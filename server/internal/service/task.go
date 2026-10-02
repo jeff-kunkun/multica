@@ -1261,12 +1261,36 @@ func (s *TaskService) EnqueueTaskForIssue(ctx context.Context, issue db.Issue, t
 	return s.enqueueIssueTask(ctx, issue, commentID, false, "", pgtype.UUID{}, pgtype.UUID{}, pgtype.Timestamptz{}, OriginDerived)
 }
 
-func (s *TaskService) EnqueueTaskForIssueFresh(ctx context.Context, issue db.Issue, triggerCommentID ...pgtype.UUID) (db.AgentTaskQueue, error) {
-	var commentID pgtype.UUID
-	if len(triggerCommentID) > 0 {
-		commentID = triggerCommentID[0]
+// CommentRunRequest is one run a comment triggers. It replaces the fork's
+// four *Fresh variants of the comment-driven Enqueue functions (DENE-1183):
+// the run kind is read from the fields, and FreshSession is a field rather
+// than a second function per kind.
+type CommentRunRequest struct {
+	Issue            db.Issue
+	TriggerCommentID pgtype.UUID
+	// FreshSession starts the run without resuming the agent's last session.
+	FreshSession bool
+	// AgentID names the agent. Zero means the issue's assignee, and the run
+	// is OriginDerived whatever Origin says, as EnqueueTaskForIssue is.
+	AgentID pgtype.UUID
+	// Leader marks a squad-leader run for SquadID (EnqueueTaskForSquadLeader).
+	Leader  bool
+	SquadID pgtype.UUID
+	// Origin is how the agent was chosen. A reply to an agent's own comment
+	// (EnqueueTaskForThreadParent) is OriginNamed.
+	Origin RunOrigin
+}
+
+// EnqueueCommentRun queues the run a comment triggered.
+func (s *TaskService) EnqueueCommentRun(ctx context.Context, req CommentRunRequest) (db.AgentTaskQueue, error) {
+	if !req.AgentID.Valid {
+		return s.enqueueIssueTask(ctx, req.Issue, req.TriggerCommentID, req.FreshSession, "", pgtype.UUID{}, pgtype.UUID{}, pgtype.Timestamptz{}, OriginDerived)
 	}
-	return s.enqueueIssueTask(ctx, issue, commentID, true, "", pgtype.UUID{}, pgtype.UUID{}, pgtype.Timestamptz{}, OriginDerived)
+	squadID := pgtype.UUID{}
+	if req.Leader {
+		squadID = req.SquadID
+	}
+	return s.enqueueMentionTask(ctx, req.Issue, req.AgentID, req.TriggerCommentID, req.Leader, squadID, req.FreshSession, "", pgtype.UUID{}, pgtype.UUID{}, req.Origin)
 }
 
 // EnqueueDeferredChannelIssueTask persists the assigned task for a media-backed
@@ -1553,19 +1577,11 @@ func (s *TaskService) EnqueueTaskForMention(ctx context.Context, issue db.Issue,
 	return s.enqueueMentionTask(ctx, issue, agentID, triggerCommentID, false, pgtype.UUID{}, false, "", pgtype.UUID{}, pgtype.UUID{}, origin)
 }
 
-func (s *TaskService) EnqueueTaskForMentionFresh(ctx context.Context, issue db.Issue, agentID pgtype.UUID, triggerCommentID pgtype.UUID, origin RunOrigin) (db.AgentTaskQueue, error) {
-	return s.enqueueMentionTask(ctx, issue, agentID, triggerCommentID, false, pgtype.UUID{}, true, "", pgtype.UUID{}, pgtype.UUID{}, origin)
-}
-
 // EnqueueTaskForThreadParent creates a queued task for the agent who authored
 // the direct parent comment a member replied to.
 func (s *TaskService) EnqueueTaskForThreadParent(ctx context.Context, issue db.Issue, agentID pgtype.UUID, triggerCommentID pgtype.UUID) (db.AgentTaskQueue, error) {
 	// Always named: the only caller is a member replying to what this agent said.
 	return s.enqueueMentionTask(ctx, issue, agentID, triggerCommentID, false, pgtype.UUID{}, false, "", pgtype.UUID{}, pgtype.UUID{}, OriginNamed)
-}
-
-func (s *TaskService) EnqueueTaskForThreadParentFresh(ctx context.Context, issue db.Issue, agentID pgtype.UUID, triggerCommentID pgtype.UUID) (db.AgentTaskQueue, error) {
-	return s.enqueueMentionTask(ctx, issue, agentID, triggerCommentID, false, pgtype.UUID{}, true, "", pgtype.UUID{}, pgtype.UUID{}, OriginNamed)
 }
 
 // EnqueueTaskForSquadLeader is the leader-role variant of EnqueueTaskForMention.
@@ -1581,10 +1597,6 @@ func (s *TaskService) EnqueueTaskForThreadParentFresh(ctx context.Context, issue
 // sub-issue done callback). See migration 127.
 func (s *TaskService) EnqueueTaskForSquadLeader(ctx context.Context, issue db.Issue, leaderID pgtype.UUID, squadID pgtype.UUID, triggerCommentID pgtype.UUID, origin RunOrigin) (db.AgentTaskQueue, error) {
 	return s.enqueueMentionTask(ctx, issue, leaderID, triggerCommentID, true, squadID, false, "", pgtype.UUID{}, pgtype.UUID{}, origin)
-}
-
-func (s *TaskService) EnqueueTaskForSquadLeaderFresh(ctx context.Context, issue db.Issue, leaderID pgtype.UUID, squadID pgtype.UUID, triggerCommentID pgtype.UUID, origin RunOrigin) (db.AgentTaskQueue, error) {
-	return s.enqueueMentionTask(ctx, issue, leaderID, triggerCommentID, true, squadID, true, "", pgtype.UUID{}, pgtype.UUID{}, origin)
 }
 
 // EnqueueTaskForSquadLeaderByActor is the assign/promote variant of
@@ -1762,29 +1774,48 @@ const QuickCreateContextType = "quick_create"
 // open the modal from "Add sub issue"). The handler is responsible for
 // validating it belongs to the same workspace before passing it in.
 func (s *TaskService) EnqueueQuickCreateTask(ctx context.Context, workspaceID, requesterID pgtype.UUID, agentID, squadID pgtype.UUID, prompt, priority, dueDate string, projectID, parentIssueID pgtype.UUID, attachmentIDs []pgtype.UUID) (db.AgentTaskQueue, error) {
-	return s.enqueueQuickCreateTask(ctx, workspaceID, requesterID, agentID, squadID, prompt, priority, dueDate, projectID, parentIssueID, attachmentIDs, false, nil)
-}
-
-// EnqueueQuickCreateTaskChoosingProject is EnqueueQuickCreateTask plus the
-// caller's explicit "no project" choice. projectExplicitNone tells the agent
-// to pass an empty --project so a sub-issue does not inherit its parent.
-func (s *TaskService) EnqueueQuickCreateTaskChoosingProject(ctx context.Context, workspaceID, requesterID pgtype.UUID, agentID, squadID pgtype.UUID, prompt, priority, dueDate string, projectID, parentIssueID pgtype.UUID, attachmentIDs []pgtype.UUID, projectExplicitNone bool) (db.AgentTaskQueue, error) {
-	return s.enqueueQuickCreateTask(ctx, workspaceID, requesterID, agentID, squadID, prompt, priority, dueDate, projectID, parentIssueID, attachmentIDs, projectExplicitNone, nil)
-}
-
-func (s *TaskService) EnqueueQuickCreateTaskChoosingProjectWithGoal(ctx context.Context, workspaceID, requesterID pgtype.UUID, agentID, squadID pgtype.UUID, prompt, priority, dueDate string, projectID, parentIssueID pgtype.UUID, attachmentIDs []pgtype.UUID, projectExplicitNone, goalMode bool) (db.AgentTaskQueue, error) {
-	return s.enqueueQuickCreateTask(ctx, workspaceID, requesterID, agentID, squadID, prompt, priority, dueDate, projectID, parentIssueID, attachmentIDs, projectExplicitNone, nil, goalMode)
+	return s.EnqueueQuickCreate(ctx, QuickCreateRequest{
+		WorkspaceID: workspaceID, RequesterID: requesterID, AgentID: agentID, SquadID: squadID,
+		Prompt: prompt, Priority: priority, DueDate: dueDate,
+		ProjectID: projectID, ParentIssueID: parentIssueID, AttachmentIDs: attachmentIDs,
+	})
 }
 
 func (s *TaskService) EnqueueQuickCreateTaskWithSourceContext(ctx context.Context, workspaceID, requesterID pgtype.UUID, agentID, squadID pgtype.UUID, prompt, priority, dueDate string, projectID, parentIssueID pgtype.UUID, attachmentIDs []pgtype.UUID, capture SourceContextCapture) (db.AgentTaskQueue, error) {
-	return s.EnqueueQuickCreateTaskWithSourceContextChoosingProject(ctx, workspaceID, requesterID, agentID, squadID, prompt, priority, dueDate, projectID, parentIssueID, attachmentIDs, false, capture)
+	return s.EnqueueQuickCreate(ctx, QuickCreateRequest{
+		WorkspaceID: workspaceID, RequesterID: requesterID, AgentID: agentID, SquadID: squadID,
+		Prompt: prompt, Priority: priority, DueDate: dueDate,
+		ProjectID: projectID, ParentIssueID: parentIssueID, AttachmentIDs: attachmentIDs,
+		SourceContext: &capture,
+	})
 }
 
-func (s *TaskService) EnqueueQuickCreateTaskWithSourceContextChoosingProject(ctx context.Context, workspaceID, requesterID pgtype.UUID, agentID, squadID pgtype.UUID, prompt, priority, dueDate string, projectID, parentIssueID pgtype.UUID, attachmentIDs []pgtype.UUID, projectExplicitNone bool, capture SourceContextCapture) (db.AgentTaskQueue, error) {
-	return s.enqueueQuickCreateTask(ctx, workspaceID, requesterID, agentID, squadID, prompt, priority, dueDate, projectID, parentIssueID, attachmentIDs, projectExplicitNone, &capture)
+// QuickCreateRequest is one quick-create run. It replaces the fork's
+// ChoosingProject / WithGoal / WithSourceContextChoosingProject variants
+// (DENE-1183): each fork option is a field, so any combination — goal mode
+// with a source context included — is one call rather than one more
+// function name.
+type QuickCreateRequest struct {
+	WorkspaceID, RequesterID pgtype.UUID
+	AgentID, SquadID         pgtype.UUID
+	Prompt, Priority         string
+	DueDate                  string
+	ProjectID, ParentIssueID pgtype.UUID
+	AttachmentIDs            []pgtype.UUID
+	// ProjectExplicitNone tells the agent to pass an empty --project so a
+	// sub-issue does not inherit its parent's project.
+	ProjectExplicitNone bool
+	// GoalMode asks the agent to create the issue as a goal.
+	GoalMode bool
+	// SourceContext, when set, captures the anchor comment thread in the same
+	// transaction as the task.
+	SourceContext *SourceContextCapture
 }
 
-func (s *TaskService) enqueueQuickCreateTask(ctx context.Context, workspaceID, requesterID pgtype.UUID, agentID, squadID pgtype.UUID, prompt, priority, dueDate string, projectID, parentIssueID pgtype.UUID, attachmentIDs []pgtype.UUID, projectExplicitNone bool, capture *SourceContextCapture, goalMode ...bool) (db.AgentTaskQueue, error) {
+// EnqueueQuickCreate queues a quick-create run.
+func (s *TaskService) EnqueueQuickCreate(ctx context.Context, req QuickCreateRequest) (db.AgentTaskQueue, error) {
+	workspaceID, requesterID, agentID := req.WorkspaceID, req.RequesterID, req.AgentID
+	capture := req.SourceContext
 	if err := CheckIssueCreateCapacity(ctx, s.Queries, s.Entitlements, workspaceID); err != nil {
 		return db.AgentTaskQueue{}, fmt.Errorf("preflight quick-create issue capacity: %w", err)
 	}
@@ -1804,31 +1835,29 @@ func (s *TaskService) enqueueQuickCreateTask(ctx context.Context, workspaceID, r
 
 	payload := QuickCreateContext{
 		Type:        QuickCreateContextType,
-		Prompt:      prompt,
+		Prompt:      req.Prompt,
 		RequesterID: util.UUIDToString(requesterID),
 		WorkspaceID: util.UUIDToString(workspaceID),
-		Priority:    priority,
-		DueDate:     dueDate,
+		Priority:    req.Priority,
+		DueDate:     req.DueDate,
 	}
-	if projectID.Valid {
-		payload.ProjectID = util.UUIDToString(projectID)
+	if req.ProjectID.Valid {
+		payload.ProjectID = util.UUIDToString(req.ProjectID)
 	}
-	if squadID.Valid {
-		payload.SquadID = util.UUIDToString(squadID)
+	if req.SquadID.Valid {
+		payload.SquadID = util.UUIDToString(req.SquadID)
 	}
-	if parentIssueID.Valid {
-		payload.ParentIssueID = util.UUIDToString(parentIssueID)
+	if req.ParentIssueID.Valid {
+		payload.ParentIssueID = util.UUIDToString(req.ParentIssueID)
 	}
-	payload.ProjectExplicitNone = projectExplicitNone
-	if len(goalMode) > 0 {
-		payload.GoalMode = goalMode[0]
-	}
+	payload.ProjectExplicitNone = req.ProjectExplicitNone
+	payload.GoalMode = req.GoalMode
 	if capture != nil {
 		payload.SourceContextID = util.UUIDToString(capture.ID)
 	}
-	if len(attachmentIDs) > 0 {
-		payload.AttachmentIDs = make([]string, 0, len(attachmentIDs))
-		for _, id := range attachmentIDs {
+	if len(req.AttachmentIDs) > 0 {
+		payload.AttachmentIDs = make([]string, 0, len(req.AttachmentIDs))
+		for _, id := range req.AttachmentIDs {
 			if id.Valid {
 				payload.AttachmentIDs = append(payload.AttachmentIDs, util.UUIDToString(id))
 			}

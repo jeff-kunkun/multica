@@ -8,6 +8,7 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -15,39 +16,20 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgtype"
-	"github.com/multica-ai/multica/server/internal/blockwait"
 	"github.com/multica-ai/multica/server/internal/closeprotocol"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/service"
+	"github.com/multica-ai/multica/server/internal/stallaction"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/dbid"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
-const (
-	stallActionKey      = "stall.action"
-	stallPreviousKey    = "stall.previous_status"
-	stallAnnouncedAtKey = "stall.announced_at"
-	stallReviewUntilKey = "stall.review_until"
-	stallRevertUntilKey = "stall.revert_until"
-	stallReasonKey      = "stall.reason"
-	stallCandidateKey   = "stall.candidate"
-	// This is the last_activity_at snapshot inspected by the model, rather
-	// than the request time. Activity arriving while it thinks must requalify
-	// the ticket on the next patrol.
-	stallJudgedAtKey         = "stall.judged_at"
-	stallActionCandidate     = "candidate"
-	stallActionAnnounced     = "announced"
-	stallActionKept          = "kept"
-	stallActionCancelled     = "cancelled"
-	stallActionParent        = "parent_completed"
-	stallActionRevoked       = "revoked"
-	stallQuietAfter          = 36 * time.Hour
-	stallAnnouncementFor     = 24 * time.Hour
-	stallRevertFor           = 7 * 24 * time.Hour
-	stallCandidateModelLimit = 20
-)
+// Which stall.* transitions are legal, and the clocks that bound them, live
+// in package stallaction. This file only gathers facts, writes the patch the
+// state machine returns, and leaves the audit trail (comments, inbox, events).
+const stallCandidateModelLimit = 20
 
 type stallIssueRow struct {
 	ID          pgtype.UUID
@@ -80,24 +62,32 @@ func parentAutoCompletionEligible(status string, paused, activeRun, hasPullReque
 
 func stallMeta(issue db.Issue) map[string]any { return util.JSONObjectOrEmpty(issue.Metadata) }
 
-func stallString(meta map[string]any, key string) string {
-	if v, ok := meta[key].(string); ok {
-		return strings.TrimSpace(v)
-	}
-	return ""
+func stallTicket(issue db.Issue) stallaction.Ticket {
+	return stallaction.Ticket{Status: issue.Status, Meta: stallMeta(issue)}
 }
 
-func stallBool(meta map[string]any, key string) bool {
-	v, _ := meta[key].(bool)
-	return v
+// stallProbe answers the state machine's database questions for one issue.
+type stallProbe struct {
+	h     *Handler
+	issue db.Issue
 }
 
-func stallCandidateJudgedForActivity(meta map[string]any, activityAt time.Time) bool {
-	judgedAt, err := time.Parse(time.RFC3339Nano, stallString(meta, stallJudgedAtKey))
-	return err == nil && !activityAt.After(judgedAt)
+func (p stallProbe) HasLinkedPR(ctx context.Context) (bool, error) {
+	prs, err := p.h.Queries.ListPullRequestsByIssue(ctx, p.issue.ID)
+	return len(prs) > 0, err
 }
 
-func (h *Handler) setStallMetadata(ctx context.Context, issue db.Issue, values map[string]string) error {
+func (p stallProbe) HasActiveRun(ctx context.Context) (bool, error) {
+	return p.h.Queries.HasActiveTaskForIssue(ctx, p.issue.ID)
+}
+
+func (p stallProbe) CommentedSince(ctx context.Context, at time.Time) (bool, error) {
+	var resumed bool
+	err := p.h.DB.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM comment WHERE issue_id=$1 AND workspace_id=$2 AND author_type <> 'system' AND created_at >= $3)`, p.issue.ID, p.issue.WorkspaceID, at).Scan(&resumed)
+	return resumed, err
+}
+
+func (h *Handler) setStallMetadata(ctx context.Context, issue db.Issue, values stallaction.Patch) error {
 	for key, value := range values {
 		raw, _ := json.Marshal(value)
 		if _, err := h.Queries.SetIssueMetadataKey(ctx, db.SetIssueMetadataKeyParams{ID: issue.ID, WorkspaceID: issue.WorkspaceID, Key: key, Value: raw}); err != nil {
@@ -121,7 +111,7 @@ func (h *Handler) markStallCandidateJudged(ctx context.Context, issue db.Issue, 
 		    revision = revision + 1,
 		    updated_at = now()
 		WHERE id = $3 AND workspace_id = $4`,
-		stallJudgedAtKey, raw, issue.ID, issue.WorkspaceID)
+		stallaction.KeyJudgedAt, raw, issue.ID, issue.WorkspaceID)
 	return err
 }
 
@@ -217,17 +207,12 @@ func (h *Handler) autoCompleteParent(ctx context.Context, parent, child db.Issue
 	if err != nil {
 		return err
 	}
-	now := time.Now().UTC()
 	body := fmt.Sprintf("所有子任务均已完成（最后完成：%s）。系统按停滞规则将父票从 `%s` 自动收口为 `done`。7 天内可用“撤销停滞处理”恢复。", child.Title, parent.Status)
 	commentID := h.stallComment(ctx, updated, body)
 	if !commentID.Valid {
 		return fmt.Errorf("create auto-close evidence comment")
 	}
-	if err := h.setStallMetadata(ctx, updated, map[string]string{
-		stallActionKey: stallActionParent, stallPreviousKey: parent.Status,
-		stallAnnouncedAtKey: now.Format(time.RFC3339), stallRevertUntilKey: now.Add(stallRevertFor).Format(time.RFC3339),
-		stallReasonKey: "所有子任务均已完成，系统按规则自动收口；可在 7 天内撤销。",
-	}); err != nil {
+	if err := h.setStallMetadata(ctx, updated, stallaction.CompleteParent(parent.Status, time.Now())); err != nil {
 		return err
 	}
 	// Automatic closure still records the same close.* contract as a normal
@@ -254,21 +239,17 @@ func (h *Handler) KeepStallAction(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	meta := stallMeta(issue)
-	if stallString(meta, stallActionKey) != stallActionAnnounced {
-		writeError(w, http.StatusConflict, "这张票当前没有待保留的停滞公示")
+	patch, err := stallaction.Keep(stallTicket(issue), time.Now())
+	if err != nil {
+		writeError(w, http.StatusConflict, err.Error())
 		return
 	}
-	if until, err := time.Parse(time.RFC3339, stallString(meta, stallReviewUntilKey)); err != nil || time.Now().UTC().After(until) {
-		writeError(w, http.StatusConflict, "公示期已结束")
-		return
-	}
-	if err := h.setStallMetadata(r.Context(), issue, map[string]string{stallActionKey: stallActionKept, stallReasonKey: "Kun 在公示期内选择保留，系统不会自动取消。"}); err != nil {
+	if err := h.setStallMetadata(r.Context(), issue, patch); err != nil {
 		writeError(w, 500, "failed to keep stall action")
 		return
 	}
 	h.stallComment(r.Context(), issue, "公示期内收到“保留”操作，这张票继续保留，系统不会自动取消。")
-	writeJSON(w, http.StatusOK, map[string]any{"action": stallActionKept, "issue_id": util.UUIDToString(issue.ID)})
+	writeJSON(w, http.StatusOK, map[string]any{"action": stallaction.ActionKept, "issue_id": util.UUIDToString(issue.ID)})
 }
 
 // UndoStallAction restores the status captured by an automatic close/cancel.
@@ -277,46 +258,25 @@ func (h *Handler) UndoStallAction(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	meta := stallMeta(issue)
-	action := stallString(meta, stallActionKey)
-	if action != stallActionParent && action != stallActionCancelled {
-		writeError(w, http.StatusConflict, "这张票没有可撤销的自动停滞处理")
+	reversal, err := stallaction.Undo(stallTicket(issue), time.Now())
+	if err != nil {
+		writeError(w, http.StatusConflict, err.Error())
 		return
 	}
-	until, err := time.Parse(time.RFC3339, stallString(meta, stallRevertUntilKey))
-	if err != nil || time.Now().UTC().After(until) {
-		writeError(w, http.StatusConflict, "撤销期限已过")
-		return
-	}
-	// Undo restores the status the system replaced, so it only applies while
-	// the ticket still carries the system's own status. A person who already
-	// moved the ticket on must not have that change silently overwritten.
-	applied := "done"
-	if action == stallActionCancelled {
-		applied = "cancelled"
-	}
-	if issue.Status != applied {
-		writeError(w, http.StatusConflict, fmt.Sprintf("票状态已被改为 `%s`，不再撤销自动停滞处理", issue.Status))
-		return
-	}
-	previous := stallString(meta, stallPreviousKey)
-	if previous == "" {
-		writeError(w, http.StatusConflict, "缺少自动处理前的状态，无法安全撤销")
-		return
-	}
+	previous := reversal.Restore
 	updated, err := h.Queries.UpdateIssueStatus(r.Context(), db.UpdateIssueStatusParams{ID: issue.ID, Status: previous, WorkspaceID: issue.WorkspaceID})
 	if err != nil {
 		writeError(w, 500, "failed to restore issue status")
 		return
 	}
 	h.clearCloseMetadata(r.Context(), updated)
-	_ = h.setStallMetadata(r.Context(), updated, map[string]string{stallActionKey: stallActionRevoked, stallReasonKey: "自动停滞处理已撤销。"})
+	_ = h.setStallMetadata(r.Context(), updated, reversal.Patch)
 	h.stallComment(r.Context(), updated, fmt.Sprintf("已撤销系统自动停滞处理，票状态恢复为 `%s`。", previous))
 	h.notifyStallInbox(r.Context(), updated, "停滞处理已撤销", "自动收口/取消已撤销，票状态已恢复。")
 	if fresh, err := h.Queries.GetIssue(r.Context(), updated.ID); err == nil {
 		h.publish(protocol.EventIssueUpdated, util.UUIDToString(fresh.WorkspaceID), "member", "", map[string]any{"issue": service.IssueToMapResolved(r.Context(), h.Queries, fresh, h.getIssuePrefix(r.Context(), fresh.WorkspaceID))})
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"action": stallActionRevoked, "status": updated.Status, "issue_id": util.UUIDToString(updated.ID)})
+	writeJSON(w, http.StatusOK, map[string]any{"action": stallaction.ActionRevoked, "status": updated.Status, "issue_id": util.UUIDToString(updated.ID)})
 }
 
 // ReviewStallAction is the AI-to-server handoff. The model (or a trusted
@@ -334,33 +294,20 @@ func (h *Handler) ReviewStallAction(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, "reason is required")
 		return
 	}
-	if issue.Status == "done" || issue.Status == "cancelled" {
-		writeError(w, http.StatusConflict, "已完成或已取消的票不能进入停滞公示")
+	announced, err := h.announceStall(r.Context(), issue, req.Reason)
+	var rejected stallaction.Rejection
+	switch {
+	case errors.As(err, &rejected):
+		writeError(w, http.StatusConflict, rejected.Error())
 		return
-	}
-	if closeprotocol.ExplainedPause(blockwait.MetaString(stallMeta(issue), closeprotocol.KeyConclusion)) {
-		writeError(w, 409, "有意暂停的票不会进入停滞处理")
-		return
-	}
-	// A duplicate-looking ticket can still carry the delivery that invalidates
-	// the duplicate claim. The reviewer must inspect that delivery first; the
-	// server therefore refuses to start a cancellation clock for any linked PR.
-	if prs, err := h.Queries.ListPullRequestsByIssue(r.Context(), issue.ID); err != nil {
+	case errors.Is(err, stallaction.ErrLookup):
 		writeError(w, http.StatusInternalServerError, "无法核对关联 PR")
 		return
-	} else if len(prs) > 0 {
-		writeError(w, http.StatusConflict, "这张票已有关联 PR，不能进入停滞公示；请先完成验收或明确处理")
-		return
-	}
-	now := time.Now().UTC()
-	reason := strings.TrimSpace(req.Reason) + "；" + h.stallArtifactCheck(r.Context(), issue) + "。"
-	if err := h.setStallMetadata(r.Context(), issue, map[string]string{stallActionKey: stallActionAnnounced, stallAnnouncedAtKey: now.Format(time.RFC3339), stallReviewUntilKey: now.Add(stallAnnouncementFor).Format(time.RFC3339), stallReasonKey: reason}); err != nil {
+	case err != nil:
 		writeError(w, 500, "failed to announce stall action")
 		return
 	}
-	h.stallComment(r.Context(), issue, fmt.Sprintf("AI 停滞巡检公示：%s\n公示 24 小时内可选择“保留”；无人拦截将自动取消。", reason))
-	h.notifyStallInbox(r.Context(), issue, "停滞票进入 24 小时公示", reason, "keep")
-	writeJSON(w, http.StatusOK, map[string]any{"action": stallActionAnnounced, "review_until": now.Add(stallAnnouncementFor), "reason": reason})
+	writeJSON(w, http.StatusOK, map[string]any{"action": stallaction.ActionAnnounced, "review_until": announced.ReviewUntil, "reason": announced.Reason})
 }
 
 // ListStallActions is consumed by the CLI and the inbox/detail surfaces.
@@ -386,8 +333,8 @@ func (h *Handler) ListStallActions(w http.ResponseWriter, r *http.Request) {
 		if err := rows.Scan(&x.ID, &x.WorkspaceID, &x.Number, &x.Title, &x.Status, &x.Metadata, &x.LastActive); err != nil {
 			continue
 		}
-		meta := stallMeta(db.Issue{Metadata: x.Metadata})
-		items = append(items, map[string]any{"issue_id": util.UUIDToString(x.ID), "number": x.Number, "title": x.Title, "status": x.Status, "action": stallString(meta, stallActionKey), "reason": stallString(meta, stallReasonKey), "review_until": stallString(meta, stallReviewUntilKey), "revert_until": stallString(meta, stallRevertUntilKey)})
+		st := stallaction.Read(stallMeta(db.Issue{Metadata: x.Metadata}))
+		items = append(items, map[string]any{"issue_id": util.UUIDToString(x.ID), "number": x.Number, "title": x.Title, "status": x.Status, "action": st.Action, "reason": st.Reason, "review_until": st.ReviewUntil, "revert_until": st.RevertUntil})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"items": items})
 }
@@ -397,7 +344,7 @@ func (h *Handler) ListStallActions(w http.ResponseWriter, r *http.Request) {
 // deterministic expiry/cancel transition.
 func (h *Handler) SweepStallActions(ctx context.Context) (int64, error) {
 	var affected int64
-	parentRows, err := h.DB.Query(ctx, `SELECT id, workspace_id, number, title, status, metadata, last_activity_at FROM issue WHERE status IN ('todo','in_progress','blocked') AND metadata->>'stall.action' IS DISTINCT FROM 'revoked' AND last_activity_at < now() - interval '36 hours' AND EXISTS (SELECT 1 FROM issue child WHERE child.parent_issue_id=issue.id) AND NOT EXISTS (SELECT 1 FROM issue child_open WHERE child_open.parent_issue_id=issue.id AND child_open.status NOT IN ('done','cancelled')) ORDER BY last_activity_at ASC LIMIT 500`)
+	parentRows, err := h.DB.Query(ctx, `SELECT id, workspace_id, number, title, status, metadata, last_activity_at FROM issue WHERE `+stallaction.PatrolStatusSQL()+` AND metadata->>'stall.action' IS DISTINCT FROM 'revoked' AND `+stallaction.QuietSQL()+` AND EXISTS (SELECT 1 FROM issue child WHERE child.parent_issue_id=issue.id) AND NOT EXISTS (SELECT 1 FROM issue child_open WHERE child_open.parent_issue_id=issue.id AND child_open.status NOT IN ('done','cancelled')) ORDER BY last_activity_at ASC LIMIT 500`)
 	if err != nil {
 		return 0, err
 	}
@@ -410,8 +357,7 @@ func (h *Handler) SweepStallActions(ctx context.Context) (int64, error) {
 		if err != nil {
 			continue
 		}
-		meta := stallMeta(issue)
-		if closeprotocol.ExplainedPause(blockwait.MetaString(meta, closeprotocol.KeyConclusion)) {
+		if stallTicket(issue).Paused() {
 			continue
 		}
 		if h.parentReadyForAutoCompletion(ctx, issue) {
@@ -425,11 +371,14 @@ func (h *Handler) SweepStallActions(ctx context.Context) (int64, error) {
 	}
 	parentRows.Close()
 
+	// Which tickets the patrol may look at is stallaction's Eligibility; the
+	// query and the per-row re-check are both built from it.
+	//
 	// Quiet top-level tickets are sent through the configured routing model for
 	// the duplicate/invalid decision. Self-hosted deployments without that
 	// model can still honor an explicit candidate marker written by a trusted
 	// agent, while never guessing from age alone.
-	candidateQuery := `SELECT id, workspace_id, number, title, status, metadata, last_activity_at FROM issue WHERE status IN ('todo','in_progress','blocked') AND metadata->>'stall.action' IS NULL AND last_activity_at < now() - interval '36 hours' AND NOT EXISTS (SELECT 1 FROM issue child WHERE child.parent_issue_id=issue.id) AND (COALESCE(metadata->>'stall.judged_at','') = '' OR CASE WHEN metadata->>'stall.judged_at' ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]+)?Z$' THEN last_activity_at > (metadata->>'stall.judged_at')::timestamptz ELSE TRUE END) AND COALESCE(metadata->>'close.conclusion','') NOT IN ('deferred','continuing') AND COALESCE(metadata->>'block.blocked_by','') = '' AND COALESCE(metadata->>'block.wait_condition','') = ''`
+	candidateQuery := `SELECT id, workspace_id, number, title, status, metadata, last_activity_at FROM issue WHERE ` + stallaction.PatrolStatusSQL() + ` AND metadata->>'stall.action' IS NULL AND ` + stallaction.QuietSQL() + ` AND NOT EXISTS (SELECT 1 FROM issue child WHERE child.parent_issue_id=issue.id) AND (COALESCE(metadata->>'stall.judged_at','') = '' OR CASE WHEN metadata->>'stall.judged_at' ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]+)?Z$' THEN last_activity_at > (metadata->>'stall.judged_at')::timestamptz ELSE TRUE END) AND ` + stallaction.NotWaitingSQL()
 	if h.Routing == nil {
 		candidateQuery += ` AND metadata->>'stall.candidate'='true'`
 	}
@@ -448,17 +397,19 @@ func (h *Handler) SweepStallActions(ctx context.Context) (int64, error) {
 		if err != nil {
 			continue
 		}
-		meta := stallMeta(issue)
-		if stallCandidateJudgedForActivity(meta, x.LastActive.Time) {
+		ticket := stallTicket(issue)
+		st := stallaction.Read(ticket.Meta)
+		if st.JudgedFor(x.LastActive.Time) {
 			continue
 		}
-		if closeprotocol.ExplainedPause(blockwait.MetaString(meta, closeprotocol.KeyConclusion)) {
+		// The same rule the query filtered on, re-read from the live row.
+		if !ticket.PatrolEligible() {
 			continue
 		}
 		if prs, err := h.Queries.ListPullRequestsByIssue(ctx, issue.ID); err != nil || len(prs) > 0 {
 			continue
 		}
-		marked := stallBool(meta, stallCandidateKey) || stallString(meta, stallCandidateKey) == "true"
+		marked := st.Marked()
 		reason := "AI 停滞巡检将这张票识别为重复或无效候选。"
 		if h.Routing != nil && !marked {
 			if modelCalls >= stallCandidateModelLimit {
@@ -501,23 +452,15 @@ func (h *Handler) SweepStallActions(ctx context.Context) (int64, error) {
 		if err != nil {
 			continue
 		}
-		meta := stallMeta(issue)
-		if closeprotocol.ExplainedPause(blockwait.MetaString(meta, closeprotocol.KeyConclusion)) {
-			continue
-		}
-		action := stallString(meta, stallActionKey)
-		if action == stallActionAnnounced {
-			until, err := time.Parse(time.RFC3339, stallString(meta, stallReviewUntilKey))
-			if err == nil && !time.Now().UTC().Before(until) {
-				if why := h.stallAnnouncementInterception(ctx, issue, meta); why != "" {
-					if err := h.keepInterceptedStall(ctx, issue, why); err == nil {
-						affected++
-					}
-					continue
-				}
-				if err := h.cancelStallIssue(ctx, issue); err == nil {
-					affected++
-				}
+		expiry := stallaction.Expire(ctx, stallTicket(issue), stallProbe{h: h, issue: issue}, time.Now())
+		switch expiry.Verdict {
+		case stallaction.ExpiryKeep:
+			if err := h.keepInterceptedStall(ctx, issue, expiry); err == nil {
+				affected++
+			}
+		case stallaction.ExpiryCancel:
+			if err := h.cancelStallIssue(ctx, issue, expiry); err == nil {
+				affected++
 			}
 		}
 	}
@@ -529,8 +472,7 @@ func (h *Handler) SweepStallActions(ctx context.Context) (int64, error) {
 // intentionally owned by the periodic stall patrol so an active run or any
 // linked delivery can finish the parent before the rule fires.
 func (h *Handler) parentReadyForAutoCompletion(ctx context.Context, parent db.Issue) bool {
-	meta := stallMeta(parent)
-	paused := closeprotocol.ExplainedPause(blockwait.MetaString(meta, closeprotocol.KeyConclusion))
+	paused := stallTicket(parent).Paused()
 	active, err := h.Queries.HasActiveTaskForIssue(ctx, parent.ID)
 	if err != nil {
 		return false
@@ -551,83 +493,46 @@ func (h *Handler) parentReadyForAutoCompletion(ctx context.Context, parent db.Is
 	return parentAutoCompletionEligible(parent.Status, paused, active, len(prs) > 0, len(children), allChildrenTerminal(children, h.realChildTerminalPredicate(ctx, statuses)))
 }
 
+// ReviewStallActionInternal announces a patrol candidate. The sweep ignores
+// refusals; the ticket simply stays where it is.
 func (h *Handler) ReviewStallActionInternal(ctx context.Context, issue db.Issue, reason string) error {
-	if issue.Status == "done" || issue.Status == "cancelled" {
-		return fmt.Errorf("issue is already terminal")
-	}
-	if closeprotocol.ExplainedPause(blockwait.MetaString(stallMeta(issue), closeprotocol.KeyConclusion)) {
-		return fmt.Errorf("issue is intentionally paused")
-	}
-	prs, err := h.Queries.ListPullRequestsByIssue(ctx, issue.ID)
+	_, err := h.announceStall(ctx, issue, reason)
+	return err
+}
+
+// announceStall starts the public notice: the state machine decides, then
+// the notice is written, commented and sent to the owners' inboxes.
+func (h *Handler) announceStall(ctx context.Context, issue db.Issue, reason string) (stallaction.Announcement, error) {
+	announced, err := stallaction.Announce(ctx, stallTicket(issue), stallProbe{h: h, issue: issue}, reason, h.stallArtifactCheck(ctx, issue), time.Now())
 	if err != nil {
-		return fmt.Errorf("check linked pull requests: %w", err)
+		return announced, err
 	}
-	if len(prs) > 0 {
-		return fmt.Errorf("issue has linked pull requests")
+	if err := h.setStallMetadata(ctx, issue, announced.Patch); err != nil {
+		return announced, err
 	}
-	now := time.Now().UTC()
-	reason = strings.TrimSpace(reason) + "；" + h.stallArtifactCheck(ctx, issue) + "。"
-	if err := h.setStallMetadata(ctx, issue, map[string]string{stallActionKey: stallActionAnnounced, stallAnnouncedAtKey: now.Format(time.RFC3339), stallReviewUntilKey: now.Add(stallAnnouncementFor).Format(time.RFC3339), stallReasonKey: reason}); err != nil {
+	h.stallComment(ctx, issue, "AI 停滞巡检公示："+announced.Reason+"\n公示 24 小时内可选择“保留”；无人拦截将自动取消。")
+	h.notifyStallInbox(ctx, issue, "停滞票进入 24 小时公示", announced.Reason, "keep")
+	return announced, nil
+}
+
+func (h *Handler) keepInterceptedStall(ctx context.Context, issue db.Issue, expiry stallaction.Expiry) error {
+	if err := h.setStallMetadata(ctx, issue, expiry.Patch); err != nil {
 		return err
 	}
-	h.stallComment(ctx, issue, "AI 停滞巡检公示："+reason+"\n公示 24 小时内可选择“保留”；无人拦截将自动取消。")
-	h.notifyStallInbox(ctx, issue, "停滞票进入 24 小时公示", reason, "keep")
+	h.stallComment(ctx, issue, "停滞公示到期，但"+expiry.Why+"，这张票继续保留，系统不会自动取消。")
 	return nil
 }
 
-// stallAnnouncementInterception explains why an expired announcement must
-// not cancel the ticket. Work resuming during the notice window is itself an
-// interception: nobody should have to press "keep" on a ticket they are
-// visibly working on. The announcement's own system comment does not count.
-func (h *Handler) stallAnnouncementInterception(ctx context.Context, issue db.Issue, meta map[string]any) string {
-	if issue.Status == "backlog" {
-		return "公示期内票被放回待规划"
-	}
-	if prs, err := h.Queries.ListPullRequestsByIssue(ctx, issue.ID); err != nil {
-		return "无法核对关联 PR"
-	} else if len(prs) > 0 {
-		return "公示期内关联了 PR"
-	}
-	if active, err := h.Queries.HasActiveTaskForIssue(ctx, issue.ID); err != nil {
-		return "无法核对进行中的运行"
-	} else if active {
-		return "公示期内有运行在跑"
-	}
-	announcedAt, err := time.Parse(time.RFC3339, stallString(meta, stallAnnouncedAtKey))
-	if err != nil {
-		return ""
-	}
-	var resumed bool
-	if err := h.DB.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM comment WHERE issue_id=$1 AND workspace_id=$2 AND author_type <> 'system' AND created_at >= $3)`, issue.ID, issue.WorkspaceID, announcedAt).Scan(&resumed); err != nil {
-		return "无法核对公示期内的评论"
-	}
-	if resumed {
-		return "公示期内有人或智能体继续推进"
-	}
-	return ""
-}
-
-func (h *Handler) keepInterceptedStall(ctx context.Context, issue db.Issue, why string) error {
-	if err := h.setStallMetadata(ctx, issue, map[string]string{stallActionKey: stallActionKept, stallReasonKey: why + "，系统不会自动取消。"}); err != nil {
-		return err
-	}
-	h.stallComment(ctx, issue, "停滞公示到期，但"+why+"，这张票继续保留，系统不会自动取消。")
-	return nil
-}
-
-func (h *Handler) cancelStallIssue(ctx context.Context, issue db.Issue) error {
-	meta := stallMeta(issue)
-	now := time.Now().UTC()
+func (h *Handler) cancelStallIssue(ctx context.Context, issue db.Issue, expiry stallaction.Expiry) error {
 	updated, err := h.Queries.UpdateIssueStatus(ctx, db.UpdateIssueStatusParams{ID: issue.ID, Status: "cancelled", WorkspaceID: issue.WorkspaceID})
 	if err != nil {
 		return err
 	}
-	reason := stallString(meta, stallReasonKey) + " 公示到期无人保留，系统自动取消。"
-	if err = h.setStallMetadata(ctx, updated, map[string]string{stallActionKey: stallActionCancelled, stallPreviousKey: issue.Status, stallRevertUntilKey: now.Add(stallRevertFor).Format(time.RFC3339), stallReasonKey: reason}); err != nil {
+	if err = h.setStallMetadata(ctx, updated, expiry.Patch); err != nil {
 		return err
 	}
-	h.stallComment(ctx, updated, "AI 停滞巡检："+reason+" 7 天内可撤销。")
-	h.notifyStallInbox(ctx, updated, "停滞票已自动取消", reason, "undo")
+	h.stallComment(ctx, updated, "AI 停滞巡检："+expiry.Why+" 7 天内可撤销。")
+	h.notifyStallInbox(ctx, updated, "停滞票已自动取消", expiry.Why, "undo")
 	if fresh, err := h.Queries.GetIssue(ctx, updated.ID); err == nil {
 		h.publish(protocol.EventIssueUpdated, util.UUIDToString(fresh.WorkspaceID), "system", "", map[string]any{"issue": service.IssueToMapResolved(ctx, h.Queries, fresh, h.getIssuePrefix(ctx, fresh.WorkspaceID))})
 	}

@@ -12,7 +12,6 @@ import (
 	"path/filepath"
 	"reflect"
 	"regexp"
-	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -382,6 +381,8 @@ func issueCloseLong() string {
 		"pull or merge request with the close; an unverifiable link still closes and is\n" +
 		"marked 未核实. The response says what\n" +
 		"was actually written: the status, whether a PR merged, and who gets woken.\n" +
+		"The server owns the outcome table and every refusal; the CLI relays the\n" +
+		"server's reason as-is, and asks it first before any local merge.\n" +
 		"The old path (`issue status` + `comment add`) keeps working.\n\n" +
 		"Every close records a knowledge audit in that same transaction, including a\n" +
 		"ticket with no pull request. --knowledge-none declares that nothing qualified\n" +
@@ -2377,46 +2378,15 @@ func registerIssueHandoffFlags(cmd *cobra.Command) {
 	cmd.Flags().String("output", "table", "Output format: table or json")
 }
 
-var validCloseOutcomes = []string{"done", "in_review", "blocked", "cancelled", "backlog", "todo", "in_progress"}
-
-// closeOutcomeNeeds is the one-line "what each outcome requires" contract the
-// help and the bad-outcome errors quote, so a caller never has to guess.
-const closeOutcomeNeeds = "done needs delivery evidence; in_review needs a linked PR (or --no-code); " +
-	"blocked needs one wait (--blocked-by / --wake-at / --wait-condition with --wait-timeout / --needs-human); " +
-	"cancelled needs --evidence; backlog and todo need --evidence and wake nobody; " +
-	"in_progress needs --evidence plus who continues (--wake-at / --wait-condition with --wait-timeout / --blocked-by / --needs-human)"
-
-// closeContinuationPresent mirrors the server's blockwait.Structured test: a
-// clock, a wait with a deadline, another ticket, or a named person.
-func closeContinuationPresent(cmd *cobra.Command) bool {
-	get := func(name string) string {
-		v, _ := cmd.Flags().GetString(name)
-		return strings.TrimSpace(v)
-	}
-	if get("blocked-by") != "" || get("wake-at") != "" || get("needs-human") != "" {
-		return true
-	}
-	return get("wait-condition") != "" && get("wait-timeout") != ""
-}
-
 func runIssueClose(cmd *cobra.Command, args []string) error {
+	// The outcome table and every request-shape refusal live on the server
+	// (DENE-1183): the CLI forwards what it was given and relays the refusal,
+	// so a CLI from an older desktop build never disagrees with the server.
 	outcome, _ := cmd.Flags().GetString("outcome")
 	outcome = strings.ToLower(strings.TrimSpace(outcome))
-	if outcome == "" {
-		return fmt.Errorf("--outcome is required: one of %s. %s", strings.Join(validCloseOutcomes, ", "), closeOutcomeNeeds)
-	}
-	if !slices.Contains(validCloseOutcomes, outcome) {
-		return fmt.Errorf("--outcome %q is not a close outcome; use one of %s. %s", outcome, strings.Join(validCloseOutcomes, ", "), closeOutcomeNeeds)
-	}
-	if outcome == "in_progress" && !closeContinuationPresent(cmd) {
-		return fmt.Errorf("--outcome in_progress must say who continues: give one of --wake-at <RFC3339>, --wait-condition \"...\" with --wait-timeout <RFC3339>, --blocked-by <issue>, or --needs-human <member>. To just put the ticket back without a continuation, use --outcome backlog or --outcome todo")
-	}
-	evidence, hasEvidence, err := resolveTextFlag(cmd, "evidence")
+	evidence, _, err := resolveTextFlag(cmd, "evidence")
 	if err != nil {
 		return err
-	}
-	if !hasEvidence || strings.TrimSpace(evidence) == "" {
-		return fmt.Errorf("--evidence, --evidence-stdin, or --evidence-file is required: a close needs the PR link or test conclusion it rests on")
 	}
 	if err := guardLocalPathLinks(evidence, "evidence",
 		"Deliver the file itself with `multica issue comment add <issue-id> --attachment <path>` and drop the link."); err != nil {
@@ -2424,13 +2394,7 @@ func runIssueClose(cmd *cobra.Command, args []string) error {
 	}
 	verdict, _ := cmd.Flags().GetString("verdict")
 	verdict = strings.ToLower(strings.TrimSpace(verdict))
-	if verdict != "" && verdict != "pass" {
-		return fmt.Errorf("--verdict only accepts pass; a failed acceptance is not a close — post it with `multica issue comment add <id> --verdict hold --content-file <path>`")
-	}
-	audit, err := knowledgeAuditFromFlags(cmd)
-	if err != nil {
-		return err
-	}
+	audit := knowledgeAuditFromFlags(cmd)
 
 	client, err := newAPIClient(cmd)
 	if err != nil {
@@ -2465,6 +2429,12 @@ func runIssueClose(cmd *cobra.Command, args []string) error {
 		body["verdict"] = verdict
 	}
 	if outcome == "done" || outcome == "in_review" {
+		// The PR refresh below can merge locally, which cannot be undone.
+		// Ask the server's shape gate first so a close it would refuse
+		// never merges anything.
+		if err := preflightIssueClose(ctx, client, issueRef.ID, body); err != nil {
+			return fmt.Errorf("close issue: %w", err)
+		}
 		declaredPR, _ := cmd.Flags().GetString("pr")
 		if strings.TrimSpace(declaredPR) == "" {
 			declaredPR = pullURLFromText(evidence)
@@ -2540,9 +2510,9 @@ func runIssueTitle(cmd *cobra.Command, args []string) error {
 	return cli.PrintJSON(os.Stdout, result)
 }
 
-// knowledgeAuditFromFlags builds the close body's knowledge_audit. The
-// sentences are the server's, so a local refusal and a 400 say the same thing.
-func knowledgeAuditFromFlags(cmd *cobra.Command) (closeprotocol.KnowledgeAudit, error) {
+// knowledgeAuditFromFlags builds the close body's knowledge_audit as given.
+// Whether it is acceptable is the server's call (DENE-1183).
+func knowledgeAuditFromFlags(cmd *cobra.Command) closeprotocol.KnowledgeAudit {
 	none, _ := cmd.Flags().GetBool("knowledge-none")
 	items, _ := cmd.Flags().GetStringArray("knowledge")
 	audit := closeprotocol.KnowledgeAudit{None: none}
@@ -2557,11 +2527,20 @@ func knowledgeAuditFromFlags(cmd *cobra.Command) (closeprotocol.KnowledgeAudit, 
 			Summary:  summary,
 		})
 	}
-	parsed, _, err := closeprotocol.CanonicalKnowledgeAudit(audit)
-	if err != nil {
-		return closeprotocol.KnowledgeAudit{}, err
+	return audit
+}
+
+// preflightIssueClose asks the server's read-only close shape gate. A server
+// that predates the endpoint answers 404/405; the close itself still runs
+// every check, so the preflight is skipped rather than failing the close.
+func preflightIssueClose(ctx context.Context, client *cli.APIClient, issueID string, body map[string]any) error {
+	var ignored map[string]any
+	err := client.PostJSON(ctx, "/api/issues/"+issueID+"/close/check", body, &ignored)
+	var httpErr *cli.HTTPError
+	if errors.As(err, &httpErr) && (httpErr.StatusCode == http.StatusNotFound || httpErr.StatusCode == http.StatusMethodNotAllowed) {
+		return nil
 	}
-	return parsed, nil
+	return err
 }
 
 // duplicateOfFlag returns the --duplicate-of reference, or "" when the flag is

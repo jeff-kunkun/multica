@@ -2270,6 +2270,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					// status and close.* keys in one transaction, checked by
 					// closeprotocol.Validate — `multica issue close`.
 					r.Post("/close", h.CloseIssue)
+					// Read-only shape gate `issue close` asks before a local
+					// merge; the outcome table lives only on the server (DENE-1183).
+					r.Post("/close/check", h.CheckCloseIssue)
 					r.Post("/stall/review", h.ReviewStallAction)
 					r.Post("/stall/keep", h.KeepStallAction)
 					r.Post("/stall/undo", h.UndoStallAction)

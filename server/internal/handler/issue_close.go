@@ -77,21 +77,6 @@ type CloseIssueResponse struct {
 	Summoned bool `json:"summoned,omitempty"`
 }
 
-// closeOutcomes is the full vocabulary `issue close --outcome` accepts. The
-// first four are the original terminal/awaiting conclusions; backlog, todo and
-// in_progress (DENE-1002) are deliberate non-terminal stops that still leave
-// an evidence comment and a close.* record.
-var closeOutcomes = []string{
-	issuestatus.Done, issuestatus.InReview, issuestatus.Blocked, issuestatus.Cancelled,
-	issuestatus.Backlog, issuestatus.Todo, issuestatus.InProgress,
-}
-
-// closeOutcomeHelp is the one-line "what each outcome needs" list shared by
-// the empty-outcome and unknown-outcome rejections.
-const closeOutcomeHelp = "done（做完，要交付证据）、in_review（等验收，要 PR 或 --no-code）、" +
-	"blocked（卡住，要写等什么）、cancelled（取消）、backlog（放回待规划，写一句为什么）、" +
-	"todo（放回待办，写一句为什么）、in_progress（这轮先停、下一轮继续，要写谁继续）"
-
 // closeRecord is the close.* metadata derived from the request plus the
 // blockwait record. It is validated by closeprotocol.Validate before any
 // write; the evidence comment id is filled in inside the transaction.
@@ -121,18 +106,14 @@ func (h *Handler) CloseIssue(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	actorType, actorID := h.resolveActor(r, userID, uuidToString(issue.WorkspaceID))
 
-	outcome := strings.ToLower(strings.TrimSpace(req.Outcome))
-	if outcome == "" {
-		writeError(w, http.StatusBadRequest, "缺 --outcome："+closeOutcomeHelp)
-		return
-	}
-	if !closeOutcomeAllowed(outcome) {
-		writeError(w, http.StatusBadRequest, fmt.Sprintf("--outcome %q 不是收口结论；只能是 %s。%s", outcome, strings.Join(closeOutcomes, " / "), closeOutcomeHelp))
+	outcome := closeprotocol.NormalizeOutcome(req.Outcome)
+	if msg := closeprotocol.OutcomeRejection(outcome); msg != "" {
+		writeError(w, http.StatusBadRequest, msg)
 		return
 	}
 	evidence := strings.TrimSpace(sanitizeNullBytes(req.Evidence))
-	if evidence == "" {
-		writeError(w, http.StatusBadRequest, "缺 --evidence：收口必须留证据（PR 链接、测试结论、或说明为什么"+outcome+"），一句话也行")
+	if msg := closeprotocol.EvidenceRejection(outcome, evidence); msg != "" {
+		writeError(w, http.StatusBadRequest, msg)
 		return
 	}
 	summary := strings.TrimSpace(sanitizeNullBytes(req.Summary))
@@ -142,8 +123,8 @@ func (h *Handler) CloseIssue(w http.ResponseWriter, r *http.Request) {
 	}
 
 	verdict := strings.ToLower(strings.TrimSpace(req.Verdict))
-	if verdict != "" && verdict != "pass" {
-		writeError(w, http.StatusBadRequest, "--verdict 只接受 pass。验收不通过不是收口：用 `multica issue comment add <id> --verdict hold --content-file <path>` 写明要改什么，票留在 in_review")
+	if msg := closeprotocol.VerdictRejection(verdict); msg != "" {
+		writeError(w, http.StatusBadRequest, msg)
 		return
 	}
 
@@ -666,9 +647,7 @@ func (h *Handler) deriveCloseRecord(r *http.Request, issue db.Issue, req CloseIs
 			return rec, rejection
 		}
 		if !block.Structured() {
-			return rec, "放回进行中必须写明「接下来谁继续」，至少一种：--wake-at <RFC3339>（到点继续）、" +
-				"--wait-condition \"...\" 配 --wait-timeout <RFC3339>（条件到了继续）、--blocked-by <票>（等这张票）、" +
-				"--needs-human <member>（交给这个人）。只有一句原因、没人接着做的票请改用 --outcome backlog 或 --outcome todo。"
+			return rec, closeprotocol.ContinuationRequiredMsg
 		}
 		rec.block = block
 		meta[closeprotocol.KeyConclusion] = closeprotocol.ConclusionContinuing
@@ -1019,15 +998,6 @@ func cloneStringMap(in map[string]string) map[string]string {
 	return out
 }
 
-func closeOutcomeAllowed(v string) bool {
-	for _, item := range closeOutcomes {
-		if item == v {
-			return true
-		}
-	}
-	return false
-}
-
 // closeSummonReason is the "why" a --needs-human close hands the person: the
 // caller's summary when there is one, otherwise the head of the evidence.
 func closeSummonReason(summary, evidence string) string {
@@ -1042,4 +1012,49 @@ func closeSummonReason(summary, evidence string) string {
 // person, done and cancelled are finished, anything else continues.
 func closeProgressTone(outcome string) string {
 	return progress.ForStatus(outcome)
+}
+
+// CheckCloseIssue is the close endpoint's request-shape gate with no writes:
+// the same outcome / evidence / verdict / continuation / knowledge-audit
+// refusals CloseIssue gives, in the same order. `issue close` calls it before
+// anything irreversible on the caller's side (a local `gh` merge), so the
+// outcome table lives only here and the CLI just relays the refusal
+// (DENE-1183). A 200 means the shape is acceptable, not that the close will
+// land: ticket-dependent gates (linked PR, child tree, parent) run at close.
+func (h *Handler) CheckCloseIssue(w http.ResponseWriter, r *http.Request) {
+	if _, ok := h.loadIssueForUser(w, r, chi.URLParam(r, "id")); !ok {
+		return
+	}
+	var req CloseIssueRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if msg := closeprotocol.CheckRequest(closeCheckRequest(req)); msg != "" {
+		writeError(w, http.StatusBadRequest, msg)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
+func closeCheckRequest(req CloseIssueRequest) closeprotocol.Request {
+	deref := func(p *string) string {
+		if p == nil {
+			return ""
+		}
+		return *p
+	}
+	return closeprotocol.Request{
+		Outcome:  req.Outcome,
+		Evidence: sanitizeNullBytes(req.Evidence),
+		Verdict:  req.Verdict,
+		Continuation: closeprotocol.Continuation{
+			BlockedBy:     deref(req.BlockedBy),
+			WakeAt:        deref(req.WakeAt),
+			WaitCondition: deref(req.WaitCondition),
+			WaitTimeout:   deref(req.WaitTimeout),
+			NeedsHuman:    deref(req.NeedsHuman),
+		},
+		Knowledge: req.KnowledgeAudit,
+	}
 }

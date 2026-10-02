@@ -1146,3 +1146,103 @@ func TestPullNamesIssueMatchesWholeIdentifier(t *testing.T) {
 		t.Error("DENE-11 must not match DENE-1156")
 	}
 }
+
+// DENE-1183: /close/check is the close endpoint's shape gate with no writes.
+// Every refusal it gives is the one /close gives for the same body, so the
+// CLI can relay it before a local merge.
+func TestCloseCheckAgreesWithCloseAndWritesNothing(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	issue := createIssueHTTP(t, "close check parity", "in_progress")
+	check := func(body map[string]any) *httptest.ResponseRecorder {
+		w := httptest.NewRecorder()
+		req := withURLParam(newRequest("POST", "/api/issues/"+issue.ID+"/close/check", body), "id", issue.ID)
+		testHandler.CheckCloseIssue(w, req)
+		return w
+	}
+	for _, tc := range []struct {
+		name string
+		body map[string]any
+	}{
+		{"missing outcome", map[string]any{"evidence": "x"}},
+		{"unknown outcome", map[string]any{"outcome": "finished", "evidence": "x"}},
+		{"missing evidence", map[string]any{"outcome": "done"}},
+		{"verdict hold", map[string]any{"outcome": "done", "evidence": "x", "verdict": "hold"}},
+		{"in_progress without continuation", map[string]any{"outcome": "in_progress", "evidence": "x"}},
+		{"missing audit", map[string]any{"outcome": "cancelled", "evidence": "x", "omit_knowledge_audit": true}},
+	} {
+		closeBody := map[string]any{}
+		checkBody := map[string]any{}
+		for k, v := range tc.body {
+			closeBody[k] = v
+			if k != "omit_knowledge_audit" {
+				checkBody[k] = v
+			}
+		}
+		if _, omit := tc.body["omit_knowledge_audit"]; !omit {
+			checkBody["knowledge_audit"] = map[string]any{"none": true}
+		}
+		got := check(checkBody)
+		want := closeIssueHTTP(t, issue.ID, "", "", closeBody)
+		if got.Code != http.StatusBadRequest || want.Code != http.StatusBadRequest {
+			t.Fatalf("%s: check=%d close=%d, want both 400: %s / %s", tc.name, got.Code, want.Code, got.Body.String(), want.Body.String())
+		}
+		if got.Body.String() != want.Body.String() {
+			t.Fatalf("%s: check says %s, close says %s", tc.name, got.Body.String(), want.Body.String())
+		}
+	}
+	ok := check(map[string]any{"outcome": "done", "evidence": "PR #1", "knowledge_audit": map[string]any{"none": true}})
+	if ok.Code != http.StatusOK {
+		t.Fatalf("acceptable shape: %d %s", ok.Code, ok.Body.String())
+	}
+	if got := issueStatusDirect(t, issue.ID); got != "in_progress" {
+		t.Fatalf("check changed status to %s", got)
+	}
+	if got := issueMetaString(t, issue.ID, closeprotocol.KeyConclusion); got != "" {
+		t.Fatalf("check wrote a close record: %s", got)
+	}
+}
+
+// DENE-1183: the delivery lookup uses the same whole-identifier rule as an
+// inferred link. A search for DENE-11 also returns DENE-110's MR (substring
+// match on the provider side); it must not be linked to DENE-11, because a
+// linked open PR is what the done gate merges.
+func TestDeliveryLookupLinksOnlyPullsNamingTheWholeIdentifier(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	issue := newVCSIssue(t, "lookup whole identifier")
+	t.Cleanup(func() { cleanupVCS(ctx, issue.ID) })
+	var api *httptest.Server
+	api = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprintf(w, `[{"iid":71,"title":"Fix %s0 elsewhere","state":"opened","web_url":%q,"sha":"a","source_branch":"agent/other"},`+
+			`{"iid":72,"title":"Fix %s","state":"opened","web_url":%q,"sha":"b","source_branch":"agent/mine"}]`,
+			issue.Identifier, api.URL+"/acme/game/-/merge_requests/71", issue.Identifier, api.URL+"/acme/game/-/merge_requests/72")
+	}))
+	defer api.Close()
+	box := withVCSBox(t)
+	prevHTTP := testHandler.deliveryHTTP
+	testHandler.deliveryHTTP = api.Client()
+	t.Cleanup(func() { testHandler.deliveryHTTP = prevHTTP })
+	seedVCSConnection(t, ctx, box, "gitlab", api.URL)
+	setHandlerTestWorkspaceRepos(t, []map[string]string{{"url": api.URL + "/acme/game"}})
+
+	dbIssue, err := testHandler.Queries.GetIssue(ctx, parseUUID(issue.ID))
+	if err != nil {
+		t.Fatalf("GetIssue: %v", err)
+	}
+	view, err := testHandler.ensureIssueDeliveries(ctx, dbIssue)
+	if err != nil {
+		t.Fatalf("ensureIssueDeliveries: %v", err)
+	}
+	var urls []string
+	for _, row := range view.VCS {
+		urls = append(urls, row.HtmlUrl)
+	}
+	if len(urls) != 1 || !strings.HasSuffix(urls[0], "/merge_requests/72") {
+		t.Fatalf("linked = %v, want only MR 72 (MR 71 names %s0)", urls, issue.Identifier)
+	}
+}
