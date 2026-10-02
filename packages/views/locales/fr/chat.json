@@ -225,6 +225,11 @@
       "label": "Résume ma boîte de réception",
       "prompt": "Résume-moi ma boîte de réception",
       "prompt_project": "Résume-moi ma boîte de réception, mais seulement le projet « {{name}} ». Lis le tableau avec `multica inbox board --project {{id}}` et ne parle que des tickets de ce projet."
+    },
+    "project_board": {
+      "prompt": "Dresse le panorama des tickets ouverts de l’espace de travail avec `multica project board --output json`, puis regroupe-les en bloqués, à faire avancer et à clôturer. Demande confirmation avant toute modification.",
+      "prompt_project": "Dresse le panorama des tickets ouverts du projet « {{name}} » avec `multica project board {{id}} --output json`, puis regroupe-les en bloqués, à faire avancer et à clôturer. Demande confirmation avant toute modification.",
+      "prompt_projects": "Dresse le panorama des tickets ouverts de ces projets : {{names}}. Utilise `multica project board {{ids}} --output json`, puis demande confirmation avant toute modification."
     }
   },
   "onboarding_cards": {

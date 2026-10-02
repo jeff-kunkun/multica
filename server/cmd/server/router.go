@@ -2259,6 +2259,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			r.Route("/api/projects", func(r chi.Router) {
 				r.Use(h.RequireModule(permission.ModuleProjects))
 				r.Get("/search", h.SearchProjects)
+				r.Get("/board", h.GetProjectBoard)
 				r.Get("/", h.ListProjects)
 				r.Post("/", h.CreateProject)
 				r.Route("/{id}", func(r chi.Router) {
