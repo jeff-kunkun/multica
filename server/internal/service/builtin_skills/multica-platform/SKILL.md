@@ -1,6 +1,6 @@
 ---
 name: multica-platform
-description: "Use for Multica platform actions: asks, goals, inbox, issues, sub-issues, routing, close protocol, mentions, agents, specialisations, squads, autopilots, projects, runtimes, progress, skill import, transfers, GitHub App. Not product code."
+description: "Use for Multica platform actions: asks, goals, inbox, project board, issues, sub-issues, routing, close protocol, mentions, agents, specialisations, squads, autopilots, projects, runtimes, progress, skill import, transfers, GitHub App. Not product code."
 user-invocable: false
 allowed-tools: Bash(multica *), Bash(git *), Bash(gh *)
 ---
