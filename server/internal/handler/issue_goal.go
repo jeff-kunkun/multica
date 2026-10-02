@@ -363,7 +363,7 @@ func (h *Handler) ConfirmIssueGoal(w http.ResponseWriter, r *http.Request) {
 			// assignment path so the same access, readiness, and pending-task
 			// guards apply after the human locks the completion line.
 			userID, _ := requireUserID(w, r)
-			if !h.enqueueSquadLeaderTask(r.Context(), issue, pgtype.UUID{}, "member", uuidToString(userID), "") {
+			if !h.enqueueSquadLeaderTask(r.Context(), issue, pgtype.UUID{}, "member", userID, "") {
 				slog.Warn("confirmed goal could not enqueue assigned squad leader", "issue_id", uuidToString(issue.ID), "squad_id", uuidToString(issue.AssigneeID))
 			}
 		}
