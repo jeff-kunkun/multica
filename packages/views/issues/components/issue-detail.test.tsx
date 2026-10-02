@@ -1269,7 +1269,7 @@ describe("IssueDetail (shared)", () => {
     renderPeek("nonexistent-id");
     await waitFor(() => {
       expect(
-        screen.getByText("This issue does not exist or has been deleted in this workspace."),
+        screen.getByText("It may have been deleted, or it hasn't been shared with you."),
       ).toBeInTheDocument();
     });
     expect(screen.getByRole("button", { name: "Close preview" })).toBeInTheDocument();

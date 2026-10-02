@@ -29,11 +29,6 @@ vi.mock("@multica/core/hooks", () => ({
   useWorkspaceId: () => "workspace-1",
 }));
 
-vi.mock("@multica/core/issue-views/mutations", () => ({
-  useCreateIssueView: () => ({ mutate: vi.fn(), isPending: false }),
-  useUpdateIssueView: () => ({ mutate: vi.fn(), isPending: false }),
-}));
-
 vi.mock("./issues-header", () => ({
   IssueFilterMenu: ({ trigger }: { trigger: React.ReactNode }) => trigger,
 }));
