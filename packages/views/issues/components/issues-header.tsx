@@ -14,6 +14,7 @@ import {
   List,
   Rows3,
   SignalHigh,
+  Sparkles,
   SlidersHorizontal,
   Tag,
   Table2,
@@ -62,6 +63,7 @@ import {
 import { StatusIcon, PriorityIcon } from ".";
 import { useQuery } from "@tanstack/react-query";
 import { useWorkspaceId } from "@multica/core/hooks";
+import { useWorkspacePaths } from "@multica/core/paths";
 import { memberListOptions, agentListOptions, squadListOptions } from "@multica/core/workspace/queries";
 import { projectListOptions } from "@multica/core/projects/queries";
 import { PROJECT_STATUS_CONFIG, PROJECT_STATUS_ORDER } from "@multica/core/projects/config";
@@ -102,6 +104,7 @@ import {
 import { useViewStore, useViewStoreApi } from "@multica/core/issues/stores/view-store-context";
 import { FilterChipsBar } from "./filter-chips-bar";
 import { PageSearchInput } from "../../common/page-search-input";
+import { AppLink } from "../../navigation";
 import { SaveViewDialog, type SaveViewScope } from "./save-view-dialog";
 import { ViewBar } from "./view-bar";
 import { toast } from "sonner";
@@ -1359,8 +1362,26 @@ export function IssuesHeader({
   saveViewScope?: SaveViewScope | null;
 }) {
   const { t } = useT("issues");
+  const { t: tInbox } = useT("inbox");
+  const { t: tChat } = useT("chat");
+  const wsPaths = useWorkspacePaths();
+  const selectedBoardProjectIds = useViewStore((s) => s.projectFilters);
   const [saveViewOpen, setSaveViewOpen] = useState(false);
   const headerWsId = useWorkspaceId();
+  const { data: boardProjects = [] } = useQuery(projectListOptions(headerWsId));
+  const boardProjectIds = useMemo(
+    () => saveViewScope?.kind === "project" ? [saveViewScope.projectId] : selectedBoardProjectIds,
+    [saveViewScope, selectedBoardProjectIds],
+  );
+  const boardProjectNames = useMemo(
+    () => boardProjectIds.map((id) => boardProjects.find((project) => project.id === id)?.title ?? id),
+    [boardProjectIds, boardProjects],
+  );
+  const boardPrompt = boardProjectIds.length === 0
+    ? tChat(($) => $.conversation_starters.project_board.prompt)
+    : boardProjectIds.length === 1
+      ? tChat(($) => $.conversation_starters.project_board.prompt_project, { name: boardProjectNames[0], id: boardProjectIds[0] })
+      : tChat(($) => $.conversation_starters.project_board.prompt_projects, { names: boardProjectNames.join("、"), ids: boardProjectIds.join(",") });
   const viewListScope: IssueViewScope | null = saveViewScope
     ? saveViewScope.kind === "project"
       ? { scope_type: "project", scope_id: saveViewScope.projectId }
@@ -1530,6 +1551,21 @@ export function IssuesHeader({
             onToggle={toggleAgentRunningFilter}
             agents={workingAgents}
           />
+          <Button
+            variant="ghost"
+            size="sm"
+            className="gap-1 text-muted-foreground"
+            nativeButton={false}
+            render={
+              <AppLink
+                href={wsPaths.chatWithPrompt(boardPrompt, boardProjectIds)}
+                data-testid="issues-ask-ai"
+              />
+            }
+          >
+            <Sparkles className="size-4" />
+            {boardProjectIds.length === 1 ? tInbox(($) => $.board.ask_ai_project) : tInbox(($) => $.board.ask_ai)}
+          </Button>
           <IssueDisplayControls
             scopedIssues={scopedIssues}
             allowGantt={allowGantt}

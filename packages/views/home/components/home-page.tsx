@@ -803,13 +803,14 @@ export function BoardProjectControls({ project }: { project: BoardProject }) {
       <BoardAskAiButton
         prompt={prompt}
         label={current ? t(($) => $.board.ask_ai_project) : t(($) => $.board.ask_ai)}
+        projectIds={current ? [current.id] : []}
       />
     </>
   );
 }
 
 /** DENE-975: the chat agent reads this same board (`multica inbox board`) and tells it back. */
-export function BoardAskAiButton({ prompt, label }: { prompt: string; label: string }) {
+export function BoardAskAiButton({ prompt, label, projectIds = [] }: { prompt: string; label: string; projectIds?: readonly string[] }) {
   const wsPaths = useWorkspacePaths();
   return (
     <Button
@@ -817,7 +818,7 @@ export function BoardAskAiButton({ prompt, label }: { prompt: string; label: str
       size="sm"
       className="text-muted-foreground"
       nativeButton={false}
-      render={<AppLink href={wsPaths.chatWithPrompt(prompt)} data-testid="board-ask-ai" />}
+      render={<AppLink href={wsPaths.chatWithPrompt(prompt, projectIds)} data-testid="board-ask-ai" />}
     >
       <Sparkles className="size-4" />
       {label}
