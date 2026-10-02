@@ -32,6 +32,7 @@ import {
   memberListOptions,
   workspaceKeys,
   workspaceListOptions,
+  workspaceNamingOptions,
 } from "@multica/core/workspace/queries";
 import { isAgentRuntimeBound } from "@multica/core/agents";
 import { issueKeys } from "@multica/core/issues/queries";
@@ -98,6 +99,10 @@ export function WorkspaceTab() {
   });
   const { data: agents = [] } = useQuery({
     ...agentListOptions(wsId ?? ""),
+    enabled: !!wsId,
+  });
+  const { data: naming } = useQuery({
+    ...workspaceNamingOptions(wsId ?? ""),
     enabled: !!wsId,
   });
   const qc = useQueryClient();
@@ -245,6 +250,17 @@ export function WorkspaceTab() {
           ? error.message
           : t(($) => $.workspace.toast_save_failed),
       );
+    }
+  };
+
+  const handleNamingChange = async (nextValue: string | null) => {
+    if (!workspace || !nextValue || !canManageWorkspace) return;
+    try {
+      const updated = await api.updateWorkspaceNaming(workspace.id, nextValue as "server_llm" | "runtime" | "rules");
+      qc.setQueryData(workspaceKeys.naming(workspace.id), updated);
+      toast.success("Chat naming source saved", { id: "settings-auto-save" });
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to save chat naming source");
     }
   };
 
@@ -635,6 +651,50 @@ export function WorkspaceTab() {
                 {t(($) => $.workspace.manage_hint)}
               </div>
             )}
+        </SettingsCard>
+      </SettingsSection>
+
+      <SettingsSection
+        title="Chat naming"
+        description="Choose how new chat titles are created."
+      >
+        <SettingsCard>
+          <SettingsRow
+            label="Naming source"
+            description={!canManageWorkspace ? "Only workspace owners and admins can change this." : "Runtime is recommended when the server has no model key."}
+            size="select-wide"
+          >
+            <Select
+              items={(naming?.options ?? []).map((option) => ({
+                value: option.id,
+                label: `${option.label}${option.recommended ? " (recommended)" : ""}${option.available ? "" : " — unavailable"}`,
+              }))}
+              value={naming?.source ?? "runtime"}
+              onValueChange={handleNamingChange}
+              disabled={!canManageWorkspace || !naming}
+            >
+              <SelectTrigger size="sm" className="w-full" aria-label="Chat naming source">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent align="end">
+                {(naming?.options ?? []).map((option) => (
+                  <SelectItem key={option.id} value={option.id} disabled={!option.available}>
+                    {option.label}{option.recommended ? " (recommended)" : ""}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </SettingsRow>
+          {naming?.options.find((option) => option.id === "server_llm" && !option.available)?.reason ? (
+            <div className="px-4 pb-3 text-caption text-muted-foreground">
+              {naming.options.find((option) => option.id === "server_llm")?.reason}
+            </div>
+          ) : null}
+          {naming?.stats ? (
+            <div className="px-4 py-3 text-caption text-muted-foreground">
+              Last 24 hours: {naming.stats.titled} titled · {naming.stats.runtime} runtime · {naming.stats.rules} rules fallback · {naming.stats.failed} failed
+            </div>
+          ) : null}
         </SettingsCard>
       </SettingsSection>
 

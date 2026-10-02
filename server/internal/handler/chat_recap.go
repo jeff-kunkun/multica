@@ -107,27 +107,44 @@ func (h *Handler) recapChatSession(ctx context.Context, workspaceID string, sess
 	}
 
 	changed := false
-	if !session.TitleLocked && h.LLM != nil && h.LLM.Enabled() {
+	if !session.TitleLocked {
 		replies, err := h.Queries.CountChatAssistantReplies(ctx, sessionID)
 		if err != nil {
 			return false, err
 		}
 		var title string
+		titleSource := ""
 		switch {
-		case replies == 1:
+		case replies == 1 && h.LLM != nil && h.LLM.Enabled():
+			titleSource = "server_llm"
 			title, err = h.recapFirstTitle(ctx, workspaceID, session, opening, lastReply)
-		case replies > 1 && replies%chatTopicCheckEvery == 0:
+		case replies > 1 && replies%chatTopicCheckEvery == 0 && h.LLM != nil && h.LLM.Enabled():
+			titleSource = "server_llm"
 			title, err = h.recapTopicTitle(ctx, session.Title, turns)
+		case replies == 1:
+			titleSource = "rules"
+			// Self-hosted instances without MULTICA_LLM_* still get a useful
+			// title. This is deliberately lexical cleanup, never another model
+			// call, and the CAS below keeps a concurrent manual rename winning.
+			title = ruleCleanChatTitle(opening)
 		}
 		if err != nil {
+			if titleSource != "" {
+				h.recordChatNamingEvent(ctx, session, titleSource, "failure")
+			}
 			slog.Warn("chat recap title failed; keeping title", "session_id", uuidToString(sessionID), "error", err)
 		} else if title != "" && title != session.Title {
 			updated, err := h.Queries.UpdateChatSessionTitleIfCurrent(ctx, db.UpdateChatSessionTitleIfCurrentParams{ID: sessionID, ExpectedTitle: session.Title, NewTitle: title})
 			if err == nil {
 				session, changed = updated, true
+				if titleSource != "" {
+					h.recordChatNamingEvent(ctx, session, titleSource, "success")
+				}
 			} else if !errors.Is(err, pgx.ErrNoRows) {
 				return false, err
 			}
+		} else if titleSource != "" {
+			h.recordChatNamingEvent(ctx, session, titleSource, "success")
 		}
 	}
 
@@ -147,6 +164,24 @@ func (h *Handler) recapChatSession(ctx context.Context, workspaceID string, sess
 		h.publishChatSessionState(workspaceID, "system", "", session)
 	}
 	return changed, nil
+}
+
+func ruleCleanChatTitle(opening string) string {
+	s := strings.TrimSpace(opening)
+	for _, prefix := range []string{"嗯", "呃", "额", "um", "uh", "so", "please", "请"} {
+		for strings.HasPrefix(strings.ToLower(s), prefix) {
+			s = strings.TrimSpace(s[len(prefix):])
+		}
+	}
+	if linkedIssueKey.MatchString(s) {
+		if match := linkedIssueKey.FindString(s); match != "" {
+			return sanitizeChatTitle(match + " · 任务讨论")
+		}
+	}
+	if strings.HasPrefix(s, "http://") || strings.HasPrefix(s, "https://") {
+		return "链接 · 任务讨论"
+	}
+	return sanitizeChatTitle(s)
 }
 
 func (h *Handler) recapFirstTitle(ctx context.Context, workspaceID string, session db.ChatSession, opening, reply string) (string, error) {
