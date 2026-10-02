@@ -479,6 +479,7 @@
     "prop_updated": "Updated",
     "activity_section": "Activity",
     "goal": {
+      "badge_aria": "Goal {{done}}/{{total}}",
       "title": "Goal",
       "completion_title": "Complete the finish line",
       "completion_hint": "Choose the checks that must pass before this task is done.",
@@ -502,7 +503,16 @@
       "stopped_hint": "This goal is paused. Answer the option question in your inbox to add budget, change the completion line, or stop.",
       "evidence_item": "Evidence",
       "open_evidence": "Open evidence",
-      "status": { "draft": "Needs confirmation", "locked": "In progress", "active": "In progress", "stopped": "Stopped", "achieved": "Achieved" }
+      "status": {
+        "draft": "Needs confirmation",
+        "locked": "In progress",
+        "active": "In progress",
+        "stopped": "Stopped",
+        "achieved": "Achieved"
+      },
+      "goal_toggle": "Make it a goal",
+      "progress_word": "met",
+      "unset": "Not set"
     },
     "subscribe": "Subscribe",
     "unsubscribe": "Unsubscribe",
@@ -1192,6 +1202,7 @@
     "entry_submit": "Start aligning",
     "entry_create_start": "Create and start",
     "goal_toggle": "Keep going until it meets the finish line",
+    "goal_prompt": "The alignment will ask how success is measured and carry that answer into the completion line.",
     "entry_submitting": "Starting…",
     "entry_cancel": "Cancel",
     "entry_no_runtime": "No online runtime is available, so the alignment agent cannot run.",

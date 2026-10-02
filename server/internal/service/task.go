@@ -736,6 +736,10 @@ var ErrAgentChainBudgetExceeded = errors.New("agent delegation chain budget exce
 // upper-layer log or response can leak the constraint name (#5914, Elon review).
 var ErrDuplicatePendingTask = errors.New("a pending task for this issue and agent already exists")
 
+// ErrGoalDraftNotConfirmed is returned when an issue's completion line is
+// still editable. Callers may safely retry after a human confirms the goal.
+var ErrGoalDraftNotConfirmed = errors.New("goal is still a draft and has not been confirmed")
+
 const (
 	agentHaltedMetadataKey      = "agent_halted"
 	agentChainBudgetNotifiedKey = "agent_chain_budget_notified"
@@ -1389,6 +1393,9 @@ func (s *TaskService) enqueueIssueTask(ctx context.Context, issue db.Issue, trig
 }
 
 func (s *TaskService) enqueueIssueTaskWithCommentPlan(ctx context.Context, issue db.Issue, triggerCommentID pgtype.UUID, coalescedCommentIDs []pgtype.UUID, forceFreshSession bool, handoffNote string, actorUserID pgtype.UUID, rerunOfTaskID pgtype.UUID, fireAt pgtype.Timestamptz, origin RunOrigin) (db.AgentTaskQueue, error) {
+	if err := s.guardGoalExecution(ctx, issue); err != nil {
+		return db.AgentTaskQueue{}, err
+	}
 	if !issue.AssigneeID.Valid {
 		slog.Error("task enqueue failed", "issue_id", util.UUIDToString(issue.ID), "error", "issue has no assignee")
 		return db.AgentTaskQueue{}, fmt.Errorf("issue has no assignee")
@@ -1525,6 +1532,20 @@ func (s *TaskService) enqueueIssueTaskWithCommentPlan(ctx context.Context, issue
 	return task, nil
 }
 
+// guardGoalExecution is shared by assignment and mention/delegation enqueue
+// paths. A goal draft is still a human-editable proposal, so neither path may
+// bypass the confirmation gate by naming an agent directly.
+func (s *TaskService) guardGoalExecution(ctx context.Context, issue db.Issue) error {
+	issueGoal, err := s.Queries.GetIssueGoal(ctx, db.GetIssueGoalParams{IssueID: issue.ID, WorkspaceID: issue.WorkspaceID})
+	if err == nil && issueGoal.Status == "draft" {
+		return ErrGoalDraftNotConfirmed
+	}
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return fmt.Errorf("check goal state: %w", err)
+	}
+	return nil
+}
+
 // EnqueueTaskForMention creates a queued task for a mentioned agent on an issue.
 // Unlike EnqueueTaskForIssue, this takes an explicit agent ID rather than
 // deriving it from the issue assignee.
@@ -1585,6 +1606,9 @@ func (s *TaskService) enqueueMentionTask(ctx context.Context, issue db.Issue, ag
 }
 
 func (s *TaskService) enqueueMentionTaskWithCommentPlan(ctx context.Context, issue db.Issue, agentID pgtype.UUID, triggerCommentID pgtype.UUID, coalescedCommentIDs []pgtype.UUID, isLeader bool, squadID pgtype.UUID, forceFreshSession bool, handoffNote string, actorUserID pgtype.UUID, rerunOfTaskID pgtype.UUID, origin RunOrigin) (db.AgentTaskQueue, error) {
+	if err := s.guardGoalExecution(ctx, issue); err != nil {
+		return db.AgentTaskQueue{}, err
+	}
 	if err := guardIssueNotInTriage(ctx, s.Queries, issue.ID, origin); err != nil {
 		return db.AgentTaskQueue{}, err
 	}
@@ -1709,6 +1733,7 @@ type QuickCreateContext struct {
 	// sub-issue. The prompt then requires `--project ""` so create does not
 	// treat the omitted flag as "inherit the parent".
 	ProjectExplicitNone bool `json:"project_explicit_none,omitempty"`
+	GoalMode            bool `json:"goal_mode,omitempty"`
 	// SourceContextID identifies the immutable pending capture that must attach
 	// to the one issue this quick-create chain produces.
 	SourceContextID string `json:"source_context_id,omitempty"`
@@ -1747,6 +1772,10 @@ func (s *TaskService) EnqueueQuickCreateTaskChoosingProject(ctx context.Context,
 	return s.enqueueQuickCreateTask(ctx, workspaceID, requesterID, agentID, squadID, prompt, priority, dueDate, projectID, parentIssueID, attachmentIDs, projectExplicitNone, nil)
 }
 
+func (s *TaskService) EnqueueQuickCreateTaskChoosingProjectWithGoal(ctx context.Context, workspaceID, requesterID pgtype.UUID, agentID, squadID pgtype.UUID, prompt, priority, dueDate string, projectID, parentIssueID pgtype.UUID, attachmentIDs []pgtype.UUID, projectExplicitNone, goalMode bool) (db.AgentTaskQueue, error) {
+	return s.enqueueQuickCreateTask(ctx, workspaceID, requesterID, agentID, squadID, prompt, priority, dueDate, projectID, parentIssueID, attachmentIDs, projectExplicitNone, nil, goalMode)
+}
+
 func (s *TaskService) EnqueueQuickCreateTaskWithSourceContext(ctx context.Context, workspaceID, requesterID pgtype.UUID, agentID, squadID pgtype.UUID, prompt, priority, dueDate string, projectID, parentIssueID pgtype.UUID, attachmentIDs []pgtype.UUID, capture SourceContextCapture) (db.AgentTaskQueue, error) {
 	return s.EnqueueQuickCreateTaskWithSourceContextChoosingProject(ctx, workspaceID, requesterID, agentID, squadID, prompt, priority, dueDate, projectID, parentIssueID, attachmentIDs, false, capture)
 }
@@ -1755,7 +1784,7 @@ func (s *TaskService) EnqueueQuickCreateTaskWithSourceContextChoosingProject(ctx
 	return s.enqueueQuickCreateTask(ctx, workspaceID, requesterID, agentID, squadID, prompt, priority, dueDate, projectID, parentIssueID, attachmentIDs, projectExplicitNone, &capture)
 }
 
-func (s *TaskService) enqueueQuickCreateTask(ctx context.Context, workspaceID, requesterID pgtype.UUID, agentID, squadID pgtype.UUID, prompt, priority, dueDate string, projectID, parentIssueID pgtype.UUID, attachmentIDs []pgtype.UUID, projectExplicitNone bool, capture *SourceContextCapture) (db.AgentTaskQueue, error) {
+func (s *TaskService) enqueueQuickCreateTask(ctx context.Context, workspaceID, requesterID pgtype.UUID, agentID, squadID pgtype.UUID, prompt, priority, dueDate string, projectID, parentIssueID pgtype.UUID, attachmentIDs []pgtype.UUID, projectExplicitNone bool, capture *SourceContextCapture, goalMode ...bool) (db.AgentTaskQueue, error) {
 	if err := CheckIssueCreateCapacity(ctx, s.Queries, s.Entitlements, workspaceID); err != nil {
 		return db.AgentTaskQueue{}, fmt.Errorf("preflight quick-create issue capacity: %w", err)
 	}
@@ -1791,6 +1820,9 @@ func (s *TaskService) enqueueQuickCreateTask(ctx context.Context, workspaceID, r
 		payload.ParentIssueID = util.UUIDToString(parentIssueID)
 	}
 	payload.ProjectExplicitNone = projectExplicitNone
+	if len(goalMode) > 0 {
+		payload.GoalMode = goalMode[0]
+	}
 	if capture != nil {
 		payload.SourceContextID = util.UUIDToString(capture.ID)
 	}

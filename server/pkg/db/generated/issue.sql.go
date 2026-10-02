@@ -1701,15 +1701,16 @@ WHERE i.workspace_id = $1
   AND ($7::uuid[] IS NULL OR i.assignee_id = ANY($7::uuid[]))
   AND ($8::uuid IS NULL OR i.creator_id = $8)
   AND ($9::uuid IS NULL OR i.project_id = $9)
-  AND ($10::bool IS NULL OR (i.start_date IS NOT NULL OR i.due_date IS NOT NULL))
-  AND ($11::jsonb IS NULL OR i.metadata @> $11::jsonb)
+  AND ($10::bool IS NOT TRUE OR EXISTS (SELECT 1 FROM issue_goal g WHERE g.issue_id = i.id AND g.workspace_id = i.workspace_id))
+  AND ($11::bool IS NULL OR (i.start_date IS NOT NULL OR i.due_date IS NOT NULL))
+  AND ($12::jsonb IS NULL OR i.metadata @> $12::jsonb)
   AND (
-    $12::uuid IS NULL
+    $13::uuid IS NULL
     -- (1) assignee is an agent owned by the user
     OR (i.assignee_type = 'agent' AND i.assignee_id IN (
           SELECT a.id FROM agent a
            WHERE a.workspace_id = $1
-             AND a.owner_id     = $12::uuid
+             AND a.owner_id     = $13::uuid
     ))
     -- (2)(3)(4) assignee is a squad related to the user — three relations
     OR (i.assignee_type = 'squad' AND i.assignee_id IN (
@@ -1719,7 +1720,7 @@ WHERE i.workspace_id = $1
             JOIN squad s ON s.id = sm.squad_id
            WHERE s.workspace_id = $1
              AND sm.member_type = 'member'
-             AND sm.member_id   = $12::uuid
+             AND sm.member_id   = $13::uuid
           UNION
           -- (3) the squad's canonical leader is an agent owned by the user.
           -- We read squad.leader_id directly rather than relying on a
@@ -1730,7 +1731,7 @@ WHERE i.workspace_id = $1
             JOIN agent a ON a.id = s.leader_id
            WHERE s.workspace_id = $1
              AND a.workspace_id = $1
-             AND a.owner_id     = $12::uuid
+             AND a.owner_id     = $13::uuid
           UNION
           -- (4) the squad has an agent member owned by the user
           SELECT sm.squad_id
@@ -1740,7 +1741,7 @@ WHERE i.workspace_id = $1
            WHERE s.workspace_id = $1
              AND sm.member_type = 'agent'
              AND a.workspace_id = $1
-             AND a.owner_id     = $12::uuid
+             AND a.owner_id     = $13::uuid
     ))
   )
 ORDER BY i.position ASC, i.created_at DESC
@@ -1757,6 +1758,7 @@ type ListIssuesParams struct {
 	AssigneeIds    []pgtype.UUID `json:"assignee_ids"`
 	CreatorID      pgtype.UUID   `json:"creator_id"`
 	ProjectID      pgtype.UUID   `json:"project_id"`
+	GoalOnly       pgtype.Bool   `json:"goal_only"`
 	Scheduled      pgtype.Bool   `json:"scheduled"`
 	MetadataFilter []byte        `json:"metadata_filter"`
 	InvolvesUserID pgtype.UUID   `json:"involves_user_id"`
@@ -1814,6 +1816,7 @@ func (q *Queries) ListIssues(ctx context.Context, arg ListIssuesParams) ([]ListI
 		arg.AssigneeIds,
 		arg.CreatorID,
 		arg.ProjectID,
+		arg.GoalOnly,
 		arg.Scheduled,
 		arg.MetadataFilter,
 		arg.InvolvesUserID,

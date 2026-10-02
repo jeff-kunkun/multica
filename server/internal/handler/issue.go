@@ -38,14 +38,15 @@ import (
 
 // IssueResponse is the JSON response for an issue.
 type IssueResponse struct {
-	ID          string            `json:"id"`
-	WorkspaceID string            `json:"workspace_id"`
-	Number      int32             `json:"number"`
-	Identifier  string            `json:"identifier"`
-	Title       string            `json:"title"`
-	Progress    *ProgressResponse `json:"progress"`
-	Description *string           `json:"description"`
-	Status      string            `json:"status"`
+	ID           string                `json:"id"`
+	WorkspaceID  string                `json:"workspace_id"`
+	Number       int32                 `json:"number"`
+	Identifier   string                `json:"identifier"`
+	Title        string                `json:"title"`
+	Progress     *ProgressResponse     `json:"progress"`
+	GoalProgress *GoalProgressResponse `json:"goal_progress,omitempty"`
+	Description  *string               `json:"description"`
+	Status       string                `json:"status"`
 	// StatusCategory encodes lifecycle using the legacy seven-value wire enum. It is
 	// omitted when an endpoint cannot resolve a custom status, so consumers must
 	// fall back to their catalog rather than treat a blank as "no category".
@@ -144,6 +145,11 @@ type IssueResponse struct {
 	// CapacityRetry is detail-only: the waiting in-place retry after a full
 	// model (DENE-1093), absent when nothing is waiting.
 	CapacityRetry *CapacityRetryResponse `json:"capacity_retry,omitempty"`
+}
+
+type GoalProgressResponse struct {
+	Done  int64 `json:"done"`
+	Total int64 `json:"total"`
 }
 
 // validIssuePriorities mirrors the CHECK constraint on the issue table. Write
@@ -1623,6 +1629,9 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 	if scheduledFilter.Valid {
 		where = append(where, "(i.start_date IS NOT NULL OR i.due_date IS NOT NULL)")
 	}
+	if r.URL.Query().Get("goal") == "true" || r.URL.Query().Get("goal_only") == "true" {
+		where = append(where, "EXISTS (SELECT 1 FROM issue_goal g WHERE g.issue_id = i.id AND g.workspace_id = i.workspace_id)")
+	}
 	if metadataFilter != nil {
 		where = append(where, fmt.Sprintf("i.metadata @> %s::jsonb", addArg(string(metadataFilter))))
 	}
@@ -1780,8 +1789,21 @@ LIMIT %s OFFSET %s`, whereSql, orderBy, limitRef, offsetRef)
 	}
 	labelsMap := h.labelsByIssue(ctx, wsUUID, ids)
 	resp := make([]IssueResponse, len(issues))
+	goalProgress := map[string]GoalProgressResponse{}
+	if len(ids) > 0 {
+		if rows, err := h.Queries.ListIssueGoalProgress(ctx, db.ListIssueGoalProgressParams{WorkspaceID: wsUUID, Column2: ids}); err == nil {
+			for _, row := range rows {
+				goalProgress[uuidToString(row.IssueID)] = GoalProgressResponse{Done: row.Passed, Total: row.Total}
+			}
+		} else {
+			slog.Warn("ListIssues goal progress query failed", "error", err)
+		}
+	}
 	for i, issue := range issues {
 		resp[i] = issueListRowToResponse(issue, prefix)
+		if progress, ok := goalProgress[resp[i].ID]; ok {
+			resp[i].GoalProgress = &progress
+		}
 		labels := labelsMap[resp[i].ID]
 		if labels == nil {
 			labels = []LabelResponse{}
@@ -2724,6 +2746,7 @@ type QuickCreateIssueRequest struct {
 	ProjectID     string   `json:"project_id,omitempty"`
 	ParentIssueID string   `json:"parent_issue_id,omitempty"`
 	AttachmentIDs []string `json:"attachment_ids,omitempty"`
+	GoalMode      bool     `json:"goal_mode,omitempty"`
 }
 
 // QuickCreateIssueResponse echoes the queued task id so the frontend can
@@ -2935,7 +2958,7 @@ func (h *Handler) QuickCreateIssue(w http.ResponseWriter, r *http.Request) {
 		projectUUID = parentProject
 	}
 
-	task, err := h.TaskService.EnqueueQuickCreateTaskChoosingProject(r.Context(), wsUUID, requesterUUID, agentUUID, squadUUID, prompt, priority, dueDate, projectUUID, parentIssueUUID, attachmentIDs, projectExplicitNone)
+	task, err := h.TaskService.EnqueueQuickCreateTaskChoosingProjectWithGoal(r.Context(), wsUUID, requesterUUID, agentUUID, squadUUID, prompt, priority, dueDate, projectUUID, parentIssueUUID, attachmentIDs, projectExplicitNone, req.GoalMode)
 	if err != nil {
 		if writeIssueLimitReached(w, err) {
 			return
@@ -3101,6 +3124,7 @@ type CreateIssueRequest struct {
 	StartDate     *string  `json:"start_date"`
 	DueDate       *string  `json:"due_date"`
 	AttachmentIDs []string `json:"attachment_ids,omitempty"`
+	GoalMode      bool     `json:"goal_mode,omitempty"`
 	// LabelIDs are issue-scoped labels to attach to the new issue in the same
 	// transaction as the create. Unknown or non-issue ids are rejected with
 	// 400 (service.ErrIssueLabelNotFound) rather than silently dropped.
@@ -3402,6 +3426,7 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 		AttachmentIDs:  attachmentIDs,
 		LabelIDs:       labelIDs,
 		AllowDuplicate: req.AllowDuplicate,
+		GoalMode:       req.GoalMode,
 
 		AssigneeSource:       ruling.Source,
 		AssigneeSourceUserID: ruling.SourceUser,

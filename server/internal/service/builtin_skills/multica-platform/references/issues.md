@@ -13,6 +13,10 @@ Product contracts the runtime brief does not fully encode.
 
 Closing is its own contract; read `references/close-protocol.md` for its `close.*` keys, decision tables, and dispatcher promotion rules.
 
+Create a goal task with `multica issue create --title "..." --goal`. This
+creates a draft completion line with starter checks; a human must edit and
+confirm it through the shared goal panel before execution begins.
+
 `multica issue wait <id> --output json` is the read-only status view for a
 blocked issue's wait. It reports the wait condition, optional `wait_probe`,
 deadline, last probe status (`ready`, `pending`, or `failed`), check timestamp,
@@ -205,6 +209,9 @@ comment rather than repeating the edit.
 ## Listing and ordering issues
 
 `issue list` reads one page at a time, with a server maximum of 100 issues.
+
+Pass `--goal` to keep only issues that have a completion-line goal:
+`multica issue list --goal --output json`.
 Advance `--offset` by the number of issues actually returned. If the server
 cannot count matching issues, it returns `failed to count issues` as an error;
 do not treat that failure as an empty or complete list. Older servers can

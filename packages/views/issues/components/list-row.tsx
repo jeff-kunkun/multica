@@ -32,6 +32,7 @@ import { BlockWaitProbeBadge } from "./block-wait-probe-badge";
 import { useLocale } from "../../i18n";
 import { useT } from "../../i18n";
 import { IssueProgressLine } from "./issue-progress-line";
+import { GoalProgressBadge } from "./goal-progress-badge";
 
 export interface ChildProgress {
   done: number;
@@ -141,7 +142,7 @@ function ListRowContent({
               density="row"
               className="hidden sm:inline-flex"
             />
-            <span className="flex min-w-0 flex-col"><span className="truncate">{issue.title}</span><IssueProgressLine issue={issue} /></span>
+            <span className="flex min-w-0 flex-col"><span className="flex min-w-0 items-center gap-1.5"><GoalProgressBadge issue={issue} /><span className="truncate">{issue.title}</span></span><IssueProgressLine issue={issue} /></span>
             {/* Keep custom names visible when this row appears outside a status section. */}
             <CustomStatusChip status={issue.status} className="shrink-0" />
             <BlockWaitProbeBadge issue={issue} />

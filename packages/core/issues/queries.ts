@@ -119,11 +119,13 @@ export const issueKeys = {
     wsId: string,
     projectId: string,
     assigneeTypes?: IssueAssigneeType[],
+    goalOnly = false,
   ) =>
     [
       ...issueKeys.projectGanttAll(wsId),
       projectId,
       assigneeTypes ?? null,
+      goalOnly,
     ] as const,
   /** Per-project issue shortlist behind the chat's @-picker (DENE-603). */
   projectPicker: (wsId: string, projectId: string, limit: number) =>
@@ -220,6 +222,7 @@ export type MyIssuesFilter = Pick<
   | "creator_id"
   | "project_id"
   | "involves_user_id"
+  | "goal_only"
 >;
 
 /** Server-side contract for the flat table window. These facets must travel
@@ -394,6 +397,7 @@ export const PROJECT_GANTT_MAX_ISSUES = 10_000;
 async function fetchProjectGanttIssues(
   projectId: string,
   assigneeTypes?: IssueAssigneeType[],
+  goalOnly = false,
 ) {
   const issues = [];
   let offset = 0;
@@ -402,6 +406,7 @@ async function fetchProjectGanttIssues(
       project_id: projectId,
       scheduled: true,
       ...(assigneeTypes?.length ? { assignee_types: assigneeTypes } : {}),
+      ...(goalOnly ? { goal_only: true } : {}),
       limit: PROJECT_GANTT_PAGE_LIMIT,
       offset,
     });
@@ -432,10 +437,11 @@ export function projectGanttIssuesOptions(
   // The page's assignee-type tab narrows the Gantt exactly like every
   // other mode — same scope, same single mapping upstream.
   assigneeTypes?: IssueAssigneeType[],
+  goalOnly = false,
 ) {
   return queryOptions({
-    queryKey: issueKeys.projectGantt(wsId, projectId, assigneeTypes),
-    queryFn: () => fetchProjectGanttIssues(projectId, assigneeTypes),
+    queryKey: issueKeys.projectGantt(wsId, projectId, assigneeTypes, goalOnly),
+    queryFn: () => fetchProjectGanttIssues(projectId, assigneeTypes, goalOnly),
   });
 }
 

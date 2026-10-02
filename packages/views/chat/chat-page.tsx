@@ -34,6 +34,7 @@ import {
   useRegenerateChatQuickActions,
 } from "@multica/core/chat/mutations";
 import {
+  chatKeys,
   chatMessageSearchOptions,
   chatMessagesOptions,
   chatQuickActionsPendingOptions,
@@ -73,6 +74,8 @@ import { matchesPinyin } from "../editor/extensions/pinyin-match";
 import { useDebouncedValue } from "../common/use-debounced-value";
 import { useRestoredScrollRef } from "../platform";
 import { openAlignIssue } from "@multica/core/issues/stores/create-mode-store";
+import { api } from "@multica/core/api";
+import { openGoalCompletion } from "@multica/core/modals";
 
 /**
  * Title half of the chat page search: every word in the title, or the whole
@@ -835,6 +838,13 @@ export function ChatPage() {
         onProjectsChange={changeProjectContext}
         isProjectUpdating={c.isProjectUpdating}
         focusRequest={c.focusInputRequest}
+        onConvertToGoal={c.activeSessionId ? async () => {
+          const result = await api.convertChatSessionToGoal(c.activeSessionId!);
+          // The server appends a link message to this chat; refetch to show it.
+          void queryClient.invalidateQueries({ queryKey: chatKeys.messages(c.activeSessionId!) });
+          void queryClient.invalidateQueries({ queryKey: chatKeys.messagesPage(c.activeSessionId!) });
+          openGoalCompletion({ issueId: result.issue.id, title: result.issue.title });
+        } : undefined}
       />
     </div>
   );
