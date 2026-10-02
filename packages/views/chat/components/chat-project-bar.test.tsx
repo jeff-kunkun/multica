@@ -7,9 +7,10 @@ import type { ChatSession, Project } from "@multica/core/types";
 import { I18nProvider } from "@multica/core/i18n/react";
 import enCommon from "../../locales/en/common.json";
 import enChat from "../../locales/en/chat.json";
+import enProjects from "../../locales/en/projects.json";
 import { ChatProjectBar } from "./chat-project-bar";
 
-const RESOURCES = { en: { common: enCommon, chat: enChat } };
+const RESOURCES = { en: { common: enCommon, chat: enChat, projects: enProjects } };
 
 function project(id: string, title: string): Project {
   return {
@@ -186,42 +187,50 @@ describe("ChatProjectBar", () => {
       ]);
     });
 
-    it("lists the collapsed projects with their chat counts in More", async () => {
-      areaWidth = 320;
-      const user = userEvent.setup();
-      const { onFilterChange } = renderBar();
-
-      await user.click(screen.getByRole("button", { name: /More/ }));
-      const collapsed = within(screen.getByRole("group", { name: "Collapsed projects" }));
-      expect(
-        collapsed.getAllByRole("button", { name: /Project \d+, 1 chat/ }).map((row) =>
-          row.getAttribute("aria-label"),
-        ),
-      ).toEqual(["Project 6, 1 chat", "Project 7, 1 chat", "Project 8, 1 chat"]);
-      // Listed once: not repeated under "Other projects".
-      expect(within(screen.getByRole("dialog")).getAllByText("Project 7")).toHaveLength(1);
-
-      await user.click(collapsed.getByRole("button", { name: "Project 7, 1 chat" }));
-      expect(onFilterChange).toHaveBeenCalledWith({ type: "project", id: "p7" });
-    });
-
-    it("lists pins that did not fit under Collapsed too, so it matches the More count", async () => {
+    it("lists every project once in More and marks the ones behind it", async () => {
       // Seven pins, five slots: p6 and p7 are pinned but behind More.
       areaWidth = 320;
       const user = userEvent.setup();
       const onTogglePin = vi.fn();
-      renderBar({ pinnedIds: ["p1", "p2", "p3", "p4", "p5", "p6", "p7"], onTogglePin });
+      const { onFilterChange } = renderBar({
+        pinnedIds: ["p1", "p2", "p3", "p4", "p5", "p6", "p7"],
+        onTogglePin,
+      });
 
       await user.click(screen.getByRole("button", { name: /More \(15\)/ }));
-      const collapsed = within(screen.getByRole("group", { name: "Collapsed projects" }));
-      expect(
-        collapsed.getAllByRole("button", { name: /Project \d+, \d+ chats?/ }).map((row) =>
-          row.getAttribute("aria-label"),
-        ),
-      ).toEqual(["Project 6, 1 chat", "Project 7, 1 chat", "Project 8, 1 chat"]);
+      const dialog = within(screen.getByRole("dialog"));
+      const pinned = within(dialog.getByRole("group", { name: "Pinned — drag to reorder" }));
+      expect(pinned.getAllByRole("button", { name: /, \d+ chats?$/ }).map((row) => row.getAttribute("aria-label")))
+        .toEqual([1, 2, 3, 4, 5, 6, 7].map((n) => `Project ${n}, 1 chat`));
+      expect(dialog.getAllByText("Project 7")).toHaveLength(1);
+      // Two collapsed pins plus p8, the one chatted project that did not fit.
+      expect(dialog.getAllByText("In More")).toHaveLength(3);
 
-      await user.click(collapsed.getAllByRole("button", { name: "Unpin" })[0]!);
+      await user.click(pinned.getAllByRole("button", { name: "Unpin" })[5]!);
       expect(onTogglePin).toHaveBeenCalledWith("p6");
+      await user.click(dialog.getByRole("button", { name: "Project 8, 1 chat" }));
+      expect(onFilterChange).toHaveBeenCalledWith({ type: "project", id: "p8" });
+    });
+
+    it("filters and groups the projects in More", async () => {
+      areaWidth = 320;
+      const user = userEvent.setup();
+      renderBar({ pinnedIds: ["p2"] });
+
+      await user.click(screen.getByRole("button", { name: /More/ }));
+      const dialog = within(screen.getByRole("dialog"));
+      await user.click(dialog.getByRole("radio", { name: "Pinned" }));
+      expect(dialog.getAllByRole("button", { name: /, \d+ chats?$/ })).toHaveLength(1);
+      expect(dialog.getByText("Project 2")).toBeInTheDocument();
+
+      await user.click(dialog.getByRole("radio", { name: "Not pinned" }));
+      expect(dialog.queryByText("Project 2")).not.toBeInTheDocument();
+      expect(dialog.getAllByRole("button", { name: /, \d+ chats?$/ })).toHaveLength(19);
+
+      await user.click(dialog.getByRole("radio", { name: "All" }));
+      await user.click(dialog.getByRole("radio", { name: "By status" }));
+      expect(dialog.getByRole("group", { name: "In Progress" })).toBeInTheDocument();
+      expect(dialog.queryByRole("group", { name: "Pinned — drag to reorder" })).not.toBeInTheDocument();
     });
 
     it("moves the project picked from More to a visible slot right after the pins", () => {

@@ -18,7 +18,6 @@
     "all": "すべて",
     "more": "⋯ その他 ({{count}})",
     "menu_title": "プロジェクト",
-    "collapsed": "折りたたまれたプロジェクト",
     "done": "完了",
     "search": "プロジェクトを検索…",
     "pinned": "ピン留め（ドラッグで並べ替え）",
@@ -33,7 +32,18 @@
     "unread": "未読",
     "switch": "プロジェクトを切り替え",
     "switch_search": "プロジェクトを検索…",
-    "switch_empty": "一致するプロジェクトはありません"
+    "switch_empty": "一致するプロジェクトはありません",
+    "filter_label": "表示",
+    "filter_all": "すべて",
+    "filter_pinned": "ピン留め",
+    "filter_unpinned": "未ピン留め",
+    "filter_unread": "未読",
+    "group_label": "グループ",
+    "group_pin": "ピン別",
+    "group_status": "状態別",
+    "group_none": "なし",
+    "collapsed_badge": "その他内",
+    "menu_empty": "一致するプロジェクトがありません"
   },
   "list_resize": {
     "label": "チャットリストの幅を調整",
