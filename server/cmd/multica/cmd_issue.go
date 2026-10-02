@@ -272,6 +272,13 @@ lines with their author and source, newest first.`,
 	RunE: runIssueProgress,
 }
 
+var issueTitleCmd = &cobra.Command{
+	Use:   "title <id> --suggest \"<title>\"",
+	Short: "Suggest a clearer issue title without applying it",
+	Args:  exactArgs(1),
+	RunE:  runIssueTitle,
+}
+
 func issueCloseLong() string {
 	return "One command for the close protocol. The server posts the evidence comment,\n" +
 		"writes the status and the close.* record in one transaction, and validates\n" +
@@ -623,6 +630,7 @@ func init() {
 	issueCmd.AddCommand(issueStatusCmd)
 	issueCmd.AddCommand(issueCloseCmd)
 	issueCmd.AddCommand(issueProgressCmd)
+	issueCmd.AddCommand(issueTitleCmd)
 	issueCmd.AddCommand(issueHandoffCmd)
 	issueCmd.AddCommand(issueReorderCmd)
 	issueCmd.AddCommand(issueCommentCmd)
@@ -652,6 +660,8 @@ func init() {
 	issueProgressCmd.Flags().String("output", "json", "Output format: table or json")
 	issueProgressCmd.Flags().String("tone", "", "Dot colour: working, waiting, stuck, or done (default: follows the issue status)")
 	issueProgressCmd.Flags().Bool("history", false, "List earlier progress lines instead of reporting one")
+	issueTitleCmd.Flags().String("suggest", "", "Suggested title to show in the issue rename bar")
+	issueTitleCmd.Flags().String("output", "json", "Output format: table or json")
 	issueListCmd.Flags().Bool("full-id", false, "Show full UUIDs in table output")
 	issueListCmd.Flags().String("status", "", "Filter by status")
 	issueListCmd.Flags().String("priority", "", "Filter by priority")
@@ -2160,6 +2170,33 @@ func runIssueProgress(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("resolve issue: %w", err)
 	}
 	return reportOrListProgress(ctx, cmd, client, "/api/issues/"+url.PathEscape(ref.ID)+"/progress", args[1:], "issue")
+}
+
+func runIssueTitle(cmd *cobra.Command, args []string) error {
+	suggestion, _ := cmd.Flags().GetString("suggest")
+	if strings.TrimSpace(suggestion) == "" {
+		return fmt.Errorf("issue title: --suggest is required")
+	}
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := cli.APIContext(context.Background())
+	defer cancel()
+	ref, err := resolveIssueRef(ctx, client, args[0])
+	if err != nil {
+		return fmt.Errorf("resolve issue: %w", err)
+	}
+	var ignored map[string]any
+	if err := client.PutJSON(ctx, "/api/issues/"+url.PathEscape(ref.ID)+"/metadata/title_suggestion", map[string]any{"value": suggestion}, &ignored); err != nil {
+		return fmt.Errorf("suggest issue title: %w", err)
+	}
+	result := map[string]any{"issue_id": ref.ID, "suggested_title": suggestion, "accepted": false}
+	if output, _ := cmd.Flags().GetString("output"); output == "table" {
+		fmt.Printf("Suggested title: %s\n", suggestion)
+		return nil
+	}
+	return cli.PrintJSON(os.Stdout, result)
 }
 
 // knowledgeAuditFromFlags builds the close body's knowledge_audit. The

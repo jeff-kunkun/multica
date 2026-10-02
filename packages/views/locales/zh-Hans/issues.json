@@ -545,7 +545,13 @@
     "alignment_origin": "查看这场对齐",
     "alignment_start": "就这张任务发起对齐",
     "alignment_started_by_another": "这件事已经有一场对齐在进行。",
-    "pull_requests_empty": "还没有关联的 PR。在 PR 标题中写入本任务编号即可关联。"
+    "pull_requests_empty": "还没有关联的 PR。在 PR 标题中写入本任务编号即可关联。",
+    "title_suggestion_label": "建议标题",
+    "title_suggestion_apply": "采用",
+    "title_suggestion_dismiss": "忽略",
+    "title_suggestion_updated": "标题已更新",
+    "title_suggestion_apply_failed": "采用建议标题失败",
+    "title_suggestion_dismiss_failed": "忽略建议标题失败"
   },
   "timeline": {
     "loading": "加载中…"

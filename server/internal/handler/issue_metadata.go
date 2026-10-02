@@ -176,6 +176,10 @@ func (h *Handler) SetIssueMetadataKey(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	if key == "title_suggestion" && issue.CreatorType != "member" {
+		writeError(w, http.StatusForbidden, "only human-created issues can receive title suggestions")
+		return
+	}
 	userID, ok := requireUserID(w, r)
 	if !ok {
 		return
