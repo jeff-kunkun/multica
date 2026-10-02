@@ -818,7 +818,7 @@ export function BoardAskAiButton({ prompt, label, projectIds = [] }: { prompt: s
       size="sm"
       className="text-muted-foreground"
       nativeButton={false}
-      render={<AppLink href={wsPaths.chatWithPrompt(prompt, projectIds)} data-testid="board-ask-ai" />}
+      render={<AppLink href={wsPaths.chatWithPrompt(prompt, ...projectIds)} data-testid="board-ask-ai" />}
     >
       <Sparkles className="size-4" />
       {label}

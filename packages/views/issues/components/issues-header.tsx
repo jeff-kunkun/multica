@@ -1381,7 +1381,7 @@ export function IssuesHeader({
     ? tChat(($) => $.conversation_starters.project_board.prompt)
     : boardProjectIds.length === 1
       ? tChat(($) => $.conversation_starters.project_board.prompt_project, { name: boardProjectNames[0], id: boardProjectIds[0] })
-      : tChat(($) => $.conversation_starters.project_board.prompt_projects, { names: boardProjectNames.join("、"), ids: boardProjectIds.join(",") });
+      : tChat(($) => $.conversation_starters.project_board.prompt_projects, { names: boardProjectNames.join("、"), ids: boardProjectIds.join(" ") });
   const viewListScope: IssueViewScope | null = saveViewScope
     ? saveViewScope.kind === "project"
       ? { scope_type: "project", scope_id: saveViewScope.projectId }
@@ -1558,7 +1558,7 @@ export function IssuesHeader({
             nativeButton={false}
             render={
               <AppLink
-                href={wsPaths.chatWithPrompt(boardPrompt, boardProjectIds)}
+                href={wsPaths.chatWithPrompt(boardPrompt, ...boardProjectIds)}
                 data-testid="issues-ask-ai"
               />
             }

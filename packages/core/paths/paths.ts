@@ -65,7 +65,7 @@ function workspaceScoped(slug: string) {
       `${ws}/chat?agent=${encode(agentId)}`,
     // A new chat with the current agent that sends `prompt` on arrival
     // (DENE-975: "walk me through my inbox" from the inbox page).
-    chatWithPrompt: (prompt: string, projectIds: readonly string[] = []) =>
+    chatWithPrompt: (prompt: string, ...projectIds: string[]) =>
       `${ws}/chat?prompt=${encode(prompt)}${projectIds.length > 0 ? `&project_ids=${encode(projectIds.join(","))}` : ""}`,
     // Stable internal address of one conversation. Older links used
     // `?session=`; those still open (see chatSessionIdFromLocation).

@@ -36,11 +36,18 @@ func runProjectBoard(cmd *cobra.Command, args []string) error {
 	params := url.Values{}
 	ids := make([]string, 0, len(args))
 	for _, arg := range args {
-		resolved, err := resolveProjectID(ctx, client, strings.TrimSpace(arg))
-		if err != nil {
-			return fmt.Errorf("resolve project %q: %w", arg, err)
+		// Accept "a,b" as well as "a b": prompts and agents write both.
+		for _, ref := range strings.Split(arg, ",") {
+			ref = strings.TrimSpace(ref)
+			if ref == "" {
+				continue
+			}
+			resolved, err := resolveProjectID(ctx, client, ref)
+			if err != nil {
+				return fmt.Errorf("resolve project %q: %w", ref, err)
+			}
+			ids = append(ids, resolved.ID)
 		}
-		ids = append(ids, resolved.ID)
 	}
 	if len(ids) > 0 {
 		params.Set("project_ids", strings.Join(ids, ","))
