@@ -221,6 +221,11 @@
       "label": "받은편지함 훑어 주기",
       "prompt": "받은편지함을 훑어 줘",
       "prompt_project": "받은편지함을 훑어 줘. 단 \"{{name}}\" 프로젝트만. `multica inbox board --project {{id}}`로 보드를 읽고 그 프로젝트의 티켓만 알려 줘."
+    },
+    "project_board": {
+      "prompt": "`multica project board --output json`로 워크스페이스의 미종료 티켓 전체를 읽고 막힌 일, 진행할 일, 정리할 일로 나눠 알려 주세요. 변경 전에는 확인을 받아 주세요.",
+      "prompt_project": "`multica project board {{id}} --output json`로 \"{{name}}\" 프로젝트의 미종료 티켓 전체를 읽고 변경 전에는 확인을 받아 주세요.",
+      "prompt_projects": "다음 프로젝트의 미종료 티켓 전체를 읽어 주세요: {{names}}. `multica project board {{ids}} --output json`을 사용하고 변경 전에는 확인을 받아 주세요."
     }
   },
   "onboarding_cards": {

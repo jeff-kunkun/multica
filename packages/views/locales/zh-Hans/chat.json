@@ -221,6 +221,11 @@
       "label": "帮我过一遍收件箱",
       "prompt": "帮我过一遍收件箱",
       "prompt_project": "帮我过一遍收件箱，只讲「{{name}}」这个项目。用 `multica inbox board --project {{id}}` 读看板，只讲这个项目的票。"
+    },
+    "project_board": {
+      "prompt": "帮我看一遍工作区所有未关闭的任务。先用 `multica project board --output json` 读全貌，再按「卡住了 / 可以往前推 / 可以清掉」三组汇报；要改状态或关票先问我确认。",
+      "prompt_project": "帮我看一遍「{{name}}」项目所有未关闭的任务。先用 `multica project board {{id}} --output json` 读全貌，再按「卡住了 / 可以往前推 / 可以清掉」三组汇报；要改状态或关票先问我确认。",
+      "prompt_projects": "帮我看一遍这些项目的所有未关闭任务：{{names}}。先用 `multica project board {{ids}} --output json` 读全貌，再按「卡住了 / 可以往前推 / 可以清掉」三组汇报；要改状态或关票先问我确认。"
     }
   },
   "onboarding_cards": {

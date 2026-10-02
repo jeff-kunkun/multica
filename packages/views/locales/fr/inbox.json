@@ -266,6 +266,26 @@
       "todo": "À faire",
       "fresh": "Nouveau",
       "done": "Terminé"
+    },
+    "actions": {
+      "backlog": "Faire plus tard",
+      "done": "Terminer",
+      "cancelled": "Ne pas le faire",
+      "return_to_do": "Remettre à faire",
+      "return_to_agent": "Remettre à faire (réveillera {{name}})",
+      "more": "Autres actions",
+      "select": "Sélectionner {{title}}",
+      "selected": "{{count}} sélectionnés",
+      "clear_selection": "Effacer la sélection",
+      "undo": "Annuler"
+    },
+    "toasts": {
+      "status_changed": "Statut mis à jour",
+      "cancelled": "Marqué comme à ne pas faire — les tâches en cours continuent"
+    },
+    "errors": {
+      "status_failed": "Impossible de mettre à jour le statut",
+      "undo_failed": "Impossible d’annuler le changement de statut"
     }
   }
 }

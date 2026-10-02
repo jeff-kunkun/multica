@@ -395,12 +395,14 @@ export function ChatPage() {
     c.archiveSession(session.id);
   };
 
-  const startNewChat = (agent: Agent | null) => {
+  const startNewChat = (agent: Agent | null, projectIdsOverride?: readonly string[]) => {
     // A manual ⊕ pick outranks a pending deep link; when called FROM the
     // intent effect the ref is already set to this param, so this is a no-op.
     supersedeAgentIntent();
     if (isCompact) conversationEntry.current = "inplace";
-    const projectIds = draftProjectIdsForNewChat(projectFilter);
+    const projectIds = projectIdsOverride
+      ? [...projectIdsOverride]
+      : draftProjectIdsForNewChat(projectFilter);
     if (agent) c.handleStartNewChat(agent, projectIds);
     else c.handleNewChat(projectIds);
     setComposingNew(true);
@@ -522,6 +524,10 @@ export function ChatPage() {
   // agent, no runtime, a refused send) the text is left in the composer
   // instead. The ref keeps StrictMode's double effect from sending twice.
   const urlPrompt = searchParams.get("prompt") || null;
+  const urlProjectIds = useMemo(
+    () => (searchParams.get("project_ids") ?? "").split(",").map((id) => id.trim()).filter(Boolean),
+    [searchParams],
+  );
   const consumedPrompt = useRef<string | null>(null);
   const [queuedPrompt, setQueuedPrompt] = useState<{ id: number; text: string } | null>(null);
   const sentPrompt = useRef<number | null>(null);
@@ -532,11 +538,11 @@ export function ChatPage() {
     }
     if (consumedPrompt.current === urlPrompt) return;
     consumedPrompt.current = urlPrompt;
-    startNewChat(null);
+    startNewChat(null, urlProjectIds);
     setQueuedPrompt({ id: Date.now(), text: urlPrompt });
     replace(wsPaths.chat());
     // eslint-disable-next-line react-hooks/exhaustive-deps -- react to the URL only
-  }, [urlPrompt]);
+  }, [urlPrompt, urlProjectIds]);
   useEffect(() => {
     if (!queuedPrompt || sentPrompt.current === queuedPrompt.id || c.activeSessionId) return;
     if (!c.agentsSettled && !c.activeAgent) return;

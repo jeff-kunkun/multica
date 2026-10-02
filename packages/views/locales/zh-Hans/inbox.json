@@ -260,6 +260,26 @@
       "todo": "待做",
       "fresh": "新动态",
       "done": "做完"
+    },
+    "actions": {
+      "backlog": "以后做",
+      "done": "完成",
+      "cancelled": "不做了",
+      "return_to_do": "交回去做",
+      "return_to_agent": "交回去做（会叫醒 {{name}}）",
+      "more": "更多操作",
+      "select": "选择 {{title}}",
+      "selected": "已选 {{count}} 项",
+      "clear_selection": "清除选择",
+      "undo": "撤销"
+    },
+    "toasts": {
+      "status_changed": "状态已更新",
+      "cancelled": "已标记为不做了，在跑的不会停"
+    },
+    "errors": {
+      "status_failed": "状态更新失败",
+      "undo_failed": "撤销状态失败"
     }
   }
 }

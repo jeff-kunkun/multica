@@ -142,7 +142,7 @@ function ListRowContent({
               density="row"
               className="hidden sm:inline-flex"
             />
-            <span className="flex min-w-0 flex-col"><span className="flex min-w-0 items-center gap-1.5"><GoalProgressBadge issue={issue} issueId={issue.id} /><span className="truncate">{issue.title}</span></span><IssueProgressLine issue={issue} /></span>
+            <span className="flex min-w-0 flex-col"><span className="flex min-w-0 items-center gap-1.5"><GoalProgressBadge issue={issue} /><span className="truncate">{issue.title}</span></span><IssueProgressLine issue={issue} /></span>
             {/* Keep custom names visible when this row appears outside a status section. */}
             <CustomStatusChip status={issue.status} className="shrink-0" />
             <BlockWaitProbeBadge issue={issue} />

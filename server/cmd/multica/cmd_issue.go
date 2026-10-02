@@ -244,6 +244,21 @@ var issueStatusCmd = &cobra.Command{
 	RunE: runIssueStatus,
 }
 
+var issueStatusBatchCmd = &cobra.Command{
+	Use:     "status-batch <status> <id> [<id>...]",
+	Aliases: []string{"batch-status"},
+	Short:   "Change the status of multiple issues",
+	Long: "Change several issues to one status through the same batch API used by the web and desktop clients.\n" +
+		"The first argument is a status KEY, followed by one or more issue keys or UUIDs.",
+	Args: func(cmd *cobra.Command, args []string) error {
+		if len(args) < 2 {
+			return fmt.Errorf("requires a status and at least one issue id")
+		}
+		return nil
+	},
+	RunE: runIssueStatusBatch,
+}
+
 var issueCloseCmd = &cobra.Command{
 	Use:   "close <id>",
 	Short: "Close out an issue in one call: evidence comment, status, close record",
@@ -628,6 +643,7 @@ func init() {
 	issueCmd.AddCommand(issueUpdateCmd)
 	issueCmd.AddCommand(issueAssignCmd)
 	issueCmd.AddCommand(issueStatusCmd)
+	issueCmd.AddCommand(issueStatusBatchCmd)
 	issueCmd.AddCommand(issueCloseCmd)
 	issueCmd.AddCommand(issueProgressCmd)
 	issueCmd.AddCommand(issueTitleCmd)
@@ -698,7 +714,7 @@ func init() {
 	issueCreateCmd.Flags().String("status", "", "Issue status")
 	issueCreateCmd.Flags().String("priority", "", "Issue priority")
 	issueCreateCmd.Flags().String("assignee", "", "Assignee name (member, agent, or squad; fuzzy match)")
-	issueCreateCmd.Flags().String("per-quote", "", "Only when you are an agent: the words the person talking to you said naming this assignee, copied exactly from the message that started this run. The server checks them; without a verified quote your pick is ignored and routing chooses")
+	issueCreateCmd.Flags().String("per-quote", "", "Only when you are an agent: the person's exact words naming this assignee. The server checks earlier messages in the direct chat or issue thread; an unverifiable quote stays unassigned and is not rerouted")
 	issueCreateCmd.Flags().String("assignee-id", "", "Assignee UUID — member, agent, or squad (mutually exclusive with --assignee)")
 	issueCreateCmd.Flags().String("parent", "", "Parent issue ID")
 	issueCreateCmd.Flags().Int("stage", 0, "Stage ordinal (>=1) grouping this sub-issue into an ordered barrier group under its parent; omit for unstaged. The parent assignee is woken only when every sub-issue in a stage finishes.")
@@ -721,7 +737,7 @@ func init() {
 	issueUpdateCmd.Flags().String("status", "", "New status")
 	issueUpdateCmd.Flags().String("priority", "", "New priority")
 	issueUpdateCmd.Flags().String("assignee", "", "New assignee name (member, agent, or squad; fuzzy match)")
-	issueUpdateCmd.Flags().String("per-quote", "", "Only when you are an agent: the words the person talking to you said naming this assignee, copied exactly from the message that started this run. The server checks them; without a verified quote your pick is ignored and routing chooses")
+	issueUpdateCmd.Flags().String("per-quote", "", "Only when you are an agent: the person's exact words naming this assignee. The server checks earlier messages in the direct chat or issue thread; an unverifiable quote stays unassigned and is not rerouted")
 	issueUpdateCmd.Flags().String("assignee-id", "", "New assignee UUID — member, agent, or squad (mutually exclusive with --assignee)")
 	issueUpdateCmd.Flags().String("reviewer", "", "验收席 — who accepts this issue: a member or agent name, \"none\" for no acceptance pass, or \"\" to clear the slot")
 	issueUpdateCmd.Flags().String("project", "", "Project ID")
@@ -746,6 +762,8 @@ func init() {
 	registerIssueCloseFlags(issueCloseCmd)
 	registerIssueHandoffFlags(issueHandoffCmd)
 	issueStatusCmd.Flags().String("no-code", "", "Why this issue has no PR the platform can see: docs or research, or code merged outside GitHub (give the MR link). An agent moving an issue to in_review without a linked open/merged PR is refused unless this is given")
+	issueStatusBatchCmd.Flags().Bool("no-start", false, "Change status without starting agent runs")
+	issueStatusBatchCmd.Flags().String("output", "table", "Output format: table or json")
 
 	// issue reorder
 	registerIssueReorderFlags(issueReorderCmd)
@@ -754,7 +772,7 @@ func init() {
 	issueAssignCmd.Flags().String("to", "", "Assignee name (member, agent, or squad; fuzzy match)")
 	issueAssignCmd.Flags().String("to-id", "", "Assignee UUID — member, agent, or squad (mutually exclusive with --to)")
 	issueAssignCmd.Flags().Bool("unassign", false, "Remove current assignee")
-	issueAssignCmd.Flags().String("per-quote", "", "Only when you are an agent: the words the person talking to you said naming this assignee, copied exactly from the message that started this run. The server checks them; without a verified quote your pick is ignored and routing chooses")
+	issueAssignCmd.Flags().String("per-quote", "", "Only when you are an agent: the person's exact words naming this assignee. The server checks earlier messages in the direct chat or issue thread; an unverifiable quote stays unassigned and is not rerouted")
 	issueAssignCmd.Flags().Bool("no-start", false, "Assign ownership without starting an agent run")
 	issueAssignCmd.Flags().String("output", "json", "Output format: table or json")
 
@@ -2014,6 +2032,66 @@ func runIssueStatus(cmd *cobra.Command, args []string) error {
 	output, _ := cmd.Flags().GetString("output")
 	if output == "json" {
 		return cli.PrintJSON(os.Stdout, result)
+	}
+	return nil
+}
+
+func runIssueStatusBatch(cmd *cobra.Command, args []string) error {
+	status := args[0]
+	if err := validateIssueStatus(status); err != nil {
+		return err
+	}
+	noStart, _ := cmd.Flags().GetBool("no-start")
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := cli.APIContext(context.Background())
+	defer cancel()
+
+	ids := make([]string, 0, len(args)-1)
+	seen := make(map[string]struct{}, len(args)-1)
+	for _, raw := range args[1:] {
+		ref, err := resolveIssueRef(ctx, client, raw)
+		if err != nil {
+			return fmt.Errorf("resolve issue %s: %w", raw, err)
+		}
+		if _, ok := seen[ref.ID]; ok {
+			continue
+		}
+		seen[ref.ID] = struct{}{}
+		ids = append(ids, ref.ID)
+	}
+
+	updates := map[string]any{"status": status}
+	if noStart {
+		updates["suppress_run"] = true
+	}
+	body := map[string]any{"issue_ids": ids, "updates": updates}
+	var result map[string]any
+	if err := client.PostJSON(ctx, "/api/issues/batch-update", body, &result); err != nil {
+		return fmt.Errorf("batch update status: %w", err)
+	}
+	updated := len(ids)
+	if value, ok := result["updated"].(float64); ok {
+		updated = int(value)
+	}
+	rejected := 0
+	if values, ok := result["rejected"].([]any); ok {
+		rejected = len(values)
+	}
+	fmt.Fprintf(os.Stderr, "%d issue(s) status changed to %s", updated, status)
+	if rejected > 0 {
+		fmt.Fprintf(os.Stderr, "; %d rejected by issue status guards", rejected)
+	}
+	fmt.Fprintln(os.Stderr, ".")
+	output, _ := cmd.Flags().GetString("output")
+	if output == "json" {
+		return cli.PrintJSON(os.Stdout, map[string]any{
+			"status":    status,
+			"issue_ids": ids,
+			"result":    result,
+		})
 	}
 	return nil
 }
@@ -3914,8 +3992,11 @@ func noteIgnoredAssignee(result map[string]any) bool {
 	if ignored, _ := result["assignee_ignored"].(bool); !ignored {
 		return false
 	}
-	fmt.Fprintf(os.Stderr, "Issue %s: the assignee you named was NOT applied. Routing will choose the executor. "+
-		"Only pass --per-quote when the person talking to you named the agent in the message that started this run.\n",
-		issueDisplayKey(result))
+	reason, _ := result["assignee_ignored_reason"].(string)
+	if reason == "" {
+		reason = "the person did not provide a verifiable quote"
+	}
+	fmt.Fprintf(os.Stderr, "Issue %s: the assignee you named was NOT applied; the issue remains unassigned. %s.\n",
+		issueDisplayKey(result), reason)
 	return true
 }

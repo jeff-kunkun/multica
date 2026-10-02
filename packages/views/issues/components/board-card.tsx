@@ -225,7 +225,7 @@ export const BoardCardContent = memo(function BoardCardContent({
       {/* Row 2: Title */}
       <p className="mt-1 text-body font-medium leading-snug line-clamp-2">
         <span className="inline-flex max-w-full items-center gap-1.5">
-          <GoalProgressBadge issue={issue} issueId={issue.id} />
+          <GoalProgressBadge issue={issue} />
           <span className="truncate">{issue.title}</span>
         </span>
       </p>

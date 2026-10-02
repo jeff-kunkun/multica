@@ -2259,6 +2259,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			r.Route("/api/projects", func(r chi.Router) {
 				r.Use(h.RequireModule(permission.ModuleProjects))
 				r.Get("/search", h.SearchProjects)
+				r.Get("/board", h.GetProjectBoard)
 				r.Get("/", h.ListProjects)
 				r.Post("/", h.CreateProject)
 				r.Route("/{id}", func(r chi.Router) {
@@ -2689,6 +2690,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				// reading it for their user (DENE-975).
 				r.Get("/board", h.GetInboxBoard)
 				r.Post("/issues/{issueId}/read", h.MarkIssueInboxRead)
+				// Agent-only cleanup for a stale waiting reminder. The handler
+				// derives the recipient from the direct-human run originator.
+				r.Post("/issues/{issueId}/dismiss", h.DismissInbox)
 				r.Post("/archive-all", h.ArchiveAllInbox)
 				r.Post("/archive-all-read", h.ArchiveAllReadInbox)
 				r.Post("/archive-completed", h.ArchiveCompletedInbox)
