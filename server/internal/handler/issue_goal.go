@@ -352,9 +352,20 @@ func (h *Handler) ConfirmIssueGoal(w http.ResponseWriter, r *http.Request) {
 	// Goal confirmation is the single transition that releases the execution
 	// gate. Creation and assignment paths deliberately skip draft goals, so a
 	// pre-assigned agent gets its first run only after the human locks the line.
-	if h.TaskService != nil && issue.AssigneeType.Valid && issue.AssigneeType.String == "agent" && issue.AssigneeID.Valid {
-		if _, enqueueErr := h.TaskService.EnqueueTaskForIssue(r.Context(), issue); enqueueErr != nil && !errors.Is(enqueueErr, service.ErrDuplicatePendingTask) {
-			slog.Warn("confirmed goal could not enqueue assigned agent", "issue_id", uuidToString(issue.ID), "error", enqueueErr)
+	if h.TaskService != nil && issue.AssigneeType.Valid && issue.AssigneeID.Valid {
+		switch issue.AssigneeType.String {
+		case "agent":
+			if _, enqueueErr := h.TaskService.EnqueueTaskForIssue(r.Context(), issue); enqueueErr != nil && !errors.Is(enqueueErr, service.ErrDuplicatePendingTask) {
+				slog.Warn("confirmed goal could not enqueue assigned agent", "issue_id", uuidToString(issue.ID), "error", enqueueErr)
+			}
+		case "squad":
+			// Squad assignment resolves to its leader. Reuse the ordinary
+			// assignment path so the same access, readiness, and pending-task
+			// guards apply after the human locks the completion line.
+			userID, _ := requireUserID(w, r)
+			if !h.enqueueSquadLeaderTask(r.Context(), issue, pgtype.UUID{}, "member", userID, "") {
+				slog.Warn("confirmed goal could not enqueue assigned squad leader", "issue_id", uuidToString(issue.ID), "squad_id", uuidToString(issue.AssigneeID))
+			}
 		}
 	}
 	writeJSON(w, http.StatusOK, makeGoalResponse(goal, checks))
