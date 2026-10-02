@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"log/slog"
 	"regexp"
@@ -107,6 +108,7 @@ func (h *Handler) recapChatSession(ctx context.Context, workspaceID string, sess
 	}
 
 	changed := false
+	namingSource := h.chatNamingSource(ctx, session)
 	if !session.TitleLocked {
 		replies, err := h.Queries.CountChatAssistantReplies(ctx, sessionID)
 		if err != nil {
@@ -115,10 +117,10 @@ func (h *Handler) recapChatSession(ctx context.Context, workspaceID string, sess
 		var title string
 		titleSource := ""
 		switch {
-		case replies == 1 && h.LLM != nil && h.LLM.Enabled():
+		case replies == 1 && namingSource == "server_llm" && h.LLM != nil && h.LLM.Enabled():
 			titleSource = "server_llm"
 			title, err = h.recapFirstTitle(ctx, workspaceID, session, opening, lastReply)
-		case replies > 1 && replies%chatTopicCheckEvery == 0 && h.LLM != nil && h.LLM.Enabled():
+		case replies > 1 && replies%chatTopicCheckEvery == 0 && namingSource == "server_llm" && h.LLM != nil && h.LLM.Enabled():
 			titleSource = "server_llm"
 			title, err = h.recapTopicTitle(ctx, session.Title, turns)
 		case replies == 1:
@@ -164,6 +166,26 @@ func (h *Handler) recapChatSession(ctx context.Context, workspaceID string, sess
 		h.publishChatSessionState(workspaceID, "system", "", session)
 	}
 	return changed, nil
+}
+
+func (h *Handler) chatNamingSource(ctx context.Context, session db.ChatSession) string {
+	source := "runtime"
+	if h.LLM != nil && h.LLM.Enabled() {
+		source = "server_llm"
+	}
+	workspace, err := h.Queries.GetWorkspace(ctx, session.WorkspaceID)
+	if err != nil {
+		return source
+	}
+	var settings map[string]any
+	if json.Unmarshal(workspace.Settings, &settings) == nil {
+		if naming, ok := settings["naming"].(map[string]any); ok {
+			if configured, ok := naming["source"].(string); ok && configured != "" {
+				return configured
+			}
+		}
+	}
+	return source
 }
 
 func ruleCleanChatTitle(opening string) string {

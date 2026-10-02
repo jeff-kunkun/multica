@@ -152,6 +152,9 @@ func (h *Handler) GetWorkspaceNaming(w http.ResponseWriter, r *http.Request) {
 	var settings map[string]any
 	_ = json.Unmarshal(ws.Settings, &settings)
 	source := "runtime"
+	if h.LLM != nil && h.LLM.Enabled() {
+		source = "server_llm"
+	}
 	if naming, ok := settings["naming"].(map[string]any); ok {
 		if value, ok := naming["source"].(string); ok && value != "" {
 			source = value
