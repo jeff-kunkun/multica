@@ -21,10 +21,6 @@ import {
   visibleBarProjectIds,
   type ChatProjectFilter,
 } from "@multica/core/chat/project-bar";
-import {
-  selectPinnedProjectIds,
-  useChatProjectBarStore,
-} from "@multica/core/chat/project-bar-store";
 import type { ChatSession, Project } from "@multica/core/types";
 import { useMeasuredRow } from "../../common/single-row-fit";
 import { matchesPinyin } from "../../editor/extensions/pinyin-match";
@@ -79,7 +75,9 @@ const PAINTED_SLOT_STYLE: CSSProperties = { ...CHIP_SLOT_STYLE, maxWidth: "100%"
 export function ChatProjectBar({
   projects,
   sessions,
-  userId,
+  pinnedIds,
+  onTogglePin,
+  onMovePin,
   filter,
   onFilterChange,
   onOpenSwitcher,
@@ -87,7 +85,10 @@ export function ChatProjectBar({
 }: {
   projects: Project[];
   sessions: ChatSession[];
-  userId: string | null;
+  /** Project pins from the server-backed sidebar pin list, in pin order. */
+  pinnedIds: readonly string[];
+  onTogglePin: (projectId: string) => void;
+  onMovePin: (fromProjectId: string, toProjectId: string) => void;
   filter: ChatProjectFilter;
   onFilterChange: (filter: ChatProjectFilter) => void;
   /** Opens the searchable jump list. Omitted on surfaces that don't switch. */
@@ -101,10 +102,6 @@ export function ChatProjectBar({
 }) {
   const { t } = useT("chat");
   const projectSwitchChord = useShortcut("switchChatProject");
-  const pinnedIds = useChatProjectBarStore(selectPinnedProjectIds(userId));
-  const pin = useChatProjectBarStore((s) => s.pin);
-  const unpin = useChatProjectBarStore((s) => s.unpin);
-  const move = useChatProjectBarStore((s) => s.move);
 
   const [menuOpen, setMenuOpen] = useState(false);
   const [query, setQuery] = useState("");
@@ -212,9 +209,7 @@ export function ChatProjectBar({
   };
 
   const togglePin = (projectId: string) => {
-    if (!userId) return;
-    if (pinnedIds.includes(projectId)) unpin(userId, projectId);
-    else pin(userId, projectId);
+    onTogglePin(projectId);
   };
 
   const queryText = query.trim().toLowerCase();
@@ -441,7 +436,7 @@ export function ChatProjectBar({
                     event.preventDefault();
                     setDragOverId(null);
                     const from = event.dataTransfer.getData("text/plain");
-                    if (userId && from) move(userId, from, row.id);
+                    if (from) onMovePin(from, row.id);
                   }}
                 />
               ))

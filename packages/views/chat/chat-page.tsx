@@ -40,9 +40,12 @@ import {
 } from "@multica/core/chat/queries";
 import { useQuickActionsPendingTimeout } from "@multica/core/chat/use-quick-actions-pending-timeout";
 import { useQuickActionsFailureToast } from "./components/use-quick-actions-failure-toast";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { chatSessionIdFromLocation } from "@multica/core/paths";
-import type { Agent, ChatSession } from "@multica/core/types";
+import { api } from "@multica/core/api";
+import { pinKeys, pinListOptions } from "@multica/core/pins";
+import { useChatProjectBarStore, selectPinnedProjectIds } from "@multica/core/chat/project-bar-store";
+import type { Agent, ChatSession, PinnedItem } from "@multica/core/types";
 import { PageHeader } from "../layout/page-header";
 import { useBackOrReplace, useNavigation } from "../navigation";
 import { useT } from "../i18n";
@@ -133,6 +136,115 @@ export function ChatPage() {
   const isCompact = useIsCompact();
 
   const c = useChatController({ isActive: true });
+  const pinUserId = c.user?.id ?? "";
+  const localProjectPins = useChatProjectBarStore(selectPinnedProjectIds(pinUserId || null));
+  const removeLocalProjectPins = useChatProjectBarStore((s) => s.remove);
+  const projectPinQuery = useQuery({
+    ...pinListOptions(c.wsId, pinUserId),
+    enabled: !!c.wsId && !!pinUserId,
+  });
+  const pinnedItems = useMemo(() => projectPinQuery.data ?? [], [projectPinQuery.data]);
+  const projectPinKey = pinKeys.list(c.wsId, pinUserId);
+  const createProjectPin = useMutation({
+    mutationFn: (projectId: string) =>
+      api.createPin({ item_type: "project", item_id: projectId }),
+    onSuccess: (newPin) => {
+      queryClient.setQueryData<PinnedItem[]>(projectPinKey, (old) =>
+        old?.some((pin) => pin.id === newPin.id) ? old : [...(old ?? []), newPin],
+      );
+    },
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: projectPinKey });
+    },
+  });
+  const deleteProjectPin = useMutation({
+    mutationFn: (projectId: string) => api.deletePin("project", projectId),
+    onMutate: async (projectId) => {
+      await queryClient.cancelQueries({ queryKey: projectPinKey });
+      const previous = queryClient.getQueryData<PinnedItem[]>(projectPinKey);
+      queryClient.setQueryData<PinnedItem[]>(projectPinKey, (old) =>
+        old?.filter((pin) => !(pin.item_type === "project" && pin.item_id === projectId)),
+      );
+      return { previous };
+    },
+    onError: (_error, _projectId, context) => {
+      if (context?.previous) queryClient.setQueryData(projectPinKey, context.previous);
+    },
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: projectPinKey });
+    },
+  });
+  const reorderProjectPins = useMutation({
+    mutationFn: (items: PinnedItem[]) =>
+      api.reorderPins({ items: items.map((pin, index) => ({ id: pin.id, position: index + 1 })) }),
+    onMutate: async (items) => {
+      await queryClient.cancelQueries({ queryKey: projectPinKey });
+      const previous = queryClient.getQueryData<PinnedItem[]>(projectPinKey);
+      queryClient.setQueryData(projectPinKey, items);
+      return { previous };
+    },
+    onError: (_error, _items, context) => {
+      if (context?.previous) queryClient.setQueryData(projectPinKey, context.previous);
+    },
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: projectPinKey });
+    },
+  });
+  const migrationKeyRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!pinUserId || !c.wsId || !c.projectsLoaded || !projectPinQuery.isSuccess) return;
+    const key = `${c.wsId}:${pinUserId}`;
+    if (migrationKeyRef.current === key) return;
+    const workspaceProjectIds = new Set(c.projects.map((project) => project.id));
+    const candidates = localProjectPins.filter((id) => workspaceProjectIds.has(id));
+    if (candidates.length === 0) return;
+    migrationKeyRef.current = key;
+    const serverProjectIds = new Set(
+      pinnedItems.filter((pin) => pin.item_type === "project").map((pin) => pin.item_id),
+    );
+    void (async () => {
+      try {
+        for (const projectId of candidates) {
+          if (serverProjectIds.has(projectId)) continue;
+          await createProjectPin.mutateAsync(projectId);
+        }
+        removeLocalProjectPins(pinUserId, candidates);
+      } catch {
+        migrationKeyRef.current = null;
+      }
+    })();
+  }, [
+    c.projects,
+    c.projectsLoaded,
+    c.wsId,
+    createProjectPin,
+    localProjectPins,
+    pinnedItems,
+    pinUserId,
+    projectPinQuery.isSuccess,
+    removeLocalProjectPins,
+  ]);
+  const projectPinnedItems = useMemo(
+    () => pinnedItems.filter((pin) => pin.item_type === "project"),
+    [pinnedItems],
+  );
+  const toggleProjectPin = (projectId: string) => {
+    if (projectPinnedItems.some((pin) => pin.item_id === projectId)) {
+      deleteProjectPin.mutate(projectId);
+    } else {
+      createProjectPin.mutate(projectId);
+    }
+  };
+  const moveProjectPin = (fromProjectId: string, toProjectId: string) => {
+    const from = pinnedItems.findIndex((pin) => pin.item_type === "project" && pin.item_id === fromProjectId);
+    const to = pinnedItems.findIndex((pin) => pin.item_type === "project" && pin.item_id === toProjectId);
+    if (from < 0 || to < 0 || from === to) return;
+    const reordered = pinnedItems.slice();
+    const [item] = reordered.splice(from, 1);
+    if (!item) return;
+    reordered.splice(to, 0, item);
+    reorderProjectPins.mutate(reordered);
+  };
   const restoreListScroll = useRestoredScrollRef("chat-list");
   const { data: quickActionsPending = null } = useQuery(
     chatQuickActionsPendingOptions(c.activeSessionId ?? ""),
@@ -561,7 +673,9 @@ export function ChatPage() {
     <ChatProjectBar
       projects={c.projects ?? []}
       sessions={c.sessions}
-      userId={c.user?.id ?? null}
+      pinnedIds={projectPinnedItems.map((pin) => pin.item_id)}
+      onTogglePin={toggleProjectPin}
+      onMovePin={moveProjectPin}
       filter={projectFilter}
       onFilterChange={changeProjectFilter}
       onOpenSwitcher={() => setSwitcherOpen(true)}
