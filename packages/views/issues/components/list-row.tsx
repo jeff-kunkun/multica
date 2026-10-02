@@ -23,12 +23,19 @@ import { ProgressRing } from "./progress-ring";
 import { IssueActionsContextMenu } from "../actions";
 import { LabelChip } from "../../labels/label-chip";
 import { CustomStatusChip } from "./custom-status-chip";
+import { IssueDuplicateOfMarker } from "./issue-duplicates";
 import { IssueAgentActivityIndicator } from "./issue-agent-activity-indicator";
 import { useIssueSurfaceSelection } from "../surface/selection-context";
 import { useIssuePinnedIds } from "../surface/pinned-context";
 import { ParentIssueBadge } from "./parent-issue-badge";
 import { PinnedRowBadge } from "./pinned-row-badge";
 import { BlockWaitProbeBadge } from "./block-wait-probe-badge";
+import {
+  PEEKED_ROW_CLASS,
+  PEEK_TARGET_ATTR,
+  useIsIssuePeeked,
+  useIssuePeekLinkProps,
+} from "../surface/peek-context";
 import { useLocale } from "../../i18n";
 import { useT } from "../../i18n";
 import { IssueProgressLine } from "./issue-progress-line";
@@ -71,6 +78,8 @@ function ListRowContent({
   const pinnedIssueIds = useIssuePinnedIds();
   const isPinned = pinnedIssueIds.has(issue.id);
   const selection = useIssueSurfaceSelection();
+  const peeked = useIsIssuePeeked(issue.id);
+  const peekLinkProps = useIssuePeekLinkProps(issue.id);
   const selected = selection.selectedIds.has(issue.id);
   const toggle = selection.toggle;
   const p = useWorkspacePaths();
@@ -95,13 +104,15 @@ function ListRowContent({
       <div
         ref={containerRef}
         data-slot="issue-list-row"
+        {...{ [PEEK_TARGET_ATTR]: issue.id }}
+        data-peeked={peeked ? "" : undefined}
         style={containerStyle}
         {...containerProps}
         className={`group/row flex h-[var(--issue-row-height)] items-center gap-2 px-4 text-body transition-colors ${
           selected
             ? "bg-surface-selected hover:not-data-[popup-open]:bg-surface-selected data-[popup-open]:bg-surface-selected"
             : "hover:not-data-[popup-open]:bg-surface-hover data-[popup-open]:bg-surface-hover"
-        } ${isDragging ? "opacity-30" : ""}`}
+        } ${PEEKED_ROW_CLASS} ${isDragging ? "opacity-30" : ""}`}
       >
         <div
           className="relative flex shrink-0 items-center justify-center w-4 h-4"
@@ -126,6 +137,7 @@ function ListRowContent({
           href={p.issueDetail(issue.id)}
           newTabTitle={issue.identifier}
           className={`flex flex-1 items-center gap-2 min-w-0 ${isDragging ? "pointer-events-none" : ""}`}
+          {...peekLinkProps}
         >
           <span className="min-w-16 shrink-0 text-caption text-muted-foreground">
             {issue.identifier}
@@ -146,6 +158,7 @@ function ListRowContent({
             {/* Keep custom names visible when this row appears outside a status section. */}
             <CustomStatusChip status={issue.status} className="shrink-0" />
             <BlockWaitProbeBadge issue={issue} />
+            <IssueDuplicateOfMarker issue={issue} insideLink />
             {showChildProgress && (
               <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-muted/60 px-1.5 py-0.5">
                 <ProgressRing done={childProgress!.done} total={childProgress!.total} size={14} />

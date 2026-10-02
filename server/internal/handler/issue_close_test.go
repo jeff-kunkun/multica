@@ -265,8 +265,8 @@ func TestCloseDoneRefreshesMergedGitLabMR(t *testing.T) {
 	if err != nil {
 		t.Fatalf("UpsertVCSPullRequest: %v", err)
 	}
-	if err := testHandler.Queries.LinkIssueToVCSPullRequest(ctx, db.LinkIssueToVCSPullRequestParams{
-		IssueID: parseUUID(issue.ID), PullRequestID: pr.ID, CloseIntent: true,
+	if _, err := testHandler.Queries.LinkIssueToVCSPullRequest(ctx, db.LinkIssueToVCSPullRequestParams{
+		IssueID: parseUUID(issue.ID), PullRequestID: pr.ID,
 	}); err != nil {
 		t.Fatalf("LinkIssueToVCSPullRequest: %v", err)
 	}
@@ -1068,8 +1068,8 @@ func TestCloseDoneAcceptsMergedGitLabMRFromLocalCLIReport(t *testing.T) {
 	if err != nil {
 		t.Fatalf("seed stale MR: %v", err)
 	}
-	if err := testHandler.Queries.LinkIssueToVCSPullRequest(ctx, db.LinkIssueToVCSPullRequestParams{
-		IssueID: parseUUID(issue.ID), PullRequestID: pr.ID, CloseIntent: true,
+	if _, err := testHandler.Queries.LinkIssueToVCSPullRequest(ctx, db.LinkIssueToVCSPullRequestParams{
+		IssueID: parseUUID(issue.ID), PullRequestID: pr.ID,
 	}); err != nil {
 		t.Fatalf("link stale MR: %v", err)
 	}

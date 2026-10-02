@@ -513,23 +513,23 @@ func (h *Handler) persistDeliveryPull(ctx context.Context, issue db.Issue, conn 
 }
 
 func (h *Handler) linkGitHubDelivery(ctx context.Context, issue db.Issue, prID pgtype.UUID, title, branch string) {
-	_ = h.Queries.LinkIssueToPullRequest(ctx, db.LinkIssueToPullRequestParams{
-		IssueID: issue.ID, PullRequestID: prID, CloseIntent: true,
+	_, _ = h.Queries.LinkIssueToPullRequest(ctx, db.LinkIssueToPullRequestParams{
+		IssueID: issue.ID, PullRequestID: prID,
 	})
 	h.linkNamedIssues(ctx, issue, title, branch, func(id pgtype.UUID) {
-		_ = h.Queries.LinkIssueToPullRequest(ctx, db.LinkIssueToPullRequestParams{
-			IssueID: id, PullRequestID: prID, CloseIntent: true,
+		_, _ = h.Queries.LinkIssueToPullRequest(ctx, db.LinkIssueToPullRequestParams{
+			IssueID: id, PullRequestID: prID,
 		})
 	})
 }
 
 func (h *Handler) linkVCSDelivery(ctx context.Context, issue db.Issue, prID pgtype.UUID, title, branch string) {
-	_ = h.Queries.LinkIssueToVCSPullRequest(ctx, db.LinkIssueToVCSPullRequestParams{
-		IssueID: issue.ID, PullRequestID: prID, CloseIntent: true,
+	_, _ = h.Queries.LinkIssueToVCSPullRequest(ctx, db.LinkIssueToVCSPullRequestParams{
+		IssueID: issue.ID, PullRequestID: prID,
 	})
 	h.linkNamedIssues(ctx, issue, title, branch, func(id pgtype.UUID) {
-		_ = h.Queries.LinkIssueToVCSPullRequest(ctx, db.LinkIssueToVCSPullRequestParams{
-			IssueID: id, PullRequestID: prID, CloseIntent: true,
+		_, _ = h.Queries.LinkIssueToVCSPullRequest(ctx, db.LinkIssueToVCSPullRequestParams{
+			IssueID: id, PullRequestID: prID,
 		})
 	})
 }

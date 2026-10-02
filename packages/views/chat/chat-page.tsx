@@ -6,7 +6,8 @@ import { toast } from "sonner";
 import { cn } from "@multica/ui/lib/utils";
 import { Button } from "@multica/ui/components/ui/button";
 import { useIsCompact } from "@multica/ui/hooks/use-mobile";
-import { useWorkspacePaths } from "@multica/core/paths";
+import { useRequiredWorkspaceSlug, useWorkspacePaths } from "@multica/core/paths";
+import { getCurrentSlug } from "@multica/core/platform";
 import { useChatStore } from "@multica/core/chat";
 import { chatSessionProjectIds } from "@multica/core/chat/project-context";
 import {
@@ -134,10 +135,21 @@ export function ChatPage() {
   const { pathname, searchParams, replace, push, back } = useNavigation();
   const backOrReplace = useBackOrReplace();
   const queryClient = useQueryClient();
+  const workspaceSlug = useRequiredWorkspaceSlug();
   const wsPaths = useWorkspacePaths();
+  // App Router can retain this page after navigation. Once the URL belongs
+  // to another route, this instance must stop reconciling shared chat state.
+  // Also check the live workspace mirror in each effect: the incoming layout
+  // can rehydrate the store before this page observes the destination URL.
+  // This fork addresses a thread by path (`/chat/<id>`), so the chat route is
+  // the list path and everything under it.
+  const isCurrentChatRoute =
+    pathname === wsPaths.chat() || pathname.startsWith(`${wsPaths.chat()}/`);
   const isCompact = useIsCompact();
 
-  const c = useChatController({ isActive: true });
+  const c = useChatController({
+    isActive: isCurrentChatRoute && getCurrentSlug() === workspaceSlug,
+  });
   const pinUserId = c.user?.id ?? "";
   const localProjectPins = useChatProjectBarStore(selectPinnedProjectIds(pinUserId || null));
   const removeLocalProjectPins = useChatProjectBarStore((s) => s.remove);
@@ -299,15 +311,17 @@ export function ChatPage() {
 
   // URL → store: deep link, refresh, notification click, back/forward.
   useEffect(() => {
+    if (!isCurrentChatRoute || getCurrentSlug() !== workspaceSlug) return;
     if (!urlSession && !composingNew) conversationEntry.current = null;
     if (urlSession !== useChatStore.getState().activeSessionId) {
       c.setActiveSession(urlSession);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- react to URL only
-  }, [urlSession]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- reconcile URL/route changes, not store updates
+  }, [isCurrentChatRoute, workspaceSlug, urlSession]);
 
   // store → URL: thread selection, "new chat", and sessions created by sending.
   useEffect(() => {
+    if (!isCurrentChatRoute || getCurrentSlug() !== workspaceSlug) return;
     const live = useChatStore.getState().activeSessionId;
     const current = chatSessionIdFromLocation(pathname, searchParams);
     const pushSync = pushNextSessionSync.current;
@@ -324,8 +338,8 @@ export function ChatPage() {
       const canonical = wsPaths.chatSession(live);
       if (pathname !== canonical) replace(canonical);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- react to store only
-  }, [c.activeSessionId]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- reconcile store/route changes, not URL updates
+  }, [isCurrentChatRoute, workspaceSlug, c.activeSessionId]);
 
   // How wide the project bar needs to be for every chip to fit on its two
   // rows; the divider snaps to it and double-click expands to it.
@@ -499,6 +513,7 @@ export function ChatPage() {
   // that surfaces the agent cannot start a chat without a fresh click. While
   // the queries are still loading the intent simply stays pending.
   useEffect(() => {
+    if (!isCurrentChatRoute || getCurrentSlug() !== workspaceSlug) return;
     if (!urlAgent) {
       consumedAgentIntent.current = null;
       return;
@@ -517,7 +532,7 @@ export function ChatPage() {
       replace(wsPaths.chat());
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- consume when the URL param or the resolving agent list changes
-  }, [urlAgent, c.availableAgents, c.agentsSettled]);
+  }, [isCurrentChatRoute, workspaceSlug, urlAgent, c.availableAgents, c.agentsSettled]);
 
   // URL → new chat that sends: `?prompt=<text>` (DENE-975, the inbox page's
   // "walk me through it") opens a fresh chat with the agent already in play
@@ -533,6 +548,7 @@ export function ChatPage() {
   const [queuedPrompt, setQueuedPrompt] = useState<{ id: number; text: string } | null>(null);
   const sentPrompt = useRef<number | null>(null);
   useEffect(() => {
+    if (!isCurrentChatRoute || getCurrentSlug() !== workspaceSlug) return;
     if (!urlPrompt) {
       consumedPrompt.current = null;
       return;
@@ -543,7 +559,7 @@ export function ChatPage() {
     setQueuedPrompt({ id: Date.now(), text: urlPrompt });
     replace(wsPaths.chat());
     // eslint-disable-next-line react-hooks/exhaustive-deps -- react to the URL only
-  }, [urlPrompt, urlProjectIds]);
+  }, [isCurrentChatRoute, workspaceSlug, urlPrompt, urlProjectIds]);
   useEffect(() => {
     if (!queuedPrompt || sentPrompt.current === queuedPrompt.id || c.activeSessionId) return;
     if (!c.agentsSettled && !c.activeAgent) return;

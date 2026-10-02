@@ -102,6 +102,7 @@
     "quick_create_failed": "Create with agent failed",
     "quick_create_unconfirmed": "Create with agent unconfirmed",
     "autopilot_paused": "Autopilot paused",
+    "children_done": "Sub-issues finished",
     "autopilot_quota_exceeded": "Autopilot run limit reached",
     "agent_access_request": "Agent access request",
     "agent_access_approved": "Agent access approved",
@@ -122,6 +123,7 @@
     "created_with_agent": "Created with agent: {{identifier}}",
     "failed_with_detail": "Failed: {{detail}}",
     "autopilot_quota_blocked": "Run blocked because the limit was reached",
+    "children_done_stage": "Stage {{stage}}'s sub-issues finished",
     "access_requested_by": "{{requester}} asked to use {{agent}}",
     "access_approved_for": "Your request to use {{agent}} was approved",
     "access_declined_for": "Your request to use {{agent}} was declined"

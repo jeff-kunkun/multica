@@ -155,6 +155,7 @@ func (h *Handler) ListIssueMetadata(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) SetIssueMetadataKey(w http.ResponseWriter, r *http.Request) {
+	r = h.withWakeupActor(r)
 	issueID := chi.URLParam(r, "id")
 	key := chi.URLParam(r, "key")
 	if err := validateIssueMetadataKey(key); err != nil {
@@ -195,11 +196,13 @@ func (h *Handler) SetIssueMetadataKey(w http.ResponseWriter, r *http.Request) {
 	}
 
 	queryStarted := time.Now()
-	updated, err := h.Queries.SetIssueMetadataKey(r.Context(), db.SetIssueMetadataKeyParams{
-		ID:          issue.ID,
-		WorkspaceID: issue.WorkspaceID,
-		Key:         key,
-		Value:       []byte(req.Value),
+	updated, err := wakeupWrite(h, r, func(q *db.Queries) (db.SetIssueMetadataKeyRow, error) {
+		return q.SetIssueMetadataKey(r.Context(), db.SetIssueMetadataKeyParams{
+			ID:          issue.ID,
+			WorkspaceID: issue.WorkspaceID,
+			Key:         key,
+			Value:       []byte(req.Value),
+		})
 	})
 	queryDuration := time.Since(queryStarted)
 	if err != nil {
@@ -251,6 +254,7 @@ func (h *Handler) SetIssueMetadataKey(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) DeleteIssueMetadataKey(w http.ResponseWriter, r *http.Request) {
+	r = h.withWakeupActor(r)
 	issueID := chi.URLParam(r, "id")
 	key := chi.URLParam(r, "key")
 	if err := validateIssueMetadataKey(key); err != nil {
@@ -268,10 +272,12 @@ func (h *Handler) DeleteIssueMetadataKey(w http.ResponseWriter, r *http.Request)
 	}
 
 	queryStarted := time.Now()
-	updated, err := h.Queries.DeleteIssueMetadataKey(r.Context(), db.DeleteIssueMetadataKeyParams{
-		ID:          issue.ID,
-		WorkspaceID: issue.WorkspaceID,
-		Key:         key,
+	updated, err := wakeupWrite(h, r, func(q *db.Queries) (db.DeleteIssueMetadataKeyRow, error) {
+		return q.DeleteIssueMetadataKey(r.Context(), db.DeleteIssueMetadataKeyParams{
+			ID:          issue.ID,
+			WorkspaceID: issue.WorkspaceID,
+			Key:         key,
+		})
 	})
 	queryDuration := time.Since(queryStarted)
 	if err != nil {
