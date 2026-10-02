@@ -886,7 +886,12 @@ func (h *Handler) createAgentCommentSubIssue(w http.ResponseWriter, r *http.Requ
 			projectID = parent.ProjectID
 		}
 	}
-	task, err := h.TaskService.EnqueueQuickCreateTaskWithSourceContextChoosingProject(r.Context(), workspaceID, userID, prepared.agentID, prepared.squadID, prepared.prompt, prepared.priority, prepared.dueDate, projectID, capture.SourceIssueID, prepared.attachmentIDs, prepared.projectExplicitNone, capture)
+	task, err := h.TaskService.EnqueueQuickCreate(r.Context(), service.QuickCreateRequest{
+		WorkspaceID: workspaceID, RequesterID: userID, AgentID: prepared.agentID, SquadID: prepared.squadID,
+		Prompt: prepared.prompt, Priority: prepared.priority, DueDate: prepared.dueDate,
+		ProjectID: projectID, ParentIssueID: capture.SourceIssueID, AttachmentIDs: prepared.attachmentIDs,
+		ProjectExplicitNone: prepared.projectExplicitNone, SourceContext: &capture,
+	})
 	if err != nil {
 		return err
 	}

@@ -2958,7 +2958,12 @@ func (h *Handler) QuickCreateIssue(w http.ResponseWriter, r *http.Request) {
 		projectUUID = parentProject
 	}
 
-	task, err := h.TaskService.EnqueueQuickCreateTaskChoosingProjectWithGoal(r.Context(), wsUUID, requesterUUID, agentUUID, squadUUID, prompt, priority, dueDate, projectUUID, parentIssueUUID, attachmentIDs, projectExplicitNone, req.GoalMode)
+	task, err := h.TaskService.EnqueueQuickCreate(r.Context(), service.QuickCreateRequest{
+		WorkspaceID: wsUUID, RequesterID: requesterUUID, AgentID: agentUUID, SquadID: squadUUID,
+		Prompt: prompt, Priority: priority, DueDate: dueDate,
+		ProjectID: projectUUID, ParentIssueID: parentIssueUUID, AttachmentIDs: attachmentIDs,
+		ProjectExplicitNone: projectExplicitNone, GoalMode: req.GoalMode,
+	})
 	if err != nil {
 		if writeIssueLimitReached(w, err) {
 			return
