@@ -1608,6 +1608,10 @@ export class ApiClient {
     });
   }
 
+  async deleteIssueMetadata(id: string, key: string): Promise<{ metadata: Record<string, unknown>; issue_revision: number }> {
+    return this.fetch(`/api/issues/${id}/metadata/${encodeURIComponent(key)}`, { method: "DELETE" });
+  }
+
   async setIssueVisibility(id: string, visibility: "private" | "project" | "workspace") {
     return this.fetch<{ id: string; visibility: "private" | "project" | "workspace"; audience_size?: number }>(
       `/api/issues/${id}/visibility`,

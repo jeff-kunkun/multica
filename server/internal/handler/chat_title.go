@@ -72,15 +72,18 @@ func (h *Handler) WriteChatTitle(w http.ResponseWriter, r *http.Request) {
 	}
 	var req ChatTitleRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		h.recordChatNamingEvent(r.Context(), session, "runtime", "failure")
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
 	title, err := normalizeRuntimeChatTitle(req.Title)
 	if err != nil {
+		h.recordChatNamingEvent(r.Context(), session, "runtime", "failure")
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	if session.TitleLocked {
+		h.recordChatNamingEvent(r.Context(), session, "runtime", "failure")
 		writeJSON(w, http.StatusConflict, map[string]any{
 			"error":  "chat title is locked",
 			"reason": "a member manually renamed this chat; runtime titles cannot replace it",
@@ -91,6 +94,7 @@ func (h *Handler) WriteChatTitle(w http.ResponseWriter, r *http.Request) {
 		ID: session.ID, ExpectedTitle: session.Title, NewTitle: title,
 	})
 	if errors.Is(err, pgx.ErrNoRows) {
+		h.recordChatNamingEvent(r.Context(), session, "runtime", "failure")
 		writeJSON(w, http.StatusConflict, map[string]any{
 			"error":  "chat title changed",
 			"reason": "the title was changed by another writer or locked by a member",
@@ -98,6 +102,7 @@ func (h *Handler) WriteChatTitle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
+		h.recordChatNamingEvent(r.Context(), session, "runtime", "failure")
 		writeError(w, http.StatusInternalServerError, "failed to update chat title")
 		return
 	}

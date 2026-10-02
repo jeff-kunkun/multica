@@ -9,6 +9,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -123,7 +125,10 @@ func (h *Handler) recapChatSession(ctx context.Context, workspaceID string, sess
 		case replies > 1 && replies%chatTopicCheckEvery == 0 && namingSource == "server_llm" && h.LLM != nil && h.LLM.Enabled():
 			titleSource = "server_llm"
 			title, err = h.recapTopicTitle(ctx, session.Title, turns)
-		case replies == 1:
+		case replies == 1 && namingSource == "runtime" && h.runtimeChatTitleReported(ctx, session):
+			// The runtime has already supplied the authoritative title for this
+			// opening turn. The lexical fallback must never overwrite it.
+		case replies == 1 && (strings.TrimSpace(session.Title) == strings.TrimSpace(opening) || strings.TrimSpace(session.Title) == ""):
 			titleSource = "rules"
 			// Self-hosted instances without MULTICA_LLM_* still get a useful
 			// title. This is deliberately lexical cleanup, never another model
@@ -146,7 +151,11 @@ func (h *Handler) recapChatSession(ctx context.Context, workspaceID string, sess
 				return false, err
 			}
 		} else if titleSource != "" {
-			h.recordChatNamingEvent(ctx, session, titleSource, "success")
+			status := "success"
+			if title == "" {
+				status = "failure"
+			}
+			h.recordChatNamingEvent(ctx, session, titleSource, status)
 		}
 	}
 
@@ -166,6 +175,18 @@ func (h *Handler) recapChatSession(ctx context.Context, workspaceID string, sess
 		h.publishChatSessionState(workspaceID, "system", "", session)
 	}
 	return changed, nil
+}
+
+func (h *Handler) runtimeChatTitleReported(ctx context.Context, session db.ChatSession) bool {
+	if h.DB == nil {
+		return false
+	}
+	var reported bool
+	if err := h.DB.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM chat_naming_event WHERE chat_session_id = $1 AND source = 'runtime' AND status = 'success')`, session.ID).Scan(&reported); err != nil {
+		slog.Warn("check runtime chat title failed", "session_id", uuidToString(session.ID), "error", err)
+		return false
+	}
+	return reported
 }
 
 func (h *Handler) chatNamingSource(ctx context.Context, session db.ChatSession) string {
@@ -190,9 +211,17 @@ func (h *Handler) chatNamingSource(ctx context.Context, session db.ChatSession) 
 
 func ruleCleanChatTitle(opening string) string {
 	s := strings.TrimSpace(opening)
-	for _, prefix := range []string{"嗯", "呃", "额", "um", "uh", "so", "please", "请"} {
-		for strings.HasPrefix(strings.ToLower(s), prefix) {
-			s = strings.TrimSpace(s[len(prefix):])
+	for {
+		before := s
+		for _, prefix := range []string{"嗯", "呃", "额", "请"} {
+			if strings.HasPrefix(s, prefix) {
+				s = strings.TrimSpace(s[len(prefix):])
+				break
+			}
+		}
+		s = stripEnglishChatLead(s)
+		if s == before {
+			break
 		}
 	}
 	if linkedIssueKey.MatchString(s) {
@@ -204,6 +233,24 @@ func ruleCleanChatTitle(opening string) string {
 		return "链接 · 任务讨论"
 	}
 	return sanitizeChatTitle(s)
+}
+
+func stripEnglishChatLead(s string) string {
+	for _, prefix := range []string{"um", "uh", "so", "please"} {
+		if len(s) < len(prefix) || !strings.EqualFold(s[:len(prefix)], prefix) {
+			continue
+		}
+		rest := s[len(prefix):]
+		if rest == "" {
+			return ""
+		}
+		r, _ := utf8.DecodeRuneInString(rest)
+		if unicode.IsLetter(r) || unicode.IsDigit(r) {
+			continue
+		}
+		return strings.TrimSpace(rest)
+	}
+	return s
 }
 
 func (h *Handler) recapFirstTitle(ctx context.Context, workspaceID string, session db.ChatSession, opening, reply string) (string, error) {

@@ -240,3 +240,20 @@ func TestReplyProgressLine(t *testing.T) {
 		}
 	}
 }
+
+func TestRuleCleanChatTitleRespectsWordBoundaries(t *testing.T) {
+	tests := map[string]string{
+		"something broke":         "something broke",
+		"umbrella planning":       "umbrella planning",
+		"So, fix the login flow":  "fix the login flow",
+		"um please review the PR": "review the PR",
+		"嗯 请整理部署日志":               "整理部署日志",
+	}
+	for input, want := range tests {
+		t.Run(input, func(t *testing.T) {
+			if got := ruleCleanChatTitle(input); got != want {
+				t.Fatalf("ruleCleanChatTitle(%q) = %q, want %q", input, got, want)
+			}
+		})
+	}
+}

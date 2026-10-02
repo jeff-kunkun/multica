@@ -37,6 +37,7 @@ import {
   Tag,
   Unlink,
   Users,
+  X,
 } from "lucide-react";
 import { BreadcrumbHeader, type BreadcrumbSegment } from "../../layout/breadcrumb-header";
 import { ResourceNotFound, WriteAction, useGuestReadOnly } from "../../layout/guest-readonly";
@@ -75,7 +76,7 @@ import { commentLandingTarget } from "@multica/core/issues/comment-deletion";
 import { formatDateOnly, isPastDateOnly } from "@multica/core/issues/date";
 import { useUpdateIssue } from "@multica/core/issues/mutations";
 import { toast } from "sonner";
-import { errorCode } from "@multica/core/api";
+import { api, errorCode } from "@multica/core/api";
 import { StatusIcon } from "./status-icon";
 import { PriorityIcon } from "./priority-icon";
 import { StatusPicker } from "./pickers/status-picker";
@@ -117,14 +118,14 @@ import { QuickActionsSection } from "./quick-actions-section";
 import { PluginPanelSection } from "../../plugins";
 import { PullRequestList } from "./pull-request-list";
 import { useGitHubSettings } from "@multica/core/github";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useAuthStore } from "@multica/core/auth";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useRecentContextStore } from "@multica/core/chat";
 import { useModalStore } from "@multica/core/modals";
-import { issueListOptions, issueDetailOptions, childIssuesOptions, childIssueProgressOptions, issueAttachmentsOptions, issueGoalOptions } from "@multica/core/issues/queries";
+import { issueListOptions, issueDetailOptions, childIssuesOptions, childIssueProgressOptions, issueAttachmentsOptions, issueGoalOptions, issueKeys } from "@multica/core/issues/queries";
 import { issueAlignmentDraftId, issueAlignmentHeldByAnother } from "@multica/core/issues";
 import { projectDetailOptions } from "@multica/core/projects/queries";
 import { ProjectIcon } from "../../projects/components/project-icon";
@@ -1177,6 +1178,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   const locale = useLocale();
   const timeAgo = useTimeAgo();
   const id = issueId;
+  const queryClient = useQueryClient();
   const user = useAuthStore((s) => s.user);
   const paths = useWorkspacePaths();
   const openModal = useModalStore((state) => state.open);
@@ -2223,6 +2225,42 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   // Called before the `if (!issue)` early return so hook order stays stable.
   const actions = useIssueActions(issue);
   const handleUpdateField = actions.updateField;
+  const issueUpdate = useUpdateIssue();
+  const clearTitleSuggestion = useMutation({
+    mutationFn: () => api.deleteIssueMetadata(id, "title_suggestion"),
+    onSuccess: (result) => {
+      if (!wsId) return;
+      // Keep the detail query authoritative without waiting for a second
+      // network round trip; the metadata endpoint returns its committed bag.
+      queryClient.setQueryData(issueKeys.detail(wsId, id), (current: Issue | undefined) =>
+        current ? { ...current, metadata: result.metadata } : current,
+      );
+    },
+  });
+  const titleSuggestion = typeof issue?.metadata?.title_suggestion === "string"
+    ? issue.metadata.title_suggestion
+    : null;
+  const acceptTitleSuggestion = useCallback(async () => {
+    if (!issue || !titleSuggestion || issueUpdate.isPending || clearTitleSuggestion.isPending) return;
+    try {
+      await issueUpdate.mutateAsync({
+        id: issue.id,
+        title: titleSuggestion,
+        title_base: issue.title,
+      });
+      await clearTitleSuggestion.mutateAsync();
+      toast.success("Title updated");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to apply title suggestion");
+    }
+  }, [issue, titleSuggestion, issueUpdate, clearTitleSuggestion]);
+  const dismissTitleSuggestion = useCallback(async () => {
+    try {
+      await clearTitleSuggestion.mutateAsync();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to dismiss title suggestion");
+    }
+  }, [clearTitleSuggestion]);
 
   // Labels live in their own query (not on the issue body) — fetch the count
   // here so seeding can decide whether the "Labels" optional row should be
@@ -3123,6 +3161,24 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
               />
             </div>
           )}
+          {titleSuggestion && issue.creator_type === "member" ? (
+            <div className="mt-2 flex items-center justify-between gap-3 rounded-lg border border-border/70 bg-muted/40 px-3 py-2 text-sm">
+              <div className="min-w-0">
+                <div className="text-caption text-muted-foreground">Suggested title</div>
+                <div className="truncate font-medium">{titleSuggestion}</div>
+              </div>
+              <div className="flex shrink-0 items-center gap-1.5">
+                <Button type="button" size="sm" onClick={acceptTitleSuggestion} disabled={issueUpdate.isPending || clearTitleSuggestion.isPending}>
+                  <CircleCheck className="mr-1.5 size-4" />
+                  Apply
+                </Button>
+                <Button type="button" variant="ghost" size="sm" onClick={dismissTitleSuggestion} disabled={clearTitleSuggestion.isPending}>
+                  <X className="mr-1.5 size-4" />
+                  Dismiss
+                </Button>
+              </div>
+            </div>
+          ) : null}
           {(!titleLazy.ready || isGuest) && (
             isGuest ? (
               <WriteAction className="w-full">
