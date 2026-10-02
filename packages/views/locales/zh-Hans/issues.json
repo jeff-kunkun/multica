@@ -474,6 +474,7 @@
     "prop_updated": "更新时间",
     "activity_section": "动态",
     "goal": {
+      "badge_aria": "目标 {{done}}/{{total}}",
       "title": "目标",
       "completion_title": "补全完成线",
       "completion_hint": "选出这张任务必须通过的检查项，确认后再开始推进。",

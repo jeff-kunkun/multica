@@ -479,6 +479,7 @@
     "prop_updated": "Updated",
     "activity_section": "Activity",
     "goal": {
+      "badge_aria": "Goal {{done}}/{{total}}",
       "title": "Goal",
       "completion_title": "Complete the finish line",
       "completion_hint": "Choose the checks that must pass before this task is done.",

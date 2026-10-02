@@ -474,6 +474,7 @@
     "prop_updated": "更新日",
     "activity_section": "アクティビティ",
     "goal": {
+      "badge_aria": "目標 {{done}}/{{total}}",
       "title": "目標",
       "completion_title": "完了ラインを設定",
       "completion_hint": "このタスクを完了とするために通過すべきチェック項目を選びます。",
@@ -1075,6 +1076,7 @@
     "goal_flow_issue": "タスク",
     "entry_create_start": "作成して開始",
     "goal_toggle": "完了ラインを満たすまで続ける",
+    "goal_prompt": "整合の中で「何をもって完了とするか」を確認し、その結論を完了ラインに反映します。",
     "subtitle": "確認するまで何も作成されません。",
     "back": "タスク一覧に戻る",
     "stage_aligning": "すり合わせ中",

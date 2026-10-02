@@ -433,6 +433,7 @@
     "prop_updated": "Mise à jour",
     "activity_section": "Activité",
     "goal": {
+      "badge_aria": "Objectif {{done}}/{{total}}",
       "title": "Objectif",
       "completion_title": "Compléter la ligne d'arrivée",
       "completion_hint": "Choisissez les contrôles qui doivent réussir avant que cette tâche soit terminée.",
@@ -1106,6 +1107,7 @@
     "goal_flow_issue": "Tâche",
     "entry_create_start": "Créer et démarrer",
     "goal_toggle": "Continuer jusqu'à la ligne d'arrivée",
+    "goal_prompt": "L'alignement demandera comment mesurer la réussite et reportera cette réponse dans la ligne d'arrivée.",
     "subtitle": "Rien n'est créé tant que vous n'avez pas confirmé.",
     "back": "Retour aux tâches",
     "stage_aligning": "Alignement",

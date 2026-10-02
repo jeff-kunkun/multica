@@ -474,6 +474,7 @@
     "prop_updated": "수정일",
     "activity_section": "활동",
     "goal": {
+      "badge_aria": "목표 {{done}}/{{total}}",
       "title": "목표",
       "completion_title": "완료 기준 정하기",
       "completion_hint": "이 태스크가 완료되기 전에 통과해야 할 확인 항목을 선택하세요.",
@@ -1075,6 +1076,7 @@
     "goal_flow_issue": "이슈",
     "entry_create_start": "생성하고 시작",
     "goal_toggle": "완료 기준을 충족할 때까지 계속하기",
+    "goal_prompt": "정렬 중에 무엇을 완료로 볼지 묻고, 그 결론을 완료 기준에 반영합니다.",
     "subtitle": "확인하기 전에는 아무것도 만들어지지 않습니다.",
     "back": "이슈 목록으로",
     "stage_aligning": "정렬 중",
