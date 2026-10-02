@@ -219,11 +219,10 @@ export function ChatProjectBar({
     matchesPinyin(label, queryText);
 
   const noneLabel = t(($) => $.project_bar.none);
-  // Bar projects that did not fit. Collapsed pins stay under Pinned, where
-  // they can also be reordered, so no project is listed twice.
-  const collapsedIds = new Set(
-    orderedIds.filter((id) => !visibleIds.includes(id) && !pinnedIds.includes(id)),
-  );
+  // Bar projects that did not fit, pins first, so this section accounts for
+  // every project behind More. Collapsed pins also stay under Pinned, the
+  // full sidebar pin list where they are reordered.
+  const collapsedIds = new Set(orderedIds.filter((id) => !visibleIds.includes(id)));
   const collapsedRows = ranked.bar.filter(
     (row) => collapsedIds.has(row.id) && matches(titleById.get(row.id) ?? ""),
   );
@@ -397,8 +396,13 @@ export function ChatProjectBar({
                     key={row.id}
                     title={titleById.get(row.id) ?? ""}
                     countLabel={t(($) => $.project_bar.chat_count, { count: row.chatCount })}
-                    pinned={false}
-                    pinLabel={t(($) => $.project_bar.pin)}
+                    pinned={pinnedIds.includes(row.id)}
+                    draggable={false}
+                    pinLabel={
+                      pinnedIds.includes(row.id)
+                        ? t(($) => $.project_bar.unpin)
+                        : t(($) => $.project_bar.pin)
+                    }
                     onSelect={() => select({ type: "project", id: row.id })}
                     onTogglePin={() => togglePin(row.id)}
                   />
@@ -514,6 +518,7 @@ function ProjectRow({
   title,
   countLabel,
   pinned,
+  draggable = pinned,
   hidePin,
   pinLabel,
   dragLabel,
@@ -528,6 +533,8 @@ function ProjectRow({
   title: string;
   countLabel: string;
   pinned: boolean;
+  /** Pins are dragged to reorder; defaults to `pinned`. */
+  draggable?: boolean;
   hidePin?: boolean;
   pinLabel?: string;
   dragLabel?: string;
@@ -541,7 +548,7 @@ function ProjectRow({
 }) {
   return (
     <div
-      draggable={pinned}
+      draggable={draggable}
       onDragStart={onDragStart}
       onDragOver={onDragOver}
       onDragLeave={onDragLeave}
@@ -551,7 +558,7 @@ function ProjectRow({
         dragOver && "bg-accent",
       )}
     >
-      {pinned ? (
+      {draggable ? (
         <span aria-label={dragLabel} className="cursor-grab text-muted-foreground select-none">
           <GripVertical className="size-3.5" />
         </span>

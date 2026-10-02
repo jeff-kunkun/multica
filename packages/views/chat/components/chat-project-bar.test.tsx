@@ -205,6 +205,25 @@ describe("ChatProjectBar", () => {
       expect(onFilterChange).toHaveBeenCalledWith({ type: "project", id: "p7" });
     });
 
+    it("lists pins that did not fit under Collapsed too, so it matches the More count", async () => {
+      // Seven pins, five slots: p6 and p7 are pinned but behind More.
+      areaWidth = 320;
+      const user = userEvent.setup();
+      const onTogglePin = vi.fn();
+      renderBar({ pinnedIds: ["p1", "p2", "p3", "p4", "p5", "p6", "p7"], onTogglePin });
+
+      await user.click(screen.getByRole("button", { name: /More \(15\)/ }));
+      const collapsed = within(screen.getByRole("group", { name: "Collapsed projects" }));
+      expect(
+        collapsed.getAllByRole("button", { name: /Project \d+, \d+ chats?/ }).map((row) =>
+          row.getAttribute("aria-label"),
+        ),
+      ).toEqual(["Project 6, 1 chat", "Project 7, 1 chat", "Project 8, 1 chat"]);
+
+      await user.click(collapsed.getAllByRole("button", { name: "Unpin" })[0]!);
+      expect(onTogglePin).toHaveBeenCalledWith("p6");
+    });
+
     it("moves the project picked from More to a visible slot right after the pins", () => {
       areaWidth = 320;
       const { chips } = renderBar({ pinnedIds: ["p8"], filter: { type: "project", id: "p7" } });
