@@ -70,7 +70,11 @@
     "access_request_expires": "{{until}} に期限切れ",
     "access_status_approved": "承認済み",
     "access_status_declined": "拒否済み",
-    "access_status_expired": "期限切れ：対応されませんでした"
+    "access_status_expired": "期限切れ：対応されませんでした",
+    "stall_review_title": "このチケットは24時間の停滞レビュー中です",
+    "stall_processed_title": "このチケットはシステムで自動処理されました",
+    "stall_keep": "保持する",
+    "stall_undo": "処理を取り消す"
   },
   "types": {
     "needs_you": "対応が必要です",
@@ -99,7 +103,8 @@
     "agent_access_request": "エージェント利用リクエスト",
     "agent_access_approved": "エージェント利用が承認されました",
     "agent_access_declined": "エージェント利用が拒否されました",
-    "parking_unexplained": "理由なく停止"
+    "parking_unexplained": "理由なく停止",
+    "issue_stall_action": "停滞処理"
   },
   "labels": {
     "set_status_to": "ステータスを変更:",

@@ -79,6 +79,10 @@ func runIssueStallList(cmd *cobra.Command, _ []string) error {
 	}
 	for _, raw := range items {
 		item, _ := raw.(map[string]any)
+		if number, ok := item["number"].(float64); ok {
+			fmt.Printf("%-12s #%-7.0f %s\n", item["action"], number, item["title"])
+			continue
+		}
 		fmt.Printf("%-12s %-16s %s\n", item["action"], item["issue_id"], item["title"])
 	}
 	return nil

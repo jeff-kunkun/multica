@@ -39,7 +39,8 @@ export type InboxItemType =
   | "agent_access_declined"
   // A run ended and its ticket stopped without saying why (kun fork,
   // DENE-881). Body carries the parking record's one sentence.
-  | "parking_unexplained";
+  | "parking_unexplained"
+  | "issue_stall_action";
 
 /**
  * One workspace's unread inbox count in the cross-workspace summary

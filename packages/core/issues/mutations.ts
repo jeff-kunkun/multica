@@ -1267,6 +1267,7 @@ export function useKeepIssueStall() {
     onSettled: (_data, _error, issueId) => {
       void qc.invalidateQueries({ queryKey: issueKeys.detail(wsId, issueId) });
       void qc.invalidateQueries({ queryKey: issueKeys.list(wsId) });
+      void qc.invalidateQueries({ queryKey: inboxKeys.list(wsId) });
     },
   });
 }
@@ -1279,6 +1280,7 @@ export function useUndoIssueStall() {
     onSettled: (_data, _error, issueId) => {
       void qc.invalidateQueries({ queryKey: issueKeys.detail(wsId, issueId) });
       void qc.invalidateQueries({ queryKey: issueKeys.list(wsId) });
+      void qc.invalidateQueries({ queryKey: inboxKeys.list(wsId) });
     },
   });
 }

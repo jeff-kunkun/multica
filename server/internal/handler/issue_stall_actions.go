@@ -282,8 +282,22 @@ func (h *Handler) ReviewStallAction(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, "reason is required")
 		return
 	}
+	if issue.Status == "done" || issue.Status == "cancelled" {
+		writeError(w, http.StatusConflict, "已完成或已取消的票不能进入停滞公示")
+		return
+	}
 	if closeprotocol.ExplainedPause(blockwait.MetaString(stallMeta(issue), closeprotocol.KeyConclusion)) {
 		writeError(w, 409, "有意暂停的票不会进入停滞处理")
+		return
+	}
+	// A duplicate-looking ticket can still carry the delivery that invalidates
+	// the duplicate claim. The reviewer must inspect that delivery first; the
+	// server therefore refuses to start a cancellation clock for any linked PR.
+	if prs, err := h.Queries.ListPullRequestsByIssue(r.Context(), issue.ID); err != nil {
+		writeError(w, http.StatusInternalServerError, "无法核对关联 PR")
+		return
+	} else if len(prs) > 0 {
+		writeError(w, http.StatusConflict, "这张票已有关联 PR，不能进入停滞公示；请先完成验收或明确处理")
 		return
 	}
 	now := time.Now().UTC()
@@ -331,7 +345,7 @@ func (h *Handler) ListStallActions(w http.ResponseWriter, r *http.Request) {
 // deterministic expiry/cancel transition.
 func (h *Handler) SweepStallActions(ctx context.Context) (int64, error) {
 	var affected int64
-	parentRows, err := h.DB.Query(ctx, `SELECT id, workspace_id, number, title, status, metadata, last_activity_at FROM issue WHERE status IN ('todo','in_progress','blocked') AND metadata->>'stall.action' IS DISTINCT FROM 'revoked' AND last_activity_at < now() - interval '36 hours' AND EXISTS (SELECT 1 FROM issue child WHERE child.parent_issue_id=issue.id) LIMIT 500`)
+	parentRows, err := h.DB.Query(ctx, `SELECT id, workspace_id, number, title, status, metadata, last_activity_at FROM issue WHERE status IN ('todo','in_progress','blocked') AND metadata->>'stall.action' IS DISTINCT FROM 'revoked' AND last_activity_at < now() - interval '36 hours' AND EXISTS (SELECT 1 FROM issue child WHERE child.parent_issue_id=issue.id) AND NOT EXISTS (SELECT 1 FROM issue child_open WHERE child_open.parent_issue_id=issue.id AND child_open.status NOT IN ('done','cancelled')) ORDER BY last_activity_at ASC LIMIT 500`)
 	if err != nil {
 		return 0, err
 	}
@@ -359,9 +373,55 @@ func (h *Handler) SweepStallActions(ctx context.Context) (int64, error) {
 	}
 	parentRows.Close()
 
+	// Quiet top-level tickets are sent through the configured routing model for
+	// the duplicate/invalid decision. Self-hosted deployments without that
+	// model can still honor an explicit candidate marker written by a trusted
+	// agent, while never guessing from age alone.
+	candidateQuery := `SELECT id, workspace_id, number, title, status, metadata, last_activity_at FROM issue WHERE status IN ('todo','in_progress','blocked') AND metadata->>'stall.action' IS NULL AND last_activity_at < now() - interval '36 hours' AND NOT EXISTS (SELECT 1 FROM issue child WHERE child.parent_issue_id=issue.id)`
+	if h.Routing == nil {
+		candidateQuery += ` AND metadata->>'stall.candidate'='true'`
+	}
+	candidateQuery += ` ORDER BY last_activity_at ASC LIMIT 500`
+	candidateRows, err := h.DB.Query(ctx, candidateQuery)
+	if err != nil {
+		return affected, err
+	}
+	for candidateRows.Next() {
+		var x stallIssueRow
+		if candidateRows.Scan(&x.ID, &x.WorkspaceID, &x.Number, &x.Title, &x.Status, &x.Metadata, &x.LastActive) != nil {
+			continue
+		}
+		issue, err := h.Queries.GetIssue(ctx, x.ID)
+		if err != nil {
+			continue
+		}
+		meta := stallMeta(issue)
+		if closeprotocol.ExplainedPause(blockwait.MetaString(meta, closeprotocol.KeyConclusion)) {
+			continue
+		}
+		if prs, err := h.Queries.ListPullRequestsByIssue(ctx, issue.ID); err != nil || len(prs) > 0 {
+			continue
+		}
+		marked := stallBool(meta, stallCandidateKey) || stallString(meta, stallCandidateKey) == "true"
+		reason := "AI 停滞巡检将这张票识别为重复或无效候选。"
+		if h.Routing != nil && !marked {
+			decision, err := h.Routing.JudgeStallCandidate(ctx, util.UUIDToString(issue.WorkspaceID), util.UUIDToString(issue.ID), h.stallArtifactCheck(ctx, issue), int(time.Since(x.LastActive.Time).Hours()))
+			if err != nil || !decision.Candidate || decision.Confidence < 0.5 {
+				continue
+			}
+			reason = decision.Reason
+		} else if h.Routing == nil && !marked {
+			continue
+		}
+		if err := h.ReviewStallActionInternal(ctx, issue, reason); err == nil {
+			affected++
+		}
+	}
+	candidateRows.Close()
+
 	// The announcement clock is independent from issue activity: posting the
 	// public notice itself must not restart the 24-hour window.
-	rows, err := h.DB.Query(ctx, `SELECT id, workspace_id, number, title, status, metadata, last_activity_at FROM issue WHERE status NOT IN ('done','cancelled') AND metadata->>'stall.action'='announced' LIMIT 500`)
+	rows, err := h.DB.Query(ctx, `SELECT id, workspace_id, number, title, status, metadata, last_activity_at FROM issue WHERE status NOT IN ('done','cancelled') AND metadata->>'stall.action'='announced' ORDER BY (metadata->>'stall.review_until') ASC NULLS LAST, last_activity_at ASC LIMIT 500`)
 	if err != nil {
 		return affected, err
 	}
@@ -420,6 +480,19 @@ func (h *Handler) parentReadyForAutoCompletion(ctx context.Context, parent db.Is
 }
 
 func (h *Handler) ReviewStallActionInternal(ctx context.Context, issue db.Issue, reason string) error {
+	if issue.Status == "done" || issue.Status == "cancelled" {
+		return fmt.Errorf("issue is already terminal")
+	}
+	if closeprotocol.ExplainedPause(blockwait.MetaString(stallMeta(issue), closeprotocol.KeyConclusion)) {
+		return fmt.Errorf("issue is intentionally paused")
+	}
+	prs, err := h.Queries.ListPullRequestsByIssue(ctx, issue.ID)
+	if err != nil {
+		return fmt.Errorf("check linked pull requests: %w", err)
+	}
+	if len(prs) > 0 {
+		return fmt.Errorf("issue has linked pull requests")
+	}
 	now := time.Now().UTC()
 	reason = strings.TrimSpace(reason) + "；" + h.stallArtifactCheck(ctx, issue) + "。"
 	if err := h.setStallMetadata(ctx, issue, map[string]string{stallActionKey: stallActionAnnounced, stallAnnouncedAtKey: now.Format(time.RFC3339), stallReviewUntilKey: now.Add(stallAnnouncementFor).Format(time.RFC3339), stallReasonKey: reason}); err != nil {

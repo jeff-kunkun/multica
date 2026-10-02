@@ -70,7 +70,11 @@
     "access_request_expires": "{{until}}에 만료",
     "access_status_approved": "승인됨",
     "access_status_declined": "거절됨",
-    "access_status_expired": "만료됨: 제때 처리되지 않았습니다"
+    "access_status_expired": "만료됨: 제때 처리되지 않았습니다",
+    "stall_review_title": "이 티켓은 24시간 정체 검토 중입니다",
+    "stall_processed_title": "이 티켓은 시스템에서 자동 처리되었습니다",
+    "stall_keep": "유지",
+    "stall_undo": "처리 취소"
   },
   "types": {
     "needs_you": "확인이 필요합니다",
@@ -99,7 +103,8 @@
     "agent_access_request": "에이전트 사용 요청",
     "agent_access_approved": "에이전트 사용 승인됨",
     "agent_access_declined": "에이전트 사용 거절됨",
-    "parking_unexplained": "설명 없이 멈춤"
+    "parking_unexplained": "설명 없이 멈춤",
+    "issue_stall_action": "정체 처리"
   },
   "labels": {
     "set_status_to": "상태 변경:",

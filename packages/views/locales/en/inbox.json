@@ -73,7 +73,11 @@
     "access_request_expires": "Expires {{until}}",
     "access_status_approved": "Approved",
     "access_status_declined": "Declined",
-    "access_status_expired": "Expired — nobody answered in time"
+    "access_status_expired": "Expired — nobody answered in time",
+    "stall_review_title": "This ticket is under a 24-hour stall review",
+    "stall_processed_title": "This ticket was handled automatically",
+    "stall_keep": "Keep ticket",
+    "stall_undo": "Undo handling"
   },
   "types": {
     "needs_you": "Needs your attention",
@@ -102,7 +106,8 @@
     "agent_access_request": "Agent access request",
     "agent_access_approved": "Agent access approved",
     "agent_access_declined": "Agent access declined",
-    "parking_unexplained": "Stopped without explanation"
+    "parking_unexplained": "Stopped without explanation",
+    "issue_stall_action": "Stall action"
   },
   "labels": {
     "set_status_to": "Set status to",
