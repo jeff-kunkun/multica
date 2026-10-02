@@ -789,7 +789,7 @@
     "naming_recommended_hint": "服务端没有模型 key 时，推荐使用聊天智能体运行时。",
     "naming_source_saved": "聊天起名来源已保存",
     "naming_source_save_failed": "保存聊天起名来源失败",
-    "naming_stats": "最近 24 小时：已起名 {{titled}} · 运行时 {{runtime}} · 规则兜底 {{rules}} · 失败 {{failed}"
+    "naming_stats": "最近 24 小时：已起名 {{titled}} · 运行时 {{runtime}} · 规则兜底 {{rules}} · 失败 {{failed}}"
   },
   "delete_workspace_dialog": {
     "title": "删除工作区",
