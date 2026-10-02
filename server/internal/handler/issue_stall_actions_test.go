@@ -1,11 +1,14 @@
 package handler
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/multica-ai/multica/server/internal/routing"
 	"github.com/multica-ai/multica/server/internal/testutil"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
@@ -32,6 +35,92 @@ func TestStallStringAndBoolReadOnlyMetadata(t *testing.T) {
 	}
 	if !stallBool(meta, stallCandidateKey) {
 		t.Fatal("candidate metadata was not read")
+	}
+}
+
+func TestStallCandidateJudgementMarkerSkipsUnchangedActivity(t *testing.T) {
+	activityAt := time.Date(2026, 10, 2, 12, 0, 0, 123456000, time.UTC)
+	meta := map[string]any{stallJudgedAtKey: activityAt.Format(time.RFC3339Nano)}
+	if !stallCandidateJudgedForActivity(meta, activityAt) {
+		t.Fatal("a model decision for the current activity should be reused")
+	}
+	if stallCandidateJudgedForActivity(meta, activityAt.Add(time.Second)) {
+		t.Fatal("new activity must make the ticket eligible for a fresh judgment")
+	}
+}
+
+type stallTestStore struct {
+	routing.Store
+	settings routing.Settings
+	issue    routing.Issue
+}
+
+func (s stallTestStore) Settings(context.Context, string) (routing.Settings, error) {
+	return s.settings, nil
+}
+
+func (s stallTestStore) Issue(context.Context, string, string) (routing.Issue, error) {
+	return s.issue, nil
+}
+
+type countingStallJudge struct {
+	calls atomic.Int32
+}
+
+func (j *countingStallJudge) Assign(context.Context, routing.Target, routing.JudgeState) (routing.Verdict, error) {
+	return routing.Verdict{}, nil
+}
+
+func (j *countingStallJudge) Unblock(context.Context, routing.Target, routing.JudgeState) (routing.Advice, error) {
+	return routing.Advice{}, nil
+}
+
+func (j *countingStallJudge) Stale(context.Context, routing.Target, routing.StaleState) (routing.StaleDecision, error) {
+	return routing.StaleDecision{}, nil
+}
+
+func (j *countingStallJudge) Candidate(context.Context, routing.Target, routing.StallCandidateState) (routing.StallCandidateDecision, error) {
+	j.calls.Add(1)
+	return routing.StallCandidateDecision{Candidate: false, Confidence: 0.99, Reason: "不是重复票"}, nil
+}
+
+func TestSweepStallActionsDoesNotRejudgeNegativeCandidateUntilActivity(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	issueID := dbfx.Issue(t, "negative candidate", testutil.Cols{"status": "in_progress", "last_activity_at": time.Now().UTC().Add(-37 * time.Hour)})
+	judge := &countingStallJudge{}
+	previousRouting := testHandler.Routing
+	testHandler.Routing = routing.New(stallTestStore{
+		settings: routing.Settings{Enabled: true, Model: "test"},
+		issue:    routing.Issue{ID: issueID, Title: "negative candidate", Status: "in_progress"},
+	}, judge)
+	t.Cleanup(func() { testHandler.Routing = previousRouting })
+
+	if _, err := testHandler.SweepStallActions(t.Context()); err != nil {
+		t.Fatalf("first sweep: %v", err)
+	}
+	if got := judge.calls.Load(); got != 1 {
+		t.Fatalf("model calls after first sweep = %d, want 1", got)
+	}
+	var judgedAt string
+	dbfx.QueryRow(t, `SELECT metadata->>'stall.judged_at' FROM issue WHERE id=$1`, issueID).Scan(&judgedAt)
+	if judgedAt == "" {
+		t.Fatal("model decision did not persist an activity marker")
+	}
+	if _, err := testHandler.SweepStallActions(t.Context()); err != nil {
+		t.Fatalf("second sweep: %v", err)
+	}
+	if got := judge.calls.Load(); got != 1 {
+		t.Fatalf("model calls after unchanged sweep = %d, want 1", got)
+	}
+
+	dbfx.Exec(t, `UPDATE issue SET last_activity_at=$2 WHERE id=$1`, issueID, time.Now().UTC().Add(-37*time.Hour))
+	if _, err := testHandler.SweepStallActions(t.Context()); err != nil {
+		t.Fatalf("post-activity sweep: %v", err)
+	}
+	if got := judge.calls.Load(); got != 2 {
+		t.Fatalf("model calls after new activity = %d, want 2", got)
 	}
 }
 

@@ -26,22 +26,27 @@ import (
 )
 
 const (
-	stallActionKey       = "stall.action"
-	stallPreviousKey     = "stall.previous_status"
-	stallAnnouncedAtKey  = "stall.announced_at"
-	stallReviewUntilKey  = "stall.review_until"
-	stallRevertUntilKey  = "stall.revert_until"
-	stallReasonKey       = "stall.reason"
-	stallCandidateKey    = "stall.candidate"
-	stallActionCandidate = "candidate"
-	stallActionAnnounced = "announced"
-	stallActionKept      = "kept"
-	stallActionCancelled = "cancelled"
-	stallActionParent    = "parent_completed"
-	stallActionRevoked   = "revoked"
-	stallQuietAfter      = 36 * time.Hour
-	stallAnnouncementFor = 24 * time.Hour
-	stallRevertFor       = 7 * 24 * time.Hour
+	stallActionKey      = "stall.action"
+	stallPreviousKey    = "stall.previous_status"
+	stallAnnouncedAtKey = "stall.announced_at"
+	stallReviewUntilKey = "stall.review_until"
+	stallRevertUntilKey = "stall.revert_until"
+	stallReasonKey      = "stall.reason"
+	stallCandidateKey   = "stall.candidate"
+	// This is the last_activity_at snapshot inspected by the model, rather
+	// than the request time. Activity arriving while it thinks must requalify
+	// the ticket on the next patrol.
+	stallJudgedAtKey         = "stall.judged_at"
+	stallActionCandidate     = "candidate"
+	stallActionAnnounced     = "announced"
+	stallActionKept          = "kept"
+	stallActionCancelled     = "cancelled"
+	stallActionParent        = "parent_completed"
+	stallActionRevoked       = "revoked"
+	stallQuietAfter          = 36 * time.Hour
+	stallAnnouncementFor     = 24 * time.Hour
+	stallRevertFor           = 7 * 24 * time.Hour
+	stallCandidateModelLimit = 20
 )
 
 type stallIssueRow struct {
@@ -87,6 +92,11 @@ func stallBool(meta map[string]any, key string) bool {
 	return v
 }
 
+func stallCandidateJudgedForActivity(meta map[string]any, activityAt time.Time) bool {
+	judgedAt, err := time.Parse(time.RFC3339Nano, stallString(meta, stallJudgedAtKey))
+	return err == nil && !activityAt.After(judgedAt)
+}
+
 func (h *Handler) setStallMetadata(ctx context.Context, issue db.Issue, values map[string]string) error {
 	for key, value := range values {
 		raw, _ := json.Marshal(value)
@@ -95,6 +105,24 @@ func (h *Handler) setStallMetadata(ctx context.Context, issue db.Issue, values m
 		}
 	}
 	return nil
+}
+
+// markStallCandidateJudged records a model decision without making that
+// bookkeeping count as new issue activity. A normal metadata write updates
+// last_activity_at and would restart the 36-hour quiet clock.
+func (h *Handler) markStallCandidateJudged(ctx context.Context, issue db.Issue, activityAt time.Time) error {
+	raw, err := json.Marshal(activityAt.UTC().Format(time.RFC3339Nano))
+	if err != nil {
+		return err
+	}
+	_, err = h.DB.Exec(ctx, `
+		UPDATE issue
+		SET metadata = jsonb_set(metadata, ARRAY[$1::text], $2::jsonb, true),
+		    revision = revision + 1,
+		    updated_at = now()
+		WHERE id = $3 AND workspace_id = $4`,
+		stallJudgedAtKey, raw, issue.ID, issue.WorkspaceID)
+	return err
 }
 
 func (h *Handler) clearCloseMetadata(ctx context.Context, issue db.Issue) {
@@ -122,7 +150,7 @@ func (h *Handler) stallComment(ctx context.Context, issue db.Issue, body string)
 	return commentID
 }
 
-func (h *Handler) notifyStallInbox(ctx context.Context, issue db.Issue, title, body string) {
+func (h *Handler) notifyStallInbox(ctx context.Context, issue db.Issue, title, body string, actions ...string) {
 	// The summary belongs to the workspace owner/admins even when the ticket is
 	// assigned to an agent. Keep the assigned member as an additional recipient.
 	recipients := make(map[string]pgtype.UUID)
@@ -140,19 +168,20 @@ func (h *Handler) notifyStallInbox(ctx context.Context, issue db.Issue, title, b
 		}
 	}
 	entry := fmt.Sprintf("%s：票 #%d（%s）\n%s", title, issue.Number, issue.Title, body)
+	details, _ := json.Marshal(map[string]any{"kind": "stall_action", "issue_id": util.UUIDToString(issue.ID), "actions": actions})
 	for _, recipient := range recipients {
 		var existingID pgtype.UUID
 		var existingBody pgtype.Text
 		err := h.DB.QueryRow(ctx, `SELECT id, body FROM inbox_item WHERE workspace_id=$1 AND recipient_type='member' AND recipient_id=$2 AND type='issue_stall_action' AND created_at >= date_trunc('day', now()) ORDER BY created_at LIMIT 1`, issue.WorkspaceID, recipient).Scan(&existingID, &existingBody)
 		if err == nil && existingID.Valid {
-			_, _ = h.DB.Exec(ctx, `UPDATE inbox_item SET body=$2 WHERE id=$1`, existingID, strings.TrimSpace(existingBody.String+"\n\n"+entry))
+			_, _ = h.DB.Exec(ctx, `UPDATE inbox_item SET body=$2, details=$3 WHERE id=$1`, existingID, strings.TrimSpace(existingBody.String+"\n\n"+entry), details)
 			continue
 		}
 		_, _ = h.Queries.CreateInboxItem(ctx, db.CreateInboxItemParams{
 			ID: dbid.NewV7(), WorkspaceID: issue.WorkspaceID, RecipientType: "member", RecipientID: recipient,
 			Type: "issue_stall_action", Severity: "attention", IssueID: issue.ID, Title: "停滞处理每日汇总",
 			Body: pgtype.Text{String: entry, Valid: true}, ActorType: pgtype.Text{String: "system", Valid: true},
-			ActorID: pgtype.UUID{Valid: true}, Details: []byte(fmt.Sprintf(`{"kind":"stall_action","issue_id":"%s","actions":["keep","undo"]}`, util.UUIDToString(issue.ID))),
+			ActorID: pgtype.UUID{Valid: true}, Details: details,
 		})
 	}
 }
@@ -200,7 +229,7 @@ func (h *Handler) autoCompleteParent(ctx context.Context, parent, child db.Issue
 			}
 		}
 	}
-	h.notifyStallInbox(ctx, updated, "父票已自动收口", "所有子任务已完成，父票已标记 done；7 天内可撤销。")
+	h.notifyStallInbox(ctx, updated, "父票已自动收口", "所有子任务已完成，父票已标记 done；7 天内可撤销。", "undo")
 	if fresh, err := h.Queries.GetIssue(ctx, updated.ID); err == nil {
 		h.publish(protocol.EventIssueUpdated, util.UUIDToString(fresh.WorkspaceID), "system", "", map[string]any{"issue": service.IssueToMapResolved(ctx, h.Queries, fresh, h.getIssuePrefix(ctx, fresh.WorkspaceID))})
 	}
@@ -307,7 +336,7 @@ func (h *Handler) ReviewStallAction(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.stallComment(r.Context(), issue, fmt.Sprintf("AI 停滞巡检公示：%s\n公示 24 小时内可选择“保留”；无人拦截将自动取消。", reason))
-	h.notifyStallInbox(r.Context(), issue, "停滞票进入 24 小时公示", reason)
+	h.notifyStallInbox(r.Context(), issue, "停滞票进入 24 小时公示", reason, "keep")
 	writeJSON(w, http.StatusOK, map[string]any{"action": stallActionAnnounced, "review_until": now.Add(stallAnnouncementFor), "reason": reason})
 }
 
@@ -377,7 +406,7 @@ func (h *Handler) SweepStallActions(ctx context.Context) (int64, error) {
 	// the duplicate/invalid decision. Self-hosted deployments without that
 	// model can still honor an explicit candidate marker written by a trusted
 	// agent, while never guessing from age alone.
-	candidateQuery := `SELECT id, workspace_id, number, title, status, metadata, last_activity_at FROM issue WHERE status IN ('todo','in_progress','blocked') AND metadata->>'stall.action' IS NULL AND last_activity_at < now() - interval '36 hours' AND NOT EXISTS (SELECT 1 FROM issue child WHERE child.parent_issue_id=issue.id)`
+	candidateQuery := `SELECT id, workspace_id, number, title, status, metadata, last_activity_at FROM issue WHERE status IN ('todo','in_progress','blocked') AND metadata->>'stall.action' IS NULL AND last_activity_at < now() - interval '36 hours' AND NOT EXISTS (SELECT 1 FROM issue child WHERE child.parent_issue_id=issue.id) AND (COALESCE(metadata->>'stall.judged_at','') = '' OR CASE WHEN metadata->>'stall.judged_at' ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]+)?Z$' THEN last_activity_at > (metadata->>'stall.judged_at')::timestamptz ELSE TRUE END) AND COALESCE(metadata->>'close.conclusion','') NOT IN ('deferred','continuing') AND COALESCE(metadata->>'block.blocked_by','') = '' AND COALESCE(metadata->>'block.wait_condition','') = ''`
 	if h.Routing == nil {
 		candidateQuery += ` AND metadata->>'stall.candidate'='true'`
 	}
@@ -386,6 +415,7 @@ func (h *Handler) SweepStallActions(ctx context.Context) (int64, error) {
 	if err != nil {
 		return affected, err
 	}
+	modelCalls := 0
 	for candidateRows.Next() {
 		var x stallIssueRow
 		if candidateRows.Scan(&x.ID, &x.WorkspaceID, &x.Number, &x.Title, &x.Status, &x.Metadata, &x.LastActive) != nil {
@@ -396,6 +426,9 @@ func (h *Handler) SweepStallActions(ctx context.Context) (int64, error) {
 			continue
 		}
 		meta := stallMeta(issue)
+		if stallCandidateJudgedForActivity(meta, x.LastActive.Time) {
+			continue
+		}
 		if closeprotocol.ExplainedPause(blockwait.MetaString(meta, closeprotocol.KeyConclusion)) {
 			continue
 		}
@@ -405,8 +438,18 @@ func (h *Handler) SweepStallActions(ctx context.Context) (int64, error) {
 		marked := stallBool(meta, stallCandidateKey) || stallString(meta, stallCandidateKey) == "true"
 		reason := "AI 停滞巡检将这张票识别为重复或无效候选。"
 		if h.Routing != nil && !marked {
+			if modelCalls >= stallCandidateModelLimit {
+				continue
+			}
+			modelCalls++
 			decision, err := h.Routing.JudgeStallCandidate(ctx, util.UUIDToString(issue.WorkspaceID), util.UUIDToString(issue.ID), h.stallArtifactCheck(ctx, issue), int(time.Since(x.LastActive.Time).Hours()))
-			if err != nil || !decision.Candidate || decision.Confidence < 0.5 {
+			if err != nil {
+				continue
+			}
+			if err := h.markStallCandidateJudged(ctx, issue, x.LastActive.Time); err != nil {
+				return affected, err
+			}
+			if !decision.Candidate || decision.Confidence < 0.5 {
 				continue
 			}
 			reason = decision.Reason
@@ -499,7 +542,7 @@ func (h *Handler) ReviewStallActionInternal(ctx context.Context, issue db.Issue,
 		return err
 	}
 	h.stallComment(ctx, issue, "AI 停滞巡检公示："+reason+"\n公示 24 小时内可选择“保留”；无人拦截将自动取消。")
-	h.notifyStallInbox(ctx, issue, "停滞票进入 24 小时公示", reason)
+	h.notifyStallInbox(ctx, issue, "停滞票进入 24 小时公示", reason, "keep")
 	return nil
 }
 
@@ -515,7 +558,7 @@ func (h *Handler) cancelStallIssue(ctx context.Context, issue db.Issue) error {
 		return err
 	}
 	h.stallComment(ctx, updated, "AI 停滞巡检："+reason+" 7 天内可撤销。")
-	h.notifyStallInbox(ctx, updated, "停滞票已自动取消", reason)
+	h.notifyStallInbox(ctx, updated, "停滞票已自动取消", reason, "undo")
 	if fresh, err := h.Queries.GetIssue(ctx, updated.ID); err == nil {
 		h.publish(protocol.EventIssueUpdated, util.UUIDToString(fresh.WorkspaceID), "system", "", map[string]any{"issue": service.IssueToMapResolved(ctx, h.Queries, fresh, h.getIssuePrefix(ctx, fresh.WorkspaceID))})
 	}
