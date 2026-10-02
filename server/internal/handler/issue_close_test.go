@@ -10,7 +10,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/closeprotocol"
+	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
 // closeIssueHTTP posts to /api/issues/{id}/close as the given agent task (or
@@ -202,6 +204,81 @@ func TestCloseInReviewWritesCommentStatusAndRecord(t *testing.T) {
 	}
 	if len(resp.Woken) == 0 || !strings.Contains(strings.Join(resp.Woken, "\n"), "路由") {
 		t.Fatalf("woken should explain the routing hand-off, got %v", resp.Woken)
+	}
+}
+
+// A routing verdict of reviewer_type=none means this ticket should use the
+// done path. An agent close must not leave an unowned in_review card behind.
+func TestCloseInReviewRoutingNoneIsRejected(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	issue := createIssueHTTP(t, "close routed without review", "in_progress")
+	agentID := handlerTestAgentID(t)
+	taskID := insertIssueTaskWithStatus(t, agentID, issue.ID, "running")
+	seedOpenPullForIssue(t, issue.ID, 1156)
+	if _, err := testPool.Exec(context.Background(), `UPDATE issue SET reviewer_type = 'none', reviewer_id = NULL WHERE id = $1`, issue.ID); err != nil {
+		t.Fatalf("set no-review routing verdict: %v", err)
+	}
+
+	w := closeIssueHTTP(t, issue.ID, agentID, taskID, map[string]any{
+		"outcome":  "in_review",
+		"evidence": "MR 已提交，等验收",
+	})
+	if w.Code != http.StatusConflict || !strings.Contains(w.Body.String(), "--outcome done") {
+		t.Fatalf("status = %d, want a done-path refusal: %s", w.Code, w.Body.String())
+	}
+	if got := issueStatusDirect(t, issue.ID); got != "in_progress" {
+		t.Fatalf("status = %s, want in_progress", got)
+	}
+}
+
+// A linked GitLab MR may be merged after its last webhook. The close gate
+// refreshes the provider state and must accept the merged result as done.
+func TestCloseDoneRefreshesMergedGitLabMR(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	var api *httptest.Server
+	api = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprintf(w, `{"iid":490,"title":"Fix DENE-1156","state":"merged","web_url":%q,"sha":"27b88db00","source_branch":"agent/dene-1156"}`, api.URL+"/acme/game/-/merge_requests/490")
+	}))
+	defer api.Close()
+	box := withVCSBox(t)
+	prevHTTP := testHandler.deliveryHTTP
+	testHandler.deliveryHTTP = api.Client()
+	t.Cleanup(func() { testHandler.deliveryHTTP = prevHTTP })
+	connID := seedVCSConnection(t, ctx, box, "gitlab", api.URL)
+	issue := newVCSIssue(t, "GitLab merged close")
+	now := pgtype.Timestamptz{Time: time.Now().UTC(), Valid: true}
+	pr, err := testHandler.Queries.UpsertVCSPullRequest(ctx, db.UpsertVCSPullRequestParams{
+		WorkspaceID: parseUUID(testWorkspaceID), ConnectionID: parseUUID(connID),
+		Provider: "gitlab", RepoOwner: "acme", RepoName: "game", PrNumber: 490,
+		Title: "Fix " + issue.Identifier, State: "open",
+		HtmlUrl:     api.URL + "/acme/game/-/merge_requests/490",
+		PrCreatedAt: now, PrUpdatedAt: now, HeadSha: "oldsha",
+	})
+	if err != nil {
+		t.Fatalf("UpsertVCSPullRequest: %v", err)
+	}
+	if err := testHandler.Queries.LinkIssueToVCSPullRequest(ctx, db.LinkIssueToVCSPullRequestParams{
+		IssueID: parseUUID(issue.ID), PullRequestID: pr.ID, CloseIntent: true,
+	}); err != nil {
+		t.Fatalf("LinkIssueToVCSPullRequest: %v", err)
+	}
+	t.Cleanup(func() { cleanupVCS(ctx, issue.ID) })
+
+	w := closeIssueHTTP(t, issue.ID, "", "", map[string]any{
+		"outcome":  "done",
+		"evidence": "MR 已合并：" + api.URL + "/acme/game/-/merge_requests/490",
+	})
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", w.Code, w.Body.String())
+	}
+	if got := issueStatusDirect(t, issue.ID); got != "done" {
+		t.Fatalf("status = %s, want done", got)
 	}
 }
 
