@@ -6,6 +6,7 @@ package glabmr
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os/exec"
 	"strings"
 	"time"
@@ -14,15 +15,33 @@ import (
 	"github.com/multica-ai/multica/server/internal/ghpr"
 )
 
-// List runs `glab mr list` in dir. A missing glab, or a directory that is not
+// List runs `glab mr list --all` in dir. A missing glab, or a directory that is not
 // a GitLab checkout, returns an error and no rows; callers keep the gh result.
 func List(ctx context.Context, dir string) ([]ghpr.PR, error) {
+	return run(ctx, dir, []string{"mr", "list", "--all", "--output", "json", "-P", "20"})
+}
+
+// View reads one merge request by its URL. Passing the URL is important for
+// self-hosted GitLab: the caller's current directory may belong to another
+// repository, while the issue already knows the exact linked MR.
+func View(ctx context.Context, dir, rawURL string) (ghpr.PR, error) {
+	rows, err := run(ctx, dir, []string{"mr", "view", rawURL, "--output", "json"})
+	if err != nil {
+		return ghpr.PR{}, err
+	}
+	if len(rows) != 1 {
+		return ghpr.PR{}, fmt.Errorf("glab mr view returned %d merge requests", len(rows))
+	}
+	return rows[0], nil
+}
+
+func run(ctx context.Context, dir string, args []string) ([]ghpr.PR, error) {
 	if _, ok := ctx.Deadline(); !ok {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, 8*time.Second)
 		defer cancel()
 	}
-	cmd := exec.CommandContext(ctx, "glab", "mr", "list", "--output", "json", "-P", "20")
+	cmd := exec.CommandContext(ctx, "glab", args...)
 	cmd.Dir = dir
 	out, err := cmd.Output()
 	if err != nil {
@@ -30,7 +49,12 @@ func List(ctx context.Context, dir string) ([]ghpr.PR, error) {
 	}
 	var rows []glabMR
 	if err := json.Unmarshal(out, &rows); err != nil {
-		return nil, err
+		// `glab mr view` returns one object rather than a JSON array.
+		var row glabMR
+		if err := json.Unmarshal(out, &row); err != nil {
+			return nil, err
+		}
+		rows = []glabMR{row}
 	}
 	prs := make([]ghpr.PR, 0, len(rows))
 	for _, row := range rows {
