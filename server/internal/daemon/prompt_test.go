@@ -579,6 +579,17 @@ func TestBuildChatPromptAttachmentIDsCanBeBoundToCreatedIssues(t *testing.T) {
 	}
 }
 
+func TestBuildChatPromptRequestsRuntimeTitleOnlyWhenAsked(t *testing.T) {
+	task := Task{ChatSessionID: "sess-1", ChatMessage: "fix login"}
+	if out := BuildPrompt(task, "claude"); strings.Contains(out, "multica chat title") {
+		t.Fatalf("chat prompt asked for a title without the server requesting one\n%s", out)
+	}
+	task.ChatTitleRequested = true
+	if out := BuildPrompt(task, "claude"); !strings.Contains(out, "multica chat title \"{Project} · {topic}\"") {
+		t.Fatalf("chat prompt missing the runtime naming directive\n%s", out)
+	}
+}
+
 func TestBuildChatPromptChannelAwareness(t *testing.T) {
 	t.Run("slack-backed prompt teaches both read commands", func(t *testing.T) {
 		out := buildChatPrompt(Task{
