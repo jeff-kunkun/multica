@@ -103,6 +103,7 @@ import {
 import { createLogger } from "@multica/core/logger";
 import type { Agent, Attachment, ChatMessage, ChatSession, PendingChatTasksResponse } from "@multica/core/types";
 import { useLocale, useT } from "../../i18n";
+import { openGoalCompletion } from "@multica/core/modals";
 
 const uiLogger = createLogger("chat.ui");
 const apiLogger = createLogger("chat.api");
@@ -1083,6 +1084,10 @@ export function ChatWindow() {
         onRestoreDraftApplied={handleRestoreDraftApplied}
         uploadEnabled={(!!activeAgent || sharedSpeaker) && !isAgentAccessRevoked && !isChatViewOnly}
         onStop={handleStop}
+        onConvertToGoal={activeSessionId ? async () => {
+          const result = await api.convertChatSessionToGoal(activeSessionId);
+          openGoalCompletion({ issueId: result.issue.id, title: result.issue.title });
+        } : undefined}
         isRunning={!!pendingTaskId}
         allowSubmitWhileRunning={pendingTask?.supports_queue === true}
         disabled={

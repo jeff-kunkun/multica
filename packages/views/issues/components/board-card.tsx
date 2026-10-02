@@ -37,6 +37,7 @@ import {
 import { ParentIssueBadge } from "./parent-issue-badge";
 import { IssueProgressLine, useIssueHasProgressLine } from "./issue-progress-line";
 import { BlockWaitProbeBadge } from "./block-wait-probe-badge";
+import { GoalProgressBadge } from "./goal-progress-badge";
 
 function formatDate(date: string, locale: string): string {
   return formatDateOnly(date, { month: "short", day: "numeric" }, locale);
@@ -223,7 +224,10 @@ export const BoardCardContent = memo(function BoardCardContent({
 
       {/* Row 2: Title */}
       <p className="mt-1 text-body font-medium leading-snug line-clamp-2">
-        {issue.title}
+        <span className="inline-flex max-w-full items-center gap-1.5">
+          <GoalProgressBadge issueId={issue.id} />
+          <span className="truncate">{issue.title}</span>
+        </span>
       </p>
       <IssueProgressLine issue={issue} className="mt-1" />
 

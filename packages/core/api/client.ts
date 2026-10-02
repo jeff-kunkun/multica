@@ -1296,6 +1296,7 @@ export class ApiClient {
     if (params?.include_no_project) search.set("include_no_project", "true");
     if (params?.label_ids?.length) search.set("label_ids", params.label_ids.join(","));
     if (params?.top_level_only) search.set("top_level_only", "true");
+    if (params?.goal_only) search.set("goal", "true");
     // No `.length` guard on purpose: an empty ids array must still send
     // `ids=` — the server treats a PRESENT-but-empty list as an empty window
     // (nothing running), while an absent param means no restriction.
@@ -1507,6 +1508,7 @@ export class ApiClient {
     project_id?: string | null;
     parent_issue_id?: string | null;
     attachment_ids?: string[];
+    goal_mode?: boolean;
   }): Promise<{ task_id: string }> {
     return this.fetch("/api/issues/quick-create", {
       method: "POST",
@@ -4695,6 +4697,10 @@ export class ApiClient {
     return parseWithFallback(raw, ChatSessionSchema, EMPTY_CHAT_SESSION, {
       endpoint: "GET /api/chat/sessions/:id",
     });
+  }
+
+  async convertChatSessionToGoal(sessionId: string): Promise<{ issue: import("../types").Issue; chat_session_id: string }> {
+    return this.fetch(`/api/chat/sessions/${sessionId}/to-goal`, { method: "POST" });
   }
 
   async createChatSession(

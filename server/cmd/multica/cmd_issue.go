@@ -666,6 +666,7 @@ func init() {
 	issueListCmd.Flags().String("direction", "", "Sort direction (asc or desc); requires --sort to be a non-position column or a property sort (position is always ascending)")
 	issueListCmd.Flags().String("fields", "", "JSON output only: comma-separated list of issue fields to include (e.g. id,title,status,priority). Filtering happens client-side after the full response is fetched, so this shrinks CLI output size and agent context cost, not network/server-side cost. Omit for the full issue object (default, unchanged). Valid fields: "+strings.Join(validIssueFields, ", "))
 	issueListCmd.Flags().Bool("resolve-properties", false, resolvePropertiesHelp)
+	issueListCmd.Flags().Bool("goal", false, "Only list issues with a completion-line goal")
 
 	// issue get
 	issueGetCmd.Flags().String("output", "json", "Output format: table or json")
@@ -860,6 +861,9 @@ func runIssueList(cmd *cobra.Command, _ []string) error {
 	}
 	if v, _ := cmd.Flags().GetString("priority"); v != "" {
 		params.Set("priority", v)
+	}
+	if goal, _ := cmd.Flags().GetBool("goal"); goal {
+		params.Set("goal", "true")
 	}
 	params.Set("limit", fmt.Sprintf("%d", limit))
 	if offset > 0 {

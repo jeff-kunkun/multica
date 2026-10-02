@@ -537,6 +537,7 @@ export function useIssueSurfaceController({
         // empty every child branch and every lane. (DENE-444)
         include_sub_issues: showSubIssues || parentAwareLayout,
         ...(hideCompletedParents ? { hide_completed_parents: true } : {}),
+        ...(scope.type === "my" && scope.goalOnly ? { goal_only: true } : {}),
       },
       ...(debouncedActiveSearch ? { search: debouncedActiveSearch } : {}),
       sort: {

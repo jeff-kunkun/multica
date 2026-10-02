@@ -456,7 +456,16 @@
       "stopped_hint": "Cet objectif est en pause. Répondez à la question à choix dans votre boîte de réception pour ajouter du budget, modifier la ligne de réussite ou arrêter.",
       "evidence_item": "Preuve",
       "open_evidence": "Ouvrir la preuve",
-      "status": { "draft": "À confirmer", "locked": "En cours", "active": "En cours", "stopped": "Arrêté", "achieved": "Atteint" }
+      "status": {
+        "draft": "À confirmer",
+        "locked": "En cours",
+        "active": "En cours",
+        "stopped": "Arrêté",
+        "achieved": "Atteint"
+      },
+      "goal_toggle": "做到达标为止",
+      "progress_word": "达标",
+      "unset": "未设"
     },
     "subscribe": "S'abonner",
     "unsubscribe": "Se désabonner",

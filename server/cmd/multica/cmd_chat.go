@@ -93,6 +93,13 @@ stuck (red), done (green). --history lists earlier lines, newest first.`,
 	RunE: runChatProgress,
 }
 
+var chatToGoalCmd = &cobra.Command{
+	Use:   "to-goal",
+	Short: "Turn the current chat into a goal task",
+	Args:  cobra.NoArgs,
+	RunE:  runChatToGoal,
+}
+
 func init() {
 	for _, c := range []*cobra.Command{chatListCmd, chatSearchCmd} {
 		c.Flags().String("project", "", "Filter to a project id (defaults to the current project)")
@@ -111,10 +118,41 @@ func init() {
 	chatCmd.AddCommand(chatHistoryCmd)
 	chatCmd.AddCommand(chatThreadCmd)
 	chatCmd.AddCommand(chatProgressCmd)
+	chatCmd.AddCommand(chatToGoalCmd)
+	chatToGoalCmd.Flags().String("session", "", "Chat session id or URL (defaults to MULTICA_CHAT_SESSION_ID)")
+	chatToGoalCmd.Flags().String("output", "json", "Output format: table or json")
 	chatProgressCmd.Flags().String("session", "", "Chat session id or URL (defaults to MULTICA_CHAT_SESSION_ID)")
 	chatProgressCmd.Flags().String("output", "json", "Output format: table or json")
 	chatProgressCmd.Flags().String("tone", "", "Dot colour: working, waiting, stuck, or done (default working)")
 	chatProgressCmd.Flags().Bool("history", false, "List earlier progress lines instead of reporting one")
+}
+
+func runChatToGoal(cmd *cobra.Command, _ []string) error {
+	session := os.Getenv("MULTICA_CHAT_SESSION_ID")
+	if raw, _ := cmd.Flags().GetString("session"); strings.TrimSpace(raw) != "" {
+		session = raw
+	}
+	ref, err := parseChatSessionLinkRef(session)
+	if err != nil {
+		return fmt.Errorf("chat to-goal: session is required (or set MULTICA_CHAT_SESSION_ID): %w", err)
+	}
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := cli.APIContext(context.Background())
+	defer cancel()
+	var out map[string]any
+	if err := client.PostJSON(ctx, "/api/chat/sessions/"+url.PathEscape(ref.ID)+"/to-goal", nil, &out); err != nil {
+		return fmt.Errorf("convert chat to goal: %w", err)
+	}
+	output, _ := cmd.Flags().GetString("output")
+	if output == "table" {
+		issue, _ := out["issue"].(map[string]any)
+		fmt.Printf("Goal task: %v\n", issue["identifier"])
+		return nil
+	}
+	return cli.PrintJSON(os.Stdout, out)
 }
 
 func runChatProgress(cmd *cobra.Command, args []string) error {

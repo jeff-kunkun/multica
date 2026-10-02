@@ -94,6 +94,12 @@ started the task, so another member's private chats stay hidden. Listing and
 reading chats never changes unread state. Use `multica chat history` for a
 bounded transcript after choosing a session.
 
+To promote the current conversation into a goal task, use
+`multica chat to-goal --session <id-or-url>`. The server creates the issue with
+the chat's agent as executor; confirm the completion line through the shared
+`multica goal` commands. Add `--output json` when another tool needs the new
+issue id.
+
 **Comment reads stay bounded.** Scan the threads cheaply
 (`--roots-only --summary --compact`), then expand only what matters
 (`--thread <thread-id> --tail 30`). Never one unbounded pull — a wide read on a

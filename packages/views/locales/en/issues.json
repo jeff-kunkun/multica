@@ -502,7 +502,16 @@
       "stopped_hint": "This goal is paused. Answer the option question in your inbox to add budget, change the completion line, or stop.",
       "evidence_item": "Evidence",
       "open_evidence": "Open evidence",
-      "status": { "draft": "Needs confirmation", "locked": "In progress", "active": "In progress", "stopped": "Stopped", "achieved": "Achieved" }
+      "status": {
+        "draft": "Needs confirmation",
+        "locked": "In progress",
+        "active": "In progress",
+        "stopped": "Stopped",
+        "achieved": "Achieved"
+      },
+      "goal_toggle": "Make it a goal",
+      "progress_word": "met",
+      "unset": "Not set"
     },
     "subscribe": "Subscribe",
     "unsubscribe": "Unsubscribe",

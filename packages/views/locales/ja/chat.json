@@ -79,7 +79,8 @@
     "remove_all_project_context": "すべてのプロジェクトコンテキストを削除",
     "no_projects": "プロジェクトがまだありません",
     "switch_project": "他のプロジェクトに切り替え…",
-    "project_context_unsupported": "プロジェクトの説明は適用されません——このエージェントのデーモンのアップグレードが必要です"
+    "project_context_unsupported": "プロジェクトの説明は適用されません——このエージェントのデーモンのアップグレードが必要です",
+    "to_goal": "转成目标任务"
   },
   "queue": {
     "title_other": "キュー内のメッセージ {{count}} 件",

@@ -192,6 +192,9 @@ comment rather than repeating the edit.
 ## Listing and ordering issues
 
 `issue list` reads one page at a time, with a server maximum of 100 issues.
+
+Pass `--goal` to keep only issues that have a completion-line goal:
+`multica issue list --goal --output json`.
 Advance `--offset` by the number of issues actually returned. If the server
 cannot count matching issues, it returns `failed to count issues` as an error;
 do not treat that failure as an empty or complete list. Older servers can

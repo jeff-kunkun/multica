@@ -497,7 +497,16 @@
       "stopped_hint": "この目標は一時停止中です。受信トレイの選択式質問に回答して、予算の追加、達成ラインの変更、終了を選択してください。",
       "evidence_item": "証拠",
       "open_evidence": "証拠を開く",
-      "status": { "draft": "確認待ち", "locked": "進行中", "active": "進行中", "stopped": "停止", "achieved": "達成" }
+      "status": {
+        "draft": "確認待ち",
+        "locked": "進行中",
+        "active": "進行中",
+        "stopped": "停止",
+        "achieved": "達成"
+      },
+      "goal_toggle": "做到达标为止",
+      "progress_word": "达标",
+      "unset": "未设"
     },
     "subscribe": "購読",
     "unsubscribe": "購読解除",

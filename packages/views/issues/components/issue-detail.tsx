@@ -35,6 +35,7 @@ import {
   Plus,
   SlidersHorizontal,
   Tag,
+  Target,
   Unlink,
   Users,
 } from "lucide-react";
@@ -2473,6 +2474,22 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
               onUpdate={handleUpdateField}
             />
           </PropRow>
+          <PropRow label={t(($) => $.detail.goal.title)}>
+            {issueGoal ? (
+              <button
+                type="button"
+                className="inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-caption text-brand hover:bg-brand/10"
+                onClick={() => openGoalCompletion({ issueId: issue.id, title: issue.title, initialChecks: issueGoal.checks.map((check) => check.description ?? check.title ?? "").filter(Boolean) })}
+              >
+                <Target className="size-3.5" aria-hidden="true" />
+                {issueGoal.checks.filter((check) => check.passed === true || check.status === "passed" || check.status === "done" || check.status === "achieved").length}/{issueGoal.checks.length} {t(($) => $.detail.goal.progress_word)}
+              </button>
+            ) : (
+              <button type="button" className="text-caption text-muted-foreground hover:text-brand" onClick={() => openGoalCompletion({ issueId: issue.id, title: issue.title })}>
+                {t(($) => $.detail.goal.unset)} · {t(($) => $.detail.goal.set_as_goal)}
+              </button>
+            )}
+          </PropRow>
 
           {/* Optional props — rendered only when set on the issue OR added
               via "+ Add property" in this session. Row order follows the
@@ -3155,6 +3172,33 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
             )
           )}
           <IssueProgressBar issue={issue} className="mt-2" />
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            {!isGuest && !issueGoal && (
+              <Button
+                size="sm"
+                className="gap-1.5 bg-brand text-brand-foreground hover:bg-brand/90"
+                onClick={() => openGoalCompletion({ issueId: issue.id, title: issue.title })}
+              >
+                <Target className="size-3.5" aria-hidden="true" />
+                {t(($) => $.detail.goal.set_as_goal)}
+              </Button>
+            )}
+            {issueGoal && (
+              <span className="inline-flex items-center gap-1.5 rounded-full border border-brand/30 bg-brand/5 px-2.5 py-1 text-caption font-medium text-brand">
+                <Target className="size-3.5" aria-hidden="true" />
+                {issueGoal.checks.filter((check) => check.passed === true || check.status === "passed" || check.status === "done" || check.status === "achieved").length}/{issueGoal.checks.length} {t(($) => $.detail.goal.progress_word)}
+              </span>
+            )}
+            <IssueAlignmentEntry
+              draftId={alignmentDraftId}
+              groupIssues={alignmentGroupIssues}
+              parentIssueId={issue.id}
+              projectId={issue.project_id}
+              selfStarted={alignmentDraftId !== null}
+              startedByAnother={alignmentHeldByAnother}
+            />
+          </div>
+          <GoalSection wsId={wsId} issueId={issue.id} />
           {titleConflictDraft !== null ? (
             <RevisionConflictCompare
               className="mt-2"
@@ -3234,28 +3278,6 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                 );
               })()}
             </AppLink>
-          )}
-
-          {/* The way back to the conversation this issue came out of, plus what
-              the group it belongs to is doing and the one action a changed
-              requirement needs: return to that same conversation and keep
-              talking. It sits beside the "sub-issue of" line because it answers
-              the same kind of question — where does this come from — and because
-              an alignment is reachable from nowhere else: its carrier is a
-              hidden system agent, so it is absent from every chat list.
-
-              An issue with no alignment behind it gets the other half of the
-              same entry instead: starting one ON this issue, filed beneath it
-              (DENE-452). The two never appear together — see the component. */}
-          {issue && (
-            <IssueAlignmentEntry
-              draftId={alignmentDraftId}
-              groupIssues={alignmentGroupIssues}
-              parentIssueId={issue.id}
-              projectId={issue.project_id}
-              selfStarted={alignmentDraftId !== null}
-              startedByAnother={alignmentHeldByAnother}
-            />
           )}
 
           {issue.source_context && (
@@ -3363,23 +3385,6 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
             </div>
             {descDragOver && <FileDropOverlay />}
           </div>
-
-          {!isGuest && !issueGoal && (
-            <div className="mt-5 flex items-center justify-between gap-3 rounded-lg border border-dashed px-3 py-2.5">
-              <div className="min-w-0">
-                <p className="text-caption font-medium">{t(($) => $.detail.goal.set_as_goal)}</p>
-                <p className="text-micro text-muted-foreground">{t(($) => $.detail.goal.set_as_goal_hint)}</p>
-              </div>
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => openGoalCompletion({ issueId: issue.id, title: issue.title })}
-              >
-                {t(($) => $.detail.goal.set_as_goal)}
-              </Button>
-            </div>
-          )}
-          <GoalSection wsId={wsId} issueId={issue.id} />
 
           {/* Sub-issues — Linear-style */}
           {childIssues.length === 0 && (

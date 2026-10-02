@@ -1620,6 +1620,9 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 	if scheduledFilter.Valid {
 		where = append(where, "(i.start_date IS NOT NULL OR i.due_date IS NOT NULL)")
 	}
+	if r.URL.Query().Get("goal") == "true" || r.URL.Query().Get("goal_only") == "true" {
+		where = append(where, "EXISTS (SELECT 1 FROM issue_goal g WHERE g.issue_id = i.id AND g.workspace_id = i.workspace_id)")
+	}
 	if metadataFilter != nil {
 		where = append(where, fmt.Sprintf("i.metadata @> %s::jsonb", addArg(string(metadataFilter))))
 	}
@@ -2721,6 +2724,7 @@ type QuickCreateIssueRequest struct {
 	ProjectID     string   `json:"project_id,omitempty"`
 	ParentIssueID string   `json:"parent_issue_id,omitempty"`
 	AttachmentIDs []string `json:"attachment_ids,omitempty"`
+	GoalMode      bool     `json:"goal_mode,omitempty"`
 }
 
 // QuickCreateIssueResponse echoes the queued task id so the frontend can
@@ -3098,6 +3102,7 @@ type CreateIssueRequest struct {
 	StartDate     *string  `json:"start_date"`
 	DueDate       *string  `json:"due_date"`
 	AttachmentIDs []string `json:"attachment_ids,omitempty"`
+	GoalMode      bool     `json:"goal_mode,omitempty"`
 	// LabelIDs are issue-scoped labels to attach to the new issue in the same
 	// transaction as the create. Unknown or non-issue ids are rejected with
 	// 400 (service.ErrIssueLabelNotFound) rather than silently dropped.

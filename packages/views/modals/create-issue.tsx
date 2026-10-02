@@ -107,6 +107,7 @@ import { useT } from "../i18n";
 import { SourceContextPreviewCard, useSourceContextFailureMessage } from "./source-context-preview";
 import { useIssueLimitUpgradePrompt } from "./use-issue-limit-upgrade-prompt";
 import { openGoalCompletion } from "@multica/core/modals";
+import { GoalToggle } from "./goal-toggle";
 
 // ---------------------------------------------------------------------------
 // ManualCreatePanel — manual-mode body of the create-issue dialog. Renders
@@ -263,7 +264,8 @@ export function ManualCreatePanel({
 
   const sendShortcut = useShortcut("send");
   const [title, setTitle] = useState(draft.manual.title);
-  const [goalMode, setGoalMode] = useState(data?.goal_mode === true);
+  const goalMode = draft.shared.goalMode || data?.goal_mode === true;
+  const setGoalMode = (value: boolean) => setShared({ goalMode: value });
   const createdGoalIssueRef = useRef<Issue | null>(null);
   const [formResetKey, setFormResetKey] = useState(0);
   const titleEditorRef = useRef<TitleEditorRef>(null);
@@ -530,7 +532,8 @@ export function ManualCreatePanel({
             mode: "manual",
             capture_token: sourcePreview.capture_token,
             issue: {
-              title: title.trim(),
+            title: title.trim(),
+              ...(goalMode ? { goal_mode: true } : {}),
               description,
               status,
               priority,
@@ -548,6 +551,7 @@ export function ManualCreatePanel({
       } else {
         issue = await createIssueMutation.mutateAsync({
           title: title.trim(),
+          ...(goalMode ? { goal_mode: true } : {}),
           description,
           status,
           priority,
@@ -1496,10 +1500,7 @@ export function ManualCreatePanel({
                   {t(($) => $.create_issue.switch_to_align)}
                 </button>
               )}
-              <label className="flex shrink-0 items-center gap-1.5 text-caption text-muted-foreground cursor-pointer select-none">
-                <Switch size="sm" checked={goalMode} onCheckedChange={setGoalMode} />
-                {tIssues(($) => $.detail.goal.set_as_goal)}
-              </label>
+              <GoalToggle checked={goalMode} onCheckedChange={setGoalMode} disabled={composer.submitting} />
               <label className="flex shrink-0 items-center gap-1.5 text-caption text-muted-foreground cursor-pointer select-none">
                 <Switch
                   size="sm"
