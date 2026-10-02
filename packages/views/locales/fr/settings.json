@@ -874,7 +874,7 @@
     "feature_auto_link_label": "Lier automatiquement tâches et PR",
     "toast_failed": "Échec de la mise à jour des paramètres GitHub",
     "page_description": "Connectez une GitHub App et gérez l'affichage des PR et l'attribution des commits.",
-    "feature_auto_link_description": "Lier automatiquement une PR dont le titre ou le nom de branche contient un identifiant de tâche.",
+    "feature_auto_link_description": "Lie une PR à la tâche dont l’identifiant, par ex. {{example}}, figure dans son titre ou sa branche, ou suit « Closes » dans sa description.",
     "status_paused": "En pause",
     "pause": "Mettre en pause les fonctionnalités GitHub",
     "resume": "Reprendre les fonctionnalités GitHub"

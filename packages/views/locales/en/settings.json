@@ -874,7 +874,7 @@
     "feature_auto_link_label": "Auto-link issues and PRs",
     "toast_failed": "Failed to update GitHub settings",
     "page_description": "Connect a GitHub App and manage how PRs and commit attribution appear.",
-    "feature_auto_link_description": "Link a PR automatically when its title or branch name contains an issue identifier.",
+    "feature_auto_link_description": "Links a PR to the issue whose ID, e.g. {{example}}, is in its title or branch name, or follows “Closes” in its description.",
     "status_paused": "Paused",
     "pause": "Pause GitHub features",
     "resume": "Resume GitHub features"

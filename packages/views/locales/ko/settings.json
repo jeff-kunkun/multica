@@ -870,7 +870,7 @@
     "feature_auto_link_label": "태스크와 PR 자동 연결",
     "toast_failed": "GitHub 설정을 업데이트하지 못했습니다",
     "page_description": "GitHub App을 연결하고 PR 표시 방식과 커밋 서명을 관리하세요.",
-    "feature_auto_link_description": "PR 제목이나 브랜치 이름에 이슈 번호가 있으면 자동으로 연결합니다.",
+    "feature_auto_link_description": "제목이나 브랜치 이름에 태스크 번호(예: {{example}})가 있거나 설명에 \"Closes {{example}}\"가 있는 PR을 해당 태스크에 연결합니다.",
     "status_paused": "일시 중지됨",
     "pause": "GitHub 기능 일시 중지",
     "resume": "GitHub 기능 재개"

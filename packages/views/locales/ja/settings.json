@@ -870,7 +870,7 @@
     "feature_auto_link_label": "タスクと PR を自動リンク",
     "toast_failed": "GitHub 設定を更新できませんでした",
     "page_description": "GitHub App を接続し、PR の表示とコミットの署名を管理します。",
-    "feature_auto_link_description": "PR のタイトルまたはブランチ名にタスク番号があれば自動でリンクします。",
+    "feature_auto_link_description": "タイトルかブランチ名にタスク番号（例: {{example}}）を含む PR、または説明に「Closes {{example}}」と書いた PR を、そのタスクに関連付けます。",
     "status_paused": "一時停止中",
     "pause": "GitHub 機能を一時停止",
     "resume": "GitHub 機能を再開"

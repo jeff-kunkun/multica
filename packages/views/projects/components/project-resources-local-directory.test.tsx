@@ -52,7 +52,10 @@ vi.mock("@multica/core/hooks", () => ({ useWorkspaceId: () => "workspace-1" }));
 vi.mock("@multica/core/paths", () => ({
   useCurrentWorkspace: () => ({ id: "workspace-1", slug: "ws", repos: [] }),
 }));
-vi.mock("../../platform/local-directory", () => ({
+vi.mock("../../platform/local-directory", async (importOriginal) => ({
+  // The fork's shared-override helpers stay real: without a desktop bridge
+  // they report the override as unavailable.
+  ...(await importOriginal<typeof import("../../platform/local-directory")>()),
   isDesktopShell: () => true,
   pickDirectory: vi.fn(),
   validateLocalDirectory: vi.fn(),

@@ -870,7 +870,7 @@
     "feature_auto_link_label": "任务 ↔ PR 自动关联",
     "toast_failed": "更新 GitHub 设置失败",
     "page_description": "连接 GitHub App，管理 PR 显示方式和 commit 署名。",
-    "feature_auto_link_description": "PR 标题或分支名中含任务编号时自动关联。",
+    "feature_auto_link_description": "PR 标题或分支名含任务编号（如 {{example}}），或正文里写了 \"Closes {{example}}\" 时，自动关联到对应任务。",
     "status_paused": "已暂停",
     "pause": "暂停 GitHub 功能",
     "resume": "恢复 GitHub 功能"
