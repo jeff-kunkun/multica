@@ -202,6 +202,9 @@ func TestDirectChatSelfAssignmentUsesSecondPersonQuote(t *testing.T) {
 			t.Fatalf("quoteNamesAssignee(%q) = false, want direct-chat self assignment", quote)
 		}
 	}
+	if quoteNamesAssignee("这张票先放着", "你来做", "Origin Target", true) {
+		t.Fatal("a second-person quote absent from the user's message must be rejected")
+	}
 	if quoteNamesAssignee("你来做", "你来做", "Origin Target", false) {
 		t.Fatal("a second-person quote must not self-assign outside a direct chat")
 	}

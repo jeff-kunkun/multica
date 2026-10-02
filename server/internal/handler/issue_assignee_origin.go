@@ -208,7 +208,15 @@ func quoteNamesAssignee(message, quote, name string, directSelf bool) bool {
 	if !directSelf {
 		return false
 	}
+	// A second-person quote identifies the current agent only in a direct
+	// chat, but it still has to be a passage of the user's message. Without
+	// this check an agent could invent "你来做" after any unrelated message
+	// and bypass the quote provenance check.
+	message = strings.Join(strings.Fields(message), " ")
 	q := strings.Join(strings.Fields(quote), " ")
+	if q == "" || !strings.Contains(strings.ToLower(message), strings.ToLower(q)) {
+		return false
+	}
 	return strings.Contains(q, "你来做") ||
 		strings.Contains(q, "你自己做") ||
 		strings.Contains(q, "指派给你") ||
