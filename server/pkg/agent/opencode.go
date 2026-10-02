@@ -34,11 +34,15 @@ func opencodeTerminateGrace() time.Duration {
 // opencodeBlockedArgs are flags hardcoded by the daemon that must not be
 // overridden by user-configured custom_args.
 var opencodeBlockedArgs = map[string]blockedArgMode{
-	"--format":                       blockedWithValue,  // json output format for daemon communication
-	"--session":                      blockedWithValue,  // managed via ExecOptions.ResumeSessionID
-	"--dir":                          blockedWithValue,  // task workdir anchor for skill / AGENTS.md discovery
-	"--variant":                      blockedWithValue,  // owned by agent.thinking_level
-	"--dangerously-skip-permissions": blockedStandalone, // daemon manages non-interactive permission prompts
+	"--format":                       blockedWithValue,     // json output format for daemon communication
+	"--session":                      blockedWithValue,     // managed via ExecOptions.ResumeSessionID
+	"-c":                             blockedOptionalValue, // --continue; also eats a stray Codex -c key=value
+	"--continue":                     blockedStandalone,    // resumes the cwd's latest session; daemon owns resume
+	"-s":                             blockedWithValue,     // short form of --session
+	"--fork":                         blockedStandalone,    // session fork is daemon-owned
+	"--dir":                          blockedWithValue,     // task workdir anchor for skill / AGENTS.md discovery
+	"--variant":                      blockedWithValue,     // owned by agent.thinking_level
+	"--dangerously-skip-permissions": blockedStandalone,    // daemon manages non-interactive permission prompts
 }
 
 // opencodeBackend implements Backend by spawning `opencode run --format json`

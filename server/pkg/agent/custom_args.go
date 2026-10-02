@@ -30,7 +30,7 @@ func ValidateCustomArgsForProvider(provider string, args []string) error {
 
 func providerUsesContinueFlag(provider string) bool {
 	switch strings.ToLower(strings.TrimSpace(provider)) {
-	case "claude", "codebuddy", "antigravity", "grok", "qwen":
+	case "claude", "codebuddy", "antigravity", "grok", "qwen", "opencode", "deveco", "codearts", "pi":
 		return true
 	default:
 		return false
