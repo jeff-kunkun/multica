@@ -282,3 +282,20 @@ func TestRuleCleanChatTitleRespectsWordBoundaries(t *testing.T) {
 		})
 	}
 }
+
+// DENE-1120 follow-up: the first send stores chattitle.Derive(opening), so the
+// rules fallback must recognise that placeholder or it never runs.
+func TestOpeningStillTitlesMatchesDerivedPlaceholder(t *testing.T) {
+	opening := "![image.png](https://x/a.png)\n\n这个聊天起名选不了啊，我哪怕选择 runtime 还起不了啊？"
+	for _, title := range []string{"", opening, "image.png"} {
+		if !openingStillTitles(title, opening) {
+			t.Errorf("openingStillTitles(%q) = false, want true", title)
+		}
+	}
+	if openingStillTitles("Multica · 聊天起名", opening) {
+		t.Error("a real title must not count as the placeholder")
+	}
+	if got, want := ruleCleanChatTitle(opening), "这个聊天起名选不了啊，我哪怕选择 runtime 还起不了啊"; got != want {
+		t.Errorf("ruleCleanChatTitle(screenshot opening) = %q, want %q", got, want)
+	}
+}
