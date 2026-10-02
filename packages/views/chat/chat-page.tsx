@@ -40,12 +40,11 @@ import {
 } from "@multica/core/chat/queries";
 import { useQuickActionsPendingTimeout } from "@multica/core/chat/use-quick-actions-pending-timeout";
 import { useQuickActionsFailureToast } from "./components/use-quick-actions-failure-toast";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { chatSessionIdFromLocation } from "@multica/core/paths";
-import { api } from "@multica/core/api";
-import { pinKeys, pinListOptions } from "@multica/core/pins";
+import { pinListOptions, useCreatePin, useDeletePin, useReorderPins } from "@multica/core/pins";
 import { useChatProjectBarStore, selectPinnedProjectIds } from "@multica/core/chat/project-bar-store";
-import type { Agent, ChatSession, PinnedItem } from "@multica/core/types";
+import type { Agent, ChatSession } from "@multica/core/types";
 import { PageHeader } from "../layout/page-header";
 import { useBackOrReplace, useNavigation } from "../navigation";
 import { useT } from "../i18n";
@@ -144,52 +143,9 @@ export function ChatPage() {
     enabled: !!c.wsId && !!pinUserId,
   });
   const pinnedItems = useMemo(() => projectPinQuery.data ?? [], [projectPinQuery.data]);
-  const projectPinKey = pinKeys.list(c.wsId, pinUserId);
-  const createProjectPin = useMutation({
-    mutationFn: (projectId: string) =>
-      api.createPin({ item_type: "project", item_id: projectId }),
-    onSuccess: (newPin) => {
-      queryClient.setQueryData<PinnedItem[]>(projectPinKey, (old) =>
-        old?.some((pin) => pin.id === newPin.id) ? old : [...(old ?? []), newPin],
-      );
-    },
-    onSettled: () => {
-      void queryClient.invalidateQueries({ queryKey: projectPinKey });
-    },
-  });
-  const deleteProjectPin = useMutation({
-    mutationFn: (projectId: string) => api.deletePin("project", projectId),
-    onMutate: async (projectId) => {
-      await queryClient.cancelQueries({ queryKey: projectPinKey });
-      const previous = queryClient.getQueryData<PinnedItem[]>(projectPinKey);
-      queryClient.setQueryData<PinnedItem[]>(projectPinKey, (old) =>
-        old?.filter((pin) => !(pin.item_type === "project" && pin.item_id === projectId)),
-      );
-      return { previous };
-    },
-    onError: (_error, _projectId, context) => {
-      if (context?.previous) queryClient.setQueryData(projectPinKey, context.previous);
-    },
-    onSettled: () => {
-      void queryClient.invalidateQueries({ queryKey: projectPinKey });
-    },
-  });
-  const reorderProjectPins = useMutation({
-    mutationFn: (items: PinnedItem[]) =>
-      api.reorderPins({ items: items.map((pin, index) => ({ id: pin.id, position: index + 1 })) }),
-    onMutate: async (items) => {
-      await queryClient.cancelQueries({ queryKey: projectPinKey });
-      const previous = queryClient.getQueryData<PinnedItem[]>(projectPinKey);
-      queryClient.setQueryData(projectPinKey, items);
-      return { previous };
-    },
-    onError: (_error, _items, context) => {
-      if (context?.previous) queryClient.setQueryData(projectPinKey, context.previous);
-    },
-    onSettled: () => {
-      void queryClient.invalidateQueries({ queryKey: projectPinKey });
-    },
-  });
+  const createPin = useCreatePin();
+  const deletePin = useDeletePin();
+  const reorderPins = useReorderPins();
   const migrationKeyRef = useRef<string | null>(null);
   useEffect(() => {
     if (!pinUserId || !c.wsId || !c.projectsLoaded || !projectPinQuery.isSuccess) return;
@@ -206,7 +162,7 @@ export function ChatPage() {
       try {
         for (const projectId of candidates) {
           if (serverProjectIds.has(projectId)) continue;
-          await createProjectPin.mutateAsync(projectId);
+          await createPin.mutateAsync({ item_type: "project", item_id: projectId });
         }
         removeLocalProjectPins(pinUserId, candidates);
       } catch {
@@ -217,7 +173,7 @@ export function ChatPage() {
     c.projects,
     c.projectsLoaded,
     c.wsId,
-    createProjectPin,
+    createPin,
     localProjectPins,
     pinnedItems,
     pinUserId,
@@ -230,9 +186,9 @@ export function ChatPage() {
   );
   const toggleProjectPin = (projectId: string) => {
     if (projectPinnedItems.some((pin) => pin.item_id === projectId)) {
-      deleteProjectPin.mutate(projectId);
+      deletePin.mutate({ itemType: "project", itemId: projectId });
     } else {
-      createProjectPin.mutate(projectId);
+      createPin.mutate({ item_type: "project", item_id: projectId });
     }
   };
   const moveProjectPin = (fromProjectId: string, toProjectId: string) => {
@@ -243,7 +199,7 @@ export function ChatPage() {
     const [item] = reordered.splice(from, 1);
     if (!item) return;
     reordered.splice(to, 0, item);
-    reorderProjectPins.mutate(reordered);
+    reorderPins.mutate(reordered);
   };
   const restoreListScroll = useRestoredScrollRef("chat-list");
   const { data: quickActionsPending = null } = useQuery(

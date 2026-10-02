@@ -138,11 +138,11 @@ describe("ChatProjectBar", () => {
       const view = render(
         <I18nProvider locale="en" resources={RESOURCES}>
           <ChatProjectBar
-          projects={projects}
-          sessions={sessions}
-          pinnedIds={props.pinnedIds ?? []}
-          onTogglePin={props.onTogglePin ?? vi.fn()}
-          onMovePin={props.onMovePin ?? vi.fn()}
+            projects={projects}
+            sessions={sessions}
+            pinnedIds={props.pinnedIds ?? []}
+            onTogglePin={props.onTogglePin ?? vi.fn()}
+            onMovePin={props.onMovePin ?? vi.fn()}
             filter={{ type: "all" }}
             onFilterChange={onFilterChange}
             onFitWidthChange={onFitWidthChange}
