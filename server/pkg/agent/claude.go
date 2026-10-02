@@ -1181,6 +1181,13 @@ const (
 // possible dangerous flag. Workspace members are trusted to configure agents
 // sensibly, same as with custom_env.
 //
+// One exception to "narrow": every flag that picks which session a run attaches
+// to (continue-latest, resume, session id/path/dir, fork) must be blocked on
+// every backend. The daemon owns session identity; a "continue the latest
+// session" flag attaches a cold start to whatever last ran in the same cwd,
+// which in shared mode is another chat (DENE-1160). A new backend adds its
+// CLI's session flags here, and TestSessionContinuationArgsAreBlocked lists it.
+//
 // Shell quoting is stripped from each arg before processing: users commonly
 // type custom_args in config fields using shell syntax (e.g.
 // --deny-tool='write'). Since the daemon spawns processes directly without a
