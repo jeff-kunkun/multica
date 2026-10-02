@@ -2206,7 +2206,11 @@ func runIssueClose(cmd *cobra.Command, args []string) error {
 		body["verdict"] = verdict
 	}
 	if outcome == "done" || outcome == "in_review" {
-		refreshIssuePullRequests(ctx, client, issueRef.ID, issueRef.Display, outcome == "done" && verdict == "pass", outcome == "done" && verdict == "")
+		declaredPR, _ := cmd.Flags().GetString("pr")
+		if strings.TrimSpace(declaredPR) == "" {
+			declaredPR = pullURLFromText(evidence)
+		}
+		refreshIssuePullRequestsWithURL(ctx, client, issueRef.ID, issueRef.Display, declaredPR, outcome == "done" && verdict == "pass", outcome == "done" && verdict == "")
 	}
 	var result map[string]any
 	if err := client.PostJSON(ctx, "/api/issues/"+issueRef.ID+"/close", body, &result); err != nil {

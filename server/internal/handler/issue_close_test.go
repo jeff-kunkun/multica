@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -1034,5 +1035,58 @@ func TestCloseInProgressNeedsHumanNamesThePerson(t *testing.T) {
 	}
 	if got := issueStatusDirect(t, issue.ID); got != "in_progress" {
 		t.Fatalf("status = %s, want in_progress", got)
+	}
+}
+
+// A local CLI report is the fallback when the server cannot read a GitLab
+// token. It must replace a stale open snapshot with the merged state before
+// the done gate evaluates it.
+func TestCloseDoneAcceptsMergedGitLabMRFromLocalCLIReport(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	box := withVCSBox(t)
+	connID := seedVCSConnection(t, ctx, box, "gitlab", "http://gitlab.example")
+	localToken, err := box.Seal([]byte("local"))
+	if err != nil {
+		t.Fatalf("seal local token: %v", err)
+	}
+	if _, err := testPool.Exec(ctx, `UPDATE vcs_connection SET access_token_encrypted = $2 WHERE id = $1`, connID, base64.StdEncoding.EncodeToString(localToken)); err != nil {
+		t.Fatalf("set local token: %v", err)
+	}
+	issue := newVCSIssue(t, "GitLab local CLI close")
+	now := pgtype.Timestamptz{Time: time.Now().UTC(), Valid: true}
+	mrURL := "http://gitlab.example/acme/game/-/merge_requests/490"
+	pr, err := testHandler.Queries.UpsertVCSPullRequest(ctx, db.UpsertVCSPullRequestParams{
+		WorkspaceID: parseUUID(testWorkspaceID), ConnectionID: parseUUID(connID),
+		Provider: "gitlab", RepoOwner: "acme", RepoName: "game", PrNumber: 490,
+		Title: "Fix " + issue.Identifier, State: "open", HtmlUrl: mrURL,
+		PrCreatedAt: now, PrUpdatedAt: now, HeadSha: "oldsha",
+	})
+	if err != nil {
+		t.Fatalf("seed stale MR: %v", err)
+	}
+	if err := testHandler.Queries.LinkIssueToVCSPullRequest(ctx, db.LinkIssueToVCSPullRequestParams{
+		IssueID: parseUUID(issue.ID), PullRequestID: pr.ID, CloseIntent: true,
+	}); err != nil {
+		t.Fatalf("link stale MR: %v", err)
+	}
+	t.Cleanup(func() { cleanupVCS(ctx, issue.ID) })
+
+	mergedAt := time.Now().UTC()
+	reportIssuePRsHTTP(t, issue.ID, []DaemonPullRequest{{
+		Provider: "gitlab", Owner: "acme", Repo: "game", Number: 490,
+		Title: "Fix " + issue.Identifier, State: "merged", URL: mrURL,
+		SHA: "27b88db00", MergedAt: &mergedAt,
+	}})
+	w := closeIssueHTTP(t, issue.ID, "", "", map[string]any{
+		"outcome": "done", "evidence": "MR 已合并：" + mrURL,
+	})
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", w.Code, w.Body.String())
+	}
+	if got := issueStatusDirect(t, issue.ID); got != "done" {
+		t.Fatalf("status = %s, want done", got)
 	}
 }
