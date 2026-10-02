@@ -1362,6 +1362,7 @@ export function IssuesHeader({
   onNewGoal?: () => void;
 }) {
   const { t } = useT("issues");
+  const { t: tMyIssues } = useT("my-issues");
   const [saveViewOpen, setSaveViewOpen] = useState(false);
   const headerWsId = useWorkspaceId();
   const viewListScope: IssueViewScope | null = saveViewScope
@@ -1537,9 +1538,9 @@ export function IssuesHeader({
             <>
               <Button variant="default" size="sm" className="hidden gap-1 bg-brand text-brand-foreground hover:bg-brand/90 sm:inline-flex" onClick={onNewGoal}>
                 <Target className="size-3.5" aria-hidden="true" />
-                New goal
+                {tMyIssues(($) => $.header.new_goal)}
               </Button>
-              <Button variant="default" size="icon-sm" className="bg-brand text-brand-foreground hover:bg-brand/90 sm:hidden" onClick={onNewGoal} aria-label="New goal">
+              <Button variant="default" size="icon-sm" className="bg-brand text-brand-foreground hover:bg-brand/90 sm:hidden" onClick={onNewGoal} aria-label={tMyIssues(($) => $.header.new_goal)}>
                 <Target className="size-3.5" aria-hidden="true" />
               </Button>
             </>

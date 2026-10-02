@@ -339,7 +339,13 @@ export function AlignCreatePanel({
     <>
       <DialogTitle className="sr-only">{t(($) => $.alignment.entry_title)}</DialogTitle>
 
-      <GoalFlowSteps active="align" className="px-6 pt-3" />
+      <div className="flex items-center justify-between gap-3 px-6 pt-3">
+        <GoalFlowSteps active="align" />
+        <label className="flex shrink-0 items-center gap-2 text-caption text-muted-foreground">
+          <Switch checked={goalMode} onCheckedChange={setGoalMode} disabled={start.isPending} />
+          <span>{t(($) => $.alignment.goal_toggle)}</span>
+        </label>
+      </div>
 
       {/* `min-h-[140px] flex-1 overflow-y-auto` is the agent panel's proven
           shape (MUL-6236): the region absorbs the delta against the card's
@@ -354,13 +360,6 @@ export function AlignCreatePanel({
         <h2 className="mt-4 text-title-sm font-semibold">
           {t(($) => $.alignment.entry_title)}
         </h2>
-        <div className="mt-3 flex items-center justify-between gap-3 rounded-lg border border-brand/20 bg-brand/5 px-3 py-2">
-          <GoalFlowSteps active="align" />
-          <label className="flex shrink-0 items-center gap-2 text-caption text-muted-foreground">
-            <Switch checked={goalMode} onCheckedChange={setGoalMode} disabled={start.isPending} />
-            <span>{t(($) => $.alignment.goal_toggle)}</span>
-          </label>
-        </div>
         <p className="mt-2 text-body leading-6 text-muted-foreground">
           {t(($) => $.alignment.entry_description)}
           {goalMode ? ` · ${t(($) => $.alignment.goal_prompt)}` : ""}
