@@ -3662,6 +3662,13 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Agent permissions (DENE-1271): an agent run may only create an issue
+	// when the workspace table allows it for this kind of run.
+	spawnTask, spawnGoverned, ok := h.gateAgentIssueSpawn(w, r, wsUUID, creatorType, actualCreatorID, 1)
+	if !ok {
+		return
+	}
+
 	// Whose pick is the executor (DENE-1033). A person's own hand stands; an
 	// agent's stands only with a quote the server can verify, and on a ticket
 	// routing will judge an unverified one is dropped so routing decides.
@@ -3803,6 +3810,9 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 	}
 
 	issue := res.Issue
+	if spawnGoverned {
+		h.recordAgentIssueSpawns(r.Context(), spawnTask, wsUUID, issue.ID)
+	}
 	if issue.Status == "blocked" || issue.Status == "in_review" {
 		h.setIssueMetaString(r.Context(), issue, blockwait.KeyWatched, blockwait.WatchedYes)
 	}

@@ -705,6 +705,11 @@ func (h *Handler) UpdateWorkspace(w http.ResponseWriter, r *http.Request) {
 				"this deployment cannot store a log export git token (no MULTICA_LOG_EXPORT_SECRET_KEY or JWT_SECRET)")
 			return
 		}
+		// An agent run must not be able to raise its own limits through the
+		// generic settings write: agent_spawn is carried forward unchanged.
+		if r.Header.Get("X-Actor-Source") == "task_token" {
+			merged = keepStoredAgentSpawn(merged, stored)
+		}
 		s, _ := json.Marshal(merged)
 		params.Settings = s
 	}

@@ -270,6 +270,16 @@ func (h *Handler) ApplyPlan(w http.ResponseWriter, r *http.Request) {
 	}
 
 	created := map[string]bool{}
+	var spawnTask db.AgentTaskQueue
+	spawnGoverned := false
+	if len(group.Nodes) > 0 {
+		// Agent permissions (DENE-1271): the whole plan counts against the
+		// run's issue budget, so it is refused before any node is written.
+		spawnTask, spawnGoverned, ok = h.gateAgentIssueSpawn(w, r, wsUUID, creatorType, creatorID, len(group.Nodes))
+		if !ok {
+			return
+		}
+	}
 	if len(group.Nodes) > 0 {
 		h.preparePlanGroupOpts(r, wsUUID, creatorID, &group)
 		res, err := h.IssueService.CreateGroup(r.Context(), group)
@@ -284,6 +294,9 @@ func (h *Handler) ApplyPlan(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		for _, issue := range res.Issues {
+			if spawnGoverned {
+				h.recordAgentIssueSpawns(r.Context(), spawnTask, wsUUID, issue.ID)
+			}
 			created[uuidToString(issue.ID)] = true
 			// Executors are seated by the plan; routing only fills what the plan
 			// left empty (the parent's reviewer, an unassigned child).
