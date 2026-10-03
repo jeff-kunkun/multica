@@ -88,6 +88,23 @@ export interface ChatChannelSource {
   route_revision: number;
 }
 
+/** One row of the agent overview's Chats section (DENE-1310). The server
+ *  redacts a chat the viewer may not open: `visible` false, `title` and
+ *  `creator_id` null. Chats share the agent's concurrency with issue runs. */
+export interface AgentChat {
+  id: string;
+  visible: boolean;
+  title: string | null;
+  creator_id: string | null;
+  status: "running" | "queued" | "idle";
+  last_activity_at: string;
+}
+
+export interface AgentChatPage {
+  chats: AgentChat[];
+  has_more: boolean;
+}
+
 export interface ChatSession {
   id: string;
   workspace_id: string;
