@@ -39,6 +39,15 @@ func (q *Queries) CountChatSessionsSpawnedFrom(ctx context.Context, originSessio
 	return column_1, err
 }
 
+const deleteAgentSpawnRecords = `-- name: DeleteAgentSpawnRecords :exec
+DELETE FROM agent_spawn_record WHERE id = ANY($1::uuid[])
+`
+
+func (q *Queries) DeleteAgentSpawnRecords(ctx context.Context, ids []pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, deleteAgentSpawnRecords, ids)
+	return err
+}
+
 const getChatSessionBySpawnKey = `-- name: GetChatSessionBySpawnKey :one
 SELECT id, workspace_id, agent_id, creator_id, title, session_id, work_dir, status, created_at, updated_at, unread_since, runtime_id, last_read_at, is_agent_intro, pinned_at, project_id, explicitly_created_at, project_nudge_dismissed_at, visibility, title_locked, progress_text, progress_source, progress_tone, progress_author_type, progress_author_id, progress_updated_at, origin_type, origin_session_id, origin_task_id, origin_client_key FROM chat_session
 WHERE origin_task_id = $1 AND origin_client_key = $2
@@ -126,6 +135,60 @@ func (q *Queries) InsertAgentSpawnRecord(ctx context.Context, arg InsertAgentSpa
 		arg.TargetKind,
 		arg.TargetID,
 	)
+	return err
+}
+
+const lockAgentSpawnTask = `-- name: LockAgentSpawnTask :exec
+SELECT pg_advisory_xact_lock(hashtext('agent_spawn'), hashtext($1::text))
+`
+
+// Serializes budget reservations of one run: count and reserve happen under
+// this lock, so two concurrent creates cannot both read the old count.
+func (q *Queries) LockAgentSpawnTask(ctx context.Context, taskID string) error {
+	_, err := q.db.Exec(ctx, lockAgentSpawnTask, taskID)
+	return err
+}
+
+const reserveAgentSpawnRecord = `-- name: ReserveAgentSpawnRecord :one
+INSERT INTO agent_spawn_record (id, workspace_id, task_id, source_kind, target_kind, target_id)
+VALUES ($1, $2, $3, $4, $5, $1)
+RETURNING id
+`
+
+type ReserveAgentSpawnRecordParams struct {
+	ID          pgtype.UUID `json:"id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	TaskID      pgtype.UUID `json:"task_id"`
+	SourceKind  string      `json:"source_kind"`
+	TargetKind  string      `json:"target_kind"`
+}
+
+// A reservation holds a budget slot before the create runs. target_id is a
+// placeholder (the row's own id) until SetAgentSpawnRecordTarget fills it.
+func (q *Queries) ReserveAgentSpawnRecord(ctx context.Context, arg ReserveAgentSpawnRecordParams) (pgtype.UUID, error) {
+	row := q.db.QueryRow(ctx, reserveAgentSpawnRecord,
+		arg.ID,
+		arg.WorkspaceID,
+		arg.TaskID,
+		arg.SourceKind,
+		arg.TargetKind,
+	)
+	var id pgtype.UUID
+	err := row.Scan(&id)
+	return id, err
+}
+
+const setAgentSpawnRecordTarget = `-- name: SetAgentSpawnRecordTarget :exec
+UPDATE agent_spawn_record SET target_id = $1 WHERE id = $2
+`
+
+type SetAgentSpawnRecordTargetParams struct {
+	TargetID pgtype.UUID `json:"target_id"`
+	ID       pgtype.UUID `json:"id"`
+}
+
+func (q *Queries) SetAgentSpawnRecordTarget(ctx context.Context, arg SetAgentSpawnRecordTargetParams) error {
+	_, err := q.db.Exec(ctx, setAgentSpawnRecordTarget, arg.TargetID, arg.ID)
 	return err
 }
 

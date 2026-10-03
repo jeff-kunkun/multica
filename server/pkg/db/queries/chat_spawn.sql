@@ -33,3 +33,21 @@ RETURNING *;
 -- The title the child bar shows for its parent. Read only after the caller
 -- has confirmed the viewer can open the parent.
 SELECT id, title FROM chat_session WHERE id = $1;
+
+-- name: LockAgentSpawnTask :exec
+-- Serializes budget reservations of one run: count and reserve happen under
+-- this lock, so two concurrent creates cannot both read the old count.
+SELECT pg_advisory_xact_lock(hashtext('agent_spawn'), hashtext(sqlc.arg('task_id')::text));
+
+-- name: ReserveAgentSpawnRecord :one
+-- A reservation holds a budget slot before the create runs. target_id is a
+-- placeholder (the row's own id) until SetAgentSpawnRecordTarget fills it.
+INSERT INTO agent_spawn_record (id, workspace_id, task_id, source_kind, target_kind, target_id)
+VALUES (@id, @workspace_id, @task_id, @source_kind, @target_kind, @id)
+RETURNING id;
+
+-- name: SetAgentSpawnRecordTarget :exec
+UPDATE agent_spawn_record SET target_id = @target_id WHERE id = @id;
+
+-- name: DeleteAgentSpawnRecords :exec
+DELETE FROM agent_spawn_record WHERE id = ANY(@ids::uuid[]);

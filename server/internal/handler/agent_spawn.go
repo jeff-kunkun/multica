@@ -9,6 +9,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
+	"github.com/multica-ai/multica/server/pkg/dbid"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
@@ -247,29 +248,103 @@ func (h *Handler) agentSpawnTask(r *http.Request, actorType, actorID string) (db
 	return task, true
 }
 
-// gateAgentIssueSpawn is the create-issue entry check: it writes the refusal
-// and returns ok=false when the acting run may not create need more issues.
-func (h *Handler) gateAgentIssueSpawn(w http.ResponseWriter, r *http.Request, workspaceID pgtype.UUID, actorType, actorID string, need int) (db.AgentTaskQueue, bool, bool) {
-	task, governed := h.agentSpawnTask(r, actorType, actorID)
-	if !governed {
-		return db.AgentTaskQueue{}, false, true
-	}
-	policy, err := h.agentSpawnPolicy(r.Context(), h.Queries, workspaceID)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to read agent permissions")
-		return db.AgentTaskQueue{}, false, false
-	}
-	if refusal := h.checkAgentSpawn(r.Context(), h.Queries, task, policy, agentSpawnKindIssue, need); refusal != nil {
-		writeAgentSpawnRefusal(w, refusal)
-		return db.AgentTaskQueue{}, false, false
-	}
-	return task, true, true
+// agentIssueSpawnReservation holds budget slots taken before an agent
+// creates issues. The count and the reservation are one transaction under a
+// per-run lock, so concurrent creates from the same run cannot both pass the
+// check on a stale count (DENE-1271 review). A zero value is ungoverned and
+// every method is a no-op on it.
+type agentIssueSpawnReservation struct {
+	h    *Handler
+	ids  []pgtype.UUID
+	used int
 }
 
-func (h *Handler) recordAgentIssueSpawns(ctx context.Context, task db.AgentTaskQueue, workspaceID pgtype.UUID, issueIDs ...pgtype.UUID) {
-	for _, id := range issueIDs {
-		_ = recordAgentSpawn(ctx, h.Queries, task, agentSpawnKindIssue, workspaceID, id)
+// fill binds the next reserved slots to the issues actually created.
+func (res *agentIssueSpawnReservation) fill(ctx context.Context, issueIDs ...pgtype.UUID) {
+	if res == nil {
+		return
 	}
+	for _, id := range issueIDs {
+		if res.used >= len(res.ids) {
+			return
+		}
+		_ = res.h.Queries.SetAgentSpawnRecordTarget(ctx, db.SetAgentSpawnRecordTargetParams{ID: res.ids[res.used], TargetID: id})
+		res.used++
+	}
+}
+
+// release returns the slots no issue was created for. Deferred by every
+// caller, so a failed create hands its budget back.
+func (res *agentIssueSpawnReservation) release() {
+	if res == nil || res.used >= len(res.ids) {
+		return
+	}
+	_ = res.h.Queries.DeleteAgentSpawnRecords(context.Background(), res.ids[res.used:])
+	res.used = len(res.ids)
+}
+
+// reserveAgentIssueSpawn checks the table and reserves need slots in one
+// transaction. It returns a refusal when the run may not create them.
+func (h *Handler) reserveAgentIssueSpawn(ctx context.Context, workspaceID pgtype.UUID, task db.AgentTaskQueue, need int) (*agentIssueSpawnReservation, *agentSpawnRefusal, error) {
+	source := agentSpawnSource(task)
+	if source == "" {
+		return nil, nil, nil
+	}
+	tx, err := h.TxStarter.Begin(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer tx.Rollback(ctx)
+	qtx := h.Queries.WithTx(tx)
+	if err := qtx.LockAgentSpawnTask(ctx, uuidToString(task.ID)); err != nil {
+		return nil, nil, err
+	}
+	policy, err := h.agentSpawnPolicy(ctx, qtx, workspaceID)
+	if err != nil {
+		return nil, nil, err
+	}
+	if refusal := h.checkAgentSpawn(ctx, qtx, task, policy, agentSpawnKindIssue, need); refusal != nil {
+		return nil, refusal, nil
+	}
+	res := &agentIssueSpawnReservation{h: h}
+	for i := 0; i < need; i++ {
+		id, err := qtx.ReserveAgentSpawnRecord(ctx, db.ReserveAgentSpawnRecordParams{
+			ID:          dbid.NewV7(),
+			WorkspaceID: workspaceID,
+			TaskID:      task.ID,
+			SourceKind:  source,
+			TargetKind:  agentSpawnKindIssue,
+		})
+		if err != nil {
+			return nil, nil, err
+		}
+		res.ids = append(res.ids, id)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, nil, err
+	}
+	return res, nil, nil
+}
+
+// gateAgentIssueSpawn is the create-issue entry check: it writes the refusal
+// and returns ok=false when the acting run may not create need more issues.
+// On ok it returns the reservation (nil when the caller is not governed); the
+// caller fills it with the created issues and defers release.
+func (h *Handler) gateAgentIssueSpawn(w http.ResponseWriter, r *http.Request, workspaceID pgtype.UUID, actorType, actorID string, need int) (*agentIssueSpawnReservation, bool) {
+	task, governed := h.agentSpawnTask(r, actorType, actorID)
+	if !governed {
+		return nil, true
+	}
+	res, refusal, err := h.reserveAgentIssueSpawn(r.Context(), workspaceID, task, need)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to check agent permissions")
+		return nil, false
+	}
+	if refusal != nil {
+		writeAgentSpawnRefusal(w, refusal)
+		return nil, false
+	}
+	return res, true
 }
 
 // ---- settings endpoints ----

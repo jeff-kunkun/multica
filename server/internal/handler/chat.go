@@ -426,10 +426,11 @@ func (h *Handler) ConvertChatSessionToGoal(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	actorType, actorID := h.resolveActor(r, userID, workspaceID)
-	spawnTask, spawnGoverned, ok := h.gateAgentIssueSpawn(w, r, session.WorkspaceID, actorType, actorID, 1)
+	spawnSlots, ok := h.gateAgentIssueSpawn(w, r, session.WorkspaceID, actorType, actorID, 1)
 	if !ok {
 		return
 	}
+	defer spawnSlots.release()
 	result, err := h.IssueService.Create(r.Context(), service.IssueCreateParams{
 		WorkspaceID: session.WorkspaceID,
 		Title:       title,
@@ -444,9 +445,7 @@ func (h *Handler) ConvertChatSessionToGoal(w http.ResponseWriter, r *http.Reques
 		writeError(w, http.StatusInternalServerError, "failed to create goal issue")
 		return
 	}
-	if spawnGoverned {
-		h.recordAgentIssueSpawns(r.Context(), spawnTask, session.WorkspaceID, result.Issue.ID)
-	}
+	spawnSlots.fill(r.Context(), result.Issue.ID)
 	prefix := h.getIssuePrefix(r.Context(), session.WorkspaceID)
 	resp := issueToResponse(result.Issue, prefix)
 	// Leave a visible bridge in the conversation so the conversion is

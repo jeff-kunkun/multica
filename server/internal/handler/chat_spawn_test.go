@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
 
 	"github.com/multica-ai/multica/server/internal/testutil"
@@ -300,6 +301,80 @@ func TestAgentSpawn_IssueFromIssueDisabled(t *testing.T) {
 	if w2.Code != http.StatusForbidden || out["code"] != SpawnRefusedBudget {
 		t.Fatalf("second create status = %d, body=%s", w2.Code, w2.Body.String())
 	}
+}
+
+// Concurrent creates from one run must not all pass on a stale count: the
+// check and the reservation are one transaction under a per-run lock.
+func TestAgentSpawn_ConcurrentIssueCreatesRespectPerRun(t *testing.T) {
+	f := newChatSpawnFixture(t)
+	setAgentSpawn(t, `{"chat_issue":{"enabled":true,"per_run":2}}`)
+	const attempts = 8
+	codes := make([]int, attempts)
+	bodies := make([]map[string]any, attempts)
+	var wg sync.WaitGroup
+	for i := 0; i < attempts; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			r := newRequest(http.MethodPost, "/api/issues", map[string]any{"title": "concurrent issue from chat", "allow_duplicate": true})
+			r.Header.Set("X-Actor-Source", "task_token")
+			r.Header.Set("X-Agent-ID", f.carrier)
+			r.Header.Set("X-Task-ID", f.task)
+			w := httptest.NewRecorder()
+			testHandler.CreateIssue(w, r)
+			codes[i] = w.Code
+			_ = json.Unmarshal(w.Body.Bytes(), &bodies[i])
+		}(i)
+	}
+	wg.Wait()
+	created := 0
+	for i, code := range codes {
+		switch {
+		case code == http.StatusCreated:
+			created++
+			id := bodies[i]["id"]
+			t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1`, id) })
+		case code == http.StatusForbidden && bodies[i]["code"] == SpawnRefusedBudget:
+		default:
+			t.Fatalf("attempt %d: status = %d, body = %v", i, code, bodies[i])
+		}
+	}
+	if created != 2 {
+		t.Fatalf("created %d issues, want exactly per_run=2", created)
+	}
+	var records int
+	if err := testPool.QueryRow(context.Background(),
+		`SELECT count(*) FROM agent_spawn_record WHERE task_id = $1 AND target_kind = 'issue' AND target_id <> id`, f.task).Scan(&records); err != nil {
+		t.Fatal(err)
+	}
+	if records != 2 {
+		t.Fatalf("ledger has %d filled issue records, want 2", records)
+	}
+}
+
+// A reservation the create never used goes back to the budget.
+func TestAgentSpawn_ReleasedReservationReturnsBudget(t *testing.T) {
+	f := newChatSpawnFixture(t)
+	setAgentSpawn(t, `{"chat_issue":{"enabled":true,"per_run":1}}`)
+	ctx := context.Background()
+	task, err := testHandler.Queries.GetAgentTask(ctx, parseUUID(f.task))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ws := parseUUID(testWorkspaceID)
+	res, refusal, err := testHandler.reserveAgentIssueSpawn(ctx, ws, task, 1)
+	if err != nil || refusal != nil {
+		t.Fatalf("first reserve: err=%v refusal=%v", err, refusal)
+	}
+	if _, refusal, _ := testHandler.reserveAgentIssueSpawn(ctx, ws, task, 1); refusal == nil || refusal.Code != SpawnRefusedBudget {
+		t.Fatalf("second reserve while held: refusal=%v", refusal)
+	}
+	res.release()
+	again, refusal, err := testHandler.reserveAgentIssueSpawn(ctx, ws, task, 1)
+	if err != nil || refusal != nil {
+		t.Fatalf("reserve after release: err=%v refusal=%v", err, refusal)
+	}
+	again.release()
 }
 
 func TestAgentSpawn_PolicyDefaultsAndAgentCannotUpdate(t *testing.T) {
