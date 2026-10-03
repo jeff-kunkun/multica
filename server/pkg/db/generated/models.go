@@ -982,6 +982,14 @@ type InboxItem struct {
 	ReadAt        pgtype.Timestamptz `json:"read_at"`
 }
 
+type IncrementalSyncTombstone struct {
+	Resource    string             `json:"resource"`
+	ID          pgtype.UUID        `json:"id"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	SubjectID   pgtype.UUID        `json:"subject_id"`
+	ChangedAt   pgtype.Timestamptz `json:"changed_at"`
+}
+
 type InstanceTelemetryState struct {
 	Singleton         bool               `json:"singleton"`
 	InstanceID        pgtype.UUID        `json:"instance_id"`
