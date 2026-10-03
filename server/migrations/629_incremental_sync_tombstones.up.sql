@@ -18,8 +18,8 @@ RETURNS TRIGGER LANGUAGE plpgsql AS $function$
 BEGIN
     INSERT INTO incremental_sync_tombstone(resource, id, workspace_id, subject_id, changed_at)
     VALUES (TG_ARGV[0], OLD.id, OLD.workspace_id,
-            CASE WHEN TG_ARGV[0] = 'inbox' THEN OLD.recipient_id
-                 WHEN TG_ARGV[0] = 'chats' THEN OLD.creator_id
+            CASE WHEN TG_ARGV[0] = 'inbox' THEN (to_jsonb(OLD)->>'recipient_id')::uuid
+                 WHEN TG_ARGV[0] = 'chats' THEN (to_jsonb(OLD)->>'creator_id')::uuid
                  ELSE NULL END, now())
     ON CONFLICT (resource, id) DO UPDATE
       SET workspace_id = EXCLUDED.workspace_id,
@@ -43,4 +43,3 @@ DROP TRIGGER IF EXISTS trg_incremental_sync_chat_delete ON chat_session;
 CREATE TRIGGER trg_incremental_sync_chat_delete
 AFTER DELETE ON chat_session FOR EACH ROW
 EXECUTE FUNCTION record_incremental_sync_tombstone('chats');
-
