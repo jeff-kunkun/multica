@@ -2007,6 +2007,8 @@
     "seats_follows": "{{name}} 따름",
     "seats_follows_base": "기본 역할을 따름",
     "seats_follows_unlock": "따름을 끄면 수정 가능",
+    "seats_work_off": "작업이 꺼져 있어 라우팅에서 제외됨",
+    "seats_runtime_unknown": "알 수 없는 런타임",
     "judge_title": "판정 모델",
     "judge_description": "티어(약 / 중 / 강 / 최강)를 확률과 함께 고릅니다. 분석 모델이 켜져 있으면 정리된 사실만 봅니다.",
     "judge_enabled_label": "판정 모델 사용",

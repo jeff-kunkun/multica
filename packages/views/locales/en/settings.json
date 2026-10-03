@@ -2022,6 +2022,8 @@
     "seats_follows": "Follows {{name}}",
     "seats_follows_base": "Follows its base role",
     "seats_follows_unlock": "Turn off to edit",
+    "seats_work_off": "Work is off, so routing skips it",
+    "seats_runtime_unknown": "Unknown runtime",
     "judge_title": "Judge model",
     "judge_description": "Picks the tier (weak / medium / strong / strongest) with a probability. With the analysis model on, it sees only the facts.",
     "judge_enabled_label": "Use the judge model",
