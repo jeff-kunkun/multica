@@ -4,7 +4,7 @@ package routing
 // every routing assignment comment that names an executor (DENE-1201). The
 // set is closed: every place that explains a pick takes its word from here,
 // so a reader learns four words once instead of reading prose each time.
-// Later stages add 接着做 (continuation) and 负载 (load).
+// 接着做 joined in DENE-1202; a later stage adds 负载 (load).
 type PickReason string
 
 const (
@@ -19,6 +19,9 @@ const (
 	// PickReasonFallback — the verdict was too weak or missing, so the
 	// ladder's fallback rung took it.
 	PickReasonFallback PickReason = "兜底"
+	// PickReasonContinuation — the seat that did the earlier, related work
+	// continues this ticket (DENE-1202).
+	PickReasonContinuation PickReason = "接着做"
 )
 
 // PickReasonLine is the comment's first line. Empty reason means no executor
@@ -58,6 +61,8 @@ func executorPickReason(issue Issue, needExecutor bool, executor *Seat, executor
 	switch executorSource {
 	case pickLabel:
 		return PickReasonTier, "票上的「" + executor.TierLabel + "」标签"
+	case pickContinuation:
+		return PickReasonContinuation, executor.Continues
 	case pickFallback:
 		return PickReasonFallback, "判断不够确定或没有判断，落到兜底档"
 	}

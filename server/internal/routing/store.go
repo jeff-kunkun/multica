@@ -52,6 +52,10 @@ type Issue struct {
 
 	ParentExecutor string
 	HasChildren    bool
+	// Related are the tickets whose executor may continue this one (接着做):
+	// the previous stage under the same parent, the parent, and tickets from
+	// the same batch. Only agent-held tickets are listed.
+	Related []RelatedTicket
 
 	// Reviewer is the ticket's reviewer slot. A zero Kind means the slot is
 	// empty — the only condition under which routing may write it.

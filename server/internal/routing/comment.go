@@ -71,10 +71,14 @@ func (r *Router) assignmentComment(
 	dec decision,
 	settings Settings,
 	ignored []string,
+	continuationNote string,
 ) string {
 	var b strings.Builder
 	b.WriteString("## 自动选派\n\n")
 	b.WriteString(PickReasonLine(executorPickReason(issue, needExecutor, executor, executorSource)))
+	if continuationNote != "" {
+		b.WriteString(continuationNote + "\n\n")
+	}
 	for _, note := range ignored {
 		b.WriteString("> " + note + "\n")
 	}
@@ -95,6 +99,9 @@ func (r *Router) assignmentComment(
 	switch {
 	case !needExecutor:
 		b.WriteString("- **执行席**：" + heldExecutorLine(issue) + "，未改动\n")
+	case executor != nil && executorSource == pickContinuation:
+		b.WriteString(fmt.Sprintf("- **执行席**：%s（%s档，接着做：%s）→ %s\n",
+			executor.Name, executor.TierLabel, executor.Continues, next))
 	case executor != nil && executorSource == pickLabel:
 		b.WriteString(fmt.Sprintf("- **执行席**：%s（%s档，按票上的「%s」标签选的，没问模型）→ %s\n",
 			executor.Name, executor.TierLabel, executor.TierLabel, next))

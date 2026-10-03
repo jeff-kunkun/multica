@@ -132,7 +132,28 @@ and the server's own moves (acceptance handoff, quota relay, reviewer relay,
 Every 「自动选派」 comment opens with one line, **为什么是他**, naming the source
 of the executor: `原话` (a person's verified words), `人工` (a person or their
 automation put it there), `档位` (routing's tier ladder, or a tier label a
-person attached), `兜底` (the verdict was too weak, so the fallback rung).
+person attached), `兜底` (the verdict was too weak, so the fallback rung),
+`接着做` (the seat that did the related earlier work continues it).
+
+**接着做 (DENE-1202).** A ticket continuing earlier work — a sibling one stage
+earlier under the same parent, the parent itself, or a ticket created by the
+same agent run — goes back to that work's executor when the seat is on the
+judged rung or stronger, online, not disabled, not out of quota, and generic
+or in the ticket's direction. It ranks after the person's words and a person's
+hand (including a person's tier label), and before the tier ladder. It is a
+workspace switch, **off by default = shadow mode**: routing writes its own
+pick and only adds a line to the 「自动选派」 comment saying who the rule would
+have picked, or why no earlier executor qualified. Check or flip it without
+the browser:
+
+```bash
+multica workspace routing get                     # prefer_continuation, continuation_mode: shadow | on
+multica workspace routing set --continuation on   # or off to go back to shadow
+```
+
+So when you split work into stages, leave each child to routing: the next
+stage reaches the seat that did the previous one by itself once the switch is
+on. Do not assign it by hand to get the same effect.
 
 If a ticket turned out too hard for its seat, do not pick a stronger one.
 Ask routing to re-judge:

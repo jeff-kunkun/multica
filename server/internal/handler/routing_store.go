@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -155,6 +156,7 @@ func (s routingStore) issueView(ctx context.Context, row db.Issue) (routing.Issu
 			}
 		}
 	}
+	out.Related = s.relatedTickets(ctx, row)
 	if !row.ParentIssueID.Valid {
 		// Only a top-level issue can be a group's coordinator, and the judge
 		// is told either way: a parent is a different job from a leaf.
@@ -165,6 +167,55 @@ func (s routingStore) issueView(ctx context.Context, row db.Issue) (routing.Issu
 	out.Reviewer = s.reviewerRef(ctx, row)
 	return out, nil
 }
+
+// relatedTickets lists the agent-held tickets whose executor may continue
+// this one (接着做, DENE-1202): siblings one stage earlier, the parent, and
+// tickets the same agent run created. Read errors drop the relation rather
+// than fail the route: a missing candidate only means the ladder decides.
+func (s routingStore) relatedTickets(ctx context.Context, row db.Issue) []routing.RelatedTicket {
+	prefix := s.h.getIssuePrefix(ctx, row.WorkspaceID)
+	var out []routing.RelatedTicket
+	add := func(rel db.Issue, relation routing.Relation) {
+		if rel.ID == row.ID || !rel.AssigneeType.Valid || rel.AssigneeType.String != "agent" || !rel.AssigneeID.Valid {
+			return
+		}
+		out = append(out, routing.RelatedTicket{
+			Identifier: fmt.Sprintf("%s-%d", prefix, rel.Number),
+			Relation:   relation,
+			ExecutorID: util.UUIDToString(rel.AssigneeID),
+		})
+	}
+	if row.ParentIssueID.Valid {
+		if row.Stage.Valid && row.Stage.Int32 > 1 {
+			if siblings, err := s.h.Queries.ListChildIssues(ctx, row.ParentIssueID); err == nil {
+				for _, sib := range siblings {
+					if sib.Stage.Valid && sib.Stage.Int32 == row.Stage.Int32-1 {
+						add(sib, routing.RelationPreviousStage)
+					}
+				}
+			}
+		}
+		if parent, err := s.h.Queries.GetIssue(ctx, row.ParentIssueID); err == nil && parent.WorkspaceID == row.WorkspaceID {
+			add(parent, routing.RelationParent)
+		}
+	}
+	if row.OriginType.Valid && row.OriginType.String == routingBatchOrigin && row.OriginID.Valid {
+		if batch, err := s.h.Queries.ListIssuesByOrigins(ctx, db.ListIssuesByOriginsParams{
+			WorkspaceID: row.WorkspaceID,
+			OriginType:  row.OriginType,
+			OriginIds:   []pgtype.UUID{row.OriginID},
+		}); err == nil {
+			for _, b := range batch {
+				add(b, routing.RelationSameBatch)
+			}
+		}
+	}
+	return out
+}
+
+// routingBatchOrigin is the origin stamped on tickets an agent run created;
+// tickets sharing it are one batch.
+const routingBatchOrigin = "agent_create"
 
 // reviewerRef reads the reviewer pair off the issue and resolves the display
 // name from the roster. The name is resolved on every read and stored nowhere,

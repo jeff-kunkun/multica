@@ -354,6 +354,7 @@ func (r *Router) routeTodo(ctx context.Context, workspaceID string, settings Set
 	var executor *Seat
 	var notes []string
 	executorSource := ""
+	var cont ContinuationPick
 	if labelled && !labelSeatOK {
 		notes = append(notes, "labelled tier "+requestedTier+" was not eligible")
 	}
@@ -363,6 +364,18 @@ func (r *Router) routeTodo(ctx context.Context, workspaceID string, settings Set
 		} else {
 			labelStill := labelSeatOK && seatIn(fresh, labelSeat)
 			seat, source, why := r.pickExecutor(fresh, labelSeat, labelStill, verdict, threshold)
+			// 接着做 ranks above the ladder's pick but not above a person's
+			// tier label: the label is a person's instruction about strength.
+			if !labelStill {
+				cont, err = r.continuation(ctx, workspaceID, settings, ladder, roster, direction, issue, seat)
+				if err != nil {
+					return Outcome{State: StateEnabled, Action: ActionSkipped, Reason: "routing context incomplete"}, err
+				}
+				if cont.OK && settings.PreferContinuation {
+					seat, source, why = cont.Seat, pickContinuation, ""
+					seat.Continues = cont.Detail()
+				}
+			}
 			written, err := r.Store.AssignAgentIfUnassigned(ctx, workspaceID, issue.ID, seat, mode == fillStarts)
 			if err != nil {
 				return out, err
@@ -456,7 +469,8 @@ func (r *Router) routeTodo(ctx context.Context, workspaceID string, settings Set
 	notify := stillUnassigned && mode != fillParked
 	body := r.assignmentComment(issue, match, candidates, verdict, threshold,
 		executor, executorSource, reviewer, reviewerFallback, fallbackWhy, humanSignoff,
-		needExecutor, needReviewer, notify, mode, dec, settings, ignored)
+		needExecutor, needReviewer, notify, mode, dec, settings, ignored,
+		ContinuationLine(cont, settings.PreferContinuation, executor))
 	if note := DemotionFootnote(ladder, roster, executor); note != "" {
 		body += "\n\n" + note
 	}
@@ -472,6 +486,8 @@ const (
 	pickLabel    = "label"
 	pickJudge    = "judge"
 	pickFallback = "fallback"
+	// pickContinuation — the 接着做 rule placed the seat (DENE-1202).
+	pickContinuation = "continuation"
 )
 
 // pickExecutor resolves the executor seat, and always resolves one: candidates
@@ -502,6 +518,41 @@ func (r *Router) pickExecutor(candidates []Seat, labelSeat Seat, labelled bool, 
 		return seat, pickJudge, ""
 	}
 	return fallback, pickFallback, why
+}
+
+// continuation assembles the 接着做 snapshot for this ticket and applies the
+// rule. base is the seat the ladder picked; its rung is the floor. A ticket
+// with no related executor costs nothing: no read, empty answer.
+func (r *Router) continuation(ctx context.Context, workspaceID string, settings Settings, ladder Ladder, roster map[string]Agent, direction string, issue Issue, base Seat) (ContinuationPick, error) {
+	ids := make([]string, 0, len(issue.Related))
+	for _, t := range issue.Related {
+		if t.ExecutorID != "" {
+			ids = append(ids, t.ExecutorID)
+		}
+	}
+	if len(ids) == 0 {
+		return ContinuationPick{}, nil
+	}
+	facts, err := r.Store.RoutingFacts(ctx, workspaceID, ids, settings.ProviderKeys())
+	if err != nil {
+		return ContinuationPick{}, err
+	}
+	seats := make(map[string]ContinuationSeat, len(ids))
+	for _, id := range ids {
+		_, onRoster := agentByID(roster, id)
+		seats[id] = ContinuationSeat{
+			Seat:         seatFromRoster(ladder, roster, id),
+			OnRoster:     onRoster,
+			Availability: facts.Seats[id].Availability,
+		}
+	}
+	return PickContinuation(ContinuationSnapshot{
+		Related:      issue.Related,
+		Seats:        seats,
+		Direction:    direction,
+		RequiredTier: base.TierKey,
+		TierOrder:    ladder.TierKeys(),
+	}), nil
 }
 
 // PickAcceptanceSeat chooses a reviewer for an issue that is about to enter
