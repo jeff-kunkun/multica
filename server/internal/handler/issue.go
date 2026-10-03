@@ -3899,6 +3899,11 @@ type UpdateIssueRequest struct {
 	WaitProbe     *string `json:"wait_probe,omitempty"`
 	WaitTimeout   *string `json:"wait_timeout,omitempty"`
 	NeedsHuman    *string `json:"needs_human,omitempty"`
+	// BlockKind and BlockAction are what the blocker card shows for this
+	// ticket: the kind of stop and the one-line next step. An agent moving
+	// the issue to blocked must send both (DENE-1301).
+	BlockKind   *string `json:"block_kind,omitempty"`
+	BlockAction *string `json:"block_action,omitempty"`
 	// NoCodeReason is the declared exit from the review gate (DENE-869). An
 	// agent moving an issue to in_review without a linked open/draft/merged PR
 	// is refused unless it says here why this ticket carries no code (docs,
@@ -4252,6 +4257,9 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 	if statusKeyForGuard == issuestatus.Blocked && prevIssue.Status != issuestatus.Blocked {
 		actorType := statusActorType
 		rec, persist, reject := h.gateBlockedStatus(r, prevIssue, req, actorType)
+		if reject == "" {
+			reject = blockAttributionRejection(req, actorType)
+		}
 		if reject != "" {
 			writeError(w, http.StatusBadRequest, reject)
 			return
@@ -4668,6 +4676,9 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 	// fails best-effort.
 	if statusChanged {
 		h.syncBlockWait(r.Context(), prevIssue, issue)
+	}
+	if statusChanged && issue.Status == issuestatus.Blocked {
+		h.persistBlockAttribution(r.Context(), issue, req)
 	}
 	if persistBlock {
 		h.persistBlockRecord(r.Context(), issue, blockRecord)
@@ -5490,6 +5501,9 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 		if batchStatusKey == issuestatus.Blocked && prevIssue.Status != issuestatus.Blocked {
 			var rejection string
 			batchBlock, batchPersistBlock, rejection = h.gateBlockedStatus(r, prevIssue, req.Updates, batchActorType)
+			if rejection == "" {
+				rejection = blockAttributionRejection(req.Updates, batchActorType)
+			}
 			if rejection != "" {
 				reject(issueID, rejection)
 				continue
@@ -5541,6 +5555,9 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 		issue = h.finishStatusTransition(r.Context(), issue, batchTransition)
 		if batchPersistBlock {
 			h.persistBlockRecord(r.Context(), issue, batchBlock)
+		}
+		if issue.Status == issuestatus.Blocked && prevIssue.Status != issuestatus.Blocked {
+			h.persistBlockAttribution(r.Context(), issue, req.Updates)
 		}
 		if batchTransition.persistBlock {
 			h.persistBlockRecord(r.Context(), issue, batchTransition.block)
