@@ -273,6 +273,7 @@ describe("RoutingTab", () => {
       usage_priority: true,
       allow_upshift: false,
       prefer_continuation: false,
+      prefer_idle: false,
       judge_enabled: false,
       analysis: {
         enabled: true,
@@ -636,16 +637,37 @@ describe("RoutingTab seat order switches", () => {
     render();
     const continuation = screen.getByRole("switch", { name: "Prefer the previous executor" });
     expect(continuation).not.toHaveAttribute("data-checked");
-    expect(screen.getByText(/^Shadow mode:/)).toBeInTheDocument();
+    expect(screen.getByText(/^Shadow mode:.*who this rule/)).toBeInTheDocument();
 
     await userEvent.click(continuation);
-    expect(screen.getByText(/^Live:/)).toBeInTheDocument();
+    expect(screen.getByText(/^Live: a ticket continuing/)).toBeInTheDocument();
     await waitFor(() => expect(updateWorkspace).toHaveBeenCalled());
     const [, body] = updateWorkspace.mock.calls.at(-1) as [
       string,
       { settings: { routing: Record<string, unknown> } },
     ];
     expect(body.settings.routing.prefer_continuation).toBe(true);
+  });
+
+  // DENE-1203: 负载分流 is its own switch, shadow by default.
+  it("switches 负载分流 from shadow to live and saves it", async () => {
+    workspace.current.settings = {
+      routing: { enabled: true, model: "gpt-5.6-luna" },
+    };
+    render();
+    const load = screen.getByRole("switch", { name: "Spread across idle seats" });
+    expect(load).not.toHaveAttribute("data-checked");
+    expect(screen.getByText(/^Shadow mode:.*less busy seat/)).toBeInTheDocument();
+
+    await userEvent.click(load);
+    expect(screen.getByText(/^Live: within the picked tier/)).toBeInTheDocument();
+    await waitFor(() => expect(updateWorkspace).toHaveBeenCalled());
+    const [, body] = updateWorkspace.mock.calls.at(-1) as [
+      string,
+      { settings: { routing: Record<string, unknown> } },
+    ];
+    expect(body.settings.routing.prefer_idle).toBe(true);
+    expect(body.settings.routing.prefer_continuation).toBe(false);
   });
 
   it("greys out upshift while usage priority is off", () => {

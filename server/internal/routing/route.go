@@ -355,6 +355,7 @@ func (r *Router) routeTodo(ctx context.Context, workspaceID string, settings Set
 	var notes []string
 	executorSource := ""
 	var cont ContinuationPick
+	var load LoadPick
 	if labelled && !labelSeatOK {
 		notes = append(notes, "labelled tier "+requestedTier+" was not eligible")
 	}
@@ -374,6 +375,17 @@ func (r *Router) routeTodo(ctx context.Context, workspaceID string, settings Set
 				if cont.OK && settings.PreferContinuation {
 					seat, source, why = cont.Seat, pickContinuation, ""
 					seat.Continues = cont.Detail()
+				} else {
+					// 负载 only reorders the ladder's own cell, so it runs
+					// after 接着做 has declined (DENE-1203).
+					load, err = r.load(ctx, workspaceID, settings, ladder, roster, seat)
+					if err != nil {
+						return Outcome{State: StateEnabled, Action: ActionSkipped, Reason: "routing context incomplete"}, err
+					}
+					if load.Moved && settings.PreferIdle {
+						seat, source = load.Seat, pickLoad
+						seat.Balanced = load.Detail()
+					}
 				}
 			}
 			written, err := r.Store.AssignAgentIfUnassigned(ctx, workspaceID, issue.ID, seat, mode == fillStarts)
@@ -470,7 +482,8 @@ func (r *Router) routeTodo(ctx context.Context, workspaceID string, settings Set
 	body := r.assignmentComment(issue, match, candidates, verdict, threshold,
 		executor, executorSource, reviewer, reviewerFallback, fallbackWhy, humanSignoff,
 		needExecutor, needReviewer, notify, mode, dec, settings, ignored,
-		ContinuationLine(cont, settings.PreferContinuation, executor))
+		ContinuationLine(cont, settings.PreferContinuation, executor),
+		LoadLine(load, settings.PreferIdle, executor))
 	if note := DemotionFootnote(ladder, roster, executor); note != "" {
 		body += "\n\n" + note
 	}
@@ -488,6 +501,8 @@ const (
 	pickFallback = "fallback"
 	// pickContinuation — the 接着做 rule placed the seat (DENE-1202).
 	pickContinuation = "continuation"
+	// pickLoad — the 负载 rule placed the seat (DENE-1203).
+	pickLoad = "load"
 )
 
 // pickExecutor resolves the executor seat, and always resolves one: candidates
@@ -553,6 +568,44 @@ func (r *Router) continuation(ctx context.Context, workspaceID string, settings 
 		RequiredTier: base.TierKey,
 		TierOrder:    ladder.TierKeys(),
 	}), nil
+}
+
+// load assembles the 负载 snapshot for the ladder's cell and applies the rule.
+// Busyness moves all the time, so it is read here once, together with the
+// cell's availability, and the rule never reads again. A cell with one seat
+// costs nothing: no read, the ladder's pick.
+func (r *Router) load(ctx context.Context, workspaceID string, settings Settings, ladder Ladder, roster map[string]Agent, base Seat) (LoadPick, error) {
+	if base.Upshifted {
+		return PickLoad(LoadSnapshot{Base: base}), nil
+	}
+	var cell []LoadSeat
+	for _, agent := range roster {
+		rs := relaySeat(ladder, agent)
+		if !rs.Eligible || rs.Tier != base.TierKey || rs.Direction != base.Direction {
+			continue
+		}
+		cell = append(cell, LoadSeat{
+			Seat:      Seat{ID: agent.ID, Name: agent.Name, TierKey: rs.Tier, TierLabel: base.TierLabel, Direction: rs.Direction},
+			Demoted:   rs.Demoted,
+			UsageRank: rs.UsageRank,
+		})
+	}
+	if len(cell) < 2 {
+		return PickLoad(LoadSnapshot{Base: base}), nil
+	}
+	ids := make([]string, 0, len(cell))
+	for _, ls := range cell {
+		ids = append(ids, ls.Seat.ID)
+	}
+	facts, err := r.Store.RoutingFacts(ctx, workspaceID, ids, settings.ProviderKeys())
+	if err != nil {
+		return LoadPick{}, err
+	}
+	for i := range cell {
+		cell[i].Availability = facts.Seats[cell[i].Seat.ID].Availability
+		cell[i].Running = facts.Running[cell[i].Seat.ID]
+	}
+	return PickLoad(LoadSnapshot{Base: base, Seats: cell}), nil
 }
 
 // PickAcceptanceSeat chooses a reviewer for an issue that is about to enter

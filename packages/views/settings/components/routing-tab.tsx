@@ -121,6 +121,7 @@ export function RoutingTab() {
   const [usagePriority, setUsagePriority] = useState(saved.usage_priority);
   const [allowUpshift, setAllowUpshift] = useState(saved.allow_upshift);
   const [preferContinuation, setPreferContinuation] = useState(saved.prefer_continuation);
+  const [preferIdle, setPreferIdle] = useState(saved.prefer_idle);
   const [availableModels, setAvailableModels] = useState<string[]>([]);
   const autoDiscoverKey = useRef("");
   const autoFilledModel = useRef("");
@@ -151,6 +152,7 @@ export function RoutingTab() {
     setUsagePriority(next.usage_priority);
     setAllowUpshift(next.allow_upshift);
     setPreferContinuation(next.prefer_continuation);
+    setPreferIdle(next.prefer_idle);
     setKeyInput("");
     setAnalysisKeyInput("");
     setAvailableModels([]);
@@ -179,6 +181,7 @@ export function RoutingTab() {
       usage_priority: usagePriority,
       allow_upshift: allowUpshift,
       prefer_continuation: preferContinuation,
+      prefer_idle: preferIdle,
     }),
     [
       enabled,
@@ -197,6 +200,7 @@ export function RoutingTab() {
       usagePriority,
       allowUpshift,
       preferContinuation,
+      preferIdle,
     ],
   );
 
@@ -261,7 +265,8 @@ export function RoutingTab() {
       (a.policy_prompt ?? "").trim() === (b.policy_prompt ?? "").trim() &&
       a.usage_priority === b.usage_priority &&
       a.allow_upshift === b.allow_upshift &&
-      a.prefer_continuation === b.prefer_continuation,
+      a.prefer_continuation === b.prefer_continuation &&
+      a.prefer_idle === b.prefer_idle,
   });
 
   // Live health from the server. Without it the fourth state is unreachable:
@@ -473,6 +478,22 @@ export function RoutingTab() {
               disabled={!canManage || !enabled}
               onCheckedChange={setPreferContinuation}
               aria-label={t(($) => $.routing.continuation_label)}
+            />
+          </SettingsRow>
+
+          <SettingsRow
+            label={t(($) => $.routing.load_label)}
+            description={
+              preferIdle
+                ? t(($) => $.routing.load_description_on)
+                : t(($) => $.routing.load_description_shadow)
+            }
+          >
+            <Switch
+              checked={preferIdle}
+              disabled={!canManage || !enabled}
+              onCheckedChange={setPreferIdle}
+              aria-label={t(($) => $.routing.load_label)}
             />
           </SettingsRow>
         </SettingsCard>

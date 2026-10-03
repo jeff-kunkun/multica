@@ -23,13 +23,14 @@ import {
 // switches at their defaults.
 const JUDGE_ONLY: Pick<
   RoutingSettings,
-  "judge_enabled" | "analysis" | "usage_priority" | "allow_upshift" | "prefer_continuation"
+  "judge_enabled" | "analysis" | "usage_priority" | "allow_upshift" | "prefer_continuation" | "prefer_idle"
 > = {
   judge_enabled: true,
   analysis: { enabled: false, model: "", base_url: "" },
   usage_priority: true,
   allow_upshift: false,
   prefer_continuation: false,
+  prefer_idle: false,
 };
 
 const BASE: RoutingSettings = {
@@ -66,6 +67,7 @@ describe("parseRoutingSettings", () => {
       usage_priority: true,
       allow_upshift: false,
       prefer_continuation: false,
+      prefer_idle: false,
     });
   });
 
@@ -76,6 +78,7 @@ describe("parseRoutingSettings", () => {
       usage_priority: true,
       allow_upshift: false,
       prefer_continuation: false,
+      prefer_idle: false,
     });
     expect(
       parseRoutingSettings({
@@ -87,6 +90,9 @@ describe("parseRoutingSettings", () => {
     expect(
       parseRoutingSettings({ routing: { prefer_continuation: true } }).prefer_continuation,
     ).toBe(true);
+    // DENE-1203: 负载分流 is off (shadow) unless explicitly true.
+    expect(parseRoutingSettings({ routing: {} }).prefer_idle).toBe(false);
+    expect(parseRoutingSettings({ routing: { prefer_idle: true } }).prefer_idle).toBe(true);
     // Only an explicit false turns usage priority off.
     expect(
       parseRoutingSettings({ routing: { usage_priority: "no" } }).usage_priority,
@@ -247,6 +253,7 @@ describe("withRoutingSettings", () => {
         usage_priority: true,
         allow_upshift: false,
         prefer_continuation: false,
+        prefer_idle: false,
       },
     });
   });
@@ -270,6 +277,7 @@ describe("withRoutingSettings", () => {
       usage_priority: true,
       allow_upshift: false,
       prefer_continuation: false,
+      prefer_idle: false,
       projects: { tarot: "出海" },
       future: 1,
     });
@@ -296,6 +304,7 @@ describe("withRoutingSettings", () => {
         usage_priority: true,
         allow_upshift: false,
         prefer_continuation: false,
+        prefer_idle: false,
       },
     );
     const gateway = withRoutingSettings(
@@ -311,6 +320,7 @@ describe("withRoutingSettings", () => {
         usage_priority: true,
         allow_upshift: false,
         prefer_continuation: false,
+        prefer_idle: false,
       },
     );
     expect((gateway.routing as { analysis: { source: string } }).analysis.source).toBe("api_gateway");
