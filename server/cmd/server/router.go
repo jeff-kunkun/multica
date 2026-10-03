@@ -2753,6 +2753,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			// Independent workspace-level list backing the issues-header
 			// "agents working" chip and its assignee-id Table filter.
 			r.Get("/api/working-agents", h.ListWorkspaceWorkingAgents)
+			// Shared incremental-sync contract for high-frequency list clients.
+			r.Get("/api/sync/changes", h.ListIncrementalChanges)
 
 			// Workspace-wide daily agent activity (last 30d, anchored on
 			// completed_at). Backs the Agents-list sparkline (trailing 7d
