@@ -1,10 +1,11 @@
 "use client";
 
 import { Fragment, type ReactNode } from "react";
-import { ChevronRight } from "lucide-react";
+import { ArrowLeft, ChevronRight } from "lucide-react";
 import { cn } from "@multica/ui/lib/utils";
+import { Button } from "@multica/ui/components/ui/button";
 import { PageHeader } from "./page-header";
-import { AppLink } from "../navigation";
+import { AppLink, useBackOrReplace } from "../navigation";
 
 /**
  * One ancestor crumb. Always a clickable link to the segment's container — the
@@ -44,8 +45,28 @@ interface BreadcrumbHeaderProps {
  * real containers and clicking one navigates up to it.
  */
 export function BreadcrumbHeader({ segments, leaf, actions, leading, className }: BreadcrumbHeaderProps) {
+  const backOrReplace = useBackOrReplace();
+  const backFallback = segments.at(-1)?.href;
+
   return (
-    <PageHeader leading={leading} className={cn("bg-background text-body", className)}>
+    <PageHeader
+      leading={
+        leading ??
+        (backFallback ? (
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            className="shrink-0"
+            aria-label="Back"
+            onClick={() => backOrReplace(backFallback)}
+          >
+            <ArrowLeft className="size-4" aria-hidden="true" />
+          </Button>
+        ) : undefined)
+      }
+      className={cn("bg-background text-body", className)}
+    >
       <div className="flex flex-1 items-center gap-1.5 min-w-0">
         {segments.map((segment) => (
           <Fragment key={segment.href}>
