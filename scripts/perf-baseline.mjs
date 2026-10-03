@@ -13,6 +13,7 @@
  */
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
+import os from "node:os";
 import process from "node:process";
 import { chromium } from "playwright";
 
@@ -65,6 +66,19 @@ async function measureNavigation(page, path) {
   }
 }
 
+async function measureForeground(page) {
+  const startedAt = Date.now();
+  await page.bringToFront();
+  const state = await page.evaluate(() => ({
+    visibilityState: document.visibilityState,
+    hidden: document.hidden,
+  }));
+  return {
+    elapsedMs: Date.now() - startedAt,
+    ...state,
+  };
+}
+
 async function main() {
   const browser = await chromium.launch({ headless: true });
   const contextOptions = storageStatePath ? { storageState: JSON.parse(readFileSync(storageStatePath, "utf8")) } : {};
@@ -81,7 +95,14 @@ async function main() {
         // A second visit in the same context models returning to an already
         // loaded page. The request delta is the signal used by the optimization.
         const hot = await measureNavigation(page, route.path);
-        samples.push({ route: route.name, path: route.path, run, cold, hot });
+        // Keep a second page in front briefly, then bring the measured page
+        // back. This exercises the same visibility/focus boundary as a user
+        // switching back to the app without adding another navigation.
+        const background = await context.newPage();
+        await background.goto("about:blank");
+        const foreground = await measureForeground(page);
+        await background.close();
+        samples.push({ route: route.name, path: route.path, run, cold, hot, foreground });
         await context.close();
       }
     }
@@ -95,6 +116,13 @@ async function main() {
     url,
     runs,
     routes,
+    environment: {
+      node: process.version,
+      platform: process.platform,
+      arch: process.arch,
+      os: `${os.type()} ${os.release()}`,
+      browser: browser.version(),
+    },
     samples,
     notes: [
       "cold is a new navigation in a cleared browser context; hot is the immediate second visit in the same context",
