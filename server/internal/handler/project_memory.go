@@ -317,10 +317,7 @@ func (h *Handler) EnsureMemoryRound(ctx context.Context, project db.Project, rea
 		WorkspaceID: project.WorkspaceID, Column2: uuidToString(project.ID),
 	})
 	if findErr == nil {
-		if _, err := h.Queries.CreateComment(ctx, db.CreateCommentParams{
-			IssueID: issue.ID, WorkspaceID: issue.WorkspaceID, AuthorType: "agent", AuthorID: agentID,
-			Content: reason, Type: "progress_update", ID: dbid.NewV7(),
-		}); err != nil {
+		if err := h.appendMemoryReason(ctx, issue, agentID, reason); err != nil {
 			return MemoryRoundResult{}, err
 		}
 		return MemoryRoundResult{Issue: &issue}, nil
@@ -367,14 +364,32 @@ func (h *Handler) EnsureMemoryRound(ctx context.Context, project db.Project, rea
 		return MemoryRoundResult{}, err
 	}
 	if created.DuplicateIssue != nil {
-		if _, err := h.Queries.CreateComment(ctx, db.CreateCommentParams{
-			IssueID: issue.ID, WorkspaceID: issue.WorkspaceID, AuthorType: "agent", AuthorID: agentID,
-			Content: reason, Type: "progress_update", ID: dbid.NewV7(),
-		}); err != nil {
+		if err := h.appendMemoryReason(ctx, issue, agentID, reason); err != nil {
 			return MemoryRoundResult{}, err
 		}
 	}
 	return MemoryRoundResult{Issue: &issue, Created: created.DuplicateIssue == nil}, nil
+}
+
+// appendMemoryReason adds the reason to an open round unless the round's
+// newest progress note already says the same thing. The daemon re-reports the
+// checklist on every run in the project, so an unchanged gap would otherwise
+// stack one identical note per run while the ticket waits (DENE-1154).
+func (h *Handler) appendMemoryReason(ctx context.Context, issue db.Issue, agentID pgtype.UUID, reason string) error {
+	same, err := h.Queries.LatestProgressUpdateMatches(ctx, db.LatestProgressUpdateMatchesParams{
+		Content: reason, IssueID: issue.ID, AuthorType: "agent", AuthorID: agentID,
+	})
+	if err != nil {
+		return err
+	}
+	if same {
+		return nil
+	}
+	_, err = h.Queries.CreateComment(ctx, db.CreateCommentParams{
+		IssueID: issue.ID, WorkspaceID: issue.WorkspaceID, AuthorType: "agent", AuthorID: agentID,
+		Content: reason, Type: "progress_update", ID: dbid.NewV7(),
+	})
+	return err
 }
 
 // noteMemoryProgress opens or extends the project's sediment round. A missing
