@@ -2155,6 +2155,18 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			// Assignee frequency
 			r.Get("/api/assignee-frequency", h.GetAssigneeFrequency)
 
+			// Cross-workspace read-only links (DENE-1225). The header names
+			// the caller's own workspace; internal/workspacelink decides
+			// everything else, and /view is the only way source data leaves.
+			r.Route("/api/workspace-links", func(r chi.Router) {
+				r.Get("/", h.ListWorkspaceLinks)
+				r.Post("/", h.CreateWorkspaceLink)
+				r.Get("/audit", h.ListWorkspaceLinkAudit)
+				r.Patch("/{id}", h.UpdateWorkspaceLink)
+				r.Delete("/{id}", h.RevokeWorkspaceLink)
+				r.Get("/{id}/view", h.GetWorkspaceLinkView)
+			})
+
 			// Project-memory checklist (DENE-972). Not under /api/projects: that
 			// tree is behind the projects module, and a close must be able to
 			// read the same list the server validates against.

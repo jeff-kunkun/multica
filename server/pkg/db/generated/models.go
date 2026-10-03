@@ -2197,6 +2197,34 @@ type WorkspaceInvitation struct {
 	ExpiresAt     pgtype.Timestamptz `json:"expires_at"`
 }
 
+type WorkspaceLink struct {
+	ID                pgtype.UUID        `json:"id"`
+	SourceWorkspaceID pgtype.UUID        `json:"source_workspace_id"`
+	TargetWorkspaceID pgtype.UUID        `json:"target_workspace_id"`
+	Status            string             `json:"status"`
+	CreatedBy         pgtype.UUID        `json:"created_by"`
+	AcceptedBy        pgtype.UUID        `json:"accepted_by"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+	AcceptedAt        pgtype.Timestamptz `json:"accepted_at"`
+}
+
+type WorkspaceLinkAudit struct {
+	ID                pgtype.UUID        `json:"id"`
+	LinkID            pgtype.UUID        `json:"link_id"`
+	SourceWorkspaceID pgtype.UUID        `json:"source_workspace_id"`
+	TargetWorkspaceID pgtype.UUID        `json:"target_workspace_id"`
+	WorkspaceID       pgtype.UUID        `json:"workspace_id"`
+	ActorID           pgtype.UUID        `json:"actor_id"`
+	Action            string             `json:"action"`
+	Detail            []byte             `json:"detail"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+}
+
+type WorkspaceLinkProject struct {
+	LinkID    pgtype.UUID `json:"link_id"`
+	ProjectID pgtype.UUID `json:"project_id"`
+}
+
 type WorkspaceMcpServer struct {
 	ID          pgtype.UUID        `json:"id"`
 	WorkspaceID pgtype.UUID        `json:"workspace_id"`
