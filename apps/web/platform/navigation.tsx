@@ -77,6 +77,7 @@ function NavigationProviderInner({
 
   useEffect(() => {
     if (typeof window === "undefined") return;
+    if (typeof window.matchMedia !== "function") return;
     const media = window.matchMedia("(pointer: coarse) and (max-width: 767px)");
     if (!media.matches) return;
     let startX = 0;
