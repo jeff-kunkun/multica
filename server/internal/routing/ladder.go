@@ -193,6 +193,9 @@ type Seat struct {
 	// served by an ample seat from the rung above (「允许上调一档」). TierKey
 	// still names the rung that was asked for.
 	Upshifted bool
+	// Continues is set when the 接着做 rule placed this seat, and names the
+	// earlier work, e.g. "DENE-12（上一阶段）的执行人".
+	Continues string
 }
 
 // SeatName is the naming convention that links a tier to its

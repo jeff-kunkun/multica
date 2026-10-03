@@ -272,6 +272,7 @@ describe("RoutingTab", () => {
       policy_prompt: "",
       usage_priority: true,
       allow_upshift: false,
+      prefer_continuation: false,
       judge_enabled: false,
       analysis: {
         enabled: true,
@@ -625,6 +626,26 @@ describe("RoutingTab seat order switches", () => {
     ];
     expect(body.settings.routing.usage_priority).toBe(true);
     expect(body.settings.routing.allow_upshift).toBe(true);
+  });
+
+  // DENE-1202: 接着做 defaults to shadow mode, and the row says which mode it is.
+  it("switches 接着做 from shadow to live and saves it", async () => {
+    workspace.current.settings = {
+      routing: { enabled: true, model: "gpt-5.6-luna" },
+    };
+    render();
+    const continuation = screen.getByRole("switch", { name: "Prefer the previous executor" });
+    expect(continuation).not.toHaveAttribute("data-checked");
+    expect(screen.getByText(/^Shadow mode:/)).toBeInTheDocument();
+
+    await userEvent.click(continuation);
+    expect(screen.getByText(/^Live:/)).toBeInTheDocument();
+    await waitFor(() => expect(updateWorkspace).toHaveBeenCalled());
+    const [, body] = updateWorkspace.mock.calls.at(-1) as [
+      string,
+      { settings: { routing: Record<string, unknown> } },
+    ];
+    expect(body.settings.routing.prefer_continuation).toBe(true);
   });
 
   it("greys out upshift while usage priority is off", () => {

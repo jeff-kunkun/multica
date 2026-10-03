@@ -102,6 +102,13 @@ export interface RoutingSettings {
    * `usage_priority` is off.
    */
   allow_upshift: boolean;
+  /**
+   * 「接着做」(DENE-1202): a ticket continuing a previous stage, its parent,
+   * or its batch goes back to that work's executor when the seat can take it.
+   * Default off, which is shadow mode — routing keeps its own pick and the
+   * assignment comment says who this rule would have picked.
+   */
+  prefer_continuation: boolean;
 }
 
 /**
@@ -156,6 +163,7 @@ export const DEFAULT_ROUTING_SETTINGS: RoutingSettings = {
   policy_prompt: "",
   usage_priority: true,
   allow_upshift: false,
+  prefer_continuation: false,
 };
 
 function isRecord(v: unknown): v is Record<string, unknown> {
@@ -204,6 +212,7 @@ export function parseRoutingSettings(
     policy_prompt: typeof block.policy_prompt === "string" ? block.policy_prompt : "",
     usage_priority: block.usage_priority !== false,
     allow_upshift: block.allow_upshift === true,
+    prefer_continuation: block.prefer_continuation === true,
   };
 }
 
@@ -331,6 +340,7 @@ export function withRoutingSettings(
     policy_prompt: (next.policy_prompt ?? "").trim(),
     usage_priority: next.usage_priority,
     allow_upshift: next.allow_upshift,
+    prefer_continuation: next.prefer_continuation,
     judge_enabled: next.judge_enabled,
     [ROUTING_ANALYSIS_KEY]: analysis,
   };

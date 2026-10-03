@@ -23,12 +23,13 @@ import {
 // switches at their defaults.
 const JUDGE_ONLY: Pick<
   RoutingSettings,
-  "judge_enabled" | "analysis" | "usage_priority" | "allow_upshift"
+  "judge_enabled" | "analysis" | "usage_priority" | "allow_upshift" | "prefer_continuation"
 > = {
   judge_enabled: true,
   analysis: { enabled: false, model: "", base_url: "" },
   usage_priority: true,
   allow_upshift: false,
+  prefer_continuation: false,
 };
 
 const BASE: RoutingSettings = {
@@ -64,6 +65,7 @@ describe("parseRoutingSettings", () => {
       analysis: { enabled: false, model: "", base_url: "" },
       usage_priority: true,
       allow_upshift: false,
+      prefer_continuation: false,
     });
   });
 
@@ -73,12 +75,18 @@ describe("parseRoutingSettings", () => {
     expect(parseRoutingSettings({ routing: { enabled: true } })).toMatchObject({
       usage_priority: true,
       allow_upshift: false,
+      prefer_continuation: false,
     });
     expect(
       parseRoutingSettings({
         routing: { usage_priority: false, allow_upshift: true },
       }),
     ).toMatchObject({ usage_priority: false, allow_upshift: true });
+    // DENE-1202: 接着做 is off (shadow) unless explicitly true.
+    expect(parseRoutingSettings({ routing: {} }).prefer_continuation).toBe(false);
+    expect(
+      parseRoutingSettings({ routing: { prefer_continuation: true } }).prefer_continuation,
+    ).toBe(true);
     // Only an explicit false turns usage priority off.
     expect(
       parseRoutingSettings({ routing: { usage_priority: "no" } }).usage_priority,
@@ -238,6 +246,7 @@ describe("withRoutingSettings", () => {
         analysis: { enabled: false, model: "", base_url: "" },
         usage_priority: true,
         allow_upshift: false,
+        prefer_continuation: false,
       },
     });
   });
@@ -260,6 +269,7 @@ describe("withRoutingSettings", () => {
       analysis: { enabled: false, model: "", base_url: "" },
       usage_priority: true,
       allow_upshift: false,
+      prefer_continuation: false,
       projects: { tarot: "出海" },
       future: 1,
     });
@@ -285,6 +295,7 @@ describe("withRoutingSettings", () => {
         judge_enabled: false,
         usage_priority: true,
         allow_upshift: false,
+        prefer_continuation: false,
       },
     );
     const gateway = withRoutingSettings(
@@ -299,6 +310,7 @@ describe("withRoutingSettings", () => {
         judge_enabled: false,
         usage_priority: true,
         allow_upshift: false,
+        prefer_continuation: false,
       },
     );
     expect((gateway.routing as { analysis: { source: string } }).analysis.source).toBe("api_gateway");
