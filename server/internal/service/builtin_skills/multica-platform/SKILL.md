@@ -1,6 +1,6 @@
 ---
 name: multica-platform
-description: "Use for Multica platform actions: asks, goals, inbox, project board, issues, sub-issues, wakeups, comment charts, routing, close protocol, stall actions, mentions, agents, specialisations, squads, autopilots, projects, runtimes, progress, skill import, transfers, GitHub App. Not product code."
+description: "Multica platform actions: asks, goals, inbox, project board, issues, sub-issues, wakeups, comment charts, routing, close protocol, stall actions, mentions, agents, specialisation, squads, autopilot, projects, runtimes, progress, skill import, transfer, linked workspace, GitHub App. Not product code."
 user-invocable: false
 allowed-tools: Bash(multica *), Bash(git *), Bash(gh *)
 ---
@@ -36,6 +36,7 @@ Read the invariants below, then open the reference(s) your task actually needs
 | `references/runtimes.md` | Runtimes, daemons, `repo checkout`, and the task CLI boundary |
 | `references/inbox.md` | The user asks about their inbox or what is stuck: `multica inbox board` (optionally `--project`) and the fixed five-part answer |
 | `references/project-board.md` | The user asks for the full open-ticket panorama by project: `multica project board` (one or more projects, or the whole workspace) |
+| `references/workspace-links.md` | Reading another workspace's shared projects through a link: `multica workspace link list` / `view`, what the view contains, why it says link not found |
 | `references/transfer.md` | `multica transfer export` / `import` / `bind-runtimes`, and the kun `/transfer/*` endpoints |
 | `references/skill-import.md` | Importing a skill into this workspace from a URL or a local archive |
 | `references/github-app.md` | GitHub App identity for this deployment: status, and a setup link a person opens to create the App |
