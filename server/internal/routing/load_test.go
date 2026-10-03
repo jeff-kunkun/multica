@@ -79,8 +79,8 @@ func TestPickLoad(t *testing.T) {
 			func() LoadSeat { s := loadSeat("a-goku", "孙悟空", 2); s.UsageRank = 1; return s }(),
 			func() LoadSeat { s := loadSeat("a-gohan", "孙悟饭", 0); s.UsageRank = 2; return s }(),
 		}, want: "a-goku"},
-		{name: "seats tagged the same as the pick still share", base: base, seats: []LoadSeat{
-			func() LoadSeat { s := loadSeat("a-goku", "孙悟空", 2); s.UsageRank = 1; return s }(),
+		{name: "an idle normal seat shares with a busy ample pick", base: base, seats: []LoadSeat{
+			func() LoadSeat { s := loadSeat("a-goku", "孙悟空", 2); s.UsageRank = 0; return s }(),
 			func() LoadSeat { s := loadSeat("a-trunks", "特兰克斯", 0); s.UsageRank = 1; return s }(),
 			func() LoadSeat { s := loadSeat("a-gohan", "孙悟饭", 0); s.UsageRank = 2; return s }(),
 		}, want: "a-trunks", moved: true},
