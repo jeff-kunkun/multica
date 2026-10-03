@@ -75,6 +75,19 @@ func TestPickLoad(t *testing.T) {
 			loadSeat("a-goku", "孙悟空", 1),
 			func() LoadSeat { s := loadSeat("a-krillin", "克林", 0); s.Demoted = true; return s }(),
 		}, want: "a-goku"},
+		{name: "an idle tight seat does not take work from a busy normal one", base: base, seats: []LoadSeat{
+			func() LoadSeat { s := loadSeat("a-goku", "孙悟空", 2); s.UsageRank = 1; return s }(),
+			func() LoadSeat { s := loadSeat("a-gohan", "孙悟饭", 0); s.UsageRank = 2; return s }(),
+		}, want: "a-goku"},
+		{name: "seats tagged the same as the pick still share", base: base, seats: []LoadSeat{
+			func() LoadSeat { s := loadSeat("a-goku", "孙悟空", 2); s.UsageRank = 1; return s }(),
+			func() LoadSeat { s := loadSeat("a-trunks", "特兰克斯", 0); s.UsageRank = 1; return s }(),
+			func() LoadSeat { s := loadSeat("a-gohan", "孙悟饭", 0); s.UsageRank = 2; return s }(),
+		}, want: "a-trunks", moved: true},
+		{name: "all tight seats share among themselves", base: base, seats: []LoadSeat{
+			func() LoadSeat { s := loadSeat("a-goku", "孙悟空", 1); s.UsageRank = 2; return s }(),
+			func() LoadSeat { s := loadSeat("a-gohan", "孙悟饭", 0); s.UsageRank = 2; return s }(),
+		}, want: "a-gohan", moved: true},
 		{name: "upshifted base is left alone", base: Seat{ID: "a-goku", Name: "孙悟空", TierKey: "strong", Upshifted: true}, seats: []LoadSeat{
 			loadSeat("a-goku", "孙悟空", 1), loadSeat("a-krillin", "克林", 0),
 		}, want: "a-goku"},
