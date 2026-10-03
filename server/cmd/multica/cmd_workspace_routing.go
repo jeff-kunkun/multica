@@ -16,10 +16,10 @@ var workspaceRoutingCmd = &cobra.Command{
 	Short: "Configure the routing analysis model and the continuation and load rules",
 }
 
-var workspaceRoutingGetCmd = &cobra.Command{Use: "get", Short: "Show analysis routing settings and the continuation and load switches", Args: cobra.NoArgs, RunE: runWorkspaceRoutingGet}
+var workspaceRoutingGetCmd = &cobra.Command{Use: "get", Short: "Show analysis routing settings and all routing switches", Args: cobra.NoArgs, RunE: runWorkspaceRoutingGet}
 var workspaceRoutingSetCmd = &cobra.Command{
 	Use:   "set",
-	Short: "Set analysis source, runtime, model, thinking level, or the continuation and load switches",
+	Short: "Set analysis source, runtime, model, thinking level, or routing switches",
 	Long: `Set analysis source, runtime, model, thinking level, or the continuation and load switches.
 
 --continuation on|off is 接着做: a ticket continuing a previous stage, its
@@ -44,6 +44,8 @@ func init() {
 	workspaceRoutingSetCmd.Flags().String("thinking", "", "Thinking level: low, medium, high")
 	workspaceRoutingSetCmd.Flags().String("continuation", "", "接着做 switch: on (prefer the previous executor) or off (shadow mode)")
 	workspaceRoutingSetCmd.Flags().String("load", "", "负载分流 switch: on (prefer a less busy seat of the same tier) or off (shadow mode)")
+	workspaceRoutingSetCmd.Flags().String("usage-priority", "", "用量优先 switch: on (ample seats first) or off (stable name order)")
+	workspaceRoutingSetCmd.Flags().String("allow-upshift", "", "允许上调一档 switch: on (borrow an ample seat from the tier above) or off")
 	workspaceRoutingCmd.AddCommand(workspaceRoutingGetCmd, workspaceRoutingSetCmd)
 	workspaceCmd.AddCommand(workspaceRoutingCmd)
 }
@@ -69,10 +71,17 @@ func routingView(block map[string]any) map[string]any {
 	analysis, _ := block["analysis"].(map[string]any)
 	continuation, _ := block["prefer_continuation"].(bool)
 	idle, _ := block["prefer_idle"].(bool)
+	usagePriority, ok := block["usage_priority"].(bool)
+	if !ok {
+		// The web and server default this omitted legacy field to on.
+		usagePriority = true
+	}
+	allowUpshift, _ := block["allow_upshift"].(bool)
 	return map[string]any{
 		"source": analysis["source"], "runtime_id": analysis["runtime_id"], "model": analysis["model"], "thinking_level": analysis["thinking_level"],
 		"prefer_continuation": continuation, "continuation_mode": switchMode(continuation),
 		"prefer_idle": idle, "load_mode": switchMode(idle),
+		"usage_priority": usagePriority, "allow_upshift": allowUpshift,
 	}
 }
 
@@ -96,6 +105,14 @@ func runWorkspaceRoutingSet(cmd *cobra.Command, _ []string) error {
 	load, _ := cmd.Flags().GetString("load")
 	if load != "" && load != "on" && load != "off" {
 		return fmt.Errorf("--load must be on or off")
+	}
+	usagePriority, _ := cmd.Flags().GetString("usage-priority")
+	if usagePriority != "" && usagePriority != "on" && usagePriority != "off" {
+		return fmt.Errorf("--usage-priority must be on or off")
+	}
+	allowUpshift, _ := cmd.Flags().GetString("allow-upshift")
+	if allowUpshift != "" && allowUpshift != "on" && allowUpshift != "off" {
+		return fmt.Errorf("--allow-upshift must be on or off")
 	}
 	if source != "" && source != "api_gateway" && source != "runtime_subscription" {
 		return fmt.Errorf("--source must be api_gateway or runtime_subscription")
@@ -122,6 +139,12 @@ func runWorkspaceRoutingSet(cmd *cobra.Command, _ []string) error {
 	}
 	if load != "" {
 		block["prefer_idle"] = load == "on"
+	}
+	if usagePriority != "" {
+		block["usage_priority"] = usagePriority == "on"
+	}
+	if allowUpshift != "" {
+		block["allow_upshift"] = allowUpshift == "on"
 	}
 	analysis, _ := block["analysis"].(map[string]any)
 	if analysis == nil {

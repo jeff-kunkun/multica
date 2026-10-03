@@ -7,7 +7,7 @@ import (
 
 func newWorkspaceRoutingSetTestCmd() *cobra.Command {
 	cmd := newRoutingProjectsTestCmd()
-	for _, f := range []string{"source", "runtime", "model", "thinking", "continuation", "load"} {
+	for _, f := range []string{"source", "runtime", "model", "thinking", "continuation", "load", "usage-priority", "allow-upshift"} {
 		cmd.Flags().String(f, "", "")
 	}
 	return cmd
@@ -55,6 +55,28 @@ func TestRoutingViewReportsShadowByDefault(t *testing.T) {
 	}
 	if got := routingView(map[string]any{"prefer_continuation": true}); got["continuation_mode"] != "on" {
 		t.Fatalf("on view = %v", got)
+	}
+	if got := routingView(nil); got["usage_priority"] != true || got["allow_upshift"] != false {
+		t.Fatalf("default tier switches = %v", got)
+	}
+}
+
+func TestWorkspaceRoutingSetTierSwitches(t *testing.T) {
+	var patched map[string]any
+	routingProjectsServer(t, map[string]any{"routing": map[string]any{"usage_priority": true}}, &patched)
+	cmd := newWorkspaceRoutingSetTestCmd()
+	_ = cmd.Flags().Set("usage-priority", "off")
+	_ = cmd.Flags().Set("allow-upshift", "on")
+	if err := runWorkspaceRoutingSet(cmd, nil); err != nil {
+		t.Fatalf("set: %v", err)
+	}
+	settings, _ := patched["settings"].(map[string]any)
+	block, _ := settings["routing"].(map[string]any)
+	if block["usage_priority"] != false || block["allow_upshift"] != true {
+		t.Fatalf("tier switches = %v", block)
+	}
+	if got := routingView(block); got["usage_priority"] != false || got["allow_upshift"] != true {
+		t.Fatalf("view = %v", got)
 	}
 }
 
