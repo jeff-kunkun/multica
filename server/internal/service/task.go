@@ -5498,6 +5498,9 @@ func (s *TaskService) FailTaskWithTransition(ctx context.Context, taskID pgtype.
 	if retried == nil && task.IssueID.Valid {
 		capacityHeld = s.relayQuotaExhaustion(ctx, task, failureReason, errMsg)
 	}
+	if retried == nil && task.IssueID.Valid && !capacityHeld {
+		capacityHeld = s.relaySafetyRefusal(ctx, task, errMsg)
+	}
 
 	// A platform interrupt (daemon shutdown while the server still considered
 	// the run alive) always leaves a notice, including when a retry was just

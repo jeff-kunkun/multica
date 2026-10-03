@@ -42,6 +42,8 @@ const (
 	ConditionWeekly           = "next weekly reset"
 	ConditionParsedReset      = "provider reset hint"
 	ConditionModelWindow      = "specialized model quota window"
+	ConditionSessionWindow    = "provider session window"
+	sessionQuotaWindow        = 5 * time.Hour
 	ConditionCapacityCooldown = "provider capacity cooldown"
 	ConditionManual           = "top up or switch the account, then re-enable the seat"
 	modelQuotaWindow          = time.Hour
@@ -128,6 +130,18 @@ func PlanFor(failureReason, errorText string, binding Binding, now time.Time) (P
 	if reset, ok := parseResetsIn(errorText, now); ok {
 		plan.RecoverAt = reset
 		plan.Condition = ConditionParsedReset
+		return plan, true
+	}
+	if reset, ok := parseResetsAt(errorText, now); ok {
+		plan.RecoverAt = reset
+		plan.Condition = ConditionParsedReset
+		return plan, true
+	}
+	if kind == KindWeeklyAgent && sessionWorded(strings.ToLower(errorText)) && !now.IsZero() {
+		// A session window is hours, not a week. Waiting for Monday would
+		// keep a seat shut for days after its account was usable again.
+		plan.RecoverAt = now.Add(sessionQuotaWindow)
+		plan.Condition = ConditionSessionWindow
 		return plan, true
 	}
 	if kind == KindSpecializedModel {
@@ -262,6 +276,55 @@ func parseResetsIn(text string, now time.Time) (time.Time, bool) {
 		return time.Time{}, false
 	}
 	return now.Add(total), true
+}
+
+// sessionWorded is Claude Code's short window: "You've hit your session
+// limit · resets 11:10pm (Asia/Taipei)" (DENE-1159).
+func sessionWorded(lower string) bool {
+	return strings.Contains(lower, "session limit")
+}
+
+// resetsAtRe matches a wall-clock reset right after "resets", with the zone
+// Claude Code prints in parentheses: "resets 11:10pm (Asia/Taipei)",
+// "resets 3pm". A date in front ("resets Oct 6, 9am") does not match; those
+// are weekly windows and keep the weekly default.
+var resetsAtRe = regexp.MustCompile(`(?i)resets\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)\b(?:\s*\(([^)]+)\))?`)
+
+// parseResetsAt turns a wall-clock reset into the next such instant after
+// now. Without a zone, or with one Go cannot load, it gives up rather than
+// guess: the session or weekly default then applies.
+func parseResetsAt(text string, now time.Time) (time.Time, bool) {
+	if now.IsZero() {
+		return time.Time{}, false
+	}
+	m := resetsAtRe.FindStringSubmatch(text)
+	if m == nil || strings.TrimSpace(m[4]) == "" {
+		return time.Time{}, false
+	}
+	loc, err := time.LoadLocation(strings.TrimSpace(m[4]))
+	if err != nil {
+		return time.Time{}, false
+	}
+	hour, err := strconv.Atoi(m[1])
+	if err != nil || hour < 1 || hour > 12 {
+		return time.Time{}, false
+	}
+	minute := 0
+	if m[2] != "" {
+		if minute, err = strconv.Atoi(m[2]); err != nil || minute > 59 {
+			return time.Time{}, false
+		}
+	}
+	hour %= 12
+	if strings.EqualFold(m[3], "pm") {
+		hour += 12
+	}
+	local := now.In(loc)
+	reset := time.Date(local.Year(), local.Month(), local.Day(), hour, minute, 0, 0, loc)
+	if !reset.After(now) {
+		reset = reset.AddDate(0, 0, 1)
+	}
+	return reset, true
 }
 
 // nextWeeklyReset is the following Monday 00:00 UTC. A hit on Monday still
