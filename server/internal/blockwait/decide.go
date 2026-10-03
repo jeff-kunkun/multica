@@ -85,6 +85,10 @@ type Decision struct {
 	// that branch.
 	Inherited  []string
 	BaseBranch string
+	// Machine is the machine-wait kind of a ReleaseWait (DENE-1212). The
+	// caller turns it into a ParkMachineWait; it is never written as blocked
+	// directly.
+	Machine string
 }
 
 // DecidePatrol picks a single next step for one stalled issue.
@@ -326,16 +330,18 @@ func (d *Decision) letThrough(pr PRSnapshot, names []string) {
 	}
 }
 
-// Release actions.
+// Release actions. ReleaseWait is a stop the executor can clear by itself
+// (DENE-1212): the caller keeps the ticket in progress on Record's clock
+// through ParkMachineWait instead of writing blocked.
 const (
 	ReleaseDone  = "done"
 	ReleaseMerge = "merge"
-	ReleaseBlock = "block"
+	ReleaseWait  = "wait"
 )
 
 // DecideRelease says what an acceptance pass should do with the linked PRs.
 // A pass never stays in in_review: no open PR closes the issue, a clean PR is
-// merged, and a conflict or a red check becomes a structured block.
+// merged, and a conflict or a red check becomes a machine wait.
 func DecideRelease(prs []PRSnapshot, now time.Time) Decision {
 	if now.IsZero() {
 		now = time.Now()
@@ -364,9 +370,10 @@ func DecideRelease(prs []PRSnapshot, now time.Time) Decision {
 				WakeAt:         now.Add(QuietAfter),
 			}
 			return Decision{
-				Action: ReleaseBlock,
-				Reason: fmt.Sprintf("验收已经通过，但 %s。先标成阻塞，到点再看，不继续停在待验收。", rec.WaitCondition),
-				Record: rec,
+				Action:  ReleaseWait,
+				Reason:  fmt.Sprintf("验收已经通过，但 %s，不继续停在待验收。", rec.WaitCondition),
+				Record:  rec,
+				Machine: machineKindFor(pr),
 			}
 		}
 	}
@@ -382,7 +389,7 @@ func DecideRelease(prs []PRSnapshot, now time.Time) Decision {
 
 // DecideClose is the gate on a direct move to done. An open linked PR that is
 // cleanly mergeable and whose checks are green is merged by the caller; any
-// other open PR becomes a structured block. No open PR allows the close.
+// other open PR becomes a machine wait. No open PR allows the close.
 func DecideClose(prs []PRSnapshot, now time.Time) Decision {
 	if now.IsZero() {
 		now = time.Now()
@@ -413,9 +420,10 @@ func DecideClose(prs []PRSnapshot, now time.Time) Decision {
 			WakeAt:         now.Add(QuietAfter),
 		}
 		return Decision{
-			Action: ReleaseBlock,
-			Reason: fmt.Sprintf("这张票要关，但 %s。先改成阻塞，不标完成。", rec.WaitCondition),
-			Record: rec,
+			Action:  ReleaseWait,
+			Reason:  fmt.Sprintf("这张票要关，但 %s，先不标完成。", rec.WaitCondition),
+			Record:  rec,
+			Machine: machineKindFor(pr),
 		}
 	}
 	label := prLabel(open[0])

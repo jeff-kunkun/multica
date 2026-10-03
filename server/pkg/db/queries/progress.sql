@@ -5,8 +5,8 @@
 
 -- name: UpdateIssueProgress :one
 -- fallback_only is the parking-summary path: it writes only while nobody has
--- said anything better (no agent report, no close summary). Zero rows means
--- an explicit line already stands.
+-- said anything better (no agent report, no close summary, no platform wait
+-- line). Zero rows means an explicit line already stands.
 UPDATE issue
 SET progress_text = @text,
     progress_source = @source,
@@ -15,7 +15,7 @@ SET progress_text = @text,
     progress_author_id = sqlc.narg('author_id')::uuid,
     progress_updated_at = now()
 WHERE id = @id AND workspace_id = @workspace_id
-  AND (NOT @fallback_only::bool OR progress_source NOT IN ('agent', 'close'))
+  AND (NOT @fallback_only::bool OR progress_source NOT IN ('agent', 'close', 'wait'))
 RETURNING *;
 
 -- name: CreateIssueProgress :exec

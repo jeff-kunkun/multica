@@ -63,7 +63,7 @@ function ProgressMeta({ entry }: { entry: Progress }) {
   const timeAgo = useTimeAgo();
   const { getActorName } = useActorName();
   const author = entry.author_id && entry.author_type !== "system" ? getActorName(entry.author_type, entry.author_id) : null;
-  const sourceKey = ["agent", "close", "parking", "model", "reply"].includes(entry.source) ? entry.source : null;
+  const sourceKey = ["agent", "close", "parking", "model", "reply", "wait"].includes(entry.source) ? entry.source : null;
   const source = sourceKey
     ? t(($) => $.progress_line[`source_${sourceKey}` as "source_agent"])
     : entry.source;

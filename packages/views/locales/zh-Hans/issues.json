@@ -1788,6 +1788,7 @@
     "source_close": "收口总结",
     "source_parking": "巡检摘要",
     "source_model": "自动总结",
-    "source_reply": "摘自回复"
+    "source_reply": "摘自回复",
+    "source_wait": "平台在等"
   }
 }

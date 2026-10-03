@@ -245,7 +245,7 @@ func TestStatusRuleIsFactJudgmentAtBothMoments(t *testing.T) {
 		"without one the close is rejected",
 		"`--outcome backlog --evidence-file ./close.md` or `--outcome todo --evidence-file ./close.md`",
 		"no PR, nobody is woken",
-		"an open linked PR is merged first; if it cannot be, the close lands as `blocked`",
+		"an open linked PR is merged first; if checks are running or red, the branch conflicts, or the merge fails, the ticket stays `in_progress`",
 		"an empty reviewer slot is filled with a different-family acceptance seat in the same call",
 		"`--outcome done --verdict pass --evidence-file ./close.md`",
 		"never as a silent `in_review`",
