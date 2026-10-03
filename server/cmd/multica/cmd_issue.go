@@ -2435,15 +2435,30 @@ func runIssueClose(cmd *cobra.Command, args []string) error {
 		if err := preflightIssueClose(ctx, client, issueRef.ID, body); err != nil {
 			return fmt.Errorf("close issue: %w", err)
 		}
-		declaredPR, _ := cmd.Flags().GetString("pr")
-		if strings.TrimSpace(declaredPR) == "" {
-			declaredPR = pullURLFromText(evidence)
-		}
-		refreshIssuePullRequestsWithURL(ctx, client, issueRef.ID, issueRef.Display, declaredPR, outcome == "done" && verdict == "pass", outcome == "done" && verdict == "")
 	}
+	declaredPR, _ := cmd.Flags().GetString("pr")
+	if strings.TrimSpace(declaredPR) == "" {
+		declaredPR = pullURLFromText(evidence)
+	}
+	// A PR whose checks are still running is waited out here (DENE-1219):
+	// the server answers close_checks_pending and changes nothing, so the
+	// CLI refreshes the PR snapshot and asks again until CI settles or the
+	// wait runs out. Every other answer is final for this call.
 	var result map[string]any
-	if err := client.PostJSON(ctx, "/api/issues/"+issueRef.ID+"/close", body, &result); err != nil {
-		return fmt.Errorf("close issue: %w", err)
+	deadline := closeNow().Add(closeWaitLimit)
+	for {
+		result, err = postIssueClose(client, issueRef, body, outcome, verdict, declaredPR)
+		if err == nil {
+			break
+		}
+		if !isCloseChecksPending(err) {
+			return fmt.Errorf("close issue: %w", err)
+		}
+		if !closeNow().Add(closeWaitInterval).Before(deadline) {
+			return fmt.Errorf("close issue: PR 的检查等了 %s 还没跑完，票没动。CI 出结果后再执行一次同样的 close：%w", closeWaitLimit, err)
+		}
+		fmt.Fprintf(os.Stderr, "PR 的检查还在跑，%s 后再试（最多等 %s）…\n", closeWaitInterval, closeWaitLimit)
+		closeSleep(closeWaitInterval)
 	}
 
 	status, _ := result["status"].(string)
@@ -2467,6 +2482,34 @@ func runIssueClose(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 	return cli.PrintJSON(os.Stdout, result)
+}
+
+var (
+	closeWaitInterval = 30 * time.Second
+	closeWaitLimit    = 15 * time.Minute
+	closeSleep        = time.Sleep
+	closeNow          = time.Now
+)
+
+// postIssueClose refreshes the issue's PR snapshot and sends one close. Each
+// attempt gets its own request deadline, since the checks wait spans many.
+func postIssueClose(client *cli.APIClient, issueRef resolvedID, body map[string]any, outcome, verdict, declaredPR string) (map[string]any, error) {
+	ctx, cancel := cli.APIContext(context.Background())
+	defer cancel()
+	if outcome == "done" || outcome == "in_review" {
+		refreshIssuePullRequestsWithURL(ctx, client, issueRef.ID, issueRef.Display, declaredPR, outcome == "done" && verdict == "pass", outcome == "done" && verdict == "")
+	}
+	var result map[string]any
+	err := client.PostJSON(ctx, "/api/issues/"+issueRef.ID+"/close", body, &result)
+	return result, err
+}
+
+// isCloseChecksPending reports the server's "checks still running" refusal,
+// the one close answer the CLI waits out instead of relaying.
+func isCloseChecksPending(err error) bool {
+	var httpErr *cli.HTTPError
+	return errors.As(err, &httpErr) && httpErr.StatusCode == http.StatusConflict &&
+		strings.Contains(httpErr.Body, `"code":"close_checks_pending"`)
 }
 
 func runIssueProgress(cmd *cobra.Command, args []string) error {

@@ -22,10 +22,6 @@ const (
 	SourceClose = "close"
 	SourceModel = "model"
 	SourceReply = "reply"
-	// SourceWait is the platform's own line for a close it held back on a
-	// machine wait (DENE-1212): "在等 PR 检查，30 分钟后叫醒执行人". It is
-	// explicit like a close summary, so the parking summary does not replace it.
-	SourceWait = "wait"
 )
 
 // Tones the dot colour reads: blue / yellow / red / green.

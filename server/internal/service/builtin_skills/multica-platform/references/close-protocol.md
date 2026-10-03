@@ -60,25 +60,31 @@ multica issue close <id> --outcome done --verdict pass --evidence-file ./close.m
   issue's assignee; `--needs-human` names the person instead.
 - `--verdict pass` is the acceptance seat's release and only pairs with
   `--outcome done` on an `in_review` ticket: the platform merges the open PR
-  and writes `done`; if the merge cannot happen it is the machine wait below,
-  not `blocked`. A failed acceptance is not a close: `multica issue comment
+  and writes `done`; if the merge cannot happen it is a PR stop below, not
+  `blocked`. A failed acceptance is not a close: `multica issue comment
   add <id> --verdict hold --content-file ./review.md` wakes the executor.
-- **Machine wait** (DENE-1212). `blocked` means a person has to act. A stop
-  the executor can clear — PR checks still running or red, a conflict with
-  the base, the platform's merge failing, the PR or delivery line unreadable,
-  a draft PR — never writes `blocked` by itself. The `done` close (and a
-  `--verdict pass`) keeps the ticket `in_progress` with conclusion
-  `continuing` and `wake_action=clock`, stores the reason as
-  `block.wait_condition`, and the patrol wakes the executor 30 minutes later.
-  The board shows the reason as the issue's progress line (source `wait`).
-  The same stop unresolved for **3 rounds in a row** becomes `blocked` with
-  `--needs-human` on the ticket's owner (the member who opened it, else a
-  workspace manager), who is summoned; a different stop resets the count.
-  The reply carries `wait`: `kind` (`checks_pending`, `checks_red`,
-  `conflict`, `merge_failed`, `read_failed`, `draft`, `delivery`), `status`,
-  `condition`, `wake_at`, `wake_owner_type`/`wake_owner_id`, `round`,
-  `escalates_after`, `escalated`, `needs_human`. When woken, fix the stop and
-  run the same `--outcome done` again.
+- **PR stops are answered on the spot** (DENE-1219). `blocked` means a person
+  has to act: missing permission or `--needs-human`. Anything the executor can
+  clear never writes a status:
+  - Checks still running: the CLI waits in place (refreshes the PR and asks
+    again every 30 seconds, about 15 minutes at most) and merges when green.
+    If CI is still running after that, run the same close again later.
+  - Checks red, a conflict with the base, a draft PR, the PR or delivery line
+    unreadable: the close is refused with HTTP 409 and a `code`
+    (`close_checks_red`, `close_conflict`, `close_draft`, `close_read_failed`,
+    `close_delivery`). Red checks name the check and where its logs are
+    (`gh pr checks <url>`). Fix the cause and close again; if the same check is
+    already red on the base branch the gate lets it through by itself, and if
+    it could not read the base, merge with `gh pr merge --squash <url>` once
+    you have confirmed it, then close again.
+  - The platform's merge fails: it retries once; still failing, the close is
+    refused with `close_merge_failed` and the local command
+    `gh pr merge --squash <url>` — run it, then close again.
+  - A `--verdict pass` that hits a stop is refused before the pass is recorded
+    (same codes). A pass recorded earlier by comment whose merge then fails
+    keeps the ticket `in_review`, and the reply's `hold` (`kind`, `reason`,
+    `next`) says what is missing; the executor is woken to fix it and the
+    patrol merges once the PR can go in.
 - `--pr <pull-or-mr-url>` declares the delivery when the platform has not
   linked one yet (DENE-961). The server checks that URL against the
   repository connection, registers it when the check succeeds, then runs the

@@ -4494,7 +4494,7 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 	}
 	tr := h.guardSilentStall(r.Context(), prevIssue, statusKeyForGuard, statusActorType, actorIDForGuard, deref(req.NoCodeReason), params.AssigneeType, params.AssigneeID, params.ReviewerType, params.ReviewerID, touchedReviewerType || touchedReviewerID)
 	if tr.refuse != "" {
-		writeError(w, http.StatusConflict, tr.refuse)
+		writeTransitionRefusal(w, tr)
 		return
 	}
 	if tr.status != "" {
@@ -4673,7 +4673,6 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		h.persistBlockRecord(r.Context(), issue, blockRecord)
 		h.summonNeedsHuman(r.Context(), issue, blockRecord.NeedsHuman, actorType, actorID, "")
 	}
-	issue = h.applyMachinePark(r.Context(), issue, tr.park, actorType, actorID)
 	if statusChanged || titleChanged || descriptionChanged {
 		if statusChanged {
 			h.notifyParentOfChildDone(r.Context(), prevIssue, issue)
@@ -5546,8 +5545,6 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 		if batchTransition.persistBlock {
 			h.persistBlockRecord(r.Context(), issue, batchTransition.block)
 		}
-		actorTypeForPark, actorIDForPark := h.resolveActor(r, userID, workspaceID)
-		issue = h.applyMachinePark(r.Context(), issue, batchTransition.park, actorTypeForPark, actorIDForPark)
 		if batchStamp != nil {
 			issue = h.stampAssignee(r.Context(), issue, *batchStamp)
 		}
