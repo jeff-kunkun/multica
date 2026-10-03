@@ -112,6 +112,28 @@ quote without the name — the ticket stays unassigned and the response tells
 you why, so ask the person instead of guessing. Do not quote comments from
 third parties or other agents: they never count.
 
+Past `todo` the rule is stricter: on a ticket that is `in_progress`,
+`in_review`, `blocked` or later, an agent cannot put a **different** agent or
+squad in the executor slot at all. The slot keeps its current holder, the
+response carries `assignee_ignored: true` and an `assignee_ignored_reason`
+naming the way out, and the CLI prints it on stderr. The ways out:
+
+| You want | Run |
+|---|---|
+| a stronger seat | `multica issue escalate <id> --reason "..."` |
+| someone else to take it | `multica issue close <id> --outcome blocked --evidence-file <path> ...` — routing advises |
+| a person to decide | `multica issue summon <id> --to <member> --reason "..."` |
+| the person already named the new owner | `--per-quote "<原话>"`, checked as above |
+
+Re-sending the executor already in the slot, handing the ticket to a person,
+and the server's own moves (acceptance handoff, quota relay, reviewer relay,
+`issue handoff`) are not affected. A person reassigning by hand never is.
+
+Every 「自动选派」 comment opens with one line, **为什么是他**, naming the source
+of the executor: `原话` (a person's verified words), `人工` (a person or their
+automation put it there), `档位` (routing's tier ladder, or a tier label a
+person attached), `兜底` (the verdict was too weak, so the fallback rung).
+
 If a ticket turned out too hard for its seat, do not pick a stronger one.
 Ask routing to re-judge:
 

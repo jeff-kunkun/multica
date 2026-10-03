@@ -626,6 +626,15 @@ func (h *Handler) UpdateWorkspace(w http.ResponseWriter, r *http.Request) {
 		if existing, err := h.Queries.GetWorkspace(r.Context(), idUUID); err == nil {
 			stored = existing.Settings
 		}
+		if incoming, ok := req.Settings.(map[string]any); ok {
+			// Only an old client's flip of the retired PR switch needs the
+			// stored value; see reconcilePRMergeSettings.
+			var storedMap map[string]any
+			if _, sent := incoming[prAutoCompleteLegacyKey]; sent && len(stored) > 0 {
+				_ = json.Unmarshal(stored, &storedMap)
+			}
+			reconcilePRMergeSettings(storedMap, incoming)
+		}
 		merged, ok := h.applyRoutingSecret(req.Settings, stored)
 		if !ok {
 			writeError(w, http.StatusServiceUnavailable,
@@ -1526,6 +1535,12 @@ func (h *Handler) DeleteWorkspace(w http.ResponseWriter, r *http.Request) {
 		{
 			name: "delete comments",
 			run:  func() error { return qtx.DeleteWorkspaceComments(ctx, requester.WorkspaceID) },
+		},
+		{
+			// Teardown mode keeps the triggers from logging the deletes above
+			// and below; this clears what normal writes logged before.
+			name: "delete search index changes",
+			run:  func() error { return qtx.DeleteWorkspaceSearchIndexChanges(ctx, requester.WorkspaceID) },
 		},
 		// Keep source-context object intents after the workspace row is gone.
 		// They are the durable retry ledger for an upload that began before the

@@ -74,6 +74,7 @@ func (r *Router) assignmentComment(
 ) string {
 	var b strings.Builder
 	b.WriteString("## 自动选派\n\n")
+	b.WriteString(PickReasonLine(executorPickReason(issue, needExecutor, executor, executorSource)))
 	for _, note := range ignored {
 		b.WriteString("> " + note + "\n")
 	}

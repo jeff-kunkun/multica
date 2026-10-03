@@ -36,12 +36,26 @@ type assignmentRuling struct {
 	Reason string
 }
 
+// heldExecutor is the executor a ticket holds before the request lands. A
+// create has none and passes nil.
+type heldExecutor struct {
+	Type pgtype.Text
+	ID   pgtype.UUID
+}
+
+func (e *heldExecutor) is(assigneeType pgtype.Text, assigneeID pgtype.UUID) bool {
+	return e != nil && e.Type.Valid && e.ID.Valid &&
+		e.Type.String == assigneeType.String && e.ID == assigneeID
+}
+
 // rulePick decides one request. actorType/actorID come from resolveActor (the
 // server-trusted X-Agent-ID), resultingStatus is the status the ticket will
-// have once the request lands.
+// have once the request lands, held is the executor already on it (nil on
+// create).
 func (h *Handler) rulePick(
 	r *http.Request, workspaceID, actorType, actorID string,
 	assigneeType pgtype.Text, assigneeID pgtype.UUID, quote, resultingStatus string,
+	held *heldExecutor,
 ) assignmentRuling {
 	if actorType != "agent" {
 		// A person's own hand. Whatever quote they sent is not needed.
@@ -72,15 +86,24 @@ func (h *Handler) rulePick(
 		// Handing a ticket to a person is not something routing decides.
 		return ruling
 	}
-	if resultingStatus != "todo" && resultingStatus != "backlog" {
-		// Past todo the agent handoff pipelines (review, blocked, in-flight
-		// reassignment) do their own work and routing does not re-pick.
-		return ruling
-	}
 	if h.Routing == nil || !h.Routing.Active(r.Context(), workspaceID) {
 		return ruling
 	}
+	if resultingStatus == "todo" || resultingStatus == "backlog" {
+		// Dropped quietly: routing fills an empty slot from scratch.
+		ruling.Apply = false
+		return ruling
+	}
+	// Past todo (DENE-1201). The executor of a ticket in flight is not an
+	// agent's to change: the server-side pipelines that move it (quota relay,
+	// reviewer relay, escalate, handoff) write the row themselves and never
+	// come through here. Re-sending the executor already there is not a
+	// change, and a create is not a reassignment.
+	if held == nil || held.is(assigneeType, assigneeID) {
+		return ruling
+	}
 	ruling.Apply = false
+	ruling.Reason = routing.ReasonAgentReassignInFlight
 	return ruling
 }
 
