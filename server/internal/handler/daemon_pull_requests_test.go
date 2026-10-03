@@ -165,7 +165,7 @@ func TestDaemonSnapshotCloseWithoutApp(t *testing.T) {
 		cleanupDaemonSnapshotPR(t, pr.Number)
 		reportIssuePRsHTTP(t, issue.ID, []DaemonPullRequest{pr})
 		w := closeIssueHTTP(t, issue.ID, agentID, taskID, map[string]any{"outcome": "done", "evidence": "PR " + pr.URL})
-		assertBlockedClose(t, issue.ID, w, "合并冲突")
+		assertMachineWaitClose(t, issue.ID, w, "合并冲突")
 	})
 
 	t.Run("red check blocks with the check name", func(t *testing.T) {
@@ -174,7 +174,7 @@ func TestDaemonSnapshotCloseWithoutApp(t *testing.T) {
 		cleanupDaemonSnapshotPR(t, pr.Number)
 		reportIssuePRsHTTP(t, issue.ID, []DaemonPullRequest{pr})
 		w := closeIssueHTTP(t, issue.ID, agentID, taskID, map[string]any{"outcome": "done", "evidence": "PR " + pr.URL})
-		assertBlockedClose(t, issue.ID, w, "检查是红的")
+		assertMachineWaitClose(t, issue.ID, w, "检查是红的")
 		if cond := issueMetaString(t, issue.ID, "block.wait_condition"); !strings.Contains(cond, "backend") {
 			t.Fatalf("wait condition = %q, want the check name", cond)
 		}
@@ -256,20 +256,31 @@ func cleanupDaemonSnapshotPR(t *testing.T, number int32) {
 	})
 }
 
-func assertBlockedClose(t *testing.T, issueID string, w *httptest.ResponseRecorder, reason string) {
+// assertMachineWaitClose: a close held back by a stop the executor can clear
+// stays in progress on a clock the patrol watches (DENE-1212).
+func assertMachineWaitClose(t *testing.T, issueID string, w *httptest.ResponseRecorder, reason string) {
 	t.Helper()
 	if w.Code != http.StatusOK {
-		t.Fatalf("close = %d: %s, want 200 rewritten to blocked", w.Code, w.Body.String())
+		t.Fatalf("close = %d: %s, want 200 rewritten to in_progress", w.Code, w.Body.String())
 	}
 	var resp CloseIssueResponse
 	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	if resp.Status != "blocked" {
-		t.Fatalf("status = %q, want blocked: %s", resp.Status, w.Body.String())
+	if resp.Status != "in_progress" {
+		t.Fatalf("status = %q, want in_progress: %s", resp.Status, w.Body.String())
 	}
-	if got := issueStatusDirect(t, issueID); got != "blocked" {
-		t.Fatalf("db status = %s, want blocked", got)
+	if resp.Wait == nil || resp.Wait.WakeAt == "" || resp.Wait.Escalated {
+		t.Fatalf("wait = %+v, want a clock", resp.Wait)
+	}
+	if got := issueStatusDirect(t, issueID); got != "in_progress" {
+		t.Fatalf("db status = %s, want in_progress", got)
+	}
+	if got := issueMetaString(t, issueID, "block.watched"); got != "1" {
+		t.Fatalf("block.watched = %q, want 1", got)
+	}
+	if got := issueMetaString(t, issueID, "block.wake_at"); got == "" {
+		t.Fatal("block.wake_at missing")
 	}
 	cond := issueMetaString(t, issueID, "block.wait_condition")
 	if !strings.Contains(cond, reason) {
