@@ -35,7 +35,7 @@ func (s *TaskService) relaySafetyRefusal(ctx context.Context, task db.AgentTaskQ
 	if err != nil {
 		return false
 	}
-	house, ok := routing.DefaultLadder.ProviderOf(failed.Name)
+	house, ok := routing.DefaultLadder.ProviderFor(failed.Name, failed.Model.String)
 	if !ok || house == "" {
 		return false
 	}

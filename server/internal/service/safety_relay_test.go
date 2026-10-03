@@ -13,15 +13,20 @@ import (
 
 const safetyRefusalText = "API Error: Claude Opus's safeguards flagged this message. Our intentionally broad safeguards may flag some legitimate work."
 
-// seedSafetyWorld renames the quota world's seats to ladder names so the
-// provider of each seat is known: the failed seat is a Claude seat, the
-// same-tier seat a GPT one.
+// seedSafetyWorld renames the quota world's seats to ladder names and gives
+// each the model that seat really runs, so the provider of each seat is
+// known: the failed seat is a Claude seat, the same-tier seat a GPT one. The
+// configured model decides the family, so name and model must agree.
 func seedSafetyWorld(t *testing.T, errorText string) quotaWorld {
 	t.Helper()
 	w := seedQuotaWorld(t, string(taskfailure.ReasonAgentUnknown), errorText, true)
 	ctx := context.Background()
-	for id, name := range map[string]string{w.failedID: "孙悟空", w.sameID: "特兰克斯", w.mediumID: "贝吉塔"} {
-		if _, err := w.pool.Exec(ctx, `UPDATE agent SET name = $2 WHERE id = $1`, id, name); err != nil {
+	for id, seat := range map[string][2]string{
+		w.failedID: {"孙悟空", "claude-opus-5-5"},
+		w.sameID:   {"特兰克斯", "gpt-6.1-sol"},
+		w.mediumID: {"贝吉塔", "command-code/deepseek%2Fdeepseek-v4.1-flash"},
+	} {
+		if _, err := w.pool.Exec(ctx, `UPDATE agent SET name = $2, model = $3 WHERE id = $1`, id, seat[0], seat[1]); err != nil {
 			t.Fatalf("rename seat: %v", err)
 		}
 	}

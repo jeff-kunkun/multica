@@ -303,6 +303,7 @@ func (s routingStore) Roster(ctx context.Context, workspaceID string) (map[strin
 			Tier:    a.RoutingTier.String,
 			Demoted: demoted[id],
 			Usage:   a.RoutingUsage,
+			Model:   a.Model.String,
 		}
 	}
 	return out, nil
@@ -412,7 +413,7 @@ func (s routingStore) OffRosterSeat(ctx context.Context, workspaceID, agentID st
 	if agent.RoutingTier.Valid {
 		tier = agent.RoutingTier.String
 	}
-	return routing.Agent{ID: agentID, Name: agent.Name, Tier: tier, Usage: agent.RoutingUsage}, true, nil
+	return routing.Agent{ID: agentID, Name: agent.Name, Tier: tier, Usage: agent.RoutingUsage, Model: agent.Model.String}, true, nil
 }
 
 func (s routingStore) ReplaceReviewer(ctx context.Context, workspaceID, issueID, currentID string, ref routing.ReviewerRef) (bool, error) {
