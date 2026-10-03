@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>智能体权限</title>
+<style>
+  :root{--bg:#fff;--line:#ececea;--text:#1d1d1b;--muted:#8a8984;--on:#1d1d1b;--off:#d9d8d4}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);font:14px/1.55 -apple-system,BlinkMacSystemFont,"PingFang SC","Helvetica Neue",sans-serif;-webkit-font-smoothing:antialiased}
+  .shell{display:grid;grid-template-columns:200px 1fr;min-height:100vh}
+  nav{border-right:1px solid var(--line);padding:28px 12px;font-size:13px}
+  nav .g{color:var(--muted);font-size:12px;padding:14px 10px 6px}
+  nav a{display:block;padding:5px 10px;border-radius:6px;color:var(--text)}
+  nav a.on{background:#f3f3f1;font-weight:500}
+  main{padding:48px 56px;max-width:760px}
+  h1{font-size:18px;font-weight:600;margin:0 0 4px}
+  .sub{color:var(--muted);margin:0 0 40px}
+  h2{font-size:13px;font-weight:500;color:var(--muted);margin:0 0 4px}
+  section{margin-bottom:40px}
+  .row{display:flex;align-items:center;justify-content:space-between;gap:24px;padding:16px 0;border-bottom:1px solid var(--line)}
+  .row .t{font-weight:500}
+  .row .d{color:var(--muted);font-size:13px}
+  .row .c{display:flex;align-items:center;gap:16px;white-space:nowrap;color:var(--muted);font-size:13px}
+  .num{display:inline-block;min-width:40px;padding:3px 8px;border:1px solid var(--line);border-radius:6px;text-align:center;color:var(--text)}
+  .sw{width:30px;height:18px;border-radius:9px;background:var(--on);position:relative;flex:none}
+  .sw::after{content:"";position:absolute;top:2px;left:14px;width:14px;height:14px;border-radius:50%;background:#fff}
+  .sw.off{background:var(--off)} .sw.off::after{left:2px}
+  .row.dis .t{color:var(--muted)}
+</style>
+</head>
+<body>
+<div class="shell">
+  <nav>
+    <div class="g">工作区</div>
+    <a>常规</a><a>成员</a><a class="on">智能体权限</a><a>路由</a><a>权限与共享</a>
+    <div class="g">任务与工作流</div>
+    <a>任务状态</a><a>标签</a><a>唤醒</a>
+  </nav>
+  <main>
+    <h1>智能体权限</h1>
+    <p class="sub">智能体运行时能新建什么、能跑多久。仅管理员可修改。</p>
+
+    <section>
+      <h2>新建</h2>
+      <div class="row">
+        <div><div class="t">在聊天中新建任务</div><div class="d">含转成目标。</div></div>
+        <div class="c">每次运行 <span class="num">不限</span><span class="sw"></span></div>
+      </div>
+      <div class="row">
+        <div><div class="t">在任务中新建任务</div><div class="d">含子任务与计划。</div></div>
+        <div class="c">每次运行 <span class="num">不限</span><span class="sw"></span></div>
+      </div>
+      <div class="row">
+        <div><div class="t">在聊天中新建聊天</div><div class="d">新聊天不能再往下开，可见范围不超过原聊天。</div></div>
+        <div class="c">每个聊天 <span class="num">5</span> 每次运行 <span class="num">3</span><span class="sw"></span></div>
+      </div>
+      <div class="row dis">
+        <div><div class="t">在任务中新建聊天</div><div class="d">不可用：任务内讨论请用评论，并行探索请拆子任务。</div></div>
+        <div class="c"><span class="sw off"></span></div>
+      </div>
+    </section>
+
+    <section>
+      <h2>运行上限</h2>
+      <div class="row">
+        <div><div class="t">接力轮次</div><div class="d">智能体之间连续接力的上限，人类评论后重新计数。</div></div>
+        <div class="c"><span class="num">30</span> 轮</div>
+      </div>
+      <div class="row">
+        <div><div class="t">单次运行时长</div><div class="d">超时会停止运行并通知负责人。</div></div>
+        <div class="c"><span class="num">不限</span></div>
+      </div>
+    </section>
+  </main>
+</div>
+</body>
+</html>
