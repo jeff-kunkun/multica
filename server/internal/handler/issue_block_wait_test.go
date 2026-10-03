@@ -130,11 +130,26 @@ func TestPatrolWakesUnstructuredBlockAndDueClock(t *testing.T) {
 
 type fakeMerger struct {
 	err error
+	// calls counts merge attempts when set, so a test can see the retry.
+	calls *int
+	// failFirst makes only the first attempt fail with err.
+	failFirst bool
 }
 
 func (f fakeMerger) MergePullRequest(context.Context, int64, string, string, int) error {
+	n := 0
+	if f.calls != nil {
+		*f.calls++
+		n = *f.calls
+	}
+	if f.failFirst && n > 1 {
+		return nil
+	}
 	return f.err
 }
+
+// The merge retry waits nothing under test.
+func init() { mergeRetryDelay = 0 }
 
 func TestAcceptancePassMergesAndCloses(t *testing.T) {
 	if testHandler == nil {

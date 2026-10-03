@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"strings"
 	"time"
 
@@ -36,10 +37,55 @@ type statusTransition struct {
 	// `issue close` can say so instead of guessing from the note (DENE-859).
 	merged bool
 	prURL  string
-	// park is the machine wait the done gate turned this close into
-	// (DENE-1212): in progress on a clock, or blocked on a person once the
-	// same stop has survived MachineEscalateAfter rounds.
-	park *blockwait.MachinePark
+	// refuseCode is the machine-readable kind of a refusal the done gate
+	// answered with a PR hold (DENE-1219): close_checks_pending,
+	// close_checks_red, ... The CLI waits out close_checks_pending in place.
+	refuseCode string
+}
+
+// holdRefusal answers a close the done gate cannot finish yet (DENE-1219):
+// nothing is written, the caller gets the reason and the kind on the spot.
+// Checks still running, red checks, a conflict, a draft, a failed merge are
+// all things the closing agent clears itself, so none of them parks the
+// ticket or calls a person.
+func holdRefusal(kind, reason string) statusTransition {
+	return statusTransition{refuse: reason, refuseCode: closeHoldCode(kind)}
+}
+
+// writeTransitionRefusal answers a refused status move with 409, carrying the
+// hold code when the done gate gave one.
+func writeTransitionRefusal(w http.ResponseWriter, tr statusTransition) {
+	if tr.refuseCode != "" {
+		writeErrorCode(w, http.StatusConflict, tr.refuseCode, tr.refuse)
+		return
+	}
+	writeError(w, http.StatusConflict, tr.refuse)
+}
+
+// closeHoldCode is the error code a hold kind is answered with.
+func closeHoldCode(kind string) string {
+	if kind == "" {
+		kind = blockwait.HoldMergeFailed
+	}
+	return "close_" + kind
+}
+
+// holdNext is the next step a hold's refusal ends with.
+func holdNext(kind string) string {
+	switch kind {
+	case blockwait.HoldChecksPending:
+		return "检查跑完前不能合。`multica issue close` 会就地等检查（最多约 15 分钟），变绿就合并关单；别的路径就等检查出结果后再关一次。"
+	case blockwait.HoldChecksRed:
+		return "红的检查要是这次改动引起的，就修好推上去再关；不是这次改动的问题（比如主线原本就红），处理掉后用 `gh pr merge --squash <url>` 合入再关。"
+	case blockwait.HoldConflict:
+		return "先把 origin/kun 合进分支、解决冲突推上去，再关一次。"
+	case blockwait.HoldDraft:
+		return "先用 `gh pr ready <url>` 把草稿标成准备好，再关一次。"
+	case blockwait.HoldReadFailed:
+		return "稍后再关一次；还是读不到就用 `multica issue delivery <issue>` 看现场。"
+	default:
+		return "再关一次。"
+	}
 }
 
 func reviewerIsAssigned(issue db.Issue) bool {
@@ -297,12 +343,12 @@ func (h *Handler) guardDoneWithOpenPull(ctx context.Context, issue db.Issue, act
 	}
 	if err != nil {
 		slog.Warn("close gate: list pull requests failed", "issue_id", uuidToString(issue.ID), "error", err)
-		return h.machineWait(ctx, issue, blockwait.MachineReadFailed, "关单前没能读到关联的 PR", closeLead)
+		return holdRefusal(blockwait.HoldReadFailed, closeLead+"关单前没能读到关联的 PR。"+holdNext(blockwait.HoldReadFailed))
 	}
 	deliveryBranchCount := 0
 	if delivery, deliveryErr := service.BuildIssueDelivery(ctx, h.Queries, issue); deliveryErr != nil {
 		slog.Warn("close gate: build delivery failed", "issue_id", uuidToString(issue.ID), "error", deliveryErr)
-		return h.machineWait(ctx, issue, blockwait.MachineReadFailed, "关单前没能核对交付线", closeLead)
+		return holdRefusal(blockwait.HoldReadFailed, closeLead+"关单前没能核对交付线。"+holdNext(blockwait.HoldReadFailed))
 	} else if delivery != nil {
 		deliveryBranchCount = len(delivery.Branches)
 	}
@@ -359,7 +405,7 @@ func (h *Handler) guardDoneWithOpenPull(ctx context.Context, issue db.Issue, act
 	// back to the closing agent: it has gh and a block would wait on nothing.
 	if !hasOpenPull(prs) && !hasMergedPull(prs) {
 		if url := firstDraftURL(prs); url != "" {
-			return h.machineWait(ctx, issue, blockwait.MachineDraft, url+" 还是草稿，要先标成准备好再合", closeLead)
+			return holdRefusal(blockwait.HoldDraft, closeLead+url+" 还是草稿。"+holdNext(blockwait.HoldDraft))
 		}
 	}
 	if actorType == "agent" && hasOpenPull(prs) && !h.serverCanMergeOpen(ctx, issue.WorkspaceID, prs) && !openPullSnapshotBlocks(prs) {
@@ -375,7 +421,7 @@ func (h *Handler) guardDoneWithOpenPull(ctx context.Context, issue db.Issue, act
 		actor, _ := util.ParseUUID(actorID)
 		h.trackBaselineFix(ctx, issue, &decision, actorType, actor)
 		if err := h.mergeOpenPulls(ctx, issue.WorkspaceID, prs); err != nil {
-			return h.machineWait(ctx, issue, blockwait.MachineMergeFailed, mergeFailureCondition(err, prs), "这张票要关，关联 PR 看起来能合并，但合并没有成功，先不标完成：")
+			return holdRefusal(blockwait.HoldMergeFailed, mergeFailureRefusal(err, prs))
 		}
 		tr.note = decision.Reason
 		if !strings.Contains(tr.note, "已合并") {
@@ -390,13 +436,21 @@ func (h *Handler) guardDoneWithOpenPull(ctx context.Context, issue db.Issue, act
 		}
 		return tr
 	default:
-		return h.machineWait(ctx, issue, decision.Machine, decision.Record.WaitCondition, closeLead)
+		return holdRefusal(decision.Kind, closeLead+decision.Record.WaitCondition+"。"+holdNext(decision.Kind))
 	}
 }
 
-// closeLead opens the timeline sentence of a done the gate held back.
+// closeLead opens the refusal of a done the gate held back.
 const closeLead = "这张票要关，先不标完成："
 
+// mergeRetryDelay is how long the gate waits before its one retry of a merge
+// the platform could not make (DENE-1219). GitHub often answers a merge
+// right after a push with "not mergeable" while it is still computing.
+var mergeRetryDelay = 5 * time.Second
+
+// mergeOpenPulls merges the open PRs, retrying each failed merge
+// once. A missing merge permission is not retried: a second call cannot
+// grant it.
 func (h *Handler) mergeOpenPulls(ctx context.Context, ws pgtype.UUID, prs []db.ListPullRequestsByIssueRow) error {
 	var merged int
 	for i := range prs {
@@ -404,7 +458,19 @@ func (h *Handler) mergeOpenPulls(ctx context.Context, ws pgtype.UUID, prs []db.L
 		if !strings.EqualFold(pr.State, "open") {
 			continue
 		}
-		if err := h.mergeGatePull(ctx, ws, pr); err != nil {
+		err := h.mergeGatePull(ctx, ws, pr)
+		if err != nil && !errors.Is(err, errPullMergeUnavailable) {
+			slog.Info("close gate: retrying merge", "pr", pr.HtmlUrl, "error", err)
+			if mergeRetryDelay > 0 {
+				select {
+				case <-ctx.Done():
+					return err
+				case <-time.After(mergeRetryDelay):
+				}
+			}
+			err = h.mergeGatePull(ctx, ws, pr)
+		}
+		if err != nil {
 			return err
 		}
 		merged++
@@ -413,6 +479,13 @@ func (h *Handler) mergeOpenPulls(ctx context.Context, ws pgtype.UUID, prs []db.L
 		return errPullNotMergeable
 	}
 	return nil
+}
+
+// mergeFailureRefusal tells the closing agent to merge locally and close
+// again, so a merge the platform could not make never parks the ticket.
+func mergeFailureRefusal(err error, prs []db.ListPullRequestsByIssueRow) string {
+	target := mergeTarget(prs)
+	return fmt.Sprintf("这张票要关，关联 PR 看起来能合并，但平台合并重试一次后还是没成功（%s），先不标完成。用 `%s` 在本机合入，再重跑这条 close。", mergeFailureCondition(err, prs), localMergeCommand(target))
 }
 
 // openPullSnapshotBlocks is true when an open PR's gh snapshot is already a

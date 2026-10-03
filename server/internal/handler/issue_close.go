@@ -75,61 +75,18 @@ type CloseIssueResponse struct {
 	Warnings       []string                      `json:"warnings,omitempty"`
 	// Summoned is true when --needs-human went through the summon entry.
 	Summoned bool `json:"summoned,omitempty"`
-	// Wait is set when the done gate held the close back on a machine wait
-	// (DENE-1212): what it waits for, when the executor is woken, and on which
-	// round a person is asked instead.
-	Wait *CloseWait `json:"wait,omitempty"`
+	// Hold is set when an acceptance pass was posted but the PR could not be
+	// merged yet (DENE-1219): the ticket stays in review and Hold says what
+	// clears it.
+	Hold *CloseHold `json:"hold,omitempty"`
 }
 
-// CloseWait is a held-back close in the reply: the status written, the stop,
-// the wake clock and who it wakes, and the escalation round.
-type CloseWait struct {
-	Kind           string `json:"kind"`
-	Status         string `json:"status"`
-	Condition      string `json:"condition"`
-	WakeAt         string `json:"wake_at,omitempty"`
-	WakeOwnerType  string `json:"wake_owner_type,omitempty"`
-	WakeOwnerID    string `json:"wake_owner_id,omitempty"`
-	Round          int    `json:"round"`
-	EscalatesAfter int    `json:"escalates_after"`
-	Escalated      bool   `json:"escalated"`
-	NeedsHuman     string `json:"needs_human,omitempty"`
-}
-
-func closeWaitFrom(issue db.Issue, park *blockwait.MachinePark) *CloseWait {
-	w := &CloseWait{
-		Kind:           park.Kind,
-		Status:         park.Status,
-		Condition:      park.Record.WaitCondition,
-		Round:          park.Rounds,
-		EscalatesAfter: blockwait.MachineEscalateAfter,
-		Escalated:      park.Escalated,
-		NeedsHuman:     park.Record.NeedsHuman,
-	}
-	if park.Record.HasWakeAt {
-		w.WakeAt = park.Record.WakeAt.UTC().Format(time.RFC3339)
-	}
-	if !park.Escalated && issue.AssigneeType.Valid && issue.AssigneeID.Valid {
-		w.WakeOwnerType = issue.AssigneeType.String
-		w.WakeOwnerID = uuidToString(issue.AssigneeID)
-	}
-	return w
-}
-
-// describeMachinePark is the reply's account of a held-back close: the status
-// actually written, and when whom is woken.
-func describeMachinePark(park *blockwait.MachinePark, w *CloseWait) []string {
-	if park.Escalated {
-		return []string{fmt.Sprintf("同一个卡点连续 %d 轮没解决，状态写成 blocked，已叫负责人（成员 %s）来看：%s", park.Rounds, park.Record.NeedsHuman, park.Record.WaitCondition)}
-	}
-	who := "执行人"
-	if w.WakeOwnerType != "" {
-		who = "执行人 " + w.WakeOwnerType + "/" + w.WakeOwnerID
-	}
-	return []string{
-		"状态写成 in_progress（不是 blocked，这个卡点不需要人）：" + park.Record.WaitCondition,
-		fmt.Sprintf("到 %s 巡检叫醒%s接着做（第 %d 轮，连续 %d 轮没解决才改 blocked 叫人）", w.WakeAt, who, park.Rounds, blockwait.MachineEscalateAfter),
-	}
+// CloseHold is a pass kept in review: the hold kind (checks_pending,
+// checks_red, conflict, merge_failed, ...), the stop, and the next step.
+type CloseHold struct {
+	Kind   string `json:"kind"`
+	Reason string `json:"reason"`
+	Next   string `json:"next"`
 }
 
 // closeRecord is the close.* metadata derived from the request plus the
@@ -256,13 +213,13 @@ func (h *Handler) CloseIssue(w http.ResponseWriter, r *http.Request) {
 	if outcome == issuestatus.Done || outcome == issuestatus.InReview {
 		tr = h.guardSilentStall(ctx, issue, statusKey, actorType, actorID, req.NoCodeReason, issue.AssigneeType, issue.AssigneeID, issue.ReviewerType, issue.ReviewerID, false)
 		if tr.refuse != "" {
-			writeError(w, http.StatusConflict, tr.refuse)
+			writeTransitionRefusal(w, tr)
 			return
 		}
 		if tr.status != "" && tr.status != statusKey {
 			statusKey = tr.status
 			outcome = tr.status
-			rec = closeRecordFromGate(issue, statusKey, tr, canonicalAudit, actorType, actorID)
+			rec = closeRecordFromGate(statusKey, tr, canonicalAudit)
 			if err := closeprotocol.Validate(closeProbe(rec.meta), statusKey, body); err != nil {
 				writeError(w, http.StatusBadRequest, closeRejection(err))
 				return
@@ -429,7 +386,6 @@ func (h *Handler) CloseIssue(w http.ResponseWriter, r *http.Request) {
 		h.persistBlockRecord(ctx, updated, rec.block)
 		h.setIssueMetaString(ctx, updated, blockwait.KeyWatched, blockwait.WatchedYes)
 	}
-	updated = h.applyMachinePark(ctx, updated, tr.park, actorType, actorID)
 	// --needs-human names a person; the summon entry is what makes them hear
 	// it (inbox, subscription, a visible @). Before the evidence comment's own
 	// triggers run, so an @ of the same person there dedupes against this call.
@@ -456,10 +412,6 @@ func (h *Handler) CloseIssue(w http.ResponseWriter, r *http.Request) {
 		resp.Woken = describeCloseWake(updated, rec, prefix, len(waiters))
 	} else {
 		resp.Woken = []string{"状态没变（本来就是 " + updated.Status + "），只补了证据和收口记录；没有叫醒任何人"}
-	}
-	if tr.park != nil {
-		resp.Wait = closeWaitFrom(updated, tr.park)
-		resp.Woken = describeMachinePark(tr.park, resp.Wait)
 	}
 	if tr.merged {
 		resp.Woken = append([]string{"关联 PR 已先合并（" + tr.prURL + "），再写 done"}, resp.Woken...)
@@ -517,6 +469,16 @@ func (h *Handler) closeIssueByVerdict(w http.ResponseWriter, r *http.Request, is
 	if auditRejection != "" {
 		writeError(w, http.StatusBadRequest, auditRejection)
 		return
+	}
+	// A PR that cannot merge right now is answered before the pass is posted
+	// (DENE-1219): the reviewer waits out running checks (the CLI does it in
+	// place), or sends red checks and conflicts back with --verdict hold.
+	// Nothing is written, so the next pass starts clean.
+	if blockwait.MetaString(parseIssueMetadata(issue.Metadata), blockwait.KeyReleased) != blockwait.ReleasedPass {
+		if _, plan, _, ok := h.releasePlan(ctx, issue); ok && plan.Action == blockwait.ReleaseHold {
+			writeErrorCode(w, http.StatusConflict, closeHoldCode(plan.Kind), "验收通过先不记，PR 现在合不进去："+plan.Record.WaitCondition+"。"+verdictHoldNext(plan.Kind))
+			return
+		}
 	}
 	body, err := blockwait.AppendVerdict(body, "pass")
 	if err != nil {
@@ -600,9 +562,9 @@ func (h *Handler) closeIssueByVerdict(w http.ResponseWriter, r *http.Request, is
 		}
 	case updated.Status == issuestatus.Done:
 		resp.Woken = []string{"没有待合并的 PR，票已置 done"}
-	case out.Park != nil:
-		resp.Wait = closeWaitFrom(updated, out.Park)
-		resp.Woken = describeMachinePark(out.Park, resp.Wait)
+	case out.Hold != "":
+		resp.Hold = &CloseHold{Kind: out.Hold, Reason: strings.TrimSpace(out.Note), Next: out.HoldNext}
+		resp.Woken = []string{"验收通过已记下，但 PR 还没合进去，票保持 in_review（没有写 blocked）：" + strings.TrimSpace(out.Note)}
 	case updated.Status == issuestatus.Blocked:
 		resp.Woken = []string{"验收通过但合并没成功，票改成 blocked 并写了等待条件：" + strings.TrimSpace(out.Note)}
 	default:
@@ -624,6 +586,21 @@ func (h *Handler) closeIssueByVerdict(w http.ResponseWriter, r *http.Request, is
 	h.fillStatusCategory(ctx, issue.WorkspaceID, &resp.Issue)
 	slog.Info("issue closed by verdict", append(logger.RequestAttrs(r), "issue_id", uuidToString(issue.ID), "status", updated.Status, "merged", out.Merged)...)
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// verdictHoldNext tells the acceptance seat how to go on when the PR it
+// wants to pass cannot merge yet.
+func verdictHoldNext(kind string) string {
+	switch kind {
+	case blockwait.HoldChecksPending:
+		return "`multica issue close --verdict pass` 会就地等检查（最多约 15 分钟），变绿就合并关单；超时就过会儿再跑一次。"
+	case blockwait.HoldChecksRed, blockwait.HoldConflict, blockwait.HoldDelivery:
+		return "要执行人修的，用 `multica issue comment add <issue> --verdict hold` 写清要修什么打回；确认不是这次改动的问题，处理掉后用 `gh pr merge --squash <url>` 合入再跑一次 --verdict pass。"
+	case blockwait.HoldDraft:
+		return "PR 还是草稿，执行人标成准备好后再跑一次。"
+	default:
+		return "用 `gh pr merge --squash <url>` 在本机合入后再跑一次 --verdict pass。"
+	}
 }
 
 // deriveCloseRecord turns the outcome and wait fields into the close.* keys
@@ -743,28 +720,10 @@ func closeProbe(meta map[string]string) map[string]string {
 }
 
 // closeRecordFromGate is the record for a close the DENE-857 gate rewrote:
-// the caller asked for done and the linked PR did not merge. A machine wait
-// (DENE-1212) keeps the ticket in progress and the executor continues on the
-// clock; only a stop that needs a person leaves it blocked.
-func closeRecordFromGate(issue db.Issue, statusKey string, tr statusTransition, knowledgeAudit, actorType, actorID string) closeRecord {
-	if statusKey == issuestatus.InProgress {
-		meta := map[string]string{
-			closeprotocol.KeyStatus:        statusKey,
-			closeprotocol.KeyConclusion:    closeprotocol.ConclusionContinuing,
-			closeprotocol.KeyNextOwnerType: actorType,
-			closeprotocol.KeyNextOwnerID:   actorID,
-			closeprotocol.KeyWaitingOn:     "",
-			closeprotocol.KeyWakeAction:    closeprotocol.WakeClock,
-		}
-		if issue.AssigneeType.Valid && issue.AssigneeID.Valid && issue.AssigneeType.String != "none" {
-			meta[closeprotocol.KeyNextOwnerType] = issue.AssigneeType.String
-			meta[closeprotocol.KeyNextOwnerID] = uuidToString(issue.AssigneeID)
-		}
-		if knowledgeAudit != "" {
-			meta[closeprotocol.KeyKnowledgeAudit] = knowledgeAudit
-		}
-		return closeRecord{meta: meta, block: tr.block}
-	}
+// the gate turned the close into a block a person has to clear (an
+// acceptance seat nobody can fill). PR holds never get here: they are
+// refused without a write (DENE-1219).
+func closeRecordFromGate(statusKey string, tr statusTransition, knowledgeAudit string) closeRecord {
 	kind, action := blockKindFor(tr.block, "")
 	meta := map[string]string{
 		closeprotocol.KeyStatus:        statusKey,
@@ -782,7 +741,7 @@ func closeRecordFromGate(issue db.Issue, statusKey string, tr statusTransition, 
 	if len(tr.block.BlockedBy) > 0 {
 		meta[closeprotocol.KeyWaitingOn] = tr.block.BlockedBy[0]
 	}
-	// An escalated machine wait (DENE-1212) names the person who has to look.
+	// A block that needs a person names them.
 	if human := strings.TrimSpace(tr.block.NeedsHuman); human != "" {
 		meta[closeprotocol.KeyNextOwnerType] = closeprotocol.OwnerMember
 		meta[closeprotocol.KeyNextOwnerID] = human
@@ -838,16 +797,6 @@ func closeRecordAfterRelease(issue db.Issue, meta map[string]any, evidenceID, kn
 		if issue.ParentIssueID.Valid {
 			rec[closeprotocol.KeyWakeAction] = closeprotocol.WakeStageDone
 		}
-	case issuestatus.InProgress:
-		// A pass the platform could not merge for a machine reason
-		// (DENE-1212): the executor is woken on the clock to clear it.
-		if !issue.AssigneeType.Valid || !issue.AssigneeID.Valid || issue.AssigneeType.String == "none" {
-			return nil
-		}
-		rec[closeprotocol.KeyConclusion] = closeprotocol.ConclusionContinuing
-		rec[closeprotocol.KeyNextOwnerType] = issue.AssigneeType.String
-		rec[closeprotocol.KeyNextOwnerID] = uuidToString(issue.AssigneeID)
-		rec[closeprotocol.KeyWakeAction] = closeprotocol.WakeClock
 	case issuestatus.Blocked:
 		rec[closeprotocol.KeyConclusion] = closeprotocol.ConclusionBlocked
 		block := blockwait.ParseMetadata(meta)
