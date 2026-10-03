@@ -18,6 +18,32 @@ behaviour is not exercised here.
 
 ## Running it
 
+### Page-load baseline
+
+The DENE-1278 baseline is a small, route-driven measurement that can run
+against Web, Desktop's renderer host, or the mobile web build. Start the target
+app first, then run:
+
+```bash
+node scripts/perf-baseline.mjs \
+  --url http://localhost:3000 \
+  --routes issues=/issues,chat=/chat,detail=/issues/<id> \
+  --storage-state .auth/perf.json \
+  --runs 3 \
+  --out perf-report/baseline.json
+```
+
+`cold` records the first navigation and `hot` records the immediate second
+visit in the same browser context. Each sample includes elapsed time,
+DOMContentLoaded, total requests, and `/api/*` request counts. The report is
+JSON so later cache or reconnect changes can be compared without relying on a
+handwritten number. Keep the same routes, run count, auth state, and machine
+when comparing before and after.
+
+The script does not create or store credentials. `--storage-state` is optional
+for public routes and should point to a Playwright storage-state file for
+authenticated routes.
+
 Against a frontend you already have running:
 
 ```bash
