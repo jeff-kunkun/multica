@@ -338,3 +338,62 @@ func TestPatrolSeatsEmptyReviewInsteadOfWakingExecutor(t *testing.T) {
 		}
 	})
 }
+
+// DENE-1255: the blocker ended but the waiter has no executor. Routing seats
+// one first, then the wake starts it as usual.
+func TestBlockedByWakeSeatsAnEmptyExecutorFirst(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	waited := createIssueHTTP(t, "unseated upstream", "in_progress")
+	waiter := createIssueHTTP(t, "unseated waiter", "blocked")
+	setIssueMetadataString(t, waiter.ID, blockwait.KeyBlockedBy, waited.Identifier)
+	// Routing comes on only now, so the seat below is the wake's, not the
+	// create-time pass's.
+	agentID := createHandlerTestAgent(t, "Unseated Wake Medium Seat", []byte("[]"))
+	dbfx.Exec(t, `UPDATE agent SET routing_tier = 'medium' WHERE id = $1`, agentID)
+	enableDraftSuggestRouting(t, tierJudge{tier: "medium", confidence: 0.95})
+	var before string
+	dbfx.QueryRow(t, `SELECT COALESCE(assignee_id::text, '') FROM issue WHERE id = $1`, waiter.ID).Scan(&before)
+	if before != "" {
+		t.Fatalf("waiter already seated before the wake: %s", before)
+	}
+
+	updateIssueStatusHTTP(t, waited.ID, "done")
+
+	var assigneeID string
+	dbfx.QueryRow(t, `SELECT COALESCE(assignee_id::text, '') FROM issue WHERE id = $1`, waiter.ID).Scan(&assigneeID)
+	if assigneeID == "" {
+		t.Fatal("the wake did not seat an executor")
+	}
+	if got := countPendingTasksForAgent(t, waiter.ID, assigneeID); got != 1 {
+		t.Fatalf("pending tasks for the seated executor = %d, want 1", got)
+	}
+}
+
+// When routing cannot seat anyone, the wake says why on the ticket and puts
+// a "缺执行人" card on a person's inbox instead of silently commenting.
+func TestBlockedByWakeWithoutExecutorSummonsAPerson(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	previousRouting := testHandler.Routing
+	testHandler.Routing = nil
+	t.Cleanup(func() { testHandler.Routing = previousRouting })
+
+	waited := createIssueHTTP(t, "unseatable upstream", "in_progress")
+	waiter := createIssueHTTP(t, "unseatable waiter", "blocked")
+	setIssueMetadataString(t, waiter.ID, blockwait.KeyBlockedBy, waited.Identifier)
+
+	updateIssueStatusHTTP(t, waited.ID, "done")
+
+	body, _, _, _ := systemCommentOn(t, waiter.ID)
+	for _, want := range []string{"没有执行人", "缺执行人", "multica issue assign"} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("comment is missing %q: %s", want, body)
+		}
+	}
+	if got := summonCount(t, `SELECT count(*) FROM issue_summon WHERE issue_id = $1 AND source = 'unseated' AND answered_at IS NULL`, waiter.ID); got != 1 {
+		t.Fatalf("unseated summons = %d, want 1", got)
+	}
+}

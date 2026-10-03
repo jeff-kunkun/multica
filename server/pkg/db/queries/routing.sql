@@ -204,16 +204,20 @@ SELECT id FROM workspace
 WHERE settings -> 'routing' ->> 'enabled' = 'true'
 ORDER BY id;
 
--- name: ListUnassignedTodoIssues :many
--- Quiet todo tickets with at least one empty routing seat. Human-held work is
--- excluded here as an additional guard; Route repeats that guard before any
--- write. The query deliberately does not inspect labels, due dates, or status
--- outside the concrete todo category.
+-- name: ListUnseatedIssues :many
+-- Quiet todo tickets with at least one empty routing seat, and quiet blocked
+-- tickets with no executor (DENE-1255: nobody is woken when their wait ends).
+-- Human-held work is excluded here as an additional guard; Route repeats that
+-- guard before any write. The query deliberately does not inspect labels, due
+-- dates, or status outside the concrete todo and blocked categories.
 SELECT i.id FROM issue i
 WHERE i.workspace_id = sqlc.arg('workspace_id')::uuid
-  AND i.status = 'todo'
   AND COALESCE(i.assignee_type, '') <> 'member'
-  AND (i.assignee_id IS NULL OR (i.parent_issue_id IS NULL AND (i.reviewer_type IS NULL OR i.reviewer_id IS NULL)))
+  AND (
+      (i.status = 'todo'
+       AND (i.assignee_id IS NULL OR (i.parent_issue_id IS NULL AND (i.reviewer_type IS NULL OR i.reviewer_id IS NULL))))
+   OR (i.status = 'blocked' AND i.assignee_id IS NULL)
+  )
   AND COALESCE(i.last_activity_at, i.updated_at) < sqlc.arg('before')::timestamptz
   AND NOT EXISTS (
       SELECT 1 FROM agent_task_queue q

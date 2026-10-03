@@ -109,16 +109,30 @@ func (h *Handler) wakeWaitingIssue(ctx context.Context, waiter, completed db.Iss
 	if fresh.AssigneeType.Valid && fresh.AssigneeType.String == "member" {
 		return
 	}
-	if !fresh.AssigneeType.Valid || !fresh.AssigneeID.Valid {
-		return
-	}
 	woken := blockwait.MetaString(parseIssueMetadata(fresh.Metadata), blockwait.KeyWokenBy)
 	if blockwait.AlreadyWoken(woken, completedIdentifier) || blockwait.AlreadyWoken(woken, uuidToString(completed.ID)) {
 		return
 	}
+	title := sanitizeChildTitleForSystemComment(completed.Title)
+	if !fresh.AssigneeType.Valid || !fresh.AssigneeID.Valid {
+		// DENE-1255: nobody holds the waiter. Routing seats one first; when it
+		// cannot, a person is told why instead of the wake vanishing.
+		seated, why := h.seatBeforeWake(ctx, fresh)
+		if !seated.AssigneeType.Valid || !seated.AssigneeID.Valid {
+			h.reportUnseatedWake(ctx, fresh, fmt.Sprintf(
+				"你在等的 [%s](mention://issue/%s)「%s」已经结束。",
+				completedIdentifier, uuidToString(completed.ID), title,
+			), why)
+			h.setIssueMetaString(ctx, fresh, blockwait.KeyWokenBy, blockwait.MarkWoken(woken, completedIdentifier))
+			return
+		}
+		if seated.AssigneeType.String == "member" {
+			return
+		}
+		fresh = seated
+	}
 
 	mentionPrefix := h.buildParentAssigneeMention(ctx, fresh)
-	title := sanitizeChildTitleForSystemComment(completed.Title)
 	content := fmt.Sprintf(
 		"%s你在等的 [%s](mention://issue/%s)「%s」已经结束，这张票可以继续了。",
 		mentionPrefix, completedIdentifier, uuidToString(completed.ID), title,
