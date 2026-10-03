@@ -133,6 +133,16 @@ import {
   UserSchema,
   WorkspaceListSchema,
 } from "./schemas";
+
+/** Shared server-side incremental list protocol (issues, inbox, chats, timeline). */
+export type IncrementalResource = "issues" | "inbox" | "chats" | "timeline";
+export type IncrementalChanges<T = unknown> = {
+  resource: IncrementalResource;
+  upserts: Array<{ id: string; updated_at: string; data: T }>;
+  deleted: string[];
+  next_cursor: string;
+  has_more: boolean;
+};
 import type { ZodType } from "zod";
 import { getCurrentSlug } from "./workspace-store";
 import { parseWithFallback } from "@/lib/parse-response";
@@ -507,6 +517,18 @@ class ApiClient {
     return parseWithFallback(raw, InboxListSchema, EMPTY_INBOX_LIST, {
       endpoint: "listInbox",
     });
+  }
+
+  async listIncrementalChanges<T = unknown>(
+    resource: IncrementalResource,
+    opts?: { updatedSince?: string; cursor?: string; issueId?: string; limit?: number; signal?: AbortSignal },
+  ): Promise<IncrementalChanges<T>> {
+    const params = new URLSearchParams({ resource });
+    if (opts?.updatedSince) params.set("updated_since", opts.updatedSince);
+    if (opts?.cursor) params.set("cursor", opts.cursor);
+    if (opts?.issueId) params.set("issue_id", opts.issueId);
+    if (opts?.limit) params.set("limit", String(opts.limit));
+    return this.fetch<IncrementalChanges<T>>(`/api/sync/changes?${params.toString()}`, { signal: opts?.signal });
   }
 
   /**
