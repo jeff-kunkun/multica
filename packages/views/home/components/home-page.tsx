@@ -327,8 +327,12 @@ function BoardRowView({
         }}
         className={cn(
           "group grid cursor-pointer gap-3 px-4 py-3 outline-none transition-colors hover:bg-accent/40 focus-visible:bg-accent/40",
-          row.lane === "waiting" && !nested ? "grid-cols-[auto_6.5rem_1fr_auto]" : "grid-cols-[6.5rem_1fr_auto]",
-          nested && "py-2 pl-8",
+          row.lane === "waiting" && !nested
+            ? "grid-cols-[auto_6.5rem_1fr_auto]"
+            : nested
+              ? "grid-cols-[auto_minmax(0,1fr)_auto] sm:grid-cols-[6.5rem_1fr_auto]"
+              : "grid-cols-[6.5rem_1fr_auto]",
+          nested && "py-2 pl-4 sm:pl-8",
           highlighted && "bg-accent/60 shadow-[inset_3px_0_0_var(--color-primary)]",
         )}
       >
@@ -357,7 +361,7 @@ function BoardRowView({
                   activate();
                 }
               }}
-              className="truncate text-body font-medium hover:underline"
+              className="min-w-0 break-words text-body font-medium hover:underline sm:truncate"
             >
               {row.title}
             </AppLink>
@@ -411,7 +415,7 @@ function BoardRowView({
         </div>
       </div>
       {open && (
-        <div className={cn("space-y-3 px-4 pb-3 pl-[8.75rem]", nested && "pl-[10.75rem]")}>
+        <div className={cn("space-y-3 px-4 pb-3 sm:pl-[8.75rem]", nested && "sm:pl-[10.75rem]")}>
           {hasTimeline && <Timeline events={row.timeline} copy={copy} />}
           {canReply && <ReplyBox row={row} copy={copy} />}
           {row.children.length > 0 && (

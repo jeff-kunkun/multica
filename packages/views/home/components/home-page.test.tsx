@@ -307,6 +307,20 @@ describe("HomePage", () => {
     expect(push).not.toHaveBeenCalled();
   });
 
+  it("keeps expanded child rows readable on narrow screens", () => {
+    board.todo[0] = {
+      ...board.todo[0]!,
+      children: [row({ issueId: "891", lane: "todo" })],
+    };
+    renderWithI18n(<InboxBoardLanes board={board} isLoading={false} isError={false} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "1 sub-issue" }));
+
+    const childRow = screen.getByText("title 891").closest('[role="link"]');
+    expect(childRow).toHaveClass("pl-4", "sm:pl-8", "grid-cols-[auto_minmax(0,1fr)_auto]");
+    expect(childRow?.parentElement?.parentElement?.parentElement).toHaveClass("px-4", "sm:pl-[8.75rem]");
+  });
+
   it("replies to a waiting row in place", () => {
     renderWithI18n(<HomePage />);
     const waiting = screen.getByTestId("board-lane-waiting");
