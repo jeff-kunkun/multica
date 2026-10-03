@@ -672,6 +672,16 @@ export interface IncrementalChanges<T = unknown> {
   has_more: boolean;
 }
 
+/** Deterministically applies one server page to a persisted list snapshot. */
+export function mergeIncrementalChanges<T extends { id: string }>(current: T[], page: IncrementalChanges<T>): T[] {
+  const deleted = new Set(page.deleted);
+  const byId = new Map(current.filter((item) => !deleted.has(item.id)).map((item) => [item.id, item]));
+  for (const change of page.upserts) {
+    if (!deleted.has(change.id)) byId.set(change.id, change.data);
+  }
+  return [...byId.values()];
+}
+
 function parseSearchIndexResponse<T>(raw: unknown, schema: ZodType, endpoint: string): T {
   const parsed = parseWithFallback<T | null>(raw, schema, null, { endpoint });
   if (parsed === null) throw new Error(`Malformed response from ${endpoint}`);

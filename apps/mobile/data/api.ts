@@ -143,6 +143,16 @@ export type IncrementalChanges<T = unknown> = {
   next_cursor: string;
   has_more: boolean;
 };
+
+/** Applies a replayable page to a locally persisted list snapshot. */
+export function mergeIncrementalChanges<T extends { id: string }>(current: T[], page: IncrementalChanges<T>): T[] {
+  const deleted = new Set(page.deleted);
+  const byId = new Map(current.filter((item) => !deleted.has(item.id)).map((item) => [item.id, item]));
+  for (const change of page.upserts) {
+    if (!deleted.has(change.id)) byId.set(change.id, change.data);
+  }
+  return [...byId.values()];
+}
 import type { ZodType } from "zod";
 import { getCurrentSlug } from "./workspace-store";
 import { parseWithFallback } from "@/lib/parse-response";
