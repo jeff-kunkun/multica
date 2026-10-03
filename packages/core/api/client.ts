@@ -5346,7 +5346,10 @@ export class ApiClient {
     return this.fetch(`/api/projects/${id}`);
   }
 
-  async listProjectMemoryLocations(): Promise<{ locations: ProjectMemoryChecklistItem[] }> {
+  async listProjectMemoryLocations(): Promise<{
+    locations: ProjectMemoryChecklistItem[];
+    builtin_sediment_instruction?: string;
+  }> {
     return this.fetch("/api/project-memory/locations");
   }
 

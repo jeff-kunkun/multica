@@ -595,13 +595,20 @@ func validateWorkspaceMemorySettings(ctx context.Context, q *db.Queries, workspa
 	}
 	var parsed struct {
 		Memory *struct {
-			SedimentAgent *string `json:"sediment_agent"`
+			SedimentAgent       *string `json:"sediment_agent"`
+			SedimentInstruction *string `json:"sediment_instruction"`
 		} `json:"memory"`
 	}
 	if err := json.Unmarshal(raw, &parsed); err != nil {
 		return nil
 	}
-	if parsed.Memory == nil || parsed.Memory.SedimentAgent == nil {
+	if parsed.Memory == nil {
+		return nil
+	}
+	if s := parsed.Memory.SedimentInstruction; s != nil && len(strings.TrimSpace(*s)) > maxSedimentInstructionBytes {
+		return fmt.Errorf("memory.sediment_instruction is longer than %d bytes", maxSedimentInstructionBytes)
+	}
+	if parsed.Memory.SedimentAgent == nil {
 		return nil
 	}
 	agentStr := strings.TrimSpace(*parsed.Memory.SedimentAgent)
