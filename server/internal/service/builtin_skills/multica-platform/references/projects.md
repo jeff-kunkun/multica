@@ -349,6 +349,22 @@ The server validates that the assigned agent:
 Agents that are currently offline are accepted (they will process sediment
 tickets when their runtime reconnects).
 
+### Customizing the sediment ticket prompt
+
+The ticket description starts with the workspace's sediment prompt, followed
+by the reason the round opened. Empty means the built-in prompt. The same
+setting (`settings.memory.sediment_instruction`, up to 4000 bytes) is editable
+under the sediment seat in the workspace settings page:
+
+```bash
+multica project memory instruction get --output json   # custom, builtin, effective
+multica project memory instruction set --file ./prompt.md
+multica project memory instruction clear                # back to built-in
+```
+
+The new prompt applies to tickets opened afterwards; an open ticket keeps its
+description.
+
 ## When to add a resource
 
 Add/update a project resource when the user asks for durable project context:
