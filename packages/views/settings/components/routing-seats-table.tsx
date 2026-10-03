@@ -11,6 +11,7 @@ import {
   type RoutingTierKey,
   type RoutingUsageKey,
 } from "@multica/core/agents";
+import { paths, useCurrentWorkspace } from "@multica/core/paths";
 import { agentListOptions } from "@multica/core/workspace/queries";
 import type { Agent } from "@multica/core/types";
 import { Button } from "@multica/ui/components/ui/button";
@@ -32,6 +33,7 @@ import {
 } from "@multica/ui/components/ui/table";
 import { cn } from "@multica/ui/lib/utils";
 import { useT } from "../../i18n";
+import { AppLink } from "../../navigation";
 import {
   ROUTING_TIER_CHOICES,
   routingTierLabel,
@@ -118,6 +120,7 @@ export function RoutingSeatsTable({
   const { t: ta } = useT("agents");
   const agentsQuery = useQuery({ ...agentListOptions(wsId), enabled: !!wsId });
   const write = useBulkUpdateAgentRouting(wsId);
+  const slug = useCurrentWorkspace()?.slug ?? "";
   const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
 
   const seats = useMemo(
@@ -300,7 +303,27 @@ export function RoutingSeatsTable({
                     tier === TIER_OFF && "text-muted-foreground",
                   )}
                 >
-                  {seat.name}
+                  {follows ? (
+                    <span className="block truncate">{seat.name}</span>
+                  ) : (
+                    seat.name
+                  )}
+                  {follows ? (
+                    <span className="block truncate text-caption font-normal text-muted-foreground">
+                      <span>{followLabel}</span>
+                      {slug ? (
+                        <>
+                          {" · "}
+                          <AppLink
+                            href={paths.workspace(slug).agentDetail(seat.id)}
+                            className="underline underline-offset-2 hover:text-foreground"
+                          >
+                            {t(($) => $.routing.seats_follows_unlock)}
+                          </AppLink>
+                        </>
+                      ) : null}
+                    </span>
+                  ) : null}
                 </TableCell>
                 <TableCell className="max-w-48 truncate font-mono text-caption text-muted-foreground">
                   {seat.model || "—"}
@@ -363,11 +386,6 @@ export function RoutingSeatsTable({
                         ))}
                       </SelectContent>
                     </Select>
-                    {follows ? (
-                      <span className="whitespace-nowrap text-caption text-muted-foreground">
-                        {followLabel}
-                      </span>
-                    ) : null}
                   </div>
                 </TableCell>
               </TableRow>
