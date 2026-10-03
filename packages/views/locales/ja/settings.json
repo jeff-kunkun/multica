@@ -2006,6 +2006,8 @@
     "seats_save_error": "保存できませんでした。もう一度お試しください。",
     "seats_follows": "{{name}} に従う",
     "seats_follows_base": "親ロールに従う",
+    "seats_work_off": "作業オフのためルーティング対象外",
+    "seats_runtime_unknown": "不明なランタイム",
     "judge_title": "判定モデル",
     "judge_description": "ティア（弱 / 中 / 強 / 最強）を確率付きで選びます。分析モデルがオンのときは、整理された事実だけを見ます。",
     "judge_enabled_label": "判定モデルを使う",
