@@ -394,6 +394,17 @@ The family read returns a compact row â€” task, issue, agent, status, started â€
 not the full execution-log record. If you need a run's detail, follow the task
 id with `multica issue run-messages`.
 
+## Who can see an issue
+
+`multica issue access <id> --output json` answers what the share button in the
+issue header shows: `visibility` (`private` / `project` = specific people /
+`workspace`), `audience_size`, and `can_change`. When `can_change` is false,
+`reason` is `guest` or `not_creator`; tell the person to ask the creator, an
+admin or the owner to change it rather than retrying. A link to a private
+issue opens as "not found" for everyone else, so check this before pasting an
+issue link for someone who may not be in its audience. `multica project access`
+is the same read for a project.
+
 ## Stop every run on one issue
 
 Use the issue-level guard when an agent chain must stop immediately:

@@ -388,7 +388,9 @@ describe("ChatPage URL synchronization", () => {
     });
 
     expect(replace).toHaveBeenLastCalledWith("/acme/chat");
-    expect(mockToastError).toHaveBeenCalledWith(enChat.page.session_link_unavailable);
+    // Explained in place (DENE-1214), not by a toast that disappears.
+    expect(mockToastError).not.toHaveBeenCalled();
+    expect(screen.getAllByTestId("resource-not-found-guide").length).toBeGreaterThan(0);
   });
 
   it("leaves a listed chat that went away without a toast", () => {

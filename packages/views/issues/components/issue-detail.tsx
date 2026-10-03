@@ -1232,6 +1232,7 @@ export function IssueNotFound({
         </div>
       )}
       <ResourceNotFound
+        kind="issue"
         actions={
           showBackLink ? (
             <Button variant="outline" size="sm" onClick={() => backOrReplace(paths.issues())}>
@@ -3462,13 +3463,12 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
               />
               <TooltipContent side="bottom">{actions.isPinned ? t(($) => $.detail.unpin_tooltip) : t(($) => $.detail.pin_tooltip)}</TooltipContent>
             </Tooltip>
-            <WriteAction>
-              <ShareScopeTrigger
-                scope={issue.visibility}
-                audienceSize={shareAudienceSize}
-                onClick={() => setShareScopeOpen(true)}
-              />
-            </WriteAction>
+            <ShareScopeTrigger
+              scope={issue.visibility}
+              audienceSize={shareAudienceSize}
+              onClick={() => setShareScopeOpen(true)}
+              access={{ kind: "issue", id: issue.id }}
+            />
             <IssueActionsDropdown
               issue={issue}
               align="end"

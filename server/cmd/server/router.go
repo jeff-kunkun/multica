@@ -2217,6 +2217,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					// ordinary edit: it has its own tier rule and its own
 					// audit row (DENE-698).
 					r.Put("/visibility", h.SetIssueVisibility)
+					r.Get("/access", h.GetIssueAccess)
 					// "Specific people": direct shares on this issue (kun fork).
 					r.Get("/shares", h.ListIssueShares)
 					r.Post("/shares", h.AddIssueShare)
@@ -2414,6 +2415,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					// holds, so the frontend asks what it would sweep first.
 					r.Get("/visibility/preview", h.PreviewProjectVisibility)
 					r.Put("/visibility", h.SetProjectVisibility)
+					r.Get("/access", h.GetProjectAccess)
 					r.Get("/resources", h.ListProjectResources)
 					// Compact repository-only surface used by the CLI and agents.
 					r.Get("/repos", h.ListProjectRepos)
