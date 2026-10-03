@@ -308,6 +308,16 @@ export function ChatPage() {
   // Set by a compact list pick so the store → URL sync below pushes instead of
   // replacing, giving the conversation its own step in the back stack.
   const pushNextSessionSync = useRef(false);
+  // Chats that have appeared in this person's list since the page mounted. A
+  // linked chat that never did is one they cannot open (someone else's private
+  // chat, or deleted); the controller's self-heal clears it and the sync below
+  // drops back to the list, which must say why instead of a silent jump. One
+  // that was listed and then vanished (deleted or archived away here) needs no
+  // explanation.
+  const listedSessionIds = useRef(new Set<string>());
+  useEffect(() => {
+    for (const session of c.sessions) listedSessionIds.current.add(session.id);
+  }, [c.sessions]);
 
   // URL → store: deep link, refresh, notification click, back/forward.
   useEffect(() => {
@@ -327,6 +337,9 @@ export function ChatPage() {
     const pushSync = pushNextSessionSync.current;
     pushNextSessionSync.current = false;
     if (live !== current) {
+      if (!live && current && c.sessionsLoaded && !listedSessionIds.current.has(current)) {
+        toast.error(t(($) => $.page.session_link_unavailable));
+      }
       const target = live ? wsPaths.chatSession(live) : wsPaths.chat();
       if (pushSync && live) push(target);
       else replace(target);
