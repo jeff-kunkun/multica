@@ -3,6 +3,7 @@
     "title": "채팅",
     "select_prompt": "대화를 선택하거나 +로 새로 시작하세요",
     "agent_link_no_access": "이 에이전트와 채팅할 권한이 없습니다.",
+    "session_link_unavailable": "이 채팅을 열 수 없습니다. 다른 사람의 비공개 채팅이거나 삭제되었습니다. 작성자에게 공개 범위를 프로젝트 또는 워크스페이스로 바꾼 뒤 링크를 다시 공유해 달라고 요청하세요.",
     "search_placeholder": "채팅 제목 또는 내용 검색…",
     "search_clear": "검색 지우기",
     "search_empty": "일치하는 채팅이 없습니다",
