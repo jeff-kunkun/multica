@@ -123,8 +123,27 @@ func (h *Handler) ListIncrementalChanges(w http.ResponseWriter, r *http.Request)
 			writeError(w, http.StatusBadRequest, "issue_id is required for timeline")
 			return
 		}
-		args = append(args, issueID)
-		query = `SELECT id, updated_at, row_to_json(c) FROM comment c WHERE workspace_id=$1 AND issue_id=$5::uuid AND (updated_at, id) > ($2::timestamptz, $3::uuid) ORDER BY updated_at,id LIMIT $4`
+		issueUUID, err := parseUUIDSafe(issueID)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid issue_id")
+			return
+		}
+		args = append(args, issueUUID)
+		wsUUID, err := parseUUIDSafe(ws)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid workspace id")
+			return
+		}
+		viewer, err := h.visibilityViewerFor(r, wsUUID)
+		if err != nil {
+			writeError(w, http.StatusForbidden, "unable to resolve issue visibility")
+			return
+		}
+		addArg := func(value any) string {
+			args = append(args, value)
+			return fmt.Sprintf("$%d", len(args))
+		}
+		query = `SELECT c.id, c.updated_at, row_to_json(c) FROM comment c JOIN issue i ON i.id = c.issue_id WHERE c.workspace_id=$1 AND c.issue_id=$5 AND ` + viewer.issueVisibilitySQL("i", addArg) + ` AND (c.updated_at, c.id) > ($2::timestamptz, $3::uuid) ORDER BY c.updated_at,c.id LIMIT $4`
 	}
 	if resource != "timeline" && resource != "issues" {
 		args = append(args, userID)
