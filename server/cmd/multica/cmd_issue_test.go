@@ -6075,3 +6075,40 @@ func TestRunIssueStatusBlockedWarnsAndReportsSeat(t *testing.T) {
 		t.Fatalf("seat report = %s", out.String())
 	}
 }
+
+// DENE-1301: an agent's `issue status blocked` carries the kind and the one
+// next step the parent's blocker card shows.
+func TestRunIssueStatusBlockedSendsKindAndAction(t *testing.T) {
+	seatPollWindow, seatPollInterval = 0, 0
+	t.Cleanup(func() { seatPollWindow, seatPollInterval = 10*time.Second, time.Second })
+	var body map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/api/issues/"):
+			json.NewEncoder(w).Encode(map[string]any{"id": "issue-1", "identifier": "MUL-1", "status": "blocked", "assignee_type": "agent", "assignee_id": "agent-1"})
+		case r.Method == http.MethodPut && r.URL.Path == "/api/issues/issue-1":
+			json.NewDecoder(r.Body).Decode(&body)
+			json.NewEncoder(w).Encode(map[string]any{"id": "issue-1", "identifier": "MUL-1", "status": "blocked"})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+	setCLITestServerEnv(t, srv.URL)
+	t.Setenv("MULTICA_TASK_CONFIG_ROOT", t.TempDir())
+	t.Setenv("MULTICA_TOKEN", "mat_test-token")
+
+	cmd := newIssueStatusTestCmd()
+	for _, flag := range []string{"blocked-by", "block-kind", "block-action"} {
+		cmd.Flags().String(flag, "", "")
+	}
+	_ = cmd.Flags().Set("blocked-by", "MUL-2")
+	_ = cmd.Flags().Set("block-kind", "dependency")
+	_ = cmd.Flags().Set("block-action", "等 MUL-2 合入")
+	if err := runIssueStatus(cmd, []string{"MUL-1", "blocked"}); err != nil {
+		t.Fatalf("runIssueStatus: %v", err)
+	}
+	if body["block_kind"] != "dependency" || body["block_action"] != "等 MUL-2 合入" || body["blocked_by"] != "MUL-2" {
+		t.Fatalf("body = %#v", body)
+	}
+}
