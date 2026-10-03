@@ -3,6 +3,7 @@
     "title": "Discussion",
     "select_prompt": "Choisissez une conversation, ou démarrez-en une nouvelle avec +",
     "agent_link_no_access": "Vous n'avez pas accès à la discussion avec cet agent.",
+    "session_link_unavailable": "Impossible d'ouvrir cette discussion : c'est la discussion privée de quelqu'un d'autre, ou elle a été supprimée. Demandez à son créateur de la rendre visible au projet ou à l'espace de travail, puis de repartager le lien.",
     "search_placeholder": "Rechercher un titre ou un contenu de discussion…",
     "search_clear": "Effacer la recherche",
     "search_empty": "Aucune discussion ne correspond",
