@@ -115,6 +115,7 @@ import type {
   AssigneeFrequencyEntry,
   TaskMessagePayload,
   Attachment,
+  AgentChatPage,
   ChatSession,
   ChatDirectoryItem,
   ChatPinnedAgent,
@@ -3419,6 +3420,13 @@ export class ApiClient {
       { tasks: [], nextCursor: null },
       { endpoint: "GET /api/agents/:id/tasks" },
     );
+  }
+
+  // An agent's open chats, running first; ones the caller may not open come
+  // back without title or creator (DENE-1310).
+  async listAgentChats(agentId: string, options: { limit?: number } = {}): Promise<AgentChatPage> {
+    const search = new URLSearchParams({ limit: String(options.limit ?? 5) });
+    return this.fetch(`/api/agents/${agentId}/chats?${search}`);
   }
 
   // Workspace-scoped agent task snapshot: every active task

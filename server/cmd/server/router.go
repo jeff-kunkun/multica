@@ -2573,6 +2573,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Post("/solidify", h.SolidifyAgent)
 					r.Post("/cancel-tasks", h.CancelAgentTasks)
 					r.Get("/tasks", h.ListAgentTasks)
+					r.Get("/chats", h.ListAgentChats)
 					r.Get("/dingtalk/groups", h.ListDingTalkGroupsForAgent)
 					r.Get("/skills", h.ListAgentSkills)
 					r.Put("/skills", h.SetAgentSkills)
