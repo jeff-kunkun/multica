@@ -303,7 +303,7 @@ export function ChatSessionHeader({
             aria-disabled={canEditAccess === false || undefined}
             className={cn(
               "h-7 gap-1.5 px-2 text-caption text-muted-foreground",
-              canEditAccess === false && "cursor-not-allowed opacity-60",
+              canEditAccess === false && "cursor-not-allowed aria-disabled:opacity-60",
             )}
             onClick={canOpenAccess ? () => setAccessOpen(true) : undefined}
             aria-label={`${t(($) => $.sharing.title)}: ${shareLabel}`}

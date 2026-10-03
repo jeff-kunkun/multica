@@ -484,12 +484,8 @@ MUL-123: fix login redirect        # correct — links the PR
 
 Sub-issues, stages and their incorrect-to-correct examples live in
 `sub-issues.md`.
-When blocking on a one-line external check, pass it as `--wait-probe` together
-with `--wait-timeout`. Exit code `0` means ready, `10` means pending, and
-`gh pr checks` exit code `8` is also pending; any other exit code is failed.
-For GitLab, `glab ci status` can be used directly when it returns non-zero while
-the pipeline is pending, or wrap its pending code as `10`.
-
+When blocking on a one-line external check, pass it as `--wait-probe` together with `--wait-timeout`. Exit code `0` means ready, `10` means pending, and `gh pr checks` exit code `8` is also pending; any other exit code is failed.
+For GitLab, `glab ci status` can be used directly when it returns non-zero while the pipeline is pending, or wrap its pending code as `10`.
 
 ### Report progress
 
