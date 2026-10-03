@@ -48,6 +48,8 @@ Run these from the repository root:
 
 Root frontend commands and `make check` do not verify mobile. Docs-only changes can use link/reference checks and `git diff --check`; state that code tests were not run.
 
+响应式 Web/Desktop 页面按 375 / 768 / 1280 三档做真实浏览器核验；先复用共享移动外壳的返回栈、安全区、44px 触控区和窄屏承载，再处理页面族自己的问题。静态 CSS 推断不能替代截图证据，当前盘点入口见 [DENE-1277 报告](docs/evidence/DENE-1277/report.html)。
+
 ## State Rules
 
 - TanStack Query owns API/server data. Zustand owns client state such as filters, drafts, modals, and tab layout; persist only durable preferences/drafts/layout, not server data or ephemeral UI state.
@@ -81,6 +83,7 @@ Root frontend commands and `make check` do not verify mobile. Docs-only changes 
 - 文档索引：[docs/README.md](docs/README.md)
 - 架构决定：[docs/adr/](docs/adr/)
 - 证据索引：[docs/evidence/INDEX.md](docs/evidence/INDEX.md)
+- 当前移动端适配盘点：[docs/evidence/DENE-1277/report.html](docs/evidence/DENE-1277/report.html)
 
 自动派票的执行席边界：
 - 路由开启时，服务端负责决定智能体或小队的执行席；`todo` / `backlog` 上智能体写入的执行人会被路由从零判断，不能把猜测当成人的指派。
