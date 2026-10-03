@@ -317,9 +317,10 @@ archived statuses remain readable via an explicit status filter.
 - **`blocked`** requires the wait on the same `multica issue status <id> blocked`
   call: `--blocked-by <DENE-N>`, `--wake-at <RFC3339>`, `--wait-condition` with
   `--wait-timeout`, or `--needs-human <member uuid>`. An agent change without
-  one is rejected; "等 DENE-N" in a comment is only a suggestion. A cleared
-  blocker or a passed acceptance wakes the waiter. The patrol wakes a quiet
-  blocked or in-review issue with no run after about 30 minutes.
+  one is rejected (a member's only warns); "等 DENE-N" in a comment is only a
+  suggestion. Routing seats an empty executor parked (no run) and the command
+  says if it did. A cleared blocker or passed acceptance wakes the waiter (no
+  executor: a person gets a 缺执行人 card); the patrol wakes a quiet one ~30 min.
 - **`cancelled`** is a terminal, user-driven decision to close the issue. Like
   `done` it enqueues no new agent work, but it does **not** stop tasks already in
   flight — a run in progress keeps going. To stop a running task, cancel the

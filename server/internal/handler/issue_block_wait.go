@@ -15,6 +15,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/blockwait"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/integrations/ghsnapshot"
+	"github.com/multica-ai/multica/server/internal/routing"
 	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -830,8 +831,18 @@ func activityTime(issue db.Issue) time.Time {
 
 // wakeIssueOwner starts the assignee (or the reviewer, while in review) and
 // leaves a sentence. A disabled seat is named and not replaced here — that
-// handoff belongs to the disabled-seat path.
+// handoff belongs to the disabled-seat path. A ticket nobody holds is seated
+// by routing first; when routing cannot, a person is told exactly that.
 func (h *Handler) wakeIssueOwner(ctx context.Context, issue db.Issue, reason string, commentOnly bool) {
+	if !commentOnly && issue.Status != "in_review" && !issue.AssigneeID.Valid &&
+		blockwait.MetaString(parseIssueMetadata(issue.Metadata), blockwait.KeyNeedsHuman) == "" {
+		seated, why := h.seatBeforeWake(ctx, issue)
+		if !seated.AssigneeID.Valid {
+			h.reportUnseatedWake(ctx, issue, reason, why)
+			return
+		}
+		issue = seated
+	}
 	targetType, targetID := issue.AssigneeType, issue.AssigneeID
 	if issue.Status == "in_review" && issue.ReviewerType.Valid && issue.ReviewerID.Valid && issue.ReviewerType.String != "none" {
 		targetType, targetID = issue.ReviewerType, issue.ReviewerID
@@ -872,6 +883,78 @@ func (h *Handler) wakeIssueOwner(ctx context.Context, issue db.Issue, reason str
 	waker.AssigneeType = targetType
 	waker.AssigneeID = targetID
 	h.dispatchWaitingOnAssigneeTrigger(ctx, waker, comment.ID)
+}
+
+// seatBeforeWake asks routing to fill the empty executor slot of a ticket
+// whose wait just ended (DENE-1255). The seat is written parked; the wake
+// that follows starts it. The ticket is read again either way, so a slot a
+// person or another pass filled meanwhile counts too. why says, in words a
+// person can act on, why the slot is still empty.
+func (h *Handler) seatBeforeWake(ctx context.Context, issue db.Issue) (db.Issue, string) {
+	why := "这个工作区没有开自动派单"
+	if h.Routing != nil {
+		rctx, cancel := context.WithTimeout(ctx, routeTimeout)
+		out, err := h.Routing.SeatExecutor(rctx, uuidToString(issue.WorkspaceID), uuidToString(issue.ID))
+		cancel()
+		switch {
+		case err != nil:
+			why = "路由这次出错了（" + err.Error() + "）"
+		case out.Action == routing.ActionSkipped && out.Reason == "routing not enabled":
+		case strings.TrimSpace(out.Reason) != "":
+			why = "路由没补上（" + out.Reason + "）"
+		default:
+			why = "路由没补上"
+		}
+	}
+	fresh, err := h.Queries.GetIssueInWorkspace(ctx, db.GetIssueInWorkspaceParams{ID: issue.ID, WorkspaceID: issue.WorkspaceID})
+	if err != nil {
+		return issue, why
+	}
+	return fresh, why
+}
+
+// reportUnseatedWake is the wake with nobody to start: the comment says
+// what ended, that the ticket has no executor, why routing left it empty,
+// and the one action that resumes it; the summon puts that same sentence on
+// a person's inbox card.
+func (h *Handler) reportUnseatedWake(ctx context.Context, issue db.Issue, reason, why string) {
+	recipient := h.unseatedRecipient(ctx, issue)
+	mention := ""
+	if recipient.Valid {
+		mention = h.memberWakeMention(ctx, recipient)
+	}
+	body := strings.TrimSpace(reason) + " 但这张票没有执行人，" + why + "，所以没有叫醒任何人。" + unseatedReason + "选好后平台会接着叫醒它。"
+	comment := h.postBlockComment(ctx, issue, mention+body)
+	if !recipient.Valid {
+		return
+	}
+	_, _ = h.summonPerson(ctx, service.SummonInput{
+		Issue:      issue,
+		Recipient:  recipient,
+		CallerType: "system",
+		Source:     service.SummonSourceUnseated,
+		Reason:     unseatedReason,
+		CommentID:  comment.ID,
+		NoComment:  !comment.ID.Valid,
+	})
+}
+
+// unseatedRecipient is who decides who holds a ticket nobody holds: the
+// person who created it, else a workspace manager — routing's notify rule.
+func (h *Handler) unseatedRecipient(ctx context.Context, issue db.Issue) pgtype.UUID {
+	if issue.CreatorType == "member" && issue.CreatorID.Valid {
+		return issue.CreatorID
+	}
+	managers, err := h.Queries.ListWorkspaceManagerUserIDs(ctx, issue.WorkspaceID)
+	if err != nil {
+		slog.Warn("block wait: list managers failed", "error", err, "issue_id", uuidToString(issue.ID))
+	}
+	for _, m := range managers {
+		if m.Valid {
+			return m
+		}
+	}
+	return pgtype.UUID{}
 }
 
 // coverDisabledWakeTarget keeps the patrol from waking a seat that is not

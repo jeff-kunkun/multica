@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -6016,4 +6017,61 @@ func TestResolveIssueRef_Link(t *testing.T) {
 			}
 		}
 	})
+}
+
+// DENE-1255: blocked with no wait flag warns but still writes; an empty
+// executor slot is reported with routing's reason.
+func TestRunIssueStatusBlockedWarnsAndReportsSeat(t *testing.T) {
+	seatPollWindow, seatPollInterval = 0, 0
+	t.Cleanup(func() { seatPollWindow, seatPollInterval = 10*time.Second, time.Second })
+	routed := false
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/issues/MUL-1":
+			json.NewEncoder(w).Encode(map[string]any{"id": "issue-1", "identifier": "MUL-1", "status": "backlog"})
+		case r.Method == http.MethodPut && r.URL.Path == "/api/issues/issue-1":
+			json.NewEncoder(w).Encode(map[string]any{"id": "issue-1", "identifier": "MUL-1", "status": "blocked"})
+		case r.Method == http.MethodGet && r.URL.Path == "/api/issues/issue-1":
+			json.NewEncoder(w).Encode(map[string]any{"id": "issue-1", "identifier": "MUL-1", "status": "blocked"})
+		case r.Method == http.MethodPost && r.URL.Path == "/api/issues/issue-1/route":
+			routed = true
+			json.NewEncoder(w).Encode(map[string]any{"state": "blocked", "action": "skipped", "reason": "routing not enabled"})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+	setCLITestServerEnv(t, srv.URL)
+	t.Setenv("MULTICA_TASK_CONFIG_ROOT", t.TempDir())
+	t.Setenv("MULTICA_TOKEN", "mat_test-token")
+
+	var warn bytes.Buffer
+	warnUnregisteredBlock(newIssueStatusTestCmd(), &warn, "MUL-1")
+	if !strings.Contains(warn.String(), "--outcome blocked --blocked-by") {
+		t.Fatalf("warning does not point at issue close: %s", warn.String())
+	}
+	flagged := newIssueStatusTestCmd()
+	for _, flag := range blockedWaitFlags {
+		flagged.Flags().String(flag, "", "")
+	}
+	if err := flagged.Flags().Set("blocked-by", "MUL-2"); err != nil {
+		t.Fatal(err)
+	}
+	warn.Reset()
+	warnUnregisteredBlock(flagged, &warn, "MUL-1")
+	if warn.Len() != 0 {
+		t.Fatalf("warned although --blocked-by was given: %s", warn.String())
+	}
+
+	if err := runIssueStatus(newIssueStatusTestCmd(), []string{"MUL-1", "blocked"}); err != nil {
+		t.Fatalf("runIssueStatus: %v", err)
+	}
+	if !routed {
+		t.Fatal("an empty executor slot was not routed")
+	}
+	var out bytes.Buffer
+	printBlockedSeat(&out, "MUL-1", seatReport{Reason: "routing not enabled"})
+	if !strings.Contains(out.String(), "routing not enabled") || !strings.Contains(out.String(), "multica issue assign MUL-1") {
+		t.Fatalf("seat report = %s", out.String())
+	}
 }

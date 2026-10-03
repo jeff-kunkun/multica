@@ -297,7 +297,12 @@ var issueStatusCmd = &cobra.Command{
 		"To cancel an issue because it duplicates another, mark it instead of only cancelling:\n" +
 		"  multica issue status <id> cancelled --duplicate-of <original>\n" +
 		"The original then lists it as a duplicate. Moving the issue to any status other\n" +
-		"than cancelled later removes the mark.",
+		"than cancelled later removes the mark.\n\n" +
+		"Moving to blocked without --blocked-by / --wake-at / --wait-condition / --needs-human\n" +
+		"prints a warning: the platform cannot tell when to wake the issue. Prefer\n" +
+		"  multica issue close <id> --outcome blocked --blocked-by <DENE-N> --evidence-file ./close.md\n" +
+		"A blocked issue with no executor is seated by routing (parked, no run starts);\n" +
+		"the command reports whether that happened and, if not, why.",
 	Args: exactArgs(2),
 	RunE: runIssueStatus,
 }
@@ -2279,6 +2284,20 @@ func runIssueStatus(cmd *cobra.Command, args []string) error {
 		fmt.Fprintf(os.Stderr, "Issue %s status changed to %s as a duplicate of %s.\n", issueDisplayKey(result), status, original)
 	} else {
 		fmt.Fprintf(os.Stderr, "Issue %s status changed to %s.\n", issueDisplayKey(result), status)
+	}
+
+	if status == "blocked" {
+		display := issueDisplayKey(result)
+		warnUnregisteredBlock(cmd, os.Stderr, display)
+		if assignee, _ := result["assignee_id"].(string); assignee == "" {
+			// Its own budget: the poll plus a synchronous route call must not
+			// eat the time the status write already used.
+			seatCtx, seatCancel := cli.APIContext(context.Background())
+			seat := reportBlockedSeat(seatCtx, client, issueRef.ID)
+			seatCancel()
+			printBlockedSeat(os.Stderr, display, seat)
+			result["routing_seat"] = seat
+		}
 	}
 
 	output, _ := cmd.Flags().GetString("output")

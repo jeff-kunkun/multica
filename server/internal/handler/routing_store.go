@@ -10,6 +10,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/blockwait"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/issuestatus"
 	"github.com/multica-ai/multica/server/internal/routing"
@@ -165,7 +166,24 @@ func (s routingStore) issueView(ctx context.Context, row db.Issue) (routing.Issu
 		}
 	}
 	out.Reviewer = s.reviewerRef(ctx, row)
+	if out.Status == "blocked" {
+		out.Wait = s.blockWait(ctx, row)
+	}
 	return out, nil
+}
+
+// blockWait reads the ticket's wait record and the live state of every
+// ticket it names, through the same reads the block patrol uses, so the
+// blocked row and the patrol cannot disagree about whether a blocker ended.
+func (s routingStore) blockWait(ctx context.Context, row db.Issue) routing.BlockWait {
+	rec := blockwait.ParseMetadata(parseIssueMetadata(row.Metadata))
+	out := routing.BlockWait{Registered: rec.Structured(), BlockedBy: rec.BlockedBy}
+	for _, view := range s.h.blockerViews(ctx, row, rec) {
+		if view.Cleared() {
+			out.Ended = append(out.Ended, view.Ref)
+		}
+	}
+	return out
 }
 
 // relatedTickets lists the agent-held tickets whose executor may continue
@@ -657,18 +675,35 @@ func (s routingStore) writeAcceptanceNotice(ctx context.Context, q *db.Queries, 
 
 const routingSummonReason = "这张票需要你看一眼——路由没有人会继续推进它。"
 
+// routingSummonFor names, for the inbox card, the one fact that keeps this
+// ticket from moving and the action that clears it (DENE-1255). "需要你看一眼"
+// is only the answer when the record holds nothing more specific.
+func routingSummonFor(issue db.Issue) (source, reason string) {
+	if !issue.AssigneeID.Valid && issue.Status != "in_review" {
+		return service.SummonSourceUnseated, unseatedReason
+	}
+	if issue.Status == "blocked" && !blockwait.ParseMetadata(parseIssueMetadata(issue.Metadata)).Structured() {
+		return service.SummonSourceRouting, "挂在阻塞但没写在等什么：让执行人用 `multica issue close --outcome blocked --blocked-by <挡路的票>` 补上，没在等就改回待办。"
+	}
+	return service.SummonSourceRouting, routingSummonReason
+}
+
+// unseatedReason is the card for a ticket nobody holds.
+const unseatedReason = "缺执行人：在执行人栏选一个智能体即可（命令行 `multica issue assign <票号> --to <名字>`）。"
+
 // writeRoutingSummon calls the person through the summon entry (DENE-880) and
 // writes this stay's routing_needs_you row. The summon records the open call
 // so the person's reply wakes the executor and it shows on their waiting
 // list; the inbox row stays per stay (HasAcceptanceNoticeSince), so a later
 // stay notifies again even while an earlier call is still unanswered.
 func writeRoutingSummon(ctx context.Context, q *db.Queries, issue db.Issue, uid pgtype.UUID) error {
+	source, reason := routingSummonFor(issue)
 	res, err := service.SummonWith(ctx, q, service.SummonInput{
 		Issue:      issue,
 		Recipient:  uid,
 		CallerType: "system",
-		Source:     service.SummonSourceRouting,
-		Reason:     routingSummonReason,
+		Source:     source,
+		Reason:     reason,
 		NoComment:  true,
 		SkipInbox:  true,
 	})
@@ -679,7 +714,7 @@ func writeRoutingSummon(ctx context.Context, q *db.Queries, issue db.Issue, uid 
 	if res.Summon.ID.Valid {
 		details, _ = json.Marshal(map[string]any{
 			"summon_id": util.UUIDToString(res.Summon.ID),
-			"source":    service.SummonSourceRouting,
+			"source":    source,
 		})
 	}
 	if _, err := q.AddIssueSubscriber(ctx, db.AddIssueSubscriberParams{
@@ -696,7 +731,7 @@ func writeRoutingSummon(ctx context.Context, q *db.Queries, issue db.Issue, uid 
 		Severity:      "action_required",
 		IssueID:       issue.ID,
 		Title:         issue.Title,
-		Body:          pgtype.Text{String: routingSummonReason, Valid: true},
+		Body:          pgtype.Text{String: reason, Valid: true},
 		ActorType:     pgtype.Text{String: "system", Valid: true},
 		Details:       details,
 	})
@@ -949,15 +984,16 @@ func (s routingStore) EnabledWorkspaces(ctx context.Context) ([]string, error) {
 	return out, nil
 }
 
-// UnassignedTodos lists quiet todo tickets with at least one empty routing
-// seat. The SQL filters the cheap, stable eligibility set; Route repeats the
-// human-held guard and applies the fill-only writes atomically.
-func (s routingStore) UnassignedTodos(ctx context.Context, workspaceID string, before time.Time, limit int) ([]string, error) {
+// UnseatedIssues lists quiet todo tickets with at least one empty routing
+// seat, and quiet blocked tickets with no executor. The SQL filters the cheap,
+// stable eligibility set; Route repeats the human-held guard and applies the
+// fill-only writes atomically.
+func (s routingStore) UnseatedIssues(ctx context.Context, workspaceID string, before time.Time, limit int) ([]string, error) {
 	wsID, err := util.ParseUUID(workspaceID)
 	if err != nil {
 		return nil, err
 	}
-	rows, err := s.h.Queries.ListUnassignedTodoIssues(ctx, db.ListUnassignedTodoIssuesParams{
+	rows, err := s.h.Queries.ListUnseatedIssues(ctx, db.ListUnseatedIssuesParams{
 		WorkspaceID: wsID,
 		Before:      pgtype.Timestamptz{Time: before, Valid: true},
 		Lim:         int32(limit),

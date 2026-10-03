@@ -31,7 +31,8 @@ const (
 	ActionDeclined Action = "declined"
 	// ActionHandedOff — the in-review row ran.
 	ActionHandedOff Action = "handed_off"
-	// ActionAdvised — the blocked row ran. Writes nothing.
+	// ActionAdvised — the blocked row ran and only spoke. When it also seated
+	// an empty executor slot the action is ActionAssigned.
 	ActionAdvised Action = "advised"
 	// ActionUnavailable — the model could not be reached.
 	ActionUnavailable Action = "unavailable"
@@ -256,6 +257,9 @@ const (
 	// fillCoordinator — the root of a group: seated to supervise its
 	// sub-issues, and its run is not started by the write.
 	fillCoordinator
+	// fillBlocked — a blocked ticket with nobody holding it: seated now, and
+	// woken by the block patrol when its wait ends (DENE-1255).
+	fillBlocked
 )
 
 // routeTodo is the only row that fills slots.
@@ -477,8 +481,10 @@ func (r *Router) routeTodo(ctx context.Context, workspaceID string, settings Set
 	// A parked sub-issue is the exception: it is not sitting in todo, and its
 	// stage's promotion routes it again, so an empty slot there is not yet a
 	// ticket nobody will move.
+	// A blocked ticket's empty slot is said by the blocked row's advice, which
+	// names the fact and the action, so this comment does not @ for it too.
 	stillUnassigned := needExecutor && executor == nil
-	notify := stillUnassigned && mode != fillParked
+	notify := stillUnassigned && mode != fillParked && mode != fillBlocked
 	body := r.assignmentComment(issue, match, candidates, verdict, threshold,
 		executor, executorSource, reviewer, reviewerFallback, fallbackWhy, humanSignoff,
 		needExecutor, needReviewer, notify, mode, dec, settings, ignored,
@@ -1124,17 +1130,46 @@ func (r *Router) decideReviewerNow(ctx context.Context, workspaceID string, sett
 	return ref, Outcome{}, nil
 }
 
-// routeBlocked writes nothing. A blocked ticket is stuck on something routing
-// cannot know; all it can do is say what it thinks and make sure somebody
-// sees it.
+// routeBlocked seats an empty executor slot, then says once what is in the
+// way. A blocked ticket nobody holds is woken by nobody when its wait ends, so
+// the slot is filled with the todo row's ladder and judge — parked: no run
+// starts and the status stays blocked (DENE-1255). A held slot is left alone.
+//
+// The advice reads the wait record before any model: an empty executor slot,
+// a block that names nothing to wait on, and a blocker that already ended are
+// facts, and a model guessing around them pointed people at the wrong thing.
 func (r *Router) routeBlocked(ctx context.Context, workspaceID string, settings Settings, issue Issue) (Outcome, error) {
 	out := Outcome{State: StateEnabled, Action: ActionAdvised}
+	fillWhy := ""
+	if issue.AssigneeType == "" {
+		seated, err := r.routeTodo(ctx, workspaceID, settings, issue, fillBlocked)
+		if err != nil || seated.Action == ActionUnavailable || seated.Action == ActionSkipped {
+			return seated, err
+		}
+		out.ExecutorWritten, out.ReviewerWritten, out.Commented = seated.ExecutorWritten, seated.ReviewerWritten, seated.Commented
+		if seat := seated.ExecutorWritten; seat != nil {
+			issue.AssigneeType, issue.AssigneeID = "agent", seat.ID
+		} else {
+			fillWhy = seated.Reason
+		}
+	}
+	if out.ExecutorWritten != nil || !out.ReviewerWritten.Empty() {
+		out.Action = ActionAssigned
+	}
+
 	done, err := r.Store.HasComment(ctx, workspaceID, issue.ID, KindAdvice)
 	if err != nil {
 		return out, err
 	}
 	if done {
+		if out.Action == ActionAssigned {
+			return out, nil
+		}
 		return Outcome{State: StateEnabled, Action: ActionNoop, Reason: "already advised"}, nil
+	}
+
+	if body, mention, ok := blockedFactComment(issue, fillWhy); ok {
+		return r.deliver(ctx, workspaceID, issue, KindAdvice, body, mention, out)
 	}
 
 	ladder := r.Ladder.WithProjects(settings.Projects).WithSeatOrder(settings.SeatOrder())
@@ -1153,12 +1188,35 @@ func (r *Router) routeBlocked(ctx context.Context, workspaceID string, settings 
 		return r.reportUnavailable(ctx, workspaceID, issue, err)
 	}
 	if !asked {
+		if out.Action == ActionAssigned {
+			return out, nil
+		}
 		return Outcome{State: StateEnabled, Action: ActionNoop, Reason: "no model is switched on to advise"}, nil
 	}
 	r.Breaker.Succeed(workspaceID)
 
 	body := r.adviceComment(issue, advice, candidates)
 	return r.deliver(ctx, workspaceID, issue, KindAdvice, body, true, out)
+}
+
+// SeatExecutor fills an empty executor slot without starting a run, on a
+// ticket that is neither over nor awaiting acceptance. The block patrol asks
+// it before waking an owner it does not have (DENE-1255): it then starts the
+// seat the usual way, so the wake and the fill stay two steps with one
+// meaning each. A held slot answers noop.
+func (r *Router) SeatExecutor(ctx context.Context, workspaceID, issueID string) (Outcome, error) {
+	settings, issue, done, err := r.admit(ctx, workspaceID, issueID)
+	if done != nil {
+		return *done, err
+	}
+	if issue.AssigneeType != "" {
+		return Outcome{State: StateEnabled, Action: ActionNoop, Reason: "executor slot is held"}, nil
+	}
+	switch issue.Status {
+	case "done", "cancelled", "in_review":
+		return Outcome{State: StateEnabled, Action: ActionNoop, Reason: "status has no executor to seat"}, nil
+	}
+	return r.routeTodo(ctx, workspaceID, settings, issue, fillBlocked)
 }
 
 // reportUnavailable records the failure with the breaker and, on the first
