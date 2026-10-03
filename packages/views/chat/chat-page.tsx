@@ -68,6 +68,7 @@ import { useChatController } from "./components/use-chat-controller";
 import { OfflineBanner } from "./components/offline-banner";
 import { NoAgentBanner } from "./components/no-agent-banner";
 import { ArchivedAgentBanner } from "./components/archived-agent-banner";
+import { ChatOriginBar } from "./components/chat-origin-bar";
 import { AgentAccessRevokedBanner } from "./components/agent-access-revoked-banner";
 import { RuntimeRequiredBanner } from "./components/runtime-required-banner";
 import { WorkThreadPanel } from "../common/work-thread-panel";
@@ -755,6 +756,7 @@ export function ChatPage() {
           }
         />
       )}
+      {c.currentSession && <ChatOriginBar session={c.currentSession} />}
       {c.currentSession && (
         <ChatProjectNudge
           session={c.currentSession}

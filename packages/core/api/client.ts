@@ -1,3 +1,4 @@
+import type { AgentSpawnPolicy, AgentSpawnPolicyPatch } from "../workspace/agent-spawn";
 import type { ZodType } from "zod";
 import type { IssueWakeup, IssueWakeupInput, IssueWakeupSummaryRow, PausedWakeup, SystemWakeup, WakeupRun, WorkspaceSystemWakeup } from "../types/issue-wakeup";
 import type { WorkspaceWakeupPage, WorkspaceWakeupFilters } from "../types/issue-wakeup";
@@ -115,6 +116,7 @@ import type {
   AssigneeFrequencyEntry,
   TaskMessagePayload,
   Attachment,
+  AgentChatPage,
   ChatSession,
   ChatDirectoryItem,
   ChatPinnedAgent,
@@ -3421,6 +3423,13 @@ export class ApiClient {
     );
   }
 
+  // An agent's open chats, running first; ones the caller may not open come
+  // back without title or creator (DENE-1310).
+  async listAgentChats(agentId: string, options: { limit?: number } = {}): Promise<AgentChatPage> {
+    const search = new URLSearchParams({ limit: String(options.limit ?? 5) });
+    return this.fetch(`/api/agents/${agentId}/chats?${search}`);
+  }
+
   // Workspace-scoped agent task snapshot: every active task
   // (queued/dispatched/running) plus each agent's most recent terminal task.
   // Powers the front-end's "active wins, else latest terminal" presence
@@ -3857,6 +3866,17 @@ export class ApiClient {
     return this.fetch(`/api/workspaces/${id}`, {
       method: "PATCH",
       body: JSON.stringify(data),
+    });
+  }
+
+  async getAgentSpawn(workspaceId: string): Promise<AgentSpawnPolicy> {
+    return this.fetch(`/api/workspaces/${workspaceId}/agent-spawn`);
+  }
+
+  async updateAgentSpawn(workspaceId: string, patch: AgentSpawnPolicyPatch): Promise<AgentSpawnPolicy> {
+    return this.fetch(`/api/workspaces/${workspaceId}/agent-spawn`, {
+      method: "PUT",
+      body: JSON.stringify(patch),
     });
   }
 

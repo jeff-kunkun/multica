@@ -146,7 +146,9 @@
     "quick_actions_heading": "후속 질문",
     "quick_actions_aria": "추천 후속 질문",
     "quick_actions_regenerate": "제안 다시 생성",
-    "quick_actions_regenerate_failed": "제안을 다시 생성하지 못했습니다. 다시 시도해 주세요."
+    "quick_actions_regenerate_failed": "제안을 다시 생성하지 못했습니다. 다시 시도해 주세요.",
+    "spawned": "채팅을 열었습니다",
+    "spawn_untitled": "새 채팅"
   },
   "session_history": {
     "untitled": "제목 없음",
@@ -315,7 +317,8 @@
     "private_tag": "비공개",
     "extra_tag": "추가 멤버",
     "show_more": "더 보기 ({{count}})",
-    "show_fewer": "접기"
+    "show_fewer": "접기",
+    "spawned": "다른 채팅에서 생성됨"
   },
   "header": {
     "view_profile": "Agent 프로필 보기",
@@ -368,5 +371,10 @@
     "make_private": "선택한 항목을 비공개로",
     "dismiss": "알겠습니다"
   },
-  "title_locked": "제목 잠김 — 에이전트가 이름을 바꾸지 않습니다"
+  "title_locked": "제목 잠김 — 에이전트가 이름을 바꾸지 않습니다",
+  "origin": {
+    "from_prefix": "",
+    "from_suffix": "에서 생성됨",
+    "from_hidden": "다른 채팅에서 생성됨"
+  }
 }
