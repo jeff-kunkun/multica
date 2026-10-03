@@ -433,7 +433,8 @@
       "apps": "已连接应用",
       "config_transfer": "配置导出/导入",
       "routing": "路由",
-      "project_sharing": "权限与共享"
+      "project_sharing": "权限与共享",
+      "workspace_links": "连通工作区"
     },
     "groups": {
       "personal": "个人",

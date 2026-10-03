@@ -7,6 +7,7 @@ import type { ArchivedInboxPage, ArchivedInboxFacets } from "../types/inbox";
 import type { InboxBoardResponse, ParkingRecordsResponse, UnreadInboxIssue, WaitingSummon } from "../types/home";
 import type { WorkThreadSnapshot } from "../types/work_thread";
 import type { Ask, CreateAskRequest, AnswerAskRequest } from "../types/ask";
+import type { LinkedView, LinkedViewParams, ListWorkspaceLinksResponse, WorkspaceLink, WorkspaceLinkAuditEntry } from "../types/workspace-link";
 import { configStore } from "../config";
 import { IssueGoalSchema, type CreateIssueGoalInput } from "../types";
 import type {
@@ -6368,6 +6369,48 @@ export class ApiClient {
       `/api/workspaces/${workspaceId}/repos/connections`,
     );
     return { repos: Array.isArray(raw?.repos) ? raw.repos : [] };
+  }
+
+  // Cross-workspace read-only links (DENE-1225). Scoped by the current
+  // workspace header; the server answers every refusal with the same 404.
+  async listWorkspaceLinks(): Promise<ListWorkspaceLinksResponse> {
+    const raw = await this.fetch<Partial<ListWorkspaceLinksResponse>>("/api/workspace-links");
+    return {
+      links: Array.isArray(raw?.links) ? raw.links : [],
+      can: { create: false, accept: false, manage: false, audit: false, ...raw?.can },
+    };
+  }
+
+  async listWorkspaceLinkAudit(): Promise<WorkspaceLinkAuditEntry[]> {
+    const raw = await this.fetch<{ entries?: WorkspaceLinkAuditEntry[] }>("/api/workspace-links/audit");
+    return Array.isArray(raw?.entries) ? raw.entries : [];
+  }
+
+  async createWorkspaceLink(body: { target_slug: string; project_ids: string[] }): Promise<WorkspaceLink> {
+    return this.fetch("/api/workspace-links", { method: "POST", body: JSON.stringify(body) });
+  }
+
+  async updateWorkspaceLink(
+    linkId: string,
+    body: { project_ids: string[] } | { accept: true },
+  ): Promise<WorkspaceLink> {
+    return this.fetch(`/api/workspace-links/${encodeURIComponent(linkId)}`, {
+      method: "PATCH",
+      body: JSON.stringify(body),
+    });
+  }
+
+  async revokeWorkspaceLink(linkId: string): Promise<void> {
+    await this.fetch(`/api/workspace-links/${encodeURIComponent(linkId)}`, { method: "DELETE" });
+  }
+
+  async getLinkedView(linkId: string, params: LinkedViewParams = {}): Promise<LinkedView> {
+    const search = new URLSearchParams();
+    if (params.projectId) search.set("project_id", params.projectId);
+    if (params.cursor) search.set("cursor", params.cursor);
+    if (params.limit) search.set("limit", String(params.limit));
+    const qs = search.toString();
+    return this.fetch(`/api/workspace-links/${encodeURIComponent(linkId)}/view${qs ? `?${qs}` : ""}`);
   }
 
   // Repository connection catalog (GitHub App / token, GitLab, Forgejo, Gitea).
