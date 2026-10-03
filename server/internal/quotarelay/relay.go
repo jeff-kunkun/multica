@@ -306,6 +306,10 @@ type Seat struct {
 	// already qualify — the same order routing uses inside a rung (DENE-922).
 	Demoted   bool
 	UsageRank int
+	// Running is how many unfinished runs the seat holds right now. Routing's
+	// 负载 rule fills it (DENE-1203); the relay leaves it zero, which keeps
+	// its order unchanged. Fewer goes first, after demotion.
+	Running int
 }
 
 // Choice is the replacement seat. SteppedDown is true when the same tier
@@ -352,6 +356,14 @@ func Pick(failed Seat, roster []Seat, ladder []string) (Choice, bool) {
 		return Choice{}, false
 	}
 	return Choice{Seat: seat, SteppedDown: true}, true
+}
+
+// BestOnTier is the same-tier choice Pick makes before it steps down, open
+// to other callers so a rung is ordered one way everywhere. failed is the
+// seat being replaced, or a seat with an empty ID when nobody is: its
+// Direction, AvoidHouse and Exclude still shape the pool.
+func BestOnTier(roster []Seat, failed Seat, tier string) (Seat, bool) {
+	return bestOnTier(roster, failed, tier)
 }
 
 func bestOnTier(roster []Seat, failed Seat, tier string) (Seat, bool) {
@@ -425,6 +437,9 @@ func betterSeat(seat, best, failed Seat) bool {
 	}
 	if seat.Demoted != best.Demoted {
 		return !seat.Demoted
+	}
+	if seat.Running != best.Running {
+		return seat.Running < best.Running
 	}
 	if seat.UsageRank != best.UsageRank {
 		return seat.UsageRank < best.UsageRank

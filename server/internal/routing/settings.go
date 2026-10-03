@@ -131,6 +131,11 @@ type Settings struct {
 	// default, which is shadow mode — the ladder's pick is written and the
 	// assignment comment says who the rule would have picked.
 	PreferContinuation bool `json:"prefer_continuation,omitempty"`
+	// PreferIdle is 「负载分流」 (DENE-1203): inside the ladder's rung and
+	// direction, a seat with fewer unfinished runs goes before a busy one.
+	// Off by default, which is shadow mode, like PreferContinuation. With
+	// both on, 接着做 wins.
+	PreferIdle bool `json:"prefer_idle,omitempty"`
 
 	// JudgeEnabled switches the judge role — Model, BaseURL and the key above
 	// are that role's fields, because the judge is the only model routing had

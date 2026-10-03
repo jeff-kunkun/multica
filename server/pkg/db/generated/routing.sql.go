@@ -227,6 +227,43 @@ func (q *Queries) CompleteIssueFromReview(ctx context.Context, arg CompleteIssue
 	return i, err
 }
 
+const countUnfinishedTasksByAgents = `-- name: CountUnfinishedTasksByAgents :many
+SELECT agent_id, count(*)::int AS running
+FROM agent_task_queue
+WHERE agent_id = ANY($1::uuid[])
+  AND status IN ('queued', 'dispatched', 'running', 'waiting_local_directory')
+GROUP BY agent_id
+`
+
+type CountUnfinishedTasksByAgentsRow struct {
+	AgentID pgtype.UUID `json:"agent_id"`
+	Running int32       `json:"running"`
+}
+
+// Unfinished runs per watched agent, for routing's 负载 rule (DENE-1203).
+// Queued counts: tickets routed a moment apart must see the run the first
+// one just queued, or a batch would still pile onto one seat. Agents with no
+// unfinished run return no row.
+func (q *Queries) CountUnfinishedTasksByAgents(ctx context.Context, agentIds []pgtype.UUID) ([]CountUnfinishedTasksByAgentsRow, error) {
+	rows, err := q.db.Query(ctx, countUnfinishedTasksByAgents, agentIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []CountUnfinishedTasksByAgentsRow{}
+	for rows.Next() {
+		var i CountUnfinishedTasksByAgentsRow
+		if err := rows.Scan(&i.AgentID, &i.Running); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const createRoutingComment = `-- name: CreateRoutingComment :one
 INSERT INTO comment (issue_id, workspace_id, author_type, author_id, content, type, routing_kind)
 VALUES (
