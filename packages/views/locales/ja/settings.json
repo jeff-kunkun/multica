@@ -2006,6 +2006,7 @@
     "seats_save_error": "保存できませんでした。もう一度お試しください。",
     "seats_follows": "{{name}} に従う",
     "seats_follows_base": "親ロールに従う",
+    "seats_follows_unlock": "従うのをやめると編集可",
     "seats_work_off": "作業オフのためルーティング対象外",
     "seats_runtime_unknown": "不明なランタイム",
     "judge_title": "判定モデル",

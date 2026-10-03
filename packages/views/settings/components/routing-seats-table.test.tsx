@@ -14,6 +14,17 @@ vi.mock("@multica/core/api", async (importOriginal) => {
   return { ...actual, api: { listAgents, bulkUpdateAgentRouting, listRuntimes } };
 });
 
+vi.mock("@multica/core/paths", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@multica/core/paths")>()),
+  useCurrentWorkspace: () => ({ id: "ws-1", name: "Acme", slug: "acme" }),
+}));
+
+vi.mock("../../navigation", () => ({
+  AppLink: ({ href, children }: { href: string; children: React.ReactNode }) => (
+    <a href={href}>{children}</a>
+  ),
+}));
+
 import { RoutingSeatsTable } from "./routing-seats-table";
 
 let clock = 0;
@@ -202,6 +213,12 @@ describe("RoutingSeatsTable", () => {
     expect(screen.getByRole("combobox", { name: "Gohan · Tier" })).toBeDisabled();
     expect(screen.getByRole("combobox", { name: "Gohan · Usage" })).toBeDisabled();
     expect(screen.getByText("Follows Goku")).toBeInTheDocument();
+    // The grey row says how to get out: one link to the follower's own page.
+    expect(screen.getAllByRole("link", { name: "Turn off to edit" })).toHaveLength(1);
+    expect(screen.getByRole("link", { name: "Turn off to edit" })).toHaveAttribute(
+      "href",
+      "/acme/agents/a-gohan",
+    );
     // This checkbox is a Base UI span: disabled shows up as aria-disabled,
     // which is what a screen reader and the pointer both honor.
     expect(screen.getByRole("checkbox", { name: "Select Gohan" })).toHaveAttribute(

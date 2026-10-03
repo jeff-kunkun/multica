@@ -2021,6 +2021,7 @@
     "seats_save_error": "Not saved. Try again.",
     "seats_follows": "Follows {{name}}",
     "seats_follows_base": "Follows its base role",
+    "seats_follows_unlock": "Turn off to edit",
     "seats_work_off": "Work is off, so routing skips it",
     "seats_runtime_unknown": "Unknown runtime",
     "judge_title": "Judge model",

@@ -10,6 +10,7 @@ import {
   type RoutingTierKey,
   type RoutingUsageKey,
 } from "@multica/core/agents";
+import { paths, useCurrentWorkspace } from "@multica/core/paths";
 import { runtimeListOptions } from "@multica/core/runtimes";
 import { agentListOptions } from "@multica/core/workspace/queries";
 import type { Agent } from "@multica/core/types";
@@ -32,6 +33,7 @@ import {
 } from "@multica/ui/components/ui/table";
 import { cn } from "@multica/ui/lib/utils";
 import { useT } from "../../i18n";
+import { AppLink } from "../../navigation";
 import {
   ROUTING_TIER_CHOICES,
   routingTierLabel,
@@ -132,6 +134,7 @@ export function RoutingSeatsTable({
   const agentsQuery = useQuery({ ...agentListOptions(wsId), enabled: !!wsId });
   const runtimesQuery = useQuery({ ...runtimeListOptions(wsId), enabled: !!wsId });
   const write = useBulkUpdateAgentRouting(wsId);
+  const slug = useCurrentWorkspace()?.slug ?? "";
   const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
 
   const unknownRuntime = t(($) => $.routing.seats_runtime_unknown);
@@ -309,6 +312,11 @@ export function RoutingSeatsTable({
                   ? t(($) => $.routing.seats_follows, { name: seat.parent_agent_name })
                   : t(($) => $.routing.seats_follows_base)
                 : "";
+            const followLabel = follows && !off
+              ? seat.parent_agent_name
+                ? t(($) => $.routing.seats_follows, { name: seat.parent_agent_name })
+                : t(($) => $.routing.seats_follows_base)
+              : "";
             const locked = !canManage || follows || off || write.isPending;
             return (
               <TableRow
@@ -336,7 +344,27 @@ export function RoutingSeatsTable({
                     (tier === TIER_OFF || off) && "text-muted-foreground",
                   )}
                 >
-                  {seat.name}
+                  {follows ? (
+                    <span className="block truncate">{seat.name}</span>
+                  ) : (
+                    seat.name
+                  )}
+                  {follows ? (
+                    <span className="block truncate text-caption font-normal text-muted-foreground">
+                      <span>{followLabel}</span>
+                      {slug ? (
+                        <>
+                          {" · "}
+                          <AppLink
+                            href={paths.workspace(slug).agentDetail(seat.id)}
+                            className="underline underline-offset-2 hover:text-foreground"
+                          >
+                            {t(($) => $.routing.seats_follows_unlock)}
+                          </AppLink>
+                        </>
+                      ) : null}
+                    </span>
+                  ) : null}
                 </TableCell>
                 <TableCell className="max-w-48 truncate font-mono text-caption text-muted-foreground">
                   {seat.model || "—"}
@@ -399,7 +427,7 @@ export function RoutingSeatsTable({
                         ))}
                       </SelectContent>
                     </Select>
-                    {note ? (
+                    {off ? (
                       <span className="whitespace-nowrap text-caption text-muted-foreground">
                         {note}
                       </span>
