@@ -1821,6 +1821,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Use(middleware.RequireWorkspaceMemberFromURL(queries, "id"))
 					r.Get("/", h.GetWorkspace)
 					r.Get("/naming", h.GetWorkspaceNaming)
+					r.Get("/agent-spawn", h.GetWorkspaceAgentSpawn)
 					r.Get("/members", h.ListMembersWithUser)
 					r.Post("/leave", h.LeaveWorkspace)
 					// Listing GitHub installations is member-visible so the
@@ -1867,6 +1868,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Group(func(r chi.Router) {
 					r.Use(middleware.RequireWorkspaceRoleFromURL(queries, "id", "owner", "admin"))
 					r.Put("/naming", h.UpdateWorkspaceNaming)
+					r.Put("/agent-spawn", h.UpdateWorkspaceAgentSpawn)
 					r.Put("/", h.UpdateWorkspace)
 					r.Patch("/", h.UpdateWorkspace)
 					// The re-check button. It makes an outbound request, so it
@@ -2768,6 +2770,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Get("/", h.ListChatSessions)
 				// Registered before /{sessionId} so "make-private" is not captured as an id.
 				r.Post("/make-private", h.MakeChatSessionsPrivate)
+				// Agent-only: open a chat from the chat this run belongs to (DENE-1271).
+				r.Post("/spawn", h.SpawnChatSession)
 				r.Get("/search", h.SearchChatMessages)
 				r.Route("/{sessionId}", func(r chi.Router) {
 					r.Get("/", h.GetChatSession)
