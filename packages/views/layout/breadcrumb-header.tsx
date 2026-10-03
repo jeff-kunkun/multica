@@ -6,6 +6,7 @@ import { cn } from "@multica/ui/lib/utils";
 import { Button } from "@multica/ui/components/ui/button";
 import { PageHeader } from "./page-header";
 import { AppLink, useBackOrReplace } from "../navigation";
+import { useT } from "../i18n";
 
 /**
  * One ancestor crumb. Always a clickable link to the segment's container — the
@@ -46,6 +47,7 @@ interface BreadcrumbHeaderProps {
  */
 export function BreadcrumbHeader({ segments, leaf, actions, leading, className }: BreadcrumbHeaderProps) {
   const backOrReplace = useBackOrReplace();
+  const { t } = useT("chat");
   const backFallback = segments.at(-1)?.href;
 
   return (
@@ -58,7 +60,7 @@ export function BreadcrumbHeader({ segments, leaf, actions, leading, className }
             variant="ghost"
             size="icon"
             className="shrink-0"
-            aria-label="Back"
+            aria-label={t(($) => $.page.back)}
             onClick={() => backOrReplace(backFallback)}
           >
             <ArrowLeft className="size-4" aria-hidden="true" />

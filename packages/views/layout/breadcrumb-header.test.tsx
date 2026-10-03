@@ -6,6 +6,10 @@ import type { NavigationAdapter } from "../navigation";
 import { NavigationProvider } from "../navigation";
 import { BreadcrumbHeader } from "./breadcrumb-header";
 
+vi.mock("../i18n", () => ({
+  useT: () => ({ t: () => "Back" }),
+}));
+
 function makeAdapter(overrides: Partial<NavigationAdapter> = {}): NavigationAdapter {
   return {
     push: vi.fn(),
