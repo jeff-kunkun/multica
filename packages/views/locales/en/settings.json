@@ -1949,7 +1949,7 @@
     "continuation_description_on": "Live: a ticket continuing a previous stage, its parent, or its batch goes to that work's executor when the seat is strong enough, online and has quota.",
     "continuation_description_shadow": "Shadow mode: routing keeps its own pick and only notes in the assignment comment who this rule would pick. Turn on to apply it.",
     "load_label": "Spread across idle seats",
-    "load_description_on": "Live: within the picked tier and direction, a seat with fewer runs in progress takes the ticket; when all are equally busy the usual order stands. If “Prefer the previous executor” is also on, it wins.",
+    "load_description_on": "Live: within the picked tier and direction, a seat with fewer runs in progress takes the ticket, but never past the usage tag: an idle seat tagged tighter does not take work from a busier one tagged looser; when all are equally busy the usual order stands. If “Prefer the previous executor” is also on, it wins.",
     "load_description_shadow": "Shadow mode: routing keeps its own pick and only notes in the assignment comment which less busy seat this rule would pick. Turn on to apply it.",
     "gateway_endpoint_workspace": "The model id is sent to this workspace's own endpoint: {{host}}.",
     "gateway_endpoint_deployment": "The model id is sent to the deployment's shared LLM endpoint: {{host}}.",
