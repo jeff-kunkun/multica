@@ -55,8 +55,8 @@ export function BreadcrumbHeader({ segments, leaf, actions, leading, className }
                 typeof segment.label === "string" ? segment.label : undefined
               }
               className={cn(
-                "text-muted-foreground hover:text-foreground transition-colors",
-                segment.className ?? "shrink-0",
+                "min-w-0 max-w-[28vw] truncate text-muted-foreground transition-colors hover:text-foreground sm:max-w-none",
+                segment.className ?? "sm:shrink-0",
               )}
             >
               {segment.label}
@@ -66,7 +66,11 @@ export function BreadcrumbHeader({ segments, leaf, actions, leading, className }
         ))}
         {leaf}
       </div>
-      {actions ? <div className="flex items-center gap-1 shrink-0">{actions}</div> : null}
+      {actions ? (
+        <div className="flex max-w-[45vw] shrink-0 items-center gap-1 overflow-x-auto sm:max-w-none">
+          {actions}
+        </div>
+      ) : null}
     </PageHeader>
   );
 }
