@@ -262,15 +262,20 @@ describe("IssuePeekHost", () => {
   });
 
   describe("on a phone", () => {
-    it("opens full screen with a back button instead of step and close buttons", async () => {
+    it("opens full screen with back and step buttons, without a close button", async () => {
       mobile.value = true;
       renderHost();
       openCard("i-1");
 
       expect(panel()).toHaveClass("fixed", "inset-0");
-      expect(screen.queryByRole("button", { name: "Next issue" })).toBeNull();
+      expect(screen.getByRole("button", { name: "Next issue" })).toBeInTheDocument();
       expect(screen.queryByRole("button", { name: "Close preview" })).toBeNull();
       expect(screen.getByRole("link", { name: "Open full page" })).toBeInTheDocument();
+
+      fireEvent.click(screen.getByRole("button", { name: "Next issue" }));
+      expect(screen.getByTestId("detail")).toHaveTextContent("i-2");
+      fireEvent.click(screen.getByRole("button", { name: "Previous issue" }));
+      expect(screen.getByTestId("detail")).toHaveTextContent("i-1");
 
       fireEvent.click(screen.getByRole("button", { name: "Back to board" }));
       await waitForClosed();

@@ -199,7 +199,7 @@ const IssuePeekPanel = memo(function IssuePeekPanel({ issueId }: { issueId: stri
           issueId={issueId}
           variant="peek"
           defaultSidebarOpen={false}
-          leadingAction={isMobile ? <IssuePeekBack /> : <IssuePeekNav />}
+          leadingAction={isMobile ? <IssuePeekMobileLeading /> : <IssuePeekNav />}
           trailingActions={<IssuePeekTrailingActions issueId={issueId} fullScreen={isMobile} />}
           onDelete={actions.close}
         />
@@ -358,7 +358,7 @@ function isControlTarget(target: EventTarget | null) {
 }
 
 /** Previous / next card in the peeked issue's board column. */
-function IssuePeekNav() {
+function IssuePeekNav({ showPosition = true }: { showPosition?: boolean } = {}) {
   const { t } = useT("issues");
   const actions = useIssuePeekActions()!;
   const position = useIssuePeekPosition();
@@ -391,7 +391,7 @@ function IssuePeekNav() {
           </TooltipContent>
         </Tooltip>
       ))}
-      {position && (
+      {showPosition && position && (
         <span className="ml-1 text-caption tabular-nums text-muted-foreground">
           {`${position.index} / ${position.total}`}
         </span>
@@ -414,6 +414,16 @@ function IssuePeekBack() {
     >
       <ArrowLeft />
     </Button>
+  );
+}
+
+/** Phone full screen: keep the board trip beside the same previous/next controls. */
+function IssuePeekMobileLeading() {
+  return (
+    <div className="flex shrink-0 items-center gap-1">
+      <IssuePeekBack />
+      <IssuePeekNav showPosition={false} />
+    </div>
   );
 }
 
