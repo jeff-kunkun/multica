@@ -80,6 +80,11 @@ Root frontend commands and `make check` do not verify mobile. Docs-only changes 
 - 架构决定：[docs/adr/](docs/adr/)
 - 证据索引：[docs/evidence/INDEX.md](docs/evidence/INDEX.md)
 
+自动派票的执行席边界：
+- 路由开启时，服务端负责决定智能体或小队的执行席；`todo` / `backlog` 上智能体写入的执行人会被路由从零判断，不能把猜测当成人的指派。
+- 票过了 `todo` 后，智能体不能把执行席换成另一个智能体或小队；需要换人就关成 `blocked` 让路由给建议，工作太难用 `issue escalate`，有人的原话才用 `--per-quote`。验收交棒、额度接力等服务端内部动作不受这条限制。
+- 每条自动选派评论都要用统一的「为什么是他」来源标签（当前为 `原话`、`人工`、`档位`、`兜底`）。聊天智能体默认只派票；负责人接票后按开工评论、关键进展、`issue close` 收尾的路径推进，不能自行把票改给别人。
+
 ## Goal 模式边界
 
 - Goal 是一张任务加一条完成线，不新增任务类型或任务状态；完成线由若干可核验检查项组成，人确认后锁定，执行人不能自行降低标准或修改。
