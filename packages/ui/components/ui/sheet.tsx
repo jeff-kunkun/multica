@@ -6,9 +6,27 @@ import { Dialog as SheetPrimitive } from "@base-ui/react/dialog"
 import { cn } from "@multica/ui/lib/utils"
 import { Button } from "@multica/ui/components/ui/button"
 import { XIcon } from "lucide-react"
+import { useMobileOverlayHistory } from "../../lib/mobile-history"
 
 function Sheet({ ...props }: SheetPrimitive.Root.Props) {
-  return <SheetPrimitive.Root data-slot="sheet" {...props} />
+  const controlled = props.open !== undefined
+  const [open, setOpen] = React.useState(props.defaultOpen ?? false)
+  const isOpen = controlled ? props.open === true : open
+  useMobileOverlayHistory(isOpen, () => {
+    if (!controlled) setOpen(false)
+    props.onOpenChange?.(false, {} as never)
+  })
+  return (
+    <SheetPrimitive.Root
+      data-slot="sheet"
+      {...props}
+      open={controlled ? props.open : open}
+      onOpenChange={(next, event) => {
+        if (!controlled) setOpen(next)
+        props.onOpenChange?.(next, event)
+      }}
+    />
+  )
 }
 
 function SheetTrigger({ ...props }: SheetPrimitive.Trigger.Props) {

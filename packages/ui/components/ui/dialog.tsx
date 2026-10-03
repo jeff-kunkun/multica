@@ -6,9 +6,27 @@ import { Dialog as DialogPrimitive } from "@base-ui/react/dialog"
 import { cn } from "@multica/ui/lib/utils"
 import { Button } from "@multica/ui/components/ui/button"
 import { XIcon } from "lucide-react"
+import { useMobileOverlayHistory } from "../../lib/mobile-history"
 
 function Dialog({ ...props }: DialogPrimitive.Root.Props) {
-  return <DialogPrimitive.Root data-slot="dialog" {...props} />
+  const controlled = props.open !== undefined
+  const [open, setOpen] = React.useState(props.defaultOpen ?? false)
+  const isOpen = controlled ? props.open === true : open
+  useMobileOverlayHistory(isOpen, () => {
+    if (!controlled) setOpen(false)
+    props.onOpenChange?.(false, {} as never)
+  })
+  return (
+    <DialogPrimitive.Root
+      data-slot="dialog"
+      {...props}
+      open={controlled ? props.open : open}
+      onOpenChange={(next, event) => {
+        if (!controlled) setOpen(next)
+        props.onOpenChange?.(next, event)
+      }}
+    />
+  )
 }
 
 function DialogTrigger({ ...props }: DialogPrimitive.Trigger.Props) {
