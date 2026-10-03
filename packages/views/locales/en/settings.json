@@ -434,7 +434,8 @@
       "apps": "Connected apps",
       "config_transfer": "Export & import",
       "routing": "Routing",
-      "project_sharing": "Permissions & sharing"
+      "project_sharing": "Permissions & sharing",
+      "workspace_links": "Linked workspaces"
     },
     "groups": {
       "personal": "Personal",

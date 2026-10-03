@@ -28,6 +28,7 @@ import {
   Zap,
   FolderKanban,
   Link2,
+  Network,
 } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { useAuthStore } from "@multica/core/auth";
@@ -67,6 +68,7 @@ import { McpTab } from "./mcp-tab";
 import { BillingTab } from "./billing-tab";
 import { ConfigTransferTab } from "./config-transfer-tab";
 import { ProjectSharingTab } from "./project-sharing-tab";
+import { WorkspaceLinksTab } from "./workspace-links-tab";
 import { SETTINGS_ANCHOR_ATTR } from "./settings-layout";
 import { searchSettings } from "./settings-search";
 import { HighlightText } from "../../search/highlight-text";
@@ -217,6 +219,13 @@ export function SettingsPage({ extraDeviceTabs = [] }: SettingsPageProps = {}) {
               t(($) => $.page.tabs.project_sharing),
               FolderKanban,
               <ProjectSharingTab />,
+              { wide: true },
+            ),
+            entry(
+              "workspace-links",
+              t(($) => $.page.tabs.workspace_links),
+              Network,
+              <WorkspaceLinksTab />,
               { wide: true },
             ),
             ...(billingEnabled

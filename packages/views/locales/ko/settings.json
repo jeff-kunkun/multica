@@ -433,7 +433,8 @@
       "apps": "연결된 앱",
       "config_transfer": "구성 내보내기/가져오기",
       "routing": "라우팅",
-      "project_sharing": "권한 및 공유"
+      "project_sharing": "권한 및 공유",
+      "workspace_links": "연결된 워크스페이스"
     },
     "groups": {
       "personal": "개인",

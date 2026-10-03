@@ -433,7 +433,8 @@
       "apps": "接続済みアプリ",
       "config_transfer": "設定の書き出し/読み込み",
       "routing": "ルーティング",
-      "project_sharing": "権限と共有"
+      "project_sharing": "権限と共有",
+      "workspace_links": "連携ワークスペース"
     },
     "groups": {
       "personal": "個人",

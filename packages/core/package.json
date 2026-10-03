@@ -155,6 +155,7 @@
     "./vcs": "./vcs/index.ts",
     "./vcs/queries": "./vcs/queries.ts",
     "./repo-links": "./repo-links/index.ts",
+    "./workspace-links": "./workspace-links/index.ts",
     "./repo-reach": "./repo-reach/index.ts",
     "./lark": "./lark/index.ts",
     "./lark/queries": "./lark/queries.ts",
