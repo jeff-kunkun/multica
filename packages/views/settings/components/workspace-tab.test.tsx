@@ -29,8 +29,8 @@ const membersRef = vi.hoisted(() => ({
 const agentsRef = vi.hoisted(() => ({
   current: [] as Array<Record<string, unknown>>,
 }));
-const namingRef = vi.hoisted(() => ({
-  current: {
+const namingRef = vi.hoisted(() => {
+  const initial = {
     source: "runtime",
     options: [
       { id: "server_llm", label: "Server model", available: false, reason: "No model key configured" },
@@ -38,8 +38,9 @@ const namingRef = vi.hoisted(() => ({
       { id: "rules", label: "Rules only", available: true },
     ],
     stats: { titled: 0, runtime: 0, rules: 0, failed: 0 },
-  },
-}));
+  } as Record<string, unknown>;
+  return { initial, current: initial };
+});
 
 vi.mock("@tanstack/react-query", () => ({
   useQuery: (options: { queryKey?: readonly unknown[] }) => {
@@ -117,6 +118,7 @@ vi.mock("sonner", () => ({
   toast: { success: mockToastSuccess, error: vi.fn() },
 }));
 
+import { api } from "@multica/core/api";
 import { WorkspaceTab } from "./workspace-tab";
 
 const TEST_RESOURCES = {
@@ -146,6 +148,7 @@ describe("WorkspaceTab — automatic updates", () => {
       settings: {},
     };
     membersRef.current = [{ user_id: "user-1", role: "owner", name: "Ada" }];
+    namingRef.current = namingRef.initial;
     mockUpdateWorkspace.mockImplementation(
       async (_id: string, payload: Record<string, unknown>) => ({
         ...workspaceRef.current,
@@ -302,20 +305,47 @@ describe("WorkspaceTab — automatic updates", () => {
     expect(screen.getByText(/Agent is currently offline/i)).toBeTruthy();
   });
 
-  it("shows the naming source card and explains an unavailable server key", () => {
+  it("leads the naming card with whether naming works", () => {
+    namingRef.current = {
+      ...namingRef.current,
+      health: "ok",
+      stats: { titled: 3, runtime: 2, rules: 1, failed: 0 },
+      last: { title: "Multica · naming card", source: "runtime", created_at: new Date().toISOString() },
+    };
     render(<WorkspaceTab />, { wrapper: I18nWrapper });
 
-    expect(screen.getByText("Chat naming")).toBeTruthy();
-    expect(screen.getByRole("combobox", { name: "Naming source" })).toBeEnabled();
-    expect(screen.getByText("No model key configured")).toBeTruthy();
-    expect(screen.getByText(/Last 24 hours: 0 titled/)).toBeTruthy();
+    expect(screen.getByText("Agents are naming new chats")).toBeTruthy();
+    expect(screen.getByText(/Latest: “Multica · naming card”/)).toBeTruthy();
+    expect(screen.queryByRole("radiogroup")).toBeNull();
+  });
+
+  it("says what to do when agents stop naming", () => {
+    namingRef.current = { ...namingRef.current, health: "degraded", stats: { titled: 5, runtime: 0, rules: 5, failed: 0 }, last: null };
+    render(<WorkspaceTab />, { wrapper: I18nWrapper });
+
+    expect(screen.getByText("Agents haven't named a chat in 24 hours")).toBeTruthy();
+    expect(screen.getByText(/5 new chats were named by rules instead/)).toBeTruthy();
+  });
+
+  it("keeps the source picker behind Change and blocks the unavailable server model", async () => {
+    namingRef.current = { ...namingRef.current, health: "idle", stats: { titled: 0, runtime: 0, rules: 0, failed: 0 }, last: null };
+    render(<WorkspaceTab />, { wrapper: I18nWrapper });
+
+    const user = setupUser();
+    await user.click(screen.getByRole("button", { name: "Change" }));
+    expect(screen.getByRole("radio", { name: "Server model" })).toBeDisabled();
+    expect(screen.getByRole("radio", { name: "Chat agent" })).toHaveAttribute("aria-checked", "true");
+    expect(screen.getByText(/needs a model key configured/)).toBeTruthy();
+
+    await user.click(screen.getByRole("radio", { name: "Rules only" }));
+    await waitFor(() => expect(api.updateWorkspaceNaming).toHaveBeenCalledWith("workspace-1", "rules"));
   });
 
   it("keeps naming source read-only for regular members with an explanation", () => {
     membersRef.current = [{ user_id: "user-1", role: "member" }];
     render(<WorkspaceTab />, { wrapper: I18nWrapper });
 
-    expect(screen.getByRole("combobox", { name: "Naming source" })).toBeDisabled();
-    expect(screen.getByText("Only workspace owners and admins can change this.")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Change" })).toBeNull();
+    expect(screen.getByText("Only owners and admins can change this")).toBeTruthy();
   });
 });
