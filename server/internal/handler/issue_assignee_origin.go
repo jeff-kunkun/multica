@@ -76,7 +76,8 @@ func (h *Handler) rulePick(
 			return assignmentRuling{
 				Apply:  false,
 				Source: routing.SourceQuoteRejected,
-				Reason: "assignee quote was not found in an earlier message by the person who started this run, or did not name the requested assignee",
+				Reason: "assignee quote was not found in an earlier message by the person who started this run, or did not name the requested assignee " +
+					"(naming the base role is enough, e.g. the person says 孙悟空 and you pick the direction by project; ask the person for the words if they never named one)",
 			}
 		}
 	}
@@ -121,15 +122,16 @@ func (h *Handler) liveTaskOf(r *http.Request, agentID string) (db.AgentTaskQueue
 // quoteFromInitiator is the whole quote check. The message must have been
 // written by the run's initiator (a member, never another agent, never a third
 // party), the quote must be a passage of it word for word, and the passage must
-// name the agent being assigned. Direct-chat history and the issue thread are
+// name the agent being assigned, or the base role it is a specialisation of.
+// Direct-chat history and the issue thread are
 // both valid evidence; the original trigger remains valid for compatibility.
 func (h *Handler) quoteFromInitiator(ctx context.Context, task db.AgentTaskQueue, assigneeType pgtype.Text, assigneeID pgtype.UUID, quote string) (pgtype.UUID, bool) {
 	initiator := task.OriginatorUserID
 	if !initiator.Valid {
 		return pgtype.UUID{}, false
 	}
-	name := h.assigneeName(ctx, assigneeType, assigneeID)
-	if name == "" {
+	names := h.assigneeNames(ctx, assigneeType, assigneeID, quote)
+	if len(names) == 0 {
 		return pgtype.UUID{}, false
 	}
 	directChat := false
@@ -142,8 +144,11 @@ func (h *Handler) quoteFromInitiator(ctx context.Context, task db.AgentTaskQueue
 		if msg.author != uuidToString(initiator) {
 			continue
 		}
-		if quoteNamesAssignee(msg.content, quote, name, directChat && uuidToString(task.AgentID) == uuidToString(assigneeID)) {
-			return initiator, true
+		directSelf := directChat && uuidToString(task.AgentID) == uuidToString(assigneeID)
+		for _, name := range names {
+			if quoteNamesAssignee(msg.content, quote, name, directSelf) {
+				return initiator, true
+			}
 		}
 	}
 	return pgtype.UUID{}, false
@@ -247,21 +252,47 @@ func quoteNamesAssignee(message, quote, name string, directSelf bool) bool {
 		strings.Contains(q, "你来负责")
 }
 
-func (h *Handler) assigneeName(ctx context.Context, assigneeType pgtype.Text, assigneeID pgtype.UUID) string {
+// assigneeNames lists the names a person's words may use to pick this
+// assignee: its own, and for a specialisation also its base role's, so "交给孙悟空"
+// covers any direction seat under 孙悟空. Only upward: a quote that names some
+// direction seat ("孙悟空出海") contains the base name too, so it counts for that
+// seat's own name alone and never reaches its siblings. Which direction fits
+// is the agent's call by project; the server only checks the name was said.
+func (h *Handler) assigneeNames(ctx context.Context, assigneeType pgtype.Text, assigneeID pgtype.UUID, quote string) []string {
 	if !assigneeType.Valid || !assigneeID.Valid {
-		return ""
+		return nil
 	}
 	switch assigneeType.String {
 	case "agent":
-		if a, err := h.Queries.GetAgent(ctx, assigneeID); err == nil {
-			return a.Name
+		a, err := h.Queries.GetAgent(ctx, assigneeID)
+		if err != nil {
+			return nil
 		}
+		names := []string{a.Name}
+		if !a.ParentAgentID.Valid {
+			return names
+		}
+		parent, err := h.Queries.GetAgent(ctx, a.ParentAgentID)
+		if err != nil {
+			return names
+		}
+		siblings, err := h.Queries.ListAgentChildren(ctx, a.ParentAgentID)
+		if err != nil {
+			return names
+		}
+		q := strings.ToLower(strings.Join(strings.Fields(quote), " "))
+		for _, sib := range siblings {
+			if n := strings.ToLower(strings.Join(strings.Fields(sib.Name), " ")); n != "" && strings.Contains(q, n) {
+				return names
+			}
+		}
+		return append(names, parent.Name)
 	case "squad":
 		if s, err := h.Queries.GetSquad(ctx, assigneeID); err == nil {
-			return s.Name
+			return []string{s.Name}
 		}
 	}
-	return ""
+	return nil
 }
 
 // stampAssignee records whose decision the executor on the ticket is. Best
