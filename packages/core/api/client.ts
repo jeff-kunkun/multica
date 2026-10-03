@@ -3922,6 +3922,15 @@ export class ApiClient {
     return parsed;
   }
 
+  async getSharingAccess(kind: "issue" | "project", id: string) {
+    return this.fetch<{
+      visibility: "private" | "project" | "workspace";
+      audience_size: number;
+      can_change: boolean;
+      reason: "guest" | "not_creator" | null;
+    }>(`/api/${kind === "issue" ? "issues" : "projects"}/${id}/access`);
+  }
+
   async previewProjectVisibility(projectId: string) {
     return this.fetch<{
       project_id: string;

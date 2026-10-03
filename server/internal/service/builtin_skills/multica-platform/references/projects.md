@@ -21,6 +21,7 @@ affect future agent tasks.
 ```bash
 multica project list --output json
 multica project get <project-id> --output json
+multica project access <project-id> --output json   # who can see it, can you change the scope
 multica project resource list <project-id> --output json
 ```
 

@@ -3,13 +3,13 @@
     "title": "Discussion",
     "select_prompt": "Choisissez une conversation, ou démarrez-en une nouvelle avec +",
     "agent_link_no_access": "Vous n'avez pas accès à la discussion avec cet agent.",
-    "session_link_unavailable": "Impossible d'ouvrir cette discussion : c'est la discussion privée de quelqu'un d'autre, ou elle a été supprimée. Demandez à son créateur de la rendre visible au projet ou à l'espace de travail, puis de repartager le lien.",
     "search_placeholder": "Rechercher un titre ou un contenu de discussion…",
     "search_clear": "Effacer la recherche",
     "search_empty": "Aucune discussion ne correspond",
     "back": "Retour",
     "new_chat_in_project": "Les nouvelles discussions restent dans « {{title}} »",
-    "new_chat_unbound": "Les nouvelles discussions ne sont liées à aucun projet"
+    "new_chat_unbound": "Les nouvelles discussions ne sont liées à aucun projet",
+    "back_to_list": "Retour aux discussions"
   },
   "goal_flow": {
     "hint": "Clarifiez-la avant de créer la tâche.",
@@ -358,7 +358,14 @@
     "header_private": "Vous seul",
     "header_project": "Les membres du projet peuvent voir et écrire",
     "header_extra": "Membres du projet, plus des personnes en plus",
-    "search": "Chercher une personne…"
+    "search": "Chercher une personne…",
+    "trigger": {
+      "private": "Moi seul",
+      "project": "Membres du projet",
+      "extra": "Projet + autres",
+      "workspace": "Tout l’espace de travail"
+    },
+    "header_workspace": "Tous les membres de l’espace de travail peuvent voir et écrire"
   },
   "notice": {
     "title": "Certaines discussions sont visibles par les membres du projet",
