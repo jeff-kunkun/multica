@@ -123,6 +123,16 @@ func (h *Handler) syncBlockWait(ctx context.Context, prev, next db.Issue) {
 		// watched forever with nothing to wake for.
 		h.deleteIssueMeta(ctx, next, blockwait.KeyWatched)
 	}
+	// The machine-wait counter (DENE-1212) counts rounds of one stop on the
+	// way to done. Delivering, handing to acceptance, cancelling, or a person
+	// lifting the escalated block ends that run of rounds.
+	switch {
+	case next.Status == "done", next.Status == "cancelled", next.Status == "in_review",
+		prev.Status == "blocked" && next.Status != "blocked":
+		for _, key := range blockwait.MachineKeys() {
+			h.deleteIssueMeta(ctx, next, key)
+		}
+	}
 	if prev.Status == "in_review" && next.Status != "in_review" {
 		h.deleteIssueMeta(ctx, next, blockwait.KeyReleased)
 		h.deleteIssueMeta(ctx, next, blockwait.KeyReviewNudged)
@@ -287,6 +297,9 @@ type releaseOutcome struct {
 	// Baseline is the "因主线原有失败放行" sentence when the merge let red
 	// checks through because the base branch already had them (DENE-892).
 	Baseline string
+	// Park is the machine wait a pass that could not merge turned into
+	// (DENE-1212).
+	Park *blockwait.MachinePark
 }
 
 // releaseOnAcceptance is the once-per-stay half of maybeReleaseOnAcceptance:
@@ -331,8 +344,9 @@ func (h *Handler) releaseAcceptedIssue(ctx context.Context, issue db.Issue, seed
 	// The delivery aggregate (DENE-820) decides whether anything is still
 	// unaccounted for before the pass is allowed to close or merge. An
 	// unresolved rescue line or an unclassified second line turns the pass
-	// into a structured block: the reviewer said the work is good, but the
-	// platform cannot yet say which branch that work is on.
+	// into a machine wait: the reviewer said the work is good, but the
+	// platform cannot yet say which branch that work is on, and the executor
+	// is the one who can sort it out.
 	var delivery *service.IssueDelivery
 	if decision.Action == blockwait.ReleaseDone || decision.Action == blockwait.ReleaseMerge {
 		var deliveryErr error
@@ -347,14 +361,7 @@ func (h *Handler) releaseAcceptedIssue(ctx context.Context, issue db.Issue, seed
 			}
 		}
 		if blocker := service.DeliveryMergeBlocker(delivery, openHeads); blocker != "" {
-			decision.Action = blockwait.ReleaseBlock
-			decision.Reason = "验收已经通过，但交付线还没对齐：" + blocker + "。先标成阻塞，`multica issue delivery <issue>` 看现场。"
-			decision.Record.WaitCondition = "交付线对齐：" + blocker
-			if !decision.Record.HasWakeAt {
-				decision.Record.HasWakeAt = true
-				decision.Record.WakeAt = time.Now().Add(blockwait.QuietAfter).UTC()
-			}
-			out := h.blockAcceptedIssue(ctx, issue, decision)
+			out := h.parkAcceptedIssue(ctx, issue, blockwait.MachineDelivery, "交付线还没对齐："+blocker+"（`multica issue delivery <issue>` 看现场）", seed.Reason+passLead)
 			h.wakeIssueOwner(ctx, issue, "验收已经通过，但这张票的交付线还没对齐："+blocker+"。请用 `multica issue delivery` 归类分支或换 canonical，再把票推回验收。", false)
 			return out
 		}
@@ -362,8 +369,8 @@ func (h *Handler) releaseAcceptedIssue(ctx context.Context, issue db.Issue, seed
 	switch decision.Action {
 	case blockwait.ReleaseDone:
 		return h.finishAcceptedIssue(ctx, issue, decision.Reason)
-	case blockwait.ReleaseBlock:
-		return h.blockAcceptedIssue(ctx, issue, decision)
+	case blockwait.ReleaseWait:
+		return h.parkAcceptedIssue(ctx, issue, decision.Machine, decision.Record.WaitCondition, seed.Reason+passLead)
 	case blockwait.ReleaseMerge:
 		h.trackBaselineFix(ctx, issue, &decision, issue.ReviewerType.String, issue.ReviewerID)
 		out := h.mergeAcceptedIssue(ctx, issue, prs, delivery, decision)
@@ -412,6 +419,44 @@ func (h *Handler) blockAcceptedIssue(ctx context.Context, issue db.Issue, decisi
 	return releaseOutcome{Status: updated.Status, Note: decision.Reason}
 }
 
+// passLead opens the timeline sentence of a pass the platform could not merge.
+const passLead = "先不合并："
+
+// parkAcceptedIssue is a pass the platform could not merge for a reason the
+// executor can clear (DENE-1212): the ticket leaves in_review for in progress
+// on a clock, or, once the same stop has survived MachineEscalateAfter rounds,
+// for blocked on the person who has to look.
+func (h *Handler) parkAcceptedIssue(ctx context.Context, issue db.Issue, kind, condition, lead string) releaseOutcome {
+	tr := h.machineWait(ctx, issue, kind, condition, lead)
+	updated, err := h.Queries.UpdateIssueStatus(ctx, db.UpdateIssueStatusParams{
+		ID:          issue.ID,
+		WorkspaceID: issue.WorkspaceID,
+		Status:      tr.status,
+	})
+	if err != nil {
+		slog.Warn("block wait: park after pass failed", "error", err, "issue_id", uuidToString(issue.ID))
+		return releaseOutcome{Status: issue.Status, Note: tr.note}
+	}
+	h.syncBlockWait(ctx, issue, updated)
+	h.persistBlockRecord(ctx, updated, tr.block)
+	updated = h.applyMachinePark(ctx, updated, tr.park, "system", "")
+	h.publishBlockStatus(issue, updated)
+	note := tr.note
+	var human pgtype.UUID
+	if tr.park.Escalated {
+		if id, err := util.ParseUUID(tr.block.NeedsHuman); err == nil {
+			human = id
+			note = h.memberWakeMention(ctx, id) + note
+		}
+	}
+	h.postBlockComment(ctx, updated, note)
+	if human.Valid {
+		// A system comment's @ reaches nobody's inbox; the summon entry does.
+		h.summonPatrol(ctx, updated, human, tr.note, pgtype.UUID{}, true)
+	}
+	return releaseOutcome{Status: updated.Status, Note: tr.note, Park: tr.park}
+}
+
 func (h *Handler) mergeAcceptedIssue(ctx context.Context, issue db.Issue, prs []db.ListPullRequestsByIssueRow, delivery *service.IssueDelivery, decision blockwait.Decision) releaseOutcome {
 	// The PR on the canonical branch is the delivery; only when no PR sits on
 	// it does the first open PR stand in, as before DENE-820.
@@ -437,25 +482,16 @@ func (h *Handler) mergeAcceptedIssue(ctx context.Context, issue db.Issue, prs []
 		out.PRURL = open.HtmlUrl
 		return out
 	}
-	decision.Action = blockwait.ReleaseBlock
+	condition := "合并 " + open.HtmlUrl + " 没有成功"
 	if errors.Is(err, errPullMergeUnavailable) {
-		decision.Reason = decision.Reason + " 这台服务没有合并权限，已改成阻塞并叫醒执行人去合并。"
-		decision.Record.WaitCondition = "验收已通过，等待执行人合并 " + open.HtmlUrl
+		condition = "这台服务没有合并权限，等执行人合并 " + open.HtmlUrl
 	} else if errors.Is(err, errPullNotMergeable) {
-		decision.Reason = fmt.Sprintf("验收已经通过，但 %s 现在合不进去。先标成阻塞，到点再看。", open.HtmlUrl)
-		decision.Record.WaitCondition = open.HtmlUrl + " 合不进去"
-	} else {
-		decision.Reason = "验收已经通过，合并没有成功。先标成阻塞，到点再试。"
-		decision.Record.WaitCondition = "合并 " + open.HtmlUrl + " 没有成功"
+		condition = open.HtmlUrl + " 现在合不进去"
 	}
-	if !decision.Record.HasWakeAt {
-		decision.Record.HasWakeAt = true
-		decision.Record.WakeAt = time.Now().Add(blockwait.QuietAfter).UTC()
-	}
-	out := h.blockAcceptedIssue(ctx, issue, decision)
+	out := h.parkAcceptedIssue(ctx, issue, blockwait.MachineMergeFailed, condition, "验收已经通过，平台合并没成功：")
 	out.PRURL = open.HtmlUrl
 	if errors.Is(err, errPullMergeUnavailable) {
-		h.wakeIssueOwner(ctx, issue, "验收已经通过。请合并关联的 PR，然后把这张票关了。合不进去就让它停在阻塞上。", false)
+		h.wakeIssueOwner(ctx, issue, "验收已经通过。请合并关联的 PR，然后把这张票关了。合不进去就写清卡在哪，票保持进行中，平台会定时叫醒你。", false)
 	}
 	return out
 }

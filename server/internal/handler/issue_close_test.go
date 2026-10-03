@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/blockwait"
 	"github.com/multica-ai/multica/server/internal/closeprotocol"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
@@ -447,9 +448,9 @@ func TestCloseVerdictPassMergesAndCloses(t *testing.T) {
 	}
 }
 
-// A pass whose merge fails ends blocked, and the response says so instead
-// of claiming done.
-func TestCloseVerdictPassMergeFailureReportsBlocked(t *testing.T) {
+// A pass whose merge fails stays in progress on a clock, and the response says
+// so instead of claiming done (DENE-1212).
+func TestCloseVerdictPassMergeFailureKeepsInProgress(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
 	}
@@ -487,14 +488,14 @@ func TestCloseVerdictPassMergeFailureReportsBlocked(t *testing.T) {
 	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	if resp.Merged || resp.Status != "blocked" {
-		t.Fatalf("merged = %v status = %q, want unmerged + blocked", resp.Merged, resp.Status)
+	if resp.Merged || resp.Status != "in_progress" {
+		t.Fatalf("merged = %v status = %q, want unmerged + in_progress", resp.Merged, resp.Status)
 	}
-	if got := issueMetaString(t, issue.ID, closeprotocol.KeyConclusion); got != closeprotocol.ConclusionBlocked {
-		t.Fatalf("close.conclusion = %q", got)
+	if resp.Wait == nil || resp.Wait.Kind != "merge_failed" || resp.Wait.WakeAt == "" {
+		t.Fatalf("wait = %+v, want a merge_failed clock", resp.Wait)
 	}
-	if got := issueMetaString(t, issue.ID, closeprotocol.KeyBlockKind); got != closeprotocol.BlockExternal {
-		t.Fatalf("close.block_kind = %q", got)
+	if got := issueMetaString(t, issue.ID, "block.watched"); got != "1" {
+		t.Fatalf("block.watched = %q", got)
 	}
 }
 
@@ -559,9 +560,10 @@ func TestCloseDoneWithOpenPullMergesFirst(t *testing.T) {
 }
 
 // The same close when the merge fails: the caller asked for done, the gate
-// rewrote it to a structured block, and the close record follows the status
-// actually written — the response carries the warning instead of a false done.
-func TestCloseDoneWithUnmergeablePullIsRewrittenToBlocked(t *testing.T) {
+// kept the ticket in progress on a clock (DENE-1212), and the close record
+// follows the status actually written — the response carries the warning
+// instead of a false done.
+func TestCloseDoneWithUnmergeablePullStaysInProgress(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
 	}
@@ -581,23 +583,29 @@ func TestCloseDoneWithUnmergeablePullIsRewrittenToBlocked(t *testing.T) {
 	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
 		t.Fatalf("decode: %v", err)
 	}
-	if resp.Merged || resp.Status != "blocked" || resp.PrevStatus != "in_progress" {
-		t.Fatalf("merged = %v status = %q prev = %q, want unmerged + blocked", resp.Merged, resp.Status, resp.PrevStatus)
+	if resp.Merged || resp.Status != "in_progress" || resp.PrevStatus != "in_progress" {
+		t.Fatalf("merged = %v status = %q prev = %q, want unmerged + in_progress", resp.Merged, resp.Status, resp.PrevStatus)
 	}
-	if len(resp.Warnings) == 0 || !strings.Contains(resp.Warnings[0], "实际落的是 blocked") {
+	if len(resp.Warnings) == 0 || !strings.Contains(resp.Warnings[0], "实际落的是 in_progress") {
 		t.Fatalf("warnings should name the rewrite, got %v", resp.Warnings)
 	}
-	if got := issueStatusDirect(t, issue.ID); got != "blocked" {
-		t.Fatalf("db status = %s, want blocked", got)
+	if resp.Wait == nil || resp.Wait.Kind != "merge_failed" || resp.Wait.WakeAt == "" || resp.Wait.Round != 1 {
+		t.Fatalf("wait = %+v, want round 1 of merge_failed on a clock", resp.Wait)
 	}
-	if got := issueMetaString(t, issue.ID, closeprotocol.KeyConclusion); got != closeprotocol.ConclusionBlocked {
+	if !strings.Contains(strings.Join(resp.Woken, "\n"), "状态写成 in_progress") {
+		t.Fatalf("woken should say what was written, got %v", resp.Woken)
+	}
+	if got := issueStatusDirect(t, issue.ID); got != "in_progress" {
+		t.Fatalf("db status = %s, want in_progress", got)
+	}
+	if got := issueMetaString(t, issue.ID, closeprotocol.KeyConclusion); got != closeprotocol.ConclusionContinuing {
 		t.Fatalf("close.conclusion = %q", got)
 	}
-	if got := issueMetaString(t, issue.ID, closeprotocol.KeyStatus); got != "blocked" {
-		t.Fatalf("close.status = %q", got)
+	if got := issueMetaString(t, issue.ID, closeprotocol.KeyWakeAction); got != closeprotocol.WakeClock {
+		t.Fatalf("close.wake_action = %q", got)
 	}
-	if got := issueMetaString(t, issue.ID, closeprotocol.KeyBlockKind); got != closeprotocol.BlockExternal {
-		t.Fatalf("close.block_kind = %q", got)
+	if got := issueMetaString(t, issue.ID, "block.watched"); got != "1" {
+		t.Fatalf("block.watched = %q", got)
 	}
 	if got := issueMetaString(t, issue.ID, "block.wait_condition"); got == "" {
 		t.Fatalf("block.wait_condition should carry the merge failure")
@@ -1244,5 +1252,50 @@ func TestDeliveryLookupLinksOnlyPullsNamingTheWholeIdentifier(t *testing.T) {
 	}
 	if len(urls) != 1 || !strings.HasSuffix(urls[0], "/merge_requests/72") {
 		t.Fatalf("linked = %v, want only MR 72 (MR 71 names %s0)", urls, issue.Identifier)
+	}
+}
+
+// The same machine stop unresolved for MachineEscalateAfter rounds stops
+// waking the executor and asks the ticket's owner (DENE-1212).
+func TestCloseDoneMachineWaitEscalatesToNeedsHuman(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	issue := createIssueHTTP(t, "close done merge keeps failing", "in_progress")
+	agentID := handlerTestAgentID(t)
+	seedOpenPullForIssue(t, issue.ID, 999863)
+	prev := testHandler.PRMerger
+	testHandler.PRMerger = fakeMerger{err: errPullNotMergeable}
+	t.Cleanup(func() { testHandler.PRMerger = prev })
+
+	var resp CloseIssueResponse
+	for round := 1; round <= blockwait.MachineEscalateAfter; round++ {
+		taskID := insertIssueTaskWithStatus(t, agentID, issue.ID, "running")
+		w := closeIssueHTTP(t, issue.ID, agentID, taskID, map[string]any{"outcome": "done", "evidence": "PR 开着，测试全绿。"})
+		if w.Code != http.StatusOK {
+			t.Fatalf("round %d: status = %d: %s", round, w.Code, w.Body.String())
+		}
+		resp = CloseIssueResponse{}
+		if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		if resp.Wait == nil || resp.Wait.Round != round {
+			t.Fatalf("round %d: wait = %+v", round, resp.Wait)
+		}
+		if round < blockwait.MachineEscalateAfter && resp.Status != "in_progress" {
+			t.Fatalf("round %d: status = %q, want in_progress", round, resp.Status)
+		}
+	}
+	if resp.Status != "blocked" || !resp.Wait.Escalated || resp.Wait.NeedsHuman != testUserID {
+		t.Fatalf("final status = %q wait = %+v, want blocked asking %s", resp.Status, resp.Wait, testUserID)
+	}
+	if got := issueMetaString(t, issue.ID, blockwait.KeyNeedsHuman); got != testUserID {
+		t.Fatalf("block.needs_human = %q", got)
+	}
+	if got := issueMetaString(t, issue.ID, blockwait.KeyWakeAt); got != "" {
+		t.Fatalf("escalated block kept a clock: %q", got)
+	}
+	if got := issueMetaString(t, issue.ID, blockwait.KeyWatched); got != "" {
+		t.Fatalf("escalated block kept watched: %q", got)
 	}
 }

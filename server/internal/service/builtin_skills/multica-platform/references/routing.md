@@ -133,7 +133,9 @@ Every 「自动选派」 comment opens with one line, **为什么是他**, namin
 of the executor: `原话` (a person's verified words), `人工` (a person or their
 automation put it there), `档位` (routing's tier ladder, or a tier label a
 person attached), `兜底` (the verdict was too weak, so the fallback rung),
-`接着做` (the seat that did the related earlier work continues it).
+`接着做` (the seat that did the related earlier work continues it), `负载`
+(the ladder's seat was busy, so a less busy seat of the same rung and
+direction took it).
 
 **接着做 (DENE-1202).** A ticket continuing earlier work — a sibling one stage
 earlier under the same parent, the parent itself, or a ticket created by the
@@ -154,6 +156,23 @@ multica workspace routing set --continuation on   # or off to go back to shadow
 So when you split work into stages, leave each child to routing: the next
 stage reaches the seat that did the previous one by itself once the switch is
 on. Do not assign it by hand to get the same effect.
+
+**负载分流 (DENE-1203).** Without it, routing always takes the first seat of
+its rung × direction cell, so a batch of independent tickets lands on one
+seat. With it, the cell's seat with the fewest unfinished runs (queued or
+running) takes the ticket; seats that cannot take work are skipped, and when
+all are equally busy the usual order stands. It is a separate workspace
+switch, **also off by default = shadow mode**: the 「自动选派」 comment only
+says 「按新规则会选 X（负载：Y 正在跑 N 个活…）」. With both switches on,
+接着做 wins.
+
+```bash
+multica workspace routing get                # prefer_idle, load_mode: shadow | on
+multica workspace routing set --load on      # or off to go back to shadow
+```
+
+So create independent tickets in one batch and leave them to routing; do not
+hand-assign them to different seats to spread the load.
 
 If a ticket turned out too hard for its seat, do not pick a stronger one.
 Ask routing to re-judge:

@@ -1788,6 +1788,7 @@
     "source_close": "クローズ要約",
     "source_parking": "巡回要約",
     "source_model": "要約",
-    "source_reply": "返信から"
+    "source_reply": "返信から",
+    "source_wait": "プラットフォーム待機"
   }
 }

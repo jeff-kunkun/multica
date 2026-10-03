@@ -196,6 +196,9 @@ type Seat struct {
 	// Continues is set when the 接着做 rule placed this seat, and names the
 	// earlier work, e.g. "DENE-12（上一阶段）的执行人".
 	Continues string
+	// Balanced is set when the 负载 rule placed this seat, and says why the
+	// ladder's own pick was passed over, e.g. "孙悟空 正在跑 2 个活，克林 空着".
+	Balanced string
 }
 
 // SeatName is the naming convention that links a tier to its

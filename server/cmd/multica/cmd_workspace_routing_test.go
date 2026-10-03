@@ -7,7 +7,7 @@ import (
 
 func newWorkspaceRoutingSetTestCmd() *cobra.Command {
 	cmd := newRoutingProjectsTestCmd()
-	for _, f := range []string{"source", "runtime", "model", "thinking", "continuation"} {
+	for _, f := range []string{"source", "runtime", "model", "thinking", "continuation", "load"} {
 		cmd.Flags().String(f, "", "")
 	}
 	return cmd
@@ -55,5 +55,36 @@ func TestRoutingViewReportsShadowByDefault(t *testing.T) {
 	}
 	if got := routingView(map[string]any{"prefer_continuation": true}); got["continuation_mode"] != "on" {
 		t.Fatalf("on view = %v", got)
+	}
+}
+
+// DENE-1203: --load flips 负载分流 and leaves the 接着做 switch alone.
+func TestWorkspaceRoutingSetLoadKeepsContinuation(t *testing.T) {
+	var patched map[string]any
+	routingProjectsServer(t, map[string]any{
+		"routing": map[string]any{"enabled": true, "prefer_continuation": true},
+	}, &patched)
+
+	cmd := newWorkspaceRoutingSetTestCmd()
+	_ = cmd.Flags().Set("load", "on")
+	if err := runWorkspaceRoutingSet(cmd, nil); err != nil {
+		t.Fatalf("set: %v", err)
+	}
+	settings, _ := patched["settings"].(map[string]any)
+	block, _ := settings["routing"].(map[string]any)
+	if block["prefer_idle"] != true || block["prefer_continuation"] != true {
+		t.Fatalf("load not written or continuation lost: %v", block)
+	}
+	if got := routingView(block); got["load_mode"] != "on" || got["continuation_mode"] != "on" {
+		t.Fatalf("view = %v", got)
+	}
+	if got := routingView(nil); got["prefer_idle"] != false || got["load_mode"] != "shadow" {
+		t.Fatalf("default view = %v, want shadow", got)
+	}
+
+	bad := newWorkspaceRoutingSetTestCmd()
+	_ = bad.Flags().Set("load", "yes")
+	if err := runWorkspaceRoutingSet(bad, nil); err == nil {
+		t.Fatal("want an error for --load yes")
 	}
 }

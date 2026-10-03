@@ -301,6 +301,17 @@ WHERE id = sqlc.arg('id')::uuid
   AND status = ANY(sqlc.arg('statuses')::text[])
 RETURNING *;
 
+-- name: CountUnfinishedTasksByAgents :many
+-- Unfinished runs per watched agent, for routing's 负载 rule (DENE-1203).
+-- Queued counts: tickets routed a moment apart must see the run the first
+-- one just queued, or a batch would still pile onto one seat. Agents with no
+-- unfinished run return no row.
+SELECT agent_id, count(*)::int AS running
+FROM agent_task_queue
+WHERE agent_id = ANY(sqlc.arg('agent_ids')::uuid[])
+  AND status IN ('queued', 'dispatched', 'running', 'waiting_local_directory')
+GROUP BY agent_id;
+
 -- name: ListRecentTaskSpansByAgents :many
 -- Wall-clock spans of the latest finished tasks for the watched agents.
 -- Routing turns these into p50/p95. A row missing either timestamp is not a

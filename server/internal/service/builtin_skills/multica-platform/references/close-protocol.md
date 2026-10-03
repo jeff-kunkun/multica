@@ -18,7 +18,7 @@ the server's read-only shape check first. A refusal is the server's own
 sentence — fix what it names and run the same command again.
 
 ```bash
-multica issue close <id> --outcome done      --evidence-file ./close.md            # delivered; an open linked PR is merged first, or the close lands as blocked and says so
+multica issue close <id> --outcome done      --evidence-file ./close.md            # delivered; an open linked PR is merged first, or the ticket stays in_progress on a wake (see below)
 multica issue close <id> --outcome in_review --evidence-file ./close.md            # top-level, awaiting acceptance: needs a linked PR (or --no-code <reason>); empty reviewer slot is filled, then routing hands over
 multica issue close <id> --outcome blocked   --evidence-file ./close.md --blocked-by DENE-196   # or --wake-at / --wait-condition + --wait-timeout / --needs-human
 multica issue close <id> --outcome cancelled --evidence-file ./close.md            # dropped on purpose: say why in the evidence
@@ -60,10 +60,25 @@ multica issue close <id> --outcome done --verdict pass --evidence-file ./close.m
   issue's assignee; `--needs-human` names the person instead.
 - `--verdict pass` is the acceptance seat's release and only pairs with
   `--outcome done` on an `in_review` ticket: the platform merges the open PR
-  and writes `done`; if the merge cannot happen it comes back as `blocked`
-  with the reason and `block_kind=external`. A failed acceptance is not a
-  close: `multica issue comment add <id> --verdict hold --content-file
-  ./review.md` wakes the executor.
+  and writes `done`; if the merge cannot happen it is the machine wait below,
+  not `blocked`. A failed acceptance is not a close: `multica issue comment
+  add <id> --verdict hold --content-file ./review.md` wakes the executor.
+- **Machine wait** (DENE-1212). `blocked` means a person has to act. A stop
+  the executor can clear — PR checks still running or red, a conflict with
+  the base, the platform's merge failing, the PR or delivery line unreadable,
+  a draft PR — never writes `blocked` by itself. The `done` close (and a
+  `--verdict pass`) keeps the ticket `in_progress` with conclusion
+  `continuing` and `wake_action=clock`, stores the reason as
+  `block.wait_condition`, and the patrol wakes the executor 30 minutes later.
+  The board shows the reason as the issue's progress line (source `wait`).
+  The same stop unresolved for **3 rounds in a row** becomes `blocked` with
+  `--needs-human` on the ticket's owner (the member who opened it, else a
+  workspace manager), who is summoned; a different stop resets the count.
+  The reply carries `wait`: `kind` (`checks_pending`, `checks_red`,
+  `conflict`, `merge_failed`, `read_failed`, `draft`, `delivery`), `status`,
+  `condition`, `wake_at`, `wake_owner_type`/`wake_owner_id`, `round`,
+  `escalates_after`, `escalated`, `needs_human`. When woken, fix the stop and
+  run the same `--outcome done` again.
 - `--pr <pull-or-mr-url>` declares the delivery when the platform has not
   linked one yet (DENE-961). The server checks that URL against the
   repository connection, registers it when the check succeeds, then runs the

@@ -36,6 +36,10 @@ type statusTransition struct {
 	// `issue close` can say so instead of guessing from the note (DENE-859).
 	merged bool
 	prURL  string
+	// park is the machine wait the done gate turned this close into
+	// (DENE-1212): in progress on a clock, or blocked on a person once the
+	// same stop has survived MachineEscalateAfter rounds.
+	park *blockwait.MachinePark
 }
 
 func reviewerIsAssigned(issue db.Issue) bool {
@@ -293,20 +297,12 @@ func (h *Handler) guardDoneWithOpenPull(ctx context.Context, issue db.Issue, act
 	}
 	if err != nil {
 		slog.Warn("close gate: list pull requests failed", "issue_id", uuidToString(issue.ID), "error", err)
-		tr.status = issuestatus.Blocked
-		tr.persistBlock = true
-		tr.block = blockwait.FailureWake(time.Now(), "关单前没能读到关联的 PR", 1)
-		tr.note = "这张票要关，但没能核对关联的 PR。先改成阻塞，不标完成。"
-		return tr
+		return h.machineWait(ctx, issue, blockwait.MachineReadFailed, "关单前没能读到关联的 PR", closeLead)
 	}
 	deliveryBranchCount := 0
 	if delivery, deliveryErr := service.BuildIssueDelivery(ctx, h.Queries, issue); deliveryErr != nil {
 		slog.Warn("close gate: build delivery failed", "issue_id", uuidToString(issue.ID), "error", deliveryErr)
-		tr.status = issuestatus.Blocked
-		tr.persistBlock = true
-		tr.block = blockwait.FailureWake(time.Now(), "关单前没能核对交付线", 1)
-		tr.note = "这张票要关，但没能核对交付线。先改成阻塞，不标完成。"
-		return tr
+		return h.machineWait(ctx, issue, blockwait.MachineReadFailed, "关单前没能核对交付线", closeLead)
 	} else if delivery != nil {
 		deliveryBranchCount = len(delivery.Branches)
 	}
@@ -363,17 +359,7 @@ func (h *Handler) guardDoneWithOpenPull(ctx context.Context, issue db.Issue, act
 	// back to the closing agent: it has gh and a block would wait on nothing.
 	if !hasOpenPull(prs) && !hasMergedPull(prs) {
 		if url := firstDraftURL(prs); url != "" {
-			tr.status = issuestatus.Blocked
-			tr.persistBlock = true
-			tr.block = blockwait.Record{
-				WaitCondition:  "草稿还没合并 " + url,
-				HasWakeAt:      true,
-				WakeAt:         time.Now().Add(blockwait.QuietAfter),
-				HasWaitTimeout: true,
-				WaitTimeout:    time.Now().Add(blockwait.QuietAfter),
-			}
-			tr.note = "找到了但还没合并：" + url + "。它还是草稿，先标成准备好再合。"
-			return tr
+			return h.machineWait(ctx, issue, blockwait.MachineDraft, url+" 还是草稿，要先标成准备好再合", closeLead)
 		}
 	}
 	if actorType == "agent" && hasOpenPull(prs) && !h.serverCanMergeOpen(ctx, issue.WorkspaceID, prs) && !openPullSnapshotBlocks(prs) {
@@ -389,18 +375,7 @@ func (h *Handler) guardDoneWithOpenPull(ctx context.Context, issue db.Issue, act
 		actor, _ := util.ParseUUID(actorID)
 		h.trackBaselineFix(ctx, issue, &decision, actorType, actor)
 		if err := h.mergeOpenPulls(ctx, issue.WorkspaceID, prs); err != nil {
-			rec := decision.Record
-			if !rec.Structured() {
-				rec = blockwait.FailureWake(time.Now(), "关联 PR 没能合并", 1)
-			}
-			if reason := mergeFailureCondition(err, prs); reason != "" {
-				rec.WaitCondition = reason
-			}
-			tr.status = issuestatus.Blocked
-			tr.persistBlock = true
-			tr.block = rec
-			tr.note = "这张票要关，关联 PR 看起来能合并，但合并没有成功。先改成阻塞，不标完成。"
-			return tr
+			return h.machineWait(ctx, issue, blockwait.MachineMergeFailed, mergeFailureCondition(err, prs), "这张票要关，关联 PR 看起来能合并，但合并没有成功，先不标完成：")
 		}
 		tr.note = decision.Reason
 		if !strings.Contains(tr.note, "已合并") {
@@ -415,13 +390,12 @@ func (h *Handler) guardDoneWithOpenPull(ctx context.Context, issue db.Issue, act
 		}
 		return tr
 	default:
-		tr.status = issuestatus.Blocked
-		tr.persistBlock = true
-		tr.block = decision.Record
-		tr.note = decision.Reason
-		return tr
+		return h.machineWait(ctx, issue, decision.Machine, decision.Record.WaitCondition, closeLead)
 	}
 }
+
+// closeLead opens the timeline sentence of a done the gate held back.
+const closeLead = "这张票要关，先不标完成："
 
 func (h *Handler) mergeOpenPulls(ctx context.Context, ws pgtype.UUID, prs []db.ListPullRequestsByIssueRow) error {
 	var merged int

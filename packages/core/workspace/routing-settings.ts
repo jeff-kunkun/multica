@@ -109,6 +109,12 @@ export interface RoutingSettings {
    * assignment comment says who this rule would have picked.
    */
   prefer_continuation: boolean;
+  /**
+   * 「负载分流」(DENE-1203): inside the rung and direction routing picked, a
+   * seat with fewer unfinished runs goes before a busy one. Default off, which
+   * is shadow mode. With both on, 「接着做」 wins.
+   */
+  prefer_idle: boolean;
 }
 
 /**
@@ -164,6 +170,7 @@ export const DEFAULT_ROUTING_SETTINGS: RoutingSettings = {
   usage_priority: true,
   allow_upshift: false,
   prefer_continuation: false,
+  prefer_idle: false,
 };
 
 function isRecord(v: unknown): v is Record<string, unknown> {
@@ -213,6 +220,7 @@ export function parseRoutingSettings(
     usage_priority: block.usage_priority !== false,
     allow_upshift: block.allow_upshift === true,
     prefer_continuation: block.prefer_continuation === true,
+    prefer_idle: block.prefer_idle === true,
   };
 }
 
@@ -341,6 +349,7 @@ export function withRoutingSettings(
     usage_priority: next.usage_priority,
     allow_upshift: next.allow_upshift,
     prefer_continuation: next.prefer_continuation,
+    prefer_idle: next.prefer_idle,
     judge_enabled: next.judge_enabled,
     [ROUTING_ANALYSIS_KEY]: analysis,
   };
