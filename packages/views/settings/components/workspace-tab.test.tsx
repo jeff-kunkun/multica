@@ -47,6 +47,9 @@ vi.mock("@tanstack/react-query", () => ({
     if (options?.queryKey?.[0] === "agents") {
       return { data: agentsRef.current, isFetched: true };
     }
+    if (options?.queryKey?.[0] === "project-memory-locations") {
+      return { data: { locations: [], builtin_sediment_instruction: "Fill the five memory locations." }, isFetched: true };
+    }
     if (options?.queryKey?.[2] === "naming") {
       return { data: namingRef.current, isFetched: true };
     }
@@ -78,6 +81,10 @@ vi.mock("@multica/core/workspace/queries", () => ({
     list: () => ["workspaces"],
     naming: () => ["workspaces", "workspace-1", "naming"],
   },
+}));
+
+vi.mock("@multica/core/projects/queries", () => ({
+  projectMemoryLocationsOptions: () => ({ queryKey: ["project-memory-locations"], queryFn: vi.fn() }),
 }));
 
 vi.mock("@multica/core/issues/queries", () => ({
@@ -303,6 +310,34 @@ describe("WorkspaceTab — automatic updates", () => {
     render(<WorkspaceTab />, { wrapper: I18nWrapper });
 
     expect(screen.getByText(/Agent is currently offline/i)).toBeTruthy();
+  });
+
+  it("shows the built-in sediment prompt and saves a custom one beside the seat", async () => {
+    vi.useRealTimers();
+    workspaceRef.current = {
+      ...workspaceRef.current,
+      settings: { memory: { sediment_agent: "agent-1" } },
+    };
+    const user = userEvent.setup();
+    render(<WorkspaceTab />, { wrapper: I18nWrapper });
+
+    expect(screen.getByText("Fill the five memory locations.")).toBeTruthy();
+    const field = screen.getByLabelText("Sediment ticket prompt");
+    await user.type(field, "Read AGENTS.md first.");
+    await user.tab();
+
+    await waitFor(() =>
+      expect(mockUpdateWorkspace).toHaveBeenCalledWith("workspace-1", {
+        settings: { memory: { sediment_agent: "agent-1", sediment_instruction: "Read AGENTS.md first." } },
+      }),
+    );
+  });
+
+  it("keeps the sediment prompt read-only for regular members", () => {
+    membersRef.current = [{ user_id: "user-1", role: "member", name: "Ada" }];
+    render(<WorkspaceTab />, { wrapper: I18nWrapper });
+
+    expect((screen.getByLabelText("Sediment ticket prompt") as HTMLTextAreaElement).disabled).toBe(true);
   });
 
   it("leads the naming card with whether naming works", () => {

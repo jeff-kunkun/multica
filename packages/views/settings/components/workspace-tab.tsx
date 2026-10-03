@@ -58,6 +58,7 @@ import { AvatarUploadControl } from "../../common/avatar-upload-control";
 import { useNavigation } from "../../navigation";
 import { DeleteWorkspaceDialog } from "./delete-workspace-dialog";
 import { ChatNamingCard } from "./chat-naming-card";
+import { SedimentInstructionForm } from "./sediment-instruction-form";
 import { useT } from "../../i18n";
 import {
   SettingsCard,
@@ -665,6 +666,7 @@ export function WorkspaceTab() {
               </SelectContent>
             </Select>
           </SettingsRow>
+          <SedimentInstructionForm workspace={workspace} canManage={canManageWorkspace} />
         </SettingsCard>
       </SettingsSection>
 
