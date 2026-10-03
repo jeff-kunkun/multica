@@ -81,10 +81,14 @@ vi.mock("../../inbox/components/inbox-page", () => ({
   ),
 }));
 let compact = true;
-vi.mock("@multica/ui/hooks/use-mobile", () => ({ useIsCompact: () => compact }));
+vi.mock("@multica/ui/hooks/use-mobile", () => ({
+  useIsCompact: () => compact,
+  useIsMobile: () => false,
+}));
 
 import { HomePage, InboxBoardLanes, type BoardLinking } from "./home-page";
 import { InboxPage } from "../../inbox/components/inbox-layers";
+import { IssuePeekActionsContext } from "../../issues/surface/peek-context";
 
 function row(over: Partial<BoardRow> & { issueId: string; lane: BoardRow["lane"] }): BoardRow {
   return {
@@ -270,10 +274,30 @@ describe("HomePage", () => {
     expect(screen.queryByTestId("board-row-unread")).toBeNull();
   });
 
-  it("opens the issue when a row is clicked", () => {
+  it("opens the issue preview when a row is clicked", () => {
     renderWithI18n(<HomePage />);
     fireEvent.click(screen.getByTestId("board-row-stalled").firstElementChild!);
-    expect(push).toHaveBeenCalledWith("/acme/issues/871");
+    expect(push).not.toHaveBeenCalled();
+    expect(screen.getByTestId("board-row-stalled")).toHaveAttribute("data-highlighted");
+  });
+
+  it("publishes the board order as one cross-lane preview sequence", () => {
+    const peek = {
+      open: vi.fn(),
+      toggle: vi.fn(),
+      close: vi.fn(),
+      publishColumns: vi.fn(),
+    };
+    renderWithI18n(
+      <IssuePeekActionsContext.Provider value={peek}>
+        <InboxBoardLanes board={board} isLoading={false} isError={false} />
+      </IssuePeekActionsContext.Provider>,
+    );
+    expect(peek.publishColumns).toHaveBeenCalledWith([
+      ["822", "871", "882", "890", "880", "879"],
+    ]);
+    fireEvent.click(screen.getByTestId("board-row-running").firstElementChild!);
+    expect(peek.open).toHaveBeenCalledWith("882");
   });
 
   it("expands a stalled row into its timeline without leaving the page", () => {
