@@ -142,7 +142,7 @@ export function ChatNamingCard({
                     selected
                       ? "bg-background text-foreground shadow-sm"
                       : "text-muted-foreground hover:text-foreground",
-                    !available && "cursor-not-allowed text-muted-foreground/50 hover:text-muted-foreground/50",
+                    !available && "cursor-not-allowed text-faint-foreground hover:text-faint-foreground",
                   )}
                 >
                   {sourceName(id)}
