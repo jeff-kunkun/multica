@@ -662,6 +662,16 @@ export interface LoginResponse {
   user: User;
 }
 
+export type IncrementalResource = "issues" | "inbox" | "chats" | "timeline";
+
+export interface IncrementalChanges<T = unknown> {
+  resource: IncrementalResource;
+  upserts: Array<{ id: string; updated_at: string; data: T }>;
+  deleted: string[];
+  next_cursor: string;
+  has_more: boolean;
+}
+
 function parseSearchIndexResponse<T>(raw: unknown, schema: ZodType, endpoint: string): T {
   const parsed = parseWithFallback<T | null>(raw, schema, null, { endpoint });
   if (parsed === null) throw new Error(`Malformed response from ${endpoint}`);
@@ -3629,6 +3639,27 @@ export class ApiClient {
     const raw = await this.fetch<unknown>("/api/inbox");
     return parseWithFallback(raw, InboxItemListSchema, EMPTY_INBOX_ITEMS, {
       endpoint: "GET /api/inbox",
+    });
+  }
+
+  /** Fetches one replayable page of changes for a high-frequency list. */
+  async listIncrementalChanges<T = unknown>(
+    resource: IncrementalResource,
+    options: {
+      updatedSince?: string;
+      cursor?: string;
+      issueId?: string;
+      limit?: number;
+      signal?: AbortSignal;
+    } = {},
+  ): Promise<IncrementalChanges<T>> {
+    const params = new URLSearchParams({ resource });
+    if (options.updatedSince) params.set("updated_since", options.updatedSince);
+    if (options.cursor) params.set("cursor", options.cursor);
+    if (options.issueId) params.set("issue_id", options.issueId);
+    if (options.limit !== undefined) params.set("limit", String(options.limit));
+    return this.fetch<IncrementalChanges<T>>(`/api/sync/changes?${params.toString()}`, {
+      signal: options.signal,
     });
   }
 

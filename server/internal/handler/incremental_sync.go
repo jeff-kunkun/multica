@@ -95,9 +95,26 @@ func (h *Handler) ListIncrementalChanges(w http.ResponseWriter, r *http.Request)
 	query := ""
 	switch resource {
 	case "issues":
-		query = `SELECT id, updated_at, row_to_json(i) FROM issue i WHERE workspace_id=$1 AND (updated_at, id) > ($2::timestamptz, NULLIF($3,'')::uuid) ORDER BY updated_at,id LIMIT $4`
+		wsUUID, err := parseUUIDSafe(ws)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid workspace id")
+			return
+		}
+		viewer, err := h.visibilityViewerFor(r, wsUUID)
+		if err != nil {
+			writeError(w, http.StatusForbidden, "unable to resolve issue visibility")
+			return
+		}
+		addArg := func(value any) string {
+			args = append(args, value)
+			return fmt.Sprintf("$%d", len(args))
+		}
+		query = `SELECT id, updated_at, row_to_json(i) FROM issue i WHERE workspace_id=$1 AND ` + viewer.issueVisibilitySQL("i", addArg) + ` AND (updated_at, id) > ($2::timestamptz, NULLIF($3,'')::uuid) ORDER BY updated_at,id LIMIT $4`
 	case "inbox":
-		query = `SELECT id, created_at, row_to_json(i) FROM inbox_item i WHERE workspace_id=$1 AND recipient_type='member' AND recipient_id=$5 AND (created_at, id) > ($2::timestamptz, NULLIF($3,'')::uuid) ORDER BY created_at,id LIMIT $4`
+		// inbox_item predates updated_at. read_at is the only durable mutation
+		// timestamp available today; include it so mark-read changes can be
+		// replayed while keeping the endpoint compatible with older schemas.
+		query = `SELECT id, GREATEST(created_at, COALESCE(read_at, created_at)), row_to_json(i) FROM inbox_item i WHERE workspace_id=$1 AND recipient_type='member' AND recipient_id=$5 AND (GREATEST(created_at, COALESCE(read_at, created_at)), id) > ($2::timestamptz, NULLIF($3,'')::uuid) ORDER BY GREATEST(created_at, COALESCE(read_at, created_at)),id LIMIT $4`
 	case "chats":
 		query = `SELECT id, updated_at, row_to_json(s) FROM chat_session s WHERE workspace_id=$1 AND creator_id=$5 AND (updated_at, id) > ($2::timestamptz, NULLIF($3,'')::uuid) ORDER BY updated_at,id LIMIT $4`
 	case "timeline":
@@ -109,7 +126,7 @@ func (h *Handler) ListIncrementalChanges(w http.ResponseWriter, r *http.Request)
 		args = append(args, issueID)
 		query = `SELECT id, updated_at, row_to_json(c) FROM comment c WHERE workspace_id=$1 AND issue_id=$5::uuid AND (updated_at, id) > ($2::timestamptz, $3::uuid) ORDER BY updated_at,id LIMIT $4`
 	}
-	if resource != "timeline" {
+	if resource != "timeline" && resource != "issues" {
 		args = append(args, userID)
 	}
 	rows, err := h.DB.Query(r.Context(), query, args...)
@@ -118,8 +135,10 @@ func (h *Handler) ListIncrementalChanges(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	defer rows.Close()
-	changes := make([]IncrementalChange, 0, limit)
-	deleted := make([]string, 0)
+	// Keep the raw page separate from the classified result. A tombstone still
+	// consumes a page slot and advances the cursor; classifying first could
+	// otherwise return too many rows or skip rows after a delete.
+	rawChanges := make([]IncrementalChange, 0, limit+1)
 	var last incrementalCursor
 	for rows.Next() {
 		var c IncrementalChange
@@ -127,27 +146,31 @@ func (h *Handler) ListIncrementalChanges(w http.ResponseWriter, r *http.Request)
 			writeError(w, http.StatusInternalServerError, "failed to read incremental changes")
 			return
 		}
-		if resource == "timeline" {
-			var row struct {
-				DeletedAt *time.Time `json:"deleted_at"`
-			}
-			if json.Unmarshal(c.Data, &row) == nil && row.DeletedAt != nil {
-				deleted = append(deleted, c.ID)
-				last = incrementalCursor{At: c.UpdatedAt, ID: c.ID}
-				continue
-			}
-		}
-		changes = append(changes, c)
+		rawChanges = append(rawChanges, c)
 		last = incrementalCursor{At: c.UpdatedAt, ID: c.ID}
 	}
 	if err := rows.Err(); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to read incremental changes")
 		return
 	}
-	hasMore := len(changes) > limit
+	hasMore := len(rawChanges) > limit
 	if hasMore {
-		changes = changes[:limit]
-		last = incrementalCursor{At: changes[len(changes)-1].UpdatedAt, ID: changes[len(changes)-1].ID}
+		rawChanges = rawChanges[:limit]
+		last = incrementalCursor{At: rawChanges[len(rawChanges)-1].UpdatedAt, ID: rawChanges[len(rawChanges)-1].ID}
+	}
+	changes := make([]IncrementalChange, 0, len(rawChanges))
+	deleted := make([]string, 0)
+	for _, c := range rawChanges {
+		if resource == "timeline" {
+			var row struct {
+				DeletedAt *time.Time `json:"deleted_at"`
+			}
+			if json.Unmarshal(c.Data, &row) == nil && row.DeletedAt != nil {
+				deleted = append(deleted, c.ID)
+				continue
+			}
+		}
+		changes = append(changes, c)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"resource": resource, "upserts": changes, "deleted": deleted, "next_cursor": func() string {
 		if last.At.IsZero() {
