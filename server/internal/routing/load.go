@@ -77,16 +77,28 @@ func loadPhrase(n int) string {
 // whenever the chosen seat is not strictly less busy — a tie is the ladder's
 // order, not a new one.
 //
+// Busyness never outranks 紧张: unless the ladder's pick is itself tight, a
+// tight seat stays out of the cell, so an idle 紧张 seat does not take work
+// from a busy 常规 or 充足 one. 紧张 means "call it less". 充足 and 常规 are only
+// an order, so load still spreads work between them.
+//
 // An upshifted base is left alone: 「允许上调一档」 already decided that cell.
 func PickLoad(s LoadSnapshot) LoadPick {
 	out := LoadPick{Seat: s.Base, Base: s.Base}
 	pool := make([]quotarelay.Seat, 0, len(s.Seats))
 	byID := make(map[string]LoadSeat, len(s.Seats))
+	baseUsage, baseSeen := 0, false
+	for _, ls := range s.Seats {
+		if ls.Seat.ID == s.Base.ID {
+			baseUsage, baseSeen = ls.UsageRank, true
+		}
+	}
 	for _, ls := range s.Seats {
 		if ls.Seat.ID == s.Base.ID {
 			out.BaseRunning, out.Running = ls.Running, ls.Running
 		}
-		inCell := ls.Seat.ID != "" && ls.Seat.TierKey == s.Base.TierKey && ls.Seat.Direction == s.Base.Direction
+		inCell := ls.Seat.ID != "" && ls.Seat.TierKey == s.Base.TierKey && ls.Seat.Direction == s.Base.Direction &&
+			(!baseSeen || ls.UsageRank <= max(baseUsage, UsageRank(UsageNormal)))
 		byID[ls.Seat.ID] = ls
 		pool = append(pool, quotarelay.Seat{
 			ID:        ls.Seat.ID,
