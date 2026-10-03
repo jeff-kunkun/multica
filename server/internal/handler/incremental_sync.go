@@ -109,14 +109,14 @@ func (h *Handler) ListIncrementalChanges(w http.ResponseWriter, r *http.Request)
 			args = append(args, value)
 			return fmt.Sprintf("$%d", len(args))
 		}
-		query = `SELECT id, updated_at, row_to_json(i) FROM issue i WHERE workspace_id=$1 AND ` + viewer.issueVisibilitySQL("i", addArg) + ` AND (updated_at, id) > ($2::timestamptz, NULLIF($3,'')::uuid) ORDER BY updated_at,id LIMIT $4`
+		query = `(SELECT id, updated_at, row_to_json(i) FROM issue i WHERE workspace_id=$1 AND ` + viewer.issueVisibilitySQL("i", addArg) + ` AND (updated_at, id) > ($2::timestamptz, NULLIF($3,'')::uuid)) UNION ALL (SELECT id, changed_at, NULL::json FROM incremental_sync_tombstone WHERE resource='issues' AND workspace_id=$1 AND (changed_at, id) > ($2::timestamptz, NULLIF($3,'')::uuid)) ORDER BY updated_at,id LIMIT $4`
 	case "inbox":
 		// inbox_item predates updated_at. read_at is the only durable mutation
 		// timestamp available today; include it so mark-read changes can be
 		// replayed while keeping the endpoint compatible with older schemas.
-		query = `SELECT id, GREATEST(created_at, COALESCE(read_at, created_at)), row_to_json(i) FROM inbox_item i WHERE workspace_id=$1 AND recipient_type='member' AND recipient_id=$5 AND (GREATEST(created_at, COALESCE(read_at, created_at)), id) > ($2::timestamptz, NULLIF($3,'')::uuid) ORDER BY GREATEST(created_at, COALESCE(read_at, created_at)),id LIMIT $4`
+		query = `(SELECT id, GREATEST(created_at, COALESCE(read_at, created_at)), row_to_json(i) FROM inbox_item i WHERE workspace_id=$1 AND recipient_type='member' AND recipient_id=$5 AND (GREATEST(created_at, COALESCE(read_at, created_at)), id) > ($2::timestamptz, NULLIF($3,'')::uuid)) UNION ALL (SELECT id, changed_at, NULL::json FROM incremental_sync_tombstone WHERE resource='inbox' AND workspace_id=$1 AND subject_id=$5 AND (changed_at, id) > ($2::timestamptz, NULLIF($3,'')::uuid)) ORDER BY updated_at,id LIMIT $4`
 	case "chats":
-		query = `SELECT id, updated_at, row_to_json(s) FROM chat_session s WHERE workspace_id=$1 AND creator_id=$5 AND (updated_at, id) > ($2::timestamptz, NULLIF($3,'')::uuid) ORDER BY updated_at,id LIMIT $4`
+		query = `(SELECT id, updated_at, row_to_json(s) FROM chat_session s WHERE workspace_id=$1 AND creator_id=$5 AND (updated_at, id) > ($2::timestamptz, NULLIF($3,'')::uuid)) UNION ALL (SELECT id, changed_at, NULL::json FROM incremental_sync_tombstone WHERE resource='chats' AND workspace_id=$1 AND subject_id=$5 AND (changed_at, id) > ($2::timestamptz, NULLIF($3,'')::uuid)) ORDER BY updated_at,id LIMIT $4`
 	case "timeline":
 		issueID := r.URL.Query().Get("issue_id")
 		if issueID == "" {
@@ -180,6 +180,10 @@ func (h *Handler) ListIncrementalChanges(w http.ResponseWriter, r *http.Request)
 	changes := make([]IncrementalChange, 0, len(rawChanges))
 	deleted := make([]string, 0)
 	for _, c := range rawChanges {
+		if len(c.Data) == 0 || string(c.Data) == "null" {
+			deleted = append(deleted, c.ID)
+			continue
+		}
 		if resource == "timeline" {
 			var row struct {
 				DeletedAt *time.Time `json:"deleted_at"`
