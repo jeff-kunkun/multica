@@ -83,7 +83,8 @@ type IssueResponse struct {
 	// instead of finding the slot empty later.
 	AssigneeIgnored bool `json:"assignee_ignored,omitempty"`
 	// AssigneeIgnoredReason explains a rejected per-quote proof so an agent can
-	// ask the person for an actual quote instead of guessing again.
+	// ask the person for an actual quote instead of guessing again, or a
+	// refused in-flight reassignment with the commands to use instead.
 	AssigneeIgnoredReason string `json:"assignee_ignored_reason,omitempty"`
 	// ReviewerType / ReviewerID are the acceptance slot, shaped exactly like
 	// the assignee pair: a REFERENCE to an agent or a member, not a copy of a
@@ -3668,7 +3669,7 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 	assigneeIgnored := false
 	assigneeIgnoredReason := ""
 	if assigneeType.Valid {
-		ruling = h.rulePick(r, workspaceID, creatorType, actualCreatorID, assigneeType, assigneeID, deref(req.AssigneeQuote), status)
+		ruling = h.rulePick(r, workspaceID, creatorType, actualCreatorID, assigneeType, assigneeID, deref(req.AssigneeQuote), status, nil)
 		if !ruling.Apply {
 			assigneeType, assigneeID = pgtype.Text{}, pgtype.UUID{}
 			assigneeIgnored = true
@@ -4442,7 +4443,8 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 			if params.Status.Valid {
 				resulting = params.Status.String
 			}
-			ruling := h.rulePick(r, workspaceID, actorType, actorID, params.AssigneeType, params.AssigneeID, deref(req.AssigneeQuote), resulting)
+			ruling := h.rulePick(r, workspaceID, actorType, actorID, params.AssigneeType, params.AssigneeID, deref(req.AssigneeQuote), resulting,
+				&heldExecutor{Type: prevIssue.AssigneeType, ID: prevIssue.AssigneeID})
 			if ruling.Apply {
 				stampRuling = &ruling
 			} else {
@@ -5459,7 +5461,8 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 				if params.Status.Valid {
 					resulting = params.Status.String
 				}
-				ruling := h.rulePick(r, workspaceID, pickActorType, pickActorID, params.AssigneeType, params.AssigneeID, deref(req.Updates.AssigneeQuote), resulting)
+				ruling := h.rulePick(r, workspaceID, pickActorType, pickActorID, params.AssigneeType, params.AssigneeID, deref(req.Updates.AssigneeQuote), resulting,
+					&heldExecutor{Type: prevIssue.AssigneeType, ID: prevIssue.AssigneeID})
 				if ruling.Apply {
 					batchStamp = &ruling
 				} else {

@@ -75,6 +75,18 @@ mentioning, triggering and status changes mutate durable workspace state or
 start agent runs that cost real budget. Never run one to see what happens. When
 the user has not asked for a specific mutation, propose it instead of making it.
 
+**A chat agent dispatches; it does not do the work.** By default it creates the
+ticket and leaves the executor to routing. Only when the person said 「你来做」
+(or named you) does it assign itself with `--per-quote "<原话>"` and start.
+
+**The owner of a ticket owns it to the end.** Once it is yours: post a start
+comment first (how you read the ask, which direction you will take), comment at
+key milestones, and finish only with `multica issue close`. Too hard →
+`multica issue escalate`. Someone else should take it → close `blocked` and let
+routing advise. A person must decide → `multica issue summon`. **Never assign
+the ticket to someone else yourself**; with routing on, the server refuses it
+once the ticket is past `todo` (details in `references/routing.md`).
+
 **Status keys identify workflow states; categories describe lifecycle only.**
 Custom statuses do not inherit built-in automation behavior. For status side
 effects and API field meanings, read `references/issues.md`.

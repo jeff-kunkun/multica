@@ -4267,7 +4267,13 @@ func noteIgnoredAssignee(result map[string]any) bool {
 	if reason == "" {
 		reason = "the person did not provide a verifiable quote"
 	}
-	fmt.Fprintf(os.Stderr, "Issue %s: the assignee you named was NOT applied; the issue remains unassigned. %s.\n",
-		issueDisplayKey(result), reason)
+	// An in-flight ticket keeps the executor it had (DENE-1201); only an empty
+	// slot is left for routing.
+	kept := "the issue remains unassigned"
+	if strVal(result, "assignee_id") != "" {
+		kept = "the issue keeps its current assignee"
+	}
+	fmt.Fprintf(os.Stderr, "Issue %s: the assignee you named was NOT applied; %s. %s.\n",
+		issueDisplayKey(result), kept, strings.TrimSuffix(reason, "."))
 	return true
 }
