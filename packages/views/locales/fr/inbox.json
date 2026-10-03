@@ -102,6 +102,7 @@
     "quick_create_failed": "Échec de la création avec un agent",
     "quick_create_unconfirmed": "Création avec un agent non confirmée",
     "autopilot_paused": "Automatisation en pause",
+    "children_done": "Sous-tâches terminées",
     "autopilot_quota_exceeded": "Limite d'exécutions d'automatisation atteinte",
     "agent_access_request": "Demande d'accès à un agent",
     "agent_access_approved": "Accès à l'agent approuvé",
@@ -122,6 +123,7 @@
     "created_with_agent": "Créé avec un agent : {{identifier}}",
     "failed_with_detail": "Échec : {{detail}}",
     "autopilot_quota_blocked": "Exécution bloquée car la limite a été atteinte",
+    "children_done_stage": "Sous-tâches de l’étape {{stage}} terminées",
     "access_requested_by": "{{requester}} demande à utiliser {{agent}}",
     "access_approved_for": "Votre demande d'utiliser {{agent}} a été approuvée",
     "access_declined_for": "Votre demande d'utiliser {{agent}} a été refusée"

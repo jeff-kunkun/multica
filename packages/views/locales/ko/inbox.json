@@ -99,6 +99,7 @@
     "quick_create_failed": "에이전트 생성 실패",
     "quick_create_unconfirmed": "에이전트 생성 결과 미확인",
     "autopilot_paused": "자동화 일시 중지됨",
+    "children_done": "하위 태스크가 모두 끝났습니다",
     "autopilot_quota_exceeded": "자동화 실행 한도 도달",
     "agent_access_request": "에이전트 사용 요청",
     "agent_access_approved": "에이전트 사용 승인됨",
@@ -119,6 +120,7 @@
     "created_with_agent": "에이전트가 생성: {{identifier}}",
     "failed_with_detail": "실패: {{detail}}",
     "autopilot_quota_blocked": "한도에 도달하여 실행이 차단됨",
+    "children_done_stage": "{{stage}}단계 하위 태스크가 모두 끝났습니다",
     "access_requested_by": "{{requester}}님이 {{agent}} 사용을 요청했습니다",
     "access_approved_for": "{{agent}} 사용 요청이 승인되었습니다",
     "access_declined_for": "{{agent}} 사용 요청이 거절되었습니다"

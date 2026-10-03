@@ -99,6 +99,7 @@
     "quick_create_failed": "通过智能体创建失败",
     "quick_create_unconfirmed": "通过智能体创建结果未确认",
     "autopilot_paused": "自动化已暂停",
+    "children_done": "子任务已全部结束",
     "autopilot_quota_exceeded": "自动化执行次数已用完",
     "agent_access_request": "智能体借用申请",
     "agent_access_approved": "智能体借用已批准",
@@ -119,6 +120,7 @@
     "created_with_agent": "通过智能体创建：{{identifier}}",
     "failed_with_detail": "失败：{{detail}}",
     "autopilot_quota_blocked": "执行已被阻止：额度已用完",
+    "children_done_stage": "第 {{stage}} 阶段的子任务已全部结束",
     "access_requested_by": "{{requester}} 申请使用 {{agent}}",
     "access_approved_for": "你使用 {{agent}} 的申请已批准",
     "access_declined_for": "你使用 {{agent}} 的申请已拒绝"

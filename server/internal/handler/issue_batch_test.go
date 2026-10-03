@@ -444,3 +444,67 @@ func TestBatchChildDoneClosesLowerStageOnly(t *testing.T) {
 		t.Errorf("expected the advance-to-next-stage instruction, got: %s", content)
 	}
 }
+
+// TestBatchChildDoneCrossStage_OneWakeRule is the MUL-4155 core. A single batch
+// that finishes children across two stages must wake the parent once, from
+// the final state: every sub-issue closed, never a stale "Stage 2 is next",
+// regardless of id order.
+func TestBatchChildDoneCrossStage_OneWakeRule(t *testing.T) {
+	enableChildDoneRule(t)
+	assertFinal := func(t *testing.T, parentID, agentID string) {
+		t.Helper()
+		entries := childDoneEntries(t, parentID)
+		if len(entries) != 1 || entries[0].Stage != nil || entries[0].Total != 4 || entries[0].Outcome != "woke" {
+			t.Fatalf("entries = %+v, want one wrap-up wake", entries)
+		}
+		runs := childDoneRuns(t, parentID)
+		if len(runs) != 1 || runs[0].ID != entries[0].TaskID || strings.Contains(runs[0].Note, "next_stage") || !strings.Contains(runs[0].Note, `"all":true`) {
+			t.Fatalf("runs = %+v, want one run for the final state", runs)
+		}
+		if got := countPendingTasksForAgent(t, parentID, agentID); got != 1 {
+			t.Fatalf("expected exactly 1 pending parent task, got %d", got)
+		}
+	}
+
+	t.Run("forward order [stage1, stage2]", func(t *testing.T) {
+		fx := newStagedBatchFixture(t)
+		batchSetStatus(t, []string{fx.stage1[0].ID, fx.stage1[1].ID, fx.stage2[0].ID, fx.stage2[1].ID}, "done")
+		assertFinal(t, fx.parent.ID, fx.agentID)
+	})
+
+	t.Run("reverse order [stage2, stage1]", func(t *testing.T) {
+		fx := newStagedBatchFixture(t)
+		batchSetStatus(t, []string{fx.stage2[0].ID, fx.stage2[1].ID, fx.stage1[0].ID, fx.stage1[1].ID}, "done")
+		assertFinal(t, fx.parent.ID, fx.agentID)
+	})
+}
+
+// TestBatchChildDoneCrossStage_CancelledRule — cancelling every stage in one batch
+// closes them too; the facts count the cancellations apart from finished work.
+func TestBatchChildDoneCrossStage_CancelledRule(t *testing.T) {
+	enableChildDoneRule(t)
+	fx := newStagedBatchFixture(t)
+	batchSetStatus(t, []string{fx.stage1[0].ID, fx.stage1[1].ID, fx.stage2[0].ID, fx.stage2[1].ID}, "cancelled")
+
+	runs := childDoneRuns(t, fx.parent.ID)
+	if len(runs) != 1 || !strings.Contains(runs[0].Note, `"cancelled":4`) || strings.Contains(runs[0].Note, "next_stage") {
+		t.Fatalf("runs = %+v, want one wake counting 4 cancellations", runs)
+	}
+}
+
+// TestBatchChildDoneClosesLowerStageOnlyRule — when a batch finishes only the lower
+// stage, the parent is told Stage 1 closed and pointed at Stage 2.
+func TestBatchChildDoneClosesLowerStageOnlyRule(t *testing.T) {
+	enableChildDoneRule(t)
+	fx := newStagedBatchFixture(t)
+	batchSetStatus(t, []string{fx.stage1[0].ID, fx.stage1[1].ID}, "done")
+
+	entries := childDoneEntries(t, fx.parent.ID)
+	if len(entries) != 1 || entries[0].Stage == nil || *entries[0].Stage != 1 || entries[0].Total != 2 {
+		t.Fatalf("entries = %+v, want stage 1", entries)
+	}
+	runs := childDoneRuns(t, fx.parent.ID)
+	if len(runs) != 1 || !strings.Contains(runs[0].Note, `"next_stage":2`) {
+		t.Fatalf("runs = %+v, want the next stage named", runs)
+	}
+}

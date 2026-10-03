@@ -14,6 +14,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/chattitle"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/progress"
 	"github.com/multica-ai/multica/server/internal/titling"
@@ -128,7 +129,7 @@ func (h *Handler) recapChatSession(ctx context.Context, workspaceID string, sess
 		case replies == 1 && namingSource == "runtime" && h.runtimeChatTitleReported(ctx, session):
 			// The runtime has already supplied the authoritative title for this
 			// opening turn. The lexical fallback must never overwrite it.
-		case replies == 1 && (strings.TrimSpace(session.Title) == strings.TrimSpace(opening) || strings.TrimSpace(session.Title) == ""):
+		case replies == 1 && openingStillTitles(session.Title, opening):
 			titleSource = "rules"
 			// Self-hosted instances without MULTICA_LLM_* still get a useful
 			// title. This is deliberately lexical cleanup, never another model
@@ -209,8 +210,45 @@ func (h *Handler) chatNamingSource(ctx context.Context, session db.ChatSession) 
 	return source
 }
 
+// openingStillTitles reports whether the chat still carries the placeholder
+// the first send wrote: empty, the raw opening, or chattitle.Derive of it
+// (what service.SendChatMessage actually stores — the raw-opening check alone
+// never matched a multi-line or long first message, so rules never ran).
+func openingStillTitles(title, opening string) bool {
+	title = strings.TrimSpace(title)
+	return title == "" || title == strings.TrimSpace(opening) || title == chattitle.Derive(opening)
+}
+
+// openingTitleSource drops lines that are only an image/file embed so a
+// screenshot pasted ahead of the question does not become the title.
+func openingTitleSource(opening string) string {
+	kept := make([]string, 0, strings.Count(opening, "\n")+1)
+	for _, line := range strings.Split(opening, "\n") {
+		if strings.TrimSpace(markdownEmbedOnly.ReplaceAllString(line, "")) == "" && strings.TrimSpace(line) != "" {
+			continue
+		}
+		kept = append(kept, line)
+	}
+	if text := strings.TrimSpace(strings.Join(kept, "\n")); text != "" {
+		return text
+	}
+	return opening
+}
+
+var markdownEmbedOnly = regexp.MustCompile(`!\[[^\]]*\]\([^)]*\)`)
+
 func ruleCleanChatTitle(opening string) string {
-	s := strings.TrimSpace(opening)
+	// Derive caps at 30 runes, so drop the trailing sentence punctuation of the
+	// line it will keep first; otherwise a question one "？" over the cap gets
+	// truncated with "…" instead of fitting.
+	source := openingTitleSource(opening)
+	for _, line := range strings.Split(source, "\n") {
+		if strings.TrimSpace(line) != "" {
+			source = strings.TrimRight(strings.TrimSpace(line), ".。!！?？,，;；:：、 ")
+			break
+		}
+	}
+	s := chattitle.Derive(source)
 	for {
 		before := s
 		for _, prefix := range []string{"嗯", "呃", "额", "请"} {

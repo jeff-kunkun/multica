@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/multica-ai/multica/server/internal/routing"
+	"github.com/multica-ai/multica/server/internal/stallaction"
 	"github.com/multica-ai/multica/server/internal/testutil"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
@@ -27,27 +28,6 @@ func TestAllChildrenTerminalRequiresChildrenAndEveryChildTerminal(t *testing.T) 
 	children[1].Status = "cancelled"
 	if !allChildrenTerminal(children, terminal) {
 		t.Fatal("all terminal children should close the barrier")
-	}
-}
-
-func TestStallStringAndBoolReadOnlyMetadata(t *testing.T) {
-	meta := map[string]any{stallActionKey: "announced", stallCandidateKey: true}
-	if stallString(meta, stallActionKey) != stallActionAnnounced {
-		t.Fatal("action metadata was not read")
-	}
-	if !stallBool(meta, stallCandidateKey) {
-		t.Fatal("candidate metadata was not read")
-	}
-}
-
-func TestStallCandidateJudgementMarkerSkipsUnchangedActivity(t *testing.T) {
-	activityAt := time.Date(2026, 10, 2, 12, 0, 0, 123456000, time.UTC)
-	meta := map[string]any{stallJudgedAtKey: activityAt.Format(time.RFC3339Nano)}
-	if !stallCandidateJudgedForActivity(meta, activityAt) {
-		t.Fatal("a model decision for the current activity should be reused")
-	}
-	if stallCandidateJudgedForActivity(meta, activityAt.Add(time.Second)) {
-		t.Fatal("new activity must make the ticket eligible for a fresh judgment")
 	}
 }
 
@@ -183,7 +163,7 @@ func TestSweepStallActionsAnnouncementKeepAndExpiry(t *testing.T) {
 	}
 	var action string
 	dbfx.QueryRow(t, `SELECT metadata->>'stall.action' FROM issue WHERE id = $1`, kept).Scan(&action)
-	if action != stallActionAnnounced {
+	if action != stallaction.ActionAnnounced {
 		t.Fatalf("candidate action = %q, want announced", action)
 	}
 
@@ -194,7 +174,7 @@ func TestSweepStallActionsAnnouncementKeepAndExpiry(t *testing.T) {
 		t.Fatalf("keep status = %d, body=%s", rr.Code, rr.Body.String())
 	}
 	dbfx.QueryRow(t, `SELECT metadata->>'stall.action' FROM issue WHERE id = $1`, kept).Scan(&action)
-	if action != stallActionKept {
+	if action != stallaction.ActionKept {
 		t.Fatalf("kept action = %q, want kept", action)
 	}
 
@@ -275,3 +255,91 @@ func TestNotifyStallInboxKeepsActionsBoundToTheirIssue(t *testing.T) {
 }
 
 func rawJSON(value string) any { return testutil.Raw("'" + value + "'::jsonb") }
+
+func TestSweepStallActionsKeepsAnnouncementWhenWorkResumes(t *testing.T) {
+	issueID := dbfx.Issue(t, "announced then resumed", testutil.Cols{"status": "in_progress", "last_activity_at": time.Now().UTC().Add(-37 * time.Hour), "metadata": rawJSON(`{"stall.candidate":"true"}`)})
+	if _, err := testHandler.SweepStallActions(t.Context()); err != nil {
+		t.Fatalf("candidate sweep: %v", err)
+	}
+	dbfx.Comment(t, issueID, "我接着做")
+	dbfx.Exec(t, `UPDATE issue SET metadata = jsonb_set(metadata, ARRAY['stall.review_until'], to_jsonb($2::text), true) WHERE id = $1`, issueID, time.Now().UTC().Add(-time.Hour).Format(time.RFC3339))
+	if _, err := testHandler.SweepStallActions(t.Context()); err != nil {
+		t.Fatalf("expiry sweep: %v", err)
+	}
+	var status, action string
+	dbfx.QueryRow(t, `SELECT status, metadata->>'stall.action' FROM issue WHERE id = $1`, issueID).Scan(&status, &action)
+	if status != "in_progress" || action != stallaction.ActionKept {
+		t.Fatalf("resumed ticket status/action = %q/%q, want in_progress/kept", status, action)
+	}
+}
+
+func TestUndoStallActionRefusesAfterManualStatusChange(t *testing.T) {
+	issueID := dbfx.Issue(t, "cancelled then reopened", testutil.Cols{"status": "todo", "metadata": rawJSON(fmt.Sprintf(`{"stall.action":"cancelled","stall.previous_status":"in_progress","stall.revert_until":%q}`, time.Now().UTC().Add(time.Hour).Format(time.RFC3339)))})
+	req := withURLParam(inboxRequest(http.MethodPost, "/api/issues/"+issueID+"/stall/undo", testWorkspaceID), "id", issueID)
+	rr := httptest.NewRecorder()
+	inboxWorkspaceHandler(testHandler.UndoStallAction).ServeHTTP(rr, req)
+	if rr.Code != http.StatusConflict {
+		t.Fatalf("undo status = %d, want 409; body=%s", rr.Code, rr.Body.String())
+	}
+	var status string
+	dbfx.QueryRow(t, `SELECT status FROM issue WHERE id = $1`, issueID).Scan(&status)
+	if status != "todo" {
+		t.Fatalf("status = %q, want the manual todo kept", status)
+	}
+}
+
+// The patrol filters in SQL and re-checks each row in Go. Both are built from
+// stallaction's Eligibility (DENE-1183); this pins them to the same answer
+// on a matrix of status, close.* and block.* values.
+func TestStallPatrolEligibilitySQLMatchesGo(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	cases := []struct {
+		status string
+		meta   string
+	}{
+		{"todo", `{}`},
+		{"in_progress", `{}`},
+		{"blocked", `{}`},
+		{"backlog", `{}`},
+		{"done", `{}`},
+		{"cancelled", `{}`},
+		{"todo", `{"close.conclusion":"deferred"}`},
+		{"in_progress", `{"close.conclusion":"continuing"}`},
+		{"in_progress", `{"close.conclusion":"delivered"}`},
+		{"blocked", `{"close.conclusion":"blocked"}`},
+		{"in_progress", `{"close.conclusion":"awaiting_human"}`},
+		{"blocked", `{"block.blocked_by":"DENE-1"}`},
+		{"blocked", `{"block.wait_condition":"CI green"}`},
+		{"blocked", `{"block.wake_at":"2026-10-04T00:00:00Z"}`},
+		{"todo", `{"block.blocked_by":""}`},
+		{"todo", `{"close.waiting_on":"DENE-2"}`},
+	}
+	ids := make([]string, len(cases))
+	for i, tc := range cases {
+		ids[i] = dbfx.Issue(t, fmt.Sprintf("eligibility %d", i), testutil.Cols{"status": tc.status, "metadata": rawJSON(tc.meta)})
+	}
+	rows, err := testPool.Query(t.Context(), `SELECT id::text FROM issue WHERE id = ANY($1::uuid[]) AND `+stallaction.PatrolStatusSQL()+` AND `+stallaction.NotWaitingSQL(), ids)
+	if err != nil {
+		t.Fatal(err)
+	}
+	inSQL := map[string]bool{}
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			t.Fatal(err)
+		}
+		inSQL[id] = true
+	}
+	rows.Close()
+	for i, id := range ids {
+		issue, err := testHandler.Queries.GetIssue(t.Context(), parseUUID(id))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := stallTicket(issue).PatrolEligible(); got != inSQL[id] {
+			t.Fatalf("case %d %s %s: Go eligible=%v, SQL selected=%v", i, cases[i].status, cases[i].meta, got, inSQL[id])
+		}
+	}
+}
