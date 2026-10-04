@@ -1804,5 +1804,26 @@
     "source_parking": "점검 요약",
     "source_model": "요약",
     "source_reply": "답변에서"
+  },
+  "state_card": {
+    "section_title": "상태 카드",
+    "decisions": "결정 사항",
+    "decisions_empty": "아직 결정 사항이 없습니다",
+    "decision_add": "결정 사항 추가",
+    "decision_placeholder": "정해진 내용을 한 줄로",
+    "decision_save": "저장",
+    "decision_cancel": "취소",
+    "decision_edit": "편집",
+    "decision_delete": "삭제",
+    "decision_failed": "저장하지 못했습니다: {{reason}}",
+    "baton": "지난 인계",
+    "baton_close": "종료",
+    "baton_handoff": "{{to}}에게 인계",
+    "baton_none": "아직 종료나 인계가 없습니다",
+    "changes": "마지막 방문 이후 변경",
+    "changes_first": "마지막 방문 이후 변경(첫 방문)",
+    "changes_none": "새 스레드가 없습니다",
+    "changes_count": "새 글 {{count}}개",
+    "changes_more": "스레드 {{count}}개 더"
   }
 }
