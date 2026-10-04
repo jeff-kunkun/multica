@@ -7364,10 +7364,10 @@ func sameExistingDir(a, b string) bool {
 	return os.SameFile(ai, bi)
 }
 
-//
-// sessionStoredAnywhere is the exception for CLIs that resume a stored session
-// from any cwd (priorSessionStoredAnywhere): when it is true the directory is
-// not compared, only the session home.
+// gateResumeToReachableSession applies the rules described above. The
+// sessionStoredAnywhere argument is the exception for CLIs that resume a
+// stored session from any cwd (priorSessionStoredAnywhere): when it is true
+// the directory is not compared, only the session home.
 func gateResumeToReachableSession(task *Task, taskCtx *execenv.TaskContextForEnv, provider, envWorkDir string, sessionHomeReachable, refusesMissingSessionCwd, sessionStoredAnywhere bool, taskLog *slog.Logger) bool {
 	var reachable bool
 	if providerUsesPiSessionFile(provider) {
