@@ -1860,6 +1860,17 @@
     "source_model": "summary",
     "source_reply": "from reply"
   },
+  "session_lineage": {
+    "round": "Run {{round}}",
+    "new": "New session",
+    "resumed": "Continues run {{round}}'s session",
+    "resumed_earlier": "Continues an earlier session",
+    "divider": "{{name}} · run {{round}}",
+    "reason_agent_changed": "different agent",
+    "reason_runtime_changed": "last session is on another machine",
+    "reason_session_lost": "session could not be restored",
+    "reason_fresh_requested": "fresh session requested"
+  },
   "state_card": {
     "section_title": "State card",
     "decisions": "Settled",

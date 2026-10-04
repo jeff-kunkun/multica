@@ -2515,6 +2515,11 @@ func (h *Handler) finalizeClaimDelivery(
 
 	receipt, err = h.TaskService.FinalizeTaskClaim(ctx, *task, token, deliveredCommentIDs, recordCommentReceipt, authorize, issueSnapshot, daemonTokens...)
 	if err == nil {
+		priorSessionID := ""
+		if response != nil {
+			priorSessionID = response.PriorSessionID
+		}
+		h.recordSessionLineage(ctx, *task, priorSessionID)
 		return receipt, nil, nil
 	}
 	var authzErr *service.ClaimDeliveryAuthzError
@@ -4946,6 +4951,9 @@ type TaskCompleteRequest struct {
 	// session because the prior one could not be resumed. Older daemons
 	// omit it.
 	SessionRestartReason string `json:"session_restart_reason,omitempty"`
+	// SessionResumeDropped: the claim pointed this run at a session and the
+	// daemon started a fresh one instead (DENE-1345). Older daemons omit it.
+	SessionResumeDropped bool `json:"session_resume_dropped,omitempty"`
 	// GoalChecks lets newer daemons report which locked completion-line checks
 	// they verified during this run. Older daemons omit it; the server keeps the
 	// existing check state and still owns continuation decisions.
@@ -5034,6 +5042,7 @@ func (h *Handler) CompleteTask(w http.ResponseWriter, r *http.Request) {
 			SessionRolloutMissing: req.SessionRolloutMissing,
 			RetiredSessionID:      req.RetiredSessionID,
 			SessionRestartReason:  req.SessionRestartReason,
+			SessionResumeDropped:  req.SessionResumeDropped,
 		})
 		return
 	}
@@ -5043,6 +5052,11 @@ func (h *Handler) CompleteTask(w http.ResponseWriter, r *http.Request) {
 	// transaction (force session_id NULL + flag the row), so an auto-retry the
 	// same commit creates and wakes can never observe the withheld pointer or a
 	// missing continuity-gap flag.
+	// Before the transition, so the terminal task event refreshes clients onto
+	// the corrected session line.
+	if req.SessionResumeDropped {
+		h.markSessionResumeDropped(r.Context(), parseUUID(taskID))
+	}
 	task, transitioned, err := h.TaskService.CompleteTaskWithTransition(r.Context(), parseUUID(taskID), result, req.SessionID, req.WorkDir, req.BranchName, req.SessionRolloutMissing, req.RetiredSessionID, req.DurableWorkDir)
 	if err != nil {
 		// A CompleteTask error is an infrastructure failure (transaction /
@@ -5756,6 +5770,9 @@ type TaskFailRequest struct {
 	// SessionRestartReason is set when this run had to open a new CLI
 	// session because the prior one could not be resumed.
 	SessionRestartReason string `json:"session_restart_reason,omitempty"`
+	// SessionResumeDropped: the claim pointed this run at a session and the
+	// daemon started a fresh one instead (DENE-1345). Older daemons omit it.
+	SessionResumeDropped bool `json:"session_resume_dropped,omitempty"`
 }
 
 func (h *Handler) FailTask(w http.ResponseWriter, r *http.Request) {
@@ -5791,6 +5808,9 @@ func (h *Handler) failTask(w http.ResponseWriter, r *http.Request, taskID, works
 	// keep a stale mid-flight pin) and flagging the row in the same commit that
 	// creates and wakes the auto-retry, so the retry can never claim the withheld
 	// pointer or miss the continuity gap.
+	if req.SessionResumeDropped {
+		h.markSessionResumeDropped(r.Context(), parseUUID(taskID))
+	}
 	task, transitioned, err := h.TaskService.FailTaskWithTransition(r.Context(), parseUUID(taskID), req.Error, req.SessionID, req.WorkDir, req.BranchName, req.FailureReason, req.SessionRolloutMissing, req.RetiredSessionID, req.DurableWorkDir)
 	if err != nil {
 		// A FailTask error is an infrastructure failure (the terminal

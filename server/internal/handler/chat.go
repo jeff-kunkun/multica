@@ -1483,6 +1483,7 @@ func (h *Handler) ListChatMessages(w http.ResponseWriter, r *http.Request) {
 	for i, m := range messages {
 		resp[i] = chatMessageToResponse(m, groupedAtt[uuidToString(m.ID)])
 	}
+	h.attachChatSessionLineage(r.Context(), resp, messages)
 	writeJSON(w, http.StatusOK, resp)
 }
 
@@ -1548,6 +1549,7 @@ func (h *Handler) ListChatMessagesPage(w http.ResponseWriter, r *http.Request) {
 	for i, m := range messages {
 		resp[i] = chatMessageToResponse(m, groupedAtt[uuidToString(m.ID)])
 	}
+	h.attachChatSessionLineage(r.Context(), resp, messages)
 	writeJSON(w, http.StatusOK, ChatMessagesPageResponse{
 		Messages:   resp,
 		Limit:      limit,
@@ -2554,6 +2556,11 @@ type ChatMessageResponse struct {
 	SenderUserID *string `json:"sender_user_id,omitempty"`
 	// LinkedSessionID is the chat a chat_spawn card opens (DENE-1271).
 	LinkedSessionID *string `json:"linked_session_id,omitempty"`
+	// Session lineage of the run behind task_id (DENE-1345): "new" or
+	// "resumed", the run whose session it resumed, and why a new one started.
+	SessionMode        string `json:"session_mode,omitempty"`
+	ResumedFromRun     string `json:"resumed_from_run,omitempty"`
+	SessionBreakReason string `json:"session_break_reason,omitempty"`
 	// Attachments linked to this message via chat_message_id. The chat
 	// bubble renders file cards from these, and the daemon claim path
 	// (daemon.go) pulls structured metadata from the same source so the

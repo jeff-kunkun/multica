@@ -442,7 +442,11 @@ type TaskResult struct {
 	// precisely when the abandoned id would otherwise stay selectable.
 	// SessionRestartReason explains a new CLI session opened because the
 	// prior one could not be resumed. Forwarded so the issue can say so.
-	SessionRestartReason string           `json:"-"`
+	SessionRestartReason string `json:"-"`
+	// SessionResumeDropped: the claim pointed at a session to resume and this
+	// run started a fresh one instead (DENE-1345). Forwarded so the run record
+	// says 新会话 · 会话没能恢复 rather than claiming it continued.
+	SessionResumeDropped bool             `json:"-"`
 	RetiredSessionID     string           `json:"-"`
 	Usage                []TaskUsageEntry `json:"usage,omitempty"` // per-model token usage
 	NumTurns             int              `json:"-"`

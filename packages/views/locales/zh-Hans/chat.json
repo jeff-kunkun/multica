@@ -376,5 +376,12 @@
     "from_prefix": "由",
     "from_suffix": "聊天派生",
     "from_hidden": "由另一个聊天派生"
+  },
+  "session_lineage": {
+    "new": "新会话",
+    "reason_agent_changed": "换了智能体",
+    "reason_runtime_changed": "上次的会话在另一台机器上",
+    "reason_session_lost": "会话没能恢复",
+    "reason_fresh_requested": "按要求新开"
   }
 }

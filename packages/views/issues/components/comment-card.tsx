@@ -55,6 +55,7 @@ import { CommentsFoldBar } from "./resolved-thread-bar";
 import { deriveThreadResolution } from "./thread-utils";
 import { RevisionConflictCompare } from "./revision-conflict-compare";
 import { InlineCommentRun, PlacedInlineCommentRun, useInlineCommentRunState, type InlineCommentRunState } from "./inline-comment-run";
+import { RunSessionDivider, useRunSessionLineage } from "./run-session-lineage";
 import { EMPTY_COMMENT_RUNS, isRunFailureNotice, orderThreadWithRuns, type CommentRun, type ThreadRunSlot } from "./comment-runs";
 import { descriptionPreview } from "./description-preview";
 import { useCommentAnnotations } from "./use-comment-annotations";
@@ -993,7 +994,10 @@ export function AgentRunComment({ run, standalone = false, commentProps, enterin
   // The notice keeps its deep-link target and highlight in the run's slot.
   const slotEntry = reply ?? notice;
   const motionRef = useRunCommentMotion(entering, reply?.id, run.task.status);
+  const sessionLineage = useRunSessionLineage(run.task.issue_id, run.task.id);
   return (
+    <>
+    <RunSessionDivider agentId={run.task.agent_id} lineage={sessionLineage} />
     <div ref={motionRef} data-run-slot-id={run.task.id}
       data-run-comment-id={!reply ? run.task.id : undefined}
       id={!standalone && slotEntry ? `comment-${slotEntry.id}` : undefined}
@@ -1011,6 +1015,7 @@ export function AgentRunComment({ run, standalone = false, commentProps, enterin
         <InlineCommentRun run={run} viewState={viewState} showIdentity replyTo={replyTo} replacesFailureNotice={!!notice} />
       </div>}
     </div>
+    </>
   );
 }
 

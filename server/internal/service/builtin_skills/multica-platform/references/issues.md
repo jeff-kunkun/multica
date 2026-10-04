@@ -380,6 +380,14 @@ child of that parent — and labels each row with the issue it belongs to, which
 is how you find another agent already working on a sibling sub-issue before you
 open a second PR against the same code.
 
+Each run row also says whether its CLI session continued an earlier run
+(DENE-1345): `session_mode` is `new` or `resumed`, `resumed_from_run` names the
+run whose session it resumed, and `session_break_reason` says why a new session
+started — `first_run`, `agent_changed`, `runtime_changed`, `session_lost`
+(nothing resumable, or the daemon could not restore it) or `fresh_requested`.
+`multica chat history --output json` carries the same three fields on chat
+messages. Rows older than this field omit all three.
+
 `waiting_local_directory` is the `in_place` path-mutex wait. Tasks on a
 `shared` or `worktree` `local_directory` do not take that mutex, so they do
 not enter this status for the directory lock. If several tasks on an umbrella

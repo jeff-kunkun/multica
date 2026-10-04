@@ -1805,6 +1805,17 @@
     "source_model": "要約",
     "source_reply": "返信から"
   },
+  "session_lineage": {
+    "round": "{{round}} 回目",
+    "new": "新しいセッション",
+    "resumed": "{{round}} 回目のセッションを継続",
+    "resumed_earlier": "以前のセッションを継続",
+    "divider": "{{name}} {{round}} 回目",
+    "reason_agent_changed": "エージェントが変わりました",
+    "reason_runtime_changed": "前回のセッションは別のマシンにあります",
+    "reason_session_lost": "セッションを復元できませんでした",
+    "reason_fresh_requested": "新規セッションを指定"
+  },
   "state_card": {
     "section_title": "状態カード",
     "decisions": "決定事項",
