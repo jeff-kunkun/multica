@@ -902,13 +902,14 @@ export const ChatMessageSchema = z.object({
   failure_reason: z.string().nullable().optional(),
   elapsed_ms: z.number().nullable().optional(),
   message_kind: z
-    .enum(["message", "no_response", "onboarding_kickoff", "onboarding_opening"])
+    .enum(["message", "no_response", "onboarding_kickoff", "onboarding_opening", "chat_spawn", "chat_spawn_refused"])
     .catch("message")
     .optional(),
   // Optional additive data degrades independently: a malformed suggestion
   // must not hide the assistant reply that contains it.
   quick_actions: z.array(ChatQuickActionSchema).catch([]).optional().default([]),
   sender_user_id: z.string().nullable().optional(),
+  linked_session_id: z.string().nullable().optional().catch(undefined),
 }).loose();
 
 export const ChatMessageListSchema = z.array(ChatMessageSchema).default([]);
@@ -1249,6 +1250,21 @@ export const IssueTriggerPreviewSchema = z.object({
 // to {} so consumers never need to nil-guard `issue.metadata`.
 const IssueMetadataSchema = z.record(z.string(), z.union([z.string(), z.number(), z.boolean()])).default({});
 
+const IssueDriverSchema = z.object({
+  kind: z.string(),
+  reason: z.string().default(""),
+  revives: z.number().optional(),
+  escalated: z.boolean().optional(),
+}).loose();
+
+export const IssueDisposeResponseSchema = z.object({
+  action: z.enum(["rerun", "reroute", "split", "cancel"]),
+  status: z.string(),
+  driver: IssueDriverSchema.optional().catch(undefined),
+  created: z.array(z.string()).optional(),
+  note: z.string().optional(),
+}).loose();
+
 export const IssueAgentGuardResponseSchema = z.object({
   issue_id: z.string(),
   halted: z.boolean(),
@@ -1452,6 +1468,8 @@ export const IssueSchema = z.object({
   // the entry, not the whole issue. (DENE-371)
   origin_type: z.string().optional().catch(undefined),
   origin_id: z.string().optional().catch(undefined),
+  // Additive (DENE-1342): a malformed driver costs the hint, not the issue.
+  driver: IssueDriverSchema.optional().catch(undefined),
 }).loose();
 
 export const ListIssuesResponseSchema = z.object({
@@ -2507,6 +2525,9 @@ export const ChatSessionSchema: z.ZodType<ChatSession> = z.object({
   project_nudge_dismissed: z.boolean().optional().catch(undefined),
   channel_source: ChatChannelSourceSchema.optional().catch(undefined),
   is_current_channel_route: z.boolean().optional().catch(undefined),
+  origin_type: z.literal("chat").nullable().optional().catch(undefined),
+  origin_session_id: z.string().nullable().optional().catch(undefined),
+  origin_title: z.string().nullable().optional().catch(undefined),
   created_at: z.string().default(""),
   updated_at: z.string().default(""),
 }).loose();

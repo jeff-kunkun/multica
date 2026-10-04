@@ -388,7 +388,8 @@
     "previous": "Tâche précédente",
     "next": "Tâche suivante",
     "open_full_page": "Ouvrir la page complète",
-    "close": "Fermer l'aperçu"
+    "close": "Fermer l'aperçu",
+    "back": "Retour au tableau"
   },
   "detail": {
     "not_found": "Cette tâche n'existe pas ou a été supprimée dans cet espace de travail.",
@@ -1589,6 +1590,20 @@
     "conclusion_awaiting_human": "En attente d'une personne",
     "conclusion_deferred": "Renvoyé au backlog / aux tâches",
     "conclusion_continuing": "En pause, reprise au prochain tour"
+  },
+  "driver": {
+    "none": "Personne ne fait avancer ce ticket",
+    "revived": "relancé {{count}}×",
+    "escalated": "signalé au responsable du parent",
+    "rerun": "Relancer",
+    "reroute": "Réattribuer",
+    "split": "Scinder",
+    "cancel": "Annuler le ticket",
+    "split_placeholder": "Titre du sous-ticket",
+    "cancel_placeholder": "Raison de l'annulation",
+    "back": "Retour",
+    "done": "Fait",
+    "failed": "Impossible de traiter le ticket"
   },
   "blocker_summary": {
     "title": "Bloqué · {{count}} cause(s) racine(s)",

@@ -153,6 +153,19 @@ multica workspace routing get                     # prefer_continuation, continu
 multica workspace routing set --continuation on   # or off to go back to shadow
 ```
 
+The same commands also expose the seat-table switches. `usage_priority` is
+shown as `true` when omitted (the web and server default it on), and
+`allow_upshift` defaults to `false`:
+
+```bash
+multica workspace routing get
+multica workspace routing set --usage-priority off
+multica workspace routing set --allow-upshift on
+```
+
+Both flags write the existing `settings.routing` fields used by the web
+settings page; they do not create a CLI-only policy.
+
 So when you split work into stages, leave each child to routing: the next
 stage reaches the seat that did the previous one by itself once the switch is
 on. Do not assign it by hand to get the same effect.

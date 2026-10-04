@@ -1,4 +1,4 @@
-export type { Issue, IssueStatus, BuiltInIssueStatus, IssuePriority, IssueAssigneeType, IssueAssigneeSource, IssueReviewerType, IssueMetadata, IssueMetadataValue, IssueAgentGuardResponse, IssueReaction, SourceContextAttachment, SourceContextAuthor, SourceContextIssueSnapshot, SourceContextCommentSnapshot, SourceContextSnapshot, SourceContextLimitUsage, SourceContextPreview, SourceContextAuthorState, IssueSourceContext, IssueDuplicateOf } from "./issue";
+export type { Issue, IssueStatus, BuiltInIssueStatus, IssuePriority, IssueAssigneeType, IssueAssigneeSource, IssueReviewerType, IssueMetadata, IssueMetadataValue, IssueAgentGuardResponse, IssueDriver, IssueDriverKind, IssueDisposeAction, IssueDisposeRequest, IssueDisposeResponse, IssueReaction, SourceContextAttachment, SourceContextAuthor, SourceContextIssueSnapshot, SourceContextCommentSnapshot, SourceContextSnapshot, SourceContextLimitUsage, SourceContextPreview, SourceContextAuthorState, IssueSourceContext, IssueDuplicateOf } from "./issue";
 export type { Progress, ProgressTone } from "./progress";
 export type { IssueGoal, IssueGoalStatus, IssueGoalCheck, IssueGoalBudget, IssueGoalEvidence, CreateIssueGoalInput, IssueGoalCheckInput } from "./goal";
 export { IssueGoalSchema } from "./goal";
@@ -197,6 +197,8 @@ export {
 } from "./attachment-url";
 export type {
   ChatSession,
+  AgentChat,
+  AgentChatPage,
   ChatDirectoryItem,
   ChatLastMessage,
   ChatShareGrant,

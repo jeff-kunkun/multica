@@ -435,7 +435,8 @@
       "config_transfer": "Export et import",
       "routing": "Routage",
       "project_sharing": "Autorisations et partage",
-      "workspace_links": "Espaces liés"
+      "workspace_links": "Espaces liés",
+      "agent_permissions": "Permissions des agents"
     },
     "groups": {
       "personal": "Personnel",
@@ -853,14 +854,8 @@
     "naming_source_save_failed": "Couldn't update chat naming",
     "automation_limits_title": "Limites d'exécution des agents",
     "automation_limits_description": "Quand une limite est atteinte, les agents s'arrêtent et les responsables sont prévenus.",
-    "chain_budget_label": "Tours de relais",
-    "chain_budget_description": "Nombre de relais entre agents après une demande humaine ; un commentaire humain remet le compteur à zéro.",
-    "chain_budget_unit": "tours",
-    "chain_budget_unlimited": "Illimité",
-    "timeout_label": "Limite de durée d'exécution",
-    "timeout_description": "Les exécutions plus longues sont arrêtées et le responsable est prévenu.",
-    "timeout_unit": "minutes",
-    "timeout_unlimited": "Illimité",
+    "automation_limits_moved": "Déplacé vers Permissions des agents.",
+    "automation_limits_open": "Ouvrir",
     "toast_saved": "Workspace settings saved"
   },
   "delete_workspace_dialog": {
@@ -2021,6 +2016,9 @@
     "seats_save_error": "Non enregistré. Réessayez.",
     "seats_follows": "Suit {{name}}",
     "seats_follows_base": "Suit son rôle de base",
+    "seats_follows_unlock": "Désactiver pour modifier",
+    "seats_work_off": "Travail désactivé : le routage l’ignore",
+    "seats_runtime_unknown": "Runtime inconnu",
     "judge_title": "Modèle de jugement",
     "judge_description": "Choisit le niveau (faible / moyen / fort / le plus fort) avec une probabilité. Quand le modèle d’analyse est actif, il ne voit que les faits.",
     "judge_enabled_label": "Utiliser le modèle de jugement",
@@ -2088,5 +2086,34 @@
     "column_projects": "Projets",
     "projects_none": "—",
     "accounts_projects": "Projets"
+  },
+  "agent_permissions": {
+    "description": "Ce que les agents peuvent créer pendant une exécution, et combien de temps. Seuls les admins peuvent modifier.",
+    "create_title": "Créer",
+    "chat_issue_label": "Créer des tâches dans un chat",
+    "chat_issue_description": "Y compris convertir en objectif.",
+    "issue_issue_label": "Créer des tâches dans une tâche",
+    "issue_issue_description": "Y compris sous-tâches et plans.",
+    "chat_chat_label": "Créer des chats dans un chat",
+    "chat_chat_description": "Un nouveau chat ne peut pas en ouvrir un autre, ni être plus visible.",
+    "issue_chat_label": "Créer des chats dans une tâche",
+    "issue_chat_description": "Indisponible : discutez en commentaires, découpez l'exploration en sous-tâches.",
+    "per_run": "Par exécution",
+    "per_chat": "Par chat",
+    "unlimited": "Illimité",
+    "enabled": "Autoriser",
+    "limits_title": "Limites d'exécution",
+    "chain_budget_label": "Relais",
+    "chain_budget_description": "Nombre maximal de relais entre agents ; un commentaire humain remet à zéro.",
+    "chain_budget_unit": "relais",
+    "timeout_label": "Durée d'exécution",
+    "timeout_description": "Une exécution trop longue est arrêtée et le responsable est notifié.",
+    "timeout_unit": "minutes",
+    "issue_issue_off_title": "Désactiver la création de tâches dans une tâche ?",
+    "issue_issue_off_description": "Les agents seront refusés s'ils créent des sous-tâches ou appliquent un plan.",
+    "confirm_off": "Désactiver",
+    "cancel": "Annuler",
+    "saved": "Enregistré",
+    "save_failed": "Échec de l'enregistrement"
   }
 }

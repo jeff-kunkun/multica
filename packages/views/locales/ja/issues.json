@@ -180,6 +180,20 @@
     "conclusion_deferred": "計画 / ToDo に戻した",
     "conclusion_continuing": "停止中、次回続行"
   },
+  "driver": {
+    "none": "誰も進めていません",
+    "revived": "{{count}} 回再実行済み",
+    "escalated": "親課題の担当者に報告済み",
+    "rerun": "同じ担当で再実行",
+    "reroute": "担当を選び直す",
+    "split": "サブ課題に分割",
+    "cancel": "課題をキャンセル",
+    "split_placeholder": "サブ課題のタイトル",
+    "cancel_placeholder": "キャンセル理由",
+    "back": "戻る",
+    "done": "対応しました",
+    "failed": "対応できませんでした"
+  },
   "blocker_summary": {
     "title": "ブロック中 · 根因 {{count}} 件",
     "needs_you": "{{count}} 件はあなたの対応が必要",
@@ -429,7 +443,8 @@
     "previous": "前のタスク",
     "next": "次のタスク",
     "open_full_page": "ページ全体で開く",
-    "close": "プレビューを閉じる"
+    "close": "プレビューを閉じる",
+    "back": "ボードに戻る"
   },
   "detail": {
     "not_found": "このページは見つかりません",

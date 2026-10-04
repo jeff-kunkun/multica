@@ -198,6 +198,16 @@ type AgentSkill struct {
 	Enabled   bool               `json:"enabled"`
 }
 
+type AgentSpawnRecord struct {
+	ID          pgtype.UUID        `json:"id"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	TaskID      pgtype.UUID        `json:"task_id"`
+	SourceKind  string             `json:"source_kind"`
+	TargetKind  string             `json:"target_kind"`
+	TargetID    pgtype.UUID        `json:"target_id"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+}
+
 type AgentTaskQueue struct {
 	ID                    pgtype.UUID        `json:"id"`
 	AgentID               pgtype.UUID        `json:"agent_id"`
@@ -613,6 +623,7 @@ type ChatMessage struct {
 	ChannelOutboundChatID         pgtype.Text        `json:"channel_outbound_chat_id"`
 	ChannelOutboundMessageIds     []string           `json:"channel_outbound_message_ids"`
 	SenderUserID                  pgtype.UUID        `json:"sender_user_id"`
+	LinkedSessionID               pgtype.UUID        `json:"linked_session_id"`
 }
 
 type ChatNamingEvent struct {
@@ -660,6 +671,10 @@ type ChatSession struct {
 	ProgressAuthorType      string             `json:"progress_author_type"`
 	ProgressAuthorID        pgtype.UUID        `json:"progress_author_id"`
 	ProgressUpdatedAt       pgtype.Timestamptz `json:"progress_updated_at"`
+	OriginType              pgtype.Text        `json:"origin_type"`
+	OriginSessionID         pgtype.UUID        `json:"origin_session_id"`
+	OriginTaskID            pgtype.UUID        `json:"origin_task_id"`
+	OriginClientKey         pgtype.Text        `json:"origin_client_key"`
 }
 
 type ChatSessionLinkReadAudit struct {
@@ -980,6 +995,14 @@ type InboxItem struct {
 	ActorID       pgtype.UUID        `json:"actor_id"`
 	Details       []byte             `json:"details"`
 	ReadAt        pgtype.Timestamptz `json:"read_at"`
+}
+
+type IncrementalSyncTombstone struct {
+	Resource    string             `json:"resource"`
+	ID          pgtype.UUID        `json:"id"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	SubjectID   pgtype.UUID        `json:"subject_id"`
+	ChangedAt   pgtype.Timestamptz `json:"changed_at"`
 }
 
 type InstanceTelemetryState struct {

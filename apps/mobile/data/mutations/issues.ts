@@ -766,6 +766,26 @@ export function useDeleteIssue() {
   });
 }
 
+/**
+ * Dispose of an issue nobody drives (DENE-1342). Awaits the server: reroute
+ * and cancel change the executor or status, so nothing is patched ahead.
+ */
+export function useDisposeIssue(issueId: string) {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceStore((s) => s.currentWorkspaceId);
+
+  return useMutation({
+    mutationFn: (body: Parameters<typeof api.disposeIssue>[1]) =>
+      api.disposeIssue(issueId, body),
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: issueKeys.detail(wsId, issueId) });
+      qc.invalidateQueries({ queryKey: issueKeys.timeline(wsId, issueId) });
+      qc.invalidateQueries({ queryKey: issueKeys.activeTasks(wsId, issueId) });
+      qc.invalidateQueries({ queryKey: issueKeys.myAll(wsId) });
+    },
+  });
+}
+
 export function useCancelTask(issueId: string) {
   const qc = useQueryClient();
   const wsId = useWorkspaceStore((s) => s.currentWorkspaceId);

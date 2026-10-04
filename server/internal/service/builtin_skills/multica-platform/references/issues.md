@@ -1,7 +1,5 @@
 # Issues
-
 Product contracts the runtime brief does not fully encode.
-
 - [PR linking](#pr-linking)
 - [Reading a linked PR's real state](#reading-a-linked-prs-real-state)
 - [Custom properties: typed workflow state](#custom-properties-typed-workflow-state)
@@ -10,13 +8,11 @@ Product contracts the runtime brief does not fully encode.
 - [Sub-issues: todo starts work now, backlog parks it](#sub-issues-todo-starts-work-now-backlog-parks-it)
 - [Charts and files in a comment](#charts-and-files-in-a-comment)
 - [Incorrect to correct](#incorrect-to-correct)
-
 Closing is its own contract; read `references/close-protocol.md` for its `close.*` keys, decision tables, and dispatcher promotion rules.
-
+Who drives an open issue, and the `issue dispose` command for one nobody drives, are in `references/drivers.md`; stopping every run on an issue and the run limits are in `references/run-control.md`.
 Create a goal task with `multica issue create --title "..." --goal`. This
 creates a draft completion line with starter checks; a human must edit and
 confirm it through the shared goal panel before execution begins.
-
 `multica issue wait <id> --output json` is the read-only status view for a
 blocked issue's wait. It reports the wait condition, optional `wait_probe`,
 deadline, last probe status (`ready`, `pending`, or `failed`), check timestamp,
@@ -24,22 +20,17 @@ and bounded output. A probe uses exit code `0` for ready, `10` (or GitHub CLI's
 `gh pr checks` code `8`) for pending, and
 any other code for failed. Do not add a follow-up stage-advance command after a
 close; the server advances stages as part of its close protocol.
-
 To move several issues to one lifecycle status at once, use the same batch
 endpoint as the web and desktop inbox actions:
-
 ```bash
 multica issue status-batch done DENE-12 DENE-13 --output json
 multica issue status-batch todo DENE-12 --no-start
 ```
-
 The first argument is the status key and the remaining arguments are issue keys
 or UUIDs. `--no-start` adds the same `suppress_run` control as single-issue
 status changes. `--output json` returns the resolved issue IDs and server batch
 result. `batch-status` is accepted as an alias.
-
 ## Sub-issues: todo starts work now, backlog parks it
-
 The steps are in `references/sub-issues.md`. `--status backlog` parks a child instead of starting it. `` `--stage <N>` `` groups children into a stage, and the parent is woken when a whole stage finishes. Promote one parked child with `multica issue status <child-id> todo`.
 
 ## Editing comments without overwriting concurrent work
@@ -318,9 +309,15 @@ archived statuses remain readable via an explicit status filter.
   call: `--blocked-by <DENE-N>`, `--wake-at <RFC3339>`, `--wait-condition` with
   `--wait-timeout`, or `--needs-human <member uuid>`. An agent change without
   one is rejected (a member's only warns); "等 DENE-N" in a comment is only a
-  suggestion. Routing seats an empty executor parked (no run) and the command
+  suggestion. An agent also passes `--block-kind <decision|permission|external|dependency|capacity>`
+  and `--block-action "<one-line next step>"` (≤80 chars), or the change is
+  rejected — `multica issue close --outcome blocked` records both for you and
+  is the preferred path. Routing seats an empty executor parked (no run) and the command
   says if it did. A cleared blocker or passed acceptance wakes the waiter (no
   executor: a person gets a 缺执行人 card); the patrol wakes a quiet one ~30 min.
+  A member's reply that starts a run for the executor moves the issue back to
+  `in_progress` and marks the blocked close superseded — do not re-block to
+  "acknowledge" it.
 - **`cancelled`** is a terminal, user-driven decision to close the issue. Like
   `done` it enqueues no new agent work, but it does **not** stop tasks already in
   flight — a run in progress keeps going. To stop a running task, cancel the
@@ -338,9 +335,9 @@ archived statuses remain readable via an explicit status filter.
   when it is really separate work. Marking logs `duplicate_marked` on the
   duplicate and `duplicate_added` on the original; removing the mark logs
   `duplicate_unmarked` / `duplicate_removed` (`multica issue timeline --action`).
-- **Failed issue-triggered tasks** may roll an issue from `in_progress` back to
-  `todo` when no active task / retry remains — that is the main server-owned
-  status write on the agent-run path.
+- **Failed issue-triggered tasks** with no retry queued leave an agent-owned issue `blocked` with
+  a failure wake clock the patrol acts on (a sweeper-reaped run may still roll it back to `todo`);
+  the parent gets a note that only promises a wake when one was recorded (DENE-1339).
 - **Completed issue-triggered tasks** are the mirror case, and they write no
   status at all: a run that reaches `/complete` cleanly while the issue is
   still `in_progress` with nothing queued behind it leaves a system comment
@@ -395,6 +392,16 @@ The family read returns a compact row — task, issue, agent, status, started �
 not the full execution-log record. If you need a run's detail, follow the task
 id with `multica issue run-messages`.
 
+Rows come back running-first, newest-first within a status, and the family read
+is capped at 20. When the cap truncates the answer the CLI prints a warning on
+stderr — read it. Without that warning a short list means "nobody else is
+there"; with it, the list proves nothing about the runs it did not return.
+
+Both are advisory reads. Nothing here reserves an issue or serialises anything:
+a run you see may finish a second later, and one you don't see may start a
+second later. Coordinate through the issue's comments — the reads tell you whom
+to coordinate with.
+
 ## Who can see an issue
 
 `multica issue access <id> --output json` answers what the share button in the
@@ -405,40 +412,6 @@ admin or the owner to change it rather than retrying. A link to a private
 issue opens as "not found" for everyone else, so check this before pasting an
 issue link for someone who may not be in its audience. `multica project access`
 is the same read for a project.
-
-## Stop every run on one issue
-
-Use the issue-level guard when an agent chain must stop immediately:
-
-```bash
-multica issue halt <issue-id>    # cancel queued/dispatched/running runs and block agent triggers
-multica issue resume <issue-id>  # clear the halt guard; a human comment is still needed to reset a chain budget
-```
-
-The guard is issue-scoped. A human comment clears it and resets the
-delegation-chain budget; `resume` only clears an explicit halt and does not
-reset an already-exceeded budget. Direct human-triggered runs are never
-consumed by that budget. The default chain limit is thirty runs; a workspace
-admin changes it under Settings → General → Agent run limits (stored as
-`agent_chain_budget` in the workspace `settings` JSON, `0` = unlimited). Hitting
-the limit posts a system comment in the triggering thread instead of stopping
-silently.
-
-The same settings section holds a run time limit
-(`agent_task_timeout_minutes`, `0`/absent = none). A run that outlives it fails with reason `task_time_limit`:
-a round boundary, not a wrong result. The platform continues the same CLI session and working directory
-until the attempt budget is spent, and the continuation is told to close out finished work and split what remains.
-When the budget is spent the issue becomes `blocked` with a comment instead of sitting in `todo`; a sub-issue also leaves a short note on its parent.
-
-Rows come back running-first, newest-first within a status, and the family read
-is capped at 20. When the cap truncates the answer the CLI prints a warning on
-stderr — read it. Without that warning a short list means "nobody else is
-there"; with it, the list proves nothing about the runs it did not return.
-
-Both are advisory reads. Nothing here reserves an issue or serialises anything:
-a run you see may finish a second later, and one you don't see may start a
-second later. Coordinate through the issue's comments — the reads tell you whom
-to coordinate with.
 
 ## Charts and files in a comment
 

@@ -38,7 +38,7 @@ import {
 import { useWorkspaceId } from "../hooks";
 import { useRecentContextStore } from "../chat/recent-context-store";
 import { useRecentIssuesStore } from "./stores";
-import type { InboxItem, Issue, IssueReaction } from "../types";
+import type { InboxItem, Issue, IssueDisposeRequest, IssueReaction } from "../types";
 import type {
   CloseIssueRequest,
   CreateCommentSubIssueManualRequest,
@@ -1258,6 +1258,24 @@ export function useHaltIssueRuns(issueId: string, workspaceId?: string) {
     onSuccess: () => {
       client.invalidateQueries({ queryKey: issueKeys.tasks(issueId) });
       if (workspaceId) client.invalidateQueries({ queryKey: issueKeys.detail(workspaceId, issueId) });
+    },
+  });
+}
+
+/**
+ * Dispose of an issue nobody drives (DENE-1342). Awaits the server: reroute
+ * and cancel change the executor or status, split creates children.
+ */
+export function useDisposeIssue(issueId: string, workspaceId?: string) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (body: IssueDisposeRequest) => api.disposeIssue(issueId, body),
+    onSettled: () => {
+      client.invalidateQueries({ queryKey: issueKeys.tasks(issueId) });
+      if (!workspaceId) return;
+      client.invalidateQueries({ queryKey: issueKeys.detail(workspaceId, issueId) });
+      client.invalidateQueries({ queryKey: issueKeys.childrenAll(workspaceId) });
+      client.invalidateQueries({ queryKey: issueKeys.childrenByParentsAll(workspaceId) });
     },
   });
 }

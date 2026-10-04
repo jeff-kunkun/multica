@@ -224,8 +224,10 @@ func TestLeavingBlockedClearsTheWait(t *testing.T) {
 	taskID := insertIssueTaskWithStatus(t, agentID, issue.ID, "running")
 	w := httptest.NewRecorder()
 	req := newRequest("PUT", "/api/issues/"+issue.ID, map[string]any{
-		"status":     "blocked",
-		"blocked_by": "DENE-806",
+		"status":       "blocked",
+		"blocked_by":   "DENE-806",
+		"block_kind":   "dependency",
+		"block_action": "等 DENE-806 修好",
 	})
 	req = withURLParam(req, "id", issue.ID)
 	req.Header.Set("X-Agent-ID", agentID)

@@ -1,3 +1,4 @@
+import type { AgentSpawnPolicy, AgentSpawnPolicyPatch } from "../workspace/agent-spawn";
 import type { ZodType } from "zod";
 import type { IssueWakeup, IssueWakeupInput, IssueWakeupSummaryRow, PausedWakeup, SystemWakeup, WakeupRun, WorkspaceSystemWakeup } from "../types/issue-wakeup";
 import type { WorkspaceWakeupPage, WorkspaceWakeupFilters } from "../types/issue-wakeup";
@@ -73,6 +74,8 @@ import type {
   Reaction,
   IssueReaction,
   IssueAgentGuardResponse,
+  IssueDisposeRequest,
+  IssueDisposeResponse,
   Workspace,
   WorkspaceRepo,
   ModuleKey,
@@ -115,6 +118,7 @@ import type {
   AssigneeFrequencyEntry,
   TaskMessagePayload,
   Attachment,
+  AgentChatPage,
   ChatSession,
   ChatDirectoryItem,
   ChatPinnedAgent,
@@ -331,6 +335,7 @@ import {
   AgentTaskPageSchema,
   AgentActivityBucketListSchema,
   IssueAgentGuardResponseSchema,
+  IssueDisposeResponseSchema,
   AttachmentResponseSchema,
   CancelTaskResponseSchema,
   ChatDraftRestoresResponseSchema,
@@ -660,6 +665,26 @@ export interface ClientUsageRequest {
 export interface LoginResponse {
   token: string;
   user: User;
+}
+
+export type IncrementalResource = "issues" | "inbox" | "chats" | "timeline";
+
+export interface IncrementalChanges<T = unknown> {
+  resource: IncrementalResource;
+  upserts: Array<{ id: string; updated_at: string; data: T }>;
+  deleted: string[];
+  next_cursor: string;
+  has_more: boolean;
+}
+
+/** Deterministically applies one server page to a persisted list snapshot. */
+export function mergeIncrementalChanges<T extends { id: string }>(current: T[], page: IncrementalChanges<T>): T[] {
+  const deleted = new Set(page.deleted);
+  const byId = new Map(current.filter((item) => !deleted.has(item.id)).map((item) => [item.id, item]));
+  for (const change of page.upserts) {
+    if (!deleted.has(change.id)) byId.set(change.id, change.data);
+  }
+  return [...byId.values()];
 }
 
 function parseSearchIndexResponse<T>(raw: unknown, schema: ZodType, endpoint: string): T {
@@ -3421,6 +3446,13 @@ export class ApiClient {
     );
   }
 
+  // An agent's open chats, running first; ones the caller may not open come
+  // back without title or creator (DENE-1310).
+  async listAgentChats(agentId: string, options: { limit?: number } = {}): Promise<AgentChatPage> {
+    const search = new URLSearchParams({ limit: String(options.limit ?? 5) });
+    return this.fetch(`/api/agents/${agentId}/chats?${search}`);
+  }
+
   // Workspace-scoped agent task snapshot: every active task
   // (queued/dispatched/running) plus each agent's most recent terminal task.
   // Powers the front-end's "active wins, else latest terminal" presence
@@ -3606,6 +3638,16 @@ export class ApiClient {
     });
   }
 
+  async disposeIssue(issueId: string, body: IssueDisposeRequest): Promise<IssueDisposeResponse> {
+    const raw = await this.fetch<unknown>(`/api/issues/${issueId}/dispose`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+    const parsed = IssueDisposeResponseSchema.safeParse(raw);
+    if (!parsed.success) throw new Error("Invalid dispose response");
+    return parsed.data;
+  }
+
   async rerunIssue(issueId: string, taskId?: string): Promise<AgentTask> {
     return this.fetch(`/api/issues/${issueId}/rerun`, {
       method: "POST",
@@ -3629,6 +3671,27 @@ export class ApiClient {
     const raw = await this.fetch<unknown>("/api/inbox");
     return parseWithFallback(raw, InboxItemListSchema, EMPTY_INBOX_ITEMS, {
       endpoint: "GET /api/inbox",
+    });
+  }
+
+  /** Fetches one replayable page of changes for a high-frequency list. */
+  async listIncrementalChanges<T = unknown>(
+    resource: IncrementalResource,
+    options: {
+      updatedSince?: string;
+      cursor?: string;
+      issueId?: string;
+      limit?: number;
+      signal?: AbortSignal;
+    } = {},
+  ): Promise<IncrementalChanges<T>> {
+    const params = new URLSearchParams({ resource });
+    if (options.updatedSince) params.set("updated_since", options.updatedSince);
+    if (options.cursor) params.set("cursor", options.cursor);
+    if (options.issueId) params.set("issue_id", options.issueId);
+    if (options.limit !== undefined) params.set("limit", String(options.limit));
+    return this.fetch<IncrementalChanges<T>>(`/api/sync/changes?${params.toString()}`, {
+      signal: options.signal,
     });
   }
 
@@ -3857,6 +3920,17 @@ export class ApiClient {
     return this.fetch(`/api/workspaces/${id}`, {
       method: "PATCH",
       body: JSON.stringify(data),
+    });
+  }
+
+  async getAgentSpawn(workspaceId: string): Promise<AgentSpawnPolicy> {
+    return this.fetch(`/api/workspaces/${workspaceId}/agent-spawn`);
+  }
+
+  async updateAgentSpawn(workspaceId: string, patch: AgentSpawnPolicyPatch): Promise<AgentSpawnPolicy> {
+    return this.fetch(`/api/workspaces/${workspaceId}/agent-spawn`, {
+      method: "PUT",
+      body: JSON.stringify(patch),
     });
   }
 

@@ -182,6 +182,20 @@
     "conclusion_deferred": "Returned to planning / to-do",
     "conclusion_continuing": "Paused, continues next round"
   },
+  "driver": {
+    "none": "Nobody is moving this",
+    "revived": "rerun {{count}}×",
+    "escalated": "escalated to the parent's owner",
+    "rerun": "Rerun",
+    "reroute": "Reassign",
+    "split": "Split",
+    "cancel": "Cancel issue",
+    "split_placeholder": "Sub-issue title",
+    "cancel_placeholder": "Why cancel",
+    "back": "Back",
+    "done": "Done",
+    "failed": "Could not dispose of the issue"
+  },
   "blocker_summary": {
     "title": "Blocked · {{count}} root cause(s)",
     "needs_you": "{{count}} need you",
@@ -433,7 +447,8 @@
     "previous": "Previous issue",
     "next": "Next issue",
     "open_full_page": "Open full page",
-    "close": "Close preview"
+    "close": "Close preview",
+    "back": "Back to board"
   },
   "detail": {
     "not_found": "Page not found",

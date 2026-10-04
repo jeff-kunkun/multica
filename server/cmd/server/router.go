@@ -1821,6 +1821,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Use(middleware.RequireWorkspaceMemberFromURL(queries, "id"))
 					r.Get("/", h.GetWorkspace)
 					r.Get("/naming", h.GetWorkspaceNaming)
+					r.Get("/agent-spawn", h.GetWorkspaceAgentSpawn)
 					r.Get("/members", h.ListMembersWithUser)
 					r.Post("/leave", h.LeaveWorkspace)
 					// Listing GitHub installations is member-visible so the
@@ -1867,6 +1868,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Group(func(r chi.Router) {
 					r.Use(middleware.RequireWorkspaceRoleFromURL(queries, "id", "owner", "admin"))
 					r.Put("/naming", h.UpdateWorkspaceNaming)
+					r.Put("/agent-spawn", h.UpdateWorkspaceAgentSpawn)
 					r.Put("/", h.UpdateWorkspace)
 					r.Patch("/", h.UpdateWorkspace)
 					// The re-check button. It makes an outbound request, so it
@@ -2297,6 +2299,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					// One-shot handoff (DENE-863): server routes, dedupes and
 					// reports what actually landed — `multica issue handoff`.
 					r.Post("/handoff", h.HandoffIssue)
+					// What to do with a child nobody drives (DENE-1342): rerun,
+					// reroute, split or cancel — `multica issue dispose`.
+					r.Post("/dispose", h.DisposeIssue)
 					// One "叫人" entry (DENE-880): inbox, subscription, a
 					// visible @ and an open call the reply answers —
 					// `multica issue summon`.
@@ -2573,6 +2578,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Post("/solidify", h.SolidifyAgent)
 					r.Post("/cancel-tasks", h.CancelAgentTasks)
 					r.Get("/tasks", h.ListAgentTasks)
+					r.Get("/chats", h.ListAgentChats)
 					r.Get("/dingtalk/groups", h.ListDingTalkGroupsForAgent)
 					r.Get("/skills", h.ListAgentSkills)
 					r.Put("/skills", h.SetAgentSkills)
@@ -2750,6 +2756,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			// Independent workspace-level list backing the issues-header
 			// "agents working" chip and its assignee-id Table filter.
 			r.Get("/api/working-agents", h.ListWorkspaceWorkingAgents)
+			// Shared incremental-sync contract for high-frequency list clients.
+			r.Get("/api/sync/changes", h.ListIncrementalChanges)
 
 			// Workspace-wide daily agent activity (last 30d, anchored on
 			// completed_at). Backs the Agents-list sparkline (trailing 7d
@@ -2767,6 +2775,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Get("/", h.ListChatSessions)
 				// Registered before /{sessionId} so "make-private" is not captured as an id.
 				r.Post("/make-private", h.MakeChatSessionsPrivate)
+				// Agent-only: open a chat from the chat this run belongs to (DENE-1271).
+				r.Post("/spawn", h.SpawnChatSession)
 				r.Get("/search", h.SearchChatMessages)
 				r.Route("/{sessionId}", func(r chi.Router) {
 					r.Get("/", h.GetChatSession)
