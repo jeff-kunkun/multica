@@ -259,6 +259,9 @@ type terminalTaskReport struct {
 	// sessionRestartReason explains a new CLI session opened because the
 	// prior one could not be resumed. Empty on the common path.
 	sessionRestartReason string
+	// sessionResumeDropped: the claim handed this run a session to resume and
+	// the daemon ran a fresh one instead (DENE-1345).
+	sessionResumeDropped bool
 }
 
 type terminalReportSendFunc func(context.Context, terminalTaskReport, []time.Duration) error
@@ -6818,6 +6821,7 @@ func (d *Daemon) reportTaskResultForTask(ctx context.Context, task Task, result 
 			sessionRolloutMissing: result.SessionRolloutMissing,
 			retiredSessionID:      result.RetiredSessionID,
 			sessionRestartReason:  result.SessionRestartReason,
+			sessionResumeDropped:  result.SessionResumeDropped,
 		})
 		if err == nil {
 			if err := d.reportLocalPullRequests(ctx, task, result); err != nil {
@@ -6868,6 +6872,7 @@ func (d *Daemon) reportTaskResultForTask(ctx context.Context, task Task, result 
 			sessionRolloutMissing: result.SessionRolloutMissing,
 			retiredSessionID:      result.RetiredSessionID,
 			sessionRestartReason:  result.SessionRestartReason,
+			sessionResumeDropped:  result.SessionResumeDropped,
 		}); err != nil {
 			taskLog.Error("report failed task failed", "error", err)
 		}
@@ -6967,9 +6972,9 @@ func (d *Daemon) sendTerminalTaskReport(ctx context.Context, report terminalTask
 	}
 	switch report.kind {
 	case terminalTaskReportComplete:
-		return d.client.completeTaskWithRetrySchedule(ctx, report.taskID, report.output, report.branchName, report.sessionID, report.workDir, report.sessionRolloutMissing, report.retiredSessionID, report.durableWorkDir, report.sessionRestartReason, schedule)
+		return d.client.completeTaskWithRetrySchedule(ctx, report.taskID, report.output, report.branchName, report.sessionID, report.workDir, report.sessionRolloutMissing, report.retiredSessionID, report.durableWorkDir, report.sessionRestartReason, report.sessionResumeDropped, schedule)
 	case terminalTaskReportFail:
-		return d.client.failTaskWithRetrySchedule(ctx, report.taskID, report.errorMessage, report.sessionID, report.workDir, report.branchName, report.failureReason, report.sessionRolloutMissing, report.retiredSessionID, report.durableWorkDir, report.sessionRestartReason, schedule)
+		return d.client.failTaskWithRetrySchedule(ctx, report.taskID, report.errorMessage, report.sessionID, report.workDir, report.branchName, report.failureReason, report.sessionRolloutMissing, report.retiredSessionID, report.durableWorkDir, report.sessionRestartReason, report.sessionResumeDropped, schedule)
 	default:
 		return fmt.Errorf("unsupported terminal task report kind %d", report.kind)
 	}
@@ -8481,6 +8486,10 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	if err := validateTaskIdentity(task); err != nil {
 		return TaskResult{}, err
 	}
+	// The session the server told this run to resume. Every gate below that
+	// cannot honour it clears task.PriorSessionID; comparing the two at the
+	// end tells the server the run fell back to a fresh session (DENE-1345).
+	claimedPriorSessionID := task.PriorSessionID
 
 	// Refuse to spawn an agent without a workspace. An empty workspace_id
 	// here would make MULTICA_WORKSPACE_ID empty in the agent env, and the
@@ -9899,6 +9908,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// through the chat_session pointer (GH #6066).
 	var retiredSessionID string
 	defer func() { taskResult.RetiredSessionID = retiredSessionID }()
+	defer func() { taskResult.SessionResumeDropped = claimedPriorSessionID != "" && task.PriorSessionID == "" }()
 	defer func() {
 		reason := result.SessionRestartReason
 		if reason == "" {

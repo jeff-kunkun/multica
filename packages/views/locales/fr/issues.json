@@ -1859,5 +1859,16 @@
     "source_parking": "patrouille",
     "source_model": "résumé",
     "source_reply": "tiré de la réponse"
+  },
+  "session_lineage": {
+    "round": "Exécution {{round}}",
+    "new": "Nouvelle session",
+    "resumed": "Reprend la session de l'exécution {{round}}",
+    "resumed_earlier": "Reprend une session précédente",
+    "divider": "{{name}} · exécution {{round}}",
+    "reason_agent_changed": "autre agent",
+    "reason_runtime_changed": "la dernière session est sur une autre machine",
+    "reason_session_lost": "la session n'a pas pu être restaurée",
+    "reason_fresh_requested": "nouvelle session demandée"
   }
 }

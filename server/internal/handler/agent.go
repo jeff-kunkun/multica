@@ -769,11 +769,16 @@ type AgentTaskResponse struct {
 	CancelledByCommentChange bool                   `json:"cancelled_by_comment_change,omitempty"`
 	CancelledBy              *TaskCancellationActor `json:"cancelled_by,omitempty"`
 
-	ID                    string `json:"id"`
-	AgentID               string `json:"agent_id"`
-	RuntimeID             string `json:"runtime_id"`
-	WorkThreadID          string `json:"work_thread_id,omitempty"`
-	ContextGeneration     int32  `json:"context_generation,omitempty"`
+	ID                string `json:"id"`
+	AgentID           string `json:"agent_id"`
+	RuntimeID         string `json:"runtime_id"`
+	WorkThreadID      string `json:"work_thread_id,omitempty"`
+	ContextGeneration int32  `json:"context_generation,omitempty"`
+	// DENE-1345 session lineage: "new" or "resumed"; the run whose session this
+	// one resumed; why a new session started. Empty on rows predating it.
+	SessionMode           string `json:"session_mode,omitempty"`
+	ResumedFromRun        string `json:"resumed_from_run,omitempty"`
+	SessionBreakReason    string `json:"session_break_reason,omitempty"`
 	ContextMessageLimit   int32  `json:"context_message_limit,omitempty"`
 	ContextTokenBudget    int32  `json:"context_token_budget,omitempty"`
 	ContinuityBreakReason string `json:"continuity_break_reason,omitempty"`
@@ -1434,6 +1439,9 @@ func taskToResponse(t db.AgentTaskQueue, workspaceID string) AgentTaskResponse {
 		AgentID:                uuidToString(t.AgentID),
 		RuntimeID:              uuidToString(t.RuntimeID),
 		WorkThreadID:           uuidToString(t.WorkThreadID),
+		SessionMode:            t.SessionMode.String,
+		ResumedFromRun:         uuidToString(t.ResumedFromTaskID),
+		SessionBreakReason:     t.SessionBreakReason.String,
 		ContextGeneration:      t.ContextGeneration,
 		ContextMessageLimit:    t.ContextMessageLimit,
 		ContextTokenBudget:     t.ContextTokenBudget,

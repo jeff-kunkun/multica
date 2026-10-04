@@ -287,6 +287,9 @@ type AgentTaskQueue struct {
 	ContextMessageLimit       int32       `json:"context_message_limit"`
 	ContextTokenBudget        int32       `json:"context_token_budget"`
 	ContinuityBreakReason     pgtype.Text `json:"continuity_break_reason"`
+	SessionMode               pgtype.Text `json:"session_mode"`
+	ResumedFromTaskID         pgtype.UUID `json:"resumed_from_task_id"`
+	SessionBreakReason        pgtype.Text `json:"session_break_reason"`
 }
 
 type AgentToLabel struct {

@@ -910,6 +910,10 @@ export const ChatMessageSchema = z.object({
   quick_actions: z.array(ChatQuickActionSchema).catch([]).optional().default([]),
   sender_user_id: z.string().nullable().optional(),
   linked_session_id: z.string().nullable().optional().catch(undefined),
+  // Session lineage (DENE-1345): additive display metadata, degraded alone.
+  session_mode: z.enum(["new", "resumed"]).optional().catch(undefined),
+  resumed_from_run: z.string().optional().catch(undefined),
+  session_break_reason: z.string().optional().catch(undefined),
 }).loose();
 
 export const ChatMessageListSchema = z.array(ChatMessageSchema).default([]);
@@ -2331,6 +2335,10 @@ export const AgentTaskSchema = z.object({
   agent_id: z.string().default(""),
   runtime_id: z.string().default(""),
   work_thread_id: z.string().optional().catch(undefined),
+  // Session lineage (DENE-1345): additive display metadata, degraded alone.
+  session_mode: z.enum(["new", "resumed"]).optional().catch(undefined),
+  resumed_from_run: z.string().optional().catch(undefined),
+  session_break_reason: z.string().optional().catch(undefined),
   context_generation: z.number().int().optional().catch(undefined),
   context_message_limit: z.number().int().optional().catch(undefined),
   context_token_budget: z.number().int().optional().catch(undefined),

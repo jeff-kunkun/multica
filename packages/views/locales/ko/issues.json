@@ -1804,5 +1804,16 @@
     "source_parking": "점검 요약",
     "source_model": "요약",
     "source_reply": "답변에서"
+  },
+  "session_lineage": {
+    "round": "{{round}}번째 실행",
+    "new": "새 세션",
+    "resumed": "{{round}}번째 실행의 세션을 이어감",
+    "resumed_earlier": "이전 세션을 이어감",
+    "divider": "{{name}} {{round}}번째 실행",
+    "reason_agent_changed": "에이전트가 바뀜",
+    "reason_runtime_changed": "지난 세션이 다른 기기에 있음",
+    "reason_session_lost": "세션을 복원하지 못함",
+    "reason_fresh_requested": "새 세션 요청"
   }
 }

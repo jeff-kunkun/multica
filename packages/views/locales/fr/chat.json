@@ -381,5 +381,12 @@
     "from_prefix": "Ouvert depuis",
     "from_suffix": "",
     "from_hidden": "Ouvert depuis une autre discussion"
+  },
+  "session_lineage": {
+    "new": "Nouvelle session",
+    "reason_agent_changed": "autre agent",
+    "reason_runtime_changed": "la dernière session est sur une autre machine",
+    "reason_session_lost": "la session précédente n'a pas pu être restaurée",
+    "reason_fresh_requested": "nouvelle session demandée"
   }
 }

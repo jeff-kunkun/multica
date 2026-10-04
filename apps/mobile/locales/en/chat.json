@@ -153,5 +153,10 @@
     "tool_result_unnamed": "result: ",
     "truncated": "…(truncated)",
     "error": "Error"
-  }
+  },
+  "session_lineage.new": "New session",
+  "session_lineage.reason_agent_changed": "agent changed",
+  "session_lineage.reason_runtime_changed": "last session is on another machine",
+  "session_lineage.reason_session_lost": "session couldn't be restored",
+  "session_lineage.reason_fresh_requested": "started fresh on request"
 }

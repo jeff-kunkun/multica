@@ -3440,7 +3440,7 @@ func runIssueRuns(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	headers := []string{"ID", "AGENT", "STATUS", "STARTED", "COMPLETED", "ERROR"}
+	headers := []string{"ID", "AGENT", "STATUS", "STARTED", "COMPLETED", "SESSION", "ERROR"}
 	rows := make([][]string, 0, len(runs))
 	for _, r := range runs {
 		started := strVal(r, "started_at")
@@ -3462,6 +3462,7 @@ func runIssueRuns(cmd *cobra.Command, args []string) error {
 			strVal(r, "status"),
 			started,
 			completed,
+			runSessionLabel(r, fullID),
 			errMsg,
 		})
 	}
@@ -4366,4 +4367,22 @@ func noteIgnoredAssignee(result map[string]any) bool {
 	fmt.Fprintf(os.Stderr, "Issue %s: the assignee you named was NOT applied; %s. %s.\n",
 		issueDisplayKey(result), kept, strings.TrimSuffix(reason, "."))
 	return true
+}
+
+// runSessionLabel is the SESSION column of `issue runs` (DENE-1345): "new
+// (<reason>)" or "resumed <run>". Empty for runs recorded before lineage.
+func runSessionLabel(r map[string]any, fullID bool) string {
+	switch strVal(r, "session_mode") {
+	case "resumed":
+		if from := strVal(r, "resumed_from_run"); from != "" {
+			return "resumed " + displayID(from, fullID)
+		}
+		return "resumed"
+	case "new":
+		if reason := strVal(r, "session_break_reason"); reason != "" {
+			return "new (" + reason + ")"
+		}
+		return "new"
+	}
+	return ""
 }

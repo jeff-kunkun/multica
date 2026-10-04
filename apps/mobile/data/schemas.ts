@@ -283,6 +283,10 @@ export const ChatMessageSchema: z.ZodType<ChatMessage> = z.object({
   failure_reason: z.string().nullable().optional(),
   elapsed_ms: z.number().nullable().optional(),
   message_kind: z.enum(["message", "no_response"]).catch("message").optional(),
+  // DENE-1345: whether this reply's run carried the CLI session forward.
+  session_mode: z.enum(["new", "resumed"]).optional().catch(undefined),
+  resumed_from_run: z.string().optional().catch(undefined),
+  session_break_reason: z.string().optional().catch(undefined),
   // One malformed optional suggestion must not erase an otherwise valid
   // conversation. The server validates these too; this is mixed-version and
   // corrupted-cache defense at the mobile boundary.
@@ -458,6 +462,10 @@ export const AgentTaskSchema: z.ZodType<AgentTask> = z.object({
   trigger_summary: z.string().optional(),
   kind: z.enum(["comment", "autopilot", "chat", "quick_create", "direct"]).optional().catch("direct"),
   work_dir: z.string().optional(),
+  // DENE-1345: whether this run carried the CLI session forward.
+  session_mode: z.enum(["new", "resumed"]).optional().catch(undefined),
+  resumed_from_run: z.string().optional().catch(undefined),
+  session_break_reason: z.string().optional().catch(undefined),
 }).loose();
 
 export const AgentTaskListSchema = z.array(AgentTaskSchema).default([]);

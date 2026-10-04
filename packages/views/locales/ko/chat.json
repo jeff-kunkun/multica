@@ -376,5 +376,12 @@
     "from_prefix": "",
     "from_suffix": "에서 생성됨",
     "from_hidden": "다른 채팅에서 생성됨"
+  },
+  "session_lineage": {
+    "new": "새 세션",
+    "reason_agent_changed": "에이전트가 바뀜",
+    "reason_runtime_changed": "지난 세션이 다른 기기에 있음",
+    "reason_session_lost": "이전 세션을 복원하지 못함",
+    "reason_fresh_requested": "새 세션 요청"
   }
 }
