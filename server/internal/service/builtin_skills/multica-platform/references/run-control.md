@@ -40,7 +40,7 @@ multica chat send --session <chat-id> --content-file ./msg.md --mode steer
 multica issue comment add <issue-id> --content-file ./msg.md --mode restart
 ```
 
-- Only Claude, Codex and Grok can take `steer` today. Any other CLI, or one too
+- Only Claude, Codex, Grok, OpenCode 1.x and Pi can take `steer` today. Any other CLI, or one too
   old to negotiate it, is refused with exit status 1, the reason, and
   `available_modes: [queue, restart]` in the JSON body; nothing is posted, so
   resend with one of those.
