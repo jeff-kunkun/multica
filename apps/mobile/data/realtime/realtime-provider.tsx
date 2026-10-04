@@ -73,6 +73,7 @@ export function RealtimeProvider({ children }: { children: React.ReactNode }) {
   // wifi strength changes, type changes, etc).
   const lastConnectedRef = useRef<boolean | null>(null);
   const syncCursorsRef = useRef<Partial<Record<"issues" | "inbox" | "chats", string>>>({});
+  const syncBaselinesRef = useRef<Partial<Record<"issues" | "inbox" | "chats", string>>>({});
 
   useEffect(() => {
     if (!userId || !wsSlug) {
@@ -105,7 +106,14 @@ export function RealtimeProvider({ children }: { children: React.ReactNode }) {
       setClient(ws);
       incrementalUnsub = ws.onReconnect(() => {
         void Promise.all((['issues', 'inbox', 'chats'] as const).map(async (resource) => {
-          const page = await api.listIncrementalChanges(resource, { cursor: syncCursorsRef.current[resource] });
+          const cursor = syncCursorsRef.current[resource];
+          const updatedSince = cursor
+            ? undefined
+            : (syncBaselinesRef.current[resource] ??= new Date().toISOString());
+          let page = await api.listIncrementalChanges(resource, { cursor, updatedSince });
+          while (page.has_more) {
+            page = await api.listIncrementalChanges(resource, { cursor: page.next_cursor });
+          }
           if (page.next_cursor) syncCursorsRef.current[resource] = page.next_cursor;
           if (page.upserts.length || page.deleted.length) {
             void queryClient.invalidateQueries({ queryKey: [resource === 'chats' ? 'chat' : resource] });

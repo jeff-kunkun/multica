@@ -763,6 +763,46 @@ function invalidateWorkspaceScopedQueries(qc: QueryClient): void {
   qc.invalidateQueries({ queryKey: workspaceKeys.list() });
 }
 
+/**
+ * Reconnect recovery for projections that are not covered by the three
+ * incremental list resources. The list replay tells us whether issues,
+ * inbox, and chat-session summaries changed, but it cannot account for a
+ * mounted issue timeline, chat messages, agents, projects, or runtimes.
+ * Those caches must still be marked stale even when the replay page is empty.
+ */
+function invalidateReconnectDetailQueries(qc: QueryClient): void {
+  const wsId = getCurrentWsId();
+  if (wsId) {
+    qc.invalidateQueries({ queryKey: workspaceKeys.agents(wsId) });
+    qc.invalidateQueries({ queryKey: workspaceKeys.members(wsId) });
+    qc.invalidateQueries({ queryKey: workspaceKeys.squads(wsId) });
+    qc.invalidateQueries({ queryKey: workspaceKeys.skills(wsId) });
+    qc.invalidateQueries({ queryKey: workspaceKeys.invitations(wsId) });
+    qc.invalidateQueries({ queryKey: projectKeys.all(wsId) });
+    qc.invalidateQueries({ queryKey: runtimeKeys.all(wsId) });
+    qc.invalidateQueries({ queryKey: autopilotKeys.all(wsId) });
+    qc.invalidateQueries({ queryKey: agentTaskSnapshotKeys.all(wsId) });
+    qc.invalidateQueries({ queryKey: workspaceWorkingAgentsKeys.all(wsId) });
+    qc.invalidateQueries({ queryKey: agentActivityKeys.all(wsId) });
+    qc.invalidateQueries({ queryKey: agentRunCountsKeys.all(wsId) });
+    qc.invalidateQueries({ queryKey: labelKeys.all(wsId) });
+    qc.invalidateQueries({ queryKey: propertyKeys.all(wsId) });
+    qc.invalidateQueries({ queryKey: issueStatusKeys.all(wsId) });
+  }
+  qc.invalidateQueries({ queryKey: issueKeys.timelineAll() });
+  qc.invalidateQueries({ queryKey: issueKeys.reactionsAll() });
+  qc.invalidateQueries({ queryKey: issueKeys.subscribersAll() });
+  qc.invalidateQueries({ queryKey: issueKeys.usageAll() });
+  qc.invalidateQueries({ queryKey: issueKeys.attachmentsAll() });
+  qc.invalidateQueries({ queryKey: issueKeys.tasksAll() });
+  qc.invalidateQueries({ queryKey: chatKeys.messagesAll() });
+  qc.invalidateQueries({ queryKey: chatKeys.messagesPageAll() });
+  qc.invalidateQueries({ queryKey: chatKeys.pendingTaskAll() });
+  qc.invalidateQueries({ queryKey: chatKeys.taskMessagesAll() });
+  qc.invalidateQueries({ queryKey: chatKeys.draftRestoresAll() });
+  void onInboxSummaryInvalidate(qc);
+}
+
 async function refreshIncrementalLists(qc: QueryClient): Promise<void> {
   const wsId = getCurrentWsId();
   if (!wsId) return;
@@ -771,7 +811,13 @@ async function refreshIncrementalLists(qc: QueryClient): Promise<void> {
   const results = await Promise.allSettled(resources.map(async (resource) => {
     const storageKey = `multica_sync_cursor:${wsId}:${resource}`;
     const cursor = defaultStorage.getItem(storageKey) ?? undefined;
-    const page = await api.listIncrementalChanges(resource, { cursor });
+    // A brand-new client must establish a current baseline. Starting from
+    // Unix epoch makes every reconnect walk the oldest 100 rows again.
+    const updatedSince = cursor ? undefined : new Date().toISOString();
+    let page = await api.listIncrementalChanges(resource, { cursor, updatedSince });
+    while (page.has_more) {
+      page = await api.listIncrementalChanges(resource, { cursor: page.next_cursor });
+    }
     if (page.next_cursor) defaultStorage.setItem(storageKey, page.next_cursor);
     if (page.upserts.length === 0 && page.deleted.length === 0) return;
     if (resource === "issues") qc.invalidateQueries({ queryKey: issueKeys.all(wsId) });
@@ -782,6 +828,7 @@ async function refreshIncrementalLists(qc: QueryClient): Promise<void> {
   const failed = results.some((result) => result.status === "rejected" && !(result.reason instanceof ApiError && result.reason.status === 410));
   if (expired) for (const resource of resources) defaultStorage.removeItem(`multica_sync_cursor:${wsId}:${resource}`);
   if (expired || failed) invalidateWorkspaceScopedQueries(qc);
+  else invalidateReconnectDetailQueries(qc);
 }
 
 async function refreshWorkingAgentQueries(qc: QueryClient, wsId: string): Promise<void> {
