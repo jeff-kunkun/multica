@@ -814,13 +814,16 @@ func (q *Queries) ListSteeringChatFollowups(ctx context.Context, chatSessionID p
 
 const listTaskSupplementMetadata = `-- name: ListTaskSupplementMetadata :many
 SELECT cap.task_id, cap.capability,
+       COALESCE(r.provider, '')::text AS provider,
        COALESCE(array_agg(s.comment_id ORDER BY s.created_at, s.comment_id)
                 FILTER (WHERE s.comment_id IS NOT NULL), '{}'::uuid[])::uuid[] AS comment_ids
 FROM task_supplement_capability cap
+LEFT JOIN agent_task_queue t ON t.id = cap.task_id
+LEFT JOIN agent_runtime r ON r.id = t.runtime_id
 LEFT JOIN task_supplement s ON s.task_id = cap.task_id
 WHERE cap.workspace_id = $1
   AND cap.task_id = ANY($2::uuid[])
-GROUP BY cap.task_id, cap.capability
+GROUP BY cap.task_id, cap.capability, r.provider
 `
 
 type ListTaskSupplementMetadataParams struct {
@@ -831,9 +834,12 @@ type ListTaskSupplementMetadataParams struct {
 type ListTaskSupplementMetadataRow struct {
 	TaskID     pgtype.UUID   `json:"task_id"`
 	Capability string        `json:"capability"`
+	Provider   string        `json:"provider"`
 	CommentIds []pgtype.UUID `json:"comment_ids"`
 }
 
+// provider is the running CLI, which decides how a supplement lands
+// (same turn, or stop the step and continue).
 func (q *Queries) ListTaskSupplementMetadata(ctx context.Context, arg ListTaskSupplementMetadataParams) ([]ListTaskSupplementMetadataRow, error) {
 	rows, err := q.db.Query(ctx, listTaskSupplementMetadata, arg.WorkspaceID, arg.TaskIds)
 	if err != nil {
@@ -843,7 +849,12 @@ func (q *Queries) ListTaskSupplementMetadata(ctx context.Context, arg ListTaskSu
 	items := []ListTaskSupplementMetadataRow{}
 	for rows.Next() {
 		var i ListTaskSupplementMetadataRow
-		if err := rows.Scan(&i.TaskID, &i.Capability, &i.CommentIds); err != nil {
+		if err := rows.Scan(
+			&i.TaskID,
+			&i.Capability,
+			&i.Provider,
+			&i.CommentIds,
+		); err != nil {
 			return nil, err
 		}
 		items = append(items, i)

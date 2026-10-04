@@ -1,4 +1,4 @@
-import type { ChatSession } from "./chat";
+import type { ChatSession, SteerUpstreamTurn } from "./chat";
 import type { Label } from "./label";
 
 export type AgentStatus = "idle" | "working" | "blocked" | "error" | "offline";
@@ -496,6 +496,8 @@ export interface AgentTask {
   supplement_comment_ids?: string[];
   /** Server-side invocation verdict for the current member and this agent. */
   can_supplement?: boolean;
+  /** How a supplement lands in this run: after the current step, or by stopping it. */
+  supplement_upstream_turn?: SteerUpstreamTurn;
   /**
    * Canonical short description of what triggered this task — snapshot
    * taken at creation time. For comment-triggered tasks it's the

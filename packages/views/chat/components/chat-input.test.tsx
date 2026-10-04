@@ -744,6 +744,22 @@ describe("ChatInput project context", () => {
     expect(onSend.mock.calls[0]![4]).toBe("restart");
   });
 
+  it("says a stop-and-continue CLI stops the current step", async () => {
+    renderInput({
+      isRunning: true,
+      allowSubmitWhileRunning: true,
+      steerSupported: true,
+      steerProvider: "kimi",
+      steerUpstreamTurn: "handoff",
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Send mode" }));
+    const menu = await screen.findByRole("menu");
+    expect(within(menu).getByText("Stops this step and reads it now")).toBeInTheDocument();
+    expect(within(menu).getByText("Current step stops · same session")).toBeInTheDocument();
+    expect(within(menu).queryByText("Same process · same session")).not.toBeInTheDocument();
+  });
+
   it("explains why steer is off for a CLI that cannot take it", async () => {
     renderInput({ isRunning: true, allowSubmitWhileRunning: true, steerProvider: "kimi" });
 

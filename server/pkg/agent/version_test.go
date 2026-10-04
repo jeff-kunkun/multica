@@ -13,10 +13,28 @@ func TestTaskSupplementVersionGate(t *testing.T) {
 		{"codex", "codex-cli 0.100.0", true}, {"codex", "0.99.0", false},
 		{"claude", "2.1.110 (Claude Code)", true}, {"claude", "2.1.109", false},
 		{"grok", "1.0.14", true}, {"grok", "1.0.13", false}, {"grok", "0.2.120", false},
-		{"codex", "", false}, {"claude", "dev", false}, {"kimi", "9.0.0", false},
+		{"codex", "", false}, {"claude", "dev", false},
+		// ACP stop-and-continue needs only session/cancel, so any version works.
+		{"kimi", "0.40.1", true}, {"hermes", "", true}, {"kiro", "dev", true},
+		{"opencode", "9.0.0", false}, {"cursor", "1.0.0", false},
 	} {
 		if got := SupportsTaskSupplement(tc.provider, tc.version); got != tc.want {
 			t.Errorf("%s %q: supported=%v, want %v", tc.provider, tc.version, got, tc.want)
+		}
+	}
+}
+
+func TestTaskSupplementUpstreamTurn(t *testing.T) {
+	for provider, want := range map[string]string{
+		"claude": SupplementTurnSame, "codex": SupplementTurnSame,
+		"grok": SupplementTurnHandoff, "kimi": SupplementTurnHandoff, "hermes": SupplementTurnHandoff,
+		"kiro": SupplementTurnHandoff, "qoder": SupplementTurnHandoff, "qoderclicn": SupplementTurnHandoff,
+		"qwenpaw": SupplementTurnHandoff, "reasonix": SupplementTurnHandoff, "traecli": SupplementTurnHandoff,
+		"zeroclaw": SupplementTurnHandoff, "devin": SupplementTurnHandoff, "dim": SupplementTurnHandoff,
+		"mcode": SupplementTurnHandoff, "cursor": "", "opencode": "",
+	} {
+		if got := TaskSupplementUpstreamTurn(provider); got != want {
+			t.Errorf("%s: upstream turn %q, want %q", provider, got, want)
 		}
 	}
 }

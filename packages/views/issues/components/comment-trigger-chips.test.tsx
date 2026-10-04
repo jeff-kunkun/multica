@@ -98,6 +98,17 @@ describe("CommentTriggerChips", () => {
     expect(onActionChange).toHaveBeenCalledWith("agent-1", "after_run");
   });
 
+  it("says a stop-and-continue CLI stops the current step", async () => {
+    const task = { ...turn("running"), supplement_upstream_turn: "handoff" } as AgentTask;
+    const handoff: AgentRunState = { kind: "running", task, steerable: true };
+    renderWithI18n(<CommentTriggerChips recipients={[entry(walt, handoff)]} onActionChange={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "Walt trigger: Steer" }));
+    const menu = await screen.findByRole("menu");
+    expect(within(menu).getByText("Stops this step to read it; the original work continues")).toBeInTheDocument();
+    expect(within(menu).getByText("Current step stops · same session")).toBeInTheDocument();
+    expect(within(menu).queryByText("Same process · same session")).not.toBeInTheDocument();
+  });
+
   it("folds a message into a queued run instead of starting another", () => {
     const queued: AgentRunState = { kind: "queued", task: turn("queued") };
     renderWithI18n(<CommentTriggerChips recipients={[entry(walt, queued)]} onActionChange={vi.fn()} />);

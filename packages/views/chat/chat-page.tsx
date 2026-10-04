@@ -860,6 +860,7 @@ export function ChatPage() {
         allowSubmitWhileRunning={c.pendingTask?.supports_queue === true}
         steerSupported={c.pendingTask?.steer_supported === true}
         steerProvider={c.pendingTask?.steer_provider}
+        steerUpstreamTurn={c.pendingTask?.steer_upstream_turn}
         disabled={
           c.isSessionArchived ||
           c.isAgentArchived ||

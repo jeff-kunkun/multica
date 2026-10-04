@@ -2,7 +2,7 @@
 
 import { useState, type SyntheticEvent } from "react";
 import { ChevronDown, Loader2 } from "lucide-react";
-import type { ChatSendMode } from "@multica/core/types";
+import type { ChatSendMode, SteerUpstreamTurn } from "@multica/core/types";
 import { Button } from "@multica/ui/components/ui/button";
 import {
   DropdownMenu,
@@ -49,6 +49,8 @@ interface ChatSendModeButtonProps {
   mode: ChatSendMode;
   steerSupported?: boolean;
   steerProvider?: string;
+  /** "handoff": steering stops the current step, so the lines say so. */
+  steerUpstreamTurn?: SteerUpstreamTurn;
   /** False while the draft is empty or a send is in flight. */
   canSend: boolean;
   loading?: boolean;
@@ -66,6 +68,7 @@ export function ChatSendModeButton({
   mode,
   steerSupported,
   steerProvider,
+  steerUpstreamTurn,
   canSend,
   loading,
   onModeChange,
@@ -81,15 +84,20 @@ export function ChatSendModeButton({
       : m === "queue"
         ? t(($) => $.input.mode_queue)
         : t(($) => $.input.mode_restart);
+  const handoff = steerUpstreamTurn === "handoff";
   const description = (m: ChatSendMode) =>
     m === "steer"
-      ? t(($) => $.input.mode_steer_desc)
+      ? handoff
+        ? t(($) => $.input.mode_steer_desc_handoff)
+        : t(($) => $.input.mode_steer_desc)
       : m === "queue"
         ? t(($) => $.input.mode_queue_desc)
         : t(($) => $.input.mode_restart_desc);
   const processLine = (m: ChatSendMode) =>
     m === "steer"
-      ? t(($) => $.input.mode_steer_process)
+      ? handoff
+        ? t(($) => $.input.mode_steer_process_handoff)
+        : t(($) => $.input.mode_steer_process)
       : m === "queue"
         ? t(($) => $.input.mode_queue_process)
         : t(($) => $.input.mode_restart_process);

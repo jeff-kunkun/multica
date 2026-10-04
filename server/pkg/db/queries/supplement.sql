@@ -149,14 +149,19 @@ WHERE s.workspace_id = @workspace_id
 ORDER BY s.created_at, s.task_id;
 
 -- name: ListTaskSupplementMetadata :many
+-- provider is the running CLI, which decides how a supplement lands
+-- (same turn, or stop the step and continue).
 SELECT cap.task_id, cap.capability,
+       COALESCE(r.provider, '')::text AS provider,
        COALESCE(array_agg(s.comment_id ORDER BY s.created_at, s.comment_id)
                 FILTER (WHERE s.comment_id IS NOT NULL), '{}'::uuid[])::uuid[] AS comment_ids
 FROM task_supplement_capability cap
+LEFT JOIN agent_task_queue t ON t.id = cap.task_id
+LEFT JOIN agent_runtime r ON r.id = t.runtime_id
 LEFT JOIN task_supplement s ON s.task_id = cap.task_id
 WHERE cap.workspace_id = @workspace_id
   AND cap.task_id = ANY(@task_ids::uuid[])
-GROUP BY cap.task_id, cap.capability;
+GROUP BY cap.task_id, cap.capability, r.provider;
 
 -- name: SettleTerminalTaskSupplements :execrows
 -- Application terminal transitions call this in the same transaction as the

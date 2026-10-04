@@ -133,6 +133,11 @@ type semver struct {
 // SupportsTaskSupplement gates the resolved executable, including custom
 // commands. Unknown versions must not advertise a capability they may lack.
 func SupportsTaskSupplement(provider, version string) bool {
+	if TaskSupplementUpstreamTurn(provider) == SupplementTurnHandoff && provider != "grok" {
+		// Stop-and-continue rides on ACP's session/cancel and session/prompt,
+		// which every ACP agent implements, so no version floor applies.
+		return true
+	}
 	var minimum string
 	switch provider {
 	case "codex":
@@ -152,6 +157,31 @@ func SupportsTaskSupplement(provider, version string) bool {
 	detected, err := parseSemver(version)
 	floor, _ := parseSemver(minimum)
 	return err == nil && !detected.lessThan(floor)
+}
+
+// How a supplement reaches a running turn, named after the ACP steering
+// extension's upstreamTurn field (LodyAI/acp-extension-core).
+const (
+	// SupplementTurnSame folds the message into the running turn; the current
+	// step finishes first.
+	SupplementTurnSame = "same"
+	// SupplementTurnHandoff stops the current step and continues with the
+	// message in the same process and session.
+	SupplementTurnHandoff = "handoff"
+)
+
+// TaskSupplementUpstreamTurn says how provider takes a supplement, or "" when
+// it cannot take one mid-turn. Grok's x.ai/interject cancels and reruns the
+// step (botiverse/oar measurements), so it is a handoff too.
+func TaskSupplementUpstreamTurn(provider string) string {
+	switch provider {
+	case "claude", "codex":
+		return SupplementTurnSame
+	case "grok", "hermes", "kimi", "kiro", "qoder", "qoderclicn", "qwenpaw",
+		"reasonix", "traecli", "zeroclaw", "devin", "dim", "mcode":
+		return SupplementTurnHandoff
+	}
+	return ""
 }
 
 // versionRe matches version strings like "2.1.100", "v2.0.0", or

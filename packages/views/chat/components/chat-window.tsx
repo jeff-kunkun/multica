@@ -1117,6 +1117,7 @@ export function ChatWindow() {
         allowSubmitWhileRunning={pendingTask?.supports_queue === true}
         steerSupported={pendingTask?.steer_supported === true}
         steerProvider={pendingTask?.steer_provider}
+        steerUpstreamTurn={pendingTask?.steer_upstream_turn}
         disabled={
           isSessionArchived ||
           isAgentArchived ||

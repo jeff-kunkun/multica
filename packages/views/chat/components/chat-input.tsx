@@ -27,7 +27,7 @@ import { attachmentToDraftUpload, type DraftUpload } from "@multica/core/drafts"
 import { createLogger } from "@multica/core/logger";
 import { formatShortcut, useShortcut } from "@multica/core/shortcuts";
 import type { MentionItem } from "../../editor/extensions/mention-suggestion";
-import type { Attachment, ChatSendMode, Project } from "@multica/core/types";
+import type { Attachment, ChatSendMode, Project, SteerUpstreamTurn } from "@multica/core/types";
 import { ProjectPicker } from "../../projects/components/project-picker";
 import { ClearablePillButton } from "../../common/pill-button";
 import { useT } from "../../i18n";
@@ -108,6 +108,8 @@ interface ChatInputProps {
   steerSupported?: boolean;
   /** CLI of the running reply, named when steer is unavailable. */
   steerProvider?: string;
+  /** How a steer lands; "handoff" stops the current step. */
+  steerUpstreamTurn?: SteerUpstreamTurn;
   disabled?: boolean;
   /** True when the user has no agent available — disables the editor and
    *  surfaces a distinct placeholder. Kept separate from `disabled` so
@@ -175,6 +177,7 @@ export function ChatInput({
   allowSubmitWhileRunning,
   steerSupported,
   steerProvider,
+  steerUpstreamTurn,
   disabled,
   noAgent,
   agentArchived,
@@ -826,6 +829,7 @@ export function ChatInput({
                 mode={sendMode}
                 steerSupported={steerSupported}
                 steerProvider={steerProvider}
+                steerUpstreamTurn={steerUpstreamTurn}
                 canSend={!hasNothingToSend && !submitting && !gate.uploading && !disabled && !noAgent}
                 loading={submitting || gate.uploading}
                 onModeChange={setChosenMode}

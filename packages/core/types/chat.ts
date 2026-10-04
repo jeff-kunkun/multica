@@ -292,6 +292,13 @@ export interface ChatMessagesPage {
  */
 export type ChatSendMode = "steer" | "queue" | "restart";
 
+/**
+ * How a steered message reaches the running reply (DENE-1347), after the ACP
+ * steering extension's upstreamTurn: "same" folds it in after the current
+ * step; "handoff" stops the current step and continues in the same session.
+ */
+export type SteerUpstreamTurn = "same" | "handoff";
+
 export interface SendChatMessageResponse {
   message_id: string;
   task_id: string;
@@ -422,4 +429,6 @@ export interface ChatPendingTask {
   steer_supported?: boolean;
   /** CLI of the running reply, for the steer cost/unsupported line. */
   steer_provider?: string;
+  /** How a steer lands: after the current step, or by stopping it (same session). */
+  steer_upstream_turn?: SteerUpstreamTurn;
 }
