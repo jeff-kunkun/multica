@@ -50,6 +50,8 @@ import type {
   SearchProjectsResponse,
   ListIssueStatusesResponse,
   SendChatMessageResponse,
+  ChatSendMode,
+  PrioritizeQueuedChatTaskResponse,
   Squad,
   NotificationPreferenceResponse,
   NotificationPreferences,
@@ -74,6 +76,8 @@ import {
   IssueStateCardSchema,
   ListIssuesResponseSchema,
   ListIssueStatusesResponseSchema,
+  EMPTY_PRIORITIZE_QUEUED_CHAT_TASK_RESPONSE,
+  PrioritizeQueuedChatTaskResponseSchema,
   StateCardDecisionSchema,
   TimelineEntriesSchema,
   WorkspaceSubscriptionSummarySchema,
@@ -1196,7 +1200,7 @@ class ApiClient {
   async sendChatMessage(
     sessionId: string,
     content: string,
-    opts?: { attachmentIds?: string[] },
+    opts?: { attachmentIds?: string[]; mode?: ChatSendMode },
   ): Promise<SendChatMessageResponse> {
     // Strict parse — we need task_id + created_at to anchor the optimistic
     // StatusPill. Fallback would silently break the elapsed-time timer.
@@ -1205,10 +1209,16 @@ class ApiClient {
     // server-side `chat.go` back-fills `chat_message_id` on the listed
     // attachments after the message row is inserted (see
     // server/internal/handler/chat.go:410-456).
-    const body: { content: string; attachment_ids?: string[] } = { content };
+    const body: {
+      content: string;
+      attachment_ids?: string[];
+      mode?: ChatSendMode;
+    } = { content };
     if (opts?.attachmentIds && opts.attachmentIds.length > 0) {
       body.attachment_ids = opts.attachmentIds;
     }
+    // What the message does to a reply already running (DENE-1346).
+    if (opts?.mode) body.mode = opts.mode;
     const raw = await this.fetch<unknown>(
       `/api/chat/sessions/${sessionId}/messages`,
       {
@@ -1307,8 +1317,34 @@ class ApiClient {
     });
   }
 
-  async cancelTaskById(taskId: string): Promise<void> {
-    await this.fetch<void>(`/api/tasks/${taskId}/cancel`, { method: "POST" });
+  /** `queuedRemove` drops a queued chat follow-up only while it is still
+   *  queued, mirroring core's `queuedAction: "remove"`. */
+  async cancelTaskById(
+    taskId: string,
+    opts?: { queuedRemove?: { sessionId: string } },
+  ): Promise<void> {
+    const query = opts?.queuedRemove
+      ? `?expected_status=queued&chat_session_id=${encodeURIComponent(opts.queuedRemove.sessionId)}&queue_action=remove`
+      : "";
+    await this.fetch<void>(`/api/tasks/${taskId}/cancel${query}`, { method: "POST" });
+  }
+
+  /** Moves a queued follow-up to the front; `active_task_id` is the reply
+   *  the caller must stop for it to start ("interrupt and restart"). */
+  async prioritizeQueuedChatTask(
+    sessionId: string,
+    taskId: string,
+  ): Promise<PrioritizeQueuedChatTaskResponse> {
+    const raw = await this.fetch<unknown>(
+      `/api/chat/sessions/${sessionId}/queued-tasks/${taskId}/prioritize`,
+      { method: "POST" },
+    );
+    return parseWithFallback(
+      raw,
+      PrioritizeQueuedChatTaskResponseSchema,
+      EMPTY_PRIORITIZE_QUEUED_CHAT_TASK_RESPONSE,
+      { endpoint: "POST /api/chat/sessions/:id/queued-tasks/:taskId/prioritize" },
+    );
   }
 
   /** Live execution timeline for a task — used by the chat screen to
