@@ -40,6 +40,7 @@ import { useAuthStore } from "@/data/auth-store";
 import { useWorkspaceStore } from "@/data/workspace-store";
 import { getToken } from "@/data/secure-storage";
 import { api } from "@/data/api";
+import { queryClient } from "@/data/query-client";
 import { WSClient } from "./ws-client";
 
 const API_URL = process.env.EXPO_PUBLIC_API_URL;
@@ -71,6 +72,7 @@ export function RealtimeProvider({ children }: { children: React.ReactNode }) {
   // offline → online EDGE, not on every change event (NetInfo fires for
   // wifi strength changes, type changes, etc).
   const lastConnectedRef = useRef<boolean | null>(null);
+  const syncCursorsRef = useRef<Partial<Record<"issues" | "inbox" | "chats", string>>>({});
 
   useEffect(() => {
     if (!userId || !wsSlug) {
@@ -82,6 +84,7 @@ export function RealtimeProvider({ children }: { children: React.ReactNode }) {
     let ws: WSClient | null = null;
     let appStateSub: { remove: () => void } | null = null;
     let netInfoUnsub: (() => void) | null = null;
+    let incrementalUnsub: (() => void) | null = null;
 
     void (async () => {
       const token = await getToken();
@@ -100,6 +103,15 @@ export function RealtimeProvider({ children }: { children: React.ReactNode }) {
       });
       ws.connect();
       setClient(ws);
+      incrementalUnsub = ws.onReconnect(() => {
+        void Promise.all((['issues', 'inbox', 'chats'] as const).map(async (resource) => {
+          const page = await api.listIncrementalChanges(resource, { cursor: syncCursorsRef.current[resource] });
+          if (page.next_cursor) syncCursorsRef.current[resource] = page.next_cursor;
+          if (page.upserts.length || page.deleted.length) {
+            void queryClient.invalidateQueries({ queryKey: [resource === 'chats' ? 'chat' : resource] });
+          }
+        }));
+      });
 
       // ── AppState ────────────────────────────────────────────────
       appStateSub = AppState.addEventListener(
@@ -137,6 +149,7 @@ export function RealtimeProvider({ children }: { children: React.ReactNode }) {
       cancelled = true;
       appStateSub?.remove();
       netInfoUnsub?.();
+      incrementalUnsub?.();
       ws?.disconnect();
       setClient(null);
     };

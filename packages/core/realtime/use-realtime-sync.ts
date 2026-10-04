@@ -7,6 +7,8 @@ import type { WSClient } from "../api/ws-client";
 import type { StoreApi, UseBoundStore } from "zustand";
 import type { AuthState } from "../auth/store";
 import { createLogger } from "../logger";
+import { getApi } from "../api";
+import { ApiError } from "../api/client";
 import { clearWorkspaceStorage } from "../platform/storage-cleanup";
 import { defaultStorage } from "../platform/storage";
 import { getCurrentWsId, getCurrentSlug } from "../platform/workspace-storage";
@@ -759,6 +761,27 @@ function invalidateWorkspaceScopedQueries(qc: QueryClient): void {
   // a mounted composer recovers the prompt without a remount.
   qc.invalidateQueries({ queryKey: chatKeys.draftRestoresAll() });
   qc.invalidateQueries({ queryKey: workspaceKeys.list() });
+}
+
+async function refreshIncrementalLists(qc: QueryClient): Promise<void> {
+  const wsId = getCurrentWsId();
+  if (!wsId) return;
+  const api = getApi();
+  const resources = ["issues", "inbox", "chats"] as const;
+  const results = await Promise.allSettled(resources.map(async (resource) => {
+    const storageKey = `multica_sync_cursor:${wsId}:${resource}`;
+    const cursor = defaultStorage.getItem(storageKey) ?? undefined;
+    const page = await api.listIncrementalChanges(resource, { cursor });
+    if (page.next_cursor) defaultStorage.setItem(storageKey, page.next_cursor);
+    if (page.upserts.length === 0 && page.deleted.length === 0) return;
+    if (resource === "issues") qc.invalidateQueries({ queryKey: issueKeys.all(wsId) });
+    if (resource === "inbox") void onInboxInvalidate(qc, wsId);
+    if (resource === "chats") qc.invalidateQueries({ queryKey: chatKeys.all(wsId) });
+  }));
+  const expired = results.some((result) => result.status === "rejected" && result.reason instanceof ApiError && result.reason.status === 410);
+  const failed = results.some((result) => result.status === "rejected" && !(result.reason instanceof ApiError && result.reason.status === 410));
+  if (expired) for (const resource of resources) defaultStorage.removeItem(`multica_sync_cursor:${wsId}:${resource}`);
+  if (expired || failed) invalidateWorkspaceScopedQueries(qc);
 }
 
 async function refreshWorkingAgentQueries(qc: QueryClient, wsId: string): Promise<void> {
@@ -2004,16 +2027,17 @@ export function useRealtimeSync(
     };
   }, [ws, qc, authStore, onToast]);
 
-  // Reconnect -> refetch all data to recover missed events
+  // Reconnect -> replay list changes, with a full refresh only as fallback.
   useEffect(() => {
     if (!ws) return;
 
     const unsub = ws.onReconnect(async () => {
-      logger.info("reconnected, refetching all data");
+      logger.info("reconnected, replaying incremental changes");
       try {
-        invalidateWorkspaceScopedQueries(qc);
+        await refreshIncrementalLists(qc);
       } catch (e) {
-        logger.error("reconnect refetch failed", e);
+        logger.error("incremental reconnect recovery failed; refreshing workspace", e);
+        invalidateWorkspaceScopedQueries(qc);
       }
     });
 
