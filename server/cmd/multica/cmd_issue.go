@@ -394,7 +394,10 @@ func issueCloseLong() string {
 		"Every close records a knowledge audit in that same transaction, including a\n" +
 		"ticket with no pull request. --knowledge-none declares that nothing qualified\n" +
 		"for project memory. Repeat --knowledge <key>=<summary> for each checklist slot\n" +
-		"this close wrote. Keys: " + strings.Join(projectmemory.LocationKeys(), ", ") + "."
+		"this close wrote. Keys: " + strings.Join(projectmemory.LocationKeys(), ", ") + ".\n\n" +
+		"Repeat --decision \"...\" for each decision this round settled; it joins the\n" +
+		"state card's 已拍板 list that `multica issue context <id>` shows the next owner.\n" +
+		"--summary becomes the card's 上一棒交代."
 }
 
 var issueDisposeCmd = &cobra.Command{
@@ -426,7 +429,9 @@ var issueHandoffCmd = &cobra.Command{
 		"  --to dispatcher   let routing pick the next owner\n" +
 		"  --to <agent>      a named agent (name or id)\n\n" +
 		"A close already hands over what it closes: `issue close --outcome in_review`\n" +
-		"routes the acceptance seat itself. The response reports target_name,\n" +
+		"routes the acceptance seat itself. --summary tells the next owner where things\n" +
+		"stand (the state card's 上一棒交代); repeat --decision for each settled decision.\n" +
+		"Both are read back with `multica issue context <id>`. The response reports target_name,\n" +
 		"run_created and duplicate — quote them, do not restate them from memory.",
 	Args: exactArgs(1),
 	RunE: runIssueHandoff,
@@ -2416,12 +2421,15 @@ func registerIssueCloseFlags(cmd *cobra.Command) {
 	cmd.Flags().String("pr", "", "Pull or merge request URL to register with this close. A verified link is stored; an unverifiable link still closes and is marked 未核实")
 	cmd.Flags().Bool("knowledge-none", false, "Declare this close wrote no qualified project memory")
 	cmd.Flags().StringArray("knowledge", nil, "Project-memory change as <key>=<summary>; repeat for each checklist location")
+	cmd.Flags().StringArray("decision", nil, "A decision settled this round, added to the state card's 已拍板 list (one line, 300 chars max; repeat for each)")
 	cmd.Flags().String("output", "json", "Output format: table or json")
 }
 
 // registerIssueHandoffFlags wires `issue handoff`; shared with its tests.
 func registerIssueHandoffFlags(cmd *cobra.Command) {
 	cmd.Flags().String("to", "", "reviewer, dispatcher, or an agent name/id (required)")
+	cmd.Flags().String("summary", "", "What the next owner needs to know; shown as the state card's 上一棒交代 (300 chars max)")
+	cmd.Flags().StringArray("decision", nil, "A decision settled this round, added to the state card's 已拍板 list (repeat for each)")
 	cmd.Flags().String("output", "table", "Output format: table or json")
 }
 
@@ -2474,6 +2482,9 @@ func runIssueClose(cmd *cobra.Command, args []string) error {
 	}
 	if verdict != "" {
 		body["verdict"] = verdict
+	}
+	if decisions, _ := cmd.Flags().GetStringArray("decision"); len(decisions) > 0 {
+		body["decisions"] = decisions
 	}
 	if outcome == "done" || outcome == "in_review" {
 		// The PR refresh below can merge locally, which cannot be undone.

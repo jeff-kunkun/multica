@@ -1870,5 +1870,26 @@
     "reason_runtime_changed": "la dernière session est sur une autre machine",
     "reason_session_lost": "la session n'a pas pu être restaurée",
     "reason_fresh_requested": "nouvelle session demandée"
+  },
+  "state_card": {
+    "section_title": "Fiche d’état",
+    "decisions": "Décidé",
+    "decisions_empty": "Rien de décidé pour l’instant",
+    "decision_add": "Ajouter une décision",
+    "decision_placeholder": "Une ligne : ce qui a été décidé",
+    "decision_save": "Enregistrer",
+    "decision_cancel": "Annuler",
+    "decision_edit": "Modifier",
+    "decision_delete": "Supprimer",
+    "decision_failed": "Échec de l’enregistrement : {{reason}}",
+    "baton": "Dernier relais",
+    "baton_close": "Clôture",
+    "baton_handoff": "Relais vers {{to}}",
+    "baton_none": "Ni clôture ni relais pour l’instant",
+    "changes": "Depuis votre passage",
+    "changes_first": "Depuis votre passage (première visite)",
+    "changes_none": "Aucun nouveau fil",
+    "changes_count": "{{count}} nouveaux",
+    "changes_more": "{{count}} fils de plus"
   }
 }

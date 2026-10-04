@@ -1399,6 +1399,84 @@ export const ProgressHistorySchema = z.object({
   progress: z.array(ProgressSchema).default([]),
 });
 
+/** Issue state card (DENE-1328). Lenient: an older server lacks the endpoint
+ *  and a newer one may add fields. */
+export const StateCardDecisionSchema = z.object({
+  id: z.string(),
+  text: z.string(),
+  source: z.string().default(""),
+  author_type: z.string().default(""),
+  author_id: z.string().optional(),
+  created_at: z.string().default(""),
+  updated_at: z.string().default(""),
+});
+
+export const IssueStateCardSchema = z.object({
+  issue_id: z.string().default(""),
+  identifier: z.string().default(""),
+  goal: z
+    .object({
+      title: z.string().default(""),
+      goal_status: z.string().optional(),
+      finish_line: z
+        .array(z.object({ description: z.string(), status: z.string().default("") }))
+        .optional(),
+    })
+    .default({ title: "" }),
+  decisions: z.array(StateCardDecisionSchema).nullable().default([]).transform((v) => v ?? []),
+  now: z
+    .object({
+      status: z.string().default(""),
+      closed: z.boolean().default(false),
+      conclusion: z.string().optional(),
+      close_status: z.string().optional(),
+      next_owner_type: z.string().optional(),
+      next_owner_id: z.string().optional(),
+      waiting_on: z.string().optional(),
+      wait_condition: z.string().optional(),
+      wake_at: z.string().optional(),
+      needs_human: z.string().optional(),
+      closed_at: z.string().optional(),
+      superseded: z.boolean().optional(),
+      stale: z.boolean().optional(),
+    })
+    .default({ status: "", closed: false }),
+  baton: z
+    .object({
+      kind: z.string(),
+      summary: z.string().optional(),
+      by_type: z.string().optional(),
+      by_id: z.string().optional(),
+      to: z.string().optional(),
+      at: z.string().optional(),
+      comment_id: z.string().optional(),
+    })
+    .nullable()
+    .optional(),
+  changes: z
+    .object({
+      anchor: z.string().default("none"),
+      since: z.string().optional(),
+      threads: z
+        .array(
+          z.object({
+            thread_id: z.string(),
+            title: z.string().default(""),
+            author_type: z.string().default(""),
+            author_id: z.string().optional(),
+            new_count: z.number().default(0),
+            last_at: z.string().default(""),
+          }),
+        )
+        .nullable()
+        .default([])
+        .transform((v) => v ?? []),
+      more: z.number().optional(),
+    })
+    .default({ anchor: "none", threads: [] }),
+  text: z.string().default(""),
+});
+
 export const IssueSchema = z.object({
   id: z.string(),
   workspace_id: z.string(),

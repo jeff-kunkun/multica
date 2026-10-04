@@ -1,6 +1,6 @@
 ---
 name: multica-platform
-description: "Multica: asks, open a chat, goals, inbox, project board, issues, sub-issues, wakeups, charts, routing, close protocol, stalls, driver, halt, mentions, agents, specialisation, squads, autopilot, projects, runtimes, progress, skill import, transfer, linked workspace, GitHub App. Not product code."
+description: "Multica: asks, open a chat, goals, inbox, project board, issues, sub-issues, wakeups, routing, close protocol, stalls, driver, halt, mentions, agents, specialisation, squads, autopilot, projects, runtimes, progress, state card, skill import, transfer, linked workspace, GitHub App. Not product code."
 user-invocable: false
 allowed-tools: Bash(multica *), Bash(git *), Bash(gh *)
 ---
@@ -27,6 +27,7 @@ Read the invariants below, then open the reference(s) your task actually needs
 | `references/goals.md` | Task goals: draft a completion line, confirm the human lock, track budget, and finish a goal |
 | `references/sub-issues.md` | Sub-issues: todo vs backlog at create time, stages as barrier groups, promoting parked children |
 | `references/routing.md` | Automatic routing: which slots it fills at which status, the 验收席 field, who may pick an executor (`--per-quote`, `issue escalate`), what an `issue route` result means, why dispatch stopped |
+| `references/state-card.md` | Picking up an issue: `multica issue context` (goal, decisions, where it stands, last baton, what changed since you), and writing decisions with `--decision` |
 | `references/close-protocol.md` | Closing an issue: the eight `close.*` keys, conclusion / status / next owner / wake decision tables, blocked-close fields, dispatcher stage promotion |
 | `references/mentions.md` | Writing a `mention://` link: which types enqueue a run, which are inert, why one silently did nothing |
 | `references/agents.md` | Creating, copying or debugging an agent definition: fields, secrets, MCP config, skill binding |

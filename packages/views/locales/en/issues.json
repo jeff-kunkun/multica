@@ -1870,5 +1870,26 @@
     "reason_runtime_changed": "last session is on another machine",
     "reason_session_lost": "session could not be restored",
     "reason_fresh_requested": "fresh session requested"
+  },
+  "state_card": {
+    "section_title": "State card",
+    "decisions": "Settled",
+    "decisions_empty": "Nothing settled yet",
+    "decision_add": "Add a decision",
+    "decision_placeholder": "One line, what was settled",
+    "decision_save": "Save",
+    "decision_cancel": "Cancel",
+    "decision_edit": "Edit",
+    "decision_delete": "Delete",
+    "decision_failed": "Could not save: {{reason}}",
+    "baton": "Last baton",
+    "baton_close": "Close",
+    "baton_handoff": "Handoff to {{to}}",
+    "baton_none": "No close or handoff yet",
+    "changes": "Since you were here",
+    "changes_first": "Since you were here (first visit)",
+    "changes_none": "No new threads",
+    "changes_count": "{{count}} new",
+    "changes_more": "{{count}} more threads"
   }
 }

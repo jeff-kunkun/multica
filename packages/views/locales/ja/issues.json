@@ -1815,5 +1815,26 @@
     "reason_runtime_changed": "前回のセッションは別のマシンにあります",
     "reason_session_lost": "セッションを復元できませんでした",
     "reason_fresh_requested": "新規セッションを指定"
+  },
+  "state_card": {
+    "section_title": "状態カード",
+    "decisions": "決定事項",
+    "decisions_empty": "まだ決定事項はありません",
+    "decision_add": "決定事項を追加",
+    "decision_placeholder": "決まったことを 1 行で",
+    "decision_save": "保存",
+    "decision_cancel": "キャンセル",
+    "decision_edit": "編集",
+    "decision_delete": "削除",
+    "decision_failed": "保存できませんでした：{{reason}}",
+    "baton": "前回の引き継ぎ",
+    "baton_close": "クローズ",
+    "baton_handoff": "{{to}} へ引き継ぎ",
+    "baton_none": "クローズも引き継ぎもまだありません",
+    "changes": "前回以降の変化",
+    "changes_first": "前回以降の変化（初回）",
+    "changes_none": "新しいスレッドはありません",
+    "changes_count": "新着 {{count}} 件",
+    "changes_more": "ほか {{count}} スレッド"
   }
 }

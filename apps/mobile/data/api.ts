@@ -28,6 +28,8 @@ import type {
   InboxItem,
   InboxWorkspaceUnread,
   Issue,
+  IssueStateCard,
+  StateCardDecision,
   IssueLabelsResponse,
   Label,
   IssueReaction,
@@ -69,8 +71,10 @@ import {
   EMPTY_LIST_ISSUES_RESPONSE,
   EMPTY_TIMELINE_ENTRIES,
   IssueSchema,
+  IssueStateCardSchema,
   ListIssuesResponseSchema,
   ListIssueStatusesResponseSchema,
+  StateCardDecisionSchema,
   TimelineEntriesSchema,
   WorkspaceSubscriptionSummarySchema,
 } from "@multica/core/api/schemas";
@@ -1253,6 +1257,53 @@ class ApiClient {
     await this.fetch<unknown>(`/api/issues/${issueId}/dispose`, {
       method: "POST",
       body: JSON.stringify(body),
+    });
+  }
+
+  /** State card (DENE-1328): the same card `multica issue context` prints. */
+  async getIssueContext(
+    issueId: string,
+    opts?: { signal?: AbortSignal },
+  ): Promise<IssueStateCard> {
+    return this.fetchValidated<IssueStateCard>(
+      `/api/issues/${issueId}/context`,
+      IssueStateCardSchema,
+      {
+        issue_id: issueId,
+        identifier: "",
+        goal: { title: "" },
+        decisions: [],
+        now: { status: "", closed: false },
+        changes: { anchor: "none", threads: [] },
+        text: "",
+      },
+      { signal: opts?.signal, endpoint: "GET /api/issues/:id/context" },
+    );
+  }
+
+  async createIssueDecision(issueId: string, text: string): Promise<StateCardDecision> {
+    const raw = await this.fetch<unknown>(`/api/issues/${issueId}/decisions`, {
+      method: "POST",
+      body: JSON.stringify({ text }),
+    });
+    return StateCardDecisionSchema.parse(raw) as StateCardDecision;
+  }
+
+  async updateIssueDecision(
+    issueId: string,
+    decisionId: string,
+    text: string,
+  ): Promise<StateCardDecision> {
+    const raw = await this.fetch<unknown>(
+      `/api/issues/${issueId}/decisions/${decisionId}`,
+      { method: "PATCH", body: JSON.stringify({ text }) },
+    );
+    return StateCardDecisionSchema.parse(raw) as StateCardDecision;
+  }
+
+  async deleteIssueDecision(issueId: string, decisionId: string): Promise<void> {
+    await this.fetch<unknown>(`/api/issues/${issueId}/decisions/${decisionId}`, {
+      method: "DELETE",
     });
   }
 
