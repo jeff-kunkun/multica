@@ -40,8 +40,17 @@ multica chat send --session <chat-id> --content-file ./msg.md --mode steer
 multica issue comment add <issue-id> --content-file ./msg.md --mode restart
 ```
 
-- Only Claude, Codex, Grok, OpenCode 1.x and Pi can take `steer` today. Any other CLI, or one too
-  old to negotiate it, is refused with exit status 1, the reason, and
+- `steer` reaches the run in one of two ways, decided by its CLI:
+  - Claude, Codex, Grok, OpenCode 1.x and Pi read it in the running process
+    after the current step.
+  - One-shot CLIs (Cursor, Copilot, CodeArts, DevEco, Antigravity, OpenClaw)
+    have no input channel while they work, so the daemon stops the CLI and
+    resumes the same session at once with the message; the step in flight is
+    cut off. The run, its receipt and the session ID stay the same.
+    Antigravity can only do this on a run that resumed a session.
+  The chat pending task reports this as `steer_mode` and an issue task as
+  `supplement_steer_mode` (`same` or `restart`).
+- Any other CLI, or one too old to negotiate `steer`, is refused with exit status 1, the reason, and
   `available_modes: [queue, restart]` in the JSON body; nothing is posted, so
   resend with one of those.
 - `steer` on a comment is for people only and is text-only (no attachments).

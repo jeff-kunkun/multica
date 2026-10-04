@@ -307,6 +307,7 @@ const ChatQueuedTaskSchema = z.object({
   created_at: z.string().default(""),
   message_id: z.string().optional(),
   content: z.string().optional(),
+  steering: z.boolean().optional().catch(undefined),
 }).loose();
 
 const ChatQueuedTasksSchema = z.array(z.unknown()).transform((tasks) =>
@@ -325,6 +326,9 @@ export const ChatPendingTaskSchema: z.ZodType<ChatPendingTask> = z.object({
   created_at: z.string().optional(),
   supports_queue: z.boolean().optional(),
   queued_tasks: ChatQueuedTasksSchema.optional(),
+  steer_supported: z.boolean().optional().catch(undefined),
+  steer_provider: z.string().optional().catch(undefined),
+  steer_mode: z.string().optional().catch(undefined),
 }).loose();
 
 export const EMPTY_CHAT_PENDING_TASK: ChatPendingTask = {};
@@ -334,6 +338,7 @@ export const SendChatMessageResponseSchema: z.ZodType<SendChatMessageResponse> =
   task_id: z.string(),
   supports_queue: z.boolean().optional(),
   queued: z.boolean().optional().catch(undefined),
+  mode: z.enum(["steer", "queue", "restart", "start"]).optional().catch(undefined),
   created_at: z.string().default(""),
 }).loose();
 

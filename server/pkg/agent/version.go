@@ -133,6 +133,11 @@ type semver struct {
 // SupportsTaskSupplement gates the resolved executable, including custom
 // commands. Unknown versions must not advertise a capability they may lack.
 func SupportsTaskSupplement(provider, version string) bool {
+	if SteersByRestart(provider) {
+		// Restarting on the same session needs no in-process input channel;
+		// every supported version of these CLIs resumes by session id.
+		return true
+	}
 	var minimum, maximum string
 	switch provider {
 	case "codex":

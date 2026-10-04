@@ -108,6 +108,8 @@ interface ChatInputProps {
   steerSupported?: boolean;
   /** CLI of the running reply, named when steer is unavailable. */
   steerProvider?: string;
+  /** How a steer reaches the reply; "restart" restarts the CLI. */
+  steerMode?: string;
   disabled?: boolean;
   /** True when the user has no agent available — disables the editor and
    *  surfaces a distinct placeholder. Kept separate from `disabled` so
@@ -175,6 +177,7 @@ export function ChatInput({
   allowSubmitWhileRunning,
   steerSupported,
   steerProvider,
+  steerMode,
   disabled,
   noAgent,
   agentArchived,
@@ -826,6 +829,7 @@ export function ChatInput({
                 mode={sendMode}
                 steerSupported={steerSupported}
                 steerProvider={steerProvider}
+                steerMode={steerMode}
                 canSend={!hasNothingToSend && !submitting && !gate.uploading && !disabled && !noAgent}
                 loading={submitting || gate.uploading}
                 onModeChange={setChosenMode}

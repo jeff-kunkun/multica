@@ -422,4 +422,6 @@ export interface ChatPendingTask {
   steer_supported?: boolean;
   /** CLI of the running reply, for the steer cost/unsupported line. */
   steer_provider?: string;
+  /** How a steer reaches the reply (DENE-1349): "same" in the running CLI, "restart" stops it and resumes the session. */
+  steer_mode?: string;
 }

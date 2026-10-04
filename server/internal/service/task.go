@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -4528,14 +4529,35 @@ func (s *TaskService) maybeLogClaimSlow(agentID pgtype.UUID, outcome string, sta
 	)
 }
 
-// StartTask transitions a dispatched task to running.
-// Issue status is NOT changed here — the agent manages it via the CLI.
-func (s *TaskService) StartTask(ctx context.Context, taskID pgtype.UUID, supplementSupport ...bool) (*db.AgentTaskQueue, error) {
-	enableTaskSupplement := len(supplementSupport) > 0 && supplementSupport[0]
-	task, err := s.Queries.StartAgentTaskWithSupplement(ctx, db.StartAgentTaskWithSupplementParams{
+// steerProviders lists, per steer mode, the providers whose runs may take a
+// mid-run message. The daemon says which mode it offers; a provider outside
+// that mode's list gets no capability, so a run fails closed.
+var steerProviders = map[string][]string{
+	protocol.SteerModeSame:    {"codex", "claude", "grok"},
+	protocol.SteerModeRestart: {"cursor", "copilot", "codearts", "deveco", "antigravity", "openclaw"},
+}
+
+// startWithSupplementParams turns the capabilities a daemon offered for one
+// run into the start transition's arguments.
+func startWithSupplementParams(taskID pgtype.UUID, capabilities []string) db.StartAgentTaskWithSupplementParams {
+	mode := protocol.SteerModeSame
+	if slices.Contains(capabilities, protocol.DaemonCapabilitySteerRestartV1) {
+		mode = protocol.SteerModeRestart
+	}
+	return db.StartAgentTaskWithSupplementParams{
 		TaskID:               taskID,
-		EnableTaskSupplement: enableTaskSupplement,
-	})
+		EnableTaskSupplement: slices.Contains(capabilities, protocol.DaemonCapabilityTaskSupplementV1),
+		SteerMode:            mode,
+		SupplementProviders:  steerProviders[mode],
+	}
+}
+
+// StartTask transitions a dispatched task to running. capabilities are the
+// run-scoped capabilities the daemon offered (task-supplement-v1 and its
+// steer-mode qualifier).
+// Issue status is NOT changed here — the agent manages it via the CLI.
+func (s *TaskService) StartTask(ctx context.Context, taskID pgtype.UUID, capabilities ...string) (*db.AgentTaskQueue, error) {
+	task, err := s.Queries.StartAgentTaskWithSupplement(ctx, startWithSupplementParams(taskID, capabilities))
 	if err != nil {
 		return nil, fmt.Errorf("start task: %w", err)
 	}
@@ -4546,7 +4568,7 @@ func (s *TaskService) StartTask(ctx context.Context, taskID pgtype.UUID, supplem
 // StartTaskForClaim serializes the ownership check and transition with reclaim,
 // cancellation and other start requests. A replay linearizes at the locked read;
 // a cancellation that commits later can still cancel the acknowledged task.
-func (s *TaskService) StartTaskForClaim(ctx context.Context, claim db.LockAgentTaskStartClaimParams, supplementSupport ...bool) (*db.AgentTaskQueue, error) {
+func (s *TaskService) StartTaskForClaim(ctx context.Context, claim db.LockAgentTaskStartClaimParams, capabilities ...string) (*db.AgentTaskQueue, error) {
 	if !claim.ID.Valid || !claim.RuntimeID.Valid || !claim.DispatchedAt.Valid {
 		return nil, fmt.Errorf("start task: incomplete claim")
 	}
@@ -4562,10 +4584,7 @@ func (s *TaskService) StartTaskForClaim(ctx context.Context, claim db.LockAgentT
 	}
 	replay := task.Status == "running"
 	if !replay {
-		task, err = qtx.StartAgentTaskWithSupplement(ctx, db.StartAgentTaskWithSupplementParams{
-			TaskID:               task.ID,
-			EnableTaskSupplement: len(supplementSupport) > 0 && supplementSupport[0],
-		})
+		task, err = qtx.StartAgentTaskWithSupplement(ctx, startWithSupplementParams(task.ID, capabilities))
 		if err != nil {
 			return nil, fmt.Errorf("start claimed task: %w", err)
 		}

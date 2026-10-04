@@ -49,6 +49,8 @@ interface ChatSendModeButtonProps {
   mode: ChatSendMode;
   steerSupported?: boolean;
   steerProvider?: string;
+  /** "restart" when steering stops the CLI and resumes its session. */
+  steerMode?: string;
   /** False while the draft is empty or a send is in flight. */
   canSend: boolean;
   loading?: boolean;
@@ -66,6 +68,7 @@ export function ChatSendModeButton({
   mode,
   steerSupported,
   steerProvider,
+  steerMode,
   canSend,
   loading,
   onModeChange,
@@ -83,13 +86,17 @@ export function ChatSendModeButton({
         : t(($) => $.input.mode_restart);
   const description = (m: ChatSendMode) =>
     m === "steer"
-      ? t(($) => $.input.mode_steer_desc)
+      ? steerMode === "restart"
+        ? t(($) => $.input.mode_steer_restart_desc)
+        : t(($) => $.input.mode_steer_desc)
       : m === "queue"
         ? t(($) => $.input.mode_queue_desc)
         : t(($) => $.input.mode_restart_desc);
   const processLine = (m: ChatSendMode) =>
     m === "steer"
-      ? t(($) => $.input.mode_steer_process)
+      ? steerMode === "restart"
+        ? t(($) => $.input.mode_steer_restart_process)
+        : t(($) => $.input.mode_steer_process)
       : m === "queue"
         ? t(($) => $.input.mode_queue_process)
         : t(($) => $.input.mode_restart_process);
