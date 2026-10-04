@@ -10,7 +10,7 @@ import type { WorkThreadSnapshot } from "../types/work_thread";
 import type { Ask, CreateAskRequest, AnswerAskRequest } from "../types/ask";
 import type { LinkedView, LinkedViewParams, ListWorkspaceLinksResponse, WorkspaceLink, WorkspaceLinkAuditEntry } from "../types/workspace-link";
 import { configStore } from "../config";
-import { IssueGoalSchema, type CreateIssueGoalInput } from "../types";
+import { IssueGoalSchema, type CommentSendMode, type CreateIssueGoalInput } from "../types";
 import type {
   Issue,
   IssuePriority,
@@ -1953,6 +1953,7 @@ export class ApiClient {
     attachmentIds?: string[],
     suppressAgentIds?: string[],
     steerTaskIds?: string[],
+    mode?: CommentSendMode,
   ): Promise<Comment> {
     return this.fetch(`/api/issues/${issueId}/comments`, {
       method: "POST",
@@ -1963,6 +1964,7 @@ export class ApiClient {
         ...(attachmentIds?.length ? { attachment_ids: attachmentIds } : {}),
         ...(suppressAgentIds?.length ? { suppress_agent_ids: suppressAgentIds } : {}),
         ...(steerTaskIds?.length ? { steer_task_ids: steerTaskIds } : {}),
+        ...(mode ? { mode } : {}),
       }),
     });
   }
@@ -5097,6 +5099,17 @@ export class ApiClient {
       method: "POST",
       headers: workspaceHeader(workspaceSlug),
       body: JSON.stringify(data),
+    });
+  }
+
+  /** Hand a chat to another agent: a new chat with `to` whose first message summarises this one (DENE-1350). */
+  async handoffChatSession(
+    sessionId: string,
+    to: string,
+  ): Promise<{ from_session_id: string; session: ChatSession; message_id: string; task_id: string }> {
+    return this.fetch(`/api/chat/sessions/${sessionId}/handoff`, {
+      method: "POST",
+      body: JSON.stringify({ to }),
     });
   }
 

@@ -345,7 +345,11 @@
     "copy_conversation": "会話全体を Markdown でコピー",
     "conversation_copied": "会話をコピーしました",
     "copy_role_user": "あなた",
-    "copy_role_assistant": "アシスタント"
+    "copy_role_assistant": "アシスタント",
+    "handoff": "引き継ぐ…",
+    "handoff_hint": "この会話の要約から始まる新しいチャットを開きます",
+    "handoff_done": "{{name}} に引き継ぎました",
+    "handoff_failed": "引き継げませんでした"
   },
   "sharing": {
     "title": "権限を編集",

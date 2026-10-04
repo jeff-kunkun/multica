@@ -350,7 +350,11 @@
     "copy_conversation": "Copier la conversation en Markdown",
     "conversation_copied": "Conversation copiée",
     "copy_role_user": "Vous",
-    "copy_role_assistant": "Assistant"
+    "copy_role_assistant": "Assistant",
+    "handoff": "Confier à…",
+    "handoff_hint": "Ouvre une nouvelle discussion qui commence par le résumé de celle-ci",
+    "handoff_done": "Confiée à {{name}}",
+    "handoff_failed": "Impossible de confier la discussion"
   },
   "sharing": {
     "title": "Modifier l'accès",

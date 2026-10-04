@@ -748,6 +748,7 @@ export function ChatPage() {
           trailing={directNewChatButton}
           session={c.currentSession}
           agent={c.activeAgent}
+          handoffAgents={c.availableAgents}
           onArchive={handleArchive}
           loadAllMessages={() =>
             c.hasOlderMessages

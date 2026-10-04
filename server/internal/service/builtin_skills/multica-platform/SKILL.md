@@ -111,7 +111,9 @@ bounded transcript after choosing a session.
 
 To message a chat while its agent may still be replying, use
 `multica chat send --session <id> --content-file <path> --mode steer|queue|restart`.
-The same `--mode` works on `multica issue comment add`. What each mode costs,
+The same `--mode` works on `multica issue comment add`, which also takes
+`handoff` / `parallel` when you @ an agent other than the one running; a chat
+moves to another agent with `multica chat handoff --to <agent>`. What each mode costs,
 and what happens when the running CLI cannot steer, is in
 `references/run-control.md`.
 

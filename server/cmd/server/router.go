@@ -2811,6 +2811,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					// workspace and the session's owner (an agent task acts as
 					// that person). Not a public share.
 					r.Get("/handoff", h.GetChatSessionHandoff)
+					// Hand this chat to another agent: a new chat that opens
+					// with this one's summary (DENE-1350).
+					r.Post("/handoff", h.HandoffChatSession)
 					r.Get("/pending-task", h.GetPendingChatTask)
 					r.Delete("/queued-tasks", h.ClearQueuedChatTasks)
 					r.Post("/queued-tasks/{taskId}/prioritize", h.PrioritizeQueuedChatTask)
