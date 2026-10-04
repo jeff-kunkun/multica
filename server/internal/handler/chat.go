@@ -1635,6 +1635,9 @@ type PendingChatTaskResponse struct {
 	// for the unsupported reason. Both empty when nothing is replying.
 	SteerSupported bool   `json:"steer_supported"`
 	SteerProvider  string `json:"steer_provider,omitempty"`
+	// SteerMode says how a steer reaches the reply: "same" in the running
+	// process, "restart" by stopping the CLI and resuming its session.
+	SteerMode string `json:"steer_mode,omitempty"`
 }
 
 // waitReasonForStatus gates the stored hold text on the status it describes.
@@ -2024,6 +2027,9 @@ func (h *Handler) GetPendingChatTask(w http.ResponseWriter, r *http.Request) {
 	if target, replying, err := h.chatSteerTarget(r.Context(), session.ID); err == nil && replying {
 		resp.SteerSupported = chatSteerSupported(target)
 		resp.SteerProvider = target.Provider
+		if resp.SteerSupported {
+			resp.SteerMode = target.SteerMode
+		}
 	}
 	writeJSON(w, http.StatusOK, resp)
 }

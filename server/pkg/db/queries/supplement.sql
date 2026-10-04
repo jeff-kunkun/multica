@@ -10,11 +10,12 @@ WITH candidate AS MATERIALIZED (
       AND t.status IN ('dispatched', 'waiting_local_directory')
     FOR UPDATE OF t
 ), capability AS (
-    INSERT INTO task_supplement_capability (task_id, workspace_id, issue_id, capability)
-    SELECT id, workspace_id, issue_id, 'task-supplement-v1'
+    INSERT INTO task_supplement_capability (task_id, workspace_id, issue_id, capability, steer_mode)
+    SELECT id, workspace_id, issue_id, 'task-supplement-v1', @steer_mode::text
     FROM candidate
     WHERE @enable_task_supplement::boolean
-      AND provider IN ('codex', 'claude', 'grok')
+      -- The providers allowed this mode live in Go (service.steerProviders).
+      AND provider = ANY(@supplement_providers::text[])
       AND (issue_id IS NOT NULL OR chat_session_id IS NOT NULL)
     ON CONFLICT DO NOTHING
     RETURNING task_id
@@ -45,7 +46,6 @@ WITH locked_task AS MATERIALIZED (
       AND r.workspace_id = @workspace_id
       AND t.status = 'running'
       AND cap.capability = 'task-supplement-v1'
-      AND r.provider IN ('codex', 'claude', 'grok')
     FOR UPDATE OF t
 ), touched_issue AS (
     UPDATE issue i SET
@@ -109,7 +109,6 @@ WITH locked_task AS MATERIALIZED (
       AND r.workspace_id = @workspace_id
       AND t.status = 'running'
       AND cap.capability = 'task-supplement-v1'
-      AND r.provider IN ('codex', 'claude', 'grok')
     FOR UPDATE OF t
 ), inserted AS (
     INSERT INTO task_supplement (
@@ -149,14 +148,14 @@ WHERE s.workspace_id = @workspace_id
 ORDER BY s.created_at, s.task_id;
 
 -- name: ListTaskSupplementMetadata :many
-SELECT cap.task_id, cap.capability,
+SELECT cap.task_id, cap.capability, cap.steer_mode,
        COALESCE(array_agg(s.comment_id ORDER BY s.created_at, s.comment_id)
                 FILTER (WHERE s.comment_id IS NOT NULL), '{}'::uuid[])::uuid[] AS comment_ids
 FROM task_supplement_capability cap
 LEFT JOIN task_supplement s ON s.task_id = cap.task_id
 WHERE cap.workspace_id = @workspace_id
   AND cap.task_id = ANY(@task_ids::uuid[])
-GROUP BY cap.task_id, cap.capability;
+GROUP BY cap.task_id, cap.capability, cap.steer_mode;
 
 -- name: SettleTerminalTaskSupplements :execrows
 -- Application terminal transitions call this in the same transaction as the
@@ -274,7 +273,8 @@ WHERE comment_id = @comment_id AND workspace_id = @workspace_id;
 -- claimed head, with the capability its daemon negotiated (empty when the CLI
 -- cannot take a message mid-reply). No row: nothing is replying yet.
 SELECT t.id, t.status, t.runtime_id, r.provider,
-       COALESCE(cap.capability, '')::text AS capability
+       COALESCE(cap.capability, '')::text AS capability,
+       COALESCE(cap.steer_mode, '')::text AS steer_mode
 FROM agent_task_queue t
 JOIN agent_runtime r ON r.id = t.runtime_id
 LEFT JOIN task_supplement_capability cap ON cap.task_id = t.id
@@ -297,7 +297,6 @@ WITH locked_task AS MATERIALIZED (
       AND t.chat_session_id = @chat_session_id
       AND t.status = 'running'
       AND cap.capability = 'task-supplement-v1'
-      AND r.provider IN ('codex', 'claude', 'grok')
     FOR UPDATE OF t
 ), inserted AS (
     INSERT INTO chat_task_supplement (
@@ -402,7 +401,8 @@ WHERE task_id = @followup_task_id
 -- The running turns on an issue and whether each can read a comment
 -- mid-reply, so a steer can be refused up front with the reason.
 SELECT t.id, t.agent_id, r.provider,
-       COALESCE(cap.capability, '')::text AS capability
+       COALESCE(cap.capability, '')::text AS capability,
+       COALESCE(cap.steer_mode, '')::text AS steer_mode
 FROM agent_task_queue t
 JOIN agent_runtime r ON r.id = t.runtime_id
 LEFT JOIN task_supplement_capability cap ON cap.task_id = t.id

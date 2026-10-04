@@ -148,7 +148,9 @@ var chatSendCmd = &cobra.Command{
 happens when the agent is still replying (ignored when it is not):
 
   steer    read it after the current step, keep working on the original ask
-           (same process, same session; Claude, Codex and Grok only)
+           (same process, same session on Claude, Codex and Grok; Cursor,
+           Copilot, CodeArts, DevEco, Antigravity and OpenClaw restart the
+           CLI on the same session to read it right away)
   queue    answer it after this reply finishes (new process, same session;
            default)
   restart  stop the reply now and start over from this message (new process,

@@ -2443,6 +2443,7 @@ export const AgentTaskSchema = z.object({
   supplement_capability: z.string().optional().catch(undefined),
   supplement_comment_ids: OptionalStringArraySchema,
   can_supplement: z.boolean().optional().catch(undefined),
+  supplement_steer_mode: z.string().optional().catch(undefined),
   trigger_summary: z.string().optional(),
   kind: z.string().optional(),
   work_dir: z.string().optional().catch(undefined),
@@ -2714,6 +2715,7 @@ export const ChatPendingTaskSchema: z.ZodType<ChatPendingTask> = z.object({
   queued_tasks: ChatQueuedTasksSchema.optional(),
   steer_supported: z.boolean().optional().catch(undefined),
   steer_provider: z.string().optional().catch(undefined),
+  steer_mode: z.string().optional().catch(undefined),
 }).loose();
 
 export const EMPTY_CHAT_PENDING_TASK: ChatPendingTask = {};
