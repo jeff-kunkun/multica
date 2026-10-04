@@ -41,7 +41,8 @@ multica issue comment add <issue-id> --content-file ./msg.md --mode restart
 ```
 
 - `steer` reaches the run in one of two ways, decided by its CLI:
-  - Claude, Codex and Grok read it in the running process after the current step.
+  - Claude, Codex, Grok, OpenCode 1.x and Pi read it in the running process
+    after the current step.
   - One-shot CLIs (Cursor, Copilot, CodeArts, DevEco, Antigravity, OpenClaw)
     have no input channel while they work, so the daemon stops the CLI and
     resumes the same session at once with the message; the step in flight is

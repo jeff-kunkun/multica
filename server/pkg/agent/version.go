@@ -138,7 +138,7 @@ func SupportsTaskSupplement(provider, version string) bool {
 		// every supported version of these CLIs resumes by session id.
 		return true
 	}
-	var minimum string
+	var minimum, maximum string
 	switch provider {
 	case "codex":
 		// v0.100.0 exposes turn/steer with the expectedTurnId precondition.
@@ -151,12 +151,29 @@ func SupportsTaskSupplement(provider, version string) bool {
 		// Grok Build 1.0.14 supports atomic delivery of in-turn interjections
 		// through its x.ai/interject ACP extension.
 		minimum = "1.0.14"
+	case "opencode":
+		// The supplement plugin (supplementext/opencode.js) calls the 1.x SDK
+		// client and was verified against 1.18.34. 2.x moves runs to a
+		// background service and has no config-content channel to load it.
+		minimum = "1.18.0"
+		maximum = "2.0.0"
+	case "pi":
+		// The steering extension (supplementext/pi.js) was verified against
+		// Pi 0.73.1; older releases are untested, so they keep queueing.
+		minimum = "0.73.0"
 	default:
 		return false
 	}
 	detected, err := parseSemver(version)
 	floor, _ := parseSemver(minimum)
-	return err == nil && !detected.lessThan(floor)
+	if err != nil || detected.lessThan(floor) {
+		return false
+	}
+	if maximum != "" {
+		ceiling, _ := parseSemver(maximum)
+		return detected.lessThan(ceiling)
+	}
+	return true
 }
 
 // versionRe matches version strings like "2.1.100", "v2.0.0", or
