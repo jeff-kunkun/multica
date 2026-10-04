@@ -180,6 +180,20 @@
     "conclusion_deferred": "백로그 / 할 일로 되돌림",
     "conclusion_continuing": "중단, 다음 회차 계속"
   },
+  "driver": {
+    "none": "아무도 진행하지 않음",
+    "revived": "{{count}}번 재실행함",
+    "escalated": "상위 이슈 담당자에게 보고함",
+    "rerun": "같은 담당으로 재실행",
+    "reroute": "담당자 다시 선택",
+    "split": "하위 이슈로 분할",
+    "cancel": "이슈 취소",
+    "split_placeholder": "하위 이슈 제목",
+    "cancel_placeholder": "취소 사유",
+    "back": "뒤로",
+    "done": "처리했습니다",
+    "failed": "처리하지 못했습니다"
+  },
   "blocker_summary": {
     "title": "차단됨 · 근본 원인 {{count}}개",
     "needs_you": "{{count}}개는 조치가 필요합니다",

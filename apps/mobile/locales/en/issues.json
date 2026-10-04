@@ -124,6 +124,19 @@
     "all": "No issues in this workspace.",
     "members": "No issues assigned to a member."
   },
+  "driver": {
+    "none": "Nobody is moving this",
+    "revived": "rerun {{count}}×",
+    "escalated": "escalated to the parent's owner",
+    "actions": "Dispose",
+    "rerun": "Rerun on the same seat",
+    "reroute": "Let routing pick again",
+    "split": "Split into a sub-issue",
+    "cancel": "Cancel issue",
+    "split_prompt": "Sub-issue title",
+    "cancel_prompt": "Why cancel",
+    "failed": "Could not dispose of the issue"
+  },
   "menu": {
     "pin": "Pin",
     "unpin": "Unpin",

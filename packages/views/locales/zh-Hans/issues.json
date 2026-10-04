@@ -180,6 +180,20 @@
     "conclusion_deferred": "放回待规划 / 待办",
     "conclusion_continuing": "本轮暂停，下轮继续"
   },
+  "driver": {
+    "none": "没人在推进",
+    "revived": "已重跑 {{count}} 次",
+    "escalated": "已上报父票负责人",
+    "rerun": "原席位再跑",
+    "reroute": "重新选执行人",
+    "split": "拆成子票",
+    "cancel": "取消任务",
+    "split_placeholder": "子票标题",
+    "cancel_placeholder": "取消原因",
+    "back": "返回",
+    "done": "已处置",
+    "failed": "处置失败"
+  },
   "blocker_summary": {
     "title": "已阻塞 · {{count}} 个根因",
     "needs_you": "其中 {{count}} 个需要你",

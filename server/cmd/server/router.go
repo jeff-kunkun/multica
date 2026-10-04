@@ -2299,6 +2299,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					// One-shot handoff (DENE-863): server routes, dedupes and
 					// reports what actually landed — `multica issue handoff`.
 					r.Post("/handoff", h.HandoffIssue)
+					// What to do with a child nobody drives (DENE-1342): rerun,
+					// reroute, split or cancel — `multica issue dispose`.
+					r.Post("/dispose", h.DisposeIssue)
 					// One "叫人" entry (DENE-880): inbox, subscription, a
 					// visible @ and an open call the reply answers —
 					// `multica issue summon`.

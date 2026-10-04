@@ -1,6 +1,6 @@
 ---
 name: multica-platform
-description: "Multica platform actions: asks, open a chat, goals, inbox, project board, issues, sub-issues, wakeups, charts, routing, close protocol, stalls, mentions, agents, specialisation, squads, autopilot, projects, runtimes, progress, skill import, transfer, linked workspace, GitHub App. Not product code."
+description: "Multica: asks, open a chat, goals, inbox, project board, issues, sub-issues, wakeups, charts, routing, close protocol, stalls, driver, halt, mentions, agents, specialisation, squads, autopilot, projects, runtimes, progress, skill import, transfer, linked workspace, GitHub App. Not product code."
 user-invocable: false
 allowed-tools: Bash(multica *), Bash(git *), Bash(gh *)
 ---
@@ -20,6 +20,8 @@ Read the invariants below, then open the reference(s) your task actually needs
 | Open | When the task is about |
 |---|---|
 | `references/issues.md` | Issues: PR linking vs close intent, reading a linked PR's state, custom properties, status side effects, who else is running, charts vs attached files in a comment |
+| `references/drivers.md` | Who drives an open issue (`driver` in `issue get` / `issue children`), the patrol's rerun-then-escalate, and `multica issue dispose` for one nobody drives |
+| `references/run-control.md` | Stopping every run on one issue (halt / resume), the chain budget, and the run time limit |
 | `references/wakeups.md` | Issue wakeups: events, conditions (`--until-*`), timers, check-ins, runaway protection |
 | `references/stall-actions.md` | Automatic stall actions: 24-hour keep announcements, parent auto-close, 7-day undo, and CLI/API commands |
 | `references/goals.md` | Task goals: draft a completion line, confirm the human lock, track budget, and finish a goal |

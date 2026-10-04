@@ -189,6 +189,7 @@ import { PAGE_GUTTER, PageHeader } from "../../layout/page-header";
 import { ShareScopeDialog, ShareScopeTrigger } from "../../common/share-scope-dialog";
 import { WorkThreadPanel } from "../../common/work-thread-panel";
 import { GoalSection } from "./goal-section";
+import { IssueUndrivenRow, UndrivenRowMark } from "./issue-driver";
 import { openGoalCompletion } from "@multica/core/modals";
 
 import { ProgressRing } from "./progress-ring";
@@ -955,6 +956,7 @@ function SubIssueRow({
             {child.identifier}
           </span>
           <IssueAgentActivityIndicator issueId={child.id} />
+          <UndrivenRowMark driver={child.driver} />
           <span className="flex min-w-0 flex-1 items-center gap-1.5">
             <span
               className={cn(
@@ -3688,6 +3690,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
             )
           )}
           <IssueProgressBar issue={issue} className="mt-2" />
+          <IssueUndrivenRow issue={issue} readOnly={isGuest} />
           <div className="mt-3 flex flex-wrap items-center gap-2">
             {!isGuest && !issueGoal && (
               <Button

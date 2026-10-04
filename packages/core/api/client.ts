@@ -74,6 +74,8 @@ import type {
   Reaction,
   IssueReaction,
   IssueAgentGuardResponse,
+  IssueDisposeRequest,
+  IssueDisposeResponse,
   Workspace,
   WorkspaceRepo,
   ModuleKey,
@@ -333,6 +335,7 @@ import {
   AgentTaskPageSchema,
   AgentActivityBucketListSchema,
   IssueAgentGuardResponseSchema,
+  IssueDisposeResponseSchema,
   AttachmentResponseSchema,
   CancelTaskResponseSchema,
   ChatDraftRestoresResponseSchema,
@@ -3633,6 +3636,16 @@ export class ApiClient {
     return parseWithFallback(raw, IssueAgentGuardResponseSchema, { issue_id: issueId, halted: false }, {
       endpoint: "POST /api/issues/:id/resume",
     });
+  }
+
+  async disposeIssue(issueId: string, body: IssueDisposeRequest): Promise<IssueDisposeResponse> {
+    const raw = await this.fetch<unknown>(`/api/issues/${issueId}/dispose`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+    const parsed = IssueDisposeResponseSchema.safeParse(raw);
+    if (!parsed.success) throw new Error("Invalid dispose response");
+    return parsed.data;
   }
 
   async rerunIssue(issueId: string, taskId?: string): Promise<AgentTask> {

@@ -1250,6 +1250,21 @@ export const IssueTriggerPreviewSchema = z.object({
 // to {} so consumers never need to nil-guard `issue.metadata`.
 const IssueMetadataSchema = z.record(z.string(), z.union([z.string(), z.number(), z.boolean()])).default({});
 
+const IssueDriverSchema = z.object({
+  kind: z.string(),
+  reason: z.string().default(""),
+  revives: z.number().optional(),
+  escalated: z.boolean().optional(),
+}).loose();
+
+export const IssueDisposeResponseSchema = z.object({
+  action: z.enum(["rerun", "reroute", "split", "cancel"]),
+  status: z.string(),
+  driver: IssueDriverSchema.optional().catch(undefined),
+  created: z.array(z.string()).optional(),
+  note: z.string().optional(),
+}).loose();
+
 export const IssueAgentGuardResponseSchema = z.object({
   issue_id: z.string(),
   halted: z.boolean(),
@@ -1453,6 +1468,8 @@ export const IssueSchema = z.object({
   // the entry, not the whole issue. (DENE-371)
   origin_type: z.string().optional().catch(undefined),
   origin_id: z.string().optional().catch(undefined),
+  // Additive (DENE-1342): a malformed driver costs the hint, not the issue.
+  driver: IssueDriverSchema.optional().catch(undefined),
 }).loose();
 
 export const ListIssuesResponseSchema = z.object({
