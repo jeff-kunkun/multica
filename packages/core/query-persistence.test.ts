@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { QueryClient } from "@tanstack/react-query";
+import { QueryClient, QueryObserver } from "@tanstack/react-query";
 import type { StorageAdapter } from "./types/storage";
 import {
   clearPersistedQueryCache,
@@ -53,5 +53,31 @@ describe("persisted query cache", () => {
     expect(storage.keys?.()).toEqual([`${queryCacheStoragePrefix()}b`]);
     clearPersistedQueryCache(storage);
     expect(storage.keys?.()).toEqual([]);
+  });
+
+  it("refetches a restored query when its page mounts", async () => {
+    vi.useFakeTimers();
+    const storage = memoryStorage();
+    const writer = new QueryClient();
+    const stopWriter = createPersistedQueryCache(writer, storage, "user-a");
+    writer.setQueryData(["projects", "workspace-a"], [{ id: "old" }]);
+    await vi.advanceTimersByTimeAsync(60);
+    stopWriter();
+
+    const reader = new QueryClient();
+    const stopReader = createPersistedQueryCache(reader, storage, "user-a");
+    const queryFn = vi.fn().mockResolvedValue([{ id: "new" }]);
+    const observer = new QueryObserver(reader, {
+      queryKey: ["projects", "workspace-a"],
+      queryFn,
+    });
+    const unsubscribe = observer.subscribe(() => undefined);
+    await vi.waitFor(() => expect(queryFn).toHaveBeenCalledTimes(1));
+    await vi.waitFor(() =>
+      expect(reader.getQueryData(["projects", "workspace-a"])).toEqual([{ id: "new" }]),
+    );
+    unsubscribe();
+    stopReader();
+    vi.useRealTimers();
   });
 });
