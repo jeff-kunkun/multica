@@ -13,8 +13,10 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/blockwait"
+	"github.com/multica-ai/multica/server/internal/closeprotocol"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/integrations/ghsnapshot"
+	"github.com/multica-ai/multica/server/internal/issuestatus"
 	"github.com/multica-ai/multica/server/internal/routing"
 	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/util"
@@ -1017,4 +1019,128 @@ func (h *Handler) memberWakeMention(ctx context.Context, userID pgtype.UUID) str
 		name = "member"
 	}
 	return fmt.Sprintf("[@%s](mention://member/%s) ", name, uuidToString(userID))
+}
+
+// blockAttributionRejection is the 400 an agent gets for moving a ticket to
+// blocked without saying what kind of stop it is and what happens next. The
+// sub-issue blocker card reads exactly these two fields; without them the row
+// is blank and never counts as "needs you" (DENE-1301). A member dragging a
+// card is not asked for them.
+func blockAttributionRejection(req UpdateIssueRequest, actorType string) string {
+	if actorType != "agent" {
+		return ""
+	}
+	kind := strings.TrimSpace(deref(req.BlockKind))
+	action := strings.TrimSpace(deref(req.BlockAction))
+	const hint = "智能体把票改成 blocked 要写明卡点类型和下一步：--block-kind（decision / permission / external / dependency / capacity）配 --block-action（一句话，80 字以内）。更推荐用 `multica issue close --outcome blocked`，它会一并写好。"
+	if kind == "" || action == "" {
+		return hint
+	}
+	if !closeprotocol.AllowedBlockKind(kind) {
+		return fmt.Sprintf("--block-kind %q 不是允许的值。", kind) + hint
+	}
+	if len([]rune(action)) > 80 {
+		return "--block-action 超过 80 字。" + hint
+	}
+	return ""
+}
+
+// persistBlockAttribution writes the kind and next step a status move into
+// blocked carried, so the blocker card has the same two fields a blocked
+// close writes.
+func (h *Handler) persistBlockAttribution(ctx context.Context, issue db.Issue, req UpdateIssueRequest) {
+	kind := strings.TrimSpace(deref(req.BlockKind))
+	action := strings.TrimSpace(deref(req.BlockAction))
+	if kind == "" || action == "" || !closeprotocol.AllowedBlockKind(kind) {
+		return
+	}
+	h.setIssueMetaString(ctx, issue, closeprotocol.KeyBlockKind, kind)
+	h.setIssueMetaString(ctx, issue, closeprotocol.KeyBlockAction, truncateRunes(action, 80))
+}
+
+// executorReached reports whether a comment's trigger results include a run
+// for the issue's own executor — its agent, or a leader run under its squad.
+// A run handed to someone else the comment happened to @ does not count.
+func executorReached(issue db.Issue, enqueued map[string]commentEnqueueResult) bool {
+	if !issue.AssigneeType.Valid || !issue.AssigneeID.Valid {
+		return false
+	}
+	assignee := uuidToString(issue.AssigneeID)
+	for agentID, res := range enqueued {
+		switch res.status {
+		case DispatchQueued, DispatchCoalesced, DispatchSteered:
+		default:
+			continue
+		}
+		switch issue.AssigneeType.String {
+		case "agent":
+			if agentID == assignee {
+				return true
+			}
+		case "squad":
+			if res.execSquadID == assignee {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// resumeBlockedOnReply moves a blocked ticket back to in_progress when a
+// member's reply has just woken its executor (DENE-1301). Before this the
+// ticket kept saying "blocked, needs you" until the executor closed again,
+// although the person had already answered and the work was moving. The wait
+// keys are dropped as on any move out of blocked, and the blocked close record
+// is marked superseded rather than replaced: nobody closed anything.
+func (h *Handler) resumeBlockedOnReply(ctx context.Context, issue db.Issue, enqueued map[string]commentEnqueueResult, summonWoke bool) {
+	if issue.Status != issuestatus.Blocked || h.TxStarter == nil || !(summonWoke || executorReached(issue, enqueued)) {
+		return
+	}
+	var prev, updated db.Issue
+	err := func() error {
+		tx, err := h.TxStarter.Begin(ctx)
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback(ctx)
+		qtx := h.Queries.WithTx(tx)
+		var status string
+		if err := tx.QueryRow(ctx, `SELECT status FROM issue WHERE id = $1 AND workspace_id = $2 FOR UPDATE`, issue.ID, issue.WorkspaceID).Scan(&status); err != nil {
+			return err
+		}
+		if status != issuestatus.Blocked {
+			return pgx.ErrNoRows
+		}
+		prev, err = qtx.GetIssue(ctx, issue.ID)
+		if err != nil {
+			return err
+		}
+		updated, err = qtx.UpdateIssueStatus(ctx, db.UpdateIssueStatusParams{ID: issue.ID, WorkspaceID: issue.WorkspaceID, Status: issuestatus.InProgress})
+		if err != nil {
+			return err
+		}
+		// §6.1: the blocker fields belong to a blocked ticket only.
+		drop := append(blockwait.WaitKeys(), blockwait.KeyWatched, closeprotocol.KeyBlockKind, closeprotocol.KeyBlockAction)
+		for _, key := range drop {
+			if _, err := qtx.DeleteIssueMetadataKey(ctx, db.DeleteIssueMetadataKeyParams{ID: issue.ID, WorkspaceID: issue.WorkspaceID, Key: key}); err != nil && !errors.Is(err, pgx.ErrNoRows) {
+				return err
+			}
+		}
+		if at := blockwait.MetaString(parseIssueMetadata(prev.Metadata), closeprotocol.KeyAt); at != "" {
+			if err := setIssueMetaStringTx(ctx, qtx, updated, closeprotocol.KeySuperseded, at); err != nil {
+				return err
+			}
+		}
+		if updated, err = qtx.GetIssue(ctx, issue.ID); err != nil {
+			return err
+		}
+		return tx.Commit(ctx)
+	}()
+	if err != nil {
+		if !errors.Is(err, pgx.ErrNoRows) {
+			slog.Warn("block wait: resume on reply failed", "error", err, "issue_id", uuidToString(issue.ID))
+		}
+		return
+	}
+	h.publishBlockStatus(prev, updated)
 }

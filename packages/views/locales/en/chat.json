@@ -151,7 +151,9 @@
     "quick_actions_heading": "Follow-up questions",
     "quick_actions_aria": "Suggested follow-ups",
     "quick_actions_regenerate": "Regenerate suggestions",
-    "quick_actions_regenerate_failed": "Couldn't refresh suggestions. Please try again."
+    "quick_actions_regenerate_failed": "Couldn't refresh suggestions. Please try again.",
+    "spawned": "Opened chat",
+    "spawn_untitled": "New chat"
   },
   "session_history": {
     "untitled": "Untitled",
@@ -320,7 +322,8 @@
     "private_tag": "Private",
     "extra_tag": "Extra people",
     "show_more": "Show more ({{count}})",
-    "show_fewer": "Show fewer"
+    "show_fewer": "Show fewer",
+    "spawned": "Opened from another chat"
   },
   "header": {
     "view_profile": "View agent profile",
@@ -373,5 +376,10 @@
     "make_private": "Make selected private",
     "dismiss": "Got it"
   },
-  "title_locked": "Title locked — the agent will not rename it"
+  "title_locked": "Title locked — the agent will not rename it",
+  "origin": {
+    "from_prefix": "Opened from",
+    "from_suffix": "",
+    "from_hidden": "Opened from another chat"
+  }
 }

@@ -299,7 +299,9 @@ var issueStatusCmd = &cobra.Command{
 		"The original then lists it as a duplicate. Moving the issue to any status other\n" +
 		"than cancelled later removes the mark.\n\n" +
 		"Moving to blocked without --blocked-by / --wake-at / --wait-condition / --needs-human\n" +
-		"prints a warning: the platform cannot tell when to wake the issue. Prefer\n" +
+		"prints a warning: the platform cannot tell when to wake the issue. An agent must\n" +
+		"also pass --block-kind and --block-action (what the parent's blocker card shows);\n" +
+		"the server refuses the move without them. Prefer\n" +
 		"  multica issue close <id> --outcome blocked --blocked-by <DENE-N> --evidence-file ./close.md\n" +
 		"A blocked issue with no executor is seated by routing (parked, no run starts);\n" +
 		"the command reports whether that happened and, if not, why.",
@@ -828,6 +830,8 @@ func init() {
 	issueStatusCmd.Flags().String("wait-probe", "", "How to check the wait condition")
 	issueStatusCmd.Flags().String("wait-timeout", "", "RFC3339 deadline for the wait condition")
 	issueStatusCmd.Flags().String("needs-human", "", "Member UUID a blocked issue is waiting on")
+	issueStatusCmd.Flags().String("block-kind", "", "Kind of stop for blocked: decision, permission, external, dependency or capacity (required for agents)")
+	issueStatusCmd.Flags().String("block-action", "", "One-line next step for blocked, at most 80 characters (required for agents)")
 	registerIssueCloseFlags(issueCloseCmd)
 	registerIssueHandoffFlags(issueHandoffCmd)
 	issueStatusCmd.Flags().String("no-code", "", "Why this issue has no PR the platform can see: docs or research, or code merged outside GitHub (give the MR link). An agent moving an issue to in_review without a linked open/merged PR is refused unless this is given")
@@ -2261,6 +2265,8 @@ func runIssueStatus(cmd *cobra.Command, args []string) error {
 		{"wait-probe", "wait_probe"},
 		{"wait-timeout", "wait_timeout"},
 		{"needs-human", "needs_human"},
+		{"block-kind", "block_kind"},
+		{"block-action", "block_action"},
 		{"no-code", "no_code_reason"},
 	} {
 		if v, _ := cmd.Flags().GetString(pair.flag); v != "" {
