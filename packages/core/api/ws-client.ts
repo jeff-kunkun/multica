@@ -144,7 +144,17 @@ export class WSClient {
       }
       if ((msg as any).type === "auth_ack") { this.onAuthenticated(); return; }
       if ((msg as any).type === "resume_ack") { this.clearResumeTimer(); return; }
-      if ((msg as any).type === "resume_failed") { this.clearResumeTimer(); for (const cb of this.onReconnectCallbacks) { try { cb(); } catch {} } return; }
+      if ((msg as any).type === "resume_failed") {
+        this.clearResumeTimer();
+        for (const cb of this.onReconnectCallbacks) {
+          try {
+            cb();
+          } catch {
+            // Ignore reconnect callback errors.
+          }
+        }
+        return;
+      }
       if (msg.event_id) this.lastEventID = msg.event_id;
       this.logger.debug("received", msg.type);
       const eventHandlers = this.handlers.get(msg.type);
@@ -199,8 +209,25 @@ export class WSClient {
     if (recoveredConnection) {
       if (this.lastEventID) {
         this.send({ type: "resume", payload: { event_id: this.lastEventID } } as unknown as WSMessage);
-        this.resumeTimer = setTimeout(() => { this.resumeTimer = null; for (const cb of this.onReconnectCallbacks) { try { cb(); } catch {} } }, 3000);
-      } else { for (const cb of this.onReconnectCallbacks) { try { cb(); } catch {} } }
+        this.resumeTimer = setTimeout(() => {
+          this.resumeTimer = null;
+          for (const cb of this.onReconnectCallbacks) {
+            try {
+              cb();
+            } catch {
+              // Ignore reconnect callback errors.
+            }
+          }
+        }, 3000);
+      } else {
+        for (const cb of this.onReconnectCallbacks) {
+          try {
+            cb();
+          } catch {
+            // Ignore reconnect callback errors.
+          }
+        }
+      }
     }
     this.hasConnectedBefore = true;
   }
