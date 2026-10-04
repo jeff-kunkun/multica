@@ -287,7 +287,7 @@ function RecipientActionMenu({
                   <span className="flex min-w-0 flex-col gap-0.5">
                     <span>{actionLabel(action, entry.state, t)}</span>
                     {description && <span className="text-caption text-muted-foreground">{description}</span>}
-                    {processLine && <span className="text-caption text-muted-foreground/80">{processLine}</span>}
+                    {processLine && <span className="text-caption text-muted-foreground">{processLine}</span>}
                   </span>
                 </DropdownMenuRadioItem>
               </div>

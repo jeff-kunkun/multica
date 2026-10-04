@@ -113,7 +113,7 @@ export function ChatSendModeButton({
           {disabled ? steerReason : description(m)}
         </span>
         {!disabled && (
-          <span className="text-caption text-muted-foreground/80">{processLine(m)}</span>
+          <span className="text-caption text-muted-foreground">{processLine(m)}</span>
         )}
       </span>
     );
