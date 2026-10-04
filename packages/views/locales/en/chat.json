@@ -352,7 +352,11 @@
     "copy_conversation": "Copy conversation as Markdown",
     "conversation_copied": "Conversation copied",
     "copy_role_user": "You",
-    "copy_role_assistant": "Assistant"
+    "copy_role_assistant": "Assistant",
+    "handoff": "Hand to…",
+    "handoff_hint": "Opens a new chat that starts with this one's summary",
+    "handoff_done": "Handed to {{name}}",
+    "handoff_failed": "Couldn't hand the chat over"
   },
   "sharing": {
     "title": "Edit access",

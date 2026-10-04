@@ -59,3 +59,22 @@ multica issue comment add <issue-id> --content-file ./msg.md --mode restart
   the current run belongs to, so a run cannot queue a turn for itself.
 - Without `--mode`, `comment add` keeps its existing behaviour (a busy agent
   answers after its current run).
+
+## Hand work to another agent
+
+When agent A is running on an issue and the comment @-mentions a different
+agent B, `comment add` takes two more modes:
+
+| Mode | What happens |
+| --- | --- |
+| `handoff` | Every run on the issue whose agent the comment does not wake stops (your own run is spared). The comment becomes the state card's handoff note, and B starts a new session that opens with that card. |
+| `parallel` | A keeps going; B starts its own run alongside it. |
+
+```bash
+multica issue comment add <issue-id> --content-file ./take-over.md --mode handoff
+```
+
+`handoff` without an @agent is refused. To give a chat to another agent, run
+`multica chat handoff --to <agent> [--session <id|url>]`: it opens a new chat
+with that agent whose first message summarises this one, and leaves the old
+chat as it is. Only the chat's owner can hand it over.

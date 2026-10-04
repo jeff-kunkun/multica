@@ -32,7 +32,8 @@ import type { RecipientEntry } from "../hooks/use-recipient-actions";
 // Each recipient's chip says what Send will do to it, and its menu offers only
 // what that recipient's current state allows: a running turn can take the
 // message now, after the turn, or instead of it; an idle or queued agent can
-// only start (or fold the message into its queued run) or be skipped.
+// only start (or fold the message into its queued run) or be skipped. While
+// another agent runs here, starting means taking over or working alongside.
 // One recipient renders as a single chip. Several collapse to an overlapping
 // avatar stack, mirroring WorkspaceAgentWorkingChip on the issues header, with
 // one row and menu per agent in a click-opened Popover.
@@ -95,7 +96,7 @@ function stateLabel(state: AgentRunState, t: IssuesT): string | null {
   }
 }
 
-function actionLabel(action: RecipientAction, state: AgentRunState, t: IssuesT): string {
+function actionLabel(action: RecipientAction, state: AgentRunState, name: string, t: IssuesT): string {
   switch (action) {
     case "steer":
       return t(($) => $.comment.recipient_steer);
@@ -105,6 +106,10 @@ function actionLabel(action: RecipientAction, state: AgentRunState, t: IssuesT):
       return t(($) => $.comment.recipient_restart);
     case "skip":
       return t(($) => $.comment.recipient_skip);
+    case "handoff":
+      return t(($) => $.comment.recipient_handoff, { name });
+    case "parallel":
+      return t(($) => $.comment.recipient_parallel);
     default:
       return state.kind === "queued"
         ? t(($) => $.comment.recipient_join)
@@ -131,6 +136,10 @@ function actionDescription(action: RecipientAction, entry: RecipientEntry, prese
       return t(($) => $.comment.recipient_restart_desc);
     case "skip":
       return t(($) => $.comment.recipient_skip_desc);
+    case "handoff":
+      return t(($) => $.comment.recipient_handoff_desc, { name });
+    case "parallel":
+      return t(($) => $.comment.recipient_parallel_desc, { name });
     case "start":
       return entry.state.kind === "queued" ? t(($) => $.comment.recipient_join_desc, { name }) : presenceLine;
     default:
@@ -294,7 +303,7 @@ function RecipientActionMenu({
                 {action === "skip" && <DropdownMenuSeparator />}
                 <DropdownMenuRadioItem value={action} className="items-start py-1.5 max-sm:min-h-11">
                   <span className="flex min-w-0 flex-col gap-0.5">
-                    <span>{actionLabel(action, entry.state, t)}</span>
+                    <span>{actionLabel(action, entry.state, entry.agent.name, t)}</span>
                     {description && <span className="text-caption text-muted-foreground">{description}</span>}
                     {processLine && <span className="text-caption text-muted-foreground">{processLine}</span>}
                   </span>
@@ -317,7 +326,7 @@ function SingleRecipientChip({
   onActionChange: (agentId: string, action: RecipientAction) => void;
   t: IssuesT;
 }) {
-  const label = actionLabel(entry.action, entry.state, t);
+  const label = actionLabel(entry.action, entry.state, entry.agent.name, t);
   // The avatar carries "who"; the sentence carries only the outcome, so it
   // stays fixed-width and never truncates on long agent names.
   return (
@@ -422,7 +431,7 @@ function MultiRecipientChip({
         </div>
         <div className="flex flex-col">
           {recipients.map((entry) => {
-            const label = actionLabel(entry.action, entry.state, t);
+            const label = actionLabel(entry.action, entry.state, entry.agent.name, t);
             const state = stateLabel(entry.state, t);
             return (
               <div key={entry.agent.id} className="flex min-w-0 items-center gap-2 rounded-md px-1.5 py-1">

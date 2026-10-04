@@ -489,7 +489,17 @@ replying on this issue (omit it for the usual behaviour):
            process, same session; the half-done step is dropped)
 
 When no woken agent's running CLI can steer, the comment is refused with the
-reason and the modes that work; nothing is posted.`,
+reason and the modes that work; nothing is posted.
+
+When another agent is running and you @ a different one, choose how the
+@agent joins:
+
+  handoff   stop every other agent's run here, write the comment into the
+            state card as the handoff note, and start the @agent in a new
+            session that opens with that card (your own run is not stopped)
+  parallel  leave the running agent alone; the @agent starts its own run
+
+  multica issue comment add <issue-id> --content-file ./take-over.md --mode handoff`,
 	Args: exactArgs(1),
 	RunE: runIssueCommentAdd,
 }
@@ -933,7 +943,7 @@ func init() {
 	issueCommentAddCmd.Flags().String("verdict", "", "Acceptance verdict written as its own line: pass or hold. This is what merges and closes; the words 通过 in the body do not")
 	issueCommentAddCmd.Flags().StringSlice("attachment", nil, "File path(s) to attach (can be specified multiple times). Non-image files, HTML included, show as file cards that open in the viewer; to render a chart inside the comment, put a ```html or ```mermaid block in the content instead")
 	issueCommentAddCmd.Flags().String("output", "json", "Output format: table or json")
-	issueCommentAddCmd.Flags().String("mode", "", "For agents still replying: steer, queue or restart (see --help)")
+	issueCommentAddCmd.Flags().String("mode", "", "steer, queue or restart for agents still replying; handoff or parallel when you @ another agent (see --help)")
 
 	// issue comment update
 	issueCommentUpdateCmd.Flags().String("content", "", "New comment content (decodes \\n, \\r, \\t, \\\\; pipe via --content-stdin for multi-line bodies or to preserve literal backslashes)")
@@ -3216,9 +3226,9 @@ func runIssueCommentAdd(cmd *cobra.Command, args []string) error {
 	}
 	mode, _ := cmd.Flags().GetString("mode")
 	switch mode {
-	case "", "steer", "queue", "restart":
+	case "", "steer", "queue", "restart", "handoff", "parallel":
 	default:
-		return fmt.Errorf("--mode must be steer, queue or restart")
+		return fmt.Errorf("--mode must be steer, queue, restart, handoff or parallel")
 	}
 
 	client, err := newAPIClient(cmd)

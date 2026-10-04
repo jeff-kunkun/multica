@@ -3197,6 +3197,7 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 				}
 			}
 		}
+		resp.IssueHandoffCard = h.handoffCardForRun(r.Context(), issue, agent, *task)
 
 		// Issue-state delta (MUL-7344). Every field below already sits on the
 		// `issue` row this claim loaded, so this costs one extra read — the
