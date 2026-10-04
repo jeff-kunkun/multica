@@ -718,6 +718,21 @@ type ChatSessionRead struct {
 	LastReadAt    pgtype.Timestamptz `json:"last_read_at"`
 }
 
+type ChatTaskSupplement struct {
+	TaskID         pgtype.UUID        `json:"task_id"`
+	ChatMessageID  pgtype.UUID        `json:"chat_message_id"`
+	FollowupTaskID pgtype.UUID        `json:"followup_task_id"`
+	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
+	ChatSessionID  pgtype.UUID        `json:"chat_session_id"`
+	AuthorID       pgtype.UUID        `json:"author_id"`
+	Status         string             `json:"status"`
+	FailureReason  pgtype.Text        `json:"failure_reason"`
+	AttemptCount   int32              `json:"attempt_count"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+	DeliveredAt    pgtype.Timestamptz `json:"delivered_at"`
+}
+
 type ChatVisibilityNotice struct {
 	WorkspaceID pgtype.UUID        `json:"workspace_id"`
 	UserID      pgtype.UUID        `json:"user_id"`

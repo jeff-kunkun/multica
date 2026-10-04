@@ -132,6 +132,7 @@ import type {
   PendingChatTasksResponse,
   HasPendingChatTasksResponse,
   SendChatMessageResponse,
+  ChatSendMode,
   StartMikaOnboardingResponse,
   CancelTaskResponse,
   Project,
@@ -5225,14 +5226,17 @@ export class ApiClient {
     sessionId: string,
     content: string,
     attachmentIds?: string[],
+    mode?: ChatSendMode,
   ): Promise<SendChatMessageResponse> {
     const body: {
       content: string;
       attachment_ids?: string[];
+      mode?: ChatSendMode;
     } = { content };
     if (attachmentIds && attachmentIds.length > 0) {
       body.attachment_ids = attachmentIds;
     }
+    if (mode) body.mode = mode;
     const raw = await this.fetch<unknown>(`/api/chat/sessions/${sessionId}/messages`, {
       method: "POST",
       body: JSON.stringify(body),

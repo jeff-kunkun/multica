@@ -1925,6 +1925,8 @@ export function useRealtimeSync(
         qc.invalidateQueries({ queryKey: chatKeys.session(id, payload.chat_session_id) });
       }
       qc.invalidateQueries({ queryKey: chatKeys.messages(payload.chat_session_id) });
+      // A steered message changing hands (DENE-1346) also moves the queue.
+      qc.invalidateQueries({ queryKey: chatKeys.pendingTask(payload.chat_session_id) });
     });
 
     const unsubChatSessionDeleted = ws.on("chat:session_deleted", (p) => {

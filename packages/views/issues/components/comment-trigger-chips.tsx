@@ -104,7 +104,7 @@ function actionLabel(action: RecipientAction, state: AgentRunState, t: IssuesT):
     case "restart":
       return t(($) => $.comment.recipient_restart);
     case "skip":
-      return t(($) => $.comment.trigger_wont_trigger);
+      return t(($) => $.comment.recipient_skip);
     default:
       return state.kind === "queued"
         ? t(($) => $.comment.recipient_join)
@@ -117,13 +117,31 @@ function actionDescription(action: RecipientAction, entry: RecipientEntry, prese
   const name = entry.agent.name;
   switch (action) {
     case "steer":
-      return t(($) => $.comment.recipient_steer_desc, { name });
+      return t(($) => $.comment.recipient_steer_desc);
     case "after_run":
       return t(($) => $.comment.recipient_after_run_desc);
     case "restart":
       return t(($) => $.comment.recipient_restart_desc);
+    case "skip":
+      return t(($) => $.comment.recipient_skip_desc);
     case "start":
       return entry.state.kind === "queued" ? t(($) => $.comment.recipient_join_desc, { name }) : presenceLine;
+    default:
+      return null;
+  }
+}
+
+// What the choice does to the CLI process and the model's session. Only a
+// native-steer CLI (Claude, Codex, Grok) negotiates the run capability that
+// makes "steer" available, so its line is that tier's cost.
+function actionProcessLine(action: RecipientAction, t: IssuesT): string | null {
+  switch (action) {
+    case "steer":
+      return t(($) => $.comment.recipient_steer_process);
+    case "after_run":
+      return t(($) => $.comment.recipient_after_run_process);
+    case "restart":
+      return t(($) => $.comment.recipient_restart_process);
     default:
       return null;
   }
@@ -261,13 +279,15 @@ function RecipientActionMenu({
         >
           {entry.actions.map((action) => {
             const description = actionDescription(action, entry, presenceLine, t);
+            const processLine = actionProcessLine(action, t);
             return (
               <div key={action}>
                 {action === "skip" && <DropdownMenuSeparator />}
-                <DropdownMenuRadioItem value={action} className="items-start py-1.5">
+                <DropdownMenuRadioItem value={action} className="items-start py-1.5 max-sm:min-h-11">
                   <span className="flex min-w-0 flex-col gap-0.5">
                     <span>{actionLabel(action, entry.state, t)}</span>
                     {description && <span className="text-caption text-muted-foreground">{description}</span>}
+                    {processLine && <span className="text-caption text-muted-foreground">{processLine}</span>}
                   </span>
                 </DropdownMenuRadioItem>
               </div>

@@ -20,7 +20,7 @@ import (
 
 var chatCmd = &cobra.Command{
 	Use:   "chat",
-	Short: "Read a chat conversation",
+	Short: "Read a chat conversation, or send to one",
 }
 
 var chatListCmd = &cobra.Command{
@@ -141,6 +141,29 @@ brief) returns the chat already opened instead of a second one.
 	RunE: runChatOpen,
 }
 
+var chatSendCmd = &cobra.Command{
+	Use:   "send [text]",
+	Short: "Send a message to a chat, steering, queueing or restarting its reply",
+	Long: `Send a message to a chat as if typed in its composer. --mode decides what
+happens when the agent is still replying (ignored when it is not):
+
+  steer    read it after the current step, keep working on the original ask
+           (same process, same session; Claude, Codex and Grok only)
+  queue    answer it after this reply finishes (new process, same session;
+           default)
+  restart  stop the reply now and start over from this message (new process,
+           same session; the half-done step is dropped)
+
+When the running CLI cannot steer, the send is refused with the reason and
+the modes that work; nothing is sent.
+
+  multica chat send --session <id|url> "Use the staging database instead" --mode steer
+  multica chat send --session <id|url> --content-file ./msg.md --mode queue
+`,
+	Args: cobra.MaximumNArgs(1),
+	RunE: runChatSend,
+}
+
 func init() {
 	for _, c := range []*cobra.Command{chatListCmd, chatSearchCmd} {
 		c.Flags().String("project", "", "Filter to a project id (defaults to the current project)")
@@ -164,6 +187,11 @@ func init() {
 	chatToGoalCmd.Flags().String("output", "json", "Output format: table or json")
 	chatCmd.AddCommand(chatTitleCmd)
 	chatCmd.AddCommand(chatOpenCmd)
+	chatCmd.AddCommand(chatSendCmd)
+	chatSendCmd.Flags().String("session", "", "Chat session id or URL (required)")
+	chatSendCmd.Flags().String("content-file", "", "Read the message from this file instead of the argument")
+	chatSendCmd.Flags().String("mode", "queue", "While the agent is replying: steer, queue or restart")
+	chatSendCmd.Flags().String("output", "json", "Output format: table or json")
 	chatOpenCmd.Flags().String("agent", "", "Agent to talk to: name or id (required)")
 	chatOpenCmd.Flags().String("brief-file", "", "File holding the first message for the agent (required)")
 	chatOpenCmd.Flags().String("title", "", "Chat title, Project · topic")
@@ -595,4 +623,72 @@ func runChatOpen(cmd *cobra.Command, _ []string) error {
 		return nil
 	}
 	return cli.PrintJSON(os.Stdout, out)
+}
+
+func runChatSend(cmd *cobra.Command, args []string) error {
+	// No MULTICA_CHAT_SESSION_ID fallback: a chat run sending to the chat it
+	// is answering would queue a turn for itself.
+	session, _ := cmd.Flags().GetString("session")
+	ref, err := parseChatSessionLinkRef(session)
+	if err != nil {
+		return fmt.Errorf("chat send: --session is required: %w", err)
+	}
+	mode, _ := cmd.Flags().GetString("mode")
+	switch mode {
+	case "steer", "queue", "restart":
+	default:
+		return fmt.Errorf("chat send: --mode must be steer, queue or restart")
+	}
+	content := ""
+	if len(args) == 1 {
+		content = args[0]
+	}
+	if path, _ := cmd.Flags().GetString("content-file"); path != "" {
+		if content != "" {
+			return fmt.Errorf("chat send: pass the message as an argument or --content-file, not both")
+		}
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			return fmt.Errorf("chat send: read content file: %w", err)
+		}
+		content = string(raw)
+	}
+	if strings.TrimSpace(content) == "" {
+		return fmt.Errorf("chat send: message is empty")
+	}
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := cli.APIContext(context.Background())
+	defer cancel()
+	output, _ := cmd.Flags().GetString("output")
+	var out map[string]any
+	path := "/api/chat/sessions/" + url.PathEscape(ref.ID) + "/messages"
+	if err := client.PostJSON(ctx, path, map[string]any{"content": content, "mode": mode}, &out); err != nil {
+		return sendModeRefusal(err, output, "chat send")
+	}
+	if output == "table" {
+		fmt.Printf("Sent (%v): message %v\n", out["mode"], out["message_id"])
+		return nil
+	}
+	return cli.PrintJSON(os.Stdout, out)
+}
+
+// sendModeRefusal turns a steer refusal into the reason plus the modes that
+// still work, shared by chat send and issue comment add.
+func sendModeRefusal(err error, output, verb string) error {
+	var httpErr *cli.HTTPError
+	var refusal struct {
+		Error          string   `json:"error"`
+		Code           string   `json:"code"`
+		AvailableModes []string `json:"available_modes"`
+	}
+	if errors.As(err, &httpErr) && json.Unmarshal([]byte(httpErr.Body), &refusal) == nil && refusal.Code == "steer_unsupported" {
+		if output != "table" {
+			_ = cli.PrintJSON(os.Stdout, refusal)
+		}
+		return fmt.Errorf("%s: cannot steer: %s (use --mode %s)", verb, refusal.Error, strings.Join(refusal.AvailableModes, " or --mode "))
+	}
+	return fmt.Errorf("%s: %w", verb, err)
 }

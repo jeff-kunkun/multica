@@ -23,3 +23,30 @@ The same settings section holds a run time limit
 a round boundary, not a wrong result. The platform continues the same CLI session and working directory
 until the attempt budget is spent, and the continuation is told to close out finished work and split what remains.
 When the budget is spent the issue becomes `blocked` with a comment instead of sitting in `todo`; a sub-issue also leaves a short note on its parent.
+
+## Message a reply that is still running
+
+A chat message or an issue comment can reach an agent mid-reply in three ways.
+`multica chat send` and `multica issue comment add` both take `--mode`:
+
+| Mode | What happens | CLI process | Session |
+| --- | --- | --- | --- |
+| `steer` | Read after the current step; the original work continues | Same process | Same session |
+| `queue` | Handled once this reply / run finishes (default for chat send) | New process | Resumes the same session |
+| `restart` | Stops the reply now and starts over from this message; the half-done step is dropped | New process | Resumes the same session |
+
+```bash
+multica chat send --session <chat-id> --content-file ./msg.md --mode steer
+multica issue comment add <issue-id> --content-file ./msg.md --mode restart
+```
+
+- Only Claude, Codex and Grok can take `steer` today. Any other CLI, or one too
+  old to negotiate it, is refused with exit status 1, the reason, and
+  `available_modes: [queue, restart]` in the JSON body; nothing is posted, so
+  resend with one of those.
+- `steer` on a comment is for people only and is text-only (no attachments).
+- With nothing running, every mode simply sends/posts and starts a run.
+- `chat send` needs an explicit `--session`; it never falls back to the chat
+  the current run belongs to, so a run cannot queue a turn for itself.
+- Without `--mode`, `comment add` keeps its existing behaviour (a busy agent
+  answers after its current run).

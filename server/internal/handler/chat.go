@@ -1082,6 +1082,10 @@ func (h *Handler) DeleteChatSession(w http.ResponseWriter, r *http.Request) {
 type SendChatMessageRequest struct {
 	Content       string   `json:"content"`
 	AttachmentIDs []string `json:"attachment_ids"`
+	// Mode says what to do when the agent is still replying: steer (read it
+	// mid-reply), queue (after the reply; default) or restart (stop the reply
+	// and start over from this message). Ignored when nothing is replying.
+	Mode string `json:"mode,omitempty"`
 }
 
 type SendChatMessageResponse struct {
@@ -1089,6 +1093,9 @@ type SendChatMessageResponse struct {
 	TaskID        string `json:"task_id"`
 	SupportsQueue bool   `json:"supports_queue"`
 	Queued        bool   `json:"queued"`
+	// Mode is what actually happened: steer, queue, restart, or start when
+	// nothing was replying. A steer whose reply ended first reports queue.
+	Mode string `json:"mode"`
 	// AttachmentIDs are the attachment rows actually bound to this message by
 	// the server. The client diffs these against the ids it requested so it
 	// can warn the user when an attachment silently failed to bind — no extra
@@ -1122,6 +1129,11 @@ func (h *Handler) SendChatMessage(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Content == "" {
 		writeError(w, http.StatusBadRequest, "content is required")
+		return
+	}
+	mode, ok := normalizeSendMode(req.Mode)
+	if !ok {
+		writeError(w, http.StatusBadRequest, "mode must be steer, queue or restart")
 		return
 	}
 
@@ -1209,6 +1221,29 @@ func (h *Handler) SendChatMessage(w http.ResponseWriter, r *http.Request) {
 		h.writeDispatchBlocked(w, http.StatusForbidden, ReasonInvocationNotAllowed)
 		return
 	}
+	// Steer and restart act on the reply in progress, so decide them before
+	// anything is persisted: a refusal must leave no message behind.
+	var steerTarget db.GetChatSteerTargetRow
+	steerable := false
+	switch mode {
+	case sendModeSteer:
+		target, replying, err := h.chatSteerTarget(r.Context(), session.ID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to load the current reply")
+			return
+		}
+		if replying && !chatSteerSupported(target) {
+			writeSteerUnsupported(w, steerUnsupportedReason(target.Provider))
+			return
+		}
+		steerTarget, steerable = target, replying
+	case sendModeRestart:
+		// Stopping a reply is the creator's call, same as the stop button.
+		if actorType != "agent" && uuidToString(session.CreatorID) != userID {
+			writeError(w, http.StatusForbidden, "only the person who started this chat can stop its reply")
+			return
+		}
+	}
 
 	// Persist the whole turn atomically (MUL-4351): the owning task, the user
 	// message bound to that task (so it belongs to the task's immutable input
@@ -1288,11 +1323,29 @@ func (h *Handler) SendChatMessage(w http.ResponseWriter, r *http.Request) {
 	// (chat_recap.go) titles the chat from the opening plus the reply
 	// (DENE-1037). Until then the first-message title stands.
 
+	applied := "start"
+	if sent.Queued {
+		applied = sendModeQueue
+		switch {
+		case mode == sendModeSteer && steerable:
+			applied = h.steerChatFollowup(r.Context(), session, steerTarget, msg, task, msg.SenderUserID)
+		case mode == sendModeRestart:
+			restarted, err := h.restartChatReply(r, session, task, actorType, actorID)
+			if err != nil {
+				slog.Warn("restart chat reply failed; message stays queued",
+					"chat_session_id", resolvedSessionID, "task_id", uuidToString(task.ID), "error", err)
+			} else if restarted {
+				applied = sendModeRestart
+			}
+		}
+	}
+
 	writeJSON(w, http.StatusCreated, SendChatMessageResponse{
 		MessageID:     uuidToString(msg.ID),
 		TaskID:        uuidToString(task.ID),
 		SupportsQueue: true,
 		Queued:        sent.Queued,
+		Mode:          applied,
 		CreatedAt:     timestampToString(task.CreatedAt),
 		AttachmentIDs: boundAttachmentIDs,
 	})
@@ -1577,6 +1630,11 @@ type PendingChatTaskResponse struct {
 	WaitReason    string                   `json:"wait_reason,omitempty"`
 	SupportsQueue bool                     `json:"supports_queue"`
 	QueuedTasks   []QueuedChatTaskResponse `json:"queued_tasks,omitempty"`
+	// SteerSupported: the reply in progress can read a message mid-reply, so
+	// the composer defaults to steer. SteerProvider names its CLI either way,
+	// for the unsupported reason. Both empty when nothing is replying.
+	SteerSupported bool   `json:"steer_supported"`
+	SteerProvider  string `json:"steer_provider,omitempty"`
 }
 
 // waitReasonForStatus gates the stored hold text on the status it describes.
@@ -1596,6 +1654,9 @@ type QueuedChatTaskResponse struct {
 	CreatedAt string `json:"created_at"`
 	MessageID string `json:"message_id,omitempty"`
 	Content   string `json:"content,omitempty"`
+	// Steering: this message was steered into the reply and is waiting to be
+	// read. Read: it leaves the queue. Not read: it runs after the reply.
+	Steering bool `json:"steering,omitempty"`
 }
 
 type PrioritizeQueuedChatTaskResponse struct {
@@ -1930,6 +1991,12 @@ func (h *Handler) GetPendingChatTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	steering := map[string]bool{}
+	if ids, err := h.Queries.ListSteeringChatFollowups(r.Context(), session.ID); err == nil {
+		for _, id := range ids {
+			steering[uuidToString(id)] = true
+		}
+	}
 	head := tasks[0]
 	queued := make([]QueuedChatTaskResponse, 0, len(tasks)-1)
 	for _, task := range tasks[1:] {
@@ -1942,17 +2009,23 @@ func (h *Handler) GetPendingChatTask(w http.ResponseWriter, r *http.Request) {
 			CreatedAt: timestampToString(task.CreatedAt),
 			MessageID: uuidToString(task.MessageID),
 			Content:   task.Content,
+			Steering:  steering[uuidToString(task.ID)],
 		})
 	}
 
-	writeJSON(w, http.StatusOK, PendingChatTaskResponse{
+	resp := PendingChatTaskResponse{
 		TaskID:        uuidToString(head.ID),
 		Status:        head.Status,
 		CreatedAt:     timestampToString(head.CreatedAt),
 		WaitReason:    waitReasonForStatus(head.Status, head.WaitReason),
 		SupportsQueue: true,
 		QueuedTasks:   queued,
-	})
+	}
+	if target, replying, err := h.chatSteerTarget(r.Context(), session.ID); err == nil && replying {
+		resp.SteerSupported = chatSteerSupported(target)
+		resp.SteerProvider = target.Provider
+	}
+	writeJSON(w, http.StatusOK, resp)
 }
 
 // PrioritizeQueuedChatTask moves one queued follow-up ahead of its FIFO peers.

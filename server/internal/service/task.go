@@ -3113,6 +3113,10 @@ type CancelTaskOptions struct {
 	ErrorMessage  string
 	FailureReason string
 	CancelledBy   TaskCancellationActor
+	// SteeredInto is the running reply that already read this queued
+	// follow-up's message (QueueAction "steered"). The message moves to that
+	// reply instead of being deleted or restored to the composer.
+	SteeredInto pgtype.UUID
 	// UserInitiated distinguishes the issue UI/API cancel action from automatic
 	// server repairs. An explicit user cancellation terminally acknowledges any
 	// delegated-failure recovery signal planned into the task; automatic
@@ -3198,7 +3202,8 @@ func (s *TaskService) CancelTaskWithResult(ctx context.Context, taskID pgtype.UU
 		err                  error
 	)
 	if opts.QueuedOnly {
-		if opts.QueueAction != "edit" && opts.QueueAction != "remove" {
+		if opts.QueueAction != "edit" && opts.QueueAction != "remove" &&
+			!(opts.QueueAction == queueActionSteered && opts.SteeredInto.Valid) {
 			return nil, errors.New("queue action must be edit or remove")
 		}
 		err = s.runInTx(ctx, func(qtx *db.Queries) error {
@@ -3217,6 +3222,9 @@ func (s *TaskService) CancelTaskWithResult(ctx context.Context, taskID pgtype.UU
 			}
 			if err != nil {
 				return fmt.Errorf("cancel queued task: %w", err)
+			}
+			if opts.QueueAction == queueActionSteered {
+				return absorbSteeredChatInput(ctx, qtx, task, opts.SteeredInto)
 			}
 			cancelledChatMessage, err = s.settleQueuedChatInput(ctx, qtx, task, opts.QueueAction)
 			return err
@@ -3475,6 +3483,44 @@ func (s *TaskService) settleQueuedChatInput(
 	cancelled.RestoreToInput = true
 	cancelled.Attachments = detached
 	return cancelled, nil
+}
+
+// queueActionSteered retires a queued chat follow-up whose message a running
+// reply has already read (DENE-1346).
+const queueActionSteered = "steered"
+
+// absorbSteeredChatInput moves a steered follow-up's message into the running
+// reply that read it. Runs in the same transaction as the follow-up's
+// queued-only cancel, so the message is never left without a turn.
+func absorbSteeredChatInput(ctx context.Context, qtx *db.Queries, followup db.AgentTaskQueue, runningTaskID pgtype.UUID) error {
+	running, err := qtx.GetAgentTask(ctx, runningTaskID)
+	if err != nil {
+		return fmt.Errorf("load steered reply: %w", err)
+	}
+	if _, err := qtx.RebindSteeredChatInput(ctx, db.RebindSteeredChatInputParams{
+		RunningInputTaskID: chatInputOwnerID(running),
+		FollowupTaskID:     chatInputOwnerID(followup),
+	}); err != nil {
+		return fmt.Errorf("move steered chat input: %w", err)
+	}
+	return nil
+}
+
+// AbsorbSteeredChatFollowup retires the queued follow-up of a chat message the
+// running reply has read. A follow-up that already left the queue — the reply
+// ended first and it started — is left alone: it answers the message itself.
+func (s *TaskService) AbsorbSteeredChatFollowup(ctx context.Context, sessionID, followupTaskID, runningTaskID pgtype.UUID) error {
+	_, err := s.CancelTaskWithResult(ctx, followupTaskID, CancelTaskOptions{
+		QueuedOnly:          true,
+		ExpectedChatSession: sessionID,
+		QueueAction:         queueActionSteered,
+		SteeredInto:         runningTaskID,
+		CancelledBy:         TaskCancellationActor{Type: "system"},
+	})
+	if errors.Is(err, ErrTaskNoLongerQueued) {
+		return nil
+	}
+	return err
 }
 
 // deleteUserChatInput removes a cancelled/edited turn's member-typed input and
@@ -7389,6 +7435,9 @@ func SettleTerminalTaskState(ctx context.Context, q *db.Queries, tasks ...db.Age
 	}
 	if _, err := q.SettleTerminalTaskSupplements(ctx, taskIDs); err != nil {
 		return fmt.Errorf("settle terminal task supplements: %w", err)
+	}
+	if _, err := q.SettleTerminalChatTaskSupplements(ctx, taskIDs); err != nil {
+		return fmt.Errorf("settle terminal chat task supplements: %w", err)
 	}
 	return SettleDeliveredDelegatedFailureRecoveries(ctx, q, tasks...)
 }
