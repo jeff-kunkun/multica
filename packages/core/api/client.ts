@@ -115,6 +115,8 @@ import type {
   RuntimeLocalSkillImportRequest,
   TimelineEntry,
   Progress,
+  IssueStateCard,
+  StateCardDecision,
   AssigneeFrequencyEntry,
   TaskMessagePayload,
   Attachment,
@@ -462,6 +464,8 @@ import {
   TaskMessageListSchema,
   TimelineEntriesSchema,
   ProgressHistorySchema,
+  IssueStateCardSchema,
+  StateCardDecisionSchema,
   UserSchema,
   WebhookDeliveryResponseSchema,
   BillingBalanceSchema,
@@ -2005,6 +2009,50 @@ export class ApiClient {
     return parseWithFallback(raw, ProgressHistorySchema, { progress: [] }, {
       endpoint: "GET /api/issues/:id/progress",
     }).progress as Progress[];
+  }
+
+  /** The issue state card for the caller (DENE-1328). */
+  async getIssueContext(issueId: string): Promise<IssueStateCard> {
+    const raw = await this.fetch<unknown>(
+      `/api/issues/${encodeURIComponent(issueId)}/context`,
+    );
+    return parseWithFallback(
+      raw,
+      IssueStateCardSchema,
+      {
+        issue_id: issueId,
+        identifier: "",
+        goal: { title: "" },
+        decisions: [],
+        now: { status: "", closed: false },
+        changes: { anchor: "none", threads: [] },
+        text: "",
+      },
+      { endpoint: "GET /api/issues/:id/context" },
+    ) as IssueStateCard;
+  }
+
+  async createIssueDecision(issueId: string, text: string): Promise<StateCardDecision> {
+    const raw = await this.fetch<unknown>(
+      `/api/issues/${encodeURIComponent(issueId)}/decisions`,
+      { method: "POST", body: JSON.stringify({ text }) },
+    );
+    return StateCardDecisionSchema.parse(raw) as StateCardDecision;
+  }
+
+  async updateIssueDecision(issueId: string, decisionId: string, text: string): Promise<StateCardDecision> {
+    const raw = await this.fetch<unknown>(
+      `/api/issues/${encodeURIComponent(issueId)}/decisions/${encodeURIComponent(decisionId)}`,
+      { method: "PATCH", body: JSON.stringify({ text }) },
+    );
+    return StateCardDecisionSchema.parse(raw) as StateCardDecision;
+  }
+
+  async deleteIssueDecision(issueId: string, decisionId: string): Promise<void> {
+    await this.fetch(
+      `/api/issues/${encodeURIComponent(issueId)}/decisions/${encodeURIComponent(decisionId)}`,
+      { method: "DELETE" },
+    );
   }
 
   async listTimeline(issueId: string): Promise<TimelineEntry[]> {

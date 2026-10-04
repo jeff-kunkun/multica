@@ -810,3 +810,28 @@ export function useCancelTask(issueId: string) {
     },
   });
 }
+
+/** Add / edit / remove the state card's 已拍板 list (DENE-1328). The server
+ *  validates (one line, 300 chars, agents only their own); the card is
+ *  refetched on settle rather than patched. */
+export function useIssueDecisionMutations(issueId: string) {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceStore((s) => s.currentWorkspaceId);
+  const onSettled = () =>
+    qc.invalidateQueries({ queryKey: issueKeys.context(wsId, issueId) });
+
+  const add = useMutation({
+    mutationFn: (text: string) => api.createIssueDecision(issueId, text),
+    onSettled,
+  });
+  const edit = useMutation({
+    mutationFn: ({ id, text }: { id: string; text: string }) =>
+      api.updateIssueDecision(issueId, id, text),
+    onSettled,
+  });
+  const remove = useMutation({
+    mutationFn: (id: string) => api.deleteIssueDecision(issueId, id),
+    onSettled,
+  });
+  return { add, edit, remove };
+}

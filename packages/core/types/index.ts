@@ -1,5 +1,14 @@
 export type { Issue, IssueStatus, BuiltInIssueStatus, IssuePriority, IssueAssigneeType, IssueAssigneeSource, IssueReviewerType, IssueMetadata, IssueMetadataValue, IssueAgentGuardResponse, IssueDriver, IssueDriverKind, IssueDisposeAction, IssueDisposeRequest, IssueDisposeResponse, IssueReaction, SourceContextAttachment, SourceContextAuthor, SourceContextIssueSnapshot, SourceContextCommentSnapshot, SourceContextSnapshot, SourceContextLimitUsage, SourceContextPreview, SourceContextAuthorState, IssueSourceContext, IssueDuplicateOf } from "./issue";
 export type { Progress, ProgressTone } from "./progress";
+export type {
+  IssueStateCard,
+  StateCardBaton,
+  StateCardChanges,
+  StateCardCheck,
+  StateCardDecision,
+  StateCardNow,
+  StateCardThread,
+} from "./state-card";
 export type { IssueGoal, IssueGoalStatus, IssueGoalCheck, IssueGoalBudget, IssueGoalEvidence, CreateIssueGoalInput, IssueGoalCheckInput } from "./goal";
 export { IssueGoalSchema } from "./goal";
 export type { IssueDraft, IssueDraftStatus, IssueDraftPayload, IssueDraftChild, IssueDraftProjectProposal, IssueDraftProjectChoice, IssueDraftCreatedIssue, IssueDraftAssignmentWarning, IssueDraftPolicy, IssueDraftCapabilities, IssueDraftSession, IssueDraftSummary, IssueDraftFinalizeResult, IssueDraftRuntimeSwitch } from "./issue-draft";

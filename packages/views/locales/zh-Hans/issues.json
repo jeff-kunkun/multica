@@ -1809,5 +1809,26 @@
     "source_parking": "巡检摘要",
     "source_model": "自动总结",
     "source_reply": "摘自回复"
+  },
+  "state_card": {
+    "section_title": "状态卡",
+    "decisions": "已拍板",
+    "decisions_empty": "还没有拍板",
+    "decision_add": "添加拍板",
+    "decision_placeholder": "一行，写定下来的事",
+    "decision_save": "保存",
+    "decision_cancel": "取消",
+    "decision_edit": "编辑",
+    "decision_delete": "删除",
+    "decision_failed": "没存上：{{reason}}",
+    "baton": "上一棒交代",
+    "baton_close": "收口",
+    "baton_handoff": "交棒给 {{to}}",
+    "baton_none": "还没有收口或交棒",
+    "changes": "你上次之后的变化",
+    "changes_first": "你上次之后的变化（首次查看）",
+    "changes_none": "没有新讨论",
+    "changes_count": "{{count}} 条新",
+    "changes_more": "还有 {{count}} 个讨论"
   }
 }
