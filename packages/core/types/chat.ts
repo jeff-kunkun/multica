@@ -246,6 +246,10 @@ export interface ChatMessage {
   sender_user_id?: string | null;
   /** The chat a `chat_spawn` card opened. */
   linked_session_id?: string | null;
+  /** Session lineage of the run behind `task_id` (DENE-1345). */
+  session_mode?: import("./agent").SessionMode;
+  resumed_from_run?: string;
+  session_break_reason?: import("./agent").SessionBreakReason | (string & {});
 }
 
 export interface ChatShareGrant {

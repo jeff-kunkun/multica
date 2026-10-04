@@ -1810,6 +1810,17 @@
     "source_model": "自动总结",
     "source_reply": "摘自回复"
   },
+  "session_lineage": {
+    "round": "第 {{round}} 轮",
+    "new": "新会话",
+    "resumed": "接着第 {{round}} 轮的会话",
+    "resumed_earlier": "接着之前的会话",
+    "divider": "{{name}} 第 {{round}} 轮",
+    "reason_agent_changed": "换了智能体",
+    "reason_runtime_changed": "上次的会话在另一台机器上",
+    "reason_session_lost": "会话没能恢复",
+    "reason_fresh_requested": "按要求新开"
+  },
   "state_card": {
     "section_title": "状态卡",
     "decisions": "已拍板",

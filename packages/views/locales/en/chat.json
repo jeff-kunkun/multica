@@ -395,5 +395,12 @@
     "from_prefix": "Opened from",
     "from_suffix": "",
     "from_hidden": "Opened from another chat"
+  },
+  "session_lineage": {
+    "new": "New session",
+    "reason_agent_changed": "different agent",
+    "reason_runtime_changed": "last session is on another machine",
+    "reason_session_lost": "previous session could not be restored",
+    "reason_fresh_requested": "fresh session requested"
   }
 }

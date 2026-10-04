@@ -390,5 +390,12 @@
     "from_prefix": "",
     "from_suffix": "から作成",
     "from_hidden": "別のチャットから作成"
+  },
+  "session_lineage": {
+    "new": "新しいセッション",
+    "reason_agent_changed": "エージェントが変わりました",
+    "reason_runtime_changed": "前回のセッションは別のマシンにあります",
+    "reason_session_lost": "前のセッションを復元できませんでした",
+    "reason_fresh_requested": "新規セッションを指定"
   }
 }

@@ -165,5 +165,10 @@
   "elapsed.failed": "运行 {{time}} 后失败",
   "alerts.no_permission_message": "你已无权运行该智能体，消息未发送。请联系该智能体的所有者申请权限。",
   "failure.runtime_access_denied": "消息未发送：{{detail}}",
-  "banners.no_agent_action": "在 \"更多 → 智能体\" 中添加或启用智能体即可开始聊天。"
+  "banners.no_agent_action": "在 \"更多 → 智能体\" 中添加或启用智能体即可开始聊天。",
+  "session_lineage.new": "新会话",
+  "session_lineage.reason_agent_changed": "换了智能体",
+  "session_lineage.reason_runtime_changed": "上次的会话在另一台机器上",
+  "session_lineage.reason_session_lost": "会话没能恢复",
+  "session_lineage.reason_fresh_requested": "按要求新开"
 }
