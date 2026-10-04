@@ -344,9 +344,9 @@ archived statuses remain readable via an explicit status filter.
   when it is really separate work. Marking logs `duplicate_marked` on the
   duplicate and `duplicate_added` on the original; removing the mark logs
   `duplicate_unmarked` / `duplicate_removed` (`multica issue timeline --action`).
-- **Failed issue-triggered tasks** may roll an issue from `in_progress` back to
-  `todo` when no active task / retry remains — that is the main server-owned
-  status write on the agent-run path.
+- **Failed issue-triggered tasks** with no retry queued leave an agent-owned issue `blocked` with
+  a failure wake clock the patrol acts on (a sweeper-reaped run may still roll it back to `todo`);
+  the parent gets a note that only promises a wake when one was recorded (DENE-1339).
 - **Completed issue-triggered tasks** are the mirror case, and they write no
   status at all: a run that reaches `/complete` cleanly while the issue is
   still `in_progress` with nothing queued behind it leaves a system comment
