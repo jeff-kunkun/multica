@@ -209,9 +209,9 @@ func issueMetaStrings(raw []byte) map[string]string {
 func decisionRejection(err error) string {
 	switch {
 	case errors.Is(err, statecard.ErrDecisionEmpty):
-		return "--decision 不能为空"
+		return "拍板不能为空"
 	case errors.Is(err, statecard.ErrDecisionTooLong):
-		return fmt.Sprintf("--decision 每条最多 %d 字：写拍板的那一句，理由放证据里", statecard.MaxDecisionLen)
+		return fmt.Sprintf("拍板每条最多 %d 字：只写定下来的那一句，理由放证据里", statecard.MaxDecisionLen)
 	}
 	return err.Error()
 }
