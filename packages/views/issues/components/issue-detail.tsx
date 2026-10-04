@@ -106,6 +106,7 @@ import { IssueAgentActivityIndicator } from "./issue-agent-activity-indicator";
 import { SubIssuesAgentWorkingChip } from "./sub-issues-agent-working-chip";
 import { SubIssueCloseStrip } from "./sub-issue-close-strip";
 import { IssueCloseRecordSection } from "./issue-close-record";
+import { IssueStateCardSection } from "./issue-state-card";
 import { IssueStallActionBanner } from "./issue-stall-action-banner";
 import { SubIssueBlockerBadge, SubIssueBlockerSummary, blockerBadgeState, useSubIssueBlockerData } from "./sub-issue-blocker-summary";
 import { ProjectPicker } from "../../projects/components/project-picker";
@@ -3073,6 +3074,19 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
         defaultAgentId={issue.assignee_type === "agent" ? (issue.assignee_id ?? undefined) : undefined}
       />
       <PluginPanelSection issueId={issue.id} />
+
+      {/* State card (DENE-1328) — settled decisions, the last baton and the
+          threads new since the viewer was here; the same card agents read
+          with `multica issue context`. */}
+      <IssueStateCardSection
+        wsId={wsId}
+        issueId={issue.id}
+        onJumpToThread={(threadId) => {
+          // On narrow screens the sidebar is a sheet over the timeline.
+          if (isCompact) setMobileSidebarOpen(false);
+          jumpToThread(threadId);
+        }}
+      />
 
       {/* Close record (DENE-1002) — which conclusion closed this ticket, the
           status it wrote, who continues and why. Renders nothing until the
