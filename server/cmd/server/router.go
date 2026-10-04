@@ -2293,6 +2293,13 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Post("/stall/undo", h.UndoStallAction)
 					r.Post("/progress", h.WriteIssueProgress)
 					r.Get("/progress", h.ListIssueProgress)
+					// State card (DENE-1328): goal, decisions, close record,
+					// last baton and the caller's own change list —
+					// `multica issue context`. Decisions are the only rows.
+					r.Get("/context", h.GetIssueContext)
+					r.Post("/decisions", h.CreateIssueDecision)
+					r.Patch("/decisions/{decisionId}", h.UpdateIssueDecision)
+					r.Delete("/decisions/{decisionId}", h.DeleteIssueDecision)
 					// PR state from the caller's gh, refreshed by `issue
 					// close` so the done gate sees merges without a GitHub App.
 					r.Post("/pull-requests/report", h.ReportIssuePullRequests)
