@@ -146,7 +146,9 @@
     "quick_actions_heading": "后续提问",
     "quick_actions_aria": "后续提问建议",
     "quick_actions_regenerate": "重新生成建议",
-    "quick_actions_regenerate_failed": "无法重新生成建议，请重试。"
+    "quick_actions_regenerate_failed": "无法重新生成建议，请重试。",
+    "spawned": "已派生会话",
+    "spawn_untitled": "新聊天"
   },
   "session_history": {
     "untitled": "无标题",
@@ -315,7 +317,8 @@
     "private_tag": "私密",
     "extra_tag": "额外成员",
     "show_more": "显示更多（{{count}}）",
-    "show_fewer": "收起"
+    "show_fewer": "收起",
+    "spawned": "由另一个聊天派生"
   },
   "header": {
     "view_profile": "查看智能体资料",
@@ -368,5 +371,10 @@
     "make_private": "把勾选的设为私密",
     "dismiss": "知道了"
   },
-  "title_locked": "标题已锁定，智能体不会再改名"
+  "title_locked": "标题已锁定，智能体不会再改名",
+  "origin": {
+    "from_prefix": "由",
+    "from_suffix": "聊天派生",
+    "from_hidden": "由另一个聊天派生"
+  }
 }

@@ -6,7 +6,6 @@ import { Input } from "@multica/ui/components/ui/input";
 import { Textarea } from "@multica/ui/components/ui/textarea";
 import { Button } from "@multica/ui/components/ui/button";
 import { Label } from "@multica/ui/components/ui/label";
-import { Switch } from "@multica/ui/components/ui/switch";
 import {
   Select,
   SelectContent,
@@ -70,13 +69,7 @@ import {
   type SettingsSaveStatus,
 } from "./settings-layout";
 import { useAutoSave } from "./use-auto-save";
-import {
-  AUTOMATION_LIMIT_PRESETS,
-  automationLimitsEqual,
-  parseAutomationLimits,
-  parseLimitInput,
-  type AutomationLimits,
-} from "./automation-limits";
+import { settingsHref } from "./settings-navigation";
 
 interface WorkspaceDetailsDraft {
   name: string;
@@ -170,9 +163,6 @@ export function WorkspaceTab() {
   const [description, setDescription] = useState(workspace?.description ?? "");
   const [context, setContext] = useState(workspace?.context ?? "");
   const [prefixDraft, setPrefixDraft] = useState<string | null>(null);
-  const [automationLimits, setAutomationLimits] = useState<AutomationLimits>(
-    parseAutomationLimits(workspace?.settings),
-  );
   const [prefixSaveStatus, setPrefixSaveStatus] =
     useState<SettingsSaveStatus>("idle");
   const [actionId, setActionId] = useState<string | null>(null);
@@ -297,7 +287,6 @@ export function WorkspaceTab() {
     setDescription(workspace?.description ?? "");
     setContext(workspace?.context ?? "");
     setPrefixDraft(null);
-    setAutomationLimits(parseAutomationLimits(workspace?.settings));
     // eslint-disable-next-line react-hooks/exhaustive-deps -- intentionally keyed on id only; see comment above
   }, [workspace?.id]);
 
@@ -334,36 +323,6 @@ export function WorkspaceTab() {
     },
     [qc, workspace],
   );
-  const savedAutomationLimits = useMemo(
-    () => parseAutomationLimits(workspace?.settings),
-    [workspace?.settings],
-  );
-  const automationLimitsAutoSave = useAutoSave({
-    value: automationLimits,
-    savedValue: savedAutomationLimits,
-    onSave: async (next) => {
-      if (!workspace) return;
-      const updated = await api.updateWorkspace(workspace.id, {
-        settings: { ...(workspace.settings ?? {}), ...next },
-      });
-      qc.setQueryData(workspaceKeys.list(), (old: Workspace[] | undefined) =>
-        old?.map((ws) => (ws.id === updated.id ? updated : ws)),
-      );
-    },
-    onSuccess: () =>
-      toast.success(t(($) => $.workspace.toast_saved), {
-        id: "settings-auto-save",
-      }),
-    onError: (error) =>
-      toast.error(
-        error instanceof Error
-          ? error.message
-          : t(($) => $.workspace.toast_save_failed),
-      ),
-    enabled: !!workspace && canManageWorkspace,
-    isEqual: automationLimitsEqual,
-  });
-
   const detailsAutoSave = useAutoSave({
     value: detailsDraft,
     savedValue: savedDetails,
@@ -677,122 +636,24 @@ export function WorkspaceTab() {
         <ChatNamingCard naming={naming} canManage={canManageWorkspace} onChange={handleNamingChange} />
       </SettingsSection>
 
-      <SettingsSection
-        title={t(($) => $.workspace.automation_limits_title)}
-        description={t(($) => $.workspace.automation_limits_description)}
-      >
+      <SettingsSection>
         <SettingsCard>
           <SettingsRow
-            label={t(($) => $.workspace.chain_budget_label)}
-            description={t(($) => $.workspace.chain_budget_description)}
-            size="text"
+            anchor="automation-limits"
+            label={t(($) => $.workspace.automation_limits_title)}
+            description={t(($) => $.workspace.automation_limits_moved)}
           >
-            <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-              <div className="flex items-center gap-2">
-                <Input
-                  type="number"
-                  inputMode="numeric"
-                  min={1}
-                  step={1}
-                  aria-label={t(($) => $.workspace.chain_budget_label)}
-                  value={
-                    automationLimits.agent_chain_budget === 0
-                      ? ""
-                      : String(automationLimits.agent_chain_budget)
-                  }
-                  placeholder="∞"
-                  onChange={(event) =>
-                    setAutomationLimits((current) => ({
-                      ...current,
-                      agent_chain_budget: parseLimitInput(
-                        event.target.value,
-                        current.agent_chain_budget,
-                      ),
-                    }))
-                  }
-                  onBlur={automationLimitsAutoSave.flush}
-                  disabled={
-                    !canManageWorkspace || automationLimits.agent_chain_budget === 0
-                  }
-                  className="w-24"
-                />
-                <span className="text-caption text-muted-foreground">
-                  {t(($) => $.workspace.chain_budget_unit)}
-                </span>
-              </div>
-              <label className="flex items-center gap-2 text-caption text-muted-foreground">
-                <Switch
-                  checked={automationLimits.agent_chain_budget === 0}
-                  onCheckedChange={(checked) =>
-                    setAutomationLimits((current) => ({
-                      ...current,
-                      agent_chain_budget: checked
-                        ? 0
-                        : AUTOMATION_LIMIT_PRESETS.agent_chain_budget,
-                    }))
-                  }
-                  disabled={!canManageWorkspace}
-                  aria-label={t(($) => $.workspace.chain_budget_unlimited)}
-                />
-                {t(($) => $.workspace.chain_budget_unlimited)}
-              </label>
-            </div>
-          </SettingsRow>
-          <SettingsRow
-            label={t(($) => $.workspace.timeout_label)}
-            description={t(($) => $.workspace.timeout_description)}
-            size="text"
-          >
-            <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-              <div className="flex items-center gap-2">
-                <Input
-                  type="number"
-                  inputMode="numeric"
-                  min={1}
-                  step={1}
-                  aria-label={t(($) => $.workspace.timeout_label)}
-                  value={
-                    automationLimits.agent_task_timeout_minutes === 0
-                      ? ""
-                      : String(automationLimits.agent_task_timeout_minutes)
-                  }
-                  placeholder="∞"
-                  onChange={(event) =>
-                    setAutomationLimits((current) => ({
-                      ...current,
-                      agent_task_timeout_minutes: parseLimitInput(
-                        event.target.value,
-                        current.agent_task_timeout_minutes,
-                      ),
-                    }))
-                  }
-                  onBlur={automationLimitsAutoSave.flush}
-                  disabled={
-                    !canManageWorkspace || automationLimits.agent_task_timeout_minutes === 0
-                  }
-                  className="w-24"
-                />
-                <span className="text-caption text-muted-foreground">
-                  {t(($) => $.workspace.timeout_unit)}
-                </span>
-              </div>
-              <label className="flex items-center gap-2 text-caption text-muted-foreground">
-                <Switch
-                  checked={automationLimits.agent_task_timeout_minutes === 0}
-                  onCheckedChange={(checked) =>
-                    setAutomationLimits((current) => ({
-                      ...current,
-                      agent_task_timeout_minutes: checked
-                        ? 0
-                        : AUTOMATION_LIMIT_PRESETS.agent_task_timeout_minutes,
-                    }))
-                  }
-                  disabled={!canManageWorkspace}
-                  aria-label={t(($) => $.workspace.timeout_unlimited)}
-                />
-                {t(($) => $.workspace.timeout_unlimited)}
-              </label>
-            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() =>
+                navigation.push(
+                  settingsHref(navigation.pathname, navigation.searchParams, "agent-permissions"),
+                )
+              }
+            >
+              {t(($) => $.workspace.automation_limits_open)}
+            </Button>
           </SettingsRow>
         </SettingsCard>
       </SettingsSection>

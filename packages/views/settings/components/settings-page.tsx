@@ -29,6 +29,7 @@ import {
   FolderKanban,
   Link2,
   Network,
+  BotMessageSquare,
 } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { useAuthStore } from "@multica/core/auth";
@@ -74,6 +75,7 @@ import { searchSettings } from "./settings-search";
 import { HighlightText } from "../../search/highlight-text";
 import { useSettingsSearchIndex } from "./use-settings-search-index";
 import { WakeupsTab } from "./wakeups-tab";
+import { AgentPermissionsTab } from "./agent-permissions-tab";
 import { CollapsedNavTrigger } from "../../layout/page-header";
 import { useT } from "../../i18n";
 
@@ -214,6 +216,12 @@ export function SettingsPage({ extraDeviceTabs = [] }: SettingsPageProps = {}) {
               adminOnly: true,
             }),
             ...(isOwner ? [membersEntry] : []),
+            entry(
+              "agent-permissions",
+              t(($) => $.page.tabs.agent_permissions),
+              BotMessageSquare,
+              <AgentPermissionsTab />,
+            ),
             entry(
               "project-sharing",
               t(($) => $.page.tabs.project_sharing),
