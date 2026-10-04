@@ -1213,6 +1213,17 @@ class ApiClient {
     );
   }
 
+  /** Dispose of an issue nobody drives (DENE-1342); same endpoint as web and CLI. */
+  async disposeIssue(
+    issueId: string,
+    body: { action: "rerun" | "reroute" | "split" | "cancel"; reason?: string; into?: string[] },
+  ): Promise<void> {
+    await this.fetch<unknown>(`/api/issues/${issueId}/dispose`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+  }
+
   async cancelTaskById(taskId: string): Promise<void> {
     await this.fetch<void>(`/api/tasks/${taskId}/cancel`, { method: "POST" });
   }

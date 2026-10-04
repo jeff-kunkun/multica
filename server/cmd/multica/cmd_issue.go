@@ -397,6 +397,25 @@ func issueCloseLong() string {
 		"this close wrote. Keys: " + strings.Join(projectmemory.LocationKeys(), ", ") + "."
 }
 
+var issueDisposeCmd = &cobra.Command{
+	Use:   "dispose <id>",
+	Short: "Decide what happens to an issue nobody is driving",
+	Long: "One command for an issue with no driver: no run, no recorded wait, no person\n" +
+		"named (the issue's driver.kind is \"none\" in `issue get` / `issue children`).\n" +
+		"The patrol reruns such an issue on its own seat, then asks the parent's\n" +
+		"executor to pick one of:\n\n" +
+		"  --action rerun                     run it again on the same seat\n" +
+		"  --action reroute                   empty the executor seat; routing picks anew\n" +
+		"  --action split --into \"title\"      create sub-issues (repeat --into, up to 10)\n" +
+		"                                     and block this issue on them\n" +
+		"  --action cancel --reason \"...\"     cancel it, with the reason on the issue\n\n" +
+		"The server refuses an issue that already has a driver, and an agent may only\n" +
+		"dispose a child of an issue it holds. The response reports status and the new\n" +
+		"driver — quote them, do not restate them from memory.",
+	Args: exactArgs(1),
+	RunE: runIssueDispose,
+}
+
 var issueHandoffCmd = &cobra.Command{
 	Use:   "handoff <id>",
 	Short: "Wake the next owner of an issue without closing it",
@@ -715,6 +734,7 @@ func init() {
 	issueCmd.AddCommand(issueProgressCmd)
 	issueCmd.AddCommand(issueTitleCmd)
 	issueCmd.AddCommand(issueHandoffCmd)
+	issueCmd.AddCommand(issueDisposeCmd)
 	issueCmd.AddCommand(issueReorderCmd)
 	issueCmd.AddCommand(issueCommentCmd)
 	issueCmd.AddCommand(issueSubscriberCmd)
@@ -834,6 +854,7 @@ func init() {
 	issueStatusCmd.Flags().String("block-action", "", "One-line next step for blocked, at most 80 characters (required for agents)")
 	registerIssueCloseFlags(issueCloseCmd)
 	registerIssueHandoffFlags(issueHandoffCmd)
+	registerIssueDisposeFlags(issueDisposeCmd)
 	issueStatusCmd.Flags().String("no-code", "", "Why this issue has no PR the platform can see: docs or research, or code merged outside GitHub (give the MR link). An agent moving an issue to in_review without a linked open/merged PR is refused unless this is given")
 	issueStatusBatchCmd.Flags().Bool("no-start", false, "Change status without starting agent runs")
 	issueStatusBatchCmd.Flags().String("output", "table", "Output format: table or json")
@@ -1449,7 +1470,7 @@ func runIssueChildren(cmd *cobra.Command, args []string) error {
 	output, _ := cmd.Flags().GetString("output")
 	if output == "table" {
 		actors := loadActorDisplayLookup(ctx, client)
-		headers := []string{"STAGE", "KEY", "TITLE", "STATUS", "PRIORITY", "ASSIGNEE"}
+		headers := []string{"STAGE", "KEY", "TITLE", "STATUS", "PRIORITY", "ASSIGNEE", "DRIVER"}
 		rows := make([][]string, 0, len(children))
 		for _, c := range children {
 			stageCell := "-"
@@ -1463,6 +1484,7 @@ func runIssueChildren(cmd *cobra.Command, args []string) error {
 				strVal(c, "status"),
 				strVal(c, "priority"),
 				formatAssignee(c, actors),
+				driverCell(c),
 			})
 		}
 		cli.PrintTable(os.Stdout, headers, rows)

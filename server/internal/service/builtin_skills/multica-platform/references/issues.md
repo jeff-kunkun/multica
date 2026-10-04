@@ -12,6 +12,7 @@ Product contracts the runtime brief does not fully encode.
 - [Incorrect to correct](#incorrect-to-correct)
 
 Closing is its own contract; read `references/close-protocol.md` for its `close.*` keys, decision tables, and dispatcher promotion rules.
+Who drives an open issue, and the `issue dispose` command for one nobody drives, are in `references/drivers.md`; stopping every run on an issue and the run limits are in `references/run-control.md`.
 
 Create a goal task with `multica issue create --title "..." --goal`. This
 creates a draft completion line with starter checks; a human must edit and
@@ -401,6 +402,16 @@ The family read returns a compact row — task, issue, agent, status, started �
 not the full execution-log record. If you need a run's detail, follow the task
 id with `multica issue run-messages`.
 
+Rows come back running-first, newest-first within a status, and the family read
+is capped at 20. When the cap truncates the answer the CLI prints a warning on
+stderr — read it. Without that warning a short list means "nobody else is
+there"; with it, the list proves nothing about the runs it did not return.
+
+Both are advisory reads. Nothing here reserves an issue or serialises anything:
+a run you see may finish a second later, and one you don't see may start a
+second later. Coordinate through the issue's comments — the reads tell you whom
+to coordinate with.
+
 ## Who can see an issue
 
 `multica issue access <id> --output json` answers what the share button in the
@@ -411,40 +422,6 @@ admin or the owner to change it rather than retrying. A link to a private
 issue opens as "not found" for everyone else, so check this before pasting an
 issue link for someone who may not be in its audience. `multica project access`
 is the same read for a project.
-
-## Stop every run on one issue
-
-Use the issue-level guard when an agent chain must stop immediately:
-
-```bash
-multica issue halt <issue-id>    # cancel queued/dispatched/running runs and block agent triggers
-multica issue resume <issue-id>  # clear the halt guard; a human comment is still needed to reset a chain budget
-```
-
-The guard is issue-scoped. A human comment clears it and resets the
-delegation-chain budget; `resume` only clears an explicit halt and does not
-reset an already-exceeded budget. Direct human-triggered runs are never
-consumed by that budget. The default chain limit is thirty runs; a workspace
-admin changes it under Settings → General → Agent run limits (stored as
-`agent_chain_budget` in the workspace `settings` JSON, `0` = unlimited). Hitting
-the limit posts a system comment in the triggering thread instead of stopping
-silently.
-
-The same settings section holds a run time limit
-(`agent_task_timeout_minutes`, `0`/absent = none). A run that outlives it fails with reason `task_time_limit`:
-a round boundary, not a wrong result. The platform continues the same CLI session and working directory
-until the attempt budget is spent, and the continuation is told to close out finished work and split what remains.
-When the budget is spent the issue becomes `blocked` with a comment instead of sitting in `todo`; a sub-issue also leaves a short note on its parent.
-
-Rows come back running-first, newest-first within a status, and the family read
-is capped at 20. When the cap truncates the answer the CLI prints a warning on
-stderr — read it. Without that warning a short list means "nobody else is
-there"; with it, the list proves nothing about the runs it did not return.
-
-Both are advisory reads. Nothing here reserves an issue or serialises anything:
-a run you see may finish a second later, and one you don't see may start a
-second later. Coordinate through the issue's comments — the reads tell you whom
-to coordinate with.
 
 ## Charts and files in a comment
 

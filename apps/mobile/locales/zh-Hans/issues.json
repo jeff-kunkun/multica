@@ -122,6 +122,19 @@
     "all": "该工作区还没有任务。",
     "members": "没有分配给成员的任务。"
   },
+  "driver": {
+    "none": "没人在推进",
+    "revived": "已重跑 {{count}} 次",
+    "escalated": "已上报父票负责人",
+    "actions": "处置",
+    "rerun": "原席位再跑",
+    "reroute": "交给路由重新选执行人",
+    "split": "拆成子票",
+    "cancel": "取消任务",
+    "split_prompt": "子票标题",
+    "cancel_prompt": "取消原因",
+    "failed": "处置失败"
+  },
   "menu": {
     "pin": "固定",
     "unpin": "取消固定",

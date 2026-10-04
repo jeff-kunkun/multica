@@ -1591,6 +1591,20 @@
     "conclusion_deferred": "Renvoyé au backlog / aux tâches",
     "conclusion_continuing": "En pause, reprise au prochain tour"
   },
+  "driver": {
+    "none": "Personne ne fait avancer ce ticket",
+    "revived": "relancé {{count}}×",
+    "escalated": "signalé au responsable du parent",
+    "rerun": "Relancer",
+    "reroute": "Réattribuer",
+    "split": "Scinder",
+    "cancel": "Annuler le ticket",
+    "split_placeholder": "Titre du sous-ticket",
+    "cancel_placeholder": "Raison de l'annulation",
+    "back": "Retour",
+    "done": "Fait",
+    "failed": "Impossible de traiter le ticket"
+  },
   "blocker_summary": {
     "title": "Bloqué · {{count}} cause(s) racine(s)",
     "needs_you": "{{count}} en attente de votre action",

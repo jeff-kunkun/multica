@@ -7197,8 +7197,8 @@ func (s *TaskService) terminateTasksInTx(ctx context.Context, fail func(*db.Quer
 // HandleFailedTasks runs the post-failure side effects for a batch of
 // freshly-failed tasks: optional auto-retry, task:failed event broadcast,
 // agent status reconciliation, and (when an issue has no remaining active
-// task and isn't being retried) resetting the issue back to todo so the
-// daemon can pick it up again.
+// task and isn't being retried) parking an agent-owned issue blocked with a
+// failure clock, or resetting any other issue back to todo.
 //
 // All callers that surface a task as failed — sweepers, FailTask,
 // recover-orphans — funnel through here so the same UI-consistency
@@ -7213,6 +7213,7 @@ func (s *TaskService) HandleFailedTasks(ctx context.Context, tasks []db.AgentTas
 	retriedIssues := make(map[string]bool)
 	quotaHeldIssues := make(map[string]bool)
 	timeLimitHeld := make(map[string]bool)
+	delegatedHandled := make(map[string]bool)
 	retried := 0
 
 	for _, t := range tasks {
@@ -7263,12 +7264,16 @@ func (s *TaskService) HandleFailedTasks(ctx context.Context, tasks []db.AgentTas
 			if hold && t.IssueID.Valid {
 				quotaHeldIssues[util.UUIDToString(t.IssueID)] = true
 			}
-			if _, err := s.recoverDelegatedTaskFailure(ctx, t); err != nil {
+			handled, err := s.recoverDelegatedTaskFailure(ctx, t)
+			if err != nil {
 				slog.Warn("handle failed tasks: delegated failure recovery failed",
 					"task_id", util.UUIDToString(t.ID),
 					"delegated_from_task_id", util.UUIDToString(t.DelegatedFromTaskID),
 					"error", err,
 				)
+			}
+			if handled && t.IssueID.Valid {
+				delegatedHandled[util.UUIDToString(t.IssueID)] = true
 			}
 		}
 
@@ -7289,16 +7294,26 @@ func (s *TaskService) HandleFailedTasks(ctx context.Context, tasks []db.AgentTas
 				// the active-status recovery rule. Effective() no longer
 				// projects a nonterminal custom key onto a built-in, so this is
 				// a key comparison on purpose. (MUL-6243, MUL-7240)
+				//
+				// An agent-owned issue is parked instead (DENE-1342): blocked
+				// with a failure clock the patrol acts on, the same driver
+				// FailTask leaves (DENE-1339). Only an issue the park declines
+				// — a person's, or nobody's — still goes back to todo.
 				effectiveStatus := issuestatus.Effective(ctx, s.Queries, issue.WorkspaceID, issue.Status)
 				if effectiveStatus == "in_progress" && !processedIssues[issueKey] && !retriedIssues[issueKey] && !quotaHeldIssues[issueKey] && !timeLimitHeld[issueKey] {
 					processedIssues[issueKey] = true
+					parked := false
+					if !delegatedHandled[issueKey] {
+						parked = s.parkFailedIssue(ctx, t)
+						s.noteParentOfChildRunFailure(ctx, t, parked)
+					}
 					hasActive, checkErr := s.Queries.HasActiveTaskForIssue(ctx, t.IssueID)
 					if checkErr != nil {
 						slog.Warn("handle failed tasks: active check failed",
 							"issue_id", issueKey,
 							"error", checkErr,
 						)
-					} else if !hasActive {
+					} else if !hasActive && !parked {
 						updatedIssue, updateErr := s.Queries.UpdateIssueStatus(ctx, db.UpdateIssueStatusParams{
 							SourceTaskID: t.ID,
 							ID:           t.IssueID,
