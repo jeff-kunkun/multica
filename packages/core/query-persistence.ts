@@ -76,7 +76,9 @@ export function createPersistedQueryCache(
         // infinite stale time.
         void queryClient.invalidateQueries({
           predicate: (query) => isPersistableQuery(query),
-          refetchType: "none",
+          // Refetch active observers immediately. Inactive restored queries
+          // remain stale and will refresh when their page mounts.
+          refetchType: "active",
         });
       } else {
         storage.removeItem(key);
