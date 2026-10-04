@@ -9442,6 +9442,9 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	var taskCapabilities []string
 	if agent.SupportsTaskSupplement(provider, resolvedVersion) && (task.IssueID != "" || task.ChatSessionID != "") {
 		taskCapabilities = append(taskCapabilities, protocol.DaemonCapabilityTaskSupplementV1)
+		if agent.SteersByRestart(provider) {
+			taskCapabilities = append(taskCapabilities, protocol.DaemonCapabilitySteerRestartV1)
+		}
 	}
 	taskSupplementNegotiated, err := d.client.StartTask(prepareCtx, task, taskCapabilities...)
 	if err != nil {
@@ -9741,6 +9744,8 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	if err != nil {
 		return TaskResult{}, fmt.Errorf("create agent backend: %w", err)
 	}
+	// One-shot CLIs take a mid-run message by restarting on the same session.
+	backend = agent.WithRestartSteer(provider, backend)
 
 	// Two-tier model resolution: an explicit agent.model wins,
 	// then the daemon-wide MULTICA_<PROVIDER>_MODEL env var. If

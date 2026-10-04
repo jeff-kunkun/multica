@@ -481,8 +481,9 @@ var issueCommentAddCmd = &cobra.Command{
 replying on this issue (omit it for the usual behaviour):
 
   steer    add it to their running turn: read after the current step, the
-           original work continues (same process, same session; Claude, Codex
-           and Grok only; text only, people only)
+           original work continues (same process, same session on Claude,
+           Codex and Grok; one-shot CLIs such as Cursor restart on the same
+           session; text only, people only)
   queue    answer it after the current turn (new process, same session)
   restart  stop their current turn first, then start from this comment (new
            process, same session; the half-done step is dropped)

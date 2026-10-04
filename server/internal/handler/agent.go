@@ -909,6 +909,7 @@ type AgentTaskResponse struct {
 	DeliveredCommentIDs   []string               `json:"delivered_comment_ids"`           // always present: [] is an authoritative empty receipt, while field absence identifies responses from legacy servers
 	SupplementCapability  string                 `json:"supplement_capability,omitempty"`
 	SupplementCommentIDs  []string               `json:"supplement_comment_ids,omitempty"`
+	SupplementSteerMode   string                 `json:"supplement_steer_mode,omitempty"` // DENE-1349: "same" reads the message in the running process, "restart" stops the CLI and resumes its session
 	CanSupplement         bool                   `json:"can_supplement,omitempty"`
 	TriggerThreadID       string                 `json:"trigger_thread_id,omitempty"`       // root comment ID for the triggering thread
 	TriggerCommentContent string                 `json:"trigger_comment_content,omitempty"` // content of the triggering comment

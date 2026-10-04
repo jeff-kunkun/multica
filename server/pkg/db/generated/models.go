@@ -1950,6 +1950,7 @@ type TaskSupplementCapability struct {
 	IssueID     pgtype.UUID        `json:"issue_id"`
 	Capability  string             `json:"capability"`
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	SteerMode   string             `json:"steer_mode"`
 }
 
 type TaskToken struct {

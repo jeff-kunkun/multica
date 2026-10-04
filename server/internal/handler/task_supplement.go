@@ -49,6 +49,7 @@ func (h *Handler) hydrateTaskSupplementMetadata(ctx context.Context, r *http.Req
 		}
 		resp[i].SupplementCapability = row.Capability
 		resp[i].SupplementCommentIDs = uuidsToStrings(row.CommentIds)
+		resp[i].SupplementSteerMode = row.SteerMode
 		if task.Status != "running" || row.Capability != protocol.DaemonCapabilityTaskSupplementV1 || userID == "" {
 			continue
 		}

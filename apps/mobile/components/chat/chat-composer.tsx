@@ -80,6 +80,8 @@ interface Props {
   steerSupported?: boolean;
   /** CLI of the running reply, named when steer is unavailable. */
   steerProvider?: string;
+  /** "restart" when steering stops the CLI and resumes its session. */
+  steerMode?: string;
   /** Hard-disable typing + send. Used when there's no usable agent in the
    *  workspace or the session is archived (legacy). */
   disabled?: boolean;
@@ -99,6 +101,7 @@ export function ChatComposer({
   allowSendWhileRunning = false,
   steerSupported,
   steerProvider,
+  steerMode,
   disabled = false,
   disabledReason,
 }: Props) {
@@ -197,6 +200,7 @@ export function ChatComposer({
       mode={sendMode}
       steerSupported={steerSupported === true}
       steerProvider={steerProvider}
+      steerMode={steerMode}
       onClose={() => setSheetOpen(false)}
       onPick={(next) => {
         setChosenMode(next);
@@ -277,6 +281,7 @@ function SendModeSheet({
   mode,
   steerSupported,
   steerProvider,
+  steerMode,
   onClose,
   onPick,
 }: {
@@ -284,6 +289,7 @@ function SendModeSheet({
   mode: ChatSendMode;
   steerSupported: boolean;
   steerProvider?: string;
+  steerMode?: string;
   onClose: () => void;
   onPick: (mode: ChatSendMode) => void;
 }) {
@@ -291,13 +297,17 @@ function SendModeSheet({
   const insets = useSafeAreaInsets();
   const descKey = (m: ChatSendMode) =>
     m === "steer"
-      ? "composer.mode_steer_desc"
+      ? steerMode === "restart"
+        ? "composer.mode_steer_restart_desc"
+        : "composer.mode_steer_desc"
       : m === "queue"
         ? "composer.mode_queue_desc"
         : "composer.mode_restart_desc";
   const processKey = (m: ChatSendMode) =>
     m === "steer"
-      ? "composer.mode_steer_process"
+      ? steerMode === "restart"
+        ? "composer.mode_steer_restart_process"
+        : "composer.mode_steer_process"
       : m === "queue"
         ? "composer.mode_queue_process"
         : "composer.mode_restart_process";

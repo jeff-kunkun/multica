@@ -112,12 +112,19 @@ function actionLabel(action: RecipientAction, state: AgentRunState, t: IssuesT):
   }
 }
 
+// A one-shot CLI takes a message by restarting on the same session (DENE-1349).
+function isRestartSteer(entry: RecipientEntry): boolean {
+  return entry.state.kind === "running" && entry.state.task.supplement_steer_mode === "restart";
+}
+
 // Only choices whose consequence is not obvious from the label carry a line.
 function actionDescription(action: RecipientAction, entry: RecipientEntry, presenceLine: string | null, t: IssuesT): string | null {
   const name = entry.agent.name;
   switch (action) {
     case "steer":
-      return t(($) => $.comment.recipient_steer_desc);
+      return isRestartSteer(entry)
+        ? t(($) => $.comment.recipient_steer_restart_desc)
+        : t(($) => $.comment.recipient_steer_desc);
     case "after_run":
       return t(($) => $.comment.recipient_after_run_desc);
     case "restart":
@@ -131,13 +138,15 @@ function actionDescription(action: RecipientAction, entry: RecipientEntry, prese
   }
 }
 
-// What the choice does to the CLI process and the model's session. Only a
-// native-steer CLI (Claude, Codex, Grok) negotiates the run capability that
-// makes "steer" available, so its line is that tier's cost.
-function actionProcessLine(action: RecipientAction, t: IssuesT): string | null {
+// What the choice does to the CLI process and the model's session. The run
+// says how it takes a message: in the running CLI, or by restarting the CLI
+// on the same session (one-shot CLIs, DENE-1349).
+function actionProcessLine(action: RecipientAction, entry: RecipientEntry, t: IssuesT): string | null {
   switch (action) {
     case "steer":
-      return t(($) => $.comment.recipient_steer_process);
+      return isRestartSteer(entry)
+        ? t(($) => $.comment.recipient_steer_restart_process)
+        : t(($) => $.comment.recipient_steer_process);
     case "after_run":
       return t(($) => $.comment.recipient_after_run_process);
     case "restart":
@@ -279,7 +288,7 @@ function RecipientActionMenu({
         >
           {entry.actions.map((action) => {
             const description = actionDescription(action, entry, presenceLine, t);
-            const processLine = actionProcessLine(action, t);
+            const processLine = actionProcessLine(action, entry, t);
             return (
               <div key={action}>
                 {action === "skip" && <DropdownMenuSeparator />}

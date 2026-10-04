@@ -744,6 +744,17 @@ describe("ChatInput project context", () => {
     expect(onSend.mock.calls[0]![4]).toBe("restart");
   });
 
+  it("says a one-shot CLI restarts to take a steer", async () => {
+    renderInput({ isRunning: true, allowSubmitWhileRunning: true, steerSupported: true, steerProvider: "cursor", steerMode: "restart" });
+
+    expect(screen.getByText("Enter = Steer")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Send mode" }));
+    const menu = await screen.findByRole("menu");
+    expect(within(menu).getByText("Restarts the CLI · same session")).toBeInTheDocument();
+    expect(within(menu).getByText("Reads it right away; the current step is cut off")).toBeInTheDocument();
+    expect(within(menu).queryByText("Same process · same session")).not.toBeInTheDocument();
+  });
+
   it("explains why steer is off for a CLI that cannot take it", async () => {
     renderInput({ isRunning: true, allowSubmitWhileRunning: true, steerProvider: "kimi" });
 

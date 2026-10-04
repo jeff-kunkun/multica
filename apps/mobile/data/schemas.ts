@@ -328,6 +328,7 @@ export const ChatPendingTaskSchema: z.ZodType<ChatPendingTask> = z.object({
   queued_tasks: ChatQueuedTasksSchema.optional(),
   steer_supported: z.boolean().optional().catch(undefined),
   steer_provider: z.string().optional().catch(undefined),
+  steer_mode: z.string().optional().catch(undefined),
 }).loose();
 
 export const EMPTY_CHAT_PENDING_TASK: ChatPendingTask = {};
