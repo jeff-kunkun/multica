@@ -105,17 +105,27 @@ export function RealtimeProvider({ children }: { children: React.ReactNode }) {
       ws.connect();
       setClient(ws);
       incrementalUnsub = ws.onReconnect(() => {
-        void Promise.all((['issues', 'inbox', 'chats'] as const).map(async (resource) => {
+        const resources = ['issues', 'inbox', 'chats'] as const;
+        const hasMissingCursor = resources.some((resource) => !syncCursorsRef.current[resource]);
+        if (hasMissingCursor) {
+          // No cursor means this is the first recovery after startup. Refresh
+          // list projections before taking a new baseline so downtime changes
+          // cannot be excluded by the baseline timestamp.
+          for (const resource of resources) {
+            void queryClient.invalidateQueries({ queryKey: [resource === 'chats' ? 'chat' : resource] });
+          }
+        }
+        void Promise.all(resources.map(async (resource) => {
           const cursor = syncCursorsRef.current[resource];
-          const updatedSince = cursor
-            ? undefined
-            : (syncBaselinesRef.current[resource] ??= new Date().toISOString());
+          const updatedSince = cursor ? undefined : (syncBaselinesRef.current[resource] ??= new Date().toISOString());
           let page = await api.listIncrementalChanges(resource, { cursor, updatedSince });
+          let changed = page.upserts.length > 0 || page.deleted.length > 0;
           while (page.has_more) {
             page = await api.listIncrementalChanges(resource, { cursor: page.next_cursor });
+            changed ||= page.upserts.length > 0 || page.deleted.length > 0;
           }
           if (page.next_cursor) syncCursorsRef.current[resource] = page.next_cursor;
-          if (page.upserts.length || page.deleted.length) {
+          if (changed && !hasMissingCursor) {
             void queryClient.invalidateQueries({ queryKey: [resource === 'chats' ? 'chat' : resource] });
           }
         }));

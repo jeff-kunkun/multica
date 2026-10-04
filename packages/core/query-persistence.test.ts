@@ -38,9 +38,14 @@ describe("persisted query cache", () => {
     ]);
 
     const second = new QueryClient();
+    const invalidate = vi.spyOn(second, "invalidateQueries");
     createPersistedQueryCache(second, storage, "user-a");
     expect(second.getQueryData(["projects", "workspace-a"])).toEqual([{ id: "p1" }]);
     expect(second.getQueryData(["messages", "workspace-a"])).toBeUndefined();
+    expect(invalidate).toHaveBeenCalledWith(expect.objectContaining({
+      refetchType: "none",
+      predicate: expect.any(Function),
+    }));
     stop();
     vi.useRealTimers();
   });

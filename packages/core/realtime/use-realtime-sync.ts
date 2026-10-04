@@ -808,18 +808,32 @@ async function refreshIncrementalLists(qc: QueryClient): Promise<void> {
   if (!wsId) return;
   const api = getApi();
   const resources = ["issues", "inbox", "chats"] as const;
+  const hasMissingCursor = resources.some((resource) =>
+    !defaultStorage.getItem(`multica_sync_cursor:${wsId}:${resource}`),
+  );
+  if (hasMissingCursor) {
+    // There is no trustworthy lower bound for the first reconnect. Refresh
+    // the visible list projections before establishing a new cursor.
+    qc.invalidateQueries({ queryKey: issueKeys.all(wsId) });
+    void onInboxInvalidate(qc, wsId);
+    qc.invalidateQueries({ queryKey: chatKeys.all(wsId) });
+  }
   const results = await Promise.allSettled(resources.map(async (resource) => {
     const storageKey = `multica_sync_cursor:${wsId}:${resource}`;
     const cursor = defaultStorage.getItem(storageKey) ?? undefined;
     // A brand-new client must establish a current baseline. Starting from
-    // Unix epoch makes every reconnect walk the oldest 100 rows again.
+    // Unix epoch makes every reconnect walk the oldest 100 rows again. The
+    // caller performs a full refresh for this first run, so changes that
+    // happened while the socket was down cannot be hidden by the baseline.
     const updatedSince = cursor ? undefined : new Date().toISOString();
     let page = await api.listIncrementalChanges(resource, { cursor, updatedSince });
+    let changed = page.upserts.length > 0 || page.deleted.length > 0;
     while (page.has_more) {
       page = await api.listIncrementalChanges(resource, { cursor: page.next_cursor });
+      changed ||= page.upserts.length > 0 || page.deleted.length > 0;
     }
     if (page.next_cursor) defaultStorage.setItem(storageKey, page.next_cursor);
-    if (page.upserts.length === 0 && page.deleted.length === 0) return;
+    if (!changed) return;
     if (resource === "issues") qc.invalidateQueries({ queryKey: issueKeys.all(wsId) });
     if (resource === "inbox") void onInboxInvalidate(qc, wsId);
     if (resource === "chats") qc.invalidateQueries({ queryKey: chatKeys.all(wsId) });
@@ -828,7 +842,6 @@ async function refreshIncrementalLists(qc: QueryClient): Promise<void> {
   const failed = results.some((result) => result.status === "rejected" && !(result.reason instanceof ApiError && result.reason.status === 410));
   if (expired) for (const resource of resources) defaultStorage.removeItem(`multica_sync_cursor:${wsId}:${resource}`);
   if (expired || failed) invalidateWorkspaceScopedQueries(qc);
-  else invalidateReconnectDetailQueries(qc);
 }
 
 async function refreshWorkingAgentQueries(qc: QueryClient, wsId: string): Promise<void> {
@@ -2080,6 +2093,10 @@ export function useRealtimeSync(
 
     const unsub = ws.onReconnect(async () => {
       logger.info("reconnected, replaying incremental changes");
+      // These projections are outside the incremental list contract. Mark
+      // them stale synchronously so callers do not observe the old snapshot
+      // while the replay request is in flight.
+      invalidateReconnectDetailQueries(qc);
       try {
         await refreshIncrementalLists(qc);
       } catch (e) {
