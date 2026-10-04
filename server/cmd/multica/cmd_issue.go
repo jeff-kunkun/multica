@@ -470,8 +470,22 @@ var issueCommentListCmd = &cobra.Command{
 var issueCommentAddCmd = &cobra.Command{
 	Use:   "add <issue-id>",
 	Short: "Add a comment to an issue",
-	Args:  exactArgs(1),
-	RunE:  runIssueCommentAdd,
+	Long: `Add a comment to an issue.
+
+--mode decides what happens to agents the comment wakes that are still
+replying on this issue (omit it for the usual behaviour):
+
+  steer    add it to their running turn: read after the current step, the
+           original work continues (same process, same session; Claude, Codex
+           and Grok only; text only, people only)
+  queue    answer it after the current turn (new process, same session)
+  restart  stop their current turn first, then start from this comment (new
+           process, same session; the half-done step is dropped)
+
+When no woken agent's running CLI can steer, the comment is refused with the
+reason and the modes that work; nothing is posted.`,
+	Args: exactArgs(1),
+	RunE: runIssueCommentAdd,
 }
 
 var issueCommentUpdateCmd = &cobra.Command{
@@ -913,6 +927,7 @@ func init() {
 	issueCommentAddCmd.Flags().String("verdict", "", "Acceptance verdict written as its own line: pass or hold. This is what merges and closes; the words 通过 in the body do not")
 	issueCommentAddCmd.Flags().StringSlice("attachment", nil, "File path(s) to attach (can be specified multiple times). Non-image files, HTML included, show as file cards that open in the viewer; to render a chart inside the comment, put a ```html or ```mermaid block in the content instead")
 	issueCommentAddCmd.Flags().String("output", "json", "Output format: table or json")
+	issueCommentAddCmd.Flags().String("mode", "", "For agents still replying: steer, queue or restart (see --help)")
 
 	// issue comment update
 	issueCommentUpdateCmd.Flags().String("content", "", "New comment content (decodes \\n, \\r, \\t, \\\\; pipe via --content-stdin for multi-line bodies or to preserve literal backslashes)")
@@ -3187,6 +3202,12 @@ func runIssueCommentAdd(cmd *cobra.Command, args []string) error {
 		"Deliver the file itself with `multica issue comment add <issue-id> --attachment <path>` (repeatable) and drop the link."); err != nil {
 		return err
 	}
+	mode, _ := cmd.Flags().GetString("mode")
+	switch mode {
+	case "", "steer", "queue", "restart":
+	default:
+		return fmt.Errorf("--mode must be steer, queue or restart")
+	}
 
 	client, err := newAPIClient(cmd)
 	if err != nil {
@@ -3235,9 +3256,13 @@ func runIssueCommentAdd(cmd *cobra.Command, args []string) error {
 	if len(attachmentIDs) > 0 {
 		body["attachment_ids"] = attachmentIDs
 	}
+	if mode != "" {
+		body["mode"] = mode
+	}
 	var result map[string]any
 	if err := client.PostJSON(ctx, "/api/issues/"+issueID+"/comments", body, &result); err != nil {
-		return fmt.Errorf("add comment: %w", err)
+		output, _ := cmd.Flags().GetString("output")
+		return sendModeRefusal(err, output, "add comment")
 	}
 
 	fmt.Fprintf(os.Stderr, "Comment added to issue %s.\n", issueRef.Display)

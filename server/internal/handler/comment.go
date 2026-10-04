@@ -1512,6 +1512,11 @@ type CreateCommentRequest struct {
 	// has ended, or cannot take additional input, is never swapped for another
 	// one: its agent keeps the normal trigger.
 	SteerTaskIDs []string `json:"steer_task_ids"`
+	// Mode is the one-word form of the same choice (DENE-1346): steer adds the
+	// comment to the running turns of every agent it wakes, queue (default)
+	// waits for them, restart stops them first. Steer is refused with the
+	// reason and the usable modes when no woken turn can read it.
+	Mode string `json:"mode,omitempty"`
 }
 
 type CommentTriggerPreviewRequest struct {
@@ -1813,6 +1818,26 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 	// Determine author identity: agent (via X-Agent-ID header) or member.
 	authorType, authorID := h.resolveActor(r, userID, uuidToString(issue.WorkspaceID))
 
+	mode, ok := normalizeSendMode(req.Mode)
+	if !ok {
+		writeError(w, http.StatusBadRequest, "mode must be steer, queue or restart")
+		return
+	}
+	var modeTriggers []commentAgentTrigger
+	if req.Mode != "" && !isNoteComment(req.Content) {
+		modeTriggers, _ = h.computeCommentAgentTriggers(r.Context(), issue, req.Content, parentComment, authorType, authorID, commentTriggerComputeOptions{
+			OriginatorUserID: h.invokeOriginatorFromRequest(r, authorType, authorID),
+		})
+		modeTriggers = filterSuppressedCommentAgentTriggers(modeTriggers, suppressAgentIDs)
+	}
+	if mode == sendModeSteer {
+		ids, ok := h.commentSteerTaskIDs(w, r.Context(), issue, modeTriggers, authorType, len(attachmentIDs) > 0)
+		if !ok {
+			return
+		}
+		steerTaskIDs = ids
+	}
+
 	// sourceTaskID captures the agent's currently-executing task when it posts
 	// via the CLI (X-Task-ID header). Stamping it on the comment row keeps the
 	// originator inheritance chain (resolveOriginatorFromTriggerComment →
@@ -2026,6 +2051,9 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 	}
 
 	originatorUserID := h.invokeOriginatorFromRequest(r, authorType, authorID)
+	if mode == sendModeRestart {
+		h.stopCommentRecipients(r.Context(), issue, modeTriggers, authorType, authorID)
+	}
 	// The comment is already saved; a blocked mention must not fail the whole
 	// request. Surface the per-target outcomes so the client can show partial
 	// success instead of a silent no-op (MUL-4525 §2).

@@ -21,7 +21,7 @@ Read the invariants below, then open the reference(s) your task actually needs
 |---|---|
 | `references/issues.md` | Issues: PR linking vs close intent, reading a linked PR's state, custom properties, status side effects, who else is running, charts vs attached files in a comment |
 | `references/drivers.md` | Who drives an open issue (`driver` in `issue get` / `issue children`), the patrol's rerun-then-escalate, and `multica issue dispose` for one nobody drives |
-| `references/run-control.md` | Stopping every run on one issue (halt / resume), the chain budget, and the run time limit |
+| `references/run-control.md` | Stopping every run on one issue (halt / resume), the chain budget, the run time limit, and steer / queue / restart for a message to a running reply |
 | `references/wakeups.md` | Issue wakeups: events, conditions (`--until-*`), timers, check-ins, runaway protection |
 | `references/stall-actions.md` | Automatic stall actions: 24-hour keep announcements, parent auto-close, 7-day undo, and CLI/API commands |
 | `references/goals.md` | Task goals: draft a completion line, confirm the human lock, track budget, and finish a goal |
@@ -107,6 +107,12 @@ opt in to a workspace-wide directory. Visibility follows the person who
 started the task, so another member's private chats stay hidden. Listing and
 reading chats never changes unread state. Use `multica chat history` for a
 bounded transcript after choosing a session.
+
+To message a chat while its agent may still be replying, use
+`multica chat send --session <id> --content-file <path> --mode steer|queue|restart`.
+The same `--mode` works on `multica issue comment add`. What each mode costs,
+and what happens when the running CLI cannot steer, is in
+`references/run-control.md`.
 
 To promote the current conversation into a goal task, use
 `multica chat to-goal --session <id-or-url>`. The server creates the issue with

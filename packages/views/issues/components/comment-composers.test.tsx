@@ -490,14 +490,14 @@ describe("comment composers", () => {
 
     activateComposer("reply-composer-shell");
     fireEvent.change(screen.getByTestId("editor"), { target: { value: "only fix web" } });
-    await screen.findByText("Add to current run", {}, { timeout: 5000 });
+    await screen.findByText("Steer", {}, { timeout: 5000 });
     fireEvent.click(getSubmitButton(container));
     await waitFor(() => expect(onSubmit).toHaveBeenCalledWith("only fix web", undefined, undefined,
       ["turn-1"]), { timeout: 5000 });
     expect(apiCancelTask).not.toHaveBeenCalled();
 
     fireEvent.change(screen.getByTestId("editor"), { target: { value: "start over on web" } });
-    await chooseRecipientAction("Lambda trigger: Add to current run", /Stop and start over/);
+    await chooseRecipientAction("Lambda trigger: Steer", /^Interrupt and restart/);
     fireEvent.click(await screen.findByRole("button", { name: "Stop and send" }, { timeout: 5000 }));
     await waitFor(() => expect(onSubmit).toHaveBeenCalledWith("start over on web", undefined, undefined, undefined), { timeout: 5000 });
     expect(apiCancelTask).toHaveBeenCalledWith("issue-1", "turn-1");
@@ -522,14 +522,14 @@ describe("comment composers", () => {
 
     activateComposer("reply-composer-shell");
     fireEvent.change(screen.getByTestId("editor"), { target: { value: "only fix web" } });
-    await screen.findByRole("button", { name: "Lambda trigger: Start after this run" }, { timeout: 5000 });
+    await screen.findByRole("button", { name: "Lambda trigger: Queue" }, { timeout: 5000 });
     fireEvent.click(getSubmitButton(container));
     await waitFor(() => expect(onSubmit).toHaveBeenCalledWith("only fix web", undefined, undefined, undefined), { timeout: 5000 });
 
     // One message can still go into the running turn.
     fireEvent.change(screen.getByTestId("editor"), { target: { value: "and keep desktop as is" } });
-    await chooseRecipientAction("Lambda trigger: Start after this run", /Add to current run/);
-    await screen.findByRole("button", { name: "Lambda trigger: Add to current run" }, { timeout: 5000 });
+    await chooseRecipientAction("Lambda trigger: Queue", /^Steer/);
+    await screen.findByRole("button", { name: "Lambda trigger: Steer" }, { timeout: 5000 });
     fireEvent.click(getSubmitButton(container));
     await waitFor(() => expect(onSubmit).toHaveBeenLastCalledWith("and keep desktop as is", undefined, undefined,
       ["turn-1"]), { timeout: 5000 });
@@ -555,8 +555,8 @@ describe("comment composers", () => {
     activateComposer("reply-composer-shell");
     fireEvent.change(screen.getByTestId("editor"), { target: { value: "only fix web" } });
     fireEvent.click(await screen.findByText("2 agents will receive this", {}, { timeout: 5000 }));
-    expect(await screen.findByRole("button", { name: "Lambda trigger: Add to current run" }, { timeout: 5000 })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Orion trigger: Add to current run" })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "Lambda trigger: Steer" }, { timeout: 5000 })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Orion trigger: Steer" })).toBeInTheDocument();
     fireEvent.click(getSubmitButton(container));
     await waitFor(() => expect(onSubmit).toHaveBeenCalledWith("only fix web", undefined, undefined,
       ["turn-1", "turn-2"]), { timeout: 5000 });
@@ -577,7 +577,7 @@ describe("comment composers", () => {
       onSubmit={onSubmit} steerByDefault={(task) => task.id === "turn-1"} />);
     activateComposer("reply-composer-shell");
     fireEvent.change(screen.getByTestId("editor"), { target: { value: "start over" } });
-    await chooseRecipientAction("Lambda trigger: Add to current run", /Stop and start over/);
+    await chooseRecipientAction("Lambda trigger: Steer", /^Interrupt and restart/);
     // A slow preview still holds Lambda's restart, though the comment now
     // explicitly addresses only a different agent.
     apiPreviewCommentTriggers.mockImplementation(() => new Promise(() => {}));
