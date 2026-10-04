@@ -181,7 +181,7 @@ var workspaceDeletionManifest = map[string]workspaceDeleteAction{
 	"workspace_invitation":               workspaceDelete,
 	"workspace_link":                     workspaceDelete,
 	"workspace_link_audit":               workspaceDelete,
-	"workspace_link_project":             workspaceDelete,
+	"workspace_link_project":              workspaceDelete,
 	"workspace_module_visibility":        workspaceDelete,
 	"workspace_share_link":               workspaceDelete,
 }
