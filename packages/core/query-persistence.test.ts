@@ -43,7 +43,7 @@ describe("persisted query cache", () => {
     expect(second.getQueryData(["projects", "workspace-a"])).toEqual([{ id: "p1" }]);
     expect(second.getQueryData(["messages", "workspace-a"])).toBeUndefined();
     expect(invalidate).toHaveBeenCalledWith(expect.objectContaining({
-      refetchType: "none",
+      refetchType: "active",
       predicate: expect.any(Function),
     }));
     stop();
