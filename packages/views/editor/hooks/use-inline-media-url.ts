@@ -210,7 +210,8 @@ function useObjectURL(
   }, [id, isAuthenticated]);
 
   useEffect(() => {
-    if (!blob || !id || !isAuthenticated || typeof URL.createObjectURL !== "function") return;
+    // Only a real Blob: a cache restored from JSON can hand back `{}`.
+    if (!(blob instanceof Blob) || !id || !isAuthenticated || typeof URL.createObjectURL !== "function") return;
     if (blobUrlCache.has(id)) {
       bump((v) => v + 1);
       return;

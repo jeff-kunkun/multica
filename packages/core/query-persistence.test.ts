@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { QueryClient, QueryObserver } from "@tanstack/react-query";
+import { dehydrate, QueryClient, QueryObserver } from "@tanstack/react-query";
 import type { StorageAdapter } from "./types/storage";
 import {
   clearPersistedQueryCache,
@@ -84,5 +84,42 @@ describe("persisted query cache", () => {
     unsubscribe();
     stopReader();
     vi.useRealTimers();
+  });
+
+  it("never persists attachment queries or binary data", () => {
+    vi.useFakeTimers();
+    const storage = memoryStorage();
+    const client = new QueryClient();
+    const stop = createPersistedQueryCache(client, storage, "user-a");
+    client.setQueryData(["projects", "workspace-a"], [{ id: "p1" }]);
+    client.setQueryData(["attachment-inline-blob", "att-1"], new Blob(["x"]));
+    client.setQueryData(["attachment-inline-resign", "att-1"], { download_url: "https://s/x" });
+    client.setQueryData(["files", "att-2"], { bytes: new Uint8Array([1]) });
+    vi.advanceTimersByTime(60);
+
+    const envelope = JSON.parse(storage.data[`${queryCacheStoragePrefix()}user-a`]!);
+    expect(envelope.state.queries.map((q: { queryKey: unknown[] }) => q.queryKey)).toEqual([
+      ["projects", "workspace-a"],
+    ]);
+    stop();
+    vi.useRealTimers();
+  });
+
+  it("drops entries an older build should not have persisted", () => {
+    const storage = memoryStorage();
+    const writer = new QueryClient();
+    writer.setQueryData(["projects", "workspace-a"], [{ id: "p1" }]);
+    writer.setQueryData(["attachment-pdf-blob", "att-1"], {});
+    const state = dehydrate(writer, { shouldDehydrateQuery: () => true });
+    storage.setItem(
+      `${queryCacheStoragePrefix()}user-a`,
+      JSON.stringify({ schemaVersion: QUERY_CACHE_SCHEMA_VERSION, userId: "user-a", state }),
+    );
+
+    const reader = new QueryClient();
+    const stop = createPersistedQueryCache(reader, storage, "user-a");
+    expect(reader.getQueryData(["projects", "workspace-a"])).toEqual([{ id: "p1" }]);
+    expect(reader.getQueryData(["attachment-pdf-blob", "att-1"])).toBeUndefined();
+    stop();
   });
 });
