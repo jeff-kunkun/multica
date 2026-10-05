@@ -748,6 +748,7 @@ export function ChatPage() {
           trailing={directNewChatButton}
           session={c.currentSession}
           agent={c.activeAgent}
+          handoffAgents={c.availableAgents}
           onArchive={handleArchive}
           loadAllMessages={() =>
             c.hasOlderMessages
@@ -860,7 +861,7 @@ export function ChatPage() {
         allowSubmitWhileRunning={c.pendingTask?.supports_queue === true}
         steerSupported={c.pendingTask?.steer_supported === true}
         steerProvider={c.pendingTask?.steer_provider}
-        steerUpstreamTurn={c.pendingTask?.steer_upstream_turn}
+        steerMode={c.pendingTask?.steer_mode}
         disabled={
           c.isSessionArchived ||
           c.isAgentArchived ||

@@ -148,7 +148,9 @@ var chatSendCmd = &cobra.Command{
 happens when the agent is still replying (ignored when it is not):
 
   steer    read it after the current step, keep working on the original ask
-           (same process, same session; Claude, Codex and Grok only)
+           (same process, same session on Claude, Codex, Grok, OpenCode 1.x
+           and Pi; Cursor, Copilot, CodeArts, DevEco, Antigravity and OpenClaw
+           restart the CLI on the same session to read it right away)
   queue    answer it after this reply finishes (new process, same session;
            default)
   restart  stop the reply now and start over from this message (new process,
@@ -162,6 +164,21 @@ the modes that work; nothing is sent.
 `,
 	Args: cobra.MaximumNArgs(1),
 	RunE: runChatSend,
+}
+
+var chatHandoffCmd = &cobra.Command{
+	Use:   "handoff",
+	Short: "Hand a chat to another agent: a new chat that opens with this one's summary",
+	Long: `Hand a chat to another agent. The server opens a new chat with --to whose
+first message summarises this one (title, opening line, latest messages, and
+how to read the full history), and starts that agent's reply. The old chat is
+left as it is. Only the chat's owner can hand it over.
+
+  multica chat handoff --to 孙悟饭
+  multica chat handoff --session <id|url> --to <agent-name|id> --output table
+`,
+	Args: cobra.NoArgs,
+	RunE: runChatHandoff,
 }
 
 func init() {
@@ -188,6 +205,10 @@ func init() {
 	chatCmd.AddCommand(chatTitleCmd)
 	chatCmd.AddCommand(chatOpenCmd)
 	chatCmd.AddCommand(chatSendCmd)
+	chatCmd.AddCommand(chatHandoffCmd)
+	chatHandoffCmd.Flags().String("session", "", "Chat session id or URL (defaults to MULTICA_CHAT_SESSION_ID)")
+	chatHandoffCmd.Flags().String("to", "", "Agent to hand the chat to: name or id (required)")
+	chatHandoffCmd.Flags().String("output", "json", "Output format: table or json")
 	chatSendCmd.Flags().String("session", "", "Chat session id or URL (required)")
 	chatSendCmd.Flags().String("content-file", "", "Read the message from this file instead of the argument")
 	chatSendCmd.Flags().String("mode", "queue", "While the agent is replying: steer, queue or restart")
@@ -691,4 +712,36 @@ func sendModeRefusal(err error, output, verb string) error {
 		return fmt.Errorf("%s: cannot steer: %s (use --mode %s)", verb, refusal.Error, strings.Join(refusal.AvailableModes, " or --mode "))
 	}
 	return fmt.Errorf("%s: %w", verb, err)
+}
+
+func runChatHandoff(cmd *cobra.Command, _ []string) error {
+	session := os.Getenv("MULTICA_CHAT_SESSION_ID")
+	if raw, _ := cmd.Flags().GetString("session"); strings.TrimSpace(raw) != "" {
+		session = raw
+	}
+	ref, err := parseChatSessionLinkRef(session)
+	if err != nil {
+		return fmt.Errorf("chat handoff: session is required (or set MULTICA_CHAT_SESSION_ID): %w", err)
+	}
+	to, _ := cmd.Flags().GetString("to")
+	if strings.TrimSpace(to) == "" {
+		return fmt.Errorf("chat handoff: --to is required")
+	}
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := cli.APIContext(context.Background())
+	defer cancel()
+	var out map[string]any
+	if err := client.PostJSON(ctx, "/api/chat/sessions/"+url.PathEscape(ref.ID)+"/handoff", map[string]any{"to": to}, &out); err != nil {
+		return fmt.Errorf("hand chat over: %w", err)
+	}
+	output, _ := cmd.Flags().GetString("output")
+	if output == "table" {
+		s, _ := out["session"].(map[string]any)
+		fmt.Printf("New chat: %v (%v)\n", s["title"], s["id"])
+		return nil
+	}
+	return cli.PrintJSON(os.Stdout, out)
 }

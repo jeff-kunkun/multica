@@ -98,14 +98,24 @@ describe("CommentTriggerChips", () => {
     expect(onActionChange).toHaveBeenCalledWith("agent-1", "after_run");
   });
 
-  it("says a stop-and-continue CLI stops the current step", async () => {
-    const task = { ...turn("running"), supplement_upstream_turn: "handoff" } as AgentTask;
-    const handoff: AgentRunState = { kind: "running", task, steerable: true };
-    renderWithI18n(<CommentTriggerChips recipients={[entry(walt, handoff)]} onActionChange={vi.fn()} />);
+  it("says an ACP CLI stops the current step to take a message", async () => {
+    const task = { ...turn("running"), supplement_steer_mode: "handoff" } as AgentTask;
+    const state: AgentRunState = { kind: "running", task, steerable: true };
+    renderWithI18n(<CommentTriggerChips recipients={[entry(walt, state)]} onActionChange={vi.fn()} />);
     fireEvent.click(screen.getByRole("button", { name: "Walt trigger: Steer" }));
     const menu = await screen.findByRole("menu");
     expect(within(menu).getByText("Stops this step to read it; the original work continues")).toBeInTheDocument();
     expect(within(menu).getByText("Current step stops · same session")).toBeInTheDocument();
+    expect(within(menu).queryByText("Same process · same session")).not.toBeInTheDocument();
+  });
+
+  it("says a one-shot CLI restarts on the same session to take a message", async () => {
+    const restartTurn = { ...turn("running"), supplement_steer_mode: "restart" } as AgentTask;
+    const state: AgentRunState = { kind: "running", task: restartTurn, steerable: true };
+    renderWithI18n(<CommentTriggerChips recipients={[entry(walt, state)]} onActionChange={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "Walt trigger: Steer" }));
+    const menu = await screen.findByRole("menu");
+    expect(within(menu).getByText("Restarts the CLI · same session")).toBeInTheDocument();
     expect(within(menu).queryByText("Same process · same session")).not.toBeInTheDocument();
   });
 

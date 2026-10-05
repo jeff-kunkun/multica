@@ -183,7 +183,6 @@ WITH locked_task AS MATERIALIZED (
       AND r.workspace_id = $4
       AND t.status = 'running'
       AND cap.capability = 'task-supplement-v1'
-      AND r.provider IN ('codex', 'claude', 'grok')
     FOR UPDATE OF t
 ), inserted AS (
     INSERT INTO task_supplement (
@@ -391,7 +390,6 @@ WITH locked_task AS MATERIALIZED (
       AND t.chat_session_id = $2
       AND t.status = 'running'
       AND cap.capability = 'task-supplement-v1'
-      AND r.provider IN ('codex', 'claude', 'grok')
     FOR UPDATE OF t
 ), inserted AS (
     INSERT INTO chat_task_supplement (
@@ -475,7 +473,6 @@ WITH locked_task AS MATERIALIZED (
       AND r.workspace_id = $3
       AND t.status = 'running'
       AND cap.capability = 'task-supplement-v1'
-      AND r.provider IN ('codex', 'claude', 'grok')
     FOR UPDATE OF t
 ), touched_issue AS (
     UPDATE issue i SET
@@ -614,7 +611,8 @@ func (q *Queries) DeleteTaskSupplementByComment(ctx context.Context, arg DeleteT
 
 const getChatSteerTarget = `-- name: GetChatSteerTarget :one
 SELECT t.id, t.status, t.runtime_id, r.provider,
-       COALESCE(cap.capability, '')::text AS capability
+       COALESCE(cap.capability, '')::text AS capability,
+       COALESCE(cap.steer_mode, '')::text AS steer_mode
 FROM agent_task_queue t
 JOIN agent_runtime r ON r.id = t.runtime_id
 LEFT JOIN task_supplement_capability cap ON cap.task_id = t.id
@@ -631,6 +629,7 @@ type GetChatSteerTargetRow struct {
 	RuntimeID  pgtype.UUID `json:"runtime_id"`
 	Provider   string      `json:"provider"`
 	Capability string      `json:"capability"`
+	SteerMode  string      `json:"steer_mode"`
 }
 
 // The reply a chat message can be steered into right now: the session's
@@ -645,6 +644,7 @@ func (q *Queries) GetChatSteerTarget(ctx context.Context, chatSessionID pgtype.U
 		&i.RuntimeID,
 		&i.Provider,
 		&i.Capability,
+		&i.SteerMode,
 	)
 	return i, err
 }
@@ -691,7 +691,7 @@ func (q *Queries) GetTaskSupplementByRequest(ctx context.Context, arg GetTaskSup
 }
 
 const getTaskSupplementCapability = `-- name: GetTaskSupplementCapability :one
-SELECT task_id, workspace_id, issue_id, capability, created_at FROM task_supplement_capability WHERE task_id = $1
+SELECT task_id, workspace_id, issue_id, capability, created_at, steer_mode FROM task_supplement_capability WHERE task_id = $1
 `
 
 func (q *Queries) GetTaskSupplementCapability(ctx context.Context, taskID pgtype.UUID) (TaskSupplementCapability, error) {
@@ -703,6 +703,7 @@ func (q *Queries) GetTaskSupplementCapability(ctx context.Context, taskID pgtype
 		&i.IssueID,
 		&i.Capability,
 		&i.CreatedAt,
+		&i.SteerMode,
 	)
 	return i, err
 }
@@ -740,7 +741,8 @@ func (q *Queries) GetTaskSupplementForRun(ctx context.Context, arg GetTaskSupple
 
 const listIssueSteerTargets = `-- name: ListIssueSteerTargets :many
 SELECT t.id, t.agent_id, r.provider,
-       COALESCE(cap.capability, '')::text AS capability
+       COALESCE(cap.capability, '')::text AS capability,
+       COALESCE(cap.steer_mode, '')::text AS steer_mode
 FROM agent_task_queue t
 JOIN agent_runtime r ON r.id = t.runtime_id
 LEFT JOIN task_supplement_capability cap ON cap.task_id = t.id
@@ -754,6 +756,7 @@ type ListIssueSteerTargetsRow struct {
 	AgentID    pgtype.UUID `json:"agent_id"`
 	Provider   string      `json:"provider"`
 	Capability string      `json:"capability"`
+	SteerMode  string      `json:"steer_mode"`
 }
 
 // The running turns on an issue and whether each can read a comment
@@ -772,6 +775,7 @@ func (q *Queries) ListIssueSteerTargets(ctx context.Context, issueID pgtype.UUID
 			&i.AgentID,
 			&i.Provider,
 			&i.Capability,
+			&i.SteerMode,
 		); err != nil {
 			return nil, err
 		}
@@ -813,17 +817,14 @@ func (q *Queries) ListSteeringChatFollowups(ctx context.Context, chatSessionID p
 }
 
 const listTaskSupplementMetadata = `-- name: ListTaskSupplementMetadata :many
-SELECT cap.task_id, cap.capability,
-       COALESCE(r.provider, '')::text AS provider,
+SELECT cap.task_id, cap.capability, cap.steer_mode,
        COALESCE(array_agg(s.comment_id ORDER BY s.created_at, s.comment_id)
                 FILTER (WHERE s.comment_id IS NOT NULL), '{}'::uuid[])::uuid[] AS comment_ids
 FROM task_supplement_capability cap
-LEFT JOIN agent_task_queue t ON t.id = cap.task_id
-LEFT JOIN agent_runtime r ON r.id = t.runtime_id
 LEFT JOIN task_supplement s ON s.task_id = cap.task_id
 WHERE cap.workspace_id = $1
   AND cap.task_id = ANY($2::uuid[])
-GROUP BY cap.task_id, cap.capability, r.provider
+GROUP BY cap.task_id, cap.capability, cap.steer_mode
 `
 
 type ListTaskSupplementMetadataParams struct {
@@ -834,12 +835,10 @@ type ListTaskSupplementMetadataParams struct {
 type ListTaskSupplementMetadataRow struct {
 	TaskID     pgtype.UUID   `json:"task_id"`
 	Capability string        `json:"capability"`
-	Provider   string        `json:"provider"`
+	SteerMode  string        `json:"steer_mode"`
 	CommentIds []pgtype.UUID `json:"comment_ids"`
 }
 
-// provider is the running CLI, which decides how a supplement lands
-// (same turn, or stop the step and continue).
 func (q *Queries) ListTaskSupplementMetadata(ctx context.Context, arg ListTaskSupplementMetadataParams) ([]ListTaskSupplementMetadataRow, error) {
 	rows, err := q.db.Query(ctx, listTaskSupplementMetadata, arg.WorkspaceID, arg.TaskIds)
 	if err != nil {
@@ -852,7 +851,7 @@ func (q *Queries) ListTaskSupplementMetadata(ctx context.Context, arg ListTaskSu
 		if err := rows.Scan(
 			&i.TaskID,
 			&i.Capability,
-			&i.Provider,
+			&i.SteerMode,
 			&i.CommentIds,
 		); err != nil {
 			return nil, err
@@ -1112,11 +1111,12 @@ WITH candidate AS MATERIALIZED (
       AND t.status IN ('dispatched', 'waiting_local_directory')
     FOR UPDATE OF t
 ), capability AS (
-    INSERT INTO task_supplement_capability (task_id, workspace_id, issue_id, capability)
-    SELECT id, workspace_id, issue_id, 'task-supplement-v1'
+    INSERT INTO task_supplement_capability (task_id, workspace_id, issue_id, capability, steer_mode)
+    SELECT id, workspace_id, issue_id, 'task-supplement-v1', $2::text
     FROM candidate
-    WHERE $2::boolean
-      AND provider IN ('codex', 'claude', 'grok')
+    WHERE $3::boolean
+      -- The providers allowed this mode live in Go (service.steerProviders).
+      AND provider = ANY($4::text[])
       AND (issue_id IS NOT NULL OR chat_session_id IS NOT NULL)
     ON CONFLICT DO NOTHING
     RETURNING task_id
@@ -1136,14 +1136,21 @@ RETURNING t.id, t.agent_id, t.issue_id, t.status, t.priority, t.dispatched_at, t
 
 type StartAgentTaskWithSupplementParams struct {
 	TaskID               pgtype.UUID `json:"task_id"`
+	SteerMode            string      `json:"steer_mode"`
 	EnableTaskSupplement bool        `json:"enable_task_supplement"`
+	SupplementProviders  []string    `json:"supplement_providers"`
 }
 
 // Starting the task and recording the exact daemon/server capability handshake
 // are one state transition. A missing row is the fail-closed value for old
 // daemons, old servers, unsupported providers and application rollback.
 func (q *Queries) StartAgentTaskWithSupplement(ctx context.Context, arg StartAgentTaskWithSupplementParams) (AgentTaskQueue, error) {
-	row := q.db.QueryRow(ctx, startAgentTaskWithSupplement, arg.TaskID, arg.EnableTaskSupplement)
+	row := q.db.QueryRow(ctx, startAgentTaskWithSupplement,
+		arg.TaskID,
+		arg.SteerMode,
+		arg.EnableTaskSupplement,
+		arg.SupplementProviders,
+	)
 	var i AgentTaskQueue
 	err := row.Scan(
 		&i.ID,

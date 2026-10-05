@@ -95,8 +95,10 @@
     "mode_steer": "割り込み",
     "mode_steer_desc": "このステップの後に読みます",
     "mode_steer_desc_handoff": "このステップを止めてすぐ読みます",
+    "mode_steer_restart_desc": "すぐに読む · 今のステップは中断",
     "mode_steer_process": "同じプロセス · 同じセッション",
     "mode_steer_process_handoff": "現在のステップは中止 · 同じセッション",
+    "mode_steer_restart_process": "CLI を再起動 · 同じセッション",
     "mode_queue": "キュー",
     "mode_queue_desc": "この返信の後に送ります",
     "mode_queue_process": "新しいプロセス · 同じセッションを再開",
@@ -347,7 +349,11 @@
     "copy_conversation": "会話全体を Markdown でコピー",
     "conversation_copied": "会話をコピーしました",
     "copy_role_user": "あなた",
-    "copy_role_assistant": "アシスタント"
+    "copy_role_assistant": "アシスタント",
+    "handoff": "引き継ぐ…",
+    "handoff_hint": "この会話の要約から始まる新しいチャットを開きます",
+    "handoff_done": "{{name}} に引き継ぎました",
+    "handoff_failed": "引き継げませんでした"
   },
   "sharing": {
     "title": "権限を編集",

@@ -11,7 +11,6 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
-	"github.com/multica-ai/multica/server/pkg/agent"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
@@ -50,9 +49,7 @@ func (h *Handler) hydrateTaskSupplementMetadata(ctx context.Context, r *http.Req
 		}
 		resp[i].SupplementCapability = row.Capability
 		resp[i].SupplementCommentIDs = uuidsToStrings(row.CommentIds)
-		if row.Capability == protocol.DaemonCapabilityTaskSupplementV1 {
-			resp[i].SupplementUpstreamTurn = agent.TaskSupplementUpstreamTurn(row.Provider)
-		}
+		resp[i].SupplementSteerMode = row.SteerMode
 		if task.Status != "running" || row.Capability != protocol.DaemonCapabilityTaskSupplementV1 || userID == "" {
 			continue
 		}

@@ -8,6 +8,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/multica-ai/multica/server/internal/testutil"
+	"github.com/multica-ai/multica/server/pkg/agent"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
@@ -32,7 +33,16 @@ func newChatSteerFixture(t *testing.T, provider string, negotiated bool) chatSte
 	var sent SendChatMessageResponse
 	head.JSON(&sent)
 	dbfx.Exec(t, `UPDATE agent_task_queue SET status = 'dispatched', dispatched_at = now() WHERE id = $1`, sent.TaskID)
-	if _, err := testHandler.TaskService.StartTask(t.Context(), parseUUID(sent.TaskID), negotiated); err != nil {
+	var capabilities []string
+	if negotiated {
+		capabilities = []string{protocol.DaemonCapabilityTaskSupplementV1}
+		if agent.SteersByRestart(provider) {
+			capabilities = append(capabilities, protocol.DaemonCapabilitySteerRestartV1)
+		} else if agent.SteersByHandoff(provider) {
+			capabilities = append(capabilities, protocol.DaemonCapabilitySteerHandoffV1)
+		}
+	}
+	if _, err := testHandler.TaskService.StartTask(t.Context(), parseUUID(sent.TaskID), capabilities...); err != nil {
 		t.Fatalf("start head: %v", err)
 	}
 	dbfx.Cleanup(t, `DELETE FROM task_supplement_capability WHERE task_id = $1`, sent.TaskID)
@@ -88,13 +98,36 @@ func TestChatStartNegotiatesSupplementWithoutIssue(t *testing.T) {
 	if !issueNull {
 		t.Fatal("chat capability row should carry no issue")
 	}
-	if p := chatPending(t, f.sessionID); !p.SteerSupported || p.SteerProvider != "claude" {
+	if p := chatPending(t, f.sessionID); !p.SteerSupported || p.SteerProvider != "claude" || p.SteerMode != protocol.SteerModeSame {
 		t.Fatalf("pending = %+v, want steer supported on claude", p)
 	}
 }
 
+// A one-shot CLI steers by restarting on the same session (DENE-1349); the
+// composer needs to know so it can say the CLI will restart.
+func TestChatSteerOnOneShotCLIRestartsTheSession(t *testing.T) {
+	f := newChatSteerFixture(t, "cursor", true)
+	if p := chatPending(t, f.sessionID); !p.SteerSupported || p.SteerMode != protocol.SteerModeRestart {
+		t.Fatalf("pending = %+v, want restart steer on cursor", p)
+	}
+	var mode string
+	dbfx.QueryRow(t, `SELECT steer_mode FROM task_supplement_capability WHERE task_id = $1`, f.headID).Scan(&mode)
+	if mode != protocol.SteerModeRestart {
+		t.Fatalf("steer_mode = %q, want restart", mode)
+	}
+}
+
+// An ACP CLI steers by stopping the current step and prompting the same
+// session again (DENE-1347).
+func TestChatSteerOnACPCLIHandsOffTheStep(t *testing.T) {
+	f := newChatSteerFixture(t, "kimi", true)
+	if p := chatPending(t, f.sessionID); !p.SteerSupported || p.SteerMode != protocol.SteerModeHandoff {
+		t.Fatalf("pending = %+v, want handoff steer on kimi", p)
+	}
+}
+
 func TestChatSteerDeliversIntoTheRunningReply(t *testing.T) {
-	for _, provider := range []string{"claude", "codex", "grok"} {
+	for _, provider := range []string{"claude", "codex", "grok", "cursor"} {
 		t.Run(provider, func(t *testing.T) {
 			f := newChatSteerFixture(t, provider, true)
 			var sent SendChatMessageResponse

@@ -133,12 +133,17 @@ type semver struct {
 // SupportsTaskSupplement gates the resolved executable, including custom
 // commands. Unknown versions must not advertise a capability they may lack.
 func SupportsTaskSupplement(provider, version string) bool {
-	if TaskSupplementUpstreamTurn(provider) == SupplementTurnHandoff && provider != "grok" {
+	if SteersByRestart(provider) {
+		// Restarting on the same session needs no in-process input channel;
+		// every supported version of these CLIs resumes by session id.
+		return true
+	}
+	if SteersByHandoff(provider) {
 		// Stop-and-continue rides on ACP's session/cancel and session/prompt,
 		// which every ACP agent implements, so no version floor applies.
 		return true
 	}
-	var minimum string
+	var minimum, maximum string
 	switch provider {
 	case "codex":
 		// v0.100.0 exposes turn/steer with the expectedTurnId precondition.
@@ -151,37 +156,29 @@ func SupportsTaskSupplement(provider, version string) bool {
 		// Grok Build 1.0.14 supports atomic delivery of in-turn interjections
 		// through its x.ai/interject ACP extension.
 		minimum = "1.0.14"
+	case "opencode":
+		// The supplement plugin (supplementext/opencode.js) calls the 1.x SDK
+		// client and was verified against 1.18.34. 2.x moves runs to a
+		// background service and has no config-content channel to load it.
+		minimum = "1.18.0"
+		maximum = "2.0.0"
+	case "pi":
+		// The steering extension (supplementext/pi.js) was verified against
+		// Pi 0.73.1; older releases are untested, so they keep queueing.
+		minimum = "0.73.0"
 	default:
 		return false
 	}
 	detected, err := parseSemver(version)
 	floor, _ := parseSemver(minimum)
-	return err == nil && !detected.lessThan(floor)
-}
-
-// How a supplement reaches a running turn, named after the ACP steering
-// extension's upstreamTurn field (LodyAI/acp-extension-core).
-const (
-	// SupplementTurnSame folds the message into the running turn; the current
-	// step finishes first.
-	SupplementTurnSame = "same"
-	// SupplementTurnHandoff stops the current step and continues with the
-	// message in the same process and session.
-	SupplementTurnHandoff = "handoff"
-)
-
-// TaskSupplementUpstreamTurn says how provider takes a supplement, or "" when
-// it cannot take one mid-turn. Grok's x.ai/interject cancels and reruns the
-// step (botiverse/oar measurements), so it is a handoff too.
-func TaskSupplementUpstreamTurn(provider string) string {
-	switch provider {
-	case "claude", "codex":
-		return SupplementTurnSame
-	case "grok", "hermes", "kimi", "kiro", "qoder", "qoderclicn", "qwenpaw",
-		"reasonix", "traecli", "zeroclaw", "devin", "dim", "mcode":
-		return SupplementTurnHandoff
+	if err != nil || detected.lessThan(floor) {
+		return false
 	}
-	return ""
+	if maximum != "" {
+		ceiling, _ := parseSemver(maximum)
+		return detected.lessThan(ceiling)
+	}
+	return true
 }
 
 // versionRe matches version strings like "2.1.100", "v2.0.0", or

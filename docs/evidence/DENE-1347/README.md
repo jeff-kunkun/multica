@@ -5,8 +5,8 @@
 | CLI | 状态 | 说明 |
 | --- | --- | --- |
 | Grok 1.0.41（借用同一段代码直接跑 ACP 协议） | 实测通过 | 见下 |
-| Kimi | 未实测 | 本机 Kimi 没登录（`session/new` 报 Authentication required），需要本人跑一次 `kimi login` |
-| Hermes | 未实测 | 本机 `~/.local/bin/hermes` 指向已删除的 venv，没装 |
+| Kimi | 未实测 | 本机 Kimi 没登录；Kun 10-05 决定不实测，靠单测和 Grok 实测覆盖 |
+| Hermes | 未实测 | 本机安装已坏；同上，不实测 |
 | Kiro / Qoder / QwenPaw / Reasonix / Trae / ZeroClaw / Devin / DIM / MCode | 未实测 | 本机没装；与 Kimi/Hermes 共用同一段代码，单测覆盖 |
 
 ### Grok 原始协议实测（`TestACPHandoffSteerRawProtocol`，96s PASS）

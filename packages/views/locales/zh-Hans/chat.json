@@ -95,8 +95,10 @@
     "mode_steer": "插话",
     "mode_steer_desc": "这一步做完就读到",
     "mode_steer_desc_handoff": "停下这一步，马上读到",
+    "mode_steer_restart_desc": "马上读到，当前这步会中断",
     "mode_steer_process": "同一个进程 · 同一段会话",
     "mode_steer_process_handoff": "当前这一步会中止 · 同一段会话",
+    "mode_steer_restart_process": "会重启 CLI · 同一段会话",
     "mode_queue": "排队",
     "mode_queue_desc": "这条回复完再发",
     "mode_queue_process": "新进程 · 接着同一段会话",
@@ -347,7 +349,11 @@
     "copy_conversation": "复制整段对话为 Markdown",
     "conversation_copied": "已复制整段对话",
     "copy_role_user": "你",
-    "copy_role_assistant": "助手"
+    "copy_role_assistant": "助手",
+    "handoff": "交给…",
+    "handoff_hint": "新开一个聊天，开头是这段的摘要",
+    "handoff_done": "已交给 {{name}}",
+    "handoff_failed": "交接失败"
   },
   "sharing": {
     "title": "编辑权限",

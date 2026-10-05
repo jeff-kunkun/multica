@@ -19,7 +19,6 @@ import (
 	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/util"
-	"github.com/multica-ai/multica/server/pkg/agent"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/dbid"
 	"github.com/multica-ai/multica/server/pkg/protocol"
@@ -1636,10 +1635,9 @@ type PendingChatTaskResponse struct {
 	// for the unsupported reason. Both empty when nothing is replying.
 	SteerSupported bool   `json:"steer_supported"`
 	SteerProvider  string `json:"steer_provider,omitempty"`
-	// SteerUpstreamTurn says how a steer lands when supported: "same" (after
-	// the current step) or "handoff" (the current step is stopped, same
-	// session).
-	SteerUpstreamTurn string `json:"steer_upstream_turn,omitempty"`
+	// SteerMode says how a steer reaches the reply: "same" in the running
+	// process, "restart" by stopping the CLI and resuming its session.
+	SteerMode string `json:"steer_mode,omitempty"`
 }
 
 // waitReasonForStatus gates the stored hold text on the status it describes.
@@ -2030,7 +2028,7 @@ func (h *Handler) GetPendingChatTask(w http.ResponseWriter, r *http.Request) {
 		resp.SteerSupported = chatSteerSupported(target)
 		resp.SteerProvider = target.Provider
 		if resp.SteerSupported {
-			resp.SteerUpstreamTurn = agent.TaskSupplementUpstreamTurn(target.Provider)
+			resp.SteerMode = target.SteerMode
 		}
 	}
 	writeJSON(w, http.StatusOK, resp)

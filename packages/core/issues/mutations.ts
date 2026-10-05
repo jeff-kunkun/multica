@@ -48,7 +48,7 @@ import type {
   UpdateIssueRequest,
 } from "../types";
 import type { CreateIssueGoalInput, IssueGoal } from "../types";
-import type { TimelineEntry, IssueSubscriber, Reaction } from "../types";
+import type { CommentSendMode, TimelineEntry, IssueSubscriber, Reaction } from "../types";
 import { sortTimelineEntriesAsc } from "./timeline-sort";
 import { applyCommentDeletion, removeCommentSubtree } from "./comment-deletion";
 import { configStore } from "../config";
@@ -864,6 +864,7 @@ export function useCreateComment(issueId: string) {
       attachmentIds,
       suppressAgentIds,
       steerTaskIds,
+      mode,
     }: {
       content: string;
       type?: string;
@@ -872,7 +873,9 @@ export function useCreateComment(issueId: string) {
       suppressAgentIds?: string[];
       /** Running turns this comment goes into instead of a follow-up run. */
       steerTaskIds?: string[];
-    }) => api.createComment(issueId, content, type, parentId, attachmentIds, suppressAgentIds, steerTaskIds),
+      /** "handoff": the @agent takes over and every other agent's run here stops. */
+      mode?: CommentSendMode;
+    }) => api.createComment(issueId, content, type, parentId, attachmentIds, suppressAgentIds, steerTaskIds, mode),
     onSuccess: (comment) => {
       if (comment.issue_revision) {
         onIssueAuxiliaryRevision(qc, wsId, issueId, comment.issue_revision);

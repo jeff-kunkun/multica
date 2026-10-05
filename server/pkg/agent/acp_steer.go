@@ -9,6 +9,17 @@ import (
 	"sync"
 )
 
+// SteersByHandoff reports whether provider takes a mid-run message by stopping
+// the current ACP step and prompting the same session again (DENE-1347).
+func SteersByHandoff(provider string) bool {
+	switch provider {
+	case "hermes", "kimi", "kiro", "qoder", "qoderclicn", "qwenpaw",
+		"reasonix", "traecli", "zeroclaw", "devin", "dim", "mcode":
+		return true
+	}
+	return false
+}
+
 // acpHandoffSteerPreamble opens the follow-up prompt sent after a step was
 // stopped to make room for a supplement. The model sees its own interrupted
 // step in the session history; this line tells it the stop was deliberate.
