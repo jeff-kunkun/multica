@@ -50,6 +50,38 @@ describe("persisted query cache", () => {
     vi.useRealTimers();
   });
 
+  it("never persists attachment bytes and drops them from an older snapshot", async () => {
+    vi.useFakeTimers();
+    const storage = memoryStorage();
+    const writer = new QueryClient();
+    const stop = createPersistedQueryCache(writer, storage, "user-a");
+    writer.setQueryData(["attachment-inline-blob", "att-1"], new Blob(["x"]));
+    writer.setQueryData(["inline-bytes", "att-2"], new Blob(["y"]));
+    writer.setQueryData(["projects", "workspace-a"], [{ id: "p1" }]);
+    await vi.advanceTimersByTimeAsync(60);
+    stop();
+
+    const key = `${queryCacheStoragePrefix()}user-a`;
+    const envelope = JSON.parse(storage.data[key]!);
+    expect(envelope.state.queries.map((q: { queryKey: unknown[] }) => q.queryKey)).toEqual([
+      ["projects", "workspace-a"],
+    ]);
+
+    // A snapshot written before the fix holds the Blob as `{}`.
+    envelope.state.queries.push({
+      ...envelope.state.queries[0],
+      queryKey: ["attachment-inline-blob", "att-1"],
+      queryHash: JSON.stringify(["attachment-inline-blob", "att-1"]),
+      state: { ...envelope.state.queries[0].state, data: {} },
+    });
+    storage.setItem(key, JSON.stringify(envelope));
+    const reader = new QueryClient();
+    createPersistedQueryCache(reader, storage, "user-a");
+    expect(reader.getQueryData(["attachment-inline-blob", "att-1"])).toBeUndefined();
+    expect(reader.getQueryData(["projects", "workspace-a"])).toEqual([{ id: "p1" }]);
+    vi.useRealTimers();
+  });
+
   it("removes one account or all persisted accounts", () => {
     const storage = memoryStorage();
     storage.setItem(`${queryCacheStoragePrefix()}a`, "a");
