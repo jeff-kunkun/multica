@@ -5,6 +5,7 @@ import {
   AlertCircle,
   Copy,
   Crown,
+  KeyRound,
   Eye,
   Link,
   Loader2,
@@ -74,7 +75,7 @@ import {
   workspaceSubscriptionSummaryOptions,
 } from "@multica/core/billing";
 import { useWorkspaceId } from "@multica/core/hooks";
-import { useFeatureEnabled } from "@multica/core/config";
+import { useConfigStore, useFeatureEnabled } from "@multica/core/config";
 import { BILLING_WORKSPACE_SUBSCRIPTIONS_FLAG } from "@multica/core/feature-flags";
 import { useCurrentWorkspace } from "@multica/core/paths";
 import {
@@ -221,6 +222,7 @@ function MemberRow({
   error,
   onRoleChange,
   onRemove,
+  onResetPassword,
 }: {
   member: MemberWithUser;
   canManage: boolean;
@@ -235,6 +237,8 @@ function MemberRow({
   error: string | null;
   onRoleChange: (role: MemberRole) => void;
   onRemove: () => void;
+  /** Present only when this instance signs in with username and password. */
+  onResetPassword?: () => void;
 }) {
   const { t } = useT("settings");
   const locale = useLocale();
@@ -358,6 +362,12 @@ function MemberRow({
             }
           />
           <DropdownMenuContent align="end" className="w-auto">
+            {onResetPassword && (
+              <DropdownMenuItem onClick={onResetPassword}>
+                <KeyRound className="h-3.5 w-3.5" />
+                {t(($) => $.members.reset_password_action)}
+              </DropdownMenuItem>
+            )}
             <DropdownMenuItem variant="destructive" onClick={onRemove}>
               <UserMinus className="h-3.5 w-3.5" />
               {t(($) => $.members.remove_action)}
@@ -579,6 +589,10 @@ export function MembersTab() {
   const [shareLinkLoading, setShareLinkLoading] = useState(false);
   const [shareLinkRole, setShareLinkRole] = useState<MemberRole>("member");
   const [shareLinkExpiry, setShareLinkExpiry] = useState<string>("168"); // default 7 days
+  const passwordAuth = useConfigStore((state) => state.passwordAuth);
+  // The temporary password lives only in this dialog's state and is dropped
+  // when it closes; the server keeps nothing but the hash.
+  const [tempPassword, setTempPassword] = useState<{ name: string; password: string } | null>(null);
   const [confirmAction, setConfirmAction] = useState<{
     title: string;
     description: string;
@@ -994,6 +1008,33 @@ export function MembersTab() {
     });
   };
 
+  const handleResetPassword = (member: MemberWithUser) => {
+    if (!workspace) return;
+    setConfirmAction({
+      title: t(($) => $.members.reset_password_title, { name: member.name }),
+      description: t(($) => $.members.reset_password_description),
+      onConfirm: async () => {
+        setMemberActionId(member.id);
+        try {
+          const res = await api.resetMemberPassword(workspace.id, member.id);
+          setTempPassword({ name: member.name, password: res.temporary_password });
+        } catch (e) {
+          toast.error(e instanceof Error ? e.message : t(($) => $.members.toast_password_reset_failed));
+        } finally {
+          setMemberActionId(null);
+        }
+      },
+    });
+  };
+
+  const handleCopyTempPassword = () => {
+    if (!tempPassword || !navigator.clipboard) return;
+    navigator.clipboard.writeText(tempPassword.password).then(
+      () => toast.success(t(($) => $.members.toast_password_copied)),
+      () => toast.error(t(($) => $.members.toast_share_link_copy_failed)),
+    );
+  };
+
   const handleCreateShareLink = async () => {
     if (!workspace) return;
     setShareLinkLoading(true);
@@ -1176,6 +1217,7 @@ export function MembersTab() {
                     error={roleErrors[m.id] ?? null}
                     onRoleChange={(role) => handleRoleChange(m, role)}
                     onRemove={() => handleRemoveMember(m)}
+                    onResetPassword={passwordAuth ? () => handleResetPassword(m) : undefined}
                   />
                 </div>
               ))}
@@ -1489,6 +1531,44 @@ export function MembersTab() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      <Dialog
+        open={!!tempPassword}
+        onOpenChange={(open) => {
+          if (!open) setTempPassword(null);
+        }}
+      >
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>{t(($) => $.members.reset_password_done_title)}</DialogTitle>
+            <DialogDescription>
+              {t(($) => $.members.reset_password_done_description, { name: tempPassword?.name ?? "" })}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex items-center gap-2">
+            <Input
+              readOnly
+              value={tempPassword?.password ?? ""}
+              aria-label={t(($) => $.members.reset_password_done_title)}
+              className="min-w-0 flex-1 font-mono"
+              onFocus={(e) => e.currentTarget.select()}
+            />
+            <Button
+              variant="outline"
+              size="icon"
+              onClick={handleCopyTempPassword}
+              aria-label={t(($) => $.members.reset_password_copy)}
+            >
+              <Copy className="h-4 w-4" />
+            </Button>
+          </div>
+          <DialogFooter>
+            <Button onClick={() => setTempPassword(null)}>
+              {t(($) => $.members.reset_password_done)}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <AlertDialog open={!!confirmAction} onOpenChange={(v) => { if (!v) setConfirmAction(null); }}>
         <AlertDialogContent>

@@ -34,6 +34,7 @@ import type {
   UpdateMeRequest,
   CreateMemberRequest,
   UpdateMemberRequest,
+  MemberPasswordResetResponse,
   ListIssuesParams,
   ListGroupedIssuesParams,
   IssueTableFacetsRequest,
@@ -1249,6 +1250,13 @@ export class ApiClient {
         ...(trimmedEmail ? { email: trimmedEmail } : {}),
         ...(totp ? { totp } : {}),
       }),
+    });
+  }
+
+  async resetPassword(username: string, totp: string, newPassword: string): Promise<void> {
+    await this.fetch("/auth/reset-password", {
+      method: "POST",
+      body: JSON.stringify({ username, totp, new_password: newPassword }),
     });
   }
 
@@ -4513,6 +4521,12 @@ export class ApiClient {
     });
     return parseWithFallback(raw, MemberWithUserSchema, EMPTY_MEMBER_WITH_USER, {
       endpoint: "PATCH /api/workspaces/{id}/members/{memberId}",
+    });
+  }
+
+  async resetMemberPassword(workspaceId: string, memberId: string): Promise<MemberPasswordResetResponse> {
+    return this.fetch(`/api/workspaces/${workspaceId}/members/${memberId}/reset-password`, {
+      method: "POST",
     });
   }
 

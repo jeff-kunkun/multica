@@ -1594,6 +1594,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	r.With(authVerifyRL).Post("/auth/verify-code", h.VerifyCode)
 	r.With(authRL).Post("/auth/login", h.PasswordLogin)
 	r.With(authRL).Post("/auth/signup", h.PasswordSignup)
+	r.With(authRL).Post("/auth/reset-password", h.PasswordReset)
 	r.With(authRL).Post("/auth/google", h.GoogleLogin)
 	r.Post("/auth/logout", h.Logout)
 
@@ -1940,6 +1941,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Route("/members/{memberId}", func(r chi.Router) {
 						r.Patch("/", h.UpdateMember)
 						r.Delete("/", h.DeleteMember)
+						r.With(handler.RequireHumanActor).Post("/reset-password", h.ResetMemberPassword)
 					})
 					r.Delete("/invitations/{invitationId}", h.RevokeInvitation)
 					// An invite link adds members just like an invitation does.
