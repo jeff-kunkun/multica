@@ -2172,6 +2172,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Get("/", h.ListWorkspaceLinks)
 				r.Post("/", h.CreateWorkspaceLink)
 				r.Get("/audit", h.ListWorkspaceLinkAudit)
+				r.Get("/lookup", h.LookupWorkspaceLinkTarget)
 				r.Patch("/{id}", h.UpdateWorkspaceLink)
 				r.Delete("/{id}", h.RevokeWorkspaceLink)
 				r.Get("/{id}/view", h.GetWorkspaceLinkView)
