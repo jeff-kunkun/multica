@@ -26,7 +26,7 @@ import (
 //     a new password. No email involved — most self-host accounts carry a
 //     placeholder address.
 //   - POST /api/workspaces/{id}/members/{memberId}/reset-password: a workspace
-//     owner issues a temporary password that is returned exactly once.
+//     owner or admin issues a temporary password that is returned exactly once.
 //
 // Existing sessions are left alone on purpose. UI JWTs are stateless (see
 // auth/session.go) so there is nothing to revoke without adding a DB read to
@@ -144,8 +144,12 @@ func (h *Handler) ResetMemberPassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	workspaceID := workspaceIDFromURL(r, "id")
-	requester, ok := h.requireOwnerMember(w, r, workspaceID)
+	requester, ok := h.workspaceMember(w, r, workspaceID)
 	if !ok {
+		return
+	}
+	if !roleAllowed(requester.Role, "owner", "admin") {
+		writeError(w, http.StatusForbidden, "only a workspace owner or admin can reset passwords")
 		return
 	}
 
@@ -165,6 +169,8 @@ func (h *Handler) ResetMemberPassword(w http.ResponseWriter, r *http.Request) {
 
 	// Taking over an account hands over every workspace it belongs to. Refuse
 	// when the member is owner or admin somewhere the requester does not own.
+	// That includes this workspace when the requester is an admin, so an admin
+	// can reset members and guests but not another admin or an owner.
 	privileged, err := h.Queries.CountPrivilegedMembershipsOutsideOwner(r.Context(), db.CountPrivilegedMembershipsOutsideOwnerParams{
 		TargetUserID: target.UserID,
 		ActorUserID:  requester.UserID,
@@ -174,7 +180,7 @@ func (h *Handler) ResetMemberPassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if privileged > 0 {
-		writeError(w, http.StatusForbidden, "this member is an owner or admin of a workspace you do not own")
+		writeError(w, http.StatusForbidden, "this member is an owner or admin, and only the owner of that workspace can reset their password")
 		return
 	}
 
@@ -206,7 +212,7 @@ func (h *Handler) ResetMemberPassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	slog.Info("member password reset by owner", append(logger.RequestAttrs(r), "user_id", uuidToString(rec.UserID), "workspace_id", workspaceID)...)
+	slog.Info("member password reset by workspace manager", append(logger.RequestAttrs(r), "user_id", uuidToString(rec.UserID), "workspace_id", workspaceID)...)
 	writeJSON(w, http.StatusOK, MemberPasswordResetResponse{
 		UserID:            uuidToString(rec.UserID),
 		Username:          rec.Username,

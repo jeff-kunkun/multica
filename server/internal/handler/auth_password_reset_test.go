@@ -178,19 +178,64 @@ func TestResetMemberPasswordByOwner(t *testing.T) {
 	}
 }
 
+func TestResetMemberPasswordByAdmin(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	setPasswordAuthEnv(t, "kun", "s3cret-bootstrap", "password-auth-bootstrap@multica.ai")
+	adminID := dbfx.User(t, "Reset Admin", "reset-admin-"+uuid.NewString()+"@multica.ai")
+	dbfx.Member(t, testWorkspaceID, adminID, "admin")
+	userID, username := passwordUser(t, "old-password-1")
+	memberID := dbfx.Member(t, testWorkspaceID, userID, "member")
+
+	w := resetMemberAs(t, adminID, memberID)
+	if w.Code != http.StatusOK {
+		t.Fatalf("admin reset: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var resp MemberPasswordResetResponse
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if w := postPasswordLogin(username, resp.TemporaryPassword); w.Code != http.StatusOK {
+		t.Fatalf("temporary password login: expected 200, got %d", w.Code)
+	}
+	if n := dbfx.Count(t,
+		`SELECT count(*) FROM password_reset_audit WHERE user_id = $1 AND method = 'admin' AND actor_user_id = $2`,
+		parseUUID(userID), parseUUID(adminID),
+	); n != 1 {
+		t.Fatalf("admin audit rows: got %d, want 1", n)
+	}
+}
+
 func TestResetMemberPasswordRefusals(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
 	}
 	setPasswordAuthEnv(t, "kun", "s3cret-bootstrap", "password-auth-bootstrap@multica.ai")
 
-	t.Run("non-owner", func(t *testing.T) {
-		adminID := dbfx.User(t, "Reset Admin", "reset-admin-"+uuid.NewString()+"@multica.ai")
-		dbfx.Member(t, testWorkspaceID, adminID, "admin")
+	t.Run("plain member", func(t *testing.T) {
+		actorID := dbfx.User(t, "Reset Member", "reset-member-"+uuid.NewString()+"@multica.ai")
+		dbfx.Member(t, testWorkspaceID, actorID, "member")
 		userID, _ := passwordUser(t, "old-password-1")
 		memberID := dbfx.Member(t, testWorkspaceID, userID, "member")
-		if w := resetMemberAs(t, adminID, memberID); w.Code != http.StatusForbidden {
-			t.Fatalf("admin: expected 403, got %d", w.Code)
+		if w := resetMemberAs(t, actorID, memberID); w.Code != http.StatusForbidden {
+			t.Fatalf("member: expected 403, got %d", w.Code)
+		}
+	})
+
+	t.Run("admin cannot reset an admin or the owner", func(t *testing.T) {
+		adminID := dbfx.User(t, "Reset Admin", "reset-admin-"+uuid.NewString()+"@multica.ai")
+		dbfx.Member(t, testWorkspaceID, adminID, "admin")
+		peerID, _ := passwordUser(t, "old-password-1")
+		peerMemberID := dbfx.Member(t, testWorkspaceID, peerID, "admin")
+		if w := resetMemberAs(t, adminID, peerMemberID); w.Code != http.StatusForbidden {
+			t.Fatalf("admin -> admin: expected 403, got %d: %s", w.Code, w.Body.String())
+		}
+		var ownerMemberID string
+		dbfx.QueryRow(t, `SELECT id::text FROM member WHERE workspace_id = $1 AND user_id = $2`,
+			parseUUID(testWorkspaceID), parseUUID(testUserID)).Scan(&ownerMemberID)
+		if w := resetMemberAs(t, adminID, ownerMemberID); w.Code != http.StatusForbidden {
+			t.Fatalf("admin -> owner: expected 403, got %d: %s", w.Code, w.Body.String())
 		}
 	})
 

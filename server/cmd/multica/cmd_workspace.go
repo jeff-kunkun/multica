@@ -91,9 +91,10 @@ var workspaceMemberResetPasswordCmd = &cobra.Command{
 		"prints it once. Pass the user ID from 'workspace member list' (or the " +
 		"member ID). Hand the password to the member over a private channel; " +
 		"nothing else stores it.\n\n" +
-		"Only a workspace owner can run this, only for accounts that sign in " +
-		"with username and password, and not for a member who is owner or admin " +
-		"of a workspace you do not own. Agents cannot run it: the temporary " +
+		"A workspace owner or admin can run this, only for accounts that sign " +
+		"in with username and password. An admin can reset members and guests; " +
+		"a member who is owner or admin of any workspace you do not own is " +
+		"refused. Agents cannot run it: the temporary " +
 		"password would land in a task log. Members who forgot their own " +
 		"password use 'Forgot password' on the sign-in page with the team 2FA code.\n\n" +
 		"Existing sessions and personal access tokens stay valid after a reset.",

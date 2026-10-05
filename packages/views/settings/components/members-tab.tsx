@@ -283,9 +283,11 @@ function MemberRow({
         )}
       </div>
       <span className="hidden w-32 shrink-0 text-caption tabular-nums text-muted-foreground md:block">
-        {t(($) => $.members.joined, {
-          date: new Date(member.created_at).toLocaleDateString(locale),
-        })}
+        {member.created_at
+          ? t(($) => $.members.joined, {
+              date: new Date(member.created_at).toLocaleDateString(locale),
+            })
+          : null}
       </span>
       {canEditRole && role ? (
         <Select
@@ -337,6 +339,9 @@ function MemberRow({
             })}
           </SelectContent>
         </Select>
+      ) : !member.role ? (
+        // An admin's roster has other members' roles redacted (DENE-1022).
+        <span className="w-24 shrink-0" />
       ) : (
         <span
           className="flex w-24 shrink-0 items-center gap-1.5 text-body"
@@ -347,7 +352,7 @@ function MemberRow({
         </span>
       )}
       <span className="flex size-7 shrink-0 items-center justify-center">
-      {canRemove && (
+      {(canRemove || onResetPassword) && (
         <DropdownMenu>
           <DropdownMenuTrigger
             render={
@@ -368,10 +373,12 @@ function MemberRow({
                 {t(($) => $.members.reset_password_action)}
               </DropdownMenuItem>
             )}
-            <DropdownMenuItem variant="destructive" onClick={onRemove}>
-              <UserMinus className="h-3.5 w-3.5" />
-              {t(($) => $.members.remove_action)}
-            </DropdownMenuItem>
+            {canRemove && (
+              <DropdownMenuItem variant="destructive" onClick={onRemove}>
+                <UserMinus className="h-3.5 w-3.5" />
+                {t(($) => $.members.remove_action)}
+              </DropdownMenuItem>
+            )}
           </DropdownMenuContent>
         </DropdownMenu>
       )}
@@ -547,6 +554,7 @@ export function MembersTab() {
   // Member management is owner-only (DENE-1022): the page, the pending
   // invitation list and the invite links all belong to the owner.
   const isOwner = currentMember?.role === "owner";
+  const isAdmin = currentMember?.role === "admin";
   const { data: invitations = [] } = useQuery(invitationListOptions(wsId, isOwner));
 
   const [inviteOpen, setInviteOpen] = useState(false);
@@ -1090,7 +1098,11 @@ export function MembersTab() {
 
   if (!workspace) return null;
 
-  if (!membersLoading && !isOwner) {
+  // Admins see the roster only to reset passwords (DENE-1416); the rest of
+  // member management stays with the owner.
+  const canResetPasswords = passwordAuth && (isOwner || isAdmin);
+
+  if (!membersLoading && !isOwner && !canResetPasswords) {
     return (
       <SettingsTab title={t(($) => $.page.tabs.members)}>
         <div
@@ -1119,9 +1131,11 @@ export function MembersTab() {
   ];
   const views: { value: MembersView; label: string; count: number }[] = [
     { value: "members", label: t(($) => $.members.members_label), count: members.length },
-    { value: "invitations", label: t(($) => $.members.pending_label), count: invitations.length },
     ...(canManageWorkspace
-      ? [{ value: "links" as const, label: t(($) => $.members.share_links_label), count: shareLinks.length }]
+      ? [
+          { value: "invitations" as const, label: t(($) => $.members.pending_label), count: invitations.length },
+          { value: "links" as const, label: t(($) => $.members.share_links_label), count: shareLinks.length },
+        ]
       : []),
   ];
   const activeView = views.some((item) => item.value === view) ? view : "members";
@@ -1139,7 +1153,7 @@ export function MembersTab() {
         ) : undefined
       }
     >
-      {currentMember && !canManageWorkspace ? (
+      {currentMember && !canManageWorkspace && !canResetPasswords ? (
         <SettingsReadOnlyNotice wsId={wsId} />
       ) : null}
       <section className="space-y-3">
@@ -1217,7 +1231,11 @@ export function MembersTab() {
                     error={roleErrors[m.id] ?? null}
                     onRoleChange={(role) => handleRoleChange(m, role)}
                     onRemove={() => handleRemoveMember(m)}
-                    onResetPassword={passwordAuth ? () => handleResetPassword(m) : undefined}
+                    onResetPassword={
+                      canResetPasswords && m.user_id !== user?.id
+                        ? () => handleResetPassword(m)
+                        : undefined
+                    }
                   />
                 </div>
               ))}

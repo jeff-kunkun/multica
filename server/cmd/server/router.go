@@ -1941,7 +1941,6 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Route("/members/{memberId}", func(r chi.Router) {
 						r.Patch("/", h.UpdateMember)
 						r.Delete("/", h.DeleteMember)
-						r.With(handler.RequireHumanActor).Post("/reset-password", h.ResetMemberPassword)
 					})
 					r.Delete("/invitations/{invitationId}", h.RevokeInvitation)
 					// An invite link adds members just like an invitation does.
@@ -1949,6 +1948,13 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Delete("/share-links/{linkId}", h.RevokeShareLink)
 					r.Get("/share-links", h.ListShareLinks)
 				})
+
+				// Password reset is the one member action admins keep (DENE-1416):
+				// the handler stops an admin from resetting an owner or admin.
+				r.With(
+					middleware.RequireWorkspaceRoleFromURL(queries, "id", "owner", "admin"),
+					handler.RequireHumanActor,
+				).Post("/members/{memberId}/reset-password", h.ResetMemberPassword)
 
 				// GitHub integration — connect / disconnect remain admin-only;
 				// the read-only list endpoint lives in the member-level group
