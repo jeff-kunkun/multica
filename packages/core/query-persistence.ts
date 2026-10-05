@@ -71,6 +71,15 @@ export function createPersistedQueryCache(
       const envelope = JSON.parse(raw) as Partial<PersistedQueryCacheEnvelope>;
       if (envelope.schemaVersion === QUERY_CACHE_SCHEMA_VERSION && envelope.userId === userId && envelope.state) {
         hydrate(queryClient, envelope.state);
+        // A restored snapshot is useful for the first paint, but must be
+        // checked in the background even though the global client uses an
+        // infinite stale time.
+        void queryClient.invalidateQueries({
+          predicate: (query) => isPersistableQuery(query),
+          // Refetch active observers immediately. Inactive restored queries
+          // remain stale and will refresh when their page mounts.
+          refetchType: "active",
+        });
       } else {
         storage.removeItem(key);
       }
