@@ -216,6 +216,8 @@
     "untitled": "새 채팅",
     "my_agents": "내 에이전트",
     "others": "기타",
+    "fit_project": "{{name}}에 적합",
+    "fit_projects": "선택한 프로젝트에 적합",
     "no_agents": "에이전트 없음",
     "history_group": "채팅 기록",
     "agent_filter_placeholder": "에이전트 검색...",

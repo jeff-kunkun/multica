@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { I18nProvider } from "@multica/core/i18n/react";
-import type { Agent } from "@multica/core/types";
+import type { Agent, Project } from "@multica/core/types";
 import enChat from "../../locales/en/chat.json";
 import enIssues from "../../locales/en/issues.json";
 
@@ -64,6 +64,31 @@ function renderPicker(onStart = vi.fn()) {
 }
 
 describe("NewChatButton", () => {
+  it("lists the project's domain agents first and drops My agents / Others", async () => {
+    const domainAgents = [
+      ...agents,
+      makeAgent({ id: "mine-out", name: "Zed出海", owner_id: "user-1", domain_id: "d-out" }),
+    ];
+    render(
+      <I18nProvider locale="en" resources={TEST_RESOURCES}>
+        <NewChatButton
+          agents={domainAgents}
+          userId="user-1"
+          projects={[{ id: "p1", title: "tarot", domain_ids: ["d-out"] } as Project]}
+          onStart={vi.fn()}
+        />
+      </I18nProvider>,
+    );
+    fireEvent.click(screen.getByRole("button", { name: NEW_CHAT_LABEL }));
+
+    const dialog = await screen.findByRole("dialog");
+    const text = dialog.textContent ?? "";
+    expect(text.indexOf("Fits tarot")).toBeLessThan(text.indexOf("Zed出海"));
+    expect(text.indexOf("Zed出海")).toBeLessThan(text.indexOf("Others"));
+    expect(text.indexOf("Others")).toBeLessThan(text.indexOf("Alpha"));
+    expect(within(dialog).queryByText("My agents")).not.toBeInTheDocument();
+  });
+
   it("opens the agent picker below the ⊕ trigger", async () => {
     renderPicker();
 
