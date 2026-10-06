@@ -1,30 +1,63 @@
-// @vitest-environment node
-import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
+import table from "./domain-fit.cases.json";
 import {
+  agentDomainFit,
   agentSceneOf,
-  domainFit,
+  domainScene,
   groupAgentsByFit,
-  resolveSceneDomains,
-  sortAgentsByFit,
+  sortAgentsByDomainFit,
 } from "./domain-fit";
 
-// The same table server/internal/routing/domainfit_test.go reads (DENE-1477).
-// It speaks in domain names; the client compares ids, the rule only compares.
-const table = JSON.parse(
-  readFileSync(new URL("./domain-fit.cases.json", import.meta.url), "utf8"),
-) as {
-  scenes: { name: string; issue_domain: string; project_domains: string[]; want: string[] }[];
-  cases: { name: string; scene: string[]; agent: { name: string; domain: string }; fit: string }[];
-};
+// Domain names stand in for ids: the table is shared with the Go tests.
+describe("domainScene (shared case table)", () => {
+  for (const c of table.scenes) {
+    it(c.name, () => {
+      expect(
+        domainScene({ issueDomainId: c.issue_domain, projectDomainIds: c.project_domains }),
+      ).toEqual(c.want);
+    });
+  }
 
-describe("domain-fit case table", () => {
-  it.each(table.scenes)("scene: $name", (s) => {
-    expect(resolveSceneDomains(s.issue_domain, s.project_domains)).toEqual(s.want);
+  it("drops duplicate project domains", () => {
+    expect(domainScene({ projectDomainIds: ["出海", "出海", "游戏"] })).toEqual([
+      "出海",
+      "游戏",
+    ]);
+  });
+});
+
+describe("agentDomainFit (shared case table)", () => {
+  for (const c of table.cases) {
+    it(c.name, () => {
+      expect(agentDomainFit(c.scene, { domain_id: c.agent.domain })).toBe(c.fit);
+    });
+  }
+});
+
+describe("sortAgentsByDomainFit", () => {
+  const agents = [
+    { name: "孙悟空游戏", domain_id: "游戏" },
+    { name: "布尔玛", domain_id: null },
+    { name: "孙悟空出海", domain_id: "出海" },
+    { name: "孙悟空" },
+  ];
+
+  it("puts the fitting specialisation before its base role", () => {
+    expect(sortAgentsByDomainFit(agents, ["出海"]).map((a) => a.name)).toEqual([
+      "孙悟空出海",
+      "布尔玛",
+      "孙悟空",
+      "孙悟空游戏",
+    ]);
   });
 
-  it.each(table.cases)("fit: $name", (c) => {
-    expect(domainFit(c.scene, c.agent.domain)).toBe(c.fit);
+  it("a generic scene puts base roles first", () => {
+    expect(sortAgentsByDomainFit(agents, []).map((a) => a.name)).toEqual([
+      "布尔玛",
+      "孙悟空",
+      "孙悟空游戏",
+      "孙悟空出海",
+    ]);
   });
 });
 
@@ -48,12 +81,7 @@ describe("agentSceneOf", () => {
 });
 
 describe("groupAgentsByFit", () => {
-  const agents = [
-    agent("base"),
-    agent("game", "d-game"),
-    agent("out", "d-out"),
-    agent("base2"),
-  ];
+  const agents = [agent("base"), agent("game", "d-game"), agent("out", "d-out"), agent("base2")];
 
   it("domain scene: fit, then base roles, then other domains, order kept", () => {
     const scene = agentSceneOf([project("tarot", ["d-out"])])!;
@@ -67,6 +95,5 @@ describe("groupAgentsByFit", () => {
   it("generic scene: base roles fit, specialisations last, no empty group", () => {
     const scene = agentSceneOf([project("m", [])])!;
     expect(groupAgentsByFit(agents, scene).map((g) => g.fit)).toEqual(["match", "other"]);
-    expect(sortAgentsByFit(agents, scene).map((a) => a.id)).toEqual(["base", "base2", "game", "out"]);
   });
 });

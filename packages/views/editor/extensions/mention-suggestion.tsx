@@ -18,7 +18,7 @@ import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
 import { workspaceKeys } from "@multica/core/workspace/queries";
 import { useAuthStore } from "@multica/core/auth";
 import { canAssignAgentToIssue } from "@multica/core/permissions";
-import { isAgentRuntimeBound, sortAgentsByFit, type AgentScene } from "@multica/core/agents";
+import { isAgentRuntimeBound, sortAgentsByDomainFit, type AgentScene } from "@multica/core/agents";
 import { searchIssues, searchProjects } from "@multica/core/search-index";
 import {
   isIssueDirectHit,
@@ -761,7 +761,7 @@ export function rankAgentItemsByFit(
   const agentRows = items
     .filter((item) => item.type === "agent")
     .map((item) => ({ item, domain_id: domainOf.get(item.id) }));
-  const ranked = sortAgentsByFit(agentRows, scene).map((row) => row.item);
+  const ranked = sortAgentsByDomainFit(agentRows, scene.domains).map((row) => row.item);
   let next = 0;
   return items.map((item) => (item.type === "agent" ? ranked[next++]! : item));
 }
