@@ -30,6 +30,10 @@ type assignmentRuling struct {
 	Source     string
 	SourceUser pgtype.UUID
 	Quote      string
+	// Seat, when set, is the agent the pick lands on instead of the one named:
+	// a quote naming only a base role puts the issue on that role's
+	// specialisation for the issue's domain (DENE-1451).
+	Seat pgtype.UUID
 	// Reason is returned to an agent when a requested pick is rejected. It is
 	// intentionally explicit so the agent can ask the person for a real quote
 	// instead of guessing again.
@@ -55,7 +59,7 @@ func (e *heldExecutor) is(assigneeType pgtype.Text, assigneeID pgtype.UUID) bool
 func (h *Handler) rulePick(
 	r *http.Request, workspaceID, actorType, actorID string,
 	assigneeType pgtype.Text, assigneeID pgtype.UUID, quote, resultingStatus string,
-	held *heldExecutor,
+	held *heldExecutor, domainID pgtype.UUID,
 ) assignmentRuling {
 	if actorType != "agent" {
 		// A person's own hand. Whatever quote they sent is not needed.
@@ -69,7 +73,11 @@ func (h *Handler) rulePick(
 	if quote != "" {
 		if task, ok := h.liveTaskOf(r, actorID); ok {
 			if user, holds := h.quoteFromInitiator(r.Context(), task, assigneeType, assigneeID, quote); holds {
-				return assignmentRuling{Apply: true, Source: routing.SourceQuote, SourceUser: user, Quote: strings.TrimSpace(quote)}
+				ruling := assignmentRuling{Apply: true, Source: routing.SourceQuote, SourceUser: user, Quote: strings.TrimSpace(quote)}
+				if seat, ok := h.seatForQuote(r.Context(), assigneeType, assigneeID, quote, domainID); ok {
+					ruling.Seat = seat
+				}
+				return ruling
 			}
 		}
 		if assigneeType.Valid && (assigneeType.String == "agent" || assigneeType.String == "squad") {
@@ -310,4 +318,41 @@ func (h *Handler) stampAssignee(ctx context.Context, issue db.Issue, ruling assi
 		return issue
 	}
 	return stamped
+}
+
+// seatForQuote is the per-quote half of domain routing (DENE-1451). A quote
+// that names a specific seat ("孙悟空出海") is kept as said. A quote that names
+// only the base role ("交给孙悟空") lands on that role's specialisation for the
+// issue's domain, or on the base role itself when the issue is generic or the
+// role has no specialisation for it. ok is false when the named agent stands.
+func (h *Handler) seatForQuote(ctx context.Context, assigneeType pgtype.Text, assigneeID pgtype.UUID, quote string, domainID pgtype.UUID) (pgtype.UUID, bool) {
+	// A generic issue has no domain to steer by: the named seat stands.
+	if !assigneeType.Valid || assigneeType.String != "agent" || !assigneeID.Valid || !domainID.Valid {
+		return pgtype.UUID{}, false
+	}
+	named, err := h.Queries.GetAgent(ctx, assigneeID)
+	if err != nil {
+		return pgtype.UUID{}, false
+	}
+	base := named
+	if named.ParentAgentID.Valid {
+		if base, err = h.Queries.GetAgent(ctx, named.ParentAgentID); err != nil {
+			return pgtype.UUID{}, false
+		}
+	}
+	children, err := h.Queries.ListAgentChildren(ctx, base.ID)
+	if err != nil {
+		return pgtype.UUID{}, false
+	}
+	q := strings.ToLower(strings.Join(strings.Fields(quote), " "))
+	for _, child := range children {
+		if n := strings.ToLower(strings.Join(strings.Fields(child.Name), " ")); n != "" && strings.Contains(q, n) {
+			return pgtype.UUID{}, false
+		}
+	}
+	seat := h.specialisationForDomain(ctx, base, domainID)
+	if seat.ID == named.ID || seat.ArchivedAt.Valid {
+		return pgtype.UUID{}, false
+	}
+	return seat.ID, true
 }

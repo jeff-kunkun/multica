@@ -35,6 +35,7 @@ import type {
   IssueReaction,
   ListIssuesParams,
   ListIssuesResponse,
+  ListDomainsResponse,
   ListLabelsResponse,
   ListProjectResourcesResponse,
   ListProjectsResponse,
@@ -124,6 +125,8 @@ import {
   InboxListSchema,
   InboxUnreadSummarySchema,
   NotificationPreferenceResponseSchema,
+  ListDomainsResponseSchema,
+  EMPTY_LIST_DOMAINS_RESPONSE,
   ListLabelsResponseSchema,
   ListProjectResourcesResponseSchema,
   ListProjectsResponseSchema,
@@ -943,6 +946,21 @@ class ApiClient {
   // short-circuits 204 → undefined (api.ts:270), so no body parsing needed.
   async deleteIssue(id: string): Promise<void> {
     await this.fetch<void>(`/api/issues/${id}`, { method: "DELETE" });
+  }
+
+  // --- Domains (DENE-1451) ---
+  async listDomains(opts?: {
+    signal?: AbortSignal;
+  }): Promise<ListDomainsResponse> {
+    const raw = await this.fetch<unknown>("/api/domains", {
+      signal: opts?.signal,
+    });
+    return parseWithFallback(
+      raw,
+      ListDomainsResponseSchema,
+      EMPTY_LIST_DOMAINS_RESPONSE,
+      { endpoint: "GET /api/domains" },
+    );
   }
 
   // --- Labels ---

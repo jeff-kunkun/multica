@@ -151,6 +151,8 @@ import type {
   UpdateProjectResourceRequest,
   ListProjectResourcesResponse,
   Label,
+  Domain,
+  ListDomainsResponse,
   IssueProperty,
   IssuePropertyValue,
   CreatePropertyRequest,
@@ -5633,6 +5635,31 @@ export class ApiClient {
     await this.fetch(`/api/projects/${projectId}/members/${memberId}`, {
       method: "DELETE",
     });
+  }
+
+  // Workspace domains (DENE-1451). Reads are open to any member; writes are
+  // owner/admin only.
+  async listDomains(): Promise<ListDomainsResponse> {
+    const raw = await this.fetch<ListDomainsResponse>(`/api/domains`);
+    return { domains: Array.isArray(raw?.domains) ? raw.domains : [] };
+  }
+
+  async createDomain(name: string): Promise<Domain> {
+    return this.fetch<Domain>(`/api/domains`, {
+      method: "POST",
+      body: JSON.stringify({ name }),
+    });
+  }
+
+  async renameDomain(id: string, name: string): Promise<Domain> {
+    return this.fetch<Domain>(`/api/domains/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ name }),
+    });
+  }
+
+  async deleteDomain(id: string): Promise<void> {
+    await this.fetch(`/api/domains/${id}`, { method: "DELETE" });
   }
 
   // Labels

@@ -19,6 +19,15 @@ func pct(v float64) string {
 }
 
 func directionLine(issue Issue, match DirectionMatch) string {
+	switch match.Source {
+	case DirectionFromIssue:
+		return fmt.Sprintf("- **方向**：%s（任务的领域）", match.Direction)
+	case DirectionFromProject:
+		if match.Direction != "" {
+			return fmt.Sprintf("- **方向**：%s（项目「%s」的领域）", match.Direction, issue.ProjectName)
+		}
+		return fmt.Sprintf("- **方向**：%s（项目「%s」有多个领域，本票没选），从通用档位里选", GenericDirection, issue.ProjectName)
+	}
 	switch {
 	case issue.ProjectName == "":
 		return "- **方向**：未知（本票没有所属 project），从通用档位里选"
@@ -26,7 +35,7 @@ func directionLine(issue Issue, match DirectionMatch) string {
 		return fmt.Sprintf("- **方向**：未知（对照表把 project「%s」写成了「%s」，但没有这个方向），从通用档位里选",
 			issue.ProjectName, match.Invalid)
 	case !match.Known:
-		return fmt.Sprintf("- **方向**：未知（project「%s」不在对照表里），从通用档位里选", issue.ProjectName)
+		return fmt.Sprintf("- **方向**：未知（project「%s」没设领域，也不在对照表里），从通用档位里选", issue.ProjectName)
 	case match.Direction == "":
 		return fmt.Sprintf("- **方向**：%s（对照表把 project「%s」归为通用），从通用档位里选", GenericDirection, issue.ProjectName)
 	}

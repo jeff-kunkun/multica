@@ -48,8 +48,8 @@ func (r *Router) Escalate(ctx context.Context, workspaceID, issueID, reason stri
 		return esc, ErrNotEscalatable
 	}
 
-	ladder := r.Ladder.WithProjects(settings.Projects).WithSeatOrder(settings.SeatOrder())
-	direction := ladder.ResolveDirection(issue.ProjectName).Direction
+	ladder := r.Ladder.For(settings)
+	direction := ladder.IssueDirection(issue).Direction
 	roster, err := r.Store.Roster(ctx, workspaceID)
 	if err != nil {
 		return esc, err
