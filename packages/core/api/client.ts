@@ -3736,8 +3736,13 @@ export class ApiClient {
   }
 
   // Inbox
+  /**
+   * One row per issue group (`?group=issue`, DENE-1505): the group's newest
+   * row with its `unread_count` and newest comment anchor — the shape
+   * `deduplicateInboxItems` builds, without shipping every sibling row.
+   */
   async listInbox(): Promise<InboxItem[]> {
-    const raw = await this.fetch<unknown>("/api/inbox");
+    const raw = await this.fetch<unknown>("/api/inbox?group=issue");
     return parseWithFallback(raw, InboxItemListSchema, EMPTY_INBOX_ITEMS, {
       endpoint: "GET /api/inbox",
     });
@@ -3764,8 +3769,10 @@ export class ApiClient {
     });
   }
 
-  async markInboxRead(id: string): Promise<InboxItem> {
-    return this.fetch(`/api/inbox/${id}/read`, { method: "POST" });
+  /** `scope: "issue"` also reads every active row of the item's issue. */
+  async markInboxRead(id: string, options: { scope?: "issue" } = {}): Promise<InboxItem> {
+    const query = options.scope ? `?scope=${options.scope}` : "";
+    return this.fetch(`/api/inbox/${id}/read${query}`, { method: "POST" });
   }
 
   async markInboxUnread(id: string): Promise<InboxItem> {
