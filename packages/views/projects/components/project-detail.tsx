@@ -76,6 +76,8 @@ import {
   AlertDialogTitle,
 } from "@multica/ui/components/ui/alert-dialog";
 import { useT } from "../../i18n";
+import { DomainSelect } from "../../domains/domain-select";
+import { domainListOptions } from "@multica/core/domains";
 import { useProjectStatusLabels, useProjectPriorityLabels } from "./labels";
 import { matchesPinyin } from "../../editor/extensions/pinyin-match";
 import { ShareScopeDialog, ShareScopeTrigger } from "../../common/share-scope-dialog";
@@ -138,6 +140,8 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
   );
   const { data: members = [] } = useQuery(memberListOptions(wsId));
   const { data: agents = [] } = useQuery(agentListOptions(wsId));
+  const { data: domains = [] } = useQuery(domainListOptions(wsId));
+  const { t: tCommon } = useT("common");
   const { getActorName } = useActorName();
   const updateProject = useUpdateProject();
   const deleteProject = useDeleteProject();
@@ -434,6 +438,15 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
           </PropRow>
           <PropRow label={t(($) => $.detail.prop_due_date)}>
             <ProjectDueDatePicker dueDate={project.due_date} onUpdate={handleUpdateField} />
+          </PropRow>
+          <PropRow label={tCommon(($) => $.domain.label)}>
+            <DomainSelect
+              multiple
+              header={tCommon(($) => $.domain.project_header)}
+              options={domains.map((d) => ({ id: d.id, name: d.name }))}
+              selected={project.domain_ids ?? []}
+              onChange={(ids) => handleUpdateField({ domain_ids: ids })}
+            />
           </PropRow>
         </div>}
       </div>

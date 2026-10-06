@@ -182,7 +182,7 @@ func init() {
 	agentGetCmd.Flags().String("output", "json", "Output format: table or json")
 
 	// agent create
-	agentCreateCmd.Flags().String("name", "", "Agent name (required)")
+	agentCreateCmd.Flags().String("name", "", "Agent name (required unless --domain is given, which names the seat base role + domain)")
 	agentCreateCmd.Flags().String("description", "", "Agent description")
 	agentCreateCmd.Flags().String("instructions", "", "Agent instructions")
 	agentCreateCmd.Flags().String("conversation-starters", "", "Conversation starters as a JSON array of {\"label\",\"prompt\"} objects (at most 3; label ≤80, prompt ≤4000). Shown above the Chat composer; selecting one fills the composer and does not start a run. Omit to default to none.")
@@ -205,6 +205,8 @@ func init() {
 	agentCreateCmd.Flags().StringSlice("public-to-member", nil, "public_to: allow the given member user id(s) to invoke this agent. Repeatable.")
 	agentCreateCmd.Flags().Int32("max-concurrent-tasks", 6, "Maximum concurrent runs (1-50)")
 	agentCreateCmd.Flags().String("parent-agent-id", "", "Base role to specialise: the new agent inherits that agent's prompt (prepended at run time), skills, and — unless --runtime-inherited=false — its runtime configuration (runtime, model, thinking level). Must be a base role itself — a specialisation cannot be specialised further. Empty = an independent base role.")
+	agentCreateCmd.Flags().String("base-role", "", "Base role to specialise, by name or id (same as --parent-agent-id, which takes an id)")
+	agentCreateCmd.Flags().String("domain", "", "Workspace domain of the new specialisation (needs --base-role). The name becomes base role + domain; a base role has one specialisation per domain. See `multica domain list`")
 	agentCreateCmd.Flags().Bool("runtime-inherited", false, "Specialisation only: follow the base role's runtime configuration (runtime_id, model, thinking_level, service_tier, runtime_config). Default for a specialisation; pass --runtime-inherited=false together with --runtime-id to give it its own. Rejected without --parent-agent-id.")
 	agentCreateCmd.Flags().String("output", "json", "Output format: table or json")
 
@@ -679,12 +681,29 @@ func runAgentCreate(cmd *cobra.Command, _ []string) error {
 	}
 
 	name, _ := cmd.Flags().GetString("name")
-	if name == "" {
-		return fmt.Errorf("--name is required")
+	domain, _ := cmd.Flags().GetString("domain")
+	domain = strings.TrimSpace(domain)
+	if name == "" && domain == "" {
+		return fmt.Errorf("--name is required (or --base-role with --domain, which names the seat)")
 	}
 	runtimeID, _ := cmd.Flags().GetString("runtime-id")
 	parentAgentID, _ := cmd.Flags().GetString("parent-agent-id")
 	parentAgentID = strings.TrimSpace(parentAgentID)
+	if baseRole, _ := cmd.Flags().GetString("base-role"); strings.TrimSpace(baseRole) != "" {
+		if parentAgentID != "" {
+			return fmt.Errorf("--base-role and --parent-agent-id name the same thing; pass one")
+		}
+		resolveCtx, resolveCancel := cli.APIContext(context.Background())
+		id, err := resolveAgent(resolveCtx, client, strings.TrimSpace(baseRole))
+		resolveCancel()
+		if err != nil {
+			return fmt.Errorf("resolve base role: %w", err)
+		}
+		parentAgentID = id
+	}
+	if domain != "" && parentAgentID == "" {
+		return fmt.Errorf("--domain needs --base-role: only a specialisation works in a domain")
+	}
 
 	// Runtime inheritance (DENE-505). A specialisation follows its base role's
 	// runtime configuration unless the caller opts out, which is why --runtime-id
@@ -783,6 +802,9 @@ func runAgentCreate(cmd *cobra.Command, _ []string) error {
 	// only sent when it carries an id.
 	if parentAgentID != "" {
 		body["parent_agent_id"] = parentAgentID
+	}
+	if domain != "" {
+		body["domain_id"] = domain
 	}
 
 	ctx, cancel := cli.APIContext(context.Background())

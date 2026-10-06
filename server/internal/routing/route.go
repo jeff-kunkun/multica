@@ -282,8 +282,8 @@ func (r *Router) routeTodo(ctx context.Context, workspaceID string, settings Set
 		return Outcome{State: StateEnabled, Action: ActionNoop, Reason: "no empty slot"}, nil
 	}
 
-	ladder := r.Ladder.WithProjects(settings.Projects).WithSeatOrder(settings.SeatOrder())
-	match := ladder.ResolveDirection(issue.ProjectName)
+	ladder := r.Ladder.For(settings)
+	match := ladder.IssueDirection(issue)
 	direction := match.Direction
 	roster, err := r.Store.Roster(ctx, workspaceID)
 	if err != nil {
@@ -631,8 +631,8 @@ func (r *Router) PickAcceptanceSeat(ctx context.Context, workspaceID string, iss
 	if len(ladder.Tiers) == 0 {
 		ladder = DefaultLadder
 	}
-	ladder = ladder.WithProjects(settings.Projects).WithSeatOrder(settings.SeatOrder())
-	direction := ladder.Direction(issue.ProjectName)
+	ladder = ladder.WithDomains(settings.Domains).WithProjects(settings.Projects).WithSeatOrder(settings.SeatOrder())
+	direction := ladder.IssueDirection(issue).Direction
 	roster, err := r.Store.Roster(ctx, workspaceID)
 	if err != nil {
 		return ReviewerRef{}, "读不到席位名册", false
@@ -733,7 +733,7 @@ func seatFromRoster(ladder Ladder, roster map[string]Agent, id string) Seat {
 	if !ok {
 		return Seat{ID: id}
 	}
-	seat := Seat{ID: agent.ID, Name: agent.Name, Direction: ladder.seatDirection(agent.Name)}
+	seat := Seat{ID: agent.ID, Name: agent.Name, Direction: ladder.agentDirection(agent)}
 	key := ""
 	if tagged, ok := ladder.NormalizeTier(agent.Tier); ok && tagged != "" {
 		key = tagged
@@ -969,8 +969,8 @@ func (r *Router) routeInReview(ctx context.Context, workspaceID string, settings
 // work. The slot already names them, so they stay the designated reviewer:
 // recovery may give the ticket back only before the cover has started.
 func (r *Router) handOffToSubstitute(ctx context.Context, workspaceID string, settings Settings, issue Issue, roster map[string]Agent, disabled Agent, out Outcome) (Outcome, error) {
-	ladder := r.Ladder.WithProjects(settings.Projects).WithSeatOrder(settings.SeatOrder())
-	direction := ladder.Direction(issue.ProjectName)
+	ladder := r.Ladder.For(settings)
+	direction := ladder.IssueDirection(issue).Direction
 	holder := seatFromRoster(ladder, map[string]Agent{disabled.Name: disabled}, disabled.ID)
 	if holder.Name == "" {
 		holder.Name = disabled.Name
@@ -1057,8 +1057,8 @@ func (r *Router) decideReviewerNow(ctx context.Context, workspaceID string, sett
 	noop := func(reason string) Outcome {
 		return Outcome{State: StateEnabled, Action: ActionNoop, Reason: reason}
 	}
-	ladder := r.Ladder.WithProjects(settings.Projects).WithSeatOrder(settings.SeatOrder())
-	direction := ladder.Direction(issue.ProjectName)
+	ladder := r.Ladder.For(settings)
+	direction := ladder.IssueDirection(issue).Direction
 	roster, err := r.Store.Roster(ctx, workspaceID)
 	if err != nil {
 		return ReviewerRef{}, Outcome{State: StateEnabled, Action: ActionSkipped, Reason: "roster unreadable"}, err
@@ -1183,8 +1183,8 @@ func (r *Router) routeBlocked(ctx context.Context, workspaceID string, settings 
 		return Outcome{State: StateEnabled, Action: ActionNoop, Reason: "waiting on " + strings.Join(pending, ", ")}, nil
 	}
 
-	ladder := r.Ladder.WithProjects(settings.Projects).WithSeatOrder(settings.SeatOrder())
-	direction := ladder.Direction(issue.ProjectName)
+	ladder := r.Ladder.For(settings)
+	direction := ladder.IssueDirection(issue).Direction
 	roster, err := r.Store.Roster(ctx, workspaceID)
 	if err != nil {
 		return out, err
