@@ -695,9 +695,17 @@ export function mergeIncrementalChanges<T extends { id: string }>(current: T[], 
   return [...byId.values()];
 }
 
+/** A search index response failed its schema; retrying soon gets the same body. */
+export class MalformedSearchIndexResponseError extends Error {
+  constructor(endpoint: string) {
+    super(`Malformed response from ${endpoint}`);
+    this.name = "MalformedSearchIndexResponseError";
+  }
+}
+
 function parseSearchIndexResponse<T>(raw: unknown, schema: ZodType, endpoint: string): T {
   const parsed = parseWithFallback<T | null>(raw, schema, null, { endpoint });
-  if (parsed === null) throw new Error(`Malformed response from ${endpoint}`);
+  if (parsed === null) throw new MalformedSearchIndexResponseError(endpoint);
   return parsed;
 }
 
