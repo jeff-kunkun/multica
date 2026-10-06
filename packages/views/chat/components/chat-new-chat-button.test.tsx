@@ -4,6 +4,7 @@ import { I18nProvider } from "@multica/core/i18n/react";
 import type { Agent, Project } from "@multica/core/types";
 import enChat from "../../locales/en/chat.json";
 import enIssues from "../../locales/en/issues.json";
+import enCommon from "../../locales/en/common.json";
 
 vi.mock("../../common/actor-avatar", () => ({
   ActorAvatar: ({ actorId }: { actorId: string }) => (
@@ -13,7 +14,7 @@ vi.mock("../../common/actor-avatar", () => ({
 
 import { NewChatButton } from "./new-chat-button";
 
-const TEST_RESOURCES = { en: { chat: enChat, issues: enIssues } };
+const TEST_RESOURCES = { en: { chat: enChat, issues: enIssues, common: enCommon } };
 
 function makeAgent(overrides: Partial<Agent> & Pick<Agent, "id" | "name" | "owner_id">): Agent {
   return {
@@ -64,7 +65,7 @@ function renderPicker(onStart = vi.fn()) {
 }
 
 describe("NewChatButton", () => {
-  it("lists the project's domain agents first and drops My agents / Others", async () => {
+  it("lists the project's domain agents first, base roles next, and drops My agents", async () => {
     const domainAgents = [
       ...agents,
       makeAgent({ id: "mine-out", name: "Zed出海", owner_id: "user-1", domain_id: "d-out" }),
@@ -84,8 +85,8 @@ describe("NewChatButton", () => {
     const dialog = await screen.findByRole("dialog");
     const text = dialog.textContent ?? "";
     expect(text.indexOf("Fits tarot")).toBeLessThan(text.indexOf("Zed出海"));
-    expect(text.indexOf("Zed出海")).toBeLessThan(text.indexOf("Others"));
-    expect(text.indexOf("Others")).toBeLessThan(text.indexOf("Alpha"));
+    expect(text.indexOf("Zed出海")).toBeLessThan(text.indexOf("General"));
+    expect(text.indexOf("General")).toBeLessThan(text.indexOf("Alpha"));
     expect(within(dialog).queryByText("My agents")).not.toBeInTheDocument();
   });
 

@@ -221,8 +221,6 @@
     "untitled": "New chat",
     "my_agents": "My agents",
     "others": "Others",
-    "fit_project": "Fits {{name}}",
-    "fit_projects": "Fits selected projects",
     "no_agents": "No agents",
     "history_group": "Chat history",
     "agent_filter_placeholder": "Search agents...",

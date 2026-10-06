@@ -226,5 +226,11 @@
     "delete_in_use": "还有项目或特化在用",
     "name_placeholder": "领域名称",
     "save_failed": "保存失败"
+  },
+  "agent_fit": {
+    "project": "适合 {{name}}",
+    "projects": "适合所选项目",
+    "generic": "通用",
+    "other": "其他"
   }
 }

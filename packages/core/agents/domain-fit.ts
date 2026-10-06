@@ -48,3 +48,55 @@ export function sortAgentsByDomainFit<T extends { domain_id?: string | null }>(
     .sort((a, b) => a.rank - b.rank || a.i - b.i)
     .map((x) => x.agent);
 }
+
+/** Group order: match first, other last. */
+export const DOMAIN_FIT_ORDER: readonly DomainFit[] = ["match", "generic", "other"];
+
+/** Minimal project shape a scene needs (Project satisfies it). */
+export interface DomainSceneProject {
+  id: string;
+  title: string;
+  domain_ids?: string[] | null;
+}
+
+/**
+ * Where a pick is made on web/desktop: the scene plus the projects in play
+ * (for the group heading). `null` at a call site means no project — pickers
+ * keep their own order and do not group.
+ */
+export interface AgentScene {
+  /** Scene domains; empty = generic. */
+  domains: string[];
+  projects: DomainSceneProject[];
+}
+
+/** The scene for some projects (and optionally an issue); null without projects. */
+export function agentSceneOf(
+  projects: readonly DomainSceneProject[],
+  issueDomainId?: string | null,
+): AgentScene | null {
+  if (projects.length === 0) return null;
+  return {
+    domains: domainScene({
+      issueDomainId,
+      projectDomainIds: projects.flatMap((p) => p.domain_ids ?? []),
+    }),
+    projects: [...projects],
+  };
+}
+
+export interface AgentFitGroup<T> {
+  fit: DomainFit;
+  items: T[];
+}
+
+/** Groups in rank order, input order kept inside each, empty groups dropped. */
+export function groupAgentsByFit<T extends { domain_id?: string | null }>(
+  agents: readonly T[],
+  scene: AgentScene,
+): AgentFitGroup<T>[] {
+  return DOMAIN_FIT_ORDER.map((fit) => ({
+    fit,
+    items: agents.filter((a) => agentDomainFit(scene.domains, a) === fit),
+  })).filter((g) => g.items.length > 0);
+}
