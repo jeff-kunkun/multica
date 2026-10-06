@@ -62,6 +62,7 @@ func (h *Handler) substituteAgent(ctx context.Context, workspaceID pgtype.UUID, 
 	}
 	roster := make(map[string]routing.Agent, len(agents))
 	byID := make(map[string]db.Agent, len(agents))
+	seats := newSeatDomains(routingStore{h: h}.domainNames(ctx, workspaceID), agents)
 	for _, agent := range agents {
 		if agent.ArchivedAt.Valid || !agent.WorkEnabled || !agent.RuntimeID.Valid {
 			continue
@@ -71,7 +72,9 @@ func (h *Handler) substituteAgent(ctx context.Context, workspaceID pgtype.UUID, 
 		if agent.RoutingTier.Valid {
 			tier = agent.RoutingTier.String
 		}
-		roster[agent.Name] = routing.Agent{ID: id, Name: agent.Name, Tier: tier, Usage: agent.RoutingUsage, Model: agent.Model.String}
+		seat := routing.Agent{ID: id, Name: agent.Name, Tier: tier, Usage: agent.RoutingUsage, Model: agent.Model.String}
+		seats.fill(&seat, agent)
+		roster[agent.Name] = seat
 		byID[id] = agent
 	}
 	holder := routing.Seat{ID: uuidToString(failed.ID), Name: failed.Name}
@@ -80,7 +83,8 @@ func (h *Handler) substituteAgent(ctx context.Context, workspaceID pgtype.UUID, 
 	}
 	ladder := routing.DefaultLadder
 	if ws, err := h.Queries.GetWorkspace(ctx, workspaceID); err == nil {
-		ladder = ladder.WithSeatOrder(routing.ParseSettings(ws.Settings).SeatOrder())
+		settings := routing.ParseSettings(ws.Settings)
+		ladder = ladder.WithDomains(h.domainNameList(ctx, workspaceID)).WithSeatOrder(settings.SeatOrder())
 	}
 	seat, _, ok := routing.SubstituteSeat(ladder, holder, roster, avoid, direction)
 	if !ok {

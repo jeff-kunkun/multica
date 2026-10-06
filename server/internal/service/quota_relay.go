@@ -699,6 +699,12 @@ func quotaRoster(ctx context.Context, qtx *db.Queries, task db.AgentTaskQueue, f
 	if ws, err := qtx.GetWorkspace(ctx, workspaceID); err == nil {
 		order = routing.ParseSettings(ws.Settings).SeatOrder()
 	}
+	domainNames := map[pgtype.UUID]string{}
+	if domains, err := qtx.ListWorkspaceDomains(ctx, workspaceID); err == nil {
+		for _, d := range domains {
+			domainNames[d.ID] = d.Name
+		}
+	}
 	roster := make([]quotarelay.Seat, 0, len(agents))
 	var failedSeat quotarelay.Seat
 	failedID := util.UUIDToString(failed.ID)
@@ -710,7 +716,7 @@ func quotaRoster(ctx context.Context, qtx *db.Queries, task db.AgentTaskQueue, f
 			ID:        id,
 			Name:      agent.Name,
 			Tier:      tier,
-			Direction: quotaSeatDirection(agent.Name),
+			Direction: quotaSeatDirection(agent, domainNames),
 			Provider:  provider,
 			Eligible:  agent.WorkEnabled && agent.RuntimeID.Valid && !agent.ArchivedAt.Valid && tier != "" && !broken[id],
 		}
@@ -1239,7 +1245,13 @@ func (s *TaskService) finishIdleTransfers(ctx context.Context, idle []idleTransf
 	}
 }
 
-func quotaSeatDirection(name string) string {
+// quotaSeatDirection is the domain a seat serves: its recorded domain
+// (DENE-1451), else read off its name.
+func quotaSeatDirection(agent db.Agent, domainNames map[pgtype.UUID]string) string {
+	if name := domainNames[agent.DomainID]; name != "" {
+		return name
+	}
+	name := agent.Name
 	for _, direction := range routing.DefaultLadder.Directions {
 		if direction != "" && strings.HasSuffix(name, direction) {
 			return direction

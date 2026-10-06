@@ -196,6 +196,8 @@ import { openGoalCompletion } from "@multica/core/modals";
 import { ProgressRing } from "./progress-ring";
 import { matchesPinyin } from "../../editor/extensions/pinyin-match";
 import { useT } from "../../i18n";
+import { DomainSelect } from "../../domains/domain-select";
+import { domainListOptions } from "@multica/core/domains";
 import { useIssueDetailScrollRestore } from "../hooks/use-issue-detail-scroll-restore";
 import { useInPageFind } from "../hooks/use-in-page-find";
 import { useStickyComposer } from "../hooks/use-sticky-composer";
@@ -2176,6 +2178,14 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     ...projectDetailOptions(wsId, issueProjectId ?? ""),
     enabled: !!issueProjectId,
   });
+  // An issue picks one of its project's domains, or stays generic (DENE-1451).
+  const { t: tCommon } = useT("common");
+  const { data: domains = [] } = useQuery(domainListOptions(wsId));
+  const projectDomainIds = breadcrumbProject?.domain_ids ?? [];
+  const issueDomainOptions = [
+    { id: "", name: tCommon(($) => $.domain.generic) },
+    ...domains.filter((d) => projectDomainIds.includes(d.id)).map((d) => ({ id: d.id, name: d.name })),
+  ];
   const {
     data: childIssues = [],
     isSuccess: childIssuesLoaded,
@@ -2878,6 +2888,16 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
               onUpdate={handleUpdateField}
             />
           </PropRow>
+          {issue.project_id && (
+            <PropRow label={tCommon(($) => $.domain.label)}>
+              <DomainSelect
+                header={tCommon(($) => $.domain.issue_header)}
+                options={issueDomainOptions}
+                selected={issue.domain_id ? [issue.domain_id] : []}
+                onChange={(ids) => handleUpdateField({ domain_id: ids[0] ?? null })}
+              />
+            </PropRow>
+          )}
           <PropRow label={t(($) => $.detail.goal.title)}>
             {issueGoal ? (
               <button

@@ -71,7 +71,7 @@ func relaySeat(l Ladder, agent Agent) quotarelay.Seat {
 		ID:        agent.ID,
 		Name:      agent.Name,
 		Tier:      tier,
-		Direction: l.seatDirection(agent.Name),
+		Direction: l.agentDirection(agent),
 		Provider:  provider,
 		Eligible:  tier != "" && agent.ID != "",
 		UsageRank: l.usageRank(agent),

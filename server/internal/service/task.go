@@ -9139,8 +9139,10 @@ func IssueToMap(issue db.Issue, issuePrefix string) map[string]any {
 		"parent_issue_id": util.UUIDToPtr(issue.ParentIssueID),
 		// Mirrors handler.IssueResponse.DuplicateOf. Null is only true for a
 		// row with no live mark; IssueToMapResolved resolves it for the rest.
-		"duplicate_of":     nil,
-		"project_id":       util.UUIDToPtr(issue.ProjectID),
+		"duplicate_of": nil,
+		"project_id":   util.UUIDToPtr(issue.ProjectID),
+		// Mirrors handler.IssueResponse.DomainID: the id, or "" for generic.
+		"domain_id":        util.UUIDToString(issue.DomainID),
 		"position":         issue.Position,
 		"stage":            util.Int4ToPtr(issue.Stage),
 		"start_date":       util.DateToPtr(issue.StartDate),

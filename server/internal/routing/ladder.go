@@ -115,6 +115,58 @@ type DirectionMatch struct {
 	// row is ignored rather than followed: base+typo names no seat, and the
 	// silent fallback would hide the typo forever.
 	Invalid string
+	// Source says where the direction came from (DENE-1451): the issue's own
+	// domain, its project's domains, or the legacy project-name table, which
+	// only answers for a project with no domains set.
+	Source DirectionSource
+}
+
+// DirectionSource is where an issue's direction was read from.
+type DirectionSource string
+
+const (
+	DirectionFromIssue   DirectionSource = "issue"
+	DirectionFromProject DirectionSource = "project"
+	DirectionFromTable   DirectionSource = "table"
+)
+
+// WithDomains replaces the ladder's directions with the workspace's domain
+// list (DENE-1451), which is where directions are maintained now. An empty
+// list keeps the shipped directions, so a workspace that never read its
+// domains still routes as before.
+func (l Ladder) WithDomains(names []string) Ladder {
+	if len(names) == 0 {
+		return l
+	}
+	l.Directions = append([]string(nil), names...)
+	return l
+}
+
+// For is the ladder one workspace routes on: its domains, its project rows,
+// and its seat order laid over the shipped defaults.
+func (l Ladder) For(settings Settings) Ladder {
+	return l.WithDomains(settings.Domains).WithProjects(settings.Projects).WithSeatOrder(settings.SeatOrder())
+}
+
+// IssueDirection resolves the direction an issue routes in. The issue's own
+// domain decides; an issue nobody classified takes its project's only domain,
+// and an issue in a project with several domains is generic on purpose. Only
+// a project with no domains at all falls back to the project-name table,
+// which is how prefix rows such as game-* still classify new projects.
+func (l Ladder) IssueDirection(issue Issue) DirectionMatch {
+	if issue.Domain != "" {
+		return DirectionMatch{Direction: issue.Domain, Known: true, Source: DirectionFromIssue}
+	}
+	switch len(issue.ProjectDomains) {
+	case 0:
+	case 1:
+		return DirectionMatch{Direction: issue.ProjectDomains[0], Known: true, Source: DirectionFromProject}
+	default:
+		return DirectionMatch{Known: true, Source: DirectionFromProject}
+	}
+	m := l.ResolveDirection(issue.ProjectName)
+	m.Source = DirectionFromTable
+	return m
 }
 
 // WithProjects returns the ladder with a workspace's own project rows laid
@@ -227,7 +279,7 @@ func (l Ladder) Candidates(direction string, roster map[string]Agent) []Seat {
 		if i > 0 {
 			if up, ok := l.upshift(tagged[t.Key], tagged[l.Tiers[i-1].Key], direction); ok {
 				seats = append(seats, Seat{ID: up.ID, Name: up.Name, TierKey: t.Key, TierLabel: t.Label,
-					Direction: l.seatDirection(up.Name), Upshifted: true})
+					Direction: l.agentDirection(up), Upshifted: true})
 				continue
 			}
 		}
@@ -297,17 +349,17 @@ func (l Ladder) pickTagged(seats []Agent, direction string) (Agent, string, bool
 	}
 	if direction != "" {
 		for _, a := range seats {
-			if l.seatDirection(a.Name) == direction {
+			if l.agentDirection(a) == direction {
 				return a, direction, true
 			}
 		}
 	}
 	for _, a := range seats {
-		if l.seatDirection(a.Name) == "" {
+		if l.agentDirection(a) == "" {
 			return a, "", true
 		}
 	}
-	return seats[0], l.seatDirection(seats[0].Name), true
+	return seats[0], l.agentDirection(seats[0]), true
 }
 
 func withoutDemoted(seats []Agent) []Agent {
@@ -353,6 +405,17 @@ func (l Ladder) pickByName(t Tier, direction string, roster map[string]Agent) (S
 	name := SeatName(t.Base, direction)
 	a, ok := lookup(name)
 	if !ok && direction != "" {
+		// The recorded domain decides before the name: a specialisation
+		// whose name strayed from base + domain is still this rung's seat.
+		for _, cand := range roster {
+			if cand.Base == t.Base && cand.Direction == direction {
+				if a, ok = lookup(cand.Name); ok {
+					break
+				}
+			}
+		}
+	}
+	if !ok && direction != "" {
 		// A direction with no specialised seat on this rung falls back to the
 		// generic seat rather than dropping the rung: losing a rung silently
 		// narrows the ladder the judge is choosing from.
@@ -385,6 +448,22 @@ type Agent struct {
 	// Model is the model id configured on the seat. It decides the seat's
 	// model family; ladder.json's per-seat copy is only a fallback.
 	Model string
+	// Direction is the domain this seat is a specialisation for (DENE-1451),
+	// read from the agent record. Empty for a base role, and for a
+	// specialisation with no domain set, whose name suffix is then read.
+	Direction string
+	// Base is the name of the base role this seat specialises; empty for a
+	// base role.
+	Base string
+}
+
+// agentDirection is the direction a seat serves: its recorded domain, or by
+// the naming convention when the record carries none.
+func (l Ladder) agentDirection(a Agent) string {
+	if a.Direction != "" {
+		return a.Direction
+	}
+	return l.seatDirection(a.Name)
 }
 
 // SeatByTier finds the candidate on a named rung.
@@ -646,7 +725,7 @@ func (l Ladder) SameTierAlternate(holder Seat, direction string, roster map[stri
 			Name:      agent.Name,
 			TierKey:   tier.Key,
 			TierLabel: tier.Label,
-			Direction: l.seatDirection(agent.Name),
+			Direction: l.agentDirection(agent),
 		})
 	}
 	if len(pool) == 0 {
