@@ -2,32 +2,32 @@ package routing
 
 import (
 	"context"
+	"reflect"
 	"strings"
 	"testing"
 )
 
 // DENE-1451: the issue's domain decides the seat, not the project name.
 
-func TestIssueDirectionReadsTheIssueDomainFirst(t *testing.T) {
+func TestIssueSceneReadsTheIssueDomainFirst(t *testing.T) {
 	l := DefaultLadder
 	cases := []struct {
 		name  string
 		issue Issue
-		want  DirectionMatch
+		want  Scene
 	}{
 		{"issue domain", Issue{ProjectName: "tarot", ProjectDomains: []string{"出海", "自媒体"}, Domain: "自媒体"},
-			DirectionMatch{Direction: "自媒体", Known: true, Source: DirectionFromIssue}},
+			Scene{Domains: []string{"自媒体"}, Source: DirectionFromIssue}},
 		{"single project domain", Issue{ProjectName: "relay", ProjectDomains: []string{"中转"}},
-			DirectionMatch{Direction: "中转", Known: true, Source: DirectionFromProject}},
+			Scene{Domains: []string{"中转"}, Source: DirectionFromProject}},
 		{"several project domains, none picked", Issue{ProjectName: "tarot", ProjectDomains: []string{"出海", "自媒体"}},
-			DirectionMatch{Known: true, Source: DirectionFromProject}},
+			Scene{Domains: []string{"出海", "自媒体"}, Source: DirectionFromProject}},
 		{"no domains falls back to the prefix row", Issue{ProjectName: "game-new"},
-			DirectionMatch{Direction: "游戏", Known: true, Source: DirectionFromTable}},
-		{"no domains, no row", Issue{ProjectName: "elsewhere"},
-			DirectionMatch{Source: DirectionFromTable}},
+			Scene{Domains: []string{"游戏"}, Source: DirectionFromTable}},
+		{"no domains, no row", Issue{ProjectName: "elsewhere"}, GenericScene},
 	}
 	for _, tc := range cases {
-		if got := l.IssueDirection(tc.issue); got != tc.want {
+		if got := l.IssueScene(tc.issue); !reflect.DeepEqual(got, tc.want) {
 			t.Errorf("%s: got %+v, want %+v", tc.name, got, tc.want)
 		}
 	}
@@ -85,7 +85,8 @@ func TestMultiDomainProjectRoutesAnIssueByItsOwnDomain(t *testing.T) {
 	}
 }
 
-func TestMultiDomainProjectWithoutAnIssueDomainIsGeneric(t *testing.T) {
+func TestMultiDomainProjectWithoutAnIssueDomainFitsEitherDomain(t *testing.T) {
+	// Rule 1 of DENE-1477: the project's domains, all of them, are the scene.
 	store := newFakeStore()
 	store.issue.ProjectName = "tarot"
 	store.issue.ProjectDomains = []string{"出海", "游戏"}
@@ -93,10 +94,42 @@ func TestMultiDomainProjectWithoutAnIssueDomainIsGeneric(t *testing.T) {
 	if _, err := newRouter(store, &fakeJudge{verdict: confidentVerdict()}).Route(context.Background(), "ws", "issue-1"); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
+	if len(store.assigns) != 1 || store.assigns[0] != "孙悟空游戏" {
+		t.Errorf("assigns = %v, want the 游戏 specialisation", store.assigns)
+	}
+	if body := store.comments[KindAssignment][0]; !strings.Contains(body, "出海、游戏（项目「tarot」的领域）") {
+		t.Errorf("comment does not name the project's domains:\n%s", body)
+	}
+}
+
+func TestOverseasProjectRoutesToTheOverseasSpecialisation(t *testing.T) {
+	// The tarot acceptance case: a project in 出海 lands on *出海.
+	store := newFakeStore()
+	store.issue.ProjectName = "online-tarot"
+	store.issue.ProjectDomains = []string{"出海"}
+	store.roster["孙悟空出海"] = Agent{ID: "a-goku-o", Name: "孙悟空出海", Direction: "出海", Base: "孙悟空"}
+
+	if _, err := newRouter(store, &fakeJudge{verdict: confidentVerdict()}).Route(context.Background(), "ws", "issue-1"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(store.assigns) != 1 || store.assigns[0] != "孙悟空出海" {
+		t.Errorf("assigns = %v, want [孙悟空出海]", store.assigns)
+	}
+}
+
+func TestProjectWithoutDomainsSaysGeneric(t *testing.T) {
+	// The Multica 魔改 acceptance case: no domain is 通用, never 未知.
+	store := newFakeStore()
+	store.issue.ProjectName = "Multica 魔改"
+
+	if _, err := newRouter(store, &fakeJudge{verdict: confidentVerdict()}).Route(context.Background(), "ws", "issue-1"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 	if len(store.assigns) != 1 || store.assigns[0] != "孙悟空" {
 		t.Errorf("assigns = %v, want the base role", store.assigns)
 	}
-	if body := store.comments[KindAssignment][0]; !strings.Contains(body, "有多个领域，本票没选") {
-		t.Errorf("comment does not explain the generic pick:\n%s", body)
+	body := store.comments[KindAssignment][0]
+	if strings.Contains(body, "未知") || !strings.Contains(body, "- **方向**：通用\n") {
+		t.Errorf("comment must say 通用:\n%s", body)
 	}
 }

@@ -55,7 +55,7 @@ func (h *Handler) disabledParentSeat(ctx context.Context, parent db.Issue) (db.A
 
 // substituteAgent picks a same-tier other-family seat, or one tier down,
 // that can take work the failed seat cannot.
-func (h *Handler) substituteAgent(ctx context.Context, workspaceID pgtype.UUID, failed db.Agent, avoid []string, direction string) (db.Agent, routing.Seat, bool) {
+func (h *Handler) substituteAgent(ctx context.Context, workspaceID pgtype.UUID, failed db.Agent, avoid []string, scene routing.Scene) (db.Agent, routing.Seat, bool) {
 	agents, err := h.Queries.ListAgents(ctx, workspaceID)
 	if err != nil {
 		return db.Agent{}, routing.Seat{}, false
@@ -86,7 +86,7 @@ func (h *Handler) substituteAgent(ctx context.Context, workspaceID pgtype.UUID, 
 		settings := routing.ParseSettings(ws.Settings)
 		ladder = ladder.WithDomains(h.domainNameList(ctx, workspaceID)).WithSeatOrder(settings.SeatOrder())
 	}
-	seat, _, ok := routing.SubstituteSeat(ladder, holder, roster, avoid, direction)
+	seat, _, ok := routing.SubstituteSeat(ladder, holder, roster, avoid, scene)
 	if !ok {
 		return db.Agent{}, routing.Seat{}, false
 	}
@@ -117,7 +117,7 @@ func (h *Handler) planStageAdvance(ctx context.Context, parent db.Issue, childre
 	if !parentOff {
 		return plan
 	}
-	replacement, _, ok := h.substituteAgent(ctx, parent.WorkspaceID, off, nil, "")
+	replacement, _, ok := h.substituteAgent(ctx, parent.WorkspaceID, off, nil, service.IssueDomainScene(ctx, h.Queries, parent).Scene)
 	if !ok {
 		plan.skipWake = true
 		plan.note += fmt.Sprintf(" 父票执行人 %s 已停用，同档和下一档都没有能接的席位，阶段没有人推进。", off.Name)
@@ -210,7 +210,7 @@ func stagePromotionNote(promoted []string, started int, held []stagegate.Hold) s
 func (h *Handler) coverDisabledMention(ctx context.Context, issue db.Issue, failed db.Agent, authorType, authorID, originator, wsID string) (db.Agent, bool) {
 	avoid := []string{}
 	for range 4 {
-		agent, _, ok := h.substituteAgent(ctx, issue.WorkspaceID, failed, avoid, "")
+		agent, _, ok := h.substituteAgent(ctx, issue.WorkspaceID, failed, avoid, service.IssueDomainScene(ctx, h.Queries, issue).Scene)
 		if !ok {
 			return db.Agent{}, false
 		}

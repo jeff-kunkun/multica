@@ -430,22 +430,6 @@ func (h *Handler) issueDomainFor(ctx context.Context, wsUUID, projectID pgtype.U
 	return pgtype.UUID{}, nil
 }
 
-// specialisationForDomain is the seat a base-role pick lands on for an issue
-// in this domain: the base role's live specialisation for it, or the base role
-// itself when the issue is generic or the base role has none for it.
-func (h *Handler) specialisationForDomain(ctx context.Context, base db.Agent, domainID pgtype.UUID) db.Agent {
-	if !domainID.Valid {
-		return base
-	}
-	seat, err := h.Queries.GetSpecializationByDomain(ctx, db.GetSpecializationByDomainParams{
-		ParentAgentID: base.ID, DomainID: domainID,
-	})
-	if err != nil {
-		return base
-	}
-	return seat
-}
-
 // domainIDField is an issue's domain as a full read reports it: the id, or ""
 // for generic. Never nil, so the key is always present on a full read.
 func domainIDField(id pgtype.UUID) *string {

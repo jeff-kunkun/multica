@@ -195,6 +195,10 @@ type AgentResponse struct {
 	// RoutingUsage is the headroom a person tagged this seat with (DENE-922):
 	// tight / normal / ample. Routing prefers ample inside a rung.
 	RoutingUsage string `json:"routing_usage"`
+	// Fit is the agent's group for one issue or project (DENE-1477): match
+	// (对口), generic (通用) or other (其他). Only on a list asked with
+	// for_issue / for_project, which also orders the list by it.
+	Fit string `json:"fit,omitempty"`
 	// ComposioToolkitAllowlist is the subset of Composio toolkit slugs this
 	// agent is allowed to mount as MCP at task dispatch — for ANY run that
 	// passes the agent's invocation permission, using the agent OWNER's
@@ -1738,6 +1742,11 @@ func (h *Handler) ListAgents(w http.ResponseWriter, r *http.Request) {
 	}
 	userID := requestUserID(r)
 
+	scene, sceneAsked, ok := h.agentListScene(w, r, parseUUID(workspaceID))
+	if !ok {
+		return
+	}
+
 	var agents []db.Agent
 	var err error
 	if r.URL.Query().Get("include_archived") == "true" {
@@ -1843,7 +1852,15 @@ func (h *Handler) ListAgents(w http.ResponseWriter, r *http.Request) {
 		} else if actorType == "agent" || uuidToString(a.OwnerID) != userID {
 			redactComposioToolkitAllowlist(&resp)
 		}
+		if sceneAsked {
+			resp.Fit = string(service.AgentDomainFit(scene.Scene, a, scene.Names))
+		}
 		visible = append(visible, resp)
+	}
+	if sceneAsked {
+		slices.SortStableFunc(visible, func(a, b AgentResponse) int {
+			return routing.Fit(a.Fit).Rank() - routing.Fit(b.Fit).Rank()
+		})
 	}
 
 	// Nested grouping data for the specialisation tree (DENE-301): the base
@@ -1855,6 +1872,41 @@ func (h *Handler) ListAgents(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, visible)
+}
+
+// agentListScene reads for_issue / for_project off an agent list request:
+// the scene its agents are grouped by (service.LoadDomainScene, the same
+// read dispatch uses). asked is false when neither was sent.
+func (h *Handler) agentListScene(w http.ResponseWriter, r *http.Request, wsUUID pgtype.UUID) (scene service.DomainScene, asked, ok bool) {
+	issueRef := strings.TrimSpace(r.URL.Query().Get("for_issue"))
+	projectRef := strings.TrimSpace(r.URL.Query().Get("for_project"))
+	switch {
+	case issueRef != "" && projectRef != "":
+		writeError(w, http.StatusBadRequest, "for_issue and for_project are exclusive")
+		return scene, false, false
+	case issueRef != "":
+		id, ok := parseUUIDOrBadRequest(w, issueRef, "for_issue")
+		if !ok {
+			return scene, false, false
+		}
+		issue, err := h.Queries.GetIssueInWorkspace(r.Context(), db.GetIssueInWorkspaceParams{ID: id, WorkspaceID: wsUUID})
+		if err != nil {
+			writeError(w, http.StatusNotFound, "issue not found")
+			return scene, false, false
+		}
+		return service.IssueDomainScene(r.Context(), h.Queries, issue), true, true
+	case projectRef != "":
+		id, ok := parseUUIDOrBadRequest(w, projectRef, "for_project")
+		if !ok {
+			return scene, false, false
+		}
+		if _, err := h.Queries.GetProjectInWorkspace(r.Context(), db.GetProjectInWorkspaceParams{ID: id, WorkspaceID: wsUUID}); err != nil {
+			writeError(w, http.StatusNotFound, "project not found")
+			return scene, false, false
+		}
+		return service.LoadDomainScene(r.Context(), h.Queries, wsUUID, pgtype.UUID{}, id), true, true
+	}
+	return scene, false, true
 }
 
 func (h *Handler) GetAgent(w http.ResponseWriter, r *http.Request) {
