@@ -110,6 +110,7 @@
     "./agents/derive-presence": "./agents/derive-presence.ts",
     "./agents/use-agent-presence": "./agents/use-agent-presence.ts",
     "./agents/visibility-label": "./agents/visibility-label.ts",
+    "./agents/list-freshness": "./agents/list-freshness.ts",
     "./agents/stores": "./agents/stores/index.ts",
     "./squads": "./squads/index.ts",
     "./squads/stores": "./squads/stores/index.ts",

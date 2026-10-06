@@ -29,6 +29,8 @@ import {
   agentRunCountsKeys,
   agentTasksKeys,
 } from "../agents/queries";
+import { patchAgentListStatus, readAgentStatusChange } from "../agents/list-freshness";
+import type { Agent } from "../types/agent";
 import { githubKeys } from "../github/queries";
 import { vcsKeys } from "../vcs/queries";
 import { larkKeys } from "../lark/queries";
@@ -1168,6 +1170,23 @@ export function useRealtimeSync(
       }, 1_000));
     };
 
+    const applyAgentStatusChange = (payload: unknown): boolean => {
+      const change = readAgentStatusChange(payload);
+      const wsId = getCurrentWsId();
+      if (!change || !wsId) return false;
+      const next = patchAgentListStatus(
+        qc.getQueryData<Agent[]>(workspaceKeys.agents(wsId)),
+        change,
+      );
+      if (!next) return false;
+      qc.setQueryData(workspaceKeys.agents(wsId), next);
+      qc.setQueryData<Agent>(workspaceKeys.agent(wsId, change.agentId), (current) =>
+        current ? { ...current, status: change.status } : current,
+      );
+      invalidateSquadMemberStatusQueries(qc, wsId);
+      return true;
+    };
+
     const timers = new Map<string, ReturnType<typeof setTimeout>>();
     const debouncedRefresh = (prefix: string, fn: () => void) => {
       const existing = timers.get(prefix);
@@ -1217,6 +1236,10 @@ export function useRealtimeSync(
         const wsId = getCurrentWsId();
         if (wsId) scheduleWorkingAgentRefresh(wsId);
       }
+      // A pure status flip (task start/finish) patches the cached row instead
+      // of refetching the whole agent table on every open tab — that refetch
+      // was the largest share of a self-hosted instance's egress. (DENE-1504)
+      if (msg.type === "agent:status" && applyAgentStatusChange(msg.payload)) return;
       const refresh = refreshMap[prefix];
       if (refresh) debouncedRefresh(prefix, refresh);
     });

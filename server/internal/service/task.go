@@ -8172,13 +8172,20 @@ func (s *TaskService) updateAgentStatus(ctx context.Context, agentID pgtype.UUID
 	s.publishAgentStatus(agent)
 }
 
+// publishAgentStatus announces a pure status flip. The top-level agent_id +
+// status pair tells clients to patch the cached row instead of refetching the
+// whole agent list (DENE-1504); "agent" stays for older clients.
 func (s *TaskService) publishAgentStatus(agent db.Agent) {
 	s.Bus.Publish(events.Event{
 		Type:        protocol.EventAgentStatus,
 		WorkspaceID: util.UUIDToString(agent.WorkspaceID),
 		ActorType:   "system",
 		ActorID:     "",
-		Payload:     map[string]any{"agent": agentToMap(agent)},
+		Payload: map[string]any{
+			"agent":    agentToMap(agent),
+			"agent_id": util.UUIDToString(agent.ID),
+			"status":   agent.Status,
+		},
 	})
 }
 
