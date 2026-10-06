@@ -221,6 +221,8 @@
     "untitled": "Nouvelle discussion",
     "my_agents": "Mes agents",
     "others": "Autres",
+    "fit_project": "Pour {{name}}",
+    "fit_projects": "Pour les projets choisis",
     "no_agents": "Aucun agent",
     "history_group": "Historique des discussions",
     "agent_filter_placeholder": "Rechercher des agents...",
