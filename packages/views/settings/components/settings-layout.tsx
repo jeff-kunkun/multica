@@ -35,10 +35,8 @@ export type SettingsScope =
 /** Anchor attribute search results and legacy `?section=` links scroll to. */
 export const SETTINGS_ANCHOR_ATTR = "data-settings-anchor";
 
-// Shrinkable and capped at its row: a long workspace name truncates instead
-// of running under the tab's action button on a phone.
 const SCOPE_BADGE_CLASS =
-  "inline-flex h-5 min-w-0 max-w-full items-center gap-1 rounded-full bg-muted px-2 text-caption font-medium text-muted-foreground";
+  "inline-flex h-5 min-w-0 shrink-0 items-center gap-1 rounded-full bg-muted px-2 text-caption font-medium text-muted-foreground";
 
 export function SettingsScopeBadge({ scope }: { scope: SettingsScope }) {
   const { t } = useT("settings");
@@ -50,7 +48,7 @@ export function SettingsScopeBadge({ scope }: { scope: SettingsScope }) {
   const Icon = scope === "account" ? UserRound : Laptop;
   return (
     <span data-slot="settings-scope" className={SCOPE_BADGE_CLASS}>
-      <Icon aria-hidden="true" className="size-3 shrink-0" />
+      <Icon aria-hidden="true" className="size-3" />
       <span className="truncate">
         {scope === "account"
           ? t(($) => $.layout.scope.account)
@@ -71,15 +69,15 @@ function WorkspaceScopeBadge({
   // A letter avatar is illegible at chip size, so only a real logo is shown.
   const mark =
     scope === "device-workspace" ? (
-      <Laptop aria-hidden="true" className="size-3 shrink-0" />
+      <Laptop aria-hidden="true" className="size-3" />
     ) : workspace?.avatar_url ? (
       <WorkspaceAvatar
         name={name}
         avatarUrl={workspace.avatar_url}
-        className="size-3 shrink-0 rounded-xs border-0"
+        className="size-3 rounded-xs border-0"
       />
     ) : (
-      <Building2 aria-hidden="true" className="size-3 shrink-0" />
+      <Building2 aria-hidden="true" className="size-3" />
     );
   const label =
     scope === "workspace"

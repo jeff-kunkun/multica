@@ -41,9 +41,7 @@ export function DashboardLayout({
         <GlobalShortcuts />
         <WorkspacePresencePrefetch />
         <AppSidebar searchSlot={searchSlot} />
-        {/* The page runs edge to edge (viewport-fit=cover), so the shell keeps
-            its content — lists, composers, the quota bar — above the Home bar. */}
-        <SidebarInset className="relative overflow-hidden pb-[env(safe-area-inset-bottom)]">
+        <SidebarInset className="relative overflow-hidden">
           <div className="flex min-h-0 flex-1 flex-col">
             <NavigationProgress />
             <GuestBanner />

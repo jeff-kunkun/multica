@@ -41,7 +41,7 @@ import {
   Users,
   X,
 } from "lucide-react";
-import { BreadcrumbBackButton, BreadcrumbHeader, type BreadcrumbSegment } from "../../layout/breadcrumb-header";
+import { BreadcrumbHeader, type BreadcrumbSegment } from "../../layout/breadcrumb-header";
 import { OverflowActions, type OverflowItem } from "../../layout/overflow-actions";
 import { ResourceNotFound, WriteAction, useGuestReadOnly } from "../../layout/guest-readonly";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
@@ -3478,38 +3478,15 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     },
   ];
 
-  // The peek card and a phone are both too narrow for every header control:
-  // both keep what fits and hand the rest to the "⋯" menu.
-  const compactHeader = isPeek || isMobile;
-  const sidebarToggle = (
-    <Tooltip>
-      <TooltipTrigger
-        render={
-          <Button
-            variant={sidebarOpen ? "secondary" : "ghost"}
-            size="icon-sm"
-            className={sidebarOpen ? "" : "text-muted-foreground"}
-            onClick={handleToggleSidebar}
-          >
-            <PanelRight />
-          </Button>
-        }
-      />
-      <TooltipContent side="bottom">{t(($) => $.detail.sidebar_tooltip)}</TooltipContent>
-    </Tooltip>
-  );
-  const backFallback = breadcrumbSegments.at(-1)?.href;
-
   const breadcrumbLeaf = (
     <AppLink
       href={paths.issueDetail(issue.id)}
-      // In the peek and on a phone the identifier is all the leaf says (the
-      // title is right below); it outranks the crumb before it, which
-      // truncates first.
-      className={cn("flex min-w-0 transition-opacity hover:opacity-80", compactHeader && "shrink-0")}
+      // In the peek the identifier is all the leaf says; it outranks the crumb
+      // before it, which truncates first.
+      className={cn("flex min-w-0 transition-opacity hover:opacity-80", isPeek && "shrink-0")}
     >
       <span className="truncate font-medium text-foreground">
-        {compactHeader ? issue.identifier : `${issue.identifier} ${issue.title}`}
+        {isPeek ? issue.identifier : `${issue.identifier} ${issue.title}`}
       </span>
     </AppLink>
   );
@@ -3551,18 +3528,12 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
             className={cn("absolute top-14 z-30", isMobile ? "right-4" : "right-10")}
           />
         )}
-        {compactHeader ? (
+        {isPeek ? (
           // The peek's controls fill what the card leaves them: the title and
           // the pinned ones (⋯, full page, close) keep their room, and the
           // bar between them hands what does not fit to the ⋯ menu — so the
           // close button can never be cut off, whatever the header grows.
-          <PageHeader
-            leading={
-              leadingAction ??
-              (!isPeek && backFallback ? <BreadcrumbBackButton fallback={backFallback} /> : undefined)
-            }
-            className="bg-background text-body"
-          >
+          <PageHeader leading={leadingAction} className="bg-background text-body">
             <div className="flex min-w-0 max-w-[55%] shrink items-center gap-1.5">
               {breadcrumbSegments.map((segment) => (
                 <Fragment key={segment.href}>
@@ -3582,7 +3553,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
               renderMore={(overflow) => (
                 <div className="flex shrink-0 items-center gap-1">
                   {issueActionsMenu(overflow)}
-                  {isPeek ? trailingActions : sidebarToggle}
+                  {trailingActions}
                 </div>
               )}
             />
@@ -3598,7 +3569,21 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
               <Fragment key={item.key}>{item.node}</Fragment>
             ))}
             {issueActionsMenu()}
-            {sidebarToggle}
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <Button
+                    variant={sidebarOpen ? "secondary" : "ghost"}
+                    size="icon-sm"
+                    className={sidebarOpen ? "" : "text-muted-foreground"}
+                    onClick={handleToggleSidebar}
+                  >
+                    <PanelRight />
+                  </Button>
+                }
+              />
+              <TooltipContent side="bottom">{t(($) => $.detail.sidebar_tooltip)}</TooltipContent>
+            </Tooltip>
             </>
           }
         />

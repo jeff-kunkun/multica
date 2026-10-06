@@ -963,7 +963,7 @@ function InboxActivityPageContent({ merged = false }: { merged?: boolean } = {})
           <div className={cn("flex h-12 shrink-0 items-center border-b", PAGE_GUTTER)}>
             <Skeleton className="h-5 w-16" />
           </div>
-          <div className="flex-1 min-h-0 overflow-y-auto max-md:pb-chat-launcher space-y-1 p-2">
+          <div className="flex-1 min-h-0 overflow-y-auto space-y-1 p-2">
             {Array.from({ length: 5 }).map((_, i) => (
               <div key={i} className="flex items-center gap-3 px-2 py-2.5">
                 <Skeleton className="h-7 w-7 shrink-0 rounded-full" />
@@ -1025,7 +1025,7 @@ function InboxActivityPageContent({ merged = false }: { merged?: boolean } = {})
             <div className={cn("flex h-12 shrink-0 items-center border-b", PAGE_GUTTER)}>
               <Skeleton className="h-5 w-16" />
             </div>
-            <div className="flex-1 min-h-0 overflow-y-auto max-md:pb-chat-launcher space-y-1 p-2">
+            <div className="flex-1 min-h-0 overflow-y-auto space-y-1 p-2">
               {Array.from({ length: 5 }).map((_, i) => (
                 <div key={i} className="flex items-center gap-3 px-2 py-2.5">
                   <Skeleton className="h-7 w-7 shrink-0 rounded-full" />
