@@ -105,6 +105,7 @@
     "./dashboard/queries": "./dashboard/queries.ts",
     "./agents": "./agents/index.ts",
     "./agents/account-slot-families": "./agents/account-slot-families.ts",
+    "./agents/domain-fit": "./agents/domain-fit.ts",
     "./agents/queries": "./agents/queries.ts",
     "./agents/derive-presence": "./agents/derive-presence.ts",
     "./agents/use-agent-presence": "./agents/use-agent-presence.ts",

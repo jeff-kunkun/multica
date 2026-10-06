@@ -28,13 +28,15 @@ describe("groupAgentsForPicker", () => {
       userId: "me",
       projects: [project("tarot", ["d-out", "d-media"])],
     });
-    expect(g.map((x) => x.kind)).toEqual(["fit", "rest"]);
+    expect(g.map((x) => x.kind)).toEqual(["match", "generic", "other"]);
     expect(ids(g[0]!)).toEqual(["out-a", "media-a"]);
-    expect(ids(g[1]!)).toEqual(["base", "game-a"]);
+    expect(ids(g[1]!)).toEqual(["base"]);
+    expect(ids(g[2]!)).toEqual(["game-a"]);
   });
 
   it("generic project lists base roles first", () => {
     const g = groupAgentsForPicker({ agents, userId: "me", projects: [project("m", [])] });
+    expect(g.map((x) => x.kind)).toEqual(["match", "other"]);
     expect(ids(g[0]!)).toEqual(["base"]);
     expect(ids(g[1]!)).toEqual(["out-a", "media-a", "game-a"]);
   });
@@ -55,7 +57,7 @@ describe("groupAgentsForPicker", () => {
       projects: [project("tarot", ["d-out"])],
       query: "media",
     });
-    expect(g.map((x) => x.kind)).toEqual(["rest"]);
+    expect(g.map((x) => x.kind)).toEqual(["other"]);
     expect(ids(g[0]!)).toEqual(["media-a"]);
   });
 });

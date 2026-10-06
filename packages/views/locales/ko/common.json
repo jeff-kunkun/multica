@@ -226,5 +226,11 @@
     "delete_in_use": "Still used by a project or specialisation",
     "name_placeholder": "Domain name",
     "save_failed": "Could not save"
+  },
+  "agent_fit": {
+    "project": "{{name}}에 적합",
+    "projects": "선택한 프로젝트에 적합",
+    "generic": "범용",
+    "other": "기타"
   }
 }

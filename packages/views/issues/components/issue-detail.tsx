@@ -94,6 +94,8 @@ import { PriorityPicker } from "./pickers/priority-picker";
 import { StagePicker, maxSiblingStage } from "./pickers/stage-picker";
 import { StartDatePicker } from "./pickers/start-date-picker";
 import { DueDatePicker } from "./pickers/due-date-picker";
+import { useAgentScene } from "@multica/core/agents";
+import { AgentSceneProvider } from "../../agents/components/agent-scene-context";
 import { AssigneePicker } from "./pickers/assignee-picker";
 import { AssigneeSourceNote } from "./assignee-source-note";
 import { ReviewerPicker } from "./pickers/reviewer-picker";
@@ -1039,6 +1041,7 @@ function SubIssueRow({
             assigneeId={child.assignee_id}
             onUpdate={handleUpdate}
             align="end"
+            sceneProjectIds={[child.project_id]}
             trigger={
               child.assignee_type && child.assignee_id ? (
                 <ActorAvatar
@@ -2582,6 +2585,8 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   // Called before the `if (!issue)` early return so hook order stays stable.
   const actions = useIssueActions(issue);
   const handleUpdateField = actions.updateField;
+  // The issue's scene (DENE-1477): @ mentions in its editors rank agents by fit.
+  const agentScene = useAgentScene(wsId, [issue?.project_id], issue?.domain_id);
   const issueUpdate = useUpdateIssue();
   const clearTitleSuggestion = useMutation({
     mutationFn: () => api.deleteIssueMetadata(id, "title_suggestion"),
@@ -2864,7 +2869,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
             />
           </PropRow>
           <PropRow label={t(($) => $.detail.prop_assignee)}>
-            <AssigneePicker assigneeType={issue.assignee_type} assigneeId={issue.assignee_id} onUpdate={handleUpdateField} align="start" />
+            <AssigneePicker assigneeType={issue.assignee_type} assigneeId={issue.assignee_id} onUpdate={handleUpdateField} align="start" sceneProjectIds={[issue.project_id]} sceneDomainId={issue.domain_id} />
           </PropRow>
           {issue.assignee_source && issue.assignee_id && (
             <div className="col-span-2">
@@ -2879,7 +2884,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
               tickets keep their decision and can clear it. */}
           {(issue.parent_issue_id == null || issue.reviewer_type != null) && (
             <PropRow label={t(($) => $.detail.prop_reviewer)}>
-              <ReviewerPicker reviewerType={issue.reviewer_type} reviewerId={issue.reviewer_id} onUpdate={handleUpdateField} align="start" />
+              <ReviewerPicker reviewerType={issue.reviewer_type} reviewerId={issue.reviewer_id} onUpdate={handleUpdateField} align="start" sceneProjectIds={[issue.project_id]} sceneDomainId={issue.domain_id} />
             </PropRow>
           )}
           <PropRow label={t(($) => $.detail.prop_project)}>
@@ -4413,7 +4418,9 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
       describeItem={describeDeliverable}
       onOpenOverview={openOverviewFromViewer}
     >
-      <AttachmentVersionsProvider files={deliverableFiles}>{layout}</AttachmentVersionsProvider>
+      <AttachmentVersionsProvider files={deliverableFiles}>
+        <AgentSceneProvider value={agentScene}>{layout}</AgentSceneProvider>
+      </AttachmentVersionsProvider>
       <DeliverablesOverview
         open={overview.open}
         onClose={closeOverview}

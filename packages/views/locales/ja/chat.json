@@ -216,8 +216,6 @@
     "untitled": "新規チャット",
     "my_agents": "マイエージェント",
     "others": "その他",
-    "fit_project": "{{name}} 向け",
-    "fit_projects": "選択中のプロジェクト向け",
     "no_agents": "エージェントなし",
     "history_group": "チャット履歴",
     "agent_filter_placeholder": "エージェントを検索...",

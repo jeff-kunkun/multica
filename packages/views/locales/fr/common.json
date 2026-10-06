@@ -228,5 +228,11 @@
     "delete_in_use": "Still used by a project or specialisation",
     "name_placeholder": "Domain name",
     "save_failed": "Could not save"
+  },
+  "agent_fit": {
+    "project": "Pour {{name}}",
+    "projects": "Pour les projets choisis",
+    "generic": "Généraux",
+    "other": "Autres"
   }
 }
