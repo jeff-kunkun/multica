@@ -634,7 +634,7 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
           {activeTab === "issues" ? (
             <IssueSurface scope={issueScope} modes={["board", "list", "table", "swimlane", "gantt"]} />
           ) : (
-            <div className="min-h-0 flex-1 overflow-y-auto p-4">
+            <div className="min-h-0 flex-1 overflow-y-auto max-md:pb-chat-launcher p-4">
               {projectChats.length === 0 ? (
                 <div className="rounded-lg border border-dashed p-8 text-center text-body text-muted-foreground">{t(($) => $.detail.chat_empty)}</div>
               ) : (
