@@ -332,25 +332,26 @@ function BoardRowView({
         }}
         className={cn(
           "group grid cursor-pointer gap-3 px-4 py-3 outline-none transition-colors hover:bg-accent/40 focus-visible:bg-accent/40",
+          // Narrow screens stack the title under the tag/meta line; a fixed
+          // tag column there leaves the title one glyph wide.
+          "grid-cols-[minmax(0,1fr)_auto]",
           row.lane === "waiting" && !nested
-            ? "grid-cols-[auto_6.5rem_1fr_auto]"
-            : nested
-              ? "grid-cols-[auto_minmax(0,1fr)_auto] sm:grid-cols-[6.5rem_1fr_auto]"
-              : "grid-cols-[6.5rem_1fr_auto]",
+            ? "sm:grid-cols-[auto_6.5rem_minmax(0,1fr)_auto]"
+            : "sm:grid-cols-[6.5rem_minmax(0,1fr)_auto]",
           nested && "py-2 pl-4 sm:pl-8",
           highlighted && "bg-accent/60 shadow-[inset_3px_0_0_var(--color-primary)]",
         )}
       >
-        {row.lane === "waiting" && !nested && <span aria-hidden />}
+        {row.lane === "waiting" && !nested && <span aria-hidden className="hidden sm:block" />}
         <span
           className={cn(
-            "h-fit w-fit rounded-sm px-1.5 py-0.5 text-caption font-medium",
+            "order-1 h-fit w-fit rounded-sm sm:order-none px-1.5 py-0.5 text-caption font-medium",
             LANE_TAG_CLASS[row.lane],
           )}
         >
           {copy.tag(row)}
         </span>
-        <div className="min-w-0 space-y-0.5">
+        <div className="order-3 col-span-2 min-w-0 space-y-0.5 sm:order-none sm:col-span-1">
           <div className="flex min-w-0 items-baseline gap-2">
             <span className="shrink-0 text-caption text-muted-foreground tabular-nums">
               {row.identifier}
@@ -411,7 +412,7 @@ function BoardRowView({
             </button>
           )}
         </div>
-        <div className="flex flex-col items-end gap-0.5 text-right text-caption text-muted-foreground">
+        <div className="order-2 flex min-w-0 flex-col items-end gap-0.5 text-right text-caption text-muted-foreground sm:order-none">
           {meta && <span className="text-foreground">{meta}</span>}
           <div className="flex items-center gap-2">
             <span>{time}</span>
