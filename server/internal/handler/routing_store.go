@@ -116,20 +116,11 @@ func (s routingStore) issueView(ctx context.Context, row db.Issue) (routing.Issu
 	}
 	if row.ProjectID.Valid {
 		out.ProjectID = util.UUIDToString(row.ProjectID)
-		if p, err := s.h.Queries.GetProjectInWorkspace(ctx, db.GetProjectInWorkspaceParams{
-			ID: row.ProjectID, WorkspaceID: row.WorkspaceID,
-		}); err == nil {
-			out.ProjectName = p.Title
-			if len(p.DomainIds) > 0 || row.DomainID.Valid {
-				names := s.domainNames(ctx, row.WorkspaceID)
-				for _, id := range p.DomainIds {
-					if n := names[id]; n != "" {
-						out.ProjectDomains = append(out.ProjectDomains, n)
-					}
-				}
-				out.Domain = names[row.DomainID]
-			}
-		}
+		// The scene's inputs, read once through the shared resolver (DENE-1477).
+		scene := service.LoadDomainScene(ctx, s.h.Queries, row.WorkspaceID, row.DomainID, row.ProjectID)
+		out.ProjectName = scene.ProjectName
+		out.ProjectDomains = scene.Project
+		out.Domain = scene.Issue
 	}
 	if labels, err := s.h.Queries.ListLabelsByIssue(ctx, db.ListLabelsByIssueParams{
 		IssueID: row.ID, WorkspaceID: row.WorkspaceID,
@@ -329,15 +320,7 @@ func (s routingStore) Roster(ctx context.Context, workspaceID string) (map[strin
 // domainNames maps a workspace's domain ids to their names. A failed read is
 // an empty map: routing then reads directions off seat names, as before.
 func (s routingStore) domainNames(ctx context.Context, wsID pgtype.UUID) map[pgtype.UUID]string {
-	out := map[pgtype.UUID]string{}
-	rows, err := s.h.Queries.ListWorkspaceDomains(ctx, wsID)
-	if err != nil {
-		return out
-	}
-	for _, d := range rows {
-		out[d.ID] = d.Name
-	}
-	return out
+	return service.WorkspaceDomainNames(ctx, s.h.Queries, wsID)
 }
 
 // seatDomains fills the structured direction and base of routing seats.

@@ -108,8 +108,8 @@ assigned agent's name. In a direct chat, “你来做”, “你自己做”, an
 are accepted as self-assignment when the target is the current agent. If it
 passes, the ticket records「按 <名字> 原话指派」and the pick stands — with one
 domain rule: a quote that names only a base role (「交给孙悟空」) on an issue
-with a domain lands on that base role's specialisation for the domain
-(孙悟空出海 on an 出海 issue); a quote that names the specialisation itself is
+whose scene has a domain lands on that base role's 对口 specialisation
+(孙悟空出海 on an 出海 issue or project); a quote that names the specialisation itself is
 kept as said. If it does
 not — a made-up quote, someone else's comment, another agent's relay, or a
 quote without the name — the ticket stays unassigned and the response tells
@@ -226,11 +226,17 @@ Consequences for how you work:
   confidence 47% < threshold 60%`. The reviewer slot falls back to one rung
   above the executor, one rung below when the executor is already the top
   rung, and 「不需要验收」 when the workspace has only one seat.
-- The issue's **domain** decides which specialisation on a rung gets the
-  work; it never changes the rung or the confidence. In order: the issue's
-  own domain; else its project's domain when the project carries exactly one;
-  else generic (a project with several domains and none picked on the issue,
-  or a project with none) — generic goes to the base role. Domains are one
+- The issue's **scene** decides which specialisation on a rung gets the
+  work; it never changes the rung or the confidence. The scene is the issue's
+  own domain; else all of its project's domains; else generic. Every
+  automatic pick (executor, 验收席, quota relay, re-dispatch, escalate,
+  suggest, the quoted base-name swap) groups agents the same way: **对口**
+  (`match`, a specialisation for a scene domain — in a generic scene, a base
+  role) first, **通用** (`generic`, a base role) as the fallback, **其他**
+  (`other`, a specialisation for another domain) last. A project with no
+  domain is generic and the dispatch comment says 「方向：通用」. See the
+  groups for any work with `multica agent list --for-issue <key> | --for-project
+  <id> --output json` (each agent gets `fit`, sorted by it). Domains are one
   workspace list (`multica domain list | add | rename | delete`); a project
   carries several (`multica project update <p> --domain 出海 --domain 自媒体`),
   an issue picks one of its project's (`multica issue create|update --domain

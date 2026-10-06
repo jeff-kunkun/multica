@@ -8,6 +8,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/multica-ai/multica/server/internal/routing"
+	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
@@ -59,7 +60,7 @@ func (e *heldExecutor) is(assigneeType pgtype.Text, assigneeID pgtype.UUID) bool
 func (h *Handler) rulePick(
 	r *http.Request, workspaceID, actorType, actorID string,
 	assigneeType pgtype.Text, assigneeID pgtype.UUID, quote, resultingStatus string,
-	held *heldExecutor, domainID pgtype.UUID,
+	held *heldExecutor, scene sceneRef,
 ) assignmentRuling {
 	if actorType != "agent" {
 		// A person's own hand. Whatever quote they sent is not needed.
@@ -74,7 +75,7 @@ func (h *Handler) rulePick(
 		if task, ok := h.liveTaskOf(r, actorID); ok {
 			if user, holds := h.quoteFromInitiator(r.Context(), task, assigneeType, assigneeID, quote); holds {
 				ruling := assignmentRuling{Apply: true, Source: routing.SourceQuote, SourceUser: user, Quote: strings.TrimSpace(quote)}
-				if seat, ok := h.seatForQuote(r.Context(), assigneeType, assigneeID, quote, domainID); ok {
+				if seat, ok := h.seatForQuote(r.Context(), workspaceID, assigneeType, assigneeID, quote, scene); ok {
 					ruling.Seat = seat
 				}
 				return ruling
@@ -320,14 +321,27 @@ func (h *Handler) stampAssignee(ctx context.Context, issue db.Issue, ruling assi
 	return stamped
 }
 
-// seatForQuote is the per-quote half of domain routing (DENE-1451). A quote
-// that names a specific seat ("孙悟空出海") is kept as said. A quote that names
-// only the base role ("交给孙悟空") lands on that role's specialisation for the
-// issue's domain, or on the base role itself when the issue is generic or the
-// role has no specialisation for it. ok is false when the named agent stands.
-func (h *Handler) seatForQuote(ctx context.Context, assigneeType pgtype.Text, assigneeID pgtype.UUID, quote string, domainID pgtype.UUID) (pgtype.UUID, bool) {
-	// A generic issue has no domain to steer by: the named seat stands.
-	if !assigneeType.Valid || assigneeType.String != "agent" || !assigneeID.Valid || !domainID.Valid {
+// sceneRef is what a pick's scene is resolved from: the issue's domain (as
+// it will be stored) and its project.
+type sceneRef struct {
+	Domain  pgtype.UUID
+	Project pgtype.UUID
+}
+
+// seatForQuote is rule 3 of DENE-1477: a quote naming only a base role puts
+// the issue on that role's specialisation that fits the issue's scene
+// (service.LoadDomainScene, then routing.DomainFit). A quote naming the
+// specialisation itself, or a generic scene, leaves the named seat standing.
+func (h *Handler) seatForQuote(ctx context.Context, workspaceID string, assigneeType pgtype.Text, assigneeID pgtype.UUID, quote string, at sceneRef) (pgtype.UUID, bool) {
+	if !assigneeType.Valid || assigneeType.String != "agent" || !assigneeID.Valid {
+		return pgtype.UUID{}, false
+	}
+	wsUUID, err := util.ParseUUID(workspaceID)
+	if err != nil {
+		return pgtype.UUID{}, false
+	}
+	scene := service.LoadDomainScene(ctx, h.Queries, wsUUID, at.Domain, at.Project)
+	if scene.Scene.Generic() {
 		return pgtype.UUID{}, false
 	}
 	named, err := h.Queries.GetAgent(ctx, assigneeID)
@@ -350,8 +364,22 @@ func (h *Handler) seatForQuote(ctx context.Context, assigneeType pgtype.Text, as
 			return pgtype.UUID{}, false
 		}
 	}
-	seat := h.specialisationForDomain(ctx, base, domainID)
-	if seat.ID == named.ID || seat.ArchivedAt.Valid {
+	// The fitting specialisation, in the scene's domain order when a project
+	// in several domains has one for more than one of them.
+	var seat db.Agent
+	rank := len(scene.Scene.Domains)
+	for _, child := range children {
+		if child.ArchivedAt.Valid || service.AgentDomainFit(scene.Scene, child, scene.Names) != routing.FitMatch {
+			continue
+		}
+		domain := service.AgentDomain(child, scene.Names)
+		for i, d := range scene.Scene.Domains {
+			if d == domain && i < rank {
+				seat, rank = child, i
+			}
+		}
+	}
+	if !seat.ID.Valid || seat.ID == named.ID {
 		return pgtype.UUID{}, false
 	}
 	return seat.ID, true

@@ -208,3 +208,93 @@ func TestQuoteNamingTheBaseRoleLandsOnTheIssueDomainSpecialisation(t *testing.T)
 		t.Fatalf("assignee = %v, a named specialisation must stand", assignee)
 	}
 }
+
+func TestAgentListForProjectGroupsByFit(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	// DENE-1477: one judgement, read the same way dispatch reads it.
+	sea := createTestDomain(t, "T出海6")
+	game := createTestDomain(t, "T游戏6")
+	project := createDomainProject(t, "fit list project", sea)
+	generic := createDomainProject(t, "fit list generic project")
+
+	base := createHandlerTestAgent(t, "Fit Goku", []byte("[]"))
+	seaSpec := specialisation(t, "Fit GokuT出海6", base)
+	dbfx.Exec(t, `UPDATE agent SET domain_id = $1 WHERE id = $2`, sea, seaSpec)
+	gameSpec := specialisation(t, "Fit GokuT游戏6", base)
+	dbfx.Exec(t, `UPDATE agent SET domain_id = $1 WHERE id = $2`, game, gameSpec)
+
+	fits := func(query string) (map[string]string, []string) {
+		t.Helper()
+		list := testutil.Decode[[]AgentResponse](t, testHandler.ListAgents,
+			newRequest(http.MethodGet, "/api/agents?workspace_id="+testWorkspaceID+"&"+query, nil), http.StatusOK)
+		out := map[string]string{}
+		order := []string{}
+		for _, a := range list {
+			if a.Fit == "" {
+				t.Fatalf("%s: agent %s has no fit", query, a.Name)
+			}
+			out[a.ID] = a.Fit
+			order = append(order, a.Fit)
+		}
+		return out, order
+	}
+	ranked := func(order []string) bool {
+		rank := map[string]int{"match": 0, "generic": 1, "other": 2}
+		for i := 1; i < len(order); i++ {
+			if rank[order[i]] < rank[order[i-1]] {
+				return false
+			}
+		}
+		return true
+	}
+
+	got, order := fits("for_project=" + project["id"].(string))
+	if got[seaSpec] != "match" || got[base] != "generic" || got[gameSpec] != "other" || !ranked(order) {
+		t.Fatalf("出海 project: base %s 出海 %s 游戏 %s order %v", got[base], got[seaSpec], got[gameSpec], order)
+	}
+	got, order = fits("for_project=" + generic["id"].(string))
+	if got[base] != "match" || got[seaSpec] != "other" || !ranked(order) {
+		t.Fatalf("generic project: base %s 出海 %s order %v", got[base], got[seaSpec], order)
+	}
+
+	issue := createDomainIssue(t, map[string]any{"title": "fit list issue", "project_id": project["id"]}, http.StatusCreated)
+	if got, _ = fits("for_issue=" + issue["id"].(string)); got[seaSpec] != "match" {
+		t.Fatalf("issue in the 出海 project: 出海 fit %s", got[seaSpec])
+	}
+	testutil.Call(t, testHandler.ListAgents, newRequest(http.MethodGet,
+		"/api/agents?workspace_id="+testWorkspaceID+"&for_issue="+issue["id"].(string)+"&for_project="+project["id"].(string), nil)).Want(http.StatusBadRequest)
+}
+
+func TestQuoteNamingTheBaseRoleInAMultiDomainProjectLandsOnAFittingSpecialisation(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	// Rule 1 of DENE-1477: no issue domain picked, so the project's domains,
+	// all of them, are the scene — the base role's 游戏 seat fits.
+	enableDraftSuggestRouting(t, tierJudge{tier: "medium", confidence: 0.95})
+	sea := createTestDomain(t, "T出海7")
+	game := createTestDomain(t, "T游戏7")
+	project := createDomainProject(t, "multi domain quote project", sea, game)
+
+	f := originRun(t, "multiquote", "交给 Multi Goku 做", "member", testUserID, testUserID)
+	base := createHandlerTestAgent(t, "Multi Goku", []byte("[]"))
+	spec := specialisation(t, "Multi GokuT游戏7", base)
+	dbfx.Exec(t, `UPDATE agent SET domain_id = $1 WHERE id = $2`, game, spec)
+
+	req := newRequest(http.MethodPost, "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
+		"title": "multi domain work", "status": "todo", "project_id": project["id"],
+		"assignee_type": "agent", "assignee_id": base, "assignee_quote": "交给 Multi Goku 做",
+	})
+	req.Header.Set("X-Agent-ID", f.caller)
+	req.Header.Set("X-Task-ID", f.task)
+	req = req.WithContext(withSkipIssueRouting(req.Context()))
+	resp := testutil.Call(t, testHandler.CreateIssue, req).Want(http.StatusCreated).Map()
+	id := resp["id"].(string)
+	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1`, id) })
+
+	if assignee, _, _, _ := originOf(t, id); assignee == nil || *assignee != spec {
+		t.Fatalf("assignee = %v, want the 游戏 specialisation", assignee)
+	}
+}

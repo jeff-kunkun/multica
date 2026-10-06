@@ -44,7 +44,7 @@ type Issue struct {
 	ProjectID   string
 	ProjectName string
 	// ProjectDomains are the project's domains in workspace order, and Domain
-	// is the issue's own (DENE-1451; empty = generic). See IssueDirection.
+	// is the issue's own (DENE-1451; empty = generic). See IssueScene.
 	ProjectDomains []string
 	Domain         string
 	Repository     string

@@ -3684,6 +3684,12 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 	// project the issue finally lands in; here it is resolved to an id, and
 	// predicted for the per-quote seat rewrite below.
 	var createDomain pgtype.UUID
+	predictProject := projectID
+	if !predictProject.Valid && !projectPinned && parentIssueID.Valid {
+		if parent, err := h.Queries.GetIssueInWorkspace(r.Context(), db.GetIssueInWorkspaceParams{ID: parentIssueID, WorkspaceID: wsUUID}); err == nil {
+			predictProject = parent.ProjectID
+		}
+	}
 	domainPinned := req.DomainID != nil
 	if domainPinned {
 		ref := strings.TrimSpace(*req.DomainID)
@@ -3701,12 +3707,6 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 			createDomain = d.ID
 		}
 	} else {
-		predictProject := projectID
-		if !predictProject.Valid && !projectPinned && parentIssueID.Valid {
-			if parent, err := h.Queries.GetIssueInWorkspace(r.Context(), db.GetIssueInWorkspaceParams{ID: parentIssueID, WorkspaceID: wsUUID}); err == nil {
-				predictProject = parent.ProjectID
-			}
-		}
 		createDomain, _ = h.issueDomainFor(r.Context(), wsUUID, predictProject, nil, pgtype.UUID{})
 	}
 	pickedDomain := pgtype.UUID{}
@@ -3729,7 +3729,7 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 	assigneeIgnored := false
 	assigneeIgnoredReason := ""
 	if assigneeType.Valid {
-		ruling = h.rulePick(r, workspaceID, creatorType, actualCreatorID, assigneeType, assigneeID, deref(req.AssigneeQuote), status, nil, createDomain)
+		ruling = h.rulePick(r, workspaceID, creatorType, actualCreatorID, assigneeType, assigneeID, deref(req.AssigneeQuote), status, nil, sceneRef{Domain: createDomain, Project: predictProject})
 		if ruling.Apply && ruling.Seat.Valid {
 			assigneeID = ruling.Seat
 		}
@@ -4543,7 +4543,7 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 				resulting = params.Status.String
 			}
 			ruling := h.rulePick(r, workspaceID, actorType, actorID, params.AssigneeType, params.AssigneeID, deref(req.AssigneeQuote), resulting,
-				&heldExecutor{Type: prevIssue.AssigneeType, ID: prevIssue.AssigneeID}, targetDomain)
+				&heldExecutor{Type: prevIssue.AssigneeType, ID: prevIssue.AssigneeID}, sceneRef{Domain: targetDomain, Project: targetProject})
 			if ruling.Apply {
 				if ruling.Seat.Valid {
 					params.AssigneeID = ruling.Seat
@@ -5588,7 +5588,7 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 					resulting = params.Status.String
 				}
 				ruling := h.rulePick(r, workspaceID, pickActorType, pickActorID, params.AssigneeType, params.AssigneeID, deref(req.Updates.AssigneeQuote), resulting,
-					&heldExecutor{Type: prevIssue.AssigneeType, ID: prevIssue.AssigneeID}, batchDomain)
+					&heldExecutor{Type: prevIssue.AssigneeType, ID: prevIssue.AssigneeID}, sceneRef{Domain: batchDomain, Project: batchTargetProject})
 				if ruling.Apply {
 					if ruling.Seat.Valid {
 						params.AssigneeID = ruling.Seat
