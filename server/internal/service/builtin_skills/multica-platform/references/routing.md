@@ -16,7 +16,8 @@ What it may do, and only when the slot is still **empty**:
   considered by the stale-review sweep. Its terminal result feeds the parent
   stage/barrier; the parent is the single issue that later enters `in_review`
   for a unified review of the full child tree.
-- **`todo`** — fill the assignee with a seat from the tier ladder. For a
+- **`todo`** — fill the assignee with a seat from the tier ladder (seats with
+  `dispatch_mode: mention_only` are never on it, whatever their tier). For a
   top-level issue, also fill the issue's 验收席 with a seat or 「不需要验收」.
   **Routing never writes a person
   into 验收席**: an issue a person holds is one routing never touches again, so

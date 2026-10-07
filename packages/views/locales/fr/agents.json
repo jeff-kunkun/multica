@@ -225,6 +225,8 @@
     "avatar_hint": "Affiché dans les assignations, l'activité et la discussion.",
     "prop_routing_tier": "Palier",
     "prop_routing_tier_hint": "Attribué aux tâches selon la force",
+    "prop_dispatch_mode": "Attribution",
+    "prop_dispatch_mode_hint": "Sur mention : jamais attribué automatiquement, seulement quand on le nomme",
     "prop_routing_usage": "Usage",
     "prop_routing_usage_hint": "Quota de compte disponible, en relatif"
   },
@@ -281,6 +283,8 @@
     "routing_tier_medium": "Moyen",
     "routing_tier_weak": "Léger",
     "routing_tier_none": "Hors routage",
+    "dispatch_mode_auto": "Auto",
+    "dispatch_mode_mention_only": "Sur mention",
     "routing_usage_tight": "Serré",
     "routing_usage_normal": "Normal",
     "routing_usage_ample": "Large"

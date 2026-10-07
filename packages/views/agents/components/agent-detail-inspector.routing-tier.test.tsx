@@ -126,4 +126,19 @@ describe("AgentDetailInspector routing section", () => {
 
     expect(onUpdate).not.toHaveBeenCalled();
   });
+
+  it("sets a seat to mention only without touching its tier", async () => {
+    const user = userEvent.setup();
+    const onUpdate = renderInspector(agentFixture({ routing_tier: "weak" }));
+
+    await user.click(screen.getByRole("radio", { name: "Mention only" }));
+
+    expect(onUpdate).toHaveBeenCalledWith("agent-1", { dispatch_mode: "mention_only" });
+  });
+
+  it("reads a missing dispatch mode as auto", () => {
+    renderInspector(agentFixture({}));
+
+    expect(screen.getByRole("radio", { name: "Auto" })).toHaveAttribute("aria-checked", "true");
+  });
 });

@@ -556,10 +556,12 @@ func (r *Router) continuation(ctx context.Context, workspaceID string, settings 
 	}
 	seats := make(map[string]ContinuationSeat, len(ids))
 	for _, id := range ids {
-		_, onRoster := agentByID(roster, id)
+		agent, onRoster := agentByID(roster, id)
+		_, unpickable := SeatSelectable(agent.State, SelectContext{})
 		seats[id] = ContinuationSeat{
 			Seat:         seatFromRoster(ladder, roster, id),
 			OnRoster:     onRoster,
+			Unpickable:   unpickable,
 			Availability: facts.Seats[id].Availability,
 		}
 	}

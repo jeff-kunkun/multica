@@ -265,6 +265,8 @@
     "cancel": "취소",
     "prop_routing_tier": "등급",
     "prop_routing_tier_hint": "강도에 맞춰 이슈에 배정합니다",
+    "prop_dispatch_mode": "배정 방식",
+    "prop_dispatch_mode_hint": "지명만: 자동 배정되지 않고 사람이나 에이전트가 지명할 때만 받음",
     "prop_routing_usage": "사용량",
     "prop_routing_usage_hint": "계정 한도의 상대적인 여유"
   },
@@ -320,6 +322,8 @@
     "routing_tier_medium": "중",
     "routing_tier_weak": "경량",
     "routing_tier_none": "제외",
+    "dispatch_mode_auto": "자동",
+    "dispatch_mode_mention_only": "지명만",
     "routing_usage_tight": "빠듯함",
     "routing_usage_normal": "보통",
     "routing_usage_ample": "넉넉함"

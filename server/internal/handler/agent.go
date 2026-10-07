@@ -195,6 +195,10 @@ type AgentResponse struct {
 	// RoutingUsage is the headroom a person tagged this seat with (DENE-922):
 	// tight / normal / ample. Routing prefers ample inside a rung.
 	RoutingUsage string `json:"routing_usage"`
+	// DispatchMode is whether automatic dispatch may pick this seat
+	// (DENE-1600, ADR-0008): auto, or mention_only for a seat that takes
+	// work only when named. Independent of RoutingTier and WorkEnabled.
+	DispatchMode string `json:"dispatch_mode"`
 	// Fit is the agent's group for one issue or project (DENE-1477): match
 	// (对口), generic (通用) or other (其他). Only on a list asked with
 	// for_issue / for_project, which also orders the list by it.
@@ -336,6 +340,7 @@ func (h *Handler) agentToResponse(a db.Agent) AgentResponse {
 		ServiceTier:              a.ServiceTier.String,
 		RoutingTier:              a.RoutingTier.String,
 		RoutingUsage:             a.RoutingUsage,
+		DispatchMode:             a.DispatchMode,
 		ComposioToolkitAllowlist: composioAllowlist,
 		OwnerID:                  uuidToPtr(a.OwnerID),
 		Skills:                   []AgentSkillSummary{},
@@ -2419,9 +2424,12 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 	}
 	// Usage is the account's headroom, and a specialisation runs on its base
 	// role's account, so it starts with the same tag (DENE-922).
-	var createdRoutingUsage pgtype.Text
+	// Dispatch mode rides with the rung (ADR-0008): a mention_only base
+	// role's specialisation is not auto-dispatched either.
+	var createdRoutingUsage, createdDispatchMode pgtype.Text
 	if parentAgent.ID.Valid {
 		createdRoutingUsage = pgtype.Text{String: parentAgent.RoutingUsage, Valid: true}
+		createdDispatchMode = pgtype.Text{String: parentAgent.DispatchMode, Valid: parentAgent.DispatchMode != ""}
 	}
 	if inheritRuntime {
 		createdRuntimeMode = parentAgent.RuntimeMode
@@ -2466,6 +2474,7 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		ServiceTier:              createdServiceTier,
 		RoutingTier:              createdRoutingTier,
 		RoutingUsage:             createdRoutingUsage,
+		DispatchMode:             createdDispatchMode,
 		ConversationStarters:     sp,
 		ComposioToolkitAllowlist: allowlist,
 		ParentAgentID:            parentAgentUUID,
@@ -2617,6 +2626,10 @@ type UpdateAgentRequest struct {
 	// RoutingUsage is omitted-preserves / present-sets. There is no clear:
 	// every seat has a usage, and 常规 is the neutral one (DENE-922).
 	RoutingUsage *string `json:"routing_usage"`
+	// DispatchMode is omitted-preserves / present-sets: auto or
+	// mention_only (DENE-1600). It belongs to the routing set, so a
+	// following specialisation takes its base role's value.
+	DispatchMode *string `json:"dispatch_mode"`
 	// ComposioToolkitAllowlist is a tri-state, same pattern as
 	// thinking_level, mcp_config:
 	//   - field omitted → no change (column preserved as-is)
@@ -3276,10 +3289,20 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 		}
 		params.RoutingUsage = pgtype.Text{String: key, Valid: true}
 	}
+	if req.DispatchMode != nil {
+		key, ok := routing.NormalizeDispatchMode(*req.DispatchMode)
+		if !ok || strings.TrimSpace(*req.DispatchMode) == "" {
+			writeError(w, http.StatusBadRequest, fmt.Sprintf(
+				"dispatch_mode %q is not a known value; expected one of %s",
+				*req.DispatchMode, strings.Join(routing.DispatchModeKeys(), ", ")))
+			return
+		}
+		params.DispatchMode = pgtype.Text{String: key, Valid: true}
+	}
 	// A following specialisation does not own its rung or its usage
 	// (DENE-1016). Turning follow off in this same request is the opt-out, so
 	// inheritRuntime is already false there and the write is the child's own.
-	routingTouched := req.RoutingTier != nil || req.RoutingUsage != nil
+	routingTouched := req.RoutingTier != nil || req.RoutingUsage != nil || req.DispatchMode != nil
 	if routingTouched && inheritRuntime && parentAfter.Valid {
 		parent, parentErr := h.Queries.GetAgent(r.Context(), parentAfter)
 		parentName := ""

@@ -2133,6 +2133,7 @@ export const AgentSchema: z.ZodType<Agent> = z.object({
   // desktop build can talk to a backend that predates the column.
   routing_tier: z.string().optional().catch(undefined),
   routing_usage: z.string().optional().catch(undefined),
+  dispatch_mode: z.string().optional().catch(undefined),
   owner_id: z.string().nullable().default(null),
   skills: z.array(z.unknown()).default([]),
   disabled_runtime_skills: z.array(z.unknown()).optional(),
