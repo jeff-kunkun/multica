@@ -706,6 +706,22 @@ func TestNewTaskSlotSemaphoreReturnsStableSlotIndexes(t *testing.T) {
 	}
 }
 
+// DENE-1331: a resumed session already holds the pasted brief; only a new
+// session, and codebuddy's per-turn system prompt, need it again.
+func TestResumedSessionHoldsBrief(t *testing.T) {
+	for _, p := range []string{"kimi", "openclaw", "traecli", "qwenpaw", "cursor", "dsh"} {
+		if !resumedSessionHoldsBrief(p, "sess-1") {
+			t.Errorf("%s: a resumed session re-pastes the brief", p)
+		}
+		if resumedSessionHoldsBrief(p, "") {
+			t.Errorf("%s: a new session goes without the brief", p)
+		}
+	}
+	if resumedSessionHoldsBrief("codebuddy", "sess-1") {
+		t.Error("codebuddy takes the brief as a system prompt and needs it every turn")
+	}
+}
+
 func TestProviderNeedsInlineSystemPrompt(t *testing.T) {
 	t.Parallel()
 

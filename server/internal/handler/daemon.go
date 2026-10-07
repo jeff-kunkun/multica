@@ -3197,8 +3197,6 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 				}
 			}
 		}
-		resp.IssueHandoffCard = h.handoffCardForRun(r.Context(), issue, agent, *task)
-
 		// Issue-state delta (MUL-7344). Every field below already sits on the
 		// `issue` row this claim loaded, so this costs one extra read — the
 		// PREVIOUS run's snapshot — and never a second GetIssue.
@@ -3482,6 +3480,7 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 		}
 
 		// Resolve the prior agent session / workdir to resume.
+		freshSession := false
 		if task.RerunOfTaskID.Valid {
 			// Manual retry: resume precisely from the source task the user
 			// clicked, NOT the most-recent (agent, issue) row — a parallel task
@@ -3545,7 +3544,13 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 				AgentID: task.AgentID,
 				IssueID: task.IssueID,
 			}); err == nil && prior.SessionID.Valid {
-				if prior.RuntimeID == task.RuntimeID {
+				// Cold and thick (DENE-1331): the cache is gone and the
+				// context is large, so the run starts a new session in the
+				// same working directory and opens with the state card. An
+				// automatic retry continues its parent's session regardless.
+				if prior.RuntimeID == task.RuntimeID && !task.RetryOfTaskID.Valid && h.sessionTooColdAndThick(r.Context(), *task, prior.SessionID.String) {
+					freshSession = true
+				} else if prior.RuntimeID == task.RuntimeID {
 					resp.PriorSessionID = prior.SessionID.String
 					// Same rule as the rerun path: date the deltas from the run
 					// this session belongs to. GetLastTaskSession skips poisoned
@@ -3641,6 +3646,12 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 					}
 				}
 			}
+		}
+
+		// The state card this run opens with, now that the session is known.
+		// A run continuing its interrupted session already has everything.
+		if !(task.RetryOfTaskID.Valid && !task.ForceFreshSession && task.SessionID.Valid) {
+			resp.IssueHandoffCard, resp.IssueStateCardReason = h.stateCardForRun(r.Context(), issue, agent, *task, resp.WakeupID != "", freshSession)
 		}
 	}
 

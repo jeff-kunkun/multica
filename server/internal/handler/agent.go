@@ -966,9 +966,13 @@ type AgentTaskResponse struct {
 	IssueSubIssues          []SubIssueRef         `json:"issue_sub_issues,omitempty"` // the task issue's sub-issues; non-empty tells the run it holds a coordinator (DENE-812)
 	IssueContextGeneratedAt string                `json:"issue_context_generated_at,omitempty"`
 	IssueContextTruncated   bool                  `json:"issue_context_truncated,omitempty"`
-	// IssueHandoffCard is the rendered state card for the first run of an
-	// agent the issue was just handed to (DENE-1350); empty otherwise.
+	// IssueHandoffCard is the rendered state card a run opens with: the first
+	// run of an agent the issue was just handed to (DENE-1350), a run after
+	// someone else closed or handed off, a wakeup, or a run whose old session
+	// was set aside (DENE-1331); empty otherwise. IssueStateCardReason says
+	// which; empty reads as a handoff, the only reason older servers send.
 	IssueHandoffCard         string               `json:"issue_handoff_card,omitempty"`
+	IssueStateCardReason     string               `json:"issue_state_card_reason,omitempty"`
 	ChatSessionID            string               `json:"chat_session_id,omitempty"`             // non-empty for chat tasks
 	ChatChannelType          string               `json:"chat_channel_type,omitempty"`           // "slack" when the chat session is backed by an IM channel; empty for a web-only chat. Makes the agent channel-aware (read history from the channel, not Multica)
 	ChatChannelDeliversFiles bool                 `json:"chat_channel_delivers_files,omitempty"` // server capability: THIS deployment can put a file the agent produced into THIS conversation — the adapter goes back for the bound attachment AND object storage exists to go back to. Absent/false on a server predating it, which is the safe reading: the agent is told to describe its file in words. Never inferred daemon-side from chat_channel_type; see handler.Handler.channelDeliversFiles
