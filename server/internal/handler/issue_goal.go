@@ -532,9 +532,14 @@ func (h *Handler) FinishIssueGoal(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, "an agent stopping a goal must pass --reason with the person's words asking for the stop")
 			return
 		}
+		originator := h.invokeOriginatorFromRequest(r, actorType, actorID)
+		if actorType == "agent" && originator == "" {
+			writeError(w, http.StatusForbidden, "an agent can stop a goal only on behalf of an active human request")
+			return
+		}
 		params.StoppedByType = pgtype.Text{String: actorType, Valid: true}
 		params.StoppedByID, _ = util.ParseUUID(actorID)
-		params.StoppedOnBehalfOf, _ = util.ParseUUID(h.invokeOriginatorFromRequest(r, actorType, actorID))
+		params.StoppedOnBehalfOf, _ = util.ParseUUID(originator)
 		params.StopReason = req.Reason
 	}
 	wasDraft := goal.Status == "draft"

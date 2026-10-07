@@ -151,6 +151,20 @@ func TestFinishIssueGoal_AgentStopsActiveButCannotAchieve(t *testing.T) {
 	}
 }
 
+func TestFinishIssueGoal_AgentWithoutActiveHumanOriginatorIsRejected(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	issueID, agentID, taskID := goalStopFixture(t, "Agent needs active human originator")
+	dbfx.Exec(t, `UPDATE agent_task_queue SET status = 'completed' WHERE id = $1`, taskID)
+	w := goalCallAs(t, testHandler.FinishIssueGoal, http.MethodPost, "/api/issues/"+issueID+"/goal/finish", issueID, agentID, taskID, map[string]any{
+		"status": "stopped", "reason": "把这张票的目标模式去掉",
+	})
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("agent stop without active human originator status = %d, want 403: %s", w.Code, w.Body.String())
+	}
+}
+
 // A goal the brake paused can be stopped on purpose, which replaces the
 // system stop record with the person who turned goal mode off.
 func TestFinishIssueGoal_MemberStopsBrakePausedGoal(t *testing.T) {
