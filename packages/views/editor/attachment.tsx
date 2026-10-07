@@ -48,7 +48,7 @@ import {
   isObjectURL,
   useResignedInlineMedia,
 } from "./hooks/use-inline-media-url";
-import { useDownloadAttachment } from "./use-download-attachment";
+import { useAttachmentActions } from "./use-attachment-actions";
 import { AttachmentCard, AttachmentFileCard } from "./attachment-card";
 import { canOpenPreview, getPreviewKind, type PreviewKind } from "./utils/preview";
 import "./styles/attachment.css";
@@ -339,7 +339,7 @@ export function Attachment({
   const { resolveAttachment, openByUrl } = useAttachmentDownloadResolver();
   const cdnDomain = useConfigStore((s) => s.cdnDomain);
   const cdnSigned = useConfigStore((s) => s.cdnSigned);
-  const download = useDownloadAttachment();
+  const { download } = useAttachmentActions();
   const preview = useAttachmentPreview();
   const sequence = usePreviewSequence();
 
@@ -405,7 +405,7 @@ export function Attachment({
 
   const handleDownload = () => {
     if (state.attachmentId) {
-      download(state.attachmentId);
+      download({ attachmentId: state.attachmentId });
       return;
     }
     if (shareUrl) openByUrl(shareUrl);
