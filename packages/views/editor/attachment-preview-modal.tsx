@@ -111,7 +111,6 @@ import {
 } from "@multica/ui/lib/motion";
 import { useT } from "../i18n";
 import { useBackToDismiss, useNavigation } from "../navigation";
-import { openExternal } from "../platform";
 import { isDesktopShell } from "../platform/local-directory";
 import { useImmersiveMode } from "../platform/use-immersive-mode";
 import { ReadonlyContent } from "./readonly-content";
@@ -127,7 +126,7 @@ import {
 } from "./utils/preview";
 import { parseStructured } from "./utils/parse-structured";
 import { formatBytes } from "../common/format-bytes";
-import { useDownloadAttachment } from "./use-download-attachment";
+import { useAttachmentActions } from "./use-attachment-actions";
 import { useAttachmentHtmlText } from "./hooks/use-attachment-html-text";
 import { useResignedInlineMedia } from "./hooks/use-inline-media-url";
 import { useZoomCanvas, type ZoomCanvasApi } from "./hooks/use-zoom-canvas";
@@ -468,7 +467,7 @@ export function AttachmentPreviewModal({
   locate,
   onOpenOverview,
 }: AttachmentPreviewModalProps & { onExitComplete?: () => void }) {
-  const download = useDownloadAttachment();
+  const { download } = useAttachmentActions();
   const shouldReduceMotion = useReducedMotion() ?? false;
   const state = normalize(source);
   // useWorkspaceSlug (not useWorkspacePaths) — returns null outside a
@@ -546,16 +545,10 @@ export function AttachmentPreviewModal({
 
   const kind = state.kind;
 
-  // Download dispatcher: re-sign through `getAttachment` when an id is
-  // available; otherwise fall back to opening the (possibly stale) URL
-  // externally — same tradeoff as the file-card NodeView's download path.
-  const handleDownload = () => {
-    if (state.attachmentId) {
-      download(state.attachmentId);
-    } else {
-      openExternal(state.mediaUrl);
-    }
-  };
+  // Re-signs through `getAttachment` when an id is available; otherwise opens
+  // the (possibly stale) URL externally — same tradeoff as the file card.
+  const handleDownload = () =>
+    download({ attachmentId: state.attachmentId, url: state.mediaUrl });
 
   // Open-in-new-tab: the full-page route (/attachments/{id}/preview) shows
   // every previewable kind, but loads the file by id — a URL-only source has
@@ -1792,7 +1785,7 @@ export function AttachmentPreviewStandalone({
   initialHtmlAddress?: string;
   onHtmlAddressChange?: (address: string) => void;
 }) {
-  const download = useDownloadAttachment();
+  const { download } = useAttachmentActions();
   const source = useMemo<PreviewSource>(
     () => ({ kind: "full", attachment }),
     [attachment],
@@ -1810,7 +1803,7 @@ export function AttachmentPreviewStandalone({
         kind={state.kind}
         source={source}
         state={state}
-        onDownload={() => download(attachment.id)}
+        onDownload={() => download({ attachmentId: attachment.id })}
         reduceMotion
         renderHtmlFrame={renderHtmlFrame}
         initialHtmlAddress={initialHtmlAddress}
