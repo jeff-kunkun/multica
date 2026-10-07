@@ -596,7 +596,9 @@ var issueRunsCmd = &cobra.Command{
 		"Defaults to this issue's full execution history, newest first. Narrow it to " +
 		"work in flight with --active, or widen it across the sub-issue family with " +
 		"--siblings when you need to know whether another agent is already working " +
-		"next to you.",
+		"next to you.\n\n" +
+		"Each run in the history carries skills_used: the bound skills it used, in " +
+		"first-use order (the SKILLS column in the table).",
 	Args: exactArgs(1),
 	RunE: runIssueRuns,
 }
@@ -3550,7 +3552,7 @@ func runIssueRuns(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	headers := []string{"ID", "AGENT", "STATUS", "STARTED", "COMPLETED", "SESSION", "ERROR"}
+	headers := []string{"ID", "AGENT", "STATUS", "STARTED", "COMPLETED", "SESSION", "SKILLS", "ERROR"}
 	rows := make([][]string, 0, len(runs))
 	for _, r := range runs {
 		started := strVal(r, "started_at")
@@ -3573,11 +3575,25 @@ func runIssueRuns(cmd *cobra.Command, args []string) error {
 			started,
 			completed,
 			runSessionLabel(r, fullID),
+			runSkillsLabel(r),
 			errMsg,
 		})
 	}
 	cli.PrintTable(os.Stdout, headers, rows)
 	return nil
+}
+
+// runSkillsLabel lists the skills a run used (DENE-1573), comma-separated;
+// empty when it used none or the server predates the field.
+func runSkillsLabel(r map[string]any) string {
+	raw, _ := r["skills_used"].([]any)
+	names := make([]string, 0, len(raw))
+	for _, v := range raw {
+		if s, ok := v.(string); ok && s != "" {
+			names = append(names, s)
+		}
+	}
+	return strings.Join(names, ",")
 }
 
 func runIssueUsage(cmd *cobra.Command, args []string) error {

@@ -123,7 +123,9 @@
     "no_results": "Aucun skill correspondant",
     "commands": {
       "note": "Ajouter une note — ne déclenchera aucun agent"
-    }
+    },
+    "skill_group": "Skills de {{name}}",
+    "skill_hint": "@ un agent pour choisir un de ses skills"
   },
   "code_block": {
     "html_preview": "Aperçu HTML",

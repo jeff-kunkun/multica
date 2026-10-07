@@ -6477,9 +6477,33 @@ func (h *Handler) ListTasksByIssue(w http.ResponseWriter, r *http.Request) {
 	// for a column that is near-empty on runs that have not finished.
 	if !activeOnly {
 		h.hydrateTaskUsage(r.Context(), issue.ID, resp)
+		h.hydrateTaskSkills(r.Context(), issue.ID, resp)
 	}
 
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// hydrateTaskSkills attaches the skills each run used (DENE-1573), read from
+// the `skill` transcript rows the daemon appends on first use. One query for
+// the issue, then a map join. Like usage it is display metadata: an error
+// leaves every row without the list rather than failing the log. A live run
+// shows its skills from the transcript stream, so the active path skips it.
+func (h *Handler) hydrateTaskSkills(ctx context.Context, issueID pgtype.UUID, resp []AgentTaskResponse) {
+	if len(resp) == 0 {
+		return
+	}
+	rows, err := h.Queries.ListIssueTaskSkills(ctx, issueID)
+	if err != nil || len(rows) == 0 {
+		return
+	}
+	byTask := make(map[string][]string, len(resp))
+	for _, row := range rows {
+		id := uuidToString(row.TaskID)
+		byTask[id] = append(byTask[id], row.Skill)
+	}
+	for i := range resp {
+		resp[i].SkillsUsed = byTask[resp[i].ID]
+	}
 }
 
 // hydrateTaskUsage attaches each run's own token usage to the execution-log

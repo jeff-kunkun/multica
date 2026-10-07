@@ -34,7 +34,9 @@
     "steer_resend_failed": "新しい実行として送信できませんでした。",
     "steer_step": "{{name}} が追加",
     "steer_step_read": "既読",
-    "retrying": "再試行を待っています。"
+    "retrying": "再試行を待っています。",
+    "skills_used": "使用した skill：{{names}}",
+    "skill_step": "skill {{name}} を使用"
   },
   "working_filter_error": {
     "title": "エージェントが作業中のタスクを読み込めませんでした"

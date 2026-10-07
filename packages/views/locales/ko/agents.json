@@ -1125,7 +1125,8 @@
     "source_remote_checkout": "원격에서 체크아웃",
     "source_mode_in_place": "한 번에 하나씩, 작업 사본을 직접 수정",
     "source_mode_worktree": "실행마다 전용 git worktree",
-    "source_mode_shared": "공유 디렉터리, 병렬 실행"
+    "source_mode_shared": "공유 디렉터리, 병렬 실행",
+    "kind_skill": "skill"
   },
   "task_failure": {
     "cancelled_by_system": "시스템에서 취소함",

@@ -1176,7 +1176,8 @@
     "source_remote_checkout": "Récupération distante",
     "source_mode_in_place": "Une exécution à la fois, dans votre copie de travail",
     "source_mode_worktree": "Un git worktree dédié par exécution",
-    "source_mode_shared": "Répertoire partagé, exécutions en parallèle"
+    "source_mode_shared": "Répertoire partagé, exécutions en parallèle",
+    "kind_skill": "Skill"
   },
   "task_failure": {
     "cancelled_by_system": "Annulée par le système",
