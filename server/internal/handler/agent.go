@@ -798,8 +798,12 @@ type AgentTaskResponse struct {
 	// CanonicalBranch is the issue's canonical delivery branch (DENE-820).
 	// A worktree-mode daemon continues it even when another seat created
 	// it, so a rerun never opens a second delivery line by accident.
-	CanonicalBranch      string                 `json:"canonical_branch,omitempty"`
-	RemoteMCPConnections []remotemcp.Connection `json:"remote_mcp_connections,omitempty"`
+	CanonicalBranch string `json:"canonical_branch,omitempty"`
+	// DeliveryLine is set on a sub-issue that delivers onto its parent's
+	// branch (DENE-1537): the worktree forks from that branch and the close
+	// merges back into it instead of opening a PR.
+	DeliveryLine         *service.DeliveryLineClaim `json:"delivery_line,omitempty"`
+	RemoteMCPConnections []remotemcp.Connection     `json:"remote_mcp_connections,omitempty"`
 	// PluginHookTools are the workspace's agent-trigger plugin hooks, which the
 	// daemon renders as MCP tools for this task. Resolved at claim time so
 	// disabling or uninstalling a plugin takes effect on the next task rather

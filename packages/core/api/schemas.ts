@@ -498,6 +498,50 @@ export const EMPTY_ISSUE_PULL_REQUESTS_RESPONSE: IssuePullRequestsResponse = {
   auto_complete: null,
 };
 
+// Sub-issues that deliver onto the parent's branch instead of their own PR
+// (DENE-1537). `line` is set on such a sub-issue; `contributions` lists them
+// on the parent. Everything else in the delivery payload is ignored here.
+export const DeliveryLineCommitSchema = z.object({
+  sha: z.string(),
+  subject: z.string().default(""),
+}).loose();
+
+export const IssueDeliveryLineSchema = z.object({
+  owner_issue_id: z.string(),
+  owner_identifier: z.string().default(""),
+  owner_title: z.string().optional(),
+  branch: z.string().default(""),
+  status: z.string(),
+  commits: z.array(DeliveryLineCommitSchema).default([]),
+  conflict_files: z.array(z.string()).nullable().default([]),
+  merged_at: z.string().nullable().optional(),
+}).loose();
+
+export const IssueDeliveryContributionSchema = z.object({
+  issue_id: z.string(),
+  identifier: z.string().default(""),
+  title: z.string().default(""),
+  issue_status: z.string().default(""),
+  status: z.string(),
+  commits: z.array(DeliveryLineCommitSchema).default([]),
+  conflict_files: z.array(z.string()).nullable().default([]),
+}).loose();
+
+export const IssueDeliveryLinesSchema = z.object({
+  line: IssueDeliveryLineSchema.nullable().optional().default(null).catch(null),
+  contributions: z.array(IssueDeliveryContributionSchema).nullable().default([]).catch([]),
+}).loose();
+
+export type DeliveryLineCommit = z.infer<typeof DeliveryLineCommitSchema>;
+export type IssueDeliveryLine = z.infer<typeof IssueDeliveryLineSchema>;
+export type IssueDeliveryContribution = z.infer<typeof IssueDeliveryContributionSchema>;
+export type IssueDeliveryLines = z.infer<typeof IssueDeliveryLinesSchema>;
+
+export const EMPTY_ISSUE_DELIVERY_LINES: IssueDeliveryLines = {
+  line: null,
+  contributions: [],
+};
+
 // Label responses are consumed by settings tables and resource pickers. Keep
 // the resource type lenient so newer server scopes do not break older clients,
 // while defaulting fields that predate scoped label catalogs.
