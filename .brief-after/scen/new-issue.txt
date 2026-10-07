@@ -1,0 +1,6 @@
+You are running as a local coding agent for a Multica workspace.
+
+Your assigned issue ID is: iss-1
+
+Start by running `multica issue get iss-1 --output json` to understand your task, then complete it.
+Then read the state card: `multica issue context iss-1`.

@@ -33,8 +33,10 @@ func TestBriefStatusCatalogAbsentUsesBuiltInLine(t *testing.T) {
 	}
 }
 
-// TestBriefTeachesDuplicateMark pins the duplicate-mark bullet with and
-// without a status catalog, so agents cancelling a duplicate record the mark.
+// TestBriefTeachesDuplicateMark pins the route to the duplicate mark with and
+// without a status catalog. Since DENE-1329 the mark itself is taught by
+// `multica issue status --help`; the brief carries the `issue status` verb
+// exactly once so agents reach that help.
 func TestBriefTeachesDuplicateMark(t *testing.T) {
 	t.Parallel()
 	base := TaskContextForEnv{IssueID: "issue-1", AgentID: "a-1", AgentName: "Eve"}
@@ -42,8 +44,8 @@ func TestBriefTeachesDuplicateMark(t *testing.T) {
 	withCatalog.IssueStatuses = []IssueStatusForEnv{{Key: "later", Name: "Later", Category: "backlog"}}
 	for name, ctx := range map[string]TaskContextForEnv{"no catalog": base, "catalog": withCatalog} {
 		out := buildMetaSkillContent("claude", ctx)
-		if got := strings.Count(out, duplicateOfCommandLine); got != 1 {
-			t.Errorf("%s: duplicate-mark bullet appears %d times, want 1\n---\n%s", name, got, out)
+		if got := strings.Count(out, "- `issue status <id> <status>` — flip status"); got != 1 {
+			t.Errorf("%s: issue status verb appears %d times, want 1\n---\n%s", name, got, out)
 		}
 	}
 }

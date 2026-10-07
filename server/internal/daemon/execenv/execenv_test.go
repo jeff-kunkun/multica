@@ -1495,8 +1495,10 @@ func TestInjectRuntimeConfigClaude(t *testing.T) {
 	s := string(content)
 	for _, want := range []string{
 		"Multica Agent Runtime",
-		"multica issue get",
-		"multica issue comment list",
+		// DENE-1329 verb map: reads are one line per verb, flags in --help.
+		"`issue get | list | children`",
+		"`issue comment list | add`",
+		"multica issue context <id>",
 		// Skills are listed by on-disk slug: that is the directory
 		// writeSkillFiles creates and the only identifier the model can
 		// actually invoke (MUL-5529).
@@ -1545,55 +1547,45 @@ func TestInjectRuntimeConfigBackgroundTaskSafetyProviderAgnostic(t *testing.T) {
 			}
 			s := string(data)
 			for _, want := range []string{
-				"## Background Task Safety",
-				// MUL-5442 judgment rewrite (owner-authorized pin renegotiation): the
-				// section now states the one platform fact, the external-systems/CI
-				// boundary with its single exception, and the review-locked
-				// persistent-service contract. Enforcement-detail pins that only
-				// restated derivations of the platform fact were retired with the
-				// prose ("Do NOT end your turn while background tasks", the
-				// tool-promise enumeration, "does not cover tests, builds, CI
-				// polling", "any sleep / retry loop that polls check status", ...).
-				// What stays pinned: the fact, each boundary, each exception, and
-				// the handoff triple — the things an agent cannot infer.
-				"any run-owned work still active is orphaned",
-				"no background-completion wakeup",
-				"whatever a tool response promises",
-				"Never background-and-yield",
-				"foreground tool calls that block",
-				"run unobservable work synchronously",
-				"standing by",
-				"are not run-owned: do not wait",
-				// The full compound ban, not its first item — MUL-5223 made this a
-				// non-derivable boundary, so no member may be silently dropped.
-				"do not run `gh pr checks --watch`, `gh run watch`, or sleep/retry polls",
-				"GitHub Actions after a successful push",
-				"NOT your delivery acceptance criteria",
+				"## Background work",
+				// DENE-1329 verb-map rewrite: the section is one paragraph that
+				// keeps the four constraints only the model can keep (ADR-0007).
+				// Each pin below is one of them; the incident history behind each
+				// lives in its ticket, not in the brief.
+				//
+				// 1. The platform fact and the no-background-and-yield rule.
+				"Your run ends when your turn exits",
+				"anything still running is orphaned and its result lost",
+				"Never background work and yield",
+				"block on results in the foreground",
+				// 2. CI / external systems are not run-owned — the full compound
+				// ban, not its first item (MUL-5223), and `issue close` owns CI.
+				"Don't wait on CI or external systems",
+				"no `gh pr checks --watch`, `gh run watch` or sleep polls",
 				"`multica issue close` handles CI",
 				"CI running: <PR link>",
-				"The one exception",
-				"ONE foreground blocking call (`gh pr checks <pr> --watch`)",
-				"persistent service handoff",
-				"running service itself is the requested deliverable",
-				"durable logs",
-				"cleanup handle such as PID/profile",
-				"verify readiness",
-				"URL, logs, and stop instructions",
-				"survival as best-effort, not guaranteed",
-				"Never terminate `multica` or `multica.exe` by executable name",
-				"exact child PID you started",
-				"`multica daemon status --output json`",
-				"never kill it if it is the reported daemon PID",
+				// 3. The one persistent-service exception and its handoff triple
+				// (MUL-5274).
+				"Only a service the user asked to keep running may outlive the turn",
+				"detach it, verify it",
+				"reply with URL, logs and how to stop it",
+				// 4. Never kill the daemon by name.
+				"Never kill `multica` by name",
+				"stop only a PID you started",
+				"never the daemon's (`multica daemon status --output json`)",
 			} {
 				if !strings.Contains(s, want) {
-					t.Errorf("%s missing background task safety text %q\n---\n%s", tc.file, want, s)
+					t.Errorf("%s missing background work text %q\n---\n%s", tc.file, want, s)
 				}
 			}
-			// Exactly one exception: substring pins cannot see a duplicated
-			// "The one exception" clause (a second, wider-scope copy slipped
-			// in during the MUL-5442 rewrite and every pin stayed green).
-			if got := strings.Count(s, "The one exception"); got != 1 {
-				t.Errorf("%s must state the CI exception exactly once, got %d\n---\n%s", tc.file, got, s)
+			if strings.Contains(s, "## Background Task Safety") {
+				t.Errorf("%s still carries the pre-DENE-1329 Background Task Safety heading\n---\n%s", tc.file, s)
+			}
+			// Exactly one persistent-service exception: substring pins cannot
+			// see a duplicated clause (a second, wider-scope copy slipped in
+			// during the MUL-5442 rewrite and every pin stayed green).
+			if got := strings.Count(s, "may outlive the turn"); got != 1 {
+				t.Errorf("%s must state the persistent-service exception exactly once, got %d\n---\n%s", tc.file, got, s)
 			}
 			// `gh run watch` may only appear as a banned command, never as
 			// the section's example of how to wait properly.
@@ -1624,31 +1616,46 @@ func TestInjectRuntimeConfigAvailableCommandsCoreOnly(t *testing.T) {
 	}
 
 	s := string(content)
+	// DENE-1329: the Commands section is a verb map — one line per verb, with
+	// each command's synopsis and flags in `multica <command> --help`.
 	for _, want := range []string{
-		"## Available Commands",
-		"core agent loop and common issue create/update tasks",
+		"## Commands",
 		"`multica <command> --help`",
-		"multica issue get <id> --output json",
-		"multica issue comment list <issue-id>",
-		"multica issue create --title",
-		"multica issue update <id>",
-		"multica issue assign <id>",
-		"--description-file <path>",
-		"--parent \"\"",
-		"multica repo checkout <url>",
-		"multica issue status <id> <status>",
-		"multica issue comment add <issue-id>",
-		"multica issue comment add --help",
+		"`issue get | list | children`",
+		"`issue context <id>`",
+		"`issue comment list | add`",
+		"bodies via `--content-file`",
+		"`issue create | update | assign`",
+		"`--no-start` records a change without starting a run",
+		"`issue status <id> <status>`",
+		"`issue close`",
+		"`issue handoff --to <seat|agent>`",
+		"`issue summon --to <member>`",
+		"`issue wakeup`",
+		"`repo checkout <url>`",
+		"`attachment upload | download`",
 	} {
 		if !strings.Contains(s, want) {
 			t.Errorf("AGENTS.md missing core command/help text %q\n---\n%s", want, s)
 		}
 	}
+	// The long synopses moved to --help; the brief must not grow them back.
+	for _, gone := range []string{
+		"## Available Commands",
+		"### Core",
+		"multica issue get <id> --output json",
+		"multica issue comment list <issue-id>",
+		"multica issue create --title",
+	} {
+		if strings.Contains(s, gone) {
+			t.Errorf("AGENTS.md carries pre-DENE-1329 command synopsis %q (it lives in --help)\n---\n%s", gone, s)
+		}
+	}
 
 	// Squad maintenance is squad-leader surface and is gated on that (MUL-5442):
 	// an agent leading no squad has no squad whose roles it could change.
-	if strings.Contains(s, "### Squad maintenance") {
-		t.Errorf("non-leader brief must not carry the squad maintenance block\n---\n%s", s)
+	if strings.Contains(s, "multica squad member set-role") {
+		t.Errorf("non-leader brief must not carry the squad maintenance line\n---\n%s", s)
 	}
 	leaderDir := t.TempDir()
 	if _, err := InjectRuntimeConfig(leaderDir, "codex", TaskContextForEnv{IssueID: "issue-1", IsSquadLeader: true}); err != nil {
@@ -1659,7 +1666,7 @@ func TestInjectRuntimeConfigAvailableCommandsCoreOnly(t *testing.T) {
 		t.Fatalf("failed to read leader AGENTS.md: %v", err)
 	}
 	for _, want := range []string{
-		"### Squad maintenance",
+		"Squad leader: ",
 		"multica squad member set-role <squad-id>",
 	} {
 		if !strings.Contains(string(leader), want) {
@@ -1667,6 +1674,16 @@ func TestInjectRuntimeConfigAvailableCommandsCoreOnly(t *testing.T) {
 		}
 	}
 
+	// Non-core commands stay out of the Commands section. Attachments are a
+	// verb line since DENE-1329 (`attachment upload | download`), and the
+	// Output section names `multica attachment download` as the fetch path,
+	// so this check is scoped to the Commands section and no longer bans it.
+	cmdStart := strings.Index(s, "## Commands")
+	cmdEnd := strings.Index(s[cmdStart+1:], "\n## ")
+	commands := s[cmdStart:]
+	if cmdEnd >= 0 {
+		commands = s[cmdStart : cmdStart+1+cmdEnd]
+	}
 	// The fork keeps --no-start in the core brief (wanted above); upstream
 	// moved it behind --help.
 	for _, banned := range []string{
@@ -1679,7 +1696,6 @@ func TestInjectRuntimeConfigAvailableCommandsCoreOnly(t *testing.T) {
 		"multica squad list",
 		"multica issue runs",
 		"multica issue run-messages",
-		"multica attachment download",
 		"multica autopilot list",
 		"multica autopilot create",
 		"multica autopilot update",
@@ -1694,8 +1710,8 @@ func TestInjectRuntimeConfigAvailableCommandsCoreOnly(t *testing.T) {
 		"multica issue comment delete",
 		"multica label create",
 	} {
-		if strings.Contains(s, banned) {
-			t.Errorf("AGENTS.md should not inject non-core command %q\n---\n%s", banned, s)
+		if strings.Contains(commands, banned) {
+			t.Errorf("Commands section should not inject non-core command %q\n---\n%s", banned, commands)
 		}
 	}
 }
@@ -1744,7 +1760,7 @@ func TestInjectRuntimeConfigNoSkills(t *testing.T) {
 	}
 
 	s := string(content)
-	if !strings.Contains(s, "multica issue get") {
+	if !strings.Contains(s, "multica issue context <id>") {
 		t.Error("should reference multica CLI even without skills")
 	}
 	if strings.Contains(s, "## Skills") {
@@ -2513,14 +2529,17 @@ func TestInjectRuntimeConfigRequiresExplicitCommentPost(t *testing.T) {
 			}
 			s := string(data)
 
-			// The workflow must contain an explicit `multica issue comment add`
-			// invocation for this issue — not just a prose mention of posting.
+			// The workflow must name an explicit delivery call — not just a
+			// prose mention of posting. Since DENE-1329 the final step is
+			// `multica issue close` (which writes the evidence comment), and a
+			// turn that does not close posts one comment under `--parent`.
+			// MUL-5442 cross-channel dedup still holds: the ready-to-run
+			// commands with real ids live in the per-turn message, so pin the
+			// command names and flag mnemonics, not full templates.
 			mustContain := []string{
-				// MUL-5442 cross-channel dedup: the brief states the loop shape; the
-				// ready-to-run commands with real ids live in the per-turn message.
-				// Pin the command NAME and the flag mnemonics, not full templates.
-				"post it with `multica issue comment add` using",
-				"mandatory",
+				"4. Finish with `multica issue close <id> --outcome <...> --evidence-file ./close.md`",
+				"posts one comment instead, under the `--parent` the per-turn message gave",
+				"`issue comment add <id> --verdict hold`",
 			}
 			for _, want := range mustContain {
 				if !strings.Contains(s, want) {
@@ -2532,8 +2551,9 @@ func TestInjectRuntimeConfigRequiresExplicitCommentPost(t *testing.T) {
 			// output is not user-visible. This is the second line of defense
 			// in case the agent skips past the workflow steps.
 			for _, want := range []string{
-				"Final results MUST be delivered via `multica issue comment add`",
-				"does NOT see your terminal output",
+				"⚠️ **Deliver through a comment on the issue** (a close writes one)",
+				"Nobody sees your terminal or run log",
+				"Post exactly ONE comment per run, the final result",
 			} {
 				if !strings.Contains(s, want) {
 					t.Errorf("%s: Output warning missing %q", tc.name, want)
@@ -2544,12 +2564,14 @@ func TestInjectRuntimeConfigRequiresExplicitCommentPost(t *testing.T) {
 }
 
 // TestInjectRuntimeConfigCommentGuardrailIsProviderAgnostic pins that the
-// "never inline --content for agent-authored comments" guardrail reaches EVERY
-// provider on every host OS — post-MUL-2904 the corruption is shell-driven, so
-// the directive is no longer Codex-scoped. The Available Commands entry still
-// lists all three input modes as available, and the legacy over-broad
-// `--description-stdin` / "MUST pipe via stdin" phrasings (#1795 / #1851, which
-// broke Windows non-ASCII) must NOT reappear.
+// file-first comment guardrail reaches EVERY provider on every host OS —
+// post-MUL-2904 the corruption is shell-driven, so the directive is not
+// Codex-scoped. Since DENE-1329 the brief no longer carries a Comment
+// Formatting section: the Commands line names `--content-file` for bodies and
+// points at `multica <command> --help`, where `issue comment add --help`
+// holds the full rules. The legacy over-broad `--description-stdin` / "MUST
+// pipe via stdin" phrasings (#1795 / #1851, which broke Windows non-ASCII)
+// must NOT reappear.
 //
 // Not parallel: mutates the package-level runtimeGOOS.
 func TestInjectRuntimeConfigCommentGuardrailIsProviderAgnostic(t *testing.T) {
@@ -2575,26 +2597,26 @@ func TestInjectRuntimeConfigCommentGuardrailIsProviderAgnostic(t *testing.T) {
 				}
 				s := string(data)
 
-				// Available Commands lists all three input modes as available.
+				// The provider-agnostic guardrail: the comment verb line sends
+				// bodies through `--content-file`, and the rules live in --help.
 				for _, want := range []string{
-					"--content \"...\"",
-					"--content-stdin",
-					"--content-file <path>",
-				} {
-					if !strings.Contains(s, want) {
-						t.Errorf("%s missing flag mention %q\n---\n%s", configFile, want, s)
-					}
-				}
-
-				// The provider-agnostic guardrail must now reach non-Codex
-				// providers too: a dedicated Comment Formatting section that
-				// bans inline `--content` for agent-authored comments.
-				for _, want := range []string{
-					"## Comment Formatting",
-					"Never use inline `--content` for agent-authored comments",
+					"`issue comment list | add` — read / post comments (bodies via `--content-file`)",
+					"Run `multica <command> --help` for flags.",
 				} {
 					if !strings.Contains(s, want) {
 						t.Errorf("%s missing provider-agnostic comment guardrail %q\n---\n%s", configFile, want, s)
+					}
+				}
+
+				// The section itself moved to `issue comment add --help`; the
+				// brief must not offer the inline / stdin modes as options.
+				for _, gone := range []string{
+					"## Comment Formatting",
+					"--content \"...\"",
+					"--content-stdin",
+				} {
+					if strings.Contains(s, gone) {
+						t.Errorf("%s still carries pre-DENE-1329 comment-formatting text %q (it lives in `multica issue comment add --help`)\n---\n%s", configFile, gone, s)
 					}
 				}
 
@@ -2615,16 +2637,21 @@ func TestInjectRuntimeConfigCommentGuardrailIsProviderAgnostic(t *testing.T) {
 	}
 }
 
-// TestInjectRuntimeConfigLinuxCommentFormattingEmphasizesFile pins that the
-// "## Comment Formatting" section emits the file-first mandate on non-Windows
-// hosts for EVERY provider (post-#4182). The previous quoted-HEREDOC
-// `--content-stdin` rule was kept for years to defend against backtick / `$()`
-// substitution in the body (MUL-2904), but the heredoc/flag boundary turned out
-// to be its own structural bug: when a model wrapped extra flags around the
-// heredoc on `multica issue create`, the flags were silently swallowed into
-// stdin (OXY-78, OXY-76). The file path defeats both classes — the body never
-// reaches the shell, and all flags live on one shell-token line — and converges
-// the Linux/macOS template with the long-standing Windows file-only path.
+// TestInjectRuntimeConfigLinuxCommentFormattingEmphasizesFile pins the
+// file-first mandate on non-Windows hosts for EVERY provider (post-#4182). The
+// previous quoted-HEREDOC `--content-stdin` rule was kept for years to defend
+// against backtick / `$()` substitution in the body (MUL-2904), but the
+// heredoc/flag boundary turned out to be its own structural bug: when a model
+// wrapped extra flags around the heredoc on `multica issue create`, the flags
+// were silently swallowed into stdin (OXY-78, OXY-76). The file path defeats
+// both classes — the body never reaches the shell, and all flags live on one
+// shell-token line.
+//
+// Since DENE-1329 the brief has no Comment Formatting section: it names
+// `--content-file` on the comment verb line, and the comment-triggered reply
+// block in the per-turn message carries the ready-to-run file-first command
+// (gated cleanup, `--parent`) and points at `multica issue comment add --help`
+// for the full rules (workdir-only path, receipt mode).
 //
 // Not parallel: mutates the package-level runtimeGOOS.
 func TestInjectRuntimeConfigLinuxCommentFormattingEmphasizesFile(t *testing.T) {
@@ -2651,42 +2678,36 @@ func TestInjectRuntimeConfigLinuxCommentFormattingEmphasizesFile(t *testing.T) {
 			}
 			s := string(data)
 
-			// Assert inside the section slice: "#4182" also appears in
-			// Available Commands, so a whole-file Contains would stay green
-			// with the HEREDOC ban deleted here (review catch on #6453).
-			// Match the HEADING at line start — Available Commands references
-			// "## Comment Formatting" inline earlier in the file.
-			cfStart := strings.Index(s, "\n## Comment Formatting\n")
-			if cfStart < 0 {
-				t.Fatalf("%s missing ## Comment Formatting section\n---\n%s", fileName, s)
+			if strings.Contains(s, "\n## Comment Formatting\n") {
+				t.Errorf("%s still carries the pre-DENE-1329 ## Comment Formatting section\n---\n%s", fileName, s)
 			}
-			cf := s[cfStart+1:]
-			if next := strings.Index(cf[3:], "\n## "); next >= 0 {
-				cf = cf[:next+3]
+			if !strings.Contains(s, "(bodies via `--content-file`)") {
+				t.Errorf("%s Commands section lost the --content-file body rule\n---\n%s", fileName, s)
 			}
+
+			reply := BuildCommentReplyInstructions(provider, "issue-1", "comment-1", false)
 			for _, want := range []string{
-				"always write the comment body to a UTF-8 file with your file-write tool first, then post it with `--content-file <path>`",
-				"Never use inline `--content` for agent-authored comments",
-				"never use `--content-stdin` HEREDOCs alongside other flags",
-				"#4182",
-				"never `/tmp` or shared paths",
-				"Keep the same `--parent` value",
-				"rm ./reply.md",
-				"do not rely on `\\n` escapes",
+				"Write the body file first",
+				"`multica issue comment add --help`",
+				"MUL-2904 / #4182",
+				"multica issue comment add issue-1 --parent comment-1 --content-file ./reply.md --output table && rm ./reply.md",
+				"do NOT reuse --parent values from previous turns",
+				"Do NOT write literal `\\n` escapes",
 			} {
-				if !strings.Contains(cf, want) {
-					t.Errorf("%s Comment Formatting section missing %q\n---\n%s", fileName, want, cf)
+				if !strings.Contains(reply, want) {
+					t.Errorf("%s reply instructions missing %q\n---\n%s", provider, want, reply)
 				}
 			}
 
-			// The previous mandate (#1795 / #1851 / MUL-2904) must NOT remain.
+			// The previous mandate (#1795 / #1851 / MUL-2904) must NOT remain
+			// on either surface.
 			for _, banned := range []string{
 				"always use `--content-stdin` with a HEREDOC, even for short single-line replies",
 				"<<'COMMENT'",
 				"Codex-Specific Comment Formatting",
 			} {
-				if strings.Contains(s, banned) {
-					t.Errorf("%s still carries pre-#4182 stdin mandate %q\n---\n%s", fileName, banned, s)
+				if strings.Contains(s, banned) || strings.Contains(reply, banned) {
+					t.Errorf("%s still carries pre-#4182 stdin mandate %q\n---\n%s\n---\n%s", fileName, banned, s, reply)
 				}
 			}
 		})
@@ -2694,10 +2715,13 @@ func TestInjectRuntimeConfigLinuxCommentFormattingEmphasizesFile(t *testing.T) {
 }
 
 // TestInjectRuntimeConfigCodexWindowsUsesContentFile pins that on Windows
-// the Comment Formatting section directs the agent at `--content-file`
-// instead of `--content-stdin`. PowerShell 5.1 / cmd.exe re-encode piped
-// HEREDOC bytes through the active console codepage and silently drop
-// non-ASCII as `?` before reaching `multica.exe` (#2198 / #2236 / #2376).
+// the agent is directed at `--content-file` instead of `--content-stdin`.
+// PowerShell 5.1 / cmd.exe re-encode piped HEREDOC bytes through the active
+// console codepage and silently drop non-ASCII as `?` before reaching
+// `multica.exe` (#2198 / #2236 / #2376). Since DENE-1329 the brief carries
+// only the `--content-file` verb rule; the Windows-specific warning rides in
+// the per-turn reply block (with PowerShell and Git Bash variants) and in
+// `multica issue comment add --help`.
 //
 // Not parallel: mutates the package-level runtimeGOOS.
 func TestInjectRuntimeConfigCodexWindowsUsesContentFile(t *testing.T) {
@@ -2714,21 +2738,26 @@ func TestInjectRuntimeConfigCodexWindowsUsesContentFile(t *testing.T) {
 		t.Fatalf("read AGENTS.md: %v", err)
 	}
 	s := string(data)
+	if !strings.Contains(s, "(bodies via `--content-file`)") {
+		t.Errorf("AGENTS.md missing Codex/Windows file-first rule\n---\n%s", s)
+	}
+
+	reply := BuildCommentReplyInstructions("codex", "issue-1", "comment-1", false)
 	for _, want := range []string{
-		"On Windows, **always write the comment body to a UTF-8 file",
-		"$OutputEncoding",
-		"--content-file",
-		"may replace non-ASCII characters with `?`",
+		"never pipe via `--content-stdin` (PowerShell drops non-ASCII",
+		"`multica issue comment add --help`",
+		"--content-file ./reply.md",
+		"if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }",
 	} {
-		if !strings.Contains(s, want) {
-			t.Errorf("AGENTS.md missing Codex/Windows file-first guidance %q\n---\n%s", want, s)
+		if !strings.Contains(reply, want) {
+			t.Errorf("Windows reply instructions missing file-first guidance %q\n---\n%s", want, reply)
 		}
 	}
 	for _, banned := range []string{
 		"always use `--content-stdin` with a HEREDOC, even for short single-line replies",
 	} {
-		if strings.Contains(s, banned) {
-			t.Errorf("AGENTS.md still carries Codex stdin mandate %q on Windows\n---\n%s", banned, s)
+		if strings.Contains(s, banned) || strings.Contains(reply, banned) {
+			t.Errorf("Codex stdin mandate %q still present on Windows\n---\n%s\n---\n%s", banned, s, reply)
 		}
 	}
 }

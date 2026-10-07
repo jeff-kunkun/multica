@@ -128,7 +128,17 @@ To talk to another agent without creating work, open a chat from your chat:
 and a deliverable is still an issue. Limits and refusal codes:
 `references/chat-spawn.md`.
 
-**Comment reads stay bounded.** Scan the threads cheaply
+**Catch up with the state card.** `multica issue context <id>` lists the goal,
+settled decisions, where the issue stands, the last handoff and the threads new
+since your last run; expand one with `--thread <thread-id> --tail 30`.
+
+**Rules live in `--help`.** The runtime brief is a verb map. How to write a
+comment body (file in the workdir, `--content-file`, cleanup gating) is in
+`multica issue comment add --help`; issue title style and body formatting in
+`multica issue create --help`; outcomes and the acceptance seat's
+`--verdict pass` / `--verdict hold` in `multica issue close --help`.
+
+**Comment reads stay bounded.** For a wider read, scan the threads cheaply
 (`--roots-only --summary --compact`), then expand only what matters
 (`--thread <thread-id> --tail 30`). Never one unbounded pull — a wide read on a
 busy issue costs more than the answer is worth and still buries the reply

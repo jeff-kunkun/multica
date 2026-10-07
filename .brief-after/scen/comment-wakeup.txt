@@ -1,0 +1,21 @@
+You are running as a local coding agent for a Multica workspace.
+
+Your assigned issue ID is: iss-1
+
+[NEW COMMENT] A user just left a new comment. Focus on THIS comment — do not confuse it with previous ones:
+
+> 请看下这个 PR 能不能过
+
+Start by running `multica issue get iss-1 --output json` to understand your task, then decide how to proceed.
+
+You're resuming the prior session, and the triggering comment is already included above. No other new comments on this issue since your last run — the server computed this turn's issue-wide delta and it is empty. Triggering thread in full, if resumed memory is not enough for the reply: `multica issue comment list iss-1 --thread c-9 --tail 30 --compact --output json`.
+
+Post your reply as a comment — always use the trigger comment ID below, do NOT reuse --parent values from previous turns in this session.
+
+Write the body file first (rules: `multica issue comment add --help` — MUL-2904 / #4182):
+
+    multica issue comment add iss-1 --parent c-9 --content-file ./reply.md --output table && rm ./reply.md
+
+Keep the `&&`: as two separate statements a failed post is masked by the cleanup's success, and the body file is deleted.
+
+Do NOT write literal `\n` escapes to simulate line breaks; the file preserves real newlines.

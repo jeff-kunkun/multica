@@ -24,6 +24,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/cli"
 	"github.com/multica-ai/multica/server/internal/closeprotocol"
 	"github.com/multica-ai/multica/server/internal/projectmemory"
+	"github.com/multica-ai/multica/server/internal/titling"
 	"github.com/multica-ai/multica/server/internal/util"
 )
 
@@ -275,7 +276,23 @@ var issueChildrenCmd = &cobra.Command{
 var issueCreateCmd = &cobra.Command{
 	Use:   "create",
 	Short: "Create a new issue",
+	Long:  issueCreateLong(),
 	RunE:  runIssueCreate,
+}
+
+// issueCreateLong carries the title and body rules that used to sit in every
+// agent brief (DENE-1329, ADR-0007): they are needed only when an issue is
+// created, so they live where that action is looked up.
+func issueCreateLong() string {
+	return "Create a new issue.\n\n" +
+		"Body: write a multi-line or rich description to a file inside the working\n" +
+		"directory and pass --description-file ./description.md; inline --description\n" +
+		"is for one short line (the shell rewrites quotes, backticks and $() first).\n" +
+		"The title already serves as the H1, so start the body with prose or ##\n" +
+		"subheadings; add a # H1 only when the user asks for one.\n\n" +
+		"Sub-issues: --parent <issue>; --status todo starts an agent-assigned child\n" +
+		"at once, --status backlog parks it, --stage <N> orders children in stages.\n\n" +
+		"Title style\n\n" + strings.TrimRight(titling.IssueTitleRules, "\n")
 }
 
 var issueUpdateCmd = &cobra.Command{
@@ -408,7 +425,14 @@ func issueCloseLong() string {
 		"this close wrote. Keys: " + strings.Join(projectmemory.LocationKeys(), ", ") + ".\n\n" +
 		"Repeat --decision \"...\" for each decision this round settled; it joins the\n" +
 		"state card's 已拍板 list that `multica issue context <id>` shows the next owner.\n" +
-		"--summary becomes the card's 上一棒交代."
+		"--summary becomes the card's 上一棒交代.\n\n" +
+		"Acceptance seat: pass with --outcome done --verdict pass when the checks this\n" +
+		"change owns are green and no named person still owes a decision\n" +
+		"(close.conclusion=awaiting_human). A check already red on the base branch is\n" +
+		"not such a wait: merge with `gh pr merge --squash <url>` and pass again. A\n" +
+		"failing ticket is not a close: `multica issue comment add <id> --verdict hold\n" +
+		"--content-file ./review.md` wakes the executor. Words like 通过 in a body are\n" +
+		"not a verdict, and a passed ticket is never left in_review for a person."
 }
 
 var issueDisposeCmd = &cobra.Command{
@@ -487,6 +511,15 @@ var issueCommentAddCmd = &cobra.Command{
 	Use:   "add <issue-id>",
 	Short: "Add a comment to an issue",
 	Long: `Add a comment to an issue.
+
+Agent-authored bodies: write the body to a UTF-8 file inside the working
+directory first, then post it with --content-file ./reply.md. Inline --content
+and --content-stdin heredocs get mangled by the shell (MUL-2904, #4182), and on
+Windows PowerShell piping can replace non-ASCII with "?". Delete the file only
+after the post succeeded (` + "`&&`" + ` in bash, a $LASTEXITCODE check in PowerShell).
+Use --output table to confirm a final result without echoing the body, --output
+json when you need the comment id. One reply per thread: a distinct body file
+for each.
 
 --mode decides what happens to agents the comment wakes that are still
 replying on this issue (omit it for the usual behaviour):

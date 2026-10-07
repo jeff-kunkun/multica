@@ -494,7 +494,7 @@ func buildPromptBody(task Task, provider string) string {
 		var b strings.Builder
 		fmt.Fprintf(&b, "You are running as a local coding agent for a Multica workspace.\n\nYour assigned issue ID is: %s\n\n[WAKEUP]\n%s\n\n", task.IssueID, task.HandoffNote)
 		fmt.Fprintf(&b, "Start by running `multica issue get %s --output json`, then read current run/comment state. Decide whether the instruction's goal is met; the trigger reports a fact, not business completion. This is an ordinary run with normal result delivery, except where the [WAKEUP] block offers a check-in.\n", task.IssueID)
-		fmt.Fprintf(&b, "Scan comment threads with `multica issue comment list %s --roots-only --summary --compact --output json`, then expand relevant threads with `--thread <id> --tail 30`.\n", task.IssueID)
+		fmt.Fprintf(&b, "Read the state card with `multica issue context %s`; expand a thread it lists with `multica issue comment list %s --thread <id> --tail 30`.\n", task.IssueID, task.IssueID)
 		if task.WakeupSystemRule != "" {
 			// Platform rules belong to the issue, not to a run; members manage them.
 			fmt.Fprintf(&b, "This wakeup is the platform's sub-issue rule for this issue. Do not try to change or disable it; members manage it on the issue.\n")
@@ -528,11 +528,10 @@ func buildPromptBody(task Task, provider string) string {
 		fmt.Fprintf(&b, "> %s\n\n", task.HandoffNote)
 	}
 	fmt.Fprintf(&b, "Start by running `multica issue get %s --output json` to understand your task, then complete it.\n", task.IssueID)
-	// Workflow step 2 owns the catch-up rule for every issue turn; this line
-	// only hands over the commands. It used to add "(assignment-triggered tasks
-	// treat the read as mandatory)", which read as if comment-triggered turns
-	// did not (MUL-6984).
-	fmt.Fprintf(&b, "For comment history, workflow step 2 applies. Scan the threads first with `multica issue comment list %s --roots-only --summary --compact --output json`, then expand only what matters with `--thread <thread-id> --tail 30`. For `--since` incremental polling, pagination, and folding, see `multica issue comment list --help`.\n", task.IssueID)
+	// Workflow step 1 owns the catch-up rule for every issue turn: the state
+	// card replaced the mandatory comment scan (DENE-1329); this line only
+	// hands over the command.
+	fmt.Fprintf(&b, "Then read the state card: `multica issue context %s`.\n", task.IssueID)
 	return b.String()
 }
 
@@ -840,9 +839,9 @@ func buildCommentPrompt(task Task, provider string) string {
 	//                            server all produce that same zero, and none of
 	//                            them looked (NewCommentsDeltaKnown).
 	//
-	// Whether the scan happens is never decided here — workflow step 2 owns
-	// that; these hints carry this turn's facts and exact commands. Final
-	// fallback (no trigger id, shouldn't happen here): plain read.
+	// These hints carry this turn's facts and exact commands; the state card
+	// (workflow step 1) is the issue-wide catch-up. Final fallback (no trigger
+	// id, shouldn't happen here): the state card.
 	var hint string
 	if resumed {
 		hint = execenv.BuildNewCommentsHint(task.IssueID, task.TriggerCommentID, task.TriggerThreadID, task.NewCommentsSince, task.NewCommentCount)
@@ -860,7 +859,7 @@ func buildCommentPrompt(task Task, provider string) string {
 	if hint != "" {
 		b.WriteString(hint)
 	} else {
-		fmt.Fprintf(&b, "Read the discussion: scan with `multica issue comment list %s --roots-only --summary --compact --output json`, then expand what matters with `--thread <thread-id> --tail 30`.\n\n", task.IssueID)
+		fmt.Fprintf(&b, "Read the discussion: `multica issue context %s` lists the threads that moved; expand one with `multica issue comment list %s --thread <thread-id> --tail 30`.\n\n", task.IssueID, task.IssueID)
 	}
 	// Reply routing. When this run coalesced comments spanning MORE THAN ONE
 	// root thread, answer each thread in its own thread instead of dumping one
