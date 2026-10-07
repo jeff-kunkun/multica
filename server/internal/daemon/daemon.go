@@ -656,6 +656,17 @@ type Daemon struct {
 	// the safety delay elapses, the next claim bypasses WS once and uses HTTP so
 	// a flaky reconnecting WS cannot starve queued tasks indefinitely.
 	wsClaimHTTPFallbackAfter atomic.Int64
+	// claimRecoveryPending is set while the outcome of an earlier claim is
+	// unknown (uncertain WS result, HTTP failure in flight) and at startup. The
+	// next claim then carries recover_undelivered so the server re-sends tasks it
+	// dispatched to us but whose response was lost, instead of leaving them to the
+	// stale reclaim (DENE-1611). Cleared by the first claim that gets a response.
+	claimRecoveryPending atomic.Bool
+	// heldTasks is the set of task ids this daemon has taken from a claim and not
+	// yet finished with. It is sent with a recovery claim and used to drop a
+	// re-sent copy of a task already being prepared or run.
+	heldTasksMu sync.Mutex
+	heldTasks   map[string]struct{}
 
 	// runtimeGoneMu guards runtimeGoneInflight, reregisterNextAttempt, and
 	// reregisterLastCompletedAt. The state lets heartbeat / poller / WS-ack
@@ -830,6 +841,7 @@ func New(cfg Config, logger *slog.Logger) *Daemon {
 		terminalReportWakeup:        make(chan struct{}, 1),
 		terminalReportNow:           time.Now,
 		terminalReportFlight:        make(map[string]struct{}),
+		heldTasks:                   make(map[string]struct{}),
 		workspaces:                  make(map[string]*workspaceState),
 		runtimeIndex:                make(map[string]Runtime),
 		profileLaunchSpecs:          make(map[string]profileLaunchSpec),
@@ -884,6 +896,9 @@ func New(cfg Config, logger *slog.Logger) *Daemon {
 	d.worktreeCleanup = newWorktreeCleanupState(cfg.Profile)
 	d.localOutputs = newLocalOutputsStore(cfg.Profile)
 	d.sharedScratch = newSharedScratchState(cfg.Profile)
+	// Tasks dispatched to a previous process of this daemon never reached this
+	// one; ask the first claim to take them back (DENE-1611).
+	d.claimRecoveryPending.Store(true)
 	return d
 }
 
@@ -5886,7 +5901,7 @@ func (d *Daemon) runBatchPoller(pollerCtx, parentCtx context.Context, sem chan i
 			if pollerCtx.Err() == nil {
 				d.logger.Warn("batch claim failed", "error", err)
 			}
-			if err := sleepWithContextOrWakeup(pollerCtx, d.cfg.PollInterval, wakeup); err != nil {
+			if err := sleepWithContextOrWakeup(pollerCtx, d.capForClaimRecovery(d.cfg.PollInterval), wakeup); err != nil {
 				return
 			}
 			continue
@@ -5898,11 +5913,20 @@ func (d *Daemon) runBatchPoller(pollerCtx, parentCtx context.Context, sem chan i
 		// sees a zero-claims / zero-active window between claim and dispatch.
 		dispatched := 0
 		for i := range tasks {
-			if i >= len(slots) || tasks[i] == nil {
+			if dispatched >= len(slots) {
+				break
+			}
+			if tasks[i] == nil {
 				break
 			}
 			t := *tasks[i]
-			slot := slots[i]
+			// A recovery claim can re-send a task this daemon is already
+			// preparing or running; one task must never run twice.
+			if !d.holdTask(t.ID) {
+				d.logger.Warn("claimed task is already held by this daemon; ignoring re-sent copy", "task", t.ID)
+				continue
+			}
+			slot := slots[dispatched]
 			taskTarget := t.IssueID
 			if taskTarget == "" && t.ChatSessionID != "" {
 				taskTarget = "chat:" + t.ChatSessionID
@@ -5921,6 +5945,7 @@ func (d *Daemon) runBatchPoller(pollerCtx, parentCtx context.Context, sem chan i
 			lease := newTaskSlotLease(sem, slot, func() { signalPollerWakeup(wakeup) })
 			go func(t Task, lease *taskSlotLease) {
 				defer taskWG.Done()
+				defer d.releaseHeldTask(t.ID)
 				defer d.finishActiveTask(provider)
 				// Release local capacity before waking the poller (the lease does
 				// both). The task's terminal callback and local cleanup have both
@@ -5961,6 +5986,24 @@ func (d *Daemon) runBatchPoller(pollerCtx, parentCtx context.Context, sem chan i
 // jitter keeps the default below the server's 3-minute empty-claim cache TTL
 // while preventing an idle fleet from polling in lockstep.
 func (d *Daemon) taskClaimPollInterval(result claimTasksResult) time.Duration {
+	return d.capForClaimRecovery(d.baseTaskClaimPollInterval(result))
+}
+
+// claimRecoveryRetryInterval is how soon an unfinished recovery asks again: just
+// past the server's minimum age for taking a dispatch back, so the retry lands
+// as soon as it can succeed rather than after a 30s poll or a multi-minute WS
+// safety poll (DENE-1611).
+const claimRecoveryRetryInterval = 6 * time.Second
+
+// capForClaimRecovery shortens a poll wait while a recovery is pending.
+func (d *Daemon) capForClaimRecovery(wait time.Duration) time.Duration {
+	if d.claimRecoveryPending.Load() && wait > claimRecoveryRetryInterval {
+		return claimRecoveryRetryInterval
+	}
+	return wait
+}
+
+func (d *Daemon) baseTaskClaimPollInterval(result claimTasksResult) time.Duration {
 	if !d.wsRPC.supportsRPCV1() || !result.ClaimedOverWS || !result.ClaimPollHintSupported {
 		if d.cfg.PollInterval > 0 {
 			return d.cfg.PollInterval

@@ -6158,6 +6158,56 @@ func (q *Queries) HasTaskForIssue(ctx context.Context, issueID pgtype.UUID) (boo
 	return exists, err
 }
 
+const hasUndeliveredDispatchedTasksForRuntimes = `-- name: HasUndeliveredDispatchedTasksForRuntimes :one
+SELECT EXISTS (
+    SELECT 1 FROM agent_task_queue atq
+    WHERE atq.runtime_id = ANY($1::uuid[])
+      AND atq.status = 'dispatched'
+      AND atq.started_at IS NULL
+      AND atq.id <> ALL($2::uuid[])
+      AND EXISTS (
+          SELECT 1
+          FROM agent a
+          JOIN agent_runtime r ON r.id = atq.runtime_id
+          WHERE a.id = atq.agent_id
+            AND a.runtime_id = atq.runtime_id
+            AND (
+                r.visibility = 'public'
+                OR (
+                    r.visibility = 'private'
+                    AND (
+                        r.owner_id IS NULL
+                        OR a.owner_id IS NULL
+                        OR r.owner_id = a.owner_id
+                    )
+                )
+            )
+            AND r.status = 'online'
+            AND COALESCE(r.last_seen_at, r.updated_at) >=
+                now() - make_interval(secs => $3::double precision)
+      )
+) AS pending
+`
+
+type HasUndeliveredDispatchedTasksForRuntimesParams struct {
+	RuntimeIds       []pgtype.UUID `json:"runtime_ids"`
+	HeldTaskIds      []pgtype.UUID `json:"held_task_ids"`
+	RuntimeStaleSecs float64       `json:"runtime_stale_secs"`
+}
+
+// Companion to RecoverUndeliveredDispatchedTasksForRuntimes (DENE-1611): true
+// while a dispatch the daemon is not holding still exists for these runtimes —
+// one the recovery just skipped because it is younger than @min_age_secs, or one
+// cut off by the batch limit. It tells the daemon the recovery is not finished,
+// so an empty answer is not read as "nothing was lost". Same eligibility as the
+// recovery; the tasks that recovery just handed back go in @held_task_ids.
+func (q *Queries) HasUndeliveredDispatchedTasksForRuntimes(ctx context.Context, arg HasUndeliveredDispatchedTasksForRuntimesParams) (bool, error) {
+	row := q.db.QueryRow(ctx, hasUndeliveredDispatchedTasksForRuntimes, arg.RuntimeIds, arg.HeldTaskIds, arg.RuntimeStaleSecs)
+	var pending bool
+	err := row.Scan(&pending)
+	return pending, err
+}
+
 const linkTaskToIssue = `-- name: LinkTaskToIssue :exec
 UPDATE agent_task_queue
 SET issue_id = $2
@@ -9686,6 +9736,162 @@ RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, c
 // died — without us, the row would sit waiting forever.
 func (q *Queries) RecoverOrphanedTasksForRuntime(ctx context.Context, runtimeID pgtype.UUID) ([]AgentTaskQueue, error) {
 	rows, err := q.db.Query(ctx, recoverOrphanedTasksForRuntime, runtimeID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []AgentTaskQueue{}
+	for rows.Next() {
+		var i AgentTaskQueue
+		if err := rows.Scan(
+			&i.ID,
+			&i.AgentID,
+			&i.IssueID,
+			&i.Status,
+			&i.Priority,
+			&i.DispatchedAt,
+			&i.StartedAt,
+			&i.CompletedAt,
+			&i.Result,
+			&i.Error,
+			&i.CreatedAt,
+			&i.Context,
+			&i.RuntimeID,
+			&i.SessionID,
+			&i.WorkDir,
+			&i.TriggerCommentID,
+			&i.ChatSessionID,
+			&i.AutopilotRunID,
+			&i.Attempt,
+			&i.MaxAttempts,
+			&i.ParentTaskID,
+			&i.FailureReason,
+			&i.TriggerSummary,
+			&i.ForceFreshSession,
+			&i.IsLeaderTask,
+			&i.WaitReason,
+			&i.InitiatorUserID,
+			&i.HandoffNote,
+			&i.PrepareLeaseExpiresAt,
+			&i.SquadID,
+			&i.RuntimeMcpOverlay,
+			&i.EscalationForTaskID,
+			&i.FireAt,
+			&i.OriginatorUserID,
+			&i.RuntimeConnectedApps,
+			&i.CoalescedCommentIds,
+			&i.DeliveredCommentIds,
+			&i.ChatInputTaskID,
+			&i.ChatFinalizeDeferredAt,
+			&i.OriginatorSource,
+			&i.DelegatedFromTaskID,
+			&i.RetryOfTaskID,
+			&i.RerunOfTaskID,
+			&i.RuleVersionID,
+			&i.TriggerEvidenceKind,
+			&i.TriggerEvidenceRefID,
+			&i.AccountableUserID,
+			&i.SessionRolloutMissing,
+			&i.RetiredSessionID,
+			&i.QuickActionsDisabled,
+			&i.RegenerateQuickActionsFor,
+			&i.BranchName,
+			&i.DurableWorkDir,
+			&i.ChannelContextRevision,
+			&i.CommentThreadID,
+			&i.CancelledByType,
+			&i.CancelledByID,
+			&i.CancelledByName,
+			&i.IssueSnapshot,
+			&i.CodeDecision,
+			&i.FailureInputVersion,
+			&i.FailureFingerprint,
+			&i.WorkThreadID,
+			&i.ContextGeneration,
+			&i.ContextMessageLimit,
+			&i.ContextTokenBudget,
+			&i.ContinuityBreakReason,
+			&i.SessionMode,
+			&i.ResumedFromTaskID,
+			&i.SessionBreakReason,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const recoverUndeliveredDispatchedTasksForRuntimes = `-- name: RecoverUndeliveredDispatchedTasksForRuntimes :many
+UPDATE agent_task_queue
+SET dispatched_at = now(),
+    prepare_lease_expires_at = now() + make_interval(secs => $1::double precision)
+WHERE id IN (
+    SELECT atq.id FROM agent_task_queue atq
+    WHERE atq.runtime_id = ANY($2::uuid[])
+      AND atq.status = 'dispatched'
+      AND atq.started_at IS NULL
+      AND atq.id <> ALL($3::uuid[])
+      AND atq.dispatched_at < now() - make_interval(secs => $4::double precision)
+      AND EXISTS (
+          SELECT 1
+          FROM agent a
+          JOIN agent_runtime r ON r.id = atq.runtime_id
+          WHERE a.id = atq.agent_id
+            AND a.runtime_id = atq.runtime_id
+            AND (
+                r.visibility = 'public'
+                OR (
+                    r.visibility = 'private'
+                    AND (
+                        r.owner_id IS NULL
+                        OR a.owner_id IS NULL
+                        OR r.owner_id = a.owner_id
+                    )
+                )
+            )
+            AND r.status = 'online'
+            AND COALESCE(r.last_seen_at, r.updated_at) >=
+                now() - make_interval(secs => $5::double precision)
+      )
+    ORDER BY atq.priority DESC, atq.dispatched_at ASC
+    LIMIT $6::int
+    FOR UPDATE SKIP LOCKED
+)
+RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for, branch_name, durable_work_dir, channel_context_revision, comment_thread_id, cancelled_by_type, cancelled_by_id, cancelled_by_name, issue_snapshot, code_decision, failure_input_version, failure_fingerprint, work_thread_id, context_generation, context_message_limit, context_token_budget, continuity_break_reason, session_mode, resumed_from_task_id, session_break_reason
+`
+
+type RecoverUndeliveredDispatchedTasksForRuntimesParams struct {
+	PrepareLeaseSecs float64       `json:"prepare_lease_secs"`
+	RuntimeIds       []pgtype.UUID `json:"runtime_ids"`
+	HeldTaskIds      []pgtype.UUID `json:"held_task_ids"`
+	MinAgeSecs       float64       `json:"min_age_secs"`
+	RuntimeStaleSecs float64       `json:"runtime_stale_secs"`
+	MaxTasks         int32         `json:"max_tasks"`
+}
+
+// Lost-claim-response recovery (DENE-1611): a daemon whose last claim outcome
+// was uncertain (response timed out / connection dropped after the request left)
+// asks for everything the server dispatched to its runtimes that it is not
+// holding, instead of waiting out the 90s recovery window. @held_task_ids is the
+// set the daemon is already preparing or running, so a task it did receive is
+// never handed out twice. @min_age_secs keeps a claim still executing server-side
+// (bounded by the claim execution budget) from being swept up as "lost". Same
+// owner fence, freshness gate and dispatched_at/lease refresh as the stale
+// reclaim above; only the recovery-window and prepare-lease conditions are
+// replaced by the daemon's own held set.
+func (q *Queries) RecoverUndeliveredDispatchedTasksForRuntimes(ctx context.Context, arg RecoverUndeliveredDispatchedTasksForRuntimesParams) ([]AgentTaskQueue, error) {
+	rows, err := q.db.Query(ctx, recoverUndeliveredDispatchedTasksForRuntimes,
+		arg.PrepareLeaseSecs,
+		arg.RuntimeIds,
+		arg.HeldTaskIds,
+		arg.MinAgeSecs,
+		arg.RuntimeStaleSecs,
+		arg.MaxTasks,
+	)
 	if err != nil {
 		return nil, err
 	}
