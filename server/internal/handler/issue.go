@@ -70,7 +70,7 @@ type IssueResponse struct {
 	AssigneeType *string `json:"assignee_type"`
 	AssigneeID   *string `json:"assignee_id"`
 	// AssigneeSource is whose decision the executor is: human / automation /
-	// quote / agent / quote_rejected / router (DENE-1033). Omitted for a ticket that predates
+	// quote / agent / router (DENE-1033). Omitted for a ticket that predates
 	// the record and by the list endpoints, which do not select it, so a
 	// client merging a list row keeps what the detail read told it.
 	// AssigneeSourceUserID is the person behind "quote" and AssigneeQuote the
@@ -82,9 +82,9 @@ type IssueResponse struct {
 	// named an executor the server did not apply, so the caller sees it now
 	// instead of finding the slot empty later.
 	AssigneeIgnored bool `json:"assignee_ignored,omitempty"`
-	// AssigneeIgnoredReason explains a rejected per-quote proof so an agent can
-	// ask the person for an actual quote instead of guessing again, or a
-	// refused in-flight reassignment with the commands to use instead.
+	// AssigneeIgnoredReason explains an unverified per-quote proof (the slot
+	// went to routing), or a refused in-flight reassignment with the commands
+	// to use instead.
 	AssigneeIgnoredReason string `json:"assignee_ignored_reason,omitempty"`
 	// ReviewerType / ReviewerID are the acceptance slot, shaped exactly like
 	// the assignee pair: a REFERENCE to an agent or a member, not a copy of a
@@ -4682,6 +4682,7 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 	}
 	if stampRuling != nil {
 		issue = h.stampAssignee(r.Context(), issue, *stampRuling)
+		h.voidRouterSeatRuns(r, prevIssue, issue, *stampRuling)
 	}
 
 	// Determine actor identity: agent (via X-Agent-ID header) or member.
@@ -5701,6 +5702,7 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 		}
 		if batchStamp != nil {
 			issue = h.stampAssignee(r.Context(), issue, *batchStamp)
+			h.voidRouterSeatRuns(r, prevIssue, issue, *batchStamp)
 		}
 
 		prefix := h.getIssuePrefix(r.Context(), issue.WorkspaceID)

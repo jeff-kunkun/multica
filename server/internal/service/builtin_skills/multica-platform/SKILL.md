@@ -81,8 +81,9 @@ start agent runs that cost real budget. Never run one to see what happens. When
 the user has not asked for a specific mutation, propose it instead of making it.
 
 **A chat agent dispatches; it does not do the work.** By default it creates the
-ticket and leaves the executor to routing. Only when the person said 「你来做」
-(or named you) does it assign itself with `--per-quote "<原话>"` and start.
+ticket with no executor and routing picks. Only when the person said 「你来做」
+(or named you) does it assign itself with `--per-quote "<原话>"` and start. A
+quote that does not check out goes to routing too; do not go back for words.
 
 **The owner of a ticket owns it to the end.** Once it is yours: post a start
 comment first (how you read the ask, which direction you will take), comment at

@@ -927,6 +927,22 @@ WHERE issue_id = $1 AND agent_id = $2
   AND status IN ('queued', 'dispatched', 'deferred')
 RETURNING *;
 
+-- name: CancelAssignmentTasksByIssueAndAgent :many
+-- DENE-1613: a seat routing filled is replaced by a person's decision, so the
+-- runs that seat's assignment started lose their reason. Only those: a run the
+-- seat got from a mention, a squad, or anything other than the assignment is
+-- left alone, and so is the run making the request (except_task_id), which
+-- must not cancel itself from inside.
+UPDATE agent_task_queue
+SET status = 'cancelled', completed_at = now(), prepare_lease_expires_at = NULL,
+    cancelled_by_type = 'system', cancelled_by_id = NULL, cancelled_by_name = NULL
+WHERE issue_id = sqlc.arg('issue_id')::uuid
+  AND agent_id = sqlc.arg('agent_id')::uuid
+  AND trigger_evidence_kind = 'issue_assignment'
+  AND id IS DISTINCT FROM sqlc.narg('except_task_id')::uuid
+  AND status IN ('queued', 'dispatched', 'running', 'waiting_local_directory', 'deferred')
+RETURNING *;
+
 -- name: CancelPendingTasksByIssueAndAgentInThread :many
 -- Cancel only the not-yet-started plan in the selected thread. Other threads
 -- retain their queues; running tasks are stopped explicitly through CancelTask.
