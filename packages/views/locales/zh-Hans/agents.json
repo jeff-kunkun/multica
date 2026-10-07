@@ -267,6 +267,7 @@
     "prop_routing_tier_hint": "按强度匹配任务",
     "prop_dispatch_mode": "派单模式",
     "prop_dispatch_mode_hint": "仅点名：不会被自动派单，只能被人或其他智能体指名找到",
+    "routing_inherited_hint": "跟随基础角色。要单独设置，先关闭上方的「跟随基础角色的运行时」。",
     "prop_routing_usage": "用量",
     "prop_routing_usage_hint": "账号额度的相对多少"
   },

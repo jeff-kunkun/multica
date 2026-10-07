@@ -227,6 +227,7 @@
     "prop_routing_tier_hint": "Attribué aux tâches selon la force",
     "prop_dispatch_mode": "Attribution",
     "prop_dispatch_mode_hint": "Sur mention : jamais attribué automatiquement, seulement quand on le nomme",
+    "routing_inherited_hint": "Suit le rôle de base. Pour les régler ici, désactivez le suivi plus haut.",
     "prop_routing_usage": "Usage",
     "prop_routing_usage_hint": "Quota de compte disponible, en relatif"
   },

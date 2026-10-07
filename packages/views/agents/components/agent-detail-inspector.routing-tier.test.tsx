@@ -141,4 +141,31 @@ describe("AgentDetailInspector routing section", () => {
 
     expect(screen.getByRole("radio", { name: "Auto" })).toHaveAttribute("aria-checked", "true");
   });
+
+  it("keeps routing read-only while a specialisation follows its base role", async () => {
+    const user = userEvent.setup();
+    const onUpdate = renderInspector(
+      agentFixture({ parent_agent_id: "base-1", runtime_inherited: true, routing_tier: "weak" }),
+    );
+
+    const mentionOnly = screen.getByRole("radio", { name: "Mention only" });
+    expect(mentionOnly).toBeDisabled();
+    expect(screen.getByRole("radio", { name: "Medium" })).toBeDisabled();
+    expect(screen.getByRole("radio", { name: "Tight" })).toBeDisabled();
+    expect(screen.getByText(/Follows the base role/)).toBeInTheDocument();
+
+    await user.click(mentionOnly);
+    expect(onUpdate).not.toHaveBeenCalledWith("agent-1", expect.objectContaining({ dispatch_mode: expect.anything() }));
+  });
+
+  it("lets a specialisation that stopped following set its dispatch mode", async () => {
+    const user = userEvent.setup();
+    const onUpdate = renderInspector(
+      agentFixture({ parent_agent_id: "base-1", runtime_inherited: false }),
+    );
+
+    await user.click(screen.getByRole("radio", { name: "Mention only" }));
+
+    expect(onUpdate).toHaveBeenCalledWith("agent-1", { dispatch_mode: "mention_only" });
+  });
 });

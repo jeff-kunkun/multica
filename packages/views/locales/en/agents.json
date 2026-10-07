@@ -283,6 +283,7 @@
     "prop_routing_tier_hint": "Matched to tasks by strength",
     "prop_dispatch_mode": "Dispatch",
     "prop_dispatch_mode_hint": "Mention only: never auto-dispatched; people or agents must name it",
+    "routing_inherited_hint": "Follows the base role. To set these here, turn off following above.",
     "prop_routing_usage": "Usage",
     "prop_routing_usage_hint": "How much account quota this seat has, relatively"
   },
