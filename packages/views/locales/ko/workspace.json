@@ -47,7 +47,7 @@
       "target_checking": "찾는 중…",
       "target_not_found": "이 주소에 해당하는 워크스페이스가 없습니다",
       "target_self": "현재 워크스페이스입니다",
-      "projects_label": "공유할 프로젝트",
+      "projects_label": "이 워크스페이스의 어떤 프로젝트를 상대에게 보여줄지",
       "no_shareable_projects": "공유할 수 있는 프로젝트가 없습니다. 비공개 프로젝트는 공유할 수 없습니다.",
       "create": "연결 제안",
       "create_hint": "선택해도 비공개 작업과 비공개 프로젝트는 숨겨집니다.",

@@ -47,7 +47,7 @@
       "target_checking": "Recherche…",
       "target_not_found": "Aucun espace de travail à cette adresse.",
       "target_self": "C'est l'espace de travail actuel.",
-      "projects_label": "Projets à partager",
+      "projects_label": "Quels projets de cet espace ils peuvent voir",
       "no_shareable_projects": "Aucun projet partageable. Les projets privés ne peuvent jamais être partagés.",
       "create": "Proposer le lien",
       "create_hint": "Les tâches et projets privés restent masqués même s'ils sont cochés.",
