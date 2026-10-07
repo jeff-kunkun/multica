@@ -30,6 +30,7 @@ import (
 
 	"github.com/multica-ai/multica/server/internal/cli"
 	"github.com/multica-ai/multica/server/internal/daemon/execenv"
+	"github.com/multica-ai/multica/server/internal/daemon/localoutputs"
 	"github.com/multica-ai/multica/server/internal/daemon/repocache"
 	"github.com/multica-ai/multica/server/internal/selfexec"
 	"github.com/multica-ai/multica/server/internal/sparsecheckout"
@@ -415,6 +416,10 @@ type Daemon struct {
 	// has used, which copies are busy, and the policy (off by default) that
 	// decides whether a finished one may be removed (DENE-617).
 	worktreeCleanup *worktreeCleanupState
+	// localOutputs is this machine's copy of every attachment an agent here
+	// uploaded, so the desktop app can open it in place (DENE-1549). Nil on a
+	// Daemon built field-by-field in a test.
+	localOutputs *localoutputs.Store
 	// sharedScratch owns the one session folder per workspace: which
 	// conversations a task is in, and how long an idle one stays (DENE-622).
 	// Nil on a Daemon built field-by-field in a test.
@@ -877,6 +882,7 @@ func New(cfg Config, logger *slog.Logger) *Daemon {
 		d.localSharedOverrides = newLocalSharedOverrideStore("")
 	}
 	d.worktreeCleanup = newWorktreeCleanupState(cfg.Profile)
+	d.localOutputs = newLocalOutputsStore(cfg.Profile)
 	d.sharedScratch = newSharedScratchState(cfg.Profile)
 	return d
 }

@@ -62,6 +62,13 @@ type APIClient struct {
 	TaskID     string
 	HTTPClient *http.Client
 
+	// LocalCopyURL is the hosting daemon's local-outputs endpoint
+	// (http://127.0.0.1:<port>/outputs), set only inside a daemon-managed task.
+	// Every successful upload then leaves a copy there, keyed by attachment id,
+	// so the desktop app on this machine can open the file in place. Empty
+	// means no copy is kept.
+	LocalCopyURL string
+
 	// Identity overrides. Empty values fall back to the package-level
 	// ClientPlatform / ClientVersion / ClientOS.
 	Platform string
@@ -873,7 +880,8 @@ const chunkedUploadThreshold = 2 << 20
 // uploadAttachment is the one road every CLI attachment upload takes to
 // /api/upload-file. fields carries the binding (issue_id / task_id); empty
 // values are not sent. Files over 2 MiB go through the resumable chunked
-// upload. Callers own the shape checks on the response.
+// upload. A successful upload inside a daemon task also leaves a local copy
+// (keepLocalCopy). Callers own the shape checks on the response.
 func (c *APIClient) uploadAttachment(ctx context.Context, fileData []byte, filename string, fields map[string]string) (AttachmentResponse, error) {
 	sent := map[string]string{}
 	for k, v := range fields {
@@ -883,7 +891,11 @@ func (c *APIClient) uploadAttachment(ctx context.Context, fileData []byte, filen
 	}
 	fields = sent
 	if len(fileData) > chunkedUploadThreshold {
-		return c.uploadChunked(ctx, fileData, filename, fields)
+		result, err := c.uploadChunked(ctx, fileData, filename, fields)
+		if err == nil {
+			c.keepLocalCopy(ctx, result.ID, filename, fileData)
+		}
+		return result, err
 	}
 	var body bytes.Buffer
 	writer := multipart.NewWriter(&body)
@@ -943,7 +955,36 @@ func (c *APIClient) uploadAttachment(ctx context.Context, fileData []byte, filen
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		return AttachmentResponse{}, fmt.Errorf("decode upload response: %w", err)
 	}
+	c.keepLocalCopy(ctx, result.ID, filename, fileData)
 	return result, nil
+}
+
+// keepLocalCopyTimeout bounds handing the bytes to the daemon on 127.0.0.1.
+const keepLocalCopyTimeout = 30 * time.Second
+
+// keepLocalCopy hands an uploaded file to the hosting daemon's copy library.
+// Best effort and silent: the upload already succeeded, and an older daemon
+// without the endpoint, or no daemon at all, only means the desktop app
+// downloads the file instead of opening it in place.
+func (c *APIClient) keepLocalCopy(ctx context.Context, attachmentID, filename string, fileData []byte) {
+	if c.LocalCopyURL == "" || attachmentID == "" {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), keepLocalCopyTimeout)
+	defer cancel()
+	q := url.Values{"attachment_id": {attachmentID}, "filename": {filepath.Base(filename)}}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.LocalCopyURL+"?"+q.Encode(), bytes.NewReader(fileData))
+	if err != nil {
+		return
+	}
+	req.Header.Set("Content-Type", "application/octet-stream")
+	req.Header.Set("Authorization", "Bearer "+c.Token)
+	resp, err := (&http.Client{Timeout: keepLocalCopyTimeout}).Do(req)
+	if err != nil {
+		return
+	}
+	_, _ = io.Copy(io.Discard, resp.Body)
+	resp.Body.Close()
 }
 
 // ImportSkillFile imports a skill from a local archive (.skill / .zip) by
