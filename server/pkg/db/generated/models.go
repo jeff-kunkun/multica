@@ -1184,6 +1184,10 @@ type IssueGoal struct {
 	MaxNoProgressRounds    int32              `json:"max_no_progress_rounds"`
 	BudgetWarningAt        pgtype.Timestamptz `json:"budget_warning_at"`
 	LastContinuationTaskID pgtype.UUID        `json:"last_continuation_task_id"`
+	StoppedByType          pgtype.Text        `json:"stopped_by_type"`
+	StoppedByID            pgtype.UUID        `json:"stopped_by_id"`
+	StoppedOnBehalfOf      pgtype.UUID        `json:"stopped_on_behalf_of"`
+	StopReason             string             `json:"stop_reason"`
 }
 
 type IssueGoalCheck struct {

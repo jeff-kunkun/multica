@@ -482,6 +482,9 @@
       "duration": "Durée",
       "budget_warning": "Cet objectif a utilisé au moins 80 % de son budget. Il sera mis en pause à la limite et demandera quoi faire ensuite.",
       "stopped_hint": "Cet objectif est en pause. Répondez à la question à choix dans votre boîte de réception pour ajouter du budget, modifier la ligne de réussite ou arrêter.",
+      "stopped_by": "Arrêté par {{name}}. Continue comme une tâche ordinaire.",
+      "stopped_by_for": "Arrêté par {{name}} à la demande de {{person}}. Continue comme une tâche ordinaire.",
+      "stop_reason": "« {{reason}} »",
       "evidence_item": "Preuve",
       "open_evidence": "Ouvrir la preuve",
       "status": {
