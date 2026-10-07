@@ -47,7 +47,7 @@
       "target_checking": "確認中…",
       "target_not_found": "このアドレスのワークスペースはありません",
       "target_self": "これは現在のワークスペースです",
-      "projects_label": "共有するプロジェクト",
+      "projects_label": "このワークスペースのどのプロジェクトを相手に見せるか",
       "no_shareable_projects": "共有できるプロジェクトがありません。非公開プロジェクトは共有できません。",
       "create": "連携を申し出る",
       "create_hint": "チェックしても非公開のタスクやプロジェクトは表示されません。",
