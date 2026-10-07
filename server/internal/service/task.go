@@ -4506,6 +4506,29 @@ func (s *TaskService) ClaimTasksForRuntimesWithOptions(ctx context.Context, runt
 	return claimed, nil
 }
 
+// UndeliveredDispatchPending reports whether a dispatch the daemon is not holding
+// still exists on these runtimes after a recovery claim (DENE-1611): one too
+// young for the recovery to take yet, or cut off by the batch limit. The daemon
+// keeps asking for recovery while this is true instead of treating an empty
+// answer as "nothing was lost". heldTaskIDs must include the tasks the claim just
+// returned. A failed lookup reports true — recovery is only ever asked for again,
+// never skipped.
+func (s *TaskService) UndeliveredDispatchPending(ctx context.Context, runtimeIDs, heldTaskIDs []pgtype.UUID) bool {
+	if heldTaskIDs == nil {
+		heldTaskIDs = []pgtype.UUID{}
+	}
+	pending, err := s.Queries.HasUndeliveredDispatchedTasksForRuntimes(ctx, db.HasUndeliveredDispatchedTasksForRuntimesParams{
+		RuntimeIds:       runtimeIDs,
+		HeldTaskIds:      heldTaskIDs,
+		RuntimeStaleSecs: RuntimeClaimFreshnessSeconds,
+	})
+	if err != nil {
+		slog.Warn("undelivered dispatch lookup failed; keeping recovery pending", "error", err)
+		return true
+	}
+	return pending
+}
+
 // cancelSupersededDeferredRetries drops deferred auto-retry rows that an active
 // task already supersedes, so a single rerun click still produces exactly one
 // more run. Runs immediately before promotion — promotion is the moment a stale

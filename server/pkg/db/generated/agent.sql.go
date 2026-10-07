@@ -6158,6 +6158,56 @@ func (q *Queries) HasTaskForIssue(ctx context.Context, issueID pgtype.UUID) (boo
 	return exists, err
 }
 
+const hasUndeliveredDispatchedTasksForRuntimes = `-- name: HasUndeliveredDispatchedTasksForRuntimes :one
+SELECT EXISTS (
+    SELECT 1 FROM agent_task_queue atq
+    WHERE atq.runtime_id = ANY($1::uuid[])
+      AND atq.status = 'dispatched'
+      AND atq.started_at IS NULL
+      AND atq.id <> ALL($2::uuid[])
+      AND EXISTS (
+          SELECT 1
+          FROM agent a
+          JOIN agent_runtime r ON r.id = atq.runtime_id
+          WHERE a.id = atq.agent_id
+            AND a.runtime_id = atq.runtime_id
+            AND (
+                r.visibility = 'public'
+                OR (
+                    r.visibility = 'private'
+                    AND (
+                        r.owner_id IS NULL
+                        OR a.owner_id IS NULL
+                        OR r.owner_id = a.owner_id
+                    )
+                )
+            )
+            AND r.status = 'online'
+            AND COALESCE(r.last_seen_at, r.updated_at) >=
+                now() - make_interval(secs => $3::double precision)
+      )
+) AS pending
+`
+
+type HasUndeliveredDispatchedTasksForRuntimesParams struct {
+	RuntimeIds       []pgtype.UUID `json:"runtime_ids"`
+	HeldTaskIds      []pgtype.UUID `json:"held_task_ids"`
+	RuntimeStaleSecs float64       `json:"runtime_stale_secs"`
+}
+
+// Companion to RecoverUndeliveredDispatchedTasksForRuntimes (DENE-1611): true
+// while a dispatch the daemon is not holding still exists for these runtimes —
+// one the recovery just skipped because it is younger than @min_age_secs, or one
+// cut off by the batch limit. It tells the daemon the recovery is not finished,
+// so an empty answer is not read as "nothing was lost". Same eligibility as the
+// recovery; the tasks that recovery just handed back go in @held_task_ids.
+func (q *Queries) HasUndeliveredDispatchedTasksForRuntimes(ctx context.Context, arg HasUndeliveredDispatchedTasksForRuntimesParams) (bool, error) {
+	row := q.db.QueryRow(ctx, hasUndeliveredDispatchedTasksForRuntimes, arg.RuntimeIds, arg.HeldTaskIds, arg.RuntimeStaleSecs)
+	var pending bool
+	err := row.Scan(&pending)
+	return pending, err
+}
+
 const linkTaskToIssue = `-- name: LinkTaskToIssue :exec
 UPDATE agent_task_queue
 SET issue_id = $2

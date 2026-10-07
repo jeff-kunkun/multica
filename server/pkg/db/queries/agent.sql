@@ -1284,6 +1284,42 @@ WHERE id IN (
 )
 RETURNING *;
 
+-- name: HasUndeliveredDispatchedTasksForRuntimes :one
+-- Companion to RecoverUndeliveredDispatchedTasksForRuntimes (DENE-1611): true
+-- while a dispatch the daemon is not holding still exists for these runtimes —
+-- one the recovery just skipped because it is younger than @min_age_secs, or one
+-- cut off by the batch limit. It tells the daemon the recovery is not finished,
+-- so an empty answer is not read as "nothing was lost". Same eligibility as the
+-- recovery; the tasks that recovery just handed back go in @held_task_ids.
+SELECT EXISTS (
+    SELECT 1 FROM agent_task_queue atq
+    WHERE atq.runtime_id = ANY(@runtime_ids::uuid[])
+      AND atq.status = 'dispatched'
+      AND atq.started_at IS NULL
+      AND atq.id <> ALL(@held_task_ids::uuid[])
+      AND EXISTS (
+          SELECT 1
+          FROM agent a
+          JOIN agent_runtime r ON r.id = atq.runtime_id
+          WHERE a.id = atq.agent_id
+            AND a.runtime_id = atq.runtime_id
+            AND (
+                r.visibility = 'public'
+                OR (
+                    r.visibility = 'private'
+                    AND (
+                        r.owner_id IS NULL
+                        OR a.owner_id IS NULL
+                        OR r.owner_id = a.owner_id
+                    )
+                )
+            )
+            AND r.status = 'online'
+            AND COALESCE(r.last_seen_at, r.updated_at) >=
+                now() - make_interval(secs => @runtime_stale_secs::double precision)
+      )
+) AS pending;
+
 -- name: ExtendAgentTaskPrepareLease :one
 -- Keeps a dispatched task protected while the daemon resolves/cache/materializes
 -- startup inputs before StartTask. Once the daemon stops extending this short

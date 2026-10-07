@@ -296,6 +296,11 @@ type claimTasksResult struct {
 	ClaimPollHintSupported      bool    `json:"claim_poll_hint_supported,omitempty"`
 	NextDeferredTaskAfterMillis int64   `json:"next_deferred_task_after_ms,omitempty"`
 	ClaimedOverWS               bool    `json:"-"`
+	// RecoveryPending is the server saying a recovery claim is not finished:
+	// undelivered dispatches remain that it could not hand back yet (DENE-1611).
+	// An answer without it — including every answer from an older server — ends
+	// the recovery.
+	RecoveryPending bool `json:"recovery_pending,omitempty"`
 }
 
 // ClaimTasks is the machine-level (MUL-4257) batch counterpart of ClaimTask:

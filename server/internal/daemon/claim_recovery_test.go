@@ -11,6 +11,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
 // TestClaimTasksWSFirst_RecoveryRequestFollowsUncertainClaim pins the DENE-1611
@@ -198,5 +200,142 @@ func TestRunBatchPollerIgnoresResentHeldTask(t *testing.T) {
 	held, _ := recoveryBodies[0]["held_task_ids"].([]any)
 	if len(held) != 1 || held[0] != "t1" {
 		t.Fatalf("held_task_ids = %v, want [t1]", recoveryBodies[0]["held_task_ids"])
+	}
+}
+
+// An answer that says recovery is unfinished keeps it armed on both transports;
+// an empty answer without that signal is not proof anything was recovered.
+func TestClaimTasksWSFirst_RecoveryStaysArmedWhileServerSaysPending(t *testing.T) {
+	var pending atomic.Bool
+	pending.Store(true)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if pending.Load() {
+			w.Write([]byte(`{"tasks":[],"recovery_pending":true}`))
+			return
+		}
+		w.Write([]byte(`{"tasks":[]}`))
+	}))
+	defer srv.Close()
+	d := New(Config{ServerBaseURL: srv.URL, MaxConcurrentTasks: 4}, slog.New(slog.NewTextHandler(noopWriter{}, nil)))
+	claim := func() {
+		t.Helper()
+		if _, err := d.ClaimTasksWSFirst(context.Background(), "daemon-x", []string{"rt1"}, 2); err != nil {
+			t.Fatalf("claim: %v", err)
+		}
+	}
+
+	// Startup starts armed; HTTP answer says unfinished.
+	claim()
+	if !d.claimRecoveryPending.Load() {
+		t.Fatal("HTTP empty answer with recovery_pending cleared recovery")
+	}
+
+	// WS answer, same contract.
+	generation := d.wsRPC.attach(func(frame []byte) (*wsOutbound, error) {
+		var msg protocol.Message
+		_ = json.Unmarshal(frame, &msg)
+		var req protocol.RPCRequestPayload
+		_ = json.Unmarshal(msg.Payload, &req)
+		go d.wsRPC.deliver(protocol.RPCResponsePayload{RequestID: req.RequestID, Status: 200, Body: json.RawMessage(`{"tasks":[],"recovery_pending":true}`)})
+		return &wsOutbound{data: frame}, nil
+	})
+	d.wsRPC.markRPCV1Supported(generation)
+	claim()
+	if !d.claimRecoveryPending.Load() {
+		t.Fatal("WS empty answer with recovery_pending cleared recovery")
+	}
+
+	// Server finished: HTTP answer without the signal ends it.
+	d.wsRPC.attach(nil)
+	pending.Store(false)
+	claim()
+	if d.claimRecoveryPending.Load() {
+		t.Fatal("recovery stayed armed after the server reported it finished")
+	}
+}
+
+// TestClaimRecoverySurvivesPrematureEmptyRetry is the DENE-1611 review scenario
+// end to end through the daemon: claim 1 commits server-side and its response is
+// destroyed (connection closed); claim 2 retries at once, before the dispatch is
+// old enough to take back, and gets an honest "nothing yet, still pending"; claim
+// 3, after the safety window, still carries the recovery request and gets the
+// original task. The stub server models the real contract's minimum age.
+func TestClaimRecoverySurvivesPrematureEmptyRetry(t *testing.T) {
+	const minAge = 150 * time.Millisecond
+	var mu sync.Mutex
+	var dispatchedAt time.Time
+	var recoverFlags []bool
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		var body map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		recover := body["recover_undelivered"] == true
+		mu.Lock()
+		defer mu.Unlock()
+		recoverFlags = append(recoverFlags, recover)
+		switch {
+		case dispatchedAt.IsZero():
+			// Commit the dispatch, then lose the response.
+			dispatchedAt = time.Now()
+			conn, _, err := w.(http.Hijacker).Hijack()
+			if err == nil {
+				conn.Close()
+			}
+		case recover && time.Since(dispatchedAt) >= minAge:
+			w.Write([]byte(`{"tasks":[{"id":"lost-1","runtime_id":"rt1","agent":{"name":"a"}}]}`))
+		case recover:
+			w.Write([]byte(`{"tasks":[],"recovery_pending":true}`))
+		default:
+			w.Write([]byte(`{"tasks":[]}`))
+		}
+	}))
+	defer srv.Close()
+
+	d := New(Config{ServerBaseURL: srv.URL, MaxConcurrentTasks: 4}, slog.New(slog.NewTextHandler(noopWriter{}, nil)))
+	d.claimRecoveryPending.Store(false)
+	claim := func() ([]*Task, error) {
+		return d.ClaimTasksWSFirst(context.Background(), "daemon-x", []string{"rt1"}, 2)
+	}
+
+	if _, err := claim(); err == nil {
+		t.Fatal("claim 1: expected the destroyed response to surface as an error")
+	}
+	tasks, err := claim()
+	if err != nil || len(tasks) != 0 {
+		t.Fatalf("claim 2 = %v, %v; want an empty answer", tasks, err)
+	}
+	if !d.claimRecoveryPending.Load() {
+		t.Fatal("premature empty answer ended recovery; the lost task would wait for stale reclaim")
+	}
+	time.Sleep(minAge + 50*time.Millisecond)
+	tasks, err = claim()
+	if err != nil || len(tasks) != 1 || tasks[0].ID != "lost-1" {
+		t.Fatalf("claim 3 = %v, %v; want the original task back", tasks, err)
+	}
+	if d.claimRecoveryPending.Load() {
+		t.Fatal("recovery stayed armed after the task came back")
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(recoverFlags) != 3 || recoverFlags[0] || !recoverFlags[1] || !recoverFlags[2] {
+		t.Fatalf("recover flags per claim = %v, want [false true true]", recoverFlags)
+	}
+}
+
+// While recovery is pending the poller must retry within seconds, not wait out
+// the 30s poll or the multi-minute WS safety poll.
+func TestTaskClaimPollIntervalIsShortWhileRecoveryPending(t *testing.T) {
+	d := New(Config{PollInterval: 30 * time.Second, WSClaimPollInterval: 3 * time.Minute}, slog.Default())
+	d.claimRecoveryPending.Store(false)
+	if got := d.taskClaimPollInterval(claimTasksResult{}); got != 30*time.Second {
+		t.Fatalf("interval without recovery = %v, want 30s", got)
+	}
+	d.claimRecoveryPending.Store(true)
+	if got := d.taskClaimPollInterval(claimTasksResult{}); got != claimRecoveryRetryInterval {
+		t.Fatalf("interval with recovery pending = %v, want %v", got, claimRecoveryRetryInterval)
+	}
+	if got := d.capForClaimRecovery(2 * time.Second); got != 2*time.Second {
+		t.Fatalf("a shorter wait must not be stretched, got %v", got)
 	}
 }

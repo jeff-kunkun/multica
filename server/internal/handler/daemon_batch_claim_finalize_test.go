@@ -15,6 +15,7 @@ type batchClaimReceiptResponse struct {
 		AuthToken           string   `json:"auth_token"`
 		DeliveredCommentIDs []string `json:"delivered_comment_ids"`
 	} `json:"tasks"`
+	RecoveryPending bool `json:"recovery_pending"`
 }
 
 // TestClaimTasksByRuntime_MaxTasksZeroClaimsNothing pins the MUL-4257 review
@@ -402,5 +403,84 @@ func TestClaimTasksByRuntime_RecoversUndeliveredDispatch(t *testing.T) {
 	}
 	if got := post(map[string]any{"recover_undelivered": true}); len(got.Tasks) != 0 {
 		t.Fatalf("task handed out twice in a row: %+v", got.Tasks)
+	}
+}
+
+// TestClaimTasksByRuntime_RecoveryAnswersPendingUntilDispatchIsOldEnough is the
+// DENE-1611 review scenario on the server: a claim commits a dispatch and its
+// response is thrown away; the daemon retries at once with recover_undelivered.
+// That retry is too early to take the task back, and the server must say so
+// (recovery_pending) rather than return a bare empty answer the daemon would
+// read as "nothing lost". Once the dispatch is old enough the next recovery
+// claim returns the same task and the pending signal is gone.
+func TestClaimTasksByRuntime_RecoveryAnswersPendingUntilDispatchIsOldEnough(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	rt := createClaimReclaimRuntime(t, ctx, "Batch pending rt")
+	a, i := createClaimReclaimAgentAndIssue(t, ctx, rt, "Batch pending agent")
+
+	var taskID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority)
+		VALUES ($1, $2, $3, 'queued', 0)
+		RETURNING id
+	`, a, rt, i).Scan(&taskID); err != nil {
+		t.Fatalf("seed queued task: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE id = $1`, taskID) })
+
+	post := func(extra map[string]any) batchClaimReceiptResponse {
+		body := map[string]any{"daemon_id": batchClaimTestDaemonID, "runtime_ids": []string{rt}, "max_tasks": 5}
+		for k, v := range extra {
+			body[k] = v
+		}
+		w := httptest.NewRecorder()
+		testHandler.ClaimTasksByRuntime(w, newDaemonTokenRequest(http.MethodPost, "/api/daemon/tasks/claim", body, testWorkspaceID, batchClaimTestDaemonID))
+		if w.Code != http.StatusOK {
+			t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+		}
+		var resp batchClaimReceiptResponse
+		if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		return resp
+	}
+
+	// Claim 1: commits the dispatch; the response is discarded, as on a dead link.
+	if first := post(nil); len(first.Tasks) != 1 || first.Tasks[0].ID != taskID {
+		t.Fatalf("claim 1 = %+v, want task %s dispatched", first.Tasks, taskID)
+	}
+
+	// Claim 2: the immediate retry. Too early to recover, but not "nothing lost".
+	early := post(map[string]any{"recover_undelivered": true, "held_task_ids": []string{}})
+	if len(early.Tasks) != 0 {
+		t.Fatalf("early recovery took a task younger than the claim budget: %+v", early.Tasks)
+	}
+	if !early.RecoveryPending {
+		t.Fatal("early empty recovery answer did not report recovery_pending; the daemon would stop asking")
+	}
+
+	// A daemon that holds the task has nothing to recover: not pending.
+	if held := post(map[string]any{"recover_undelivered": true, "held_task_ids": []string{taskID}}); held.RecoveryPending {
+		t.Fatal("recovery reported pending for a task the daemon holds")
+	}
+
+	// Claim 3: past the safety window the same task comes back, and recovery is done.
+	if _, err := testPool.Exec(ctx, `UPDATE agent_task_queue SET dispatched_at = now() - interval '6 seconds' WHERE id = $1`, taskID); err != nil {
+		t.Fatalf("age dispatch: %v", err)
+	}
+	late := post(map[string]any{"recover_undelivered": true, "held_task_ids": []string{}})
+	if len(late.Tasks) != 1 || late.Tasks[0].ID != taskID {
+		t.Fatalf("late recovery = %+v, want task %s back without stale reclaim", late.Tasks, taskID)
+	}
+	if late.RecoveryPending {
+		t.Fatal("recovery still pending after the task was handed back")
+	}
+
+	// A plain claim never reports recovery state.
+	if plain := post(nil); plain.RecoveryPending {
+		t.Fatal("plain claim reported recovery_pending")
 	}
 }

@@ -5901,7 +5901,7 @@ func (d *Daemon) runBatchPoller(pollerCtx, parentCtx context.Context, sem chan i
 			if pollerCtx.Err() == nil {
 				d.logger.Warn("batch claim failed", "error", err)
 			}
-			if err := sleepWithContextOrWakeup(pollerCtx, d.cfg.PollInterval, wakeup); err != nil {
+			if err := sleepWithContextOrWakeup(pollerCtx, d.capForClaimRecovery(d.cfg.PollInterval), wakeup); err != nil {
 				return
 			}
 			continue
@@ -5986,6 +5986,24 @@ func (d *Daemon) runBatchPoller(pollerCtx, parentCtx context.Context, sem chan i
 // jitter keeps the default below the server's 3-minute empty-claim cache TTL
 // while preventing an idle fleet from polling in lockstep.
 func (d *Daemon) taskClaimPollInterval(result claimTasksResult) time.Duration {
+	return d.capForClaimRecovery(d.baseTaskClaimPollInterval(result))
+}
+
+// claimRecoveryRetryInterval is how soon an unfinished recovery asks again: just
+// past the server's minimum age for taking a dispatch back, so the retry lands
+// as soon as it can succeed rather than after a 30s poll or a multi-minute WS
+// safety poll (DENE-1611).
+const claimRecoveryRetryInterval = 6 * time.Second
+
+// capForClaimRecovery shortens a poll wait while a recovery is pending.
+func (d *Daemon) capForClaimRecovery(wait time.Duration) time.Duration {
+	if d.claimRecoveryPending.Load() && wait > claimRecoveryRetryInterval {
+		return claimRecoveryRetryInterval
+	}
+	return wait
+}
+
+func (d *Daemon) baseTaskClaimPollInterval(result claimTasksResult) time.Duration {
 	if !d.wsRPC.supportsRPCV1() || !result.ClaimedOverWS || !result.ClaimPollHintSupported {
 		if d.cfg.PollInterval > 0 {
 			return d.cfg.PollInterval

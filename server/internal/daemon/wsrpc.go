@@ -357,7 +357,7 @@ func (d *Daemon) claimTasksWSFirst(ctx context.Context, daemonID string, runtime
 			claimBody(daemonID, runtimeIDs, maxTasks, rec), &resp)
 		if err == nil {
 			resp.ClaimedOverWS = true
-			d.claimRecoveryPending.Store(false)
+			d.claimRecoveryPending.Store(resp.RecoveryPending)
 			return resp, nil
 		}
 		if errors.Is(err, errWSRPCUncertain) {
@@ -382,7 +382,7 @@ func (d *Daemon) claimTasksWSFirst(ctx context.Context, daemonID string, runtime
 	}
 	result, err := d.client.claimTasksWithHints(ctx, daemonID, runtimeIDs, maxTasks, rec)
 	if err == nil {
-		d.claimRecoveryPending.Store(false)
+		d.claimRecoveryPending.Store(result.RecoveryPending)
 		return result, nil
 	}
 	// Server has no batch route (404): freeze the old API contract by falling
