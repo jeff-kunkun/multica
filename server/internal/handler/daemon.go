@@ -2170,6 +2170,11 @@ func (h *Handler) ClaimTasksByRuntime(w http.ResponseWriter, r *http.Request) {
 		DaemonID   string   `json:"daemon_id"`
 		RuntimeIDs []string `json:"runtime_ids"`
 		MaxTasks   int      `json:"max_tasks"`
+		// RecoverUndelivered / HeldTaskIDs (DENE-1611): the daemon's previous
+		// claim outcome was uncertain, so re-send tasks dispatched to it that it
+		// is not holding instead of waiting for the stale reclaim.
+		RecoverUndelivered bool     `json:"recover_undelivered"`
+		HeldTaskIDs        []string `json:"held_task_ids"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
@@ -2284,7 +2289,16 @@ func (h *Handler) ClaimTasksByRuntime(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	claimed, err := h.TaskService.ClaimTasksForRuntimes(r.Context(), authorized, maxTasks)
+	heldTaskIDs := make([]pgtype.UUID, 0, len(req.HeldTaskIDs))
+	for _, raw := range req.HeldTaskIDs {
+		if id, perr := util.ParseUUID(raw); perr == nil {
+			heldTaskIDs = append(heldTaskIDs, id)
+		}
+	}
+	claimed, err := h.TaskService.ClaimTasksForRuntimesWithOptions(r.Context(), authorized, maxTasks, service.ClaimBatchOptions{
+		RecoverUndelivered: req.RecoverUndelivered,
+		HeldTaskIDs:        heldTaskIDs,
+	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to claim tasks: "+err.Error())
 		return
@@ -2386,12 +2400,27 @@ func (h *Handler) ClaimTasksByRuntime(w http.ResponseWriter, r *http.Request) {
 		out = append(out, resp)
 	}
 
+	// Recovery is only finished when nothing undelivered is left. An empty answer
+	// can also mean "too young to take yet", so say so and let the daemon ask
+	// again (DENE-1611). Tasks returned by this claim are not undelivered.
+	recoveryPending := false
+	if req.RecoverUndelivered {
+		held := heldTaskIDs
+		for i := range claimed {
+			held = append(held, claimed[i].ID)
+		}
+		recoveryPending = h.TaskService.UndeliveredDispatchPending(r.Context(), authorized, held)
+	}
+
 	if len(out) > 0 {
 		slog.Info("tasks claimed by runtime batch",
 			"runtimes", len(authorized), "requested_max", maxTasks, "claimed", len(out),
 			"total_ms", time.Since(start).Milliseconds())
 	}
 	response := map[string]any{"tasks": out}
+	if recoveryPending {
+		response["recovery_pending"] = true
+	}
 	// Only opted-in daemons understand this additive response metadata. Query
 	// after the claim so a future fire_at can shorten the long healthy-WS safety
 	// poll; a task that crossed fire_at during this request yields a bounded
