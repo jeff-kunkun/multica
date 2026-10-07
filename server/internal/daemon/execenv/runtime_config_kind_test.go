@@ -384,7 +384,10 @@ func TestBackgroundTaskSafetySlimHardPins(t *testing.T) {
 		"\"Local tests pass; CI running: <PR link>\" is a complete hand-off",
 		// 3. The one persistent-service exception and its handoff triple.
 		"Only a service the user asked to keep running may outlive the turn",
-		"detach it, verify it, and reply with URL, logs and how to stop it",
+		"detach it (durable logs, a recorded PID), verify it, and reply with URL, logs and how to stop it",
+		"without a supervisor its survival is best-effort",
+		// 2b. The CI-result carve-out, restored by DENE-1329 (sample C).
+		"explicitly ask for the CI result, wait for it in ONE foreground `gh pr checks <pr> --watch`",
 		// 4. Never kill the daemon.
 		"Never kill `multica` by name",
 		"stop only a PID you started",
@@ -394,15 +397,15 @@ func TestBackgroundTaskSafetySlimHardPins(t *testing.T) {
 			t.Errorf("slim Background work missing hardened pin %q\n---\n%s", want, out)
 		}
 	}
-	// Exactly one exception: the persistent service. The old "The one
-	// exception" CI carve-out (an explicitly requested CI result collected
-	// with `gh pr checks --watch`) is gone, so `gh pr checks --watch` may now
-	// appear only once — inside the ban.
+	// Exactly one persistent-service exception. `gh pr checks` appears twice:
+	// once inside the ban, once as the single foreground wait allowed when the
+	// trigger explicitly asks for the CI result (DENE-1329 kept sample C's
+	// carve-out).
 	if got := strings.Count(out, "may outlive the turn"); got != 1 {
 		t.Errorf("slim brief must state the persistent-service exception exactly once, got %d\n---\n%s", got, out)
 	}
-	if got := strings.Count(out, "gh pr checks"); got != 1 {
-		t.Errorf("`gh pr checks` must appear only once, as a banned wait, got %d\n---\n%s", got, out)
+	if got := strings.Count(out, "gh pr checks"); got != 2 {
+		t.Errorf("`gh pr checks` must appear exactly twice (the ban and the explicit-request carve-out), got %d\n---\n%s", got, out)
 	}
 	// `gh run watch` may only appear as a banned command, never as the
 	// section's example of how to wait properly.

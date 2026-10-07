@@ -9,11 +9,12 @@ import (
 
 // builtInStatusLine is the status bullet for workspaces without custom
 // statuses, including deployments behind an old server.
-const builtInStatusLine = "- `multica issue status <id> <status>` — flip status (todo / in_progress / in_review / done / blocked / backlog / cancelled).\n"
+const builtInStatusLine = "- `issue status <id> <status>` — flip status (todo / in_progress / in_review / done / blocked / backlog / cancelled)\n"
 
-// catalogBridgeBullet distinguishes workflow keys from lifecycle categories;
-// it must appear exactly when a catalog is present.
-const catalogBridgeBullet = "- The workflow rules above refer to exact built-in status keys, not categories. Custom statuses share lifecycle semantics only, not built-in automation behavior.\n"
+// catalogHeader opens the per-category listing; it must appear exactly when a
+// catalog is present. (The bridge bullet that used to follow it explained the
+// workflow's long status rules, which DENE-1329 moved out of the brief.)
+const catalogHeader = "- `issue status <id> <status>` — flip status. Available statuses by lifecycle category:\n"
 
 func TestBriefStatusCatalogAbsentUsesBuiltInLine(t *testing.T) {
 	t.Parallel()
@@ -22,8 +23,8 @@ func TestBriefStatusCatalogAbsentUsesBuiltInLine(t *testing.T) {
 	if !strings.Contains(out, builtInStatusLine) {
 		t.Fatalf("brief without a catalog must list the built-in statuses\n---\n%s", out)
 	}
-	if strings.Contains(out, catalogBridgeBullet) {
-		t.Errorf("brief without a catalog must not carry the catalog bridge bullet")
+	if strings.Contains(out, catalogHeader) {
+		t.Errorf("brief without a catalog must not carry the catalog listing")
 	}
 
 	withEmpty := base
@@ -65,12 +66,11 @@ func TestBriefStatusCatalogRendered(t *testing.T) {
 		t.Errorf("catalog brief must replace the built-in seven-value enumeration")
 	}
 	for _, want := range []string{
-		"- `multica issue status <id> <status>` — flip status. Available statuses by lifecycle category:\n",
+		catalogHeader,
 		"  - unstarted category: `backlog`, `todo` (built-in), `later` (Later — Deferred on purpose), `rework` (Rework)\n",
 		"  - done category: `done` (built-in)\n",
 		"  - started category: `in_progress`, `in_review`, `blocked` (built-in), `human_review` (Human Review — Awaiting human acceptance)\n",
 		"  - closed category: `cancelled` (built-in)\n",
-		catalogBridgeBullet,
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("catalog brief missing %q\n---\n%s", want, out)

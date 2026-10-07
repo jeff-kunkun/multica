@@ -50,14 +50,16 @@ func writeHeader(b *strings.Builder) {
 // writeBackgroundTaskSafetySlim emits the Background work section: the
 // four constraints only the model can keep, so they stay in the brief
 // (DENE-1329, ADR-0007) — never background-and-yield, do not wait on CI
-// (`multica issue close` owns it, MUL-5223), the one persistent-service
+// (`multica issue close` owns it, MUL-5223) unless the CI result is explicitly
+// asked for, the one persistent-service
 // exception (MUL-5274), and never kill the daemon by name. Incident history
 // behind each lives in those tickets, not here.
 func writeBackgroundTaskSafetySlim(b *strings.Builder) {
 	b.WriteString("## Background work\n\n")
 	b.WriteString("Your run ends when your turn exits; anything still running is orphaned and its result lost. Never background work and yield — block on results in the foreground. ")
 	b.WriteString("Don't wait on CI or external systems (no `gh pr checks --watch`, `gh run watch` or sleep polls); `multica issue close` handles CI, and \"Local tests pass; CI running: <PR link>\" is a complete hand-off. ")
-	b.WriteString("Only a service the user asked to keep running may outlive the turn: detach it, verify it, and reply with URL, logs and how to stop it. ")
+	b.WriteString("Only when the trigger or the acceptance criteria explicitly ask for the CI result, wait for it in ONE foreground `gh pr checks <pr> --watch`. ")
+	b.WriteString("Only a service the user asked to keep running may outlive the turn: detach it (durable logs, a recorded PID), verify it, and reply with URL, logs and how to stop it; without a supervisor its survival is best-effort. ")
 	b.WriteString("Never kill `multica` by name; stop only a PID you started, and never the daemon's (`multica daemon status --output json`).\n\n")
 }
 
@@ -208,7 +210,7 @@ func sanitizeBriefCodeToken(s string) string {
 func writeAvailableCommands(b *strings.Builder, ctx TaskContextForEnv) {
 	b.WriteString("## Commands\n\n")
 	b.WriteString("Reach Multica only through the `multica` CLI, never `curl` / `wget`. Run `multica <command> --help` for flags. The server rejects an incomplete call and says what is missing, so try the command instead of guessing. ")
-	b.WriteString("`--output json` writes JSON to stdout and notes to stderr; never merge them (`2>&1`) into what you parse.\n\n")
+	b.WriteString("`--output json` " + jsonStreamsRule + "\n\n")
 	b.WriteString("- `issue get | list | children` — read issues\n")
 	b.WriteString("- `issue context <id>` — the state card: goal, settled decisions, where it stands, the last handoff, threads new since your last run\n")
 	b.WriteString("- `issue comment list | add` — read / post comments (bodies via `--content-file`)\n")
@@ -229,6 +231,11 @@ func writeAvailableCommands(b *strings.Builder, ctx TaskContextForEnv) {
 		b.WriteString("Squad leader: `multica squad member set-role <squad-id> --member-id <id> --member-type <agent|member> --role <role>` changes a role in place (instead of remove+add).\n\n")
 	}
 }
+
+// jsonStreamsRule is the one stdout/stderr rule both brief builders carry: a
+// confirmation merged into the JSON makes a write that succeeded parse as a
+// failure, and the retry posts twice.
+const jsonStreamsRule = "writes JSON to stdout and notes to stderr; never merge them (`2>&1`) into what you parse — a write that succeeded would read as failed and get retried."
 
 // briefStatusCategoryOrder groups the briefing catalog by internal lifecycle,
 // matching ListIssueStatusEntries. User-facing columns still use status keys.
@@ -314,7 +321,7 @@ func writeIssueStatusCommand(b *strings.Builder, ctx TaskContextForEnv) {
 // workdir-only path is enforced by the CLI itself (MUL-4252).
 func writeAvailableCommandsQuickCreate(b *strings.Builder) {
 	b.WriteString("## Commands\n\n")
-	b.WriteString("Use `multica issue create --output json` (see `--help` for flags; `--attachment <path>` is repeatable). JSON goes to stdout and notes to stderr; never merge them (`2>&1`) into what you parse. ")
+	b.WriteString("Use `multica issue create --output json` (see `--help` for flags; `--attachment <path>` is repeatable); it " + jsonStreamsRule + " ")
 	b.WriteString("Inline `--description \"...\"` is only for a short single line with no code, quotes, backticks or `$()`. Anything richer goes through `--description-file ./description.md` inside your working directory; treat a failed file write as fatal.\n\n")
 }
 
@@ -730,7 +737,13 @@ func writeWorkflowIssue(b *strings.Builder, ctx TaskContextForEnv) {
 	} else {
 		b.WriteString("4. Finish with `multica issue close <id> --outcome <...> --evidence-file ./close.md`. ")
 	}
-	b.WriteString("A refused close names what is missing; fix it and call again. The reply says the status written, whether a PR merged and who is woken — quote it. A turn that does not close (an answer, a review hold) posts one comment instead, under the `--parent` the per-turn message gave. Acceptance seat: pass with `--outcome done --verdict pass`; send it back with `issue comment add <id> --verdict hold`.\n\n")
+	b.WriteString("A refused close names what is missing; fix it and call again. The reply says the status written, whether a PR merged and who is woken — quote it. ")
+	if ctx.IsSquadLeader {
+		b.WriteString("Otherwise post one comment under the `--parent` the per-turn message gave, unless the outcome is `no_action`. ")
+	} else {
+		b.WriteString("A turn that does not close (an answer, a review hold) posts one comment instead, under the `--parent` the per-turn message gave. ")
+	}
+	b.WriteString("Acceptance seat: pass with `--outcome done --verdict pass`; send it back with `issue comment add <id> --verdict hold`.\n\n")
 	// A custom catalog needs one reminder that workflow updates use exact keys.
 	if len(ctx.IssueStatuses) > 0 {
 		b.WriteString("Workflow rules name exact built-in status keys; custom statuses share lifecycle only, not built-in automation.\n\n")
@@ -857,7 +870,7 @@ func writeSkills(b *strings.Builder, ctx TaskContextForEnv) {
 func writeMentions(b *strings.Builder) {
 	b.WriteString("## Mentions\n\n")
 	b.WriteString("`[MUL-123](mention://issue/<issue-id>)` and `[Name](mention://project/<project-id>)` are plain links. `[@Name](mention://member/<user-id>)` **notifies a person**; `[@Name](mention://agent/<agent-id>)` **starts a run for that agent**. ")
-	b.WriteString("Mention only to pull someone into work they are not doing yet. Followers already see your comment; a thank-you or FYI mention of an agent costs a paid run; naming someone in prose stays plain text.\n\n")
+	b.WriteString("Mention only to pull someone into work they are not doing yet. Followers already see your comment; a thank-you or FYI mention of an agent costs a paid run; naming someone in prose stays plain text. When unsure, leave it out: a missed mention costs one follow-up ask, a stray one costs a run.\n\n")
 }
 
 // writeDeliveryInvariant emits the always-on delivery contract, shared by every

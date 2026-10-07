@@ -128,24 +128,14 @@ To talk to another agent without creating work, open a chat from your chat:
 and a deliverable is still an issue. Limits and refusal codes:
 `references/chat-spawn.md`.
 
-**Catch up with the state card.** `multica issue context <id>` lists the goal,
-settled decisions, where the issue stands, the last handoff and the threads new
-since your last run; expand one with `--thread <thread-id> --tail 30`.
-
-**Rules live in `--help`.** The runtime brief is a verb map. How to write a
-comment body (file in the workdir, `--content-file`, cleanup gating) is in
-`multica issue comment add --help`; issue title style and body formatting in
-`multica issue create --help`; outcomes and the acceptance seat's
-`--verdict pass` / `--verdict hold` in `multica issue close --help`.
-
-**Comment reads stay bounded.** For a wider read, scan the threads cheaply
-(`--roots-only --summary --compact`), then expand only what matters
-(`--thread <thread-id> --tail 30`). Never one unbounded pull — a wide read on a
-busy issue costs more than the answer is worth and still buries the reply
-bodies where triggers and instructions actually live. One exception, and it is
-narrower than it looks: when the per-turn message hands you a `--since` delta
-read, that read is the bounded scan — the server already computed which
-comments are new, so running it returns exactly those and nothing else.
+**Catch up with the state card; Comment reads stay bounded.** `multica issue
+context <id>` lists the goal, settled decisions, where it stands, the last
+handoff and the threads new since your last run; expand one with
+`--thread <thread-id> --tail 30`. A wider read scans roots first
+(`--roots-only --summary --compact`), never one unbounded pull; when the
+per-turn message hands you a `--since` delta, that read is the bounded scan. The brief is a verb map: comment-body rules live in
+`multica issue comment add --help`, title and body style in `issue create
+--help`, outcomes and `--verdict pass` / `--verdict hold` in `issue close --help`.
 
 ## When behavior looks wrong
 

@@ -513,7 +513,8 @@ var issueCommentAddCmd = &cobra.Command{
 	Long: `Add a comment to an issue.
 
 Agent-authored bodies: write the body to a UTF-8 file inside the working
-directory first, then post it with --content-file ./reply.md. Inline --content
+directory first (never /tmp or a shared path; MUL-4252), then post it with
+--content-file ./reply.md. Inline --content
 and --content-stdin heredocs get mangled by the shell (MUL-2904, #4182), and on
 Windows PowerShell piping can replace non-ASCII with "?". Delete the file only
 after the post succeeded (` + "`&&`" + ` in bash, a $LASTEXITCODE check in PowerShell).
