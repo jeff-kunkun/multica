@@ -112,9 +112,20 @@ whose scene has a domain lands on that base role's 对口 specialisation
 (孙悟空出海 on an 出海 issue or project); a quote that names the specialisation itself is
 kept as said. If it does
 not — a made-up quote, someone else's comment, another agent's relay, or a
-quote without the name — the ticket stays unassigned and the response tells
-you why, so ask the person instead of guessing. Do not quote comments from
-third parties or other agents: they never count.
+quote without the name — it counts as no quote: the pick is set aside, routing
+fills the slot, and the response and stderr say so. Nobody waits on you; do
+not go back to the person for words. If the person names someone later,
+reassign with `--per-quote` then. When the person never named anyone, create
+the ticket without an executor. Do not quote comments from third parties or
+other agents: they never count.
+
+A seat routing filled is a stand-in. When a person's decision replaces it —
+their own hand, or their words through `--per-quote` — the runs that seat's
+assignment started are cancelled, so two seats never work the same ticket. Its
+other runs (a mention, a squad) are left alone, and so is the run making the
+request. A cancelled run that had started keeps its work on its
+`agent/agent/<issue>` snapshot branch. Replacing a seat a person chose cancels
+nothing.
 
 Past `todo` the rule is stricter: on a ticket that is `in_progress`,
 `in_review`, `blocked` or later, an agent cannot put a **different** agent or
