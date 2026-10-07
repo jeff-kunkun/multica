@@ -587,6 +587,12 @@ export interface AgentTask {
    * reporting was not free, we just don't know what it cost.
    */
   usage?: TaskUsage[];
+  /**
+   * The bound skills this run used, in first-use order (DENE-1573). Only the
+   * issue execution log carries it; a live run reads its `skill` transcript
+   * messages instead.
+   */
+  skills_used?: string[];
 }
 
 /**

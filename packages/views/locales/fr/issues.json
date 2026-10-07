@@ -35,7 +35,9 @@
     "steer_resend_failed": "Impossible de l'envoyer comme nouvelle exécution.",
     "steer_step": "{{name}} a ajouté",
     "steer_step_read": "Lu",
-    "retrying": "En attente d'une nouvelle tentative."
+    "retrying": "En attente d'une nouvelle tentative.",
+    "skills_used": "Skills utilisés : {{names}}",
+    "skill_step": "Skill {{name}} utilisé"
   },
   "working_filter_error": {
     "title": "Impossible de charger les tâches en cours de traitement par les agents"

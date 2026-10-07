@@ -1254,7 +1254,8 @@
     "source_remote_checkout": "Remote checkout",
     "source_mode_in_place": "One run at a time, in your working copy",
     "source_mode_worktree": "Own git worktree per run",
-    "source_mode_shared": "Shared directory, runs in parallel"
+    "source_mode_shared": "Shared directory, runs in parallel",
+    "kind_skill": "Skill"
   },
   "task_failure": {
     "cancelled_by_system": "Cancelled by the system",

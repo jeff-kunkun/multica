@@ -35,7 +35,9 @@
     "steer_resend_failed": "Couldn't send it as a new run.",
     "steer_step": "{{name}} added",
     "steer_step_read": "Read",
-    "retrying": "Waiting to retry."
+    "retrying": "Waiting to retry.",
+    "skills_used": "Skills used: {{names}}",
+    "skill_step": "Used skill {{name}}"
   },
   "working_filter_error": {
     "title": "Couldn't load issues with working agents"

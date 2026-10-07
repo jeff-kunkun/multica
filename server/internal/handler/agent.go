@@ -1035,6 +1035,10 @@ type AgentTaskResponse struct {
 	// model call, genuinely has no number, and showing 0 would assert it was
 	// free. omitempty keeps both off the wire.
 	Usage []TaskUsageData `json:"usage,omitempty"`
+	// SkillsUsed lists the bound skills this run used, in first-use order
+	// (DENE-1573). Only the issue execution log fills it; empty means none
+	// were detected, or the daemon predates detection.
+	SkillsUsed []string `json:"skills_used,omitempty"`
 	// AuthToken is the task-scoped `mat_` token the daemon must inject as
 	// MULTICA_TOKEN in the agent process environment. The server binds it to
 	// this (agent_id, task_id) pair at claim time and treats any request

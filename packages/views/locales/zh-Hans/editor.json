@@ -119,7 +119,9 @@
     "no_results": "没有匹配的技能",
     "commands": {
       "note": "添加备注——不触发任何智能体"
-    }
+    },
+    "skill_group": "{{name}} 的 skill",
+    "skill_hint": "@ 一个智能体后，可选它的 skill"
   },
   "code_block": {
     "html_preview": "HTML 预览",

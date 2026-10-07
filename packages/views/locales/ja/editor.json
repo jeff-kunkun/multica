@@ -169,6 +169,8 @@
     "no_results": "一致するスキルなし",
     "commands": {
       "note": "メモを追加 — エージェントをトリガーしません"
-    }
+    },
+    "skill_group": "{{name}} の skill",
+    "skill_hint": "エージェントを @ すると、その skill を選べます"
   }
 }

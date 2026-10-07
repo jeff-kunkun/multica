@@ -34,7 +34,9 @@
     "steer_resend_failed": "没能作为新一轮发送。",
     "steer_step": "{{name}} 插话",
     "steer_step_read": "已读取",
-    "retrying": "正在等待重试。"
+    "retrying": "正在等待重试。",
+    "skills_used": "用到 skill：{{names}}",
+    "skill_step": "使用 skill {{name}}"
   },
   "working_filter_error": {
     "title": "无法加载智能体正在处理的任务"
