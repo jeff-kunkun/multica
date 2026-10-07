@@ -83,6 +83,7 @@ import {
   FileSpreadsheet,
   FileText,
   FileVideo,
+  FolderOpen,
   ImageIcon,
   LayoutGrid,
   ListTree,
@@ -92,6 +93,7 @@ import {
   Monitor,
   PanelRight,
   RotateCw,
+  LaptopMinimal,
   Smartphone,
   Tablet,
   WrapText,
@@ -126,7 +128,10 @@ import {
 } from "./utils/preview";
 import { parseStructured } from "./utils/parse-structured";
 import { formatBytes } from "../common/format-bytes";
-import { useAttachmentActions } from "./use-attachment-actions";
+import {
+  useAttachmentActions,
+  useLocalAttachment,
+} from "./use-attachment-actions";
 import { useAttachmentHtmlText } from "./hooks/use-attachment-html-text";
 import { useResignedInlineMedia } from "./hooks/use-inline-media-url";
 import { useZoomCanvas, type ZoomCanvasApi } from "./hooks/use-zoom-canvas";
@@ -818,6 +823,8 @@ function PreviewPanel({
   // headers), and there the browser's own context menu has Copy image. Copies
   // the frame on screen, which during a sequence swap is still the last one.
   const canCopyImage = kind === "image" && isDesktopShell();
+  // Desktop: the copy on this computer, when an agent here uploaded it.
+  const local = useLocalAttachment(state.attachmentId);
   const handleCopyImage = async () => {
     if (await copyImage(mediaUrl)) {
       toast.success(t(($) => $.image.image_copied));
@@ -1031,6 +1038,19 @@ function PreviewPanel({
             >
               <Copy className="size-4" />
             </ChromeButton>
+          )}
+          {local && (
+            <>
+              <ChromeButton
+                label={t(($) => $.attachment.open_local)}
+                onClick={local.open}
+              >
+                <LaptopMinimal className="size-4" />
+              </ChromeButton>
+              <ChromeButton label={local.revealLabel} onClick={local.reveal}>
+                <FolderOpen className="size-4" />
+              </ChromeButton>
+            </>
           )}
           <ChromeButton label={t(($) => $.image.download)} onClick={onDownload}>
             <Download className="size-4" />

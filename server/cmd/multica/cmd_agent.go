@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -338,7 +339,22 @@ func newAPIClient(cmd *cobra.Command) (*cli.APIClient, error) {
 	if taskID := os.Getenv("MULTICA_TASK_ID"); taskID != "" {
 		client.TaskID = taskID
 	}
+	client.LocalCopyURL = localCopyURL(token)
 	return client, nil
+}
+
+// localCopyURL is where uploads leave their local copy: the hosting daemon's
+// /outputs endpoint, only inside a daemon-managed task that carries its task
+// token. Anywhere else no copy is kept.
+func localCopyURL(token string) string {
+	if !inDaemonTaskIdentityContext() || !strings.HasPrefix(token, "mat_") {
+		return ""
+	}
+	port, err := strconv.Atoi(strings.TrimSpace(os.Getenv("MULTICA_DAEMON_PORT")))
+	if err != nil || port <= 0 {
+		return ""
+	}
+	return fmt.Sprintf("http://127.0.0.1:%d/outputs", port)
 }
 
 const (
