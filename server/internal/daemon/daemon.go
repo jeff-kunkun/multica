@@ -7094,6 +7094,18 @@ func providerNeedsInlineSystemPrompt(provider string) bool {
 	}
 }
 
+// resumedSessionHoldsBrief reports whether a resumed session already carries
+// the inline brief, so the turn need not paste it again (DENE-1331). The
+// pasting backends put the brief into the first user message, which the
+// session keeps; re-pasting it cost every resumed turn the whole brief again.
+// A resume the runtime rejects falls back to the fresh-session retry, which
+// pastes the brief anew. codebuddy is the exception: it takes the brief as
+// --append-system-prompt, which is not kept in the session and must ride
+// every turn.
+func resumedSessionHoldsBrief(provider, resumeSessionID string) bool {
+	return resumeSessionID != "" && provider != "codebuddy"
+}
+
 // sharedBriefDelivery says how a provider receives the runtime brief and its
 // skills when a shared-mode task keeps every daemon-written file out of the
 // cwd (execenv.PrepareParams.IsolateSidecars).
@@ -9906,7 +9918,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			briefInline = true
 		}
 	}
-	if briefInline {
+	if briefInline && !resumedSessionHoldsBrief(provider, execOpts.ResumeSessionID) {
 		execOpts.SystemPrompt = runtimeBrief
 	}
 
