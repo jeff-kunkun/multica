@@ -64,6 +64,7 @@ type Agent struct {
 	DoorbellEnabled       bool        `json:"doorbell_enabled"`
 	RoutingUsage          string      `json:"routing_usage"`
 	DomainID              pgtype.UUID `json:"domain_id"`
+	DispatchMode          string      `json:"dispatch_mode"`
 }
 
 type AgentAccessPass struct {
