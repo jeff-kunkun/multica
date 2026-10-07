@@ -9,7 +9,7 @@ import type { ArchivedInboxPage, ArchivedInboxFacets } from "../types/inbox";
 import type { InboxBoardResponse, ParkingRecordsResponse, UnreadInboxIssue, WaitingSummon } from "../types/home";
 import type { WorkThreadSnapshot } from "../types/work_thread";
 import type { Ask, CreateAskRequest, AnswerAskRequest } from "../types/ask";
-import type { LinkedView, LinkedViewParams, ListWorkspaceLinksResponse, WorkspaceLink, WorkspaceLinkAuditEntry, WorkspaceLinkLookup } from "../types/workspace-link";
+import type { LinkedView, LinkedViewParams, ListWorkspaceLinksResponse, WorkspaceLink, WorkspaceLinkAuditEntry, WorkspaceLinkDirection, WorkspaceLinkLookup } from "../types/workspace-link";
 import { configStore } from "../config";
 import { IssueGoalSchema, type CommentSendMode, type CreateIssueGoalInput } from "../types";
 import type {
@@ -6583,7 +6583,7 @@ export class ApiClient {
     const raw = await this.fetch<Partial<ListWorkspaceLinksResponse>>("/api/workspace-links");
     return {
       links: Array.isArray(raw?.links) ? raw.links : [],
-      can: { create: false, accept: false, manage: false, audit: false, ...raw?.can },
+      can: { create: false, accept: false, pull: false, manage: false, audit: false, ...raw?.can },
     };
   }
 
@@ -6597,7 +6597,11 @@ export class ApiClient {
     return this.fetch(`/api/workspace-links/lookup?target=${encodeURIComponent(target)}`);
   }
 
-  async createWorkspaceLink(body: { target_slug: string; project_ids: string[] }): Promise<WorkspaceLink> {
+  async createWorkspaceLink(body: {
+    target_slug: string;
+    project_ids: string[];
+    direction?: WorkspaceLinkDirection;
+  }): Promise<WorkspaceLink> {
     return this.fetch("/api/workspace-links", { method: "POST", body: JSON.stringify(body) });
   }
 
