@@ -67,7 +67,19 @@ export function PlacedInlineCommentRun({ presentation = "inline", ...props }: Pa
 
 function PlacedRunSessionCaption({ task }: { task: AgentTask }) {
   const lineage = useRunSessionLineage(task.issue_id, task.id);
-  return <RunSessionCaption lineage={lineage} className="pb-1.5" />;
+  // A run that already replied folds into the reply's header; its skills stay visible here.
+  return <>
+    <RunSessionCaption lineage={lineage} className="pb-1.5" />
+    <RunSkillsLine names={task.skills_used ?? []} className="pb-1.5" />
+  </>;
+}
+
+function RunSkillsLine({ names, className }: { names: string[]; className?: string }) {
+  const { t } = useT("issues");
+  if (names.length === 0) return null;
+  return <p className={cn("break-words text-caption text-muted-foreground", className)} data-run-skills>
+    {t(($) => $.inline_run.skills_used, { names: names.join("、") })}
+  </p>;
 }
 
 export function InlineCommentRun({ run, className, viewState, showIdentity = false, presentation = "inline", replyTo, replacesFailureNotice = false }: {
@@ -239,9 +251,7 @@ export function InlineCommentRun({ run, className, viewState, showIdentity = fal
       </div>
       <div className={cn(showIdentity && "pl-8")}>
         <RunSessionCaption lineage={sessionLineage} />
-        {skillsUsed.length > 0 && <p className="break-words text-caption text-muted-foreground" data-run-skills>
-          {t(($) => $.inline_run.skills_used, { names: skillsUsed.join("、") })}
-        </p>}
+        <RunSkillsLine names={skillsUsed} />
         {replyTo}
         {output && <div className="mt-2 text-body"><ReadonlyContent content={redactSecrets(output)} /></div>}
         {needsAction && rawError && <p title={rawError}
