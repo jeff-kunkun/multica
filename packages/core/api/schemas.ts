@@ -2597,7 +2597,8 @@ export const TaskMessagePayloadSchema = z.object({
   issue_id: z.string().default(""),
   chat_session_id: z.string().optional(),
   seq: z.number().default(0),
-  type: z.enum(["text", "thinking", "tool_use", "tool_result", "error"]).catch("text"),
+  // `skill` marks a bound skill's first use (DENE-1573); the name rides in `tool`.
+  type: z.enum(["text", "thinking", "tool_use", "tool_result", "error", "skill"]).catch("text"),
   tool: z.string().optional(),
   content: z.string().optional(),
   input: z.record(z.string(), z.unknown()).optional(),

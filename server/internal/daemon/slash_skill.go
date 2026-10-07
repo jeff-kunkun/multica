@@ -52,11 +52,16 @@ func selectedSkillsBlock(agent *AgentData, md string) string {
 		agentSkills[s.ID] = s.Name
 	}
 	var b strings.Builder
+	seen := make(map[string]struct{}, len(refs))
 	for _, ref := range refs {
 		name, ok := agentSkills[ref.ID]
 		if !ok {
 			continue
 		}
+		if _, dup := seen[ref.ID]; dup {
+			continue
+		}
+		seen[ref.ID] = struct{}{}
 		if b.Len() == 0 {
 			b.WriteString("Explicitly selected skills:\n")
 		}
