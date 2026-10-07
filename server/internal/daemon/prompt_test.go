@@ -2535,3 +2535,41 @@ func TestBuildPromptHandoffCard(t *testing.T) {
 		t.Fatal("a run without a handoff card must not render the block")
 	}
 }
+
+// DENE-1331: the card's heading says why the run opens with it, and a cold
+// run that has the card drops the full thread summary list it duplicates.
+func TestBuildPromptStateCardReasons(t *testing.T) {
+	base := Task{
+		IssueID: "issue-1", IssueTitle: "Fix", IssueContextGeneratedAt: "now",
+		IssueCommentSummaries: []IssueContextComment{{ThreadID: "t-1", Content: "一条很长的旧讨论"}},
+		IssueTriggerThread:    []IssueContextComment{{ID: "c-1", Content: "触发评论"}},
+	}
+	for reason, want := range map[string]string{
+		"":              "This issue was just handed to you",
+		"handoff":       "This issue was just handed to you",
+		"baton":         "Someone else closed or handed off this issue",
+		"wakeup":        "as the wakeup fires",
+		"fresh_session": "starts a new session in the same working directory",
+	} {
+		task := base
+		task.IssueHandoffCard, task.IssueStateCardReason = "## 状态卡 DENE-1\n上一棒交代：接着修缓存", reason
+		out := BuildPrompt(task, "claude")
+		for _, w := range []string{want, "上一棒交代：接着修缓存", "触发评论"} {
+			if !strings.Contains(out, w) {
+				t.Fatalf("reason %q: prompt missing %q:\n%s", reason, w, out)
+			}
+		}
+		if strings.Contains(out, "一条很长的旧讨论") {
+			t.Fatalf("reason %q: a run with the card still lists every thread:\n%s", reason, out)
+		}
+	}
+	if out := BuildPrompt(base, "claude"); !strings.Contains(out, "一条很长的旧讨论") {
+		t.Fatalf("a cold run without the card lost its thread summaries:\n%s", out)
+	}
+
+	wake := base
+	wake.WakeupID, wake.IssueHandoffCard, wake.IssueStateCardReason = "w-1", "上一棒交代：等 CI", "wakeup"
+	if out := BuildPrompt(wake, "claude"); !strings.Contains(out, "[WAKEUP]") || !strings.Contains(out, "上一棒交代：等 CI") {
+		t.Fatalf("a wakeup does not open with the card:\n%s", out)
+	}
+}

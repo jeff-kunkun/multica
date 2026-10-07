@@ -170,6 +170,22 @@ multica workspace routing set --allow-upshift on
 Both flags write the existing `settings.routing` fields used by the web
 settings page; they do not create a CLI-only policy.
 
+The routing model's confidence floor and the stale-review sweep window are
+also part of the same settings block. `confidence_threshold` accepts a value
+in `(0, 1]`; `stale_review_hours` accepts a positive number of hours up to one
+year. The get command prints the effective defaults (`0.6` and `24`) when a
+legacy workspace has no saved value:
+
+```bash
+multica workspace routing get
+multica workspace routing set --confidence-threshold 0.75
+multica workspace routing set --stale-review-hours 48
+```
+
+These flags update `settings.routing.confidence_threshold` and
+`settings.routing.stale_review_hours`, the fields used by the settings page,
+server routing, and the stale-review sweep.
+
 So when you split work into stages, leave each child to routing: the next
 stage reaches the seat that did the previous one by itself once the switch is
 on. Do not assign it by hand to get the same effect.

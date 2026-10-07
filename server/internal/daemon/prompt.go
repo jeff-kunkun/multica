@@ -333,6 +333,11 @@ func buildIssueContextBlock(task Task) string {
 				fmt.Fprintf(&b, "- [%s] %s\n", c.ID, strings.ReplaceAll(strings.TrimSpace(c.Content), "\n", " "))
 			}
 		}
+	} else if strings.TrimSpace(task.IssueHandoffCard) != "" {
+		// The state card below lists the threads that moved; the full
+		// summary list would say the same at many times the size.
+		b.WriteString("Comment threads: see the state card below; expand one with `--thread <id> --tail 30`.\n")
+		writeTriggerThread(&b, task.IssueTriggerThread)
 	} else {
 		if len(task.IssueCommentSummaries) > 0 {
 			b.WriteString("Comment thread summaries:\n")
@@ -340,12 +345,7 @@ func buildIssueContextBlock(task Task) string {
 				fmt.Fprintf(&b, "- thread %s (%s, author=%s, replies=%d, last_activity=%s): %s\n", c.ThreadID, c.CreatedAt, c.AuthorType, c.ReplyCount, c.LastActivityAt, strings.ReplaceAll(strings.TrimSpace(c.Content), "\n", " "))
 			}
 		}
-		if len(task.IssueTriggerThread) > 0 {
-			b.WriteString("Triggering thread (root plus recent replies):\n")
-			for _, c := range task.IssueTriggerThread {
-				fmt.Fprintf(&b, "- [%s] %s\n", c.ID, strings.ReplaceAll(strings.TrimSpace(c.Content), "\n", " "))
-			}
-		}
+		writeTriggerThread(&b, task.IssueTriggerThread)
 	}
 	if task.IssueContextTruncated {
 		b.WriteString("Some snapshot text was truncated; use the CLI reads in the brief to fill gaps.\n")
@@ -363,6 +363,16 @@ func buildIssueContextBlock(task Task) string {
 		cut = cut[:len(cut)-size]
 	}
 	return cut + marker
+}
+
+func writeTriggerThread(b *strings.Builder, thread []IssueContextComment) {
+	if len(thread) == 0 {
+		return
+	}
+	b.WriteString("Triggering thread (root plus recent replies):\n")
+	for _, c := range thread {
+		fmt.Fprintf(b, "- [%s] %s\n", c.ID, strings.ReplaceAll(strings.TrimSpace(c.Content), "\n", " "))
+	}
 }
 
 // writeCoordinatorRole states the division of labour when the task issue is a
@@ -467,7 +477,7 @@ func BuildPrompt(task Task, provider string, options ...PromptOption) string {
 			if !strings.HasSuffix(body, "\n\n") {
 				body += "\n"
 			}
-			body += "## Handoff\n\nThis issue was just handed to you. Start from the state card below; earlier comments are background.\n\n" + card + "\n\n"
+			body += stateCardHeading(task.IssueStateCardReason) + card + "\n\n"
 		}
 	}
 	// Run-scoped context is appended, never prepended: everything ahead of it
@@ -480,6 +490,22 @@ func BuildPrompt(task Task, provider string, options ...PromptOption) string {
 		body += blocks
 	}
 	return body
+}
+
+// stateCardHeading introduces the state card a run opens with, worded for
+// why the server sent it (DENE-1331). An empty reason is a handoff: older
+// servers send the card for nothing else.
+func stateCardHeading(reason string) string {
+	switch reason {
+	case "baton":
+		return "## State card\n\nSomeone else closed or handed off this issue since your last run. Start from the state card below.\n\n"
+	case "wakeup":
+		return "## State card\n\nWhere this issue stands as the wakeup fires:\n\n"
+	case "fresh_session":
+		return "## Fresh session\n\nYour earlier session on this issue sat idle past the prompt-cache window with a large context, so this run starts a new session in the same working directory. Files and branch are as you left them; what was settled and what you last said are in the state card below.\n\n"
+	default:
+		return "## Handoff\n\nThis issue was just handed to you. Start from the state card below; earlier comments are background.\n\n"
+	}
 }
 
 func shouldContinueInterruptedSession(task Task) bool {
