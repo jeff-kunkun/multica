@@ -347,3 +347,60 @@ func TestClaimTasksByRuntime_RepairsStaleCommentPlan(t *testing.T) {
 		t.Fatalf("expected the surviving comment rebuilt into a new trigger task, found %d", rebuilt)
 	}
 }
+
+// TestClaimTasksByRuntime_RecoversUndeliveredDispatch is the DENE-1611 loop:
+// a claim response is lost on a bad link, leaving the task dispatched. The
+// daemon's next claim carries recover_undelivered and gets the same task back
+// within seconds (no 90s stale reclaim), with a fresh token; the copy it already
+// holds (held_task_ids) is not sent again.
+func TestClaimTasksByRuntime_RecoversUndeliveredDispatch(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	rt := createClaimReclaimRuntime(t, ctx, "Batch recovery rt")
+	a, i := createClaimReclaimAgentAndIssue(t, ctx, rt, "Batch recovery agent")
+
+	// Dispatched 10s ago, prepare lease still live: the state a lost response
+	// leaves behind, invisible to the stale reclaim.
+	var taskID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, dispatched_at, prepare_lease_expires_at, started_at)
+		VALUES ($1, $2, $3, 'dispatched', 0, now() - interval '10 seconds', now() + interval '30 seconds', NULL)
+		RETURNING id
+	`, a, rt, i).Scan(&taskID); err != nil {
+		t.Fatalf("seed dispatched task: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE id = $1`, taskID) })
+
+	post := func(extra map[string]any) batchClaimReceiptResponse {
+		body := map[string]any{"daemon_id": batchClaimTestDaemonID, "runtime_ids": []string{rt}, "max_tasks": 5}
+		for k, v := range extra {
+			body[k] = v
+		}
+		w := httptest.NewRecorder()
+		testHandler.ClaimTasksByRuntime(w, newDaemonTokenRequest(http.MethodPost, "/api/daemon/tasks/claim", body, testWorkspaceID, batchClaimTestDaemonID))
+		if w.Code != http.StatusOK {
+			t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+		}
+		var resp batchClaimReceiptResponse
+		if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		return resp
+	}
+
+	if got := post(nil); len(got.Tasks) != 0 {
+		t.Fatalf("plain claim returned %+v; recovery must be opt-in", got.Tasks)
+	}
+	if got := post(map[string]any{"recover_undelivered": true, "held_task_ids": []string{taskID}}); len(got.Tasks) != 0 {
+		t.Fatalf("recovery re-sent a task the daemon holds: %+v", got.Tasks)
+	}
+	got := post(map[string]any{"recover_undelivered": true, "held_task_ids": []string{}})
+	if len(got.Tasks) != 1 || got.Tasks[0].ID != taskID || got.Tasks[0].AuthToken == "" {
+		t.Fatalf("recovery claim = %+v, want task %s with a fresh token", got.Tasks, taskID)
+	}
+	if got := post(map[string]any{"recover_undelivered": true}); len(got.Tasks) != 0 {
+		t.Fatalf("task handed out twice in a row: %+v", got.Tasks)
+	}
+}

@@ -2170,6 +2170,11 @@ func (h *Handler) ClaimTasksByRuntime(w http.ResponseWriter, r *http.Request) {
 		DaemonID   string   `json:"daemon_id"`
 		RuntimeIDs []string `json:"runtime_ids"`
 		MaxTasks   int      `json:"max_tasks"`
+		// RecoverUndelivered / HeldTaskIDs (DENE-1611): the daemon's previous
+		// claim outcome was uncertain, so re-send tasks dispatched to it that it
+		// is not holding instead of waiting for the stale reclaim.
+		RecoverUndelivered bool     `json:"recover_undelivered"`
+		HeldTaskIDs        []string `json:"held_task_ids"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
@@ -2284,7 +2289,16 @@ func (h *Handler) ClaimTasksByRuntime(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	claimed, err := h.TaskService.ClaimTasksForRuntimes(r.Context(), authorized, maxTasks)
+	heldTaskIDs := make([]pgtype.UUID, 0, len(req.HeldTaskIDs))
+	for _, raw := range req.HeldTaskIDs {
+		if id, perr := util.ParseUUID(raw); perr == nil {
+			heldTaskIDs = append(heldTaskIDs, id)
+		}
+	}
+	claimed, err := h.TaskService.ClaimTasksForRuntimesWithOptions(r.Context(), authorized, maxTasks, service.ClaimBatchOptions{
+		RecoverUndelivered: req.RecoverUndelivered,
+		HeldTaskIDs:        heldTaskIDs,
+	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to claim tasks: "+err.Error())
 		return

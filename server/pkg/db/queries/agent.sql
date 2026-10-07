@@ -1236,6 +1236,54 @@ WHERE id IN (
 )
 RETURNING *;
 
+-- name: RecoverUndeliveredDispatchedTasksForRuntimes :many
+-- Lost-claim-response recovery (DENE-1611): a daemon whose last claim outcome
+-- was uncertain (response timed out / connection dropped after the request left)
+-- asks for everything the server dispatched to its runtimes that it is not
+-- holding, instead of waiting out the 90s recovery window. @held_task_ids is the
+-- set the daemon is already preparing or running, so a task it did receive is
+-- never handed out twice. @min_age_secs keeps a claim still executing server-side
+-- (bounded by the claim execution budget) from being swept up as "lost". Same
+-- owner fence, freshness gate and dispatched_at/lease refresh as the stale
+-- reclaim above; only the recovery-window and prepare-lease conditions are
+-- replaced by the daemon's own held set.
+UPDATE agent_task_queue
+SET dispatched_at = now(),
+    prepare_lease_expires_at = now() + make_interval(secs => @prepare_lease_secs::double precision)
+WHERE id IN (
+    SELECT atq.id FROM agent_task_queue atq
+    WHERE atq.runtime_id = ANY(@runtime_ids::uuid[])
+      AND atq.status = 'dispatched'
+      AND atq.started_at IS NULL
+      AND atq.id <> ALL(@held_task_ids::uuid[])
+      AND atq.dispatched_at < now() - make_interval(secs => @min_age_secs::double precision)
+      AND EXISTS (
+          SELECT 1
+          FROM agent a
+          JOIN agent_runtime r ON r.id = atq.runtime_id
+          WHERE a.id = atq.agent_id
+            AND a.runtime_id = atq.runtime_id
+            AND (
+                r.visibility = 'public'
+                OR (
+                    r.visibility = 'private'
+                    AND (
+                        r.owner_id IS NULL
+                        OR a.owner_id IS NULL
+                        OR r.owner_id = a.owner_id
+                    )
+                )
+            )
+            AND r.status = 'online'
+            AND COALESCE(r.last_seen_at, r.updated_at) >=
+                now() - make_interval(secs => @runtime_stale_secs::double precision)
+      )
+    ORDER BY atq.priority DESC, atq.dispatched_at ASC
+    LIMIT @max_tasks::int
+    FOR UPDATE SKIP LOCKED
+)
+RETURNING *;
+
 -- name: ExtendAgentTaskPrepareLease :one
 -- Keeps a dispatched task protected while the daemon resolves/cache/materializes
 -- startup inputs before StartTask. Once the daemon stops extending this short
