@@ -143,6 +143,10 @@ type IssueResponse struct {
 	Properties  map[string]any          `json:"properties"`
 	Reactions   []IssueReactionResponse `json:"reactions,omitempty"`
 	Attachments []AttachmentResponse    `json:"attachments,omitempty"`
+	// DeliveryLine is set on a sub-issue that delivers onto its parent's
+	// branch instead of opening its own PR (DENE-1537). Detail and children
+	// reads fill it; other paths leave it off.
+	DeliveryLine *service.IssueDeliveryLineSummary `json:"delivery_line,omitempty"`
 	// Labels are bulk-attached by list/detail endpoints so the client can render
 	// chips without an N+1 round-trip per row. Pointer + omitempty so paths that
 	// don't load labels (e.g. UpdateIssue, batch UpdateIssues, the issue:updated
@@ -2699,6 +2703,11 @@ func (h *Handler) GetIssue(w http.ResponseWriter, r *http.Request) {
 	if driver, ok := h.issueDriver(r.Context(), issue); ok {
 		resp.Driver = driverResponse(driver)
 	}
+	if lines, err := service.DeliveryLineSummaries(r.Context(), h.Queries, []pgtype.UUID{issue.ID}); err == nil {
+		if line, ok := lines[resp.ID]; ok {
+			resp.DeliveryLine = &line
+		}
+	}
 
 	writeJSON(w, http.StatusOK, resp)
 }
@@ -2735,9 +2744,16 @@ func (h *Handler) ListChildIssues(w http.ResponseWriter, r *http.Request) {
 	// costs one catalog read rather than one per row.
 	statusResolver := issuestatus.NewResolver(issue.WorkspaceID)
 	drivers := h.issueDrivers(r.Context(), issue.WorkspaceID, children)
+	lines, linesErr := service.DeliveryLineSummaries(r.Context(), h.Queries, ids)
+	if linesErr != nil {
+		slog.Warn("list child issues: delivery lines failed", "issue_id", uuidToString(issue.ID), "error", linesErr)
+	}
 	resp := make([]IssueResponse, len(children))
 	for i, child := range children {
 		resp[i] = issueToResponse(child, prefix)
+		if line, ok := lines[uuidToString(child.ID)]; ok {
+			resp[i].DeliveryLine = &line
+		}
 		if driver, ok := drivers[uuidToString(child.ID)]; ok {
 			resp[i].Driver = driverResponse(driver)
 		}

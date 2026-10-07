@@ -606,7 +606,18 @@
     "title_suggestion_dismiss": "Dismiss",
     "title_suggestion_updated": "Title updated",
     "title_suggestion_apply_failed": "Failed to apply title suggestion",
-    "title_suggestion_dismiss_failed": "Failed to dismiss title suggestion"
+    "title_suggestion_dismiss_failed": "Failed to dismiss title suggestion",
+    "delivery_line": {
+      "section": "Delivery branch",
+      "section_children": "Sub-issue commits",
+      "delivers_to": "Delivers to {{identifier}}'s branch",
+      "status_open": "Not merged back yet",
+      "status_merged_one": "{{count}} commit merged",
+      "status_merged_other": "{{count}} commits merged",
+      "status_conflict": "Conflict, executor resolves",
+      "show_all_one": "Show all {{count}}",
+      "show_all_other": "Show all {{count}}"
+    }
   },
   "timeline": {
     "loading": "Loading..."

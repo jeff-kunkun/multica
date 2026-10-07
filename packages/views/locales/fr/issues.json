@@ -547,7 +547,18 @@
     "title_suggestion_dismiss": "Dismiss",
     "title_suggestion_updated": "Title updated",
     "title_suggestion_apply_failed": "Failed to apply title suggestion",
-    "title_suggestion_dismiss_failed": "Failed to dismiss title suggestion"
+    "title_suggestion_dismiss_failed": "Failed to dismiss title suggestion",
+    "delivery_line": {
+      "section": "Branche de livraison",
+      "section_children": "Commits des sous-tâches",
+      "delivers_to": "Livré sur la branche de {{identifier}}",
+      "status_open": "Pas encore fusionné",
+      "status_merged_one": "{{count}} commit fusionné",
+      "status_merged_other": "{{count}} commits fusionnés",
+      "status_conflict": "Conflit, l'exécutant résout",
+      "show_all_one": "Tout afficher ({{count}})",
+      "show_all_other": "Tout afficher ({{count}})"
+    }
   },
   "timeline": {
     "loading": "Chargement..."

@@ -263,8 +263,13 @@ var issueChildrenCmd = &cobra.Command{
 	Use:     "children <id>",
 	Aliases: []string{"subissues"},
 	Short:   "List an issue's sub-issues grouped by stage",
-	Args:    exactArgs(1),
-	RunE:    runIssueChildren,
+	Long: "List an issue's sub-issues grouped by stage. A sub-issue created after\n" +
+		"DENE-1537 delivers onto its parent's branch instead of opening its own PR;\n" +
+		"its delivery_line (JSON) or DELIVERY column (table) says whether its commits\n" +
+		"are merged back (merged, with commit_count), still open, or in conflict.\n" +
+		"`multica issue delivery <parent>` lists every sub-issue's commits.",
+	Args: exactArgs(1),
+	RunE: runIssueChildren,
 }
 
 var issueCreateCmd = &cobra.Command{
@@ -383,6 +388,12 @@ func issueCloseLong() string {
 		"                        comes back without anyone @-ing it\n" +
 		"  --verdict pass        acceptance seat only, with --outcome done: the platform\n" +
 		"                        merges the open PR and sets done, or blocks with the reason\n\n" +
+		"A sub-issue on its parent's delivery line (`delivery_line` in `issue get`) opens\n" +
+		"no PR: --outcome done, run in the sub-issue's working directory, merges its\n" +
+		"commits into the parent's branch and uses the commit list as evidence. A real\n" +
+		"conflict closes blocked with the files named; merge that branch into yours,\n" +
+		"resolve, and close done again. The parent opens the one PR, with Closes for\n" +
+		"every sub-issue, and --verdict pass on such a sub-issue is refused.\n\n" +
 		"--evidence is mandatory (PR link, test conclusion). Agent-authored bodies should\n" +
 		"use --evidence-file <path> inside the working directory. --pr <url> registers that\n" +
 		"pull or merge request with the close; an unverifiable link still closes and is\n" +
@@ -1503,7 +1514,7 @@ func runIssueChildren(cmd *cobra.Command, args []string) error {
 	output, _ := cmd.Flags().GetString("output")
 	if output == "table" {
 		actors := loadActorDisplayLookup(ctx, client)
-		headers := []string{"STAGE", "KEY", "TITLE", "STATUS", "PRIORITY", "ASSIGNEE", "DRIVER"}
+		headers := []string{"STAGE", "KEY", "TITLE", "STATUS", "PRIORITY", "ASSIGNEE", "DRIVER", "DELIVERY"}
 		rows := make([][]string, 0, len(children))
 		for _, c := range children {
 			stageCell := "-"
@@ -1518,6 +1529,7 @@ func runIssueChildren(cmd *cobra.Command, args []string) error {
 				strVal(c, "priority"),
 				formatAssignee(c, actors),
 				driverCell(c),
+				deliveryLineCell(c),
 			})
 		}
 		cli.PrintTable(os.Stdout, headers, rows)
@@ -1558,6 +1570,28 @@ func runIssueChildren(cmd *cobra.Command, args []string) error {
 		"stages":   stages,
 		"unstaged": unstaged,
 	})
+}
+
+// deliveryLineCell summarizes a child that delivers onto its parent's branch
+// (DENE-1537): merged with its commit count, open, or in conflict.
+func deliveryLineCell(c map[string]any) string {
+	line, ok := c["delivery_line"].(map[string]any)
+	if !ok {
+		return "-"
+	}
+	status := strVal(line, "status")
+	if status == "merged" {
+		if n, ok := line["commit_count"].(float64); ok {
+			return fmt.Sprintf("父票分支 · %d 提交", int(n))
+		}
+	}
+	switch status {
+	case "conflict":
+		return "父票分支 · 冲突"
+	case "merged":
+		return "父票分支 · 已并回"
+	}
+	return "父票分支 · 未并回"
 }
 
 // isTerminalChildIssue reports whether a child issue counts as finished for
@@ -2534,8 +2568,23 @@ func runIssueClose(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("close issue: %w", err)
 		}
 	}
+	// A sub-issue on its parent's line (DENE-1537) delivers by merging its
+	// commits into the parent's branch, not through a PR of its own. The
+	// merge runs after the shape check above so a refused close moves
+	// nothing, and the server records what it did.
+	onLine := false
+	if outcome == "done" && verdict == "" {
+		merge, err := mergeIntoParentLine(ctx, client, issueRef.ID)
+		if err != nil {
+			return fmt.Errorf("close issue: %w", err)
+		}
+		if merge != nil {
+			onLine = true
+			body["delivery_merge"] = merge
+		}
+	}
 	declaredPR, _ := cmd.Flags().GetString("pr")
-	if strings.TrimSpace(declaredPR) == "" {
+	if strings.TrimSpace(declaredPR) == "" && !onLine {
 		declaredPR = pullURLFromText(evidence)
 	}
 	// A PR whose checks are still running is waited out here (DENE-1219):
@@ -2545,7 +2594,7 @@ func runIssueClose(cmd *cobra.Command, args []string) error {
 	var result map[string]any
 	deadline := closeNow().Add(closeWaitLimit)
 	for {
-		result, err = postIssueClose(client, issueRef, body, outcome, verdict, declaredPR)
+		result, err = postIssueClose(client, issueRef, body, outcome, verdict, declaredPR, !onLine)
 		if err == nil {
 			break
 		}
@@ -2591,10 +2640,10 @@ var (
 
 // postIssueClose refreshes the issue's PR snapshot and sends one close. Each
 // attempt gets its own request deadline, since the checks wait spans many.
-func postIssueClose(client *cli.APIClient, issueRef resolvedID, body map[string]any, outcome, verdict, declaredPR string) (map[string]any, error) {
+func postIssueClose(client *cli.APIClient, issueRef resolvedID, body map[string]any, outcome, verdict, declaredPR string, refreshPRs bool) (map[string]any, error) {
 	ctx, cancel := cli.APIContext(context.Background())
 	defer cancel()
-	if outcome == "done" || outcome == "in_review" {
+	if refreshPRs && (outcome == "done" || outcome == "in_review") {
 		refreshIssuePullRequestsWithURL(ctx, client, issueRef.ID, issueRef.Display, declaredPR, outcome == "done" && verdict == "pass", outcome == "done" && verdict == "")
 	}
 	var result map[string]any

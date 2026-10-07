@@ -601,7 +601,16 @@
     "title_suggestion_dismiss": "忽略",
     "title_suggestion_updated": "标题已更新",
     "title_suggestion_apply_failed": "采用建议标题失败",
-    "title_suggestion_dismiss_failed": "忽略建议标题失败"
+    "title_suggestion_dismiss_failed": "忽略建议标题失败",
+    "delivery_line": {
+      "section": "交付分支",
+      "section_children": "子票提交",
+      "delivers_to": "交付到父票 {{identifier}} 的分支",
+      "status_open": "还没并回",
+      "status_merged_other": "已并回 {{count}} 个提交",
+      "status_conflict": "并回冲突，等执行人解决",
+      "show_all_other": "展开全部 {{count}} 个"
+    }
   },
   "timeline": {
     "loading": "加载中…"

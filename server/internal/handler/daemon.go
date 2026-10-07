@@ -4279,6 +4279,13 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 		}
 	}
 
+	// DENE-1537: a sub-issue delivers onto its parent's branch. The line is
+	// opened only on a worktree run by a daemon that can fork from it and
+	// merge back; once open it is handed to every later run of the issue.
+	if task.IssueID.Valid && requestHasClientCapability(r, protocol.DaemonCapabilityDeliveryLineV1) {
+		resp.DeliveryLine = h.claimDeliveryLine(r.Context(), task.IssueID, resp.CodeDecision != nil && resp.CodeDecision.Kind() == coderesolve.KindLocalWorktree)
+	}
+
 	// DENE-727: an automatic retry that inherited the parent's session already
 	// ran partway. Tell the daemon to continue that session instead of
 	// re-injecting the original task. The child's session_id is copied from

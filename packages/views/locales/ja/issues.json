@@ -601,7 +601,16 @@
     "title_suggestion_dismiss": "Dismiss",
     "title_suggestion_updated": "Title updated",
     "title_suggestion_apply_failed": "Failed to apply title suggestion",
-    "title_suggestion_dismiss_failed": "Failed to dismiss title suggestion"
+    "title_suggestion_dismiss_failed": "Failed to dismiss title suggestion",
+    "delivery_line": {
+      "section": "納品ブランチ",
+      "section_children": "サブ課題のコミット",
+      "delivers_to": "{{identifier}} のブランチに納品",
+      "status_open": "まだ統合されていません",
+      "status_merged_other": "{{count}} 件のコミットを統合済み",
+      "status_conflict": "競合あり、担当者が解決",
+      "show_all_other": "全 {{count}} 件を表示"
+    }
   },
   "timeline": {
     "loading": "読み込み中..."

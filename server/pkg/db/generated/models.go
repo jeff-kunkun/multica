@@ -1121,6 +1121,21 @@ type IssueDeliveryBranch struct {
 	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
 }
 
+type IssueDeliveryLine struct {
+	IssueID       pgtype.UUID        `json:"issue_id"`
+	WorkspaceID   pgtype.UUID        `json:"workspace_id"`
+	OwnerIssueID  pgtype.UUID        `json:"owner_issue_id"`
+	Status        string             `json:"status"`
+	BranchName    pgtype.Text        `json:"branch_name"`
+	SourceBranch  pgtype.Text        `json:"source_branch"`
+	MergedTip     pgtype.Text        `json:"merged_tip"`
+	Commits       []byte             `json:"commits"`
+	ConflictFiles []string           `json:"conflict_files"`
+	MergedAt      pgtype.Timestamptz `json:"merged_at"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
+}
+
 type IssueDependency struct {
 	ID               pgtype.UUID `json:"id"`
 	IssueID          pgtype.UUID `json:"issue_id"`
