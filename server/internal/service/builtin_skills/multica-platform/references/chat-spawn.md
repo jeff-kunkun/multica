@@ -60,3 +60,23 @@ The same policy governs creating issues: `agent_spawn_disabled` and
 `agent_spawn_budget_exceeded` can also come back from `multica issue create`
 and `multica plan apply` when the workspace limits issue creation from a chat
 or from a task.
+
+## Tasks a chat dispatched
+
+A task created from a chat records it: by a chat run (`multica issue create`,
+`multica plan apply`), by `multica chat to-goal`, by an IM `/issue` command or
+from an alignment. The issue page links back ("来自聊天") and `multica issue
+context` opens with a 来源 line quoting the message that asked for it.
+
+When the task enters 待验收, done, blocked or cancelled, the server posts a
+receipt card into that chat: status, the close's summary, PRs, knowledge. A chat
+run opens with the latest ten as "Tasks you dispatched from this chat"; answer
+"how is it going" from that list, not from memory.
+
+```bash
+multica chat issues                       # inside a chat run
+multica chat issues <session-id-or-url> --output json
+```
+
+Sub-issues record no chat: they report to their parent, whose receipt carries
+the result.

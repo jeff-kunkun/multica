@@ -18,6 +18,7 @@ import { useState, useEffect, useCallback, useMemo, useRef, Fragment, type React
 import { Virtuoso, type VirtuosoHandle } from "react-virtuoso";
 import { useDefaultLayout, usePanelRef } from "react-resizable-panels";
 import { AppLink, useBackOrReplace } from "../../navigation";
+import { IssueSourceChatLink } from "./issue-source-chat-link";
 import { IssueDuplicateBanner, IssueDuplicatesSection, isDuplicateIssue } from "./issue-duplicates";
 import {
   Archive,
@@ -3440,6 +3441,9 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     // needs no run picker of its own.
     { key: "export", priority: 6, node: <IssueLogExportButton issueId={id} issueIdentifier={issue.identifier} /> },
     { key: "thread", priority: 7, node: <WorkThreadPanel kind="issue" id={id} /> },
+    ...(issue.source_chat_session_id
+      ? [{ key: "source-chat", priority: 5, node: <IssueSourceChatLink sessionId={issue.source_chat_session_id} /> }]
+      : []),
     { key: "wakeup", priority: 4, node: <IssueWakeupHeaderChip issueId={id} onOpen={openWakeups} /> },
     {
       key: "done",

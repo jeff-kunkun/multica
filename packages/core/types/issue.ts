@@ -321,4 +321,10 @@ export interface Issue {
    */
   origin_type?: string;
   origin_id?: string;
+  /**
+   * The chat this issue was dispatched from; its result is posted back there
+   * (DENE-1672). Absent on sub-issues, which report to their parent.
+   */
+  source_chat_session_id?: string;
+  source_chat_message_id?: string;
 }

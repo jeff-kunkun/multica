@@ -29,7 +29,9 @@ export type ChatMessageKind =
   /** An agent opened a chat from this one; `linked_session_id` points at it. */
   | "chat_spawn"
   /** An agent tried to open a chat from this one and the server refused. */
-  | "chat_spawn_refused";
+  | "chat_spawn_refused"
+  /** A task this chat dispatched reports back; `linked_issue_id` points at it. */
+  | "issue_receipt";
 
 /**
  * A concise follow-up offered by an assistant reply. `label` is rendered in
@@ -250,6 +252,8 @@ export interface ChatMessage {
   sender_user_id?: string | null;
   /** The chat a `chat_spawn` card opened. */
   linked_session_id?: string | null;
+  /** The task an `issue_receipt` card reports on (DENE-1672). */
+  linked_issue_id?: string | null;
   /** Session lineage of the run behind `task_id` (DENE-1345). */
   session_mode?: import("./agent").SessionMode;
   resumed_from_run?: string;

@@ -27,6 +27,7 @@ import {
   Copy,
   RotateCw,
   MessagesSquare,
+  ClipboardCheck,
 } from "lucide-react";
 import { useScrollFade } from "@multica/ui/hooks/use-scroll-fade";
 import { isTaskMessageTaskId, taskMessagesOptions } from "@multica/core/chat/queries";
@@ -612,6 +613,9 @@ const MessageBubble = memo(function MessageBubble({
   if (message.message_kind === "chat_spawn_refused") {
     return <ChatSpawnRefusedNotice content={message.content} />;
   }
+  if (message.message_kind === "issue_receipt") {
+    return <IssueReceiptCard content={message.content} />;
+  }
 
   return (
     <>
@@ -1027,6 +1031,22 @@ function ChatSpawnCard({ message }: { message: ChatMessage }) {
       ) : (
         <span className="truncate font-medium">{title}</span>
       )}
+    </div>
+  );
+}
+
+// Result of a task this chat dispatched (DENE-1672): the server writes the
+// issue link, conclusion, PRs and knowledge as markdown, so the card is a
+// frame around it and every client that only renders markdown still reads it.
+function IssueReceiptCard({ content }: { content: string }) {
+  const { t } = useT("chat");
+  return (
+    <div className="min-w-0 rounded-md border px-3 py-2">
+      <div className="mb-1 flex items-center gap-1.5 text-xs text-muted-foreground">
+        <ClipboardCheck className="size-3.5 shrink-0" />
+        <span>{t(($) => $.message_list.issue_receipt)}</span>
+      </div>
+      <RichContent content={content} density="compact" phase="settled" />
     </div>
   );
 }
