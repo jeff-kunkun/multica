@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -236,5 +237,55 @@ func TestChildReceiptsFollowEveryParentReader(t *testing.T) {
 	}
 	if strings.Contains(card, secretID) || strings.Contains(card, "不该外泄") {
 		t.Fatalf("workspace chat card names the secret child:\n%s", card)
+	}
+}
+
+// The "last one" line names the child that closed the barrier; when a reader
+// of the parent cannot see that child, the line leaves it unnamed
+// (DENE-1687). A member-assigned parent gets no line at all, so the reader
+// here is a member the parent alone is shared with.
+func TestChildDoneLineSkipsChildHiddenFromParentReaders(t *testing.T) {
+	ctx := context.Background()
+	agentID := createHandlerTestAgent(t, "Child Done Line Agent", []byte("[]"))
+	sessionID := createHandlerTestChatSession(t, agentID)
+	taskID, _ := createChatRunTask(t, agentID, sessionID, "私有父票")
+	parentID := createIssueFromChatRun(t, agentID, taskID, "Child done line parent", nil)
+	openID := createIssueFromChatRun(t, agentID, taskID, "Child done line open sub", map[string]any{"parent_issue_id": parentID})
+	secretID := createIssueFromChatRun(t, agentID, taskID, "Child done line secret sub", map[string]any{"parent_issue_id": parentID})
+	bID := createPlainMember(t, "child-done-line-b@multica.test")
+	exec := func(q string, args ...any) {
+		t.Helper()
+		if _, err := testPool.Exec(ctx, q, args...); err != nil {
+			t.Fatalf("%s: %v", q, err)
+		}
+	}
+	projectID := createChatProjectTestProject(t, testWorkspaceID, "Child done line project", "")
+	exec(`UPDATE issue SET visibility = 'project', project_id = $2 WHERE id = ANY($1::uuid[])`, []string{parentID, openID, secretID}, projectID)
+	exec(`UPDATE issue SET status = 'in_progress', assignee_type = 'agent', assignee_id = $2 WHERE id = $1`, parentID, agentID)
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM resource_share WHERE resource_id = ANY($1::text[])`, []string{parentID, openID})
+	})
+	for _, id := range []string{parentID, openID} {
+		exec(`INSERT INTO resource_share (workspace_id, resource_type, resource_id, member_id, access, added_by) VALUES ($1, 'issue', $2, $3, 'view', $4)`,
+			testWorkspaceID, id, bID, testUserID)
+	}
+	var secretNumber int
+	if err := testPool.QueryRow(ctx, `SELECT number FROM issue WHERE id = $1`, secretID).Scan(&secretNumber); err != nil {
+		t.Fatalf("load secret number: %v", err)
+	}
+
+	setIssueStatusForTest(t, openID, "done")
+	setIssueStatusForTest(t, secretID, "done")
+
+	var all string
+	if err := testPool.QueryRow(ctx, `SELECT COALESCE(string_agg(content, E'\n---\n'), '') FROM comment WHERE issue_id = $1`, parentID).Scan(&all); err != nil {
+		t.Fatalf("read parent comments: %v", err)
+	}
+	if !strings.Contains(all, "All sub-issues are complete — the last one, (not visible to everyone here), just finished.") {
+		t.Fatalf("parent comment misses the unnamed last-child line:\n%s", all)
+	}
+	secretIdentifier := testHandler.getIssuePrefix(ctx, parseUUID(testWorkspaceID)) + "-" + strconv.Itoa(secretNumber)
+	if strings.Contains(all, secretID) || strings.Contains(all, "secret sub") || strings.Contains(all, "["+secretIdentifier+"]") {
+		t.Fatalf("parent comment names the secret child:\n%s", all)
 	}
 }
