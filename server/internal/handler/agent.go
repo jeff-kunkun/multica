@@ -199,6 +199,9 @@ type AgentResponse struct {
 	// (DENE-1600, ADR-0008): auto, or mention_only for a seat that takes
 	// work only when named. Independent of RoutingTier and WorkEnabled.
 	DispatchMode string `json:"dispatch_mode"`
+	// DispatchProjects limits automatic dispatch to tickets in these
+	// projects (DENE-1648). Empty serves every project.
+	DispatchProjects []string `json:"dispatch_projects"`
 	// Fit is the agent's group for one issue or project (DENE-1477): match
 	// (对口), generic (通用) or other (其他). Only on a list asked with
 	// for_issue / for_project, which also orders the list by it.
@@ -341,6 +344,7 @@ func (h *Handler) agentToResponse(a db.Agent) AgentResponse {
 		RoutingTier:              a.RoutingTier.String,
 		RoutingUsage:             a.RoutingUsage,
 		DispatchMode:             a.DispatchMode,
+		DispatchProjects:         dispatchProjectsOrEmpty(a),
 		ComposioToolkitAllowlist: composioAllowlist,
 		OwnerID:                  uuidToPtr(a.OwnerID),
 		Skills:                   []AgentSkillSummary{},
@@ -2630,6 +2634,11 @@ type UpdateAgentRequest struct {
 	// mention_only (DENE-1600). It belongs to the routing set, so a
 	// following specialisation takes its base role's value.
 	DispatchMode *string `json:"dispatch_mode"`
+	// DispatchProjects is omitted-preserves / present-sets; an empty list
+	// lifts the limit (DENE-1648). Every id must be a project in the
+	// agent's workspace. It is the seat's own, not part of what a following
+	// specialisation inherits.
+	DispatchProjects *[]string `json:"dispatch_projects"`
 	// ComposioToolkitAllowlist is a tri-state, same pattern as
 	// thinking_level, mcp_config:
 	//   - field omitted → no change (column preserved as-is)
@@ -3298,6 +3307,14 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		params.DispatchMode = pgtype.Text{String: key, Valid: true}
+	}
+	if req.DispatchProjects != nil {
+		ids, msg := h.resolveDispatchProjects(r.Context(), existing.WorkspaceID, *req.DispatchProjects)
+		if msg != "" {
+			writeError(w, http.StatusBadRequest, msg)
+			return
+		}
+		params.DispatchProjects = ids
 	}
 	// A following specialisation does not own its rung or its usage
 	// (DENE-1016). Turning follow off in this same request is the opt-out, so
@@ -4613,4 +4630,38 @@ func applyWorkPause(resp *AgentResponse, agent db.Agent, pauses map[string]Agent
 	if pause, ok := pauses[uuidToString(agent.ID)]; ok {
 		resp.WorkPause = &pause
 	}
+}
+
+// dispatchProjectsOrEmpty is the agent's project limit for the API: always a
+// list, empty when the seat serves every project.
+func dispatchProjectsOrEmpty(a db.Agent) []string {
+	if ids := service.AgentDispatchProjects(a); ids != nil {
+		return ids
+	}
+	return []string{}
+}
+
+// resolveDispatchProjects validates a project limit (DENE-1648): each entry
+// is a project id in this workspace, duplicates collapse, and an empty list
+// lifts the limit. The second return value is the 400 message.
+func (h *Handler) resolveDispatchProjects(ctx context.Context, workspaceID pgtype.UUID, raw []string) ([]pgtype.UUID, string) {
+	out := make([]pgtype.UUID, 0, len(raw))
+	seen := make(map[string]bool, len(raw))
+	for _, value := range raw {
+		value = strings.TrimSpace(value)
+		id, err := util.ParseUUID(value)
+		if err != nil {
+			return nil, fmt.Sprintf("dispatch_projects: %q is not a project id", value)
+		}
+		key := util.UUIDToString(id)
+		if seen[key] {
+			continue
+		}
+		if _, err := h.Queries.GetProjectInWorkspace(ctx, db.GetProjectInWorkspaceParams{ID: id, WorkspaceID: workspaceID}); err != nil {
+			return nil, fmt.Sprintf("dispatch_projects: %s is not a project in this workspace", value)
+		}
+		seen[key] = true
+		out = append(out, id)
+	}
+	return out, ""
 }

@@ -62,6 +62,11 @@ type Outcome struct {
 	Mentioned bool
 	// Commented reports whether this call posted a routing comment.
 	Commented bool
+	// Tier is the executor tier this call's decision named; JudgedTier is
+	// the model's own tier when the rule floor raised it (DENE-1648), empty
+	// when it stood.
+	Tier       string
+	JudgedTier string
 }
 
 // Router is the module both entry points call. The HTTP hooks call Route
@@ -285,6 +290,7 @@ func (r *Router) routeTodo(ctx context.Context, workspaceID string, settings Set
 	if err != nil {
 		return Outcome{State: StateEnabled, Action: ActionSkipped, Reason: "roster unreadable"}, err
 	}
+	roster = ForProject(roster, issue.ProjectID)
 	candidates := ladder.SceneCandidates(scene, roster)
 	if len(candidates) == 0 {
 		return Outcome{State: StateEnabled, Action: ActionNoop, Reason: "ladder has no seat in this workspace"}, nil
@@ -333,6 +339,7 @@ func (r *Router) routeTodo(ctx context.Context, workspaceID string, settings Set
 			r.Breaker.Succeed(workspaceID)
 		}
 		dec, verdict = d, d.Verdict
+		out.Tier, out.JudgedTier = d.Verdict.ExecutorTier, d.RaisedFrom
 	}
 
 	threshold := settings.Threshold()
@@ -563,7 +570,7 @@ func (r *Router) continuation(ctx context.Context, workspaceID string, settings 
 	seats := make(map[string]ContinuationSeat, len(ids))
 	for _, id := range ids {
 		agent, onRoster := agentByID(roster, id)
-		_, unpickable := SeatSelectable(agent.State, SelectContext{})
+		_, unpickable := SeatSelectable(agent.State, SelectContext{ProjectID: agent.project})
 		seats[id] = ContinuationSeat{
 			Seat:         seatFromRoster(ladder, roster, id),
 			OnRoster:     onRoster,
@@ -641,6 +648,7 @@ func (r *Router) PickAcceptanceSeat(ctx context.Context, workspaceID string, iss
 	if err != nil {
 		return ReviewerRef{}, "读不到席位名册", false
 	}
+	roster = ForProject(roster, issue.ProjectID)
 	candidates := ladder.SceneCandidates(scene, roster)
 	ref, why := r.fallbackReviewer(ladder, scene, roster, candidates, nil, issue)
 	if ref.Kind != ReviewerAgent || ref.ID == "" || ref.ID == issue.AssigneeID {
@@ -944,6 +952,7 @@ func (r *Router) routeInReview(ctx context.Context, workspaceID string, settings
 	if err != nil {
 		return out, err
 	}
+	roster = ForProject(roster, issue.ProjectID)
 	seatAgent, ok := agentByID(roster, issue.Reviewer.ID)
 	if !ok {
 		card, found, err := r.Store.OffRosterSeat(ctx, workspaceID, issue.Reviewer.ID)
@@ -1079,6 +1088,7 @@ func (r *Router) decideReviewerNow(ctx context.Context, workspaceID string, sett
 	if err != nil {
 		return ReviewerRef{}, Outcome{State: StateEnabled, Action: ActionSkipped, Reason: "roster unreadable"}, err
 	}
+	roster = ForProject(roster, issue.ProjectID)
 	candidates := ladder.SceneCandidates(scene, roster)
 	if len(candidates) == 0 {
 		return ReviewerRef{}, noop("ladder has no seat in this workspace"), nil
@@ -1205,6 +1215,7 @@ func (r *Router) routeBlocked(ctx context.Context, workspaceID string, settings 
 	if err != nil {
 		return out, err
 	}
+	roster = ForProject(roster, issue.ProjectID)
 	candidates := ladder.SceneCandidates(scene, roster)
 	_, state, err := r.decisionContext(ctx, workspaceID, settings, issue, scene, candidates)
 	if err != nil {

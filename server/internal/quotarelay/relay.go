@@ -349,7 +349,11 @@ func nextWeeklyReset(now time.Time) time.Time {
 // dropping a rung is how a tier that has only the same house still gets
 // the work done.
 type Seat struct {
-	ID         string
+	ID string
+	// Projects is the seat's project limit (DENE-1648); empty serves every
+	// project. The roster is shared across tickets, so Eligible ignores it
+	// and the caller applies it per ticket.
+	Projects   []string
 	Name       string
 	Tier       string
 	Direction  string

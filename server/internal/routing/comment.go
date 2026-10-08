@@ -74,7 +74,7 @@ func (r *Router) assignmentComment(
 ) string {
 	var b strings.Builder
 	b.WriteString("## 自动选派\n\n")
-	b.WriteString(PickReasonLine(executorPickReason(issue, needExecutor, executor, executorSource)))
+	b.WriteString(PickReasonLine(executorPickReason(issue, needExecutor, executor, executorSource, dec.RaisedFrom != "")))
 	if continuationNote != "" {
 		b.WriteString(continuationNote + "\n\n")
 	}
@@ -156,6 +156,9 @@ func (r *Router) assignmentComment(
 	// there is nothing to say about who decided.
 	if executorSource != pickLabel || needReviewer {
 		b.WriteString(decisionSourceLine(dec, settings))
+	}
+	if executorSource != pickLabel && executorSource != pickFallback {
+		b.WriteString(floorLine(dec, DefaultLadder))
 	}
 	if strings.TrimSpace(v.Reason) != "" {
 		b.WriteString("- **判断**：" + strings.TrimSpace(v.Reason) + "\n")
