@@ -172,6 +172,7 @@
     "last_activity_missing": "无活动时间",
     "knowledge_none": "无够格知识",
     "knowledge_change": "知识：{{locations}}",
+    "knowledge_change_unverified": "知识：{{locations}}（未核对交付）",
     "section_title": "收口记录",
     "conclusion": "结论",
     "status": "状态",
@@ -618,7 +619,9 @@
       "status_merged_other": "已并回 {{count}} 个提交",
       "status_conflict": "并回冲突，等执行人解决",
       "show_all_other": "展开全部 {{count}} 个"
-    }
+    },
+    "from_chat": "来自聊天",
+    "from_chat_hidden": "来自一个你看不到的聊天"
   },
   "timeline": {
     "loading": "加载中…"

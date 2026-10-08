@@ -1071,3 +1071,18 @@ SELECT
           AND t.created_at >= sqlc.arg('since')::timestamptz
           AND t.status = 'failed'
     )::int AS failed_runs;
+
+-- name: SetIssueOriginChatSession :one
+-- Records the chat an issue was opened from (DENE-1665). Written in the create
+-- transaction, never afterwards.
+UPDATE issue SET origin_chat_session_id = sqlc.arg('chat_session_id')::uuid
+WHERE id = sqlc.arg('id') AND workspace_id = sqlc.arg('workspace_id')
+RETURNING *;
+
+-- name: ListIssuesByOriginChatSession :many
+-- The issues a chat opened, oldest first (`multica chat tickets`).
+SELECT * FROM issue
+WHERE workspace_id = sqlc.arg('workspace_id')
+  AND origin_chat_session_id = sqlc.arg('chat_session_id')::uuid
+ORDER BY created_at ASC, id ASC
+LIMIT 200;

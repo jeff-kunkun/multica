@@ -65,7 +65,9 @@
     "open_on_web": "在网页打开",
     "delete_comment": "删除评论",
     "edit_comment": "编辑评论",
-    "no_runs": "暂无运行"
+    "no_runs": "暂无运行",
+    "from_chat": "来自聊天",
+    "from_chat_hidden": "来自一个你看不到的聊天"
   },
   "new": {
     "title": "新建任务",

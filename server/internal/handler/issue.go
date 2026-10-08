@@ -46,8 +46,11 @@ type IssueResponse struct {
 	Title        string                `json:"title"`
 	Progress     *ProgressResponse     `json:"progress"`
 	GoalProgress *GoalProgressResponse `json:"goal_progress,omitempty"`
-	Description  *string               `json:"description"`
-	Status       string                `json:"status"`
+	// SourceChat is the chat this issue was opened from (DENE-1665); set on
+	// the single-issue read only.
+	SourceChat  *IssueSourceChat `json:"source_chat,omitempty"`
+	Description *string          `json:"description"`
+	Status      string           `json:"status"`
 	// StatusCategory encodes lifecycle using the legacy seven-value wire enum. It is
 	// omitted when an endpoint cannot resolve a custom status, so consumers must
 	// fall back to their catalog rather than treat a blank as "no category".
@@ -2656,6 +2659,7 @@ func (h *Handler) GetIssue(w http.ResponseWriter, r *http.Request) {
 	prefix := h.getIssuePrefix(r.Context(), issue.WorkspaceID)
 	resp := issueToResponse(issue, prefix)
 	h.fillStatusCategory(r.Context(), issue.WorkspaceID, &resp)
+	resp.SourceChat = h.issueSourceChat(r.Context(), r, issue)
 	detailLabels := h.labelsByIssue(r.Context(), issue.WorkspaceID, []pgtype.UUID{issue.ID})[uuidToString(issue.ID)]
 	if detailLabels == nil {
 		detailLabels = []LabelResponse{}
@@ -3661,6 +3665,7 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 	// be provided together.
 	var originType pgtype.Text
 	var originID pgtype.UUID
+	var originChat pgtype.UUID
 	if req.OriginType != nil || req.OriginID != nil {
 		if req.OriginType == nil || req.OriginID == nil {
 			writeError(w, http.StatusBadRequest, "origin_type and origin_id must be provided together")
@@ -3701,8 +3706,18 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 				if task, terr := h.Queries.GetAgentTask(r.Context(), taskUUID); terr == nil && uuidToString(task.AgentID) == actualCreatorID {
 					originType = pgtype.Text{String: "agent_create", Valid: true}
 					originID = taskUUID
+					// A chat run's issue points back at its chat (DENE-1665)
+					// and must carry what the chat aligned on.
+					originChat = task.ChatSessionID
 				}
 			}
+		}
+	}
+
+	if originChat.Valid {
+		if msg := chatTicketDescriptionProblem(ptrToText(req.Description).String); msg != "" {
+			writeError(w, http.StatusBadRequest, msg)
+			return
 		}
 	}
 
@@ -3802,30 +3817,31 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 	}
 
 	res, err := h.IssueService.Create(r.Context(), service.IssueCreateParams{
-		WorkspaceID:    wsUUID,
-		Title:          req.Title,
-		Description:    ptrToText(req.Description),
-		Status:         status,
-		Priority:       priority,
-		AssigneeType:   assigneeType,
-		AssigneeID:     assigneeID,
-		CreatorType:    creatorType,
-		CreatorID:      parseUUID(actualCreatorID),
-		ParentIssueID:  parentIssueID,
-		ProjectID:      projectID,
-		ProjectPinned:  projectPinned,
-		DomainID:       pickedDomain,
-		DomainPinned:   domainPinned,
-		StartDate:      startDate,
-		DueDate:        dueDate,
-		OriginType:     originType,
-		OriginID:       originID,
-		Stage:          ptrToInt4(req.Stage),
-		AttachmentIDs:  attachmentIDs,
-		LabelIDs:       labelIDs,
-		Properties:     properties,
-		AllowDuplicate: req.AllowDuplicate,
-		GoalMode:       req.GoalMode,
+		WorkspaceID:         wsUUID,
+		Title:               req.Title,
+		Description:         ptrToText(req.Description),
+		Status:              status,
+		Priority:            priority,
+		AssigneeType:        assigneeType,
+		AssigneeID:          assigneeID,
+		CreatorType:         creatorType,
+		CreatorID:           parseUUID(actualCreatorID),
+		ParentIssueID:       parentIssueID,
+		ProjectID:           projectID,
+		ProjectPinned:       projectPinned,
+		DomainID:            pickedDomain,
+		DomainPinned:        domainPinned,
+		StartDate:           startDate,
+		DueDate:             dueDate,
+		OriginType:          originType,
+		OriginID:            originID,
+		OriginChatSessionID: originChat,
+		Stage:               ptrToInt4(req.Stage),
+		AttachmentIDs:       attachmentIDs,
+		LabelIDs:            labelIDs,
+		Properties:          properties,
+		AllowDuplicate:      req.AllowDuplicate,
+		GoalMode:            req.GoalMode,
 
 		AssigneeSource:       ruling.Source,
 		AssigneeSourceUserID: ruling.SourceUser,
@@ -4825,7 +4841,10 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		h.persistBlockRecord(r.Context(), issue, blockRecord)
 		h.summonNeedsHuman(r.Context(), issue, blockRecord.NeedsHuman, actorType, actorID, "")
 	}
-	if statusChanged || titleChanged || descriptionChanged || pickSetAside {
+	// Clearing the executor hands the ticket back to routing (DENE-1665: the
+	// chat ticket card's 改给智能体); the routing table decides per status.
+	executorCleared := prevIssue.AssigneeID.Valid && !issue.AssigneeID.Valid
+	if statusChanged || titleChanged || descriptionChanged || pickSetAside || executorCleared {
 		if statusChanged {
 			h.notifyParentOfChildDone(r.Context(), prevIssue, issue)
 			h.notifyWaitersOfIssueDone(r.Context(), prevIssue, issue)

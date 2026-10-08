@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -285,7 +286,7 @@ func init() {
 	projectStatusCmd.Flags().String("output", "table", "Output format: table or json")
 
 	// project memory
-	projectMemoryCheckCmd.Flags().String("path", "", "Local project root to stat (omit to show the latest daemon check)")
+	projectMemoryCheckCmd.Flags().String("path", "", "Directory to stat; only the project's bound local directory counts, any other path is a worktree self-check (omit to show the latest daemon check)")
 	projectMemoryCheckCmd.Flags().String("output", "json", "Output format: table or json")
 	projectMemoryStatusCmd.Flags().String("output", "json", "Output format: table or json")
 	projectMemorySeatGetCmd.Flags().String("output", "table", "Output format: table or json")
@@ -670,7 +671,11 @@ func runProjectMemoryRequest(cmd *cobra.Command, ref string, check bool) error {
 				return fmt.Errorf("check project memory: %w", err)
 			}
 		} else {
+			if abs, absErr := filepath.Abs(path); absErr == nil {
+				path = abs
+			}
 			if err := client.PostJSON(ctx, "/api/projects/"+projectRef.ID+"/memory/check", map[string]any{
+				"path":      path,
 				"locations": projectmemory.Check(path),
 			}, &result); err != nil {
 				return fmt.Errorf("report project memory: %w", err)
@@ -684,6 +689,19 @@ func runProjectMemoryRequest(cmd *cobra.Command, ref string, check bool) error {
 	if output != "table" {
 		return cli.PrintJSON(os.Stdout, result)
 	}
+	// LOCAL is the daemon's observation of the bound local directory; a
+	// WORKTREE column appears only for a --path self-check elsewhere.
+	worktreeState := map[string]string{}
+	worktree, hasWorktree := result["worktree_check"].(map[string]any)
+	if hasWorktree {
+		fmt.Fprintf(os.Stdout, "Worktree self-check of %s does not count as the local directory.\n", strVal(worktree, "path"))
+		worktreeLocations, _ := worktree["locations"].([]any)
+		for _, raw := range worktreeLocations {
+			if location, ok := raw.(map[string]any); ok {
+				worktreeState[strVal(location, "key")] = memoryLocationState(location)
+			}
+		}
+	}
 	locations, _ := result["locations"].([]any)
 	rows := make([][]string, 0, len(locations))
 	for _, raw := range locations {
@@ -691,15 +709,28 @@ func runProjectMemoryRequest(cmd *cobra.Command, ref string, check bool) error {
 		if !ok {
 			continue
 		}
-		exists, _ := location["exists"].(bool)
-		state := "missing"
-		if exists {
-			state = "present"
+		row := []string{strVal(location, "key"), strVal(location, "path"), memoryLocationState(location)}
+		if hasWorktree {
+			row = append(row, worktreeState[strVal(location, "key")])
 		}
-		rows = append(rows, []string{strVal(location, "key"), strVal(location, "path"), state, strVal(location, "modified_at")})
+		rows = append(rows, append(row, strVal(location, "modified_at")))
 	}
-	cli.PrintTable(os.Stdout, []string{"KEY", "PATH", "STATE", "MODIFIED"}, rows)
+	headers := []string{"KEY", "PATH", "LOCAL"}
+	if hasWorktree {
+		headers = append(headers, "WORKTREE")
+	}
+	cli.PrintTable(os.Stdout, append(headers, "MODIFIED"), rows)
 	return nil
+}
+
+func memoryLocationState(location map[string]any) string {
+	if exists, _ := location["exists"].(bool); exists {
+		return "present"
+	}
+	if ref := strVal(location, "mainline_ref"); ref != "" {
+		return "behind (" + ref + ")"
+	}
+	return "missing"
 }
 
 func runProjectMemorySeatGet(cmd *cobra.Command, _ []string) error {
