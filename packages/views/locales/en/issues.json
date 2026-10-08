@@ -691,6 +691,7 @@
   },
   "comment": {
     "add_reaction": "Add reaction",
+    "reaction_failed": "Couldn't update the reaction",
     "collapse_thread": "Collapse thread",
     "expand_thread": "Expand thread",
     "delete_title": "Delete comment",

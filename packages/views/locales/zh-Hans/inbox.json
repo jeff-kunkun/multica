@@ -74,7 +74,8 @@
     "stall_review_title": "这张票正在进行 24 小时停滞公示",
     "stall_processed_title": "这张票由系统自动处理",
     "stall_keep": "保留",
-    "stall_undo": "撤销处理"
+    "stall_undo": "撤销处理",
+    "stall_action_failed": "工单更新失败"
   },
   "types": {
     "needs_you": "需要你处理",

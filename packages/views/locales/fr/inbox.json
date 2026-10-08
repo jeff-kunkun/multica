@@ -77,7 +77,8 @@
     "stall_review_title": "Ce ticket est en revue de stagnation pendant 24 heures",
     "stall_processed_title": "Ce ticket a été traité automatiquement",
     "stall_keep": "Conserver",
-    "stall_undo": "Annuler le traitement"
+    "stall_undo": "Annuler le traitement",
+    "stall_action_failed": "Impossible de mettre à jour le ticket"
   },
   "types": {
     "needs_you": "Nécessite votre attention",

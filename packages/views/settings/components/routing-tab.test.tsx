@@ -14,6 +14,8 @@ const checkRoutingHealth = vi.hoisted(() => vi.fn());
 const listRoutingModels = vi.hoisted(() => vi.fn());
 const listAgents = vi.hoisted(() => vi.fn());
 const listRuntimes = vi.hoisted(() => vi.fn());
+const toastError = vi.hoisted(() => vi.fn());
+vi.mock("sonner", () => ({ toast: { error: toastError, success: vi.fn() } }));
 const member = vi.hoisted(() => ({ role: "owner" as "owner" | "admin" | "member" }));
 const workspace = vi.hoisted(() => ({
   current: {
@@ -100,6 +102,7 @@ const HEALTHY = {
 
 beforeEach(() => {
   updateWorkspace.mockReset();
+  toastError.mockReset();
   getRoutingHealth.mockReset();
   getRoutingHealth.mockResolvedValue(HEALTHY);
   checkRoutingHealth.mockReset();
@@ -365,6 +368,16 @@ describe("RoutingTab", () => {
     ];
     expect(body.settings.routing.api_key).toBe("sk-live-abc");
     // And the box is emptied, so a credential is not left sitting in the DOM.
+    await waitFor(() => expect((key as HTMLInputElement).value).toBe(""));
+  });
+
+  it("says so when the key is refused, since the box empties either way", async () => {
+    updateWorkspace.mockRejectedValue(new Error("only owners and admins can change settings"));
+    render();
+    const key = fieldByLabel(JUDGE_KEY);
+    await userEvent.type(key, "sk-live-abc");
+    await userEvent.click(screen.getAllByRole("button", { name: /save key|保存 key/i })[1]!);
+    await waitFor(() => expect(toastError).toHaveBeenCalledWith("only owners and admins can change settings"));
     await waitFor(() => expect((key as HTMLInputElement).value).toBe(""));
   });
 

@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
 import { Button } from "@multica/ui/components/ui/button";
 import { Input } from "@multica/ui/components/ui/input";
 import { Textarea } from "@multica/ui/components/ui/textarea";
@@ -336,6 +337,8 @@ export function RoutingTab() {
     onSuccess: (next) => {
       qc.setQueryData(workspaceKeys.routingHealth(workspace?.id ?? ""), next);
     },
+    onError: (error) =>
+      toast.error(error instanceof Error && error.message ? error.message : t(($) => $.routing.health_recheck_failed)),
   });
 
   // The key write. Explicit rather than auto-saved (see keyInput), and it
@@ -360,6 +363,10 @@ export function RoutingTab() {
         queryKey: workspaceKeys.routingHealth(workspace.id),
       });
     },
+    // The box is emptied either way (below), so a failure must say so —
+    // otherwise an empty box reads as a stored key.
+    onError: (error) =>
+      toast.error(error instanceof Error && error.message ? error.message : t(($) => $.routing.gateway_key_save_error)),
     // Cleared whichever way it went: on success the key is stored and there
     // is nothing to show, and on failure leaving a credential in a text box
     // behind a red message is not something to do to somebody.
