@@ -346,6 +346,22 @@ type AutopilotCollaborator struct {
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 }
 
+type AutopilotLinkedChange struct {
+	ID               pgtype.UUID        `json:"id"`
+	WorkspaceID      pgtype.UUID        `json:"workspace_id"`
+	AutopilotID      pgtype.UUID        `json:"autopilot_id"`
+	LinkID           pgtype.UUID        `json:"link_id"`
+	Route            string             `json:"route"`
+	ActorID          pgtype.UUID        `json:"actor_id"`
+	ViaWorkspaceID   pgtype.UUID        `json:"via_workspace_id"`
+	ViaWorkspaceName string             `json:"via_workspace_name"`
+	ViaSlug          string             `json:"via_slug"`
+	AgentID          pgtype.UUID        `json:"agent_id"`
+	AgentName        string             `json:"agent_name"`
+	TaskID           pgtype.UUID        `json:"task_id"`
+	CreatedAt        pgtype.Timestamptz `json:"created_at"`
+}
+
 type AutopilotQuotaPeriod struct {
 	WorkspaceID         pgtype.UUID        `json:"workspace_id"`
 	PeriodStart         pgtype.Timestamptz `json:"period_start"`
@@ -2316,6 +2332,7 @@ type WorkspaceLink struct {
 	AcceptedBy        pgtype.UUID        `json:"accepted_by"`
 	CreatedAt         pgtype.Timestamptz `json:"created_at"`
 	AcceptedAt        pgtype.Timestamptz `json:"accepted_at"`
+	Managed           bool               `json:"managed"`
 }
 
 type WorkspaceLinkAudit struct {
