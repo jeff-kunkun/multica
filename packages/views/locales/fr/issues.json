@@ -564,7 +564,9 @@
       "status_conflict": "Conflit, l'exécutant résout",
       "show_all_one": "Tout afficher ({{count}})",
       "show_all_other": "Tout afficher ({{count}})"
-    }
+    },
+    "from_chat": "Depuis la discussion",
+    "from_chat_hidden": "Depuis une discussion que vous ne voyez pas"
   },
   "timeline": {
     "loading": "Chargement..."
@@ -1611,6 +1613,7 @@
     "last_activity_missing": "Aucune heure d'activité",
     "knowledge_none": "Aucune connaissance qualifiée",
     "knowledge_change": "Connaissance : {{locations}}",
+    "knowledge_change_unverified": "Connaissance : {{locations}} (livraison non vérifiée)",
     "section_title": "Enregistrement de clôture",
     "conclusion": "Conclusion",
     "status": "Statut",

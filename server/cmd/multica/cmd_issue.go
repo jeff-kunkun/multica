@@ -427,7 +427,11 @@ func issueCloseLong() string {
 		"Every close records a knowledge audit in that same transaction, including a\n" +
 		"ticket with no pull request. --knowledge-none declares that nothing qualified\n" +
 		"for project memory. Repeat --knowledge <key>=<summary> for each checklist slot\n" +
-		"this close wrote. Keys: " + strings.Join(projectmemory.LocationKeys(), ", ") + ".\n\n" +
+		"this close wrote. Keys: " + strings.Join(projectmemory.LocationKeys(), ", ") + ".\n" +
+		"On done/in_review the written slots must ship with this delivery: commit the\n" +
+		"files on this branch first. The CLI sends the paths git says it changes\n" +
+		"(against the parent's delivery branch, else the nearest main line) and the\n" +
+		"server refuses a slot no delivered file writes.\n\n" +
 		"Repeat --decision \"...\" for each decision this round settled; it joins the\n" +
 		"state card's 已拍板 list that `multica issue context <id>` shows the next owner.\n" +
 		"--summary becomes the card's 上一棒交代.\n\n" +
@@ -1454,6 +1458,13 @@ func runIssueGet(cmd *cobra.Command, args []string) error {
 			strVal(issue, "description"),
 		}}
 		cli.PrintTable(os.Stdout, headers, rows)
+		if chat, ok := issue["source_chat"].(map[string]any); ok {
+			if title := strVal(chat, "title"); title != "" {
+				fmt.Printf("\nFrom chat: %s (%s)\n", title, strVal(chat, "id"))
+			} else {
+				fmt.Printf("\nFrom chat: %s\n", strVal(chat, "id"))
+			}
+		}
 		return nil
 	}
 
@@ -2618,6 +2629,13 @@ func runIssueClose(cmd *cobra.Command, args []string) error {
 	}
 	if decisions, _ := cmd.Flags().GetStringArray("decision"); len(decisions) > 0 {
 		body["decisions"] = decisions
+	}
+	if closeprotocol.KnowledgeMustShip(outcome, verdict) && len(audit.Changes) > 0 {
+		// The knowledge the audit claims has to ship with this delivery
+		// (DENE-1661): send what git says it changes, the server matches.
+		if files := closeDeliveredFiles(ctx, client, issueRef.ID); files != nil {
+			body["delivered_files"] = *files
+		}
 	}
 	if outcome == "done" || outcome == "in_review" {
 		// The PR refresh below can merge locally, which cannot be undone.

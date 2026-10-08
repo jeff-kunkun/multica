@@ -791,6 +791,7 @@ export function ChatPage() {
           onLoadOlderMessages={() => void c.fetchOlderMessages()}
           onQuickAction={(action) => c.handleSend(action.prompt)}
           creatorId={c.currentSession?.creator_id}
+          sessionId={c.activeSessionId ?? undefined}
           quickActionsDisabled={
             !!c.pendingTaskId ||
             c.isSessionArchived ||

@@ -170,6 +170,7 @@
     "last_activity_missing": "活動時刻なし",
     "knowledge_none": "該当する知識なし",
     "knowledge_change": "知識: {{locations}}",
+    "knowledge_change_unverified": "知識: {{locations}}（納品未確認）",
     "section_title": "クローズ記録",
     "conclusion": "結論",
     "status": "ステータス",
@@ -616,7 +617,9 @@
       "status_merged_other": "{{count}} 件のコミットを統合済み",
       "status_conflict": "競合あり、担当者が解決",
       "show_all_other": "全 {{count}} 件を表示"
-    }
+    },
+    "from_chat": "チャットから",
+    "from_chat_hidden": "閲覧できないチャットから"
   },
   "timeline": {
     "loading": "読み込み中..."

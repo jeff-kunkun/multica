@@ -130,6 +130,7 @@ import type {
   ChatMessage,
   ChatMessagesPage,
   ChatDraftRestoresResponse,
+  ChatTicketsResponse,
   ChatPendingTask,
   PrioritizeQueuedChatTaskResponse,
   PendingChatTasksResponse,
@@ -5336,6 +5337,11 @@ export class ApiClient {
     return parseWithFallback(raw, ChatPendingTaskSchema, EMPTY_CHAT_PENDING_TASK, {
       endpoint: "GET /api/chat/sessions/:id/pending-task",
     });
+  }
+
+  /** Issues this chat opened, oldest first (DENE-1665). */
+  async listChatTickets(sessionId: string): Promise<ChatTicketsResponse> {
+    return this.fetch(`/api/chat/sessions/${sessionId}/tickets`);
   }
 
   async getChatWorkThread(sessionId: string): Promise<WorkThreadSnapshot | null> {

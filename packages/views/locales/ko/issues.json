@@ -170,6 +170,7 @@
     "last_activity_missing": "활동 시각 없음",
     "knowledge_none": "해당하는 지식 없음",
     "knowledge_change": "지식: {{locations}}",
+    "knowledge_change_unverified": "지식: {{locations}} (전달물 미확인)",
     "section_title": "종료 기록",
     "conclusion": "결론",
     "status": "상태",
@@ -616,7 +617,9 @@
       "status_merged_other": "커밋 {{count}}개 병합됨",
       "status_conflict": "충돌, 실행자가 해결",
       "show_all_other": "{{count}}개 모두 보기"
-    }
+    },
+    "from_chat": "채팅에서",
+    "from_chat_hidden": "볼 수 없는 채팅에서"
   },
   "timeline": {
     "loading": "불러오는 중..."

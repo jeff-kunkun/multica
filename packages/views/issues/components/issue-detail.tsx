@@ -33,6 +33,7 @@ import {
   PanelRight,
   Pin,
   PinOff,
+  MessagesSquare,
   Plus,
   SlidersHorizontal,
   Tag,
@@ -3874,6 +3875,24 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
               })()}
             </AppLink>
           )}
+
+          {issue.source_chat && (issue.source_chat.accessible ? (
+            <AppLink
+              href={paths.chatSession(issue.source_chat.id)}
+              className="mt-2 flex max-w-full items-center gap-1.5 text-caption text-muted-foreground hover:text-foreground transition-colors group/chat"
+            >
+              <MessagesSquare className="h-3.5 w-3.5 shrink-0" />
+              <span className="font-medium shrink-0">{t(($) => $.detail.from_chat)}</span>
+              {issue.source_chat.title && (
+                <span className="truncate group-hover/chat:text-foreground">{issue.source_chat.title}</span>
+              )}
+            </AppLink>
+          ) : (
+            <div className="mt-2 flex items-center gap-1.5 text-caption text-muted-foreground">
+              <MessagesSquare className="h-3.5 w-3.5 shrink-0" />
+              <span>{t(($) => $.detail.from_chat_hidden)}</span>
+            </div>
+          ))}
 
           {isPeek && (
             <div className="mt-3">
