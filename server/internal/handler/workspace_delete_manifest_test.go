@@ -148,6 +148,7 @@ var workspaceDeletionManifest = map[string]workspaceDeleteAction{
 	"project":                            workspaceDelete,
 	"project_member":                     workspaceDelete,
 	"project_memory_status":              workspaceDelete,
+	"project_report_heard":               workspaceDelete,
 	"project_resource":                   workspaceDelete,
 	"quick_action":                       workspaceDelete,
 	"resource_share":                     workspaceDelete,
