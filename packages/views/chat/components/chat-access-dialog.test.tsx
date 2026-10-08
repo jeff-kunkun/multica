@@ -40,7 +40,7 @@ const session = { id: "session-1", creator_id: "user-1", title: "Plan", project_
 
 // Stands in for the header's share button: it reads the same access query.
 function HeaderMode() {
-  const { data } = useQuery({ queryKey: chatKeys.access("ws-1", session.id), queryFn: async () => null });
+  const { data } = useQuery({ queryKey: chatKeys.access("ws-1", session.id), queryFn: async (): Promise<{ mode: string } | null> => null });
   return <span data-testid="header-mode">{data?.mode ?? "-"}</span>;
 }
 
