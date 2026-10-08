@@ -783,13 +783,13 @@ export function ChatInput({
                 }
                 clearLabel={t(($) => $.input.remove_project_context)}
                 className={cn(
-                  "h-6 border-dashed border-surface-border bg-surface-raised font-medium",
+                  "h-6 max-w-80 border-dashed border-surface-border bg-surface-raised font-medium",
                   item.available ? "text-foreground" : "text-muted-foreground",
                 )}
               >
                 <span className="shrink-0" aria-hidden="true">{item.icon || "📁"}</span>
                 <span className={cn("min-w-0 truncate", !item.available && "line-through")}>{item.title}</span>
-                <span className="shrink-0 font-normal text-muted-foreground">
+                <span className="max-w-24 shrink-0 truncate font-normal text-muted-foreground">
                   {item.available ? item.source_name : t(($) => $.input.linked_project_stale)}
                 </span>
               </ClearablePillButton>

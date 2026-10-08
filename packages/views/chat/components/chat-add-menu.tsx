@@ -183,7 +183,7 @@ export function ChatAddMenu({
                   </span>
                 )}
               </DropdownMenuSubTrigger>
-              <DropdownMenuSubContent className="max-h-72 min-w-52 overflow-y-auto">
+              <DropdownMenuSubContent className="max-h-72 min-w-52 max-w-[min(24rem,calc(100vw-1rem))] overflow-y-auto">
                 {visibleProjects.map((project) => (
                   // Checkbox items keep the menu open on click (Base UI), which
                   // is the point: attaching two or three projects is one trip.
