@@ -251,6 +251,24 @@ func disabledReviewerStuck(from string) string {
 	return fmt.Sprintf("验收席 %s 已停用，不接新活。同档没有另一家供应商，降一档也没有能接的席位。这张票停在待验收，需要人指定验收席。", from)
 }
 
+func failedReviewerNote(from, to string, steppedDown bool) string {
+	if from == "" {
+		from = "原验收席"
+	}
+	step := "同档另一家模型"
+	if steppedDown {
+		step = "下一档"
+	}
+	return fmt.Sprintf("验收席失败，已转给 %s。%s 这一轮的验收 run 失败后没有再跑起来，复审改由%s的 %s 接手，避开了做过这张票的席位。", to, from, step, to)
+}
+
+func failedReviewerStuck(from string) string {
+	if from == "" {
+		from = "原验收席"
+	}
+	return fmt.Sprintf("验收席 %s 的验收 run 失败了，找不到另一个没做过这张票的验收席。这张票停在待验收，已发选项提问：换席位 / 我来验 / 直接关票。", from)
+}
+
 // handoffComment is the in-review-row comment. Every handoff it describes is
 // to a seat: the reviewer slot never names a person.
 func (r *Router) handoffComment(issue Issue, to string, decidedHere bool) string {

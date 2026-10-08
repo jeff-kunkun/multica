@@ -3220,6 +3220,43 @@ func (q *Queries) PromoteBacklogIssueToTodo(ctx context.Context, arg PromoteBack
 	return i, err
 }
 
+const reviewRoundRunState = `-- name: ReviewRoundRunState :one
+SELECT
+    COALESCE((
+        SELECT t.status FROM agent_task_queue t
+        WHERE t.issue_id = $1::uuid
+          AND t.created_at >= $2::timestamptz
+        ORDER BY t.created_at DESC, t.id DESC
+        LIMIT 1
+    ), '')::text AS last_status,
+    (
+        SELECT count(*) FROM agent_task_queue t
+        WHERE t.issue_id = $1::uuid
+          AND t.created_at >= $2::timestamptz
+          AND t.status = 'failed'
+    )::int AS failed_runs
+`
+
+type ReviewRoundRunStateParams struct {
+	IssueID pgtype.UUID        `json:"issue_id"`
+	Since   pgtype.Timestamptz `json:"since"`
+}
+
+type ReviewRoundRunStateRow struct {
+	LastStatus string `json:"last_status"`
+	FailedRuns int32  `json:"failed_runs"`
+}
+
+// DENE-1647 patrol input: the newest run of this review round and how many
+// of the round's runs failed. A failed newest run with nothing after it is a
+// stalled acceptance, whatever the quiet clock says about comments.
+func (q *Queries) ReviewRoundRunState(ctx context.Context, arg ReviewRoundRunStateParams) (ReviewRoundRunStateRow, error) {
+	row := q.db.QueryRow(ctx, reviewRoundRunState, arg.IssueID, arg.Since)
+	var i ReviewRoundRunStateRow
+	err := row.Scan(&i.LastStatus, &i.FailedRuns)
+	return i, err
+}
+
 const setIssueMetadataKey = `-- name: SetIssueMetadataKey :one
 
 UPDATE issue SET

@@ -216,6 +216,7 @@
     "prop_work_enabled_hint": "Désactivé, ce poste ne prend plus de nouveau travail ; les exécutions en cours continuent.",
     "prop_work_pause_balance": "En pause : le solde du compte est épuisé. Rechargez ou changez de compte, puis réactivez ce poste.",
     "prop_work_pause_quota": "En pause : le quota du modèle est épuisé. Reprise à sa réinitialisation.",
+    "prop_work_pause_auth": "En pause : la connexion au modèle a été refusée (401/403). Nouvel essai dans une heure ; corrigez la connexion puis réactivez ce poste pour reprendre tout de suite.",
     "prop_auto_retry": "Nouvelle tentative automatique",
     "prop_auto_retry_hint": "Désactivé, les exécutions en échec ne sont plus relancées automatiquement.",
     "prop_runtime_inherit": "Suivre le runtime du rôle de base",

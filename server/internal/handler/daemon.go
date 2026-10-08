@@ -6531,9 +6531,34 @@ func (h *Handler) ListTasksByIssue(w http.ResponseWriter, r *http.Request) {
 	if !activeOnly {
 		h.hydrateTaskUsage(r.Context(), issue.ID, resp)
 		h.hydrateTaskSkills(r.Context(), issue.ID, resp)
+		h.hydrateTaskRelays(r.Context(), issue.ID, resp)
 	}
 
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// hydrateTaskRelays attaches the relay record of each failed run (DENE-1647)
+// so the log and `multica issue runs` say where the work went. Display
+// metadata: an error leaves the rows without it.
+func (h *Handler) hydrateTaskRelays(ctx context.Context, issueID pgtype.UUID, resp []AgentTaskResponse) {
+	if len(resp) == 0 {
+		return
+	}
+	rows, err := h.Queries.ListIssueQuotaRelays(ctx, issueID)
+	if err != nil || len(rows) == 0 {
+		return
+	}
+	byTask := make(map[string]*TaskRelayData, len(rows))
+	for _, row := range rows {
+		relay := &TaskRelayData{Outcome: row.Outcome, Reason: row.Reason, WaitReason: row.WaitReason, ToAgentName: row.ToAgentName}
+		if row.ToAgentID.Valid {
+			relay.ToAgentID = uuidToString(row.ToAgentID)
+		}
+		byTask[uuidToString(row.SourceTaskID)] = relay
+	}
+	for i := range resp {
+		resp[i].Relay = byTask[resp[i].ID]
+	}
 }
 
 // hydrateTaskSkills attaches the skills each run used (DENE-1573), read from

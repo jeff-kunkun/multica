@@ -1052,3 +1052,22 @@ WHERE workspace_id = $1 AND project_id = $2;
 -- and tightening to private is the only answer that shows nobody more.
 UPDATE issue SET visibility = 'private', updated_at = now()
 WHERE workspace_id = $1 AND project_id = $2 AND visibility = 'project';
+
+-- name: ReviewRoundRunState :one
+-- DENE-1647 patrol input: the newest run of this review round and how many
+-- of the round's runs failed. A failed newest run with nothing after it is a
+-- stalled acceptance, whatever the quiet clock says about comments.
+SELECT
+    COALESCE((
+        SELECT t.status FROM agent_task_queue t
+        WHERE t.issue_id = sqlc.arg('issue_id')::uuid
+          AND t.created_at >= sqlc.arg('since')::timestamptz
+        ORDER BY t.created_at DESC, t.id DESC
+        LIMIT 1
+    ), '')::text AS last_status,
+    (
+        SELECT count(*) FROM agent_task_queue t
+        WHERE t.issue_id = sqlc.arg('issue_id')::uuid
+          AND t.created_at >= sqlc.arg('since')::timestamptz
+          AND t.status = 'failed'
+    )::int AS failed_runs;

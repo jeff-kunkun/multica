@@ -3609,7 +3609,7 @@ func runIssueRuns(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	headers := []string{"ID", "AGENT", "STATUS", "STARTED", "COMPLETED", "SESSION", "SKILLS", "ERROR"}
+	headers := []string{"ID", "AGENT", "STATUS", "STARTED", "COMPLETED", "SESSION", "SKILLS", "RELAY", "ERROR"}
 	rows := make([][]string, 0, len(runs))
 	for _, r := range runs {
 		started := strVal(r, "started_at")
@@ -3633,6 +3633,7 @@ func runIssueRuns(cmd *cobra.Command, args []string) error {
 			completed,
 			runSessionLabel(r, fullID),
 			runSkillsLabel(r),
+			runRelayLabel(r),
 			errMsg,
 		})
 	}
@@ -3651,6 +3652,20 @@ func runSkillsLabel(r map[string]any) string {
 		}
 	}
 	return strings.Join(names, ",")
+}
+
+// runRelayLabel says where the work went after a failed run (DENE-1647):
+// "→ <seat>" when another seat took over, otherwise the relay outcome
+// (waiting, skipped_*). Empty when the run had no relay.
+func runRelayLabel(r map[string]any) string {
+	relay, _ := r["relay"].(map[string]any)
+	if relay == nil {
+		return ""
+	}
+	if name := strVal(relay, "to_agent_name"); name != "" {
+		return "→ " + name
+	}
+	return strVal(relay, "outcome")
 }
 
 func runIssueUsage(cmd *cobra.Command, args []string) error {
