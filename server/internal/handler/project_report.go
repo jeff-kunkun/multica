@@ -13,7 +13,10 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/multica-ai/multica/server/internal/closeprotocol"
+	"github.com/multica-ai/multica/server/internal/progress"
 	"github.com/multica-ai/multica/server/internal/service"
+	"github.com/multica-ai/multica/server/internal/statecard"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
@@ -53,8 +56,12 @@ type ProjectReportItem struct {
 	// FromStatus is the status before the first move inside the window; empty
 	// for an issue opened inside it (Opened).
 	FromStatus string `json:"from_status,omitempty"`
-	Opened     bool   `json:"opened"`
-	ChangedAt  string `json:"changed_at"`
+	// LatestSummary is the --summary of the newer of the issue's last close
+	// and last handoff: what got done, where it is stuck, who must do what.
+	// Omitted when that close or handoff carried none.
+	LatestSummary string `json:"latest_summary,omitempty"`
+	Opened        bool   `json:"opened"`
+	ChangedAt     string `json:"changed_at"`
 	// Phase is the report's three buckets: done, in_progress or waiting_you.
 	Phase      string                   `json:"phase"`
 	NeedsYou   bool                     `json:"needs_you"`
@@ -285,6 +292,7 @@ func (h *Handler) buildProjectReport(ctx context.Context, wsUUID pgtype.UUID, pr
 			Opened:     m.opened,
 			ChangedAt:  m.changed.UTC().Format(time.RFC3339Nano),
 		}
+		item.LatestSummary = h.projectReportSummary(ctx, wsUUID, row.ID, issueMetaStrings(row.Metadata))
 		if row.SourceChatID.Valid {
 			item.SourceChat = chats(row.SourceChatID)
 		}
@@ -463,6 +471,23 @@ func projectReportGist(description string) string {
 		}
 	}
 	return pick
+}
+
+// projectReportSummary is an issue's latest conclusion line, word for word
+// from statecard.KeyLatestSummary. Only issues closed before that key existed
+// read the close's progress line, and only when it belongs to that close —
+// the evidence never stands in for it.
+func (h *Handler) projectReportSummary(ctx context.Context, wsUUID, issueID pgtype.UUID, meta map[string]string) string {
+	var closeSummary string
+	if _, stored := meta[statecard.KeyLatestSummary]; !stored && closeprotocol.Complete(meta) {
+		row, err := h.Queries.GetLatestIssueProgressBySource(ctx, db.GetLatestIssueProgressBySourceParams{
+			IssueID: issueID, WorkspaceID: wsUUID, Source: progress.SourceClose,
+		})
+		if err == nil && row.CreatedAt.Valid && statecard.SummaryBelongsToClose(row.CreatedAt.Time, meta[closeprotocol.KeyAt]) {
+			closeSummary = row.Text
+		}
+	}
+	return statecard.LatestSummary(meta, closeSummary)
 }
 
 func cleanProjectReportLine(line string) string {

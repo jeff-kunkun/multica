@@ -59,7 +59,7 @@ ORDER BY created_at ASC;
 -- to the person hangs on it.
 SELECT i.id, i.number, i.title, i.status, i.priority, i.description,
        i.assignee_type, i.assignee_id, i.visibility, i.creator_type, i.creator_id,
-       i.project_id, i.updated_at,
+       i.project_id, i.updated_at, i.metadata,
        COALESCE(i.origin_chat_session_id, t.chat_session_id)::uuid AS source_chat_id,
        EXISTS (
            SELECT 1 FROM inbox_item n

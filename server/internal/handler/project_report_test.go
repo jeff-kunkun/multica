@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -239,5 +240,81 @@ func TestProjectReportCursorIsPerPersonAndProject(t *testing.T) {
 	_ = json.Unmarshal(rows[0].Actions, &actions)
 	if len(actions) == 0 || actions[len(actions)-1]["label"] != service.ChatReportAckLabel {
 		t.Fatalf("recorded actions = %v", actions)
+	}
+}
+
+// DENE-1691: each item carries the --summary of its latest close or handoff,
+// verbatim, and nothing when that close or handoff carried none.
+func TestProjectReportCarriesLatestSummary(t *testing.T) {
+	if testPool == nil {
+		t.Skip("no database")
+	}
+	ctx := context.Background()
+	f := newProjectReportFixture(t)
+	agentID := handlerTestAgentID(t)
+	inProject := func(title string) string {
+		issue := createIssueHTTP(t, title, "in_progress")
+		if _, err := testPool.Exec(ctx, `UPDATE issue SET project_id = $2 WHERE id = $1`, issue.ID, f.projectID); err != nil {
+			t.Fatalf("move into project: %v", err)
+		}
+		setIssueAssigneeDirect(t, issue.ID, "agent", agentID)
+		return issue.ID
+	}
+	closeIt := func(issueID string, body map[string]any) {
+		taskID := insertIssueTaskWithStatus(t, agentID, issueID, "running")
+		body["outcome"] = "in_progress"
+		body["wake_at"] = time.Now().Add(2 * time.Hour).UTC().Format(time.RFC3339)
+		if w := closeIssueHTTP(t, issueID, agentID, taskID, body); w.Code != http.StatusOK {
+			t.Fatalf("close status = %d: %s", w.Code, w.Body.String())
+		}
+	}
+
+	handoff := func(issueID, summary string) {
+		next := createHandlerTestAgent(t, "report next "+time.Now().Format(time.RFC3339Nano), []byte("[]"))
+		body := map[string]any{"to": agentNameDirect(t, next)}
+		if summary != "" {
+			body["summary"] = summary
+		}
+		req := withURLParam(newRequest(http.MethodPost, "/api/issues/"+issueID+"/handoff", body), "id", issueID)
+		rec := httptest.NewRecorder()
+		testHandler.HandoffIssue(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("handoff status = %d: %s", rec.Code, rec.Body.String())
+		}
+	}
+
+	// Longer than the progress line keeps, with inner spacing: the report
+	// still says it word for word.
+	long := strings.Repeat("结", 500) + "  论"
+	withSummary := inProject("report summary")
+	closeIt(withSummary, map[string]any{"summary": long, "evidence": "证据：测试全绿"})
+	noSummary := inProject("report no summary")
+	closeIt(noSummary, map[string]any{"evidence": "只有证据没有结论"})
+	handedOff := inProject("report handoff")
+	closeIt(handedOff, map[string]any{"summary": "旧结论", "evidence": "证据"})
+	handoff(handedOff, "卡在前端，要验收席看截图")
+	// The latest handoff said nothing: no older line stands in, whether the
+	// one before it was a close or a handoff. Same-second on purpose.
+	closeThenBare := inProject("report close then bare handoff")
+	closeIt(closeThenBare, map[string]any{"summary": "旧结论", "evidence": "证据"})
+	handoff(closeThenBare, "")
+	handoffThenBare := inProject("report handoff then bare handoff")
+	handoff(handoffThenBare, "上一棒结论")
+	handoff(handoffThenBare, "")
+
+	items := reportItems(callProjectReport(t, f.projectID, "", false))
+	if got := items[withSummary].LatestSummary; got != long {
+		t.Fatalf("closed with summary: latest_summary = %q", got)
+	}
+	if got, ok := items[noSummary]; !ok || got.LatestSummary != "" {
+		t.Fatalf("closed without summary must be reported without latest_summary: %+v (present %v)", got, ok)
+	}
+	if got := items[handedOff].LatestSummary; got != "卡在前端，要验收席看截图" {
+		t.Fatalf("handoff after close: latest_summary = %q", got)
+	}
+	for name, id := range map[string]string{"close → bare handoff": closeThenBare, "handoff → bare handoff": handoffThenBare} {
+		if got, ok := items[id]; !ok || got.LatestSummary != "" {
+			t.Fatalf("%s: latest_summary = %q (present %v), want none", name, got.LatestSummary, ok)
+		}
 	}
 }
