@@ -195,7 +195,7 @@ func (q *Queries) SetAgentSpawnRecordTarget(ctx context.Context, arg SetAgentSpa
 const setChatMessageLinkedSession = `-- name: SetChatMessageLinkedSession :one
 UPDATE chat_message SET linked_session_id = $1
 WHERE id = $2
-RETURNING id, chat_session_id, role, content, task_id, created_at, failure_reason, elapsed_ms, message_kind, channel_media_pending_until, channel_ingested, quick_actions, channel_context_revision, channel_outbound_type, channel_outbound_installation_id, channel_outbound_chat_id, channel_outbound_message_ids, sender_user_id, linked_session_id
+RETURNING id, chat_session_id, role, content, task_id, created_at, failure_reason, elapsed_ms, message_kind, channel_media_pending_until, channel_ingested, quick_actions, channel_context_revision, channel_outbound_type, channel_outbound_installation_id, channel_outbound_chat_id, channel_outbound_message_ids, sender_user_id, linked_session_id, linked_issue_id
 `
 
 type SetChatMessageLinkedSessionParams struct {
@@ -226,6 +226,7 @@ func (q *Queries) SetChatMessageLinkedSession(ctx context.Context, arg SetChatMe
 		&i.ChannelOutboundMessageIds,
 		&i.SenderUserID,
 		&i.LinkedSessionID,
+		&i.LinkedIssueID,
 	)
 	return i, err
 }

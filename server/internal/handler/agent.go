@@ -993,6 +993,7 @@ type AgentTaskResponse struct {
 	ChatType                 string               `json:"chat_type,omitempty"`                   // channel_chat_session_binding.chat_type — "group" for a shared room, "p2p" for a 1:1 with the bot. Lets the per-turn prompt tell the agent who else can read its replies; empty for a web-only chat
 	ChatInThread             bool                 `json:"chat_in_thread,omitempty"`              // true when the latest @mention was a thread reply; tells the agent to start with `multica chat thread` vs `multica chat history`
 	ChatTitleRequested       bool                 `json:"chat_title_requested,omitempty"`        // workspace names chats through the runtime and this chat has no runtime title yet; the prompt asks the agent to run `multica chat title`
+	ChatDispatchedIssues     []string             `json:"chat_dispatched_issues,omitempty"`      // DENE-1672: the tasks this chat dispatched, one receipt line each, newest first
 	ChatMessage              string               `json:"chat_message,omitempty"`                // user message for chat tasks
 	ChatMessageAttachments   []ChatAttachmentMeta `json:"chat_message_attachments,omitempty"`    // attachments on the user message — agent calls `multica attachment download <id>` per entry
 	ChatIntro                bool                 `json:"chat_intro,omitempty"`                  // legacy compatibility for historical is_agent_intro sessions; new agent creation no longer creates these chats

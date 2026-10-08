@@ -112,6 +112,15 @@ type IssueCreateParams struct {
 	// Stage groups this issue into an ordered barrier group under its parent
 	// (NULL = unstaged). See issue_wakeup_system.go for the staged-barrier wake.
 	Stage pgtype.Int4
+	// SourceChatSessionID is the chat this issue was dispatched from
+	// (DENE-1672); SourceChatMessageID the message it answered. Left unset,
+	// Create derives them from SourceTaskID or the origin: a chat run's
+	// agent_create, an IM `/issue` command, an alignment draft.
+	SourceChatSessionID pgtype.UUID
+	SourceChatMessageID pgtype.UUID
+	// SourceTaskID is the run that created the issue when the origin does not
+	// name it (plan apply).
+	SourceTaskID pgtype.UUID
 	// SourceContext is set only by the comment-scoped manual create endpoint.
 	// Its immutable snapshot and cloned attachment rows commit in the same
 	// transaction as the new issue.
@@ -580,6 +589,15 @@ func (s *IssueService) createInTx(ctx context.Context, tx pgx.Tx, qtx *db.Querie
 		})
 		if err != nil {
 			return issueCreateTxOutcome{}, fmt.Errorf("record assignee source: %w", err)
+		}
+	}
+
+	if session, message := resolveSourceChat(ctx, qtx, p); session.Valid {
+		issue, err = qtx.SetIssueSourceChat(ctx, db.SetIssueSourceChatParams{
+			ID: issue.ID, SourceChatSessionID: session, SourceChatMessageID: message,
+		})
+		if err != nil {
+			return issueCreateTxOutcome{}, fmt.Errorf("record source chat: %w", err)
 		}
 	}
 

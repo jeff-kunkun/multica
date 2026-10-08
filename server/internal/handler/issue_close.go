@@ -512,6 +512,7 @@ func (h *Handler) CloseIssue(w http.ResponseWriter, r *http.Request) {
 	if resp.StatusChanged {
 		waiters := h.listBlockWaiters(ctx, updated, identifier)
 		h.notifyParentOfChildDone(ctx, prev, updated)
+		h.postSourceChatReceipt(ctx, prev, updated)
 		h.notifyWaitersOfIssueDone(ctx, prev, updated)
 		h.RouteIssueAsync(r, uuidToString(issue.WorkspaceID), uuidToString(issue.ID))
 		resp.Woken = describeCloseWake(updated, rec, prefix, len(waiters))

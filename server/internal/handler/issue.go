@@ -122,6 +122,11 @@ type IssueResponse struct {
 	// (DENE-371).
 	OriginType *string `json:"origin_type,omitempty"`
 	OriginID   *string `json:"origin_id,omitempty"`
+	// SourceChatSessionID is the chat this issue was dispatched from; its
+	// receipts flow back there (DENE-1672). Absent for sub-issues and issues
+	// nobody created from a chat.
+	SourceChatSessionID *string `json:"source_chat_session_id,omitempty"`
+	SourceChatMessageID *string `json:"source_chat_message_id,omitempty"`
 	// Stage groups sub-issues under the same parent into ordered barrier
 	// groups (null = unstaged). See service/issue_wakeup_system.go for how a
 	// closed stage wakes the parent's assignee.
@@ -562,39 +567,41 @@ func issueToResponse(i db.Issue, issuePrefix string) IssueResponse {
 		statusCategory = i.Status
 	}
 	return IssueResponse{
-		ID:                 uuidToString(i.ID),
-		WorkspaceID:        uuidToString(i.WorkspaceID),
-		Number:             i.Number,
-		Identifier:         identifier,
-		Title:              i.Title,
-		Progress:           progressResponse(i.ProgressText, i.ProgressSource, i.ProgressTone, i.ProgressAuthorType, i.ProgressAuthorID, i.ProgressUpdatedAt),
-		Description:        textToPtr(i.Description),
-		Status:             i.Status,
-		StatusCategory:     statusCategory,
-		Priority:           i.Priority,
-		AssigneeType:       textToPtr(i.AssigneeType),
-		AssigneeID:         uuidToPtr(i.AssigneeID),
-		ReviewerType:       textToPtr(i.ReviewerType),
-		ReviewerID:         uuidToPtr(i.ReviewerID),
-		CreatorType:        i.CreatorType,
-		CreatorID:          uuidToString(i.CreatorID),
-		ParentIssueID:      uuidToPtr(i.ParentIssueID),
-		duplicateOfIssueID: duplicateOfPointer(i.Status, i.DuplicateOfIssueID),
-		ProjectID:          uuidToPtr(i.ProjectID),
-		DomainID:           domainIDField(i.DomainID),
-		Visibility:         i.Visibility,
-		Position:           i.Position,
-		OriginType:         textToPtr(i.OriginType),
-		OriginID:           uuidToPtr(i.OriginID),
-		Stage:              int4ToPtr(i.Stage),
-		StartDate:          dateToPtr(i.StartDate),
-		DueDate:            dateToPtr(i.DueDate),
-		CreatedAt:          timestampToString(i.CreatedAt),
-		UpdatedAt:          timestampToString(i.UpdatedAt),
-		Revision:           i.Revision,
-		LastActivityAt:     timestampToNanoPtr(i.LastActivityAt),
-		Metadata:           parseIssueMetadata(i.Metadata),
-		Properties:         parseIssueProperties(i.Properties),
+		ID:                  uuidToString(i.ID),
+		WorkspaceID:         uuidToString(i.WorkspaceID),
+		Number:              i.Number,
+		Identifier:          identifier,
+		Title:               i.Title,
+		Progress:            progressResponse(i.ProgressText, i.ProgressSource, i.ProgressTone, i.ProgressAuthorType, i.ProgressAuthorID, i.ProgressUpdatedAt),
+		Description:         textToPtr(i.Description),
+		Status:              i.Status,
+		StatusCategory:      statusCategory,
+		Priority:            i.Priority,
+		AssigneeType:        textToPtr(i.AssigneeType),
+		AssigneeID:          uuidToPtr(i.AssigneeID),
+		ReviewerType:        textToPtr(i.ReviewerType),
+		ReviewerID:          uuidToPtr(i.ReviewerID),
+		CreatorType:         i.CreatorType,
+		CreatorID:           uuidToString(i.CreatorID),
+		ParentIssueID:       uuidToPtr(i.ParentIssueID),
+		duplicateOfIssueID:  duplicateOfPointer(i.Status, i.DuplicateOfIssueID),
+		ProjectID:           uuidToPtr(i.ProjectID),
+		DomainID:            domainIDField(i.DomainID),
+		Visibility:          i.Visibility,
+		Position:            i.Position,
+		OriginType:          textToPtr(i.OriginType),
+		OriginID:            uuidToPtr(i.OriginID),
+		SourceChatSessionID: uuidToPtr(i.SourceChatSessionID),
+		SourceChatMessageID: uuidToPtr(i.SourceChatMessageID),
+		Stage:               int4ToPtr(i.Stage),
+		StartDate:           dateToPtr(i.StartDate),
+		DueDate:             dateToPtr(i.DueDate),
+		CreatedAt:           timestampToString(i.CreatedAt),
+		UpdatedAt:           timestampToString(i.UpdatedAt),
+		Revision:            i.Revision,
+		LastActivityAt:      timestampToNanoPtr(i.LastActivityAt),
+		Metadata:            parseIssueMetadata(i.Metadata),
+		Properties:          parseIssueProperties(i.Properties),
 
 		AssigneeSource:       textToPtr(i.AssigneeSource),
 		AssigneeSourceUserID: uuidToPtr(i.AssigneeSourceUserID),
@@ -4828,6 +4835,7 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 	if statusChanged || titleChanged || descriptionChanged || pickSetAside {
 		if statusChanged {
 			h.notifyParentOfChildDone(r.Context(), prevIssue, issue)
+			h.postSourceChatReceipt(r.Context(), prevIssue, issue)
 			h.notifyWaitersOfIssueDone(r.Context(), prevIssue, issue)
 		}
 		// Route after content edits as well as status changes, and after an
@@ -5810,6 +5818,7 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 			h.RouteIssueAsync(r, uuidToString(issue.WorkspaceID), uuidToString(issue.ID))
 		}
 		if statusChanged {
+			h.postSourceChatReceipt(r.Context(), prevIssue, issue)
 			prevTerminal := isTerminalChildStatus(
 				issuestatus.Effective(r.Context(), h.Queries, prevIssue.WorkspaceID, prevIssue.Status))
 			nowTerminal := isTerminalChildStatus(

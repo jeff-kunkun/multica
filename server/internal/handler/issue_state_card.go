@@ -14,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/closeprotocol"
 	"github.com/multica-ai/multica/server/internal/progress"
+	"github.com/multica-ai/multica/server/internal/receipt"
 	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/statecard"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -85,6 +86,8 @@ func (h *Handler) buildStateCard(ctx context.Context, issue db.Issue, caller sta
 		return card, err
 	}
 
+	card.Source = h.stateCardSource(ctx, issue)
+
 	decisions, err := h.Queries.ListIssueDecisions(ctx, db.ListIssueDecisionsParams{IssueID: issue.ID, WorkspaceID: issue.WorkspaceID})
 	if err != nil {
 		return card, err
@@ -103,6 +106,28 @@ func (h *Handler) buildStateCard(ctx context.Context, issue db.Issue, caller sta
 	}
 	card.Changes = changes
 	return card, nil
+}
+
+// stateCardSource names the chat the issue was dispatched from and quotes the
+// message that asked for it. A chat that is gone leaves no line.
+func (h *Handler) stateCardSource(ctx context.Context, issue db.Issue) *statecard.Source {
+	if !issue.SourceChatSessionID.Valid {
+		return nil
+	}
+	session, err := h.Queries.GetChatSession(ctx, issue.SourceChatSessionID)
+	if err != nil || session.WorkspaceID != issue.WorkspaceID {
+		return nil
+	}
+	src := &statecard.Source{ChatSessionID: uuidToString(session.ID), ChatTitle: session.Title}
+	if issue.SourceChatMessageID.Valid {
+		if msg, err := h.Queries.GetChatMessageInSession(ctx, db.GetChatMessageInSessionParams{
+			ID: issue.SourceChatMessageID, ChatSessionID: session.ID,
+		}); err == nil {
+			src.MessageID = uuidToString(msg.ID)
+			src.Excerpt = receipt.Clip(msg.Content, statecard.MaxSourceExcerpt)
+		}
+	}
+	return src
 }
 
 // closeNote is the latest close's summary: its progress line when the line

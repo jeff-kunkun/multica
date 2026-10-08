@@ -544,7 +544,7 @@ func (q *Queries) SetAgentDomain(ctx context.Context, arg SetAgentDomainParams) 
 const setIssueDomain = `-- name: SetIssueDomain :one
 UPDATE issue SET domain_id = $3::uuid, updated_at = now()
 WHERE id = $1 AND workspace_id = $2
-RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, triage_state, reviewer_type, reviewer_id, visibility, assignee_source, assignee_source_user_id, assignee_quote, progress_text, progress_source, progress_tone, progress_author_type, progress_author_id, progress_updated_at, duplicate_of_issue_id, domain_id
+RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, triage_state, reviewer_type, reviewer_id, visibility, assignee_source, assignee_source_user_id, assignee_quote, progress_text, progress_source, progress_tone, progress_author_type, progress_author_id, progress_updated_at, duplicate_of_issue_id, domain_id, source_chat_session_id, source_chat_message_id
 `
 
 type SetIssueDomainParams struct {
@@ -600,6 +600,8 @@ func (q *Queries) SetIssueDomain(ctx context.Context, arg SetIssueDomainParams) 
 		&i.ProgressUpdatedAt,
 		&i.DuplicateOfIssueID,
 		&i.DomainID,
+		&i.SourceChatSessionID,
+		&i.SourceChatMessageID,
 	)
 	return i, err
 }

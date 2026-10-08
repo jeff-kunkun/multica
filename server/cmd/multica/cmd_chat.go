@@ -104,6 +104,19 @@ var chatToGoalCmd = &cobra.Command{
 	RunE:  runChatToGoal,
 }
 
+var chatIssuesCmd = &cobra.Command{
+	Use:   "issues [session-id-or-url]",
+	Short: "List the tasks a chat dispatched and where each stands",
+	Long: `List the tasks created from a chat, newest first: status, the close's
+conclusion and PRs. Defaults to MULTICA_CHAT_SESSION_ID inside a chat run.
+
+  multica chat issues
+  multica chat issues <session-id> --output json
+`,
+	Args: cobra.MaximumNArgs(1),
+	RunE: runChatIssues,
+}
+
 var chatTitleCmd = &cobra.Command{
 	Use:   "title <Project · topic>",
 	Short: "Report the title for the current chat",
@@ -202,6 +215,8 @@ func init() {
 	chatCmd.AddCommand(chatToGoalCmd)
 	chatToGoalCmd.Flags().String("session", "", "Chat session id or URL (defaults to MULTICA_CHAT_SESSION_ID)")
 	chatToGoalCmd.Flags().String("output", "json", "Output format: table or json")
+	chatCmd.AddCommand(chatIssuesCmd)
+	chatIssuesCmd.Flags().String("output", "table", "Output format: table or json")
 	chatCmd.AddCommand(chatTitleCmd)
 	chatCmd.AddCommand(chatOpenCmd)
 	chatCmd.AddCommand(chatSendCmd)
@@ -254,6 +269,75 @@ func runChatTitle(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 	return cli.PrintJSON(os.Stdout, out)
+}
+
+type chatIssueReceipt struct {
+	Identifier   string `json:"identifier"`
+	Title        string `json:"title"`
+	Status       string `json:"status"`
+	Summary      string `json:"summary"`
+	PullRequests []struct {
+		Number int    `json:"number"`
+		URL    string `json:"url"`
+		State  string `json:"state"`
+	} `json:"pull_requests"`
+}
+
+func runChatIssues(cmd *cobra.Command, args []string) error {
+	session := os.Getenv("MULTICA_CHAT_SESSION_ID")
+	if len(args) > 0 && strings.TrimSpace(args[0]) != "" {
+		session = args[0]
+	}
+	ref, err := parseChatSessionLinkRef(session)
+	if err != nil {
+		return fmt.Errorf("chat issues: session is required (or set MULTICA_CHAT_SESSION_ID): %w", err)
+	}
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := cli.APIContext(context.Background())
+	defer cancel()
+	var raw json.RawMessage
+	if err := client.GetJSON(ctx, "/api/chat/sessions/"+url.PathEscape(ref.ID)+"/issues", &raw); err != nil {
+		return fmt.Errorf("list chat issues: %w", err)
+	}
+	if output, _ := cmd.Flags().GetString("output"); output == "json" {
+		var out any
+		if err := json.Unmarshal(raw, &out); err != nil {
+			return err
+		}
+		return cli.PrintJSON(os.Stdout, out)
+	}
+	var resp struct {
+		Issues []chatIssueReceipt `json:"issues"`
+	}
+	if err := json.Unmarshal(raw, &resp); err != nil {
+		return err
+	}
+	if len(resp.Issues) == 0 {
+		fmt.Println("This chat has not dispatched any tasks.")
+		return nil
+	}
+	rows := make([][]string, 0, len(resp.Issues))
+	for _, r := range resp.Issues {
+		prs := make([]string, 0, len(r.PullRequests))
+		for _, p := range r.PullRequests {
+			prs = append(prs, fmt.Sprintf("#%d %s", p.Number, p.State))
+		}
+		rows = append(rows, []string{r.Identifier, r.Status, truncateCell(r.Title, 40), truncateCell(r.Summary, 60), strings.Join(prs, ", ")})
+	}
+	cli.PrintTable(os.Stdout, []string{"ISSUE", "STATUS", "TITLE", "CONCLUSION", "PRS"}, rows)
+	return nil
+}
+
+func truncateCell(s string, max int) string {
+	s = strings.Join(strings.Fields(s), " ")
+	r := []rune(s)
+	if len(r) <= max {
+		return s
+	}
+	return string(r[:max-1]) + "…"
 }
 
 func runChatToGoal(cmd *cobra.Command, _ []string) error {

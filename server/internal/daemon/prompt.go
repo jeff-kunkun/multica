@@ -1044,6 +1044,16 @@ func buildChatPrompt(task Task) string {
 	if task.ChatTitleRequested {
 		b.WriteString("Chat naming: this chat has no title yet. Once you understand the request, run `multica chat title \"{Project} · {topic}\" --output json` once, silently, before your final reply. {Project} is the display name from `## Project Context` (if there is none, use the product or repo the chat is about); {topic} is a short phrase for what the user wants, in the user's language. A refusal (title locked or already changed) is final — do not retry or mention it.\n\n")
 	}
+	// Where the tasks this chat dispatched stand, so the agent answers "how is
+	// it going" from fact instead of memory (DENE-1672). Changes every turn,
+	// so it lives here, not in the brief (ADR-0007).
+	if len(task.ChatDispatchedIssues) > 0 {
+		b.WriteString("Tasks you dispatched from this chat (newest first; `multica chat issues` for the full list):\n")
+		for _, line := range task.ChatDispatchedIssues {
+			fmt.Fprintf(&b, "- %s\n", line)
+		}
+		b.WriteString("\n")
+	}
 	fmt.Fprintf(&b, "User message:\n%s\n", task.ChatMessage)
 	// List attachments by id + filename so the agent can fetch them via
 	// the CLI. We deliberately do NOT inline the URL: chat attachments

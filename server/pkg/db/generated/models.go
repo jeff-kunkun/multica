@@ -630,6 +630,7 @@ type ChatMessage struct {
 	ChannelOutboundMessageIds     []string           `json:"channel_outbound_message_ids"`
 	SenderUserID                  pgtype.UUID        `json:"sender_user_id"`
 	LinkedSessionID               pgtype.UUID        `json:"linked_session_id"`
+	LinkedIssueID                 pgtype.UUID        `json:"linked_issue_id"`
 }
 
 type ChatNamingEvent struct {
@@ -1093,6 +1094,8 @@ type Issue struct {
 	ProgressUpdatedAt    pgtype.Timestamptz `json:"progress_updated_at"`
 	DuplicateOfIssueID   pgtype.UUID        `json:"duplicate_of_issue_id"`
 	DomainID             pgtype.UUID        `json:"domain_id"`
+	SourceChatSessionID  pgtype.UUID        `json:"source_chat_session_id"`
+	SourceChatMessageID  pgtype.UUID        `json:"source_chat_message_id"`
 }
 
 type IssueChildEvent struct {

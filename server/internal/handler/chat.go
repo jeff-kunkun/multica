@@ -425,11 +425,15 @@ func (h *Handler) ConvertChatSessionToGoal(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	var seed string
+	var lastUser pgtype.UUID
 	for _, message := range messages {
-		if message.Role == "user" && strings.TrimSpace(message.Content) != "" {
-			seed = strings.TrimSpace(message.Content)
-			break
+		if message.Role != "user" || strings.TrimSpace(message.Content) == "" {
+			continue
 		}
+		if seed == "" {
+			seed = strings.TrimSpace(message.Content)
+		}
+		lastUser = message.ID
 	}
 	title := strings.TrimSpace(session.Title)
 	if title == "" || title == "New chat" {
@@ -461,7 +465,8 @@ func (h *Handler) ConvertChatSessionToGoal(w http.ResponseWriter, r *http.Reques
 		AssigneeType: pgtype.Text{String: "agent", Valid: true}, AssigneeID: session.AgentID,
 		CreatorType: "member", CreatorID: creatorID,
 		ProjectID: session.ProjectID, ProjectPinned: session.ProjectID.Valid,
-		GoalMode: true,
+		GoalMode:            true,
+		SourceChatSessionID: session.ID, SourceChatMessageID: lastUser,
 	}, service.IssueCreateOpts{ActorID: userID, AnalyticsAgentID: uuidToString(session.AgentID), Platform: "web"})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to create goal issue")

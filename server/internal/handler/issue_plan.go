@@ -152,6 +152,12 @@ func (h *Handler) ApplyPlan(w http.ResponseWriter, r *http.Request) {
 	identity := req.Key
 
 	creatorType, creatorID := h.resolveActor(r, userID, workspaceID)
+	var sourceTask pgtype.UUID
+	if creatorType == "agent" {
+		if task, ok := h.taskFromRequestHeader(r); ok && uuidToString(task.AgentID) == creatorID {
+			sourceTask = task.ID
+		}
+	}
 	build := func(node ApplyPlanNode, status string, stage pgtype.Int4, nodeKey string) (service.IssueCreateParams, bool) {
 		priority := node.Priority
 		if priority == "" {
@@ -189,6 +195,7 @@ func (h *Handler) ApplyPlan(w http.ResponseWriter, r *http.Request) {
 			Stage:          stage,
 			OriginType:     pgtype.Text{String: planOriginType, Valid: true},
 			OriginID:       planNodeID(wsUUID, identity, nodeKey),
+			SourceTaskID:   sourceTask,
 			AllowDuplicate: true,
 		}, true
 	}

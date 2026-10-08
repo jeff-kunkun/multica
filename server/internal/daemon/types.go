@@ -264,6 +264,7 @@ type Task struct {
 	ChatType                  string                `json:"chat_type,omitempty"`                    // "group" when the channel conversation is a shared room, "p2p" for a 1:1 with the bot. Empty for a web chat or an old server; the per-turn prompt then reports unknown rather than guessing 1:1
 	ChatInThread              bool                  `json:"chat_in_thread,omitempty"`               // true when the latest @mention was a thread reply; selects which read command the prompt tells the agent to start with
 	ChatTitleRequested        bool                  `json:"chat_title_requested,omitempty"`         // server asks this run to name the chat with `multica chat title` (workspace naming source is runtime and no runtime title landed yet)
+	ChatDispatchedIssues      []string              `json:"chat_dispatched_issues,omitempty"`       // tasks this chat dispatched, one server-rendered receipt line each (DENE-1672)
 	ChatMessage               string                `json:"chat_message,omitempty"`                 // user message content for chat tasks
 	ChatMessageAttachments    []ChatAttachmentMeta  `json:"chat_message_attachments,omitempty"`     // attachments linked to the chat message; agent uses these to `multica attachment download <id>`
 	ChatIntro                 bool                  `json:"chat_intro,omitempty"`                   // legacy compatibility for historical is_agent_intro sessions; new agent creation no longer creates these chats

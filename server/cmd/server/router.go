@@ -2812,6 +2812,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Route("/{sessionId}", func(r chi.Router) {
 					r.Get("/", h.GetChatSession)
 					r.Post("/to-goal", h.ConvertChatSessionToGoal)
+					r.Get("/issues", h.ListChatSessionIssues)
 					r.Get("/access", h.GetChatSessionAccess)
 					r.Put("/access", h.PutChatSessionAccess)
 					r.Get("/work-thread", h.GetChatWorkThread)
