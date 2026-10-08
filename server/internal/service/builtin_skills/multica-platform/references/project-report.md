@@ -32,6 +32,7 @@ report then looks back a week), `counts` and `items`:
 | `from_status` → `status` | How it moved since the last hearing; `opened` when it is new |
 | `changed_at` | When it last moved |
 | `source_chat` | The chat that opened it; `title` is empty when the user cannot see that chat |
+| `latest_summary` | The conclusion line of its latest close or handoff; absent when that carried none |
 
 ## Tell it in this shape
 
@@ -42,9 +43,12 @@ Otherwise, per project (only a heading per project when the chat has several):
 1. **Sections by source chat.** 「这个聊天」 for items whose `source_chat.id` is
    this chat (MULTICA_CHAT_SESSION_ID), 「来自「<title>」」 for another chat,
    「其他」 for items no chat opened.
-2. **Two or three plain sentences per ticket**, for someone who does not read
-   code: what it is for, what changed since last time, what happens next. Keep
-   the identifier. No code, file names, commands or engineering reasons.
+2. **One or two sentences per ticket**, conclusion first, identifier kept:
+   what it is for, what got done or where it is stuck (`latest_summary` when
+   present), what happens next. The voice follows the Requesting User's
+   self-description — plain words if they ask for plain words, PRs and
+   engineering terms if that is what they read. When it says nothing about
+   this, keep to the conclusion and the identifier.
 3. **One Mermaid chart** of where things stand — three groups, top to bottom,
    so it fits a phone:
 

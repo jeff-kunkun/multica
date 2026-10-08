@@ -257,7 +257,7 @@ func (q *Queries) ListProjectReportHeardByTask(ctx context.Context, taskID pgtyp
 const listProjectReportIssues = `-- name: ListProjectReportIssues :many
 SELECT i.id, i.number, i.title, i.status, i.priority, i.description,
        i.assignee_type, i.assignee_id, i.visibility, i.creator_type, i.creator_id,
-       i.project_id, i.updated_at,
+       i.project_id, i.updated_at, i.metadata,
        COALESCE(i.origin_chat_session_id, t.chat_session_id)::uuid AS source_chat_id,
        EXISTS (
            SELECT 1 FROM inbox_item n
@@ -295,6 +295,7 @@ type ListProjectReportIssuesRow struct {
 	CreatorID    pgtype.UUID        `json:"creator_id"`
 	ProjectID    pgtype.UUID        `json:"project_id"`
 	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
+	Metadata     []byte             `json:"metadata"`
 	SourceChatID pgtype.UUID        `json:"source_chat_id"`
 	HasOpenCall  bool               `json:"has_open_call"`
 }
@@ -326,6 +327,7 @@ func (q *Queries) ListProjectReportIssues(ctx context.Context, arg ListProjectRe
 			&i.CreatorID,
 			&i.ProjectID,
 			&i.UpdatedAt,
+			&i.Metadata,
 			&i.SourceChatID,
 			&i.HasOpenCall,
 		); err != nil {

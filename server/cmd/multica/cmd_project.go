@@ -1788,12 +1788,12 @@ func runProjectReport(cmd *cobra.Command, args []string) error {
 
 	output, _ := cmd.Flags().GetString("output")
 	if output == "table" {
-		headers := []string{"PROJECT", "ISSUE", "PHASE", "STATUS", "FROM", "SOURCE CHAT", "TITLE"}
+		headers := []string{"PROJECT", "ISSUE", "PHASE", "STATUS", "FROM", "SOURCE CHAT", "TITLE", "LATEST SUMMARY"}
 		var rows [][]string
 		for _, report := range reports {
 			items, _ := report["items"].([]any)
 			if len(items) == 0 {
-				rows = append(rows, []string{strVal(report, "project_title"), "-", "-", "-", "-", "-", "no news since " + strVal(report, "since")})
+				rows = append(rows, []string{strVal(report, "project_title"), "-", "-", "-", "-", "-", "no news since " + strVal(report, "since"), ""})
 			}
 			for _, raw := range items {
 				item, _ := raw.(map[string]any)
@@ -1808,7 +1808,7 @@ func runProjectReport(cmd *cobra.Command, args []string) error {
 				if b, _ := item["opened"].(bool); b {
 					from = "(opened)"
 				}
-				rows = append(rows, []string{strVal(report, "project_title"), strVal(item, "identifier"), strVal(item, "phase"), strVal(item, "status"), from, source, strVal(item, "title")})
+				rows = append(rows, []string{strVal(report, "project_title"), strVal(item, "identifier"), strVal(item, "phase"), strVal(item, "status"), from, source, strVal(item, "title"), strVal(item, "latest_summary")})
 			}
 		}
 		cli.PrintTable(os.Stdout, headers, rows)

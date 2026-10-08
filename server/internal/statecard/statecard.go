@@ -323,6 +323,22 @@ func DeriveBaton(meta map[string]string, close CloseNote) *Baton {
 	}
 }
 
+// LatestSummary is the conclusion line of the newer of the last close and
+// the last handoff, exactly as its --summary said it — the report's
+// latest_summary (DENE-1691). Unlike DeriveBaton nothing stands in: when the
+// newer of the two carried no summary there is no line, so an older one is
+// never passed off as the latest conclusion.
+func LatestSummary(meta map[string]string, closeSummary string) string {
+	handoffAt := strings.TrimSpace(meta[KeyHandoffAt])
+	if closeprotocol.Complete(meta) && (handoffAt == "" || !after(handoffAt, strings.TrimSpace(meta[closeprotocol.KeyAt]))) {
+		return strings.TrimSpace(closeSummary)
+	}
+	if handoffAt == "" {
+		return ""
+	}
+	return strings.TrimSpace(meta[KeyHandoffSummary])
+}
+
 func after(a, b string) bool {
 	ta, errA := time.Parse(time.RFC3339Nano, a)
 	tb, errB := time.Parse(time.RFC3339Nano, b)

@@ -29,7 +29,10 @@ multica issue close <id> --outcome done --verdict pass --evidence-file ./close.m
 ```
 
 - `--evidence` (or `--evidence-file` / `--evidence-stdin`) is required: the PR
-  link, test conclusion, or blocker it rests on. `--summary` goes above it.
+  link, test conclusion, or blocker it rests on. `--summary` goes above it:
+  one conclusion line — what got done, or where it is stuck and who must do
+  what. Proof stays in the evidence. Engineering words are fine; the line is
+  what `project report` hands on as `latest_summary`.
   Keep `--parent` when this turn has a trigger; a comment-triggered run on the
   same issue defaults to that thread. Headings inside the evidence, in this
   order: `## 结论` / `## 状态` / `## 证据` / `## 下一责任人` / `## 唤醒动作`.
@@ -144,7 +147,8 @@ A close already hands over what it closes: `--outcome in_review` routes the
 seat itself, so do not follow it with `handoff --to reviewer`.
 
 Both calls take a repeatable `--decision "..."` for what this round settled,
-and `handoff` takes `--summary` for what the next owner needs to know. The
+and `handoff` takes `--summary`: the same kind of conclusion line — what got
+done, or where it is stuck and who must do what next. The
 next owner reads both back with `multica issue context <id>`
 (`references/state-card.md`).
 
