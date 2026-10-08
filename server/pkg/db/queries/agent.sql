@@ -84,7 +84,7 @@ INSERT INTO agent (
     instructions, custom_env, custom_args, mcp_config, model, thinking_level,
     service_tier, routing_tier, conversation_starters,
     composio_toolkit_allowlist, permission_mode, parent_agent_id,
-    runtime_inherited, routing_usage
+    runtime_inherited, routing_usage, dispatch_mode
 ) VALUES (
     $1, $2, $3, $4, $5,
     $6, $7, $8, $9, $10,
@@ -95,7 +95,8 @@ INSERT INTO agent (
     COALESCE(sqlc.narg('permission_mode'), 'private'),
     sqlc.narg('parent_agent_id')::uuid,
     COALESCE(sqlc.narg('runtime_inherited')::boolean, FALSE),
-    COALESCE(sqlc.narg('routing_usage')::text, 'normal')
+    COALESCE(sqlc.narg('routing_usage')::text, 'normal'),
+    COALESCE(sqlc.narg('dispatch_mode')::text, 'auto')
 )
 RETURNING *;
 
@@ -217,6 +218,8 @@ UPDATE agent SET
     service_tier = COALESCE(sqlc.narg('service_tier'), service_tier),
     routing_tier = COALESCE(sqlc.narg('routing_tier'), routing_tier),
     routing_usage = COALESCE(sqlc.narg('routing_usage'), routing_usage),
+    dispatch_mode = COALESCE(sqlc.narg('dispatch_mode')::text, dispatch_mode),
+    dispatch_projects = COALESCE(sqlc.narg('dispatch_projects')::uuid[], dispatch_projects),
     conversation_starters = COALESCE(sqlc.narg('conversation_starters'), conversation_starters),
     composio_toolkit_allowlist = COALESCE(sqlc.narg('composio_toolkit_allowlist')::text[], composio_toolkit_allowlist),
     switchable_models = COALESCE(sqlc.narg('switchable_models'), switchable_models),
@@ -303,7 +306,7 @@ RETURNING *;
 -- owners the specialisation keeps its own execution config; everything else
 -- still follows.
 --
--- Routing tier and usage (DENE-1016) follow for every owner: they are not
+-- Routing tier, usage (DENE-1016) and dispatch mode (DENE-1600) follow for every owner: they are not
 -- secrets, and a following seat that kept its own rung would route as a
 -- different person. The same statement is the copy used when a base role's
 -- routing changes, so that write and this one commit together.
@@ -316,6 +319,7 @@ SET runtime_id = parent.runtime_id,
     service_tier = parent.service_tier,
     routing_tier = parent.routing_tier,
     routing_usage = parent.routing_usage,
+    dispatch_mode = parent.dispatch_mode,
     custom_env = CASE WHEN child.owner_id = parent.owner_id THEN parent.custom_env ELSE child.custom_env END,
     custom_args = CASE WHEN child.owner_id = parent.owner_id THEN parent.custom_args ELSE child.custom_args END,
     mcp_config = CASE WHEN child.owner_id = parent.owner_id THEN parent.mcp_config ELSE child.mcp_config END,
@@ -333,6 +337,7 @@ WHERE child.parent_agent_id = parent.id
     OR child.service_tier IS DISTINCT FROM parent.service_tier
     OR child.routing_tier IS DISTINCT FROM parent.routing_tier
     OR child.routing_usage IS DISTINCT FROM parent.routing_usage
+    OR child.dispatch_mode IS DISTINCT FROM parent.dispatch_mode
     OR (child.owner_id = parent.owner_id
       AND (child.custom_env IS DISTINCT FROM parent.custom_env
         OR child.custom_args IS DISTINCT FROM parent.custom_args

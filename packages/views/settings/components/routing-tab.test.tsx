@@ -14,6 +14,8 @@ const checkRoutingHealth = vi.hoisted(() => vi.fn());
 const listRoutingModels = vi.hoisted(() => vi.fn());
 const listAgents = vi.hoisted(() => vi.fn());
 const listRuntimes = vi.hoisted(() => vi.fn());
+const toastError = vi.hoisted(() => vi.fn());
+vi.mock("sonner", () => ({ toast: { error: toastError, success: vi.fn() } }));
 const member = vi.hoisted(() => ({ role: "owner" as "owner" | "admin" | "member" }));
 const workspace = vi.hoisted(() => ({
   current: {
@@ -100,6 +102,7 @@ const HEALTHY = {
 
 beforeEach(() => {
   updateWorkspace.mockReset();
+  toastError.mockReset();
   getRoutingHealth.mockReset();
   getRoutingHealth.mockResolvedValue(HEALTHY);
   checkRoutingHealth.mockReset();
@@ -274,6 +277,7 @@ describe("RoutingTab", () => {
       allow_upshift: false,
       prefer_continuation: false,
       prefer_idle: false,
+      judged_review: false,
       judge_enabled: false,
       analysis: {
         enabled: true,
@@ -364,6 +368,16 @@ describe("RoutingTab", () => {
     ];
     expect(body.settings.routing.api_key).toBe("sk-live-abc");
     // And the box is emptied, so a credential is not left sitting in the DOM.
+    await waitFor(() => expect((key as HTMLInputElement).value).toBe(""));
+  });
+
+  it("says so when the key is refused, since the box empties either way", async () => {
+    updateWorkspace.mockRejectedValue(new Error("only owners and admins can change settings"));
+    render();
+    const key = fieldByLabel(JUDGE_KEY);
+    await userEvent.type(key, "sk-live-abc");
+    await userEvent.click(screen.getAllByRole("button", { name: /save key|保存 key/i })[1]!);
+    await waitFor(() => expect(toastError).toHaveBeenCalledWith("only owners and admins can change settings"));
     await waitFor(() => expect((key as HTMLInputElement).value).toBe(""));
   });
 
@@ -668,6 +682,24 @@ describe("RoutingTab seat order switches", () => {
     ];
     expect(body.settings.routing.prefer_idle).toBe(true);
     expect(body.settings.routing.prefer_continuation).toBe(false);
+  });
+
+  // DENE-1252: 按判断配验收 is off by default and saves as judged_review.
+  it("switches 按判断配验收 on and saves it", async () => {
+    workspace.current.settings = {
+      routing: { enabled: true, model: "gpt-5.6-luna" },
+    };
+    render();
+    const judged = screen.getByRole("switch", { name: "Review only when judged" });
+    expect(judged).not.toHaveAttribute("data-checked");
+
+    await userEvent.click(judged);
+    await waitFor(() => expect(updateWorkspace).toHaveBeenCalled());
+    const [, body] = updateWorkspace.mock.calls.at(-1) as [
+      string,
+      { settings: { routing: Record<string, unknown> } },
+    ];
+    expect(body.settings.routing.judged_review).toBe(true);
   });
 
   it("greys out upshift while usage priority is off", () => {

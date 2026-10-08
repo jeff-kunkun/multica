@@ -290,8 +290,13 @@ func issueCreateLong() string {
 		"is for one short line (the shell rewrites quotes, backticks and $() first).\n" +
 		"The title already serves as the H1, so start the body with prose or ##\n" +
 		"subheadings; add a # H1 only when the user asks for one.\n\n" +
+		"Status: leave it out (todo) for work that should start now; routing never\n" +
+		"picks up backlog. Use --status backlog only for work that waits on\n" +
+		"something, and say what with --waiting-for \"<one line>\" (agents are\n" +
+		"refused without it; staged sub-issues are exempt).\n\n" +
 		"Sub-issues: --parent <issue>; --status todo starts an agent-assigned child\n" +
-		"at once, --status backlog parks it, --stage <N> orders children in stages.\n\n" +
+		"at once, --status backlog --stage <N> parks a later stage until the stage\n" +
+		"before it finishes.\n\n" +
 		"Title style\n\n" + strings.TrimRight(titling.IssueTitleRules, "\n")
 }
 
@@ -394,8 +399,8 @@ func issueCloseLong() string {
 		"  --outcome blocked     needs one wait: --blocked-by / --wake-at /\n" +
 		"                        --wait-condition with --wait-timeout / --needs-human\n" +
 		"  --outcome cancelled   dropped on purpose; say why in --evidence\n" +
-		"  --outcome backlog     back to planning on purpose; say why in --evidence,\n" +
-		"                        no PR needed, nobody is woken\n" +
+		"  --outcome backlog     back to planning on purpose; --waiting-for says what it\n" +
+		"                        waits for (agents must), no PR needed, nobody is woken\n" +
 		"  --outcome todo        back to the ready list on purpose; say why in --evidence,\n" +
 		"                        no PR needed, nobody is woken\n" +
 		"  --outcome in_progress this round stops and the next one continues; --evidence\n" +
@@ -886,6 +891,7 @@ func init() {
 	issueCreateCmd.Flags().String("domain", "", "Issue domain: one of the project's domains, or 通用 for generic (default: the project's only domain). Routing and --per-quote pick the specialisation by it")
 	issueCreateCmd.Flags().String("start-date", "", "Start date (calendar day, YYYY-MM-DD)")
 	issueCreateCmd.Flags().String("due-date", "", "Due date (calendar day, YYYY-MM-DD)")
+	issueCreateCmd.Flags().String("waiting-for", "", "What this backlog issue is waiting for, one line (80 chars max). Required when an agent puts an issue in backlog; nothing to wait for means use todo")
 	issueCreateCmd.Flags().Bool("allow-duplicate", false, "Allow creating an issue even when an active duplicate exists")
 	issueCreateCmd.Flags().Bool("goal", false, "Create a draft completion-line goal for this issue")
 	issueCreateCmd.Flags().String("routing-facts", "", `Routing facts as JSON, so routing skips the analysis call: {"scope":"small|module|cross_module","clarity":"clear|vague","risk":"low|medium|high","needs_human":false,"summary":"..."}`)
@@ -915,6 +921,7 @@ func init() {
 	issueUpdateCmd.Flags().Int("stage", 0, "Stage ordinal (>=1) for this sub-issue; see `issue create --stage`")
 	issueUpdateCmd.Flags().Float64("position", 0, "Ordering position within the board column (lower sorts first); prefer `issue reorder` for relative moves")
 	issueUpdateCmd.Flags().Bool("no-start", false, "Apply the update without starting an agent run")
+	issueUpdateCmd.Flags().String("waiting-for", "", "What this backlog issue is waiting for, one line (80 chars max). Required when an agent puts an issue in backlog; nothing to wait for means use todo")
 	issueUpdateCmd.Flags().String("no-code", "", "Why this issue has no PR the platform can see: docs or research, or code merged outside GitHub (give the MR link). An agent moving an issue to in_review without a linked open/merged PR is refused unless this is given")
 	issueUpdateCmd.Flags().String("duplicate-of", "", "Mark the issue as a duplicate of this original issue (key like MUL-123, or full UUID) and cancel it; --status, if given, must be cancelled, and description/attachment changes must go in a separate update")
 	issueUpdateCmd.Flags().String("output", "json", "Output format: table or json")
@@ -931,11 +938,13 @@ func init() {
 	issueStatusCmd.Flags().String("needs-human", "", "Member UUID a blocked issue is waiting on")
 	issueStatusCmd.Flags().String("block-kind", "", "Kind of stop for blocked: decision, permission, external, dependency or capacity (required for agents)")
 	issueStatusCmd.Flags().String("block-action", "", "One-line next step for blocked, at most 80 characters (required for agents)")
+	issueStatusCmd.Flags().String("waiting-for", "", "What this backlog issue is waiting for, one line (80 chars max). Required when an agent puts an issue in backlog; nothing to wait for means use todo")
 	registerIssueCloseFlags(issueCloseCmd)
 	registerIssueHandoffFlags(issueHandoffCmd)
 	registerIssueDisposeFlags(issueDisposeCmd)
 	issueStatusCmd.Flags().String("no-code", "", "Why this issue has no PR the platform can see: docs or research, or code merged outside GitHub (give the MR link). An agent moving an issue to in_review without a linked open/merged PR is refused unless this is given")
 	issueStatusBatchCmd.Flags().Bool("no-start", false, "Change status without starting agent runs")
+	issueStatusBatchCmd.Flags().String("waiting-for", "", "What this backlog issue is waiting for, one line (80 chars max). Required when an agent puts an issue in backlog; nothing to wait for means use todo")
 	issueStatusBatchCmd.Flags().String("output", "table", "Output format: table or json")
 
 	// issue reorder
@@ -1859,6 +1868,9 @@ func runIssueCreate(cmd *cobra.Command, _ []string) error {
 	if statusFlag != "" {
 		body["status"] = statusFlag
 	}
+	if v, _ := cmd.Flags().GetString("waiting-for"); strings.TrimSpace(v) != "" {
+		body["waiting_for"] = v
+	}
 	if priorityFlag != "" {
 		body["priority"] = priorityFlag
 	}
@@ -2118,6 +2130,9 @@ func runIssueUpdate(cmd *cobra.Command, args []string) error {
 	}
 	if v, _ := cmd.Flags().GetString("no-code"); v != "" {
 		body["no_code_reason"] = v
+	}
+	if v, _ := cmd.Flags().GetString("waiting-for"); strings.TrimSpace(v) != "" {
+		body["waiting_for"] = v
 	}
 	if priorityChanged {
 		body["priority"] = priorityFlag
@@ -2405,6 +2420,7 @@ func runIssueStatus(cmd *cobra.Command, args []string) error {
 		{"block-kind", "block_kind"},
 		{"block-action", "block_action"},
 		{"no-code", "no_code_reason"},
+		{"waiting-for", "waiting_for"},
 	} {
 		if v, _ := cmd.Flags().GetString(pair.flag); v != "" {
 			body[pair.key] = v
@@ -2481,6 +2497,9 @@ func runIssueStatusBatch(cmd *cobra.Command, args []string) error {
 	if noStart {
 		updates["suppress_run"] = true
 	}
+	if v, _ := cmd.Flags().GetString("waiting-for"); strings.TrimSpace(v) != "" {
+		updates["waiting_for"] = v
+	}
 	body := map[string]any{"issue_ids": ids, "updates": updates}
 	var result map[string]any
 	if err := client.PostJSON(ctx, "/api/issues/batch-update", body, &result); err != nil {
@@ -2518,6 +2537,7 @@ func registerIssueCloseFlags(cmd *cobra.Command) {
 	cmd.Flags().Bool("evidence-stdin", false, "Read the evidence body from stdin")
 	cmd.Flags().String("evidence-file", "", "Read the evidence body from a UTF-8 file inside the working directory")
 	cmd.Flags().Bool("allow-external-file", false, "Allow --evidence-file to read a path outside the current working directory")
+	cmd.Flags().String("waiting-for", "", "With --outcome backlog: what the issue waits for, one line (80 chars max; required for agents)")
 	cmd.Flags().String("summary", "", "One-line conclusion placed above the evidence; for blocked it is the close.block_action (80 chars max)")
 	cmd.Flags().String("parent", "", "Comment ID to reply under; a comment-triggered run defaults to its trigger comment")
 	cmd.Flags().String("blocked-by", "", "Comma-separated issue identifiers this blocked issue is waiting on; on --outcome in_progress it says who continues")
@@ -2585,6 +2605,7 @@ func runIssueClose(cmd *cobra.Command, args []string) error {
 		{"needs-human", "needs_human"},
 		{"no-code", "no_code_reason"},
 		{"pr", "pr_url"},
+		{"waiting-for", "waiting_for"},
 	} {
 		if v, _ := cmd.Flags().GetString(pair.flag); strings.TrimSpace(v) != "" {
 			body[pair.key] = v

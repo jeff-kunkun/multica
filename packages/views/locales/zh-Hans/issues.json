@@ -503,6 +503,7 @@
     "prop_status": "状态",
     "prop_priority": "优先级",
     "prop_stage": "阶段",
+    "prop_waiting_for": "在等",
     "prop_assignee": "负责人",
     "prop_reviewer": "验收席",
     "prop_start_date": "开始日期",
@@ -676,6 +677,7 @@
   },
   "comment": {
     "add_reaction": "添加表情回应",
+    "reaction_failed": "表情回应更新失败",
     "collapse_thread": "收起讨论",
     "expand_thread": "展开讨论",
     "delete_title": "删除评论",

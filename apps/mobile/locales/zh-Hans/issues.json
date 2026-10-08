@@ -122,6 +122,7 @@
     "all": "该工作区还没有任务。",
     "members": "没有分配给成员的任务。"
   },
+  "waiting_for": "在等：{{reason}}",
   "driver": {
     "none": "没人在推进",
     "revived": "已重跑 {{count}} 次",

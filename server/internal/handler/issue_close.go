@@ -65,6 +65,9 @@ type CloseIssueRequest struct {
 	// onto its parent's branch (DENE-1537): the commits it merged back, or
 	// the files that conflicted. Required for such a sub-issue's done.
 	DeliveryMerge *service.DeliveryMergeReport `json:"delivery_merge,omitempty"`
+	// WaitingFor is `issue close --outcome backlog --waiting-for`: what the
+	// parked ticket waits for (DENE-1638). Required for an agent's backlog.
+	WaitingFor string `json:"waiting_for,omitempty"`
 }
 
 // CloseIssueResponse reports what actually happened, not what was asked for:
@@ -392,6 +395,15 @@ func (h *Handler) CloseIssue(w http.ResponseWriter, r *http.Request) {
 		}
 		if lineMerge != nil {
 			if _, err := service.RecordDeliveryMerge(ctx, qtx, *line, lineMerge.DeliveryMergeReport); err != nil {
+				return err
+			}
+		}
+		if reason := strings.TrimSpace(req.WaitingFor); outcome == issuestatus.Backlog && reason != "" {
+			if err := setIssueMetaStringTx(ctx, qtx, updated, metaKeyBacklogWaitingFor, truncateRunes(reason, maxBacklogWaitingForRunes)); err != nil {
+				return err
+			}
+		} else if outcome != issuestatus.Backlog {
+			if _, err := qtx.DeleteIssueMetadataKey(ctx, db.DeleteIssueMetadataKeyParams{ID: updated.ID, WorkspaceID: updated.WorkspaceID, Key: metaKeyBacklogWaitingFor}); err != nil && !errors.Is(err, pgx.ErrNoRows) {
 				return err
 			}
 		}
@@ -773,6 +785,11 @@ func (h *Handler) deriveCloseRecord(r *http.Request, issue db.Issue, req CloseIs
 		// Returned to planning / the ready list on purpose. The evidence says
 		// why; nothing is delivered and no PR gate runs. Neither status is a
 		// stage terminal, so no stage_done wake.
+		if outcome == issuestatus.Backlog {
+			if reject := backlogWaitingForRejection(&req.WaitingFor, actorType, issue.Stage.Valid); reject != "" {
+				return rec, reject
+			}
+		}
 		meta[closeprotocol.KeyConclusion] = closeprotocol.ConclusionDeferred
 	case issuestatus.InProgress:
 		// "This turn stops, the next one continues." The who/when is the same

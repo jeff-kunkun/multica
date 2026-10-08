@@ -60,6 +60,7 @@ import {
   notificationPreferenceKeys,
 } from "../notification-preferences/queries";
 import { workspaceKeys, workspaceListOptions } from "../workspace/queries";
+import { workspaceLinkKeys } from "../workspace-links/queries";
 import { isWorkspaceDeletePending } from "../workspace/pending-delete";
 import {
   showWebNotification,
@@ -1460,6 +1461,11 @@ export function useRealtimeSync(
       if (!item) return;
       const inboxWsId = getCurrentWsId();
       if (inboxWsId) qc.invalidateQueries({ queryKey: homeKeys.all(inboxWsId) });
+      // A link request or receipt changed that workspace's link list
+      // (DENE-1641); the settings nav counts pending requests from it.
+      if (item.type.startsWith("workspace_link_")) {
+        qc.invalidateQueries({ queryKey: workspaceLinkKeys.list(item.workspace_id) });
+      }
       await handleInboxNew(qc, item);
     });
 

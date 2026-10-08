@@ -16,7 +16,9 @@ What it may do, and only when the slot is still **empty**:
   considered by the stale-review sweep. Its terminal result feeds the parent
   stage/barrier; the parent is the single issue that later enters `in_review`
   for a unified review of the full child tree.
-- **`todo`** — fill the assignee with a seat from the tier ladder. For a
+- **`todo`** — fill the assignee with a seat from the tier ladder (seats with
+  `dispatch_mode: mention_only` are never on it, whatever their tier, and a
+  seat with `dispatch_projects` set is on it only for those projects' issues). For a
   top-level issue, also fill the issue's 验收席 with a seat or 「不需要验收」.
   **Routing never writes a person
   into 验收席**: an issue a person holds is one routing never touches again, so
@@ -31,7 +33,9 @@ What it may do, and only when the slot is still **empty**:
   whoever is holding it keeps it, so its status can still be moved.
 - **`blocked`** — post one advice comment and @ somebody. **No value is
   changed.**
-- **`in_progress` / `done` / `cancelled` / `backlog`** — nothing at all.
+- **`in_progress` / `done` / `cancelled` / `backlog`** — nothing at all. A
+  ticket meant to start now must be `todo`; an agent putting one in `backlog`
+  has to name what it waits for (`--waiting-for`), or the server refuses.
 
 There is a fourth trigger that is not a status change. A top-level ticket sitting
 in `in_review` with nothing happening on it and no run working on it is **stalled**,
@@ -218,6 +222,16 @@ multica workspace routing set --load on      # or off to go back to shadow
 So create independent tickets in one batch and leave them to routing; do not
 hand-assign them to different seats to spread the load.
 
+**按判断配验收 (DENE-1252).** Off by default: an unsure reviewer verdict gets
+the fallback seat. With it on, the routing model decides — only a confident
+"seat" or a "human" answer fills the reviewer slot; anything else writes
+不需要验收, and the executor verifies, merges and closes with
+`issue close --outcome done`. The workspace's policy prompt steers this call.
+
+```bash
+multica workspace routing set --judged-review on   # judged_review in get
+```
+
 If a ticket turned out too hard for its seat, do not pick a stronger one.
 Ask routing to re-judge:
 
@@ -279,6 +293,12 @@ alone, exactly as if routing were off. Nothing is posted on a ticket about it.
 The reason is shown in one place only: Settings → Routing, which reports the
 state, the reason, when the model last answered, and offers a re-check. If
 automatic dispatch seems to have stopped, that section is where to look.
+
+The facts also set a floor on the tier: cross-module, high-risk or vague work
+is at least strong. A model answering below the floor is raised to it, the
+decision comment says 「判断模型给的是 X 档，按规则抬到 Y 档」, and
+`multica issue route <id> --output json` reports `tier` (used) and
+`judged_tier` (the model's own, set only when raised).
 
 Agent-created tickets should pass `--routing-facts` with scope, clarity, risk,
 and needs_human (plus an optional summary). The creator facts are accepted

@@ -758,7 +758,7 @@ func writeWorkflowIssue(b *strings.Builder, ctx TaskContextForEnv) {
 // brief keeps the one-line map so the flags remain discoverable without it.
 func writeSubIssueCreation(b *strings.Builder, ctx TaskContextForEnv) {
 	b.WriteString("## Sub-issue Creation\n\n")
-	b.WriteString("`--status todo` starts an agent-assigned child immediately; `--status backlog` parks it for later promotion; `--stage <N>` groups children into ordered stages.")
+	b.WriteString("`--status todo` starts an agent-assigned child immediately; `--status backlog` parks it only when it waits on something (`--waiting-for`); `--stage <N>` groups children into ordered stages.")
 	if where, ok := issueContractsSkill(modelVisibleSkills(ctx.AgentSkills)); ok {
 		b.WriteString(" Before creating sub-issues, read " + where + " — it covers serial chains, promotion, and stage wake semantics.")
 	}

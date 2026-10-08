@@ -682,9 +682,14 @@ func pickQuotaReplacement(ctx context.Context, qtx *db.Queries, task db.AgentTas
 // roster is shared across a batch; the fit is per issue.
 func quotaPickForIssue(ctx context.Context, qtx *db.Queries, failed quotarelay.Seat, roster []quotarelay.Seat, issue db.Issue) (quotarelay.Choice, bool) {
 	scene := IssueDomainScene(ctx, qtx, issue).Scene
+	projectID := ""
+	if issue.ProjectID.Valid {
+		projectID = util.UUIDToString(issue.ProjectID)
+	}
 	fitted := make([]quotarelay.Seat, len(roster))
 	for i, seat := range roster {
 		seat.Fit = routing.DomainFit(scene, seat.Direction).Rank()
+		seat.Eligible = seat.Eligible && routing.ServesProject(seat.Projects, projectID)
 		fitted[i] = seat
 	}
 	return quotarelay.Pick(failed, fitted, routing.DefaultLadder.TierKeys())
@@ -726,7 +731,8 @@ func quotaRoster(ctx context.Context, qtx *db.Queries, task db.AgentTaskQueue, f
 			Tier:      tier,
 			Direction: AgentDomain(agent, domainNames),
 			Provider:  provider,
-			Eligible:  agent.WorkEnabled && agent.RuntimeID.Valid && !agent.ArchivedAt.Valid && tier != "" && !broken[id],
+			Eligible:  quotaSeatSelectable(agent, tier, broken[id]),
+			Projects:  AgentDispatchProjects(agent),
 		}
 		if !order.IgnoreUsage {
 			seat.UsageRank = routing.UsageRank(agent.RoutingUsage)
@@ -740,6 +746,16 @@ func quotaRoster(ctx context.Context, qtx *db.Queries, task db.AgentTaskQueue, f
 		roster = append(roster, seat)
 	}
 	return failedSeat, roster, nil
+}
+
+// quotaSeatSelectable asks the one auto-pick rule (routing.SeatSelectable,
+// ADR-0008). The relay ranks by rung, so an untagged seat is out, and so is
+// a seat whose own quota breaker is open.
+func quotaSeatSelectable(agent db.Agent, tier string, breakerOpen bool) bool {
+	ok, _ := routing.SeatSelectable(AgentSeatState(agent), routing.SelectContext{
+		NeedTier: true, Tier: tier, BreakerOpen: breakerOpen, AnyProject: true,
+	})
+	return ok
 }
 
 // reviewerSeatExclusion keeps the replacement off the issue's own acceptance

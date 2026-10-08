@@ -846,6 +846,17 @@ export interface Agent {
    */
   routing_usage?: string;
   /**
+   * `auto` or `mention_only` (DENE-1600). A mention_only seat keeps its tier
+   * but is never picked by automatic dispatch; older backends omit it, which
+   * reads as `auto`.
+   */
+  dispatch_mode?: string;
+  /**
+   * Project ids automatic dispatch is limited to (DENE-1648). Empty serves
+   * every project; older backends omit it.
+   */
+  dispatch_projects?: string[];
+  /**
    * Platform auto-retry switch (DENE-217). When `false`, FailTask /
    * MaybeRetryFailedTask never spawn a retry child. Older backends omit
    * the field; treat `undefined` as enabled. Only `=== false` is off.
@@ -1133,6 +1144,10 @@ export interface UpdateAgentRequest {
   routing_tier?: string;
   /** Account headroom tag. Omitted preserves the saved value. */
   routing_usage?: string;
+  /** `auto` or `mention_only`. Omitted preserves the saved value. */
+  dispatch_mode?: string;
+  /** Project limit for automatic dispatch; `[]` lifts it. Omitted preserves. */
+  dispatch_projects?: string[];
   /**
    * Platform auto-retry switch. Omitted preserves the saved value; `false`
    * turns platform auto-retry off without affecting manual rerun.

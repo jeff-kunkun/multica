@@ -3355,6 +3355,10 @@ type CreateIssueRequest struct {
 
 	AllowDuplicate bool `json:"allow_duplicate,omitempty"`
 
+	// WaitingFor is the one line a backlog ticket waits for (DENE-1638). An
+	// agent creating a backlog ticket without it is refused.
+	WaitingFor *string `json:"waiting_for,omitempty"`
+
 	// RoutingFacts lets the creator — usually an agent that just wrote the
 	// ticket and already knows its shape — supply the facts routing would
 	// otherwise ask the analysis model for (DENE-923). They are cached
@@ -3644,6 +3648,12 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 
 	// Determine creator identity: agent (via X-Agent-ID header) or member.
 	creatorType, actualCreatorID := h.resolveActor(r, creatorID, workspaceID)
+	if h.isBacklogStatus(r.Context(), wsUUID, status) {
+		if reject := backlogWaitingForRejection(req.WaitingFor, creatorType, req.Stage != nil); reject != "" {
+			writeError(w, http.StatusBadRequest, reject)
+			return
+		}
+	}
 
 	// Optional origin stamping (quick-create / autopilot). Only the
 	// allowed origin types are accepted; anything else is rejected so a
@@ -3895,6 +3905,7 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 	if issue.Status == "in_review" {
 		h.setIssueMetaString(r.Context(), issue, blockwait.KeyReviewRound, time.Now().UTC().Format(time.RFC3339))
 	}
+	issue = h.syncBacklogWaitingFor(r.Context(), issue, req.WaitingFor)
 	slog.Info("issue created", append(logger.RequestAttrs(r), "issue_id", uuidToString(issue.ID), "title", issue.Title, "status", issue.Status, "workspace_id", workspaceID)...)
 
 	resp := issueToResponse(issue, prefix)
@@ -3999,6 +4010,9 @@ type UpdateIssueRequest struct {
 	// research). The reason is echoed in the system comment; people are not
 	// gated and may leave it empty.
 	NoCodeReason *string `json:"no_code_reason,omitempty"`
+	// WaitingFor: see CreateIssueRequest.WaitingFor. Required when an agent
+	// moves a ticket into backlog.
+	WaitingFor *string `json:"waiting_for,omitempty"`
 	// DuplicateOfIssueID marks this issue as a duplicate of another issue in
 	// the same workspace (MUL-7349). A duplicate is an ordinary cancelled issue
 	// that remembers its original, so this also sets status to cancelled.
@@ -4356,6 +4370,12 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		blockRecord = rec
 		persistBlock = persist
 	}
+	if statusActorType != "" && h.isBacklogStatus(r.Context(), prevIssue.WorkspaceID, statusKeyForGuard) && !h.isBacklogStatus(r.Context(), prevIssue.WorkspaceID, prevIssue.Status) {
+		if reject := backlogWaitingForRejection(req.WaitingFor, statusActorType, prevIssue.Stage.Valid || req.Stage != nil); reject != "" {
+			writeError(w, http.StatusBadRequest, reject)
+			return
+		}
+	}
 	if req.Priority != nil {
 		if !validateIssueEnum(w, "priority", *req.Priority, validIssuePriorities) {
 			return
@@ -4683,6 +4703,9 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 	}
 	if tr.noCode != "" {
 		h.setIssueMetaString(r.Context(), issue, "close.no_code_reason", tr.noCode)
+	}
+	if req.Status != nil || req.WaitingFor != nil {
+		issue = h.syncBacklogWaitingFor(r.Context(), issue, req.WaitingFor)
 	}
 	if stampRuling != nil {
 		issue = h.stampAssignee(r.Context(), issue, *stampRuling)
@@ -5652,6 +5675,12 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 		}
+		if batchStatusKey != "" && h.isBacklogStatus(r.Context(), prevIssue.WorkspaceID, batchStatusKey) && !h.isBacklogStatus(r.Context(), prevIssue.WorkspaceID, prevIssue.Status) {
+			if rejection := backlogWaitingForRejection(req.Updates.WaitingFor, batchActorType, prevIssue.Stage.Valid || req.Updates.Stage != nil); rejection != "" {
+				reject(issueID, rejection)
+				continue
+			}
+		}
 		batchTransition := h.guardSilentStall(r.Context(), prevIssue, batchStatusKey, batchActorType, batchActorID, deref(req.Updates.NoCodeReason), params.AssigneeType, params.AssigneeID, params.ReviewerType, params.ReviewerID, false)
 		if batchTransition.refuse != "" {
 			reject(issueID, batchTransition.refuse)
@@ -5704,6 +5733,9 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 		}
 		if issue.Status == issuestatus.Blocked && prevIssue.Status != issuestatus.Blocked {
 			h.persistBlockAttribution(r.Context(), issue, req.Updates)
+		}
+		if batchStatusKey != "" || req.Updates.WaitingFor != nil {
+			issue = h.syncBacklogWaitingFor(r.Context(), issue, req.Updates.WaitingFor)
 		}
 		if batchTransition.persistBlock {
 			h.persistBlockRecord(r.Context(), issue, batchTransition.block)

@@ -26,12 +26,23 @@ type decision struct {
 	// that the analysis call was skipped because the record was fresh.
 	FactsSource string
 	Cached      bool
+	// RaisedFrom is the model's own executor tier when the rule floor
+	// raised it (DENE-1648); empty when the model's tier stood.
+	RaisedFrom string
 }
 
 // decide asks whichever roles are on for the todo row's verdict. It is the
 // only place the four combinations differ; everything after it — thresholds,
 // the ladder, the conditional writes — is the same for all of them.
 func (r *Router) decide(ctx context.Context, workspaceID string, settings Settings, issue Issue, state JudgeState) (decision, error) {
+	d, err := r.decideModel(ctx, workspaceID, settings, issue, state)
+	if err == nil {
+		d = d.withRuleFloor(r.ladder())
+	}
+	return d, err
+}
+
+func (r *Router) decideModel(ctx context.Context, workspaceID string, settings Settings, issue Issue, state JudgeState) (decision, error) {
 	d := decision{Mode: settings.Mode()}
 	if d.Mode == ModeNone {
 		// No model is called. The zero verdict names no tier and carries no
@@ -86,6 +97,66 @@ func (r *Router) decide(ctx context.Context, workspaceID string, settings Settin
 	}
 	d.Verdict, d.Decider = v, DeciderJudge
 	return d, nil
+}
+
+// withRuleFloor holds a model's executor tier to the rule's reading of the
+// same facts (DENE-1648). RuleVerdict is the platform's own policy — cross
+// module, high risk or a vague requirement is at least strong — and a model
+// answering below it, however confident, is overruled upward. A model may
+// still pick above the floor. Without facts there is nothing to floor on.
+func (d decision) withRuleFloor(l Ladder) decision {
+	if d.Facts == nil || (d.Decider != DeciderJudge && d.Decider != DeciderAnalysis) {
+		return d
+	}
+	floor := RuleVerdict(*d.Facts).ExecutorTier
+	got := strings.ToLower(strings.TrimSpace(d.Verdict.ExecutorTier))
+	floorRank, gotRank := tierRank(l, floor), tierRank(l, got)
+	if got == "" || floorRank < 0 || gotRank < 0 || gotRank <= floorRank {
+		return d
+	}
+	d.RaisedFrom = got
+	d.Verdict.ExecutorTier = floor
+	return d
+}
+
+// floorLine is the decision comment's line for a raised tier.
+func floorLine(d decision, l Ladder) string {
+	if d.RaisedFrom == "" || d.Facts == nil {
+		return ""
+	}
+	return "- **抬档**：判断模型给的是" + tierLabel(l, d.RaisedFrom) + "档，按规则（" + floorWhy(*d.Facts) + "）抬到" + tierLabel(l, d.Verdict.ExecutorTier) + "档\n"
+}
+
+// floorWhy names the facts that set the floor, in RuleVerdict's order.
+func floorWhy(f Facts) string {
+	var why []string
+	if f.Scope == ScopeCrossModule {
+		why = append(why, "跨模块")
+	}
+	if f.Risk == RiskHigh {
+		why = append(why, "出错代价高")
+	}
+	if f.Clarity == ClarityVague {
+		why = append(why, "需求模糊")
+	}
+	if len(why) > 0 {
+		return strings.Join(why, "、") + "至少强档"
+	}
+	return "只有小改动、低风险、需求清楚才用弱档"
+}
+
+func tierLabel(l Ladder, key string) string {
+	if t, ok := l.TierByKey(key); ok && t.Label != "" {
+		return t.Label
+	}
+	return key
+}
+
+func (r *Router) ladder() Ladder {
+	if len(r.Ladder.Tiers) == 0 {
+		return DefaultLadder
+	}
+	return r.Ladder
 }
 
 // analysis returns the facts for this ticket: the cached record while it is

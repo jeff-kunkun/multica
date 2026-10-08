@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
 import { Button } from "@multica/ui/components/ui/button";
 import { Input } from "@multica/ui/components/ui/input";
 import { Textarea } from "@multica/ui/components/ui/textarea";
@@ -123,6 +124,7 @@ export function RoutingTab() {
   const [allowUpshift, setAllowUpshift] = useState(saved.allow_upshift);
   const [preferContinuation, setPreferContinuation] = useState(saved.prefer_continuation);
   const [preferIdle, setPreferIdle] = useState(saved.prefer_idle);
+  const [judgedReview, setJudgedReview] = useState(saved.judged_review);
   const [availableModels, setAvailableModels] = useState<string[]>([]);
   const autoDiscoverKey = useRef("");
   const autoFilledModel = useRef("");
@@ -154,6 +156,7 @@ export function RoutingTab() {
     setAllowUpshift(next.allow_upshift);
     setPreferContinuation(next.prefer_continuation);
     setPreferIdle(next.prefer_idle);
+    setJudgedReview(next.judged_review);
     setKeyInput("");
     setAnalysisKeyInput("");
     setAvailableModels([]);
@@ -183,6 +186,7 @@ export function RoutingTab() {
       allow_upshift: allowUpshift,
       prefer_continuation: preferContinuation,
       prefer_idle: preferIdle,
+      judged_review: judgedReview,
     }),
     [
       enabled,
@@ -202,6 +206,7 @@ export function RoutingTab() {
       allowUpshift,
       preferContinuation,
       preferIdle,
+      judgedReview,
     ],
   );
 
@@ -267,7 +272,8 @@ export function RoutingTab() {
       a.usage_priority === b.usage_priority &&
       a.allow_upshift === b.allow_upshift &&
       a.prefer_continuation === b.prefer_continuation &&
-      a.prefer_idle === b.prefer_idle,
+      a.prefer_idle === b.prefer_idle &&
+      a.judged_review === b.judged_review,
   });
 
   // Live health from the server. Without it the fourth state is unreachable:
@@ -331,6 +337,8 @@ export function RoutingTab() {
     onSuccess: (next) => {
       qc.setQueryData(workspaceKeys.routingHealth(workspace?.id ?? ""), next);
     },
+    onError: (error) =>
+      toast.error(error instanceof Error && error.message ? error.message : t(($) => $.routing.health_recheck_failed)),
   });
 
   // The key write. Explicit rather than auto-saved (see keyInput), and it
@@ -355,6 +363,10 @@ export function RoutingTab() {
         queryKey: workspaceKeys.routingHealth(workspace.id),
       });
     },
+    // The box is emptied either way (below), so a failure must say so —
+    // otherwise an empty box reads as a stored key.
+    onError: (error) =>
+      toast.error(error instanceof Error && error.message ? error.message : t(($) => $.routing.gateway_key_save_error)),
     // Cleared whichever way it went: on success the key is stored and there
     // is nothing to show, and on failure leaving a credential in a text box
     // behind a red message is not something to do to somebody.
@@ -495,6 +507,18 @@ export function RoutingTab() {
               disabled={!canManage || !enabled}
               onCheckedChange={setPreferIdle}
               aria-label={t(($) => $.routing.load_label)}
+            />
+          </SettingsRow>
+
+          <SettingsRow
+            label={t(($) => $.routing.judged_review_label)}
+            description={t(($) => $.routing.judged_review_description)}
+          >
+            <Switch
+              checked={judgedReview}
+              disabled={!canManage || !enabled}
+              onCheckedChange={setJudgedReview}
+              aria-label={t(($) => $.routing.judged_review_label)}
             />
           </SettingsRow>
         </SettingsCard>

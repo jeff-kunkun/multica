@@ -377,6 +377,7 @@
     "remove": "Remove",
     "save": "Save",
     "cancel": "Cancel",
+    "save_failed": "Couldn't save access",
     "note_bound": "Once private, it's hidden from everyone else's list.",
     "note_unbound": "A chat with no project stays private.",
     "view_only": "You can read this chat, but you can't send messages.",
@@ -396,7 +397,8 @@
     "title": "Some of your chats are now visible to project members",
     "body": "You have {{count}} chats that project members can now see.",
     "make_private": "Make selected private",
-    "dismiss": "Got it"
+    "dismiss": "Got it",
+    "failed": "Couldn't save. Try again."
   },
   "title_locked": "Title locked — the agent will not rename it",
   "origin": {

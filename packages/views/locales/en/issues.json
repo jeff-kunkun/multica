@@ -508,6 +508,7 @@
     "prop_status": "Status",
     "prop_priority": "Priority",
     "prop_stage": "Stage",
+    "prop_waiting_for": "Waiting for",
     "prop_assignee": "Assignee",
     "prop_reviewer": "Reviewer",
     "prop_start_date": "Start date",
@@ -690,6 +691,7 @@
   },
   "comment": {
     "add_reaction": "Add reaction",
+    "reaction_failed": "Couldn't update the reaction",
     "collapse_thread": "Collapse thread",
     "expand_thread": "Expand thread",
     "delete_title": "Delete comment",

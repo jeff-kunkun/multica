@@ -372,6 +372,7 @@
     "remove": "移除",
     "save": "保存",
     "cancel": "取消",
+    "save_failed": "保存失败",
     "note_bound": "改成私密后，其他人将看不到这个聊天。",
     "note_unbound": "没绑项目的聊天默认就是私密。",
     "view_only": "你可以看这个聊天，但不能发言。",
@@ -391,7 +392,8 @@
     "title": "有些聊天现在项目成员能看到",
     "body": "你有 {{count}} 个聊天现在项目成员能看到。",
     "make_private": "把勾选的设为私密",
-    "dismiss": "知道了"
+    "dismiss": "知道了",
+    "failed": "保存失败，请重试"
   },
   "title_locked": "标题已锁定，智能体不会再改名",
   "origin": {

@@ -503,6 +503,7 @@
     "prop_status": "ステータス",
     "prop_priority": "優先度",
     "prop_stage": "ステージ",
+    "prop_waiting_for": "待ち",
     "prop_assignee": "担当者",
     "prop_reviewer": "検収担当",
     "prop_start_date": "開始日",
@@ -676,6 +677,7 @@
   },
   "comment": {
     "add_reaction": "リアクションを追加",
+    "reaction_failed": "リアクションを更新できませんでした",
     "collapse_thread": "スレッドを折りたたむ",
     "expand_thread": "スレッドを展開",
     "delete_title": "コメントを削除",

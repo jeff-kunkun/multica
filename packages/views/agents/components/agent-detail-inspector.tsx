@@ -38,9 +38,11 @@ import {
   type ModelCatalog,
 } from "./inspector/model-change-cleanup";
 import { RuntimePicker } from "./inspector/runtime-picker";
+import { DispatchProjectsField } from "./inspector/dispatch-projects-field";
 import { ThinkingSettingField } from "./inspector/thinking-prop-row";
 import { ServiceTierSettingField } from "./inspector/service-tier-setting-field";
 import {
+  DispatchModeSegmented,
   RoutingTierSegmented,
   RoutingUsageSegmented,
 } from "./inspector/routing-seat-fields";
@@ -409,7 +411,14 @@ export function AgentDetailInspector({
         </SettingsCard>
       </SettingsSection>
 
-      <SettingsSection title={t(($) => $.inspector.section_routing)}>
+      {/* Tier, dispatch mode and usage travel with the base role while the
+          agent follows it; the server refuses them until following is off. */}
+      <SettingsSection
+        title={t(($) => $.inspector.section_routing)}
+        description={
+          runtimeInherited ? t(($) => $.inspector.routing_inherited_hint) : undefined
+        }
+      >
         <SettingsCard>
           <SettingsRow
             label={t(($) => $.inspector.prop_routing_tier)}
@@ -418,8 +427,32 @@ export function AgentDetailInspector({
           >
             <RoutingTierSegmented
               value={agent.routing_tier}
-              canEdit={canEdit}
+              canEdit={canEditRuntime}
               onChange={(routingTier) => update({ routing_tier: routingTier })}
+            />
+          </SettingsRow>
+          <SettingsRow
+            label={t(($) => $.inspector.prop_dispatch_mode)}
+            description={t(($) => $.inspector.prop_dispatch_mode_hint)}
+            size="none"
+          >
+            <DispatchModeSegmented
+              value={agent.dispatch_mode}
+              canEdit={canEditRuntime}
+              onChange={(dispatchMode) => update({ dispatch_mode: dispatchMode })}
+            />
+          </SettingsRow>
+          <SettingsRow
+            label={t(($) => $.inspector.prop_dispatch_projects)}
+            description={t(($) => $.inspector.prop_dispatch_projects_hint)}
+            size="none"
+          >
+            {/* The seat's own setting: a following specialisation keeps it. */}
+            <DispatchProjectsField
+              wsId={agent.workspace_id}
+              value={agent.dispatch_projects}
+              canEdit={canEdit}
+              onChange={(dispatchProjects) => update({ dispatch_projects: dispatchProjects })}
             />
           </SettingsRow>
           <SettingsRow
@@ -429,7 +462,7 @@ export function AgentDetailInspector({
           >
             <RoutingUsageSegmented
               value={agent.routing_usage}
-              canEdit={canEdit}
+              canEdit={canEditRuntime}
               onChange={(routingUsage) => update({ routing_usage: routingUsage })}
             />
           </SettingsRow>
