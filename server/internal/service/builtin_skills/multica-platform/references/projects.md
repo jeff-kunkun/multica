@@ -336,7 +336,35 @@ round closes, the same missing set (or a subset) does not open another one for
 Other triggers of the same round (server-side, no command needed): a stage
 advancing, a parent's sub-issues all reaching a terminal status, and the
 project being set to `completed`. Closing an ordinary issue does not trigger
-one.
+one. A milestone round's reason carries a digest of its source tickets: each
+one's conclusion, what its close audit wrote (with files), and the head of its
+close evidence; a project-completed round lists the recent sediments.
+
+### Sediment rides the delivery
+
+The executor who finishes the work writes the memory, not a later ticket.
+A task does it through its close audit (see `close-protocol.md`: the named
+files must be in the delivery). A chat that changed code or settled something
+worth keeping does it at the end, then records it:
+
+```bash
+multica chat sediment --knowledge context=<summary> [--knowledge agents=<summary>]
+multica chat sediment --knowledge adr=<summary> --pr <merged-pr-url>
+multica chat sediment --history --output json
+```
+
+- Commit the edits on the chat's branch first.
+- A repository with a remote lands through a PR: merge it, then pass `--pr`
+  (put `Chat <first 8 of the session id>` in the PR title).
+- A repository that only lives on this machine is merged into the project
+  directory's branch as a merge commit named `Chat <id>: 沉淀 …`. A dirty
+  project directory or a conflict refuses and changes nothing.
+- Work already on the main line (a shared directory) is recorded as is.
+- Each `--knowledge` slot must be written by a delivered file, or nothing is
+  recorded. Plain Q&A records nothing.
+
+`multica project memory status` returns `recent_sediments`: which ticket or
+chat wrote which files, onto which line, verified or not.
 
 ### Configuring the sediment agent seat
 
