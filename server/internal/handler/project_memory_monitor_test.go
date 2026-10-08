@@ -72,9 +72,14 @@ func TestProjectMemoryMonitor(t *testing.T) {
 	otherUser := dbfx.User(t, "monitor other", "monitor-other@multica.test")
 	dbfx.Member(t, testWorkspaceID, otherUser, "member")
 	privateChat := dbfx.ChatSession(t, agentID, testutil.Cols{"creator_id": otherUser, "title": "别人的私聊", "visibility": "private"})
-	dbfx.Exec(t, `INSERT INTO knowledge_sediment (workspace_id, project_id, chat_session_id, changes, verified, author_type, layer)
-		VALUES ($1, $2, $3, '[{"location":"context","action":"new","summary":"词条","files":["CONTEXT.md"]}]'::jsonb, true, 'member', 'boss')`,
-		testWorkspaceID, projectID, privateChat)
+	// Its round rolled up a ticket the caller can read and one they cannot.
+	privateSource := inProject("monitor private source", "done", testutil.Cols{
+		"visibility": "private", "creator_type": "member", "creator_id": otherUser,
+	})
+	sources, _ := json.Marshal([]map[string]string{{"kind": "issue", "id": wrote}, {"kind": "issue", "id": privateSource}})
+	dbfx.Exec(t, `INSERT INTO knowledge_sediment (workspace_id, project_id, chat_session_id, changes, verified, author_type, layer, sources)
+		VALUES ($1, $2, $3, '[{"location":"context","action":"new","summary":"词条","files":["CONTEXT.md"]}]'::jsonb, true, 'member', 'boss', $4::jsonb)`,
+		testWorkspaceID, projectID, privateChat, string(sources))
 
 	// Unsettled: one declared nothing, one finished without an audit, one
 	// finished before the window.
@@ -127,6 +132,10 @@ func TestProjectMemoryMonitor(t *testing.T) {
 		case "chat":
 			if w.SourceAccessible || w.SourceTitle != "" || w.Layer != "boss" || w.DeletedLines != nil {
 				t.Fatalf("a private chat's write leaked or misreported: %+v", w)
+			}
+			if len(w.Sources) != 2 || w.Sources[0].Identifier == nil || w.Sources[0].Title != "monitor wrote" ||
+				w.Sources[1].ID != privateSource || w.Sources[1].Identifier != nil || w.Sources[1].Title != "" {
+				t.Fatalf("a private source ticket leaked or misreported: %+v", w.Sources)
 			}
 		}
 	}

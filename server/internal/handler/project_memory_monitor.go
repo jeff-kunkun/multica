@@ -243,7 +243,7 @@ func (h *Handler) monitorWrites(ctx context.Context, project db.Project, since p
 		} else {
 			item.SourceAccessible = false
 		}
-		item.Sources = h.resolveSedimentSources(ctx, row.WorkspaceID, row.Sources)
+		item.Sources = h.resolveSedimentSources(ctx, row.WorkspaceID, row.Sources, &viewer)
 		for _, change := range item.Changes {
 			if change.Action == closeprotocol.ActionSupersede && change.Entry != "" {
 				item.Superseded = append(item.Superseded, change.Entry)
