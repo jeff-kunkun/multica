@@ -53,10 +53,14 @@ const (
 	OpManage Op = "manage"
 	// OpAudit reads the audit trail.
 	OpAudit Op = "audit"
+	// OpSeePending lists the offers waiting for this workspace's answer
+	// (DENE-1641): names only, so an agent can tell its person what to
+	// accept. Answering stays OpAccept.
+	OpSeePending Op = "see_pending"
 )
 
 // Ops lists every operation, for the decision-table test.
-var Ops = []Op{OpCreate, OpUpdateProjects, OpAccept, OpRevoke, OpView, OpManage, OpAudit}
+var Ops = []Op{OpCreate, OpUpdateProjects, OpAccept, OpRevoke, OpView, OpManage, OpAudit, OpSeePending}
 
 // Actor is the caller as this package needs it.
 type Actor struct {
@@ -80,7 +84,13 @@ func Decide(op Op, side Side, actor Actor) bool {
 	if actor.IsAgent {
 		// Agents read exactly what a person of the same tier reads, nothing
 		// more: no bypass, no management.
-		return op == OpView && side == SideViewer && role.CanWrite()
+		switch op {
+		case OpView:
+			return side == SideViewer && role.CanWrite()
+		case OpSeePending:
+			return side == SideViewer && ownerOrAdmin
+		}
+		return false
 	}
 	switch op {
 	case OpCreate, OpUpdateProjects:
@@ -100,6 +110,8 @@ func Decide(op Op, side Side, actor Actor) bool {
 		return ownerOrAdmin
 	case OpAudit:
 		return role == permission.RoleOwner
+	case OpSeePending:
+		return side == SideViewer && ownerOrAdmin
 	}
 	return false
 }
