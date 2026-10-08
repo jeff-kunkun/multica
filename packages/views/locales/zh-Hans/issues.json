@@ -36,7 +36,9 @@
     "steer_step_read": "已读取",
     "retrying": "正在等待重试。",
     "skills_used": "用到 skill：{{names}}",
-    "skill_step": "使用 skill {{name}}"
+    "skill_step": "使用 skill {{name}}",
+    "relayed_to": "失败后已转给 {{name}}",
+    "relay_waiting": "失败后没有可接的席位，等人决定"
   },
   "working_filter_error": {
     "title": "无法加载智能体正在处理的任务"

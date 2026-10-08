@@ -93,6 +93,15 @@ and `multica issue runs` (`--output json`) carry `capacity_retry`
 (`{task_id, retry, next_at}`). Only real quota exhaustion (weekly / model
 limits, `402` / balance) closes the seat and relays the issue.
 
+A `401`/`403` (`agent_error.provider_auth_or_access`) also closes the seat
+(DENE-1647): `work_pause.reason` is `auth_failure`, it retries on its own
+after an hour, and switching the seat back on clears it at once. The relay
+keeps the role: a failed acceptance run hands acceptance to another seat that
+did not work on the ticket, and the ticket stays `in_review`. With no seat to
+cover, the ticket stays put and the creator gets an options ask (换席位 /
+我来验 / 直接关票). `multica issue runs` shows where each failed run went in
+its RELAY column (`relay` in `--output json`).
+
 `agent get` returns the persisted agent including `runtime_id`, `model`,
 `thinking_level`, `service_tier`, `custom_args`, `has_custom_env`,
 `custom_env_key_count`, and `skills`. It never returns plaintext `custom_env`.

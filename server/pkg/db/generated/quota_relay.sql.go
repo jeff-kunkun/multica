@@ -33,11 +33,12 @@ func (q *Queries) AbandonQuotaRelay(ctx context.Context, arg AbandonQuotaRelayPa
 const closeManualQuotaBreakers = `-- name: CloseManualQuotaBreakers :execrows
 UPDATE agent_quota_breaker
 SET recovered_at = now()
-WHERE agent_id = $1 AND reason = 'balance_exhausted' AND recovered_at IS NULL
+WHERE agent_id = $1 AND reason IN ('balance_exhausted', 'auth_failure') AND recovered_at IS NULL
 `
 
 // DENE-870: a balance breaker has no timer. A person turning the seat back
-// on after topping up is the recovery.
+// on after topping up is the recovery. DENE-1647: a refused login is the
+// same — turning the seat on after fixing it ends the wait at once.
 func (q *Queries) CloseManualQuotaBreakers(ctx context.Context, agentID pgtype.UUID) (int64, error) {
 	result, err := q.db.Exec(ctx, closeManualQuotaBreakers, agentID)
 	if err != nil {
@@ -89,6 +90,33 @@ func (q *Queries) CountQuotaBreakersSinceSuccess(ctx context.Context, agentID pg
 	var column_1 int32
 	err := row.Scan(&column_1)
 	return column_1, err
+}
+
+const createReviewStuckAsk = `-- name: CreateReviewStuckAsk :one
+INSERT INTO agent_ask (workspace_id, issue_id, asker_type, asker_id, title, questions, mode)
+VALUES ($1, $2, 'agent', $3, $4, $5, 'needs_you')
+RETURNING id
+`
+
+type CreateReviewStuckAskParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	IssueID     pgtype.UUID `json:"issue_id"`
+	AskerID     pgtype.UUID `json:"asker_id"`
+	Title       string      `json:"title"`
+	Questions   []byte      `json:"questions"`
+}
+
+func (q *Queries) CreateReviewStuckAsk(ctx context.Context, arg CreateReviewStuckAskParams) (pgtype.UUID, error) {
+	row := q.db.QueryRow(ctx, createReviewStuckAsk,
+		arg.WorkspaceID,
+		arg.IssueID,
+		arg.AskerID,
+		arg.Title,
+		arg.Questions,
+	)
+	var id pgtype.UUID
+	err := row.Scan(&id)
+	return id, err
 }
 
 const getQuotaRelayBySourceTask = `-- name: GetQuotaRelayBySourceTask :one
@@ -157,6 +185,24 @@ func (q *Queries) HasOpenQuotaBreakerForReason(ctx context.Context, arg HasOpenQ
 	var exists bool
 	err := row.Scan(&exists)
 	return exists, err
+}
+
+const hasOpenReviewStuckAsk = `-- name: HasOpenReviewStuckAsk :one
+SELECT EXISTS (
+    SELECT 1 FROM agent_ask
+    WHERE issue_id = $1::uuid
+      AND status = 'open'
+      AND questions @> '[{"options":[{"id":"review_stuck.close"}]}]'::jsonb
+)::bool
+`
+
+// One open "acceptance seat failed" ask per issue. The ask is recognised by
+// its close option, which no other ask carries.
+func (q *Queries) HasOpenReviewStuckAsk(ctx context.Context, issueID pgtype.UUID) (bool, error) {
+	row := q.db.QueryRow(ctx, hasOpenReviewStuckAsk, issueID)
+	var column_1 bool
+	err := row.Scan(&column_1)
+	return column_1, err
 }
 
 const insertQuotaRelay = `-- name: InsertQuotaRelay :one
@@ -338,6 +384,90 @@ func (q *Queries) ListInheritingSpecialisations(ctx context.Context, arg ListInh
 			return nil, err
 		}
 		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listIssueQuotaRelays = `-- name: ListIssueQuotaRelays :many
+SELECT r.source_task_id,
+       r.outcome,
+       r.wait_reason,
+       r.to_agent_id,
+       COALESCE(a.name, '')::text AS to_agent_name,
+       COALESCE((
+           SELECT b.reason FROM agent_quota_breaker b
+           WHERE b.source_task_id = r.source_task_id AND b.agent_id = r.from_agent_id
+           LIMIT 1
+       ), '')::text AS reason
+FROM agent_quota_relay r
+LEFT JOIN agent a ON a.id = r.to_agent_id
+WHERE r.issue_id = $1
+`
+
+type ListIssueQuotaRelaysRow struct {
+	SourceTaskID pgtype.UUID `json:"source_task_id"`
+	Outcome      string      `json:"outcome"`
+	WaitReason   string      `json:"wait_reason"`
+	ToAgentID    pgtype.UUID `json:"to_agent_id"`
+	ToAgentName  string      `json:"to_agent_name"`
+	Reason       string      `json:"reason"`
+}
+
+// DENE-1647: the relay record for each failed run on an issue, for the
+// execution log and `multica issue runs`.
+func (q *Queries) ListIssueQuotaRelays(ctx context.Context, issueID pgtype.UUID) ([]ListIssueQuotaRelaysRow, error) {
+	rows, err := q.db.Query(ctx, listIssueQuotaRelays, issueID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListIssueQuotaRelaysRow{}
+	for rows.Next() {
+		var i ListIssueQuotaRelaysRow
+		if err := rows.Scan(
+			&i.SourceTaskID,
+			&i.Outcome,
+			&i.WaitReason,
+			&i.ToAgentID,
+			&i.ToAgentName,
+			&i.Reason,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listIssueWorkerAgentIDs = `-- name: ListIssueWorkerAgentIDs :many
+SELECT DISTINCT agent_id
+FROM agent_task_queue
+WHERE issue_id = $1
+  AND status = 'completed'
+  AND agent_id IS NOT NULL
+`
+
+// Seats that finished a run on this issue. A replacement acceptance seat
+// must not be one of them: the executor never accepts its own work.
+func (q *Queries) ListIssueWorkerAgentIDs(ctx context.Context, issueID pgtype.UUID) ([]pgtype.UUID, error) {
+	rows, err := q.db.Query(ctx, listIssueWorkerAgentIDs, issueID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []pgtype.UUID{}
+	for rows.Next() {
+		var agent_id pgtype.UUID
+		if err := rows.Scan(&agent_id); err != nil {
+			return nil, err
+		}
+		items = append(items, agent_id)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err

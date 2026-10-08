@@ -593,6 +593,20 @@ export interface AgentTask {
    * messages instead.
    */
   skills_used?: string[];
+  /**
+   * What the platform did after this run failed on a broken seat (DENE-1647).
+   * Only the issue execution log carries it.
+   */
+  relay?: TaskRelay;
+}
+
+/** One failed run's relay record: handed to another seat, waiting, or skipped. */
+export interface TaskRelay {
+  outcome: string;
+  reason?: string;
+  to_agent_id?: string;
+  to_agent_name?: string;
+  wait_reason?: string;
 }
 
 /**

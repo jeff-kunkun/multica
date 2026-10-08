@@ -37,7 +37,9 @@
     "steer_step_read": "Lu",
     "retrying": "En attente d'une nouvelle tentative.",
     "skills_used": "Skills utilisés : {{names}}",
-    "skill_step": "Skill {{name}} utilisé"
+    "skill_step": "Skill {{name}} utilisé",
+    "relayed_to": "Confié à {{name}} après l’échec",
+    "relay_waiting": "Aucun poste ne peut reprendre ; en attente d’une décision"
   },
   "working_filter_error": {
     "title": "Impossible de charger les tâches en cours de traitement par les agents"

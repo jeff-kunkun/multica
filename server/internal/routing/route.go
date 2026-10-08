@@ -1005,7 +1005,7 @@ func (r *Router) routeInReview(ctx context.Context, workspaceID string, settings
 				ReviewerWritten: out.ReviewerWritten,
 			}, nil
 		}
-		return r.handOffToSubstitute(ctx, workspaceID, settings, issue, roster, card, out)
+		return r.handOffToSubstitute(ctx, workspaceID, settings, issue, roster, card, out, false)
 	}
 	facts, err := r.Store.RoutingFacts(ctx, workspaceID, []string{seatAgent.ID}, settings.ProviderKeys())
 	if err != nil {
@@ -1013,7 +1013,7 @@ func (r *Router) routeInReview(ctx context.Context, workspaceID string, settings
 	}
 	if snap, ok := facts.Seats[seatAgent.ID]; ok && Unselectable(snap.Availability) {
 		if snap.Availability == AvailabilityDisabled {
-			return r.handOffToSubstitute(ctx, workspaceID, settings, issue, roster, seatAgent, out)
+			return r.handOffToSubstitute(ctx, workspaceID, settings, issue, roster, seatAgent, out, false)
 		}
 		return Outcome{State: StateEnabled, Action: ActionNoop, Reason: "reviewer seat is not eligible"}, nil
 	}
@@ -1031,7 +1031,10 @@ func (r *Router) routeInReview(ctx context.Context, workspaceID string, settings
 // handOffToSubstitute covers an acceptance wake whose reviewer cannot take
 // work. The slot already names them, so they stay the designated reviewer:
 // recovery may give the ticket back only before the cover has started.
-func (r *Router) handOffToSubstitute(ctx context.Context, workspaceID string, settings Settings, issue Issue, roster map[string]Agent, disabled Agent, out Outcome) (Outcome, error) {
+//
+// failed is true when the seat is still switched on but its acceptance runs
+// keep failing (DENE-1647); only the wording differs.
+func (r *Router) handOffToSubstitute(ctx context.Context, workspaceID string, settings Settings, issue Issue, roster map[string]Agent, disabled Agent, out Outcome, failed bool) (Outcome, error) {
 	ladder := r.Ladder.For(settings)
 	scene := ladder.IssueScene(issue)
 	holder := seatFromRoster(ladder, map[string]Agent{disabled.Name: disabled}, disabled.ID)
@@ -1045,10 +1048,20 @@ func (r *Router) handOffToSubstitute(ctx context.Context, workspaceID string, se
 	if issue.AssigneeType == "agent" && issue.AssigneeID != "" && issue.AssigneeID != disabled.ID {
 		avoid = append(avoid, issue.AssigneeID)
 	}
+	for _, id := range issue.Workers {
+		if id != disabled.ID {
+			avoid = append(avoid, id)
+		}
+	}
 	replacement, steppedDown, ok := SubstituteSeat(ladder, holder, roster, avoid, scene)
 	if !ok {
 		body := disabledReviewerStuck(disabled.Name)
-		stuck, err := r.deliver(ctx, workspaceID, issue, CommentKind("reviewer_off:"+disabled.ID), body, true, out)
+		kind := CommentKind("reviewer_off:" + disabled.ID)
+		if failed {
+			body = failedReviewerStuck(disabled.Name)
+			kind = CommentKind("reviewer_failed:" + disabled.ID)
+		}
+		stuck, err := r.deliver(ctx, workspaceID, issue, kind, body, true, out)
 		if err != nil {
 			return stuck, err
 		}
@@ -1085,6 +1098,9 @@ func (r *Router) handOffToSubstitute(ctx context.Context, workspaceID string, se
 		return out, err
 	}
 	note := disabledReviewerNote(disabled.Name, replacement.Name, steppedDown)
+	if failed {
+		note = failedReviewerNote(disabled.Name, replacement.Name, steppedDown)
+	}
 	body := note + "\n\n" + r.handoffComment(issue, replacement.Name, false)
 	delivered, err := r.deliver(ctx, workspaceID, issue, KindHandoff, body, false, out)
 	if err != nil {
