@@ -110,29 +110,56 @@ func MainlineCandidates(gitRoot string) []string {
 	return out
 }
 
-// Mainline is the branch the user's checkout of the repository is on — the
-// line a chat's work has to land on for the project directory to have it.
-// A detached user checkout falls back to the remote default, then main/master.
+// MainlineConfigKey names a repository's main line when nothing else can:
+// `git config multica.mainline <branch>`.
+const MainlineConfigKey = "multica.mainline"
+
+// Mainline is the branch the project counts as its main line — where a
+// chat's settled work has to land (DENE-1668). It never follows the branch
+// the project directory happens to be on, which is often a feature branch.
+// In order: the repository's multica.mainline setting; with a remote, the
+// remote's default branch (asked live, then the local origin/HEAD); without
+// one, the only one of main and master. "" when none decides it, and callers
+// refuse rather than guess.
 func Mainline(dir string) string {
 	gitRoot, err := runGitTrimmed(dir, "rev-parse", "--show-toplevel")
 	if err != nil || gitRoot == "" {
 		return ""
 	}
-	if user := worktreeBranch(mainWorktree(gitRoot)); user != "" {
-		return user
+	if name, err := runGitTrimmed(gitRoot, "config", "--get", MainlineConfigKey); err == nil && name != "" {
+		return name
 	}
-	if def, err := runGitTrimmed(gitRoot, "symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD"); err == nil {
-		if _, name, ok := strings.Cut(def, "/"); ok {
-			return name
+	if RemoteURL(gitRoot) != "" {
+		if out, err := runGitTrimmedEnv(gitRoot, []string{"GIT_TERMINAL_PROMPT=0"}, "ls-remote", "--symref", "origin", "HEAD"); err == nil {
+			for _, line := range strings.Split(out, "\n") {
+				if rest, ok := strings.CutPrefix(line, "ref: refs/heads/"); ok {
+					if name, _, ok := strings.Cut(rest, "\t"); ok && name != "" {
+						return name
+					}
+				}
+			}
 		}
+		if def, err := runGitTrimmed(gitRoot, "symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD"); err == nil {
+			if _, name, ok := strings.Cut(def, "/"); ok {
+				return name
+			}
+		}
+		return ""
 	}
+	found := ""
 	for _, name := range []string{"main", "master"} {
 		if _, err := runGitTrimmed(gitRoot, "rev-parse", "--verify", "--quiet", "refs/heads/"+name); err == nil {
-			return name
+			if found != "" {
+				return ""
+			}
+			found = name
 		}
 	}
-	return ""
+	return found
 }
+
+// noMainlineHint is how to fix a repository whose main line is unknown.
+const noMainlineHint = "no main line can be determined (no " + MainlineConfigKey + ", no remote default branch, not exactly one of main/master); set it with `git config " + MainlineConfigKey + " <branch>`"
 
 // RemoteURL is origin's URL, "" for a repository that only lives here.
 func RemoteURL(dir string) string {
@@ -159,7 +186,8 @@ type MainlineMergeResult struct {
 }
 
 // MergeIntoMainline lands the current branch's commits on the main line of
-// a repository that has no remote to open a PR on (DENE-1661). The merge is
+// a repository that has no remote to open a PR on (DENE-1661). The main line
+// is Mainline's, not the project directory's current branch. The merge is
 // always a merge commit whose message is message, so the main line says
 // where the work came from. A checkout holding the main line is merged in
 // place and must be clean; otherwise the branch moves with a compare-and-swap.
@@ -172,7 +200,7 @@ func MergeIntoMainline(dir, message, since string) (MainlineMergeResult, error) 
 	}
 	res.Mainline = Mainline(gitRoot)
 	if res.Mainline == "" {
-		return res, fmt.Errorf("%w: no main line found (the project directory is detached and there is no main/master)", ErrDeliveryMergeRefused)
+		return res, fmt.Errorf("%w: %s", ErrDeliveryMergeRefused, noMainlineHint)
 	}
 	res.Source = worktreeBranch(gitRoot)
 	if res.Source == "" {
@@ -252,6 +280,54 @@ func MergeIntoMainline(dir, message, since string) (MainlineMergeResult, error) 
 	}
 	res.Commits = append(res.Commits, DeliveryMergeCommit{SHA: res.Tip, Subject: message})
 	return res, nil
+}
+
+// RemoteLanding is what CheckRemoteLanding found.
+type RemoteLanding struct {
+	Mainline string `json:"mainline"`
+	// Landed: origin's main line, fetched just now, contains HEAD.
+	Landed bool `json:"landed"`
+	// RemoteTip is origin's main line as fetched.
+	RemoteTip string                `json:"remote_tip"`
+	Commits   []DeliveryMergeCommit `json:"commits"`
+	Files     []string              `json:"files"`
+}
+
+// CheckRemoteLanding asks origin whether its main line already holds this
+// checkout's HEAD — work pushed there directly, or merged in some other way —
+// for a repository with a remote and no PR to point at (DENE-1668). The
+// commits reported are HEAD's since since (the chat's start; the last 20
+// without one). A fetch that fails is an error: unknown is not landed.
+func CheckRemoteLanding(dir, mainline, since string) (RemoteLanding, error) {
+	res := RemoteLanding{Mainline: mainline}
+	gitRoot, err := runGitTrimmed(dir, "rev-parse", "--show-toplevel")
+	if err != nil || gitRoot == "" {
+		return res, fmt.Errorf("%s is not inside a git checkout", dir)
+	}
+	if mainline == "" {
+		return res, fmt.Errorf("%s", noMainlineHint)
+	}
+	head, err := runGitTrimmed(gitRoot, "rev-parse", "--verify", "HEAD")
+	if err != nil {
+		return res, fmt.Errorf("resolve HEAD: %w", err)
+	}
+	tracking := "refs/remotes/origin/" + mainline
+	if _, err := runGitTrimmedEnv(gitRoot, []string{"GIT_TERMINAL_PROMPT=0"}, "fetch", "--quiet", "--no-tags", "origin", "+refs/heads/"+mainline+":"+tracking); err != nil {
+		return res, fmt.Errorf("fetch origin %s to check what it holds: %w", mainline, err)
+	}
+	if res.RemoteTip, err = runGitTrimmed(gitRoot, "rev-parse", "--verify", tracking); err != nil {
+		return res, fmt.Errorf("resolve %s: %w", tracking, err)
+	}
+	res.Landed = isAncestor(gitRoot, head, res.RemoteTip)
+	args := []string{"--since=" + since}
+	if since == "" {
+		args = []string{"-n", "20"}
+	}
+	if res.Commits, err = listCommits(gitRoot, head, args...); err != nil {
+		return res, err
+	}
+	res.Files, err = commitFiles(gitRoot, res.Commits)
+	return res, err
 }
 
 // commitFiles is the union of the paths the commits add or change.

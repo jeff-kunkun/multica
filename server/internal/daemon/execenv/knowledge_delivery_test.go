@@ -127,3 +127,109 @@ func TestMergeIntoMainlineRecordsWorkAlreadyOnTheMainline(t *testing.T) {
 		t.Fatalf("files = %v", res.Files)
 	}
 }
+
+// DENE-1668 F1: the project directory parked on a feature branch is not the
+// main line. The sediment lands on main, and the feature branch is untouched.
+func TestMergeIntoMainlineIgnoresTheProjectDirectorysFeatureBranch(t *testing.T) {
+	repo := newTestRepo(t)
+	before := gitRun(t, repo, "rev-parse", "main")
+	gitRun(t, repo, "checkout", "-b", "feature/stale")
+	feature := gitRun(t, repo, "rev-parse", "feature/stale")
+	wt := addTaskWorktree(t, repo, "agent/chat/review", "main")
+	commitIn(t, wt, "CONTEXT.md", "terms\n", "Chat review: terms")
+
+	res, err := MergeIntoMainline(wt, "Chat review: sediment", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	after := gitRun(t, repo, "rev-parse", "main")
+	if res.Mainline != "main" || after == before || res.Tip != after {
+		t.Fatalf("res = %+v; main %s -> %s", res, before, after)
+	}
+	if got := gitRun(t, repo, "show", "main:CONTEXT.md"); got != "terms" {
+		t.Fatalf("main:CONTEXT.md = %q", got)
+	}
+	if got := gitRun(t, repo, "rev-parse", "feature/stale"); got != feature {
+		t.Fatalf("feature/stale moved %s -> %s", feature, got)
+	}
+}
+
+func TestMergeIntoMainlineFromADetachedProjectDirectoryLandsOnMain(t *testing.T) {
+	repo := newTestRepo(t)
+	gitRun(t, repo, "checkout", "--detach")
+	wt := addTaskWorktree(t, repo, "agent/chat/review", "main")
+	commitIn(t, wt, "CONTEXT.md", "terms\n", "Chat review: terms")
+
+	res, err := MergeIntoMainline(wt, "Chat review: sediment", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Mainline != "main" || gitRun(t, repo, "rev-parse", "main") != res.Tip {
+		t.Fatalf("res = %+v", res)
+	}
+}
+
+func TestMergeIntoMainlineRefusesWhenTheMainlineIsAmbiguous(t *testing.T) {
+	repo := newTestRepo(t)
+	gitRun(t, repo, "branch", "master")
+	before := gitRun(t, repo, "rev-parse", "main")
+	wt := addTaskWorktree(t, repo, "agent/chat/review", "main")
+	commitIn(t, wt, "CONTEXT.md", "terms\n", "Chat review: terms")
+
+	_, err := MergeIntoMainline(wt, "Chat review: sediment", "")
+	if !errors.Is(err, ErrDeliveryMergeRefused) || !strings.Contains(err.Error(), MainlineConfigKey) {
+		t.Fatalf("err = %v; want a refusal naming %s", err, MainlineConfigKey)
+	}
+	if gitRun(t, repo, "rev-parse", "main") != before || gitRun(t, repo, "rev-parse", "master") != before {
+		t.Fatal("a refused merge moved a branch")
+	}
+
+	gitRun(t, repo, "config", MainlineConfigKey, "master")
+	res, err := MergeIntoMainline(wt, "Chat review: sediment", "")
+	if err != nil || res.Mainline != "master" || gitRun(t, repo, "rev-parse", "main") != before {
+		t.Fatalf("res = %+v err = %v; want the configured master", res, err)
+	}
+}
+
+// originFor gives repo a bare origin whose default branch is main.
+func originFor(t *testing.T, repo string) string {
+	t.Helper()
+	origin := filepath.Join(t.TempDir(), "origin.git")
+	gitRun(t, repo, "clone", "--bare", "-q", repo, origin)
+	gitRun(t, repo, "remote", "add", "origin", origin)
+	gitRun(t, repo, "fetch", "-q", "origin")
+	return origin
+}
+
+func TestMainlineOfARemoteRepositoryIsTheRemoteDefault(t *testing.T) {
+	repo := newTestRepo(t)
+	origin := originFor(t, repo)
+	gitRun(t, repo, "branch", "kun")
+	gitRun(t, repo, "push", "-q", "origin", "kun")
+	gitRun(t, origin, "symbolic-ref", "HEAD", "refs/heads/kun")
+	gitRun(t, repo, "checkout", "-q", "-b", "feature/x")
+	if got := Mainline(repo); got != "kun" {
+		t.Fatalf("Mainline = %q; want the remote's default kun, not the checkout's feature/x or a stale origin/HEAD", got)
+	}
+}
+
+func TestCheckRemoteLandingSeesOnlyWhatTheRemoteHolds(t *testing.T) {
+	repo := newTestRepo(t)
+	originFor(t, repo)
+	commitIn(t, repo, "CONTEXT.md", "terms\n", "Chat review: terms")
+
+	res, err := CheckRemoteLanding(repo, "main", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Landed {
+		t.Fatalf("res = %+v; an unpushed commit has not landed", res)
+	}
+	gitRun(t, repo, "push", "-q", "origin", "main")
+	if res, err = CheckRemoteLanding(repo, "main", ""); err != nil || !res.Landed || res.RemoteTip != gitRun(t, repo, "rev-parse", "HEAD") {
+		t.Fatalf("res = %+v err = %v; a pushed commit has landed", res, err)
+	}
+	if !strings.Contains(strings.Join(res.Files, ","), "CONTEXT.md") {
+		t.Fatalf("files = %v", res.Files)
+	}
+}

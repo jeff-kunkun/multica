@@ -354,12 +354,18 @@ multica chat sediment --history --output json
 ```
 
 - Commit the edits on the chat's branch first.
-- A repository with a remote lands through a PR: merge it, then pass `--pr`
-  (put `Chat <first 8 of the session id>` in the PR title).
-- A repository that only lives on this machine is merged into the project
-  directory's branch as a merge commit named `Chat <id>: 沉淀 …`. A dirty
-  project directory or a conflict refuses and changes nothing.
-- Work already on the main line (a shared directory) is recorded as is.
+- The main line is the project's, never the branch the project directory is
+  on: `git config multica.mainline <branch>`, else the remote's default
+  branch, else the only one of main/master. Undecidable refuses; set the
+  config.
+- A repository with a remote counts only what the remote's main line holds:
+  merge a PR into this repository's main line and pass `--pr` (put
+  `Chat <first 8 of the session id>` in the PR title), or push to it. A PR
+  into another repository or branch, or an unpushed commit, records nothing.
+- A repository that only lives on this machine is merged into its main line
+  as a merge commit named `Chat <id>: 沉淀 …`. A dirty project directory or a
+  conflict refuses and changes nothing; work already on the main line (a
+  shared directory) is recorded as is.
 - Each `--knowledge` slot must be written by a delivered file, or nothing is
   recorded. Plain Q&A records nothing.
 

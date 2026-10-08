@@ -53,12 +53,17 @@ Commit the edits on the chat's branch first, then:
   multica chat sediment --knowledge agents=... --pr https://github.com/o/r/pull/12
   multica chat sediment --history
 
-A repository with a GitHub/GitLab remote lands through a PR: merge it, then
-pass --pr (the PR title should carry "Chat <id>"). A repository that only
-lives on this machine is merged into the project directory's branch here,
-as a merge commit named after the chat. Work already on the main line (a
-shared directory) is recorded as it is. Each --knowledge location must be
-written by a delivered file, or nothing is recorded.
+The main line is the project's, never the branch the project directory
+happens to be on: git config multica.mainline, else the remote's default
+branch, else the only one of main/master. Nothing is recorded when it cannot
+be determined.
+
+A repository with a remote counts only what the remote's main line holds:
+merge a PR into it and pass --pr (the PR title should carry "Chat <id>"), or
+push to it. A repository that only lives on this machine is merged into its
+main line here, as a merge commit named after the chat; work already on the
+main line (a shared directory) is recorded as it is. Each --knowledge
+location must be written by a delivered file, or nothing is recorded.
 
 Skip it for a chat that settled nothing: idle talk records no sediment.
 `,
@@ -130,6 +135,11 @@ func runChatSediment(cmd *cobra.Command, _ []string) error {
 	body := map[string]any{"changes": changes}
 	prURL, _ := cmd.Flags().GetString("pr")
 	prURL = strings.TrimSpace(prURL)
+	mainline := execenv.Mainline(dir)
+	if mainline == "" {
+		return fmt.Errorf("chat sediment: 确定不了项目主线，什么都没记：先 `git config %s <主线分支>` 再执行一次", execenv.MainlineConfigKey)
+	}
+	landing := closeprotocol.SedimentLanding{Remote: closeprotocol.RemoteIdentity(execenv.RemoteURL(dir))}
 	switch {
 	case prURL != "":
 		pr, err := viewMergedPR(ctx, dir, prURL)
@@ -139,13 +149,30 @@ func runChatSediment(cmd *cobra.Command, _ []string) error {
 		if !strings.Contains(pr.Title, shortID) {
 			fmt.Fprintf(os.Stderr, "  ! PR 标题没带聊天 id（Chat %s），以后从主线追来源会难找\n", shortID)
 		}
+		landing.Via, landing.PRURL, landing.PRBase, landing.PRMerged = closeprotocol.LandingPR, prURL, pr.Base, true
 		body["delivered_files"] = pr.Files
 		body["commits"] = []string{pr.MergeCommit}
-		body["mainline"] = pr.Base
-		body["pr_url"] = prURL
-	case execenv.RemoteURL(dir) != "" && !onMainline(dir):
-		return fmt.Errorf("chat sediment: 这个仓库有远端，沉淀要走 PR：推分支、开 PR（标题带 Chat %s）、合入后带 --pr <url> 再执行一次", shortID)
+	case landing.Remote != "":
+		res, err := execenv.CheckRemoteLanding(dir, mainline, chatStartedAt(ctx, client, ref.ID))
+		if err != nil {
+			return fmt.Errorf("chat sediment: 核实不了远端的 %s，什么都没记：%w；推到远端 %s 后重试，或开 PR（标题带 Chat %s）合入后带 --pr 再执行一次", mainline, err, mainline, shortID)
+		}
+		landing.Via, landing.RemoteHasCommits = closeprotocol.LandingPush, res.Landed
+		commits := make([]string, 0, len(res.Commits))
+		for _, c := range res.Commits {
+			commits = append(commits, c.SHA)
+		}
+		body["delivered_files"] = res.Files
+		body["commits"] = commits
 	default:
+		landing.Via = closeprotocol.LandingLocal
+	}
+	// The server runs the same rule; checking here first keeps a local merge
+	// from happening for a sediment that would be refused.
+	if reason := closeprotocol.CheckSedimentLanding(landing, mainline); reason != "" {
+		return fmt.Errorf("chat sediment: 没有记，%s（PR 标题带 Chat %s）", reason, shortID)
+	}
+	if landing.Via == closeprotocol.LandingLocal {
 		res, err := execenv.MergeIntoMainline(dir, fmt.Sprintf("Chat %s: 沉淀 %s", shortID, sedimentLocations(changes)), chatStartedAt(ctx, client, ref.ID))
 		if err != nil {
 			return fmt.Errorf("chat sediment: 沉淀没能合进主线，什么都没记：%w", err)
@@ -161,11 +188,13 @@ func runChatSediment(cmd *cobra.Command, _ []string) error {
 		}
 		body["delivered_files"] = res.Files
 		body["commits"] = commits
-		body["mainline"] = res.Mainline
+		mainline = res.Mainline
 		if res.Source != res.Mainline {
-			fmt.Fprintf(os.Stderr, "已把 %s 合进项目目录的 %s\n", res.Source, res.Mainline)
+			fmt.Fprintf(os.Stderr, "已把 %s 合进 %s\n", res.Source, res.Mainline)
 		}
 	}
+	body["mainline"] = mainline
+	body["landing"] = landing
 
 	var out map[string]any
 	if err := client.PostJSON(ctx, path, body, &out); err != nil {
@@ -176,16 +205,6 @@ func runChatSediment(cmd *cobra.Command, _ []string) error {
 		return nil
 	}
 	return cli.PrintJSON(os.Stdout, out)
-}
-
-// onMainline reports whether HEAD is already on the project directory's
-// branch: a shared directory commits there directly, PR or not.
-func onMainline(dir string) bool {
-	mainline := execenv.Mainline(dir)
-	if mainline == "" {
-		return false
-	}
-	return exec.Command("git", "-C", dir, "merge-base", "--is-ancestor", "HEAD", "refs/heads/"+mainline).Run() == nil
 }
 
 // chatStartedAt bounds the commits a shared directory reports to this chat's

@@ -20,6 +20,7 @@ func TestCheckChatSedimentHoldsTheClaimAgainstGit(t *testing.T) {
 		DeliveredFiles: &files,
 		Commits:        []string{"ABCDEF1234567"},
 		Mainline:       "kun",
+		Landing:        &closeprotocol.SedimentLanding{Via: closeprotocol.LandingPR, Remote: "github.com/o/r", PRURL: "https://github.com/o/r/pull/7", PRBase: "kun", PRMerged: true},
 	}
 	audit, commits, rejection := checkChatSediment(ok)
 	if rejection != "" || len(commits) != 1 || commits[0] != "abcdef1234567" || audit.Changes[0].Files[0] != "CONTEXT.md" {
@@ -37,6 +38,23 @@ func TestCheckChatSedimentHoldsTheClaimAgainstGit(t *testing.T) {
 		"no mainline":    {func(r *ChatSedimentRequest) { r.Mainline = " " }, "缺 mainline"},
 		"no commits":     {func(r *ChatSedimentRequest) { r.Commits = nil }, "缺 commits"},
 		"not a sha":      {func(r *ChatSedimentRequest) { r.Commits = []string{"main"} }, "不是 git SHA"},
+		"no landing":     {func(r *ChatSedimentRequest) { r.Landing = nil }, "缺 landing"},
+		"unpushed": {func(r *ChatSedimentRequest) {
+			r.Landing = &closeprotocol.SedimentLanding{Via: closeprotocol.LandingPush, Remote: "github.com/o/r"}
+		}, "还没收到"},
+		"local merge with a remote": {func(r *ChatSedimentRequest) {
+			r.Landing = &closeprotocol.SedimentLanding{Via: closeprotocol.LandingLocal, Remote: "github.com/o/r"}
+		}, "本地合入不算数"},
+		"pr in another repo": {func(r *ChatSedimentRequest) {
+			l := *r.Landing
+			l.PRURL = "https://github.com/x/r/pull/7"
+			r.Landing = &l
+		}, "不在这个仓库"},
+		"pr into another branch": {func(r *ChatSedimentRequest) {
+			l := *r.Landing
+			l.PRBase = "feature/x"
+			r.Landing = &l
+		}, "项目主线是 kun"},
 		"claimed files": {func(r *ChatSedimentRequest) {
 			r.Changes = []closeprotocol.KnowledgeChange{{Location: "agents", Summary: "s", Files: []string{"AGENTS.md"}}}
 		}, "没有对应文件"},
@@ -126,11 +144,16 @@ func TestChatSedimentIsRecordedAndListed(t *testing.T) {
 		return w
 	}
 	changes := []any{map[string]any{"location": "agents", "summary": "聊天收尾要沉淀"}}
+	landing := map[string]any{"via": "push", "remote": "github.com/o/r", "remote_has_commits": true}
 
-	if w := post(map[string]any{"changes": changes, "delivered_files": []string{"README.md"}, "commits": []string{"abcdef1"}, "mainline": "kun"}); w.Code != http.StatusBadRequest {
+	if w := post(map[string]any{"changes": changes, "delivered_files": []string{"README.md"}, "commits": []string{"abcdef1"}, "mainline": "kun", "landing": landing}); w.Code != http.StatusBadRequest {
 		t.Fatalf("a sediment whose file is not delivered: status = %d: %s", w.Code, w.Body.String())
 	}
-	w := post(map[string]any{"changes": changes, "delivered_files": []string{"AGENTS.md"}, "commits": []string{"abcdef1"}, "mainline": "kun"})
+	if w := post(map[string]any{"changes": changes, "delivered_files": []string{"AGENTS.md"}, "commits": []string{"abcdef1"}, "mainline": "kun",
+		"landing": map[string]any{"via": "push", "remote": "github.com/o/r"}}); w.Code != http.StatusBadRequest {
+		t.Fatalf("an unpushed sediment: status = %d: %s", w.Code, w.Body.String())
+	}
+	w := post(map[string]any{"changes": changes, "delivered_files": []string{"AGENTS.md"}, "commits": []string{"abcdef1"}, "mainline": "kun", "landing": landing})
 	if w.Code != http.StatusCreated {
 		t.Fatalf("status = %d: %s", w.Code, w.Body.String())
 	}

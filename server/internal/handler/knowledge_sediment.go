@@ -139,13 +139,13 @@ func sedimentToResponse(row db.KnowledgeSediment) KnowledgeSedimentResponse {
 // ChatSedimentRequest is what `multica chat sediment` sends after the
 // chat's memory edits reached the main line: the locations it wrote, and
 // what git says about it — the changed paths, the commits, the main line
-// they are on, and the PR when the repository has one.
+// they are on, and how they got there (DENE-1668).
 type ChatSedimentRequest struct {
 	Changes        []closeprotocol.KnowledgeChange `json:"changes"`
 	DeliveredFiles *[]string                       `json:"delivered_files"`
 	Commits        []string                        `json:"commits"`
 	Mainline       string                          `json:"mainline"`
-	PRURL          string                          `json:"pr_url,omitempty"`
+	Landing        *closeprotocol.SedimentLanding  `json:"landing"`
 }
 
 var commitSHAPattern = regexp.MustCompile(`^[0-9a-f]{7,40}$`)
@@ -178,6 +178,12 @@ func checkChatSediment(req ChatSedimentRequest) (closeprotocol.KnowledgeAudit, [
 	}
 	if len(commits) == 0 {
 		return closeprotocol.KnowledgeAudit{}, nil, "缺 commits：沉淀要以提交的形式进主线，上报带上那几个提交"
+	}
+	if req.Landing == nil {
+		return closeprotocol.KnowledgeAudit{}, nil, "缺 landing：用新版 `multica chat sediment` 上报，它会核实主线确实收到了"
+	}
+	if reason := closeprotocol.CheckSedimentLanding(*req.Landing, req.Mainline); reason != "" {
+		return closeprotocol.KnowledgeAudit{}, nil, reason
 	}
 	return bound, commits, ""
 }
@@ -217,7 +223,7 @@ func (h *Handler) CreateChatSediment(w http.ResponseWriter, r *http.Request) {
 		Verified:      true,
 		Mainline:      strings.TrimSpace(req.Mainline),
 		Commits:       rawCommits,
-		PrUrl:         strings.TrimSpace(req.PRURL),
+		PrUrl:         strings.TrimSpace(req.Landing.PRURL),
 		AuthorType:    actorType,
 		AuthorID:      parseUUID(actorID),
 	})

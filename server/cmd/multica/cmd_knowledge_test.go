@@ -210,39 +210,110 @@ func TestChatSedimentMergesALocalOnlyRepoIntoTheProjectDirectory(t *testing.T) {
 	}
 }
 
-func TestChatSedimentWithARemoteNeedsAMergedPR(t *testing.T) {
+func runSediment(t *testing.T, pr string) error {
+	t.Helper()
+	cmd := newChatSedimentTestCmd()
+	_ = cmd.Flags().Set("knowledge", "context=加了沉淀记录词条")
+	_ = cmd.Flags().Set("output", "table")
+	if pr != "" {
+		_ = cmd.Flags().Set("pr", pr)
+	}
+	stderr := captureStderr(t)
+	defer stderr.restore()
+	_, err := captureStdout(t, func() error { return runChatSediment(cmd, nil) })
+	return err
+}
+
+// A remote repository counts a PR only when it merged into this repository's
+// main line (DENE-1668 F2).
+func TestChatSedimentWithARemoteNeedsAMergedPRIntoTheMainline(t *testing.T) {
 	repo, _ := knowledgeRepo(t, "agent/chat/abcd1234")
 	knowledgeGit(t, repo, "remote", "add", "origin", "https://github.com/o/r.git")
+	knowledgeGit(t, repo, "config", "multica.mainline", "kun")
 	body, posts := chatSedimentServer(t)
 	before := knowledgeGit(t, repo, "rev-parse", "HEAD")
 
-	cmd := newChatSedimentTestCmd()
-	_ = cmd.Flags().Set("knowledge", "context=加了沉淀记录词条")
-	err := runChatSediment(cmd, nil)
-	if err == nil || !strings.Contains(err.Error(), "--pr") || *posts != 0 {
-		t.Fatalf("err = %v posts = %d; want a refusal pointing at --pr", err, *posts)
+	orig := viewMergedPR
+	t.Cleanup(func() { viewMergedPR = orig })
+	base := "kun"
+	viewMergedPR = func(_ context.Context, _, url string) (mergedPR, error) {
+		return mergedPR{Title: "Chat abcd1234: 沉淀", Base: base, MergeCommit: "0123456789abcdef0123456789abcdef01234567", Files: []string{"CONTEXT.md"}}, nil
+	}
+	for name, tc := range map[string]struct{ pr, base, want string }{
+		"no pr":      {"", "kun", "--pr"},
+		"wrong repo": {"https://github.com/other/r/pull/7", "kun", "不在这个仓库"},
+		"wrong base": {"https://github.com/o/r/pull/7", "feature/x", "项目主线是 kun"},
+	} {
+		base = tc.base
+		if err := runSediment(t, tc.pr); err == nil || !strings.Contains(err.Error(), tc.want) || *posts != 0 {
+			t.Fatalf("%s: err = %v posts = %d; want a refusal mentioning %q", name, err, *posts, tc.want)
+		}
 	}
 	if after := knowledgeGit(t, repo, "rev-parse", "HEAD"); after != before {
 		t.Fatal("a repository with a remote must not be merged locally")
 	}
 
-	orig := viewMergedPR
-	t.Cleanup(func() { viewMergedPR = orig })
-	viewMergedPR = func(_ context.Context, _, url string) (mergedPR, error) {
-		return mergedPR{Title: "Chat abcd1234: 沉淀", Base: "kun", MergeCommit: "0123456789abcdef0123456789abcdef01234567", Files: []string{"CONTEXT.md"}}, nil
-	}
-	cmd = newChatSedimentTestCmd()
-	_ = cmd.Flags().Set("knowledge", "context=加了沉淀记录词条")
-	_ = cmd.Flags().Set("pr", "https://github.com/o/r/pull/7")
-	_ = cmd.Flags().Set("output", "table")
-	stderr := captureStderr(t)
-	defer stderr.restore()
-	if _, err := captureStdout(t, func() error { return runChatSediment(cmd, nil) }); err != nil {
+	base = "kun"
+	if err := runSediment(t, "https://github.com/o/r/pull/7"); err != nil {
 		t.Fatalf("runChatSediment --pr: %v", err)
 	}
 	b := *body
-	if b["mainline"] != "kun" || b["pr_url"] != "https://github.com/o/r/pull/7" {
+	landing, _ := b["landing"].(map[string]any)
+	if b["mainline"] != "kun" || landing["via"] != "pr" || landing["pr_url"] != "https://github.com/o/r/pull/7" || landing["remote"] != "github.com/o/r" {
 		t.Fatalf("body = %#v", b)
+	}
+}
+
+// DENE-1668 F2: a shared directory's commit on local main that never reached
+// origin is not a sediment; once pushed, it is.
+func TestChatSedimentWithARemoteCountsOnlyWhatWasPushed(t *testing.T) {
+	repo, _ := knowledgeRepo(t, "agent/chat/abcd1234")
+	origin := filepath.Join(t.TempDir(), "origin.git")
+	knowledgeGit(t, repo, "clone", "--bare", "-q", repo, origin)
+	knowledgeGit(t, repo, "remote", "add", "origin", origin)
+	knowledgeGit(t, repo, "fetch", "-q", "origin")
+	knowledgeGit(t, repo, "branch", "--set-upstream-to=origin/main", "main")
+	knowledgeGit(t, repo, "merge", "-q", "--ff-only", "agent/chat/abcd1234")
+	if err := os.Chdir(repo); err != nil {
+		t.Fatal(err)
+	}
+	body, posts := chatSedimentServer(t)
+
+	err := runSediment(t, "")
+	ahead := knowledgeGit(t, repo, "rev-list", "--count", "origin/main..main")
+	if err == nil || !strings.Contains(err.Error(), "还没收到") || *posts != 0 || ahead != "1" {
+		t.Fatalf("err = %v posts = %d ahead = %s; an unpushed commit must not be recorded", err, *posts, ahead)
+	}
+
+	knowledgeGit(t, repo, "push", "-q", "origin", "main")
+	if err := runSediment(t, ""); err != nil || *posts != 1 {
+		t.Fatalf("after push: err = %v posts = %d", err, *posts)
+	}
+	b := *body
+	landing, _ := b["landing"].(map[string]any)
+	files, _ := b["delivered_files"].([]any)
+	if b["mainline"] != "main" || landing["via"] != "push" || landing["remote_has_commits"] != true || len(files) == 0 {
+		t.Fatalf("body = %#v", b)
+	}
+}
+
+// The reviewer's reproducer, kept as it was written: a fake GitHub origin
+// that is never pushed to records nothing.
+func TestChatSedimentRemoteUnpushedMustNotReportSuccess(t *testing.T) {
+	repo, _ := knowledgeRepo(t, "agent/chat/abcd1234")
+	knowledgeGit(t, repo, "remote", "add", "origin", "https://github.com/o/r.git")
+	knowledgeGit(t, repo, "config", "multica.mainline", "main")
+	knowledgeGit(t, repo, "update-ref", "refs/remotes/origin/main", "main")
+	knowledgeGit(t, repo, "branch", "--set-upstream-to=origin/main", "main")
+	knowledgeGit(t, repo, "merge", "-q", "--ff-only", "agent/chat/abcd1234")
+	if err := os.Chdir(repo); err != nil {
+		t.Fatal(err)
+	}
+	_, posts := chatSedimentServer(t)
+	t.Setenv("GIT_TERMINAL_PROMPT", "0")
+	err := runSediment(t, "")
+	if err == nil || *posts > 0 {
+		t.Fatalf("err = %v posts = %d; remote sediment accepted while the commit exists only locally", err, *posts)
 	}
 }
 
