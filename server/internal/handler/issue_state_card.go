@@ -164,10 +164,12 @@ func (h *Handler) stateCardSource(ctx context.Context, issue db.Issue, viewer so
 }
 
 // stateCardChildren is the sub-task receipts the viewer can see. A run with
-// no person behind it sees the ones scoped like the parent.
+// no person behind it sees the ones every reader of the parent can see.
 func (h *Handler) stateCardChildren(ctx context.Context, issue db.Issue, viewer sourceViewer) []receipt.Receipt {
-	keep := visibleWithParent(issue)
-	if viewer.UserID != "" {
+	var keep func(db.Issue) bool
+	if viewer.UserID == "" {
+		keep = h.visibleWithParent(ctx, issue)
+	} else {
 		userID, err := parseUUIDStrict(viewer.UserID)
 		if err != nil {
 			return []receipt.Receipt{}

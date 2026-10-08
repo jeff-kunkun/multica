@@ -307,7 +307,8 @@ archived statuses remain readable via an explicit status filter.
   is open and awaiting review; moving to it is an explicit mutation.
 - **`done`** on a child issue posts a system comment on its parent once the
   stage closes, listing each finished child's conclusion, PRs and knowledge
-  (子任务回执). If a PR
+  (子任务回执); a sub-issue some reader of the parent cannot see stays off
+  it. If a PR
   carries close intent (`Closes MUL-XXXX`), it advances the issue to `done`
   itself on merge — you do not also need to flip it manually.
 - **`blocked`** requires the wait on the same `multica issue status <id> blocked`
