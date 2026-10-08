@@ -954,7 +954,6 @@ export const ChatMessageSchema = z.object({
   quick_actions: z.array(ChatQuickActionSchema).catch([]).optional().default([]),
   sender_user_id: z.string().nullable().optional(),
   linked_session_id: z.string().nullable().optional().catch(undefined),
-  linked_issue_id: z.string().nullable().optional().catch(undefined),
   // Session lineage (DENE-1345): additive display metadata, degraded alone.
   session_mode: z.enum(["new", "resumed"]).optional().catch(undefined),
   resumed_from_run: z.string().optional().catch(undefined),
@@ -1608,9 +1607,6 @@ export const IssueSchema = z.object({
   // the entry, not the whole issue. (DENE-371)
   origin_type: z.string().optional().catch(undefined),
   origin_id: z.string().optional().catch(undefined),
-  // The chat the issue was dispatched from (DENE-1672); costs only the link.
-  source_chat_session_id: z.string().optional().catch(undefined),
-  source_chat_message_id: z.string().optional().catch(undefined),
   // Additive (DENE-1342): a malformed driver costs the hint, not the issue.
   driver: IssueDriverSchema.optional().catch(undefined),
 }).loose();

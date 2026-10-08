@@ -86,29 +86,15 @@ func TestRunChatHandoffPostsTarget(t *testing.T) {
 	}
 }
 
-func TestRunChatIssuesReadsSessionIssues(t *testing.T) {
-	const id = "019ec09d-6222-722b-bdfa-427b105d80be"
-	var gotPath string
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		gotPath = r.URL.Path
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]any{"chat_session_id": id, "issues": []map[string]any{{
-			"identifier": "DENE-9", "title": "修登录", "status": "done", "summary": "改走新令牌",
-			"pull_requests": []map[string]any{{"number": 12, "url": "https://x/pull/12", "state": "merged"}},
-		}}})
-	}))
-	defer srv.Close()
-	t.Setenv("MULTICA_SERVER_URL", srv.URL)
-	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
-	t.Setenv("MULTICA_TOKEN", "test-token")
-	t.Setenv("MULTICA_CHAT_SESSION_ID", id)
-
-	cmd := &cobra.Command{Use: "issues"}
-	cmd.Flags().String("output", "table", "")
-	if err := runChatIssues(cmd, nil); err != nil {
-		t.Fatalf("run: %v", err)
+func TestChatTicketResultShowsReceipt(t *testing.T) {
+	ticket := map[string]any{
+		"identifier": "DENE-9", "status": "done", "summary": "改走新令牌",
+		"pull_requests": []any{map[string]any{"number": float64(12), "url": "https://x/pull/12", "state": "merged"}},
 	}
-	if gotPath != "/api/chat/sessions/"+id+"/issues" {
-		t.Fatalf("request path = %s", gotPath)
+	if got := chatTicketResult(ticket); got != "改走新令牌 · PR #12 merged" {
+		t.Fatalf("result = %q", got)
+	}
+	if got := chatTicketResult(map[string]any{"status": "in_progress"}); got != "-" {
+		t.Fatalf("empty result = %q", got)
 	}
 }

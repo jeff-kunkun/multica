@@ -1086,7 +1086,6 @@ describe("ChatMessageList opened-chat cards (DENE-1271)", () => {
       role: "assistant",
       content: "DENE-9 修登录 · 已完成\n\n结论：登录改走新令牌",
       message_kind: "issue_receipt",
-      linked_issue_id: "issue-9",
       task_id: null,
       created_at: "2026-10-08T00:00:00Z",
     }]);

@@ -11,17 +11,26 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-const getChatInputMessageForTask = `-- name: GetChatInputMessageForTask :one
-SELECT id, chat_session_id, role, content, task_id, created_at, failure_reason, elapsed_ms, message_kind, channel_media_pending_until, channel_ingested, quick_actions, channel_context_revision, channel_outbound_type, channel_outbound_installation_id, channel_outbound_chat_id, channel_outbound_message_ids, sender_user_id, linked_session_id, linked_issue_id FROM chat_message
-WHERE task_id = $1 AND role = 'user'
+const getChatSourceMessage = `-- name: GetChatSourceMessage :one
+
+SELECT id, chat_session_id, role, content, task_id, created_at, failure_reason, elapsed_ms, message_kind, channel_media_pending_until, channel_ingested, quick_actions, channel_context_revision, channel_outbound_type, channel_outbound_installation_id, channel_outbound_chat_id, channel_outbound_message_ids, sender_user_id, linked_session_id FROM chat_message
+WHERE chat_session_id = $1
+  AND role = 'user'
+  AND created_at <= $2
 ORDER BY created_at DESC, id DESC
 LIMIT 1
 `
 
-// The newest user message a chat run answered: the "原话" an issue that run
-// created was dispatched from.
-func (q *Queries) GetChatInputMessageForTask(ctx context.Context, taskID pgtype.UUID) (ChatMessage, error) {
-	row := q.db.QueryRow(ctx, getChatInputMessageForTask, taskID)
+type GetChatSourceMessageParams struct {
+	ChatSessionID pgtype.UUID        `json:"chat_session_id"`
+	Before        pgtype.Timestamptz `json:"before"`
+}
+
+// DENE-1672: what a chat-opened task reports back to its chat.
+// The user message an issue was opened in answer to: the chat's newest user
+// message at or before the issue's creation.
+func (q *Queries) GetChatSourceMessage(ctx context.Context, arg GetChatSourceMessageParams) (ChatMessage, error) {
+	row := q.db.QueryRow(ctx, getChatSourceMessage, arg.ChatSessionID, arg.Before)
 	var i ChatMessage
 	err := row.Scan(
 		&i.ID,
@@ -43,234 +52,6 @@ func (q *Queries) GetChatInputMessageForTask(ctx context.Context, taskID pgtype.
 		&i.ChannelOutboundMessageIds,
 		&i.SenderUserID,
 		&i.LinkedSessionID,
-		&i.LinkedIssueID,
-	)
-	return i, err
-}
-
-const getChatMessageInSession = `-- name: GetChatMessageInSession :one
-SELECT id, chat_session_id, role, content, task_id, created_at, failure_reason, elapsed_ms, message_kind, channel_media_pending_until, channel_ingested, quick_actions, channel_context_revision, channel_outbound_type, channel_outbound_installation_id, channel_outbound_chat_id, channel_outbound_message_ids, sender_user_id, linked_session_id, linked_issue_id FROM chat_message
-WHERE id = $1 AND chat_session_id = $2
-`
-
-type GetChatMessageInSessionParams struct {
-	ID            pgtype.UUID `json:"id"`
-	ChatSessionID pgtype.UUID `json:"chat_session_id"`
-}
-
-func (q *Queries) GetChatMessageInSession(ctx context.Context, arg GetChatMessageInSessionParams) (ChatMessage, error) {
-	row := q.db.QueryRow(ctx, getChatMessageInSession, arg.ID, arg.ChatSessionID)
-	var i ChatMessage
-	err := row.Scan(
-		&i.ID,
-		&i.ChatSessionID,
-		&i.Role,
-		&i.Content,
-		&i.TaskID,
-		&i.CreatedAt,
-		&i.FailureReason,
-		&i.ElapsedMs,
-		&i.MessageKind,
-		&i.ChannelMediaPendingUntil,
-		&i.ChannelIngested,
-		&i.QuickActions,
-		&i.ChannelContextRevision,
-		&i.ChannelOutboundType,
-		&i.ChannelOutboundInstallationID,
-		&i.ChannelOutboundChatID,
-		&i.ChannelOutboundMessageIds,
-		&i.SenderUserID,
-		&i.LinkedSessionID,
-		&i.LinkedIssueID,
-	)
-	return i, err
-}
-
-const listIssuesBySourceChat = `-- name: ListIssuesBySourceChat :many
-SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, triage_state, reviewer_type, reviewer_id, visibility, assignee_source, assignee_source_user_id, assignee_quote, progress_text, progress_source, progress_tone, progress_author_type, progress_author_id, progress_updated_at, duplicate_of_issue_id, domain_id, source_chat_session_id, source_chat_message_id FROM issue
-WHERE source_chat_session_id = $1
-  AND workspace_id = $2
-ORDER BY created_at DESC, id DESC
-LIMIT $3
-`
-
-type ListIssuesBySourceChatParams struct {
-	ChatSessionID pgtype.UUID `json:"chat_session_id"`
-	WorkspaceID   pgtype.UUID `json:"workspace_id"`
-	Lim           int32       `json:"lim"`
-}
-
-// Tasks dispatched from one chat, newest first.
-func (q *Queries) ListIssuesBySourceChat(ctx context.Context, arg ListIssuesBySourceChatParams) ([]Issue, error) {
-	rows, err := q.db.Query(ctx, listIssuesBySourceChat, arg.ChatSessionID, arg.WorkspaceID, arg.Lim)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []Issue{}
-	for rows.Next() {
-		var i Issue
-		if err := rows.Scan(
-			&i.ID,
-			&i.WorkspaceID,
-			&i.Title,
-			&i.Description,
-			&i.Status,
-			&i.Priority,
-			&i.AssigneeType,
-			&i.AssigneeID,
-			&i.CreatorType,
-			&i.CreatorID,
-			&i.ParentIssueID,
-			&i.AcceptanceCriteria,
-			&i.ContextRefs,
-			&i.Position,
-			&i.DueDate,
-			&i.CreatedAt,
-			&i.UpdatedAt,
-			&i.Number,
-			&i.ProjectID,
-			&i.OriginType,
-			&i.OriginID,
-			&i.FirstExecutedAt,
-			&i.StartDate,
-			&i.Metadata,
-			&i.Stage,
-			&i.Properties,
-			&i.Revision,
-			&i.LastActivityAt,
-			&i.TriageState,
-			&i.ReviewerType,
-			&i.ReviewerID,
-			&i.Visibility,
-			&i.AssigneeSource,
-			&i.AssigneeSourceUserID,
-			&i.AssigneeQuote,
-			&i.ProgressText,
-			&i.ProgressSource,
-			&i.ProgressTone,
-			&i.ProgressAuthorType,
-			&i.ProgressAuthorID,
-			&i.ProgressUpdatedAt,
-			&i.DuplicateOfIssueID,
-			&i.DomainID,
-			&i.SourceChatSessionID,
-			&i.SourceChatMessageID,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const setChatMessageLinkedIssue = `-- name: SetChatMessageLinkedIssue :one
-UPDATE chat_message SET linked_issue_id = $1
-WHERE id = $2
-RETURNING id, chat_session_id, role, content, task_id, created_at, failure_reason, elapsed_ms, message_kind, channel_media_pending_until, channel_ingested, quick_actions, channel_context_revision, channel_outbound_type, channel_outbound_installation_id, channel_outbound_chat_id, channel_outbound_message_ids, sender_user_id, linked_session_id, linked_issue_id
-`
-
-type SetChatMessageLinkedIssueParams struct {
-	LinkedIssueID pgtype.UUID `json:"linked_issue_id"`
-	ID            pgtype.UUID `json:"id"`
-}
-
-func (q *Queries) SetChatMessageLinkedIssue(ctx context.Context, arg SetChatMessageLinkedIssueParams) (ChatMessage, error) {
-	row := q.db.QueryRow(ctx, setChatMessageLinkedIssue, arg.LinkedIssueID, arg.ID)
-	var i ChatMessage
-	err := row.Scan(
-		&i.ID,
-		&i.ChatSessionID,
-		&i.Role,
-		&i.Content,
-		&i.TaskID,
-		&i.CreatedAt,
-		&i.FailureReason,
-		&i.ElapsedMs,
-		&i.MessageKind,
-		&i.ChannelMediaPendingUntil,
-		&i.ChannelIngested,
-		&i.QuickActions,
-		&i.ChannelContextRevision,
-		&i.ChannelOutboundType,
-		&i.ChannelOutboundInstallationID,
-		&i.ChannelOutboundChatID,
-		&i.ChannelOutboundMessageIds,
-		&i.SenderUserID,
-		&i.LinkedSessionID,
-		&i.LinkedIssueID,
-	)
-	return i, err
-}
-
-const setIssueSourceChat = `-- name: SetIssueSourceChat :one
-
-UPDATE issue
-SET source_chat_session_id = $1,
-    source_chat_message_id = $2
-WHERE id = $3
-RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, triage_state, reviewer_type, reviewer_id, visibility, assignee_source, assignee_source_user_id, assignee_quote, progress_text, progress_source, progress_tone, progress_author_type, progress_author_id, progress_updated_at, duplicate_of_issue_id, domain_id, source_chat_session_id, source_chat_message_id
-`
-
-type SetIssueSourceChatParams struct {
-	SourceChatSessionID pgtype.UUID `json:"source_chat_session_id"`
-	SourceChatMessageID pgtype.UUID `json:"source_chat_message_id"`
-	ID                  pgtype.UUID `json:"id"`
-}
-
-// DENE-1672: which chat a task came from, and the receipts that flow back.
-func (q *Queries) SetIssueSourceChat(ctx context.Context, arg SetIssueSourceChatParams) (Issue, error) {
-	row := q.db.QueryRow(ctx, setIssueSourceChat, arg.SourceChatSessionID, arg.SourceChatMessageID, arg.ID)
-	var i Issue
-	err := row.Scan(
-		&i.ID,
-		&i.WorkspaceID,
-		&i.Title,
-		&i.Description,
-		&i.Status,
-		&i.Priority,
-		&i.AssigneeType,
-		&i.AssigneeID,
-		&i.CreatorType,
-		&i.CreatorID,
-		&i.ParentIssueID,
-		&i.AcceptanceCriteria,
-		&i.ContextRefs,
-		&i.Position,
-		&i.DueDate,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-		&i.Number,
-		&i.ProjectID,
-		&i.OriginType,
-		&i.OriginID,
-		&i.FirstExecutedAt,
-		&i.StartDate,
-		&i.Metadata,
-		&i.Stage,
-		&i.Properties,
-		&i.Revision,
-		&i.LastActivityAt,
-		&i.TriageState,
-		&i.ReviewerType,
-		&i.ReviewerID,
-		&i.Visibility,
-		&i.AssigneeSource,
-		&i.AssigneeSourceUserID,
-		&i.AssigneeQuote,
-		&i.ProgressText,
-		&i.ProgressSource,
-		&i.ProgressTone,
-		&i.ProgressAuthorType,
-		&i.ProgressAuthorID,
-		&i.ProgressUpdatedAt,
-		&i.DuplicateOfIssueID,
-		&i.DomainID,
-		&i.SourceChatSessionID,
-		&i.SourceChatMessageID,
 	)
 	return i, err
 }

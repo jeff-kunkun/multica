@@ -425,15 +425,11 @@ func (h *Handler) ConvertChatSessionToGoal(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	var seed string
-	var lastUser pgtype.UUID
 	for _, message := range messages {
-		if message.Role != "user" || strings.TrimSpace(message.Content) == "" {
-			continue
-		}
-		if seed == "" {
+		if message.Role == "user" && strings.TrimSpace(message.Content) != "" {
 			seed = strings.TrimSpace(message.Content)
+			break
 		}
-		lastUser = message.ID
 	}
 	title := strings.TrimSpace(session.Title)
 	if title == "" || title == "New chat" {
@@ -465,8 +461,7 @@ func (h *Handler) ConvertChatSessionToGoal(w http.ResponseWriter, r *http.Reques
 		AssigneeType: pgtype.Text{String: "agent", Valid: true}, AssigneeID: session.AgentID,
 		CreatorType: "member", CreatorID: creatorID,
 		ProjectID: session.ProjectID, ProjectPinned: session.ProjectID.Valid,
-		GoalMode:            true,
-		SourceChatSessionID: session.ID, SourceChatMessageID: lastUser,
+		GoalMode: true, OriginChatSessionID: session.ID,
 	}, service.IssueCreateOpts{ActorID: userID, AnalyticsAgentID: uuidToString(session.AgentID), Platform: "web"})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to create goal issue")
@@ -2717,8 +2712,6 @@ type ChatMessageResponse struct {
 	SenderUserID *string `json:"sender_user_id,omitempty"`
 	// LinkedSessionID is the chat a chat_spawn card opens (DENE-1271).
 	LinkedSessionID *string `json:"linked_session_id,omitempty"`
-	// LinkedIssueID is the task an issue_receipt card reports on (DENE-1672).
-	LinkedIssueID *string `json:"linked_issue_id,omitempty"`
 	// Session lineage of the run behind task_id (DENE-1345): "new" or
 	// "resumed", the run whose session it resumed, and why a new one started.
 	SessionMode        string `json:"session_mode,omitempty"`
@@ -2769,7 +2762,6 @@ func chatMessageToResponse(m db.ChatMessage, attachments []AttachmentResponse) C
 		SenderUserID:  uuidToPtr(m.SenderUserID),
 
 		LinkedSessionID: uuidToPtr(m.LinkedSessionID),
-		LinkedIssueID:   uuidToPtr(m.LinkedIssueID),
 	}
 }
 

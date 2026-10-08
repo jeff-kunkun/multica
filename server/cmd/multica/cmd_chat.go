@@ -104,17 +104,22 @@ var chatToGoalCmd = &cobra.Command{
 	RunE:  runChatToGoal,
 }
 
-var chatIssuesCmd = &cobra.Command{
-	Use:   "issues [session-id-or-url]",
-	Short: "List the tasks a chat dispatched and where each stands",
-	Long: `List the tasks created from a chat, newest first: status, the close's
-conclusion and PRs. Defaults to MULTICA_CHAT_SESSION_ID inside a chat run.
+var chatTicketsCmd = &cobra.Command{
+	Use:   "tickets",
+	Short: "List the issues a chat opened",
+	Long: `List the issues opened from a chat — by its agent's "issue create" or
+"plan apply", or by turning the chat into a goal — oldest first, with status,
+assignee and the first line of each issue's 目标 section. A ticket that is
+done, blocked, cancelled or in review also carries its result: the close's
+summary, PRs and knowledge (summary, pull_requests, knowledge). The chat shows the
+same list as its ticket cards; each issue names the chat back as source_chat
+in "multica issue get".
 
-  multica chat issues
-  multica chat issues <session-id> --output json
+  multica chat tickets
+  multica chat tickets --session <id|url> --output json
 `,
-	Args: cobra.MaximumNArgs(1),
-	RunE: runChatIssues,
+	Args: cobra.NoArgs,
+	RunE: runChatTickets,
 }
 
 var chatTitleCmd = &cobra.Command{
@@ -215,9 +220,10 @@ func init() {
 	chatCmd.AddCommand(chatToGoalCmd)
 	chatToGoalCmd.Flags().String("session", "", "Chat session id or URL (defaults to MULTICA_CHAT_SESSION_ID)")
 	chatToGoalCmd.Flags().String("output", "json", "Output format: table or json")
-	chatCmd.AddCommand(chatIssuesCmd)
-	chatIssuesCmd.Flags().String("output", "table", "Output format: table or json")
 	chatCmd.AddCommand(chatTitleCmd)
+	chatCmd.AddCommand(chatTicketsCmd)
+	chatTicketsCmd.Flags().String("session", "", "Chat session id or URL (defaults to MULTICA_CHAT_SESSION_ID)")
+	chatTicketsCmd.Flags().String("output", "table", "Output format: table or json")
 	chatCmd.AddCommand(chatOpenCmd)
 	chatCmd.AddCommand(chatSendCmd)
 	chatCmd.AddCommand(chatHandoffCmd)
@@ -271,26 +277,14 @@ func runChatTitle(cmd *cobra.Command, args []string) error {
 	return cli.PrintJSON(os.Stdout, out)
 }
 
-type chatIssueReceipt struct {
-	Identifier   string `json:"identifier"`
-	Title        string `json:"title"`
-	Status       string `json:"status"`
-	Summary      string `json:"summary"`
-	PullRequests []struct {
-		Number int    `json:"number"`
-		URL    string `json:"url"`
-		State  string `json:"state"`
-	} `json:"pull_requests"`
-}
-
-func runChatIssues(cmd *cobra.Command, args []string) error {
-	session := os.Getenv("MULTICA_CHAT_SESSION_ID")
-	if len(args) > 0 && strings.TrimSpace(args[0]) != "" {
-		session = args[0]
+func runChatTickets(cmd *cobra.Command, _ []string) error {
+	session, _ := cmd.Flags().GetString("session")
+	if strings.TrimSpace(session) == "" {
+		session = os.Getenv("MULTICA_CHAT_SESSION_ID")
 	}
 	ref, err := parseChatSessionLinkRef(session)
 	if err != nil {
-		return fmt.Errorf("chat issues: session is required (or set MULTICA_CHAT_SESSION_ID): %w", err)
+		return fmt.Errorf("chat tickets: --session is required (or set MULTICA_CHAT_SESSION_ID): %w", err)
 	}
 	client, err := newAPIClient(cmd)
 	if err != nil {
@@ -298,46 +292,54 @@ func runChatIssues(cmd *cobra.Command, args []string) error {
 	}
 	ctx, cancel := cli.APIContext(context.Background())
 	defer cancel()
-	var raw json.RawMessage
-	if err := client.GetJSON(ctx, "/api/chat/sessions/"+url.PathEscape(ref.ID)+"/issues", &raw); err != nil {
-		return fmt.Errorf("list chat issues: %w", err)
+	var out struct {
+		ChatSessionID string           `json:"chat_session_id"`
+		Tickets       []map[string]any `json:"tickets"`
 	}
-	if output, _ := cmd.Flags().GetString("output"); output == "json" {
-		var out any
-		if err := json.Unmarshal(raw, &out); err != nil {
-			return err
-		}
+	if err := client.GetJSON(ctx, "/api/chat/sessions/"+url.PathEscape(ref.ID)+"/tickets", &out); err != nil {
+		return fmt.Errorf("list chat tickets: %w", err)
+	}
+	output, _ := cmd.Flags().GetString("output")
+	if output != "table" {
 		return cli.PrintJSON(os.Stdout, out)
 	}
-	var resp struct {
-		Issues []chatIssueReceipt `json:"issues"`
-	}
-	if err := json.Unmarshal(raw, &resp); err != nil {
-		return err
-	}
-	if len(resp.Issues) == 0 {
-		fmt.Println("This chat has not dispatched any tasks.")
+	if len(out.Tickets) == 0 {
+		fmt.Println("This chat has not opened any issues.")
 		return nil
 	}
-	rows := make([][]string, 0, len(resp.Issues))
-	for _, r := range resp.Issues {
-		prs := make([]string, 0, len(r.PullRequests))
-		for _, p := range r.PullRequests {
-			prs = append(prs, fmt.Sprintf("#%d %s", p.Number, p.State))
+	headers := []string{"IDENTIFIER", "STATUS", "ASSIGNEE", "TITLE", "RESULT"}
+	rows := make([][]string, 0, len(out.Tickets))
+	for _, t := range out.Tickets {
+		assignee, _ := t["assignee_name"].(string)
+		if assignee == "" {
+			assignee = "-"
 		}
-		rows = append(rows, []string{r.Identifier, r.Status, truncateCell(r.Title, 40), truncateCell(r.Summary, 60), strings.Join(prs, ", ")})
+		rows = append(rows, []string{fmt.Sprint(t["identifier"]), fmt.Sprint(t["status"]), assignee, fmt.Sprint(t["title"]), chatTicketResult(t)})
 	}
-	cli.PrintTable(os.Stdout, []string{"ISSUE", "STATUS", "TITLE", "CONCLUSION", "PRS"}, rows)
+	cli.PrintTable(os.Stdout, headers, rows)
 	return nil
 }
 
-func truncateCell(s string, max int) string {
-	s = strings.Join(strings.Fields(s), " ")
-	r := []rune(s)
-	if len(r) <= max {
-		return s
+// chatTicketResult is a ticket's receipt in one table cell: its close summary
+// and PRs, "-" while it has none.
+func chatTicketResult(t map[string]any) string {
+	var parts []string
+	if summary, _ := t["summary"].(string); summary != "" {
+		if r := []rune(summary); len(r) > 60 {
+			summary = string(r[:59]) + "…"
+		}
+		parts = append(parts, summary)
 	}
-	return string(r[:max-1]) + "…"
+	prs, _ := t["pull_requests"].([]any)
+	for _, raw := range prs {
+		if pr, ok := raw.(map[string]any); ok {
+			parts = append(parts, fmt.Sprintf("PR #%v %v", pr["number"], pr["state"]))
+		}
+	}
+	if len(parts) == 0 {
+		return "-"
+	}
+	return strings.Join(parts, " · ")
 }
 
 func runChatToGoal(cmd *cobra.Command, _ []string) error {

@@ -172,6 +172,7 @@
     "last_activity_missing": "No activity time",
     "knowledge_none": "No qualified knowledge",
     "knowledge_change": "Knowledge: {{locations}}",
+    "knowledge_change_unverified": "Knowledge: {{locations}} (delivery not checked)",
     "section_title": "Close record",
     "conclusion": "Conclusion",
     "status": "Status",
@@ -573,9 +574,6 @@
     "change_subscribers_placeholder": "Change subscribers...",
     "members_group": "Members",
     "agents_group": "Agents",
-    "source_chat": "From chat",
-    "source_chat_tooltip": "Dispatched from “{{title}}”; results are posted back there",
-    "source_chat_tooltip_untitled": "Dispatched from a chat; results are posted back there",
     "mark_done_tooltip": "Mark as done",
     "archive_tooltip": "Archive",
     "pin_tooltip": "Pin",
@@ -626,7 +624,9 @@
       "status_conflict": "Conflict, executor resolves",
       "show_all_one": "Show all {{count}}",
       "show_all_other": "Show all {{count}}"
-    }
+    },
+    "from_chat": "From chat",
+    "from_chat_hidden": "From a chat you can't see"
   },
   "timeline": {
     "loading": "Loading..."
@@ -670,6 +670,7 @@
     "status_changed_pr": "changed status from {{from}} to {{to}} after every linked PR merged ({{prs}})",
     "pr_auto_complete_disabled": "set this issue to keep its status when PRs merge",
     "pr_auto_complete_enabled": "set this issue to change status when PRs merge again",
+    "linked_write": "acted on this issue via {{workspace}} · {{agent}}",
     "wakeup_created": "added a wakeup: {{condition}} · wake {{agent}}",
     "wakeup_triggered": "{{condition}} · woke {{agent}}",
     "wakeup_triggered_merged": "{{condition}} · joined {{agent}}'s waiting run",

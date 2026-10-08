@@ -3,10 +3,8 @@ package handler
 import (
 	"context"
 	"log/slog"
-	"net/http"
 	"strings"
 
-	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/closeprotocol"
 	"github.com/multica-ai/multica/server/internal/receipt"
@@ -15,8 +13,7 @@ import (
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
-// dispatchedReceiptLimit bounds the per-turn "tasks you dispatched" list and
-// the default page of `multica chat issues`.
+// dispatchedReceiptLimit bounds the per-turn list of a chat's tickets.
 const dispatchedReceiptLimit = 10
 
 // issueReceipt reads a task's result from what the issue records (DENE-1672).
@@ -77,12 +74,13 @@ func knowledgeLine(raw string) string {
 	return receipt.Clip(strings.Join(parts, "；"), 200)
 }
 
-// postSourceChatReceipt puts a receipt card into the chat an issue was
-// dispatched from when the issue enters a status the dispatcher must hear
-// about. It sits beside notifyParentOfChildDone on every status-transition
-// path. Best-effort: a failure never undoes the status change.
+// postSourceChatReceipt puts a receipt card into the chat an issue was opened
+// from when the issue enters a status the chat must hear about. It sits
+// beside notifyParentOfChildDone on every status-transition path. A
+// sub-issue of a ticket from the same chat stays quiet: its parent reports.
+// Best-effort: a failure never undoes the status change.
 func (h *Handler) postSourceChatReceipt(ctx context.Context, prev, issue db.Issue) {
-	if !issue.SourceChatSessionID.Valid {
+	if !issue.OriginChatSessionID.Valid {
 		return
 	}
 	effective := h.childStatusResolver(ctx)
@@ -94,7 +92,12 @@ func (h *Handler) postSourceChatReceipt(ctx context.Context, prev, issue db.Issu
 	if err != nil || prevStatus == nowStatus || !receipt.Reportable(nowStatus) {
 		return
 	}
-	session, err := h.Queries.GetChatSession(ctx, issue.SourceChatSessionID)
+	if issue.ParentIssueID.Valid {
+		if parent, err := h.Queries.GetIssue(ctx, issue.ParentIssueID); err == nil && parent.OriginChatSessionID == issue.OriginChatSessionID {
+			return
+		}
+	}
+	session, err := h.Queries.GetChatSession(ctx, issue.OriginChatSessionID)
 	if err != nil || session.WorkspaceID != issue.WorkspaceID {
 		return
 	}
@@ -116,9 +119,6 @@ func (h *Handler) postSourceChatReceipt(ctx context.Context, prev, issue db.Issu
 		slog.Warn("receipt: create chat message failed", "issue_id", r.IssueID, "chat_session_id", uuidToString(session.ID), "error", err)
 		return
 	}
-	if msg, err = h.Queries.SetChatMessageLinkedIssue(ctx, db.SetChatMessageLinkedIssueParams{ID: msg.ID, LinkedIssueID: issue.ID}); err != nil {
-		slog.Warn("receipt: link issue failed", "issue_id", r.IssueID, "error", err)
-	}
 	if err := h.Queries.TouchChatSession(ctx, session.ID); err != nil {
 		slog.Warn("receipt: touch chat session failed", "chat_session_id", uuidToString(session.ID), "error", err)
 	}
@@ -132,72 +132,26 @@ func (h *Handler) postSourceChatReceipt(ctx context.Context, prev, issue db.Issu
 	})
 }
 
-// dispatchedReceipts lists the tasks one chat dispatched, newest first.
-func (h *Handler) dispatchedReceipts(ctx context.Context, session db.ChatSession, limit int32, visible func(db.Issue) bool) ([]receipt.Receipt, error) {
-	issues, err := h.Queries.ListIssuesBySourceChat(ctx, db.ListIssuesBySourceChatParams{
-		ChatSessionID: session.ID, WorkspaceID: session.WorkspaceID, Lim: limit,
-	})
-	if err != nil {
-		return nil, err
-	}
-	prefix := h.getIssuePrefix(ctx, session.WorkspaceID)
-	out := make([]receipt.Receipt, 0, len(issues))
-	for _, issue := range issues {
-		if visible != nil && !visible(issue) {
-			continue
-		}
-		out = append(out, h.issueReceipt(ctx, issue, prefix))
-	}
-	return out, nil
-}
-
-// chatDispatchedLines is the per-turn "tasks you dispatched" list a chat run
-// opens with, limited to what the chat's owner can see.
+// chatDispatchedLines is the per-turn "tickets you opened" list a chat run
+// opens with: the newest few, limited to what the chat's owner can see.
 func (h *Handler) chatDispatchedLines(ctx context.Context, session db.ChatSession) []string {
 	viewer, err := h.visibilityViewerForUser(ctx, session.WorkspaceID, session.CreatorID)
 	if err != nil {
 		return nil
 	}
-	receipts, err := h.dispatchedReceipts(ctx, session, dispatchedReceiptLimit, viewer.canSeeIssue)
+	issues, err := h.Queries.ListIssuesByOriginChatSession(ctx, db.ListIssuesByOriginChatSessionParams{
+		WorkspaceID: session.WorkspaceID, ChatSessionID: session.ID,
+	})
 	if err != nil {
-		slog.Warn("receipt: list dispatched issues failed", "chat_session_id", uuidToString(session.ID), "error", err)
+		slog.Warn("receipt: list chat tickets failed", "chat_session_id", uuidToString(session.ID), "error", err)
 		return nil
 	}
-	lines := make([]string, 0, len(receipts))
-	for _, r := range receipts {
-		lines = append(lines, r.Line())
+	prefix := h.getIssuePrefix(ctx, session.WorkspaceID)
+	lines := []string{}
+	for i := len(issues) - 1; i >= 0 && len(lines) < dispatchedReceiptLimit; i-- {
+		if viewer.canSeeIssue(issues[i]) {
+			lines = append(lines, h.issueReceipt(ctx, issues[i], prefix).Line())
+		}
 	}
 	return lines
-}
-
-// ChatSessionIssuesResponse is GET /api/chat/sessions/{id}/issues.
-type ChatSessionIssuesResponse struct {
-	ChatSessionID string            `json:"chat_session_id"`
-	Issues        []receipt.Receipt `json:"issues"`
-}
-
-// ListChatSessionIssues answers `multica chat issues`: the tasks this chat
-// dispatched and where each one stands.
-func (h *Handler) ListChatSessionIssues(w http.ResponseWriter, r *http.Request) {
-	userID, ok := requireUserID(w, r)
-	if !ok {
-		return
-	}
-	workspaceID := ctxWorkspaceID(r.Context())
-	session, ok := h.gatePublicChatSessionForUser(w, r, userID, workspaceID, chi.URLParam(r, "sessionId"))
-	if !ok {
-		return
-	}
-	viewer, err := h.visibilityViewerFor(r, session.WorkspaceID)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to resolve visibility")
-		return
-	}
-	limit := int32(50)
-	receipts, err := h.dispatchedReceipts(r.Context(), session, limit, viewer.canSeeIssue)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to list dispatched issues")
-		return
-	}
-	writeJSON(w, http.StatusOK, ChatSessionIssuesResponse{ChatSessionID: uuidToString(session.ID), Issues: receipts})
 }

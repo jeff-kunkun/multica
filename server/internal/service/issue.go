@@ -83,13 +83,16 @@ type IssueCreateParams struct {
 	// true when the caller chose one, generic included; left out, a project
 	// with exactly one domain gives it to the issue. A domain the resolved
 	// project does not carry fails the create with ErrIssueDomainNotInProject.
-	DomainID      pgtype.UUID
-	DomainPinned  bool
-	StartDate     pgtype.Date
-	DueDate       pgtype.Date
-	OriginType    pgtype.Text
-	OriginID      pgtype.UUID
-	AttachmentIDs []pgtype.UUID
+	DomainID     pgtype.UUID
+	DomainPinned bool
+	StartDate    pgtype.Date
+	DueDate      pgtype.Date
+	OriginType   pgtype.Text
+	OriginID     pgtype.UUID
+	// OriginChatSessionID is the chat this issue was opened from (DENE-1665),
+	// written in the create transaction. Unset for issues no chat opened.
+	OriginChatSessionID pgtype.UUID
+	AttachmentIDs       []pgtype.UUID
 	// LabelIDs are the issue-scoped labels to attach to the new issue. They
 	// are validated and written inside the create transaction (see Create),
 	// so the issue is never committed with a partial or wrong label set. An
@@ -112,15 +115,6 @@ type IssueCreateParams struct {
 	// Stage groups this issue into an ordered barrier group under its parent
 	// (NULL = unstaged). See issue_wakeup_system.go for the staged-barrier wake.
 	Stage pgtype.Int4
-	// SourceChatSessionID is the chat this issue was dispatched from
-	// (DENE-1672); SourceChatMessageID the message it answered. Left unset,
-	// Create derives them from SourceTaskID or the origin: a chat run's
-	// agent_create, an IM `/issue` command, an alignment draft.
-	SourceChatSessionID pgtype.UUID
-	SourceChatMessageID pgtype.UUID
-	// SourceTaskID is the run that created the issue when the origin does not
-	// name it (plan apply).
-	SourceTaskID pgtype.UUID
 	// SourceContext is set only by the comment-scoped manual create endpoint.
 	// Its immutable snapshot and cloned attachment rows commit in the same
 	// transaction as the new issue.
@@ -574,6 +568,15 @@ func (s *IssueService) createInTx(ctx context.Context, tx pgx.Tx, qtx *db.Querie
 			return issueCreateTxOutcome{}, fmt.Errorf("set issue domain: %w", err)
 		}
 	}
+	if !p.OriginChatSessionID.Valid {
+		p.OriginChatSessionID = chatOriginSession(ctx, qtx, p)
+	}
+	if p.OriginChatSessionID.Valid {
+		issue, err = qtx.SetIssueOriginChatSession(ctx, db.SetIssueOriginChatSessionParams{ID: issue.ID, WorkspaceID: p.WorkspaceID, ChatSessionID: p.OriginChatSessionID})
+		if err != nil {
+			return issueCreateTxOutcome{}, fmt.Errorf("set issue origin chat: %w", err)
+		}
+	}
 	if p.GoalMode {
 		if _, goalErr := qtx.CreateIssueGoal(ctx, db.CreateIssueGoalParams{IssueID: issue.ID, WorkspaceID: p.WorkspaceID, CreatedByType: p.CreatorType, CreatedByID: p.CreatorID}); goalErr != nil {
 			return issueCreateTxOutcome{}, fmt.Errorf("create goal draft: %w", goalErr)
@@ -589,15 +592,6 @@ func (s *IssueService) createInTx(ctx context.Context, tx pgx.Tx, qtx *db.Querie
 		})
 		if err != nil {
 			return issueCreateTxOutcome{}, fmt.Errorf("record assignee source: %w", err)
-		}
-	}
-
-	if session, message := resolveSourceChat(ctx, qtx, p); session.Valid {
-		issue, err = qtx.SetIssueSourceChat(ctx, db.SetIssueSourceChatParams{
-			ID: issue.ID, SourceChatSessionID: session, SourceChatMessageID: message,
-		})
-		if err != nil {
-			return issueCreateTxOutcome{}, fmt.Errorf("record source chat: %w", err)
 		}
 	}
 

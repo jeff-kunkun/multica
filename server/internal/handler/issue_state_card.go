@@ -108,24 +108,23 @@ func (h *Handler) buildStateCard(ctx context.Context, issue db.Issue, caller sta
 	return card, nil
 }
 
-// stateCardSource names the chat the issue was dispatched from and quotes the
-// message that asked for it. A chat that is gone leaves no line.
+// stateCardSource names the chat the issue was opened from and quotes the
+// user message it answered: the chat's newest one at the issue's creation. A
+// chat that is gone leaves no line.
 func (h *Handler) stateCardSource(ctx context.Context, issue db.Issue) *statecard.Source {
-	if !issue.SourceChatSessionID.Valid {
+	if !issue.OriginChatSessionID.Valid {
 		return nil
 	}
-	session, err := h.Queries.GetChatSession(ctx, issue.SourceChatSessionID)
+	session, err := h.Queries.GetChatSession(ctx, issue.OriginChatSessionID)
 	if err != nil || session.WorkspaceID != issue.WorkspaceID {
 		return nil
 	}
 	src := &statecard.Source{ChatSessionID: uuidToString(session.ID), ChatTitle: session.Title}
-	if issue.SourceChatMessageID.Valid {
-		if msg, err := h.Queries.GetChatMessageInSession(ctx, db.GetChatMessageInSessionParams{
-			ID: issue.SourceChatMessageID, ChatSessionID: session.ID,
-		}); err == nil {
-			src.MessageID = uuidToString(msg.ID)
-			src.Excerpt = receipt.Clip(msg.Content, statecard.MaxSourceExcerpt)
-		}
+	if msg, err := h.Queries.GetChatSourceMessage(ctx, db.GetChatSourceMessageParams{
+		ChatSessionID: session.ID, Before: issue.CreatedAt,
+	}); err == nil {
+		src.MessageID = uuidToString(msg.ID)
+		src.Excerpt = receipt.Clip(msg.Content, statecard.MaxSourceExcerpt)
 	}
 	return src
 }

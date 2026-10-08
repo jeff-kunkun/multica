@@ -346,6 +346,22 @@ type AutopilotCollaborator struct {
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 }
 
+type AutopilotLinkedChange struct {
+	ID               pgtype.UUID        `json:"id"`
+	WorkspaceID      pgtype.UUID        `json:"workspace_id"`
+	AutopilotID      pgtype.UUID        `json:"autopilot_id"`
+	LinkID           pgtype.UUID        `json:"link_id"`
+	Route            string             `json:"route"`
+	ActorID          pgtype.UUID        `json:"actor_id"`
+	ViaWorkspaceID   pgtype.UUID        `json:"via_workspace_id"`
+	ViaWorkspaceName string             `json:"via_workspace_name"`
+	ViaSlug          string             `json:"via_slug"`
+	AgentID          pgtype.UUID        `json:"agent_id"`
+	AgentName        string             `json:"agent_name"`
+	TaskID           pgtype.UUID        `json:"task_id"`
+	CreatedAt        pgtype.Timestamptz `json:"created_at"`
+}
+
 type AutopilotQuotaPeriod struct {
 	WorkspaceID         pgtype.UUID        `json:"workspace_id"`
 	PeriodStart         pgtype.Timestamptz `json:"period_start"`
@@ -630,7 +646,6 @@ type ChatMessage struct {
 	ChannelOutboundMessageIds     []string           `json:"channel_outbound_message_ids"`
 	SenderUserID                  pgtype.UUID        `json:"sender_user_id"`
 	LinkedSessionID               pgtype.UUID        `json:"linked_session_id"`
-	LinkedIssueID                 pgtype.UUID        `json:"linked_issue_id"`
 }
 
 type ChatNamingEvent struct {
@@ -1094,8 +1109,7 @@ type Issue struct {
 	ProgressUpdatedAt    pgtype.Timestamptz `json:"progress_updated_at"`
 	DuplicateOfIssueID   pgtype.UUID        `json:"duplicate_of_issue_id"`
 	DomainID             pgtype.UUID        `json:"domain_id"`
-	SourceChatSessionID  pgtype.UUID        `json:"source_chat_session_id"`
-	SourceChatMessageID  pgtype.UUID        `json:"source_chat_message_id"`
+	OriginChatSessionID  pgtype.UUID        `json:"origin_chat_session_id"`
 }
 
 type IssueChildEvent struct {
@@ -1489,6 +1503,22 @@ type IssueWakeupReceipt struct {
 	CoalesceKey pgtype.Text        `json:"coalesce_key"`
 }
 
+type KnowledgeSediment struct {
+	ID            pgtype.UUID        `json:"id"`
+	WorkspaceID   pgtype.UUID        `json:"workspace_id"`
+	ProjectID     pgtype.UUID        `json:"project_id"`
+	IssueID       pgtype.UUID        `json:"issue_id"`
+	ChatSessionID pgtype.UUID        `json:"chat_session_id"`
+	Changes       []byte             `json:"changes"`
+	Verified      bool               `json:"verified"`
+	Mainline      string             `json:"mainline"`
+	Commits       []byte             `json:"commits"`
+	PrUrl         string             `json:"pr_url"`
+	AuthorType    string             `json:"author_type"`
+	AuthorID      pgtype.UUID        `json:"author_id"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+}
+
 type LarkBindingToken struct {
 	TokenHash      string             `json:"token_hash"`
 	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
@@ -1778,6 +1808,7 @@ type ProjectMemoryStatus struct {
 	ModifiedAt   pgtype.Timestamptz `json:"modified_at"`
 	ObservedAt   pgtype.Timestamptz `json:"observed_at"`
 	Error        pgtype.Text        `json:"error"`
+	MainlineRef  pgtype.Text        `json:"mainline_ref"`
 }
 
 type ProjectResource struct {
@@ -2318,6 +2349,7 @@ type WorkspaceLink struct {
 	AcceptedBy        pgtype.UUID        `json:"accepted_by"`
 	CreatedAt         pgtype.Timestamptz `json:"created_at"`
 	AcceptedAt        pgtype.Timestamptz `json:"accepted_at"`
+	Managed           bool               `json:"managed"`
 }
 
 type WorkspaceLinkAudit struct {

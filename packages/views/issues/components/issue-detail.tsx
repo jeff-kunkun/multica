@@ -18,7 +18,6 @@ import { useState, useEffect, useCallback, useMemo, useRef, Fragment, type React
 import { Virtuoso, type VirtuosoHandle } from "react-virtuoso";
 import { useDefaultLayout, usePanelRef } from "react-resizable-panels";
 import { AppLink, useBackOrReplace } from "../../navigation";
-import { IssueSourceChatLink } from "./issue-source-chat-link";
 import { IssueDuplicateBanner, IssueDuplicatesSection, isDuplicateIssue } from "./issue-duplicates";
 import {
   Archive,
@@ -34,6 +33,7 @@ import {
   PanelRight,
   Pin,
   PinOff,
+  MessagesSquare,
   Plus,
   SlidersHorizontal,
   Tag,
@@ -378,6 +378,13 @@ function formatActivity(
       return t(($) => $.activity.status_changed, {
         from: statusLabel(details.from ?? "?", t, resolveStatusLabel),
         to: statusLabel(details.to ?? "?", t, resolveStatusLabel),
+      });
+    case "linked_write":
+      // A managed workspace link (DENE-1663): the actor is the person whose
+      // run did it; the line names the workspace and agent it came through.
+      return t(($) => $.activity.linked_write, {
+        workspace: details.via_workspace ?? "?",
+        agent: details.agent_name ?? "?",
       });
     case "pr_auto_complete_changed":
       return (entry.details as { disabled?: unknown } | undefined)?.disabled === true
@@ -3441,9 +3448,6 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     // needs no run picker of its own.
     { key: "export", priority: 6, node: <IssueLogExportButton issueId={id} issueIdentifier={issue.identifier} /> },
     { key: "thread", priority: 7, node: <WorkThreadPanel kind="issue" id={id} /> },
-    ...(issue.source_chat_session_id
-      ? [{ key: "source-chat", priority: 5, node: <IssueSourceChatLink sessionId={issue.source_chat_session_id} /> }]
-      : []),
     { key: "wakeup", priority: 4, node: <IssueWakeupHeaderChip issueId={id} onOpen={openWakeups} /> },
     {
       key: "done",
@@ -3871,6 +3875,24 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
               })()}
             </AppLink>
           )}
+
+          {issue.source_chat && (issue.source_chat.accessible ? (
+            <AppLink
+              href={paths.chatSession(issue.source_chat.id)}
+              className="mt-2 flex max-w-full items-center gap-1.5 text-caption text-muted-foreground hover:text-foreground transition-colors group/chat"
+            >
+              <MessagesSquare className="h-3.5 w-3.5 shrink-0" />
+              <span className="font-medium shrink-0">{t(($) => $.detail.from_chat)}</span>
+              {issue.source_chat.title && (
+                <span className="truncate group-hover/chat:text-foreground">{issue.source_chat.title}</span>
+              )}
+            </AppLink>
+          ) : (
+            <div className="mt-2 flex items-center gap-1.5 text-caption text-muted-foreground">
+              <MessagesSquare className="h-3.5 w-3.5 shrink-0" />
+              <span>{t(($) => $.detail.from_chat_hidden)}</span>
+            </div>
+          ))}
 
           {isPeek && (
             <div className="mt-3">

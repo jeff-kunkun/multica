@@ -306,23 +306,71 @@ multica project memory check <project-id> --output json   # no --path
 
 ### Reporting a check (may open a sediment ticket)
 
-A new report is what can trigger a memory round. Reports come from the daemon
-(when it stats a project's local directory) or from the CLI with `--path`:
+`locations` is always the project's **local directory** as the daemon last saw
+it (`source: "local_directory"`). Only that directory counts as an
+observation. The daemon reports it on every refresh; the CLI counts only when
+`--path` is that same bound directory:
 
 ```bash
 multica project memory check <project-id> --path <project-root> --output json
 ```
 
-When the reported locations include a missing one, the server calls
+`--path` pointing anywhere else — your own task worktree, typically — is a
+self-check: the response echoes it under `worktree_check` and leaves the
+local-directory observation and any sediment ticket untouched. A complete
+`worktree_check` is not proof the round is done; the round is done when the
+local directory has the files (merged and synced).
+
+A location missing locally but already on the remote mainline carries
+`mainline_ref` (for example `origin/dev`): the local directory is behind, so
+sync it instead of writing the file again. The ticket description says so.
+
+When the local directory lacks a location, the server calls
 `EnsureMemoryRound`: an open sediment ticket for the project gets a reason
 comment, otherwise a new one is created and assigned to the workspace sediment
 agent (`settings.memory.sediment_agent`). With no seat configured, no ticket is
-created and the response carries `sediment_error` explaining why.
+created and the response carries `sediment_error` explaining why. After a
+round closes, the same missing set (or a subset) does not open another one for
+7 days; a newly missing location does.
 
 Other triggers of the same round (server-side, no command needed): a stage
 advancing, a parent's sub-issues all reaching a terminal status, and the
 project being set to `completed`. Closing an ordinary issue does not trigger
-one.
+one. A milestone round's reason carries a digest of its source tickets: each
+one's conclusion, what its close audit wrote (with files), and the head of its
+close evidence; a project-completed round lists the recent sediments.
+
+### Sediment rides the delivery
+
+The executor who finishes the work writes the memory, not a later ticket.
+A task does it through its close audit (see `close-protocol.md`: the named
+files must be in the delivery). A chat that changed code or settled something
+worth keeping does it at the end, then records it:
+
+```bash
+multica chat sediment --knowledge context=<summary> [--knowledge agents=<summary>]
+multica chat sediment --knowledge adr=<summary> --pr <merged-pr-url>
+multica chat sediment --history --output json
+```
+
+- Commit the edits on the chat's branch first.
+- The main line is the project's, never the branch the project directory is
+  on: `git config multica.mainline <branch>`, else the remote's default
+  branch, else the only one of main/master. Undecidable refuses; set the
+  config.
+- A repository with a remote counts only what the remote's main line holds:
+  merge a PR into this repository's main line and pass `--pr` (put
+  `Chat <first 8 of the session id>` in the PR title), or push to it. A PR
+  into another repository or branch, or an unpushed commit, records nothing.
+- A repository that only lives on this machine is merged into its main line
+  as a merge commit named `Chat <id>: 沉淀 …`. A dirty project directory or a
+  conflict refuses and changes nothing; work already on the main line (a
+  shared directory) is recorded as is.
+- Each `--knowledge` slot must be written by a delivered file, or nothing is
+  recorded. Plain Q&A records nothing.
+
+`multica project memory status` returns `recent_sediments`: which ticket or
+chat wrote which files, onto which line, verified or not.
 
 ### Configuring the sediment agent seat
 

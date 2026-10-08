@@ -26,7 +26,11 @@ var workspaceLinkCmd = &cobra.Command{
 		"Sharing a project shares its context too: description, local directories, repositories\n" +
 		"and project memory. A chat can attach it as a read-only reference.\n\n" +
 		"Agents use `list` to find the active links of their workspace and `view` to read one;\n" +
-		"`list --pending` shows the offers waiting for this workspace's owner or admin to accept.",
+		"`list --pending` shows the offers waiting for this workspace's owner or admin to accept.\n\n" +
+		"Managed: when the source owner turns it on (`update <link-id> --managed on`), an\n" +
+		"agent of the viewer may work on the source's issues and autopilots on behalf of the\n" +
+		"person who started its run, with that person's rights there:\n" +
+		"`multica issue ... --linked <source-slug>` and `multica autopilot ... --linked <source-slug>`.",
 }
 
 var workspaceLinkListCmd = &cobra.Command{
@@ -51,8 +55,8 @@ var workspaceLinkCreateCmd = &cobra.Command{
 }
 
 var workspaceLinkUpdateCmd = &cobra.Command{
-	Use:   "update <link-id> [--project <project>...] [--accept]",
-	Short: "Change the projects a link shares (source owner) or accept it (viewer owner/admin)",
+	Use:   "update <link-id> [--project <project>...] [--accept] [--managed on|off]",
+	Short: "Change the projects a link shares (source owner), accept it (viewer owner/admin), or turn managed on/off (source owner)",
 	Args:  cobra.ExactArgs(1),
 	RunE:  runWorkspaceLinkUpdate,
 }
@@ -82,6 +86,7 @@ func init() {
 	workspaceLinkListCmd.Flags().Bool("pending", false, "Only offers waiting for this workspace to accept (owner/admin, or their agents)")
 	workspaceLinkUpdateCmd.Flags().StringArray("project", nil, "Replace the shared projects with these; repeatable")
 	workspaceLinkUpdateCmd.Flags().Bool("accept", false, "Accept a pending link offered to this workspace")
+	workspaceLinkUpdateCmd.Flags().String("managed", "", "on: the viewer's agents may work on this workspace's issues and autopilots for the person who started their run; off: read-only again (source owner, or owner of both from the viewer side)")
 	workspaceLinkViewCmd.Flags().String("project-id", "", "Only this shared project (an id from the view's projects)")
 	workspaceLinkViewCmd.Flags().String("cursor", "", "next_cursor from the previous page")
 	workspaceLinkViewCmd.Flags().Int("limit", 0, "Tasks per page (max 100)")
@@ -114,10 +119,18 @@ func runWorkspaceLinkList(cmd *cobra.Command, _ []string) error {
 			other = "target"
 		}
 		peer, _ := l[other].(map[string]any)
-		rows = append(rows, []string{strVal(l, "id"), strVal(l, "side"), strVal(l, "status"), strVal(peer, "name") + " (" + strVal(peer, "slug") + ")"})
+		rows = append(rows, []string{strVal(l, "id"), strVal(l, "side"), strVal(l, "status"), managedLabel(l), strVal(peer, "name") + " (" + strVal(peer, "slug") + ")"})
 	}
-	cli.PrintTable(os.Stdout, []string{"ID", "SIDE", "STATUS", "OTHER WORKSPACE"}, rows)
+	cli.PrintTable(os.Stdout, []string{"ID", "SIDE", "STATUS", "ACCESS", "OTHER WORKSPACE"}, rows)
 	return nil
+}
+
+// managedLabel names what the viewer's agents may do through the link.
+func managedLabel(link map[string]any) string {
+	if on, _ := link["managed"].(bool); on {
+		return "managed"
+	}
+	return "read-only"
 }
 
 // waitingLinks keeps the offers this workspace has not answered yet.
@@ -149,7 +162,7 @@ func printLink(cmd *cobra.Command, link map[string]any) error {
 	if out, _ := cmd.Flags().GetString("output"); out == "json" {
 		return cli.PrintJSON(os.Stdout, link)
 	}
-	fmt.Fprintf(os.Stdout, "%s  %s  %s\n", strVal(link, "id"), strVal(link, "side"), strVal(link, "status"))
+	fmt.Fprintf(os.Stdout, "%s  %s  %s  %s\n", strVal(link, "id"), strVal(link, "side"), strVal(link, "status"), managedLabel(link))
 	return nil
 }
 
@@ -250,8 +263,18 @@ func runWorkspaceLinkCreate(cmd *cobra.Command, _ []string) error {
 func runWorkspaceLinkUpdate(cmd *cobra.Command, args []string) error {
 	refs, _ := cmd.Flags().GetStringArray("project")
 	accept, _ := cmd.Flags().GetBool("accept")
-	if (len(refs) > 0) == accept {
-		return fmt.Errorf("pass either --project (source side) or --accept (viewer side)")
+	managed, _ := cmd.Flags().GetString("managed")
+	given := 0
+	for _, set := range []bool{len(refs) > 0, accept, managed != ""} {
+		if set {
+			given++
+		}
+	}
+	if given != 1 {
+		return fmt.Errorf("pass exactly one of --project (source side), --accept (viewer side) or --managed on|off")
+	}
+	if managed != "" && managed != "on" && managed != "off" {
+		return fmt.Errorf("--managed takes on or off")
 	}
 	client, err := newAPIClient(cmd)
 	if err != nil {
@@ -266,6 +289,9 @@ func runWorkspaceLinkUpdate(cmd *cobra.Command, args []string) error {
 			return err
 		}
 		body["project_ids"] = ids
+	}
+	if managed != "" {
+		body["managed"] = managed == "on"
 	}
 	var link map[string]any
 	if err := client.PatchJSON(ctx, "/api/workspace-links/"+url.PathEscape(args[0]), body, &link); err != nil {

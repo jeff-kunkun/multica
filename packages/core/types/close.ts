@@ -2,6 +2,8 @@
 export interface KnowledgeAuditChange {
   location: string;
   summary: string;
+  /** The delivered files that wrote the slot (DENE-1661). */
+  files?: string[];
 }
 
 // KnowledgeAudit is either an explicit "nothing qualified" declaration or one
@@ -10,6 +12,8 @@ export interface KnowledgeAuditChange {
 export interface KnowledgeAudit {
   none?: boolean;
   changes?: KnowledgeAuditChange[];
+  /** True when git could not say what the close delivered. */
+  unverified?: boolean;
 }
 
 // Outcome is the status the close writes. done / in_review / blocked /

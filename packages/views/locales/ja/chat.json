@@ -412,5 +412,18 @@
     "reason_runtime_changed": "前回のセッションは別のマシンにあります",
     "reason_session_lost": "前のセッションを復元できませんでした",
     "reason_fresh_requested": "新規セッションを指定"
+  },
+  "tickets": {
+    "heading_other": "{{count}} 件の課題を作成",
+    "to": "担当 {{name}}",
+    "routing": "ルーティングが担当を選びます",
+    "actions": "{{id}} の操作",
+    "assign_me": "自分に割り当て",
+    "assign_agent": "エージェントに任せる",
+    "withdraw": "取り下げ",
+    "assigned_me": "{{id}} を自分に割り当てました",
+    "assigned_agent": "{{id}} をルーティングに戻しました",
+    "withdrawn": "{{id}} を取り下げました",
+    "failed": "{{id}} を更新できませんでした"
   }
 }

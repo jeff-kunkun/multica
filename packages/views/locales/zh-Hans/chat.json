@@ -412,5 +412,18 @@
     "reason_runtime_changed": "上次的会话在另一台机器上",
     "reason_session_lost": "会话没能恢复",
     "reason_fresh_requested": "按要求新开"
+  },
+  "tickets": {
+    "heading_other": "开了 {{count}} 张单",
+    "to": "给 {{name}}",
+    "routing": "等路由派人",
+    "actions": "{{id}} 的操作",
+    "assign_me": "改给我",
+    "assign_agent": "改给智能体",
+    "withdraw": "撤回",
+    "assigned_me": "{{id}} 已改给你",
+    "assigned_agent": "{{id}} 已交回路由派人",
+    "withdrawn": "已撤回 {{id}}",
+    "failed": "{{id}} 没改成"
   }
 }
