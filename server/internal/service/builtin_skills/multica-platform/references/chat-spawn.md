@@ -24,7 +24,7 @@ need its answer.
 | A conversation with another agent: ask, explore, compare options | `multica chat open` |
 | Discussion inside a task | an issue comment; split parallel exploration into sub-issues |
 | Turn the current chat into tracked work | `multica chat to-goal` |
-| See the issues this chat opened, and their status | `multica chat tickets [--session <id>] --output json` |
+| See the issues this chat opened, their status, latest move and phase (waiting_you / in_progress / done) | `multica chat tickets [--session <id>] --output json` |
 
 **Chat aligns, a ticket executes.** In chat, only make an aligned small fix: at
 most 3 files and 150 lines, no migration, not a server + UI + CLI change.

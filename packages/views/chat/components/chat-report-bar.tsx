@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useRef, useState, type TouchEvent } from "react";
-import { useQueries } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { ChevronUp } from "lucide-react";
 import { cn } from "@multica/ui/lib/utils";
 import { useIsMobile } from "@multica/ui/hooks/use-mobile";
@@ -10,35 +10,34 @@ import { Popover, PopoverContent, PopoverTrigger } from "@multica/ui/components/
 import { Sheet, SheetContent, SheetTitle } from "@multica/ui/components/ui/sheet";
 import { defaultStorage } from "@multica/core/platform";
 import { useWorkspacePaths } from "@multica/core/paths";
-import { projectReportOptions } from "@multica/core/projects";
+import { chatTicketsOptions } from "@multica/core/chat/queries";
 import { useIssueStatuses } from "@multica/core/issue-statuses";
-import type { ProjectReport, ProjectReportItem } from "@multica/core/types";
+import type { ChatTicket } from "@multica/core/types";
 import { AppLink } from "../../navigation";
 import { useT, useTimeAgo } from "../../i18n";
 import { CHAT_COLUMN, CHAT_GUTTER } from "./chat-column";
 
-// DENE-1667: the chat's progress bar. It shows only when the chat's projects
-// have news since the person last heard them; the window lists what moved, and
-// "听汇报" asks the agent to tell it (the agent marks it heard server-side).
+// DENE-1667: the chat's progress bar over the tickets this chat opened
+// (DENE-1665's chat tickets — the same list as the in-thread ticket cards).
+// What moved since the person last looked floats to the top as 「刚变」;
+// "听汇报" asks the agent to tell the project's news (heard server-side).
 
 const SWIPE_CLOSE_PX = 80;
+// With no earlier look on this device, a move within the last day is fresh.
+const FIRST_LOOK_WINDOW_MS = 24 * 60 * 60 * 1000;
+const PHASE_RANK = { waiting_you: 0, in_progress: 1, done: 2 } as const;
 
-// When the person last opened the window, per person + project: rows that
-// moved after it are marked 「刚变」 and float to the top.
-function openedKey(userId: string, projectId: string) {
-  return `multica:chat-report-opened:${userId}:${projectId}`;
+// When the person last opened this chat's window, per person + chat.
+function openedKey(userId: string, sessionId: string) {
+  return `multica:chat-report-opened:${userId}:${sessionId}`;
 }
 
-function lastOpenedAt(userId: string, projectIds: string[]): number {
-  let latest = 0;
-  for (const id of projectIds) {
-    const at = Date.parse(defaultStorage.getItem(openedKey(userId, id)) ?? "");
-    if (!Number.isNaN(at)) latest = Math.max(latest, at);
-  }
-  return latest;
+function lastOpenedAt(userId: string, sessionId: string): number {
+  const at = Date.parse(defaultStorage.getItem(openedKey(userId, sessionId)) ?? "");
+  return Number.isNaN(at) ? Date.now() - FIRST_LOOK_WINDOW_MS : at;
 }
 
-interface ReportRow extends ProjectReportItem {
+interface ReportRow extends ChatTicket {
   fresh: boolean;
 }
 
@@ -46,56 +45,57 @@ export function ChatReportBar({
   wsId,
   userId,
   sessionId,
-  projectIds,
+  projectTitle,
   disabled,
   onHear,
 }: {
   wsId: string;
   userId: string;
-  sessionId: string | null;
-  projectIds: string[];
+  sessionId: string;
+  /** The chat's projects, named; empty hides 听汇报 (a report is per project). */
+  projectTitle: string;
   disabled: boolean;
   onHear: (prompt: string) => void;
 }) {
   const { t } = useT("chat");
   const isMobile = useIsMobile();
   const [open, setOpen] = useState(false);
-  const [seenAt, setSeenAt] = useState(() => lastOpenedAt(userId, projectIds));
+  const [seenAt, setSeenAt] = useState(() => lastOpenedAt(userId, sessionId));
 
-  const results = useQueries({
-    queries: projectIds.map((id) => ({ ...projectReportOptions(wsId, id), enabled: !!wsId })),
-  });
-  const reports = results
-    .map((r) => r.data)
-    .filter((r): r is ProjectReport => !!r && r.items.length > 0);
+  const { data } = useQuery({ ...chatTicketsOptions(wsId, sessionId), enabled: !!wsId && !!sessionId });
 
   const rows = useMemo<ReportRow[]>(() => {
-    const all = reports.flatMap((r) =>
-      r.items.map((item) => ({ ...item, fresh: Date.parse(item.changed_at) > seenAt })),
-    );
-    // Rows newer than the last look come first; the server's order otherwise.
-    return [...all.filter((r) => r.fresh), ...all.filter((r) => !r.fresh)];
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [reports.map((r) => r.until).join(), seenAt]);
+    const all = (data?.tickets ?? []).map((ticket) => ({
+      ...ticket,
+      fresh: !!ticket.from_status && Date.parse(ticket.changed_at) > seenAt,
+    }));
+    // Fresh moves first, newest first; the rest by who they wait on.
+    const fresh = all.filter((r) => r.fresh).sort((a, b) => Date.parse(b.changed_at) - Date.parse(a.changed_at));
+    const rest = all
+      .filter((r) => !r.fresh)
+      .sort((a, b) => PHASE_RANK[a.phase] - PHASE_RANK[b.phase] || Date.parse(b.changed_at) - Date.parse(a.changed_at));
+    return [...fresh, ...rest];
+  }, [data, seenAt]);
 
   if (rows.length === 0) return null;
 
   const counts = { waiting_you: 0, in_progress: 0, done: 0 };
   for (const row of rows) counts[row.phase] += 1;
-  const hasFresh = rows.some((r) => r.fresh);
-  const title = reports.map((r) => r.project_title).join("、");
-  const hear = () => {
-    setOpen(false);
-    onHear(t(($) => $.report.hear_prompt, { project: title }));
-  };
+  const freshCount = rows.filter((r) => r.fresh).length;
+  const hear = projectTitle
+    ? () => {
+        setOpen(false);
+        onHear(t(($) => $.report.hear_prompt, { project: projectTitle }));
+      }
+    : null;
 
   const setWindowOpen = (next: boolean) => {
     setOpen(next);
     if (!next) {
-      // Closing the window is the "look": record it so the next opening marks
-      // only what moved after it.
+      // Closing the window is the "look": the next opening marks only what
+      // moved after it.
       const now = new Date().toISOString();
-      for (const id of projectIds) defaultStorage.setItem(openedKey(userId, id), now);
+      defaultStorage.setItem(openedKey(userId, sessionId), now);
       setSeenAt(Date.parse(now));
     }
   };
@@ -104,10 +104,12 @@ export function ChatReportBar({
     <span className="flex min-w-0 items-center gap-1.5">
       <span
         aria-hidden
-        className={cn("size-1.5 shrink-0 rounded-full", hasFresh ? "bg-brand" : "bg-muted-foreground/40")}
+        className={cn("size-1.5 shrink-0 rounded-full", freshCount > 0 ? "bg-brand" : "bg-muted-foreground/40")}
       />
       <span className="truncate">
-        {t(($) => $.report.bar, { count: rows.length })}
+        {freshCount > 0
+          ? t(($) => $.report.bar_fresh, { count: rows.length, fresh: freshCount })
+          : t(($) => $.report.bar, { count: rows.length })}
         <span className="text-muted-foreground">
           {counts.waiting_you > 0 && ` · ${t(($) => $.report.waiting_you, { count: counts.waiting_you })}`}
           {counts.in_progress > 0 && ` · ${t(($) => $.report.in_progress, { count: counts.in_progress })}`}
@@ -120,23 +122,14 @@ export function ChatReportBar({
   const triggerClass =
     "flex min-w-0 flex-1 items-center rounded-md py-1 text-left text-caption hover:bg-accent/60 min-h-11 md:min-h-0";
 
-  const panel = (
-    <ReportPanel
-      rows={rows}
-      sessionId={sessionId}
-      wsId={wsId}
-      lastHeardAt={reports[0]?.last_heard_at ?? null}
-      hearDisabled={disabled}
-      onHear={hear}
-    />
-  );
+  const panel = <ReportPanel rows={rows} wsId={wsId} hearDisabled={disabled} onHear={hear} />;
 
   return (
     <div className={cn(CHAT_GUTTER, "pb-1")} data-slot="chat-report-bar">
       <div className={cn(CHAT_COLUMN, "flex items-center gap-2")}>
         {isMobile ? (
           <>
-            <button type="button" className={triggerClass} onClick={() => setWindowOpen(true)}>
+            <button type="button" className={triggerClass} onClick={() => setOpen(true)}>
               {summary}
             </button>
             <MobileDrawer open={open} onOpenChange={setWindowOpen} title={t(($) => $.report.title)}>
@@ -147,13 +140,16 @@ export function ChatReportBar({
           <Popover open={open} onOpenChange={setWindowOpen}>
             <PopoverTrigger className={triggerClass}>{summary}</PopoverTrigger>
             <PopoverContent side="top" align="start" className="w-96 gap-0 p-0">
+              <p className="border-b px-4 py-2 text-caption font-medium">{t(($) => $.report.title)}</p>
               {panel}
             </PopoverContent>
           </Popover>
         )}
-        <Button size="sm" variant="ghost" disabled={disabled} onClick={hear} className="shrink-0">
-          {t(($) => $.report.hear)}
-        </Button>
+        {hear && (
+          <Button size="sm" variant="ghost" disabled={disabled} onClick={hear} className="shrink-0">
+            {t(($) => $.report.hear)}
+          </Button>
+        )}
       </div>
     </div>
   );
@@ -210,18 +206,14 @@ function MobileDrawer({
 
 function ReportPanel({
   rows,
-  sessionId,
   wsId,
-  lastHeardAt,
   hearDisabled,
   onHear,
 }: {
   rows: ReportRow[];
-  sessionId: string | null;
   wsId: string;
-  lastHeardAt: string | null;
   hearDisabled: boolean;
-  onHear: () => void;
+  onHear: (() => void) | null;
 }) {
   const { t } = useT("chat");
   const timeAgo = useTimeAgo();
@@ -230,25 +222,15 @@ function ReportPanel({
 
   return (
     <div className="flex min-h-0 flex-col">
-      <p className="border-b px-4 py-2 text-caption text-muted-foreground">
-        {lastHeardAt
-          ? t(($) => $.report.since_heard, { time: timeAgo(lastHeardAt) })
-          : t(($) => $.report.since_week)}
-      </p>
       <ul className="min-h-0 flex-1 overflow-y-auto py-1 md:max-h-80">
         {rows.map((row) => {
-          const move = row.opened && !row.from_status
-            ? t(($) => $.report.opened, { to: statuses.labelOf(row.status) })
-            : `${statuses.labelOf(row.from_status ?? "")} → ${statuses.labelOf(row.status)}`;
-          const source = row.source_chat && row.source_chat.id !== sessionId
-            ? row.source_chat.accessible && row.source_chat.title
-              ? t(($) => $.report.from_chat, { title: row.source_chat.title })
-              : t(($) => $.report.from_other_chat)
-            : null;
+          const where = row.from_status
+            ? `${statuses.labelOf(row.from_status)} → ${statuses.labelOf(row.status)}`
+            : t(($) => $.report.opened, { to: statuses.labelOf(row.status) });
           return (
-            <li key={row.issue_id}>
+            <li key={row.id}>
               <AppLink
-                href={wsPaths.issueDetail(row.issue_id)}
+                href={wsPaths.issueDetail(row.id)}
                 className="flex min-h-11 flex-col justify-center gap-0.5 px-4 py-1.5 hover:bg-accent/60"
               >
                 <span className="flex min-w-0 items-baseline gap-2 text-body">
@@ -258,20 +240,21 @@ function ReportPanel({
                 <span className="line-clamp-2 text-caption text-muted-foreground">
                   {row.fresh && <span className="text-foreground">{t(($) => $.report.just_changed)}</span>}
                   {row.fresh && "："}
-                  {move} · {timeAgo(row.changed_at)}
+                  {where} · {timeAgo(row.changed_at)}
                   {row.needs_you && ` · ${t(($) => $.report.needs_you)}`}
-                  {source && ` · ${source}`}
                 </span>
               </AppLink>
             </li>
           );
         })}
       </ul>
-      <div className="flex justify-end border-t px-3 py-2">
-        <Button size="sm" disabled={hearDisabled} onClick={onHear}>
-          {t(($) => $.report.hear)}
-        </Button>
-      </div>
+      {onHear && (
+        <div className="flex justify-end border-t px-3 py-2">
+          <Button size="sm" disabled={hearDisabled} onClick={onHear}>
+            {t(($) => $.report.hear)}
+          </Button>
+        </div>
+      )}
     </div>
   );
 }

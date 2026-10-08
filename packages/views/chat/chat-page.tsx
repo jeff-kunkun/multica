@@ -854,13 +854,16 @@ export function ChatPage() {
         onClear={c.handleClearQueuedTasks}
       />
 
-      {c.user?.id && c.activeProjectIds.length > 0 && !c.isChatViewOnly && (
+      {c.user?.id && c.activeSessionId && !c.isChatViewOnly && (
         <ChatReportBar
-          key={`${c.activeSessionId ?? "new"}:${c.activeProjectIds.join()}`}
+          key={c.activeSessionId}
           wsId={c.wsId}
           userId={c.user.id}
           sessionId={c.activeSessionId}
-          projectIds={c.activeProjectIds}
+          projectTitle={(c.projects ?? [])
+            .filter((p) => c.activeProjectIds.includes(p.id))
+            .map((p) => p.title)
+            .join("、")}
           disabled={
             c.isSessionArchived ||
             c.isAgentArchived ||

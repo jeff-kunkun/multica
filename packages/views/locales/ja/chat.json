@@ -413,20 +413,17 @@
     "reason_fresh_requested": "新規セッションを指定"
   },
   "report": {
-    "bar": "新しい進捗 {{count}} 件",
+    "bar_other": "このチャットのチケット {{count}} 件",
+    "bar_fresh_other": "このチャットのチケット {{count}} 件 · 変更 {{fresh}}",
     "waiting_you": "あなた待ち {{count}}",
     "in_progress": "進行中 {{count}}",
     "done": "完了 {{count}}",
     "hear": "報告を聞く",
     "hear_prompt": "報告：「{{project}}」の前回以降の進捗を教えて",
-    "title": "新しい進捗",
-    "since_heard": "{{time}}に聞いた後",
-    "since_week": "直近 7 日間、まだ聞いていません",
+    "title": "このチャットで作ったチケット",
     "just_changed": "今変わった",
     "opened": "新規 · {{to}}",
-    "needs_you": "要対応",
-    "from_chat": "「{{title}}」から",
-    "from_other_chat": "別のチャットから"
+    "needs_you": "要対応"
   },
   "tickets": {
     "heading_other": "{{count}} 件の課題を作成",

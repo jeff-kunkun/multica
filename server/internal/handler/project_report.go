@@ -90,6 +90,20 @@ const (
 	projectReportPhaseWaitingYou = "waiting_you"
 )
 
+// projectReportPhaseOf buckets an issue for the person: finished is done, one
+// assigned to them or with their unread call on it waits on them, the rest is
+// in progress. The report and the chat's progress bar share it.
+func projectReportPhaseOf(terminal, onPerson bool) (phase string, needsYou bool) {
+	switch {
+	case terminal:
+		return projectReportPhaseDone, false
+	case onPerson:
+		return projectReportPhaseWaitingYou, true
+	default:
+		return projectReportPhaseInProgress, false
+	}
+}
+
 // GetProjectReport answers what is new in a project since the caller last
 // heard it, without moving the cursor.
 func (h *Handler) GetProjectReport(w http.ResponseWriter, r *http.Request) {
@@ -275,15 +289,7 @@ func (h *Handler) buildProjectReport(ctx context.Context, wsUUID pgtype.UUID, pr
 			item.SourceChat = chats(row.SourceChatID)
 		}
 		assignedToPerson := row.AssigneeType.String == "member" && uuidToString(row.AssigneeID) == personID
-		switch {
-		case isTerminal[row.Status]:
-			item.Phase = projectReportPhaseDone
-		case row.HasOpenCall || assignedToPerson:
-			item.Phase = projectReportPhaseWaitingYou
-			item.NeedsYou = true
-		default:
-			item.Phase = projectReportPhaseInProgress
-		}
+		item.Phase, item.NeedsYou = projectReportPhaseOf(isTerminal[row.Status], row.HasOpenCall || assignedToPerson)
 		report.Items = append(report.Items, item)
 	}
 

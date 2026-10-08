@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestChatTicketDescriptionProblem(t *testing.T) {
@@ -40,10 +41,10 @@ func TestChatTicketDescriptionProblem(t *testing.T) {
 func TestChatTicketGoal(t *testing.T) {
 	cases := map[string]string{
 		"## 目标\n\n- 做开单卡\n## 验收\n- x": "做开单卡",
-		"目标：聊天里能看到开了哪些单\n验收：x":       "聊天里能看到开了哪些单",
-		"**目标**: **让单子显示来源**":          "让单子显示来源",
-		"## 目标\n## 验收\n- x":             "",
-		"没有目标段":                          "",
+		"目标：聊天里能看到开了哪些单\n验收：x":        "聊天里能看到开了哪些单",
+		"**目标**: **让单子显示来源**":         "让单子显示来源",
+		"## 目标\n## 验收\n- x":           "",
+		"没有目标段":                       "",
 	}
 	for desc, want := range cases {
 		if got := chatTicketGoal(desc); got != want {
@@ -137,6 +138,26 @@ func TestChatTickets_LinkBothWays(t *testing.T) {
 	}
 	if got := tickets.Tickets[0].Goal; got != "聊天能看到开了哪些单" {
 		t.Fatalf("ticket goal = %q", got)
+	}
+	if tk := tickets.Tickets[0]; tk.Phase != projectReportPhaseInProgress || tk.FromStatus != "" || tk.ChangedAt != tk.CreatedAt {
+		t.Fatalf("fresh ticket progress = %+v, want in progress since creation", tk)
+	}
+
+	// The progress bar (DENE-1667): a move hands it to the person — the latest
+	// move and their bucket come with the ticket.
+	if _, err := testPool.Exec(ctx, `UPDATE issue SET assignee_type = 'member', assignee_id = $2 WHERE id = $1`, created.ID, testUserID); err != nil {
+		t.Fatalf("assign to person: %v", err)
+	}
+	// A minute on: changed_at is second-precise, like created_at.
+	moveProjectReportTicket(t, created.ID, "todo", "in_review", time.Now().UTC().Add(time.Minute))
+	w = httptest.NewRecorder()
+	testHandler.ListChatSessionTickets(w, withChatTestWorkspaceCtx(t, withURLParam(newRequest("GET", "/api/chat/sessions/"+sessionID+"/tickets", nil), "sessionId", sessionID)))
+	tickets = ChatTicketsResponse{}
+	if err := json.NewDecoder(w.Body).Decode(&tickets); err != nil {
+		t.Fatalf("decode tickets: %v", err)
+	}
+	if tk := tickets.Tickets[0]; tk.Phase != projectReportPhaseWaitingYou || !tk.NeedsYou || tk.FromStatus != "todo" || tk.ChangedAt == tk.CreatedAt {
+		t.Fatalf("moved ticket progress = %+v, want waiting on the person, from todo", tk)
 	}
 
 	// The chat run reads its own chat's tickets through its task token.

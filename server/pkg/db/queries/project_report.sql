@@ -54,12 +54,13 @@ ORDER BY created_at ASC;
 
 -- name: ListProjectReportIssues :many
 -- The report's issues with what the report says about each: the chat that
--- opened it (an agent's `issue create` inside a chat run) and whether an
--- unread call to the person hangs on it.
+-- opened it (DENE-1665's origin_chat_session_id, else the chat run behind an
+-- agent's `issue create` from before that column) and whether an unread call
+-- to the person hangs on it.
 SELECT i.id, i.number, i.title, i.status, i.priority, i.description,
        i.assignee_type, i.assignee_id, i.visibility, i.creator_type, i.creator_id,
        i.project_id, i.updated_at,
-       t.chat_session_id AS source_chat_id,
+       COALESCE(i.origin_chat_session_id, t.chat_session_id)::uuid AS source_chat_id,
        EXISTS (
            SELECT 1 FROM inbox_item n
            WHERE n.workspace_id = i.workspace_id
@@ -97,3 +98,30 @@ WHERE i.workspace_id = sqlc.arg('workspace_id')::uuid
              OR (s.comment_id IS NOT NULL AND i.details->>'comment_id' = s.comment_id::text))
   )
 RETURNING i.id;
+
+-- name: ListChatTicketProgress :many
+-- The chat's progress bar (DENE-1667): for each ticket the chat opened, its
+-- latest status move and whether an unread call to the person hangs on it —
+-- the same call predicate as ListProjectReportIssues.
+SELECT i.id,
+       COALESCE(m.from_status, '')::text AS from_status,
+       m.changed_at::timestamptz AS changed_at,
+       EXISTS (
+           SELECT 1 FROM inbox_item n
+           WHERE n.workspace_id = i.workspace_id
+             AND n.recipient_type = 'member'
+             AND n.recipient_id = sqlc.arg('user_id')::uuid
+             AND n.issue_id = i.id
+             AND n.severity = 'action_required'
+             AND n.read = false AND n.archived = false
+       )::boolean AS has_open_call
+FROM issue i
+LEFT JOIN LATERAL (
+    SELECT a.details->>'from' AS from_status, a.created_at AS changed_at
+    FROM activity_log a
+    WHERE a.issue_id = i.id AND a.action = 'status_changed'
+    ORDER BY a.created_at DESC, a.id DESC
+    LIMIT 1
+) m ON true
+WHERE i.workspace_id = sqlc.arg('workspace_id')::uuid
+  AND i.id = ANY(sqlc.arg('issue_ids')::uuid[]);
