@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -268,26 +269,41 @@ func TestProjectReportCarriesLatestSummary(t *testing.T) {
 		}
 	}
 
+	handoff := func(issueID, summary string) {
+		next := createHandlerTestAgent(t, "report next "+time.Now().Format(time.RFC3339Nano), []byte("[]"))
+		body := map[string]any{"to": agentNameDirect(t, next)}
+		if summary != "" {
+			body["summary"] = summary
+		}
+		req := withURLParam(newRequest(http.MethodPost, "/api/issues/"+issueID+"/handoff", body), "id", issueID)
+		rec := httptest.NewRecorder()
+		testHandler.HandoffIssue(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("handoff status = %d: %s", rec.Code, rec.Body.String())
+		}
+	}
+
+	// Longer than the progress line keeps, with inner spacing: the report
+	// still says it word for word.
+	long := strings.Repeat("结", 500) + "  论"
 	withSummary := inProject("report summary")
-	closeIt(withSummary, map[string]any{"summary": "服务端做完了，剩 CLI 说明", "evidence": "证据：测试全绿"})
+	closeIt(withSummary, map[string]any{"summary": long, "evidence": "证据：测试全绿"})
 	noSummary := inProject("report no summary")
 	closeIt(noSummary, map[string]any{"evidence": "只有证据没有结论"})
 	handedOff := inProject("report handoff")
 	closeIt(handedOff, map[string]any{"summary": "旧结论", "evidence": "证据"})
-	// The handoff lands strictly after close.at (second precision).
-	time.Sleep(1100 * time.Millisecond)
-	next := createHandlerTestAgent(t, "report next "+time.Now().Format(time.RFC3339Nano), []byte("[]"))
-	req := withURLParam(newRequest(http.MethodPost, "/api/issues/"+handedOff+"/handoff", map[string]any{
-		"to": agentNameDirect(t, next), "summary": "卡在前端，要验收席看截图",
-	}), "id", handedOff)
-	rec := httptest.NewRecorder()
-	testHandler.HandoffIssue(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("handoff status = %d: %s", rec.Code, rec.Body.String())
-	}
+	handoff(handedOff, "卡在前端，要验收席看截图")
+	// The latest handoff said nothing: no older line stands in, whether the
+	// one before it was a close or a handoff. Same-second on purpose.
+	closeThenBare := inProject("report close then bare handoff")
+	closeIt(closeThenBare, map[string]any{"summary": "旧结论", "evidence": "证据"})
+	handoff(closeThenBare, "")
+	handoffThenBare := inProject("report handoff then bare handoff")
+	handoff(handoffThenBare, "上一棒结论")
+	handoff(handoffThenBare, "")
 
 	items := reportItems(callProjectReport(t, f.projectID, "", false))
-	if got := items[withSummary].LatestSummary; got != "服务端做完了，剩 CLI 说明" {
+	if got := items[withSummary].LatestSummary; got != long {
 		t.Fatalf("closed with summary: latest_summary = %q", got)
 	}
 	if got, ok := items[noSummary]; !ok || got.LatestSummary != "" {
@@ -295,5 +311,10 @@ func TestProjectReportCarriesLatestSummary(t *testing.T) {
 	}
 	if got := items[handedOff].LatestSummary; got != "卡在前端，要验收席看截图" {
 		t.Fatalf("handoff after close: latest_summary = %q", got)
+	}
+	for name, id := range map[string]string{"close → bare handoff": closeThenBare, "handoff → bare handoff": handoffThenBare} {
+		if got, ok := items[id]; !ok || got.LatestSummary != "" {
+			t.Fatalf("%s: latest_summary = %q (present %v), want none", name, got.LatestSummary, ok)
+		}
 	}
 }

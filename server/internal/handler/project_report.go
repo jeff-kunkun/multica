@@ -473,12 +473,13 @@ func projectReportGist(description string) string {
 	return pick
 }
 
-// projectReportSummary is an issue's latest conclusion line. The close
-// summary is read only when a close is recorded and only when its progress
-// line belongs to that close — the evidence never stands in for it.
+// projectReportSummary is an issue's latest conclusion line, word for word
+// from statecard.KeyLatestSummary. Only issues closed before that key existed
+// read the close's progress line, and only when it belongs to that close —
+// the evidence never stands in for it.
 func (h *Handler) projectReportSummary(ctx context.Context, wsUUID, issueID pgtype.UUID, meta map[string]string) string {
 	var closeSummary string
-	if closeprotocol.Complete(meta) {
+	if _, stored := meta[statecard.KeyLatestSummary]; !stored && closeprotocol.Complete(meta) {
 		row, err := h.Queries.GetLatestIssueProgressBySource(ctx, db.GetLatestIssueProgressBySourceParams{
 			IssueID: issueID, WorkspaceID: wsUUID, Source: progress.SourceClose,
 		})

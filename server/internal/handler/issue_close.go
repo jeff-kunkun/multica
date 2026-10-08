@@ -399,6 +399,11 @@ func (h *Handler) CloseIssue(w http.ResponseWriter, r *http.Request) {
 				return err
 			}
 		}
+		// The summary word for word: the progress line is clipped, the
+		// report's latest_summary is not (DENE-1691).
+		if err := setIssueMetaStringTx(ctx, qtx, updated, statecard.KeyLatestSummary, summary); err != nil {
+			return err
+		}
 		if err := insertDecisions(ctx, qtx, updated, decisions, statecard.SourceClose, actorType, actorID); err != nil {
 			return err
 		}

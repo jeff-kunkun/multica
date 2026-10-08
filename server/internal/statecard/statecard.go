@@ -55,6 +55,12 @@ const (
 	KeyHandoffByID    = "handoff.by_id"
 )
 
+// KeyLatestSummary is the --summary of the latest close or handoff, word for
+// word, rewritten by every one of them — empty when that one carried none.
+// The project report reads it as latest_summary (DENE-1691); write order is
+// the order, so no timestamp comparison can let an older line through.
+const KeyLatestSummary = "summary.latest"
+
 // HandoffKeys lists every handoff key, for writers that replace the record.
 var HandoffKeys = []string{KeyHandoffAt, KeyHandoffSummary, KeyHandoffTo, KeyHandoffByType, KeyHandoffByID}
 
@@ -323,12 +329,15 @@ func DeriveBaton(meta map[string]string, close CloseNote) *Baton {
 	}
 }
 
-// LatestSummary is the conclusion line of the newer of the last close and
-// the last handoff, exactly as its --summary said it — the report's
-// latest_summary (DENE-1691). Unlike DeriveBaton nothing stands in: when the
-// newer of the two carried no summary there is no line, so an older one is
-// never passed off as the latest conclusion.
+// LatestSummary is the report's latest_summary (DENE-1691): the latest close
+// or handoff --summary as stored under KeyLatestSummary. Issues closed before
+// that key existed fall back to the newer of the last close and the last
+// summarised handoff; nothing else stands in, so an older line is never
+// passed off as the latest conclusion.
 func LatestSummary(meta map[string]string, closeSummary string) string {
+	if latest, ok := meta[KeyLatestSummary]; ok {
+		return strings.TrimSpace(latest)
+	}
 	handoffAt := strings.TrimSpace(meta[KeyHandoffAt])
 	if closeprotocol.Complete(meta) && (handoffAt == "" || !after(handoffAt, strings.TrimSpace(meta[closeprotocol.KeyAt]))) {
 		return strings.TrimSpace(closeSummary)
