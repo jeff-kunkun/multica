@@ -416,5 +416,21 @@
     "reason_runtime_changed": "la dernière session est sur une autre machine",
     "reason_session_lost": "la session précédente n'a pas pu être restaurée",
     "reason_fresh_requested": "nouvelle session demandée"
+  },
+  "report": {
+    "bar": "{{count}} nouveautés",
+    "waiting_you": "{{count}} vous attendent",
+    "in_progress": "{{count}} en cours",
+    "done": "{{count}} terminées",
+    "hear": "Écouter le point",
+    "hear_prompt": "Point : raconte-moi les nouveautés de « {{project}} » depuis la dernière fois",
+    "title": "Nouveautés",
+    "since_heard": "Depuis votre écoute {{time}}",
+    "since_week": "7 derniers jours, pas encore écouté",
+    "just_changed": "Vient de changer",
+    "opened": "Ouvert · {{to}}",
+    "needs_you": "vous attend",
+    "from_chat": "depuis « {{title}} »",
+    "from_other_chat": "depuis une autre discussion"
   }
 }

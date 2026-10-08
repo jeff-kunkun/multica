@@ -95,7 +95,9 @@
     "chat_unknown_agent": "Agent",
     "toast_link_copied": "Lien copié",
     "toast_project_deleted": "Projet supprimé",
-    "toast_move_issue_failed": "Échec du déplacement de la tâche"
+    "toast_move_issue_failed": "Échec du déplacement de la tâche",
+    "hear_report": "Écouter le point",
+    "hear_report_hint": "L'IA raconte les nouveautés depuis la dernière fois"
   },
   "resources": {
     "section_header": "Ressources",

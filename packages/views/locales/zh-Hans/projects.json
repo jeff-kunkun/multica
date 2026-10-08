@@ -94,7 +94,9 @@
     "chat_unknown_agent": "智能体",
     "toast_link_copied": "已复制链接",
     "toast_project_deleted": "已删除项目",
-    "toast_move_issue_failed": "移动任务失败"
+    "toast_move_issue_failed": "移动任务失败",
+    "hear_report": "听汇报",
+    "hear_report_hint": "让 AI 在聊天里讲讲上次以来的新进展"
   },
   "resources": {
     "section_header": "资源",

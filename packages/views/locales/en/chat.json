@@ -416,5 +416,21 @@
     "reason_runtime_changed": "last session is on another machine",
     "reason_session_lost": "previous session could not be restored",
     "reason_fresh_requested": "fresh session requested"
+  },
+  "report": {
+    "bar": "{{count}} new updates",
+    "waiting_you": "{{count}} need you",
+    "in_progress": "{{count}} in progress",
+    "done": "{{count}} done",
+    "hear": "Hear report",
+    "hear_prompt": "Report: tell me what's new in \"{{project}}\" since I last heard",
+    "title": "New updates",
+    "since_heard": "Since you heard it {{time}}",
+    "since_week": "Last 7 days, not heard yet",
+    "just_changed": "Just changed",
+    "opened": "Opened · {{to}}",
+    "needs_you": "needs you",
+    "from_chat": "from \"{{title}}\"",
+    "from_other_chat": "from another chat"
   }
 }

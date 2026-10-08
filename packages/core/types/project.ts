@@ -1,3 +1,5 @@
+import type { ChatQuickAction } from "./chat";
+
 export type ProjectStatus = "planned" | "in_progress" | "paused" | "completed" | "cancelled";
 
 export type ProjectPriority = "urgent" | "high" | "medium" | "low" | "none";
@@ -251,4 +253,44 @@ export interface UpdateProjectResourceRequest {
 export interface ListProjectResourcesResponse {
   resources: ProjectResource[];
   total: number;
+}
+
+/** Where a report item stands for the person hearing it (DENE-1667). */
+export type ProjectReportPhase = "done" | "in_progress" | "waiting_you";
+
+export interface ProjectReportSourceChat {
+  id: string;
+  /** Empty when the person can't open that chat. */
+  title?: string;
+  accessible: boolean;
+}
+
+export interface ProjectReportItem {
+  issue_id: string;
+  identifier: string;
+  title: string;
+  status: string;
+  priority: string;
+  gist?: string;
+  /** The status before the window; empty for a ticket opened inside it. */
+  from_status?: string;
+  opened: boolean;
+  changed_at: string;
+  phase: ProjectReportPhase;
+  needs_you: boolean;
+  source_chat?: ProjectReportSourceChat;
+}
+
+/** A project's news since the person last heard it ("听汇报"). */
+export interface ProjectReport {
+  project_id: string;
+  project_title: string;
+  since: string;
+  until: string;
+  last_heard_at: string | null;
+  items: ProjectReportItem[];
+  counts: { total: number; done: number; in_progress: number; waiting_you: number };
+  actions: ChatQuickAction[];
+  marked: boolean;
+  inbox_read: number;
 }

@@ -411,5 +411,21 @@
     "reason_runtime_changed": "지난 세션이 다른 기기에 있음",
     "reason_session_lost": "이전 세션을 복원하지 못함",
     "reason_fresh_requested": "새 세션 요청"
+  },
+  "report": {
+    "bar": "새 진행 {{count}}건",
+    "waiting_you": "내 차례 {{count}}",
+    "in_progress": "진행 중 {{count}}",
+    "done": "완료 {{count}}",
+    "hear": "보고 듣기",
+    "hear_prompt": "보고: 「{{project}}」의 지난번 이후 새 진행을 알려줘",
+    "title": "새 진행",
+    "since_heard": "{{time}}에 들은 이후",
+    "since_week": "최근 7일, 아직 듣지 않음",
+    "just_changed": "방금 바뀜",
+    "opened": "새로 열림 · {{to}}",
+    "needs_you": "내 처리 필요",
+    "from_chat": "「{{title}}」에서",
+    "from_other_chat": "다른 채팅에서"
   }
 }

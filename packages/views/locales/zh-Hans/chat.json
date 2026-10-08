@@ -411,5 +411,21 @@
     "reason_runtime_changed": "上次的会话在另一台机器上",
     "reason_session_lost": "会话没能恢复",
     "reason_fresh_requested": "按要求新开"
+  },
+  "report": {
+    "bar": "{{count}} 条新进展",
+    "waiting_you": "等你 {{count}}",
+    "in_progress": "在做 {{count}}",
+    "done": "做完 {{count}}",
+    "hear": "听汇报",
+    "hear_prompt": "听汇报：讲讲「{{project}}」上次以来的新进展",
+    "title": "新进展",
+    "since_heard": "{{time}}听过之后",
+    "since_week": "最近 7 天，还没听过",
+    "just_changed": "刚变",
+    "opened": "新开 · {{to}}",
+    "needs_you": "要你处理",
+    "from_chat": "来自「{{title}}」",
+    "from_other_chat": "来自其他聊天"
   }
 }

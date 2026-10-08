@@ -53,6 +53,7 @@ import { useBackOrReplace, useNavigation } from "../navigation";
 import { useT } from "../i18n";
 import { ChatMessageList, ChatMessageSkeleton } from "./components/chat-message-list";
 import { ChatInput } from "./components/chat-input";
+import { ChatReportBar } from "./components/chat-report-bar";
 import { ChatQueue } from "./components/chat-queue";
 import { ChatThreadList } from "./components/chat-thread-list";
 import { ChatProjectBar } from "./components/chat-project-bar";
@@ -851,6 +852,24 @@ export function ChatPage() {
         onRemove={c.handleRemoveQueuedTask}
         onClear={c.handleClearQueuedTasks}
       />
+
+      {c.user?.id && c.activeProjectIds.length > 0 && !c.isChatViewOnly && (
+        <ChatReportBar
+          key={`${c.activeSessionId ?? "new"}:${c.activeProjectIds.join()}`}
+          wsId={c.wsId}
+          userId={c.user.id}
+          sessionId={c.activeSessionId}
+          projectIds={c.activeProjectIds}
+          disabled={
+            c.isSessionArchived ||
+            c.isAgentArchived ||
+            c.isAgentAccessRevoked ||
+            !c.isAgentRuntimeBound ||
+            c.noAgent
+          }
+          onHear={(prompt) => void c.handleSend(prompt)}
+        />
+      )}
 
       {projectCaption && (
         <div className={cn(CHAT_GUTTER, "pb-1")} data-slot="chat-new-chat-project">
