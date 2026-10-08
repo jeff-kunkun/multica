@@ -96,21 +96,24 @@ export function ProjectMemoryCard({ projectId }: { projectId: string }) {
             const source = sediment.issue_identifier
               ?? t(($) => $.detail.memory_recent_chat, { title: sediment.source_title || sediment.chat_session_id?.slice(0, 8) || "" });
             return (
-              <div key={sediment.id} className="flex items-baseline gap-2 text-caption">
-                <AppLink
-                  href={href ?? "#"}
-                  className="max-w-[40%] shrink-0 truncate text-primary hover:underline"
-                  title={sediment.source_title || undefined}
-                >
-                  {source}
-                </AppLink>
-                <span className="min-w-0 flex-1 truncate" title={files}>{files}</span>
-                {!sediment.verified ? (
-                  <span className="shrink-0 text-amber-700" title={t(($) => $.detail.memory_recent_unverified_title)}>
-                    {t(($) => $.detail.memory_recent_unverified)}
-                  </span>
-                ) : null}
-                <span className="shrink-0 text-muted-foreground">{timeAgo(sediment.created_at)}</span>
+              <div key={sediment.id} className="text-caption">
+                <div className="flex items-baseline gap-2">
+                  <AppLink
+                    href={href ?? "#"}
+                    className="min-w-0 flex-1 truncate text-primary hover:underline"
+                    title={sediment.source_title || undefined}
+                  >
+                    {source}
+                  </AppLink>
+                  {!sediment.verified ? (
+                    <span className="shrink-0 text-amber-700" title={t(($) => $.detail.memory_recent_unverified_title)}>
+                      {t(($) => $.detail.memory_recent_unverified)}
+                    </span>
+                  ) : null}
+                  <span className="shrink-0 text-muted-foreground">{timeAgo(sediment.created_at)}</span>
+                </div>
+                {/* Its own wrapping line: a phone has no hover to read a cut-off path. */}
+                <p className="text-muted-foreground [overflow-wrap:anywhere]">{files}</p>
               </div>
             );
           })}
