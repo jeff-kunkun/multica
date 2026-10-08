@@ -287,9 +287,11 @@ func (h *Handler) monitorUnsettled(ctx context.Context, project db.Project, sinc
 		if audit, err := closeprotocol.ParseStoredKnowledgeAudit(meta[closeprotocol.KeyKnowledgeAudit]); err == nil && audit.None {
 			reason = "none"
 		}
-		closedAt := strings.TrimSpace(meta[closeprotocol.KeyAt])
-		if closedAt == "" {
-			closedAt = timestampToString(issue.UpdatedAt)
+		// close.at when the close recorded one, in the same format as every
+		// other timestamp here; the row's last update otherwise.
+		closedAt := timestampToString(issue.UpdatedAt)
+		if at, err := time.Parse(time.RFC3339Nano, strings.TrimSpace(meta[closeprotocol.KeyAt])); err == nil {
+			closedAt = at.In(time.Local).Format(time.RFC3339)
 		}
 		out = append(out, MonitorUnsettled{
 			IssueID: uuidToString(issue.ID), Identifier: issueIdentifier(prefix, issue.Number),
