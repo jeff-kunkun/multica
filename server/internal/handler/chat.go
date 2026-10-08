@@ -580,7 +580,7 @@ func (h *Handler) UpdateChatSession(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		var resolved []workspacelink.ReferenceOption
-		resolved, err = h.resolveChatLinkedProjects(r.Context(), session.WorkspaceID, requestMemberRole(r), refs)
+		resolved, err = h.resolveChatLinkedProjectsReplace(r.Context(), session, requestMemberRole(r), refs)
 		if err == nil {
 			err = h.replaceChatSessionLinkedProjects(r.Context(), session, resolved)
 		}

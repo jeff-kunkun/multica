@@ -221,4 +221,31 @@ describe("ChatAddMenu linked projects (DENE-1643)", () => {
     fireEvent.click(item);
     expect(onLinkedProjectsChange).toHaveBeenCalledWith([]);
   });
+
+  it("drops one stale entry at a time and keeps the rest of the set", async () => {
+    const onLinkedProjectsChange = vi.fn();
+    const stale = (id: string, title: string) => ({
+      link_id: "link-gone",
+      project_id: id,
+      title,
+      icon: null,
+      source_name: "Acme",
+      available: false,
+    });
+    await openProjectSubmenu({
+      linkedProjectOptions: [OPTION],
+      linkedProjects: [
+        stale("gone-a", "Old A"),
+        stale("gone-b", "Old B"),
+        { ...stale("shared-1", "Shared Docs"), link_id: "link-1", available: true },
+      ],
+      onLinkedProjectsChange,
+    });
+
+    fireEvent.click(await screen.findByRole("menuitemcheckbox", { name: /Old A/ }));
+    expect(onLinkedProjectsChange).toHaveBeenCalledWith([
+      { link_id: "link-gone", project_id: "gone-b" },
+      { link_id: "link-1", project_id: "shared-1" },
+    ]);
+  });
 });

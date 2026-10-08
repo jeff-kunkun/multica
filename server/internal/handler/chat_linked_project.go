@@ -96,6 +96,55 @@ func (h *Handler) resolveChatLinkedProjects(ctx context.Context, workspaceID pgt
 	return resolved, nil
 }
 
+// resolveChatLinkedProjectsReplace resolves the complete next set for an open
+// chat. A ref the chat already carries may stay even after its link stopped
+// resolving: it is kept as its stored snapshot (still stale, still never sent
+// to the agent) so the user can drop stale entries one at a time and edit the
+// rest of the set around them. A ref the chat does not carry yet is held to
+// the same strict check as on create.
+func (h *Handler) resolveChatLinkedProjectsReplace(ctx context.Context, session db.ChatSession, role permission.Role, refs []workspacelink.Ref) ([]workspacelink.ReferenceOption, error) {
+	refs = dedupeLinkRefs(refs)
+	if len(refs) == 0 {
+		return nil, nil
+	}
+	rows, err := h.Queries.ListChatSessionLinkedProjectsForSessions(ctx, []pgtype.UUID{session.ID})
+	if err != nil {
+		return nil, err
+	}
+	key := func(link, project pgtype.UUID) string { return uuidToString(link) + "/" + uuidToString(project) }
+	bound := make(map[string]db.ChatSessionLinkedProject, len(rows))
+	for _, row := range rows {
+		bound[key(row.LinkID, row.ProjectID)] = row
+	}
+	reachable, err := h.workspaceLinks().Reachable(ctx, session.WorkspaceID, role, refs)
+	if err != nil {
+		return nil, err
+	}
+	live := make(map[string]workspacelink.ReferenceOption, len(reachable))
+	for _, ref := range reachable {
+		live[ref.LinkID+"/"+ref.ID] = ref
+	}
+	out := make([]workspacelink.ReferenceOption, 0, len(refs))
+	for _, ref := range refs {
+		k := key(ref.LinkID, ref.ProjectID)
+		if option, ok := live[k]; ok {
+			out = append(out, option)
+			continue
+		}
+		row, ok := bound[k]
+		if !ok {
+			return nil, errChatLinkedProjectNotFound
+		}
+		out = append(out, workspacelink.ReferenceOption{
+			LinkID: uuidToString(row.LinkID),
+			ID:     uuidToString(row.ProjectID),
+			Title:  row.Title,
+			Source: workspacelink.LinkedWorkspace{Name: row.SourceName},
+		})
+	}
+	return out, nil
+}
+
 func dedupeLinkRefs(refs []workspacelink.Ref) []workspacelink.Ref {
 	seen := map[[32]byte]bool{}
 	out := make([]workspacelink.Ref, 0, len(refs))
