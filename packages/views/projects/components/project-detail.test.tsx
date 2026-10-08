@@ -88,6 +88,8 @@ vi.mock("@multica/core/paths", () => ({
     projects: () => "/test-workspace/projects",
     settings: () => "/test-workspace/settings",
     issueDetail: (id: string) => `/test-workspace/issues/${id}`,
+    chatWithPrompt: (prompt: string, ...projectIds: string[]) =>
+      `/test-workspace/chat?prompt=${encodeURIComponent(prompt)}&project_ids=${projectIds.join(",")}`,
   }),
 }));
 

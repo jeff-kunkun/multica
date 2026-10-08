@@ -418,6 +418,21 @@
     "reason_session_lost": "previous session could not be restored",
     "reason_fresh_requested": "fresh session requested"
   },
+  "report": {
+    "bar_one": "{{count}} issue from this chat",
+    "bar_other": "{{count}} issues from this chat",
+    "bar_fresh_one": "{{count}} issue from this chat · {{fresh}} just changed",
+    "bar_fresh_other": "{{count}} issues from this chat · {{fresh}} just changed",
+    "waiting_you": "{{count}} need you",
+    "in_progress": "{{count}} in progress",
+    "done": "{{count}} done",
+    "hear": "Hear report",
+    "hear_prompt": "Report: tell me what's new in \"{{project}}\" since I last heard",
+    "title": "Issues from this chat",
+    "just_changed": "Just changed",
+    "opened": "Opened · {{to}}",
+    "needs_you": "needs you"
+  },
   "tickets": {
     "heading_one": "Opened {{count}} issue",
     "heading_other": "Opened {{count}} issues",

@@ -100,7 +100,9 @@
     "chat_unknown_agent": "에이전트",
     "toast_link_copied": "링크를 복사했습니다",
     "toast_project_deleted": "프로젝트를 삭제했습니다",
-    "toast_move_issue_failed": "태스크를 이동하지 못했습니다"
+    "toast_move_issue_failed": "태스크를 이동하지 못했습니다",
+    "hear_report": "보고 듣기",
+    "hear_report_hint": "지난번 이후 새 진행을 AI가 채팅으로 알려줍니다"
   },
   "resources": {
     "section_header": "리소스",

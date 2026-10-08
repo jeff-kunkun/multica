@@ -418,6 +418,21 @@
     "reason_session_lost": "la session précédente n'a pas pu être restaurée",
     "reason_fresh_requested": "nouvelle session demandée"
   },
+  "report": {
+    "bar_one": "{{count}} ticket de cette discussion",
+    "bar_other": "{{count}} tickets de cette discussion",
+    "bar_fresh_one": "{{count}} ticket de cette discussion · {{fresh}} vient de changer",
+    "bar_fresh_other": "{{count}} tickets de cette discussion · {{fresh}} viennent de changer",
+    "waiting_you": "{{count}} vous attendent",
+    "in_progress": "{{count}} en cours",
+    "done": "{{count}} terminées",
+    "hear": "Écouter le point",
+    "hear_prompt": "Point : raconte-moi les nouveautés de « {{project}} » depuis la dernière fois",
+    "title": "Tickets de cette discussion",
+    "just_changed": "Vient de changer",
+    "opened": "Ouvert · {{to}}",
+    "needs_you": "vous attend"
+  },
   "tickets": {
     "heading_one": "{{count}} ticket ouvert",
     "heading_other": "{{count}} tickets ouverts",
