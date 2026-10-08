@@ -408,7 +408,7 @@ func (h *Handler) CloseIssue(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		if closeprotocol.KnowledgeMustShip(outcome, "") {
-			if err := recordIssueSediment(ctx, qtx, updated, parsedAudit, prURL, lineMerge, actorType, actorID); err != nil {
+			if err := recordIssueSediment(ctx, qtx, updated, parsedAudit, req.MemoryFiles, prURL, lineMerge, actorType, actorID); err != nil {
 				return err
 			}
 		}

@@ -308,6 +308,10 @@ func TestBossRoundSedimentCarriesSourceAndHygiene(t *testing.T) {
 	if layer != "boss" || !strings.Contains(sources, parent) {
 		t.Fatalf("sediment layer = %q sources = %q", layer, sources)
 	}
+	// DENE-1681: the row keeps git's deletion count for the project monitor.
+	if got := deletedLines([]byte(issueSedimentMemoryFiles(t, round))); got == nil || *got != 2 {
+		t.Fatalf("sediment deleted lines = %v", got)
+	}
 	items := testHandler.recentKnowledgeSediments(context.Background(), loadTestProject(t, projectID))
 	if len(items) != 1 || items[0].Layer != "boss" || len(items[0].Sources) != 1 ||
 		items[0].Sources[0].Identifier == nil || items[0].Sources[0].Title != "boss sediment parent" {
@@ -316,4 +320,11 @@ func TestBossRoundSedimentCarriesSourceAndHygiene(t *testing.T) {
 	if got := items[0].Changes; len(got) != 2 || got[1].Action != "supersede" || got[1].Entry != "旧派单" {
 		t.Fatalf("changes = %+v", got)
 	}
+}
+
+func issueSedimentMemoryFiles(t *testing.T, issueID string) string {
+	t.Helper()
+	var raw string
+	dbfx.QueryRow(t, `SELECT memory_files::text FROM knowledge_sediment WHERE issue_id = $1`, issueID).Scan(&raw)
+	return raw
 }

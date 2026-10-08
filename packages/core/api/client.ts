@@ -141,6 +141,7 @@ import type {
   CancelTaskResponse,
   Project,
   ProjectMemoryStatus,
+  ProjectMemoryMonitor,
   ProjectMemoryChecklistItem,
   ProjectReport,
   CloseIssueRequest,
@@ -5553,6 +5554,11 @@ export class ApiClient {
 
   async getProjectMemory(id: string): Promise<ProjectMemoryStatus> {
     return this.fetch(`/api/projects/${id}/memory/status`);
+  }
+
+  async getProjectMemoryMonitor(id: string, days?: number): Promise<ProjectMemoryMonitor> {
+    const query = days ? `?days=${days}` : "";
+    return this.fetch(`/api/projects/${id}/memory/monitor${query}`);
   }
 
   async checkProjectMemory(

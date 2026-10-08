@@ -116,8 +116,9 @@ func (h *Handler) addRoundSource(ctx context.Context, round db.Issue, source sed
 }
 
 // resolveSedimentSources names each source for a reader. A source that can
-// no longer be read keeps its kind and id.
-func (h *Handler) resolveSedimentSources(ctx context.Context, workspaceID pgtype.UUID, raw []byte) []SedimentSourceResponse {
+// no longer be read, or that viewer cannot see, keeps its kind and id only;
+// a nil viewer names every source.
+func (h *Handler) resolveSedimentSources(ctx context.Context, workspaceID pgtype.UUID, raw []byte, viewer *visibilityViewer) []SedimentSourceResponse {
 	var sources []sedimentSource
 	_ = json.Unmarshal(raw, &sources)
 	out := make([]SedimentSourceResponse, 0, len(sources))
@@ -126,7 +127,7 @@ func (h *Handler) resolveSedimentSources(ctx context.Context, workspaceID pgtype
 		item := SedimentSourceResponse{Kind: source.Kind, ID: source.ID}
 		switch source.Kind {
 		case "issue":
-			if issue, err := h.Queries.GetIssueInWorkspace(ctx, db.GetIssueInWorkspaceParams{ID: parseUUID(source.ID), WorkspaceID: workspaceID}); err == nil {
+			if issue, err := h.Queries.GetIssueInWorkspace(ctx, db.GetIssueInWorkspaceParams{ID: parseUUID(source.ID), WorkspaceID: workspaceID}); err == nil && (viewer == nil || viewer.canSeeIssue(issue)) {
 				if prefix == "" {
 					prefix = h.getIssuePrefix(ctx, workspaceID)
 				}
@@ -135,7 +136,7 @@ func (h *Handler) resolveSedimentSources(ctx context.Context, workspaceID pgtype
 				item.Title = issue.Title
 			}
 		case "project":
-			if project, err := h.Queries.GetProjectInWorkspace(ctx, db.GetProjectInWorkspaceParams{ID: parseUUID(source.ID), WorkspaceID: workspaceID}); err == nil {
+			if project, err := h.Queries.GetProjectInWorkspace(ctx, db.GetProjectInWorkspaceParams{ID: parseUUID(source.ID), WorkspaceID: workspaceID}); err == nil && (viewer == nil || viewer.canSeeProject(project)) {
 				item.Title = project.Title
 			}
 		}
@@ -146,7 +147,7 @@ func (h *Handler) resolveSedimentSources(ctx context.Context, workspaceID pgtype
 
 // recordIssueSediment writes the close's sediment row inside the close
 // transaction. An audit that declared nothing writes no row.
-func recordIssueSediment(ctx context.Context, q *db.Queries, issue db.Issue, audit closeprotocol.KnowledgeAudit, prURL string, line *deliveryLineMerge, actorType, actorID string) error {
+func recordIssueSediment(ctx context.Context, q *db.Queries, issue db.Issue, audit closeprotocol.KnowledgeAudit, memoryFiles *[]closeprotocol.MemoryFile, prURL string, line *deliveryLineMerge, actorType, actorID string) error {
 	if audit.None || len(audit.Changes) == 0 {
 		return nil
 	}
@@ -189,8 +190,24 @@ func recordIssueSediment(ctx context.Context, q *db.Queries, issue db.Issue, aud
 		PrUrl:       prURL,
 		AuthorType:  actorType,
 		AuthorID:    parseUUID(actorID),
+		MemoryFiles: storedMemoryFiles(memoryFiles),
 	})
 	return err
+}
+
+// storedMemoryFiles is what a sediment row keeps of git's memory-file facts
+// (DENE-1681): sizes, deleted lines and supersede marks per file, without the
+// per-heading breakdown the hygiene check needed. Nil (an older CLI, a person
+// closing from the web) stores [] — unknown, not "deleted nothing".
+func storedMemoryFiles(files *[]closeprotocol.MemoryFile) []byte {
+	out := []closeprotocol.MemoryFile{}
+	if files != nil {
+		for _, f := range *files {
+			out = append(out, closeprotocol.MemoryFile{Path: f.Path, Bytes: f.Bytes, Deleted: f.Deleted, SupersedeMarks: f.SupersedeMarks})
+		}
+	}
+	raw, _ := json.Marshal(out)
+	return raw
 }
 
 func (h *Handler) recentKnowledgeSediments(ctx context.Context, project db.Project) []KnowledgeSedimentResponse {
@@ -210,7 +227,7 @@ func (h *Handler) recentKnowledgeSediments(ctx context.Context, project db.Proje
 			Commits: row.Commits, PrUrl: row.PrUrl, AuthorType: row.AuthorType, AuthorID: row.AuthorID, CreatedAt: row.CreatedAt,
 			Layer: row.Layer,
 		})
-		item.Sources = h.resolveSedimentSources(ctx, row.WorkspaceID, row.Sources)
+		item.Sources = h.resolveSedimentSources(ctx, row.WorkspaceID, row.Sources, nil)
 		if row.IssueNumber.Valid {
 			identifier := issueIdentifier(prefix, row.IssueNumber.Int32)
 			item.IssueIdentifier = &identifier
@@ -357,6 +374,7 @@ func (h *Handler) CreateChatSediment(w http.ResponseWriter, r *http.Request) {
 		AuthorID:      parseUUID(actorID),
 		Layer:         sedimentLayerBoss,
 		Sources:       []byte("[]"),
+		MemoryFiles:   storedMemoryFiles(req.MemoryFiles),
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to record chat sediment")

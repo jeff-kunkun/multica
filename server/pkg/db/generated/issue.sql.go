@@ -2929,6 +2929,94 @@ func (q *Queries) ListOpenIssues(ctx context.Context, arg ListOpenIssuesParams) 
 	return items, nil
 }
 
+const listProjectChatDispatchedIssues = `-- name: ListProjectChatDispatchedIssues :many
+SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, triage_state, reviewer_type, reviewer_id, visibility, assignee_source, assignee_source_user_id, assignee_quote, progress_text, progress_source, progress_tone, progress_author_type, progress_author_id, progress_updated_at, duplicate_of_issue_id, domain_id, origin_chat_session_id FROM issue
+WHERE workspace_id = $1 AND project_id = $2
+  AND origin_chat_session_id IS NOT NULL
+  AND (updated_at >= $3 OR status NOT IN ('done', 'cancelled'))
+ORDER BY created_at DESC, id DESC
+LIMIT $4
+`
+
+type ListProjectChatDispatchedIssuesParams struct {
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	ProjectID   pgtype.UUID        `json:"project_id"`
+	Since       pgtype.Timestamptz `json:"since"`
+	RowLimit    int32              `json:"row_limit"`
+}
+
+// The project monitor's chat flow (DENE-1681): tickets in the project opened
+// from a chat, touched in the window or still open, newest first.
+func (q *Queries) ListProjectChatDispatchedIssues(ctx context.Context, arg ListProjectChatDispatchedIssuesParams) ([]Issue, error) {
+	rows, err := q.db.Query(ctx, listProjectChatDispatchedIssues,
+		arg.WorkspaceID,
+		arg.ProjectID,
+		arg.Since,
+		arg.RowLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Issue{}
+	for rows.Next() {
+		var i Issue
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.Title,
+			&i.Description,
+			&i.Status,
+			&i.Priority,
+			&i.AssigneeType,
+			&i.AssigneeID,
+			&i.CreatorType,
+			&i.CreatorID,
+			&i.ParentIssueID,
+			&i.AcceptanceCriteria,
+			&i.ContextRefs,
+			&i.Position,
+			&i.DueDate,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.Number,
+			&i.ProjectID,
+			&i.OriginType,
+			&i.OriginID,
+			&i.FirstExecutedAt,
+			&i.StartDate,
+			&i.Metadata,
+			&i.Stage,
+			&i.Properties,
+			&i.Revision,
+			&i.LastActivityAt,
+			&i.TriageState,
+			&i.ReviewerType,
+			&i.ReviewerID,
+			&i.Visibility,
+			&i.AssigneeSource,
+			&i.AssigneeSourceUserID,
+			&i.AssigneeQuote,
+			&i.ProgressText,
+			&i.ProgressSource,
+			&i.ProgressTone,
+			&i.ProgressAuthorType,
+			&i.ProgressAuthorID,
+			&i.ProgressUpdatedAt,
+			&i.DuplicateOfIssueID,
+			&i.DomainID,
+			&i.OriginChatSessionID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const lockIssueDuplicateKey = `-- name: LockIssueDuplicateKey :exec
 SELECT pg_advisory_xact_lock(hashtextextended($1::text, 0))
 `

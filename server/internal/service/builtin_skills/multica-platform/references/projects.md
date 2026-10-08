@@ -106,6 +106,7 @@ multica project resource update <project-id> <resource-id> --url <new-github-url
 multica project resource update <project-id> <resource-id> --ref <branch-or-sha> --output json
 multica project resource remove <project-id> <resource-id> --output json
 multica project memory status <project-id> --output json
+multica project memory monitor <project-id> [--days 14] --output json
 multica project memory check <project-id> --output json
 multica project memory seat get --output json
 multica project memory seat set <agent-name-or-uuid> --output json
@@ -377,6 +378,21 @@ multica chat sediment --history --output json
 chat wrote which files, onto which line, verified or not; a boss-layer one
 also carries `layer: boss`, its `sources` (the parent ticket or project it
 rolled up), and each change's `action` / `entry`.
+
+`multica project memory monitor <project-id> [--days N]` (1–90, default 14)
+is the project page's memory card as JSON — read it before judging whether
+the project's memory is being kept, instead of opening tickets one by one:
+
+- `writes`: each sediment with its source ticket or chat, `superseded`
+  entries and `deleted_lines` (null when the delivery predates the count).
+- `unsettled`: tickets finished without writing memory — `none` declared
+  nothing qualified, `unaudited` finished without a knowledge audit.
+- `rounds`: sediment rounds; `idle` ended without a sediment, so the same
+  gap may reopen.
+- `chats`: tickets each chat dispatched, as `reported` (receipt carries a
+  conclusion), `no_conclusion` (finished without `issue close`) or `open`.
+
+Rows the person cannot see are left out; a private chat keeps its id only.
 
 ### Configuring the sediment agent seat
 

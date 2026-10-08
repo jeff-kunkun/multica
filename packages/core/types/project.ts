@@ -106,6 +106,70 @@ export interface ProjectMemoryStatus {
   recent_sediments?: KnowledgeSediment[];
 }
 
+/** A sediment in the monitor window, with what it superseded or deleted. */
+export interface MonitorWrite extends KnowledgeSediment {
+  /** False for a chat the person cannot open; its title is withheld. */
+  source_accessible: boolean;
+  superseded: string[];
+  /** Deleted lines across memory files; null when the delivery predates the count. */
+  deleted_lines: number | null;
+}
+
+/** A ticket that finished without writing project memory. */
+export interface MonitorUnsettled {
+  issue_id: string;
+  identifier: string;
+  title: string;
+  /** none: its close declared nothing qualified; unaudited: no knowledge audit. */
+  reason: "none" | "unaudited";
+  closed_at: string;
+}
+
+export interface MonitorRound {
+  issue_id: string;
+  identifier: string;
+  title: string;
+  status: string;
+  layer: "worker" | "boss";
+  gap: string[];
+  wrote: boolean;
+  /** Ended without a sediment. */
+  idle: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface MonitorChatTicket {
+  issue_id: string;
+  identifier: string;
+  title: string;
+  status: string;
+  flow: "open" | "reported" | "no_conclusion";
+  updated_at: string;
+}
+
+export interface MonitorChat {
+  chat_session_id: string;
+  title?: string;
+  accessible: boolean;
+  dispatched: number;
+  reported: number;
+  no_conclusion: number;
+  open: number;
+  tickets: MonitorChatTicket[];
+}
+
+/** Project memory activity over one window (DENE-1681). */
+export interface ProjectMemoryMonitor {
+  project_id: string;
+  days: number;
+  since: string;
+  writes: MonitorWrite[];
+  unsettled: MonitorUnsettled[];
+  rounds: { opened: number; open: number; idle: number; items: MonitorRound[] };
+  chats: MonitorChat[];
+}
+
 export interface ProjectVisibilityPreview {
   project_id: string;
   visibility: "private" | "project" | "workspace";
