@@ -57,10 +57,18 @@ const (
 	// (DENE-1641): names only, so an agent can tell its person what to
 	// accept. Answering stays OpAccept.
 	OpSeePending Op = "see_pending"
+	// OpSetManaged turns managed access on or off (DENE-1663). Like handing
+	// projects out, it is the source owner's call.
+	OpSetManaged Op = "set_managed"
+	// OpManageRemote is an agent of the viewer acting on the source's issues
+	// and autopilots for its run's originator (DENE-1663). Asked from the
+	// viewer side with the ORIGINATOR's tier in the source: the agent never
+	// holds more there than the person who started it.
+	OpManageRemote Op = "manage_remote"
 )
 
 // Ops lists every operation, for the decision-table test.
-var Ops = []Op{OpCreate, OpUpdateProjects, OpAccept, OpRevoke, OpView, OpManage, OpAudit, OpSeePending}
+var Ops = []Op{OpCreate, OpUpdateProjects, OpAccept, OpRevoke, OpView, OpManage, OpAudit, OpSeePending, OpSetManaged, OpManageRemote}
 
 // Actor is the caller as this package needs it.
 type Actor struct {
@@ -68,8 +76,9 @@ type Actor struct {
 	// the tier of the human the task token runs as.
 	Role permission.Role
 	// IsAgent: the call came from an agent. Agents may only read (OpView and
-	// the active-link directory); setting a link up or tearing it down is a
-	// person's decision.
+	// the active-link directory) and, on a managed link, act in the source
+	// for their originator (OpManageRemote); setting a link up, switching
+	// managed access or tearing it down is a person's decision.
 	IsAgent bool
 }
 
@@ -89,6 +98,9 @@ func Decide(op Op, side Side, actor Actor) bool {
 			return side == SideViewer && role.CanWrite()
 		case OpSeePending:
 			return side == SideViewer && ownerOrAdmin
+		case OpManageRemote:
+			// Guests of the source only read there; a manager writes.
+			return side == SideViewer && role.CanWrite()
 		}
 		return false
 	}
@@ -112,6 +124,11 @@ func Decide(op Op, side Side, actor Actor) bool {
 		return role == permission.RoleOwner
 	case OpSeePending:
 		return side == SideViewer && ownerOrAdmin
+	case OpSetManaged:
+		return side == SideSource && role == permission.RoleOwner
+	case OpManageRemote:
+		// A person acts in the source through their own membership there.
+		return false
 	}
 	return false
 }
