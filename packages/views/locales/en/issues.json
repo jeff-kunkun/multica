@@ -623,7 +623,9 @@
       "status_conflict": "Conflict, executor resolves",
       "show_all_one": "Show all {{count}}",
       "show_all_other": "Show all {{count}}"
-    }
+    },
+    "from_chat": "From chat",
+    "from_chat_hidden": "From a chat you can't see"
   },
   "timeline": {
     "loading": "Loading..."

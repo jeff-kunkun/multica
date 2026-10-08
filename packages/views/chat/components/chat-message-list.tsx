@@ -29,7 +29,7 @@ import {
   MessagesSquare,
 } from "lucide-react";
 import { useScrollFade } from "@multica/ui/hooks/use-scroll-fade";
-import { isTaskMessageTaskId, taskMessagesOptions } from "@multica/core/chat/queries";
+import { chatTicketsOptions, isTaskMessageTaskId, taskMessagesOptions } from "@multica/core/chat/queries";
 import { useChatStore } from "@multica/core/chat";
 import { RichContent } from "../../rich-content";
 import { RichContentScrollRootProvider } from "../../rich-content/scroll-root";
@@ -49,6 +49,7 @@ import { buildTimeline } from "../../common/task-transcript";
 import { traceToolArgSummary } from "../../common/task-transcript/trace-event-presenter";
 import { OnboardingStarterCards } from "./onboarding-starter-cards";
 import { TaskStatusPill } from "./task-status-pill";
+import { ChatTicketCard, groupChatTickets } from "./chat-ticket-card";
 import { CHAT_COLUMN, CHAT_GUTTER } from "./chat-column";
 import { FOLLOW_EDGE_THRESHOLD } from "../../common/task-transcript/transcript-follow";
 import {
@@ -75,6 +76,11 @@ import { memberListOptions } from "@multica/core/workspace/queries";
 
 interface ChatMessageListProps {
   messages: ChatMessage[];
+  /**
+   * The chat these messages belong to. When set, the issues this chat opened
+   * hang under the reply of the turn that opened them (DENE-1665).
+   */
+  sessionId?: string;
   /**
    * Server-authoritative pending-task snapshot. `null` / undefined means
    * no in-flight task — list renders without StatusPill.
@@ -203,6 +209,7 @@ export function ChatMessageList({
   onRegenerateQuickActions,
   quickActionsPendingMessageId = null,
   creatorId,
+  sessionId,
 }: ChatMessageListProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [scrollContainerEl, setScrollContainerEl] = useState<HTMLDivElement | null>(null);
@@ -296,6 +303,18 @@ export function ChatMessageList({
   }, [messages, hasLive, pendingTaskId]);
 
   const firstIndex = renderItems.length > 0 ? firstItemIndex : 0;
+
+  // The issues this chat opened, each under the reply of the turn that opened
+  // it; a turn still running shows its tickets on the list's last row.
+  const ticketsWsId = useCurrentWorkspace()?.id ?? "";
+  const { data: ticketsData } = useQuery({
+    ...chatTicketsOptions(ticketsWsId, sessionId ?? ""),
+    enabled: !!sessionId && !!ticketsWsId,
+  });
+  const ticketGroups = useMemo(
+    () => groupChatTickets(messages, ticketsData?.tickets ?? []),
+    [messages, ticketsData],
+  );
 
   // The reader's own sends are not news to them, so only replies count toward
   // the jump-to-latest badge.
@@ -415,6 +434,12 @@ export function ChatMessageList({
               starterCardsMessageId={starterCardsMessageId}
               creatorId={creatorId}
             />
+            {item.kind === "message" && ticketGroups.byMessage.has(item.message.id) && (
+              <ChatTicketCard wsId={ticketsWsId} tickets={ticketGroups.byMessage.get(item.message.id)!} />
+            )}
+            {item.key === liveEndKey && ticketGroups.tail.length > 0 && (
+              <ChatTicketCard wsId={ticketsWsId} tickets={ticketGroups.tail} />
+            )}
           </div>
         )}
       />

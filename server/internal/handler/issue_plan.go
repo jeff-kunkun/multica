@@ -152,6 +152,24 @@ func (h *Handler) ApplyPlan(w http.ResponseWriter, r *http.Request) {
 	identity := req.Key
 
 	creatorType, creatorID := h.resolveActor(r, userID, workspaceID)
+	// A plan applied from a chat run points every issue back at that chat and
+	// carries what the chat aligned on, node by node (DENE-1665).
+	var originChat pgtype.UUID
+	if creatorType == "agent" {
+		originChat = h.chatSessionForTask(r.Context(), r, creatorID)
+	}
+	if originChat.Valid {
+		nodes := req.Children
+		if req.Parent != nil {
+			nodes = append([]ApplyPlanNode{*req.Parent}, nodes...)
+		}
+		for _, node := range nodes {
+			if msg := chatTicketDescriptionProblem(node.Description); msg != "" {
+				writeError(w, http.StatusBadRequest, fmt.Sprintf("%q: %s", strings.TrimSpace(node.Title), msg))
+				return
+			}
+		}
+	}
 	build := func(node ApplyPlanNode, status string, stage pgtype.Int4, nodeKey string) (service.IssueCreateParams, bool) {
 		priority := node.Priority
 		if priority == "" {
@@ -177,19 +195,20 @@ func (h *Handler) ApplyPlan(w http.ResponseWriter, r *http.Request) {
 			return service.IssueCreateParams{}, false
 		}
 		return service.IssueCreateParams{
-			WorkspaceID:    wsUUID,
-			Title:          strings.TrimSpace(node.Title),
-			Description:    pgtype.Text{String: node.Description, Valid: node.Description != ""},
-			Status:         status,
-			Priority:       priority,
-			AssigneeType:   assigneeType,
-			AssigneeID:     assigneeID,
-			CreatorType:    creatorType,
-			CreatorID:      parseUUID(creatorID),
-			Stage:          stage,
-			OriginType:     pgtype.Text{String: planOriginType, Valid: true},
-			OriginID:       planNodeID(wsUUID, identity, nodeKey),
-			AllowDuplicate: true,
+			WorkspaceID:         wsUUID,
+			Title:               strings.TrimSpace(node.Title),
+			Description:         pgtype.Text{String: node.Description, Valid: node.Description != ""},
+			Status:              status,
+			Priority:            priority,
+			AssigneeType:        assigneeType,
+			AssigneeID:          assigneeID,
+			CreatorType:         creatorType,
+			CreatorID:           parseUUID(creatorID),
+			Stage:               stage,
+			OriginType:          pgtype.Text{String: planOriginType, Valid: true},
+			OriginID:            planNodeID(wsUUID, identity, nodeKey),
+			OriginChatSessionID: originChat,
+			AllowDuplicate:      true,
 		}, true
 	}
 

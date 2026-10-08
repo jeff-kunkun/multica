@@ -411,5 +411,18 @@
     "reason_runtime_changed": "지난 세션이 다른 기기에 있음",
     "reason_session_lost": "이전 세션을 복원하지 못함",
     "reason_fresh_requested": "새 세션 요청"
+  },
+  "tickets": {
+    "heading_other": "이슈 {{count}}개 생성",
+    "to": "담당 {{name}}",
+    "routing": "라우팅이 담당자를 고릅니다",
+    "actions": "{{id}} 작업",
+    "assign_me": "나에게 배정",
+    "assign_agent": "에이전트에게 맡기기",
+    "withdraw": "철회",
+    "assigned_me": "{{id}}을(를) 나에게 배정했습니다",
+    "assigned_agent": "{{id}}을(를) 라우팅에 돌려보냈습니다",
+    "withdrawn": "{{id}}을(를) 철회했습니다",
+    "failed": "{{id}}을(를) 업데이트하지 못했습니다"
   }
 }
