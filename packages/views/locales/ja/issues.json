@@ -1853,6 +1853,8 @@
   },
   "state_card": {
     "source_quote": "元の依頼",
+    "children": "サブタスクの結果",
+    "children_pr_merged": "マージ済み",
     "section_title": "状態カード",
     "decisions": "決定事項",
     "decisions_empty": "まだ決定事項はありません",

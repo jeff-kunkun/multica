@@ -1853,6 +1853,8 @@
   },
   "state_card": {
     "source_quote": "原话",
+    "children": "子任务回执",
+    "children_pr_merged": "已合并",
     "section_title": "状态卡",
     "decisions": "已拍板",
     "decisions_empty": "还没有拍板",

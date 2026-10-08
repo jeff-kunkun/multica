@@ -23,6 +23,7 @@ import (
 
 	"github.com/multica-ai/multica/server/internal/blockwait"
 	"github.com/multica-ai/multica/server/internal/closeprotocol"
+	"github.com/multica-ai/multica/server/internal/receipt"
 )
 
 // Decision limits. A decision is one sentence someone settled, not a report.
@@ -235,6 +236,8 @@ type Card struct {
 	Now        Now        `json:"now"`
 	Baton      *Baton     `json:"baton"`
 	Changes    Changes    `json:"changes"`
+	// Children are the sub-tasks' receipts the viewer can see (DENE-1679).
+	Children []receipt.Receipt `json:"children"`
 }
 
 // MaxSourceExcerpt bounds the source message quoted on the card.
@@ -444,6 +447,17 @@ func Render(c Card) string {
 			}
 		}
 		fmt.Fprintf(&b, "（%s，%s）%s\n", label, c.Baton.At, c.Baton.Summary)
+	}
+
+	if len(c.Children) > 0 {
+		b.WriteString("\n子任务回执：\n")
+		for i, r := range c.Children {
+			if i == receipt.MaxChildren {
+				fmt.Fprintf(&b, "  - 另有 %d 个子任务\n", len(c.Children)-receipt.MaxChildren)
+				break
+			}
+			fmt.Fprintf(&b, "  - %s\n", r.Line())
+		}
 	}
 
 	b.WriteString("\n你上次之后的变化：")

@@ -73,6 +73,19 @@ export interface StateCardSource {
   excerpt?: string;
 }
 
+/** A sub-task's receipt (DENE-1679): its conclusion, pull requests and knowledge. */
+export interface StateCardChildReceipt {
+  issue_id: string;
+  identifier: string;
+  title: string;
+  /** Canonical status. */
+  status: string;
+  conclusion?: string;
+  summary?: string;
+  knowledge?: string;
+  pull_requests: { number: number; url: string; state: string }[];
+}
+
 export interface IssueStateCard {
   issue_id: string;
   identifier: string;
@@ -82,6 +95,8 @@ export interface IssueStateCard {
   baton?: StateCardBaton | null;
   changes: StateCardChanges;
   source?: StateCardSource | null;
+  /** Sub-task receipts the viewer can see. */
+  children?: StateCardChildReceipt[];
   /** The card as the CLI prints it. */
   text: string;
 }

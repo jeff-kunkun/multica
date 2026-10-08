@@ -297,6 +297,8 @@
   "resources.commit": "这是提交 ID，不是分支。运行会回传到起始分支。如需一次性修订，请给 multica repo checkout 传入 --ref。",
   "state_card": {
     "section_title": "状态卡",
+    "children": "子任务回执",
+    "children_pr_merged": "已合并",
     "decisions": "已拍板",
     "decisions_empty": "还没有拍板",
     "decision_add": "添加拍板",
