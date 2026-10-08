@@ -39,7 +39,7 @@ type ChatTicket struct {
 	PullRequests []receipt.PR `json:"pull_requests,omitempty"`
 	Knowledge    string       `json:"knowledge,omitempty"`
 	CreatedAt    string       `json:"created_at"`
-	UpdatedAt    string  `json:"updated_at"`
+	UpdatedAt    string       `json:"updated_at"`
 }
 
 type ChatTicketsResponse struct {
