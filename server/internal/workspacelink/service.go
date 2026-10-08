@@ -129,7 +129,9 @@ func (s *Service) load(ctx context.Context, q *db.Queries, ws, linkID pgtype.UUI
 // management list (both directions, pending ones, the source's project
 // picks). Everyone else who may read — members and agents — gets only the
 // active links their workspace views, which is what the sidebar and the
-// `workspace link list` command need to reach View. Guests get nothing.
+// `workspace link list` command need to reach View, plus — for an agent of an
+// owner or admin — the offers waiting for this workspace's answer. Guests get
+// nothing.
 func (s *Service) List(ctx context.Context, actorWS pgtype.UUID, actor Actor) ([]Link, error) {
 	rows, err := s.q.ListWorkspaceLinksForWorkspace(ctx, actorWS)
 	if err != nil {
@@ -143,7 +145,9 @@ func (s *Service) List(ctx context.Context, actorWS pgtype.UUID, actor Actor) ([
 		}
 		side := sideOf(link, actorWS)
 		manage := Decide(OpManage, side, actor)
-		if !manage && !(Decide(OpView, side, actor) && row.Status == "active") {
+		readable := Decide(OpView, side, actor) && row.Status == "active"
+		waiting := Decide(OpSeePending, side, actor) && row.Status == "pending"
+		if !manage && !readable && !waiting {
 			continue
 		}
 		out := Link{

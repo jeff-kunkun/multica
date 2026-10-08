@@ -66,6 +66,11 @@ func TestDecideMatrix(t *testing.T) {
 			SideViewer: "Y......",
 			SideNone:   ".......",
 		},
+		OpSeePending: {
+			SideSource: ".......",
+			SideViewer: "YY..Y..",
+			SideNone:   ".......",
+		},
 	}
 	if len(want) != len(Ops) {
 		t.Fatalf("matrix covers %d ops, package defines %d: add the new op's row", len(want), len(Ops))

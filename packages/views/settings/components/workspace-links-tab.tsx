@@ -61,7 +61,7 @@ export function WorkspaceLinksTab() {
 
   return (
     <SettingsTab title={t(($) => $.links.tab.title)} description={t(($) => $.links.tab.description)}>
-      <SettingsSection title={t(($) => $.links.tab.outgoing_title)} description={t(($) => $.links.tab.outgoing_description)}>
+      <SettingsSection anchor="outgoing" title={t(($) => $.links.tab.outgoing_title)} description={t(($) => $.links.tab.outgoing_description)}>
         <CreateLinkForm
           wsId={wsId}
           direction="offer"
@@ -79,7 +79,7 @@ export function WorkspaceLinksTab() {
         </div>
       </SettingsSection>
 
-      <SettingsSection title={t(($) => $.links.tab.incoming_title)} description={t(($) => $.links.tab.incoming_description)}>
+      <SettingsSection anchor="incoming" title={t(($) => $.links.tab.incoming_title)} description={t(($) => $.links.tab.incoming_description)}>
         <CreateLinkForm
           wsId={wsId}
           direction="pull"
