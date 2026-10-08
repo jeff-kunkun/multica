@@ -503,6 +503,7 @@
     "prop_status": "状态",
     "prop_priority": "优先级",
     "prop_stage": "阶段",
+    "prop_waiting_for": "在等",
     "prop_assignee": "负责人",
     "prop_reviewer": "验收席",
     "prop_start_date": "开始日期",

@@ -124,6 +124,7 @@
     "all": "No issues in this workspace.",
     "members": "No issues assigned to a member."
   },
+  "waiting_for": "Waiting for: {{reason}}",
   "driver": {
     "none": "Nobody is moving this",
     "revived": "rerun {{count}}×",

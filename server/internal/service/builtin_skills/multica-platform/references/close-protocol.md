@@ -22,7 +22,7 @@ multica issue close <id> --outcome done      --evidence-file ./close.md         
 multica issue close <id> --outcome in_review --evidence-file ./close.md            # top-level, awaiting acceptance: needs a linked PR (or --no-code <reason>); empty reviewer slot is filled, then routing hands over
 multica issue close <id> --outcome blocked   --evidence-file ./close.md --blocked-by DENE-196   # or --wake-at / --wait-condition + --wait-timeout / --needs-human
 multica issue close <id> --outcome cancelled --evidence-file ./close.md            # dropped on purpose: say why in the evidence
-multica issue close <id> --outcome backlog   --evidence-file ./close.md            # back to planning on purpose (DENE-1002): a reason, no PR, nobody woken
+multica issue close <id> --outcome backlog   --evidence-file ./close.md --waiting-for "公司注册办好"   # back to planning on purpose (DENE-1002): what it waits for, no PR, nobody woken
 multica issue close <id> --outcome todo      --evidence-file ./close.md            # back to the ready list on purpose: same shape as backlog
 multica issue close <id> --outcome in_progress --evidence-file ./close.md --wake-at 2026-10-01T09:00:00Z   # stay in progress, and say who continues
 multica issue close <id> --outcome done --verdict pass --evidence-file ./close.md  # acceptance seat: merge the open PR, then done
@@ -47,7 +47,8 @@ multica issue close <id> --outcome done --verdict pass --evidence-file ./close.m
 - `--outcome backlog` / `--outcome todo` are the deliberate return: the
   ticket goes back to `backlog` / `todo` with a `deferred` conclusion, a
   `none` next owner and no wake. It needs no PR (nothing shipped) — the
-  evidence says why the work goes back. This is the right close for "a reason,
+  evidence says why the work goes back, and a backlog close names what it
+  waits for with `--waiting-for` (agents are refused without it). This is the right close for "a reason,
   no continuation"; do not park a ticket in `in_progress` for it.
 - `--outcome in_progress` keeps the ticket in flight while this run stops:
   conclusion `continuing`, and it **must** name who continues, using the same
