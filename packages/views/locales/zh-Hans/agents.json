@@ -239,6 +239,7 @@
     "prop_work_enabled_hint": "关闭后不再承接新工作，进行中的运行不受影响。",
     "prop_work_pause_balance": "账号余额已用完，已暂停。充值或换账号后重新打开。",
     "prop_work_pause_quota": "模型额度已用完，重置后自动恢复。",
+    "prop_work_pause_auth": "模型登录被拒（401/403），已暂停。一小时后自动重试，修好登录后重新打开可立即恢复。",
     "prop_auto_retry": "自动重试",
     "prop_auto_retry_hint": "关闭后，失败的运行不再自动重试。",
     "prop_runtime_inherit": "跟随基础角色的运行时",

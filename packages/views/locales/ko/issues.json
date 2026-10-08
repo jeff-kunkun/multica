@@ -36,7 +36,9 @@
     "steer_step_read": "읽음",
     "retrying": "재시도를 기다리는 중입니다.",
     "skills_used": "사용한 skill: {{names}}",
-    "skill_step": "skill {{name}} 사용"
+    "skill_step": "skill {{name}} 사용",
+    "relayed_to": "실패 후 {{name}}에게 넘겼습니다",
+    "relay_waiting": "넘겨받을 자리가 없어 결정을 기다립니다"
   },
   "working_filter_error": {
     "title": "에이전트가 작업 중인 태스크를 불러오지 못했습니다"

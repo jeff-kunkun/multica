@@ -2530,6 +2530,13 @@ export const AgentTaskSchema = z.object({
   // the UI already renders as an em dash.
   usage: z.array(TaskUsageSchema).optional().catch(undefined),
   skills_used: z.array(z.string()).optional().catch(undefined),
+  relay: z.object({
+    outcome: z.string(),
+    reason: z.string().optional(),
+    to_agent_id: z.string().optional(),
+    to_agent_name: z.string().optional(),
+    wait_reason: z.string().optional(),
+  }).optional().catch(undefined),
 }).loose();
 
 // Outcome counts are required: every backend that serves this endpoint

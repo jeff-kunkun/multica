@@ -383,7 +383,9 @@ export function AgentDetailInspector({
                 ? t(($) => $.inspector.prop_work_enabled_hint)
                 : agent.work_pause.reason === "balance_exhausted"
                   ? t(($) => $.inspector.prop_work_pause_balance)
-                  : t(($) => $.inspector.prop_work_pause_quota)
+                  : agent.work_pause.reason === "auth_failure"
+                    ? t(($) => $.inspector.prop_work_pause_auth)
+                    : t(($) => $.inspector.prop_work_pause_quota)
             }
           >
             <Switch

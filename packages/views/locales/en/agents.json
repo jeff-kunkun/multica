@@ -255,6 +255,7 @@
     "prop_work_enabled_hint": "When off, this seat takes no new work; running work continues.",
     "prop_work_pause_balance": "Paused: the account is out of balance. Top up or switch accounts, then turn this back on.",
     "prop_work_pause_quota": "Paused: the model quota is used up. It resumes when the quota resets.",
+    "prop_work_pause_auth": "Paused: the model login was refused (401/403). Retries in an hour; fix the login and turn this back on to resume now.",
     "prop_auto_retry": "Auto retry",
     "prop_auto_retry_hint": "When off, failed runs are not retried automatically.",
     "prop_runtime_inherit": "Follow the base role's runtime",

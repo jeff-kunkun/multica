@@ -174,6 +174,13 @@ func (s routingStore) issueView(ctx context.Context, row db.Issue) (routing.Issu
 	if out.Status == "blocked" {
 		out.Wait = s.blockWait(ctx, row)
 	}
+	if out.Status == "in_review" {
+		if ids, err := s.h.Queries.ListIssueWorkerAgentIDs(ctx, row.ID); err == nil {
+			for _, id := range ids {
+				out.Workers = append(out.Workers, util.UUIDToString(id))
+			}
+		}
+	}
 	return out, nil
 }
 

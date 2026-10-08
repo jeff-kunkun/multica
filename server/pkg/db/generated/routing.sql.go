@@ -1170,3 +1170,75 @@ func (q *Queries) SetIssueReviewerIfUnset(ctx context.Context, arg SetIssueRevie
 	)
 	return i, err
 }
+
+const setIssueReviewerToMember = `-- name: SetIssueReviewerToMember :one
+UPDATE issue
+SET reviewer_type = 'member',
+    reviewer_id = $1::uuid,
+    revision = revision + 1,
+    last_activity_at = GREATEST(COALESCE(last_activity_at, updated_at), now()),
+    updated_at = now()
+WHERE id = $2::uuid
+  AND workspace_id = $3::uuid
+RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, triage_state, reviewer_type, reviewer_id, visibility, assignee_source, assignee_source_user_id, assignee_quote, progress_text, progress_source, progress_tone, progress_author_type, progress_author_id, progress_updated_at, duplicate_of_issue_id, domain_id, origin_chat_session_id
+`
+
+type SetIssueReviewerToMemberParams struct {
+	ReviewerID  pgtype.UUID `json:"reviewer_id"`
+	ID          pgtype.UUID `json:"id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+}
+
+// DENE-1647: a person answered "我来验" on a failed acceptance. The slot
+// names them; the patrol then only reminds and never starts a seat.
+func (q *Queries) SetIssueReviewerToMember(ctx context.Context, arg SetIssueReviewerToMemberParams) (Issue, error) {
+	row := q.db.QueryRow(ctx, setIssueReviewerToMember, arg.ReviewerID, arg.ID, arg.WorkspaceID)
+	var i Issue
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.Title,
+		&i.Description,
+		&i.Status,
+		&i.Priority,
+		&i.AssigneeType,
+		&i.AssigneeID,
+		&i.CreatorType,
+		&i.CreatorID,
+		&i.ParentIssueID,
+		&i.AcceptanceCriteria,
+		&i.ContextRefs,
+		&i.Position,
+		&i.DueDate,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Number,
+		&i.ProjectID,
+		&i.OriginType,
+		&i.OriginID,
+		&i.FirstExecutedAt,
+		&i.StartDate,
+		&i.Metadata,
+		&i.Stage,
+		&i.Properties,
+		&i.Revision,
+		&i.LastActivityAt,
+		&i.TriageState,
+		&i.ReviewerType,
+		&i.ReviewerID,
+		&i.Visibility,
+		&i.AssigneeSource,
+		&i.AssigneeSourceUserID,
+		&i.AssigneeQuote,
+		&i.ProgressText,
+		&i.ProgressSource,
+		&i.ProgressTone,
+		&i.ProgressAuthorType,
+		&i.ProgressAuthorID,
+		&i.ProgressUpdatedAt,
+		&i.DuplicateOfIssueID,
+		&i.DomainID,
+		&i.OriginChatSessionID,
+	)
+	return i, err
+}

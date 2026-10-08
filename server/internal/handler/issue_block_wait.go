@@ -618,27 +618,31 @@ func (h *Handler) patrolOne(ctx context.Context, issue db.Issue) bool {
 		}
 	}
 	round, hasRound := parseMetaTime(blockwait.MetaString(meta, blockwait.KeyReviewRound))
+	reviewFailed, reviewFailures, reviewAsked := h.reviewRoundFailure(ctx, issue, round, hasRound)
 	decision := blockwait.DecidePatrol(blockwait.PatrolInput{
-		Status:         issue.Status,
-		Quiet:          quiet,
-		Record:         rec,
-		Blockers:       blockers,
-		Now:            time.Now(),
-		LastPatrol:     last,
-		HasLastPatrol:  hasLast,
-		HasPassComment: h.passInThisRound(ctx, issue, round, hasRound),
-		ReleasedPass:   hasRound && blockwait.MetaString(meta, blockwait.KeyReleased) == blockwait.ReleasedPass,
-		SegmentNudged:  blockwait.MetaString(meta, blockwait.KeySegmentNudged) == "1",
-		ReviewNudged:   blockwait.MetaString(meta, blockwait.KeyReviewNudged) == "1",
-		ReviewerHuman:  issue.ReviewerType.Valid && issue.ReviewerType.String == "member",
-		ReviewerEmpty:  reviewerSlotEmpty(issue),
-		Watched:        watched,
-		Undriven:       self.Kind == blockwait.DriverNone,
-		UndrivenWhy:    self.Reason,
-		UndrivenState:  blockwait.ParseUndriven(meta),
+		Status:          issue.Status,
+		Quiet:           quiet,
+		Record:          rec,
+		Blockers:        blockers,
+		Now:             time.Now(),
+		LastPatrol:      last,
+		HasLastPatrol:   hasLast,
+		HasPassComment:  h.passInThisRound(ctx, issue, round, hasRound),
+		ReleasedPass:    hasRound && blockwait.MetaString(meta, blockwait.KeyReleased) == blockwait.ReleasedPass,
+		SegmentNudged:   blockwait.MetaString(meta, blockwait.KeySegmentNudged) == "1",
+		ReviewNudged:    blockwait.MetaString(meta, blockwait.KeyReviewNudged) == "1",
+		ReviewerHuman:   issue.ReviewerType.Valid && issue.ReviewerType.String == "member",
+		ReviewerEmpty:   reviewerSlotEmpty(issue),
+		ReviewRunFailed: reviewFailed,
+		ReviewFailures:  reviewFailures,
+		ReviewAsked:     reviewAsked,
+		Watched:         watched,
+		Undriven:        self.Kind == blockwait.DriverNone,
+		UndrivenWhy:     self.Reason,
+		UndrivenState:   blockwait.ParseUndriven(meta),
 	})
 	switch decision.Action {
-	case blockwait.ActionRelease, blockwait.ActionWake, blockwait.ActionSeat, blockwait.ActionRevive, blockwait.ActionEscalate:
+	case blockwait.ActionRelease, blockwait.ActionWake, blockwait.ActionSeat, blockwait.ActionRevive, blockwait.ActionEscalate, blockwait.ActionCoverReview:
 	default:
 		return false
 	}
@@ -652,6 +656,8 @@ func (h *Handler) patrolOne(ctx context.Context, issue db.Issue) bool {
 		h.wakeIssueOwner(ctx, issue, decision.Reason, decision.CommentOnly)
 	case blockwait.ActionSeat:
 		h.seatQuietReview(ctx, issue, decision.Reason)
+	case blockwait.ActionCoverReview:
+		h.coverFailedReview(ctx, issue, decision.Force)
 	}
 	return true
 }

@@ -782,6 +782,17 @@ type TaskCancellationActor struct {
 	Name string `json:"name,omitempty"`
 }
 
+// TaskRelayData is one failed run's relay record. Outcome is the
+// agent_quota_relay outcome (relayed, waiting, skipped_*); ToAgent* is the
+// seat that took over, empty when none did.
+type TaskRelayData struct {
+	Outcome     string `json:"outcome"`
+	Reason      string `json:"reason,omitempty"`
+	ToAgentID   string `json:"to_agent_id,omitempty"`
+	ToAgentName string `json:"to_agent_name,omitempty"`
+	WaitReason  string `json:"wait_reason,omitempty"`
+}
+
 type AgentTaskResponse struct {
 	StartClaimSupported      bool                   `json:"start_claim_supported,omitempty"`
 	CancelledByCommentChange bool                   `json:"cancelled_by_comment_change,omitempty"`
@@ -1058,6 +1069,10 @@ type AgentTaskResponse struct {
 	// (DENE-1573). Only the issue execution log fills it; empty means none
 	// were detected, or the daemon predates detection.
 	SkillsUsed []string `json:"skills_used,omitempty"`
+	// Relay is what the platform did after this run failed on a broken seat
+	// (DENE-1647): handed to another seat, waiting for one, or skipped. Only
+	// the issue execution log fills it.
+	Relay *TaskRelayData `json:"relay,omitempty"`
 	// AuthToken is the task-scoped `mat_` token the daemon must inject as
 	// MULTICA_TOKEN in the agent process environment. The server binds it to
 	// this (agent_id, task_id) pair at claim time and treats any request

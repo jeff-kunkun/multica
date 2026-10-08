@@ -36,7 +36,9 @@
     "steer_step_read": "既読",
     "retrying": "再試行を待っています。",
     "skills_used": "使用した skill：{{names}}",
-    "skill_step": "skill {{name}} を使用"
+    "skill_step": "skill {{name}} を使用",
+    "relayed_to": "失敗後 {{name}} に引き継ぎました",
+    "relay_waiting": "引き継げる席がなく、判断待ちです"
   },
   "working_filter_error": {
     "title": "エージェントが作業中のタスクを読み込めませんでした"

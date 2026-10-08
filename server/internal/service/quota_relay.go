@@ -295,7 +295,7 @@ func (s *TaskService) prepareQuotaRelay(ctx context.Context, task db.AgentTaskQu
 			return err
 		}
 		if issue.Status == "in_review" {
-			return s.skipQuotaRelay(ctx, qtx, locked, agent, issue, plan, handoff, "skipped_review", "票在验收中，不改执行席")
+			return s.stageReviewRelay(ctx, qtx, locked, agent, issue, plan, handoff, &prepared)
 		}
 		if !issue.AssigneeID.Valid || util.UUIDToString(issue.AssigneeID) != util.UUIDToString(agent.ID) || issue.AssigneeType.String != "agent" {
 			return s.skipQuotaRelay(ctx, qtx, locked, agent, issue, plan, handoff, "skipped_reassigned", "执行席已经不是失败的这一席")
