@@ -102,6 +102,18 @@ func TestChatDispatchedIssueRecordsSourceAndPostsReceipt(t *testing.T) {
 		t.Fatalf("receipt messages = %d, content = %q", count, content)
 	}
 
+	// The chat renders it as a receipt card linked to the issue.
+	page := fetchChatMessagesPageForTest(t, sessionID, nil)
+	var receiptMsg *ChatMessageResponse
+	for i := range page.Messages {
+		if page.Messages[i].MessageKind == "issue_receipt" {
+			receiptMsg = &page.Messages[i]
+		}
+	}
+	if receiptMsg == nil || receiptMsg.LinkedIssueID == nil || *receiptMsg.LinkedIssueID != issueID {
+		t.Fatalf("receipt card in chat page = %+v", receiptMsg)
+	}
+
 	// `multica chat issues` lists it.
 	req := withURLParam(withChatTestWorkspaceCtx(t, newRequest(http.MethodGet, "/api/chat/sessions/"+sessionID+"/issues", nil)), "sessionId", sessionID)
 	w := httptest.NewRecorder()
