@@ -8,7 +8,7 @@ import { useWorkspacePaths } from "@multica/core/paths";
 import { cn } from "@multica/ui/lib/utils";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { AppLink } from "../../navigation";
-import { useT } from "../../i18n";
+import { useT, useTimeAgo } from "../../i18n";
 
 function formatObservedAt(value: string | null | undefined, fallback: string) {
 	if (!value) return fallback;
@@ -20,6 +20,7 @@ export function ProjectMemoryCard({ projectId }: { projectId: string }) {
 	const { t } = useT("projects");
   const workspaceId = useWorkspaceId();
   const workspacePaths = useWorkspacePaths();
+  const timeAgo = useTimeAgo();
   const { data, isLoading } = useQuery(projectMemoryOptions(workspaceId, projectId));
 
   return (
@@ -80,7 +81,41 @@ export function ProjectMemoryCard({ projectId }: { projectId: string }) {
       ) : data?.sediment_error ? (
         <p className="mt-3 text-caption text-amber-700">{data.sediment_error}</p>
       ) : null}
-      {data?.latest_sediment_at ? (
+      {data?.recent_sediments && data.recent_sediments.length > 0 ? (
+        <div className="mt-3 space-y-1.5" aria-labelledby="project-memory-recent-heading">
+          <p id="project-memory-recent-heading" className="text-caption text-muted-foreground">
+            {t(($) => $.detail.memory_recent)}
+          </p>
+          {data.recent_sediments.map((sediment) => {
+            const files = sediment.changes.flatMap((change) => change.files?.length ? change.files : [change.location]).join(", ");
+            const href = sediment.issue_id
+              ? workspacePaths.issueDetail?.(sediment.issue_id)
+              : sediment.chat_session_id
+                ? workspacePaths.chatSession?.(sediment.chat_session_id)
+                : undefined;
+            const source = sediment.issue_identifier
+              ?? t(($) => $.detail.memory_recent_chat, { title: sediment.source_title || sediment.chat_session_id?.slice(0, 8) || "" });
+            return (
+              <div key={sediment.id} className="flex items-baseline gap-2 text-caption">
+                <AppLink
+                  href={href ?? "#"}
+                  className="max-w-[40%] shrink-0 truncate text-primary hover:underline"
+                  title={sediment.source_title || undefined}
+                >
+                  {source}
+                </AppLink>
+                <span className="min-w-0 flex-1 truncate" title={files}>{files}</span>
+                {!sediment.verified ? (
+                  <span className="shrink-0 text-amber-700" title={t(($) => $.detail.memory_recent_unverified_title)}>
+                    {t(($) => $.detail.memory_recent_unverified)}
+                  </span>
+                ) : null}
+                <span className="shrink-0 text-muted-foreground">{timeAgo(sediment.created_at)}</span>
+              </div>
+            );
+          })}
+        </div>
+      ) : data?.latest_sediment_at ? (
         <p className="mt-3 text-caption text-muted-foreground">
           {t(($) => $.detail.memory_last_sediment, { time: formatObservedAt(data.latest_sediment_at, t(($) => $.detail.memory_no_check)) })}
         </p>

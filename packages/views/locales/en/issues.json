@@ -172,6 +172,7 @@
     "last_activity_missing": "No activity time",
     "knowledge_none": "No qualified knowledge",
     "knowledge_change": "Knowledge: {{locations}}",
+    "knowledge_change_unverified": "Knowledge: {{locations}} (delivery not checked)",
     "section_title": "Close record",
     "conclusion": "Conclusion",
     "status": "Status",

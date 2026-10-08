@@ -1,3 +1,5 @@
+import type { KnowledgeAuditChange } from "./close";
+
 export type ProjectStatus = "planned" | "in_progress" | "paused" | "completed" | "cancelled";
 
 export type ProjectPriority = "urgent" | "high" | "medium" | "low" | "none";
@@ -56,6 +58,25 @@ export interface ProjectMemoryIssue {
   title: string;
 }
 
+// KnowledgeSediment is one delivery that wrote project memory: an issue close
+// or a chat that merged into the main line (DENE-1661).
+export interface KnowledgeSediment {
+  id: string;
+  source_kind: "issue" | "chat";
+  issue_id: string | null;
+  issue_identifier: string | null;
+  chat_session_id: string | null;
+  source_title: string;
+  changes: KnowledgeAuditChange[];
+  verified: boolean;
+  mainline: string;
+  commits: string[];
+  pr_url: string;
+  author_type: string;
+  author_id: string;
+  created_at: string;
+}
+
 export interface ProjectMemoryStatus {
   project_id: string;
   /** Whose observation `locations` is: always the project's local directory. */
@@ -68,6 +89,8 @@ export interface ProjectMemoryStatus {
   sediment_issue: ProjectMemoryIssue | null;
   sediment_agent_configured: boolean;
   sediment_error: string | null;
+  /** Newest deliveries that wrote this memory; absent on older servers. */
+  recent_sediments?: KnowledgeSediment[];
 }
 
 export interface ProjectVisibilityPreview {
