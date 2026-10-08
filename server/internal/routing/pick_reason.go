@@ -74,5 +74,5 @@ func executorPickReason(issue Issue, needExecutor bool, executor *Seat, executor
 	if raised {
 		return PickReasonTier, "按规则下限抬到的" + executor.TierLabel + "档"
 	}
-	return PickReasonTier, "判断模型定的" + executor.TierLabel + "档"
+	return PickReasonTier, "规则表定的" + executor.TierLabel + "档"
 }

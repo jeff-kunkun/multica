@@ -100,6 +100,22 @@ const HEALTHY = {
   workspace_key_storable: true,
 };
 
+const RULES = parseRoutingHealth({
+  state: "enabled",
+  rules: {
+    questions: [
+      { key: "scope", label: "改动范围", options: [{ value: "small", label: "小" }, { value: "cross_module", label: "跨模块" }] },
+      { key: "clarity", label: "需求", options: [{ value: "clear", label: "清楚" }] },
+    ],
+    rules: [
+      { index: 1, id: "cross_module", label: "跨模块", when: { scope: ["cross_module"] }, tier: "strong", tier_label: "强档", reviewer: "seat" },
+      { index: 2, id: "unknown", label: "有一题答不出", any_unknown: true, tier: "medium", tier_label: "中档", reviewer: "seat" },
+      { index: 3, id: "simple", label: "小改动", when: { clarity: ["clear"], scope: ["small"] }, tier: "weak", tier_label: "弱档", reviewer: "none" },
+      { index: 4, id: "default", label: "其余", tier: "medium", tier_label: "中档", reviewer: "none" },
+    ],
+  },
+}).rules;
+
 beforeEach(() => {
   updateWorkspace.mockReset();
   toastError.mockReset();
@@ -684,22 +700,41 @@ describe("RoutingTab seat order switches", () => {
     expect(body.settings.routing.prefer_continuation).toBe(false);
   });
 
-  // DENE-1252: 按判断配验收 is off by default and saves as judged_review.
-  it("switches 按判断配验收 on and saves it", async () => {
+  // DENE-1677: the rule table decides the tier and the 验收席, so the
+  // 按判断配验收 switch is gone, and a saved value is kept as it was.
+  it("drops the judged-review switch and keeps a saved value", async () => {
     workspace.current.settings = {
-      routing: { enabled: true, model: "gpt-5.6-luna" },
+      routing: { enabled: true, model: "gpt-5.6-luna", judged_review: true },
     };
     render();
-    const judged = screen.getByRole("switch", { name: "Review only when judged" });
-    expect(judged).not.toHaveAttribute("data-checked");
+    expect(screen.queryByRole("switch", { name: /judged/i })).toBeNull();
 
-    await userEvent.click(judged);
+    await userEvent.click(screen.getByRole("switch", { name: "Spread across idle seats" }));
     await waitFor(() => expect(updateWorkspace).toHaveBeenCalled());
     const [, body] = updateWorkspace.mock.calls.at(-1) as [
       string,
       { settings: { routing: Record<string, unknown> } },
     ];
     expect(body.settings.routing.judged_review).toBe(true);
+  });
+
+  it("shows the rule table read-only, one row per rule", async () => {
+    getRoutingHealth.mockResolvedValue({ ...HEALTHY, rules: RULES });
+    const { qc } = render();
+    await healthSettled(qc);
+    expect(await screen.findByText("Tier rules")).toBeInTheDocument();
+    expect(screen.getByText("改动范围：跨模块")).toBeInTheDocument();
+    expect(screen.getByText("Any question unanswered")).toBeInTheDocument();
+    expect(screen.getByText("改动范围：小 · 需求：清楚")).toBeInTheDocument();
+    expect(screen.getByText("Nothing above matched")).toBeInTheDocument();
+    expect(screen.getByText("强档, reviewed")).toBeInTheDocument();
+    expect(screen.getAllByText("弱档, no review")).toHaveLength(1);
+  });
+
+  it("hides the rule table on a backend that predates it", async () => {
+    const { qc } = render();
+    await healthSettled(qc);
+    expect(screen.queryByText("Tier rules")).toBeNull();
   });
 
   it("greys out upshift while usage priority is off", () => {

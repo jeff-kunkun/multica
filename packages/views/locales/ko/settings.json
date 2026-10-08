@@ -1940,8 +1940,6 @@
     "load_label": "한가한 자리로 분산",
     "load_description_on": "적용 중: 판정된 티어와 방향의 자리 중 진행 중인 작업이 적은 자리에 배정합니다. 단, 사용량 태그는 넘지 않습니다(빠듯한 자리는 비어 있어도 여유 있는 자리의 작업을 가져가지 않습니다). 바쁜 정도가 같으면 기존 순서를 따릅니다. \"이전 담당자에게 이어서 맡기기\"도 켜져 있으면 그것이 우선합니다.",
     "load_description_shadow": "섀도 모드: 실제 선택은 바꾸지 않고, 이 규칙이라면 어느 덜 바쁜 자리를 고를지 배정 댓글에만 적습니다. 켜면 적용됩니다.",
-    "judged_review_label": "판단에 따라 검수",
-    "judged_review_description": "라우팅 모델이 판단해 검수가 필요하다고 확신할 때만 검수자를 지정합니다. 그 외에는 실행자가 검증 후 닫습니다.",
     "gateway_endpoint_workspace": "모델 id는 이 워크스페이스 전용 엔드포인트로 전송됩니다: {{host}}.",
     "gateway_endpoint_deployment": "모델 id는 배포 공용 LLM 엔드포인트로 전송됩니다: {{host}}.",
     "gateway_unset": "사용할 수 있는 엔드포인트가 없습니다. 아래에 엔드포인트와 키를 입력하세요.",
@@ -2018,10 +2016,10 @@
     "seats_work_off": "작업이 꺼져 있어 라우팅에서 제외됨",
     "seats_runtime_unknown": "알 수 없는 런타임",
     "judge_title": "판정 모델",
-    "judge_description": "티어(약 / 중 / 강 / 최강)를 확률과 함께 고릅니다. 분석 모델이 켜져 있으면 정리된 사실만 봅니다.",
+    "judge_description": "분석 모델의 답을 보고 규칙표의 티어를 이유와 함께 한 단계만 올릴 수 있습니다. 낮출 수는 없습니다.",
     "judge_enabled_label": "판정 모델 사용",
     "analysis_title": "분석 모델",
-    "analysis_description": "티켓 전체를 읽고 몇 가지 사실로 정리합니다: 변경 범위, 요구사항의 명확성, 실패 비용, 사람의 결정이 필요한지. 티켓이 멈추면 어디서 막혔는지 적습니다.",
+    "analysis_description": "티켓 전체를 읽고 객관식 질문 네 개에 답합니다: 변경 범위, 요구사항의 명확성, 실패 비용, 사람의 결정이 필요한지. 티켓이 멈추면 어디서 막혔는지 적습니다.",
     "analysis_enabled_label": "분석 모델 사용",
     "analysis_source_label": "소스",
     "analysis_source_description": "API 게이트웨이 또는 구독한 런타임을 선택합니다.",
@@ -2035,10 +2033,16 @@
     "analysis_key_label": "분석 모델 API 키",
     "modes": {
       "none": "둘 다 꺼짐: 모델을 호출하지 않고 모든 티켓이 대체 티어로 갑니다.",
-      "analysis": "분석만: 분석 모델이 티어를 고르고, 임계값은 그 자기 보고 신뢰도에 적용됩니다.",
-      "analysis_judge": "둘 다 켜짐: 분석 모델이 사실을 정리하고 판정 모델이 그것으로 티어를 고릅니다.",
-      "judge": "판정만: 판정 모델이 티켓을 읽고 티어를 고릅니다."
-    }
+      "analysis": "분석만: 분석 모델이 질문에 답하고 규칙표가 티어를 정합니다.",
+      "analysis_judge": "둘 다 켜짐: 규칙표가 티어를 정하고, 판정 모델은 최대 한 단계 올릴 수 있으며 낮출 수 없습니다.",
+      "judge": "판정만: 질문에 답하는 모델이 없어 규칙표의 '답하지 못함' 행이 티어를 정하고, 판정 모델이 한 단계 올릴 수 있습니다."
+    },
+    "rules_title": "티어 규칙",
+    "rules_description": "분석 모델이 답하면 위에서부터 처음 맞는 규칙이 티어를 정합니다.",
+    "rules_any_unknown": "답하지 못한 질문이 있음",
+    "rules_catch_all": "위에 맞는 규칙이 없음",
+    "rules_review": "{{tier}}, 검수 있음",
+    "rules_no_review": "{{tier}}, 검수 없음"
   },
   "project_sharing": {
     "title": "권한 및 공유",

@@ -157,7 +157,7 @@ func TestProjectLimitedSeatOnlyInItsProjects(t *testing.T) {
 	}
 }
 
-// Routing end to end: a weak verdict on a ticket outside the seat's project
+// Routing end to end: a weak rule-table row on a ticket outside the seat's project
 // lands on another weak seat.
 func TestRouteSkipsSeatLimitedToAnotherProject(t *testing.T) {
 	store := newFakeStore()
@@ -167,6 +167,7 @@ func TestRouteSkipsSeatLimitedToAnotherProject(t *testing.T) {
 		"克林":  {ID: "krillin", Name: "克林", Tier: "weak", Usage: "tight"},
 		"拉蒂兹": {ID: "raditz", Name: "拉蒂兹", Tier: "weak", Usage: "ample", State: SeatState{Projects: []string{"p-ipa"}}},
 	}
+	withCreatorFacts(store, weakFacts)
 	judge := &fakeJudge{verdict: Verdict{ExecutorTier: "weak", ExecutorConfidence: 1, Reviewer: ReviewerNone, ReviewerConfidence: 1}}
 	out := routeWith(t, store, judge, nil)
 	if out.ExecutorWritten == nil || out.ExecutorWritten.ID != "krillin" {
@@ -180,6 +181,7 @@ func TestRouteSkipsSeatLimitedToAnotherProject(t *testing.T) {
 		"克林":  {ID: "krillin", Name: "克林", Tier: "weak", Usage: "tight"},
 		"拉蒂兹": {ID: "raditz", Name: "拉蒂兹", Tier: "weak", Usage: "ample", State: SeatState{Projects: []string{"p-ipa"}}},
 	}
+	withCreatorFacts(store, weakFacts)
 	out = routeWith(t, store, judge, nil)
 	if out.ExecutorWritten == nil || out.ExecutorWritten.ID != "raditz" {
 		t.Fatalf("own project executor = %+v, want 拉蒂兹", out.ExecutorWritten)

@@ -181,16 +181,17 @@ const (
 	AnalysisSourceRuntimeSubscription = "runtime_subscription"
 )
 
-// Mode is which of the two roles are switched on. It decides who picks the
-// tier:
+// Mode is which of the two roles are switched on. Since DENE-1677 no mode
+// lets a model pick the tier: the rule table (rules.json) does.
 //
 //   - ModeNone      — no model is called; every slot takes the ladder's
 //     fallback rung.
-//   - ModeAnalysis  — the analysis model reads the ticket and picks the tier
-//     itself; the threshold gates the confidence it reports.
-//   - ModeBoth      — the analysis model reduces the ticket to facts and the
-//     judge picks the tier from the facts alone.
-//   - ModeJudge     — the judge reads the trimmed ticket, as before the split.
+//   - ModeAnalysis  — the analysis model answers the table's numbered
+//     questions and the table picks the tier.
+//   - ModeBoth      — as ModeAnalysis, and the judge, reading only the
+//     answers, may raise the tier one rung with a reason.
+//   - ModeJudge     — nobody answers the questions, so the table's unknown
+//     row sets the tier, and the judge may raise it one rung.
 type Mode string
 
 const (
