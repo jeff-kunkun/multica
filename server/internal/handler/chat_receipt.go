@@ -48,6 +48,57 @@ func (h *Handler) issueReceipt(ctx context.Context, issue db.Issue, prefix strin
 	return r
 }
 
+// childReceipts is the receipts of a parent's sub-tasks that keep accepts,
+// in creation order (DENE-1679). A parent reports for its children, so its
+// card, its state card and its child-done comment all list them.
+func (h *Handler) childReceipts(ctx context.Context, parent db.Issue, keep func(db.Issue) bool) []receipt.Receipt {
+	children, err := h.Queries.ListChildIssues(ctx, parent.ID)
+	if err != nil {
+		slog.Warn("receipt: list children failed", "issue_id", uuidToString(parent.ID), "error", err)
+		return nil
+	}
+	effective := h.childStatusResolver(ctx)
+	return h.receiptsOf(ctx, parent.WorkspaceID, children, keep, func(c db.Issue) string {
+		status, _ := effective(c)
+		return status
+	})
+}
+
+// receiptsOf reads the receipts of the issues keep accepts. status names each
+// issue's canonical status; an empty answer keeps the stored one.
+func (h *Handler) receiptsOf(ctx context.Context, workspaceID pgtype.UUID, issues []db.Issue, keep func(db.Issue) bool, status func(db.Issue) string) []receipt.Receipt {
+	prefix := h.getIssuePrefix(ctx, workspaceID)
+	var out []receipt.Receipt
+	for _, c := range issues {
+		if !keep(c) {
+			continue
+		}
+		r := h.issueReceipt(ctx, c, prefix)
+		if s := status(c); s != "" {
+			r.Status = s
+		}
+		out = append(out, r)
+	}
+	return out
+}
+
+// visibleWithParent keeps a sub-task that anyone who can see the parent can
+// see too: one open to the workspace, or one scoped exactly like its parent.
+// A system comment and a chat card are read by everyone who sees the parent.
+func visibleWithParent(parent db.Issue) func(db.Issue) bool {
+	return func(c db.Issue) bool {
+		switch c.Visibility {
+		case "workspace":
+			return true
+		case "project":
+			return parent.Visibility != "workspace" && c.ProjectID == parent.ProjectID
+		case "private":
+			return parent.Visibility == "private" && c.CreatorType == parent.CreatorType && c.CreatorID == parent.CreatorID
+		}
+		return false
+	}
+}
+
 func prReceiptState(state string, merged bool) string {
 	if merged {
 		return "merged"
@@ -109,6 +160,7 @@ func (h *Handler) postSourceChatReceipt(ctx context.Context, prev, issue db.Issu
 	}
 	r := h.issueReceipt(ctx, issue, h.getIssuePrefix(ctx, issue.WorkspaceID))
 	r.Status = nowStatus
+	r.Children = h.childReceipts(ctx, issue, visibleWithParent(issue))
 	msg, err := h.Queries.CreateChatMessage(ctx, db.CreateChatMessageParams{
 		ID:            dbid.NewV7(),
 		ChatSessionID: session.ID,

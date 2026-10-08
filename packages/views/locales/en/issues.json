@@ -1910,6 +1910,8 @@
   },
   "state_card": {
     "source_quote": "Original request",
+    "children": "Sub-task results",
+    "children_pr_merged": "merged",
     "section_title": "State card",
     "decisions": "Settled",
     "decisions_empty": "Nothing settled yet",

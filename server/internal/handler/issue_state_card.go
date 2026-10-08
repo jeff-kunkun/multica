@@ -124,6 +124,8 @@ func (h *Handler) buildStateCard(ctx context.Context, issue db.Issue, caller sta
 	card.Now = statecard.DeriveNow(meta, issue.Status)
 	card.Baton = statecard.DeriveBaton(meta, h.closeNote(ctx, issue, meta))
 
+	card.Children = h.stateCardChildren(ctx, issue, viewer)
+
 	changes, err := h.stateCardChanges(ctx, issue, caller, excludeTask, explicit)
 	if err != nil {
 		return card, err
@@ -159,6 +161,28 @@ func (h *Handler) stateCardSource(ctx context.Context, issue db.Issue, viewer so
 		src.Excerpt = receipt.Clip(msg.Content, statecard.MaxSourceExcerpt)
 	}
 	return src
+}
+
+// stateCardChildren is the sub-task receipts the viewer can see. A run with
+// no person behind it sees the ones scoped like the parent.
+func (h *Handler) stateCardChildren(ctx context.Context, issue db.Issue, viewer sourceViewer) []receipt.Receipt {
+	keep := visibleWithParent(issue)
+	if viewer.UserID != "" {
+		userID, err := parseUUIDStrict(viewer.UserID)
+		if err != nil {
+			return []receipt.Receipt{}
+		}
+		v, err := h.visibilityViewerForUser(ctx, issue.WorkspaceID, userID)
+		if err != nil {
+			return []receipt.Receipt{}
+		}
+		keep = v.canSeeIssue
+	}
+	out := h.childReceipts(ctx, issue, keep)
+	if out == nil {
+		out = []receipt.Receipt{}
+	}
+	return out
 }
 
 // closeNote is the latest close's summary: its progress line when the line

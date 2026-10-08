@@ -1910,6 +1910,8 @@
   },
   "state_card": {
     "source_quote": "Demande d’origine",
+    "children": "Résultats des sous-tâches",
+    "children_pr_merged": "fusionnée",
     "section_title": "Fiche d’état",
     "decisions": "Décidé",
     "decisions_empty": "Rien de décidé pour l’instant",

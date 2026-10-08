@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/issuestatus"
+	"github.com/multica-ai/multica/server/internal/receipt"
 	"github.com/multica-ai/multica/server/internal/service"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/dbid"
@@ -486,6 +487,9 @@ func (h *Handler) postChildDoneComment(ctx context.Context, parent, completed db
 		}
 	}
 	content += plan.note
+	if digest := h.childDoneDigest(ctx, parent, children, staged, closedStage, batchCompleted, statuses); digest != "" {
+		content += "\n\n" + digest
+	}
 
 	// author_type='system', author_id=zero UUID. The zero UUID is a valid 16
 	// byte value and the column is NOT NULL; frontend code should branch on
@@ -543,6 +547,32 @@ func (h *Handler) postChildDoneComment(ctx context.Context, parent, completed db
 		return
 	}
 	h.dispatchParentAssigneeTrigger(ctx, parent, comment)
+}
+
+// childDoneDigest is the closed barrier's sub-task receipts (DENE-1679): the
+// parent hears each child's conclusion, pull requests and knowledge, not only
+// that they finished. A staged set lists the closed stage plus any child this
+// batch finished; an unstaged set lists every child. Mention links inside a
+// close summary are made inert, like the child title above.
+func (h *Handler) childDoneDigest(ctx context.Context, parent db.Issue, children []db.Issue, staged bool, closedStage int32, batchCompleted []db.Issue, statuses resolvedChildStatuses) string {
+	inBatch := map[pgtype.UUID]bool{}
+	for _, c := range batchCompleted {
+		inBatch[c.ID] = true
+	}
+	visible := visibleWithParent(parent)
+	// The statuses this pass already resolved; reading the catalog again
+	// would cost a second read per notification.
+	receipts := h.receiptsOf(ctx, parent.WorkspaceID, children, func(c db.Issue) bool {
+		if staged && !(c.Stage.Valid && c.Stage.Int32 == closedStage) && !inBatch[c.ID] {
+			return false
+		}
+		return visible(c)
+	}, statuses.status)
+	for i := range receipts {
+		receipts[i].Summary = sanitizeChildTitleForSystemComment(receipts[i].Summary)
+		receipts[i].Knowledge = sanitizeChildTitleForSystemComment(receipts[i].Knowledge)
+	}
+	return receipt.Digest(receipts)
 }
 
 // isTerminalChildStatus reports whether a child issue status counts as

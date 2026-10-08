@@ -79,7 +79,8 @@ opens with a 来源 line quoting the message the issue answered.
 
 When such an issue enters 待验收, done, blocked or cancelled, the server posts a
 receipt card into the chat: status, the close's summary, PRs, knowledge. A
-sub-issue of a ticket from the same chat stays quiet; its parent reports. A
+sub-issue of a ticket from the same chat stays quiet; its parent reports, and
+the parent's card lists each sub-issue's conclusion, PRs and knowledge. A
 chat run opens with the newest ten tickets and where each stands; answer "how
 is it going" from that list, not from memory. `multica chat tickets` shows the
 same result (`summary`, `pull_requests`, `knowledge`) for every ticket.

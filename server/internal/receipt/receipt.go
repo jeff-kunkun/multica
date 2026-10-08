@@ -34,7 +34,17 @@ type Receipt struct {
 	// close recorded none.
 	Knowledge string `json:"knowledge,omitempty"`
 	UpdatedAt string `json:"updated_at"`
+	// Children are the sub-tasks' receipts (DENE-1679): a parent reports for
+	// its children, so its card carries their conclusions.
+	Children []Receipt `json:"children,omitempty"`
 }
+
+// MaxChildren bounds the sub-task receipts one card or comment lists; the
+// rest are counted.
+const MaxChildren = 20
+
+// maxChildSummary bounds a sub-task's conclusion inside its parent's list.
+const maxChildSummary = 160
 
 // MaxSummary bounds the summary a receipt carries; the evidence comment on
 // the issue has the rest.
@@ -108,6 +118,48 @@ func (r Receipt) Markdown() string {
 	}
 	if r.Knowledge != "" {
 		fmt.Fprintf(&b, "\n\n沉淀：%s", r.Knowledge)
+	}
+	if d := Digest(r.Children); d != "" {
+		b.WriteString("\n\n" + d)
+	}
+	return b.String()
+}
+
+// Item is a sub-task's receipt as one markdown list item: the issue chip,
+// status, conclusion, pull requests and knowledge on one line.
+func (r Receipt) Item() string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "- [%s](mention://issue/%s) %s", r.Identifier, r.IssueID, StatusLabel(r.Status))
+	if s := Clip(r.Summary, maxChildSummary); s != "" {
+		fmt.Fprintf(&b, "：%s", s)
+	}
+	if len(r.PRs) > 0 {
+		labels := make([]string, 0, len(r.PRs))
+		for _, p := range r.PRs {
+			labels = append(labels, prLabel(p))
+		}
+		fmt.Fprintf(&b, "；PR %s", strings.Join(labels, "，"))
+	}
+	if r.Knowledge != "" {
+		fmt.Fprintf(&b, "；沉淀 %s", Clip(r.Knowledge, 120))
+	}
+	return b.String()
+}
+
+// Digest is the sub-task receipts as a markdown list under one heading;
+// empty when there are none.
+func Digest(children []Receipt) string {
+	if len(children) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("子任务回执：")
+	for i, c := range children {
+		if i == MaxChildren {
+			fmt.Fprintf(&b, "\n- 另有 %d 个子任务", len(children)-MaxChildren)
+			break
+		}
+		b.WriteString("\n" + c.Item())
 	}
 	return b.String()
 }
