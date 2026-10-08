@@ -3751,6 +3751,19 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 		}
 		h.applyClaimChatCounts(r.Context(), &projectCtx, task, cs.WorkspaceID)
 		projectCtx.applyTo(&resp)
+		linkedProjects, linkedErr := h.resolveClaimChatLinkedProjects(r.Context(), *task, cs)
+		if linkedErr != nil {
+			slog.Error("chat claim: load linked projects failed; preserving task for redelivery",
+				"task_id", uuidToString(task.ID),
+				"chat_session_id", uuidToString(cs.ID),
+				"error", linkedErr)
+			return resp, deliveredCommentIDs, issueSnapshot, agentSkillCount, builtinSkillCount, &claimBuildFailure{
+				outcome: "error_project_context",
+				status:  http.StatusInternalServerError,
+				message: "failed to load linked projects",
+			}
+		}
+		resp.LinkedProjects = linkedProjects
 		if !task.ForceFreshSession && !task.ChannelContextRevision.Valid {
 			// Resume chat sessions only when the stored pointer was produced
 			// by the same runtime as the claiming task. When the chat_session

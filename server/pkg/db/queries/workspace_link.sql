@@ -122,3 +122,16 @@ SELECT id, title, icon FROM project
 WHERE workspace_id = sqlc.arg('workspace_id')::uuid
   AND visibility <> 'private'
 ORDER BY title, id;
+
+-- name: ListLinkedReferenceProjects :many
+-- DENE-1643: the full rows of a link's shared projects, for the read-only
+-- project context (description, resources, memory). Same filter as
+-- ListLinkedViewProjects: still ticked on this link, still in the source,
+-- still not private. An empty project_ids filter means every ticked project.
+SELECT p.* FROM workspace_link_project lp
+JOIN project p ON p.id = lp.project_id
+WHERE lp.link_id = sqlc.arg('link_id')::uuid
+  AND p.workspace_id = sqlc.arg('source_workspace_id')::uuid
+  AND p.visibility <> 'private'
+  AND (cardinality(sqlc.arg('project_ids')::uuid[]) = 0 OR p.id = ANY(sqlc.arg('project_ids')::uuid[]))
+ORDER BY p.title, p.id;

@@ -209,6 +209,9 @@ WITH
 deleted_chat_session_projects AS (
     DELETE FROM chat_session_project WHERE workspace_id = $1
 ),
+deleted_chat_session_linked_projects AS (
+    DELETE FROM chat_session_linked_project WHERE workspace_id = $1
+),
 deleted_sessions AS (
     DELETE FROM chat_session WHERE chat_session.workspace_id = $1
 ),

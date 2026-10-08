@@ -557,6 +557,60 @@ func writeProjectContext(b *strings.Builder, ctx TaskContextForEnv) {
 	b.WriteString("When a deliverable must be attributed to one project — creating an issue, for example — infer the target from the request and the project descriptions above. If it is still ambiguous, ask the user which project to use instead of guessing.\n\n")
 }
 
+// writeReferenceProjects emits the read-only reference projects a chat
+// attached from another workspace (DENE-1643). Nothing is written without
+// them, so every other brief stays byte-identical. They are context only: the
+// run's working project and code source above are unchanged.
+func writeReferenceProjects(b *strings.Builder, ctx TaskContextForEnv) {
+	if len(ctx.ReferenceProjects) == 0 {
+		return
+	}
+	b.WriteString("## Read-only Reference Projects\n\n")
+	b.WriteString("Shared from other workspaces for reading only. Never open a worktree, commit or write in their directories, and never push to their repositories; `multica repo checkout` to read is fine.\n\n")
+	for _, project := range ctx.ReferenceProjects {
+		title := project.Title
+		if title == "" {
+			title = "Project"
+		}
+		if project.SourceName != "" {
+			fmt.Fprintf(b, "### %s (from %s)\n\n", title, project.SourceName)
+		} else {
+			fmt.Fprintf(b, "### %s\n\n", title)
+		}
+		if desc := strings.TrimSpace(project.Description); desc != "" {
+			b.WriteString(desc)
+			b.WriteString("\n\n")
+		}
+		writeProjectMemoryLine(b, project.MemoryLine)
+		if len(project.Resources) == 0 {
+			continue
+		}
+		for _, r := range project.Resources {
+			b.WriteString("- ")
+			b.WriteString(formatReferenceResource(r))
+			b.WriteString("\n")
+		}
+		b.WriteString("\n")
+	}
+}
+
+func formatReferenceResource(r ReferenceResourceForEnv) string {
+	var out string
+	switch {
+	case r.Path != "":
+		out = fmt.Sprintf("%s: `%s`", r.Type, r.Path)
+		if r.Missing {
+			out += " — not on this machine; read its repositories instead"
+		}
+	default:
+		out = fmt.Sprintf("%s: %s", r.Type, r.URL)
+	}
+	if r.Label != "" {
+		out = fmt.Sprintf("%s (%s)", out, r.Label)
+	}
+	return out
+}
+
 func writeProjectChatDirectoryHint(b *strings.Builder, project ProjectContextForEnv) {
 	if project.ChatCount <= 0 || strings.TrimSpace(project.ID) == "" {
 		return
@@ -1014,6 +1068,7 @@ func buildMetaSkillContentSlim(provider string, ctx TaskContextForEnv) string {
 	}
 
 	writeProjectContext(&b, ctx)
+	writeReferenceProjects(&b, ctx)
 	writeCodeSource(&b, ctx)
 
 	if kind == kindIssue {
