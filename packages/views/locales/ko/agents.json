@@ -267,6 +267,12 @@
     "prop_routing_tier_hint": "강도에 맞춰 이슈에 배정합니다",
     "prop_dispatch_mode": "배정 방식",
     "prop_dispatch_mode_hint": "지명만: 자동 배정되지 않고 사람이나 에이전트가 지명할 때만 받음",
+    "prop_dispatch_projects": "대상 프로젝트",
+    "prop_dispatch_projects_hint": "이 프로젝트의 작업에만 자동 배정합니다. 지명은 제한 없음",
+    "dispatch_projects_all": "모든 프로젝트",
+    "dispatch_projects_some": "{{first}} 외 {{count}}개",
+    "dispatch_projects_search": "프로젝트 검색…",
+    "dispatch_projects_empty": "프로젝트 없음",
     "routing_inherited_hint": "기본 역할을 따릅니다. 따로 설정하려면 위에서 따르기를 끄세요.",
     "prop_routing_usage": "사용량",
     "prop_routing_usage_hint": "계정 한도의 상대적인 여유"

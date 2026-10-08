@@ -259,6 +259,12 @@
     "prop_routing_tier_hint": "強さでタスクに割り当てます",
     "prop_dispatch_mode": "割り当て",
     "prop_dispatch_mode_hint": "指名のみ：自動割り当てされず、人やエージェントが指名した時だけ受ける",
+    "prop_dispatch_projects": "対象プロジェクト",
+    "prop_dispatch_projects_hint": "これらのプロジェクトのタスクだけに自動割り当て。指名は制限なし",
+    "dispatch_projects_all": "すべてのプロジェクト",
+    "dispatch_projects_some": "{{first}} ほか {{count}} 件",
+    "dispatch_projects_search": "プロジェクトを検索…",
+    "dispatch_projects_empty": "プロジェクトなし",
     "routing_inherited_hint": "基本ロールに従っています。個別に設定するには、上で追従をオフにしてください。",
     "prop_routing_usage": "使用量",
     "prop_routing_usage_hint": "アカウント枠の相対的な余裕"

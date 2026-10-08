@@ -17,7 +17,8 @@ What it may do, and only when the slot is still **empty**:
   stage/barrier; the parent is the single issue that later enters `in_review`
   for a unified review of the full child tree.
 - **`todo`** — fill the assignee with a seat from the tier ladder (seats with
-  `dispatch_mode: mention_only` are never on it, whatever their tier). For a
+  `dispatch_mode: mention_only` are never on it, whatever their tier, and a
+  seat with `dispatch_projects` set is on it only for those projects' issues). For a
   top-level issue, also fill the issue's 验收席 with a seat or 「不需要验收」.
   **Routing never writes a person
   into 验收席**: an issue a person holds is one routing never touches again, so
@@ -292,6 +293,12 @@ alone, exactly as if routing were off. Nothing is posted on a ticket about it.
 The reason is shown in one place only: Settings → Routing, which reports the
 state, the reason, when the model last answered, and offers a re-check. If
 automatic dispatch seems to have stopped, that section is where to look.
+
+The facts also set a floor on the tier: cross-module, high-risk or vague work
+is at least strong. A model answering below the floor is raised to it, the
+decision comment says 「判断模型给的是 X 档，按规则抬到 Y 档」, and
+`multica issue route <id> --output json` reports `tier` (used) and
+`judged_tier` (the model's own, set only when raised).
 
 Agent-created tickets should pass `--routing-facts` with scope, clarity, risk,
 and needs_human (plus an optional summary). The creator facts are accepted
