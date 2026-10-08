@@ -15,9 +15,11 @@ import (
 
 func TestCheckChatSedimentHoldsTheClaimAgainstGit(t *testing.T) {
 	files := []string{"CONTEXT.md", "server/x.go"}
+	memory := []closeprotocol.MemoryFile{{Path: "CONTEXT.md", Bytes: 200}}
 	ok := ChatSedimentRequest{
-		Changes:        []closeprotocol.KnowledgeChange{{Location: "context", Summary: "词条"}},
+		Changes:        []closeprotocol.KnowledgeChange{{Location: "context", Action: "new", Summary: "词条"}},
 		DeliveredFiles: &files,
+		MemoryFiles:    &memory,
 		Commits:        []string{"ABCDEF1234567"},
 		Mainline:       "kun",
 		Landing:        &closeprotocol.SedimentLanding{Via: closeprotocol.LandingPR, Remote: "github.com/o/r", PRURL: "https://github.com/o/r/pull/7", PRBase: "kun", PRMerged: true},
@@ -32,13 +34,21 @@ func TestCheckChatSedimentHoldsTheClaimAgainstGit(t *testing.T) {
 		mutate func(*ChatSedimentRequest)
 		want   string
 	}{
-		"no changes":     {func(r *ChatSedimentRequest) { r.Changes = nil }, "知识审计"},
-		"no file list":   {func(r *ChatSedimentRequest) { r.DeliveredFiles = nil }, "缺 delivered_files"},
-		"file not there": {func(r *ChatSedimentRequest) { r.DeliveredFiles = &other }, "没有对应文件"},
-		"no mainline":    {func(r *ChatSedimentRequest) { r.Mainline = " " }, "缺 mainline"},
-		"no commits":     {func(r *ChatSedimentRequest) { r.Commits = nil }, "缺 commits"},
-		"not a sha":      {func(r *ChatSedimentRequest) { r.Commits = []string{"main"} }, "不是 git SHA"},
-		"no landing":     {func(r *ChatSedimentRequest) { r.Landing = nil }, "缺 landing"},
+		"no changes":      {func(r *ChatSedimentRequest) { r.Changes = nil }, "知识审计"},
+		"no file list":    {func(r *ChatSedimentRequest) { r.DeliveredFiles = nil }, "缺 delivered_files"},
+		"file not there":  {func(r *ChatSedimentRequest) { r.DeliveredFiles = &other }, "没有对应文件"},
+		"no mainline":     {func(r *ChatSedimentRequest) { r.Mainline = " " }, "缺 mainline"},
+		"no commits":      {func(r *ChatSedimentRequest) { r.Commits = nil }, "缺 commits"},
+		"not a sha":       {func(r *ChatSedimentRequest) { r.Commits = []string{"main"} }, "不是 git SHA"},
+		"no landing":      {func(r *ChatSedimentRequest) { r.Landing = nil }, "缺 landing"},
+		"no memory facts": {func(r *ChatSedimentRequest) { r.MemoryFiles = nil }, "缺 memory_files"},
+		"no action": {func(r *ChatSedimentRequest) {
+			r.Changes = []closeprotocol.KnowledgeChange{{Location: "context", Summary: "词条"}}
+		}, "老板层沉淀"},
+		"silent delete": {func(r *ChatSedimentRequest) {
+			m := []closeprotocol.MemoryFile{{Path: "CONTEXT.md", Bytes: 200, Deleted: 3}}
+			r.MemoryFiles = &m
+		}, "不悄悄删"},
 		"unpushed": {func(r *ChatSedimentRequest) {
 			r.Landing = &closeprotocol.SedimentLanding{Via: closeprotocol.LandingPush, Remote: "github.com/o/r"}
 		}, "还没收到"},
@@ -143,17 +153,18 @@ func TestChatSedimentIsRecordedAndListed(t *testing.T) {
 		testHandler.CreateChatSediment(w, req)
 		return w
 	}
-	changes := []any{map[string]any{"location": "agents", "summary": "聊天收尾要沉淀"}}
+	changes := []any{map[string]any{"location": "agents", "action": "update", "entry": "聊天", "summary": "聊天收尾要沉淀"}}
 	landing := map[string]any{"via": "push", "remote": "github.com/o/r", "remote_has_commits": true}
+	memory := []any{map[string]any{"path": "AGENTS.md", "bytes": 900, "deleted": 1}}
 
-	if w := post(map[string]any{"changes": changes, "delivered_files": []string{"README.md"}, "commits": []string{"abcdef1"}, "mainline": "kun", "landing": landing}); w.Code != http.StatusBadRequest {
+	if w := post(map[string]any{"changes": changes, "delivered_files": []string{"README.md"}, "commits": []string{"abcdef1"}, "mainline": "kun", "landing": landing, "memory_files": memory}); w.Code != http.StatusBadRequest {
 		t.Fatalf("a sediment whose file is not delivered: status = %d: %s", w.Code, w.Body.String())
 	}
 	if w := post(map[string]any{"changes": changes, "delivered_files": []string{"AGENTS.md"}, "commits": []string{"abcdef1"}, "mainline": "kun",
 		"landing": map[string]any{"via": "push", "remote": "github.com/o/r"}}); w.Code != http.StatusBadRequest {
 		t.Fatalf("an unpushed sediment: status = %d: %s", w.Code, w.Body.String())
 	}
-	w := post(map[string]any{"changes": changes, "delivered_files": []string{"AGENTS.md"}, "commits": []string{"abcdef1"}, "mainline": "kun", "landing": landing})
+	w := post(map[string]any{"changes": changes, "delivered_files": []string{"AGENTS.md"}, "commits": []string{"abcdef1"}, "mainline": "kun", "landing": landing, "memory_files": memory})
 	if w.Code != http.StatusCreated {
 		t.Fatalf("status = %d: %s", w.Code, w.Body.String())
 	}
@@ -161,7 +172,8 @@ func TestChatSedimentIsRecordedAndListed(t *testing.T) {
 	if err := json.NewDecoder(w.Body).Decode(&created); err != nil {
 		t.Fatal(err)
 	}
-	if created.SourceKind != "chat" || created.Mainline != "kun" || len(created.Changes) != 1 || created.Changes[0].Files[0] != "AGENTS.md" {
+	if created.SourceKind != "chat" || created.Layer != "boss" || created.Mainline != "kun" || len(created.Changes) != 1 ||
+		created.Changes[0].Files[0] != "AGENTS.md" || created.Changes[0].Action != "update" || created.Changes[0].Entry != "聊天" {
 		t.Fatalf("created = %+v", created)
 	}
 
@@ -215,5 +227,93 @@ func TestMemoryRoundCarriesTheSourceTicketsDigest(t *testing.T) {
 		if !strings.Contains(desc, want) {
 			t.Fatalf("description lacks %q:\n%s", want, desc)
 		}
+	}
+}
+
+// DENE-1680: a parent whose three children are done opens one boss-layer
+// round. Its close must say what each change does to existing entries, may
+// not quietly delete, stays under the map-file limit, and the sediment it
+// records carries the parent as its source.
+func TestBossRoundSedimentCarriesSourceAndHygiene(t *testing.T) {
+	memoryProgressReady(t)
+	seat := openSedimentSeat(t)
+	projectID := dbfx.Project(t, "boss sediment project")
+	forgetSediment(t, projectID)
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM knowledge_sediment WHERE project_id = $1`, projectID)
+	})
+	parent := dbfx.Issue(t, "boss sediment parent", testutil.Cols{"status": "in_progress", "project_id": projectID})
+	var children []string
+	for i := 0; i < 3; i++ {
+		children = append(children, dbfx.Issue(t, "boss sediment child", testutil.Cols{
+			"status": "in_progress", "parent_issue_id": parent, "project_id": projectID,
+		}))
+	}
+	for _, child := range children {
+		finishChild(t, child, "in_progress")
+	}
+	rounds := sedimentIDs(t, projectID)
+	if len(rounds) != 1 {
+		t.Fatalf("three children opened %d rounds, want 1", len(rounds))
+	}
+	round := rounds[0]
+	if !strings.Contains(issueDescription(t, round), "老板层沉淀") {
+		t.Fatalf("round description lacks the boss-layer hint: %s", issueDescription(t, round))
+	}
+	if got := issueMetaString(t, round, sedimentSourcesKey); !strings.Contains(got, parent) {
+		t.Fatalf("round sources = %q, want parent %s", got, parent)
+	}
+
+	dbfx.Exec(t, `UPDATE issue SET status = 'in_progress' WHERE id = $1`, round)
+	testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE issue_id = $1`, round)
+	taskID := insertIssueTaskWithStatus(t, seat, round, "running")
+	body := func(changes []any, memory []any) map[string]any {
+		return map[string]any{
+			"outcome":         "done",
+			"evidence":        "合并了子票的经验。",
+			"no_code_reason":  "纯文档",
+			"delivered_files": []string{"AGENTS.md"},
+			"memory_files":    memory,
+			"knowledge_audit": map[string]any{"changes": changes},
+		}
+	}
+	update := map[string]any{"location": "agents", "action": "update", "entry": "工作单", "summary": "并入三张子票的派单经验"}
+	supersede := map[string]any{"location": "agents", "action": "supersede", "entry": "旧派单", "summary": "被自动派票取代"}
+	small := []any{map[string]any{"path": "AGENTS.md", "bytes": 4000, "deleted": 2, "supersede_marks": 1}}
+
+	for name, tc := range map[string]struct {
+		changes []any
+		memory  []any
+		want    string
+	}{
+		"no action":     {[]any{map[string]any{"location": "agents", "summary": "s"}}, small, "没声明动作"},
+		"silent delete": {[]any{map[string]any{"location": "agents", "action": "new", "summary": "s"}}, small, "不悄悄删"},
+		"over limit": {[]any{update}, []any{map[string]any{"path": "AGENTS.md", "bytes": closeprotocol.MapFileMaxBytes + 100,
+			"sections": []any{map[string]any{"heading": "工作单", "bytes": 9000}, map[string]any{"heading": "旧派单", "bytes": 500, "superseded": true}}}},
+			"先删已标取代的 「旧派单」"},
+	} {
+		w := closeIssueHTTP(t, round, seat, taskID, body(tc.changes, tc.memory))
+		if w.Code != http.StatusBadRequest || !strings.Contains(w.Body.String(), tc.want) {
+			t.Fatalf("%s: status = %d: %s", name, w.Code, w.Body.String())
+		}
+		assertCloseRejectedClean(t, round, "in_progress")
+	}
+
+	w := closeIssueHTTP(t, round, seat, taskID, body([]any{update, supersede}, small))
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d: %s", w.Code, w.Body.String())
+	}
+	var layer, sources string
+	dbfx.QueryRow(t, `SELECT layer, sources::text FROM knowledge_sediment WHERE issue_id = $1`, round).Scan(&layer, &sources)
+	if layer != "boss" || !strings.Contains(sources, parent) {
+		t.Fatalf("sediment layer = %q sources = %q", layer, sources)
+	}
+	items := testHandler.recentKnowledgeSediments(context.Background(), loadTestProject(t, projectID))
+	if len(items) != 1 || items[0].Layer != "boss" || len(items[0].Sources) != 1 ||
+		items[0].Sources[0].Identifier == nil || items[0].Sources[0].Title != "boss sediment parent" {
+		t.Fatalf("recent sediments = %+v", items)
+	}
+	if got := items[0].Changes; len(got) != 2 || got[1].Action != "supersede" || got[1].Entry != "旧派单" {
+		t.Fatalf("changes = %+v", got)
 	}
 }

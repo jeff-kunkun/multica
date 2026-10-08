@@ -59,6 +59,15 @@ export interface ProjectMemoryIssue {
   title: string;
 }
 
+// SedimentSource is what a boss-layer sediment rolled up: the parent ticket
+// whose children finished, or the project that completed (DENE-1680).
+export interface SedimentSource {
+  kind: "issue" | "project";
+  id: string;
+  identifier: string | null;
+  title: string;
+}
+
 // KnowledgeSediment is one delivery that wrote project memory: an issue close
 // or a chat that merged into the main line (DENE-1661).
 export interface KnowledgeSediment {
@@ -76,6 +85,9 @@ export interface KnowledgeSediment {
   author_type: string;
   author_id: string;
   created_at: string;
+  /** "boss" rolls up finished work across tickets; absent on older servers. */
+  layer?: "worker" | "boss";
+  sources?: SedimentSource[];
 }
 
 export interface ProjectMemoryStatus {

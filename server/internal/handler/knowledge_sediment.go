@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -10,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/closeprotocol"
 	"github.com/multica-ai/multica/server/internal/progress"
@@ -41,6 +43,105 @@ type KnowledgeSedimentResponse struct {
 	AuthorType      string                          `json:"author_type"`
 	AuthorID        string                          `json:"author_id"`
 	CreatedAt       string                          `json:"created_at"`
+	// Layer is worker (an executor's close) or boss (a round opened by a
+	// parent ticket or a project, or a chat settling its work; DENE-1680).
+	// Sources are what a boss-layer round summed up.
+	Layer   string                   `json:"layer"`
+	Sources []SedimentSourceResponse `json:"sources"`
+}
+
+// The two sediment layers (DENE-1680).
+const (
+	sedimentLayerWorker = "worker"
+	sedimentLayerBoss   = "boss"
+)
+
+// sedimentSourcesKey is the round ticket's metadata key listing what opened
+// it as a boss-layer round: the parent tickets and projects it sums up.
+const sedimentSourcesKey = "sediment_sources"
+
+// sedimentSource is one thing a boss-layer round sums up.
+type sedimentSource struct {
+	Kind string `json:"kind"` // issue or project
+	ID   string `json:"id"`
+}
+
+// SedimentSourceResponse is a source with what a reader needs to name it.
+type SedimentSourceResponse struct {
+	Kind       string  `json:"kind"`
+	ID         string  `json:"id"`
+	Identifier *string `json:"identifier"`
+	Title      string  `json:"title"`
+}
+
+// roundSources reads the boss-layer sources an issue carries; empty for any
+// ticket that is not a boss-layer round.
+func roundSources(issue db.Issue) []sedimentSource {
+	var metadata map[string]json.RawMessage
+	if json.Unmarshal(issue.Metadata, &metadata) != nil {
+		return nil
+	}
+	var sources []sedimentSource
+	if json.Unmarshal(metadata[sedimentSourcesKey], &sources) != nil {
+		return nil
+	}
+	return sources
+}
+
+// isBossRound reports whether closing this issue is a boss-layer sediment.
+func isBossRound(issue db.Issue) bool { return len(roundSources(issue)) > 0 }
+
+// addRoundSource records source on the round, once.
+func (h *Handler) addRoundSource(ctx context.Context, round db.Issue, source sedimentSource) error {
+	if fresh, err := h.Queries.GetIssue(ctx, round.ID); err == nil {
+		round = fresh
+	}
+	sources := roundSources(round)
+	for _, existing := range sources {
+		if existing == source {
+			return nil
+		}
+	}
+	value, err := json.Marshal(append(sources, source))
+	if err != nil {
+		return err
+	}
+	_, err = h.Queries.SetIssueMetadataKey(ctx, db.SetIssueMetadataKeyParams{
+		ID: round.ID, WorkspaceID: round.WorkspaceID, Key: sedimentSourcesKey, Value: value,
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil
+	}
+	return err
+}
+
+// resolveSedimentSources names each source for a reader. A source that can
+// no longer be read keeps its kind and id.
+func (h *Handler) resolveSedimentSources(ctx context.Context, workspaceID pgtype.UUID, raw []byte) []SedimentSourceResponse {
+	var sources []sedimentSource
+	_ = json.Unmarshal(raw, &sources)
+	out := make([]SedimentSourceResponse, 0, len(sources))
+	prefix := ""
+	for _, source := range sources {
+		item := SedimentSourceResponse{Kind: source.Kind, ID: source.ID}
+		switch source.Kind {
+		case "issue":
+			if issue, err := h.Queries.GetIssueInWorkspace(ctx, db.GetIssueInWorkspaceParams{ID: parseUUID(source.ID), WorkspaceID: workspaceID}); err == nil {
+				if prefix == "" {
+					prefix = h.getIssuePrefix(ctx, workspaceID)
+				}
+				identifier := issueIdentifier(prefix, issue.Number)
+				item.Identifier = &identifier
+				item.Title = issue.Title
+			}
+		case "project":
+			if project, err := h.Queries.GetProjectInWorkspace(ctx, db.GetProjectInWorkspaceParams{ID: parseUUID(source.ID), WorkspaceID: workspaceID}); err == nil {
+				item.Title = project.Title
+			}
+		}
+		out = append(out, item)
+	}
+	return out
 }
 
 // recordIssueSediment writes the close's sediment row inside the close
@@ -68,7 +169,16 @@ func recordIssueSediment(ctx context.Context, q *db.Queries, issue db.Issue, aud
 	if err != nil {
 		return err
 	}
+	layer, sources := sedimentLayerWorker, []byte("[]")
+	if roundSrc := roundSources(issue); len(roundSrc) > 0 {
+		layer = sedimentLayerBoss
+		if sources, err = json.Marshal(roundSrc); err != nil {
+			return err
+		}
+	}
 	_, err = q.CreateKnowledgeSediment(ctx, db.CreateKnowledgeSedimentParams{
+		Layer:       layer,
+		Sources:     sources,
 		WorkspaceID: issue.WorkspaceID,
 		ProjectID:   issue.ProjectID,
 		IssueID:     issue.ID,
@@ -98,7 +208,9 @@ func (h *Handler) recentKnowledgeSediments(ctx context.Context, project db.Proje
 			ID: row.ID, WorkspaceID: row.WorkspaceID, ProjectID: row.ProjectID, IssueID: row.IssueID,
 			ChatSessionID: row.ChatSessionID, Changes: row.Changes, Verified: row.Verified, Mainline: row.Mainline,
 			Commits: row.Commits, PrUrl: row.PrUrl, AuthorType: row.AuthorType, AuthorID: row.AuthorID, CreatedAt: row.CreatedAt,
+			Layer: row.Layer,
 		})
+		item.Sources = h.resolveSedimentSources(ctx, row.WorkspaceID, row.Sources)
 		if row.IssueNumber.Valid {
 			identifier := issueIdentifier(prefix, row.IssueNumber.Int32)
 			item.IssueIdentifier = &identifier
@@ -123,6 +235,11 @@ func sedimentToResponse(row db.KnowledgeSediment) KnowledgeSedimentResponse {
 		AuthorType: row.AuthorType,
 		AuthorID:   uuidToString(row.AuthorID),
 		CreatedAt:  timestampToString(row.CreatedAt),
+		Layer:      row.Layer,
+		Sources:    []SedimentSourceResponse{},
+	}
+	if item.Layer == "" {
+		item.Layer = sedimentLayerWorker
 	}
 	if row.IssueID.Valid {
 		item.SourceKind = "issue"
@@ -146,6 +263,9 @@ type ChatSedimentRequest struct {
 	Commits        []string                        `json:"commits"`
 	Mainline       string                          `json:"mainline"`
 	Landing        *closeprotocol.SedimentLanding  `json:"landing"`
+	// MemoryFiles are git's facts about the delivered memory files
+	// (DENE-1680); a chat sediment is boss-layer, so they are required.
+	MemoryFiles *[]closeprotocol.MemoryFile `json:"memory_files"`
 }
 
 var commitSHAPattern = regexp.MustCompile(`^[0-9a-f]{7,40}$`)
@@ -184,6 +304,15 @@ func checkChatSediment(req ChatSedimentRequest) (closeprotocol.KnowledgeAudit, [
 	}
 	if reason := closeprotocol.CheckSedimentLanding(*req.Landing, req.Mainline); reason != "" {
 		return closeprotocol.KnowledgeAudit{}, nil, reason
+	}
+	// A chat settling its work is the boss layer (DENE-1680): every change
+	// says what it did to the existing entries, deletions are declared, and
+	// the map files stay under their limit.
+	if req.MemoryFiles == nil {
+		return closeprotocol.KnowledgeAudit{}, nil, "缺 memory_files：用新版 `multica chat sediment` 上报，它会从 git 读出记忆文件的体积和删改"
+	}
+	if err := closeprotocol.CheckMemoryHygiene(bound, req.MemoryFiles, true); err != nil {
+		return closeprotocol.KnowledgeAudit{}, nil, err.Error()
 	}
 	return bound, commits, ""
 }
@@ -226,6 +355,8 @@ func (h *Handler) CreateChatSediment(w http.ResponseWriter, r *http.Request) {
 		PrUrl:         strings.TrimSpace(req.Landing.PRURL),
 		AuthorType:    actorType,
 		AuthorID:      parseUUID(actorID),
+		Layer:         sedimentLayerBoss,
+		Sources:       []byte("[]"),
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to record chat sediment")
@@ -357,6 +488,12 @@ func digestAudit(raw string) string {
 	parts := make([]string, 0, len(audit.Changes))
 	for _, change := range audit.Changes {
 		part := change.Location
+		if change.Action != "" {
+			part += ":" + change.Action
+			if change.Entry != "" {
+				part += "「" + change.Entry + "」"
+			}
+		}
 		if len(change.Files) > 0 {
 			part += "(" + strings.Join(change.Files, "、") + ")"
 		}

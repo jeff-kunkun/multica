@@ -348,8 +348,8 @@ files must be in the delivery). A chat that changed code or settled something
 worth keeping does it at the end, then records it:
 
 ```bash
-multica chat sediment --knowledge context=<summary> [--knowledge agents=<summary>]
-multica chat sediment --knowledge adr=<summary> --pr <merged-pr-url>
+multica chat sediment --knowledge context:new=<summary> [--knowledge agents:update:<entry>=<summary>]
+multica chat sediment --knowledge adr:new=<summary> --pr <merged-pr-url>
 multica chat sediment --history --output json
 ```
 
@@ -368,9 +368,15 @@ multica chat sediment --history --output json
   shared directory) is recorded as is.
 - Each `--knowledge` slot must be written by a delivered file, or nothing is
   recorded. Plain Q&A records nothing.
+- A chat's sediment is boss-layer: every slot declares `new`, `update`,
+  `merge` or `supersede` (see `close-protocol.md`), removed lines need
+  `update` / `supersede`, and a map file over 32 KiB refuses before anything
+  is merged.
 
 `multica project memory status` returns `recent_sediments`: which ticket or
-chat wrote which files, onto which line, verified or not.
+chat wrote which files, onto which line, verified or not; a boss-layer one
+also carries `layer: boss`, its `sources` (the parent ticket or project it
+rolled up), and each change's `action` / `entry`.
 
 ### Configuring the sediment agent seat
 

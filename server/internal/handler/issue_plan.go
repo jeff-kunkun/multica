@@ -523,7 +523,7 @@ func (h *Handler) AdvanceIssueStage(w http.ResponseWriter, r *http.Request) {
 		resp.Message = fmt.Sprintf("stage %d of %s promoted to todo: %s", stage, parentLabel, strings.Join(labels, ", "))
 		if parent.ProjectID.Valid {
 			reason := fmt.Sprintf("阶段推进：%s 进入第 %d 阶段", parentLabel, stage)
-			resp.SedimentError = h.noteMemoryMilestone(r.Context(), parent.WorkspaceID, parent.ProjectID, reason, h.sedimentDigest(r.Context(), childrenBelowStage(children, stage)))
+			resp.SedimentError = h.noteMemoryMilestone(r.Context(), parent.WorkspaceID, parent.ProjectID, reason, h.sedimentDigest(r.Context(), childrenBelowStage(children, stage)), &sedimentSource{Kind: "issue", ID: uuidToString(parent.ID)})
 		}
 	} else {
 		resp.Message = fmt.Sprintf("stage %d of %s was already promoted by a concurrent advance", stage, parentLabel)

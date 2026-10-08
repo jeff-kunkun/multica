@@ -2,8 +2,13 @@ package execenv
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
+
+	"github.com/multica-ai/multica/server/internal/closeprotocol"
+	"github.com/multica-ai/multica/server/internal/projectmemory"
 )
 
 // Knowledge sediment rides the delivery (DENE-1661).
@@ -20,13 +25,26 @@ import (
 // The first base HEAD is ahead of wins. nil, "" means no base was found or
 // HEAD is already on every one of them, so nothing can be said.
 func DeliveredFiles(dir string, bases ...string) ([]string, string, error) {
+	r, err := deliveryRange(dir, bases...)
+	if err != nil || r.ref == "" {
+		return nil, "", err
+	}
+	files, err := changedFiles(r.root, r.base, r.head)
+	return files, r.ref, err
+}
+
+type delivery struct{ root, ref, base, head string }
+
+// deliveryRange finds the base DeliveredFiles diffs against; ref "" means
+// none was found.
+func deliveryRange(dir string, bases ...string) (delivery, error) {
 	gitRoot, err := runGitTrimmed(dir, "rev-parse", "--show-toplevel")
 	if err != nil || gitRoot == "" {
-		return nil, "", fmt.Errorf("%s is not inside a git checkout", dir)
+		return delivery{}, fmt.Errorf("%s is not inside a git checkout", dir)
 	}
 	head, err := runGitTrimmed(gitRoot, "rev-parse", "--verify", "HEAD")
 	if err != nil {
-		return nil, "", fmt.Errorf("resolve HEAD: %w", err)
+		return delivery{}, fmt.Errorf("resolve HEAD: %w", err)
 	}
 	pick := func(candidates []string) (string, string) {
 		best, bestBase, bestCount := "", "", -1
@@ -57,11 +75,97 @@ func DeliveredFiles(dir string, bases ...string) ([]string, string, error) {
 	if ref == "" {
 		ref, base = pick(MainlineCandidates(gitRoot))
 	}
-	if ref == "" {
-		return nil, "", nil
+	return delivery{root: gitRoot, ref: ref, base: base, head: head}, nil
+}
+
+// DeliveredMemoryFiles is the memory-hygiene account (DENE-1680) of the
+// delivery DeliveredFiles sees: for each project-memory file it changes, the
+// size at HEAD, the lines removed, the added supersede marks, and the
+// sections. nil when no base is found.
+func DeliveredMemoryFiles(dir string, bases ...string) ([]closeprotocol.MemoryFile, error) {
+	r, err := deliveryRange(dir, bases...)
+	if err != nil || r.ref == "" {
+		return nil, err
 	}
-	files, err := changedFiles(gitRoot, base, head)
-	return files, ref, err
+	files, err := changedFiles(r.root, r.base, r.head)
+	if err != nil {
+		return nil, err
+	}
+	return memoryFiles(r.root, [][2]string{{r.base, r.head}}, files, func(path string) (string, error) {
+		return runGitStdout(r.root, "show", r.head+":"+path)
+	})
+}
+
+// CommitMemoryFiles is DeliveredMemoryFiles for a chat's commits: each
+// commit is diffed against its first parent, and sizes are read from the
+// checkout, which holds what the chat merged.
+func CommitMemoryFiles(dir string, commits, files []string) ([]closeprotocol.MemoryFile, error) {
+	gitRoot, err := runGitTrimmed(dir, "rev-parse", "--show-toplevel")
+	if err != nil || gitRoot == "" {
+		return nil, fmt.Errorf("%s is not inside a git checkout", dir)
+	}
+	diffs := make([][2]string, 0, len(commits))
+	for _, sha := range commits {
+		if _, err := runGitTrimmed(gitRoot, "rev-parse", "--verify", sha+"^{commit}"); err != nil {
+			// A PR merged on the forge is not here yet: fetch it once.
+			_, _ = runGitTrimmed(gitRoot, "fetch", "--quiet", "--no-tags", "origin", sha)
+			if _, err := runGitTrimmed(gitRoot, "rev-parse", "--verify", sha+"^{commit}"); err != nil {
+				return nil, fmt.Errorf("commit %s is not in this checkout: %w", sha, err)
+			}
+		}
+		parent := sha + "^"
+		if _, err := runGitTrimmed(gitRoot, "rev-parse", "--verify", parent); err != nil {
+			parent = emptyTree
+		}
+		diffs = append(diffs, [2]string{parent, sha})
+	}
+	return memoryFiles(gitRoot, diffs, files, func(path string) (string, error) {
+		raw, err := os.ReadFile(filepath.Join(gitRoot, filepath.FromSlash(path)))
+		return string(raw), err
+	})
+}
+
+// emptyTree is git's well-known empty tree, the parent of a root commit.
+const emptyTree = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
+
+func memoryFiles(root string, diffs [][2]string, files []string, read func(string) (string, error)) ([]closeprotocol.MemoryFile, error) {
+	out := []closeprotocol.MemoryFile{}
+	for _, path := range files {
+		if !isMemoryFile(path) {
+			continue
+		}
+		content, err := read(path)
+		if err != nil {
+			return nil, fmt.Errorf("read %s: %w", path, err)
+		}
+		file := closeprotocol.MemoryFile{Path: path, Bytes: len(content), Sections: closeprotocol.MemorySections(content)}
+		for _, d := range diffs {
+			patch, err := runGitStdout(root, "diff", "--no-renames", "-U0", d[0], d[1], "--", path)
+			if err != nil {
+				return nil, fmt.Errorf("git diff %s: %w", path, err)
+			}
+			for _, line := range strings.Split(patch, "\n") {
+				switch {
+				case strings.HasPrefix(line, "+++"), strings.HasPrefix(line, "---"):
+				case strings.HasPrefix(line, "-"):
+					file.Deleted++
+				case strings.HasPrefix(line, "+") && closeprotocol.IsSupersedeMark(line):
+					file.SupersedeMarks++
+				}
+			}
+		}
+		out = append(out, file)
+	}
+	return out, nil
+}
+
+func isMemoryFile(path string) bool {
+	for _, key := range projectmemory.LocationKeys() {
+		if len(projectmemory.MatchFiles(key, []string{path})) > 0 {
+			return true
+		}
+	}
+	return false
 }
 
 // changedFiles lists the paths to adds or changes against from. Deletions

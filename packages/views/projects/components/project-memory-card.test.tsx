@@ -90,4 +90,38 @@ describe("ProjectMemoryCard", () => {
     expect(screen.getByText("Not checked")).toBeTruthy();
     expect(screen.queryByText(/Last sediment/)).toBeNull();
   });
+
+  it("shows what a boss-layer sediment rolled up and what each change did", async () => {
+    const status: ProjectMemoryStatus = {
+      project_id: "p-1", workspace_id: "ws-1", source: "local_directory",
+      locations: [location("agents", "AGENTS.md")],
+      missing: [], observed_at: null, latest_sediment_at: "2026-10-01T00:00:00Z",
+      sediment_issue: null, sediment_agent_configured: true, sediment_error: null,
+      recent_sediments: [
+        {
+          id: "s-1", source_kind: "issue", issue_id: "i-9", issue_identifier: "DENE-9", chat_session_id: null,
+          source_title: "沉淀第 1 轮", verified: true, mainline: "kun", commits: [], pr_url: "",
+          author_type: "agent", author_id: "a-1", created_at: new Date().toISOString(),
+          layer: "boss",
+          sources: [{ kind: "issue", id: "i-1", identifier: "DENE-1672", title: "回执贯通" }],
+          changes: [
+            { location: "agents", action: "update", entry: "工作单", summary: "s", files: ["AGENTS.md"] },
+            { location: "agents", action: "supersede", entry: "旧派单", summary: "s", files: ["AGENTS.md"] },
+          ],
+        },
+      ],
+    };
+    mockGetProjectMemory.mockResolvedValue(status);
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={qc}>
+        <I18nProvider locale="en" resources={TEST_RESOURCES}>
+          <ProjectMemoryCard projectId="p-1" />
+        </I18nProvider>
+      </QueryClientProvider>,
+    );
+    expect(await screen.findByText("Rolled up from DENE-1672")).toBeTruthy();
+    expect(screen.getByText("Updated「工作单」 · AGENTS.md")).toBeTruthy();
+    expect(screen.getByText("Marked「旧派单」superseded · AGENTS.md")).toBeTruthy();
+  });
 });

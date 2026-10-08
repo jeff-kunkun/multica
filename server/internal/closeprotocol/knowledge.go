@@ -23,8 +23,15 @@ const knowledgeSummaryMax = 500
 // KnowledgeChange is one checklist slot this close wrote, plus what changed.
 // Files are the delivered paths that write the slot (DENE-1661): the server
 // fills them from the delivery's file list, never from the caller's claim.
+//
+// Action and Entry say how the change treats what the file already holds
+// (DENE-1680): a new entry, an update of an existing one, a new one waiting to
+// be merged into an existing one, or an old one marked superseded. A boss-layer
+// sediment must say it for every change; elsewhere it is optional.
 type KnowledgeChange struct {
 	Location string   `json:"location"`
+	Action   string   `json:"action,omitempty"`
+	Entry    string   `json:"entry,omitempty"`
 	Summary  string   `json:"summary"`
 	Files    []string `json:"files,omitempty"`
 }
@@ -53,7 +60,10 @@ func CanonicalKnowledgeAudit(audit KnowledgeAudit) (KnowledgeAudit, string, erro
 		if location == "" && summary == "" {
 			continue
 		}
-		changes = append(changes, KnowledgeChange{Location: location, Summary: summary, Files: cleanFiles(change.Files)})
+		changes = append(changes, KnowledgeChange{
+			Location: location, Action: strings.ToLower(strings.TrimSpace(change.Action)), Entry: strings.TrimSpace(change.Entry),
+			Summary: summary, Files: cleanFiles(change.Files),
+		})
 	}
 	if audit.None && len(changes) > 0 {
 		return KnowledgeAudit{}, "", fmt.Errorf("知识审计不能同时声明无够格知识又列出改动")
@@ -72,10 +82,20 @@ func CanonicalKnowledgeAudit(audit KnowledgeAudit) (KnowledgeAudit, string, erro
 		if utf8.RuneCountInString(change.Summary) > knowledgeSummaryMax {
 			return KnowledgeAudit{}, "", fmt.Errorf("知识审计位置 %q 的摘要超过 %d 字", change.Location, knowledgeSummaryMax)
 		}
-		if _, ok := seen[change.Location]; ok {
-			return KnowledgeAudit{}, "", fmt.Errorf("知识审计位置 %q 写了两次", change.Location)
+		if err := checkChangeAction(change); err != nil {
+			return KnowledgeAudit{}, "", err
 		}
-		seen[change.Location] = struct{}{}
+		// One location may carry several changes when each names its own
+		// entry (update one rule, supersede another); the same entry twice
+		// is still a typo.
+		key := change.Location + "\x00" + change.Entry
+		if _, ok := seen[key]; ok {
+			if change.Entry == "" {
+				return KnowledgeAudit{}, "", fmt.Errorf("知识审计位置 %q 写了两次", change.Location)
+			}
+			return KnowledgeAudit{}, "", fmt.Errorf("知识审计位置 %q 的条目「%s」写了两次", change.Location, change.Entry)
+		}
+		seen[key] = struct{}{}
 	}
 	stored := KnowledgeAudit{}
 	if audit.None {
@@ -111,7 +131,7 @@ func ParseStoredKnowledgeAudit(raw string) (KnowledgeAudit, error) {
 func StripKnowledgeEvidence(audit KnowledgeAudit) KnowledgeAudit {
 	out := KnowledgeAudit{None: audit.None}
 	for _, change := range audit.Changes {
-		out.Changes = append(out.Changes, KnowledgeChange{Location: change.Location, Summary: change.Summary})
+		out.Changes = append(out.Changes, KnowledgeChange{Location: change.Location, Action: change.Action, Entry: change.Entry, Summary: change.Summary})
 	}
 	return out
 }

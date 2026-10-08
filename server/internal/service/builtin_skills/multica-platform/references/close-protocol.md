@@ -115,6 +115,18 @@ multica issue close <id> --outcome done --verdict pass --evidence-file ./close.m
   the audit marked `unverified` with a warning. The bound files are stored on
   each change (`files`) and as a sediment record the project page lists. A
   verdict pass, blocked, or parked close is not held to this.
+- Memory hygiene (DENE-1680). A slot may carry an action:
+  `--knowledge <key>:update:<entry>=…` (rewrote an existing entry),
+  `<key>:merge:<entry>=…` (new entry marked to merge into one),
+  `<key>:supersede:<entry>=<replaced by what>` (the old entry is marked
+  「已被 X 取代」 in the file, not deleted), `<key>:new=…` (nothing related
+  existed). Look for the existing entry before writing. On a boss-layer
+  round (a sediment ticket opened because a parent's children all finished,
+  a stage advanced, or the project completed — its description says so)
+  every slot needs an action, and removing existing lines needs `update` or
+  `supersede`. Everywhere, `supersede` needs the mark in the delivered file,
+  and a map file (AGENTS.md, CONTEXT.md, the docs and evidence indexes) over
+  32 KiB refuses the close; the refusal names the sections to merge or drop.
 - The reply reports the status actually written, whether the PR merged, and
   who is woken. Quote it; do not restate it from memory.
 

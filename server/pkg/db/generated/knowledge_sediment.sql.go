@@ -14,12 +14,13 @@ import (
 const createKnowledgeSediment = `-- name: CreateKnowledgeSediment :one
 INSERT INTO knowledge_sediment (
     workspace_id, project_id, issue_id, chat_session_id, changes, verified,
-    mainline, commits, pr_url, author_type, author_id
+    mainline, commits, pr_url, author_type, author_id, layer, sources
 ) VALUES (
     $1, $2, $3, $4,
-    $5, $6, $7, $8, $9, $10, $11
+    $5, $6, $7, $8, $9, $10, $11,
+    $12, $13
 )
-RETURNING id, workspace_id, project_id, issue_id, chat_session_id, changes, verified, mainline, commits, pr_url, author_type, author_id, created_at
+RETURNING id, workspace_id, project_id, issue_id, chat_session_id, changes, verified, mainline, commits, pr_url, author_type, author_id, created_at, layer, sources
 `
 
 type CreateKnowledgeSedimentParams struct {
@@ -34,6 +35,8 @@ type CreateKnowledgeSedimentParams struct {
 	PrUrl         string      `json:"pr_url"`
 	AuthorType    string      `json:"author_type"`
 	AuthorID      pgtype.UUID `json:"author_id"`
+	Layer         string      `json:"layer"`
+	Sources       []byte      `json:"sources"`
 }
 
 func (q *Queries) CreateKnowledgeSediment(ctx context.Context, arg CreateKnowledgeSedimentParams) (KnowledgeSediment, error) {
@@ -49,6 +52,8 @@ func (q *Queries) CreateKnowledgeSediment(ctx context.Context, arg CreateKnowled
 		arg.PrUrl,
 		arg.AuthorType,
 		arg.AuthorID,
+		arg.Layer,
+		arg.Sources,
 	)
 	var i KnowledgeSediment
 	err := row.Scan(
@@ -65,12 +70,14 @@ func (q *Queries) CreateKnowledgeSediment(ctx context.Context, arg CreateKnowled
 		&i.AuthorType,
 		&i.AuthorID,
 		&i.CreatedAt,
+		&i.Layer,
+		&i.Sources,
 	)
 	return i, err
 }
 
 const listChatKnowledgeSediments = `-- name: ListChatKnowledgeSediments :many
-SELECT id, workspace_id, project_id, issue_id, chat_session_id, changes, verified, mainline, commits, pr_url, author_type, author_id, created_at FROM knowledge_sediment
+SELECT id, workspace_id, project_id, issue_id, chat_session_id, changes, verified, mainline, commits, pr_url, author_type, author_id, created_at, layer, sources FROM knowledge_sediment
 WHERE chat_session_id = $1 AND workspace_id = $2
 ORDER BY created_at DESC
 LIMIT 20
@@ -104,6 +111,8 @@ func (q *Queries) ListChatKnowledgeSediments(ctx context.Context, arg ListChatKn
 			&i.AuthorType,
 			&i.AuthorID,
 			&i.CreatedAt,
+			&i.Layer,
+			&i.Sources,
 		); err != nil {
 			return nil, err
 		}
@@ -116,7 +125,7 @@ func (q *Queries) ListChatKnowledgeSediments(ctx context.Context, arg ListChatKn
 }
 
 const listProjectKnowledgeSediments = `-- name: ListProjectKnowledgeSediments :many
-SELECT ks.id, ks.workspace_id, ks.project_id, ks.issue_id, ks.chat_session_id, ks.changes, ks.verified, ks.mainline, ks.commits, ks.pr_url, ks.author_type, ks.author_id, ks.created_at,
+SELECT ks.id, ks.workspace_id, ks.project_id, ks.issue_id, ks.chat_session_id, ks.changes, ks.verified, ks.mainline, ks.commits, ks.pr_url, ks.author_type, ks.author_id, ks.created_at, ks.layer, ks.sources,
        i.number AS issue_number,
        COALESCE(i.title, '')::text AS issue_title,
        COALESCE(cs.title, '')::text AS chat_title
@@ -148,6 +157,8 @@ type ListProjectKnowledgeSedimentsRow struct {
 	AuthorType    string             `json:"author_type"`
 	AuthorID      pgtype.UUID        `json:"author_id"`
 	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+	Layer         string             `json:"layer"`
+	Sources       []byte             `json:"sources"`
 	IssueNumber   pgtype.Int4        `json:"issue_number"`
 	IssueTitle    string             `json:"issue_title"`
 	ChatTitle     string             `json:"chat_title"`
@@ -178,6 +189,8 @@ func (q *Queries) ListProjectKnowledgeSediments(ctx context.Context, arg ListPro
 			&i.AuthorType,
 			&i.AuthorID,
 			&i.CreatedAt,
+			&i.Layer,
+			&i.Sources,
 			&i.IssueNumber,
 			&i.IssueTitle,
 			&i.ChatTitle,
