@@ -12,7 +12,7 @@
 --
 -- The table is new and empty, so its indexes are built in the same migration.
 -- References stay soft (no FKs), like chat_session_project.
-CREATE TABLE project_report_heard (
+CREATE TABLE IF NOT EXISTS project_report_heard (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     workspace_id UUID NOT NULL,
     user_id UUID NOT NULL,
@@ -26,9 +26,9 @@ CREATE TABLE project_report_heard (
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
-CREATE INDEX idx_project_report_heard_cursor
+CREATE INDEX IF NOT EXISTS idx_project_report_heard_cursor
     ON project_report_heard (user_id, project_id, heard_until DESC);
 
-CREATE INDEX idx_project_report_heard_task
+CREATE INDEX IF NOT EXISTS idx_project_report_heard_task
     ON project_report_heard (task_id)
     WHERE task_id IS NOT NULL;

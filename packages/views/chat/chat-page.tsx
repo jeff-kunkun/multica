@@ -856,7 +856,7 @@ export function ChatPage() {
 
       {c.user?.id && c.activeSessionId && !c.isChatViewOnly && (
         <ChatReportBar
-          key={c.activeSessionId}
+          key={`report:${c.activeSessionId}`}
           wsId={c.wsId}
           userId={c.user.id}
           sessionId={c.activeSessionId}
