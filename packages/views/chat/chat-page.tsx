@@ -134,6 +134,7 @@ function chatTitleMatches(session: ChatSession, words: string[], query: string) 
  */
 export function ChatPage() {
   const { t } = useT("chat");
+  const { t: tProjects } = useT("projects");
   const { pathname, searchParams, replace, push, back } = useNavigation();
   const backOrReplace = useBackOrReplace();
   const queryClient = useQueryClient();
@@ -202,10 +203,11 @@ export function ChatPage() {
     [pinnedItems],
   );
   const toggleProjectPin = (projectId: string) => {
+    const onError = () => toast.error(tProjects(($) => $.page.pin_failed));
     if (projectPinnedItems.some((pin) => pin.item_id === projectId)) {
-      deletePin.mutate({ itemType: "project", itemId: projectId });
+      deletePin.mutate({ itemType: "project", itemId: projectId }, { onError });
     } else {
-      createPin.mutate({ item_type: "project", item_id: projectId });
+      createPin.mutate({ item_type: "project", item_id: projectId }, { onError });
     }
   };
   const moveProjectPin = (fromProjectId: string, toProjectId: string) => {

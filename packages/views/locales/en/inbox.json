@@ -77,7 +77,8 @@
     "stall_review_title": "This ticket is under a 24-hour stall review",
     "stall_processed_title": "This ticket was handled automatically",
     "stall_keep": "Keep ticket",
-    "stall_undo": "Undo handling"
+    "stall_undo": "Undo handling",
+    "stall_action_failed": "Couldn't update the ticket"
   },
   "types": {
     "needs_you": "Needs your attention",

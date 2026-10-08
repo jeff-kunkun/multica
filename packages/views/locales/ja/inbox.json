@@ -74,7 +74,8 @@
     "stall_review_title": "このチケットは24時間の停滞レビュー中です",
     "stall_processed_title": "このチケットはシステムで自動処理されました",
     "stall_keep": "保持する",
-    "stall_undo": "処理を取り消す"
+    "stall_undo": "処理を取り消す",
+    "stall_action_failed": "チケットを更新できませんでした"
   },
   "types": {
     "needs_you": "対応が必要です",

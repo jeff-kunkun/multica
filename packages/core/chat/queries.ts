@@ -35,6 +35,8 @@ export const chatKeys = {
   /** Full sessions list (active + archived); the dropdown splits locally. */
   sessions: (wsId: string) => [...chatKeys.all(wsId), "sessions"] as const,
   directory: (wsId: string, projectId?: string) => [...chatKeys.all(wsId), "directory", projectId ?? "all"] as const,
+  /** The once-per-person "your chats are now visible" notice. */
+  visibilityNotice: (wsId: string) => [...chatKeys.all(wsId), "visibility-notice"] as const,
   messageSearch: (wsId: string, q: string) =>
     [...chatKeys.all(wsId), "message-search", q] as const,
   session: (wsId: string, id: string) => [...chatKeys.all(wsId), "session", id] as const,

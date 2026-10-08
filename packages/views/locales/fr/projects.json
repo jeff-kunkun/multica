@@ -12,6 +12,7 @@
     "view_cards": "Cartes",
     "row_menu": "Actions du projet",
     "pin": "Épingler à la barre latérale",
+    "pin_failed": "Impossible de mettre à jour l'épingle",
     "unpin": "Détacher",
     "delete": "Supprimer",
     "no_matches": "Aucun projet correspondant",

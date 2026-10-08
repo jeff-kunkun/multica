@@ -397,7 +397,8 @@
     "title": "Certaines discussions sont visibles par les membres du projet",
     "body": "Vous avez {{count}} discussions que les membres du projet peuvent maintenant voir.",
     "make_private": "Rendre la sélection privée",
-    "dismiss": "Compris"
+    "dismiss": "Compris",
+    "failed": "Échec de l’enregistrement. Réessayez."
   },
   "title_locked": "Titre verrouillé — l’agent ne le renommera pas",
   "origin": {
