@@ -55,7 +55,8 @@ func prReceiptState(state string, merged bool) string {
 	return state
 }
 
-// knowledgeLine is the close's knowledge audit in one line.
+// knowledgeLine is what the close wrote into project memory, in one line;
+// empty when it wrote nothing.
 func knowledgeLine(raw string) string {
 	if strings.TrimSpace(raw) == "" {
 		return ""
@@ -65,7 +66,7 @@ func knowledgeLine(raw string) string {
 		return ""
 	}
 	if audit.None {
-		return "无够格知识"
+		return "" // nothing worth a line on the card
 	}
 	parts := make([]string, 0, len(audit.Changes))
 	for _, c := range audit.Changes {
