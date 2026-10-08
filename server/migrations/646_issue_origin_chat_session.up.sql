@@ -8,7 +8,7 @@
 --
 -- A nullable column with no default is a catalog-only change. Bound lock
 -- acquisition so the ALTER fails fast instead of queueing an ACCESS EXCLUSIVE
--- lock in front of every issue query. The index follows in 645.
+-- lock in front of every issue query. The index follows in 647.
 SET LOCAL lock_timeout = '2s';
 SET LOCAL statement_timeout = '10s';
 
