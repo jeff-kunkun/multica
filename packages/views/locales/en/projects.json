@@ -101,7 +101,9 @@
     "chat_unknown_agent": "Agent",
     "toast_link_copied": "Link copied",
     "toast_project_deleted": "Project deleted",
-    "toast_move_issue_failed": "Failed to move issue"
+    "toast_move_issue_failed": "Failed to move issue",
+    "hear_report": "Hear report",
+    "hear_report_hint": "Have the AI tell you what's new since you last heard"
   },
   "resources": {
     "section_header": "Resources",

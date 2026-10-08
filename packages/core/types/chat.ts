@@ -1,6 +1,7 @@
 import type { AgentTask } from "./agent";
 import type { Progress } from "./progress";
 import type { ChatLinkedProject } from "./workspace-link";
+import type { ProjectReportPhase } from "./project";
 
 /** A user's pinned "quick agent" for the Chat list top bar. */
 export interface ChatPinnedAgent {
@@ -449,6 +450,12 @@ export interface ChatTicket {
   goal?: string;
   created_at: string;
   updated_at: string;
+  /** DENE-1667: the latest status move; empty `from_status` and the creation time when it never moved. */
+  from_status?: string;
+  changed_at: string;
+  /** The caller's bucket, as the project report computes it. */
+  phase: ProjectReportPhase;
+  needs_you: boolean;
 }
 
 export interface ChatTicketsResponse {

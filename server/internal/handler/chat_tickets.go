@@ -40,6 +40,13 @@ type ChatTicket struct {
 	Knowledge    string       `json:"knowledge,omitempty"`
 	CreatedAt    string       `json:"created_at"`
 	UpdatedAt    string       `json:"updated_at"`
+	// The chat's progress bar (DENE-1667): the latest status move (FromStatus
+	// empty and ChangedAt the creation time when it never moved) and the
+	// caller's bucket, as the project report computes it.
+	FromStatus string `json:"from_status,omitempty"`
+	ChangedAt  string `json:"changed_at"`
+	Phase      string `json:"phase"`
+	NeedsYou   bool   `json:"needs_you"`
 }
 
 type ChatTicketsResponse struct {
@@ -166,6 +173,11 @@ func (h *Handler) ListChatSessionTickets(w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusInternalServerError, "failed to resolve visibility")
 		return
 	}
+	progress, isTerminal, err := h.chatTicketProgress(r.Context(), session.WorkspaceID, userID, issues)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list chat tickets")
+		return
+	}
 	prefix := h.getIssuePrefix(r.Context(), session.WorkspaceID)
 	names := map[string]string{}
 	tickets := make([]ChatTicket, 0, len(issues))
@@ -188,6 +200,14 @@ func (h *Handler) ListChatSessionTickets(w http.ResponseWriter, r *http.Request)
 		if issue.AssigneeType.Valid && issue.AssigneeID.Valid {
 			ticket.AssigneeName = h.chatTicketAssigneeName(r.Context(), names, issue.AssigneeType.String, issue.AssigneeID)
 		}
+		ticket.ChangedAt = resp.CreatedAt
+		p := progress[resp.ID]
+		if p.ChangedAt.Valid {
+			ticket.FromStatus = p.FromStatus
+			ticket.ChangedAt = timestampToString(p.ChangedAt)
+		}
+		onPerson := p.HasOpenCall || (issue.AssigneeType.String == "member" && uuidToString(issue.AssigneeID) == userID)
+		ticket.Phase, ticket.NeedsYou = projectReportPhaseOf(isTerminal[issue.Status], onPerson)
 		tickets = append(tickets, ticket)
 	}
 	writeJSON(w, http.StatusOK, ChatTicketsResponse{ChatSessionID: uuidToString(session.ID), Tickets: tickets})
@@ -258,4 +278,35 @@ func (h *Handler) issueSourceChat(ctx context.Context, r *http.Request, issue db
 		out.Title = strings.TrimSpace(session.Title)
 	}
 	return out
+}
+
+// chatTicketProgress reads each ticket's latest status move and the caller's
+// open calls, keyed by issue id, with the workspace's finished statuses.
+func (h *Handler) chatTicketProgress(ctx context.Context, workspaceID pgtype.UUID, userID string, issues []db.Issue) (map[string]db.ListChatTicketProgressRow, map[string]bool, error) {
+	out := map[string]db.ListChatTicketProgressRow{}
+	isTerminal := map[string]bool{}
+	if len(issues) == 0 {
+		return out, isTerminal, nil
+	}
+	ids := make([]pgtype.UUID, 0, len(issues))
+	for _, issue := range issues {
+		ids = append(ids, issue.ID)
+	}
+	rows, err := h.Queries.ListChatTicketProgress(ctx, db.ListChatTicketProgressParams{
+		UserID: parseUUID(userID), WorkspaceID: workspaceID, IssueIds: ids,
+	})
+	if err != nil {
+		return nil, nil, err
+	}
+	for _, row := range rows {
+		out[uuidToString(row.ID)] = row
+	}
+	terminal, err := h.terminalIssueStatusKeys(ctx, workspaceID)
+	if err != nil {
+		return nil, nil, err
+	}
+	for _, key := range terminal {
+		isTerminal[key] = true
+	}
+	return out, isTerminal, nil
 }

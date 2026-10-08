@@ -10,6 +10,9 @@ export const projectKeys = {
     [...projectKeys.all(wsId), "memory", id] as const,
   memoryLocations: (wsId: string) =>
     [...projectKeys.all(wsId), "memory-locations"] as const,
+  reports: (wsId: string) => [...projectKeys.all(wsId), "report"] as const,
+  report: (wsId: string, id: string) =>
+    [...projectKeys.reports(wsId), id] as const,
 };
 
 export function projectListOptions(wsId: string) {
@@ -39,5 +42,13 @@ export function projectMemoryLocationsOptions(wsId: string) {
     queryKey: projectKeys.memoryLocations(wsId),
     queryFn: () => api.listProjectMemoryLocations(),
     staleTime: Infinity,
+  });
+}
+
+/** "听汇报" preview: what moved in the project since the person last heard it. */
+export function projectReportOptions(wsId: string, id: string) {
+  return queryOptions({
+    queryKey: projectKeys.report(wsId, id),
+    queryFn: () => api.getProjectReport(id),
   });
 }

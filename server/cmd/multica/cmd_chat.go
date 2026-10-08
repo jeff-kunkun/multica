@@ -109,11 +109,13 @@ var chatTicketsCmd = &cobra.Command{
 	Short: "List the issues a chat opened",
 	Long: `List the issues opened from a chat — by its agent's "issue create" or
 "plan apply", or by turning the chat into a goal — oldest first, with status,
-assignee and the first line of each issue's 目标 section. A ticket that is
-done, blocked, cancelled or in review also carries its result: the close's
-summary, PRs and knowledge (summary, pull_requests, knowledge). The chat shows the
-same list as its ticket cards; each issue names the chat back as source_chat
-in "multica issue get".
+assignee and the first line of each issue's 目标 section, plus its latest
+status move (from_status, changed_at) and phase — waiting_you, in_progress or
+done, bucketed as "multica project report" does. A ticket that is done,
+blocked, cancelled or in review also carries its result: the close's summary,
+PRs and knowledge (summary, pull_requests, knowledge). The chat shows the same
+list as its ticket cards and progress bar; each issue names the chat back as
+source_chat in "multica issue get".
 
   multica chat tickets
   multica chat tickets --session <id|url> --output json
@@ -307,14 +309,18 @@ func runChatTickets(cmd *cobra.Command, _ []string) error {
 		fmt.Println("This chat has not opened any issues.")
 		return nil
 	}
-	headers := []string{"IDENTIFIER", "STATUS", "ASSIGNEE", "TITLE", "RESULT"}
+	headers := []string{"IDENTIFIER", "STATUS", "PHASE", "ASSIGNEE", "TITLE", "RESULT"}
 	rows := make([][]string, 0, len(out.Tickets))
 	for _, t := range out.Tickets {
 		assignee, _ := t["assignee_name"].(string)
 		if assignee == "" {
 			assignee = "-"
 		}
-		rows = append(rows, []string{fmt.Sprint(t["identifier"]), fmt.Sprint(t["status"]), assignee, fmt.Sprint(t["title"]), chatTicketResult(t)})
+		phase, _ := t["phase"].(string)
+		if phase == "" {
+			phase = "-"
+		}
+		rows = append(rows, []string{fmt.Sprint(t["identifier"]), fmt.Sprint(t["status"]), phase, assignee, fmt.Sprint(t["title"]), chatTicketResult(t)})
 	}
 	cli.PrintTable(os.Stdout, headers, rows)
 	return nil

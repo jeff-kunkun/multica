@@ -93,6 +93,7 @@ import { ChatTitleButton } from "@/components/chat/chat-title-button";
 import { ChatSessionActions } from "@/components/chat/chat-session-actions";
 import { ChatMessageList } from "@/components/chat/chat-message-list";
 import { ChatComposer } from "@/components/chat/chat-composer";
+import { ChatProgressBar } from "@/components/chat/chat-progress-bar";
 import { ChatQueue } from "@/components/chat/chat-queue";
 import { sendChatMessageInMode } from "@/lib/chat-send-mode";
 import { AgentPickerSheet } from "@/components/chat/agent-picker-sheet";
@@ -650,6 +651,7 @@ export default function ChatTab() {
         ) : currentAgent ? (
           <RuntimeRequiredBanner agentName={currentAgent.name} />
         ) : null}
+        <ChatProgressBar sessionId={activeSessionId} tickets={ticketsData?.tickets} />
         <ChatQueue
           tasks={pendingTask?.queued_tasks ?? []}
           headStatus={pendingTask?.status}

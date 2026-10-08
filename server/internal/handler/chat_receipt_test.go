@@ -10,6 +10,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/service"
+	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
 // createChatRunTask seeds a running chat task whose input is userMessage, the
@@ -157,5 +158,72 @@ func TestAlignmentIssueRecordsItsChat(t *testing.T) {
 	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1`, res.Issue.ID) })
 	if uuidToString(res.Issue.OriginChatSessionID) != sessionID {
 		t.Fatalf("origin chat = %s, want %s", uuidToString(res.Issue.OriginChatSessionID), sessionID)
+	}
+}
+
+// A person who can see the issue but not the private chat it came from gets
+// no source: no title, no quote, no message id. The run brief reads with the
+// eyes of the person the run acts for.
+func TestStateCardSourceFollowsChatAccess(t *testing.T) {
+	ctx := context.Background()
+	agentID := createHandlerTestAgent(t, "Receipt Private Chat Agent", []byte("[]"))
+	sessionID := createHandlerTestChatSession(t, agentID)
+	taskID, _ := createChatRunTask(t, agentID, sessionID, "私聊里的原话")
+	issueID := createIssueFromChatRun(t, agentID, taskID, "Receipt private source", nil)
+	otherID := createPermissionTestMember(t, "receipt-outsider@multica.test")
+
+	contextAs := func(userID string) IssueContextResponse {
+		t.Helper()
+		req := withURLParam(newRequest(http.MethodGet, "/api/issues/"+issueID+"/context", nil), "id", issueID)
+		req.Header.Set("X-User-ID", userID)
+		rec := httptest.NewRecorder()
+		testHandler.GetIssueContext(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("context as %s = %d %s", userID, rec.Code, rec.Body.String())
+		}
+		var resp IssueContextResponse
+		if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		return resp
+	}
+
+	if card := contextAs(testUserID); card.Source == nil || card.Source.Excerpt != "私聊里的原话" {
+		t.Fatalf("owner source = %+v", card.Source)
+	}
+	outsider := contextAs(otherID)
+	if outsider.Source != nil {
+		t.Fatalf("outsider sees the private chat: %+v", outsider.Source)
+	}
+	if strings.Contains(outsider.Text, "私聊里的原话") || strings.Contains(outsider.Text, "Handler Test Chat Session") {
+		t.Fatalf("outsider text leaks the chat:\n%s", outsider.Text)
+	}
+
+	issue, err := testHandler.Queries.GetIssue(ctx, parseUUID(issueID))
+	if err != nil {
+		t.Fatalf("load issue: %v", err)
+	}
+	runFor := func(originator string) sourceViewer {
+		return taskSourceViewer(db.AgentTaskQueue{OriginatorUserID: parseUUID(originator)})
+	}
+	if testHandler.stateCardSource(ctx, issue, runFor(otherID)) != nil {
+		t.Fatal("a run acting for the outsider sees the private chat")
+	}
+	if testHandler.stateCardSource(ctx, issue, sourceViewer{}) != nil {
+		t.Fatal("a run with no originator sees the private chat")
+	}
+	if testHandler.stateCardSource(ctx, issue, runFor(testUserID)) == nil {
+		t.Fatal("a run acting for the owner lost the source")
+	}
+	if testHandler.stateCardSource(ctx, issue, sourceViewer{OwnChat: parseUUID(sessionID)}) == nil {
+		t.Fatal("the chat's own run lost the source")
+	}
+
+	// Shared with the workspace, the same person reads it.
+	if _, err := testPool.Exec(ctx, `UPDATE chat_session SET visibility = 'workspace' WHERE id = $1`, sessionID); err != nil {
+		t.Fatalf("share chat: %v", err)
+	}
+	if card := contextAs(otherID); card.Source == nil || card.Source.Excerpt != "私聊里的原话" {
+		t.Fatalf("shared viewer source = %+v", card.Source)
 	}
 }

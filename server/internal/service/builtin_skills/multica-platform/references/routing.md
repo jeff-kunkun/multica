@@ -222,15 +222,9 @@ multica workspace routing set --load on      # or off to go back to shadow
 So create independent tickets in one batch and leave them to routing; do not
 hand-assign them to different seats to spread the load.
 
-**按判断配验收 (DENE-1252).** Off by default: an unsure reviewer verdict gets
-the fallback seat. With it on, the routing model decides — only a confident
-"seat" or a "human" answer fills the reviewer slot; anything else writes
-不需要验收, and the executor verifies, merges and closes with
-`issue close --outcome done`. The workspace's policy prompt steers this call.
-
-```bash
-multica workspace routing set --judged-review on   # judged_review in get
-```
+**按判断配验收 (DENE-1252)** has no effect since DENE-1677: the rule table
+below decides whether a ticket gets a 验收席. `--judged-review` is still
+accepted so old configs read, and changes nothing.
 
 If a ticket turned out too hard for its seat, do not pick a stronger one.
 Ask routing to re-judge:
@@ -262,11 +256,14 @@ Consequences for how you work:
 - Read `action` in `--output json` as what was WRITTEN. `assigned`: a slot was
   filled. `declined`: nothing was written, which now means somebody else won
   the write. `noop`: nothing to decide. Only `assigned` is a dispatch.
-- **Low confidence dispatches anyway**, to the ladder's fallback rung (the
-  generic strong seat) — `reason` reads `executor fell back to 孙悟空:
-  confidence 47% < threshold 60%`. The reviewer slot falls back to one rung
-  above the executor, one rung below when the executor is already the top
-  rung, and 「不需要验收」 when the workspace has only one seat.
+- **The tier comes from the rule table, not a model (DENE-1677).** The
+  analysis model answers four numbered questions (改动范围, 需求, 出错代价,
+  要人拍板); only the option number is read. The first matching row of the
+  table names the tier and whether a 验收席 is needed. An answer that is not a
+  number in range, a timeout or a garbled reply counts as 答不出, and 答不出 or
+  cross-module never lands on the weakest rung. The reviewer seat follows the
+  executor: same rung from another model family, else one rung down. A judge
+  answer below confidence threshold is ignored and the table stands.
 - The issue's **scene** decides which specialisation on a rung gets the
   work; it never changes the rung or the confidence. The scene is the issue's
   own domain; else all of its project's domains; else generic. Every
@@ -294,11 +291,21 @@ The reason is shown in one place only: Settings → Routing, which reports the
 state, the reason, when the model last answered, and offers a re-check. If
 automatic dispatch seems to have stopped, that section is where to look.
 
-The facts also set a floor on the tier: cross-module, high-risk or vague work
-is at least strong. A model answering below the floor is raised to it, the
-decision comment says 「判断模型给的是 X 档，按规则抬到 Y 档」, and
-`multica issue route <id> --output json` reports `tier` (used) and
-`judged_tier` (the model's own, set only when raised).
+Read the table without the browser (`--output json` for the same shape the
+settings page reads):
+
+```bash
+multica workspace routing rules
+```
+
+With the judge on (mode `judge` or `both`) it may only **raise** the table's
+tier by one rung, with a reason; a lower or two-rung answer is not used, and
+the decision comment says so. `multica issue route <id> --output json`
+reports `tier` (used), `judged_tier` (set only when the judge's answer was
+held to the table), and `trace`: the questions with the raw reply and the
+number read, the rule row, the judge's effect (`raised` / `agreed` /
+`ignored` / `failed`) and the tier. The decision comment carries the same
+trace in prose.
 
 Agent-created tickets should pass `--routing-facts` with scope, clarity, risk,
 and needs_human (plus an optional summary). The creator facts are accepted

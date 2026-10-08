@@ -1955,8 +1955,6 @@
     "load_label": "Spread across idle seats",
     "load_description_on": "Live: within the picked tier and direction, a seat with fewer runs in progress takes the ticket, but never past the usage tag: an idle Tight seat does not take work from a busier Normal or Ample one; when all are equally busy the usual order stands. If “Prefer the previous executor” is also on, it wins.",
     "load_description_shadow": "Shadow mode: routing keeps its own pick and only notes in the assignment comment which less busy seat this rule would pick. Turn on to apply it.",
-    "judged_review_label": "Review only when judged",
-    "judged_review_description": "The routing model decides: a reviewer is set only when it is confident a check is needed; otherwise the executor verifies and closes.",
     "gateway_endpoint_workspace": "The model id is sent to this workspace's own endpoint: {{host}}.",
     "gateway_endpoint_deployment": "The model id is sent to the deployment's shared LLM endpoint: {{host}}.",
     "gateway_unset": "No endpoint is available. Set an endpoint and key below.",
@@ -2033,10 +2031,10 @@
     "seats_work_off": "Work is off, so routing skips it",
     "seats_runtime_unknown": "Unknown runtime",
     "judge_title": "Judge model",
-    "judge_description": "Picks the tier (weak / medium / strong / strongest) with a probability. With the analysis model on, it sees only the facts.",
+    "judge_description": "Reads the analysis answers and may raise the rule table's tier by one, with a reason. It cannot lower it.",
     "judge_enabled_label": "Use the judge model",
     "analysis_title": "Analysis model",
-    "analysis_description": "Reads the whole ticket and reduces it to a few facts: scope, clarity, cost of a mistake, whether a person must decide. When a ticket stops, it writes where it is stuck.",
+    "analysis_description": "Reads the whole ticket and answers four multiple-choice questions: scope, clarity, cost of a mistake, whether a person must decide. When a ticket stops, it writes where it is stuck.",
     "analysis_enabled_label": "Use the analysis model",
     "analysis_source_label": "Source",
     "analysis_source_description": "Choose the API gateway or a subscribed runtime.",
@@ -2050,10 +2048,16 @@
     "analysis_key_label": "Analysis API key",
     "modes": {
       "none": "Neither model is on: no model is called, and every ticket goes to the fallback tier.",
-      "analysis": "Analysis only: the analysis model picks the tier, and the threshold gates its self-reported confidence.",
-      "analysis_judge": "Both on: the analysis model writes the facts and the judge picks the tier from them.",
-      "judge": "Judge only: the judge reads the ticket and picks the tier."
-    }
+      "analysis": "Analysis only: the analysis model answers the questions and the rule table sets the tier.",
+      "analysis_judge": "Both on: the rule table sets the tier, and the judge may raise it by one at most, never lower.",
+      "judge": "Judge only: nobody answers the questions, so the table's unanswered row sets the tier, and the judge may raise it by one."
+    },
+    "rules_title": "Tier rules",
+    "rules_description": "After the analysis model answers, the first matching rule from the top sets the tier.",
+    "rules_any_unknown": "Any question unanswered",
+    "rules_catch_all": "Nothing above matched",
+    "rules_review": "{{tier}}, reviewed",
+    "rules_no_review": "{{tier}}, no review"
   },
   "project_sharing": {
     "title": "Permissions & sharing",
