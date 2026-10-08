@@ -185,3 +185,42 @@ func TestRemoveCleanableWorktreeAlsoDropsTheDeliveredBranch(t *testing.T) {
 		t.Error("an unmerged branch was deleted")
 	}
 }
+
+// The user's own checkout is not trunk. A feature branch cut from a failed
+// run's partial commit makes that commit an ancestor of HEAD, and treating HEAD
+// as the integration line deleted work that exists nowhere else (review of
+// PR #589, F1).
+func TestPrepareLocalWorktreeKeepsPartialWorkWhenCheckoutIsAFeatureBranch(t *testing.T) {
+	t.Parallel()
+	repo := newTestRepo(t)
+	commitOnBranch(t, repo, "agent/a/dene-failed-partial", "partial.txt")
+	// main stays on the initial commit; the user checks out a branch sitting
+	// on the agent's unmerged commit.
+	gitRun(t, repo, "checkout", "-q", "-b", "feature/unmerged", "agent/a/dene-failed-partial")
+
+	wt := prepareForTest(t, repo)
+	t.Cleanup(func() { wt.Discard(worktreeTestLogger()) })
+
+	if !branchExists(t, repo, "agent/a/dene-failed-partial") {
+		t.Fatal("prepare deleted a failed run's unmerged branch because the user's checkout contains it")
+	}
+	// Same for the direct call, with no trunk named.
+	if got := SweepMergedTaskBranches(repo, nil, worktreeTestLogger()); len(got) != 0 {
+		t.Fatalf("swept %v against the checked-out feature branch", got)
+	}
+}
+
+// With no resolvable integration line there is nothing to compare against, and
+// unknown keeps the branch.
+func TestSweepMergedTaskBranchesKeepsEverythingWithoutATrunk(t *testing.T) {
+	t.Parallel()
+	repo := newTestRepo(t)
+	commitOnBranch(t, repo, "agent/a/dene-11", "eleven.txt")
+	gitRun(t, repo, "merge", "-q", "--ff-only", "agent/a/dene-11")
+	gitRun(t, repo, "checkout", "-q", "-b", "elsewhere")
+	gitRun(t, repo, "branch", "-m", "main", "renamed") // no main/master/trunk, no origin
+
+	if got := SweepMergedTaskBranches(repo, nil, worktreeTestLogger()); len(got) != 0 {
+		t.Fatalf("swept %v with no trunk to judge against", got)
+	}
+}

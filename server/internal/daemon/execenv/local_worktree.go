@@ -150,6 +150,11 @@ type LocalWorktreeParams struct {
 	// the task's commits back into it. Empty, or absent locally, leaves the
 	// branch rules below unchanged.
 	DeliveryBranch string
+	// SweepTrunks names the integration lines merged task branches are swept
+	// against, beyond the repository's default branch (DENE-1666). The daemon
+	// fills it from the machine's configured trunk. Never derived from the
+	// user's current checkout: see resolveSweepTrunks.
+	SweepTrunks []string
 	// ResumeWorkDir is the previous run's agent cwd on a same-seat retry.
 	// When it names a working copy this repository can recreate — a direct
 	// child of the worktree root that is not on disk — Prepare builds this
@@ -594,7 +599,7 @@ func PrepareLocalWorktree(params LocalWorktreeParams, logger *slog.Logger) (*Loc
 	// other running task's. It runs here, under the repo lock, because this is
 	// the one moment Multica is certain to be in the repository again after a
 	// pull request has merged (DENE-1666).
-	SweepMergedTaskBranches(gitRoot, []string{upstream}, logger)
+	SweepMergedTaskBranches(gitRoot, params.SweepTrunks, logger)
 
 	wt := &LocalWorktree{
 		GitRoot:               gitRoot,

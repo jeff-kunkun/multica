@@ -135,16 +135,18 @@ func deleteIfMerged(gitRoot, branch, sha string, trunks []string, logger *slog.L
 	return true
 }
 
-// resolveSweepTrunks adds the repository's own idea of trunk to what the caller
-// supplied — the checked-out branch and the remote default — and keeps only the
-// refs that resolve. A task lands wherever the user's repo integrates it, which
-// is not always origin's default branch (a fork whose pull requests target a
-// development line), so more than one trunk is normal.
+// resolveSweepTrunks is the set of refs a branch must be delivered into to be
+// swept: the trunks the caller names (the machine's configured integration
+// line) plus the repository's default branch, and nothing else.
+//
+// Deliberately NOT the branch the user happens to have checked out. A branch
+// is "delivered" when it is in the line the team integrates into; the user's
+// checkout can be any feature branch, including one that was cut from an agent
+// branch's unmerged work, and treating it as trunk would delete exactly the
+// partial work the sweep exists to keep. When neither a named trunk nor a
+// default resolves, nothing is swept — unknown is not permission.
 func resolveSweepTrunks(gitRoot string, given []string) []string {
 	candidates := append([]string{}, given...)
-	if head, err := runGitTrimmed(gitRoot, "symbolic-ref", "--short", "HEAD"); err == nil && head != "" {
-		candidates = append(candidates, head)
-	}
 	if def, err := (GitWorktreeProbe{}).DefaultBranch(gitRoot); err == nil && def != "" {
 		candidates = append(candidates, def)
 	}

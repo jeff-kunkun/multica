@@ -9239,6 +9239,9 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 				ReclaimPriorCopy: reclaimPriorCopy,
 				CanonicalBranch:  strings.TrimSpace(task.CanonicalBranch),
 			}
+			if trunk := strings.TrimSpace(d.worktreeCleanup.Settings().TrunkBranch); trunk != "" {
+				prepParams.LocalWorktree.SweepTrunks = []string{trunk}
+			}
 			if task.DeliveryLine != nil {
 				prepParams.LocalWorktree.DeliveryBranch = strings.TrimSpace(task.DeliveryLine.Branch)
 			}
