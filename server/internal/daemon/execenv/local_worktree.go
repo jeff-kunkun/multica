@@ -590,6 +590,12 @@ func PrepareLocalWorktree(params LocalWorktreeParams, logger *slog.Logger) (*Loc
 			"path", worktreePath, "root", worktreeRoot, "error", recErr)
 	}
 
+	// The new branch is checked out now, so the sweep cannot touch it or any
+	// other running task's. It runs here, under the repo lock, because this is
+	// the one moment Multica is certain to be in the repository again after a
+	// pull request has merged (DENE-1666).
+	SweepMergedTaskBranches(gitRoot, []string{upstream}, logger)
+
 	wt := &LocalWorktree{
 		GitRoot:               gitRoot,
 		Path:                  worktreePath,
@@ -1227,7 +1233,7 @@ func worktreeIsDirty(worktreePath string) (bool, error) {
 
 // removeLocalWorktreeDir unregisters the worktree from the user's repo and
 // deletes its directory. The branch is deliberately left alone — it is the
-// task's deliverable.
+// task's deliverable. Merged ones are swept later (SweepMergedTaskBranches).
 func removeLocalWorktreeDir(gitRoot, worktreePath string, logger *slog.Logger) error {
 	var removeErr error
 	if out, err := runGit(gitRoot, "worktree", "remove", "--force", worktreePath); err != nil {
