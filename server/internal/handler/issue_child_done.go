@@ -559,7 +559,7 @@ func (h *Handler) childDoneDigest(ctx context.Context, parent db.Issue, children
 	for _, c := range batchCompleted {
 		inBatch[c.ID] = true
 	}
-	visible := visibleWithParent(parent)
+	visible := h.visibleWithParent(ctx, parent)
 	// The statuses this pass already resolved; reading the catalog again
 	// would cost a second read per notification.
 	receipts := h.receiptsOf(ctx, parent.WorkspaceID, children, func(c db.Issue) bool {

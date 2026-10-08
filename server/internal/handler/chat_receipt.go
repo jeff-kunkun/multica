@@ -82,20 +82,73 @@ func (h *Handler) receiptsOf(ctx context.Context, workspaceID pgtype.UUID, issue
 	return out
 }
 
-// visibleWithParent keeps a sub-task that anyone who can see the parent can
-// see too: one open to the workspace, or one scoped exactly like its parent.
-// A system comment and a chat card are read by everyone who sees the parent.
-func visibleWithParent(parent db.Issue) func(db.Issue) bool {
+// visibleWithParent keeps a sub-task that everyone who reads the parent can
+// see: the system comment it lands in stays on the parent for every present
+// and future reader. Two checks must both hold. The child is scoped no wider
+// apart from its parent (future readers arrive through the parent's scope),
+// and every member who can see the parent now can see the child, by the same
+// rules the issue APIs use (an assignee or a share names the parent alone).
+// Failing to establish the readers keeps nothing.
+func (h *Handler) visibleWithParent(ctx context.Context, parent db.Issue) func(db.Issue) bool {
+	none := func(db.Issue) bool { return false }
+	members, err := h.Queries.ListMembers(ctx, parent.WorkspaceID)
+	if err != nil {
+		slog.Warn("receipt: list members failed", "issue_id", uuidToString(parent.ID), "error", err)
+		return none
+	}
+	var readers []visibilityViewer
+	for _, m := range members {
+		v, err := h.visibilityViewerForUser(ctx, parent.WorkspaceID, m.UserID)
+		if err != nil {
+			slog.Warn("receipt: load member visibility failed", "issue_id", uuidToString(parent.ID), "error", err)
+			return none
+		}
+		if v.canSeeIssue(parent) {
+			readers = append(readers, v)
+		}
+	}
+	scoped := scopedLikeParent(parent)
+	return func(c db.Issue) bool {
+		if !scoped(c) {
+			return false
+		}
+		for _, v := range readers {
+			if !v.canSeeIssue(c) {
+				return false
+			}
+		}
+		return true
+	}
+}
+
+// scopedLikeParent keeps a sub-task whose scope reaches everyone the parent's
+// scope does: one open to the workspace under a parent no guest can reach
+// (a guest reaches a project, never the workspace), or one scoped exactly like
+// its parent.
+func scopedLikeParent(parent db.Issue) func(db.Issue) bool {
 	return func(c db.Issue) bool {
 		switch c.Visibility {
 		case "workspace":
-			return true
+			return parent.Visibility != "project"
 		case "project":
-			return parent.Visibility != "workspace" && c.ProjectID == parent.ProjectID
+			return parent.Visibility == "project" && c.ProjectID == parent.ProjectID
 		case "private":
 			return parent.Visibility == "private" && c.CreatorType == parent.CreatorType && c.CreatorID == parent.CreatorID
 		}
 		return false
+	}
+}
+
+// visibleInChat keeps a sub-task everyone who can see the chat may see, the
+// rule chat titles follow: the chat's owner sees it, and a chat open beyond
+// its owner only names workspace-wide issues.
+func (h *Handler) visibleInChat(ctx context.Context, session db.ChatSession) func(db.Issue) bool {
+	viewer, err := h.visibilityViewerForUser(ctx, session.WorkspaceID, session.CreatorID)
+	if err != nil {
+		return func(db.Issue) bool { return false }
+	}
+	return func(c db.Issue) bool {
+		return viewer.canSeeIssue(c) && (session.Visibility == "private" || c.Visibility == "workspace")
 	}
 }
 
@@ -160,7 +213,7 @@ func (h *Handler) postSourceChatReceipt(ctx context.Context, prev, issue db.Issu
 	}
 	r := h.issueReceipt(ctx, issue, h.getIssuePrefix(ctx, issue.WorkspaceID))
 	r.Status = nowStatus
-	r.Children = h.childReceipts(ctx, issue, visibleWithParent(issue))
+	r.Children = h.childReceipts(ctx, issue, h.visibleInChat(ctx, session))
 	msg, err := h.Queries.CreateChatMessage(ctx, db.CreateChatMessageParams{
 		ID:            dbid.NewV7(),
 		ChatSessionID: session.ID,

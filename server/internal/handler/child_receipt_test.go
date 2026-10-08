@@ -122,8 +122,119 @@ func TestChildReceiptsHidePrivateChildren(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load parent: %v", err)
 	}
-	got := testHandler.childReceipts(context.Background(), parent, visibleWithParent(parent))
+	got := testHandler.childReceipts(context.Background(), parent, testHandler.visibleWithParent(context.Background(), parent))
 	if len(got) != 1 || got[0].IssueID != openID {
 		t.Fatalf("receipts with parent scope = %+v, want only the open child", got)
+	}
+}
+
+// A sub-task scoped exactly like its parent still stays off what the
+// parent's readers share when one of them reaches the parent some other way:
+// the parent's own assignee, or a share naming the parent alone.
+func TestChildReceiptsFollowEveryParentReader(t *testing.T) {
+	ctx := context.Background()
+	agentID := createHandlerTestAgent(t, "Child Receipt Reader Agent", []byte("[]"))
+	sessionID := createHandlerTestChatSession(t, agentID)
+	taskID, _ := createChatRunTask(t, agentID, sessionID, "私有父票")
+	parentID := createIssueFromChatRun(t, agentID, taskID, "Child receipt reader parent", nil)
+	openID := createIssueFromChatRun(t, agentID, taskID, "Child receipt reader open sub", map[string]any{"parent_issue_id": parentID})
+	secretID := createIssueFromChatRun(t, agentID, taskID, "Child receipt reader secret sub", map[string]any{"parent_issue_id": parentID})
+	bID := createPlainMember(t, "child-receipt-reader-b@multica.test")
+	exec := func(q string, args ...any) {
+		t.Helper()
+		if _, err := testPool.Exec(ctx, q, args...); err != nil {
+			t.Fatalf("%s: %v", q, err)
+		}
+	}
+	exec(`UPDATE issue SET visibility = 'private' WHERE id = ANY($1::uuid[])`, []string{parentID, secretID})
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM resource_share WHERE resource_id = ANY($1::text[])`, []string{parentID, openID})
+	})
+	keeps := func() (open, secret bool) {
+		t.Helper()
+		parent, err := testHandler.Queries.GetIssue(ctx, parseUUID(parentID))
+		if err != nil {
+			t.Fatalf("load parent: %v", err)
+		}
+		keep := testHandler.visibleWithParent(ctx, parent)
+		for _, id := range []string{openID, secretID} {
+			c, err := testHandler.Queries.GetIssue(ctx, parseUUID(id))
+			if err != nil {
+				t.Fatalf("load child: %v", err)
+			}
+			if id == openID {
+				open = keep(c)
+			} else {
+				secret = keep(c)
+			}
+		}
+		return open, secret
+	}
+
+	// Same creator, both private, nobody else reads the parent: listed.
+	if open, secret := keeps(); !open || !secret {
+		t.Fatalf("sole reader: open=%v secret=%v, want both", open, secret)
+	}
+
+	// The parent's assignee reads the parent but not the secret child.
+	exec(`UPDATE issue SET assignee_type = 'member', assignee_id = $2 WHERE id = $1`, parentID, bID)
+	if open, secret := keeps(); !open || secret {
+		t.Fatalf("parent assigned to B: open=%v secret=%v, want open only", open, secret)
+	}
+
+	// A share naming the parent (and the open child) but not the secret one
+	// does the same at project scope.
+	projectID := createChatProjectTestProject(t, testWorkspaceID, "Child receipt reader project", "")
+	exec(`UPDATE issue SET status = 'in_progress', assignee_type = 'agent', assignee_id = $2 WHERE id = $1`, parentID, agentID)
+	exec(`UPDATE issue SET visibility = 'project', project_id = $2 WHERE id = ANY($1::uuid[])`, []string{parentID, openID, secretID}, projectID)
+	for _, id := range []string{parentID, openID} {
+		exec(`INSERT INTO resource_share (workspace_id, resource_type, resource_id, member_id, access, added_by) VALUES ($1, 'issue', $2, $3, 'view', $4)`,
+			testWorkspaceID, id, bID, testUserID)
+	}
+	if open, secret := keeps(); !open || secret {
+		t.Fatalf("parent shared with B: open=%v secret=%v, want open only", open, secret)
+	}
+
+	// End to end: the parent's comment, read by B too, leaves the secret
+	// child out. It finishes first, so the "last one" line names the open
+	// child and the receipts are the only place it could leak.
+	seedDoneClose(t, openID, "公开子票的结论")
+	seedDoneClose(t, secretID, "不该外泄的结论")
+	setIssueStatusForTest(t, secretID, "done")
+	setIssueStatusForTest(t, openID, "done")
+	var comments []string
+	rows, err := testPool.Query(ctx, `SELECT content FROM comment WHERE issue_id = $1`, parentID)
+	if err != nil {
+		t.Fatalf("read parent comments: %v", err)
+	}
+	for rows.Next() {
+		var body string
+		if err := rows.Scan(&body); err != nil {
+			t.Fatalf("scan: %v", err)
+		}
+		comments = append(comments, body)
+	}
+	rows.Close()
+	all := strings.Join(comments, "\n---\n")
+	if strings.Contains(all, secretID) || strings.Contains(all, "不该外泄") {
+		t.Fatalf("parent comment names the secret child:\n%s", all)
+	}
+	if !strings.Contains(all, "公开子票的结论") {
+		t.Fatalf("parent comment misses the open child:\n%s", all)
+	}
+
+	// The chat card follows the chat's readers: once the chat is open to the
+	// workspace, only workspace-wide children are named.
+	exec(`UPDATE chat_session SET visibility = 'workspace' WHERE id = $1`, sessionID)
+	setIssueStatusForTest(t, parentID, "done")
+	var card string
+	if err := testPool.QueryRow(ctx, `
+		SELECT content FROM chat_message
+		WHERE chat_session_id = $1 AND message_kind = 'issue_receipt' AND content LIKE '%mention://issue/' || $2 || ')%'
+	`, sessionID, parentID).Scan(&card); err != nil {
+		t.Fatalf("parent receipt: %v", err)
+	}
+	if strings.Contains(card, secretID) || strings.Contains(card, "不该外泄") {
+		t.Fatalf("workspace chat card names the secret child:\n%s", card)
 	}
 }
