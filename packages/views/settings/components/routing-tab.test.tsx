@@ -274,6 +274,7 @@ describe("RoutingTab", () => {
       allow_upshift: false,
       prefer_continuation: false,
       prefer_idle: false,
+      judged_review: false,
       judge_enabled: false,
       analysis: {
         enabled: true,
@@ -668,6 +669,24 @@ describe("RoutingTab seat order switches", () => {
     ];
     expect(body.settings.routing.prefer_idle).toBe(true);
     expect(body.settings.routing.prefer_continuation).toBe(false);
+  });
+
+  // DENE-1252: 按判断配验收 is off by default and saves as judged_review.
+  it("switches 按判断配验收 on and saves it", async () => {
+    workspace.current.settings = {
+      routing: { enabled: true, model: "gpt-5.6-luna" },
+    };
+    render();
+    const judged = screen.getByRole("switch", { name: "Review only when judged" });
+    expect(judged).not.toHaveAttribute("data-checked");
+
+    await userEvent.click(judged);
+    await waitFor(() => expect(updateWorkspace).toHaveBeenCalled());
+    const [, body] = updateWorkspace.mock.calls.at(-1) as [
+      string,
+      { settings: { routing: Record<string, unknown> } },
+    ];
+    expect(body.settings.routing.judged_review).toBe(true);
   });
 
   it("greys out upshift while usage priority is off", () => {

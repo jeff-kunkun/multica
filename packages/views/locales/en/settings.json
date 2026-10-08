@@ -1955,6 +1955,8 @@
     "load_label": "Spread across idle seats",
     "load_description_on": "Live: within the picked tier and direction, a seat with fewer runs in progress takes the ticket, but never past the usage tag: an idle Tight seat does not take work from a busier Normal or Ample one; when all are equally busy the usual order stands. If “Prefer the previous executor” is also on, it wins.",
     "load_description_shadow": "Shadow mode: routing keeps its own pick and only notes in the assignment comment which less busy seat this rule would pick. Turn on to apply it.",
+    "judged_review_label": "Review only when judged",
+    "judged_review_description": "The routing model decides: a reviewer is set only when it is confident a check is needed; otherwise the executor verifies and closes.",
     "gateway_endpoint_workspace": "The model id is sent to this workspace's own endpoint: {{host}}.",
     "gateway_endpoint_deployment": "The model id is sent to the deployment's shared LLM endpoint: {{host}}.",
     "gateway_unset": "No endpoint is available. Set an endpoint and key below.",
