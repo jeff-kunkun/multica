@@ -381,6 +381,7 @@
     "remove": "Retirer",
     "save": "Enregistrer",
     "cancel": "Annuler",
+    "save_failed": "Impossible d'enregistrer l'accès",
     "note_bound": "Une fois privé, il disparaît des listes des autres.",
     "note_unbound": "Une discussion sans projet reste privée.",
     "view_only": "Vous pouvez lire cette discussion, pas y écrire.",

@@ -38,6 +38,8 @@ export const chatKeys = {
   messageSearch: (wsId: string, q: string) =>
     [...chatKeys.all(wsId), "message-search", q] as const,
   session: (wsId: string, id: string) => [...chatKeys.all(wsId), "session", id] as const,
+  /** Who can see this chat. Nested under the session so every invalidation of it reaches here. */
+  access: (wsId: string, id: string) => [...chatKeys.session(wsId, id), "access"] as const,
   messagesAll: () => ["chat", "messages"] as const,
   messages: (sessionId: string) => [...chatKeys.messagesAll(), sessionId] as const,
   messagesPageAll: () => ["chat", "messages-page"] as const,
