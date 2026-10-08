@@ -221,7 +221,7 @@ export function ProjectMemoryCard({ projectId }: { projectId: string }) {
             items={monitor.unsettled}
             render={(item) => (
               <div key={item.issue_id} className="flex items-baseline gap-2 text-caption">
-                <AppLink href={issueHref(item.issue_id)} className="min-w-0 flex-1 truncate text-primary hover:underline" title={item.title}>
+                <AppLink href={issueHref(item.issue_id)} className="min-w-0 flex-1 text-primary hover:underline [overflow-wrap:anywhere]">
                   {item.identifier} {item.title}
                 </AppLink>
                 <span className="shrink-0 text-amber-700">
@@ -241,7 +241,7 @@ export function ProjectMemoryCard({ projectId }: { projectId: string }) {
             items={monitor.rounds.items}
             render={(round) => (
               <div key={round.issue_id} className="flex items-baseline gap-2 text-caption">
-                <AppLink href={issueHref(round.issue_id)} className="min-w-0 flex-1 truncate text-primary hover:underline" title={round.title}>
+                <AppLink href={issueHref(round.issue_id)} className="min-w-0 flex-1 text-primary hover:underline [overflow-wrap:anywhere]">
                   {round.identifier} {round.title}
                 </AppLink>
                 <span className={cn("shrink-0", round.idle ? "text-amber-700" : "text-muted-foreground")}>
@@ -262,7 +262,7 @@ export function ProjectMemoryCard({ projectId }: { projectId: string }) {
             render={(chat) => (
               <div key={chat.chat_session_id} className="text-caption">
                 {chat.accessible ? (
-                  <AppLink href={chatHref(chat.chat_session_id)} className="block truncate text-primary hover:underline" title={chat.title}>
+                  <AppLink href={chatHref(chat.chat_session_id)} className="block text-primary hover:underline [overflow-wrap:anywhere]">
                     {t(($) => $.detail.memory_recent_chat, { title: chat.title || chat.chat_session_id.slice(0, 8) })}
                   </AppLink>
                 ) : (
@@ -276,7 +276,7 @@ export function ProjectMemoryCard({ projectId }: { projectId: string }) {
                 </p>
                 <ExpandableRows items={chat.tickets} render={(ticket) => (
                   <div key={ticket.issue_id} className="flex items-baseline gap-2 pl-3">
-                    <AppLink href={issueHref(ticket.issue_id)} className="min-w-0 flex-1 truncate text-primary hover:underline" title={ticket.title}>
+                    <AppLink href={issueHref(ticket.issue_id)} className="min-w-0 flex-1 text-primary hover:underline [overflow-wrap:anywhere]">
                       {ticket.identifier} {ticket.title}
                     </AppLink>
                     <span className={cn("shrink-0", ticket.flow === "no_conclusion" ? "text-amber-700" : "text-muted-foreground")}>
