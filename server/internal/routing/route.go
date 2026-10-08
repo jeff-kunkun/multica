@@ -431,7 +431,13 @@ func (r *Router) routeTodo(ctx context.Context, workspaceID string, settings Set
 			ok = false
 			why = "confidence " + pct(verdict.ReviewerConfidence) + " < threshold " + pct(threshold)
 		}
-		if !ok {
+		switch {
+		case !ok && settings.JudgedReview && unsureReviewer(verdict, dec, threshold):
+			// 按判断配验收: only a confident call for a check fills a seat.
+			// Without one the executor merges and closes on its own.
+			ref = ReviewerRef{Kind: ReviewerNoReview}
+			notes = append(notes, "reviewer left to the executor under judged review: "+why)
+		case !ok:
 			var ladderWhy string
 			ref, ladderWhy = r.fallbackReviewer(ladder, scene, roster, fresh, executor, issue)
 			reviewerFallback = true
@@ -791,6 +797,18 @@ func (r *Router) decideReviewer(v Verdict, ladder Ladder, scene Scene, roster ma
 		return seatReviewer(seat), true
 	}
 	return ReviewerRef{}, false
+}
+
+// unsureReviewer reports a reviewer verdict that 按判断配验收 reads as "no
+// confident call for a check": the model answered, did not ask for a person,
+// and either did not want a check or wanted one below the threshold. A
+// confident seat answer whose tier has no seat here still asked for a check,
+// and no answer at all is nobody's judgement, so both keep the fallback seat.
+func unsureReviewer(v Verdict, dec decision, threshold float64) bool {
+	if dec.Decider == DeciderNone || v.Reviewer == ReviewerHuman {
+		return false
+	}
+	return v.Reviewer == ReviewerNone || v.ReviewerConfidence < threshold
 }
 
 // routeInReview hands the ticket to whoever accepts it. This row does not fill

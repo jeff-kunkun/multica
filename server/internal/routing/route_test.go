@@ -1263,3 +1263,51 @@ func TestStrongExecutorFallbackReviewerUsesAnotherModelOnTheSameTier(t *testing.
 		t.Errorf("comment does not say the reviewer stayed on the rung:\n%s", body)
 	}
 }
+
+func TestJudgedReviewLeavesUnsureReviewerToTheExecutor(t *testing.T) {
+	// 按判断配验收 (DENE-1252): with the switch on, only a confident request
+	// for a check fills the reviewer slot; otherwise the slot reads 不需要验收.
+	cases := []struct {
+		name   string
+		on     bool
+		v      Verdict
+		want   string
+		inBody string
+	}{
+		{"unsure seat", true, Verdict{ExecutorTier: "strong", ExecutorConfidence: 0.9, Reviewer: ReviewerSeat, ReviewerTier: "strongest", ReviewerConfidence: 0.3}, LabelNoReview, "按判断配验收"},
+		{"confident none", true, Verdict{ExecutorTier: "strong", ExecutorConfidence: 0.9, Reviewer: ReviewerNone, ReviewerConfidence: 0.9}, LabelNoReview, "不需要验收"},
+		{"switch off keeps fallback", false, Verdict{ExecutorTier: "strong", ExecutorConfidence: 0.9, Reviewer: ReviewerSeat, ReviewerTier: "strongest", ReviewerConfidence: 0.3}, "", "兜底"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			store := newFakeStore()
+			store.settings.JudgedReview = tc.on
+			if _, err := newRouter(store, &fakeJudge{verdict: tc.v}).Route(context.Background(), "ws", "issue-1"); err != nil {
+				t.Fatalf("route: %v", err)
+			}
+			if len(store.reviewer) != 1 {
+				t.Fatalf("reviewer = %v, want one write", store.reviewer)
+			}
+			if tc.want != "" && store.reviewer[0] != tc.want {
+				t.Errorf("reviewer = %v, want %q", store.reviewer, tc.want)
+			}
+			if tc.want == "" && store.reviewer[0] == LabelNoReview {
+				t.Errorf("switch off wrote 不需要验收; want the fallback seat")
+			}
+			if body := store.comments[KindAssignment][0]; !strings.Contains(body, tc.inBody) {
+				t.Errorf("comment lacks %q:\n%s", tc.inBody, body)
+			}
+		})
+	}
+}
+
+func TestJudgedReviewKeepsAConfidentSeat(t *testing.T) {
+	store := newFakeStore()
+	store.settings.JudgedReview = true
+	if _, err := newRouter(store, &fakeJudge{verdict: confidentVerdict()}).Route(context.Background(), "ws", "issue-1"); err != nil {
+		t.Fatalf("route: %v", err)
+	}
+	if len(store.reviewer) != 1 || store.reviewer[0] == LabelNoReview {
+		t.Errorf("reviewer = %v, want the judged seat", store.reviewer)
+	}
+}

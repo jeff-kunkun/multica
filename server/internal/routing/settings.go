@@ -140,6 +140,12 @@ type Settings struct {
 	// Off by default, which is shadow mode, like PreferContinuation. With
 	// both on, 接着做 wins.
 	PreferIdle bool `json:"prefer_idle,omitempty"`
+	// JudgedReview is 「按判断配验收」 (DENE-1252): the reviewer slot gets a
+	// seat only when the judge asks for a check with confidence (or asks for
+	// a person). An unsure or "none" answer writes 不需要验收 instead of the
+	// fallback seat, and the executor merges and closes. Off by default,
+	// which keeps the fallback seat.
+	JudgedReview bool `json:"judged_review,omitempty"`
 
 	// JudgeEnabled switches the judge role — Model, BaseURL and the key above
 	// are that role's fields, because the judge is the only model routing had

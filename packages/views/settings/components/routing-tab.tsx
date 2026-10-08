@@ -123,6 +123,7 @@ export function RoutingTab() {
   const [allowUpshift, setAllowUpshift] = useState(saved.allow_upshift);
   const [preferContinuation, setPreferContinuation] = useState(saved.prefer_continuation);
   const [preferIdle, setPreferIdle] = useState(saved.prefer_idle);
+  const [judgedReview, setJudgedReview] = useState(saved.judged_review);
   const [availableModels, setAvailableModels] = useState<string[]>([]);
   const autoDiscoverKey = useRef("");
   const autoFilledModel = useRef("");
@@ -154,6 +155,7 @@ export function RoutingTab() {
     setAllowUpshift(next.allow_upshift);
     setPreferContinuation(next.prefer_continuation);
     setPreferIdle(next.prefer_idle);
+    setJudgedReview(next.judged_review);
     setKeyInput("");
     setAnalysisKeyInput("");
     setAvailableModels([]);
@@ -183,6 +185,7 @@ export function RoutingTab() {
       allow_upshift: allowUpshift,
       prefer_continuation: preferContinuation,
       prefer_idle: preferIdle,
+      judged_review: judgedReview,
     }),
     [
       enabled,
@@ -202,6 +205,7 @@ export function RoutingTab() {
       allowUpshift,
       preferContinuation,
       preferIdle,
+      judgedReview,
     ],
   );
 
@@ -267,7 +271,8 @@ export function RoutingTab() {
       a.usage_priority === b.usage_priority &&
       a.allow_upshift === b.allow_upshift &&
       a.prefer_continuation === b.prefer_continuation &&
-      a.prefer_idle === b.prefer_idle,
+      a.prefer_idle === b.prefer_idle &&
+      a.judged_review === b.judged_review,
   });
 
   // Live health from the server. Without it the fourth state is unreachable:
@@ -495,6 +500,18 @@ export function RoutingTab() {
               disabled={!canManage || !enabled}
               onCheckedChange={setPreferIdle}
               aria-label={t(($) => $.routing.load_label)}
+            />
+          </SettingsRow>
+
+          <SettingsRow
+            label={t(($) => $.routing.judged_review_label)}
+            description={t(($) => $.routing.judged_review_description)}
+          >
+            <Switch
+              checked={judgedReview}
+              disabled={!canManage || !enabled}
+              onCheckedChange={setJudgedReview}
+              aria-label={t(($) => $.routing.judged_review_label)}
             />
           </SettingsRow>
         </SettingsCard>

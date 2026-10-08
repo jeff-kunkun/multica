@@ -137,6 +137,9 @@ func (r *Router) assignmentComment(
 	case reviewerFallback && !reviewer.Empty():
 		b.WriteString(fmt.Sprintf("- **验收席**：%s（**兜底**——裁决置信度 %s 低于阈值 %s，%s）\n",
 			reviewer.Label(), pct(v.ReviewerConfidence), pct(threshold), fallbackWhy))
+	case reviewer.Kind == ReviewerNoReview && settings.JudgedReview && !(v.Reviewer == ReviewerNone && v.ReviewerConfidence >= threshold):
+		b.WriteString(fmt.Sprintf("- **验收席**：本票不需要验收（按判断配验收：模型没有把握要验收，置信度 %s 低于阈值 %s；执行人验证后自己合并关单）。要人复核就自己填一个\n",
+			pct(v.ReviewerConfidence), pct(threshold)))
 	case reviewer.Kind == ReviewerNoReview:
 		b.WriteString(fmt.Sprintf("- **验收席**：本票不需要验收（置信度 %s）。要人复核就自己填一个\n", pct(v.ReviewerConfidence)))
 	case !reviewer.Empty():

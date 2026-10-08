@@ -219,6 +219,16 @@ multica workspace routing set --load on      # or off to go back to shadow
 So create independent tickets in one batch and leave them to routing; do not
 hand-assign them to different seats to spread the load.
 
+**按判断配验收 (DENE-1252).** Off by default: an unsure reviewer verdict gets
+the fallback seat. With it on, the routing model decides — only a confident
+"seat" or a "human" answer fills the reviewer slot; anything else writes
+不需要验收, and the executor verifies, merges and closes with
+`issue close --outcome done`. The workspace's policy prompt steers this call.
+
+```bash
+multica workspace routing set --judged-review on   # judged_review in get
+```
+
 If a ticket turned out too hard for its seat, do not pick a stronger one.
 Ask routing to re-judge:
 
