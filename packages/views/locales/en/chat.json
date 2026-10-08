@@ -175,7 +175,8 @@
     "quick_actions_regenerate": "Regenerate suggestions",
     "quick_actions_regenerate_failed": "Couldn't refresh suggestions. Please try again.",
     "spawned": "Opened chat",
-    "spawn_untitled": "New chat"
+    "spawn_untitled": "New chat",
+    "issue_receipt": "Task receipt"
   },
   "session_history": {
     "untitled": "Untitled",

@@ -2814,6 +2814,8 @@ func normalizeMessageKind(kind string) string {
 		return protocol.ChatMessageKindChatSpawn
 	case protocol.ChatMessageKindChatSpawnRefused:
 		return protocol.ChatMessageKindChatSpawnRefused
+	case protocol.ChatMessageKindIssueReceipt:
+		return protocol.ChatMessageKindIssueReceipt
 	default:
 		return protocol.ChatMessageKindMessage
 	}

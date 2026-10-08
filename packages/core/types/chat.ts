@@ -30,7 +30,9 @@ export type ChatMessageKind =
   /** An agent opened a chat from this one; `linked_session_id` points at it. */
   | "chat_spawn"
   /** An agent tried to open a chat from this one and the server refused. */
-  | "chat_spawn_refused";
+  | "chat_spawn_refused"
+  /** A ticket this chat opened reports its result (DENE-1672). */
+  | "issue_receipt";
 
 /**
  * A concise follow-up offered by an assistant reply. `label` is rendered in

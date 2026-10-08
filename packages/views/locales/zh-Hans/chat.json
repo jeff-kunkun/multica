@@ -170,7 +170,8 @@
     "quick_actions_regenerate": "重新生成建议",
     "quick_actions_regenerate_failed": "无法重新生成建议，请重试。",
     "spawned": "已派生会话",
-    "spawn_untitled": "新聊天"
+    "spawn_untitled": "新聊天",
+    "issue_receipt": "任务回执"
   },
   "session_history": {
     "untitled": "无标题",

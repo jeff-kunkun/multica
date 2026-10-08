@@ -175,7 +175,8 @@
     "quick_actions_regenerate": "Régénérer les suggestions",
     "quick_actions_regenerate_failed": "Impossible d'actualiser les suggestions. Veuillez réessayer.",
     "spawned": "Discussion ouverte",
-    "spawn_untitled": "Nouvelle discussion"
+    "spawn_untitled": "Nouvelle discussion",
+    "issue_receipt": "Résultat de tâche"
   },
   "session_history": {
     "untitled": "Sans titre",

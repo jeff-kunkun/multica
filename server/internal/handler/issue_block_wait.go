@@ -405,6 +405,7 @@ func (h *Handler) finishAcceptedIssue(ctx context.Context, issue db.Issue, reaso
 	h.publishBlockStatus(issue, updated)
 	h.postBlockComment(ctx, updated, reason)
 	h.notifyParentOfChildDone(ctx, issue, updated)
+	h.postSourceChatReceipt(ctx, issue, updated)
 	h.notifyWaitersOfIssueDone(ctx, issue, updated)
 	return releaseOutcome{Status: updated.Status, Note: reason}
 }

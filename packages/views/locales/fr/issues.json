@@ -1909,6 +1909,7 @@
     "reason_fresh_requested": "nouvelle session demandée"
   },
   "state_card": {
+    "source_quote": "Demande d’origine",
     "section_title": "Fiche d’état",
     "decisions": "Décidé",
     "decisions_empty": "Rien de décidé pour l’instant",

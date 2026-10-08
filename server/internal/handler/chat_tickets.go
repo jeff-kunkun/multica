@@ -9,6 +9,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/multica-ai/multica/server/internal/receipt"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
@@ -31,8 +32,14 @@ type ChatTicket struct {
 	AssigneeID   *string `json:"assignee_id"`
 	AssigneeName string  `json:"assignee_name,omitempty"`
 	Goal         string  `json:"goal,omitempty"`
-	CreatedAt    string  `json:"created_at"`
-	UpdatedAt    string  `json:"updated_at"`
+	// Summary, PullRequests and Knowledge are the ticket's receipt
+	// (DENE-1672): what its latest close reported, once it is done, blocked,
+	// cancelled or waiting for review.
+	Summary      string       `json:"summary,omitempty"`
+	PullRequests []receipt.PR `json:"pull_requests,omitempty"`
+	Knowledge    string       `json:"knowledge,omitempty"`
+	CreatedAt    string       `json:"created_at"`
+	UpdatedAt    string       `json:"updated_at"`
 	// The chat's progress bar (DENE-1667): the latest status move (FromStatus
 	// empty and ChangedAt the creation time when it never moved) and the
 	// caller's bucket, as the project report computes it.
@@ -185,6 +192,10 @@ func (h *Handler) ListChatSessionTickets(w http.ResponseWriter, r *http.Request)
 			AssigneeType: resp.AssigneeType, AssigneeID: resp.AssigneeID,
 			Goal:      chatTicketGoal(issue.Description.String),
 			CreatedAt: resp.CreatedAt, UpdatedAt: resp.UpdatedAt,
+		}
+		if receipt.Reportable(issue.Status) {
+			rc := h.issueReceipt(r.Context(), issue, prefix)
+			ticket.Summary, ticket.PullRequests, ticket.Knowledge = rc.Summary, rc.PRs, rc.Knowledge
 		}
 		if issue.AssigneeType.Valid && issue.AssigneeID.Valid {
 			ticket.AssigneeName = h.chatTicketAssigneeName(r.Context(), names, issue.AssigneeType.String, issue.AssigneeID)

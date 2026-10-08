@@ -1852,6 +1852,7 @@
     "reason_fresh_requested": "새 세션 요청"
   },
   "state_card": {
+    "source_quote": "원래 요청",
     "section_title": "상태 카드",
     "decisions": "결정 사항",
     "decisions_empty": "아직 결정 사항이 없습니다",

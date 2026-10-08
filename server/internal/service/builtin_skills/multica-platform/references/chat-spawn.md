@@ -70,3 +70,16 @@ The same policy governs creating issues: `agent_spawn_disabled` and
 `agent_spawn_budget_exceeded` can also come back from `multica issue create`
 and `multica plan apply` when the workspace limits issue creation from a chat
 or from a task.
+
+## Receipts from the issues a chat opened
+
+An IM `/issue` command and an alignment also record their chat, like a chat
+run's `issue create` / `plan apply` and `chat to-goal`. `multica issue context`
+opens with a 来源 line quoting the message the issue answered.
+
+When such an issue enters 待验收, done, blocked or cancelled, the server posts a
+receipt card into the chat: status, the close's summary, PRs, knowledge. A
+sub-issue of a ticket from the same chat stays quiet; its parent reports. A
+chat run opens with the newest ten tickets and where each stands; answer "how
+is it going" from that list, not from memory. `multica chat tickets` shows the
+same result (`summary`, `pull_requests`, `knowledge`) for every ticket.

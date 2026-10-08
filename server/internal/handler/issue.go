@@ -4847,6 +4847,7 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 	if statusChanged || titleChanged || descriptionChanged || pickSetAside || executorCleared {
 		if statusChanged {
 			h.notifyParentOfChildDone(r.Context(), prevIssue, issue)
+			h.postSourceChatReceipt(r.Context(), prevIssue, issue)
 			h.notifyWaitersOfIssueDone(r.Context(), prevIssue, issue)
 		}
 		// Route after content edits as well as status changes, and after an
@@ -5829,6 +5830,7 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 			h.RouteIssueAsync(r, uuidToString(issue.WorkspaceID), uuidToString(issue.ID))
 		}
 		if statusChanged {
+			h.postSourceChatReceipt(r.Context(), prevIssue, issue)
 			prevTerminal := isTerminalChildStatus(
 				issuestatus.Effective(r.Context(), h.Queries, prevIssue.WorkspaceID, prevIssue.Status))
 			nowTerminal := isTerminalChildStatus(

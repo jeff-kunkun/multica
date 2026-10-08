@@ -568,6 +568,9 @@ func (s *IssueService) createInTx(ctx context.Context, tx pgx.Tx, qtx *db.Querie
 			return issueCreateTxOutcome{}, fmt.Errorf("set issue domain: %w", err)
 		}
 	}
+	if !p.OriginChatSessionID.Valid {
+		p.OriginChatSessionID = chatOriginSession(ctx, qtx, p)
+	}
 	if p.OriginChatSessionID.Valid {
 		issue, err = qtx.SetIssueOriginChatSession(ctx, db.SetIssueOriginChatSessionParams{ID: issue.ID, WorkspaceID: p.WorkspaceID, ChatSessionID: p.OriginChatSessionID})
 		if err != nil {

@@ -946,7 +946,7 @@ export const ChatMessageSchema = z.object({
   failure_reason: z.string().nullable().optional(),
   elapsed_ms: z.number().nullable().optional(),
   message_kind: z
-    .enum(["message", "no_response", "onboarding_kickoff", "onboarding_opening", "chat_spawn", "chat_spawn_refused"])
+    .enum(["message", "no_response", "onboarding_kickoff", "onboarding_opening", "chat_spawn", "chat_spawn_refused", "issue_receipt"])
     .catch("message")
     .optional(),
   // Optional additive data degrades independently: a malformed suggestion
@@ -1531,6 +1531,15 @@ export const IssueStateCardSchema = z.object({
       more: z.number().optional(),
     })
     .default({ anchor: "none", threads: [] }),
+  source: z
+    .object({
+      chat_session_id: z.string(),
+      chat_title: z.string().default(""),
+      message_id: z.string().optional(),
+      excerpt: z.string().optional(),
+    })
+    .nullable()
+    .optional(),
   text: z.string().default(""),
 });
 

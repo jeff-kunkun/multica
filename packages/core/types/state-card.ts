@@ -65,6 +65,14 @@ export interface StateCardChanges {
   more?: number;
 }
 
+/** The chat the issue was opened from and what was asked there (DENE-1672). */
+export interface StateCardSource {
+  chat_session_id: string;
+  chat_title: string;
+  message_id?: string;
+  excerpt?: string;
+}
+
 export interface IssueStateCard {
   issue_id: string;
   identifier: string;
@@ -73,6 +81,7 @@ export interface IssueStateCard {
   now: StateCardNow;
   baton?: StateCardBaton | null;
   changes: StateCardChanges;
+  source?: StateCardSource | null;
   /** The card as the CLI prints it. */
   text: string;
 }

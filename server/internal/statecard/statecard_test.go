@@ -162,3 +162,17 @@ func TestRenderCoversEverySection(t *testing.T) {
 		}
 	}
 }
+
+func TestRenderNamesSourceChat(t *testing.T) {
+	card := Card{Identifier: "DENE-2", Goal: Goal{Title: "x"}}
+	if strings.Contains(Render(card), "来源") {
+		t.Fatal("card without a source renders a source line")
+	}
+	card.Source = &Source{ChatSessionID: "chat-1", ChatTitle: "Multica · 回执", Excerpt: "聊天派的票要回执"}
+	text := Render(card)
+	for _, want := range []string{"来源：聊天「Multica · 回执」", "multica chat history --session chat-1", "原话：聊天派的票要回执"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("render misses %q:\n%s", want, text)
+		}
+	}
+}

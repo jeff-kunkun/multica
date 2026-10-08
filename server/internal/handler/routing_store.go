@@ -1206,6 +1206,7 @@ func (s routingStore) CompleteFromReview(ctx context.Context, workspaceID, issue
 	// Both are best-effort and guard on the transition themselves; the status
 	// write has already committed, so neither can undo it.
 	s.h.notifyParentOfChildDone(ctx, prev, issue)
+	s.h.postSourceChatReceipt(ctx, prev, issue)
 	s.h.notifyWaitersOfIssueDone(ctx, prev, issue)
 	return true, nil
 }

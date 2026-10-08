@@ -111,8 +111,10 @@ var chatTicketsCmd = &cobra.Command{
 "plan apply", or by turning the chat into a goal — oldest first, with status,
 assignee and the first line of each issue's 目标 section, plus its latest
 status move (from_status, changed_at) and phase — waiting_you, in_progress or
-done, bucketed as "multica project report" does. The chat shows the same list
-as its ticket cards and progress bar; each issue names the chat back as
+done, bucketed as "multica project report" does. A ticket that is done,
+blocked, cancelled or in review also carries its result: the close's summary,
+PRs and knowledge (summary, pull_requests, knowledge). The chat shows the same
+list as its ticket cards and progress bar; each issue names the chat back as
 source_chat in "multica issue get".
 
   multica chat tickets
@@ -307,7 +309,7 @@ func runChatTickets(cmd *cobra.Command, _ []string) error {
 		fmt.Println("This chat has not opened any issues.")
 		return nil
 	}
-	headers := []string{"IDENTIFIER", "STATUS", "PHASE", "ASSIGNEE", "TITLE"}
+	headers := []string{"IDENTIFIER", "STATUS", "PHASE", "ASSIGNEE", "TITLE", "RESULT"}
 	rows := make([][]string, 0, len(out.Tickets))
 	for _, t := range out.Tickets {
 		assignee, _ := t["assignee_name"].(string)
@@ -318,10 +320,32 @@ func runChatTickets(cmd *cobra.Command, _ []string) error {
 		if phase == "" {
 			phase = "-"
 		}
-		rows = append(rows, []string{fmt.Sprint(t["identifier"]), fmt.Sprint(t["status"]), phase, assignee, fmt.Sprint(t["title"])})
+		rows = append(rows, []string{fmt.Sprint(t["identifier"]), fmt.Sprint(t["status"]), phase, assignee, fmt.Sprint(t["title"]), chatTicketResult(t)})
 	}
 	cli.PrintTable(os.Stdout, headers, rows)
 	return nil
+}
+
+// chatTicketResult is a ticket's receipt in one table cell: its close summary
+// and PRs, "-" while it has none.
+func chatTicketResult(t map[string]any) string {
+	var parts []string
+	if summary, _ := t["summary"].(string); summary != "" {
+		if r := []rune(summary); len(r) > 60 {
+			summary = string(r[:59]) + "…"
+		}
+		parts = append(parts, summary)
+	}
+	prs, _ := t["pull_requests"].([]any)
+	for _, raw := range prs {
+		if pr, ok := raw.(map[string]any); ok {
+			parts = append(parts, fmt.Sprintf("PR #%v %v", pr["number"], pr["state"]))
+		}
+	}
+	if len(parts) == 0 {
+		return "-"
+	}
+	return strings.Join(parts, " · ")
 }
 
 func runChatToGoal(cmd *cobra.Command, _ []string) error {

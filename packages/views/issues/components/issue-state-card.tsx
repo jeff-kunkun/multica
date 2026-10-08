@@ -44,6 +44,14 @@ export function IssueStateCardSection({
         {t(($) => $.state_card.section_title)}
       </div>
       <div className="flex flex-col gap-3 pl-2">
+        {card.source?.excerpt ? (
+          <Row label={t(($) => $.state_card.source_quote)}>
+            <span className="break-words text-foreground" data-testid="issue-state-card-source">
+              {card.source.excerpt}
+            </span>
+          </Row>
+        ) : null}
+
         <DecisionList wsId={wsId} issueId={issueId} decisions={card.decisions} />
 
         <Row label={t(($) => $.state_card.baton)}>

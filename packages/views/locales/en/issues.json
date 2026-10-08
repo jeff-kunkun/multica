@@ -1909,6 +1909,7 @@
     "reason_fresh_requested": "fresh session requested"
   },
   "state_card": {
+    "source_quote": "Original request",
     "section_title": "State card",
     "decisions": "Settled",
     "decisions_empty": "Nothing settled yet",

@@ -348,6 +348,10 @@ const (
 	// ChatMessageKindChatSpawnRefused explains in the same chat why the
 	// server refused to open a new one (depth, budget, permissions).
 	ChatMessageKindChatSpawnRefused = "chat_spawn_refused"
+	// ChatMessageKindIssueReceipt reports a task this chat dispatched: it
+	// finished, stopped, or waits for review (DENE-1672). linked_issue_id
+	// points at the task; the content reads on its own as markdown.
+	ChatMessageKindIssueReceipt = "issue_receipt"
 )
 
 // ChatDonePayload is broadcast when an agent finishes responding to a chat

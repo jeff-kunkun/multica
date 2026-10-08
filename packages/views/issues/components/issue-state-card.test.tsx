@@ -69,6 +69,18 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe("IssueStateCardSection", () => {
+  it("quotes what the source chat asked for, and hides the row without a quote", async () => {
+    state.card.mockResolvedValue({ ...base, source: { chat_session_id: "c-1", chat_title: "登录改造", excerpt: "把登录改成新令牌" } });
+    renderCard();
+    await waitFor(() => expect(screen.getByTestId("issue-state-card-source").textContent).toBe("把登录改成新令牌"));
+    expect(screen.getByText("state_card.source_quote")).toBeTruthy();
+    cleanup();
+    state.card.mockResolvedValue({ ...base, source: null });
+    renderCard();
+    await waitFor(() => expect(screen.getByText("拍板单独建表")).toBeTruthy());
+    expect(screen.queryByTestId("issue-state-card-source")).toBeNull();
+  });
+
   it("shows decisions, the baton and the viewer's new threads", async () => {
     state.card.mockResolvedValue(base);
     const onJump = renderCard();

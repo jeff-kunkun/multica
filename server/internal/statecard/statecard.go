@@ -230,10 +230,23 @@ type Card struct {
 	IssueID    string     `json:"issue_id"`
 	Identifier string     `json:"identifier"`
 	Goal       Goal       `json:"goal"`
+	Source     *Source    `json:"source"`
 	Decisions  []Decision `json:"decisions"`
 	Now        Now        `json:"now"`
 	Baton      *Baton     `json:"baton"`
 	Changes    Changes    `json:"changes"`
+}
+
+// MaxSourceExcerpt bounds the source message quoted on the card.
+const MaxSourceExcerpt = 200
+
+// Source is the chat an issue was dispatched from (DENE-1672): the executor
+// reads what was asked, and where to read the rest.
+type Source struct {
+	ChatSessionID string `json:"chat_session_id"`
+	ChatTitle     string `json:"chat_title"`
+	MessageID     string `json:"message_id,omitempty"`
+	Excerpt       string `json:"excerpt,omitempty"`
 }
 
 // DeriveNow reads "现在在哪" from the close record. meta is the issue's
@@ -369,6 +382,16 @@ func Render(c Card) string {
 			mark = "[x]"
 		}
 		fmt.Fprintf(&b, "  %s %s\n", mark, ch.Description)
+	}
+	if c.Source != nil {
+		title := c.Source.ChatTitle
+		if title == "" {
+			title = "未命名聊天"
+		}
+		fmt.Fprintf(&b, "来源：聊天「%s」（multica chat history --session %s）\n", title, c.Source.ChatSessionID)
+		if c.Source.Excerpt != "" {
+			fmt.Fprintf(&b, "  原话：%s\n", c.Source.Excerpt)
+		}
 	}
 
 	b.WriteString("\n已拍板：")
