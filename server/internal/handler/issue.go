@@ -4571,6 +4571,9 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		assigneeIgnore       bool
 		assigneeIgnoreReason string
 	)
+	// An agent's pick was not applied and the slot is still empty, so this
+	// write hands the ticket to routing (DENE-1613).
+	pickSetAside := false
 	if touchedType || touchedID {
 		if params.AssigneeType.Valid && params.AssigneeID.Valid {
 			actorType, actorID := h.resolveActor(r, userID, workspaceID)
@@ -4597,6 +4600,7 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 					if stampRuling.Source == "" {
 						stampRuling.Source = routing.SourceAgent
 					}
+					pickSetAside = true
 				}
 			}
 		} else if !params.AssigneeID.Valid {
@@ -4821,12 +4825,14 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		h.persistBlockRecord(r.Context(), issue, blockRecord)
 		h.summonNeedsHuman(r.Context(), issue, blockRecord.NeedsHuman, actorType, actorID, "")
 	}
-	if statusChanged || titleChanged || descriptionChanged {
+	if statusChanged || titleChanged || descriptionChanged || pickSetAside {
 		if statusChanged {
 			h.notifyParentOfChildDone(r.Context(), prevIssue, issue)
 			h.notifyWaitersOfIssueDone(r.Context(), prevIssue, issue)
 		}
-		// Route after content edits as well as status changes. The detached
+		// Route after content edits as well as status changes, and after an
+		// agent's pick was set aside: the reply says routing picks, so this
+		// write is what starts it. The detached
 		// pass pre-analyzes the new content, so runtime-backed analysis is warm
 		// before a later dispatch.
 		h.RouteIssueAsync(r, uuidToString(issue.WorkspaceID), uuidToString(issue.ID))
@@ -5620,6 +5626,7 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 		}
 		// Whose pick is the executor (DENE-1033); same ruling as UpdateIssue.
 		var batchStamp *assignmentRuling
+		batchPickSetAside := false
 		if batchTouchedType || batchTouchedID {
 			if params.AssigneeType.Valid && params.AssigneeID.Valid {
 				pickActorType, pickActorID := h.resolveActor(r, userID, workspaceID)
@@ -5642,6 +5649,7 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 						if batchStamp.Source == "" {
 							batchStamp.Source = routing.SourceAgent
 						}
+						batchPickSetAside = true
 					}
 				}
 			} else if !params.AssigneeID.Valid {
@@ -5798,8 +5806,10 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 		// done/cancelled status still enters the stage barrier below. A literal
 		// comparison here left childDoneCompleted empty and silently skipped
 		// notifyParentsOfBatchChildDone entirely. (MUL-6243)
-		if statusChanged {
+		if statusChanged || batchPickSetAside {
 			h.RouteIssueAsync(r, uuidToString(issue.WorkspaceID), uuidToString(issue.ID))
+		}
+		if statusChanged {
 			prevTerminal := isTerminalChildStatus(
 				issuestatus.Effective(r.Context(), h.Queries, prevIssue.WorkspaceID, prevIssue.Status))
 			nowTerminal := isTerminalChildStatus(
