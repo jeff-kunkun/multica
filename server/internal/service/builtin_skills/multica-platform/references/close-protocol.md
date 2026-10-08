@@ -105,6 +105,16 @@ multica issue close <id> --outcome done --verdict pass --evidence-file ./close.m
   knowledge is a valid close. This key is not one of the original eight:
   older closes stay readable without it. A heading in a pull-request body is
   not a second gate.
+- Knowledge ships with the delivery (DENE-1661). On `done` / `in_review`
+  without a verdict, every slot named by `--knowledge` must be written by a
+  file this delivery changes: commit the AGENTS.md / CONTEXT.md / docs edits
+  on the task branch before closing. The CLI sends `delivered_files` (what git
+  says the branch changes against the parent's delivery branch, else the
+  nearest main line) and the server refuses a slot no delivered file writes;
+  nothing is written. A close that sends no list (the web, an older CLI) keeps
+  the audit marked `unverified` with a warning. The bound files are stored on
+  each change (`files`) and as a sediment record the project page lists. A
+  verdict pass, blocked, or parked close is not held to this.
 - The reply reports the status actually written, whether the PR merged, and
   who is woken. Quote it; do not restate it from memory.
 

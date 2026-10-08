@@ -461,7 +461,7 @@ func (h *Handler) ConvertChatSessionToGoal(w http.ResponseWriter, r *http.Reques
 		AssigneeType: pgtype.Text{String: "agent", Valid: true}, AssigneeID: session.AgentID,
 		CreatorType: "member", CreatorID: creatorID,
 		ProjectID: session.ProjectID, ProjectPinned: session.ProjectID.Valid,
-		GoalMode: true,
+		GoalMode: true, OriginChatSessionID: session.ID,
 	}, service.IssueCreateOpts{ActorID: userID, AnalyticsAgentID: uuidToString(session.AgentID), Platform: "web"})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to create goal issue")

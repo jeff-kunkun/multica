@@ -429,3 +429,27 @@ export interface ChatPendingTask {
   /** How a steer reaches the reply (DENE-1349): "same" in the running CLI, "restart" stops it and resumes the session, "handoff" (DENE-1347) stops the current step in the same session. */
   steer_mode?: string;
 }
+
+/**
+ * One issue a chat opened (DENE-1665): `GET /api/chat/sessions/:id/tickets`,
+ * also `multica chat tickets`. `goal` is the first line of the description's
+ * 目标 section — the "why" shown on the chat's ticket card.
+ */
+export interface ChatTicket {
+  id: string;
+  identifier: string;
+  title: string;
+  status: string;
+  priority: string;
+  assignee_type: "member" | "agent" | "squad" | null;
+  assignee_id: string | null;
+  assignee_name?: string;
+  goal?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ChatTicketsResponse {
+  chat_session_id: string;
+  tickets: ChatTicket[];
+}

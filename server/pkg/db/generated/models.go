@@ -1109,6 +1109,7 @@ type Issue struct {
 	ProgressUpdatedAt    pgtype.Timestamptz `json:"progress_updated_at"`
 	DuplicateOfIssueID   pgtype.UUID        `json:"duplicate_of_issue_id"`
 	DomainID             pgtype.UUID        `json:"domain_id"`
+	OriginChatSessionID  pgtype.UUID        `json:"origin_chat_session_id"`
 }
 
 type IssueChildEvent struct {
@@ -1502,6 +1503,22 @@ type IssueWakeupReceipt struct {
 	CoalesceKey pgtype.Text        `json:"coalesce_key"`
 }
 
+type KnowledgeSediment struct {
+	ID            pgtype.UUID        `json:"id"`
+	WorkspaceID   pgtype.UUID        `json:"workspace_id"`
+	ProjectID     pgtype.UUID        `json:"project_id"`
+	IssueID       pgtype.UUID        `json:"issue_id"`
+	ChatSessionID pgtype.UUID        `json:"chat_session_id"`
+	Changes       []byte             `json:"changes"`
+	Verified      bool               `json:"verified"`
+	Mainline      string             `json:"mainline"`
+	Commits       []byte             `json:"commits"`
+	PrUrl         string             `json:"pr_url"`
+	AuthorType    string             `json:"author_type"`
+	AuthorID      pgtype.UUID        `json:"author_id"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+}
+
 type LarkBindingToken struct {
 	TokenHash      string             `json:"token_hash"`
 	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
@@ -1791,6 +1808,7 @@ type ProjectMemoryStatus struct {
 	ModifiedAt   pgtype.Timestamptz `json:"modified_at"`
 	ObservedAt   pgtype.Timestamptz `json:"observed_at"`
 	Error        pgtype.Text        `json:"error"`
+	MainlineRef  pgtype.Text        `json:"mainline_ref"`
 }
 
 type ProjectResource struct {

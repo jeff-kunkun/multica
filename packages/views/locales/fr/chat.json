@@ -416,5 +416,19 @@
     "reason_runtime_changed": "la dernière session est sur une autre machine",
     "reason_session_lost": "la session précédente n'a pas pu être restaurée",
     "reason_fresh_requested": "nouvelle session demandée"
+  },
+  "tickets": {
+    "heading_one": "{{count}} ticket ouvert",
+    "heading_other": "{{count}} tickets ouverts",
+    "to": "pour {{name}}",
+    "routing": "le routage choisit l'exécutant",
+    "actions": "Actions pour {{id}}",
+    "assign_me": "Me l'attribuer",
+    "assign_agent": "Confier à un agent",
+    "withdraw": "Retirer",
+    "assigned_me": "{{id}} vous est attribué",
+    "assigned_agent": "{{id}} est rendu au routage",
+    "withdrawn": "{{id}} retiré",
+    "failed": "Impossible de modifier {{id}}"
   }
 }
