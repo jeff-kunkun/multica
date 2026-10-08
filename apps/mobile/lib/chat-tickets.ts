@@ -31,3 +31,35 @@ export function groupChatTickets(
   }
   return { byMessage, tail };
 }
+
+const PHASE_RANK = { waiting_you: 0, in_progress: 1, done: 2 } as const;
+
+export interface ChatProgressRow extends ChatTicket {
+  fresh: boolean;
+}
+
+/**
+ * The chat's progress bar (DENE-1667). Mirrors `ChatReportBar` in
+ * packages/views/chat/components/chat-report-bar.tsx: a ticket whose latest
+ * status move came after `seenAt` is fresh; fresh rows lead, newest first,
+ * the rest by who they wait on.
+ */
+export function chatProgress(tickets: ChatTicket[], seenAt: number) {
+  const all = tickets.map((ticket) => ({
+    ...ticket,
+    fresh: !!ticket.from_status && Date.parse(ticket.changed_at) > seenAt,
+  }));
+  const fresh = all
+    .filter((r) => r.fresh)
+    .sort((a, b) => Date.parse(b.changed_at) - Date.parse(a.changed_at));
+  const rest = all
+    .filter((r) => !r.fresh)
+    .sort(
+      (a, b) =>
+        PHASE_RANK[a.phase] - PHASE_RANK[b.phase] ||
+        Date.parse(b.changed_at) - Date.parse(a.changed_at),
+    );
+  const counts = { waiting_you: 0, in_progress: 0, done: 0 };
+  for (const row of all) counts[row.phase] += 1;
+  return { rows: [...fresh, ...rest] as ChatProgressRow[], counts, fresh: fresh.length };
+}

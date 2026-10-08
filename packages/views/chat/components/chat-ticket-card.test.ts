@@ -12,6 +12,9 @@ const ticket = (id: string, created_at: string): ChatTicket => ({
   assignee_id: null,
   created_at,
   updated_at: created_at,
+  changed_at: created_at,
+  phase: "in_progress",
+  needs_you: false,
 });
 
 describe("groupChatTickets", () => {

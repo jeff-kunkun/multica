@@ -412,6 +412,19 @@
     "reason_session_lost": "会话没能恢复",
     "reason_fresh_requested": "按要求新开"
   },
+  "report": {
+    "bar_other": "本聊天 {{count}} 张单",
+    "bar_fresh_other": "本聊天 {{count}} 张单 · 刚变 {{fresh}}",
+    "waiting_you": "等你 {{count}}",
+    "in_progress": "在做 {{count}}",
+    "done": "做完 {{count}}",
+    "hear": "听汇报",
+    "hear_prompt": "听汇报：讲讲「{{project}}」上次以来的新进展",
+    "title": "本聊天开的单",
+    "just_changed": "刚变",
+    "opened": "新开 · {{to}}",
+    "needs_you": "要你处理"
+  },
   "tickets": {
     "heading_other": "开了 {{count}} 张单",
     "to": "给 {{name}}",

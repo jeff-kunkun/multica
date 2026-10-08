@@ -32,25 +32,29 @@ func TestModelTierBelowRuleFloorIsRaised(t *testing.T) {
 	}
 }
 
+// The table's tier is the floor and the judge's ceiling is one rung above it:
+// strong on small/low/clear facts is capped at medium, weak on module facts
+// stays at the table's medium.
 func TestModelTierAtOrAboveRuleFloorStands(t *testing.T) {
 	small := Facts{Scope: ScopeSmall, Clarity: ClarityClear, Risk: RiskLow}
-	for _, tier := range []string{"weak", "strong"} {
-		d := decision{Decider: DeciderJudge, Facts: &small, Verdict: Verdict{ExecutorTier: tier}}.withRuleFloor(DefaultLadder)
-		if d.Verdict.ExecutorTier != tier || d.RaisedFrom != "" {
+	_, row := DefaultRules.Match(small)
+	for tier, want := range map[string]string{"weak": "weak", "strong": "medium"} {
+		trace := &Trace{}
+		d := decision{Decider: DeciderRule, Facts: &small, Verdict: row.Verdict(small)}.
+			withJudge(Verdict{ExecutorTier: tier, ExecutorConfidence: 1, Reason: "看过"}, nil, 0.7, DefaultLadder, trace)
+		if d.Verdict.ExecutorTier != want || d.RaisedFrom != "" {
 			t.Fatalf("%s on small/low/clear facts became %+v", tier, d)
 		}
 	}
 	module := Facts{Scope: ScopeModule, Clarity: ClarityClear, Risk: RiskLow}
-	d := decision{Decider: DeciderAnalysis, Facts: &module, Verdict: Verdict{ExecutorTier: "weak"}}.withRuleFloor(DefaultLadder)
+	index, mrow := DefaultRules.Match(module)
+	trace := &Trace{Rule: TraceRule{Index: index, ID: mrow.ID, Label: mrow.Label, Tier: mrow.Tier}}
+	d := decision{Decider: DeciderRule, Facts: &module, Verdict: mrow.Verdict(module), Trace: trace}.
+		withJudge(Verdict{ExecutorTier: "weak", ExecutorConfidence: 1}, nil, 0.7, DefaultLadder, trace)
 	if d.Verdict.ExecutorTier != "medium" || d.RaisedFrom != "weak" {
-		t.Fatalf("weak on module facts = %+v, want raised to medium", d)
+		t.Fatalf("weak on module facts = %+v, want held at medium", d)
 	}
 	if got := floorLine(d, DefaultLadder); !strings.Contains(got, "只有小改动、低风险、需求清楚才用弱档") {
 		t.Fatalf("floor line = %q", got)
-	}
-	// No facts, nothing to floor on.
-	d = decision{Decider: DeciderJudge, Verdict: Verdict{ExecutorTier: "weak"}}.withRuleFloor(DefaultLadder)
-	if d.Verdict.ExecutorTier != "weak" || d.RaisedFrom != "" {
-		t.Fatalf("judge-only verdict without facts was changed: %+v", d)
 	}
 }

@@ -21,6 +21,27 @@ var projectCmd = &cobra.Command{
 	Short: "Work with projects",
 }
 
+var projectReportCmd = &cobra.Command{
+	Use:   "report [<project>...]",
+	Short: "What is new in a project since the person last heard it",
+	Long: `What is new in a project since the person last heard it (听汇报).
+
+The server keeps where each person has heard up to per person + project, not
+per chat: hearing a project in one chat, another chat or on the project page
+moves the same cursor. News is every issue whose status moved, or that was
+opened, since then — grouped into done / in_progress / waiting_you, each with
+its source chat when a chat opened it.
+
+Without a project, reports every project of the current chat
+(MULTICA_CHAT_SESSION_ID). In a chat run the person is the human the run works
+for. --mark-heard records the report as heard: the cursor moves to its end,
+that person's inbox rows on the covered issues are read, and the chat reply of
+this run gets the report's follow-up buttons (the "actions" field).`,
+	Example: `  multica project report --output json
+  multica project report "Multica 魔改" --mark-heard --output json`,
+	RunE: runProjectReport,
+}
+
 var projectListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List projects in the workspace",
@@ -189,6 +210,7 @@ func validateProjectStatus(status string) error {
 
 func init() {
 	projectCmd.AddCommand(projectListCmd)
+	projectCmd.AddCommand(projectReportCmd)
 	projectCmd.AddCommand(projectGetCmd)
 	projectCmd.AddCommand(projectCreateCmd)
 	projectCmd.AddCommand(projectUpdateCmd)
@@ -214,6 +236,9 @@ func init() {
 
 	// project list
 	projectListCmd.Flags().String("output", "table", "Output format: table or json")
+	projectReportCmd.Flags().Bool("mark-heard", false, "Record the report as heard: move the cursor, read the covered inbox rows")
+	projectReportCmd.Flags().String("session", "", "Chat whose projects to report when no project is named (defaults to MULTICA_CHAT_SESSION_ID)")
+	projectReportCmd.Flags().String("output", "json", "Output format: table or json")
 	projectListCmd.Flags().Bool("full-id", false, "Show full UUIDs in table output")
 	projectListCmd.Flags().String("status", "", "Filter by status")
 
@@ -1654,4 +1679,91 @@ func projectRepoRows(raw any) [][]string {
 		rows = append(rows, []string{strVal(resource, "id"), strVal(ref, "url"), strVal(repo, "mode"), strVal(action, "kind")})
 	}
 	return rows
+}
+
+func runProjectReport(cmd *cobra.Command, args []string) error {
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := cli.APIContext(context.Background())
+	defer cancel()
+
+	var projectIDs []string
+	for _, arg := range args {
+		ref, err := resolveProjectID(ctx, client, arg)
+		if err != nil {
+			return fmt.Errorf("resolve project: %w", err)
+		}
+		projectIDs = append(projectIDs, ref.ID)
+	}
+	if len(projectIDs) == 0 {
+		session, _ := cmd.Flags().GetString("session")
+		if strings.TrimSpace(session) == "" {
+			session = os.Getenv("MULTICA_CHAT_SESSION_ID")
+		}
+		if strings.TrimSpace(session) == "" {
+			return fmt.Errorf("project report: name a project, or run it inside a chat (MULTICA_CHAT_SESSION_ID) / pass --session")
+		}
+		ref, err := parseChatSessionLinkRef(session)
+		if err != nil {
+			return fmt.Errorf("project report: %w", err)
+		}
+		var chat struct {
+			ProjectIDs []string `json:"project_ids"`
+		}
+		if err := client.GetJSON(ctx, "/api/chat/sessions/"+url.PathEscape(ref.ID), &chat); err != nil {
+			return fmt.Errorf("project report: read the chat's projects: %w", err)
+		}
+		if len(chat.ProjectIDs) == 0 {
+			return fmt.Errorf("project report: this chat has no project; name one")
+		}
+		projectIDs = chat.ProjectIDs
+	}
+
+	markHeard, _ := cmd.Flags().GetBool("mark-heard")
+	reports := make([]map[string]any, 0, len(projectIDs))
+	for _, id := range projectIDs {
+		var report map[string]any
+		path := "/api/projects/" + url.PathEscape(id) + "/report"
+		if markHeard {
+			err = client.PostJSON(ctx, path+"/heard", map[string]any{}, &report)
+		} else {
+			err = client.GetJSON(ctx, path, &report)
+		}
+		if err != nil {
+			return fmt.Errorf("project report: %w", err)
+		}
+		reports = append(reports, report)
+	}
+
+	output, _ := cmd.Flags().GetString("output")
+	if output == "table" {
+		headers := []string{"PROJECT", "ISSUE", "PHASE", "STATUS", "FROM", "SOURCE CHAT", "TITLE"}
+		var rows [][]string
+		for _, report := range reports {
+			items, _ := report["items"].([]any)
+			if len(items) == 0 {
+				rows = append(rows, []string{strVal(report, "project_title"), "-", "-", "-", "-", "-", "no news since " + strVal(report, "since")})
+			}
+			for _, raw := range items {
+				item, _ := raw.(map[string]any)
+				source := ""
+				if chat, ok := item["source_chat"].(map[string]any); ok {
+					source = strVal(chat, "title")
+					if source == "" {
+						source = strVal(chat, "id")
+					}
+				}
+				from := strVal(item, "from_status")
+				if b, _ := item["opened"].(bool); b {
+					from = "(opened)"
+				}
+				rows = append(rows, []string{strVal(report, "project_title"), strVal(item, "identifier"), strVal(item, "phase"), strVal(item, "status"), from, source, strVal(item, "title")})
+			}
+		}
+		cli.PrintTable(os.Stdout, headers, rows)
+		return nil
+	}
+	return cli.PrintJSON(os.Stdout, map[string]any{"marked": markHeard, "reports": reports})
 }

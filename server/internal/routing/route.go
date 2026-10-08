@@ -67,6 +67,10 @@ type Outcome struct {
 	// when it stood.
 	Tier       string
 	JudgedTier string
+	// Trace is the decision log of the todo row (DENE-1677): the questions,
+	// the matched rule, the judge's part, and the seats written. Nil when no
+	// decision was made on this call.
+	Trace *Trace
 }
 
 // Router is the module both entry points call. The HTTP hooks call Route
@@ -78,9 +82,11 @@ type Router struct {
 	Judge Judge
 	// Analyst is the analysis role. Nil means this build cannot run it, and a
 	// workspace that switched it on gets the unavailable path.
-	Analyst          Analyst
-	Breaker          *Breaker
-	Ladder           Ladder
+	Analyst Analyst
+	Breaker *Breaker
+	Ladder  Ladder
+	// Rules is the rule table; empty means DefaultRules.
+	Rules            RuleTable
 	Log              *slog.Logger
 	analysisFailures sync.Map // content key -> time.Time
 }
@@ -340,6 +346,7 @@ func (r *Router) routeTodo(ctx context.Context, workspaceID string, settings Set
 		}
 		dec, verdict = d, d.Verdict
 		out.Tier, out.JudgedTier = d.Verdict.ExecutorTier, d.RaisedFrom
+		out.Trace = d.Trace
 	}
 
 	threshold := settings.Threshold()
@@ -365,6 +372,9 @@ func (r *Router) routeTodo(ctx context.Context, workspaceID string, settings Set
 	var load LoadPick
 	if labelled && !labelSeatOK {
 		notes = append(notes, "labelled tier "+requestedTier+" was not eligible")
+	}
+	if j := judgeNote(dec.Trace); j != "" {
+		notes = append(notes, j)
 	}
 	if needExecutor {
 		if len(fresh) == 0 {
@@ -426,6 +436,10 @@ func (r *Router) routeTodo(ctx context.Context, workspaceID string, settings Set
 	humanSignoff := needReviewer && verdict.Reviewer == ReviewerHuman
 	if needReviewer {
 		ref, ok := r.decideReviewer(verdict, ladder, scene, roster, fresh, executor, issue)
+		if ok && verdict.Reviewer == ReviewerSeat && verdict.ReviewerTier == "" {
+			// The table's check landed where the ladder put it; say why.
+			_, fallbackWhy = r.fallbackReviewer(ladder, scene, roster, fresh, executor, issue)
+		}
 		why := ""
 		switch {
 		case !ok && humanSignoff:
@@ -482,6 +496,14 @@ func (r *Router) routeTodo(ctx context.Context, workspaceID string, settings Set
 		out.Action = ActionAssigned
 	}
 	out.Reason = strings.Join(notes, "; ")
+	if out.Trace != nil {
+		if executor != nil {
+			out.Trace.Seat = executor.Name
+		}
+		if !reviewer.Empty() {
+			out.Trace.Reviewer = reviewer.Label()
+		}
+	}
 
 	// --- notify ----------------------------------------------------------
 	// The one condition that earns an @: the ticket is in a state where
@@ -507,6 +529,15 @@ func (r *Router) routeTodo(ctx context.Context, workspaceID string, settings Set
 	}
 
 	return r.deliver(ctx, workspaceID, issue, KindAssignment, body, notify, out)
+}
+
+// judgeNote names a judge answer the rule table did not take, so a hook or
+// CLI reading Reason sees the drift without opening the comment.
+func judgeNote(t *Trace) string {
+	if t == nil || t.Judge == nil || t.Judge.Effect != JudgeIgnored {
+		return ""
+	}
+	return "judge answer \"" + t.Judge.Tier + "\" not used: " + t.Judge.Why
 }
 
 // Where the executor seat came from, for the decision comment.
@@ -785,6 +816,13 @@ func (r *Router) decideReviewer(v Verdict, ladder Ladder, scene Scene, roster ma
 		// fallback, exactly as it does for any other unusable answer.
 		return ReviewerRef{}, false
 	case ReviewerSeat:
+		if v.ReviewerTier == "" {
+			// The rule table asks for a check and leaves the seat to the
+			// ladder: the holder's rung in another model family, or one
+			// rung down (DENE-1677).
+			ref, _ := r.fallbackReviewer(ladder, scene, roster, candidates, executor, issue)
+			return ref, !ref.Empty()
+		}
 		seat, ok := SeatByTier(candidates, v.ReviewerTier)
 		if !ok {
 			return ReviewerRef{}, false
