@@ -191,8 +191,9 @@ func TestProjectReportCursorIsPerPersonAndProject(t *testing.T) {
 	if !read {
 		t.Fatal("hearing the report must read the inbox row on a covered ticket")
 	}
-	if len(heard.Actions) != 3 || heard.Actions[2].Label != service.ChatReportAckLabel {
-		t.Fatalf("actions = %+v, want approve / change for the one waiting ticket and 都知道了", heard.Actions)
+	// A2 waits on the person without being in review: ask what blocks it.
+	if len(heard.Actions) != 2 || heard.Actions[0].Label != items[a2].Identifier+" 卡在哪" || heard.Actions[1].Label != service.ChatReportAckLabel {
+		t.Fatalf("actions = %+v, want 卡在哪 for the one waiting ticket and 都知道了", heard.Actions)
 	}
 
 	// Nothing moved since: chat B hears nothing new.
@@ -219,6 +220,10 @@ func TestProjectReportCursorIsPerPersonAndProject(t *testing.T) {
 	}
 	if got[a2].SourceChat == nil || got[a2].SourceChat.ID != chatA {
 		t.Fatalf("A2 must name chat A as its source: %+v", got[a2].SourceChat)
+	}
+	// A2 is now in review: the person's verdict, either way.
+	if len(fromB.Actions) != 3 || fromB.Actions[0].Label != got[a2].Identifier+" 看过了，没问题" || fromB.Actions[1].Label != got[a2].Identifier+" 要改" {
+		t.Fatalf("actions = %+v, want approve / change for the ticket in review", fromB.Actions)
 	}
 
 	// The run that heard it is recorded with the report's buttons, which its

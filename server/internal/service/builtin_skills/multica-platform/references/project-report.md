@@ -77,6 +77,7 @@ ticket, recording the user's words:
 |---|---|
 | 「X 看过了，没问题」 | Comment the user's verdict on X. If X is `in_review` waiting on them, close it as accepted per `references/close-protocol.md`; otherwise just record it |
 | 「X 要改」 | Ask what to change, then comment it on X and mention X's executor so the work resumes |
+| 「X 卡在哪」 | Say what blocks X and what the user must do; record their answer on X as a comment |
 | 「X 加急」 | `multica issue update X --priority urgent`, and comment that the user asked |
 | 「都知道了」 | Nothing to change; say so in one line |
 

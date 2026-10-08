@@ -255,7 +255,7 @@ function ReportPanel({
                   <span className="shrink-0 text-caption text-muted-foreground">{row.identifier}</span>
                   <span className="truncate">{row.title}</span>
                 </span>
-                <span className="truncate text-caption text-muted-foreground">
+                <span className="line-clamp-2 text-caption text-muted-foreground">
                   {row.fresh && <span className="text-foreground">{t(($) => $.report.just_changed)}</span>}
                   {row.fresh && "："}
                   {move} · {timeAgo(row.changed_at)}

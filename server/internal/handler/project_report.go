@@ -324,20 +324,30 @@ func projectReportActions(items []ProjectReportItem) []protocol.ChatQuickAction 
 		}
 	}
 	var actions []protocol.ChatQuickAction
-	approve := func(item ProjectReportItem) protocol.ChatQuickAction {
+	// A ticket in review is the person's verdict to give; anything else
+	// waiting on them (stuck, assigned, an open call) first needs the ask.
+	settle := func(item ProjectReportItem) protocol.ChatQuickAction {
+		if item.Status == "in_review" {
+			return protocol.ChatQuickAction{
+				Label:  item.Identifier + " 看过了，没问题",
+				Prompt: item.Identifier + " 看过了，没问题。把我的结论记到这张票上，按通过推进。",
+			}
+		}
 		return protocol.ChatQuickAction{
-			Label:  item.Identifier + " 看过了，没问题",
-			Prompt: item.Identifier + " 看过了，没问题。把我的结论记到这张票上，按通过推进。",
+			Label:  item.Identifier + " 卡在哪",
+			Prompt: item.Identifier + " 卡在哪？讲清楚要我做什么，我回答后记到票上。",
 		}
 	}
 	switch {
-	case len(waiting) == 1:
-		actions = append(actions, approve(waiting[0]), protocol.ChatQuickAction{
+	case len(waiting) == 1 && waiting[0].Status == "in_review":
+		actions = append(actions, settle(waiting[0]), protocol.ChatQuickAction{
 			Label:  waiting[0].Identifier + " 要改",
 			Prompt: waiting[0].Identifier + " 要改。先问我改什么，再把意见记到这张票上叫回执行人。",
 		})
+	case len(waiting) == 1:
+		actions = append(actions, settle(waiting[0]))
 	case len(waiting) > 1:
-		actions = append(actions, approve(waiting[0]), approve(waiting[1]))
+		actions = append(actions, settle(waiting[0]), settle(waiting[1]))
 	case len(moving) > 0:
 		actions = append(actions, protocol.ChatQuickAction{
 			Label:  moving[0].Identifier + " 加急",
