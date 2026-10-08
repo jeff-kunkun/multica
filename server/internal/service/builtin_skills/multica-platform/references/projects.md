@@ -306,18 +306,32 @@ multica project memory check <project-id> --output json   # no --path
 
 ### Reporting a check (may open a sediment ticket)
 
-A new report is what can trigger a memory round. Reports come from the daemon
-(when it stats a project's local directory) or from the CLI with `--path`:
+`locations` is always the project's **local directory** as the daemon last saw
+it (`source: "local_directory"`). Only that directory counts as an
+observation. The daemon reports it on every refresh; the CLI counts only when
+`--path` is that same bound directory:
 
 ```bash
 multica project memory check <project-id> --path <project-root> --output json
 ```
 
-When the reported locations include a missing one, the server calls
+`--path` pointing anywhere else — your own task worktree, typically — is a
+self-check: the response echoes it under `worktree_check` and leaves the
+local-directory observation and any sediment ticket untouched. A complete
+`worktree_check` is not proof the round is done; the round is done when the
+local directory has the files (merged and synced).
+
+A location missing locally but already on the remote mainline carries
+`mainline_ref` (for example `origin/dev`): the local directory is behind, so
+sync it instead of writing the file again. The ticket description says so.
+
+When the local directory lacks a location, the server calls
 `EnsureMemoryRound`: an open sediment ticket for the project gets a reason
 comment, otherwise a new one is created and assigned to the workspace sediment
 agent (`settings.memory.sediment_agent`). With no seat configured, no ticket is
-created and the response carries `sediment_error` explaining why.
+created and the response carries `sediment_error` explaining why. After a
+round closes, the same missing set (or a subset) does not open another one for
+7 days; a newly missing location does.
 
 Other triggers of the same round (server-side, no command needed): a stage
 advancing, a parent's sub-issues all reaching a terminal status, and the

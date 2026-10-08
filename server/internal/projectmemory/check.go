@@ -69,6 +69,9 @@ type LocationResult struct {
 	IsDirectory bool       `json:"is_directory"`
 	ModifiedAt  *time.Time `json:"modified_at,omitempty"`
 	Error       string     `json:"error,omitempty"`
+	// MainlineRef names the remote ref that already has a slot the directory
+	// lacks: the directory is behind, the memory itself exists (DENE-1660).
+	MainlineRef string `json:"mainline_ref,omitempty"`
 }
 
 // Check stats only. It never creates, opens for writing, or changes anything
