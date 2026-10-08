@@ -15,6 +15,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/closeprotocol"
 	"github.com/multica-ai/multica/server/internal/projectmemory"
 	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/util"
@@ -676,14 +677,17 @@ func (h *Handler) appendMemoryReason(ctx context.Context, issue db.Issue, agentI
 // seat, a bad setting, or a write failure is logged and returned as text. It
 // never fails the business event that noticed the progress.
 func (h *Handler) noteMemoryProgress(ctx context.Context, workspaceID, projectID pgtype.UUID, reason string) string {
-	return h.noteMemoryMilestone(ctx, workspaceID, projectID, reason, "")
+	return h.noteMemoryMilestone(ctx, workspaceID, projectID, reason, "", nil)
 }
 
 // noteMemoryMilestone is noteMemoryProgress for the three milestone triggers
 // (children all terminal, stage advance, project completed). The digest
 // (sedimentDigest) follows the one-line reason, so the round's ticket carries
-// the source tickets' conclusions and close evidence (DENE-1661).
-func (h *Handler) noteMemoryMilestone(ctx context.Context, workspaceID, projectID pgtype.UUID, reason, digest string) string {
+// the source tickets' conclusions and close evidence (DENE-1661). source is
+// the parent ticket or project the milestone sums up: it makes the round a
+// boss-layer sediment (DENE-1680), whose close declares what each change does
+// to the existing entries and whose record names the source.
+func (h *Handler) noteMemoryMilestone(ctx context.Context, workspaceID, projectID pgtype.UUID, reason, digest string, source *sedimentSource) string {
 	reason = strings.NewReplacer("\r", " ", "\n", " ").Replace(strings.TrimSpace(reason))
 	if !projectID.Valid || reason == "" || h.Queries == nil {
 		return ""
@@ -698,6 +702,9 @@ func (h *Handler) noteMemoryMilestone(ctx context.Context, workspaceID, projectI
 	if digest = strings.TrimSpace(digest); digest != "" {
 		reason += "\n\n" + digest
 	}
+	if source != nil {
+		reason += "\n\n老板层沉淀：" + closeprotocol.BossLayerHint
+	}
 	result, err := h.EnsureMemoryRound(ctx, project, reason)
 	if err != nil {
 		slog.Warn("memory round: sediment failed", "error", err, "project_id", uuidToString(projectID), "reason", reason)
@@ -706,6 +713,12 @@ func (h *Handler) noteMemoryMilestone(ctx context.Context, workspaceID, projectI
 	if result.Error != "" {
 		slog.Warn("memory round: sediment skipped", "error", result.Error, "project_id", uuidToString(projectID), "reason", reason)
 		return result.Error
+	}
+	if source != nil && result.Issue != nil {
+		if err := h.addRoundSource(ctx, *result.Issue, *source); err != nil {
+			slog.Warn("memory round: source not recorded", "error", err, "project_id", uuidToString(projectID))
+			return "project memory sediment failed"
+		}
 	}
 	return ""
 }
@@ -739,7 +752,7 @@ func (h *Handler) sedimentClosedBarrier(ctx context.Context, parent, completed d
 	} else {
 		return
 	}
-	h.noteMemoryMilestone(ctx, parent.WorkspaceID, parent.ProjectID, reason, h.sedimentDigest(ctx, sources))
+	h.noteMemoryMilestone(ctx, parent.WorkspaceID, parent.ProjectID, reason, h.sedimentDigest(ctx, sources), &sedimentSource{Kind: "issue", ID: uuidToString(parent.ID)})
 }
 
 func childrenInStage(children []db.Issue, stage int32) []db.Issue {

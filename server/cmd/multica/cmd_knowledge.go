@@ -24,11 +24,12 @@ import (
 // closeDeliveredFiles is the delivered_files a close sends: the paths this
 // checkout's branch changes against the parent's delivery branch (a
 // sub-issue) or the nearest main line. nil — sent as no list — when git
-// cannot say; the server then keeps the audit marked unverified.
-func closeDeliveredFiles(ctx context.Context, client *cli.APIClient, issueID string) *[]string {
+// cannot say; the server then keeps the audit marked unverified. The second
+// value is the memory_files account of the same delivery (DENE-1680).
+func closeDeliveredFiles(ctx context.Context, client *cli.APIClient, issueID string) (*[]string, *[]closeprotocol.MemoryFile) {
 	dir, err := os.Getwd()
 	if err != nil {
-		return nil
+		return nil, nil
 	}
 	var bases []string
 	var d service.IssueDelivery
@@ -37,9 +38,13 @@ func closeDeliveredFiles(ctx context.Context, client *cli.APIClient, issueID str
 	}
 	files, base, err := execenv.DeliveredFiles(dir, bases...)
 	if err != nil || base == "" {
-		return nil
+		return nil, nil
 	}
-	return &files
+	memory, err := execenv.DeliveredMemoryFiles(dir, bases...)
+	if err != nil || memory == nil {
+		return &files, nil
+	}
+	return &files, &memory
 }
 
 var chatSedimentCmd = &cobra.Command{
@@ -49,9 +54,18 @@ var chatSedimentCmd = &cobra.Command{
 docs/adr, the docs and evidence indexes) once they are on the main line.
 Commit the edits on the chat's branch first, then:
 
-  multica chat sediment --knowledge context=加了「沉淀记录」词条
-  multica chat sediment --knowledge agents=... --pr https://github.com/o/r/pull/12
+  multica chat sediment --knowledge context:new=加了「沉淀记录」词条
+  multica chat sediment --knowledge agents:update:工作单=... --pr https://github.com/o/r/pull/12
+  multica chat sediment --knowledge agents:supersede:旧派单规则=已被「自动派票」取代
   multica chat sediment --history
+
+A chat settling its work is the boss layer: look for the existing entry
+before writing, and give each change an action — update (rewrote an entry),
+merge (new entry marked to merge into an existing one), supersede (the old
+entry is marked 「已被 X 取代」, not deleted), or new. Rewriting or deleting
+existing lines without update/supersede is refused, and so is a map file
+(AGENTS.md, CONTEXT.md, the indexes) over 32 KiB; the refusal names the
+entries to merge or drop.
 
 The main line is the project's, never the branch the project directory
 happens to be on: git config multica.mainline, else the remote's default
@@ -74,7 +88,7 @@ Skip it for a chat that settled nothing: idle talk records no sediment.
 func init() {
 	chatCmd.AddCommand(chatSedimentCmd)
 	chatSedimentCmd.Flags().String("session", "", "Chat session id or URL (defaults to MULTICA_CHAT_SESSION_ID)")
-	chatSedimentCmd.Flags().StringArray("knowledge", nil, "Memory location this chat wrote and what changed, as location=summary; repeatable (agents, context, adr, docs_index, evidence_index)")
+	chatSedimentCmd.Flags().StringArray("knowledge", nil, "Memory change as location:action[:entry]=summary; action is new, update, merge or supersede; repeatable (locations: agents, context, adr, docs_index, evidence_index)")
 	chatSedimentCmd.Flags().String("pr", "", "The merged PR that carried the edits (repositories with a remote)")
 	chatSedimentCmd.Flags().Bool("history", false, "List this chat's earlier sediments instead of recording one")
 	chatSedimentCmd.Flags().String("output", "json", "Output format: table or json")
@@ -120,8 +134,7 @@ func runChatSediment(cmd *cobra.Command, _ []string) error {
 	}
 	changes := make([]closeprotocol.KnowledgeChange, 0, len(items))
 	for _, item := range items {
-		location, summary, _ := strings.Cut(item, "=")
-		changes = append(changes, closeprotocol.KnowledgeChange{Location: location, Summary: summary})
+		changes = append(changes, parseKnowledgeItem(item))
 	}
 	dir, err := os.Getwd()
 	if err != nil {
@@ -173,6 +186,17 @@ func runChatSediment(cmd *cobra.Command, _ []string) error {
 		return fmt.Errorf("chat sediment: 没有记，%s（PR 标题带 Chat %s）", reason, shortID)
 	}
 	if landing.Via == closeprotocol.LandingLocal {
+		// The hygiene rules run before the merge too: a merge cannot be
+		// taken back once the server refuses the record.
+		if pending, err := execenv.DeliveredMemoryFiles(dir, mainline); err == nil && pending != nil {
+			audit, _, auditErr := closeprotocol.CanonicalKnowledgeAudit(closeprotocol.KnowledgeAudit{Changes: changes})
+			if auditErr != nil {
+				return fmt.Errorf("chat sediment: 没有记，%w", auditErr)
+			}
+			if err := closeprotocol.CheckMemoryHygiene(audit, &pending, true); err != nil {
+				return fmt.Errorf("chat sediment: 没有合也没有记，%w", err)
+			}
+		}
 		res, err := execenv.MergeIntoMainline(dir, fmt.Sprintf("Chat %s: 沉淀 %s", shortID, sedimentLocations(changes)), chatStartedAt(ctx, client, ref.ID))
 		if err != nil {
 			return fmt.Errorf("chat sediment: 沉淀没能合进主线，什么都没记：%w", err)
@@ -195,6 +219,15 @@ func runChatSediment(cmd *cobra.Command, _ []string) error {
 	}
 	body["mainline"] = mainline
 	body["landing"] = landing
+	// What the delivered memory files look like now, for the hygiene check
+	// (DENE-1680): read after any local merge, from the commits recorded.
+	delivered, _ := body["delivered_files"].([]string)
+	recorded, _ := body["commits"].([]string)
+	memory, err := execenv.CommitMemoryFiles(dir, recorded, delivered)
+	if err != nil {
+		return fmt.Errorf("chat sediment: 读不出记忆文件的改动，什么都没记：%w；先 git fetch 让这些提交在本地可见再执行一次", err)
+	}
+	body["memory_files"] = memory
 
 	var out map[string]any
 	if err := client.PostJSON(ctx, path, body, &out); err != nil {

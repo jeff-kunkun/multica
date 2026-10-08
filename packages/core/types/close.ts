@@ -1,6 +1,10 @@
 // KnowledgeAuditChange is one project-memory checklist slot this close wrote.
 export interface KnowledgeAuditChange {
   location: string;
+  /** How the change treats existing entries (DENE-1680); required on the boss layer. */
+  action?: "new" | "update" | "merge" | "supersede";
+  /** The existing entry an update / merge / supersede names. */
+  entry?: string;
   summary: string;
   /** The delivered files that wrote the slot (DENE-1661). */
   files?: string[];

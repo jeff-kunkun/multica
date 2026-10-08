@@ -2563,7 +2563,7 @@ func registerIssueCloseFlags(cmd *cobra.Command) {
 	cmd.Flags().String("verdict", "", "Acceptance verdict, reviewer only: pass (merges and closes)")
 	cmd.Flags().String("pr", "", "Pull or merge request URL to register with this close. A verified link is stored; an unverifiable link still closes and is marked 未核实")
 	cmd.Flags().Bool("knowledge-none", false, "Declare this close wrote no qualified project memory")
-	cmd.Flags().StringArray("knowledge", nil, "Project-memory change as <key>=<summary>; repeat for each checklist location")
+	cmd.Flags().StringArray("knowledge", nil, "Project-memory change as <key>[:<action>[:<entry>]]=<summary>; action is new, update, merge or supersede (required on a boss-layer sediment round); repeat for each change")
 	cmd.Flags().StringArray("decision", nil, "A decision settled this round, added to the state card's 已拍板 list (one line, 300 chars max; repeat for each)")
 	cmd.Flags().String("output", "json", "Output format: table or json")
 }
@@ -2630,11 +2630,17 @@ func runIssueClose(cmd *cobra.Command, args []string) error {
 	if decisions, _ := cmd.Flags().GetStringArray("decision"); len(decisions) > 0 {
 		body["decisions"] = decisions
 	}
-	if closeprotocol.KnowledgeMustShip(outcome, verdict) && len(audit.Changes) > 0 {
+	if closeprotocol.KnowledgeMustShip(outcome, verdict) {
 		// The knowledge the audit claims has to ship with this delivery
 		// (DENE-1661): send what git says it changes, the server matches.
-		if files := closeDeliveredFiles(ctx, client, issueRef.ID); files != nil {
+		// The memory files it touches go along whatever the audit says, so
+		// the server can hold the map files to their size limit (DENE-1680).
+		files, memory := closeDeliveredFiles(ctx, client, issueRef.ID)
+		if files != nil && len(audit.Changes) > 0 {
 			body["delivered_files"] = *files
+		}
+		if memory != nil {
+			body["memory_files"] = *memory
 		}
 	}
 	if outcome == "done" || outcome == "in_review" {
@@ -2784,17 +2790,25 @@ func knowledgeAuditFromFlags(cmd *cobra.Command) closeprotocol.KnowledgeAudit {
 	items, _ := cmd.Flags().GetStringArray("knowledge")
 	audit := closeprotocol.KnowledgeAudit{None: none}
 	for _, item := range items {
-		location, summary, ok := strings.Cut(item, "=")
-		if !ok {
-			location = item
-			summary = ""
-		}
-		audit.Changes = append(audit.Changes, closeprotocol.KnowledgeChange{
-			Location: location,
-			Summary:  summary,
-		})
+		audit.Changes = append(audit.Changes, parseKnowledgeItem(item))
 	}
 	return audit
+}
+
+// parseKnowledgeItem reads one --knowledge value:
+// <location>[:<action>[:<entry>]]=<summary>. The action says what the change
+// does to the entries already there (DENE-1680); the server checks it.
+func parseKnowledgeItem(item string) closeprotocol.KnowledgeChange {
+	key, summary, _ := strings.Cut(item, "=")
+	parts := strings.SplitN(key, ":", 3)
+	change := closeprotocol.KnowledgeChange{Location: parts[0], Summary: summary}
+	if len(parts) > 1 {
+		change.Action = parts[1]
+	}
+	if len(parts) > 2 {
+		change.Entry = parts[2]
+	}
+	return change
 }
 
 // preflightIssueClose asks the server's read-only close shape gate. A server

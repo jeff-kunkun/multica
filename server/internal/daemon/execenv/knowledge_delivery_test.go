@@ -233,3 +233,35 @@ func TestCheckRemoteLandingSeesOnlyWhatTheRemoteHolds(t *testing.T) {
 		t.Fatalf("files = %v", res.Files)
 	}
 }
+
+// DENE-1680: the hygiene account of a delivery — size at HEAD, existing
+// lines removed or rewritten, added supersede marks, sections.
+func TestDeliveredMemoryFilesReadsHygieneFacts(t *testing.T) {
+	repo := newTestRepo(t)
+	commitIn(t, repo, "AGENTS.md", "# Map\n## 派单\n- 手工派单\n- 先查重\n", "seed map")
+	wt := addTaskWorktree(t, repo, "agent/agent/dene-3", "main")
+	next := "# Map\n## 派单\n- 手工派单（已被「自动派票」取代）\n## 自动派票\n- 路由决定执行席\n"
+	commitIn(t, wt, "AGENTS.md", next, "DENE-3: map")
+	commitIn(t, wt, "server.go", "package x\n", "DENE-3: code")
+
+	files, err := DeliveredMemoryFiles(wt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(files) != 1 {
+		t.Fatalf("files = %+v; only AGENTS.md is a memory file", files)
+	}
+	f := files[0]
+	if f.Path != "AGENTS.md" || f.Bytes != len(next) || f.Deleted != 2 || f.SupersedeMarks != 1 {
+		t.Fatalf("facts = %+v", f)
+	}
+	if len(f.Sections) != 3 || !f.Sections[1].Superseded || f.Sections[2].Heading != "自动派票" {
+		t.Fatalf("sections = %+v", f.Sections)
+	}
+
+	head := strings.TrimSpace(gitRun(t, wt, "rev-parse", "HEAD~1"))
+	byCommit, err := CommitMemoryFiles(wt, []string{head}, []string{"AGENTS.md"})
+	if err != nil || len(byCommit) != 1 || byCommit[0].Deleted != 2 || byCommit[0].SupersedeMarks != 1 {
+		t.Fatalf("by commit = %+v err = %v", byCommit, err)
+	}
+}

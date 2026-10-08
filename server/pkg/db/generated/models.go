@@ -1517,6 +1517,8 @@ type KnowledgeSediment struct {
 	AuthorType    string             `json:"author_type"`
 	AuthorID      pgtype.UUID        `json:"author_id"`
 	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+	Layer         string             `json:"layer"`
+	Sources       []byte             `json:"sources"`
 }
 
 type LarkBindingToken struct {

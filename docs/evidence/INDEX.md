@@ -28,3 +28,4 @@
 - DENE-1647：验收席失败后的接力去向（执行记录「失败后已转给 X」/「等人决定」）和席位鉴权暂停说明；桌面与 390px 手机静态稿 [预览](DENE-1647/preview.html)、[桌面截图](DENE-1647/desktop.png)、[手机截图](DENE-1647/mobile.png)。
 
 - DENE-1679：子任务回执汇总给父票——完成评论、状态卡「子任务回执」、来源聊天的父票回执卡与 `multica issue context --output json` 的 `children` 都列出每张子票的结论、PR、沉淀；[375/390/768/1280 截图与 CLI 输出](DENE-1679/preview.html)。
+- DENE-1680：老板层沉淀与记忆卫生——项目记忆卡片「最近沉淀」显示「汇总自 DENE-N」和每条改动的动作（新建/更新/待合并/标记已被取代），`multica project memory status` 同样列出来源；[375/390/768/1280 截图与 CLI 输出](DENE-1680/preview.html)。

@@ -1,10 +1,11 @@
 -- name: CreateKnowledgeSediment :one
 INSERT INTO knowledge_sediment (
     workspace_id, project_id, issue_id, chat_session_id, changes, verified,
-    mainline, commits, pr_url, author_type, author_id
+    mainline, commits, pr_url, author_type, author_id, layer, sources
 ) VALUES (
     @workspace_id, sqlc.narg('project_id'), sqlc.narg('issue_id'), sqlc.narg('chat_session_id'),
-    @changes, @verified, @mainline, @commits, @pr_url, @author_type, sqlc.narg('author_id')
+    @changes, @verified, @mainline, @commits, @pr_url, @author_type, sqlc.narg('author_id'),
+    @layer, @sources
 )
 RETURNING *;
 

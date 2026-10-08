@@ -745,7 +745,56 @@ func runProjectMemoryRequest(cmd *cobra.Command, ref string, check bool) error {
 		headers = append(headers, "WORKTREE")
 	}
 	cli.PrintTable(os.Stdout, append(headers, "MODIFIED"), rows)
+	if sediments, _ := result["recent_sediments"].([]any); len(sediments) > 0 {
+		fmt.Fprintln(os.Stdout, "\nRecent sediments:")
+		for _, raw := range sediments {
+			if sediment, ok := raw.(map[string]any); ok {
+				fmt.Fprintln(os.Stdout, "  "+sedimentSummaryLine(sediment))
+			}
+		}
+	}
 	return nil
+}
+
+// sedimentSummaryLine renders one recent sediment for the table output:
+// when, which layer, where it came from (a boss-layer round also names what
+// it summed up), and what each change did (DENE-1680).
+func sedimentSummaryLine(sediment map[string]any) string {
+	source := strVal(sediment, "issue_identifier")
+	if source == "" {
+		source = "chat " + strVal(sediment, "source_title")
+	}
+	var from []string
+	sources, _ := sediment["sources"].([]any)
+	for _, raw := range sources {
+		item, _ := raw.(map[string]any)
+		name := strVal(item, "identifier")
+		if name == "" {
+			name = strVal(item, "kind") + " " + strVal(item, "title")
+		}
+		from = append(from, name)
+	}
+	if len(from) > 0 {
+		source += " <- " + strings.Join(from, ", ")
+	}
+	var changes []string
+	list, _ := sediment["changes"].([]any)
+	for _, raw := range list {
+		change, _ := raw.(map[string]any)
+		label := strVal(change, "location")
+		if action := strVal(change, "action"); action != "" {
+			label += ":" + action
+		}
+		if entry := strVal(change, "entry"); entry != "" {
+			label += "「" + entry + "」"
+		}
+		changes = append(changes, label)
+	}
+	layer := strVal(sediment, "layer")
+	if layer == "" {
+		layer = "worker"
+	}
+	return fmt.Sprintf("%s  %-6s  %s  %s", strVal(sediment, "created_at"), layer, source, strings.Join(changes, "; "))
 }
 
 func memoryLocationState(location map[string]any) string {

@@ -5,6 +5,7 @@ import { useQuery } from "@tanstack/react-query";
 import { projectMemoryOptions } from "@multica/core/projects";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useWorkspacePaths } from "@multica/core/paths";
+import type { KnowledgeAuditChange } from "@multica/core/types";
 import { cn } from "@multica/ui/lib/utils";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { AppLink } from "../../navigation";
@@ -22,6 +23,18 @@ export function ProjectMemoryCard({ projectId }: { projectId: string }) {
   const workspacePaths = useWorkspacePaths();
   const timeAgo = useTimeAgo();
   const { data, isLoading } = useQuery(projectMemoryOptions(workspaceId, projectId));
+  const actionLabel = (action: NonNullable<KnowledgeAuditChange["action"]>, entry: string) => {
+    switch (action) {
+      case "update":
+        return t(($) => $.detail.memory_action_update, { entry });
+      case "merge":
+        return t(($) => $.detail.memory_action_merge, { entry });
+      case "supersede":
+        return t(($) => $.detail.memory_action_supersede, { entry });
+      default:
+        return t(($) => $.detail.memory_action_new);
+    }
+  };
 
   return (
     <section className="rounded-lg border bg-card p-4 shadow-xs" aria-labelledby="project-memory-heading">
@@ -87,7 +100,15 @@ export function ProjectMemoryCard({ projectId }: { projectId: string }) {
             {t(($) => $.detail.memory_recent)}
           </p>
           {data.recent_sediments.map((sediment) => {
-            const files = sediment.changes.flatMap((change) => change.files?.length ? change.files : [change.location]).join(", ");
+            const changes = sediment.changes.map((change) => {
+              const files = (change.files?.length ? change.files : [change.location]).join(", ");
+              const action = change.action ? actionLabel(change.action, change.entry ?? "") : "";
+              return action ? `${action} · ${files}` : files;
+            });
+            const rolledUp = (sediment.sources ?? [])
+              .map((src) => src.identifier ?? src.title)
+              .filter(Boolean)
+              .join(", ");
             const href = sediment.issue_id
               ? workspacePaths.issueDetail?.(sediment.issue_id)
               : sediment.chat_session_id
@@ -112,8 +133,15 @@ export function ProjectMemoryCard({ projectId }: { projectId: string }) {
                   ) : null}
                   <span className="shrink-0 text-muted-foreground">{timeAgo(sediment.created_at)}</span>
                 </div>
-                {/* Its own wrapping line: a phone has no hover to read a cut-off path. */}
-                <p className="text-muted-foreground [overflow-wrap:anywhere]">{files}</p>
+                {rolledUp ? (
+                  <p className="text-muted-foreground [overflow-wrap:anywhere]">
+                    {t(($) => $.detail.memory_recent_from, { sources: rolledUp })}
+                  </p>
+                ) : null}
+                {/* Own wrapping lines: a phone has no hover to read a cut-off path. */}
+                {changes.map((line, i) => (
+                  <p key={i} className="text-muted-foreground [overflow-wrap:anywhere]">{line}</p>
+                ))}
               </div>
             );
           })}

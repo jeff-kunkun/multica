@@ -63,6 +63,10 @@ type CloseIssueRequest struct {
 	// in_review whose audit names locations must deliver files writing each
 	// of them (DENE-1661); without the list the audit is kept as unverified.
 	DeliveredFiles *[]string `json:"delivered_files,omitempty"`
+	// MemoryFiles is git's account of the delivered project-memory files —
+	// size, deleted lines, supersede marks, sections — held to the memory
+	// hygiene rules (DENE-1680). nil when the caller sent none.
+	MemoryFiles *[]closeprotocol.MemoryFile `json:"memory_files,omitempty"`
 	// Decisions are `issue close --decision`: settled points written to the
 	// state card's 已拍板 list in the same transaction (DENE-1328).
 	Decisions []string `json:"decisions,omitempty"`
@@ -288,7 +292,7 @@ func (h *Handler) CloseIssue(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, closeRejection(err))
 		return
 	}
-	parsedAudit, canonicalAudit, auditRejection := requireShippedKnowledgeAudit(req.KnowledgeAudit, req.DeliveredFiles, outcome)
+	parsedAudit, canonicalAudit, auditRejection := requireShippedKnowledgeAudit(req.KnowledgeAudit, req.DeliveredFiles, req.MemoryFiles, isBossRound(issue), outcome)
 	if auditRejection != "" {
 		writeError(w, http.StatusBadRequest, auditRejection)
 		return
@@ -1012,8 +1016,10 @@ func requireKnowledgeAudit(raw *closeprotocol.KnowledgeAudit) (closeprotocol.Kno
 // requireShippedKnowledgeAudit is requireKnowledgeAudit for the executor's
 // close: a delivering outcome binds every claimed location to the delivered
 // files (DENE-1661), so "I wrote AGENTS.md" only passes when the delivery
-// actually carries an AGENTS.md change.
-func requireShippedKnowledgeAudit(raw *closeprotocol.KnowledgeAudit, delivered *[]string, outcome string) (closeprotocol.KnowledgeAudit, string, string) {
+// actually carries an AGENTS.md change. It then holds the audit and the
+// delivered memory files to the hygiene rules (DENE-1680); boss is a
+// boss-layer sediment round.
+func requireShippedKnowledgeAudit(raw *closeprotocol.KnowledgeAudit, delivered *[]string, memoryFiles *[]closeprotocol.MemoryFile, boss bool, outcome string) (closeprotocol.KnowledgeAudit, string, string) {
 	parsed, canonical, rejection := requireKnowledgeAudit(raw)
 	if rejection != "" || !closeprotocol.KnowledgeMustShip(outcome, "") {
 		return parsed, canonical, rejection
@@ -1024,6 +1030,9 @@ func requireShippedKnowledgeAudit(raw *closeprotocol.KnowledgeAudit, delivered *
 	}
 	bound, canonical, err = closeprotocol.CanonicalKnowledgeAudit(bound)
 	if err != nil {
+		return closeprotocol.KnowledgeAudit{}, "", err.Error()
+	}
+	if err := closeprotocol.CheckMemoryHygiene(bound, memoryFiles, boss); err != nil {
 		return closeprotocol.KnowledgeAudit{}, "", err.Error()
 	}
 	return bound, canonical, ""
@@ -1227,7 +1236,8 @@ func closeProgressTone(outcome string) string {
 // (DENE-1183). A 200 means the shape is acceptable, not that the close will
 // land: ticket-dependent gates (linked PR, child tree, parent) run at close.
 func (h *Handler) CheckCloseIssue(w http.ResponseWriter, r *http.Request) {
-	if _, ok := h.loadIssueForUser(w, r, chi.URLParam(r, "id")); !ok {
+	issue, ok := h.loadIssueForUser(w, r, chi.URLParam(r, "id"))
+	if !ok {
 		return
 	}
 	var req CloseIssueRequest
@@ -1235,7 +1245,9 @@ func (h *Handler) CheckCloseIssue(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
-	if msg := closeprotocol.CheckRequest(closeCheckRequest(req)); msg != "" {
+	check := closeCheckRequest(req)
+	check.Boss = isBossRound(issue)
+	if msg := closeprotocol.CheckRequest(check); msg != "" {
 		writeError(w, http.StatusBadRequest, msg)
 		return
 	}
@@ -1262,5 +1274,6 @@ func closeCheckRequest(req CloseIssueRequest) closeprotocol.Request {
 		},
 		Knowledge:      req.KnowledgeAudit,
 		DeliveredFiles: req.DeliveredFiles,
+		MemoryFiles:    req.MemoryFiles,
 	}
 }
