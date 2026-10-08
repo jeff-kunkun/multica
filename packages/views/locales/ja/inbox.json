@@ -77,7 +77,8 @@
     "stall_undo": "処理を取り消す",
     "link_projects": "プロジェクト：{{projects}}",
     "link_answer": "連携ワークスペースで確認",
-    "link_open": "連携ワークスペースを開く"
+    "link_open": "連携ワークスペースを開く",
+    "stall_action_failed": "チケットを更新できませんでした"
   },
   "types": {
     "needs_you": "対応が必要です",

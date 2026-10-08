@@ -80,7 +80,8 @@
     "stall_undo": "Undo handling",
     "link_projects": "Projects: {{projects}}",
     "link_answer": "Review in Linked workspaces",
-    "link_open": "Open Linked workspaces"
+    "link_open": "Open Linked workspaces",
+    "stall_action_failed": "Couldn't update the ticket"
   },
   "types": {
     "needs_you": "Needs your attention",

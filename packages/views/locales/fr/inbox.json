@@ -80,7 +80,8 @@
     "stall_undo": "Annuler le traitement",
     "link_projects": "Projets : {{projects}}",
     "link_answer": "Traiter dans Espaces liés",
-    "link_open": "Ouvrir Espaces liés"
+    "link_open": "Ouvrir Espaces liés",
+    "stall_action_failed": "Impossible de mettre à jour le ticket"
   },
   "types": {
     "needs_you": "Nécessite votre attention",

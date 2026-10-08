@@ -77,7 +77,8 @@
     "stall_undo": "撤销处理",
     "link_projects": "项目：{{projects}}",
     "link_answer": "去连通工作区处理",
-    "link_open": "打开连通工作区"
+    "link_open": "打开连通工作区",
+    "stall_action_failed": "工单更新失败"
   },
   "types": {
     "needs_you": "需要你处理",

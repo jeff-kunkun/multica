@@ -164,6 +164,13 @@ func (h *Handler) RouteIssue(w http.ResponseWriter, r *http.Request) {
 	if outcome.ExecutorWritten != nil {
 		resp["executor"] = outcome.ExecutorWritten.Name
 	}
+	if outcome.Tier != "" {
+		resp["tier"] = outcome.Tier
+	}
+	if outcome.JudgedTier != "" {
+		// The model's own pick, below the rule floor and raised to tier.
+		resp["judged_tier"] = outcome.JudgedTier
+	}
 	if !outcome.ReviewerWritten.Empty() {
 		resp["reviewer"] = outcome.ReviewerWritten.Label()
 		resp["reviewer_type"] = string(outcome.ReviewerWritten.Kind)

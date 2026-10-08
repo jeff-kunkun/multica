@@ -77,7 +77,8 @@
     "stall_undo": "처리 취소",
     "link_projects": "프로젝트: {{projects}}",
     "link_answer": "연결된 워크스페이스에서 처리",
-    "link_open": "연결된 워크스페이스 열기"
+    "link_open": "연결된 워크스페이스 열기",
+    "stall_action_failed": "티켓을 업데이트하지 못했습니다"
   },
   "types": {
     "needs_you": "확인이 필요합니다",

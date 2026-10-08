@@ -677,6 +677,7 @@
   },
   "comment": {
     "add_reaction": "リアクションを追加",
+    "reaction_failed": "リアクションを更新できませんでした",
     "collapse_thread": "スレッドを折りたたむ",
     "expand_thread": "スレッドを展開",
     "delete_title": "コメントを削除",

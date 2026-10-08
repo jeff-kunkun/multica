@@ -74,6 +74,16 @@ multica agent list --output json                                             # e
 
 A following specialisation inherits it with the tier and usage.
 
+A seat can also be **limited to projects** (`dispatch_projects`, DENE-1648):
+automatic dispatch — routing, quota relay, seat relay — picks it only for
+issues in those projects. Empty means every project. @mention, assignment and
+delegation are not limited. Not inherited by followers.
+
+```bash
+multica agent update <agent-id> --dispatch-projects IPA-input,game --output json   # titles, ids or id prefixes
+multica agent update <agent-id> --dispatch-projects "" --output json               # every project again
+```
+
 A full model is not a closed seat (DENE-1093). A run that fails with
 `agent_error.provider_capacity_or_rate_limit` keeps the seat open and retries
 in place on the same agent, resuming the same session, after 30s, 1m, 2m, 5m
@@ -203,6 +213,7 @@ the child own its runtime instead of following the base role's.
 | `max_concurrent_tasks` | `max_concurrent_tasks` | integer from 1 through 50; out-of-range values return 400 | scheduler task cap; defaults to `6` |
 | `work_enabled` | `work_enabled` | boolean; omitted on update preserves | reversible seat gate (DENE-714). Default `true`. `false` keeps the seat in the list but routing will not pick it, assignment will not wake it, and claim will not take a new run. Running tasks are not cancelled. A base role sets its direct specialisations to the same value, both off and on. Turning a seat on requeues its stranded `todo` / `in_progress` issues. CLI: `agent update --work-enabled=true\|false`. Distinct from archive |
 | `dispatch_mode` | `dispatch_mode` | `auto` (default) or `mention_only`; omitted on update preserves; anything else returns 400 | automatic-dispatch gate (DENE-1600). `mention_only` keeps the tier but routing, quota relay and seat relay never select it; @mention, assignment and delegation still run it. Followers inherit it. CLI: `agent update --dispatch-mode auto\|mention_only` |
+| `dispatch_projects` | `dispatch_projects` | project ids of this workspace; omitted on update preserves, `[]` clears; an unknown id returns 400 | automatic dispatch only picks the seat for issues in these projects (DENE-1648); empty = every project. @mention, assignment and delegation are not limited. Not inherited by followers. CLI: `agent update --dispatch-projects <titles\|ids>` |
 
 Defaults when omitted or explicitly `null`: `max_concurrent_tasks` → `6`.
 Other defaults when omitted: `runtime_config` → `{}`, `custom_env` → `{}`,
