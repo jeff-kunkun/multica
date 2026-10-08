@@ -126,6 +126,13 @@ func CheckMemoryHygiene(audit KnowledgeAudit, files *[]MemoryFile, boss bool) er
 		return fmt.Errorf("%s", msg)
 	}
 	if audit.None {
+		if boss {
+			for _, file := range *files {
+				if file.Deleted > 0 {
+					return fmt.Errorf("%s 改掉或删掉了 %d 行已有内容，老板层沉淀不能用 --knowledge-none 带过：改原条目要声明 update，过时规则标「已被 X 取代」并声明 supersede。%s", file.Path, file.Deleted, BossLayerHint)
+				}
+			}
+		}
 		return nil
 	}
 	byLocation := map[string][]MemoryFile{}

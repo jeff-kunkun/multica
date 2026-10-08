@@ -69,6 +69,8 @@ func TestCheckMemoryHygiene(t *testing.T) {
 		"supersede without mark":        {supersede, small(MemoryFile{Deleted: 1}), false, "已被 X 取代"},
 		"supersede with mark":           {supersede, small(MemoryFile{Deleted: 1, SupersedeMarks: 1}), true, ""},
 		"boss with no facts":            {update, nil, true, ""},
+		"boss none deleting lines":      {KnowledgeAudit{None: true}, small(MemoryFile{Deleted: 3}), true, "--knowledge-none"},
+		"worker none deleting lines":    {KnowledgeAudit{None: true}, small(MemoryFile{Deleted: 3}), false, ""},
 		"none still checks size":        {KnowledgeAudit{None: true}, &[]MemoryFile{{Path: "CONTEXT.md", Bytes: MapFileMaxBytes + 1}}, false, "超过地图文件上限"},
 		"adr files have no size limit":  {bare, &[]MemoryFile{{Path: "docs/adr/0001-x.md", Bytes: MapFileMaxBytes * 2}}, false, ""},
 		"nested AGENTS.md is a map too": {bare, &[]MemoryFile{{Path: "apps/x/AGENTS.md", Bytes: MapFileMaxBytes + 10}}, false, "apps/x/AGENTS.md"},
