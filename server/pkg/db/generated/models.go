@@ -1519,6 +1519,7 @@ type KnowledgeSediment struct {
 	CreatedAt     pgtype.Timestamptz `json:"created_at"`
 	Layer         string             `json:"layer"`
 	Sources       []byte             `json:"sources"`
+	MemoryFiles   []byte             `json:"memory_files"`
 }
 
 type LarkBindingToken struct {

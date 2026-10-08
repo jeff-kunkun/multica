@@ -1086,3 +1086,13 @@ WHERE workspace_id = sqlc.arg('workspace_id')
   AND origin_chat_session_id = sqlc.arg('chat_session_id')::uuid
 ORDER BY created_at ASC, id ASC
 LIMIT 200;
+
+-- name: ListProjectChatDispatchedIssues :many
+-- The project monitor's chat flow (DENE-1681): tickets in the project opened
+-- from a chat, touched in the window or still open, newest first.
+SELECT * FROM issue
+WHERE workspace_id = @workspace_id AND project_id = @project_id
+  AND origin_chat_session_id IS NOT NULL
+  AND (updated_at >= @since OR status NOT IN ('done', 'cancelled'))
+ORDER BY created_at DESC, id DESC
+LIMIT @row_limit;

@@ -2462,6 +2462,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Get("/memory", h.GetProjectMemory)
 					r.Get("/memory/check", h.GetProjectMemory)
 					r.Get("/memory/status", h.GetProjectMemory)
+					r.Get("/memory/monitor", h.GetProjectMemoryMonitor)
 					r.Post("/memory/check", h.PostProjectMemoryCheck)
 					r.Put("/", h.UpdateProject)
 					r.Delete("/", h.DeleteProject)
