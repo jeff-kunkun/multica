@@ -36,10 +36,9 @@ seat with fewer unfinished runs (queued or running) takes the ticket; when all
 are equally busy the usual order stands. Off (the default) is shadow mode, as
 above. With both switches on, --continuation wins.
 
---judged-review on|off is 按判断配验收: the routing model decides whether a
-ticket needs a check. A confident "seat" or "human" answer still fills the
-reviewer slot; an unsure or "none" answer writes 不需要验收 and the executor
-merges and closes. Off (the default) keeps the fallback reviewer seat.`,
+--judged-review on|off is 按判断配验收. It is kept so old configs still read:
+since DENE-1677 the rule table (multica workspace routing rules) decides
+whether a ticket needs a check, so the switch has no effect.`,
 	Args: cobra.NoArgs,
 	RunE: runWorkspaceRoutingSet,
 }
@@ -54,7 +53,7 @@ func init() {
 	workspaceRoutingSetCmd.Flags().String("load", "", "负载分流 switch: on (prefer a less busy seat of the same tier) or off (shadow mode)")
 	workspaceRoutingSetCmd.Flags().String("usage-priority", "", "用量优先 switch: on (ample seats first) or off (stable name order)")
 	workspaceRoutingSetCmd.Flags().String("allow-upshift", "", "允许上调一档 switch: on (borrow an ample seat from the tier above) or off")
-	workspaceRoutingSetCmd.Flags().String("judged-review", "", "按判断配验收 switch: on (no reviewer unless the routing model asks for one) or off (fallback seat)")
+	workspaceRoutingSetCmd.Flags().String("judged-review", "", "按判断配验收 switch (no effect since the rule table decides the check; kept for old configs)")
 	workspaceRoutingSetCmd.Flags().String("confidence-threshold", "", "Confidence floor for the routing model (0, 1]")
 	workspaceRoutingSetCmd.Flags().String("stale-review-hours", "", "Hours before an inactive in-review ticket is checked (0, 8760]")
 	workspaceRoutingCmd.AddCommand(workspaceRoutingGetCmd, workspaceRoutingSetCmd)

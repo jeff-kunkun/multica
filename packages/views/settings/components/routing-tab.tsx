@@ -22,6 +22,8 @@ import {
   roleHealth,
   type RoutingHealth,
   type RoutingRoleHealth,
+  type RoutingRule,
+  type RoutingRuleTable,
 } from "@multica/core/workspace/routing-health";
 import { DEFAULT_ROUTING_POLICY_PROMPT } from "@multica/core/workspace/routing-policy-prompt";
 import {
@@ -510,17 +512,6 @@ export function RoutingTab() {
             />
           </SettingsRow>
 
-          <SettingsRow
-            label={t(($) => $.routing.judged_review_label)}
-            description={t(($) => $.routing.judged_review_description)}
-          >
-            <Switch
-              checked={judgedReview}
-              disabled={!canManage || !enabled}
-              onCheckedChange={setJudgedReview}
-              aria-label={t(($) => $.routing.judged_review_label)}
-            />
-          </SettingsRow>
         </SettingsCard>
         <p
           className="px-0.5 text-caption leading-5 text-muted-foreground"
@@ -529,6 +520,8 @@ export function RoutingTab() {
           {t(($) => $.routing.modes[routingMode(draft)])}
         </p>
       </SettingsSection>
+
+      <RuleTableSection table={health.data?.rules} />
 
       <SettingsSection
         title={t(($) => $.routing.analysis_title)}
@@ -873,6 +866,58 @@ function RoleEndpointNote({
         : t(($) => $.routing.gateway_endpoint_deployment, { host: role.gateway_host })}
     </p>
   );
+}
+
+/**
+ * The rule table that sets the tier (DENE-1677), read-only: it ships with the
+ * server, so there is nothing here to edit. Hidden on a backend that predates
+ * it rather than shown empty.
+ */
+function RuleTableSection({ table }: { table: RoutingRuleTable | undefined }) {
+  const { t } = useT("settings");
+  // `?.`: a report that skipped the parser (a mocked client) has no table.
+  if (!table?.rules?.length) return null;
+  return (
+    <SettingsSection
+      title={t(($) => $.routing.rules_title)}
+      description={t(($) => $.routing.rules_description)}
+    >
+      <SettingsCard>
+        {table.rules.map((rule) => (
+          <SettingsRow
+            key={rule.id}
+            label={rule.label}
+            description={ruleCondition(rule, table, {
+              anyUnknown: t(($) => $.routing.rules_any_unknown),
+              catchAll: t(($) => $.routing.rules_catch_all),
+            })}
+          >
+            <span className="whitespace-nowrap text-body text-muted-foreground">
+              {rule.reviewer === "none"
+                ? t(($) => $.routing.rules_no_review, { tier: rule.tier_label })
+                : t(($) => $.routing.rules_review, { tier: rule.tier_label })}
+            </span>
+          </SettingsRow>
+        ))}
+      </SettingsCard>
+    </SettingsSection>
+  );
+}
+
+/** A row's condition in the questions' own words, in question order. */
+export function ruleCondition(
+  rule: RoutingRule,
+  table: RoutingRuleTable,
+  words: { anyUnknown: string; catchAll: string },
+): string {
+  if (rule.any_unknown) return words.anyUnknown;
+  const parts = table.questions.flatMap((q) => {
+    const values = rule.when[q.key];
+    if (!values?.length) return [];
+    const labels = values.map((v) => q.options.find((o) => o.value === v)?.label ?? v);
+    return [`${q.label}：${labels.join(" / ")}`];
+  });
+  return parts.length ? parts.join(" · ") : words.catchAll;
 }
 
 function providerLabel(provider: string): string {
