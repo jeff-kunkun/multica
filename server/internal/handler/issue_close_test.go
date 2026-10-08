@@ -890,7 +890,9 @@ func TestCloseKnowledgeChangeIsStored(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("status = %d: %s", w.Code, w.Body.String())
 	}
-	want := `{"changes":[{"location":"agents","summary":"补了开张种子"}]}`
+	// No delivered_files: a close from an older CLI or the web keeps the
+	// audit but marks it unverified (DENE-1661).
+	want := `{"changes":[{"location":"agents","summary":"补了开张种子"}],"unverified":true}`
 	if got := issueMetaString(t, issue.ID, closeprotocol.KeyKnowledgeAudit); got != want {
 		t.Fatalf("close.knowledge_audit = %q", got)
 	}

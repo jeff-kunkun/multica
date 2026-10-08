@@ -245,6 +245,7 @@ export type {
   ProjectMemoryChecklistItem,
   ProjectMemoryIssue,
   ProjectMemoryStatus,
+  KnowledgeSediment,
   ProjectStatus,
   ProjectPriority,
   CreateProjectRequest,

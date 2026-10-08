@@ -2833,6 +2833,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Post("/title", h.WriteChatTitle)
 					r.Post("/progress", h.WriteChatProgress)
 					r.Get("/progress", h.ListChatProgress)
+					r.Post("/sediment", h.CreateChatSediment)
+					r.Get("/sediment", h.ListChatSediments)
 					r.Post("/onboarding", h.StartMikaOnboarding)
 					// Explicit "refresh" of a turn's quick actions: re-runs the
 					// daemon suggestion pass for the latest assistant reply (MUL-5149).

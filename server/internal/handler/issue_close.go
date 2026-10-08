@@ -58,6 +58,11 @@ type CloseIssueRequest struct {
 	// KnowledgeAudit is required. None declares 无够格知识; Changes names the
 	// project-memory locations this close wrote. The two cannot be combined.
 	KnowledgeAudit *closeprotocol.KnowledgeAudit `json:"knowledge_audit,omitempty"`
+	// DeliveredFiles is the delivery's changed paths, read by the CLI from
+	// git (the PR's files, or the branch against its target). A done or
+	// in_review whose audit names locations must deliver files writing each
+	// of them (DENE-1661); without the list the audit is kept as unverified.
+	DeliveredFiles *[]string `json:"delivered_files,omitempty"`
 	// Decisions are `issue close --decision`: settled points written to the
 	// state card's 已拍板 list in the same transaction (DENE-1328).
 	Decisions []string `json:"decisions,omitempty"`
@@ -283,7 +288,7 @@ func (h *Handler) CloseIssue(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, closeRejection(err))
 		return
 	}
-	parsedAudit, canonicalAudit, auditRejection := requireKnowledgeAudit(req.KnowledgeAudit)
+	parsedAudit, canonicalAudit, auditRejection := requireShippedKnowledgeAudit(req.KnowledgeAudit, req.DeliveredFiles, outcome)
 	if auditRejection != "" {
 		writeError(w, http.StatusBadRequest, auditRejection)
 		return
@@ -395,6 +400,11 @@ func (h *Handler) CloseIssue(w http.ResponseWriter, r *http.Request) {
 		}
 		if lineMerge != nil {
 			if _, err := service.RecordDeliveryMerge(ctx, qtx, *line, lineMerge.DeliveryMergeReport); err != nil {
+				return err
+			}
+		}
+		if closeprotocol.KnowledgeMustShip(outcome, "") {
+			if err := recordIssueSediment(ctx, qtx, updated, parsedAudit, prURL, lineMerge, actorType, actorID); err != nil {
 				return err
 			}
 		}
@@ -543,6 +553,9 @@ func (h *Handler) CloseIssue(w http.ResponseWriter, r *http.Request) {
 	}
 	if resp.Summoned {
 		resp.Woken = append(resp.Woken, "已替你叫 --needs-human 的人：收件箱、关注、票上 @ 都已送到；他回复后平台叫醒执行智能体")
+	}
+	if parsedAudit.Unverified {
+		resp.Warnings = append(resp.Warnings, closeprotocol.KnowledgeUnverifiedWarning)
 	}
 	if d := declaredFrom(ctx); d.Unverified {
 		h.setIssueMetaString(ctx, updated, "close.pr_unverified", d.URL)
@@ -988,11 +1001,31 @@ func requireKnowledgeAudit(raw *closeprotocol.KnowledgeAudit) (closeprotocol.Kno
 	if raw == nil {
 		return closeprotocol.KnowledgeAudit{}, "", closeprotocol.KnowledgeAuditRequiredMsg
 	}
-	parsed, canonical, err := closeprotocol.CanonicalKnowledgeAudit(*raw)
+	parsed, canonical, err := closeprotocol.CanonicalKnowledgeAudit(closeprotocol.StripKnowledgeEvidence(*raw))
 	if err != nil {
 		return closeprotocol.KnowledgeAudit{}, "", err.Error()
 	}
 	return parsed, canonical, ""
+}
+
+// requireShippedKnowledgeAudit is requireKnowledgeAudit for the executor's
+// close: a delivering outcome binds every claimed location to the delivered
+// files (DENE-1661), so "I wrote AGENTS.md" only passes when the delivery
+// actually carries an AGENTS.md change.
+func requireShippedKnowledgeAudit(raw *closeprotocol.KnowledgeAudit, delivered *[]string, outcome string) (closeprotocol.KnowledgeAudit, string, string) {
+	parsed, canonical, rejection := requireKnowledgeAudit(raw)
+	if rejection != "" || !closeprotocol.KnowledgeMustShip(outcome, "") {
+		return parsed, canonical, rejection
+	}
+	bound, err := closeprotocol.BindDeliveredFiles(parsed, delivered)
+	if err != nil {
+		return closeprotocol.KnowledgeAudit{}, "", err.Error()
+	}
+	bound, canonical, err = closeprotocol.CanonicalKnowledgeAudit(bound)
+	if err != nil {
+		return closeprotocol.KnowledgeAudit{}, "", err.Error()
+	}
+	return bound, canonical, ""
 }
 
 // writeCloseKeysTx writes a finished close record in one transaction. The
@@ -1226,6 +1259,7 @@ func closeCheckRequest(req CloseIssueRequest) closeprotocol.Request {
 			WaitTimeout:   deref(req.WaitTimeout),
 			NeedsHuman:    deref(req.NeedsHuman),
 		},
-		Knowledge: req.KnowledgeAudit,
+		Knowledge:      req.KnowledgeAudit,
+		DeliveredFiles: req.DeliveredFiles,
 	}
 }

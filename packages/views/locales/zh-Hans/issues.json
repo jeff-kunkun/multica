@@ -170,6 +170,7 @@
     "last_activity_missing": "无活动时间",
     "knowledge_none": "无够格知识",
     "knowledge_change": "知识：{{locations}}",
+    "knowledge_change_unverified": "知识：{{locations}}（未核对交付）",
     "section_title": "收口记录",
     "conclusion": "结论",
     "status": "状态",

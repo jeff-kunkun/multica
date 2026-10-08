@@ -170,6 +170,7 @@
     "last_activity_missing": "活動時刻なし",
     "knowledge_none": "該当する知識なし",
     "knowledge_change": "知識: {{locations}}",
+    "knowledge_change_unverified": "知識: {{locations}}（納品未確認）",
     "section_title": "クローズ記録",
     "conclusion": "結論",
     "status": "ステータス",

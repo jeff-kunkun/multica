@@ -1613,6 +1613,7 @@
     "last_activity_missing": "Aucune heure d'activité",
     "knowledge_none": "Aucune connaissance qualifiée",
     "knowledge_change": "Connaissance : {{locations}}",
+    "knowledge_change_unverified": "Connaissance : {{locations}} (livraison non vérifiée)",
     "section_title": "Enregistrement de clôture",
     "conclusion": "Conclusion",
     "status": "Statut",
