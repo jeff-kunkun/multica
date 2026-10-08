@@ -333,6 +333,10 @@ export const ChatTicketSchema: z.ZodType<ChatTicket> = z.object({
   goal: z.string().optional(),
   created_at: z.string().default(""),
   updated_at: z.string().default(""),
+  from_status: z.string().optional(),
+  changed_at: z.string().default(""),
+  phase: z.enum(["done", "in_progress", "waiting_you"]).catch("in_progress").default("in_progress"),
+  needs_you: z.boolean().default(false),
 }).loose();
 
 export const ChatTicketsResponseSchema: z.ZodType<ChatTicketsResponse> = z.object({

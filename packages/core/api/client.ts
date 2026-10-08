@@ -142,6 +142,7 @@ import type {
   Project,
   ProjectMemoryStatus,
   ProjectMemoryChecklistItem,
+  ProjectReport,
   CloseIssueRequest,
   CloseIssueResponse,
   ProjectMember,
@@ -5536,6 +5537,11 @@ export class ApiClient {
 
   async getProject(id: string): Promise<Project> {
     return this.fetch(`/api/projects/${id}`);
+  }
+
+  /** The project's news since the caller last heard it; reading moves nothing. */
+  async getProjectReport(id: string): Promise<ProjectReport> {
+    return this.fetch(`/api/projects/${id}/report`);
   }
 
   async listProjectMemoryLocations(): Promise<{

@@ -100,7 +100,9 @@
     "chat_unknown_agent": "エージェント",
     "toast_link_copied": "リンクをコピーしました",
     "toast_project_deleted": "プロジェクトを削除しました",
-    "toast_move_issue_failed": "タスクを移動できませんでした"
+    "toast_move_issue_failed": "タスクを移動できませんでした",
+    "hear_report": "報告を聞く",
+    "hear_report_hint": "前回以降の進捗を AI がチャットで報告します"
   },
   "resources": {
     "section_header": "リソース",

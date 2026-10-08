@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { ChatTicket } from "@multica/core/types";
-import { groupChatTickets } from "./chat-tickets";
+import { chatProgress, groupChatTickets } from "./chat-tickets";
 
 const ticket = (id: string, created_at: string): ChatTicket => ({
   id,
@@ -12,6 +12,9 @@ const ticket = (id: string, created_at: string): ChatTicket => ({
   assignee_id: null,
   created_at,
   updated_at: created_at,
+  changed_at: created_at,
+  phase: "in_progress",
+  needs_you: false,
 });
 
 describe("groupChatTickets", () => {
@@ -40,5 +43,31 @@ describe("groupChatTickets", () => {
     ]);
     expect(byMessage.size).toBe(0);
     expect(tail.map((t) => t.id)).toEqual(["t4"]);
+  });
+});
+
+describe("chatProgress", () => {
+  const at = (min: number) => new Date(Date.UTC(2026, 0, 1, 12, min)).toISOString();
+  const tk = (id: string, rest: Partial<ChatTicket>): ChatTicket => ({
+    id, identifier: id, title: id, status: "todo", priority: "none",
+    assignee_type: null, assignee_id: null, created_at: at(0), updated_at: at(0),
+    changed_at: at(0), phase: "in_progress", needs_you: false, ...rest,
+  });
+
+  it("puts moves after the last look first, then waits-on-you, in progress, done", () => {
+    const seenAt = Date.parse(at(30));
+    const { rows, counts, fresh } = chatProgress(
+      [
+        tk("done-old", { from_status: "todo", status: "done", changed_at: at(10), phase: "done" }),
+        tk("never-moved", {}),
+        tk("fresh-a", { from_status: "todo", status: "in_progress", changed_at: at(40) }),
+        tk("waiting", { from_status: "todo", status: "in_review", changed_at: at(20), phase: "waiting_you", needs_you: true }),
+        tk("fresh-b", { from_status: "in_progress", status: "in_review", changed_at: at(50), phase: "waiting_you" }),
+      ],
+      seenAt,
+    );
+    expect(rows.map((r) => r.id)).toEqual(["fresh-b", "fresh-a", "waiting", "never-moved", "done-old"]);
+    expect(fresh).toBe(2);
+    expect(counts).toEqual({ waiting_you: 2, in_progress: 2, done: 1 });
   });
 });

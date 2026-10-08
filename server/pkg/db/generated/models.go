@@ -1811,6 +1811,20 @@ type ProjectMemoryStatus struct {
 	MainlineRef  pgtype.Text        `json:"mainline_ref"`
 }
 
+type ProjectReportHeard struct {
+	ID            pgtype.UUID        `json:"id"`
+	WorkspaceID   pgtype.UUID        `json:"workspace_id"`
+	UserID        pgtype.UUID        `json:"user_id"`
+	ProjectID     pgtype.UUID        `json:"project_id"`
+	HeardSince    pgtype.Timestamptz `json:"heard_since"`
+	HeardUntil    pgtype.Timestamptz `json:"heard_until"`
+	ItemCount     int32              `json:"item_count"`
+	TaskID        pgtype.UUID        `json:"task_id"`
+	ChatSessionID pgtype.UUID        `json:"chat_session_id"`
+	Actions       []byte             `json:"actions"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+}
+
 type ProjectResource struct {
 	ID           pgtype.UUID        `json:"id"`
 	ProjectID    pgtype.UUID        `json:"project_id"`
