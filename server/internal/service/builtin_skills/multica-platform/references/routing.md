@@ -32,7 +32,9 @@ What it may do, and only when the slot is still **empty**:
   whoever is holding it keeps it, so its status can still be moved.
 - **`blocked`** — post one advice comment and @ somebody. **No value is
   changed.**
-- **`in_progress` / `done` / `cancelled` / `backlog`** — nothing at all.
+- **`in_progress` / `done` / `cancelled` / `backlog`** — nothing at all. A
+  ticket meant to start now must be `todo`; an agent putting one in `backlog`
+  has to name what it waits for (`--waiting-for`), or the server refuses.
 
 There is a fourth trigger that is not a status change. A top-level ticket sitting
 in `in_review` with nothing happening on it and no run working on it is **stalled**,

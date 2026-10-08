@@ -82,6 +82,7 @@ import { PropertyIcon } from "../../common/property-icon";
 import type { Attachment, Issue, IssueProperty, IssueStatus, IssueStatusCategory, IssuePriority, TimelineEntry, UpdateIssueRequest } from "@multica/core/types";
 import { contentReferencesAttachment } from "@multica/core/types";
 import { isBuiltInIssueStatus } from "@multica/core/issue-statuses";
+import { backlogWaitingFor } from "@multica/core/issues/backlog-waiting-for";
 import { commentLandingTarget, isDeletedComment } from "@multica/core/issues/comment-deletion";
 import { formatDateOnly, isPastDateOnly } from "@multica/core/issues/date";
 import { useUpdateIssue } from "@multica/core/issues/mutations";
@@ -2799,6 +2800,9 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     return <IssueNotFound showBackLink={!onDelete} leading={leadingAction} trailing={trailingActions} />;
   }
 
+  // What a parked ticket waits for (DENE-1638); shown only while it is in backlog.
+  const backlogWaitingForLine = backlogWaitingFor(issue);
+
   const persistDescriptionSave = (
     draft: { markdown: string; baseMarkdown: string; attachmentIds: string[] },
   ) => {
@@ -2869,6 +2873,11 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
               isDuplicate={isDuplicateIssue(issue)}
             />
           </PropRow>
+          {backlogWaitingForLine && (
+            <PropRow label={t(($) => $.detail.prop_waiting_for)} interactive={false}>
+              <span className="min-w-0 whitespace-normal break-words py-1.5" title={backlogWaitingForLine}>{backlogWaitingForLine}</span>
+            </PropRow>
+          )}
           <PropRow label={t(($) => $.detail.prop_assignee)}>
             <AssigneePicker assigneeType={issue.assignee_type} assigneeId={issue.assignee_id} onUpdate={handleUpdateField} align="start" sceneProjectIds={[issue.project_id]} sceneDomainId={issue.domain_id} />
           </PropRow>

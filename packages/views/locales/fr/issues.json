@@ -449,6 +449,7 @@
     "prop_status": "Statut",
     "prop_priority": "Priorité",
     "prop_stage": "Étape",
+    "prop_waiting_for": "En attente de",
     "prop_assignee": "Assigné à",
     "prop_start_date": "Date de début",
     "prop_due_date": "Date d'échéance",

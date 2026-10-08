@@ -275,8 +275,11 @@ Archival does not move issues automatically. Historical issues on previously
 archived statuses remain readable via an explicit status filter.
 
 - **`backlog`** parks an agent-assigned issue: the assignee is set but no task
-  fires. Moving `backlog → todo` (or any non-done/non-cancelled status) enqueues
-  the assigned agent then.
+  fires, and routing does not touch it. Moving `backlog → todo` (or any
+  non-done/non-cancelled status) enqueues the assigned agent then. Work that
+  should start now is `todo`; an agent moving or creating an issue in
+  `backlog` must say what it waits for with `--waiting-for "<one line>"`
+  (staged sub-issues exempt), shown as `metadata["backlog.waiting_for"]`.
 - **`in_progress` / `in_review`** are agent-managed CLI mutations, not automatic
   side effects of a task starting or finishing. The runtime brief asks agents to
   write the state the issue is in whenever their work changes it — not from

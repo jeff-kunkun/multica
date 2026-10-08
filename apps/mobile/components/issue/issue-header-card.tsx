@@ -17,6 +17,7 @@ import { Text } from "@/components/ui/text";
 import { AttributeRow } from "./attribute-row";
 import { AgentActivityRow } from "./agent-activity-row";
 import { UndrivenRow } from "./undriven-row";
+import { BacklogWaitingRow } from "./backlog-waiting-row";
 
 export function IssueHeaderCard({ issue }: { issue: Issue }) {
   return (
@@ -31,6 +32,7 @@ export function IssueHeaderCard({ issue }: { issue: Issue }) {
        *  Conditionally renders null when there are no tasks at all. */}
       <AgentActivityRow issueId={issue.id} />
       <UndrivenRow issue={issue} />
+      <BacklogWaitingRow issue={issue} />
       <AttributeRow issue={issue} />
     </View>
   );
