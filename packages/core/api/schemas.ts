@@ -1531,6 +1531,15 @@ export const IssueStateCardSchema = z.object({
       more: z.number().optional(),
     })
     .default({ anchor: "none", threads: [] }),
+  source: z
+    .object({
+      chat_session_id: z.string(),
+      chat_title: z.string().default(""),
+      message_id: z.string().optional(),
+      excerpt: z.string().optional(),
+    })
+    .nullable()
+    .optional(),
   text: z.string().default(""),
 });
 
