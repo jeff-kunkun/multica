@@ -317,6 +317,7 @@ import { createRequestId, createSafeId } from "../utils";
 import { getCurrentSlug } from "../platform/workspace-storage";
 import { parseWithFallback } from "./schema";
 import { compressImageForUpload } from "../attachments/compress-image";
+import { isFileReadable, UnreadableFileError } from "../attachments/file-readable";
 import { defaultStorage } from "../platform/storage";
 import {
   parseRoutingHealth,
@@ -4788,6 +4789,9 @@ export class ApiClient {
     // failure via `signal.aborted` / `err.name === "AbortError"`.
     signal?: AbortSignal,
   ): Promise<Attachment> {
+    // A handle whose bytes cannot be read fails like a dropped connection
+    // once sent; stop here so the retry policy does not spin on it.
+    if (!(await isFileReadable(file))) throw new UnreadableFileError(file.name);
     // Large phone photos are downscaled first: on a slow uplink the original
     // often cannot finish inside the proxy timeout (see compress-image.ts).
     const body = await compressImageForUpload(file);
