@@ -1775,6 +1775,7 @@ type ProjectMemoryStatus struct {
 	ModifiedAt   pgtype.Timestamptz `json:"modified_at"`
 	ObservedAt   pgtype.Timestamptz `json:"observed_at"`
 	Error        pgtype.Text        `json:"error"`
+	MainlineRef  pgtype.Text        `json:"mainline_ref"`
 }
 
 type ProjectResource struct {

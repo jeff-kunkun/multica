@@ -39,15 +39,25 @@ export function ProjectMemoryCard({ projectId }: { projectId: string }) {
         </div>
       ) : (
         <div className="space-y-2">
-          {(data?.locations ?? []).map((location) => (
-            <div key={location.key} className="flex items-center gap-2 text-caption">
-              {location.exists ? <CheckCircle2 className="size-4 text-emerald-600" /> : <AlertCircle className="size-4 text-amber-600" />}
-              <span className="min-w-0 flex-1 truncate" title={location.path}>{location.path}</span>
-              <span className={cn("shrink-0", location.exists ? "text-emerald-700" : "text-amber-700")}>
-                {location.exists ? t(($) => $.detail.memory_present) : t(($) => $.detail.memory_missing)}
-              </span>
-            </div>
-          ))}
+          {(data?.locations ?? []).map((location) => {
+            const behind = !location.exists && location.mainline_ref ? location.mainline_ref : null;
+            return (
+              <div key={location.key} className="flex items-center gap-2 text-caption">
+                {location.exists ? <CheckCircle2 className="size-4 text-emerald-600" /> : <AlertCircle className="size-4 text-amber-600" />}
+                <span className="min-w-0 flex-1 truncate" title={location.path}>{location.path}</span>
+                <span
+                  className={cn("shrink-0", location.exists ? "text-emerald-700" : "text-amber-700")}
+                  title={behind ? t(($) => $.detail.memory_behind_title, { ref: behind }) : undefined}
+                >
+                  {location.exists
+                    ? t(($) => $.detail.memory_present)
+                    : behind
+                      ? t(($) => $.detail.memory_behind, { ref: behind })
+                      : t(($) => $.detail.memory_missing)}
+                </span>
+              </div>
+            );
+          })}
         </div>
       )}
       {data?.sediment_issue ? (
