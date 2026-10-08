@@ -656,6 +656,7 @@
     "status_changed_pr": "所有关联 PR 均已合并（{{prs}}），状态从 {{from}} 改为 {{to}}",
     "pr_auto_complete_disabled": "设置此任务合并后不改状态",
     "pr_auto_complete_enabled": "恢复了此任务合并后改状态",
+    "linked_write": "经 {{workspace}}·{{agent}} 代办",
     "wakeup_created": "添加了唤醒：{{condition}}唤醒 {{agent}}",
     "wakeup_triggered": "{{condition}}，唤醒了 {{agent}}",
     "wakeup_triggered_merged": "{{condition}}，并入了 {{agent}} 待开始的运行",

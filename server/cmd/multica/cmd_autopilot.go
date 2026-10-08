@@ -104,6 +104,8 @@ var autopilotTriggerRotateURLCmd = &cobra.Command{
 }
 
 func init() {
+	addLinkedFlag(autopilotListCmd, autopilotGetCmd, autopilotCreateCmd, autopilotUpdateCmd, autopilotDeleteCmd, autopilotTriggerCmd,
+		autopilotRunsCmd, autopilotTriggerAddCmd, autopilotTriggerListCmd, autopilotTriggerUpdateCmd, autopilotTriggerDeleteCmd)
 	autopilotCmd.AddCommand(autopilotListCmd)
 	autopilotCmd.AddCommand(autopilotGetCmd)
 	autopilotCmd.AddCommand(autopilotCreateCmd)

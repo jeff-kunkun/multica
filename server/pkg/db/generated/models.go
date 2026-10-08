@@ -2315,6 +2315,7 @@ type WorkspaceLink struct {
 	AcceptedBy        pgtype.UUID        `json:"accepted_by"`
 	CreatedAt         pgtype.Timestamptz `json:"created_at"`
 	AcceptedAt        pgtype.Timestamptz `json:"accepted_at"`
+	Managed           bool               `json:"managed"`
 }
 
 type WorkspaceLinkAudit struct {

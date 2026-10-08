@@ -656,6 +656,7 @@
     "status_changed_pr": "関連するすべての PR がマージされたため（{{prs}}）、ステータスを {{from}} から {{to}} に変更しました",
     "pr_auto_complete_disabled": "このタスクを PR マージでステータスを変えないように設定しました",
     "pr_auto_complete_enabled": "このタスクの PR マージ後のステータス変更を再開しました",
+    "linked_write": "{{workspace}}·{{agent}} 経由で操作しました",
     "wakeup_created": "起動を追加しました：{{condition}} · {{agent}} を起こす",
     "wakeup_triggered": "{{condition}} · {{agent}} を起こしました",
     "wakeup_triggered_merged": "{{condition}}（{{agent}} の開始待ちの実行に合流しました）",
