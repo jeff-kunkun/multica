@@ -694,6 +694,18 @@ type ChatSessionLinkReadAudit struct {
 	CreatedAt         pgtype.Timestamptz `json:"created_at"`
 }
 
+type ChatSessionLinkedProject struct {
+	ID            pgtype.UUID        `json:"id"`
+	WorkspaceID   pgtype.UUID        `json:"workspace_id"`
+	ChatSessionID pgtype.UUID        `json:"chat_session_id"`
+	LinkID        pgtype.UUID        `json:"link_id"`
+	ProjectID     pgtype.UUID        `json:"project_id"`
+	Title         string             `json:"title"`
+	SourceName    string             `json:"source_name"`
+	Position      int32              `json:"position"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+}
+
 type ChatSessionProgress struct {
 	ID            pgtype.UUID        `json:"id"`
 	WorkspaceID   pgtype.UUID        `json:"workspace_id"`

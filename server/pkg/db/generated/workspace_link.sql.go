@@ -152,6 +152,63 @@ func (q *Queries) InsertWorkspaceLinkAudit(ctx context.Context, arg InsertWorksp
 	return err
 }
 
+const listLinkedReferenceProjects = `-- name: ListLinkedReferenceProjects :many
+SELECT p.id, p.workspace_id, p.title, p.description, p.icon, p.status, p.lead_type, p.lead_id, p.created_at, p.updated_at, p.priority, p.start_date, p.due_date, p.visibility, p.created_by, p.domain_ids FROM workspace_link_project lp
+JOIN project p ON p.id = lp.project_id
+WHERE lp.link_id = $1::uuid
+  AND p.workspace_id = $2::uuid
+  AND p.visibility <> 'private'
+  AND (cardinality($3::uuid[]) = 0 OR p.id = ANY($3::uuid[]))
+ORDER BY p.title, p.id
+`
+
+type ListLinkedReferenceProjectsParams struct {
+	LinkID            pgtype.UUID   `json:"link_id"`
+	SourceWorkspaceID pgtype.UUID   `json:"source_workspace_id"`
+	ProjectIds        []pgtype.UUID `json:"project_ids"`
+}
+
+// DENE-1643: the full rows of a link's shared projects, for the read-only
+// project context (description, resources, memory). Same filter as
+// ListLinkedViewProjects: still ticked on this link, still in the source,
+// still not private. An empty project_ids filter means every ticked project.
+func (q *Queries) ListLinkedReferenceProjects(ctx context.Context, arg ListLinkedReferenceProjectsParams) ([]Project, error) {
+	rows, err := q.db.Query(ctx, listLinkedReferenceProjects, arg.LinkID, arg.SourceWorkspaceID, arg.ProjectIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Project{}
+	for rows.Next() {
+		var i Project
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.Title,
+			&i.Description,
+			&i.Icon,
+			&i.Status,
+			&i.LeadType,
+			&i.LeadID,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.Priority,
+			&i.StartDate,
+			&i.DueDate,
+			&i.Visibility,
+			&i.CreatedBy,
+			&i.DomainIds,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listLinkedViewIssues = `-- name: ListLinkedViewIssues :many
 SELECT w.issue_prefix, i.number, i.title, i.status, i.priority, i.due_date, i.updated_at,
        p.id AS project_id,

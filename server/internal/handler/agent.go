@@ -878,10 +878,15 @@ type AgentTaskResponse struct {
 	// one. The singular project_* fields above mirror the FIRST entry so a
 	// daemon predating this field still renders the primary project. Mirror
 	// field: internal/daemon/types.go, same JSON name.
-	Projects       []TaskProjectContextData `json:"projects,omitempty"`
-	CreatedAt      string                   `json:"created_at"`
-	PriorSessionID string                   `json:"prior_session_id,omitempty"` // session ID from a previous task on same issue
-	PriorWorkDir   string                   `json:"prior_work_dir,omitempty"`   // work_dir from a previous task on same issue
+	Projects []TaskProjectContextData `json:"projects,omitempty"`
+	// LinkedProjects are read-only reference projects a chat attached through
+	// a workspace link (DENE-1643), re-checked against the link at claim. They
+	// never feed the code source or the working project. Mirror field:
+	// internal/daemon/types.go, same JSON name.
+	LinkedProjects []TaskLinkedProjectData `json:"linked_projects,omitempty"`
+	CreatedAt      string                  `json:"created_at"`
+	PriorSessionID string                  `json:"prior_session_id,omitempty"` // session ID from a previous task on same issue
+	PriorWorkDir   string                  `json:"prior_work_dir,omitempty"`   // work_dir from a previous task on same issue
 	// PriorSessionResumeUnavailable is set when a more recent Codex session was
 	// withheld because its rollout was missing (MUL-5305); PriorSessionID (if
 	// any) is then an older fallback, and the daemon surfaces the continuity gap

@@ -41,6 +41,8 @@ type Service struct {
 	tx TxStarter
 	// now is swappable for tests.
 	now func() time.Time
+	// memoryLine renders a shared project's memory line (WithMemoryLine).
+	memoryLine MemoryLineFunc
 }
 
 // New builds a Service over the shared queries and pool.

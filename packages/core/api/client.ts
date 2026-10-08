@@ -5,6 +5,7 @@ import type { WorkspaceWakeupPage, WorkspaceWakeupFilters } from "../types/issue
 import type { IssueDeliveryLines } from "./schemas";
 import { WorkspaceWakeupPageSchema, IssueWakeupSchema, IssueWakeupSummaryRowSchema, PausedWakeupSchema, SystemWakeupSchema, WakeupRunSchema, WorkspaceSystemWakeupSchema } from "./schemas";
 import type { InboxFilters } from "../inbox/filter-store";
+import type { ChatLinkedProjectRef, LinkedProjectOption } from "../types/workspace-link";
 import type { ArchivedInboxPage, ArchivedInboxFacets } from "../types/inbox";
 import type { InboxBoardResponse, ParkingRecordsResponse, UnreadInboxIssue, WaitingSummon } from "../types/home";
 import type { WorkThreadSnapshot } from "../types/work_thread";
@@ -5130,6 +5131,8 @@ export class ApiClient {
        *  than silently preferring one. */
       project_ids?: string[];
       project_id?: string | null;
+      /** Read-only projects shared from linked workspaces (DENE-1643). */
+      linked_projects?: ChatLinkedProjectRef[];
     },
     workspaceSlug?: string,
   ): Promise<ChatSession> {
@@ -5180,7 +5183,12 @@ export class ApiClient {
     // One field per request: the server rejects a body that carries more than
     // one of them. `project_ids` is the complete replacement set in selection
     // order; an empty array clears the session's project context.
-    data: { title: string } | { project_id: string | null } | { project_ids: string[] },
+    // `linked_projects` replaces the read-only linked set the same way.
+    data:
+      | { title: string }
+      | { project_id: string | null }
+      | { project_ids: string[] }
+      | { linked_projects: ChatLinkedProjectRef[] },
   ): Promise<ChatSession> {
     return this.fetch(`/api/chat/sessions/${id}`, {
       method: "PATCH",
@@ -6621,6 +6629,12 @@ export class ApiClient {
 
   async revokeWorkspaceLink(linkId: string): Promise<void> {
     await this.fetch(`/api/workspace-links/${encodeURIComponent(linkId)}`, { method: "DELETE" });
+  }
+
+  /** Shared projects this workspace may attach to a chat read-only (DENE-1643). */
+  async listLinkedProjectOptions(): Promise<LinkedProjectOption[]> {
+    const raw = await this.fetch<{ projects?: LinkedProjectOption[] }>("/api/workspace-links/projects");
+    return Array.isArray(raw?.projects) ? raw.projects : [];
   }
 
   async getLinkedView(linkId: string, params: LinkedViewParams = {}): Promise<LinkedView> {

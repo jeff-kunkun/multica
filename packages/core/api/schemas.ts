@@ -2643,6 +2643,15 @@ const ChatLastMessageSchema = z.object({
   sender_user_id: z.string().nullable().optional(),
 }).loose();
 
+const ChatLinkedProjectSchema = z.object({
+  link_id: z.string(),
+  project_id: z.string(),
+  title: z.string().default(""),
+  icon: z.string().nullable().default(null),
+  source_name: z.string().default(""),
+  available: z.boolean().default(false),
+}).loose();
+
 const ChatChannelSourceSchema = z.object({
   channel_type: z.string().default(""),
   installation_id: z.string().default(""),
@@ -2656,6 +2665,7 @@ export const ChatSessionSchema: z.ZodType<ChatSession> = z.object({
   creator_id: z.string().default(""),
   project_id: z.string().nullable().optional(),
   project_ids: z.array(z.string()).optional().catch(undefined),
+  linked_projects: z.array(ChatLinkedProjectSchema).optional().catch(undefined),
   title: z.string().default(""),
   title_locked: z.boolean().optional().catch(undefined),
   progress: ProgressSchema.nullable().optional().catch(undefined),

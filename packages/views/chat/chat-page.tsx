@@ -887,6 +887,9 @@ export function ChatPage() {
         projectIds={c.activeProjectIds}
         projectContextUnsupported={c.projectContextUnsupported}
         onProjectsChange={changeProjectContext}
+        linkedProjects={c.linkedProjects.items}
+        linkedProjectOptions={c.linkedProjects.options}
+        onLinkedProjectsChange={c.linkedProjects.onChange}
         isProjectUpdating={c.isProjectUpdating}
         focusRequest={c.focusInputRequest}
         onConvertToGoal={c.activeSessionId ? async () => {

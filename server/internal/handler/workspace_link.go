@@ -20,7 +20,7 @@ import (
 // workspace by RequireWorkspaceMember.
 
 func (h *Handler) workspaceLinks() *workspacelink.Service {
-	return workspacelink.New(h.Queries, h.TxStarter)
+	return workspacelink.New(h.Queries, h.TxStarter).WithMemoryLine(h.projectMemoryBriefLine)
 }
 
 // workspaceLinkCaller reads the caller's workspace, user and tier from the
