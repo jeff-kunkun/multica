@@ -94,6 +94,13 @@ func printIssueRoute(out map[string]any) {
 	if v := str("executor"); v != "" {
 		fmt.Printf("执行席:   %s\n", v)
 	}
+	if v := str("tier"); v != "" {
+		if from := str("judged_tier"); from != "" {
+			fmt.Printf("档位:    %s（判断模型给的 %s，按规则下限抬档）\n", v, from)
+		} else {
+			fmt.Printf("档位:    %s\n", v)
+		}
+	}
 	if v := str("reviewer"); v != "" {
 		fmt.Printf("验收席:   %s\n", v)
 	}

@@ -12,6 +12,7 @@
     "view_cards": "Cards",
     "row_menu": "Project actions",
     "pin": "Pin to sidebar",
+    "pin_failed": "Couldn't update the pin",
     "unpin": "Unpin",
     "delete": "Delete",
     "no_matches": "No projects match",

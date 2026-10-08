@@ -12,6 +12,7 @@
     "view_cards": "卡片",
     "row_menu": "项目操作",
     "pin": "固定到侧边栏",
+    "pin_failed": "固定状态更新失败",
     "unpin": "取消钉选",
     "delete": "删除",
     "no_matches": "没有匹配的项目",

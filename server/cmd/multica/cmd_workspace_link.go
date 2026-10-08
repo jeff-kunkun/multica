@@ -25,12 +25,13 @@ var workspaceLinkCmd = &cobra.Command{
 		"`create --from <workspace> --project <name>` links that workspace's projects in, active at once.\n" +
 		"Sharing a project shares its context too: description, local directories, repositories\n" +
 		"and project memory. A chat can attach it as a read-only reference.\n\n" +
-		"Agents use `list` to find the active links of their workspace and `view` to read one.",
+		"Agents use `list` to find the active links of their workspace and `view` to read one;\n" +
+		"`list --pending` shows the offers waiting for this workspace's owner or admin to accept.",
 }
 
 var workspaceLinkListCmd = &cobra.Command{
 	Use:   "list",
-	Short: "List links this workspace is on (members and agents see only active incoming links)",
+	Short: "List links this workspace is on (members see only active incoming links; --pending: offers waiting for this workspace)",
 	Args:  cobra.NoArgs,
 	RunE:  runWorkspaceLinkList,
 }
@@ -78,6 +79,7 @@ func init() {
 	workspaceLinkCreateCmd.Flags().String("to", "", "The workspace that will see the projects: its link (https://host/<slug>/...) or slug")
 	workspaceLinkCreateCmd.Flags().String("from", "", "The workspace whose projects this workspace will see (you must own it): its link or slug")
 	workspaceLinkCreateCmd.Flags().StringArray("project", nil, "Project to share (id, id prefix or exact name); with --from, a project of that workspace; repeatable")
+	workspaceLinkListCmd.Flags().Bool("pending", false, "Only offers waiting for this workspace to accept (owner/admin, or their agents)")
 	workspaceLinkUpdateCmd.Flags().StringArray("project", nil, "Replace the shared projects with these; repeatable")
 	workspaceLinkUpdateCmd.Flags().Bool("accept", false, "Accept a pending link offered to this workspace")
 	workspaceLinkViewCmd.Flags().String("project-id", "", "Only this shared project (an id from the view's projects)")
@@ -97,6 +99,9 @@ func runWorkspaceLinkList(cmd *cobra.Command, _ []string) error {
 	if err := client.GetJSON(ctx, "/api/workspace-links", &resp); err != nil {
 		return fmt.Errorf("list workspace links: %w", err)
 	}
+	if pending, _ := cmd.Flags().GetBool("pending"); pending {
+		resp["links"] = waitingLinks(resp["links"])
+	}
 	if out, _ := cmd.Flags().GetString("output"); out == "json" {
 		return cli.PrintJSON(os.Stdout, resp)
 	}
@@ -113,6 +118,19 @@ func runWorkspaceLinkList(cmd *cobra.Command, _ []string) error {
 	}
 	cli.PrintTable(os.Stdout, []string{"ID", "SIDE", "STATUS", "OTHER WORKSPACE"}, rows)
 	return nil
+}
+
+// waitingLinks keeps the offers this workspace has not answered yet.
+func waitingLinks(raw any) []any {
+	links, _ := raw.([]any)
+	out := make([]any, 0, len(links))
+	for _, l := range links {
+		m, _ := l.(map[string]any)
+		if strVal(m, "side") == "viewer" && strVal(m, "status") == "pending" {
+			out = append(out, l)
+		}
+	}
+	return out
 }
 
 func resolveLinkProjects(ctx context.Context, client *cli.APIClient, refs []string) ([]string, error) {

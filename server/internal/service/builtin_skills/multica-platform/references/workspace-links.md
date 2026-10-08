@@ -10,7 +10,10 @@ multica workspace link view <link-id> --output json
 multica workspace link view <link-id> --project-id <id> --cursor <next_cursor> --output json
 ```
 
-`list` shows the active links this workspace receives. `view` returns the
+`list` shows the active links this workspace receives. When the person your
+task runs as is this workspace's owner or admin, it also shows offers still
+waiting for their answer (`status: pending`, names only); `list --pending`
+shows just those. `view` returns the
 source's name, its shared projects with `done`/`total` counts and their project
 context (`description`, `resources` — a repo `url` or a directory `path` — and
 `memory_line`), and one page of
@@ -35,6 +38,12 @@ every such call is refused.
 Every refusal is the same `404 link not found`: the link was revoked, is still
 waiting for acceptance, or your workspace is not its viewer. Report it as "no
 access", not as a bug.
+
+An offer puts a request in the inbox of every owner and admin of the receiving
+workspace; accepting or declining it sends the offering workspace's owners and
+admins a receipt, and once the request is answered or withdrawn the inbox
+request is archived. If someone asks what is waiting, run `list --pending` and
+tell them to answer it in 设置 → 连通工作区; you cannot accept it yourself.
 
 Creating, changing projects, accepting and revoking (`create`, `update`,
 `revoke`, and the `lookup` that confirms a target) are refused for agents.

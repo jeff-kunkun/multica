@@ -543,10 +543,11 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
                 className={cn("text-muted-foreground", isPinned && "text-foreground")}
                 title={isPinned ? t(($) => $.detail.unpin_tooltip) : t(($) => $.detail.pin_tooltip)}
                 onClick={() => {
+                  const onError = () => toast.error(t(($) => $.page.pin_failed));
                   if (isPinned) {
-                    deletePinMut.mutate({ itemType: "project", itemId: projectId });
+                    deletePinMut.mutate({ itemType: "project", itemId: projectId }, { onError });
                   } else {
-                    createPin.mutate({ item_type: "project", item_id: projectId });
+                    createPin.mutate({ item_type: "project", item_id: projectId }, { onError });
                   }
                 }}
               >

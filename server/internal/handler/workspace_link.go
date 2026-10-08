@@ -166,6 +166,11 @@ func (h *Handler) CreateWorkspaceLink(w http.ResponseWriter, r *http.Request) {
 	switch req.Direction {
 	case "", "offer":
 		link, err = h.workspaceLinks().Create(r.Context(), ws, user, actor, req.TargetSlug, projects)
+		if err == nil {
+			if id, perr := parseUUIDSafe(link.ID); perr == nil {
+				h.notifyWorkspaceLinkOffered(r.Context(), id, user)
+			}
+		}
 	case "pull":
 		link, err = h.workspaceLinks().Pull(r.Context(), ws, user, actor, req.TargetSlug, projects)
 	default:
@@ -212,6 +217,11 @@ func (h *Handler) UpdateWorkspaceLink(w http.ResponseWriter, r *http.Request) {
 		writeWorkspaceLinkError(w, err)
 		return
 	}
+	if patch.Accept {
+		if row, err := h.Queries.GetWorkspaceLink(r.Context(), id); err == nil {
+			h.answerWorkspaceLinkRequest(r.Context(), row, user, inboxTypeWorkspaceLinkAccepted)
+		}
+	}
 	writeJSON(w, http.StatusOK, link)
 }
 
@@ -225,9 +235,22 @@ func (h *Handler) RevokeWorkspaceLink(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	// Read before the delete: the notices need to know what was revoked.
+	before, beforeErr := h.Queries.GetWorkspaceLink(r.Context(), id)
 	if err := h.workspaceLinks().Revoke(r.Context(), ws, user, actor, id); err != nil {
 		writeWorkspaceLinkError(w, err)
 		return
+	}
+	if beforeErr == nil {
+		switch {
+		case before.Status != "pending":
+			h.archiveWorkspaceLinkRequest(r.Context(), before)
+		case before.TargetWorkspaceID == ws:
+			h.answerWorkspaceLinkRequest(r.Context(), before, user, inboxTypeWorkspaceLinkDeclined)
+		default:
+			// The source withdrew its own offer: nobody needs a receipt.
+			h.answerWorkspaceLinkRequest(r.Context(), before, user, "")
+		}
 	}
 	w.WriteHeader(http.StatusNoContent)
 }

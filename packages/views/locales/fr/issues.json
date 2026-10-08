@@ -632,6 +632,7 @@
   },
   "comment": {
     "add_reaction": "Ajouter une réaction",
+    "reaction_failed": "Impossible de mettre à jour la réaction",
     "collapse_thread": "Replier le fil",
     "expand_thread": "Développer le fil",
     "delete_title": "Supprimer le commentaire",
