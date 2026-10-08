@@ -91,11 +91,11 @@ func Clip(s string, max int) string {
 	return string(r[:max-1]) + "…"
 }
 
-// Markdown is the receipt card's body in a chat. It reads on its own in any
-// client that only renders markdown.
+// Markdown is the receipt card's body in a chat. The issue mention renders as
+// a chip carrying the title, so the head line adds only the status.
 func (r Receipt) Markdown() string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "[%s](mention://issue/%s) %s · %s", r.Identifier, r.IssueID, r.Title, StatusLabel(r.Status))
+	fmt.Fprintf(&b, "[%s](mention://issue/%s) %s", r.Identifier, r.IssueID, StatusLabel(r.Status))
 	if s := Clip(r.Summary, MaxSummary); s != "" {
 		fmt.Fprintf(&b, "\n\n结论：%s", s)
 	}

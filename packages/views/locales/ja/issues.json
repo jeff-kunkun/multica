@@ -1850,6 +1850,7 @@
     "reason_fresh_requested": "新規セッションを指定"
   },
   "state_card": {
+    "source_quote": "元の依頼",
     "section_title": "状態カード",
     "decisions": "決定事項",
     "decisions_empty": "まだ決定事項はありません",

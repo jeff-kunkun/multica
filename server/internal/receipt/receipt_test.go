@@ -27,8 +27,8 @@ func TestMarkdownOmitsEmptySections(t *testing.T) {
 			t.Fatalf("markdown has empty section %q:\n%s", absent, md)
 		}
 	}
-	if !strings.Contains(md, "卡住了") {
-		t.Fatalf("markdown misses status label:\n%s", md)
+	if !strings.Contains(md, "卡住了") || strings.Contains(md, "修登录") {
+		t.Fatalf("markdown wants the status but not the chip's title:\n%s", md)
 	}
 }
 
