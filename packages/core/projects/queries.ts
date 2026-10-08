@@ -8,6 +8,8 @@ export const projectKeys = {
     [...projectKeys.all(wsId), "detail", id] as const,
   memory: (wsId: string, id: string) =>
     [...projectKeys.all(wsId), "memory", id] as const,
+  memoryMonitor: (wsId: string, id: string) =>
+    [...projectKeys.memory(wsId, id), "monitor"] as const,
   memoryLocations: (wsId: string) =>
     [...projectKeys.all(wsId), "memory-locations"] as const,
   reports: (wsId: string) => [...projectKeys.all(wsId), "report"] as const,
@@ -34,6 +36,14 @@ export function projectMemoryOptions(wsId: string, id: string) {
   return queryOptions({
     queryKey: projectKeys.memory(wsId, id),
     queryFn: () => api.getProjectMemory(id),
+  });
+}
+
+/** Writes, unsettled closes, idle rounds and chat receipts over the default window. */
+export function projectMemoryMonitorOptions(wsId: string, id: string) {
+  return queryOptions({
+    queryKey: projectKeys.memoryMonitor(wsId, id),
+    queryFn: () => api.getProjectMemoryMonitor(id),
   });
 }
 
