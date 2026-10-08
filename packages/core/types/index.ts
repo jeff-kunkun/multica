@@ -462,6 +462,10 @@ export type {
   LinkedViewIssue,
   LinkedViewStatus,
   LinkedViewParams,
+  LinkedResource,
+  LinkedProjectOption,
+  ChatLinkedProjectRef,
+  ChatLinkedProject,
   WorkspaceLinkLookup,
   WorkspaceLinkDirection,
 } from "./workspace-link";

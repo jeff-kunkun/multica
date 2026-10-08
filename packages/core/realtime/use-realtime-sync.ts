@@ -128,6 +128,7 @@ import type {
   ChatPendingTask,
   ChatMessagesPage,
   ChatSession,
+  ChatLinkedProject,
   Progress,
   ChatSessionCreatedPayload,
   InvitationCreatedPayload,
@@ -372,6 +373,8 @@ type ChatSessionUpdatedPayload = {
   /** The session's full project set, sent on the same events that carry
    *  `project_id` (DENE-522). Absent on rename/pin/archive. */
   project_ids?: string[];
+  /** Full read-only linked set (DENE-1643); absent unless it changed. */
+  linked_projects?: ChatLinkedProject[];
   pinned?: boolean;
   status?: "active" | "archived";
   /** Present only when the creator dismisses the "bind a project" reminder. */
@@ -416,6 +419,7 @@ export function applyChatSessionUpdatedToCache(
             // predating project_ids sends only project_id, and the singular
             // patch above still moves the chip.
             ...("project_ids" in payload ? { project_ids: payload.project_ids } : {}),
+            ...("linked_projects" in payload ? { linked_projects: payload.linked_projects } : {}),
             pinned: payload.pinned ?? s.pinned,
             status: payload.status ?? s.status,
             ...("project_nudge_dismissed" in payload

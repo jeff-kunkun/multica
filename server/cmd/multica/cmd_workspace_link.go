@@ -22,7 +22,9 @@ var workspaceLinkCmd = &cobra.Command{
 		"this workspace's chosen projects without becoming members. Only the owner can\n" +
 		"offer a link; the viewer's owner or admin accepts it; either side can revoke it.\n" +
 		"Someone who owns both workspaces can pull from the viewer side instead:\n" +
-		"`create --from <workspace> --project <name>` links that workspace's projects in, active at once.\n\n" +
+		"`create --from <workspace> --project <name>` links that workspace's projects in, active at once.\n" +
+		"Sharing a project shares its context too: description, local directories, repositories\n" +
+		"and project memory. A chat can attach it as a read-only reference.\n\n" +
 		"Agents use `list` to find the active links of their workspace and `view` to read one.",
 }
 
@@ -63,7 +65,7 @@ var workspaceLinkRevokeCmd = &cobra.Command{
 
 var workspaceLinkViewCmd = &cobra.Command{
 	Use:   "view <link-id>",
-	Short: "Read the linked workspace's projects and task status (read-only)",
+	Short: "Read the linked workspace's projects — description, directories, repos, project memory — and task status (read-only)",
 	Args:  cobra.ExactArgs(1),
 	RunE:  runWorkspaceLinkView,
 }
@@ -303,6 +305,28 @@ func runWorkspaceLinkView(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
+// printLinkedProjectContext prints a shared project's context, indented under
+// it: description, resources (read-only pointers) and the memory line.
+func printLinkedProjectContext(w io.Writer, p map[string]any) {
+	if desc := strings.TrimSpace(strVal(p, "description")); desc != "" {
+		for _, line := range strings.Split(desc, "\n") {
+			fmt.Fprintf(w, "    %s\n", line)
+		}
+	}
+	resources, _ := p["resources"].([]any)
+	for _, raw := range resources {
+		r, _ := raw.(map[string]any)
+		target := strVal(r, "path")
+		if target == "" {
+			target = strVal(r, "url")
+		}
+		fmt.Fprintf(w, "    - %s: %s\n", strVal(r, "type"), target)
+	}
+	if memory := strVal(p, "memory_line"); memory != "" {
+		fmt.Fprintf(w, "    %s\n", memory)
+	}
+}
+
 func printLinkedView(w io.Writer, view map[string]any) {
 	source, _ := view["source"].(map[string]any)
 	fmt.Fprintf(w, "%s (read-only)\n\nProjects\n", strVal(source, "name"))
@@ -310,6 +334,7 @@ func printLinkedView(w io.Writer, view map[string]any) {
 	for _, raw := range projects {
 		p, _ := raw.(map[string]any)
 		fmt.Fprintf(w, "  %s  %s  %v/%v done  [%s]\n", strVal(p, "title"), strVal(p, "status"), p["done"], p["total"], strVal(p, "id"))
+		printLinkedProjectContext(w, p)
 	}
 	issues, _ := view["issues"].([]any)
 	rows := make([][]string, 0, len(issues))

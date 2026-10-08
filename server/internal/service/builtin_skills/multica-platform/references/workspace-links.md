@@ -11,10 +11,20 @@ multica workspace link view <link-id> --project-id <id> --cursor <next_cursor> -
 ```
 
 `list` shows the active links this workspace receives. `view` returns the
-source's name, its shared projects with `done`/`total` counts, and one page of
+source's name, its shared projects with `done`/`total` counts and their project
+context (`description`, `resources` — a repo `url` or a directory `path` — and
+`memory_line`), and one page of
 tasks: `identifier`, `title`, `status`, `priority`, `assignee_name`, `due_date`,
 `updated_at`. Pass `next_cursor` back as `--cursor` for the next page; it is
 empty on the last page. `--project-id` takes an `id` from the view's `projects`.
+
+A chat can attach a shared project as a read-only reference (composer + →
+项目上下文 → 连通的项目（只读）). Your brief then has a `Read-only Reference
+Projects` section with that context, re-checked against the link every run.
+Read it only: you may `multica repo checkout` its repositories to read, but
+never push to them, and never open a worktree, commit or write in its
+directories. A path marked "not on this machine" is the source's; read its
+repositories instead. Your working project and code source stay your own.
 
 That is everything the link exposes. Task descriptions, comments, attachments,
 private tasks, private projects and projects the source did not tick are never
