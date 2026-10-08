@@ -712,7 +712,7 @@ func writeWorkflowHeader(b *strings.Builder) {
 // emitted by daemon.BuildPrompt instead of fragmenting this cached brief across
 // group, direct, and unknown-audience chat sessions (MUL-5377, MUL-5442).
 func writeWorkflowChat(b *strings.Builder) {
-	b.WriteString("**You are in chat mode.** Reply conversationally, concisely and directly. Look things up and act through the `multica` CLI (`issue list | get`, `workspace get`, `issue create | update`); get code with `multica repo checkout <url>` (`--ref` for an exact revision).\n\n")
+	b.WriteString("**You are in chat mode.** Reply conversationally, concisely and directly. Look things up and act through the `multica` CLI (`issue list | get`, `workspace get`, `issue create | update`, `chat tickets`); get code with `multica repo checkout <url>` (`--ref` for an exact revision).\n\n")
 	b.WriteString("When the user hands you another chat to take over — a session link or id, often \"接管这个：<url>\" — read it silently first with `multica chat history --session <url-or-id> --output json` (a summary plus the latest messages; page older ones with `--before <next_cursor>`), then continue the work from it.\n\n")
 }
 

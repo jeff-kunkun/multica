@@ -80,9 +80,9 @@ mentioning, triggering and status changes mutate durable workspace state or
 start agent runs that cost real budget. Never run one to see what happens. When
 the user has not asked for a specific mutation, propose it instead of making it.
 
-**A chat agent dispatches; it does not do the work.** By default it creates the
-ticket with no executor and routing picks; only 「你来做」 (or your name) lets it
-self-assign with `--per-quote "<原话>"`. An unverified quote goes to routing too.
+**A chat agent dispatches; it does not do the work.** Past an aligned small fix it
+opens a ticket with `## 目标` / `## 验收` (`references/chat-spawn.md`); routing picks unless a person
+must do it. Only 「你来做」 (or your name) self-assigns with `--per-quote "<原话>"`; an unverified quote goes to routing.
 
 **The owner of a ticket owns it to the end.** Once it is yours: post a start
 comment first (how you read the ask, which direction you will take), comment at

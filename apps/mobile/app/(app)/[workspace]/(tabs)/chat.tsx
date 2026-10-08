@@ -63,6 +63,7 @@ import {
   chatKeys,
   chatMessagesOptions,
   chatSessionsOptions,
+  chatTicketsOptions,
   pendingChatTaskOptions,
   taskMessagesOptions,
 } from "@/data/queries/chat";
@@ -167,6 +168,11 @@ export default function ChatTab() {
     pendingChatTaskOptions(activeSessionId),
   );
   const visibleMessages = hideQueuedChatMessages(messages, pendingTask);
+  // The issues this chat opened (DENE-1665); refreshed by issue events in
+  // useChatSessionRealtime.
+  const { data: ticketsData } = useQuery(
+    chatTicketsOptions(wsId, activeSessionId),
+  );
   // Live execution trace for the in-flight task. `task:message` WS events
   // append rows to this same cache key via `appendTaskMessage`, so the
   // list/pill stay in sync without a polling fetch. `enabled` is gated by
@@ -543,10 +549,14 @@ export default function ChatTab() {
   // when they delete the active one in the sheet).
   useEffect(() => {
     if (!selectRequest) return;
+    // A request can arrive before the first-entry hydration (e.g. opening a
+    // chat from an issue's "From chat" line on a cold tab); mark hydration
+    // done so the most-recent-session default does not overwrite it.
+    hydratedWsRef.current = wsId;
     setSelectedAgentId(null);
     setActiveSessionId(selectRequest.id);
     consumeSelect();
-  }, [selectRequest, consumeSelect]);
+  }, [selectRequest, consumeSelect, wsId]);
 
   const handleDeleteActive = useCallback(() => {
     if (!activeSession) return;
@@ -630,6 +640,7 @@ export default function ChatTab() {
           pendingTask={pendingTask}
           liveTaskMessages={liveTaskMessages}
           availability={presenceAvailability}
+          tickets={ticketsData?.tickets}
         />
         {runtimeBound ? (
           <OfflineBanner

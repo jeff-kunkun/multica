@@ -1109,6 +1109,7 @@ type Issue struct {
 	ProgressUpdatedAt    pgtype.Timestamptz `json:"progress_updated_at"`
 	DuplicateOfIssueID   pgtype.UUID        `json:"duplicate_of_issue_id"`
 	DomainID             pgtype.UUID        `json:"domain_id"`
+	OriginChatSessionID  pgtype.UUID        `json:"origin_chat_session_id"`
 }
 
 type IssueChildEvent struct {

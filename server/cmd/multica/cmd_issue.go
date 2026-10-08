@@ -1454,6 +1454,13 @@ func runIssueGet(cmd *cobra.Command, args []string) error {
 			strVal(issue, "description"),
 		}}
 		cli.PrintTable(os.Stdout, headers, rows)
+		if chat, ok := issue["source_chat"].(map[string]any); ok {
+			if title := strVal(chat, "title"); title != "" {
+				fmt.Printf("\nFrom chat: %s (%s)\n", title, strVal(chat, "id"))
+			} else {
+				fmt.Printf("\nFrom chat: %s\n", strVal(chat, "id"))
+			}
+		}
 		return nil
 	}
 

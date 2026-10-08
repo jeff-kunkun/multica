@@ -1377,6 +1377,8 @@ export function useRealtimeSync(
         // The state card derives from status, the close record, handoff and
         // decisions, all of which arrive as issue:updated (DENE-1328).
         qc.invalidateQueries({ queryKey: issueKeys.context(wsId, issue.id) });
+        // A chat's ticket card shows its issues' status and executor (DENE-1665).
+        qc.invalidateQueries({ queryKey: chatKeys.ticketsAll(wsId) });
       }
     });
 
@@ -1384,7 +1386,10 @@ export function useRealtimeSync(
       const { issue } = p as IssueCreatedPayload;
       if (!issue) return;
       const wsId = getCurrentWsId();
-      if (wsId) onIssueCreated(qc, wsId, issue);
+      if (wsId) {
+        onIssueCreated(qc, wsId, issue);
+        qc.invalidateQueries({ queryKey: chatKeys.ticketsAll(wsId) });
+      }
     });
 
     const unsubIssueDeleted = ws.on("issue:deleted", (p) => {
@@ -1394,6 +1399,7 @@ export function useRealtimeSync(
       if (wsId) {
         onIssueDeleted(qc, wsId, issue_id);
         void onInboxIssueDeleted(qc, wsId, issue_id);
+        qc.invalidateQueries({ queryKey: chatKeys.ticketsAll(wsId) });
       }
     });
 
@@ -1409,6 +1415,7 @@ export function useRealtimeSync(
       const wsId = getCurrentWsId();
       if (!wsId) return;
       applyIssueInvalidatedToCache(qc, wsId, p as IssueInvalidatedPayload);
+      qc.invalidateQueries({ queryKey: chatKeys.ticketsAll(wsId) });
     });
 
     const unsubIssueLabelsChanged = ws.on("issue_labels:changed", (p) => {

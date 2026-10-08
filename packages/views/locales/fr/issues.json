@@ -564,7 +564,9 @@
       "status_conflict": "Conflit, l'exécutant résout",
       "show_all_one": "Tout afficher ({{count}})",
       "show_all_other": "Tout afficher ({{count}})"
-    }
+    },
+    "from_chat": "Depuis la discussion",
+    "from_chat_hidden": "Depuis une discussion que vous ne voyez pas"
   },
   "timeline": {
     "loading": "Chargement..."
