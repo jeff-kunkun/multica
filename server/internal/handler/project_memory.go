@@ -50,6 +50,9 @@ type ProjectMemoryResponse struct {
 	SedimentIssue           *ProjectMemoryIssue     `json:"sediment_issue"`
 	SedimentAgentConfigured bool                    `json:"sediment_agent_configured"`
 	SedimentError           *string                 `json:"sediment_error"`
+	// RecentSediments are the newest deliveries that wrote this project's
+	// memory: issue closes and chats, with the files bound to each location.
+	RecentSediments []KnowledgeSedimentResponse `json:"recent_sediments"`
 }
 
 type projectMemoryCheckRequest struct {
@@ -172,6 +175,7 @@ func (h *Handler) projectMemoryResponse(ctx context.Context, project db.Project)
 		response.SedimentIssue = h.projectMemoryIssue(ctx, issue)
 		response.LatestSedimentAt = memoryTime(issue.UpdatedAt)
 	}
+	response.RecentSediments = h.recentKnowledgeSediments(ctx, project)
 	return response
 }
 
@@ -420,6 +424,14 @@ func (h *Handler) appendMemoryReason(ctx context.Context, issue db.Issue, agentI
 // seat, a bad setting, or a write failure is logged and returned as text. It
 // never fails the business event that noticed the progress.
 func (h *Handler) noteMemoryProgress(ctx context.Context, workspaceID, projectID pgtype.UUID, reason string) string {
+	return h.noteMemoryMilestone(ctx, workspaceID, projectID, reason, "")
+}
+
+// noteMemoryMilestone is noteMemoryProgress for the three milestone triggers
+// (children all terminal, stage advance, project completed). The digest
+// (sedimentDigest) follows the one-line reason, so the round's ticket carries
+// the source tickets' conclusions and close evidence (DENE-1661).
+func (h *Handler) noteMemoryMilestone(ctx context.Context, workspaceID, projectID pgtype.UUID, reason, digest string) string {
 	reason = strings.NewReplacer("\r", " ", "\n", " ").Replace(strings.TrimSpace(reason))
 	if !projectID.Valid || reason == "" || h.Queries == nil {
 		return ""
@@ -430,6 +442,9 @@ func (h *Handler) noteMemoryProgress(ctx context.Context, workspaceID, projectID
 	if err != nil {
 		slog.Warn("memory round: sediment failed", "error", err, "project_id", uuidToString(projectID), "reason", reason)
 		return "project memory sediment failed"
+	}
+	if digest = strings.TrimSpace(digest); digest != "" {
+		reason += "\n\n" + digest
 	}
 	result, err := h.EnsureMemoryRound(ctx, project, reason)
 	if err != nil {
@@ -454,12 +469,14 @@ func (h *Handler) sedimentClosedBarrier(ctx context.Context, parent, completed d
 	}
 	label := issueIdentifier(h.getIssuePrefix(ctx, parent.WorkspaceID), parent.Number)
 	var reason string
+	sources := children
 	if siblingsAreStaged(children) {
 		if !completed.Stage.Valid {
 			return
 		}
 		if next := nextOpenStage(children, completed.Stage.Int32, isTerminal); next > 0 {
 			reason = fmt.Sprintf("阶段推进：%s 的第 %d 阶段已终态，下一阶段是 %d", label, completed.Stage.Int32, next)
+			sources = childrenInStage(children, completed.Stage.Int32)
 		} else if stagedChildrenAllTerminal(children, isTerminal) {
 			reason = fmt.Sprintf("父票子票全部终态：%s", label)
 		} else {
@@ -470,7 +487,17 @@ func (h *Handler) sedimentClosedBarrier(ctx context.Context, parent, completed d
 	} else {
 		return
 	}
-	h.noteMemoryProgress(ctx, parent.WorkspaceID, parent.ProjectID, reason)
+	h.noteMemoryMilestone(ctx, parent.WorkspaceID, parent.ProjectID, reason, h.sedimentDigest(ctx, sources))
+}
+
+func childrenInStage(children []db.Issue, stage int32) []db.Issue {
+	var out []db.Issue
+	for _, child := range children {
+		if child.Stage.Valid && child.Stage.Int32 == stage {
+			out = append(out, child)
+		}
+	}
+	return out
 }
 
 func nextOpenStage(children []db.Issue, closedStage int32, isTerminal func(db.Issue) bool) int32 {

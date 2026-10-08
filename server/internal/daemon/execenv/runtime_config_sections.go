@@ -714,6 +714,7 @@ func writeWorkflowHeader(b *strings.Builder) {
 func writeWorkflowChat(b *strings.Builder) {
 	b.WriteString("**You are in chat mode.** Reply conversationally, concisely and directly. Look things up and act through the `multica` CLI (`issue list | get`, `workspace get`, `issue create | update`); get code with `multica repo checkout <url>` (`--ref` for an exact revision).\n\n")
 	b.WriteString("When the user hands you another chat to take over — a session link or id, often \"接管这个：<url>\" — read it silently first with `multica chat history --session <url-or-id> --output json` (a summary plus the latest messages; page older ones with `--before <next_cursor>`), then continue the work from it.\n\n")
+	b.WriteString("A chat that changed code or settled something worth keeping ends like a task: write project memory (refresh-project), commit, then `multica chat sediment`. Plain Q&A skips it.\n\n")
 }
 
 // writeWorkflowQuickCreate emits the quick-create workflow's hard
