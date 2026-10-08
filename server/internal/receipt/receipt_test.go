@@ -64,7 +64,7 @@ func TestClip(t *testing.T) {
 
 func TestMarkdownListsChildren(t *testing.T) {
 	r := Receipt{IssueID: "p", Identifier: "DENE-1", Status: "done", Children: []Receipt{
-		{IssueID: "c1", Identifier: "DENE-2", Status: "done", Summary: "接口做完", PRs: []PR{{Number: 5, URL: "https://x/pull/5", State: "merged"}}},
+		{IssueID: "c1", Identifier: "DENE-2", Status: "done", Summary: "接口做完。", PRs: []PR{{Number: 5, URL: "https://x/pull/5", State: "merged"}}},
 		{IssueID: "c2", Identifier: "DENE-3", Status: "cancelled"},
 		{IssueID: "c3", Identifier: "DENE-4", Status: "done", Summary: "界面做完", Knowledge: "AGENTS.md：新规则"},
 	}}

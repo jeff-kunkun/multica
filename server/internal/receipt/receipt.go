@@ -130,7 +130,7 @@ func (r Receipt) Markdown() string {
 func (r Receipt) Item() string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "- [%s](mention://issue/%s) %s", r.Identifier, r.IssueID, StatusLabel(r.Status))
-	if s := Clip(r.Summary, maxChildSummary); s != "" {
+	if s := strings.TrimRight(Clip(r.Summary, maxChildSummary), "。.；; "); s != "" {
 		fmt.Fprintf(&b, "：%s", s)
 	}
 	if len(r.PRs) > 0 {
