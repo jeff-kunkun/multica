@@ -61,3 +61,39 @@ func TestClip(t *testing.T) {
 		t.Fatalf("Clip = %q", got)
 	}
 }
+
+func TestMarkdownListsChildren(t *testing.T) {
+	r := Receipt{IssueID: "p", Identifier: "DENE-1", Status: "done", Children: []Receipt{
+		{IssueID: "c1", Identifier: "DENE-2", Status: "done", Summary: "接口做完。", PRs: []PR{{Number: 5, URL: "https://x/pull/5", State: "merged"}}},
+		{IssueID: "c2", Identifier: "DENE-3", Status: "cancelled"},
+		{IssueID: "c3", Identifier: "DENE-4", Status: "done", Summary: "界面做完", Knowledge: "AGENTS.md：新规则"},
+	}}
+	md := r.Markdown()
+	for _, want := range []string{
+		"子任务回执：",
+		"- [DENE-2](mention://issue/c1) 已完成：接口做完；PR [#5](https://x/pull/5) 已合并",
+		"- [DENE-3](mention://issue/c2) 已取消",
+		"- [DENE-4](mention://issue/c3) 已完成：界面做完；沉淀 AGENTS.md：新规则",
+	} {
+		if !strings.Contains(md, want) {
+			t.Fatalf("markdown misses %q:\n%s", want, md)
+		}
+	}
+}
+
+func TestDigestCountsPastLimit(t *testing.T) {
+	children := make([]Receipt, MaxChildren+3)
+	for i := range children {
+		children[i] = Receipt{IssueID: "c", Identifier: "DENE-9", Status: "done"}
+	}
+	d := Digest(children)
+	if got := strings.Count(d, "\n- [DENE-9]"); got != MaxChildren {
+		t.Fatalf("listed %d children, want %d", got, MaxChildren)
+	}
+	if !strings.Contains(d, "另有 3 个子任务") {
+		t.Fatalf("digest misses the count:\n%s", d)
+	}
+	if Digest(nil) != "" {
+		t.Fatal("empty digest must be empty")
+	}
+}

@@ -1540,6 +1540,26 @@ export const IssueStateCardSchema = z.object({
     })
     .nullable()
     .optional(),
+  children: z
+    .array(
+      z.object({
+        issue_id: z.string(),
+        identifier: z.string().default(""),
+        title: z.string().default(""),
+        status: z.string().default(""),
+        conclusion: z.string().optional(),
+        summary: z.string().optional(),
+        knowledge: z.string().optional(),
+        pull_requests: z
+          .array(z.object({ number: z.number().default(0), url: z.string(), state: z.string().default("") }))
+          .nullable()
+          .default([])
+          .transform((v) => v ?? []),
+      }),
+    )
+    .nullable()
+    .optional()
+    .transform((v) => v ?? []),
   text: z.string().default(""),
 });
 

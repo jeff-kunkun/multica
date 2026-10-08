@@ -5,6 +5,7 @@ export type {
   StateCardBaton,
   StateCardChanges,
   StateCardCheck,
+  StateCardChildReceipt,
   StateCardDecision,
   StateCardNow,
   StateCardThread,
