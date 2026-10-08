@@ -372,6 +372,7 @@
     "remove": "移除",
     "save": "保存",
     "cancel": "取消",
+    "save_failed": "保存失败",
     "note_bound": "改成私密后，其他人将看不到这个聊天。",
     "note_unbound": "没绑项目的聊天默认就是私密。",
     "view_only": "你可以看这个聊天，但不能发言。",
