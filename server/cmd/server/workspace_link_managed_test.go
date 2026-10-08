@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/multica-ai/multica/server/internal/workspacelink"
@@ -116,12 +117,26 @@ func TestManagedLinkThroughRouter(t *testing.T) {
 	if code, body := do(token, "POST", "/api/issues/"+issueID+"/comments", map[string]any{"content": "from the viewer"}, true); code != http.StatusCreated && code != http.StatusOK {
 		t.Fatalf("comment: %d %v", code, body)
 	}
+	// A custom property: set, then cleared, on the source issue.
+	prop := scan(`INSERT INTO issue_property (workspace_id, name, type) VALUES ($1, 'Env', 'text') RETURNING id::text`, source)
+	if code, body := do(token, "PUT", "/api/issues/"+issueID+"/properties/"+prop, map[string]any{"value": "staging"}, true); code != http.StatusOK {
+		t.Fatalf("set property: %d %v", code, body)
+	}
+	if got := scan(`SELECT COALESCE(properties->>$2, '') FROM issue WHERE id = $1`, issueID, prop); got != "staging" {
+		t.Fatalf("property = %q, want staging", got)
+	}
+	if code, body := do(token, "DELETE", "/api/issues/"+issueID+"/properties/"+prop, nil, true); code != http.StatusOK && code != http.StatusNoContent {
+		t.Fatalf("clear property: %d %v", code, body)
+	}
+	if got := scan(`SELECT COALESCE(properties->>$2, '') FROM issue WHERE id = $1`, issueID, prop); got != "" {
+		t.Fatalf("property after clear = %q", got)
+	}
 	if n := scan(`SELECT count(*)::text FROM activity_log WHERE issue_id = $1 AND action = 'linked_write'
-		AND actor_id = $2 AND details->>'agent_name' = $3 AND details->>'via_slug' = $4`, issueID, originator, agentName, integrationTestWorkspaceSlug); n != "3" {
-		t.Fatalf("linked_write activity rows = %s, want 3", n)
+		AND actor_id = $2 AND details->>'agent_name' = $3 AND details->>'via_slug' = $4`, issueID, originator, agentName, integrationTestWorkspaceSlug); n != "5" {
+		t.Fatalf("linked_write activity rows = %s, want 5", n)
 	}
 
-	// Autopilot: create, pause, resume, then delete.
+	// Autopilot: create, schedule and reschedule, pause, resume, then delete.
 	code, ap := do(token, "POST", "/api/autopilots", map[string]any{
 		"title": "linked autopilot", "assignee_id": sourceAgent, "execution_mode": "create_issue",
 	}, true)
@@ -132,6 +147,19 @@ func TestManagedLinkThroughRouter(t *testing.T) {
 	if ws := scan(`SELECT workspace_id::text FROM autopilot WHERE id = $1`, apID); ws != source {
 		t.Fatalf("autopilot landed in %s", ws)
 	}
+	code, trig := do(token, "POST", "/api/autopilots/"+apID+"/triggers", map[string]any{
+		"kind": "schedule", "cron_expression": "0 9 * * *", "timezone": "UTC",
+	}, true)
+	if code != http.StatusCreated && code != http.StatusOK {
+		t.Fatalf("add trigger: %d %v", code, trig)
+	}
+	trigID, _ := trig["id"].(string)
+	if code, body := do(token, "PATCH", "/api/autopilots/"+apID+"/triggers/"+trigID, map[string]any{"cron_expression": "30 7 * * *"}, true); code != http.StatusOK {
+		t.Fatalf("reschedule: %d %v", code, body)
+	}
+	if got := scan(`SELECT cron_expression FROM autopilot_trigger WHERE id = $1`, trigID); got != "30 7 * * *" {
+		t.Fatalf("cron = %s", got)
+	}
 	for _, status := range []string{"paused", "active"} {
 		if code, body := do(token, "PATCH", "/api/autopilots/"+apID, map[string]any{"status": status}, true); code != http.StatusOK {
 			t.Fatalf("autopilot %s: %d %v", status, code, body)
@@ -140,8 +168,26 @@ func TestManagedLinkThroughRouter(t *testing.T) {
 			t.Fatalf("autopilot status = %s, want %s", got, status)
 		}
 	}
-	if n := scan(`SELECT count(*)::text FROM workspace_link_audit WHERE link_id = $1 AND action = 'managed_write' AND detail->>'autopilot_id' = $2`, link, apID); n != "2" {
-		t.Fatalf("autopilot audit rows = %s, want 2 (pause, resume; create has no id in the path)", n)
+	// Every write, the create included, is in the link audit under the
+	// autopilot's id and in the autopilot's own trail.
+	if n := scan(`SELECT count(*)::text FROM workspace_link_audit WHERE link_id = $1 AND action = 'managed_write' AND detail->>'autopilot_id' = $2`, link, apID); n != "5" {
+		t.Fatalf("autopilot audit rows = %s, want 5 (create, trigger add, reschedule, pause, resume)", n)
+	}
+	code, trail := do(token, "GET", "/api/autopilots/"+apID+"/linked-changes", nil, true)
+	if code != http.StatusOK {
+		t.Fatalf("linked changes: %d %v", code, trail)
+	}
+	changes, _ := trail["changes"].([]any)
+	var routes []string
+	for _, c := range changes {
+		c := c.(map[string]any)
+		if c["actor_id"] != originator || c["actor_name"] != "Originator" || c["via_slug"] != integrationTestWorkspaceSlug || c["agent_name"] != agentName {
+			t.Fatalf("linked change = %v, want originator via the viewer and agent", c)
+		}
+		routes = append(routes, c["route"].(string))
+	}
+	if want := "autopilot.update autopilot.update autopilot.trigger_update autopilot.trigger_add autopilot.create"; strings.Join(routes, " ") != want {
+		t.Fatalf("linked change routes = %v, want %s", routes, want)
 	}
 
 	// Not on the whitelist: members, settings, link management.

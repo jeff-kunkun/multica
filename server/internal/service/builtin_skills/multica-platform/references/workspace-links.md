@@ -52,8 +52,10 @@ multica autopilot trigger-update <id> <trigger-id> --cron "0 9 * * *" --linked <
 ```
 
 Covered: issue list/get/search/children/create/update/assign/status, comments
-(list, add), labels; autopilot list/get/create/update/delete, run now
-(`trigger`), runs and triggers. Everything else — members, settings, agents,
+(list, add), labels, custom properties (`issue property list/set/unset`);
+autopilot list/get/create/update/delete, run now (`trigger`), runs and
+triggers. `multica autopilot linked-changes <id> --linked <source-slug>` lists
+the autopilot's writes made this way (who, via which workspace, which agent). Everything else — members, settings, agents,
 MCP, the link itself, close/handoff — is refused with 403. The run executes
 nowhere new: the work stays in the source, and each change shows there as
 "<person> 经 <your workspace>·<you>". A 403 means managed is off, the link is

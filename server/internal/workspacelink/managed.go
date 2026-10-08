@@ -96,6 +96,7 @@ var managedRoutes = []managedRoute{
 	route("autopilot.delete", "DELETE", `/api/autopilots/(?P<autopilot>`+seg+`)`, true),
 	route("autopilot.run", "POST", `/api/autopilots/(?P<autopilot>`+seg+`)/trigger`, true),
 	route("autopilot.runs", "GET", `/api/autopilots/(?P<autopilot>`+seg+`)/runs`, false),
+	route("autopilot.linked_changes", "GET", `/api/autopilots/(?P<autopilot>`+seg+`)/linked-changes`, false),
 	route("autopilot.run_get", "GET", `/api/autopilots/(?P<autopilot>`+seg+`)/runs/`+seg, false),
 	route("autopilot.trigger_add", "POST", `/api/autopilots/(?P<autopilot>`+seg+`)/triggers`, true),
 	route("autopilot.trigger_update", "PATCH", `/api/autopilots/(?P<autopilot>`+seg+`)/triggers/`+seg, true),
@@ -297,7 +298,7 @@ func (s *Service) Managed(next http.Handler) http.Handler {
 		}
 		r.URL.RawQuery = q.Encode()
 
-		rec := &managedRecorder{ResponseWriter: w, status: http.StatusOK, keepBody: rt.name == "issue.create"}
+		rec := &managedRecorder{ResponseWriter: w, status: http.StatusOK, keepBody: rt.name == "issue.create" || rt.name == "autopilot.create"}
 		next.ServeHTTP(rec, r)
 		if rt.write && rec.status < 300 {
 			s.recordManagedWrite(context.WithoutCancel(r.Context()), grant, rt, params, rec.body.Bytes())
@@ -318,8 +319,8 @@ func writeManagedError(w http.ResponseWriter, err error) {
 	_ = json.NewEncoder(w).Encode(map[string]string{"error": msg})
 }
 
-// managedRecorder keeps the status, and the body of an issue create, which
-// is the only way to learn the new issue's id.
+// managedRecorder keeps the status, and the body of an issue or autopilot
+// create, which is the only way to learn the new id.
 type managedRecorder struct {
 	http.ResponseWriter
 	status   int
@@ -368,8 +369,32 @@ func (s *Service) recordManagedWrite(ctx context.Context, g ManagedGrant, rt man
 			detail["issue_id"] = util.UUIDToString(issueID)
 		}
 	}
+	var autopilotID pgtype.UUID
+	if strings.HasPrefix(rt.name, "autopilot.") {
+		autopilotID = s.managedAutopilotID(ctx, g.Source, params["autopilot"], body)
+		if autopilotID.Valid {
+			detail["autopilot_id"] = util.UUIDToString(autopilotID)
+		}
+	}
 	if err := audit(ctx, s.q, g.Link, g.Viewer.ID, g.Originator, "managed_write", detail); err != nil {
 		slog.Error("workspace link managed audit", "error", err, "route", rt.name)
+	}
+	if autopilotID.Valid {
+		if err := s.q.InsertAutopilotLinkedChange(ctx, db.InsertAutopilotLinkedChangeParams{
+			WorkspaceID:      g.Source.ID,
+			AutopilotID:      autopilotID,
+			LinkID:           g.Link.ID,
+			Route:            rt.name,
+			ActorID:          g.Originator,
+			ViaWorkspaceID:   g.Viewer.ID,
+			ViaWorkspaceName: g.Viewer.Name,
+			ViaSlug:          g.Viewer.Slug,
+			AgentID:          g.Agent.ID,
+			AgentName:        g.Agent.Name,
+			TaskID:           g.TaskID,
+		}); err != nil {
+			slog.Error("workspace link managed autopilot change", "error", err, "route", rt.name)
+		}
 	}
 	if !issueID.Valid {
 		return
@@ -394,6 +419,30 @@ func (s *Service) recordManagedWrite(ctx context.Context, g ManagedGrant, rt man
 	}); err != nil {
 		slog.Error("workspace link managed activity", "error", err, "route", rt.name)
 	}
+}
+
+// managedAutopilotID resolves the autopilot a managed write touched: the
+// path's id, or the id in an autopilot create's response. A deleted
+// autopilot resolves to nothing; its trail is the link audit row.
+func (s *Service) managedAutopilotID(ctx context.Context, source db.Workspace, ref string, body []byte) pgtype.UUID {
+	if ref == "" {
+		var created struct {
+			ID string `json:"id"`
+		}
+		if json.Unmarshal(body, &created) != nil {
+			return pgtype.UUID{}
+		}
+		ref = created.ID
+	}
+	id, err := util.ParseUUID(ref)
+	if err != nil {
+		return pgtype.UUID{}
+	}
+	ap, err := s.q.GetAutopilotInWorkspace(ctx, db.GetAutopilotInWorkspaceParams{ID: id, WorkspaceID: source.ID})
+	if err != nil {
+		return pgtype.UUID{}
+	}
+	return ap.ID
 }
 
 // managedIssueID resolves the issue a managed write touched: the path's id
