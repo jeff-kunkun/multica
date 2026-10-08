@@ -81,6 +81,7 @@
   },
   "activity": {
     "created": "created the issue",
+    "linked_write": "acted on this issue via {{workspace}} · {{agent}}",
     "status_changed": "changed status: {{from}} → {{to}}",
     "priority_changed": "changed priority: {{from}} → {{to}}",
     "self_assigned": "self-assigned",

@@ -342,6 +342,11 @@ func newAPIClient(cmd *cobra.Command) (*cli.APIClient, error) {
 		client.TaskID = taskID
 	}
 	client.LocalCopyURL = localCopyURL(token)
+	if linked, _ := cmd.Flags().GetString(linkedFlag); strings.TrimSpace(linked) != "" {
+		if err := useLinkedWorkspace(client, strings.TrimSpace(linked)); err != nil {
+			return nil, err
+		}
+	}
 	return client, nil
 }
 

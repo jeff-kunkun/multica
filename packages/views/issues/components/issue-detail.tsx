@@ -378,6 +378,13 @@ function formatActivity(
         from: statusLabel(details.from ?? "?", t, resolveStatusLabel),
         to: statusLabel(details.to ?? "?", t, resolveStatusLabel),
       });
+    case "linked_write":
+      // A managed workspace link (DENE-1663): the actor is the person whose
+      // run did it; the line names the workspace and agent it came through.
+      return t(($) => $.activity.linked_write, {
+        workspace: details.via_workspace ?? "?",
+        agent: details.agent_name ?? "?",
+      });
     case "pr_auto_complete_changed":
       return (entry.details as { disabled?: unknown } | undefined)?.disabled === true
         ? t(($) => $.activity.pr_auto_complete_disabled)
