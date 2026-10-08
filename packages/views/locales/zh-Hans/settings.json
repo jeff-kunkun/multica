@@ -1940,8 +1940,6 @@
     "load_label": "负载分流",
     "load_description_on": "已生效：在判出的同档、同方向席位里，派给手上活更少的那个，但不会越过用量标签：标「紧张」的席位不会因为空闲就抢走「常规」「充足」席位的活；大家一样忙就按原来的顺序。和「接着做」都开时，「接着做」优先。",
     "load_description_shadow": "影子运行：不改实际选择，只在路由评论里写「按新规则会选谁、谁正在跑几个活」。打开后才真的生效。",
-    "judged_review_label": "按判断配验收",
-    "judged_review_description": "由路由模型判断要不要验收：有把握要验收才配验收席，否则执行人自验后合并关单。",
     "gateway_endpoint_workspace": "模型 id 发往本工作区自己的端点：{{host}}。",
     "gateway_endpoint_deployment": "模型 id 发往部署共用的 LLM 端点：{{host}}。",
     "gateway_unset": "还没有可用的端点，请在下面填写端点和 Key。",
@@ -2018,10 +2016,10 @@
     "seats_work_off": "已关闭接活，路由不会派给它",
     "seats_runtime_unknown": "未知运行时",
     "judge_title": "判断模型",
-    "judge_description": "只管选档（弱 / 中 / 强 / 最强）并给出概率。分析模型开着时，它只看整理好的事实。",
+    "judge_description": "看分析模型的答案，觉得规则表定低了可以抬一档并写理由，不能降档。",
     "judge_enabled_label": "启用判断模型",
     "analysis_title": "分析模型",
-    "analysis_description": "读完整张票，整理成几条事实：改动范围、需求是否清楚、出错代价、是否要人拍板。票停下时写一句卡在哪了。",
+    "analysis_description": "读完整张票，答四道选择题：改动范围、需求是否清楚、出错代价、是否要人拍板。票停下时写一句卡在哪了。",
     "analysis_enabled_label": "启用分析模型",
     "analysis_source_label": "来源",
     "analysis_source_description": "选择 API 网关或运行时订阅模型。",
@@ -2035,10 +2033,16 @@
     "analysis_key_label": "分析模型 API Key",
     "modes": {
       "none": "两个都没开：不调用模型，每张票走兜底档。",
-      "analysis": "只开分析：分析模型直接选档，阈值卡它自报的置信度。",
-      "analysis_judge": "两个都开：分析模型整理事实，判断模型据此选档。",
-      "judge": "只开判断：判断模型读票选档。"
-    }
+      "analysis": "只开分析：分析模型答选择题，规则表定档。",
+      "analysis_judge": "两个都开：规则表定档，判断模型最多再抬一档，不能降档。",
+      "judge": "只开判断：没人答题，按规则表「答不出」那行定档，判断模型最多再抬一档。"
+    },
+    "rules_title": "定档规则",
+    "rules_description": "分析模型答题后，从上往下第一条对上的规则定档。",
+    "rules_any_unknown": "任一题答不出",
+    "rules_catch_all": "以上都没对上",
+    "rules_review": "{{tier}}，要验收",
+    "rules_no_review": "{{tier}}，不验收"
   },
   "project_sharing": {
     "title": "权限与共享",

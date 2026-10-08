@@ -1250,11 +1250,6 @@ func (s routingStore) SaveAnalysis(ctx context.Context, workspaceID, issueID str
 
 func (h *Handler) writeAnalysisRecord(ctx context.Context, wsID, issueID pgtype.UUID, rec routing.AnalysisRecord) error {
 	rec.Facts.Summary = clipRunes(rec.Facts.Summary, analysisTextLimit)
-	if rec.Verdict != nil {
-		v := *rec.Verdict
-		v.Reason = clipRunes(v.Reason, analysisTextLimit)
-		rec.Verdict = &v
-	}
 	_, err := h.DB.Exec(ctx, `
 		UPDATE issue
 		SET metadata = jsonb_set(COALESCE(metadata, '{}'::jsonb), ARRAY[$3::text], to_jsonb($4::text), true)
