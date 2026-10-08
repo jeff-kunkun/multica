@@ -564,7 +564,9 @@
       "status_conflict": "Conflit, l'exécutant résout",
       "show_all_one": "Tout afficher ({{count}})",
       "show_all_other": "Tout afficher ({{count}})"
-    }
+    },
+    "from_chat": "Depuis la discussion",
+    "from_chat_hidden": "Depuis une discussion que vous ne voyez pas"
   },
   "timeline": {
     "loading": "Chargement..."
@@ -608,6 +610,7 @@
     "status_changed_pr": "a changé le statut de {{from}} à {{to}} après la fusion de toutes les PR liées ({{prs}})",
     "pr_auto_complete_disabled": "a configuré cette tâche pour garder son statut à la fusion des PR",
     "pr_auto_complete_enabled": "a de nouveau fait changer le statut de cette tâche à la fusion des PR",
+    "linked_write": "a agi sur cette tâche via {{workspace}} · {{agent}}",
     "wakeup_created": "a ajouté un réveil : {{condition}} · réveiller {{agent}}",
     "wakeup_triggered": "{{condition}} · {{agent}} réveillé",
     "wakeup_triggered_merged": "{{condition}} · ajouté à l’exécution en attente de {{agent}}",

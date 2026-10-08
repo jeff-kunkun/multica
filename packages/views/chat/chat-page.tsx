@@ -775,7 +775,7 @@ export function ChatPage() {
           dismissing={dismissProjectNudge.isPending}
         />
       )}
-      {c.currentSession && <div className="flex shrink-0 px-3 py-1"><WorkThreadPanel kind="chat" id={c.currentSession.id} /></div>}
+      {c.currentSession && <WorkThreadPanel kind="chat" id={c.currentSession.id} className="mx-3 my-1 self-start" />}
       {c.showSkeleton ? (
         <ChatMessageSkeleton />
       ) : c.hasMessages ? (
@@ -790,6 +790,7 @@ export function ChatPage() {
           onLoadOlderMessages={() => void c.fetchOlderMessages()}
           onQuickAction={(action) => c.handleSend(action.prompt)}
           creatorId={c.currentSession?.creator_id}
+          sessionId={c.activeSessionId ?? undefined}
           quickActionsDisabled={
             !!c.pendingTaskId ||
             c.isSessionArchived ||

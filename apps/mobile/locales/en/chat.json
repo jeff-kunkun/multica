@@ -185,5 +185,16 @@
     "fallback": "Queued message",
     "action_failed_toast": "Couldn't update the queued message",
     "steering": "Steering"
+  },
+  "tickets": {
+    "heading_one": "Opened {{count}} issue",
+    "heading_other": "Opened {{count}} issues",
+    "to": "to {{name}}",
+    "routing": "routing picks the executor",
+    "actions": "Actions for {{id}}",
+    "assign_me": "Give to me",
+    "assign_agent": "Give to an agent",
+    "withdraw": "Withdraw",
+    "failed": "Couldn't update {{id}}"
   }
 }

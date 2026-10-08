@@ -617,7 +617,9 @@
       "status_merged_other": "커밋 {{count}}개 병합됨",
       "status_conflict": "충돌, 실행자가 해결",
       "show_all_other": "{{count}}개 모두 보기"
-    }
+    },
+    "from_chat": "채팅에서",
+    "from_chat_hidden": "볼 수 없는 채팅에서"
   },
   "timeline": {
     "loading": "불러오는 중..."
@@ -657,6 +659,7 @@
     "status_changed_pr": "연결된 PR이 모두 병합되어({{prs}}) 상태를 {{from}}에서 {{to}}로 변경했습니다",
     "pr_auto_complete_disabled": "이 태스크가 PR 병합 시 상태를 유지하도록 설정했습니다",
     "pr_auto_complete_enabled": "이 태스크의 PR 병합 후 상태 변경을 다시 켰습니다",
+    "linked_write": "{{workspace}}·{{agent}} 를 통해 작업했습니다",
     "wakeup_created": "깨우기를 추가했습니다: {{condition}} · {{agent}} 깨우기",
     "wakeup_triggered": "{{condition}} · {{agent}}을(를) 깨웠습니다",
     "wakeup_triggered_merged": "{{condition}} · {{agent}}의 대기 중인 실행에 합쳤습니다",

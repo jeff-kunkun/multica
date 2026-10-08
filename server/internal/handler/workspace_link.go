@@ -187,6 +187,8 @@ func (h *Handler) CreateWorkspaceLink(w http.ResponseWriter, r *http.Request) {
 type updateWorkspaceLinkRequest struct {
 	ProjectIDs *[]string `json:"project_ids"`
 	Accept     bool      `json:"accept"`
+	// Managed switches managed access (DENE-1663).
+	Managed *bool `json:"managed"`
 }
 
 // UpdateWorkspaceLink — PATCH /api/workspace-links/{id}
@@ -204,7 +206,7 @@ func (h *Handler) UpdateWorkspaceLink(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
-	patch := workspacelink.Patch{Accept: req.Accept}
+	patch := workspacelink.Patch{Accept: req.Accept, Managed: req.Managed}
 	if req.ProjectIDs != nil {
 		projects, ok := parseProjectUUIDs(w, *req.ProjectIDs)
 		if !ok {

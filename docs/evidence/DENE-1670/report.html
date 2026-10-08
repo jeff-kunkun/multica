@@ -45,7 +45,7 @@
   <tr><td>查询</td><td><code>multica project memory status &lt;项目&gt;</code></td>
       <td class="ok">recent_sediments 返回上面 5 条（3 条聊天、2 条收口），来源标题、文件、核对状态都对</td></tr>
 </table>
-<p>全部命令与输出：<a href="chain.log">chain.log</a>，脚本在 <code>scripts/</code>（token 已抹掉）。PR 路径（<code>--pr</code>）要真 GitHub PR，本票没跑，靠 718ab9be6a 的单测。</p>
+<p>复现脚本在 <code>scripts/</code>，执行结果见上表；原始 chain.log 未随交付保存。PR 路径（<code>--pr</code>）要真 GitHub PR，本票没跑，靠 718ab9be6a 的单测。</p>
 
 <h2>页面</h2>
 <p>项目记忆卡片在项目详情的右侧栏；375 / 390 / 768 时右侧栏是抽屉，点右上角面板按钮打开。每档都核对过：五条沉淀都在、SED-4 显示「未核对」、文件不截断、<code>scrollWidth == innerWidth</code>（不横向溢出）、抽屉按 Esc 和点遮罩都能关。逐项数据见 <a href="page-checks.json">page-checks.json</a>。</p>

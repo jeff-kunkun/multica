@@ -416,5 +416,19 @@
     "reason_runtime_changed": "last session is on another machine",
     "reason_session_lost": "previous session could not be restored",
     "reason_fresh_requested": "fresh session requested"
+  },
+  "tickets": {
+    "heading_one": "Opened {{count}} issue",
+    "heading_other": "Opened {{count}} issues",
+    "to": "to {{name}}",
+    "routing": "routing picks the executor",
+    "actions": "Actions for {{id}}",
+    "assign_me": "Give to me",
+    "assign_agent": "Give to an agent",
+    "withdraw": "Withdraw",
+    "assigned_me": "{{id}} is yours",
+    "assigned_agent": "{{id}} is back with routing",
+    "withdrawn": "Withdrew {{id}}",
+    "failed": "Couldn't update {{id}}"
   }
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"fmt"
+	"github.com/multica-ai/multica/server/internal/workspacelink"
 	"log/slog"
 	"net/http"
 	"net/netip"
@@ -1742,6 +1743,11 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	r.Group(func(r chi.Router) {
 		r.Use(middleware.Auth(queries, patCache, cloudPATVerifier, cfSigner))
 		r.Use(middleware.RefreshCloudFrontCookies(cfSigner))
+		// The one way a task token reaches another workspace (DENE-1663): a
+		// managed link carries the run's originator into the source on a
+		// whitelist of issue/autopilot routes. Before the guest interceptor
+		// so it, and every gate after it, judges the originator there.
+		r.Use(workspacelink.New(queries, pool).Managed)
 		// Guests are the read-only tier (DENE-695). One interceptor in
 		// front of every authenticated route, rather than a check
 		// repeated in each of the ~250 write handlers below — the rule
@@ -2514,6 +2520,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Post("/trigger", h.TriggerAutopilot)
 					r.Get("/runs", h.ListAutopilotRuns)
 					r.Get("/runs/{runId}", h.GetAutopilotRun)
+					r.Get("/linked-changes", h.ListAutopilotLinkedChanges)
 					r.Get("/deliveries", h.ListAutopilotDeliveries)
 					r.Get("/deliveries/{deliveryId}", h.GetAutopilotDelivery)
 					r.Post("/deliveries/{deliveryId}/replay", h.ReplayAutopilotDelivery)
@@ -2812,6 +2819,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Route("/{sessionId}", func(r chi.Router) {
 					r.Get("/", h.GetChatSession)
 					r.Post("/to-goal", h.ConvertChatSessionToGoal)
+					r.Get("/tickets", h.ListChatSessionTickets)
 					r.Get("/access", h.GetChatSessionAccess)
 					r.Put("/access", h.PutChatSessionAccess)
 					r.Get("/work-thread", h.GetChatWorkThread)
