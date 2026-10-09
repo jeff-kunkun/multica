@@ -335,6 +335,9 @@ func TestChatTickets_FollowAndPin(t *testing.T) {
 		_ = json.NewDecoder(w.Body).Decode(&resp)
 		out := map[string]string{}
 		for _, tk := range resp.Tickets {
+			if tk.LinkedAt == "" {
+				t.Fatalf("ticket %s has no linked_at", tk.Identifier)
+			}
 			out[tk.ID] = tk.Source
 		}
 		return out

@@ -38,7 +38,7 @@ const (
 // ChatTicket is one issue a chat opened or follows. Goal is the first line of
 // the description's 目标 section: the "why" shown on the chat's ticket card.
 type ChatTicket struct {
-	ID           string  `json:"id"`
+	ID string `json:"id"`
 	// Source is created, auto or manual (chatTicketSource*).
 	Source       string  `json:"source"`
 	Identifier   string  `json:"identifier"`
@@ -57,6 +57,9 @@ type ChatTicket struct {
 	Knowledge    string       `json:"knowledge,omitempty"`
 	CreatedAt    string       `json:"created_at"`
 	UpdatedAt    string       `json:"updated_at"`
+	// LinkedAt is when the issue joined this chat: created_at for one it
+	// opened, the follow or pin time otherwise.
+	LinkedAt string `json:"linked_at"`
 	// The chat's progress bar (DENE-1667): the latest status move (FromStatus
 	// empty and ChangedAt the creation time when it never moved) and the
 	// caller's bucket, as the project report computes it.
@@ -187,10 +190,10 @@ func (h *Handler) ListChatSessionTickets(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	issues := make([]db.Issue, 0, len(rows))
-	sources := make(map[string]string, len(rows))
+	links := make(map[string]db.ListChatSessionTicketIssuesRow, len(rows))
 	for _, row := range rows {
 		issues = append(issues, row.Issue)
-		sources[uuidToString(row.Issue.ID)] = row.Source
+		links[uuidToString(row.Issue.ID)] = row
 	}
 	viewer, err := h.visibilityViewerFor(r, session.WorkspaceID)
 	if err != nil {
@@ -211,7 +214,7 @@ func (h *Handler) ListChatSessionTickets(w http.ResponseWriter, r *http.Request)
 		}
 		resp := issueToResponse(issue, prefix)
 		ticket := ChatTicket{
-			ID: resp.ID, Source: sources[resp.ID], Identifier: resp.Identifier, Title: resp.Title,
+			ID: resp.ID, Source: links[resp.ID].Source, LinkedAt: timestampToString(links[resp.ID].LinkedAt), Identifier: resp.Identifier, Title: resp.Title,
 			Status: resp.Status, Priority: resp.Priority,
 			AssigneeType: resp.AssigneeType, AssigneeID: resp.AssigneeID,
 			Goal:      chatTicketGoal(issue.Description.String),
