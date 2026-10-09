@@ -1137,6 +1137,24 @@ type IssueChildEvent struct {
 	ProcessedAt  pgtype.Timestamptz `json:"processed_at"`
 }
 
+type IssueConsult struct {
+	ID              pgtype.UUID        `json:"id"`
+	WorkspaceID     pgtype.UUID        `json:"workspace_id"`
+	IssueID         pgtype.UUID        `json:"issue_id"`
+	AskerAgentID    pgtype.UUID        `json:"asker_agent_id"`
+	AskerTaskID     pgtype.UUID        `json:"asker_task_id"`
+	AdvisorAgentID  pgtype.UUID        `json:"advisor_agent_id"`
+	AdvisorTaskID   pgtype.UUID        `json:"advisor_task_id"`
+	Question        string             `json:"question"`
+	Status          string             `json:"status"`
+	Answer          pgtype.Text        `json:"answer"`
+	FailureReason   pgtype.Text        `json:"failure_reason"`
+	TokensUsed      int64              `json:"tokens_used"`
+	DurationSeconds int64              `json:"duration_seconds"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	FinishedAt      pgtype.Timestamptz `json:"finished_at"`
+}
+
 type IssueDecision struct {
 	ID          pgtype.UUID        `json:"id"`
 	WorkspaceID pgtype.UUID        `json:"workspace_id"`
