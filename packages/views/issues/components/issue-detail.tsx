@@ -44,6 +44,7 @@ import {
 } from "lucide-react";
 import { BreadcrumbBackButton, BreadcrumbHeader, type BreadcrumbSegment } from "../../layout/breadcrumb-header";
 import { OverflowActions, type OverflowItem } from "../../layout/overflow-actions";
+import { useIsPhone } from "../../layout/use-is-phone";
 import { ResourceNotFound, WriteAction, useGuestReadOnly } from "../../layout/guest-readonly";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { Button } from "@multica/ui/components/ui/button";
@@ -1387,6 +1388,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   });
   const sidebarRef = usePanelRef();
   const isMobile = useIsMobile();
+  const isPhone = useIsPhone();
   // The properties panel folds into a drawer below the same breakpoint the
   // app nav does: on a portrait tablet a 320px panel beside the content
   // leaves the description under 500px of reading width.
@@ -3546,7 +3548,10 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
       <TooltipContent side="bottom">{t(($) => $.detail.sidebar_tooltip)}</TooltipContent>
     </Tooltip>
   );
-  const backFallback = breadcrumbSegments.at(-1)?.href;
+  // On a phone the header always offers a way back. It steps back through
+  // history (Chat → issue → Chat), and only a cold open falls back — to the
+  // issue list, the phone's home for issues, not the issue's container.
+  const backFallback = isPhone ? paths.issues() : breadcrumbSegments.at(-1)?.href;
 
   const breadcrumbLeaf = (
     <AppLink
