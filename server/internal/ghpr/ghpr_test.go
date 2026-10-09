@@ -78,8 +78,8 @@ func TestApplyApproval(t *testing.T) {
 	if pr.ApprovedBy == nil || *pr.ApprovedBy != "" {
 		t.Fatalf("no approval = %v, want read and empty", pr.ApprovedBy)
 	}
-	applyApproval(&pr, json.RawMessage(`[{"author":{"login":"a"},"state":"COMMENTED"},{"author":{"login":"b"},"state":"APPROVED","submittedAt":"2026-10-09T01:02:03Z"}]`))
-	if pr.ApprovedBy == nil || *pr.ApprovedBy != "b" || pr.ApprovedAt == nil {
-		t.Fatalf("approval = %v %v, want b with time", pr.ApprovedBy, pr.ApprovedAt)
+	applyApproval(&pr, json.RawMessage(`[{"author":{"login":"a"},"state":"COMMENTED"},{"author":{"login":"b"},"state":"APPROVED","submittedAt":"2026-10-09T01:02:03Z","commit":{"oid":"abc1234def"}}]`))
+	if pr.ApprovedBy == nil || *pr.ApprovedBy != "b" || pr.ApprovedAt == nil || pr.ApprovedHead != "abc1234def" {
+		t.Fatalf("approval = %v %v %q, want b with time and head", pr.ApprovedBy, pr.ApprovedAt, pr.ApprovedHead)
 	}
 }

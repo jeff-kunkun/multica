@@ -206,7 +206,7 @@ SELECT
     pr.api_mergeable, pr.api_merge_state_status, pr.checks_rollup_state,
     pr.snapshot_head_sha, pr.snapshot_fetched_at,
     pr.created_at, pr.updated_at, pr.source,
-    pr.approved_by, pr.approved_at,
+    pr.approved_by, pr.approved_at, pr.approved_head_sha,
     COALESCE(ipr.linked_by_type, 'system')::text AS linked_by_type,
     COALESCE(c.total, 0)::bigint   AS checks_total,
     COALESCE(c.passed, 0)::bigint  AS checks_passed,
@@ -318,21 +318,24 @@ ORDER BY pr_updated_at DESC
 LIMIT 1;
 
 -- name: SetGitHubPullRequestApproval :exec
--- DENE-1678: the approval GitHub reports for a PR, by row. A NULL approver
--- clears it (the report read the reviews and found no approval).
+-- DENE-1678: the approval GitHub reports for a PR, by row, with the head
+-- commit it approved. A NULL approver clears it (the report read the reviews
+-- and found no approval).
 UPDATE github_pull_request
 SET approved_by = sqlc.narg('approved_by'),
     approved_at = sqlc.narg('approved_at'),
+    approved_head_sha = sqlc.narg('approved_head_sha'),
     updated_at = now()
 WHERE id = $1;
 
 -- name: SetGitHubPullRequestApprovalByNumber :exec
 -- DENE-1678: the pull_request_review webhook's write, one bound workspace at
--- a time. An approval sets the approver; a dismissed approval by the same
--- reviewer clears it.
+-- a time. An approval sets the approver and the head it approved; a
+-- dismissed approval by the same reviewer clears it.
 UPDATE github_pull_request
 SET approved_by = sqlc.narg('approved_by'),
     approved_at = sqlc.narg('approved_at'),
+    approved_head_sha = sqlc.narg('approved_head_sha'),
     updated_at = now()
 WHERE workspace_id = $1
   AND lower(repo_owner) = lower(sqlc.arg('repo_owner'))

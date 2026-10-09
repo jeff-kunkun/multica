@@ -44,6 +44,9 @@ type DaemonPullRequest struct {
 	// Approval from the caller's gh (DENE-1678). Nil means not read.
 	ApprovedBy *string    `json:"approved_by,omitempty"`
 	ApprovedAt *time.Time `json:"approved_at,omitempty"`
+	// ApprovedHead is the commit the approval was given on; an approval of
+	// another commit never counts toward a review skip.
+	ApprovedHead string `json:"approved_head_sha,omitempty"`
 }
 
 func (h *Handler) ReportDaemonPullRequests(w http.ResponseWriter, r *http.Request) {
@@ -138,6 +141,7 @@ func (h *Handler) persistReportedPullRequests(ctx context.Context, ws pgtype.UUI
 					at = *p.ApprovedAt
 				}
 				approval.ApprovedAt = pgtype.Timestamptz{Time: at, Valid: true}
+				approval.ApprovedHeadSha = pgtype.Text{String: p.ApprovedHead, Valid: p.ApprovedHead != ""}
 			}
 			if err := qtx.SetGitHubPullRequestApproval(ctx, approval); err != nil {
 				_ = tx.Rollback(ctx)

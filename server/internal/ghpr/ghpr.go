@@ -41,6 +41,8 @@ type PR struct {
 	// means the report did not read reviews; "" means it did and found none.
 	ApprovedBy *string    `json:"approved_by,omitempty"`
 	ApprovedAt *time.Time `json:"approved_at,omitempty"`
+	// ApprovedHead is the commit that approval was given on.
+	ApprovedHead string `json:"approved_head_sha,omitempty"`
 }
 
 // ReadyToMerge reports whether the gh snapshot is one the close gate would
@@ -83,6 +85,9 @@ type ghReview struct {
 	} `json:"author"`
 	State       string     `json:"state"`
 	SubmittedAt *time.Time `json:"submittedAt"`
+	Commit      struct {
+		Oid string `json:"oid"`
+	} `json:"commit"`
 }
 
 // ghJSONFields is what `gh pr list --json` returns for the close gate.
@@ -150,6 +155,7 @@ func applyApproval(pr *PR, raw json.RawMessage) {
 		if strings.EqualFold(r.State, "approved") && r.Author.Login != "" {
 			by = r.Author.Login
 			pr.ApprovedAt = r.SubmittedAt
+			pr.ApprovedHead = r.Commit.Oid
 			break
 		}
 	}

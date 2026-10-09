@@ -1593,6 +1593,39 @@ func (q *Queries) ListReconcilableCommentsForIssueSince(ctx context.Context, arg
 	return items, nil
 }
 
+const listReviewPassHeads = `-- name: ListReviewPassHeads :many
+SELECT comment_id, pr_url, head_sha
+FROM review_pass_head
+WHERE comment_id = ANY($1::uuid[])
+`
+
+type ListReviewPassHeadsRow struct {
+	CommentID pgtype.UUID `json:"comment_id"`
+	PrUrl     string      `json:"pr_url"`
+	HeadSha   string      `json:"head_sha"`
+}
+
+// DENE-1678: the PR heads recorded for the given pass comments.
+func (q *Queries) ListReviewPassHeads(ctx context.Context, commentIds []pgtype.UUID) ([]ListReviewPassHeadsRow, error) {
+	rows, err := q.db.Query(ctx, listReviewPassHeads, commentIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListReviewPassHeadsRow{}
+	for rows.Next() {
+		var i ListReviewPassHeadsRow
+		if err := rows.Scan(&i.CommentID, &i.PrUrl, &i.HeadSha); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listRootCommentsForIssue = `-- name: ListRootCommentsForIssue :many
 WITH RECURSIVE selected_roots AS (
     SELECT c.id, c.created_at
@@ -2167,6 +2200,34 @@ func (q *Queries) LockLiveComment(ctx context.Context, arg LockLiveCommentParams
 		&i.SuppressedAgentIds,
 	)
 	return i, err
+}
+
+const recordReviewPassHeads = `-- name: RecordReviewPassHeads :exec
+INSERT INTO review_pass_head (comment_id, pr_url, head_sha)
+SELECT $1::uuid, pr.html_url, pr.head_sha
+FROM github_pull_request pr
+JOIN issue_pull_request ipr ON ipr.pull_request_id = pr.id
+WHERE ipr.issue_id = $2 AND pr.head_sha <> ''
+UNION
+SELECT $1::uuid, pr.html_url, pr.head_sha
+FROM vcs_pull_request pr
+JOIN issue_vcs_pull_request ipr ON ipr.pull_request_id = pr.id
+WHERE ipr.issue_id = $2 AND pr.head_sha <> ''
+ON CONFLICT (comment_id, pr_url) DO NOTHING
+`
+
+type RecordReviewPassHeadsParams struct {
+	CommentID pgtype.UUID `json:"comment_id"`
+	IssueID   pgtype.UUID `json:"issue_id"`
+}
+
+// DENE-1678: when a `verdict: pass` comment lands, keep the head of every PR
+// linked to its issue, GitHub and self-hosted alike: the version the pass
+// reviewed. A PR with no known head is left out, so a pass never vouches for
+// it.
+func (q *Queries) RecordReviewPassHeads(ctx context.Context, arg RecordReviewPassHeadsParams) error {
+	_, err := q.db.Exec(ctx, recordReviewPassHeads, arg.CommentID, arg.IssueID)
+	return err
 }
 
 const resolveComment = `-- name: ResolveComment :one

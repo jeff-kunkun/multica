@@ -1300,6 +1300,7 @@ type ghPullRequestReviewPayload struct {
 	Review struct {
 		State       string `json:"state"`
 		SubmittedAt string `json:"submitted_at"`
+		CommitID    string `json:"commit_id"`
 		User        struct {
 			Login string `json:"login"`
 		} `json:"user"`
@@ -1339,6 +1340,7 @@ func (h *Handler) handlePullRequestReviewEvent(ctx context.Context, body []byte)
 	case p.Action == "submitted" && strings.EqualFold(p.Review.State, "approved"):
 		params.ApprovedBy = pgtype.Text{String: p.Review.User.Login, Valid: true}
 		params.ApprovedAt = parseGHTimeOrNow(p.Review.SubmittedAt)
+		params.ApprovedHeadSha = pgtype.Text{String: p.Review.CommitID, Valid: p.Review.CommitID != ""}
 	case p.Action == "dismissed":
 		params.DismissedBy = p.Review.User.Login
 	default:

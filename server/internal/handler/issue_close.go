@@ -365,6 +365,9 @@ func (h *Handler) CloseIssue(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return err
 		}
+		if err := service.RecordReviewPass(ctx, qtx, created.Comment()); err != nil {
+			return err
+		}
 		updated = issue
 		if tr.setReviewer {
 			updated, err = qtx.SetIssueReviewerIfUnset(ctx, db.SetIssueReviewerIfUnsetParams{

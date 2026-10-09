@@ -1006,6 +1006,7 @@ type GithubPullRequest struct {
 	Source              string             `json:"source"`
 	ApprovedBy          pgtype.Text        `json:"approved_by"`
 	ApprovedAt          pgtype.Timestamptz `json:"approved_at"`
+	ApprovedHeadSha     pgtype.Text        `json:"approved_head_sha"`
 }
 
 type GithubPullRequestCheckRun struct {
@@ -1869,6 +1870,13 @@ type ResourceShare struct {
 	AddedBy      pgtype.UUID        `json:"added_by"`
 	CreatedAt    pgtype.Timestamptz `json:"created_at"`
 	Access       string             `json:"access"`
+}
+
+type ReviewPassHead struct {
+	CommentID pgtype.UUID        `json:"comment_id"`
+	PrUrl     string             `json:"pr_url"`
+	HeadSha   string             `json:"head_sha"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
 }
 
 type RuntimeProfile struct {
