@@ -53,7 +53,9 @@ export function MobileTabBar() {
       </WriteAction>
       <TabLink href={p.inbox()} pathname={pathname} label={t(($) => $.nav.inbox)} badge={inboxUnread} />
       <button type="button" className={ITEM_CLASS} onClick={() => setOpenMobile(true)}>
-        <Menu className="size-5" aria-hidden="true" />
+        <span className="flex h-7 items-center">
+          <Menu className="size-5" aria-hidden="true" />
+        </span>
         {t(($) => $.tab_bar.more)}
       </button>
     </nav>
@@ -79,7 +81,7 @@ function TabLink({
       aria-current={active ? "page" : undefined}
       className={cn(ITEM_CLASS, active && "text-foreground")}
     >
-      <span className="relative">
+      <span className="relative flex h-7 items-center">
         <Icon className="size-5" aria-hidden="true" />
         {badge > 0 ? <Badge>{badge > 99 ? "99+" : badge}</Badge> : null}
       </span>
@@ -90,7 +92,7 @@ function TabLink({
 
 function Badge({ children }: { children: ReactNode }) {
   return (
-    <span className="absolute -right-2.5 -top-1.5 min-w-4 rounded-full bg-primary px-1 text-center text-[10px] font-medium leading-4 text-primary-foreground tabular-nums">
+    <span className="absolute -right-2.5 top-0 min-w-4 rounded-full bg-primary px-1 text-center text-[10px] font-medium leading-4 text-primary-foreground tabular-nums">
       {children}
     </span>
   );
