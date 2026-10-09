@@ -12,6 +12,7 @@ import {
 const links = vi.hoisted(() => ({
   data: undefined as unknown,
   accept: vi.fn(),
+  decline: vi.fn(),
 }));
 
 vi.mock("@tanstack/react-query", () => ({
@@ -21,6 +22,7 @@ vi.mock("@tanstack/react-query", () => ({
 vi.mock("@multica/core/workspace-links", () => ({
   workspaceLinksOptions: (wsId: string) => ({ queryKey: ["links", wsId] }),
   useAcceptWorkspaceLink: () => ({ mutate: links.accept, isPending: false }),
+  useRevokeWorkspaceLink: () => ({ mutate: links.decline, isPending: false }),
 }));
 
 vi.mock("../../i18n", () => ({
@@ -91,7 +93,7 @@ describe("workspace link notices", () => {
     expect(screen.queryByRole("link")).toBeNull();
   });
 
-  it("accepts a still-pending offer in place when the reader may accept", () => {
+  it("answers a still-pending offer in place when the reader may accept", () => {
     links.data = {
       can: { accept: true },
       links: [{ id: "link-1", status: "pending" }],
@@ -99,6 +101,8 @@ describe("workspace link notices", () => {
     render(<WorkspaceLinkNotice item={item()} />);
     screen.getByRole("button", { name: "Accept" }).click();
     expect(links.accept).toHaveBeenCalledWith("link-1", expect.anything());
+    screen.getByRole("button", { name: "Decline" }).click();
+    expect(links.decline).toHaveBeenCalledWith("link-1", expect.anything());
 
     links.data = { can: { accept: false }, links: [{ id: "link-1", status: "pending" }] };
     render(<WorkspaceLinkNotice item={item({ id: "inbox-2" })} />);

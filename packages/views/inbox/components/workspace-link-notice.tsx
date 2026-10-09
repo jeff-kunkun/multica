@@ -3,7 +3,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { paths } from "@multica/core/paths";
 import type { InboxItem, InboxItemType } from "@multica/core/types";
-import { useAcceptWorkspaceLink, workspaceLinksOptions } from "@multica/core/workspace-links";
+import { useAcceptWorkspaceLink, useRevokeWorkspaceLink, workspaceLinksOptions } from "@multica/core/workspace-links";
 import { Button, buttonVariants } from "@multica/ui/components/ui/button";
 import { toast } from "sonner";
 import { cn } from "@multica/ui/lib/utils";
@@ -11,10 +11,9 @@ import { AppLink } from "../../navigation";
 import { useT } from "../../i18n";
 
 // Workspace link requests and their receipts (DENE-1641). They carry no
-// issue: a still-pending request can be accepted right here when the reader
-// may accept (the server's `can.accept`); declining, and everything else,
-// stays in Settings → Linked workspaces. The receipt points back to the
-// offering side.
+// issue: a still-pending request can be accepted or declined right here when
+// the reader may answer (the server's `can.accept`); otherwise it points to
+// Settings → Linked workspaces. The receipt points back to the offering side.
 
 export function isWorkspaceLinkNotice(type: InboxItemType): boolean {
   return (
@@ -65,6 +64,10 @@ export function WorkspaceLinkNotice({ item }: { item: InboxItem }) {
   const wsId = request && !item.archived ? item.workspace_id : "";
   const { data } = useQuery(workspaceLinksOptions(wsId));
   const accept = useAcceptWorkspaceLink(wsId);
+  const decline = useRevokeWorkspaceLink(wsId);
+  const answering = accept.isPending || decline.isPending;
+  const onError = (error: unknown) =>
+    toast.error(error instanceof Error && error.message ? error.message : tw(($) => $.links.tab.failed));
   const pending = data?.links.find((link) => link.id === item.details?.link_id && link.status === "pending");
   const canAccept = !!pending && !!data?.can.accept;
   return (
@@ -77,18 +80,14 @@ export function WorkspaceLinkNotice({ item }: { item: InboxItem }) {
       {href && !item.archived ? (
         <div className="mt-4 flex flex-wrap gap-2">
           {canAccept ? (
-            <Button
-              size="sm"
-              disabled={accept.isPending}
-              onClick={() =>
-                accept.mutate(pending.id, {
-                  onError: (error) =>
-                    toast.error(error instanceof Error && error.message ? error.message : tw(($) => $.links.tab.failed)),
-                })
-              }
-            >
-              {tw(($) => $.links.tab.accept)}
-            </Button>
+            <>
+              <Button size="sm" disabled={answering} onClick={() => accept.mutate(pending.id, { onError })}>
+                {tw(($) => $.links.tab.accept)}
+              </Button>
+              <Button size="sm" variant="outline" disabled={answering} onClick={() => decline.mutate(pending.id, { onError })}>
+                {tw(($) => $.links.tab.decline)}
+              </Button>
+            </>
           ) : null}
           <AppLink
             href={href}
