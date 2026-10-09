@@ -512,6 +512,7 @@
     "prop_priority": "Priority",
     "prop_stage": "Stage",
     "prop_waiting_for": "Waiting for",
+    "prop_review_skip": "Review skipped",
     "prop_assignee": "Assignee",
     "prop_reviewer": "Reviewer",
     "prop_start_date": "Start date",

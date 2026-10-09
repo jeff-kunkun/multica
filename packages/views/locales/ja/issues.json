@@ -507,6 +507,7 @@
     "prop_priority": "優先度",
     "prop_stage": "ステージ",
     "prop_waiting_for": "待ち",
+    "prop_review_skip": "検収スキップ",
     "prop_assignee": "担当者",
     "prop_reviewer": "検収担当",
     "prop_start_date": "開始日",
