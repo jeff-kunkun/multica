@@ -1445,7 +1445,10 @@
       "manage_members": "멤버 초대 및 등급 변경",
       "workspace_settings": "워크스페이스 설정·연동·키",
       "billing_and_transfer": "결제·이전·삭제"
-    }
+    },
+    "projects_count_other": "프로젝트 {{count}}개",
+    "no_projects": "프로젝트 없음",
+    "projects_aria": "{{name}}님이 참여한 프로젝트"
   },
   "lark": {
     "section_title": "Lark",

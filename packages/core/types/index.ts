@@ -134,7 +134,7 @@ export type {
   SessionBreakReason,
 } from "./agent";
 export { RUNTIME_PROFILE_PROTOCOL_FAMILIES, RUNTIME_PROFILE_RUNTIME_TYPES } from "./agent";
-export type { Workspace, WorkspaceRepo, WorkspaceMcpServer, WorkspaceNaming, WorkspaceNamingOption, WorkspaceNamingSource, Member, MemberRole, User, MemberWithUser, Invitation, ShareLink, ShareLinkInfo, ModuleKey, ModuleVisibility, ModuleVisibilityList } from "./workspace";
+export type { Workspace, WorkspaceRepo, WorkspaceMcpServer, WorkspaceNaming, WorkspaceNamingOption, WorkspaceNamingSource, Member, MemberRole, User, MemberWithUser, MemberProjectRef, Invitation, ShareLink, ShareLinkInfo, ModuleKey, ModuleVisibility, ModuleVisibilityList } from "./workspace";
 export { MODULE_KEYS } from "./workspace";
 export type {
   PluginInstallation,

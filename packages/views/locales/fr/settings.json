@@ -1722,7 +1722,11 @@
       "manage_members": "inviter des membres et changer les rôles",
       "workspace_settings": "paramètres de l'espace de travail, intégrations et clés",
       "billing_and_transfer": "facturation, transfert et suppression"
-    }
+    },
+    "projects_count_one": "{{count}} projet",
+    "projects_count_other": "{{count}} projets",
+    "no_projects": "Aucun projet",
+    "projects_aria": "Projets rejoints par {{name}}"
   },
   "integrations": {
     "status_connected": "Connecté",

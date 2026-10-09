@@ -1708,7 +1708,10 @@
       "manage_members": "邀请成员与修改档位",
       "workspace_settings": "工作区设置、集成与密钥",
       "billing_and_transfer": "计费、转让与删除工作区"
-    }
+    },
+    "projects_count_other": "{{count}} 个项目",
+    "no_projects": "未加入项目",
+    "projects_aria": "{{name}} 加入的项目"
   },
   "integrations": {
     "status_connected": "已连接",

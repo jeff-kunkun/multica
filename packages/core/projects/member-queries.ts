@@ -1,6 +1,7 @@
 import { queryOptions, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api";
 import { projectKeys } from "./queries";
+import { workspaceKeys } from "../workspace/queries";
 import type { ProjectMember } from "../types";
 
 export const projectMemberKeys = {
@@ -34,6 +35,8 @@ export function useAddProjectMember(wsId: string, projectId: string) {
       qc.invalidateQueries({
         queryKey: projectMemberKeys.list(wsId, projectId),
       });
+      // The roster lists each member's projects (DENE-1706).
+      qc.invalidateQueries({ queryKey: workspaceKeys.members(wsId) });
     },
   });
 }
@@ -64,6 +67,8 @@ export function useRemoveProjectMember(wsId: string, projectId: string) {
       qc.invalidateQueries({
         queryKey: projectMemberKeys.list(wsId, projectId),
       });
+      // The roster lists each member's projects (DENE-1706).
+      qc.invalidateQueries({ queryKey: workspaceKeys.members(wsId) });
     },
   });
 }
