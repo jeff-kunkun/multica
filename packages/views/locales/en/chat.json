@@ -435,8 +435,8 @@
   "tickets": {
     "heading_one": "Opened {{count}} issue",
     "heading_other": "Opened {{count}} issues",
-    "heading_mixed_one": "{{count}} issue from this turn",
-    "heading_mixed_other": "{{count}} issues from this turn",
+    "heading_mixed_one": "{{count}} issue",
+    "heading_mixed_other": "{{count}} issues",
     "to": "to {{name}}",
     "routing": "routing picks the executor",
     "actions": "Actions for {{id}}",

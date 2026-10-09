@@ -17,8 +17,8 @@ vi.mock("@multica/core/chat/queries", () => ({
 vi.mock("@multica/core/chat/mutations", () => ({
   useSetChatTicket: () => ({ mutate: setTicket, isPending: false }),
 }));
-vi.mock("@multica/core/issue-statuses", () => ({
-  useIssueStatuses: () => ({ labelOf: (key: string) => key }),
+vi.mock("../../issues/utils/status-label", () => ({
+  useStatusLabel: () => (key: string) => key,
 }));
 vi.mock("@multica/core/paths", () => ({
   useWorkspacePaths: () => ({ issueDetail: (id: string) => `/ws/issues/${id}` }),

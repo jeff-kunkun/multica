@@ -435,8 +435,8 @@
   "tickets": {
     "heading_one": "{{count}} ticket ouvert",
     "heading_other": "{{count}} tickets ouverts",
-    "heading_mixed_one": "{{count}} ticket de ce tour",
-    "heading_mixed_other": "{{count}} tickets de ce tour",
+    "heading_mixed_one": "{{count}} ticket",
+    "heading_mixed_other": "{{count}} tickets",
     "to": "pour {{name}}",
     "routing": "le routage choisit l'exécutant",
     "actions": "Actions pour {{id}}",

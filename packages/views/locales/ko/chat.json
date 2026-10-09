@@ -427,7 +427,7 @@
   },
   "tickets": {
     "heading_other": "이슈 {{count}}개 생성",
-    "heading_mixed_other": "이번 턴의 이슈 {{count}}개",
+    "heading_mixed_other": "이슈 {{count}}개",
     "to": "담당 {{name}}",
     "routing": "라우팅이 담당자를 고릅니다",
     "actions": "{{id}} 작업",

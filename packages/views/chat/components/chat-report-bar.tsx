@@ -13,11 +13,11 @@ import { defaultStorage } from "@multica/core/platform";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { chatTicketsOptions } from "@multica/core/chat/queries";
 import { useSetChatTicket } from "@multica/core/chat/mutations";
-import { useIssueStatuses } from "@multica/core/issue-statuses";
 import type { ChatTicket } from "@multica/core/types";
 import { AppLink } from "../../navigation";
 import { useT, useTimeAgo } from "../../i18n";
 import { CHAT_COLUMN, CHAT_GUTTER } from "./chat-column";
+import { useStatusLabel } from "../../issues/utils/status-label";
 import { useChatTicketSourceLabel } from "./chat-ticket-card";
 import { ChatTicketPinDialog } from "./chat-ticket-pin-dialog";
 
@@ -245,7 +245,7 @@ function ReportPanel({
       },
     );
   const timeAgo = useTimeAgo();
-  const statuses = useIssueStatuses(wsId);
+  const statusLabel = useStatusLabel(wsId);
   const wsPaths = useWorkspacePaths();
 
   return (
@@ -253,8 +253,8 @@ function ReportPanel({
       <ul className="min-h-0 flex-1 overflow-y-auto py-1 md:max-h-80">
         {rows.map((row) => {
           const where = row.from_status
-            ? `${statuses.labelOf(row.from_status)} → ${statuses.labelOf(row.status)}`
-            : statuses.labelOf(row.status);
+            ? `${statusLabel(row.from_status)} → ${statusLabel(row.status)}`
+            : statusLabel(row.status);
           return (
             <li key={row.id} className="group/row flex items-center hover:bg-accent/60">
               <AppLink
@@ -276,7 +276,7 @@ function ReportPanel({
                 type="button"
                 variant="ghost"
                 size="icon-xs"
-                className="mr-2 shrink-0 text-muted-foreground max-sm:size-11 md:opacity-0 md:group-hover/row:opacity-100 md:focus-visible:opacity-100"
+                className="mr-2 shrink-0 text-muted-foreground max-sm:size-11 [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-hover/row:opacity-100 focus-visible:opacity-100"
                 disabled={unpin.isPending}
                 onClick={() => remove(row)}
                 aria-label={`${t(($) => $.tickets.remove)} ${row.identifier}`}

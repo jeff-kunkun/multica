@@ -427,7 +427,7 @@
   },
   "tickets": {
     "heading_other": "{{count}} 件の課題を作成",
-    "heading_mixed_other": "このターンの課題 {{count}} 件",
+    "heading_mixed_other": "課題 {{count}} 件",
     "to": "担当 {{name}}",
     "routing": "ルーティングが担当を選びます",
     "actions": "{{id}} の操作",

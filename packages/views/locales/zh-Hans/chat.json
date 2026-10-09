@@ -427,7 +427,7 @@
   },
   "tickets": {
     "heading_other": "开了 {{count}} 张单",
-    "heading_mixed_other": "本轮 {{count}} 张单",
+    "heading_mixed_other": "{{count}} 张单",
     "to": "给 {{name}}",
     "routing": "等路由派人",
     "actions": "{{id}} 的操作",
