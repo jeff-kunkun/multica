@@ -197,7 +197,13 @@ export function ChatSessionHeader({
   const doUnarchive = () => setArchived.mutate({ sessionId: session.id, archived: false });
 
   // Only the owner can hand a chat over; the server opens the new chat as them.
-  const handoffTargets = canManage ? handoffAgents.filter((a) => a.id !== session.agent_id) : [];
+  // The chat's own agent comes first: a fresh chat with the same role.
+  const handoffTargets = canManage
+    ? [
+        ...handoffAgents.filter((a) => a.id === session.agent_id),
+        ...handoffAgents.filter((a) => a.id !== session.agent_id),
+      ]
+    : [];
   const handoff = useHandoffChatSession();
   const doHandoff = (target: Agent) => {
     if (handoff.isPending) return;
