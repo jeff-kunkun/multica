@@ -188,8 +188,9 @@ the modes that work; nothing is sent.
 
 var chatHandoffCmd = &cobra.Command{
 	Use:   "handoff",
-	Short: "Hand a chat to another agent: a new chat that opens with this one's summary",
-	Long: `Hand a chat to another agent. The server opens a new chat with --to whose
+	Short: "Hand a chat to an agent: a new chat that opens with this one's summary",
+	Long: `Hand a chat to an agent (the chat's own agent too, for a fresh start). The
+server opens a new chat with --to whose
 first message summarises this one (title, opening line, latest messages, and
 how to read the full history), and starts that agent's reply. The old chat is
 left as it is. Only the chat's owner can hand it over.
