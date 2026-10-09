@@ -280,6 +280,7 @@ func init() {
 	// project resource list
 	projectResourceListCmd.Flags().String("output", "table", "Output format: table or json")
 	projectResourceListCmd.Flags().Bool("full-id", false, "Show full UUIDs in table output")
+	projectMemberListCmd.Flags().String("output", "table", "Output format: table or json")
 
 	// project resource add — generic shape: any --type with a JSON --ref
 	// payload works without further CLI changes. github_repo is supported via

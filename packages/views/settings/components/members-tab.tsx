@@ -467,13 +467,15 @@ function MemberProjectLinks({
   if (projects.length <= INLINE_PROJECT_LIMIT) {
     return (
       <div
-        className="flex min-w-0 items-center gap-1 text-caption text-muted-foreground"
+        className="flex min-w-0 flex-wrap items-center gap-x-1 text-caption text-muted-foreground"
         aria-label={t(($) => $.members.projects_aria, { name })}
       >
+        {/* Wraps rather than truncating: on a phone two titles share the
+            narrow column, and "Multic… · P…" names neither project. */}
         {projects.map((p, i) => (
-          <span key={p.id} className="flex min-w-0 items-center gap-1">
-            {i > 0 && <span aria-hidden="true">·</span>}
+          <span key={p.id} className="flex min-w-0 max-w-full items-center gap-1">
             {link(p)}
+            {i < projects.length - 1 && <span aria-hidden="true">·</span>}
           </span>
         ))}
       </div>
