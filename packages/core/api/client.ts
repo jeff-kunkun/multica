@@ -199,6 +199,7 @@ import type {
   GetAutopilotResponse,
   AutopilotCollaboratorsResponse,
   ListAutopilotRunsResponse,
+  AutopilotLinkedChange,
   ListWebhookDeliveriesResponse,
   WebhookDelivery,
   NotificationPreferenceResponse,
@@ -6297,6 +6298,11 @@ export class ApiClient {
   // Returns a single run including its full trigger_payload. List responses
   // omit trigger_payload to keep them small (a webhook envelope can be
   // up to 256 KiB × limit rows), so the detail view fetches via this route.
+  async listAutopilotLinkedChanges(id: string): Promise<AutopilotLinkedChange[]> {
+    const raw = await this.fetch<{ changes?: AutopilotLinkedChange[] }>(`/api/autopilots/${id}/linked-changes`);
+    return raw.changes ?? [];
+  }
+
   async getAutopilotRun(autopilotId: string, runId: string): Promise<AutopilotRun> {
     return this.fetch(`/api/autopilots/${autopilotId}/runs/${runId}`);
   }
@@ -6637,7 +6643,7 @@ export class ApiClient {
 
   async updateWorkspaceLink(
     linkId: string,
-    body: { project_ids: string[] } | { accept: true },
+    body: { project_ids: string[] } | { accept: true } | { managed: boolean },
   ): Promise<WorkspaceLink> {
     return this.fetch(`/api/workspace-links/${encodeURIComponent(linkId)}`, {
       method: "PATCH",

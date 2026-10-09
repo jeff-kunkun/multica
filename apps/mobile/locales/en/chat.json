@@ -208,6 +208,8 @@
     "title": "Issues from this chat",
     "just_changed": "Just changed",
     "opened": "Opened · {{to}}",
-    "needs_you": "needs you"
+    "needs_you": "needs you",
+    "hear": "Hear report",
+    "hear_prompt": "Report: tell me what's new in \"{{project}}\" since I last heard"
   }
 }
