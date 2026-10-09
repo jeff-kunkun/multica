@@ -579,6 +579,7 @@ func (h *Handler) CloseIssue(w http.ResponseWriter, r *http.Request) {
 	resp.Issue = issueToResponse(updated, prefix)
 	h.fillStatusCategory(ctx, issue.WorkspaceID, &resp.Issue)
 	slog.Info("issue closed", append(logger.RequestAttrs(r), "issue_id", uuidToString(issue.ID), "outcome", outcome, "status", updated.Status)...)
+	h.followIssueFromChatTask(r, actorType, actorID, updated)
 	writeJSON(w, http.StatusOK, resp)
 }
 
