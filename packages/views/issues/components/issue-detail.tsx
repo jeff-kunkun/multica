@@ -85,6 +85,7 @@ import type { Attachment, Issue, IssueProperty, IssueStatus, IssueStatusCategory
 import { contentReferencesAttachment } from "@multica/core/types";
 import { isBuiltInIssueStatus } from "@multica/core/issue-statuses";
 import { backlogWaitingFor } from "@multica/core/issues/backlog-waiting-for";
+import { reviewSkipReason } from "@multica/core/issues/review-skip";
 import { commentLandingTarget, isDeletedComment } from "@multica/core/issues/comment-deletion";
 import { formatDateOnly, isPastDateOnly } from "@multica/core/issues/date";
 import { useUpdateIssue } from "@multica/core/issues/mutations";
@@ -2812,6 +2813,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
 
   // What a parked ticket waits for (DENE-1638); shown only while it is in backlog.
   const backlogWaitingForLine = backlogWaitingFor(issue);
+  const reviewSkip = reviewSkipReason(issue);
 
   const persistDescriptionSave = (
     draft: { markdown: string; baseMarkdown: string; attachmentIds: string[] },
@@ -2905,6 +2907,13 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
           {(issue.parent_issue_id == null || issue.reviewer_type != null) && (
             <PropRow label={t(($) => $.detail.prop_reviewer)}>
               <ReviewerPicker reviewerType={issue.reviewer_type} reviewerId={issue.reviewer_id} onUpdate={handleUpdateField} align="start" sceneProjectIds={[issue.project_id]} sceneDomainId={issue.domain_id} />
+            </PropRow>
+          )}
+          {/* DENE-1678: merged and already reviewed, so no acceptance seat ran.
+              The server writes the reason; it says which fact counted. */}
+          {reviewSkip && (
+            <PropRow label={t(($) => $.detail.prop_review_skip)} interactive={false}>
+              <span className="min-w-0 whitespace-normal break-words py-1.5" title={reviewSkip}>{reviewSkip}</span>
             </PropRow>
           )}
           <PropRow label={t(($) => $.detail.prop_project)}>

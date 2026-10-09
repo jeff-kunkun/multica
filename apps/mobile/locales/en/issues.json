@@ -128,6 +128,7 @@
     "members": "No issues assigned to a member."
   },
   "waiting_for": "Waiting for: {{reason}}",
+  "review_skip": "Review skipped: {{reason}}",
   "driver": {
     "none": "Nobody is moving this",
     "revived": "rerun {{count}}×",

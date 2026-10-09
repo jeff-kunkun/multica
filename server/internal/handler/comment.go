@@ -2032,6 +2032,11 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	comment := created.Comment()
+	// A pass keeps the PR heads it reviewed (DENE-1678). Without them the
+	// pass only stops counting toward a review skip, so a failure is logged.
+	if err := service.RecordReviewPass(r.Context(), h.Queries, comment); err != nil {
+		slog.Warn("record review pass heads failed", append(logger.RequestAttrs(r), "error", err, "comment_id", uuidToString(comment.ID))...)
+	}
 
 	// Fetch linked attachments so the response includes them.
 	groupedAtt := h.groupAttachments(r, []pgtype.UUID{comment.ID})
