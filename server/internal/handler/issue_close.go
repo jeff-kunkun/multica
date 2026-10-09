@@ -316,7 +316,17 @@ func (h *Handler) CloseIssue(w http.ResponseWriter, r *http.Request) {
 		if tr.status != "" && tr.status != statusKey {
 			statusKey = tr.status
 			outcome = tr.status
-			rec = closeRecordFromGate(statusKey, tr, canonicalAudit)
+			if tr.reviewSkip != nil {
+				// Reviewed and merged already: a delivered done, not a block.
+				rec, rejection = h.deriveCloseRecord(r, issue, req, outcome, statusKey, body, actorType)
+				if rejection != "" {
+					writeError(w, http.StatusBadRequest, rejection)
+					return
+				}
+				rec.meta[closeprotocol.KeyKnowledgeAudit] = canonicalAudit
+			} else {
+				rec = closeRecordFromGate(statusKey, tr, canonicalAudit)
+			}
 			if err := closeprotocol.Validate(closeProbe(rec.meta), statusKey, body); err != nil {
 				writeError(w, http.StatusBadRequest, closeRejection(err))
 				return

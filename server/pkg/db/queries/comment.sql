@@ -890,3 +890,16 @@ FROM comment c
 JOIN ancestor_ids path ON path.id = c.id
 ORDER BY c.id
 FOR UPDATE OF c;
+
+-- name: ListIssueVerdictComments :many
+-- DENE-1678: the newest comments on an issue that may carry an acceptance
+-- verdict line (`verdict: pass` / `verdict: hold`). The caller parses the
+-- line; the LIKE only narrows the scan.
+SELECT id, author_type, author_id, content, created_at
+FROM comment
+WHERE issue_id = $1
+  AND deleted_at IS NULL
+  AND author_type IN ('agent', 'member')
+  AND content ILIKE '%verdict:%'
+ORDER BY created_at DESC, id DESC
+LIMIT 20;

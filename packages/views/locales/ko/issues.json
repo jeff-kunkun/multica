@@ -507,6 +507,7 @@
     "prop_priority": "우선순위",
     "prop_stage": "단계",
     "prop_waiting_for": "대기 사유",
+    "prop_review_skip": "검수 생략",
     "prop_assignee": "담당자",
     "prop_reviewer": "검수자",
     "prop_start_date": "시작일",

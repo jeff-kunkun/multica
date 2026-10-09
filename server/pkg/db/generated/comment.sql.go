@@ -1280,6 +1280,54 @@ func (q *Queries) ListCommentsSinceForIssue(ctx context.Context, arg ListComment
 	return items, nil
 }
 
+const listIssueVerdictComments = `-- name: ListIssueVerdictComments :many
+SELECT id, author_type, author_id, content, created_at
+FROM comment
+WHERE issue_id = $1
+  AND deleted_at IS NULL
+  AND author_type IN ('agent', 'member')
+  AND content ILIKE '%verdict:%'
+ORDER BY created_at DESC, id DESC
+LIMIT 20
+`
+
+type ListIssueVerdictCommentsRow struct {
+	ID         pgtype.UUID        `json:"id"`
+	AuthorType string             `json:"author_type"`
+	AuthorID   pgtype.UUID        `json:"author_id"`
+	Content    string             `json:"content"`
+	CreatedAt  pgtype.Timestamptz `json:"created_at"`
+}
+
+// DENE-1678: the newest comments on an issue that may carry an acceptance
+// verdict line (`verdict: pass` / `verdict: hold`). The caller parses the
+// line; the LIKE only narrows the scan.
+func (q *Queries) ListIssueVerdictComments(ctx context.Context, issueID pgtype.UUID) ([]ListIssueVerdictCommentsRow, error) {
+	rows, err := q.db.Query(ctx, listIssueVerdictComments, issueID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListIssueVerdictCommentsRow{}
+	for rows.Next() {
+		var i ListIssueVerdictCommentsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.AuthorType,
+			&i.AuthorID,
+			&i.Content,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listRecentThreadCommentsForIssue = `-- name: ListRecentThreadCommentsForIssue :many
 WITH RECURSIVE membership(id, root_id, comment_created_at) AS (
     -- Each root maps to itself.
