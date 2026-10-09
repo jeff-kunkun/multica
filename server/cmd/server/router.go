@@ -1870,6 +1870,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					// that routing is on, so everyone should be able to see
 					// that it is currently broken. Only admins can change it.
 					r.Get("/routing/health", h.GetRoutingHealth)
+					r.Get("/routing/learning", h.GetRoutingLearning)
 				})
 				// Admin-level access
 				r.Group(func(r chi.Router) {

@@ -1367,6 +1367,19 @@ type IssueRejection struct {
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 }
 
+type IssueRoutingOutcome struct {
+	IssueID     pgtype.UUID        `json:"issue_id"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	Direction   string             `json:"direction"`
+	Tier        string             `json:"tier"`
+	Scope       string             `json:"scope"`
+	Clarity     string             `json:"clarity"`
+	Risk        string             `json:"risk"`
+	RoutedAt    pgtype.Timestamptz `json:"routed_at"`
+	EscalatedAt pgtype.Timestamptz `json:"escalated_at"`
+	HeldAt      pgtype.Timestamptz `json:"held_at"`
+}
+
 type IssueSourceContext struct {
 	ID               pgtype.UUID        `json:"id"`
 	WorkspaceID      pgtype.UUID        `json:"workspace_id"`
