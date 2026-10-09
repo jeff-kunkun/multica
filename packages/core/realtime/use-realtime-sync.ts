@@ -1300,6 +1300,7 @@ export function useRealtimeSync(
       // Chat events are handled explicitly below; do not double-invalidate.
       "chat:message", "chat:done", "chat:quick_actions", "chat:cancel_finalized", "chat:session_read",
       "chat:session_created", "chat:session_deleted", "chat:session_updated", "chat:session_invalidated",
+      "chat:tickets_changed",
       // task:message stays out of the prefix path because it fires per
       // streamed message during a long run — invalidating the snapshot on
       // every message would flood the network. Specific chat handlers below
@@ -2136,6 +2137,13 @@ export function useRealtimeSync(
       qc.invalidateQueries({ queryKey: chatKeys.pendingTask(payload.chat_session_id) });
     });
 
+    // An issue joined or left a chat's tickets (DENE-1719).
+    const unsubChatTicketsChanged = ws.on("chat:tickets_changed", (p) => {
+      const payload = p as { chat_session_id: string };
+      const id = getCurrentWsId();
+      if (id) qc.invalidateQueries({ queryKey: chatKeys.tickets(id, payload.chat_session_id) });
+    });
+
     const unsubChatSessionDeleted = ws.on("chat:session_deleted", (p) => {
       const payload = p as { chat_session_id: string };
       chatWsLogger.info("chat:session_deleted (global)", payload);
@@ -2204,6 +2212,7 @@ export function useRealtimeSync(
       unsubChatSessionRead();
       unsubChatSessionCreated();
       unsubChatSessionInvalidated();
+      unsubChatTicketsChanged();
       unsubChatSessionDeleted();
       unsubChatSessionUpdated();
       if (taskMessageFlushTimer) clearTimeout(taskMessageFlushTimer);
