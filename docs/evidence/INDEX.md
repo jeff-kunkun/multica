@@ -35,3 +35,4 @@
 - DENE-1682：手机 App 聊天里听汇报的 Mermaid 进度图按三组清单显示、带项目的聊天进度条出现「听汇报」；无模拟器，附 390px 浅/深色 HTML 预览图：[预览](DENE-1682/preview.html)。
 - DENE-1678：PR 已合入且每个合入的 PR 合入的那个版本都审过（GitHub 对该提交的批准，或验收席在该提交时给的 `verdict: pass`）时跳过验收席直接完成；任务页「跳过验收」行、手机 App 头部、`issue close` 警告与 `issue context` 同一句原因；[真实任务详情页 375/390/768/1280 截图](DENE-1678/report.html)。
 - DENE-1719：聊天底栏和卡片显示本聊天跟进的已有票（新建 / 跟进 / 手动挂上），可手动挂上和取下，`multica chat tickets add|remove` 同一接口；[390/768/1280 截图](DENE-1719/preview.html)。
+- DENE-1722：路由从结果里学——升档、验收打回记为判低，同类票判低比例过阈值时新票上调一档（默认影子运行），`multica workspace routing learning` 查各类统计；[1280/390 截图](DENE-1722/preview.html)。
