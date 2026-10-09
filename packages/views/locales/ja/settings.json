@@ -1708,7 +1708,10 @@
       "manage_members": "メンバー招待と権限変更",
       "workspace_settings": "ワークスペース設定・連携・キー",
       "billing_and_transfer": "請求・譲渡・削除"
-    }
+    },
+    "projects_count_other": "{{count}} 件のプロジェクト",
+    "no_projects": "プロジェクトなし",
+    "projects_aria": "{{name}} が参加しているプロジェクト"
   },
   "integrations": {
     "status_connected": "接続済み",
