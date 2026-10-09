@@ -238,6 +238,7 @@ export type {
   ChatDraftRestoresResponse,
   ChatTicket,
   ChatTicketsResponse,
+  ChatTicketSource,
 } from "./chat";
 export type { StorageAdapter } from "./storage";
 export type {

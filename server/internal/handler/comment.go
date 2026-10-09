@@ -2088,6 +2088,7 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 		applyCommentSupplements(&resp, h.listCommentSupplements(r.Context(), issue.WorkspaceID, []pgtype.UUID{comment.ID})[uuidToString(comment.ID)])
 	}
 	h.maybeReleaseOnAcceptance(r.Context(), issue, comment)
+	h.followIssueFromChatTask(r, authorType, authorID, issue)
 
 	writeJSON(w, http.StatusCreated, resp)
 }

@@ -436,6 +436,11 @@ type ChatSessionInvalidatedPayload struct {
 	ChatSessionID string `json:"chat_session_id"`
 }
 
+// ChatTicketsChangedPayload names the chat whose ticket list changed.
+type ChatTicketsChangedPayload struct {
+	ChatSessionID string `json:"chat_session_id"`
+}
+
 type ChatSessionCreatedPayload struct {
 	WorkspaceID           string                   `json:"workspace_id"`
 	ChatSessionID         string                   `json:"chat_session_id"`

@@ -2825,6 +2825,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Get("/", h.GetChatSession)
 					r.Post("/to-goal", h.ConvertChatSessionToGoal)
 					r.Get("/tickets", h.ListChatSessionTickets)
+					// Pin / take down by hand (DENE-1719) — `multica chat tickets add|remove`.
+					r.Post("/tickets", h.AddChatSessionTicket)
+					r.Delete("/tickets/{issueId}", h.RemoveChatSessionTicket)
 					r.Get("/access", h.GetChatSessionAccess)
 					r.Put("/access", h.PutChatSessionAccess)
 					r.Get("/work-thread", h.GetChatWorkThread)

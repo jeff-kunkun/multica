@@ -626,6 +626,16 @@ type ChatDraftRestore struct {
 	CreatedAt     pgtype.Timestamptz `json:"created_at"`
 }
 
+type ChatFollowedIssue struct {
+	ChatSessionID pgtype.UUID        `json:"chat_session_id"`
+	IssueID       pgtype.UUID        `json:"issue_id"`
+	WorkspaceID   pgtype.UUID        `json:"workspace_id"`
+	Source        string             `json:"source"`
+	Hidden        bool               `json:"hidden"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
+}
+
 type ChatMessage struct {
 	ID                            pgtype.UUID        `json:"id"`
 	ChatSessionID                 pgtype.UUID        `json:"chat_session_id"`

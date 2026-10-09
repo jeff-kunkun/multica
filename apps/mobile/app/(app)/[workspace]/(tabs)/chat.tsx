@@ -654,6 +654,7 @@ export default function ChatTab() {
           liveTaskMessages={liveTaskMessages}
           availability={presenceAvailability}
           tickets={ticketsData?.tickets}
+          ticketsSessionId={activeSessionId}
         />
         {runtimeBound ? (
           <OfflineBanner
