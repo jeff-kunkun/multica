@@ -60,46 +60,55 @@ export function WorkspaceLinksTab() {
   const [revoking, setRevoking] = useState<WorkspaceLink | null>(null);
   const revoke = useRevokeWorkspaceLink(wsId);
 
+  // An offer waiting for this workspace's answer goes first: it is the one
+  // thing on this page that needs someone to act.
+  const awaitingAnswer = incoming.some((link) => link.status === "pending");
+  const outgoingSection = (
+    <SettingsSection anchor="outgoing" title={t(($) => $.links.tab.outgoing_title)} description={t(($) => $.links.tab.outgoing_description)}>
+      <CreateLinkForm
+        wsId={wsId}
+        direction="offer"
+        enabled={!!can?.create}
+        loaded={!!can}
+        linkedSlugs={outgoing.map((link) => link.target.slug)}
+      />
+      {!isLoading && outgoing.length === 0 ? (
+        <p className="text-caption text-muted-foreground">{t(($) => $.links.tab.outgoing_empty)}</p>
+      ) : null}
+      <div className="space-y-3">
+        {outgoing.map((link) => (
+          <OutgoingLinkRow key={link.id} wsId={wsId} link={link} canChange={!!can?.create} onRevoke={() => setRevoking(link)} />
+        ))}
+      </div>
+    </SettingsSection>
+  );
+  const incomingSection = (
+    <SettingsSection anchor="incoming" title={t(($) => $.links.tab.incoming_title)} description={t(($) => $.links.tab.incoming_description)}>
+      {!isLoading && incoming.length === 0 ? (
+        <p className="text-caption text-muted-foreground">{t(($) => $.links.tab.incoming_empty)}</p>
+      ) : null}
+      <div className="space-y-3">
+        {incoming.map((link) => (
+          <IncomingLinkRow key={link.id} wsId={wsId} link={link} canAccept={!!can?.accept} onRevoke={() => setRevoking(link)} />
+        ))}
+      </div>
+      <CreateLinkForm
+        wsId={wsId}
+        direction="pull"
+        enabled={!!can?.pull}
+        loaded={!!can}
+        linkedSlugs={incoming.map((link) => link.source.slug)}
+      />
+      {can && !can.accept ? (
+        <p className="text-caption text-muted-foreground">{t(($) => $.links.tab.accept_reason)}</p>
+      ) : null}
+    </SettingsSection>
+  );
+
   return (
     <SettingsTab title={t(($) => $.links.tab.title)} description={t(($) => $.links.tab.description)}>
-      <SettingsSection anchor="outgoing" title={t(($) => $.links.tab.outgoing_title)} description={t(($) => $.links.tab.outgoing_description)}>
-        <CreateLinkForm
-          wsId={wsId}
-          direction="offer"
-          enabled={!!can?.create}
-          loaded={!!can}
-          linkedSlugs={outgoing.map((link) => link.target.slug)}
-        />
-        {!isLoading && outgoing.length === 0 ? (
-          <p className="text-caption text-muted-foreground">{t(($) => $.links.tab.outgoing_empty)}</p>
-        ) : null}
-        <div className="space-y-3">
-          {outgoing.map((link) => (
-            <OutgoingLinkRow key={link.id} wsId={wsId} link={link} canChange={!!can?.create} onRevoke={() => setRevoking(link)} />
-          ))}
-        </div>
-      </SettingsSection>
-
-      <SettingsSection anchor="incoming" title={t(($) => $.links.tab.incoming_title)} description={t(($) => $.links.tab.incoming_description)}>
-        <CreateLinkForm
-          wsId={wsId}
-          direction="pull"
-          enabled={!!can?.pull}
-          loaded={!!can}
-          linkedSlugs={incoming.map((link) => link.source.slug)}
-        />
-        {!isLoading && incoming.length === 0 ? (
-          <p className="text-caption text-muted-foreground">{t(($) => $.links.tab.incoming_empty)}</p>
-        ) : null}
-        <div className="space-y-3">
-          {incoming.map((link) => (
-            <IncomingLinkRow key={link.id} wsId={wsId} link={link} canAccept={!!can?.accept} onRevoke={() => setRevoking(link)} />
-          ))}
-        </div>
-        {can && !can.accept ? (
-          <p className="text-caption text-muted-foreground">{t(($) => $.links.tab.accept_reason)}</p>
-        ) : null}
-      </SettingsSection>
+      {awaitingAnswer ? incomingSection : outgoingSection}
+      {awaitingAnswer ? outgoingSection : incomingSection}
 
       {can?.audit ? <AuditSection wsId={wsId} /> : null}
 
