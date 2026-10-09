@@ -68,14 +68,14 @@ multica issue close <id> --outcome done --verdict pass --evidence-file ./close.m
   `blocked`. A failed acceptance is not a close: `multica issue comment
   add <id> --verdict hold --content-file ./review.md` wakes the executor.
 - **Merged and already reviewed skips acceptance** (DENE-1678). When an
-  executor closes `in_review` and every linked PR is finished with one merged,
-  and either GitHub recorded an approval or someone other than the executor
-  left a `verdict: pass` line (and no newer `verdict: hold`), the platform
-  writes `done` instead of seating a reviewer. The reply's warning and
-  `multica issue context` (现在在哪 … 跳过验收：…) say which fact counted. A
-  failed acceptance run on such a ticket is closed as passed the same way.
-  An independent reviewer therefore writes `--verdict pass`, not 审查通过 in
-  prose — only the verdict line counts.
+  executor closes `in_review`, every linked PR is finished, and each merged PR
+  has its own review — a GitHub approval of that PR, or a `verdict: pass` the
+  issue's acceptance seat wrote after that PR was opened, with no newer seat
+  `verdict: hold` — the platform writes `done` instead of seating a reviewer.
+  A pass by anyone who is not the acceptance seat never counts, and one PR's
+  review never covers another. The reply's warning and `multica issue
+  context` (现在在哪 … 跳过验收：…) say which fact counted. A failed
+  acceptance run on such a ticket is closed as passed the same way.
 - **PR stops are answered on the spot** (DENE-1219). `blocked` means a person
   has to act: missing permission or `--needs-human`. Anything the executor can
   clear never writes a status:
