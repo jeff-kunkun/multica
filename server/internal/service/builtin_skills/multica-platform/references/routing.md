@@ -140,6 +140,7 @@ naming the way out, and the CLI prints it on stderr. The ways out:
 | You want | Run |
 |---|---|
 | a stronger seat | `multica issue escalate <id> --reason "..."` |
+| advice from a stronger seat, keeping the ticket | `multica issue consult <id> --question-file <path>` (`references/consult.md`) |
 | someone else to take it | `multica issue close <id> --outcome blocked --evidence-file <path> ...` — routing advises |
 | a person to decide | `multica issue summon <id> --to <member> --reason "..."` |
 | the person already named the new owner | `--per-quote "<原话>"`, checked as above |

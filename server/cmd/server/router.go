@@ -2299,6 +2299,11 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					// "Too hard" mid-flight: a reason only, routing re-judges
 					// (DENE-1033) — `multica issue escalate`.
 					r.Post("/escalate", h.EscalateIssue)
+					// Ask a strong-tier seat one question mid-run (DENE-1721)
+					// — `multica issue consult`.
+					r.Post("/consults", h.CreateIssueConsult)
+					r.Get("/consults", h.ListIssueConsults)
+					r.Get("/consults/{consultId}", h.GetIssueConsult)
 					// One-shot close protocol (DENE-859): evidence comment,
 					// status and close.* keys in one transaction, checked by
 					// closeprotocol.Validate — `multica issue close`.

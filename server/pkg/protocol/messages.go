@@ -108,6 +108,11 @@ const (
 	// branch (DENE-1537). Only then does the server put a sub-issue on its
 	// parent's line; any other daemon keeps one PR per sub-issue.
 	DaemonCapabilityDeliveryLineV1 = "delivery-line-v1"
+	// DaemonCapabilityConsultV1 advertises that the daemon runs a consult
+	// claim (DENE-1721): it sends the claim's consult_prompt as the whole
+	// prompt in an empty workdir. Only such a daemon's seats are offered as
+	// advisors; any other daemon would run the advisor as a blank task.
+	DaemonCapabilityConsultV1 = "consult-v1"
 	// DaemonCapabilityTaskSupplementV1 advertises that this provider run can accept
 	// an additional text instruction without cancelling or starting a task.
 	// It is persisted when this exact task enters running; absence always means
