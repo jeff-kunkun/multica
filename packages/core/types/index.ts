@@ -397,6 +397,7 @@ export type {
   CronPreviewResponse,
   GetAutopilotResponse,
   ListAutopilotRunsResponse,
+  AutopilotLinkedChange,
   WebhookDelivery,
   WebhookDeliveryStatus,
   WebhookSignatureStatus,
