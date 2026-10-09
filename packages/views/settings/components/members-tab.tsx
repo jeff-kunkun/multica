@@ -98,6 +98,7 @@ import {
   type RoleOption,
 } from "@multica/core/workspace/member-roles";
 import { api, errorCode } from "@multica/core/api";
+import { invalidateProjectMemberLists } from "@multica/core/projects";
 import { useLocale, useT } from "../../i18n";
 import {
   SettingsCard,
@@ -1069,6 +1070,7 @@ export function MembersTab() {
         },
       );
       qc.invalidateQueries({ queryKey: key });
+      void invalidateProjectMemberLists(qc, wsId);
     } catch (e) {
       // Roll the row back to exactly what the list held before the patch —
       // re-deriving it from `member` would lose a concurrent update that
@@ -1096,6 +1098,7 @@ export function MembersTab() {
         try {
           await api.deleteMember(workspace.id, member.id);
           qc.invalidateQueries({ queryKey: workspaceKeys.members(wsId) });
+          void invalidateProjectMemberLists(qc, wsId);
           toast.success(t(($) => $.members.toast_member_removed));
         } catch (e) {
           toast.error(e instanceof Error ? e.message : t(($) => $.members.toast_member_remove_failed));

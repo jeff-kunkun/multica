@@ -15,6 +15,7 @@ import { getCurrentWsId, getCurrentSlug } from "../platform/workspace-storage";
 import { issueKeys } from "../issues/queries";
 import { homeKeys } from "../home/queries";
 import { projectKeys } from "../projects/queries";
+import { invalidateProjectMemberLists } from "../projects/member-queries";
 import { pinKeys } from "../pins/queries";
 import { autopilotKeys } from "../autopilots/queries";
 import { runtimeKeys } from "../runtimes/queries";
@@ -1031,7 +1032,11 @@ export function useRealtimeSync(
       },
       member: () => {
         const wsId = getCurrentWsId();
-        if (wsId) qc.invalidateQueries({ queryKey: workspaceKeys.members(wsId) });
+        if (wsId) {
+          qc.invalidateQueries({ queryKey: workspaceKeys.members(wsId) });
+          // Project member rows show the workspace role and sort by it.
+          void invalidateProjectMemberLists(qc, wsId);
+        }
       },
       // workspace:updated is handled by the specific handler below
       // (compares prefixes to decide whether to also invalidate issues).
@@ -1055,6 +1060,9 @@ export function useRealtimeSync(
           // against, and project writes are rare, so refresh the table
           // queries unconditionally rather than guess.
           qc.invalidateQueries({ queryKey: issueKeys.tableAll(wsId) });
+          // Roster rows list each member's projects by title, and project
+          // membership changes arrive as project:updated.
+          qc.invalidateQueries({ queryKey: workspaceKeys.members(wsId) });
         }
       },
       squad: () => {
