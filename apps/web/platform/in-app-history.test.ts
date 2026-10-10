@@ -1,5 +1,5 @@
-import { afterEach, describe, expect, it } from "vitest";
-import { canGoBackInApp, installInAppHistoryDepth } from "./in-app-history";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { canGoBackInApp, goHome, installInAppHistoryDepth, seedHomeBelow } from "./in-app-history";
 
 const win = window as unknown as { navigation?: unknown };
 
@@ -115,5 +115,71 @@ describe("canGoBackInApp", () => {
     withNavigationApi({ canGoBack: "yes" });
 
     expect(canGoBackInApp()).toBe(false);
+  });
+});
+
+describe("seedHomeBelow", () => {
+  it("slips the home page under a page opened cold", () => {
+    resetHistory();
+    window.history.replaceState({ __NA: true, tree: "t" }, "", "/acme/issues/i1");
+    const go = vi.spyOn(window.history, "go").mockImplementation(() => {});
+
+    expect(seedHomeBelow("/acme/chat")).toBe(true);
+
+    // The visible page keeps Next's state and sits one deep, over the home.
+    expect(window.location.pathname).toBe("/acme/issues/i1");
+    expect(window.history.state).toMatchObject({
+      __NA: true,
+      tree: "t",
+      __multicaDepth: 1,
+      __multicaBase: "/acme/chat",
+    });
+    expect(canGoBackInApp()).toBe(true);
+    go.mockRestore();
+  });
+
+  it("does nothing when the app already has a page behind", () => {
+    resetHistory();
+    window.history.pushState({ __NA: true }, "", "/acme/chat");
+    window.history.pushState({ __NA: true }, "", "/acme/issues/i1");
+
+    expect(seedHomeBelow("/acme/chat")).toBe(false);
+    expect(window.history.state).toMatchObject({ __multicaDepth: 2 });
+  });
+});
+
+describe("goHome", () => {
+  it("steps back to the bottom of the run when it is the home page", () => {
+    resetHistory();
+    window.history.replaceState({ __NA: true }, "", "/acme/chat");
+    window.history.pushState({ __NA: true }, "", "/acme/inbox");
+    window.history.pushState({ __NA: true }, "", "/acme/issues/i1");
+    const go = vi.spyOn(window.history, "go").mockImplementation(() => {});
+
+    expect(goHome("/acme/chat")).toBe(true);
+    expect(go).toHaveBeenCalledWith(-2);
+    go.mockRestore();
+  });
+
+  it("leaves it to the caller when the bottom is another page or there is none", () => {
+    resetHistory();
+    window.history.replaceState({ __NA: true }, "", "/acme/issues");
+    window.history.pushState({ __NA: true }, "", "/acme/inbox");
+    const go = vi.spyOn(window.history, "go").mockImplementation(() => {});
+
+    expect(goHome("/acme/chat")).toBe(false);
+    window.history.go(0);
+    resetHistory();
+    expect(goHome("/acme/chat")).toBe(false);
+    expect(go).toHaveBeenCalledTimes(1);
+    go.mockRestore();
+  });
+
+  it("does not take another workspace's chat for home", () => {
+    resetHistory();
+    window.history.replaceState({ __NA: true }, "", "/old/chat");
+    window.history.pushState({ __NA: true }, "", "/new/inbox");
+
+    expect(goHome("/new/chat")).toBe(false);
   });
 });

@@ -7,7 +7,7 @@ import { useInboxUnreadCount } from "@multica/core/inbox/queries";
 import { openCreateIssueWithPreference } from "@multica/core/issues/stores/create-mode-store";
 import { useSidebar } from "@multica/ui/components/ui/sidebar";
 import { cn } from "@multica/ui/lib/utils";
-import { AppLink, useNavigation } from "../navigation";
+import { AppLink, resolveClickIntent, useNavigation } from "../navigation";
 import { useT } from "../i18n";
 import { WriteAction } from "./guest-readonly";
 import { isNavActive, useChatNavUnreadCount } from "./nav-unread";
@@ -30,6 +30,7 @@ export function MobileTabBar() {
   const { setOpenMobile } = useSidebar();
   const inboxUnread = useInboxUnreadCount(workspace?.id);
   const chatUnread = useChatNavUnreadCount(workspace?.id, pathname, p.chat());
+  const tabs = { home: p.chat(), roots: [p.chat(), p.issues(), p.inbox()] };
 
   return (
     <nav
@@ -37,8 +38,8 @@ export function MobileTabBar() {
       data-testid="mobile-tab-bar"
       className="flex shrink-0 items-stretch border-t border-border bg-background px-1 pb-[env(safe-area-inset-bottom)]"
     >
-      <TabLink href={p.chat()} pathname={pathname} label={t(($) => $.nav.chat)} badge={chatUnread} />
-      <TabLink href={p.issues()} pathname={pathname} label={t(($) => $.nav.issues)} />
+      <TabLink href={p.chat()} pathname={pathname} tabs={tabs} label={t(($) => $.nav.chat)} badge={chatUnread} />
+      <TabLink href={p.issues()} pathname={pathname} tabs={tabs} label={t(($) => $.nav.issues)} />
       <WriteAction className="flex flex-1">
         <button
           type="button"
@@ -51,7 +52,7 @@ export function MobileTabBar() {
           {t(($) => $.tab_bar.new_issue)}
         </button>
       </WriteAction>
-      <TabLink href={p.inbox()} pathname={pathname} label={t(($) => $.nav.inbox)} badge={inboxUnread} />
+      <TabLink href={p.inbox()} pathname={pathname} tabs={tabs} label={t(($) => $.nav.inbox)} badge={inboxUnread} />
       <button type="button" className={ITEM_CLASS} onClick={() => setOpenMobile(true)}>
         <span className="flex h-7 items-center">
           <Menu className="size-5" aria-hidden="true" />
@@ -65,14 +66,17 @@ export function MobileTabBar() {
 function TabLink({
   href,
   pathname,
+  tabs,
   label,
   badge = 0,
 }: {
   href: string;
   pathname: string;
+  tabs: { home: string; roots: string[] };
   label: string;
   badge?: number;
 }) {
+  const { switchTab } = useNavigation();
   const active = isNavActive(pathname, href);
   const Icon = routeIconForPath(href);
   return (
@@ -80,6 +84,11 @@ function TabLink({
       href={href}
       aria-current={active ? "page" : undefined}
       className={cn(ITEM_CLASS, active && "text-foreground")}
+      onClick={(e) => {
+        if (!switchTab || resolveClickIntent(e) !== "push" || e.shiftKey) return;
+        e.preventDefault();
+        switchTab(href, tabs.home, tabs.roots);
+      }}
     >
       <span className="relative flex h-7 items-center">
         <Icon className="size-5" aria-hidden="true" />

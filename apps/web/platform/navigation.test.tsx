@@ -157,3 +157,65 @@ describe("WebNavigationProvider hash", () => {
     expect(adapter().hash).toBe("#comment-c2");
   });
 });
+
+/**
+ * The phone's bottom bar: tabs are roots, not a trail. Chat is the bottom of
+ * the back stack; moving between the other roots replaces the page.
+ */
+describe("WebNavigationProvider switchTab", () => {
+  const roots = ["/acme/chat", "/acme/issues", "/acme/inbox"];
+  const matchMedia = window.matchMedia;
+
+  beforeEach(() => {
+    router.push.mockReset();
+    router.replace.mockReset();
+  });
+
+  afterEach(() => {
+    window.matchMedia = matchMedia;
+    // Unwrapped, so the depth stamped by the previous test does not carry over.
+    (Object.getPrototypeOf(window.history) as History).replaceState.call(window.history, null, "", "/acme/chat");
+  });
+
+  function asPhone(phone: boolean) {
+    window.matchMedia = ((query: string) => ({ matches: phone, media: query })) as typeof window.matchMedia;
+  }
+
+  it("replaces when moving from one non-chat root to another", () => {
+    asPhone(true);
+    renderAdapter()().switchTab!("/acme/inbox", "/acme/chat", roots); // pathname is /acme/issues
+
+    expect(router.replace).toHaveBeenCalledWith("/acme/inbox");
+    expect(router.push).not.toHaveBeenCalled();
+  });
+
+  it("steps back to the bottom of the stack for Chat", () => {
+    asPhone(true);
+    window.history.replaceState({ __NA: true }, "", "/acme/chat");
+    window.history.pushState({ __NA: true }, "", "/acme/issues");
+    const go = vi.spyOn(window.history, "go").mockImplementation(() => {});
+
+    renderAdapter()().switchTab!("/acme/chat", "/acme/chat", roots);
+
+    expect(go).toHaveBeenCalledWith(-1);
+    expect(router.push).not.toHaveBeenCalled();
+    expect(router.replace).not.toHaveBeenCalled();
+    go.mockRestore();
+  });
+
+  it("replaces for Chat when the bottom of the stack is not Chat", () => {
+    asPhone(true);
+
+    renderAdapter()().switchTab!("/acme/chat", "/acme/chat", roots);
+
+    expect(router.replace).toHaveBeenCalledWith("/acme/chat");
+  });
+
+  it("is a plain push off a phone", () => {
+    asPhone(false);
+    renderAdapter()().switchTab!("/acme/inbox", "/acme/chat", roots);
+
+    expect(router.push).toHaveBeenCalledWith("/acme/inbox");
+    expect(router.replace).not.toHaveBeenCalled();
+  });
+});

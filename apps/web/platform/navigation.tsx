@@ -6,8 +6,13 @@ import {
   NavigationProvider,
   type NavigationAdapter,
 } from "@multica/views/navigation";
-import { isPhoneViewport, paths } from "@multica/core/paths";
-import { canGoBackInApp, installInAppHistoryDepth } from "./in-app-history";
+import { isPhoneViewport, isReservedSlug, paths } from "@multica/core/paths";
+import {
+  canGoBackInApp,
+  goHome,
+  installInAppHistoryDepth,
+  seedHomeBelow,
+} from "./in-app-history";
 
 /**
  * Web half of the `multica:navigate` bridge — the event shared content
@@ -79,11 +84,21 @@ function NavigationProviderInner({
 
   // A phone opens on Chat. The home-screen icon launches at /inbox (manifest
   // start_url), which would leave Inbox under every Back; a fresh launch that
-  // lands on a bare inbox is moved onto Chat instead.
+  // lands on a bare inbox is moved onto Chat instead. Any other page opened
+  // cold (a task link, a notification) gets Chat slipped in underneath, so Back
+  // from it lands on Chat rather than leaving the app.
   useEffect(() => {
-    if (!isPhoneViewport() || canGoBackInApp() || window.location.search) return;
-    const slug = /^\/([^/]+)\/inbox\/?$/.exec(window.location.pathname)?.[1];
-    if (slug) router.replace(paths.workspace(slug).chat());
+    if (!isPhoneViewport() || canGoBackInApp()) return;
+    const segments = window.location.pathname.split("/").filter(Boolean);
+    const slug = segments[0];
+    if (!slug || isReservedSlug(slug) || segments.length < 2) return;
+    const chat = paths.workspace(slug).chat();
+    if (segments[1] === "chat") return;
+    if (segments.length === 2 && segments[1] === "inbox" && !window.location.search) {
+      router.replace(chat);
+      return;
+    }
+    seedHomeBelow(chat);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- the launch only
   }, []);
 
@@ -131,6 +146,18 @@ function NavigationProviderInner({
     back: router.back,
     forward: router.forward,
     canGoBack: canGoBackInApp,
+    switchTab: (path: string, home: string, roots: string[]) => {
+      if (!isPhoneViewport()) {
+        router.push(path);
+        return;
+      }
+      const here = pathname.replace(/\/+$/, "");
+      if (here === path) return;
+      const onRoot = roots.includes(here) && here !== home;
+      if (path === home && goHome(home)) return;
+      if (onRoot) router.replace(path);
+      else router.push(path);
+    },
     pathname,
     searchParams: new URLSearchParams(searchParams.toString()),
     hash,
