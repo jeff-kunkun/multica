@@ -24,8 +24,7 @@ import { ChatTicketPinDialog } from "./chat-ticket-pin-dialog";
 // DENE-1667: the chat's progress bar over the tickets this chat opened or
 // follows (DENE-1665's chat tickets — the same list as the in-thread ticket
 // cards; DENE-1719 adds followed and pinned ones, each row saying which).
-// What moved since the person last looked floats to the top as 「刚变」;
-// "听汇报" asks the agent to tell the project's news (heard server-side).
+// What moved since the person last looked floats to the top as 「刚变」.
 
 const SWIPE_CLOSE_PX = 80;
 // With no earlier look on this device, a move within the last day is fresh.
@@ -50,17 +49,10 @@ export function ChatReportBar({
   wsId,
   userId,
   sessionId,
-  projectTitle,
-  disabled,
-  onHear,
 }: {
   wsId: string;
   userId: string;
   sessionId: string;
-  /** The chat's projects, named; empty hides 听汇报 (a report is per project). */
-  projectTitle: string;
-  disabled: boolean;
-  onHear: (prompt: string) => void;
 }) {
   const { t } = useT("chat");
   const isMobile = useIsMobile();
@@ -88,12 +80,6 @@ export function ChatReportBar({
   const counts = { waiting_you: 0, in_progress: 0, done: 0 };
   for (const row of rows) counts[row.phase] += 1;
   const freshCount = rows.filter((r) => r.fresh).length;
-  const hear = projectTitle
-    ? () => {
-        setOpen(false);
-        onHear(t(($) => $.report.hear_prompt, { project: projectTitle }));
-      }
-    : null;
 
   const setWindowOpen = (next: boolean) => {
     setOpen(next);
@@ -133,7 +119,7 @@ export function ChatReportBar({
     setPinOpen(true);
   };
   const panel = (
-    <ReportPanel rows={rows} wsId={wsId} sessionId={sessionId} hearDisabled={disabled} onHear={hear} onPin={pin} />
+    <ReportPanel rows={rows} wsId={wsId} sessionId={sessionId} onPin={pin} />
   );
 
   return (
@@ -156,11 +142,6 @@ export function ChatReportBar({
               {panel}
             </PopoverContent>
           </Popover>
-        )}
-        {hear && (
-          <Button size="sm" variant="ghost" disabled={disabled} onClick={hear} className="shrink-0">
-            {t(($) => $.report.hear)}
-          </Button>
         )}
       </div>
       <ChatTicketPinDialog sessionId={sessionId} open={pinOpen} onOpenChange={setPinOpen} />
@@ -221,15 +202,11 @@ function ReportPanel({
   rows,
   wsId,
   sessionId,
-  hearDisabled,
-  onHear,
   onPin,
 }: {
   rows: ReportRow[];
   wsId: string;
   sessionId: string;
-  hearDisabled: boolean;
-  onHear: (() => void) | null;
   onPin: () => void;
 }) {
   const { t } = useT("chat");
@@ -288,16 +265,11 @@ function ReportPanel({
           );
         })}
       </ul>
-      <div className="flex items-center justify-between gap-2 border-t px-3 py-2">
+      <div className="flex items-center gap-2 border-t px-3 py-2">
         <Button size="sm" variant="ghost" onClick={onPin} className="max-sm:h-11">
           <Plus className="size-3.5" />
           {t(($) => $.tickets.pin)}
         </Button>
-        {onHear && (
-          <Button size="sm" disabled={hearDisabled} onClick={onHear} className="max-sm:h-11">
-            {t(($) => $.report.hear)}
-          </Button>
-        )}
       </div>
     </div>
   );

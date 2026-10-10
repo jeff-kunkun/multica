@@ -426,7 +426,6 @@
     "waiting_you": "{{count}} need you",
     "in_progress": "{{count}} in progress",
     "done": "{{count}} done",
-    "hear": "Hear report",
     "hear_prompt": "Report: tell me what's new in \"{{project}}\" since I last heard",
     "title": "This chat's issues",
     "just_changed": "Just changed",

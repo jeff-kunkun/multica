@@ -4,10 +4,8 @@
  * on. A tap opens the `chat-progress` formSheet with the list. Mirrors web's
  * `ChatReportBar` (packages/views/chat/components/chat-report-bar.tsx).
  *
- * 听汇报 shows only when the chat carries a project (a report is per project;
- * the phone cannot pick one, but a chat opened elsewhere may have it) and
- * sends the same prompt as web. The sheet is a native formSheet, so the
- * grabber swipe and the backdrop tap close it.
+ * The sheet is a native formSheet, so the grabber swipe and the backdrop tap
+ * close it.
  */
 import { Pressable, View } from "react-native";
 import { router } from "expo-router";
@@ -25,16 +23,9 @@ import { useT } from "@/lib/i18n";
 export function ChatProgressBar({
   sessionId,
   tickets,
-  projectTitle,
-  hearDisabled,
-  onHear,
 }: {
   sessionId: string | null;
   tickets: ChatTicket[] | undefined;
-  /** The chat's projects, named; empty hides 听汇报. */
-  projectTitle: string;
-  hearDisabled: boolean;
-  onHear: (prompt: string) => void;
 }) {
   const { t } = useT("chat");
   const wsSlug = useWorkspaceStore((s) => s.currentWorkspaceSlug);
@@ -49,7 +40,6 @@ export function ChatProgressBar({
   ].filter(Boolean);
 
   return (
-    <View className="flex-row items-center pr-2">
     <Pressable
       accessibilityRole="button"
       onPress={() => {
@@ -74,19 +64,5 @@ export function ChatProgressBar({
       </Text>
       <Ionicons name="chevron-up" size={14} color={THEME[colorScheme].mutedForeground} />
     </Pressable>
-    {projectTitle ? (
-      <Pressable
-        accessibilityRole="button"
-        disabled={hearDisabled}
-        onPress={() => onHear(t("progress.hear_prompt", { project: projectTitle }))}
-        className={cn(
-          "min-h-11 justify-center px-3 active:opacity-70",
-          hearDisabled && "opacity-40",
-        )}
-      >
-        <Text className="text-xs font-medium text-brand">{t("progress.hear")}</Text>
-      </Pressable>
-    ) : null}
-    </View>
   );
 }

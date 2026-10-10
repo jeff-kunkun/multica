@@ -883,18 +883,6 @@ export function ChatPage() {
           wsId={c.wsId}
           userId={c.user.id}
           sessionId={c.activeSessionId}
-          projectTitle={(c.projects ?? [])
-            .filter((p) => c.activeProjectIds.includes(p.id))
-            .map((p) => p.title)
-            .join("、")}
-          disabled={
-            c.isSessionArchived ||
-            c.isAgentArchived ||
-            c.isAgentAccessRevoked ||
-            !c.isAgentRuntimeBound ||
-            c.noAgent
-          }
-          onHear={(prompt) => void c.handleSend(prompt)}
         />
       )}
 

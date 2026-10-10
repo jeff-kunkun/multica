@@ -419,7 +419,6 @@
     "waiting_you": "等你 {{count}}",
     "in_progress": "在做 {{count}}",
     "done": "做完 {{count}}",
-    "hear": "听汇报",
     "hear_prompt": "听汇报：讲讲「{{project}}」上次以来的新进展",
     "title": "本聊天的单",
     "just_changed": "刚变",

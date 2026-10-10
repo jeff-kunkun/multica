@@ -216,8 +216,6 @@
     "done": "{{count}} done",
     "title": "Issues from this chat",
     "just_changed": "Just changed",
-    "needs_you": "needs you",
-    "hear": "Hear report",
-    "hear_prompt": "Report: tell me what's new in \"{{project}}\" since I last heard"
+    "needs_you": "needs you"
   }
 }

@@ -419,7 +419,6 @@
     "waiting_you": "あなた待ち {{count}}",
     "in_progress": "進行中 {{count}}",
     "done": "完了 {{count}}",
-    "hear": "報告を聞く",
     "hear_prompt": "報告：「{{project}}」の前回以降の進捗を教えて",
     "title": "このチャットのチケット",
     "just_changed": "今変わった",
