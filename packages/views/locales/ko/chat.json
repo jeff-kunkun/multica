@@ -419,7 +419,6 @@
     "waiting_you": "내 차례 {{count}}",
     "in_progress": "진행 중 {{count}}",
     "done": "완료 {{count}}",
-    "hear": "보고 듣기",
     "hear_prompt": "보고: 「{{project}}」의 지난번 이후 새 진행을 알려줘",
     "title": "이 채팅의 티켓",
     "just_changed": "방금 바뀜",

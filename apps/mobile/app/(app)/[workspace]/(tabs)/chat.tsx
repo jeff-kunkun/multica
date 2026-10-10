@@ -59,8 +59,6 @@ import { useAuthStore } from "@/data/auth-store";
 import { useWorkspaceStore } from "@/data/workspace-store";
 import { agentListOptions } from "@/data/queries/agents";
 import { memberListOptions } from "@/data/queries/members";
-import { projectListOptions } from "@/data/queries/projects";
-import { chatSessionProjectIds } from "@multica/core/chat/project-context";
 import {
   chatKeys,
   chatMessagesOptions,
@@ -147,7 +145,6 @@ export default function ChatTab() {
   const { data: sessions = [] } = useQuery(chatSessionsOptions(wsId));
   const { data: agents = [] } = useQuery(agentListOptions(wsId));
   const { data: members = [] } = useQuery(memberListOptions(wsId));
-  const { data: projects = [] } = useQuery(projectListOptions(wsId));
 
   // ── Auto-hydrate active session on first Chat tab entry ────────────────
   // Mobile-only deviation from web: web's chat-window opens to an empty
@@ -583,15 +580,6 @@ export default function ChatTab() {
     );
   }, [activeSession, deleteSession, t]);
 
-  // 听汇报 is per project (DENE-1682): the chat's own projects, named like web.
-  const reportProjectTitle = useMemo(() => {
-    const ids = chatSessionProjectIds(activeSession);
-    return projects
-      .filter((p) => ids.includes(p.id))
-      .map((p) => p.title)
-      .join("、");
-  }, [activeSession, projects]);
-
   // ── Composer disabled-state ────────────────────────────────────────────
   const disabled =
     !currentAgent ||
@@ -667,9 +655,6 @@ export default function ChatTab() {
         <ChatProgressBar
           sessionId={activeSessionId}
           tickets={ticketsData?.tickets}
-          projectTitle={reportProjectTitle}
-          hearDisabled={disabled || sending}
-          onHear={(prompt) => handleSend(prompt, [], { clearDraft: false })}
         />
         <ChatQueue
           tasks={pendingTask?.queued_tasks ?? []}
