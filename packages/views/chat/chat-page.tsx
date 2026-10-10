@@ -486,7 +486,9 @@ export function ChatPage() {
   const changeProjectFilter = (next: ChatProjectFilter) => {
     setProjectFilter(next);
     const userId = c.user?.id ?? null;
-    const land = sessionToLandOn({
+    // Compact shows one pane: switching projects lands on that project's
+    // thread list, not inside its last chat.
+    const land = isCompact ? null : sessionToLandOn({
       filter: next,
       sessions: c.sessions.map((session) => ({
         id: session.id,

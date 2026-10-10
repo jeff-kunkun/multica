@@ -104,8 +104,14 @@ const storeListeners = vi.hoisted(() => new Set<() => void>());
 const availableAgentsRef = vi.hoisted(() => ({ current: [] as Agent[] }));
 const agentsSettledRef = vi.hoisted(() => ({ current: true }));
 const runtimeBoundRef = vi.hoisted(() => ({ current: true }));
+const projectsRef = vi.hoisted(() => ({
+  current: undefined as { id: string; title: string }[] | undefined,
+}));
 const sessionsRef = vi.hoisted(() => ({
-  current: { list: [] as { id: string }[], loaded: false },
+  current: {
+    list: [] as { id: string; status?: string; project_ids?: string[]; updated_at?: string }[],
+    loaded: false,
+  },
 }));
 const mockStartNewChat = vi.hoisted(() => vi.fn());
 const mockHandleSend = vi.hoisted(() => vi.fn(async (_text: string) => true));
@@ -154,6 +160,8 @@ vi.mock("./components/use-chat-controller", async () => {
       availableAgents: availableAgentsRef.current,
       agentsSettled: agentsSettledRef.current,
       sessions: sessionsRef.current.list,
+      projects: projectsRef.current,
+      projectsLoaded: projectsRef.current !== undefined,
       sessionsLoaded: sessionsRef.current.loaded,
       activeSessionId: useSyncExternalStore(
         subscribeToStore,
@@ -298,6 +306,7 @@ beforeEach(() => {
   agentsSettledRef.current = true;
   runtimeBoundRef.current = true;
   sessionsRef.current = { list: [], loaded: false };
+  projectsRef.current = undefined;
   platformWorkspace.slug = "acme";
   layout.width = DESKTOP;
 });
@@ -648,6 +657,21 @@ describe("ChatPage compact back navigation", () => {
     fireEvent.click(screen.getByRole("button", { name: "Chat" }));
     expect(back).toHaveBeenCalledTimes(1);
     expect(mockSetActiveSession).not.toHaveBeenCalledWith(null);
+  });
+
+  it("stays on the thread list when switching projects", () => {
+    layout.width = FOLD_INNER;
+    projectsRef.current = [{ id: "p-tarot", title: "Tarot" }];
+    sessionsRef.current = {
+      list: [{ id: "session-2", status: "active", project_ids: ["p-tarot"], updated_at: "2026-10-01T00:00:00Z" }],
+      loaded: true,
+    };
+    const { push } = renderPage("");
+
+    fireEvent.click(screen.getByRole("button", { name: "Switch project" }));
+    fireEvent.click(screen.getByRole("option", { name: /Tarot/ }));
+    expect(push).not.toHaveBeenCalled();
+    expect(mockSetActiveSession).not.toHaveBeenCalledWith("session-2");
   });
 
   it("returns a chat opened from another page to that page", () => {

@@ -6,6 +6,7 @@ import {
   NavigationProvider,
   type NavigationAdapter,
 } from "@multica/views/navigation";
+import { isPhoneViewport, paths } from "@multica/core/paths";
 import { canGoBackInApp, installInAppHistoryDepth } from "./in-app-history";
 
 /**
@@ -75,6 +76,16 @@ function NavigationProviderInner({
   );
   useInternalLinkHandler(router);
   useEffect(installInAppHistoryDepth, []);
+
+  // A phone opens on Chat. The home-screen icon launches at /inbox (manifest
+  // start_url), which would leave Inbox under every Back; a fresh launch that
+  // lands on a bare inbox is moved onto Chat instead.
+  useEffect(() => {
+    if (!isPhoneViewport() || canGoBackInApp() || window.location.search) return;
+    const slug = /^\/([^/]+)\/inbox\/?$/.exec(window.location.pathname)?.[1];
+    if (slug) router.replace(paths.workspace(slug).chat());
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- the launch only
+  }, []);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
