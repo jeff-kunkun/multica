@@ -11,13 +11,15 @@ const state = vi.hoisted(() => ({
   chatUnread: 0,
   openCreate: vi.fn(),
   setOpenMobile: vi.fn(),
+  switchTab: undefined as undefined | ((...args: unknown[]) => void),
 }));
 
-vi.mock("../navigation", () => ({
+vi.mock("../navigation", async () => ({
+  resolveClickIntent: (await import("../navigation/click-intent")).resolveClickIntent,
   AppLink: ({ children, href, ...rest }: { children: React.ReactNode; href: string }) => (
     <a href={href} {...rest}>{children}</a>
   ),
-  useNavigation: () => ({ pathname: state.pathname }),
+  useNavigation: () => ({ pathname: state.pathname, switchTab: state.switchTab }),
 }));
 vi.mock("@multica/core/paths", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@multica/core/paths")>();
@@ -50,6 +52,7 @@ beforeEach(() => {
   state.chatUnread = 0;
   state.openCreate.mockReset();
   state.setOpenMobile.mockReset();
+  state.switchTab = undefined;
 });
 
 describe("MobileTabBar", () => {
@@ -117,5 +120,23 @@ describe("text entry focus", () => {
     });
     expect(screen.getByTestId("typing").textContent).toBe("false");
     vi.useRealTimers();
+  });
+
+  it("hands a plain tap to the adapter's tab switch with Chat as home", () => {
+    state.switchTab = vi.fn();
+    renderWithI18n(<MobileTabBar />);
+    fireEvent.click(screen.getByRole("link", { name: /inbox/i }));
+    expect(state.switchTab).toHaveBeenCalledWith("/acme/inbox", "/acme/chat", [
+      "/acme/chat",
+      "/acme/issues",
+      "/acme/inbox",
+    ]);
+  });
+
+  it("leaves a modifier click to the link", () => {
+    state.switchTab = vi.fn();
+    renderWithI18n(<MobileTabBar />);
+    fireEvent.click(screen.getByRole("link", { name: /inbox/i }), { metaKey: true });
+    expect(state.switchTab).not.toHaveBeenCalled();
   });
 });

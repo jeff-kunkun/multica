@@ -32,6 +32,7 @@
 type NavigationApi = { canGoBack: boolean };
 
 const DEPTH_KEY = "__multicaDepth";
+const BASE_KEY = "__multicaBase";
 const INSTALLED = Symbol.for("multica.inAppHistoryDepth");
 
 function depthOf(state: unknown): number {
@@ -42,11 +43,31 @@ function depthOf(state: unknown): number {
     : 0;
 }
 
-/** Copy of `data` carrying `depth`; non-object state is left unstamped. */
-function stamp(data: unknown, depth: number): unknown {
-  if (data === null || data === undefined) return { [DEPTH_KEY]: depth };
+function baseOf(state: unknown): string | null {
+  if (state === null || typeof state !== "object") return null;
+  const base = (state as Record<string, unknown>)[BASE_KEY];
+  return typeof base === "string" ? base : null;
+}
+
+/**
+ * Copy of `data` carrying `depth` and the path of the entry at the bottom of
+ * the in-app run; non-object state is left unstamped.
+ */
+function stamp(data: unknown, depth: number, base: string): unknown {
+  if (data === null || data === undefined) {
+    return { [DEPTH_KEY]: depth, [BASE_KEY]: base };
+  }
   if (typeof data !== "object" || Array.isArray(data)) return data;
-  return { ...(data as Record<string, unknown>), [DEPTH_KEY]: depth };
+  return { ...(data as Record<string, unknown>), [DEPTH_KEY]: depth, [BASE_KEY]: base };
+}
+
+function pathnameOf(url: string | URL | null | undefined): string {
+  if (url === null || url === undefined) return window.location.pathname;
+  try {
+    return new URL(String(url), window.location.href).pathname;
+  } catch {
+    return window.location.pathname;
+  }
 }
 
 /**
@@ -61,10 +82,14 @@ export function installInAppHistoryDepth(): void {
   const push = history.pushState;
   const replace = history.replaceState;
   history.pushState = function pushState(data, unused, url) {
-    return push.call(this, stamp(data, depthOf(history.state) + 1), unused, url);
+    const base = baseOf(history.state) ?? window.location.pathname;
+    return push.call(this, stamp(data, depthOf(history.state) + 1, base), unused, url);
   };
   history.replaceState = function replaceState(data, unused, url) {
-    return replace.call(this, stamp(data, depthOf(history.state)), unused, url);
+    const depth = depthOf(history.state);
+    // Replacing the bottom entry changes what the bottom is.
+    const base = depth === 0 ? pathnameOf(url) : (baseOf(history.state) ?? pathnameOf(url));
+    return replace.call(this, stamp(data, depth, base), unused, url);
   };
 }
 
@@ -81,4 +106,41 @@ export function canGoBackInApp(): boolean {
     return navigation.canGoBack === true;
   }
   return depthOf(window.history.state) > 0;
+}
+
+/**
+ * Leave the page under the current one as `homePath`, so Back from a page
+ * opened cold (a shared task link, a notification) lands on it instead of
+ * leaving the app. The current entry becomes `homePath`, and the page the user
+ * is looking at is pushed back on top of it with its own state, so Next still
+ * recognises it as its own.
+ *
+ * The seeded entry carries Next's `_N` marker: without it Next's history patch
+ * copies the visible page's route tree into the entry and Back would render
+ * that page under the wrong URL. With it Next does not own the entry, so
+ * returning to it reloads the page at `homePath`.
+ *
+ * Only for an entry nothing in the app sits behind; otherwise a no-op.
+ */
+export function seedHomeBelow(homePath: string): boolean {
+  if (typeof window === "undefined" || canGoBackInApp()) return false;
+  const history = window.history;
+  const here = window.location.pathname + window.location.search + window.location.hash;
+  const state = history.state;
+  history.replaceState({ _N: true }, "", homePath);
+  history.pushState(state ?? {}, "", here);
+  return true;
+}
+
+/**
+ * Step back to the bottom of the in-app run when it is `homePath`. Returns
+ * false when it is not (or there is nothing behind), leaving navigation to
+ * the caller.
+ */
+export function goHome(homePath: string): boolean {
+  if (typeof window === "undefined") return false;
+  const depth = depthOf(window.history.state);
+  if (depth === 0 || baseOf(window.history.state) !== homePath) return false;
+  window.history.go(-depth);
+  return true;
 }

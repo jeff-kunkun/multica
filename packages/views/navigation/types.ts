@@ -57,4 +57,13 @@ export interface NavigationAdapter {
    * it via `forward?.()`.
    */
   forward?: () => void;
+  /**
+   * Optional: switch between the phone's bottom-bar tabs. The tabs are roots,
+   * not a trail: `home` (Chat) is the bottom of the back stack, and moving from
+   * one root page to another replaces the page instead of stacking a new one.
+   * `roots` lists the tab pages. Web wires this for phone viewports; adapters
+   * without it (desktop) get a plain `push`. Callers must treat undefined as
+   * "push".
+   */
+  switchTab?: (path: string, home: string, roots: string[]) => void;
 }
