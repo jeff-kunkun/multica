@@ -232,3 +232,38 @@ Task tokens retain agent authorship, via-Bot snapshot and the run's persisted
 root/hop even after that Bot's current cause changes. Request-supplied origin,
 actor or hop values are not used to establish this source. Local regression
 coverage includes the agent=none/Bot=all counterexample on both branches.
+
+## Self-host deployment injection (DENE-1800 prerequisite)
+
+`docker-compose.selfhost.yml` explicitly forwards `MULTICA_BOT_WAKE_SECRET_KEY`
+only to the backend. The local-build override retains that environment;
+`backend-green` extends the same backend definition, so both colours receive the
+same operator-supplied key. `scripts/install.sh`, `scripts/selfhost-wait.sh` and
+`scripts/selfhost-autoupdate.sh` use these Compose files. Mirror the protected
+injection in the unattended updater's environment as well as an interactive shell.
+Do not rely on a one-off shell export surviving service restarts.
+
+Provision a base64-encoded 32-byte random key once in the deployment secret store
+or an operator-owned mode-0600 env file outside Git. Compose accepts that file via
+`--env-file <protected-file>` or `COMPOSE_ENV_FILES`; the existing deployment `.env`
+may hold it only if access is restricted and the file is excluded from backups
+that are public and from repository commits. Shell environment overrides env-file
+values: remove stale overrides before rollout. Never put the value in command
+arguments, Git, tickets, logs, or `docker compose config` output. Preserve the
+same protected input for backend/green, replicas and all later recreations.
+
+This forwarding fix deliberately leaves missing values empty: existing
+JWT-derived ciphertext continues to decrypt, and old deployments are not forced
+to rotate. **Empty is not an acceptable production Bot-webhook enablement state.**
+Before enabling new receiver credentials, operations must verify a nonempty,
+valid independent key is configured on every backend, reporting only a boolean.
+If any ciphertext already exists under the JWT-derived key, follow the pause and
+receiver-owned credential rewrite procedure above before switching keys; this
+patch does not automatically migrate or invalidate ciphertext. Invalid explicit
+keys keep encryption unavailable rather than falling back to JWT_SECRET.
+
+Local Compose rendering with synthetic keys checks published/build/blue-green
+forwarding and repeat consistency without printing values. That check and the
+existing independent secretbox-instance test do not prove a production restart:
+DENE-1805 must verify persisted injection and matching running image on rollout;
+DENE-1800 retains real Grok execution and cost acceptance.
