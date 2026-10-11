@@ -223,7 +223,7 @@ describe("WorkspaceLinksTab", () => {
     const [mine, theirs] = switches as [HTMLElement, HTMLElement];
     expect(theirs).toHaveAttribute("aria-disabled", "true");
     expect(theirs).toHaveAttribute("aria-checked", "true");
-    expect(screen.getByText("Only an owner of the sharing workspace can switch this.")).toBeInTheDocument();
+    expect(screen.getAllByText("Requires source owner rights; from here, also owner or admin rights in this workspace.").length).toBeGreaterThan(0);
     expect(mine).not.toHaveAttribute("aria-disabled", "true");
     await user.click(mine);
     await waitFor(() => expect(api.updateWorkspaceLink).toHaveBeenCalledWith("l-out", { managed: true }));

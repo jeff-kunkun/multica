@@ -1,8 +1,8 @@
 import { infiniteQueryOptions, queryOptions } from "@tanstack/react-query";
 import { api } from "../api";
 
-// A linked view is never cached server-side or pushed; it is re-read on
-// focus and on this interval so a revoke or an untick shows up promptly.
+// Link changes invalidate this cache through realtime events. Focus and
+// interval refresh also pick up changes to the source project/task content.
 export const LINKED_VIEW_REFRESH_MS = 60_000;
 const LINKED_VIEW_PAGE_SIZE = 50;
 

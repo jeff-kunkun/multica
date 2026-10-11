@@ -61,8 +61,8 @@ type Link struct {
 	// Source / Target identify both workspaces by display fields only.
 	Source WorkspaceRef `json:"source"`
 	Target WorkspaceRef `json:"target"`
-	// Projects is only filled for the source side's managers; the viewer
-	// learns what is shared through View, which re-checks it.
+	// Projects names shared projects for managers and active viewers.
+	// Viewer lists exclude projects that have since become private.
 	Projects []ProjectRef `json:"projects"`
 	// Managed: the source lets the viewer's agents manage its issues and
 	// autopilots for their run's originator (DENE-1663).

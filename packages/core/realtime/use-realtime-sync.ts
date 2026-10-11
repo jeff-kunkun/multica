@@ -1485,7 +1485,7 @@ export function useRealtimeSync(
 
     const unsubWorkspaceLinkChanged = ws.on("workspace_link:changed", (p) => {
       const wsId = getCurrentWsId();
-      if (!wsId || p.workspace_id !== wsId) return;
+      if (!wsId || !p || typeof p !== "object" || !("workspace_id" in p) || p.workspace_id !== wsId) return;
       qc.invalidateQueries({ queryKey: workspaceLinkKeys.all(wsId) });
       qc.invalidateQueries({ queryKey: ["workspaces", wsId, "overview"] });
     });
