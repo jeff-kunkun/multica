@@ -143,8 +143,10 @@ COMMANDS
 FLAGS
 {{.LocalFlags.FlagUsages}}
 {{- end}}
+{{- if .HasInheritedFlags}}
 INHERITED FLAGS
-  --help   Show help for command
+{{.InheritedFlags.FlagUsages}}
+{{- end}}
 {{- if .Example}}
 
 EXAMPLES
@@ -164,8 +166,10 @@ USAGE
 FLAGS
 {{.LocalFlags.FlagUsages}}
 {{- end}}
+{{- if .HasInheritedFlags}}
 INHERITED FLAGS
-  --help   Show help for command
+{{.InheritedFlags.FlagUsages}}
+{{- end}}
 {{- if .Example}}
 
 EXAMPLES
