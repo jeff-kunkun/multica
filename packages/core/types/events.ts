@@ -442,6 +442,8 @@ export interface ChatMessageEventPayload {
   task_id?: string;
   created_at: string;
   sender_user_id?: string;
+  via_bot_id?: string;
+  via_bot_name?: string;
 }
 
 export interface ChatDonePayload {
