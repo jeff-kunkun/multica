@@ -724,7 +724,7 @@ func quotaRoster(ctx context.Context, qtx *db.Queries, task db.AgentTaskQueue, f
 	for _, agent := range agents {
 		id := util.UUIDToString(agent.ID)
 		tier := quotaTierKey(agent.RoutingTier)
-		provider, _ := routing.DefaultLadder.ProviderFor(agent.Name, agent.Model.String)
+		provider := AgentSeries(ctx, qtx, agent).Provider
 		seat := quotarelay.Seat{
 			ID:        id,
 			Name:      agent.Name,
@@ -740,7 +740,7 @@ func quotaRoster(ctx context.Context, qtx *db.Queries, task db.AgentTaskQueue, f
 		if id == failedID {
 			failedSeat = seat
 			failedSeat.Eligible = false
-			failedSeat.AvoidHouse = capacityAvoidHouse(task, agent)
+			failedSeat.AvoidHouse = capacityAvoidHouse(task, agent, provider)
 			failedSeat.StrictHouse = balanceFailure(task)
 		}
 		roster = append(roster, seat)
@@ -924,7 +924,7 @@ func planSeatTier(agent db.Agent) string {
 	return quotaTierKey(agent.RoutingTier)
 }
 
-func capacityAvoidHouse(task db.AgentTaskQueue, agent db.Agent) string {
+func capacityAvoidHouse(task db.AgentTaskQueue, agent db.Agent, knownProvider ...string) string {
 	// A seat whose account ran out of money leaves its house: Grok goes to
 	// Claude or GPT, GPT to Claude or Grok (DENE-870). Capacity no longer
 	// relays at all (DENE-1093), so balance is the only caller left.
@@ -933,8 +933,11 @@ func capacityAvoidHouse(task db.AgentTaskQueue, agent db.Agent) string {
 	}
 	// Any house, not only GPT. One tier down still may land on the same
 	// house when the rung has nobody else.
-	provider, ok := routing.DefaultLadder.ProviderFor(agent.Name, agent.Model.String)
-	if !ok || provider == "" {
+	provider := routing.ResolveSeries(agent.Name, agent.Model.String, "", "").Provider
+	if len(knownProvider) > 0 {
+		provider = knownProvider[0]
+	}
+	if provider == "" {
 		return ""
 	}
 	return provider
@@ -968,7 +971,7 @@ func (s *TaskService) reassignUnstartedIssues(ctx context.Context, qtx *db.Queri
 	if task.IssueID.Valid {
 		sourceID = util.UUIDToString(task.IssueID)
 	}
-	crossHouse := capacityAvoidHouse(task, agent) != ""
+	crossHouse := failedSeat.AvoidHouse != ""
 	actor := task.AccountableUserID
 	if !actor.Valid {
 		actor = task.OriginatorUserID

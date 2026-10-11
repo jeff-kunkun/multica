@@ -698,12 +698,12 @@ export function AgentListToolbar({
               <span className="text-caption font-medium text-muted-foreground">
                 {t(($) => $.toolbar.group_by)}
               </span>
-              <div className="mt-2 flex items-center gap-1 rounded-md border p-0.5">
+              <div className="mt-2 grid grid-cols-2 gap-1 rounded-md border p-0.5">
                 <Button
                   type="button"
                   variant={grouping === "none" ? "secondary" : "ghost"}
                   size="sm"
-                  className="h-7 flex-1 text-caption"
+                  className="min-h-11 flex-1 text-caption"
                   aria-pressed={grouping === "none"}
                   onClick={() => onGroupingChange("none")}
                 >
@@ -713,7 +713,7 @@ export function AgentListToolbar({
                   type="button"
                   variant={grouping === "squad" ? "secondary" : "ghost"}
                   size="sm"
-                  className="h-7 flex-1 text-caption"
+                  className="min-h-11 flex-1 text-caption"
                   aria-pressed={grouping === "squad"}
                   onClick={() => onGroupingChange("squad")}
                 >
@@ -721,9 +721,19 @@ export function AgentListToolbar({
                 </Button>
                 <Button
                   type="button"
+                  variant={grouping === "series" ? "secondary" : "ghost"}
+                  size="sm"
+                  className="min-h-11 text-caption"
+                  aria-pressed={grouping === "series"}
+                  onClick={() => onGroupingChange("series")}
+                >
+                  {t(($) => $.toolbar.grouping_series)}
+                </Button>
+                <Button
+                  type="button"
                   variant={grouping === "specialization" ? "secondary" : "ghost"}
                   size="sm"
-                  className="h-7 flex-1 text-caption"
+                  className="min-h-11 flex-1 text-caption"
                   aria-pressed={grouping === "specialization"}
                   onClick={() => onGroupingChange("specialization")}
                 >

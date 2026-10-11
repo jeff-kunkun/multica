@@ -276,7 +276,13 @@
     "dispatch_projects_empty": "프로젝트 없음",
     "routing_inherited_hint": "기본 역할을 따릅니다. 따로 설정하려면 위에서 따르기를 끄세요.",
     "prop_routing_usage": "사용량",
-    "prop_routing_usage_hint": "계정 한도의 상대적인 여유"
+    "prop_routing_usage_hint": "계정 한도의 상대적인 여유",
+    "prop_series": "시리즈",
+    "prop_series_hint": "비우면 자동 분류를 사용합니다.",
+    "series_readonly": "이 에이전트를 수정할 권한이 없습니다.",
+    "series_auto": "자동",
+    "series_manual": "수동",
+    "series_unknown": "미분류"
   },
   "overview": {
     "agent_context": "에이전트",
@@ -1210,7 +1216,8 @@
     "group_by": "그룹화",
     "grouping_none": "없음",
     "grouping_squad": "스쿼드",
-    "grouping_specialization": "베이스 역할"
+    "grouping_specialization": "베이스 역할",
+    "grouping_series": "시리즈"
   },
   "creation_studio": {
     "title": "에이전트 만들기",

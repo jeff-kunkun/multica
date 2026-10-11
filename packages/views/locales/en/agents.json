@@ -292,7 +292,13 @@
     "dispatch_projects_empty": "No projects",
     "routing_inherited_hint": "Follows the base role. To set these here, turn off following above.",
     "prop_routing_usage": "Usage",
-    "prop_routing_usage_hint": "How much account quota this seat has, relatively"
+    "prop_routing_usage_hint": "How much account quota this seat has, relatively",
+    "prop_series": "Series",
+    "prop_series_hint": "Clear to use the automatic series.",
+    "series_readonly": "You do not have permission to change this agent.",
+    "series_auto": "Automatic",
+    "series_manual": "Manual",
+    "series_unknown": "Unclassified"
   },
   "overview": {
     "agent_context": "Agent",
@@ -1341,7 +1347,8 @@
     "group_by": "Group by",
     "grouping_none": "None",
     "grouping_squad": "Squad",
-    "grouping_specialization": "Base roles"
+    "grouping_specialization": "Base roles",
+    "grouping_series": "Series"
   },
   "actions": {
     "selected_one": "{{count}} selected",

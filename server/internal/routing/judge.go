@@ -36,6 +36,7 @@ const (
 // confidence, and nothing else. No prose the product depends on, no action, no
 // status.
 type Verdict struct {
+	PreferredSeries string `json:"preferred_series,omitempty"`
 	// ExecutorTier is a tier key from the ladder.
 	ExecutorTier string `json:"executor_tier"`
 	// ExecutorConfidence gates the executor slot alone.
@@ -85,6 +86,7 @@ type JudgeState struct {
 	HasChildren        bool     `json:"has_children"`
 	Direction          string   `json:"direction,omitempty"`
 	Candidates         []string `json:"candidate_tiers"`
+	CandidateSeries    []string `json:"candidate_series,omitempty"`
 	// RoutingPolicy and PolicyPrompt are the tier preference. Omitted on
 	// questions that do not choose a tier, so a stale-review request does
 	// not grow a blank policy object.
@@ -213,7 +215,7 @@ When the payload carries rule_tier, the platform's rule table has already chosen
 
 Large or vague tickets default to needing review. When the payload carries facts, decide from them: they are a reading of the whole ticket. Report calibrated confidence in [0,1] separately for the executor choice and the reviewer choice; below-threshold answers are discarded rather than used, so do not inflate them.
 
-Respond with a JSON object with keys: executor_tier, executor_confidence, reviewer, reviewer_tier, reviewer_confidence, reason. reason is one short sentence for a human reader.
+Respond with a JSON object with keys: executor_tier, executor_confidence, reviewer, reviewer_tier, reviewer_confidence, preferred_series, reason. preferred_series is an optional name from candidate_series, following policy_prompt for this kind of work. It is a same-tier preference only: never change tier to satisfy it; use an empty string when there is no preference. reason is one short sentence for a human reader.
 
 Follow policy_prompt in the user payload when choosing executor_tier, reviewer and reviewer_tier. That text is the preference. Checking the work is not a reason to pick a higher tier than doing it. You still only return the JSON object above: you do not change status, assignee, or any other ticket field, and you do not take an action. A fact marked unknown is missing: do not treat it as zero, available, or exhausted.`
 

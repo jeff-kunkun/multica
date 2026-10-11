@@ -381,3 +381,24 @@ func TestSystemOneHonoursContextDeadline(t *testing.T) {
 		t.Fatalf("a hung endpoint must become an unavailable judge, got %v", err)
 	}
 }
+
+func TestSystemOneSeriesPreferenceQuestionAndAnswer(t *testing.T) {
+	reply := strings.Replace(assignReply, `"answers": {`, `"answers": {"preferred_series":{"type":"choice","choice":"Claude","confidence":0.9},`, 1)
+	srv, probe := systemOneServer(t, http.StatusOK, reply)
+	state := assignState()
+	state.CandidateSeries = []string{"Claude", "Codex"}
+	state.PolicyPrompt = "前端工作多用 Claude 系列"
+	v, err := (SystemOneJudge{HTTP: srv.Client()}).Assign(context.Background(), systemOneTarget(srv.URL), state)
+	if err != nil || v.PreferredSeries != "Claude" {
+		t.Fatalf("verdict=%+v err=%v", v, err)
+	}
+	questions := probe.body["questions"].(map[string]any)
+	question, ok := questions["preferred_series"].(map[string]any)
+	if !ok {
+		t.Fatal("missing preferred series question")
+	}
+	criteria := question["criteria"].(map[string]any)
+	if _, ok := criteria["Claude"]; !ok {
+		t.Fatal("missing series choice")
+	}
+}
