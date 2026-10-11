@@ -66,6 +66,7 @@ type Agent struct {
 	DomainID              pgtype.UUID   `json:"domain_id"`
 	DispatchMode          string        `json:"dispatch_mode"`
 	DispatchProjects      []pgtype.UUID `json:"dispatch_projects"`
+	SeriesOverride        string        `json:"series_override"`
 }
 
 type AgentAccessPass struct {

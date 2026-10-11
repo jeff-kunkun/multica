@@ -174,6 +174,7 @@ export interface AgentSquadGroup<
 > {
   id: string;
   squad: Squad | null;
+  seriesName?: string;
   rows: T[];
 }
 
@@ -225,13 +226,30 @@ export type AgentListVirtualItem<
   | { kind: "row"; key: string; row: T; groupId: string };
 
 export function flattenAgentListItems<
-  T extends { agent: { id: string }; squadIds: readonly string[] },
+  T extends { agent: { id: string; series?: string }; squadIds: readonly string[] },
 >(
   rows: readonly T[],
   squads: readonly Squad[],
-  grouping: "none" | "squad",
+  grouping: "none" | "squad" | "series",
   rosters?: ReadonlyMap<string, SquadRoster>,
 ): AgentListVirtualItem<T>[] {
+  if (grouping === "series") {
+    const groups = new Map<string, T[]>();
+    for (const row of rows) {
+      const name = row.agent.series || "";
+      const members = groups.get(name) ?? [];
+      members.push(row);
+      groups.set(name, members);
+    }
+    return [...groups.entries()].sort(([a], [b]) => a.localeCompare(b)).flatMap(([name, members]) => {
+      const id = `series:${name}`;
+      const group: AgentSquadGroup<T> = { id, squad: null, seriesName: name, rows: members };
+      return [
+        { kind: "header" as const, key: `header:${id}`, group },
+        ...members.map((row) => ({ kind: "row" as const, key: `${id}:${row.agent.id}`, row, groupId: id })),
+      ];
+    });
+  }
   if (grouping !== "squad") {
     return rows.map((row) => ({
       kind: "row" as const,

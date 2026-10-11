@@ -35,7 +35,7 @@ func SubstituteSeat(l Ladder, holder Seat, roster map[string]Agent, avoid []stri
 		}
 		relay = append(relay, seat)
 	}
-	provider, _ := l.ProviderFor(holder.Name, holderAgent.Model)
+	provider := l.resolveSeries(holder.Name, holderAgent.Model, holderAgent.RuntimeMode, "").Provider
 	failed := quotarelay.Seat{
 		ID:         holder.ID,
 		Name:       holder.Name,
@@ -62,7 +62,7 @@ func SubstituteSeat(l Ladder, holder Seat, roster map[string]Agent, avoid []stri
 
 func relaySeat(l Ladder, agent Agent) quotarelay.Seat {
 	tier := agentTierKey(l, agent)
-	provider, _ := l.ProviderFor(agent.Name, agent.Model)
+	provider := l.resolveSeries(agent.Name, agent.Model, agent.RuntimeMode, "").Provider
 	return quotarelay.Seat{
 		ID:        agent.ID,
 		Name:      agent.Name,

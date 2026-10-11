@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import type {
   Agent,
@@ -90,6 +90,25 @@ export function AgentDetailInspector({
     (data: Record<string, unknown>) => onUpdate(agent.id, data),
     [agent.id, onUpdate],
   );
+
+  const [series, setSeries] = useState(agent.series_override ?? "");
+  const previousSeries = useRef({ id: agent.id, value: agent.series_override ?? "" });
+  useEffect(() => {
+    const previous = previousSeries.current;
+    const next = agent.series_override ?? "";
+    setSeries((draft) => previous.id !== agent.id || draft === previous.value ? next : draft);
+    previousSeries.current = { id: agent.id, value: next };
+  }, [agent.id, agent.series_override]);
+  const saveSeries = useCallback(async (value: string) => {
+    await update({ series: value });
+  }, [update]);
+  const seriesAutoSave = useAutoSave({
+    value: series.trim(),
+    savedValue: agent.series_override ?? "",
+    onSave: saveSeries,
+    enabled: canEdit,
+    isEqual: (left, right) => left === right,
+  });
 
   const [name, setName] = useState(agent.name);
   const [description, setDescription] = useState(agent.description ?? "");
@@ -274,6 +293,36 @@ export function AgentDetailInspector({
                 length={[...description].length}
                 max={AGENT_DESCRIPTION_MAX_LENGTH}
               />
+            </div>
+          </SettingsRow>
+          <SettingsRow
+            label={t(($) => $.inspector.prop_series)}
+            description={canEdit
+              ? t(($) => $.inspector.prop_series_hint)
+              : t(($) => $.inspector.series_readonly)}
+          >
+            <div className="w-full min-w-0 space-y-1 sm:max-w-64">
+              <Input
+                aria-label={t(($) => $.inspector.prop_series)}
+                value={series}
+                placeholder={agent.automatic_series || agent.series || t(($) => $.inspector.series_unknown)}
+                disabled={!canEdit}
+                maxLength={64}
+                className="min-h-11"
+                onChange={(event) => setSeries(event.target.value)}
+                onBlur={seriesAutoSave.flush}
+              />
+              <div className="flex flex-wrap items-center justify-between gap-2 text-caption text-muted-foreground">
+                <span>{agent.series_source === "manual"
+                  ? t(($) => $.inspector.series_manual)
+                  : t(($) => $.inspector.series_auto)}</span>
+                <SettingsSaveState
+                  status={seriesAutoSave.status}
+                  savingLabel={ts(($) => $.auto_save.saving)}
+                  savedLabel={ts(($) => $.auto_save.saved)}
+                  errorLabel={ts(($) => $.auto_save.failed)}
+                />
+              </div>
             </div>
           </SettingsRow>
         </SettingsCard>

@@ -268,7 +268,13 @@
     "dispatch_projects_empty": "プロジェクトなし",
     "routing_inherited_hint": "基本ロールに従っています。個別に設定するには、上で追従をオフにしてください。",
     "prop_routing_usage": "使用量",
-    "prop_routing_usage_hint": "アカウント枠の相対的な余裕"
+    "prop_routing_usage_hint": "アカウント枠の相対的な余裕",
+    "prop_series": "シリーズ",
+    "prop_series_hint": "空欄にすると自動分類に戻ります。",
+    "series_readonly": "このエージェントを変更する権限がありません。",
+    "series_auto": "自動",
+    "series_manual": "手動",
+    "series_unknown": "未分類"
   },
   "overview": {
     "agent_context": "エージェント",
@@ -1210,7 +1216,8 @@
     "group_by": "グループ化",
     "grouping_none": "なし",
     "grouping_squad": "スクワッド",
-    "grouping_specialization": "ベースロール"
+    "grouping_specialization": "ベースロール",
+    "grouping_series": "シリーズ"
   },
   "creation_studio": {
     "title": "エージェントを作成",

@@ -160,6 +160,9 @@ func (d decision) withJudge(v Verdict, err error, threshold float64, l Ladder, t
 		trace.Judge = &TraceJudge{Effect: JudgeFailed, Why: clipRunes(err.Error(), 160)}
 		return d
 	}
+	if preferred, normalizeErr := NormalizeSeries(v.PreferredSeries); normalizeErr == nil {
+		d.Verdict.PreferredSeries = preferred
+	}
 	got := strings.ToLower(strings.TrimSpace(v.ExecutorTier))
 	reason := strings.TrimSpace(v.Reason)
 	tj := &TraceJudge{Tier: got, Confidence: v.ExecutorConfidence, Reason: reason}

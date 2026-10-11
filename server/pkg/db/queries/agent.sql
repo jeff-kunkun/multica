@@ -84,7 +84,7 @@ INSERT INTO agent (
     instructions, custom_env, custom_args, mcp_config, model, thinking_level,
     service_tier, routing_tier, conversation_starters,
     composio_toolkit_allowlist, permission_mode, parent_agent_id,
-    runtime_inherited, routing_usage, dispatch_mode
+    runtime_inherited, routing_usage, dispatch_mode, series_override
 ) VALUES (
     $1, $2, $3, $4, $5,
     $6, $7, $8, $9, $10,
@@ -96,7 +96,8 @@ INSERT INTO agent (
     sqlc.narg('parent_agent_id')::uuid,
     COALESCE(sqlc.narg('runtime_inherited')::boolean, FALSE),
     COALESCE(sqlc.narg('routing_usage')::text, 'normal'),
-    COALESCE(sqlc.narg('dispatch_mode')::text, 'auto')
+    COALESCE(sqlc.narg('dispatch_mode')::text, 'auto'),
+    COALESCE(sqlc.narg('series_override')::text, '')
 )
 RETURNING *;
 
@@ -218,6 +219,7 @@ UPDATE agent SET
     service_tier = COALESCE(sqlc.narg('service_tier'), service_tier),
     routing_tier = COALESCE(sqlc.narg('routing_tier'), routing_tier),
     routing_usage = COALESCE(sqlc.narg('routing_usage'), routing_usage),
+    series_override = COALESCE(sqlc.narg('series_override')::text, series_override),
     dispatch_mode = COALESCE(sqlc.narg('dispatch_mode')::text, dispatch_mode),
     dispatch_projects = COALESCE(sqlc.narg('dispatch_projects')::uuid[], dispatch_projects),
     conversation_starters = COALESCE(sqlc.narg('conversation_starters'), conversation_starters),

@@ -310,13 +310,16 @@ func (s routingStore) Roster(ctx context.Context, workspaceID string) (map[strin
 			continue
 		}
 		id := util.UUIDToString(a.ID)
+		series := service.AgentSeries(ctx, s.h.Queries, a)
 		agent := routing.Agent{
-			ID:      id,
-			Name:    a.Name,
-			Tier:    a.RoutingTier.String,
-			Demoted: demoted[id],
-			Usage:   a.RoutingUsage,
-			Model:   a.Model.String,
+			ID:          id,
+			Name:        a.Name,
+			Tier:        a.RoutingTier.String,
+			Demoted:     demoted[id],
+			Usage:       a.RoutingUsage,
+			Model:       a.Model.String,
+			RuntimeMode: series.AutomaticSeries,
+			Series:      series.Series,
 			// A mention_only seat stays on the roster so it can be woken
 			// as a holder; the candidate builders drop it (ADR-0008).
 			State: service.AgentSeatState(a),
@@ -458,7 +461,8 @@ func (s routingStore) OffRosterSeat(ctx context.Context, workspaceID, agentID st
 	if agent.RoutingTier.Valid {
 		tier = agent.RoutingTier.String
 	}
-	out := routing.Agent{ID: agentID, Name: agent.Name, Tier: tier, Usage: agent.RoutingUsage, Model: agent.Model.String, State: service.AgentSeatState(agent)}
+	series := service.AgentSeries(ctx, s.h.Queries, agent)
+	out := routing.Agent{ID: agentID, Name: agent.Name, Tier: tier, Usage: agent.RoutingUsage, Model: agent.Model.String, RuntimeMode: series.AutomaticSeries, Series: series.Series, State: service.AgentSeatState(agent)}
 	out.Direction = s.domainNames(ctx, wsID)[agent.DomainID]
 	if agent.ParentAgentID.Valid {
 		if parent, err := s.h.Queries.GetAgent(ctx, agent.ParentAgentID); err == nil {

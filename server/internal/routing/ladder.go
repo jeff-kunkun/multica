@@ -432,8 +432,13 @@ func (l Ladder) pickByName(t Tier, scene Scene, roster map[string]Agent) (Seat, 
 
 // Agent is the slice of an agent record routing needs.
 type Agent struct {
-	ID   string
-	Name string
+	// Series is the effective display/routing group, including a manual override.
+	Series string
+	// RuntimeMode carries the runtime CLI provider (claude/codex), not the
+	// agent record's cloud/local execution mode.
+	RuntimeMode string
+	ID          string
+	Name        string
 	// Tier is the tier key a human tagged this seat with, empty when the seat
 	// carries no tag. It is the authoritative rung: strength is not derivable
 	// from the model id, because the same model at a different thinking level
@@ -566,10 +571,8 @@ func (l Ladder) SeatByName(name string) (TierSeat, string, bool) {
 // the moment someone switches a seat's model, and a stale copy would make a
 // same-tier handoff pick the very house it meant to leave.
 func (l Ladder) ProviderFor(name, model string) (string, bool) {
-	if provider := ModelProvider(model); provider != "" {
-		return provider, true
-	}
-	return l.ProviderOf(name)
+	provider := l.resolveSeries(name, model, "", "").Provider
+	return provider, provider != ""
 }
 
 // ModelProvider reads the model family off a model id: claude-* is
@@ -705,11 +708,11 @@ func (l Ladder) SceneTierAlternate(holder Seat, scene Scene, roster map[string]A
 	if !ok {
 		return Seat{}, false
 	}
-	holderModel := ""
+	holderModel, holderRuntime := "", ""
 	if a, ok := agentByID(roster, holder.ID); ok {
-		holderModel = a.Model
+		holderModel, holderRuntime = a.Model, a.RuntimeMode
 	}
-	holderProvider, _ := l.ProviderFor(holder.Name, holderModel)
+	holderProvider := l.resolveSeries(holder.Name, holderModel, holderRuntime, "").Provider
 	pool := make([]Seat, 0, len(roster))
 	agents := make(map[string]Agent, len(roster))
 	seen := map[string]bool{}
@@ -729,7 +732,8 @@ func (l Ladder) SceneTierAlternate(holder Seat, scene Scene, roster map[string]A
 		if seatTier != tier.Key {
 			continue
 		}
-		provider, known := l.ProviderFor(agent.Name, agent.Model)
+		provider := l.resolveSeries(agent.Name, agent.Model, agent.RuntimeMode, "").Provider
+		known := provider != ""
 		if !known || provider == "" || provider == holderProvider {
 			continue
 		}

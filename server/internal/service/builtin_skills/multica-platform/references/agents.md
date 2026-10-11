@@ -477,3 +477,27 @@ State-changing (require an explicit instruction — do not run speculatively):
 - "Detaching a specialisation keeps the inherited prompt." It does not — the
   child is left with only its own `instructions`. Solidify first to freeze the
   text in.
+
+## Series
+
+`agent list/get --output json` exposes `series` (effective name),
+`series_source` (`auto` or `manual`), `automatic_series`, and `series_override`.
+The configured model decides the automatic series first, then the runtime CLI,
+then the legacy ladder fallback: Claude, Codex, DeepSeek, Grok, or Gemini.
+An unknown runtime/model has an empty automatic series.
+
+```bash
+multica agent update <agent-id> --series '破甲系列' --output json
+multica agent update <agent-id> --series '' --output json  # restore automatic
+multica agent create --name <name> --runtime-id <runtime-id> --series '破甲系列'
+```
+
+Names are trimmed, limited to 64 characters, and cannot contain control characters.
+Omitting `series` on update preserves the override. Series are per-seat and do not
+inherit a parent's manual override; following specialisations derive their automatic
+series from the inherited model/runtime. The settings page and CLI use the same API.
+
+A routing `policy_prompt` may request a series for a kind of work. The judge can
+return `preferred_series`; routing prefers an eligible seat in that series only
+within the chosen tier and otherwise keeps its ordinary choice. Manual grouping
+never changes the automatic provider used by acceptance and quota family rotation.

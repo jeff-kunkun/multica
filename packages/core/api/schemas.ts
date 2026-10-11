@@ -2164,6 +2164,10 @@ export const AgentSchema: z.ZodType<Agent> = z.object({
   service_tier: z.string().optional(),
   // Seat strength for automatic dispatch (DENE-633). Optional because a
   // desktop build can talk to a backend that predates the column.
+  series: z.string().optional().catch(undefined),
+  series_override: z.string().optional().catch(undefined),
+  series_source: z.enum(["auto", "manual"]).optional().catch(undefined),
+  automatic_series: z.string().optional().catch(undefined),
   routing_tier: z.string().optional().catch(undefined),
   routing_usage: z.string().optional().catch(undefined),
   dispatch_mode: z.string().optional().catch(undefined),

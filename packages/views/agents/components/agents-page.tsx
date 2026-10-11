@@ -375,7 +375,9 @@ function SquadGroupHeader({
   href: string | null;
 }) {
   const { t } = useT("agents");
-  const name = group.squad?.name ?? t(($) => $.toolbar.no_squad);
+  const name = group.seriesName !== undefined
+    ? group.seriesName || t(($) => $.inspector.series_unknown)
+    : group.squad?.name ?? t(($) => $.toolbar.no_squad);
   const count = group.rows.length;
   return (
     <div

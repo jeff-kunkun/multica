@@ -9,7 +9,6 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/quotarelay"
-	"github.com/multica-ai/multica/server/internal/routing"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/taskfailure"
@@ -35,8 +34,8 @@ func (s *TaskService) relaySafetyRefusal(ctx context.Context, task db.AgentTaskQ
 	if err != nil {
 		return false
 	}
-	house, ok := routing.DefaultLadder.ProviderFor(failed.Name, failed.Model.String)
-	if !ok || house == "" {
+	house := AgentSeries(ctx, s.Queries, failed).Provider
+	if house == "" {
 		return false
 	}
 
