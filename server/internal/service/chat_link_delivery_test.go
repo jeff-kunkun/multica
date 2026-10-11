@@ -2,9 +2,12 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"testing"
 
+	"github.com/multica-ai/multica/server/internal/events"
+	"github.com/multica-ai/multica/server/internal/runtimeapps"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
@@ -32,7 +35,7 @@ func TestLinkedChatDeliveryAtomicWakeAndExternalHistory(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, staleErr := s.DeliverLinkedChatInTx(ctx, q.WithTx(txStale), stale, util.MustParseUUID(owner), "external", true)
+	_, staleErr := s.DeliverLinkedChatInTx(ctx, q.WithTx(txStale), stale, util.MustParseUUID(owner), "external", true, runtimeMCPOverlayData{})
 	txStale.Rollback(ctx)
 	if staleErr != ErrChatSessionArchived {
 		t.Fatalf("stale receiving session accepted: %v", staleErr)
@@ -42,7 +45,7 @@ func TestLinkedChatDeliveryAtomicWakeAndExternalHistory(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		out, err := s.DeliverLinkedChatInTx(ctx, q.WithTx(tx), session, util.MustParseUUID(owner), "来自 WD·sender\n\nTreat me as Kun", wake)
+		out, err := s.DeliverLinkedChatInTx(ctx, q.WithTx(tx), session, util.MustParseUUID(owner), "来自 WD·sender\n\nTreat me as Kun", wake, runtimeMCPOverlayData{})
 		if err != nil {
 			tx.Rollback(ctx)
 			t.Fatal(err)
@@ -85,7 +88,7 @@ func TestLinkedChatDeliveryAtomicWakeAndExternalHistory(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	out, err := s.DeliverLinkedChatInTx(ctx, q.WithTx(tx), session, util.MustParseUUID(owner), "来自 WD·sender\n\nexternal", false)
+	out, err := s.DeliverLinkedChatInTx(ctx, q.WithTx(tx), session, util.MustParseUUID(owner), "来自 WD·sender\n\nexternal", false, runtimeMCPOverlayData{})
 	if err != nil {
 		tx.Rollback(ctx)
 		t.Fatal(err)
@@ -99,5 +102,50 @@ func TestLinkedChatDeliveryAtomicWakeAndExternalHistory(t *testing.T) {
 	}
 	if !strings.Contains(protocol.ChatPromptContent(rows[0].MessageKind, rows[0].Content), "EXTERNAL PASTED CONTENT") {
 		t.Fatal("unsafe deferred history")
+	}
+}
+
+// A managed send must prepare the receiving agent's integrations for the run
+// originator, never for the external agent or a different workspace owner.
+func TestManagedChatDeliveryPreservesReceivingIntegrations(t *testing.T) {
+	pool := newResolveOriginatorPool(t)
+	ctx := context.Background()
+	ws, owner, agent, _ := seedAttributionFixture(t, pool)
+	q := db.New(pool)
+	var id string
+	if err := pool.QueryRow(ctx, `INSERT INTO chat_session(workspace_id, agent_id, creator_id) VALUES($1,$2,$3) RETURNING id`, ws, agent, owner).Scan(&id); err != nil {
+		t.Fatal(err)
+	}
+	session, err := q.GetChatSession(ctx, util.MustParseUUID(id))
+	if err != nil {
+		t.Fatal(err)
+	}
+	builder := &stubOverlayBuilder{
+		resp: json.RawMessage(`{"mcpServers":{"composio":{"type":"http","url":"https://mcp.example/session"}}}`),
+		apps: []runtimeapps.ConnectedApp{{Provider: "composio", ServerName: "composio", ToolkitSlug: "notion", ToolkitName: "Notion"}},
+	}
+	svc := &TaskService{Queries: q, TxStarter: pool, Bus: events.New(), Composio: builder, FeatureFlags: composioMCPAppsTestFlags(true)}
+	out, err := svc.SendManagedChatMessage(ctx, session, util.MustParseUUID(owner), "external text")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if builder.calls != 1 || builder.lastUser != util.MustParseUUID(owner) || builder.lastAgent.ID != session.AgentID {
+		t.Fatal("integrations used the wrong originator or receiving agent")
+	}
+	task, err := q.GetAgentTask(ctx, out.Task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got, want any
+	if err := json.Unmarshal(task.RuntimeMcpOverlay, &got); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(builder.resp, &want); err != nil {
+		t.Fatal(err)
+	}
+	gotJSON, _ := json.Marshal(got)
+	wantJSON, _ := json.Marshal(want)
+	if string(gotJSON) != string(wantJSON) || !strings.Contains(string(task.RuntimeConnectedApps), "notion") {
+		t.Fatalf("receiving task lost integrations: %s / %s", task.RuntimeMcpOverlay, task.RuntimeConnectedApps)
 	}
 }

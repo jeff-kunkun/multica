@@ -20,7 +20,7 @@ import (
 // and invocation grant; the managed middleware owns the existing write audit.
 // Unlike a normal send, this never interprets mentions or attributes text to a
 // human. It never invokes external integrations while holding database locks.
-func (s *TaskService) DeliverLinkedChatInTx(ctx context.Context, qtx *db.Queries, session db.ChatSession, originator pgtype.UUID, content string, wake bool) (*DirectChatSendResult, error) {
+func (s *TaskService) DeliverLinkedChatInTx(ctx context.Context, qtx *db.Queries, session db.ChatSession, originator pgtype.UUID, content string, wake bool, overlay runtimeMCPOverlayData) (*DirectChatSendResult, error) {
 	current, err := qtx.LockChatSessionForEnqueue(ctx, session.ID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrChatSessionArchived
@@ -61,6 +61,7 @@ func (s *TaskService) DeliverLinkedChatInTx(ctx context.Context, qtx *db.Queries
 			OriginatorSource:    pgtype.Text{String: "workspace_link_delivery", Valid: true},
 			TriggerEvidenceKind: pgtype.Text{String: "chat_message", Valid: true}, TriggerEvidenceRefID: messageID,
 			ForceFreshSession: pgtype.Bool{Valid: true},
+			RuntimeMcpOverlay: overlay.Overlay, RuntimeConnectedApps: overlay.ConnectedApps,
 		})
 		if err != nil {
 			return nil, fmt.Errorf("create delivery wake: %w", err)
@@ -109,10 +110,17 @@ func (s *TaskService) FinalizeLinkedChatDelivery(ctx context.Context, out *Direc
 // SendManagedChatMessage sends an external agent's text using the originator's
 // existing source chat permissions. It does not borrow another user's identity.
 func (s *TaskService) SendManagedChatMessage(ctx context.Context, session db.ChatSession, originator pgtype.UUID, content string) (*DirectChatSendResult, error) {
+	agent, err := s.Queries.GetAgent(ctx, session.AgentID)
+	if err != nil {
+		return nil, fmt.Errorf("load receiving agent for integrations: %w", err)
+	}
+	// Resolve the receiving agent's integrations for the originator before
+	// opening a transaction: the builder can perform network I/O.
+	overlay := s.buildRuntimeMCPOverlay(ctx, originator, agent)
 	var out *DirectChatSendResult
-	err := s.runInTx(ctx, func(qtx *db.Queries) error {
+	err = s.runInTx(ctx, func(qtx *db.Queries) error {
 		var err error
-		out, err = s.DeliverLinkedChatInTx(ctx, qtx, session, originator, content, true)
+		out, err = s.DeliverLinkedChatInTx(ctx, qtx, session, originator, content, true, overlay)
 		return err
 	})
 	if err != nil {
