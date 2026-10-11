@@ -223,5 +223,7 @@
     "title": "Issues from this chat",
     "just_changed": "Just changed",
     "needs_you": "needs you"
-  }
+  },
+  "references": "Read-only reference projects",
+  "references_unavailable": "Some reference projects are no longer available."
 }

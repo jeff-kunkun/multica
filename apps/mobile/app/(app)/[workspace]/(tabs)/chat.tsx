@@ -1,3 +1,5 @@
+import { Text } from "@/components/ui/text";
+import { chatDraftReferences, useChatReferencesDraftStore } from "@/data/stores/chat-references-draft-store";
 /**
  * Chat tab — single-screen IA.
  *
@@ -36,6 +38,7 @@ import {
   KeyboardAvoidingView,
   Platform,
   View,
+  Pressable,
 } from "react-native";
 import { router } from "expo-router";
 import { useFocusEffect, useIsFocused } from "@react-navigation/native";
@@ -121,6 +124,7 @@ export default function ChatTab() {
     }
   }, [t]);
   const wsId = useWorkspaceStore((s) => s.currentWorkspaceId);
+  const referenceCount = useChatReferencesDraftStore((s) => s.workspaceId === wsId ? s.refs.length : 0);
   const wsSlug = useWorkspaceStore((s) => s.currentWorkspaceSlug);
   const userId = useAuthStore((s) => s.user?.id);
 
@@ -299,7 +303,9 @@ export default function ChatTab() {
           const session = await createSession.mutateAsync({
             agent_id: currentAgent.id,
             title: titleSeed.slice(0, 50),
+            linked_projects: chatDraftReferences(wsId),
           });
+          useChatReferencesDraftStore.getState().clear();
           return session.id;
         } finally {
           sessionPromiseRef.current = null;
@@ -308,7 +314,7 @@ export default function ChatTab() {
       sessionPromiseRef.current = promise;
       return promise;
     },
-    [activeSessionId, currentAgent, createSession],
+    [activeSessionId, currentAgent, createSession, wsId],
   );
 
   const handleSend = useCallback(
@@ -533,6 +539,7 @@ export default function ChatTab() {
 
   // ── Header / sheet actions ─────────────────────────────────────────────
   const handleNewChat = useCallback(() => {
+    useChatReferencesDraftStore.getState().clear();
     if (availableAgents.length > 1) {
       setAgentPickerOpen(true);
       return;
@@ -623,6 +630,7 @@ export default function ChatTab() {
           />
         }
       />
+      <Pressable accessibilityRole="button" className="min-h-11 justify-center border-b border-border px-4" onPress={() => { if (wsSlug) router.push({ pathname: "/[workspace]/chat-references", params: { workspace: wsSlug, ...(activeSessionId ? { sessionId: activeSessionId } : {}) } }); }}><Text className="text-sm text-muted-foreground">{t("references")}{(activeSession ? activeSession.linked_projects?.length : referenceCount) ? ` · ${activeSession ? activeSession.linked_projects?.length : referenceCount}` : ""}</Text>{activeSession?.linked_projects?.some((ref) => !ref.available) && <Text className="text-sm text-destructive">{t("references_unavailable")}</Text>}</Pressable>
       {availability === "none" ? <NoAgentBanner /> : null}
       <KeyboardAvoidingView
         behavior={Platform.OS === "ios" ? "padding" : undefined}

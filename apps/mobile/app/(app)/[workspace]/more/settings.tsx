@@ -60,6 +60,7 @@ export default function SettingsPage() {
     setPreference: setLocalePreference,
   } = useLocalePreference();
   const { t } = useT("settings");
+  const { t: tw } = useT("workspace");
   const { t: tCommon } = useT();
   const mutedFg = THEME[colorScheme].mutedForeground;
   const localeLabels = {
@@ -128,6 +129,8 @@ export default function SettingsPage() {
           subtitle={t("account.notifications_subtitle")}
         />
       </SectionGroup>
+
+      <SectionGroup title={tw("links.tab.title")}><NavRow title={tw("links.tab.title")} subtitle={tw("links.tab.description")} chevronColor={mutedFg} onPress={() => { if (currentSlug) router.push({ pathname: "/[workspace]/workspace-links", params: { workspace: currentSlug } }); }} /></SectionGroup>
 
       <SectionGroup title={t("account.workspaces")}>
         {isLoading ? (
