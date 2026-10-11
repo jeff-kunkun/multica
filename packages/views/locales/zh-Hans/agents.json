@@ -276,7 +276,13 @@
     "dispatch_projects_empty": "没有项目",
     "routing_inherited_hint": "跟随基础角色。要单独设置，先关闭上方的「跟随基础角色的运行时」。",
     "prop_routing_usage": "用量",
-    "prop_routing_usage_hint": "账号额度的相对多少"
+    "prop_routing_usage_hint": "账号额度的相对多少",
+    "prop_series": "系列",
+    "prop_series_hint": "清空后按运行时和模型自动归类。",
+    "series_readonly": "你没有修改此智能体的权限。",
+    "series_auto": "自动",
+    "series_manual": "手动",
+    "series_unknown": "未分类"
   },
   "overview": {
     "agent_context": "智能体",
@@ -1308,7 +1314,8 @@
     "group_by": "分组方式",
     "grouping_none": "无",
     "grouping_squad": "小队",
-    "grouping_specialization": "按基础角色"
+    "grouping_specialization": "按基础角色",
+    "grouping_series": "系列"
   },
   "actions": {
     "selected_other": "已选 {{count}} 项",

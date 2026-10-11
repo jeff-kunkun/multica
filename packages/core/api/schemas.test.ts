@@ -2896,6 +2896,18 @@ describe("AgentSchema routing_tier", () => {
     expect(parsed.routing_tier).toBeUndefined();
   });
 
+  it("keeps series metadata and tolerates older or malformed responses", () => {
+    const parsed = AgentSchema.parse({ ...baseAgent, series: "破甲系列", series_override: "破甲系列", series_source: "manual", automatic_series: "Codex" });
+    expect(parsed.series).toBe("破甲系列");
+    expect(parsed.series_source).toBe("manual");
+    expect(parsed.automatic_series).toBe("Codex");
+    expect(AgentSchema.parse(baseAgent).series).toBeUndefined();
+    const malformed = AgentSchema.parse({ ...baseAgent, series: 7, series_source: "future", automatic_series: null });
+    expect(malformed.id).toBe(baseAgent.id);
+    expect(malformed.series).toBeUndefined();
+    expect(malformed.series_source).toBeUndefined();
+  });
+
   it("keeps the rung a newer backend sent", () => {
     const parsed = AgentSchema.parse({ ...baseAgent, routing_tier: "strong" });
     expect(parsed.routing_tier).toBe("strong");

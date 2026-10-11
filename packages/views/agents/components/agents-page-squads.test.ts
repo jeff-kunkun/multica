@@ -435,3 +435,18 @@ describe("official-cloud GET /api/squads payload (no members field)", () => {
     ).toHaveLength(7);
   });
 });
+
+
+describe("series grouping", () => {
+  it("groups effective series once per agent and preserves ordering inside groups", () => {
+    const rows = [
+      { agent: { id: "1", series: "Codex" }, squadIds: [] },
+      { agent: { id: "2", series: "Claude" }, squadIds: [] },
+      { agent: { id: "3", series: "Codex" }, squadIds: [] },
+      { agent: { id: "4", series: "破甲系列" }, squadIds: [] },
+    ];
+    const items = flattenAgentListItems(rows, [], "series");
+    expect(items.filter((item) => item.kind === "header").map((item) => item.group.seriesName)).toEqual(["Claude", "Codex", "破甲系列"]);
+    expect(items.filter((item) => item.kind === "row").map((item) => item.row.agent.id)).toEqual(["2", "1", "3", "4"]);
+  });
+});

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, screen } from "@testing-library/react";
+import { cleanup, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { Agent } from "@multica/core/types";
 import { renderWithI18n } from "../../test/i18n";
@@ -65,6 +65,19 @@ function renderInspector(agent: Agent, onUpdate = vi.fn(async () => {})) {
 describe("AgentDetailInspector routing section", () => {
   afterEach(() => {
     cleanup();
+  });
+
+  it("saves a custom series and clears it to restore automatic classification", async () => {
+    const user = userEvent.setup();
+    const onUpdate = renderInspector(agentFixture({ series: "Claude", automatic_series: "Claude", series_source: "auto" }));
+    const input = screen.getByRole("textbox", { name: "Series" });
+    expect(input.getAttribute("placeholder")).toBe("Claude");
+    await user.type(input, "破甲系列");
+    await user.tab();
+    await waitFor(() => expect(onUpdate).toHaveBeenCalledWith("agent-1", { series: "破甲系列" }));
+    await user.clear(input);
+    await user.tab();
+    await waitFor(() => expect(onUpdate).toHaveBeenCalledWith("agent-1", { series: "" }));
   });
 
   it("shows the saved rung and usage", () => {

@@ -853,6 +853,11 @@ export interface Agent {
    * person tags it; it is deliberately NOT derived from `model`, because the
    * same model at another thinking level is another rung.
    */
+  /** Effective display/routing series, supplied by the server. */
+  series?: string;
+  series_override?: string;
+  series_source?: "auto" | "manual";
+  automatic_series?: string;
   routing_tier?: string;
   /**
    * Account headroom tag (DENE-922): `tight`, `normal` or `ample`. Orders
@@ -950,6 +955,8 @@ export interface AgentSkillSummary {
 }
 
 export interface CreateAgentRequest {
+  /** Empty restores automatic classification. */
+  series?: string;
   name: string;
   description?: string;
   instructions?: string;
@@ -1084,6 +1091,8 @@ export interface BulkUpdateAgentRoutingResponse {
 }
 
 export interface UpdateAgentRequest {
+  /** Empty restores automatic classification. */
+  series?: string;
   name?: string;
   description?: string;
   instructions?: string;

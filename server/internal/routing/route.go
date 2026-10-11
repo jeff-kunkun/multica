@@ -297,7 +297,7 @@ func (r *Router) routeTodo(ctx context.Context, workspaceID string, settings Set
 		return Outcome{State: StateEnabled, Action: ActionSkipped, Reason: "roster unreadable"}, err
 	}
 	roster = ForProject(roster, issue.ProjectID)
-	candidates := ladder.SceneCandidates(scene, roster)
+	candidates := ladder.assignmentCandidates(scene, roster)
 	if len(candidates) == 0 {
 		return Outcome{State: StateEnabled, Action: ActionNoop, Reason: "ladder has no seat in this workspace"}, nil
 	}
@@ -334,6 +334,7 @@ func (r *Router) routeTodo(ctx context.Context, workspaceID string, settings Set
 	}
 	executorFromLabel := needExecutor && labelSeatOK
 
+	state.CandidateSeries = ladder.candidateSeries(roster)
 	var verdict Verdict
 	dec := decision{Mode: settings.Mode(), Decider: DeciderNone}
 	if needReviewer || !executorFromLabel {
@@ -367,6 +368,7 @@ func (r *Router) routeTodo(ctx context.Context, workspaceID string, settings Set
 	// visible in the decision comment.
 	var executor *Seat
 	var notes []string
+	seriesNote := ""
 	executorSource := ""
 	var cont ContinuationPick
 	var load LoadPick
@@ -419,6 +421,20 @@ func (r *Router) routeTodo(ctx context.Context, workspaceID string, settings Set
 						seat, source = load.Seat, pickLoad
 						seat.Balanced = load.Detail()
 					}
+				}
+			}
+			if !labelStill && verdict.PreferredSeries != "" {
+				preferred, matched, preferenceErr := r.availableSeriesSeat(ctx, workspaceID, settings, ladder, scene, roster, seat, verdict.PreferredSeries)
+				if preferenceErr != nil {
+					return Outcome{State: StateEnabled, Action: ActionSkipped, Reason: "routing context incomplete"}, preferenceErr
+				}
+				if matched {
+					seat = preferred
+					seriesNote = "系列偏好：" + verdict.PreferredSeries + "；同档可用席位 " + seat.Name
+					notes = append(notes, seriesNote)
+				} else {
+					seriesNote = "系列偏好：" + verdict.PreferredSeries + "；同档没有可用席位，沿用原选择"
+					notes = append(notes, seriesNote)
 				}
 			}
 			written, err := r.Store.AssignAgentIfUnassigned(ctx, workspaceID, issue.ID, seat, mode == fillStarts)
@@ -541,6 +557,9 @@ func (r *Router) routeTodo(ctx context.Context, workspaceID string, settings Set
 		ContinuationLine(cont, settings.PreferContinuation, executor),
 		LoadLine(load, settings.PreferIdle, executor),
 		learnLine(learn, settings.LearnFromOutcomes, learnApplied, executor, executorSource))
+	if seriesNote != "" {
+		body += "\n\n" + seriesNote
+	}
 	if note := DemotionFootnote(ladder, roster, executor); note != "" {
 		body += "\n\n" + note
 	}
@@ -1526,8 +1545,12 @@ func seatIn(seats []Seat, seat Seat) bool {
 
 func (r *Router) judgeState(issue Issue, scene Scene, candidates []Seat) JudgeState {
 	tiers := make([]string, 0, len(candidates))
+	seen := map[string]bool{}
 	for _, c := range candidates {
-		tiers = append(tiers, c.TierKey)
+		if !seen[c.TierKey] {
+			tiers = append(tiers, c.TierKey)
+			seen[c.TierKey] = true
+		}
 	}
 	return JudgeState{
 		Title:              issue.Title,

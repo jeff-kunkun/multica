@@ -194,7 +194,11 @@ type AgentResponse struct {
 	RoutingTier string `json:"routing_tier"`
 	// RoutingUsage is the headroom a person tagged this seat with (DENE-922):
 	// tight / normal / ample. Routing prefers ample inside a rung.
-	RoutingUsage string `json:"routing_usage"`
+	RoutingUsage    string `json:"routing_usage"`
+	Series          string `json:"series"`
+	SeriesOverride  string `json:"series_override"`
+	SeriesSource    string `json:"series_source"`
+	AutomaticSeries string `json:"automatic_series"`
 	// DispatchMode is whether automatic dispatch may pick this seat
 	// (DENE-1600, ADR-0008): auto, or mention_only for a seat that takes
 	// work only when named. Independent of RoutingTier and WorkEnabled.
@@ -308,6 +312,7 @@ func (h *Handler) agentToResponse(a db.Agent) AgentResponse {
 	// owner-only gate below can decide.
 	composioAllowlist := a.ComposioToolkitAllowlist
 
+	series := service.AgentSeries(context.Background(), h.Queries, a)
 	return AgentResponse{
 		ID:                       uuidToString(a.ID),
 		WorkspaceID:              uuidToString(a.WorkspaceID),
@@ -343,6 +348,10 @@ func (h *Handler) agentToResponse(a db.Agent) AgentResponse {
 		ServiceTier:              a.ServiceTier.String,
 		RoutingTier:              a.RoutingTier.String,
 		RoutingUsage:             a.RoutingUsage,
+		Series:                   series.Series,
+		SeriesOverride:           a.SeriesOverride,
+		SeriesSource:             series.Source,
+		AutomaticSeries:          series.AutomaticSeries,
 		DispatchMode:             a.DispatchMode,
 		DispatchProjects:         dispatchProjectsOrEmpty(a),
 		ComposioToolkitAllowlist: composioAllowlist,
@@ -2042,6 +2051,7 @@ func (h *Handler) GetAgent(w http.ResponseWriter, r *http.Request) {
 }
 
 type CreateAgentRequest struct {
+	Series               string                     `json:"series"`
 	Name                 string                     `json:"name"`
 	Description          string                     `json:"description"`
 	Instructions         string                     `json:"instructions"`
@@ -2455,6 +2465,11 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 	// role's account, so it starts with the same tag (DENE-922).
 	// Dispatch mode rides with the rung (ADR-0008): a mention_only base
 	// role's specialisation is not auto-dispatched either.
+	seriesOverride, seriesErr := routing.NormalizeSeries(req.Series)
+	if seriesErr != nil {
+		writeError(w, http.StatusBadRequest, seriesErr.Error())
+		return
+	}
 	var createdRoutingUsage, createdDispatchMode pgtype.Text
 	if parentAgent.ID.Valid {
 		createdRoutingUsage = pgtype.Text{String: parentAgent.RoutingUsage, Valid: true}
@@ -2503,6 +2518,7 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		ServiceTier:              createdServiceTier,
 		RoutingTier:              createdRoutingTier,
 		RoutingUsage:             createdRoutingUsage,
+		SeriesOverride:           pgtype.Text{String: seriesOverride, Valid: true},
 		DispatchMode:             createdDispatchMode,
 		ConversationStarters:     sp,
 		ComposioToolkitAllowlist: allowlist,
@@ -2607,6 +2623,7 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 }
 
 type UpdateAgentRequest struct {
+	Series               *string                     `json:"series"`
 	Name                 *string                     `json:"name"`
 	Description          *string                     `json:"description"`
 	Instructions         *string                     `json:"instructions"`
@@ -3312,6 +3329,14 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 			}
 			params.RoutingTier = pgtype.Text{String: key, Valid: true}
 		}
+	}
+	if req.Series != nil {
+		value, err := routing.NormalizeSeries(*req.Series)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		params.SeriesOverride = pgtype.Text{String: value, Valid: true}
 	}
 	if req.RoutingUsage != nil {
 		key, ok := routing.NormalizeUsage(*req.RoutingUsage)

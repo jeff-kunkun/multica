@@ -314,7 +314,7 @@ func (q *Queries) ListDemotedQuotaAgentIDs(ctx context.Context, workspaceID pgty
 }
 
 const listInheritingSpecialisations = `-- name: ListInheritingSpecialisations :many
-SELECT id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, thinking_level, composio_toolkit_allowlist, permission_mode, kind, system_key, disabled_runtime_skills, service_tier, conversation_starters, switchable_models, auto_retry_enabled, parent_agent_id, runtime_inherited, routing_tier, work_enabled, plan_limits, doorbell_enabled, routing_usage, domain_id, dispatch_mode, dispatch_projects FROM agent
+SELECT id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, thinking_level, composio_toolkit_allowlist, permission_mode, kind, system_key, disabled_runtime_skills, service_tier, conversation_starters, switchable_models, auto_retry_enabled, parent_agent_id, runtime_inherited, routing_tier, work_enabled, plan_limits, doorbell_enabled, routing_usage, domain_id, dispatch_mode, dispatch_projects, series_override FROM agent
 WHERE workspace_id = $1
   AND parent_agent_id = $2
   AND runtime_inherited
@@ -380,6 +380,7 @@ func (q *Queries) ListInheritingSpecialisations(ctx context.Context, arg ListInh
 			&i.DomainID,
 			&i.DispatchMode,
 			&i.DispatchProjects,
+			&i.SeriesOverride,
 		); err != nil {
 			return nil, err
 		}
@@ -685,7 +686,7 @@ func (q *Queries) ListPendingQuotaRelays(ctx context.Context, limit int32) ([]Ag
 }
 
 const listQuotaAccountSiblings = `-- name: ListQuotaAccountSiblings :many
-SELECT id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, thinking_level, composio_toolkit_allowlist, permission_mode, kind, system_key, disabled_runtime_skills, service_tier, conversation_starters, switchable_models, auto_retry_enabled, parent_agent_id, runtime_inherited, routing_tier, work_enabled, plan_limits, doorbell_enabled, routing_usage, domain_id, dispatch_mode, dispatch_projects FROM agent a
+SELECT id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, thinking_level, composio_toolkit_allowlist, permission_mode, kind, system_key, disabled_runtime_skills, service_tier, conversation_starters, switchable_models, auto_retry_enabled, parent_agent_id, runtime_inherited, routing_tier, work_enabled, plan_limits, doorbell_enabled, routing_usage, domain_id, dispatch_mode, dispatch_projects, series_override FROM agent a
 WHERE a.workspace_id = $1
   AND a.id <> $2
   AND a.archived_at IS NULL
@@ -768,6 +769,7 @@ func (q *Queries) ListQuotaAccountSiblings(ctx context.Context, arg ListQuotaAcc
 			&i.DomainID,
 			&i.DispatchMode,
 			&i.DispatchProjects,
+			&i.SeriesOverride,
 		); err != nil {
 			return nil, err
 		}
