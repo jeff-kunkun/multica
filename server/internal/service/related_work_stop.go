@@ -38,6 +38,11 @@ func (s *TaskService) StopWorkTargetsInTransaction(ctx context.Context, qtx *db.
 	if err != nil {
 		return nil, err
 	}
+	if err := qtx.MarkStoppedWorkRetrySources(ctx, db.MarkStoppedWorkRetrySourcesParams{
+		WorkspaceID: workspaceID, IssueIds: issueIDs, ChatSessionIds: chatIDs,
+	}); err != nil {
+		return nil, err
+	}
 	for _, id := range issueIDs {
 		_, err := qtx.SetIssueMetadataKey(ctx, db.SetIssueMetadataKeyParams{
 			ID: id, WorkspaceID: workspaceID, Key: "agent_halted", Value: []byte("true"),

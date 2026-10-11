@@ -176,6 +176,50 @@ func TestMergedChatStopDoesNotRequeueUnreadInputs(t *testing.T) {
 	}
 }
 
+func TestMergedChatStopFencesHistoricalFailureAndAllowsNewMessage(t *testing.T) {
+	f := newChatSteerFixture(t, "claude", true)
+	sendChatWithMode(t, f.sessionID, "stop the old purchase", "").Want(http.StatusCreated)
+	// Capture the same stale failed row a sweeper could have loaded before the
+	// stop transaction commits. Its retry budget and reason otherwise allow retry.
+	dbfx.Exec(t, `UPDATE agent_task_queue SET status='failed',completed_at=now(),failure_reason='agent_error.provider_network',attempt=1,max_attempts=3 WHERE id=$1`, f.headID)
+	stale, err := testHandler.Queries.GetAgentTask(t.Context(), parseUUID(f.headID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := withChatTestWorkspaceCtx(t, withURLParam(newRequest(http.MethodPost, "/api/chat/sessions/"+f.sessionID+"/stop", nil), "sessionId", f.sessionID))
+	testutil.Call(t, testHandler.StopChatSession, req).Want(http.StatusOK)
+	var stopped bool
+	dbfx.QueryRow(t, `SELECT coalesce((context->>'work_stopped')::boolean,false) FROM agent_task_queue WHERE id=$1`, f.headID).Scan(&stopped)
+	if !stopped {
+		t.Fatal("chat stop did not fence its historical failed execution")
+	}
+	if retry, err := testHandler.TaskService.MaybeRetryFailedTask(t.Context(), stale); err != nil {
+		t.Fatal(err)
+	} else if retry != nil {
+		t.Fatal("chat stop allowed a stale historical failure to retry")
+	}
+	if err := testHandler.TaskService.RecoverFailedMergedChatInputs(t.Context(), stale); err != nil {
+		t.Fatal(err)
+	}
+	testHandler.TaskService.HandleFailedTasks(t.Context(), []db.AgentTaskQueue{stale})
+	var activeCount, recoveredCount int
+	dbfx.QueryRow(t, `SELECT count(*) FROM agent_task_queue WHERE chat_session_id=$1 AND status IN ('queued','deferred','running','dispatched','waiting_for_runtime')`, f.sessionID).Scan(&activeCount)
+	dbfx.QueryRow(t, `SELECT count(*) FROM chat_task_supplement WHERE task_id=$1 AND recovered_into_task_id IS NOT NULL`, f.headID).Scan(&recoveredCount)
+	if activeCount != 0 || recoveredCount != 0 {
+		t.Fatalf("chat stop revived historical work: active=%d recovered=%d", activeCount, recoveredCount)
+	}
+	var fresh SendChatMessageResponse
+	sendChatWithMode(t, f.sessionID, "start a new task after stopping", "").Want(http.StatusCreated).JSON(&fresh)
+	if fresh.TaskID == "" || fresh.TaskID == f.headID {
+		t.Fatalf("new human message did not start fresh work: task=%s", fresh.TaskID)
+	}
+	var freshInputs int
+	dbfx.QueryRow(t, `SELECT count(*) FROM chat_message WHERE task_id=$1 AND role='user'`, fresh.TaskID).Scan(&freshInputs)
+	if freshInputs != 1 {
+		t.Fatalf("fresh execution inherited stopped inputs: count=%d", freshInputs)
+	}
+}
+
 func TestMergedChatCompletionDoesNotReplayAcknowledgedInput(t *testing.T) {
 	f := newChatSteerFixture(t, "claude", true)
 	var delivered SendChatMessageResponse

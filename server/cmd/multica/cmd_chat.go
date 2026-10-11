@@ -1004,6 +1004,15 @@ func collectChatSendAttachments(cmd *cobra.Command) ([]pendingAttachment, error)
 	return collectLocalAttachments(cmd, paths)
 }
 
+// linkedChatRefusal preserves the server status and gives the supported next step.
+func linkedChatRefusal(cmd *cobra.Command, err error, verb string) error {
+	linked, _ := cmd.Flags().GetString(linkedFlag)
+	if strings.TrimSpace(linked) != "" {
+		return fmt.Errorf("%s: %w; inspect `multica workspace link view <link-id>` for this source", verb, err)
+	}
+	return fmt.Errorf("%s: %w", verb, err)
+}
+
 func runChatStop(cmd *cobra.Command, args []string) error {
 	session, _ := cmd.Flags().GetString("session")
 	if len(args) > 0 {
@@ -1033,13 +1042,4 @@ func runChatStop(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 	return cli.PrintJSON(os.Stdout, result)
-}
-
-// linkedChatRefusal preserves the server status and gives the supported next step.
-func linkedChatRefusal(cmd *cobra.Command, err error, verb string) error {
-	linked, _ := cmd.Flags().GetString(linkedFlag)
-	if strings.TrimSpace(linked) != "" {
-		return fmt.Errorf("%s: %w; inspect `multica workspace link view <link-id>` for this source", verb, err)
-	}
-	return fmt.Errorf("%s: %w", verb, err)
 }

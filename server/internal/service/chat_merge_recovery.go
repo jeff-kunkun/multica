@@ -23,6 +23,11 @@ func RecoverMergedChatInputs(ctx context.Context, q *db.Queries, task db.AgentTa
 	if !task.ChatSessionID.Valid || (task.Status != "completed" && task.Status != "failed") {
 		return nil
 	}
+	// A chat stop fences historical failures as well as active runs. Keep the
+	// marker on this execution, so a later human message can start fresh work.
+	if stopped, _ := util.JSONObjectOrEmpty(task.Context)["work_stopped"].(bool); stopped {
+		return nil
+	}
 	session, err := q.GetChatSession(ctx, task.ChatSessionID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil

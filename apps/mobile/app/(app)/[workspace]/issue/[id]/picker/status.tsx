@@ -40,7 +40,7 @@ export default function IssueStatusPickerRoute() {
       ]);
       router.back();
     },
-    onError: (error) => Alert.alert(t(($) => $.cancel_work.title), error instanceof Error ? error.message : t(($) => $.cancel_work.failed)),
+    onError: (error) => Alert.alert(t("cancel_work.title"), error instanceof Error ? error.message : t("cancel_work.failed")),
   });
 
   return (
@@ -49,10 +49,10 @@ export default function IssueStatusPickerRoute() {
       onChange={(next) => {
         if (cancelIssue.isPending || updateIssue.isPending) return;
         if (next === "cancelled") {
-          Alert.alert(t(($) => $.cancel_work.title), t(($) => $.cancel_work.description), [
-            { text: t(($) => $.cancel_work.keep), style: "cancel" },
-            { text: t(($) => $.cancel_work.confirm), style: "destructive", onPress: () => cancelIssue.mutate(false) },
-            { text: t(($) => $.cancel_work.confirm_related), style: "destructive", onPress: () => cancelIssue.mutate(true) },
+          Alert.alert(t("cancel_work.title"), t("cancel_work.description"), [
+            { text: t("cancel_work.keep"), style: "cancel" },
+            { text: t("cancel_work.confirm"), style: "destructive", onPress: () => cancelIssue.mutate(false) },
+            { text: t("cancel_work.confirm_related"), style: "destructive", onPress: () => cancelIssue.mutate(true) },
           ]);
           return;
         }
