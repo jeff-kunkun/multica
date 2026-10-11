@@ -67,6 +67,7 @@ const (
 	ReasonAgentRuntimeRequired  = dispatch.ReasonAgentRuntimeRequired
 	ReasonAttributionBlocked    = dispatch.ReasonAttributionBlocked
 	ReasonChainBudgetExceeded   = dispatch.ReasonChainBudgetExceeded
+	ReasonBotWakeChainLimit     = dispatch.ReasonBotWakeChainLimit
 	ReasonAlreadyActive         = dispatch.ReasonAlreadyActive
 	ReasonSelfTriggerSuppressed = dispatch.ReasonSelfTriggerSuppressed
 	ReasonIssueInTriage         = dispatch.ReasonIssueInTriage
@@ -138,6 +139,8 @@ func dispatchBlockedFallbackMessage(code DispatchReasonCode) string {
 		return "the target needs a runtime"
 	case ReasonAttributionBlocked:
 		return "the run couldn't be attributed to a responsible member"
+	case ReasonBotWakeChainLimit:
+		return "Bot wake-chain limit reached; wait for an agent reply or completed run, send as a human, or use a verified human quote; workspace administrators can change bot_wake_chain_limit"
 	case ReasonAlreadyActive:
 		return "a run is already active for this target"
 	case ReasonIssueInTriage:

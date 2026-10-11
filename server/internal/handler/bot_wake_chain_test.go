@@ -156,19 +156,30 @@ func TestBotWakeTrustedChainHTTP(t *testing.T) {
 	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM task_token WHERE task_id=$1`, task) })
 	comment(token, a)
 	drain()
-	if len(deliveries) != 3 || deliveries[2]["hop"] != float64(4) {
+	if len(deliveries) != 3 || deliveries[2]["hop"] != float64(1) {
 		t.Fatalf("agent reply chain %v", deliveries)
+	}
+	// An actual agent reply starts a fresh unanswered budget. Fill its four
+	// slots before checking durable refusal after worker recreation.
+	comment(aToken, b)
+	drain()
+	comment(bToken, a)
+	drain()
+	comment(aToken, b)
+	drain()
+	if len(deliveries) != 6 || deliveries[5]["hop"] != float64(4) {
+		t.Fatalf("fresh unanswered chain %v", deliveries)
 	}
 	// New worker instance reads durable cause and cap; no client hop is needed.
 	worker = NewBotWakeWorker(testHandler)
 	worker.client = func(*url.URL) *http.Client { return receiver.Client() }
-	comment(aToken, b)
+	comment(bToken, a)
 	drain()
-	if len(deliveries) != 3 {
-		t.Fatal("fifth wake escaped cap after restart")
+	if len(deliveries) != 7 || deliveries[6]["type"] != "wake_blocked" || deliveries[6]["reason_code"] != "bot_wake_chain_limit" {
+		t.Fatalf("fifth wake must send a refusal alert instead of another wake: %v", deliveries)
 	}
 	var reason string
-	dbfx.QueryRow(t, `SELECT reason FROM bot_wake_event WHERE bot_id=$1 ORDER BY sequence DESC LIMIT 1`, b.ID).Scan(&reason)
+	dbfx.QueryRow(t, `SELECT reason FROM bot_wake_event WHERE bot_id=$1 ORDER BY sequence DESC LIMIT 1`, a.ID).Scan(&reason)
 	if reason != "bot wake chain limit (4)" {
 		t.Fatalf("cap reason %s", reason)
 	}
@@ -230,7 +241,7 @@ func TestBotWakeTrustedChainHTTP(t *testing.T) {
 	} else {
 		t.Log("CLI subprocess verification not requested; set BOT_WAKE_TEST_CLI to a built binary")
 	}
-	t.Logf("deliveries=%d hops=1,2,4; agent hop=3; self/default-none/fifth wake suppressed; durable cap survives worker recreation", len(deliveries))
+	t.Logf("deliveries=%d initial hops=1,2; agent hop=3; reply resets next hops=1,2,3,4; self/default-none/fifth wake suppressed; durable cap survives worker recreation", len(deliveries))
 }
 
 func TestBotWakeIssueCreateSourceHTTP(t *testing.T) {

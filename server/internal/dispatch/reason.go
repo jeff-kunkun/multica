@@ -103,6 +103,8 @@ const (
 	// ReasonChainBudgetExceeded means an agent-originated delegation chain hit
 	// the workspace budget and needs a human comment or explicit resume.
 	ReasonChainBudgetExceeded ReasonCode = "chain_budget_exceeded"
+	// ReasonBotWakeChainLimit: a Bot has exhausted unacknowledged wake admissions.
+	ReasonBotWakeChainLimit ReasonCode = "bot_wake_chain_limit"
 	// ReasonInternalError: an unexpected server error prevented a clean decision.
 	ReasonInternalError ReasonCode = "internal_error"
 )

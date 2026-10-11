@@ -81,3 +81,36 @@ must be verified separately from saving the skill source.
 Report who, the issue/chat, the action, its result/evidence and the next step.
 For execution delivery distinguish delivered, wake acknowledged, and result received;
 an unverified stage is unknown, never a reason to automatically resend.
+
+## Bot wake-chain guard
+
+The workspace's `bot_wake_chain_limit` defaults to 4 (valid values 1–100).
+It limits consecutive unacknowledged Bot wakes, including Bot-originated agent
+continuations. A real agent reply or completed run resets the chain; work that
+never starts does not consume it. Human messages are exempt. To relay a human
+instruction, use `chat send --per-quote "<exact words>"` or
+`issue comment add --per-quote "<exact words>"`: the server verifies the quote
+against this caller's earlier genuine human message in the same chat/issue.
+Invented or unmatched quotes are rejected before writing.
+
+A blocked `chat send` or `chat new` returns `mode: "blocked"`, a saved `message_id`, and
+`warning`; the CLI prints the JSON receipt and exits nonzero before `--wait`.
+A saved comment remains a successful write, with stderr warnings and
+`trigger_outcomes[].reason_code: "bot_wake_chain_limit"` for each blocked target,
+including an implicitly routed assignee or thread owner.
+Do not repost either saved message. Wait for an agent reply/completed run, send
+as the person, relay a verified quote, or have an administrator adjust the limit:
+
+```sh
+multica settings get bot_wake_chain_limit
+multica settings set bot_wake_chain_limit --value-json '6'
+```
+
+Agent task tokens cannot change the guard. Every blocked attempt is recorded
+and emits `wake_blocked` to the originating Bot's webhook. For patrol and
+dispatch daily reports, consume `multica overview --output json`:
+`bot_wake_chain.blocked_last_24h` and `recent_blocks` report counts and details.
+Authenticated Bots can inspect their own blocks only; human workspace owners
+and admins can inspect viewer-visible records. Task tokens do not read the audit. Other members see the limit and recovery contract.
+`audit_read_failed: true` means the audit is unavailable, not zero blocks.
+The same report is included in the routing-health inspection response.
