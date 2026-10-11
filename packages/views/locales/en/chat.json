@@ -117,6 +117,7 @@
     "steer_fell_back_toast": "This reply can't take a message mid-reply, so it was queued"
   },
   "queue": {
+    "hidden_messages": "{{count}} more messages queued",
     "title_one": "{{count}} queued message",
     "title_other": "{{count}} queued messages",
     "clear": "Clear all",
@@ -298,6 +299,8 @@
     "action": "Bind runtime"
   },
   "offline_banner": {
+    "last_seen": "Runtime offline, last seen {{time}}",
+    "last_seen_unknown": "Runtime offline, last seen unknown",
     "fallback_name": "the agent",
     "unstable": "{{name}}'s connection is unstable — replies may be delayed.",
     "offline": "{{name}} is offline — your message will be delivered when they're back."

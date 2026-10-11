@@ -288,6 +288,8 @@ export interface ChatMessagesCursor {
 }
 
 export interface ChatMessagesPage {
+  /** Session-wide user messages currently omitted while queued behind the head. */
+  hidden_queued_count?: number;
   messages: ChatMessage[];
   limit: number;
   has_more: boolean;
@@ -302,6 +304,8 @@ export interface ChatMessagesPage {
 export type ChatSendMode = "steer" | "queue" | "restart";
 
 export interface SendChatMessageResponse {
+  runtime?: { status: string; name: string; last_seen_at: string | null } | null;
+  warning?: string;
   message_id: string;
   task_id: string;
   /** What actually happened; `start` when nothing was replying. */
@@ -409,6 +413,8 @@ export interface PrioritizeQueuedChatTaskResponse {
 }
 
 export interface ChatPendingTask {
+  /** Session-wide user messages currently omitted while queued behind the head. */
+  hidden_queued_count?: number;
   task_id?: string;
   status?: string;
   created_at?: string;

@@ -3,9 +3,7 @@
  * runtime isn't reachable. Mirror of
  * `packages/views/chat/components/offline-banner.tsx`.
  *
- * Two states render copy:
- *   - `unstable` (runtime offline < 5 min) → amber, "may reconnect"
- *   - `offline`  (runtime offline ≥ 5 min) → muted, "won't run until back"
+ * Both offline states show last contact without disabling the composer.
  *
  * Loading silence: `undefined` and the implicit "online" case render nothing.
  * The chat composer never sees a speculative offline flash during the cold
@@ -21,6 +19,7 @@ import { useT } from "@/lib/i18n";
 interface Props {
   /** Display name for the copy. */
   agentName?: string;
+  lastSeenAt?: string | null;
   /**
    * Resolved presence availability. Pass `undefined` to suppress the banner
    * — we only surface known offline / unstable states, never speculative
@@ -29,33 +28,18 @@ interface Props {
   availability: AgentAvailability | undefined;
 }
 
-export function OfflineBanner({ agentName, availability }: Props) {
+export function OfflineBanner({ availability, lastSeenAt }: Props) {
   const { t } = useT("chat");
   if (availability !== "offline" && availability !== "unstable") return null;
-  const name = agentName?.trim() || t("title.this_agent");
-
-  if (availability === "unstable") {
-    return (
-      <View className="mx-3 mb-1.5 flex-row items-center gap-1.5 rounded-md bg-warning/15 px-2.5 py-1.5">
-        <Ionicons name="alert-circle-outline" size={14} color="#a16207" />
-        <Text
-          className="flex-1 text-xs text-warning"
-          numberOfLines={1}
-        >
-          {t("banners.offline_unstable", { name })}
-        </Text>
-      </View>
-    );
-  }
-
+  const date = lastSeenAt ? new Date(lastSeenAt) : null;
+  const time = date && Number.isFinite(date.getTime())
+    ? date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false })
+    : null;
   return (
-    <View className="mx-3 mb-1.5 flex-row items-center gap-1.5 rounded-md bg-muted px-2.5 py-1.5">
+    <View accessibilityRole="text" className="mx-3 mb-1.5 flex-row items-center gap-1.5 px-2.5 py-1.5">
       <Ionicons name="cloud-offline-outline" size={14} color="#71717a" />
-      <Text
-        className="flex-1 text-xs text-muted-foreground"
-        numberOfLines={1}
-      >
-        {t("banners.offline", { name })}
+      <Text className="flex-1 text-xs text-muted-foreground">
+        {time ? t("banners.last_seen", { time }) : t("banners.last_seen_unknown")}
       </Text>
     </View>
   );

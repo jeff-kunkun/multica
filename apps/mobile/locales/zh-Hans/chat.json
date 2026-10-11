@@ -58,6 +58,8 @@
     "needs_runtime": "需要运行时"
   },
   "banners": {
+    "last_seen": "运行时离线，最后在线 {{time}}",
+    "last_seen_unknown": "运行时离线，最后在线时间未知",
     "no_agent": "没有可用智能体",
     "runtime_required": "该智能体需要先配置运行时才能运行。",
     "offline": "{{name}} 已离线。消息会等待其运行时恢复后发送。",
@@ -190,6 +192,7 @@
   "session_lineage.reason_session_lost": "会话没能恢复",
   "session_lineage.reason_fresh_requested": "按要求新开",
   "queue": {
+    "hidden_messages": "另有 {{count}} 条排队消息",
     "steer": "打断重来",
     "steer_unavailable": "当前回复开始后才能打断重来",
     "steer_no_permission": "你已没有运行该智能体的权限",

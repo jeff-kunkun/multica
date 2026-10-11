@@ -1144,10 +1144,12 @@ type SendChatMessageRequest struct {
 }
 
 type SendChatMessageResponse struct {
-	MessageID     string `json:"message_id"`
-	TaskID        string `json:"task_id"`
-	SupportsQueue bool   `json:"supports_queue"`
-	Queued        bool   `json:"queued"`
+	Runtime       *ChatRuntimeResponse `json:"runtime"`
+	Warning       string               `json:"warning,omitempty"`
+	MessageID     string               `json:"message_id"`
+	TaskID        string               `json:"task_id"`
+	SupportsQueue bool                 `json:"supports_queue"`
+	Queued        bool                 `json:"queued"`
 	// Mode is what actually happened: steer, queue, restart, or start when
 	// nothing was replying. A steer whose reply ended first reports queue.
 	Mode string `json:"mode"`
@@ -1395,7 +1397,12 @@ func (h *Handler) SendChatMessage(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	diagnostics, diagnosticErr := h.chatDiagnostics(r.Context(), agent.RuntimeID, &task)
+	if diagnosticErr != nil {
+		slog.Warn("chat send diagnostics unavailable", "error", diagnosticErr)
+	}
 	writeJSON(w, http.StatusCreated, SendChatMessageResponse{
+		Runtime: diagnostics.Runtime, Warning: diagnostics.Warning,
 		MessageID:     uuidToString(msg.ID),
 		TaskID:        uuidToString(task.ID),
 		SupportsQueue: true,
@@ -1412,10 +1419,11 @@ type ChatMessagesCursorResponse struct {
 }
 
 type ChatMessagesPageResponse struct {
-	Messages   []ChatMessageResponse       `json:"messages"`
-	Limit      int                         `json:"limit"`
-	HasMore    bool                        `json:"has_more"`
-	NextCursor *ChatMessagesCursorResponse `json:"next_cursor,omitempty"`
+	HiddenQueuedCount int32                       `json:"hidden_queued_count"`
+	Messages          []ChatMessageResponse       `json:"messages"`
+	Limit             int                         `json:"limit"`
+	HasMore           bool                        `json:"has_more"`
+	NextCursor        *ChatMessagesCursorResponse `json:"next_cursor,omitempty"`
 }
 
 func parseChatMessagesPageParams(r *http.Request) (int, pgtype.Timestamptz, pgtype.UUID, error) {
@@ -1658,11 +1666,17 @@ func (h *Handler) ListChatMessagesPage(w http.ResponseWriter, r *http.Request) {
 		resp[i] = chatMessageToResponse(m, groupedAtt[uuidToString(m.ID)])
 	}
 	h.attachChatSessionLineage(r.Context(), resp, messages)
+	hiddenQueued, err := h.Queries.CountHiddenQueuedChatMessages(r.Context(), session.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to count queued chat messages")
+		return
+	}
 	writeJSON(w, http.StatusOK, ChatMessagesPageResponse{
-		Messages:   resp,
-		Limit:      limit,
-		HasMore:    hasMore,
-		NextCursor: nextCursor,
+		HiddenQueuedCount: hiddenQueued,
+		Messages:          resp,
+		Limit:             limit,
+		HasMore:           hasMore,
+		NextCursor:        nextCursor,
 	})
 }
 
@@ -1673,9 +1687,10 @@ func (h *Handler) ListChatMessagesPage(w http.ResponseWriter, r *http.Request) {
 // optimistic seeds don't have a real task created_at and the timer needs to
 // survive refresh / reopen.
 type PendingChatTaskResponse struct {
-	TaskID    string `json:"task_id,omitempty"`
-	Status    string `json:"status,omitempty"`
-	CreatedAt string `json:"created_at,omitempty"`
+	HiddenQueuedCount int32  `json:"hidden_queued_count"`
+	TaskID            string `json:"task_id,omitempty"`
+	Status            string `json:"status,omitempty"`
+	CreatedAt         string `json:"created_at,omitempty"`
 	// WaitReason explains a waiting_local_directory hold: which directory the
 	// task is parked on and, when known, the short id of the task holding it.
 	// Emitted only for that status — on any other one the column still carries
@@ -2049,6 +2064,11 @@ func (h *Handler) GetPendingChatTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	hiddenQueued, err := h.Queries.CountHiddenQueuedChatMessages(r.Context(), session.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to count queued chat messages")
+		return
+	}
 	steering := map[string]bool{}
 	if ids, err := h.Queries.ListSteeringChatFollowups(r.Context(), session.ID); err == nil {
 		for _, id := range ids {
@@ -2072,12 +2092,13 @@ func (h *Handler) GetPendingChatTask(w http.ResponseWriter, r *http.Request) {
 	}
 
 	resp := PendingChatTaskResponse{
-		TaskID:        uuidToString(head.ID),
-		Status:        head.Status,
-		CreatedAt:     timestampToString(head.CreatedAt),
-		WaitReason:    waitReasonForStatus(head.Status, head.WaitReason),
-		SupportsQueue: true,
-		QueuedTasks:   queued,
+		HiddenQueuedCount: hiddenQueued,
+		TaskID:            uuidToString(head.ID),
+		Status:            head.Status,
+		CreatedAt:         timestampToString(head.CreatedAt),
+		WaitReason:        waitReasonForStatus(head.Status, head.WaitReason),
+		SupportsQueue:     true,
+		QueuedTasks:       queued,
 	}
 	if target, replying, err := h.chatSteerTarget(r.Context(), session.ID); err == nil && replying {
 		resp.SteerSupported = chatSteerSupported(target)

@@ -200,6 +200,48 @@ func (q *Queries) CountHandoffChatMessages(ctx context.Context, chatSessionID pg
 	return count, err
 }
 
+const countHiddenQueuedChatMessages = `-- name: CountHiddenQueuedChatMessages :one
+SELECT count(*)::int AS count FROM chat_message AS message
+WHERE message.chat_session_id = $1
+  AND message.message_kind NOT IN ('channel_command', 'onboarding_kickoff')
+  AND (
+    message.role = 'user'
+    AND EXISTS (
+      SELECT 1
+      FROM agent_task_queue AS task
+      WHERE task.chat_session_id = message.chat_session_id
+        AND task.status = 'queued'
+        AND task.id = message.task_id
+        AND task.id <> (
+          SELECT head.id
+          FROM agent_task_queue AS head
+          WHERE head.chat_session_id = $1
+            AND head.status IN ('queued', 'dispatched', 'running', 'waiting_local_directory', 'deferred')
+            AND head.regenerate_quick_actions_for IS NULL
+          ORDER BY
+            CASE
+              WHEN head.status IN ('dispatched', 'running', 'waiting_local_directory') THEN 0
+              WHEN head.status = 'deferred' THEN 1
+              ELSE 2
+            END,
+            head.priority DESC,
+            head.created_at ASC,
+            head.id ASC
+          LIMIT 1
+        )
+    )
+  )
+`
+
+// Session-wide count of user rows omitted by ListChatMessagesPage. Independent
+// of cursor/limit; exclude commands and the server-authored onboarding kickoff.
+func (q *Queries) CountHiddenQueuedChatMessages(ctx context.Context, chatSessionID pgtype.UUID) (int32, error) {
+	row := q.db.QueryRow(ctx, countHiddenQueuedChatMessages, chatSessionID)
+	var count int32
+	err := row.Scan(&count)
+	return count, err
+}
+
 const createChatDraftRestore = `-- name: CreateChatDraftRestore :one
 INSERT INTO chat_draft_restore (id, chat_session_id, task_id, content, attachment_ids)
 VALUES ($1, $2, $3, $4, $5)

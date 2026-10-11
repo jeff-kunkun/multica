@@ -377,6 +377,7 @@ const ChatQueuedTasksSchema = z.array(z.unknown()).transform((tasks) =>
 // task is in flight. Ignore malformed queue rows without discarding a valid
 // head, matching packages/core/api/schemas.ts.
 export const ChatPendingTaskSchema: z.ZodType<ChatPendingTask> = z.object({
+  hidden_queued_count: z.number().int().nonnegative().optional().catch(undefined),
   task_id: z.string().optional(),
   status: z.string().optional(),
   created_at: z.string().optional(),
@@ -390,6 +391,8 @@ export const ChatPendingTaskSchema: z.ZodType<ChatPendingTask> = z.object({
 export const EMPTY_CHAT_PENDING_TASK: ChatPendingTask = {};
 
 export const SendChatMessageResponseSchema: z.ZodType<SendChatMessageResponse> = z.object({
+  runtime: z.object({ status: z.string(), name: z.string(), last_seen_at: z.string().nullable() }).nullish().catch(undefined),
+  warning: z.string().optional().catch(undefined),
   message_id: z.string(),
   task_id: z.string(),
   supports_queue: z.boolean().optional(),

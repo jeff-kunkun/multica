@@ -1094,3 +1094,22 @@ describe("ChatMessageList opened-chat cards (DENE-1271)", () => {
     expect(screen.getByText(/结论：登录改走新令牌/)).toBeInTheDocument();
   });
 });
+
+describe("ChatMessageList queued-history explanation (DENE-1842)", () => {
+  it("shows the server count at the history tail and removes it when the queue clears", async () => {
+    const qc = new QueryClient();
+    qc.setQueryData(chatKeys.taskMessages(TASK_ID), []);
+    const props = { messages: [] as ChatMessage[], availability: undefined };
+    const wrap = (count: number) => (
+      <I18nProvider locale="en" resources={TEST_RESOURCES}>
+        <QueryClientProvider client={qc}>
+          <ChatMessageList {...props} pendingTask={{task_id: TASK_ID, status: "running", hidden_queued_count: count}} />
+        </QueryClientProvider>
+      </I18nProvider>
+    );
+    const view = render(wrap(2));
+    expect(await screen.findByText("2 more messages queued")).toBeInTheDocument();
+    view.rerender(wrap(0));
+    expect(screen.queryByText("2 more messages queued")).not.toBeInTheDocument();
+  });
+});

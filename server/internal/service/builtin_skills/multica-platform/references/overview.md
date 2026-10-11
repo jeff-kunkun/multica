@@ -44,3 +44,8 @@ compact mode and use the same access checks as the settings read endpoints.
 with machine_name, runtime_ids, started_at, ended_at and alerted_at, including
 in compact mode. Agent/project filters keep only outages involving the selected
 agents’ runtimes. See `runtimes.md` for alert controls and Bot delivery rules.
+
+Runtime rows include `status` and nullable RFC3339 `last_seen_at`, including
+in compact mode. Read a particular unanswered turn with
+`multica chat progress --session <id> --history --output json`; it adds the
+server task status, reason and queue position to that runtime snapshot.

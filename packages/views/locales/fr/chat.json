@@ -117,6 +117,7 @@
     "steer_fell_back_toast": "Cette réponse ne peut pas lire le message en cours, il a été mis en file d'attente"
   },
   "queue": {
+    "hidden_messages": "{{count}} messages supplémentaires en attente",
     "title_one": "{{count}} message en file d'attente",
     "title_other": "{{count}} messages en file d'attente",
     "clear": "Tout effacer",
@@ -298,6 +299,8 @@
     "action": "Associer un runtime"
   },
   "offline_banner": {
+    "last_seen": "Runtime hors ligne, dernière connexion à {{time}}",
+    "last_seen_unknown": "Runtime hors ligne, dernière connexion inconnue",
     "fallback_name": "l'agent",
     "unstable": "La connexion de {{name}} est instable — les réponses peuvent être retardées.",
     "offline": "{{name}} est hors ligne — votre message sera remis à son retour."

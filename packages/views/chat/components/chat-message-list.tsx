@@ -180,8 +180,15 @@ function ChatListHeader({ context }: { context?: ChatListContext }) {
 // constant bottom inset: without it the last row's own py-2 was the only gap
 // between the final reply (and its follow-up pills) and the composer.
 function ChatListFooter({ context }: { context?: ChatListContext }) {
+  const { t } = useT("chat");
+  const hiddenQueuedCount = context?.pendingTask?.hidden_queued_count ?? context?.pendingTask?.queued_tasks?.length ?? 0;
   return (
     <div className={cn(CHAT_COLUMN, "pb-4 space-y-4")}>
+      {hiddenQueuedCount > 0 ? (
+        <p className="text-sm text-muted-foreground break-words" role="status">
+          {t(($) => $.queue.hidden_messages, { count: hiddenQueuedCount })}
+        </p>
+      ) : null}
       {context?.showStatusPill && context.pendingTask ? (
         <TaskStatusPill
           pendingTask={context.pendingTask}

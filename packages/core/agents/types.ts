@@ -66,6 +66,7 @@ export type Workload =
   | "idle"; // nothing on the plate
 
 export interface AgentPresenceDetail {
+  runtimeLastSeenAt?: string | null;
   availability: AgentAvailability;
   workload: Workload;
   runningCount: number;
