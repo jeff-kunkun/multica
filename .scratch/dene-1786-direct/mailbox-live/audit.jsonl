@@ -1,2 +1,0 @@
-{"ts": "2026-10-11T06:52:26Z", "sender": "bridge", "action": "task_out", "id": "t-29af8208c2", "issue": "DENE-1797", "to": null, "decision": "queued", "file": "1791701546410-task-1c0f92.json"}
-{"ts": "2026-10-11T06:52:56Z", "sender": "grok", "transport": "grok-bot", "file": "grok-1791701564036004566-1a8f.json", "sha": "d8a80abc2367e4e6", "id": "grok-1791701564036004566-1a8f", "claimed_from": "grok", "action": "task_result", "decision": "allowed", "multica": "task_result t-29af8208c2 -> comment DENE-1797"}
