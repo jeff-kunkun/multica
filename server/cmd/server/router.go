@@ -2060,6 +2060,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Get("/bots/{botId}/wake/pending", h.ListBotWakeEvents)
 					r.Post("/bots/{botId}/wake/pending/ack", h.AcknowledgeBotWakePending)
 					r.Post("/bots/{botId}/wake/events/{eventId}/woken", h.RecordBotWakeReceipt)
+					// Older webhook payloads supplied this base receipt URL.
+					r.Post("/bots/{botId}/wake/events/{eventId}", h.RecordBotWakeReceipt)
+					r.Post("/bots/{botId}/wake/events/{eventId}/ack", h.RecordBotWakeReceipt)
 					r.Post("/bots/{botId}/wake/events/{eventId}/result", h.RecordBotWakeReceipt)
 				})
 

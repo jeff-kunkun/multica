@@ -21,19 +21,34 @@ SELECT * FROM bot_wake_event WHERE bot_id=$1 AND workspace_id=$2
  ORDER BY sequence DESC LIMIT $3;
 
 -- name: NextBotWakeEvent :one
-SELECT * FROM bot_wake_event WHERE status='queued' AND next_attempt_at<=now()
+SELECT * FROM bot_wake_event WHERE next_attempt_at<=now() AND
+ (status='queued' OR (status='pending' AND acknowledged_at IS NULL AND woken_at IS NULL AND result_at IS NULL AND
+ reason IN ('hourly limit','quiet hours','source attribution unavailable')))
  ORDER BY (event_type='mention') DESC, sequence FOR UPDATE SKIP LOCKED LIMIT 1;
 
 -- name: CountRecentBotWakeAttempts :one
 SELECT COUNT(*) FROM bot_wake_attempt WHERE bot_id=$1 AND attempted_at>now()-interval '1 hour';
 
 -- name: FinishBotWakeEvent :exec
-UPDATE bot_wake_event SET status=$2,reason=$3,received_at=CASE WHEN $2='received' THEN now() ELSE received_at END,
+UPDATE bot_wake_event SET status=$2,reason=CASE WHEN $2='received' AND (woken_at IS NOT NULL OR result_at IS NOT NULL)
+ THEN 'HTTP 200; execution confirmed' ELSE $3 END,received_at=CASE WHEN $2='received' THEN now() ELSE received_at END,
  next_attempt_at=now()+sqlc.arg(delay_seconds)::integer*interval '1 second' WHERE sequence=$1;
 
 -- name: MarkBotWakeSending :exec
-WITH sent AS (UPDATE bot_wake_event SET status='sending',sent_at=now(),attempts=attempts+1,hop=$2 WHERE sequence=$1 RETURNING bot_id)
-INSERT INTO bot_wake_attempt(bot_id) SELECT bot_id FROM sent;
+WITH sent AS (UPDATE bot_wake_event SET status='sending',sent_at=now(),attempts=attempts+1,hop=$2 WHERE sequence=$1 RETURNING bot_id,event_type)
+INSERT INTO bot_wake_attempt(bot_id) SELECT bot_id FROM sent
+ WHERE event_type<>'mention';
+
+-- name: RescheduleDeferredBotWakeEvents :exec
+UPDATE bot_wake_event SET next_attempt_at=now() WHERE bot_id=$1 AND status='pending'
+ AND acknowledged_at IS NULL AND reason IN ('hourly limit','quiet hours','source attribution unavailable');
+
+-- name: ListLimitedBotWakeEvents :many
+SELECT * FROM bot_wake_event WHERE bot_id=$1 AND workspace_id=$2 AND status='pending'
+ AND acknowledged_at IS NULL AND woken_at IS NULL AND result_at IS NULL AND reason='hourly limit';
+
+-- name: RestoreBotWakeAuthor :exec
+UPDATE bot_wake_event SET author_type='agent',author_id=$2 WHERE sequence=$1;
 
 -- name: RecoverBotWakeUncertain :exec
 UPDATE bot_wake_event SET status='uncertain',reason='worker interrupted; receipt unknown'
@@ -46,11 +61,13 @@ DELETE FROM bot_wake_attempt WHERE attempted_at<now()-interval '2 hours';
 SELECT * FROM bot_wake_event WHERE bot_id=$1 AND workspace_id=$2 AND event_id=$3 FOR UPDATE;
 
 -- name: RecordBotWakeWoken :exec
-UPDATE bot_wake_event SET woken_at=COALESCE(woken_at,clock_timestamp()) WHERE sequence=$1;
+UPDATE bot_wake_event SET woken_at=COALESCE(woken_at,clock_timestamp()),
+ reason=CASE WHEN status='received' THEN 'HTTP 200; execution confirmed' ELSE reason END WHERE sequence=$1;
 
 -- name: RecordBotWakeResult :exec
 UPDATE bot_wake_event SET result_at=COALESCE(result_at,clock_timestamp()),
- result_url=COALESCE(result_url,$2) WHERE sequence=$1;
+ result_url=COALESCE(result_url,$2),
+ reason=CASE WHEN status='received' THEN 'HTTP 200; execution confirmed' ELSE reason END WHERE sequence=$1;
 
 -- name: AcknowledgeBotWakePending :exec
 UPDATE bot_wake_event SET acknowledged_at=COALESCE(acknowledged_at,clock_timestamp())

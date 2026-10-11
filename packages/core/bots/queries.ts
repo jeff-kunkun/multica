@@ -52,6 +52,7 @@ export const botWakeOptions = (wsId: string, botId: string) =>
     queryKey: botKeys.wake(wsId, botId),
     queryFn: () => api.getBotWake(wsId, botId),
     enabled: !!wsId && !!botId,
+    refetchInterval: 5_000,
   });
 
 const WAKE_EVENT_PAGE = 20;
