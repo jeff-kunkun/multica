@@ -9,6 +9,7 @@
 - [Web/Desktop 移动适配先抽共享外壳再修页面](adr/0005-mobile-web-shell.md)
 - [证据索引](evidence/INDEX.md)
 - [Bot 写入来源与推送集成契约](../server/docs/bot-write-provenance.md)
+- [Bot 唤醒限制、回执、恢复与审计](../server/docs/bot-wake-contract.md#causality-lifecycle-and-verification-limits)
 - [工作区全景命令与筛选范围](../server/internal/service/builtin_skills/multica-platform/references/overview.md)
 - [运行合并、连带停止与聊天转单](../server/internal/service/builtin_skills/multica-platform/references/run-control.md)
 - [新能力的智能体可读契约与收尾检查清单](kun/agent-readable-capabilities.md)

@@ -113,3 +113,21 @@ multica issue comment add <issue-id> --content-file ./take-over.md --mode handof
 `multica chat handoff --to <agent> [--session <id|url>]`: it opens a new chat
 with that agent whose first message summarises this one, and leaves the old
 chat as it is. Only the chat's owner can hand it over.
+
+## Unanswered Bot wakes
+
+Separate from the agent handoff budget above, `bot_wake_chain_limit` caps
+unanswered automatic Bot wakes across a trusted root (default 4, range 1–100).
+Queued wakes reserve a slot; terminal tasks that never ran release it. An actual
+agent reply or completed running task clears the count. Human sends bypass it;
+`chat send` and `issue comment add --per-quote` also bypass when the quote exactly
+matches the caller's original human message in that same chat/issue.
+
+A capped `chat send` retains the message and receipt, reports `mode=blocked`
+and exits nonzero. Do not duplicate that message. A saved issue comment warns
+with each target's `bot_wake_chain_limit` outcome. Wait for a reply/completion or
+a human message; a workspace administrator can change the limit using
+`multica settings set bot_wake_chain_limit --value-json '6'`.
+`multica overview --output json` and routing health expose the current limit
+and visibility-scoped recent blocks for patrol/daily reports. The initiating
+Bot also receives a `wake_blocked` operational webhook event.

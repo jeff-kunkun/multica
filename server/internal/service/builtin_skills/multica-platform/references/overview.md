@@ -49,3 +49,13 @@ another run or stopping work. Use `issue halt --related`,
 `issue status cancelled --related` or `chat stop --related` for a related stop;
 ordinary status cancellation alone does not interrupt runs. The detailed
 contract is in `run-control.md`.
+`bot_wake_chain` describes the workspace-wide Bot wake guard even in compact
+mode: `limit`, `reason_code`, `reset`, `human_exempt`,
+`verified_quote_exempt`, and `settings_key`. When audit access is permitted,
+`blocked_last_24h` and up to 100 `recent_blocks` include each attempted wake's
+Bot, target, root, task/issue/chat identifiers, limit and timestamp. This guard
+summary is workspace-wide, independently of project/agent filters. External Bot
+callers see only their own Bot's visible records; human owners/admins see viewer-visible records. Other
+members and task tokens see no audit identifiers. Include these counts and records in patrol
+and dispatch daily reports; treat `audit_read_failed` as unavailable evidence,
+never as zero. Recovery and quote verification: `external-bots.md`.

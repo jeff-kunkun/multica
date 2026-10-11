@@ -172,8 +172,9 @@ func buildCapabilityMap(root *cobra.Command, cliVersion string) capabilityMap {
 		},
 		Onboarding: botonboarding.Steps(),
 		Legend: map[string]string{
-			"access":  "read = only reads; write = creates or changes something; local = acts on this machine",
-			"bot_key": "yes = an external bot key can run it; no = agent run or human login only; local = no server call",
+			"access":         "read = only reads; write = creates or changes something; local = acts on this machine",
+			"bot_key":        "yes = an external bot key can run it; no = agent run or human login only; local = no server call",
+			"bot_wake_chain": "Bot wake-chain limit defaults to 4, configurable with settings get/set bot_wake_chain_limit (1..100); agent replies/completed runs reset it; human messages and server-verified --per-quote messages are exempt; blocked chat sends exit nonzero with a saved-message receipt; blocked comment wakes emit warnings; overview reports permitted block audit",
 		},
 	}
 	placed := map[string]bool{}
@@ -250,6 +251,9 @@ func commandExample(c *cobra.Command) string {
 }
 
 func printCapabilityMap(w io.Writer, m capabilityMap) {
+	if guard, ok := m.Legend["bot_wake_chain"]; ok {
+		fmt.Fprintln(w, guard)
+	}
 	fmt.Fprintln(w, "接入步骤 / Getting started")
 	fmt.Fprint(w, botonboarding.Render())
 	for _, rule := range m.ExecutionRules {

@@ -2865,9 +2865,11 @@ export const EMPTY_CHAT_PENDING_TASK: ChatPendingTask = {};
 export const SendChatMessageResponseSchema: z.ZodType<SendChatMessageResponse> = z.object({
   message_id: z.string().min(1),
   task_id: z.string().min(1),
+  warning: z.string().optional(),
+  reason_code: z.string().optional(),
   supports_queue: z.boolean().optional(),
   queued: z.boolean().optional().catch(undefined),
-  mode: z.enum(["steer", "queue", "restart", "start"]).optional().catch(undefined),
+  mode: z.enum(["steer", "queue", "restart", "start", "blocked"]).optional().catch(undefined),
   created_at: z.string().min(1),
   attachment_ids: z.array(z.string()).nullish().transform((ids) => ids ?? undefined),
 }).loose();

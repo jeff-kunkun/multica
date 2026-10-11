@@ -83,7 +83,9 @@ type CommentResponse struct {
 	FoldedCount    *int  `json:"folded_count,omitempty"`
 	// TriggerOutcomes is the per-target result of every EXPLICIT @agent / @squad
 	// mention in this comment (MUL-4525 §2). It is additive and populated only on
-	// create/edit responses: old clients ignore it. A saved comment whose mention
+	// create/edit responses: old clients ignore it. Bot-limit failures also include
+	// implicitly routed targets so ordinary comments cannot hide this guard.
+	// A saved comment whose mention
 	// was blocked (no invoke permission, target unavailable, runtime offline) now
 	// reports that here instead of silently dropping the trigger, so the client
 	// can show "comment posted, but N targets were not triggered".
@@ -1515,6 +1517,7 @@ func keepRootConnected(byID map[string]db.Comment) []db.Comment {
 }
 
 type CreateCommentRequest struct {
+	PerQuote         string   `json:"per_quote,omitempty"`
 	Content          string   `json:"content"`
 	Type             string   `json:"type"`
 	ParentID         *string  `json:"parent_id"`
@@ -1970,8 +1973,12 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	if req.PerQuote != "" && !h.verifyBotWakeQuote(w, r, issue.WorkspaceID, issue.ID, pgtype.UUID{}, req.PerQuote) {
+		return
+	}
 	createParams := db.CreateCommentParams{
-		ViaBotID: botsource.FromContext(r.Context()).ID, ViaBotName: util.StrToText(botsource.FromContext(r.Context()).Name),
+		HumanQuote: pgtype.Text{String: req.PerQuote, Valid: req.PerQuote != ""},
+		ViaBotID:   botsource.FromContext(r.Context()).ID, ViaBotName: util.StrToText(botsource.FromContext(r.Context()).Name),
 		ID:           dbid.NewV7(),
 		IssueID:      issue.ID,
 		WorkspaceID:  issue.WorkspaceID,
@@ -2199,6 +2206,22 @@ func (h *Handler) triggerTasksForCommentReport(ctx context.Context, issue db.Iss
 		enqueued[agentID] = result
 	}
 	outcomes := commentTriggerOutcomes(targets, enqueued)
+	// A Bot limit must be visible even when a plain comment implicitly routes
+	// to the assignee or a thread owner. Keep every other implicit outcome out
+	// of the explicit-mention contract and avoid duplicating named targets.
+	namedAgents := make(map[string]bool, len(targets))
+	for _, target := range targets {
+		namedAgents[target.ExecAgentID] = true
+	}
+	for _, trigger := range resolved {
+		agentID := uuidToString(trigger.Agent.ID)
+		result, present := enqueued[agentID]
+		if namedAgents[agentID] || !present || result.status != DispatchBlocked || result.reason != ReasonBotWakeChainLimit {
+			continue
+		}
+		outcomes = append(outcomes, CommentTriggerOutcome{TargetType: "agent", TargetID: agentID, Status: DispatchBlocked, ReasonCode: ReasonBotWakeChainLimit})
+		namedAgents[agentID] = true
+	}
 	woken := commentWokenRuns(resolved, enqueued)
 	// Summons (DENE-880) follow a new comment only; an edit neither answers
 	// a call nor makes a new one.
@@ -2512,6 +2535,9 @@ func commentBlockedTargetOutcomes(targets []commentMentionTarget) []CommentTrigg
 // infrastructure error that stays an unclassified internal error rather than
 // leaking the raw message.
 func commentEnqueueFailureReason(err error) DispatchReasonCode {
+	if errors.Is(err, service.ErrBotWakeChainLimit) {
+		return ReasonBotWakeChainLimit
+	}
 	if errors.Is(err, service.ErrAgentChainBudgetExceeded) {
 		return ReasonChainBudgetExceeded
 	}

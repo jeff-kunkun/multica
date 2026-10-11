@@ -539,6 +539,11 @@ A comment is not a dispatch. The receipt says who it woke ("Woke: ..."; JSON
 "wake.woken"); "Woke no one" (JSON "wake.none_woken") means no run started and
 none is running, so nobody will act on it: use multica issue handoff, or @ them.
 
+A Bot wake blocked by bot_wake_chain_limit leaves the comment saved and prints
+a warning naming the target and recovery options. JSON trigger_outcomes carries
+the reason; do not repost the saved comment. Human messages and verified
+--per-quote messages are exempt.
+
 --mode decides what happens to agents the comment wakes that are still
 replying on this issue (omit it for the usual behaviour):
 
@@ -1017,6 +1022,7 @@ func init() {
 	issueCommentAddCmd.Flags().String("verdict", "", "Acceptance verdict written as its own line: pass or hold. This is what merges and closes; the words 通过 in the body do not")
 	issueCommentAddCmd.Flags().StringSlice("attachment", nil, "File path(s) to attach (can be specified multiple times). Non-image files, HTML included, show as file cards that open in the viewer; to render a chart inside the comment, put a ```html or ```mermaid block in the content instead")
 	issueCommentAddCmd.Flags().String("output", "json", "Output format: table or json")
+	issueCommentAddCmd.Flags().String("per-quote", "", "Exact words from this caller’s earlier human comment on this issue; the server verifies it before exempting the wake from the Bot chain limit")
 	issueCommentAddCmd.Flags().String("mode", "", "steer, queue or restart for agents still replying; handoff or parallel when you @ another agent (see --help)")
 
 	// issue comment update
@@ -3443,6 +3449,7 @@ func runIssueCommentAdd(cmd *cobra.Command, args []string) error {
 	}
 
 	body := map[string]any{"content": content}
+	addPerQuote(cmd, body)
 	if parentID, _ := cmd.Flags().GetString("parent"); parentID != "" {
 		body["parent_id"] = parentID
 	}
@@ -3460,12 +3467,24 @@ func runIssueCommentAdd(cmd *cobra.Command, args []string) error {
 
 	fmt.Fprintf(os.Stderr, "Comment added to issue %s.\n", issueRef.Display)
 	printCommentWake(os.Stderr, issueRef.Display, result["wake"])
+	printBotWakeBlockedWarnings(os.Stderr, result["trigger_outcomes"])
 
 	output, _ := cmd.Flags().GetString("output")
 	if output == "table" {
 		return nil
 	}
 	return cli.PrintJSON(os.Stdout, result)
+}
+
+// Saved comments stay successful writes: warnings go to stderr while the JSON
+// receipt remains parseable and callers are not invited to post duplicates.
+func printBotWakeBlockedWarnings(w io.Writer, raw any) {
+	for _, outcome := range objectList(raw) {
+		if outcome["reason_code"] != "bot_wake_chain_limit" {
+			continue
+		}
+		fmt.Fprintf(w, "Warning: comment saved, but %v %v was not woken: bot_wake_chain_limit. Wait for the agent to reply or complete a run, send as a human, or use a server-verified --per-quote. An administrator can change multica settings set bot_wake_chain_limit --value-json <1..100>. Do not repost the saved comment.\n", outcome["target_type"], outcome["target_id"])
+	}
 }
 
 // printCommentWake turns the server's wake summary into one line (DENE-1774):

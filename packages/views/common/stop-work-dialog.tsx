@@ -31,8 +31,8 @@ export function StopWorkDialog({ open, pending, cancelling, onOpenChange, onConf
           <span>{t(($) => $.stop_work.related)}</span>
         </label>
         <AlertDialogFooter>
-          <AlertDialogCancel disabled={pending}>{t(($) => cancelling ? $.stop_work.cancel_keep : $.stop_work.keep)}</AlertDialogCancel>
-          <AlertDialogAction variant="destructive" disabled={pending} onClick={(event) => {
+          <AlertDialogCancel className="min-h-11" disabled={pending}>{t(($) => cancelling ? $.stop_work.cancel_keep : $.stop_work.keep)}</AlertDialogCancel>
+          <AlertDialogAction className="min-h-11" variant="destructive" disabled={pending} onClick={(event) => {
             event.preventDefault();
             onConfirm(related);
           }}>{t(($) => cancelling ? (related ? $.stop_work.cancel_confirm_related : $.stop_work.cancel_confirm) : (related ? $.stop_work.confirm_related : $.stop_work.confirm))}</AlertDialogAction>

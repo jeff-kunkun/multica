@@ -225,6 +225,12 @@ run. Queued messages form one input batch; an active reply receives the message
 as a supplement. A CLI without live-input support returns a refusal with the
 reason and explicit queue/restart choices; nothing is sent.
 
+Bot wake-chain admission defaults to four unacknowledged triggers. A blocked
+send saves the message, prints its receipt, and exits nonzero with the reason;
+do not resend it. A genuine agent reply or completed run resets the chain.
+Human messages and server-verified --per-quote messages are exempt.
+Read or change the limit with multica settings get/set bot_wake_chain_limit.
+
 With --linked <source>, a viewer agent can send to the run initiator’s own chat
 through a managed link. Messages carry a forwarded-by label and enter the
 receiver brief as external content. Only queued text is supported; --wait is unavailable.
@@ -301,6 +307,7 @@ func init() {
 	chatSendCmd.Flags().String("session", "", "Chat session id or URL (required)")
 	chatSendCmd.Flags().String("content-file", "", "Read the message from this file instead of the argument")
 	chatSendCmd.Flags().String("mode", "", "Default: merge into existing work; choose steer, queue or restart explicitly")
+	chatSendCmd.Flags().String("per-quote", "", "Exact words from this caller’s earlier human message in this chat; server verifies the quote before exempting it from the Bot wake-chain limit")
 	chatSendCmd.Flags().String("output", "json", "Output format: table or json")
 	chatSendCmd.Flags().StringSlice("attachment", nil, "Local files to attach to this message (repeatable)")
 	chatSendCmd.Flags().Bool("allow-external-file", false, "Allow attachment paths outside the working directory")
@@ -920,7 +927,7 @@ func runChatSend(cmd *cobra.Command, args []string) error {
 		attachmentIDs = append(attachmentIDs, id)
 	}
 	path := "/api/chat/sessions/" + url.PathEscape(ref.ID) + "/messages"
-	body := map[string]any{"content": content, "attachment_ids": attachmentIDs}
+	body := map[string]any{"content": content, "attachment_ids": attachmentIDs, "per_quote": flagString(cmd, "per-quote")}
 	if mode != "" {
 		body["mode"] = mode
 	}
@@ -931,6 +938,14 @@ func runChatSend(cmd *cobra.Command, args []string) error {
 
 		return sendModeRefusal(err, output, "chat send")
 	}
+	if out["mode"] == "blocked" {
+		if output == "json" {
+			if err := cli.PrintJSON(os.Stdout, out); err != nil {
+				return err
+			}
+		}
+		return blockedChatSendError(out)
+	}
 	if wait, _ := cmd.Flags().GetBool("wait"); wait {
 		return finishChatSend(cmd, client, ref.ID, out)
 	}
@@ -939,6 +954,14 @@ func runChatSend(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 	return cli.PrintJSON(os.Stdout, out)
+}
+
+func blockedChatSendError(out map[string]any) error {
+	warning, _ := out["warning"].(string)
+	if warning == "" {
+		warning = "Bot wake-chain limit reached; wait for the agent to reply or complete a run, use a human login, or ask an administrator to change bot_wake_chain_limit"
+	}
+	return fmt.Errorf("message %v saved, but agent was not woken: %s; do not resend the saved message", out["message_id"], warning)
 }
 
 // sendModeRefusal turns a steer refusal into the reason plus the modes that
