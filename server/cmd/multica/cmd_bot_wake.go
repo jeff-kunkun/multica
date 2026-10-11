@@ -16,7 +16,10 @@ func init() {
 	wake := &cobra.Command{Use: "wake", Short: "Manage receiver-owned event webhooks and receipts", Long: `Read or update a bot's wake rules, and inspect delivered or pending events.
 The bot may manage only itself; workspace administrators may manage any bot.
 HTTP 200 means received, not running or completed. Uncertain deliveries are
-never automatically replayed. Disabled, quiet and limited events remain pending.`}
+never automatically replayed. Quiet and hourly-limited events are automatically
+delivered later in sequence order; mentions bypass positive hourly limits and
+do not consume them. 0 pauses all pushes. Get reports the saved hourly_limit
+and limited_count (visible events held by that limit).`}
 	for _, verb := range []string{"get", "set", "events", "pending"} {
 		verb := verb
 		cmd := &cobra.Command{Use: verb + " <bot-id>", Short: map[string]string{"get": "Read wake rules (no secrets)", "set": "Update rules or write webhook credentials from file/stdin", "events": "List paginated delivery receipts", "pending": "List paginated events awaiting review"}[verb], Args: exactArgs(1), RunE: func(cmd *cobra.Command, args []string) error { return runBotWake(cmd, args, verb) }}

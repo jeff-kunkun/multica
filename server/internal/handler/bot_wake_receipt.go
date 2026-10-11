@@ -132,6 +132,15 @@ func (h *Handler) AcknowledgeBotWakePending(w http.ResponseWriter, r *http.Reque
 			writeError(w, 404, "event not found")
 			return
 		}
+		// A receiver may acknowledge while the webhook request is still in
+		// flight. Keep execution confirmation separate from transport state.
+		if e.Status == "received" || e.Status == "sending" {
+			if q.RecordBotWakeWoken(r.Context(), e.Sequence) != nil {
+				writeError(w, 500, "failed to record receipt")
+				return
+			}
+			continue
+		}
 		if e.Status != "pending" && e.Status != "failed" && e.Status != "uncertain" {
 			writeError(w, 409, "event is not pending review")
 			return

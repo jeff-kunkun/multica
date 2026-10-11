@@ -261,7 +261,7 @@ describe("BotsTab", () => {
     });
 
     it("saves rules without touching the endpoint", async () => {
-      wakeRef.current = { data: wake(), error: null };
+      wakeRef.current = { data: wake({ limited_count: 2 }), error: null };
       mockUpdateWake.mockResolvedValue(wake());
       openWake();
       const save = screen.getByRole("button", { name: "Save rules" });
@@ -274,6 +274,8 @@ describe("BotsTab", () => {
       expect(save).toBeDisabled();
       await userEvent.clear(limit);
       await userEvent.type(limit, "0");
+      expect(screen.getByText("Currently applied: 6 / hour")).toBeInTheDocument();
+      expect(screen.getByText("2 held for later")).toBeInTheDocument();
       await userEvent.click(save);
       await waitFor(() =>
         expect(mockUpdateWake).toHaveBeenCalledWith({

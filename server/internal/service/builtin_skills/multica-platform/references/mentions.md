@@ -296,8 +296,12 @@ only when `inherit_owner_follows` is explicitly enabled (default false).
 
 Defaults: all seven event types, 6 attempts/hour and 23:00–08:00 Asia/Shanghai
 quiet hours. `events: []` disables pushes; `hourly_limit: 0` pauses all pushes.
-Quiet, disabled, limited and unavailable events remain pending. Changing settings
-does not replay them. `received` means HTTP 200 only, never started or completed.
+Quiet and hourly-limited unsent events remain pending and are automatically
+rechecked each second; saving settings releases eligible events immediately.
+Mentions bypass positive hourly limits without consuming quota; zero pauses all
+pushes, and quiet hours still apply. Disabled/unavailable events remain pending.
+`wake get` reports the saved `hourly_limit` and visible `limited_count`.
+Missing source attribution is noted with empty author fields, not held indefinitely. `received` means HTTP 200 only, never started or completed.
 An interrupted or timed-out send is `uncertain` and is not retried automatically.
 Only definite pre-send failures, HTTP 429 and HTTP 503 retry (5s, 10s, 3 attempts
 total); other errors remain visible for inspection.
@@ -326,8 +330,13 @@ Settings accept `wake_from` with member/agent/bot rules `{mode:all|none|list,ids
 See `server/docs/bot-wake-contract.md` for the trusted-source deployment gate.
 
 The server attaches source_id/parent_id, web_url, root_id/hop and ack_url to wake
-payloads; url remains the authenticated source API URL. Do not infer execution
-from type=task. Bot and agent automatic wakes share a durable four-admission root
-budget; a missing/client-reset hop cannot bypass it. At the cap read pending or
+payloads; url remains the authenticated source API URL. POST `ack_body` to
+`ack_url` (the same endpoint as `bot wake ack`), `{}` to `woken_url`, or
+`{result_url: payload.url}` to `result_url`. Ack confirms execution for
+received/sending events and reviews pending/failed/uncertain events; the transport
+status stays separate from `woken_at` / `result_at`. Do not append suffixes to ack_url. Do not infer execution
+from type=task. Bot and agent automatic wakes share the workspace-configured
+unanswered wake budget; a missing/client-reset hop cannot bypass it. Real agent
+replies/completed runs reset that budget, and human writes are exempt. At the cap read pending or
 the cancelled run error. Do not repeatedly rerun a capped chain. Bot tombstones
 retain history but are absent from the mention directory.

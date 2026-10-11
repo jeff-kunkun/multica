@@ -39,6 +39,7 @@ type BotWakeResponse struct {
 	WebhookConfigured bool          `json:"webhook_configured"`
 	Events            []string      `json:"events"`
 	HourlyLimit       int32         `json:"hourly_limit"`
+	LimitedCount      int64         `json:"limited_count"`
 	QuietHours        BotQuietHours `json:"quiet_hours"`
 }
 type botWakeSecrets struct {
@@ -195,7 +196,22 @@ func (h *Handler) GetBotWake(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 500, "failed to load wake rules")
 		return
 	}
-	writeJSON(w, 200, wakeResponse(c))
+	h.writeWakeSettings(w, r, c, bot)
+}
+
+func (h *Handler) writeWakeSettings(w http.ResponseWriter, r *http.Request, c db.BotWake, bot db.PersonalAccessToken) {
+	limited, err := h.Queries.ListLimitedBotWakeEvents(r.Context(), db.ListLimitedBotWakeEventsParams{BotID: bot.ID, WorkspaceID: bot.WorkspaceID})
+	if err != nil {
+		writeError(w, 500, "failed to load deferred events")
+		return
+	}
+	response := wakeResponse(c)
+	for _, e := range limited {
+		if h.wakeVisible(r.Context(), e, bot.UserID) && h.wakeVisible(r.Context(), e, parseUUID(requestUserID(r))) {
+			response.LimitedCount++
+		}
+	}
+	writeJSON(w, 200, response)
 }
 func (h *Handler) PutBotWake(w http.ResponseWriter, r *http.Request) {
 	bot, ok := h.authorizeWake(w, r)
@@ -297,11 +313,15 @@ func (h *Handler) PutBotWake(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 500, "failed to save wake rules")
 		return
 	}
+	if err = q.RescheduleDeferredBotWakeEvents(r.Context(), bot.ID); err != nil {
+		writeError(w, 500, "failed to reschedule deferred events")
+		return
+	}
 	if err = tx.Commit(r.Context()); err != nil {
 		writeError(w, 500, "failed to save wake rules")
 		return
 	}
-	writeJSON(w, 200, wakeResponse(saved))
+	h.writeWakeSettings(w, r, saved, bot)
 }
 
 // Reuse resource visibility, including private chat semantics, at send AND read.
