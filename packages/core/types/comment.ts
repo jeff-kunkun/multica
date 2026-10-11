@@ -47,6 +47,8 @@ export interface Comment {
   // Per-target result of every explicit @agent / @squad mention in this comment
   // (MUL-4525 §2). Present only on create/edit responses; older servers omit it.
   trigger_outcomes?: CommentTriggerOutcome[];
+  /** Who a new comment woke; `none_woken` means no run started on an unattended issue. Create responses only. */
+  wake?: CommentWake;
   /** Every running turn this comment steered, one receipt per run. */
   supplements?: CommentSupplementReceipt[];
   /** Mirrors the first receipt; servers that predate `supplements` send only these. */
@@ -108,4 +110,9 @@ export interface CommentTriggerPreview {
   // Explicit @agent / @squad mentions that will NOT trigger if posted as-is
   // (MUL-4525 §2). Additive: older servers omit it.
   blocked?: CommentTriggerOutcome[];
+}
+
+export interface CommentWake {
+  woken: { agent_id: string; agent_name: string; source: string; status: string }[];
+  none_woken: boolean;
 }

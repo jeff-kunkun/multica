@@ -85,6 +85,9 @@ type CommentResponse struct {
 	// reports that here instead of silently dropping the trigger, so the client
 	// can show "comment posted, but N targets were not triggered".
 	TriggerOutcomes []CommentTriggerOutcome `json:"trigger_outcomes,omitempty"`
+	// Wake is who this new comment woke, and whether it woke no one while the
+	// issue sits unattended (DENE-1774). Create responses only.
+	Wake *CommentWake `json:"wake,omitempty"`
 	// HandoffStoppedTaskIDs are the runs a handoff comment stopped (DENE-1350):
 	// the agents it did not wake, so the woken agent takes over alone.
 	HandoffStoppedTaskIDs []string `json:"handoff_stopped_task_ids,omitempty"`
@@ -2091,7 +2094,9 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 	// The comment is already saved; a blocked mention must not fail the whole
 	// request. Surface the per-target outcomes so the client can show partial
 	// success instead of a silent no-op (MUL-4525 §2).
-	resp.TriggerOutcomes = h.triggerTasksForComment(triggerCtx, issue, comment, parentComment, authorType, authorID, originatorUserID, suppressAgentIDs, steerTaskIDs)
+	var woken []CommentWokenRun
+	resp.TriggerOutcomes, woken = h.triggerTasksForCommentReport(triggerCtx, issue, comment, parentComment, authorType, authorID, originatorUserID, suppressAgentIDs, steerTaskIDs)
+	resp.Wake = h.commentWake(r.Context(), issue, comment, woken)
 	if len(steerTaskIDs) > 0 {
 		applyCommentSupplements(&resp, h.listCommentSupplements(r.Context(), issue.WorkspaceID, []pgtype.UUID{comment.ID})[uuidToString(comment.ID)])
 	}
@@ -2141,8 +2146,15 @@ func isNoteComment(content string) bool {
 // steerTaskIDs are the running turns the author chose: a recipient whose chosen
 // turn is still running receives this comment there instead of a follow-up run.
 func (h *Handler) triggerTasksForComment(ctx context.Context, issue db.Issue, comment db.Comment, parentComment *db.Comment, actorType, actorID, originatorUserID string, suppressAgentIDs, steerTaskIDs []pgtype.UUID, forceFreshSession ...bool) []CommentTriggerOutcome {
+	outcomes, _ := h.triggerTasksForCommentReport(ctx, issue, comment, parentComment, actorType, actorID, originatorUserID, suppressAgentIDs, steerTaskIDs, forceFreshSession...)
+	return outcomes
+}
+
+// triggerTasksForCommentReport is triggerTasksForComment that also reports
+// every run the comment woke, whatever the trigger source (DENE-1774).
+func (h *Handler) triggerTasksForCommentReport(ctx context.Context, issue db.Issue, comment db.Comment, parentComment *db.Comment, actorType, actorID, originatorUserID string, suppressAgentIDs, steerTaskIDs []pgtype.UUID, forceFreshSession ...bool) ([]CommentTriggerOutcome, []CommentWokenRun) {
 	if isNoteComment(comment.Content) {
-		return nil
+		return nil, nil
 	}
 	triggers, targets := h.computeCommentAgentTriggers(ctx, issue, comment.Content, parentComment, actorType, actorID, commentTriggerComputeOptions{
 		ExcludeTriggerCommentID: comment.ID,
@@ -2156,22 +2168,27 @@ func (h *Handler) triggerTasksForComment(ctx context.Context, issue db.Issue, co
 	h.noteBlockedRuntimeTargets(ctx, issue, targets)
 	h.noteMissedMentionRelays(ctx, issue, comment.ID, targets)
 	h.ringDoorbellTargets(ctx, issue, comment, actorType, actorID, targets)
+	resolved := triggers
 	triggers, steered := h.steerCommentAgentTriggers(ctx, issue, comment, actorType, triggers, steerTaskIDs)
 	enqueued := h.enqueueCommentAgentTriggers(ctx, issue, comment.ID, triggers)
 	for agentID, result := range steered {
 		enqueued[agentID] = result
 	}
 	outcomes := commentTriggerOutcomes(targets, enqueued)
+	woken := commentWokenRuns(resolved, enqueued)
 	// Summons (DENE-880) follow a new comment only; an edit neither answers
 	// a call nor makes a new one.
 	if len(forceFreshSession) == 0 || !forceFreshSession[0] {
 		h.recordMentionSummons(ctx, issue, comment, actorType, actorID)
 		summonWoke := h.answerSummons(ctx, issue, comment, actorType, actorID, triggerOutcomesStartedRun(outcomes))
 		if actorType == "member" {
-			h.resumeBlockedOnReply(ctx, issue, enqueued, summonWoke)
+			h.resumeBlockedOnReply(ctx, issue, enqueued, summonWoke.Valid)
+		}
+		if summonWoke.Valid {
+			woken = append(woken, h.summonAnswerWokenRun(ctx, summonWoke))
 		}
 	}
-	return outcomes
+	return outcomes, woken
 }
 
 // markCommentTriggersFresh applies the edit-only session policy after trigger

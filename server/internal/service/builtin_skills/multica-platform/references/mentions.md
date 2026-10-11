@@ -133,6 +133,17 @@ target has a queued task in the same comment thread can come back `coalesced`.
 A claim race can return `deferred`: the input is recorded for a follow-up run,
 not injected into an already running prompt. Different threads queue independently. Read that array after posting — it is the only place any of this shows up.
 
+A comment is not a dispatch. `trigger_outcomes` covers only explicit mentions;
+`wake` covers the whole comment. `wake.woken` lists every run it queued, folded
+into or steered (assignee, @agent, @squad, thread, conversation, or a reply
+answering a needs_human call — `summon_answer`), and the CLI
+prints it as `Woke: ...`. `wake.none_woken: true` — printed as `Woke no one` —
+means no run started, nothing is running, and the issue is open: nobody will act
+on it. The assignee never wakes itself, so a seat that posts "please continue"
+with no @ has dispatched nothing. Run `multica issue handoff <id> --to
+<reviewer|dispatcher|agent>` or @ the agent before telling anyone the work is
+underway.
+
 - **A name where a UUID belongs.** `mention://member/Alice` is dead. The id
   group accepts only hex+dashes or `all`; the non-hex letters in a typical name
   make the whole pattern fail to match, so the parser returns nothing.
