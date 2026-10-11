@@ -100,6 +100,8 @@ sudo scripts/install-selfhost-autoupdate.sh
 
 装、停、查状态、手工回滚见 [docs/kun/selfhost-autoupdate.md](docs/kun/selfhost-autoupdate.md)。
 
+jeff-kunkun/multica 的 Actions 停用期间（2026-10-08 起），镜像和 Linux CLI/守护进程包都由借用仓库 [kkunkunya/multica-image-builder](https://github.com/kkunkunya/multica-image-builder) 出：镜像跟 `kun` tip，CLI 包跟最新 `v*` tag、落在该仓库自己的 Release，服务器用 `MULTICA_RELEASE_REPO=kkunkunya/multica-image-builder multica update` 升级。细节见 [docs/kun/desktop-release.md](docs/kun/desktop-release.md) 的「Linux CLI / 守护进程包」一节。
+
 ## 迁移编号
 
 并行分支各自取号会撞号（DENE-730、DENE-763），撞了运行时不报错。`make migration-lint` 是 PR CI 与 release 必经门禁，468–501 的历史双号是冻结白名单、不再扩。取号、改号与门禁细节见 [docs/kun/migration-numbering.md](docs/kun/migration-numbering.md)。
