@@ -30,7 +30,8 @@ signed Bot message as a request, not as the owner's direct decision.
 Use the relevant references in this skill and each command's `--help`:
 
 - `issue list/search/get/context`, `issue comment list --full` for complete reads.
-- `chat list/search/history/send` for conversation discovery and continuation.
+- `chat list/search/history` for discovery; personal `chat new --agent ... --wait` on supported versions.
+- `chat send --session ... --attachment ./file` uploads local files and binds them to the user message through the ordinary chat API.
 - `issue update/status/assign/label/close/rerun` for issue work.
 - `issue comment add/update/delete` and its attachment flags for comment work.
 - Agent/settings commands supported by the installed CLI for administration.
@@ -54,3 +55,7 @@ Bot by name; a wake ping carries only the task id, and result files are
 pulled by the receiver and checked against their size and SHA-256 before
 they are attached. New Bots can reuse this skill; cloud installation and live login
 must be verified separately from saving the skill source.
+
+Report who, the issue/chat, the action, its result/evidence and the next step.
+For execution delivery distinguish delivered, wake acknowledged, and result received;
+an unverified stage is unknown, never a reason to automatically resend.
