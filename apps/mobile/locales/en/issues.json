@@ -324,5 +324,13 @@
     "changes_none": "No new threads",
     "changes_count": "{{count}} new",
     "changes_more": "{{count}} more threads"
+  },
+  "cancel_work": {
+    "title": "Cancel issue?",
+    "description": "The issue will be cancelled. Choose whether to stop related runs too.",
+    "keep": "Keep issue",
+    "confirm": "Cancel issue",
+    "confirm_related": "Cancel and stop related work",
+    "failed": "Could not cancel the issue. Try again."
   }
 }

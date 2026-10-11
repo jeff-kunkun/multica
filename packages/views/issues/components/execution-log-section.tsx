@@ -49,6 +49,7 @@ import {
   hasIssueUsageDeepLink,
   ISSUE_USAGE_QUERY_PARAM,
 } from "../../common/issue-usage-link";
+import { StopWorkDialog } from "../../common/stop-work-dialog";
 import { WakeupRunLabel } from "./wakeup-source-chip";
 
 // Right-panel section that lists every agent run for this issue. Active
@@ -124,6 +125,7 @@ export function ExecutionLogSection({ issueId, workspaceId, identifier, issueTit
       ? hasIssueUsageDeepLink(navigation.searchParams)
       : false;
   const [usageOpen, setUsageOpen] = useState(urlWantsUsage);
+  const [stopDialogOpen, setStopDialogOpen] = useState(false);
   const haltMutation = useHaltIssueRuns(issueId, workspaceId);
   const resumeMutation = useResumeIssueRuns(issueId, workspaceId);
 
@@ -228,6 +230,11 @@ export function ExecutionLogSection({ issueId, workspaceId, identifier, issueTit
     // sidebar's — a resizable 260–420px panel — not the viewport's. See
     // IssueRunsTotal for the tier this container drives.
     <div className="@container/execution-log">
+      <StopWorkDialog open={stopDialogOpen} onOpenChange={setStopDialogOpen} pending={haltMutation.isPending}
+        onConfirm={(related) => haltMutation.mutate({ related }, {
+          onSuccess: () => setStopDialogOpen(false),
+          onError: (error) => toast.error(error instanceof Error ? error.message : t(($) => $.execution_log.halt_failed)),
+        })} />
       {/* Header is two independent targets, not one: the label + chevron
           collapse the section, the total on the right opens the Runs dialog.
           Nesting a button inside a button is invalid HTML, so they are
@@ -272,8 +279,8 @@ export function ExecutionLogSection({ issueId, workspaceId, identifier, issueTit
           className="ml-auto inline-flex shrink-0 items-center gap-1 rounded-md px-1.5 py-0.5 text-caption text-destructive transition-colors hover:bg-destructive/10 disabled:cursor-not-allowed disabled:opacity-50"
           disabled={haltMutation.isPending || resumeMutation.isPending}
           onClick={() => {
-            const mutation = halted ? resumeMutation : haltMutation;
-            mutation.mutate(undefined, {
+            if (!halted) { setStopDialogOpen(true); return; }
+            resumeMutation.mutate(undefined, {
               onError: (error) => toast.error(
                 error instanceof Error
                   ? error.message

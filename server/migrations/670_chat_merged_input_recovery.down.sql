@@ -1,0 +1,1 @@
+ALTER TABLE chat_task_supplement DROP COLUMN recovered_into_task_id;

@@ -1,5 +1,6 @@
 "use client";
 
+import { StopWorkDialog } from "../../common/stop-work-dialog";
 import { ViaBot } from "../../common/via-bot";
 
 import {
@@ -2696,7 +2697,28 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   // Shared issue actions (mutations, pin, copy-link, modal dispatch, etc.).
   // Called before the `if (!issue)` early return so hook order stays stable.
   const actions = useIssueActions(issue);
-  const handleUpdateField = actions.updateField;
+  const [cancelDialogOpen, setCancelDialogOpen] = useState(false);
+  useEffect(() => { setCancelDialogOpen(false); }, [id]);
+  const cancelIssue = useMutation({
+    mutationFn: (related: boolean) => api.updateIssue(id, {
+      status: "cancelled",
+      ...(related ? { related_stop: true } : {}),
+    }),
+    onSuccess: () => {
+      setCancelDialogOpen(false);
+      queryClient.invalidateQueries({ queryKey: ["issues", wsId] });
+      queryClient.invalidateQueries({ queryKey: ["chat"] });
+    },
+    onError: (error) => toast.error(error.message),
+  });
+  const handleUpdateField = (...args: Parameters<typeof actions.updateField>) => {
+    const [updates] = args;
+    if (updates.status === "cancelled") {
+      setCancelDialogOpen(true);
+      return;
+    }
+    actions.updateField(...args);
+  };
   // The issue's scene (DENE-1477): @ mentions in its editors rank agents by fit.
   const agentScene = useAgentScene(wsId, [issue?.project_id], issue?.domain_id);
   const issueUpdate = useUpdateIssue();
@@ -3696,6 +3718,8 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
 
   const detailContent = (
     <CurrentIssueRenderContextProvider value={currentIssueRenderContext}>
+    <StopWorkDialog open={cancelDialogOpen} pending={cancelIssue.isPending} cancelling
+      onOpenChange={setCancelDialogOpen} onConfirm={(related) => cancelIssue.mutate(related)} />
     <div className="relative flex h-full min-w-0 flex-1 flex-col">
         {/* In-page find bar — floats over the top-right of the content column
             (below the breadcrumb header), outside the scroll container so it

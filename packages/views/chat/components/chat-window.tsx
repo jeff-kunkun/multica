@@ -1,5 +1,7 @@
 "use client";
 
+import { ConvertedChatNotice } from "./converted-chat-notice";
+
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
 import { motion } from "motion/react";
@@ -69,7 +71,7 @@ import { chatQuickActionsPendingOptions } from "@multica/core/chat/queries";
 import { useQuickActionsPendingTimeout } from "@multica/core/chat/use-quick-actions-pending-timeout";
 import { useQuickActionsFailureToast } from "./use-quick-actions-failure-toast";
 import { hideQueuedChatMessages } from "@multica/core/chat/pending";
-import { removeChatMessageFromCaches } from "@multica/core/realtime";
+import { StopWorkDialog } from "../../common/stop-work-dialog";
 import { useChatDraftRestore } from "./use-chat-draft-restore";
 import { useChatTaskActions } from "./use-chat-task-actions";
 import { useChatInputFocus } from "./use-chat-input-focus";
@@ -1105,7 +1107,11 @@ export function ChatWindow() {
       {/* Input — disabled for legacy archived sessions and for sessions whose
        *  agent has been archived (read-only); locked out entirely when there's
        *  no agent (the EmptyState above carries the CTA). */}
+      {currentSession?.converted_issue_id ? (
+        <ConvertedChatNotice issueId={currentSession.converted_issue_id} />
+      ) : (
       <ChatInput
+        stopSessionId={activeSessionId ?? undefined}
         onSend={handleSend}
         restoreDraftRequest={restoreDraftRequest}
         conversationStarterRequest={conversationStarterRequest}
@@ -1115,6 +1121,7 @@ export function ChatWindow() {
         onStop={handleStop}
         onConvertToGoal={activeSessionId ? async () => {
           const result = await api.convertChatSessionToGoal(activeSessionId);
+          void qc.invalidateQueries({ queryKey: ["chat"] });
           // The server appends a link message to this chat; refetch to show it.
           void qc.invalidateQueries({ queryKey: chatKeys.messages(activeSessionId) });
           void qc.invalidateQueries({ queryKey: chatKeys.messagesPage(activeSessionId) });
@@ -1163,6 +1170,7 @@ export function ChatWindow() {
         contextItems={contextItems}
         focusRequest={focusRequest}
       />
+      )}
       <ChatVisibilityNotice />
     </motion.div>
   );
@@ -1404,46 +1412,17 @@ function SessionDropdown({
     setIsHistoryOpen(false);
   };
 
-  const handleConfirmStop = (session: ChatSession, task: PendingChatTasksResponse["tasks"][number]) => {
+  const handleConfirmStop = async (session: ChatSession, task: PendingChatTasksResponse["tasks"][number], related = false) => {
+    if (stoppingTaskId) return;
     setStoppingTaskId(task.task_id);
-    previousInFlightRef.current = new Set(
-      [...previousInFlightRef.current].filter((sessionId) => sessionId !== session.id),
-    );
-
-    // Same optimistic behavior as the active chat Stop button: remove the
-    // running affordance immediately, then let task:cancelled / refetches
-    // converge every open surface on the server truth.
-    queryClient.setQueryData<PendingChatTasksResponse>(chatKeys.pendingTasks(wsId), (current) => {
-      if (!current) return current;
-      return {
-        ...current,
-        tasks: current.tasks.filter((item) => item.task_id !== task.task_id),
-      };
-    });
-    queryClient.setQueryData(chatKeys.pendingTask(session.id), {});
-    queryClient.invalidateQueries({ queryKey: chatKeys.messages(session.id) });
-    queryClient.invalidateQueries({ queryKey: chatKeys.messagesPage(session.id) });
-
-    api.cancelTaskById(task.task_id).then(
-      (result) => {
-        const restored = result.cancelled_chat_message;
-        if (restored?.restore_to_input) {
-          removeChatMessageFromCaches(queryClient, restored.chat_session_id, restored.message_id);
-        }
-        apiLogger.info("cancelTask.success (history row)", { taskId: task.task_id, sessionId: session.id });
-      },
-      (err) =>
-        apiLogger.warn("cancelTask.error (history row; task may have already finished)", {
-          taskId: task.task_id,
-          sessionId: session.id,
-          err,
-        }),
-    ).finally(() => {
-      queryClient.invalidateQueries({ queryKey: chatKeys.pendingTasks(wsId) });
-      queryClient.invalidateQueries({ queryKey: chatKeys.pendingTask(session.id) });
-      setStoppingTaskId(null);
+    try {
+      await api.stopChatSession(session.id, related);
       setConfirmingStopId(null);
-    });
+      void queryClient.invalidateQueries({ queryKey: ["chat"] });
+      if (related) void queryClient.invalidateQueries({ queryKey: ["issues"] });
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : t(($) => $.queue.action_failed_toast));
+    } finally { setStoppingTaskId(null); }
   };
 
   const renderRow = (session: ChatSession) => {
@@ -1560,42 +1539,9 @@ function SessionDropdown({
         </div>
         {!isRenaming && (
           isConfirmingStop && pendingTask ? (
-            <div className="flex shrink-0 items-center gap-1">
-              <button
-                type="button"
-                onPointerDown={(e) => {
-                  e.preventDefault();
-                  e.stopPropagation();
-                }}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  e.preventDefault();
-                  setConfirmingStopId(null);
-                }}
-                disabled={stoppingTaskId === pendingTask.task_id}
-                className="inline-flex h-7 items-center rounded-xs px-2 text-micro font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-50"
-              >
-                {t(($) => $.session_history.stop_dialog.cancel)}
-              </button>
-              <button
-                type="button"
-                onPointerDown={(e) => {
-                  e.preventDefault();
-                  e.stopPropagation();
-                }}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  e.preventDefault();
-                  handleConfirmStop(session, pendingTask);
-                }}
-                disabled={stoppingTaskId === pendingTask.task_id}
-                className="inline-flex h-7 items-center rounded-xs px-2 text-micro font-medium text-destructive transition-colors hover:bg-destructive/10 disabled:opacity-50"
-              >
-                {stoppingTaskId === pendingTask.task_id
-                  ? t(($) => $.session_history.stop_dialog.confirming)
-                  : t(($) => $.session_history.stop_dialog.confirm)}
-              </button>
-            </div>
+            <StopWorkDialog open pending={stoppingTaskId === pendingTask.task_id}
+              onOpenChange={(next) => { if (!next) setConfirmingStopId(null); }}
+              onConfirm={(related) => void handleConfirmStop(session, pendingTask, related)} />
           ) : (
             <div className="flex shrink-0 items-center">
               <div className="flex h-7 items-center justify-end gap-1.5 text-caption text-muted-foreground [@media(hover:hover)]:group-hover/history-row:hidden [@media(hover:hover)]:group-focus-within/history-row:hidden">
