@@ -2058,9 +2058,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Put("/bots/{botId}/wake", h.PutBotWake)
 					r.Get("/bots/{botId}/wake/events", h.ListBotWakeEvents)
 					r.Get("/bots/{botId}/wake/pending", h.ListBotWakeEvents)
- r.Post("/bots/{botId}/wake/pending/ack", h.AcknowledgeBotWakePending)
- r.Post("/bots/{botId}/wake/events/{eventId}/woken", h.RecordBotWakeReceipt)
- r.Post("/bots/{botId}/wake/events/{eventId}/result", h.RecordBotWakeReceipt)
+					r.Post("/bots/{botId}/wake/pending/ack", h.AcknowledgeBotWakePending)
+					r.Post("/bots/{botId}/wake/events/{eventId}/woken", h.RecordBotWakeReceipt)
+					r.Post("/bots/{botId}/wake/events/{eventId}/result", h.RecordBotWakeReceipt)
 				})
 
 				// External bot keys (DENE-1788): admin-only, and never from an
@@ -2069,6 +2069,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Use(middleware.RequireWorkspaceRoleFromURL(queries, "id", "owner", "admin"))
 					r.Use(handler.RequireHumanActor)
 					r.Get("/bots", h.ListBots)
+					r.Get("/bots/setup-text", h.GetBotSetupText)
 					r.Post("/bots", h.CreateBot)
 					r.Post("/bots/{botId}/rotate", h.RotateBotKey)
 					r.Post("/bots/{botId}/stop", h.StopBot)
@@ -2497,6 +2498,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Post("/", h.CreateProject)
 				r.Route("/{id}", func(r chi.Router) {
 					r.Get("/", h.GetProject)
+					r.Get("/linked-projects", h.GetProjectLinkedProjects)
+					r.Put("/linked-projects", h.PutProjectLinkedProjects)
 					r.Get("/memory", h.GetProjectMemory)
 					r.Get("/memory/check", h.GetProjectMemory)
 					r.Get("/memory/status", h.GetProjectMemory)
@@ -2558,6 +2561,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Get("/usage", h.GetAutopilotQuotaUsage)
 				r.Route("/{id}", func(r chi.Router) {
 					r.Get("/", h.GetAutopilot)
+					r.Get("/linked-projects", h.GetAutopilotLinkedProjects)
+					r.Put("/linked-projects", h.PutAutopilotLinkedProjects)
 					r.Patch("/", h.UpdateAutopilot)
 					r.Delete("/", h.DeleteAutopilot)
 					r.Post("/trigger", h.TriggerAutopilot)

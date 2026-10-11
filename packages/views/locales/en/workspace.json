@@ -82,7 +82,10 @@
       "managed_label": "Managed access",
       "managed_hint_outgoing": "Their agents may act here with the initiator’s permissions.",
       "managed_hint_incoming": "Agents here may act there with the initiator’s permissions.",
-      "managed_reason": "Only an owner of the sharing workspace can switch this.",
+      "managed_reason": "Requires source owner rights; from here, also owner or admin rights in this workspace.",
+      "pending_only": "Waiting for this workspace",
+      "projects_reason": "Requires source owner rights; from here, also owner or admin rights in this workspace.",
+      "managed_pending": "Accept the link before enabling managed access.",
       "managed_create_hint": "Viewer agents may act with the initiator’s permissions by default; you can turn this off."
     },
     "audit": {

@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/multica-ai/multica/server/internal/botonboarding"
 	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/testutil"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -27,6 +28,7 @@ func botTestRouter() http.Handler {
 			r.Use(middleware.RequireWorkspaceRoleFromURL(testHandler.Queries, "id", "owner", "admin"))
 			r.Use(RequireHumanActor)
 			r.Get("/bots", testHandler.ListBots)
+			r.Get("/bots/setup-text", testHandler.GetBotSetupText)
 			r.Post("/bots", testHandler.CreateBot)
 			r.Post("/bots/{botId}/rotate", testHandler.RotateBotKey)
 			r.Post("/bots/{botId}/stop", testHandler.StopBot)
@@ -106,6 +108,26 @@ func TestBotKeys_AdminAddsUsesStopsBot(t *testing.T) {
 	}
 	if !strings.Contains(created.SetupText, "multica workspace switch "+wsID) || !strings.Contains(created.SetupText, "- 自媒体") {
 		t.Fatalf("setup text misses workspace or directions: %q", created.SetupText)
+	}
+
+	// The setup text points the bot at overview, then the capability map
+	// (DENE-1804); the key-less copy is the same text with a placeholder.
+	for _, want := range []string{"1. multica overview", "2. multica capabilities"} {
+		if !strings.Contains(created.SetupText, want) {
+			t.Fatalf("setup text misses %q: %q", want, created.SetupText)
+		}
+	}
+	rec = call("GET", base+"/bots/setup-text?bot="+created.Bot.ID, adminKey, nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("setup text: want 200, got %d %s", rec.Code, rec.Body)
+	}
+	var again BotSetupTextResponse
+	_ = json.NewDecoder(rec.Body).Decode(&again)
+	if strings.Replace(again.SetupText, BotSetupTextPlaceholder, created.Token, 1) != created.SetupText {
+		t.Fatalf("key-less setup text differs from the issued one:\n%s\n---\n%s", again.SetupText, created.SetupText)
+	}
+	if rec := call("GET", base+"/bots/setup-text", memberKey, nil); rec.Code != http.StatusForbidden {
+		t.Fatalf("member setup text: want 403, got %d", rec.Code)
 	}
 
 	// The bot key works like the admin's own credential.
@@ -209,4 +231,17 @@ func insertTestPATFor(t *testing.T, userID string) string {
 		t.Fatal(err)
 	}
 	return raw
+}
+
+func TestRenderBotSetupTextUsesSharedOnboarding(t *testing.T) {
+	out := renderBotSetupText(botSetupInput{BotName: "B", WorkspaceID: "ws", Token: "mul_x"})
+	if !strings.Contains(out, botonboarding.Render()) {
+		t.Fatalf("setup text must embed the shared onboarding steps verbatim:\n%s", out)
+	}
+	if strings.Contains(out, "常用命令") {
+		t.Fatalf("hand-maintained command list is back:\n%s", out)
+	}
+	if strings.Index(out, "multica login --token mul_x") > strings.Index(out, "1. multica overview") {
+		t.Fatalf("login must come before the onboarding steps:\n%s", out)
+	}
 }

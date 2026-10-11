@@ -2705,6 +2705,17 @@ const ChatLinkedProjectSchema = z.object({
   available: z.boolean().default(false),
 }).loose();
 
+export const LinkedProjectOptionsSchema = z.object({ projects: z.array(z.object({
+  link_id: z.string(), id: z.string(), title: z.string(), icon: z.string().nullable(),
+  source: z.object({ name: z.string(), avatar_url: z.string().nullable() }),
+})).default([]) });
+
+export const LinkedProjectSettingsSchema = z.object({
+  linked_projects: z.array(ChatLinkedProjectSchema).nullable(),
+  effective_linked_projects: z.array(ChatLinkedProjectSchema),
+  inherited: z.boolean(),
+});
+
 const ChatChannelSourceSchema = z.object({
   channel_type: z.string().default(""),
   installation_id: z.string().default(""),

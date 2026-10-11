@@ -30,6 +30,27 @@ never push to them, and never open a worktree, commit or write in its
 directories. A path marked "not on this machine" is the source's; read its
 repositories instead. Your working project and code source stay your own.
 
+The CLI uses the same `linked-projects` / `--reference LINK_ID:PROJECT_ID`
+contract as project and autopilot reference settings:
+
+```sh
+multica chat linked-projects --available --output json
+multica chat linked-projects "$MULTICA_CHAT_SESSION_ID" --output json
+multica chat linked-projects "$MULTICA_CHAT_SESSION_ID" --reference "$LINK_ID:$PROJECT_ID"
+multica chat linked-projects "$MULTICA_CHAT_SESSION_ID" --clear
+multica chat new --agent "$AGENT_ID" --reference "$LINK_ID:$PROJECT_ID" "Read the reference notes"
+```
+
+Use real IDs from `--available`; `--reference` replaces the complete selection,
+so repeat it for every reference to keep. To remove one, submit the remaining
+pairs; `--clear` removes all. `chat new` is for people/personal-key bots, not
+agent runs. These commands reuse the chat's normal access checks. JSON
+`linked_projects` entries name `project_id`, `link_id`, `title`, `source_name`,
+`available` and `unavailable_reason`. A false availability keeps the saved name
+visible, but the server does not disclose which access check failed. Disconnecting
+or unsharing stops injection in the **next** run. References never become working
+projects. `multica overview --output json` also includes chats' `linked_projects`.
+
 That is everything a read-only link exposes. Task descriptions, comments,
 attachments, private tasks, private projects and projects the source did not
 tick are never in the response, and nothing here can write to the source. Do
@@ -74,7 +95,7 @@ nowhere new: the work stays in the source, and each change shows there as
 gone, the person lacks the right there, or the command is not covered; say so,
 do not retry another way.
 
-Every refusal of `view` is the same `404 link not found`: the link was revoked, is still
+Every refusal of `view` is the same `404 link not found`: the link was deleted, is still
 waiting for acceptance, or your workspace is not its viewer. Report it as "no
 access", not as a bug.
 
@@ -107,3 +128,50 @@ multica workspace link create --from <source-slug> --project <project> --managed
 
 A missing source membership or guest role still grants no managed access.
 There is no receiving-chat setting or separate workspace-link send command.
+
+Projects and autopilots can also save references with
+`multica project linked-projects <id>` and `multica autopilot linked-projects <id>`.
+Both accept `--reference <link-id>:<project-id>` (repeatable) or `--clear`;
+autopilots also accept `--inherit` to use the owning project's defaults.
+These settings do not enable managed access or change any existing link.
+
+Disconnect (`revoke`) deletes the link; there is no `revoked` status. Both
+sides retain audit records.
+
+Attachments work with `--linked` on create and comment add:
+
+```sh
+multica issue comment add <ID> --linked <source-slug> --content-file note.md --attachment x.png
+```
+
+Upload and attachment ownership are in the source, under the run originator's
+permissions. Read-only project resource lookup is available for CLI resolution.
+Mentioning or assigning a source agent uses the source's normal trigger rules;
+the originating person remains the run originator. Writes leave provenance in
+the source issue timeline (`issue timeline`) or `autopilot linked-changes`.
+Link audit records (`workspace_link_audit`) are visible to both owners in
+Settings → Linked workspaces. No existing link settings are changed by a command
+using `--linked`.
+
+## Settings and audit
+
+Human source owners can change projects and switch managed from either side.
+From the viewer they
+also need owner/admin rights there; `update <link-id> --project <name>` resolves
+names in the source workspace. `list` includes shared `projects` on both sides,
+`can_update_projects` and `can_set_managed`. Pending offers may carry the default
+`managed: true`, but managed access starts only after acceptance. An off pending
+link cannot be enabled through `update`: accept first. Agents still cannot manage
+links or read owner-only audit.
+
+Human workspace owners can read changes and managed writes (including deleted links):
+
+```sh
+multica workspace link audit --limit 50 --output json
+multica workspace link audit --cursor <next_cursor> --output json
+```
+
+Each entry names `peer_workspace_name`, `by_side`, `actor_name`, `action`, `route`,
+`object_label` (task identifier or automation name), `detail` and `created_at`.
+`next_cursor: null` marks the last page. Settings, linked reading and overview
+refresh on link-change events and after reconnect; a full-page reload is unnecessary.

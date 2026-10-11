@@ -1,3 +1,5 @@
+import { LinkedProjectSettingsSchema } from "./schemas";
+import type { LinkedProjectSettings } from "../types/workspace-link";
 import { parseOverview, type OverviewFilters } from "./overview";
 import type { AgentSpawnPolicy, AgentSpawnPolicyPatch } from "../workspace/agent-spawn";
 import type { ZodType } from "zod";
@@ -99,6 +101,7 @@ import type {
   ExternalBot,
   CreateExternalBotRequest,
   ExternalBotKeyResponse,
+  ExternalBotSetupTextResponse,
   BotWakeSettings,
   UpdateBotWakeRequest,
   BotWakeEventPage,
@@ -4817,6 +4820,12 @@ export class ApiClient {
     });
   }
 
+  /** Setup text again, key replaced by a placeholder; `botId` addresses the bot by name. */
+  async getExternalBotSetupText(workspaceId: string, botId?: string): Promise<ExternalBotSetupTextResponse> {
+    const qs = botId ? `?bot=${encodeURIComponent(botId)}` : "";
+    return this.fetch(`/api/workspaces/${workspaceId}/bots/setup-text${qs}`);
+  }
+
   async rotateExternalBotKey(workspaceId: string, botId: string): Promise<ExternalBotKeyResponse> {
     return this.fetch(`/api/workspaces/${workspaceId}/bots/${botId}/rotate`, {
       method: "POST",
@@ -6742,9 +6751,9 @@ export class ApiClient {
     };
   }
 
-  async listWorkspaceLinkAudit(): Promise<WorkspaceLinkAuditEntry[]> {
-    const raw = await this.fetch<{ entries?: WorkspaceLinkAuditEntry[] }>("/api/workspace-links/audit");
-    return Array.isArray(raw?.entries) ? raw.entries : [];
+  async listWorkspaceLinkAudit(cursor = ""): Promise<{ entries: WorkspaceLinkAuditEntry[]; next_cursor: string | null }> {
+    const raw = await this.fetch<{ entries?: WorkspaceLinkAuditEntry[]; next_cursor?: string | null }>(`/api/workspace-links/audit?limit=50&cursor=${encodeURIComponent(cursor)}`);
+    return { entries: Array.isArray(raw?.entries) ? raw.entries : [], next_cursor: raw?.next_cursor ?? null };
   }
 
   /** Names the workspace a pasted link or slug points to; 404 when none. */
@@ -6776,6 +6785,21 @@ export class ApiClient {
   }
 
   /** Shared projects this workspace may attach to a chat read-only (DENE-1643). */
+  async getLinkedProjectSettings(kind: "projects" | "autopilots", id: string): Promise<LinkedProjectSettings> {
+    const endpoint = `/api/${kind}/${encodeURIComponent(id)}/linked-projects`;
+    const parsed = parseWithFallback<LinkedProjectSettings | null>(await this.fetch(endpoint), LinkedProjectSettingsSchema, null, { endpoint });
+    if (!parsed) throw new Error("Could not read reference projects");
+    return parsed;
+  }
+
+  async setLinkedProjectSettings(kind: "projects" | "autopilots", id: string, refs: ChatLinkedProjectRef[] | null): Promise<LinkedProjectSettings> {
+    const endpoint = `/api/${kind}/${encodeURIComponent(id)}/linked-projects`;
+    const raw = await this.fetch(endpoint, { method: "PUT", body: JSON.stringify({ linked_projects: refs }) });
+    const parsed = parseWithFallback<LinkedProjectSettings | null>(raw, LinkedProjectSettingsSchema, null, { endpoint });
+    if (!parsed) throw new Error("Could not read saved reference projects");
+    return parsed;
+  }
+
   async listLinkedProjectOptions(): Promise<LinkedProjectOption[]> {
     const raw = await this.fetch<{ projects?: LinkedProjectOption[] }>("/api/workspace-links/projects");
     return Array.isArray(raw?.projects) ? raw.projects : [];

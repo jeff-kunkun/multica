@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"github.com/multica-ai/multica/server/internal/botsource"
 	"log/slog"
 	"net/http"
@@ -51,7 +52,7 @@ const ManagedActorSource = "linked_task_token"
 var ErrManagedDenied = forbidden("that workspace is not open to this run: it needs an active link with managed access on, and the person who started this run must be able to do this there; inspect multica workspace link view")
 
 // ErrManagedRoute refuses a command outside the managed list.
-var ErrManagedRoute = forbidden("this command is not available on a linked workspace: only supported issue/autopilot operations and the originator's own chat list/read/send are; inspect multica workspace link view")
+var ErrManagedRoute = forbidden("this command is not available on a linked workspace: only supported issue/autopilot operations, attachment upload, read-only lookups, and the originator's own chat list/read/send are; inspect multica workspace link view")
 
 // managedRoute is one endpoint a managed request may reach.
 type managedRoute struct {
@@ -66,7 +67,10 @@ func route(name, method, pattern string, write bool) managedRoute {
 	return managedRoute{name: name, method: method, path: regexp.MustCompile("^" + pattern + "/?$"), write: write}
 }
 
-const seg = `[^/]+`
+// IDs are canonical UUIDs; issues additionally accept their public identifier.
+// Never use an arbitrary segment: it also matches fixed collection endpoints.
+const seg = `[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}`
+const issueRef = `(?:` + seg + `|[A-Za-z0-9]{1,10}-[1-9][0-9]*)`
 
 // managedRoutes is the whole whitelist. Lookups (labels, properties,
 // statuses, projects, members, agents, squads) are read-only and exist so
@@ -81,17 +85,17 @@ var managedRoutes = []managedRoute{
 	route("issue.search", "GET", `/api/issues/search`, false),
 	route("issue.children", "GET", `/api/issues/children`, false),
 	route("issue.create", "POST", `/api/issues`, true),
-	route("issue.get", "GET", `/api/issues/(?P<issue>`+seg+`)`, false),
-	route("issue.update", "PUT", `/api/issues/(?P<issue>`+seg+`)`, true),
-	route("issue.child_list", "GET", `/api/issues/(?P<issue>`+seg+`)/children`, false),
-	route("issue.comments", "GET", `/api/issues/(?P<issue>`+seg+`)/comments`, false),
-	route("issue.comment", "POST", `/api/issues/(?P<issue>`+seg+`)/comments`, true),
-	route("issue.timeline", "GET", `/api/issues/(?P<issue>`+seg+`)/timeline`, false),
-	route("issue.labels", "GET", `/api/issues/(?P<issue>`+seg+`)/labels`, false),
-	route("issue.label_add", "POST", `/api/issues/(?P<issue>`+seg+`)/labels`, true),
-	route("issue.label_remove", "DELETE", `/api/issues/(?P<issue>`+seg+`)/labels/`+seg, true),
-	route("issue.property_set", "PUT", `/api/issues/(?P<issue>`+seg+`)/properties/`+seg, true),
-	route("issue.property_clear", "DELETE", `/api/issues/(?P<issue>`+seg+`)/properties/`+seg, true),
+	route("issue.get", "GET", `/api/issues/(?P<issue>`+issueRef+`)`, false),
+	route("issue.update", "PUT", `/api/issues/(?P<issue>`+issueRef+`)`, true),
+	route("issue.child_list", "GET", `/api/issues/(?P<issue>`+issueRef+`)/children`, false),
+	route("issue.comments", "GET", `/api/issues/(?P<issue>`+issueRef+`)/comments`, false),
+	route("issue.comment", "POST", `/api/issues/(?P<issue>`+issueRef+`)/comments`, true),
+	route("issue.timeline", "GET", `/api/issues/(?P<issue>`+issueRef+`)/timeline`, false),
+	route("issue.labels", "GET", `/api/issues/(?P<issue>`+issueRef+`)/labels`, false),
+	route("issue.label_add", "POST", `/api/issues/(?P<issue>`+issueRef+`)/labels`, true),
+	route("issue.label_remove", "DELETE", `/api/issues/(?P<issue>`+issueRef+`)/labels/`+seg, true),
+	route("issue.property_set", "PUT", `/api/issues/(?P<issue>`+issueRef+`)/properties/`+seg, true),
+	route("issue.property_clear", "DELETE", `/api/issues/(?P<issue>`+issueRef+`)/properties/`+seg, true),
 
 	route("autopilot.list", "GET", `/api/autopilots`, false),
 	route("autopilot.cron_preview", "GET", `/api/autopilots/cron-preview`, false),
@@ -107,6 +111,8 @@ var managedRoutes = []managedRoute{
 	route("autopilot.trigger_update", "PATCH", `/api/autopilots/(?P<autopilot>`+seg+`)/triggers/`+seg, true),
 	route("autopilot.trigger_delete", "DELETE", `/api/autopilots/(?P<autopilot>`+seg+`)/triggers/`+seg, true),
 
+	route("attachment.upload", "POST", `/api/upload-file`, true),
+	route("lookup.project_resources", "GET", `/api/projects/`+seg+`/resources`, false),
 	route("lookup.labels", "GET", `/api/labels`, false),
 	route("lookup.properties", "GET", `/api/properties`, false),
 	route("lookup.statuses", "GET", `/api/issue-statuses`, false),
@@ -318,6 +324,14 @@ func (s *Service) Managed(next http.Handler) http.Handler {
 		}
 		r.URL.RawQuery = q.Encode()
 
+		// Capture names before a destructive operation removes the object.
+		if rt.write && params["autopilot"] != "" {
+			if id, err := util.ParseUUID(params["autopilot"]); err == nil {
+				if ap, err := s.q.GetAutopilotInWorkspace(r.Context(), db.GetAutopilotInWorkspaceParams{ID: id, WorkspaceID: grant.Source.ID}); err == nil {
+					params["object_label"] = ap.Title
+				}
+			}
+		}
 		rec := &managedRecorder{ResponseWriter: w, status: http.StatusOK, keepBody: rt.name == "issue.create" || rt.name == "autopilot.create"}
 		next.ServeHTTP(rec, r)
 		if rt.write && rec.status < 300 {
@@ -374,6 +388,7 @@ func (m *managedRecorder) Flush() {
 func (s *Service) recordManagedWrite(ctx context.Context, g ManagedGrant, rt managedRoute, params map[string]string, body []byte) {
 	detail := map[string]any{
 		"route":         rt.name,
+		"object_label":  params["object_label"],
 		"via_workspace": g.Viewer.Name,
 		"via_slug":      g.Viewer.Slug,
 		"agent_id":      util.UUIDToString(g.Agent.ID),
@@ -388,6 +403,9 @@ func (s *Service) recordManagedWrite(ctx context.Context, g ManagedGrant, rt man
 		issueID = s.managedIssueID(ctx, g.Source, params["issue"], body)
 		if issueID.Valid {
 			detail["issue_id"] = util.UUIDToString(issueID)
+			if issue, err := s.q.GetIssueInWorkspace(ctx, db.GetIssueInWorkspaceParams{ID: issueID, WorkspaceID: g.Source.ID}); err == nil {
+				detail["object_label"] = fmt.Sprintf("%s-%d", g.Source.IssuePrefix, issue.Number)
+			}
 		}
 	}
 	var autopilotID pgtype.UUID
@@ -395,6 +413,9 @@ func (s *Service) recordManagedWrite(ctx context.Context, g ManagedGrant, rt man
 		autopilotID = s.managedAutopilotID(ctx, g.Source, params["autopilot"], body)
 		if autopilotID.Valid {
 			detail["autopilot_id"] = util.UUIDToString(autopilotID)
+			if ap, err := s.q.GetAutopilotInWorkspace(ctx, db.GetAutopilotInWorkspaceParams{ID: autopilotID, WorkspaceID: g.Source.ID}); err == nil {
+				detail["object_label"] = ap.Title
+			}
 		}
 	}
 	if err := audit(ctx, s.q, g.Link, g.Viewer.ID, g.Originator, "managed_write", detail); err != nil {
@@ -507,6 +528,7 @@ func (s *Service) FillCanSetManaged(ctx context.Context, links []Link, actorUser
 		switch links[i].Side {
 		case SideSource:
 			links[i].CanSetManaged = Decide(OpSetManaged, SideSource, actor)
+			links[i].CanUpdateProjects = Decide(OpUpdateProjects, SideSource, actor)
 		case SideViewer:
 			sourceID, err := util.ParseUUID(links[i].Source.ID)
 			if err != nil {
@@ -517,6 +539,10 @@ func (s *Service) FillCanSetManaged(ctx context.Context, links []Link, actorUser
 				return err
 			}
 			links[i].CanSetManaged = ok
+			links[i].CanUpdateProjects = ok
+		}
+		if links[i].Status != "active" && !links[i].Managed {
+			links[i].CanSetManaged = false
 		}
 	}
 	return nil
@@ -540,6 +566,9 @@ func (s *Service) setManaged(ctx context.Context, q *db.Queries, link db.Workspa
 		fromViewer = true
 	default:
 		return ErrNotFound
+	}
+	if on && link.Status != "active" {
+		return invalid("accept the link before enabling managed access")
 	}
 	updated, err := q.SetWorkspaceLinkManaged(ctx, db.SetWorkspaceLinkManagedParams{ID: link.ID, Managed: on})
 	if err != nil {

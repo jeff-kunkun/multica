@@ -1,3 +1,4 @@
+import { ProjectReferencesSetting } from "@/components/projects/project-references-setting";
 /**
  * Project detail screen. Single column, scrolling:
  *
@@ -239,6 +240,7 @@ export default function ProjectDetail() {
                 });
             }}
           />
+          <View className="px-4 py-3"><ProjectReferencesSetting projectId={id} /></View>
           <ProjectResourcesSection
             projectId={id}
             onAdd={() => {

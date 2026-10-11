@@ -33,7 +33,7 @@ INSERT INTO project (
     $11::uuid,
     COALESCE($12::text, 'private'),
     COALESCE($13::uuid[], '{}'::uuid[])
-) RETURNING id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, start_date, due_date, visibility, created_by, domain_ids
+) RETURNING id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, start_date, due_date, visibility, created_by, domain_ids, linked_projects
 `
 
 type CreateProjectParams struct {
@@ -86,6 +86,7 @@ func (q *Queries) CreateProject(ctx context.Context, arg CreateProjectParams) (P
 		&i.Visibility,
 		&i.CreatedBy,
 		&i.DomainIds,
+		&i.LinkedProjects,
 	)
 	return i, err
 }
@@ -106,7 +107,7 @@ func (q *Queries) DeleteProject(ctx context.Context, arg DeleteProjectParams) er
 }
 
 const getProjectInWorkspace = `-- name: GetProjectInWorkspace :one
-SELECT id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, start_date, due_date, visibility, created_by, domain_ids FROM project
+SELECT id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, start_date, due_date, visibility, created_by, domain_ids, linked_projects FROM project
 WHERE id = $1 AND workspace_id = $2
 `
 
@@ -135,6 +136,7 @@ func (q *Queries) GetProjectInWorkspace(ctx context.Context, arg GetProjectInWor
 		&i.Visibility,
 		&i.CreatedBy,
 		&i.DomainIds,
+		&i.LinkedProjects,
 	)
 	return i, err
 }
@@ -239,7 +241,7 @@ func (q *Queries) ListProjectIDsLedByMember(ctx context.Context, arg ListProject
 }
 
 const listProjects = `-- name: ListProjects :many
-SELECT id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, start_date, due_date, visibility, created_by, domain_ids FROM project
+SELECT id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, start_date, due_date, visibility, created_by, domain_ids, linked_projects FROM project
 WHERE workspace_id = $1
   AND ($2::text IS NULL OR status = $2)
   AND ($3::text IS NULL OR priority = $3)
@@ -278,6 +280,7 @@ func (q *Queries) ListProjects(ctx context.Context, arg ListProjectsParams) ([]P
 			&i.Visibility,
 			&i.CreatedBy,
 			&i.DomainIds,
+			&i.LinkedProjects,
 		); err != nil {
 			return nil, err
 		}
@@ -334,7 +337,7 @@ UPDATE project SET
     visibility = $3,
     updated_at = now()
 WHERE id = $1 AND workspace_id = $2
-RETURNING id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, start_date, due_date, visibility, created_by, domain_ids
+RETURNING id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, start_date, due_date, visibility, created_by, domain_ids, linked_projects
 `
 
 type SetProjectVisibilityParams struct {
@@ -363,6 +366,7 @@ func (q *Queries) SetProjectVisibility(ctx context.Context, arg SetProjectVisibi
 		&i.Visibility,
 		&i.CreatedBy,
 		&i.DomainIds,
+		&i.LinkedProjects,
 	)
 	return i, err
 }
@@ -380,7 +384,7 @@ UPDATE project SET
     due_date = $10,
     updated_at = now()
 WHERE id = $1
-RETURNING id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, start_date, due_date, visibility, created_by, domain_ids
+RETURNING id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, start_date, due_date, visibility, created_by, domain_ids, linked_projects
 `
 
 type UpdateProjectParams struct {
@@ -427,6 +431,7 @@ func (q *Queries) UpdateProject(ctx context.Context, arg UpdateProjectParams) (P
 		&i.Visibility,
 		&i.CreatedBy,
 		&i.DomainIds,
+		&i.LinkedProjects,
 	)
 	return i, err
 }

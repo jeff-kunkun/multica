@@ -335,5 +335,19 @@
     "cancel": "취소",
     "loading": "불러오는 중…",
     "load_more": "더 보기"
+  },
+  "references": {
+    "title": "참고 프로젝트",
+    "description": "실행 시 이 프로젝트를 읽습니다.",
+    "choose": "프로젝트 선택",
+    "inherit": "프로젝트 기본값 사용",
+    "empty": "공유 프로젝트가 없습니다",
+    "unavailable": "사용 불가",
+    "load_error": "참고 프로젝트를 불러올 수 없습니다",
+    "retry": "다시 시도",
+    "save_error": "저장하지 못했습니다. 다시 시도하세요.",
+    "read_only": "수정 권한이 없습니다.",
+    "loading": "불러오는 중...",
+    "none": "없음"
   }
 }

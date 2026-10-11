@@ -1,6 +1,7 @@
 # Workspace overview
 
-Start with `multica overview --compact` when you do not know the workspace.
+Start with `multica overview --compact` when you do not know the workspace,
+then `multica capabilities` for the live command map (see `external-bots.md`).
 This is one request to `GET /api/overview`; the CLI and Settings → Overview use
 that same read-only, permission-scoped projection. It never marks chats read.
 
@@ -32,3 +33,10 @@ It never includes prompts, API keys, environment values or webhook secrets.
 External Bot personal keys follow the same ordinary authentication and access
 rules as their owner. Task tokens retain their existing actor/visibility rules;
 they cannot read the external key inventory. See `external-bots.md` for setup.
+
+Project and automation rows include `linked_projects` (saved selection),
+`effective_linked_projects` (selection after inheritance), and `inherited`.
+Each reference names `link_id`, `project_id`, `title`, `source_name` and `available`;
+unavailable references remain visible for removal. Automation `linked_projects: null`
+means inherit, while `[]` means explicitly no references. These fields survive
+compact mode and use the same access checks as the settings read endpoints.

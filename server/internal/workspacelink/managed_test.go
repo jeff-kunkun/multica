@@ -3,8 +3,10 @@ package workspacelink
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 
@@ -241,18 +243,18 @@ func TestManagedGate(t *testing.T) {
 	if rec, _ := gateRequest(t, w.svc, "GET", "/api/autopilots", token, 200, `{}`); rec.Code != 200 {
 		t.Fatalf("autopilot list: %d", rec.Code)
 	}
-	if rec, _ := gateRequest(t, w.svc, "PATCH", "/api/autopilots/ap-1/triggers/tr-1", token, 200, `{}`); rec.Code != 200 {
+	if rec, _ := gateRequest(t, w.svc, "PATCH", "/api/autopilots/00000000-0000-0000-0000-000000000001/triggers/00000000-0000-0000-0000-000000000002", token, 200, `{}`); rec.Code != 200 {
 		t.Fatalf("trigger update: %d", rec.Code)
 	}
 	// A refused write leaves nothing.
-	if rec, _ := gateRequest(t, w.svc, "POST", "/api/autopilots/ap-1/trigger", token, 403, `{}`); rec.Code != 403 {
+	if rec, _ := gateRequest(t, w.svc, "POST", "/api/autopilots/00000000-0000-0000-0000-000000000001/trigger", token, 403, `{}`); rec.Code != 403 {
 		t.Fatalf("refused run: %d", rec.Code)
 	}
 	if n := w.fx.Count(t, `SELECT count(*) FROM workspace_link_audit WHERE link_id = $1 AND action = 'managed_write'`, link); n != 3 {
 		t.Fatalf("managed_write audit rows = %d, want 3 (update, create, trigger update)", n)
 	}
 	if n := w.fx.Count(t, `SELECT count(*) FROM workspace_link_audit WHERE link_id = $1 AND action = 'managed_write'
-		AND workspace_id = $2 AND actor_id = $3 AND detail->>'autopilot_id' = 'ap-1'`, link, w.viewer, w.srcAdmin); n != 1 {
+		AND workspace_id = $2 AND actor_id = $3 AND detail->>'autopilot_id' = '00000000-0000-0000-0000-000000000001'`, link, w.viewer, w.srcAdmin); n != 1 {
 		t.Fatalf("autopilot audit row missing its provenance")
 	}
 
@@ -260,8 +262,8 @@ func TestManagedGate(t *testing.T) {
 	for _, c := range []struct{ method, path string }{
 		{"GET", "/api/workspace-links"},
 		{"PATCH", "/api/workspace-links/" + util.UUIDToString(link)},
-		{"POST", "/api/autopilots/ap-1/triggers/tr-1/rotate-webhook-token"},
-		{"POST", "/api/autopilots/ap-1/collaborators"},
+		{"POST", "/api/autopilots/00000000-0000-0000-0000-000000000001/triggers/00000000-0000-0000-0000-000000000002/rotate-webhook-token"},
+		{"POST", "/api/autopilots/00000000-0000-0000-0000-000000000001/collaborators"},
 		{"DELETE", "/api/issues/" + issueID},
 		{"GET", "/api/agents/x"},
 		{"PATCH", "/api/workspaces/" + sourceID},
@@ -305,4 +307,42 @@ func TestManagedGate(t *testing.T) {
 func itoa(n int) string {
 	b, _ := json.Marshal(n)
 	return string(b)
+}
+
+// The complete contract includes method, path grammar, audit behavior and name.
+// Adding a route requires an explicit, reviewable snapshot update.
+func TestManagedRouteSnapshot(t *testing.T) {
+	var got strings.Builder
+	for _, rt := range managedRoutes {
+		fmt.Fprintf(&got, "%s %s %s write=%t\n", rt.name, rt.method, rt.path.String(), rt.write)
+	}
+	want, err := os.ReadFile("testdata/managed-routes.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.String() != string(want) {
+		t.Fatalf("managed route contract changed:\n%s", got.String())
+	}
+}
+
+func TestManagedRouteExactParameters(t *testing.T) {
+	for _, path := range []string{
+		"/api/issues/limit-usage", "/api/issues/child-progress", "/api/issues/parking",
+		"/api/issues/grouped", "/api/issues/stall-actions", "/api/autopilots/usage",
+		"/api/issues/future-endpoint", "/api/autopilots/future-endpoint",
+		"/api/chat/sessions/future-endpoint", "/api/chat/sessions/future-endpoint/messages",
+		"/api/chat/sessions/01a12a2a-d7c1-7b2c-86d9-8ac9c11e7b44/handoff",
+		"/api/projects/not-an-id/resources", "/api/issues/WL-0", "/api/issues/WL-12/extra", "/api/issues/ABCDEFGHIJK-12", "/api/issues/-12",
+	} {
+		for _, method := range []string{"GET", "POST", "PUT", "PATCH", "DELETE"} {
+			if rt, _, ok := matchManagedRoute(method, path); ok {
+				t.Errorf("%s %s unexpectedly matches %s", method, path, rt.name)
+			}
+		}
+	}
+	for _, path := range []string{"/api/issues/123-12", "/api/issues/3TEAM-12", "/api/issues/1234567890-12", "/api/issues/3team-12", "/api/issues/WL-12", "/api/issues/01a12a2a-d7c1-7b2c-86d9-8ac9c11e7b44", "/api/autopilots/01a12a2a-d7c1-7b2c-86d9-8ac9c11e7b44"} {
+		if _, _, ok := matchManagedRoute("GET", path); !ok {
+			t.Errorf("valid reference rejected: %s", path)
+		}
+	}
 }

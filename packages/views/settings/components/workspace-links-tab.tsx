@@ -2,7 +2,7 @@
 
 import { useRef, useState } from "react";
 import { toast } from "sonner";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ApiError } from "@multica/core/api";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { projectListOptions } from "@multica/core/projects";
@@ -56,7 +56,9 @@ export function WorkspaceLinksTab() {
   const wsId = useWorkspaceId();
   const { data, isLoading } = useQuery(workspaceLinksOptions(wsId));
   const can = data?.can;
-  const links = data?.links ?? EMPTY_LINKS;
+  const [pendingOnly, setPendingOnly] = useState(false);
+  const allLinks = data?.links ?? EMPTY_LINKS;
+  const links = pendingOnly ? allLinks.filter((link) => link.side === "viewer" && link.status === "pending") : allLinks;
   const outgoing = links.filter((link) => link.side === "source");
   const incoming = links.filter((link) => link.side === "viewer");
   const [revoking, setRevoking] = useState<WorkspaceLink | null>(null);
@@ -109,6 +111,10 @@ export function WorkspaceLinksTab() {
 
   return (
     <SettingsTab title={t(($) => $.links.tab.title)} description={t(($) => $.links.tab.description)}>
+      <label className="flex min-h-11 items-center gap-2 text-body">
+        <input type="checkbox" checked={pendingOnly} onChange={(e) => setPendingOnly(e.target.checked)} />
+        {t(($) => $.links.tab.pending_only)}
+      </label>
       {awaitingAnswer ? incomingSection : outgoingSection}
       {awaitingAnswer ? outgoingSection : incomingSection}
 
@@ -197,7 +203,7 @@ function ProjectChecklist({
         return (
           <label
             key={project.id}
-            className="flex cursor-pointer items-center gap-2 rounded-md border px-2.5 py-1.5 text-body has-[:disabled]:cursor-not-allowed has-[:disabled]:opacity-60"
+            className="flex min-h-11 max-w-full cursor-pointer items-center gap-2 rounded-md border px-2.5 py-1.5 text-body has-[:disabled]:cursor-not-allowed has-[:disabled]:opacity-60"
           >
             <input
               type="checkbox"
@@ -301,7 +307,7 @@ function CreateLinkForm({
           </p>
           <Button
             size="sm"
-            className="shrink-0"
+            className="max-sm:min-h-11 shrink-0"
             disabled={!ready}
             onClick={() =>
               target.workspace &&
@@ -528,24 +534,13 @@ function OutgoingLinkRow({
   onRevoke: () => void;
 }) {
   const { t } = useT("workspace");
-  const [editing, setEditing] = useState<string[] | null>(null);
-  const update = useUpdateWorkspaceLinkProjects(wsId);
   return (
     <Card data-testid="workspace-link-outgoing">
       <CardContent className="space-y-3 p-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <LinkHeading name={link.target.name} avatarUrl={link.target.avatar_url} slug={link.target.slug} link={link} />
           <div className="flex gap-2">
-            <Button
-              size="sm"
-              variant="outline"
-              disabled={!canChange}
-              title={canChange ? undefined : t(($) => $.links.tab.create_reason)}
-              onClick={() => setEditing(editing ? null : link.projects.map((p) => p.id))}
-            >
-              {t(($) => $.links.tab.change_projects)}
-            </Button>
-            <Button
+            <Button className="max-sm:min-h-11"
               size="sm"
               variant="outline"
               disabled={!canChange}
@@ -556,39 +551,34 @@ function OutgoingLinkRow({
             </Button>
           </div>
         </div>
-        {editing ? (
-          <div className="space-y-2">
-            <ProjectPicker wsId={wsId} selected={editing} onChange={setEditing} disabled={update.isPending} />
-            <div className="flex justify-end gap-2">
-              <Button size="sm" variant="ghost" onClick={() => setEditing(null)}>
-                {t(($) => $.links.tab.cancel)}
-              </Button>
-              <Button
-                size="sm"
-                disabled={editing.length === 0 || update.isPending}
-                onClick={() =>
-                  update.mutate(
-                    { linkId: link.id, projectIds: editing },
-                    {
-                      onSuccess: () => setEditing(null),
-                      onError: (error) => toast.error(errorMessage(error, t(($) => $.links.tab.failed))),
-                    },
-                  )
-                }
-              >
-                {t(($) => $.links.tab.save)}
-              </Button>
-            </div>
-          </div>
-        ) : (
-          <p className="text-caption text-muted-foreground">
-            {t(($) => $.links.tab.sharing, { projects: link.projects.map((p) => p.title).join("、") || "—" })}
-          </p>
-        )}
+        <LinkProjects wsId={wsId} link={link} />
         <ManagedSwitch wsId={wsId} link={link} />
       </CardContent>
     </Card>
   );
+}
+
+function LinkProjects({ wsId, link }: { wsId: string; link: WorkspaceLink }) {
+  const { t } = useT("workspace");
+  const [editing, setEditing] = useState<string[] | null>(null);
+  const update = useUpdateWorkspaceLinkProjects(wsId);
+  const allowed = !!link.can_update_projects;
+  const lookup = useQuery(workspaceLinkLookupOptions(wsId, link.source.slug, allowed && editing !== null && link.side === "viewer", true));
+  return <div className="space-y-2">
+    <div className="flex flex-wrap items-center justify-between gap-2">
+      <p className="min-w-0 break-words text-caption text-muted-foreground">{t(($) => $.links.tab.sharing, { projects: link.projects.map((p) => p.title).join("、") || "—" })}</p>
+      <Button className="max-sm:min-h-11" size="sm" variant="outline" disabled={!allowed} onClick={() => setEditing(link.projects.map((p) => p.id))}>{t(($) => $.links.tab.change_projects)}</Button>
+    </div>
+    {!allowed ? <p className="text-caption text-muted-foreground">{t(($) => $.links.tab.projects_reason)}</p> : null}
+    {editing !== null ? <div className="space-y-2">
+      {link.side === "source" ? <ProjectPicker wsId={wsId} selected={editing} onChange={setEditing} disabled={update.isPending} /> :
+        <ProjectChecklist projects={lookup.data?.pull?.projects ?? []} selected={editing} onChange={setEditing} disabled={update.isPending || !lookup.data?.pull?.allowed} legend={t(($) => $.links.tab.projects_label)} empty={lookup.error ? errorMessage(lookup.error, t(($) => $.links.tab.failed)) : t(($) => $.links.tab.pull_no_projects)} />}
+      <div className="flex justify-end gap-2">
+        <Button className="max-sm:min-h-11" size="sm" variant="ghost" disabled={update.isPending} onClick={() => setEditing(null)}>{t(($) => $.links.tab.cancel)}</Button>
+        <Button className="max-sm:min-h-11" size="sm" disabled={!editing.length || update.isPending || (link.side === "viewer" && !lookup.data?.pull?.allowed)} onClick={() => update.mutate({ linkId: link.id, projectIds: editing }, { onSuccess: () => setEditing(null), onError: (error) => toast.error(errorMessage(error, t(($) => $.links.tab.failed))) })}>{t(($) => $.links.tab.save)}</Button>
+      </div>
+    </div> : null}
+  </div>;
 }
 
 function IncomingLinkRow({
@@ -617,7 +607,7 @@ function IncomingLinkRow({
           </div>
           <div className="flex gap-2">
             {link.status === "pending" ? (
-              <Button
+              <Button className="max-sm:min-h-11"
                 size="sm"
                 disabled={!canAccept || accept.isPending}
                 title={reason}
@@ -630,11 +620,12 @@ function IncomingLinkRow({
                 {t(($) => $.links.tab.accept)}
               </Button>
             ) : null}
-            <Button size="sm" variant="outline" disabled={!canAccept} title={reason} onClick={onRevoke}>
+            <Button className="max-sm:min-h-11" size="sm" variant="outline" disabled={!canAccept} title={reason} onClick={onRevoke}>
               {link.status === "pending" ? t(($) => $.links.tab.decline) : t(($) => $.links.tab.revoke)}
             </Button>
           </div>
         </div>
+        <LinkProjects wsId={wsId} link={link} />
         <ManagedSwitch wsId={wsId} link={link} />
       </CardContent>
     </Card>
@@ -657,14 +648,14 @@ function ManagedSwitch({ wsId, link }: { wsId: string; link: WorkspaceLink }) {
         <p className="text-body">{label}</p>
         <p className="text-caption text-muted-foreground">
           {!allowed
-            ? t(($) => $.links.tab.managed_reason)
+            ? (link.status === "pending" && !link.managed ? t(($) => $.links.tab.managed_pending) : t(($) => $.links.tab.managed_reason))
             : link.side === "source"
               ? t(($) => $.links.tab.managed_hint_outgoing)
               : t(($) => $.links.tab.managed_hint_incoming)}
         </p>
       </div>
       <Switch
-        className="shrink-0"
+        className="relative shrink-0 after:absolute after:-inset-x-1 after:-inset-y-3"
         checked={!!link.managed}
         disabled={!allowed || setManaged.isPending}
         aria-label={label}
@@ -682,7 +673,8 @@ function ManagedSwitch({ wsId, link }: { wsId: string; link: WorkspaceLink }) {
 function AuditSection({ wsId }: { wsId: string }) {
   const { t } = useT("workspace");
   const timeAgo = useTimeAgo();
-  const { data: entries = [] } = useQuery(workspaceLinkAuditOptions(wsId, true));
+  const query = useInfiniteQuery(workspaceLinkAuditOptions(wsId, true));
+  const entries = query.data?.pages.flatMap((page) => page.entries) ?? [];
   const action = (entry: WorkspaceLinkAuditEntry) => {
     switch (entry.action) {
       case "create":
@@ -705,14 +697,17 @@ function AuditSection({ wsId }: { wsId: string }) {
   };
   return (
     <SettingsSection title={t(($) => $.links.audit.title)} description={t(($) => $.links.audit.description)}>
+      {query.isError ? <p role="alert">{t(($) => $.links.tab.failed)}</p> : null}
       {entries.length === 0 ? (
         <p className="text-caption text-muted-foreground">{t(($) => $.links.audit.empty)}</p>
       ) : (
         <ul className="divide-y rounded-lg border">
           {entries.map((entry, index) => (
-            <li key={`${entry.link_id}-${entry.created_at}-${index}`} className="flex items-center gap-3 px-4 py-2 text-body">
-              <span className="min-w-0 flex-1 truncate">
+            <li key={`${entry.link_id}-${entry.created_at}-${index}`} className="flex flex-wrap items-center gap-3 px-4 py-2 text-body">
+              <span className="min-w-0 flex-1 basis-48 break-words">
+                <span className="block text-caption text-muted-foreground">{entry.peer_workspace_name || entry.link_id}</span>
                 {entry.actor_name || t(($) => $.links.audit.someone)} · {action(entry)}
+                {entry.route ? <span className="block text-caption text-muted-foreground">{entry.route} · {entry.object_label || "—"}</span> : null}
               </span>
               <span className="shrink-0 text-caption text-muted-foreground">
                 {entry.by_side === "source" ? t(($) => $.links.audit.by_source) : t(($) => $.links.audit.by_viewer)}
@@ -722,6 +717,7 @@ function AuditSection({ wsId }: { wsId: string }) {
           ))}
         </ul>
       )}
+      {query.hasNextPage ? <Button className="max-sm:min-h-11" variant="outline" disabled={query.isFetchingNextPage} onClick={() => void query.fetchNextPage()}>{t(($) => $.links.panel.load_more)}</Button> : null}
     </SettingsSection>
   );
 }

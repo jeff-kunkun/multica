@@ -1,8 +1,8 @@
 import { infiniteQueryOptions, queryOptions } from "@tanstack/react-query";
 import { api } from "../api";
 
-// A linked view is never cached server-side or pushed; it is re-read on
-// focus and on this interval so a revoke or an untick shows up promptly.
+// Link changes invalidate this cache through realtime events. Focus and
+// interval refresh also pick up changes to the source project/task content.
 export const LINKED_VIEW_REFRESH_MS = 60_000;
 const LINKED_VIEW_PAGE_SIZE = 50;
 
@@ -25,9 +25,11 @@ export const workspaceLinksOptions = (wsId: string) =>
   });
 
 export const workspaceLinkAuditOptions = (wsId: string, enabled: boolean) =>
-  queryOptions({
+  infiniteQueryOptions({
     queryKey: workspaceLinkKeys.audit(wsId),
-    queryFn: () => api.listWorkspaceLinkAudit(),
+    queryFn: ({ pageParam }) => api.listWorkspaceLinkAudit(pageParam),
+    initialPageParam: "",
+    getNextPageParam: (last) => last.next_cursor || undefined,
     enabled: !!wsId && enabled,
   });
 
@@ -72,5 +74,15 @@ export const linkedViewOptions = (wsId: string, linkId: string, projectId: strin
     refetchOnWindowFocus: true,
     refetchInterval: LINKED_VIEW_REFRESH_MS,
     // A refused read is the same 404 every time; retrying cannot change it.
+    retry: false,
+  });
+
+export const linkedProjectSettingsOptions = (wsId: string, kind: "projects" | "autopilots", id: string) =>
+  queryOptions({
+    queryKey: [...workspaceLinkKeys.all(wsId), "settings", kind, id],
+    queryFn: () => api.getLinkedProjectSettings(kind, id),
+    enabled: !!wsId && !!id,
+    refetchOnWindowFocus: true,
+    refetchInterval: LINKED_VIEW_REFRESH_MS,
     retry: false,
   });

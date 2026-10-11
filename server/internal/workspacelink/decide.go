@@ -80,6 +80,8 @@ type Actor struct {
 	// for their originator (OpManageRemote); setting a link up, switching
 	// managed access or tearing it down is a person's decision.
 	IsAgent bool
+	// SourceRole is loaded from membership when acting from the viewer.
+	SourceRole permission.Role
 }
 
 // Decide is the whole permission table. It is pure so the test can pin every
@@ -105,7 +107,10 @@ func Decide(op Op, side Side, actor Actor) bool {
 		return false
 	}
 	switch op {
-	case OpCreate, OpUpdateProjects:
+	case OpUpdateProjects:
+		return (side == SideSource && role == permission.RoleOwner) ||
+			(side == SideViewer && ownerOrAdmin && actor.SourceRole == permission.RoleOwner)
+	case OpCreate:
 		// Handing data out of the workspace weighs more than any setting.
 		return side == SideSource && role == permission.RoleOwner
 	case OpAccept:

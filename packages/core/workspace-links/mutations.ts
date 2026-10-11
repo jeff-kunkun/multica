@@ -38,3 +38,9 @@ export function useAcceptWorkspaceLink(wsId: string) {
 export function useRevokeWorkspaceLink(wsId: string) {
   return useLinkMutation(wsId, (linkId: string) => api.revokeWorkspaceLink(linkId));
 }
+
+export function useSetLinkedProjectSettings(wsId: string, kind: "projects" | "autopilots", id: string) {
+  return useLinkMutation(wsId, (refs: import("../types/workspace-link").ChatLinkedProjectRef[] | null) =>
+    api.setLinkedProjectSettings(kind, id, refs),
+  );
+}

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { LinkedProjectSettingsSchema } from "./schemas";
 import { runtimeDisplayLabel } from "../runtimes/display";
 import { parseWithFallback } from "./schema";
 
@@ -31,6 +32,9 @@ const recordSchema = z.object({
   }) })).nullish(),
   schedules: z.array(z.object({ kind: z.string(), enabled: z.boolean(), cron_expression: z.string().nullish(), timezone: z.string().nullish(), next_run_at: z.string().nullish() })).nullish(),
   project_ids: z.array(z.string()).nullish(),
+  linked_projects: LinkedProjectSettingsSchema.shape.linked_projects.optional(),
+  effective_linked_projects: LinkedProjectSettingsSchema.shape.effective_linked_projects.optional(),
+  inherited: z.boolean().optional(),
 }).passthrough().transform((row) => ({
   id: row.id,
   name: row.source && row.target ? `${row.source.name} → ${row.target.name}` : row.provider != null ? runtimeDisplayLabel({ name: row.name ?? "", custom_name: row.custom_name ?? null, provider: row.provider }) : row.name ?? row.title ?? row.id,
@@ -51,6 +55,9 @@ const recordSchema = z.object({
   specialization: row.domain_name ?? row.specialization,
   workEnabled: row.work_enabled,
   projectIds: row.project_ids ?? [],
+  linkedProjects: row.linked_projects,
+  effectiveLinkedProjects: row.effective_linked_projects,
+  referencesInherited: row.inherited,
 }));
 
 export type OverviewRecord = z.output<typeof recordSchema>;

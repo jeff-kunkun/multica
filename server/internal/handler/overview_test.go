@@ -100,6 +100,20 @@ func TestOverviewCountsFiltersAndCompact(t *testing.T) {
 	if string(compact["counts"]) != string(full["counts"]) {
 		t.Fatal("compact changed counts")
 	}
+	for _, snapshot := range []map[string]json.RawMessage{full, compact} {
+		for _, section := range []string{"projects", "automations"} {
+			for _, row := range overviewTestRows(t, snapshot, section) {
+				for _, field := range []string{"linked_projects", "effective_linked_projects", "inherited"} {
+					if _, ok := row[field]; !ok {
+						t.Fatalf("%s lacks %s: %v", section, field, row)
+					}
+				}
+				if overviewString(row, "id") == automation && row["inherited"] != true {
+					t.Fatalf("unset automation references must inherit: %v", row)
+				}
+			}
+		}
+	}
 	filtered, _ := overviewTestGet(t, overviewTestRequest(t, testUserID, "project="+project))
 	if rows := overviewTestRows(t, filtered, "projects"); len(rows) != 1 || overviewString(rows[0], "id") != project {
 		t.Fatalf("project filter: %v", rows)

@@ -27,8 +27,28 @@ comment or chat message the Bot writes with a line naming the Bot (for example
 `🤖 <Bot name> (Grok Bot)`), and mark relayed owner words as quotes. Treat a
 signed Bot message as a request, not as the owner's direct decision.
 
+A new bot starts with the two commands its setup text names (DENE-1804):
+`multica overview --output json` for the workspace map, then
+`multica capabilities` for the command map. The map is generated from the
+installed CLI's own command tree on every run, grouped by domain (issues,
+chats, agents, projects, automations, overview, workspace, local); each row
+gives usage, a one-line summary, `access` (read / write / local), `bot_key`
+(yes / no / local) and a runnable example. `--domain issues` narrows it,
+`--output json` returns `onboarding`, `legend`, `domains[].commands[]` and
+`count`. `bot_key: yes` means "try it"; the server's refusal stays final.
+An admin hands the same text out again with `multica bot guide [bot]` or the
+bot row's "Copy setup text" menu item; both read `GET
+/api/workspaces/{id}/bots/setup-text`, key replaced by a placeholder.
+
+A subcommand that does not exist (`multica inbox list`) is reported by name
+with the closest real one (`board`); with `--output json` the answer is a
+JSON object (`code: unknown_subcommand`, `suggestions`, `available`, `help`)
+instead of help text, exit code 1.
+
 Use the relevant references in this skill and each command's `--help`:
 
+- `overview --output json` for the permission-filtered workspace map, including project/automation reference selections and availability.
+- `project linked-projects <id>` and `autopilot linked-projects <id>` read references; `--reference <link-id>:<project-id>` replaces them, `--clear` selects none, and autopilot `--inherit` restores project defaults.
 - `issue list/search/get/context`, `issue comment list --full` for complete reads.
 - `chat list/search/history` for discovery; personal `chat new --agent ... --wait` on supported versions.
 - `chat send --session ... --attachment ./file` uploads local files and binds them to the user message through the ordinary chat API.

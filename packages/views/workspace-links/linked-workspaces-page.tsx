@@ -185,17 +185,20 @@ function ProjectCard({
         <div className="h-full rounded-full bg-primary" style={{ width: `${percent}%` }} />
       </div>
       <p className="mt-2 text-caption text-muted-foreground">{statusLabel}</p>
+      {project.description ? <p className="mt-2 whitespace-pre-wrap break-words text-body">{project.description}</p> : null}
+      {project.resources?.map((resource, index) => <p key={index} className="mt-2 break-all text-caption text-muted-foreground">{resource.label || resource.type} · {resource.url || resource.path}</p>)}
+      {project.memory_line ? <p className="mt-2 whitespace-pre-wrap break-words text-caption text-muted-foreground">{project.memory_line}</p> : null}
     </button>
   );
 }
 
 function IssueRow({ issue, status, updated }: { issue: LinkedViewIssue; status: string; updated: string }) {
   return (
-    <li className="flex items-center gap-3 px-4 py-2.5 text-body">
+    <li className="flex flex-wrap items-center gap-x-3 gap-y-1 px-4 py-2.5 text-body">
       <span className="w-20 shrink-0 font-mono text-caption text-muted-foreground">{issue.identifier}</span>
-      <span className="min-w-0 flex-1 truncate">{issue.title}</span>
-      <span className="hidden shrink-0 text-caption text-muted-foreground sm:inline">{status}</span>
-      <span className="hidden w-28 shrink-0 truncate text-caption text-muted-foreground md:inline">
+      <span className="min-w-0 basis-[calc(100%-6rem)] break-words sm:flex-1 sm:basis-0">{issue.title}</span>
+      <span className="shrink-0 text-caption text-muted-foreground">{status}</span>
+      <span className="min-w-0 flex-1 break-words text-caption text-muted-foreground sm:w-28 sm:flex-none">
         {issue.assignee_name ?? "—"}
       </span>
       <span className="w-20 shrink-0 text-right text-caption text-muted-foreground">{updated}</span>

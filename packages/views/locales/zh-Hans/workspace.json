@@ -82,7 +82,10 @@
       "managed_label": "可托管",
       "managed_hint_outgoing": "对方智能体可按发起人的权限在这里代办。",
       "managed_hint_incoming": "这里的智能体可按发起人的权限到对方代办。",
-      "managed_reason": "只有源方工作区的所有者能开关托管。",
+      "managed_reason": "需要源方 owner 权限；从看方修改还需本工作区 owner 或 admin 权限。",
+      "pending_only": "只看待本工作区接受的连通",
+      "projects_reason": "需要源方 owner 权限；从看方修改还需本工作区 owner 或 admin 权限。",
+      "managed_pending": "接受连通后才能开启托管。",
       "managed_create_hint": "默认允许看方智能体按发起人权限代办，可关"
     },
     "audit": {

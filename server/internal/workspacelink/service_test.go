@@ -183,8 +183,8 @@ func TestCreateRules(t *testing.T) {
 	if links, _ := w.svc.List(ctx, w.viewer, member()); len(links) != 0 {
 		t.Fatalf("member sees pending link: %+v", links)
 	}
-	if links, _ := w.svc.List(ctx, w.viewer, admin()); len(links) != 1 || links[0].Side != SideViewer || len(links[0].Projects) != 0 {
-		t.Fatalf("viewer admin list = %+v (viewer must not get the project picks)", links)
+	if links, _ := w.svc.List(ctx, w.viewer, admin()); len(links) != 1 || links[0].Side != SideViewer || len(links[0].Projects) != 1 {
+		t.Fatalf("viewer admin list = %+v (viewer admin must see the shared project picks)", links)
 	}
 
 	// Accept: only the viewer's owner/admin.

@@ -41,10 +41,9 @@ import (
 // Background work is emitted by `writeBackgroundTaskSafetySlim`
 // below.
 
-// writeHeader emits the brief's leading title and one-line elevator pitch.
+// writeHeader emits the brief's leading title.
 func writeHeader(b *strings.Builder) {
 	b.WriteString("# Multica Agent Runtime\n\n")
-	b.WriteString("You are a coding agent in the Multica platform. Use the `multica` CLI to interact with the platform.\n\n")
 }
 
 // writeBackgroundTaskSafetySlim emits the Background work section: the
@@ -209,10 +208,10 @@ func sanitizeBriefCodeToken(s string) string {
 // identity rule.
 func writeAvailableCommands(b *strings.Builder, ctx TaskContextForEnv) {
 	b.WriteString("## Commands\n\n")
-	b.WriteString("Reach Multica only through the `multica` CLI, never `curl` / `wget`. Run `multica <command> --help` for flags. The server rejects an incomplete call and says what is missing, so try the command instead of guessing. ")
+	b.WriteString("Reach Multica only through the `multica` CLI, never `curl` / `wget`. Run `multica <command> --help` for flags. The server rejects an incomplete call and says what is missing. ")
 	b.WriteString("`--output json` " + jsonStreamsRule + "\n\n")
 	b.WriteString("- `issue get | list | children` — read issues\n")
-	b.WriteString("- `issue context <id>` — the state card: goal, settled decisions, where it stands, the last handoff, threads new since your last run\n")
+	b.WriteString("- `issue context <id>` — state card and new threads\n")
 	b.WriteString("- `issue comment list | add` — read / post comments (bodies via `--content-file`)\n")
 	b.WriteString("- `issue create | update | assign` — create and edit issues; `--no-start` records a change without starting a run\n")
 	writeIssueStatusCommand(b, ctx)
@@ -223,7 +222,7 @@ func writeAvailableCommands(b *strings.Builder, ctx TaskContextForEnv) {
 	b.WriteString("- `chat list | search | history` — read chats\n")
 	b.WriteString("- `repo checkout <url>` — other repositories\n")
 	b.WriteString("- `attachment upload | download` — files\n\n")
-	b.WriteString("Keep the user's Git identity; a task-local override uses `git config --worktree`, never global.\n\n")
+	b.WriteString("Keep the user's Git identity; override via `git config --worktree`, never global.\n\n")
 	// Squad maintenance is squad-leader surface (MUL-5442). IsSquadLeader is a
 	// per-task role, so this costs byte-stability when the role flips; the
 	// owner accepted that tradeoff (MUL-5811).
@@ -1063,6 +1062,7 @@ func buildMetaSkillContentSlim(provider string, ctx TaskContextForEnv) string {
 	writeAgentIdentity(&b, ctx)
 	writeRequestingUser(&b, ctx)
 	writeWorkspaceContext(&b, ctx)
+	writeWorkspaceLinks(&b, ctx)
 
 	switch kind {
 	case kindQuickCreate:

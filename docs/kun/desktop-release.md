@@ -188,6 +188,21 @@ workflow 会 checkout **那个 tag 指向的 commit**（不是 `kun` tip），�
 
 回填成功后记得 `gh release edit <tag> --notes-file <file>` 把说明改成如实版本——资产齐全了就不该再写着「资产不完整」。
 
+## Linux CLI / 守护进程包（Actions 停用期间由借用仓库出）
+
+`release.yml` 的 GoReleaser job 在本 fork 上本来就被 `repository_owner == 'multica-ai'` 守卫跳过，而 jeff-kunkun/multica 的 Actions 自 2026-10-08 起又整体停用，所以一个 `v*` tag 推上去**没有任何 CLI 压缩包**；v0.6.3-test.5 之前服务器上的 CLI/守护进程都是发版人手工编译补上的。现在这一步由借用仓库 [`kkunkunya/multica-image-builder`](https://github.com/kkunkunya/multica-image-builder) 的 `cli-linux.yml` 自动做（DENE-1830）：每 10 分钟看一次源仓库最新的 `v*` tag，缺包就 checkout 那个 tag、用源码树自己的 `.goreleaser.yml` 交叉编译 linux amd64/arm64，产物与官方发版同名：`multica-cli-<ver>-linux-<arch>.tar.gz`、老名字 `multica_linux_<arch>.tar.gz`、`checksums.txt`。上传后逐个核对 `state=uploaded` 与大小，并在 job 里跑一次 `--version` 确认版本号和 commit 对得上 tag。
+
+**包在哪**（两种情况，由借用仓库有没有 `SOURCE_RELEASE_TOKEN` secret 决定）：
+
+| 情况 | 位置 | 服务器升级命令 |
+| --- | --- | --- |
+| 默认，没有 secret | 借用仓库自己的 Release：`https://github.com/kkunkunya/multica-image-builder/releases/tag/<tag>` | `MULTICA_RELEASE_REPO=kkunkunya/multica-image-builder multica update` |
+| owner 给了一把能写 jeff-kunkun/multica Release 的 token，存成借用仓库 secret `SOURCE_RELEASE_TOKEN` | 源仓库同一 tag 的 Release，和 Desktop 资产并排 | `multica update`（不用改任何配置） |
+
+借用仓库的 GITHUB_TOKEN 写不了别的仓库的 Release，所以默认落在借用仓库；要并回源仓库只能靠 owner 自己建 token（细粒度 token 只能开给自己名下的仓库，jeff-kunkun 名下的仓库要用 jeff-kunkun 账号建，或用 kkunkunya 的 classic token 带 `repo` 范围），agent 不碰。借用仓库上的 Release 故意**不标 prerelease**：`multica update` 读的是 `/releases/latest`，GitHub 的 latest 会跳过 prerelease。
+
+发版后要贴进票里的：Release 链接、`multica --version` 输出（版本 = tag 去掉 `v`，commit = tag 指向提交的前 7 位）。按 tag 手动下载、校验、覆盖安装的命令在借用仓库 README「Upgrade a server」一节；给旧 tag 补包用 `gh workflow run cli-linux.yml -R kkunkunya/multica-image-builder -f tag=<tag>`。Actions 恢复后 `release.yml` 的守卫仍会跳过 GoReleaser，CLI 包的出处要么继续留在借用仓库，要么另开票给 fork 自己的 workflow；删借用仓库前先定这件事。
+
 ## 僵尸资产（`state=starter`）
 
 失败的半截上传会留下 `state=starter` 的资产：`gh release view` 看不到它们，但它们会挡住同名重传。查与清：
@@ -200,6 +215,12 @@ node scripts/desktop-release-assets.mjs clean --tag v0.4.57 --repo jeff-kunkun/m
 ```
 
 `clean` 不会碰已 `uploaded` 的资产，也不会动别的 Release。
+
+## Actions 停用期间的出包分工（2026-10-08 起）
+
+- backend/web 镜像统一由 `kkunkunya/multica-image-builder` 出（推到 ghcr.io/kkunkunya，生产服自动跟这里）；Desktop 走下面的本机兜底；两边不要同时手工打同一个版本。
+- Linux CLI 包（守护进程是同一个二进制）在借用仓库补上自动构建前，由发版人在 tag 上本机交叉编译 linux amd64/arm64，按 `.goreleaser.yml` 的两种命名各出一份（`multica-cli-<ver>-linux-<arch>.tar.gz` 和 `multica_linux_<arch>.tar.gz`）加 `checksums.txt`，等 Desktop 的上传开始后（即 `clean` 已清过僵尸资产）再追加到同一个 Release。
+- 测试版（`-test.N`）的 CLI 包 `multica update` 不会自动拿到（它只看正式版的 `releases/latest`），服务器要按版本号用 Release 直链下载替换。
 
 ## 本机兜底构建（只在 CI 跑不起来时用）
 

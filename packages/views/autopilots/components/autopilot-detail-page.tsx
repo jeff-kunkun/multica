@@ -1,4 +1,5 @@
 "use client";
+import { ReferenceProjectsSetting } from "../../projects/components/reference-projects-setting";
 
 import { useState } from "react";
 import {
@@ -977,6 +978,8 @@ export function AutopilotDetailPage({ autopilotId }: { autopilotId: string }) {
               )}
             </div>
           </section>
+
+          <ReferenceProjectsSetting kind="autopilots" id={autopilotId} canWrite={canWrite} />
 
           {/* Triggers */}
           <section className="space-y-3">

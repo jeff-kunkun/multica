@@ -2155,6 +2155,7 @@
     "expires": "{{date}} 到期",
     "actions_aria": "{{name}} 的操作",
     "new_key": "发新钥匙",
+    "copy_setup": "复制接入说明",
     "stop": "停用",
     "delete": "删除",
     "cancel": "取消",
@@ -2192,6 +2193,7 @@
     },
     "toast_stopped": "已停用 {{name}}",
     "toast_failed": "没成功，再试一次。",
+    "toast_setup_copied": "已复制「{{name}}」的接入说明",
     "wake": {
       "open": "叫醒设置",
       "breadcrumb": "Bot 设置路径",

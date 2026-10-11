@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="zh-Hans"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>DENE-1804 外部 bot 自动入门 · 预览与样例</title>
+<style>
+:root{--fg:#1a1a1a;--mute:#6b6b6b;--line:#e3e3e3;--bg:#fff;--ok:#1b7f3b}
+body{margin:0;padding:24px 16px;font:15px/1.5 -apple-system,system-ui,"PingFang SC",sans-serif;color:var(--fg);background:var(--bg);max-width:960px;margin:auto}
+h1{font-size:20px;margin:0 0 4px}h2{font-size:16px;margin:32px 0 8px}p{margin:4px 0;color:var(--mute)}
+pre{background:#f6f6f6;border:1px solid var(--line);border-radius:6px;padding:12px;overflow:auto;font:12.5px/1.45 ui-monospace,Menlo,monospace;color:var(--fg)}
+.frames{display:flex;gap:16px;flex-wrap:wrap;align-items:flex-start}
+.frame{border:1px solid var(--line);border-radius:8px;overflow:hidden;background:#fff}
+.frame .bar{font-size:11px;color:var(--mute);padding:4px 10px;border-bottom:1px solid var(--line);background:#fafafa}
+.row{display:flex;align-items:center;justify-content:space-between;padding:12px 16px;border-bottom:1px solid var(--line);gap:12px}
+.row .name{font-weight:500}.row .sub{font-size:12px;color:var(--mute)}
+.kebab{width:28px;height:28px;border:1px solid var(--line);border-radius:6px;display:grid;place-items:center;color:var(--mute);flex:none}
+.menu{margin:4px 16px 16px auto;width:200px;border:1px solid var(--line);border-radius:8px;box-shadow:0 6px 20px rgba(0,0,0,.08);padding:4px;background:#fff}
+.menu div{padding:8px 10px;border-radius:5px;font-size:13.5px;min-height:44px;box-sizing:border-box;display:flex;align-items:center}
+.menu .hl{background:#f0f0f0}.menu .danger{color:#b42318}
+.toast{margin:8px 16px;display:inline-block;border:1px solid var(--line);border-radius:6px;padding:6px 10px;font-size:12.5px}
+.toast b{color:var(--ok);font-weight:500}
+table{border-collapse:collapse;width:100%;font-size:13.5px}td,th{border-bottom:1px solid var(--line);padding:6px 8px;text-align:left;vertical-align:top}th{color:var(--mute);font-weight:500}
+</style></head><body>
+<h1>DENE-1804 外部 bot 自动入门</h1>
+<p>发钥匙的说明、<code>multica capabilities</code> 的接入步骤、设置页「复制接入说明」三处同源（Go 包 <code>server/internal/botonboarding</code>）。以下界面为静态预览稿，CLI 输出为本机构建二进制的真实输出（2026-10-11）。</p>
+
+<h2>设置页 · 外部 Bot 行菜单（桌面 1280 / 手机 390）</h2>
+<p>菜单新增「复制接入说明」，复制的是不含钥匙的同一段说明（钥匙位写作 <code>&lt;钥匙&gt;</code>）。手机宽度下菜单项高 44px，不截断。<code>apps/mobile</code> 没有外部 Bot 设置屏，不改。</p>
+<div class="frames">
+ <div class="frame" style="width:560px;max-width:100%"><div class="bar">1280 · 设置 › 外部 Bot</div>
+  <div class="row"><div><div class="name">飞书通知机器人</div><div class="sub">钥匙 2 把 · 最近使用 今天</div></div><div class="kebab">⋯</div></div>
+  <div class="menu"><div class="hl">复制接入说明</div><div>新钥匙</div><div>重命名</div><div class="danger">删除</div></div>
+  <div class="toast"><b>已复制</b>「飞书通知机器人」的接入说明</div>
+ </div>
+ <div class="frame" style="width:390px;max-width:100%"><div class="bar">390 · 设置 › 外部 Bot</div>
+  <div class="row"><div><div class="name">飞书通知机器人</div><div class="sub">钥匙 2 把</div></div><div class="kebab">⋯</div></div>
+  <div class="menu" style="width:calc(100% - 32px)"><div class="hl">复制接入说明</div><div>新钥匙</div><div>重命名</div><div class="danger">删除</div></div>
+  <div class="toast"><b>已复制</b>「飞书通知机器人」的接入说明</div>
+ </div>
+</div>
+
+<h2>发钥匙 / 复制出来的接入说明（节选，三处同一段）</h2>
+<pre>三、上手（这段说明由系统生成，命令清单看 multica capabilities，不用背）
+1. multica overview --output json   # 看工作区全景：有哪些智能体、项目、聊天、自动化、技能、小队
+2. multica capabilities             # 看命令能力地图：每条命令能看什么、能做什么、示例，按领域分组，标出外部 bot 钥匙能不能用；--output json 给程序读
+3. multica &lt;命令&gt; &lt;子命令&gt; --help        # 单条命令的用法；拼错子命令时错误里会提示正确的那一条</pre>
+<p>CLI 同一段也能拿：<code>multica bot guide [bot]</code>；Web 走 <code>GET /api/workspaces/:ws/bots/setup-text</code>（owner/admin，人类登录）。</p>
+
+<h2><code>multica capabilities --domain chats</code>（真实输出）</h2>
+<pre>接入步骤 / Getting started
+1. multica overview --output json   # 看工作区全景……
+2. multica capabilities             # 看命令能力地图……
+3. multica &lt;命令&gt; &lt;子命令&gt; --help        # 单条命令的用法……
+
+16 commands · access: read/write/local · bot_key: yes/no/local (the server's refusal is final)
+
+聊天 (chats) — 16
+COMMAND                       ACCESS  BOT KEY  SUMMARY                                                                  EXAMPLE
+multica chat handoff          write   yes      Hand a chat to an agent: a new chat that opens with this one's summary   multica chat handoff
+multica chat history          read    yes      Overview of the channel this conversation is in (messages + thread list) multica chat history
+multica chat linked-projects  read    yes      List available or attached read-only reference projects ...              multica chat linked-projects --available --output json
+multica chat list             read    yes      List chats visible to the task initiator                                 multica chat list
+multica chat search           read    yes      Search visible chat titles and messages                                  multica chat search &lt;词&gt;
+...</pre>
+<table><tr><th>领域</th><th>命令数</th></tr>
+<tr><td>issues（issue / ask / plan / goal / knowledge）</td><td>83</td></tr><tr><td>chats</td><td>16</td></tr><tr><td>agents（agent / squad / skill）</td><td>45</td></tr><tr><td>projects（project / label / domain / property）</td><td>42</td></tr><tr><td>automations</td><td>14</td></tr><tr><td>overview（overview / capabilities / inbox / logs）</td><td>5</td></tr><tr><td>workspace（workspace / connection / github-app / settings / user / bot / transfer / attachment / repo）</td><td>62</td></tr><tr><td>local（daemon / runtime / config / login / setup / update / version / auth）</td><td>30</td></tr><tr><th>合计</th><th>297</th></tr></table>
+<p>JSON 每条命令字段：<code>command, usage, summary, access, bot_key, example, help</code>；顶层带 <code>onboarding</code>（接入步骤）和 <code>legend</code>（字段含义）。新加 CLI 命令自动入图；缺 Short 或没有可运行示例时测试 <code>TestCapabilitiesEveryCommandIsDescribed</code> 变红。</p>
+
+<h2><code>multica inbox list</code> 拼错子命令</h2>
+<pre>$ multica inbox list --output json ; echo exit=$?
+{
+  "error": "unknown command \"list\" for \"multica inbox\"",
+  "code": "unknown_subcommand",
+  "command": "multica inbox",
+  "unknown": "list",
+  "suggestions": ["board"],
+  "available": ["board", "dismiss"],
+  "help": "multica inbox --help"
+}
+exit=1
+
+$ multica inbox list
+Error: unknown command "list" for "multica inbox"
+There is no "list" here; you may want: board
+（后接 multica inbox 的帮助）</pre>
+</body></html>

@@ -3011,6 +3011,11 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 			"error_runtime_access_denied", http.StatusForbidden, "private runtime does not permit task agent",
 		)
 	}
+	links, linksErr := h.workspaceLinks().BriefHints(r.Context(), parseUUID(runtimeWorkspaceID))
+	if linksErr != nil {
+		return resp, deliveredCommentIDs, issueSnapshot, agentSkillCount, builtinSkillCount, h.rejectClaimSourceLoad(r.Context(), task, linksErr, "workspace_links", runtimeWorkspaceID)
+	}
+	resp.WorkspaceLinks = links
 	useSkillRefs := requestHasClientCapability(r, protocol.DaemonCapabilitySkillBundlesV1)
 	// A daemon older than the multica-platform merge assembles a brief that
 	// still names the built-ins this server stopped shipping. It cannot be
@@ -3360,6 +3365,17 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 				message: "failed to load project context",
 			}
 		}
+		var referenceAutopilot pgtype.UUID
+		if issue.OriginType.String == "autopilot" {
+			referenceAutopilot = issue.OriginID
+		}
+		linkedProjects, linkedErr := h.resolveClaimDefaultLinkedProjects(r.Context(), *task, issue.WorkspaceID, issue.ProjectID, referenceAutopilot)
+		if linkedErr != nil {
+			return resp, deliveredCommentIDs, issueSnapshot, agentSkillCount, builtinSkillCount, &claimBuildFailure{
+				outcome: "error_project_context", status: http.StatusInternalServerError, message: "failed to load reference projects",
+			}
+		}
+		resp.LinkedProjects = linkedProjects
 		h.applyClaimChatCounts(r.Context(), &projectCtx, task, issue.WorkspaceID)
 		projectCtx.applyTo(&resp)
 
@@ -4016,6 +4032,13 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 				message: "failed to load project context",
 			}
 		}
+		linkedProjects, linkedErr := h.resolveClaimDefaultLinkedProjects(r.Context(), *task, ap.WorkspaceID, ap.ProjectID, ap.ID)
+		if linkedErr != nil {
+			return resp, deliveredCommentIDs, issueSnapshot, agentSkillCount, builtinSkillCount, &claimBuildFailure{
+				outcome: "error_project_context", status: http.StatusInternalServerError, message: "failed to load reference projects",
+			}
+		}
+		resp.LinkedProjects = linkedProjects
 		h.applyClaimChatCounts(r.Context(), &projectCtx, task, ap.WorkspaceID)
 		projectCtx.applyTo(&resp)
 	}

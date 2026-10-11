@@ -2,6 +2,10 @@
 
 本索引只记录指向沉淀票附件的短指针；原始日志、截图和样本留在对应票据附件。
 
+- DENE-1811：跨工作区连通双向设置、CLI 实时同步与审计分页；[验收记录及四档 HTML 预览](DENE-1811/checkpoint.md)。
+
+- DENE-1804：外部 bot 自动入门，发钥匙说明 / `multica capabilities` / 设置页「复制接入说明」三处同源，拼错子命令给建议与 JSON 错误；[预览、1280/390 稿与真实 CLI 输出](DENE-1804/preview.html)。
+
 - DENE-1779：聊天项目筛选跟随当前对话、右侧项目变更和新建项目；手动「全部」在跳转与刷新后保留。[真实浏览器 375/390/768/1280 截图报告（任务附件）](https://ai.ferryway.cc/api/attachments/01a12929-1b8b-70e0-bb44-10f1349a356a/download)。
 
 - DENE-1050：统一带选项提问的三面交付；[PR #448](https://github.com/jeff-kunkun/multica/pull/448)，界面预览 `preview/ask-options-card.html`。
@@ -46,5 +50,7 @@
 - DENE-1794：评论、聊天和改单记录「经 Bot」，Bot 留言不算人的原话，停止和删除后保留历史；[最终验收证据](https://ai.ferryway.cc/api/attachments/01a129ef-dd01-77ac-b6dd-a0eaf945f3d7/download)含任务及聊天 375/390/768/1280 实页截图、禁止消息重拉时的真实 PAT 实时显示、PostgreSQL/Redis 与 CLI 来源专项测试；[来源与部署契约](../../server/docs/bot-write-provenance.md)。后台推送与四跳限制由 DENE-1792 集成验收。
 
 - DENE-1803：工作区全景聚合接口、CLI 与共享设置入口；[验收附件](https://ai.ferryway.cc/api/attachments/01a12a17-15bf-79fb-8d0f-bcd0526d52f6/download)含 375/390/768/1280 实页截图、筛选与刷新请求记录、真实 Bot 钥匙接口测试和本地 CLI 数量对照。完整/精简 JSON 为 3457/1730 字节（隔离测试工作区）。
+
+- DENE-1806：项目默认参考项目、自动化继承/覆盖与每次运行重新核验；[含手机版的 HTML 预览（任务附件）](https://ai.ferryway.cc/api/attachments/01a12a26-bdc6-798a-b349-f9ed72409a6c/download)。数据库、任务认领与页面截图见任务交付附件；线上 WD 实例验收须等待运行环境升级。
 
 - DENE-1808：可托管聊天代发、新连通默认开托管（旧连通不变）；[桌面/手机 HTML 预览附件](https://ai.ferryway.cc/api/attachments/01a12a2c-418e-78c0-bef9-e084235a21f1/download)。[验证记录与剩余验收](DENE-1808/README.md)：已补真实设置/聊天四档截图与开关提交；原生设备缺口保留，WD 线上验收需发布含本功能 CLI 的新测试版。

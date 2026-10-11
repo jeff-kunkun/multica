@@ -38,7 +38,11 @@ var workspaceLinkListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List links this workspace is on (members see only active incoming links; --pending: offers waiting for this workspace)",
 	Args:  cobra.NoArgs,
-	RunE:  runWorkspaceLinkList,
+	Long: "List accessible links. side=source means this workspace shares projects; side=viewer means it reads the source.\n" +
+		"Members and task tokens list active incoming links; managers can also list outgoing and pending links.\n" +
+		"The startup hint names both directions but grants no additional access. Use view <link-id> for incoming shared content.",
+	Example: "  multica workspace link list --output json",
+	RunE:    runWorkspaceLinkList,
 }
 
 var workspaceLinkLookupCmd = &cobra.Command{
@@ -59,7 +63,7 @@ var workspaceLinkCreateCmd = &cobra.Command{
 
 var workspaceLinkUpdateCmd = &cobra.Command{
 	Use:   "update <link-id> [--project <project>...] [--accept] [--managed on|off]",
-	Short: "Change the projects a link shares (source owner), accept it (viewer owner/admin), or turn managed on/off (source owner)",
+	Short: "Change projects or managed access as source owner (also from viewer with owner/admin rights), or accept a link",
 	Args:  cobra.ExactArgs(1),
 	RunE:  runWorkspaceLinkUpdate,
 }
@@ -75,11 +79,60 @@ var workspaceLinkViewCmd = &cobra.Command{
 	Use:   "view <link-id>",
 	Short: "Read the linked workspace's projects — description, directories, repos, project memory — and task status (read-only)",
 	Args:  cobra.ExactArgs(1),
-	RunE:  runWorkspaceLinkView,
+	Long: "From the viewer workspace, read an active source link's shared project context and task summaries.\n" +
+		"Task descriptions, comments and attachments are excluded. Source-side hints name the viewer only: they do not let you read that viewer.\n" +
+		"Find an accessible incoming link ID with multica workspace link list; disconnected or inaccessible links return link not found.",
+	Example: "  multica workspace link list --output json\n  multica workspace link view <link-id> --output json",
+	RunE:    runWorkspaceLinkView,
+}
+
+var workspaceLinkAuditCmd = &cobra.Command{
+	Use: "audit", Short: "Read link changes and managed writes, with peer workspace, route and object (workspace owner)",
+	Long: "Read the link audit trail, including disconnected links. Only a human workspace owner may read it.\n" +
+		"entries contain peer_workspace_name, by_side (source/viewer), route, object_label, actor_name, detail and created_at.\n" +
+		"Pass next_cursor as --cursor for the next page; null means the end. This command changes nothing.",
+	Example: "  multica workspace link audit --limit 50 --output json\n  multica workspace link audit --cursor <next_cursor> --output json",
+	Args:    cobra.NoArgs, RunE: runWorkspaceLinkAudit,
+}
+
+func runWorkspaceLinkAudit(cmd *cobra.Command, _ []string) error {
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := cli.APIContext(context.Background())
+	defer cancel()
+	cursor, _ := cmd.Flags().GetString("cursor")
+	limit, _ := cmd.Flags().GetInt("limit")
+	if limit < 1 || limit > 200 {
+		return fmt.Errorf("--limit must be between 1 and 200")
+	}
+	var resp struct {
+		Entries    []map[string]any `json:"entries"`
+		NextCursor *string          `json:"next_cursor"`
+	}
+	path := fmt.Sprintf("/api/workspace-links/audit?limit=%d&cursor=%s", limit, url.QueryEscape(cursor))
+	if err := client.GetJSON(ctx, path, &resp); err != nil {
+		return fmt.Errorf("read link audit (workspace owner required): %w", err)
+	}
+	if out, _ := cmd.Flags().GetString("output"); out == "json" {
+		return cli.PrintJSON(os.Stdout, resp)
+	}
+	rows := make([][]string, 0, len(resp.Entries))
+	for _, e := range resp.Entries {
+		rows = append(rows, []string{strVal(e, "created_at"), strVal(e, "peer_workspace_name"), strVal(e, "actor_name"), strVal(e, "by_side"), strVal(e, "action"), strVal(e, "route"), strVal(e, "object_label")})
+	}
+	cli.PrintTable(os.Stdout, []string{"TIME", "OTHER WORKSPACE", "ACTOR", "SIDE", "ACTION", "ROUTE", "OBJECT"}, rows)
+	if resp.NextCursor != nil {
+		fmt.Fprintf(os.Stdout, "Next page: multica workspace link audit --cursor %s\n", *resp.NextCursor)
+	}
+	return nil
 }
 
 func init() {
-	for _, c := range []*cobra.Command{workspaceLinkListCmd, workspaceLinkLookupCmd, workspaceLinkCreateCmd, workspaceLinkUpdateCmd, workspaceLinkRevokeCmd, workspaceLinkViewCmd} {
+	workspaceLinkAuditCmd.Flags().String("cursor", "", "next_cursor from the previous audit page")
+	workspaceLinkAuditCmd.Flags().Int("limit", 50, "Entries per page (1–200)")
+	for _, c := range []*cobra.Command{workspaceLinkListCmd, workspaceLinkLookupCmd, workspaceLinkCreateCmd, workspaceLinkUpdateCmd, workspaceLinkRevokeCmd, workspaceLinkViewCmd, workspaceLinkAuditCmd} {
 		c.Flags().String("output", "table", "Output format: table or json")
 		workspaceLinkCmd.AddCommand(c)
 	}
@@ -276,7 +329,7 @@ func runWorkspaceLinkUpdate(cmd *cobra.Command, args []string) error {
 		}
 	}
 	if given != 1 {
-		return fmt.Errorf("pass exactly one of --project (source side), --accept (viewer side) or --managed on|off")
+		return fmt.Errorf("pass exactly one of --project (source owner, either side), --accept (viewer side) or --managed on|off")
 	}
 	if managed != "" && managed != "on" && managed != "off" {
 		return fmt.Errorf("--managed takes on or off")
@@ -289,7 +342,35 @@ func runWorkspaceLinkUpdate(cmd *cobra.Command, args []string) error {
 	defer cancel()
 	body := map[string]any{"accept": accept}
 	if len(refs) > 0 {
-		ids, err := resolveLinkProjects(ctx, client, refs)
+		var directory struct {
+			Links []struct {
+				ID     string `json:"id"`
+				Side   string `json:"side"`
+				Source struct {
+					Slug string `json:"slug"`
+				} `json:"source"`
+			} `json:"links"`
+		}
+		if err := client.GetJSON(ctx, "/api/workspace-links", &directory); err != nil {
+			return err
+		}
+		var ids []string
+		found := false
+		for _, l := range directory.Links {
+			if l.ID != args[0] {
+				continue
+			}
+			found = true
+			if l.Side == "viewer" {
+				ids, err = resolvePullProjects(ctx, client, l.Source.Slug, refs)
+			} else {
+				ids, err = resolveLinkProjects(ctx, client, refs)
+			}
+			break
+		}
+		if !found {
+			return fmt.Errorf("link not found; run multica workspace link list to find its id")
+		}
 		if err != nil {
 			return err
 		}

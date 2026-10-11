@@ -614,7 +614,7 @@ func (q *Queries) SetIssueDomain(ctx context.Context, arg SetIssueDomainParams) 
 const setProjectDomains = `-- name: SetProjectDomains :one
 UPDATE project SET domain_ids = $3::uuid[], updated_at = now()
 WHERE id = $1 AND workspace_id = $2
-RETURNING id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, start_date, due_date, visibility, created_by, domain_ids
+RETURNING id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, start_date, due_date, visibility, created_by, domain_ids, linked_projects
 `
 
 type SetProjectDomainsParams struct {
@@ -643,6 +643,7 @@ func (q *Queries) SetProjectDomains(ctx context.Context, arg SetProjectDomainsPa
 		&i.Visibility,
 		&i.CreatedBy,
 		&i.DomainIds,
+		&i.LinkedProjects,
 	)
 	return i, err
 }
