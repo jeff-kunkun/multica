@@ -53,7 +53,8 @@ It is the SAME command regardless of which channel the conversation came from.
 Pass --session <url|id> to read a different chat in this workspace instead of
 the one you are running in. The link looks like …/chat/<session-id> (an older
 ?session=<id> link works too). The default is a short summary plus the latest
-messages, not the full transcript. Page older messages with --before
+messages, not the full transcript. hidden_queued_count is the session-wide number
+of queued user messages omitted from this transcript (not an older-page count). Page older messages with --before
 <next_cursor>.
 
 When the user says "接管这个：<link>", run:
@@ -747,6 +748,9 @@ func renderChatRead(cmd *cobra.Command, resp map[string]any, overview bool) erro
 		}
 	}
 	cli.PrintTable(os.Stdout, headers, rows)
+	if count := numVal(resp, "hidden_queued_count"); count != "" {
+		fmt.Fprintf(os.Stdout, "另有 %s 条排队消息\n", count)
+	}
 	if cursor := strVal(resp, "next_cursor"); cursor != "" && strVal(resp, "summary") != "" {
 		fmt.Fprintf(os.Stdout, "next_cursor: %s\n", cursor)
 	}

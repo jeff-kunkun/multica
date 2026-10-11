@@ -117,6 +117,7 @@
     "steer_fell_back_toast": "Cette réponse ne peut pas lire le message en cours, il a été mis en file d'attente"
   },
   "queue": {
+    "hidden_messages": "{{count}} messages supplémentaires en attente",
     "title_one": "{{count}} message en file d'attente",
     "title_other": "{{count}} messages en file d'attente",
     "clear": "Tout effacer",

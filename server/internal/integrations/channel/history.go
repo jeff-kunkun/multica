@@ -71,6 +71,7 @@ type HistoryMessage struct {
 // HistoryPage is one normalized page. Messages are ordered OLDEST-FIRST so the
 // transcript reads top-to-bottom like the chat does.
 type HistoryPage struct {
+	HiddenQueuedCount int32 `json:"hidden_queued_count,omitempty"`
 	// ChannelType is the platform the history came from ("slack"). Empty when
 	// the session is not bound to any channel (a web-only chat session).
 	ChannelType string `json:"channel_type,omitempty"`

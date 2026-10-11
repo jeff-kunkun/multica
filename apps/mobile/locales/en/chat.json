@@ -178,6 +178,7 @@
   "session_lineage.reason_session_lost": "session couldn't be restored",
   "session_lineage.reason_fresh_requested": "started fresh on request",
   "queue": {
+    "hidden_messages": "{{count}} more messages queued",
     "steer": "Interrupt and restart",
     "steer_unavailable": "Available after the current reply starts",
     "steer_no_permission": "You no longer have permission to run this agent",

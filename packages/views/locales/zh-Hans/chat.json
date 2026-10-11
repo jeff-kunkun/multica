@@ -115,6 +115,7 @@
     "steer_fell_back_toast": "这条回复读不了插话，已改为排队"
   },
   "queue": {
+    "hidden_messages": "另有 {{count}} 条排队消息",
     "title_other": "{{count}} 条排队消息",
     "clear": "全部清空",
     "steer": "打断重来",

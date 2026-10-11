@@ -115,6 +115,7 @@
     "steer_fell_back_toast": "이 답장은 중간에 메시지를 읽을 수 없어 대기열에 넣었습니다"
   },
   "queue": {
+    "hidden_messages": "메시지 {{count}}개 추가 대기 중",
     "title_other": "대기 중인 메시지 {{count}}개",
     "clear": "모두 지우기",
     "steer": "중단하고 다시",

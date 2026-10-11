@@ -190,6 +190,7 @@
   "session_lineage.reason_session_lost": "会话没能恢复",
   "session_lineage.reason_fresh_requested": "按要求新开",
   "queue": {
+    "hidden_messages": "另有 {{count}} 条排队消息",
     "steer": "打断重来",
     "steer_unavailable": "当前回复开始后才能打断重来",
     "steer_no_permission": "你已没有运行该智能体的权限",

@@ -17,12 +17,13 @@ import (
 // ChatSessionHandoffResponse is what a new session reads when it takes over an
 // older one. Summary plus the latest page — never the whole transcript.
 type ChatSessionHandoffResponse struct {
-	SessionID    string                   `json:"session_id"`
-	Title        string                   `json:"title"`
-	Summary      string                   `json:"summary"`
-	MessageCount int                      `json:"message_count"`
-	Messages     []channel.HistoryMessage `json:"messages"`
-	NextCursor   string                   `json:"next_cursor,omitempty"`
+	HiddenQueuedCount int32                    `json:"hidden_queued_count"`
+	SessionID         string                   `json:"session_id"`
+	Title             string                   `json:"title"`
+	Summary           string                   `json:"summary"`
+	MessageCount      int                      `json:"message_count"`
+	Messages          []channel.HistoryMessage `json:"messages"`
+	NextCursor        string                   `json:"next_cursor,omitempty"`
 }
 
 const (
@@ -149,6 +150,11 @@ func (h *Handler) writeChatSessionHandoff(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusInternalServerError, "failed to read chat session")
 		return
 	}
+	hiddenQueued, err := h.Queries.CountHiddenQueuedChatMessages(r.Context(), session.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to count queued chat messages")
+		return
+	}
 	opening, err := h.Queries.GetEarliestHandoffUserMessage(r.Context(), session.ID)
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		writeError(w, http.StatusInternalServerError, "failed to read chat session")
@@ -166,12 +172,13 @@ func (h *Handler) writeChatSessionHandoff(w http.ResponseWriter, r *http.Request
 	}
 	title := strings.TrimSpace(session.Title)
 	writeJSON(w, http.StatusOK, ChatSessionHandoffResponse{
-		SessionID:    uuidToString(session.ID),
-		Title:        title,
-		Summary:      buildHandoffSummary(title, int(total), len(messages), handoffExcerpt(opening), hasOlder),
-		MessageCount: int(total),
-		Messages:     messages,
-		NextCursor:   nextCursor,
+		HiddenQueuedCount: hiddenQueued,
+		SessionID:         uuidToString(session.ID),
+		Title:             title,
+		Summary:           buildHandoffSummary(title, int(total), len(messages), handoffExcerpt(opening), hasOlder),
+		MessageCount:      int(total),
+		Messages:          messages,
+		NextCursor:        nextCursor,
 	})
 }
 

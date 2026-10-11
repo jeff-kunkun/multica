@@ -115,6 +115,7 @@
     "steer_fell_back_toast": "この返信は途中でメッセージを読めないため、キューに入れました"
   },
   "queue": {
+    "hidden_messages": "ほかに {{count}} 件のメッセージが待機中",
     "title_other": "キュー内のメッセージ {{count}} 件",
     "clear": "すべて削除",
     "steer": "中断してやり直す",

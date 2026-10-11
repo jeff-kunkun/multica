@@ -345,3 +345,15 @@ describe("promotePendingChatTask wait_reason", () => {
     expect(promoted.wait_reason).toBeUndefined();
   });
 });
+
+describe("queued-history count refresh", () => {
+  it("drops the old count when a sparse event adds or removes a follow-up", () => {
+    const current = { task_id: "head", status: "running", hidden_queued_count: 2, queued_tasks: [task("next", "2026-01-01T00:00:00Z")] };
+    const appended = enqueuePendingChatTask(current, task("later", "2026-01-01T00:00:01Z"));
+    expect(appended.hidden_queued_count).toBeUndefined();
+    expect(appended.queued_tasks).toHaveLength(2);
+    const removed = removePendingChatTask(current, "next");
+    expect(removed.hidden_queued_count).toBeUndefined();
+    expect(removed.queued_tasks).toHaveLength(0);
+  });
+});

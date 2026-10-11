@@ -117,6 +117,7 @@
     "steer_fell_back_toast": "This reply can't take a message mid-reply, so it was queued"
   },
   "queue": {
+    "hidden_messages": "{{count}} more messages queued",
     "title_one": "{{count}} queued message",
     "title_other": "{{count}} queued messages",
     "clear": "Clear all",
