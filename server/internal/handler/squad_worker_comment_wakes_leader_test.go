@@ -244,14 +244,14 @@ func TestCreateComment_WorkerAgentCommentWakesSquadLeader_MUL4015(t *testing.T) 
 	}
 }
 
-// TestCreateComment_WorkerAgentCommentQueuesSeparatelyFromLeaderAssignment
+// TestCreateComment_WorkerAgentCommentMergesIntoLeaderAssignment
 // pins the dedup behavior: when the squad leader ALREADY has a queued or
 // dispatched task on the issue, a worker's completion comment does not double-
 // enqueue a second leader task. This is the desired "coalescing" behavior in
 // production — the leader is going to run once and will observe the worker's
 // comment in that run. Regression coverage so nobody drops the dedup and
 // starts stacking duplicate leader runs.
-func TestCreateComment_WorkerAgentCommentQueuesSeparatelyFromLeaderAssignment(t *testing.T) {
+func TestCreateComment_WorkerAgentCommentMergesIntoLeaderAssignment(t *testing.T) {
 	if testHandler == nil || testPool == nil {
 		t.Skip("database not available")
 	}
@@ -304,7 +304,7 @@ func TestCreateComment_WorkerAgentCommentQueuesSeparatelyFromLeaderAssignment(t 
 		t.Fatalf("CreateComment: expected 201, got %d: %s", w.Code, w.Body.String())
 	}
 
-	// The new comment thread queues independently of the assignment run.
+	// The existing assignment run receives the comment without another queue entry.
 	var leaderTasks int
 	if err := testPool.QueryRow(ctx, `
 		SELECT count(*) FROM agent_task_queue
@@ -312,8 +312,8 @@ func TestCreateComment_WorkerAgentCommentQueuesSeparatelyFromLeaderAssignment(t 
 	`, issueID, fx.LeaderID).Scan(&leaderTasks); err != nil {
 		t.Fatalf("count leader tasks: %v", err)
 	}
-	if leaderTasks != 2 {
-		t.Fatalf("expected separate assignment and comment tasks, got %d", leaderTasks)
+	if leaderTasks != 1 {
+		t.Fatalf("expected one merged assignment and comment task, got %d", leaderTasks)
 	}
 }
 

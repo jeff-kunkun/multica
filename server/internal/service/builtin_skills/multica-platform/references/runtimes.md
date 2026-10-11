@@ -25,7 +25,7 @@ The chain is:
 ## CLI
 
 ```bash
-multica runtime list --output json
+multica runtime list --compact --output json
 multica runtime usage <runtime-id> --output json
 multica runtime activity <runtime-id> --output json
 multica runtime update <runtime-id> --target-version <version> --output json

@@ -322,5 +322,13 @@
     "changes_none": "没有新讨论",
     "changes_count": "{{count}} 条新",
     "changes_more": "还有 {{count}} 个讨论"
+  },
+  "cancel_work": {
+    "title": "取消任务？",
+    "description": "任务将被取消。可同时停止关联的运行。",
+    "keep": "保留任务",
+    "confirm": "取消任务",
+    "confirm_related": "取消并连带停止",
+    "failed": "取消失败，请重试。"
   }
 }

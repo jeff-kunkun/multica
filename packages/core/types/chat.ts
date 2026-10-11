@@ -115,6 +115,8 @@ export interface AgentChatPage {
 }
 
 export interface ChatSession {
+  /** The issue that owns execution after this chat was converted. */
+  converted_issue_id?: string | null;
   id: string;
   workspace_id: string;
   agent_id: string;

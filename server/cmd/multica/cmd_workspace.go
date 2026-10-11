@@ -460,6 +460,22 @@ func resolveWorkspaceByIDOrSlug(workspaces []workspaceSummary, target string) (w
 			return ws, nil
 		}
 	}
+	var named []workspaceSummary
+	for _, ws := range workspaces {
+		if strings.EqualFold(ws.Name, target) {
+			named = append(named, ws)
+		}
+	}
+	if len(named) == 1 {
+		return named[0], nil
+	}
+	if len(named) > 1 {
+		parts := []string{}
+		for _, ws := range named {
+			parts = append(parts, fmt.Sprintf("  %s  %s (%s)", ws.ID, ws.Name, ws.Slug))
+		}
+		return workspaceSummary{}, fmt.Errorf("ambiguous workspace name %q; candidates:\n%s\nUse a slug or UUID", target, strings.Join(parts, "\n"))
+	}
 
 	// Fall back to short UUID prefix matching, so values copied from
 	// `workspace list`'s default (truncated) ID column round-trip back into

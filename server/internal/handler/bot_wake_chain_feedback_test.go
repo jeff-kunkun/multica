@@ -61,7 +61,17 @@ func newBotChainChatFixture(t *testing.T) botChainChatFixture {
 
 func (f botChainChatFixture) send(t *testing.T, token, content, quote string, code int) SendChatMessageResponse {
 	t.Helper()
-	r := newRequest("POST", "/chats/"+f.session+"/messages", map[string]any{"content": content, "per_quote": quote})
+	// Budget/refund tests deliberately request separate executions.
+	return f.sendMode(t, token, content, quote, "queue", code)
+}
+
+func (f botChainChatFixture) sendMode(t *testing.T, token, content, quote, mode string, code int) SendChatMessageResponse {
+	t.Helper()
+	body := map[string]any{"content": content, "per_quote": quote}
+	if mode != "" {
+		body["mode"] = mode
+	}
+	r := newRequest("POST", "/chats/"+f.session+"/messages", body)
 	r.Header.Del("X-User-ID")
 	r.Header.Set("Authorization", "Bearer "+token)
 	w := httptest.NewRecorder()
@@ -96,6 +106,33 @@ func requireBotChainAccepted(t *testing.T, out SendChatMessageResponse) {
 	t.Helper()
 	if (out.Mode != "start" && out.Mode != "queue") || out.Warning != "" || out.ReasonCode != "" {
 		t.Fatalf("unexpected wake refusal: %+v", out)
+	}
+}
+
+func TestBotWakeDefaultChatMergeConsumesOneWake(t *testing.T) {
+	f := newBotChainChatFixture(t)
+	first := f.sendMode(t, f.botToken, "first instruction", "", "", http.StatusCreated)
+	requireBotChainAccepted(t, first)
+	for i := 0; i < 3; i++ {
+		out := f.sendMode(t, f.botToken, fmt.Sprintf("supplement %d", i), "", "", http.StatusCreated)
+		if out.Mode != "merge" || out.TaskID != first.TaskID || out.Warning != "" || out.ReasonCode != "" {
+			t.Fatalf("default Bot input did not merge: %+v", out)
+		}
+	}
+	assertBotChainHops(t, f, 1)
+	var runs, ownedInputs int
+	dbfx.QueryRow(t, `SELECT count(*) FROM agent_task_queue WHERE chat_session_id=$1 AND status='queued'`, f.session).Scan(&runs)
+	dbfx.QueryRow(t, `SELECT count(*) FROM chat_message WHERE chat_session_id=$1 AND role='user' AND task_id=$2`, f.session, first.TaskID).Scan(&ownedInputs)
+	if runs != 1 || ownedInputs != 4 {
+		t.Fatalf("merged run/input ownership=%d/%d, want 1/4", runs, ownedInputs)
+	}
+	for i := 0; i < 3; i++ {
+		requireBotChainAccepted(t, f.send(t, f.botToken, "explicit next execution", "", http.StatusCreated))
+	}
+	assertBotChainHops(t, f, 4)
+	blocked := f.send(t, f.botToken, "beyond explicit execution budget", "", http.StatusCreated)
+	if blocked.Mode != "blocked" || blocked.ReasonCode != "bot_wake_chain_limit" {
+		t.Fatalf("explicit execution bypassed Bot budget: %+v", blocked)
 	}
 }
 
@@ -323,7 +360,7 @@ func TestBotWakeDirectChatCLIPreservesBlockedReceipt(t *testing.T) {
 	t.Cleanup(api.Close)
 	callCLI := func(wantBlocked bool) SendChatMessageResponse {
 		t.Helper()
-		cmd := exec.Command(bin, "chat", "send", "--session", f.session, "CLI followup", "--output", "json")
+		cmd := exec.Command(bin, "chat", "send", "--session", f.session, "CLI followup", "--mode", "queue", "--output", "json")
 		var cleanEnv []string
 		for _, item := range os.Environ() {
 			if !strings.HasPrefix(item, "MULTICA_") {

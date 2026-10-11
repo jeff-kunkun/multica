@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/multica-ai/multica/server/internal/listshape"
 	"net/http"
 	"net/url"
 	"os"
@@ -23,6 +24,13 @@ import (
 var chatCmd = &cobra.Command{
 	Use:   "chat",
 	Short: "Read a chat conversation, or send to one",
+}
+
+var chatStopCmd = &cobra.Command{
+	Use:   "stop [session-id|url]",
+	Short: "Stop all queued and active runs in a chat",
+	Long:  "Stop a chat's active, queued and deferred runs. With --related, also stop its source/spawned chats, bound issues and descendants. Every related chat must belong to the requesting person; every issue and private agent requires access. New human messages may start work again.",
+	Args:  cobra.MaximumNArgs(1), RunE: runChatStop,
 }
 
 var chatListCmd = &cobra.Command{
@@ -216,13 +224,14 @@ happens when the agent is still replying (ignored when it is not):
            (same process, same session on Claude, Codex, Grok, OpenCode 1.x
            and Pi; Cursor, Copilot, CodeArts, DevEco, Antigravity and OpenClaw
            restart the CLI on the same session to read it right away)
-  queue    answer it after this reply finishes (new process, same session;
-           default)
+  queue    explicitly answer it after this reply finishes (new process, same session)
   restart  stop the reply now and start over from this message (new process,
            same session; the half-done step is dropped)
 
-When the running CLI cannot steer, the send is refused with the reason and
-the modes that work; nothing is sent.
+Without --mode, merge into the queued or active run instead of creating another
+run. Queued messages form one input batch; an active reply receives the message
+as a supplement. A CLI without live-input support returns a refusal with the
+reason and explicit queue/restart choices; nothing is sent.
 
 The response includes runtime (status, name, last_seen_at). Offline sends are
 accepted with warning in JSON and stderr. With --wait, timeout exits nonzero
@@ -286,11 +295,17 @@ left as it is. Only the chat's owner can hand it over.
 
 func init() {
 	for _, c := range []*cobra.Command{chatListCmd, chatSearchCmd} {
-		c.Flags().String("project", "", "Filter to a project id (defaults to the current project)")
+		c.Flags().String("project", "", "Filter to a project UUID, prefix or exact name (case-insensitive; defaults to the current project)")
+		addListShapeFlags(c)
+		c.Example = "  multica chat list --project \"My project\" --compact --output json\n  multica chat list --fields id,title,status --workspace \"My workspace\""
 		c.Flags().Bool("all-projects", false, "Search across every project visible to the task initiator")
 		c.Flags().String("since", "", "Only chats active since an RFC3339 timestamp")
 		c.Flags().String("output", "json", "Output format: table or json")
 	}
+	chatCmd.AddCommand(chatStopCmd)
+	chatStopCmd.Flags().Bool("related", false, "Also stop related issues and chats (every target requires access)")
+	chatStopCmd.Flags().String("session", "", "Chat session id or URL (defaults to MULTICA_CHAT_SESSION_ID)")
+	chatStopCmd.Flags().String("output", "json", "Output format: table or json")
 	chatCmd.AddCommand(chatListCmd)
 	chatCmd.AddCommand(chatSearchCmd)
 	for _, c := range []*cobra.Command{chatHistoryCmd, chatThreadCmd} {
@@ -323,6 +338,7 @@ func init() {
 	chatHandoffCmd.Flags().String("output", "json", "Output format: table or json")
 	chatSendCmd.Flags().String("session", "", "Chat session id or URL (required)")
 	chatSendCmd.Flags().String("content-file", "", "Read the message from this file instead of the argument")
+	chatSendCmd.Flags().String("mode", "", "Default: merge into existing work; choose steer, queue or restart explicitly")
 	chatSendCmd.Flags().String("per-quote", "", "Exact words from this caller’s earlier human message in this chat; server verifies the quote before exempting it from the Bot wake-chain limit")
 	chatSendCmd.Flags().String("mode", "queue", "While the agent is replying: steer, queue or restart")
 	chatSendCmd.Flags().Bool("urgent", false, "Deliver now or fail now: refused (exit nonzero, JSON reason + next_steps) when the agent's runtime is offline and no online fallback runtime is configured; otherwise goes to the head of the queue (restart semantics) and fails with pickup_timeout if no daemon starts it within 30s. With --wait, waits for the pickup instead of the full reply.")
@@ -597,7 +613,11 @@ func runChatDirectory(cmd *cobra.Command, keyword string) error {
 	defer cancel()
 	q := url.Values{}
 	if project, _ := cmd.Flags().GetString("project"); strings.TrimSpace(project) != "" {
-		q.Set("project", strings.TrimSpace(project))
+		ref, err := resolveProjectID(ctx, client, project)
+		if err != nil {
+			return err
+		}
+		q.Set("project", ref.ID)
 	}
 	if all, _ := cmd.Flags().GetBool("all-projects"); all {
 		q.Set("all_projects", "true")
@@ -608,6 +628,10 @@ func runChatDirectory(cmd *cobra.Command, keyword string) error {
 	if strings.TrimSpace(keyword) != "" {
 		q.Set("q", keyword)
 	}
+	fields, err := listShapeQuery(cmd, q, listshape.Chat)
+	if err != nil {
+		return err
+	}
 	path := "/api/chat/directory"
 	if encoded := q.Encode(); encoded != "" {
 		path += "?" + encoded
@@ -616,9 +640,18 @@ func runChatDirectory(cmd *cobra.Command, keyword string) error {
 	if err := client.GetJSON(ctx, path, &rows); err != nil {
 		return linkedChatRefusal(cmd, err, "list chats")
 	}
+	listshape.Filter(rows, fields)
 	output, _ := cmd.Flags().GetString("output")
 	if output != "table" {
 		return cli.PrintJSON(os.Stdout, rows)
+	}
+	if compact, _ := cmd.Flags().GetBool("compact"); compact {
+		tableRows := make([][]string, 0, len(rows))
+		for _, row := range rows {
+			tableRows = append(tableRows, []string{strVal(row, "id"), strVal(row, "title"), strVal(row, "project_title"), strVal(row, "agent_name"), strVal(row, "status"), strVal(row, "last_active_at"), numVal(row, "message_count")})
+		}
+		cli.PrintTable(os.Stdout, []string{"ID", "TITLE", "PROJECT", "AGENT", "STATUS", "LAST_ACTIVE", "MESSAGES"}, tableRows)
+		return nil
 	}
 	headers := []string{"TITLE", "PROJECT", "AGENT", "ORIGINATOR", "LAST_ACTIVE", "MESSAGES", "SUMMARY"}
 	tableRows := make([][]string, 0, len(rows))
@@ -909,7 +942,7 @@ func runChatSend(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("chat send --linked supports --mode queue only; remove --mode or pass --mode queue")
 	}
 	switch mode {
-	case "steer", "queue", "restart":
+	case "", "steer", "queue", "restart":
 	default:
 		return fmt.Errorf("chat send: --mode must be steer, queue or restart")
 	}
@@ -955,7 +988,10 @@ func runChatSend(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("chat send --urgent is not available with --linked")
 	}
 	path := "/api/chat/sessions/" + url.PathEscape(ref.ID) + "/messages"
-	body := map[string]any{"content": content, "mode": mode, "attachment_ids": attachmentIDs, "per_quote": flagString(cmd, "per-quote")}
+	body := map[string]any{"content": content, "attachment_ids": attachmentIDs, "per_quote": flagString(cmd, "per-quote")}
+	if mode != "" {
+		body["mode"] = mode
+	}
 	if urgent {
 		body["urgent"] = true
 	}
@@ -1160,4 +1196,35 @@ func linkedChatRefusal(cmd *cobra.Command, err error, verb string) error {
 		return fmt.Errorf("%s: %w; inspect `multica workspace link view <link-id>` for this source", verb, err)
 	}
 	return fmt.Errorf("%s: %w", verb, err)
+}
+
+func runChatStop(cmd *cobra.Command, args []string) error {
+	session, _ := cmd.Flags().GetString("session")
+	if len(args) > 0 {
+		session = args[0]
+	}
+	if strings.TrimSpace(session) == "" {
+		session = os.Getenv("MULTICA_CHAT_SESSION_ID")
+	}
+	ref, err := parseChatSessionLinkRef(session)
+	if err != nil {
+		return fmt.Errorf("chat stop: provide a session id or --session: %w", err)
+	}
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := cli.APIContext(context.Background())
+	defer cancel()
+	related, _ := cmd.Flags().GetBool("related")
+	var result map[string]any
+	if err := client.PostJSON(ctx, "/api/chat/sessions/"+url.PathEscape(ref.ID)+"/stop", map[string]any{"related": related}, &result); err != nil {
+		return fmt.Errorf("stop chat: %w", err)
+	}
+	output, _ := cmd.Flags().GetString("output")
+	if output == "table" {
+		fmt.Fprintf(os.Stdout, "Stopped %v runs\n", result["cancelled_count"])
+		return nil
+	}
+	return cli.PrintJSON(os.Stdout, result)
 }

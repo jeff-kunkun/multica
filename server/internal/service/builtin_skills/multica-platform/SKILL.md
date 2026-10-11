@@ -1,6 +1,6 @@
 ---
 name: multica-platform
-description: "Asks, open a chat, consult, goals, inbox, project board/report, sub-issues, wakeups, routing, close protocol, stall, driver, halt, mention, agents, specialisation, squads, autopilot, projects, runtimes, progress, state card, skill import, transfer, linked workspace, bots, GitHub App. Not app code."
+description: "Overview, asks, open a chat, consult, goals, inbox, project board/report, sub-issues, wakeups, routing, close protocol, stall, driver, halt, mention, agents, specialisation, squads, autopilot, projects, runtimes, progress, state card, skill import, transfer, linked workspace, bots, GitHub App. Not app code."
 user-invocable: false
 allowed-tools: Bash(multica *), Bash(git *), Bash(gh *)
 ---
@@ -31,7 +31,7 @@ See `references/overview.md` for filter semantics and examples.
 |---|---|
 | `references/issues.md` | Issues: PR linking vs close intent, reading a linked PR's state, custom properties, status side effects, who else is running, charts vs attached files in a comment |
 | `references/drivers.md` | Who drives an open issue (`driver` in `issue get` / `issue children`), the patrol's rerun-then-escalate, and `multica issue dispose` for one nobody drives |
-| `references/run-control.md` | Stopping every run on one issue (halt / resume), the chain budget, the run time limit, and steer / queue / restart for a message to a running reply |
+| `references/run-control.md` | Stopping issue/chat work with optional related targets, halt / resume, default wakeup merging, the chain budget, the run time limit, and explicit steer / queue / restart |
 | `references/wakeups.md` | Issue wakeups: events, conditions (`--until-*`), timers, check-ins, runaway protection |
 | `references/stall-actions.md` | Automatic stall actions: 24-hour keep announcements, parent auto-close, 7-day undo, and CLI/API commands |
 | `references/goals.md` | Task goals: draft a completion line, confirm the human lock, track budget, and finish a goal |
@@ -81,6 +81,17 @@ where an id belongs, and never invent a UUID: an id that is well-formed but
 belongs to nothing fails in ways that read like a permission error, which sends
 you debugging access when the real problem was the id.
 
+**Bounded CLI reads.** `agent list`, `chat list/search` and `runtime list`
+accept `--compact --output json` (recommended) or `--fields id,name,status`
+(use `title` for chats). Explicit fields override compact defaults; the API
+projects after permission checks and the CLI also trims older-server responses.
+API read commands accept `--workspace <UUID|slug|exact-name>` for this invocation;
+case-insensitive names must be unique. The parameter wins over the environment
+and saved profile; the chosen workspace and conflicts are printed on stderr,
+so stdout keeps its existing JSON shape. `--linked` remains a separate route;
+commands with an existing local `--workspace` (such as cross-workspace
+`changes/runs` and transfer) retain their own scope contract.
+
 **`--output json` writes to stdout; warnings and confirmations go to stderr.**
 Do not merge them (`2>&1`) into anything that parses the output — that makes a
 write which SUCCEEDED look like it failed, and invites a duplicate retry.
@@ -112,8 +123,8 @@ effects and API field meanings, read `references/issues.md`.
 
 Use the read-only chat directory before opening a transcript:
 
-- `multica chat list [--project <id>] [--all-projects] [--since <RFC3339>] [--output json|table]`
-- `multica chat search <词> [--project <id>] [--all-projects] [--since <RFC3339>] [--output json|table]`
+- `multica chat list [--project <id-or-exact-name>] [--compact] [--all-projects] [--since <RFC3339>] [--output json|table]`
+- `multica chat search <词> [--project <id-or-exact-name>] [--compact] [--all-projects] [--since <RFC3339>] [--output json|table]`
 
 Task-scoped commands default to the current project. Use `--all-projects` to
 opt in to a workspace-wide directory. Visibility follows the person who

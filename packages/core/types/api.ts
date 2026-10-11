@@ -68,6 +68,8 @@ export interface UpdateIssueRequest {
    * update. The server uses it to merge channel media that landed meanwhile. */
   description_base?: string;
   status?: IssueStatus;
+  /** Cancel this issue and atomically stop its related work. Only valid with cancelled. */
+  related_stop?: boolean;
   priority?: IssuePriority;
   assignee_type?: IssueAssigneeType | null;
   assignee_id?: string | null;

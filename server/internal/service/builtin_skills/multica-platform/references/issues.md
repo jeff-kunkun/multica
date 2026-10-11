@@ -30,6 +30,19 @@ The first argument is the status key and the remaining arguments are issue keys
 or UUIDs. `--no-start` adds the same `suppress_run` control as single-issue
 status changes. `--output json` returns the resolved issue IDs and server batch
 result. `batch-status` is accepted as an alias.
+## Project names and body files
+
+`issue create/list --project` and `chat list/search --project` accept a full
+UUID, ID prefix or exact project title (case-insensitive). Duplicate titles
+return candidates with UUID, title and status; choose the UUID. The project
+lookup stays in the selected workspace and requests only id/title/status.
+
+`--content-file` and `--description-file` accept files in the current working
+directory or regular files owned by the current OS user under the system temp
+directory (`/tmp`, `$TMPDIR`, or the platform temp root). Symlinks are resolved
+before checking containment and ownership. Other locations require
+`--allow-external-file`; attachment and other file flags keep their own rules.
+
 ## Sub-issues: todo starts work now, backlog parks it
 The steps are in `references/sub-issues.md`. `--status backlog` parks a child instead of starting it. `` `--stage <N>` `` groups children into a stage, and the parent is woken when a whole stage finishes. Promote one parked child with `multica issue status <child-id> todo`.
 

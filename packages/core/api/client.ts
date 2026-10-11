@@ -360,6 +360,7 @@ import {
   AgentTaskListSchema,
   AgentTaskPageSchema,
   AgentActivityBucketListSchema,
+  WorkStopResponseSchema,
   IssueAgentGuardResponseSchema,
   IssueDisposeResponseSchema,
   AttachmentResponseSchema,
@@ -3715,8 +3716,13 @@ export class ApiClient {
     return task;
   }
 
-  async haltIssue(issueId: string): Promise<IssueAgentGuardResponse> {
-    const raw = await this.fetch<unknown>(`/api/issues/${issueId}/halt`, { method: "POST" });
+  async stopChatSession(sessionId: string, related = false): Promise<{ cancelled_count: number; issue_ids: string[]; chat_session_ids: string[] }> {
+    const raw = await this.fetch<unknown>(`/api/chat/sessions/${sessionId}/stop`, { method: "POST", body: JSON.stringify({ related }) });
+    return parseWithFallback(raw, WorkStopResponseSchema, { cancelled_count: 0, issue_ids: [], chat_session_ids: [] }, { endpoint: "POST /api/chat/sessions/:id/stop" });
+  }
+
+  async haltIssue(issueId: string, related = false): Promise<IssueAgentGuardResponse> {
+    const raw = await this.fetch<unknown>(`/api/issues/${issueId}/halt`, { method: "POST", body: JSON.stringify({ related }) });
     return parseWithFallback(raw, IssueAgentGuardResponseSchema, { issue_id: issueId, halted: true }, {
       endpoint: "POST /api/issues/:id/halt",
     });

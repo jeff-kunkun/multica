@@ -41,6 +41,7 @@ func TestSendChatMessage_ReportsPositionInsteadOfQueuedStatus(t *testing.T) {
 		t.Helper()
 		req := newRequest("POST", "/api/chat-sessions/"+sessionID+"/messages", map[string]any{
 			"content": content,
+			"mode":    "queue",
 		})
 		req = withURLParam(req, "sessionId", sessionID)
 		req = withChatTestWorkspaceCtx(t, req)
@@ -71,7 +72,7 @@ func TestSendChatMessage_UsesChatSessionAsWorkThread(t *testing.T) {
 
 	send := func(content string) string {
 		t.Helper()
-		req := newRequest("POST", "/api/chat-sessions/"+sessionID+"/messages", map[string]any{"content": content})
+		req := newRequest("POST", "/api/chat-sessions/"+sessionID+"/messages", map[string]any{"content": content, "mode": "queue"})
 		req = withURLParam(req, "sessionId", sessionID)
 		req = withChatTestWorkspaceCtx(t, req)
 		w := httptest.NewRecorder()
@@ -121,6 +122,7 @@ func TestSendChatMessage_DeferredPredecessorStaysHeadAcrossPromotion(t *testing.
 		t.Helper()
 		req := newRequest("POST", "/api/chat-sessions/"+sessionID+"/messages", map[string]any{
 			"content": content,
+			"mode":    "queue",
 		})
 		req = withURLParam(req, "sessionId", sessionID)
 		req = withChatTestWorkspaceCtx(t, req)

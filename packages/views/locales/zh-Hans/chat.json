@@ -112,7 +112,9 @@
     "mode_steer_unsupported": "{{cli}} 还不能在回复中途读消息",
     "mode_steer_unsupported_generic": "这个智能体还不能在回复中途读消息",
     "enter_hint": "回车 = {{mode}}",
-    "steer_fell_back_toast": "这条回复读不了插话，已改为排队"
+    "steer_fell_back_toast": "这条回复读不了插话，已改为排队",
+    "converted_to_issue": "这件事已转到任务中执行",
+    "open_converted_issue": "前往任务"
   },
   "queue": {
     "hidden_messages": "另有 {{count}} 条排队消息",
