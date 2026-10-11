@@ -3011,6 +3011,11 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 			"error_runtime_access_denied", http.StatusForbidden, "private runtime does not permit task agent",
 		)
 	}
+	links, linksErr := h.workspaceLinks().BriefHints(r.Context(), parseUUID(runtimeWorkspaceID))
+	if linksErr != nil {
+		return resp, deliveredCommentIDs, issueSnapshot, agentSkillCount, builtinSkillCount, h.rejectClaimSourceLoad(r.Context(), task, linksErr, "workspace_links", runtimeWorkspaceID)
+	}
+	resp.WorkspaceLinks = links
 	useSkillRefs := requestHasClientCapability(r, protocol.DaemonCapabilitySkillBundlesV1)
 	// A daemon older than the multica-platform merge assembles a brief that
 	// still names the built-ins this server stopped shipping. It cannot be

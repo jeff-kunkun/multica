@@ -5,6 +5,7 @@ import (
 
 	"github.com/multica-ai/multica/server/internal/coderesolve"
 	"github.com/multica-ai/multica/server/internal/runtimeapps"
+	"github.com/multica-ai/multica/server/pkg/protocol"
 	"github.com/multica-ai/multica/server/pkg/remotemcp"
 )
 
@@ -214,6 +215,9 @@ type Task struct {
 	// exactly as before. Mirror field: internal/handler/agent.go
 	// AgentTaskResponse.Projects, same JSON name.
 	Projects []ProjectContextData `json:"projects,omitempty"`
+	// WorkspaceLinks names active peers at claim time, without project content.
+	WorkspaceLinks []protocol.WorkspaceLinkHint `json:"workspace_links,omitempty"`
+
 	// LinkedProjects are read-only reference projects (DENE-1643). They never
 	// feed the code source, the working directory or resources.json. Mirror
 	// field: internal/handler/agent.go AgentTaskResponse.LinkedProjects.
