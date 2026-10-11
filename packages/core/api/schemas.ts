@@ -2878,7 +2878,7 @@ export const SendChatMessageResponseSchema: z.ZodType<SendChatMessageResponse> =
   runtime: z.object({ status: z.string(), name: z.string(), last_seen_at: z.string().nullable() }).nullish().catch(undefined),
   message_id: z.string().min(1),
   task_id: z.string().min(1),
-  warning: z.string().optional(),
+  warning: z.string().optional().catch(undefined),
   reason_code: z.string().optional(),
   supports_queue: z.boolean().optional(),
   queued: z.boolean().optional().catch(undefined),

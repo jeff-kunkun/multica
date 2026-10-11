@@ -20,7 +20,8 @@ func startClaimFixture(t *testing.T, status string) (string, string, time.Time) 
 		t.Fatal("PostgreSQL is required for start claim tests")
 	}
 	var agentID string
-	dbfx.QueryRow(t, `SELECT id FROM agent WHERE workspace_id=$1 LIMIT 1`, testWorkspaceID).Scan(&agentID)
+	// Other tests rebind their own agents; pin one still on the test runtime.
+	dbfx.QueryRow(t, `SELECT id FROM agent WHERE workspace_id=$1 AND runtime_id=$2 ORDER BY created_at LIMIT 1`, testWorkspaceID, testRuntimeID).Scan(&agentID)
 	issueID := dbfx.Issue(t, "start claim ownership")
 	generation := time.Date(2026, 9, 17, 9, 0, 0, 123456000, time.UTC)
 	taskID := dbfx.Task(t, agentID, testutil.Cols{
