@@ -2,9 +2,11 @@ package workspacelink
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -59,8 +61,8 @@ type Link struct {
 	// Source / Target identify both workspaces by display fields only.
 	Source WorkspaceRef `json:"source"`
 	Target WorkspaceRef `json:"target"`
-	// Projects is only filled for the source side's managers; the viewer
-	// learns what is shared through View, which re-checks it.
+	// Projects names shared projects for managers and active viewers.
+	// Viewer lists exclude projects that have since become private.
 	Projects []ProjectRef `json:"projects"`
 	// Managed: the source lets the viewer's agents manage its issues and
 	// autopilots for their run's originator (DENE-1663).
@@ -68,9 +70,10 @@ type Link struct {
 	// CanSetManaged answers whether the caller may switch Managed; only the
 	// list fills it (FillCanSetManaged), so the UI disables the switch and
 	// says why instead of re-deriving the rule.
-	CanSetManaged bool    `json:"can_set_managed"`
-	CreatedAt     string  `json:"created_at"`
-	AcceptedAt    *string `json:"accepted_at"`
+	CanUpdateProjects bool    `json:"can_update_projects"`
+	CanSetManaged     bool    `json:"can_set_managed"`
+	CreatedAt         string  `json:"created_at"`
+	AcceptedAt        *string `json:"accepted_at"`
 }
 
 // WorkspaceRef names a workspace without exposing anything inside it.
@@ -92,14 +95,18 @@ type ProjectRef struct {
 
 // AuditEntry is one row of the link audit trail.
 type AuditEntry struct {
-	LinkID    string          `json:"link_id"`
-	Action    string          `json:"action"`
-	ActorName string          `json:"actor_name"`
-	BySide    Side            `json:"by_side"`
-	Source    string          `json:"source_workspace_id"`
-	Target    string          `json:"target_workspace_id"`
-	Detail    json.RawMessage `json:"detail"`
-	CreatedAt string          `json:"created_at"`
+	ID                string          `json:"id"`
+	PeerWorkspaceName string          `json:"peer_workspace_name"`
+	Route             string          `json:"route"`
+	ObjectLabel       string          `json:"object_label"`
+	LinkID            string          `json:"link_id"`
+	Action            string          `json:"action"`
+	ActorName         string          `json:"actor_name"`
+	BySide            Side            `json:"by_side"`
+	Source            string          `json:"source_workspace_id"`
+	Target            string          `json:"target_workspace_id"`
+	Detail            json.RawMessage `json:"detail"`
+	CreatedAt         string          `json:"created_at"`
 }
 
 // Patch is an Update request. Exactly one field is set: the source changes
@@ -177,14 +184,17 @@ func (s *Service) List(ctx context.Context, actorWS pgtype.UUID, actor Actor) ([
 			CreatedAt:  util.TimestampToString(row.CreatedAt),
 			AcceptedAt: timestampPtr(row.AcceptedAt),
 		}
-		if manage && side == SideSource {
+		if manage || readable {
 			projects, err := s.q.ListWorkspaceLinkProjects(ctx, db.ListWorkspaceLinkProjectsParams{
-				LinkID: row.ID, SourceWorkspaceID: actorWS,
+				LinkID: row.ID, SourceWorkspaceID: row.SourceWorkspaceID,
 			})
 			if err != nil {
 				return nil, err
 			}
 			for _, p := range projects {
+				if side == SideViewer && p.Visibility == "private" {
+					continue
+				}
 				out.Projects = append(out.Projects, ProjectRef{
 					ID: util.UUIDToString(p.ID), Title: p.Title, Icon: util.TextToPtr(p.Icon),
 				})
@@ -197,35 +207,80 @@ func (s *Service) List(ctx context.Context, actorWS pgtype.UUID, actor Actor) ([
 
 // Audit returns the audit trail of every link the workspace was ever on,
 // including revoked ones. Owners only.
+type AuditPage struct {
+	Entries    []AuditEntry `json:"entries"`
+	NextCursor *string      `json:"next_cursor"`
+}
+
+// Audit keeps the internal first-page convenience API.
 func (s *Service) Audit(ctx context.Context, actorWS pgtype.UUID, actor Actor) ([]AuditEntry, error) {
-	// The workspace is on every link it is asked about, so either side works
-	// for the table; the source/viewer split does not change OpAudit.
+	page, err := s.AuditPage(ctx, actorWS, actor, Page{Limit: 200})
+	return page.Entries, err
+}
+
+func (s *Service) AuditPage(ctx context.Context, actorWS pgtype.UUID, actor Actor, page Page) (AuditPage, error) {
+	out := AuditPage{Entries: []AuditEntry{}}
 	if !Decide(OpAudit, SideSource, actor) {
-		return nil, forbidden("only the workspace owner can read the link audit trail")
+		return out, forbidden("only the workspace owner can read the link audit trail")
 	}
-	rows, err := s.q.ListWorkspaceLinkAudit(ctx, actorWS)
+	limit := page.Limit
+	if limit <= 0 {
+		limit = 50
+	}
+	if limit > 200 {
+		limit = 200
+	}
+	params := db.ListWorkspaceLinkAuditParams{WorkspaceID: actorWS, PageLimit: int32(limit + 1)}
+	if page.Cursor != "" {
+		raw, err := base64.RawURLEncoding.DecodeString(page.Cursor)
+		parts := strings.Split(string(raw), "|")
+		if err != nil || len(parts) != 2 {
+			return out, invalid("invalid audit cursor; start again without cursor")
+		}
+		at, err := time.Parse(time.RFC3339Nano, parts[0])
+		if err != nil {
+			return out, invalid("invalid audit cursor")
+		}
+		id, err := util.ParseUUID(parts[1])
+		if err != nil {
+			return out, invalid("invalid audit cursor")
+		}
+		params.CursorAt = pgtype.Timestamptz{Time: at, Valid: true}
+		params.CursorID = id
+	}
+	rows, err := s.q.ListWorkspaceLinkAudit(ctx, params)
 	if err != nil {
-		return nil, err
+		return out, err
 	}
-	out := make([]AuditEntry, 0, len(rows))
+	if len(rows) > limit {
+		last := rows[limit-1]
+		cursor := base64.RawURLEncoding.EncodeToString([]byte(last.CreatedAt.Time.Format(time.RFC3339Nano) + "|" + util.UUIDToString(last.ID)))
+		out.NextCursor = &cursor
+		rows = rows[:limit]
+	}
 	for _, row := range rows {
 		by := SideViewer
 		if row.WorkspaceID == row.SourceWorkspaceID {
 			by = SideSource
 		}
+		peer := row.SourceName
+		if actorWS == row.SourceWorkspaceID {
+			peer = row.TargetName
+		}
 		detail := json.RawMessage(row.Detail)
 		if len(detail) == 0 {
 			detail = json.RawMessage("{}")
 		}
-		out = append(out, AuditEntry{
-			LinkID:    util.UUIDToString(row.LinkID),
-			Action:    row.Action,
-			ActorName: row.ActorName.String,
-			BySide:    by,
-			Source:    util.UUIDToString(row.SourceWorkspaceID),
-			Target:    util.UUIDToString(row.TargetWorkspaceID),
-			Detail:    detail,
-			CreatedAt: util.TimestampToString(row.CreatedAt),
+		var fields struct {
+			Route string `json:"route"`
+		}
+		_ = json.Unmarshal(detail, &fields)
+		out.Entries = append(out.Entries, AuditEntry{
+			ID: util.UUIDToString(row.ID), LinkID: util.UUIDToString(row.LinkID), Action: row.Action,
+			ActorName: row.ActorName.String, BySide: by,
+			Source: util.UUIDToString(row.SourceWorkspaceID), Target: util.UUIDToString(row.TargetWorkspaceID),
+			PeerWorkspaceName: peer, Route: fields.Route, ObjectLabel: row.ObjectLabel,
+			Detail: detail, CreatedAt: util.TimestampToString(row.CreatedAt),
 		})
 	}
 	return out, nil
@@ -308,10 +363,19 @@ func (s *Service) Update(ctx context.Context, actorWS pgtype.UUID, actorUser pgt
 			}
 			return audit(ctx, q, accepted, actorWS, actorUser, "accept", nil)
 		}
+		if side == SideViewer {
+			there, ok, err := s.pullActor(ctx, q, actorUser, link.SourceWorkspaceID, actor)
+			if err != nil {
+				return err
+			}
+			if ok {
+				actor.SourceRole = there.Role
+			}
+		}
 		if !Decide(OpUpdateProjects, side, actor) {
 			return forbidden("only the source workspace owner can change what a link shares")
 		}
-		ids, err := s.shareableProjects(ctx, q, actorWS, *patch.ProjectIDs)
+		ids, err := s.shareableProjects(ctx, q, link.SourceWorkspaceID, *patch.ProjectIDs)
 		if err != nil {
 			return err
 		}
@@ -321,7 +385,14 @@ func (s *Service) Update(ctx context.Context, actorWS pgtype.UUID, actorUser pgt
 		if err := q.AddWorkspaceLinkProjects(ctx, db.AddWorkspaceLinkProjectsParams{LinkID: link.ID, ProjectIds: ids}); err != nil {
 			return err
 		}
-		return audit(ctx, q, link, actorWS, actorUser, "update_projects", map[string]any{"project_ids": uuidStrings(ids)})
+		detail := map[string]any{"project_ids": uuidStrings(ids)}
+		if side == SideViewer {
+			detail["from_viewer"] = true
+			if err := audit(ctx, q, link, link.SourceWorkspaceID, actorUser, "update_projects", detail); err != nil {
+				return err
+			}
+		}
+		return audit(ctx, q, link, actorWS, actorUser, "update_projects", detail)
 	})
 	if err != nil {
 		return Link{}, err

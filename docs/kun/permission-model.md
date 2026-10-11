@@ -193,7 +193,8 @@ Guest 一整列除了「查看」全是否，没有任何关系能翻过来：�
 
 | 操作 | 源方 | 看方 |
 | --- | --- | --- |
-| 发起连通、改勾选项目 | Owner | — |
+| 发起连通 | Owner | — |
+| 改勾选项目（DENE-1811） | Owner | 本工作区 Owner / Admin，且同一人是源方 Owner |
 | 接受 | — | Owner / Admin |
 | 断开 | Owner | Owner / Admin |
 | 只读查看 | — | Owner / Admin / Member，以及这些人跑的智能体；访客不行 |

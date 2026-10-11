@@ -429,14 +429,30 @@ func (q *Queries) ListShareableProjects(ctx context.Context, arg ListShareablePr
 }
 
 const listWorkspaceLinkAudit = `-- name: ListWorkspaceLinkAudit :many
-SELECT a.id, a.link_id, a.source_workspace_id, a.target_workspace_id, a.workspace_id, a.actor_id, a.action, a.detail, a.created_at, u.name AS actor_name
+SELECT a.id, a.link_id, a.source_workspace_id, a.target_workspace_id, a.workspace_id, a.actor_id, a.action, a.detail, a.created_at, u.name AS actor_name,
+       COALESCE(sw.name, a.source_workspace_id::text)::text AS source_name,
+       COALESCE(tw.name, a.target_workspace_id::text)::text AS target_name,
+       COALESCE(NULLIF(a.detail->>'object_label', ''), sw.issue_prefix || '-' || i.number::text, ap.title, a.detail->>'issue_ref', a.detail->>'autopilot_id', '')::text AS object_label
 FROM workspace_link_audit a
 LEFT JOIN "user" u ON u.id = a.actor_id
-WHERE a.source_workspace_id = $1::uuid
-   OR a.target_workspace_id = $1::uuid
-ORDER BY a.created_at DESC
-LIMIT 200
+LEFT JOIN workspace sw ON sw.id = a.source_workspace_id
+LEFT JOIN workspace tw ON tw.id = a.target_workspace_id
+LEFT JOIN issue i ON i.id::text = a.detail->>'issue_id' AND i.workspace_id = a.source_workspace_id
+LEFT JOIN autopilot ap ON ap.id::text = a.detail->>'autopilot_id' AND ap.workspace_id = a.source_workspace_id
+WHERE (a.source_workspace_id = $1::uuid
+   OR a.target_workspace_id = $1::uuid)
+  AND ($2::timestamptz IS NULL
+       OR (a.created_at, a.id) < ($2::timestamptz, $3::uuid))
+ORDER BY a.created_at DESC, a.id DESC
+LIMIT $4::int
 `
+
+type ListWorkspaceLinkAuditParams struct {
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	CursorAt    pgtype.Timestamptz `json:"cursor_at"`
+	CursorID    pgtype.UUID        `json:"cursor_id"`
+	PageLimit   int32              `json:"page_limit"`
+}
 
 type ListWorkspaceLinkAuditRow struct {
 	ID                pgtype.UUID        `json:"id"`
@@ -449,10 +465,18 @@ type ListWorkspaceLinkAuditRow struct {
 	Detail            []byte             `json:"detail"`
 	CreatedAt         pgtype.Timestamptz `json:"created_at"`
 	ActorName         pgtype.Text        `json:"actor_name"`
+	SourceName        string             `json:"source_name"`
+	TargetName        string             `json:"target_name"`
+	ObjectLabel       string             `json:"object_label"`
 }
 
-func (q *Queries) ListWorkspaceLinkAudit(ctx context.Context, workspaceID pgtype.UUID) ([]ListWorkspaceLinkAuditRow, error) {
-	rows, err := q.db.Query(ctx, listWorkspaceLinkAudit, workspaceID)
+func (q *Queries) ListWorkspaceLinkAudit(ctx context.Context, arg ListWorkspaceLinkAuditParams) ([]ListWorkspaceLinkAuditRow, error) {
+	rows, err := q.db.Query(ctx, listWorkspaceLinkAudit,
+		arg.WorkspaceID,
+		arg.CursorAt,
+		arg.CursorID,
+		arg.PageLimit,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -471,6 +495,9 @@ func (q *Queries) ListWorkspaceLinkAudit(ctx context.Context, workspaceID pgtype
 			&i.Detail,
 			&i.CreatedAt,
 			&i.ActorName,
+			&i.SourceName,
+			&i.TargetName,
+			&i.ObjectLabel,
 		); err != nil {
 			return nil, err
 		}

@@ -6744,9 +6744,9 @@ export class ApiClient {
     };
   }
 
-  async listWorkspaceLinkAudit(): Promise<WorkspaceLinkAuditEntry[]> {
-    const raw = await this.fetch<{ entries?: WorkspaceLinkAuditEntry[] }>("/api/workspace-links/audit");
-    return Array.isArray(raw?.entries) ? raw.entries : [];
+  async listWorkspaceLinkAudit(cursor = ""): Promise<{ entries: WorkspaceLinkAuditEntry[]; next_cursor: string | null }> {
+    const raw = await this.fetch<{ entries?: WorkspaceLinkAuditEntry[]; next_cursor?: string | null }>(`/api/workspace-links/audit?limit=50&cursor=${encodeURIComponent(cursor)}`);
+    return { entries: Array.isArray(raw?.entries) ? raw.entries : [], next_cursor: raw?.next_cursor ?? null };
   }
 
   /** Names the workspace a pasted link or slug points to; 404 when none. */

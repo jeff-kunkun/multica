@@ -107,12 +107,13 @@ func (h *Handler) ListWorkspaceLinkAudit(w http.ResponseWriter, r *http.Request)
 	if !ok {
 		return
 	}
-	entries, err := h.workspaceLinks().Audit(r.Context(), ws, actor)
+	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+	entries, err := h.workspaceLinks().AuditPage(r.Context(), ws, actor, workspacelink.Page{Limit: limit, Cursor: r.URL.Query().Get("cursor")})
 	if err != nil {
 		writeWorkspaceLinkError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"entries": entries})
+	writeJSON(w, http.StatusOK, entries)
 }
 
 // LookupWorkspaceLinkTarget — GET /api/workspace-links/lookup?target=<address>
@@ -184,6 +185,7 @@ func (h *Handler) CreateWorkspaceLink(w http.ResponseWriter, r *http.Request) {
 		writeWorkspaceLinkError(w, err)
 		return
 	}
+	h.publishWorkspaceLinkChanged(link.Source.ID, link.Target.ID)
 	writeJSON(w, http.StatusCreated, link)
 }
 
@@ -227,6 +229,7 @@ func (h *Handler) UpdateWorkspaceLink(w http.ResponseWriter, r *http.Request) {
 			h.answerWorkspaceLinkRequest(r.Context(), row, user, inboxTypeWorkspaceLinkAccepted)
 		}
 	}
+	h.publishWorkspaceLinkChanged(link.Source.ID, link.Target.ID)
 	writeJSON(w, http.StatusOK, link)
 }
 
@@ -247,6 +250,7 @@ func (h *Handler) RevokeWorkspaceLink(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if beforeErr == nil {
+		h.publishWorkspaceLinkChanged(uuidToString(before.SourceWorkspaceID), uuidToString(before.TargetWorkspaceID))
 		switch {
 		case before.Status != "pending":
 			h.archiveWorkspaceLinkRequest(r.Context(), before)
@@ -293,4 +297,15 @@ func (h *Handler) GetWorkspaceLinkView(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, view)
+}
+
+// Invalidation only: never broadcast source data or link metadata to members
+// who may not read it. Each client re-reads through the permission gate.
+func (h *Handler) publishWorkspaceLinkChanged(source, target string) {
+	if h.Bus == nil {
+		return
+	}
+	for _, ws := range []string{source, target} {
+		h.publish("workspace_link:changed", ws, "", "", map[string]string{"workspace_id": ws})
+	}
 }

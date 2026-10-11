@@ -109,3 +109,23 @@ Projects and autopilots can also save references with
 Both accept `--reference <link-id>:<project-id>` (repeatable) or `--clear`;
 autopilots also accept `--inherit` to use the owning project's defaults.
 These settings do not enable managed access or change any existing link.
+
+## Settings and audit
+
+Human source owners can change projects from either side. From the viewer they
+also need owner/admin rights there; `update <link-id> --project <name>` resolves
+names in the source workspace. `list` includes shared `projects` on both sides,
+`can_update_projects` and `can_set_managed`. Pending links cannot enable managed
+access: accept first. Agents still cannot manage links or read owner-only audit.
+
+Human workspace owners can read changes and managed writes (including revoked links):
+
+```sh
+multica workspace link audit --limit 50 --output json
+multica workspace link audit --cursor <next_cursor> --output json
+```
+
+Each entry names `peer_workspace_name`, `by_side`, `actor_name`, `action`, `route`,
+`object_label` (task identifier or automation name), `detail` and `created_at`.
+`next_cursor: null` marks the last page. Settings, linked reading and overview
+refresh on link-change events and after reconnect; a full-page reload is unnecessary.
