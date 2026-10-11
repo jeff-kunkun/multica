@@ -103,3 +103,24 @@ its slug); the viewer's owner or admin accepts it; either side can revoke.
 Someone who owns both workspaces can instead pull from the viewer side (设置 →
 连通工作区 → 连进来的, or `create --from <workspace>`); that link is active at
 once. Anyone else must ask the source's owner to offer it.
+
+
+## Settings and audit
+
+Human source owners can change projects from either side. From the viewer they
+also need owner/admin rights there; `update <link-id> --project <name>` resolves
+names in the source workspace. `list` includes shared `projects` on both sides,
+`can_update_projects` and `can_set_managed`. Pending links cannot enable managed
+access: accept first. Agents still cannot manage links or read owner-only audit.
+
+Human workspace owners can read changes and managed writes (including revoked links):
+
+```sh
+multica workspace link audit --limit 50 --output json
+multica workspace link audit --cursor <next_cursor> --output json
+```
+
+Each entry names `peer_workspace_name`, `by_side`, `actor_name`, `action`, `route`,
+`object_label` (task identifier or automation name), `detail` and `created_at`.
+`next_cursor: null` marks the last page. Settings, linked reading and overview
+refresh on link-change events and after reconnect; a full-page reload is unnecessary.
