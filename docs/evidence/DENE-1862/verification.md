@@ -43,4 +43,4 @@ Go 路径通过；cmd/server 编译通过，该筛选下无测试。设置页 17
 
 交付期间 DENE-1849 合入 kun，已在原任务分支 merge origin/kun；保留其 wake_blocked 运维告警绕过过滤与额度、可配置未回答链预算、generation 与退款逻辑，再叠加本单普通事件补发和提及规则。未重复实现该单能力。
 
-合并后重跑同一 Go BotWake / CLI 命令：18 个 handler 测试通过，包含 DENE-1849 告警、回复重置、人类豁免与本单送达测试；handler 4.467s、CLI 0.778s，cmd/server 编译通过。增量 views 类型检查通过；bots-tab 与 bot-wake-limit 两个文件共 21 个测试通过。手机截图缺口仍保留，交验收席继续；当前候选未合并或部署。
+合并后重跑同一 Go BotWake / CLI 命令：18 个 handler 测试通过，包含 DENE-1849 告警、回复重置、人类豁免与本单送达测试；handler 4.467s、CLI 0.778s，cmd/server 编译通过。增量 views 类型检查通过；bots-tab 与 bot-wake-limit 两个文件共 20 个测试通过。手机截图缺口仍保留，交验收席继续；当前候选未合并或部署。
