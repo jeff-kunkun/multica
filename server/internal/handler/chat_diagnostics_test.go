@@ -45,8 +45,10 @@ func TestChatOfflineSendAndProgressDiagnostics(t *testing.T) {
 	seen := time.Date(2026, 10, 11, 9, 0, 10, 0, time.UTC)
 	runtimeID := dbfx.Runtime(t, "Claude (offline-test.local)", map[string]any{"status": "offline", "last_seen_at": seen})
 	dbfx.Exec(t, `UPDATE agent SET runtime_id=$1 WHERE id=$2`, runtimeID, agentID)
+	// Explicit queue mode: a default send would merge into the first queued
+	// turn (DENE-1857), and this test needs two distinct tasks.
 	send := func() SendChatMessageResponse {
-		req := withChatTestWorkspaceCtx(t, withURLParam(newRequest("POST", "/messages", map[string]any{"content": "hello"}), "sessionId", sessionID))
+		req := withChatTestWorkspaceCtx(t, withURLParam(newRequest("POST", "/messages", map[string]any{"content": "hello", "mode": "queue"}), "sessionId", sessionID))
 		w := httptest.NewRecorder()
 		testHandler.SendChatMessage(w, req)
 		if w.Code != http.StatusCreated {

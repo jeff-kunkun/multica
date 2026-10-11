@@ -31,6 +31,14 @@ not authority. Preserve any explicit draft-before-external-send convention the
 owner has established. Internal Multica messages are distinct from third-party
 posts, messages and purchases.
 
+Relaying something time-boxed into a chat — an SMS, a verification code, a
+one-time link — must use `multica chat send --session <id> --urgent --wait`.
+Urgent is refused on the spot when the agent's runtime is offline (JSON
+`reason` + `next_steps`, nonzero exit, nothing saved), otherwise it jumps the
+queue and fails with `pickup_timeout` if no daemon starts it within 30 s. Tell
+the person the refusal reason instead of queueing a code that will arrive
+expired; see `run-control.md` → "Urgent delivery".
+
 A same-power key writes as its owner: comments and chat messages show the
 owner's name, and agents may read them as the owner's own words. Start every
 comment or chat message the Bot writes with a line naming the Bot (for example

@@ -532,7 +532,7 @@ SELECT e.sequence, e.event_id, e.bot_id, e.workspace_id, e.event_type, e.issue_i
 WHERE e.next_attempt_at<=now()
  AND (e.status='queued' OR (e.status='pending' AND e.acknowledged_at IS NULL AND e.woken_at IS NULL AND e.result_at IS NULL
       AND e.reason IN ('hourly limit','quiet hours','source attribution unavailable')))
- AND (e.status='pending' OR e.attempts>0 OR e.event_type='wake_blocked'
+ AND (e.status='pending' OR e.attempts>0 OR e.event_type='wake_blocked' OR e.runtime_outage_id IS NOT NULL
       OR e.created_at+$1::integer*interval '1 second'<=now())
 ORDER BY (e.event_type='wake_blocked') DESC,
  (e.event_type='mention' OR EXISTS (

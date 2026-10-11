@@ -308,7 +308,6 @@ export type ChatSendMode = "steer" | "queue" | "restart";
 
 export interface SendChatMessageResponse {
   runtime?: { status: string; name: string; last_seen_at: string | null } | null;
-  warning?: string;
   message_id: string;
   task_id: string;
   /** What actually happened; `start` when nothing was replying. */

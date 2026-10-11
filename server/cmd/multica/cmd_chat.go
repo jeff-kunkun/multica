@@ -340,7 +340,6 @@ func init() {
 	chatSendCmd.Flags().String("content-file", "", "Read the message from this file instead of the argument")
 	chatSendCmd.Flags().String("mode", "", "Default: merge into existing work; choose steer, queue or restart explicitly")
 	chatSendCmd.Flags().String("per-quote", "", "Exact words from this caller’s earlier human message in this chat; server verifies the quote before exempting it from the Bot wake-chain limit")
-	chatSendCmd.Flags().String("mode", "queue", "While the agent is replying: steer, queue or restart")
 	chatSendCmd.Flags().Bool("urgent", false, "Deliver now or fail now: refused (exit nonzero, JSON reason + next_steps) when the agent's runtime is offline and no online fallback runtime is configured; otherwise goes to the head of the queue (restart semantics) and fails with pickup_timeout if no daemon starts it within 30s. With --wait, waits for the pickup instead of the full reply.")
 	chatSendCmd.Flags().String("output", "json", "Output format: table or json")
 	chatSendCmd.Flags().StringSlice("attachment", nil, "Local files to attach to this message (repeatable)")

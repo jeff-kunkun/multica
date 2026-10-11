@@ -386,7 +386,7 @@ export function AgentDetailInspector({
               value={agent.fallback_runtime_id ?? ""}
               primaryRuntimeId={agent.runtime_id ?? ""}
               runtimes={runtimes}
-              currentUserId={currentUserId}
+              currentUserId={currentUserId ?? ""}
               canEdit={canEditRuntime}
               onChange={(id) => update({ fallback_runtime_id: id })}
             />
