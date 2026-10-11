@@ -25,6 +25,10 @@ var chatNewCmd = &cobra.Command{
 the first message. With --wait, block until the agent's reply arrives and
 print it.
 
+Attach read-only references with --reference LINK_ID:PROJECT_ID (repeatable).
+Find IDs with "multica chat linked-projects --available --output json".
+References are not working projects; disconnecting stops injection in the next run.
+
 For people and external bots logged in with a personal key. An agent run
 is refused here: use "multica chat open" from a chat run instead.
 
@@ -41,6 +45,7 @@ func init() {
 	chatNewCmd.Flags().String("content-file", "", "Read the first message from this file instead of the argument")
 	chatNewCmd.Flags().String("title", "", "Chat title (optional; the server names it otherwise)")
 	chatNewCmd.Flags().String("project", "", "Project id or prefix to give the chat as context")
+	chatNewCmd.Flags().StringSlice("reference", nil, "Read-only LINK_ID:PROJECT_ID references (repeatable; not working projects)")
 	chatNewCmd.Flags().Bool("wait", false, "Wait for the agent's reply and print it")
 	chatNewCmd.Flags().Duration("wait-timeout", 10*time.Minute, "How long --wait waits for the reply")
 	chatNewCmd.Flags().String("output", "json", "Output format: table or json")
@@ -61,6 +66,11 @@ func runChatNew(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
+	values, _ := cmd.Flags().GetStringSlice("reference")
+	refs, err := parseChatReferences(values)
+	if err != nil {
+		return err
+	}
 	client, err := newAPIClient(cmd)
 	if err != nil {
 		return err
@@ -72,6 +82,9 @@ func runChatNew(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("chat new: %w", err)
 	}
 	body := map[string]any{"agent_id": agentID}
+	if cmd.Flags().Changed("reference") {
+		body["linked_projects"] = refs
+	}
 	if title, _ := cmd.Flags().GetString("title"); strings.TrimSpace(title) != "" {
 		body["title"] = strings.TrimSpace(title)
 	}
