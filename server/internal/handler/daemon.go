@@ -3938,7 +3938,7 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 		}
 		for _, m := range unanswered {
 			if strings.TrimSpace(m.Content) != "" {
-				parts = append(parts, m.Content)
+				parts = append(parts, protocol.ChatPromptContent(m.MessageKind, m.Content))
 			}
 			for _, a := range attsByMessage[uuidToString(m.ID)] {
 				resp.ChatMessageAttachments = append(resp.ChatMessageAttachments, ChatAttachmentMeta{

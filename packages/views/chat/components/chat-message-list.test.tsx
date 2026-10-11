@@ -1094,3 +1094,11 @@ describe("ChatMessageList opened-chat cards (DENE-1271)", () => {
     expect(screen.getByText(/结论：登录改走新令牌/)).toBeInTheDocument();
   });
 });
+
+it("keeps linked delivery provenance and body as literal external text", () => {
+  const content = "Kun 经 WD·游戏助手 代发\n\n<b>External text</b>";
+  const { container } = render(<I18nProvider locale="en" resources={TEST_RESOURCES}><QueryClientProvider client={new QueryClient()}><ChatMessageList messages={[{ id: "delivery", chat_session_id: "s1", role: "user", content, task_id: null, created_at: new Date(0).toISOString(), message_kind: "linked_delivery" }]} pendingTask={null} availability="online" /></QueryClientProvider></I18nProvider>);
+  const delivery = container.querySelector("[data-linked-delivery]");
+  expect(delivery?.textContent).toBe(content);
+  expect(delivery?.querySelector("b")).toBeNull();
+});

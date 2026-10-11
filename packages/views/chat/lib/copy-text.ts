@@ -70,6 +70,10 @@ export function conversationToMarkdown(
     }
     const body = canonicalAnswerText(message).trim();
     if (!body) continue;
+    if (kind === "linked_delivery") {
+      blocks.push(body, "");
+      continue;
+    }
     const who = message.role === "assistant" ? roles.assistant : roles.user;
     blocks.push(`**${who}**`, "", body, "");
   }

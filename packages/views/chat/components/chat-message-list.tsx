@@ -604,6 +604,10 @@ const MessageBubble = memo(function MessageBubble({
 
   const { message } = item;
 
+  if (message.message_kind === "linked_delivery") {
+    return <div data-linked-delivery className="min-w-0 whitespace-pre-wrap break-words rounded-lg border px-3.5 py-2 text-body">{message.content}</div>;
+  }
+
   if (message.role === "user") {
     const copyContent = canonicalAnswerText(message).trim();
     return (
