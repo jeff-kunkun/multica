@@ -62,3 +62,5 @@
 - DENE-1808：可托管聊天代发、新连通默认开托管（旧连通不变）；[桌面/手机 HTML 预览附件](https://ai.ferryway.cc/api/attachments/01a12a2c-418e-78c0-bef9-e084235a21f1/download)。[验证记录与剩余验收](DENE-1808/README.md)：已补真实设置/聊天四档截图与开关提交；原生设备缺口保留，WD 线上验收需发布含本功能 CLI 的新测试版。
 
 - DENE-1870：跨工作区紧凑读取；[协议](../kun/fast-access.md)、[后端复现与本地测量](DENE-1870/backend.md)、[共享界面验证及原生例外](DENE-1870/frontend.md)、[四档真实截图报告](https://ai.ferryway.cc/api/attachments/01a12c30-6781-7d33-94d8-6399c6cbba01/download)。本地两工作区17活动运行，30次p95为1.043秒，不代表线上结果。
+
+- DENE-1872：持久事件记录与断线续传；[事务、回放、性能与回滚证据](DENE-1872/backend.md)。服务端、CLI、共享页面和原生查询层已同步；本地集成通过，尚未发布，原生设备与 Electron GUI 未实测。

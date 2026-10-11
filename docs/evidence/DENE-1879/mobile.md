@@ -15,3 +15,7 @@ The mobile-owned Query options call the mobile API wrapper, forwarding AbortSign
 - This is the timestamp snapshot phase, not production cross-workspace performance acceptance. The event-journal sibling was notified to update the shared schema/mobile consumer when changing mode.
 
 Unverified native flow: open Inbox → Activity, switch scope, Load more, Refresh, Close in both themes. Expected: safe-area scrolling, no clipping, return to Inbox and unchanged unread badges. If different, capture screen, app build, selected scope and failing action. No human review or production claim is implied.
+
+## Durable protocol follow-up (DENE-1872)
+
+The later durable implementation supersedes the 30-minute request above: a fresh read omits `since` and rebuilds current state; the timestamp in the query key is only a refresh identity. Queries refresh every 30 seconds/on focus and clear prior pages on failure, while retaining cancellation forwarding. The shared schema accepts `durable_delta`. Mobile typecheck/lint, 40 files / 255 tests, and ios-run assertions passed. This is query-layer evidence; the on-device visual limitation above remains. See [journal evidence](../DENE-1872/backend.md).
