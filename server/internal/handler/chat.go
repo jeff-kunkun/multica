@@ -1805,10 +1805,11 @@ func (h *Handler) ListChatMessagesPage(w http.ResponseWriter, r *http.Request) {
 // optimistic seeds don't have a real task created_at and the timer needs to
 // survive refresh / reopen.
 type PendingChatTaskResponse struct {
-	HiddenQueuedCount int32  `json:"hidden_queued_count"`
-	TaskID            string `json:"task_id,omitempty"`
-	Status            string `json:"status,omitempty"`
-	CreatedAt         string `json:"created_at,omitempty"`
+	HiddenQueuedCount int32               `json:"hidden_queued_count"`
+	QueueReason       *MachineQueueReason `json:"queue_reason,omitempty"`
+	TaskID            string              `json:"task_id,omitempty"`
+	Status            string              `json:"status,omitempty"`
+	CreatedAt         string              `json:"created_at,omitempty"`
 	// WaitReason explains a waiting_local_directory hold: which directory the
 	// task is parked on and, when known, the short id of the task holding it.
 	// Emitted only for that status — on any other one the column still carries
@@ -1840,11 +1841,12 @@ func waitReasonForStatus(status string, reason pgtype.Text) string {
 }
 
 type QueuedChatTaskResponse struct {
-	TaskID    string `json:"task_id"`
-	Status    string `json:"status"`
-	CreatedAt string `json:"created_at"`
-	MessageID string `json:"message_id,omitempty"`
-	Content   string `json:"content,omitempty"`
+	QueueReason *MachineQueueReason `json:"queue_reason,omitempty"`
+	TaskID      string              `json:"task_id"`
+	Status      string              `json:"status"`
+	CreatedAt   string              `json:"created_at"`
+	MessageID   string              `json:"message_id,omitempty"`
+	Content     string              `json:"content,omitempty"`
 	// Steering: this message was steered into the reply and is waiting to be
 	// read. Read: it leaves the queue. Not read: it runs after the reply.
 	Steering bool `json:"steering,omitempty"`
@@ -2187,6 +2189,16 @@ func (h *Handler) GetPendingChatTask(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to count queued chat messages")
 		return
 	}
+	queueRows := make([]AgentTaskResponse, len(tasks))
+	for i, task := range tasks {
+		queueRows[i] = AgentTaskResponse{RuntimeID: uuidToString(task.RuntimeID), Status: task.Status}
+	}
+	h.hydrateMachineQueueReasons(r.Context(), queueRows)
+	queueByID := map[string]*MachineQueueReason{}
+	for i, task := range tasks {
+		queueByID[uuidToString(task.ID)] = queueRows[i].QueueReason
+	}
+
 	steering := map[string]bool{}
 	if ids, err := h.Queries.ListSteeringChatFollowups(r.Context(), session.ID); err == nil {
 		for _, id := range ids {
@@ -2200,17 +2212,19 @@ func (h *Handler) GetPendingChatTask(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		queued = append(queued, QueuedChatTaskResponse{
-			TaskID:    uuidToString(task.ID),
-			Status:    task.Status,
-			CreatedAt: timestampToString(task.CreatedAt),
-			MessageID: uuidToString(task.MessageID),
-			Content:   task.Content,
-			Steering:  steering[uuidToString(task.ID)],
+			QueueReason: queueByID[uuidToString(task.ID)],
+			TaskID:      uuidToString(task.ID),
+			Status:      task.Status,
+			CreatedAt:   timestampToString(task.CreatedAt),
+			MessageID:   uuidToString(task.MessageID),
+			Content:     task.Content,
+			Steering:    steering[uuidToString(task.ID)],
 		})
 	}
 
 	resp := PendingChatTaskResponse{
 		HiddenQueuedCount: hiddenQueued,
+		QueueReason:       queueByID[uuidToString(head.ID)],
 		TaskID:            uuidToString(head.ID),
 		Status:            head.Status,
 		CreatedAt:         timestampToString(head.CreatedAt),

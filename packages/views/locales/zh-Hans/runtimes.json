@@ -85,6 +85,12 @@
       "toast_saved": "已重命名机器",
       "toast_cleared": "已清除机器名称",
       "toast_failed": "重命名机器失败"
+    },
+    "capacity": {
+      "label": "同时运行上限",
+      "running": "运行中 {{active}}/{{limit}}",
+      "owner_only": "只有机器主人能修改上限。",
+      "failed": "保存失败，请重试。"
     }
   },
   "health": {

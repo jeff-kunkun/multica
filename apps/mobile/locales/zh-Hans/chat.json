@@ -80,7 +80,8 @@
     "searching_code": "正在搜索代码",
     "making_edits": "正在修改",
     "searching_web": "正在搜索网页",
-    "retrying": "重试中"
+    "retrying": "重试中",
+    "machine_full": "排队中：机器已满（{{active}}/{{limit}}）"
   },
   "alerts": {
     "no_permission_title": "无权运行该智能体",

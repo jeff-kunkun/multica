@@ -89,6 +89,12 @@
       "toast_saved": "Machine renommée",
       "toast_cleared": "Nom de la machine effacé",
       "toast_failed": "Échec du renommage de la machine"
+    },
+    "capacity": {
+      "label": "Limite des exécutions simultanées",
+      "running": "En cours {{active}}/{{limit}}",
+      "owner_only": "Seul le propriétaire peut modifier cette limite.",
+      "failed": "Enregistrement impossible. Réessayez."
     }
   },
   "health": {

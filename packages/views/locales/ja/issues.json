@@ -910,7 +910,8 @@
     "sparkline_now": "現在",
     "status_deferred": "再試行中",
     "status_capacity_retry": "モデル混雑中・{{retry}} 回目の再試行、次回 {{time}}",
-    "usage_label": "トークン費用"
+    "usage_label": "トークン費用",
+    "machine_full": "待機中：マシンの上限に到達（{{active}}/{{limit}}）"
   },
   "runs_timeline": {
     "title": "実行履歴",

@@ -5,6 +5,8 @@
 - DENE-1843：运行时机器掉线告警的同机聚合、CLI 记录与开关、Web/Desktop 和原生通知设置入口；[运行时页 375/390/768/1280 开启与关闭实页截图（任务附件）](https://ai.ferryway.cc/api/attachments/01a12c55-9f14-78af-b58e-55ab05ab47eb/download)。网页开关保存与刷新验证通过；真实 Telegram 停机/恢复演练移交父票 DENE-1819 上线后核对，未记为已通过；原生窗口和实体手机未做视觉验收。
 
 - DENE-1842：聊天历史说明被隐藏的排队消息数量，CLI JSON/table 与 Web/Desktop、原生 App 同步；[真实聊天页 375/390/768/1280 截图与 CLI 对照（任务附件）](https://ai.ferryway.cc/api/attachments/01a12c10-3758-7434-b901-113262873335/download)。原生窗口及手机设备未做视觉验收。
+- DENE-1860：每台机器默认同时运行上限 12、跨运行时/工作区共用与排队原因；[并发领取、改为 8 与四档真实页面截图（任务附件）](https://ai.ferryway.cc/api/attachments/01a12c7c-6089-79c8-ac3f-f844722791a7/download)。原生 App 查看入口已补，视觉未测；不代表生产已升级。
+
 - DENE-1857：默认唤醒合并、连带停止、显式转工单后的唯一执行处；[验收、回归、CLI 契约与可撤回副本](https://ai.ferryway.cc/api/attachments/01a12c51-917a-7aeb-964c-1238e378017e/download)，[四档浏览器截图与验证边界](https://ai.ferryway.cc/api/attachments/01a12c4c-f9c0-7457-bc3f-87c15b413f2f/download)。最终 390px 停止/取消按钮已实测 44px，其余较早截图已标注；全套后端仍有主线已有失败与属性列表分页用例失败，未声明全套通过。 [终审返工：只递归子单，聊天止步，兄弟单保留运行/执行开关/重试的验证](https://ai.ferryway.cc/api/attachments/01a12c68-cff7-7846-8275-d1fdc79ce088/download)。
 - DENE-1865：CLI 项目名、当前用户临时文件、钥匙状态与续期提示、服务端列表投影、一次性工作区选择；[完整测试、真实 CLI 与独立副本回滚记录（任务附件）](https://ai.ferryway.cc/api/attachments/01a12c55-6e00-7d6a-85fd-77deb84386d5/download)。52 个智能体紧凑输出 20,469 字节；670 项 CLI 与 13 项相关服务端测试通过。首次已失效且无缓存的钥匙元数据为未知，Windows 仅交叉构建。
 

@@ -538,8 +538,8 @@ type BotWakeEvent struct {
 	Hop             int32              `json:"hop"`
 	InheritedOwner  bool               `json:"inherited_owner"`
 	WakeGeneration  int64              `json:"wake_generation"`
-	RuntimeOutageID pgtype.UUID        `json:"runtime_outage_id"`
 	DeliveryID      pgtype.UUID        `json:"delivery_id"`
+	RuntimeOutageID pgtype.UUID        `json:"runtime_outage_id"`
 }
 
 type BotWakeWatch struct {
@@ -2035,6 +2035,12 @@ type ReviewPassHead struct {
 	PrUrl     string             `json:"pr_url"`
 	HeadSha   string             `json:"head_sha"`
 	CreatedAt pgtype.Timestamptz `json:"created_at"`
+}
+
+type RuntimeMachineCapacity struct {
+	MachineKey        string             `json:"machine_key"`
+	MaxConcurrentRuns int32              `json:"max_concurrent_runs"`
+	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
 }
 
 type RuntimeMachineWatch struct {

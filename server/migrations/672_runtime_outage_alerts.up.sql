@@ -28,4 +28,4 @@ ALTER TABLE bot_wake_event ADD CONSTRAINT bot_wake_event_check CHECK (
 );
 -- Subscribe existing owner bots through the same opt-out event settings.
 UPDATE bot_wake SET events = events || ARRAY['runtime.offline','runtime.online'];
-ALTER TABLE bot_wake ALTER COLUMN events SET DEFAULT ARRAY['mention','started','done','blocked','needs_kun','task','chat','runtime.offline','runtime.online'];
+ALTER TABLE bot_wake ALTER COLUMN events SET DEFAULT ARRAY['mention','done','blocked','needs_kun','task','chat','runtime.offline','runtime.online'];

@@ -89,6 +89,12 @@
       "toast_saved": "Machine renamed",
       "toast_cleared": "Machine name cleared",
       "toast_failed": "Failed to rename machine"
+    },
+    "capacity": {
+      "label": "Concurrent run limit",
+      "running": "Running {{active}}/{{limit}}",
+      "owner_only": "Only the machine owner can change this limit.",
+      "failed": "Could not save. Try again."
     }
   },
   "health": {

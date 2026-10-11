@@ -320,7 +320,8 @@
       "making_edits": "編集中",
       "searching_web": "ウェブを検索中",
       "fallback": "作業中"
-    }
+    },
+    "machine_full": "待機中：マシンの上限に到達（{{active}}/{{limit}}）"
   },
   "list": {
     "typing": "入力中…",

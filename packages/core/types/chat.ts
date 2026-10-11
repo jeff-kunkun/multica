@@ -1,3 +1,4 @@
+import type { MachineQueueReason } from "./agent";
 import type { AgentTask } from "./agent";
 import type { Progress } from "./progress";
 import type { ChatLinkedProject } from "./workspace-link";
@@ -401,6 +402,7 @@ export interface ChatDraftRestoresResponse {
  * so the timer survives refresh / reopen without "resetting to 0s".
  */
 export interface ChatQueuedTask {
+  queue_reason?: MachineQueueReason;
   task_id: string;
   status: string;
   created_at: string;
@@ -419,6 +421,7 @@ export interface PrioritizeQueuedChatTaskResponse {
 export interface ChatPendingTask {
   /** Session-wide user messages currently omitted while queued behind the head. */
   hidden_queued_count?: number;
+  queue_reason?: MachineQueueReason;
   task_id?: string;
   status?: string;
   created_at?: string;

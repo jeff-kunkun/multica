@@ -80,7 +80,8 @@
     "searching_code": "Searching code",
     "making_edits": "Making edits",
     "searching_web": "Searching web",
-    "retrying": "Retrying"
+    "retrying": "Retrying",
+    "machine_full": "Queued: machine full ({{active}}/{{limit}})"
   },
   "alerts": {
     "no_permission_title": "No permission to run this agent",

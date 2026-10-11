@@ -320,7 +320,8 @@
       "making_edits": "수정 중",
       "searching_web": "웹 검색 중",
       "fallback": "작업 중"
-    }
+    },
+    "machine_full": "대기 중: 기기 한도 도달 ({{active}}/{{limit}})"
   },
   "list": {
     "typing": "입력 중…",

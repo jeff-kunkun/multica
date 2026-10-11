@@ -27,6 +27,7 @@ import {
 import { RenameMachineDialog } from "./rename-machine-dialog";
 import { RuntimeProfilesDialog } from "./runtime-profiles-dialog";
 import { pendingRuntimesForProfiles } from "./pending-runtime";
+import { MachineCapacityControl } from "./machine-capacity-control";
 import { MachineCliSection } from "./machine-cli-section";
 import { HealthIcon, useHealthLabel } from "./shared";
 import { useT, useTimeAgo } from "../../i18n";
@@ -94,7 +95,7 @@ export function RuntimeDetailPage({
   const healthLabel = useHealthLabel();
   const timeAgo = useTimeAgo();
   const currentUserId = useAuthStore((state) => state.user?.id);
-  const { data: runtimes = [], isLoading } = useQuery(runtimeListOptions(wsId));
+  const { data: runtimes = [], isLoading } = useQuery({ ...runtimeListOptions(wsId), refetchInterval: 5000 });
   const { data: agents = [] } = useQuery(agentListOptions(wsId));
   const { data: tasks = [] } = useQuery(agentTaskSnapshotOptions(wsId));
   const { data: members = [] } = useQuery(memberListOptions(wsId));
@@ -290,6 +291,7 @@ export function RuntimeDetailPage({
               {machine.isCurrent && localMachineActions}
             </div>
           </div>
+          <div className="mt-4"><MachineCapacityControl runtimes={machine.runtimes} /></div>
         </div>
       </header>
 

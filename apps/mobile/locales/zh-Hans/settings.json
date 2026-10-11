@@ -84,5 +84,11 @@
     "runtime_alerts_description": "我的机器掉线超过 3 分钟及恢复时，通知我和我的 Bot。"
   },
   "groups.assignments_description": "任务分配给我或取消分配给我时。",
-  "groups.mentions_description": "有人用 @ 提到你时，包括 @all 和 @squad。"
+  "groups.mentions_description": "有人用 @ 提到你时，包括 @all 和 @squad。",
+  "machines": {
+    "title": "机器",
+    "capacity": "运行中 {{active}}/{{limit}}",
+    "limit": "同时运行上限 {{limit}}",
+    "failed": "加载失败，请重试。"
+  }
 }

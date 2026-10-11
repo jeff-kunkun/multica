@@ -82,5 +82,11 @@
     "system_description": "Account changes, security alerts, product updates.",
     "runtime_alerts": "Machine disconnect alerts",
     "runtime_alerts_description": "Notify me and my Bots when my machines disconnect for over 3 minutes or recover."
+  },
+  "machines": {
+    "title": "Machines",
+    "capacity": "Running {{active}}/{{limit}}",
+    "limit": "Concurrent run limit {{limit}}",
+    "failed": "Could not load. Try again."
   }
 }

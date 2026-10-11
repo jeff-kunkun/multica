@@ -4106,6 +4106,25 @@ func (s *TaskService) claimTask(ctx context.Context, agentID, runtimeID pgtype.U
 			return nil
 		}
 
+		// All agents/providers on the device reserve capacity under the same
+		// transaction lock. Dispatched tasks already occupy a slot; reclaiming
+		// an existing dispatch does not reserve another one.
+		machineKey, err := qtx.GetRuntimeMachineKey(ctx, claimRuntimeID)
+		if err != nil {
+			return fmt.Errorf("resolve machine capacity: %w", err)
+		}
+		if err := qtx.LockRuntimeMachineCapacity(ctx, machineKey); err != nil {
+			return fmt.Errorf("lock machine capacity: %w", err)
+		}
+		capacity, err := qtx.GetRuntimeMachineCapacity(ctx, machineKey)
+		if err != nil {
+			return fmt.Errorf("read machine capacity: %w", err)
+		}
+		if capacity.ActiveRuns >= int64(capacity.MaxConcurrentRuns) {
+			outcome = "machine_full"
+			return nil
+		}
+
 		t0 = time.Now()
 		running, err := qtx.CountRunningTasks(ctx, agentID)
 		countRunningMs = time.Since(t0).Milliseconds()
