@@ -31,3 +31,15 @@ python3 scripts/check-agent-drift.py --workspace kunkunya --json: exit 1; litera
 I17 literal result: {"checked": 1, "errors": [], "warnings": []}
 Remaining errors are unchanged non-profile surfaces: nonempty instructions for gohan/trunks; piccolo family tier/runtime/thinking mismatch; Pi trial pending adoption. No changes to these surfaces.
 Latest profile re-read unchanged; original mono worktree untouched; no application source changes by this task. Current app AGENTS.md has a runtime-managed working tree modification, excluded.
+
+WAIT PROBE REPAIR
+Previous observed stderr: sh: 读取: command not found
+Command: python3 -c 'import subprocess,json,sys; r=subprocess.run(["multica","issue","comment","list","DENE-1861","--thread","01a12c23-8e60-7e84-b820-f2b683adaba7","--tail","1","--compact","--output","json"],capture_output=True,text=True,timeout=25); r.check_returncode(); rows=json.loads(r.stdout); ready=any(c.get("id")!="01a12c23-8e60-7e84-b820-f2b683adaba7" for c in rows); print("NEW_REPLY: review content before any publication" if ready else "PENDING: no reply in parent handoff thread"); sys.exit(0 if ready else 2)'
+stdout:
+PENDING: no reply in parent handoff thread
+stderr:
+exit: 2
+
+Stored probe read-back matches; sh -c persisted command: exit 2
+stdout: PENDING: no reply in parent handoff thread
+stderr: 
