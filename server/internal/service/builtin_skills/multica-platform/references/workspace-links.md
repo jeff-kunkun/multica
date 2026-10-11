@@ -62,7 +62,7 @@ nowhere new: the work stays in the source, and each change shows there as
 gone, the person lacks the right there, or the command is not covered; say so,
 do not retry another way.
 
-Every refusal of `view` is the same `404 link not found`: the link was revoked, is still
+Every refusal of `view` is the same `404 link not found`: the link was deleted, is still
 waiting for acceptance, or your workspace is not its viewer. Report it as "no
 access", not as a bug.
 
@@ -82,3 +82,23 @@ its slug); the viewer's owner or admin accepts it; either side can revoke.
 Someone who owns both workspaces can instead pull from the viewer side (设置 →
 连通工作区 → 连进来的, or `create --from <workspace>`); that link is active at
 once. Anyone else must ask the source's owner to offer it.
+
+A person who owns the source and is owner/admin in the viewer can also switch
+managed from the viewer side; `can_set_managed` reports this per link. Agents
+cannot switch it. Disconnect (`revoke`) deletes the link; there is no `revoked`
+status. Both sides retain audit records.
+
+Attachments work with `--linked` on create and comment add:
+
+```sh
+multica issue comment add <ID> --linked <source-slug> --content-file note.md --attachment x.png
+```
+
+Upload and attachment ownership are in the source, under the run originator's
+permissions. Read-only project resource lookup is available for CLI resolution.
+Mentioning or assigning a source agent uses the source's normal trigger rules;
+the originating person remains the run originator. Writes leave provenance in
+the source issue timeline (`issue timeline`) or `autopilot linked-changes`.
+Link audit records (`workspace_link_audit`) are visible to both owners in
+Settings → Linked workspaces. No existing link settings are changed by a command
+using `--linked`.

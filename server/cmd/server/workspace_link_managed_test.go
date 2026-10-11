@@ -4,7 +4,12 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"io"
+	"mime/multipart"
 	"net/http"
+	"os"
+	osexec "os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -136,6 +141,108 @@ func TestManagedLinkThroughRouter(t *testing.T) {
 		t.Fatalf("linked_write activity rows = %s, want 5", n)
 	}
 
+	// Attachments use the same multipart upload + comment binding as the CLI.
+	var upload bytes.Buffer
+	form := multipart.NewWriter(&upload)
+	part, err := form.CreateFormFile("file", "x.png")
+	if err != nil {
+		t.Fatal(err)
+	}
+	imageBytes := []byte("\x89PNG\r\n\x1a\nmanaged attachment")
+	part.Write(imageBytes)
+	form.WriteField("issue_id", issueID)
+	form.Close()
+	req, _ := http.NewRequest("POST", testServer.URL+"/api/upload-file", &upload)
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", form.FormDataContentType())
+	req.Header.Set("X-Workspace-ID", testWorkspaceID)
+	req.Header.Set(workspacelink.LinkedWorkspaceHeader, sourceSlug)
+	response, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var attachment map[string]any
+	json.NewDecoder(response.Body).Decode(&attachment)
+	response.Body.Close()
+	if response.StatusCode != 200 && response.StatusCode != 201 {
+		t.Fatalf("upload: %d %v", response.StatusCode, attachment)
+	}
+	attachmentID, _ := attachment["id"].(string)
+	if got := scan(`SELECT workspace_id::text || ':' || uploader_id::text FROM attachment WHERE id = $1`, attachmentID); got != source+":"+originator {
+		t.Fatalf("attachment ownership = %s", got)
+	}
+	if code, body := do(token, "POST", "/api/issues/"+issueID+"/comments", map[string]any{"content": "attached", "attachment_ids": []string{attachmentID}}, true); code != 201 {
+		t.Fatalf("attachment comment: %d %v", code, body)
+	}
+	if got := scan(`SELECT count(*)::text FROM attachment WHERE id = $1 AND comment_id IS NOT NULL`, attachmentID); got != "1" {
+		t.Fatal("attachment not bound to comment")
+	}
+	download, _ := http.NewRequest("GET", testServer.URL+"/api/attachments/"+attachmentID+"/download", nil)
+	download.Header.Set("Authorization", "Bearer "+testToken)
+	download.Header.Set("X-Workspace-ID", source)
+	downloaded, err := http.DefaultClient.Do(download)
+	if err != nil {
+		t.Fatal(err)
+	}
+	contents, err := io.ReadAll(downloaded.Body)
+	downloaded.Body.Close()
+	if err != nil || downloaded.StatusCode != 200 || !bytes.Equal(contents, imageBytes) {
+		t.Fatalf("source attachment download: %d %q %v", downloaded.StatusCode, contents, err)
+	}
+
+	label := scan(`INSERT INTO issue_label (workspace_id, name, color) VALUES ($1, 'Managed label', '#abcdef') RETURNING id::text`, source)
+	if code, body := do(token, "POST", "/api/issues/"+issueID+"/labels", map[string]any{"label_id": label}, true); code != 200 && code != 201 {
+		t.Fatalf("add label: %d %v", code, body)
+	}
+	if code, body := do(token, "DELETE", "/api/issues/"+issueID+"/labels/"+label, nil, true); code != 200 && code != 204 {
+		t.Fatalf("remove label: %d %v", code, body)
+	}
+
+	// Exercise the literal CLI command, with only fixture credentials and a local server.
+	cliDir := t.TempDir()
+	binary := filepath.Join(cliDir, "multica")
+	build := osexec.Command("go", "build", "-o", binary, "../multica")
+	if output, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("build CLI: %v\n%s", err, output)
+	}
+	if err := os.WriteFile(filepath.Join(cliDir, "x.png"), imageBytes, 0600); err != nil {
+		t.Fatal(err)
+	}
+	command := osexec.Command(binary, "issue", "comment", "add", issueID, "--linked", sourceSlug, "--content", "CLI attachment", "--attachment", "x.png", "--output", "json", "--server-url", testServer.URL, "--workspace-id", testWorkspaceID)
+	command.Dir = cliDir
+	for _, entry := range os.Environ() {
+		if !strings.HasPrefix(entry, "MULTICA_") {
+			command.Env = append(command.Env, entry)
+		}
+	}
+	command.Env = append(command.Env, "MULTICA_TOKEN="+token)
+	if output, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("linked CLI attachment: %v\n%s", err, output)
+	}
+	if got := scan(`SELECT count(*)::text FROM attachment WHERE workspace_id=$1 AND issue_id=$2 AND uploader_id=$3 AND comment_id IS NOT NULL`, source, issueID, originator); got != "2" {
+		t.Fatalf("CLI attachment ownership/binding: %s", got)
+	}
+
+	// Assignment also delegates under the same human's identity in the source.
+	code, assigned := do(token, "POST", "/api/issues", map[string]any{"title": "managed assignment", "status": "in_progress", "assignee_type": "agent", "assignee_id": sourceAgent}, true)
+	if code != 201 {
+		t.Fatalf("assigned create: %d %v", code, assigned)
+	}
+	assignedID, _ := assigned["id"].(string)
+	if got := scan(`SELECT originator_user_id::text FROM agent_task_queue WHERE issue_id=$1 AND agent_id=$2 ORDER BY created_at DESC LIMIT 1`, assignedID, sourceAgent); got != originator {
+		t.Fatalf("assignment originator: %s", got)
+	}
+	// A source agent mention is a real source run attributed to the delegating person.
+	if code, body := do(token, "POST", "/api/issues/"+issueID+"/comments", map[string]any{"content": "[@Source Agent](mention://agent/" + sourceAgent + ") please handle this"}, true); code != 201 {
+		t.Fatalf("mention: %d %v", code, body)
+	}
+	if got := scan(`SELECT originator_user_id::text FROM agent_task_queue WHERE issue_id = $1 AND agent_id = $2 ORDER BY created_at DESC LIMIT 1`, issueID, sourceAgent); got != originator {
+		t.Fatalf("mention originator: %s", got)
+	}
+	if got := scan(`SELECT count(*)::text FROM activity_log WHERE issue_id=$1 AND action='linked_write' AND actor_id=$2 AND details->>'route'='issue.comment'`, issueID, originator); got != "4" {
+		t.Fatalf("comment provenance: %s", got)
+	}
+
 	// Autopilot: create, schedule and reschedule, pause, resume, then delete.
 	code, ap := do(token, "POST", "/api/autopilots", map[string]any{
 		"title": "linked autopilot", "assignee_id": sourceAgent, "execution_mode": "create_issue",
@@ -188,6 +295,17 @@ func TestManagedLinkThroughRouter(t *testing.T) {
 	}
 	if want := "autopilot.update autopilot.update autopilot.trigger_update autopilot.trigger_add autopilot.create"; strings.Join(routes, " ") != want {
 		t.Fatalf("linked change routes = %v, want %s", routes, want)
+	}
+
+	// Exercise the remaining managed mutations through the real router.
+	if code, body := do(token, "POST", "/api/autopilots/"+apID+"/trigger", map[string]any{}, true); code != 200 && code != 201 && code != 202 {
+		t.Fatalf("run now: %d %v", code, body)
+	}
+	if code, body := do(token, "DELETE", "/api/autopilots/"+apID+"/triggers/"+trigID, nil, true); code != 200 && code != 204 {
+		t.Fatalf("delete trigger: %d %v", code, body)
+	}
+	if got := scan(`SELECT count(*)::text FROM autopilot_trigger WHERE id=$1`, trigID); got != "0" {
+		t.Fatal("trigger still exists")
 	}
 
 	// Not on the whitelist: members, settings, link management.
