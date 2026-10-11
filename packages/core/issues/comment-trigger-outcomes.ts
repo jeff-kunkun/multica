@@ -82,3 +82,10 @@ const HANDLED_TRIGGER_STATUSES = new Set(["queued", "coalesced", "deferred", "st
 export function unhandledCommentTriggerOutcomes(raw: unknown): CommentTriggerOutcome[] {
   return parseCommentTriggerOutcomes(raw).filter((o) => !HANDLED_TRIGGER_STATUSES.has(o.status));
 }
+
+// True only when the server says this new comment woke no one while the issue
+// sits unattended (DENE-1774). Anything else — an older server, a malformed
+// field — reads as false, so the notice never shows on a guess.
+export function commentWokeNoOne(raw: unknown): boolean {
+  return typeof raw === "object" && raw !== null && (raw as { none_woken?: unknown }).none_woken === true;
+}

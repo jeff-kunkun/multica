@@ -535,6 +535,10 @@ Use --output table to confirm a final result without echoing the body, --output
 json when you need the comment id. One reply per thread: a distinct body file
 for each.
 
+A comment is not a dispatch. The receipt says who it woke ("Woke: ..."; JSON
+"wake.woken"); "Woke no one" (JSON "wake.none_woken") means no run started and
+none is running, so nobody will act on it: use multica issue handoff, or @ them.
+
 --mode decides what happens to agents the comment wakes that are still
 replying on this issue (omit it for the usual behaviour):
 
@@ -3446,12 +3450,48 @@ func runIssueCommentAdd(cmd *cobra.Command, args []string) error {
 	}
 
 	fmt.Fprintf(os.Stderr, "Comment added to issue %s.\n", issueRef.Display)
+	printCommentWake(os.Stderr, issueRef.Display, result["wake"])
 
 	output, _ := cmd.Flags().GetString("output")
 	if output == "table" {
 		return nil
 	}
 	return cli.PrintJSON(os.Stdout, result)
+}
+
+// printCommentWake turns the server's wake summary into one line (DENE-1774):
+// who this comment woke, or — when it woke no one on an unattended issue —
+// that a comment is not a dispatch, with the two commands that are. An older
+// server sends no summary and prints nothing.
+func printCommentWake(w io.Writer, issueDisplay string, raw any) {
+	wake, ok := raw.(map[string]any)
+	if !ok {
+		return
+	}
+	var woken []string
+	if list, ok := wake["woken"].([]any); ok {
+		for _, item := range list {
+			run, ok := item.(map[string]any)
+			if !ok {
+				continue
+			}
+			name, _ := run["agent_name"].(string)
+			if name == "" {
+				name, _ = run["agent_id"].(string)
+			}
+			status, _ := run["status"].(string)
+			woken = append(woken, fmt.Sprintf("%s (%s)", name, status))
+		}
+	}
+	if len(woken) > 0 {
+		fmt.Fprintf(w, "Woke: %s\n", strings.Join(woken, ", "))
+		return
+	}
+	if none, _ := wake["none_woken"].(bool); none {
+		fmt.Fprintf(w, "Woke no one: this comment started no run and nothing is running on %s.\n"+
+			"A comment is not a dispatch. To get someone working: multica issue handoff %s --to <reviewer|dispatcher|agent>, or @ them in a comment.\n",
+			issueDisplay, issueDisplay)
+	}
 }
 
 func runIssueCommentUpdate(cmd *cobra.Command, args []string) error {

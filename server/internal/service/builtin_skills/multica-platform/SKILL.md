@@ -29,7 +29,7 @@ Read the invariants below, then open the reference(s) your task actually needs
 | `references/routing.md` | Automatic routing: which slots it fills at which status, the 验收席 field, who may pick an executor (`--per-quote`, `issue escalate`), domains (`multica domain`, project/issue `--domain`), what an `issue route` result means, why dispatch stopped |
 | `references/state-card.md` | Picking up an issue: `multica issue context` (goal, decisions, where it stands, last baton, what changed since you), and writing decisions with `--decision` |
 | `references/close-protocol.md` | Closing an issue: the eight `close.*` keys, conclusion / status / next owner / wake decision tables, blocked-close fields, dispatcher stage promotion |
-| `references/mentions.md` | Writing a `mention://` link: which types enqueue a run, which are inert, why one silently did nothing |
+| `references/mentions.md` | Writing a `mention://` link: which types enqueue a run, which are inert, why one silently did nothing; a comment that "Woke no one" |
 | `references/agents.md` | Creating, copying or debugging an agent definition: fields, secrets, MCP config, skill binding |
 | `references/asks.md` | Option questions raised and answered by agents |
 | `references/specialisations.md` | Base roles and specialisations: create by base role + domain, what a child inherits, the two-level cap, runtime following, solidify, the archive guard |

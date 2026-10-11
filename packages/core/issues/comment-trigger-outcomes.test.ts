@@ -4,6 +4,7 @@ import {
   unhandledCommentTriggerOutcomes,
   mentionLabelsByTarget,
   blockedTriggerLabel,
+  commentWokeNoOne,
 } from "./comment-trigger-outcomes";
 
 // MUL-4525 §2: the create/edit comment response's trigger_outcomes drive the
@@ -75,5 +76,14 @@ describe("mentionLabelsByTarget", () => {
   it("returns an empty map for content with no mentions", () => {
     expect(mentionLabelsByTarget("just text").size).toBe(0);
     expect(mentionLabelsByTarget("").size).toBe(0);
+  });
+});
+
+describe("commentWokeNoOne", () => {
+  it("is true only for an explicit none_woken", () => {
+    expect(commentWokeNoOne({ woken: [], none_woken: true })).toBe(true);
+    expect(commentWokeNoOne({ woken: [], none_woken: false })).toBe(false);
+    expect(commentWokeNoOne(undefined)).toBe(false);
+    expect(commentWokeNoOne({ none_woken: "true" })).toBe(false);
   });
 });
