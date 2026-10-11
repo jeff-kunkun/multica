@@ -19,6 +19,7 @@ import {
 } from "@/data/stores/chat-progress-seen-store";
 import { chatProgress } from "@/lib/chat-tickets";
 import { useIssueStatuses } from "@/lib/use-issue-statuses";
+import { useChatTicketWorkLabel } from "@/lib/use-chat-ticket-work";
 import { timeAgo } from "@/lib/time-ago";
 import { useT } from "@/lib/i18n";
 
@@ -28,6 +29,7 @@ export default function ChatProgressRoute() {
   const wsId = useWorkspaceStore((s) => s.currentWorkspaceId);
   const wsSlug = useWorkspaceStore((s) => s.currentWorkspaceSlug);
   const { t } = useT("chat");
+  const workLabel = useChatTicketWorkLabel(wsId);
   const catalog = useIssueStatuses();
   const { data } = useQuery(chatTicketsOptions(wsId, sessionId));
   const seenAt = useChatProgressSeenAt(sessionId);
@@ -53,6 +55,7 @@ export default function ChatProgressRoute() {
           const meta = [
             t(`tickets.source.${row.source}`),
             row.fresh ? `${t("progress.just_changed")}：${where}` : where,
+            row.phase === "done" ? "" : workLabel(row),
             row.changed_at ? timeAgo(row.changed_at) : "",
             row.needs_you ? t("progress.needs_you") : "",
           ]

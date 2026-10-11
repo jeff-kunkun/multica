@@ -1,9 +1,13 @@
 "use client";
 
+import { useMemo } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { MoreHorizontal } from "lucide-react";
 import { toast } from "sonner";
 import type { ChatTicket } from "@multica/core/types";
 import { useAuthStore } from "@multica/core/auth";
+import { agentTaskSnapshotOptions } from "@multica/core/agents";
+import { agentListOptions } from "@multica/core/workspace/queries";
 import { statusCategoryOfKey } from "@multica/core/issues";
 import { useUpdateIssue } from "@multica/core/issues/mutations";
 import { useSetChatTicket } from "@multica/core/chat/mutations";
@@ -18,6 +22,7 @@ import {
 import { AppLink } from "../../navigation";
 import { StatusIcon } from "../../issues/components/status-icon";
 import { useStatusLabel } from "../../issues/utils/status-label";
+import { deriveIssueSurfaceActivity } from "../../issues/surface/activity";
 import { useT } from "../../i18n";
 
 /** The one-line caption saying how a ticket came to be in this chat. */
@@ -29,6 +34,34 @@ export function useChatTicketSourceLabel() {
       : source === "manual"
         ? t(($) => $.tickets.source_manual)
         : t(($) => $.tickets.source_created);
+}
+
+/**
+ * Who is on a ticket right now, from the live run snapshot: the agents running
+ * it, else the ones queued for it. An 「进行中」 ticket with neither says so —
+ * the status alone would claim work nobody is doing.
+ */
+export function useChatTicketWorkLabel(wsId: string) {
+  const { t } = useT("chat");
+  const { data: snapshot } = useQuery({ ...agentTaskSnapshotOptions(wsId), enabled: !!wsId });
+  const { data: agents } = useQuery({ ...agentListOptions(wsId), enabled: !!wsId });
+  const activity = useMemo(() => deriveIssueSurfaceActivity(snapshot ?? []).activityByIssueId, [snapshot]);
+  const names = useMemo(() => new Map((agents ?? []).map((a) => [a.id, a.name])), [agents]);
+  return (ticket: Pick<ChatTicket, "id" | "status">) => {
+    const live = activity.get(ticket.id);
+    const who = (tasks: { agent_id: string }[]) =>
+      [...new Set(tasks.map((task) => names.get(task.agent_id)).filter(Boolean))].join("、");
+    if (live?.runningTasks.length) {
+      const name = who(live.runningTasks);
+      return name ? t(($) => $.tickets.working, { name }) : t(($) => $.tickets.working_unnamed);
+    }
+    if (live?.queuedTasks.length) {
+      const name = who(live.queuedTasks);
+      return name ? t(($) => $.tickets.queued, { name }) : t(($) => $.tickets.queued_unnamed);
+    }
+    // Only a snapshot we actually have can say nobody is on it.
+    return snapshot && ticket.status === "in_progress" ? t(($) => $.tickets.idle) : "";
+  };
 }
 
 /**
@@ -75,6 +108,7 @@ function ChatTicketRow({ wsId, sessionId, ticket }: { wsId: string; sessionId: s
   const update = useUpdateIssue();
   const unpin = useSetChatTicket();
   const sourceLabel = useChatTicketSourceLabel();
+  const workLabel = useChatTicketWorkLabel(wsId);
 
   const category = statusCategoryOfKey(ticket.status);
   const settled = category === "done" || category === "closed";
@@ -84,7 +118,8 @@ function ChatTicketRow({ wsId, sessionId, ticket }: { wsId: string; sessionId: s
   const owner = unassigned
     ? settled ? "" : t(($) => $.tickets.routing)
     : t(($) => $.tickets.to, { name: ticket.assignee_name || ticket.identifier });
-  const detail = [sourceLabel(ticket.source), statusLabel(ticket.status), owner, ticket.goal].filter(Boolean).join(" · ");
+  const work = settled ? "" : workLabel(ticket);
+  const detail = [sourceLabel(ticket.source), statusLabel(ticket.status), work, owner, ticket.goal].filter(Boolean).join(" · ");
 
   const run = (data: Parameters<typeof update.mutate>[0], done: string) =>
     update.mutate(data, {
