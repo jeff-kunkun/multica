@@ -1123,6 +1123,9 @@ WITH candidate AS MATERIALIZED (
     JOIN agent_runtime r ON r.id = t.runtime_id
     WHERE t.id = $1
       AND t.status IN ('dispatched', 'waiting_local_directory')
+      -- An urgent turn (DENE-1844) past its pickup deadline never starts, on
+      -- any path: the sweep or StartTaskForClaim fails it with pickup_timeout.
+      AND (t.pickup_deadline_at IS NULL OR t.pickup_deadline_at >= now())
     FOR UPDATE OF t
 ), capability AS (
     INSERT INTO task_supplement_capability (task_id, workspace_id, issue_id, capability, steer_mode)

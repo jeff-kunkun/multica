@@ -4912,6 +4912,31 @@ func (s *TaskService) StartTaskForClaim(ctx context.Context, claim db.LockAgentT
 		return nil, fmt.Errorf("lock task start claim: %w", err)
 	}
 	replay := task.Status == "running"
+	if !replay && task.PickupDeadlineAt.Valid {
+		// An urgent turn (DENE-1844) past its pickup deadline must not start,
+		// however long the daemon waited for its directory. The database clock
+		// decides, under the row lock taken above, so this and the pickup sweep
+		// never both fail the same task: the loser sees a terminal row.
+		expired, err := qtx.FailAgentTaskPastPickupDeadlineForStart(ctx, task.ID)
+		switch {
+		case err == nil:
+			if err := writeChatPickupTimeoutNotices(ctx, qtx, []db.AgentTaskQueue{expired}); err != nil {
+				return nil, err
+			}
+			if err := SettleTerminalTaskState(ctx, qtx, expired); err != nil {
+				return nil, err
+			}
+			if err := tx.Commit(ctx); err != nil {
+				return nil, fmt.Errorf("commit task start: %w", err)
+			}
+			s.HandleFailedTasks(ctx, []db.AgentTaskQueue{expired})
+			return nil, fmt.Errorf("start task %s: %w", util.UUIDToString(expired.ID), ErrTaskPickupExpired)
+		case errors.Is(err, pgx.ErrNoRows):
+			// Still inside its deadline: start it.
+		default:
+			return nil, fmt.Errorf("check task pickup deadline: %w", err)
+		}
+	}
 	if !replay {
 		task, err = qtx.StartAgentTaskWithSupplement(ctx, startWithSupplementParams(task.ID, capabilities))
 		if err != nil {
@@ -4926,6 +4951,12 @@ func (s *TaskService) StartTaskForClaim(ctx context.Context, claim db.LockAgentT
 	}
 	return &task, nil
 }
+
+// ErrTaskPickupExpired is returned by StartTaskForClaim when the claimed task
+// is an urgent chat turn whose pickup deadline passed before the daemon asked
+// to start it. The task has already been failed with pickup_timeout and the
+// chat notified; the daemon must discard the claim, not report a failure.
+var ErrTaskPickupExpired = errors.New("urgent task missed its pickup deadline")
 
 func (s *TaskService) taskStarted(ctx context.Context, task db.AgentTaskQueue) {
 	s.forgetTaskReclaim(task)
@@ -7439,41 +7470,55 @@ func (s *TaskService) FailTasksForOfflineRuntimes(ctx context.Context, arg db.Fa
 // daemon started before their pickup deadline and writes the failure bubble
 // into the chat, so the sender sees within seconds that the message was not
 // picked up. Runs on the fast pickup sweep, not the 30-second runtime tick.
+// It covers every not-yet-started status, including a task a daemon parked in
+// waiting_local_directory after claiming it (DENE-1884).
 func (s *TaskService) FailTasksPastPickupDeadline(ctx context.Context, maxPerTick int32) ([]db.AgentTaskQueue, error) {
 	return s.terminateTasksInTx(ctx, func(qtx *db.Queries) ([]db.AgentTaskQueue, error) {
 		failed, err := qtx.FailTasksPastPickupDeadline(ctx, maxPerTick)
 		if err != nil {
 			return nil, err
 		}
-		for _, t := range failed {
-			if !t.ChatSessionID.Valid {
-				continue
-			}
-			var runtime *db.AgentRuntime
-			if t.RuntimeID.Valid {
-				if rt, err := qtx.GetAgentRuntime(ctx, t.RuntimeID); err == nil {
-					runtime = &rt
-				}
-			}
-			if err := qtx.ReleaseOnboardingKickoffFromTask(ctx, chatInputOwnerID(t)); err != nil {
-				return nil, fmt.Errorf("release onboarding kickoff: %w", err)
-			}
-			if _, err := createAssistantChatMessage(ctx, qtx, db.CreateChatMessageParams{
-				ViaBotID:      t.ViaBotID,
-				ViaBotName:    t.ViaBotName,
-				ID:            dbid.NewV7(),
-				ChatSessionID: t.ChatSessionID,
-				Role:          "assistant",
-				Content:       chatPickupTimeoutNotice(t, runtime, time.Now()),
-				TaskID:        t.ID,
-				FailureReason: pgtype.Text{String: string(taskfailure.ReasonPickupTimeout), Valid: true},
-				ElapsedMs:     computeChatElapsedMs(t),
-			}); err != nil {
-				return nil, fmt.Errorf("write chat pickup_timeout outcome: %w", err)
-			}
+		if err := writeChatPickupTimeoutNotices(ctx, qtx, failed); err != nil {
+			return nil, err
 		}
 		return failed, nil
 	})
+}
+
+// writeChatPickupTimeoutNotices posts the pickup_timeout bubble for each
+// freshly-failed urgent chat turn, in the transaction that failed it. Both
+// the sweep and the start-time fence go through here, and each row is failed
+// by exactly one of them (the row is locked while it fails), so the chat sees
+// one notice per turn.
+func writeChatPickupTimeoutNotices(ctx context.Context, qtx *db.Queries, failed []db.AgentTaskQueue) error {
+	for _, t := range failed {
+		if !t.ChatSessionID.Valid {
+			continue
+		}
+		var runtime *db.AgentRuntime
+		if t.RuntimeID.Valid {
+			if rt, err := qtx.GetAgentRuntime(ctx, t.RuntimeID); err == nil {
+				runtime = &rt
+			}
+		}
+		if err := qtx.ReleaseOnboardingKickoffFromTask(ctx, chatInputOwnerID(t)); err != nil {
+			return fmt.Errorf("release onboarding kickoff: %w", err)
+		}
+		if _, err := createAssistantChatMessage(ctx, qtx, db.CreateChatMessageParams{
+			ViaBotID:      t.ViaBotID,
+			ViaBotName:    t.ViaBotName,
+			ID:            dbid.NewV7(),
+			ChatSessionID: t.ChatSessionID,
+			Role:          "assistant",
+			Content:       chatPickupTimeoutNotice(t, runtime, time.Now()),
+			TaskID:        t.ID,
+			FailureReason: pgtype.Text{String: string(taskfailure.ReasonPickupTimeout), Valid: true},
+			ElapsedMs:     computeChatElapsedMs(t),
+		}); err != nil {
+			return fmt.Errorf("write chat pickup_timeout outcome: %w", err)
+		}
+	}
+	return nil
 }
 
 // chatPickupTimeoutNotice is the detail line under an urgent turn that nobody

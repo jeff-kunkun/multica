@@ -119,9 +119,12 @@ SMS to relay, a "stop now". It changes three things and nothing else:
 - **Head of the queue, 30 s to start.** An accepted urgent turn is created at
   priority 4 with restart semantics (a reply in progress is stopped, the same
   session resumes from this message) and a `pickup_deadline_at` 30 s out. If
-  no daemon has started it by then the server fails it with
-  `failure_reason: pickup_timeout`, posts a system note in the chat saying
-  which machine did not pick it up, and does not retry.
+  no daemon has started it by then — whether it is still queued, dispatched,
+  or parked in `waiting_local_directory` behind another run — the server
+  fails it with `failure_reason: pickup_timeout`, posts one system note in
+  the chat saying which machine did not pick it up, and does not retry. A
+  daemon that asks to start an expired turn is refused in the same
+  transaction (HTTP 409, `code: pickup_timeout`): an expired code never runs.
 - **Standby runtime.** When the primary runtime is offline but the agent has
   `fallback_runtime_id` set and that runtime is online, the task is dispatched
   there instead; the response says `fallback_runtime: true`. A standby must
@@ -129,15 +132,18 @@ SMS to relay, a "stop now". It changes three things and nothing else:
   enforced; see `agents.md`).
 
 ```bash
-multica chat send --session <id> --urgent --wait "验证码 482913，请立刻填入" --output json
+multica chat send --session <id> --urgent "验证码 482913，请立刻填入" --output json
 ```
 
 - `--urgent` implies `--mode restart`; combining it with `--mode steer` is a
   400. Only the person who started the chat (or an agent run) may restart a
   reply, so a shared-chat guest gets 403 as with any restart.
-- `--urgent --wait` waits for the **pickup** (task_status `running`), not the
-  full reply; it exits nonzero with `task_status`, `reason` and `runtime` when
-  the turn fails or the deadline passes. Read the reply later with
+- `--urgent` always waits for the **pickup** (task_status `running`), not the
+  full reply: exit 0 with `pickup_elapsed_ms` once a daemon starts the turn;
+  nonzero with `task_status`, `reason` (`pickup_timeout`) and `runtime` when
+  nobody starts it by `pickup_deadline_at`. The wait is bounded by that server
+  deadline, not by `--wait-timeout`; `--wait` adds nothing. A zero exit means
+  the message is being read now. Read the reply later with
   `multica chat history`.
 - `--urgent` is not available with `--linked` (linked-workspace sends) and is
   not a flag of `chat new`; open the chat first, then send urgent.

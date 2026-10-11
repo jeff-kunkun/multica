@@ -135,8 +135,9 @@ bounded transcript after choosing a session.
 To message a chat while its agent may still be replying, use
 `multica chat send --session <id> --content-file <path> --mode steer|queue|restart`.
 A message that is worthless late (a verification code, a relayed SMS) goes with
-`--urgent --wait`: refused at once when the runtime is offline, otherwise head
-of the queue with a 30 s pickup deadline (`run-control.md` → "Urgent delivery").
+`--urgent`: refused at once when the runtime is offline, otherwise head of the
+queue, and the command exits 0 only once a daemon has started the turn within
+the 30 s pickup deadline (`run-control.md` → "Urgent delivery").
 The same `--mode` works on `multica issue comment add`, which also takes
 `handoff` / `parallel` when you @ an agent other than the one running; a chat
 moves to another agent with `multica chat handoff --to <agent>`. What each mode costs,

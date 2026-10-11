@@ -8,8 +8,10 @@
 --
 -- agent_task_queue.pickup_deadline_at marks an urgent task: a non-NULL value
 -- is the instant by which a daemon must have started it. The pickup sweeper
--- fails queued/dispatched rows past it with failure_reason 'pickup_timeout'.
--- Expand-only: previous releases ignore both columns.
+-- fails rows past it that have not started (queued, dispatched, or parked in
+-- waiting_local_directory) with failure_reason 'pickup_timeout', and the start
+-- transaction refuses to start one. Expand-only: previous releases ignore both
+-- columns.
 ALTER TABLE agent
     ADD COLUMN IF NOT EXISTS fallback_runtime_id uuid
         REFERENCES agent_runtime(id) ON DELETE SET NULL;
@@ -19,4 +21,5 @@ ALTER TABLE agent_task_queue
 
 CREATE INDEX IF NOT EXISTS agent_task_queue_pickup_deadline_idx
     ON agent_task_queue (pickup_deadline_at)
-    WHERE pickup_deadline_at IS NOT NULL AND status IN ('queued', 'dispatched');
+    WHERE pickup_deadline_at IS NOT NULL
+      AND status IN ('queued', 'dispatched', 'waiting_local_directory');

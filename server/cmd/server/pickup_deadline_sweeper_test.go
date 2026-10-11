@@ -52,14 +52,16 @@ func TestPickupDeadlineSweepFailsOnlyOverdueUnstartedTurns(t *testing.T) {
 	}
 	sessionOverdue := newPoisonTestChatSession(t, agentID, runtimeID, "urgent overdue")
 	sessionDispatched := newPoisonTestChatSession(t, agentID, runtimeID, "urgent dispatched overdue")
+	sessionWaiting := newPoisonTestChatSession(t, agentID, runtimeID, "urgent waiting overdue")
 	sessionRunning := newPoisonTestChatSession(t, agentID, runtimeID, "urgent running")
 	sessionFresh := newPoisonTestChatSession(t, agentID, runtimeID, "urgent fresh")
-	for _, s := range []string{sessionOverdue, sessionDispatched, sessionRunning, sessionFresh} {
+	for _, s := range []string{sessionOverdue, sessionDispatched, sessionWaiting, sessionRunning, sessionFresh} {
 		s := s
 		t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM chat_message WHERE chat_session_id = $1`, s) })
 	}
 	overdue := insertUrgentChatTask(t, agentID, runtimeID, sessionOverdue, "queued", 5*time.Second)
 	dispatchedOverdue := insertUrgentChatTask(t, agentID, runtimeID, sessionDispatched, "dispatched", 5*time.Second)
+	waitingOverdue := insertUrgentChatTask(t, agentID, runtimeID, sessionWaiting, "waiting_local_directory", 5*time.Second)
 	running := insertUrgentChatTask(t, agentID, runtimeID, sessionRunning, "running", 5*time.Second)
 	fresh := insertUrgentChatTask(t, agentID, runtimeID, sessionFresh, "queued", -25*time.Second)
 
@@ -72,7 +74,7 @@ func TestPickupDeadlineSweepFailsOnlyOverdueUnstartedTurns(t *testing.T) {
 	for _, f := range failed {
 		got[f.ID.Bytes] = f
 	}
-	for _, want := range []string{overdue, dispatchedOverdue} {
+	for _, want := range []string{overdue, dispatchedOverdue, waitingOverdue} {
 		f, ok := got[parseUUIDBytes(want)]
 		if !ok {
 			t.Fatalf("overdue task %s was not failed", want)
@@ -110,6 +112,52 @@ func TestPickupDeadlineSweepFailsOnlyOverdueUnstartedTurns(t *testing.T) {
 	}
 	if len(again) != 0 {
 		t.Fatalf("second sweep failed %d tasks, want 0", len(again))
+	}
+}
+
+// DENE-1884 review counterexample: a daemon that claimed an urgent turn and
+// then parked it in waiting_local_directory (another run holds the project
+// directory) must not shelter it from the pickup deadline. The sweep fails it
+// with pickup_timeout, clears the wait reason, and leaves one chat notice.
+func TestPickupDeadlineSweepFailsExpiredWaitingLocalDirectoryTurn(t *testing.T) {
+	if testPool == nil {
+		t.Skip("no database connection")
+	}
+	ctx := context.Background()
+	issueID, agentID, _ := setupSweeperTestFixture(t, "dispatched")
+	t.Cleanup(func() { cleanupSweeperFixture(t, issueID, agentID) })
+	var runtimeID string
+	if err := testPool.QueryRow(ctx, `SELECT runtime_id FROM agent WHERE id = $1`, agentID).Scan(&runtimeID); err != nil {
+		t.Fatalf("load agent runtime: %v", err)
+	}
+	session := newPoisonTestChatSession(t, agentID, runtimeID, "urgent expired while waiting for directory")
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM chat_message WHERE chat_session_id = $1`, session)
+	})
+	taskID := insertUrgentChatTask(t, agentID, runtimeID, session, "waiting_local_directory", time.Minute)
+	if _, err := testPool.Exec(ctx, `UPDATE agent_task_queue SET wait_reason = '/srv/project (holder: abc123)' WHERE id = $1`, taskID); err != nil {
+		t.Fatalf("set wait_reason: %v", err)
+	}
+
+	taskSvc := service.NewTaskService(db.New(testPool), testPool, nil, events.New())
+	failed, err := taskSvc.FailTasksPastPickupDeadline(ctx, pickupDeadlineFailBatchSize)
+	if err != nil {
+		t.Fatalf("FailTasksPastPickupDeadline: %v", err)
+	}
+	if len(failed) != 1 || failed[0].ID.Bytes != parseUUIDBytes(taskID) {
+		t.Fatalf("swept %d tasks, want exactly the expired waiting turn", len(failed))
+	}
+	var status, reason string
+	var waitReason *string
+	if err := testPool.QueryRow(ctx, `SELECT status, COALESCE(failure_reason, ''), wait_reason FROM agent_task_queue WHERE id = $1`, taskID).Scan(&status, &reason, &waitReason); err != nil {
+		t.Fatalf("reload task: %v", err)
+	}
+	if status != "failed" || reason != "pickup_timeout" || waitReason != nil {
+		t.Fatalf("task = status %q reason %q wait_reason %v, want failed/pickup_timeout/NULL", status, reason, waitReason)
+	}
+	var notices int
+	if err := testPool.QueryRow(ctx, `SELECT count(*) FROM chat_message WHERE chat_session_id = $1 AND task_id = $2 AND failure_reason = 'pickup_timeout'`, session, taskID).Scan(&notices); err != nil || notices != 1 {
+		t.Fatalf("chat notices = %d (%v), want exactly one", notices, err)
 	}
 }
 

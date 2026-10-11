@@ -348,16 +348,21 @@ RETURNING task.*;
 
 -- name: FailTasksPastPickupDeadline :many
 -- Urgent chat turns (DENE-1844) carry pickup_deadline_at: the instant by which
--- a daemon must have started them. A row still queued or dispatched past it
--- fails with 'pickup_timeout' so the sender learns within seconds that nobody
--- picked the message up, instead of waiting for the runtime-offline grace.
+-- a daemon must have started them. A row past it that has not started —
+-- queued, dispatched, or parked in waiting_local_directory by a daemon that
+-- claimed it but is still waiting for the directory (DENE-1884) — fails with
+-- 'pickup_timeout' so the sender learns within seconds that nobody picked the
+-- message up, instead of waiting for the runtime-offline grace.
 -- A running row is left alone: it was picked up, the deadline is satisfied.
+-- The start transaction (StartTaskForClaim) applies the same fence through
+-- FailAgentTaskPastPickupDeadlineForStart, so a task that expired between two
+-- sweeps cannot start either.
 WITH victims AS (
   SELECT task.id
   FROM agent_task_queue task
   WHERE task.pickup_deadline_at IS NOT NULL
     AND task.pickup_deadline_at < now()
-    AND task.status IN ('queued', 'dispatched')
+    AND task.status IN ('queued', 'dispatched', 'waiting_local_directory')
   ORDER BY task.pickup_deadline_at
   LIMIT @max_per_tick::int
   FOR UPDATE OF task SKIP LOCKED
@@ -369,8 +374,29 @@ SET status = 'failed', completed_at = now(),
     wait_reason = NULL
 FROM victims
 WHERE task.id = victims.id
-  AND task.status IN ('queued', 'dispatched')
+  AND task.status IN ('queued', 'dispatched', 'waiting_local_directory')
 RETURNING task.*;
+
+-- name: FailAgentTaskPastPickupDeadlineForStart :one
+-- The start-time half of the pickup fence (DENE-1884). Called inside the
+-- start transaction after LockAgentTaskStartClaim has locked the row: if the
+-- claimed task's pickup deadline has passed by the database clock, it fails
+-- here with the same status, error and failure_reason the sweep would have
+-- written, and the caller refuses the start. No row means the task is still
+-- startable (or carries no deadline). The locked row keeps the concurrent
+-- sweep (FOR UPDATE SKIP LOCKED) from failing the same task twice, so the
+-- chat notice is written exactly once by whichever side wins.
+UPDATE agent_task_queue
+SET status = 'failed', completed_at = now(),
+    error = 'urgent message was not picked up before its deadline',
+    failure_reason = 'pickup_timeout',
+    wait_reason = NULL,
+    prepare_lease_expires_at = NULL
+WHERE id = $1
+  AND pickup_deadline_at IS NOT NULL
+  AND pickup_deadline_at < now()
+  AND status IN ('dispatched', 'waiting_local_directory')
+RETURNING *;
 
 -- name: ListAgentRuntimesByOwner :many
 SELECT * FROM agent_runtime
