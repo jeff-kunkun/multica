@@ -2833,6 +2833,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			// Workspace-wide agent task snapshot for presence derivation:
 			// every active task + each agent's most recent terminal task.
 			r.Get("/api/agent-task-snapshot", h.ListWorkspaceAgentTaskSnapshot)
+			r.Post("/api/fast-access/v1/read", h.ReadFastAccess)
+			r.Get("/api/fast-access/v1/runs", h.ListFastAccessRuns)
 			r.Get("/api/issue-wakeup-summaries", h.ListWorkspaceWakeupSummaries)
 			r.Get("/api/issue-wakeups", h.ListWorkspaceWakeups)
 			r.Get("/api/issue-wakeup-paused", h.ListPausedWakeups)

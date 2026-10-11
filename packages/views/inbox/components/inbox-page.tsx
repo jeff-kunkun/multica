@@ -87,6 +87,7 @@ import { useIsCompact } from "@multica/ui/hooks/use-mobile";
 import { cn } from "@multica/ui/lib/utils";
 import { PAGE_GUTTER, PageHeader } from "../../layout/page-header";
 import { useTimeAgo } from "./inbox-list-item";
+import { FastAccessDialog } from "./fast-access-dialog";
 import { InboxList } from "./inbox-list";
 import { InboxFilterMenu } from "./inbox-filter-menu";
 import { InboxLayerTabs } from "./inbox-layer-tabs";
@@ -593,6 +594,7 @@ function InboxActivityPageContent({ merged = false }: { merged?: boolean } = {})
           />
         )}
       </div>
+      <FastAccessDialog wsId={wsId} />
       <InboxFilterMenu
         wsId={wsId}
         items={viewItems}
