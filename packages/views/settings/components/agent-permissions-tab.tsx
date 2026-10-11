@@ -31,8 +31,10 @@ import { SettingsCard, SettingsRow, SettingsSection, SettingsTab } from "./setti
 import { useAutoSave } from "./use-auto-save";
 import {
   AUTOMATION_LIMIT_PRESETS,
+  MAX_BOT_WAKE_CHAIN_LIMIT,
   automationLimitsEqual,
   parseAutomationLimits,
+  parseBotWakeLimitInput,
   parseLimitInput,
   type AutomationLimits,
 } from "./automation-limits";
@@ -305,7 +307,7 @@ function RunLimitsSection({ workspace, canManage }: { workspace: Workspace; canM
   });
 
   const rows: {
-    key: keyof AutomationLimits;
+    key: keyof typeof AUTOMATION_LIMIT_PRESETS;
     anchor: string;
     label: string;
     description: string;
@@ -380,7 +382,66 @@ function RunLimitsSection({ workspace, canManage }: { workspace: Workspace; canM
             </SettingsRow>
           );
         })}
+        <SettingsRow
+          anchor="bot-wake-chain"
+          label={t(($) => $.agent_permissions.bot_wake_chain_label)}
+          description={t(($) => $.agent_permissions.bot_wake_chain_description)}
+          size="text"
+        >
+          <div className="flex items-center gap-2 sm:justify-end">
+            <BotWakeLimitInput
+              label={t(($) => $.agent_permissions.bot_wake_chain_label)}
+              value={limits.bot_wake_chain_limit}
+              disabled={!canManage}
+              onCommit={(bot_wake_chain_limit) => {
+                const next = { ...limits, bot_wake_chain_limit };
+                setLimits(next);
+                autoSave.saveNow(next);
+              }}
+            />
+            <span className="text-caption text-muted-foreground">
+              {t(($) => $.agent_permissions.bot_wake_chain_range)}
+            </span>
+          </div>
+        </SettingsRow>
       </SettingsCard>
     </SettingsSection>
+  );
+}
+
+function BotWakeLimitInput({
+  label,
+  value,
+  disabled,
+  onCommit,
+}: {
+  label: string;
+  value: number;
+  disabled: boolean;
+  onCommit: (value: number) => void;
+}) {
+  const [draft, setDraft] = useState(String(value));
+  useEffect(() => setDraft(String(value)), [value]);
+  return (
+    <Input
+      type="number"
+      inputMode="numeric"
+      min={1}
+      max={MAX_BOT_WAKE_CHAIN_LIMIT}
+      step={1}
+      aria-label={label}
+      value={draft}
+      disabled={disabled}
+      className="h-11 w-20 sm:h-9"
+      onChange={(event) => setDraft(event.target.value)}
+      onBlur={() => {
+        const next = parseBotWakeLimitInput(draft, value);
+        setDraft(String(next));
+        if (next !== value) onCommit(next);
+      }}
+      onKeyDown={(event) => {
+        if (event.key === "Enter") event.currentTarget.blur();
+      }}
+    />
   );
 }

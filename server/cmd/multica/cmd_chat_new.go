@@ -23,7 +23,9 @@ var chatNewCmd = &cobra.Command{
 	Short: "Start a new chat with an agent and send the first message",
 	Long: `Start a new chat with an agent, as if you opened one in the app and typed
 the first message. With --wait, block until the agent's reply arrives and
-print it.
+print it. A Bot wake blocked by bot_wake_chain_limit keeps the new chat
+and saved message, prints their receipt, and exits nonzero before waiting.
+Do not resend the saved message; see chat send --help for recovery.
 
 Attach read-only references with --reference LINK_ID:PROJECT_ID (repeatable).
 Find IDs with "multica chat linked-projects --available --output json".
@@ -109,6 +111,19 @@ func runChatNew(cmd *cobra.Command, args []string) error {
 		"title":      strVal(session, "title"),
 		"message_id": strVal(sent, "message_id"),
 		"task_id":    strVal(sent, "task_id"),
+	}
+	for _, key := range []string{"mode", "warning", "reason_code"} {
+		if value, present := sent[key]; present {
+			out[key] = value
+		}
+	}
+	if out["mode"] == "blocked" {
+		if output, _ := cmd.Flags().GetString("output"); output == "json" {
+			if err := cli.PrintJSON(os.Stdout, out); err != nil {
+				return err
+			}
+		}
+		return fmt.Errorf("chat new: chat %s created: %w", sessionID, blockedChatSendError(out))
 	}
 	return finishChatSend(cmd, client, sessionID, out)
 }
