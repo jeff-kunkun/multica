@@ -1,3 +1,4 @@
+import { parseOverview, type OverviewFilters } from "./overview";
 import type { AgentSpawnPolicy, AgentSpawnPolicyPatch } from "../workspace/agent-spawn";
 import type { ZodType } from "zod";
 import type { IssueWakeup, IssueWakeupInput, IssueWakeupSummaryRow, PausedWakeup, SystemWakeup, WakeupRun, WorkspaceSystemWakeup } from "../types/issue-wakeup";
@@ -3948,6 +3949,15 @@ export class ApiClient {
     return parseWithFallback<AppConfigResponse>(raw, AppConfigSchema, EMPTY_APP_CONFIG, {
       endpoint: "GET /api/config",
     });
+  }
+
+  async getOverview(filters: OverviewFilters = {}) {
+    const params = new URLSearchParams();
+    if (filters.project) params.set("project", filters.project);
+    if (filters.agent) params.set("agent", filters.agent);
+    if (filters.compact) params.set("compact", "true");
+    const suffix = params.size ? `?${params}` : "";
+    return parseOverview(await this.fetch<unknown>(`/api/overview${suffix}`));
   }
 
   // Workspaces

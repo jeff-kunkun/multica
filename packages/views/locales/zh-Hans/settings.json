@@ -436,7 +436,8 @@
       "project_sharing": "权限与共享",
       "workspace_links": "连通工作区",
       "agent_permissions": "智能体权限",
-      "bots": "外部 Bot"
+      "bots": "外部 Bot",
+      "overview": "工作区全景"
     },
     "groups": {
       "personal": "个人",
@@ -2324,5 +2325,25 @@
       "toast_acked": "已确认 {{count}} 条，已从待看移走",
       "refresh": "重新扫描"
     }
+  },
+  "overview": {
+    "agents": "智能体",
+    "projects": "项目",
+    "chats": "活跃聊天",
+    "automations": "自动化",
+    "skills": "Skills",
+    "squads": "小队",
+    "runtimes": "运行时",
+    "workspace_links": "关联工作区",
+    "external_connections": "外部连接",
+    "refresh": "刷新",
+    "loading": "正在加载全景...",
+    "load_error": "无法加载全景，请刷新重试。",
+    "restricted": "你没有权限查看这部分内容。",
+    "empty": "暂无相关内容。",
+    "accepting_work": "接活中",
+    "paused": "不接活",
+    "all_projects": "所有项目",
+    "all_agents": "所有智能体"
   }
 }

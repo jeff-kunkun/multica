@@ -44,3 +44,5 @@
 - DENE-1787：智能体系列自动归类、手动覆盖与同档路由偏好；[含手机版的 HTML 预览](../design/prototypes/agent-series.html)。真实设置页与列表 375/390/768/1280 截图、CLI 往返、数据库与换家族验证见任务附件。
 - DENE-1788：设置页「外部 Bot」（仅所有者/管理员可见）发管理员同权钥匙与接入指令，停用即 401、发新钥匙、删除，`multica bot`；[PR #626](https://github.com/jeff-kunkun/multica/pull/626)，[1280/768/390/375 截图](DENE-1788/index.html)，`multica chat new --wait` 等命令行全链路实测见 [bot-cli-e2e](DENE-1788/bot-cli-e2e.md)。
 - DENE-1794：评论、聊天和改单记录「经 Bot」，Bot 留言不算人的原话，停止和删除后保留历史；[最终验收证据](https://ai.ferryway.cc/api/attachments/01a129ef-dd01-77ac-b6dd-a0eaf945f3d7/download)含任务及聊天 375/390/768/1280 实页截图、禁止消息重拉时的真实 PAT 实时显示、PostgreSQL/Redis 与 CLI 来源专项测试；[来源与部署契约](../../server/docs/bot-write-provenance.md)。后台推送与四跳限制由 DENE-1792 集成验收。
+
+- DENE-1803：工作区全景聚合接口、CLI 与共享设置入口；[验收附件](https://ai.ferryway.cc/api/attachments/01a12a17-15bf-79fb-8d0f-bcd0526d52f6/download)含 375/390/768/1280 实页截图、筛选与刷新请求记录、真实 Bot 钥匙接口测试和本地 CLI 数量对照。完整/精简 JSON 为 3457/1730 字节（隔离测试工作区）。

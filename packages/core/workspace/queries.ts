@@ -261,3 +261,11 @@ export function agentMcpServersOptions(agentId: string) {
     enabled: agentId !== "",
   });
 }
+
+export function workspaceOverviewOptions(wsId: string, filters: import("../api/overview").OverviewFilters = {}) {
+  return queryOptions({
+    queryKey: ["workspaces", wsId, "overview", filters] as const,
+    queryFn: () => api.getOverview(filters),
+    enabled: !!wsId,
+  });
+}

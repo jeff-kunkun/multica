@@ -437,7 +437,8 @@
       "project_sharing": "Permissions & sharing",
       "workspace_links": "Linked workspaces",
       "agent_permissions": "Agent permissions",
-      "bots": "External bots"
+      "bots": "External bots",
+      "overview": "Overview"
     },
     "groups": {
       "personal": "Personal",
@@ -2340,5 +2341,25 @@
       "toast_acked": "{{count}} marked as seen and removed from pending",
       "refresh": "Rescan"
     }
+  },
+  "overview": {
+    "agents": "Agents",
+    "projects": "Projects",
+    "chats": "Active chats",
+    "automations": "Automations",
+    "skills": "Skills",
+    "squads": "Squads",
+    "runtimes": "Runtimes",
+    "workspace_links": "Linked workspaces",
+    "external_connections": "External connections",
+    "refresh": "Refresh",
+    "loading": "Loading overview...",
+    "load_error": "Could not load overview. Try refreshing.",
+    "restricted": "You do not have access to this section.",
+    "empty": "No matching items.",
+    "accepting_work": "Accepting work",
+    "paused": "Not accepting work",
+    "all_projects": "All projects",
+    "all_agents": "All agents"
   }
 }

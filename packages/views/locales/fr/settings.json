@@ -437,7 +437,8 @@
       "project_sharing": "Autorisations et partage",
       "workspace_links": "Espaces liés",
       "agent_permissions": "Permissions des agents",
-      "bots": "External bots"
+      "bots": "External bots",
+      "overview": "Vue d’ensemble"
     },
     "groups": {
       "personal": "Personnel",
@@ -2340,5 +2341,25 @@
       "toast_acked": "{{count}} marqués comme vus et retirés de l'attente",
       "refresh": "Réanalyser"
     }
+  },
+  "overview": {
+    "agents": "Agents",
+    "projects": "Projets",
+    "chats": "Discussions actives",
+    "automations": "Automatisations",
+    "skills": "Skills",
+    "squads": "Équipes",
+    "runtimes": "Environnements d’exécution",
+    "workspace_links": "Espaces liés",
+    "external_connections": "Connexions externes",
+    "refresh": "Actualiser",
+    "loading": "Chargement de la vue d’ensemble...",
+    "load_error": "Impossible de charger la vue d’ensemble. Actualisez pour réessayer.",
+    "restricted": "Vous n’avez pas accès à cette section.",
+    "empty": "Aucun élément correspondant.",
+    "accepting_work": "Accepte des tâches",
+    "paused": "N’accepte pas de tâches",
+    "all_projects": "Tous les projets",
+    "all_agents": "Tous les agents"
   }
 }

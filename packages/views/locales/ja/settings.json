@@ -436,7 +436,8 @@
       "project_sharing": "権限と共有",
       "workspace_links": "連携ワークスペース",
       "agent_permissions": "エージェント権限",
-      "bots": "External bots"
+      "bots": "External bots",
+      "overview": "ワークスペースの全体像"
     },
     "groups": {
       "personal": "個人",
@@ -2324,5 +2325,25 @@
       "toast_acked": "{{count}} 件を確認済みにし、保留から外しました",
       "refresh": "再スキャン"
     }
+  },
+  "overview": {
+    "agents": "エージェント",
+    "projects": "プロジェクト",
+    "chats": "進行中のチャット",
+    "automations": "自動化",
+    "skills": "Skills",
+    "squads": "チーム",
+    "runtimes": "ランタイム",
+    "workspace_links": "連携ワークスペース",
+    "external_connections": "外部接続",
+    "refresh": "更新",
+    "loading": "全体像を読み込み中...",
+    "load_error": "全体像を読み込めません。更新して再試行してください。",
+    "restricted": "このセクションを表示する権限がありません。",
+    "empty": "該当する項目はありません。",
+    "accepting_work": "タスク受付中",
+    "paused": "タスク受付停止中",
+    "all_projects": "すべてのプロジェクト",
+    "all_agents": "すべてのエージェント"
   }
 }
