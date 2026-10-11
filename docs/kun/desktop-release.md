@@ -201,6 +201,12 @@ node scripts/desktop-release-assets.mjs clean --tag v0.4.57 --repo jeff-kunkun/m
 
 `clean` 不会碰已 `uploaded` 的资产，也不会动别的 Release。
 
+## Actions 停用期间的出包分工（2026-10-08 起）
+
+- backend/web 镜像统一由 `kkunkunya/multica-image-builder` 出（推到 ghcr.io/kkunkunya，生产服自动跟这里）；Desktop 走下面的本机兜底；两边不要同时手工打同一个版本。
+- Linux CLI 包（守护进程是同一个二进制）在借用仓库补上自动构建前，由发版人在 tag 上本机交叉编译 linux amd64/arm64，按 `.goreleaser.yml` 的两种命名各出一份（`multica-cli-<ver>-linux-<arch>.tar.gz` 和 `multica_linux_<arch>.tar.gz`）加 `checksums.txt`，等 Desktop 的上传开始后（即 `clean` 已清过僵尸资产）再追加到同一个 Release。
+- 测试版（`-test.N`）的 CLI 包 `multica update` 不会自动拿到（它只看正式版的 `releases/latest`），服务器要按版本号用 Release 直链下载替换。
+
 ## 本机兜底构建（只在 CI 跑不起来时用）
 
 用本条时，红线 6、7 与红线 2 的核对一条都不能省。
