@@ -2034,6 +2034,12 @@ type ReviewPassHead struct {
 	CreatedAt pgtype.Timestamptz `json:"created_at"`
 }
 
+type RuntimeMachineCapacity struct {
+	MachineKey        string             `json:"machine_key"`
+	MaxConcurrentRuns int32              `json:"max_concurrent_runs"`
+	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
+}
+
 type RuntimeProfile struct {
 	ID             pgtype.UUID        `json:"id"`
 	WorkspaceID    pgtype.UUID        `json:"workspace_id"`

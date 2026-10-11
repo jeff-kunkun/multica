@@ -207,17 +207,20 @@ export function TaskStatusPill({
     status === "waiting_local_directory" ? pendingTask.wait_reason : undefined,
   );
 
+  const { t } = useT("chat");
+  const reason = status === "queued" ? pendingTask.queue_reason : undefined;
+  const label = reason ? t(($) => $.status_pill.machine_full, { active: reason.active_runs, limit: reason.max_concurrent_runs }) : stage.label;
   return (
     <div
-      className="flex items-center gap-1.5 px-1 text-caption text-muted-foreground"
+      className="flex items-start gap-1.5 px-1 text-caption text-muted-foreground"
       aria-live="polite"
     >
       {!stage.static && (
         <UnicodeSpinner name="breathe" className="opacity-70" />
       )}
-      <span className="truncate">
+      <span className="min-w-0 break-words">
         <ShimmerText active={!stage.static}>
-          {stage.label}
+          {label}
         </ShimmerText>
         <span className="opacity-70 tabular-nums"> · {formatElapsedSecs(elapsedSecs)}</span>
       </span>

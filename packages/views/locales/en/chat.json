@@ -323,7 +323,8 @@
       "making_edits": "Making edits",
       "searching_web": "Searching the web",
       "fallback": "Working"
-    }
+    },
+    "machine_full": "Queued: machine full ({{active}}/{{limit}})"
   },
   "list": {
     "typing": "Typing…",

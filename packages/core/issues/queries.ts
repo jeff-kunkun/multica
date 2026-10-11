@@ -24,6 +24,7 @@ export function issueTasksOptions(issueId: string) {
   return queryOptions({
     queryKey: issueKeys.tasks(issueId),
     queryFn: () => api.listTasksByIssue(issueId),
+    refetchInterval: (query) => query.state.data?.some((task) => task.status === "queued") ? 5000 : false,
     enabled: !!issueId,
     staleTime: 30_000,
     refetchOnWindowFocus: true,

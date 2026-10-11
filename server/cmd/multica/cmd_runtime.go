@@ -71,6 +71,9 @@ var runtimeDeleteCmd = &cobra.Command{
 }
 
 func init() {
+	runtimeCmd.AddCommand(runtimeCapacityCmd)
+	runtimeCapacityCmd.Flags().Int("max-concurrent-runs", 12, "Set machine-wide run limit (1-100; omitted reads current capacity)")
+	runtimeCapacityCmd.Flags().String("output", "json", "Output format: table or json")
 	runtimeCmd.AddCommand(runtimeListCmd)
 	runtimeCmd.AddCommand(runtimeUsageCmd)
 	runtimeCmd.AddCommand(runtimeActivityCmd)
@@ -469,5 +472,59 @@ func printRuntimeDeleteResult(cmd *cobra.Command, result map[string]any) error {
 		return nil
 	}
 	fmt.Fprintf(os.Stderr, "Runtime %s deleted.\n", strVal(result, "id"))
+	return nil
+}
+
+// Capacity reads and edits the server setting, independently of CLI upgrades.
+var runtimeCapacityCmd = &cobra.Command{
+	Annotations: map[string]string{annotationAccess: "write", annotationBotKey: "yes"},
+	Example:     "multica runtime capacity <runtime-id> --max-concurrent-runs 8 --output json",
+	Use:         "capacity <runtime-id>",
+	Short:       "Read or set the machine's simultaneous run limit (default 12)",
+	Long:        "Find runtime IDs with multica runtime list. Read the device-wide active run count and limit, or set it with --max-concurrent-runs (1-100). All providers and workspaces on the same device share this limit. Only the machine owner may change it. Excess runs queue; lowering the limit does not stop active runs.",
+	Args:        exactArgs(1),
+	RunE:        runRuntimeCapacity,
+}
+
+func runRuntimeCapacity(cmd *cobra.Command, args []string) error {
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := cli.APIContext(context.Background())
+	defer cancel()
+	var result map[string]any
+	if cmd.Flags().Changed("max-concurrent-runs") {
+		limit, _ := cmd.Flags().GetInt("max-concurrent-runs")
+		if limit < 1 || limit > 100 {
+			return fmt.Errorf("--max-concurrent-runs must be between 1 and 100")
+		}
+		if err := client.PatchJSON(ctx, "/api/runtimes/"+args[0], map[string]any{"max_concurrent_runs": limit}, &result); err != nil {
+			return fmt.Errorf("set machine capacity: %w", err)
+		}
+	} else {
+		var runtimes []map[string]any
+		if err := client.GetJSON(ctx, "/api/runtimes", &runtimes); err != nil {
+			return err
+		}
+		for _, rt := range runtimes {
+			if strVal(rt, "id") == args[0] {
+				result = rt
+				break
+			}
+		}
+		if result == nil {
+			return fmt.Errorf("runtime not found")
+		}
+	}
+	output, _ := cmd.Flags().GetString("output")
+	if output == "json" {
+		return cli.PrintJSON(cmd.OutOrStdout(), result)
+	}
+	capacity, ok := result["machine_capacity"].(map[string]any)
+	if !ok {
+		return fmt.Errorf("machine capacity is not available on this server")
+	}
+	cli.PrintTable(cmd.OutOrStdout(), []string{"RUNTIME", "ACTIVE", "LIMIT"}, [][]string{{args[0], fmt.Sprint(capacity["active_runs"]), fmt.Sprint(capacity["max_concurrent_runs"])}})
 	return nil
 }

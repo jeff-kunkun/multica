@@ -684,7 +684,8 @@ export function ActiveTaskRow({
   // A deferred retry after a full model says which retry it is and when it
   // fires (DENE-1093); the seat stays open, so this is a wait, not a failure.
   const capacityRetry = task.status === "deferred" ? task.capacity_retry : undefined;
-  const label = capacityRetry
+  const reason = task.status === "queued" ? task.queue_reason : undefined;
+  const label = reason ? t(($) => $.execution_log.machine_full, { active: reason.active_runs, limit: reason.max_concurrent_runs }) : capacityRetry
     ? t(($) => $.execution_log.status_capacity_retry, {
         retry: capacityRetry.retry,
         time: new Date(capacityRetry.next_at).toLocaleTimeString(locale, {
@@ -743,7 +744,7 @@ export function ActiveTaskRow({
   // test that asserts a scenario production cannot produce. Restore it in the
   // same change that adds incremental reporting + cache invalidation.
   return (
-    <RowShell task={task}>
+    <RowShell task={task} footer={reason ? label : undefined}>
       {task.wakeup_id ? (
         <WakeupRunLabel task={task} fallback={trigger} render={(label) => <TriggerText text={label} />} />
       ) : (
@@ -757,7 +758,7 @@ export function ActiveTaskRow({
             <span className="sr-only">{label}</span>
           </>
         ) : (
-          <span className={`${tone} min-w-0 truncate`}>{label}</span>
+          <span className={`${tone} min-w-0 truncate`}>{reason ? t(($) => $.execution_log.status_queued) : label}</span>
         )}
       </RowStatus>
       <RowActions>
@@ -889,6 +890,7 @@ function PastRow({ task, issueId }: { task: AgentTask; issueId: string }) {
 function RowShell({
   task,
   title,
+  footer,
   children,
 }: {
   task: AgentTask;
@@ -897,9 +899,10 @@ function RowShell({
    *  is swapped out for the action buttons on hover — a title there would
    *  disappear at exactly the moment the pointer arrives. */
   title?: string;
+  footer?: string;
   children: React.ReactNode;
 }) {
-  return (
+  const row = (
     <div
       title={title || undefined}
       className="group/execution-log-row flex items-center gap-2 overflow-hidden rounded-xs px-1 py-1.5 transition-colors hover:bg-accent/40"
@@ -917,6 +920,7 @@ function RowShell({
       {children}
     </div>
   );
+  return footer ? <div>{row}<p className="ml-7 whitespace-normal px-1 pb-1.5 text-caption text-muted-foreground">{footer}</p></div> : row;
 }
 
 function TriggerText({ text }: { text: string }) {

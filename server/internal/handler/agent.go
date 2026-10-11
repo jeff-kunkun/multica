@@ -805,6 +805,7 @@ type TaskRelayData struct {
 }
 
 type AgentTaskResponse struct {
+	QueueReason              *MachineQueueReason    `json:"queue_reason,omitempty"`
 	StartClaimSupported      bool                   `json:"start_claim_supported,omitempty"`
 	CancelledByCommentChange bool                   `json:"cancelled_by_comment_change,omitempty"`
 	CancelledBy              *TaskCancellationActor `json:"cancelled_by,omitempty"`

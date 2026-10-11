@@ -105,7 +105,17 @@ export interface JevStatusSnapshot {
   observed_at?: number;
 }
 
+export interface MachineCapacity {
+  active_runs: number;
+  max_concurrent_runs: number;
+}
+
+export interface MachineQueueReason extends MachineCapacity {
+  code: "machine_capacity";
+}
+
 export interface RuntimeDevice {
+  machine_capacity?: MachineCapacity;
   id: string;
   workspace_id: string;
   daemon_id: string | null;
@@ -404,6 +414,7 @@ export type SessionBreakReason =
   | "fresh_requested";
 
 export interface AgentTask {
+  queue_reason?: MachineQueueReason;
   wakeup_id?: string;
   id: string;
   agent_id: string;

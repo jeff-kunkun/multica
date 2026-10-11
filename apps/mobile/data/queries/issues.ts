@@ -63,6 +63,7 @@ export const issueActiveTasksOptions = (wsId: string | null, id: string) =>
   queryOptions({
     queryKey: issueKeys.activeTasks(wsId, id),
     queryFn: ({ signal }) => api.listActiveTasksForIssue(id, { signal }),
+    refetchInterval: (query) => query.state.data?.some((task) => task.status === "queued") ? 5000 : false,
     enabled: !!wsId && !!id,
   });
 

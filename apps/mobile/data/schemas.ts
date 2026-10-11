@@ -51,6 +51,12 @@ import { IssueSchema } from "@multica/core/api/schemas";
  *  is even looser (only `id`); mobile validates more because the upload
  *  flow inserts `url` directly into editable text and an empty `url` would
  *  produce a broken link the user only notices after submit. */
+const MachineCapacitySchema = z.object({
+  active_runs: z.number().int().nonnegative(),
+  max_concurrent_runs: z.number().int().min(1).max(100),
+});
+const MachineQueueReasonSchema = MachineCapacitySchema.extend({ code: z.literal("machine_capacity") });
+
 export const AttachmentSchema: z.ZodType<Attachment> = z.object({
   id: z.string(),
   workspace_id: z.string().default(""),
@@ -359,6 +365,7 @@ export const EMPTY_CHAT_TICKETS_RESPONSE: ChatTicketsResponse = {
 };
 
 const ChatQueuedTaskSchema = z.object({
+  queue_reason: MachineQueueReasonSchema.optional().catch(undefined),
   task_id: z.string(),
   status: z.string().default("queued"),
   created_at: z.string().default(""),
@@ -378,6 +385,7 @@ const ChatQueuedTasksSchema = z.array(z.unknown()).transform((tasks) =>
 // task is in flight. Ignore malformed queue rows without discarding a valid
 // head, matching packages/core/api/schemas.ts.
 export const ChatPendingTaskSchema: z.ZodType<ChatPendingTask> = z.object({
+  queue_reason: MachineQueueReasonSchema.optional().catch(undefined),
   task_id: z.string().optional(),
   status: z.string().optional(),
   created_at: z.string().optional(),
@@ -480,6 +488,7 @@ export const EMPTY_SEARCH_PROJECTS_RESPONSE: SearchProjectsResponse = {
 // value this build has never seen must survive parsing and degrade at render.
 
 export const AgentTaskSchema: z.ZodType<AgentTask> = z.object({
+  queue_reason: MachineQueueReasonSchema.optional().catch(undefined),
   id: z.string(),
   agent_id: z.string().default(""),
   runtime_id: z.string().default(""),
@@ -770,6 +779,8 @@ export const EMPTY_AGENT_LIST: Agent[] = [];
 // fields default safely so a backend that adds optional new metadata
 // (timezone, visibility flags, etc.) doesn't break the parse.
 export const RuntimeSchema: z.ZodType<RuntimeDevice> = z.object({
+  custom_name: z.string().nullable().optional().catch(undefined),
+  machine_capacity: MachineCapacitySchema.optional().catch(undefined),
   id: z.string(),
   workspace_id: z.string().default(""),
   daemon_id: z.string().nullable().default(null),
