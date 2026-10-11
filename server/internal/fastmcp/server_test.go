@@ -139,7 +139,9 @@ func TestMCPStdioAcceptance(t *testing.T) {
 			if code == 901 {
 				checksum = "bad"
 			}
-			fmt.Fprintf(w, `{"id":%q,"filename":"../../escape","size_bytes":%d,"sha256":%q,"download_url":"/download"}`, testID, len(payload), checksum)
+			fmt.Fprintf(w, `{"id":%q,"filename":"../../escape","size_bytes":%d,"sha256":%q,"download_url":"/preview","raw_download_url":"/download"}`, testID, len(payload), checksum)
+		case r.URL.Path == "/preview":
+			t.Error("MCP downloaded preview instead of original bytes")
 		case r.URL.Path == "/download":
 			w.Write(payload)
 		default:
@@ -253,5 +255,34 @@ func TestMCPStdioAcceptance(t *testing.T) {
 			status.Store(0)
 			t.Log("9 tools; schema; summary/full; cursors; reads/writes; 403/429; timeout reconciliation without retry; attachment integrity; credential-free output")
 		})
+	}
+}
+
+// Record the public draft's parameter incompatibility without silently adding
+// aliases. The public documentation owner must align with discovered schemas.
+func TestMCPPublishedDraftParameterMismatch(t *testing.T) {
+	var requests atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { requests.Add(1); w.WriteHeader(500) }))
+	defer srv.Close()
+	s := connect(t, srv.URL, "2025-11-25")
+	cases := []struct {
+		name string
+		args map[string]any
+	}{
+		{"comments_list", map[string]any{"issue_id": testID}},
+		{"comment_create", map[string]any{"issue_id": testID, "content": "fixture"}},
+		{"chat_history", map[string]any{"chat_id": testID}},
+		{"chat_send", map[string]any{"chat_id": testID, "content": "fixture", "mode": "queue"}},
+		{"runs_list", map[string]any{"active": true}},
+		{"changes_read", map[string]any{"max_bytes": 50000}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			out := call(t, s, tc.name, tc.args, true)
+			t.Logf("published draft rejected: %v", out)
+		})
+	}
+	if requests.Load() != 0 {
+		t.Fatal("invalid schema reached business API")
 	}
 }

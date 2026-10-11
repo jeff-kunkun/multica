@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/multica-ai/multica/server/internal/listshape"
 	"net/url"
 	"os"
 	"strconv"
@@ -217,6 +218,12 @@ happens when the agent is still replying (ignored when it is not):
 When the running CLI cannot steer, the send is refused with the reason and
 the modes that work; nothing is sent.
 
+Bot wake-chain admission defaults to four unacknowledged triggers. A blocked
+send saves the message, prints its receipt, and exits nonzero with the reason;
+do not resend it. A genuine agent reply or completed run resets the chain.
+Human messages and server-verified --per-quote messages are exempt.
+Read or change the limit with multica settings get/set bot_wake_chain_limit.
+
 With --linked <source>, a viewer agent can send to the run initiator’s own chat
 through a managed link. Messages carry a forwarded-by label and enter the
 receiver brief as external content. Only queued text is supported; --wait is unavailable.
@@ -251,7 +258,9 @@ left as it is. Only the chat's owner can hand it over.
 
 func init() {
 	for _, c := range []*cobra.Command{chatListCmd, chatSearchCmd} {
-		c.Flags().String("project", "", "Filter to a project id (defaults to the current project)")
+		c.Flags().String("project", "", "Filter to a project UUID, prefix or exact name (case-insensitive; defaults to the current project)")
+		addListShapeFlags(c)
+		c.Example = "  multica chat list --project \"My project\" --compact --output json\n  multica chat list --fields id,title,status --workspace \"My workspace\""
 		c.Flags().Bool("all-projects", false, "Search across every project visible to the task initiator")
 		c.Flags().String("since", "", "Only chats active since an RFC3339 timestamp")
 		c.Flags().String("output", "json", "Output format: table or json")
@@ -288,6 +297,7 @@ func init() {
 	chatHandoffCmd.Flags().String("output", "json", "Output format: table or json")
 	chatSendCmd.Flags().String("session", "", "Chat session id or URL (required)")
 	chatSendCmd.Flags().String("content-file", "", "Read the message from this file instead of the argument")
+	chatSendCmd.Flags().String("per-quote", "", "Exact words from this caller’s earlier human message in this chat; server verifies the quote before exempting it from the Bot wake-chain limit")
 	chatSendCmd.Flags().String("mode", "queue", "While the agent is replying: steer, queue or restart")
 	chatSendCmd.Flags().String("output", "json", "Output format: table or json")
 	chatSendCmd.Flags().StringSlice("attachment", nil, "Local files to attach to this message (repeatable)")
@@ -557,7 +567,11 @@ func runChatDirectory(cmd *cobra.Command, keyword string) error {
 	defer cancel()
 	q := url.Values{}
 	if project, _ := cmd.Flags().GetString("project"); strings.TrimSpace(project) != "" {
-		q.Set("project", strings.TrimSpace(project))
+		ref, err := resolveProjectID(ctx, client, project)
+		if err != nil {
+			return err
+		}
+		q.Set("project", ref.ID)
 	}
 	if all, _ := cmd.Flags().GetBool("all-projects"); all {
 		q.Set("all_projects", "true")
@@ -568,6 +582,10 @@ func runChatDirectory(cmd *cobra.Command, keyword string) error {
 	if strings.TrimSpace(keyword) != "" {
 		q.Set("q", keyword)
 	}
+	fields, err := listShapeQuery(cmd, q, listshape.Chat)
+	if err != nil {
+		return err
+	}
 	path := "/api/chat/directory"
 	if encoded := q.Encode(); encoded != "" {
 		path += "?" + encoded
@@ -576,9 +594,18 @@ func runChatDirectory(cmd *cobra.Command, keyword string) error {
 	if err := client.GetJSON(ctx, path, &rows); err != nil {
 		return linkedChatRefusal(cmd, err, "list chats")
 	}
+	listshape.Filter(rows, fields)
 	output, _ := cmd.Flags().GetString("output")
 	if output != "table" {
 		return cli.PrintJSON(os.Stdout, rows)
+	}
+	if compact, _ := cmd.Flags().GetBool("compact"); compact {
+		tableRows := make([][]string, 0, len(rows))
+		for _, row := range rows {
+			tableRows = append(tableRows, []string{strVal(row, "id"), strVal(row, "title"), strVal(row, "project_title"), strVal(row, "agent_name"), strVal(row, "status"), strVal(row, "last_active_at"), numVal(row, "message_count")})
+		}
+		cli.PrintTable(os.Stdout, []string{"ID", "TITLE", "PROJECT", "AGENT", "STATUS", "LAST_ACTIVE", "MESSAGES"}, tableRows)
+		return nil
 	}
 	headers := []string{"TITLE", "PROJECT", "AGENT", "ORIGINATOR", "LAST_ACTIVE", "MESSAGES", "SUMMARY"}
 	tableRows := make([][]string, 0, len(rows))
@@ -908,11 +935,19 @@ func runChatSend(cmd *cobra.Command, args []string) error {
 		attachmentIDs = append(attachmentIDs, id)
 	}
 	path := "/api/chat/sessions/" + url.PathEscape(ref.ID) + "/messages"
-	if err := client.PostJSON(ctx, path, map[string]any{"content": content, "mode": mode, "attachment_ids": attachmentIDs}, &out); err != nil {
+	if err := client.PostJSON(ctx, path, map[string]any{"content": content, "mode": mode, "attachment_ids": attachmentIDs, "per_quote": flagString(cmd, "per-quote")}, &out); err != nil {
 		if strings.TrimSpace(linked) != "" {
 			return linkedChatRefusal(cmd, err, "chat send")
 		}
 		return sendModeRefusal(err, output, "chat send")
+	}
+	if out["mode"] == "blocked" {
+		if output == "json" {
+			if err := cli.PrintJSON(os.Stdout, out); err != nil {
+				return err
+			}
+		}
+		return blockedChatSendError(out)
 	}
 	if wait, _ := cmd.Flags().GetBool("wait"); wait {
 		return finishChatSend(cmd, client, ref.ID, out)
@@ -922,6 +957,14 @@ func runChatSend(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 	return cli.PrintJSON(os.Stdout, out)
+}
+
+func blockedChatSendError(out map[string]any) error {
+	warning, _ := out["warning"].(string)
+	if warning == "" {
+		warning = "Bot wake-chain limit reached; wait for the agent to reply or complete a run, use a human login, or ask an administrator to change bot_wake_chain_limit"
+	}
+	return fmt.Errorf("message %v saved, but agent was not woken: %s; do not resend the saved message", out["message_id"], warning)
 }
 
 // sendModeRefusal turns a steer refusal into the reason plus the modes that

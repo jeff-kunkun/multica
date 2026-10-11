@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/multica-ai/multica/server/internal/listshape"
 	"io"
 	"net/url"
 	"os"
@@ -185,6 +186,8 @@ func init() {
 	agentEnvCmd.AddCommand(agentEnvSetCmd)
 
 	// agent list
+	addListShapeFlags(agentListCmd)
+	agentListCmd.Example = "  multica agent list --compact --output json\n  multica agent list --fields id,name,status --output json --workspace \"My workspace\""
 	agentListCmd.Flags().String("output", "table", "Output format: table or json")
 	agentListCmd.Flags().Bool("include-archived", false, "Include archived agents")
 	agentListCmd.Flags().String("for-issue", "", "Group agents by fit for this issue (key or UUID); adds a fit field")
@@ -561,6 +564,9 @@ func daemonTaskContextMarkerPath() string {
 }
 
 func resolveWorkspaceID(cmd *cobra.Command) string {
+	if id := cmd.Annotations[selectedWorkspaceAnnotation]; id != "" {
+		return id
+	}
 	val := cli.FlagOrEnv(cmd, "workspace-id", "MULTICA_WORKSPACE_ID", "")
 	if val != "" {
 		return val
@@ -633,6 +639,10 @@ func runAgentList(cmd *cobra.Command, _ []string) error {
 		params.Set("for_project", ref.ID)
 	}
 	withFit := forIssue != "" || forProject != ""
+	fields, err := listShapeQuery(cmd, params, listshape.Agent)
+	if err != nil {
+		return err
+	}
 	path := "/api/agents"
 	if len(params) > 0 {
 		path += "?" + params.Encode()
@@ -641,6 +651,7 @@ func runAgentList(cmd *cobra.Command, _ []string) error {
 		return fmt.Errorf("list agents: %w", err)
 	}
 
+	listshape.Filter(agents, fields)
 	output, _ := cmd.Flags().GetString("output")
 	if output == "json" {
 		return cli.PrintJSON(os.Stdout, agents)

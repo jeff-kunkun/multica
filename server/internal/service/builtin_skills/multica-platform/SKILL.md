@@ -81,11 +81,22 @@ where an id belongs, and never invent a UUID: an id that is well-formed but
 belongs to nothing fails in ways that read like a permission error, which sends
 you debugging access when the real problem was the id.
 
+**Bounded CLI reads.** `agent list`, `chat list/search` and `runtime list`
+accept `--compact --output json` (recommended) or `--fields id,name,status`
+(use `title` for chats). Explicit fields override compact defaults; the API
+projects after permission checks and the CLI also trims older-server responses.
+API read commands accept `--workspace <UUID|slug|exact-name>` for this invocation;
+case-insensitive names must be unique. The parameter wins over the environment
+and saved profile; the chosen workspace and conflicts are printed on stderr,
+so stdout keeps its existing JSON shape. `--linked` remains a separate route;
+commands with an existing local `--workspace` (such as cross-workspace
+`changes/runs` and transfer) retain their own scope contract.
+
 **`--output json` writes to stdout; warnings and confirmations go to stderr.**
 Do not merge them (`2>&1`) into anything that parses the output — that makes a
 write which SUCCEEDED look like it failed, and invites a duplicate retry.
 
-**Long-tail settings:** `multica settings get <key>` and `multica settings set <key> --value-json '<json>'` (secrets via `--value-file` or `--value-stdin`); `repo.shares` revokes with `{"url","member_id","revoke":true}`. The key table is `docs/kun/settings-cli-coverage.md`.
+**Long-tail settings:** `multica settings get <key>` and `multica settings set <key> --value-json '<json>'` (secrets via `--value-file` or `--value-stdin`); `repo.shares` revokes with `{"url","member_id","revoke":true}`. The key table is `docs/kun/settings-cli-coverage.md`; Bot wake limits and recovery: `references/external-bots.md`.
 
 **Writes are real.** Creating, updating, deleting, assigning, commenting,
 mentioning, triggering and status changes mutate durable workspace state or
@@ -112,8 +123,8 @@ effects and API field meanings, read `references/issues.md`.
 
 Use the read-only chat directory before opening a transcript:
 
-- `multica chat list [--project <id>] [--all-projects] [--since <RFC3339>] [--output json|table]`
-- `multica chat search <词> [--project <id>] [--all-projects] [--since <RFC3339>] [--output json|table]`
+- `multica chat list [--project <id-or-exact-name>] [--compact] [--all-projects] [--since <RFC3339>] [--output json|table]`
+- `multica chat search <词> [--project <id-or-exact-name>] [--compact] [--all-projects] [--since <RFC3339>] [--output json|table]`
 
 Task-scoped commands default to the current project. Use `--all-projects` to
 opt in to a workspace-wide directory. Visibility follows the person who

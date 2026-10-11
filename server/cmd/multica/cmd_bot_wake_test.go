@@ -59,3 +59,64 @@ func TestBotWakeCLIFileAndStdin(t *testing.T) {
 		t.Fatal("missing requests")
 	}
 }
+
+func TestBotWakeCLIWithContent(t *testing.T) {
+	const id = "11111111-1111-4111-8111-111111111111"
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != "GET" || r.URL.Query().Get("include_content") != "true" || r.URL.Query().Get("limit") != "5" {
+			t.Errorf("request: %s %s", r.Method, r.URL)
+		}
+		json.NewEncoder(w).Encode(map[string]any{"events": []any{map[string]any{"delivery_id": "fixture", "payload": map[string]any{"content": "source", "reply_to_comment_id": "comment"}}}, "next_cursor": ""})
+	}))
+	defer srv.Close()
+	setCLITestServerEnv(t, srv.URL)
+	t.Setenv("MULTICA_TOKEN", "mat_test-token")
+	for _, verb := range []string{"events", "pending"} {
+		cmd := &cobra.Command{}
+		cmd.Flags().String("output", "json", "")
+		cmd.Flags().Int("limit", 5, "")
+		cmd.Flags().String("before", "", "")
+		cmd.Flags().Bool("with-content", true, "")
+		var out bytes.Buffer
+		cmd.SetOut(&out)
+		if err := runBotWake(cmd, []string{id}, verb); err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(out.String(), `"reply_to_comment_id": "comment"`) {
+			t.Fatal(out.String())
+		}
+	}
+}
+
+func TestBotWakeAckUsesWebhookEndpoint(t *testing.T) {
+	const botID = "11111111-1111-4111-8111-111111111111"
+	const eventID = "22222222-2222-4222-8222-222222222222"
+	var calls int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		if r.Method != "POST" || !strings.HasSuffix(r.URL.Path, "/bots/"+botID+"/wake/pending/ack") {
+			t.Errorf("wrong ack route: %s %s", r.Method, r.URL.Path)
+		}
+		var body struct {
+			EventIDs []string `json:"event_ids"`
+		}
+		if json.NewDecoder(r.Body).Decode(&body) != nil || len(body.EventIDs) != 1 || body.EventIDs[0] != eventID {
+			t.Errorf("wrong ack body: %+v", body)
+		}
+		json.NewEncoder(w).Encode(map[string]any{"acknowledged": 1})
+	}))
+	defer srv.Close()
+	setCLITestServerEnv(t, srv.URL)
+	t.Setenv("MULTICA_TOKEN", "mat_test-token")
+	wake := &cobra.Command{Use: "wake"}
+	addBotWakeReceipts(wake)
+	var out bytes.Buffer
+	wake.SetOut(&out)
+	wake.SetArgs([]string{"ack", botID, eventID, "--output", "json"})
+	if err := wake.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	if calls != 1 || !strings.Contains(out.String(), `"acknowledged": 1`) {
+		t.Fatalf("ack result: calls=%d %s", calls, out.String())
+	}
+}

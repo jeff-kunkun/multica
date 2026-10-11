@@ -368,14 +368,41 @@ func resolveAutopilotTriggerID(ctx context.Context, client *cli.APIClient, autop
 }
 
 func resolveProjectID(ctx context.Context, client *cli.APIClient, input string) (resolvedID, error) {
-	return resolveIDByPrefix(ctx, client, "project", input, fetchProjectCandidates)
+	input = strings.TrimSpace(input)
+	if uuidRegexp.MatchString(input) {
+		return resolvedID{ID: input, Display: input}, nil
+	}
+	candidates, err := fetchProjectCandidates(ctx, client)
+	if err != nil {
+		return resolvedID{}, fmt.Errorf("resolve project: %w", err)
+	}
+	var matches []idCandidate
+	for _, p := range candidates {
+		if strings.EqualFold(p.Display, input) {
+			matches = append(matches, p)
+		}
+	}
+	if len(matches) == 1 {
+		return resolvedID{ID: matches[0].ID, Display: matches[0].Display}, nil
+	}
+	if len(matches) > 1 {
+		parts := make([]string, 0, len(matches))
+		for _, p := range matches {
+			parts = append(parts, fmt.Sprintf("  %s  %s (%s)", p.ID, p.Display, p.Detail))
+		}
+		return resolvedID{}, fmt.Errorf("ambiguous project name %q; candidates:\n%s\nUse the project UUID", input, strings.Join(parts, "\n"))
+	}
+	if _, err := normalizeUUIDPrefix(input); err != nil {
+		return resolvedID{}, fmt.Errorf("project %q not found; use an exact name or UUID", input)
+	}
+	return resolveIDByPrefix(ctx, client, "project", input, func(context.Context, *cli.APIClient) ([]idCandidate, error) { return candidates, nil })
 }
 
 func fetchProjectCandidates(ctx context.Context, client *cli.APIClient) ([]idCandidate, error) {
 	if client.WorkspaceID == "" {
 		return nil, fmt.Errorf("workspace_id is required to resolve project id prefixes")
 	}
-	params := url.Values{"workspace_id": {client.WorkspaceID}}
+	params := url.Values{"workspace_id": {client.WorkspaceID}, "fields": {"id,title,status"}}
 	var result map[string]any
 	if err := client.GetJSON(ctx, "/api/projects?"+params.Encode(), &result); err != nil {
 		return nil, err

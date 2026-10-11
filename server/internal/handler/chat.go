@@ -1135,6 +1135,7 @@ func (h *Handler) DeleteChatSession(w http.ResponseWriter, r *http.Request) {
 // ---------------------------------------------------------------------------
 
 type SendChatMessageRequest struct {
+	PerQuote      string   `json:"per_quote,omitempty"`
 	Content       string   `json:"content"`
 	AttachmentIDs []string `json:"attachment_ids"`
 	// Mode says what to do when the agent is still replying: steer (read it
@@ -1144,6 +1145,8 @@ type SendChatMessageRequest struct {
 }
 
 type SendChatMessageResponse struct {
+	Warning        string                     `json:"warning,omitempty"`
+	ReasonCode     string                     `json:"reason_code,omitempty"`
 	ChatSessionID  string                     `json:"chat_session_id,omitempty"`
 	MessageKind    string                     `json:"message_kind,omitempty"`
 	LinkedDelivery *ManagedChatDeliverySource `json:"linked_delivery,omitempty"`
@@ -1226,6 +1229,13 @@ func (h *Handler) SendChatMessage(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	if req.PerQuote != "" {
+		if !h.verifyBotWakeQuote(w, r, session.WorkspaceID, pgtype.UUID{}, session.ID, req.PerQuote) {
+			return
+		}
+		r = r.WithContext(service.WithBotWakeHumanQuote(r.Context(), req.PerQuote))
+	}
+
 	// Archived sessions are read-only: refuse to enqueue new agent work for
 	// them (see SetChatSessionArchived). The frontend disables the composer
 	// for status='archived' and only offers unarchive/delete there. Legacy
@@ -1396,7 +1406,7 @@ func (h *Handler) SendChatMessage(w http.ResponseWriter, r *http.Request) {
 	// (DENE-1037). Until then the first-message title stands.
 
 	applied := "start"
-	if sent.Queued {
+	if sent.Queued && task.Status != "cancelled" {
 		applied = sendModeQueue
 		switch {
 		case mode == sendModeSteer && steerable:
@@ -1412,7 +1422,14 @@ func (h *Handler) SendChatMessage(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	warning, reason := "", ""
+	if service.BotWakeBlocked(task) {
+		applied = "blocked"
+		warning = service.BotWakeWarning(task, agent.Name)
+		reason = "bot_wake_chain_limit"
+	}
 	writeJSON(w, http.StatusCreated, SendChatMessageResponse{
+		Warning: warning, ReasonCode: reason,
 		MessageID:     uuidToString(msg.ID),
 		TaskID:        uuidToString(task.ID),
 		SupportsQueue: true,

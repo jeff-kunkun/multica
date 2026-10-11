@@ -566,7 +566,10 @@ func (a *adapter) attachment(ctx context.Context, in AttachmentInput) (map[strin
 		return nil, errors.New("invalid attachment metadata")
 	}
 	checksum, _ := m["sha256"].(string)
-	downloadURL, _ := m["download_url"].(string)
+	downloadURL, _ := m["raw_download_url"].(string)
+	if downloadURL == "" {
+		downloadURL, _ = m["download_url"].(string)
+	}
 	size, err := strconv.ParseInt(fmt.Sprint(m["size_bytes"]), 10, 64)
 	if err != nil || size < 0 || size > 100<<20 || checksum == "" || downloadURL == "" {
 		return invalid("Attachment requires size <=100 MiB, SHA256 and a download URL")

@@ -106,6 +106,9 @@ type AttachmentResponse struct {
 	Filename      string  `json:"filename"`
 	URL           string  `json:"url"`
 	DownloadURL   string  `json:"download_url"`
+	// RawDownloadURL bypasses preview/CDN transformations for verified clients.
+	// Only single-attachment metadata emits it, after the normal access guard.
+	RawDownloadURL string `json:"raw_download_url,omitempty"`
 	// AttachmentDownloadURL is a credential-free URL that forces a
 	// Content-Disposition: attachment across every storage mode, for the
 	// download BUTTON — unlike DownloadURL, which is load-intent and keeps
@@ -920,6 +923,30 @@ func (h *Handler) ListAttachments(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, resp)
 }
 
+// ListCommentAttachments uses the same issue visibility guard as the comment
+// list. Workspace membership alone does not grant access to a private issue.
+func (h *Handler) ListCommentAttachments(w http.ResponseWriter, r *http.Request) {
+	comment, _, _, _, ok := h.loadCommentForActor(w, r)
+	if !ok {
+		return
+	}
+	if _, ok := h.loadIssueForUser(w, r, uuidToString(comment.IssueID)); !ok {
+		return
+	}
+	attachments, err := h.Queries.ListAttachmentsByComment(r.Context(), db.ListAttachmentsByCommentParams{
+		CommentID: comment.ID, WorkspaceID: comment.WorkspaceID,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list attachments")
+		return
+	}
+	resp := make([]AttachmentResponse, len(attachments))
+	for i, att := range attachments {
+		resp[i] = h.attachmentToResponse(att, attachmentURLModeFromRequest(r))
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
 // ---------------------------------------------------------------------------
 // GetAttachmentByID — GET /api/attachments/{id}
 // ---------------------------------------------------------------------------
@@ -954,6 +981,7 @@ func (h *Handler) GetAttachmentByID(w http.ResponseWriter, r *http.Request) {
 	// stable path for a signature HERE, so honoring the capability would break
 	// the very flow that makes stable mode safe elsewhere.
 	resp := h.attachmentToResponse(att, attachmentURLModeSigned)
+	resp.RawDownloadURL = "/api/attachments/" + uuidToString(att.ID) + "/download?raw=1"
 	// Token-mode clients use this authenticated endpoint to replace the
 	// auth-gated API path with a URL that native media elements can load.
 	// Assert the same storage.DownloadPresigner that resolveAttachmentDownloadMode
@@ -1176,6 +1204,12 @@ func (h *Handler) DownloadAttachment(w http.ResponseWriter, r *http.Request) {
 	}
 
 	key := h.Storage.KeyFromURL(att.Url)
+	// Verified downloads bypass CDN representations and read the stored object
+	// directly. Authorization above is identical to the normal download path.
+	if r.URL.Query().Get("raw") == "1" {
+		h.proxyAttachmentDownload(w, r, att, key, true, false)
+		return
+	}
 	switch h.resolveAttachmentDownloadMode(att.Url) {
 	case attachmentDownloadModeCloudFront:
 		if h.CFSigner == nil {
@@ -1346,6 +1380,10 @@ func (h *Handler) proxyAttachmentDownload(w http.ResponseWriter, r *http.Request
 			w.WriteHeader(http.StatusNotModified)
 			return
 		}
+	}
+	if r.URL.Query().Get("raw") == "1" {
+		w.Header().Set("Content-Type", "application/octet-stream")
+		w.Header().Set("Cache-Control", "no-store, no-transform")
 	}
 
 	// Seekable backends get full standard-library Range handling. A zero
