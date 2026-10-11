@@ -626,7 +626,8 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
                     <Button
                       variant={sidebarOpen ? "secondary" : "ghost"}
                       size="icon-sm"
-                      className={sidebarOpen ? "" : "text-muted-foreground"}
+                      className={cn("order-first min-h-11 min-w-11 sm:order-none sm:min-h-0 sm:min-w-0", !sidebarOpen && "text-muted-foreground")}
+                      aria-label={t(($) => $.detail.sidebar_tooltip)}
                       onClick={handleToggleSidebar}
                     >
                       <PanelRight />
@@ -706,7 +707,7 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
         )}
         {isCompact && (
           <Sheet open={mobileSidebarOpen} onOpenChange={setMobileSidebarOpen}>
-            <SheetContent side="right" showCloseButton={false} className="w-[min(320px,85vw)] overflow-y-auto p-4">
+            <SheetContent side="right" showCloseButton className="w-[min(320px,85vw)] overflow-y-auto p-4 [&>[data-slot=sheet-close]]:min-h-11 [&>[data-slot=sheet-close]]:min-w-11">
               {sidebarContent}
             </SheetContent>
           </Sheet>
