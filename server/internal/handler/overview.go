@@ -176,7 +176,7 @@ func (h *Handler) GetOverview(w http.ResponseWriter, r *http.Request) {
 		counts[name] = len(rows)
 		if compact {
 			for i, row := range rows {
-				rows[i] = overviewProject(row, "id name title model runtime_id routing_tier runtime_availability work_enabled status project_id agent_id assignee_id next_run_at leader_id source target type")
+				rows[i] = overviewProject(row, "id name title model runtime_id routing_tier runtime_availability work_enabled status project_id agent_id assignee_id next_run_at leader_id source target type linked_projects effective_linked_projects inherited")
 			}
 		}
 		result[name] = rows
@@ -185,6 +185,32 @@ func (h *Handler) GetOverview(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) enrichOverview(r *http.Request, ws string, sections map[string][]overviewRow) error {
+	// Reuse the settings read gates, including the effective actor, on every
+	// snapshot. Never infer availability from saved link identifiers.
+	for _, owner := range []struct {
+		section string
+		read    http.HandlerFunc
+	}{
+		{"projects", h.GetProjectLinkedProjects}, {"automations", h.GetAutopilotLinkedProjects},
+	} {
+		for _, row := range sections[owner.section] {
+			b := &overviewBuffer{header: make(http.Header), status: http.StatusOK}
+			owner.read(b, overviewRequest(r, map[string]string{"id": overviewString(row, "id")}))
+			if b.status == http.StatusForbidden || b.status == http.StatusNotFound {
+				continue
+			}
+			if b.status != http.StatusOK {
+				return fmt.Errorf("reference settings returned HTTP %d", b.status)
+			}
+			var settings overviewRow
+			if err := json.Unmarshal(b.Bytes(), &settings); err != nil {
+				return err
+			}
+			for key, value := range overviewProject(settings, "linked_projects effective_linked_projects inherited") {
+				row[key] = value
+			}
+		}
+	}
 	projectIDs := []pgtype.UUID{}
 	projects := map[string]overviewRow{}
 	for _, project := range sections["projects"] {

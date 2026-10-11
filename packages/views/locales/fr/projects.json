@@ -337,5 +337,19 @@
     "cancel": "Annuler",
     "loading": "Chargement…",
     "load_more": "Voir plus"
+  },
+  "references": {
+    "title": "Projets de référence",
+    "description": "Les exécutions peuvent lire ces projets.",
+    "choose": "Choisir les projets",
+    "inherit": "Utiliser les choix du projet",
+    "empty": "Aucun projet partagé disponible",
+    "unavailable": "Indisponible",
+    "load_error": "Impossible de charger les projets de référence",
+    "retry": "Réessayer",
+    "save_error": "Impossible de sauvegarder. Réessayez.",
+    "read_only": "Vous ne pouvez pas modifier ce paramètre.",
+    "loading": "Chargement...",
+    "none": "Aucun"
   }
 }

@@ -1,3 +1,4 @@
+import { ProjectReferencesSetting } from "@/components/projects/project-references-setting";
 /**
  * Edit project title / description / icon. Modal presentation, configured
  * in `[workspace]/_layout.tsx`. Save button in the header runs an
@@ -178,6 +179,7 @@ export default function EditProject() {
                   minHeight={MIN_BODY_INPUT_HEIGHT_PX}
                 />
               </Field>
+              <ProjectReferencesSetting projectId={id} />
             </>
           )}
         </ScrollView>

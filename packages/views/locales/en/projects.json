@@ -337,5 +337,19 @@
     "cancel": "Cancel",
     "loading": "Loading…",
     "load_more": "Load more"
+  },
+  "references": {
+    "title": "Reference projects",
+    "description": "Runs can read these projects.",
+    "choose": "Choose projects",
+    "inherit": "Use project defaults",
+    "empty": "No shared projects available",
+    "unavailable": "Unavailable",
+    "load_error": "Cannot load reference projects",
+    "retry": "Retry",
+    "save_error": "Could not save. Try again.",
+    "read_only": "You do not have permission to edit.",
+    "loading": "Loading...",
+    "none": "None"
   }
 }

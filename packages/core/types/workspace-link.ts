@@ -150,3 +150,10 @@ export interface LinkedViewParams {
   cursor?: string;
   limit?: number;
 }
+
+/** Persisted references and their current run-time effective selection. */
+export interface LinkedProjectSettings {
+  linked_projects: ChatLinkedProject[] | null;
+  effective_linked_projects: ChatLinkedProject[];
+  inherited: boolean;
+}

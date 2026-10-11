@@ -3360,6 +3360,17 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 				message: "failed to load project context",
 			}
 		}
+		var referenceAutopilot pgtype.UUID
+		if issue.OriginType.String == "autopilot" {
+			referenceAutopilot = issue.OriginID
+		}
+		linkedProjects, linkedErr := h.resolveClaimDefaultLinkedProjects(r.Context(), *task, issue.WorkspaceID, issue.ProjectID, referenceAutopilot)
+		if linkedErr != nil {
+			return resp, deliveredCommentIDs, issueSnapshot, agentSkillCount, builtinSkillCount, &claimBuildFailure{
+				outcome: "error_project_context", status: http.StatusInternalServerError, message: "failed to load reference projects",
+			}
+		}
+		resp.LinkedProjects = linkedProjects
 		h.applyClaimChatCounts(r.Context(), &projectCtx, task, issue.WorkspaceID)
 		projectCtx.applyTo(&resp)
 
@@ -4016,6 +4027,13 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 				message: "failed to load project context",
 			}
 		}
+		linkedProjects, linkedErr := h.resolveClaimDefaultLinkedProjects(r.Context(), *task, ap.WorkspaceID, ap.ProjectID, ap.ID)
+		if linkedErr != nil {
+			return resp, deliveredCommentIDs, issueSnapshot, agentSkillCount, builtinSkillCount, &claimBuildFailure{
+				outcome: "error_project_context", status: http.StatusInternalServerError, message: "failed to load reference projects",
+			}
+		}
+		resp.LinkedProjects = linkedProjects
 		h.applyClaimChatCounts(r.Context(), &projectCtx, task, ap.WorkspaceID)
 		projectCtx.applyTo(&resp)
 	}

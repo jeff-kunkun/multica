@@ -74,3 +74,13 @@ export const linkedViewOptions = (wsId: string, linkId: string, projectId: strin
     // A refused read is the same 404 every time; retrying cannot change it.
     retry: false,
   });
+
+export const linkedProjectSettingsOptions = (wsId: string, kind: "projects" | "autopilots", id: string) =>
+  queryOptions({
+    queryKey: [...workspaceLinkKeys.all(wsId), "settings", kind, id],
+    queryFn: () => api.getLinkedProjectSettings(kind, id),
+    enabled: !!wsId && !!id,
+    refetchOnWindowFocus: true,
+    refetchInterval: LINKED_VIEW_REFRESH_MS,
+    retry: false,
+  });

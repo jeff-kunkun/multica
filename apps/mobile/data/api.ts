@@ -1,3 +1,5 @@
+import { LinkedProjectSettingsSchema, LinkedProjectOptionsSchema } from "@multica/core/api/schemas";
+import type { LinkedProjectSettings, LinkedProjectOption, ChatLinkedProjectRef } from "@multica/core/types/workspace-link";
 /**
  * Mobile-owned fetch wrapper. Mirrors the surface area of
  * packages/core/api/client.ts that mobile actually uses, but lives in
@@ -417,6 +419,23 @@ class ApiClient {
     return parseWithFallback(raw, schema, fallback, {
       endpoint: opts?.endpoint ?? `${init.method ?? "GET"} ${path}`,
     });
+  }
+
+  async getProjectReferences(id: string, opts?: { signal?: AbortSignal }): Promise<LinkedProjectSettings> {
+    const result = await this.fetchValidated<LinkedProjectSettings | null>(`/api/projects/${encodeURIComponent(id)}/linked-projects`, LinkedProjectSettingsSchema, null, opts);
+    if (!result) throw new Error("Could not read reference projects");
+    return result;
+  }
+
+  async listReferenceProjectOptions(opts?: { signal?: AbortSignal }): Promise<{ projects: LinkedProjectOption[] }> {
+    return this.fetchValidated("/api/workspace-links/projects", LinkedProjectOptionsSchema, { projects: [] }, opts);
+  }
+
+  async setProjectReferences(id: string, refs: ChatLinkedProjectRef[]): Promise<LinkedProjectSettings> {
+    const result = await this.fetchValidatedWith<LinkedProjectSettings | null>(`/api/projects/${encodeURIComponent(id)}/linked-projects`, LinkedProjectSettingsSchema, null,
+      { method: "PUT", body: JSON.stringify({ linked_projects: refs }) });
+    if (!result) throw new Error("Could not read saved reference projects");
+    return result;
   }
 
   // --- Auth ---

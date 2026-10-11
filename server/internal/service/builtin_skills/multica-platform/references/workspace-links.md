@@ -82,3 +82,9 @@ its slug); the viewer's owner or admin accepts it; either side can revoke.
 Someone who owns both workspaces can instead pull from the viewer side (设置 →
 连通工作区 → 连进来的, or `create --from <workspace>`); that link is active at
 once. Anyone else must ask the source's owner to offer it.
+
+Projects and autopilots can also save references with
+`multica project linked-projects <id>` and `multica autopilot linked-projects <id>`.
+Both accept `--reference <link-id>:<project-id>` (repeatable) or `--clear`;
+autopilots also accept `--inherit` to use the owning project's defaults.
+These settings do not enable managed access or change any existing link.

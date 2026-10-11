@@ -1,4 +1,5 @@
 "use client";
+import { ReferenceProjectsSetting } from "./reference-projects-setting";
 
 import { useMemo, useState, useCallback, useRef, useEffect } from "react";
 import { useDefaultLayout, usePanelRef } from "react-resizable-panels";
@@ -512,6 +513,7 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
       </div>
 
       {/* Resources */}
+      <ReferenceProjectsSetting kind="projects" id={projectId} canWrite={!isGuest} />
       <ProjectMemoryCard projectId={projectId} />
       <ProjectCodeSection projectId={projectId} />
       <ProjectResourcesSection projectId={projectId} />
