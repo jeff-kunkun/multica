@@ -70,6 +70,8 @@
 
 - DENE-1808：可托管聊天代发、新连通默认开托管（旧连通不变）；[桌面/手机 HTML 预览附件](https://ai.ferryway.cc/api/attachments/01a12a2c-418e-78c0-bef9-e084235a21f1/download)。[验证记录与验收结论](DENE-1808/README.md)：真实设置/聊天四档截图、开关提交及线上 WD 代发/叫醒已通过；Grok Bot 代 Kun 验收收单，原生截图按决定留到后续发版、不占用 Kun 前台。
 
+- DENE-1815：手机 App 连通设置、共享项目阅读、聊天只读参考项目与通知入口；[390px 手机源码实页五屏与验收 HTML](https://ai.ferryway.cc/api/attachments/01a12c05-8d5e-7b40-ae67-05569ebfd349/download)、[原图/点击记录/检查日志](https://ai.ferryway.cc/api/attachments/01a12c05-8f3a-7c62-a4a7-dee4d0b6abfa/download)。React Native Web 隔离验收数据；原生模拟器启动卡在系统迁移，原生构建未验证。
+
 ## Compact cross-workspace reads
 
 - DENE-1870：服务端紧凑读取与 Web/Desktop 共享收件箱入口，集成于父分支；[协议](../kun/fast-access.md)、[四档真实截图报告](https://ai.ferryway.cc/api/attachments/01a12c30-6781-7d33-94d8-6399c6cbba01/download)、[SQL 改前/改后与回滚记录](https://ai.ferryway.cc/api/attachments/01a12c30-67e6-7a3d-a878-d4a99839d107/download)、[最终后端回归输出](https://ai.ferryway.cc/api/attachments/01a12c30-6844-72e6-aa30-57da9aee6405/download)。隔离数据库两工作区、17 个活动运行，5 页无漏重；前后两轮 30 次本地 p95 分别为 1.043 秒 / 43.852 毫秒，不外推生产性能。375/390/768/1280 实页与 375 关闭、未读不变已核验；浏览器续页/刷新成功、独立 Electron、原生 App 和线上实测未完成，手机入口与页面缺口由 DENE-1879 接续，线上复核归父任务。

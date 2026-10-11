@@ -22,5 +22,7 @@
 
 - [DENE-1277 全站响应式盘点](evidence/DENE-1277/report.html)
 - [移动共性外壳预览](design/dene-1291-mobile-shell-preview.html)
+- [手机 App 连通工作区交互路径](../INTERACTION.md)
+- [手机 App 连通工作区交互预览（示例数据）](design/prototypes/mobile-workspace-links.html)
 
 可复跑的操作手册放在本目录，并从这里建立入口。
