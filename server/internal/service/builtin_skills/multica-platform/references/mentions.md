@@ -309,7 +309,9 @@ total); other errors remain visible for inspection.
 `multica attachment upload <path> --issue <id>` works with Bot PATs and
 supplies sha256 automatically (no comment is posted). Without `--issue`,
 upload still targets the current agent chat task. Download verifies
-size and sha256 before publishing a file; rejected bytes leave no file. Old
+size and sha256 before publishing a file; rejected bytes leave no file. Single,
+comment and issue batch downloads, output paths and retry behavior are in
+`references/issues.md#downloading-attachments`. Old
 attachments acquire a checksum from authenticated server storage on metadata
 read. A server that cannot supply a checksum is refused; do not bypass it.
 

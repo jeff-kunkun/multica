@@ -17,6 +17,10 @@ import (
 func newAttachmentDownloadTestCmd() *cobra.Command {
 	cmd := &cobra.Command{Use: "download"}
 	cmd.Flags().StringP("output-dir", "o", ".", "")
+	cmd.Flags().String("output-file", "", "")
+	cmd.Flags().String("comment", "", "")
+	cmd.Flags().String("issue", "", "")
+	cmd.Flags().String("output", "json", "")
 	return cmd
 }
 
