@@ -33,7 +33,8 @@ type BotWakeFromRule struct {
 type BotWakeFrom map[string]BotWakeFromRule
 
 type BotWakeResponse struct {
-	WakeFrom BotWakeFrom `json:"wake_from"`
+	InheritOwnerFollows bool        `json:"inherit_owner_follows"`
+	WakeFrom            BotWakeFrom `json:"wake_from"`
 
 	WebhookConfigured bool          `json:"webhook_configured"`
 	Events            []string      `json:"events"`
@@ -51,7 +52,7 @@ func NewBotWakeSecretBox(secret string) (*secretbox.Box, error) {
 	return secretbox.New(mac.Sum(nil))
 }
 func wakeResponse(c db.BotWake) BotWakeResponse {
-	r := BotWakeResponse{WebhookConfigured: len(c.WebhookSecret) > 0, Events: c.Events, HourlyLimit: c.HourlyLimit}
+	r := BotWakeResponse{InheritOwnerFollows: c.InheritOwnerFollows, WebhookConfigured: len(c.WebhookSecret) > 0, Events: c.Events, HourlyLimit: c.HourlyLimit}
 	_ = json.Unmarshal(c.QuietHours, &r.QuietHours)
 	_ = json.Unmarshal(c.WakeFrom, &r.WakeFrom)
 	return r
@@ -206,12 +207,13 @@ func (h *Handler) PutBotWake(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req struct {
-		WakeFrom    *BotWakeFrom   `json:"wake_from"`
-		Events      *[]string      `json:"events"`
-		HourlyLimit *int32         `json:"hourly_limit"`
-		QuietHours  *BotQuietHours `json:"quiet_hours"`
-		URL         *string        `json:"webhook_url"`
-		Key         *string        `json:"webhook_key"`
+		InheritOwnerFollows *bool          `json:"inherit_owner_follows"`
+		WakeFrom            *BotWakeFrom   `json:"wake_from"`
+		Events              *[]string      `json:"events"`
+		HourlyLimit         *int32         `json:"hourly_limit"`
+		QuietHours          *BotQuietHours `json:"quiet_hours"`
+		URL                 *string        `json:"webhook_url"`
+		Key                 *string        `json:"webhook_key"`
 	}
 	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 16384))
 	dec.DisallowUnknownFields()
@@ -237,6 +239,9 @@ func (h *Handler) PutBotWake(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	rules := wakeResponse(c)
+	if req.InheritOwnerFollows != nil {
+		rules.InheritOwnerFollows = *req.InheritOwnerFollows
+	}
 	if req.WakeFrom != nil {
 		rules.WakeFrom = *req.WakeFrom
 	}
@@ -287,7 +292,7 @@ func (h *Handler) PutBotWake(w http.ResponseWriter, r *http.Request) {
 	}
 	quiet, _ := json.Marshal(rules.QuietHours)
 	from, _ := json.Marshal(rules.WakeFrom)
-	saved, err := q.UpdateBotWake(r.Context(), db.UpdateBotWakeParams{BotID: bot.ID, Events: rules.Events, HourlyLimit: rules.HourlyLimit, QuietHours: quiet, WakeFrom: from, WebhookSecret: sealed})
+	saved, err := q.UpdateBotWake(r.Context(), db.UpdateBotWakeParams{InheritOwnerFollows: rules.InheritOwnerFollows, BotID: bot.ID, Events: rules.Events, HourlyLimit: rules.HourlyLimit, QuietHours: quiet, WakeFrom: from, WebhookSecret: sealed})
 	if err != nil {
 		writeError(w, 500, "failed to save wake rules")
 		return

@@ -12,7 +12,7 @@ SELECT * FROM bot_wake WHERE bot_id=$1 FOR UPDATE;
 
 -- name: UpdateBotWake :one
 UPDATE bot_wake SET webhook_secret=COALESCE(sqlc.narg(webhook_secret)::bytea,webhook_secret),
- events=$2,hourly_limit=$3,quiet_hours=$4,wake_from=$5,updated_at=now() WHERE bot_id=$1 RETURNING *;
+ events=$2,hourly_limit=$3,quiet_hours=$4,wake_from=$5,inherit_owner_follows=sqlc.arg(inherit_owner_follows)::boolean,updated_at=now() WHERE bot_id=$1 RETURNING *;
 
 -- name: ListBotWakeEvents :many
 SELECT * FROM bot_wake_event WHERE bot_id=$1 AND workspace_id=$2
@@ -65,3 +65,7 @@ UPDATE bot_wake_chain SET hops=hops+1 WHERE root_id=$1 AND workspace_id=$2 AND h
 -- name: RememberBotWakeCause :exec
 INSERT INTO bot_wake_cause(bot_id,root_id,hop) VALUES($1,$2,$3)
 ON CONFLICT(bot_id) DO UPDATE SET root_id=excluded.root_id,hop=excluded.hop;
+
+-- name: BotOwnerFollowsIssue :one
+SELECT EXISTS(SELECT 1 FROM issue i WHERE i.id=$1 AND i.assignee_type='member' AND i.assignee_id=$2)
+ OR EXISTS(SELECT 1 FROM issue_subscriber s WHERE s.issue_id=$1 AND s.user_type='member' AND s.user_id=$2)::boolean;

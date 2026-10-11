@@ -462,13 +462,14 @@ type AutopilotTrigger struct {
 }
 
 type BotWake struct {
-	BotID         pgtype.UUID        `json:"bot_id"`
-	WebhookSecret []byte             `json:"webhook_secret"`
-	Events        []string           `json:"events"`
-	HourlyLimit   int32              `json:"hourly_limit"`
-	QuietHours    []byte             `json:"quiet_hours"`
-	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
-	WakeFrom      []byte             `json:"wake_from"`
+	BotID               pgtype.UUID        `json:"bot_id"`
+	WebhookSecret       []byte             `json:"webhook_secret"`
+	Events              []string           `json:"events"`
+	HourlyLimit         int32              `json:"hourly_limit"`
+	QuietHours          []byte             `json:"quiet_hours"`
+	UpdatedAt           pgtype.Timestamptz `json:"updated_at"`
+	WakeFrom            []byte             `json:"wake_from"`
+	InheritOwnerFollows bool               `json:"inherit_owner_follows"`
 }
 
 type BotWakeAttempt struct {
@@ -515,6 +516,7 @@ type BotWakeEvent struct {
 	SourceTaskID   pgtype.UUID        `json:"source_task_id"`
 	RootID         pgtype.UUID        `json:"root_id"`
 	Hop            int32              `json:"hop"`
+	InheritedOwner bool               `json:"inherited_owner"`
 }
 
 type BotWakeWatch struct {

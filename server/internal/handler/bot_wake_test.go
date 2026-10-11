@@ -16,6 +16,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
+	"os/exec"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -396,4 +398,193 @@ func TestBotWakeAttachmentSHA256(t *testing.T) {
 		t.Log("legacy metadata GET: checksum backfilled from authorized storage")
 
 	}
+}
+
+func TestBotWakeOwnerFollowsHTTP(t *testing.T) {
+	ctx := context.Background()
+	oldBox := testHandler.BotWakeSecrets
+	testHandler.BotWakeSecrets, _ = NewBotWakeSecretBox("local-test-only")
+	defer func() { testHandler.BotWakeSecrets = oldBox }()
+	raw, hash, prefix, err := mintBotToken()
+	if err != nil {
+		t.Fatal(err)
+	}
+	bot, err := testHandler.Queries.CreateBotAccessToken(ctx, db.CreateBotAccessTokenParams{UserID: parseUUID(testUserID), WorkspaceID: parseUUID(testWorkspaceID), Name: "wake acceptance", TokenHash: hash, TokenPrefix: prefix})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer testPool.Exec(ctx, `DELETE FROM personal_access_token WHERE id=$1`, bot.ID)
+	id := uuidToString(bot.ID)
+	issueID := dbfx.Issue(t, "Wake receipt test", testutil.Cols{"visibility": "workspace"})
+	base := "/api/workspaces/" + testWorkspaceID + "/bots/" + id + "/wake"
+	router := chi.NewRouter()
+	router.Use(middleware.Auth(testHandler.Queries, nil, nil, nil))
+	router.Route("/api/workspaces/{id}", func(r chi.Router) {
+		r.Use(middleware.RequireWorkspaceMemberFromURL(testHandler.Queries, "id"))
+		r.Get("/bots/mentions", testHandler.ListBotMentionDirectory)
+		r.Get("/bots/{botId}/wake", testHandler.GetBotWake)
+		r.Put("/bots/{botId}/wake", testHandler.PutBotWake)
+		r.Get("/bots/{botId}/wake/events", testHandler.ListBotWakeEvents)
+		r.Get("/bots/{botId}/wake/pending", testHandler.ListBotWakeEvents)
+	})
+	api := httptest.NewServer(router)
+	defer api.Close()
+	call := func(method, path, token string, body any) (int, []byte) {
+		t.Helper()
+		b, _ := json.Marshal(body)
+		req, _ := http.NewRequest(method, api.URL+path, bytes.NewReader(b))
+		req.Header.Set("Authorization", "Bearer "+token)
+		res, err := api.Client().Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer res.Body.Close()
+		data, _ := io.ReadAll(res.Body)
+		return res.StatusCode, data
+	}
+	code, data := call("GET", base, raw, nil)
+	if code != 200 || !bytes.Contains(data, []byte(`"hourly_limit":6`)) {
+		t.Fatalf("defaults %d %s", code, data)
+	}
+	t.Logf("GET defaults: %d %s", code, data)
+	var calls atomic.Int32
+	var response atomic.Int32
+	response.Store(200)
+	var slow atomic.Bool
+	receiver := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		if r.Header.Get("Authorization") != "Bearer local-fixture" {
+			t.Error("missing authorization")
+		}
+		var payload map[string]any
+		if json.NewDecoder(r.Body).Decode(&payload) != nil {
+			t.Error("invalid payload")
+		}
+		if r.Header.Get("X-Multica-Event-ID") == "" || payload["summary"] == nil {
+			t.Error("missing metadata")
+		}
+		if _, ok := payload["content"]; ok {
+			t.Error("body leaked")
+		}
+		if slow.Load() {
+			time.Sleep(150 * time.Millisecond)
+		}
+		w.WriteHeader(int(response.Load()))
+	}))
+	defer receiver.Close()
+	t.Setenv("MULTICA_PLUGIN_DEV_ORIGINS", receiver.URL)
+	worker := NewBotWakeWorker(testHandler)
+	worker.client = func(u *url.URL) *http.Client { return &http.Client{Timeout: 50 * time.Millisecond} }
+	quietOff := map[string]any{"enabled": false, "start": "23:00", "end": "08:00", "timezone": "Asia/Shanghai"}
+	put := func(body any) {
+		t.Helper()
+		code, data := call("PUT", base, raw, body)
+		if code != 200 {
+			t.Fatalf("PUT %d %s", code, data)
+		}
+		if bytes.Contains(data, []byte("local-fixture")) || bytes.Contains(data, []byte(receiver.URL)) {
+			t.Fatal("secret echoed")
+		}
+	}
+	put(map[string]any{"webhook_url": receiver.URL, "webhook_key": "Bearer local-fixture", "quiet_hours": quietOff})
+	if !bytes.Contains(data, []byte(`"inherit_owner_follows":false`)) {
+		t.Fatal("default inheritance not false")
+	}
+	dbfx.Exec(t, `INSERT INTO issue_subscriber(issue_id,user_type,user_id,reason) VALUES($1,'member',$2,'manual') ON CONFLICT DO NOTHING`, issueID, testUserID)
+	change := func(status string) {
+		t.Helper()
+		dbfx.Exec(t, `WITH actor AS MATERIALIZED (SELECT set_config('multica.actor_type','member',true),set_config('multica.actor_id',$3,true)) UPDATE issue SET status=$2 FROM actor WHERE issue.id=$1`, issueID, status, testUserID)
+	}
+	count := func() int {
+		var n int
+		dbfx.QueryRow(t, `SELECT count(*) FROM bot_wake_event WHERE bot_id=$1`, bot.ID).Scan(&n)
+		return n
+	}
+	drain := func() {
+		t.Helper()
+		for i := 0; i < 20; i++ {
+			ok, err := worker.ProcessNext(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !ok {
+				return
+			}
+		}
+		t.Fatal("did not drain")
+	}
+	change("in_progress")
+	if count() != 0 {
+		t.Fatal("default inherited")
+	}
+	put(map[string]any{"inherit_owner_follows": true})
+	code, data = call("GET", base, raw, nil)
+	if code != 200 || !bytes.Contains(data, []byte(`"inherit_owner_follows":true`)) {
+		t.Fatalf("saved %d %s", code, data)
+	}
+	change("done")
+	drain()
+	if count() != 1 || calls.Load() != 1 {
+		t.Fatalf("enabled subscription not delivered: events=%d sent=%d", count(), calls.Load())
+	}
+	// Inheritance does not make a persistent explicit Bot watch.
+	var watches int
+	dbfx.QueryRow(t, `SELECT count(*) FROM bot_wake_watch WHERE bot_id=$1`, bot.ID).Scan(&watches)
+	if watches != 0 {
+		t.Fatal("inheritance promoted to permanent watch")
+	}
+	change("blocked")
+	put(map[string]any{"inherit_owner_follows": false})
+	drain()
+	var reason string
+	dbfx.QueryRow(t, `SELECT reason FROM bot_wake_event WHERE bot_id=$1 ORDER BY sequence DESC LIMIT 1`, bot.ID).Scan(&reason)
+	if reason != "owner inheritance disabled" || calls.Load() != 1 {
+		t.Fatalf("disable queued: %s", reason)
+	}
+	change("in_progress")
+	if count() != 2 {
+		t.Fatal("disabled creates new inherited event")
+	}
+	put(map[string]any{"inherit_owner_follows": true})
+	change("done")
+	dbfx.Exec(t, `DELETE FROM issue_subscriber WHERE issue_id=$1 AND user_id=$2`, issueID, testUserID)
+	drain()
+	dbfx.QueryRow(t, `SELECT reason FROM bot_wake_event WHERE bot_id=$1 ORDER BY sequence DESC LIMIT 1`, bot.ID).Scan(&reason)
+	if reason != "owner no longer follows source" {
+		t.Fatal(reason)
+	}
+	dbfx.Exec(t, `UPDATE issue SET assignee_type='member',assignee_id=$2 WHERE id=$1`, issueID, testUserID)
+	drain() // This test-only unattributed assignment cannot send.
+	change("blocked")
+	drain()
+	if calls.Load() != 2 {
+		t.Fatalf("owner assignment missing: %d", calls.Load())
+	}
+	// Current private-source permission still wins over subscription inheritance.
+	stranger := dbfx.User(t, "private creator", "wake-private@example.invalid")
+	dbfx.Exec(t, `UPDATE issue SET visibility='private',creator_type='member',creator_id=$2,assignee_id=NULL,assignee_type=NULL WHERE id=$1`, issueID, stranger)
+	dbfx.Exec(t, `INSERT INTO issue_subscriber(issue_id,user_type,user_id,reason) VALUES($1,'member',$2,'manual')`, issueID, testUserID)
+	change("done")
+	drain()
+	dbfx.QueryRow(t, `SELECT reason FROM bot_wake_event WHERE bot_id=$1 ORDER BY sequence DESC LIMIT 1`, bot.ID).Scan(&reason)
+	if reason != "access unavailable" || calls.Load() != 2 {
+		t.Fatalf("inheritance permission: %s sent=%d", reason, calls.Load())
+	}
+	if bin := os.Getenv("BOT_WAKE_TEST_CLI"); bin != "" {
+		cmd := exec.Command(bin, "bot", "wake", "set", id, "--config-stdin")
+		for _, e := range os.Environ() {
+			if !strings.HasPrefix(e, "MULTICA_") {
+				cmd.Env = append(cmd.Env, e)
+			}
+		}
+		cmd.Env = append(cmd.Env, "MULTICA_SERVER_URL="+api.URL, "MULTICA_TOKEN="+raw, "MULTICA_WORKSPACE_ID="+testWorkspaceID, "MULTICA_PROFILE_DIR="+t.TempDir())
+		cmd.Dir = t.TempDir()
+		cmd.Stdin = strings.NewReader(`{"inherit_owner_follows":false}`)
+		output, err := cmd.CombinedOutput()
+		t.Logf("CLI set inheritance: %s error=%v", output, err)
+		if err != nil || !bytes.Contains(output, []byte(`"inherit_owner_follows": false`)) {
+			t.Fatal("CLI inheritance failed")
+		}
+	}
+	t.Log("inheritance default false; enabled subscription/assignment delivered; disabling/unfollowing queued events holds pending; private source denied")
 }

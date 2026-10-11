@@ -22,7 +22,7 @@ func TestBotWakeCLIFileAndStdin(t *testing.T) {
 		}
 		if r.Method == "PUT" {
 			var body map[string]any
-			if json.NewDecoder(r.Body).Decode(&body) != nil || body["webhook_key"] != "Bearer fixture-secret" {
+			if json.NewDecoder(r.Body).Decode(&body) != nil || body["webhook_key"] != "Bearer fixture-secret" || body["inherit_owner_follows"] != true {
 				t.Error("wrong body")
 			}
 		}
@@ -31,7 +31,7 @@ func TestBotWakeCLIFileAndStdin(t *testing.T) {
 	defer srv.Close()
 	setCLITestServerEnv(t, srv.URL)
 	t.Setenv("MULTICA_TOKEN", "mat_test-token")
-	payload := `{"webhook_url":"https://receiver.example/hook","webhook_key":"Bearer fixture-secret"}`
+	payload := `{"webhook_url":"https://receiver.example/hook","webhook_key":"Bearer fixture-secret","inherit_owner_follows":true}`
 	for _, source := range []string{"file", "stdin"} {
 		cmd := &cobra.Command{}
 		cmd.Flags().String("output", "json", "")

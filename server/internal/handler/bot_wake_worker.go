@@ -119,6 +119,18 @@ func (w *BotWakeWorker) ProcessNext(ctx context.Context) (bool, error) {
 	if e.AuthorType == "bot" && e.AuthorID == e.BotID {
 		return pending("self wake suppressed")
 	}
+	if e.InheritedOwner {
+		if !rules.InheritOwnerFollows {
+			return pending("owner inheritance disabled")
+		}
+		follows, err := q.BotOwnerFollowsIssue(ctx, db.BotOwnerFollowsIssueParams{ID: e.IssueID, AssigneeID: bot.UserID})
+		if err != nil {
+			return true, err
+		}
+		if !follows.Bool {
+			return pending("owner no longer follows source")
+		}
+	}
 	rule, known := rules.WakeFrom[e.AuthorType]
 	if !known || rule.Mode == "none" || (rule.Mode == "list" && !slices.Contains(rule.IDs, uuidToString(e.AuthorID))) {
 		return pending("sender not allowed")

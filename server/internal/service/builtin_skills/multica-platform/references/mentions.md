@@ -280,13 +280,14 @@ It does not dispatch an internal agent. Resolve identities with the member-visib
 `chat_session_id`); administrators can also use `multica bot list --output json`.
 Mentioning a Bot grants no access. The Bot's PAT owner must already see the
 source. A mention starts following subsequent lifecycle events on that issue or
-messages in that chat; member assignments/subscriptions use the PAT owner.
+messages in that chat. Owner member issue subscriptions/assignments are inherited
+only when `inherit_owner_follows` is explicitly enabled (default false).
 
 - `multica bot wake get <bot-id>` reads receiver rules; no URL or key is returned.
 - `multica bot wake set <bot-id> --config-file ./wake.json` or `--config-stdin`
   updates only supplied fields. Secrets never go in arguments, comments or logs.
   Fields: `webhook_url`, `webhook_key` (write these together), `events` (array),
-  `hourly_limit`, `quiet_hours: {enabled,start,end,timezone}`. The key is the
+  `inherit_owner_follows` (boolean, default false), `hourly_limit`, `quiet_hours: {enabled,start,end,timezone}`. The key is the
   complete Authorization header value supplied by the receiver, including any
   scheme. Empty URL and key disconnect. Do not guess the receiver's scheme.
 - `multica bot wake events <bot-id> --limit 50 --before <next_cursor>` reads
