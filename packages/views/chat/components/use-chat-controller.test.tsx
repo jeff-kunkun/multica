@@ -92,6 +92,10 @@ const h = vi.hoisted(() => {
 });
 
 vi.mock("@multica/core/hooks", () => ({ useWorkspaceId: () => "ws-1" }));
+const routing = vi.hoisted(() => ({ available: false }));
+vi.mock("./use-routed-pick", () => ({
+  useRoutingPicksAgents: () => routing.available,
+}));
 vi.mock("@multica/core/platform", () => ({
   getCurrentWsId: () => "ws-1",
 }));
@@ -160,6 +164,7 @@ vi.mock("../../common/use-app-foreground", () => ({
   useAppForeground: () => h.appForeground.value,
 }));
 vi.mock("@multica/core/chat", () => ({
+  ROUTED_AGENT_ID: "routed",
   useChatStore: Object.assign(
     (sel: (s: typeof h.store) => unknown) => sel(h.store),
     { getState: () => h.store },
@@ -431,6 +436,50 @@ describe("useChatController project context", () => {
       expect.objectContaining({ linked_projects: [ref] }),
     );
     expect(h.linkedProjects.clearDraft).toHaveBeenCalled();
+  });
+
+  it("lazy-creates a routed chat with the brief and no agent_id (DENE-1834)", async () => {
+    routing.available = true;
+    h.store.activeSessionId = null;
+    h.store.selectedAgentId = "routed";
+    h.sessions = [];
+    h.agents = [agentA];
+    h.createSessionMutate.mockResolvedValue({
+      id: "new-session",
+      routing: { source: "档位", routed: true, agent_id: agentA.id, agent: agentA.name },
+    });
+    vi.mocked(api.sendChatMessage).mockResolvedValue({
+      message_id: "message-1",
+      task_id: "task-1",
+      created_at: new Date(0).toISOString(),
+    } as Awaited<ReturnType<typeof api.sendChatMessage>>);
+
+    const { result } = renderHook(() => useChatController());
+    expect(result.current.routedPick).toBe(true);
+    expect(result.current.activeAgent).toBeNull();
+    expect(result.current.isAgentRuntimeBound).toBe(true);
+    await act(async () => {
+      await result.current.handleSend("hello routed", undefined, vi.fn());
+    });
+    routing.available = false;
+
+    expect(h.createSessionMutate).toHaveBeenCalledWith(
+      expect.objectContaining({ brief: "hello routed" }),
+    );
+    expect(h.createSessionMutate).not.toHaveBeenCalledWith(
+      expect.objectContaining({ agent_id: expect.anything() }),
+    );
+  });
+
+  it("falls back to the first agent when routing is off even if the draft asked for it", () => {
+    routing.available = false;
+    h.store.activeSessionId = null;
+    h.store.selectedAgentId = "routed";
+    h.sessions = [];
+    h.agents = [agentA];
+    const { result } = renderHook(() => useChatController());
+    expect(result.current.routedPick).toBe(false);
+    expect(result.current.activeAgent?.id).toBe(agentA.id);
   });
 
   it("does not inherit the current session projects when starting a new chat", () => {

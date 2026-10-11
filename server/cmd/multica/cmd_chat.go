@@ -101,8 +101,15 @@ stuck (red), done (green). --history lists earlier lines, newest first.`,
 var chatToGoalCmd = &cobra.Command{
 	Use:   "to-goal",
 	Short: "Turn the current chat into a goal task",
-	Args:  cobra.NoArgs,
-	RunE:  runChatToGoal,
+	Long: `Turn the current chat into a goal task. With routing on, the executor is
+picked by routing like any ticket, not inherited from the chat; the result
+is printed as "routing" (source, agent, tier, reason). With routing off the
+chat's agent keeps it (人工).
+
+  multica chat to-goal --session <id> --output table
+`,
+	Args: cobra.NoArgs,
+	RunE: runChatToGoal,
 }
 
 var chatTicketsCmd = &cobra.Command{
@@ -467,6 +474,9 @@ func runChatToGoal(cmd *cobra.Command, _ []string) error {
 	if output == "table" {
 		issue, _ := out["issue"].(map[string]any)
 		fmt.Printf("Goal task: %v\n", issue["identifier"])
+		if routing, ok := out["routing"].(map[string]any); ok {
+			fmt.Println(routingReceiptLine(routing))
+		}
 		return nil
 	}
 	return cli.PrintJSON(os.Stdout, out)

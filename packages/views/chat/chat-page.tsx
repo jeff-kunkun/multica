@@ -68,6 +68,7 @@ import { AlignmentRecords } from "../issues/draft";
 import { useChatController } from "./components/use-chat-controller";
 import { OfflineBanner } from "./components/offline-banner";
 import { NoAgentBanner } from "./components/no-agent-banner";
+import { RoutedPickBanner } from "./components/routed-pick-banner";
 import { ArchivedAgentBanner } from "./components/archived-agent-banner";
 import { ChatOriginBar } from "./components/chat-origin-bar";
 import { AgentAccessRevokedBanner } from "./components/agent-access-revoked-banner";
@@ -490,7 +491,20 @@ export function ChatPage() {
   // "+" and the chord skip the agent picker: the chat continues with whoever
   // is already in play. The list "+" still opens the picker when there are
   // several agents, then lands in the same project.
+  // 「由路由选派」: a new chat with no agent; the server picks one on the first
+  // send (DENE-1834). Offered only while the workspace routes.
+  const startRouted = () => {
+    supersedeAgentIntent();
+    if (isCompact) conversationEntry.current = "inplace";
+    c.handleStartRoutedChat(draftProjectIdsForNewChat(projectFilter));
+    setComposingNew(true);
+  };
+
   const startDirect = () => {
+    if (c.routedPick) {
+      startRouted();
+      return;
+    }
     const agent = c.activeAgent;
     if (agent && !isAgentRuntimeBound(agent)) {
       toast.error(t(($) => $.input.runtime_required_toast));
@@ -628,11 +642,11 @@ export function ChatPage() {
   }, [isCurrentChatRoute, workspaceSlug, urlPrompt, urlProjectIds]);
   useEffect(() => {
     if (!queuedPrompt || sentPrompt.current === queuedPrompt.id || c.activeSessionId) return;
-    if (!c.agentsSettled && !c.activeAgent) return;
+    if (!c.agentsSettled && !c.activeAgent && !c.routedPick) return;
     sentPrompt.current = queuedPrompt.id;
     const { text } = queuedPrompt;
     setQueuedPrompt(null);
-    if (!c.activeAgent || !c.isAgentRuntimeBound) {
+    if ((!c.activeAgent && !c.routedPick) || !c.isAgentRuntimeBound) {
       c.prefillConversationStarter(text);
       return;
     }
@@ -640,7 +654,7 @@ export function ChatPage() {
       if (!sent) c.prefillConversationStarter(text);
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps -- send once the new chat and its agent are in place
-  }, [queuedPrompt, c.activeSessionId, c.activeAgent, c.agentsSettled, c.isAgentRuntimeBound]);
+  }, [queuedPrompt, c.activeSessionId, c.activeAgent, c.routedPick, c.agentsSettled, c.isAgentRuntimeBound]);
 
   const newChatChord = useShortcut("newChat");
   // A new chat starts in the project the list is filtered to, so that project's
@@ -655,6 +669,7 @@ export function ChatPage() {
       userId={c.user?.id}
       projects={newChatProjects}
       onStart={startNewChat}
+      onStartRouted={c.routingAvailable ? startRouted : undefined}
       side="bottom"
       shortcut={newChatChord}
     />
@@ -875,6 +890,8 @@ export function ChatPage() {
         <AgentAccessRevokedBanner agentName={c.activeAgent?.name} />
       ) : c.noAgent ? (
         <NoAgentBanner />
+      ) : c.routedPick || c.routingReceipt ? (
+        <RoutedPickBanner receipt={c.routingReceipt} />
       ) : c.isAgentArchived ? (
         <ArchivedAgentBanner agentName={c.activeAgent?.name} />
       ) : !c.isAgentRuntimeBound && c.activeAgent ? (

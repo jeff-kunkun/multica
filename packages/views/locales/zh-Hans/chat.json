@@ -225,7 +225,12 @@
     "history_group": "历史对话",
     "agent_filter_placeholder": "搜索智能体...",
     "agent_needs_runtime": "需绑定运行时",
-    "agent_needs_runtime_hint": "请先绑定运行时，再与该智能体开始对话"
+    "agent_needs_runtime_hint": "请先绑定运行时，再与该智能体开始对话",
+    "routed_pick": "由路由选派",
+    "routed_pick_hint": "不选智能体，发送后按内容和项目选一个",
+    "routed_pending": "由路由选派：发送后按内容和项目选智能体",
+    "routed_result": "由路由选派：",
+    "routed_result_offline": "（运行时离线，消息会排队等它上线）"
   },
   "empty_state": {
     "first_time_title": "和你的智能体对话",

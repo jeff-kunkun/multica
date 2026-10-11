@@ -276,7 +276,7 @@ func (r *Router) analysis(ctx context.Context, workspaceID string, settings Sett
 	r.analysisFailures.Delete(failureKey)
 	rec.Hash = issue.ContentHash
 	rec.Model = model
-	if cache, ok := r.Store.(AnalysisCache); ok && rec.Hash != "" {
+	if cache, ok := r.Store.(AnalysisCache); ok && rec.Hash != "" && issue.ID != "" {
 		// A cache that cannot be written only costs the next call; it never
 		// turns a good answer into a failed route.
 		if err := cache.SaveAnalysis(ctx, workspaceID, issue.ID, rec); err != nil {

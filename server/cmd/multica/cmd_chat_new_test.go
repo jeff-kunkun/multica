@@ -85,6 +85,57 @@ func TestRunChatNewCreatesSendsAndWaits(t *testing.T) {
 	}
 }
 
+func TestRunChatNewRoutesWhenNoAgentNamed(t *testing.T) {
+	t.Chdir(t.TempDir())
+	var created map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/api/chat/sessions":
+			_ = json.NewDecoder(r.Body).Decode(&created)
+			_ = json.NewEncoder(w).Encode(map[string]any{"id": "s-2", "title": "路由", "agent_id": "a-9",
+				"routing": map[string]any{"source": "档位", "routed": true, "agent_id": "a-9", "agent": "孙悟空", "tier": "strong", "reason": "小改动"}})
+		case r.Method == http.MethodPost && r.URL.Path == "/api/chat/sessions/s-2/messages":
+			_ = json.NewEncoder(w).Encode(map[string]any{"message_id": "m-1", "task_id": "t-1"})
+		default:
+			http.Error(w, r.Method+" "+r.URL.Path, http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+	clearAgentContext(t)
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_TOKEN", "mul_test")
+	out, err := captureStdout(t, func() error { return runChatNew(chatNewCmd, []string{"帮我看看"}) })
+	if err != nil {
+		t.Fatalf("chat new: %v", err)
+	}
+	if _, named := created["agent_id"]; named {
+		t.Fatalf("agent_id must be absent when routing picks: %v", created)
+	}
+	if created["brief"] != "帮我看看" {
+		t.Fatalf("brief = %v", created["brief"])
+	}
+	var printed map[string]any
+	if err := json.Unmarshal([]byte(out), &printed); err != nil {
+		t.Fatalf("output %q: %v", out, err)
+	}
+	routing, _ := printed["routing"].(map[string]any)
+	if routing["source"] != "档位" || routing["agent"] != "孙悟空" || printed["agent_id"] != "a-9" {
+		t.Fatalf("routing receipt missing from output: %v", printed)
+	}
+}
+
+func TestRoutingReceiptLine(t *testing.T) {
+	got := routingReceiptLine(map[string]any{"source": "档位", "agent": "孙悟空", "tier_label": "强", "reason": "小改动", "offline": true})
+	if got != "Agent: 孙悟空 [档位 · 强] 小改动 (offline)" {
+		t.Fatalf("line = %q", got)
+	}
+	if got := routingReceiptLine(map[string]any{"source": "无可用席位", "reason": "全员离线"}); got != "Agent: nobody [无可用席位] 全员离线" {
+		t.Fatalf("line = %q", got)
+	}
+}
+
 func TestRunChatNewRefusesAgentRuns(t *testing.T) {
 	t.Setenv("MULTICA_AGENT_ID", "a-1")
 	t.Setenv("MULTICA_TASK_ID", "t-1")

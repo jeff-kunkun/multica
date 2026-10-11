@@ -90,6 +90,9 @@ type IssueResponse struct {
 	// went to routing), or a refused in-flight reassignment with the commands
 	// to use instead.
 	AssigneeIgnoredReason string `json:"assignee_ignored_reason,omitempty"`
+	// Routing is set on a create that asked for route_sync (DENE-1834): who
+	// holds the executor slot and why, in the 自动选派 source words.
+	Routing *RoutingReceipt `json:"routing,omitempty"`
 	// ReviewerType / ReviewerID are the acceptance slot, shaped exactly like
 	// the assignee pair: a REFERENCE to an agent or a member, not a copy of a
 	// name, so renaming or archiving the target cannot leave stale text behind.
@@ -3369,6 +3372,13 @@ type CreateIssueRequest struct {
 	// otherwise ask the analysis model for (DENE-923). They are cached
 	// against this content, so editing the ticket later invalidates them.
 	RoutingFacts *routing.Facts `json:"routing_facts,omitempty"`
+
+	// RouteSync asks for the routing answer in this response (DENE-1834):
+	// the executor slot is filled inline and `routing` says who and why.
+	// Without it the slot is filled by the detached hook and the caller
+	// reads the 自动选派 comment later. Ignored when the caller's own
+	// executor stands; then `routing` just reports 人工.
+	RouteSync bool `json:"route_sync,omitempty"`
 }
 
 // UnmarshalJSON rejects duplicate object members before Go's ordinary map
@@ -3953,7 +3963,30 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 			slog.Warn("routing facts write failed", append(logger.RequestAttrs(r), "error", err, "issue_id", uuidToString(issue.ID))...)
 		}
 	}
-	h.RouteIssueAsync(r, workspaceID, uuidToString(issue.ID))
+	if req.RouteSync {
+		// The caller wants the answer now (DENE-1834). Same Route as the
+		// hook, run inline instead of detached; the hook is then skipped so
+		// the pass is not made twice.
+		if assigneeType.Valid {
+			rr := h.receiptForHeldSlot(r.Context(), workspaceID, assigneeType, assigneeID)
+			resp.Routing = &rr
+			h.RouteIssueAsync(r, workspaceID, uuidToString(issue.ID))
+		} else {
+			rr := h.routeIssueSync(r.Context(), workspaceID, uuidToString(issue.ID))
+			if assigneeIgnored && assigneeIgnoredReason != "" {
+				rr.Reason = assigneeIgnoredReason + "；" + rr.Reason
+			}
+			resp.Routing = &rr
+			if fresh, err := h.Queries.GetIssue(r.Context(), issue.ID); err == nil {
+				refreshed := issueToResponse(fresh, prefix)
+				resp.AssigneeType, resp.AssigneeID = refreshed.AssigneeType, refreshed.AssigneeID
+				resp.AssigneeSource, resp.AssigneeSourceUserID = refreshed.AssigneeSource, refreshed.AssigneeSourceUserID
+				resp.ReviewerType, resp.ReviewerID = refreshed.ReviewerType, refreshed.ReviewerID
+			}
+		}
+	} else {
+		h.RouteIssueAsync(r, workspaceID, uuidToString(issue.ID))
+	}
 	h.seatStagedParent(r, workspaceID, issue, creatorType, actualCreatorID)
 
 	writeJSON(w, http.StatusCreated, resp)

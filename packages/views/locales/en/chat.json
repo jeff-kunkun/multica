@@ -230,7 +230,12 @@
     "history_group": "Chat history",
     "agent_filter_placeholder": "Search agents...",
     "agent_needs_runtime": "Needs runtime",
-    "agent_needs_runtime_hint": "Bind a runtime before starting a chat with this agent"
+    "agent_needs_runtime_hint": "Bind a runtime before starting a chat with this agent",
+    "routed_pick": "Let routing pick",
+    "routed_pick_hint": "Name no agent; the router picks one from the message and project",
+    "routed_pending": "Routing picks the agent from the message and project once you send",
+    "routed_result": "Routed to: ",
+    "routed_result_offline": "(runtime offline; the message waits until it is back)"
   },
   "empty_state": {
     "first_time_title": "Chat with your agents",

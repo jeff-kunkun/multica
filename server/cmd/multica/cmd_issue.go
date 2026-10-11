@@ -297,6 +297,14 @@ func issueCreateLong() string {
 		"Sub-issues: --parent <issue>; --status todo starts an agent-assigned child\n" +
 		"at once, --status backlog --stage <N> parks a later stage until the stage\n" +
 		"before it finishes.\n\n" +
+		"Executor: leave --assignee out and routing picks the agent (tier by scope\n" +
+		"and risk, the project's direction, who is online). Outside an agent run the\n" +
+		"answer is waited for and printed as \"routing\": source (原话 / 人工 / 档位 /\n" +
+		"兜底), agent, tier, reason, candidates; --routing-wait=false returns at once\n" +
+		"and routing fills the slot in the background (read the 自动选派 comment).\n" +
+		"Name --assignee to choose yourself: a person's pick stands (人工); an\n" +
+		"agent's or a bot key's pick needs --per-quote on a todo ticket, otherwise\n" +
+		"routing decides and the response says assignee_ignored.\n\n" +
 		"Title style\n\n" + strings.TrimRight(titling.IssueTitleRules, "\n")
 }
 
@@ -909,6 +917,7 @@ func init() {
 	issueCreateCmd.Flags().Bool("allow-duplicate", false, "Allow creating an issue even when an active duplicate exists")
 	issueCreateCmd.Flags().Bool("goal", false, "Create a draft completion-line goal for this issue")
 	issueCreateCmd.Flags().String("routing-facts", "", `Routing facts as JSON, so routing skips the analysis call: {"scope":"small|module|cross_module","clarity":"clear|vague","risk":"low|medium|high","needs_human":false,"summary":"..."}`)
+	issueCreateCmd.Flags().Bool("routing-wait", true, "Wait for routing to pick the executor and print it as \"routing\" (who, why, tier). Default on for people and bot keys, off inside an agent run; =false returns at once and routing fills the slot in the background")
 	issueCreateCmd.Flags().String("output", "json", "Output format: table or json")
 	issueCreateCmd.Flags().StringSlice("attachment", nil, "File path(s) to attach (can be specified multiple times). Each file is uploaded and its markdown reference is appended to the description, which is what makes it render on the issue page")
 	issueCreateCmd.Flags().StringSlice("attachment-id", nil, "Existing attachment UUID(s) to bind to the created issue (can be specified multiple times)")
@@ -1956,6 +1965,12 @@ func runIssueCreate(cmd *cobra.Command, _ []string) error {
 		body["assignee_id"] = aID
 		addPerQuote(cmd, body)
 	}
+	if issueCreateRoutingWait(cmd) {
+		// Ask for the routing answer in the response (DENE-1834). Inside an
+		// agent run the default is off: the run should not sit on a model
+		// call it does not need, and the 自动选派 comment reaches it anyway.
+		body["route_sync"] = true
+	}
 
 	// Quick-create stamp: when the daemon sets MULTICA_QUICK_CREATE_TASK_ID
 	// before invoking the agent, the agent's `multica issue create` call
@@ -2036,10 +2051,24 @@ func runIssueCreate(cmd *cobra.Command, _ []string) error {
 			strVal(result, "priority"),
 		}}
 		cli.PrintTable(os.Stdout, headers, rows)
+		if routing, ok := result["routing"].(map[string]any); ok {
+			fmt.Println(routingReceiptLine(routing))
+		}
 		return nil
 	}
 
 	return cli.PrintJSON(os.Stdout, result)
+}
+
+// issueCreateRoutingWait decides whether this create asks the server for the
+// routing answer inline: the flag when set, otherwise on for people and bot
+// keys and off inside an agent run.
+func issueCreateRoutingWait(cmd *cobra.Command) bool {
+	if cmd.Flags().Changed("routing-wait") {
+		v, _ := cmd.Flags().GetBool("routing-wait")
+		return v
+	}
+	return !inAgentExecutionContext()
 }
 
 func verifyIssueCreateProperties(expected map[string]json.RawMessage, issue map[string]any) error {

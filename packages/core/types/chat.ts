@@ -113,6 +113,22 @@ export interface AgentChatPage {
   has_more: boolean;
 }
 
+/** How the chat's agent was chosen when the caller named none (DENE-1834).
+ *  `source` is the same label the issue router stamps on its comments
+ *  (原话 / 人工 / 档位 / 兜底); `routed` false means a person named the agent. */
+export interface ChatRoutingReceipt {
+  source: string;
+  routed: boolean;
+  agent_id?: string;
+  agent?: string;
+  tier?: string;
+  tier_label?: string;
+  reason?: string;
+  availability?: string;
+  offline?: boolean;
+  candidates?: string[];
+}
+
 export interface ChatSession {
   id: string;
   workspace_id: string;
@@ -169,6 +185,8 @@ export interface ChatSession {
   origin_session_id?: string | null;
   /** Parent title, only when the viewer can see the parent. Detail-only. */
   origin_title?: string | null;
+  /** Present on the create response only: who routing picked and why. */
+  routing?: ChatRoutingReceipt;
   created_at: string;
   updated_at: string;
 }

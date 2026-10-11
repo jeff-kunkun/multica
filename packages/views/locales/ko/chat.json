@@ -225,7 +225,12 @@
     "history_group": "채팅 기록",
     "agent_filter_placeholder": "에이전트 검색...",
     "agent_needs_runtime": "런타임 필요",
-    "agent_needs_runtime_hint": "이 에이전트와 채팅하기 전에 런타임을 연결하세요"
+    "agent_needs_runtime_hint": "이 에이전트와 채팅하기 전에 런타임을 연결하세요",
+    "routed_pick": "라우팅에 맡기기",
+    "routed_pick_hint": "에이전트를 지정하지 않고 내용과 프로젝트로 고릅니다",
+    "routed_pending": "보내면 내용과 프로젝트에 따라 에이전트를 고릅니다",
+    "routed_result": "라우팅 결과: ",
+    "routed_result_offline": "(런타임 오프라인, 메시지는 복귀까지 대기합니다)"
   },
   "empty_state": {
     "first_time_title": "에이전트와 채팅하기",
