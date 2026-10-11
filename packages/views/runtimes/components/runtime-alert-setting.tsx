@@ -22,8 +22,9 @@ export function RuntimeAlertSetting() {
       {query.isError ? (
         <Button variant="ghost" onClick={() => query.refetch()}>{t(($) => $.alerts.retry)}</Button>
       ) : (
-        <label className="flex min-h-11 min-w-11 cursor-pointer items-center justify-end">
+        <div className="flex min-h-11 min-w-11 items-center justify-center">
           <Switch
+            className="after:-inset-x-1.5 after:-inset-y-3.5"
             aria-label={t(($) => $.alerts.label)}
             checked={query.data?.preferences.runtime_alerts !== "muted"}
             disabled={query.isPending || mutation.isPending}
@@ -32,7 +33,7 @@ export function RuntimeAlertSetting() {
               { onError: () => toast.error(t(($) => $.alerts.save_failed)) },
             )}
           />
-        </label>
+        </div>
       )}
     </SettingsRow>
   );
