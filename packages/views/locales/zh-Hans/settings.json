@@ -435,7 +435,8 @@
       "routing": "路由",
       "project_sharing": "权限与共享",
       "workspace_links": "连通工作区",
-      "agent_permissions": "智能体权限"
+      "agent_permissions": "智能体权限",
+      "bots": "外部 Bot"
     },
     "groups": {
       "personal": "个人",
@@ -2131,5 +2132,63 @@
     "cancel": "取消",
     "saved": "已保存",
     "save_failed": "保存失败"
+  },
+  "bots": {
+    "title": "外部 Bot",
+    "description": "给外部 Bot 发一把和你同权的钥匙，Bot 用 multica 命令行直接查任务、改任务、聊天。",
+    "add": "添加 Bot",
+    "empty": "还没有 Bot",
+    "empty_hint": "添加后会拿到一段接入指令，整段发给 Bot 即可。",
+    "load_failed": "Bot 列表没加载出来，刷新页面再试。",
+    "type": {
+      "grok": "Grok"
+    },
+    "status": {
+      "active": "使用中",
+      "stopped": "已停用",
+      "expired": "已过期"
+    },
+    "meta": "{{type}} · {{lastUsed}} · {{created}} 添加",
+    "last_used": "最近使用 {{date}}",
+    "last_used_never": "还没用过",
+    "actions_aria": "{{name}} 的操作",
+    "new_key": "发新钥匙",
+    "stop": "停用",
+    "delete": "删除",
+    "cancel": "取消",
+    "expiry": {
+      "never": "永不过期",
+      "365": "1 年"
+    },
+    "add_dialog": {
+      "title": "添加 Bot",
+      "name": "名字",
+      "name_placeholder": "例如：Multica 管家",
+      "type": "类型",
+      "expiry": "钥匙有效期",
+      "submit": "生成钥匙",
+      "submitting": "生成中…"
+    },
+    "key_dialog": {
+      "title": "发给「{{name}}」的接入指令",
+      "description": "整段复制发给 Bot。钥匙只显示这一次，关掉后只能发新钥匙。",
+      "copy": "复制",
+      "copied": "已复制",
+      "done": "完成"
+    },
+    "stop_dialog": {
+      "title": "停用「{{name}}」？",
+      "description": "Bot 的下一条命令就会失败。之后可以发新钥匙恢复。"
+    },
+    "rotate_dialog": {
+      "title": "给「{{name}}」发新钥匙？",
+      "description": "旧钥匙立即失效，新的接入指令要再发给 Bot 一次。"
+    },
+    "delete_dialog": {
+      "title": "删除「{{name}}」？",
+      "description": "从列表里移除，不能恢复。"
+    },
+    "toast_stopped": "已停用 {{name}}",
+    "toast_failed": "没成功，再试一次。"
   }
 }

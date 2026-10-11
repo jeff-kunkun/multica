@@ -11,10 +11,58 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const createBotAccessToken = `-- name: CreateBotAccessToken :one
+
+INSERT INTO personal_access_token (user_id, name, token_hash, token_prefix, expires_at, kind, bot_type, workspace_id)
+VALUES ($1, $2, $3, $4, $5, 'bot', $6, $7)
+RETURNING id, user_id, name, token_hash, token_prefix, expires_at, last_used_at, revoked, created_at, kind, bot_type, workspace_id, revoked_at
+`
+
+type CreateBotAccessTokenParams struct {
+	UserID      pgtype.UUID        `json:"user_id"`
+	Name        string             `json:"name"`
+	TokenHash   string             `json:"token_hash"`
+	TokenPrefix string             `json:"token_prefix"`
+	ExpiresAt   pgtype.Timestamptz `json:"expires_at"`
+	BotType     pgtype.Text        `json:"bot_type"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+}
+
+// External bot keys (DENE-1788). A bot is a PAT row with kind = 'bot',
+// listed per workspace for the admin who added it. Stopped bots stay listed.
+func (q *Queries) CreateBotAccessToken(ctx context.Context, arg CreateBotAccessTokenParams) (PersonalAccessToken, error) {
+	row := q.db.QueryRow(ctx, createBotAccessToken,
+		arg.UserID,
+		arg.Name,
+		arg.TokenHash,
+		arg.TokenPrefix,
+		arg.ExpiresAt,
+		arg.BotType,
+		arg.WorkspaceID,
+	)
+	var i PersonalAccessToken
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.Name,
+		&i.TokenHash,
+		&i.TokenPrefix,
+		&i.ExpiresAt,
+		&i.LastUsedAt,
+		&i.Revoked,
+		&i.CreatedAt,
+		&i.Kind,
+		&i.BotType,
+		&i.WorkspaceID,
+		&i.RevokedAt,
+	)
+	return i, err
+}
+
 const createPersonalAccessToken = `-- name: CreatePersonalAccessToken :one
 INSERT INTO personal_access_token (user_id, name, token_hash, token_prefix, expires_at)
 VALUES ($1, $2, $3, $4, $5)
-RETURNING id, user_id, name, token_hash, token_prefix, expires_at, last_used_at, revoked, created_at
+RETURNING id, user_id, name, token_hash, token_prefix, expires_at, last_used_at, revoked, created_at, kind, bot_type, workspace_id, revoked_at
 `
 
 type CreatePersonalAccessTokenParams struct {
@@ -44,8 +92,31 @@ func (q *Queries) CreatePersonalAccessToken(ctx context.Context, arg CreatePerso
 		&i.LastUsedAt,
 		&i.Revoked,
 		&i.CreatedAt,
+		&i.Kind,
+		&i.BotType,
+		&i.WorkspaceID,
+		&i.RevokedAt,
 	)
 	return i, err
+}
+
+const deleteStoppedBotAccessToken = `-- name: DeleteStoppedBotAccessToken :execrows
+DELETE FROM personal_access_token
+WHERE id = $1 AND workspace_id = $2 AND user_id = $3 AND kind = 'bot' AND revoked = TRUE
+`
+
+type DeleteStoppedBotAccessTokenParams struct {
+	ID          pgtype.UUID `json:"id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	UserID      pgtype.UUID `json:"user_id"`
+}
+
+func (q *Queries) DeleteStoppedBotAccessToken(ctx context.Context, arg DeleteStoppedBotAccessTokenParams) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteStoppedBotAccessToken, arg.ID, arg.WorkspaceID, arg.UserID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const extendPersonalAccessTokenExpiry = `-- name: ExtendPersonalAccessTokenExpiry :one
@@ -83,8 +154,40 @@ func (q *Queries) ExtendPersonalAccessTokenExpiry(ctx context.Context, arg Exten
 	return expires_at, err
 }
 
+const getBotAccessToken = `-- name: GetBotAccessToken :one
+SELECT id, user_id, name, token_hash, token_prefix, expires_at, last_used_at, revoked, created_at, kind, bot_type, workspace_id, revoked_at FROM personal_access_token
+WHERE id = $1 AND workspace_id = $2 AND user_id = $3 AND kind = 'bot'
+`
+
+type GetBotAccessTokenParams struct {
+	ID          pgtype.UUID `json:"id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	UserID      pgtype.UUID `json:"user_id"`
+}
+
+func (q *Queries) GetBotAccessToken(ctx context.Context, arg GetBotAccessTokenParams) (PersonalAccessToken, error) {
+	row := q.db.QueryRow(ctx, getBotAccessToken, arg.ID, arg.WorkspaceID, arg.UserID)
+	var i PersonalAccessToken
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.Name,
+		&i.TokenHash,
+		&i.TokenPrefix,
+		&i.ExpiresAt,
+		&i.LastUsedAt,
+		&i.Revoked,
+		&i.CreatedAt,
+		&i.Kind,
+		&i.BotType,
+		&i.WorkspaceID,
+		&i.RevokedAt,
+	)
+	return i, err
+}
+
 const getPersonalAccessTokenByHash = `-- name: GetPersonalAccessTokenByHash :one
-SELECT id, user_id, name, token_hash, token_prefix, expires_at, last_used_at, revoked, created_at FROM personal_access_token
+SELECT id, user_id, name, token_hash, token_prefix, expires_at, last_used_at, revoked, created_at, kind, bot_type, workspace_id, revoked_at FROM personal_access_token
 WHERE token_hash = $1
   AND revoked = FALSE
   AND (expires_at IS NULL OR expires_at > now())
@@ -103,14 +206,99 @@ func (q *Queries) GetPersonalAccessTokenByHash(ctx context.Context, tokenHash st
 		&i.LastUsedAt,
 		&i.Revoked,
 		&i.CreatedAt,
+		&i.Kind,
+		&i.BotType,
+		&i.WorkspaceID,
+		&i.RevokedAt,
 	)
 	return i, err
 }
 
+const listBotAccessTokens = `-- name: ListBotAccessTokens :many
+SELECT id, user_id, name, token_hash, token_prefix, expires_at, last_used_at, revoked, created_at, kind, bot_type, workspace_id, revoked_at FROM personal_access_token
+WHERE workspace_id = $1 AND user_id = $2 AND kind = 'bot'
+ORDER BY revoked, created_at DESC
+`
+
+type ListBotAccessTokensParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	UserID      pgtype.UUID `json:"user_id"`
+}
+
+func (q *Queries) ListBotAccessTokens(ctx context.Context, arg ListBotAccessTokensParams) ([]PersonalAccessToken, error) {
+	rows, err := q.db.Query(ctx, listBotAccessTokens, arg.WorkspaceID, arg.UserID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []PersonalAccessToken{}
+	for rows.Next() {
+		var i PersonalAccessToken
+		if err := rows.Scan(
+			&i.ID,
+			&i.UserID,
+			&i.Name,
+			&i.TokenHash,
+			&i.TokenPrefix,
+			&i.ExpiresAt,
+			&i.LastUsedAt,
+			&i.Revoked,
+			&i.CreatedAt,
+			&i.Kind,
+			&i.BotType,
+			&i.WorkspaceID,
+			&i.RevokedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listBotSetupDomains = `-- name: ListBotSetupDomains :many
+SELECT d.name AS domain_name, COALESCE(a.name, '')::text AS agent_name
+FROM workspace_domain d
+LEFT JOIN agent a ON a.workspace_id = d.workspace_id AND a.domain_id = d.id AND a.archived_at IS NULL
+WHERE d.workspace_id = $1
+ORDER BY d.position, d.created_at, a.name
+`
+
+type ListBotSetupDomainsRow struct {
+	DomainName string `json:"domain_name"`
+	AgentName  string `json:"agent_name"`
+}
+
+// The workspace's directions with the live specialisation covering each, for
+// the setup text a new bot is given.
+func (q *Queries) ListBotSetupDomains(ctx context.Context, workspaceID pgtype.UUID) ([]ListBotSetupDomainsRow, error) {
+	rows, err := q.db.Query(ctx, listBotSetupDomains, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListBotSetupDomainsRow{}
+	for rows.Next() {
+		var i ListBotSetupDomainsRow
+		if err := rows.Scan(&i.DomainName, &i.AgentName); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listPersonalAccessTokensByUser = `-- name: ListPersonalAccessTokensByUser :many
-SELECT id, user_id, name, token_hash, token_prefix, expires_at, last_used_at, revoked, created_at FROM personal_access_token
+SELECT id, user_id, name, token_hash, token_prefix, expires_at, last_used_at, revoked, created_at, kind, bot_type, workspace_id, revoked_at FROM personal_access_token
 WHERE user_id = $1
   AND revoked = FALSE
+  AND kind = 'personal'
 ORDER BY created_at DESC
 `
 
@@ -133,6 +321,10 @@ func (q *Queries) ListPersonalAccessTokensByUser(ctx context.Context, userID pgt
 			&i.LastUsedAt,
 			&i.Revoked,
 			&i.CreatedAt,
+			&i.Kind,
+			&i.BotType,
+			&i.WorkspaceID,
+			&i.RevokedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -161,6 +353,87 @@ func (q *Queries) RevokePersonalAccessToken(ctx context.Context, arg RevokePerso
 	var token_hash string
 	err := row.Scan(&token_hash)
 	return token_hash, err
+}
+
+const rotateBotAccessToken = `-- name: RotateBotAccessToken :one
+UPDATE personal_access_token
+SET token_hash = $4, token_prefix = $5, expires_at = $6,
+    revoked = FALSE, revoked_at = NULL, last_used_at = NULL
+WHERE id = $1 AND workspace_id = $2 AND user_id = $3 AND kind = 'bot'
+RETURNING id, user_id, name, token_hash, token_prefix, expires_at, last_used_at, revoked, created_at, kind, bot_type, workspace_id, revoked_at
+`
+
+type RotateBotAccessTokenParams struct {
+	ID          pgtype.UUID        `json:"id"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	UserID      pgtype.UUID        `json:"user_id"`
+	TokenHash   string             `json:"token_hash"`
+	TokenPrefix string             `json:"token_prefix"`
+	ExpiresAt   pgtype.Timestamptz `json:"expires_at"`
+}
+
+// A new key for the same bot: the old hash stops matching at once and a
+// stopped bot comes back. Last use restarts with the new key.
+func (q *Queries) RotateBotAccessToken(ctx context.Context, arg RotateBotAccessTokenParams) (PersonalAccessToken, error) {
+	row := q.db.QueryRow(ctx, rotateBotAccessToken,
+		arg.ID,
+		arg.WorkspaceID,
+		arg.UserID,
+		arg.TokenHash,
+		arg.TokenPrefix,
+		arg.ExpiresAt,
+	)
+	var i PersonalAccessToken
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.Name,
+		&i.TokenHash,
+		&i.TokenPrefix,
+		&i.ExpiresAt,
+		&i.LastUsedAt,
+		&i.Revoked,
+		&i.CreatedAt,
+		&i.Kind,
+		&i.BotType,
+		&i.WorkspaceID,
+		&i.RevokedAt,
+	)
+	return i, err
+}
+
+const stopBotAccessToken = `-- name: StopBotAccessToken :one
+UPDATE personal_access_token
+SET revoked = TRUE, revoked_at = COALESCE(revoked_at, now())
+WHERE id = $1 AND workspace_id = $2 AND user_id = $3 AND kind = 'bot'
+RETURNING id, user_id, name, token_hash, token_prefix, expires_at, last_used_at, revoked, created_at, kind, bot_type, workspace_id, revoked_at
+`
+
+type StopBotAccessTokenParams struct {
+	ID          pgtype.UUID `json:"id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	UserID      pgtype.UUID `json:"user_id"`
+}
+
+func (q *Queries) StopBotAccessToken(ctx context.Context, arg StopBotAccessTokenParams) (PersonalAccessToken, error) {
+	row := q.db.QueryRow(ctx, stopBotAccessToken, arg.ID, arg.WorkspaceID, arg.UserID)
+	var i PersonalAccessToken
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.Name,
+		&i.TokenHash,
+		&i.TokenPrefix,
+		&i.ExpiresAt,
+		&i.LastUsedAt,
+		&i.Revoked,
+		&i.CreatedAt,
+		&i.Kind,
+		&i.BotType,
+		&i.WorkspaceID,
+		&i.RevokedAt,
+	)
+	return i, err
 }
 
 const updatePersonalAccessTokenLastUsed = `-- name: UpdatePersonalAccessTokenLastUsed :exec

@@ -2044,6 +2044,18 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Delete("/telegram/installations/{installationId}", h.RevokeTelegramInstallation)
 					r.Post("/telegram/install", h.RegisterTelegramBot)
 				})
+
+				// External bot keys (DENE-1788): admin-only, and never from an
+				// agent's task token — a key carries the caller's full power.
+				r.Group(func(r chi.Router) {
+					r.Use(middleware.RequireWorkspaceRoleFromURL(queries, "id", "owner", "admin"))
+					r.Use(handler.RequireHumanActor)
+					r.Get("/bots", h.ListBots)
+					r.Post("/bots", h.CreateBot)
+					r.Post("/bots/{botId}/rotate", h.RotateBotKey)
+					r.Post("/bots/{botId}/stop", h.StopBot)
+					r.Delete("/bots/{botId}", h.DeleteBot)
+				})
 			})
 		})
 

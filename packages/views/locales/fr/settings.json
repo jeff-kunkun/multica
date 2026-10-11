@@ -436,7 +436,8 @@
       "routing": "Routage",
       "project_sharing": "Autorisations et partage",
       "workspace_links": "Espaces liés",
-      "agent_permissions": "Permissions des agents"
+      "agent_permissions": "Permissions des agents",
+      "bots": "External bots"
     },
     "groups": {
       "personal": "Personnel",
@@ -2147,5 +2148,63 @@
     "cancel": "Annuler",
     "saved": "Enregistré",
     "save_failed": "Échec de l'enregistrement"
+  },
+  "bots": {
+    "title": "External bots",
+    "description": "Give an external bot a key with your own access; it uses the multica CLI to read and update issues and chats.",
+    "add": "Add bot",
+    "empty": "No bots yet",
+    "empty_hint": "Adding one gives you setup text to paste to the bot.",
+    "load_failed": "Couldn't load bots. Refresh the page to try again.",
+    "type": {
+      "grok": "Grok"
+    },
+    "status": {
+      "active": "Active",
+      "stopped": "Stopped",
+      "expired": "Expired"
+    },
+    "meta": "{{type}} · {{lastUsed}} · added {{created}}",
+    "last_used": "Last used {{date}}",
+    "last_used_never": "Never used",
+    "actions_aria": "Actions for {{name}}",
+    "new_key": "New key",
+    "stop": "Stop",
+    "delete": "Delete",
+    "cancel": "Cancel",
+    "expiry": {
+      "never": "Never expires",
+      "365": "1 year"
+    },
+    "add_dialog": {
+      "title": "Add bot",
+      "name": "Name",
+      "name_placeholder": "e.g. Multica Steward",
+      "type": "Type",
+      "expiry": "Key expires",
+      "submit": "Create key",
+      "submitting": "Creating…"
+    },
+    "key_dialog": {
+      "title": "Setup text for {{name}}",
+      "description": "Copy all of it to the bot. The key is shown only once; after closing you can only issue a new one.",
+      "copy": "Copy",
+      "copied": "Copied",
+      "done": "Done"
+    },
+    "stop_dialog": {
+      "title": "Stop {{name}}?",
+      "description": "The bot's next command will fail. Issue a new key to bring it back."
+    },
+    "rotate_dialog": {
+      "title": "Issue a new key for {{name}}?",
+      "description": "The old key stops working now; send the new setup text to the bot."
+    },
+    "delete_dialog": {
+      "title": "Delete {{name}}?",
+      "description": "Removes it from the list. This can't be undone."
+    },
+    "toast_stopped": "Stopped {{name}}",
+    "toast_failed": "That didn't work. Try again."
   }
 }

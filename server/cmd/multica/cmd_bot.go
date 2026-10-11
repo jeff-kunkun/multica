@@ -1,0 +1,259 @@
+package main
+
+import (
+	"context"
+	"fmt"
+	"net/url"
+	"os"
+	"strings"
+
+	"github.com/spf13/cobra"
+
+	"github.com/multica-ai/multica/server/internal/cli"
+)
+
+// ---------------------------------------------------------------------------
+// Bot commands — external bot keys (DENE-1788). Same server routes as the
+// "External bots" settings page; workspace owner/admin only, and refused for
+// an agent's task token.
+// ---------------------------------------------------------------------------
+
+var botCmd = &cobra.Command{
+	Use:   "bot",
+	Short: "Add external bots (Grok, ...) and manage their keys",
+	Long: `An external bot gets a key with the same power as the admin who adds it.
+Only workspace owners and admins can add bots, and only from their own login
+(an agent's task token is refused). The full key and the setup text to paste
+to the bot are shown once, when the key is issued.`,
+}
+
+var botListCmd = &cobra.Command{
+	Use:   "list",
+	Short: "List the bots you added in this workspace",
+	Args:  exactArgs(0),
+	RunE:  runBotList,
+}
+
+var botAddCmd = &cobra.Command{
+	Use:   "add",
+	Short: "Add a bot and print the setup text to paste to it",
+	Example: `  multica bot add --name "Multica 管家"
+  multica bot add --name "个人事务" --expires-in-days 365 --output json`,
+	Args: exactArgs(0),
+	RunE: runBotAdd,
+}
+
+var botKeyCmd = &cobra.Command{
+	Use:   "key <bot>",
+	Short: "Issue a new key for a bot; the old key stops working at once",
+	Long: `Issue a new key for a bot (by id, id prefix or exact name). The old key
+stops working immediately; a stopped bot comes back with the new key.`,
+	Args: exactArgs(1),
+	RunE: runBotKey,
+}
+
+var botStopCmd = &cobra.Command{
+	Use:   "stop <bot>",
+	Short: "Stop a bot: its key fails with 401 from the next call",
+	Args:  exactArgs(1),
+	RunE:  runBotStop,
+}
+
+var botDeleteCmd = &cobra.Command{
+	Use:   "delete <bot>",
+	Short: "Remove a stopped bot from the list",
+	Args:  exactArgs(1),
+	RunE:  runBotDelete,
+}
+
+func init() {
+	botCmd.AddCommand(botListCmd, botAddCmd, botKeyCmd, botStopCmd, botDeleteCmd)
+
+	botListCmd.Flags().String("output", "table", "Output format: table or json")
+	botListCmd.Flags().Bool("full-id", false, "Show full UUIDs in table output")
+
+	botAddCmd.Flags().String("name", "", "Bot name (required)")
+	botAddCmd.Flags().String("type", "grok", "Bot type: grok")
+	botAddCmd.Flags().Int("expires-in-days", 0, "Key lifetime in days; 0 = never expires")
+	botAddCmd.Flags().String("output", "text", "Output format: text (setup text) or json")
+
+	botKeyCmd.Flags().Int("expires-in-days", -1, "Key lifetime in days; 0 = never expires (default: keep the bot's current kind)")
+	botKeyCmd.Flags().String("output", "text", "Output format: text (setup text) or json")
+
+	botStopCmd.Flags().String("output", "json", "Output format: table or json")
+}
+
+func botsPath(wsID string) string {
+	return "/api/workspaces/" + url.PathEscape(wsID) + "/bots"
+}
+
+func runBotList(cmd *cobra.Command, _ []string) error {
+	client, wsID, ctx, cancel, err := botClient(cmd)
+	if err != nil {
+		return err
+	}
+	defer cancel()
+	var bots []map[string]any
+	if err := client.GetJSON(ctx, botsPath(wsID), &bots); err != nil {
+		return fmt.Errorf("list bots: %w", err)
+	}
+	if output, _ := cmd.Flags().GetString("output"); output == "json" {
+		return cli.PrintJSON(os.Stdout, bots)
+	}
+	fullID, _ := cmd.Flags().GetBool("full-id")
+	rows := make([][]string, 0, len(bots))
+	for _, b := range bots {
+		lastUsed := strVal(b, "last_used_at")
+		if lastUsed == "" {
+			lastUsed = "never"
+		} else if len(lastUsed) >= 16 {
+			lastUsed = strings.Replace(lastUsed[:16], "T", " ", 1)
+		}
+		created := strVal(b, "created_at")
+		if len(created) >= 10 {
+			created = created[:10]
+		}
+		rows = append(rows, []string{
+			displayID(strVal(b, "id"), fullID),
+			strVal(b, "name"),
+			strVal(b, "type"),
+			strVal(b, "status"),
+			created,
+			lastUsed,
+		})
+	}
+	cli.PrintTable(os.Stdout, []string{"ID", "NAME", "TYPE", "STATUS", "CREATED", "LAST USED"}, rows)
+	return nil
+}
+
+func runBotAdd(cmd *cobra.Command, _ []string) error {
+	name, _ := cmd.Flags().GetString("name")
+	if strings.TrimSpace(name) == "" {
+		return fmt.Errorf("--name is required")
+	}
+	client, wsID, ctx, cancel, err := botClient(cmd)
+	if err != nil {
+		return err
+	}
+	defer cancel()
+	botType, _ := cmd.Flags().GetString("type")
+	body := map[string]any{"name": name, "type": botType}
+	if days, _ := cmd.Flags().GetInt("expires-in-days"); days > 0 {
+		body["expires_in_days"] = days
+	}
+	var resp map[string]any
+	if err := client.PostJSON(ctx, botsPath(wsID), body, &resp); err != nil {
+		return fmt.Errorf("add bot: %w", err)
+	}
+	return printBotKey(cmd, resp)
+}
+
+func runBotKey(cmd *cobra.Command, args []string) error {
+	client, wsID, ctx, cancel, err := botClient(cmd)
+	if err != nil {
+		return err
+	}
+	defer cancel()
+	id, err := resolveBotID(ctx, client, wsID, args[0])
+	if err != nil {
+		return err
+	}
+	body := map[string]any{}
+	if days, _ := cmd.Flags().GetInt("expires-in-days"); days >= 0 {
+		body["expires_in_days"] = days
+	}
+	var resp map[string]any
+	if err := client.PostJSON(ctx, botsPath(wsID)+"/"+id+"/rotate", body, &resp); err != nil {
+		return fmt.Errorf("issue bot key: %w", err)
+	}
+	return printBotKey(cmd, resp)
+}
+
+func runBotStop(cmd *cobra.Command, args []string) error {
+	client, wsID, ctx, cancel, err := botClient(cmd)
+	if err != nil {
+		return err
+	}
+	defer cancel()
+	id, err := resolveBotID(ctx, client, wsID, args[0])
+	if err != nil {
+		return err
+	}
+	var bot map[string]any
+	if err := client.PostJSON(ctx, botsPath(wsID)+"/"+id+"/stop", map[string]any{}, &bot); err != nil {
+		return fmt.Errorf("stop bot: %w", err)
+	}
+	if output, _ := cmd.Flags().GetString("output"); output == "table" {
+		fmt.Fprintf(os.Stdout, "Stopped %s; its key now fails with 401.\n", strVal(bot, "name"))
+		return nil
+	}
+	return cli.PrintJSON(os.Stdout, bot)
+}
+
+func runBotDelete(cmd *cobra.Command, args []string) error {
+	client, wsID, ctx, cancel, err := botClient(cmd)
+	if err != nil {
+		return err
+	}
+	defer cancel()
+	id, err := resolveBotID(ctx, client, wsID, args[0])
+	if err != nil {
+		return err
+	}
+	if err := client.DeleteJSON(ctx, botsPath(wsID)+"/"+id); err != nil {
+		return fmt.Errorf("delete bot: %w", err)
+	}
+	fmt.Fprintln(os.Stderr, "Deleted.")
+	return nil
+}
+
+func botClient(cmd *cobra.Command) (*cli.APIClient, string, context.Context, context.CancelFunc, error) {
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return nil, "", nil, nil, err
+	}
+	wsID, err := requireWorkspaceID(cmd)
+	if err != nil {
+		return nil, "", nil, nil, err
+	}
+	ctx, cancel := cli.APIContext(context.Background())
+	return client, wsID, ctx, cancel, nil
+}
+
+// printBotKey prints the setup text (stdout) for the human to paste, or the
+// whole response as JSON. The key is not shown again after this.
+func printBotKey(cmd *cobra.Command, resp map[string]any) error {
+	if output, _ := cmd.Flags().GetString("output"); output == "json" {
+		return cli.PrintJSON(os.Stdout, resp)
+	}
+	fmt.Fprintln(os.Stderr, "Paste the text below to the bot. The key is shown only this once.")
+	fmt.Fprintln(os.Stderr)
+	fmt.Fprint(os.Stdout, strVal(resp, "setup_text"))
+	return nil
+}
+
+// resolveBotID accepts a full id, an id prefix or an exact bot name.
+func resolveBotID(ctx context.Context, client *cli.APIClient, wsID, ref string) (string, error) {
+	var bots []map[string]any
+	if err := client.GetJSON(ctx, botsPath(wsID), &bots); err != nil {
+		return "", fmt.Errorf("list bots: %w", err)
+	}
+	var matches []string
+	for _, b := range bots {
+		id := strVal(b, "id")
+		if id == ref || strVal(b, "name") == ref {
+			return id, nil
+		}
+		if strings.HasPrefix(id, ref) {
+			matches = append(matches, id)
+		}
+	}
+	switch len(matches) {
+	case 1:
+		return matches[0], nil
+	case 0:
+		return "", fmt.Errorf("no bot matches %q (see multica bot list)", ref)
+	default:
+		return "", fmt.Errorf("%q matches %d bots; use a longer id", ref, len(matches))
+	}
+}

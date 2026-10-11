@@ -29,6 +29,7 @@ import {
   FolderKanban,
   Link2,
   Network,
+  Bot,
   BotMessageSquare,
 } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
@@ -51,6 +52,7 @@ import { WorkspaceAvatar } from "../../workspace/workspace-avatar";
 import { AccountTab } from "./account-tab";
 import { PreferencesTab } from "./preferences-tab";
 import { TokensTab } from "./tokens-tab";
+import { BotsTab } from "./bots-tab";
 import { WorkspaceTab } from "./workspace-tab";
 import { MembersTab } from "./members-tab";
 import { CodeTab } from "./code-tab";
@@ -133,6 +135,9 @@ export function SettingsPage({ extraDeviceTabs = [] }: SettingsPageProps = {}) {
   const isMember = role === "member";
   // Member management is owner-only (DENE-1022): only owners get the nav entry.
   const isOwner = role === "owner";
+  // External bot keys (DENE-1788) carry the admin's own power: owners and
+  // admins only, and the entry is hidden (not locked) for everyone else.
+  const isAdmin = role === "owner" || role === "admin";
   const navigation = useNavigation();
   const pluginsEnabled = useFeatureEnabled(PLUGINS_V1_FLAG, false);
   const billingEnabled = useFeatureEnabled(
@@ -326,6 +331,9 @@ export function SettingsPage({ extraDeviceTabs = [] }: SettingsPageProps = {}) {
               MessagesSquare,
               <ChannelsTab />,
             ),
+            ...(isAdmin
+              ? [entry("bots", t(($) => $.page.tabs.bots), Bot, <BotsTab />)]
+              : []),
             entry("mcp", t(($) => $.page.tabs.mcp), Server, <McpTab />, {
               adminOnly: true,
             }),
