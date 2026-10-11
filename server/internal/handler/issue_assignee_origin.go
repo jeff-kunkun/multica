@@ -8,7 +8,6 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 
-	"github.com/multica-ai/multica/server/internal/botsource"
 	"github.com/multica-ai/multica/server/internal/routing"
 	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/util"
@@ -64,8 +63,11 @@ func (h *Handler) rulePick(
 	assigneeType pgtype.Text, assigneeID pgtype.UUID, quote, resultingStatus string,
 	held *heldExecutor, scene sceneRef,
 ) assignmentRuling {
-	if actorType != "agent" && !botsource.FromContext(r.Context()).ID.Valid {
-		// A person's own hand. Whatever quote they sent is not needed.
+	if actorType != "agent" {
+		// A person's own hand, directly or through a bot key (DENE-1834): the
+		// key acts for the member who holds it, the write already carries its
+		// via_bot provenance, and routing only fills an empty slot. Whatever
+		// quote they sent is not needed.
 		ruling := assignmentRuling{Apply: true, Source: routing.SourceHuman}
 		if id, err := util.ParseUUID(actorID); err == nil && actorType == "member" {
 			ruling.SourceUser = id

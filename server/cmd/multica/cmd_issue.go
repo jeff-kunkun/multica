@@ -302,9 +302,10 @@ func issueCreateLong() string {
 		"answer is waited for and printed as \"routing\": source (原话 / 人工 / 档位 /\n" +
 		"兜底), agent, tier, reason, candidates; --routing-wait=false returns at once\n" +
 		"and routing fills the slot in the background (read the 自动选派 comment).\n" +
-		"Name --assignee to choose yourself: a person's pick stands (人工); an\n" +
-		"agent's or a bot key's pick needs --per-quote on a todo ticket, otherwise\n" +
-		"routing decides and the response says assignee_ignored.\n\n" +
+		"Name --assignee to choose yourself: a person's pick stands (人工), and so\n" +
+		"does a bot key's — it acts for the member who holds it; an agent's pick\n" +
+		"needs --per-quote on a todo ticket, otherwise routing decides and the\n" +
+		"response says assignee_ignored.\n\n" +
 		"Title style\n\n" + strings.TrimRight(titling.IssueTitleRules, "\n")
 }
 

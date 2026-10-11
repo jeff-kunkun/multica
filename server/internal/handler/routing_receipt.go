@@ -8,6 +8,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/multica-ai/multica/server/internal/botsource"
 	"github.com/multica-ai/multica/server/internal/routing"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -138,7 +139,7 @@ func heldSource(source string) routing.PickReason {
 // receiptForNamedAgent is the receipt for an agent the caller chose itself:
 // 人工, with the runtime word so a seat on an offline machine is said now.
 func (h *Handler) receiptForNamedAgent(ctx context.Context, workspaceID string, agent db.Agent) RoutingReceipt {
-	rr := RoutingReceipt{Source: ReceiptSourceHuman, AgentID: util.UUIDToString(agent.ID), Agent: agent.Name, Reason: "调用方指定"}
+	rr := RoutingReceipt{Source: ReceiptSourceHuman, AgentID: util.UUIDToString(agent.ID), Agent: agent.Name, Reason: namedByCaller(ctx)}
 	rr.Availability, rr.Offline = h.agentAvailability(ctx, workspaceID, rr.AgentID)
 	if rr.Offline {
 		rr.Reason += "；该智能体的运行时离线，消息会排队等它上线"
@@ -234,7 +235,20 @@ func (h *Handler) receiptForHeldSlot(ctx context.Context, workspaceID string, as
 		if agent, err := h.agentInWorkspace(ctx, workspaceID, util.UUIDToString(assigneeID)); err == nil {
 			return h.receiptForNamedAgent(ctx, workspaceID, agent)
 		}
-		return RoutingReceipt{Source: ReceiptSourceHuman, AgentID: util.UUIDToString(assigneeID), Reason: "调用方指定"}
+		return RoutingReceipt{Source: ReceiptSourceHuman, AgentID: util.UUIDToString(assigneeID), Reason: namedByCaller(ctx)}
 	}
-	return RoutingReceipt{Source: ReceiptSourceHuman, Reason: "执行人是人，调用方指定"}
+	return RoutingReceipt{Source: ReceiptSourceHuman, Reason: "执行人是人，" + namedByCaller(ctx)}
+}
+
+// namedByCaller is the 人工 reason sentence: a bot key names the bot it came
+// through, so the receipt says whose hand it was.
+func namedByCaller(ctx context.Context) string {
+	if src := botsource.FromContext(ctx); src.ID.Valid {
+		name := strings.TrimSpace(src.Name)
+		if name == "" {
+			name = "Bot"
+		}
+		return "调用方经 " + name + " 指定"
+	}
+	return "调用方指定"
 }

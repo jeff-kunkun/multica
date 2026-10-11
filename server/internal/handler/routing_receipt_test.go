@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgtype"
@@ -70,11 +71,11 @@ func TestHumanNamedExecutorReceiptIsManual(t *testing.T) {
 	}
 }
 
-func TestBotKeyNamedExecutorIsDroppedAndRouted(t *testing.T) {
+func TestBotKeyNamedExecutorStandsAsHuman(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
 	}
-	seat := routableSeat(t, "Receipt Seat bot-named")
+	routableSeat(t, "Receipt Seat bot-named")
 	other := createHandlerTestAgent(t, "Receipt Other bot-named", []byte("[]"))
 	req := asBotKey(newRequest(http.MethodPost, "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
 		"title": "bot key names an agent without a quote", "status": "todo", "route_sync": true,
@@ -83,12 +84,15 @@ func TestBotKeyNamedExecutorIsDroppedAndRouted(t *testing.T) {
 	resp := testutil.Call(t, testHandler.CreateIssue, req).Want(http.StatusCreated).Map()
 	id := resp["id"].(string)
 	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1`, id) })
-	if resp["assignee_ignored"] != true {
-		t.Fatalf("bot key's pick was applied: %v", resp)
+	if resp["assignee_ignored"] == true || resp["assignee_id"] != other {
+		t.Fatalf("bot key's pick was dropped: %v", resp)
 	}
 	rr := receiptOf(t, resp)
-	if rr["routed"] != true || rr["agent_id"] != seat {
-		t.Fatalf("receipt = %v, want routing to pick %s over the bot's %s", rr, seat, other)
+	if rr["routed"] != false || rr["source"] != string(routing.PickReasonHuman) || rr["agent_id"] != other {
+		t.Fatalf("receipt = %v, want 人工 for the bot's %s", rr, other)
+	}
+	if reason, _ := rr["reason"].(string); !strings.Contains(reason, "Feishu Bot") {
+		t.Fatalf("receipt reason = %q, want the bot named", reason)
 	}
 }
 
