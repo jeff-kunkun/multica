@@ -100,3 +100,26 @@ PR #634 已 squash 合入 `kun`，功能提交 `7121f543`。本轮不修改实�
 17:26Z CLI 构建成功：[v0.6.3-test.7 Release](https://github.com/kkunkunya/multica-image-builder/releases/tag/v0.6.3-test.7) 非 draft，五份资产均 uploaded 且大小通过流水线核对。本机下载两种命名的 amd64/arm64 四包及 checksums.txt，逐份 SHA256 校验全部通过。amd64 包为 10,773,932 字节、SHA256 `67391b23c077d87c03057db106cc2f82e9011c6917bfcd79832c9a2b37203fb4`；arm64 包为 9,765,815 字节、SHA256 `623f98062563072945a1875f82cba0ac98a7ee3dcd959e52ebfa27910621a7bc`。同架构旧命名包与版本命名包字节相同。
 
 平台接受了生产 Grok 运行时的 test.7 升级请求，ID `10be11f1301654ca6d34b9ef1c776452`，返回 `pending`，**尚未确认安装成功**。该守护进程没有设置 `MULTICA_RELEASE_REPO`，下一轮须核对下载源：产物在借用仓库，不能把请求排队当成升级成功，也不要重复排队。若默认源下载失败，按发版文档的固定 tag 下载、校验流程处理，再确认运行中守护进程版本。自建镜像构建仍在运行；原生与实际消息验收仍待后续步骤。
+
+## 真实投递与环境复核（2026-10-11 17:56 UTC）
+
+- 镜像构建 38159520015 成功；ai-multica 自动更新回执在 17:37:04Z 与 17:47:05Z 均为 deployed_commit=target_commit=9e827e990a63dcc998f62f213b2784373bea5ec5、result=noop、error为空。没有手工部署 backend/web。
+- Linux amd64 包重新下载并校验 SHA256 67391b23c077d87c03057db106cc2f82e9011c6917bfcd79832c9a2b37203fb4；解出的二进制 SHA256 9e29209eec4ea53dcfc98bce21de0a3a3dc54a0f8e3131a9b06119475bdca733。第一次在 scp 尚未结束时尝试版本检查因 Text file busy 退出，尚未停止服务；传输完成且校验二进制后才执行升级。
+- ai-multica 守护进程无子任务时从 test.6 更新到 test.7，systemd active、线上 Grok runtime.metadata.cli_version=0.6.3-test.7。旧版保留在 /usr/local/bin/multica.dene1808-test6-backup，执行 version 仍报告 test.6；没有把生产服务退回旧版。
+- WD 一次性验收任务 WDGA-25：路由初选 grok-kun 两次因额度失败，随后由 grok生产服真实任务 01a12c15-6ed7-73be-9544-c3bf7bd8a1b6 接续并完成。创建/接续均经可托管出口，未改变已有连通。
+- 真正发送了一次：message_id=01a12c1a-165a-757a-8688-2f20e3c524af；源方聊天=01a12a08-cb06-7503-bdf2-f06c9d58d150；接收任务=01a12c1a-165a-7db6-ba90-d682d863060b。JSON message_kind=linked_delivery、mode=start、queued=false，linked_delivery 正确记录 kunkunya / wd-game生产 / grok生产服。
+- 源方 chat history 独立读回消息，以 EXTERNAL PASTED CONTENT 包裹，正文包含「kunkunya 经 wd-game生产·grok生产服 代发」。接收任务的 run-messages 与源方 assistant 消息 01a12c1a-68cb-70d0-9cef-f741d17943b4 均读回「收到代发验收消息」，17:54:50Z 回复确认来源且没有执行生产操作。此处是实际投递/叫醒证据，区别于 S1 本地视觉夹具。
+- deepseek生产服登记的 daemon_id 与 Grok 相同，但 work_enabled=false，运行环境自9月21日起离线，版本缓存0.5.3，dsh探测没有可用结果。共用守护进程二进制已更新，不宣称 DeepSeek 已在线验证；未开启席位或改 provider 配置。
+- 上轮定时接续已在本轮停止：唤醒先于 disable 发出，取消精确重复任务 01a12c0d-7e5c-764c-9f1c-c69b65373047；当前恢复任务继续，未中断生产任务。补证支线 74f9a57b40f1 已吸收进规范交付线并归类 rescue/absorbed。
+
+原生环境的旧缺口已部分排除：Xcode 已安装，xcode-select 指向 CommandLineTools 才导致默认 simctl 不可用。仅当前命令使用 DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer，未改全局选择，iPhone 17e / iOS26.5 已启动。CocoaPods 128 pods 安装成功，原生构建进行中。Cua 对 Simulator 窗口427报告 ax_window_unresolved，后台输入拒绝，窗口截图报 px_capture_unavailable。没有绕过到前台输入，也没有把空窗口当截图。原生界面尚未验证。
+
+本轮知识审计：新增发布、真实投递及验收环境事实，沿用已合并 ADR/CONTEXT/skill 的权限边界；无新权限或配置规则，无新实现代码。GitHub fetch 已恢复，纳入 origin/kun 的既有修复；与当前主线相比仅证据 README 增量，未编辑 daemon 心跳、离线判定或令牌代码。
+
+### 原生 App 安装完成，截图等待窗口授权（18:14 UTC）
+
+使用当前命令的 DEVELOPER_DIR 完成 iOS prebuild、128 个 Pods 安装及真实 xcodebuild（exit 0，BUILD SUCCEEDED）。本地测试 App `ai.multica.mobile.dev` 已由 simctl 安装到 iPhone 17e / iOS 26.5，get_app_container 读回安装目录；可执行文件 SHA256 为 `756152b83ea51f27f1bfc5c8c27495dabca6aeb7cd0ef2ee5a2395110eea4e1c`。没有修改原生生产代码。
+
+已在本 worktree 受管数据库创建隔离视觉夹具聊天 `bb3687b8-7bb9-4466-ab37-ae667e0ac069`，接收智能体没有运行环境；它只用于原生界面检查，不替代上述真实线上投递。桌面工具对 Simulator 窗口 427 返回 `ax_window_unresolved`，三条后台输入路由全部 refused，截图 `px_capture_unavailable`。按 cua-driver/SKILL.md 的明确前台接管授权要求，已创建选项提问 `3de377a8-cf1e-49bf-8e1e-047002abb63f`；同意后执行临时前台操作、测试账号登录、聊天截图并恢复窗口。未获得授权前，原生截图验收保持待完成。
+
+知识审计：本轮没有新增领域/权限/配置规则；已合并 ADR、CONTEXT、平台 skill 仍适用，仅追加部署与真实验收事实。结束前再次 merge 最新 origin/kun（29b1b5be19197360a21614d9bbf63c793c3f4d38），保留主线新改动；与主线相比仅本票证据 README 有增量。已合并 PR634 不再次合并。
