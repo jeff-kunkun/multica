@@ -257,6 +257,11 @@ export function useSettingsSearchIndex(
         description: t(($) => $[channel].page_description),
       })),
       {
+        tab: "bots",
+        title: t(($) => $.page.tabs.bots),
+        description: t(($) => $.bots.description),
+      },
+      {
         tab: "mcp",
         title: t(($) => $.page.tabs.mcp),
         description: t(($) => $.mcp.description),

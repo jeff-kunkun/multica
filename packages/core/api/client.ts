@@ -95,6 +95,9 @@ import type {
   PersonalAccessToken,
   CreatePersonalAccessTokenRequest,
   CreatePersonalAccessTokenResponse,
+  ExternalBot,
+  CreateExternalBotRequest,
+  ExternalBotKeyResponse,
   RuntimeUsage,
   IssueUsageSummary,
   IssueGoal,
@@ -4782,6 +4785,36 @@ export class ApiClient {
 
   async revokePersonalAccessToken(id: string): Promise<void> {
     await this.fetch(`/api/tokens/${id}`, { method: "DELETE" });
+  }
+
+  // External bots (DENE-1788) — workspace admin only.
+  async listExternalBots(workspaceId: string): Promise<ExternalBot[]> {
+    return this.fetch(`/api/workspaces/${workspaceId}/bots`);
+  }
+
+  async createExternalBot(
+    workspaceId: string,
+    data: CreateExternalBotRequest,
+  ): Promise<ExternalBotKeyResponse> {
+    return this.fetch(`/api/workspaces/${workspaceId}/bots`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async rotateExternalBotKey(workspaceId: string, botId: string): Promise<ExternalBotKeyResponse> {
+    return this.fetch(`/api/workspaces/${workspaceId}/bots/${botId}/rotate`, {
+      method: "POST",
+      body: JSON.stringify({}),
+    });
+  }
+
+  async stopExternalBot(workspaceId: string, botId: string): Promise<ExternalBot> {
+    return this.fetch(`/api/workspaces/${workspaceId}/bots/${botId}/stop`, { method: "POST" });
+  }
+
+  async deleteExternalBot(workspaceId: string, botId: string): Promise<void> {
+    await this.fetch(`/api/workspaces/${workspaceId}/bots/${botId}`, { method: "DELETE" });
   }
 
   // File Upload & Attachments
