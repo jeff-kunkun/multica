@@ -33,7 +33,9 @@ Use the relevant references in this skill and each command's `--help`:
 - `project linked-projects <id>` and `autopilot linked-projects <id>` read references; `--reference <link-id>:<project-id>` replaces them, `--clear` selects none, and autopilot `--inherit` restores project defaults.
 - `issue list/search/get/context`, `issue comment list --full` for complete reads.
 - `chat list/search/history` for discovery; personal `chat new --agent ... --wait` on supported versions.
-- `chat send --session ... --attachment ./file` uploads local files and binds them to the user message through the ordinary chat API.
+- `chat send --session ... --attachment ./file` uploads local files and binds them to the user message through the ordinary chat API. Sends include runtime status/last_seen_at and an offline warning on stderr and in JSON; the message is already accepted, so the warning is not a retry instruction.
+- `chat send --session <id> "Hello" --wait --wait-timeout 20s --output json` exits nonzero on timeout with task_status, reason, queue_ahead and runtime. `chat progress --session <id> --history --output json` reads the latest turn's same diagnostics. See `references/run-control.md` for reason meanings.
+- `overview --output json` includes runtime status and last_seen_at for the workspace panorama; use chat progress to explain a particular unanswered turn.
 - `issue update/status/assign/label/close/rerun` for issue work.
 - `issue comment add/update/delete` and its attachment flags for comment work.
 - Agent/settings commands supported by the installed CLI for administration.

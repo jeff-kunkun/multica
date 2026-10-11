@@ -119,7 +119,7 @@ func (h *Handler) GetOverview(w http.ResponseWriter, r *http.Request) {
 		{"automations", "autopilots", "id title description project_id assignee_type assignee_id status execution_mode trigger_kinds next_run_at", h.ListAutopilots, ""},
 		{"skills", "", "id name description", h.ListSkills, ""},
 		{"squads", "", "id name description leader_id members member_count", h.ListSquads, ""},
-		{"runtimes", "", "id name custom_name runtime_mode provider status device_info daemon_id", h.ListAgentRuntimes, permission.ModuleRuntimes},
+		{"runtimes", "", "id name custom_name runtime_mode provider status last_seen_at device_info daemon_id", h.ListAgentRuntimes, permission.ModuleRuntimes},
 		{"workspace_links", "links", "id side status source target projects managed can_update_projects can_set_managed", h.ListWorkspaceLinks, ""},
 	}
 	for _, source := range sources {

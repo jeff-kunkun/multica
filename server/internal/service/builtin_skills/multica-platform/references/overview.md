@@ -39,3 +39,8 @@ Each reference names `link_id`, `project_id`, `title`, `source_name` and `availa
 unavailable references remain visible for removal. Automation `linked_projects: null`
 means inherit, while `[]` means explicitly no references. These fields survive
 compact mode and use the same access checks as the settings read endpoints.
+
+Runtime rows include `status` and nullable RFC3339 `last_seen_at`, including
+in compact mode. Read a particular unanswered turn with
+`multica chat progress --session <id> --history --output json`; it adds the
+server task status, reason and queue position to that runtime snapshot.
