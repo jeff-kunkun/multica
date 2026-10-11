@@ -40,3 +40,58 @@ Each reference names `link_id`, `project_id`, `title`, `source_name` and `availa
 unavailable references remain visible for removal. Automation `linked_projects: null`
 means inherit, while `[]` means explicitly no references. These fields survive
 compact mode and use the same access checks as the settings read endpoints.
+
+## Changes and active runs
+
+Use `multica changes --since <RFC3339> --all-workspaces --output json` for one
+page of compact chat/issue summaries and active runs. Use
+`multica runs --active --all-workspaces --output json` for active runs alone.
+Both reuse the caller's identity and server visibility rules, including linked
+project restrictions. They never mark chats read. Do not loop through workspaces
+or agents to reconstruct these results.
+
+Omit `--all-workspaces` to use the current workspace, or pass `--workspace <UUID>`
+(repeatable or comma-separated). Find IDs with `multica workspace list --output json`.
+`--workspace` and `--all-workspaces` are mutually exclusive. For changes, the first
+page requires `--since` (RFC3339); a subsequent read uses the opaque `--cursor`
+instead. Do not repeat scope flags with a cursor: the server already binds it
+to scope and filters. The CLI never decodes or manufactures cursors.
+
+```sh
+multica changes --since 2026-10-11T17:00:00Z --all-workspaces --output json
+multica changes --cursor 'SERVER_NEXT_CURSOR' --output json
+multica runs --active --all-workspaces --output json
+multica runs --active --cursor 'SERVER_NEXT_CURSOR' --output json
+```
+
+Each invocation makes exactly one business read: `POST /api/fast-access/v1/read`
+or `GET /api/fast-access/v1/runs?active=true`. `--limit` defaults to 100 (1–200);
+`--max-bytes` defaults to 50000 (1–50000 uncompressed UTF-8 bytes, not characters).
+There is no automatic pagination or retry. Oversized, malformed or non-UTF-8
+responses fail before any result is printed. JSON stdout preserves the entire
+server envelope and additional fields, including large numeric revisions;
+notes and warnings go to stderr. Do not combine the streams when parsing.
+
+Read `schema_version`, `mode`, `as_of`, `coverage_from`, `scope_revision`,
+`changes[]`, `active_runs[]`, `active_runs_complete`, `complete`, `next_cursor`,
+`checkpoint`, and `retention_floor`. Empty arrays mean no items on this page,
+not necessarily an empty scope. A false completeness flag means a partial page:
+continue explicitly with `next_cursor`, and save `checkpoint` only when the
+batch is complete. Null cursor/checkpoint/retention values convey the server's
+absence of that value; do not synthesize one. `timestamp_snapshot` is a current
+summary within stated coverage, not a durable history of deletions or every
+intermediate state. Unknown schema versions fail; install a compatible CLI.
+
+Runs are attempts, including chat runs without issues. Preserve the server's
+`status` and `phase` as returned. The server selects queued/dispatched/running/
+waiting_local_directory and deferred with a wakeup; `phase` is queued, executing
+(dispatched/running), or waiting. Autopilot executions are not silently counted
+as the same run type. CLI does not reimplement this selection or authorization.
+
+On permission failure, report the refusal; do not treat it as empty results or
+switch identities. On 429, honor `Retry-After`/`retry_after` and retry later.
+Timeouts use the existing `MULTICA_HTTP_TIMEOUT`; they do not trigger retries.
+On `reset_required`, `history_unavailable` or `scope_reset`, discard the stale
+cursor and restart with an available coverage window. The server is the source
+of these errors, scope restrictions and rate limits. Discover both commands in
+`multica capabilities --domain overview --output json` and their `--help`.
