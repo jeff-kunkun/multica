@@ -30,6 +30,27 @@ never push to them, and never open a worktree, commit or write in its
 directories. A path marked "not on this machine" is the source's; read its
 repositories instead. Your working project and code source stay your own.
 
+The CLI uses the same `linked-projects` / `--reference LINK_ID:PROJECT_ID`
+contract as project and autopilot reference settings:
+
+```sh
+multica chat linked-projects --available --output json
+multica chat linked-projects "$MULTICA_CHAT_SESSION_ID" --output json
+multica chat linked-projects "$MULTICA_CHAT_SESSION_ID" --reference "$LINK_ID:$PROJECT_ID"
+multica chat linked-projects "$MULTICA_CHAT_SESSION_ID" --clear
+multica chat new --agent "$AGENT_ID" --reference "$LINK_ID:$PROJECT_ID" "Read the reference notes"
+```
+
+Use real IDs from `--available`; `--reference` replaces the complete selection,
+so repeat it for every reference to keep. To remove one, submit the remaining
+pairs; `--clear` removes all. `chat new` is for people/personal-key bots, not
+agent runs. These commands reuse the chat's normal access checks. JSON
+`linked_projects` entries name `project_id`, `link_id`, `title`, `source_name`,
+`available` and `unavailable_reason`. A false availability keeps the saved name
+visible, but the server does not disclose which access check failed. Disconnecting
+or unsharing stops injection in the **next** run. References never become working
+projects. `multica overview --output json` also includes chats' `linked_projects`.
+
 That is everything a read-only link exposes. Task descriptions, comments,
 attachments, private tasks, private projects and projects the source did not
 tick are never in the response, and nothing here can write to the source. Do

@@ -115,7 +115,7 @@ func (h *Handler) GetOverview(w http.ResponseWriter, r *http.Request) {
 	sources := []overviewSource{
 		{"agents", "", "id name description model runtime_id runtime_mode runtime_availability parent_agent_id parent_agent_name domain_id routing_tier thinking_level service_tier work_enabled work_pause dispatch_mode dispatch_projects skills", h.ListAgents, ""},
 		{"projects", "projects", "id title description status lead_type lead_id domain_ids", h.ListProjects, permission.ModuleProjects},
-		{"chats", "", "id title project_id agent_id agent_name status last_active_at", h.ListChatDirectory, ""},
+		{"chats", "", "id title project_id agent_id agent_name status last_active_at linked_projects", h.ListChatDirectory, ""},
 		{"automations", "autopilots", "id title description project_id assignee_type assignee_id status execution_mode trigger_kinds next_run_at", h.ListAutopilots, ""},
 		{"skills", "", "id name description", h.ListSkills, ""},
 		{"squads", "", "id name description leader_id members member_count", h.ListSquads, ""},
@@ -267,6 +267,16 @@ func (h *Handler) enrichOverview(r *http.Request, ws string, sections map[string
 	}
 	for _, automation := range sections["automations"] {
 		automation["assignee_name"] = names[overviewString(automation, "assignee_id")]
+	}
+	chatReferences := make([]ChatSessionResponse, 0, len(sections["chats"]))
+	for _, chat := range sections["chats"] {
+		chatReferences = append(chatReferences, ChatSessionResponse{ID: overviewString(chat, "id")})
+	}
+	if err := h.hydrateChatSessionLinkedProjects(r.Context(), chatReferences); err != nil {
+		return err
+	}
+	for i, chat := range sections["chats"] {
+		chat["linked_projects"] = chatReferences[i].LinkedProjects
 	}
 	for _, chat := range sections["chats"] {
 		ids := []string{}
