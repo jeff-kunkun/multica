@@ -17,11 +17,20 @@ active or queued turn in the selected chat, including retry backoff. Without
 still leaves existing runs alone; `status cancelled --related` explicitly
 combines the status and stop in one transaction.
 
-`--related` follows only explicit relationships in the current workspace:
-child issues; an issue's source chat; visible chat ticket bindings; spawned
-chat parent/child links; and chat sessions sharing the exact same external
-thread binding key. It does not match titles, projects or all chats in a
-channel. The server checks every issue, chat owner and private agent before
+`--related` stays in the current workspace and follows the named root:
+
+- Issue root: the issue and its descendant issues, plus each selected issue's
+  source chat and visible chat ticket bindings.
+- Chat root: the named chat's direct parent/children and sessions sharing its
+  exact external thread binding key; issues opened from or visibly bound to
+  the named chat and their descendants; those issues' source/bound chats.
+
+Only child-issue links recurse. Reached chats are endpoints: they never expand
+again to sibling issues, other followed tickets, more spawned chats or further
+thread bindings. Stopping issue A from chat C does not stop another issue B
+opened from C. Stopping C itself includes both directly linked issues A and B.
+The scope never matches titles, projects or all chats in a channel.
+The server checks every issue, chat owner and private agent before
 writing. A hidden or unauthorized target rejects the entire operation, with
 no partial stop. Only the person who started a chat may interrupt its work.
 External Bots use the same endpoint and their owner's ordinary permissions.

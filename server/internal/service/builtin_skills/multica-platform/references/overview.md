@@ -48,7 +48,9 @@ stops, and the chat-to-issue execution transfer. Read these before starting
 another run or stopping work. Use `issue halt --related`,
 `issue status cancelled --related` or `chat stop --related` for a related stop;
 ordinary status cancellation alone does not interrupt runs. The detailed
-contract is in `run-control.md`.
+contract is in `run-control.md`. Related stops recurse only through child
+issues. Reached source/bound/spawned chats never expand to other tickets or
+further chat relationships; only the named chat supplies direct chat links.
 `bot_wake_chain` describes the workspace-wide Bot wake guard even in compact
 mode: `limit`, `reason_code`, `reset`, `human_exempt`,
 `verified_quote_exempt`, and `settings_key`. When audit access is permitted,

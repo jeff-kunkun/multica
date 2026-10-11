@@ -167,7 +167,7 @@ func buildCapabilityMap(root *cobra.Command, cliVersion string) capabilityMap {
 		ExecutionRules: []string{
 			"Default chat messages and same-agent issue comments merge into queued or active work; issue comments across threads share that execution place. Explicit queue/restart/parallel keep their stated semantics.",
 			"A running chat CLI without live-input support rejects default merging and offers explicit queue/restart. A retry is discarded when its issue or chat already has an active run.",
-			"issue halt --related, issue status cancelled --related and chat stop --related stop descendant issues and explicitly related chats in one authorized server operation. Every target must be in this workspace and pass its own access/stop checks; an inaccessible target rejects the whole operation.",
+			"Related stop scope: an issue selects its descendants and each issue's source/bound chats; a chat selects its own direct parent/children and exact thread bindings, its directly opened/bound issues and their descendants, plus those issues' source/bound chats. Only child-issue links recurse: reached chats never expand to sibling/other tickets or further chat links. issue halt --related, issue status cancelled --related and chat stop --related share one authorized server operation; every target must be in this workspace and pass its own checks, or the whole operation is rejected.",
 			"After chat-to-issue conversion, execution belongs to the issue. The source chat is read-only and links to that issue.",
 		},
 		Onboarding: botonboarding.Steps(),

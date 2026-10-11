@@ -197,3 +197,117 @@ func TestHaltIssueRelatedStopsChildIssueAndBoundChat(t *testing.T) {
 		t.Fatal("related halt left active runs")
 	}
 }
+
+func TestIssueRelatedStopPreservesSiblingWorkFromSharedChat(t *testing.T) {
+	for _, action := range []string{"halt", "cancel"} {
+		for _, relation := range []string{"origin", "binding"} {
+			t.Run(action+"/"+relation, func(t *testing.T) {
+				agent := createHandlerTestAgent(t, "Scoped Related Stop", []byte("[]"))
+				chat := createHandlerTestChatSession(t, agent)
+				root := dbfx.Issue(t, "stop A only", testutil.Cols{"visibility": "workspace", "status": "in_progress"})
+				if relation == "origin" {
+					dbfx.Exec(t, `UPDATE issue SET origin_chat_session_id=$1 WHERE id=$2`, chat, root)
+				} else {
+					dbfx.Exec(t, `INSERT INTO chat_followed_issue(chat_session_id,issue_id,workspace_id,source) VALUES ($1,$2,$3,'manual')`, chat, root, testWorkspaceID)
+					t.Cleanup(func() {
+						testPool.Exec(context.Background(), `DELETE FROM chat_followed_issue WHERE chat_session_id=$1`, chat)
+					})
+				}
+				sibling := dbfx.Issue(t, "keep B running", testutil.Cols{"visibility": "workspace", "status": "in_progress", "origin_chat_session_id": chat})
+				child := dbfx.Issue(t, "A child", testutil.Cols{"visibility": "workspace", "parent_issue_id": root})
+				grandchild := dbfx.Issue(t, "A grandchild", testutil.Cols{"visibility": "workspace", "parent_issue_id": child})
+				childChat := createHandlerTestChatSession(t, agent)
+				dbfx.Exec(t, `UPDATE chat_session SET origin_session_id=$1, origin_type='chat' WHERE id=$2`, chat, childChat)
+				queuedSibling := insertIssueTaskWithStatus(t, agent, sibling, "queued")
+				failedSibling := insertIssueTaskWithStatus(t, agent, sibling, "failed")
+				queuedChildChat := insertRelatedStopChatTask(t, agent, childChat, "queued")
+				targets := []string{
+					insertRelatedStopChatTask(t, agent, chat, "queued"),
+					insertIssueTaskWithStatus(t, agent, root, "queued"),
+					insertIssueTaskWithStatus(t, agent, child, "queued"),
+					insertIssueTaskWithStatus(t, agent, grandchild, "queued"),
+				}
+				w := httptest.NewRecorder()
+				if action == "halt" {
+					testHandler.HaltIssue(w, withURLParam(newRequest(http.MethodPost, "/api/issues/"+root+"/halt", map[string]any{"related": true}), "id", root))
+				} else {
+					testHandler.UpdateIssue(w, withURLParam(newRequest(http.MethodPatch, "/api/issues/"+root, map[string]any{"status": "cancelled", "related_stop": true}), "id", root))
+				}
+				if w.Code != http.StatusOK {
+					t.Fatalf("scoped stop: %d %s", w.Code, w.Body.String())
+				}
+				for _, id := range targets {
+					if got := taskStatus(t, id); got != "cancelled" {
+						t.Fatalf("direct target %s is %s", id, got)
+					}
+				}
+				if got := taskStatus(t, queuedSibling); got != "queued" {
+					t.Fatalf("sibling B run is %s, want queued", got)
+				}
+				if got := taskStatus(t, queuedChildChat); got != "queued" {
+					t.Fatalf("issue stop expanded again through its source chat: %s", got)
+				}
+				if issue := issueForGuardTest(t, sibling); issue.Status != "in_progress" || parseIssueMetadata(issue.Metadata)["agent_halted"] == true {
+					t.Fatal("sibling B status or halt guard changed")
+				}
+				var stopped bool
+				dbfx.QueryRow(t, `SELECT COALESCE((context->>'work_stopped')::boolean, false) FROM agent_task_queue WHERE id=$1`, failedSibling).Scan(&stopped)
+				if stopped {
+					t.Fatal("sibling B historical retry was fenced")
+				}
+			})
+		}
+	}
+}
+
+func TestChatRelatedStopDoesNotExpandReachedChatRelations(t *testing.T) {
+	agent := createHandlerTestAgent(t, "Scoped Chat Stop", []byte("[]"))
+	root := createHandlerTestChatSession(t, agent)
+	childChat := createHandlerTestChatSession(t, agent)
+	grandchildChat := createHandlerTestChatSession(t, agent)
+	boundChat := createHandlerTestChatSession(t, agent)
+	dbfx.Exec(t, `UPDATE chat_session SET origin_session_id=$1, origin_type='chat' WHERE id=$2`, root, childChat)
+	dbfx.Exec(t, `UPDATE chat_session SET origin_session_id=$1, origin_type='chat' WHERE id=$2`, childChat, grandchildChat)
+	issue := dbfx.Issue(t, "root chat issue", testutil.Cols{"visibility": "workspace", "origin_chat_session_id": root})
+	childIssue := dbfx.Issue(t, "root chat issue child", testutil.Cols{"visibility": "workspace", "parent_issue_id": issue})
+	dbfx.Exec(t, `INSERT INTO chat_followed_issue(chat_session_id,issue_id,workspace_id,source) VALUES ($1,$2,$3,'manual')`, boundChat, childIssue, testWorkspaceID)
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM chat_followed_issue WHERE chat_session_id=$1`, boundChat)
+	})
+	unrelatedIssues := []string{
+		dbfx.Issue(t, "other bound chat issue", testutil.Cols{"visibility": "workspace", "origin_chat_session_id": boundChat}),
+		dbfx.Issue(t, "other child chat issue", testutil.Cols{"visibility": "workspace", "origin_chat_session_id": childChat}),
+	}
+	untouched := []string{insertRelatedStopChatTask(t, agent, grandchildChat, "queued")}
+	for _, id := range unrelatedIssues {
+		untouched = append(untouched, insertIssueTaskWithStatus(t, agent, id, "queued"))
+	}
+	targets := []string{
+		insertRelatedStopChatTask(t, agent, root, "queued"),
+		insertRelatedStopChatTask(t, agent, childChat, "queued"),
+		insertRelatedStopChatTask(t, agent, boundChat, "queued"),
+		insertIssueTaskWithStatus(t, agent, issue, "queued"),
+		insertIssueTaskWithStatus(t, agent, childIssue, "queued"),
+	}
+	w := httptest.NewRecorder()
+	req := withURLParam(newRequest(http.MethodPost, "/api/chat/sessions/"+root+"/stop", map[string]any{"related": true}), "sessionId", root)
+	testHandler.StopChatSession(w, withChatTestWorkspaceCtx(t, req))
+	if w.Code != http.StatusOK {
+		t.Fatalf("stop chat: %d %s", w.Code, w.Body.String())
+	}
+	for _, id := range targets {
+		if got := taskStatus(t, id); got != "cancelled" {
+			t.Fatalf("direct target %s is %s", id, got)
+		}
+	}
+	for _, id := range untouched {
+		if got := taskStatus(t, id); got != "queued" {
+			t.Fatalf("reached chat expanded to unrelated work %s: %s", id, got)
+		}
+	}
+	for _, id := range unrelatedIssues {
+		if parseIssueMetadata(issueForGuardTest(t, id).Metadata)["agent_halted"] == true {
+			t.Fatalf("unrelated issue %s was halted", id)
+		}
+	}
+}

@@ -1,6 +1,7 @@
 -- name: ListRelatedWorkStopTargets :many
--- Explicit relation graph, always workspace-scoped. A channel binding key is
--- the thread/session-isolation key, not the whole external channel.
+-- Only issue descendants recurse. Chats reached from an issue are endpoints;
+-- chat-to-issue and chat-to-chat edges are followed only from the named chat.
+-- All edges stay workspace-scoped. A binding key identifies one thread/session.
 WITH RECURSIVE edges AS (
     SELECT 'issue'::text AS source_kind, i.parent_issue_id AS source_id, 'issue'::text AS target_kind, i.id AS target_id
     FROM issue i JOIN issue parent ON parent.id = i.parent_issue_id AND parent.workspace_id = @workspace_id
@@ -32,10 +33,28 @@ WITH RECURSIVE edges AS (
     JOIN channel_chat_session_binding b ON b.installation_id = a.installation_id AND b.channel_chat_id = a.channel_chat_id
     JOIN chat_session ca ON ca.id = a.chat_session_id JOIN chat_session cb ON cb.id = b.chat_session_id
     WHERE ca.workspace_id = @workspace_id AND cb.workspace_id = @workspace_id
+), issue_roots(id) AS (
+    SELECT @root_id::uuid WHERE @root_kind::text = 'issue'
+    UNION
+    SELECT e.target_id FROM edges e
+    WHERE @root_kind::text = 'chat' AND e.source_kind = 'chat'
+      AND e.source_id = @root_id::uuid AND e.target_kind = 'issue'
+), issue_targets(id) AS (
+    SELECT id FROM issue_roots
+    UNION
+    SELECT e.target_id FROM edges e JOIN issue_targets i ON e.source_id = i.id
+    WHERE e.source_kind = 'issue' AND e.target_kind = 'issue'
 ), targets(kind, id) AS (
     SELECT @root_kind::text, @root_id::uuid
     UNION
-    SELECT e.target_kind, e.target_id FROM edges e JOIN targets t ON t.kind = e.source_kind AND t.id = e.source_id
+    SELECT 'issue', id FROM issue_targets
+    UNION
+    SELECT 'chat', e.target_id FROM edges e JOIN issue_targets i ON e.source_id = i.id
+    WHERE e.source_kind = 'issue' AND e.target_kind = 'chat'
+    UNION
+    SELECT 'chat', e.target_id FROM edges e
+    WHERE @root_kind::text = 'chat' AND e.source_kind = 'chat'
+      AND e.source_id = @root_id::uuid AND e.target_kind = 'chat'
 )
 SELECT kind::text, id::uuid FROM targets ORDER BY kind, id;
 
