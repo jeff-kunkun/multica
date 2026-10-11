@@ -40,3 +40,12 @@ Each reference names `link_id`, `project_id`, `title`, `source_name` and `availa
 unavailable references remain visible for removal. Automation `linked_projects: null`
 means inherit, while `[]` means explicitly no references. These fields survive
 compact mode and use the same access checks as the settings read endpoints.
+
+
+`multica capabilities --output json` includes `execution_rules`: default wakeup
+coalescing, explicit queue/restart alternatives, permission-scoped related
+stops, and the chat-to-issue execution transfer. Read these before starting
+another run or stopping work. Use `issue halt --related`,
+`issue status cancelled --related` or `chat stop --related` for a related stop;
+ordinary status cancellation alone does not interrupt runs. The detailed
+contract is in `run-control.md`.

@@ -1,13 +1,36 @@
 # Run control
 
-## Stop every run on one issue
-
-Use the issue-level guard when an agent chain must stop immediately:
+## Stop a piece of work
 
 ```bash
-multica issue halt <issue-id>    # cancel queued/dispatched/running runs and block agent triggers
-multica issue resume <issue-id>  # clear the halt guard; a human comment is still needed to reset a chain budget
+multica issue halt <issue-id> --output json
+multica issue halt <issue-id> --related --output json
+multica issue status <issue-id> cancelled --related --output json
+multica chat stop <chat-id|url> --related --output json
+multica issue resume <issue-id> --output json
 ```
+
+`halt` stops queued, dispatched, running, waiting-for-directory and deferred
+runs, then blocks agent triggers on each stopped issue. `chat stop` stops every
+active or queued turn in the selected chat, including retry backoff. Without
+`--related`, each action stays on its named object. A plain cancelled status
+still leaves existing runs alone; `status cancelled --related` explicitly
+combines the status and stop in one transaction.
+
+`--related` follows only explicit relationships in the current workspace:
+child issues; an issue's source chat; visible chat ticket bindings; spawned
+chat parent/child links; and chat sessions sharing the exact same external
+thread binding key. It does not match titles, projects or all chats in a
+channel. The server checks every issue, chat owner and private agent before
+writing. A hidden or unauthorized target rejects the entire operation, with
+no partial stop. Only the person who started a chat may interrupt its work.
+External Bots use the same endpoint and their owner's ordinary permissions.
+The Web/Desktop stop dialog has the same optional related-work checkbox;
+the native phone chat stop alert offers a separate related-work action.
+
+The stop response reports `cancelled_count`, `issue_ids` and
+`chat_session_ids`. Already stopped runs are not counted again. A later human
+message may start a chat again; the stop never archives or deletes it.
 
 The guard is issue-scoped. A human comment clears it and resets the
 delegation-chain budget; `resume` only clears an explicit halt and does not
@@ -32,7 +55,7 @@ A chat message or an issue comment can reach an agent mid-reply in three ways.
 | Mode | What happens | CLI process | Session |
 | --- | --- | --- | --- |
 | `steer` | Read after the current step; the original work continues | Same process | Same session |
-| `queue` | Handled once this reply / run finishes (default for chat send) | New process | Resumes the same session |
+| `queue` | Explicitly handled once this reply / run finishes | New process | Resumes the same session |
 | `restart` | Stops the reply now and starts over from this message; the half-done step is dropped | New process | Resumes the same session |
 
 ```bash
@@ -60,8 +83,17 @@ multica issue comment add <issue-id> --content-file ./msg.md --mode restart
 - With nothing running, every mode simply sends/posts and starts a run.
 - `chat send` needs an explicit `--session`; it never falls back to the chat
   the current run belongs to, so a run cannot queue a turn for itself.
-- Without `--mode`, `comment add` keeps its existing behaviour (a busy agent
-  answers after its current run).
+- Without `--mode`, a chat message or same-agent issue comment merges into the
+  existing queued or active run, including issue comments in another thread.
+  A queued chat collects one input batch; a running chat receives a supplement
+  in that same run. No extra run is created for repeated wakeups or a restart
+  retry while the same object already has an active run.
+- A running chat whose CLI cannot accept live input rejects default merging
+  with an explicit reason and `available_modes: [queue, restart]`; choose one
+  deliberately. The rejection does not persist the message.
+- After converting a chat into an issue, the issue is the execution place.
+  The source chat stops its remaining runs, refuses new sends and shows a link
+  to the issue. Repeating conversion returns that same issue.
 
 ## Hand work to another agent
 

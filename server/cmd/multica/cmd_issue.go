@@ -941,6 +941,7 @@ func init() {
 	issueUpdateCmd.Flags().String("output", "json", "Output format: table or json")
 
 	// issue status
+	issueStatusCmd.Flags().Bool("related", false, "With cancelled status, also stop child issues and related chats in the same request")
 	issueStatusCmd.Flags().Bool("no-start", false, "Change status without starting an agent run")
 	issueStatusCmd.Flags().String("duplicate-of", "", "Mark the issue as a duplicate of this original issue (key like MUL-123, or full UUID); the status must be cancelled")
 	issueStatusCmd.Flags().String("output", "table", "Output format: table or json")
@@ -996,6 +997,7 @@ func init() {
 
 	// issue rerun
 	issueRerunCmd.Flags().String("output", "json", "Output format: table or json")
+	issueHaltCmd.Flags().Bool("related", false, "Also stop descendant issues and explicitly related chats (every target requires access)")
 	issueHaltCmd.Flags().String("output", "json", "Output format: table or json")
 	issueResumeCmd.Flags().String("output", "json", "Output format: table or json")
 	// issue cancel-task
@@ -2420,7 +2422,14 @@ func runIssueStatus(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("resolve issue: %w", err)
 	}
 
+	related, _ := cmd.Flags().GetBool("related")
+	if related && status != "cancelled" {
+		return fmt.Errorf("--related requires cancelled status")
+	}
 	body := map[string]any{"status": status}
+	if related {
+		body["related_stop"] = true
+	}
 	if duplicateOf != "" {
 		original, err := resolveIssueRef(ctx, client, duplicateOf)
 		if err != nil {
@@ -3949,7 +3958,12 @@ func runIssueGuardCommand(cmd *cobra.Command, input, action, label string) error
 		return fmt.Errorf("resolve issue: %w", err)
 	}
 	var result map[string]any
-	if err := client.PostJSON(ctx, "/api/issues/"+url.PathEscape(issueRef.ID)+"/"+action, map[string]any{}, &result); err != nil {
+	body := map[string]any{}
+	if action == "halt" {
+		related, _ := cmd.Flags().GetBool("related")
+		body["related"] = related
+	}
+	if err := client.PostJSON(ctx, "/api/issues/"+url.PathEscape(issueRef.ID)+"/"+action, body, &result); err != nil {
 		return fmt.Errorf("%s: %w", label, err)
 	}
 	output, _ := cmd.Flags().GetString("output")

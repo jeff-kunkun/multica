@@ -37,6 +37,8 @@ import {
   Platform,
   View,
 } from "react-native";
+import { Text } from "@/components/ui/text";
+import { Button } from "@/components/ui/button";
 import { router } from "expo-router";
 import { useFocusEffect, useIsFocused } from "@react-navigation/native";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -462,18 +464,20 @@ export default function ChatTab() {
   // ── Cancel in-flight ───────────────────────────────────────────────────
   const handleStop = useCallback(() => {
     if (!pendingTask?.task_id || !activeSessionId) return;
-    if (pendingTask.status === "queued") return;
-    const taskId = pendingTask.task_id;
     const sessionId = activeSessionId;
-    qc.setQueryData<ChatPendingTask>(chatKeys.pendingTask(sessionId), (old) =>
-      removePendingChatTask(old, taskId),
-    );
-    void api.cancelTaskById(taskId)
-      .catch(() => {
-        // Silent — task may have already terminated server-side.
-      })
-      .finally(() => invalidatePendingTask(qc, sessionId));
-  }, [pendingTask?.task_id, pendingTask?.status, activeSessionId, qc]);
+    const stop = async (related: boolean) => {
+      try {
+        await api.stopChatSession(sessionId, related);
+        await qc.invalidateQueries({ queryKey: ["chat"] });
+        if (related) await qc.invalidateQueries({ queryKey: ["issues"] });
+      } catch { Alert.alert(t("stop_work.failed")); }
+    };
+    Alert.alert(t("stop_work.title"), t("stop_work.description"), [
+      { text: t("stop_work.keep"), style: "cancel" },
+      { text: t("stop_work.confirm"), style: "destructive", onPress: () => void stop(false) },
+      { text: t("stop_work.confirm_related"), style: "destructive", onPress: () => void stop(true) },
+    ]);
+  }, [pendingTask?.task_id, pendingTask?.status, activeSessionId, qc, t]);
 
   // ── Queue actions (DENE-1362, mirrors Web's use-chat-task-actions) ──────
   const handleSendQueuedNow = useCallback(
@@ -663,6 +667,14 @@ export default function ChatTab() {
           onSendNow={handleSendQueuedNow}
           onRemove={handleRemoveQueued}
         />
+        {activeSession?.converted_issue_id ? (
+          <View className="gap-2 px-4 py-3">
+            <Text className="text-sm text-muted-foreground">{t("converted_to_issue")}</Text>
+            <Button variant="outline" onPress={() => {
+              if (wsSlug) router.push(`/${wsSlug}/issue/${activeSession.converted_issue_id}`);
+            }}><Text>{t("open_converted_issue")}</Text></Button>
+          </View>
+        ) : (
         <ChatComposer
           value={draft}
           onChangeText={(next) => setDraft(draftKey, next)}
@@ -671,7 +683,7 @@ export default function ChatTab() {
           }
           onStop={handleStop}
           sending={sending}
-          allowStop={pendingTask?.status !== "queued"}
+          allowStop={!!pendingTask?.task_id}
           allowSendWhileRunning={pendingTask?.supports_queue === true}
           steerSupported={pendingTask?.steer_supported === true}
           steerProvider={pendingTask?.steer_provider}
@@ -679,6 +691,7 @@ export default function ChatTab() {
           disabled={disabled}
           disabledReason={disabledReason}
         />
+        )}
       </KeyboardAvoidingView>
 
       <AgentPickerSheet

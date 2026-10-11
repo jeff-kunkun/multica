@@ -699,33 +699,33 @@ describe("ChatInput project context", () => {
     renderInput({ isRunning: true, allowSubmitWhileRunning: true, onSend, onStop });
 
     expect(screen.getByRole("button", { name: "Stop" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Queue" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Send" })).toBeDisabled();
 
     fireEvent.change(screen.getByTestId("editor"), {
       target: { value: "follow-up" },
     });
 
     expect(screen.getByRole("button", { name: "Stop" })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Queue" }));
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
 
     await waitFor(() => expect(onSend).toHaveBeenCalledTimes(1));
-    expect(onSend.mock.calls[0]![4]).toBe("queue");
+    expect(onSend.mock.calls[0]![4]).toBeUndefined();
     fireEvent.click(screen.getByRole("button", { name: "Stop" }));
     expect(onStop).toHaveBeenCalledTimes(1);
   });
 
-  it("steers by default when the running reply can take it", async () => {
+  it("leaves the default busy send mode to server merging", async () => {
     const onSend = vi.fn<ChatInputOnSend>(async () => true);
     renderInput({ isRunning: true, allowSubmitWhileRunning: true, steerSupported: true, onSend });
 
-    expect(screen.getByText("Enter = Steer")).toBeInTheDocument();
+    expect(screen.getByText("Enter = Send")).toBeInTheDocument();
     fireEvent.change(screen.getByTestId("editor"), {
       target: { value: "also fix the CLI" },
     });
-    fireEvent.click(screen.getByRole("button", { name: "Steer" }));
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
 
     await waitFor(() => expect(onSend).toHaveBeenCalledTimes(1));
-    expect(onSend.mock.calls[0]![4]).toBe("steer");
+    expect(onSend.mock.calls[0]![4]).toBeUndefined();
   });
 
   it("sends with the mode picked from the menu", async () => {
@@ -757,7 +757,7 @@ describe("ChatInput project context", () => {
   it("says a one-shot CLI restarts to take a steer", async () => {
     renderInput({ isRunning: true, allowSubmitWhileRunning: true, steerSupported: true, steerProvider: "cursor", steerMode: "restart" });
 
-    expect(screen.getByText("Enter = Steer")).toBeInTheDocument();
+    expect(screen.getByText("Enter = Send")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Send mode" }));
     const menu = await screen.findByRole("menu");
     expect(within(menu).getByText("Restarts the CLI · same session")).toBeInTheDocument();
@@ -768,7 +768,7 @@ describe("ChatInput project context", () => {
   it("explains why steer is off for a CLI that cannot take it", async () => {
     renderInput({ isRunning: true, allowSubmitWhileRunning: true, steerProvider: "kimi" });
 
-    expect(screen.getByText("Enter = Queue")).toBeInTheDocument();
+    expect(screen.getByText("Enter = Send")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Send mode" }));
     const menu = await screen.findByRole("menu");
     expect(within(menu).getByText("Kimi can't read messages mid-reply yet")).toBeInTheDocument();
@@ -786,7 +786,7 @@ describe("ChatInput project context", () => {
     fireEvent.change(screen.getByTestId("editor"), {
       target: { value: "follow-up with attachment" },
     });
-    expect(screen.getByRole("button", { name: "Queue" })).not.toBeDisabled();
+    expect(screen.getByRole("button", { name: "Send" })).not.toBeDisabled();
 
     await act(async () => {
       dropHandlers.onDrop?.([
@@ -810,7 +810,7 @@ describe("ChatInput project context", () => {
       await Promise.resolve();
     });
 
-    expect(await screen.findByRole("button", { name: "Queue" })).not.toBeDisabled();
+    expect(await screen.findByRole("button", { name: "Send" })).not.toBeDisabled();
   });
 
   it("shows only Stop while an older server is running", () => {

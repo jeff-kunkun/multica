@@ -23,37 +23,11 @@ func (h *Handler) HaltIssue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Cancel first. If cancellation fails, do not leave the issue latched while
-	// its active runs are still alive and the UI cannot observe the partial state.
-	if err := h.TaskService.CancelTasksForIssue(r.Context(), issue.ID); err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to cancel issue runs")
+	req, ok := decodeStopWorkRequest(w, r)
+	if !ok {
 		return
 	}
-
-	updated, err := h.Queries.SetIssueMetadataKey(r.Context(), db.SetIssueMetadataKeyParams{
-		ID: issue.ID, WorkspaceID: issue.WorkspaceID, Key: issueAgentHaltedKey, Value: []byte("true"),
-	})
-	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-		writeError(w, http.StatusInternalServerError, "failed to halt issue")
-		return
-	}
-	metadata := updated.Metadata
-	revision := updated.Revision
-	if errors.Is(err, pgx.ErrNoRows) {
-		current, readErr := h.Queries.GetIssueMetadataInWorkspace(r.Context(), db.GetIssueMetadataInWorkspaceParams{ID: issue.ID, WorkspaceID: issue.WorkspaceID})
-		if readErr != nil {
-			writeError(w, http.StatusInternalServerError, "failed to read issue guard")
-			return
-		}
-		metadata = current.Metadata
-		revision = current.Revision
-	}
-
-	actorType, actorID := h.resolveActor(r, requestUserID(r), uuidToString(issue.WorkspaceID))
-	h.publishWithSource(r.Context(), protocol.EventIssueMetadataChanged, uuidToString(issue.WorkspaceID), actorType, actorID, map[string]any{
-		"issue_id": uuidToString(issue.ID), "metadata": parseIssueMetadata(metadata), "issue_revision": revision,
-	})
-	writeJSON(w, http.StatusOK, map[string]any{"issue_id": uuidToString(issue.ID), "halted": true, "metadata": parseIssueMetadata(metadata)})
+	h.stopRelatedWork(w, r, "issue", issue.ID, issue.WorkspaceID, req.Related)
 }
 
 // ResumeIssue clears the issue-level halt. The delegation-chain budget is

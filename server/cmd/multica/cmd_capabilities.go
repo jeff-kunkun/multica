@@ -45,11 +45,12 @@ type capabilityDomain struct {
 }
 
 type capabilityMap struct {
-	CLIVersion string               `json:"cli_version"`
-	Onboarding []botonboarding.Step `json:"onboarding"`
-	Legend     map[string]string    `json:"legend"`
-	Domains    []capabilityDomain   `json:"domains"`
-	Count      int                  `json:"count"`
+	ExecutionRules []string             `json:"execution_rules"`
+	CLIVersion     string               `json:"cli_version"`
+	Onboarding     []botonboarding.Step `json:"onboarding"`
+	Legend         map[string]string    `json:"legend"`
+	Domains        []capabilityDomain   `json:"domains"`
+	Count          int                  `json:"count"`
 }
 
 // capabilityDomains maps a top-level command to its domain. Anything not
@@ -163,6 +164,12 @@ func buildCapabilityMap(root *cobra.Command, cliVersion string) capabilityMap {
 
 	m := capabilityMap{
 		CLIVersion: cliVersion,
+		ExecutionRules: []string{
+			"Default chat messages and same-agent issue comments merge into queued or active work; issue comments across threads share that execution place. Explicit queue/restart/parallel keep their stated semantics.",
+			"A running chat CLI without live-input support rejects default merging and offers explicit queue/restart. A retry is discarded when its issue or chat already has an active run.",
+			"issue halt --related, issue status cancelled --related and chat stop --related stop descendant issues and explicitly related chats in one authorized server operation. Every target must be in this workspace and pass its own access/stop checks; an inaccessible target rejects the whole operation.",
+			"After chat-to-issue conversion, execution belongs to the issue. The source chat is read-only and links to that issue.",
+		},
 		Onboarding: botonboarding.Steps(),
 		Legend: map[string]string{
 			"access":  "read = only reads; write = creates or changes something; local = acts on this machine",
@@ -245,6 +252,9 @@ func commandExample(c *cobra.Command) string {
 func printCapabilityMap(w io.Writer, m capabilityMap) {
 	fmt.Fprintln(w, "接入步骤 / Getting started")
 	fmt.Fprint(w, botonboarding.Render())
+	for _, rule := range m.ExecutionRules {
+		fmt.Fprintln(w, rule)
+	}
 	fmt.Fprintf(w, "\n%d commands · access: read/write/local · bot_key: yes/no/local (the server's refusal is final)\n", m.Count)
 	for _, d := range m.Domains {
 		fmt.Fprintf(w, "\n%s (%s) — %d\n", d.Title, d.Key, len(d.Commands))

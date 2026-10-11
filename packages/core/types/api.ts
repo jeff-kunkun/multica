@@ -8,6 +8,8 @@ export interface CreateIssueRequest {
   title: string;
   description?: string;
   status?: IssueStatus;
+  /** Cancel this issue and atomically stop its related work. Only valid with cancelled. */
+  related_stop?: boolean;
   priority?: IssuePriority;
   assignee_type?: IssueAssigneeType;
   assignee_id?: string;

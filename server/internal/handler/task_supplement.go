@@ -11,6 +11,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/service"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
@@ -139,7 +140,7 @@ func applyCommentSupplements(resp *CommentResponse, receipts []CommentSupplement
 // queued / coalesced / deferred handling, so losing a race never drops or
 // misdirects the comment.
 func (h *Handler) steerCommentAgentTriggers(ctx context.Context, issue db.Issue, comment db.Comment, actorType string, triggers []commentAgentTrigger, steerTaskIDs []pgtype.UUID) ([]commentAgentTrigger, map[string]commentEnqueueResult) {
-	if len(steerTaskIDs) == 0 || len(triggers) == 0 || actorType != "member" {
+	if len(steerTaskIDs) == 0 || len(triggers) == 0 || (actorType != "member" && service.SeparateIssueRun(ctx)) {
 		return triggers, nil
 	}
 	// Each chosen turn names its agent; only a turn of this issue counts.
@@ -497,9 +498,13 @@ func (h *Handler) ackChatTaskSupplement(w http.ResponseWriter, r *http.Request, 
 	var row db.ChatTaskSupplement
 	var err error
 	if req.Delivered {
-		row, err = h.Queries.AckChatTaskSupplementDelivered(ctx, db.AckChatTaskSupplementDeliveredParams{
-			TaskID: taskID, ChatMessageID: messageID,
-		})
+		var merged bool
+		row, merged, err = h.TaskService.AckMergedChatSupplement(ctx, taskID, messageID)
+		if !merged && err == nil {
+			row, err = h.Queries.AckChatTaskSupplementDelivered(ctx, db.AckChatTaskSupplementDeliveredParams{
+				TaskID: taskID, ChatMessageID: messageID,
+			})
+		}
 	} else {
 		row, err = h.Queries.AckChatTaskSupplementFailed(ctx, db.AckChatTaskSupplementFailedParams{
 			TaskID: taskID, ChatMessageID: messageID,
@@ -514,7 +519,7 @@ func (h *Handler) ackChatTaskSupplement(w http.ResponseWriter, r *http.Request, 
 		writeError(w, http.StatusInternalServerError, "failed to acknowledge additional message")
 		return
 	}
-	if row.Status == "delivered" {
+	if row.Status == "delivered" && row.FollowupTaskID != row.TaskID {
 		if err := h.TaskService.AbsorbSteeredChatFollowup(ctx, row.ChatSessionID, row.FollowupTaskID, row.TaskID); err != nil {
 			slog.Warn("absorb steered chat follow-up failed",
 				"task_id", uuidToString(row.TaskID), "followup_task_id", uuidToString(row.FollowupTaskID), "error", err)

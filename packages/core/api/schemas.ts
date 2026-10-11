@@ -1332,6 +1332,12 @@ export const IssueDisposeResponseSchema = z.object({
   note: z.string().optional(),
 }).loose();
 
+export const WorkStopResponseSchema = z.object({
+  cancelled_count: z.number().default(0),
+  issue_ids: z.array(z.string()).default([]),
+  chat_session_ids: z.array(z.string()).default([]),
+}).loose();
+
 export const IssueAgentGuardResponseSchema = z.object({
   issue_id: z.string(),
   halted: z.boolean(),
@@ -2722,6 +2728,7 @@ const ChatChannelSourceSchema = z.object({
 }).loose();
 
 export const ChatSessionSchema: z.ZodType<ChatSession> = z.object({
+  converted_issue_id: z.string().nullable().optional().catch(undefined),
   id: z.string(),
   workspace_id: z.string().default(""),
   agent_id: z.string().default(""),
