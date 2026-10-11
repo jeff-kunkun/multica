@@ -56,6 +56,7 @@ func TestBotWakeTrustedChainHTTP(t *testing.T) {
 	defer receiver.Close()
 	t.Setenv("MULTICA_PLUGIN_DEV_ORIGINS", receiver.URL)
 	worker := NewBotWakeWorker(testHandler)
+	worker.coalesceSeconds = 0
 	worker.client = func(*url.URL) *http.Client { return receiver.Client() }
 	configure := func(bot db.PersonalAccessToken) {
 		plain, _ := json.Marshal(botWakeSecrets{URL: receiver.URL, Key: "fixture"})
@@ -172,6 +173,7 @@ func TestBotWakeTrustedChainHTTP(t *testing.T) {
 	}
 	// New worker instance reads durable cause and cap; no client hop is needed.
 	worker = NewBotWakeWorker(testHandler)
+	worker.coalesceSeconds = 0
 	worker.client = func(*url.URL) *http.Client { return receiver.Client() }
 	comment(bToken, a)
 	drain()
@@ -276,6 +278,7 @@ func TestBotWakeIssueCreateSourceHTTP(t *testing.T) {
 	defer receiver.Close()
 	t.Setenv("MULTICA_PLUGIN_DEV_ORIGINS", receiver.URL)
 	worker := NewBotWakeWorker(testHandler)
+	worker.coalesceSeconds = 0
 	worker.client = func(*url.URL) *http.Client { return receiver.Client() }
 	configure := func(bot db.PersonalAccessToken) {
 		plain, _ := json.Marshal(botWakeSecrets{URL: receiver.URL, Key: "fixture"})
