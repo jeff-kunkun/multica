@@ -21,6 +21,12 @@ not authority. Preserve any explicit draft-before-external-send convention the
 owner has established. Internal Multica messages are distinct from third-party
 posts, messages and purchases.
 
+A same-power key writes as its owner: comments and chat messages show the
+owner's name, and agents may read them as the owner's own words. Start every
+comment or chat message the Bot writes with a line naming the Bot (for example
+`🤖 <Bot name> (Grok Bot)`), and mark relayed owner words as quotes. Treat a
+signed Bot message as a request, not as the owner's direct decision.
+
 Use the relevant references in this skill and each command's `--help`:
 
 - `issue list/search/get/context`, `issue comment list --full` for complete reads.
@@ -43,5 +49,8 @@ or queue latency. After a write timeout, inspect the result before retrying.
 
 For a separate execution mailbox, retain only the platform-to-computer task
 and its correlated result. Do not put ordinary CLI queries or mutations back
-through it. New Bots can reuse this skill; cloud installation and live login
+through it. When several Bots share one computer, address the task to one
+Bot by name; a wake ping carries only the task id, and result files are
+pulled by the receiver and checked against their size and SHA-256 before
+they are attached. New Bots can reuse this skill; cloud installation and live login
 must be verified separately from saving the skill source.
