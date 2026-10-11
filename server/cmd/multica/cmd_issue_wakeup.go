@@ -51,6 +51,9 @@ func newIssueWakeupCommand() *cobra.Command {
 		}
 		c := &cobra.Command{Use: use, Args: cobra.ExactArgs(count), Short: short, RunE: func(cmd *cobra.Command, args []string) error { return runIssueWakeup(cmd, args, action) }}
 		c.Flags().String("output", "json", "Output format (json or table)")
+		if action == "list" {
+			c.Long = "List the issue's wakeups, then the platform's child_done rule (kind system). Its on_met says what happens when the watched sub-issues close: wake (the agent or squad leader runs), notify (the member gets an inbox item), advance (nobody holds the parent: the platform promotes next-stage sub-issues with no extra dependency and asks a person for the rest), hold (parked in backlog), off or paused; blocked and target say why."
+		}
 		if action == "create" || action == "update" {
 			c.Long = "Create or replace the complete configuration. Events default to once; every/cron use continuous. Updating explicitly re-enables the configuration. Runs use normal comment delivery."
 			c.Long += " Give waits an end with --expires-in or --expires-at; --on-timeout wake runs the target once if the deadline passes first."
@@ -108,6 +111,18 @@ func runIssueWakeup(cmd *cobra.Command, args []string, action string) error {
 		var rows []map[string]any
 		if err = client.GetJSON(ctx, path, &rows); err != nil {
 			return err
+		}
+		if action == "list" {
+			// The platform's child_done rule, so an agent sees whom it would
+			// wake and why it would not (on_met, blocked) without the panel.
+			var system []map[string]any
+			if e := client.GetJSON(ctx, "/api/issues/"+url.PathEscape(ref.ID)+"/system-wakeups", &system); e != nil {
+				fmt.Fprintln(os.Stderr, "system wakeups unavailable:", e)
+			}
+			for _, row := range system {
+				row["kind"] = "system"
+				rows = append(rows, row)
+			}
 		}
 		result = rows
 		if action == "get" {
@@ -233,7 +248,15 @@ func runIssueWakeup(cmd *cobra.Command, args []string, action string) error {
 		}
 		cells := [][]string{}
 		for _, r := range rows {
-			cells = append(cells, []string{strVal(r, "id"), strVal(r, "kind"), strVal(r, "mode"), fmt.Sprint(r["enabled"]), strVal(r, "next_fire_at"), strVal(r, "last_task_id")})
+			mode, next := strVal(r, "mode"), strVal(r, "next_fire_at")
+			if strVal(r, "kind") == "system" {
+				// What happens when the rule fires now, and why nobody is woken.
+				mode, next = strVal(r, "on_met"), strVal(r, "blocked")
+				if target, ok := r["target"].(map[string]any); ok {
+					next = strVal(target, "type") + ":" + strVal(target, "name")
+				}
+			}
+			cells = append(cells, []string{strVal(r, "id"), strVal(r, "kind"), mode, fmt.Sprint(r["enabled"]), next, strVal(r, "last_task_id")})
 		}
 		cli.PrintTable(os.Stdout, []string{"ID", "KIND", "MODE", "ENABLED", "NEXT", "LAST RUN"}, cells)
 		return nil

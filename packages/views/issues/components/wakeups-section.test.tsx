@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type React from "react";
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import type { IssueWakeup, SystemWakeup } from "@multica/core/types";
 import { renderWithI18n } from "../../test/i18n";
@@ -8,6 +9,7 @@ const enable = vi.fn();
 const updateSystem = vi.fn();
 const trigger = vi.fn();
 const remove = vi.fn();
+const assignIssue = vi.fn();
 let runs: unknown[] = [];
 let systemRules: SystemWakeup[] = [];
 let pending = false;
@@ -46,6 +48,14 @@ vi.mock("@tanstack/react-query", () => ({
               : [],
   }),
 }));
+vi.mock("@multica/core/issues/mutations", () => ({
+  useUpdateIssue: () => ({ mutate: assignIssue }),
+}));
+vi.mock("./pickers", () => ({
+  AssigneePicker: ({ onUpdate, trigger }: { onUpdate: (u: object) => void; trigger: React.ReactNode }) => (
+    <button onClick={() => onUpdate({ assignee_type: "agent", assignee_id: "a" })}>{trigger}</button>
+  ),
+}));
 vi.mock("../../common/use-viewing-timezone", () => ({
   useViewingTimezone: () => viewTZ,
 }));
@@ -59,6 +69,7 @@ beforeEach(() => {
   mutate.mockReset();
   trigger.mockReset();
   remove.mockReset();
+  assignIssue.mockReset();
   runs = [];
   updateSystem.mockReset().mockResolvedValue(undefined);
   systemRules = [];
@@ -394,6 +405,21 @@ describe("v2 sidebar", () => {
     }];
     renderWithI18n(<WakeupsSection issueId="issue" />);
     expect(screen.getByRole("button", { name: /When all sub-issues finish/ })).toHaveTextContent("Notify Jiayuan in their inbox · 2 to go");
+  });
+
+  it("offers to assign the parent when nobody holds it", () => {
+    systemRules = [{
+      id: "rule", revision: 1, default_instruction: "Advance the next stage.", customized: false, paused_reason: null,
+      rule: "child_done", workspace_default: true, enabled: true, instruction: "", staged: true, stage: 1, total: 2, remaining: 1,
+      waiting: ["MUL-2"], target: null, blocked: "no_assignee", on_met: "advance",
+    }];
+    renderWithI18n(<WakeupsSection issueId="issue" />, { locale: "zh-Hans" });
+    expect(screen.getByRole("button", { name: /当第 1 阶段的子任务全部结束时/ })).toHaveTextContent("没有负责人，阶段结束时平台自动推进");
+    fireEvent.click(screen.getByRole("button", { name: "指派负责人" }));
+    expect(assignIssue).toHaveBeenCalledWith(
+      { id: "issue", assignee_type: "agent", assignee_id: "a", suppress_run: true },
+      expect.anything(),
+    );
   });
 
   it("shows the default instruction and saves one for this issue", async () => {

@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="zh-Hans">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DENE-1777 唤醒面板：总单没有负责人</title>
+<style>
+  :root { --fg:#18181b; --muted:#71717a; --border:#e4e4e7; --accent:#f4f4f5; --badge:#f4f4f5; }
+  * { box-sizing:border-box; }
+  body { margin:0; font:13px/1.5 -apple-system,BlinkMacSystemFont,"PingFang SC",sans-serif; color:var(--fg); background:#fafafa; }
+  .frames { display:flex; flex-wrap:wrap; gap:32px; padding:24px; align-items:flex-start; }
+  .frame { background:#fff; border:1px solid var(--border); border-radius:10px; overflow:hidden; }
+  .frame h2 { margin:0; padding:8px 12px; font-size:12px; font-weight:500; color:var(--muted); border-bottom:1px solid var(--border); }
+  .desktop { width:320px; } .phone { width:390px; }
+  .section { padding:8px; }
+  .section h3 { margin:4px 8px 6px; font-size:12px; font-weight:600; color:var(--muted); }
+  .row { display:grid; grid-template-columns:minmax(0,1fr) auto; border-radius:6px; }
+  .row:hover { background:var(--accent); }
+  .head { display:flex; gap:8px; align-items:flex-start; padding:4px 4px 0 8px; min-height:32px; }
+  .icon { width:14px; height:14px; margin-top:2px; flex-shrink:0; border:1.5px solid var(--muted); border-radius:3px; }
+  .title { font-weight:500; min-width:0; }
+  .badge { flex-shrink:0; background:var(--badge); color:var(--muted); font-size:11px; padding:0 6px; border-radius:3px; margin-top:1px; }
+  .summary { grid-column:1 / span 2; padding:0 8px 0 30px; color:var(--muted); }
+  .assign { grid-column:1 / span 2; padding:0 8px 6px 30px; }
+  .assign button { all:unset; cursor:pointer; font-weight:500; text-decoration:underline; text-underline-offset:2px; min-height:32px; display:flex; align-items:center; }
+  .phone .assign button { min-height:44px; }
+  .switch { grid-column:2; grid-row:1; display:flex; align-items:center; padding:0 8px; min-height:44px; }
+  .switch span { width:30px; height:17px; border-radius:9px; background:var(--fg); position:relative; }
+  .switch span::after { content:""; position:absolute; right:2px; top:2px; width:13px; height:13px; border-radius:50%; background:#fff; }
+  .old .summary { padding-bottom:6px; }
+</style>
+</head>
+<body>
+<div class="frames">
+  <div class="frame desktop">
+    <h2>之前 · 桌面侧栏</h2>
+    <div class="section old"><h3>唤醒</h3>
+      <div class="row">
+        <div class="head"><i class="icon"></i><span class="title">当第 1 阶段的子任务全部结束时</span><span class="badge">系统</span></div>
+        <div class="summary">没有智能体负责人，不会唤醒</div>
+        <div class="switch"><span></span></div>
+      </div>
+    </div>
+  </div>
+  <div class="frame desktop">
+    <h2>之后 · 桌面侧栏</h2>
+    <div class="section"><h3>唤醒</h3>
+      <div class="row">
+        <div class="head"><i class="icon"></i><span class="title">当第 1 阶段的子任务全部结束时</span><span class="badge">系统</span></div>
+        <div class="summary">没有负责人，阶段结束时平台自动推进</div>
+        <div class="assign"><button type="button">指派负责人</button></div>
+        <div class="switch"><span></span></div>
+      </div>
+    </div>
+  </div>
+  <div class="frame phone">
+    <h2>之后 · 手机 390px</h2>
+    <div class="section"><h3>唤醒</h3>
+      <div class="row">
+        <div class="head"><i class="icon"></i><span class="title">当第 1 阶段的子任务全部结束时</span><span class="badge">系统</span></div>
+        <div class="summary">没有负责人，阶段结束时平台自动推进</div>
+        <div class="assign"><button type="button">指派负责人</button></div>
+        <div class="switch"><span></span></div>
+      </div>
+    </div>
+  </div>
+</div>
+</body>
+</html>

@@ -354,6 +354,18 @@ func resolveWakeTarget(ctx context.Context, q *db.Queries, issue db.Issue) (wake
 	return wakeTarget{Type: "none"}, nil
 }
 
+// SystemRuleReaches reports whether the child_done rule has someone to reach
+// on this parent: a member to notify or an agent that can run. A rule that
+// reaches nobody leaves the stage advance to the handler path (DENE-1777).
+// A failed read keeps the rule in charge, as before.
+func SystemRuleReaches(ctx context.Context, q *db.Queries, issue db.Issue) bool {
+	target, err := resolveWakeTarget(ctx, q, issue)
+	if err != nil {
+		return true
+	}
+	return target.Type == "member" || target.Agent.ID.Valid
+}
+
 // childDoneFacts summarizes the newest observation for the timeline entry and
 // a member's notification: the closed stage (absent when every sub-issue
 // closed) and how many sub-issues that covers.

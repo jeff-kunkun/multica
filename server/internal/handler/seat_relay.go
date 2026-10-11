@@ -21,6 +21,9 @@ type stagePlan struct {
 	skipWake  bool
 	parentOff bool
 	relay     *db.Agent
+	// needsCall: the next stage has work the platform would not start on
+	// its own (held, or blocked by a cancelled sibling).
+	needsCall bool
 }
 
 // disabledParentSeat reports the parent seat that would be woken and cannot
@@ -109,9 +112,11 @@ func (h *Handler) planStageAdvance(ctx context.Context, parent db.Issue, childre
 	off, parentOff := h.disabledParentSeat(ctx, parent)
 	var plan stagePlan
 	plan.parentOff = parentOff
+	plan.needsCall = nextStage > 0 && blockedByCancel
 	if nextStage > 0 && !blockedByCancel {
 		promoted, started, held := h.promoteClearNextStage(ctx, parent, children, nextStage, statuses)
 		plan.note = stagePromotionNote(promoted, started, held)
+		plan.needsCall = len(held) > 0
 		if len(promoted) > 0 && len(held) == 0 {
 			plan.skipWake = true
 			if parentOff {

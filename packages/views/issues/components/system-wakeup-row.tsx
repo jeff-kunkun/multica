@@ -4,7 +4,8 @@ import { useId, useState } from "react";
 import { ListChecks, Pencil } from "lucide-react";
 import { toast } from "sonner";
 import { useUpdateIssueSystemWakeup } from "@multica/core/issues";
-import type { SystemWakeup } from "@multica/core/types";
+import { useUpdateIssue } from "@multica/core/issues/mutations";
+import type { SystemWakeup, UpdateIssueRequest } from "@multica/core/types";
 import { Button } from "@multica/ui/components/ui/button";
 import { Switch } from "@multica/ui/components/ui/switch";
 import { Textarea } from "@multica/ui/components/ui/textarea";
@@ -16,6 +17,7 @@ import {
 } from "@multica/ui/components/ui/popover";
 import { useT } from "../../i18n";
 import { useWakeupText } from "./wakeup-presentation";
+import { AssigneePicker } from "./pickers";
 
 const MAX_INSTRUCTION_BYTES = 4000;
 
@@ -60,6 +62,16 @@ export function SystemWakeupRow({
         : [target, t(($) => $.wakeups.system.remaining, { count: rule.remaining })].join(" · "));
   const save = (input: { enabled: boolean; instruction: string }) =>
     update.mutateAsync({ rule: rule.rule, ...input });
+  const updateIssue = useUpdateIssue();
+  // A parent nobody holds: the platform advances clear stages by itself, and
+  // a person can seat the coordinator right here. suppress_run keeps it a
+  // coordinator that the stage barrier wakes (DENE-1777).
+  const canAssign = !paused && rule.enabled && rule.blocked === "no_assignee";
+  const assign = (updates: Partial<UpdateIssueRequest>) =>
+    updateIssue.mutate(
+      { id: issueId, ...updates, suppress_run: true },
+      { onError: () => toast.error(t(($) => $.wakeups.system.assign_error)) },
+    );
   const toggle = (enabled: boolean) =>
     void save({ enabled, instruction: rule.instruction }).catch(() =>
       toast.error(t(($) => $.wakeups.system.save_error)),
@@ -122,6 +134,23 @@ export function SystemWakeupRow({
           </p>
         </PopoverContent>
       </Popover>
+      {canAssign && (
+        <div className="col-span-2 col-start-1 row-start-2 pl-7.5 pr-2">
+          <AssigneePicker
+            assigneeType={null}
+            assigneeId={null}
+            onUpdate={assign}
+            align="start"
+            triggerRender={
+              <button
+                type="button"
+                className="flex min-h-11 items-center rounded-md text-caption font-medium underline underline-offset-2 focus-visible:outline-2 focus-visible:outline-ring sm:min-h-8"
+              />
+            }
+            trigger={t(($) => $.wakeups.system.assign)}
+          />
+        </div>
+      )}
       <div className="z-10 col-start-2 row-start-1 flex min-h-11 items-center self-start px-2">
         <Switch
           checked={rule.enabled}

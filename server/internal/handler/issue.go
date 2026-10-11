@@ -3953,6 +3953,7 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	h.RouteIssueAsync(r, workspaceID, uuidToString(issue.ID))
+	h.seatStagedParent(r, workspaceID, issue, creatorType, actualCreatorID)
 
 	writeJSON(w, http.StatusCreated, resp)
 }

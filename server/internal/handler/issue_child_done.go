@@ -301,7 +301,15 @@ func (h *Handler) notifyParentsOfBatchChildDone(ctx context.Context, completed [
 // The rule row is created lazily when the parent's first sub-issue change is
 // processed, which happens after this path runs, so a parent without one
 // follows the workspace default the row will be created with.
+//
+// A rule with nobody to reach (no assignee, or an agent that cannot run)
+// only records the fact, so this path keeps the parent instead: it promotes
+// what the next stage can start and calls a person for the rest (DENE-1777).
 func (h *Handler) childDoneRuleOwnsParent(ctx context.Context, parent db.Issue) bool {
+	return h.childDoneRuleOn(ctx, parent) && service.SystemRuleReaches(ctx, h.Queries, parent)
+}
+
+func (h *Handler) childDoneRuleOn(ctx context.Context, parent db.Issue) bool {
 	rule, err := h.Queries.GetSystemWakeup(ctx, db.GetSystemWakeupParams{
 		IssueID:    parent.ID,
 		SystemRule: pgtype.Text{String: service.SystemRuleChildDone, Valid: true},
@@ -550,6 +558,12 @@ func (h *Handler) postChildDoneComment(ctx context.Context, parent, completed db
 	}
 	if plan.relay != nil {
 		h.wakeStageRelay(ctx, parent, comment.ID, plan.relay)
+		return
+	}
+	if !parent.AssigneeID.Valid {
+		if plan.needsCall {
+			h.wakeUnseatedParent(ctx, parent, comment, nextStage)
+		}
 		return
 	}
 	h.dispatchParentAssigneeTrigger(ctx, parent, comment)
