@@ -49,10 +49,10 @@ const ManagedActorSource = "linked_task_token"
 // ErrManagedDenied is the one refusal for a request the gate will not carry:
 // no such workspace, no active link, managed off, no originator, or an
 // originator without the right there. Like ErrNotFound it never says which.
-var ErrManagedDenied = forbidden("that workspace is not open to this run: it needs an active link with managed access on, and the person who started this run must be able to do this there")
+var ErrManagedDenied = forbidden("that workspace is not open to this run: it needs an active link with managed access on, and the person who started this run must be able to do this there; inspect multica workspace link view")
 
 // ErrManagedRoute refuses a command outside the managed list.
-var ErrManagedRoute = forbidden("this command is not available on a linked workspace: only issues (list, get, create, update, comment, labels, properties) and autopilots (list, get, create, update, triggers, run, delete) are")
+var ErrManagedRoute = forbidden("this command is not available on a linked workspace: only supported issue/autopilot operations, attachment upload, read-only name and project-resource lookups, and the originator's own chat list/read/send are; inspect multica workspace link view")
 
 // managedRoute is one endpoint a managed request may reach.
 type managedRoute struct {
@@ -77,6 +77,10 @@ const issueRef = `(?:` + seg + `|[A-Za-z0-9]{1,10}-[1-9][0-9]*)`
 // the CLI can resolve names; members, workspace settings, MCP, agent config
 // and the link itself stay closed.
 var managedRoutes = []managedRoute{
+	route("chat.list", "GET", `/api/chat/directory`, false),
+	route("chat.get", "GET", `/api/chat/sessions/(?P<chat>`+seg+`)`, false),
+	route("chat.messages", "GET", `/api/chat/sessions/(?P<chat>`+seg+`)/messages`, false),
+	route("chat.send", "POST", `/api/chat/sessions/(?P<chat>`+seg+`)/messages`, true),
 	route("issue.list", "GET", `/api/issues`, false),
 	route("issue.search", "GET", `/api/issues/search`, false),
 	route("issue.children", "GET", `/api/issues/children`, false),
@@ -291,6 +295,21 @@ func (s *Service) Managed(next http.Handler) http.Handler {
 			return
 		}
 
+		// A managed chat grant never includes shared/project-visible chats.
+		if ref, ok := params["chat"]; ok {
+			id, parseErr := util.ParseUUID(ref)
+			if parseErr != nil {
+				writeManagedError(w, ErrManagedDenied)
+				return
+			}
+			session, getErr := s.q.GetChatSessionInWorkspace(r.Context(), db.GetChatSessionInWorkspaceParams{ID: id, WorkspaceID: grant.Source.ID})
+			if getErr != nil || session.CreatorID != grant.Originator {
+				writeManagedError(w, ErrManagedDenied)
+				return
+			}
+		}
+		r = r.WithContext(context.WithValue(r.Context(), managedGrantKey{}, grant))
+
 		// From here on the request is the originator's own, in the source.
 		r.Header.Set("X-User-ID", util.UUIDToString(grant.Originator))
 		r.Header.Set("X-Workspace-ID", sourceID)
@@ -378,6 +397,7 @@ func (s *Service) recordManagedWrite(ctx context.Context, g ManagedGrant, rt man
 		"autopilot_id":  params["autopilot"],
 		"issue_ref":     params["issue"],
 	}
+	detail["chat_id"] = params["chat"]
 	var issueID pgtype.UUID
 	if strings.HasPrefix(rt.name, "issue.") {
 		issueID = s.managedIssueID(ctx, g.Source, params["issue"], body)
@@ -565,4 +585,12 @@ func (s *Service) setManaged(ctx context.Context, q *db.Queries, link db.Workspa
 		return audit(ctx, q, updated, actorWS, actorUser, "set_managed", detail)
 	}
 	return nil
+}
+
+// managedGrantKey cannot be forged through request headers.
+type managedGrantKey struct{}
+
+func ManagedGrantFromContext(ctx context.Context) (ManagedGrant, bool) {
+	grant, ok := ctx.Value(managedGrantKey{}).(ManagedGrant)
+	return grant, ok
 }

@@ -1158,6 +1158,7 @@ WHERE chat_session_id = $1
   AND role = 'user'
   AND message_kind <> 'channel_command'
   AND message_kind <> 'onboarding_kickoff'
+  AND message_kind <> 'linked_delivery'
 ORDER BY created_at ASC, id ASC
 LIMIT 1
 `
@@ -2081,7 +2082,7 @@ SELECT cs.id, cs.workspace_id, cs.agent_id, cs.creator_id, cs.title, cs.session_
                           )
                       AND (
                         m.role = 'assistant'
-                        OR (m.role = 'user' AND COALESCE(m.sender_user_id, cs.creator_id) <> $1)
+                        OR (m.role = 'user' AND (m.message_kind = 'linked_delivery' OR COALESCE(m.sender_user_id, cs.creator_id) <> $1))
                       ))
        END::int AS unread_count,
        COALESCE(lm.content, '') AS last_message_content,
@@ -2959,7 +2960,7 @@ SELECT cs.id, cs.workspace_id, cs.agent_id, cs.creator_id, cs.title, cs.session_
                 )
             AND (
               m.role = 'assistant'
-              OR (m.role = 'user' AND COALESCE(m.sender_user_id, cs.creator_id) <> $1)
+              OR (m.role = 'user' AND (m.message_kind = 'linked_delivery' OR COALESCE(m.sender_user_id, cs.creator_id) <> $1))
             ))::int AS unread_count,
        COALESCE(lm.content, '') AS last_message_content,
        COALESCE(lm.role, '') AS last_message_role,

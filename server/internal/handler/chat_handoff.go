@@ -12,6 +12,7 @@ import (
 
 	"github.com/multica-ai/multica/server/internal/integrations/channel"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
+	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
 // ChatSessionHandoffResponse is what a new session reads when it takes over an
@@ -197,8 +198,8 @@ func handoffMessages(rows []db.ChatMessage) []channel.HistoryMessage {
 			ViaBotID: uuidToString(m.ViaBotID), ViaBotName: m.ViaBotName.String,
 			ID:     uuidToString(m.ID),
 			Role:   role,
-			Text:   m.Content,
-			Author: transcriptAuthor(role),
+			Text:   protocol.ChatPromptContent(m.MessageKind, m.Content),
+			Author: transcriptMessageAuthor(role, m.MessageKind),
 			TS:     m.CreatedAt.Time.UTC().Format(time.RFC3339Nano),
 		})
 	}

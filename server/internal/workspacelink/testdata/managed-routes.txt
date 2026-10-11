@@ -1,3 +1,7 @@
+chat.list GET ^/api/chat/directory/?$ write=false
+chat.get GET ^/api/chat/sessions/(?P<chat>[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})/?$ write=false
+chat.messages GET ^/api/chat/sessions/(?P<chat>[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})/messages/?$ write=false
+chat.send POST ^/api/chat/sessions/(?P<chat>[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})/messages/?$ write=true
 issue.list GET ^/api/issues/?$ write=false
 issue.search GET ^/api/issues/search/?$ write=false
 issue.children GET ^/api/issues/children/?$ write=false

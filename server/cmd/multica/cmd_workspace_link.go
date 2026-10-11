@@ -27,10 +27,11 @@ var workspaceLinkCmd = &cobra.Command{
 		"and project memory. A chat can attach it as a read-only reference.\n\n" +
 		"Agents use `list` to find the active links of their workspace and `view` to read one;\n" +
 		"`list --pending` shows the offers waiting for this workspace's owner or admin to accept.\n\n" +
-		"Managed: when the source owner turns it on (`update <link-id> --managed on`), an\n" +
-		"agent of the viewer may work on the source's issues and autopilots on behalf of the\n" +
+		"Managed is on for new links unless `create --managed=false` is passed. An\n" +
+		"agent of the viewer may work on the source's issues, autopilots and initiator-owned chats on behalf of the\n" +
 		"person who started its run, with that person's rights there:\n" +
-		"`multica issue ... --linked <source-slug>` and `multica autopilot ... --linked <source-slug>`.",
+		"Use `multica chat list|send --linked <source-slug>`, `multica issue ... --linked <source-slug>`\n" +
+		"or `multica autopilot ... --linked <source-slug>`. Existing links keep their managed setting.",
 }
 
 var workspaceLinkListCmd = &cobra.Command{
@@ -52,10 +53,12 @@ var workspaceLinkLookupCmd = &cobra.Command{
 }
 
 var workspaceLinkCreateCmd = &cobra.Command{
-	Use:   "create (--to | --from) <workspace-link-or-slug> --project <project>...",
-	Short: "Share this workspace's projects (--to, owner) or pull another workspace's projects in (--from, owner of both)",
-	Args:  cobra.NoArgs,
-	RunE:  runWorkspaceLinkCreate,
+	Use:     "create (--to | --from) <workspace-link-or-slug> --project <project>... [--managed=false]",
+	Long:    "Create a workspace link. Managed access is on by default: viewer agents may act with the run initiator’s rights in the source. Pass --managed=false to disable it. Existing links are unchanged.",
+	Example: "  multica workspace link create --to studio --project 019abcde-1234-7000-8000-000000000001 --managed=false",
+	Short:   "Share this workspace's projects (--to, owner) or pull another workspace's projects in (--from, owner of both)",
+	Args:    cobra.NoArgs,
+	RunE:    runWorkspaceLinkCreate,
 }
 
 var workspaceLinkUpdateCmd = &cobra.Command{
@@ -133,13 +136,14 @@ func init() {
 		c.Flags().String("output", "table", "Output format: table or json")
 		workspaceLinkCmd.AddCommand(c)
 	}
+	workspaceLinkCreateCmd.Flags().Bool("managed", true, "Allow viewer agents to act with the run initiator’s source permissions (default on; --managed=false disables)")
 	workspaceLinkCreateCmd.Flags().String("to", "", "The workspace that will see the projects: its link (https://host/<slug>/...) or slug")
 	workspaceLinkCreateCmd.Flags().String("from", "", "The workspace whose projects this workspace will see (you must own it): its link or slug")
 	workspaceLinkCreateCmd.Flags().StringArray("project", nil, "Project to share (id, id prefix or exact name); with --from, a project of that workspace; repeatable")
 	workspaceLinkListCmd.Flags().Bool("pending", false, "Only offers waiting for this workspace to accept (owner/admin, or their agents)")
 	workspaceLinkUpdateCmd.Flags().StringArray("project", nil, "Replace the shared projects with these; repeatable")
 	workspaceLinkUpdateCmd.Flags().Bool("accept", false, "Accept a pending link offered to this workspace")
-	workspaceLinkUpdateCmd.Flags().String("managed", "", "on: the viewer's agents may work on this workspace's issues and autopilots for the person who started their run; off: read-only again (source owner, or owner of both from the viewer side)")
+	workspaceLinkUpdateCmd.Flags().String("managed", "", "on: the viewer's agents may work on this workspace's issues, autopilots and initiator-owned chats for the person who started their run; off: read-only again (source owner, or owner of both from the viewer side)")
 	workspaceLinkViewCmd.Flags().String("project-id", "", "Only this shared project (an id from the view's projects)")
 	workspaceLinkViewCmd.Flags().String("cursor", "", "next_cursor from the previous page")
 	workspaceLinkViewCmd.Flags().Int("limit", 0, "Tasks per page (max 100)")
@@ -294,7 +298,8 @@ func runWorkspaceLinkCreate(cmd *cobra.Command, _ []string) error {
 	}
 	ctx, cancel := cli.APIContext(context.Background())
 	defer cancel()
-	body := map[string]any{"target_slug": to, "direction": "offer"}
+	managed, _ := cmd.Flags().GetBool("managed")
+	body := map[string]any{"target_slug": to, "direction": "offer", "managed": managed}
 	var ids []string
 	if from != "" {
 		body["target_slug"], body["direction"] = from, "pull"

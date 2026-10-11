@@ -58,7 +58,9 @@ func TestViewerUpdatesProjectsAndAuditPagination(t *testing.T) {
 func TestPendingLinkCannotEnableManaged(t *testing.T) {
 	w := newWorld(t)
 	ctx := context.Background()
-	l, err := w.svc.Create(ctx, w.source, w.srcOwner, owner(), w.viewerSlug, []pgtype.UUID{w.shared})
+	// Explicitly off: new offers default on, but an off pending offer still
+	// cannot enable managed access before acceptance.
+	l, err := w.svc.Create(ctx, w.source, w.srcOwner, owner(), w.viewerSlug, []pgtype.UUID{w.shared}, false)
 	if err != nil {
 		t.Fatal(err)
 	}

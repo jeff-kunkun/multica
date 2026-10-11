@@ -79,13 +79,14 @@
       "pull_reason": "Only an owner or admin can link another workspace in.",
       "pull_create": "Link in",
       "pull_created": "Linked. Members can read it in the sidebar now.",
-      "managed_label": "Let the viewing side manage tasks and autopilots",
-      "managed_hint_outgoing": "When on, their agents can change tasks and autopilots here for the person who started the run.",
-      "managed_hint_incoming": "When on, agents here can change their tasks and autopilots for the person who started the run.",
+      "managed_label": "Managed access",
+      "managed_hint_outgoing": "Their agents may act here with the initiator’s permissions.",
+      "managed_hint_incoming": "Agents here may act there with the initiator’s permissions.",
       "managed_reason": "Requires source owner rights; from here, also owner or admin rights in this workspace.",
       "pending_only": "Waiting for this workspace",
       "projects_reason": "Requires source owner rights; from here, also owner or admin rights in this workspace.",
-      "managed_pending": "Accept the link before enabling managed access."
+      "managed_pending": "Accept the link before enabling managed access.",
+      "managed_create_hint": "Viewer agents may act with the initiator’s permissions by default; you can turn this off."
     },
     "audit": {
       "title": "Audit trail",
@@ -100,7 +101,8 @@
       "someone": "Someone",
       "set_managed_on": "turned managed access on",
       "set_managed_off": "turned managed access off",
-      "managed_write": "had {{agent}} make a change"
+      "managed_write": "had {{agent}} make a change",
+      "deliver": "Delivered a message"
     },
     "panel": {
       "title": "Linked workspaces",
@@ -116,7 +118,7 @@
       "show_all": "Show all",
       "no_tasks": "No tasks to show.",
       "load_more": "Load more",
-      "managed_from": "{{name}} allows managed access: agents can work on its tasks and autopilots for you"
+      "managed_from": "{{name}} allows managed access: agents can act with the initiator’s permissions"
     }
   }
 }

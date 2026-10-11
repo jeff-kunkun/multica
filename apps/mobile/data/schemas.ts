@@ -304,7 +304,7 @@ export const ChatMessageSchema: z.ZodType<ChatMessage> = z.object({
   attachments: z.array(AttachmentSchema).optional(),
   failure_reason: z.string().nullable().optional(),
   elapsed_ms: z.number().nullable().optional(),
-  message_kind: z.enum(["message", "no_response"]).catch("message").optional(),
+  message_kind: z.enum(["message", "no_response", "linked_delivery"]).catch("message").optional(),
   // DENE-1345: whether this reply's run carried the CLI session forward.
   session_mode: z.enum(["new", "resumed"]).optional().catch(undefined),
   resumed_from_run: z.string().optional().catch(undefined),
