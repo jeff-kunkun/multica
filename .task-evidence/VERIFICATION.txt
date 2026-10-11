@@ -48,3 +48,12 @@ DAEMON PROBE FAILURE FOLLOWUP
 Observed daemon CLI exit 3; stderr absent from traceback. Previous local exit 2 did not verify daemon environment.
 Removed block.wait_probe, block.wait_condition, block.wait_timeout through CLI (all exit 0); close blocked --wake-at 2026-10-12T18:05:00Z exit 0.
 Readback: probe absent; wake_at 2026-10-12T18:05:00Z. No credential or identity changes.
+
+MERGED SOURCE VERIFICATION
+GitHub PR https://github.com/kkunkunya/kun-agent-mono/pull/784 is MERGED at 2026-10-11T18:03:07Z; commit 3cf1ba3766d63d88a7171c91ac77d0c9eb187eb2; files prompt/AGENT.md only (+4/-2). Current origin/main 151d9c0494d648e5eba91ec65be4c4c5b955d49c.
+Merged prompt bytes equal MODIFIED_FILE.md; fresh live profile I17 PASS exit 0 stderr empty.
+python3 scripts/check-agent-drift.py --static-only after merging origin/main: exit 0; stdout static gates (I8/I9/I11/I12/I13/I15/I16/I17): ok; stderr empty.
+
+Final skills drift exit 0; stdout merged-skills-drift.json, stderr merged-skills-drift.stderr; aligned=true, checked=98, bindings=50.
+
+Final close --outcome done failed exit 5: cross-repository verification rejected by parent delivery-line guard. See close-limitation.md. No application commit fabricated.

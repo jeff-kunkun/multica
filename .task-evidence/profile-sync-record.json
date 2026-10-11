@@ -1,0 +1,11 @@
+[
+  {
+    "author_id": "d1591cab-9534-4ffc-89ab-b1d60940cf8f",
+    "author_type": "agent",
+    "content": "**Skill 分发记录** · `origin/main` @ `fba73c7b9cd7`\n\n- 推正文：`ask-selfmedia`、`edit-video`、`faceless-explainer`、`general-video`、`hyperframes`、`long-article`、`media-use`、`video-shotcraft`\n- 绑定：无改动\n- 目录表：没有变化\n- 「关于你」：线上更新，已回写 prompt/AGENT.md，已合并 https://github.com/kkunkunya/kun-agent-mono/pull/784\n- 漂移：干净",
+    "created_at": "2026-10-11T18:03:13Z",
+    "id": "01a12c22-155d-73f1-a579-e2c5ad948c04",
+    "revision": 1,
+    "type": "comment"
+  }
+]
