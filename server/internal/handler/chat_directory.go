@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"github.com/multica-ai/multica/server/internal/listshape"
 	"net/http"
 	"strings"
 	"time"
@@ -44,7 +45,7 @@ func (h *Handler) ListChatDirectory(w http.ResponseWriter, r *http.Request) {
 	}
 	if viewerID == "" {
 		// A task with no human originator has no visibility principal.
-		writeJSON(w, http.StatusOK, []ChatDirectoryItem{})
+		writeProjectedList(w, r, []ChatDirectoryItem{}, listshape.Chat)
 		return
 	}
 
@@ -122,7 +123,7 @@ func (h *Handler) ListChatDirectory(w http.ResponseWriter, r *http.Request) {
 			Summary:      directorySummary(row.Summary),
 		})
 	}
-	writeJSON(w, http.StatusOK, items)
+	writeProjectedList(w, r, items, listshape.Chat)
 }
 
 func directorySummary(raw string) string {

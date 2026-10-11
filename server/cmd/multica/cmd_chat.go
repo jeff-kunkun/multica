@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/multica-ai/multica/server/internal/listshape"
 	"net/url"
 	"os"
 	"strconv"
@@ -265,7 +266,9 @@ left as it is. Only the chat's owner can hand it over.
 
 func init() {
 	for _, c := range []*cobra.Command{chatListCmd, chatSearchCmd} {
-		c.Flags().String("project", "", "Filter to a project id (defaults to the current project)")
+		c.Flags().String("project", "", "Filter to a project UUID, prefix or exact name (case-insensitive; defaults to the current project)")
+		addListShapeFlags(c)
+		c.Example = "  multica chat list --project \"My project\" --compact --output json\n  multica chat list --fields id,title,status --workspace \"My workspace\""
 		c.Flags().Bool("all-projects", false, "Search across every project visible to the task initiator")
 		c.Flags().String("since", "", "Only chats active since an RFC3339 timestamp")
 		c.Flags().String("output", "json", "Output format: table or json")
@@ -576,7 +579,11 @@ func runChatDirectory(cmd *cobra.Command, keyword string) error {
 	defer cancel()
 	q := url.Values{}
 	if project, _ := cmd.Flags().GetString("project"); strings.TrimSpace(project) != "" {
-		q.Set("project", strings.TrimSpace(project))
+		ref, err := resolveProjectID(ctx, client, project)
+		if err != nil {
+			return err
+		}
+		q.Set("project", ref.ID)
 	}
 	if all, _ := cmd.Flags().GetBool("all-projects"); all {
 		q.Set("all_projects", "true")
@@ -587,6 +594,10 @@ func runChatDirectory(cmd *cobra.Command, keyword string) error {
 	if strings.TrimSpace(keyword) != "" {
 		q.Set("q", keyword)
 	}
+	fields, err := listShapeQuery(cmd, q, listshape.Chat)
+	if err != nil {
+		return err
+	}
 	path := "/api/chat/directory"
 	if encoded := q.Encode(); encoded != "" {
 		path += "?" + encoded
@@ -595,9 +606,18 @@ func runChatDirectory(cmd *cobra.Command, keyword string) error {
 	if err := client.GetJSON(ctx, path, &rows); err != nil {
 		return linkedChatRefusal(cmd, err, "list chats")
 	}
+	listshape.Filter(rows, fields)
 	output, _ := cmd.Flags().GetString("output")
 	if output != "table" {
 		return cli.PrintJSON(os.Stdout, rows)
+	}
+	if compact, _ := cmd.Flags().GetBool("compact"); compact {
+		tableRows := make([][]string, 0, len(rows))
+		for _, row := range rows {
+			tableRows = append(tableRows, []string{strVal(row, "id"), strVal(row, "title"), strVal(row, "project_title"), strVal(row, "agent_name"), strVal(row, "status"), strVal(row, "last_active_at"), numVal(row, "message_count")})
+		}
+		cli.PrintTable(os.Stdout, []string{"ID", "TITLE", "PROJECT", "AGENT", "STATUS", "LAST_ACTIVE", "MESSAGES"}, tableRows)
+		return nil
 	}
 	headers := []string{"TITLE", "PROJECT", "AGENT", "ORIGINATOR", "LAST_ACTIVE", "MESSAGES", "SUMMARY"}
 	tableRows := make([][]string, 0, len(rows))

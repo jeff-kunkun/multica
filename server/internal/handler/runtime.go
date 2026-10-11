@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/multica-ai/multica/server/internal/listshape"
 	"log/slog"
 	"net/http"
 	"strconv"
@@ -999,7 +1000,7 @@ func (h *Handler) ListAgentRuntimes(w http.ResponseWriter, r *http.Request) {
 		resp[i] = runtimeToResponse(rt)
 	}
 
-	writeJSON(w, http.StatusOK, resp)
+	writeProjectedList(w, r, resp, listshape.Runtime)
 }
 
 // DeleteAgentRuntime deletes a runtime after permission and dependency checks.

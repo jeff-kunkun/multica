@@ -13,6 +13,16 @@ transcript, issue body, source file or mailbox message. Verify `auth status`
 and the selected workspace. Keep its CLI configuration private and check
 persistence after a cloud-computer restart; revoke this Bot's token when retired.
 
+`multica auth status --output json` reports the selected key's type, name,
+source and expiry without printing key material. Seven days before expiry it
+prints a renewal hint. Bot keys use `multica bot key <bot-id> --workspace
+<workspace-id> --profile <admin-profile>` from an administrator's authenticated
+session without `MULTICA_TOKEN`, then install the issued key. Personal keys
+use `multica login`; an explicit `MULTICA_TOKEN` must be updated separately.
+An expired/revoked key fails with an auth exit code and keeps the selected
+identity. Previous status metadata can be shown as cached; a rejected key
+whose metadata was never read has unknown type/expiry, never a guessed identity.
+
 There is no extra mailbox command allowlist or privilege tier in this path.
 The owner's authorization and the server's ordinary checks determine what the
 Bot may do. Do not turn "same permissions" into instructions to bypass a server
