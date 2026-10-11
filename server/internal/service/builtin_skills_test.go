@@ -380,6 +380,7 @@ func TestPlatformSkillDescriptionNamesEveryDomain(t *testing.T) {
 		"references/drivers.md":         "driver",
 		"references/run-control.md":     "halt",
 		"references/state-card.md":      "state card",
+		"references/external-bots.md":   "bot",
 	}
 
 	skill, ok := findSkill(t, PlatformSkillName)

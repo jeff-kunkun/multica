@@ -1,6 +1,6 @@
 ---
 name: multica-platform
-description: "Multica asks, open a chat, consult, goals, inbox, project board/report, sub-issues, wakeups, routing, close protocol, stall, driver, halt, mention, agents, specialisation, squads, autopilot, projects, runtimes, progress, state card, skill import, transfer, linked workspace, GitHub App. Not app code."
+description: "Asks, open a chat, consult, goals, inbox, project board/report, sub-issues, wakeups, routing, close protocol, stall, driver, halt, mention, agents, specialisation, squads, autopilot, projects, runtimes, progress, state card, skill import, transfer, linked workspace, bots, GitHub App. Not app code."
 user-invocable: false
 allowed-tools: Bash(multica *), Bash(git *), Bash(gh *)
 ---
@@ -148,7 +148,6 @@ the user, say so and propose a scoped change.
 Do not silently alter routing, briefing, or trigger behavior to make a complaint
 go away. Those are product contracts, and changing one without confirmation
 moves the surprise to somebody else.
-
 
 ## Progress
 
