@@ -227,7 +227,7 @@ func (h *Handler) writeMikaAgentResponse(w http.ResponseWriter, r *http.Request,
 	// hear about it.
 	if created {
 		actorType, actorID := h.resolveActor(r, uuidToString(agent.OwnerID), workspaceID)
-		h.publish(protocol.EventAgentCreated, workspaceID, actorType, actorID, map[string]any{"agent": broadcastAgentResponse(resp)})
+		h.publishWithSource(r.Context(), protocol.EventAgentCreated, workspaceID, actorType, actorID, map[string]any{"agent": broadcastAgentResponse(resp)})
 	}
 
 	session, err := h.getOrCreateMikaSession(r.Context(), agent, workspaceID, userID, sessionTitle)

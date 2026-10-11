@@ -564,7 +564,7 @@ func (h *Handler) promoteChildToTodo(ctx context.Context, child db.Issue, actorT
 	if err != nil {
 		return db.Issue{}, false, err
 	}
-	h.publish(protocol.EventIssueUpdated, uuidToString(updated.WorkspaceID), actorType, actorID, RoutingIssueUpdatedPayload(child, updated))
+	h.publishWithSource(ctx, protocol.EventIssueUpdated, uuidToString(updated.WorkspaceID), actorType, actorID, RoutingIssueUpdatedPayload(child, updated))
 	if h.IssueService == nil {
 		return updated, false, nil
 	}

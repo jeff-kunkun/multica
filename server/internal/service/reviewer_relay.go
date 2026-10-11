@@ -10,6 +10,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/botsource"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/dbid"
@@ -127,6 +128,7 @@ func (s *TaskService) reclaimOneReview(ctx context.Context, agent db.Agent, issu
 	}
 	body := fmt.Sprintf("验收席 %s 已恢复接活，而且 %s 还没开跑，这张票的指定验收人换回去了。", agent.Name, emptyName(meta.ReplacementName))
 	created, err := s.Queries.CreateComment(ctx, db.CreateCommentParams{
+		ViaBotID: botsource.FromContext(ctx).ID, ViaBotName: pgtype.Text{String: botsource.FromContext(ctx).Name, Valid: botsource.FromContext(ctx).ID.Valid},
 		ID:          dbid.NewV7(),
 		IssueID:     restored.ID,
 		WorkspaceID: restored.WorkspaceID,

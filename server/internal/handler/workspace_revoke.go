@@ -312,7 +312,7 @@ func (h *Handler) publishRevocation(ctx context.Context, result revocationResult
 	}
 
 	for _, agent := range result.ArchivedAgents {
-		h.publish(protocol.EventAgentArchived, workspaceIDStr, actorType, actorIDStr, map[string]any{
+		h.publishWithSource(ctx, protocol.EventAgentArchived, workspaceIDStr, actorType, actorIDStr, map[string]any{
 			"agent": h.agentToResponse(agent),
 		})
 	}
@@ -323,7 +323,7 @@ func (h *Handler) publishRevocation(ctx context.Context, result revocationResult
 	// without us having to introduce a new event type the desktop app would
 	// need a build to learn about.
 	if len(result.OfflineRuntimeIDs) > 0 {
-		h.publish(protocol.EventDaemonRegister, workspaceIDStr, actorType, actorIDStr, map[string]any{
+		h.publishWithSource(ctx, protocol.EventDaemonRegister, workspaceIDStr, actorType, actorIDStr, map[string]any{
 			"action": "revoke",
 		})
 	}

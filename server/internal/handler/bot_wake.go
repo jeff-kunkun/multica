@@ -131,8 +131,8 @@ func validateWakeURL(ctx context.Context, raw string) (*url.URL, error) {
 	return u, nil
 }
 
-// Authenticate the PAT itself, not just its inherited X-User-ID. Cache hits
-// on the normal auth middleware deliberately carry only the owner's identity.
+// Revalidate the PAT itself, independently of its inherited owner identity.
+// Bot provenance never grants administration of another Bot.
 func (h *Handler) authorizeWake(w http.ResponseWriter, r *http.Request) (db.PersonalAccessToken, bool) {
 	var zero db.PersonalAccessToken
 	user, ok := requireUserID(w, r)
@@ -199,6 +199,10 @@ func (h *Handler) GetBotWake(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) PutBotWake(w http.ResponseWriter, r *http.Request) {
 	bot, ok := h.authorizeWake(w, r)
 	if !ok {
+		return
+	}
+	if bot.DeletedAt.Valid {
+		writeError(w, 410, "bot deleted")
 		return
 	}
 	var req struct {
@@ -358,7 +362,7 @@ func (h *Handler) ListBotWakeEvents(w http.ResponseWriter, r *http.Request) {
 		if !h.wakeVisible(r.Context(), e, bot.UserID) || !h.wakeVisible(r.Context(), e, parseUUID(requestUserID(r))) {
 			continue
 		}
-		result = append(result, map[string]any{"event_id": uuidToString(e.EventID), "sequence": e.Sequence, "type": e.EventType, "issue_id": uuidToString(e.IssueID), "chat_session_id": uuidToString(e.ChatSessionID), "status": e.Status, "reason": e.Reason, "attempts": e.Attempts, "created_at": e.CreatedAt.Time, "sent_at": timestampToPtr(e.SentAt), "received_at": timestampToPtr(e.ReceivedAt), "woken_at": timestampToPtr(e.WokenAt), "result_at": timestampToPtr(e.ResultAt), "result_url": e.ResultUrl, "acknowledged_at": timestampToPtr(e.AcknowledgedAt)})
+		result = append(result, map[string]any{"event_id": uuidToString(e.EventID), "hop": e.Hop, "root_id": uuidToString(e.RootID), "source_task_id": uuidToString(e.SourceTaskID), "sequence": e.Sequence, "type": e.EventType, "issue_id": uuidToString(e.IssueID), "chat_session_id": uuidToString(e.ChatSessionID), "status": e.Status, "reason": e.Reason, "attempts": e.Attempts, "created_at": e.CreatedAt.Time, "sent_at": timestampToPtr(e.SentAt), "received_at": timestampToPtr(e.ReceivedAt), "woken_at": timestampToPtr(e.WokenAt), "result_at": timestampToPtr(e.ResultAt), "result_url": e.ResultUrl, "acknowledged_at": timestampToPtr(e.AcknowledgedAt)})
 	}
 	if int64(len(rows)) == limit {
 		next = strconv.FormatInt(rows[len(rows)-1].Sequence, 10)

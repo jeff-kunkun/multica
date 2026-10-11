@@ -323,3 +323,10 @@ then start again without a cursor. Never use creation sequence as a high-water
 mark: older queued events may fail later, and sequence is not commit order.
 Settings accept `wake_from` with member/agent/bot rules `{mode:all|none|list,ids:[]}`.
 See `server/docs/bot-wake-contract.md` for the trusted-source deployment gate.
+
+The server attaches source_id/parent_id, web_url, root_id/hop and ack_url to wake
+payloads; url remains the authenticated source API URL. Do not infer execution
+from type=task. Bot and agent automatic wakes share a durable four-admission root
+budget; a missing/client-reset hop cannot bypass it. At the cap read pending or
+the cancelled run error. Do not repeatedly rerun a capped chain. Bot tombstones
+retain history but are absent from the mention directory.

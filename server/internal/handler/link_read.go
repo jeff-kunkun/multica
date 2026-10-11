@@ -14,6 +14,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/multica-ai/multica/server/internal/botsource"
 	"github.com/multica-ai/multica/server/internal/logger"
 	"github.com/multica-ai/multica/server/internal/permission"
 	"github.com/multica-ai/multica/server/internal/util"
@@ -496,6 +497,7 @@ func (h *Handler) recordLinkRead(r *http.Request, target linkReadTarget, surface
 	}
 	raw, _ := json.Marshal(details)
 	activity, err := h.Queries.CreateActivity(ctx, db.CreateActivityParams{
+		ViaBotID: botsource.FromContext(ctx).ID, ViaBotName: pgtype.Text{String: botsource.FromContext(ctx).Name, Valid: botsource.FromContext(ctx).ID.Valid},
 		ID:          dbid.NewV7(),
 		WorkspaceID: target.workspace.ID,
 		IssueID:     target.issue.ID,
@@ -509,7 +511,7 @@ func (h *Handler) recordLinkRead(r *http.Request, target linkReadTarget, surface
 			append(logger.RequestAttrs(r), "issue_id", uuidToString(target.issue.ID), "error", err)...)
 		return
 	}
-	h.publish(protocol.EventActivityCreated, uuidToString(target.workspace.ID), "member", uuidToString(target.originator), map[string]any{
+	h.publishWithSource(r.Context(), protocol.EventActivityCreated, uuidToString(target.workspace.ID), "member", uuidToString(target.originator), map[string]any{
 		"issue_id": uuidToString(target.issue.ID),
 		"entry": map[string]any{
 			"type":       "activity",

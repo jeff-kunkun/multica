@@ -15,7 +15,7 @@ const createBotAccessToken = `-- name: CreateBotAccessToken :one
 
 INSERT INTO personal_access_token (user_id, name, token_hash, token_prefix, expires_at, kind, bot_type, workspace_id)
 VALUES ($1, $2, $3, $4, $5, 'bot', $6, $7)
-RETURNING id, user_id, name, token_hash, token_prefix, expires_at, last_used_at, revoked, created_at, kind, bot_type, workspace_id, revoked_at
+RETURNING id, user_id, name, token_hash, token_prefix, expires_at, last_used_at, revoked, created_at, kind, bot_type, workspace_id, revoked_at, deleted_at
 `
 
 type CreateBotAccessTokenParams struct {
@@ -55,6 +55,7 @@ func (q *Queries) CreateBotAccessToken(ctx context.Context, arg CreateBotAccessT
 		&i.BotType,
 		&i.WorkspaceID,
 		&i.RevokedAt,
+		&i.DeletedAt,
 	)
 	return i, err
 }
@@ -62,7 +63,7 @@ func (q *Queries) CreateBotAccessToken(ctx context.Context, arg CreateBotAccessT
 const createPersonalAccessToken = `-- name: CreatePersonalAccessToken :one
 INSERT INTO personal_access_token (user_id, name, token_hash, token_prefix, expires_at)
 VALUES ($1, $2, $3, $4, $5)
-RETURNING id, user_id, name, token_hash, token_prefix, expires_at, last_used_at, revoked, created_at, kind, bot_type, workspace_id, revoked_at
+RETURNING id, user_id, name, token_hash, token_prefix, expires_at, last_used_at, revoked, created_at, kind, bot_type, workspace_id, revoked_at, deleted_at
 `
 
 type CreatePersonalAccessTokenParams struct {
@@ -96,13 +97,15 @@ func (q *Queries) CreatePersonalAccessToken(ctx context.Context, arg CreatePerso
 		&i.BotType,
 		&i.WorkspaceID,
 		&i.RevokedAt,
+		&i.DeletedAt,
 	)
 	return i, err
 }
 
 const deleteStoppedBotAccessToken = `-- name: DeleteStoppedBotAccessToken :execrows
-DELETE FROM personal_access_token
-WHERE id = $1 AND workspace_id = $2 AND user_id = $3 AND kind = 'bot' AND revoked = TRUE
+UPDATE personal_access_token
+SET deleted_at = now(), revoked = TRUE, revoked_at = COALESCE(revoked_at, now())
+WHERE id = $1 AND workspace_id = $2 AND user_id = $3 AND kind = 'bot' AND deleted_at IS NULL AND revoked = TRUE
 `
 
 type DeleteStoppedBotAccessTokenParams struct {
@@ -123,6 +126,7 @@ const extendPersonalAccessTokenExpiry = `-- name: ExtendPersonalAccessTokenExpir
 UPDATE personal_access_token
 SET expires_at = $1
 WHERE id = $2
+  AND deleted_at IS NULL
   AND revoked = FALSE
   AND expires_at IS NOT NULL
   AND expires_at > now()
@@ -155,8 +159,8 @@ func (q *Queries) ExtendPersonalAccessTokenExpiry(ctx context.Context, arg Exten
 }
 
 const getBotAccessToken = `-- name: GetBotAccessToken :one
-SELECT id, user_id, name, token_hash, token_prefix, expires_at, last_used_at, revoked, created_at, kind, bot_type, workspace_id, revoked_at FROM personal_access_token
-WHERE id = $1 AND workspace_id = $2 AND user_id = $3 AND kind = 'bot'
+SELECT id, user_id, name, token_hash, token_prefix, expires_at, last_used_at, revoked, created_at, kind, bot_type, workspace_id, revoked_at, deleted_at FROM personal_access_token
+WHERE id = $1 AND workspace_id = $2 AND user_id = $3 AND kind = 'bot' AND deleted_at IS NULL
 `
 
 type GetBotAccessTokenParams struct {
@@ -182,13 +186,15 @@ func (q *Queries) GetBotAccessToken(ctx context.Context, arg GetBotAccessTokenPa
 		&i.BotType,
 		&i.WorkspaceID,
 		&i.RevokedAt,
+		&i.DeletedAt,
 	)
 	return i, err
 }
 
 const getPersonalAccessTokenByHash = `-- name: GetPersonalAccessTokenByHash :one
-SELECT id, user_id, name, token_hash, token_prefix, expires_at, last_used_at, revoked, created_at, kind, bot_type, workspace_id, revoked_at FROM personal_access_token
+SELECT id, user_id, name, token_hash, token_prefix, expires_at, last_used_at, revoked, created_at, kind, bot_type, workspace_id, revoked_at, deleted_at FROM personal_access_token
 WHERE token_hash = $1
+  AND deleted_at IS NULL
   AND revoked = FALSE
   AND (expires_at IS NULL OR expires_at > now())
 `
@@ -210,13 +216,14 @@ func (q *Queries) GetPersonalAccessTokenByHash(ctx context.Context, tokenHash st
 		&i.BotType,
 		&i.WorkspaceID,
 		&i.RevokedAt,
+		&i.DeletedAt,
 	)
 	return i, err
 }
 
 const listBotAccessTokens = `-- name: ListBotAccessTokens :many
-SELECT id, user_id, name, token_hash, token_prefix, expires_at, last_used_at, revoked, created_at, kind, bot_type, workspace_id, revoked_at FROM personal_access_token
-WHERE workspace_id = $1 AND user_id = $2 AND kind = 'bot'
+SELECT id, user_id, name, token_hash, token_prefix, expires_at, last_used_at, revoked, created_at, kind, bot_type, workspace_id, revoked_at, deleted_at FROM personal_access_token
+WHERE workspace_id = $1 AND user_id = $2 AND kind = 'bot' AND deleted_at IS NULL
 ORDER BY revoked, created_at DESC
 `
 
@@ -248,6 +255,7 @@ func (q *Queries) ListBotAccessTokens(ctx context.Context, arg ListBotAccessToke
 			&i.BotType,
 			&i.WorkspaceID,
 			&i.RevokedAt,
+			&i.DeletedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -295,8 +303,9 @@ func (q *Queries) ListBotSetupDomains(ctx context.Context, workspaceID pgtype.UU
 }
 
 const listPersonalAccessTokensByUser = `-- name: ListPersonalAccessTokensByUser :many
-SELECT id, user_id, name, token_hash, token_prefix, expires_at, last_used_at, revoked, created_at, kind, bot_type, workspace_id, revoked_at FROM personal_access_token
+SELECT id, user_id, name, token_hash, token_prefix, expires_at, last_used_at, revoked, created_at, kind, bot_type, workspace_id, revoked_at, deleted_at FROM personal_access_token
 WHERE user_id = $1
+  AND deleted_at IS NULL
   AND revoked = FALSE
   AND kind = 'personal'
 ORDER BY created_at DESC
@@ -325,6 +334,7 @@ func (q *Queries) ListPersonalAccessTokensByUser(ctx context.Context, userID pgt
 			&i.BotType,
 			&i.WorkspaceID,
 			&i.RevokedAt,
+			&i.DeletedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -359,8 +369,8 @@ const rotateBotAccessToken = `-- name: RotateBotAccessToken :one
 UPDATE personal_access_token
 SET token_hash = $4, token_prefix = $5, expires_at = $6,
     revoked = FALSE, revoked_at = NULL, last_used_at = NULL
-WHERE id = $1 AND workspace_id = $2 AND user_id = $3 AND kind = 'bot'
-RETURNING id, user_id, name, token_hash, token_prefix, expires_at, last_used_at, revoked, created_at, kind, bot_type, workspace_id, revoked_at
+WHERE id = $1 AND workspace_id = $2 AND user_id = $3 AND kind = 'bot' AND deleted_at IS NULL
+RETURNING id, user_id, name, token_hash, token_prefix, expires_at, last_used_at, revoked, created_at, kind, bot_type, workspace_id, revoked_at, deleted_at
 `
 
 type RotateBotAccessTokenParams struct {
@@ -398,6 +408,7 @@ func (q *Queries) RotateBotAccessToken(ctx context.Context, arg RotateBotAccessT
 		&i.BotType,
 		&i.WorkspaceID,
 		&i.RevokedAt,
+		&i.DeletedAt,
 	)
 	return i, err
 }
@@ -405,8 +416,8 @@ func (q *Queries) RotateBotAccessToken(ctx context.Context, arg RotateBotAccessT
 const stopBotAccessToken = `-- name: StopBotAccessToken :one
 UPDATE personal_access_token
 SET revoked = TRUE, revoked_at = COALESCE(revoked_at, now())
-WHERE id = $1 AND workspace_id = $2 AND user_id = $3 AND kind = 'bot'
-RETURNING id, user_id, name, token_hash, token_prefix, expires_at, last_used_at, revoked, created_at, kind, bot_type, workspace_id, revoked_at
+WHERE id = $1 AND workspace_id = $2 AND user_id = $3 AND kind = 'bot' AND deleted_at IS NULL
+RETURNING id, user_id, name, token_hash, token_prefix, expires_at, last_used_at, revoked, created_at, kind, bot_type, workspace_id, revoked_at, deleted_at
 `
 
 type StopBotAccessTokenParams struct {
@@ -432,6 +443,7 @@ func (q *Queries) StopBotAccessToken(ctx context.Context, arg StopBotAccessToken
 		&i.BotType,
 		&i.WorkspaceID,
 		&i.RevokedAt,
+		&i.DeletedAt,
 	)
 	return i, err
 }

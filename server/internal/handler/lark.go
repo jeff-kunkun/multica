@@ -170,7 +170,7 @@ func (h *Handler) RevokeLarkInstallation(w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusInternalServerError, "failed to revoke installation")
 		return
 	}
-	h.publish(protocol.EventLarkInstallationRevoked, uuidToString(wsUUID), "user", userID, map[string]any{
+	h.publishWithSource(r.Context(), protocol.EventLarkInstallationRevoked, uuidToString(wsUUID), "user", userID, map[string]any{
 		"id": uuidToString(instUUID),
 	})
 	w.WriteHeader(http.StatusNoContent)

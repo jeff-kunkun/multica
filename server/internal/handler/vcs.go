@@ -252,7 +252,7 @@ func (h *Handler) ConnectVCS(w http.ResponseWriter, r *http.Request) {
 	h.clearCoveredNudges(r.Context(), conn)
 
 	resp := h.vcsConnectionToResponse(conn)
-	h.publish(protocol.EventVCSConnectionCreated, workspaceID, "system", "", map[string]any{"id": resp.ID})
+	h.publishWithSource(r.Context(), protocol.EventVCSConnectionCreated, workspaceID, "system", "", map[string]any{"id": resp.ID})
 	writeJSON(w, http.StatusOK, VCSConnectResponse{
 		VCSConnectionResponse: resp,
 		WebhookSecret:         webhookSecret,
@@ -299,7 +299,7 @@ func (h *Handler) DeleteVCSConnection(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to remove connection")
 		return
 	}
-	h.publish(protocol.EventVCSConnectionDeleted, workspaceID, "system", "", map[string]any{
+	h.publishWithSource(r.Context(), protocol.EventVCSConnectionDeleted, workspaceID, "system", "", map[string]any{
 		"id": chi.URLParam(r, "connectionId"),
 	})
 	w.WriteHeader(http.StatusNoContent)
@@ -356,7 +356,7 @@ func (h *Handler) RotateVCSConnectionWebhook(w http.ResponseWriter, r *http.Requ
 	}
 
 	resp := h.vcsConnectionToResponse(updated)
-	h.publish(protocol.EventVCSConnectionCreated, workspaceID, "system", "", map[string]any{"id": resp.ID})
+	h.publishWithSource(r.Context(), protocol.EventVCSConnectionCreated, workspaceID, "system", "", map[string]any{"id": resp.ID})
 	writeJSON(w, http.StatusOK, VCSConnectResponse{
 		VCSConnectionResponse: resp,
 		WebhookSecret:         webhookSecret,

@@ -374,6 +374,7 @@ function MessageRow({
         )}
         style={continuousCorners}
       >
+        {message.via_bot_name ? <Text className="text-xs text-muted-foreground">{t("via_bot", { name: message.via_bot_name })}</Text> : null}
         <Markdown
           content={message.content}
           attachments={message.attachments}

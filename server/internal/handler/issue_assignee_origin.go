@@ -8,6 +8,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/multica-ai/multica/server/internal/botsource"
 	"github.com/multica-ai/multica/server/internal/routing"
 	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/util"
@@ -63,7 +64,7 @@ func (h *Handler) rulePick(
 	assigneeType pgtype.Text, assigneeID pgtype.UUID, quote, resultingStatus string,
 	held *heldExecutor, scene sceneRef,
 ) assignmentRuling {
-	if actorType != "agent" {
+	if actorType != "agent" && !botsource.FromContext(r.Context()).ID.Valid {
 		// A person's own hand. Whatever quote they sent is not needed.
 		ruling := assignmentRuling{Apply: true, Source: routing.SourceHuman}
 		if id, err := util.ParseUUID(actorID); err == nil && actorType == "member" {
@@ -206,7 +207,7 @@ func (h *Handler) initiatorMessages(ctx context.Context, task db.AgentTaskQueue)
 	}
 	for _, id := range ids {
 		c, err := h.Queries.GetComment(ctx, id)
-		if err != nil || c.DeletedAt.Valid || c.AuthorType != "member" || !c.AuthorID.Valid {
+		if err != nil || c.DeletedAt.Valid || c.ViaBotID.Valid || c.AuthorType != "member" || !c.AuthorID.Valid {
 			continue
 		}
 		out = append(out, triggerMessage{author: uuidToString(c.AuthorID), content: c.Content})
@@ -221,6 +222,9 @@ func (h *Handler) initiatorMessages(ctx context.Context, task db.AgentTaskQueue)
 				}
 			}
 			for _, m := range msgs {
+				if m.ViaBotID.Valid {
+					continue
+				}
 				author := uuidToString(m.SenderUserID)
 				if author == "" {
 					author = creator
@@ -236,6 +240,9 @@ func (h *Handler) initiatorMessages(ctx context.Context, task db.AgentTaskQueue)
 				creator = uuidToString(sess.CreatorID)
 			}
 			for _, m := range msgs {
+				if m.ViaBotID.Valid {
+					continue
+				}
 				if m.Role != "user" {
 					continue
 				}
@@ -253,7 +260,7 @@ func (h *Handler) initiatorMessages(ctx context.Context, task db.AgentTaskQueue)
 				IssueID: task.IssueID, WorkspaceID: issue.WorkspaceID, Limit: 1000,
 			}); err == nil {
 				for _, c := range comments {
-					if c.DeletedAt.Valid || c.AuthorType != "member" || !c.AuthorID.Valid {
+					if c.DeletedAt.Valid || c.ViaBotID.Valid || c.AuthorType != "member" || !c.AuthorID.Valid {
 						continue
 					}
 					out = append(out, triggerMessage{author: uuidToString(c.AuthorID), content: c.Content})

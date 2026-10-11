@@ -6,6 +6,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/botsource"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
@@ -28,6 +29,8 @@ type IssueContentPatch struct {
 // effects.
 func (s *IssueService) UpdateContent(ctx context.Context, issue db.Issue, patch IssueContentPatch) (db.Issue, error) {
 	params := db.UpdateIssueParams{
+		ActorType: pgtype.Text{String: botsource.ActorFromContext(ctx).Type, Valid: botsource.ActorFromContext(ctx).Type != ""}, ActorID: botsource.ActorFromContext(ctx).ID,
+		ViaBotID: botsource.FromContext(ctx).ID, ViaBotName: pgtype.Text{String: botsource.FromContext(ctx).Name, Valid: botsource.FromContext(ctx).ID.Valid},
 		ID:            issue.ID,
 		AssigneeType:  issue.AssigneeType,
 		AssigneeID:    issue.AssigneeID,

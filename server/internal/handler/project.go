@@ -479,7 +479,7 @@ func (h *Handler) CreateProject(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		resp := projectToResponse(project)
-		h.publish(protocol.EventProjectCreated, workspaceID, "member", userID, map[string]any{"project": resp})
+		h.publishWithSource(r.Context(), protocol.EventProjectCreated, workspaceID, "member", userID, map[string]any{"project": resp})
 		writeJSON(w, http.StatusCreated, resp)
 		return
 	}
@@ -544,9 +544,9 @@ func (h *Handler) CreateProject(w http.ResponseWriter, r *http.Request) {
 	}
 	resp := projectToResponse(project)
 	resp.ResourceCount = int64(len(resourceResp))
-	h.publish(protocol.EventProjectCreated, workspaceID, "member", userID, map[string]any{"project": resp})
+	h.publishWithSource(r.Context(), protocol.EventProjectCreated, workspaceID, "member", userID, map[string]any{"project": resp})
 	for _, rr := range resourceResp {
-		h.publish(protocol.EventProjectResourceCreated, workspaceID, "member", userID, map[string]any{
+		h.publishWithSource(r.Context(), protocol.EventProjectResourceCreated, workspaceID, "member", userID, map[string]any{
 			"resource":   rr,
 			"project_id": resp.ID,
 		})
@@ -717,7 +717,7 @@ func (h *Handler) UpdateProject(w http.ResponseWriter, r *http.Request) {
 	resp := projectToResponse(project)
 	resp.IssueCount, resp.DoneCount = h.loadProjectIssueStats(r.Context(), wsUUID, project.ID)
 	resp.ResourceCount = h.loadProjectResourceCount(r.Context(), project.ID)
-	h.publish(protocol.EventProjectUpdated, workspaceID, "member", userID, map[string]any{"project": resp})
+	h.publishWithSource(r.Context(), protocol.EventProjectUpdated, workspaceID, "member", userID, map[string]any{"project": resp})
 	sedimentError := ""
 	if prevProject.Status != "completed" && project.Status == "completed" {
 		sedimentError = h.noteMemoryMilestone(r.Context(), project.WorkspaceID, project.ID, "项目置为 completed："+project.Title, h.projectSedimentDigest(r.Context(), project), &sedimentSource{Kind: "project", ID: uuidToString(project.ID)})
@@ -828,7 +828,7 @@ func (h *Handler) DeleteProject(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to commit project delete")
 		return
 	}
-	h.publish(protocol.EventProjectDeleted, workspaceID, "member", userID, map[string]any{"project_id": uuidToString(project.ID)})
+	h.publishWithSource(r.Context(), protocol.EventProjectDeleted, workspaceID, "member", userID, map[string]any{"project_id": uuidToString(project.ID)})
 	w.WriteHeader(http.StatusNoContent)
 }
 

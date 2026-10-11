@@ -50,7 +50,7 @@ func (h *Handler) HaltIssue(w http.ResponseWriter, r *http.Request) {
 	}
 
 	actorType, actorID := h.resolveActor(r, requestUserID(r), uuidToString(issue.WorkspaceID))
-	h.publish(protocol.EventIssueMetadataChanged, uuidToString(issue.WorkspaceID), actorType, actorID, map[string]any{
+	h.publishWithSource(r.Context(), protocol.EventIssueMetadataChanged, uuidToString(issue.WorkspaceID), actorType, actorID, map[string]any{
 		"issue_id": uuidToString(issue.ID), "metadata": parseIssueMetadata(metadata), "issue_revision": revision,
 	})
 	writeJSON(w, http.StatusOK, map[string]any{"issue_id": uuidToString(issue.ID), "halted": true, "metadata": parseIssueMetadata(metadata)})
@@ -78,7 +78,7 @@ func (h *Handler) ResumeIssue(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	actorType, actorID := h.resolveActor(r, requestUserID(r), uuidToString(issue.WorkspaceID))
-	h.publish(protocol.EventIssueMetadataChanged, uuidToString(issue.WorkspaceID), actorType, actorID, map[string]any{
+	h.publishWithSource(r.Context(), protocol.EventIssueMetadataChanged, uuidToString(issue.WorkspaceID), actorType, actorID, map[string]any{
 		"issue_id": uuidToString(issue.ID), "metadata": parseIssueMetadata(metadata), "issue_revision": revision,
 	})
 	writeJSON(w, http.StatusOK, map[string]any{"issue_id": uuidToString(issue.ID), "halted": false, "metadata": parseIssueMetadata(metadata)})

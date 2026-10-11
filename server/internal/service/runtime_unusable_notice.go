@@ -5,6 +5,7 @@ import (
 	"log/slog"
 
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/botsource"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -30,6 +31,7 @@ func (s *IssueService) noteRuntimeUnusable(ctx context.Context, issue db.Issue, 
 	// author_type='system', author_id=zero UUID. The zero UUID is a valid 16
 	// byte value and the column is NOT NULL; clients branch on author_type.
 	created, err := s.Queries.CreateComment(ctx, db.CreateCommentParams{
+		ViaBotID: botsource.FromContext(ctx).ID, ViaBotName: pgtype.Text{String: botsource.FromContext(ctx).Name, Valid: botsource.FromContext(ctx).ID.Valid},
 		ID:          dbid.NewV7(),
 		IssueID:     issue.ID,
 		WorkspaceID: issue.WorkspaceID,

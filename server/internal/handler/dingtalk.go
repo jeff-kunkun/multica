@@ -706,7 +706,7 @@ func (h *Handler) RevokeDingTalkInstallation(w http.ResponseWriter, r *http.Requ
 		writeError(w, http.StatusInternalServerError, "failed to revoke installation")
 		return
 	}
-	h.publish(protocol.EventDingTalkInstallationRevoked, uuidToString(wsUUID), "user", userID, map[string]any{
+	h.publishWithSource(r.Context(), protocol.EventDingTalkInstallationRevoked, uuidToString(wsUUID), "user", userID, map[string]any{
 		"id": uuidToString(instUUID),
 	})
 	w.WriteHeader(http.StatusNoContent)
@@ -771,7 +771,7 @@ func (h *Handler) RedeemDingTalkBindingToken(w http.ResponseWriter, r *http.Requ
 		}
 		return
 	}
-	h.publish(protocol.EventDingTalkAccountBindingUpdated, uuidToString(redeemed.WorkspaceID), "user", userID, map[string]any{
+	h.publishWithSource(r.Context(), protocol.EventDingTalkAccountBindingUpdated, uuidToString(redeemed.WorkspaceID), "user", userID, map[string]any{
 		"id": uuidToString(redeemed.InstallationID),
 	})
 	writeJSON(w, http.StatusOK, RedeemDingTalkBindingTokenResponse{

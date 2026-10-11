@@ -8,6 +8,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/botsource"
 	"github.com/multica-ai/multica/server/internal/quotarelay"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -92,6 +93,8 @@ func (s *TaskService) relaySafetyRefusal(ctx context.Context, task db.AgentTaskQ
 		prev = reassigned.Status
 		if reassigned.Status != "in_progress" {
 			if reassigned, err = qtx.UpdateIssueStatus(ctx, db.UpdateIssueStatusParams{
+				ActorType: pgtype.Text{String: botsource.ActorFromContext(ctx).Type, Valid: botsource.ActorFromContext(ctx).Type != ""}, ActorID: botsource.ActorFromContext(ctx).ID,
+				ViaBotID: botsource.FromContext(ctx).ID, ViaBotName: pgtype.Text{String: botsource.FromContext(ctx).Name, Valid: botsource.FromContext(ctx).ID.Valid},
 				ID: reassigned.ID, Status: "in_progress", WorkspaceID: reassigned.WorkspaceID,
 			}); err != nil {
 				return err

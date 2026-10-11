@@ -6,12 +6,14 @@ RETURNING *;
 -- name: GetPersonalAccessTokenByHash :one
 SELECT * FROM personal_access_token
 WHERE token_hash = $1
+  AND deleted_at IS NULL
   AND revoked = FALSE
   AND (expires_at IS NULL OR expires_at > now());
 
 -- name: ListPersonalAccessTokensByUser :many
 SELECT * FROM personal_access_token
 WHERE user_id = $1
+  AND deleted_at IS NULL
   AND revoked = FALSE
   AND kind = 'personal'
 ORDER BY created_at DESC;
@@ -42,6 +44,7 @@ WHERE id = $1;
 UPDATE personal_access_token
 SET expires_at = sqlc.arg(new_expires_at)
 WHERE id = sqlc.arg(id)
+  AND deleted_at IS NULL
   AND revoked = FALSE
   AND expires_at IS NOT NULL
   AND expires_at > now()
@@ -58,12 +61,12 @@ RETURNING *;
 
 -- name: ListBotAccessTokens :many
 SELECT * FROM personal_access_token
-WHERE workspace_id = $1 AND user_id = $2 AND kind = 'bot'
+WHERE workspace_id = $1 AND user_id = $2 AND kind = 'bot' AND deleted_at IS NULL
 ORDER BY revoked, created_at DESC;
 
 -- name: GetBotAccessToken :one
 SELECT * FROM personal_access_token
-WHERE id = $1 AND workspace_id = $2 AND user_id = $3 AND kind = 'bot';
+WHERE id = $1 AND workspace_id = $2 AND user_id = $3 AND kind = 'bot' AND deleted_at IS NULL;
 
 -- name: RotateBotAccessToken :one
 -- A new key for the same bot: the old hash stops matching at once and a
@@ -71,18 +74,19 @@ WHERE id = $1 AND workspace_id = $2 AND user_id = $3 AND kind = 'bot';
 UPDATE personal_access_token
 SET token_hash = $4, token_prefix = $5, expires_at = $6,
     revoked = FALSE, revoked_at = NULL, last_used_at = NULL
-WHERE id = $1 AND workspace_id = $2 AND user_id = $3 AND kind = 'bot'
+WHERE id = $1 AND workspace_id = $2 AND user_id = $3 AND kind = 'bot' AND deleted_at IS NULL
 RETURNING *;
 
 -- name: StopBotAccessToken :one
 UPDATE personal_access_token
 SET revoked = TRUE, revoked_at = COALESCE(revoked_at, now())
-WHERE id = $1 AND workspace_id = $2 AND user_id = $3 AND kind = 'bot'
+WHERE id = $1 AND workspace_id = $2 AND user_id = $3 AND kind = 'bot' AND deleted_at IS NULL
 RETURNING *;
 
 -- name: DeleteStoppedBotAccessToken :execrows
-DELETE FROM personal_access_token
-WHERE id = $1 AND workspace_id = $2 AND user_id = $3 AND kind = 'bot' AND revoked = TRUE;
+UPDATE personal_access_token
+SET deleted_at = now(), revoked = TRUE, revoked_at = COALESCE(revoked_at, now())
+WHERE id = $1 AND workspace_id = $2 AND user_id = $3 AND kind = 'bot' AND deleted_at IS NULL AND revoked = TRUE;
 
 -- name: ListBotSetupDomains :many
 -- The workspace's directions with the live specialisation covering each, for

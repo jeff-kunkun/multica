@@ -210,7 +210,7 @@ func (h *Handler) RevokeSlackInstallation(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusInternalServerError, "failed to revoke installation")
 		return
 	}
-	h.publish(protocol.EventSlackInstallationRevoked, uuidToString(wsUUID), "user", userID, map[string]any{
+	h.publishWithSource(r.Context(), protocol.EventSlackInstallationRevoked, uuidToString(wsUUID), "user", userID, map[string]any{
 		"id": uuidToString(instUUID),
 	})
 	w.WriteHeader(http.StatusNoContent)

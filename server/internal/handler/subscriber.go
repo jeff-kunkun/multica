@@ -102,7 +102,7 @@ func (h *Handler) SubscribeToIssue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.publish(protocol.EventSubscriberAdded, workspaceID, callerActorType, callerActorID, map[string]any{
+	h.publishWithSource(r.Context(), protocol.EventSubscriberAdded, workspaceID, callerActorType, callerActorID, map[string]any{
 		"issue_id":  issueID,
 		"user_type": targetUserType,
 		"user_id":   targetUserID,
@@ -208,7 +208,7 @@ func (h *Handler) unsubscribeFromIssue(w http.ResponseWriter, r *http.Request, s
 	}
 
 	for _, id := range removed {
-		h.publish(protocol.EventSubscriberRemoved, workspaceID, callerActorType, callerActorID, map[string]any{
+		h.publishWithSource(r.Context(), protocol.EventSubscriberRemoved, workspaceID, callerActorType, callerActorID, map[string]any{
 			"issue_id":  id,
 			"user_type": targetUserType,
 			"user_id":   targetUserID,

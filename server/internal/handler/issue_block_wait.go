@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/blockwait"
+	"github.com/multica-ai/multica/server/internal/botsource"
 	"github.com/multica-ai/multica/server/internal/closeprotocol"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/integrations/ghsnapshot"
@@ -226,6 +227,7 @@ func (h *Handler) noteBlockClearedOnSource(ctx context.Context, completed, waite
 
 func (h *Handler) postBlockComment(ctx context.Context, issue db.Issue, content string) db.Comment {
 	created, err := h.Queries.CreateComment(ctx, db.CreateCommentParams{
+		ViaBotID: botsource.FromContext(ctx).ID, ViaBotName: pgtype.Text{String: botsource.FromContext(ctx).Name, Valid: botsource.FromContext(ctx).ID.Valid},
 		ID:          dbid.NewV7(),
 		IssueID:     issue.ID,
 		WorkspaceID: issue.WorkspaceID,
@@ -240,7 +242,7 @@ func (h *Handler) postBlockComment(ctx context.Context, issue db.Issue, content 
 		return db.Comment{}
 	}
 	comment := created.Comment()
-	h.publish(protocol.EventCommentCreated, uuidToString(issue.WorkspaceID), "system", "", map[string]any{
+	h.publishWithSource(ctx, protocol.EventCommentCreated, uuidToString(issue.WorkspaceID), "system", "", map[string]any{
 		"comment":             commentToResponse(comment, nil, nil),
 		"issue_title":         issue.Title,
 		"issue_assignee_type": textToPtr(issue.AssigneeType),
@@ -412,6 +414,8 @@ func (h *Handler) finishAcceptedIssue(ctx context.Context, issue db.Issue, reaso
 
 func (h *Handler) blockAcceptedIssue(ctx context.Context, issue db.Issue, decision blockwait.Decision) releaseOutcome {
 	updated, err := h.Queries.UpdateIssueStatus(ctx, db.UpdateIssueStatusParams{
+		ActorType: pgtype.Text{String: botsource.ActorFromContext(ctx).Type, Valid: botsource.ActorFromContext(ctx).Type != ""}, ActorID: botsource.ActorFromContext(ctx).ID,
+		ViaBotID: botsource.FromContext(ctx).ID, ViaBotName: pgtype.Text{String: botsource.FromContext(ctx).Name, Valid: botsource.FromContext(ctx).ID.Valid},
 		ID:          issue.ID,
 		WorkspaceID: issue.WorkspaceID,
 		Status:      "blocked",
@@ -1051,7 +1055,7 @@ func (h *Handler) coverDisabledWakeTarget(ctx context.Context, issue db.Issue, t
 	}); err != nil {
 		slog.Warn("block wait: cancel off seat tasks failed", "issue_id", uuidToString(issue.ID), "error", err)
 	}
-	h.publish(protocol.EventIssueUpdated, uuidToString(updated.WorkspaceID), "system", "", RoutingIssueUpdatedPayload(issue, updated))
+	h.publishWithSource(ctx, protocol.EventIssueUpdated, uuidToString(updated.WorkspaceID), "system", "", RoutingIssueUpdatedPayload(issue, updated))
 	note := fmt.Sprintf(" 原执行人 %s 已停用，这张票改由 %s 接手：先读评论和原分支上的提交，接着做，别从头来。", agent.Name, replacement.Name)
 	return updated, replacement.ID, reason + note, true
 }
@@ -1162,7 +1166,9 @@ func (h *Handler) resumeBlockedOnReply(ctx context.Context, issue db.Issue, enqu
 		if err != nil {
 			return err
 		}
-		updated, err = qtx.UpdateIssueStatus(ctx, db.UpdateIssueStatusParams{ID: issue.ID, WorkspaceID: issue.WorkspaceID, Status: issuestatus.InProgress})
+		updated, err = qtx.UpdateIssueStatus(ctx, db.UpdateIssueStatusParams{
+			ActorType: pgtype.Text{String: botsource.ActorFromContext(ctx).Type, Valid: botsource.ActorFromContext(ctx).Type != ""}, ActorID: botsource.ActorFromContext(ctx).ID,
+			ViaBotID: botsource.FromContext(ctx).ID, ViaBotName: pgtype.Text{String: botsource.FromContext(ctx).Name, Valid: botsource.FromContext(ctx).ID.Valid}, ID: issue.ID, WorkspaceID: issue.WorkspaceID, Status: issuestatus.InProgress})
 		if err != nil {
 			return err
 		}

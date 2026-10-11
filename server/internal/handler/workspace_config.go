@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/botsource"
 	"github.com/multica-ai/multica/server/internal/logger"
 	"github.com/multica-ai/multica/server/internal/service"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -92,6 +93,7 @@ func (h *Handler) ExportWorkspaceConfig(w http.ResponseWriter, r *http.Request) 
 		"stats":     bundle.Stats,
 	})
 	if _, err := h.Queries.CreateActivity(r.Context(), db.CreateActivityParams{
+		ViaBotID: botsource.FromContext(r.Context()).ID, ViaBotName: pgtype.Text{String: botsource.FromContext(r.Context()).Name, Valid: botsource.FromContext(r.Context()).ID.Valid},
 		ID:          dbid.NewV7(),
 		WorkspaceID: wsUUID,
 		ActorType:   pgtype.Text{String: "member", Valid: true},

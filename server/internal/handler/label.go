@@ -233,7 +233,7 @@ func (h *Handler) CreateLabel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	resp := labelToResponse(label)
-	h.publish(protocol.EventLabelCreated, workspaceID, "member", userID, map[string]any{"label": resp})
+	h.publishWithSource(r.Context(), protocol.EventLabelCreated, workspaceID, "member", userID, map[string]any{"label": resp})
 	writeJSON(w, http.StatusCreated, resp)
 }
 
@@ -302,7 +302,7 @@ func (h *Handler) UpdateLabel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	resp := labelToResponse(label)
-	h.publish(protocol.EventLabelUpdated, workspaceID, "member", userID, map[string]any{"label": resp})
+	h.publishWithSource(r.Context(), protocol.EventLabelUpdated, workspaceID, "member", userID, map[string]any{"label": resp})
 	writeJSON(w, http.StatusOK, resp)
 }
 
@@ -361,7 +361,7 @@ func (h *Handler) DeleteLabel(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to commit label deletion")
 		return
 	}
-	h.publish(protocol.EventLabelDeleted, workspaceID, "member", userID, map[string]any{"label_id": uuidToString(idUUID)})
+	h.publishWithSource(r.Context(), protocol.EventLabelDeleted, workspaceID, "member", userID, map[string]any{"label_id": uuidToString(idUUID)})
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -488,7 +488,7 @@ func (h *Handler) AttachLabel(w http.ResponseWriter, r *http.Request) {
 	}
 	resp := labelsToResponse(labels)
 	if attached.Changed {
-		h.publish(protocol.EventIssueLabelsChanged, uuidToString(issue.WorkspaceID), "member", userID, map[string]any{
+		h.publishWithSource(r.Context(), protocol.EventIssueLabelsChanged, uuidToString(issue.WorkspaceID), "member", userID, map[string]any{
 			"issue_id":       uuidToString(issue.ID),
 			"labels":         resp,
 			"issue_revision": attached.IssueRevision,
@@ -560,7 +560,7 @@ func (h *Handler) DetachLabel(w http.ResponseWriter, r *http.Request) {
 	}
 	resp := labelsToResponse(labels)
 	if detached.Changed {
-		h.publish(protocol.EventIssueLabelsChanged, uuidToString(issue.WorkspaceID), "member", userID, map[string]any{
+		h.publishWithSource(r.Context(), protocol.EventIssueLabelsChanged, uuidToString(issue.WorkspaceID), "member", userID, map[string]any{
 			"issue_id":       uuidToString(issue.ID),
 			"labels":         resp,
 			"issue_revision": detached.IssueRevision,
@@ -617,7 +617,7 @@ func (h *Handler) AttachLabelToAgent(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to attach agent label")
 		return
 	}
-	h.publish(protocol.EventLabelUpdated, uuidToString(agent.WorkspaceID), "member", requestUserID(r), map[string]any{"label": labelToResponse(label)})
+	h.publishWithSource(r.Context(), protocol.EventLabelUpdated, uuidToString(agent.WorkspaceID), "member", requestUserID(r), map[string]any{"label": labelToResponse(label)})
 	h.ListLabelsForAgent(w, r)
 }
 
@@ -636,7 +636,7 @@ func (h *Handler) DetachLabelFromAgent(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to detach agent label")
 		return
 	}
-	h.publish(protocol.EventLabelUpdated, uuidToString(agent.WorkspaceID), "member", requestUserID(r), map[string]any{"label_id": uuidToString(labelID), "resource_type": "agent"})
+	h.publishWithSource(r.Context(), protocol.EventLabelUpdated, uuidToString(agent.WorkspaceID), "member", requestUserID(r), map[string]any{"label_id": uuidToString(labelID), "resource_type": "agent"})
 	h.ListLabelsForAgent(w, r)
 }
 
@@ -680,7 +680,7 @@ func (h *Handler) AttachLabelToSkill(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to attach skill label")
 		return
 	}
-	h.publish(protocol.EventLabelUpdated, uuidToString(skill.WorkspaceID), "member", requestUserID(r), map[string]any{"label": labelToResponse(label)})
+	h.publishWithSource(r.Context(), protocol.EventLabelUpdated, uuidToString(skill.WorkspaceID), "member", requestUserID(r), map[string]any{"label": labelToResponse(label)})
 	h.ListLabelsForSkill(w, r)
 }
 
@@ -699,6 +699,6 @@ func (h *Handler) DetachLabelFromSkill(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to detach skill label")
 		return
 	}
-	h.publish(protocol.EventLabelUpdated, uuidToString(skill.WorkspaceID), "member", requestUserID(r), map[string]any{"label_id": uuidToString(labelID), "resource_type": "skill"})
+	h.publishWithSource(r.Context(), protocol.EventLabelUpdated, uuidToString(skill.WorkspaceID), "member", requestUserID(r), map[string]any{"label_id": uuidToString(labelID), "resource_type": "skill"})
 	h.ListLabelsForSkill(w, r)
 }

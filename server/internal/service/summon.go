@@ -10,6 +10,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/botsource"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -144,6 +145,7 @@ func SummonWith(ctx context.Context, q *db.Queries, in SummonInput) (SummonResul
 	}
 
 	row, err := q.CreateIssueSummon(ctx, db.CreateIssueSummonParams{
+		ViaBotID: botsource.FromContext(ctx).ID, ViaBotName: pgtype.Text{String: botsource.FromContext(ctx).Name, Valid: botsource.FromContext(ctx).ID.Valid}, SourceTaskID: botsource.TaskFromContext(ctx),
 		WorkspaceID: in.Issue.WorkspaceID,
 		IssueID:     in.Issue.ID,
 		RecipientID: in.Recipient,
@@ -173,6 +175,7 @@ func SummonWith(ctx context.Context, q *db.Queries, in SummonInput) (SummonResul
 	commentID := in.CommentID
 	if !commentID.Valid && !in.NoComment {
 		created, err := q.CreateComment(ctx, db.CreateCommentParams{
+			ViaBotID: botsource.FromContext(ctx).ID, ViaBotName: pgtype.Text{String: botsource.FromContext(ctx).Name, Valid: botsource.FromContext(ctx).ID.Valid},
 			ID:          dbid.NewV7(),
 			IssueID:     in.Issue.ID,
 			WorkspaceID: in.Issue.WorkspaceID,

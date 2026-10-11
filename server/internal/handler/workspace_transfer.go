@@ -80,7 +80,7 @@ func (h *Handler) ImportWorkspaceTransferIssues(w http.ResponseWriter, r *http.R
 	}
 	if report.Finalized {
 		if ws, werr := h.Queries.GetWorkspace(r.Context(), env.TargetID); werr == nil {
-			h.publish(protocol.EventWorkspaceUpdated, uuidToString(env.TargetID), "member", uuidToString(env.ImporterID), map[string]any{
+			h.publishWithSource(r.Context(), protocol.EventWorkspaceUpdated, uuidToString(env.TargetID), "member", uuidToString(env.ImporterID), map[string]any{
 				"workspace": h.workspaceToResponse(ws),
 			})
 		}
@@ -256,7 +256,7 @@ func (h *Handler) bindTransferAgentRuntime(r *http.Request, member db.Member, ws
 		slog.Warn("transfer bind runtime failed", append(logger.RequestAttrs(r), "error", err, "agent_id", uuidToString(agent.ID))...)
 		return agent.Name, runtimeDisplayName(runtime), "bind_failed", "failed to bind the agent to this runtime"
 	}
-	h.publish(protocol.EventAgentStatus, uuidToString(wsUUID), "member", requestUserID(r), map[string]any{
+	h.publishWithSource(r.Context(), protocol.EventAgentStatus, uuidToString(wsUUID), "member", requestUserID(r), map[string]any{
 		"reason": "transfer_runtime_bind",
 	})
 	return agent.Name, runtimeDisplayName(runtime), "", ""
@@ -293,7 +293,7 @@ func (h *Handler) ImportWorkspaceTransferConversations(w http.ResponseWriter, r 
 		return
 	}
 	if report.Finalized {
-		h.publish(protocol.EventChatSessionUpdated, uuidToString(env.TargetID), "member", uuidToString(env.ImporterID), map[string]any{
+		h.publishWithSource(r.Context(), protocol.EventChatSessionUpdated, uuidToString(env.TargetID), "member", uuidToString(env.ImporterID), map[string]any{
 			"reason": "transfer_import_finalize",
 		})
 	}

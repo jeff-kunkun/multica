@@ -416,7 +416,7 @@ func (h *Handler) recordProjectReportHeard(ctx context.Context, wsUUID, person p
 	report.InboxRead = len(read)
 	if len(read) > 0 {
 		personID := uuidToString(person)
-		h.publish(protocol.EventInboxBatchRead, uuidToString(wsUUID), "member", personID, map[string]any{
+		h.publishWithSource(ctx, protocol.EventInboxBatchRead, uuidToString(wsUUID), "member", personID, map[string]any{
 			"recipient_id": personID,
 			"count":        len(read),
 		})

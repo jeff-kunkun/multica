@@ -105,7 +105,7 @@ func (w *BotWakeWorker) ProcessNext(ctx context.Context) (bool, error) {
 		}
 		return true, tx.Commit(ctx)
 	}
-	if bot.Revoked || bot.ExpiresAt.Valid && !bot.ExpiresAt.Time.After(time.Now()) {
+	if bot.DeletedAt.Valid || bot.Revoked || bot.ExpiresAt.Valid && !bot.ExpiresAt.Time.After(time.Now()) {
 		return pending("bot inactive")
 	}
 	if !w.h.wakeVisible(ctx, e, bot.UserID) {
@@ -155,11 +155,31 @@ func (w *BotWakeWorker) ProcessNext(ctx context.Context) (bool, error) {
 	if err != nil {
 		return pending("webhook endpoint unavailable")
 	}
-	payload, err := w.h.botWakePayload(ctx, e)
+	var payload []byte
+	if !e.RootID.Valid {
+		return pending("source lineage unavailable")
+	}
+	if e.Attempts == 0 {
+		if err = q.EnsureBotWakeChain(ctx, db.EnsureBotWakeChainParams{RootID: e.RootID, WorkspaceID: e.WorkspaceID}); err != nil {
+			return true, err
+		}
+		hop, hopErr := q.ConsumeBotWakeHop(ctx, db.ConsumeBotWakeHopParams{RootID: e.RootID, WorkspaceID: e.WorkspaceID})
+		if errors.Is(hopErr, pgx.ErrNoRows) {
+			return pending("bot wake chain limit (4)")
+		}
+		if hopErr != nil {
+			return true, hopErr
+		}
+		e.Hop = hop
+	}
+	if err = q.RememberBotWakeCause(ctx, db.RememberBotWakeCauseParams{BotID: e.BotID, RootID: e.RootID, Hop: e.Hop}); err != nil {
+		return true, err
+	}
+	payload, err = w.h.botWakePayload(ctx, e)
 	if err != nil {
 		return true, err
 	}
-	if err = q.MarkBotWakeSending(ctx, e.Sequence); err != nil {
+	if err = q.MarkBotWakeSending(ctx, db.MarkBotWakeSendingParams{Sequence: e.Sequence, Hop: e.Hop}); err != nil {
 		return true, err
 	}
 	// Commit BEFORE the network write. A crash after this point must never
@@ -230,9 +250,13 @@ func (w *BotWakeWorker) deliver(ctx context.Context, endpoint *url.URL, key stri
 func (h *Handler) botWakePayload(ctx context.Context, e db.BotWakeEvent) ([]byte, error) {
 	summary := e.EventType
 	link := ""
+	webPath := ""
+	ws, err := h.Queries.GetWorkspace(ctx, e.WorkspaceID)
+	if err != nil {
+		return nil, err
+	}
 	attachments := []map[string]any{}
 	var files []db.Attachment
-	var err error
 	if e.IssueID.Valid {
 		issue, getErr := h.Queries.GetIssue(ctx, e.IssueID)
 		if getErr != nil {
@@ -240,6 +264,7 @@ func (h *Handler) botWakePayload(ctx context.Context, e db.BotWakeEvent) ([]byte
 		}
 		summary = e.EventType + ": " + issue.Title
 		link = "/api/issues/" + uuidToString(e.IssueID)
+		webPath = "/" + url.PathEscape(ws.Slug) + "/issues/" + uuidToString(e.IssueID)
 		files, err = h.Queries.ListAttachmentsByIssue(ctx, db.ListAttachmentsByIssueParams{IssueID: e.IssueID, WorkspaceID: e.WorkspaceID})
 	} else {
 		chat, getErr := h.Queries.GetChatSession(ctx, e.ChatSessionID)
@@ -248,6 +273,7 @@ func (h *Handler) botWakePayload(ctx context.Context, e db.BotWakeEvent) ([]byte
 		}
 		summary = e.EventType + ": " + chat.Title
 		link = "/api/chat/sessions/" + uuidToString(e.ChatSessionID)
+		webPath = "/" + url.PathEscape(ws.Slug) + "/chat/" + uuidToString(e.ChatSessionID)
 		files, err = h.Queries.ListAttachmentsByChatMessage(ctx, db.ListAttachmentsByChatMessageParams{ChatMessageID: e.SourceID, WorkspaceID: e.WorkspaceID})
 	}
 	if err != nil {
@@ -266,7 +292,7 @@ func (h *Handler) botWakePayload(ctx context.Context, e db.BotWakeEvent) ([]byte
 		}
 		attachments = append(attachments, map[string]any{"url": base + "/api/attachments/" + uuidToString(a.ID) + "/download", "size_bytes": a.SizeBytes, "sha256": a.Sha256.String})
 	}
-	return json.Marshal(map[string]any{"event_id": uuidToString(e.EventID), "sequence": e.Sequence, "source_id": uuidToString(e.SourceID), "parent_id": wakeParentID(e), "ack_url": base + "/api/workspaces/" + uuidToString(e.WorkspaceID) + "/bots/" + uuidToString(e.BotID) + "/wake/events/" + uuidToString(e.EventID), "type": e.EventType, "issue_id": uuidToString(e.IssueID), "chat_session_id": uuidToString(e.ChatSessionID), "author": map[string]any{"type": e.AuthorType, "id": uuidToString(e.AuthorID)}, "time": e.CreatedAt.Time, "summary": summary, "url": base + link, "attachments": attachments})
+	return json.Marshal(map[string]any{"event_id": uuidToString(e.EventID), "sequence": e.Sequence, "source_id": uuidToString(e.SourceID), "parent_id": wakeParentID(e), "ack_url": base + "/api/workspaces/" + uuidToString(e.WorkspaceID) + "/bots/" + uuidToString(e.BotID) + "/wake/events/" + uuidToString(e.EventID), "root_id": uuidToString(e.RootID), "hop": e.Hop, "source_task_id": uuidToString(e.SourceTaskID), "web_url": base + webPath, "type": e.EventType, "issue_id": uuidToString(e.IssueID), "chat_session_id": uuidToString(e.ChatSessionID), "author": h.wakeAuthor(ctx, e), "time": e.CreatedAt.Time, "summary": summary, "url": base + link, "attachments": attachments})
 }
 
 func wakeParentID(e db.BotWakeEvent) string {
@@ -274,4 +300,35 @@ func wakeParentID(e db.BotWakeEvent) string {
 		return uuidToString(e.IssueID)
 	}
 	return uuidToString(e.ChatSessionID)
+}
+
+// Names are disclosed only when the receiver can see the named principal.
+func (h *Handler) wakeAuthor(ctx context.Context, e db.BotWakeEvent) map[string]any {
+	a := map[string]any{"type": e.AuthorType, "id": uuidToString(e.AuthorID)}
+	if e.AuthorType == "bot" {
+		a["name"] = e.ViaBotName.String
+	} else if e.AuthorType == "member" {
+		if _, err := h.Queries.GetMemberByUserAndWorkspace(ctx, db.GetMemberByUserAndWorkspaceParams{UserID: e.AuthorID, WorkspaceID: e.WorkspaceID}); err == nil {
+			if u, err := h.Queries.GetUser(ctx, e.AuthorID); err == nil {
+				a["name"] = u.Name
+			} else {
+				a["id"] = ""
+			}
+		} else {
+			a["id"] = ""
+		}
+	} else if e.AuthorType == "agent" {
+		bot, err := h.Queries.GetWakeBot(ctx, db.GetWakeBotParams{ID: e.BotID, WorkspaceID: e.WorkspaceID})
+		agent, agentErr := h.Queries.GetAgent(ctx, e.AuthorID)
+		if err == nil && agentErr == nil && agent.WorkspaceID == e.WorkspaceID && h.canAccessPrivateAgent(ctx, agent, "member", uuidToString(bot.UserID), uuidToString(e.WorkspaceID)) {
+			a["name"] = agent.Name
+		} else {
+			a["id"] = ""
+		}
+	}
+	if e.ViaBotID.Valid {
+		a["via_bot_id"] = uuidToString(e.ViaBotID)
+		a["via_bot_name"] = e.ViaBotName.String
+	}
+	return a
 }

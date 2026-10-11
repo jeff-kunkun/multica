@@ -137,7 +137,7 @@ SET duplicate_of_issue_id = NULL,
 WHERE workspace_id = $1
   AND duplicate_of_issue_id = $2::uuid
   AND NOT COALESCE(id = ANY($3::uuid[]), false)
-RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, triage_state, reviewer_type, reviewer_id, visibility, assignee_source, assignee_source_user_id, assignee_quote, progress_text, progress_source, progress_tone, progress_author_type, progress_author_id, progress_updated_at, duplicate_of_issue_id, domain_id, origin_chat_session_id
+RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, triage_state, reviewer_type, reviewer_id, visibility, assignee_source, assignee_source_user_id, assignee_quote, progress_text, progress_source, progress_tone, progress_author_type, progress_author_id, progress_updated_at, duplicate_of_issue_id, domain_id, origin_chat_session_id, via_bot_id, via_bot_name
 `
 
 type ClearIssueDuplicatesOfParams struct {
@@ -203,6 +203,8 @@ func (q *Queries) ClearIssueDuplicatesOf(ctx context.Context, arg ClearIssueDupl
 			&i.DuplicateOfIssueID,
 			&i.DomainID,
 			&i.OriginChatSessionID,
+			&i.ViaBotID,
+			&i.ViaBotName,
 		); err != nil {
 			return nil, err
 		}
@@ -227,7 +229,7 @@ SET assignee_type = NULL,
 WHERE id = $1::uuid
   AND workspace_id = $2::uuid
   AND assignee_id = $3::uuid
-RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, triage_state, reviewer_type, reviewer_id, visibility, assignee_source, assignee_source_user_id, assignee_quote, progress_text, progress_source, progress_tone, progress_author_type, progress_author_id, progress_updated_at, duplicate_of_issue_id, domain_id, origin_chat_session_id
+RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, triage_state, reviewer_type, reviewer_id, visibility, assignee_source, assignee_source_user_id, assignee_quote, progress_text, progress_source, progress_tone, progress_author_type, progress_author_id, progress_updated_at, duplicate_of_issue_id, domain_id, origin_chat_session_id, via_bot_id, via_bot_name
 `
 
 type ClearIssueExecutorIfCurrentParams struct {
@@ -286,6 +288,8 @@ func (q *Queries) ClearIssueExecutorIfCurrent(ctx context.Context, arg ClearIssu
 		&i.DuplicateOfIssueID,
 		&i.DomainID,
 		&i.OriginChatSessionID,
+		&i.ViaBotID,
+		&i.ViaBotName,
 	)
 	return i, err
 }
@@ -486,20 +490,21 @@ func (q *Queries) CountProjectIssueVisibility(ctx context.Context, arg CountProj
 }
 
 const createIssue = `-- name: CreateIssue :one
+WITH write_source AS MATERIALIZED (SELECT set_config('multica.source_task_id', '', true), set_config('multica.actor_type', COALESCE($24::text::text, ''), true), set_config('multica.actor_id', COALESCE($25::uuid::text, ''), true), set_config('multica.via_bot_id', COALESCE($22::uuid::text, ''), true), set_config('multica.via_bot_name', COALESCE($23::text::text, ''), true))
 INSERT INTO issue (
     workspace_id, title, description, status, priority,
     assignee_type, assignee_id, creator_type, creator_id,
     parent_issue_id, position, start_date, due_date, number, project_id,
-    stage, reviewer_type, reviewer_id, properties, last_activity_at, id, visibility
-) VALUES (
+    stage, reviewer_type, reviewer_id, properties, last_activity_at, id, visibility, via_bot_id, via_bot_name
+) SELECT
     $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
     $16, $17::text, $18::uuid,
     COALESCE($19::jsonb, '{}'::jsonb),
     now(), COALESCE($20::uuid, gen_random_uuid()),
     -- Zero trust by default. A create that lands in a project passes the
     -- project's current scope here instead (DENE-698).
-    COALESCE($21::text, 'private')
-) RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, triage_state, reviewer_type, reviewer_id, visibility, assignee_source, assignee_source_user_id, assignee_quote, progress_text, progress_source, progress_tone, progress_author_type, progress_author_id, progress_updated_at, duplicate_of_issue_id, domain_id, origin_chat_session_id
+    COALESCE($21::text, 'private'), $22, $23
+FROM write_source RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, triage_state, reviewer_type, reviewer_id, visibility, assignee_source, assignee_source_user_id, assignee_quote, progress_text, progress_source, progress_tone, progress_author_type, progress_author_id, progress_updated_at, duplicate_of_issue_id, domain_id, origin_chat_session_id, via_bot_id, via_bot_name
 `
 
 type CreateIssueParams struct {
@@ -524,6 +529,10 @@ type CreateIssueParams struct {
 	Properties    []byte      `json:"properties"`
 	ID            pgtype.UUID `json:"id"`
 	Visibility    pgtype.Text `json:"visibility"`
+	ViaBotID      pgtype.UUID `json:"via_bot_id"`
+	ViaBotName    pgtype.Text `json:"via_bot_name"`
+	ActorType     pgtype.Text `json:"actor_type"`
+	ActorID       pgtype.UUID `json:"actor_id"`
 }
 
 func (q *Queries) CreateIssue(ctx context.Context, arg CreateIssueParams) (Issue, error) {
@@ -549,6 +558,10 @@ func (q *Queries) CreateIssue(ctx context.Context, arg CreateIssueParams) (Issue
 		arg.Properties,
 		arg.ID,
 		arg.Visibility,
+		arg.ViaBotID,
+		arg.ViaBotName,
+		arg.ActorType,
+		arg.ActorID,
 	)
 	var i Issue
 	err := row.Scan(
@@ -596,21 +609,24 @@ func (q *Queries) CreateIssue(ctx context.Context, arg CreateIssueParams) (Issue
 		&i.DuplicateOfIssueID,
 		&i.DomainID,
 		&i.OriginChatSessionID,
+		&i.ViaBotID,
+		&i.ViaBotName,
 	)
 	return i, err
 }
 
 const createIssueWithOrigin = `-- name: CreateIssueWithOrigin :one
+WITH write_source AS MATERIALIZED (SELECT set_config('multica.source_task_id', '', true), set_config('multica.actor_type', COALESCE($24::text::text, ''), true), set_config('multica.actor_id', COALESCE($25::uuid::text, ''), true), set_config('multica.via_bot_id', COALESCE($22::uuid::text, ''), true), set_config('multica.via_bot_name', COALESCE($23::text::text, ''), true))
 INSERT INTO issue (
     workspace_id, title, description, status, priority,
     assignee_type, assignee_id, creator_type, creator_id,
     parent_issue_id, position, start_date, due_date, number, project_id,
-    origin_type, origin_id, stage, properties, last_activity_at, id, visibility
-) VALUES (
+    origin_type, origin_id, stage, properties, last_activity_at, id, visibility, via_bot_id, via_bot_name
+) SELECT
     $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
     $16, $17, $18, COALESCE($19::jsonb, '{}'::jsonb), now(), COALESCE($20::uuid, gen_random_uuid()),
-    COALESCE($21::text, 'private')
-) RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, triage_state, reviewer_type, reviewer_id, visibility, assignee_source, assignee_source_user_id, assignee_quote, progress_text, progress_source, progress_tone, progress_author_type, progress_author_id, progress_updated_at, duplicate_of_issue_id, domain_id, origin_chat_session_id
+    COALESCE($21::text, 'private'), $22, $23
+FROM write_source RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, triage_state, reviewer_type, reviewer_id, visibility, assignee_source, assignee_source_user_id, assignee_quote, progress_text, progress_source, progress_tone, progress_author_type, progress_author_id, progress_updated_at, duplicate_of_issue_id, domain_id, origin_chat_session_id, via_bot_id, via_bot_name
 `
 
 type CreateIssueWithOriginParams struct {
@@ -635,6 +651,10 @@ type CreateIssueWithOriginParams struct {
 	Properties    []byte      `json:"properties"`
 	ID            pgtype.UUID `json:"id"`
 	Visibility    pgtype.Text `json:"visibility"`
+	ViaBotID      pgtype.UUID `json:"via_bot_id"`
+	ViaBotName    pgtype.Text `json:"via_bot_name"`
+	ActorType     pgtype.Text `json:"actor_type"`
+	ActorID       pgtype.UUID `json:"actor_id"`
 }
 
 func (q *Queries) CreateIssueWithOrigin(ctx context.Context, arg CreateIssueWithOriginParams) (Issue, error) {
@@ -660,6 +680,10 @@ func (q *Queries) CreateIssueWithOrigin(ctx context.Context, arg CreateIssueWith
 		arg.Properties,
 		arg.ID,
 		arg.Visibility,
+		arg.ViaBotID,
+		arg.ViaBotName,
+		arg.ActorType,
+		arg.ActorID,
 	)
 	var i Issue
 	err := row.Scan(
@@ -707,6 +731,8 @@ func (q *Queries) CreateIssueWithOrigin(ctx context.Context, arg CreateIssueWith
 		&i.DuplicateOfIssueID,
 		&i.DomainID,
 		&i.OriginChatSessionID,
+		&i.ViaBotID,
+		&i.ViaBotName,
 	)
 	return i, err
 }
@@ -838,7 +864,7 @@ SET parent_issue_id = NULL,
 WHERE workspace_id = $1
   AND parent_issue_id = $2
   AND NOT COALESCE(id = ANY($3::uuid[]), false)
-RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, triage_state, reviewer_type, reviewer_id, visibility, assignee_source, assignee_source_user_id, assignee_quote, progress_text, progress_source, progress_tone, progress_author_type, progress_author_id, progress_updated_at, duplicate_of_issue_id, domain_id, origin_chat_session_id
+RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, triage_state, reviewer_type, reviewer_id, visibility, assignee_source, assignee_source_user_id, assignee_quote, progress_text, progress_source, progress_tone, progress_author_type, progress_author_id, progress_updated_at, duplicate_of_issue_id, domain_id, origin_chat_session_id, via_bot_id, via_bot_name
 `
 
 type DetachDirectChildIssuesParams struct {
@@ -901,6 +927,8 @@ func (q *Queries) DetachDirectChildIssues(ctx context.Context, arg DetachDirectC
 			&i.DuplicateOfIssueID,
 			&i.DomainID,
 			&i.OriginChatSessionID,
+			&i.ViaBotID,
+			&i.ViaBotName,
 		); err != nil {
 			return nil, err
 		}
@@ -913,7 +941,7 @@ func (q *Queries) DetachDirectChildIssues(ctx context.Context, arg DetachDirectC
 }
 
 const findActiveDuplicateIssue = `-- name: FindActiveDuplicateIssue :one
-SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, triage_state, reviewer_type, reviewer_id, visibility, assignee_source, assignee_source_user_id, assignee_quote, progress_text, progress_source, progress_tone, progress_author_type, progress_author_id, progress_updated_at, duplicate_of_issue_id, domain_id, origin_chat_session_id FROM issue
+SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, triage_state, reviewer_type, reviewer_id, visibility, assignee_source, assignee_source_user_id, assignee_quote, progress_text, progress_source, progress_tone, progress_author_type, progress_author_id, progress_updated_at, duplicate_of_issue_id, domain_id, origin_chat_session_id, via_bot_id, via_bot_name FROM issue
 WHERE workspace_id = $1
   -- Negate only known terminal keys so an unknown legacy key remains active.
   AND NOT (status = ANY($2::text[]))
@@ -990,12 +1018,14 @@ func (q *Queries) FindActiveDuplicateIssue(ctx context.Context, arg FindActiveDu
 		&i.DuplicateOfIssueID,
 		&i.DomainID,
 		&i.OriginChatSessionID,
+		&i.ViaBotID,
+		&i.ViaBotName,
 	)
 	return i, err
 }
 
 const findLatestSedimentIssue = `-- name: FindLatestSedimentIssue :one
-SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, triage_state, reviewer_type, reviewer_id, visibility, assignee_source, assignee_source_user_id, assignee_quote, progress_text, progress_source, progress_tone, progress_author_type, progress_author_id, progress_updated_at, duplicate_of_issue_id, domain_id, origin_chat_session_id FROM issue
+SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, triage_state, reviewer_type, reviewer_id, visibility, assignee_source, assignee_source_user_id, assignee_quote, progress_text, progress_source, progress_tone, progress_author_type, progress_author_id, progress_updated_at, duplicate_of_issue_id, domain_id, origin_chat_session_id, via_bot_id, via_bot_name FROM issue
 WHERE workspace_id = $1
   AND metadata @> jsonb_build_object('sediment_project', $2::text)
 ORDER BY updated_at DESC, id DESC
@@ -1055,12 +1085,14 @@ func (q *Queries) FindLatestSedimentIssue(ctx context.Context, arg FindLatestSed
 		&i.DuplicateOfIssueID,
 		&i.DomainID,
 		&i.OriginChatSessionID,
+		&i.ViaBotID,
+		&i.ViaBotName,
 	)
 	return i, err
 }
 
 const findOpenSedimentIssue = `-- name: FindOpenSedimentIssue :one
-SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, triage_state, reviewer_type, reviewer_id, visibility, assignee_source, assignee_source_user_id, assignee_quote, progress_text, progress_source, progress_tone, progress_author_type, progress_author_id, progress_updated_at, duplicate_of_issue_id, domain_id, origin_chat_session_id FROM issue
+SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, triage_state, reviewer_type, reviewer_id, visibility, assignee_source, assignee_source_user_id, assignee_quote, progress_text, progress_source, progress_tone, progress_author_type, progress_author_id, progress_updated_at, duplicate_of_issue_id, domain_id, origin_chat_session_id, via_bot_id, via_bot_name FROM issue
 WHERE workspace_id = $1
   AND metadata @> jsonb_build_object('sediment_project', $2::text)
   AND status NOT IN ('done', 'cancelled')
@@ -1121,12 +1153,14 @@ func (q *Queries) FindOpenSedimentIssue(ctx context.Context, arg FindOpenSedimen
 		&i.DuplicateOfIssueID,
 		&i.DomainID,
 		&i.OriginChatSessionID,
+		&i.ViaBotID,
+		&i.ViaBotName,
 	)
 	return i, err
 }
 
 const findRecentAutopilotDuplicateIssue = `-- name: FindRecentAutopilotDuplicateIssue :one
-SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority, i.assignee_type, i.assignee_id, i.creator_type, i.creator_id, i.parent_issue_id, i.acceptance_criteria, i.context_refs, i.position, i.due_date, i.created_at, i.updated_at, i.number, i.project_id, i.origin_type, i.origin_id, i.first_executed_at, i.start_date, i.metadata, i.stage, i.properties, i.revision, i.last_activity_at, i.triage_state, i.reviewer_type, i.reviewer_id, i.visibility, i.assignee_source, i.assignee_source_user_id, i.assignee_quote, i.progress_text, i.progress_source, i.progress_tone, i.progress_author_type, i.progress_author_id, i.progress_updated_at, i.duplicate_of_issue_id, i.domain_id, i.origin_chat_session_id FROM issue i
+SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority, i.assignee_type, i.assignee_id, i.creator_type, i.creator_id, i.parent_issue_id, i.acceptance_criteria, i.context_refs, i.position, i.due_date, i.created_at, i.updated_at, i.number, i.project_id, i.origin_type, i.origin_id, i.first_executed_at, i.start_date, i.metadata, i.stage, i.properties, i.revision, i.last_activity_at, i.triage_state, i.reviewer_type, i.reviewer_id, i.visibility, i.assignee_source, i.assignee_source_user_id, i.assignee_quote, i.progress_text, i.progress_source, i.progress_tone, i.progress_author_type, i.progress_author_id, i.progress_updated_at, i.duplicate_of_issue_id, i.domain_id, i.origin_chat_session_id, i.via_bot_id, i.via_bot_name FROM issue i
 WHERE i.workspace_id = $1
   -- Negate only known terminal keys so an unknown legacy key remains active.
   AND NOT (i.status = ANY($3::text[]))
@@ -1214,12 +1248,14 @@ func (q *Queries) FindRecentAutopilotDuplicateIssue(ctx context.Context, arg Fin
 		&i.DuplicateOfIssueID,
 		&i.DomainID,
 		&i.OriginChatSessionID,
+		&i.ViaBotID,
+		&i.ViaBotName,
 	)
 	return i, err
 }
 
 const getIssue = `-- name: GetIssue :one
-SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, triage_state, reviewer_type, reviewer_id, visibility, assignee_source, assignee_source_user_id, assignee_quote, progress_text, progress_source, progress_tone, progress_author_type, progress_author_id, progress_updated_at, duplicate_of_issue_id, domain_id, origin_chat_session_id FROM issue
+SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, triage_state, reviewer_type, reviewer_id, visibility, assignee_source, assignee_source_user_id, assignee_quote, progress_text, progress_source, progress_tone, progress_author_type, progress_author_id, progress_updated_at, duplicate_of_issue_id, domain_id, origin_chat_session_id, via_bot_id, via_bot_name FROM issue
 WHERE id = $1
 `
 
@@ -1271,12 +1307,14 @@ func (q *Queries) GetIssue(ctx context.Context, id pgtype.UUID) (Issue, error) {
 		&i.DuplicateOfIssueID,
 		&i.DomainID,
 		&i.OriginChatSessionID,
+		&i.ViaBotID,
+		&i.ViaBotName,
 	)
 	return i, err
 }
 
 const getIssueByNumber = `-- name: GetIssueByNumber :one
-SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, triage_state, reviewer_type, reviewer_id, visibility, assignee_source, assignee_source_user_id, assignee_quote, progress_text, progress_source, progress_tone, progress_author_type, progress_author_id, progress_updated_at, duplicate_of_issue_id, domain_id, origin_chat_session_id FROM issue
+SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, triage_state, reviewer_type, reviewer_id, visibility, assignee_source, assignee_source_user_id, assignee_quote, progress_text, progress_source, progress_tone, progress_author_type, progress_author_id, progress_updated_at, duplicate_of_issue_id, domain_id, origin_chat_session_id, via_bot_id, via_bot_name FROM issue
 WHERE workspace_id = $1 AND number = $2
 `
 
@@ -1333,12 +1371,14 @@ func (q *Queries) GetIssueByNumber(ctx context.Context, arg GetIssueByNumberPara
 		&i.DuplicateOfIssueID,
 		&i.DomainID,
 		&i.OriginChatSessionID,
+		&i.ViaBotID,
+		&i.ViaBotName,
 	)
 	return i, err
 }
 
 const getIssueByOrigin = `-- name: GetIssueByOrigin :one
-SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, triage_state, reviewer_type, reviewer_id, visibility, assignee_source, assignee_source_user_id, assignee_quote, progress_text, progress_source, progress_tone, progress_author_type, progress_author_id, progress_updated_at, duplicate_of_issue_id, domain_id, origin_chat_session_id FROM issue
+SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, triage_state, reviewer_type, reviewer_id, visibility, assignee_source, assignee_source_user_id, assignee_quote, progress_text, progress_source, progress_tone, progress_author_type, progress_author_id, progress_updated_at, duplicate_of_issue_id, domain_id, origin_chat_session_id, via_bot_id, via_bot_name FROM issue
 WHERE workspace_id = $1
   AND origin_type = $2
   AND origin_id = $3
@@ -1404,6 +1444,8 @@ func (q *Queries) GetIssueByOrigin(ctx context.Context, arg GetIssueByOriginPara
 		&i.DuplicateOfIssueID,
 		&i.DomainID,
 		&i.OriginChatSessionID,
+		&i.ViaBotID,
+		&i.ViaBotName,
 	)
 	return i, err
 }
@@ -1428,7 +1470,7 @@ func (q *Queries) GetIssueGCStatus(ctx context.Context, id pgtype.UUID) (GetIssu
 }
 
 const getIssueInWorkspace = `-- name: GetIssueInWorkspace :one
-SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, triage_state, reviewer_type, reviewer_id, visibility, assignee_source, assignee_source_user_id, assignee_quote, progress_text, progress_source, progress_tone, progress_author_type, progress_author_id, progress_updated_at, duplicate_of_issue_id, domain_id, origin_chat_session_id FROM issue
+SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, triage_state, reviewer_type, reviewer_id, visibility, assignee_source, assignee_source_user_id, assignee_quote, progress_text, progress_source, progress_tone, progress_author_type, progress_author_id, progress_updated_at, duplicate_of_issue_id, domain_id, origin_chat_session_id, via_bot_id, via_bot_name FROM issue
 WHERE id = $1 AND workspace_id = $2
 `
 
@@ -1485,6 +1527,8 @@ func (q *Queries) GetIssueInWorkspace(ctx context.Context, arg GetIssueInWorkspa
 		&i.DuplicateOfIssueID,
 		&i.DomainID,
 		&i.OriginChatSessionID,
+		&i.ViaBotID,
+		&i.ViaBotName,
 	)
 	return i, err
 }
@@ -1584,7 +1628,7 @@ func (q *Queries) IssueHasDuplicates(ctx context.Context, arg IssueHasDuplicates
 }
 
 const listBlockPatrolCandidates = `-- name: ListBlockPatrolCandidates :many
-SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, triage_state, reviewer_type, reviewer_id, visibility, assignee_source, assignee_source_user_id, assignee_quote, progress_text, progress_source, progress_tone, progress_author_type, progress_author_id, progress_updated_at, duplicate_of_issue_id, domain_id, origin_chat_session_id FROM issue
+SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, triage_state, reviewer_type, reviewer_id, visibility, assignee_source, assignee_source_user_id, assignee_quote, progress_text, progress_source, progress_tone, progress_author_type, progress_author_id, progress_updated_at, duplicate_of_issue_id, domain_id, origin_chat_session_id, via_bot_id, via_bot_name FROM issue
 WHERE NOT EXISTS (
     SELECT 1 FROM agent_task_queue t
     WHERE t.issue_id = issue.id
@@ -1704,6 +1748,8 @@ func (q *Queries) ListBlockPatrolCandidates(ctx context.Context, arg ListBlockPa
 			&i.DuplicateOfIssueID,
 			&i.DomainID,
 			&i.OriginChatSessionID,
+			&i.ViaBotID,
+			&i.ViaBotName,
 		); err != nil {
 			return nil, err
 		}
@@ -1716,7 +1762,7 @@ func (q *Queries) ListBlockPatrolCandidates(ctx context.Context, arg ListBlockPa
 }
 
 const listChildIssues = `-- name: ListChildIssues :many
-SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, triage_state, reviewer_type, reviewer_id, visibility, assignee_source, assignee_source_user_id, assignee_quote, progress_text, progress_source, progress_tone, progress_author_type, progress_author_id, progress_updated_at, duplicate_of_issue_id, domain_id, origin_chat_session_id FROM issue
+SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, triage_state, reviewer_type, reviewer_id, visibility, assignee_source, assignee_source_user_id, assignee_quote, progress_text, progress_source, progress_tone, progress_author_type, progress_author_id, progress_updated_at, duplicate_of_issue_id, domain_id, origin_chat_session_id, via_bot_id, via_bot_name FROM issue
 WHERE parent_issue_id = $1
 ORDER BY number ASC
 `
@@ -1781,6 +1827,8 @@ func (q *Queries) ListChildIssues(ctx context.Context, parentIssueID pgtype.UUID
 			&i.DuplicateOfIssueID,
 			&i.DomainID,
 			&i.OriginChatSessionID,
+			&i.ViaBotID,
+			&i.ViaBotName,
 		); err != nil {
 			return nil, err
 		}
@@ -1793,7 +1841,7 @@ func (q *Queries) ListChildIssues(ctx context.Context, parentIssueID pgtype.UUID
 }
 
 const listChildrenByParents = `-- name: ListChildrenByParents :many
-SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, triage_state, reviewer_type, reviewer_id, visibility, assignee_source, assignee_source_user_id, assignee_quote, progress_text, progress_source, progress_tone, progress_author_type, progress_author_id, progress_updated_at, duplicate_of_issue_id, domain_id, origin_chat_session_id FROM issue
+SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, triage_state, reviewer_type, reviewer_id, visibility, assignee_source, assignee_source_user_id, assignee_quote, progress_text, progress_source, progress_tone, progress_author_type, progress_author_id, progress_updated_at, duplicate_of_issue_id, domain_id, origin_chat_session_id, via_bot_id, via_bot_name FROM issue
 WHERE workspace_id = $1
   AND parent_issue_id = ANY($2::uuid[])
 ORDER BY parent_issue_id, number ASC
@@ -1865,6 +1913,8 @@ func (q *Queries) ListChildrenByParents(ctx context.Context, arg ListChildrenByP
 			&i.DuplicateOfIssueID,
 			&i.DomainID,
 			&i.OriginChatSessionID,
+			&i.ViaBotID,
+			&i.ViaBotName,
 		); err != nil {
 			return nil, err
 		}
@@ -1877,7 +1927,7 @@ func (q *Queries) ListChildrenByParents(ctx context.Context, arg ListChildrenByP
 }
 
 const listDaemonBlockWaits = `-- name: ListDaemonBlockWaits :many
-SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, triage_state, reviewer_type, reviewer_id, visibility, assignee_source, assignee_source_user_id, assignee_quote, progress_text, progress_source, progress_tone, progress_author_type, progress_author_id, progress_updated_at, duplicate_of_issue_id, domain_id, origin_chat_session_id FROM issue
+SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, triage_state, reviewer_type, reviewer_id, visibility, assignee_source, assignee_source_user_id, assignee_quote, progress_text, progress_source, progress_tone, progress_author_type, progress_author_id, progress_updated_at, duplicate_of_issue_id, domain_id, origin_chat_session_id, via_bot_id, via_bot_name FROM issue
 WHERE workspace_id = $1::uuid
   AND status = 'blocked'
   AND NULLIF(trim(COALESCE(metadata->>'block.wait_probe', '')), '') IS NOT NULL
@@ -1947,6 +1997,8 @@ func (q *Queries) ListDaemonBlockWaits(ctx context.Context, workspaceID pgtype.U
 			&i.DuplicateOfIssueID,
 			&i.DomainID,
 			&i.OriginChatSessionID,
+			&i.ViaBotID,
+			&i.ViaBotName,
 		); err != nil {
 			return nil, err
 		}
@@ -2026,7 +2078,7 @@ func (q *Queries) ListIssueDriverFacts(ctx context.Context, arg ListIssueDriverF
 }
 
 const listIssueDuplicates = `-- name: ListIssueDuplicates :many
-SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, triage_state, reviewer_type, reviewer_id, visibility, assignee_source, assignee_source_user_id, assignee_quote, progress_text, progress_source, progress_tone, progress_author_type, progress_author_id, progress_updated_at, duplicate_of_issue_id, domain_id, origin_chat_session_id FROM issue
+SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, triage_state, reviewer_type, reviewer_id, visibility, assignee_source, assignee_source_user_id, assignee_quote, progress_text, progress_source, progress_tone, progress_author_type, progress_author_id, progress_updated_at, duplicate_of_issue_id, domain_id, origin_chat_session_id, via_bot_id, via_bot_name FROM issue
 WHERE workspace_id = $1
   AND duplicate_of_issue_id = $2::uuid
   AND status = 'cancelled'
@@ -2092,6 +2144,8 @@ func (q *Queries) ListIssueDuplicates(ctx context.Context, arg ListIssueDuplicat
 			&i.DuplicateOfIssueID,
 			&i.DomainID,
 			&i.OriginChatSessionID,
+			&i.ViaBotID,
+			&i.ViaBotName,
 		); err != nil {
 			return nil, err
 		}
@@ -2376,7 +2430,7 @@ func (q *Queries) ListIssues(ctx context.Context, arg ListIssuesParams) ([]ListI
 }
 
 const listIssuesBlockedByToken = `-- name: ListIssuesBlockedByToken :many
-SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, triage_state, reviewer_type, reviewer_id, visibility, assignee_source, assignee_source_user_id, assignee_quote, progress_text, progress_source, progress_tone, progress_author_type, progress_author_id, progress_updated_at, duplicate_of_issue_id, domain_id, origin_chat_session_id FROM issue
+SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, triage_state, reviewer_type, reviewer_id, visibility, assignee_source, assignee_source_user_id, assignee_quote, progress_text, progress_source, progress_tone, progress_author_type, progress_author_id, progress_updated_at, duplicate_of_issue_id, domain_id, origin_chat_session_id, via_bot_id, via_bot_name FROM issue
 WHERE workspace_id = $1
   AND (
     ',' || replace(COALESCE(metadata->>'block.blocked_by', ''), ' ', '') || ','
@@ -2445,6 +2499,8 @@ func (q *Queries) ListIssuesBlockedByToken(ctx context.Context, arg ListIssuesBl
 			&i.DuplicateOfIssueID,
 			&i.DomainID,
 			&i.OriginChatSessionID,
+			&i.ViaBotID,
+			&i.ViaBotName,
 		); err != nil {
 			return nil, err
 		}
@@ -2457,7 +2513,7 @@ func (q *Queries) ListIssuesBlockedByToken(ctx context.Context, arg ListIssuesBl
 }
 
 const listIssuesByOriginChatSession = `-- name: ListIssuesByOriginChatSession :many
-SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, triage_state, reviewer_type, reviewer_id, visibility, assignee_source, assignee_source_user_id, assignee_quote, progress_text, progress_source, progress_tone, progress_author_type, progress_author_id, progress_updated_at, duplicate_of_issue_id, domain_id, origin_chat_session_id FROM issue
+SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, triage_state, reviewer_type, reviewer_id, visibility, assignee_source, assignee_source_user_id, assignee_quote, progress_text, progress_source, progress_tone, progress_author_type, progress_author_id, progress_updated_at, duplicate_of_issue_id, domain_id, origin_chat_session_id, via_bot_id, via_bot_name FROM issue
 WHERE workspace_id = $1
   AND origin_chat_session_id = $2::uuid
 ORDER BY created_at ASC, id ASC
@@ -2524,6 +2580,8 @@ func (q *Queries) ListIssuesByOriginChatSession(ctx context.Context, arg ListIss
 			&i.DuplicateOfIssueID,
 			&i.DomainID,
 			&i.OriginChatSessionID,
+			&i.ViaBotID,
+			&i.ViaBotName,
 		); err != nil {
 			return nil, err
 		}
@@ -2536,7 +2594,7 @@ func (q *Queries) ListIssuesByOriginChatSession(ctx context.Context, arg ListIss
 }
 
 const listIssuesByOrigins = `-- name: ListIssuesByOrigins :many
-SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, triage_state, reviewer_type, reviewer_id, visibility, assignee_source, assignee_source_user_id, assignee_quote, progress_text, progress_source, progress_tone, progress_author_type, progress_author_id, progress_updated_at, duplicate_of_issue_id, domain_id, origin_chat_session_id FROM issue
+SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, triage_state, reviewer_type, reviewer_id, visibility, assignee_source, assignee_source_user_id, assignee_quote, progress_text, progress_source, progress_tone, progress_author_type, progress_author_id, progress_updated_at, duplicate_of_issue_id, domain_id, origin_chat_session_id, via_bot_id, via_bot_name FROM issue
 WHERE workspace_id = $1
   AND origin_type = $2
   AND origin_id = ANY($3::uuid[])
@@ -2608,6 +2666,8 @@ func (q *Queries) ListIssuesByOrigins(ctx context.Context, arg ListIssuesByOrigi
 			&i.DuplicateOfIssueID,
 			&i.DomainID,
 			&i.OriginChatSessionID,
+			&i.ViaBotID,
+			&i.ViaBotName,
 		); err != nil {
 			return nil, err
 		}
@@ -2620,7 +2680,7 @@ func (q *Queries) ListIssuesByOrigins(ctx context.Context, arg ListIssuesByOrigi
 }
 
 const listIssuesWaitingOn = `-- name: ListIssuesWaitingOn :many
-SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, triage_state, reviewer_type, reviewer_id, visibility, assignee_source, assignee_source_user_id, assignee_quote, progress_text, progress_source, progress_tone, progress_author_type, progress_author_id, progress_updated_at, duplicate_of_issue_id, domain_id, origin_chat_session_id FROM issue
+SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, triage_state, reviewer_type, reviewer_id, visibility, assignee_source, assignee_source_user_id, assignee_quote, progress_text, progress_source, progress_tone, progress_author_type, progress_author_id, progress_updated_at, duplicate_of_issue_id, domain_id, origin_chat_session_id, via_bot_id, via_bot_name FROM issue
 WHERE workspace_id = $1
   AND (
     metadata @> $2::jsonb
@@ -2692,6 +2752,8 @@ func (q *Queries) ListIssuesWaitingOn(ctx context.Context, arg ListIssuesWaiting
 			&i.DuplicateOfIssueID,
 			&i.DomainID,
 			&i.OriginChatSessionID,
+			&i.ViaBotID,
+			&i.ViaBotName,
 		); err != nil {
 			return nil, err
 		}
@@ -2930,7 +2992,7 @@ func (q *Queries) ListOpenIssues(ctx context.Context, arg ListOpenIssuesParams) 
 }
 
 const listProjectChatDispatchedIssues = `-- name: ListProjectChatDispatchedIssues :many
-SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, triage_state, reviewer_type, reviewer_id, visibility, assignee_source, assignee_source_user_id, assignee_quote, progress_text, progress_source, progress_tone, progress_author_type, progress_author_id, progress_updated_at, duplicate_of_issue_id, domain_id, origin_chat_session_id FROM issue
+SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, triage_state, reviewer_type, reviewer_id, visibility, assignee_source, assignee_source_user_id, assignee_quote, progress_text, progress_source, progress_tone, progress_author_type, progress_author_id, progress_updated_at, duplicate_of_issue_id, domain_id, origin_chat_session_id, via_bot_id, via_bot_name FROM issue
 WHERE workspace_id = $1 AND project_id = $2
   AND origin_chat_session_id IS NOT NULL
   AND (updated_at >= $3 OR status NOT IN ('done', 'cancelled'))
@@ -3006,6 +3068,8 @@ func (q *Queries) ListProjectChatDispatchedIssues(ctx context.Context, arg ListP
 			&i.DuplicateOfIssueID,
 			&i.DomainID,
 			&i.OriginChatSessionID,
+			&i.ViaBotID,
+			&i.ViaBotName,
 		); err != nil {
 			return nil, err
 		}
@@ -3099,7 +3163,7 @@ func (q *Queries) LockIssueForDelete(ctx context.Context, arg LockIssueForDelete
 }
 
 const lockIssueForDescriptionUpdate = `-- name: LockIssueForDescriptionUpdate :one
-SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, triage_state, reviewer_type, reviewer_id, visibility, assignee_source, assignee_source_user_id, assignee_quote, progress_text, progress_source, progress_tone, progress_author_type, progress_author_id, progress_updated_at, duplicate_of_issue_id, domain_id, origin_chat_session_id FROM issue
+SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, triage_state, reviewer_type, reviewer_id, visibility, assignee_source, assignee_source_user_id, assignee_quote, progress_text, progress_source, progress_tone, progress_author_type, progress_author_id, progress_updated_at, duplicate_of_issue_id, domain_id, origin_chat_session_id, via_bot_id, via_bot_name FROM issue
 WHERE id = $1 AND workspace_id = $2
 FOR UPDATE
 `
@@ -3161,6 +3225,8 @@ func (q *Queries) LockIssueForDescriptionUpdate(ctx context.Context, arg LockIss
 		&i.DuplicateOfIssueID,
 		&i.DomainID,
 		&i.OriginChatSessionID,
+		&i.ViaBotID,
+		&i.ViaBotName,
 	)
 	return i, err
 }
@@ -3259,7 +3325,7 @@ SET description = CASE
     updated_at = now()
 WHERE id = $4
   AND workspace_id = $5
-RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, triage_state, reviewer_type, reviewer_id, visibility, assignee_source, assignee_source_user_id, assignee_quote, progress_text, progress_source, progress_tone, progress_author_type, progress_author_id, progress_updated_at, duplicate_of_issue_id, domain_id, origin_chat_session_id
+RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, triage_state, reviewer_type, reviewer_id, visibility, assignee_source, assignee_source_user_id, assignee_quote, progress_text, progress_source, progress_tone, progress_author_type, progress_author_id, progress_updated_at, duplicate_of_issue_id, domain_id, origin_chat_session_id, via_bot_id, via_bot_name
 `
 
 type MaterializeIssueChannelMediaMarkdownParams struct {
@@ -3331,6 +3397,8 @@ func (q *Queries) MaterializeIssueChannelMediaMarkdown(ctx context.Context, arg 
 		&i.DuplicateOfIssueID,
 		&i.DomainID,
 		&i.OriginChatSessionID,
+		&i.ViaBotID,
+		&i.ViaBotName,
 	)
 	return i, err
 }
@@ -3348,7 +3416,7 @@ UPDATE issue AS i SET
     last_activity_at = GREATEST(COALESCE(i.last_activity_at, i.updated_at), now()),
     updated_at = now()
 WHERE i.id = $1 AND i.workspace_id = $2 AND i.status = 'backlog'
-RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, triage_state, reviewer_type, reviewer_id, visibility, assignee_source, assignee_source_user_id, assignee_quote, progress_text, progress_source, progress_tone, progress_author_type, progress_author_id, progress_updated_at, duplicate_of_issue_id, domain_id, origin_chat_session_id
+RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, triage_state, reviewer_type, reviewer_id, visibility, assignee_source, assignee_source_user_id, assignee_quote, progress_text, progress_source, progress_tone, progress_author_type, progress_author_id, progress_updated_at, duplicate_of_issue_id, domain_id, origin_chat_session_id, via_bot_id, via_bot_name
 `
 
 type PromoteBacklogIssueToTodoParams struct {
@@ -3407,6 +3475,8 @@ func (q *Queries) PromoteBacklogIssueToTodo(ctx context.Context, arg PromoteBack
 		&i.DuplicateOfIssueID,
 		&i.DomainID,
 		&i.OriginChatSessionID,
+		&i.ViaBotID,
+		&i.ViaBotName,
 	)
 	return i, err
 }
@@ -3460,7 +3530,7 @@ UPDATE issue AS i SET
 WHERE i.id = $3 AND i.workspace_id = $4
   AND i.parent_issue_id IS NULL AND i.creator_type = 'agent' AND i.assignee_id IS NULL
   AND (i.status IN ('backlog', 'todo') OR (i.status = 'in_progress' AND $2::uuid IS NOT NULL))
-RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, triage_state, reviewer_type, reviewer_id, visibility, assignee_source, assignee_source_user_id, assignee_quote, progress_text, progress_source, progress_tone, progress_author_type, progress_author_id, progress_updated_at, duplicate_of_issue_id, domain_id, origin_chat_session_id
+RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, triage_state, reviewer_type, reviewer_id, visibility, assignee_source, assignee_source_user_id, assignee_quote, progress_text, progress_source, progress_tone, progress_author_type, progress_author_id, progress_updated_at, duplicate_of_issue_id, domain_id, origin_chat_session_id, via_bot_id, via_bot_name
 `
 
 type SeatStagedParentParams struct {
@@ -3527,6 +3597,8 @@ func (q *Queries) SeatStagedParent(ctx context.Context, arg SeatStagedParentPara
 		&i.DuplicateOfIssueID,
 		&i.DomainID,
 		&i.OriginChatSessionID,
+		&i.ViaBotID,
+		&i.ViaBotName,
 	)
 	return i, err
 }
@@ -3583,7 +3655,7 @@ func (q *Queries) SetIssueMetadataKey(ctx context.Context, arg SetIssueMetadataK
 const setIssueOriginChatSession = `-- name: SetIssueOriginChatSession :one
 UPDATE issue SET origin_chat_session_id = $1::uuid
 WHERE id = $2 AND workspace_id = $3
-RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, triage_state, reviewer_type, reviewer_id, visibility, assignee_source, assignee_source_user_id, assignee_quote, progress_text, progress_source, progress_tone, progress_author_type, progress_author_id, progress_updated_at, duplicate_of_issue_id, domain_id, origin_chat_session_id
+RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, triage_state, reviewer_type, reviewer_id, visibility, assignee_source, assignee_source_user_id, assignee_quote, progress_text, progress_source, progress_tone, progress_author_type, progress_author_id, progress_updated_at, duplicate_of_issue_id, domain_id, origin_chat_session_id, via_bot_id, via_bot_name
 `
 
 type SetIssueOriginChatSessionParams struct {
@@ -3642,6 +3714,8 @@ func (q *Queries) SetIssueOriginChatSession(ctx context.Context, arg SetIssueOri
 		&i.DuplicateOfIssueID,
 		&i.DomainID,
 		&i.OriginChatSessionID,
+		&i.ViaBotID,
+		&i.ViaBotName,
 	)
 	return i, err
 }
@@ -3651,7 +3725,7 @@ UPDATE issue SET
     visibility = $3,
     updated_at = now()
 WHERE id = $1 AND workspace_id = $2
-RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, triage_state, reviewer_type, reviewer_id, visibility, assignee_source, assignee_source_user_id, assignee_quote, progress_text, progress_source, progress_tone, progress_author_type, progress_author_id, progress_updated_at, duplicate_of_issue_id, domain_id, origin_chat_session_id
+RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, triage_state, reviewer_type, reviewer_id, visibility, assignee_source, assignee_source_user_id, assignee_quote, progress_text, progress_source, progress_tone, progress_author_type, progress_author_id, progress_updated_at, duplicate_of_issue_id, domain_id, origin_chat_session_id, via_bot_id, via_bot_name
 `
 
 type SetIssueVisibilityParams struct {
@@ -3713,12 +3787,14 @@ func (q *Queries) SetIssueVisibility(ctx context.Context, arg SetIssueVisibility
 		&i.DuplicateOfIssueID,
 		&i.DomainID,
 		&i.OriginChatSessionID,
+		&i.ViaBotID,
+		&i.ViaBotName,
 	)
 	return i, err
 }
 
 const updateIssue = `-- name: UpdateIssue :one
-WITH wakeup_source AS MATERIALIZED (SELECT set_config('multica.source_task_id', COALESCE($3::uuid::text, ''), true)), candidate AS MATERIALIZED (
+WITH wakeup_source AS MATERIALIZED (SELECT set_config('multica.actor_type', COALESCE($3::text::text, ''), true), set_config('multica.actor_id', COALESCE($4::uuid::text, ''), true), set_config('multica.via_bot_id', COALESCE($5::uuid::text, ''), true), set_config('multica.via_bot_name', COALESCE($6::text::text, ''), true), set_config('multica.source_task_id', COALESCE($7::uuid::text, ''), true)), candidate AS MATERIALIZED (
     -- FOR UPDATE, so every next_* value below is computed from the row this
     -- statement is about to write rather than from the snapshot the statement
     -- started with. Without it a write that waits here behind a concurrent one
@@ -3727,22 +3803,22 @@ WITH wakeup_source AS MATERIALIZED (SELECT set_config('multica.source_task_id', 
     -- did_change/did_activity would be decided against the pre-wait row too.
     -- Materialized so the locking clause is never inlined away.
     SELECT
-        i.id, i.workspace_id, i.title, i.description, i.status, i.priority, i.assignee_type, i.assignee_id, i.creator_type, i.creator_id, i.parent_issue_id, i.acceptance_criteria, i.context_refs, i.position, i.due_date, i.created_at, i.updated_at, i.number, i.project_id, i.origin_type, i.origin_id, i.first_executed_at, i.start_date, i.metadata, i.stage, i.properties, i.revision, i.last_activity_at, i.triage_state, i.reviewer_type, i.reviewer_id, i.visibility, i.assignee_source, i.assignee_source_user_id, i.assignee_quote, i.progress_text, i.progress_source, i.progress_tone, i.progress_author_type, i.progress_author_id, i.progress_updated_at, i.duplicate_of_issue_id, i.domain_id, i.origin_chat_session_id,
-        COALESCE($4::text, i.title) AS next_title,
-        COALESCE($5::text, i.description) AS next_description,
-        COALESCE($6::text, i.status) AS next_status,
-        COALESCE($7::text, i.priority) AS next_priority,
-        $8::text AS next_assignee_type,
-        $9::uuid AS next_assignee_id,
+        i.id, i.workspace_id, i.title, i.description, i.status, i.priority, i.assignee_type, i.assignee_id, i.creator_type, i.creator_id, i.parent_issue_id, i.acceptance_criteria, i.context_refs, i.position, i.due_date, i.created_at, i.updated_at, i.number, i.project_id, i.origin_type, i.origin_id, i.first_executed_at, i.start_date, i.metadata, i.stage, i.properties, i.revision, i.last_activity_at, i.triage_state, i.reviewer_type, i.reviewer_id, i.visibility, i.assignee_source, i.assignee_source_user_id, i.assignee_quote, i.progress_text, i.progress_source, i.progress_tone, i.progress_author_type, i.progress_author_id, i.progress_updated_at, i.duplicate_of_issue_id, i.domain_id, i.origin_chat_session_id, i.via_bot_id, i.via_bot_name,
+        COALESCE($8::text, i.title) AS next_title,
+        COALESCE($9::text, i.description) AS next_description,
+        COALESCE($10::text, i.status) AS next_status,
+        COALESCE($11::text, i.priority) AS next_priority,
+        $12::text AS next_assignee_type,
+        $13::uuid AS next_assignee_id,
         -- Same tri-state convention as the assignee pair: the caller passes the
         -- current value to leave it alone, and NULL to clear the slot.
-        $10::text AS next_reviewer_type,
-        $11::uuid AS next_reviewer_id,
+        $14::text AS next_reviewer_type,
+        $15::uuid AS next_reviewer_id,
         CASE
             -- An explicit position wins. Cross-column drag-and-drop sends
             -- status and position together and means the slot it dropped on.
-            WHEN $12::double precision IS NOT NULL
-                THEN $12::double precision
+            WHEN $16::double precision IS NOT NULL
+                THEN $16::double precision
             -- position ranks an issue *within* its (workspace, status)
             -- column, so it stops meaning anything the moment the column
             -- changes: the value that put the issue on top of Todo lands it
@@ -3757,20 +3833,20 @@ WITH wakeup_source AS MATERIALIZED (SELECT set_config('multica.source_task_id', 
             -- unstable across pages. Creation avoids the tie by computing its
             -- min under the workspace counter lock; a status change holds no
             -- such lock and is not worth taking one for.
-            WHEN i.status IS DISTINCT FROM COALESCE($6::text, i.status)
+            WHEN i.status IS DISTINCT FROM COALESCE($10::text, i.status)
                 THEN (
                     SELECT COALESCE(MIN(target.position), 0) - 1
                     FROM issue AS target
                     WHERE target.workspace_id = i.workspace_id
-                      AND target.status = $6::text
+                      AND target.status = $10::text
                 )
             ELSE i.position
         END AS next_position,
-        $13::date AS next_start_date,
-        $14::date AS next_due_date,
-        $15::uuid AS next_parent_issue_id,
-        $16::uuid AS next_project_id,
-        $17::integer AS next_stage,
+        $17::date AS next_start_date,
+        $18::date AS next_due_date,
+        $19::uuid AS next_parent_issue_id,
+        $20::uuid AS next_project_id,
+        $21::integer AS next_stage,
         -- Sharing scope rides along with the project move (DENE-698).
         -- An explicit value wins: that is an issue joining a project and
         -- taking its current scope. Otherwise the only change made here is
@@ -3779,9 +3855,9 @@ WITH wakeup_source AS MATERIALIZED (SELECT set_config('multica.source_task_id', 
         -- stay 'project'-scoped, so it falls back to 'private'. Widening is
         -- never automatic.
         CASE
-            WHEN $18::text IS NOT NULL
-                THEN $18::text
-            WHEN $16::uuid IS NULL AND i.visibility = 'project'
+            WHEN $22::text IS NOT NULL
+                THEN $22::text
+            WHEN $20::uuid IS NULL AND i.visibility = 'project'
                 THEN 'private'
             ELSE i.visibility
         END AS next_visibility,
@@ -3791,9 +3867,9 @@ WITH wakeup_source AS MATERIALIZED (SELECT set_config('multica.source_task_id', 
         -- how a mark is removed, and re-entering cancelled does not revive a
         -- pointer that a server predating this rule left on a reopened issue.
         CASE
-            WHEN $19::uuid IS NOT NULL
-                THEN $19::uuid
-            WHEN i.status = 'cancelled' AND COALESCE($6::text, i.status) = 'cancelled'
+            WHEN $23::uuid IS NOT NULL
+                THEN $23::uuid
+            WHEN i.status = 'cancelled' AND COALESCE($10::text, i.status) = 'cancelled'
                 THEN i.duplicate_of_issue_id
             ELSE NULL
         END AS next_duplicate_of_issue_id
@@ -3803,7 +3879,7 @@ WITH wakeup_source AS MATERIALIZED (SELECT set_config('multica.source_task_id', 
     FOR UPDATE
 ), changed AS (
     SELECT
-        candidate.id, candidate.workspace_id, candidate.title, candidate.description, candidate.status, candidate.priority, candidate.assignee_type, candidate.assignee_id, candidate.creator_type, candidate.creator_id, candidate.parent_issue_id, candidate.acceptance_criteria, candidate.context_refs, candidate.position, candidate.due_date, candidate.created_at, candidate.updated_at, candidate.number, candidate.project_id, candidate.origin_type, candidate.origin_id, candidate.first_executed_at, candidate.start_date, candidate.metadata, candidate.stage, candidate.properties, candidate.revision, candidate.last_activity_at, candidate.triage_state, candidate.reviewer_type, candidate.reviewer_id, candidate.visibility, candidate.assignee_source, candidate.assignee_source_user_id, candidate.assignee_quote, candidate.progress_text, candidate.progress_source, candidate.progress_tone, candidate.progress_author_type, candidate.progress_author_id, candidate.progress_updated_at, candidate.duplicate_of_issue_id, candidate.domain_id, candidate.origin_chat_session_id, candidate.next_title, candidate.next_description, candidate.next_status, candidate.next_priority, candidate.next_assignee_type, candidate.next_assignee_id, candidate.next_reviewer_type, candidate.next_reviewer_id, candidate.next_position, candidate.next_start_date, candidate.next_due_date, candidate.next_parent_issue_id, candidate.next_project_id, candidate.next_stage, candidate.next_visibility, candidate.next_duplicate_of_issue_id,
+        candidate.id, candidate.workspace_id, candidate.title, candidate.description, candidate.status, candidate.priority, candidate.assignee_type, candidate.assignee_id, candidate.creator_type, candidate.creator_id, candidate.parent_issue_id, candidate.acceptance_criteria, candidate.context_refs, candidate.position, candidate.due_date, candidate.created_at, candidate.updated_at, candidate.number, candidate.project_id, candidate.origin_type, candidate.origin_id, candidate.first_executed_at, candidate.start_date, candidate.metadata, candidate.stage, candidate.properties, candidate.revision, candidate.last_activity_at, candidate.triage_state, candidate.reviewer_type, candidate.reviewer_id, candidate.visibility, candidate.assignee_source, candidate.assignee_source_user_id, candidate.assignee_quote, candidate.progress_text, candidate.progress_source, candidate.progress_tone, candidate.progress_author_type, candidate.progress_author_id, candidate.progress_updated_at, candidate.duplicate_of_issue_id, candidate.domain_id, candidate.origin_chat_session_id, candidate.via_bot_id, candidate.via_bot_name, candidate.next_title, candidate.next_description, candidate.next_status, candidate.next_priority, candidate.next_assignee_type, candidate.next_assignee_id, candidate.next_reviewer_type, candidate.next_reviewer_id, candidate.next_position, candidate.next_start_date, candidate.next_due_date, candidate.next_parent_issue_id, candidate.next_project_id, candidate.next_stage, candidate.next_visibility, candidate.next_duplicate_of_issue_id,
         ROW(
             title, description, status, priority, assignee_type, assignee_id,
             reviewer_type, reviewer_id,
@@ -3862,12 +3938,16 @@ WHERE i.id = changed.id
   -- from the same snapshot; EvalPlanQual re-evaluates this target-row predicate
   -- after waiting for the first writer, leaving the stale writer with 0 rows.
   AND ($2::bigint IS NULL OR i.revision = $2::bigint)
-RETURNING i.id, i.workspace_id, i.title, i.description, i.status, i.priority, i.assignee_type, i.assignee_id, i.creator_type, i.creator_id, i.parent_issue_id, i.acceptance_criteria, i.context_refs, i.position, i.due_date, i.created_at, i.updated_at, i.number, i.project_id, i.origin_type, i.origin_id, i.first_executed_at, i.start_date, i.metadata, i.stage, i.properties, i.revision, i.last_activity_at, i.triage_state, i.reviewer_type, i.reviewer_id, i.visibility, i.assignee_source, i.assignee_source_user_id, i.assignee_quote, i.progress_text, i.progress_source, i.progress_tone, i.progress_author_type, i.progress_author_id, i.progress_updated_at, i.duplicate_of_issue_id, i.domain_id, i.origin_chat_session_id
+RETURNING i.id, i.workspace_id, i.title, i.description, i.status, i.priority, i.assignee_type, i.assignee_id, i.creator_type, i.creator_id, i.parent_issue_id, i.acceptance_criteria, i.context_refs, i.position, i.due_date, i.created_at, i.updated_at, i.number, i.project_id, i.origin_type, i.origin_id, i.first_executed_at, i.start_date, i.metadata, i.stage, i.properties, i.revision, i.last_activity_at, i.triage_state, i.reviewer_type, i.reviewer_id, i.visibility, i.assignee_source, i.assignee_source_user_id, i.assignee_quote, i.progress_text, i.progress_source, i.progress_tone, i.progress_author_type, i.progress_author_id, i.progress_updated_at, i.duplicate_of_issue_id, i.domain_id, i.origin_chat_session_id, i.via_bot_id, i.via_bot_name
 `
 
 type UpdateIssueParams struct {
 	ID                 pgtype.UUID   `json:"id"`
 	ExpectedRevision   pgtype.Int8   `json:"expected_revision"`
+	ActorType          pgtype.Text   `json:"actor_type"`
+	ActorID            pgtype.UUID   `json:"actor_id"`
+	ViaBotID           pgtype.UUID   `json:"via_bot_id"`
+	ViaBotName         pgtype.Text   `json:"via_bot_name"`
 	SourceTaskID       pgtype.UUID   `json:"source_task_id"`
 	Title              pgtype.Text   `json:"title"`
 	Description        pgtype.Text   `json:"description"`
@@ -3891,6 +3971,10 @@ func (q *Queries) UpdateIssue(ctx context.Context, arg UpdateIssueParams) (Issue
 	row := q.db.QueryRow(ctx, updateIssue,
 		arg.ID,
 		arg.ExpectedRevision,
+		arg.ActorType,
+		arg.ActorID,
+		arg.ViaBotID,
+		arg.ViaBotName,
 		arg.SourceTaskID,
 		arg.Title,
 		arg.Description,
@@ -3955,12 +4039,14 @@ func (q *Queries) UpdateIssue(ctx context.Context, arg UpdateIssueParams) (Issue
 		&i.DuplicateOfIssueID,
 		&i.DomainID,
 		&i.OriginChatSessionID,
+		&i.ViaBotID,
+		&i.ViaBotName,
 	)
 	return i, err
 }
 
 const updateIssueStatus = `-- name: UpdateIssueStatus :one
-WITH wakeup_source AS MATERIALIZED (SELECT set_config('multica.source_task_id', COALESCE($4::uuid::text, ''), true))
+WITH wakeup_source AS MATERIALIZED (SELECT set_config('multica.actor_type', COALESCE($4::text::text, ''), true), set_config('multica.actor_id', COALESCE($5::uuid::text, ''), true), set_config('multica.via_bot_id', COALESCE($6::uuid::text, ''), true), set_config('multica.via_bot_name', COALESCE($7::text::text, ''), true), set_config('multica.source_task_id', COALESCE($8::uuid::text, ''), true))
 UPDATE issue AS i SET
     status = $2,
     -- Same rule as UpdateIssue: a mark only survives cancelled -> cancelled.
@@ -3981,13 +4067,17 @@ UPDATE issue AS i SET
     updated_at = now()
 FROM wakeup_source
 WHERE i.id = $1 AND i.workspace_id = $3
-RETURNING i.id, i.workspace_id, i.title, i.description, i.status, i.priority, i.assignee_type, i.assignee_id, i.creator_type, i.creator_id, i.parent_issue_id, i.acceptance_criteria, i.context_refs, i.position, i.due_date, i.created_at, i.updated_at, i.number, i.project_id, i.origin_type, i.origin_id, i.first_executed_at, i.start_date, i.metadata, i.stage, i.properties, i.revision, i.last_activity_at, i.triage_state, i.reviewer_type, i.reviewer_id, i.visibility, i.assignee_source, i.assignee_source_user_id, i.assignee_quote, i.progress_text, i.progress_source, i.progress_tone, i.progress_author_type, i.progress_author_id, i.progress_updated_at, i.duplicate_of_issue_id, i.domain_id, i.origin_chat_session_id
+RETURNING i.id, i.workspace_id, i.title, i.description, i.status, i.priority, i.assignee_type, i.assignee_id, i.creator_type, i.creator_id, i.parent_issue_id, i.acceptance_criteria, i.context_refs, i.position, i.due_date, i.created_at, i.updated_at, i.number, i.project_id, i.origin_type, i.origin_id, i.first_executed_at, i.start_date, i.metadata, i.stage, i.properties, i.revision, i.last_activity_at, i.triage_state, i.reviewer_type, i.reviewer_id, i.visibility, i.assignee_source, i.assignee_source_user_id, i.assignee_quote, i.progress_text, i.progress_source, i.progress_tone, i.progress_author_type, i.progress_author_id, i.progress_updated_at, i.duplicate_of_issue_id, i.domain_id, i.origin_chat_session_id, i.via_bot_id, i.via_bot_name
 `
 
 type UpdateIssueStatusParams struct {
 	ID           pgtype.UUID `json:"id"`
 	Status       string      `json:"status"`
 	WorkspaceID  pgtype.UUID `json:"workspace_id"`
+	ActorType    pgtype.Text `json:"actor_type"`
+	ActorID      pgtype.UUID `json:"actor_id"`
+	ViaBotID     pgtype.UUID `json:"via_bot_id"`
+	ViaBotName   pgtype.Text `json:"via_bot_name"`
 	SourceTaskID pgtype.UUID `json:"source_task_id"`
 }
 
@@ -4001,6 +4091,10 @@ func (q *Queries) UpdateIssueStatus(ctx context.Context, arg UpdateIssueStatusPa
 		arg.ID,
 		arg.Status,
 		arg.WorkspaceID,
+		arg.ActorType,
+		arg.ActorID,
+		arg.ViaBotID,
+		arg.ViaBotName,
 		arg.SourceTaskID,
 	)
 	var i Issue
@@ -4049,6 +4143,8 @@ func (q *Queries) UpdateIssueStatus(ctx context.Context, arg UpdateIssueStatusPa
 		&i.DuplicateOfIssueID,
 		&i.DomainID,
 		&i.OriginChatSessionID,
+		&i.ViaBotID,
+		&i.ViaBotName,
 	)
 	return i, err
 }

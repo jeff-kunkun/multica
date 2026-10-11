@@ -33,6 +33,8 @@ var workspaceDeletionManifest = map[string]workspaceDeleteAction{
 	"agent_task_queue":                workspaceDelete,
 	"agent_to_label":                  workspaceDelete,
 	"bot_wake":                        workspaceDelete,
+	"bot_wake_cause":                  workspaceDelete,
+	"bot_wake_chain":                  workspaceDelete,
 	"bot_wake_attempt":                workspaceDelete,
 	"bot_wake_event":                  workspaceDelete,
 	"bot_wake_watch":                  workspaceDelete,

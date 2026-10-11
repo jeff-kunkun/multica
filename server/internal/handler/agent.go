@@ -599,7 +599,7 @@ func (h *Handler) publishAgentUpdate(r *http.Request, agent db.Agent) {
 	wsID := uuidToString(agent.WorkspaceID)
 	actorType, actorID := h.resolveActor(r, requestUserID(r), wsID)
 	resp := h.agentToResponse(agent)
-	h.publish(protocol.EventAgentStatus, wsID, actorType, actorID, map[string]any{"agent": broadcastAgentResponse(resp)})
+	h.publishWithSource(r.Context(), protocol.EventAgentStatus, wsID, actorType, actorID, map[string]any{"agent": broadcastAgentResponse(resp)})
 }
 
 // validateAgentParent enforces the two-level rule for a requested parent.
@@ -1103,6 +1103,8 @@ type AgentTaskResponse struct {
 // Initiator/Originator carry the raw user id always and the display name/email/avatar
 // only after hydration on a user-facing surface.
 type TaskAttribution struct {
+	ViaBotID   string `json:"via_bot_id,omitempty"`
+	ViaBotName string `json:"via_bot_name,omitempty"`
 	// Source is the waterfall level that resolved the accountable human:
 	// direct_human | delegation | comment_source | rule_owner | owner_fallback |
 	// backfill | unattributed. Never blank (a pre-migration NULL renders "unattributed").
@@ -1145,6 +1147,7 @@ type TaskEvidence struct {
 func taskAttributionBase(t db.AgentTaskQueue) *TaskAttribution {
 	src := attribution.Source(t.OriginatorSource.String)
 	attr := &TaskAttribution{
+		ViaBotID: uuidToString(t.ViaBotID), ViaBotName: t.ViaBotName.String,
 		Source:              src.String(), // empty (pre-migration) → "unattributed"
 		Precise:             src.Precise(),
 		RuleVersionID:       uuidToString(t.RuleVersionID),
@@ -2596,7 +2599,7 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 	}
 	resp = resps[0]
 	actorType, actorID := h.resolveActor(r, ownerID, workspaceID)
-	h.publish(protocol.EventAgentCreated, workspaceID, actorType, actorID, map[string]any{"agent": broadcastAgentResponse(resp)})
+	h.publishWithSource(r.Context(), protocol.EventAgentCreated, workspaceID, actorType, actorID, map[string]any{"agent": broadcastAgentResponse(resp)})
 
 	// Reported for the profile the agent actually got: an inherited
 	// specialisation has no request runtime of its own, and reporting the empty
@@ -3698,7 +3701,7 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 	slog.Info("agent updated", append(logger.RequestAttrs(r), "agent_id", id, "workspace_id", uuidToString(updated.WorkspaceID))...)
 	userID := requestUserID(r)
 	actorType, actorID := h.resolveActor(r, userID, uuidToString(updated.WorkspaceID))
-	h.publish(protocol.EventAgentStatus, uuidToString(updated.WorkspaceID), actorType, actorID, map[string]any{"agent": broadcastAgentResponse(resp)})
+	h.publishWithSource(r.Context(), protocol.EventAgentStatus, uuidToString(updated.WorkspaceID), actorType, actorID, map[string]any{"agent": broadcastAgentResponse(resp)})
 	redactAgentResponseForActor(&resp, actorType)
 	// Workspace admins / non-owner members pass canManageAgent for legitimate
 	// admin actions (e.g. bulk reassigning agents off a leaving member's
@@ -4013,7 +4016,7 @@ func (h *Handler) ArchiveAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	actorType, actorID := h.resolveActor(r, userID, wsID)
-	h.publish(protocol.EventAgentArchived, wsID, actorType, actorID, map[string]any{"agent": broadcastAgentResponse(resp)})
+	h.publishWithSource(r.Context(), protocol.EventAgentArchived, wsID, actorType, actorID, map[string]any{"agent": broadcastAgentResponse(resp)})
 	redactAgentResponseForActor(&resp, actorType)
 	writeJSON(w, http.StatusOK, resp)
 }
@@ -4061,7 +4064,7 @@ func (h *Handler) RestoreAgent(w http.ResponseWriter, r *http.Request) {
 	}
 	userID := requestUserID(r)
 	actorType, actorID := h.resolveActor(r, userID, wsID)
-	h.publish(protocol.EventAgentRestored, wsID, actorType, actorID, map[string]any{"agent": broadcastAgentResponse(resp)})
+	h.publishWithSource(r.Context(), protocol.EventAgentRestored, wsID, actorType, actorID, map[string]any{"agent": broadcastAgentResponse(resp)})
 	redactAgentResponseForActor(&resp, actorType)
 	writeJSON(w, http.StatusOK, resp)
 }
@@ -4198,9 +4201,9 @@ func (h *Handler) SolidifyAgent(w http.ResponseWriter, r *http.Request) {
 		slog.Warn("solidify agent: load parent relation failed", append(logger.RequestAttrs(r), "error", err, "agent_id", uuidToString(parent.ID))...)
 	}
 	parentActorType, parentActorID := h.resolveActor(r, userID, wsID)
-	h.publish(protocol.EventAgentStatus, wsID, parentActorType, parentActorID, map[string]any{"agent": broadcastAgentResponse(parentResps[0])})
+	h.publishWithSource(r.Context(), protocol.EventAgentStatus, wsID, parentActorType, parentActorID, map[string]any{"agent": broadcastAgentResponse(parentResps[0])})
 
-	h.publish(protocol.EventAgentStatus, wsID, actorType, actorID, map[string]any{"agent": broadcastAgentResponse(resp)})
+	h.publishWithSource(r.Context(), protocol.EventAgentStatus, wsID, actorType, actorID, map[string]any{"agent": broadcastAgentResponse(resp)})
 	redactAgentResponseForActor(&resp, actorType)
 	if !h.composioMCPAppsEnabled(r.Context()) {
 		suppressComposioToolkitAllowlist(&resp)

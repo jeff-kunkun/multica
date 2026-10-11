@@ -40,5 +40,7 @@
 - DENE-1722：路由从结果里学——升档、验收打回记为判低，同类票判低比例过阈值时新票上调一档（默认影子运行），`multica workspace routing learning` 查各类统计；[1280/390 截图](DENE-1722/preview.html)。
 - DENE-1721：干活中咨询强档席位——`multica issue consult` 同步问最强档一句（每张任务默认 3 次，设置 → 智能体权限可调），时间线一行可展开看问题和回答，Web/手机 App 同步；HTML 预览稿非真实页面截图：[1280/390 预览](DENE-1721/preview.html)。
 
+- DENE-1786：Grok 个人令牌 CLI 真机验收：[原始报告日志](https://ai.ferryway.cc/api/attachments/01a129b6-9502-7652-844c-e84d896735cb/download)，沙盒 DENE-1797；补测聊天附件的消息为 `01a129bf-1cc2-771e-b9a3-8582b957a37b`，最终回复 `01a129bf-4755-73f3-a371-3fcdc7901306`；执行信箱任务 `t-29af8208c2` 的校验回报为评论 `01a129bc-7250-731c-9ecb-f8b7b10f480a`。新进程登录通过，整机重置未测，不能据此声称全年在线。
 - DENE-1787：智能体系列自动归类、手动覆盖与同档路由偏好；[含手机版的 HTML 预览](../design/prototypes/agent-series.html)。真实设置页与列表 375/390/768/1280 截图、CLI 往返、数据库与换家族验证见任务附件。
 - DENE-1788：设置页「外部 Bot」（仅所有者/管理员可见）发管理员同权钥匙与接入指令，停用即 401、发新钥匙、删除，`multica bot`；[PR #626](https://github.com/jeff-kunkun/multica/pull/626)，[1280/768/390/375 截图](DENE-1788/index.html)，`multica chat new --wait` 等命令行全链路实测见 [bot-cli-e2e](DENE-1788/bot-cli-e2e.md)。
+- DENE-1794：评论、聊天和改单记录「经 Bot」，Bot 留言不算人的原话，停止和删除后保留历史；[最终验收证据](https://ai.ferryway.cc/api/attachments/01a129ef-dd01-77ac-b6dd-a0eaf945f3d7/download)含任务及聊天 375/390/768/1280 实页截图、禁止消息重拉时的真实 PAT 实时显示、PostgreSQL/Redis 与 CLI 来源专项测试；[来源与部署契约](../../server/docs/bot-write-provenance.md)。后台推送与四跳限制由 DENE-1792 集成验收。

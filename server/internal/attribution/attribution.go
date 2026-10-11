@@ -42,6 +42,8 @@ const (
 	// mention, assign, promote, manual trigger, rerun). The member IS the
 	// accountable human.
 	SourceDirectHuman Source = "direct_human"
+	// SourceViaBot retains the credential owner as principal without claiming their words.
+	SourceViaBot Source = "via_bot"
 	// SourceDelegation — an agent running on behalf of a human caused the
 	// enqueue (agent @-mentions another agent, agent creates a sub-issue,
 	// stage-completion wakeup). The parent task's accountable human is COPIED,
@@ -85,7 +87,7 @@ const (
 // attribution-coverage health metric (MUL-4302 §9).
 func (src Source) Precise() bool {
 	switch src {
-	case SourceDirectHuman, SourceDelegation, SourceCommentSource, SourceTriggerOwner, SourceRuleOwner:
+	case SourceViaBot, SourceDirectHuman, SourceDelegation, SourceCommentSource, SourceTriggerOwner, SourceRuleOwner:
 		return true
 	default:
 		return false
@@ -165,6 +167,8 @@ const (
 // DirectHumanRun / Unattributed / RuleOwner so AccountableUserID is always
 // finalized; never stamp a hand-built literal onto the queue.
 type Result struct {
+	ViaBotID            pgtype.UUID
+	ViaBotName          pgtype.Text
 	UserID              pgtype.UUID
 	AccountableUserID   pgtype.UUID
 	Source              Source
@@ -195,9 +199,13 @@ func finalizeAttribution(r Result) Result {
 // CommentFacts are the already-fetched facts about a trigger comment, gathered
 // by the caller from the DB and passed in so classification stays pure.
 type CommentFacts struct {
-	CommentID  pgtype.UUID
-	AuthorType string // "member" | "agent" | other
-	AuthorID   pgtype.UUID
+	ViaBotID         pgtype.UUID
+	ViaBotName       pgtype.Text
+	ParentViaBotID   pgtype.UUID
+	ParentViaBotName pgtype.Text
+	CommentID        pgtype.UUID
+	AuthorType       string // "member" | "agent" | other
+	AuthorID         pgtype.UUID
 
 	// For agent-authored comments: the source task the comment was written
 	// from (comment.source_task_id) and that task's originator_user_id. The
@@ -221,7 +229,17 @@ type CommentFacts struct {
 // issue-assignee-reacting path, SourceDelegation for an explicit mention /
 // thread-parent / squad-leader path. The returned UserID is byte-identical to
 // the legacy originator resolution so authorization behavior is unchanged.
-func ClassifyComment(f CommentFacts, agentAuthoredSource Source) Result {
+func ClassifyComment(f CommentFacts, agentAuthoredSource Source) (result Result) {
+	defer func() {
+		if f.ViaBotID.Valid {
+			result.ViaBotID, result.ViaBotName = f.ViaBotID, f.ViaBotName
+		} else {
+			result.ViaBotID, result.ViaBotName = f.ParentViaBotID, f.ParentViaBotName
+		}
+		if result.ViaBotID.Valid && result.Source == SourceDirectHuman {
+			result.Source = SourceViaBot
+		}
+	}()
 	switch f.AuthorType {
 	case "member":
 		return finalizeAttribution(Result{
@@ -263,6 +281,8 @@ func ClassifyComment(f CommentFacts, agentAuthoredSource Source) Result {
 // DirectFacts are the facts for a run with no trigger comment: a direct issue
 // assignment/creation, or an agent-created issue with a quick-create origin.
 type DirectFacts struct {
+	ViaBotID    pgtype.UUID
+	ViaBotName  pgtype.Text
 	IssueID     pgtype.UUID
 	CreatorType string
 	CreatorID   pgtype.UUID
@@ -294,7 +314,13 @@ type DirectFacts struct {
 }
 
 // ClassifyDirect resolves attribution for a run with no trigger comment.
-func ClassifyDirect(f DirectFacts) Result {
+func ClassifyDirect(f DirectFacts) (result Result) {
+	defer func() {
+		result.ViaBotID, result.ViaBotName = f.ViaBotID, f.ViaBotName
+		if result.ViaBotID.Valid && result.Source == SourceDirectHuman {
+			result.Source = SourceViaBot
+		}
+	}()
 	// A member who directly assigned/promoted the issue is the accountable human,
 	// ahead of the issue's creator (MUL-4302 §4). Evidence points at the issue the
 	// action targeted.

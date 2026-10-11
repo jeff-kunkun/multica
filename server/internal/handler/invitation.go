@@ -222,7 +222,7 @@ func (h *Handler) CreateInvitation(w http.ResponseWriter, r *http.Request) {
 		workspaceName = ws.Name
 		eventPayload["workspace_name"] = ws.Name
 	}
-	h.publish(protocol.EventInvitationCreated, uuidToString(requester.WorkspaceID), "member", userID, eventPayload)
+	h.publishWithSource(r.Context(), protocol.EventInvitationCreated, uuidToString(requester.WorkspaceID), "member", userID, eventPayload)
 
 	obsmetrics.RecordEvent(h.Analytics, h.Metrics, analytics.TeamInviteSent(
 		uuidToString(requester.UserID),
@@ -349,7 +349,7 @@ func (h *Handler) RevokeInvitation(w http.ResponseWriter, r *http.Request) {
 	slog.Info("invitation revoked", "invitation_id", invitationID, "workspace_id", workspaceID)
 
 	userID := requestUserID(r)
-	h.publish(protocol.EventInvitationRevoked, uuidToString(workspaceUUID), "member", userID, map[string]any{
+	h.publishWithSource(r.Context(), protocol.EventInvitationRevoked, uuidToString(workspaceUUID), "member", userID, map[string]any{
 		"invitation_id":   uuidToString(inv.ID),
 		"invitee_email":   inv.InviteeEmail,
 		"invitee_user_id": uuidToPtr(inv.InviteeUserID),
@@ -600,10 +600,10 @@ func (h *Handler) AcceptInvitation(w http.ResponseWriter, r *http.Request) {
 	if ws, err := h.Queries.GetWorkspace(r.Context(), accepted.WorkspaceID); err == nil {
 		eventPayload["workspace_name"] = ws.Name
 	}
-	h.publish(protocol.EventMemberAdded, wsID, "member", userID, eventPayload)
+	h.publishWithSource(r.Context(), protocol.EventMemberAdded, wsID, "member", userID, eventPayload)
 
 	// Notify the workspace about the acceptance.
-	h.publish(protocol.EventInvitationAccepted, wsID, "member", userID, map[string]any{
+	h.publishWithSource(r.Context(), protocol.EventInvitationAccepted, wsID, "member", userID, map[string]any{
 		"invitation_id": uuidToString(accepted.ID),
 		"member":        memberResp,
 	})
@@ -710,7 +710,7 @@ func (h *Handler) DeclineInvitation(w http.ResponseWriter, r *http.Request) {
 	slog.Info("invitation declined", "invitation_id", invitationID, "user_id", userID)
 
 	wsID := uuidToString(declined.WorkspaceID)
-	h.publish(protocol.EventInvitationDeclined, wsID, "member", userID, map[string]any{
+	h.publishWithSource(r.Context(), protocol.EventInvitationDeclined, wsID, "member", userID, map[string]any{
 		"invitation_id": uuidToString(declined.ID),
 		"invitee_email": declined.InviteeEmail,
 	})

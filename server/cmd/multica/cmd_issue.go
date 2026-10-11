@@ -3356,7 +3356,7 @@ func runIssueCommentList(cmd *cobra.Command, args []string) error {
 		rows = append(rows, []string{
 			strVal(c, "id"),
 			parentID,
-			actors.actor(strVal(c, "author_type"), strVal(c, "author_id")),
+			withBotAttribution(actors.actor(strVal(c, "author_type"), strVal(c, "author_id")), c),
 			strVal(c, "type"),
 			content,
 			created,

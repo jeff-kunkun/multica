@@ -1,4 +1,5 @@
 {
+  "via_bot": "{{name}} 経由",
   "avatar_upload": {
     "change": "アバターを変更",
     "remove": "削除",

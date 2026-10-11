@@ -126,7 +126,7 @@ func (h *Handler) AddReaction(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if reaction.CommentRevision > 0 {
-		h.publish(protocol.EventReactionAdded, workspaceID, actorType, actorID, map[string]any{
+		h.publishWithSource(r.Context(), protocol.EventReactionAdded, workspaceID, actorType, actorID, map[string]any{
 			"reaction":            resp,
 			"issue_id":            issueID,
 			"issue_title":         issueTitle,
@@ -206,7 +206,7 @@ func (h *Handler) RemoveReaction(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if removed.Changed {
-		h.publish(protocol.EventReactionRemoved, workspaceID, actorType, actorID, map[string]any{
+		h.publishWithSource(r.Context(), protocol.EventReactionRemoved, workspaceID, actorType, actorID, map[string]any{
 			"comment_id":       uuidToString(comment.ID),
 			"issue_id":         uuidToString(comment.IssueID),
 			"emoji":            req.Emoji,

@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/attribution"
+	"github.com/multica-ai/multica/server/internal/botsource"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -139,6 +140,7 @@ func (s *TaskService) RequestConsult(ctx context.Context, req ConsultRequest) (d
 	// The advisor works for whoever the asking run works for: the asker's
 	// human is copied down, as for a sub-issue an agent creates.
 	attr := attribution.ClassifyDirect(attribution.DirectFacts{
+		ViaBotID: req.AskerTask.ViaBotID, ViaBotName: req.AskerTask.ViaBotName,
 		IssueID: req.Issue.ID, OriginType: "agent_create", OriginTaskID: req.AskerTask.ID,
 		OriginOriginator: req.AskerTask.OriginatorUserID, OriginAccountable: req.AskerTask.AccountableUserID,
 	})
@@ -150,6 +152,7 @@ func (s *TaskService) RequestConsult(ctx context.Context, req ConsultRequest) (d
 		ID: dbid.NewV7(), AgentID: advisor.ID, RuntimeID: advisor.RuntimeID,
 		Priority: priorityToInt("urgent"), Context: contextJSON,
 		OriginatorUserID: attr.UserID, AccountableUserID: attr.AccountableUserID,
+		ViaBotID: attr.ViaBotID, ViaBotName: attr.ViaBotName,
 		OriginatorSource: attrSource, TriggerEvidenceKind: attrEvidenceKind, TriggerEvidenceRefID: attrEvidenceRef,
 	})
 	if err != nil {
@@ -264,6 +267,7 @@ func (s *TaskService) recordConsultActivity(ctx context.Context, c db.IssueConsu
 	}
 	raw, _ := json.Marshal(details)
 	row, err := s.Queries.CreateActivity(ctx, db.CreateActivityParams{
+		ViaBotID: botsource.FromContext(ctx).ID, ViaBotName: pgtype.Text{String: botsource.FromContext(ctx).Name, Valid: botsource.FromContext(ctx).ID.Valid},
 		ID: dbid.NewV7(), WorkspaceID: c.WorkspaceID, IssueID: c.IssueID,
 		ActorType: pgtype.Text{String: "agent", Valid: true}, ActorID: c.AskerAgentID,
 		Action: action, Details: raw,

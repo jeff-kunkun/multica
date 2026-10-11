@@ -80,6 +80,8 @@ export const EMPTY_ATTACHMENT_LIST: Attachment[] = [];
  *  Empty fallback yields `id: ""` so downstream code (the mutations'
  *  onSuccess writers) can detect drift and fall back to invalidate. */
 export const CommentSchema = z.object({
+  via_bot_id: z.string().nullish().catch(undefined),
+  via_bot_name: z.string().nullish().catch(undefined),
   id: z.string(),
   issue_id: z.string().default(""),
   author_type: z.string().default("member"),
@@ -288,6 +290,8 @@ export const EMPTY_CHAT_SESSION_LIST: ChatSession[] = [];
 // `attachments` carried for parity rendering only — v1 doesn't author them on
 // mobile. AttachmentSchema is reused as-is.
 export const ChatMessageSchema: z.ZodType<ChatMessage> = z.object({
+  via_bot_id: z.string().nullish().catch(undefined),
+  via_bot_name: z.string().nullish().catch(undefined),
   id: z.string(),
   chat_session_id: z.string(),
   // If the server ever introduces a third role, fall back to "assistant" so
