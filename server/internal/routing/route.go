@@ -400,6 +400,7 @@ func (r *Router) routeTodo(ctx context.Context, workspaceID string, settings Set
 					}
 				}
 			}
+			tierSeat, tierSource, tierWhy := seat, source, why
 			// 接着做 ranks above the ladder's pick but not above a person's
 			// tier label: the label is a person's instruction about strength.
 			if !labelStill {
@@ -429,6 +430,13 @@ func (r *Router) routeTodo(ctx context.Context, workspaceID string, settings Set
 					return Outcome{State: StateEnabled, Action: ActionSkipped, Reason: "routing context incomplete"}, preferenceErr
 				}
 				if matched {
+					if preferred.ID != seat.ID {
+						// Series changes the seat within the chosen tier. Restore
+						// the tier provenance, not the displaced seat's reason.
+						source, why = tierSource, tierWhy
+						preferred.Learned = tierSeat.Learned
+						cont, load = ContinuationPick{}, LoadPick{}
+					}
 					seat = preferred
 					seriesNote = "系列偏好：" + verdict.PreferredSeries + "；同档可用席位 " + seat.Name
 					notes = append(notes, seriesNote)

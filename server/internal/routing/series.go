@@ -75,6 +75,11 @@ func (l Ladder) preferredSeriesSeat(base Seat, preferred string, scene Scene, ro
 			filtered[name] = a
 		}
 	}
+	// A matching, still-eligible choice already satisfies the preference.
+	// Keep its continuation/load metadata as well as its identity.
+	if a, ok := agentByID(filtered, base.ID); ok && a.autoPickable() {
+		return base, true
+	}
 	candidates := l.SceneCandidates(scene, filtered)
 	if chosen, ok := SeatByTier(candidates, base.TierKey); ok && !chosen.Upshifted {
 		return chosen, true
