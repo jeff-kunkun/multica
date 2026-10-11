@@ -88,8 +88,8 @@ func TestBotWakeLocalHTTP(t *testing.T) {
 		if r.Header.Get("X-Multica-Event-ID") == "" || payload["summary"] == nil {
 			t.Error("missing metadata")
 		}
-		if _, ok := payload["content"]; ok {
-			t.Error("body leaked")
+		if payload["type"] == "mention" && payload["content"] == nil {
+			t.Error("mention body missing")
 		}
 		if slow.Load() {
 			time.Sleep(150 * time.Millisecond)
@@ -99,6 +99,7 @@ func TestBotWakeLocalHTTP(t *testing.T) {
 	defer receiver.Close()
 	t.Setenv("MULTICA_PLUGIN_DEV_ORIGINS", receiver.URL)
 	worker := NewBotWakeWorker(testHandler)
+	worker.coalesceSeconds = 0
 	worker.client = func(u *url.URL) *http.Client { return &http.Client{Timeout: 50 * time.Millisecond} }
 	quietOff := map[string]any{"enabled": false, "start": "23:00", "end": "08:00", "timezone": "Asia/Shanghai"}
 	put := func(body any) {
@@ -463,8 +464,8 @@ func TestBotWakeOwnerFollowsHTTP(t *testing.T) {
 		if r.Header.Get("X-Multica-Event-ID") == "" || payload["summary"] == nil {
 			t.Error("missing metadata")
 		}
-		if _, ok := payload["content"]; ok {
-			t.Error("body leaked")
+		if payload["type"] == "mention" && payload["content"] == nil {
+			t.Error("mention body missing")
 		}
 		if slow.Load() {
 			time.Sleep(150 * time.Millisecond)
@@ -474,6 +475,7 @@ func TestBotWakeOwnerFollowsHTTP(t *testing.T) {
 	defer receiver.Close()
 	t.Setenv("MULTICA_PLUGIN_DEV_ORIGINS", receiver.URL)
 	worker := NewBotWakeWorker(testHandler)
+	worker.coalesceSeconds = 0
 	worker.client = func(u *url.URL) *http.Client { return &http.Client{Timeout: 50 * time.Millisecond} }
 	quietOff := map[string]any{"enabled": false, "start": "23:00", "end": "08:00", "timezone": "Asia/Shanghai"}
 	put := func(body any) {

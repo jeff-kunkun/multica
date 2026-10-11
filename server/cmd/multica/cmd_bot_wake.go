@@ -30,9 +30,12 @@ Fields: inherit_owner_follows (boolean, default false; member issue subscription
 {enabled,start,end,timezone}, webhook_url, webhook_key.
 Write URL and key together. The key is the complete Authorization header value
 (e.g. Bearer …), as specified by the receiver. Two empty strings disconnect.
-Defaults: 6 attempts/hour, 23:00–08:00 Asia/Shanghai.`
+Defaults: 6 attempts/hour, 23:00–08:00 Asia/Shanghai. New subscriptions exclude started.
+Ordinary events for one issue/chat are grouped for 30 seconds; webhooks include events[].`
 		}
 		if verb == "events" || verb == "pending" {
+			cmd.Flags().Bool("with-content", false, "Include current mention/chat payload: content, thread previews, attachments and reply location; visibility checked, no delivery or acknowledgement")
+			cmd.Example = "  multica bot wake " + verb + " <bot-id-from-bot-mentions> --with-content --limit 5 --output json"
 			cmd.Flags().Int("limit", 50, "Page size (1..100)")
 			cmd.Flags().String("before", "", "next_cursor from preceding page; pending consumers restart at first page after each scan")
 		}
@@ -87,6 +90,9 @@ func runBotWake(cmd *cobra.Command, args []string, verb string) error {
 		}
 		before, _ := cmd.Flags().GetString("before")
 		path += "/" + verb + "?limit=" + fmt.Sprint(limit) + "&before=" + url.QueryEscape(before)
+		if withContent, _ := cmd.Flags().GetBool("with-content"); withContent {
+			path += "&include_content=true"
+		}
 	}
 	var response map[string]any
 	if verb == "set" {

@@ -114,3 +114,56 @@ Authenticated Bots can inspect their own blocks only; human workspace owners
 and admins can inspect viewer-visible records. Task tokens do not read the audit. Other members see the limit and recovery contract.
 `audit_read_failed: true` means the audit is unavailable, not zero blocks.
 The same report is included in the routing-health inspection response.
+
+## Mention delivery and replying in place
+
+Ordinary notifications for one Bot and one issue/chat are grouped in a fixed
+30-second window from the first event. `started` is excluded from new Bot
+subscriptions by default; existing explicitly saved subscriptions stay unchanged.
+`wake_blocked` operational alerts remain immediate. This notification batching is
+separate from merging agent runs (DENE-1857).
+
+Every webhook has `delivery_id` and an ordered `events` array, including a
+single-event delivery. The top-level legacy fields mirror the first admitted
+event; handle **each** element of `events`, deduplicating its `event_id`. Each
+keeps its own `ack_url`, `root_id`, `source_id`, author and time. Existing retry,
+receipt, visibility and chain-budget contracts still apply. One HTTP attempt
+counts once toward the hourly limit. A retried batch keeps its membership and
+`delivery_id`; later events are delivered separately.
+
+For an issue comment mention, each event includes:
+- `content`: full current source comment, `comment_id`, `reply_to_comment_id`.
+- `issue`: `{id,identifier,title}` and `author`: `{type,id,name?,via_bot_id?,via_bot_name?}`.
+- `thread`: `root` and the five most recent `replies`, chronologically ordered;
+  compact comment fields with 200-character previews and `content_truncated`,
+  using the same summary projection as `comment list --compact --summary`.
+- `attachments`: `{id,filename,size_bytes,sha256,url}` for the source comment;
+  `url` downloads bytes with normal Bot authentication. Legacy files without a
+  recorded digest remain omitted; use authorized metadata/download when needed.
+- `reply`: authenticated POST `url`, `body.parent_id`, and a CLI command template.
+
+Use the delivered IDs directly. **After being @mentioned, first reply
+「收到，在处理」 under that source comment; when finished, reply with the result
+under the same comment.** Preserve the Bot signature on both messages. This is an
+internal Multica reply; it does not authorize an external post or purchase.
+
+```sh
+# Save the signed acknowledgement/result in ./reply.md, then send once.
+multica issue comment add <issue_id> --parent <reply_to_comment_id> --content-file ./reply.md --output json
+```
+
+The API equivalent adds `content` to the delivered `reply.body`, sets
+`reply.headers` (`X-Workspace-ID`) and its own Authorization, then POSTs to
+`reply.url`; no issue/comment GET is required. Issue-description mentions have
+`content` but no comment reply target. Chat events have `content`, `message_id`,
+`reply_to_message_id` and a `reply.cli` using `chat send --session` to continue
+in the same chat (chats have no comment floors). Deleted source comments carry
+an empty body and no reply action; deleted context comments remain empty
+placeholders so thread structure is preserved.
+
+For inspection without delivery or acknowledgement, use
+`multica bot wake events <bot-id> --with-content --limit 5 --output json`
+(or `pending`). This adds `payload` with the same current source projection;
+`delivery_id` on receipt rows identifies the persisted transport batch.
+The API option is `include_content=true` (boolean, default false). Reads
+recheck recipient and caller visibility; they do not replay or acknowledge.

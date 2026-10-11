@@ -161,6 +161,7 @@ func TestBotWakeDirectChatBlockedVisibleAndReplyReset(t *testing.T) {
 		t.Fatalf("refusals must each leave an audit and alert: %d/%d", blocks, alerts)
 	}
 	worker := NewBotWakeWorker(testHandler)
+	worker.coalesceSeconds = 0
 	worker.client = func(*url.URL) *http.Client { return receiver.Client() }
 	for n := 0; n < 30; n++ {
 		worked, err := worker.ProcessNext(ctx)
@@ -407,6 +408,7 @@ func TestBotWakeWorkerDeliversOwnOperationalRefusal(t *testing.T) {
 		t.Fatal(err)
 	}
 	worker := NewBotWakeWorker(testHandler)
+	worker.coalesceSeconds = 0
 	worker.client = func(*url.URL) *http.Client { return receiver.Client() }
 	if worked, err := worker.ProcessNext(ctx); err != nil || !worked {
 		t.Fatalf("process original event: worked=%v err=%v", worked, err)
