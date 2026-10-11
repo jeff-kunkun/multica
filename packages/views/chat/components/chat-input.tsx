@@ -824,6 +824,7 @@ export function ChatInput({
             onUploadingChange={uploadGate.onUploadingChange}
             attachments={draftAttachments}
             debounceMs={100}
+            currentChatSessionId={activeSessionId ?? undefined}
             mentionMode={contextItems ? "context" : "default"}
             mentionContextItems={contextItems}
             enableSlashCommands

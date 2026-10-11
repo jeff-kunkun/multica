@@ -3,9 +3,9 @@
 -- to the same person on the same ticket while the first is unanswered
 -- returns no row, and the caller reports it as a duplicate.
 INSERT INTO issue_summon (
-    workspace_id, issue_id, recipient_id, caller_type, caller_id, source, reason, comment_id
+    workspace_id, issue_id, recipient_id, caller_type, caller_id, source, reason, comment_id,via_bot_id,via_bot_name,source_task_id
 ) VALUES (
-    $1, $2, $3, $4, sqlc.narg('caller_id'), $5, $6, sqlc.narg('comment_id')
+    $1, $2, $3, $4, sqlc.narg('caller_id'), $5, $6, sqlc.narg('comment_id'),sqlc.narg('via_bot_id'),sqlc.narg('via_bot_name'),sqlc.narg('source_task_id')
 )
 ON CONFLICT (issue_id, recipient_id) WHERE answered_at IS NULL DO NOTHING
 RETURNING *;

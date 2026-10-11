@@ -490,7 +490,7 @@ func (q *Queries) CountProjectIssueVisibility(ctx context.Context, arg CountProj
 }
 
 const createIssue = `-- name: CreateIssue :one
-WITH write_source AS MATERIALIZED (SELECT set_config('multica.actor_type', COALESCE($24::text::text, ''), true), set_config('multica.actor_id', COALESCE($25::uuid::text, ''), true), set_config('multica.via_bot_id', COALESCE($22::uuid::text, ''), true), set_config('multica.via_bot_name', COALESCE($23::text::text, ''), true))
+WITH write_source AS MATERIALIZED (SELECT set_config('multica.source_task_id', COALESCE($24::uuid::text, ''), true), set_config('multica.actor_type', COALESCE($25::text::text, ''), true), set_config('multica.actor_id', COALESCE($26::uuid::text, ''), true), set_config('multica.via_bot_id', COALESCE($22::uuid::text, ''), true), set_config('multica.via_bot_name', COALESCE($23::text::text, ''), true))
 INSERT INTO issue (
     workspace_id, title, description, status, priority,
     assignee_type, assignee_id, creator_type, creator_id,
@@ -531,6 +531,7 @@ type CreateIssueParams struct {
 	Visibility    pgtype.Text `json:"visibility"`
 	ViaBotID      pgtype.UUID `json:"via_bot_id"`
 	ViaBotName    pgtype.Text `json:"via_bot_name"`
+	SourceTaskID  pgtype.UUID `json:"source_task_id"`
 	ActorType     pgtype.Text `json:"actor_type"`
 	ActorID       pgtype.UUID `json:"actor_id"`
 }
@@ -560,6 +561,7 @@ func (q *Queries) CreateIssue(ctx context.Context, arg CreateIssueParams) (Issue
 		arg.Visibility,
 		arg.ViaBotID,
 		arg.ViaBotName,
+		arg.SourceTaskID,
 		arg.ActorType,
 		arg.ActorID,
 	)
@@ -616,7 +618,7 @@ func (q *Queries) CreateIssue(ctx context.Context, arg CreateIssueParams) (Issue
 }
 
 const createIssueWithOrigin = `-- name: CreateIssueWithOrigin :one
-WITH write_source AS MATERIALIZED (SELECT set_config('multica.actor_type', COALESCE($24::text::text, ''), true), set_config('multica.actor_id', COALESCE($25::uuid::text, ''), true), set_config('multica.via_bot_id', COALESCE($22::uuid::text, ''), true), set_config('multica.via_bot_name', COALESCE($23::text::text, ''), true))
+WITH write_source AS MATERIALIZED (SELECT set_config('multica.source_task_id', COALESCE($24::uuid::text, ''), true), set_config('multica.actor_type', COALESCE($25::text::text, ''), true), set_config('multica.actor_id', COALESCE($26::uuid::text, ''), true), set_config('multica.via_bot_id', COALESCE($22::uuid::text, ''), true), set_config('multica.via_bot_name', COALESCE($23::text::text, ''), true))
 INSERT INTO issue (
     workspace_id, title, description, status, priority,
     assignee_type, assignee_id, creator_type, creator_id,
@@ -653,6 +655,7 @@ type CreateIssueWithOriginParams struct {
 	Visibility    pgtype.Text `json:"visibility"`
 	ViaBotID      pgtype.UUID `json:"via_bot_id"`
 	ViaBotName    pgtype.Text `json:"via_bot_name"`
+	SourceTaskID  pgtype.UUID `json:"source_task_id"`
 	ActorType     pgtype.Text `json:"actor_type"`
 	ActorID       pgtype.UUID `json:"actor_id"`
 }
@@ -682,6 +685,7 @@ func (q *Queries) CreateIssueWithOrigin(ctx context.Context, arg CreateIssueWith
 		arg.Visibility,
 		arg.ViaBotID,
 		arg.ViaBotName,
+		arg.SourceTaskID,
 		arg.ActorType,
 		arg.ActorID,
 	)

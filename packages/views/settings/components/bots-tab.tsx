@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Check, Copy, MoreHorizontal } from "lucide-react";
+import { Check, ChevronRight, Copy, MoreHorizontal } from "lucide-react";
 import { toast } from "sonner";
 import type { ExternalBot, ExternalBotKeyResponse } from "@multica/core/types";
 import { useWorkspaceId } from "@multica/core/hooks";
@@ -16,7 +16,7 @@ import {
 } from "@multica/core/bots";
 import { cn } from "@multica/ui/lib/utils";
 import { copyText } from "@multica/ui/lib/clipboard";
-import { Button } from "@multica/ui/components/ui/button";
+import { Button, buttonVariants } from "@multica/ui/components/ui/button";
 import { Input } from "@multica/ui/components/ui/input";
 import { Label } from "@multica/ui/components/ui/label";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
@@ -52,8 +52,11 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@multica/ui/components/ui/dropdown-menu";
+import { AppLink, useNavigation } from "../../navigation";
 import { useLocale, useT } from "../../i18n";
 import { SettingsCard, SettingsRow, SettingsSection, SettingsTab } from "./settings-layout";
+import { resolveSettingsLocation, settingsHref } from "./settings-navigation";
+import { BotWakePage } from "./bot-wake-page";
 
 const EXPIRY_KEYS = ["never", "365"] as const;
 type Expiry = (typeof EXPIRY_KEYS)[number];
@@ -69,6 +72,11 @@ export function BotsTab() {
   const { role } = useCurrentMember(wsId);
   const canManage = role === "owner" || role === "admin";
   const { data: bots = [], isLoading, isError } = useQuery(externalBotListOptions(wsId, canManage));
+  const navigation = useNavigation();
+  const requested = resolveSettingsLocation(navigation.searchParams).integration;
+  const selected = bots.find((bot) => bot.id === requested);
+  const href = (integration?: string) =>
+    settingsHref(navigation.pathname, navigation.searchParams, "bots", { integration });
 
   const create = useCreateExternalBot(wsId);
   const rotate = useRotateExternalBotKey(wsId);
@@ -190,6 +198,36 @@ export function BotsTab() {
   };
   const confirmCopy = confirm ? confirmText(confirm) : null;
 
+  // ?tab=bots&integration=<botId> opens that bot's wake settings.
+  if (selected) {
+    return (
+      <SettingsTab
+        title={selected.name}
+        description={t(($) => $.bots.wake.description)}
+        scope="workspace"
+        breadcrumb={
+          <nav
+            aria-label={t(($) => $.bots.wake.breadcrumb)}
+            className="flex items-center gap-1.5 text-caption text-muted-foreground"
+          >
+            <AppLink
+              href={href()}
+              className="rounded-sm hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring"
+            >
+              {t(($) => $.bots.title)}
+            </AppLink>
+            <ChevronRight aria-hidden="true" className="size-3" />
+            <span aria-current="page" className="truncate text-foreground">
+              {selected.name}
+            </span>
+          </nav>
+        }
+      >
+        <BotWakePage bot={selected} />
+      </SettingsTab>
+    );
+  }
+
   return (
     <SettingsTab
       title={t(($) => $.bots.title)}
@@ -265,6 +303,13 @@ export function BotsTab() {
                   .filter(Boolean)
                   .join(" · ")}
               >
+                <div className="flex items-center gap-1">
+                <AppLink
+                  href={href(bot.id)}
+                  className={cn(buttonVariants({ variant: "outline", size: "sm" }), "h-11 sm:h-8")}
+                >
+                  {t(($) => $.bots.wake.open)}
+                </AppLink>
                 <DropdownMenu>
                   <DropdownMenuTrigger
                     render={
@@ -300,6 +345,7 @@ export function BotsTab() {
                     )}
                   </DropdownMenuContent>
                 </DropdownMenu>
+                </div>
               </SettingsRow>
             ))}
           </SettingsCard>

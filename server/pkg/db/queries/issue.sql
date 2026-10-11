@@ -341,7 +341,7 @@ WHERE workspace_id = sqlc.arg(workspace_id)
 RETURNING *;
 
 -- name: CreateIssue :one
-WITH write_source AS MATERIALIZED (SELECT set_config('multica.actor_type', COALESCE(sqlc.narg('actor_type')::text::text, ''), true), set_config('multica.actor_id', COALESCE(sqlc.narg('actor_id')::uuid::text, ''), true), set_config('multica.via_bot_id', COALESCE(sqlc.narg('via_bot_id')::uuid::text, ''), true), set_config('multica.via_bot_name', COALESCE(sqlc.narg('via_bot_name')::text::text, ''), true))
+WITH write_source AS MATERIALIZED (SELECT set_config('multica.source_task_id', COALESCE(sqlc.narg('source_task_id')::uuid::text, ''), true), set_config('multica.actor_type', COALESCE(sqlc.narg('actor_type')::text::text, ''), true), set_config('multica.actor_id', COALESCE(sqlc.narg('actor_id')::uuid::text, ''), true), set_config('multica.via_bot_id', COALESCE(sqlc.narg('via_bot_id')::uuid::text, ''), true), set_config('multica.via_bot_name', COALESCE(sqlc.narg('via_bot_name')::text::text, ''), true))
 INSERT INTO issue (
     workspace_id, title, description, status, priority,
     assignee_type, assignee_id, creator_type, creator_id,
@@ -638,7 +638,7 @@ WHERE i.id = sqlc.arg('id') AND i.workspace_id = sqlc.arg('workspace_id') AND i.
 RETURNING *;
 
 -- name: CreateIssueWithOrigin :one
-WITH write_source AS MATERIALIZED (SELECT set_config('multica.actor_type', COALESCE(sqlc.narg('actor_type')::text::text, ''), true), set_config('multica.actor_id', COALESCE(sqlc.narg('actor_id')::uuid::text, ''), true), set_config('multica.via_bot_id', COALESCE(sqlc.narg('via_bot_id')::uuid::text, ''), true), set_config('multica.via_bot_name', COALESCE(sqlc.narg('via_bot_name')::text::text, ''), true))
+WITH write_source AS MATERIALIZED (SELECT set_config('multica.source_task_id', COALESCE(sqlc.narg('source_task_id')::uuid::text, ''), true), set_config('multica.actor_type', COALESCE(sqlc.narg('actor_type')::text::text, ''), true), set_config('multica.actor_id', COALESCE(sqlc.narg('actor_id')::uuid::text, ''), true), set_config('multica.via_bot_id', COALESCE(sqlc.narg('via_bot_id')::uuid::text, ''), true), set_config('multica.via_bot_name', COALESCE(sqlc.narg('via_bot_name')::text::text, ''), true))
 INSERT INTO issue (
     workspace_id, title, description, status, priority,
     assignee_type, assignee_id, creator_type, creator_id,

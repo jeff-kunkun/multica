@@ -42,6 +42,8 @@ Closes #
 - [ ] I have updated relevant documentation to reflect my changes
 - [ ] If I added a new runtime / coding tool / UI tab, I synced the change to **landing copy** (`apps/web/features/landing/i18n/`) and **relevant docs** (`apps/docs/content/docs/`)
 - [ ] If this PR touches Chinese product copy, I checked it against `apps/docs/content/docs/developers/conventions.zh.mdx` (terminology, mixed-rule for `task` / `issue` / `skill`)
+- [ ] 三面齐：服务端、Web/Desktop、`multica` CLI 都能用；缺哪一面写明原因
+- [ ] 对智能体友好：新增的每块信息都有命令能读到，`--help` 带示例，`--output json` 字段自解释，已并进工作区全景 / bot 能力地图
 - [ ] I have considered and documented any risks above
 - [ ] I will address all reviewer comments before requesting merge
 

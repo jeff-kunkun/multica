@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -665,6 +666,7 @@ type AttachmentResponse struct {
 	Filename    string `json:"filename"`
 	ContentType string `json:"content_type"`
 	SizeBytes   int64  `json:"size_bytes"`
+	SHA256      string `json:"sha256"`
 	CreatedAt   string `json:"created_at"`
 }
 
@@ -898,6 +900,7 @@ func (c *APIClient) uploadAttachment(ctx context.Context, fileData []byte, filen
 		}
 	}
 	fields = sent
+	fields["sha256"] = fmt.Sprintf("%x", sha256.Sum256(fileData))
 	if len(fileData) > chunkedUploadThreshold {
 		result, err := c.uploadChunked(ctx, fileData, filename, fields)
 		if err == nil {

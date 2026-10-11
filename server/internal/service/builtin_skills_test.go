@@ -636,7 +636,7 @@ func TestPlatformSkillCoversPlatformContracts(t *testing.T) {
 		{
 			file: "references/mentions.md",
 			want: []string{
-				"(member|agent|squad|issue|all)/([0-9a-fA-F-]+|all)",
+				"(member|agent|bot|squad|issue|all)/([0-9a-fA-F-]+|all)",
 				"multica workspace member list --output json",
 				"enqueues a run for that agent",
 				"enqueues NOTHING",

@@ -511,7 +511,8 @@ func (s *IssueService) createInTx(ctx context.Context, tx pgx.Tx, qtx *db.Querie
 	var assignedTask db.AgentTaskQueue
 	if p.OriginType.Valid {
 		issue, err = qtx.CreateIssueWithOrigin(ctx, db.CreateIssueWithOriginParams{
-			ActorType: pgtype.Text{String: botsource.ActorFromContext(ctx).Type, Valid: botsource.ActorFromContext(ctx).Type != ""}, ActorID: botsource.ActorFromContext(ctx).ID,
+			SourceTaskID: botsource.TaskFromContext(ctx),
+			ActorType:    pgtype.Text{String: botsource.ActorFromContext(ctx).Type, Valid: botsource.ActorFromContext(ctx).Type != ""}, ActorID: botsource.ActorFromContext(ctx).ID,
 			ViaBotID: botsource.FromContext(ctx).ID, ViaBotName: pgtype.Text{String: botsource.FromContext(ctx).Name, Valid: botsource.FromContext(ctx).ID.Valid},
 			ID:            dbid.NewV7(),
 			WorkspaceID:   p.WorkspaceID,
@@ -537,7 +538,8 @@ func (s *IssueService) createInTx(ctx context.Context, tx pgx.Tx, qtx *db.Querie
 		})
 	} else {
 		issue, err = qtx.CreateIssue(ctx, db.CreateIssueParams{
-			ActorType: pgtype.Text{String: botsource.ActorFromContext(ctx).Type, Valid: botsource.ActorFromContext(ctx).Type != ""}, ActorID: botsource.ActorFromContext(ctx).ID,
+			SourceTaskID: botsource.TaskFromContext(ctx),
+			ActorType:    pgtype.Text{String: botsource.ActorFromContext(ctx).Type, Valid: botsource.ActorFromContext(ctx).Type != ""}, ActorID: botsource.ActorFromContext(ctx).ID,
 			ViaBotID: botsource.FromContext(ctx).ID, ViaBotName: pgtype.Text{String: botsource.FromContext(ctx).Name, Valid: botsource.FromContext(ctx).ID.Valid},
 			ID:            dbid.NewV7(),
 			WorkspaceID:   p.WorkspaceID,
