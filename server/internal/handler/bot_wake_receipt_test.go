@@ -111,6 +111,28 @@ func TestBotWakeReceiptsAndStableScan(t *testing.T) {
 	if state != "failed" || !result || !woken {
 		t.Fatal("receipt changed transport or regressed result")
 	}
+	for _, transport := range []string{"sending", "received"} {
+		id, seq := insert(transport)
+		for n := 0; n < 2; n++ {
+			if code, _ = call("POST", base+"/pending/ack", map[string]any{"event_ids": []string{id}}); code != 200 {
+				t.Fatal("execution ack rejected")
+			}
+		}
+		dbfx.QueryRow(t, `SELECT status,woken_at IS NOT NULL FROM bot_wake_event WHERE sequence=$1`, seq).Scan(&state, &woken)
+		if state != transport || !woken {
+			t.Fatal("ack lost confirmation or altered delivery")
+		}
+		if transport == "sending" {
+			if err := testHandler.Queries.FinishBotWakeEvent(ctx, db.FinishBotWakeEventParams{Sequence: seq, Status: "received", Reason: "HTTP 200; execution not confirmed"}); err != nil {
+				t.Fatal(err)
+			}
+			var reason string
+			dbfx.QueryRow(t, `SELECT reason FROM bot_wake_event WHERE sequence=$1`, seq).Scan(&reason)
+			if reason != "HTTP 200; execution confirmed" {
+				t.Fatal("in-flight confirmation overwritten")
+			}
+		}
+	}
 	// Late commit below a newer sequence is discovered by the next full scan.
 	tx, err := testPool.Begin(ctx)
 	if err != nil {

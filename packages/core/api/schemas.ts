@@ -5181,3 +5181,8 @@ export const EMPTY_TEST_REPO_BINDING_RESPONSE: TestRepoBindingResponse = {
   binding: EMPTY_REPO_BINDING,
   ok: false,
 };
+
+/** Validate additive delivery statistics without narrowing older wake settings. */
+export const BotWakeDeliveryStatsSchema = z.object({
+  limited_count: z.number().int().nonnegative().safe().optional().catch(0).default(0),
+}).passthrough();

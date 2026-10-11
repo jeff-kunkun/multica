@@ -101,7 +101,12 @@ func (w *BotWakeWorker) ProcessNext(ctx context.Context) (bool, error) {
 		return false, err
 	}
 	pending := func(reason string) (bool, error) {
-		if err := q.FinishBotWakeEvent(ctx, db.FinishBotWakeEventParams{Sequence: e.Sequence, Status: "pending", Reason: reason}); err != nil {
+		// Temporary policy blocks are revisited without replaying uncertain sends.
+		delay := int32(0)
+		if reason == "hourly limit" || reason == "quiet hours" {
+			delay = 1
+		}
+		if err := q.FinishBotWakeEvent(ctx, db.FinishBotWakeEventParams{Sequence: e.Sequence, Status: "pending", Reason: reason, DelaySeconds: delay}); err != nil {
 			return true, err
 		}
 		return true, tx.Commit(ctx)
@@ -114,9 +119,15 @@ func (w *BotWakeWorker) ProcessNext(ctx context.Context) (bool, error) {
 	}
 	alert := e.EventType == "wake_blocked"
 	rules := wakeResponse(c)
-	// Unknown trigger attribution cannot safely be treated as a human owner.
-	if !alert && (e.AuthorType == "system" || !e.AuthorID.Valid) {
-		return pending("source attribution unavailable")
+	// Some issue writes do not set transaction-local actor metadata. Recover
+	// an actual run's actor where available; never impersonate an issue owner.
+	if !alert && (e.AuthorType == "system" || !e.AuthorID.Valid) && e.SourceTaskID.Valid {
+		if task, err := q.GetAgentTaskInWorkspace(ctx, db.GetAgentTaskInWorkspaceParams{ID: e.SourceTaskID, WorkspaceID: e.WorkspaceID}); err == nil {
+			e.AuthorType, e.AuthorID = "agent", task.AgentID
+			if err := q.RestoreBotWakeAuthor(ctx, db.RestoreBotWakeAuthorParams{Sequence: e.Sequence, AuthorID: e.AuthorID}); err != nil {
+				return true, err
+			}
+		}
 	}
 	if !alert && e.AuthorType == "bot" && e.AuthorID == e.BotID {
 		return pending("self wake suppressed")
@@ -133,9 +144,11 @@ func (w *BotWakeWorker) ProcessNext(ctx context.Context) (bool, error) {
 			return pending("owner no longer follows source")
 		}
 	}
-	rule, known := rules.WakeFrom[e.AuthorType]
-	if !alert && (!known || rule.Mode == "none" || (rule.Mode == "list" && !slices.Contains(rule.IDs, uuidToString(e.AuthorID)))) {
-		return pending("sender not allowed")
+	if !alert && e.AuthorType != "system" && e.AuthorID.Valid {
+		rule, known := rules.WakeFrom[e.AuthorType]
+		if !known || rule.Mode == "none" || (rule.Mode == "list" && !slices.Contains(rule.IDs, uuidToString(e.AuthorID))) {
+			return pending("sender not allowed")
+		}
 	}
 
 	if !alert && !slices.Contains(rules.Events, e.EventType) {
@@ -148,7 +161,7 @@ func (w *BotWakeWorker) ProcessNext(ctx context.Context) (bool, error) {
 	if err != nil {
 		return true, err
 	}
-	if !alert && count >= int64(rules.HourlyLimit) {
+	if !alert && (rules.HourlyLimit == 0 || (e.EventType != "mention" && count >= int64(rules.HourlyLimit))) {
 		return pending("hourly limit")
 	}
 	if len(c.WebhookSecret) == 0 {
@@ -336,7 +349,8 @@ func (h *Handler) botWakePayload(ctx context.Context, e db.BotWakeEvent) ([]byte
 		}
 		attachments = append(attachments, map[string]any{"url": base + "/api/attachments/" + uuidToString(a.ID) + "/download", "size_bytes": a.SizeBytes, "sha256": a.Sha256.String})
 	}
-	payload := map[string]any{"event_id": uuidToString(e.EventID), "sequence": e.Sequence, "source_id": uuidToString(e.SourceID), "parent_id": wakeParentID(e), "ack_url": base + "/api/workspaces/" + uuidToString(e.WorkspaceID) + "/bots/" + uuidToString(e.BotID) + "/wake/events/" + uuidToString(e.EventID), "root_id": uuidToString(e.RootID), "hop": e.Hop, "source_task_id": uuidToString(e.SourceTaskID), "web_url": base + webPath, "type": e.EventType, "issue_id": uuidToString(e.IssueID), "chat_session_id": uuidToString(e.ChatSessionID), "author": h.wakeAuthor(ctx, e), "time": e.CreatedAt.Time, "summary": summary, "url": base + link, "attachments": attachments}
+	receiptBase := base + "/api/workspaces/" + uuidToString(e.WorkspaceID) + "/bots/" + uuidToString(e.BotID) + "/wake"
+	payload := map[string]any{"event_id": uuidToString(e.EventID), "sequence": e.Sequence, "source_id": uuidToString(e.SourceID), "parent_id": wakeParentID(e), "ack_url": receiptBase + "/pending/ack", "ack_body": map[string]any{"event_ids": []string{uuidToString(e.EventID)}}, "woken_url": receiptBase + "/events/" + uuidToString(e.EventID) + "/woken", "result_url": receiptBase + "/events/" + uuidToString(e.EventID) + "/result", "root_id": uuidToString(e.RootID), "hop": e.Hop, "source_task_id": uuidToString(e.SourceTaskID), "web_url": base + webPath, "type": e.EventType, "issue_id": uuidToString(e.IssueID), "chat_session_id": uuidToString(e.ChatSessionID), "author": h.wakeAuthor(ctx, e), "time": e.CreatedAt.Time, "summary": summary, "url": base + link, "attachments": attachments}
 	if e.EventType == "wake_blocked" {
 		payload["reason_code"] = "bot_wake_chain_limit"
 		payload["reason"] = e.Reason
@@ -361,6 +375,9 @@ func wakeParentID(e db.BotWakeEvent) string {
 // Names are disclosed only when the receiver can see the named principal.
 func (h *Handler) wakeAuthor(ctx context.Context, e db.BotWakeEvent) map[string]any {
 	a := map[string]any{"type": e.AuthorType, "id": uuidToString(e.AuthorID)}
+	if e.AuthorType == "system" || !e.AuthorID.Valid {
+		return map[string]any{"type": "", "id": "", "note": "source attribution unavailable"}
+	}
 	if e.AuthorType == "bot" {
 		a["name"] = e.ViaBotName.String
 	} else if e.AuthorType == "member" {
