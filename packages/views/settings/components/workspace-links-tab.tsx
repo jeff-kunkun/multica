@@ -299,7 +299,7 @@ function CreateLinkForm({
           </p>
           <Button
             size="sm"
-            className="shrink-0"
+            className="max-sm:min-h-11 shrink-0"
             disabled={!ready}
             onClick={() =>
               target.workspace &&
@@ -531,7 +531,7 @@ function OutgoingLinkRow({
         <div className="flex flex-wrap items-center justify-between gap-3">
           <LinkHeading name={link.target.name} avatarUrl={link.target.avatar_url} slug={link.target.slug} link={link} />
           <div className="flex gap-2">
-            <Button
+            <Button className="max-sm:min-h-11"
               size="sm"
               variant="outline"
               disabled={!canChange}
@@ -558,15 +558,15 @@ function LinkProjects({ wsId, link }: { wsId: string; link: WorkspaceLink }) {
   return <div className="space-y-2">
     <div className="flex flex-wrap items-center justify-between gap-2">
       <p className="min-w-0 break-words text-caption text-muted-foreground">{t(($) => $.links.tab.sharing, { projects: link.projects.map((p) => p.title).join("、") || "—" })}</p>
-      <Button size="sm" variant="outline" disabled={!allowed} onClick={() => setEditing(link.projects.map((p) => p.id))}>{t(($) => $.links.tab.change_projects)}</Button>
+      <Button className="max-sm:min-h-11" size="sm" variant="outline" disabled={!allowed} onClick={() => setEditing(link.projects.map((p) => p.id))}>{t(($) => $.links.tab.change_projects)}</Button>
     </div>
     {!allowed ? <p className="text-caption text-muted-foreground">{t(($) => $.links.tab.projects_reason)}</p> : null}
     {editing !== null ? <div className="space-y-2">
       {link.side === "source" ? <ProjectPicker wsId={wsId} selected={editing} onChange={setEditing} disabled={update.isPending} /> :
         <ProjectChecklist projects={lookup.data?.pull?.projects ?? []} selected={editing} onChange={setEditing} disabled={update.isPending || !lookup.data?.pull?.allowed} legend={t(($) => $.links.tab.projects_label)} empty={lookup.error ? errorMessage(lookup.error, t(($) => $.links.tab.failed)) : t(($) => $.links.tab.pull_no_projects)} />}
       <div className="flex justify-end gap-2">
-        <Button size="sm" variant="ghost" disabled={update.isPending} onClick={() => setEditing(null)}>{t(($) => $.links.tab.cancel)}</Button>
-        <Button size="sm" disabled={!editing.length || update.isPending || (link.side === "viewer" && !lookup.data?.pull?.allowed)} onClick={() => update.mutate({ linkId: link.id, projectIds: editing }, { onSuccess: () => setEditing(null), onError: (error) => toast.error(errorMessage(error, t(($) => $.links.tab.failed))) })}>{t(($) => $.links.tab.save)}</Button>
+        <Button className="max-sm:min-h-11" size="sm" variant="ghost" disabled={update.isPending} onClick={() => setEditing(null)}>{t(($) => $.links.tab.cancel)}</Button>
+        <Button className="max-sm:min-h-11" size="sm" disabled={!editing.length || update.isPending || (link.side === "viewer" && !lookup.data?.pull?.allowed)} onClick={() => update.mutate({ linkId: link.id, projectIds: editing }, { onSuccess: () => setEditing(null), onError: (error) => toast.error(errorMessage(error, t(($) => $.links.tab.failed))) })}>{t(($) => $.links.tab.save)}</Button>
       </div>
     </div> : null}
   </div>;
@@ -598,7 +598,7 @@ function IncomingLinkRow({
           </div>
           <div className="flex gap-2">
             {link.status === "pending" ? (
-              <Button
+              <Button className="max-sm:min-h-11"
                 size="sm"
                 disabled={!canAccept || accept.isPending}
                 title={reason}
@@ -611,7 +611,7 @@ function IncomingLinkRow({
                 {t(($) => $.links.tab.accept)}
               </Button>
             ) : null}
-            <Button size="sm" variant="outline" disabled={!canAccept} title={reason} onClick={onRevoke}>
+            <Button className="max-sm:min-h-11" size="sm" variant="outline" disabled={!canAccept} title={reason} onClick={onRevoke}>
               {link.status === "pending" ? t(($) => $.links.tab.decline) : t(($) => $.links.tab.revoke)}
             </Button>
           </div>
@@ -646,7 +646,7 @@ function ManagedSwitch({ wsId, link }: { wsId: string; link: WorkspaceLink }) {
         </p>
       </div>
       <Switch
-        className="shrink-0"
+        className="relative shrink-0 after:absolute after:-inset-x-1 after:-inset-y-3"
         checked={!!link.managed}
         disabled={!allowed || setManaged.isPending}
         aria-label={label}
@@ -706,7 +706,7 @@ function AuditSection({ wsId }: { wsId: string }) {
           ))}
         </ul>
       )}
-      {query.hasNextPage ? <Button variant="outline" disabled={query.isFetchingNextPage} onClick={() => void query.fetchNextPage()}>{t(($) => $.links.panel.load_more)}</Button> : null}
+      {query.hasNextPage ? <Button className="max-sm:min-h-11" variant="outline" disabled={query.isFetchingNextPage} onClick={() => void query.fetchNextPage()}>{t(($) => $.links.panel.load_more)}</Button> : null}
     </SettingsSection>
   );
 }
