@@ -489,13 +489,14 @@ func (h *Handler) CreateWorkspace(w http.ResponseWriter, r *http.Request) {
 }
 
 type UpdateWorkspaceRequest struct {
-	Name        *string `json:"name"`
-	Description *string `json:"description"`
-	Context     *string `json:"context"`
-	Settings    any     `json:"settings"`
-	Repos       any     `json:"repos"`
-	IssuePrefix *string `json:"issue_prefix"`
-	AvatarURL   *string `json:"avatar_url"`
+	BotWakeChainLimit json.RawMessage `json:"bot_wake_chain_limit"`
+	Name              *string         `json:"name"`
+	Description       *string         `json:"description"`
+	Context           *string         `json:"context"`
+	Settings          any             `json:"settings"`
+	Repos             any             `json:"repos"`
+	IssuePrefix       *string         `json:"issue_prefix"`
+	AvatarURL         *string         `json:"avatar_url"`
 }
 
 // workspaceRepoRef is one entry of workspace.repos. A repository has no table
@@ -678,7 +679,41 @@ func (h *Handler) UpdateWorkspace(w http.ResponseWriter, r *http.Request) {
 	if req.Context != nil {
 		params.Context = pgtype.Text{String: *req.Context, Valid: true}
 	}
+	if len(req.BotWakeChainLimit) > 0 {
+		var limit int
+		if err := json.Unmarshal(req.BotWakeChainLimit, &limit); err != nil || limit < 1 || limit > 100 {
+			writeError(w, http.StatusBadRequest, "bot_wake_chain_limit must be an integer from 1 to 100")
+			return
+		}
+		if r.Header.Get("X-Actor-Source") == "task_token" {
+			writeError(w, http.StatusForbidden, "agent runs cannot change bot_wake_chain_limit")
+			return
+		}
+		if req.Settings == nil {
+			existing, err := h.Queries.GetWorkspace(r.Context(), idUUID)
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, "failed to load workspace settings")
+				return
+			}
+			values := map[string]any{}
+			_ = json.Unmarshal(existing.Settings, &values)
+			if values == nil {
+				values = map[string]any{}
+			}
+			req.Settings = values
+		}
+		if values, ok := req.Settings.(map[string]any); ok {
+			values["bot_wake_chain_limit"] = limit
+		} else {
+			writeError(w, http.StatusBadRequest, "settings must be a JSON object")
+			return
+		}
+	}
 	if req.Settings != nil {
+		if err := validateBotWakeChainSettings(req.Settings); err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
 		if err := validateWorkspaceMemorySettings(r.Context(), h.Queries, idUUID, req.Settings); err != nil {
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
@@ -719,6 +754,7 @@ func (h *Handler) UpdateWorkspace(w http.ResponseWriter, r *http.Request) {
 		// generic settings write: agent_spawn is carried forward unchanged.
 		if r.Header.Get("X-Actor-Source") == "task_token" {
 			merged = keepStoredAgentSpawn(merged, stored)
+			merged = keepStoredBotWakeChainLimit(merged, stored)
 		}
 		s, _ := json.Marshal(merged)
 		params.Settings = s

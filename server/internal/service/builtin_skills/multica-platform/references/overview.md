@@ -30,6 +30,12 @@ mean no visible matches. Compact mode keeps identifiers and key status fields;
 full mode adds descriptions, relationships, repositories, schedules and tickets.
 It never includes prompts, API keys, environment values or webhook secrets.
 
+Runtime rows retain `machine_capacity: {active_runs, max_concurrent_runs}` in
+both full and compact mode. Counts include the owner's machine across providers
+and workspaces without exposing other workspace task identities. The default
+limit is 12; use `multica runtime capacity <runtime-id> --max-concurrent-runs 8`
+to change it as the machine owner (see `runtimes.md`).
+
 External Bot personal keys follow the same ordinary authentication and access
 rules as their owner. Task tokens retain their existing actor/visibility rules;
 they cannot read the external key inventory. See `external-bots.md` for setup.
@@ -40,3 +46,24 @@ Each reference names `link_id`, `project_id`, `title`, `source_name` and `availa
 unavailable references remain visible for removal. Automation `linked_projects: null`
 means inherit, while `[]` means explicitly no references. These fields survive
 compact mode and use the same access checks as the settings read endpoints.
+
+
+`multica capabilities --output json` includes `execution_rules`: default wakeup
+coalescing, explicit queue/restart alternatives, permission-scoped related
+stops, and the chat-to-issue execution transfer. Read these before starting
+another run or stopping work. Use `issue halt --related`,
+`issue status cancelled --related` or `chat stop --related` for a related stop;
+ordinary status cancellation alone does not interrupt runs. The detailed
+contract is in `run-control.md`. Related stops recurse only through child
+issues. Reached source/bound/spawned chats never expand to other tickets or
+further chat relationships; only the named chat supplies direct chat links.
+`bot_wake_chain` describes the workspace-wide Bot wake guard even in compact
+mode: `limit`, `reason_code`, `reset`, `human_exempt`,
+`verified_quote_exempt`, and `settings_key`. When audit access is permitted,
+`blocked_last_24h` and up to 100 `recent_blocks` include each attempted wake's
+Bot, target, root, task/issue/chat identifiers, limit and timestamp. This guard
+summary is workspace-wide, independently of project/agent filters. External Bot
+callers see only their own Bot's visible records; human owners/admins see viewer-visible records. Other
+members and task tokens see no audit identifiers. Include these counts and records in patrol
+and dispatch daily reports; treat `audit_read_failed` as unavailable evidence,
+never as zero. Recovery and quote verification: `external-bots.md`.

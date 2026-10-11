@@ -70,6 +70,11 @@ func (m *mockDBTX) Query(_ context.Context, _ string, _ ...interface{}) (pgx.Row
 }
 
 func (m *mockDBTX) QueryRow(_ context.Context, sql string, _ ...interface{}) pgx.Row {
+	// These replay fixtures are non-chat tasks. The chat ownership fence
+	// therefore has no session row, rather than returning the generic task row.
+	if strings.Contains(sql, "-- name: LockChatSessionForTask") && !m.task.ChatSessionID.Valid {
+		return &mockRow{err: pgx.ErrNoRows}
+	}
 	// CompleteAgentTask and FailAgentTask SQL contain "SET status ="
 	if strings.Contains(sql, "SET status =") {
 		return &mockRow{err: pgx.ErrNoRows}

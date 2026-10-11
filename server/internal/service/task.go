@@ -1517,9 +1517,16 @@ func (s *TaskService) enqueueIssueTaskWithCommentPlan(ctx context.Context, issue
 		// from a later request against a new HEAD (TEN-356).
 		HeadSha: headShaText(s.ResolveIssueReviewSHA(ctx, issue.ID)),
 	}
+	q, enqueueTx, err := s.lockDefaultIssueEnqueue(ctx, issue.ID, issue.AssigneeID, forceFreshSession, triggerCommentID, actorUserID, attr)
+	if err != nil {
+		return db.AgentTaskQueue{}, err
+	}
+	if enqueueTx != nil {
+		defer enqueueTx.Rollback(ctx)
+	}
 	var task db.AgentTaskQueue
 	if fireAt.Valid {
-		task, err = s.Queries.CreateDeferredChannelIssueTask(ctx, db.CreateDeferredChannelIssueTaskParams{
+		task, err = q.CreateDeferredChannelIssueTask(ctx, db.CreateDeferredChannelIssueTaskParams{
 			ID:                   dbid.NewV7(),
 			AgentID:              createParams.AgentID,
 			RuntimeID:            createParams.RuntimeID,
@@ -1548,7 +1555,7 @@ func (s *TaskService) enqueueIssueTaskWithCommentPlan(ctx context.Context, issue
 			FireAt:               fireAt,
 		})
 	} else {
-		task, err = s.Queries.CreateAgentTask(ctx, createParams)
+		task, err = q.CreateAgentTask(ctx, createParams)
 	}
 	if err != nil {
 		// A concurrent enqueue for the same (issue, agent) won the race and the
@@ -1565,6 +1572,14 @@ func (s *TaskService) enqueueIssueTaskWithCommentPlan(ctx context.Context, issue
 		return db.AgentTaskQueue{}, fmt.Errorf("create task: %w", err)
 	}
 
+	if enqueueTx != nil {
+		if err := enqueueTx.Commit(ctx); err != nil {
+			return db.AgentTaskQueue{}, fmt.Errorf("commit issue wake: %w", err)
+		}
+	}
+	if err := botWakeTaskError(task); err != nil {
+		return task, err
+	}
 	slog.Info("task enqueued",
 		"task_id", util.UUIDToString(task.ID),
 		"issue_id", util.UUIDToString(issue.ID),
@@ -1689,7 +1704,14 @@ func (s *TaskService) enqueueMentionTaskWithCommentPlan(ctx context.Context, iss
 	originatorUserID := attr.UserID
 	runtimeMCPOverlay := s.buildRuntimeMCPOverlay(ctx, originatorUserID, agent)
 	attrSource, attrDelegatedFrom, attrEvidenceKind, attrEvidenceRef := attributionCreateParams(attr)
-	task, err := s.Queries.CreateAgentTask(ctx, db.CreateAgentTaskParams{
+	q, enqueueTx, err := s.lockDefaultIssueEnqueue(ctx, issue.ID, agentID, forceFreshSession, triggerCommentID, actorUserID, attr)
+	if err != nil {
+		return db.AgentTaskQueue{}, err
+	}
+	if enqueueTx != nil {
+		defer enqueueTx.Rollback(ctx)
+	}
+	task, err := q.CreateAgentTask(ctx, db.CreateAgentTaskParams{
 		ID:                   dbid.NewV7(),
 		AgentID:              agentID,
 		RuntimeID:            agent.RuntimeID,
@@ -1732,6 +1754,14 @@ func (s *TaskService) enqueueMentionTaskWithCommentPlan(ctx context.Context, iss
 		return db.AgentTaskQueue{}, fmt.Errorf("create task: %w", err)
 	}
 
+	if enqueueTx != nil {
+		if err := enqueueTx.Commit(ctx); err != nil {
+			return db.AgentTaskQueue{}, fmt.Errorf("commit issue wake: %w", err)
+		}
+	}
+	if err := botWakeTaskError(task); err != nil {
+		return task, err
+	}
 	slog.Info("mention task enqueued", "task_id", util.UUIDToString(task.ID), "issue_id", util.UUIDToString(issue.ID), "agent_id", util.UUIDToString(agentID), "is_leader_task", isLeader)
 	// See EnqueueTaskForIssue for ordering rationale.
 	s.broadcastTaskEvent(ctx, protocol.EventTaskQueued, task)
@@ -2302,6 +2332,9 @@ func (s *TaskService) enqueueChatTaskTx(
 	if err != nil {
 		return db.AgentTaskQueue{}, fmt.Errorf("lock chat session: %w", err)
 	}
+	if currentSession.ConvertedIssueID.Valid {
+		return db.AgentTaskQueue{}, ErrChatSessionConverted
+	}
 	if currentSession.Status != "active" {
 		return db.AgentTaskQueue{}, ErrChatSessionArchived
 	}
@@ -2356,6 +2389,16 @@ func (s *TaskService) enqueueChatTaskTx(
 	}
 	if pendingFresh {
 		forceFreshSession = true
+	}
+
+	if !forceFreshSession && !SeparateIssueRun(ctx) {
+		merged, err := mergeChannelChatInputs(ctx, qtx, currentSession, contextRevision)
+		if err != nil {
+			return db.AgentTaskQueue{}, fmt.Errorf("merge channel chat input: %w", err)
+		}
+		if merged != nil {
+			return *merged, nil
+		}
 	}
 
 	mediaPendingUntil, err := qtx.GetChannelMediaPendingUntil(
@@ -2447,6 +2490,17 @@ func (s *TaskService) enqueueChatTaskTx(
 
 // FinalizeChatTaskEnqueue performs only post-commit effects.
 func (s *TaskService) FinalizeChatTaskEnqueue(ctx context.Context, task db.AgentTaskQueue) {
+	if task.Status == "running" || task.Status == "dispatched" || task.Status == "waiting_local_directory" {
+		if task.Status == "running" && task.RuntimeID.Valid {
+			if notifier, ok := s.Wakeup.(interface {
+				NotifyTaskSupplementAvailable(runtimeID, taskID string)
+			}); ok {
+				notifier.NotifyTaskSupplementAvailable(util.UUIDToString(task.RuntimeID), util.UUIDToString(task.ID))
+			}
+		}
+		return
+	}
+
 	if task.Status == "deferred" {
 		slog.Info("chat task deferred for channel media",
 			"task_id", util.UUIDToString(task.ID),
@@ -2597,6 +2651,8 @@ type DirectChatSendResult struct {
 	BoundAttachmentIDs []pgtype.UUID
 	Queued             bool
 	InitialTitle       string
+	Merged             bool
+	Steered            bool
 }
 
 var ErrChatSessionAlreadyStarted = errors.New("chat session already has a user message")
@@ -2622,8 +2678,16 @@ func (s *TaskService) SendDirectChatMessage(
 	uploaderType string,
 	uploaderID pgtype.UUID,
 ) (*DirectChatSendResult, error) {
-	return s.sendDirectChatMessage(ctx, session, agent, initiatorUserID, content, attachmentIDs, uploaderType, uploaderID, nil)
+	return s.sendDirectChatMessage(ctx, session, agent, initiatorUserID, content, attachmentIDs, uploaderType, uploaderID, nil, "")
 }
+
+// SendDirectChatMessageWithMode leaves deliberate queue/restart requests
+// independent, while an omitted mode merges into the session's active run.
+func (s *TaskService) SendDirectChatMessageWithMode(ctx context.Context, session db.ChatSession, agent db.Agent, initiatorUserID pgtype.UUID, content string, attachmentIDs []pgtype.UUID, uploaderType string, uploaderID pgtype.UUID, mode string) (*DirectChatSendResult, error) {
+	return s.sendDirectChatMessage(ctx, session, agent, initiatorUserID, content, attachmentIDs, uploaderType, uploaderID, nil, mode)
+}
+
+var ErrChatMergeUnsupported = errors.New("this running reply cannot accept more input; use queue or restart")
 
 // SpawnDirectChat opens a chat that does not exist yet and sends its first
 // message in the same transaction (DENE-1271). createSession runs first inside
@@ -2639,7 +2703,7 @@ func (s *TaskService) SpawnDirectChat(
 	brief string,
 	createSession func(qtx *db.Queries) error,
 ) (*DirectChatSendResult, error) {
-	return s.sendDirectChatMessage(ctx, session, agent, initiatorUserID, brief, nil, "", pgtype.UUID{}, createSession)
+	return s.sendDirectChatMessage(ctx, session, agent, initiatorUserID, brief, nil, "", pgtype.UUID{}, createSession, "")
 }
 
 func (s *TaskService) sendDirectChatMessage(
@@ -2652,6 +2716,7 @@ func (s *TaskService) sendDirectChatMessage(
 	uploaderType string,
 	uploaderID pgtype.UUID,
 	beforeSend func(qtx *db.Queries) error,
+	mode string,
 ) (*DirectChatSendResult, error) {
 	// Build the per-task Composio overlay before the transaction — it can do
 	// network I/O and must not run with a DB transaction open.
@@ -2691,6 +2756,9 @@ func (s *TaskService) sendDirectChatMessage(
 		if err != nil {
 			return fmt.Errorf("reload chat session: %w", err)
 		}
+		if currentSession.ConvertedIssueID.Valid {
+			return ErrChatSessionConverted
+		}
 		if currentSession.Status != "active" {
 			return ErrChatSessionArchived
 		}
@@ -2720,32 +2788,62 @@ func (s *TaskService) sendDirectChatMessage(
 		}
 		out.Queued = queued
 
-		task, err := qtx.CreateChatTask(ctx, db.CreateChatTaskParams{
-			ID:                   dbid.NewV7(),
-			AgentID:              session.AgentID,
-			RuntimeID:            carrier.RuntimeID,
-			Priority:             2, // medium priority for chat; matches EnqueueChatTask
-			ChatSessionID:        session.ID,
-			InitiatorUserID:      initiatorUserID,
-			OriginatorUserID:     attr.UserID,
-			AccountableUserID:    attr.AccountableUserID,
-			ViaBotID:             attr.ViaBotID,
-			ViaBotName:           attr.ViaBotName,
-			ForceFreshSession:    pgtype.Bool{Bool: false, Valid: true},
-			RuntimeMcpOverlay:    overlay.Overlay,
-			RuntimeConnectedApps: overlay.ConnectedApps,
-			OriginatorSource:     attrSource,
-			TriggerEvidenceKind:  attrEvidenceKind,
-			TriggerEvidenceRefID: attrEvidenceRef,
-		})
-		if err != nil {
-			return fmt.Errorf("create direct chat task: %w", err)
+		var task db.AgentTaskQueue
+		if mode == "" {
+			task, err = qtx.GetChatMergeTarget(ctx, session.ID)
+			if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+				return fmt.Errorf("find chat merge target: %w", err)
+			}
+			if err == nil {
+				// The immutable initial input was already dispatched. Only a
+				// capability handshake permits adding a live supplement.
+				if task.Status != "queued" && task.Status != "deferred" {
+					cap, capErr := qtx.GetTaskSupplementCapability(ctx, task.ID)
+					if task.Status != "running" || capErr != nil || cap.Capability != protocol.DaemonCapabilityTaskSupplementV1 || len(attachmentIDs) > 0 {
+						return ErrChatMergeUnsupported
+					}
+					out.Steered = true
+				}
+				out.Merged = true
+				out.Queued = false
+			}
 		}
-		// Claim this task's own input batch (chat_input_task_id = id) in the same
-		// transaction, before the user message is written with task_id = task.id.
-		task, err = qtx.SetChatTaskInputOwnerSelf(ctx, task.ID)
-		if err != nil {
-			return fmt.Errorf("stamp direct chat input owner: %w", err)
+		if !out.Merged {
+			task, err = qtx.CreateChatTask(ctx, db.CreateChatTaskParams{
+				WakeHumanQuote:       pgtype.Text{String: botWakeHumanQuote(ctx), Valid: botWakeHumanQuote(ctx) != ""},
+				ID:                   dbid.NewV7(),
+				AgentID:              session.AgentID,
+				RuntimeID:            carrier.RuntimeID,
+				Priority:             2, // medium priority for chat; matches EnqueueChatTask
+				ChatSessionID:        session.ID,
+				InitiatorUserID:      initiatorUserID,
+				OriginatorUserID:     attr.UserID,
+				AccountableUserID:    attr.AccountableUserID,
+				ViaBotID:             attr.ViaBotID,
+				ViaBotName:           attr.ViaBotName,
+				ForceFreshSession:    pgtype.Bool{Bool: false, Valid: true},
+				RuntimeMcpOverlay:    overlay.Overlay,
+				RuntimeConnectedApps: overlay.ConnectedApps,
+				OriginatorSource:     attrSource,
+				TriggerEvidenceKind:  attrEvidenceKind,
+				TriggerEvidenceRefID: attrEvidenceRef,
+			})
+			if err != nil {
+				return fmt.Errorf("create direct chat task: %w", err)
+			}
+			// Claim this task's own input batch (chat_input_task_id = id) in the same
+			// transaction, before the user message is written with task_id = task.id.
+			task, err = qtx.SetChatTaskInputOwnerSelf(ctx, task.ID)
+			if err != nil {
+				return fmt.Errorf("stamp direct chat input owner: %w", err)
+			}
+		} else if !task.ChatInputTaskID.Valid && !out.Steered {
+			// Legacy/channel tasks still select trailing history; direct sends
+			// must own their message batch before it can be appended safely.
+			task, err = qtx.SetChatTaskInputOwnerSelf(ctx, task.ID)
+			if err != nil {
+				return err
+			}
 		}
 		out.Task = task
 
@@ -2784,13 +2882,21 @@ func (s *TaskService) sendDirectChatMessage(
 			ChatSessionID: session.ID,
 			Role:          "user",
 			Content:       content,
-			TaskID:        task.ID,
+			TaskID:        chatMergeInputOwner(task, out.Steered),
 			MessageKind:   pgtype.Text{String: protocol.ChatMessageKindMessage, Valid: true},
 		})
 		if err != nil {
 			return fmt.Errorf("create user chat message: %w", err)
 		}
 		out.Message = msg
+		if out.Steered {
+			if _, err := qtx.CreateMergedChatTaskSupplement(ctx, db.CreateMergedChatTaskSupplementParams{
+				TaskID: task.ID, ChatMessageID: msg.ID, ChatSessionID: session.ID,
+				WorkspaceID: session.WorkspaceID, AuthorID: initiatorUserID,
+			}); err != nil {
+				return fmt.Errorf("bind merged chat input: %w", err)
+			}
+		}
 
 		if len(attachmentIDs) > 0 {
 			bound, err := qtx.LinkAttachmentsToChatMessage(ctx, db.LinkAttachmentsToChatMessageParams{
@@ -2846,13 +2952,18 @@ func (s *TaskService) sendDirectChatMessage(
 		return nil, err
 	}
 
+	if botWakeTaskError(out.Task) != nil {
+		return &out, nil
+	}
 	slog.Info("direct chat task enqueued",
 		"task_id", util.UUIDToString(out.Task.ID),
 		"chat_session_id", util.UUIDToString(session.ID),
 		"agent_id", util.UUIDToString(session.AgentID))
 	// Notify only after commit. See EnqueueTaskForIssue for ordering rationale.
-	s.broadcastTaskEvent(ctx, protocol.EventTaskQueued, out.Task)
-	s.NotifyTaskEnqueued(ctx, out.Task)
+	if !out.Merged {
+		s.broadcastTaskEvent(ctx, protocol.EventTaskQueued, out.Task)
+		s.NotifyTaskEnqueued(ctx, out.Task)
+	}
 	return &out, nil
 }
 
@@ -3927,6 +4038,25 @@ func (s *TaskService) claimTask(ctx context.Context, agentID, runtimeID pgtype.U
 		// responsible for serializing and settling the remaining queued rows.
 		if runtimeID.Valid && agent.RuntimeID != runtimeID {
 			outcome = "runtime_mismatch"
+			return nil
+		}
+
+		// All agents/providers on the device reserve capacity under the same
+		// transaction lock. Dispatched tasks already occupy a slot; reclaiming
+		// an existing dispatch does not reserve another one.
+		machineKey, err := qtx.GetRuntimeMachineKey(ctx, claimRuntimeID)
+		if err != nil {
+			return fmt.Errorf("resolve machine capacity: %w", err)
+		}
+		if err := qtx.LockRuntimeMachineCapacity(ctx, machineKey); err != nil {
+			return fmt.Errorf("lock machine capacity: %w", err)
+		}
+		capacity, err := qtx.GetRuntimeMachineCapacity(ctx, machineKey)
+		if err != nil {
+			return fmt.Errorf("read machine capacity: %w", err)
+		}
+		if capacity.ActiveRuns >= int64(capacity.MaxConcurrentRuns) {
+			outcome = "machine_full"
 			return nil
 		}
 
@@ -5007,6 +5137,9 @@ func (s *TaskService) CompleteTaskWithTransition(ctx context.Context, taskID pgt
 		return nil, false, fmt.Errorf("complete task: %w", err)
 	}
 
+	if task.ChatSessionID.Valid {
+		s.FinalizeMergedChatRecovery(ctx, task.ID)
+	}
 	slog.Info("task completed", "task_id", util.UUIDToString(task.ID), "issue_id", util.UUIDToString(task.IssueID))
 	s.captureTaskCompleted(ctx, task)
 	s.postDeliveryNotice(ctx, task, deliveryNotice)
@@ -5431,8 +5564,17 @@ func (s *TaskService) FailTaskWithTransition(ctx context.Context, taskID pgtype.
 	var retried *db.AgentTaskQueue
 	deterministicEscalated := false
 	if err := s.runInTx(ctx, func(qtx *db.Queries) error {
-		if err := lockChatSessionForTaskWrite(ctx, qtx, taskID); err != nil {
-			return err
+		chatAllowed, chatLockErr := lockChatRetry(ctx, qtx, taskID)
+		if chatLockErr != nil {
+			return chatLockErr
+		}
+		wantRetry = wantRetry && chatAllowed
+		if parentErr == nil {
+			allowed, lockErr := lockIssueRetry(ctx, qtx, parentForFailure)
+			if lockErr != nil {
+				return lockErr
+			}
+			wantRetry = wantRetry && allowed
 		}
 		t, err := qtx.FailAgentTask(ctx, db.FailAgentTaskParams{
 			ID:                  taskID,
@@ -5643,6 +5785,9 @@ func (s *TaskService) FailTaskWithTransition(ctx context.Context, taskID pgtype.
 		// be claimed between the status flip and this row, placing its user input
 		// before the failure it follows.
 		if t.ChatSessionID.Valid && retried == nil {
+			if err := RecoverMergedChatInputs(ctx, qtx, t, true); err != nil {
+				return err
+			}
 			// This turn is dead, so anything it owned has to move on. An adopted
 			// onboarding kickoff would otherwise stay bound to a task that will
 			// never run again: the next turn would reach Mika with no onboarding
@@ -5701,6 +5846,9 @@ func (s *TaskService) FailTaskWithTransition(ctx context.Context, taskID pgtype.
 		return nil, false, fmt.Errorf("fail task: %w", err)
 	}
 
+	if task.ChatSessionID.Valid {
+		s.FinalizeMergedChatRecovery(ctx, task.ID)
+	}
 	slog.Warn("task failed", "task_id", util.UUIDToString(task.ID), "issue_id", util.UUIDToString(task.IssueID), "error", errMsg, "failure_reason", failureReason)
 	s.captureTaskFailed(ctx, task)
 	s.postDeliveryNotice(ctx, task, deliveryNotice)
@@ -6624,14 +6772,10 @@ func isSourceContextQuickCreateTask(task db.AgentTaskQueue) bool {
 // Chat / quick-create tasks carry no issue_id, so the index cannot apply to them
 // and their retries can never collide.
 func hasRunnableSuccessor(ctx context.Context, q *db.Queries, task db.AgentTaskQueue) (bool, error) {
-	if !task.IssueID.Valid {
+	if !task.IssueID.Valid && !task.ChatSessionID.Valid {
 		return false, nil
 	}
-	return q.HasPendingTaskForIssueAndAgentInThread(ctx, db.HasPendingTaskForIssueAndAgentInThreadParams{
-		ThreadCommentID: task.TriggerCommentID,
-		IssueID:         task.IssueID,
-		AgentID:         task.AgentID,
-	})
+	return q.HasOtherActiveWorkRun(ctx, db.HasOtherActiveWorkRunParams{TaskID: task.ID, IssueID: task.IssueID, ChatSessionID: task.ChatSessionID})
 }
 
 // MaybeRetryFailedTask spawns a fresh queued attempt for a recently-failed
@@ -6725,6 +6869,21 @@ func (s *TaskService) MaybeRetryFailedTask(ctx context.Context, parent db.AgentT
 	}
 	defer tx.Rollback(ctx)
 	qtx := s.Queries.WithTx(tx)
+	chatAllowed, chatLockErr := lockChatRetry(ctx, qtx, parent.ID)
+	if chatLockErr != nil {
+		return nil, chatLockErr
+	}
+	if !chatAllowed {
+		return nil, nil
+	}
+	allowed, lockErr := lockIssueRetry(ctx, qtx, parent)
+	if lockErr != nil {
+		return nil, lockErr
+	}
+	if !allowed {
+		return nil, nil
+	}
+
 	if err := guardIssueNotInTriage(ctx, qtx, parent.IssueID, OriginDerived); err != nil {
 		if errors.Is(err, ErrIssueInTriage) {
 			slog.Info("task auto-retry skipped: issue is in triage",
@@ -7457,12 +7616,16 @@ func (s *TaskService) HandleFailedTasks(ctx context.Context, tasks []db.AgentTas
 		// flapping todo → in_progress within a tick.
 		retryPending := false
 		var continued *db.AgentTaskQueue
-		if child, _ := s.MaybeRetryFailedTask(ctx, t); child != nil {
+		if child, retryErr := s.MaybeRetryFailedTask(ctx, t); child != nil {
 			continued = child
 			retryPending = true
 			retried++
 			if t.IssueID.Valid {
 				retriedIssues[util.UUIDToString(t.IssueID)] = true
+			}
+		} else if retryErr == nil {
+			if err := s.RecoverFailedMergedChatInputs(ctx, t); err != nil {
+				slog.Warn("recover unread failed chat input failed", "task_id", util.UUIDToString(t.ID), "error", err)
 			}
 		}
 		failureReason := "agent_error"
@@ -7623,6 +7786,9 @@ func SettleTerminalTaskState(ctx context.Context, q *db.Queries, tasks ...db.Age
 
 	taskIDs := make([]pgtype.UUID, 0, len(tasks))
 	for _, task := range tasks {
+		if err := RecoverMergedChatInputs(ctx, q, task, false); err != nil {
+			return err
+		}
 		taskIDs = append(taskIDs, task.ID)
 	}
 	if _, err := q.SettleTerminalTaskSupplements(ctx, taskIDs); err != nil {
@@ -8179,6 +8345,9 @@ func (s *TaskService) dispatchDelegatedFailureRecovery(ctx context.Context, targ
 			HeadSha:              headShaText(s.ResolveIssueReviewSHA(ctx, target.issue.ID)),
 		})
 		if err == nil {
+			if blockedErr := botWakeTaskError(task); blockedErr != nil {
+				return delegatedFailureRecoveryCovered, blockedErr
+			}
 			slog.Info("delegated failure recovery task enqueued",
 				"failed_task_id", util.UUIDToString(target.failed.ID),
 				"source_task_id", util.UUIDToString(target.source.ID),
@@ -8753,6 +8922,9 @@ func priorityToInt(p string) int32 {
 // cache and kicks the daemon WS so the new task is claimed without
 // waiting for the next poll.
 func (s *TaskService) NotifyTaskEnqueued(ctx context.Context, task db.AgentTaskQueue) {
+	if task.Status == "cancelled" {
+		return
+	}
 	s.captureTaskQueued(ctx, task)
 	s.notifyTaskAvailable(task)
 }
@@ -8889,6 +9061,9 @@ func (s *TaskService) publishTaskEvent(eventType, workspaceID string, task db.Ag
 }
 
 func (s *TaskService) broadcastTaskEvent(ctx context.Context, eventType string, task db.AgentTaskQueue, extra ...map[string]any) {
+	if eventType == protocol.EventTaskQueued && task.Status == "cancelled" {
+		return
+	}
 	workspaceID := s.ResolveTaskWorkspaceID(ctx, task)
 	s.publishTaskEvent(eventType, workspaceID, task, extra...)
 }

@@ -323,7 +323,7 @@ WITH next AS MATERIALIZED (
     WHERE s.task_id = @task_id
       AND s.status = 'pending'
       AND t.status = 'running'
-      AND f.status = 'queued'
+      AND (f.status = 'queued' OR (s.followup_task_id = s.task_id AND f.status = 'running'))
     ORDER BY s.created_at, s.chat_message_id
     FOR UPDATE OF s SKIP LOCKED
     LIMIT 1

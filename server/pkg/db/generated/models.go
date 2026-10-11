@@ -300,6 +300,9 @@ type AgentTaskQueue struct {
 	ViaBotName                pgtype.Text `json:"via_bot_name"`
 	WakeRootID                pgtype.UUID `json:"wake_root_id"`
 	WakeHop                   int32       `json:"wake_hop"`
+	WakeGeneration            int64       `json:"wake_generation"`
+	WakeReserved              bool        `json:"wake_reserved"`
+	WakeHumanQuote            pgtype.Text `json:"wake_human_quote"`
 }
 
 type AgentToLabel struct {
@@ -478,6 +481,19 @@ type BotWakeAttempt struct {
 	AttemptedAt pgtype.Timestamptz `json:"attempted_at"`
 }
 
+type BotWakeBlock struct {
+	ID            pgtype.UUID        `json:"id"`
+	WorkspaceID   pgtype.UUID        `json:"workspace_id"`
+	BotID         pgtype.UUID        `json:"bot_id"`
+	AgentID       pgtype.UUID        `json:"agent_id"`
+	RootID        pgtype.UUID        `json:"root_id"`
+	TaskID        pgtype.UUID        `json:"task_id"`
+	IssueID       pgtype.UUID        `json:"issue_id"`
+	ChatSessionID pgtype.UUID        `json:"chat_session_id"`
+	LimitValue    int32              `json:"limit_value"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+}
+
 type BotWakeCause struct {
 	BotID  pgtype.UUID `json:"bot_id"`
 	RootID pgtype.UUID `json:"root_id"`
@@ -488,6 +504,7 @@ type BotWakeChain struct {
 	RootID      pgtype.UUID `json:"root_id"`
 	WorkspaceID pgtype.UUID `json:"workspace_id"`
 	Hops        int32       `json:"hops"`
+	Generation  int64       `json:"generation"`
 }
 
 type BotWakeEvent struct {
@@ -518,6 +535,8 @@ type BotWakeEvent struct {
 	RootID         pgtype.UUID        `json:"root_id"`
 	Hop            int32              `json:"hop"`
 	InheritedOwner bool               `json:"inherited_owner"`
+	WakeGeneration int64              `json:"wake_generation"`
+	DeliveryID     pgtype.UUID        `json:"delivery_id"`
 }
 
 type BotWakeWatch struct {
@@ -784,6 +803,7 @@ type ChatSession struct {
 	OriginSessionID         pgtype.UUID        `json:"origin_session_id"`
 	OriginTaskID            pgtype.UUID        `json:"origin_task_id"`
 	OriginClientKey         pgtype.Text        `json:"origin_client_key"`
+	ConvertedIssueID        pgtype.UUID        `json:"converted_issue_id"`
 }
 
 type ChatSessionLinkReadAudit struct {
@@ -837,18 +857,19 @@ type ChatSessionRead struct {
 }
 
 type ChatTaskSupplement struct {
-	TaskID         pgtype.UUID        `json:"task_id"`
-	ChatMessageID  pgtype.UUID        `json:"chat_message_id"`
-	FollowupTaskID pgtype.UUID        `json:"followup_task_id"`
-	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
-	ChatSessionID  pgtype.UUID        `json:"chat_session_id"`
-	AuthorID       pgtype.UUID        `json:"author_id"`
-	Status         string             `json:"status"`
-	FailureReason  pgtype.Text        `json:"failure_reason"`
-	AttemptCount   int32              `json:"attempt_count"`
-	CreatedAt      pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
-	DeliveredAt    pgtype.Timestamptz `json:"delivered_at"`
+	TaskID              pgtype.UUID        `json:"task_id"`
+	ChatMessageID       pgtype.UUID        `json:"chat_message_id"`
+	FollowupTaskID      pgtype.UUID        `json:"followup_task_id"`
+	WorkspaceID         pgtype.UUID        `json:"workspace_id"`
+	ChatSessionID       pgtype.UUID        `json:"chat_session_id"`
+	AuthorID            pgtype.UUID        `json:"author_id"`
+	Status              string             `json:"status"`
+	FailureReason       pgtype.Text        `json:"failure_reason"`
+	AttemptCount        int32              `json:"attempt_count"`
+	CreatedAt           pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt           pgtype.Timestamptz `json:"updated_at"`
+	DeliveredAt         pgtype.Timestamptz `json:"delivered_at"`
+	RecoveredIntoTaskID pgtype.UUID        `json:"recovered_into_task_id"`
 }
 
 type ChatVisibilityNotice struct {
@@ -903,6 +924,7 @@ type Comment struct {
 	ViaBotName         pgtype.Text        `json:"via_bot_name"`
 	WakeRootID         pgtype.UUID        `json:"wake_root_id"`
 	WakeHop            int32              `json:"wake_hop"`
+	HumanQuote         pgtype.Text        `json:"human_quote"`
 }
 
 type CommentReaction struct {
@@ -2010,6 +2032,12 @@ type ReviewPassHead struct {
 	PrUrl     string             `json:"pr_url"`
 	HeadSha   string             `json:"head_sha"`
 	CreatedAt pgtype.Timestamptz `json:"created_at"`
+}
+
+type RuntimeMachineCapacity struct {
+	MachineKey        string             `json:"machine_key"`
+	MaxConcurrentRuns int32              `json:"max_concurrent_runs"`
+	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
 }
 
 type RuntimeProfile struct {

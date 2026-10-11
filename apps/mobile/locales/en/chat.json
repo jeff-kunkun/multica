@@ -78,7 +78,8 @@
     "searching_code": "Searching code",
     "making_edits": "Making edits",
     "searching_web": "Searching web",
-    "retrying": "Retrying"
+    "retrying": "Retrying",
+    "machine_full": "Queued: machine full ({{active}}/{{limit}})"
   },
   "alerts": {
     "no_permission_title": "No permission to run this agent",
@@ -224,6 +225,16 @@
     "just_changed": "Just changed",
     "needs_you": "needs you"
   },
+  "stop_work": {
+    "title": "Stop work?",
+    "description": "Queued and active runs will stop. Partial output stays available.",
+    "keep": "Keep running",
+    "confirm": "Stop this chat",
+    "confirm_related": "Stop related work",
+    "failed": "Could not stop work. Try again."
+  },
+  "converted_to_issue": "Work continues in the issue",
+  "open_converted_issue": "Open issue",
   "references": "Read-only reference projects",
   "references_unavailable": "Some reference projects are no longer available."
 }

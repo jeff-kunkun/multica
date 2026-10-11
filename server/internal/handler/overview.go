@@ -119,7 +119,7 @@ func (h *Handler) GetOverview(w http.ResponseWriter, r *http.Request) {
 		{"automations", "autopilots", "id title description project_id assignee_type assignee_id status execution_mode trigger_kinds next_run_at", h.ListAutopilots, ""},
 		{"skills", "", "id name description", h.ListSkills, ""},
 		{"squads", "", "id name description leader_id members member_count", h.ListSquads, ""},
-		{"runtimes", "", "id name custom_name runtime_mode provider status device_info daemon_id", h.ListAgentRuntimes, permission.ModuleRuntimes},
+		{"runtimes", "", "id name custom_name runtime_mode provider status device_info daemon_id machine_capacity", h.ListAgentRuntimes, permission.ModuleRuntimes},
 		{"workspace_links", "links", "id side status source target projects managed can_update_projects can_set_managed", h.ListWorkspaceLinks, ""},
 	}
 	for _, source := range sources {
@@ -171,12 +171,12 @@ func (h *Handler) GetOverview(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	counts := map[string]int{}
-	result := map[string]any{"workspace_id": ws, "compact": compact, "omitted_sections": omitted, "counts": counts}
+	result := map[string]any{"bot_wake_chain": h.botWakeChainReport(r, ws), "workspace_id": ws, "compact": compact, "omitted_sections": omitted, "counts": counts}
 	for name, rows := range sections {
 		counts[name] = len(rows)
 		if compact {
 			for i, row := range rows {
-				rows[i] = overviewProject(row, "id name title model runtime_id routing_tier runtime_availability work_enabled status project_id agent_id assignee_id next_run_at leader_id source target type linked_projects effective_linked_projects inherited")
+				rows[i] = overviewProject(row, "id name title model runtime_id routing_tier runtime_availability work_enabled status project_id agent_id assignee_id next_run_at leader_id source target type linked_projects effective_linked_projects inherited machine_capacity")
 			}
 		}
 		result[name] = rows

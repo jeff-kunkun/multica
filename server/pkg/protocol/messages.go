@@ -316,6 +316,7 @@ type RuntimeInfo struct {
 
 // ChatMessagePayload is broadcast when a new chat message is created.
 type ChatMessagePayload struct {
+	MessageKind   string `json:"message_kind,omitempty"`
 	ViaBotID      string `json:"via_bot_id,omitempty"`
 	ViaBotName    string `json:"via_bot_name,omitempty"`
 	ChatSessionID string `json:"chat_session_id"`
@@ -334,6 +335,8 @@ type ChatMessagePayload struct {
 const (
 	// ChatMessageKindMessage is an ordinary user/assistant message.
 	ChatMessageKindMessage = "message"
+	// Linked delivery is external pasted text, never a human instruction.
+	ChatMessageKindLinkedDelivery = "linked_delivery"
 	// ChatMessageKindNoResponse marks a direct-chat turn the agent completed
 	// without any text reply — a visible, deliberate terminal outcome rather
 	// than a silently-dropped turn (MUL-4351).

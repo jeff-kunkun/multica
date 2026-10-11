@@ -72,6 +72,9 @@ func addBotWakeReceipts(wake *cobra.Command) {
 			}
 			return cli.PrintJSON(cmd.OutOrStdout(), out)
 		}}
+		if verb == "ack" {
+			cmd.Long = "Acknowledge 1..100 events using the webhook ack_url/ack_body endpoint. Delivered or in-flight events record execution confirmation (woken_at); pending, failed or uncertain events record review acknowledgement. Transport status is preserved."
+		}
 		cmd.Flags().String("output", "json", "Output format: json")
 		if verb == "result" {
 			cmd.Flags().String("result-url", "", "Canonical API URL of the event source")

@@ -3234,3 +3234,13 @@ describe("IssueStateCardSchema source (DENE-1672)", () => {
     expect(IssueStateCardSchema.parse({ source: null }).source).toBeNull();
   });
 });
+
+describe("Machine capacity queue diagnostics", () => {
+  it("accepts live machine counts and degrades older or malformed fields", () => {
+    const queue_reason = { code: "machine_capacity", active_runs: 12, max_concurrent_runs: 12 };
+    expect(ChatPendingTaskSchema.parse({ status: "queued", queue_reason }).queue_reason).toEqual(queue_reason);
+    expect(ChatPendingTaskSchema.parse({ status: "queued" }).queue_reason).toBeUndefined();
+    expect(ChatPendingTaskSchema.parse({ status: "queued", queue_reason: { ...queue_reason, max_concurrent_runs: 0 } }).queue_reason).toBeUndefined();
+    expect(ChatPendingTaskSchema.parse({ status: "queued", queue_reason: "full" }).queue_reason).toBeUndefined();
+  });
+});

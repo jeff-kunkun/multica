@@ -207,6 +207,7 @@ export function pendingChatTaskOptions(sessionId: string) {
   return queryOptions({
     queryKey: chatKeys.pendingTask(sessionId),
     queryFn: () => api.getPendingChatTask(sessionId),
+    refetchInterval: (query) => query.state.data?.status === "queued" ? 5000 : false,
     enabled: !!sessionId,
     staleTime: Infinity,
   });

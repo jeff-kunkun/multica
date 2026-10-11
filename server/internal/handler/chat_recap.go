@@ -85,7 +85,7 @@ func (h *Handler) recapChatSession(ctx context.Context, workspaceID string, sess
 	if len(rows) < 2 || rows[0].Role != "user" {
 		return false, nil
 	}
-	opening := rows[0].Content
+	opening := protocol.ChatPromptContent(rows[0].MessageKind, rows[0].Content)
 	recent := rows[1:]
 	// recent is newest first; turns are oldest first for the prompts.
 	turns := make([]titling.RecapTurn, 0, len(recent))
@@ -96,7 +96,7 @@ func (h *Handler) recapChatSession(ctx context.Context, workspaceID string, sess
 		if row.FailureReason.Valid || row.MessageKind == "no_response" || strings.TrimSpace(row.Content) == "" {
 			continue
 		}
-		turns = append(turns, titling.RecapTurn{Role: row.Role, Content: row.Content})
+		turns = append(turns, titling.RecapTurn{Role: row.Role, Content: protocol.ChatPromptContent(row.MessageKind, row.Content)})
 	}
 	for _, row := range recent {
 		if row.Role == "assistant" && lastReply == "" && !row.FailureReason.Valid && row.MessageKind != "no_response" {

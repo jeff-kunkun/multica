@@ -16,6 +16,8 @@ import { Alert, ActivityIndicator, Pressable, ScrollView, View } from "react-nat
 import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
 import { useQuery } from "@tanstack/react-query";
+import { runtimeListOptions } from "@/data/queries/runtimes";
+import { runtimeDisplayName } from "@multica/core/runtimes/display";
 import type { Workspace } from "@multica/core/types";
 import { Text } from "@/components/ui/text";
 import { Button } from "@/components/ui/button";
@@ -97,6 +99,14 @@ export default function SettingsPage() {
   const goNotifications = () =>
     router.push(`/${currentSlug}/more/settings/notifications`);
 
+  const wsId = useWorkspaceStore((s) => s.currentWorkspaceId);
+  const runtimesQuery = useQuery({ ...runtimeListOptions(wsId), refetchInterval: 5000 });
+  const machines = new Map<string, NonNullable<typeof runtimesQuery.data>[number]>();
+  for (const runtime of runtimesQuery.data ?? []) {
+    const key = runtime.daemon_id || runtime.id;
+    if (!machines.has(key)) machines.set(key, runtime);
+  }
+
   return (
     <ScrollView
       className="flex-1 bg-background"
@@ -161,6 +171,18 @@ export default function SettingsPage() {
             );
           })
         )}
+      </SectionGroup>
+
+      <SectionGroup title={t("machines.title")}>
+        {runtimesQuery.isPending ? <ActivityIndicator className="p-4" /> : runtimesQuery.isError ?
+          <Text className="p-4 text-destructive" onPress={() => void runtimesQuery.refetch()}>{t("machines.failed")}</Text> :
+          Array.from(machines.values()).map((runtime) => <View key={runtime.id} className="px-4 py-3.5 gap-1">
+            <Text className="text-base font-medium">{runtimeDisplayName(runtime)}</Text>
+            {runtime.machine_capacity && <>
+              <Text className="text-sm text-muted-foreground">{t("machines.capacity", { active: runtime.machine_capacity.active_runs, limit: runtime.machine_capacity.max_concurrent_runs })}</Text>
+              <Text className="text-sm text-muted-foreground">{t("machines.limit", { limit: runtime.machine_capacity.max_concurrent_runs })}</Text>
+            </>}
+          </View>)}
       </SectionGroup>
 
       <SectionGroup title={t("appearance.title")}>

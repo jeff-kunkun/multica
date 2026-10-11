@@ -217,7 +217,12 @@ func (h *Handler) ListProjects(w http.ResponseWriter, r *http.Request) {
 		}
 		resp[i].ResourceCount = resourceCountMap[resp[i].ID]
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"projects": resp, "total": len(resp)})
+	projected, err := projectList(r, resp, nil)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"projects": projected, "total": len(resp)})
 }
 
 func (h *Handler) GetProject(w http.ResponseWriter, r *http.Request) {

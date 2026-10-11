@@ -45,11 +45,12 @@ type capabilityDomain struct {
 }
 
 type capabilityMap struct {
-	CLIVersion string               `json:"cli_version"`
-	Onboarding []botonboarding.Step `json:"onboarding"`
-	Legend     map[string]string    `json:"legend"`
-	Domains    []capabilityDomain   `json:"domains"`
-	Count      int                  `json:"count"`
+	ExecutionRules []string             `json:"execution_rules"`
+	CLIVersion     string               `json:"cli_version"`
+	Onboarding     []botonboarding.Step `json:"onboarding"`
+	Legend         map[string]string    `json:"legend"`
+	Domains        []capabilityDomain   `json:"domains"`
+	Count          int                  `json:"count"`
 }
 
 // capabilityDomains maps a top-level command to its domain. Anything not
@@ -163,10 +164,18 @@ func buildCapabilityMap(root *cobra.Command, cliVersion string) capabilityMap {
 
 	m := capabilityMap{
 		CLIVersion: cliVersion,
+		ExecutionRules: []string{
+			"Default chat messages and same-agent issue comments merge into queued or active work; issue comments across threads share that execution place. Explicit queue/restart/parallel keep their stated semantics.",
+			"A running chat CLI without live-input support rejects default merging and offers explicit queue/restart. A retry is discarded when its issue or chat already has an active run.",
+			"Related stop scope: an issue selects its descendants and each issue's source/bound chats; a chat selects its own direct parent/children and exact thread bindings, its directly opened/bound issues and their descendants, plus those issues' source/bound chats. Only child-issue links recurse: reached chats never expand to sibling/other tickets or further chat links. issue halt --related, issue status cancelled --related and chat stop --related share one authorized server operation; every target must be in this workspace and pass its own checks, or the whole operation is rejected.",
+			"After chat-to-issue conversion, execution belongs to the issue. The source chat is read-only and links to that issue.",
+		},
 		Onboarding: botonboarding.Steps(),
 		Legend: map[string]string{
-			"access":  "read = only reads; write = creates or changes something; local = acts on this machine",
-			"bot_key": "yes = an external bot key can run it; no = agent run or human login only; local = no server call",
+			"machine_capacity": "runtime capacity <runtime-id> reads device-wide active runs and limit; --max-concurrent-runs 1..100 sets it via PATCH /api/runtimes/:id (owner only). Default 12, shared across providers/workspaces; overflow queues; lowering does not stop active runs. overview runtimes includes machine_capacity.",
+			"access":           "read = only reads; write = creates or changes something; local = acts on this machine",
+			"bot_key":          "yes = an external bot key can run it; no = agent run or human login only; local = no server call",
+			"bot_wake_chain":   "Bot wake-chain limit defaults to 4, configurable with settings get/set bot_wake_chain_limit (1..100); agent replies/completed runs reset it; human messages and server-verified --per-quote messages are exempt; blocked chat sends exit nonzero with a saved-message receipt; blocked comment wakes emit warnings; overview reports permitted block audit",
 		},
 	}
 	placed := map[string]bool{}
@@ -243,8 +252,14 @@ func commandExample(c *cobra.Command) string {
 }
 
 func printCapabilityMap(w io.Writer, m capabilityMap) {
+	if guard, ok := m.Legend["bot_wake_chain"]; ok {
+		fmt.Fprintln(w, guard)
+	}
 	fmt.Fprintln(w, "接入步骤 / Getting started")
 	fmt.Fprint(w, botonboarding.Render())
+	for _, rule := range m.ExecutionRules {
+		fmt.Fprintln(w, rule)
+	}
 	fmt.Fprintf(w, "\n%d commands · access: read/write/local · bot_key: yes/no/local (the server's refusal is final)\n", m.Count)
 	for _, d := range m.Domains {
 		fmt.Fprintf(w, "\n%s (%s) — %d\n", d.Title, d.Key, len(d.Commands))

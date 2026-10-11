@@ -95,17 +95,9 @@ func resolveTextFlag(cmd *cobra.Command, flagName string) (string, bool, error) 
 	return util.UnescapeBackslashEscapes(inline), true, nil
 }
 
-// ensureFileFlagWithinWorkdir fails closed when a --<name>-file path resolves
-// outside the current working directory, unless --allow-external-file is set.
-//
-// Agent task workdirs are isolated per profile and per task; machine-shared
-// scratch paths like /tmp are not. MUL-4252 traced a cross-environment context
-// leak to exactly this gap: a quick-create run wrote its description to a fixed
-// /tmp/desc.md, the write silently failed because a *different* environment's
-// run had left a stale file there minutes earlier, and --description-file then
-// fed that stale content into the new issue. Requiring the file to live under
-// the workdir turns "silently read another run's file" into a loud command
-// failure — an "incorrect content" bug becomes a "command errored" bug.
+// ensureFileFlagWithinWorkdir allows the workdir and, for content/description,
+// regular files owned by this user in system temp roots. Other paths require
+// --allow-external-file. Both roots and candidates are resolved through symlinks.
 func ensureFileFlagWithinWorkdir(cmd *cobra.Command, fileFlag, flagName, filePath string) error {
 	if allow, _ := cmd.Flags().GetBool("allow-external-file"); allow {
 		return nil
@@ -115,6 +107,9 @@ func ensureFileFlagWithinWorkdir(cmd *cobra.Command, fileFlag, flagName, filePat
 		return fmt.Errorf("resolve --%s path %q: %w", fileFlag, filePath, err)
 	}
 	if !within {
+		if (fileFlag == "content-file" || fileFlag == "description-file") && ownedSystemTempFile(filePath) {
+			return nil
+		}
 		if !pathExists(filePath) {
 			return fmt.Errorf(
 				"--%s path %q does not exist; it also resolves outside the current working directory, "+
@@ -124,8 +119,8 @@ func ensureFileFlagWithinWorkdir(cmd *cobra.Command, fileFlag, flagName, filePat
 		}
 		return fmt.Errorf(
 			"--%s path %q resolves outside the current working directory; "+
-				"write agent temp files inside the run workdir (e.g. ./%s.md) rather than machine-shared "+
-				"paths like /tmp, where another run's stale file can be read by mistake. "+
+				"allowed locations are the current working directory (e.g. ./%s.md), or for content/description files, "+
+				"regular files owned by the current user under /tmp or the system temp directory ($TMPDIR). "+
 				"Pass --allow-external-file to override.",
 			fileFlag, filePath, flagName)
 	}
@@ -539,6 +534,11 @@ A comment is not a dispatch. The receipt says who it woke ("Woke: ..."; JSON
 "wake.woken"); "Woke no one" (JSON "wake.none_woken") means no run started and
 none is running, so nobody will act on it: use multica issue handoff, or @ them.
 
+A Bot wake blocked by bot_wake_chain_limit leaves the comment saved and prints
+a warning naming the target and recovery options. JSON trigger_outcomes carries
+the reason; do not repost the saved comment. Human messages and verified
+--per-quote messages are exempt.
+
 --mode decides what happens to agents the comment wakes that are still
 replying on this issue (omit it for the usual behaviour):
 
@@ -866,7 +866,7 @@ func init() {
 	issueListCmd.Flags().String("priority", "", "Filter by priority")
 	issueListCmd.Flags().String("assignee", "", "Filter by assignee name (member, agent, or squad; fuzzy match)")
 	issueListCmd.Flags().String("assignee-id", "", "Filter by assignee UUID — member, agent, or squad (mutually exclusive with --assignee)")
-	issueListCmd.Flags().String("project", "", "Filter by project ID")
+	issueListCmd.Flags().String("project", "", "Filter by project UUID, prefix or exact name (case-insensitive)")
 	issueListCmd.Flags().StringSlice("metadata", nil, "Filter by metadata key=value (repeatable; combined with AND). Value is JSON-parsed: 'true'/'false' → bool, numbers → number, otherwise string. Wrap as '\"42\"' to force a string when the value would otherwise sniff as a number.")
 	issueListCmd.Flags().StringArray("property", nil, `Filter by custom property, written as "Name=Value" (repeatable, one value per flag). Name is a property name (case-insensitive) or its UUID. Value depends on the type: an option name or id for select and multi_select, true or false for checkbox, a member name, email, or id for actor types, and the value itself for text, url, number, and date (YYYY-MM-DD). Use __none__ to match issues where the property is unset; it works for every type, so an option or member actually named __none__ has to be given by id, as does a property whose name contains "=" or ends in <, > or ! (the >=, <=, and != spellings are reserved for comparison filters). Repeating a property matches ANY of its values; different properties must ALL match.`)
 	issueListCmd.Flags().Int("limit", 50, fmt.Sprintf("Page size, 1 to %d (the server returns at most %d issues per request; use --offset to page through more)", issueListMaxPageSize, issueListMaxPageSize))
@@ -892,7 +892,7 @@ func init() {
 	issueCreateCmd.Flags().String("title", "", "Issue title (required)")
 	issueCreateCmd.Flags().String("description", "", "Issue description (decodes \\n, \\r, \\t, \\\\; pipe via --description-stdin to preserve literal backslashes)")
 	issueCreateCmd.Flags().Bool("description-stdin", false, "Read issue description from stdin (preserves multi-line content verbatim)")
-	issueCreateCmd.Flags().String("description-file", "", "Read issue description from a UTF-8 file (preserves multi-line content verbatim; use this on Windows when stdin piping mangles non-ASCII bytes). The path must be inside the current working directory unless --allow-external-file is set.")
+	issueCreateCmd.Flags().String("description-file", "", "Read issue description from a UTF-8 file (preserves multi-line content verbatim; use this on Windows when stdin piping mangles non-ASCII bytes). Allowed: current working directory or your own regular files in the system temp directory (/tmp, $TMPDIR); other paths require --allow-external-file.")
 	issueCreateCmd.Flags().Bool("allow-external-file", false, "Allow --description-file / --attachment to read a path outside the current working directory. Off by default so a stale file from another run/environment can't be picked up (MUL-4252).")
 	issueCreateCmd.Flags().String("status", "", "Issue status")
 	issueCreateCmd.Flags().String("priority", "", "Issue priority")
@@ -901,7 +901,7 @@ func init() {
 	issueCreateCmd.Flags().String("assignee-id", "", "Assignee UUID — member, agent, or squad (mutually exclusive with --assignee)")
 	issueCreateCmd.Flags().String("parent", "", "Parent issue ID")
 	issueCreateCmd.Flags().Int("stage", 0, "Stage ordinal (>=1) grouping this sub-issue into an ordered barrier group under its parent; omit for unstaged. The parent assignee is woken only when every sub-issue in a stage finishes.")
-	issueCreateCmd.Flags().String("project", "", "Project ID")
+	issueCreateCmd.Flags().String("project", "", "Project UUID, prefix or exact name (case-insensitive)")
 	issueCreateCmd.Flags().String("domain", "", "Issue domain: one of the project's domains, or 通用 for generic (default: the project's only domain). Routing and --per-quote pick the specialisation by it")
 	issueCreateCmd.Flags().String("start-date", "", "Start date (calendar day, YYYY-MM-DD)")
 	issueCreateCmd.Flags().String("due-date", "", "Due date (calendar day, YYYY-MM-DD)")
@@ -918,7 +918,7 @@ func init() {
 	issueUpdateCmd.Flags().String("title", "", "New title")
 	issueUpdateCmd.Flags().String("description", "", "New description (decodes \\n, \\r, \\t, \\\\; pipe via --description-stdin to preserve literal backslashes)")
 	issueUpdateCmd.Flags().Bool("description-stdin", false, "Read new description from stdin (preserves multi-line content verbatim)")
-	issueUpdateCmd.Flags().String("description-file", "", "Read new description from a UTF-8 file (preserves multi-line content verbatim; use this on Windows when stdin piping mangles non-ASCII bytes). The path must be inside the current working directory unless --allow-external-file is set.")
+	issueUpdateCmd.Flags().String("description-file", "", "Read new description from a UTF-8 file (preserves multi-line content verbatim; use this on Windows when stdin piping mangles non-ASCII bytes). Allowed: current working directory or your own regular files in the system temp directory (/tmp, $TMPDIR); other paths require --allow-external-file.")
 	issueUpdateCmd.Flags().Bool("allow-external-file", false, "Allow --description-file / --attachment to read a path outside the current working directory. Off by default so a stale temp file from another run/environment can't be picked up (MUL-4252).")
 	issueUpdateCmd.Flags().StringSlice("attachment", nil, "Local file path(s) to attach to the issue description (repeatable); references are appended to the end of the description")
 	issueUpdateCmd.Flags().String("status", "", "New status")
@@ -927,7 +927,7 @@ func init() {
 	issueUpdateCmd.Flags().String("per-quote", "", "Only when you are an agent: the person's exact words naming this assignee; naming the base role (e.g. 孙悟空) is enough, you pick the direction by project. The server checks earlier messages in the direct chat or issue thread; a quote that does not check out is set aside and routing picks the executor")
 	issueUpdateCmd.Flags().String("assignee-id", "", "New assignee UUID — member, agent, or squad (mutually exclusive with --assignee)")
 	issueUpdateCmd.Flags().String("reviewer", "", "验收席 — who accepts this issue: a member or agent name, \"none\" for no acceptance pass, or \"\" to clear the slot")
-	issueUpdateCmd.Flags().String("project", "", "Project ID")
+	issueUpdateCmd.Flags().String("project", "", "Project UUID, prefix or exact name (case-insensitive)")
 	issueUpdateCmd.Flags().String("domain", "", "Issue domain: one of the project's domains, or 通用 / \"\" for generic")
 	issueUpdateCmd.Flags().String("start-date", "", "New start date (calendar day, YYYY-MM-DD; pass empty string to clear)")
 	issueUpdateCmd.Flags().String("due-date", "", "New due date (calendar day, YYYY-MM-DD)")
@@ -941,6 +941,7 @@ func init() {
 	issueUpdateCmd.Flags().String("output", "json", "Output format: table or json")
 
 	// issue status
+	issueStatusCmd.Flags().Bool("related", false, "With cancelled status, also stop child issues and related chats in the same request")
 	issueStatusCmd.Flags().Bool("no-start", false, "Change status without starting an agent run")
 	issueStatusCmd.Flags().String("duplicate-of", "", "Mark the issue as a duplicate of this original issue (key like MUL-123, or full UUID); the status must be cancelled")
 	issueStatusCmd.Flags().String("output", "table", "Output format: table or json")
@@ -996,6 +997,7 @@ func init() {
 
 	// issue rerun
 	issueRerunCmd.Flags().String("output", "json", "Output format: table or json")
+	issueHaltCmd.Flags().Bool("related", false, "Also stop descendant issues and explicitly related chats (every target requires access)")
 	issueHaltCmd.Flags().String("output", "json", "Output format: table or json")
 	issueResumeCmd.Flags().String("output", "json", "Output format: table or json")
 	// issue cancel-task
@@ -1009,18 +1011,19 @@ func init() {
 	// issue comment add
 	issueCommentAddCmd.Flags().String("content", "", "Comment content (decodes \\n, \\r, \\t, \\\\; pipe via --content-stdin for multi-line bodies or to preserve literal backslashes)")
 	issueCommentAddCmd.Flags().Bool("content-stdin", false, "Read comment content from stdin (preserves multi-line content verbatim)")
-	issueCommentAddCmd.Flags().String("content-file", "", "Read comment content from a UTF-8 file (preserves multi-line content verbatim; use this on Windows when stdin piping mangles non-ASCII bytes). The path must be inside the current working directory unless --allow-external-file is set.")
+	issueCommentAddCmd.Flags().String("content-file", "", "Read comment content from a UTF-8 file (preserves multi-line content verbatim; use this on Windows when stdin piping mangles non-ASCII bytes). Allowed: current working directory or your own regular files in the system temp directory (/tmp, $TMPDIR); other paths require --allow-external-file.")
 	issueCommentAddCmd.Flags().Bool("allow-external-file", false, "Allow --content-file / --attachment to read a path outside the current working directory. Off by default so a stale file from another run/environment can't be picked up (MUL-4252).")
 	issueCommentAddCmd.Flags().String("parent", "", "Parent comment ID to reply under. A comment-triggered agent run must reply under its trigger comment; omitting --parent to post a top-level comment is rejected")
 	issueCommentAddCmd.Flags().String("verdict", "", "Acceptance verdict written as its own line: pass or hold. This is what merges and closes; the words 通过 in the body do not")
 	issueCommentAddCmd.Flags().StringSlice("attachment", nil, "File path(s) to attach (can be specified multiple times). Non-image files, HTML included, show as file cards that open in the viewer; to render a chart inside the comment, put a ```html or ```mermaid block in the content instead")
 	issueCommentAddCmd.Flags().String("output", "json", "Output format: table or json")
+	issueCommentAddCmd.Flags().String("per-quote", "", "Exact words from this caller’s earlier human comment on this issue; the server verifies it before exempting the wake from the Bot chain limit")
 	issueCommentAddCmd.Flags().String("mode", "", "steer, queue or restart for agents still replying; handoff or parallel when you @ another agent (see --help)")
 
 	// issue comment update
 	issueCommentUpdateCmd.Flags().String("content", "", "New comment content (decodes \\n, \\r, \\t, \\\\; pipe via --content-stdin for multi-line bodies or to preserve literal backslashes)")
 	issueCommentUpdateCmd.Flags().Bool("content-stdin", false, "Read new comment content from stdin (preserves multi-line content verbatim)")
-	issueCommentUpdateCmd.Flags().String("content-file", "", "Read new comment content from a UTF-8 file (preserves multi-line content verbatim; use this on Windows when stdin piping mangles non-ASCII bytes). The path must be inside the current working directory unless --allow-external-file is set.")
+	issueCommentUpdateCmd.Flags().String("content-file", "", "Read new comment content from a UTF-8 file (preserves multi-line content verbatim; use this on Windows when stdin piping mangles non-ASCII bytes). Allowed: current working directory or your own regular files in the system temp directory (/tmp, $TMPDIR); other paths require --allow-external-file.")
 	issueCommentUpdateCmd.Flags().Bool("allow-external-file", false, "Allow --content-file to read a path outside the current working directory. Off by default so a stale file from another run/environment can't be picked up (MUL-4252).")
 	issueCommentUpdateCmd.Flags().Int64("expected-revision", 0, "Current positive comment revision from issue comment list --output json (required; prevents overwriting a concurrent edit)")
 	issueCommentUpdateCmd.Flags().String("output", "json", "Output format: table or json")
@@ -2420,7 +2423,14 @@ func runIssueStatus(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("resolve issue: %w", err)
 	}
 
+	related, _ := cmd.Flags().GetBool("related")
+	if related && status != "cancelled" {
+		return fmt.Errorf("--related requires cancelled status")
+	}
 	body := map[string]any{"status": status}
+	if related {
+		body["related_stop"] = true
+	}
 	if duplicateOf != "" {
 		original, err := resolveIssueRef(ctx, client, duplicateOf)
 		if err != nil {
@@ -3434,6 +3444,7 @@ func runIssueCommentAdd(cmd *cobra.Command, args []string) error {
 	}
 
 	body := map[string]any{"content": content}
+	addPerQuote(cmd, body)
 	if parentID, _ := cmd.Flags().GetString("parent"); parentID != "" {
 		body["parent_id"] = parentID
 	}
@@ -3451,12 +3462,24 @@ func runIssueCommentAdd(cmd *cobra.Command, args []string) error {
 
 	fmt.Fprintf(os.Stderr, "Comment added to issue %s.\n", issueRef.Display)
 	printCommentWake(os.Stderr, issueRef.Display, result["wake"])
+	printBotWakeBlockedWarnings(os.Stderr, result["trigger_outcomes"])
 
 	output, _ := cmd.Flags().GetString("output")
 	if output == "table" {
 		return nil
 	}
 	return cli.PrintJSON(os.Stdout, result)
+}
+
+// Saved comments stay successful writes: warnings go to stderr while the JSON
+// receipt remains parseable and callers are not invited to post duplicates.
+func printBotWakeBlockedWarnings(w io.Writer, raw any) {
+	for _, outcome := range objectList(raw) {
+		if outcome["reason_code"] != "bot_wake_chain_limit" {
+			continue
+		}
+		fmt.Fprintf(w, "Warning: comment saved, but %v %v was not woken: bot_wake_chain_limit. Wait for the agent to reply or complete a run, send as a human, or use a server-verified --per-quote. An administrator can change multica settings set bot_wake_chain_limit --value-json <1..100>. Do not repost the saved comment.\n", outcome["target_type"], outcome["target_id"])
+	}
 }
 
 // printCommentWake turns the server's wake summary into one line (DENE-1774):
@@ -3949,7 +3972,12 @@ func runIssueGuardCommand(cmd *cobra.Command, input, action, label string) error
 		return fmt.Errorf("resolve issue: %w", err)
 	}
 	var result map[string]any
-	if err := client.PostJSON(ctx, "/api/issues/"+url.PathEscape(issueRef.ID)+"/"+action, map[string]any{}, &result); err != nil {
+	body := map[string]any{}
+	if action == "halt" {
+		related, _ := cmd.Flags().GetBool("related")
+		body["related"] = related
+	}
+	if err := client.PostJSON(ctx, "/api/issues/"+url.PathEscape(issueRef.ID)+"/"+action, body, &result); err != nil {
 		return fmt.Errorf("%s: %w", label, err)
 	}
 	output, _ := cmd.Flags().GetString("output")

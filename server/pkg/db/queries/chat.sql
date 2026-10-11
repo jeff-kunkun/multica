@@ -45,7 +45,7 @@ SELECT cs.*,
                 )
             AND (
               m.role = 'assistant'
-              OR (m.role = 'user' AND COALESCE(m.sender_user_id, cs.creator_id) <> sqlc.arg(viewer_id))
+              OR (m.role = 'user' AND (m.message_kind = 'linked_delivery' OR COALESCE(m.sender_user_id, cs.creator_id) <> sqlc.arg(viewer_id)))
             ))::int AS unread_count,
        COALESCE(lm.content, '') AS last_message_content,
        COALESCE(lm.role, '') AS last_message_role,
@@ -146,7 +146,7 @@ SELECT cs.*,
                           )
                       AND (
                         m.role = 'assistant'
-                        OR (m.role = 'user' AND COALESCE(m.sender_user_id, cs.creator_id) <> sqlc.arg(viewer_id))
+                        OR (m.role = 'user' AND (m.message_kind = 'linked_delivery' OR COALESCE(m.sender_user_id, cs.creator_id) <> sqlc.arg(viewer_id)))
                       ))
        END::int AS unread_count,
        COALESCE(lm.content, '') AS last_message_content,
@@ -1326,7 +1326,7 @@ INSERT INTO agent_task_queue (
     agent_id, runtime_id, issue_id, status, priority, chat_session_id,
     initiator_user_id, originator_user_id, accountable_user_id, force_fresh_session, runtime_mcp_overlay,
     runtime_connected_apps, via_bot_id, via_bot_name, originator_source, trigger_evidence_kind, trigger_evidence_ref_id,
-    fire_at, channel_context_revision, work_thread_id, id
+    fire_at, channel_context_revision, work_thread_id, id, wake_human_quote
 )
 SELECT
     $1, $2, NULL,
@@ -1347,7 +1347,7 @@ SELECT
                 AND wt.model IS NOT DISTINCT FROM (SELECT a.model FROM agent a WHERE a.id = $1)
                 AND wt.permission_mode IS NOT DISTINCT FROM (SELECT a.permission_mode FROM agent a WHERE a.id = $1)
               ORDER BY wt.updated_at DESC, wt.id DESC LIMIT 1), gen_random_uuid()),
-    COALESCE(sqlc.narg('id')::uuid, gen_random_uuid())
+    COALESCE(sqlc.narg('id')::uuid, gen_random_uuid()), sqlc.narg(wake_human_quote)
 WHERE lock_task_owner_rows($1, NULL, $2)
 RETURNING *;
 
@@ -1572,6 +1572,7 @@ LIMIT 1;
 -- one-line queue preview. GetPendingChatTask remains for legacy callers that
 -- only need an existence check.
 SELECT
+    task.runtime_id,
     task.id,
     task.status,
     task.created_at,
@@ -1990,6 +1991,7 @@ WHERE chat_session_id = $1
   AND role = 'user'
   AND message_kind <> 'channel_command'
   AND message_kind <> 'onboarding_kickoff'
+  AND message_kind <> 'linked_delivery'
 ORDER BY created_at ASC, id ASC
 LIMIT 1;
 

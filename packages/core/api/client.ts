@@ -354,11 +354,13 @@ import {
   type ConfigImportResult,
 } from "./config-transfer";
 import {
+  BotWakeDeliveryStatsSchema,
   RuntimeProfileSchema,
   RuntimeProfileListSchema,
   AgentTaskListSchema,
   AgentTaskPageSchema,
   AgentActivityBucketListSchema,
+  WorkStopResponseSchema,
   IssueAgentGuardResponseSchema,
   IssueDisposeResponseSchema,
   AttachmentResponseSchema,
@@ -3072,6 +3074,7 @@ export class ApiClient {
     runtimeId: string,
     patch: {
       visibility?: "private" | "public";
+        max_concurrent_runs?: number;
       /**
        * Custom display name. Pass an empty string to clear it (the server
        * reverts to the default name). Omit to leave it unchanged — a JSON
@@ -3714,8 +3717,13 @@ export class ApiClient {
     return task;
   }
 
-  async haltIssue(issueId: string): Promise<IssueAgentGuardResponse> {
-    const raw = await this.fetch<unknown>(`/api/issues/${issueId}/halt`, { method: "POST" });
+  async stopChatSession(sessionId: string, related = false): Promise<{ cancelled_count: number; issue_ids: string[]; chat_session_ids: string[] }> {
+    const raw = await this.fetch<unknown>(`/api/chat/sessions/${sessionId}/stop`, { method: "POST", body: JSON.stringify({ related }) });
+    return parseWithFallback(raw, WorkStopResponseSchema, { cancelled_count: 0, issue_ids: [], chat_session_ids: [] }, { endpoint: "POST /api/chat/sessions/:id/stop" });
+  }
+
+  async haltIssue(issueId: string, related = false): Promise<IssueAgentGuardResponse> {
+    const raw = await this.fetch<unknown>(`/api/issues/${issueId}/halt`, { method: "POST", body: JSON.stringify({ related }) });
     return parseWithFallback(raw, IssueAgentGuardResponseSchema, { issue_id: issueId, halted: true }, {
       endpoint: "POST /api/issues/:id/halt",
     });
@@ -4843,7 +4851,9 @@ export class ApiClient {
 
   // Bot wake (DENE-1792): owner/admin or the bot's own key.
   async getBotWake(workspaceId: string, botId: string): Promise<BotWakeSettings> {
-    return this.fetch(`/api/workspaces/${workspaceId}/bots/${botId}/wake`);
+    const path = `/api/workspaces/${workspaceId}/bots/${botId}/wake`;
+    const raw = await this.fetch<BotWakeSettings>(path);
+    return parseWithFallback(raw, BotWakeDeliveryStatsSchema, raw, { endpoint: `GET ${path}` });
   }
 
   async updateBotWake(
@@ -4851,10 +4861,12 @@ export class ApiClient {
     botId: string,
     data: UpdateBotWakeRequest,
   ): Promise<BotWakeSettings> {
-    return this.fetch(`/api/workspaces/${workspaceId}/bots/${botId}/wake`, {
+    const path = `/api/workspaces/${workspaceId}/bots/${botId}/wake`;
+    const raw = await this.fetch<BotWakeSettings>(path, {
       method: "PUT",
       body: JSON.stringify(data),
     });
+    return parseWithFallback(raw, BotWakeDeliveryStatsSchema, raw, { endpoint: `PUT ${path}` });
   }
 
   async listBotWakeEvents(
@@ -6765,6 +6777,7 @@ export class ApiClient {
     target_slug: string;
     project_ids: string[];
     direction?: WorkspaceLinkDirection;
+    managed?: boolean;
   }): Promise<WorkspaceLink> {
     return this.fetch("/api/workspace-links", { method: "POST", body: JSON.stringify(body) });
   }

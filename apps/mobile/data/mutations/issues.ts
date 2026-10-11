@@ -544,6 +544,7 @@ export function useUpdateIssue(issueId: string) {
       const prev = qc.getQueryData<Issue>(key);
       if (prev) {
         const {
+          related_stop: _relatedStop,
           description: _description,
           description_base: _descriptionBase,
           title_base: _titleBase,

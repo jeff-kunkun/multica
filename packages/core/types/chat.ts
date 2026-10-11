@@ -1,3 +1,4 @@
+import type { MachineQueueReason } from "./agent";
 import type { AgentTask } from "./agent";
 import type { Progress } from "./progress";
 import type { ChatLinkedProject } from "./workspace-link";
@@ -27,6 +28,7 @@ export type ChatMessageKind =
   | "onboarding_kickoff"
   | "onboarding_opening"
   | "goal_link"
+  | "linked_delivery"
   /** An agent opened a chat from this one; `linked_session_id` points at it. */
   | "chat_spawn"
   /** An agent tried to open a chat from this one and the server refused. */
@@ -114,6 +116,8 @@ export interface AgentChatPage {
 }
 
 export interface ChatSession {
+  /** The issue that owns execution after this chat was converted. */
+  converted_issue_id?: string | null;
   id: string;
   workspace_id: string;
   agent_id: string;
@@ -305,7 +309,9 @@ export interface SendChatMessageResponse {
   message_id: string;
   task_id: string;
   /** What actually happened; `start` when nothing was replying. */
-  mode?: ChatSendMode | "start";
+  mode?: ChatSendMode | "start" | "blocked";
+  warning?: string;
+  reason_code?: string;
   /** True when the server supports queued follow-up sends. */
   supports_queue?: boolean;
   /**
@@ -393,6 +399,7 @@ export interface ChatDraftRestoresResponse {
  * so the timer survives refresh / reopen without "resetting to 0s".
  */
 export interface ChatQueuedTask {
+  queue_reason?: MachineQueueReason;
   task_id: string;
   status: string;
   created_at: string;
@@ -409,6 +416,7 @@ export interface PrioritizeQueuedChatTaskResponse {
 }
 
 export interface ChatPendingTask {
+  queue_reason?: MachineQueueReason;
   task_id?: string;
   status?: string;
   created_at?: string;

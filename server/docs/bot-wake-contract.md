@@ -31,7 +31,7 @@ All routes require authenticated workspace membership.
 GET/PUT response fields (additive):
 
 ```json
-{"inherit_owner_follows":false,"webhook_configured":false,"events":["mention","started","done","blocked","needs_kun","task","chat"],"hourly_limit":6,"wake_from":{"member":{"mode":"all","ids":[]},"agent":{"mode":"all","ids":[]},"bot":{"mode":"none","ids":[]}},"quiet_hours":{"enabled":true,"start":"23:00","end":"08:00","timezone":"Asia/Shanghai"}}
+{"inherit_owner_follows":false,"webhook_configured":false,"events":["mention","done","blocked","needs_kun","task","chat"],"hourly_limit":6,"limited_count":0,"wake_from":{"member":{"mode":"all","ids":[]},"agent":{"mode":"all","ids":[]},"bot":{"mode":"none","ids":[]}},"quiet_hours":{"enabled":true,"start":"23:00","end":"08:00","timezone":"Asia/Shanghai"}}
 ```
 
 `inherit_owner_follows` is a boolean, default false, readable/writable by the
@@ -42,8 +42,8 @@ the owner can read, or fan out mentions addressed only to other Bots. Disabling
 stops new inherited events; queued inherited events become pending with
 `owner inheritance disabled`. Unfollowing/unassignment before send yields
 `owner no longer follows source`. Current source visibility, sender rules, quiet
-hours, event types, the shared rate limit and root budget still apply. Changes
-do not replay older pending events. Explicit Bot watches/mentions remain valid
+hours, event types, the ordinary-event rate limit and root budget still apply.
+Inheritance changes do not replay pending events held by inheritance policy. Explicit Bot watches/mentions remain valid
 independently of this switch. Frontend should bind its switch directly to this
 field; no client-side subscription expansion.
 
@@ -52,7 +52,7 @@ PUT patches supplied fields. Do not send `webhook_configured`. `webhook_url` and
 credentials. Key is the exact Authorization header value (including scheme).
 Supported event names are unique; limit 0..120; times HH:MM and a valid IANA
 zone. Equal start/end means all day. `events:[]` disables events; limit 0 pauses.
-No extra top-level enabled field. Settings changes do not replay pending events.
+No extra top-level enabled field. Saving settings makes quota/quiet deferred events eligible for immediate rechecking; other policy blocks and uncertain deliveries are not replayed.
 
 Events/pending query: `limit=1..100` (default 50), `before=<sequence>`.
 Response `{"events":[...],"next_cursor":"..."}`; empty cursor means end.
@@ -69,17 +69,27 @@ notification. Repeated mention in the same message/comment is unique per Bot
 and source, including edits; a different message is a different event. All
 recipients of a source event share its generated event ID. The worker polls the
 local durable outbox each second (not Grok or a Mac bridge), uses SKIP LOCKED,
-serializes the rate decision on the Bot row and counts **all attempts**, including
-retries, in a shared rolling one-hour window. Settings updates serialize on the
-same row. Mention events are selected before other ready events, sharing the
-same total limit (default 6); there is no separate mention budget or quiet bypass.
+serializes the rate decision on the Bot row and counts non-mention attempts, including
+retries, in a rolling one-hour window. Settings updates serialize on the
+same row. Sources containing mentions are prioritized among eligible windows. All
+notification types, including mentions, wait for a fixed 30-second source window
+from the first event; only wake_blocked bypasses it. This deliberately adds about
+30 seconds to a standalone mention in exchange for one push per source window,
+so it does not promise an immediate acknowledgement. Mentions bypass the ordinary-event limit
+(default 6) and consume no hourly quota; zero explicitly pauses all pushes, and quiet hours still apply to mentions.
+Legacy attempts recorded before this release age out of the window after one hour.
 A request already in flight may complete after a rule changes.
 
 `wake_from` contains member/agent/bot rules `{mode: "all"|"none"|"list",ids:[]}`;
 list IDs must be UUIDs (up to 100). Bot defaults none, member/agent default all.
 The entire map is replaced when supplied. Sender rejection and self-Bot events
 are held pending with fixed reasons. The outbox snapshots the authenticated current writer and Bot provenance
-inside the source transaction; it never substitutes the issue creator.
+inside the source transaction; it never substitutes the issue creator. Some
+issue writes lack transaction-local actor settings, leaving system/null attribution.
+The worker recovers the agent from a workspace-scoped source run when possible;
+otherwise delivery proceeds with author type/id empty and note="source attribution unavailable".
+Known actors still obey sender filters and self-wake suppression; visibility,
+inheritance, event, quiet and chain checks always apply.
 
 - mention: explicit Markdown `mention://bot/<UUID>` in comment/chat or new
   issue description; only named Bots receive it. Fenced/indented code, inline
@@ -100,6 +110,11 @@ HTTP 200 means receipt only. Pre-send failures/429/503 have at most 3 attempts,
 5s then 10s backoff. Other 5xx, timeout after headers or interrupted sending are
 uncertain, never replayed automatically. Stale sending is reconciled after two
 minutes. Disable/quiet/limit/inactive/access/config failures become pending.
+Quota/quiet pending events are automatically reconsidered each second,
+in sequence order within ordinary ready events, including events held before
+this release. Acknowledged or execution-confirmed events are excluded.
+GET/PUT return the actually saved hourly_limit and limited_count, counting only
+held events visible to both the querying member and the Bot owner.
 Reading never acknowledges. `/pending` returns only unacknowledged pending,
 failed and uncertain events. This is a stable unacknowledged scan, not a creation
 sequence delta: page using `before`/`next_cursor`, including empty filtered pages;
@@ -110,7 +125,8 @@ Persisting a last-created sequence as a high-water mark is NOT supported. Old
 queued events that fail after a scan and transactions that commit out of sequence
 appear in the next scan. On restart begin again at the first page. A crash before
 ack causes replay to the reader; deduplicate by event_id. The global bigserial is
-neither Bot-contiguous nor commit-ordered. No automatic webhook retry is added.
+neither Bot-contiguous nor commit-ordered. Only unsent events held by quota/quiet policies are automatically released;
+failed/uncertain sends retain their existing retry and review semantics.
 
 POST `/events/{eventId}/woken` with `{}` and `/events/{eventId}/result` with
 `{"result_url":"<canonical source API URL>"}` records server receive timestamps.
@@ -120,13 +136,20 @@ Bot cannot acknowledge this Bot's event. `woken_at`, `result_at`, `result_url`,
 timestamps; out-of-order result then woken preserves both. HTTP status/received_at
 remain separate. A result does not fabricate woken_at. This version only accepts
 the event's exact issue/chat API URL, not arbitrary comment or external URLs.
-A review acknowledgement neither confirms execution nor retries a delivery.
+For pending/failed/uncertain events a review acknowledgement neither confirms
+execution nor retries delivery. The same /pending/ack endpoint (and CLI wake ack)
+records woken_at for received/sending events, including a receipt sent while the
+webhook request is in flight. Batch validation remains atomic and idempotent.
+The legacy bare /events/{eventId} and /events/{eventId}/ack paths accept execution
+receipts as aliases for /woken.
 
 POST payload: event_id, sequence, source_id, parent_id, source_task_id, root_id,
-hop, web_url, ack_url (append /woken or /result), type, issue_id/chat_session_id,
+hop, web_url, ack_url (the CLI /pending/ack endpoint), ack_body ({event_ids:[event_id]}),
+woken_url, result_url (POST endpoints; send {} or {result_url:payload.url}), type, issue_id/chat_session_id,
 author {type,id,name?,via_bot_id?,via_bot_name?}, time,
 summary (event type + current title, at most 180 runes), authenticated API url,
-attachments [{url,size_bytes,sha256}]. No comment/chat body. Headers:
+attachments [{id,filename,url,size_bytes,sha256}]. Mention/chat events include
+source content and reply metadata; see the batching contract below. Headers:
 Content-Type application/json, Authorization (exact configured value),
 X-Multica-Event-ID. URLs point to authenticated API paths, never signed storage
 capabilities. `parent_id` identifies the containing issue/chat; `source_id`
@@ -195,23 +218,38 @@ provenance. Private agent identity and nonmember author identity are redacted.
 Deleted Bot credentials remain as audit tombstones; the directory omits them,
 the worker marks old queued events pending, and settings PUT returns 410.
 
-`bot_wake_cause` stores each Bot's current root, so omitting a parent/hop header
-cannot create a new chain. `bot_wake_chain` serializes a maximum of four automatic
-wake admissions across a root, including all branches. This is deliberately more
-conservative than four hops per branch. Dispatch records the cause before network
-I/O; retries of the same event reuse its admission and still count toward the
-hourly attempt budget. A new genuine member event starts a new root. Independent
-Bot actions remain in their last server-owned root until another delivered event
-provides a cause; a Bot cannot reset this with client-supplied metadata.
+`bot_wake_cause` stores each Bot's current root. `bot_wake_chain` serializes
+unanswered automatic admissions across that root and all branches. The workspace
+setting `bot_wake_chain_limit` defaults to 4, accepts integers 1–100, and is
+editable in Settings → Agent permissions → Run limits and through
+`multica settings get|set bot_wake_chain_limit`. Pending tasks reserve capacity:
+an offline recipient admits four sends, and the fifth is reported blocked.
+A task cancelled/failed before running releases its reservation. Generation
+stamps prevent a stale cancellation from subtracting a new round's capacity.
+Actual agent output or a completed run that reached running resets the count.
+The counter is server-owned; client actor/hop fields never reset it.
 
-Task queue inserts inherit from a parent run, triggering comment, or authenticated
-Bot association and consume the same root budget. Runs persist wake_root_id and
-wake_hop; task-token replies recover them through source_task_id. At the cap the
-run is persisted cancelled with error `bot wake chain limit (4)` and cannot be
-requeued. Bot delivery at the cap stays pending with that reason. Genuine direct
-human runs are not charged to an old automation root. Existing pre-upgrade queued
-events without trusted lineage stay pending (`source lineage unavailable`).
-No arbitrary client `hop`, actor header or payload can change these counters.
+Task inserts inherit a parent run, triggering comment, or authenticated Bot
+association. At the cap they persist cancelled with `bot wake chain limit (N)`.
+The send result includes saved message/task IDs, `mode: blocked`,
+`reason_code: bot_wake_chain_limit` and a recovery warning. The CLI prints the
+receipt and exits nonzero; `--wait` never waits on the cancelled task. A saved
+issue comment includes a blocked outcome per target and the CLI warns on stderr.
+Do not resend a saved message merely because its wake was blocked.
+
+Genuine direct human runs bypass this guard. `--per-quote` must exactly match
+that caller's original non-Bot human message in the same chat or issue; the
+handler checks before saving and the database verifies again at admission.
+Every rejected task creates `bot_wake_block` and a `wake_blocked` webhook event
+for its initiating Bot. Operational alerts bypass sender filters, event switches,
+quiet hours, hourly wake limits and the chain counter; inactive Bots, visibility
+checks and webhook credential checks still apply. Delivery failure remains
+inspectable in the durable wake event. Overview and routing health expose the
+workspace limit and permission-scoped last-24-hour audit for inspection/daily
+reports. Runtime task tokens cannot raise the guard through settings updates.
+Existing pre-upgrade queued events without trusted lineage remain pending
+(`source lineage unavailable`). No arbitrary client metadata changes this budget.
+
 
 Local acceptance includes an authenticated HTTP Bot A -> Bot B -> agent task ->
 Bot A chain, a worker recreation, cap/cancellation, source actor differing from
@@ -267,3 +305,51 @@ forwarding and repeat consistency without printing values. That check and the
 existing independent secretbox-instance test do not prove a production restart:
 DENE-1805 must verify persisted injection and matching running image on rollout;
 DENE-1800 retains real Grok execution and cost acceptance.
+
+## Content and batching (DENE-1863)
+
+The [external-Bot skill](../internal/service/builtin_skills/multica-platform/references/external-bots.md#mention-delivery-and-replying-in-place)
+is the consumer contract for `events`, `delivery_id`, comment/thread/attachment
+fields and the acknowledge-then-result reply convention. The shared
+`internal/botonboarding` instructions make the convention visible in Bot setup
+text (Web/Desktop copy action) and CLI capabilities without changing key code.
+
+The worker locks the Bot before selecting its source batch, so concurrent workers
+cannot split it. Each issue/chat uses a fixed 30-second window; different Bots,
+workspaces and sources are isolated. `wake_blocked` bypasses the window. Each
+event retains its source ID, lineage and receipt. Sender, subscription,
+visibility, inheritance and chain checks are applied individually before
+content is included. Disabled members remain pending. New Bots omit `started`;
+the old default selection is updated too; custom selections are retained.
+
+Migration 668 adds nullable `delivery_id`; older releases ignore it and still
+work with the expanded schema. Deploy the matching worker to all replicas before
+expecting batching: an older worker can still deliver unbatched events. Ordinary
+batch members persist `sending` together before the one HTTP write; results are
+recorded together afterwards. A retry selects only that saved delivery, excluding
+new events. One network attempt containing non-mention events consumes one hourly-limit
+attempt; mention-only deliveries bypass that quota (zero still pauses all pushes); per-event
+chain admission and existing retry/uncertainty rules are retained.
+
+Payload content is read at dispatch time after current visibility checks, not a
+snapshot of prior edits. The source comment is verbatim; thread previews reuse
+`summarizeContent` (200 Unicode runes), with root + last five replies. Deleted
+comments are redacted. Download URLs remain authenticated API paths. A batch's
+legacy top level mirrors its first admitted event; consumers must iterate
+`events` to handle every member. Receiver dedupe and per-event receipts continue
+to use `event_id`; `delivery_id` identifies the stable transport group.
+
+Existing Web/Desktop and native mobile comment feeds render the unchanged
+`parent_id` reply relationship; no new frontend screen or navigation is needed.
+
+For inspection without delivery or acknowledgement, use
+`multica bot wake events <bot-id> --with-content --limit 5 --output json`
+(or `pending`). This adds `payload` with the same current source projection;
+`delivery_id` on receipt rows identifies the persisted transport batch.
+The API option is `include_content=true` (boolean, default false). Reads
+recheck recipient and caller visibility; they do not replay or acknowledge.
+
+Downgrading migration 668 restores the prior schema and default for newly created
+Bots; already updated subscription arrays stay as saved, so a downgrade does not
+re-enable started notifications on existing Bots. Legacy retries without a
+delivery_id are processed singly by the new worker.

@@ -5,6 +5,7 @@ processes and claims queued tasks from the server.
 
 - [Core model](#core-model)
 - [CLI](#cli)
+- [Machine run capacity](#machine-run-capacity)
 - [Task CLI boundary](#task-cli-boundary)
 - [Debugging an agent that did not run](#debugging-an-agent-that-did-not-run)
 - [Repos](#repos)
@@ -25,7 +26,9 @@ The chain is:
 ## CLI
 
 ```bash
-multica runtime list --output json
+multica runtime list --compact --output json
+multica runtime capacity <runtime-id> --output json
+multica runtime capacity <runtime-id> --max-concurrent-runs 8 --output json
 multica runtime usage <runtime-id> --output json
 multica runtime activity <runtime-id> --output json
 multica runtime update <runtime-id> --target-version <version> --output json
@@ -226,3 +229,36 @@ Workspace repos and project resources are not the same thing:
 Do not add a project resource just because `repo checkout` failed. First
 determine whether the user asked for durable project context or just a task
 checkout.
+
+## Machine run capacity
+
+A device shares one simultaneous-run limit across its registered providers and
+workspaces (`daemon_id` scoped to the runtime owner, so another account cannot
+reuse a daemon name to change its capacity; an ownerless runtime or one without
+a daemon id has its own capacity).
+The default is **12**, alongside each agent's existing `max_concurrent_tasks`.
+Dispatched, running and directory-waiting tasks reserve slots. Overflow stays
+queued; reclaiming an existing dispatch consumes no extra slot.
+
+```bash
+multica runtime list --output json
+multica runtime capacity <runtime-id> --output json
+multica runtime capacity <runtime-id> --max-concurrent-runs 8 --output json
+```
+
+`capacity` without the flag is read-only; with it, it PATCHes
+`/api/runtimes/:id` with `max_concurrent_runs` (integer 1..100). Only the
+runtime owner can change the machine limit; workspace-admin access alone is
+insufficient. External Bot keys use their owner's same permission gate. The
+stable refusal codes are `invalid_machine_capacity` (choose an integer 1..100)
+and `machine_capacity_owner_required` (ask the machine owner to change it). The
+response and `overview` runtimes expose `machine_capacity.active_runs` and
+`machine_capacity.max_concurrent_runs`, counting all runs on that device without
+revealing other workspaces' tasks. Lowering the cap preserves active runs and
+holds new claims until the count drops below it. Web/Desktop machine cards edit
+the setting; the native App settings show it.
+
+Issue runs and chat pending tasks expose `queue_reason` with
+`code: "machine_capacity"`, `active_runs`, `max_concurrent_runs` while queued on
+a full machine. Clients show “排队中：机器已满（12/12）”; the reason is recomputed
+from current capacity, so it disappears after a slot becomes available.

@@ -34,6 +34,7 @@ var workspaceDeletionManifest = map[string]workspaceDeleteAction{
 	"agent_to_label":                  workspaceDelete,
 	"bot_wake":                        workspaceDelete,
 	"bot_wake_cause":                  workspaceDelete,
+	"bot_wake_block":                  workspaceDelete,
 	"bot_wake_chain":                  workspaceDelete,
 	"bot_wake_attempt":                workspaceDelete,
 	"bot_wake_event":                  workspaceDelete,
@@ -183,6 +184,7 @@ var workspaceDeletionManifest = map[string]workspaceDeleteAction{
 	"transfer_attachment_upload":         workspaceDelete,
 	"transfer_attachment_upload_chunk":   workspaceDelete,
 	"user":                               workspaceDeleteKeep,
+	"runtime_machine_capacity":           workspaceDeleteKeep, // owner-scoped, shared across workspaces
 	"user_composio_connection":           workspaceDeleteKeep,
 	"user_password_credential":           workspaceDeleteKeep,
 	"vcs_commit_status":                  workspaceDelete,

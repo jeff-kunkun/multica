@@ -25,7 +25,7 @@ WHERE s.task_id = t.id
   AND s.chat_message_id = $1
   AND (s.status IN ('delivering', 'delivered')
        OR (s.status = 'failed' AND s.failure_reason = 'turn_ended' AND s.attempt_count > 0))
-RETURNING s.task_id, s.chat_message_id, s.followup_task_id, s.workspace_id, s.chat_session_id, s.author_id, s.status, s.failure_reason, s.attempt_count, s.created_at, s.updated_at, s.delivered_at
+RETURNING s.task_id, s.chat_message_id, s.followup_task_id, s.workspace_id, s.chat_session_id, s.author_id, s.status, s.failure_reason, s.attempt_count, s.created_at, s.updated_at, s.delivered_at, s.recovered_into_task_id
 `
 
 type AckChatTaskSupplementDeliveredParams struct {
@@ -49,6 +49,7 @@ func (q *Queries) AckChatTaskSupplementDelivered(ctx context.Context, arg AckCha
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.DeliveredAt,
+		&i.RecoveredIntoTaskID,
 	)
 	return i, err
 }
@@ -61,7 +62,7 @@ SET status = 'failed',
 WHERE task_id = $2
   AND chat_message_id = $3
   AND status = 'delivering'
-RETURNING task_id, chat_message_id, followup_task_id, workspace_id, chat_session_id, author_id, status, failure_reason, attempt_count, created_at, updated_at, delivered_at
+RETURNING task_id, chat_message_id, followup_task_id, workspace_id, chat_session_id, author_id, status, failure_reason, attempt_count, created_at, updated_at, delivered_at, recovered_into_task_id
 `
 
 type AckChatTaskSupplementFailedParams struct {
@@ -86,6 +87,7 @@ func (q *Queries) AckChatTaskSupplementFailed(ctx context.Context, arg AckChatTa
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.DeliveredAt,
+		&i.RecoveredIntoTaskID,
 	)
 	return i, err
 }
@@ -268,7 +270,7 @@ WITH next AS MATERIALIZED (
     WHERE s.task_id = $1
       AND s.status = 'pending'
       AND t.status = 'running'
-      AND f.status = 'queued'
+      AND (f.status = 'queued' OR (s.followup_task_id = s.task_id AND f.status = 'running'))
     ORDER BY s.created_at, s.chat_message_id
     FOR UPDATE OF s SKIP LOCKED
     LIMIT 1
@@ -281,7 +283,7 @@ WITH next AS MATERIALIZED (
     FROM next
     WHERE s.chat_message_id = next.chat_message_id
       AND s.task_id = next.task_id
-    RETURNING s.task_id, s.chat_message_id, s.followup_task_id, s.workspace_id, s.chat_session_id, s.author_id, s.status, s.failure_reason, s.attempt_count, s.created_at, s.updated_at, s.delivered_at
+    RETURNING s.task_id, s.chat_message_id, s.followup_task_id, s.workspace_id, s.chat_session_id, s.author_id, s.status, s.failure_reason, s.attempt_count, s.created_at, s.updated_at, s.delivered_at, s.recovered_into_task_id
 )
 SELECT claimed.chat_message_id, claimed.attempt_count, m.content,
        COALESCE(NULLIF(btrim(u.name), ''), 'a user')::text AS author_name
@@ -399,9 +401,9 @@ WITH locked_task AS MATERIALIZED (
     SELECT t.id, $3, $4, $5,
            $2, $6, 'pending'
     FROM locked_task t
-    RETURNING task_id, chat_message_id, followup_task_id, workspace_id, chat_session_id, author_id, status, failure_reason, attempt_count, created_at, updated_at, delivered_at
+    RETURNING task_id, chat_message_id, followup_task_id, workspace_id, chat_session_id, author_id, status, failure_reason, attempt_count, created_at, updated_at, delivered_at, recovered_into_task_id
 )
-SELECT inserted.task_id, inserted.chat_message_id, inserted.followup_task_id, inserted.workspace_id, inserted.chat_session_id, inserted.author_id, inserted.status, inserted.failure_reason, inserted.attempt_count, inserted.created_at, inserted.updated_at, inserted.delivered_at, locked_task.runtime_id
+SELECT inserted.task_id, inserted.chat_message_id, inserted.followup_task_id, inserted.workspace_id, inserted.chat_session_id, inserted.author_id, inserted.status, inserted.failure_reason, inserted.attempt_count, inserted.created_at, inserted.updated_at, inserted.delivered_at, inserted.recovered_into_task_id, locked_task.runtime_id
 FROM inserted
 JOIN locked_task ON locked_task.id = inserted.task_id
 `
@@ -416,19 +418,20 @@ type CreateChatTaskSupplementParams struct {
 }
 
 type CreateChatTaskSupplementRow struct {
-	TaskID         pgtype.UUID        `json:"task_id"`
-	ChatMessageID  pgtype.UUID        `json:"chat_message_id"`
-	FollowupTaskID pgtype.UUID        `json:"followup_task_id"`
-	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
-	ChatSessionID  pgtype.UUID        `json:"chat_session_id"`
-	AuthorID       pgtype.UUID        `json:"author_id"`
-	Status         string             `json:"status"`
-	FailureReason  pgtype.Text        `json:"failure_reason"`
-	AttemptCount   int32              `json:"attempt_count"`
-	CreatedAt      pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
-	DeliveredAt    pgtype.Timestamptz `json:"delivered_at"`
-	RuntimeID      pgtype.UUID        `json:"runtime_id"`
+	TaskID              pgtype.UUID        `json:"task_id"`
+	ChatMessageID       pgtype.UUID        `json:"chat_message_id"`
+	FollowupTaskID      pgtype.UUID        `json:"followup_task_id"`
+	WorkspaceID         pgtype.UUID        `json:"workspace_id"`
+	ChatSessionID       pgtype.UUID        `json:"chat_session_id"`
+	AuthorID            pgtype.UUID        `json:"author_id"`
+	Status              string             `json:"status"`
+	FailureReason       pgtype.Text        `json:"failure_reason"`
+	AttemptCount        int32              `json:"attempt_count"`
+	CreatedAt           pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt           pgtype.Timestamptz `json:"updated_at"`
+	DeliveredAt         pgtype.Timestamptz `json:"delivered_at"`
+	RecoveredIntoTaskID pgtype.UUID        `json:"recovered_into_task_id"`
+	RuntimeID           pgtype.UUID        `json:"runtime_id"`
 }
 
 // Asks the running reply to read a message that was just queued behind it.
@@ -457,6 +460,7 @@ func (q *Queries) CreateChatTaskSupplement(ctx context.Context, arg CreateChatTa
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.DeliveredAt,
+		&i.RecoveredIntoTaskID,
 		&i.RuntimeID,
 	)
 	return i, err
@@ -489,7 +493,7 @@ WITH locked_task AS MATERIALIZED (
     SELECT i.id, i.workspace_id, 'member', $4, $5, 'comment', t.trigger_comment_id
     FROM touched_issue i
     JOIN locked_task t ON t.issue_id = i.id
-    RETURNING id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, resolved_at, resolved_by_type, resolved_by_id, source_task_id, quick_action_id, via_plugin_id, revision, recovery_settled_at, deleted_at, routing_kind, suppressed_agent_ids, via_bot_id, via_bot_name, wake_root_id, wake_hop
+    RETURNING id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, resolved_at, resolved_by_type, resolved_by_id, source_task_id, quick_action_id, via_plugin_id, revision, recovery_settled_at, deleted_at, routing_kind, suppressed_agent_ids, via_bot_id, via_bot_name, wake_root_id, wake_hop, human_quote
 ), inserted_supplement AS (
     INSERT INTO task_supplement (
         task_id, workspace_id, issue_id, comment_id, author_id,
@@ -503,7 +507,7 @@ WITH locked_task AS MATERIALIZED (
     JOIN inserted_comment c ON c.issue_id = i.id
     RETURNING task_id, workspace_id, issue_id, comment_id, author_id, client_request_id, status, failure_reason, attempt_count, created_at, updated_at, delivered_at
 )
-SELECT c.id, c.issue_id, c.author_type, c.author_id, c.content, c.type, c.created_at, c.updated_at, c.parent_id, c.workspace_id, c.resolved_at, c.resolved_by_type, c.resolved_by_id, c.source_task_id, c.quick_action_id, c.via_plugin_id, c.revision, c.recovery_settled_at, c.deleted_at, c.routing_kind, c.suppressed_agent_ids, c.via_bot_id, c.via_bot_name, c.wake_root_id, c.wake_hop, i.revision AS issue_revision,
+SELECT c.id, c.issue_id, c.author_type, c.author_id, c.content, c.type, c.created_at, c.updated_at, c.parent_id, c.workspace_id, c.resolved_at, c.resolved_by_type, c.resolved_by_id, c.source_task_id, c.quick_action_id, c.via_plugin_id, c.revision, c.recovery_settled_at, c.deleted_at, c.routing_kind, c.suppressed_agent_ids, c.via_bot_id, c.via_bot_name, c.wake_root_id, c.wake_hop, c.human_quote, i.revision AS issue_revision,
        s.task_id AS supplement_task_id, s.status AS supplement_status,
        s.failure_reason AS supplement_failure_reason,
        s.delivered_at AS supplement_delivered_at
@@ -547,6 +551,7 @@ type CreateTaskSupplementRow struct {
 	ViaBotName              pgtype.Text        `json:"via_bot_name"`
 	WakeRootID              pgtype.UUID        `json:"wake_root_id"`
 	WakeHop                 int32              `json:"wake_hop"`
+	HumanQuote              pgtype.Text        `json:"human_quote"`
 	IssueRevision           int64              `json:"issue_revision"`
 	SupplementTaskID        pgtype.UUID        `json:"supplement_task_id"`
 	SupplementStatus        string             `json:"supplement_status"`
@@ -593,6 +598,7 @@ func (q *Queries) CreateTaskSupplement(ctx context.Context, arg CreateTaskSupple
 		&i.ViaBotName,
 		&i.WakeRootID,
 		&i.WakeHop,
+		&i.HumanQuote,
 		&i.IssueRevision,
 		&i.SupplementTaskID,
 		&i.SupplementStatus,
@@ -1139,7 +1145,7 @@ WHERE t.id = candidate.id
   -- Reference the data-modifying CTE explicitly: capability persistence and
   -- the returned running row are one indivisible statement.
   AND (SELECT count(*) FROM capability) >= 0
-RETURNING t.id, t.agent_id, t.issue_id, t.status, t.priority, t.dispatched_at, t.started_at, t.completed_at, t.result, t.error, t.created_at, t.context, t.runtime_id, t.session_id, t.work_dir, t.trigger_comment_id, t.chat_session_id, t.autopilot_run_id, t.attempt, t.max_attempts, t.parent_task_id, t.failure_reason, t.trigger_summary, t.force_fresh_session, t.is_leader_task, t.wait_reason, t.initiator_user_id, t.handoff_note, t.prepare_lease_expires_at, t.squad_id, t.runtime_mcp_overlay, t.escalation_for_task_id, t.fire_at, t.originator_user_id, t.runtime_connected_apps, t.coalesced_comment_ids, t.delivered_comment_ids, t.chat_input_task_id, t.chat_finalize_deferred_at, t.originator_source, t.delegated_from_task_id, t.retry_of_task_id, t.rerun_of_task_id, t.rule_version_id, t.trigger_evidence_kind, t.trigger_evidence_ref_id, t.accountable_user_id, t.session_rollout_missing, t.retired_session_id, t.quick_actions_disabled, t.regenerate_quick_actions_for, t.branch_name, t.durable_work_dir, t.channel_context_revision, t.comment_thread_id, t.cancelled_by_type, t.cancelled_by_id, t.cancelled_by_name, t.issue_snapshot, t.code_decision, t.failure_input_version, t.failure_fingerprint, t.work_thread_id, t.context_generation, t.context_message_limit, t.context_token_budget, t.continuity_break_reason, t.session_mode, t.resumed_from_task_id, t.session_break_reason, t.via_bot_id, t.via_bot_name, t.wake_root_id, t.wake_hop
+RETURNING t.id, t.agent_id, t.issue_id, t.status, t.priority, t.dispatched_at, t.started_at, t.completed_at, t.result, t.error, t.created_at, t.context, t.runtime_id, t.session_id, t.work_dir, t.trigger_comment_id, t.chat_session_id, t.autopilot_run_id, t.attempt, t.max_attempts, t.parent_task_id, t.failure_reason, t.trigger_summary, t.force_fresh_session, t.is_leader_task, t.wait_reason, t.initiator_user_id, t.handoff_note, t.prepare_lease_expires_at, t.squad_id, t.runtime_mcp_overlay, t.escalation_for_task_id, t.fire_at, t.originator_user_id, t.runtime_connected_apps, t.coalesced_comment_ids, t.delivered_comment_ids, t.chat_input_task_id, t.chat_finalize_deferred_at, t.originator_source, t.delegated_from_task_id, t.retry_of_task_id, t.rerun_of_task_id, t.rule_version_id, t.trigger_evidence_kind, t.trigger_evidence_ref_id, t.accountable_user_id, t.session_rollout_missing, t.retired_session_id, t.quick_actions_disabled, t.regenerate_quick_actions_for, t.branch_name, t.durable_work_dir, t.channel_context_revision, t.comment_thread_id, t.cancelled_by_type, t.cancelled_by_id, t.cancelled_by_name, t.issue_snapshot, t.code_decision, t.failure_input_version, t.failure_fingerprint, t.work_thread_id, t.context_generation, t.context_message_limit, t.context_token_budget, t.continuity_break_reason, t.session_mode, t.resumed_from_task_id, t.session_break_reason, t.via_bot_id, t.via_bot_name, t.wake_root_id, t.wake_hop, t.wake_generation, t.wake_reserved, t.wake_human_quote
 `
 
 type StartAgentTaskWithSupplementParams struct {
@@ -1235,6 +1241,9 @@ func (q *Queries) StartAgentTaskWithSupplement(ctx context.Context, arg StartAge
 		&i.ViaBotName,
 		&i.WakeRootID,
 		&i.WakeHop,
+		&i.WakeGeneration,
+		&i.WakeReserved,
+		&i.WakeHumanQuote,
 	)
 	return i, err
 }

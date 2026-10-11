@@ -1437,6 +1437,10 @@ class ApiClient {
 
   /** `queuedRemove` drops a queued chat follow-up only while it is still
    *  queued, mirroring core's `queuedAction: "remove"`. */
+  async stopChatSession(sessionId: string, related = false): Promise<void> {
+    await this.fetch(`/api/chat/sessions/${sessionId}/stop`, { method: "POST", body: JSON.stringify({ related }) });
+  }
+
   async cancelTaskById(
     taskId: string,
     opts?: { queuedRemove?: { sessionId: string } },

@@ -47,6 +47,7 @@ function keepFocusInComposer(event: SyntheticEvent<HTMLButtonElement>) {
 
 interface ChatSendModeButtonProps {
   mode: ChatSendMode;
+  automatic?: boolean;
   steerSupported?: boolean;
   steerProvider?: string;
   /** "restart" when steering stops the CLI and resumes its session. */
@@ -55,7 +56,7 @@ interface ChatSendModeButtonProps {
   canSend: boolean;
   loading?: boolean;
   onModeChange: (mode: ChatSendMode) => void;
-  onSend: (mode: ChatSendMode) => void;
+  onSend: (mode?: ChatSendMode) => void;
 }
 
 /**
@@ -66,6 +67,7 @@ interface ChatSendModeButtonProps {
  */
 export function ChatSendModeButton({
   mode,
+  automatic = false,
   steerSupported,
   steerProvider,
   steerMode,
@@ -153,9 +155,9 @@ export function ChatSendModeButton({
         aria-busy={loading || undefined}
         onPointerDown={keepFocusInComposer}
         onMouseDown={keepFocusInComposer}
-        onClick={() => onSend(mode)}
+        onClick={() => automatic ? onSend() : onSend(mode)}
       >
-        {loading ? <Loader2 className="animate-spin" aria-hidden="true" /> : label(mode)}
+        {loading ? <Loader2 className="animate-spin" aria-hidden="true" /> : automatic ? t(($) => $.input.send_tooltip) : label(mode)}
       </Button>
       {isMobile ? (
         <>
@@ -170,11 +172,11 @@ export function ChatSendModeButton({
                     key={m}
                     type="button"
                     disabled={disabled}
-                    aria-pressed={m === mode}
+                    aria-pressed={!automatic && m === mode}
                     onClick={() => pick(m)}
                     className={cn(
                       "flex min-h-11 w-full items-center rounded-md px-3 py-2 text-body",
-                      m === mode && "bg-accent",
+                      !automatic && m === mode && "bg-accent",
                       disabled && "opacity-60",
                     )}
                   >
@@ -190,7 +192,7 @@ export function ChatSendModeButton({
           <DropdownMenuTrigger render={trigger} />
           <DropdownMenuContent side="top" align="end" className="w-72">
             <DropdownMenuRadioGroup
-              value={mode}
+              value={automatic ? "" : mode}
               onValueChange={(value) => pick(value as ChatSendMode)}
             >
               {MODES.map((m) => (

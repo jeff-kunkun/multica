@@ -101,6 +101,7 @@
     "./logs/report": "./logs/report.ts",
     "./logs/mutations": "./logs/mutations.ts",
     "./runtimes": "./runtimes/index.ts",
+    "./runtimes/display": "./runtimes/display.ts",
     "./runtimes/queries": "./runtimes/queries.ts",
     "./runtimes/mutations": "./runtimes/mutations.ts",
     "./runtimes/custom-pricing-store": "./runtimes/custom-pricing-store.ts",
