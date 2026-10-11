@@ -77,6 +77,7 @@ func TestBotWakeReliableDelivery(t *testing.T) {
 	defer receiver.Close()
 	t.Setenv("MULTICA_PLUGIN_DEV_ORIGINS", receiver.URL)
 	worker := NewBotWakeWorker(testHandler)
+	worker.coalesceSeconds = 0
 	worker.client = func(*url.URL) *http.Client { return receiver.Client() }
 	request("PUT", base, map[string]any{"webhook_url": receiver.URL, "webhook_key": "Bearer fixture", "hourly_limit": 120, "quiet_hours": map[string]any{"enabled": false, "start": "00:00", "end": "00:00", "timezone": "UTC"}})
 	process := func() {

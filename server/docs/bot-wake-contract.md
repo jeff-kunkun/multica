@@ -31,7 +31,7 @@ All routes require authenticated workspace membership.
 GET/PUT response fields (additive):
 
 ```json
-{"inherit_owner_follows":false,"webhook_configured":false,"events":["mention","started","done","blocked","needs_kun","task","chat"],"hourly_limit":6,"limited_count":0,"wake_from":{"member":{"mode":"all","ids":[]},"agent":{"mode":"all","ids":[]},"bot":{"mode":"none","ids":[]}},"quiet_hours":{"enabled":true,"start":"23:00","end":"08:00","timezone":"Asia/Shanghai"}}
+{"inherit_owner_follows":false,"webhook_configured":false,"events":["mention","done","blocked","needs_kun","task","chat"],"hourly_limit":6,"limited_count":0,"wake_from":{"member":{"mode":"all","ids":[]},"agent":{"mode":"all","ids":[]},"bot":{"mode":"none","ids":[]}},"quiet_hours":{"enabled":true,"start":"23:00","end":"08:00","timezone":"Asia/Shanghai"}}
 ```
 
 `inherit_owner_follows` is a boolean, default false, readable/writable by the
@@ -71,9 +71,12 @@ recipients of a source event share its generated event ID. The worker polls the
 local durable outbox each second (not Grok or a Mac bridge), uses SKIP LOCKED,
 serializes the rate decision on the Bot row and counts non-mention attempts, including
 retries, in a rolling one-hour window. Settings updates serialize on the
-same row. Mention events are selected before other ready events, sharing the
-ordinary-event limit (default 6) is bypassed by mentions, which consume no hourly
-quota; zero explicitly pauses all pushes, and quiet hours still apply to mentions.
+same row. Sources containing mentions are prioritized among eligible windows. All
+notification types, including mentions, wait for a fixed 30-second source window
+from the first event; only wake_blocked bypasses it. This deliberately adds about
+30 seconds to a standalone mention in exchange for one push per source window,
+so it does not promise an immediate acknowledgement. Mentions bypass the ordinary-event limit
+(default 6) and consume no hourly quota; zero explicitly pauses all pushes, and quiet hours still apply to mentions.
 Legacy attempts recorded before this release age out of the window after one hour.
 A request already in flight may complete after a rule changes.
 
@@ -145,7 +148,8 @@ hop, web_url, ack_url (the CLI /pending/ack endpoint), ack_body ({event_ids:[eve
 woken_url, result_url (POST endpoints; send {} or {result_url:payload.url}), type, issue_id/chat_session_id,
 author {type,id,name?,via_bot_id?,via_bot_name?}, time,
 summary (event type + current title, at most 180 runes), authenticated API url,
-attachments [{url,size_bytes,sha256}]. No comment/chat body. Headers:
+attachments [{id,filename,url,size_bytes,sha256}]. Mention/chat events include
+source content and reply metadata; see the batching contract below. Headers:
 Content-Type application/json, Authorization (exact configured value),
 X-Multica-Event-ID. URLs point to authenticated API paths, never signed storage
 capabilities. `parent_id` identifies the containing issue/chat; `source_id`
@@ -301,3 +305,51 @@ forwarding and repeat consistency without printing values. That check and the
 existing independent secretbox-instance test do not prove a production restart:
 DENE-1805 must verify persisted injection and matching running image on rollout;
 DENE-1800 retains real Grok execution and cost acceptance.
+
+## Content and batching (DENE-1863)
+
+The [external-Bot skill](../internal/service/builtin_skills/multica-platform/references/external-bots.md#mention-delivery-and-replying-in-place)
+is the consumer contract for `events`, `delivery_id`, comment/thread/attachment
+fields and the acknowledge-then-result reply convention. The shared
+`internal/botonboarding` instructions make the convention visible in Bot setup
+text (Web/Desktop copy action) and CLI capabilities without changing key code.
+
+The worker locks the Bot before selecting its source batch, so concurrent workers
+cannot split it. Each issue/chat uses a fixed 30-second window; different Bots,
+workspaces and sources are isolated. `wake_blocked` bypasses the window. Each
+event retains its source ID, lineage and receipt. Sender, subscription,
+visibility, inheritance and chain checks are applied individually before
+content is included. Disabled members remain pending. New Bots omit `started`;
+the old default selection is updated too; custom selections are retained.
+
+Migration 668 adds nullable `delivery_id`; older releases ignore it and still
+work with the expanded schema. Deploy the matching worker to all replicas before
+expecting batching: an older worker can still deliver unbatched events. Ordinary
+batch members persist `sending` together before the one HTTP write; results are
+recorded together afterwards. A retry selects only that saved delivery, excluding
+new events. One network attempt containing non-mention events consumes one hourly-limit
+attempt; mention-only deliveries bypass that quota (zero still pauses all pushes); per-event
+chain admission and existing retry/uncertainty rules are retained.
+
+Payload content is read at dispatch time after current visibility checks, not a
+snapshot of prior edits. The source comment is verbatim; thread previews reuse
+`summarizeContent` (200 Unicode runes), with root + last five replies. Deleted
+comments are redacted. Download URLs remain authenticated API paths. A batch's
+legacy top level mirrors its first admitted event; consumers must iterate
+`events` to handle every member. Receiver dedupe and per-event receipts continue
+to use `event_id`; `delivery_id` identifies the stable transport group.
+
+Existing Web/Desktop and native mobile comment feeds render the unchanged
+`parent_id` reply relationship; no new frontend screen or navigation is needed.
+
+For inspection without delivery or acknowledgement, use
+`multica bot wake events <bot-id> --with-content --limit 5 --output json`
+(or `pending`). This adds `payload` with the same current source projection;
+`delivery_id` on receipt rows identifies the persisted transport batch.
+The API option is `include_content=true` (boolean, default false). Reads
+recheck recipient and caller visibility; they do not replay or acknowledge.
+
+Downgrading migration 668 restores the prior schema and default for newly created
+Bots; already updated subscription arrays stay as saved, so a downgrade does not
+re-enable started notifications on existing Bots. Legacy retries without a
+delivery_id are processed singly by the new worker.
