@@ -6524,6 +6524,13 @@ func retryEligible(failureReason string, t db.AgentTaskQueue, agent db.Agent) bo
 
 // retryGatesOpen is retryEligible without the attempt ceiling.
 func retryGatesOpen(failureReason string, t db.AgentTaskQueue, agent db.Agent) bool {
+	// A chat turn whose runtime went offline is not retried (DENE-1839): the
+	// retry would sit deferred until that same machine heartbeats again, while
+	// the sender has already been told in the chat and decides whether to
+	// resend. Issue runs keep the deferred retry so the work resumes on return.
+	if failureReason == string(taskfailure.ReasonRuntimeOffline) && t.ChatSessionID.Valid {
+		return false
+	}
 	return retryableFailure(failureReason, t.Error.String) &&
 		t.MaxAttempts > 1 &&
 		!t.AutopilotRunID.Valid &&
@@ -7158,12 +7165,90 @@ func (s *TaskService) enqueueRerunTask(ctx context.Context, issue db.Issue, agen
 // neither replay nor settle; it would sit in the partial index forever,
 // restoring the unbounded history scan this change set removes.
 
-// FailTasksForOfflineRuntimes fails in-flight tasks whose runtime stayed
-// offline past the reconnect grace.
+// FailTasksForOfflineRuntimes fails in-flight work whose runtime has stayed
+// offline past its grace. A chat turn also gets its outcome written into the
+// chat in the same transaction (DENE-1839): the person who sent it is waiting,
+// and the sweeper path never reaches FailTask's in-tx failure message. The
+// row carries failure_reason=runtime_offline so every chat surface renders it
+// as a failure bubble, with the machine and its last heartbeat as the detail.
 func (s *TaskService) FailTasksForOfflineRuntimes(ctx context.Context, arg db.FailTasksForOfflineRuntimesParams) ([]db.AgentTaskQueue, error) {
 	return s.terminateTasksInTx(ctx, func(qtx *db.Queries) ([]db.AgentTaskQueue, error) {
-		return qtx.FailTasksForOfflineRuntimes(ctx, arg)
+		failed, err := qtx.FailTasksForOfflineRuntimes(ctx, arg)
+		if err != nil {
+			return nil, err
+		}
+		runtimes := make(map[pgtype.UUID]db.AgentRuntime)
+		for _, t := range failed {
+			if !t.ChatSessionID.Valid {
+				continue
+			}
+			runtime, ok := runtimes[t.RuntimeID]
+			if !ok {
+				runtime, err = qtx.GetAgentRuntime(ctx, t.RuntimeID)
+				if err != nil {
+					return nil, fmt.Errorf("load offline runtime for chat notice: %w", err)
+				}
+				runtimes[t.RuntimeID] = runtime
+			}
+			if err := qtx.ReleaseOnboardingKickoffFromTask(ctx, chatInputOwnerID(t)); err != nil {
+				return nil, fmt.Errorf("release onboarding kickoff: %w", err)
+			}
+			if _, err := createAssistantChatMessage(ctx, qtx, db.CreateChatMessageParams{
+				ViaBotID:      t.ViaBotID,
+				ViaBotName:    t.ViaBotName,
+				ID:            dbid.NewV7(),
+				ChatSessionID: t.ChatSessionID,
+				Role:          "assistant",
+				Content:       chatRuntimeOfflineNotice(runtime, time.Now()),
+				TaskID:        t.ID,
+				FailureReason: pgtype.Text{String: string(taskfailure.ReasonRuntimeOffline), Valid: true},
+				ElapsedMs:     computeChatElapsedMs(t),
+			}); err != nil {
+				return nil, fmt.Errorf("write chat runtime_offline outcome: %w", err)
+			}
+		}
+		return failed, nil
 	})
+}
+
+// chatRuntimeOfflineNotice is the detail line under the chat failure bubble:
+// which machine stopped answering and when it was last heard from. The chat
+// surfaces already translate the headline from failure_reason; this text is
+// the part they cannot derive on their own.
+func chatRuntimeOfflineNotice(runtime db.AgentRuntime, now time.Time) string {
+	name := runtime.Name
+	if runtime.CustomName.Valid && runtime.CustomName.String != "" {
+		name = runtime.CustomName.String
+	}
+	if name == "" {
+		name = util.UUIDToString(runtime.ID)
+	}
+	lastSeen := runtime.LastSeenAt
+	if !lastSeen.Valid {
+		lastSeen = runtime.UpdatedAt
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "运行这个智能体的机器「%s」已掉线", name)
+	if lastSeen.Valid {
+		fmt.Fprintf(&b, "，最后在线 %s", lastSeen.Time.UTC().Format("2006-01-02 15:04 UTC"))
+		if ago := now.Sub(lastSeen.Time).Round(time.Minute); ago >= time.Minute {
+			fmt.Fprintf(&b, "（约 %s 前）", chineseDuration(ago))
+		}
+	}
+	b.WriteString("。这条消息没有处理完，平台不会替你重发；机器恢复在线后请再发一次。")
+	return b.String()
+}
+
+// chineseDuration renders a whole-minute duration as "N 分钟" or "H 小时 M 分钟".
+func chineseDuration(d time.Duration) string {
+	minutes := int(d.Round(time.Minute) / time.Minute)
+	if minutes < 60 {
+		return fmt.Sprintf("%d 分钟", minutes)
+	}
+	if minutes%60 == 0 {
+		return fmt.Sprintf("%d 小时", minutes/60)
+	}
+	return fmt.Sprintf("%d 小时 %d 分钟", minutes/60, minutes%60)
 }
 
 // FailExpiredRuntimeReconnectRetries fails deferred retries that reached their

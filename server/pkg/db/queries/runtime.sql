@@ -319,6 +319,9 @@ RETURNING id, workspace_id, owner_id, daemon_id, provider;
 -- cannot monopolise the sweeper transaction. last_seen_at is normally set by
 -- the first heartbeat; updated_at is only the fallback for a never-heartbeated
 -- runtime, and a forced-offline write starts its grace from that update.
+-- A chat turn waits only chat_reconnect_grace_secs (DENE-1839): the person who
+-- sent it is watching, so a laptop lid closing should tell them within minutes
+-- instead of leaving the turn spinning for the long issue-run grace.
 WITH victims AS (
   SELECT task.id
   FROM agent_task_queue task
@@ -326,7 +329,10 @@ WITH victims AS (
   WHERE task.status IN ('dispatched', 'running', 'waiting_local_directory')
     AND runtime.status = 'offline'
     AND COALESCE(runtime.last_seen_at, runtime.updated_at) <
-        now() - make_interval(secs => @reconnect_grace_secs::double precision)
+        now() - make_interval(secs => CASE
+          WHEN task.chat_session_id IS NOT NULL THEN @chat_reconnect_grace_secs::double precision
+          ELSE @reconnect_grace_secs::double precision
+        END)
   ORDER BY COALESCE(runtime.last_seen_at, runtime.updated_at), task.created_at
   LIMIT @max_per_tick::int
   FOR UPDATE OF task SKIP LOCKED

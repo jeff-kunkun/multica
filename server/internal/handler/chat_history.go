@@ -120,6 +120,8 @@ func (h *Handler) chatMessageHistory(r *http.Request, scope chatHistoryScope) (c
 			Text:   m.Content,
 			Author: transcriptAuthor(role),
 			TS:     m.CreatedAt.Time.UTC().Format(time.RFC3339Nano),
+			// Set on a failed run's outcome row (DENE-1839).
+			FailureReason: m.FailureReason.String,
 		})
 		if l, ok := lineage[uuidToString(m.TaskID)]; ok && m.TaskID.Valid {
 			last := &out[len(out)-1]

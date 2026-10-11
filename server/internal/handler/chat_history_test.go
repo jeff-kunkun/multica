@@ -315,6 +315,14 @@ func TestGetChatHistory_NilReaderServesStoredTranscript(t *testing.T) {
 	base := time.Date(2026, 8, 11, 1, 0, 0, 0, time.UTC)
 	insertChatVisibilityMessage(t, sessionID, "nil reader still reads me", "message", true, base)
 	insertChatMessageRole(t, sessionID, "assistant", "and my reply", "message", true, base.Add(time.Second))
+	// A sweeper-written failure row (DENE-1839): the CLI must be able to tell
+	// it apart from a reply.
+	if _, err := testPool.Exec(context.Background(), `
+		INSERT INTO chat_message (chat_session_id, role, content, message_kind, channel_ingested, created_at, failure_reason)
+		VALUES ($1, 'assistant', '机器「box」已掉线', 'message', true, $2, 'runtime_offline')
+	`, sessionID, base.Add(2*time.Second)); err != nil {
+		t.Fatalf("insert failure message: %v", err)
+	}
 
 	w := httptest.NewRecorder()
 	testHandler.GetChatChannelHistory(w, taskActorReq("/api/chat/history", taskID))
@@ -327,8 +335,14 @@ func TestGetChatHistory_NilReaderServesStoredTranscript(t *testing.T) {
 	if resp.Note != "" {
 		t.Fatalf("expected no note when the transcript is served, got %q", resp.Note)
 	}
-	if len(resp.Messages) != 2 || resp.Messages[0].Text != "nil reader still reads me" || resp.Messages[1].Text != "and my reply" {
+	if len(resp.Messages) != 3 || resp.Messages[0].Text != "nil reader still reads me" || resp.Messages[1].Text != "and my reply" {
 		t.Fatalf("nil reader did not serve the stored transcript: %+v", resp.Messages)
+	}
+	if resp.Messages[0].FailureReason != "" || resp.Messages[1].FailureReason != "" {
+		t.Fatalf("ordinary rows must not carry a failure_reason: %+v", resp.Messages)
+	}
+	if resp.Messages[2].FailureReason != "runtime_offline" || resp.Messages[2].Text != "机器「box」已掉线" {
+		t.Fatalf("failure row should expose failure_reason and its detail: %+v", resp.Messages[2])
 	}
 }
 

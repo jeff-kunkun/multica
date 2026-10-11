@@ -746,10 +746,18 @@ func main() {
 		)
 		runtimeReconnectGrace = minimumRuntimeReconnectGrace
 	}
+	chatRuntimeReconnectGrace := envDuration("MULTICA_CHAT_RUNTIME_RECONNECT_GRACE", defaultChatRuntimeReconnectGrace)
+	if chatRuntimeReconnectGrace < minimumRuntimeReconnectGrace {
+		slog.Warn("chat runtime reconnect grace is shorter than heartbeat freshness; clamping",
+			"configured", chatRuntimeReconnectGrace,
+			"minimum", minimumRuntimeReconnectGrace,
+		)
+		chatRuntimeReconnectGrace = minimumRuntimeReconnectGrace
+	}
 	// Queued work now expires on the same runtime-liveness signal as in-flight
 	// work, so there is no separate queue TTL to tune: a busy runtime keeps its
 	// backlog, and a departed one retires everything it owned at once.
-	go runRuntimeSweeper(sweepCtx, queries, liveness, taskSvc, bus, runtimeReconnectGrace)
+	go runRuntimeSweeper(sweepCtx, queries, liveness, taskSvc, bus, runtimeReconnectGrace, chatRuntimeReconnectGrace)
 	if telemetryWorker != nil {
 		go telemetryWorker.Run(sweepCtx)
 	}

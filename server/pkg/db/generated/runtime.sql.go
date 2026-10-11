@@ -221,9 +221,12 @@ WITH victims AS (
   WHERE task.status IN ('dispatched', 'running', 'waiting_local_directory')
     AND runtime.status = 'offline'
     AND COALESCE(runtime.last_seen_at, runtime.updated_at) <
-        now() - make_interval(secs => $1::double precision)
+        now() - make_interval(secs => CASE
+          WHEN task.chat_session_id IS NOT NULL THEN $1::double precision
+          ELSE $2::double precision
+        END)
   ORDER BY COALESCE(runtime.last_seen_at, runtime.updated_at), task.created_at
-  LIMIT $2::int
+  LIMIT $3::int
   FOR UPDATE OF task SKIP LOCKED
 )
 UPDATE agent_task_queue AS task
@@ -237,8 +240,9 @@ RETURNING task.id, task.agent_id, task.issue_id, task.status, task.priority, tas
 `
 
 type FailTasksForOfflineRuntimesParams struct {
-	ReconnectGraceSecs float64 `json:"reconnect_grace_secs"`
-	MaxPerTick         int32   `json:"max_per_tick"`
+	ChatReconnectGraceSecs float64 `json:"chat_reconnect_grace_secs"`
+	ReconnectGraceSecs     float64 `json:"reconnect_grace_secs"`
+	MaxPerTick             int32   `json:"max_per_tick"`
 }
 
 // Marks dispatched/running/waiting_local_directory tasks as failed when
@@ -249,8 +253,11 @@ type FailTasksForOfflineRuntimesParams struct {
 // cannot monopolise the sweeper transaction. last_seen_at is normally set by
 // the first heartbeat; updated_at is only the fallback for a never-heartbeated
 // runtime, and a forced-offline write starts its grace from that update.
+// A chat turn waits only chat_reconnect_grace_secs (DENE-1839): the person who
+// sent it is watching, so a laptop lid closing should tell them within minutes
+// instead of leaving the turn spinning for the long issue-run grace.
 func (q *Queries) FailTasksForOfflineRuntimes(ctx context.Context, arg FailTasksForOfflineRuntimesParams) ([]AgentTaskQueue, error) {
-	rows, err := q.db.Query(ctx, failTasksForOfflineRuntimes, arg.ReconnectGraceSecs, arg.MaxPerTick)
+	rows, err := q.db.Query(ctx, failTasksForOfflineRuntimes, arg.ChatReconnectGraceSecs, arg.ReconnectGraceSecs, arg.MaxPerTick)
 	if err != nil {
 		return nil, err
 	}
