@@ -1,6 +1,8 @@
 package handler
 
 import (
+	"github.com/multica-ai/multica/server/pkg/protocol"
+
 	"bytes"
 	"context"
 	"encoding/json"
@@ -32,7 +34,6 @@ import (
 	"github.com/multica-ai/multica/server/internal/util"
 	"github.com/multica-ai/multica/server/pkg/agent"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
-	"github.com/multica-ai/multica/server/pkg/protocol"
 	"github.com/multica-ai/multica/server/pkg/redact"
 	"github.com/multica-ai/multica/server/pkg/remotemcp"
 	"github.com/multica-ai/multica/server/pkg/taskfailure"
@@ -899,6 +900,9 @@ type AgentTaskResponse struct {
 	// daemon predating this field still renders the primary project. Mirror
 	// field: internal/daemon/types.go, same JSON name.
 	Projects []TaskProjectContextData `json:"projects,omitempty"`
+	// WorkspaceLinks names active peers at claim time, without project content.
+	WorkspaceLinks []protocol.WorkspaceLinkHint `json:"workspace_links,omitempty"`
+
 	// LinkedProjects are read-only reference projects a chat attached through
 	// a workspace link (DENE-1643), re-checked against the link at claim. They
 	// never feed the code source or the working project. Mirror field:

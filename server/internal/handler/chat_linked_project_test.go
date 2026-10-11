@@ -14,6 +14,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/testutil"
 	"github.com/multica-ai/multica/server/internal/util"
 	"github.com/multica-ai/multica/server/internal/workspacelink"
+	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
 // A chat attaches another workspace's shared project read-only (DENE-1643):
@@ -54,10 +55,17 @@ func TestChatLinkedProjects(t *testing.T) {
 		testPool.Exec(context.Background(), `DELETE FROM workspace_link_project WHERE link_id = $1`, link.ID)
 		testPool.Exec(context.Background(), `DELETE FROM workspace_link WHERE id = $1`, link.ID)
 	})
+	if hints, err := links.BriefHints(ctx, util.MustParseUUID(source)); err != nil || len(hints) != 0 {
+		t.Fatalf("pending hints = %+v, %v", hints, err)
+	}
 	if _, err := links.Update(ctx, util.MustParseUUID(testWorkspaceID), util.MustParseUUID(testUserID), owner, linkID, workspacelink.Patch{Accept: true}); err != nil {
 		t.Fatalf("accept link: %v", err)
 	}
 
+	if hints, err := links.BriefHints(ctx, util.MustParseUUID(source)); err != nil || len(hints) != 1 || hints[0].Side != "source" {
+		t.Fatalf("source hints = %+v, %v", hints, err)
+	}
+	expectHint := true
 	// The menu lists it with its source workspace.
 	w := httptest.NewRecorder()
 	testHandler.ListChatLinkedProjectOptions(w, withChatTestWorkspaceCtx(t, newRequest(http.MethodGet, "/api/workspace-links/projects", nil)))
@@ -116,14 +124,24 @@ func TestChatLinkedProjects(t *testing.T) {
 		}
 		var out struct {
 			Task *struct {
-				ID             string                  `json:"id"`
-				ProjectID      string                  `json:"project_id"`
-				LinkedProjects []TaskLinkedProjectData `json:"linked_projects"`
+				ID             string                       `json:"id"`
+				ProjectID      string                       `json:"project_id"`
+				LinkedProjects []TaskLinkedProjectData      `json:"linked_projects"`
+				WorkspaceLinks []protocol.WorkspaceLinkHint `json:"workspace_links"`
 			} `json:"task"`
 		}
 		json.NewDecoder(w.Body).Decode(&out)
 		if out.Task == nil || out.Task.ID != taskID {
 			t.Fatalf("claimed %+v, want %s", out.Task, taskID)
+		}
+		found := false
+		for _, hint := range out.Task.WorkspaceLinks {
+			if hint.Name == "Acme" && hint.Side == "viewer" {
+				found = true
+			}
+		}
+		if found != expectHint {
+			t.Fatalf("claim workspace hints = %+v, want Acme=%v", out.Task.WorkspaceLinks, expectHint)
 		}
 		dbfx.Exec(t, `UPDATE agent_task_queue SET status = 'completed', completed_at = now() WHERE id = $1`, taskID)
 		return out.Task.ProjectID, out.Task.LinkedProjects
@@ -145,6 +163,7 @@ func TestChatLinkedProjects(t *testing.T) {
 	if err := links.Revoke(ctx, util.MustParseUUID(testWorkspaceID), util.MustParseUUID(testUserID), owner, linkID); err != nil {
 		t.Fatalf("revoke: %v", err)
 	}
+	expectHint = false
 	if _, linked := claim(); len(linked) != 0 {
 		t.Fatalf("claim after revoke = %+v, want none", linked)
 	}

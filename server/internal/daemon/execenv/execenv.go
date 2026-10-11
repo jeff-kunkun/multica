@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/multica-ai/multica/server/internal/runtimeapps"
+	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
 // RepoContextForEnv describes a workspace repo available for checkout.
@@ -296,6 +297,9 @@ type TaskContextForEnv struct {
 	// only source for a server that predates projects[]; projectContexts()
 	// normalises both shapes so rendering reads one path.
 	Projects []ProjectContextForEnv
+	// WorkspaceLinks names active peers at claim time, without project content.
+	WorkspaceLinks []protocol.WorkspaceLinkHint
+
 	// ReferenceProjects are read-only projects shared from another workspace
 	// (DENE-1643). Rendered only as reference; empty renders nothing.
 	ReferenceProjects []ReferenceProjectForEnv
