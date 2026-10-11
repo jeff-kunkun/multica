@@ -127,8 +127,10 @@ Every webhook has `delivery_id` and an ordered `events` array, including a
 single-event delivery. The top-level legacy fields mirror the first admitted
 event; handle **each** element of `events`, deduplicating its `event_id`. Each
 keeps its own `ack_url`, `root_id`, `source_id`, author and time. Existing retry,
-receipt, visibility and chain-budget contracts still apply. One HTTP attempt
-counts once toward the hourly limit. A retried batch keeps its membership and
+receipt, visibility and chain-budget contracts still apply. One HTTP attempt containing non-mention events
+counts once toward the hourly limit; mention-only deliveries bypass it, while
+zero pauses all pushes. Execution receipts remain per event: use each event’s
+`ack_body`/`woken_url`/`result_url`, not only the legacy top-level event. A retried batch keeps its membership and
 `delivery_id`; later events are delivered separately.
 
 For an issue comment mention, each event includes:

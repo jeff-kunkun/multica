@@ -101,7 +101,12 @@ func (w *BotWakeWorker) ProcessNext(ctx context.Context) (bool, error) {
 		return false, err
 	}
 	pending := func(reason string) (bool, error) {
-		if err := q.FinishBotWakeEvent(ctx, db.FinishBotWakeEventParams{Sequence: e.Sequence, Status: "pending", Reason: reason}); err != nil {
+		// Temporary policy blocks are revisited without replaying uncertain sends.
+		delay := int32(0)
+		if reason == "hourly limit" || reason == "quiet hours" {
+			delay = 1
+		}
+		if err := q.FinishBotWakeEvent(ctx, db.FinishBotWakeEventParams{Sequence: e.Sequence, Status: "pending", Reason: reason, DelaySeconds: delay}); err != nil {
 			return true, err
 		}
 		return true, tx.Commit(ctx)
@@ -114,6 +119,10 @@ func (w *BotWakeWorker) ProcessNext(ctx context.Context) (bool, error) {
 	}
 	alert := e.EventType == "wake_blocked"
 	rules := wakeResponse(c)
+	e, err = w.restoreEventActor(ctx, q, e)
+	if err != nil {
+		return true, err
+	}
 	if reason, err := w.eventHoldReason(ctx, q, e, bot, rules); err != nil {
 		return true, err
 	} else if reason != "" {
@@ -123,7 +132,7 @@ func (w *BotWakeWorker) ProcessNext(ctx context.Context) (bool, error) {
 	if err != nil {
 		return true, err
 	}
-	if !alert && count >= int64(rules.HourlyLimit) {
+	if !alert && rules.HourlyLimit == 0 {
 		return pending("hourly limit")
 	}
 	if len(c.WebhookSecret) == 0 {
@@ -151,7 +160,7 @@ func (w *BotWakeWorker) ProcessNext(ctx context.Context) (bool, error) {
 	// Pre-upgrade retries have no delivery_id. Keep those as single events
 	// so they cannot disappear from the first-attempt-only batch selector.
 	batch := []db.BotWakeEvent{e}
-	if !alert && (e.Attempts == 0 || e.DeliveryID.Valid) {
+	if !alert && e.Status == "queued" && (e.Attempts == 0 || e.DeliveryID.Valid) {
 		batch, err = q.ListBotWakeBatch(ctx, db.ListBotWakeBatchParams{BotID: e.BotID, WorkspaceID: e.WorkspaceID, IssueID: e.IssueID, ChatSessionID: e.ChatSessionID, DeliveryID: e.DeliveryID, WindowStart: e.CreatedAt, FirstSequence: e.Sequence, WindowSeconds: w.coalesceSeconds})
 		if err != nil {
 			return true, err
@@ -164,9 +173,16 @@ func (w *BotWakeWorker) ProcessNext(ctx context.Context) (bool, error) {
 		deliveryID = e.EventID
 	}
 	for _, member := range batch {
+		member, err = w.restoreEventActor(ctx, q, member)
+		if err != nil {
+			return true, err
+		}
 		reason, checkErr := w.eventHoldReason(ctx, q, member, bot, rules)
 		if checkErr != nil {
 			return true, checkErr
+		}
+		if reason == "" && !alert && member.EventType != "mention" && count >= int64(rules.HourlyLimit) {
+			reason = "hourly limit"
 		}
 		generation := member.WakeGeneration
 		if reason == "" {
@@ -176,7 +192,11 @@ func (w *BotWakeWorker) ProcessNext(ctx context.Context) (bool, error) {
 			}
 		}
 		if reason != "" {
-			if err := q.FinishBotWakeEvent(ctx, db.FinishBotWakeEventParams{Sequence: member.Sequence, Status: "pending", Reason: reason}); err != nil {
+			delay := int32(0)
+			if reason == "hourly limit" || reason == "quiet hours" {
+				delay = 1
+			}
+			if err := q.FinishBotWakeEvent(ctx, db.FinishBotWakeEventParams{Sequence: member.Sequence, Status: "pending", Reason: reason, DelaySeconds: delay}); err != nil {
 				return true, err
 			}
 			continue
@@ -200,8 +220,13 @@ func (w *BotWakeWorker) ProcessNext(ctx context.Context) (bool, error) {
 			return true, err
 		}
 	}
-	if err := q.RecordBotWakeBatchAttempt(ctx, e.BotID); err != nil {
-		return true, err
+	for _, member := range admitted {
+		if member.EventType != "mention" {
+			if err := q.RecordBotWakeBatchAttempt(ctx, e.BotID); err != nil {
+				return true, err
+			}
+			break
+		}
 	}
 	payload, err := marshalBotWakeBatch(deliveryID, fields)
 	if err != nil {
@@ -336,7 +361,8 @@ func (h *Handler) botWakePayloadFields(ctx context.Context, e db.BotWakeEvent) (
 		}
 		attachments = append(attachments, map[string]any{"id": uuidToString(a.ID), "filename": a.Filename, "url": base + "/api/attachments/" + uuidToString(a.ID) + "/download", "size_bytes": a.SizeBytes, "sha256": a.Sha256.String})
 	}
-	payload := map[string]any{"workspace_id": uuidToString(e.WorkspaceID), "event_id": uuidToString(e.EventID), "sequence": e.Sequence, "source_id": uuidToString(e.SourceID), "parent_id": wakeParentID(e), "ack_url": base + "/api/workspaces/" + uuidToString(e.WorkspaceID) + "/bots/" + uuidToString(e.BotID) + "/wake/events/" + uuidToString(e.EventID), "root_id": uuidToString(e.RootID), "hop": e.Hop, "source_task_id": uuidToString(e.SourceTaskID), "web_url": base + webPath, "type": e.EventType, "issue_id": uuidToString(e.IssueID), "chat_session_id": uuidToString(e.ChatSessionID), "author": h.wakeAuthor(ctx, e), "time": e.CreatedAt.Time, "summary": summary, "url": base + link, "attachments": attachments}
+	receiptBase := base + "/api/workspaces/" + uuidToString(e.WorkspaceID) + "/bots/" + uuidToString(e.BotID) + "/wake"
+	payload := map[string]any{"workspace_id": uuidToString(e.WorkspaceID), "event_id": uuidToString(e.EventID), "sequence": e.Sequence, "source_id": uuidToString(e.SourceID), "parent_id": wakeParentID(e), "ack_url": receiptBase + "/pending/ack", "ack_body": map[string]any{"event_ids": []string{uuidToString(e.EventID)}}, "woken_url": receiptBase + "/events/" + uuidToString(e.EventID) + "/woken", "result_url": receiptBase + "/events/" + uuidToString(e.EventID) + "/result", "root_id": uuidToString(e.RootID), "hop": e.Hop, "source_task_id": uuidToString(e.SourceTaskID), "web_url": base + webPath, "type": e.EventType, "issue_id": uuidToString(e.IssueID), "chat_session_id": uuidToString(e.ChatSessionID), "author": h.wakeAuthor(ctx, e), "time": e.CreatedAt.Time, "summary": summary, "url": base + link, "attachments": attachments}
 	if e.EventType == "wake_blocked" {
 		payload["reason_code"] = "bot_wake_chain_limit"
 		payload["reason"] = e.Reason
@@ -364,6 +390,9 @@ func wakeParentID(e db.BotWakeEvent) string {
 // Names are disclosed only when the receiver can see the named principal.
 func (h *Handler) wakeAuthor(ctx context.Context, e db.BotWakeEvent) map[string]any {
 	a := map[string]any{"type": e.AuthorType, "id": uuidToString(e.AuthorID)}
+	if e.AuthorType == "system" || !e.AuthorID.Valid {
+		return map[string]any{"type": "", "id": "", "note": "source attribution unavailable"}
+	}
 	if e.AuthorType == "bot" {
 		a["name"] = e.ViaBotName.String
 	} else if e.AuthorType == "member" {

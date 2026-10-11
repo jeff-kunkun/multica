@@ -134,6 +134,8 @@ func TestBotWakeBatchContentAndReply(t *testing.T) {
 	router.Post("/api/issues/{id}/comments", testHandler.CreateComment)
 	router.Get("/api/issues/{id}/comments", testHandler.ListComments)
 	router.Get("/api/workspaces/{id}/bots/{botId}/wake/events", testHandler.ListBotWakeEvents)
+	router.Post("/api/workspaces/{id}/bots/{botId}/wake/pending/ack", testHandler.AcknowledgeBotWakePending)
+	router.Post("/api/workspaces/{id}/bots/{botId}/wake/events/{eventId}/result", testHandler.RecordBotWakeReceipt)
 	api := httptest.NewServer(router)
 	defer api.Close()
 	reply := mention["reply"].(map[string]any)
@@ -199,6 +201,36 @@ func TestBotWakeBatchContentAndReply(t *testing.T) {
 	if res.StatusCode != 200 || !foundPayload {
 		t.Fatalf("content listing: %d %+v", res.StatusCode, listing)
 	}
+	// Every member retains the reliability contract's own receipt action.
+	// Confirm the full delivery with no GET, then record only one member result.
+	for i, item := range events {
+		event := item.(map[string]any)
+		action := "ack_url"
+		input := event["ack_body"]
+		if i == 0 {
+			action = "result_url"
+			input = map[string]any{"result_url": event["url"]}
+		}
+		receiptURL, _ := url.Parse(event[action].(string))
+		data, _ := json.Marshal(input)
+		req, _ := http.NewRequest("POST", api.URL+receiptURL.Path, bytes.NewReader(data))
+		req.Header.Set("Authorization", "Bearer "+raw)
+		res, err := api.Client().Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		res.Body.Close()
+		if res.StatusCode != 200 {
+			t.Fatalf("member receipt %d=%d", i, res.StatusCode)
+		}
+	}
+	var results, woken int
+	dbfx.QueryRow(t, `SELECT count(*) FILTER(WHERE result_at IS NOT NULL),count(*) FILTER(WHERE woken_at IS NOT NULL) FROM bot_wake_event WHERE bot_id=$1 AND delivery_id=$2`, bot.ID, body["delivery_id"]).Scan(&results, &woken)
+	if results != 1 || woken != 2 {
+		t.Fatalf("batch member receipt leaked: results=%d woken=%d", results, woken)
+	}
+	t.Log("batched members keep independent receipt actions: one result and two acknowledgements; transport received for all")
+
 	t.Log("30s window: no early push; mention + blocked + needs_kun: 1 HTTP POST, 3 events, 1 attempt; content/context/attachment complete; reply POST 201 under original mention; shared thread feed contains reply")
 
 	// Retry membership survives worker recreation; a later source event is not
@@ -349,6 +381,13 @@ func TestBotWakeBatchIsolationAndLock(t *testing.T) {
 		if uuidToString(e.IssueID) != firstIssue {
 			t.Fatal("another source joined")
 		}
+	}
+	// A later mention prioritizes the source, without skipping its earlier
+	// ordinary events and accidentally splitting the fixed source window.
+	dbfx.Exec(t, `INSERT INTO bot_wake_event(bot_id,workspace_id,event_type,issue_id,source_id,author_type,author_id,root_id,created_at) VALUES($1,$2,'mention',$3,gen_random_uuid(),'member',$4,gen_random_uuid(),now()-interval '40 seconds')`, bot.ID, testWorkspaceID, firstIssue, testUserID)
+	prioritized, err := q.NextBotWakeEvent(ctx, 30)
+	if err != nil || prioritized.Sequence != first.Sequence {
+		t.Fatalf("mention split earlier source events: %+v %v", prioritized, err)
 	}
 	// A second transaction skips the already locked Bot, even though this Bot
 	// has several ready events. It cannot seize a member and split the push.

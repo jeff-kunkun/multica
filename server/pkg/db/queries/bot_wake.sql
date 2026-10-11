@@ -23,10 +23,18 @@ SELECT * FROM bot_wake_event WHERE bot_id=$1 AND workspace_id=$2
 -- name: NextBotWakeEvent :one
 -- Lock the Bot first, so two workers cannot split the same source batch.
 SELECT e.* FROM bot_wake_event e JOIN bot_wake b ON b.bot_id=e.bot_id
-WHERE e.status='queued' AND e.next_attempt_at<=now()
- AND (e.attempts>0 OR e.event_type='wake_blocked'
+WHERE e.next_attempt_at<=now()
+ AND (e.status='queued' OR (e.status='pending' AND e.acknowledged_at IS NULL AND e.woken_at IS NULL AND e.result_at IS NULL
+      AND e.reason IN ('hourly limit','quiet hours','source attribution unavailable')))
+ AND (e.status='pending' OR e.attempts>0 OR e.event_type='wake_blocked'
       OR e.created_at+sqlc.arg(window_seconds)::integer*interval '1 second'<=now())
-ORDER BY (e.event_type='wake_blocked') DESC, e.sequence
+ORDER BY (e.event_type='wake_blocked') DESC,
+ (e.event_type='mention' OR EXISTS (
+   SELECT 1 FROM bot_wake_event m WHERE m.bot_id=e.bot_id AND m.workspace_id=e.workspace_id
+   AND m.issue_id IS NOT DISTINCT FROM e.issue_id AND m.chat_session_id IS NOT DISTINCT FROM e.chat_session_id
+   AND m.status='queued' AND m.event_type='mention' AND m.next_attempt_at<=now()
+   AND m.created_at>=e.created_at AND m.created_at<=e.created_at+sqlc.arg(window_seconds)::integer*interval '1 second'
+ )) DESC, e.sequence
 FOR UPDATE OF b SKIP LOCKED LIMIT 1;
 
 -- name: ListBotWakeBatch :many
@@ -52,12 +60,25 @@ INSERT INTO bot_wake_attempt(bot_id) VALUES($1);
 SELECT COUNT(*) FROM bot_wake_attempt WHERE bot_id=$1 AND attempted_at>now()-interval '1 hour';
 
 -- name: FinishBotWakeEvent :exec
-UPDATE bot_wake_event SET status=$2,reason=$3,received_at=CASE WHEN $2='received' THEN now() ELSE received_at END,
+UPDATE bot_wake_event SET status=$2,reason=CASE WHEN $2='received' AND (woken_at IS NOT NULL OR result_at IS NOT NULL)
+ THEN 'HTTP 200; execution confirmed' ELSE $3 END,received_at=CASE WHEN $2='received' THEN now() ELSE received_at END,
  next_attempt_at=now()+sqlc.arg(delay_seconds)::integer*interval '1 second' WHERE sequence=$1;
 
 -- name: MarkBotWakeSending :exec
-WITH sent AS (UPDATE bot_wake_event SET status='sending',sent_at=now(),attempts=attempts+1,hop=$2,wake_generation=sqlc.arg(wake_generation)::bigint WHERE sequence=$1 RETURNING bot_id)
-INSERT INTO bot_wake_attempt(bot_id) SELECT bot_id FROM sent;
+WITH sent AS (UPDATE bot_wake_event SET status='sending',sent_at=now(),attempts=attempts+1,hop=$2,wake_generation=sqlc.arg(wake_generation)::bigint WHERE sequence=$1 RETURNING bot_id,event_type)
+INSERT INTO bot_wake_attempt(bot_id) SELECT bot_id FROM sent
+ WHERE event_type<>'mention';
+
+-- name: RescheduleDeferredBotWakeEvents :exec
+UPDATE bot_wake_event SET next_attempt_at=now() WHERE bot_id=$1 AND status='pending'
+ AND acknowledged_at IS NULL AND reason IN ('hourly limit','quiet hours','source attribution unavailable');
+
+-- name: ListLimitedBotWakeEvents :many
+SELECT * FROM bot_wake_event WHERE bot_id=$1 AND workspace_id=$2 AND status='pending'
+ AND acknowledged_at IS NULL AND woken_at IS NULL AND result_at IS NULL AND reason='hourly limit';
+
+-- name: RestoreBotWakeAuthor :exec
+UPDATE bot_wake_event SET author_type='agent',author_id=$2 WHERE sequence=$1;
 
 -- name: RecoverBotWakeUncertain :exec
 UPDATE bot_wake_event SET status='uncertain',reason='worker interrupted; receipt unknown'
@@ -70,11 +91,13 @@ DELETE FROM bot_wake_attempt WHERE attempted_at<now()-interval '2 hours';
 SELECT * FROM bot_wake_event WHERE bot_id=$1 AND workspace_id=$2 AND event_id=$3 FOR UPDATE;
 
 -- name: RecordBotWakeWoken :exec
-UPDATE bot_wake_event SET woken_at=COALESCE(woken_at,clock_timestamp()) WHERE sequence=$1;
+UPDATE bot_wake_event SET woken_at=COALESCE(woken_at,clock_timestamp()),
+ reason=CASE WHEN status='received' THEN 'HTTP 200; execution confirmed' ELSE reason END WHERE sequence=$1;
 
 -- name: RecordBotWakeResult :exec
 UPDATE bot_wake_event SET result_at=COALESCE(result_at,clock_timestamp()),
- result_url=COALESCE(result_url,$2) WHERE sequence=$1;
+ result_url=COALESCE(result_url,$2),
+ reason=CASE WHEN status='received' THEN 'HTTP 200; execution confirmed' ELSE reason END WHERE sequence=$1;
 
 -- name: AcknowledgeBotWakePending :exec
 UPDATE bot_wake_event SET acknowledged_at=COALESCE(acknowledged_at,clock_timestamp())

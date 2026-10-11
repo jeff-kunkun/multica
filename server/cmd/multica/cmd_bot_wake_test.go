@@ -87,3 +87,36 @@ func TestBotWakeCLIWithContent(t *testing.T) {
 		}
 	}
 }
+
+func TestBotWakeAckUsesWebhookEndpoint(t *testing.T) {
+	const botID = "11111111-1111-4111-8111-111111111111"
+	const eventID = "22222222-2222-4222-8222-222222222222"
+	var calls int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		if r.Method != "POST" || !strings.HasSuffix(r.URL.Path, "/bots/"+botID+"/wake/pending/ack") {
+			t.Errorf("wrong ack route: %s %s", r.Method, r.URL.Path)
+		}
+		var body struct {
+			EventIDs []string `json:"event_ids"`
+		}
+		if json.NewDecoder(r.Body).Decode(&body) != nil || len(body.EventIDs) != 1 || body.EventIDs[0] != eventID {
+			t.Errorf("wrong ack body: %+v", body)
+		}
+		json.NewEncoder(w).Encode(map[string]any{"acknowledged": 1})
+	}))
+	defer srv.Close()
+	setCLITestServerEnv(t, srv.URL)
+	t.Setenv("MULTICA_TOKEN", "mat_test-token")
+	wake := &cobra.Command{Use: "wake"}
+	addBotWakeReceipts(wake)
+	var out bytes.Buffer
+	wake.SetOut(&out)
+	wake.SetArgs([]string{"ack", botID, eventID, "--output", "json"})
+	if err := wake.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	if calls != 1 || !strings.Contains(out.String(), `"acknowledged": 1`) {
+		t.Fatalf("ack result: calls=%d %s", calls, out.String())
+	}
+}
