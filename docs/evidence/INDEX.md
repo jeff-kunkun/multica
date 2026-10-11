@@ -2,7 +2,7 @@
 
 本索引只记录指向沉淀票附件的短指针；原始日志、截图和样本留在对应票据附件。
 
-- DENE-1857：默认唤醒合并、连带停止、显式转工单后的唯一执行处；[验收、回归、CLI 契约与可撤回副本](https://ai.ferryway.cc/api/attachments/01a12c4c-569d-7873-8e00-09cc19ed1275/download)，[四档浏览器截图与验证边界](https://ai.ferryway.cc/api/attachments/01a12c4c-f9c0-7457-bc3f-87c15b413f2f/download)。最终 390px 停止/取消按钮已实测 44px，其余较早截图已标注；全套后端仍有主线已有失败与属性列表分页用例失败，未声明全套通过。
+- DENE-1857：默认唤醒合并、连带停止、显式转工单后的唯一执行处；[验收、回归、CLI 契约与可撤回副本](https://ai.ferryway.cc/api/attachments/01a12c51-917a-7aeb-964c-1238e378017e/download)，[四档浏览器截图与验证边界](https://ai.ferryway.cc/api/attachments/01a12c4c-f9c0-7457-bc3f-87c15b413f2f/download)。最终 390px 停止/取消按钮已实测 44px，其余较早截图已标注；全套后端仍有主线已有失败与属性列表分页用例失败，未声明全套通过。
 - DENE-1864：附件大小误报修复、原始字节下载、一次重试和评论/任务批量下载；[真实附件、完整模块测试及回滚记录（任务附件）](https://ai.ferryway.cc/api/attachments/01a12c3b-d765-762d-8476-07d03d5ad1d2/download)。云电脑历史摘要失败未原地重现，独立评论入口及原始下载元数据已通过本地服务端测试。
 
 - DENE-1862：外部 Bot 来源降级、额度/静默补发、提及额度独立与回执路径；[本地验证记录](DENE-1862/verification.md)，手机真实截图与生产 Grok 确认尚未完成。
