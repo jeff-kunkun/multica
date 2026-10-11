@@ -171,7 +171,8 @@ export function InlineCommentRun({ run, className, viewState, showIdentity = fal
     : current?.kind === "error" ? t(($) => $.inline_run.error)
     : current?.kind === "skill" ? t(($) => $.inline_run.skill_step, { name: current.item.tool ?? "" })
     : t(($) => $.inline_run.waiting_response);
-  const summary = task.status === "queued" ? (task.queue_reason ? t(($) => $.execution_log.machine_full, { active: task.queue_reason.active_runs, limit: task.queue_reason.max_concurrent_runs }) : t(($) => $.inline_run.queued))
+  const machineQueueReason = task.status === "queued" ? task.queue_reason : undefined;
+  const summary = task.status === "queued" ? t(($) => $.inline_run.queued)
     : task.status === "dispatched" ? t(($) => $.inline_run.starting)
     : task.status === "waiting_local_directory" ? t(($) => $.inline_run.waiting_directory)
     : task.status === "deferred" ? t(($) => $.inline_run.retrying)
@@ -261,6 +262,9 @@ export function InlineCommentRun({ run, className, viewState, showIdentity = fal
         </Button>}
       </div>
       <div className={cn(showIdentity && "pl-8")}>
+        {machineQueueReason && <p role="status" className="mt-1 whitespace-normal text-caption text-muted-foreground">
+          {t(($) => $.execution_log.machine_full, { active: machineQueueReason.active_runs, limit: machineQueueReason.max_concurrent_runs })}
+        </p>}
         <RunSessionCaption lineage={sessionLineage} />
         <RunSkillsLine names={skillsUsed} />
         <RunRelayLine relay={task.relay} />

@@ -9,7 +9,7 @@ import (
 
 var Agent = []string{"id", "name", "status", "runtime_id", "runtime_mode", "runtime_availability", "series", "series_source", "work_enabled", "archived_at", "parent_agent_id", "domain_id", "fit"}
 var Chat = []string{"id", "title", "project_id", "project_title", "agent_id", "agent_name", "status", "last_active_at", "message_count"}
-var Runtime = []string{"id", "name", "custom_name", "runtime_mode", "provider", "status", "visibility", "last_seen_at"}
+var Runtime = []string{"id", "name", "custom_name", "runtime_mode", "provider", "status", "visibility", "last_seen_at", "machine_capacity"}
 
 // Fields gives explicit --fields precedence over the compact defaults. The
 // server validates names against the resource's public JSON fields, after
