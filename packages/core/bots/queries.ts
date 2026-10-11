@@ -92,6 +92,14 @@ export function useCreateExternalBot(wsId: string) {
   });
 }
 
+// Setup text without a key, fetched on demand for the row's "copy setup text"
+// action (DENE-1804). Nothing to invalidate: it mints nothing.
+export function useExternalBotSetupText(wsId: string) {
+  return useMutation({
+    mutationFn: (botId?: string) => api.getExternalBotSetupText(wsId, botId),
+  });
+}
+
 export function useRotateExternalBotKey(wsId: string) {
   const qc = useQueryClient();
   return useMutation({

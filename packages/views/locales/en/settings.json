@@ -2171,6 +2171,7 @@
     "expires": "Expires {{date}}",
     "actions_aria": "Actions for {{name}}",
     "new_key": "New key",
+    "copy_setup": "Copy setup text",
     "stop": "Stop",
     "delete": "Delete",
     "cancel": "Cancel",
@@ -2208,6 +2209,7 @@
     },
     "toast_stopped": "Stopped {{name}}",
     "toast_failed": "That didn't work. Try again.",
+    "toast_setup_copied": "Setup text for {{name}} copied",
     "wake": {
       "open": "Wake settings",
       "breadcrumb": "Bot settings path",

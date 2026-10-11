@@ -12,6 +12,8 @@ const roleRef = vi.hoisted(() => ({ current: "owner" as string }));
 const botsRef = vi.hoisted(() => ({ current: [] as unknown[] }));
 const mockCreate = vi.hoisted(() => vi.fn());
 const mockStop = vi.hoisted(() => vi.fn());
+const mockSetupText = vi.hoisted(() => vi.fn());
+const mockCopy = vi.hoisted(() => vi.fn());
 const listEnabledRef = vi.hoisted(() => ({ current: undefined as boolean | undefined }));
 const searchRef = vi.hoisted(() => ({ current: "" }));
 const wakeRef = vi.hoisted(() => ({ current: { data: undefined as unknown, error: null as unknown } }));
@@ -96,6 +98,7 @@ vi.mock("@multica/core/bots", () => ({
   externalBotListOptions: (_ws: string, enabled: boolean) => ({ queryKey: ["bots"], enabled }),
   useCreateExternalBot: () => mutation(mockCreate),
   useRotateExternalBotKey: () => mutation(vi.fn()),
+  useExternalBotSetupText: () => mutation(mockSetupText),
   useStopExternalBot: () => mutation(mockStop),
   useDeleteExternalBot: () => mutation(vi.fn()),
   BOT_WAKE_EVENT_TYPES: ["mention", "started", "done", "blocked", "needs_kun", "task", "chat"],
@@ -106,6 +109,7 @@ vi.mock("@multica/core/bots", () => ({
   useAckBotWakePending: () => mutation(mockAck),
 }));
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
+vi.mock("@multica/ui/lib/clipboard", () => ({ copyText: mockCopy }));
 
 import { toast } from "sonner";
 import { BotsTab } from "./bots-tab";
@@ -156,6 +160,20 @@ describe("BotsTab", () => {
       expect(mockCreate).toHaveBeenCalledWith({ name: "Test Bot", type: "grok", expires_in_days: undefined }),
     );
     expect(await screen.findByTestId("bot-setup-text")).toHaveTextContent("multica login --token mul_secret");
+  });
+
+  it("copies the key-less setup text from a bot's menu (DENE-1804)", async () => {
+    botsRef.current = [bot()];
+    mockSetupText.mockResolvedValue({ setup_text: "1. multica overview\n2. multica capabilities\nmultica login --token <钥匙>" });
+    mockCopy.mockResolvedValue(true);
+    renderTab();
+    await userEvent.click(screen.getByRole("button", { name: "Actions for Test Bot" }));
+    await userEvent.click(await screen.findByRole("menuitem", { name: "Copy setup text" }));
+    await waitFor(() => expect(mockSetupText).toHaveBeenCalledWith("b1"));
+    await waitFor(() =>
+      expect(mockCopy).toHaveBeenCalledWith(expect.stringContaining("2. multica capabilities")),
+    );
+    expect(toast.success).toHaveBeenCalledWith("Setup text for Test Bot copied");
   });
 
   it("stops a bot only after confirming", async () => {

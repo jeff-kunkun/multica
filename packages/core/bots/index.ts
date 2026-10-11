@@ -8,6 +8,7 @@ export {
   botMentionDirectoryOptions,
   useCreateExternalBot,
   useRotateExternalBotKey,
+  useExternalBotSetupText,
   useStopExternalBot,
   useDeleteExternalBot,
   useUpdateBotWake,
