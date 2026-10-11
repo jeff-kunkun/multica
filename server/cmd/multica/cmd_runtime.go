@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/multica-ai/multica/server/internal/listshape"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -80,6 +82,8 @@ func init() {
 	runtimeCmd.AddCommand(runtimeDeleteCmd)
 
 	// runtime list
+	addListShapeFlags(runtimeListCmd)
+	runtimeListCmd.Example = "  multica runtime list --compact --output json\n  multica runtime list --fields id,name,status --output json --workspace \"My workspace\""
 	runtimeListCmd.Flags().String("output", "table", "Output format: table or json")
 
 	// runtime usage
@@ -116,11 +120,17 @@ func runRuntimeList(cmd *cobra.Command, _ []string) error {
 	ctx, cancel := cli.APIContext(context.Background())
 	defer cancel()
 
+	q := url.Values{}
+	fields, err := listShapeQuery(cmd, q, listshape.Runtime)
+	if err != nil {
+		return err
+	}
 	var runtimes []map[string]any
-	if err := client.GetJSON(ctx, "/api/runtimes", &runtimes); err != nil {
+	if err := client.GetJSON(ctx, "/api/runtimes?"+q.Encode(), &runtimes); err != nil {
 		return fmt.Errorf("list runtimes: %w", err)
 	}
 
+	listshape.Filter(runtimes, fields)
 	output, _ := cmd.Flags().GetString("output")
 	if output == "json" {
 		return cli.PrintJSON(os.Stdout, runtimes)

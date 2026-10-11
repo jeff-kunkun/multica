@@ -23,6 +23,7 @@ func Steps() []Step {
 	return []Step{
 		{Command: "multica overview --output json", Purpose: "看工作区全景：有哪些智能体、项目、聊天、自动化、技能、小队"},
 		{Command: "multica capabilities", Purpose: "看命令能力地图：每条命令能看什么、能做什么、示例，按领域分组，标出外部 bot 钥匙能不能用；--output json 给程序读"},
+		{Command: "multica issue comment add <issue_id> --parent <reply_to_comment_id> --content-file ./reply.md", Purpose: "被 @ 后先在原楼层回复「收到，在处理」，完成后在同一楼层回复结果；推送 events 含原文、楼层摘要、附件和回复位置，无需先读票。普通通知同单或同聊天合并 30 秒，started 默认不订阅"},
 		{Command: "multica <命令> <子命令> --help", Purpose: "单条命令的用法；拼错子命令时错误里会提示正确的那一条"},
 	}
 }

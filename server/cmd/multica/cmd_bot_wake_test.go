@@ -60,6 +60,34 @@ func TestBotWakeCLIFileAndStdin(t *testing.T) {
 	}
 }
 
+func TestBotWakeCLIWithContent(t *testing.T) {
+	const id = "11111111-1111-4111-8111-111111111111"
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != "GET" || r.URL.Query().Get("include_content") != "true" || r.URL.Query().Get("limit") != "5" {
+			t.Errorf("request: %s %s", r.Method, r.URL)
+		}
+		json.NewEncoder(w).Encode(map[string]any{"events": []any{map[string]any{"delivery_id": "fixture", "payload": map[string]any{"content": "source", "reply_to_comment_id": "comment"}}}, "next_cursor": ""})
+	}))
+	defer srv.Close()
+	setCLITestServerEnv(t, srv.URL)
+	t.Setenv("MULTICA_TOKEN", "mat_test-token")
+	for _, verb := range []string{"events", "pending"} {
+		cmd := &cobra.Command{}
+		cmd.Flags().String("output", "json", "")
+		cmd.Flags().Int("limit", 5, "")
+		cmd.Flags().String("before", "", "")
+		cmd.Flags().Bool("with-content", true, "")
+		var out bytes.Buffer
+		cmd.SetOut(&out)
+		if err := runBotWake(cmd, []string{id}, verb); err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(out.String(), `"reply_to_comment_id": "comment"`) {
+			t.Fatal(out.String())
+		}
+	}
+}
+
 func TestBotWakeAckUsesWebhookEndpoint(t *testing.T) {
 	const botID = "11111111-1111-4111-8111-111111111111"
 	const eventID = "22222222-2222-4222-8222-222222222222"

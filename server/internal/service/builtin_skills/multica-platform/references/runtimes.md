@@ -26,7 +26,7 @@ The chain is:
 ## CLI
 
 ```bash
-multica runtime list --output json
+multica runtime list --compact --output json
 multica runtime capacity <runtime-id> --output json
 multica runtime capacity <runtime-id> --max-concurrent-runs 8 --output json
 multica runtime usage <runtime-id> --output json
