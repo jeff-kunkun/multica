@@ -477,7 +477,7 @@ export default function ChatTab() {
       { text: t("stop_work.confirm"), style: "destructive", onPress: () => void stop(false) },
       { text: t("stop_work.confirm_related"), style: "destructive", onPress: () => void stop(true) },
     ]);
-  }, [pendingTask?.task_id, pendingTask?.status, activeSessionId, qc, t]);
+  }, [pendingTask?.task_id, activeSessionId, qc, t]);
 
   // ── Queue actions (DENE-1362, mirrors Web's use-chat-task-actions) ──────
   const handleSendQueuedNow = useCallback(

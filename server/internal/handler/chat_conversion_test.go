@@ -2,13 +2,16 @@ package handler
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/testutil"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
+	"github.com/multica-ai/multica/server/pkg/dbid"
 )
 
 func convertChatForTest(t *testing.T, sessionID string) string {
@@ -83,6 +86,50 @@ func TestOrdinaryChatIssueProvenanceDoesNotConvertChat(t *testing.T) {
 	dbfx.QueryRow(t, `SELECT converted_issue_id IS NOT NULL FROM chat_session WHERE id=$1`, f.sessionID).Scan(&converted)
 	if converted {
 		t.Fatal("ordinary issue origin incorrectly transferred chat execution")
+	}
+}
+
+func TestChatConversionFencesHistoricalFailureRetries(t *testing.T) {
+	f := newChatSteerFixture(t, "claude", true)
+	sendChatWithMode(t, f.sessionID, "still unread when transferred", "").Want(http.StatusCreated)
+	dbfx.Exec(t, `UPDATE chat_session SET title=$1 WHERE id=$2`, t.Name(), f.sessionID)
+	dbfx.Exec(t, `UPDATE agent_task_queue SET status='failed',completed_at=now(),failure_reason='agent_error.provider_network',attempt=1,max_attempts=3 WHERE id=$1`, f.headID)
+	stale, err := testHandler.Queries.GetAgentTask(t.Context(), parseUUID(f.headID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	issueID := convertChatForTest(t, f.sessionID)
+	dbfx.Cleanup(t, `DELETE FROM issue WHERE id=$1`, issueID)
+	dbfx.Cleanup(t, `DELETE FROM issue_goal WHERE issue_id=$1`, issueID)
+	var stopped bool
+	dbfx.QueryRow(t, `SELECT coalesce((context->>'work_stopped')::boolean,false) FROM agent_task_queue WHERE id=$1`, f.headID).Scan(&stopped)
+	if !stopped {
+		t.Fatal("conversion left its historical failed retry source unfenced")
+	}
+	// Model a legacy conversion whose old task lacks the marker: session
+	// ownership itself must fence both application and SQL retry paths.
+	dbfx.Exec(t, `UPDATE agent_task_queue SET context=coalesce(context,'{}'::jsonb)-'work_stopped' WHERE id=$1`, f.headID)
+	if retry, err := testHandler.TaskService.MaybeRetryFailedTask(t.Context(), stale); err != nil {
+		t.Fatal(err)
+	} else if retry != nil {
+		t.Fatal("converted chat allowed a stale historical failure to retry")
+	}
+	if _, err := testHandler.Queries.CreateRetryTask(t.Context(), db.CreateRetryTaskParams{ID: stale.ID, NewTaskID: dbid.NewV7()}); !errors.Is(err, pgx.ErrNoRows) {
+		t.Fatalf("converted chat SQL retry returned %v, want no row", err)
+	}
+	if err := testHandler.TaskService.RecoverFailedMergedChatInputs(t.Context(), stale); err != nil {
+		t.Fatal(err)
+	}
+	// A late failure report still settles its run, but it cannot create a new
+	// chat execution after ownership was transferred.
+	dbfx.Exec(t, `UPDATE agent_task_queue SET status='running',completed_at=NULL WHERE id=$1`, f.headID)
+	if _, err := testHandler.TaskService.FailTask(t.Context(), stale.ID, "stream disconnected", "", "", "", "agent_error.provider_network", false, "", ""); err != nil {
+		t.Fatal(err)
+	}
+	var active int
+	dbfx.QueryRow(t, `SELECT count(*) FROM agent_task_queue WHERE chat_session_id=$1 AND status IN ('queued','deferred','running','dispatched','waiting_local_directory')`, f.sessionID).Scan(&active)
+	if active != 0 {
+		t.Fatalf("converted chat revived %d executions", active)
 	}
 }
 
@@ -203,7 +250,7 @@ func TestMergedChatStopFencesHistoricalFailureAndAllowsNewMessage(t *testing.T) 
 	}
 	testHandler.TaskService.HandleFailedTasks(t.Context(), []db.AgentTaskQueue{stale})
 	var activeCount, recoveredCount int
-	dbfx.QueryRow(t, `SELECT count(*) FROM agent_task_queue WHERE chat_session_id=$1 AND status IN ('queued','deferred','running','dispatched','waiting_for_runtime')`, f.sessionID).Scan(&activeCount)
+	dbfx.QueryRow(t, `SELECT count(*) FROM agent_task_queue WHERE chat_session_id=$1 AND status IN ('queued','deferred','running','dispatched','waiting_local_directory')`, f.sessionID).Scan(&activeCount)
 	dbfx.QueryRow(t, `SELECT count(*) FROM chat_task_supplement WHERE task_id=$1 AND recovered_into_task_id IS NOT NULL`, f.headID).Scan(&recoveredCount)
 	if activeCount != 0 || recoveredCount != 0 {
 		t.Fatalf("chat stop revived historical work: active=%d recovered=%d", activeCount, recoveredCount)

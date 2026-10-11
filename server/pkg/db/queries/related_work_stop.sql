@@ -46,6 +46,13 @@ WHERE (task.issue_id = ANY(@issue_ids::uuid[]) OR task.chat_session_id = ANY(@ch
   AND task.status IN ('queued', 'dispatched', 'running', 'waiting_local_directory', 'deferred')
 ORDER BY task.chat_session_id NULLS LAST, task.id;
 
+-- name: ListRunsForStopFence :many
+SELECT task.* FROM agent_task_queue task
+JOIN agent a ON a.id = task.agent_id AND a.workspace_id = @workspace_id
+WHERE (task.issue_id = ANY(@issue_ids::uuid[]) OR task.chat_session_id = ANY(@chat_session_ids::uuid[]))
+  AND task.status IN ('queued', 'dispatched', 'running', 'waiting_local_directory', 'deferred', 'failed')
+ORDER BY task.chat_session_id NULLS LAST, task.id;
+
 -- name: MarkStoppedWorkRetrySources :exec
 -- Terminal failed runs are not cancelled again, but their automatic retries
 -- and unread-input recovery must not revive work after an explicit stop.

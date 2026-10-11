@@ -81,7 +81,7 @@ func (s *TaskService) StopWorkTargetsInTransaction(ctx context.Context, qtx *db.
 // standalone stop and a stop combined with a cancellation status change.
 func (s *TaskService) LockWorkStopTargets(ctx context.Context, qtx *db.Queries, workspaceID pgtype.UUID, issueIDs, chatIDs []pgtype.UUID) ([]db.AgentTaskQueue, error) {
 	params := db.ListActiveRunsForStopTargetsParams{WorkspaceID: workspaceID, IssueIds: issueIDs, ChatSessionIds: chatIDs}
-	tasks, err := qtx.ListActiveRunsForStopTargets(ctx, params)
+	tasks, err := qtx.ListRunsForStopFence(ctx, db.ListRunsForStopFenceParams{WorkspaceID: workspaceID, IssueIds: issueIDs, ChatSessionIds: chatIDs})
 	if err != nil {
 		return nil, err
 	}

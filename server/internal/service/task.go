@@ -5535,9 +5535,11 @@ func (s *TaskService) FailTaskWithTransition(ctx context.Context, taskID pgtype.
 	var retried *db.AgentTaskQueue
 	deterministicEscalated := false
 	if err := s.runInTx(ctx, func(qtx *db.Queries) error {
-		if err := lockChatSessionForTaskWrite(ctx, qtx, taskID); err != nil {
-			return err
+		chatAllowed, chatLockErr := lockChatRetry(ctx, qtx, taskID)
+		if chatLockErr != nil {
+			return chatLockErr
 		}
+		wantRetry = wantRetry && chatAllowed
 		if parentErr == nil {
 			allowed, lockErr := lockIssueRetry(ctx, qtx, parentForFailure)
 			if lockErr != nil {
@@ -6838,8 +6840,12 @@ func (s *TaskService) MaybeRetryFailedTask(ctx context.Context, parent db.AgentT
 	}
 	defer tx.Rollback(ctx)
 	qtx := s.Queries.WithTx(tx)
-	if err := lockChatSessionForTaskWrite(ctx, qtx, parent.ID); err != nil {
-		return nil, err
+	chatAllowed, chatLockErr := lockChatRetry(ctx, qtx, parent.ID)
+	if chatLockErr != nil {
+		return nil, chatLockErr
+	}
+	if !chatAllowed {
+		return nil, nil
 	}
 	allowed, lockErr := lockIssueRetry(ctx, qtx, parent)
 	if lockErr != nil {

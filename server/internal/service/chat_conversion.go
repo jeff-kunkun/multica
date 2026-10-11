@@ -53,6 +53,11 @@ func (s *IssueService) ConvertChatToIssue(ctx context.Context, sessionID pgtype.
 	if _, err := qtx.SetChatSessionConvertedIssue(ctx, db.SetChatSessionConvertedIssueParams{ChatSessionID: sessionID, WorkspaceID: p.WorkspaceID, IssueID: outcome.Issue.ID}); err != nil {
 		return IssueCreateResult{}, err
 	}
+	if err := qtx.MarkStoppedWorkRetrySources(ctx, db.MarkStoppedWorkRetrySourcesParams{
+		WorkspaceID: p.WorkspaceID, ChatSessionIds: []pgtype.UUID{sessionID}, IssueIds: []pgtype.UUID{},
+	}); err != nil {
+		return IssueCreateResult{}, err
+	}
 	cancelled, err := qtx.CancelAgentTasksByChatSession(ctx, sessionID)
 	if err != nil {
 		return IssueCreateResult{}, err

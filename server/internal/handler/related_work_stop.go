@@ -95,7 +95,7 @@ func (h *Handler) authorizeWorkStop(w http.ResponseWriter, r *http.Request, root
 	}
 	// Runs on private agents retain the single-run stop gate. Inspect them
 	// before mutations, including historical dual issue/chat-linked runs.
-	tasks, err := h.Queries.ListActiveRunsForStopTargets(r.Context(), db.ListActiveRunsForStopTargetsParams{
+	tasks, err := h.Queries.ListRunsForStopFence(r.Context(), db.ListRunsForStopFenceParams{
 		WorkspaceID: workspaceID, IssueIds: issueIDs, ChatSessionIds: chatIDs,
 	})
 	if err != nil {

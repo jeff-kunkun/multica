@@ -103,3 +103,18 @@ func TestAutomaticRetryDiscardedAfterIssueStopped(t *testing.T) {
 		t.Fatalf("stopped work retried: %+v %v", child, err)
 	}
 }
+
+func TestDefaultCommentsMergeIntoRunningWakeup(t *testing.T) {
+	f := newSupplementFixture(t, "codex", "running", false)
+	dbfx.Exec(t, `UPDATE issue SET assignee_type='agent', assignee_id=$2 WHERE id=$1`, f.issueID, f.agentID)
+	dbfx.Exec(t, `UPDATE agent_task_queue SET context='{"wakeup_id":"18570000-0000-4000-8000-000000000009"}' WHERE id=$1`, f.taskID)
+	req := withURLParam(newRequest(http.MethodPost, "/comments", map[string]any{"content": "supplement the existing timer run"}), "id", f.issueID)
+	var c CommentResponse
+	testutil.Call(t, testHandler.CreateComment, req).Want(http.StatusCreated).JSON(&c)
+	if n := dbfx.Count(t, `SELECT count(*) FROM agent_task_queue WHERE issue_id=$1 AND status IN ('queued','dispatched','running','waiting_local_directory')`, f.issueID); n != 1 {
+		t.Fatalf("active executions=%d, want 1", n)
+	}
+	if !commentCovered(t, f.issueID, f.agentID, c.ID, "running") {
+		t.Fatal("running wakeup lost comment")
+	}
+}

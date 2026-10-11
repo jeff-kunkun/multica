@@ -1529,8 +1529,8 @@ type CreateCommentRequest struct {
 	// one: its agent keeps the normal trigger.
 	SteerTaskIDs []string `json:"steer_task_ids"`
 	// Mode is the one-word form of the same choice (DENE-1346): steer adds the
-	// comment to the running turns of every agent it wakes, queue (default)
-	// waits for them, restart stops them first. Steer is refused with the
+	// comment to the running turns of every agent it wakes, explicit queue
+	// waits for them, restart stops them first. Omitted mode merges into existing work. Steer is refused with the
 	// reason and the usable modes when no woken turn can read it.
 	// handoff and parallel (DENE-1350) are for an @agent who is not running:
 	// handoff stops every other agent's run here, writes the handoff card and

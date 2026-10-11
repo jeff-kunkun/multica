@@ -87,7 +87,7 @@ func TestStopChatRelatedChecksAllOwnersBeforeAnyCancellation(t *testing.T) {
 	w := httptest.NewRecorder()
 	req := withURLParam(newRequest(http.MethodPost, "/api/chat/sessions/"+origin+"/stop", map[string]any{"related": true}), "sessionId", origin)
 	testHandler.StopChatSession(w, withChatTestWorkspaceCtx(t, req))
-	if w.Code != http.StatusForbidden {
+	if w.Code != http.StatusNotFound {
 		t.Fatalf("expected owner gate: %d %s", w.Code, w.Body.String())
 	}
 	if taskStatus(t, current) != "running" || taskStatus(t, queued) != "queued" {
@@ -153,7 +153,7 @@ func TestUpdateIssueCancelledRelatedPermissionDenialPreservesStatusAndRuns(t *te
 	queued := insertRelatedStopChatTask(t, agent, chat, "queued")
 	w := httptest.NewRecorder()
 	testHandler.UpdateIssue(w, withURLParam(newRequest(http.MethodPatch, "/api/issues/"+issue, map[string]any{"status": "cancelled", "related_stop": true}), "id", issue))
-	if w.Code != http.StatusForbidden {
+	if w.Code != http.StatusNotFound {
 		t.Fatalf("expected owner denial: %d %s", w.Code, w.Body.String())
 	}
 	if issueForGuardTest(t, issue).Status != "in_progress" || taskStatus(t, queued) != "queued" {

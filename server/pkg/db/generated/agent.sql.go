@@ -3626,6 +3626,11 @@ SELECT
 FROM agent_task_queue p
 WHERE p.id = $1
   AND COALESCE(p.context->>'work_stopped', 'false') <> 'true'
+  AND NOT EXISTS (
+    SELECT 1 FROM chat_session converted
+    WHERE converted.id = p.chat_session_id
+      AND (converted.converted_issue_id IS NOT NULL OR converted.status <> 'active')
+  )
   AND lock_task_owner_rows(p.agent_id, p.issue_id, p.runtime_id)
   AND NOT EXISTS (
     SELECT 1 FROM agent_task_queue active
@@ -6191,8 +6196,8 @@ func (q *Queries) HasActiveTaskForIssue(ctx context.Context, issueID pgtype.UUID
 const hasActiveTaskForIssueAndAgent = `-- name: HasActiveTaskForIssueAndAgent :one
 SELECT count(*) > 0 AS has_active FROM agent_task_queue
 WHERE issue_id = $1 AND agent_id = $2
-  AND context->>'wakeup_id' IS NULL
-  AND status IN ('queued', 'dispatched', 'running', 'waiting_local_directory', 'deferred')
+  AND (status IN ('queued', 'dispatched', 'running', 'waiting_local_directory')
+    OR (status = 'deferred' AND context->>'wakeup_id' IS NULL))
 `
 
 type HasActiveTaskForIssueAndAgentParams struct {
@@ -6200,8 +6205,8 @@ type HasActiveTaskForIssueAndAgentParams struct {
 	AgentID pgtype.UUID `json:"agent_id"`
 }
 
-// Default work includes retry/backoff deferred rows, but excludes deliberate
-// wakeup timers, whose separate fire_at lifecycle does not own normal inputs.
+// Default work includes retry/backoff deferred rows. Future wakeup timers do
+// not own normal inputs, but once queued/running they are active executions.
 func (q *Queries) HasActiveTaskForIssueAndAgent(ctx context.Context, arg HasActiveTaskForIssueAndAgentParams) (bool, error) {
 	row := q.db.QueryRow(ctx, hasActiveTaskForIssueAndAgent, arg.IssueID, arg.AgentID)
 	var has_active bool
@@ -9006,12 +9011,12 @@ SET coalesced_comment_ids = (
     runtime_connected_apps = $13
 WHERE id = (
     SELECT t.id FROM agent_task_queue t
-    WHERE t.context->>'wakeup_id' IS NULL AND t.issue_id = $14
-      AND t.agent_id = $15
-      AND ($16::boolean OR t.comment_thread_id IS NOT DISTINCT FROM comment_thread_root_id($1::uuid))
+    WHERE ($14::boolean OR t.context->>'wakeup_id' IS NULL) AND t.issue_id = $15
+      AND t.agent_id = $16
+      AND ($14::boolean OR t.comment_thread_id IS NOT DISTINCT FROM comment_thread_root_id($1::uuid))
       AND (
           t.status = 'queued'
-          OR (t.status = 'deferred' AND ($16::boolean OR t.context->>'channel_issue_media_pending' = 'true'))
+          OR (t.status = 'deferred' AND (($14::boolean AND t.context->>'wakeup_id' IS NULL) OR t.context->>'channel_issue_media_pending' = 'true'))
       )
       -- Head-scoped (TEN-356, #5914): never fold across HEADs. The physical
       -- unique index is per (issue_id, agent_id, thread), so an insert-race loser can
@@ -9042,9 +9047,9 @@ type MergeCommentIntoPendingTaskParams struct {
 	NewTriggerEvidenceRefID pgtype.UUID `json:"new_trigger_evidence_ref_id"`
 	NewRuntimeMcpOverlay    []byte      `json:"new_runtime_mcp_overlay"`
 	NewRuntimeConnectedApps []byte      `json:"new_runtime_connected_apps"`
+	AcrossThreads           bool        `json:"across_threads"`
 	IssueID                 pgtype.UUID `json:"issue_id"`
 	AgentID                 pgtype.UUID `json:"agent_id"`
-	AcrossThreads           bool        `json:"across_threads"`
 	HeadSha                 pgtype.Text `json:"head_sha"`
 }
 
@@ -9112,9 +9117,9 @@ func (q *Queries) MergeCommentIntoPendingTask(ctx context.Context, arg MergeComm
 		arg.NewTriggerEvidenceRefID,
 		arg.NewRuntimeMcpOverlay,
 		arg.NewRuntimeConnectedApps,
+		arg.AcrossThreads,
 		arg.IssueID,
 		arg.AgentID,
-		arg.AcrossThreads,
 		arg.HeadSha,
 	)
 	var i MergeCommentIntoPendingTaskRow
@@ -10494,9 +10499,9 @@ SET coalesced_comment_ids = (
     )
 WHERE id = (
     SELECT t.id FROM agent_task_queue t
-    WHERE t.context->>'wakeup_id' IS NULL AND t.issue_id = $2
-      AND t.agent_id = $3
-      AND ($4::boolean OR t.comment_thread_id IS NOT DISTINCT FROM comment_thread_root_id($1::uuid))
+    WHERE ($2::boolean OR t.context->>'wakeup_id' IS NULL) AND t.issue_id = $3
+      AND t.agent_id = $4
+      AND ($2::boolean OR t.comment_thread_id IS NOT DISTINCT FROM comment_thread_root_id($1::uuid))
       AND t.status IN ('dispatched', 'running', 'waiting_local_directory')
       AND (
           COALESCE($5::text, '') = ''
@@ -10511,9 +10516,9 @@ RETURNING id, coalesced_comment_ids
 
 type RegisterPlannedCommentForActiveTaskParams struct {
 	CommentID     pgtype.UUID `json:"comment_id"`
+	AcrossThreads bool        `json:"across_threads"`
 	IssueID       pgtype.UUID `json:"issue_id"`
 	AgentID       pgtype.UUID `json:"agent_id"`
-	AcrossThreads bool        `json:"across_threads"`
 	HeadSha       pgtype.Text `json:"head_sha"`
 }
 
@@ -10551,9 +10556,9 @@ type RegisterPlannedCommentForActiveTaskRow struct {
 func (q *Queries) RegisterPlannedCommentForActiveTask(ctx context.Context, arg RegisterPlannedCommentForActiveTaskParams) (RegisterPlannedCommentForActiveTaskRow, error) {
 	row := q.db.QueryRow(ctx, registerPlannedCommentForActiveTask,
 		arg.CommentID,
+		arg.AcrossThreads,
 		arg.IssueID,
 		arg.AgentID,
-		arg.AcrossThreads,
 		arg.HeadSha,
 	)
 	var i RegisterPlannedCommentForActiveTaskRow
