@@ -223,6 +223,14 @@ func (j SystemOneJudge) Assign(ctx context.Context, target Target, st JudgeState
 		},
 	}
 
+	if len(st.CandidateSeries) > 0 {
+		seriesChoices := map[string]any{"": "No series preference for this work."}
+		for _, series := range st.CandidateSeries {
+			seriesChoices[series] = "Prefer this series only within the chosen tier when policy_prompt favors it for this work."
+		}
+		req.Questions["preferred_series"] = systemOneQuestion{Type: "choice", Instructions: "Follow policy_prompt to choose a preferred series from candidate_series for this work, or the empty choice if none. This preference never changes the tier; unavailable series fall back normally.", Criteria: seriesChoices}
+	}
+
 	resp, err := j.evaluate(ctx, target, req)
 	if err != nil {
 		return Verdict{}, err
@@ -251,6 +259,10 @@ func (j SystemOneJudge) Assign(ctx context.Context, target Target, st JudgeState
 		Reviewer:           kind,
 		ReviewerConfidence: reviewer.Confidence,
 	}
+	if answer, ok := resp.Answers["preferred_series"]; ok {
+		v.PreferredSeries = answer.Choice
+	}
+
 	if kind == ReviewerSeat {
 		tier, ok := resp.Answers[qReviewerTier]
 		if !ok || tier.Choice == "" {

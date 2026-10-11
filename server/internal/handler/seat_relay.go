@@ -81,11 +81,15 @@ func (h *Handler) substituteAgent(ctx context.Context, workspaceID pgtype.UUID, 
 		if agent.RoutingTier.Valid {
 			tier = agent.RoutingTier.String
 		}
-		seat := routing.Agent{ID: id, Name: agent.Name, Tier: tier, Usage: agent.RoutingUsage, Model: agent.Model.String, State: state}
+		series := service.AgentSeries(ctx, h.Queries, agent)
+		seat := routing.Agent{ID: id, Name: agent.Name, Tier: tier, Usage: agent.RoutingUsage, Model: agent.Model.String, RuntimeMode: series.AutomaticSeries, Series: series.Series, State: state}
 		seats.fill(&seat, agent)
 		roster[agent.Name] = seat
 		byID[id] = agent
 	}
+	// Keep the unavailable holder in the roster for family identity only.
+	series := service.AgentSeries(ctx, h.Queries, failed)
+	roster[failed.Name] = routing.Agent{ID: uuidToString(failed.ID), Name: failed.Name, Model: failed.Model.String, RuntimeMode: series.AutomaticSeries, Series: series.Series, Tier: failed.RoutingTier.String, State: service.AgentSeatState(failed)}
 	holder := routing.Seat{ID: uuidToString(failed.ID), Name: failed.Name}
 	if failed.RoutingTier.Valid {
 		holder.TierKey = failed.RoutingTier.String

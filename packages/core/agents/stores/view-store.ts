@@ -29,12 +29,13 @@ export const AGENT_SCOPES: AgentsScope[] = ["mine", "all", "archived"];
  * of headers in one list cost more to read than they explain. Persisted with
  * the rest of the view state; nothing about it belongs in the Query cache.
  */
-export type AgentGrouping = "none" | "squad" | "specialization";
+export type AgentGrouping = "none" | "squad" | "specialization" | "series";
 
 export const AGENT_GROUPINGS: AgentGrouping[] = [
   "none",
   "squad",
   "specialization",
+  "series",
 ];
 
 export type AgentSortField = "lastActive" | "name" | "runs" | "created";

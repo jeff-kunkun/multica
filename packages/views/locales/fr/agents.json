@@ -236,7 +236,13 @@
     "dispatch_projects_empty": "Aucun projet",
     "routing_inherited_hint": "Suit le rôle de base. Pour les régler ici, désactivez le suivi plus haut.",
     "prop_routing_usage": "Usage",
-    "prop_routing_usage_hint": "Quota de compte disponible, en relatif"
+    "prop_routing_usage_hint": "Quota de compte disponible, en relatif",
+    "prop_series": "Série",
+    "prop_series_hint": "Effacez pour utiliser la série automatique.",
+    "series_readonly": "Vous ne pouvez pas modifier cet agent.",
+    "series_auto": "Automatique",
+    "series_manual": "Manuelle",
+    "series_unknown": "Non classée"
   },
   "overview": {
     "agent_context": "Agent",
@@ -1263,7 +1269,8 @@
     "group_by": "Regrouper par",
     "grouping_none": "Aucun",
     "grouping_squad": "Squad",
-    "grouping_specialization": "Rôles de base"
+    "grouping_specialization": "Rôles de base",
+    "grouping_series": "Série"
   },
   "actions": {
     "selected_one": "{{count}} sélectionné",

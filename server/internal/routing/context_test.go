@@ -223,10 +223,13 @@ func TestRouteSkipsASeatTheSnapshotAlreadySaysIsDead(t *testing.T) {
 		t.Fatalf("provider quotas = %#v", state.ProviderQuotas)
 	}
 	var deadSeen bool
+	// A dead seat is excluded, but another live seat keeps its rung usable.
+	strongPresent := false
 	for _, tier := range state.Candidates {
-		if tier == "strong" {
-			t.Fatal("dead strong seat stayed in candidate_tiers")
-		}
+		strongPresent = strongPresent || tier == "strong"
+	}
+	if !strongPresent {
+		t.Fatal("live same-tier alternatives were hidden from the judge")
 	}
 	for _, seat := range state.Seats {
 		if seat.AgentID == "a-goku" {
