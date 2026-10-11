@@ -69,7 +69,7 @@ func route(name, method, pattern string, write bool) managedRoute {
 // IDs are canonical UUIDs; issues additionally accept their public identifier.
 // Never use an arbitrary segment: it also matches fixed collection endpoints.
 const seg = `[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}`
-const issueRef = `(?:` + seg + `|[A-Za-z][A-Za-z0-9]*-[1-9][0-9]*)`
+const issueRef = `(?:` + seg + `|[A-Za-z0-9]{1,10}-[1-9][0-9]*)`
 
 // managedRoutes is the whole whitelist. Lookups (labels, properties,
 // statuses, projects, members, agents, squads) are read-only and exist so

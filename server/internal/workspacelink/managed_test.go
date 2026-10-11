@@ -330,7 +330,7 @@ func TestManagedRouteExactParameters(t *testing.T) {
 		"/api/issues/limit-usage", "/api/issues/child-progress", "/api/issues/parking",
 		"/api/issues/grouped", "/api/issues/stall-actions", "/api/autopilots/usage",
 		"/api/issues/future-endpoint", "/api/autopilots/future-endpoint",
-		"/api/projects/not-an-id/resources", "/api/issues/WL-0", "/api/issues/WL-12/extra",
+		"/api/projects/not-an-id/resources", "/api/issues/WL-0", "/api/issues/WL-12/extra", "/api/issues/ABCDEFGHIJK-12", "/api/issues/-12",
 	} {
 		for _, method := range []string{"GET", "POST", "PUT", "PATCH", "DELETE"} {
 			if rt, _, ok := matchManagedRoute(method, path); ok {
@@ -338,7 +338,7 @@ func TestManagedRouteExactParameters(t *testing.T) {
 			}
 		}
 	}
-	for _, path := range []string{"/api/issues/WL-12", "/api/issues/01a12a2a-d7c1-7b2c-86d9-8ac9c11e7b44", "/api/autopilots/01a12a2a-d7c1-7b2c-86d9-8ac9c11e7b44"} {
+	for _, path := range []string{"/api/issues/123-12", "/api/issues/3TEAM-12", "/api/issues/1234567890-12", "/api/issues/3team-12", "/api/issues/WL-12", "/api/issues/01a12a2a-d7c1-7b2c-86d9-8ac9c11e7b44", "/api/autopilots/01a12a2a-d7c1-7b2c-86d9-8ac9c11e7b44"} {
 		if _, _, ok := matchManagedRoute("GET", path); !ok {
 			t.Errorf("valid reference rejected: %s", path)
 		}
