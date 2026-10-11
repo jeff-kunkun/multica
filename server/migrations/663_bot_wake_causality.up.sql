@@ -23,7 +23,7 @@ BEGIN
  bot:=NEW.via_bot_id;
  IF task IS NOT NULL THEN SELECT wake_root_id,wake_hop INTO root,hops FROM agent_task_queue WHERE id=task; END IF;
  IF root IS NULL AND bot IS NOT NULL THEN
-  INSERT INTO bot_wake_cause(bot_id,root_id) VALUES(bot,gen_random_uuid()) ON CONFLICT DO NOTHING;
+  INSERT INTO bot_wake_cause(bot_id,root_id) SELECT id,gen_random_uuid() FROM personal_access_token WHERE id=bot ON CONFLICT DO NOTHING;
   SELECT root_id,hop INTO root,hops FROM bot_wake_cause WHERE bot_id=bot;
  END IF;
  NEW.wake_root_id:=root;NEW.wake_hop:=COALESCE(hops,0);
@@ -37,7 +37,7 @@ DECLARE root uuid; hops integer; parent uuid; ws uuid;
 BEGIN
  IF TG_OP='UPDATE' THEN
   -- A cancelled cap record cannot be re-queued by retrying a status mutation.
-  IF OLD.error='bot wake chain limit (4)' THEN NEW.status:='cancelled';NEW.error:=OLD.error; END IF;
+  IF OLD.error IN ('bot wake chain limit (4)','bot wake source unavailable') THEN NEW.status:='cancelled';NEW.error:=OLD.error; END IF;
   RETURN NEW;
  END IF;
  IF NEW.originator_source='direct_human' AND NEW.via_bot_id IS NULL THEN RETURN NEW; END IF;
@@ -57,7 +57,10 @@ BEGIN
   INSERT INTO bot_wake_cause(bot_id,root_id) SELECT id,gen_random_uuid() FROM personal_access_token WHERE id=NEW.via_bot_id AND workspace_id=ws ON CONFLICT DO NOTHING;
   SELECT root_id INTO root FROM bot_wake_cause WHERE bot_id=NEW.via_bot_id;
  END IF;
- IF root IS NULL THEN RETURN NEW; END IF;
+ IF root IS NULL THEN
+  IF NEW.via_bot_id IS NOT NULL THEN NEW.status:='cancelled';NEW.error:='bot wake source unavailable';NEW.completed_at:=clock_timestamp(); END IF;
+  RETURN NEW;
+ END IF;
  INSERT INTO bot_wake_chain(root_id,workspace_id) VALUES(root,ws) ON CONFLICT DO NOTHING;
  UPDATE bot_wake_chain c SET hops=c.hops+1 WHERE c.root_id=root AND c.workspace_id=ws AND c.hops<4 RETURNING c.hops INTO hops;
  NEW.wake_root_id:=root;
@@ -90,7 +93,7 @@ BEGIN
   via:=NEW.via_bot_id;vname:=NEW.via_bot_name;stask:=NEW.source_task_id;
   IF stask IS NOT NULL THEN SELECT wake_root_id,wake_hop INTO root,hops FROM agent_task_queue WHERE id=stask; END IF;
   IF root IS NULL AND via IS NOT NULL THEN
-   INSERT INTO bot_wake_cause(bot_id,root_id) VALUES(via,gen_random_uuid()) ON CONFLICT DO NOTHING;
+   INSERT INTO bot_wake_cause(bot_id,root_id) SELECT id,gen_random_uuid() FROM personal_access_token WHERE id=via AND workspace_id=ws ON CONFLICT DO NOTHING;
    SELECT root_id,hop INTO root,hops FROM bot_wake_cause WHERE bot_id=via;
   END IF;
  ELSE
@@ -102,7 +105,7 @@ BEGIN
   stask:=NULLIF(current_setting('multica.source_task_id',true),'')::uuid;
   IF stask IS NOT NULL THEN SELECT wake_root_id,wake_hop INTO root,hops FROM agent_task_queue WHERE id=stask; END IF;
   IF root IS NULL AND via IS NOT NULL THEN
-   INSERT INTO bot_wake_cause(bot_id,root_id) VALUES(via,gen_random_uuid()) ON CONFLICT DO NOTHING;
+   INSERT INTO bot_wake_cause(bot_id,root_id) SELECT id,gen_random_uuid() FROM personal_access_token WHERE id=via AND workspace_id=ws ON CONFLICT DO NOTHING;
    SELECT root_id,hop INTO root,hops FROM bot_wake_cause WHERE bot_id=via;
   END IF;
   IF TG_OP='INSERT' THEN typ:='task'; body:=COALESCE(NEW.description,'');
@@ -119,7 +122,8 @@ BEGIN
  IF typ IS NULL THEN RETURN NEW; END IF;
  IF via IS NOT NULL AND (atype='member' OR stask IS NULL) THEN atype:='bot';aid:=via; END IF;
  IF TG_TABLE_NAME='comment' AND atype='agent' AND stask IS NULL AND via IS NULL THEN atype:='system';aid:=NULL; END IF;
- root:=COALESCE(root,eid);hops:=COALESCE(hops,0);
+ IF root IS NULL AND (via IS NULL OR EXISTS(SELECT 1 FROM personal_access_token WHERE id=via AND workspace_id=ws)) THEN root:=eid; END IF;
+ hops:=COALESCE(hops,0);
  FOR b IN SELECT id,user_id FROM personal_access_token WHERE kind='bot' AND workspace_id=ws AND NOT revoked AND deleted_at IS NULL LOOP
   mentioned:=bot_wake_mention_text(body) ~ ('(?n)\[@?(.+?)\]\(mention://bot/' || b.id::text || '\)');
   IF mentioned THEN

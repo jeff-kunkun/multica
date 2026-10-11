@@ -189,6 +189,11 @@ func TestBotWakeTrustedChainHTTP(t *testing.T) {
 		t.Fatal("status actor was not actual Bot")
 	}
 	drain()
+	historical := dbfx.Task(t, agent, testutil.Cols{"issue_id": issue, "via_bot_id": "00000000-0000-0000-0000-000000000042", "via_bot_name": "deleted historical", "originator_user_id": testUserID, "accountable_user_id": testUserID})
+	dbfx.QueryRow(t, `SELECT status,error FROM agent_task_queue WHERE id=$1`, historical).Scan(&status, &reason)
+	if status != "cancelled" || reason != "bot wake source unavailable" {
+		t.Fatalf("historical source gate %s %s", status, reason)
+	}
 	if bin := os.Getenv("BOT_WAKE_TEST_CLI"); bin != "" {
 		runCLI := func(token string, args ...string) bool {
 			t.Helper()
