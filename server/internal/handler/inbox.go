@@ -357,7 +357,7 @@ func (h *Handler) MarkInboxRead(w http.ResponseWriter, r *http.Request) {
 
 	userID := requestUserID(r)
 	workspaceID := uuidToString(item.WorkspaceID)
-	h.publish(protocol.EventInboxRead, workspaceID, "member", userID, map[string]any{
+	h.publishWithSource(r.Context(), protocol.EventInboxRead, workspaceID, "member", userID, map[string]any{
 		"item_id":      uuidToString(item.ID),
 		"recipient_id": uuidToString(item.RecipientID),
 	})
@@ -386,7 +386,7 @@ func (h *Handler) MarkInboxUnread(w http.ResponseWriter, r *http.Request) {
 
 	userID := requestUserID(r)
 	workspaceID := uuidToString(item.WorkspaceID)
-	h.publish(protocol.EventInboxUnread, workspaceID, "member", userID, map[string]any{
+	h.publishWithSource(r.Context(), protocol.EventInboxUnread, workspaceID, "member", userID, map[string]any{
 		"item_id":      uuidToString(item.ID),
 		"recipient_id": uuidToString(item.RecipientID),
 	})
@@ -419,7 +419,7 @@ func (h *Handler) ArchiveInboxItem(w http.ResponseWriter, r *http.Request) {
 
 	userID := requestUserID(r)
 	workspaceID := uuidToString(item.WorkspaceID)
-	h.publish(protocol.EventInboxArchived, workspaceID, "member", userID, map[string]any{
+	h.publishWithSource(r.Context(), protocol.EventInboxArchived, workspaceID, "member", userID, map[string]any{
 		"item_id":      uuidToString(item.ID),
 		"issue_id":     uuidToPtr(item.IssueID),
 		"recipient_id": uuidToString(item.RecipientID),
@@ -461,7 +461,7 @@ func (h *Handler) UnarchiveInboxItem(w http.ResponseWriter, r *http.Request) {
 
 	userID := requestUserID(r)
 	workspaceID := uuidToString(item.WorkspaceID)
-	h.publish(protocol.EventInboxUnarchived, workspaceID, "member", userID, map[string]any{
+	h.publishWithSource(r.Context(), protocol.EventInboxUnarchived, workspaceID, "member", userID, map[string]any{
 		"item_id":      uuidToString(item.ID),
 		"issue_id":     uuidToPtr(item.IssueID),
 		"recipient_id": uuidToString(item.RecipientID),
@@ -552,7 +552,7 @@ func (h *Handler) MarkAllInboxRead(w http.ResponseWriter, r *http.Request) {
 	}
 
 	slog.Info("inbox: mark all read", append(logger.RequestAttrs(r), "user_id", userID, "count", count)...)
-	h.publish(protocol.EventInboxBatchRead, workspaceID, "member", userID, map[string]any{
+	h.publishWithSource(r.Context(), protocol.EventInboxBatchRead, workspaceID, "member", userID, map[string]any{
 		"recipient_id": userID,
 		"count":        count,
 	})
@@ -581,7 +581,7 @@ func (h *Handler) ArchiveAllInbox(w http.ResponseWriter, r *http.Request) {
 	}
 
 	slog.Info("inbox: archive all", append(logger.RequestAttrs(r), "user_id", userID, "count", count)...)
-	h.publish(protocol.EventInboxBatchArchived, workspaceID, "member", userID, map[string]any{
+	h.publishWithSource(r.Context(), protocol.EventInboxBatchArchived, workspaceID, "member", userID, map[string]any{
 		"recipient_id": userID,
 		"count":        count,
 	})
@@ -610,7 +610,7 @@ func (h *Handler) ArchiveAllReadInbox(w http.ResponseWriter, r *http.Request) {
 	}
 
 	slog.Info("inbox: archive all read", append(logger.RequestAttrs(r), "user_id", userID, "count", count)...)
-	h.publish(protocol.EventInboxBatchArchived, workspaceID, "member", userID, map[string]any{
+	h.publishWithSource(r.Context(), protocol.EventInboxBatchArchived, workspaceID, "member", userID, map[string]any{
 		"recipient_id": userID,
 		"count":        count,
 	})
@@ -645,7 +645,7 @@ func (h *Handler) ArchiveCompletedInbox(w http.ResponseWriter, r *http.Request) 
 	}
 
 	slog.Info("inbox: archive completed", append(logger.RequestAttrs(r), "user_id", userID, "count", count)...)
-	h.publish(protocol.EventInboxBatchArchived, workspaceID, "member", userID, map[string]any{
+	h.publishWithSource(r.Context(), protocol.EventInboxBatchArchived, workspaceID, "member", userID, map[string]any{
 		"recipient_id": userID,
 		"count":        count,
 	})
@@ -741,7 +741,7 @@ func (h *Handler) MarkIssueInboxRead(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if len(ids) > 0 {
-		h.publish(protocol.EventInboxBatchRead, workspaceID, "member", userID, map[string]any{
+		h.publishWithSource(r.Context(), protocol.EventInboxBatchRead, workspaceID, "member", userID, map[string]any{
 			"recipient_id": userID,
 			"count":        len(ids),
 		})

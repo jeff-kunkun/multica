@@ -11,6 +11,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/analytics"
+	"github.com/multica-ai/multica/server/internal/botsource"
 	"github.com/multica-ai/multica/server/internal/logger"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/util"
@@ -327,7 +328,7 @@ func (h *Handler) CreateSquad(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to load squad member preview")
 		return
 	}
-	h.publish(protocol.EventSquadCreated, workspaceID, "member", uuidToString(member.UserID), map[string]any{"squad": resp})
+	h.publishWithSource(r.Context(), protocol.EventSquadCreated, workspaceID, "member", uuidToString(member.UserID), map[string]any{"squad": resp})
 	obsmetrics.RecordEvent(h.Analytics, h.Metrics, analytics.SquadCreated(
 		uuidToString(member.UserID),
 		workspaceID,
@@ -485,9 +486,9 @@ func (h *Handler) UpdateSquad(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to load squad member preview")
 		return
 	}
-	h.publish(protocol.EventSquadUpdated, workspaceID, "member", requestUserID(r), map[string]any{"squad": resp})
+	h.publishWithSource(r.Context(), protocol.EventSquadUpdated, workspaceID, "member", requestUserID(r), map[string]any{"squad": resp})
 	for _, autopilot := range pausedAutopilots {
-		h.publish(protocol.EventAutopilotUpdated, workspaceID, "member", requestUserID(r), map[string]any{
+		h.publishWithSource(r.Context(), protocol.EventAutopilotUpdated, workspaceID, "member", requestUserID(r), map[string]any{
 			"autopilot": autopilotToResponse(autopilot, nil),
 		})
 	}
@@ -547,7 +548,7 @@ func (h *Handler) DeleteSquad(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.publish(protocol.EventSquadDeleted, workspaceID, "member", userID, map[string]any{
+	h.publishWithSource(r.Context(), protocol.EventSquadDeleted, workspaceID, "member", userID, map[string]any{
 		"squad_id":  uuidToString(squad.ID),
 		"leader_id": uuidToString(squad.LeaderID),
 	})
@@ -862,7 +863,7 @@ func (h *Handler) AddSquadMember(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusCreated, squadMemberToResponse(sm))
-	h.publish(protocol.EventSquadUpdated, workspaceID, "member", requestUserID(r), map[string]any{
+	h.publishWithSource(r.Context(), protocol.EventSquadUpdated, workspaceID, "member", requestUserID(r), map[string]any{
 		"squad_id": uuidToString(squad.ID),
 	})
 }
@@ -917,7 +918,7 @@ func (h *Handler) RemoveSquadMember(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.publish(protocol.EventSquadUpdated, workspaceID, "member", requestUserID(r), map[string]any{
+	h.publishWithSource(r.Context(), protocol.EventSquadUpdated, workspaceID, "member", requestUserID(r), map[string]any{
 		"squad_id": uuidToString(squad.ID),
 	})
 	w.WriteHeader(http.StatusNoContent)
@@ -965,7 +966,7 @@ func (h *Handler) UpdateSquadMemberRole(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	h.publish(protocol.EventSquadUpdated, workspaceID, "member", requestUserID(r), map[string]any{
+	h.publishWithSource(r.Context(), protocol.EventSquadUpdated, workspaceID, "member", requestUserID(r), map[string]any{
 		"squad_id": uuidToString(squad.ID),
 	})
 	writeJSON(w, http.StatusOK, squadMemberToResponse(sm))
@@ -1114,6 +1115,7 @@ func (h *Handler) RecordSquadLeaderEvaluation(w http.ResponseWriter, r *http.Req
 	})
 
 	activity, err := h.Queries.CreateActivity(r.Context(), db.CreateActivityParams{
+		ViaBotID: botsource.FromContext(r.Context()).ID, ViaBotName: pgtype.Text{String: botsource.FromContext(r.Context()).Name, Valid: botsource.FromContext(r.Context()).ID.Valid},
 		ID:          dbid.NewV7(),
 		WorkspaceID: issue.WorkspaceID,
 		IssueID:     issue.ID,
@@ -1131,7 +1133,7 @@ func (h *Handler) RecordSquadLeaderEvaluation(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	h.publish(protocol.EventActivityCreated, uuidToString(issue.WorkspaceID), "agent", actorID, map[string]any{
+	h.publishWithSource(r.Context(), protocol.EventActivityCreated, uuidToString(issue.WorkspaceID), "agent", actorID, map[string]any{
 		"issue_id": uuidToString(issue.ID),
 		"entry": map[string]any{
 			"type":       "activity",

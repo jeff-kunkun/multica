@@ -11,6 +11,7 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/auth"
+	"github.com/multica-ai/multica/server/internal/botsource"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
@@ -39,9 +40,9 @@ func rejectTemporarilyDisabledUser(w http.ResponseWriter, r *http.Request, userI
 // Sets X-User-ID and X-User-Email headers on the request for downstream handlers.
 //
 // patCache is optional; when non-nil, PAT lookups are cached with a short
-// TTL (auth.AuthCacheTTL). On cache hit the middleware skips both the DB
-// SELECT and the last_used_at UPDATE — last_used_at is therefore refreshed
-// at most once per TTL window per token, not per request.
+// TTL (auth.AuthCacheTTL). Personal-token hits skip DB reads and writes.
+// Bot tokens always revalidate against the DB, including on cache hits, so
+// revocation takes effect even when Redis invalidation is unavailable.
 //
 // cfSigner is optional; when non-nil, a session renewed here also gets fresh
 // CloudFront cookies. It is wired into THIS middleware rather than left to
@@ -67,6 +68,11 @@ func Auth(queries *db.Queries, patCache *auth.PATCache, cloudPAT *auth.CloudPATV
 			// to convince a downstream handler that its request came
 			// from a non-task-token path.
 			r.Header.Del("X-Actor-Source")
+			r.Header.Del("X-User-ID")
+			r.Header.Del("X-User-Email")
+			r.Header.Del("X-Actor-Bot-ID")
+			r.Header.Del("X-Actor-Bot-Name")
+			r = r.WithContext(botsource.WithContext(r.Context(), botsource.Source{}))
 
 			// The carrier scope marker is server-set on the same terms, and
 			// for a sharper reason: the upload handler READS it to apply the
@@ -160,6 +166,9 @@ func Auth(queries *db.Queries, patCache *auth.PATCache, cloudPAT *auth.CloudPATV
 				// this header is allowed to carry — strip anything else a
 				// client tried to send.
 				r.Header.Set("X-Actor-Source", "task_token")
+				if tt.ViaBotID.Valid {
+					r = r.WithContext(botsource.WithContext(r.Context(), botsource.Source{ID: tt.ViaBotID, Name: tt.ViaBotName.String}))
+				}
 				if carrierScope {
 					// Tells the upload handler that this credential is an
 					// alignment carrier's, so the one write it is allowed
@@ -167,7 +176,7 @@ func Auth(queries *db.Queries, patCache *auth.PATCache, cloudPAT *auth.CloudPATV
 					// carrier's own reply.
 					r.Header.Set(IssueDraftScopeHeader, IssueDraftScopeValue)
 				}
-				next.ServeHTTP(w, r)
+				serveAuthenticated(next, w, r)
 				return
 			}
 
@@ -227,7 +236,7 @@ func Auth(queries *db.Queries, patCache *auth.PATCache, cloudPAT *auth.CloudPATV
 				// treated as the owner having approved an account-
 				// level action.
 				r.Header.Set("X-Actor-Source", "cloud_pat")
-				next.ServeHTTP(w, r)
+				serveAuthenticated(next, w, r)
 				return
 			}
 
@@ -239,12 +248,15 @@ func Auth(queries *db.Queries, patCache *auth.PATCache, cloudPAT *auth.CloudPATV
 				// last time we looked, and nothing has invalidated the
 				// entry since. Skip the DB SELECT and the last_used_at
 				// UPDATE — last_used_at is bumped once per TTL window.
-				if userID, ok := patCache.Get(r.Context(), hash); ok {
+				// Bot cache hits deliberately re-read the DB below: revocation and
+				// rotation must take effect even when Redis invalidation fails.
+				if identity, ok := patCache.GetIdentity(r.Context(), hash); ok && identity.Kind == "personal" {
+					userID := identity.UserID
 					if rejectTemporarilyDisabledUser(w, r, userID, "", "pat_cache") {
 						return
 					}
 					r.Header.Set("X-User-ID", userID)
-					next.ServeHTTP(w, r)
+					serveAuthenticated(next, w, r)
 					return
 				}
 
@@ -272,14 +284,17 @@ func Auth(queries *db.Queries, patCache *auth.PATCache, cloudPAT *auth.CloudPATV
 				if pat.ExpiresAt.Valid {
 					expiresAt = pat.ExpiresAt.Time
 				}
-				patCache.Set(r.Context(), hash, userID, auth.TTLForExpiry(time.Now(), expiresAt))
+				patCache.SetIdentity(r.Context(), hash, auth.PATIdentity{UserID: userID, TokenID: uuidToString(pat.ID), Kind: pat.Kind, Name: pat.Name}, auth.TTLForExpiry(time.Now(), expiresAt))
+				if pat.Kind == "bot" {
+					r = r.WithContext(botsource.WithContext(r.Context(), botsource.Source{ID: pat.ID, Name: pat.Name}))
+				}
 
 				// Cache miss = TTL expired (or first use after revoke /
 				// process restart). Refresh last_used_at; subsequent hits
 				// within the TTL window skip this write entirely.
 				go queries.UpdatePersonalAccessTokenLastUsed(context.Background(), pat.ID)
 
-				next.ServeHTTP(w, r)
+				serveAuthenticated(next, w, r)
 				return
 			}
 
@@ -324,7 +339,7 @@ func Auth(queries *db.Queries, patCache *auth.PATCache, cloudPAT *auth.CloudPATV
 			// (MUL-7436).
 			r = renewCookieSession(w, r, claims, fromCookie, cfSigner)
 
-			next.ServeHTTP(w, r)
+			serveAuthenticated(next, w, r)
 		})
 	}
 }
@@ -344,4 +359,23 @@ func extractToken(r *http.Request) (token string, fromCookie bool) {
 	}
 
 	return "", false
+}
+
+// serveAuthenticated stamps only identity headers established by authentication.
+// Both entry points strip client identity headers before reaching this function.
+func serveAuthenticated(next http.Handler, w http.ResponseWriter, r *http.Request) {
+	actor := botsource.Actor{}
+	if raw := r.Header.Get("X-Agent-ID"); raw != "" {
+		if actor.ID.Scan(raw) == nil && actor.ID.Valid {
+			actor.Type = "agent"
+		}
+	} else if raw := r.Header.Get("X-User-ID"); raw != "" {
+		if actor.ID.Scan(raw) == nil && actor.ID.Valid {
+			actor.Type = "member"
+		}
+	}
+	if actor.Type == "" {
+		actor.ID = pgtype.UUID{}
+	}
+	next.ServeHTTP(w, r.WithContext(botsource.WithActor(r.Context(), actor)))
 }

@@ -186,7 +186,7 @@ func (h *Handler) CreatePin(w http.ResponseWriter, r *http.Request) {
 	}
 
 	resp := pinnedItemToResponse(pin)
-	h.publish(protocol.EventPinCreated, workspaceID, "member", userID, map[string]any{"pin": resp})
+	h.publishWithSource(r.Context(), protocol.EventPinCreated, workspaceID, "member", userID, map[string]any{"pin": resp})
 	if req.ItemType == pinnedItemTypeChat {
 		// The caller's Chat list sorts on this flag too.
 		h.publishChatPinned(workspaceID, userID, chatSession, true)
@@ -223,7 +223,7 @@ func (h *Handler) DeletePin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.publish(protocol.EventPinDeleted, workspaceID, "member", userID, map[string]any{
+	h.publishWithSource(r.Context(), protocol.EventPinDeleted, workspaceID, "member", userID, map[string]any{
 		"item_type": itemType,
 		"item_id":   itemID,
 	})
@@ -275,7 +275,7 @@ func (h *Handler) ReorderPins(w http.ResponseWriter, r *http.Request) {
 	// Fan out so other sessions (web/desktop, or a second tab) refetch
 	// the pin list and pick up the new order. Without this, reorder is
 	// only consistent on the originating client until a hard refresh.
-	h.publish(protocol.EventPinReordered, workspaceID, "member", userID, map[string]any{"items": req.Items})
+	h.publishWithSource(r.Context(), protocol.EventPinReordered, workspaceID, "member", userID, map[string]any{"items": req.Items})
 
 	w.WriteHeader(http.StatusNoContent)
 }

@@ -16,6 +16,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/botsource"
 	"github.com/multica-ai/multica/server/internal/closeprotocol"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/service"
@@ -124,6 +125,7 @@ func (h *Handler) clearCloseMetadata(ctx context.Context, issue db.Issue) {
 func (h *Handler) stallComment(ctx context.Context, issue db.Issue, body string) pgtype.UUID {
 	commentID := dbid.NewV7()
 	created, err := h.Queries.CreateComment(ctx, db.CreateCommentParams{
+		ViaBotID: botsource.FromContext(ctx).ID, ViaBotName: pgtype.Text{String: botsource.FromContext(ctx).Name, Valid: botsource.FromContext(ctx).ID.Valid},
 		ID: commentID, IssueID: issue.ID, WorkspaceID: issue.WorkspaceID,
 		AuthorType: "system", AuthorID: pgtype.UUID{Valid: true}, Content: body,
 		Type: "system", ParentID: pgtype.UUID{Valid: false},
@@ -203,7 +205,9 @@ func (h *Handler) autoCompleteParent(ctx context.Context, parent, child db.Issue
 	if parent.Status == "done" || parent.Status == "cancelled" {
 		return nil
 	}
-	updated, err := h.Queries.UpdateIssueStatus(ctx, db.UpdateIssueStatusParams{ID: parent.ID, Status: "done", WorkspaceID: parent.WorkspaceID})
+	updated, err := h.Queries.UpdateIssueStatus(ctx, db.UpdateIssueStatusParams{
+		ActorType: pgtype.Text{String: botsource.ActorFromContext(ctx).Type, Valid: botsource.ActorFromContext(ctx).Type != ""}, ActorID: botsource.ActorFromContext(ctx).ID,
+		ViaBotID: botsource.FromContext(ctx).ID, ViaBotName: pgtype.Text{String: botsource.FromContext(ctx).Name, Valid: botsource.FromContext(ctx).ID.Valid}, ID: parent.ID, Status: "done", WorkspaceID: parent.WorkspaceID})
 	if err != nil {
 		return err
 	}
@@ -228,7 +232,7 @@ func (h *Handler) autoCompleteParent(ctx context.Context, parent, child db.Issue
 	}
 	h.notifyStallInbox(ctx, updated, "父票已自动收口", "所有子任务已完成，父票已标记 done；7 天内可撤销。", "undo")
 	if fresh, err := h.Queries.GetIssue(ctx, updated.ID); err == nil {
-		h.publish(protocol.EventIssueUpdated, util.UUIDToString(fresh.WorkspaceID), "system", "", map[string]any{"issue": service.IssueToMapResolved(ctx, h.Queries, fresh, h.getIssuePrefix(ctx, fresh.WorkspaceID))})
+		h.publishWithSource(ctx, protocol.EventIssueUpdated, util.UUIDToString(fresh.WorkspaceID), "system", "", map[string]any{"issue": service.IssueToMapResolved(ctx, h.Queries, fresh, h.getIssuePrefix(ctx, fresh.WorkspaceID))})
 	}
 	return nil
 }
@@ -264,7 +268,9 @@ func (h *Handler) UndoStallAction(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	previous := reversal.Restore
-	updated, err := h.Queries.UpdateIssueStatus(r.Context(), db.UpdateIssueStatusParams{ID: issue.ID, Status: previous, WorkspaceID: issue.WorkspaceID})
+	updated, err := h.Queries.UpdateIssueStatus(r.Context(), db.UpdateIssueStatusParams{
+		ActorType: pgtype.Text{String: botsource.ActorFromContext(r.Context()).Type, Valid: botsource.ActorFromContext(r.Context()).Type != ""}, ActorID: botsource.ActorFromContext(r.Context()).ID,
+		ViaBotID: botsource.FromContext(r.Context()).ID, ViaBotName: pgtype.Text{String: botsource.FromContext(r.Context()).Name, Valid: botsource.FromContext(r.Context()).ID.Valid}, ID: issue.ID, Status: previous, WorkspaceID: issue.WorkspaceID})
 	if err != nil {
 		writeError(w, 500, "failed to restore issue status")
 		return
@@ -274,7 +280,7 @@ func (h *Handler) UndoStallAction(w http.ResponseWriter, r *http.Request) {
 	h.stallComment(r.Context(), updated, fmt.Sprintf("已撤销系统自动停滞处理，票状态恢复为 `%s`。", previous))
 	h.notifyStallInbox(r.Context(), updated, "停滞处理已撤销", "自动收口/取消已撤销，票状态已恢复。")
 	if fresh, err := h.Queries.GetIssue(r.Context(), updated.ID); err == nil {
-		h.publish(protocol.EventIssueUpdated, util.UUIDToString(fresh.WorkspaceID), "member", "", map[string]any{"issue": service.IssueToMapResolved(r.Context(), h.Queries, fresh, h.getIssuePrefix(r.Context(), fresh.WorkspaceID))})
+		h.publishWithSource(r.Context(), protocol.EventIssueUpdated, util.UUIDToString(fresh.WorkspaceID), "member", "", map[string]any{"issue": service.IssueToMapResolved(r.Context(), h.Queries, fresh, h.getIssuePrefix(r.Context(), fresh.WorkspaceID))})
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"action": stallaction.ActionRevoked, "status": updated.Status, "issue_id": util.UUIDToString(updated.ID)})
 }
@@ -524,7 +530,9 @@ func (h *Handler) keepInterceptedStall(ctx context.Context, issue db.Issue, expi
 }
 
 func (h *Handler) cancelStallIssue(ctx context.Context, issue db.Issue, expiry stallaction.Expiry) error {
-	updated, err := h.Queries.UpdateIssueStatus(ctx, db.UpdateIssueStatusParams{ID: issue.ID, Status: "cancelled", WorkspaceID: issue.WorkspaceID})
+	updated, err := h.Queries.UpdateIssueStatus(ctx, db.UpdateIssueStatusParams{
+		ActorType: pgtype.Text{String: botsource.ActorFromContext(ctx).Type, Valid: botsource.ActorFromContext(ctx).Type != ""}, ActorID: botsource.ActorFromContext(ctx).ID,
+		ViaBotID: botsource.FromContext(ctx).ID, ViaBotName: pgtype.Text{String: botsource.FromContext(ctx).Name, Valid: botsource.FromContext(ctx).ID.Valid}, ID: issue.ID, Status: "cancelled", WorkspaceID: issue.WorkspaceID})
 	if err != nil {
 		return err
 	}
@@ -534,7 +542,7 @@ func (h *Handler) cancelStallIssue(ctx context.Context, issue db.Issue, expiry s
 	h.stallComment(ctx, updated, "AI 停滞巡检："+expiry.Why+" 7 天内可撤销。")
 	h.notifyStallInbox(ctx, updated, "停滞票已自动取消", expiry.Why, "undo")
 	if fresh, err := h.Queries.GetIssue(ctx, updated.ID); err == nil {
-		h.publish(protocol.EventIssueUpdated, util.UUIDToString(fresh.WorkspaceID), "system", "", map[string]any{"issue": service.IssueToMapResolved(ctx, h.Queries, fresh, h.getIssuePrefix(ctx, fresh.WorkspaceID))})
+		h.publishWithSource(ctx, protocol.EventIssueUpdated, util.UUIDToString(fresh.WorkspaceID), "system", "", map[string]any{"issue": service.IssueToMapResolved(ctx, h.Queries, fresh, h.getIssuePrefix(ctx, fresh.WorkspaceID))})
 	}
 	return nil
 }

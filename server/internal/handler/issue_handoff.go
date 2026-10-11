@@ -16,6 +16,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/botsource"
 	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/statecard"
 	"github.com/multica-ai/multica/server/internal/util"
@@ -191,7 +192,8 @@ func (h *Handler) HandoffIssue(w http.ResponseWriter, r *http.Request) {
 			sourceTaskID = task.ID
 		}
 	}
-	created, err := h.Queries.CreateComment(r.Context(), db.CreateCommentParams{IssueID: issue.ID, WorkspaceID: issue.WorkspaceID, AuthorType: authorType, AuthorID: authorUUID, Content: content, Type: "comment", ParentID: pgtype.UUID{}, SourceTaskID: sourceTaskID, QuickActionID: pgtype.UUID{}, ViaPluginID: pgtype.UUID{}})
+	created, err := h.Queries.CreateComment(r.Context(), db.CreateCommentParams{
+		ViaBotID: botsource.FromContext(r.Context()).ID, ViaBotName: pgtype.Text{String: botsource.FromContext(r.Context()).Name, Valid: botsource.FromContext(r.Context()).ID.Valid}, IssueID: issue.ID, WorkspaceID: issue.WorkspaceID, AuthorType: authorType, AuthorID: authorUUID, Content: content, Type: "comment", ParentID: pgtype.UUID{}, SourceTaskID: sourceTaskID, QuickActionID: pgtype.UUID{}, ViaPluginID: pgtype.UUID{}})
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			writeError(w, 404, "issue not found")

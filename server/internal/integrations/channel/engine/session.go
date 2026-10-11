@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/multica-ai/multica/server/internal/botsource"
 	"log/slog"
 	"sort"
 	"strings"
@@ -536,6 +537,7 @@ func (s *ChatSession) StartSession(ctx context.Context, in StartSessionInput) (S
 			return StartSessionResult{}, fmt.Errorf("snapshot started chat initiator: %w", err)
 		}
 		msg, err := qtx.CreateChatMessage(ctx, db.CreateChatMessageParams{
+			ViaBotID: botsource.FromContext(ctx).ID, ViaBotName: pgtype.Text{String: botsource.FromContext(ctx).Name, Valid: botsource.FromContext(ctx).ID.Valid},
 			ID: dbid.NewV7(), ChatSessionID: session.ID, Role: "user", Content: in.Body,
 			ChannelMediaPendingSecs: pgtype.Float8{Float64: in.MediaPendingSeconds, Valid: in.MediaPendingSeconds > 0},
 			ChannelIngested:         pgtype.Bool{Bool: true, Valid: true},
@@ -747,6 +749,7 @@ func (s *ChatSession) AppendUserMessage(ctx context.Context, in AppendInput) (Ap
 	// it must be stamped in the same transaction as the message so no later
 	// binding deletion (archive, installation rebind) can strip it.
 	msg, err := qtx.CreateChatMessage(ctx, db.CreateChatMessageParams{
+		ViaBotID: botsource.FromContext(ctx).ID, ViaBotName: pgtype.Text{String: botsource.FromContext(ctx).Name, Valid: botsource.FromContext(ctx).ID.Valid},
 		ID:                      dbid.NewV7(),
 		ChatSessionID:           in.SessionID,
 		Role:                    "user",

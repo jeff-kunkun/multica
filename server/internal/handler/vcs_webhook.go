@@ -286,7 +286,7 @@ func (h *Handler) mirrorVCSPullRequest(ctx context.Context, conn db.VcsConnectio
 		slog.Warn("vcs: load workspace failed", "err", err)
 	}
 
-	h.publish(protocol.EventPullRequestUpdated, workspaceID, "system", "", map[string]any{
+	h.publishWithSource(ctx, protocol.EventPullRequestUpdated, workspaceID, "system", "", map[string]any{
 		"pull_request":     resp,
 		"linked_issue_ids": linkedIssueIDs,
 	})
@@ -323,7 +323,7 @@ func (h *Handler) mirrorVCSCIStatus(ctx context.Context, conn db.VcsConnection, 
 	}
 	workspaceID := uuidToString(conn.WorkspaceID)
 	for _, issueID := range issueIDs {
-		h.publish(protocol.EventPullRequestUpdated, workspaceID, "system", "", map[string]any{
+		h.publishWithSource(ctx, protocol.EventPullRequestUpdated, workspaceID, "system", "", map[string]any{
 			"issue_id": uuidToString(issueID),
 		})
 	}

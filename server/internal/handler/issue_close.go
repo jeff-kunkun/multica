@@ -14,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/blockwait"
+	"github.com/multica-ai/multica/server/internal/botsource"
 	"github.com/multica-ai/multica/server/internal/closeprotocol"
 	"github.com/multica-ai/multica/server/internal/issuestatus"
 	"github.com/multica-ai/multica/server/internal/logger"
@@ -352,6 +353,7 @@ func (h *Handler) CloseIssue(w http.ResponseWriter, r *http.Request) {
 			return err
 		}
 		created, err = qtx.CreateComment(ctx, db.CreateCommentParams{
+			ViaBotID: botsource.FromContext(ctx).ID, ViaBotName: pgtype.Text{String: botsource.FromContext(ctx).Name, Valid: botsource.FromContext(ctx).ID.Valid},
 			ID:           dbid.NewV7(),
 			IssueID:      issue.ID,
 			WorkspaceID:  issue.WorkspaceID,
@@ -387,6 +389,8 @@ func (h *Handler) CloseIssue(w http.ResponseWriter, r *http.Request) {
 		}
 		if statusKey != updated.Status {
 			updated, err = qtx.UpdateIssueStatus(ctx, db.UpdateIssueStatusParams{
+				ActorType: pgtype.Text{String: botsource.ActorFromContext(r.Context()).Type, Valid: botsource.ActorFromContext(r.Context()).Type != ""}, ActorID: botsource.ActorFromContext(r.Context()).ID,
+				ViaBotID: botsource.FromContext(r.Context()).ID, ViaBotName: pgtype.Text{String: botsource.FromContext(r.Context()).Name, Valid: botsource.FromContext(r.Context()).ID.Valid},
 				ID:          issue.ID,
 				Status:      statusKey,
 				WorkspaceID: issue.WorkspaceID,
@@ -478,7 +482,7 @@ func (h *Handler) CloseIssue(w http.ResponseWriter, r *http.Request) {
 	}
 	resp.Comment = commentToResponse(comment, nil, nil)
 	resp.Comment.IssueRevision = created.IssueRevision
-	h.publish(protocol.EventCommentCreated, uuidToString(issue.WorkspaceID), actorType, actorID, map[string]any{
+	h.publishWithSource(r.Context(), protocol.EventCommentCreated, uuidToString(issue.WorkspaceID), actorType, actorID, map[string]any{
 		"comment":             resp.Comment,
 		"issue_title":         issue.Title,
 		"issue_assignee_type": textToPtr(issue.AssigneeType),
@@ -636,6 +640,7 @@ func (h *Handler) closeIssueByVerdict(w http.ResponseWriter, r *http.Request, is
 		return
 	}
 	created, err := h.Queries.CreateComment(ctx, db.CreateCommentParams{
+		ViaBotID: botsource.FromContext(ctx).ID, ViaBotName: pgtype.Text{String: botsource.FromContext(ctx).Name, Valid: botsource.FromContext(ctx).ID.Valid},
 		ID:           dbid.NewV7(),
 		IssueID:      issue.ID,
 		WorkspaceID:  issue.WorkspaceID,
@@ -662,7 +667,7 @@ func (h *Handler) closeIssueByVerdict(w http.ResponseWriter, r *http.Request, is
 	resp := CloseIssueResponse{PrevStatus: issue.Status}
 	resp.Comment = commentToResponse(comment, nil, nil)
 	resp.Comment.IssueRevision = created.IssueRevision
-	h.publish(protocol.EventCommentCreated, uuidToString(issue.WorkspaceID), actorType, actorID, map[string]any{
+	h.publishWithSource(r.Context(), protocol.EventCommentCreated, uuidToString(issue.WorkspaceID), actorType, actorID, map[string]any{
 		"comment":             resp.Comment,
 		"issue_title":         issue.Title,
 		"issue_assignee_type": textToPtr(issue.AssigneeType),
@@ -1106,7 +1111,7 @@ func setIssueMetaStringTx(ctx context.Context, q *db.Queries, issue db.Issue, ke
 func (h *Handler) publishCloseStatus(r *http.Request, prev, issue db.Issue, prefix, actorType, actorID string) {
 	resp := issueToResponse(issue, prefix)
 	h.fillStatusCategory(r.Context(), issue.WorkspaceID, &resp)
-	h.publish(protocol.EventIssueUpdated, uuidToString(issue.WorkspaceID), actorType, actorID, map[string]any{
+	h.publishWithSource(r.Context(), protocol.EventIssueUpdated, uuidToString(issue.WorkspaceID), actorType, actorID, map[string]any{
 		"issue":              resp,
 		"assignee_changed":   false,
 		"status_changed":     true,

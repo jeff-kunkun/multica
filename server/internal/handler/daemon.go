@@ -970,7 +970,7 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 
 	slog.Info("daemon registered", "workspace_id", req.WorkspaceID, "daemon_id", req.DaemonID, "runtimes_count", len(resp))
 
-	h.publish(protocol.EventDaemonRegister, req.WorkspaceID, "system", "", map[string]any{
+	h.publishWithSource(r.Context(), protocol.EventDaemonRegister, req.WorkspaceID, "system", "", map[string]any{
 		"runtimes": resp,
 	})
 
@@ -1259,7 +1259,7 @@ func (h *Handler) DaemonDeregister(w http.ResponseWriter, r *http.Request) {
 
 	// Notify frontend clients so they re-fetch runtime list.
 	for wsID := range affectedWorkspaces {
-		h.publish(protocol.EventDaemonRegister, wsID, "system", "", map[string]any{
+		h.publishWithSource(r.Context(), protocol.EventDaemonRegister, wsID, "system", "", map[string]any{
 			"action": "deregister",
 		})
 	}
@@ -1596,7 +1596,7 @@ func (h *Handler) applyStoredPlanLimits(ctx context.Context, runtimeUUID pgtype.
 		return fmt.Errorf("update runtime plan limits: %w", err)
 	}
 	if updated > 0 && workspaceID != "" {
-		h.publish(protocol.EventDaemonHeartbeat, workspaceID, "system", "", map[string]any{
+		h.publishWithSource(ctx, protocol.EventDaemonHeartbeat, workspaceID, "system", "", map[string]any{
 			"runtime_id":          uuidToString(runtimeUUID),
 			"plan_limits_updated": true,
 		})
@@ -1631,7 +1631,7 @@ func (h *Handler) applyStoredAgentPlanLimits(ctx context.Context, workspaceID st
 			return fmt.Errorf("update agent plan limits: %w", err)
 		}
 		if updated > 0 && workspaceID != "" {
-			h.publish(protocol.EventDaemonHeartbeat, workspaceID, "system", "", map[string]any{
+			h.publishWithSource(ctx, protocol.EventDaemonHeartbeat, workspaceID, "system", "", map[string]any{
 				"agent_id":            uuidToString(agentUUID),
 				"plan_limits_updated": true,
 			})
@@ -1657,7 +1657,7 @@ func (h *Handler) applyStoredJevStatus(ctx context.Context, runtimeUUID pgtype.U
 		return fmt.Errorf("update runtime jev status: %w", err)
 	}
 	if updated > 0 && workspaceID != "" {
-		h.publish(protocol.EventDaemonHeartbeat, workspaceID, "system", "", map[string]any{
+		h.publishWithSource(ctx, protocol.EventDaemonHeartbeat, workspaceID, "system", "", map[string]any{
 			"runtime_id":  uuidToString(runtimeUUID),
 			"jev_updated": true,
 		})
@@ -6096,7 +6096,7 @@ func (h *Handler) ReportTaskMessages(w http.ResponseWriter, r *http.Request) {
 			// rather than reusing the table model; the columns are the table's,
 			// in order, so the conversion is checked by the compiler and breaks
 			// loudly if the query ever stops returning the whole row.
-			h.publishTask(protocol.EventTaskMessage, workspaceID, "system", "", taskID,
+			h.publishTaskWithSource(r.Context(), protocol.EventTaskMessage, workspaceID, "system", "", taskID,
 				taskMessageToPayload(db.TaskMessage(m), taskID, uuidToString(task.IssueID)))
 		}
 	}

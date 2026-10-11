@@ -945,7 +945,7 @@ func (h *Handler) CreateAutopilot(w http.ResponseWriter, r *http.Request) {
 	}
 
 	resp := autopilotToResponse(autopilot, subs)
-	h.publish(protocol.EventAutopilotCreated, workspaceID, "member", userID, map[string]any{"autopilot": resp})
+	h.publishWithSource(r.Context(), protocol.EventAutopilotCreated, workspaceID, "member", userID, map[string]any{"autopilot": resp})
 	obsmetrics.RecordEvent(h.Analytics, h.Metrics, analytics.AutopilotCreated(
 		userID,
 		workspaceID,
@@ -1270,7 +1270,7 @@ func (h *Handler) UpdateAutopilot(w http.ResponseWriter, r *http.Request) {
 		subs = nil
 	}
 	resp := autopilotToResponse(autopilot, subs)
-	h.publish(protocol.EventAutopilotUpdated, workspaceID, "member", userID, map[string]any{"autopilot": resp})
+	h.publishWithSource(r.Context(), protocol.EventAutopilotUpdated, workspaceID, "member", userID, map[string]any{"autopilot": resp})
 	writeJSON(w, http.StatusOK, resp)
 }
 
@@ -1390,7 +1390,7 @@ func (h *Handler) DeleteAutopilot(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.publish(protocol.EventAutopilotDeleted, workspaceID, "member", userID, map[string]any{"autopilot_id": uuidToString(idUUID)})
+	h.publishWithSource(r.Context(), protocol.EventAutopilotDeleted, workspaceID, "member", userID, map[string]any{"autopilot_id": uuidToString(idUUID)})
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -1466,7 +1466,7 @@ func (h *Handler) AddAutopilotCollaborator(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	h.publish(protocol.EventAutopilotUpdated, workspaceID, "member", grantedBy, map[string]any{
+	h.publishWithSource(r.Context(), protocol.EventAutopilotUpdated, workspaceID, "member", grantedBy, map[string]any{
 		"autopilot_id": uuidToString(ap.ID),
 	})
 	h.writeAutopilotCollaborators(w, r, ap.ID, http.StatusCreated)
@@ -1503,7 +1503,7 @@ func (h *Handler) RemoveAutopilotCollaborator(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	h.publish(protocol.EventAutopilotUpdated, workspaceID, "member", uuidToString(actor.UserID), map[string]any{
+	h.publishWithSource(r.Context(), protocol.EventAutopilotUpdated, workspaceID, "member", uuidToString(actor.UserID), map[string]any{
 		"autopilot_id": uuidToString(ap.ID),
 	})
 	h.writeAutopilotCollaborators(w, r, ap.ID, http.StatusOK)
@@ -1641,7 +1641,7 @@ func (h *Handler) CreateAutopilotTrigger(w http.ResponseWriter, r *http.Request)
 			return
 		}
 		resp := h.triggerToResponse(trigger)
-		h.publish(protocol.EventAutopilotUpdated, workspaceID, "member", userID, map[string]any{
+		h.publishWithSource(r.Context(), protocol.EventAutopilotUpdated, workspaceID, "member", userID, map[string]any{
 			"autopilot_id": uuidToString(ap.ID),
 			"trigger":      broadcastAutopilotTriggerResponse(resp),
 		})
@@ -1693,7 +1693,7 @@ func (h *Handler) CreateAutopilotTrigger(w http.ResponseWriter, r *http.Request)
 	}
 
 	resp := h.triggerToResponse(trigger)
-	h.publish(protocol.EventAutopilotUpdated, workspaceID, "member", userID, map[string]any{
+	h.publishWithSource(r.Context(), protocol.EventAutopilotUpdated, workspaceID, "member", userID, map[string]any{
 		"autopilot_id": uuidToString(ap.ID),
 		"trigger":      broadcastAutopilotTriggerResponse(resp),
 	})
@@ -2038,7 +2038,7 @@ func (h *Handler) UpdateAutopilotTrigger(w http.ResponseWriter, r *http.Request)
 	}
 
 	resp := h.triggerToResponse(trigger)
-	h.publish(protocol.EventAutopilotUpdated, workspaceID, "member", userID, map[string]any{
+	h.publishWithSource(r.Context(), protocol.EventAutopilotUpdated, workspaceID, "member", userID, map[string]any{
 		"autopilot_id": uuidToString(ap.ID),
 		"trigger":      broadcastAutopilotTriggerResponse(resp),
 	})
@@ -2108,7 +2108,7 @@ func (h *Handler) DeleteAutopilotTrigger(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	h.publish(protocol.EventAutopilotUpdated, workspaceID, "member", userID, map[string]any{
+	h.publishWithSource(r.Context(), protocol.EventAutopilotUpdated, workspaceID, "member", userID, map[string]any{
 		"autopilot_id": uuidToString(autopilotUUID),
 		"trigger_id":   uuidToString(triggerUUID),
 	})
@@ -2172,7 +2172,7 @@ func (h *Handler) RotateAutopilotTriggerWebhookToken(w http.ResponseWriter, r *h
 	}
 
 	resp := h.triggerToResponse(rotated)
-	h.publish(protocol.EventAutopilotUpdated, workspaceID, "member", uuidToString(actor.UserID), map[string]any{
+	h.publishWithSource(r.Context(), protocol.EventAutopilotUpdated, workspaceID, "member", uuidToString(actor.UserID), map[string]any{
 		"autopilot_id": uuidToString(ap.ID),
 		"trigger":      broadcastAutopilotTriggerResponse(resp),
 	})
@@ -2244,7 +2244,7 @@ func (h *Handler) SetAutopilotTriggerSigningSecret(w http.ResponseWriter, r *htt
 	// badge in real time. The event payload only carries the response shape,
 	// which excludes the signing secret and, on the broadcast copy, the webhook
 	// credential as well.
-	h.publish(protocol.EventAutopilotUpdated, workspaceID, "member", uuidToString(actor.UserID), map[string]any{
+	h.publishWithSource(r.Context(), protocol.EventAutopilotUpdated, workspaceID, "member", uuidToString(actor.UserID), map[string]any{
 		"autopilot_id": uuidToString(ap.ID),
 		"trigger":      broadcastAutopilotTriggerResponse(resp),
 	})

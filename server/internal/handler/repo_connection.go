@@ -197,7 +197,7 @@ func (h *Handler) writeRepoConnection(w http.ResponseWriter, r *http.Request, sa
 		return
 	}
 	h.clearCoveredNudges(r.Context(), conn)
-	h.publish(protocol.EventVCSConnectionCreated, uuidToString(wsUUID), "system", "", map[string]any{"id": uuidToString(conn.ID), "repo_url": repo.URL})
+	h.publishWithSource(r.Context(), protocol.EventVCSConnectionCreated, uuidToString(wsUUID), "system", "", map[string]any{"id": uuidToString(conn.ID), "repo_url": repo.URL})
 	viewer, viewErr := h.visibilityViewerFor(r, wsUUID)
 	var viewerPtr *visibilityViewer
 	if viewErr == nil {

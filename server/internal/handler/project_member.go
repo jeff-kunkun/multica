@@ -206,7 +206,7 @@ func (h *Handler) AddProjectMember(w http.ResponseWriter, r *http.Request) {
 	// at stays as it was until a reload (DENE-717). The frame is targeted: it
 	// tells one member to refetch, and the HTTP filter decides what comes back.
 	h.publishIssueInvalidated(wsID, "member", actorID, "", uuidToString(project.ID), uuidToString(memberUUID))
-	h.publish(protocol.EventProjectUpdated, wsID, "member", actorID, map[string]any{
+	h.publishWithSource(r.Context(), protocol.EventProjectUpdated, wsID, "member", actorID, map[string]any{
 		"project_id": uuidToString(project.ID),
 	})
 	writeJSON(w, http.StatusCreated, h.projectMemberToResponse(sm, user, roleVisibleTo(actor, memberUUID, target.Role), projectLeadUserID(project)))
@@ -242,7 +242,7 @@ func (h *Handler) RemoveProjectMember(w http.ResponseWriter, r *http.Request) {
 	// Their open tab has to hear it too: this is the frame that makes the
 	// project's issues disappear from their list without a reload (DENE-717).
 	h.publishIssueInvalidated(wsID, "member", actorID, "", uuidToString(project.ID), uuidToString(memberUUID))
-	h.publish(protocol.EventProjectUpdated, wsID, "member", actorID, map[string]any{
+	h.publishWithSource(r.Context(), protocol.EventProjectUpdated, wsID, "member", actorID, map[string]any{
 		"project_id": uuidToString(project.ID),
 	})
 	w.WriteHeader(http.StatusNoContent)

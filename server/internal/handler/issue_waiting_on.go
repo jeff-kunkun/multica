@@ -10,6 +10,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/blockwait"
+	"github.com/multica-ai/multica/server/internal/botsource"
 	"github.com/multica-ai/multica/server/internal/closeprotocol"
 	"github.com/multica-ai/multica/server/internal/service"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -140,6 +141,7 @@ func (h *Handler) wakeWaitingIssue(ctx context.Context, waiter, completed db.Iss
 	)
 
 	created, err := h.Queries.CreateComment(ctx, db.CreateCommentParams{
+		ViaBotID: botsource.FromContext(ctx).ID, ViaBotName: pgtype.Text{String: botsource.FromContext(ctx).Name, Valid: botsource.FromContext(ctx).ID.Valid},
 		ID:          dbid.NewV7(),
 		IssueID:     fresh.ID,
 		WorkspaceID: fresh.WorkspaceID,
@@ -158,7 +160,7 @@ func (h *Handler) wakeWaitingIssue(ctx context.Context, waiter, completed db.Iss
 	}
 	comment := created.Comment()
 
-	h.publish(protocol.EventCommentCreated, uuidToString(fresh.WorkspaceID), "system", "", map[string]any{
+	h.publishWithSource(ctx, protocol.EventCommentCreated, uuidToString(fresh.WorkspaceID), "system", "", map[string]any{
 		"comment":             commentToResponse(comment, nil, nil),
 		"issue_title":         fresh.Title,
 		"issue_assignee_type": textToPtr(fresh.AssigneeType),

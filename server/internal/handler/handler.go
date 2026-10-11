@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"github.com/multica-ai/multica/server/pkg/protocol"
 	"log/slog"
 	"math"
 	"net/http"
@@ -20,6 +21,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/auth"
+	"github.com/multica-ai/multica/server/internal/botsource"
 	"github.com/multica-ai/multica/server/internal/cloudruntime"
 	"github.com/multica-ai/multica/server/internal/daemonws"
 	"github.com/multica-ai/multica/server/internal/dbreader"
@@ -849,6 +851,12 @@ func (h *Handler) channelDeliversFiles(channelType string) bool {
 }
 
 // publish sends a domain event through the event bus.
+// publishWithSource preserves the authenticated writer independently of its member permissions.
+func (h *Handler) publishWithSource(ctx context.Context, eventType, workspaceID, actorType, actorID string, payload any) {
+	source := botsource.FromContext(ctx)
+	h.Bus.Publish(events.Event{Type: eventType, WorkspaceID: workspaceID, ActorType: actorType, ActorID: actorID, Payload: payload, ViaBotID: uuidToString(source.ID), ViaBotName: source.Name})
+}
+
 func (h *Handler) publish(eventType, workspaceID, actorType, actorID string, payload any) {
 	h.Bus.Publish(events.Event{
 		Type:        eventType,
@@ -1384,4 +1392,34 @@ func (h *Handler) loadInboxItemForUser(w http.ResponseWriter, r *http.Request, i
 		return db.InboxItem{}, false
 	}
 	return item, true
+}
+
+func (h *Handler) publishTaskWithSource(ctx context.Context, eventType, workspaceID, actorType, actorID, taskID string, payload any) {
+	source := botsource.FromContext(ctx)
+	h.Bus.Publish(events.Event{
+		ViaBotID: uuidToString(source.ID), ViaBotName: source.Name,
+		Type:        eventType,
+		WorkspaceID: workspaceID,
+		ActorType:   actorType,
+		ActorID:     actorID,
+		TaskID:      taskID,
+		Payload:     payload,
+	})
+}
+
+func (h *Handler) publishChatWithSource(ctx context.Context, eventType, workspaceID, actorType, actorID, chatSessionID string, payload any) {
+	source := botsource.FromContext(ctx)
+	if msg, ok := payload.(protocol.ChatMessagePayload); ok {
+		msg.ViaBotID, msg.ViaBotName = uuidToString(source.ID), source.Name
+		payload = msg
+	}
+	h.Bus.Publish(events.Event{
+		ViaBotID: uuidToString(source.ID), ViaBotName: source.Name,
+		Type:          eventType,
+		WorkspaceID:   workspaceID,
+		ActorType:     actorType,
+		ActorID:       actorID,
+		ChatSessionID: chatSessionID,
+		Payload:       payload,
+	})
 }

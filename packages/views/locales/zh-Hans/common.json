@@ -1,4 +1,5 @@
 {
+  "via_bot": "经 {{name}}",
   "avatar_upload": {
     "change": "更换头像",
     "remove": "移除",

@@ -30,6 +30,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/multica-ai/multica/server/internal/analytics"
+	"github.com/multica-ai/multica/server/internal/botsource"
 	"github.com/multica-ai/multica/server/internal/issueguard"
 	"github.com/multica-ai/multica/server/internal/logger"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
@@ -261,6 +262,8 @@ func (h *Handler) BootstrapOnboardingRuntime(w http.ResponseWriter, r *http.Requ
 			description = req.StarterPrompt
 		}
 		issue, err = qtx.CreateIssue(r.Context(), db.CreateIssueParams{
+			ActorType: pgtype.Text{String: botsource.ActorFromContext(r.Context()).Type, Valid: botsource.ActorFromContext(r.Context()).Type != ""}, ActorID: botsource.ActorFromContext(r.Context()).ID,
+			ViaBotID: botsource.FromContext(r.Context()).ID, ViaBotName: pgtype.Text{String: botsource.FromContext(r.Context()).Name, Valid: botsource.FromContext(r.Context()).ID.Valid},
 			ID:            dbid.NewV7(),
 			WorkspaceID:   wsUUID,
 			Title:         onboardingIssueTitle,
@@ -312,7 +315,7 @@ func (h *Handler) BootstrapOnboardingRuntime(w http.ResponseWriter, r *http.Requ
 
 	if assistantCreated {
 		resp := h.agentToResponse(assistant)
-		h.publish(protocol.EventAgentCreated, req.WorkspaceID, "member", userID, map[string]any{"agent": resp})
+		h.publishWithSource(r.Context(), protocol.EventAgentCreated, req.WorkspaceID, "member", userID, map[string]any{"agent": resp})
 		obsmetrics.RecordEvent(h.Analytics, h.Metrics, analytics.AgentCreated(
 			userID, req.WorkspaceID, uuidToString(assistant.ID),
 			runtime.Provider, runtime.RuntimeMode, onboardingAgentCreationSource, isFirstAgent,
@@ -322,7 +325,7 @@ func (h *Handler) BootstrapOnboardingRuntime(w http.ResponseWriter, r *http.Requ
 		prefix := h.getIssuePrefix(r.Context(), issue.WorkspaceID)
 		resp := issueToResponse(issue, prefix)
 		h.fillStatusCategory(r.Context(), issue.WorkspaceID, &resp)
-		h.publish(protocol.EventIssueCreated, req.WorkspaceID, "member", userID, map[string]any{"issue": resp})
+		h.publishWithSource(r.Context(), protocol.EventIssueCreated, req.WorkspaceID, "member", userID, map[string]any{"issue": resp})
 		platform, _, _ := middleware.ClientMetadataFromContext(r.Context())
 		obsmetrics.RecordEvent(h.Analytics, h.Metrics, analytics.IssueCreated(
 			userID, req.WorkspaceID, uuidToString(issue.ID),
@@ -425,6 +428,8 @@ func (h *Handler) BootstrapOnboardingNoRuntime(w http.ResponseWriter, r *http.Re
 			return
 		}
 		issue, err = qtx.CreateIssue(r.Context(), db.CreateIssueParams{
+			ActorType: pgtype.Text{String: botsource.ActorFromContext(r.Context()).Type, Valid: botsource.ActorFromContext(r.Context()).Type != ""}, ActorID: botsource.ActorFromContext(r.Context()).ID,
+			ViaBotID: botsource.FromContext(r.Context()).ID, ViaBotName: pgtype.Text{String: botsource.FromContext(r.Context()).Name, Valid: botsource.FromContext(r.Context()).ID.Valid},
 			ID:            dbid.NewV7(),
 			WorkspaceID:   wsUUID,
 			Title:         noRuntimeIssueTitle,
@@ -468,7 +473,7 @@ func (h *Handler) BootstrapOnboardingNoRuntime(w http.ResponseWriter, r *http.Re
 		prefix := h.getIssuePrefix(r.Context(), issue.WorkspaceID)
 		resp := issueToResponse(issue, prefix)
 		h.fillStatusCategory(r.Context(), issue.WorkspaceID, &resp)
-		h.publish(protocol.EventIssueCreated, req.WorkspaceID, "member", userID, map[string]any{"issue": resp})
+		h.publishWithSource(r.Context(), protocol.EventIssueCreated, req.WorkspaceID, "member", userID, map[string]any{"issue": resp})
 		platform2, _, _ := middleware.ClientMetadataFromContext(r.Context())
 		obsmetrics.RecordEvent(h.Analytics, h.Metrics, analytics.IssueCreated(
 			userID, req.WorkspaceID, uuidToString(issue.ID),

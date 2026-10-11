@@ -146,7 +146,7 @@ func (h *Handler) AttachProjectRepo(w http.ResponseWriter, r *http.Request) {
 	}
 	h.noteUnconnectedProjectRepo(r.Context(), project, row.ResourceType, row.ResourceRef, creator)
 	resp := projectResourceToResponse(row)
-	h.publish(protocol.EventProjectResourceCreated, uuidToString(project.WorkspaceID), "member", userID, map[string]any{
+	h.publishWithSource(r.Context(), protocol.EventProjectResourceCreated, uuidToString(project.WorkspaceID), "member", userID, map[string]any{
 		"resource": resp, "project_id": uuidToString(project.ID),
 	})
 	h.writeProjectRepoAttachment(w, r, project, row, true, registered)
@@ -171,7 +171,7 @@ func (h *Handler) RemoveProjectRepo(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to remove project repository")
 		return
 	}
-	h.publish(protocol.EventProjectResourceDeleted, uuidToString(project.WorkspaceID), "member", userID, map[string]any{
+	h.publishWithSource(r.Context(), protocol.EventProjectResourceDeleted, uuidToString(project.WorkspaceID), "member", userID, map[string]any{
 		"project_id": uuidToString(project.ID), "resource_id": uuidToString(row.ID),
 	})
 	writeJSON(w, http.StatusOK, map[string]any{"id": uuidToString(row.ID), "removed": true})

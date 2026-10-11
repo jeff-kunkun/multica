@@ -5,6 +5,7 @@ package db
 // row's IssueRevision remains available separately for owner-cache coherence.
 func (r CreateCommentRow) Comment() Comment {
 	return Comment{
+		ViaBotID: r.ViaBotID, ViaBotName: r.ViaBotName,
 		ID:                 r.ID,
 		IssueID:            r.IssueID,
 		AuthorType:         r.AuthorType,
@@ -32,6 +33,7 @@ func (r CreateCommentRow) Comment() Comment {
 // available on the row for response/event cache reconciliation.
 func (r UpdateCommentRow) Comment() Comment {
 	return Comment{
+		ViaBotID: r.ViaBotID, ViaBotName: r.ViaBotName,
 		ID:             r.ID,
 		IssueID:        r.IssueID,
 		AuthorType:     r.AuthorType,

@@ -675,7 +675,7 @@ WHERE id = $1;
 INSERT INTO chat_message (
     chat_session_id, role, content, task_id, failure_reason, elapsed_ms,
     message_kind, quick_actions, channel_media_pending_until, channel_ingested,
-    channel_context_revision, id
+    channel_context_revision, id, via_bot_id, via_bot_name
 )
 VALUES (
     $1, $2, $3, sqlc.narg(task_id), sqlc.narg(failure_reason), sqlc.narg(elapsed_ms),
@@ -691,7 +691,7 @@ VALUES (
          ELSE now() + make_interval(secs => sqlc.narg(channel_media_pending_secs)::float8) END,
     COALESCE(sqlc.narg(channel_ingested)::boolean, FALSE),
     sqlc.narg(channel_context_revision),
-    COALESCE(sqlc.narg('id')::uuid, gen_random_uuid())
+    COALESCE(sqlc.narg('id')::uuid, gen_random_uuid()), sqlc.narg(via_bot_id), sqlc.narg(via_bot_name)
 )
 RETURNING *;
 
@@ -1325,7 +1325,7 @@ WHERE id = $1;
 INSERT INTO agent_task_queue (
     agent_id, runtime_id, issue_id, status, priority, chat_session_id,
     initiator_user_id, originator_user_id, accountable_user_id, force_fresh_session, runtime_mcp_overlay,
-    runtime_connected_apps, originator_source, trigger_evidence_kind, trigger_evidence_ref_id,
+    runtime_connected_apps, via_bot_id, via_bot_name, originator_source, trigger_evidence_kind, trigger_evidence_ref_id,
     fire_at, channel_context_revision, work_thread_id, id
 )
 SELECT
@@ -1337,7 +1337,7 @@ SELECT
     COALESCE(sqlc.narg('force_fresh_session')::boolean, FALSE),
     sqlc.narg(runtime_mcp_overlay),
     sqlc.narg(runtime_connected_apps),
-    sqlc.narg(originator_source),
+    sqlc.narg(via_bot_id), sqlc.narg(via_bot_name), sqlc.narg(originator_source),
     sqlc.narg(trigger_evidence_kind),
     sqlc.narg(trigger_evidence_ref_id),
     sqlc.narg('fire_at')::timestamptz,

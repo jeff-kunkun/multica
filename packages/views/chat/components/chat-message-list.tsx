@@ -1,5 +1,7 @@
 "use client";
 
+import { ViaBot } from "../../common/via-bot";
+
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { useQuery } from "@tanstack/react-query";
@@ -609,6 +611,7 @@ const MessageBubble = memo(function MessageBubble({
         <div className="flex max-w-[80%] flex-col items-end gap-1">
           <div className="rounded-2xl bg-muted px-3.5 py-2 text-body break-words">
             <MessageAuthor senderId={message.sender_user_id} creatorId={creatorId} />
+            <ViaBot name={message.via_bot_name} />
             {/* User messages are authored as markdown in ContentEditor, so they
              * render through the SAME RichContent as assistant replies and as
              * Issue/Comment — a Mermaid fence a user pastes is a diagram here

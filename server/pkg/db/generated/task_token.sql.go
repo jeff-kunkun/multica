@@ -70,7 +70,7 @@ func (q *Queries) DeleteTaskTokensByTask(ctx context.Context, taskID pgtype.UUID
 }
 
 const getTaskTokenActorByHash = `-- name: GetTaskTokenActorByHash :one
-SELECT tt.id,
+SELECT q.via_bot_id, q.via_bot_name, tt.id,
        tt.token_hash,
        tt.task_id,
        tt.agent_id,
@@ -88,6 +88,8 @@ WHERE tt.token_hash = $1 AND tt.expires_at > now()
 `
 
 type GetTaskTokenActorByHashRow struct {
+	ViaBotID       pgtype.UUID        `json:"via_bot_id"`
+	ViaBotName     pgtype.Text        `json:"via_bot_name"`
 	ID             pgtype.UUID        `json:"id"`
 	TokenHash      string             `json:"token_hash"`
 	TaskID         pgtype.UUID        `json:"task_id"`
@@ -119,6 +121,8 @@ func (q *Queries) GetTaskTokenActorByHash(ctx context.Context, tokenHash string)
 	row := q.db.QueryRow(ctx, getTaskTokenActorByHash, tokenHash)
 	var i GetTaskTokenActorByHashRow
 	err := row.Scan(
+		&i.ViaBotID,
+		&i.ViaBotName,
 		&i.ID,
 		&i.TokenHash,
 		&i.TaskID,

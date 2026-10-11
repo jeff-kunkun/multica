@@ -12,6 +12,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/botsource"
 	"github.com/multica-ai/multica/server/internal/issuestatus"
 	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/util"
@@ -416,15 +417,14 @@ func (h *Handler) dispatchReleasedGoalIssue(r *http.Request, issue db.Issue) {
 	if h.TaskService == nil || !issue.AssigneeType.Valid || !issue.AssigneeID.Valid {
 		return
 	}
+	actorType, actorID := h.resolveActor(r, requestUserID(r), uuidToString(issue.WorkspaceID))
 	switch issue.AssigneeType.String {
 	case "agent":
-		if _, enqueueErr := h.TaskService.EnqueueTaskForIssue(r.Context(), issue); enqueueErr != nil && !errors.Is(enqueueErr, service.ErrDuplicatePendingTask) {
+		if _, enqueueErr := h.TaskService.EnqueueTaskForIssueByActor(r.Context(), issue, memberActorUserID(actorType, actorID)); enqueueErr != nil && !errors.Is(enqueueErr, service.ErrDuplicatePendingTask) {
 			slog.Warn("released goal could not enqueue assigned agent", "issue_id", uuidToString(issue.ID), "error", enqueueErr)
 		}
 	case "squad":
 		// Squad assignment resolves to its leader.
-		userID := requestUserID(r)
-		actorType, actorID := h.resolveActor(r, userID, uuidToString(issue.WorkspaceID))
 		if !h.enqueueSquadLeaderTask(r.Context(), issue, pgtype.UUID{}, actorType, actorID, "") {
 			slog.Warn("released goal could not enqueue assigned squad leader", "issue_id", uuidToString(issue.ID), "squad_id", uuidToString(issue.AssigneeID))
 		}
@@ -467,14 +467,17 @@ func (h *Handler) AppendIssueGoalBudget(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	if wasStopped {
-		updated, updateErr := h.Queries.UpdateIssueStatus(r.Context(), db.UpdateIssueStatusParams{ID: issue.ID, Status: issuestatus.InProgress, WorkspaceID: issue.WorkspaceID})
+		actorType, actorID := h.resolveActor(r, requestUserID(r), uuidToString(issue.WorkspaceID))
+		updated, updateErr := h.Queries.UpdateIssueStatus(r.Context(), db.UpdateIssueStatusParams{
+			ActorType: pgtype.Text{String: botsource.ActorFromContext(r.Context()).Type, Valid: botsource.ActorFromContext(r.Context()).Type != ""}, ActorID: botsource.ActorFromContext(r.Context()).ID,
+			ViaBotID: botsource.FromContext(r.Context()).ID, ViaBotName: pgtype.Text{String: botsource.FromContext(r.Context()).Name, Valid: botsource.FromContext(r.Context()).ID.Valid}, ID: issue.ID, Status: issuestatus.InProgress, WorkspaceID: issue.WorkspaceID})
 		if updateErr != nil {
 			writeError(w, http.StatusInternalServerError, "failed to resume goal issue")
 			return
 		}
-		h.publish(protocol.EventIssueUpdated, uuidToString(updated.WorkspaceID), "system", "", RoutingIssueUpdatedPayload(issue, updated))
+		h.publishWithSource(r.Context(), protocol.EventIssueUpdated, uuidToString(updated.WorkspaceID), actorType, actorID, RoutingIssueUpdatedPayload(issue, updated))
 		if h.TaskService != nil {
-			if _, enqueueErr := h.TaskService.EnqueueTaskForIssueWithHandoff(r.Context(), issue, "已追加目标预算，自动继续处理尚未通过的完成线检查项。", pgtype.UUID{}); enqueueErr != nil {
+			if _, enqueueErr := h.TaskService.EnqueueTaskForIssueWithHandoff(r.Context(), issue, "已追加目标预算，自动继续处理尚未通过的完成线检查项。", memberActorUserID(actorType, actorID)); enqueueErr != nil {
 				writeError(w, http.StatusInternalServerError, "failed to resume goal")
 				return
 			}

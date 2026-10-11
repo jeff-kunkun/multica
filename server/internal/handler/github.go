@@ -579,7 +579,7 @@ func (h *Handler) GitHubSetupCallback(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, settingsURL+"&github_error=persist_failed", http.StatusFound)
 		return
 	}
-	h.publish(protocol.EventGitHubInstallationCreated, workspaceID, "system", "", map[string]any{
+	h.publishWithSource(r.Context(), protocol.EventGitHubInstallationCreated, workspaceID, "system", "", map[string]any{
 		"installation": githubInstallationToBroadcast(inst),
 	})
 	http.Redirect(w, r, settingsURL+"&github_connected=1", http.StatusFound)
@@ -966,7 +966,7 @@ func (h *Handler) DeleteGitHubInstallation(w http.ResponseWriter, r *http.Reques
 		writeError(w, http.StatusInternalServerError, "failed to remove installation")
 		return
 	}
-	h.publish(protocol.EventGitHubInstallationDeleted, workspaceID, "system", "", map[string]any{
+	h.publishWithSource(r.Context(), protocol.EventGitHubInstallationDeleted, workspaceID, "system", "", map[string]any{
 		"id": id,
 	})
 	w.WriteHeader(http.StatusNoContent)
@@ -1059,7 +1059,7 @@ func (h *Handler) broadcastPRSnapshotApplied(ctx context.Context, prID pgtype.UU
 	for _, id := range issueIDs {
 		linked = append(linked, uuidToString(id))
 	}
-	h.publish(protocol.EventPullRequestUpdated, uuidToString(pr.WorkspaceID), "system", "", map[string]any{
+	h.publishWithSource(ctx, protocol.EventPullRequestUpdated, uuidToString(pr.WorkspaceID), "system", "", map[string]any{
 		"pull_request":     githubPullRequestToResponse(pr, h.PRRefresh.Enabled()),
 		"linked_issue_ids": linked,
 	})
@@ -1194,7 +1194,7 @@ func (h *Handler) handleInstallationEvent(ctx context.Context, body []byte) {
 		// does not read the broadcast payload directly. One broadcast per
 		// deleted binding so every affected workspace's Settings tab refreshes.
 		for _, row := range deleted {
-			h.publish(protocol.EventGitHubInstallationDeleted, uuidToString(row.WorkspaceID), "system", "", map[string]any{
+			h.publishWithSource(ctx, protocol.EventGitHubInstallationDeleted, uuidToString(row.WorkspaceID), "system", "", map[string]any{
 				"id": uuidToString(row.ID),
 			})
 		}
@@ -1247,7 +1247,7 @@ func (h *Handler) handleInstallationEvent(ctx context.Context, body []byte) {
 		// the user already loaded the page) would stay visibly stale
 		// until the user manually refreshes. One broadcast per bound workspace.
 		for _, inst := range refreshed {
-			h.publish(protocol.EventGitHubInstallationCreated, uuidToString(inst.WorkspaceID), "system", "", map[string]any{
+			h.publishWithSource(ctx, protocol.EventGitHubInstallationCreated, uuidToString(inst.WorkspaceID), "system", "", map[string]any{
 				"installation": githubInstallationToBroadcast(inst),
 			})
 		}
@@ -1732,7 +1732,7 @@ func (h *Handler) mirrorPullRequestForWorkspace(ctx context.Context, wsID pgtype
 
 	// Broadcast PR change to the workspace so any open issue detail page
 	// re-queries its PR list.
-	h.publish(protocol.EventPullRequestUpdated, workspaceID, "system", "", map[string]any{
+	h.publishWithSource(ctx, protocol.EventPullRequestUpdated, workspaceID, "system", "", map[string]any{
 		"pull_request":     resp,
 		"linked_issue_ids": linkedIssueIDs,
 	})

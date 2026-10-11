@@ -316,6 +316,8 @@ type RuntimeInfo struct {
 
 // ChatMessagePayload is broadcast when a new chat message is created.
 type ChatMessagePayload struct {
+	ViaBotID      string `json:"via_bot_id,omitempty"`
+	ViaBotName    string `json:"via_bot_name,omitempty"`
 	ChatSessionID string `json:"chat_session_id"`
 	MessageID     string `json:"message_id"`
 	Role          string `json:"role"`

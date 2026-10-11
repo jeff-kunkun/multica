@@ -341,27 +341,28 @@ WHERE workspace_id = sqlc.arg(workspace_id)
 RETURNING *;
 
 -- name: CreateIssue :one
+WITH write_source AS MATERIALIZED (SELECT set_config('multica.actor_type', COALESCE(sqlc.narg('actor_type')::text::text, ''), true), set_config('multica.actor_id', COALESCE(sqlc.narg('actor_id')::uuid::text, ''), true), set_config('multica.via_bot_id', COALESCE(sqlc.narg('via_bot_id')::uuid::text, ''), true), set_config('multica.via_bot_name', COALESCE(sqlc.narg('via_bot_name')::text::text, ''), true))
 INSERT INTO issue (
     workspace_id, title, description, status, priority,
     assignee_type, assignee_id, creator_type, creator_id,
     parent_issue_id, position, start_date, due_date, number, project_id,
-    stage, reviewer_type, reviewer_id, properties, last_activity_at, id, visibility
-) VALUES (
+    stage, reviewer_type, reviewer_id, properties, last_activity_at, id, visibility, via_bot_id, via_bot_name
+) SELECT
     $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
     sqlc.narg('stage'), sqlc.narg('reviewer_type')::text, sqlc.narg('reviewer_id')::uuid,
     COALESCE(sqlc.narg('properties')::jsonb, '{}'::jsonb),
     now(), COALESCE(sqlc.narg('id')::uuid, gen_random_uuid()),
     -- Zero trust by default. A create that lands in a project passes the
     -- project's current scope here instead (DENE-698).
-    COALESCE(sqlc.narg('visibility')::text, 'private')
-) RETURNING *;
+    COALESCE(sqlc.narg('visibility')::text, 'private'), sqlc.narg(via_bot_id), sqlc.narg(via_bot_name)
+FROM write_source RETURNING *;
 
 -- name: GetIssueByNumber :one
 SELECT * FROM issue
 WHERE workspace_id = $1 AND number = $2;
 
 -- name: UpdateIssue :one
-WITH wakeup_source AS MATERIALIZED (SELECT set_config('multica.source_task_id', COALESCE(sqlc.narg('source_task_id')::uuid::text, ''), true)), candidate AS MATERIALIZED (
+WITH wakeup_source AS MATERIALIZED (SELECT set_config('multica.actor_type', COALESCE(sqlc.narg('actor_type')::text::text, ''), true), set_config('multica.actor_id', COALESCE(sqlc.narg('actor_id')::uuid::text, ''), true), set_config('multica.via_bot_id', COALESCE(sqlc.narg('via_bot_id')::uuid::text, ''), true), set_config('multica.via_bot_name', COALESCE(sqlc.narg('via_bot_name')::text::text, ''), true), set_config('multica.source_task_id', COALESCE(sqlc.narg('source_task_id')::uuid::text, ''), true)), candidate AS MATERIALIZED (
     -- FOR UPDATE, so every next_* value below is computed from the row this
     -- statement is about to write rather than from the snapshot the statement
     -- started with. Without it a write that waits here behind a concurrent one
@@ -513,7 +514,7 @@ RETURNING i.*;
 -- completion) so a status write cannot land without one: an issue carrying its
 -- old column's rank into a new column is the bug this guards against. See the
 -- next_position CASE in UpdateIssue for the policy.
-WITH wakeup_source AS MATERIALIZED (SELECT set_config('multica.source_task_id', COALESCE(sqlc.narg('source_task_id')::uuid::text, ''), true))
+WITH wakeup_source AS MATERIALIZED (SELECT set_config('multica.actor_type', COALESCE(sqlc.narg('actor_type')::text::text, ''), true), set_config('multica.actor_id', COALESCE(sqlc.narg('actor_id')::uuid::text, ''), true), set_config('multica.via_bot_id', COALESCE(sqlc.narg('via_bot_id')::uuid::text, ''), true), set_config('multica.via_bot_name', COALESCE(sqlc.narg('via_bot_name')::text::text, ''), true), set_config('multica.source_task_id', COALESCE(sqlc.narg('source_task_id')::uuid::text, ''), true))
 UPDATE issue AS i SET
     status = $2,
     -- Same rule as UpdateIssue: a mark only survives cancelled -> cancelled.
@@ -637,16 +638,17 @@ WHERE i.id = sqlc.arg('id') AND i.workspace_id = sqlc.arg('workspace_id') AND i.
 RETURNING *;
 
 -- name: CreateIssueWithOrigin :one
+WITH write_source AS MATERIALIZED (SELECT set_config('multica.actor_type', COALESCE(sqlc.narg('actor_type')::text::text, ''), true), set_config('multica.actor_id', COALESCE(sqlc.narg('actor_id')::uuid::text, ''), true), set_config('multica.via_bot_id', COALESCE(sqlc.narg('via_bot_id')::uuid::text, ''), true), set_config('multica.via_bot_name', COALESCE(sqlc.narg('via_bot_name')::text::text, ''), true))
 INSERT INTO issue (
     workspace_id, title, description, status, priority,
     assignee_type, assignee_id, creator_type, creator_id,
     parent_issue_id, position, start_date, due_date, number, project_id,
-    origin_type, origin_id, stage, properties, last_activity_at, id, visibility
-) VALUES (
+    origin_type, origin_id, stage, properties, last_activity_at, id, visibility, via_bot_id, via_bot_name
+) SELECT
     $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
     sqlc.narg('origin_type'), sqlc.narg('origin_id'), sqlc.narg('stage'), COALESCE(sqlc.narg('properties')::jsonb, '{}'::jsonb), now(), COALESCE(sqlc.narg('id')::uuid, gen_random_uuid()),
-    COALESCE(sqlc.narg('visibility')::text, 'private')
-) RETURNING *;
+    COALESCE(sqlc.narg('visibility')::text, 'private'), sqlc.narg(via_bot_id), sqlc.narg(via_bot_name)
+FROM write_source RETURNING *;
 
 -- name: LockIssueDuplicateKey :exec
 SELECT pg_advisory_xact_lock(hashtextextended($1::text, 0));

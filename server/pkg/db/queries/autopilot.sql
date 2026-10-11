@@ -592,7 +592,7 @@ ORDER BY t.id;
 INSERT INTO agent_task_queue (
     agent_id, runtime_id, issue_id, status, priority, autopilot_run_id, trigger_summary,
     originator_user_id, accountable_user_id, rule_version_id,
-    originator_source, trigger_evidence_kind, trigger_evidence_ref_id,
+    via_bot_id, via_bot_name, originator_source, trigger_evidence_kind, trigger_evidence_ref_id,
     id
 )
 SELECT
@@ -600,7 +600,7 @@ SELECT
     sqlc.narg(originator_user_id),
     sqlc.narg(accountable_user_id),
     sqlc.narg(rule_version_id),
-    sqlc.narg(originator_source),
+    sqlc.narg(via_bot_id), sqlc.narg(via_bot_name), sqlc.narg(originator_source),
     sqlc.narg(trigger_evidence_kind),
     sqlc.narg(trigger_evidence_ref_id),
     COALESCE(sqlc.narg('id')::uuid, gen_random_uuid())

@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/blockwait"
+	"github.com/multica-ai/multica/server/internal/botsource"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/quotarelay"
 	"github.com/multica-ai/multica/server/internal/routing"
@@ -369,6 +370,8 @@ func (s *TaskService) waitQuotaRelay(ctx context.Context, qtx *db.Queries, task 
 	updated := issue
 	if issue.Status == "todo" || issue.Status == "in_progress" {
 		updated, err = qtx.UpdateIssueStatus(ctx, db.UpdateIssueStatusParams{
+			ActorType: pgtype.Text{String: botsource.ActorFromContext(ctx).Type, Valid: botsource.ActorFromContext(ctx).Type != ""}, ActorID: botsource.ActorFromContext(ctx).ID,
+			ViaBotID: botsource.FromContext(ctx).ID, ViaBotName: pgtype.Text{String: botsource.FromContext(ctx).Name, Valid: botsource.FromContext(ctx).ID.Valid},
 			ID:          issue.ID,
 			Status:      "blocked",
 			WorkspaceID: issue.WorkspaceID,
@@ -412,6 +415,8 @@ func (s *TaskService) stageQuotaReplacement(ctx context.Context, qtx *db.Queries
 	prev := reassigned.Status
 	if reassigned.Status == "todo" || reassigned.Status == "blocked" {
 		reassigned, err = qtx.UpdateIssueStatus(ctx, db.UpdateIssueStatusParams{
+			ActorType: pgtype.Text{String: botsource.ActorFromContext(ctx).Type, Valid: botsource.ActorFromContext(ctx).Type != ""}, ActorID: botsource.ActorFromContext(ctx).ID,
+			ViaBotID: botsource.FromContext(ctx).ID, ViaBotName: pgtype.Text{String: botsource.FromContext(ctx).Name, Valid: botsource.FromContext(ctx).ID.Valid},
 			ID:          reassigned.ID,
 			Status:      "in_progress",
 			WorkspaceID: reassigned.WorkspaceID,
@@ -517,6 +522,8 @@ func (s *TaskService) abandonQuotaRelayTx(ctx context.Context, qtx *db.Queries, 
 	var err error
 	if issue.Status == "todo" || issue.Status == "in_progress" {
 		updated, err = qtx.UpdateIssueStatus(ctx, db.UpdateIssueStatusParams{
+			ActorType: pgtype.Text{String: botsource.ActorFromContext(ctx).Type, Valid: botsource.ActorFromContext(ctx).Type != ""}, ActorID: botsource.ActorFromContext(ctx).ID,
+			ViaBotID: botsource.FromContext(ctx).ID, ViaBotName: pgtype.Text{String: botsource.FromContext(ctx).Name, Valid: botsource.FromContext(ctx).ID.Valid},
 			ID:          issue.ID,
 			Status:      "blocked",
 			WorkspaceID: issue.WorkspaceID,

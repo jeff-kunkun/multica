@@ -101,7 +101,7 @@ func (h *Handler) recordIssueProgress(ctx context.Context, issue db.Issue, e pro
 // view refresh its history without refetching the issue.
 func (h *Handler) publishIssueProgress(ctx context.Context, issue db.Issue, actorType, actorID string) {
 	prefix := h.getIssuePrefix(ctx, issue.WorkspaceID)
-	h.publish(protocol.EventIssueUpdated, uuidToString(issue.WorkspaceID), actorType, actorID, map[string]any{
+	h.publishWithSource(ctx, protocol.EventIssueUpdated, uuidToString(issue.WorkspaceID), actorType, actorID, map[string]any{
 		"issue":            service.IssueToMapResolved(ctx, h.Queries, issue, prefix),
 		"status_changed":   false,
 		"prev_status":      issue.Status,

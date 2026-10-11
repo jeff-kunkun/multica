@@ -315,7 +315,7 @@ func (h *Handler) CreateTaskSupplement(w http.ResponseWriter, r *http.Request) {
 		FailureReason: textToPtr(created.SupplementFailureReason),
 		DeliveredAt:   timestampToPtr(created.SupplementDeliveredAt),
 	}})
-	h.publish(protocol.EventCommentCreated, uuidToString(issue.WorkspaceID), "member", uuidToString(authorID), map[string]any{
+	h.publishWithSource(r.Context(), protocol.EventCommentCreated, uuidToString(issue.WorkspaceID), "member", uuidToString(authorID), map[string]any{
 		"comment": resp, "issue_title": issue.Title, "issue_revision": created.IssueRevision,
 	})
 	h.notifyTaskSupplementAvailable(task)
@@ -467,7 +467,7 @@ func (h *Handler) publishCommentSupplementUpdate(ctx context.Context, workspaceI
 	}
 	resp := commentToResponse(comment, nil, nil)
 	applyCommentSupplements(&resp, h.listCommentSupplements(ctx, workspaceID, []pgtype.UUID{commentID})[uuidToString(commentID)])
-	h.publish(protocol.EventCommentUpdated, uuidToString(workspaceID), "system", "", map[string]any{"comment": resp})
+	h.publishWithSource(ctx, protocol.EventCommentUpdated, uuidToString(workspaceID), "system", "", map[string]any{"comment": resp})
 }
 
 // claimChatTaskSupplement hands the daemon the next chat message steered into

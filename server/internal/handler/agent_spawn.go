@@ -433,7 +433,7 @@ func (h *Handler) UpdateWorkspaceAgentSpawn(w http.ResponseWriter, r *http.Reque
 		writeError(w, http.StatusInternalServerError, "failed to update agent permissions")
 		return
 	}
-	h.publish(protocol.EventWorkspaceUpdated, uuidToString(updated.ID), "member", requestUserID(r), map[string]any{"workspace": h.workspaceToResponse(updated)})
+	h.publishWithSource(r.Context(), protocol.EventWorkspaceUpdated, uuidToString(updated.ID), "member", requestUserID(r), map[string]any{"workspace": h.workspaceToResponse(updated)})
 	writeJSON(w, http.StatusOK, policy)
 }
 

@@ -112,7 +112,7 @@ func (h *Handler) archiveWorkspaceLinkRequest(ctx context.Context, link db.Works
 	ws := uuidToString(link.TargetWorkspaceID)
 	for _, row := range rows {
 		recipient := uuidToString(row.RecipientID)
-		h.publish(protocol.EventInboxArchived, ws, "member", recipient, map[string]any{
+		h.publishWithSource(ctx, protocol.EventInboxArchived, ws, "member", recipient, map[string]any{
 			"item_id":      uuidToString(row.ID),
 			"issue_id":     nil,
 			"recipient_id": recipient,
@@ -150,6 +150,6 @@ func (h *Handler) notifyWorkspaceManagers(ctx context.Context, ws, actorUser pgt
 			slog.WarnContext(ctx, "workspace link notice: inbox write", "type", itemType, "error", err)
 			continue
 		}
-		h.publish(protocol.EventInboxNew, uuidToString(ws), "system", "", map[string]any{"item": inboxToResponse(item)})
+		h.publishWithSource(ctx, protocol.EventInboxNew, uuidToString(ws), "system", "", map[string]any{"item": inboxToResponse(item)})
 	}
 }

@@ -1,4 +1,5 @@
 {
+  "via_bot": "经 {{name}}",
   "tabs": {
     "title": "聊天"
   },
