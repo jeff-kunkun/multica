@@ -298,6 +298,8 @@
     "action": "Associer un runtime"
   },
   "offline_banner": {
+    "last_seen": "Runtime hors ligne, dernière connexion à {{time}}",
+    "last_seen_unknown": "Runtime hors ligne, dernière connexion inconnue",
     "fallback_name": "l'agent",
     "unstable": "La connexion de {{name}} est instable — les réponses peuvent être retardées.",
     "offline": "{{name}} est hors ligne — votre message sera remis à son retour."

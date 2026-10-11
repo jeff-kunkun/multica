@@ -293,6 +293,8 @@
     "action": "ランタイムを設定"
   },
   "offline_banner": {
+    "last_seen": "ランタイムがオフラインです。最終接続 {{time}}",
+    "last_seen_unknown": "ランタイムがオフラインです。最終接続時刻不明",
     "fallback_name": "エージェント",
     "unstable": "{{name}} の接続が不安定です。返信が遅れる場合があります。",
     "offline": "{{name}} はオフラインです。再接続されたらメッセージが届きます。"

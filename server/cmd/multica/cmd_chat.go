@@ -93,7 +93,12 @@ platform writes after each reply.
   multica chat progress --history
 
 --tone sets the dot colour: working (blue, default), waiting (yellow),
-stuck (red), done (green). --history lists earlier lines, newest first.`,
+stuck (red), done (green). --history lists earlier lines, newest first, plus
+task_status, reason, queue_ahead (turns before this one), and runtime
+(status, name, last_seen_at). Reasons include runtime_offline, running_no_logs,
+and queued_behind_N.
+
+  multica chat progress --session <session-id> --history --output json`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: runChatProgress,
 }
@@ -215,6 +220,13 @@ happens when the agent is still replying (ignored when it is not):
 
 When the running CLI cannot steer, the send is refused with the reason and
 the modes that work; nothing is sent.
+
+The response includes runtime (status, name, last_seen_at). Offline sends are
+accepted with warning in JSON and stderr. With --wait, timeout exits nonzero
+and returns task_status, reason and queue_ahead plus runtime last_seen_at.
+Reasons include runtime_offline, running_no_logs and queued_behind_N.
+
+  multica chat send --session <session-id> "Hello" --wait --wait-timeout 20s --output json
 
   multica chat send --session <id|url> "Use the staging database instead" --mode steer
   multica chat send --session <id|url> --content-file ./msg.md --mode queue
@@ -498,14 +510,17 @@ func reportOrListProgress(ctx context.Context, cmd *cobra.Command, client *cli.A
 		if len(args) > 0 {
 			return fmt.Errorf("%s progress: --history takes no text", noun)
 		}
-		var out struct {
-			Progress []map[string]any `json:"progress"`
-		}
+		var out map[string]any
 		if err := client.GetJSON(ctx, path, &out); err != nil {
 			return fmt.Errorf("list %s progress: %w", noun, err)
 		}
 		if output == "table" {
-			for _, p := range out.Progress {
+			if status := strVal(out, "task_status"); status != "" {
+				fmt.Printf("Task: %s; reason: %s; runtime: %v\n", status, strVal(out, "reason"), out["runtime"])
+			}
+			items, _ := out["progress"].([]any)
+			for _, item := range items {
+				p, _ := item.(map[string]any)
 				fmt.Printf("%v  %-7v %-7v %v\n", p["updated_at"], p["tone"], p["source"], p["text"])
 			}
 			return nil
@@ -889,6 +904,7 @@ func runChatSend(cmd *cobra.Command, args []string) error {
 	if err := client.PostJSON(ctx, path, map[string]any{"content": content, "mode": mode, "attachment_ids": attachmentIDs}, &out); err != nil {
 		return sendModeRefusal(err, output, "chat send")
 	}
+	printChatRuntimeWarning(cmd, out)
 	if wait, _ := cmd.Flags().GetBool("wait"); wait {
 		return finishChatSend(cmd, client, ref.ID, out)
 	}

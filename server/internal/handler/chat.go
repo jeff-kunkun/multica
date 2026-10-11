@@ -1144,10 +1144,12 @@ type SendChatMessageRequest struct {
 }
 
 type SendChatMessageResponse struct {
-	MessageID     string `json:"message_id"`
-	TaskID        string `json:"task_id"`
-	SupportsQueue bool   `json:"supports_queue"`
-	Queued        bool   `json:"queued"`
+	Runtime       *ChatRuntimeResponse `json:"runtime"`
+	Warning       string               `json:"warning,omitempty"`
+	MessageID     string               `json:"message_id"`
+	TaskID        string               `json:"task_id"`
+	SupportsQueue bool                 `json:"supports_queue"`
+	Queued        bool                 `json:"queued"`
 	// Mode is what actually happened: steer, queue, restart, or start when
 	// nothing was replying. A steer whose reply ended first reports queue.
 	Mode string `json:"mode"`
@@ -1395,7 +1397,12 @@ func (h *Handler) SendChatMessage(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	diagnostics, diagnosticErr := h.chatDiagnostics(r.Context(), agent.RuntimeID, &task)
+	if diagnosticErr != nil {
+		slog.Warn("chat send diagnostics unavailable", "error", diagnosticErr)
+	}
 	writeJSON(w, http.StatusCreated, SendChatMessageResponse{
+		Runtime: diagnostics.Runtime, Warning: diagnostics.Warning,
 		MessageID:     uuidToString(msg.ID),
 		TaskID:        uuidToString(task.ID),
 		SupportsQueue: true,

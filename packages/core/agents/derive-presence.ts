@@ -145,6 +145,7 @@ export function deriveAgentPresenceDetail(input: DerivePresenceInput): AgentPres
 
   return {
     availability,
+    runtimeLastSeenAt: input.runtime?.last_seen_at,
     workload: detail.workload,
     runningCount: detail.runningCount,
     queuedCount: detail.queuedCount,

@@ -81,3 +81,30 @@ multica issue comment add <issue-id> --content-file ./take-over.md --mode handof
 `multica chat handoff --to <agent> [--session <id|url>]`: it opens a new chat
 with that agent whose first message summarises this one, and leaves the old
 chat as it is. Only the chat's owner can hand it over.
+
+## Chat runtime status and reply timeouts
+
+`multica chat send --session <id> "Hello" --output json` returns `runtime`:
+`{status, name, last_seen_at}`. `last_seen_at` is an RFC3339 timestamp or null
+when no heartbeat is known. Offline sends are accepted with `warning` in JSON;
+the same warning goes to stderr. Do not send the message again because of this
+warning: the message and its queued task already exist.
+
+`multica chat send --session <id> "Hello" --wait --wait-timeout 20s --output json`
+exits nonzero on timeout and preserves the send result plus `task_status`,
+`reason`, `queue_ahead` and `runtime`. Diagnostics refer to this send's task,
+not a later message in the session. `task_status` is the stored task state;
+`reason` can be `runtime_offline`, `running_no_logs`, `running`,
+`queued_behind_N` (`queue_ahead` is N preceding turns in this chat),
+`awaiting_dispatch`, `waiting_local_directory`, `retry_scheduled`, or the
+terminal failure reason. A completed task reports `completed`, even when the
+reply has not yet appeared. No ETA is implied by queue position.
+
+Read the latest turn again with:
+
+```bash
+multica chat progress --session <id> --history --output json
+```
+
+This returns progress history plus the same current task diagnostics and
+runtime last-seen time. An empty chat has no `task_status` or `reason` yet.
