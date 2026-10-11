@@ -6771,6 +6771,7 @@ export class ApiClient {
     target_slug: string;
     project_ids: string[];
     direction?: WorkspaceLinkDirection;
+    managed?: boolean;
   }): Promise<WorkspaceLink> {
     return this.fetch("/api/workspace-links", { method: "POST", body: JSON.stringify(body) });
   }

@@ -127,7 +127,7 @@ func wantStatus(t *testing.T, err error, status int) {
 func (w *world) link(t *testing.T, projects ...pgtype.UUID) pgtype.UUID {
 	t.Helper()
 	ctx := context.Background()
-	l, err := w.svc.Create(ctx, w.source, w.srcOwner, owner(), w.viewerSlug, projects)
+	l, err := w.svc.Create(ctx, w.source, w.srcOwner, owner(), w.viewerSlug, projects, false)
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}

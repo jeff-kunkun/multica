@@ -431,7 +431,7 @@ func (h *Handler) ConvertChatSessionToGoal(w http.ResponseWriter, r *http.Reques
 	var seed string
 	for _, message := range messages {
 		if message.Role == "user" && strings.TrimSpace(message.Content) != "" {
-			seed = strings.TrimSpace(message.Content)
+			seed = strings.TrimSpace(protocol.ChatPromptContent(message.MessageKind, message.Content))
 			break
 		}
 	}
@@ -1153,10 +1153,13 @@ type SendChatMessageRequest struct {
 }
 
 type SendChatMessageResponse struct {
-	MessageID     string `json:"message_id"`
-	TaskID        string `json:"task_id"`
-	SupportsQueue bool   `json:"supports_queue"`
-	Queued        bool   `json:"queued"`
+	ChatSessionID  string                     `json:"chat_session_id,omitempty"`
+	MessageKind    string                     `json:"message_kind,omitempty"`
+	LinkedDelivery *ManagedChatDeliverySource `json:"linked_delivery,omitempty"`
+	MessageID      string                     `json:"message_id"`
+	TaskID         string                     `json:"task_id"`
+	SupportsQueue  bool                       `json:"supports_queue"`
+	Queued         bool                       `json:"queued"`
 	// Mode is what actually happened: steer, queue, restart, or start when
 	// nothing was replying. A steer whose reply ended first reports queue.
 	Mode string `json:"mode"`
@@ -1193,6 +1196,20 @@ func (h *Handler) SendChatMessage(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Content == "" {
 		writeError(w, http.StatusBadRequest, "content is required")
+		return
+	}
+	if grant, managed := workspacelink.ManagedGrantFromContext(r.Context()); managed {
+		id, err := parseUUIDSafe(sessionID)
+		if err != nil {
+			writeWorkspaceLinkError(w, workspacelink.ErrManagedDenied)
+			return
+		}
+		session, err := h.Queries.GetChatSessionInWorkspace(r.Context(), db.GetChatSessionInWorkspaceParams{ID: id, WorkspaceID: grant.Source.ID})
+		if err != nil {
+			writeWorkspaceLinkError(w, workspacelink.ErrManagedDenied)
+			return
+		}
+		h.sendManagedChatMessage(w, r, session, grant, req)
 		return
 	}
 	mode, ok := normalizeSendMode(req.Mode)
@@ -1617,6 +1634,9 @@ func (h *Handler) ListChatMessages(w http.ResponseWriter, r *http.Request) {
 	resp := make([]ChatMessageResponse, len(messages))
 	for i, m := range messages {
 		resp[i] = chatMessageToResponse(m, groupedAtt[uuidToString(m.ID)])
+		if _, managed := workspacelink.ManagedGrantFromContext(r.Context()); managed {
+			resp[i].Content = protocol.ChatPromptContent(m.MessageKind, m.Content)
+		}
 	}
 	h.attachChatSessionLineage(r.Context(), resp, messages)
 	writeJSON(w, http.StatusOK, resp)
@@ -2839,6 +2859,8 @@ const chatQuickActionResponseLimit = 3
 // never surprises an older client into a broken render (MUL-4351).
 func normalizeMessageKind(kind string) string {
 	switch kind {
+	case protocol.ChatMessageKindLinkedDelivery:
+		return protocol.ChatMessageKindLinkedDelivery
 	case protocol.ChatMessageKindNoResponse:
 		return protocol.ChatMessageKindNoResponse
 	case protocol.ChatMessageKindOnboardingKickoff:

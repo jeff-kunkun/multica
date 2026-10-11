@@ -104,6 +104,29 @@ multica auth logout
 
 Removes the stored authentication token.
 
+### Recovering a rejected daemon credential
+
+If a request with the daemon's own credential receives HTTP 401 and `/api/me`
+confirms the rejection, the daemon stops claiming tasks and closes its
+WebSocket. Endpoint-specific token-kind restrictions do not stop a daemon
+whose identity still authenticates. Pending terminal reports remain on disk for
+replay after authentication is restored. A task-scoped token's 401, HTTP 403,
+rate limiting, and network/server errors do not trigger this shutdown.
+
+Run `multica login --profile <name>`, then `multica daemon start --profile <name>`
+to restore a CLI-managed daemon. Desktop detects even an immediate startup
+authentication failure and exposes its existing reauthentication action. On
+login, Desktop checks a cached PAT, replaces it only if explicitly rejected,
+and restarts a running daemon when credentials change, including for the same
+user. A transient probe failure preserves the cached credential.
+
+The server rechecks a PAT-authenticated daemon WebSocket on connection and
+every 15 seconds against token storage. Revoked, deleted, rotated, or expired
+PATs close with WebSocket status 1008; a failed storage check closes with the
+retryable status 1013. This removes the connection from presence even for old
+clients. Runtime offline timing and task reassignment still follow the existing
+server liveness/lease rules. Non-PAT WebSocket authentication is unchanged.
+
 ## Agent Daemon
 
 The daemon is the local agent runtime. It detects available AI CLIs on your machine, registers them with the Multica server, and executes tasks when agents are assigned work.
