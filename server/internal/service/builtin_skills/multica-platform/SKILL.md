@@ -1,6 +1,6 @@
 ---
 name: multica-platform
-description: "Asks, open a chat, consult, goals, inbox, project board/report, sub-issues, wakeups, routing, close protocol, stall, driver, halt, mention, agents, specialisation, squads, autopilot, projects, runtimes, progress, state card, skill import, transfer, linked workspace, bots, GitHub App. Not app code."
+description: "Overview, asks, open a chat, consult, goals, inbox, project board/report, sub-issues, wakeups, routing, close protocol, stall, driver, halt, mention, agents, specialisation, squads, autopilot, projects, runtimes, progress, state card, skill import, transfer, linked workspace, bots, GitHub App. Not app code."
 user-invocable: false
 allowed-tools: Bash(multica *), Bash(git *), Bash(gh *)
 ---
@@ -31,7 +31,7 @@ See `references/overview.md` for filter semantics and examples.
 |---|---|
 | `references/issues.md` | Issues: PR linking vs close intent, reading a linked PR's state, custom properties, status side effects, who else is running, charts vs attached files in a comment |
 | `references/drivers.md` | Who drives an open issue (`driver` in `issue get` / `issue children`), the patrol's rerun-then-escalate, and `multica issue dispose` for one nobody drives |
-| `references/run-control.md` | Stopping every run on one issue (halt / resume), the chain budget, the run time limit, and steer / queue / restart for a message to a running reply |
+| `references/run-control.md` | Stopping issue/chat work with optional related targets, halt / resume, default wakeup merging, the chain budget, the run time limit, and explicit steer / queue / restart |
 | `references/wakeups.md` | Issue wakeups: events, conditions (`--until-*`), timers, check-ins, runaway protection |
 | `references/stall-actions.md` | Automatic stall actions: 24-hour keep announcements, parent auto-close, 7-day undo, and CLI/API commands |
 | `references/goals.md` | Task goals: draft a completion line, confirm the human lock, track budget, and finish a goal |

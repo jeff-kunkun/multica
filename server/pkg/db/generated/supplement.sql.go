@@ -25,7 +25,7 @@ WHERE s.task_id = t.id
   AND s.chat_message_id = $1
   AND (s.status IN ('delivering', 'delivered')
        OR (s.status = 'failed' AND s.failure_reason = 'turn_ended' AND s.attempt_count > 0))
-RETURNING s.task_id, s.chat_message_id, s.followup_task_id, s.workspace_id, s.chat_session_id, s.author_id, s.status, s.failure_reason, s.attempt_count, s.created_at, s.updated_at, s.delivered_at
+RETURNING s.task_id, s.chat_message_id, s.followup_task_id, s.workspace_id, s.chat_session_id, s.author_id, s.status, s.failure_reason, s.attempt_count, s.created_at, s.updated_at, s.delivered_at, s.recovered_into_task_id
 `
 
 type AckChatTaskSupplementDeliveredParams struct {
@@ -49,6 +49,7 @@ func (q *Queries) AckChatTaskSupplementDelivered(ctx context.Context, arg AckCha
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.DeliveredAt,
+		&i.RecoveredIntoTaskID,
 	)
 	return i, err
 }
@@ -61,7 +62,7 @@ SET status = 'failed',
 WHERE task_id = $2
   AND chat_message_id = $3
   AND status = 'delivering'
-RETURNING task_id, chat_message_id, followup_task_id, workspace_id, chat_session_id, author_id, status, failure_reason, attempt_count, created_at, updated_at, delivered_at
+RETURNING task_id, chat_message_id, followup_task_id, workspace_id, chat_session_id, author_id, status, failure_reason, attempt_count, created_at, updated_at, delivered_at, recovered_into_task_id
 `
 
 type AckChatTaskSupplementFailedParams struct {
@@ -86,6 +87,7 @@ func (q *Queries) AckChatTaskSupplementFailed(ctx context.Context, arg AckChatTa
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.DeliveredAt,
+		&i.RecoveredIntoTaskID,
 	)
 	return i, err
 }
@@ -268,7 +270,7 @@ WITH next AS MATERIALIZED (
     WHERE s.task_id = $1
       AND s.status = 'pending'
       AND t.status = 'running'
-      AND f.status = 'queued'
+      AND (f.status = 'queued' OR (s.followup_task_id = s.task_id AND f.status = 'running'))
     ORDER BY s.created_at, s.chat_message_id
     FOR UPDATE OF s SKIP LOCKED
     LIMIT 1
@@ -281,7 +283,7 @@ WITH next AS MATERIALIZED (
     FROM next
     WHERE s.chat_message_id = next.chat_message_id
       AND s.task_id = next.task_id
-    RETURNING s.task_id, s.chat_message_id, s.followup_task_id, s.workspace_id, s.chat_session_id, s.author_id, s.status, s.failure_reason, s.attempt_count, s.created_at, s.updated_at, s.delivered_at
+    RETURNING s.task_id, s.chat_message_id, s.followup_task_id, s.workspace_id, s.chat_session_id, s.author_id, s.status, s.failure_reason, s.attempt_count, s.created_at, s.updated_at, s.delivered_at, s.recovered_into_task_id
 )
 SELECT claimed.chat_message_id, claimed.attempt_count, m.content,
        COALESCE(NULLIF(btrim(u.name), ''), 'a user')::text AS author_name
@@ -399,9 +401,9 @@ WITH locked_task AS MATERIALIZED (
     SELECT t.id, $3, $4, $5,
            $2, $6, 'pending'
     FROM locked_task t
-    RETURNING task_id, chat_message_id, followup_task_id, workspace_id, chat_session_id, author_id, status, failure_reason, attempt_count, created_at, updated_at, delivered_at
+    RETURNING task_id, chat_message_id, followup_task_id, workspace_id, chat_session_id, author_id, status, failure_reason, attempt_count, created_at, updated_at, delivered_at, recovered_into_task_id
 )
-SELECT inserted.task_id, inserted.chat_message_id, inserted.followup_task_id, inserted.workspace_id, inserted.chat_session_id, inserted.author_id, inserted.status, inserted.failure_reason, inserted.attempt_count, inserted.created_at, inserted.updated_at, inserted.delivered_at, locked_task.runtime_id
+SELECT inserted.task_id, inserted.chat_message_id, inserted.followup_task_id, inserted.workspace_id, inserted.chat_session_id, inserted.author_id, inserted.status, inserted.failure_reason, inserted.attempt_count, inserted.created_at, inserted.updated_at, inserted.delivered_at, inserted.recovered_into_task_id, locked_task.runtime_id
 FROM inserted
 JOIN locked_task ON locked_task.id = inserted.task_id
 `
@@ -416,19 +418,20 @@ type CreateChatTaskSupplementParams struct {
 }
 
 type CreateChatTaskSupplementRow struct {
-	TaskID         pgtype.UUID        `json:"task_id"`
-	ChatMessageID  pgtype.UUID        `json:"chat_message_id"`
-	FollowupTaskID pgtype.UUID        `json:"followup_task_id"`
-	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
-	ChatSessionID  pgtype.UUID        `json:"chat_session_id"`
-	AuthorID       pgtype.UUID        `json:"author_id"`
-	Status         string             `json:"status"`
-	FailureReason  pgtype.Text        `json:"failure_reason"`
-	AttemptCount   int32              `json:"attempt_count"`
-	CreatedAt      pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
-	DeliveredAt    pgtype.Timestamptz `json:"delivered_at"`
-	RuntimeID      pgtype.UUID        `json:"runtime_id"`
+	TaskID              pgtype.UUID        `json:"task_id"`
+	ChatMessageID       pgtype.UUID        `json:"chat_message_id"`
+	FollowupTaskID      pgtype.UUID        `json:"followup_task_id"`
+	WorkspaceID         pgtype.UUID        `json:"workspace_id"`
+	ChatSessionID       pgtype.UUID        `json:"chat_session_id"`
+	AuthorID            pgtype.UUID        `json:"author_id"`
+	Status              string             `json:"status"`
+	FailureReason       pgtype.Text        `json:"failure_reason"`
+	AttemptCount        int32              `json:"attempt_count"`
+	CreatedAt           pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt           pgtype.Timestamptz `json:"updated_at"`
+	DeliveredAt         pgtype.Timestamptz `json:"delivered_at"`
+	RecoveredIntoTaskID pgtype.UUID        `json:"recovered_into_task_id"`
+	RuntimeID           pgtype.UUID        `json:"runtime_id"`
 }
 
 // Asks the running reply to read a message that was just queued behind it.
@@ -457,6 +460,7 @@ func (q *Queries) CreateChatTaskSupplement(ctx context.Context, arg CreateChatTa
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.DeliveredAt,
+		&i.RecoveredIntoTaskID,
 		&i.RuntimeID,
 	)
 	return i, err

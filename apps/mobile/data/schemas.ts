@@ -266,6 +266,7 @@ export const EMPTY_LIST_PROJECT_RESOURCES_RESPONSE: ListProjectResourcesResponse
 // fields mobile keys behaviour on — `id` and `chat_session_id` — are required.
 
 export const ChatSessionSchema: z.ZodType<ChatSession> = z.object({
+  converted_issue_id: z.string().nullable().optional().catch(undefined),
   id: z.string(),
   workspace_id: z.string().default(""),
   agent_id: z.string().default(""),

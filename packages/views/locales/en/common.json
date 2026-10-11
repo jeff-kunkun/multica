@@ -233,5 +233,18 @@
     "projects": "Fits selected projects",
     "generic": "General",
     "other": "Others"
+  },
+  "stop_work": {
+    "title": "Stop work?",
+    "description": "Queued and active runs will stop. Partial output stays available.",
+    "related": "Also stop child issues and related chats",
+    "keep": "Keep running",
+    "confirm": "Stop work",
+    "confirm_related": "Stop related work",
+    "cancel_title": "Cancel issue?",
+    "cancel_description": "The issue will be cancelled. Choose whether to stop related runs too.",
+    "cancel_keep": "Keep issue",
+    "cancel_confirm": "Cancel issue",
+    "cancel_confirm_related": "Cancel and stop related work"
   }
 }
