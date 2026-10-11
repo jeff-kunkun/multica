@@ -106,3 +106,8 @@ On `reset_required`, `history_unavailable` or `scope_reset`, discard the stale
 cursor AND cached summaries, then rebuild without `--since`. The server is the source
 of these errors, scope restrictions and rate limits. Discover both commands in
 `multica capabilities --domain overview --output json` and their `--help`.
+
+The `fast_access.mcp` discovery field names the local `multica mcp serve` stdio
+adapter. Find it in `capabilities` and read `mcp serve --help` for configuration,
+tool schemas and ambiguous-write recovery. Existing workspace/agent MCP settings
+assign it; no new credentials are created.

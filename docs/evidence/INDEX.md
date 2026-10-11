@@ -65,3 +65,5 @@
 - DENE-1870：跨工作区紧凑读取；[协议](../kun/fast-access.md)、[后端复现与本地测量](DENE-1870/backend.md)、[共享界面验证及原生例外](DENE-1870/frontend.md)、[四档真实截图报告](https://ai.ferryway.cc/api/attachments/01a12c30-6781-7d33-94d8-6399c6cbba01/download)。本地两工作区17活动运行，30次p95为1.043秒，不代表线上结果。
 
 - DENE-1872：持久事件记录与断线续传（含三条生命周期路径实际锁等待采样补测）；[事务、回放、性能与回滚证据](DENE-1872/backend.md)。服务端、CLI、共享页面和原生查询层已同步；本地集成通过，尚未发布，原生设备与 Electron GUI 未实测。
+
+- DENE-1873：本地 stdio MCP 薄适配；[接入、工具与边界](../kun/fast-access-mcp.md)、[真实 SDK/编译后 CLI 验收及独立副本回滚附件](https://ai.ferryway.cc/api/attachments/01a12c68-be9d-7a4b-ba60-5e8288e18ff3/download)。2025-11-25 初始化与 2026-07-28 发现、九工具、权限/429/写超时查证、附件校验通过；相关 CLI 回归在隔离测试目录通过。广范围 CLI 测试受任务标记/配置环境干扰失败；未运行生产写入或新增界面验收。
