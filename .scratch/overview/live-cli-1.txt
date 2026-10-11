@@ -1,0 +1,73 @@
+{
+  "agents": [
+    {
+      "id": "18030000-0000-4000-8000-000000000003",
+      "model": "test-model",
+      "name": "QA Builder",
+      "routing_tier": "strong",
+      "runtime_id": "18030000-0000-4000-8000-000000000002",
+      "work_enabled": false
+    }
+  ],
+  "automations": [
+    {
+      "assignee_id": "18030000-0000-4000-8000-000000000003",
+      "id": "18030000-0000-4000-8000-000000000006",
+      "project_id": "18030000-0000-4000-8000-000000000004",
+      "status": "paused",
+      "title": "Daily release report"
+    }
+  ],
+  "chats": [
+    {
+      "agent_id": "18030000-0000-4000-8000-000000000003",
+      "id": "2f6dcd01-984f-493b-802f-4ed9aee862f4",
+      "project_id": "18030000-0000-4000-8000-000000000004",
+      "status": "active",
+      "title": "Mobile release planning"
+    }
+  ],
+  "compact": true,
+  "counts": {
+    "agents": 1,
+    "automations": 1,
+    "chats": 1,
+    "external_connections": 0,
+    "projects": 1,
+    "runtimes": 1,
+    "skills": 1,
+    "squads": 1,
+    "workspace_links": 0
+  },
+  "external_connections": [],
+  "omitted_sections": [],
+  "projects": [
+    {
+      "id": "18030000-0000-4000-8000-000000000004",
+      "status": "planned",
+      "title": "Mobile release"
+    }
+  ],
+  "runtimes": [
+    {
+      "id": "18030000-0000-4000-8000-000000000002",
+      "name": "QA laptop",
+      "status": "offline"
+    }
+  ],
+  "skills": [
+    {
+      "id": "18030000-0000-4000-8000-000000000005",
+      "name": "Release checks"
+    }
+  ],
+  "squads": [
+    {
+      "id": "30f76ce6-cc6b-469b-aa0c-c02821e4c79c",
+      "leader_id": "18030000-0000-4000-8000-000000000003",
+      "name": "Release team"
+    }
+  ],
+  "workspace_id": "18030000-0000-4000-8000-000000000001",
+  "workspace_links": []
+}
