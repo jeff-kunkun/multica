@@ -1,22 +1,44 @@
-# DENE-1814 continuation checkpoint
+# DENE-1814 — chat reference CLI verification
 
-- ACTIVE_OBJECT: branch `agent/agent/dene-1814`, chat read-only reference CLI.
-- LAST_CONFIRMED_RESULT: implementation restored and committed as b938382dae; CLI tests committed as 9aef957d94. `go test ./cmd/multica -run 'TestChatLinkedProjects|TestRunChatNew' -count=1 -v` passed, and `go run ./cmd/multica chat linked-projects --help` succeeded. Tests use mock HTTP responses, including revoked availability; they are not real server/run evidence.
-- NEXT_EXECUTABLE_ACTION: from `server/`, run `bash ../scripts/test-db.sh -- go test ./internal/handler -run '^TestChatLinkedProjects' -count=1 -v` using this checkout's managed test environment. Set GOTMPDIR to a writable volume if system disk is still full. Do not copy another checkout's env file.
-- INPUT_PATHS: `server/internal/handler/chat_linked_project_test.go`, `server/internal/daemon/execenv/reference_projects_brief_test.go`, `server/cmd/multica/cmd_chat_linked_projects.go`.
-- ACCEPTANCE_EVENT: real CLI attachment -> next chat run claim/brief includes the reference; revocation -> next run omits it. Existing handler and renderer tests provide narrower evidence only.
+Implementation: `chat linked-projects --available`, `chat linked-projects [session-id]`
+with `--reference LINK_ID:PROJECT_ID` / `--clear`, and `chat new --reference`.
+References use existing chat APIs and retain server-side validation. Names and flags
+match DENE-1806; output uses `link_id`, `project_id`, `title`, `source_name`,
+`available`, plus a non-disclosing `unavailable_reason` sentence.
 
-Remaining pieces:
-1. Local CLI-to-server-to-run verification and overview projection check. The prior run's `make status` reported no registered environment. No production links were changed.
-2. Reconcile latest `origin/kun`, review final diff, create PR, then use issue close when acceptance evidence is complete. No PR or merge yet.
+## Verified locally
 
-DENE-1806 alignment: read the sibling implementation and posted comment 01a12a2e-a8b2-71ea-8a3e-eea3f60d968a there. Common `linked-projects`, `--reference LINK_ID:PROJECT_ID`, `--clear`, `linked_projects`, `title`, `source_name`, `available`; this CLI also emits `unavailable_reason`. Recheck that ticket's final implementation before merging.
+- CLI HTTP contract tests: list, attach, detach, stale status, create-chat references,
+  invalid input and agent-run create guard passed.
+- Compiled CLI against real handlers and a disposable PostgreSQL database: list
+  available projects, clear and attach a reference, read the revoked reference.
+- The next actual task claim included the shared project's context; the runtime
+  renderer generated `Read-only Reference Projects` and `Shared brief (from Acme)`.
+  After revocation the next claim and rendered brief omitted the reference.
+- Full and compact overview include chat references; overview permissions tests pass.
+- Existing daemon reference-brief rendering test and whitespace checks pass.
 
-Only CLI capability is added: existing server mutation/access contracts and Web/Desktop picker are reused. Overview and external bot guidance expose the new capability. No frontend/native mobile change.
+Reproduce the optional CLI integration from `server/`:
+
+```sh
+go build -o /tmp/multica-reference-check ./cmd/multica
+MULTICA_REFERENCE_CLI_TEST_BINARY=/tmp/multica-reference-check \
+  bash ../scripts/test-db.sh --quiet -- \
+  go test ./internal/handler -run '^TestChatLinkedProjects|^TestOverview' -count=1 -v
+```
+
+Authentication in this local HTTP fixture is supplied by the existing handler test
+identity; the real authentication middleware and a paid agent process are not run.
+The first fixture attempt lacked that user header and returned 401; correcting the
+fixture produced the passing run. No production links were modified. CLI new-chat
+payload is covered by the HTTP contract test, not a production conversation.
+
+Only CLI capability is added. Existing server writes and Web/Desktop/mobile UI
+are unchanged; overview and external bot guidance expose the CLI capability.
 
 ## 知识审计
 
 - 术语/ADR、AGENTS.md、DESIGN.md / INTERACTION.md：不改。
-- Skill：已更新内置 `multica-platform/references/workspace-links.md` 的聊天参考项目命令与失效语义。
-- Multica Project Context：不改；临时磁盘不足不沉淀为项目约束。
-- 删减：无。任务尚未合并，不清理任务分支。
+- Skill：已更新内置 `multica-platform/references/workspace-links.md`。
+- Multica Project Context：不改。
+- 删减：移除本任务分支误收的 `.local/` 临时证据；原件保留在任务附件。

@@ -176,7 +176,7 @@ func (h *Handler) GetOverview(w http.ResponseWriter, r *http.Request) {
 		counts[name] = len(rows)
 		if compact {
 			for i, row := range rows {
-				rows[i] = overviewProject(row, "id name title model runtime_id routing_tier runtime_availability work_enabled status project_id agent_id assignee_id next_run_at leader_id source target type")
+				rows[i] = overviewProject(row, "id name title model runtime_id routing_tier runtime_availability work_enabled status project_id agent_id assignee_id next_run_at leader_id source target type linked_projects")
 			}
 		}
 		result[name] = rows

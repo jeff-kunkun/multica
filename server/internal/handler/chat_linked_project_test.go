@@ -118,6 +118,7 @@ func TestChatLinkedProjects(t *testing.T) {
 	var cliRead func(...string) string
 	if binary := os.Getenv("MULTICA_REFERENCE_CLI_TEST_BINARY"); binary != "" {
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			r.Header.Set("X-User-ID", testUserID)
 			r = withChatTestWorkspaceCtx(t, withURLParam(r, "sessionId", session.ID))
 			switch {
 			case r.URL.Path == "/api/workspace-links/projects":
@@ -159,6 +160,13 @@ func TestChatLinkedProjects(t *testing.T) {
 		}
 	}
 
+	for _, suffix := range []string{"", "?compact=true"} {
+		w := httptest.NewRecorder()
+		testHandler.GetOverview(w, withChatTestWorkspaceCtx(t, newRequest("GET", "/api/overview"+suffix, nil)))
+		if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), shared) || !strings.Contains(w.Body.String(), "linked_projects") {
+			t.Fatalf("overview reference projection %s: %d %s", suffix, w.Code, w.Body)
+		}
+	}
 	runtimeID := handlerTestRuntimeID(t)
 	claim := func() (string, []TaskLinkedProjectData) {
 		t.Helper()
