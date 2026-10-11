@@ -163,7 +163,7 @@ func TestFastAccessArgumentValidationAndHelp(t *testing.T) {
 	for _, runs := range []bool{false, true} {
 		cases := [][]string{{"--output", "yaml"}, {"--limit", "0"}, {"--limit", "201"}, {"--max-bytes", "0"}, {"--max-bytes", "50001"}, {"--all-workspaces", "--workspace", "ws-a"}, {"unexpected"}, {"--cursor", ""}, {"--workspace", ""}, {"--cursor", "opaque", "--workspace", "ws-a"}, {"--cursor", "opaque", "--all-workspaces"}}
 		if !runs {
-			cases = append(cases, []string{"--since", "not-time"}, []string{"--since", "2026-10-11T17:00:00Z", "--cursor", "next"}, []string{})
+			cases = append(cases, []string{"--since", "not-time"}, []string{"--since", "2026-10-11T17:00:00Z", "--cursor", "next"})
 		} else {
 			cases = append(cases, []string{"--active=false"})
 		}

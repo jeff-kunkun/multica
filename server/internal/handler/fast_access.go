@@ -15,23 +15,22 @@ import (
 	"unicode/utf8"
 )
 
-// Fast access is a bounded current-state snapshot, not a change journal. A
-// server-owned batch keeps both row values and ordering stable across pages.
-// Restart/replica misses explicitly require a new snapshot; never fall back to
-// a moving timestamp cursor and silently skip rows.
+// Shared envelope and bounded page packing for snapshot and durable deltas.
 type fastScope struct {
 	Mode         string   `json:"mode"`
 	WorkspaceIDs []string `json:"workspace_ids,omitempty"`
 }
 type fastRequest struct {
-	Scope    *fastScope `json:"scope,omitempty"`
-	Since    *time.Time `json:"since,omitempty"`
-	Cursor   string     `json:"cursor,omitempty"`
-	Include  []string   `json:"include,omitempty"`
-	Limit    int        `json:"limit,omitempty"`
-	MaxBytes int        `json:"max_bytes,omitempty"`
+	countSince *time.Time
+	Scope      *fastScope `json:"scope,omitempty"`
+	Since      *time.Time `json:"since,omitempty"`
+	Cursor     string     `json:"cursor,omitempty"`
+	Include    []string   `json:"include,omitempty"`
+	Limit      int        `json:"limit,omitempty"`
+	MaxBytes   int        `json:"max_bytes,omitempty"`
 }
 type fastItem struct {
+	EventID          string     `json:"event_id,omitempty"`
 	WorkspaceID      string     `json:"workspace_id"`
 	WorkspaceName    string     `json:"workspace_name"`
 	Kind             string     `json:"kind"`
@@ -72,6 +71,13 @@ type fastResponse struct {
 	RetentionFloor     *time.Time `json:"retention_floor"`
 }
 type fastBatch struct {
+	Delta         bool
+	Current       []fastItem
+	Lower         map[string]int64
+	ID            string
+	Mode          string
+	CoverageFrom  time.Time
+	Watermarks    map[string]int64
 	Principal     string
 	Request       fastRequest
 	AsOf          time.Time
@@ -79,11 +85,6 @@ type fastBatch struct {
 	Items         []fastItem
 	ActiveCount   int
 	Expires       time.Time
-	Size          int
-}
-type fastPosition struct {
-	Batch  *fastBatch
-	Offset int
 }
 type fastQuota struct {
 	Tokens float64
@@ -91,16 +92,15 @@ type fastQuota struct {
 }
 type fastStore struct {
 	sync.Mutex
-	Positions map[string]fastPosition
-	Quotas    map[string]fastQuota
+	Quotas map[string]fastQuota
 }
 
 // Stores belong to the handler, so independent test/server instances never
-// share identities or cursors. The outer registry has one entry per server.
+// share rate-limit buckets. The outer registry has one entry per server.
 var fastStores sync.Map
 
 func (h *Handler) fastStore() *fastStore {
-	value, _ := fastStores.LoadOrStore(h, &fastStore{Positions: map[string]fastPosition{}, Quotas: map[string]fastQuota{}})
+	value, _ := fastStores.LoadOrStore(h, &fastStore{Quotas: map[string]fastQuota{}})
 	return value.(*fastStore)
 }
 func fastError(w http.ResponseWriter, status int, code, message string) {
@@ -242,11 +242,6 @@ func (h *Handler) readFastAccess(w http.ResponseWriter, r *http.Request, req fas
 	store := h.fastStore()
 	now := time.Now().UTC()
 	store.Lock()
-	for k, p := range store.Positions {
-		if !now.Before(p.Batch.Expires) {
-			delete(store.Positions, k)
-		}
-	}
 	for k, q := range store.Quotas {
 		if now.Sub(q.At) > 5*time.Minute {
 			delete(store.Quotas, k)
@@ -267,85 +262,18 @@ func (h *Handler) readFastAccess(w http.ResponseWriter, r *http.Request, req fas
 	}
 	quota.Tokens--
 	store.Quotas[viewer] = quota
-	pos, found := store.Positions[req.Cursor]
 	store.Unlock()
-	var batch *fastBatch
-	offset := 0
-	if req.Cursor != "" {
-		if !found || pos.Batch.Principal != principal {
-			fastError(w, 410, "reset_required", "snapshot expired or unavailable; start a new read")
-			return
-		}
-		batch = pos.Batch
-		offset = pos.Offset
-		revision, err := h.fastAuthorizeBatch(r, viewer, batch)
-		if err != nil {
-			fastError(w, 503, "read_unavailable", "cannot verify current access")
-			return
-		}
-		if revision != batch.ScopeRevision {
-			fastError(w, 409, "scope_reset", "access changed; discard snapshot and start a new read")
-			return
-		}
-	} else {
-		var err error
-		batch, err = h.fastCollect(r, viewer, req, now)
-		if err != nil {
-			status, code := 503, "read_unavailable"
-			if err == errFastScope {
-				status, code = 403, "scope_denied"
-			}
-			if err == errFastLarge {
-				status, code = 422, "snapshot_too_large"
-			}
-			message := "cannot read compact snapshot"
-			if status != 503 {
-				message = err.Error()
-			}
-			fastError(w, status, code, message)
-			return
-		}
-		batch.Principal = principal
-		batch.Expires = now.Add(5 * time.Minute)
-		serialized, _ := json.Marshal(batch.Items)
-		batch.Size = len(serialized)
-	}
-	next := randomID()
-	checkpoint := "snapshot:" + batch.AsOf.Format(time.RFC3339Nano)
-	response, bytes, end, err := fastPage(batch, offset, req.Limit, req.MaxBytes, next, checkpoint)
-	if err != nil {
-		fastError(w, 422, "byte_budget_too_small", err.Error())
-		return
-	}
-	if !response.Complete {
-		store.Lock()
-		retained := 0
-		seen := map[*fastBatch]bool{}
-		for _, p := range store.Positions {
-			if !seen[p.Batch] {
-				retained += p.Batch.Size
-				seen[p.Batch] = true
-			}
-		}
-		if !seen[batch] {
-			retained += batch.Size
-		}
-		if len(store.Positions) >= 10000 || retained > 64*1024*1024 {
-			store.Unlock()
-			fastError(w, 503, "snapshot_capacity", "snapshot capacity reached; retry later")
-			return
-		}
-		store.Positions[next] = fastPosition{batch, end}
-		store.Unlock()
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("Cache-Control", "no-store")
-	w.WriteHeader(200)
-	_, _ = w.Write(bytes)
+	h.fastDurableRead(w, r, req, viewer, principal)
 }
+
 func fastPage(b *fastBatch, offset, limit, budget int, next, checkpoint string) (fastResponse, []byte, int, error) {
 	resp := fastResponse{SchemaVersion: "1", AsOf: b.AsOf, CoverageFrom: b.AsOf, Mode: "timestamp_snapshot", ScopeRevision: b.ScopeRevision, Changes: []fastItem{}, ActiveRuns: []fastItem{}}
-	// Coverage starts at observation, not since: there is no historical journal.
+	if b.Mode != "" {
+		resp.Mode = b.Mode
+		resp.CoverageFrom = b.CoverageFrom
+		floor := b.CoverageFrom
+		resp.RetentionFloor = &floor
+	}
 	end := offset
 	var payload []byte
 	finish := func() {

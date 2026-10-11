@@ -9,6 +9,9 @@ describe("fast access response", () => {
     expect(parseFastAccess({ ...page, active_runs_complete: undefined })).toBeNull();
     expect(parseFastAccess({ ...page, active_runs: [{ id: "run" }] })).toBeNull();
   });
+  it("accepts the durable mode", () => {
+    expect(parseFastAccess({ ...page, mode: "durable_delta" })).not.toBeNull();
+  });
   it("retains continuation and maps unread without modifying it", () => {
     const result = parseFastAccess({ ...page, complete: false, next_cursor: "next", changes: [{ id: "chat", workspace_id: "ws", kind: "chat", changed_at: page.as_of, unread_count: 3, content_truncated: true, preview: "你好" }] });
     expect(result?.nextCursor).toBe("next");

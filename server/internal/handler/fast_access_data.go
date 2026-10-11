@@ -175,85 +175,6 @@ func fastIDs(items []fastItem, ws, kind string) []pgtype.UUID {
 	return out
 }
 
-func (h *Handler) fastCollect(r *http.Request, user string, req fastRequest, asOf time.Time) (*fastBatch, error) {
-	tx, err := h.TxStarter.Begin(r.Context())
-	if err != nil {
-		return nil, err
-	}
-	defer tx.Rollback(r.Context())
-	if _, err = tx.Exec(r.Context(), "SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY"); err != nil {
-		return nil, err
-	}
-	if err = tx.QueryRow(r.Context(), "SELECT transaction_timestamp()").Scan(&asOf); err != nil {
-		return nil, err
-	}
-	// Reuse permission readers inside the same database snapshot as the rows.
-	reader := *h
-	reader.DB = tx
-	reader.Queries = h.Queries.WithTx(tx)
-	scopes, err := reader.fastScopes(r, user, req)
-	if err != nil {
-		return nil, err
-	}
-	items, err := reader.fastRows(r.Context(), scopes, req, asOf, nil)
-	if err != nil {
-		return nil, err
-	}
-	if err = tx.Commit(r.Context()); err != nil {
-		return nil, err
-	}
-	b := &fastBatch{Request: req, AsOf: asOf, Items: []fastItem{}}
-	for _, item := range items {
-		if item.active && fastIncludes(req, "active_runs") {
-			b.Items = append(b.Items, item)
-		}
-	}
-	b.ActiveCount = len(b.Items)
-	for _, item := range items {
-		if item.active && fastIncludes(req, "active_runs") {
-			continue
-		}
-		if item.Kind == "run" || item.Kind == "autopilot_run" {
-			if !fastIncludes(req, "run_changes") {
-				continue
-			}
-		}
-		if req.Since != nil && item.ChangedAt.Before(*req.Since) {
-			continue
-		}
-		b.Items = append(b.Items, item)
-	}
-	b.ScopeRevision = fastPermissionDigest(scopes, b.Items)
-	return b, nil
-}
-func fastPermissionDigest(scopes []fastWorkspace, items []fastItem) string {
-	parts := []string{}
-	for _, s := range scopes {
-		parts = append(parts, s.ID+":"+string(s.Viewer.role)+fmt.Sprint(s.Managed, s.IssuesAllowed))
-		for _, p := range s.LinkedProjects {
-			parts = append(parts, s.ID+":"+uuidToString(p))
-		}
-	}
-	for _, item := range items {
-		parts = append(parts, fastKey(item)+":"+item.SourceType+":"+item.SourceID)
-	}
-	return fastDigest(parts)
-}
-func (h *Handler) fastAuthorizeBatch(r *http.Request, user string, b *fastBatch) (string, error) {
-	scopes, err := h.fastScopes(r, user, b.Request)
-	if err != nil {
-		if err == errFastScope {
-			return "", nil
-		}
-		return "", err
-	}
-	items, err := h.fastRows(r.Context(), scopes, b.Request, b.AsOf, b.Items)
-	if err != nil {
-		return "", err
-	}
-	return fastPermissionDigest(scopes, items), nil
-}
-
 // Every query projects only compact text and identity/visibility columns. No
 // task context/prompt/result, chat transcript or issue description is loaded.
 func (h *Handler) fastRows(ctx context.Context, scopes []fastWorkspace, req fastRequest, asOf time.Time, authorize []fastItem) ([]fastItem, error) {
@@ -268,13 +189,17 @@ func (h *Handler) fastRows(ctx context.Context, scopes []fastWorkspace, req fast
 			ws := q.add(parseUUID(s.ID))
 			visibility := s.issueSQL(q, "i")
 			window := q.add(since)
+			countWindow := window
+			if req.countSince != nil {
+				countWindow = q.add(*req.countSince)
+			}
 			filter := "GREATEST(i.updated_at,COALESCE(cm.changed_at,i.updated_at)) >= " + window + "::timestamptz"
 			if authorize != nil {
 				filter = "i.id=ANY(" + q.add(fastIDs(authorize, s.ID, "issue")) + "::uuid[])"
 			}
 			query := `SELECT i.id::text,left(i.title,81),w.issue_prefix||'-'||i.number::text,i.status,GREATEST(i.updated_at,COALESCE(cm.changed_at,i.updated_at)),COALESCE(cm.new_count,0)::int
     FROM issue i JOIN workspace w ON w.id=i.workspace_id
-    LEFT JOIN LATERAL(SELECT max(GREATEST(c.created_at,c.updated_at)) changed_at,count(*) FILTER(WHERE c.created_at >= ` + window + `::timestamptz AND c.deleted_at IS NULL) new_count FROM comment c WHERE c.issue_id=i.id AND c.workspace_id=i.workspace_id) cm ON true
+    LEFT JOIN LATERAL(SELECT max(GREATEST(c.created_at,c.updated_at)) changed_at,count(*) FILTER(WHERE c.created_at >= ` + countWindow + `::timestamptz AND c.deleted_at IS NULL) new_count FROM comment c WHERE c.issue_id=i.id AND c.workspace_id=i.workspace_id) cm ON true
     WHERE i.workspace_id=` + ws + `::uuid AND ` + visibility + ` AND ` + filter + ` ORDER BY i.id LIMIT 10001`
 			rows, err := h.DB.Query(ctx, query, q.args...)
 			if err != nil {

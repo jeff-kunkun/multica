@@ -9,7 +9,6 @@ import (
 	"net/http/httptest"
 	"os"
 	"os/exec"
-	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -88,7 +87,7 @@ func TestFastAccessCLIHandlerIntegration(t *testing.T) {
 	t.Setenv("MULTICA_TOKEN", "mat_fixture_identity_boundary")
 	t.Setenv("MULTICA_SERVER_URL", srv.URL)
 	t.Setenv("MULTICA_WORKSPACE_ID", ws)
-	since := time.Now().Add(-30 * time.Minute).UTC().Format(time.RFC3339)
+
 	invoke := func(runs bool, args ...string) (map[string]any, error) {
 		t.Helper()
 		before := requests.Load()
@@ -132,7 +131,7 @@ func TestFastAccessCLIHandlerIntegration(t *testing.T) {
 		}
 		return envelope, nil
 	}
-	full, err := invoke(false, "--since", since, "--all-workspaces")
+	full, err := invoke(false, "--all-workspaces")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -162,7 +161,7 @@ func TestFastAccessCLIHandlerIntegration(t *testing.T) {
 			t.Fatal("scope escaped")
 		}
 	}
-	page, err := invoke(false, "--since", since, "--all-workspaces", "--limit", "5")
+	page, err := invoke(false, "--all-workspaces", "--limit", "5")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -200,11 +199,11 @@ func TestFastAccessCLIHandlerIntegration(t *testing.T) {
 		}
 	}
 	want := len(full["active_runs"].([]any)) + len(full["changes"].([]any))
-	if len(unique) != want || page["active_runs_complete"] != true || !strings.HasPrefix(page["checkpoint"].(string), "snapshot:") {
+	if len(unique) != want || page["active_runs_complete"] != true || page["checkpoint"] == nil {
 		t.Fatal("incomplete pagination", len(unique), want, page)
 	}
-	if _, err := invoke(false, "--cursor", page["checkpoint"].(string)); err == nil {
-		t.Fatal("snapshot receipt must not be accepted as a cursor")
+	if _, err := invoke(false, "--cursor", page["checkpoint"].(string)); err != nil {
+		t.Fatal("durable checkpoint must be accepted as a cursor", err)
 	}
-	t.Logf("REAL HANDLER/POSTGRES CLI: two workspaces, 17 active runs; explicit scope; %d pages, %d unique items; snapshot receipt refused; token middleware not exercised", pages, len(unique))
+	t.Logf("REAL HANDLER/POSTGRES CLI: two workspaces, 17 active runs; explicit scope; %d pages, %d unique items; durable checkpoint resumed; token middleware not exercised", pages, len(unique))
 }

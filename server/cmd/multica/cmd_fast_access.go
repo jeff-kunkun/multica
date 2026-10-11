@@ -33,7 +33,8 @@ read. No per-workspace polling, automatic retries or automatic pagination.
 
 Choose --all-workspaces or --workspace UUID (repeatable); otherwise use the current
 configured workspace. Find workspace IDs with multica workspace list --output json.
-For changes, provide an RFC3339 --since for the first page or the server's opaque
+For changes, omit --since to rebuild current state, or provide a retained RFC3339
+--since for a historical window, or the server's opaque
 --cursor for continuation, never both. Continuation takes only --cursor (plus limit/max-bytes/output);
 do not repeat scope flags because the server cursor already binds the scope.
 
@@ -41,7 +42,9 @@ JSON preserves the complete envelope: schema_version, mode, coverage_from, as_of
 scope_revision, changes, active_runs, complete, active_runs_complete, next_cursor,
 checkpoint and retention_floor, including additional server fields. A false
 complete or active_runs_complete means this page is partial. Follow next_cursor
-explicitly; only persist checkpoint after completion. In timestamp_snapshot,
+explicitly; only persist checkpoint after completion. In durable_delta, pass the
+completed checkpoint as --cursor for the next delta; event_id deduplicates delivery
+and revision orders each object within its workspace. In timestamp_snapshot,
 checkpoint is an observation receipt, not a cursor; start the next poll with
 --since. timestamp_snapshot describes
 current summaries, not historical deletions or every intermediate transition.
@@ -51,12 +54,12 @@ at most 50000 bytes. Diagnostics go to stderr; --output json owns stdout.
 
 Permission errors are not empty results. On 429, wait for the server's retry_after
 before retrying. On reset_required, history_unavailable or scope_reset, discard
-the stale cursor and start a supported window. Unknown schema versions require a
+all cached summaries and the stale cursor, then rebuild without --since. Unknown schema versions require a
 compatible CLI. HTTP timeout follows MULTICA_HTTP_TIMEOUT.`,
 	}
 	cmd.Flags().Bool("all-workspaces", false, "Read all workspaces visible to the caller (server-authorized)")
 	cmd.Flags().StringSlice("workspace", nil, "Workspace UUIDs (repeatable or comma-separated); defaults to current workspace")
-	cmd.Flags().String("cursor", "", "Opaque next_cursor from the server (snapshot checkpoint is not a cursor)")
+	cmd.Flags().String("cursor", "", "Opaque next_cursor or durable_delta checkpoint from the server")
 	cmd.Flags().Int("limit", 100, "Page item limit (1-200)")
 	cmd.Flags().Int("max-bytes", fastAccessMaxBytes, "Maximum uncompressed UTF-8 response bytes (1-50000)")
 	cmd.Flags().String("output", "table", "Output format: table or json (entire envelope)")
@@ -100,9 +103,6 @@ func runFastAccess(cmd *cobra.Command, runs bool) error {
 		since, _ = cmd.Flags().GetString("since")
 		if cmd.Flags().Changed("since") && cmd.Flags().Changed("cursor") {
 			return fmt.Errorf("--since and --cursor are mutually exclusive")
-		}
-		if since == "" && cursor == "" {
-			return fmt.Errorf("provide --since RFC3339 or --cursor; see multica changes --help")
 		}
 		if since != "" {
 			if _, err := time.Parse(time.RFC3339Nano, since); err != nil {

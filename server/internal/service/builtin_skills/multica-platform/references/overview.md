@@ -77,7 +77,16 @@ Read `schema_version`, `mode`, `as_of`, `coverage_from`, `scope_revision`,
 `checkpoint`, and `retention_floor`. Empty arrays mean no items on this page,
 not necessarily an empty scope. A false completeness flag means a partial page:
 continue explicitly with `next_cursor`, and save `checkpoint` only when the
-batch is complete. In `timestamp_snapshot`, `snapshot:<as_of>` is only an
+batch is complete. In `durable_delta`, use that checkpoint as the next read's
+`--cursor`. Start/rebuild current state with `multica changes --all-workspaces`
+(no `--since`). Historical `--since` is bounded by `coverage_from`; reset after
+permission changes/deletes carries no hidden object IDs. Deduplicate `event_id`,
+apply revisions monotonically per workspace/object, and atomically save applied
+summaries and the completed read checkpoint. SSE `GET /api/fast-access/v1/events`
+accepts a completed cursor or `Last-Event-ID`; its notification position is NOT
+an applied read checkpoint. Keep both positions separate. The delivery is at
+least once, with seven-day retention, two streams and 30-second keepalives.
+In `timestamp_snapshot`, `snapshot:<as_of>` is only an
 observation receipt: do not pass it as `--cursor`; start the next poll with
 `--since`. Null cursor/checkpoint/retention values convey the server's
 absence of that value; do not synthesize one. `timestamp_snapshot` is a current
@@ -94,6 +103,6 @@ On permission failure, report the refusal; do not treat it as empty results or
 switch identities. On 429, honor `Retry-After`/`retry_after` and retry later.
 Timeouts use the existing `MULTICA_HTTP_TIMEOUT`; they do not trigger retries.
 On `reset_required`, `history_unavailable` or `scope_reset`, discard the stale
-cursor and restart with an available coverage window. The server is the source
+cursor AND cached summaries, then rebuild without `--since`. The server is the source
 of these errors, scope restrictions and rate limits. Discover both commands in
 `multica capabilities --domain overview --output json` and their `--help`.

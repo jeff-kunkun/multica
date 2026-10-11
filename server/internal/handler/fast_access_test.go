@@ -73,7 +73,7 @@ func TestFastAccessSnapshot(t *testing.T) {
 	privateChat := dbfx.ChatSession(t, agent, testutil.Cols{"creator_id": stranger, "visibility": "private", "title": "HIDDEN-CHAT", "explicitly_created_at": testutil.Raw("now()")})
 	dbfx.Task(t, agent, testutil.Cols{"runtime_id": runtime, "status": "running", "chat_session_id": privateChat})
 	since := time.Now().Add(-30 * time.Minute)
-	req := fastRequest{Scope: &fastScope{Mode: "workspace_ids", WorkspaceIDs: []string{testWorkspaceID, ws2}}, Since: &since, Limit: 200}
+	req := fastRequest{Scope: &fastScope{Mode: "workspace_ids", WorkspaceIDs: []string{testWorkspaceID, ws2}}, Limit: 200}
 	resetFastQuota()
 	resp, w := fastCall(t, req)
 	if w.Code != 200 {
@@ -95,7 +95,7 @@ func TestFastAccessSnapshot(t *testing.T) {
 		}
 		if item.ID == old {
 			foundIssue = true
-			if item.NewCommentCount == nil || *item.NewCommentCount != 1 {
+			if item.NewCommentCount == nil || *item.NewCommentCount != 2 {
 				t.Fatalf("old root new reply missed: count=%v item=%#v", *item.NewCommentCount, item)
 			}
 		}
