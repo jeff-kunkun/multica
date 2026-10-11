@@ -2190,6 +2190,102 @@
       "description": "从列表里移除，不能恢复。"
     },
     "toast_stopped": "已停用 {{name}}",
-    "toast_failed": "没成功，再试一次。"
+    "toast_failed": "没成功，再试一次。",
+    "wake": {
+      "open": "叫醒设置",
+      "breadcrumb": "Bot 设置路径",
+      "description": "Multica 里有事发生时，直接把摘要推给这个 Bot 的接收地址，叫它起来看。正文不推，Bot 收到后自己用命令行拉。",
+      "forbidden": "只有工作区管理员能查看和修改叫醒设置。",
+      "not_found": "找不到这个 Bot，可能已被删除。",
+      "load_failed": "叫醒设置没加载出来。",
+      "retry": "重试",
+      "webhook_title": "接收地址",
+      "webhook_description": "地址和密钥只能写入、不会显示。要换就两项一起重填；留空不会动已保存的配置。",
+      "webhook_configured": "已配置",
+      "webhook_missing": "未配置",
+      "url": "地址",
+      "key": "密钥",
+      "key_hint": "整段 Authorization 请求头的值，例如 Bearer 开头的那一串。",
+      "key_placeholder": "Bearer …",
+      "saved_placeholder": "已保存，不显示",
+      "save_webhook": "保存地址",
+      "replace_webhook": "换成新地址",
+      "saving": "保存中…",
+      "disconnect": "断开",
+      "disconnect_dialog": {
+        "title": "断开「{{name}}」的接收地址？",
+        "description": "之后不再推送给它，规则保留。要恢复就重新填地址和密钥。"
+      },
+      "toast_webhook_saved": "接收地址已保存",
+      "toast_disconnected": "已断开接收地址",
+      "toast_rules_saved": "叫醒规则已保存",
+      "events_title": "哪些事会叫醒它",
+      "events_description": "全部不勾就是暂停所有推送。",
+      "event": {
+        "mention": {
+          "label": "@ 它",
+          "description": "有人在任务或聊天里 @ 了这个 Bot"
+        },
+        "started": {
+          "label": "开工",
+          "description": "它关注的任务开始执行"
+        },
+        "done": {
+          "label": "完成",
+          "description": "它关注的任务做完了"
+        },
+        "blocked": {
+          "label": "阻塞",
+          "description": "它关注的任务卡住了"
+        },
+        "needs_kun": {
+          "label": "需要拍板",
+          "description": "任务在等人做决定"
+        },
+        "task": {
+          "label": "派活",
+          "description": "有任务指派给了它"
+        },
+        "chat": {
+          "label": "聊天新消息",
+          "description": "它所在的聊天有新消息"
+        }
+      },
+      "limits_title": "频率和静音",
+      "hourly_limit": "每小时最多推送",
+      "hourly_limit_hint": "0 到 120，填 0 就是暂停推送。超出的事件进「待看」。",
+      "hourly_limit_invalid": "请填 0 到 120 之间的整数。",
+      "per_hour": "次 / 小时",
+      "quiet": "静音时段",
+      "quiet_hint": "时段内不推送，事件进「待看」。",
+      "quiet_window": "时段",
+      "quiet_start": "开始",
+      "quiet_end": "结束",
+      "timezone": "时区",
+      "timezone_hint": "IANA 时区名，例如 Asia/Shanghai。",
+      "reset": "还原",
+      "save_rules": "保存规则",
+      "log_title": "推送记录",
+      "log_recent": "最近推送",
+      "log_pending": "待看",
+      "log_description": "「已收到」只说明对方地址回了 200，不代表 Bot 已开工或做完。",
+      "log_pending_description": "因限频、静音或没配地址而没推出去的事件。只读；改规则不会补推这些事件。",
+      "log_failed": "推送记录没加载出来。",
+      "empty_recent": "还没有推送过。",
+      "empty_pending": "没有待看的事件。",
+      "load_more": "加载更多",
+      "loading": "加载中…",
+      "source_issue": "打开任务",
+      "source_chat": "打开聊天",
+      "attempts": "尝试 {{count}} 次",
+      "status": {
+        "queued": "排队中",
+        "sending": "发送中",
+        "received": "已收到",
+        "failed": "失败",
+        "uncertain": "不确定",
+        "pending": "待看"
+      }
+    }
   }
 }

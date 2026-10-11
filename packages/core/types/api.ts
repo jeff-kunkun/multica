@@ -709,6 +709,87 @@ export interface ExternalBotKeyResponse {
   setup_text: string;
 }
 
+// Bot wake (DENE-1792/1793): which Multica events POST to the bot's own
+// webhook. The URL and key are write-only — reads only say whether one is set.
+export type BotWakeEventType =
+  | "mention"
+  | "started"
+  | "done"
+  | "blocked"
+  | "needs_kun"
+  | "task"
+  | "chat";
+
+export interface BotQuietHours {
+  enabled: boolean;
+  /** HH:MM; equal start and end means all day. */
+  start: string;
+  end: string;
+  /** IANA zone, e.g. Asia/Shanghai. */
+  timezone: string;
+}
+
+export interface BotWakeSettings {
+  webhook_configured: boolean;
+  /** Empty disables every event. */
+  events: BotWakeEventType[];
+  /** 0..120; 0 pauses delivery. */
+  hourly_limit: number;
+  quiet_hours: BotQuietHours;
+}
+
+/** PUT patches supplied fields. `webhook_url` and `webhook_key` go together;
+ *  two empty strings disconnect. Never send `webhook_configured`. */
+export interface UpdateBotWakeRequest {
+  events?: BotWakeEventType[];
+  hourly_limit?: number;
+  quiet_hours?: BotQuietHours;
+  webhook_url?: string;
+  webhook_key?: string;
+}
+
+export type BotWakeEventStatus =
+  | "queued"
+  | "sending"
+  | "received"
+  | "failed"
+  | "uncertain"
+  | "pending";
+
+export interface BotWakeEvent {
+  event_id: string;
+  sequence: number;
+  type: BotWakeEventType;
+  /** Empty string when the event is not about an issue. */
+  issue_id: string;
+  chat_session_id: string;
+  status: BotWakeEventStatus;
+  reason: string;
+  attempts: number;
+  created_at: string;
+  sent_at: string | null;
+  received_at: string | null;
+}
+
+/** A filtered page can be empty and still carry a cursor; empty cursor = end. */
+export interface BotWakeEventPage {
+  events: BotWakeEvent[];
+  next_cursor: string;
+}
+
+/** Member-visible @ directory entry; identity only. */
+export interface BotMentionTarget {
+  id: string;
+  name: string;
+  type: "bot";
+  bot_type: ExternalBotType;
+}
+
+export interface BotMentionSource {
+  issue_id?: string;
+  chat_session_id?: string;
+}
+
 // Pagination
 export interface PaginationParams {
   limit?: number;

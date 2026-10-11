@@ -2206,6 +2206,102 @@
       "description": "Removes it from the list. This can't be undone."
     },
     "toast_stopped": "Stopped {{name}}",
-    "toast_failed": "That didn't work. Try again."
+    "toast_failed": "That didn't work. Try again.",
+    "wake": {
+      "open": "Wake settings",
+      "breadcrumb": "Bot settings path",
+      "description": "When something happens in Multica, push a short summary to this bot's endpoint to wake it up. Content is not pushed; the bot pulls it with the CLI.",
+      "forbidden": "Only workspace admins can view and change wake settings.",
+      "not_found": "This bot no longer exists.",
+      "load_failed": "Couldn't load wake settings.",
+      "retry": "Retry",
+      "webhook_title": "Endpoint",
+      "webhook_description": "The URL and key are write-only and never shown. To change them, fill in both again; leaving them blank keeps the saved endpoint.",
+      "webhook_configured": "Configured",
+      "webhook_missing": "Not configured",
+      "url": "URL",
+      "key": "Key",
+      "key_hint": "The full Authorization header value, e.g. the string starting with Bearer.",
+      "key_placeholder": "Bearer …",
+      "saved_placeholder": "Saved, hidden",
+      "save_webhook": "Save endpoint",
+      "replace_webhook": "Replace endpoint",
+      "saving": "Saving…",
+      "disconnect": "Disconnect",
+      "disconnect_dialog": {
+        "title": "Disconnect {{name}}'s endpoint?",
+        "description": "Nothing will be pushed to it after this; rules are kept. Enter a URL and key again to reconnect."
+      },
+      "toast_webhook_saved": "Endpoint saved",
+      "toast_disconnected": "Endpoint disconnected",
+      "toast_rules_saved": "Wake rules saved",
+      "events_title": "What wakes it",
+      "events_description": "Clear every box to pause all pushes.",
+      "event": {
+        "mention": {
+          "label": "Mentioned",
+          "description": "Someone @mentions this bot in an issue or chat"
+        },
+        "started": {
+          "label": "Started",
+          "description": "An issue it follows starts running"
+        },
+        "done": {
+          "label": "Done",
+          "description": "An issue it follows is finished"
+        },
+        "blocked": {
+          "label": "Blocked",
+          "description": "An issue it follows is blocked"
+        },
+        "needs_kun": {
+          "label": "Needs a decision",
+          "description": "An issue is waiting on a person to decide"
+        },
+        "task": {
+          "label": "Assigned",
+          "description": "An issue is assigned to it"
+        },
+        "chat": {
+          "label": "New chat message",
+          "description": "A chat it's in has a new message"
+        }
+      },
+      "limits_title": "Rate and quiet hours",
+      "hourly_limit": "Max pushes per hour",
+      "hourly_limit_hint": "0 to 120. 0 pauses pushes. Events over the limit go to Pending.",
+      "hourly_limit_invalid": "Enter a whole number from 0 to 120.",
+      "per_hour": "per hour",
+      "quiet": "Quiet hours",
+      "quiet_hint": "Nothing is pushed during this window; events go to Pending.",
+      "quiet_window": "Window",
+      "quiet_start": "Start",
+      "quiet_end": "End",
+      "timezone": "Time zone",
+      "timezone_hint": "IANA name, e.g. Asia/Shanghai.",
+      "reset": "Reset",
+      "save_rules": "Save rules",
+      "log_title": "Delivery log",
+      "log_recent": "Recent",
+      "log_pending": "Pending",
+      "log_description": "\"Received\" only means the endpoint answered 200. It doesn't mean the bot started or finished anything.",
+      "log_pending_description": "Events held back by the rate limit, quiet hours, or a missing endpoint. Read-only; changing rules doesn't resend them.",
+      "log_failed": "Couldn't load the delivery log.",
+      "empty_recent": "Nothing pushed yet.",
+      "empty_pending": "Nothing pending.",
+      "load_more": "Load more",
+      "loading": "Loading…",
+      "source_issue": "Open issue",
+      "source_chat": "Open chat",
+      "attempts": "{{count}} attempts",
+      "status": {
+        "queued": "Queued",
+        "sending": "Sending",
+        "received": "Received",
+        "failed": "Failed",
+        "uncertain": "Uncertain",
+        "pending": "Pending"
+      }
+    }
   }
 }

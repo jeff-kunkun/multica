@@ -32,8 +32,11 @@ import type {
   MemberWithUser,
   Agent,
   Squad,
+  BotMentionSource,
+  BotMentionTarget,
 } from "@multica/core/types";
-import { ListTodo } from "lucide-react";
+import { botKeys, botMentionDirectoryOptions } from "@multica/core/bots";
+import { Bot, ListTodo } from "lucide-react";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { StatusIcon } from "../../issues/components/status-icon";
 import { ProjectIcon } from "../../projects/components/project-icon";
@@ -73,7 +76,7 @@ import { blockedReasonLabel } from "../../issues/blocked-trigger-copy";
 export interface MentionItem {
   id: string;
   label: string;
-  type: "member" | "agent" | "squad" | "issue" | "project" | "all";
+  type: "member" | "agent" | "squad" | "bot" | "issue" | "project" | "all";
   /** Optional grouping hint for injected context items. `project` is the
    *  chat's current-project shortlist — the tasks of the project the user is
    *  looking at (DENE-603). */
@@ -649,12 +652,19 @@ function MentionRow({
       } ${disabledMessage ? "cursor-not-allowed opacity-50" : ""}`}
       onClick={onSelect}
     >
-      <ActorAvatar
-        actorType={item.type === "all" ? "member" : item.type}
-        actorId={item.id}
-        size="sm"
-        showStatusDot
-      />
+      {item.type === "bot" ? (
+        // External bots have no workspace actor profile to resolve.
+        <span className="flex size-5 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground">
+          <Bot className="size-3" aria-hidden="true" />
+        </span>
+      ) : (
+        <ActorAvatar
+          actorType={item.type === "all" ? "member" : item.type}
+          actorId={item.id}
+          size="sm"
+          showStatusDot
+        />
+      )}
       <span className="truncate font-medium">
         {item.type === "all" ? t(($) => $.mention.all_members) : item.label}
       </span>
@@ -666,6 +676,11 @@ function MentionRow({
       {item.type === "squad" && (
         <Badge variant="outline" className="ml-auto text-micro h-4 px-1.5">
           {t(($) => $.mention.squad_badge)}
+        </Badge>
+      )}
+      {item.type === "bot" && (
+        <Badge variant="outline" className="ml-auto text-micro h-4 px-1.5">
+          {t(($) => $.mention.bot_badge)}
         </Badge>
       )}
     </button>
@@ -742,6 +757,8 @@ interface MentionSuggestionOptions {
   getContextItems?: () => MentionItem[];
   /** The surface's scene (DENE-1477); agents rank 对口 / 通用 / 其他. */
   getAgentScene?: () => AgentScene | null;
+  /** Issue or chat being written into; narrows the bot directory. */
+  getMentionSource?: () => BotMentionSource;
 }
 
 /**
@@ -836,6 +853,16 @@ export function createMentionSuggestion(
         .map((agent) => [agent.id, isAgentRuntimeBound(agent)]),
     );
 
+    // External bots come from the member-visible @ directory (never the
+    // admin-only bot list). Not cached yet → fetch now; the next keystroke
+    // has them. A failed load just leaves bots out of the picker.
+    const source = options.getMentionSource?.() ?? {};
+    const bots = qc.getQueryData<BotMentionTarget[]>(botKeys.mentions(wsId, source));
+    if (bots === undefined) void qc.prefetchQuery(botMentionDirectoryOptions(wsId, source));
+    const botItems: MentionItem[] = (bots ?? [])
+      .filter((b) => b.name.toLowerCase().includes(q) || matchesPinyin(b.name, q))
+      .map((b) => ({ id: b.id, label: b.name, type: "bot" as const }));
+
     const squadItems: MentionItem[] = squads
       .filter(
         (s) =>
@@ -857,7 +884,7 @@ export function createMentionSuggestion(
     // for everyone the user hasn't mentioned yet on this device.
     const recency = getRecencyMap(wsId);
     const userItems = rankAgentItemsByFit(
-      sortUserItemsByRecency([...memberItems, ...agentItems, ...squadItems], recency),
+      sortUserItemsByRecency([...memberItems, ...agentItems, ...squadItems, ...botItems], recency),
       agents,
       options.getAgentScene?.() ?? null,
     );

@@ -50,7 +50,9 @@ import { useQueryClient } from "@tanstack/react-query";
 import { issueIdentifierOptions } from "@multica/core/issues/queries";
 import { workspaceListOptions } from "@multica/core/workspace/queries";
 import { isIssueIdentifier } from "@multica/ui/markdown";
-import type { Attachment } from "@multica/core/types";
+import type { Attachment, BotMentionSource } from "@multica/core/types";
+import { botMentionDirectoryOptions } from "@multica/core/bots";
+import { getCurrentWsId } from "@multica/core/platform";
 import {
   parseMarkdownChunked,
   MARKDOWN_CHUNK_THRESHOLD,
@@ -181,6 +183,11 @@ interface ContentEditorBaseProps {
    * under this ID and replaces the selection with a mention link.
    */
   currentIssueId?: string;
+  /**
+   * Chat session this editor writes into. With `currentIssueId` it scopes the
+   * external-bot @ directory to bots that can read the source (DENE-1793).
+   */
+  currentChatSessionId?: string;
   /**
    * When true, the `@` suggestion picker is disabled but the mention node
    * type remains in the schema, so existing mentions pasted in from other
@@ -375,6 +382,7 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
       showBubbleMenu = true,
       selectionAction,
       currentIssueId,
+      currentChatSessionId,
       disableMentions = false,
       mentionMode = "default",
       mentionContextItems,
@@ -407,6 +415,12 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
     // live without remounting the editor.
     const pasteAsFileThresholdRef = useRef<number | undefined>(pasteAsFileThreshold);
     const mentionContextItemsRef = useRef<MentionItem[]>(mentionContextItems ?? []);
+    const mentionSource: BotMentionSource = currentIssueId
+      ? { issue_id: currentIssueId }
+      : currentChatSessionId
+        ? { chat_session_id: currentChatSessionId }
+        : {};
+    const mentionSourceRef = useRef<BotMentionSource>(mentionSource);
     // The surrounding surface's scene (DENE-1477) ranks @ agents by fit; a ref
     // because the mention extension is built once at mount.
     const agentScene = useContextAgentScene();
@@ -515,11 +529,31 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
     onUploadFileRef.current = wrappedOnUploadFile;
     pasteAsFileThresholdRef.current = pasteAsFileThreshold;
     mentionContextItemsRef.current = mentionContextItems ?? [];
+    mentionSourceRef.current = mentionSource;
     agentSceneRef.current = agentScene;
     quickActionMenuRef.current = quickActionMenu;
     flushPendingOnUnmountRef.current = flushPendingOnUnmount;
 
     const queryClient = useQueryClient();
+
+    // Warm the bot @ directory so the synchronous picker has it on the first
+    // `@`. A prefetch, not a query hook: this editor is mounted widely and
+    // must not re-render when the directory lands.
+    useEffect(() => {
+      if (disableMentions) return;
+      const wsId = getCurrentWsId();
+      if (!wsId) return;
+      void queryClient.prefetchQuery(
+        botMentionDirectoryOptions(
+          wsId,
+          currentIssueId
+            ? { issue_id: currentIssueId }
+            : currentChatSessionId
+              ? { chat_session_id: currentChatSessionId }
+              : {},
+        ),
+      );
+    }, [queryClient, disableMentions, currentIssueId, currentChatSessionId]);
 
     // Linear-style bare identifier autolink resolver. Fully lazy — it runs only
     // on user input, never on render, so it adds no query hook to this widely
@@ -618,6 +652,7 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
         mentionMode,
         getMentionContextItems: () => mentionContextItemsRef.current,
         getAgentScene: () => agentSceneRef.current,
+        getMentionSource: () => mentionSourceRef.current,
         enableSlashCommands,
         slashCommandMode,
         quickActionMenu: {

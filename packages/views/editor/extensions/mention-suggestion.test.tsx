@@ -3,6 +3,7 @@ import { createRef, type ReactNode } from "react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { workspaceKeys } from "@multica/core/workspace/queries";
 import { issueKeys, PAGINATED_CATEGORIES } from "@multica/core/issues/queries";
+import { botKeys } from "@multica/core/bots";
 import { statusCategoryOfKey } from "@multica/core/issues";
 import { I18nProvider } from "@multica/core/i18n/react";
 import type { IssueStatusCategory, ListIssuesCache } from "@multica/core/types";
@@ -65,6 +66,7 @@ vi.mock("@multica/core/issue-statuses/hooks", () => ({
 }));
 
 // Mock the API so we control search responses + observe calls.
+const prefetchQueryMock = vi.fn();
 const searchIssuesMock = vi.fn();
 const searchProjectsMock = vi.fn();
 vi.mock("@multica/core/api", () => ({
@@ -121,6 +123,7 @@ function fakeQc(data: {
     leader_id: string;
   }>;
   issues?: Array<{ id: string; identifier: string; title: string; status: string }>;
+  bots?: { source: { issue_id?: string; chat_session_id?: string }; list: Array<{ id: string; name: string }> };
 }): QueryClient {
   const map = new Map<string, unknown>();
   map.set(JSON.stringify(workspaceKeys.members("ws-1")), data.members ?? []);
@@ -154,8 +157,15 @@ function fakeQc(data: {
     JSON.stringify(issueKeys.list("ws-1")),
     { byStatus } satisfies ListIssuesCache,
   );
+  if (data.bots) {
+    map.set(
+      JSON.stringify(botKeys.mentions("ws-1", data.bots.source)),
+      data.bots.list.map((b) => ({ ...b, type: "bot", bot_type: "grok" })),
+    );
+  }
   return {
     getQueryData: (key: readonly unknown[]) => map.get(JSON.stringify(key)),
+    prefetchQuery: prefetchQueryMock,
     getQueriesData: <T,>(filter: { queryKey: readonly unknown[] }) => {
       const prefix = filter.queryKey as unknown[];
       const results: [readonly unknown[], T][] = [];
@@ -204,7 +214,29 @@ describe("createMentionSuggestion", () => {
   beforeEach(() => {
     searchIssuesMock.mockReset();
     searchProjectsMock.mockReset();
+    prefetchQueryMock.mockReset();
     Element.prototype.scrollIntoView = vi.fn();
+  });
+
+  it("offers external bots from the @ directory scoped to the current issue (DENE-1793)", () => {
+    const qc = fakeQc({
+      members: [{ user_id: "u1", name: "Alice" }],
+      bots: { source: { issue_id: "i1" }, list: [{ id: "b1", name: "Grok Helper" }] },
+    });
+    const config = createMentionSuggestion(qc, { getMentionSource: () => ({ issue_id: "i1" }) });
+    expect(config.items!(itemArgs("grok"))).toEqual([
+      expect.objectContaining({ id: "b1", label: "Grok Helper", type: "bot" }),
+    ]);
+    expect(prefetchQueryMock).not.toHaveBeenCalled();
+  });
+
+  it("fetches the bot @ directory for the chat when it is not cached yet (DENE-1793)", () => {
+    const qc = fakeQc({ members: [{ user_id: "u1", name: "Alice" }] });
+    const config = createMentionSuggestion(qc, { getMentionSource: () => ({ chat_session_id: "c1" }) });
+    expect((config.items!(itemArgs("")) as MentionItem[]).some((i) => i.type === "bot")).toBe(false);
+    expect(prefetchQueryMock).toHaveBeenCalledWith(
+      expect.objectContaining({ queryKey: botKeys.mentions("ws-1", { chat_session_id: "c1" }) }),
+    );
   });
 
   it("keeps the mention query active across spaces for multi-word search", () => {
