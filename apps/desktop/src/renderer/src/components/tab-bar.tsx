@@ -11,7 +11,6 @@ import { X, Plus, Pin, PinOff, ListX, AppWindow, ChevronDown, ChevronRight } fro
 import {
   DndContext,
   PointerSensor,
-  useDroppable,
   useSensor,
   useSensors,
   closestCenter,
@@ -31,6 +30,8 @@ import {
   ContextMenu,
   ContextMenuContent,
   ContextMenuItem,
+  ContextMenuRadioGroup,
+  ContextMenuRadioItem,
   ContextMenuSeparator,
   ContextMenuSub,
   ContextMenuSubContent,
@@ -44,9 +45,12 @@ import {
   useTabStore,
   useActiveGroup,
   type Tab,
+  type TabGroupMode,
   type TabStripGroup,
   type TabStripGroupColor,
 } from "@/stores/tab-store";
+import type { Project } from "@multica/core/types";
+import { stripProjectPrefix, useTabProjectSync } from "./use-tab-project-sync";
 import { paths } from "@multica/core/paths";
 import {
   useTabPresentation,
@@ -55,6 +59,7 @@ import {
 import { parseIssueWindowPath } from "../../../shared/issue-window";
 
 const TAB_SCROLL_FADE_SIZE = 24;
+const EMPTY_TABS: Tab[] = [];
 const TAB_ENTRY_EASE = [0.22, 1, 0.36, 1] as const;
 
 const GROUP_CHIP_CLASS: Record<TabStripGroupColor, string> = {
@@ -79,8 +84,39 @@ const GROUP_WASH_CLASS: Record<TabStripGroupColor, string> = {
   orange: "bg-orange-500/10",
 };
 
-function stripGroupLabel(group: TabStripGroup): string {
-  return group.name.trim() || "Group";
+function stripGroupLabel(group: TabStripGroup, project?: Project): string {
+  return (
+    project?.title.trim() ||
+    group.name.trim() ||
+    (group.projectId ? "Project" : "Group")
+  );
+}
+
+/**
+ * Strip-wide arrangement items, shared by the tab and group-chip menus:
+ * the grouping mode and the one-shot "Sort by project".
+ */
+function StripArrangeMenuItems() {
+  const mode = useTabStore((s) => s.tabGroupMode);
+  const setTabGroupMode = useTabStore((s) => s.setTabGroupMode);
+  const arrangeTabsByProject = useTabStore((s) => s.arrangeTabsByProject);
+  return (
+    <>
+      <ContextMenuSub>
+        <ContextMenuSubTrigger>Group tabs</ContextMenuSubTrigger>
+        <ContextMenuSubContent>
+          <ContextMenuRadioGroup
+            value={mode}
+            onValueChange={(value) => setTabGroupMode(value as TabGroupMode)}
+          >
+            <ContextMenuRadioItem value="project">By project</ContextMenuRadioItem>
+            <ContextMenuRadioItem value="manual">Manually</ContextMenuRadioItem>
+          </ContextMenuRadioGroup>
+        </ContextMenuSubContent>
+      </ContextMenuSub>
+      <ContextMenuItem onClick={arrangeTabsByProject}>Sort by project</ContextMenuItem>
+    </>
+  );
 }
 
 // Chrome-style merged tab: the active tab shares the content surface's fill and
@@ -221,9 +257,12 @@ function SortableTabItem({
   isNew,
   shouldReduceMotion,
   showSeparator,
+  projectsById,
 }: {
   tab: Tab;
   isActive: boolean;
+  /** Workspace projects, for group labels and the in-group title trim. */
+  projectsById: Map<string, Project>;
   /**
    * True iff this is the only tab in the workspace. Hiding X on the last
    * tab matches existing behavior and avoids the surprise of the store's
@@ -257,6 +296,13 @@ function SortableTabItem({
   // updated as the cache updates. `tab.title` is only a persisted first-frame
   // fallback. See @multica/views useTabPresentation.
   const { visual, title } = useTabPresentation(tab.url, tab.title);
+  // Inside a project group the chip already names the project.
+  const groupProject = ownGroup?.projectId
+    ? projectsById.get(ownGroup.projectId)
+    : undefined;
+  const shownTitle = ownGroup?.projectId
+    ? stripProjectPrefix(title, groupProject?.title ?? ownGroup.name)
+    : title;
 
   // Persist the active tab's resolved title so it survives as the next
   // session's first-frame fallback. The tab strip itself always renders the
@@ -346,7 +392,7 @@ function SortableTabItem({
       aria-label={tab.pinned ? `${title} (pinned)` : title}
       data-tab-active={isActive ? "true" : undefined}
       data-tab-entering={isEntering ? "true" : undefined}
-      title={tab.pinned ? `${title} (pinned)` : undefined}
+      title={tab.pinned ? `${title} (pinned)` : shownTitle !== title ? title : undefined}
       style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}
       className={cn(
         "group relative flex size-full min-w-0 items-center gap-1.5 px-2.5 text-caption transition-colors",
@@ -365,7 +411,7 @@ function SortableTabItem({
           WebkitMaskImage: "linear-gradient(to right, black calc(100% - 12px), transparent)",
         }}
       >
-        {title}
+        {shownTitle}
       </span>
       <span
         onClick={handleTogglePin}
@@ -474,7 +520,12 @@ function SortableTabItem({
                             key={candidate.id}
                             onClick={() => addTabToGroup(tab.id, candidate.id)}
                           >
-                            {stripGroupLabel(candidate)}
+                            {stripGroupLabel(
+                              candidate,
+                              candidate.projectId
+                                ? projectsById.get(candidate.projectId)
+                                : undefined,
+                            )}
                           </ContextMenuItem>
                         ))}
                     </ContextMenuSubContent>
@@ -486,6 +537,7 @@ function SortableTabItem({
                       Remove from group
                     </ContextMenuItem>
                     <ContextMenuItem
+                      disabled={isActive && !ownGroup.collapsed}
                       onClick={() => toggleTabGroupCollapsed(ownGroup.id)}
                     >
                       {ownGroup.collapsed ? "Expand group" : "Collapse group"}
@@ -495,6 +547,8 @@ function SortableTabItem({
                 <ContextMenuSeparator />
               </>
             )}
+            <StripArrangeMenuItems />
+            <ContextMenuSeparator />
             <ContextMenuItem onClick={() => togglePin(tab.id)}>
               {tab.pinned ? (
                 <>
@@ -609,19 +663,36 @@ function TabGroupChip({
   group,
   count,
   containsActive,
+  project,
 }: {
   group: TabStripGroup;
   count: number;
   containsActive: boolean;
+  /** The group's project, when it is a project group and the list loaded. */
+  project?: Project;
 }) {
   const toggleTabGroupCollapsed = useTabStore((s) => s.toggleTabGroupCollapsed);
   const renameTabGroup = useTabStore((s) => s.renameTabGroup);
   const ungroupTabs = useTabStore((s) => s.ungroupTabs);
-  const { setNodeRef, isOver } = useDroppable({ id: `group:${group.id}` });
+  // Sortable, so a group drags as a whole; also the drop target that adds a
+  // dragged tab to this group.
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+    isOver,
+  } = useSortable({ id: `group:${group.id}` });
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(group.name);
   const skipCommitRef = useRef(false);
-  const label = stripGroupLabel(group);
+  const label = stripGroupLabel(group, project);
+  const isProjectGroup = !!group.projectId;
+  // Collapsing would hide the tab you are on.
+  const collapseLocked = containsActive && !group.collapsed;
+  const collapseLockedReason = "The current tab is in this group";
 
   const startRename = () => {
     setDraft(group.name);
@@ -667,22 +738,34 @@ function TabGroupChip({
   ) : (
     <button
       type="button"
+      {...attributes}
+      {...listeners}
       aria-expanded={!group.collapsed}
       aria-label={`${label}, ${group.collapsed ? "collapsed" : "expanded"}`}
+      title={collapseLocked ? `${label} · ${collapseLockedReason}` : label}
       data-tab-active={containsActive && group.collapsed ? "true" : undefined}
-      onClick={() => toggleTabGroupCollapsed(group.id)}
-      onDoubleClick={startRename}
+      onClick={() => {
+        if (!collapseLocked) toggleTabGroupCollapsed(group.id);
+      }}
+      onDoubleClick={isProjectGroup ? undefined : startRename}
       style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}
       className={cn(
-        "flex h-6 max-w-40 items-center gap-1 rounded-md px-2 text-caption",
+        "flex h-6 max-w-44 cursor-default items-center gap-1 rounded-md px-2 text-caption",
         GROUP_CHIP_CLASS[group.color],
         isOver && "ring-1 ring-inset ring-foreground/40",
+        isDragging && "opacity-60",
       )}
     >
       {group.collapsed ? (
         <ChevronRight className="size-3 shrink-0" />
       ) : (
-        <ChevronDown className="size-3 shrink-0" />
+        <ChevronDown className={cn("size-3 shrink-0", collapseLocked && "opacity-40")} />
+      )}
+      {isProjectGroup && (
+        <ResourceLeadingVisual
+          visual={{ kind: "project-icon", icon: project?.icon ?? null }}
+          className="size-3.5"
+        />
       )}
       <span className="truncate">{label}</span>
       {group.collapsed && (
@@ -695,19 +778,36 @@ function TabGroupChip({
     <div
       ref={setNodeRef}
       data-tab-group={group.id}
+      data-tab-group-project={group.projectId ?? undefined}
       data-tab-group-collapsed={group.collapsed ? "true" : "false"}
+      style={{
+        transform: CSS.Transform.toString(transform),
+        transition,
+        zIndex: isDragging ? 20 : undefined,
+      }}
       className="mb-1 flex items-center self-end"
     >
       <ContextMenu>
         <ContextMenuTrigger render={chip} />
         <ContextMenuContent>
-          <ContextMenuItem onClick={startRename}>Rename group</ContextMenuItem>
-          <ContextMenuItem onClick={() => toggleTabGroupCollapsed(group.id)}>
-            {group.collapsed ? "Expand group" : "Collapse group"}
+          {!isProjectGroup && (
+            <ContextMenuItem onClick={startRename}>Rename group</ContextMenuItem>
+          )}
+          <ContextMenuItem
+            disabled={collapseLocked}
+            onClick={() => toggleTabGroupCollapsed(group.id)}
+          >
+            {group.collapsed
+              ? "Expand group"
+              : collapseLocked
+                ? `Collapse group (${collapseLockedReason.toLowerCase()})`
+                : "Collapse group"}
           </ContextMenuItem>
           <ContextMenuItem onClick={() => ungroupTabs(group.id)}>
             Ungroup
           </ContextMenuItem>
+          <ContextMenuSeparator />
+          <StripArrangeMenuItems />
         </ContextMenuContent>
       </ContextMenu>
     </div>
@@ -745,6 +845,7 @@ function NewTabButton() {
 export function TabBar() {
   const group = useActiveGroup();
   const moveTab = useTabStore((s) => s.moveTab);
+  const moveTabGroup = useTabStore((s) => s.moveTabGroup);
   const addTabToGroup = useTabStore((s) => s.addTabToGroup);
   const activeWorkspaceSlug = useTabStore((s) => s.activeWorkspaceSlug);
   const shouldReduceMotion = useReducedMotion() ?? false;
@@ -762,8 +863,10 @@ export function TabBar() {
     }),
   );
 
-  const tabs = group?.tabs ?? [];
+  const tabs = group?.tabs ?? EMPTY_TABS;
   const activeTabId = group?.activeTabId ?? "";
+  const projects = useTabProjectSync(activeWorkspaceSlug, tabs);
+  const projectsById = new Map(projects.map((project) => [project.id, project]));
   const tabIds = tabs.map((t) => t.id);
   const tabOrder = tabIds.join("\0");
   const tabLayoutKey = tabs
@@ -829,9 +932,18 @@ export function TabBar() {
   const handleDragEnd = (event: DragEndEvent) => {
     const { active, over } = event;
     if (!over || active.id === over.id) return;
+    const activeId = String(active.id);
     const overId = String(over.id);
+    if (activeId.startsWith("group:")) {
+      // A whole group moves to the block under the drop point.
+      const overTabId = overId.startsWith("group:")
+        ? tabs.find((t) => t.groupId === overId.slice("group:".length))?.id
+        : overId;
+      if (overTabId) moveTabGroup(activeId.slice("group:".length), overTabId);
+      return;
+    }
     if (overId.startsWith("group:")) {
-      addTabToGroup(String(active.id), overId.slice("group:".length));
+      addTabToGroup(activeId, overId.slice("group:".length));
       return;
     }
     const from = tabs.findIndex((t) => t.id === active.id);
@@ -848,9 +960,18 @@ export function TabBar() {
   const collapsedGroupIds = new Set(
     stripGroups.filter((candidate) => candidate.collapsed).map((candidate) => candidate.id),
   );
-  const visibleTabIds = tabs
-    .filter((tab) => !tab.groupId || !collapsedGroupIds.has(tab.groupId))
-    .map((tab) => tab.id);
+  // Sortable order as rendered: each group's chip sits before its tabs.
+  const sortableIds: string[] = [];
+  for (const [index, tab] of tabs.entries()) {
+    const stripGroup =
+      tab.groupId && !tab.pinned ? groupById.get(tab.groupId) : undefined;
+    if (stripGroup && tabs[index - 1]?.groupId !== stripGroup.id) {
+      sortableIds.push(`group:${stripGroup.id}`);
+    }
+    if (!stripGroup || !collapsedGroupIds.has(stripGroup.id)) {
+      sortableIds.push(tab.id);
+    }
+  }
 
   type StripRun =
     | { kind: "tab"; tab: Tab; index: number }
@@ -896,7 +1017,7 @@ export function TabBar() {
             className="no-scrollbar flex h-full min-w-0 flex-1 items-end overflow-x-auto overflow-y-hidden overscroll-x-contain px-4"
             style={tabFadeStyle}
           >
-            <SortableContext items={visibleTabIds} strategy={horizontalListSortingStrategy}>
+            <SortableContext items={sortableIds} strategy={horizontalListSortingStrategy}>
               {runs.map((run) => {
                 if (run.kind === "group") {
                   const collapsed = run.group.collapsed;
@@ -915,6 +1036,11 @@ export function TabBar() {
                         group={run.group}
                         count={run.tabs.length}
                         containsActive={containsActive}
+                        project={
+                          run.group.projectId
+                            ? projectsById.get(run.group.projectId)
+                            : undefined
+                        }
                       />
                       {!collapsed &&
                         run.tabs.map(({ tab }) => (
@@ -930,6 +1056,7 @@ export function TabBar() {
                             isNew={addedTabIdSet.has(tab.id)}
                             shouldReduceMotion={shouldReduceMotion}
                             showSeparator={false}
+                            projectsById={projectsById}
                           />
                         ))}
                     </div>
@@ -949,6 +1076,7 @@ export function TabBar() {
                       )}
                       isNew={addedTabIdSet.has(tab.id)}
                       shouldReduceMotion={shouldReduceMotion}
+                      projectsById={projectsById}
                       showSeparator={
                         !!previousTab &&
                         tab.id !== activeTabId &&

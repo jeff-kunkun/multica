@@ -22,6 +22,7 @@ type MockStripGroup = {
   name: string;
   collapsed: boolean;
   color: "blue";
+  projectId?: string;
 };
 
 const state = vi.hoisted(() => ({
@@ -49,6 +50,17 @@ const state = vi.hoisted(() => ({
   addTab: vi.fn<(path: string, title: string) => string>(),
   updateTab: vi.fn<(tabId: string, patch: { title?: string }) => void>(),
   openIssueWindow: vi.fn(),
+  setTabGroupMode: vi.fn(),
+  arrangeTabsByProject: vi.fn(),
+}));
+
+// Project resolution needs the query stack; the strip only consumes the list.
+const projectSync = vi.hoisted(() => ({
+  projects: [] as { id: string; title: string; icon: string | null }[],
+}));
+vi.mock("./use-tab-project-sync", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./use-tab-project-sync")>()),
+  useTabProjectSync: () => projectSync.projects,
 }));
 
 vi.mock("@/stores/tab-store", () => {
@@ -69,6 +81,13 @@ vi.mock("@/stores/tab-store", () => {
     moveTab: state.moveTab,
     addTab: state.addTab,
     updateTab: state.updateTab,
+    tabGroupMode: "project",
+    setTabGroupMode: state.setTabGroupMode,
+    arrangeTabsByProject: state.arrangeTabsByProject,
+    moveTabGroup: vi.fn(),
+    renameTabGroup: vi.fn(),
+    ungroupTabs: vi.fn(),
+    removeTabFromGroup: vi.fn(),
   };
   const useTabStore = Object.assign(
     (selector?: (s: typeof store) => unknown) =>
@@ -133,6 +152,9 @@ function reset() {
   state.addTab.mockReset();
   state.updateTab.mockReset();
   state.openIssueWindow.mockReset();
+  state.setTabGroupMode.mockReset();
+  state.arrangeTabsByProject.mockReset();
+  projectSync.projects = [];
   pres.title = null;
 }
 
@@ -602,7 +624,7 @@ describe("TabBar context menu", () => {
 
   it("starts a group from the tab menu and collapses it from the chip", async () => {
     state.byWorkspace.acme = {
-      activeTabId: "tA",
+      activeTabId: "tB",
       groups: [{ id: "g1", name: "Plan", collapsed: false, color: "blue" }],
       tabs: [
         {
@@ -636,5 +658,58 @@ describe("TabBar context menu", () => {
     expect(getByLabelText("Plan, collapsed")).toBeInTheDocument();
     expect(queryByLabelText("Issues")).toBeNull();
     expect(getByLabelText("Projects")).toBeInTheDocument();
+  });
+
+  it("refuses to collapse the group holding the current tab", () => {
+    state.byWorkspace.acme = {
+      activeTabId: "tA",
+      groups: [{ id: "g1", name: "Plan", collapsed: false, color: "blue" }],
+      tabs: [
+        { id: "tA", url: "/acme/issues", title: "Issues", pinned: false, groupId: "g1" },
+      ],
+    };
+    const { getByLabelText } = render(<TabBar />);
+    fireEvent.click(getByLabelText("Plan, expanded"));
+    expect(state.toggleTabGroupCollapsed).not.toHaveBeenCalled();
+  });
+});
+
+describe("TabBar project groups (DENE-1775)", () => {
+  it("labels a project group with the project and trims the prefix from its tabs", () => {
+    projectSync.projects = [{ id: "p1", title: "Multica 魔改", icon: "🛠" }];
+    state.byWorkspace.acme = {
+      activeTabId: "tB",
+      groups: [
+        { id: "g1", name: "old name", collapsed: false, color: "blue", projectId: "p1" },
+      ],
+      tabs: [
+        {
+          id: "tA",
+          url: "/acme/chat/s1",
+          title: "Multica 魔改 · 底部额度栏",
+          pinned: false,
+          groupId: "g1",
+        },
+        { id: "tB", url: "/acme/inbox", title: "Inbox", pinned: false },
+      ],
+    };
+    const { getByLabelText, getByText, container } = render(<TabBar />);
+    expect(getByLabelText("Multica 魔改, expanded")).toBeInTheDocument();
+    expect(getByText("底部额度栏")).toBeInTheDocument();
+    expect(
+      container.querySelector('[data-tab-group-project="p1"] [data-visual-kind="project-icon"]'),
+    ).not.toBeNull();
+  });
+
+  it("switches grouping mode and sorts by project from the menu", async () => {
+    const { findByText, getByLabelText } = render(<TabBar />);
+    fireEvent.contextMenu(getByLabelText("Projects"));
+    fireEvent.click(await findByText("Sort by project"));
+    expect(state.arrangeTabsByProject).toHaveBeenCalled();
+
+    fireEvent.contextMenu(getByLabelText("Projects"));
+    fireEvent.click(await findByText("Group tabs"));
+    fireEvent.click(await findByText("Manually"));
+    expect(state.setTabGroupMode).toHaveBeenCalledWith("manual");
   });
 });
