@@ -2,11 +2,9 @@ package main
 
 import (
 	"context"
-	"crypto/sha256"
 	"fmt"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"time"
 
@@ -195,15 +193,8 @@ func runAttachmentDownload(cmd *cobra.Command, args []string) error {
 	// Validate before writing any destination bytes; a corrupt response never
 	// replaces an existing good file. No unverified temporary file is retained.
 	expected := strVal(att, "sha256")
-	if expected == "" {
-		return fmt.Errorf("attachment has no sha256; server must provide a verified checksum")
-	}
-	if fmt.Sprintf("%x", sha256.Sum256(data)) != expected {
-		return fmt.Errorf("attachment sha256 mismatch; downloaded bytes discarded")
-	}
-	size, parseErr := strconv.ParseInt(fmt.Sprint(att["size_bytes"]), 10, 64)
-	if parseErr != nil || size != int64(len(data)) {
-		return fmt.Errorf("attachment size mismatch; downloaded bytes discarded")
+	if err := cli.VerifyAttachment(data, expected, att["size_bytes"]); err != nil {
+		return err
 	}
 
 	// Write to the output directory, creating it if needed so `-o` works

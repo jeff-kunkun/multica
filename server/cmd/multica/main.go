@@ -82,6 +82,9 @@ func init() {
 	versionCmd.GroupID = groupAdditional
 
 	rootCmd.AddCommand(overviewCmd)
+	mcpCommand := newMCPCommand()
+	mcpCommand.GroupID = groupCore
+	rootCmd.AddCommand(mcpCommand)
 	for _, runs := range []bool{false, true} {
 		cmd := newFastAccessCommand(runs)
 		cmd.GroupID = groupCore
