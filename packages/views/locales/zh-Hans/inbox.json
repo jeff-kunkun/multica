@@ -306,5 +306,32 @@
       "status_failed": "状态更新失败",
       "undo_failed": "撤销状态失败"
     }
+  },
+  "fast_access": {
+    "open": "动态",
+    "title": "工作区动态",
+    "close": "关闭",
+    "scope": "工作区",
+    "all": "所有可见工作区",
+    "current": "当前工作区",
+    "refresh": "刷新",
+    "loading": "加载中...",
+    "error": "动态未能加载，请刷新重试。",
+    "runs": "活动运行",
+    "untitled_run": "运行",
+    "executing": "执行中",
+    "queued": "排队中",
+    "waiting": "等待中",
+    "unknown": "状态暂不可用",
+    "autopilot": "自动化",
+    "no_runs": "暂无活动运行。",
+    "chats": "聊天动态 · 最近 30 分钟",
+    "untitled_chat": "聊天",
+    "unread": "未读：{{count}}",
+    "no_chats": "暂无近期聊天动态。",
+    "complete": "已加载全部结果。",
+    "partial": "还有结果未加载。",
+    "more": "加载更多",
+    "as_of": "查看时间：{{time}}"
   }
 }
