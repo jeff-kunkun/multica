@@ -178,7 +178,11 @@ func TestManagedLinkThroughRouter(t *testing.T) {
 		t.Fatal("attachment not bound to comment")
 	}
 	download, _ := http.NewRequest("GET", testServer.URL+"/api/attachments/"+attachmentID+"/download", nil)
-	download.Header.Set("Authorization", "Bearer "+testToken)
+	originatorToken, err := generateTestJWT(originator, "dene1663-originator@multica.ai", "Originator")
+	if err != nil {
+		t.Fatal(err)
+	}
+	download.Header.Set("Authorization", "Bearer "+originatorToken)
 	download.Header.Set("X-Workspace-ID", source)
 	downloaded, err := http.DefaultClient.Do(download)
 	if err != nil {
@@ -222,6 +226,14 @@ func TestManagedLinkThroughRouter(t *testing.T) {
 	if got := scan(`SELECT count(*)::text FROM attachment WHERE workspace_id=$1 AND issue_id=$2 AND uploader_id=$3 AND comment_id IS NOT NULL`, source, issueID, originator); got != "2" {
 		t.Fatalf("CLI attachment ownership/binding: %s", got)
 	}
+
+	// Managed access does not borrow the runtime owner's right to a private agent.
+	if code, body := do(token, "POST", "/api/issues", map[string]any{"title": "forbidden assignment", "assignee_type": "agent", "assignee_id": sourceAgent}, true); code != 403 {
+		t.Fatalf("private agent permission: %d %v", code, body)
+	}
+	exec(`UPDATE agent SET permission_mode='public_to' WHERE id=$1`, sourceAgent)
+	exec(`INSERT INTO agent_invocation_target (agent_id,target_type,target_id) VALUES ($1,'member',$2)`, sourceAgent, originator)
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM agent_invocation_target WHERE agent_id=$1`, sourceAgent) })
 
 	// Assignment also delegates under the same human's identity in the source.
 	code, assigned := do(token, "POST", "/api/issues", map[string]any{"title": "managed assignment", "status": "in_progress", "assignee_type": "agent", "assignee_id": sourceAgent}, true)
