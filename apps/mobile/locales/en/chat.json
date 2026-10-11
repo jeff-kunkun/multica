@@ -58,6 +58,8 @@
     "needs_runtime": "Needs runtime"
   },
   "banners": {
+    "last_seen": "Runtime offline, last seen {{time}}",
+    "last_seen_unknown": "Runtime offline, last seen unknown",
     "no_agent": "No agents available",
     "runtime_required": "This agent needs a runtime before it can run.",
     "offline": "{{name}} is offline. Messages will wait until its runtime is back.",

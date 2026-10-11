@@ -299,6 +299,8 @@
     "action": "Bind runtime"
   },
   "offline_banner": {
+    "last_seen": "Runtime offline, last seen {{time}}",
+    "last_seen_unknown": "Runtime offline, last seen unknown",
     "fallback_name": "the agent",
     "unstable": "{{name}}'s connection is unstable — replies may be delayed.",
     "offline": "{{name}} is offline — your message will be delivered when they're back."

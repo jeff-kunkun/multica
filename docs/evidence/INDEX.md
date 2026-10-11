@@ -52,3 +52,5 @@
 - DENE-1803：工作区全景聚合接口、CLI 与共享设置入口；[验收附件](https://ai.ferryway.cc/api/attachments/01a12a17-15bf-79fb-8d0f-bcd0526d52f6/download)含 375/390/768/1280 实页截图、筛选与刷新请求记录、真实 Bot 钥匙接口测试和本地 CLI 数量对照。完整/精简 JSON 为 3457/1730 字节（隔离测试工作区）。
 
 - DENE-1806：项目默认参考项目、自动化继承/覆盖与每次运行重新核验；[含手机版的 HTML 预览（任务附件）](https://ai.ferryway.cc/api/attachments/01a12a26-bdc6-798a-b349-f9ed72409a6c/download)。数据库、任务认领与页面截图见任务交付附件；线上 WD 实例验收须等待运行环境升级。
+
+- DENE-1841：聊天发送的离线运行时提醒、等待超时任务原因、Web/Desktop 与原生手机端最后在线时间提示；[CLI 与真实页面截图（任务附件）](https://ai.ferryway.cc/api/attachments/01a12c0b-9cee-7777-98d9-c15e6ba0a3f2/download)。本地离线发送、20 秒等待、进度查询通过；375 / 390 / 768 / 1280px 截图已查看，网页离线发送返回 201，手机返回操作通过。

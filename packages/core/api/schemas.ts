@@ -2857,6 +2857,8 @@ export const ChatPendingTaskSchema: z.ZodType<ChatPendingTask> = z.object({
 export const EMPTY_CHAT_PENDING_TASK: ChatPendingTask = {};
 
 export const SendChatMessageResponseSchema: z.ZodType<SendChatMessageResponse> = z.object({
+  runtime: z.object({ status: z.string(), name: z.string(), last_seen_at: z.string().nullable() }).nullish().catch(undefined),
+  warning: z.string().optional().catch(undefined),
   message_id: z.string().min(1),
   task_id: z.string().min(1),
   supports_queue: z.boolean().optional(),

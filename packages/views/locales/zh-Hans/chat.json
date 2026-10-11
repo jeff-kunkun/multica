@@ -294,6 +294,8 @@
     "action": "绑定运行时"
   },
   "offline_banner": {
+    "last_seen": "运行时离线，最后在线 {{time}}",
+    "last_seen_unknown": "运行时离线，最后在线时间未知",
     "fallback_name": "智能体",
     "unstable": "{{name}} 的连接不稳定——回复可能延迟。",
     "offline": "{{name}} 离线——你的消息将在它上线后发送。"

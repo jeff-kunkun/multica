@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"github.com/multica-ai/multica/server/internal/cli"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -98,5 +99,35 @@ func clearAgentContext(t *testing.T) {
 	t.Helper()
 	for _, k := range []string{"MULTICA_AGENT_ID", "MULTICA_TASK_ID"} {
 		t.Setenv(k, "")
+	}
+}
+
+// A timed-out send must diagnose its own task even when a newer turn exists.
+func TestWaitChatReplyTimeoutReadsTaskDiagnostics(t *testing.T) {
+	var queriedTask string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if strings.HasSuffix(r.URL.Path, "/messages") {
+			_, _ = w.Write([]byte(`[]`))
+			return
+		}
+		if strings.HasSuffix(r.URL.Path, "/progress") {
+			queriedTask = r.URL.Query().Get("task_id")
+			_, _ = w.Write([]byte(`{"progress":[],"task_id":"t-1","task_status":"queued","reason":"runtime_offline","queue_ahead":0,"runtime":{"status":"offline","name":"Claude (test)","last_seen_at":"2026-10-11T09:00:10Z"}}`))
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer srv.Close()
+	client := cli.NewAPIClient(srv.URL, "ws-1", "test")
+	out, err := waitChatReply(client, "s-1", "t-1", 0)
+	if err == nil || !strings.Contains(err.Error(), "task_status=queued reason=runtime_offline") {
+		t.Fatalf("timeout error: %v", err)
+	}
+	if queriedTask != "t-1" || out["task_status"] != "queued" || out["reason"] != "runtime_offline" || out["runtime"] == nil {
+		t.Fatalf("task=%s output=%v", queriedTask, out)
+	}
+	if _, ok := out["progress"]; ok {
+		t.Fatal("timeout output must not include history")
 	}
 }
