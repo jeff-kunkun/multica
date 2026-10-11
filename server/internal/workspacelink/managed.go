@@ -52,7 +52,7 @@ const ManagedActorSource = "linked_task_token"
 var ErrManagedDenied = forbidden("that workspace is not open to this run: it needs an active link with managed access on, and the person who started this run must be able to do this there; inspect multica workspace link view")
 
 // ErrManagedRoute refuses a command outside the managed list.
-var ErrManagedRoute = forbidden("this command is not available on a linked workspace: only supported issue/autopilot operations, attachment upload, read-only lookups, and the originator's own chat list/read/send are; inspect multica workspace link view")
+var ErrManagedRoute = forbidden("this command is not available on a linked workspace: only supported issue/autopilot operations, attachment upload, read-only name and project-resource lookups, and the originator's own chat list/read/send are; inspect multica workspace link view")
 
 // managedRoute is one endpoint a managed request may reach.
 type managedRoute struct {

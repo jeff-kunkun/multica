@@ -68,3 +68,12 @@ cd server && go test ./cmd/multica ./pkg/protocol -run 'TestManagedChat|TestCrea
 本轮独立路由夹具：BASELINE routes=37 / chat_routes=0，MODIFIED routes=41 / chat_routes=4，ROLLBACK routes=37 / chat_routes=0，三个探针均 forbidden_routes_restored=0 / exit 0；回滚副本与 BASELINE 字节一致。它只证明路由表及可恢复性，不是部署回滚。完整命令、字面输出、哈希与日志随本轮 issue 回复附件交付。
 
 权限复测结果交 Grok Bot 合并；发布后实际跨区发送与叫醒仍由孙悟饭承接，本轮未操作已有连通。
+
+
+Grok Bot 同轮补充要求的服务入口整包复测也已完成：
+
+```sh
+bash scripts/test-db.sh --quiet -- sh -c 'cd server && go test ./internal/workspacelink/... ./cmd/server/... -count=1 && go test ./internal/service ./internal/handler -run "TestManagedChat|TestLinkedChatDelivery|TestLinkedDeliveryHandoff|TestManagedLinked" -count=1 -v'
+```
+
+退出 0：workspacelink 11.924s，cmd/server 32.560s，service 0.941s，handler 1.583s，隔离数据库已删除。补测第一次在迁移 344 时因本机磁盘满退出 1，尚未执行用例；删除约 4GB 超过 24 小时未使用的可重建 Go 缓存后，上述完整命令通过，保留失败与成功日志。`ErrManagedRoute` 已明确写出附件上传和只读名字/项目资源查询。`seg`、`issueRef`、`attachment.upload`、`lookup.project_resources` 与对象名审计均保留主线版本。本轮未改 daemon 心跳、离线判定或令牌代码。
