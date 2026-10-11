@@ -39,7 +39,7 @@ func (q *Queries) BotOwnerFollowsIssue(ctx context.Context, arg BotOwnerFollowsI
 }
 
 const consumeBotWakeHop = `-- name: ConsumeBotWakeHop :one
-UPDATE bot_wake_chain SET hops=hops+1 WHERE root_id=$1 AND workspace_id=$2 AND hops<4 RETURNING hops
+UPDATE bot_wake_chain SET hops=hops+1 WHERE root_id=$1 AND workspace_id=$2 AND hops<workspace_bot_wake_limit(workspace_id) RETURNING hops
 `
 
 type ConsumeBotWakeHopParams struct {
@@ -80,7 +80,8 @@ func (q *Queries) EnsureBotWakeChain(ctx context.Context, arg EnsureBotWakeChain
 }
 
 const finishBotWakeEvent = `-- name: FinishBotWakeEvent :exec
-UPDATE bot_wake_event SET status=$2,reason=$3,received_at=CASE WHEN $2='received' THEN now() ELSE received_at END,
+UPDATE bot_wake_event SET status=$2,reason=CASE WHEN $2='received' AND (woken_at IS NOT NULL OR result_at IS NOT NULL)
+ THEN 'HTTP 200; execution confirmed' ELSE $3 END,received_at=CASE WHEN $2='received' THEN now() ELSE received_at END,
  next_attempt_at=now()+$4::integer*interval '1 second' WHERE sequence=$1
 `
 
@@ -121,6 +122,17 @@ func (q *Queries) GetBotWake(ctx context.Context, botID pgtype.UUID) (BotWake, e
 	return i, err
 }
 
+const getBotWakeChainGeneration = `-- name: GetBotWakeChainGeneration :one
+SELECT generation FROM bot_wake_chain WHERE root_id=$1
+`
+
+func (q *Queries) GetBotWakeChainGeneration(ctx context.Context, rootID pgtype.UUID) (int64, error) {
+	row := q.db.QueryRow(ctx, getBotWakeChainGeneration, rootID)
+	var generation int64
+	err := row.Scan(&generation)
+	return generation, err
+}
+
 const getWakeBot = `-- name: GetWakeBot :one
 SELECT id, user_id, name, token_hash, token_prefix, expires_at, last_used_at, revoked, created_at, kind, bot_type, workspace_id, revoked_at, deleted_at FROM personal_access_token WHERE id=$1 AND workspace_id=$2 AND kind='bot'
 `
@@ -152,8 +164,92 @@ func (q *Queries) GetWakeBot(ctx context.Context, arg GetWakeBotParams) (Persona
 	return i, err
 }
 
+const listBotWakeBatch = `-- name: ListBotWakeBatch :many
+SELECT sequence, event_id, bot_id, workspace_id, event_type, issue_id, chat_session_id, source_id, author_type, author_id, status, reason, attempts, next_attempt_at, sent_at, received_at, created_at, woken_at, result_at, result_url, acknowledged_at, via_bot_id, via_bot_name, source_task_id, root_id, hop, inherited_owner, wake_generation, runtime_outage_id, delivery_id FROM bot_wake_event
+WHERE bot_id=$1 AND workspace_id=$2 AND status='queued'
+ AND issue_id IS NOT DISTINCT FROM $3::uuid
+ AND chat_session_id IS NOT DISTINCT FROM $4::uuid
+ AND event_type<>'wake_blocked'
+ AND (($5::uuid IS NOT NULL AND delivery_id=$5::uuid)
+      OR ($5::uuid IS NULL AND delivery_id IS NULL AND attempts=0
+          AND (created_at,sequence)>=($6::timestamptz,$7::bigint)
+          AND created_at<=$6::timestamptz+$8::integer*interval '1 second'))
+ORDER BY sequence FOR UPDATE
+`
+
+type ListBotWakeBatchParams struct {
+	BotID         pgtype.UUID        `json:"bot_id"`
+	WorkspaceID   pgtype.UUID        `json:"workspace_id"`
+	IssueID       pgtype.UUID        `json:"issue_id"`
+	ChatSessionID pgtype.UUID        `json:"chat_session_id"`
+	DeliveryID    pgtype.UUID        `json:"delivery_id"`
+	WindowStart   pgtype.Timestamptz `json:"window_start"`
+	FirstSequence int64              `json:"first_sequence"`
+	WindowSeconds int32              `json:"window_seconds"`
+}
+
+func (q *Queries) ListBotWakeBatch(ctx context.Context, arg ListBotWakeBatchParams) ([]BotWakeEvent, error) {
+	rows, err := q.db.Query(ctx, listBotWakeBatch,
+		arg.BotID,
+		arg.WorkspaceID,
+		arg.IssueID,
+		arg.ChatSessionID,
+		arg.DeliveryID,
+		arg.WindowStart,
+		arg.FirstSequence,
+		arg.WindowSeconds,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []BotWakeEvent{}
+	for rows.Next() {
+		var i BotWakeEvent
+		if err := rows.Scan(
+			&i.Sequence,
+			&i.EventID,
+			&i.BotID,
+			&i.WorkspaceID,
+			&i.EventType,
+			&i.IssueID,
+			&i.ChatSessionID,
+			&i.SourceID,
+			&i.AuthorType,
+			&i.AuthorID,
+			&i.Status,
+			&i.Reason,
+			&i.Attempts,
+			&i.NextAttemptAt,
+			&i.SentAt,
+			&i.ReceivedAt,
+			&i.CreatedAt,
+			&i.WokenAt,
+			&i.ResultAt,
+			&i.ResultUrl,
+			&i.AcknowledgedAt,
+			&i.ViaBotID,
+			&i.ViaBotName,
+			&i.SourceTaskID,
+			&i.RootID,
+			&i.Hop,
+			&i.InheritedOwner,
+			&i.WakeGeneration,
+			&i.RuntimeOutageID,
+			&i.DeliveryID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listBotWakeEvents = `-- name: ListBotWakeEvents :many
-SELECT sequence, event_id, bot_id, workspace_id, event_type, issue_id, chat_session_id, source_id, author_type, author_id, status, reason, attempts, next_attempt_at, sent_at, received_at, created_at, woken_at, result_at, result_url, acknowledged_at, via_bot_id, via_bot_name, source_task_id, root_id, hop, inherited_owner, runtime_outage_id FROM bot_wake_event WHERE bot_id=$1 AND workspace_id=$2
+SELECT sequence, event_id, bot_id, workspace_id, event_type, issue_id, chat_session_id, source_id, author_type, author_id, status, reason, attempts, next_attempt_at, sent_at, received_at, created_at, woken_at, result_at, result_url, acknowledged_at, via_bot_id, via_bot_name, source_task_id, root_id, hop, inherited_owner, wake_generation, runtime_outage_id, delivery_id FROM bot_wake_event WHERE bot_id=$1 AND workspace_id=$2
  AND ($4::bigint=0 OR sequence<$4)
  AND (NOT $5::boolean OR (status IN ('pending','failed','uncertain') AND acknowledged_at IS NULL))
  ORDER BY sequence DESC LIMIT $3
@@ -210,7 +306,70 @@ func (q *Queries) ListBotWakeEvents(ctx context.Context, arg ListBotWakeEventsPa
 			&i.RootID,
 			&i.Hop,
 			&i.InheritedOwner,
+			&i.WakeGeneration,
 			&i.RuntimeOutageID,
+			&i.DeliveryID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listLimitedBotWakeEvents = `-- name: ListLimitedBotWakeEvents :many
+SELECT sequence, event_id, bot_id, workspace_id, event_type, issue_id, chat_session_id, source_id, author_type, author_id, status, reason, attempts, next_attempt_at, sent_at, received_at, created_at, woken_at, result_at, result_url, acknowledged_at, via_bot_id, via_bot_name, source_task_id, root_id, hop, inherited_owner, wake_generation, runtime_outage_id, delivery_id FROM bot_wake_event WHERE bot_id=$1 AND workspace_id=$2 AND status='pending'
+ AND acknowledged_at IS NULL AND woken_at IS NULL AND result_at IS NULL AND reason='hourly limit'
+`
+
+type ListLimitedBotWakeEventsParams struct {
+	BotID       pgtype.UUID `json:"bot_id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+}
+
+func (q *Queries) ListLimitedBotWakeEvents(ctx context.Context, arg ListLimitedBotWakeEventsParams) ([]BotWakeEvent, error) {
+	rows, err := q.db.Query(ctx, listLimitedBotWakeEvents, arg.BotID, arg.WorkspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []BotWakeEvent{}
+	for rows.Next() {
+		var i BotWakeEvent
+		if err := rows.Scan(
+			&i.Sequence,
+			&i.EventID,
+			&i.BotID,
+			&i.WorkspaceID,
+			&i.EventType,
+			&i.IssueID,
+			&i.ChatSessionID,
+			&i.SourceID,
+			&i.AuthorType,
+			&i.AuthorID,
+			&i.Status,
+			&i.Reason,
+			&i.Attempts,
+			&i.NextAttemptAt,
+			&i.SentAt,
+			&i.ReceivedAt,
+			&i.CreatedAt,
+			&i.WokenAt,
+			&i.ResultAt,
+			&i.ResultUrl,
+			&i.AcknowledgedAt,
+			&i.ViaBotID,
+			&i.ViaBotName,
+			&i.SourceTaskID,
+			&i.RootID,
+			&i.Hop,
+			&i.InheritedOwner,
+			&i.WakeGeneration,
+			&i.RuntimeOutageID,
+			&i.DeliveryID,
 		); err != nil {
 			return nil, err
 		}
@@ -282,7 +441,7 @@ func (q *Queries) LockBotWake(ctx context.Context, botID pgtype.UUID) (BotWake, 
 }
 
 const lockBotWakeReceipt = `-- name: LockBotWakeReceipt :one
-SELECT sequence, event_id, bot_id, workspace_id, event_type, issue_id, chat_session_id, source_id, author_type, author_id, status, reason, attempts, next_attempt_at, sent_at, received_at, created_at, woken_at, result_at, result_url, acknowledged_at, via_bot_id, via_bot_name, source_task_id, root_id, hop, inherited_owner, runtime_outage_id FROM bot_wake_event WHERE bot_id=$1 AND workspace_id=$2 AND event_id=$3 FOR UPDATE
+SELECT sequence, event_id, bot_id, workspace_id, event_type, issue_id, chat_session_id, source_id, author_type, author_id, status, reason, attempts, next_attempt_at, sent_at, received_at, created_at, woken_at, result_at, result_url, acknowledged_at, via_bot_id, via_bot_name, source_task_id, root_id, hop, inherited_owner, wake_generation, runtime_outage_id, delivery_id FROM bot_wake_event WHERE bot_id=$1 AND workspace_id=$2 AND event_id=$3 FOR UPDATE
 `
 
 type LockBotWakeReceiptParams struct {
@@ -322,33 +481,72 @@ func (q *Queries) LockBotWakeReceipt(ctx context.Context, arg LockBotWakeReceipt
 		&i.RootID,
 		&i.Hop,
 		&i.InheritedOwner,
+		&i.WakeGeneration,
 		&i.RuntimeOutageID,
+		&i.DeliveryID,
 	)
 	return i, err
 }
 
+const markBotWakeBatchMemberSending = `-- name: MarkBotWakeBatchMemberSending :exec
+UPDATE bot_wake_event SET status='sending',sent_at=now(),attempts=attempts+1,
+ hop=$1,wake_generation=$2,delivery_id=$3 WHERE sequence=$4
+`
+
+type MarkBotWakeBatchMemberSendingParams struct {
+	Hop            int32       `json:"hop"`
+	WakeGeneration int64       `json:"wake_generation"`
+	DeliveryID     pgtype.UUID `json:"delivery_id"`
+	Sequence       int64       `json:"sequence"`
+}
+
+func (q *Queries) MarkBotWakeBatchMemberSending(ctx context.Context, arg MarkBotWakeBatchMemberSendingParams) error {
+	_, err := q.db.Exec(ctx, markBotWakeBatchMemberSending,
+		arg.Hop,
+		arg.WakeGeneration,
+		arg.DeliveryID,
+		arg.Sequence,
+	)
+	return err
+}
+
 const markBotWakeSending = `-- name: MarkBotWakeSending :exec
-WITH sent AS (UPDATE bot_wake_event SET status='sending',sent_at=now(),attempts=attempts+1,hop=$2 WHERE sequence=$1 RETURNING bot_id)
+WITH sent AS (UPDATE bot_wake_event SET status='sending',sent_at=now(),attempts=attempts+1,hop=$2,wake_generation=$3::bigint WHERE sequence=$1 RETURNING bot_id,event_type)
 INSERT INTO bot_wake_attempt(bot_id) SELECT bot_id FROM sent
+ WHERE event_type<>'mention'
 `
 
 type MarkBotWakeSendingParams struct {
-	Sequence int64 `json:"sequence"`
-	Hop      int32 `json:"hop"`
+	Sequence       int64 `json:"sequence"`
+	Hop            int32 `json:"hop"`
+	WakeGeneration int64 `json:"wake_generation"`
 }
 
 func (q *Queries) MarkBotWakeSending(ctx context.Context, arg MarkBotWakeSendingParams) error {
-	_, err := q.db.Exec(ctx, markBotWakeSending, arg.Sequence, arg.Hop)
+	_, err := q.db.Exec(ctx, markBotWakeSending, arg.Sequence, arg.Hop, arg.WakeGeneration)
 	return err
 }
 
 const nextBotWakeEvent = `-- name: NextBotWakeEvent :one
-SELECT sequence, event_id, bot_id, workspace_id, event_type, issue_id, chat_session_id, source_id, author_type, author_id, status, reason, attempts, next_attempt_at, sent_at, received_at, created_at, woken_at, result_at, result_url, acknowledged_at, via_bot_id, via_bot_name, source_task_id, root_id, hop, inherited_owner, runtime_outage_id FROM bot_wake_event WHERE status='queued' AND next_attempt_at<=now()
- ORDER BY (event_type='mention') DESC, sequence FOR UPDATE SKIP LOCKED LIMIT 1
+SELECT e.sequence, e.event_id, e.bot_id, e.workspace_id, e.event_type, e.issue_id, e.chat_session_id, e.source_id, e.author_type, e.author_id, e.status, e.reason, e.attempts, e.next_attempt_at, e.sent_at, e.received_at, e.created_at, e.woken_at, e.result_at, e.result_url, e.acknowledged_at, e.via_bot_id, e.via_bot_name, e.source_task_id, e.root_id, e.hop, e.inherited_owner, e.wake_generation, e.runtime_outage_id, e.delivery_id FROM bot_wake_event e JOIN bot_wake b ON b.bot_id=e.bot_id
+WHERE e.next_attempt_at<=now()
+ AND (e.status='queued' OR (e.status='pending' AND e.acknowledged_at IS NULL AND e.woken_at IS NULL AND e.result_at IS NULL
+      AND e.reason IN ('hourly limit','quiet hours','source attribution unavailable')))
+ AND (e.status='pending' OR e.attempts>0 OR e.event_type='wake_blocked'
+      OR e.created_at+$1::integer*interval '1 second'<=now())
+ORDER BY (e.event_type='wake_blocked') DESC,
+ (e.event_type='mention' OR EXISTS (
+   SELECT 1 FROM bot_wake_event m WHERE m.bot_id=e.bot_id AND m.workspace_id=e.workspace_id
+   AND m.issue_id IS NOT DISTINCT FROM e.issue_id AND m.chat_session_id IS NOT DISTINCT FROM e.chat_session_id
+   AND m.status='queued' AND m.event_type='mention' AND m.next_attempt_at<=now()
+   AND m.created_at>=e.created_at AND m.created_at<=e.created_at+$1::integer*interval '1 second'
+ )) DESC, e.sequence
+FOR UPDATE OF b SKIP LOCKED LIMIT 1
 `
 
-func (q *Queries) NextBotWakeEvent(ctx context.Context) (BotWakeEvent, error) {
-	row := q.db.QueryRow(ctx, nextBotWakeEvent)
+// Lock the Bot first, so two workers cannot split the same source batch.
+func (q *Queries) NextBotWakeEvent(ctx context.Context, windowSeconds int32) (BotWakeEvent, error) {
+	row := q.db.QueryRow(ctx, nextBotWakeEvent, windowSeconds)
 	var i BotWakeEvent
 	err := row.Scan(
 		&i.Sequence,
@@ -378,7 +576,9 @@ func (q *Queries) NextBotWakeEvent(ctx context.Context) (BotWakeEvent, error) {
 		&i.RootID,
 		&i.Hop,
 		&i.InheritedOwner,
+		&i.WakeGeneration,
 		&i.RuntimeOutageID,
+		&i.DeliveryID,
 	)
 	return i, err
 }
@@ -392,9 +592,56 @@ func (q *Queries) PruneBotWakeAttempts(ctx context.Context) error {
 	return err
 }
 
+const recordBotWakeBatchAttempt = `-- name: RecordBotWakeBatchAttempt :exec
+INSERT INTO bot_wake_attempt(bot_id) VALUES($1)
+`
+
+func (q *Queries) RecordBotWakeBatchAttempt(ctx context.Context, botID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, recordBotWakeBatchAttempt, botID)
+	return err
+}
+
+const recordBotWakeDeliveryBlock = `-- name: RecordBotWakeDeliveryBlock :exec
+WITH recorded AS (
+ INSERT INTO bot_wake_block(workspace_id,bot_id,root_id,issue_id,chat_session_id,limit_value)
+ VALUES($2,$1,$7,$3,$4,$8)
+ RETURNING id
+)
+INSERT INTO bot_wake_event(bot_id,workspace_id,event_type,issue_id,chat_session_id,source_id,author_type,author_id,via_bot_id,root_id,hop,reason)
+SELECT $1,$2,'wake_blocked',$3,$4,$5,'bot',$6,$1,$7,$8,$9 FROM recorded
+`
+
+type RecordBotWakeDeliveryBlockParams struct {
+	OriginBotID   pgtype.UUID `json:"origin_bot_id"`
+	WorkspaceID   pgtype.UUID `json:"workspace_id"`
+	IssueID       pgtype.UUID `json:"issue_id"`
+	ChatSessionID pgtype.UUID `json:"chat_session_id"`
+	SourceID      pgtype.UUID `json:"source_id"`
+	TargetBotID   pgtype.UUID `json:"target_bot_id"`
+	RootID        pgtype.UUID `json:"root_id"`
+	LimitValue    int32       `json:"limit_value"`
+	Reason        string      `json:"reason"`
+}
+
+func (q *Queries) RecordBotWakeDeliveryBlock(ctx context.Context, arg RecordBotWakeDeliveryBlockParams) error {
+	_, err := q.db.Exec(ctx, recordBotWakeDeliveryBlock,
+		arg.OriginBotID,
+		arg.WorkspaceID,
+		arg.IssueID,
+		arg.ChatSessionID,
+		arg.SourceID,
+		arg.TargetBotID,
+		arg.RootID,
+		arg.LimitValue,
+		arg.Reason,
+	)
+	return err
+}
+
 const recordBotWakeResult = `-- name: RecordBotWakeResult :exec
 UPDATE bot_wake_event SET result_at=COALESCE(result_at,clock_timestamp()),
- result_url=COALESCE(result_url,$2) WHERE sequence=$1
+ result_url=COALESCE(result_url,$2),
+ reason=CASE WHEN status='received' THEN 'HTTP 200; execution confirmed' ELSE reason END WHERE sequence=$1
 `
 
 type RecordBotWakeResultParams struct {
@@ -408,7 +655,8 @@ func (q *Queries) RecordBotWakeResult(ctx context.Context, arg RecordBotWakeResu
 }
 
 const recordBotWakeWoken = `-- name: RecordBotWakeWoken :exec
-UPDATE bot_wake_event SET woken_at=COALESCE(woken_at,clock_timestamp()) WHERE sequence=$1
+UPDATE bot_wake_event SET woken_at=COALESCE(woken_at,clock_timestamp()),
+ reason=CASE WHEN status='received' THEN 'HTTP 200; execution confirmed' ELSE reason END WHERE sequence=$1
 `
 
 func (q *Queries) RecordBotWakeWoken(ctx context.Context, sequence int64) error {
@@ -426,6 +674,21 @@ func (q *Queries) RecoverBotWakeUncertain(ctx context.Context) error {
 	return err
 }
 
+const refundBotWakeHop = `-- name: RefundBotWakeHop :exec
+UPDATE bot_wake_chain SET hops=GREATEST(0,hops-1)
+WHERE root_id=$1 AND generation=$2
+`
+
+type RefundBotWakeHopParams struct {
+	RootID     pgtype.UUID `json:"root_id"`
+	Generation int64       `json:"generation"`
+}
+
+func (q *Queries) RefundBotWakeHop(ctx context.Context, arg RefundBotWakeHopParams) error {
+	_, err := q.db.Exec(ctx, refundBotWakeHop, arg.RootID, arg.Generation)
+	return err
+}
+
 const rememberBotWakeCause = `-- name: RememberBotWakeCause :exec
 INSERT INTO bot_wake_cause(bot_id,root_id,hop) VALUES($1,$2,$3)
 ON CONFLICT(bot_id) DO UPDATE SET root_id=excluded.root_id,hop=excluded.hop
@@ -439,6 +702,30 @@ type RememberBotWakeCauseParams struct {
 
 func (q *Queries) RememberBotWakeCause(ctx context.Context, arg RememberBotWakeCauseParams) error {
 	_, err := q.db.Exec(ctx, rememberBotWakeCause, arg.BotID, arg.RootID, arg.Hop)
+	return err
+}
+
+const rescheduleDeferredBotWakeEvents = `-- name: RescheduleDeferredBotWakeEvents :exec
+UPDATE bot_wake_event SET next_attempt_at=now() WHERE bot_id=$1 AND status='pending'
+ AND acknowledged_at IS NULL AND reason IN ('hourly limit','quiet hours','source attribution unavailable')
+`
+
+func (q *Queries) RescheduleDeferredBotWakeEvents(ctx context.Context, botID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, rescheduleDeferredBotWakeEvents, botID)
+	return err
+}
+
+const restoreBotWakeAuthor = `-- name: RestoreBotWakeAuthor :exec
+UPDATE bot_wake_event SET author_type='agent',author_id=$2 WHERE sequence=$1
+`
+
+type RestoreBotWakeAuthorParams struct {
+	Sequence int64       `json:"sequence"`
+	AuthorID pgtype.UUID `json:"author_id"`
+}
+
+func (q *Queries) RestoreBotWakeAuthor(ctx context.Context, arg RestoreBotWakeAuthorParams) error {
+	_, err := q.db.Exec(ctx, restoreBotWakeAuthor, arg.Sequence, arg.AuthorID)
 	return err
 }
 
@@ -479,4 +766,29 @@ func (q *Queries) UpdateBotWake(ctx context.Context, arg UpdateBotWakeParams) (B
 		&i.InheritOwnerFollows,
 	)
 	return i, err
+}
+
+const verifyBotWakeHumanQuote = `-- name: VerifyBotWakeHumanQuote :one
+SELECT bot_wake_quote_valid($1::uuid,$2::uuid,$3::uuid,$4::uuid,$5::text)::boolean
+`
+
+type VerifyBotWakeHumanQuoteParams struct {
+	WorkspaceID   pgtype.UUID `json:"workspace_id"`
+	UserID        pgtype.UUID `json:"user_id"`
+	IssueID       pgtype.UUID `json:"issue_id"`
+	ChatSessionID pgtype.UUID `json:"chat_session_id"`
+	Quote         string      `json:"quote"`
+}
+
+func (q *Queries) VerifyBotWakeHumanQuote(ctx context.Context, arg VerifyBotWakeHumanQuoteParams) (bool, error) {
+	row := q.db.QueryRow(ctx, verifyBotWakeHumanQuote,
+		arg.WorkspaceID,
+		arg.UserID,
+		arg.IssueID,
+		arg.ChatSessionID,
+		arg.Quote,
+	)
+	var column_1 bool
+	err := row.Scan(&column_1)
+	return column_1, err
 }

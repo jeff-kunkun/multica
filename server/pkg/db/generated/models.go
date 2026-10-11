@@ -300,6 +300,9 @@ type AgentTaskQueue struct {
 	ViaBotName                pgtype.Text `json:"via_bot_name"`
 	WakeRootID                pgtype.UUID `json:"wake_root_id"`
 	WakeHop                   int32       `json:"wake_hop"`
+	WakeGeneration            int64       `json:"wake_generation"`
+	WakeReserved              bool        `json:"wake_reserved"`
+	WakeHumanQuote            pgtype.Text `json:"wake_human_quote"`
 }
 
 type AgentToLabel struct {
@@ -478,6 +481,19 @@ type BotWakeAttempt struct {
 	AttemptedAt pgtype.Timestamptz `json:"attempted_at"`
 }
 
+type BotWakeBlock struct {
+	ID            pgtype.UUID        `json:"id"`
+	WorkspaceID   pgtype.UUID        `json:"workspace_id"`
+	BotID         pgtype.UUID        `json:"bot_id"`
+	AgentID       pgtype.UUID        `json:"agent_id"`
+	RootID        pgtype.UUID        `json:"root_id"`
+	TaskID        pgtype.UUID        `json:"task_id"`
+	IssueID       pgtype.UUID        `json:"issue_id"`
+	ChatSessionID pgtype.UUID        `json:"chat_session_id"`
+	LimitValue    int32              `json:"limit_value"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+}
+
 type BotWakeCause struct {
 	BotID  pgtype.UUID `json:"bot_id"`
 	RootID pgtype.UUID `json:"root_id"`
@@ -488,6 +504,7 @@ type BotWakeChain struct {
 	RootID      pgtype.UUID `json:"root_id"`
 	WorkspaceID pgtype.UUID `json:"workspace_id"`
 	Hops        int32       `json:"hops"`
+	Generation  int64       `json:"generation"`
 }
 
 type BotWakeEvent struct {
@@ -518,7 +535,9 @@ type BotWakeEvent struct {
 	RootID          pgtype.UUID        `json:"root_id"`
 	Hop             int32              `json:"hop"`
 	InheritedOwner  bool               `json:"inherited_owner"`
+	WakeGeneration  int64              `json:"wake_generation"`
 	RuntimeOutageID pgtype.UUID        `json:"runtime_outage_id"`
+	DeliveryID      pgtype.UUID        `json:"delivery_id"`
 }
 
 type BotWakeWatch struct {
@@ -904,6 +923,7 @@ type Comment struct {
 	ViaBotName         pgtype.Text        `json:"via_bot_name"`
 	WakeRootID         pgtype.UUID        `json:"wake_root_id"`
 	WakeHop            int32              `json:"wake_hop"`
+	HumanQuote         pgtype.Text        `json:"human_quote"`
 }
 
 type CommentReaction struct {

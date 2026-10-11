@@ -1565,6 +1565,9 @@ func (s *TaskService) enqueueIssueTaskWithCommentPlan(ctx context.Context, issue
 		return db.AgentTaskQueue{}, fmt.Errorf("create task: %w", err)
 	}
 
+	if err := botWakeTaskError(task); err != nil {
+		return task, err
+	}
 	slog.Info("task enqueued",
 		"task_id", util.UUIDToString(task.ID),
 		"issue_id", util.UUIDToString(issue.ID),
@@ -1732,6 +1735,9 @@ func (s *TaskService) enqueueMentionTaskWithCommentPlan(ctx context.Context, iss
 		return db.AgentTaskQueue{}, fmt.Errorf("create task: %w", err)
 	}
 
+	if err := botWakeTaskError(task); err != nil {
+		return task, err
+	}
 	slog.Info("mention task enqueued", "task_id", util.UUIDToString(task.ID), "issue_id", util.UUIDToString(issue.ID), "agent_id", util.UUIDToString(agentID), "is_leader_task", isLeader)
 	// See EnqueueTaskForIssue for ordering rationale.
 	s.broadcastTaskEvent(ctx, protocol.EventTaskQueued, task)
@@ -2721,6 +2727,7 @@ func (s *TaskService) sendDirectChatMessage(
 		out.Queued = queued
 
 		task, err := qtx.CreateChatTask(ctx, db.CreateChatTaskParams{
+			WakeHumanQuote:       pgtype.Text{String: botWakeHumanQuote(ctx), Valid: botWakeHumanQuote(ctx) != ""},
 			ID:                   dbid.NewV7(),
 			AgentID:              session.AgentID,
 			RuntimeID:            carrier.RuntimeID,
@@ -2846,6 +2853,9 @@ func (s *TaskService) sendDirectChatMessage(
 		return nil, err
 	}
 
+	if botWakeTaskError(out.Task) != nil {
+		return &out, nil
+	}
 	slog.Info("direct chat task enqueued",
 		"task_id", util.UUIDToString(out.Task.ID),
 		"chat_session_id", util.UUIDToString(session.ID),
@@ -8264,6 +8274,9 @@ func (s *TaskService) dispatchDelegatedFailureRecovery(ctx context.Context, targ
 			HeadSha:              headShaText(s.ResolveIssueReviewSHA(ctx, target.issue.ID)),
 		})
 		if err == nil {
+			if blockedErr := botWakeTaskError(task); blockedErr != nil {
+				return delegatedFailureRecoveryCovered, blockedErr
+			}
 			slog.Info("delegated failure recovery task enqueued",
 				"failed_task_id", util.UUIDToString(target.failed.ID),
 				"source_task_id", util.UUIDToString(target.source.ID),
@@ -8838,6 +8851,9 @@ func priorityToInt(p string) int32 {
 // cache and kicks the daemon WS so the new task is claimed without
 // waiting for the next poll.
 func (s *TaskService) NotifyTaskEnqueued(ctx context.Context, task db.AgentTaskQueue) {
+	if task.Status == "cancelled" {
+		return
+	}
 	s.captureTaskQueued(ctx, task)
 	s.notifyTaskAvailable(task)
 }
@@ -8974,6 +8990,9 @@ func (s *TaskService) publishTaskEvent(eventType, workspaceID string, task db.Ag
 }
 
 func (s *TaskService) broadcastTaskEvent(ctx context.Context, eventType string, task db.AgentTaskQueue, extra ...map[string]any) {
+	if eventType == protocol.EventTaskQueued && task.Status == "cancelled" {
+		return
+	}
 	workspaceID := s.ResolveTaskWorkspaceID(ctx, task)
 	s.publishTaskEvent(eventType, workspaceID, task, extra...)
 }

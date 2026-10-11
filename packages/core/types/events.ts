@@ -436,6 +436,7 @@ export interface IssueReactionRemovedPayload {
 }
 
 export interface ChatMessageEventPayload {
+  message_kind?: import("./chat").ChatMessageKind;
   chat_session_id: string;
   message_id: string;
   role: "user" | "assistant";

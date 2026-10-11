@@ -79,10 +79,11 @@
       "pull_reason": "Seul un propriétaire ou un administrateur peut relier un autre espace ici.",
       "pull_create": "Relier ici",
       "pull_created": "Relié. Les membres peuvent le consulter dans la barre latérale.",
-      "managed_label": "Laisser l’espace lecteur gérer tâches et autopilotes",
-      "managed_hint_outgoing": "Activé, leurs agents peuvent modifier les tâches et autopilotes d’ici pour la personne qui a lancé l’exécution.",
-      "managed_hint_incoming": "Activé, les agents d’ici peuvent modifier leurs tâches et autopilotes pour la personne qui a lancé l’exécution.",
-      "managed_reason": "Seul un propriétaire de l’espace qui partage peut changer ce réglage."
+      "managed_label": "Accès délégué",
+      "managed_hint_outgoing": "Leurs agents peuvent agir ici avec les droits de l’initiateur.",
+      "managed_hint_incoming": "Les agents peuvent agir là-bas avec les droits de l’initiateur.",
+      "managed_reason": "Seul un propriétaire de l’espace qui partage peut changer ce réglage.",
+      "managed_create_hint": "Par défaut, les agents lecteurs agissent avec les droits de l’initiateur ; vous pouvez désactiver cette option."
     },
     "audit": {
       "title": "Historique",
@@ -97,7 +98,8 @@
       "someone": "Quelqu'un",
       "set_managed_on": "a activé la gestion déléguée",
       "set_managed_off": "a désactivé la gestion déléguée",
-      "managed_write": "a fait faire une modification par {{agent}}"
+      "managed_write": "a fait faire une modification par {{agent}}",
+      "deliver": "Message transmis"
     },
     "panel": {
       "title": "Espaces liés",
@@ -113,7 +115,7 @@
       "show_all": "Tout afficher",
       "no_tasks": "Aucune tâche à afficher.",
       "load_more": "Charger plus",
-      "managed_from": "{{name}} autorise la gestion déléguée : vos agents peuvent agir sur ses tâches et autopilotes"
+      "managed_from": "{{name}} autorise la gestion déléguée selon les droits de la personne à l’origine de l’exécution"
     }
   }
 }

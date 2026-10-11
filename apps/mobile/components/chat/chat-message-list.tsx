@@ -350,6 +350,10 @@ function MessageRow({
   );
   const longPress = useChatMessageLongPress(message);
 
+  if (message.message_kind === "linked_delivery") {
+    return <View className="rounded-lg border border-border px-3.5 py-2"><Text selectable className="text-sm text-foreground">{message.content}</Text></View>;
+  }
+
   if (isFailure) {
     return (
       <FailureBubble

@@ -27,6 +27,24 @@ comment or chat message the Bot writes with a line naming the Bot (for example
 `🤖 <Bot name> (Grok Bot)`), and mark relayed owner words as quotes. Treat a
 signed Bot message as a request, not as the owner's direct decision.
 
+A new bot starts with the two commands its setup text names (DENE-1804):
+`multica overview --output json` for the workspace map, then
+`multica capabilities` for the command map. The map is generated from the
+installed CLI's own command tree on every run, grouped by domain (issues,
+chats, agents, projects, automations, overview, workspace, local); each row
+gives usage, a one-line summary, `access` (read / write / local), `bot_key`
+(yes / no / local) and a runnable example. `--domain issues` narrows it,
+`--output json` returns `onboarding`, `legend`, `domains[].commands[]` and
+`count`. `bot_key: yes` means "try it"; the server's refusal stays final.
+An admin hands the same text out again with `multica bot guide [bot]` or the
+bot row's "Copy setup text" menu item; both read `GET
+/api/workspaces/{id}/bots/setup-text`, key replaced by a placeholder.
+
+A subcommand that does not exist (`multica inbox list`) is reported by name
+with the closest real one (`board`); with `--output json` the answer is a
+JSON object (`code: unknown_subcommand`, `suggestions`, `available`, `help`)
+instead of help text, exit code 1.
+
 Use the relevant references in this skill and each command's `--help`:
 
 - `overview --output json` for the permission-filtered workspace map, including project/automation reference selections and availability.
@@ -39,6 +57,8 @@ Use the relevant references in this skill and each command's `--help`:
 - `issue update/status/assign/label/close/rerun` for issue work.
 - `issue comment add/update/delete` and its attachment flags for comment work.
 - Agent/settings commands supported by the installed CLI for administration.
+- `workspace link create` enables managed access by default; use `--managed=false` to opt out. Existing links stay unchanged.
+- `chat list/send --linked <source>` is for viewer agents with task tokens and the run initiator’s own source chats. Personal-login Bots cannot use this path or borrow a task identity.
 
 Command availability is not proof that a personal login can use the endpoint.
 In particular, `chat open` may be the agent-only chat-spawn API, and
@@ -77,3 +97,94 @@ an unverified stage is unknown, never a reason to automatically resend.
   Handle both event types as Telegram notices to the owner, deduplicate on
   `event_id`, then use the ordinary receipt endpoint. Do not start an agent or
   invent an issue/chat id: those fields are empty for machine events.
+
+## Bot wake-chain guard
+
+The workspace's `bot_wake_chain_limit` defaults to 4 (valid values 1–100).
+It limits consecutive unacknowledged Bot wakes, including Bot-originated agent
+continuations. A real agent reply or completed run resets the chain; work that
+never starts does not consume it. Human messages are exempt. To relay a human
+instruction, use `chat send --per-quote "<exact words>"` or
+`issue comment add --per-quote "<exact words>"`: the server verifies the quote
+against this caller's earlier genuine human message in the same chat/issue.
+Invented or unmatched quotes are rejected before writing.
+
+A blocked `chat send` or `chat new` returns `mode: "blocked"`, a saved `message_id`, and
+`warning`; the CLI prints the JSON receipt and exits nonzero before `--wait`.
+A saved comment remains a successful write, with stderr warnings and
+`trigger_outcomes[].reason_code: "bot_wake_chain_limit"` for each blocked target,
+including an implicitly routed assignee or thread owner.
+Do not repost either saved message. Wait for an agent reply/completed run, send
+as the person, relay a verified quote, or have an administrator adjust the limit:
+
+```sh
+multica settings get bot_wake_chain_limit
+multica settings set bot_wake_chain_limit --value-json '6'
+```
+
+Agent task tokens cannot change the guard. Every blocked attempt is recorded
+and emits `wake_blocked` to the originating Bot's webhook. For patrol and
+dispatch daily reports, consume `multica overview --output json`:
+`bot_wake_chain.blocked_last_24h` and `recent_blocks` report counts and details.
+Authenticated Bots can inspect their own blocks only; human workspace owners
+and admins can inspect viewer-visible records. Task tokens do not read the audit. Other members see the limit and recovery contract.
+`audit_read_failed: true` means the audit is unavailable, not zero blocks.
+The same report is included in the routing-health inspection response.
+
+## Mention delivery and replying in place
+
+Ordinary notifications for one Bot and one issue/chat are grouped in a fixed
+30-second window from the first event, including explicit mentions. A standalone
+mention therefore waits about 30 seconds before its first push; the reply
+convention starts when the Bot receives it. `started` is excluded from new Bot
+subscriptions by default; the old untouched default selection is updated too. Custom selections stay unchanged.
+`wake_blocked` operational alerts remain immediate. This notification batching is
+separate from merging agent runs (DENE-1857).
+
+Every webhook has `delivery_id` and an ordered `events` array, including a
+single-event delivery. The top-level legacy fields mirror the first admitted
+event; handle **each** element of `events`, deduplicating its `event_id`. Each
+keeps its own `ack_url`, `root_id`, `source_id`, author and time. Existing retry,
+receipt, visibility and chain-budget contracts still apply. One HTTP attempt containing non-mention events
+counts once toward the hourly limit; mention-only deliveries bypass it, while
+zero pauses all pushes. Execution receipts remain per event: use each event’s
+`ack_body`/`woken_url`/`result_url`, not only the legacy top-level event. A retried batch keeps its membership and
+`delivery_id`; later events are delivered separately.
+
+For an issue comment mention, each event includes:
+- `content`: full current source comment, `comment_id`, `reply_to_comment_id`.
+- `issue`: `{id,identifier,title}` and `author`: `{type,id,name?,via_bot_id?,via_bot_name?}`.
+- `thread`: `root` and the five most recent `replies`, chronologically ordered;
+  compact comment fields with 200-character previews and `content_truncated`,
+  using the same summary projection as `comment list --compact --summary`.
+- `attachments`: `{id,filename,size_bytes,sha256,url}` for the source comment;
+  `url` downloads bytes with normal Bot authentication. Legacy files without a
+  recorded digest remain omitted; use authorized metadata/download when needed.
+- `reply`: authenticated POST `url`, `body.parent_id`, and a CLI command template.
+
+Use the delivered IDs directly. **After being @mentioned, first reply
+「收到，在处理」 under that source comment; when finished, reply with the result
+under the same comment.** Preserve the Bot signature on both messages. This is an
+internal Multica reply; it does not authorize an external post or purchase.
+
+```sh
+# Save the signed acknowledgement/result in ./reply.md, then send once.
+multica issue comment add <issue_id> --parent <reply_to_comment_id> --content-file ./reply.md --output json
+```
+
+The API equivalent adds `content` to the delivered `reply.body`, sets
+`reply.headers` (`X-Workspace-ID`) and its own Authorization, then POSTs to
+`reply.url`; no issue/comment GET is required. Issue-description mentions have
+`content` and a top-level comment `reply` with no parent; they have no original
+comment floor. Chat events have `content`, `message_id`,
+`reply_to_message_id` and a `reply.cli` using `chat send --session` to continue
+in the same chat (chats have no comment floors). Deleted source comments carry
+an empty body and no reply action; deleted context comments remain empty
+placeholders so thread structure is preserved.
+
+For inspection without delivery or acknowledgement, use
+`multica bot wake events <bot-id> --with-content --limit 5 --output json`
+(or `pending`). This adds `payload` with the same current source projection;
+`delivery_id` on receipt rows identifies the persisted transport batch.
+The API option is `include_content=true` (boolean, default false). Reads
+recheck recipient and caller visibility; they do not replay or acknowledge.

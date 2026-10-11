@@ -1402,6 +1402,13 @@ describe("applyChatMessageToCache", () => {
     };
   }
 
+  it("preserves external delivery kind before the refetch", () => {
+    const qc = createQueryClient();
+    qc.setQueryData<ChatMessage[]>(messagesKey, []);
+    applyChatMessageToCache(qc, messagePayload({ message_kind: "linked_delivery" }));
+    expect(qc.getQueryData<ChatMessage[]>(messagesKey)?.[0]?.message_kind).toBe("linked_delivery");
+  });
+
   it("writes the user message into both caches without waiting for a refetch", () => {
     const qc = createQueryClient();
     qc.setQueryData<ChatMessage[]>(messagesKey, [userMessage()]);

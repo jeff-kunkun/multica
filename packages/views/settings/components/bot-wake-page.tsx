@@ -611,6 +611,13 @@ function RulesSection({ bot, settings }: { bot: ExternalBot; settings: BotWakeSe
             </div>
           </SettingsRow>
           <SettingsRow
+            label={t(($) => $.bots.wake.effective_hourly_limit, { count: saved.hourly_limit })}
+            description={settings.limited_count ? t(($) => $.bots.wake.limited_count, { count: settings.limited_count }) : undefined}
+            size="none"
+          >
+            {null}
+          </SettingsRow>
+          <SettingsRow
             label={t(($) => $.bots.wake.quiet)}
             description={t(($) => $.bots.wake.quiet_hint)}
           >

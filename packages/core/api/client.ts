@@ -101,6 +101,7 @@ import type {
   ExternalBot,
   CreateExternalBotRequest,
   ExternalBotKeyResponse,
+  ExternalBotSetupTextResponse,
   BotWakeSettings,
   UpdateBotWakeRequest,
   BotWakeEventPage,
@@ -353,6 +354,7 @@ import {
   type ConfigImportResult,
 } from "./config-transfer";
 import {
+  BotWakeDeliveryStatsSchema,
   RuntimeProfileSchema,
   RuntimeProfileListSchema,
   AgentTaskListSchema,
@@ -4819,6 +4821,12 @@ export class ApiClient {
     });
   }
 
+  /** Setup text again, key replaced by a placeholder; `botId` addresses the bot by name. */
+  async getExternalBotSetupText(workspaceId: string, botId?: string): Promise<ExternalBotSetupTextResponse> {
+    const qs = botId ? `?bot=${encodeURIComponent(botId)}` : "";
+    return this.fetch(`/api/workspaces/${workspaceId}/bots/setup-text${qs}`);
+  }
+
   async rotateExternalBotKey(workspaceId: string, botId: string): Promise<ExternalBotKeyResponse> {
     return this.fetch(`/api/workspaces/${workspaceId}/bots/${botId}/rotate`, {
       method: "POST",
@@ -4836,7 +4844,9 @@ export class ApiClient {
 
   // Bot wake (DENE-1792): owner/admin or the bot's own key.
   async getBotWake(workspaceId: string, botId: string): Promise<BotWakeSettings> {
-    return this.fetch(`/api/workspaces/${workspaceId}/bots/${botId}/wake`);
+    const path = `/api/workspaces/${workspaceId}/bots/${botId}/wake`;
+    const raw = await this.fetch<BotWakeSettings>(path);
+    return parseWithFallback(raw, BotWakeDeliveryStatsSchema, raw, { endpoint: `GET ${path}` });
   }
 
   async updateBotWake(
@@ -4844,10 +4854,12 @@ export class ApiClient {
     botId: string,
     data: UpdateBotWakeRequest,
   ): Promise<BotWakeSettings> {
-    return this.fetch(`/api/workspaces/${workspaceId}/bots/${botId}/wake`, {
+    const path = `/api/workspaces/${workspaceId}/bots/${botId}/wake`;
+    const raw = await this.fetch<BotWakeSettings>(path, {
       method: "PUT",
       body: JSON.stringify(data),
     });
+    return parseWithFallback(raw, BotWakeDeliveryStatsSchema, raw, { endpoint: `PUT ${path}` });
   }
 
   async listBotWakeEvents(
@@ -6758,6 +6770,7 @@ export class ApiClient {
     target_slug: string;
     project_ids: string[];
     direction?: WorkspaceLinkDirection;
+    managed?: boolean;
   }): Promise<WorkspaceLink> {
     return this.fetch("/api/workspace-links", { method: "POST", body: JSON.stringify(body) });
   }

@@ -29,7 +29,7 @@ func TestUseLinkedWorkspace(t *testing.T) {
 	defer srv.Close()
 
 	for _, c := range []struct{ ref, want string }{
-		{"read-only", "--managed on"},
+		{"read-only", "workspace link view"},
 		{"mine", "no active link"},
 		{"pending", "no active link"},
 		{"nowhere", "no active link"},
@@ -59,6 +59,7 @@ func TestUseLinkedWorkspace(t *testing.T) {
 // routes the managed link opens, so a new subcommand cannot quietly miss it.
 func TestLinkedFlagOnManagedCommands(t *testing.T) {
 	for _, path := range [][]string{
+		{"chat", "list"}, {"chat", "send"},
 		{"issue", "list"}, {"issue", "get"}, {"issue", "children"}, {"issue", "create"},
 		{"issue", "update"}, {"issue", "assign"}, {"issue", "status"}, {"issue", "search"},
 		{"issue", "comment", "list"}, {"issue", "comment", "add"},

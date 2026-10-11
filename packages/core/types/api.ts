@@ -709,6 +709,11 @@ export interface ExternalBotKeyResponse {
   setup_text: string;
 }
 
+/** The same setup text without a key (DENE-1804): the key is a placeholder. */
+export interface ExternalBotSetupTextResponse {
+  setup_text: string;
+}
+
 // Bot wake (DENE-1792/1793): which Multica events POST to the bot's own
 // webhook. The URL and key are write-only — reads only say whether one is set.
 export type BotWakeEventType =
@@ -752,6 +757,8 @@ export interface BotWakeSettings {
   events: BotWakeEventType[];
   /** 0..120; 0 pauses delivery. */
   hourly_limit: number;
+  /** Unacknowledged, visible events currently held by the hourly limit. */
+  limited_count?: number;
   quiet_hours: BotQuietHours;
 }
 

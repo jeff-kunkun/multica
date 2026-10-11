@@ -216,22 +216,26 @@ async function fetchHealthAtPort(
  * a 2xx means it's fine, and a thrown request means the network is the problem,
  * not auth. See classifyAuthProbe for the full rule set.
  */
-async function probeTokenValidity(profile: string): Promise<AuthProbeResult> {
-  if (!targetApiBaseUrl) return "unknown";
+async function probeTokenValidity(
+  profile: string,
+  serverUrl = targetApiBaseUrl,
+): Promise<AuthProbeResult> {
+  if (!serverUrl) return "unknown";
   const cfg = await readProfileConfig(profile);
   const token = typeof cfg.token === "string" ? cfg.token : "";
   if (!token) return classifyAuthProbe({ noToken: true });
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 4_000);
   try {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 4_000);
-    const res = await fetch(`${targetApiBaseUrl.replace(/\/+$/, "")}/api/me`, {
+    const res = await fetch(`${serverUrl.replace(/\/+$/, "")}/api/me`, {
       headers: { Authorization: `Bearer ${token}` },
       signal: controller.signal,
     });
-    clearTimeout(timeout);
     return classifyAuthProbe({ status: res.status });
   } catch {
     return classifyAuthProbe({ networkError: true });
+  } finally {
+    clearTimeout(timeout);
   }
 }
 
@@ -301,6 +305,9 @@ async function ensureActiveProfile(): Promise<ActiveProfile | null> {
 function invalidateActiveProfile(): void {
   activeProfile = null;
   externalDaemonObserved = false;
+  authExpired = false;
+  authProbeDone = false;
+  startingSince = null;
   recoveryPolicy.reset();
 }
 
@@ -704,19 +711,19 @@ async function mintPat(jwt: string): Promise<string> {
  * - Input from the renderer is the user's JWT (from localStorage) plus the
  *   current user's id, so we can detect session changes.
  * - If the profile already has a cached PAT (`mul_...`) AND the sidecar user
- *   id matches the caller, reuse it — minting fresh on every launch would
- *   accumulate garbage in the user's tokens page.
+ *   id matches the caller, probe it and reuse unless explicitly rejected.
+ *   Network/server failures do not justify rotating a potentially valid PAT.
  * - On user mismatch (or first run) call POST /api/tokens with the JWT to
  *   mint a fresh PAT, overwriting any stale cached PAT. This is the critical
  *   path: without it, a previous user's PAT would be used by a new session.
  * - If the caller happens to pass a PAT directly, write it through.
- * - Reports a user mismatch to the caller; the IPC boundary owns the gated
+ * - Reports a credential change to the caller; the IPC boundary owns the gated
  *   restart so internal callers such as reauthenticate never re-enter it.
  */
 async function syncToken(
   tokenFromRenderer: string,
   userId: string,
-): Promise<{ active: ActiveProfile; userChanged: boolean }> {
+): Promise<{ active: ActiveProfile; credentialsChanged: boolean }> {
   const active = await ensureActiveProfile();
   if (!active) {
     // Writing here would land the token and server_url in the user's default
@@ -736,7 +743,10 @@ async function syncToken(
   let finalToken: string;
   if (tokenFromRenderer.startsWith("mul_")) {
     finalToken = tokenFromRenderer;
-  } else if (sameUserWithCachedPat) {
+  } else if (
+    sameUserWithCachedPat &&
+    (await probeTokenValidity(active.name)) !== "auth_expired"
+  ) {
     finalToken = config.token as string;
   } else {
     try {
@@ -750,15 +760,16 @@ async function syncToken(
     }
   }
 
+  const credentialsChanged = userChanged || config.token !== finalToken;
   config.token = finalToken;
   if (targetApiBaseUrl) config.server_url = targetApiBaseUrl;
   await writeProfileConfig(active.name, config);
   await writeProfileUserId(active.name, userId);
 
-  return { active, userChanged };
+  return { active, credentialsChanged };
 }
 
-async function restartDaemonAfterUserSwitch(
+async function restartDaemonAfterCredentialChange(
   active: ActiveProfile,
 ): Promise<void> {
   // If we just rotated credentials onto a running daemon, restart it so the
@@ -769,7 +780,7 @@ async function restartDaemonAfterUserSwitch(
     // already loaded the old token at startup, so it must be restarted to
     // pick up the rotated credentials.
     console.log(
-      "[daemon] user switched — restarting daemon with new credentials",
+      "[daemon] credentials changed — restarting daemon with new credentials",
     );
     // Credential rotation is a one-shot login intent, not poll-driven
     // maintenance: wait for bootstrap/recovery instead of dropping it.
@@ -778,7 +789,7 @@ async function restartDaemonAfterUserSwitch(
     );
     if (!restarted.success) {
       console.warn(
-        `[daemon] restart-on-user-switch failed: ${restarted.error ?? "unknown error"}`,
+        `[daemon] restart-on-credential-change failed: ${restarted.error ?? "unknown error"}`,
       );
     }
   }
@@ -1028,16 +1039,27 @@ async function startDaemon(
   sendStatus({ state: "starting" });
 
   const args = ["daemon", "start", ...profileArgs(active.name)];
+  const startServerUrl = targetApiBaseUrl;
 
   return new Promise((resolve) => {
     execFile(
       bin,
       args,
       { timeout: DAEMON_START_EXEC_TIMEOUT_MS, env: desktopSpawnEnv() },
-      (err) => {
+      async (err) => {
         if (err) {
-          currentState = "stopped";
-          sendStatus({ state: "stopped" });
+          // Preflight can reject a revoked PAT and exit in less than a second.
+          // The 10s polling probe never sees that failure once state is stopped.
+          const verdict = await probeTokenValidity(active.name, startServerUrl);
+          if (
+            activeProfile?.name === active.name &&
+            targetApiBaseUrl === startServerUrl
+          ) {
+            authProbeDone = true;
+            authExpired = verdict === "auth_expired";
+            currentState = authExpired ? "auth_expired" : "stopped";
+            sendStatus({ state: currentState, profile: active.name });
+          }
           resolve({ success: false, error: err.message });
           return;
         }
@@ -1420,8 +1442,8 @@ export function setupDaemonManager(
     "daemon:sync-token",
     async (_event, token: string, userId: string) => {
       const result = await syncToken(token, userId);
-      if (result.userChanged) {
-        await restartDaemonAfterUserSwitch(result.active);
+      if (result.credentialsChanged) {
+        await restartDaemonAfterCredentialChange(result.active);
       }
     },
   );

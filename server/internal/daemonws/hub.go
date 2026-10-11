@@ -3,6 +3,7 @@ package daemonws
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -12,6 +13,10 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
+
+// ErrAuthExpired is distinct from a transient revalidation failure. Only this
+// verdict tells a daemon that its credential must be replaced.
+var ErrAuthExpired = errors.New("daemon authentication expired")
 
 const (
 	writeWait  = 10 * time.Second
@@ -39,6 +44,9 @@ type ClientIdentity struct {
 	// Capabilities is the raw X-Client-Capabilities header captured at connect,
 	// so RPC handlers can honor the same capability gating as the HTTP path.
 	Capabilities string
+	// Revalidate checks the original credential against authoritative storage,
+	// not the handshake's cached identity. Nil preserves non-PAT auth behavior.
+	Revalidate func(context.Context) error
 }
 
 // RuntimeLease is the connection-scoped liveness state for one already
@@ -335,8 +343,9 @@ type Hub struct {
 	rpcMu sync.RWMutex
 	onRPC RPCHandler
 
-	kindMu       sync.RWMutex
-	kindRecorder MessageKindRecorder
+	kindMu            sync.RWMutex
+	kindRecorder      MessageKindRecorder
+	authCheckInterval time.Duration
 }
 
 func NewHub() *Hub {
@@ -350,6 +359,7 @@ func NewHub() *Hub {
 			CheckOrigin: func(r *http.Request) bool { return true },
 		},
 		clients:            make(map[*client]bool),
+		authCheckInterval:  15 * time.Second,
 		byRuntime:          make(map[string]map[*client]bool),
 		byWorkspace:        make(map[string]map[*client]bool),
 		byUser:             make(map[string]map[*client]bool),
@@ -447,6 +457,42 @@ func (h *Hub) HandleWebSocket(w http.ResponseWriter, r *http.Request, identity C
 
 	go c.writePump()
 	go c.readPump()
+	if identity.Revalidate != nil {
+		go c.authPump()
+	}
+}
+
+// Revalidate once per connection, not once per runtime heartbeat. This also
+// closes sockets belonging to old daemons that ignore HTTP authentication
+// errors. A failed DB read closes with a retryable status, never "expired".
+func (c *client) authPump() {
+	ticker := time.NewTicker(c.hub.authCheckInterval)
+	defer ticker.Stop()
+	for {
+		ctx, cancel := context.WithTimeout(c.ctx, 5*time.Second)
+		err := c.identity.Revalidate(ctx)
+		cancel()
+		if err != nil {
+			if c.ctx.Err() != nil {
+				return
+			}
+			code, reason := websocket.CloseTryAgainLater, "authentication check unavailable"
+			if errors.Is(err, ErrAuthExpired) {
+				code, reason = websocket.ClosePolicyViolation, "authentication expired"
+			}
+			// Cancel RPCs before removing this connection from presence indexes.
+			c.cancel()
+			_ = c.conn.WriteControl(websocket.CloseMessage, websocket.FormatCloseMessage(code, reason), time.Now().Add(time.Second))
+			c.hub.unregister(c)
+			_ = c.conn.Close()
+			return
+		}
+		select {
+		case <-c.ctx.Done():
+			return
+		case <-ticker.C:
+		}
+	}
 }
 
 // NotifyTaskAvailable sends a best-effort wakeup to daemons watching runtimeID.

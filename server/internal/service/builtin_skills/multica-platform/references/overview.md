@@ -1,6 +1,7 @@
 # Workspace overview
 
-Start with `multica overview --compact` when you do not know the workspace.
+Start with `multica overview --compact` when you do not know the workspace,
+then `multica capabilities` for the live command map (see `external-bots.md`).
 This is one request to `GET /api/overview`; the CLI and Settings → Overview use
 that same read-only, permission-scoped projection. It never marks chats read.
 
@@ -49,3 +50,14 @@ Runtime rows include `status` and nullable RFC3339 `last_seen_at`, including
 in compact mode. Read a particular unanswered turn with
 `multica chat progress --session <id> --history --output json`; it adds the
 server task status, reason and queue position to that runtime snapshot.
+
+`bot_wake_chain` describes the workspace-wide Bot wake guard even in compact
+mode: `limit`, `reason_code`, `reset`, `human_exempt`,
+`verified_quote_exempt`, and `settings_key`. When audit access is permitted,
+`blocked_last_24h` and up to 100 `recent_blocks` include each attempted wake's
+Bot, target, root, task/issue/chat identifiers, limit and timestamp. This guard
+summary is workspace-wide, independently of project/agent filters. External Bot
+callers see only their own Bot's visible records; human owners/admins see viewer-visible records. Other
+members and task tokens see no audit identifiers. Include these counts and records in patrol
+and dispatch daily reports; treat `audit_read_failed` as unavailable evidence,
+never as zero. Recovery and quote verification: `external-bots.md`.

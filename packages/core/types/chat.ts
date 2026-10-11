@@ -27,6 +27,7 @@ export type ChatMessageKind =
   | "onboarding_kickoff"
   | "onboarding_opening"
   | "goal_link"
+  | "linked_delivery"
   /** An agent opened a chat from this one; `linked_session_id` points at it. */
   | "chat_spawn"
   /** An agent tried to open a chat from this one and the server refused. */
@@ -309,7 +310,9 @@ export interface SendChatMessageResponse {
   message_id: string;
   task_id: string;
   /** What actually happened; `start` when nothing was replying. */
-  mode?: ChatSendMode | "start";
+  mode?: ChatSendMode | "start" | "blocked";
+  warning?: string;
+  reason_code?: string;
   /** True when the server supports queued follow-up sends. */
   supports_queue?: boolean;
   /**

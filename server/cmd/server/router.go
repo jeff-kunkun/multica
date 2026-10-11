@@ -2058,9 +2058,12 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Put("/bots/{botId}/wake", h.PutBotWake)
 					r.Get("/bots/{botId}/wake/events", h.ListBotWakeEvents)
 					r.Get("/bots/{botId}/wake/pending", h.ListBotWakeEvents)
- r.Post("/bots/{botId}/wake/pending/ack", h.AcknowledgeBotWakePending)
- r.Post("/bots/{botId}/wake/events/{eventId}/woken", h.RecordBotWakeReceipt)
- r.Post("/bots/{botId}/wake/events/{eventId}/result", h.RecordBotWakeReceipt)
+					r.Post("/bots/{botId}/wake/pending/ack", h.AcknowledgeBotWakePending)
+					r.Post("/bots/{botId}/wake/events/{eventId}/woken", h.RecordBotWakeReceipt)
+					// Older webhook payloads supplied this base receipt URL.
+					r.Post("/bots/{botId}/wake/events/{eventId}", h.RecordBotWakeReceipt)
+					r.Post("/bots/{botId}/wake/events/{eventId}/ack", h.RecordBotWakeReceipt)
+					r.Post("/bots/{botId}/wake/events/{eventId}/result", h.RecordBotWakeReceipt)
 				})
 
 				// External bot keys (DENE-1788): admin-only, and never from an
@@ -2069,6 +2072,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Use(middleware.RequireWorkspaceRoleFromURL(queries, "id", "owner", "admin"))
 					r.Use(handler.RequireHumanActor)
 					r.Get("/bots", h.ListBots)
+					r.Get("/bots/setup-text", h.GetBotSetupText)
 					r.Post("/bots", h.CreateBot)
 					r.Post("/bots/{botId}/rotate", h.RotateBotKey)
 					r.Post("/bots/{botId}/stop", h.StopBot)
@@ -2618,6 +2622,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			// Comments
 			r.Route("/api/comments/{commentId}", func(r chi.Router) {
 				r.Use(h.RequireModule(permission.ModuleIssues))
+				r.Get("/attachments", h.ListCommentAttachments)
 				r.With(handler.RequireHumanActor).Get("/sub-issue-preview", h.PreviewCommentSubIssue)
 				r.With(handler.RequireHumanActor).Post("/sub-issues", h.CreateCommentSubIssue)
 				r.Put("/", h.UpdateComment)

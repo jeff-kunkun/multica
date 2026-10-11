@@ -17,7 +17,7 @@ import (
 
 var connectionCmd = &cobra.Command{Use: "connection", Short: "Manage Git connections"}
 var connectionRepoCmd = &cobra.Command{Use: "repo", Short: "Inspect repository connections"}
-var connectionListCmd = &cobra.Command{Use: "list", Args: cobra.NoArgs, RunE: runConnectionList}
+var connectionListCmd = &cobra.Command{Use: "list", Short: "List the workspace's GitHub/GitLab connections", Args: cobra.NoArgs, RunE: runConnectionList}
 var connectionAddCmd = &cobra.Command{
 	Use:   "add",
 	Short: "Register a GitHub or GitLab token connection",
@@ -35,9 +35,9 @@ for the whole instance.`,
 	Args: cobra.NoArgs,
 	RunE: runConnectionAdd,
 }
-var connectionTestCmd = &cobra.Command{Use: "test <connection-id>", Args: exactArgs(1), RunE: runConnectionTest}
-var connectionRemoveCmd = &cobra.Command{Use: "remove <connection-id>", Args: exactArgs(1), RunE: runConnectionRemove}
-var connectionRepoStatusCmd = &cobra.Command{Use: "status", Args: cobra.NoArgs, RunE: runConnectionRepoStatus}
+var connectionTestCmd = &cobra.Command{Use: "test <connection-id>", Short: "Check that a connection's token still works", Args: exactArgs(1), RunE: runConnectionTest}
+var connectionRemoveCmd = &cobra.Command{Use: "remove <connection-id>", Short: "Remove a connection", Args: exactArgs(1), RunE: runConnectionRemove}
+var connectionRepoStatusCmd = &cobra.Command{Use: "status", Short: "Show which repositories each connection can reach", Args: cobra.NoArgs, RunE: runConnectionRepoStatus}
 
 // connectionTokenCommand runs a local credential helper. Tests replace it.
 // The arguments never include the secret; it stays on stdout.

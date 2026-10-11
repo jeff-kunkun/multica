@@ -428,7 +428,7 @@ func (h *Handler) ConvertChatSessionToGoal(w http.ResponseWriter, r *http.Reques
 	var seed string
 	for _, message := range messages {
 		if message.Role == "user" && strings.TrimSpace(message.Content) != "" {
-			seed = strings.TrimSpace(message.Content)
+			seed = strings.TrimSpace(protocol.ChatPromptContent(message.MessageKind, message.Content))
 			break
 		}
 	}
@@ -1135,6 +1135,7 @@ func (h *Handler) DeleteChatSession(w http.ResponseWriter, r *http.Request) {
 // ---------------------------------------------------------------------------
 
 type SendChatMessageRequest struct {
+	PerQuote      string   `json:"per_quote,omitempty"`
 	Content       string   `json:"content"`
 	AttachmentIDs []string `json:"attachment_ids"`
 	// Mode says what to do when the agent is still replying: steer (read it
@@ -1144,12 +1145,16 @@ type SendChatMessageRequest struct {
 }
 
 type SendChatMessageResponse struct {
-	Runtime       *ChatRuntimeResponse `json:"runtime"`
-	Warning       string               `json:"warning,omitempty"`
-	MessageID     string               `json:"message_id"`
-	TaskID        string               `json:"task_id"`
-	SupportsQueue bool                 `json:"supports_queue"`
-	Queued        bool                 `json:"queued"`
+	Runtime        *ChatRuntimeResponse       `json:"runtime"`
+	Warning        string                     `json:"warning,omitempty"`
+	ReasonCode     string                     `json:"reason_code,omitempty"`
+	ChatSessionID  string                     `json:"chat_session_id,omitempty"`
+	MessageKind    string                     `json:"message_kind,omitempty"`
+	LinkedDelivery *ManagedChatDeliverySource `json:"linked_delivery,omitempty"`
+	MessageID      string                     `json:"message_id"`
+	TaskID         string                     `json:"task_id"`
+	SupportsQueue  bool                       `json:"supports_queue"`
+	Queued         bool                       `json:"queued"`
 	// Mode is what actually happened: steer, queue, restart, or start when
 	// nothing was replying. A steer whose reply ended first reports queue.
 	Mode string `json:"mode"`
@@ -1188,6 +1193,20 @@ func (h *Handler) SendChatMessage(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "content is required")
 		return
 	}
+	if grant, managed := workspacelink.ManagedGrantFromContext(r.Context()); managed {
+		id, err := parseUUIDSafe(sessionID)
+		if err != nil {
+			writeWorkspaceLinkError(w, workspacelink.ErrManagedDenied)
+			return
+		}
+		session, err := h.Queries.GetChatSessionInWorkspace(r.Context(), db.GetChatSessionInWorkspaceParams{ID: id, WorkspaceID: grant.Source.ID})
+		if err != nil {
+			writeWorkspaceLinkError(w, workspacelink.ErrManagedDenied)
+			return
+		}
+		h.sendManagedChatMessage(w, r, session, grant, req)
+		return
+	}
 	mode, ok := normalizeSendMode(req.Mode)
 	if !ok {
 		writeError(w, http.StatusBadRequest, "mode must be steer, queue or restart")
@@ -1211,6 +1230,13 @@ func (h *Handler) SendChatMessage(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	if req.PerQuote != "" {
+		if !h.verifyBotWakeQuote(w, r, session.WorkspaceID, pgtype.UUID{}, session.ID, req.PerQuote) {
+			return
+		}
+		r = r.WithContext(service.WithBotWakeHumanQuote(r.Context(), req.PerQuote))
+	}
+
 	// Archived sessions are read-only: refuse to enqueue new agent work for
 	// them (see SetChatSessionArchived). The frontend disables the composer
 	// for status='archived' and only offers unarchive/delete there. Legacy
@@ -1381,7 +1407,7 @@ func (h *Handler) SendChatMessage(w http.ResponseWriter, r *http.Request) {
 	// (DENE-1037). Until then the first-message title stands.
 
 	applied := "start"
-	if sent.Queued {
+	if sent.Queued && task.Status != "cancelled" {
 		applied = sendModeQueue
 		switch {
 		case mode == sendModeSteer && steerable:
@@ -1401,8 +1427,14 @@ func (h *Handler) SendChatMessage(w http.ResponseWriter, r *http.Request) {
 	if diagnosticErr != nil {
 		slog.Warn("chat send diagnostics unavailable", "error", diagnosticErr)
 	}
+	warning, reason := diagnostics.Warning, ""
+	if service.BotWakeBlocked(task) {
+		applied = "blocked"
+		warning = service.BotWakeWarning(task, agent.Name)
+		reason = "bot_wake_chain_limit"
+	}
 	writeJSON(w, http.StatusCreated, SendChatMessageResponse{
-		Runtime: diagnostics.Runtime, Warning: diagnostics.Warning,
+		Runtime: diagnostics.Runtime, Warning: warning, ReasonCode: reason,
 		MessageID:     uuidToString(msg.ID),
 		TaskID:        uuidToString(task.ID),
 		SupportsQueue: true,
@@ -1598,6 +1630,9 @@ func (h *Handler) ListChatMessages(w http.ResponseWriter, r *http.Request) {
 	resp := make([]ChatMessageResponse, len(messages))
 	for i, m := range messages {
 		resp[i] = chatMessageToResponse(m, groupedAtt[uuidToString(m.ID)])
+		if _, managed := workspacelink.ManagedGrantFromContext(r.Context()); managed {
+			resp[i].Content = protocol.ChatPromptContent(m.MessageKind, m.Content)
+		}
 	}
 	h.attachChatSessionLineage(r.Context(), resp, messages)
 	writeJSON(w, http.StatusOK, resp)
@@ -2830,6 +2865,8 @@ const chatQuickActionResponseLimit = 3
 // never surprises an older client into a broken render (MUL-4351).
 func normalizeMessageKind(kind string) string {
 	switch kind {
+	case protocol.ChatMessageKindLinkedDelivery:
+		return protocol.ChatMessageKindLinkedDelivery
 	case protocol.ChatMessageKindNoResponse:
 		return protocol.ChatMessageKindNoResponse
 	case protocol.ChatMessageKindOnboardingKickoff:

@@ -2212,6 +2212,8 @@ func (d *Daemon) clearWSHeartbeatAcks() {
 func (d *Daemon) Run(ctx context.Context) error {
 	// Wrap context so handleUpdate can cancel the daemon for restart.
 	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	d.stopOnAuthRejection(ctx, cancel)
 	d.cancelFunc = cancel
 	d.setLifecycleCtx(ctx)
 	d.rootCtx = ctx
@@ -2324,6 +2326,31 @@ func (d *Daemon) Run(ctx context.Context) error {
 	err = d.pollLoop(ctx, taskWakeups)
 	d.logger.Debug("daemon main loop returning", "error", err)
 	return err
+}
+
+// A live WebSocket is not proof that the PAT still works: an already upgraded
+// socket can keep heartbeating after revocation. Stop all claims and close that
+// socket once the identity endpoint confirms rejection. Normal shutdown
+// persists terminal callbacks for replay with the next valid credential;
+// it never clears them.
+func (d *Daemon) stopOnAuthRejection(ctx context.Context, cancel context.CancelFunc) {
+	var once sync.Once
+	var probing atomic.Bool
+	d.client.onUnauthorized = func() {
+		if ctx.Err() != nil || !probing.CompareAndSwap(false, true) {
+			return
+		}
+		defer probing.Store(false)
+		probeCtx, stopProbe := context.WithTimeout(ctx, 5*time.Second)
+		defer stopProbe()
+		if !d.client.credentialRejected(probeCtx) {
+			return
+		}
+		once.Do(func() {
+			d.logger.Warn("daemon credential rejected; stopping task claims and websocket; re-authenticate and restart", "profile", d.cfg.Profile)
+			cancel()
+		})
+	}
 }
 
 // RestartBinary returns the path to the new binary if the daemon needs to restart
@@ -4371,10 +4398,9 @@ func (d *Daemon) registerAfterDshProfileInstall(ctx context.Context) {
 //
 // The server is authoritative on the renewal threshold (it sees expires_at;
 // we don't), so this loop is intentionally dumb: call, log, sleep, repeat.
-// On 401 we surface a clear "re-login required" warning because the daemon
-// has no way to recover automatically — but we keep the loop running so the
-// user sees the same warning on every cycle until they fix it, rather than
-// silently exiting and forcing them to read scrollback to find the cause.
+// On 401 we surface a clear "re-login required" warning. The client's shared
+// credential-rejection handler cancels Run, including this loop, so a revoked
+// daemon cannot remain online through its previously authenticated WebSocket.
 func (d *Daemon) tokenRenewalLoop(ctx context.Context) {
 	ticker := time.NewTicker(DefaultTokenRenewalInterval)
 	defer ticker.Stop()

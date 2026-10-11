@@ -172,7 +172,7 @@ func (h *Handler) GetOverview(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	counts := map[string]int{}
-	result := map[string]any{"workspace_id": ws, "compact": compact, "omitted_sections": omitted, "counts": counts}
+	result := map[string]any{"bot_wake_chain": h.botWakeChainReport(r, ws), "workspace_id": ws, "compact": compact, "omitted_sections": omitted, "counts": counts}
 	for name, rows := range sections {
 		counts[name] = len(rows)
 		if compact {

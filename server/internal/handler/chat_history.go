@@ -18,6 +18,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/logger"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
+	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
 // ChatChannelHistoryReader reads a chat session's bound IM-channel history. The
@@ -118,8 +119,8 @@ func (h *Handler) chatMessageHistory(r *http.Request, scope chatHistoryScope) (c
 			ViaBotID: uuidToString(m.ViaBotID), ViaBotName: m.ViaBotName.String,
 			ID:     uuidToString(m.ID),
 			Role:   role,
-			Text:   m.Content,
-			Author: transcriptAuthor(role),
+			Text:   protocol.ChatPromptContent(m.MessageKind, m.Content),
+			Author: transcriptMessageAuthor(role, m.MessageKind),
 			TS:     m.CreatedAt.Time.UTC().Format(time.RFC3339Nano),
 			// Set on a failed run's outcome row (DENE-1839).
 			FailureReason: m.FailureReason.String,
@@ -431,4 +432,11 @@ func (h *Handler) sessionChannelType(ctx context.Context, sessionID pgtype.UUID)
 	default:
 		return "", err
 	}
+}
+
+func transcriptMessageAuthor(role channel.HistoryRole, kind string) string {
+	if kind == protocol.ChatMessageKindLinkedDelivery {
+		return "External workspace agent"
+	}
+	return transcriptAuthor(role)
 }

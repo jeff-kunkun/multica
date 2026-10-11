@@ -54,6 +54,7 @@ export const botWakeOptions = (wsId: string, botId: string) =>
     queryKey: botKeys.wake(wsId, botId),
     queryFn: () => api.getBotWake(wsId, botId),
     enabled: !!wsId && !!botId,
+    refetchInterval: 5_000,
   });
 
 const WAKE_EVENT_PAGE = 20;
@@ -91,6 +92,14 @@ export function useCreateExternalBot(wsId: string) {
   return useMutation({
     mutationFn: (data: CreateExternalBotRequest) => api.createExternalBot(wsId, data),
     onSettled: () => qc.invalidateQueries({ queryKey: botKeys.list(wsId) }),
+  });
+}
+
+// Setup text without a key, fetched on demand for the row's "copy setup text"
+// action (DENE-1804). Nothing to invalidate: it mints nothing.
+export function useExternalBotSetupText(wsId: string) {
+  return useMutation({
+    mutationFn: (botId?: string) => api.getExternalBotSetupText(wsId, botId),
   });
 }
 
