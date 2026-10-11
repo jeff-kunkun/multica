@@ -241,6 +241,32 @@ func TestBotWakeBatchContentAndReply(t *testing.T) {
 		t.Fatalf("disabled=%d %v", disabled, err)
 	}
 	t.Log("mixed source batch: done delivered; disabled started kept pending")
+	// Chat containers use the same window, preserving every source message.
+	agentID := createHandlerTestAgent(t, "BatchChatAgent", []byte("[]"))
+	chatID := createHandlerTestChatSession(t, agentID)
+	messageIDs := []string{}
+	for i := 0; i < 3; i++ {
+		text := "chat follow-up"
+		if i == 0 {
+			text = "[@Bot](mention://bot/" + uuidToString(bot.ID) + ") chat source"
+		}
+		messageIDs = append(messageIDs, dbfx.Insert(t, "chat_message", testutil.Cols{"chat_session_id": chatID, "role": "user", "sender_user_id": testUserID, "content": text}))
+	}
+	dbfx.Exec(t, `UPDATE bot_wake_event SET created_at=created_at-interval '31 seconds' WHERE bot_id=$1 AND chat_session_id=$2`, bot.ID, chatID)
+	beforeCalls := calls.Load()
+	if worked, err := worker.ProcessNext(ctx); err != nil || !worked {
+		t.Fatalf("chat batch: %v %v", worked, err)
+	}
+	if calls.Load() != beforeCalls+1 || len(body["events"].([]any)) != 3 {
+		t.Fatal("chat group split")
+	}
+	for i, rawEvent := range body["events"].([]any) {
+		event := rawEvent.(map[string]any)
+		if event["message_id"] != messageIDs[i] || event["reply_to_message_id"] != messageIDs[i] || event["content"] == nil {
+			t.Fatalf("chat source lost: %+v", event)
+		}
+	}
+	t.Log("3 messages in the same chat: 1 HTTP POST; each message body and same-chat reply location included")
 
 }
 
