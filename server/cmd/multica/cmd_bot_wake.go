@@ -26,7 +26,7 @@ never automatically replayed. Disabled, quiet and limited events remain pending.
 			cmd.Flags().Bool("config-stdin", false, "Read JSON settings from standard input")
 			cmd.Long = `Update only supplied fields. Pass JSON using exactly one of --config-file
 or --config-stdin. Never pass secret values as command arguments.
-Fields: inherit_owner_follows (boolean, default false; member issue subscriptions/assignments), wake_from {member,agent,bot}: {mode: all|none|list, ids: []}, events (array), hourly_limit (0..120), quiet_hours
+Fields: inherit_owner_follows (boolean, default false; member issue subscriptions/assignments), wake_from {member,agent,bot}: {mode: all|none|list, ids: []}, events (array: mention, started, done, blocked, needs_kun, task, chat, runtime.offline, runtime.online), hourly_limit (0..120), quiet_hours
 {enabled,start,end,timezone}, webhook_url, webhook_key.
 Write URL and key together. The key is the complete Authorization header value
 (e.g. Bearer …), as specified by the receiver. Two empty strings disconnect.

@@ -2250,6 +2250,14 @@
         "chat": {
           "label": "聊天新消息",
           "description": "它所在的聊天有新消息"
+        },
+        "runtime.offline": {
+          "label": "机器掉线",
+          "description": "我的机器持续掉线超过 3 分钟。"
+        },
+        "runtime.online": {
+          "label": "机器恢复在线",
+          "description": "我的机器在掉线告警后恢复连接。"
         }
       },
       "limits_title": "频率和静音",

@@ -2775,6 +2775,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			r.Route("/api/runtimes", func(r chi.Router) {
 				r.Use(h.RequireModule(permission.ModuleRuntimes))
 				r.Get("/", h.ListAgentRuntimes)
+				r.Get("/outages", h.ListRuntimeOutages)
 				r.Route("/{runtimeId}", func(r chi.Router) {
 					r.Patch("/", h.UpdateAgentRuntime)
 					r.Get("/usage", h.GetRuntimeUsage)

@@ -226,3 +226,20 @@ Workspace repos and project resources are not the same thing:
 Do not add a project resource just because `repo checkout` failed. First
 determine whether the user asked for durable project context or just a task
 checkout.
+
+## Machine disconnect alerts
+
+`multica runtime outages --output json` reads the owner's latest 100 machine
+outages in the selected workspace. `machine_name` identifies the physical host;
+`runtime_ids` lists its runtimes. `started_at` is the confirmed offline
+transition, `ended_at` is null until recovery, and `alerted_at` is null for a
+short restart or muted alert. `overview --output json` includes `runtime_outages`.
+
+`multica runtime alerts --output json` reads the personal setting;
+`multica runtime alerts on|off` changes inbox and owner Bot alerts together.
+A previously-online runtime must stay offline for more than three
+minutes; machine-level grouping includes affected runtimes. Brief daemon
+restarts produce no disconnect/recovery pair. Recovery of all affected runtimes
+ends the outage. Only the owner reads these records.
+Bot delivery still follows the receiver's event subscriptions, quiet hours and
+hourly limit. It does not follow issue subscriptions or sender wake rules.

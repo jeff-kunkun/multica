@@ -115,7 +115,9 @@
     "issue_stall_action": "Action de stagnation",
     "workspace_link_request": "Demande de liaison",
     "workspace_link_accepted": "Liaison acceptée",
-    "workspace_link_declined": "Liaison refusée"
+    "workspace_link_declined": "Liaison refusée",
+    "runtime_offline": "Machine hors ligne",
+    "runtime_online": "Machine en ligne"
   },
   "labels": {
     "set_status_to": "Statut défini sur",

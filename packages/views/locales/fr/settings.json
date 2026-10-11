@@ -2266,6 +2266,14 @@
         "chat": {
           "label": "Nouveau message",
           "description": "Un chat dont il fait partie a un nouveau message"
+        },
+        "runtime.offline": {
+          "label": "Machine hors ligne",
+          "description": "Ma machine est déconnectée depuis plus de 3 minutes."
+        },
+        "runtime.online": {
+          "label": "Machine en ligne",
+          "description": "Ma machine se reconnecte après une alerte de déconnexion."
         }
       },
       "limits_title": "Fréquence et silence",

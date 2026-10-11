@@ -35,6 +35,8 @@ const PRIORITY_LABEL: Record<IssuePriority, string> = {
 
 // Mirrors useTypeLabels in packages/views/inbox/components/inbox-detail-label.tsx
 const TYPE_KEY: Record<InboxItemType, string> = {
+  "runtime.offline": "type.runtime_offline",
+  "runtime.online": "type.runtime_online",
   needs_you: "type.needs_you",
   ask_answered: "type.ask_answered",
   issue_assigned: "type.assigned",

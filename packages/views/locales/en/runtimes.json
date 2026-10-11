@@ -512,5 +512,11 @@
     "table_cache_r": "Cache R",
     "table_cache_w": "Cache W",
     "no_data": "No usage data yet"
+  },
+  "alerts": {
+    "label": "Machine disconnect alerts",
+    "description": "Notify me and my Bots when my machines disconnect for over 3 minutes or recover.",
+    "retry": "Loading failed. Retry",
+    "save_failed": "Could not save. Try again."
   }
 }

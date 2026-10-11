@@ -758,6 +758,11 @@ func main() {
 	// work, so there is no separate queue TTL to tune: a busy runtime keeps its
 	// backlog, and a departed one retires everything it owned at once.
 	go runRuntimeSweeper(sweepCtx, queries, liveness, taskSvc, bus, runtimeReconnectGrace, chatRuntimeReconnectGrace)
+	go runPeriodicSweep(sweepCtx, sweepInterval, func() {
+		if err := h.SweepRuntimeAlerts(sweepCtx, time.Now()); err != nil {
+			slog.Warn("runtime alert sweep failed", "error", err)
+		}
+	})
 	if telemetryWorker != nil {
 		go telemetryWorker.Run(sweepCtx)
 	}

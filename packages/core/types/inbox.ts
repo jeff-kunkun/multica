@@ -49,7 +49,9 @@ export type InboxItemType =
   // receipts go back to the offering workspace's.
   | "workspace_link_request"
   | "workspace_link_accepted"
-  | "workspace_link_declined";
+  | "workspace_link_declined"
+  | "runtime.offline"
+  | "runtime.online";
 
 /**
  * One workspace's unread inbox count in the cross-workspace summary

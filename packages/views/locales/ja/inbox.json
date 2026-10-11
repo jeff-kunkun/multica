@@ -112,7 +112,9 @@
     "issue_stall_action": "停滞処理",
     "workspace_link_request": "連携リクエスト",
     "workspace_link_accepted": "連携が承認されました",
-    "workspace_link_declined": "連携が拒否されました"
+    "workspace_link_declined": "連携が拒否されました",
+    "runtime_offline": "マシンがオフライン",
+    "runtime_online": "マシンがオンライン"
   },
   "labels": {
     "set_status_to": "ステータスを変更:",

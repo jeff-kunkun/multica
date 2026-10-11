@@ -61,3 +61,17 @@ must be verified separately from saving the skill source.
 Report who, the issue/chat, the action, its result/evidence and the next step.
 For execution delivery distinguish delivered, wake acknowledged, and result received;
 an unverified stage is unknown, never a reason to automatically resend.
+
+## Machine health in the capability map
+
+- `runtime outages --output json`: own machines, runtime ids, disconnect start,
+  recovery end and alert time; also `overview --output json` → `runtime_outages`.
+- `runtime alerts [on|off] --output json`: read/change the owner's inbox and
+  Bot disconnect alerts. This does not change runtime bindings.
+- Bot wake `events` accepts `runtime.offline` and `runtime.online`. These are
+  owner-scoped system events; they bypass sender/follow rules, while quiet hours
+  and hourly limits still apply. The ordinary webhook contains `runtime_outage`
+  (machine_name, machine_key, runtime_ids, started_at, ended_at, alerted_at).
+  Handle both event types as Telegram notices to the owner, deduplicate on
+  `event_id`, then use the ordinary receipt endpoint. Do not start an agent or
+  invent an issue/chat id: those fields are empty for machine events.

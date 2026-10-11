@@ -112,30 +112,41 @@ func (w *BotWakeWorker) ProcessNext(ctx context.Context) (bool, error) {
 		return pending("access unavailable")
 	}
 	rules := wakeResponse(c)
-	// Unknown trigger attribution cannot safely be treated as a human owner.
-	if e.AuthorType == "system" || !e.AuthorID.Valid {
-		return pending("source attribution unavailable")
-	}
-	if e.AuthorType == "bot" && e.AuthorID == e.BotID {
-		return pending("self wake suppressed")
-	}
-	if e.InheritedOwner {
-		if !rules.InheritOwnerFollows {
-			return pending("owner inheritance disabled")
-		}
-		follows, err := q.BotOwnerFollowsIssue(ctx, db.BotOwnerFollowsIssueParams{ID: e.IssueID, AssigneeID: bot.UserID})
+	runtimeEvent := e.RuntimeOutageID.Valid && (e.EventType == "runtime.offline" || e.EventType == "runtime.online")
+	if runtimeEvent {
+		enabled, err := runtimeAlertsEnabled(ctx, q, e.WorkspaceID, bot.UserID)
 		if err != nil {
 			return true, err
 		}
-		if !follows.Bool {
-			return pending("owner no longer follows source")
+		if !enabled {
+			return pending("runtime alerts muted")
 		}
 	}
-	rule, known := rules.WakeFrom[e.AuthorType]
-	if !known || rule.Mode == "none" || (rule.Mode == "list" && !slices.Contains(rule.IDs, uuidToString(e.AuthorID))) {
-		return pending("sender not allowed")
+	if !runtimeEvent {
+		// Unknown trigger attribution cannot safely be treated as a human owner.
+		if e.AuthorType == "system" || !e.AuthorID.Valid {
+			return pending("source attribution unavailable")
+		}
+		if e.AuthorType == "bot" && e.AuthorID == e.BotID {
+			return pending("self wake suppressed")
+		}
+		if e.InheritedOwner {
+			if !rules.InheritOwnerFollows {
+				return pending("owner inheritance disabled")
+			}
+			follows, err := q.BotOwnerFollowsIssue(ctx, db.BotOwnerFollowsIssueParams{ID: e.IssueID, AssigneeID: bot.UserID})
+			if err != nil {
+				return true, err
+			}
+			if !follows.Bool {
+				return pending("owner no longer follows source")
+			}
+		}
+		rule, known := rules.WakeFrom[e.AuthorType]
+		if !known || rule.Mode == "none" || (rule.Mode == "list" && !slices.Contains(rule.IDs, uuidToString(e.AuthorID))) {
+			return pending("sender not allowed")
+		}
 	}
-
 	if !slices.Contains(rules.Events, e.EventType) {
 		return pending("event disabled")
 	}
@@ -184,8 +195,10 @@ func (w *BotWakeWorker) ProcessNext(ctx context.Context) (bool, error) {
 		}
 		e.Hop = hop
 	}
-	if err = q.RememberBotWakeCause(ctx, db.RememberBotWakeCauseParams{BotID: e.BotID, RootID: e.RootID, Hop: e.Hop}); err != nil {
-		return true, err
+	if !runtimeEvent {
+		if err = q.RememberBotWakeCause(ctx, db.RememberBotWakeCauseParams{BotID: e.BotID, RootID: e.RootID, Hop: e.Hop}); err != nil {
+			return true, err
+		}
 	}
 	payload, err = w.h.botWakePayload(ctx, e)
 	if err != nil {
@@ -269,7 +282,20 @@ func (h *Handler) botWakePayload(ctx context.Context, e db.BotWakeEvent) ([]byte
 	}
 	attachments := []map[string]any{}
 	var files []db.Attachment
-	if e.IssueID.Valid {
+	var runtimeDetails any
+	if e.RuntimeOutageID.Valid {
+		o, getErr := h.Queries.GetRuntimeOutage(ctx, e.RuntimeOutageID)
+		if getErr != nil {
+			return nil, getErr
+		}
+		runtimeDetails = runtimeOutageResponse(o)
+		summary = o.MachineName + " 已掉线（持续超过 3 分钟）"
+		if e.EventType == "runtime.online" {
+			summary = o.MachineName + " 已恢复在线"
+		}
+		link = "/api/runtimes/outages"
+		webPath = "/" + url.PathEscape(ws.Slug) + "/runtimes"
+	} else if e.IssueID.Valid {
 		issue, getErr := h.Queries.GetIssue(ctx, e.IssueID)
 		if getErr != nil {
 			return nil, getErr
@@ -304,7 +330,7 @@ func (h *Handler) botWakePayload(ctx context.Context, e db.BotWakeEvent) ([]byte
 		}
 		attachments = append(attachments, map[string]any{"url": base + "/api/attachments/" + uuidToString(a.ID) + "/download", "size_bytes": a.SizeBytes, "sha256": a.Sha256.String})
 	}
-	return json.Marshal(map[string]any{"event_id": uuidToString(e.EventID), "sequence": e.Sequence, "source_id": uuidToString(e.SourceID), "parent_id": wakeParentID(e), "ack_url": base + "/api/workspaces/" + uuidToString(e.WorkspaceID) + "/bots/" + uuidToString(e.BotID) + "/wake/events/" + uuidToString(e.EventID), "root_id": uuidToString(e.RootID), "hop": e.Hop, "source_task_id": uuidToString(e.SourceTaskID), "web_url": base + webPath, "type": e.EventType, "issue_id": uuidToString(e.IssueID), "chat_session_id": uuidToString(e.ChatSessionID), "author": h.wakeAuthor(ctx, e), "time": e.CreatedAt.Time, "summary": summary, "url": base + link, "attachments": attachments})
+	return json.Marshal(map[string]any{"event_id": uuidToString(e.EventID), "sequence": e.Sequence, "source_id": uuidToString(e.SourceID), "parent_id": wakeParentID(e), "ack_url": base + "/api/workspaces/" + uuidToString(e.WorkspaceID) + "/bots/" + uuidToString(e.BotID) + "/wake/events/" + uuidToString(e.EventID), "root_id": uuidToString(e.RootID), "hop": e.Hop, "source_task_id": uuidToString(e.SourceTaskID), "web_url": base + webPath, "type": e.EventType, "issue_id": uuidToString(e.IssueID), "chat_session_id": uuidToString(e.ChatSessionID), "author": h.wakeAuthor(ctx, e), "time": e.CreatedAt.Time, "summary": summary, "url": base + link, "attachments": attachments, "runtime_outage": runtimeDetails})
 }
 
 func wakeParentID(e db.BotWakeEvent) string {

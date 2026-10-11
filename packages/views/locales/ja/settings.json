@@ -2250,6 +2250,14 @@
         "chat": {
           "label": "チャットの新着",
           "description": "参加中のチャットに新しいメッセージ"
+        },
+        "runtime.offline": {
+          "label": "マシンがオフライン",
+          "description": "自分のマシンが3分以上切断されています。"
+        },
+        "runtime.online": {
+          "label": "マシンがオンライン",
+          "description": "切断アラート後に自分のマシンが再接続しました。"
         }
       },
       "limits_title": "頻度と静音",

@@ -8,6 +8,7 @@
 - [跨工作区连通使用显式出口，不复用访客](adr/0004-workspace-link.md)
 - [Web/Desktop 移动适配先抽共享外壳再修页面](adr/0005-mobile-web-shell.md)
 - [证据索引](evidence/INDEX.md)
+- [运行时掉线告警与高时效任务的机器选择](kun/runtime-availability.md)
 - [Bot 写入来源与推送集成契约](../server/docs/bot-write-provenance.md)
 - [工作区全景命令与筛选范围](../server/internal/service/builtin_skills/multica-platform/references/overview.md)
 

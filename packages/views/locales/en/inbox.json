@@ -115,7 +115,9 @@
     "issue_stall_action": "Stall action",
     "workspace_link_request": "Link request",
     "workspace_link_accepted": "Link accepted",
-    "workspace_link_declined": "Link declined"
+    "workspace_link_declined": "Link declined",
+    "runtime_offline": "Machine offline",
+    "runtime_online": "Machine online"
   },
   "labels": {
     "set_status_to": "Set status to",

@@ -21,6 +21,8 @@ export const BOT_WAKE_EVENT_TYPES: readonly BotWakeEventType[] = [
   "needs_kun",
   "task",
   "chat",
+  "runtime.offline",
+  "runtime.online",
 ];
 
 /** Server limit for one acknowledgement call. */
