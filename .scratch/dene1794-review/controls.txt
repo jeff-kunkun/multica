@@ -1,4 +1,0 @@
-Core existing tests: 2 files, 67 tests passed, exit 0.
-Views: 2 files, 14 tests passed, exit 0.
-Temporary Bot realtime expectation: 1 failed, exit 1.
-Backend selective suite: exit 0; Redis-dependent 3 subcases skipped.

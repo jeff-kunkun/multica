@@ -1,7 +1,0 @@
-38b3e1deb0aeaa840866fc1e105c4b9100f66e2e
-100644 d81f30f54325ef6dd3c4c5254a48db9a5747a191 1	server/cmd/multica/cmd_chat.go
-100644 9b8b459371b1add0334490b6d37a6de739a294ef 2	server/cmd/multica/cmd_chat.go
-100644 83f0d0ea25c6046b5d92fb271608961557fd4653 3	server/cmd/multica/cmd_chat.go
-
-Auto-merging server/cmd/multica/cmd_chat.go
-CONFLICT (content): Merge conflict in server/cmd/multica/cmd_chat.go
