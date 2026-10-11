@@ -2053,6 +2053,36 @@ describe("project auto-grouping (DENE-1775)", () => {
       acme().tabs.map((tab) => [tab.id, tab.groupId, tab.projectId, tab.openedAt]),
     );
   });
+
+  // A project title longer than the stored cap must still compare equal to
+  // the stored name, or every sync rewrites the strip and the tab bar's
+  // effect feeds itself.
+  it("settles after a long project rename, also after a restart", () => {
+    const store = useTabStore.getState();
+    store.switchWorkspace("acme");
+    const id = store.addTab("/acme/projects/p1", "Project");
+    store.syncTabProjects("acme", { [id]: "p1" }, { p1: "Short" });
+    const long = `  ${"a".repeat(81)}`;
+    store.syncTabProjects("acme", { [id]: "p1" }, { p1: long });
+    const settled = acme();
+    expect(settled.groups[0].name).toBe("a".repeat(80));
+
+    store.syncTabProjects("acme", { [id]: "p1" }, { p1: long });
+    expect(acme()).toBe(settled);
+
+    const partial = useTabStore.persist.getOptions().partialize!(
+      useTabStore.getState(),
+    );
+    const restored = mergePersistedTabs(JSON.parse(JSON.stringify(partial)), {
+      activeWorkspaceSlug: null,
+      byWorkspace: {} as Record<string, WorkspaceTabGroup>,
+      tabGroupMode: "project" as const,
+    });
+    useTabStore.setState(restored);
+    const afterRestart = acme();
+    store.syncTabProjects("acme", { [id]: "p1" }, { p1: long });
+    expect(acme()).toBe(afterRestart);
+  });
 });
 
 describe("migrateV6ToV7", () => {
