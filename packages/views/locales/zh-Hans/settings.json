@@ -2269,7 +2269,7 @@
       "log_recent": "最近推送",
       "log_pending": "待看",
       "log_description": "「已收到」只说明对方地址回了 200，不代表 Bot 已开工或做完。",
-      "log_pending_description": "因限频、静音或没配地址而没推出去的事件。只读；改规则不会补推这些事件。",
+      "log_pending_description": "没送到 Bot 的事件：被规则拦下的（暂停、静音、限额、没配地址）、发送失败的、结果不确定的。只读，看过不会消失；改规则也不会补推。",
       "log_failed": "推送记录没加载出来。",
       "empty_recent": "还没有推送过。",
       "empty_pending": "没有待看的事件。",

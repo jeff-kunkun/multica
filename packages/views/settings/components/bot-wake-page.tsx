@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useState, type CSSProperties, type ReactNode } from "react";
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { ApiError } from "@multica/core/api";
@@ -53,6 +53,19 @@ const sameRules = (a: Rules, b: Rules) =>
   a.events.length === b.events.length &&
   a.events.every((e) => b.events.includes(e)) &&
   JSON.stringify(a.quiet_hours) === JSON.stringify(b.quiet_hours);
+
+// The key is a bot's credential, not the person's. A password-type field makes
+// password managers offer to save (or overwrite!) the site login with it, and
+// they ignore opt-out attributes on submit — so mask a text field instead.
+const MASKED = { WebkitTextSecurity: "disc" } as CSSProperties;
+// Phone-width touch targets stay 44px; desktop keeps the compact settings density.
+const TAP = "h-11 sm:h-8";
+const NOT_A_LOGIN = {
+  "data-1p-ignore": true,
+  "data-bwignore": true,
+  "data-lpignore": "true",
+  "data-form-type": "other",
+} as const;
 
 const errorStatus = (e: unknown) => (e instanceof ApiError ? e.status : 0);
 
@@ -176,6 +189,7 @@ function WebhookSection({ bot, settings }: { bot: ExternalBot; settings: BotWake
     >
       <SettingsCard>
         <form
+          {...NOT_A_LOGIN}
           onSubmit={(e) => {
             e.preventDefault();
             save();
@@ -188,6 +202,8 @@ function WebhookSection({ bot, settings }: { bot: ExternalBot; settings: BotWake
               inputMode="url"
               autoComplete="off"
               spellCheck={false}
+              {...NOT_A_LOGIN}
+              className={TAP}
               aria-label={t(($) => $.bots.wake.url)}
               value={url}
               onChange={(e) => setUrl(e.target.value)}
@@ -205,9 +221,13 @@ function WebhookSection({ bot, settings }: { bot: ExternalBot; settings: BotWake
           >
             <Input
               id="bot-webhook-key"
-              type="password"
-              autoComplete="new-password"
+              type="text"
+              autoComplete="off"
+              autoCapitalize="off"
               spellCheck={false}
+              {...NOT_A_LOGIN}
+              style={MASKED}
+              className={TAP}
               aria-label={t(($) => $.bots.wake.key)}
               value={key}
               onChange={(e) => setKey(e.target.value)}
@@ -223,14 +243,14 @@ function WebhookSection({ bot, settings }: { bot: ExternalBot; settings: BotWake
               <Button
                 type="button"
                 variant="ghost"
-                className="text-destructive hover:text-destructive"
+                className={cn("text-destructive hover:text-destructive", TAP)}
                 disabled={update.isPending}
                 onClick={() => setConfirmDisconnect(true)}
               >
                 {t(($) => $.bots.wake.disconnect)}
               </Button>
             ) : null}
-            <Button type="submit" disabled={!canSave}>
+            <Button type="submit" className={TAP} disabled={!canSave}>
               {update.isPending
                 ? t(($) => $.bots.wake.saving)
                 : configured
@@ -374,7 +394,7 @@ function RulesSection({ bot, settings }: { bot: ExternalBot; settings: BotWakeSe
                 aria-invalid={!limitValid || undefined}
                 value={limitText}
                 onChange={(e) => setLimitText(e.target.value.trim())}
-                className="w-20"
+                className={cn("w-20", TAP)}
               />
               <span className="text-caption text-muted-foreground">
                 {t(($) => $.bots.wake.per_hour)}
@@ -385,11 +405,13 @@ function RulesSection({ bot, settings }: { bot: ExternalBot; settings: BotWakeSe
             label={t(($) => $.bots.wake.quiet)}
             description={t(($) => $.bots.wake.quiet_hint)}
           >
-            <Switch
-              aria-label={t(($) => $.bots.wake.quiet)}
-              checked={draft.quiet_hours.enabled}
-              onCheckedChange={(v) => setQuiet({ enabled: v })}
-            />
+            <label className="-mx-2 flex min-h-11 cursor-pointer items-center px-2 sm:min-h-0">
+              <Switch
+                aria-label={t(($) => $.bots.wake.quiet)}
+                checked={draft.quiet_hours.enabled}
+                onCheckedChange={(v) => setQuiet({ enabled: v })}
+              />
+            </label>
           </SettingsRow>
           {draft.quiet_hours.enabled ? (
             <SettingsRow label={t(($) => $.bots.wake.quiet_window)} size="text">
@@ -397,12 +419,14 @@ function RulesSection({ bot, settings }: { bot: ExternalBot; settings: BotWakeSe
                 <TimeInput
                   value={draft.quiet_hours.start}
                   onChange={(v) => setQuiet({ start: v })}
+                  className={TAP}
                   hourLabel={t(($) => $.bots.wake.quiet_start)}
                 />
                 <span className="text-caption text-muted-foreground">–</span>
                 <TimeInput
                   value={draft.quiet_hours.end}
                   onChange={(v) => setQuiet({ end: v })}
+                  className={TAP}
                   hourLabel={t(($) => $.bots.wake.quiet_end)}
                 />
               </div>
@@ -418,6 +442,7 @@ function RulesSection({ bot, settings }: { bot: ExternalBot; settings: BotWakeSe
                 id="bot-wake-timezone"
                 autoComplete="off"
                 spellCheck={false}
+                className={TAP}
                 aria-label={t(($) => $.bots.wake.timezone)}
                 value={draft.quiet_hours.timezone}
                 onChange={(e) => setQuiet({ timezone: e.target.value.trim() })}
@@ -426,12 +451,13 @@ function RulesSection({ bot, settings }: { bot: ExternalBot; settings: BotWakeSe
           ) : null}
           <div className="flex flex-wrap items-center justify-end gap-2 border-t border-surface-border px-4 py-3">
             {dirty ? (
-              <Button type="button" variant="ghost" onClick={reset} disabled={update.isPending}>
+              <Button type="button" variant="ghost" className={TAP} onClick={reset} disabled={update.isPending}>
                 {t(($) => $.bots.wake.reset)}
               </Button>
             ) : null}
             <Button
               type="button"
+              className={TAP}
               onClick={save}
               disabled={!dirty || !limitValid || update.isPending}
             >
@@ -490,6 +516,7 @@ function DeliveryLog({ bot }: { bot: ExternalBot }) {
             <Button
               size="sm"
               variant="ghost"
+              className={TAP}
               disabled={log.isFetchingNextPage}
               onClick={() => void log.fetchNextPage()}
             >
@@ -546,11 +573,11 @@ function EventRow({ event }: { event: BotWakeEvent }) {
     minute: "2-digit",
   });
   const source = event.issue_id ? (
-    <AppLink href={paths.issueDetail(event.issue_id)} className="underline-offset-2 hover:text-foreground hover:underline">
+    <AppLink href={paths.issueDetail(event.issue_id)} className="inline-flex min-h-11 items-center underline-offset-2 hover:text-foreground hover:underline sm:min-h-0">
       {t(($) => $.bots.wake.source_issue)}
     </AppLink>
   ) : event.chat_session_id ? (
-    <AppLink href={paths.chatSession(event.chat_session_id)} className="underline-offset-2 hover:text-foreground hover:underline">
+    <AppLink href={paths.chatSession(event.chat_session_id)} className="inline-flex min-h-11 items-center underline-offset-2 hover:text-foreground hover:underline sm:min-h-0">
       {t(($) => $.bots.wake.source_chat)}
     </AppLink>
   ) : null;

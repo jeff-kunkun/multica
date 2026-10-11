@@ -306,7 +306,7 @@ export function BotsTab() {
                 <div className="flex items-center gap-1">
                 <AppLink
                   href={href(bot.id)}
-                  className={buttonVariants({ variant: "outline", size: "sm", className: "h-11 sm:h-8" })}
+                  className={cn(buttonVariants({ variant: "outline", size: "sm" }), "h-11 sm:h-8")}
                 >
                   {t(($) => $.bots.wake.open)}
                 </AppLink>

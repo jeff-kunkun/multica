@@ -2285,7 +2285,7 @@
       "log_recent": "Recent",
       "log_pending": "Pending",
       "log_description": "\"Received\" only means the endpoint answered 200. It doesn't mean the bot started or finished anything.",
-      "log_pending_description": "Events held back by the rate limit, quiet hours, or a missing endpoint. Read-only; changing rules doesn't resend them.",
+      "log_pending_description": "Events that didn't reach the bot: held back by rules (paused, quiet hours, rate limit, no endpoint), failed, or uncertain. Read-only and never cleared by viewing; changing rules doesn't resend them.",
       "log_failed": "Couldn't load the delivery log.",
       "empty_recent": "Nothing pushed yet.",
       "empty_pending": "Nothing pending.",

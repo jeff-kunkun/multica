@@ -2285,7 +2285,7 @@
       "log_recent": "Récents",
       "log_pending": "En attente",
       "log_description": "« Reçu » signifie seulement que le point de réception a répondu 200, pas que le bot a commencé ou terminé quoi que ce soit.",
-      "log_pending_description": "Événements retenus par la limite, les heures de silence ou l'absence de point de réception. Lecture seule ; changer les règles ne les renvoie pas.",
+      "log_pending_description": "Événements qui n'ont pas atteint le bot : retenus par les règles (pause, heures de silence, limite, aucun point de réception), en échec ou incertains. Lecture seule, jamais effacés à la consultation ; changer les règles ne les renvoie pas.",
       "log_failed": "Impossible de charger l'historique d'envoi.",
       "empty_recent": "Aucun envoi pour l'instant.",
       "empty_pending": "Rien en attente.",
