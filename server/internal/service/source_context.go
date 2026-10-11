@@ -170,6 +170,7 @@ type SourceContextBuild struct {
 }
 
 type SourceContextClone struct {
+	SHA256      pgtype.Text
 	ID          pgtype.UUID
 	Filename    string
 	URL         string
@@ -626,7 +627,7 @@ func PersistSourceContext(ctx context.Context, q *db.Queries, capture SourceCont
 		if _, err := q.CreateSourceContextAttachment(ctx, db.CreateSourceContextAttachmentParams{
 			ID: clone.ID, WorkspaceID: capture.WorkspaceID, SourceContextID: capture.ID,
 			UploaderType: "member", UploaderID: capture.CapturedByUserID,
-			Filename: clone.Filename, Url: clone.URL, ContentType: clone.ContentType, SizeBytes: clone.SizeBytes,
+			Filename: clone.Filename, Url: clone.URL, ContentType: clone.ContentType, SizeBytes: clone.SizeBytes, Sha256: clone.SHA256,
 		}); err != nil {
 			return db.IssueSourceContext{}, err
 		}

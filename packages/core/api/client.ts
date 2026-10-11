@@ -98,6 +98,11 @@ import type {
   ExternalBot,
   CreateExternalBotRequest,
   ExternalBotKeyResponse,
+  BotWakeSettings,
+  UpdateBotWakeRequest,
+  BotWakeEventPage,
+  BotMentionTarget,
+  BotMentionSource,
   RuntimeUsage,
   IssueUsageSummary,
   IssueGoal,
@@ -4815,6 +4820,62 @@ export class ApiClient {
 
   async deleteExternalBot(workspaceId: string, botId: string): Promise<void> {
     await this.fetch(`/api/workspaces/${workspaceId}/bots/${botId}`, { method: "DELETE" });
+  }
+
+  // Bot wake (DENE-1792): owner/admin or the bot's own key.
+  async getBotWake(workspaceId: string, botId: string): Promise<BotWakeSettings> {
+    return this.fetch(`/api/workspaces/${workspaceId}/bots/${botId}/wake`);
+  }
+
+  async updateBotWake(
+    workspaceId: string,
+    botId: string,
+    data: UpdateBotWakeRequest,
+  ): Promise<BotWakeSettings> {
+    return this.fetch(`/api/workspaces/${workspaceId}/bots/${botId}/wake`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async listBotWakeEvents(
+    workspaceId: string,
+    botId: string,
+    params: { pending?: boolean; before?: string; limit?: number } = {},
+  ): Promise<BotWakeEventPage> {
+    const search = new URLSearchParams();
+    if (params.limit) search.set("limit", String(params.limit));
+    if (params.before) search.set("before", params.before);
+    const qs = search.toString();
+    const path = params.pending ? "pending" : "events";
+    return this.fetch(
+      `/api/workspaces/${workspaceId}/bots/${botId}/wake/${path}${qs ? `?${qs}` : ""}`,
+    );
+  }
+
+  // All-or-none; acknowledging only clears the pending list, nothing is resent.
+  async ackBotWakePending(
+    workspaceId: string,
+    botId: string,
+    eventIds: string[],
+  ): Promise<{ acknowledged: number }> {
+    return this.fetch(`/api/workspaces/${workspaceId}/bots/${botId}/wake/pending/ack`, {
+      method: "POST",
+      body: JSON.stringify({ event_ids: eventIds }),
+    });
+  }
+
+  // Any member: bots that may be @-mentioned, narrowed to those able to read
+  // the source when one is given.
+  async listBotMentionDirectory(
+    workspaceId: string,
+    source: BotMentionSource = {},
+  ): Promise<BotMentionTarget[]> {
+    const search = new URLSearchParams();
+    if (source.issue_id) search.set("issue_id", source.issue_id);
+    else if (source.chat_session_id) search.set("chat_session_id", source.chat_session_id);
+    const qs = search.toString();
+    return this.fetch(`/api/workspaces/${workspaceId}/bots/mentions${qs ? `?${qs}` : ""}`);
   }
 
   // File Upload & Attachments

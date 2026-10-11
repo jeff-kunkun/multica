@@ -774,6 +774,9 @@ func main() {
 	if h.WebhookDeliveryWorker != nil {
 		go h.WebhookDeliveryWorker.Run(sweepCtx)
 	}
+	if h.BotWakeWorker != nil {
+		go h.BotWakeWorker.Run(sweepCtx)
+	}
 	if h.SeatCapacityWorker != nil {
 		go h.SeatCapacityWorker.Run(sweepCtx)
 	}
@@ -935,6 +938,9 @@ func main() {
 		CancelWorkers:     sweepCancel,
 		StopHeartbeats:    heartbeatScheduler.Stop,
 		JoinWebhookWorker: func() {
+			if h.BotWakeWorker != nil && !h.BotWakeWorker.WaitWithTimeout(5*time.Second) {
+				slog.Warn("bot wake worker did not exit within shutdown timeout")
+			}
 			if h.WebhookDeliveryWorker != nil && !h.WebhookDeliveryWorker.WaitWithTimeout(5*time.Second) {
 				slog.Warn("webhook delivery worker did not exit within shutdown timeout")
 			}

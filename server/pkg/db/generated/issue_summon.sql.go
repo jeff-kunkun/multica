@@ -15,7 +15,7 @@ const answerIssueSummons = `-- name: AnswerIssueSummons :many
 UPDATE issue_summon
 SET answered_at = now(), answer_comment_id = $3
 WHERE issue_id = $1 AND recipient_id = $2 AND answered_at IS NULL
-RETURNING id, workspace_id, issue_id, recipient_id, caller_type, caller_id, source, reason, comment_id, inbox_item_id, created_at, answered_at, answer_comment_id, reminded_at
+RETURNING id, workspace_id, issue_id, recipient_id, caller_type, caller_id, source, reason, comment_id, inbox_item_id, created_at, answered_at, answer_comment_id, reminded_at, via_bot_id, via_bot_name, source_task_id
 `
 
 type AnswerIssueSummonsParams struct {
@@ -49,6 +49,9 @@ func (q *Queries) AnswerIssueSummons(ctx context.Context, arg AnswerIssueSummons
 			&i.AnsweredAt,
 			&i.AnswerCommentID,
 			&i.RemindedAt,
+			&i.ViaBotID,
+			&i.ViaBotName,
+			&i.SourceTaskID,
 		); err != nil {
 			return nil, err
 		}
@@ -64,7 +67,7 @@ const claimIssueSummonReminder = `-- name: ClaimIssueSummonReminder :one
 UPDATE issue_summon
 SET reminded_at = now()
 WHERE answer_comment_id = $1 AND reminded_at IS NULL
-RETURNING id, workspace_id, issue_id, recipient_id, caller_type, caller_id, source, reason, comment_id, inbox_item_id, created_at, answered_at, answer_comment_id, reminded_at
+RETURNING id, workspace_id, issue_id, recipient_id, caller_type, caller_id, source, reason, comment_id, inbox_item_id, created_at, answered_at, answer_comment_id, reminded_at, via_bot_id, via_bot_name, source_task_id
 `
 
 // One reminder per answered call: the run the answer woke ended with the
@@ -87,6 +90,9 @@ func (q *Queries) ClaimIssueSummonReminder(ctx context.Context, answerCommentID 
 		&i.AnsweredAt,
 		&i.AnswerCommentID,
 		&i.RemindedAt,
+		&i.ViaBotID,
+		&i.ViaBotName,
+		&i.SourceTaskID,
 	)
 	return i, err
 }
@@ -96,7 +102,7 @@ UPDATE issue_summon
 SET answered_at = now()
 WHERE issue_id = $1 AND answered_at IS NULL
   AND ($2::uuid IS NULL OR recipient_id = $2::uuid)
-RETURNING id, workspace_id, issue_id, recipient_id, caller_type, caller_id, source, reason, comment_id, inbox_item_id, created_at, answered_at, answer_comment_id, reminded_at
+RETURNING id, workspace_id, issue_id, recipient_id, caller_type, caller_id, source, reason, comment_id, inbox_item_id, created_at, answered_at, answer_comment_id, reminded_at, via_bot_id, via_bot_name, source_task_id
 `
 
 type CloseOpenIssueSummonsParams struct {
@@ -132,6 +138,9 @@ func (q *Queries) CloseOpenIssueSummons(ctx context.Context, arg CloseOpenIssueS
 			&i.AnsweredAt,
 			&i.AnswerCommentID,
 			&i.RemindedAt,
+			&i.ViaBotID,
+			&i.ViaBotName,
+			&i.SourceTaskID,
 		); err != nil {
 			return nil, err
 		}
@@ -145,23 +154,26 @@ func (q *Queries) CloseOpenIssueSummons(ctx context.Context, arg CloseOpenIssueS
 
 const createIssueSummon = `-- name: CreateIssueSummon :one
 INSERT INTO issue_summon (
-    workspace_id, issue_id, recipient_id, caller_type, caller_id, source, reason, comment_id
+    workspace_id, issue_id, recipient_id, caller_type, caller_id, source, reason, comment_id,via_bot_id,via_bot_name,source_task_id
 ) VALUES (
-    $1, $2, $3, $4, $7, $5, $6, $8
+    $1, $2, $3, $4, $7, $5, $6, $8,$9,$10,$11
 )
 ON CONFLICT (issue_id, recipient_id) WHERE answered_at IS NULL DO NOTHING
-RETURNING id, workspace_id, issue_id, recipient_id, caller_type, caller_id, source, reason, comment_id, inbox_item_id, created_at, answered_at, answer_comment_id, reminded_at
+RETURNING id, workspace_id, issue_id, recipient_id, caller_type, caller_id, source, reason, comment_id, inbox_item_id, created_at, answered_at, answer_comment_id, reminded_at, via_bot_id, via_bot_name, source_task_id
 `
 
 type CreateIssueSummonParams struct {
-	WorkspaceID pgtype.UUID `json:"workspace_id"`
-	IssueID     pgtype.UUID `json:"issue_id"`
-	RecipientID pgtype.UUID `json:"recipient_id"`
-	CallerType  string      `json:"caller_type"`
-	Source      string      `json:"source"`
-	Reason      string      `json:"reason"`
-	CallerID    pgtype.UUID `json:"caller_id"`
-	CommentID   pgtype.UUID `json:"comment_id"`
+	WorkspaceID  pgtype.UUID `json:"workspace_id"`
+	IssueID      pgtype.UUID `json:"issue_id"`
+	RecipientID  pgtype.UUID `json:"recipient_id"`
+	CallerType   string      `json:"caller_type"`
+	Source       string      `json:"source"`
+	Reason       string      `json:"reason"`
+	CallerID     pgtype.UUID `json:"caller_id"`
+	CommentID    pgtype.UUID `json:"comment_id"`
+	ViaBotID     pgtype.UUID `json:"via_bot_id"`
+	ViaBotName   pgtype.Text `json:"via_bot_name"`
+	SourceTaskID pgtype.UUID `json:"source_task_id"`
 }
 
 // ON CONFLICT against the open-row unique index is the dedupe: a second call
@@ -177,6 +189,9 @@ func (q *Queries) CreateIssueSummon(ctx context.Context, arg CreateIssueSummonPa
 		arg.Reason,
 		arg.CallerID,
 		arg.CommentID,
+		arg.ViaBotID,
+		arg.ViaBotName,
+		arg.SourceTaskID,
 	)
 	var i IssueSummon
 	err := row.Scan(
@@ -194,6 +209,9 @@ func (q *Queries) CreateIssueSummon(ctx context.Context, arg CreateIssueSummonPa
 		&i.AnsweredAt,
 		&i.AnswerCommentID,
 		&i.RemindedAt,
+		&i.ViaBotID,
+		&i.ViaBotName,
+		&i.SourceTaskID,
 	)
 	return i, err
 }
@@ -205,7 +223,7 @@ WITH dismissed AS (
     WHERE issue_summon.issue_id = $1
       AND issue_summon.recipient_id = $2
       AND issue_summon.answered_at IS NULL
-    RETURNING id, workspace_id, issue_id, recipient_id, caller_type, caller_id, source, reason, comment_id, inbox_item_id, created_at, answered_at, answer_comment_id, reminded_at
+    RETURNING id, workspace_id, issue_id, recipient_id, caller_type, caller_id, source, reason, comment_id, inbox_item_id, created_at, answered_at, answer_comment_id, reminded_at, via_bot_id, via_bot_name, source_task_id
 ), archived AS (
     UPDATE inbox_item i
     SET archived = true
@@ -216,7 +234,7 @@ WITH dismissed AS (
       AND i.recipient_id = d.recipient_id
       AND i.archived = false
 )
-SELECT dismissed.id, dismissed.workspace_id, dismissed.issue_id, dismissed.recipient_id, dismissed.caller_type, dismissed.caller_id, dismissed.source, dismissed.reason, dismissed.comment_id, dismissed.inbox_item_id, dismissed.created_at, dismissed.answered_at, dismissed.answer_comment_id, dismissed.reminded_at FROM dismissed
+SELECT dismissed.id, dismissed.workspace_id, dismissed.issue_id, dismissed.recipient_id, dismissed.caller_type, dismissed.caller_id, dismissed.source, dismissed.reason, dismissed.comment_id, dismissed.inbox_item_id, dismissed.created_at, dismissed.answered_at, dismissed.answer_comment_id, dismissed.reminded_at, dismissed.via_bot_id, dismissed.via_bot_name, dismissed.source_task_id FROM dismissed
 `
 
 type DismissOpenIssueSummonForRecipientParams struct {
@@ -239,6 +257,9 @@ type DismissOpenIssueSummonForRecipientRow struct {
 	AnsweredAt      pgtype.Timestamptz `json:"answered_at"`
 	AnswerCommentID pgtype.UUID        `json:"answer_comment_id"`
 	RemindedAt      pgtype.Timestamptz `json:"reminded_at"`
+	ViaBotID        pgtype.UUID        `json:"via_bot_id"`
+	ViaBotName      pgtype.Text        `json:"via_bot_name"`
+	SourceTaskID    pgtype.UUID        `json:"source_task_id"`
 }
 
 // An agent may clear one stale "waiting on you" reminder only for the human
@@ -263,12 +284,15 @@ func (q *Queries) DismissOpenIssueSummonForRecipient(ctx context.Context, arg Di
 		&i.AnsweredAt,
 		&i.AnswerCommentID,
 		&i.RemindedAt,
+		&i.ViaBotID,
+		&i.ViaBotName,
+		&i.SourceTaskID,
 	)
 	return i, err
 }
 
 const getOpenIssueSummon = `-- name: GetOpenIssueSummon :one
-SELECT id, workspace_id, issue_id, recipient_id, caller_type, caller_id, source, reason, comment_id, inbox_item_id, created_at, answered_at, answer_comment_id, reminded_at FROM issue_summon
+SELECT id, workspace_id, issue_id, recipient_id, caller_type, caller_id, source, reason, comment_id, inbox_item_id, created_at, answered_at, answer_comment_id, reminded_at, via_bot_id, via_bot_name, source_task_id FROM issue_summon
 WHERE issue_id = $1 AND recipient_id = $2 AND answered_at IS NULL
 `
 
@@ -295,6 +319,9 @@ func (q *Queries) GetOpenIssueSummon(ctx context.Context, arg GetOpenIssueSummon
 		&i.AnsweredAt,
 		&i.AnswerCommentID,
 		&i.RemindedAt,
+		&i.ViaBotID,
+		&i.ViaBotName,
+		&i.SourceTaskID,
 	)
 	return i, err
 }

@@ -14,6 +14,7 @@ func (r CreateAttachmentRow) Attachment() Attachment {
 		Url:           r.Url,
 		ContentType:   r.ContentType,
 		SizeBytes:     r.SizeBytes,
+		Sha256:        r.Sha256,
 		CreatedAt:     r.CreatedAt,
 		ChatSessionID: r.ChatSessionID,
 		ChatMessageID: r.ChatMessageID,

@@ -1,8 +1,15 @@
 export {
+  BOT_WAKE_EVENT_TYPES,
+  BOT_WAKE_ACK_MAX,
   botKeys,
   externalBotListOptions,
+  botWakeOptions,
+  botWakeEventsOptions,
+  botMentionDirectoryOptions,
   useCreateExternalBot,
   useRotateExternalBotKey,
   useStopExternalBot,
   useDeleteExternalBot,
+  useUpdateBotWake,
+  useAckBotWakePending,
 } from "./queries";

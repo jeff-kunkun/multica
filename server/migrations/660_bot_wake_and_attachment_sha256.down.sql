@@ -1,0 +1,12 @@
+DROP TRIGGER IF EXISTS bot_wake_summon ON issue_summon;
+DROP TRIGGER IF EXISTS bot_wake_issue ON issue;
+DROP TRIGGER IF EXISTS bot_wake_chat ON chat_message;
+DROP TRIGGER IF EXISTS bot_wake_comment ON comment;
+DROP FUNCTION IF EXISTS bot_wake_capture();
+DROP TABLE IF EXISTS bot_wake_attempt;
+DROP TABLE IF EXISTS bot_wake_event;
+DROP TABLE IF EXISTS bot_wake_watch;
+DROP TRIGGER IF EXISTS bot_wake_initialize ON personal_access_token;
+DROP FUNCTION IF EXISTS bot_wake_initialize();
+DROP TABLE IF EXISTS bot_wake;
+ALTER TABLE attachment DROP COLUMN IF EXISTS sha256;

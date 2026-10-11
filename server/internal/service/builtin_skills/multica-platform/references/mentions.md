@@ -6,7 +6,7 @@ that and do not re-derive it here.
 
 - [A mention link is built from a real UUID](#a-mention-link-is-built-from-a-real-uuid)
 - [Step 1 — look up the UUID](#step-1--look-up-the-uuid)
-- [Step 2 — the four types and what each enqueues](#step-2--the-four-types-and-what-each-enqueues)
+- [Step 2 — the five types and what each enqueues](#step-2--the-four-types-and-what-each-enqueues)
 - [Preview and per-comment suppression](#preview-and-per-comment-suppression)
 - [@all is the broadcast type](#all-is-the-broadcast-type)
 - [What does NOT happen](#what-does-not-happen)
@@ -19,11 +19,11 @@ The backend recognizes a mention only through this Markdown shape:
 
     [@Label](mention://<type>/<id>)
 
-The parser accepts exactly four `<type>` values plus the `all` sentinel, and the
+The parser accepts five `<type>` values plus the `all` sentinel, and the
 `<id>` group accepts only hex characters and dashes, OR the literal string
 `all`:
 
-    (member|agent|squad|issue|all)/([0-9a-fA-F-]+|all)
+    (member|agent|bot|squad|issue|all)/([0-9a-fA-F-]+|all)
 
 So the link target is a real entity UUID (or `all`), never a display name. The
 label between the brackets is free text — that is where the human-readable name
@@ -35,7 +35,7 @@ above, so the backend never parses it and it can enqueue nothing — it is a
 render-only link every client makes navigable (a chip on web and desktop, an
 ordinary link that opens the project on tap on mobile). That is the whole point:
 a project reference should never be able to start a run. Use it freely to point
-at a project; everything else in this document is about the four types (plus
+at a project; everything else in this document is about the five types (plus
 `all`) the parser does recognize.
 
 ## Step 1 — look up the UUID
@@ -53,13 +53,14 @@ backend's own roster formatter uses `user_id` for member mentions. Match by
 display name. If the name is ambiguous or absent, do not guess — say so in your
 comment instead of emitting a broken link.
 
-## Step 2 — the four types and what each enqueues
+## Step 2 — the five types and what each enqueues
 
 Format: `[@Name](mention://<type>/<uuid>)`. The `<type>` and the id source must
 match, or the link resolves to the wrong entity (or to nothing).
 
 | To…                  | type     | uuid from       | What the backend does                                    |
 | -------------------- | -------- | --------------- | -------------------------------------------------------- |
+| wake an external Bot | `bot` | bot.id | records a webhook event subject to recipient rules and visibility |
 | trigger an agent     | `agent`  | agent.id        | enqueues a run for that agent                            |
 | hand work to a squad | `squad`  | squad.id        | resolves the squad's `leader_id` and enqueues a run for the LEADER agent |
 | link a person        | `member` | member.user_id  | renders a link; enqueues NOTHING — no agent run          |
@@ -270,3 +271,63 @@ runs no specific agent, and suppresses the assignee auto-trigger.
 
 Using the wrong `type` for a real UUID still parses — it just resolves to the
 wrong entity, or to nothing. That is why the type must match the id source.
+
+## External Bot wake receipts (DENE-1792)
+
+`[@Name](mention://bot/<bot-id>)` addresses that exact PAT-backed external Bot.
+It does not dispatch an internal agent. Resolve identities with the member-visible
+`GET /api/workspaces/{id}/bots/mentions` directory (optionally `issue_id` or
+`chat_session_id`); administrators can also use `multica bot list --output json`.
+Mentioning a Bot grants no access. The Bot's PAT owner must already see the
+source. A mention starts following subsequent lifecycle events on that issue or
+messages in that chat. Owner member issue subscriptions/assignments are inherited
+only when `inherit_owner_follows` is explicitly enabled (default false).
+
+- `multica bot wake get <bot-id>` reads receiver rules; no URL or key is returned.
+- `multica bot wake set <bot-id> --config-file ./wake.json` or `--config-stdin`
+  updates only supplied fields. Secrets never go in arguments, comments or logs.
+  Fields: `webhook_url`, `webhook_key` (write these together), `events` (array),
+  `inherit_owner_follows` (boolean, default false), `hourly_limit`, `quiet_hours: {enabled,start,end,timezone}`. The key is the
+  complete Authorization header value supplied by the receiver, including any
+  scheme. Empty URL and key disconnect. Do not guess the receiver's scheme.
+- `multica bot wake events <bot-id> --limit 50 --before <next_cursor>` reads
+  receipts. `pending` uses the same pagination for pending/failed/uncertain rows.
+  Follow nonempty `next_cursor` even when a page has no visible events.
+
+Defaults: all seven event types, 6 attempts/hour and 23:00–08:00 Asia/Shanghai
+quiet hours. `events: []` disables pushes; `hourly_limit: 0` pauses all pushes.
+Quiet, disabled, limited and unavailable events remain pending. Changing settings
+does not replay them. `received` means HTTP 200 only, never started or completed.
+An interrupted or timed-out send is `uncertain` and is not retried automatically.
+Only definite pre-send failures, HTTP 429 and HTTP 503 retry (5s, 10s, 3 attempts
+total); other errors remain visible for inspection.
+
+`multica attachment upload <path> --issue <id>` works with Bot PATs and
+supplies sha256 automatically (no comment is posted). Without `--issue`,
+upload still targets the current agent chat task. Download verifies
+size and sha256 before publishing a file; rejected bytes leave no file. Old
+attachments acquire a checksum from authenticated server storage on metadata
+read. A server that cannot supply a checksum is refused; do not bypass it.
+
+### Bot execution receipts and review acknowledgements
+
+`multica bot mentions [--issue UUID|--chat UUID]` lists source-visible Bot targets.
+`multica bot wake woken BOT EVENT` records start receipt. `multica bot wake result
+BOT EVENT --result-url URL` records a result pointing to the event's canonical
+issue/chat API URL. Both are idempotent and separate from HTTP receipt.
+`multica bot wake ack BOT EVENT...` acknowledges 1..100 pending review events in
+one transaction; it does not claim execution or replay the webhook.
+
+For incremental review use `wake pending`, follow every `next_cursor` through
+`--before`, including empty filtered pages, acknowledge only processed events,
+then start again without a cursor. Never use creation sequence as a high-water
+mark: older queued events may fail later, and sequence is not commit order.
+Settings accept `wake_from` with member/agent/bot rules `{mode:all|none|list,ids:[]}`.
+See `server/docs/bot-wake-contract.md` for the trusted-source deployment gate.
+
+The server attaches source_id/parent_id, web_url, root_id/hop and ack_url to wake
+payloads; url remains the authenticated source API URL. Do not infer execution
+from type=task. Bot and agent automatic wakes share a durable four-admission root
+budget; a missing/client-reset hop cannot bypass it. At the cap read pending or
+the cancelled run error. Do not repeatedly rerun a capped chain. Bot tombstones
+retain history but are absent from the mention directory.

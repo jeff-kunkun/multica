@@ -145,6 +145,7 @@ func SummonWith(ctx context.Context, q *db.Queries, in SummonInput) (SummonResul
 	}
 
 	row, err := q.CreateIssueSummon(ctx, db.CreateIssueSummonParams{
+		ViaBotID: botsource.FromContext(ctx).ID, ViaBotName: pgtype.Text{String: botsource.FromContext(ctx).Name, Valid: botsource.FromContext(ctx).ID.Valid}, SourceTaskID: botsource.TaskFromContext(ctx),
 		WorkspaceID: in.Issue.WorkspaceID,
 		IssueID:     in.Issue.ID,
 		RecipientID: in.Recipient,

@@ -649,7 +649,7 @@ func (h *Handler) cloneSourceContext(ctx context.Context, workspaceID, userID, c
 			return service.SourceContextCapture{}, nil, closeErr
 		}
 		keys = append(keys, cloneKey)
-		clones = append(clones, service.SourceContextClone{ID: cloneID, Filename: source.Filename, URL: url, ContentType: source.ContentType, SizeBytes: source.SizeBytes})
+		clones = append(clones, service.SourceContextClone{ID: cloneID, Filename: source.Filename, URL: url, ContentType: source.ContentType, SizeBytes: source.SizeBytes, SHA256: source.Sha256})
 	}
 	capture, err := service.PrepareSourceContextCapture(build, contextID, workspaceID, userID, time.Now(), clones)
 	if err != nil {

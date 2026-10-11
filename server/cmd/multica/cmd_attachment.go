@@ -2,9 +2,11 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -34,7 +36,7 @@ var attachmentDownloadCmd = &cobra.Command{
 
 var attachmentUploadCmd = &cobra.Command{
 	Use:   "upload <path>",
-	Short: "Upload a file to attach to your chat reply",
+	Short: "Upload a checksummed file to an issue or your chat reply",
 	Long: `Upload a local file so it is attached to the reply of the current chat task.
 
 Intended for agents running inside a chat task: the file is tagged with the
@@ -45,7 +47,8 @@ own line to place the item: files use !file[name](url) (a card), images use
 ![name](url) (inline).
 
 The task id is read from MULTICA_TASK_ID (set by the daemon inside a task);
-override it with --task when needed.
+override it with --task when needed. Outside a chat task (including external
+Bots), use --issue <id> to upload to an authorized issue. No comment is posted.
 
 Inside a daemon task the uploaded file also stays on this machine: the daemon
 keeps a copy under <profile>/outputs/<attachment-id>/ so the desktop app here
@@ -64,6 +67,7 @@ func init() {
 
 	attachmentDownloadCmd.Flags().StringP("output-dir", "o", ".", "Directory to save the downloaded file")
 	attachmentUploadCmd.Flags().String("task", "", "Chat task id to attach to (defaults to MULTICA_TASK_ID)")
+	attachmentUploadCmd.Flags().String("issue", "", "Issue ID or identifier; works with Bot PATs, mutually exclusive with --task")
 }
 
 func runAttachmentUpload(cmd *cobra.Command, args []string) error {
@@ -72,12 +76,16 @@ func runAttachmentUpload(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	issueInput, _ := cmd.Flags().GetString("issue")
 	taskID, _ := cmd.Flags().GetString("task")
+	if issueInput != "" && taskID != "" {
+		return fmt.Errorf("--issue and --task are mutually exclusive")
+	}
 	if taskID == "" {
 		taskID = client.TaskID
 	}
-	if taskID == "" {
-		return fmt.Errorf("no chat task in context: run inside a chat task (MULTICA_TASK_ID set) or pass --task <id>")
+	if taskID == "" && issueInput == "" {
+		return fmt.Errorf("no chat task in context: run inside a chat task (MULTICA_TASK_ID set) or pass --task <id> / --issue <id>")
 	}
 
 	path := args[0]
@@ -96,7 +104,16 @@ func runAttachmentUpload(cmd *cobra.Command, args []string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), cli.AtLeastAPITimeout(10*time.Minute))
 	defer cancel()
 
-	att, err := client.UploadChatAttachment(ctx, data, path, taskID)
+	var att cli.AttachmentResponse
+	if issueInput != "" {
+		ref, resolveErr := resolveIssueRef(ctx, client, issueInput)
+		if resolveErr != nil {
+			return resolveErr
+		}
+		att, err = client.UploadIssueAttachment(ctx, data, path, ref.ID)
+	} else {
+		att, err = client.UploadChatAttachment(ctx, data, path, taskID)
+	}
 	if err != nil {
 		return fmt.Errorf("upload attachment: %w", err)
 	}
@@ -110,6 +127,8 @@ func runAttachmentUpload(cmd *cobra.Command, args []string) error {
 		"filename":     filename,
 		"markdown_url": att.MarkdownURL,
 		"markdown":     markdown,
+		"sha256":       att.SHA256,
+		"size_bytes":   att.SizeBytes,
 	})
 }
 
@@ -173,6 +192,20 @@ func runAttachmentDownload(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("download file: %w", err)
 	}
 
+	// Validate before writing any destination bytes; a corrupt response never
+	// replaces an existing good file. No unverified temporary file is retained.
+	expected := strVal(att, "sha256")
+	if expected == "" {
+		return fmt.Errorf("attachment has no sha256; server must provide a verified checksum")
+	}
+	if fmt.Sprintf("%x", sha256.Sum256(data)) != expected {
+		return fmt.Errorf("attachment sha256 mismatch; downloaded bytes discarded")
+	}
+	size, parseErr := strconv.ParseInt(fmt.Sprint(att["size_bytes"]), 10, 64)
+	if parseErr != nil || size != int64(len(data)) {
+		return fmt.Errorf("attachment size mismatch; downloaded bytes discarded")
+	}
+
 	// Write to the output directory, creating it if needed so `-o` works
 	// against a directory that does not exist yet (the help example's
 	// `-o ./attachments` in a clean workdir).
@@ -184,8 +217,20 @@ func runAttachmentDownload(cmd *cobra.Command, args []string) error {
 	}
 	destPath := filepath.Join(outputDir, filename)
 
-	if err := os.WriteFile(destPath, data, 0o644); err != nil {
+	file, err := os.CreateTemp(outputDir, ".multica-download-*")
+	if err != nil {
 		return fmt.Errorf("write file: %w", err)
+	}
+	defer os.Remove(file.Name())
+	if _, err = file.Write(data); err != nil {
+		file.Close()
+		return fmt.Errorf("write file: %w", err)
+	}
+	if err = file.Close(); err != nil {
+		return fmt.Errorf("close file: %w", err)
+	}
+	if err = os.Rename(file.Name(), destPath); err != nil {
+		return fmt.Errorf("save file: %w", err)
 	}
 
 	// Print the absolute path so agents can reference the file.
@@ -200,6 +245,7 @@ func runAttachmentDownload(cmd *cobra.Command, args []string) error {
 		"id":       strVal(att, "id"),
 		"filename": filename,
 		"path":     abs,
-		"size":     strVal(att, "size_bytes"),
+		"size":     att["size_bytes"],
+		"sha256":   expected,
 	})
 }

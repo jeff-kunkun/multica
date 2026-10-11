@@ -709,6 +709,112 @@ export interface ExternalBotKeyResponse {
   setup_text: string;
 }
 
+// Bot wake (DENE-1792/1793): which Multica events POST to the bot's own
+// webhook. The URL and key are write-only — reads only say whether one is set.
+export type BotWakeEventType =
+  | "mention"
+  | "started"
+  | "done"
+  | "blocked"
+  | "needs_kun"
+  | "task"
+  | "chat";
+
+export interface BotQuietHours {
+  enabled: boolean;
+  /** HH:MM; equal start and end means all day. */
+  start: string;
+  end: string;
+  /** IANA zone, e.g. Asia/Shanghai. */
+  timezone: string;
+}
+
+/** Who may wake the Bot, per sender kind. `ids` (UUIDs, at most 100) only
+ *  with `list`. */
+export interface BotWakeFromRule {
+  mode: "all" | "none" | "list";
+  ids: string[];
+}
+
+export type BotWakeSenderKind = "member" | "agent" | "bot";
+
+export type BotWakeFrom = Record<BotWakeSenderKind, BotWakeFromRule>;
+
+export interface BotWakeSettings {
+  webhook_configured: boolean;
+  wake_from: BotWakeFrom;
+  /** Also wake on issues the owner currently follows or is assigned. Off by
+   *  default; never widens chats or mentions addressed to other bots. */
+  inherit_owner_follows: boolean;
+  /** Empty disables every event. */
+  events: BotWakeEventType[];
+  /** 0..120; 0 pauses delivery. */
+  hourly_limit: number;
+  quiet_hours: BotQuietHours;
+}
+
+/** PUT patches supplied fields. `webhook_url` and `webhook_key` go together;
+ *  two empty strings disconnect. Never send `webhook_configured`. */
+export interface UpdateBotWakeRequest {
+  /** Replaces the whole map; all three kinds are required. */
+  wake_from?: BotWakeFrom;
+  inherit_owner_follows?: boolean;
+  events?: BotWakeEventType[];
+  hourly_limit?: number;
+  quiet_hours?: BotQuietHours;
+  webhook_url?: string;
+  webhook_key?: string;
+}
+
+export type BotWakeEventStatus =
+  | "queued"
+  | "sending"
+  | "received"
+  | "failed"
+  | "uncertain"
+  | "pending";
+
+export interface BotWakeEvent {
+  event_id: string;
+  sequence: number;
+  type: BotWakeEventType;
+  /** Empty string when the event is not about an issue. */
+  issue_id: string;
+  chat_session_id: string;
+  status: BotWakeEventStatus;
+  reason: string;
+  attempts: number;
+  created_at: string;
+  sent_at: string | null;
+  received_at: string | null;
+  /** Bot's own "started" receipt; never inferred from received or result. */
+  woken_at: string | null;
+  /** May arrive before `woken_at`. */
+  result_at: string | null;
+  result_url: string | null;
+  /** Reviewed in the pending list; does not mean the Bot ran it. */
+  acknowledged_at: string | null;
+}
+
+/** A filtered page can be empty and still carry a cursor; empty cursor = end. */
+export interface BotWakeEventPage {
+  events: BotWakeEvent[];
+  next_cursor: string;
+}
+
+/** Member-visible @ directory entry; identity only. */
+export interface BotMentionTarget {
+  id: string;
+  name: string;
+  type: "bot";
+  bot_type: ExternalBotType;
+}
+
+export interface BotMentionSource {
+  issue_id?: string;
+  chat_session_id?: string;
+}
+
 // Pagination
 export interface PaginationParams {
   limit?: number;

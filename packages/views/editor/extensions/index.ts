@@ -20,6 +20,7 @@
  * not Tailwind HTMLAttributes, to keep a single source of truth.
  */
 import type { AgentScene } from "@multica/core/agents";
+import type { BotMentionSource } from "@multica/core/types";
 import type { RefObject } from "react";
 import StarterKit from "@tiptap/starter-kit";
 import CodeBlockLowlight from "@tiptap/extension-code-block-lowlight";
@@ -172,6 +173,8 @@ export interface EditorExtensionsOptions {
   mentionMode?: "default" | "context";
   getMentionContextItems?: () => MentionItem[];
   getAgentScene?: () => AgentScene | null;
+  /** Issue or chat the text is written into; scopes the bot @ directory. */
+  getMentionSource?: () => BotMentionSource;
   /** When true, attach the `/` picker. Default false. */
   enableSlashCommands?: boolean;
   /**
@@ -271,7 +274,7 @@ export function createEditorExtensions(
       ...(options.disableMentions
         ? { suggestion: { allow: () => false } }
         : options.queryClient
-          ? { suggestion: createMentionSuggestion(options.queryClient, { mode: options.mentionMode, getContextItems: options.getMentionContextItems, getAgentScene: options.getAgentScene }) }
+          ? { suggestion: createMentionSuggestion(options.queryClient, { mode: options.mentionMode, getContextItems: options.getMentionContextItems, getAgentScene: options.getAgentScene, getMentionSource: options.getMentionSource }) }
           : {}),
     }),
     // Linear-style bare identifier → issue mention. Attached only when a

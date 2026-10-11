@@ -1,7 +1,9 @@
 package main
 
 import (
+	"crypto/sha256"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -29,7 +31,8 @@ func TestRunAttachmentDownloadWritesBasenameIntoOutputDir(t *testing.T) {
 				"id":           attachmentID,
 				"filename":     "../report.txt",
 				"download_url": "/downloads/report.txt",
-				"size_bytes":   "15",
+				"size_bytes":   15,
+				"sha256":       fmt.Sprintf("%x", sha256.Sum256([]byte(fileBody))),
 			})
 		case r.Method == http.MethodGet && r.URL.Path == "/downloads/report.txt":
 			if r.Header.Get("Authorization") == "" {
@@ -91,7 +94,8 @@ func TestRunAttachmentDownloadCreatesMissingOutputDir(t *testing.T) {
 				"id":           attachmentID,
 				"filename":     "shot.png",
 				"download_url": "/downloads/shot.png",
-				"size_bytes":   "15",
+				"size_bytes":   15,
+				"sha256":       fmt.Sprintf("%x", sha256.Sum256([]byte(fileBody))),
 			})
 		case r.Method == http.MethodGet && r.URL.Path == "/downloads/shot.png":
 			_, _ = w.Write([]byte(fileBody))
@@ -315,5 +319,83 @@ func TestRunAttachmentDownloadRequiresDownloadURL(t *testing.T) {
 	cmd := newAttachmentDownloadTestCmd()
 	if err := runAttachmentDownload(cmd, []string{"att-no-url"}); err == nil || !strings.Contains(err.Error(), "no download URL") {
 		t.Fatalf("runAttachmentDownload error = %v, want missing download URL", err)
+	}
+}
+
+func TestAttachmentDownloadRejectsCorruption(t *testing.T) {
+	good := []byte("intact")
+	digest := fmt.Sprintf("%x", sha256.Sum256(good))
+	for _, scenario := range []string{"digest", "size", "legacy"} {
+		t.Run(scenario, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == "/api/attachments/fixture" {
+					sha := digest
+					size := len(good)
+					if scenario == "size" {
+						size++
+					}
+					if scenario == "legacy" {
+						sha = ""
+					}
+					json.NewEncoder(w).Encode(map[string]any{"id": "fixture", "filename": "sample.txt", "download_url": "/bytes", "size_bytes": size, "sha256": sha})
+					return
+				}
+				if scenario == "digest" {
+					w.Write([]byte("broken"))
+				} else {
+					w.Write(good)
+				}
+			}))
+			defer srv.Close()
+			setCLITestServerEnv(t, srv.URL)
+			t.Setenv("MULTICA_TOKEN", "mat_test-token")
+			dir := t.TempDir()
+			cmd := newAttachmentDownloadTestCmd()
+			cmd.Flags().Set("output-dir", dir)
+			err := runAttachmentDownload(cmd, []string{"fixture"})
+			if err == nil {
+				t.Fatal("corrupt/unverified file accepted")
+			}
+			entries, _ := os.ReadDir(dir)
+			if len(entries) != 0 {
+				t.Fatal("rejected bytes left on disk")
+			}
+			t.Logf("%s: %v; output directory empty", scenario, err)
+		})
+	}
+}
+
+func TestRunAttachmentUploadToIssue(t *testing.T) {
+	const issueID = "11111111-1111-4111-8111-111111111111"
+	var got bool
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "GET" {
+			json.NewEncoder(w).Encode(map[string]any{"id": issueID, "identifier": "TEST-1"})
+			return
+		}
+		if r.URL.Path != "/api/upload-file" {
+			t.Error("unexpected path")
+		}
+		r.ParseMultipartForm(1 << 20)
+		if r.FormValue("issue_id") != issueID || r.FormValue("task_id") != "" {
+			t.Error("wrong upload binding")
+		}
+		digest := fmt.Sprintf("%x", sha256.Sum256([]byte("sample")))
+		if r.FormValue("sha256") != digest {
+			t.Error("checksum missing")
+		}
+		got = true
+		json.NewEncoder(w).Encode(map[string]any{"id": "att", "url": "/sample", "sha256": digest, "size_bytes": 6})
+	}))
+	defer srv.Close()
+	setCLITestServerEnv(t, srv.URL)
+	t.Setenv("MULTICA_TOKEN", "mat_test-token")
+	path := filepath.Join(t.TempDir(), "sample.txt")
+	os.WriteFile(path, []byte("sample"), 0600)
+	cmd := newAttachmentUploadTestCmd()
+	cmd.Flags().String("issue", issueID, "")
+	_, err := captureStdout(t, func() error { return runAttachmentUpload(cmd, []string{path}) })
+	if err != nil || !got {
+		t.Fatalf("issue upload %v", err)
 	}
 }
