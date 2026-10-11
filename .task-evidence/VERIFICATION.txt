@@ -43,3 +43,8 @@ exit: 2
 Stored probe read-back matches; sh -c persisted command: exit 2
 stdout: PENDING: no reply in parent handoff thread
 stderr: 
+
+DAEMON PROBE FAILURE FOLLOWUP
+Observed daemon CLI exit 3; stderr absent from traceback. Previous local exit 2 did not verify daemon environment.
+Removed block.wait_probe, block.wait_condition, block.wait_timeout through CLI (all exit 0); close blocked --wake-at 2026-10-12T18:05:00Z exit 0.
+Readback: probe absent; wake_at 2026-10-12T18:05:00Z. No credential or identity changes.
