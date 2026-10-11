@@ -18,7 +18,7 @@ import { AppLink } from "../../navigation";
 import { useT, useTimeAgo } from "../../i18n";
 import { CHAT_COLUMN, CHAT_GUTTER } from "./chat-column";
 import { useStatusLabel } from "../../issues/utils/status-label";
-import { useChatTicketSourceLabel } from "./chat-ticket-card";
+import { useChatTicketSourceLabel, useChatTicketWorkLabel } from "./chat-ticket-card";
 import { ChatTicketPinDialog } from "./chat-ticket-pin-dialog";
 
 // DENE-1667: the chat's progress bar over the tickets this chat opened or
@@ -211,6 +211,7 @@ function ReportPanel({
 }) {
   const { t } = useT("chat");
   const sourceLabel = useChatTicketSourceLabel();
+  const workLabel = useChatTicketWorkLabel(wsId);
   const unpin = useSetChatTicket();
   // Taking a ticket off the chat leaves the issue as it is.
   const remove = (row: ReportRow) =>
@@ -232,6 +233,7 @@ function ReportPanel({
           const where = row.from_status
             ? `${statusLabel(row.from_status)} → ${statusLabel(row.status)}`
             : statusLabel(row.status);
+          const work = row.phase === "done" ? "" : workLabel(row);
           return (
             <li key={row.id} className="group/row flex items-center hover:bg-accent/60">
               <AppLink
@@ -245,7 +247,8 @@ function ReportPanel({
                 <span className="line-clamp-2 text-caption text-muted-foreground">
                   {row.fresh && <span className="text-foreground">{t(($) => $.report.just_changed)}</span>}
                   {row.fresh && "："}
-                  {sourceLabel(row.source)} · {where} · {timeAgo(row.changed_at)}
+                  {sourceLabel(row.source)} · {where}
+                  {work && ` · ${work}`} · {timeAgo(row.changed_at)}
                   {row.needs_you && ` · ${t(($) => $.report.needs_you)}`}
                 </span>
               </AppLink>
