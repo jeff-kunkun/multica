@@ -1,10 +1,14 @@
 package handler
 
 import (
+	"context"
+	"errors"
 	"log/slog"
 	"net/http"
 	"strings"
 
+	"github.com/jackc/pgx/v5"
+	"github.com/multica-ai/multica/server/internal/auth"
 	"github.com/multica-ai/multica/server/internal/daemonws"
 	"github.com/multica-ai/multica/server/internal/middleware"
 )
@@ -41,6 +45,19 @@ func (h *Handler) buildDaemonWebSocketIdentity(w http.ResponseWriter, r *http.Re
 		RuntimeLeases: make(map[string]*daemonws.RuntimeLease, len(runtimeIDs)),
 		ClientVersion: r.Header.Get("X-Client-Version"),
 		Capabilities:  r.Header.Get("X-Client-Capabilities"),
+	}
+	// The HTTP middleware runs only at upgrade. Its cached user/runtime
+	// identity must not authorize heartbeats and claims forever after a PAT
+	// is revoked, deleted, rotated or expires. Retain only the hash, not the key.
+	if token := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer "); strings.HasPrefix(token, "mul_") {
+		hash := auth.HashToken(token)
+		identity.Revalidate = func(ctx context.Context) error {
+			_, err := h.Queries.GetPersonalAccessTokenByHash(ctx, hash)
+			if errors.Is(err, pgx.ErrNoRows) {
+				return daemonws.ErrAuthExpired
+			}
+			return err
+		}
 	}
 	if len(runtimeIDs) == 0 {
 		return identity, true
