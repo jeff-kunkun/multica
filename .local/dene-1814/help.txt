@@ -1,0 +1,32 @@
+Read a chat's saved linked_projects, including unavailable entries. With --available,
+list projects you can attach. With --reference LINK_ID:PROJECT_ID, replace the entire
+selection; repeat the flag to keep multiple projects. Omit a pair to detach it, or
+use --clear to detach all. Defaults to MULTICA_CHAT_SESSION_ID when no ID is given.
+
+These projects are read-only references, not working projects or code sources.
+Disconnecting or unsharing stops injection in the next run, not an ongoing run.
+JSON entries include link_id, project_id, title, source_name, available and
+unavailable_reason. The server does not disclose which access check failed.
+Use --available to discover real IDs before changing a selection.
+
+USAGE
+  multica chat linked-projects [session-id] [flags]
+
+FLAGS
+      --available           List source projects currently available to attach (no chat required)
+      --clear               Detach all reference projects
+  -h, --help                help for linked-projects
+      --output string       Output format: json or table (default "json")
+      --reference strings   Replace selection with LINK_ID:PROJECT_ID pairs (repeatable)
+
+INHERITED FLAGS
+  --help   Show help for command
+
+EXAMPLES
+  multica chat linked-projects --available --output json
+  multica chat linked-projects --output json
+  multica chat linked-projects "$MULTICA_CHAT_SESSION_ID" --reference "$LINK_ID:$PROJECT_ID"
+  multica chat linked-projects "$MULTICA_CHAT_SESSION_ID" --clear
+
+LEARN MORE
+  Use `multica <command> <subcommand> --help` for more information about a command.
