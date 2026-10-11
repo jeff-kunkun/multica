@@ -119,6 +119,7 @@
     "open_converted_issue": "Open issue"
   },
   "queue": {
+    "hidden_messages": "{{count}} more messages queued",
     "title_one": "{{count}} queued message",
     "title_other": "{{count}} queued messages",
     "clear": "Clear all",
@@ -144,6 +145,7 @@
       "timeout": "The agent took too long and stopped before finishing. Try again, or break your request into smaller steps.",
       "codex_semantic_inactivity": "The agent went idle and stopped before finishing. Please try again.",
       "runtime_offline": "The agent is offline right now, so it couldn't reply. Please try again once it's back online.",
+      "pickup_timeout": "Nobody picked up this urgent message within 30 seconds. The platform does not resend it: send it to another agent, or configure a standby runtime for this agent and send again.",
       "runtime_access_denied": "This agent can't run on its private runtime, so it couldn't reply. Make the runtime public, or rebind/copy the agent to a runtime its owner can use.",
       "runtime_recovery": "The agent restarted before it could finish. Please try again.",
       "manual": "This reply was cancelled.",
@@ -300,6 +302,8 @@
     "action": "Bind runtime"
   },
   "offline_banner": {
+    "last_seen": "Runtime offline, last seen {{time}}",
+    "last_seen_unknown": "Runtime offline, last seen unknown",
     "fallback_name": "the agent",
     "unstable": "{{name}}'s connection is unstable — replies may be delayed.",
     "offline": "{{name}} is offline — your message will be delivered when they're back."

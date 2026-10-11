@@ -58,6 +58,8 @@
     "needs_runtime": "Needs runtime"
   },
   "banners": {
+    "last_seen": "Runtime offline, last seen {{time}}",
+    "last_seen_unknown": "Runtime offline, last seen unknown",
     "no_agent": "No agents available",
     "runtime_required": "This agent needs a runtime before it can run.",
     "offline": "{{name}} is offline. Messages will wait until its runtime is back.",
@@ -129,6 +131,7 @@
     "default": "Run failed",
     "queued_expired": "Expired in queue",
     "runtime_offline": "Daemon offline",
+    "pickup_timeout": "Urgent message not picked up in time",
     "runtime_reconnect_timeout": "Daemon did not reconnect in time",
     "runtime_recovery": "Daemon restarted",
     "timeout": "Run timed out",
@@ -179,6 +182,7 @@
   "session_lineage.reason_session_lost": "session couldn't be restored",
   "session_lineage.reason_fresh_requested": "started fresh on request",
   "queue": {
+    "hidden_messages": "{{count}} more messages queued",
     "steer": "Interrupt and restart",
     "steer_unavailable": "Available after the current reply starts",
     "steer_no_permission": "You no longer have permission to run this agent",

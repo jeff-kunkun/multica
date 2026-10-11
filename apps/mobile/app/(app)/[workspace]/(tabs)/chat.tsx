@@ -659,6 +659,7 @@ export default function ChatTab() {
           <OfflineBanner
             agentName={currentAgent?.name}
             availability={presenceAvailability}
+            lastSeenAt={presenceDetail === "loading" ? undefined : presenceDetail.runtimeLastSeenAt}
           />
         ) : currentAgent ? (
           <RuntimeRequiredBanner agentName={currentAgent.name} />

@@ -437,6 +437,14 @@ started — `first_run`, `agent_changed`, `runtime_changed`, `session_lost`
 `multica chat history --output json` carries the same three fields on chat
 messages. Rows older than this field omit all three.
 
+`multica chat history --session <id> --output json` also returns
+`hidden_queued_count`: the session-wide number of user messages waiting behind
+the current turn and omitted from the transcript. Add it to the visible rows
+when comparing with `message_count`; older cursor pages are a separate gap.
+A nonzero count means the inputs are queued, not missing. The current-session
+history fallback reports the same field; context-generation reads already
+include their queued rows and report zero.
+
 `waiting_local_directory` is the `in_place` path-mutex wait. Tasks on a
 `shared` or `worktree` `local_directory` do not take that mutex, so they do
 not enter this status for the directory lock. If several tasks on an umbrella

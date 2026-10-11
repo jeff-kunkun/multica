@@ -73,6 +73,14 @@ const (
 	// task went offline. Written by FailTasksForOfflineRuntimes.
 	ReasonRuntimeOffline Reason = "runtime_offline"
 
+	// ReasonPickupTimeout: an urgent chat turn (DENE-1844) had not started
+	// (queued, dispatched or waiting_local_directory) when its pickup deadline
+	// passed — no daemon started it in time. Written by
+	// FailTasksPastPickupDeadline and by the start transaction that refuses an
+	// expired claim (DENE-1884). Non-retryable: the sender was told in the chat
+	// and decides whether to resend or switch agents.
+	ReasonPickupTimeout Reason = "pickup_timeout"
+
 	// ReasonRuntimeReconnectTimeout: a retry waiting for an offline runtime
 	// remained deferred for the full reconnect grace. Non-retryable: the
 	// runtime must return before a user starts another attempt. Written by
@@ -300,6 +308,7 @@ var allReasons = []Reason{
 	// Platform / scheduler side.
 	ReasonQueuedExpired,
 	ReasonRuntimeOffline,
+	ReasonPickupTimeout,
 	ReasonRuntimeReconnectTimeout,
 	ReasonRuntimeRecovery,
 	ReasonTimeout,

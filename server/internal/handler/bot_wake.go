@@ -82,7 +82,7 @@ func validateWakeRules(r BotWakeResponse) error {
 	if r.HourlyLimit < 0 || r.HourlyLimit > 120 {
 		return errors.New("hourly_limit must be between 0 and 120")
 	}
-	allowed := map[string]bool{"mention": true, "started": true, "done": true, "blocked": true, "needs_kun": true, "task": true, "chat": true}
+	allowed := map[string]bool{"mention": true, "started": true, "done": true, "blocked": true, "needs_kun": true, "task": true, "chat": true, "runtime.offline": true, "runtime.online": true}
 	seen := map[string]bool{}
 	for _, e := range r.Events {
 		if !allowed[e] || seen[e] {
@@ -329,6 +329,10 @@ func (h *Handler) wakeVisible(ctx context.Context, e db.BotWakeEvent, user pgtyp
 	if _, err := h.Queries.GetMemberByUserAndWorkspace(ctx, db.GetMemberByUserAndWorkspaceParams{UserID: user, WorkspaceID: e.WorkspaceID}); err != nil {
 		return false
 	}
+	if e.RuntimeOutageID.Valid {
+		o, err := h.Queries.GetRuntimeOutage(ctx, e.RuntimeOutageID)
+		return err == nil && o.WorkspaceID == e.WorkspaceID && o.OwnerID == user && e.AuthorType == "system" && e.AuthorID == user
+	}
 	if e.IssueID.Valid {
 		i, err := h.Queries.GetIssue(ctx, e.IssueID)
 		if err != nil || i.WorkspaceID != e.WorkspaceID {
@@ -395,7 +399,16 @@ func (h *Handler) ListBotWakeEvents(w http.ResponseWriter, r *http.Request) {
 		if !h.wakeVisible(r.Context(), e, bot.UserID) || !h.wakeVisible(r.Context(), e, parseUUID(requestUserID(r))) {
 			continue
 		}
-		item := map[string]any{"delivery_id": uuidToString(e.DeliveryID), "event_id": uuidToString(e.EventID), "hop": e.Hop, "root_id": uuidToString(e.RootID), "source_task_id": uuidToString(e.SourceTaskID), "sequence": e.Sequence, "type": e.EventType, "issue_id": uuidToString(e.IssueID), "chat_session_id": uuidToString(e.ChatSessionID), "status": e.Status, "reason": e.Reason, "attempts": e.Attempts, "created_at": e.CreatedAt.Time, "sent_at": timestampToPtr(e.SentAt), "received_at": timestampToPtr(e.ReceivedAt), "woken_at": timestampToPtr(e.WokenAt), "result_at": timestampToPtr(e.ResultAt), "result_url": e.ResultUrl, "acknowledged_at": timestampToPtr(e.AcknowledgedAt)}
+		var runtimeDetails any
+		if e.RuntimeOutageID.Valid {
+			outage, err := h.Queries.GetRuntimeOutage(r.Context(), e.RuntimeOutageID)
+			if err != nil {
+				writeError(w, 500, "failed to load runtime event; try again")
+				return
+			}
+			runtimeDetails = runtimeOutageResponse(outage)
+		}
+		item := map[string]any{"runtime_outage": runtimeDetails, "runtime_outage_id": uuidToString(e.RuntimeOutageID), "delivery_id": uuidToString(e.DeliveryID), "event_id": uuidToString(e.EventID), "hop": e.Hop, "root_id": uuidToString(e.RootID), "source_task_id": uuidToString(e.SourceTaskID), "sequence": e.Sequence, "type": e.EventType, "issue_id": uuidToString(e.IssueID), "chat_session_id": uuidToString(e.ChatSessionID), "status": e.Status, "reason": e.Reason, "attempts": e.Attempts, "created_at": e.CreatedAt.Time, "sent_at": timestampToPtr(e.SentAt), "received_at": timestampToPtr(e.ReceivedAt), "woken_at": timestampToPtr(e.WokenAt), "result_at": timestampToPtr(e.ResultAt), "result_url": e.ResultUrl, "acknowledged_at": timestampToPtr(e.AcknowledgedAt)}
 		if includeContent {
 			payload, err := h.botWakePayloadFields(r.Context(), e)
 			if err != nil {

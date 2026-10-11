@@ -725,7 +725,9 @@ export type BotWakeEventType =
   | "blocked"
   | "needs_kun"
   | "task"
-  | "chat";
+  | "chat"
+  | "runtime.offline"
+  | "runtime.online";
 
 export interface BotQuietHours {
   enabled: boolean;
@@ -787,6 +789,11 @@ export interface BotWakeEvent {
   event_id: string;
   sequence: number;
   type: BotWakeEventType;
+  runtime_outage_id?: string;
+  runtime_outage?: {
+    id: string; machine_key: string; machine_name: string; runtime_ids: string[];
+    started_at: string; ended_at: string | null; alerted_at: string | null;
+  } | null;
   /** Empty string when the event is not about an issue. */
   issue_id: string;
   chat_session_id: string;

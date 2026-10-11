@@ -81,3 +81,16 @@ A transaction trigger probe verifies the current actor differs from the creator
 and that a later system write clears previous Bot metadata. Redis-backed auth
 tests cover cached credentials and forged headers. The integrated DENE-1792
 worker/outbox and real Grok delivery require their own end-to-end acceptance.
+
+## Owner machine events
+
+`runtime.offline` / `runtime.online` reuse the wake outbox and receipt contract.
+They carry `runtime_outage` with machine identity, affected runtime ids, start,
+end and alert time. The source is an owner-scoped server health observation,
+not a comment, issue or chat. The worker validates the outage owner against the
+Bot owner, rechecks the owner's `runtime_alerts` preference, then applies event,
+quiet-hour and rate settings. Sender rules and owner issue subscriptions do
+not apply. Machine events do not update `bot_wake_cause`, so subsequent Bot
+writes cannot inherit a health observation as human intent. Receivers should
+send one Telegram notice per event_id and use the normal receipt endpoint;
+issue_id/chat_session_id are empty, and no agent run is needed.

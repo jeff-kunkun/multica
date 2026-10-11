@@ -36,7 +36,8 @@ type ChatChannelHistoryReader interface {
 // shape no matter which channel backs the session, the agent never sees a
 // per-platform API.
 type ChatChannelHistoryResponse struct {
-	ChannelType string `json:"channel_type"`
+	HiddenQueuedCount int32  `json:"hidden_queued_count"`
+	ChannelType       string `json:"channel_type"`
 	// ThreadID is set on a thread read: which thread the messages belong to.
 	ThreadID   string                   `json:"thread_id,omitempty"`
 	Messages   []channel.HistoryMessage `json:"messages"`
@@ -121,6 +122,8 @@ func (h *Handler) chatMessageHistory(r *http.Request, scope chatHistoryScope) (c
 			Text:   protocol.ChatPromptContent(m.MessageKind, m.Content),
 			Author: transcriptMessageAuthor(role, m.MessageKind),
 			TS:     m.CreatedAt.Time.UTC().Format(time.RFC3339Nano),
+			// Set on a failed run's outcome row (DENE-1839).
+			FailureReason: m.FailureReason.String,
 		})
 		if l, ok := lineage[uuidToString(m.TaskID)]; ok && m.TaskID.Valid {
 			last := &out[len(out)-1]
@@ -137,6 +140,12 @@ func (h *Handler) chatMessageHistory(r *http.Request, scope chatHistoryScope) (c
 		return channel.HistoryPage{}, fmt.Errorf("%w: %w", errChannelBindingRead, err)
 	}
 	page := channel.HistoryPage{ChannelType: channelType, Messages: out}
+	if !scope.contextRevision.Valid {
+		page.HiddenQueuedCount, err = h.Queries.CountHiddenQueuedChatMessages(r.Context(), scope.sessionID)
+		if err != nil {
+			return channel.HistoryPage{}, err
+		}
+	}
 	// Advertise a cursor when a full page came back, so the agent can page to
 	// older messages (mirrors the Slack reader's "more may exist" signal).
 	if len(messages) == limit && len(out) > 0 {
@@ -340,10 +349,11 @@ func (h *Handler) respondChatHistory(w http.ResponseWriter, r *http.Request, ses
 		messages = []channel.HistoryMessage{}
 	}
 	writeJSON(w, http.StatusOK, ChatChannelHistoryResponse{
-		ChannelType: page.ChannelType,
-		ThreadID:    page.ThreadID,
-		Messages:    messages,
-		NextCursor:  page.NextCursor,
+		HiddenQueuedCount: page.HiddenQueuedCount,
+		ChannelType:       page.ChannelType,
+		ThreadID:          page.ThreadID,
+		Messages:          messages,
+		NextCursor:        page.NextCursor,
 	})
 }
 

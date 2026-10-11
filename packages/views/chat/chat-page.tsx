@@ -885,7 +885,7 @@ export function ChatPage() {
           agentName={c.activeAgent.name}
         />
       ) : (
-        <OfflineBanner agentName={c.activeAgent?.name} availability={c.availability} />
+        <OfflineBanner agentName={c.activeAgent?.name} availability={c.availability} lastSeenAt={c.runtimeLastSeenAt} />
       )}
 
       <ChatQueue

@@ -112,7 +112,9 @@
     "issue_stall_action": "停滞处理",
     "workspace_link_request": "连通请求",
     "workspace_link_accepted": "连通已接受",
-    "workspace_link_declined": "连通已拒绝"
+    "workspace_link_declined": "连通已拒绝",
+    "runtime_offline": "机器掉线",
+    "runtime_online": "机器恢复在线"
   },
   "labels": {
     "set_status_to": "状态设为",

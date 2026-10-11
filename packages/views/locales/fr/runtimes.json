@@ -518,5 +518,11 @@
     "window_balance_cny": "Solde CNY",
     "window_balance_usd": "Solde USD",
     "switch_source": "Basculer sur le quota {{provider}}"
+  },
+  "alerts": {
+    "label": "Alertes de déconnexion",
+    "description": "Me prévenir, ainsi que mes Bots, après 3 minutes de déconnexion ou au retour en ligne.",
+    "retry": "Échec du chargement. Réessayer",
+    "save_failed": "Échec de la sauvegarde. Réessayer."
   }
 }

@@ -117,6 +117,7 @@
     "steer_fell_back_toast": "Cette réponse ne peut pas lire le message en cours, il a été mis en file d'attente"
   },
   "queue": {
+    "hidden_messages": "{{count}} messages supplémentaires en attente",
     "title_one": "{{count}} message en file d'attente",
     "title_other": "{{count}} messages en file d'attente",
     "clear": "Tout effacer",
@@ -142,6 +143,7 @@
       "timeout": "L'agent a mis trop de temps et s'est arrêté avant de terminer. Réessayez, ou découpez votre demande en étapes plus courtes.",
       "codex_semantic_inactivity": "L'agent est resté inactif et s'est arrêté avant de terminer. Veuillez réessayer.",
       "runtime_offline": "L'agent est actuellement hors ligne et n'a donc pas pu répondre. Veuillez réessayer dès son retour en ligne.",
+      "pickup_timeout": "Personne n'a pris en charge ce message urgent dans les 30 secondes. La plateforme ne le renvoie pas : envoyez-le à un autre agent, ou configurez un runtime de secours pour cet agent et renvoyez-le.",
       "runtime_access_denied": "Cet agent ne peut pas s'exécuter sur son runtime privé et n'a donc pas pu répondre. Passez le runtime en public, ou réassociez/copiez l'agent vers un runtime que son propriétaire peut utiliser.",
       "runtime_recovery": "L'agent a redémarré avant d'avoir pu terminer. Veuillez réessayer.",
       "manual": "Cette réponse a été annulée.",
@@ -298,6 +300,8 @@
     "action": "Associer un runtime"
   },
   "offline_banner": {
+    "last_seen": "Runtime hors ligne, dernière connexion à {{time}}",
+    "last_seen_unknown": "Runtime hors ligne, dernière connexion inconnue",
     "fallback_name": "l'agent",
     "unstable": "La connexion de {{name}} est instable — les réponses peuvent être retardées.",
     "offline": "{{name}} est hors ligne — votre message sera remis à son retour."

@@ -972,6 +972,7 @@ export const ChatMessageListSchema = z.array(ChatMessageSchema).default([]);
 export const EMPTY_CHAT_MESSAGE_LIST: ChatMessage[] = [];
 
 export const ChatMessagesPageSchema = z.object({
+  hidden_queued_count: z.number().int().nonnegative().optional().catch(undefined),
   messages: z.array(ChatMessageSchema).default([]),
   limit: z.number().default(50),
   has_more: z.boolean().default(false),
@@ -2859,6 +2860,7 @@ const ChatQueuedTasksSchema = z.array(z.unknown()).transform((tasks) =>
 // fields optional so callers can distinguish an older server from an empty
 // queue. A malformed queue row is ignored without discarding a valid head.
 export const ChatPendingTaskSchema: z.ZodType<ChatPendingTask> = z.object({
+  hidden_queued_count: z.number().int().nonnegative().optional().catch(undefined),
   queue_reason: MachineQueueReasonSchema.optional().catch(undefined),
   task_id: z.string().optional(),
   status: z.string().optional(),
@@ -2873,9 +2875,10 @@ export const ChatPendingTaskSchema: z.ZodType<ChatPendingTask> = z.object({
 export const EMPTY_CHAT_PENDING_TASK: ChatPendingTask = {};
 
 export const SendChatMessageResponseSchema: z.ZodType<SendChatMessageResponse> = z.object({
+  runtime: z.object({ status: z.string(), name: z.string(), last_seen_at: z.string().nullable() }).nullish().catch(undefined),
   message_id: z.string().min(1),
   task_id: z.string().min(1),
-  warning: z.string().optional(),
+  warning: z.string().optional().catch(undefined),
   reason_code: z.string().optional(),
   supports_queue: z.boolean().optional(),
   queued: z.boolean().optional().catch(undefined),

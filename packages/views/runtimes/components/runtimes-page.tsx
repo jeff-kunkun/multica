@@ -50,6 +50,7 @@ import {
   pickContentLang,
 } from "../../onboarding/templates";
 import { ConnectRemoteDialog } from "./connect-remote-dialog";
+import { RuntimeAlertSetting } from "./runtime-alert-setting";
 import { CloudRuntimeDialog } from "./cloud-runtime-dialog";
 import { MachineCapacityControl } from "./machine-capacity-control";
 import { ProviderLogo } from "./provider-logo";
@@ -174,6 +175,8 @@ export function RuntimesPage({
         cloudRuntimeEnabled={cloudRuntimeEnabled}
         onOpenCloudRuntime={() => setShowCloudRuntimeDialog(true)}
       />
+
+      {!isGuest && <div className={cn(PAGE_RAIL, PAGE_GUTTER)}><RuntimeAlertSetting /></div>}
 
       {showEmpty ? (
         isGuest ? (

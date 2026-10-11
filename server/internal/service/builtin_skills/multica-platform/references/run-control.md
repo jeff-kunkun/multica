@@ -104,6 +104,64 @@ multica issue comment add <issue-id> --content-file ./msg.md --mode restart
   The source chat stops its remaining runs, refuses new sends and shows a link
   to the issue. Repeating conversion returns that same issue.
 
+## Urgent delivery (`chat send --urgent`)
+
+`--urgent` is for a message that is worthless late: a verification code, an
+SMS to relay, a "stop now". It changes three things and nothing else:
+
+- **Deliver now or fail now.** If the agent's runtime cannot claim (offline, or
+  no heartbeat in the last 150 s) and the agent has no online standby runtime,
+  the server refuses with HTTP 409 before anything is saved. The body carries
+  `code: "runtime_offline"`, a `reason` such as
+  `runtime_offline: Claude (MacBook-Pro.local) last_seen 2026-10-11T09:00:10Z`,
+  the `runtime` snapshot and `next_steps`. The CLI prints that JSON and exits
+  nonzero; there is nothing to resend.
+- **Head of the queue, 30 s to start.** An accepted urgent turn is created at
+  priority 4 with restart semantics (a reply in progress is stopped, the same
+  session resumes from this message) and a `pickup_deadline_at` 30 s out. If
+  no daemon has started it by then — whether it is still queued, dispatched,
+  or parked in `waiting_local_directory` behind another run — the server
+  fails it with `failure_reason: pickup_timeout`, posts one system note in
+  the chat saying which machine did not pick it up, and does not retry. A
+  daemon that asks to start an expired turn is refused in the same
+  transaction (HTTP 409, `code: pickup_timeout`): an expired code never runs.
+- **Standby runtime.** When the primary runtime is offline but the agent has
+  `fallback_runtime_id` set and that runtime is online, the task is dispatched
+  there instead; the response says `fallback_runtime: true`. A standby must
+  belong to the same owner and the same provider as the primary (server
+  enforced; see `agents.md`). The standby's daemon claims the turn through
+  the ordinary poll (single or batch) and starts it like any other task; the
+  same eligibility rule — the agent's bound runtime or its configured
+  standby — is applied at claim, at response build and in the delivery
+  transaction, so clearing the standby or rebinding the agent while the turn
+  is in flight fails it with `invalid_task_identity` instead of handing it
+  to a machine the agent no longer names.
+
+```bash
+multica chat send --session <id> --urgent "验证码 482913，请立刻填入" --output json
+```
+
+- `--urgent` implies `--mode restart`; combining it with `--mode steer` is a
+  400. Only the person who started the chat (or an agent run) may restart a
+  reply, so a shared-chat guest gets 403 as with any restart.
+- `--urgent` always waits for the **pickup** (task_status `running`), not the
+  full reply: exit 0 with `pickup_elapsed_ms` once a daemon starts the turn;
+  nonzero with `task_status`, `reason` (`pickup_timeout`) and `runtime` when
+  nobody starts it by `pickup_deadline_at`. The wait ends at that server
+  deadline and never later: every progress request and pause runs under it,
+  so a slow request or a late server sweep cannot stretch the command past
+  the 30 s. `--wait-timeout` does not apply; `--wait` adds nothing. When the
+  server has not judged the turn by the deadline, `task_status` is whatever
+  it last reported (it may still be `dispatched`) and `reason_source: sender`
+  says the sender stopped waiting; `reason_source: server` marks a verdict the
+  server wrote (`failed`/`cancelled`). Only the server decides the task's
+  fate. A zero exit means the message is being read now. Read the reply later
+  with `multica chat history`.
+- `--urgent` is not available with `--linked` (linked-workspace sends) and is
+  not a flag of `chat new`; open the chat first, then send urgent.
+- `multica chat progress --session <id> --history --output json` shows
+  `pickup_timeout` as the task reason once the deadline has passed.
+
 ## Hand work to another agent
 
 When agent A is running on an issue and the comment @-mentions a different
@@ -122,6 +180,33 @@ multica issue comment add <issue-id> --content-file ./take-over.md --mode handof
 `multica chat handoff --to <agent> [--session <id|url>]`: it opens a new chat
 with that agent whose first message summarises this one, and leaves the old
 chat as it is. Only the chat's owner can hand it over.
+
+## Chat runtime status and reply timeouts
+
+`multica chat send --session <id> "Hello" --output json` returns `runtime`:
+`{status, name, last_seen_at}`. `last_seen_at` is an RFC3339 timestamp or null
+when no heartbeat is known. Offline sends are accepted with `warning` in JSON;
+the same warning goes to stderr. Do not send the message again because of this
+warning: the message and its queued task already exist.
+
+`multica chat send --session <id> "Hello" --wait --wait-timeout 20s --output json`
+exits nonzero on timeout and preserves the send result plus `task_status`,
+`reason`, `queue_ahead` and `runtime`. Diagnostics refer to this send's task,
+not a later message in the session. `task_status` is the stored task state;
+`reason` can be `runtime_offline`, `running_no_logs`, `running`,
+`queued_behind_N` (`queue_ahead` is N preceding turns in this chat),
+`awaiting_dispatch`, `waiting_local_directory`, `retry_scheduled`, or the
+terminal failure reason. A completed task reports `completed`, even when the
+reply has not yet appeared. No ETA is implied by queue position.
+
+Read the latest turn again with:
+
+```bash
+multica chat progress --session <id> --history --output json
+```
+
+This returns progress history plus the same current task diagnostics and
+runtime last-seen time. An empty chat has no `task_status` or `reason` yet.
 
 ## Unanswered Bot wakes
 

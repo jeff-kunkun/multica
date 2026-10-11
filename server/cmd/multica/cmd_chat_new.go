@@ -53,7 +53,7 @@ func init() {
 	chatNewCmd.Flags().String("output", "json", "Output format: table or json")
 
 	chatSendCmd.Flags().Bool("wait", false, "Wait for the agent's reply to this message and print it")
-	chatSendCmd.Flags().Duration("wait-timeout", 10*time.Minute, "How long --wait waits for the reply")
+	chatSendCmd.Flags().Duration("wait-timeout", 10*time.Minute, "How long --wait waits; timeout exits nonzero with task_status, reason and runtime last_seen_at")
 }
 
 func runChatNew(cmd *cobra.Command, args []string) error {
@@ -112,7 +112,7 @@ func runChatNew(cmd *cobra.Command, args []string) error {
 		"message_id": strVal(sent, "message_id"),
 		"task_id":    strVal(sent, "task_id"),
 	}
-	for _, key := range []string{"mode", "warning", "reason_code"} {
+	for _, key := range []string{"mode", "warning", "reason_code", "runtime"} {
 		if value, present := sent[key]; present {
 			out[key] = value
 		}
@@ -125,6 +125,7 @@ func runChatNew(cmd *cobra.Command, args []string) error {
 		}
 		return fmt.Errorf("chat new: chat %s created: %w", sessionID, blockedChatSendError(out))
 	}
+	printChatRuntimeWarning(cmd, out)
 	return finishChatSend(cmd, client, sessionID, out)
 }
 
@@ -157,6 +158,11 @@ func finishChatSend(cmd *cobra.Command, client *cli.APIClient, sessionID string,
 		timeout, _ := cmd.Flags().GetDuration("wait-timeout")
 		reply, err := waitChatReply(client, sessionID, strVal(out, "task_id"), timeout)
 		if err != nil {
+			if reply != nil {
+				for key, value := range reply {
+					out[key] = value
+				}
+			}
 			if output != "table" {
 				_ = cli.PrintJSON(os.Stdout, out)
 			}
@@ -202,8 +208,22 @@ func waitChatReply(client *cli.APIClient, sessionID, taskID string, timeout time
 			}
 		}
 		if time.Now().After(deadline) {
-			return nil, fmt.Errorf("no reply after %s; read it later with: multica chat history --session %s", timeout, sessionID)
+			ctx, cancel := cli.APIContext(context.Background())
+			var diagnostics map[string]any
+			err := client.GetJSON(ctx, "/api/chat/sessions/"+url.PathEscape(sessionID)+"/progress?task_id="+url.QueryEscape(taskID), &diagnostics)
+			cancel()
+			if err != nil {
+				return nil, fmt.Errorf("no reply after %s; task diagnostics unavailable: %w; read it later with: multica chat progress --session %s --history", timeout, err, sessionID)
+			}
+			delete(diagnostics, "progress")
+			return diagnostics, fmt.Errorf("no reply after %s; task_status=%s reason=%s runtime=%v; read it later with: multica chat progress --session %s --history", timeout, strVal(diagnostics, "task_status"), strVal(diagnostics, "reason"), diagnostics["runtime"], sessionID)
 		}
 		time.Sleep(chatReplyPollInterval)
+	}
+}
+
+func printChatRuntimeWarning(cmd *cobra.Command, out map[string]any) {
+	if warning := strVal(out, "warning"); warning != "" {
+		fmt.Fprintln(cmd.ErrOrStderr(), "Warning:", warning)
 	}
 }

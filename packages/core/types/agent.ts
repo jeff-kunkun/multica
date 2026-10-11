@@ -263,6 +263,7 @@ export type TaskFailureReason =
   | "timeout"
   | "codex_semantic_inactivity"
   | "runtime_offline"
+  | "pickup_timeout"
   | "runtime_reconnect_timeout"
   | "runtime_recovery"
   | "manual";
@@ -697,6 +698,13 @@ export interface Agent {
   runtime_id: string;
   /** False exactly when the agent has no runtime. Older backends omit it. */
   runtime_bound?: boolean;
+  /**
+   * Standby runtime for `chat send --urgent` (DENE-1844): when the primary
+   * runtime is offline, an urgent message is dispatched here instead. Must
+   * share the primary's owner and provider; the server enforces both. Empty
+   * or omitted means none.
+   */
+  fallback_runtime_id?: string;
   /** Privacy-safe coarse liveness for a runtime hidden from the runtime list. */
   runtime_availability?: "online" | "unstable" | "offline";
   name: string;
@@ -1024,6 +1032,11 @@ export interface CreateAgentRequest {
    * inherit; `true` without a parent is rejected.
    */
   runtime_inherited?: boolean;
+  /**
+   * Standby runtime for urgent chat messages. Send `""` to clear. The server
+   * rejects a runtime with a different owner or provider than the primary.
+   */
+  fallback_runtime_id?: string;
 }
 
 export interface AgentBuilderSession {

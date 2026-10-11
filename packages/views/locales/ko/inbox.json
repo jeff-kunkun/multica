@@ -112,7 +112,9 @@
     "issue_stall_action": "정체 처리",
     "workspace_link_request": "연결 요청",
     "workspace_link_accepted": "연결 수락됨",
-    "workspace_link_declined": "연결 거절됨"
+    "workspace_link_declined": "연결 거절됨",
+    "runtime_offline": "머신 오프라인",
+    "runtime_online": "머신 온라인"
   },
   "labels": {
     "set_status_to": "상태 변경:",

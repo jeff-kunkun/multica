@@ -326,7 +326,20 @@ func (h *Handler) botWakePayloadFields(ctx context.Context, e db.BotWakeEvent) (
 	}
 	attachments := []map[string]any{}
 	var files []db.Attachment
-	if e.IssueID.Valid {
+	var runtimeDetails any
+	if e.RuntimeOutageID.Valid {
+		o, getErr := h.Queries.GetRuntimeOutage(ctx, e.RuntimeOutageID)
+		if getErr != nil {
+			return nil, getErr
+		}
+		runtimeDetails = runtimeOutageResponse(o)
+		summary = o.MachineName + " 已掉线（持续超过 3 分钟）"
+		if e.EventType == "runtime.online" {
+			summary = o.MachineName + " 已恢复在线"
+		}
+		link = "/api/runtimes/outages"
+		webPath = "/" + url.PathEscape(ws.Slug) + "/runtimes"
+	} else if e.IssueID.Valid {
 		issue, getErr := h.Queries.GetIssue(ctx, e.IssueID)
 		if getErr != nil {
 			return nil, getErr
@@ -365,7 +378,7 @@ func (h *Handler) botWakePayloadFields(ctx context.Context, e db.BotWakeEvent) (
 		attachments = append(attachments, map[string]any{"id": uuidToString(a.ID), "filename": a.Filename, "url": base + "/api/attachments/" + uuidToString(a.ID) + "/download", "size_bytes": a.SizeBytes, "sha256": a.Sha256.String})
 	}
 	receiptBase := base + "/api/workspaces/" + uuidToString(e.WorkspaceID) + "/bots/" + uuidToString(e.BotID) + "/wake"
-	payload := map[string]any{"workspace_id": uuidToString(e.WorkspaceID), "event_id": uuidToString(e.EventID), "sequence": e.Sequence, "source_id": uuidToString(e.SourceID), "parent_id": wakeParentID(e), "ack_url": receiptBase + "/pending/ack", "ack_body": map[string]any{"event_ids": []string{uuidToString(e.EventID)}}, "woken_url": receiptBase + "/events/" + uuidToString(e.EventID) + "/woken", "result_url": receiptBase + "/events/" + uuidToString(e.EventID) + "/result", "root_id": uuidToString(e.RootID), "hop": e.Hop, "source_task_id": uuidToString(e.SourceTaskID), "web_url": base + webPath, "type": e.EventType, "issue_id": uuidToString(e.IssueID), "chat_session_id": uuidToString(e.ChatSessionID), "author": h.wakeAuthor(ctx, e), "time": e.CreatedAt.Time, "summary": summary, "url": base + link, "attachments": attachments}
+	payload := map[string]any{"workspace_id": uuidToString(e.WorkspaceID), "event_id": uuidToString(e.EventID), "sequence": e.Sequence, "source_id": uuidToString(e.SourceID), "parent_id": wakeParentID(e), "ack_url": receiptBase + "/pending/ack", "ack_body": map[string]any{"event_ids": []string{uuidToString(e.EventID)}}, "woken_url": receiptBase + "/events/" + uuidToString(e.EventID) + "/woken", "result_url": receiptBase + "/events/" + uuidToString(e.EventID) + "/result", "root_id": uuidToString(e.RootID), "hop": e.Hop, "source_task_id": uuidToString(e.SourceTaskID), "web_url": base + webPath, "type": e.EventType, "issue_id": uuidToString(e.IssueID), "chat_session_id": uuidToString(e.ChatSessionID), "author": h.wakeAuthor(ctx, e), "time": e.CreatedAt.Time, "summary": summary, "url": base + link, "attachments": attachments, "runtime_outage": runtimeDetails}
 	if e.EventType == "wake_blocked" {
 		payload["reason_code"] = "bot_wake_chain_limit"
 		payload["reason"] = e.Reason

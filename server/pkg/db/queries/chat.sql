@@ -1310,6 +1310,40 @@ WHERE message.chat_session_id = $1
 ORDER BY message.created_at DESC, message.id DESC
 LIMIT $2;
 
+-- name: CountHiddenQueuedChatMessages :one
+-- Session-wide count of user rows omitted by ListChatMessagesPage. Independent
+-- of cursor/limit; exclude commands and the server-authored onboarding kickoff.
+SELECT count(*)::int AS count FROM chat_message AS message
+WHERE message.chat_session_id = $1
+  AND message.message_kind NOT IN ('channel_command', 'onboarding_kickoff')
+  AND (
+    message.role = 'user'
+    AND EXISTS (
+      SELECT 1
+      FROM agent_task_queue AS task
+      WHERE task.chat_session_id = message.chat_session_id
+        AND task.status = 'queued'
+        AND task.id = message.task_id
+        AND task.id <> (
+          SELECT head.id
+          FROM agent_task_queue AS head
+          WHERE head.chat_session_id = $1
+            AND head.status IN ('queued', 'dispatched', 'running', 'waiting_local_directory', 'deferred')
+            AND head.regenerate_quick_actions_for IS NULL
+          ORDER BY
+            CASE
+              WHEN head.status IN ('dispatched', 'running', 'waiting_local_directory') THEN 0
+              WHEN head.status = 'deferred' THEN 1
+              ELSE 2
+            END,
+            head.priority DESC,
+            head.created_at ASC,
+            head.id ASC
+          LIMIT 1
+        )
+    )
+  );
+
 -- name: GetChatMessage :one
 SELECT * FROM chat_message
 WHERE id = $1;
@@ -1326,7 +1360,7 @@ INSERT INTO agent_task_queue (
     agent_id, runtime_id, issue_id, status, priority, chat_session_id,
     initiator_user_id, originator_user_id, accountable_user_id, force_fresh_session, runtime_mcp_overlay,
     runtime_connected_apps, via_bot_id, via_bot_name, originator_source, trigger_evidence_kind, trigger_evidence_ref_id,
-    fire_at, channel_context_revision, work_thread_id, id, wake_human_quote
+    fire_at, channel_context_revision, work_thread_id, id, wake_human_quote, pickup_deadline_at
 )
 SELECT
     $1, $2, NULL,
@@ -1347,7 +1381,8 @@ SELECT
                 AND wt.model IS NOT DISTINCT FROM (SELECT a.model FROM agent a WHERE a.id = $1)
                 AND wt.permission_mode IS NOT DISTINCT FROM (SELECT a.permission_mode FROM agent a WHERE a.id = $1)
               ORDER BY wt.updated_at DESC, wt.id DESC LIMIT 1), gen_random_uuid()),
-    COALESCE(sqlc.narg('id')::uuid, gen_random_uuid()), sqlc.narg(wake_human_quote)
+    COALESCE(sqlc.narg('id')::uuid, gen_random_uuid()), sqlc.narg(wake_human_quote),
+    sqlc.narg('pickup_deadline_at')::timestamptz
 WHERE lock_task_owner_rows($1, NULL, $2)
 RETURNING *;
 

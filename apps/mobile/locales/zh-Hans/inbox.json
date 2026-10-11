@@ -78,7 +78,9 @@
     "reacted_with": "回应了 {{emoji}}",
     "created_with_agent": "由智能体创建：{{identifier}}",
     "failed_with_detail": "失败：{{detail}}",
-    "run_limit_blocked": "已达到上限，本次运行被阻止"
+    "run_limit_blocked": "已达到上限，本次运行被阻止",
+    "runtime_offline": "机器掉线",
+    "runtime_online": "机器恢复在线"
   },
   "body": {
     "autopilot_title_limit": "自动化 \"{{title}}\" 未启动，因为该工作区已达到当前周期 {{limit}} 次运行的上限。额度将在 {{resetAt}} 重置。",

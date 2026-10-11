@@ -79,7 +79,9 @@
     "inbox_notifications": "Inbox notifications",
     "system": "System",
     "system_notifications": "System notifications",
-    "system_description": "Account changes, security alerts, product updates."
+    "system_description": "Account changes, security alerts, product updates.",
+    "runtime_alerts": "Machine disconnect alerts",
+    "runtime_alerts_description": "Notify me and my Bots when my machines disconnect for over 3 minutes or recover."
   },
   "machines": {
     "title": "Machines",

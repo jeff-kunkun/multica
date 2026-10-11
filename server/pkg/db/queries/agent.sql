@@ -206,6 +206,9 @@ UPDATE agent SET
     runtime_config = COALESCE(sqlc.narg('runtime_config'), runtime_config),
     runtime_mode = COALESCE(sqlc.narg('runtime_mode'), runtime_mode),
     runtime_id = COALESCE(sqlc.narg('runtime_id'), runtime_id),
+    -- Fallback runtime for urgent chat turns (DENE-1844); NULL-clear goes
+    -- through ClearAgentFallbackRuntime, same two-query pattern as thinking_level.
+    fallback_runtime_id = COALESCE(sqlc.narg('fallback_runtime_id'), fallback_runtime_id),
     visibility = COALESCE(sqlc.narg('visibility'), visibility),
     permission_mode = COALESCE(sqlc.narg('permission_mode'), permission_mode),
     status = COALESCE(sqlc.narg('status'), status),
@@ -314,6 +317,7 @@ RETURNING *;
 -- routing changes, so that write and this one commit together.
 UPDATE agent AS child
 SET runtime_id = parent.runtime_id,
+    fallback_runtime_id = parent.fallback_runtime_id,
     runtime_mode = parent.runtime_mode,
     runtime_config = parent.runtime_config,
     model = parent.model,
@@ -332,6 +336,7 @@ WHERE child.parent_agent_id = parent.id
   AND child.archived_at IS NULL
   AND parent.id = @parent_agent_id
   AND (child.runtime_id IS DISTINCT FROM parent.runtime_id
+    OR child.fallback_runtime_id IS DISTINCT FROM parent.fallback_runtime_id
     OR child.runtime_mode IS DISTINCT FROM parent.runtime_mode
     OR child.runtime_config IS DISTINCT FROM parent.runtime_config
     OR child.model IS DISTINCT FROM parent.model
@@ -379,6 +384,13 @@ GROUP BY parent_agent_id;
 -- dedicated query when the agent owner removes every toolkit; subsequent
 -- dispatch decisions treat NULL identically to `{}` (both -> no overlay).
 UPDATE agent SET composio_toolkit_allowlist = NULL, updated_at = now()
+WHERE id = $1
+RETURNING *;
+
+-- name: ClearAgentFallbackRuntime :one
+-- Explicit NULL-clear for fallback_runtime_id (DENE-1844): the agent keeps
+-- only its primary runtime and urgent chat turns fail fast when it is offline.
+UPDATE agent SET fallback_runtime_id = NULL, updated_at = now()
 WHERE id = $1
 RETURNING *;
 
@@ -1079,7 +1091,8 @@ WHERE id = (
           JOIN agent_runtime r ON r.id = atq.runtime_id
           WHERE a.id = atq.agent_id
             -- A task's persisted runtime is not authority after an agent rebind.
-            AND a.runtime_id = atq.runtime_id
+            -- The configured fallback runtime may also claim (DENE-1844 urgent relay).
+            AND (a.runtime_id = atq.runtime_id OR a.fallback_runtime_id = atq.runtime_id)
             -- Reversible seat gate (DENE-714). Queued work stays queued until
             -- the seat is turned back on. Already-dispatched reclaim queries
             -- do NOT check this: disable must not interrupt an in-flight claim.
@@ -1203,7 +1216,8 @@ WHERE id = (
           FROM agent a
           JOIN agent_runtime r ON r.id = atq.runtime_id
           WHERE a.id = atq.agent_id
-            AND a.runtime_id = atq.runtime_id
+            -- The configured fallback runtime may also claim (DENE-1844 urgent relay).
+            AND (a.runtime_id = atq.runtime_id OR a.fallback_runtime_id = atq.runtime_id)
             AND (
                 r.visibility = 'public'
                 OR (
@@ -1250,7 +1264,8 @@ WHERE id IN (
           FROM agent a
           JOIN agent_runtime r ON r.id = atq.runtime_id
           WHERE a.id = atq.agent_id
-            AND a.runtime_id = atq.runtime_id
+            -- The configured fallback runtime may also claim (DENE-1844 urgent relay).
+            AND (a.runtime_id = atq.runtime_id OR a.fallback_runtime_id = atq.runtime_id)
             AND (
                 r.visibility = 'public'
                 OR (
@@ -1298,7 +1313,8 @@ WHERE id IN (
           FROM agent a
           JOIN agent_runtime r ON r.id = atq.runtime_id
           WHERE a.id = atq.agent_id
-            AND a.runtime_id = atq.runtime_id
+            -- The configured fallback runtime may also claim (DENE-1844 urgent relay).
+            AND (a.runtime_id = atq.runtime_id OR a.fallback_runtime_id = atq.runtime_id)
             AND (
                 r.visibility = 'public'
                 OR (
@@ -1338,7 +1354,8 @@ SELECT EXISTS (
           FROM agent a
           JOIN agent_runtime r ON r.id = atq.runtime_id
           WHERE a.id = atq.agent_id
-            AND a.runtime_id = atq.runtime_id
+            -- The configured fallback runtime may also claim (DENE-1844 urgent relay).
+            AND (a.runtime_id = atq.runtime_id OR a.fallback_runtime_id = atq.runtime_id)
             AND (
                 r.visibility = 'public'
                 OR (
@@ -2765,7 +2782,7 @@ WHERE atq.runtime_id = $1
       FROM agent a
       JOIN agent_runtime r ON r.id = atq.runtime_id
       WHERE a.id = atq.agent_id
-        AND a.runtime_id = atq.runtime_id
+        AND (a.runtime_id = atq.runtime_id OR a.fallback_runtime_id = atq.runtime_id)
         AND a.work_enabled
         AND (
             r.visibility = 'public'
@@ -2887,7 +2904,7 @@ WHERE atq.runtime_id = ANY(@runtime_ids::uuid[])
       FROM agent a
       JOIN agent_runtime r ON r.id = atq.runtime_id
       WHERE a.id = atq.agent_id
-        AND a.runtime_id = atq.runtime_id
+        AND (a.runtime_id = atq.runtime_id OR a.fallback_runtime_id = atq.runtime_id)
         AND a.work_enabled
         AND (
             r.visibility = 'public'

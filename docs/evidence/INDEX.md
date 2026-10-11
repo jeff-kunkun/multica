@@ -2,6 +2,9 @@
 
 本索引只记录指向沉淀票附件的短指针；原始日志、截图和样本留在对应票据附件。
 
+- DENE-1843：运行时机器掉线告警的同机聚合、CLI 记录与开关、Web/Desktop 和原生通知设置入口；[运行时页 375/390/768/1280 开启与关闭实页截图（任务附件）](https://ai.ferryway.cc/api/attachments/01a12c55-9f14-78af-b58e-55ab05ab47eb/download)。网页开关保存与刷新验证通过；真实 Telegram 停机/恢复演练移交父票 DENE-1819 上线后核对，未记为已通过；原生窗口和实体手机未做视觉验收。
+
+- DENE-1842：聊天历史说明被隐藏的排队消息数量，CLI JSON/table 与 Web/Desktop、原生 App 同步；[真实聊天页 375/390/768/1280 截图与 CLI 对照（任务附件）](https://ai.ferryway.cc/api/attachments/01a12c10-3758-7434-b901-113262873335/download)。原生窗口及手机设备未做视觉验收。
 - DENE-1879：原生收件箱动态入口与快照页面补验；[手机截图报告](https://ai.ferryway.cc/api/attachments/01a12c47-e796-7ef2-a4e7-650de8231672/download)、[原始验证和回滚材料](https://ai.ferryway.cc/api/attachments/01a12c47-ef98-7bf9-a919-bf45e79132ac/download)。网页四档续页/刷新/关闭成功，122 条记录无漏重、未读不变；原生 App/Electron 未实跑，不代表生产性能达标。
 
 - DENE-1875：Grok 小本子[交互说明附件](https://ai.ferryway.cc/api/attachments/01a12c18-69b5-7614-a9bf-09c68d3ffb46/download)与[浏览器检查记录](https://ai.ferryway.cc/api/attachments/01a12c19-5fbf-74bf-b299-1878e1459d21/download)。方案演示，1–2 秒为目标；长期画像的 mono 回写尚待父单协调，不代表全局已同步。
@@ -73,6 +76,7 @@
 
 - DENE-1806：项目默认参考项目、自动化继承/覆盖与每次运行重新核验；[含手机版的 HTML 预览（任务附件）](https://ai.ferryway.cc/api/attachments/01a12a26-bdc6-798a-b349-f9ed72409a6c/download)。数据库、任务认领与页面截图见任务交付附件；2026-10-11 已在升级后的 WD 真实巡检 run 简报中核验 `game`、`game-multica` 的描述、资源与项目记忆，均只进入参考段。[线上简报与升级证据（任务收尾附件）](https://ai.ferryway.cc/kunkunya/issues/01a12a20-e63b-7a09-bcd7-fafbfa684a9c)。
 
+- DENE-1841：聊天发送的离线运行时提醒、等待超时任务原因、Web/Desktop 与原生手机端最后在线时间提示；[CLI 与真实页面截图（任务附件）](https://ai.ferryway.cc/api/attachments/01a12c0b-9cee-7777-98d9-c15e6ba0a3f2/download)。本地离线发送、20 秒等待、进度查询通过；375 / 390 / 768 / 1280px 截图已查看，网页离线发送返回 201，手机返回操作通过。
 
 - DENE-1876：页面说明偏好已回写全局来源，I17 与技能分发核验通过；[脱敏核验记录](DENE-1876/README.md)（引用已合并外仓修复，原始证据留附件）。
 

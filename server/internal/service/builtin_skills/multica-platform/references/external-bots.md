@@ -31,6 +31,15 @@ not authority. Preserve any explicit draft-before-external-send convention the
 owner has established. Internal Multica messages are distinct from third-party
 posts, messages and purchases.
 
+Relaying something time-boxed into a chat — an SMS, a verification code, a
+one-time link — must use `multica chat send --session <id> --urgent`.
+Urgent is refused on the spot when the agent's runtime is offline (JSON
+`reason` + `next_steps`, nonzero exit, nothing saved); otherwise it jumps the
+queue and the command returns only with the pickup result: exit 0 once a daemon
+starts the turn, nonzero with `reason: pickup_timeout` if none does within 30 s.
+Treat a nonzero exit as "the code did not reach the agent": tell the person the
+reason instead of assuming it was queued; see `run-control.md` → "Urgent delivery".
+
 A same-power key writes as its owner: comments and chat messages show the
 owner's name, and agents may read them as the owner's own words. Start every
 comment or chat message the Bot writes with a line naming the Bot (for example
@@ -61,7 +70,9 @@ Use the relevant references in this skill and each command's `--help`:
 - `project linked-projects <id>` and `autopilot linked-projects <id>` read references; `--reference <link-id>:<project-id>` replaces them, `--clear` selects none, and autopilot `--inherit` restores project defaults.
 - `issue list/search/get/context`, `issue comment list --full` for complete reads.
 - `chat list/search/history` for discovery; personal `chat new --agent ... --wait` on supported versions.
-- `chat send --session ... --attachment ./file` uploads local files and binds them to the user message through the ordinary chat API.
+- `chat send --session ... --attachment ./file` uploads local files and binds them to the user message through the ordinary chat API. Sends include runtime status/last_seen_at and an offline warning on stderr and in JSON; the message is already accepted, so the warning is not a retry instruction.
+- `chat send --session <id> "Hello" --wait --wait-timeout 20s --output json` exits nonzero on timeout with task_status, reason, queue_ahead and runtime. `chat progress --session <id> --history --output json` reads the latest turn's same diagnostics. See `references/run-control.md` for reason meanings.
+- `overview --output json` includes runtime status and last_seen_at for the workspace panorama; use chat progress to explain a particular unanswered turn.
 - `issue update/status/assign/label/close/rerun` for issue work.
 - `issue comment add/update/delete` and its attachment flags for comment work.
 - Agent/settings commands supported by the installed CLI for administration.
@@ -91,6 +102,20 @@ must be verified separately from saving the skill source.
 Report who, the issue/chat, the action, its result/evidence and the next step.
 For execution delivery distinguish delivered, wake acknowledged, and result received;
 an unverified stage is unknown, never a reason to automatically resend.
+
+## Machine health in the capability map
+
+- `runtime outages --output json`: own machines, runtime ids, disconnect start,
+  recovery end and alert time; also `overview --output json` → `runtime_outages`.
+- `runtime alerts [on|off] --output json`: read/change the owner's inbox and
+  Bot disconnect alerts. This does not change runtime bindings.
+- Bot wake `events` accepts `runtime.offline` and `runtime.online`. These are
+  owner-scoped system events; they bypass sender/follow rules, while quiet hours
+  and hourly limits still apply. The ordinary webhook contains `runtime_outage`
+  (machine_name, machine_key, runtime_ids, started_at, ended_at, alerted_at).
+  Handle both event types as Telegram notices to the owner, deduplicate on
+  `event_id`, then use the ordinary receipt endpoint. Do not start an agent or
+  invent an issue/chat id: those fields are empty for machine events.
 
 ## Bot wake-chain guard
 

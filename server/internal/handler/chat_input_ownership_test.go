@@ -480,9 +480,10 @@ func TestCompleteTask_ChatCallbackIdempotent(t *testing.T) {
 
 // TestFailTask_ChatRetryInheritsInputOwnerAndPriority: a transient failure of a
 // task-owned direct task creates a retry child that reuses the SAME input owner
-// (so it reads the same user messages) and keeps a bumped priority. A
-// runtime_offline retry remains deferred until the runtime is healthy, then is
-// claimed ahead of fresh chat tasks.
+// (so it reads the same user messages) and keeps a bumped priority. A provider
+// server error retries after a backoff, so the child waits deferred and is then
+// claimed ahead of fresh chat tasks. (runtime_offline no longer retries a chat
+// turn, DENE-1839; see TestRetryGatesOpen_ChatRuntimeOfflineIsFinal.)
 func TestFailTask_ChatRetryInheritsInputOwnerAndPriority(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
@@ -492,7 +493,7 @@ func TestFailTask_ChatRetryInheritsInputOwnerAndPriority(t *testing.T) {
 	rootID := sendDirectChat(t, ctx, agentID, sessionID, "root question")
 	markTaskRunning(t, ctx, rootID)
 
-	if _, err := testHandler.TaskService.FailTask(ctx, parseUUID(rootID), "runtime went away", "", "", "", "runtime_offline", false, "", ""); err != nil {
+	if _, err := testHandler.TaskService.FailTask(ctx, parseUUID(rootID), "provider returned 503", "", "", "", "agent_error.provider_server_error", false, "", ""); err != nil {
 		t.Fatalf("fail task: %v", err)
 	}
 
@@ -513,7 +514,7 @@ func TestFailTask_ChatRetryInheritsInputOwnerAndPriority(t *testing.T) {
 		t.Fatalf("chat retry must be bumped above fresh chat priority (2); got %d", childPriority)
 	}
 	if childStatus != "deferred" {
-		t.Fatalf("runtime_offline retry child must be deferred, got %q", childStatus)
+		t.Fatalf("backoff retry child must be deferred, got %q", childStatus)
 	}
 	// The root direct task starts at attempt 1, so its first retry is attempt 2.
 	var rootAttempt int

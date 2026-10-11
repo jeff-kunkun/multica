@@ -2657,6 +2657,36 @@ type DirectChatSendResult struct {
 
 var ErrChatSessionAlreadyStarted = errors.New("chat session already has a user message")
 
+// ErrChatFallbackRuntimeChanged: an urgent send resolved the agent's fallback
+// runtime before the transaction, and under the agent lock that configuration
+// no longer matches. The caller re-reads the agent and decides again.
+var ErrChatFallbackRuntimeChanged = errors.New("chat agent fallback runtime changed; retry the send")
+
+// UrgentChatPickupDeadline is how long an urgent chat turn (DENE-1844) may sit
+// queued or dispatched before FailTasksPastPickupDeadline fails it with
+// pickup_timeout. Thirty seconds covers one daemon poll cycle plus claim.
+const UrgentChatPickupDeadline = 30 * time.Second
+
+// UrgentChatPriority puts an urgent turn at the head of the agent's queue. It
+// is the same value PrioritizeQueuedChatTask writes for a restart, so claim
+// ordering needs no new rule.
+const UrgentChatPriority int32 = 4
+
+// DirectChatSendOptions carries the urgent-delivery choices for one direct
+// chat send (DENE-1844). The zero value is an ordinary send.
+type DirectChatSendOptions struct {
+	// Urgent stamps the task with a pickup deadline and head-of-queue priority.
+	Urgent bool
+	// RuntimeID, when valid, dispatches the task to this runtime instead of the
+	// agent's primary one. It must equal the agent's configured fallback runtime
+	// at commit time; the handler has already verified owner, provider and
+	// liveness.
+	RuntimeID pgtype.UUID
+	// Mode is the client's explicit send mode. Empty means "merge into the
+	// session's queued or active run" (DENE-1857); urgent never merges.
+	Mode string
+}
+
 // SendDirectChatMessage atomically persists one web/mobile direct-chat turn:
 // the owning task (which claims its own input batch via chat_input_task_id), the
 // user message bound to that task, any attachment bindings, and the session
@@ -2678,13 +2708,29 @@ func (s *TaskService) SendDirectChatMessage(
 	uploaderType string,
 	uploaderID pgtype.UUID,
 ) (*DirectChatSendResult, error) {
-	return s.sendDirectChatMessage(ctx, session, agent, initiatorUserID, content, attachmentIDs, uploaderType, uploaderID, nil, "")
+	return s.sendDirectChatMessage(ctx, session, agent, initiatorUserID, content, attachmentIDs, uploaderType, uploaderID, nil, DirectChatSendOptions{})
 }
 
 // SendDirectChatMessageWithMode leaves deliberate queue/restart requests
 // independent, while an omitted mode merges into the session's active run.
 func (s *TaskService) SendDirectChatMessageWithMode(ctx context.Context, session db.ChatSession, agent db.Agent, initiatorUserID pgtype.UUID, content string, attachmentIDs []pgtype.UUID, uploaderType string, uploaderID pgtype.UUID, mode string) (*DirectChatSendResult, error) {
-	return s.sendDirectChatMessage(ctx, session, agent, initiatorUserID, content, attachmentIDs, uploaderType, uploaderID, nil, mode)
+	return s.sendDirectChatMessage(ctx, session, agent, initiatorUserID, content, attachmentIDs, uploaderType, uploaderID, nil, DirectChatSendOptions{Mode: mode})
+}
+
+// SendDirectChatMessageWithOptions is SendDirectChatMessage with the urgent
+// delivery options (DENE-1844).
+func (s *TaskService) SendDirectChatMessageWithOptions(
+	ctx context.Context,
+	session db.ChatSession,
+	agent db.Agent,
+	initiatorUserID pgtype.UUID,
+	content string,
+	attachmentIDs []pgtype.UUID,
+	uploaderType string,
+	uploaderID pgtype.UUID,
+	opts DirectChatSendOptions,
+) (*DirectChatSendResult, error) {
+	return s.sendDirectChatMessage(ctx, session, agent, initiatorUserID, content, attachmentIDs, uploaderType, uploaderID, nil, opts)
 }
 
 var ErrChatMergeUnsupported = errors.New("this running reply cannot accept more input; use queue or restart")
@@ -2703,7 +2749,7 @@ func (s *TaskService) SpawnDirectChat(
 	brief string,
 	createSession func(qtx *db.Queries) error,
 ) (*DirectChatSendResult, error) {
-	return s.sendDirectChatMessage(ctx, session, agent, initiatorUserID, brief, nil, "", pgtype.UUID{}, createSession, "")
+	return s.sendDirectChatMessage(ctx, session, agent, initiatorUserID, brief, nil, "", pgtype.UUID{}, createSession, DirectChatSendOptions{})
 }
 
 func (s *TaskService) sendDirectChatMessage(
@@ -2716,7 +2762,7 @@ func (s *TaskService) sendDirectChatMessage(
 	uploaderType string,
 	uploaderID pgtype.UUID,
 	beforeSend func(qtx *db.Queries) error,
-	mode string,
+	opts DirectChatSendOptions,
 ) (*DirectChatSendResult, error) {
 	// Build the per-task Composio overlay before the transaction — it can do
 	// network I/O and must not run with a DB transaction open.
@@ -2775,6 +2821,22 @@ func (s *TaskService) sendDirectChatMessage(
 		if !carrier.RuntimeID.Valid {
 			return ErrChatTaskAgentNoRuntime
 		}
+		// An urgent send may have chosen the fallback runtime (DENE-1844). The
+		// choice was made before this lock from the caller's copy of the agent;
+		// it only stands if the fallback is still the configured one now.
+		taskRuntimeID := carrier.RuntimeID
+		if opts.RuntimeID.Valid {
+			if !carrier.FallbackRuntimeID.Valid || carrier.FallbackRuntimeID != opts.RuntimeID {
+				return ErrChatFallbackRuntimeChanged
+			}
+			taskRuntimeID = opts.RuntimeID
+		}
+		priority := int32(2) // medium priority for chat; matches EnqueueChatTask
+		var pickupDeadline pgtype.Timestamptz
+		if opts.Urgent {
+			priority = UrgentChatPriority
+			pickupDeadline = pgtype.Timestamptz{Time: time.Now().Add(UrgentChatPickupDeadline), Valid: true}
+		}
 
 		// The database status of every newly-created task is "queued" until a
 		// daemon claims it. Product queue semantics are positional instead: this
@@ -2789,7 +2851,9 @@ func (s *TaskService) sendDirectChatMessage(
 		out.Queued = queued
 
 		var task db.AgentTaskQueue
-		if mode == "" {
+		// An urgent turn is always its own task: it carries a runtime choice,
+		// a priority and a pickup deadline that an existing run would not get.
+		if opts.Mode == "" && !opts.Urgent {
 			task, err = qtx.GetChatMergeTarget(ctx, session.ID)
 			if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 				return fmt.Errorf("find chat merge target: %w", err)
@@ -2813,8 +2877,9 @@ func (s *TaskService) sendDirectChatMessage(
 				WakeHumanQuote:       pgtype.Text{String: botWakeHumanQuote(ctx), Valid: botWakeHumanQuote(ctx) != ""},
 				ID:                   dbid.NewV7(),
 				AgentID:              session.AgentID,
-				RuntimeID:            carrier.RuntimeID,
-				Priority:             2, // medium priority for chat; matches EnqueueChatTask
+				RuntimeID:            taskRuntimeID,
+				Priority:             priority,
+				PickupDeadlineAt:     pickupDeadline,
 				ChatSessionID:        session.ID,
 				InitiatorUserID:      initiatorUserID,
 				OriginatorUserID:     attr.UserID,
@@ -4036,7 +4101,10 @@ func (s *TaskService) claimTask(ctx context.Context, agentID, runtimeID pgtype.U
 		// before its state transition; the claim handler then rechecks the freshly
 		// loaded Agent before returning any payload. Runtime mutation teardown is
 		// responsible for serializing and settling the remaining queued rows.
-		if runtimeID.Valid && agent.RuntimeID != runtimeID {
+		// The agent's explicit standby runtime is eligible too (DENE-1887): an
+		// urgent turn addressed to it is otherwise claimable in SQL but dropped
+		// here, and the daemon polls forever against {"task": null}.
+		if runtimeID.Valid && !AgentMayRunOnRuntime(agent, runtimeID) {
 			outcome = "runtime_mismatch"
 			return nil
 		}
@@ -4847,6 +4915,31 @@ func (s *TaskService) StartTaskForClaim(ctx context.Context, claim db.LockAgentT
 		return nil, fmt.Errorf("lock task start claim: %w", err)
 	}
 	replay := task.Status == "running"
+	if !replay && task.PickupDeadlineAt.Valid {
+		// An urgent turn (DENE-1844) past its pickup deadline must not start,
+		// however long the daemon waited for its directory. The database clock
+		// decides, under the row lock taken above, so this and the pickup sweep
+		// never both fail the same task: the loser sees a terminal row.
+		expired, err := qtx.FailAgentTaskPastPickupDeadlineForStart(ctx, task.ID)
+		switch {
+		case err == nil:
+			if err := writeChatPickupTimeoutNotices(ctx, qtx, []db.AgentTaskQueue{expired}); err != nil {
+				return nil, err
+			}
+			if err := SettleTerminalTaskState(ctx, qtx, expired); err != nil {
+				return nil, err
+			}
+			if err := tx.Commit(ctx); err != nil {
+				return nil, fmt.Errorf("commit task start: %w", err)
+			}
+			s.HandleFailedTasks(ctx, []db.AgentTaskQueue{expired})
+			return nil, fmt.Errorf("start task %s: %w", util.UUIDToString(expired.ID), ErrTaskPickupExpired)
+		case errors.Is(err, pgx.ErrNoRows):
+			// Still inside its deadline: start it.
+		default:
+			return nil, fmt.Errorf("check task pickup deadline: %w", err)
+		}
+	}
 	if !replay {
 		task, err = qtx.StartAgentTaskWithSupplement(ctx, startWithSupplementParams(task.ID, capabilities))
 		if err != nil {
@@ -4861,6 +4954,12 @@ func (s *TaskService) StartTaskForClaim(ctx context.Context, claim db.LockAgentT
 	}
 	return &task, nil
 }
+
+// ErrTaskPickupExpired is returned by StartTaskForClaim when the claimed task
+// is an urgent chat turn whose pickup deadline passed before the daemon asked
+// to start it. The task has already been failed with pickup_timeout and the
+// chat notified; the daemon must discard the claim, not report a failure.
+var ErrTaskPickupExpired = errors.New("urgent task missed its pickup deadline")
 
 func (s *TaskService) taskStarted(ctx context.Context, task db.AgentTaskQueue) {
 	s.forgetTaskReclaim(task)
@@ -6672,6 +6771,13 @@ func retryEligible(failureReason string, t db.AgentTaskQueue, agent db.Agent) bo
 
 // retryGatesOpen is retryEligible without the attempt ceiling.
 func retryGatesOpen(failureReason string, t db.AgentTaskQueue, agent db.Agent) bool {
+	// A chat turn whose runtime went offline is not retried (DENE-1839): the
+	// retry would sit deferred until that same machine heartbeats again, while
+	// the sender has already been told in the chat and decides whether to
+	// resend. Issue runs keep the deferred retry so the work resumes on return.
+	if failureReason == string(taskfailure.ReasonRuntimeOffline) && t.ChatSessionID.Valid {
+		return false
+	}
 	return retryableFailure(failureReason, t.Error.String) &&
 		t.MaxAttempts > 1 &&
 		!t.AutopilotRunID.Valid &&
@@ -7317,12 +7423,189 @@ func (s *TaskService) enqueueRerunTask(ctx context.Context, issue db.Issue, agen
 // neither replay nor settle; it would sit in the partial index forever,
 // restoring the unbounded history scan this change set removes.
 
-// FailTasksForOfflineRuntimes fails in-flight tasks whose runtime stayed
-// offline past the reconnect grace.
+// FailTasksForOfflineRuntimes fails in-flight work whose runtime has stayed
+// offline past its grace. A chat turn also gets its outcome written into the
+// chat in the same transaction (DENE-1839): the person who sent it is waiting,
+// and the sweeper path never reaches FailTask's in-tx failure message. The
+// row carries failure_reason=runtime_offline so every chat surface renders it
+// as a failure bubble, with the machine and its last heartbeat as the detail.
 func (s *TaskService) FailTasksForOfflineRuntimes(ctx context.Context, arg db.FailTasksForOfflineRuntimesParams) ([]db.AgentTaskQueue, error) {
 	return s.terminateTasksInTx(ctx, func(qtx *db.Queries) ([]db.AgentTaskQueue, error) {
-		return qtx.FailTasksForOfflineRuntimes(ctx, arg)
+		failed, err := qtx.FailTasksForOfflineRuntimes(ctx, arg)
+		if err != nil {
+			return nil, err
+		}
+		runtimes := make(map[pgtype.UUID]db.AgentRuntime)
+		for _, t := range failed {
+			if !t.ChatSessionID.Valid {
+				continue
+			}
+			runtime, ok := runtimes[t.RuntimeID]
+			if !ok {
+				runtime, err = qtx.GetAgentRuntime(ctx, t.RuntimeID)
+				if err != nil {
+					return nil, fmt.Errorf("load offline runtime for chat notice: %w", err)
+				}
+				runtimes[t.RuntimeID] = runtime
+			}
+			if err := qtx.ReleaseOnboardingKickoffFromTask(ctx, chatInputOwnerID(t)); err != nil {
+				return nil, fmt.Errorf("release onboarding kickoff: %w", err)
+			}
+			if _, err := createAssistantChatMessage(ctx, qtx, db.CreateChatMessageParams{
+				ViaBotID:      t.ViaBotID,
+				ViaBotName:    t.ViaBotName,
+				ID:            dbid.NewV7(),
+				ChatSessionID: t.ChatSessionID,
+				Role:          "assistant",
+				Content:       chatRuntimeOfflineNotice(runtime, time.Now()),
+				TaskID:        t.ID,
+				FailureReason: pgtype.Text{String: string(taskfailure.ReasonRuntimeOffline), Valid: true},
+				ElapsedMs:     computeChatElapsedMs(t),
+			}); err != nil {
+				return nil, fmt.Errorf("write chat runtime_offline outcome: %w", err)
+			}
+		}
+		return failed, nil
 	})
+}
+
+// FailTasksPastPickupDeadline fails urgent chat turns (DENE-1844) that no
+// daemon started before their pickup deadline and writes the failure bubble
+// into the chat, so the sender sees within seconds that the message was not
+// picked up. Runs on the fast pickup sweep, not the 30-second runtime tick.
+// It covers every not-yet-started status, including a task a daemon parked in
+// waiting_local_directory after claiming it (DENE-1884).
+func (s *TaskService) FailTasksPastPickupDeadline(ctx context.Context, maxPerTick int32) ([]db.AgentTaskQueue, error) {
+	return s.terminateTasksInTx(ctx, func(qtx *db.Queries) ([]db.AgentTaskQueue, error) {
+		failed, err := qtx.FailTasksPastPickupDeadline(ctx, maxPerTick)
+		if err != nil {
+			return nil, err
+		}
+		if err := writeChatPickupTimeoutNotices(ctx, qtx, failed); err != nil {
+			return nil, err
+		}
+		return failed, nil
+	})
+}
+
+// writeChatPickupTimeoutNotices posts the pickup_timeout bubble for each
+// freshly-failed urgent chat turn, in the transaction that failed it. Both
+// the sweep and the start-time fence go through here, and each row is failed
+// by exactly one of them (the row is locked while it fails), so the chat sees
+// one notice per turn.
+func writeChatPickupTimeoutNotices(ctx context.Context, qtx *db.Queries, failed []db.AgentTaskQueue) error {
+	for _, t := range failed {
+		if !t.ChatSessionID.Valid {
+			continue
+		}
+		var runtime *db.AgentRuntime
+		if t.RuntimeID.Valid {
+			if rt, err := qtx.GetAgentRuntime(ctx, t.RuntimeID); err == nil {
+				runtime = &rt
+			}
+		}
+		if err := qtx.ReleaseOnboardingKickoffFromTask(ctx, chatInputOwnerID(t)); err != nil {
+			return fmt.Errorf("release onboarding kickoff: %w", err)
+		}
+		if _, err := createAssistantChatMessage(ctx, qtx, db.CreateChatMessageParams{
+			ViaBotID:      t.ViaBotID,
+			ViaBotName:    t.ViaBotName,
+			ID:            dbid.NewV7(),
+			ChatSessionID: t.ChatSessionID,
+			Role:          "assistant",
+			Content:       chatPickupTimeoutNotice(t, runtime, time.Now()),
+			TaskID:        t.ID,
+			FailureReason: pgtype.Text{String: string(taskfailure.ReasonPickupTimeout), Valid: true},
+			ElapsedMs:     computeChatElapsedMs(t),
+		}); err != nil {
+			return fmt.Errorf("write chat pickup_timeout outcome: %w", err)
+		}
+	}
+	return nil
+}
+
+// chatPickupTimeoutNotice is the detail line under an urgent turn that nobody
+// started in time: which machine was supposed to pick it up, whether it was
+// even handed to the daemon, and what the sender can do now.
+func chatPickupTimeoutNotice(t db.AgentTaskQueue, runtime *db.AgentRuntime, now time.Time) string {
+	var b strings.Builder
+	b.WriteString("这条加急消息")
+	if t.PickupDeadlineAt.Valid && t.CreatedAt.Valid {
+		if wait := t.PickupDeadlineAt.Time.Sub(t.CreatedAt.Time).Round(time.Second); wait > 0 {
+			fmt.Fprintf(&b, "在 %d 秒内", int(wait/time.Second))
+		}
+	}
+	b.WriteString("没有被接起")
+	if runtime != nil {
+		name := runtime.Name
+		if runtime.CustomName.Valid && runtime.CustomName.String != "" {
+			name = runtime.CustomName.String
+		}
+		if name == "" {
+			name = util.UUIDToString(runtime.ID)
+		}
+		fmt.Fprintf(&b, "：负责的机器「%s」", name)
+		switch {
+		case t.DispatchedAt.Valid:
+			b.WriteString("收到了任务但没有开始执行")
+		case runtime.Status != "online":
+			b.WriteString("不在线")
+		default:
+			b.WriteString("在线但没有来领取")
+		}
+		lastSeen := runtime.LastSeenAt
+		if !lastSeen.Valid {
+			lastSeen = runtime.UpdatedAt
+		}
+		if lastSeen.Valid {
+			fmt.Fprintf(&b, "，最后在线 %s", lastSeen.Time.UTC().Format("2006-01-02 15:04:05 UTC"))
+			if ago := now.Sub(lastSeen.Time).Round(time.Minute); ago >= time.Minute {
+				fmt.Fprintf(&b, "（约 %s 前）", chineseDuration(ago))
+			}
+		}
+	}
+	b.WriteString("。平台不会替你重发；可以换一个在线的智能体，或给这个智能体配置备用运行时后再发一次。")
+	return b.String()
+}
+
+// chatRuntimeOfflineNotice is the detail line under the chat failure bubble:
+// which machine stopped answering and when it was last heard from. The chat
+// surfaces already translate the headline from failure_reason; this text is
+// the part they cannot derive on their own.
+func chatRuntimeOfflineNotice(runtime db.AgentRuntime, now time.Time) string {
+	name := runtime.Name
+	if runtime.CustomName.Valid && runtime.CustomName.String != "" {
+		name = runtime.CustomName.String
+	}
+	if name == "" {
+		name = util.UUIDToString(runtime.ID)
+	}
+	lastSeen := runtime.LastSeenAt
+	if !lastSeen.Valid {
+		lastSeen = runtime.UpdatedAt
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "运行这个智能体的机器「%s」已掉线", name)
+	if lastSeen.Valid {
+		fmt.Fprintf(&b, "，最后在线 %s", lastSeen.Time.UTC().Format("2006-01-02 15:04 UTC"))
+		if ago := now.Sub(lastSeen.Time).Round(time.Minute); ago >= time.Minute {
+			fmt.Fprintf(&b, "（约 %s 前）", chineseDuration(ago))
+		}
+	}
+	b.WriteString("。这条消息没有处理完，平台不会替你重发；机器恢复在线后请再发一次。")
+	return b.String()
+}
+
+// chineseDuration renders a whole-minute duration as "N 分钟" or "H 小时 M 分钟".
+func chineseDuration(d time.Duration) string {
+	minutes := int(d.Round(time.Minute) / time.Minute)
+	if minutes < 60 {
+		return fmt.Sprintf("%d 分钟", minutes)
+	}
+	if minutes%60 == 0 {
+		return fmt.Sprintf("%d 小时", minutes/60)
+	}
+	return fmt.Sprintf("%d 小时 %d 分钟", minutes/60, minutes%60)
 }
 
 // FailExpiredRuntimeReconnectRetries fails deferred retries that reached their
