@@ -160,3 +160,9 @@ then apply the paired down migration; it removes only the journal/cursor/stream
 objects and capture triggers. Existing business rows remain untouched. Reapplying
 starts a new coverage period; old cursors must reset. The native down migration
 and three lifecycle behaviors are exercised on a disposable test database.
+
+Native Inbox → Activity uses a registered formSheet and the mobile API's AbortSignal
+handling with the shared pure schema. The existing [interaction map](../../INTERACTION.md)
+and [browser evidence](../evidence/DENE-1879/browser.md) describe the initial
+snapshot entry. Durable-mode/cache changes are recorded separately in the second
+phase evidence; the earlier screenshots do not prove durable-mode behavior.

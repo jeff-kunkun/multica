@@ -6,7 +6,9 @@ The view reads `POST /api/fast-access/v1/read` through the shared API client. It
 
 The API boundary validates envelopes and continuation consistency. An invalid response becomes a recoverable error instead of an empty successful result. Any continuation error hides the old partial snapshot because its authorization may have changed. The query cache key includes caller and request workspace identity. Server state remains in TanStack Query, with no persistence.
 
-## Native mobile exception
+## Native mobile exception (superseded by DENE-1879)
+
+Update: DENE-1879 implements the native entry; see [mobile follow-up](../DENE-1879/mobile.md) for verification limits. The following records the original delivery boundary.
 
 `apps/mobile/app/(app)/[workspace]/(tabs)/inbox.tsx` is an independent native inbox. The new cross-workspace activity dialog is not wired there. This child task explicitly restricts writes to server/core/views and necessary Web/Desktop wiring; native parity must be scheduled by the parent. Mobile web uses the same shared dialog. No claim of native feature parity is made.
 

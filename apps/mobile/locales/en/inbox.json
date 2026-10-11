@@ -83,5 +83,33 @@
   "body": {
     "autopilot_title_limit": "Autopilot \"{{title}}\" was not started because this workspace has reached its limit of {{limit}} runs for the current period. The allowance resets {{resetAt}}.",
     "autopilot_limit": "This workspace has reached its limit of {{limit}} autopilot runs for the current period. This execution was not started. The allowance resets {{resetAt}}."
+  },
+  "fast_access": {
+    "open": "Activity",
+    "title": "Workspace activity",
+    "close": "Close",
+    "scope": "Workspaces",
+    "all": "All visible workspaces",
+    "current": "Current workspace",
+    "refresh": "Refresh",
+    "loading": "Loading...",
+    "error": "Activity could not be loaded. Refresh to try again.",
+    "runs": "Active runs",
+    "untitled_run": "Run",
+    "executing": "Executing",
+    "queued": "Queued",
+    "waiting": "Waiting",
+    "unknown": "Status unavailable",
+    "autopilot": "Automation",
+    "no_runs": "No active runs.",
+    "chats": "Chat activity · last 30 minutes",
+    "untitled_chat": "Chat",
+    "unread": "Unread: {{count}}",
+    "no_chats": "No recent chat activity.",
+    "complete": "All results loaded.",
+    "partial": "More results remain.",
+    "more": "Load more",
+    "as_of": "Observed at {{time}}",
+    "denied": "You do not have access to this activity. Try the current workspace."
   }
 }
