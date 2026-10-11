@@ -11,6 +11,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/spf13/cobra"
@@ -279,6 +280,8 @@ func init() {
 	chatSendCmd.Flags().String("content-file", "", "Read the message from this file instead of the argument")
 	chatSendCmd.Flags().String("mode", "queue", "While the agent is replying: steer, queue or restart")
 	chatSendCmd.Flags().String("output", "json", "Output format: table or json")
+	chatSendCmd.Flags().StringSlice("attachment", nil, "Local files to attach to this message (repeatable)")
+	chatSendCmd.Flags().Bool("allow-external-file", false, "Allow attachment paths outside the working directory")
 	chatOpenCmd.Flags().String("agent", "", "Agent to talk to: name or id (required)")
 	chatOpenCmd.Flags().String("brief-file", "", "File holding the first message for the agent (required)")
 	chatOpenCmd.Flags().String("title", "", "Chat title, Project · topic")
@@ -866,12 +869,24 @@ func runChatSend(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	ctx, cancel := cli.APIContext(context.Background())
+	pending, err := collectChatSendAttachments(cmd)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), cli.AtLeastAPITimeout(10*time.Minute))
 	defer cancel()
 	output, _ := cmd.Flags().GetString("output")
 	var out map[string]any
+	var attachmentIDs []string
+	for _, att := range pending {
+		id, err := client.UploadFile(ctx, att.data, att.path, "")
+		if err != nil {
+			return fmt.Errorf("upload chat attachment (uploaded IDs: %v): %w", attachmentIDs, err)
+		}
+		attachmentIDs = append(attachmentIDs, id)
+	}
 	path := "/api/chat/sessions/" + url.PathEscape(ref.ID) + "/messages"
-	if err := client.PostJSON(ctx, path, map[string]any{"content": content, "mode": mode}, &out); err != nil {
+	if err := client.PostJSON(ctx, path, map[string]any{"content": content, "mode": mode, "attachment_ids": attachmentIDs}, &out); err != nil {
 		return sendModeRefusal(err, output, "chat send")
 	}
 	if wait, _ := cmd.Flags().GetBool("wait"); wait {
@@ -940,4 +955,9 @@ func withBotAttribution(author string, record map[string]any) string {
 		return author + " (via " + name + ")"
 	}
 	return author
+}
+
+func collectChatSendAttachments(cmd *cobra.Command) ([]pendingAttachment, error) {
+	paths, _ := cmd.Flags().GetStringSlice("attachment")
+	return collectLocalAttachments(cmd, paths)
 }

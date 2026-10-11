@@ -1,1 +1,0 @@
-const {Client}=require('pg');(async()=>{const c=new Client({connectionString:process.env.DATABASE_URL});await c.connect();await c.query(`UPDATE "user" SET onboarded_at=now(),starter_content_state='skipped' WHERE email='dene1794-qa@example.test'`);await c.end();console.log('Local QA onboarding completed')})().catch(e=>{console.error(e.message);process.exit(1)});

@@ -11,6 +11,10 @@ is a write-time snapshot. Ordinary member writes omit the fields. A content edit
 re-stamps comment provenance only when text changes. Readers must not infer a
 human endorsement from `author_type=member` when `via_bot_id` is present.
 
+Chat realtime clients preserve both source fields in flat and paged message
+caches before reconciliation. A cancelled refetch or reconnect replay must not
+turn a Bot message into an apparent direct member message.
+
 Issue creation also retains its Bot snapshot for later system wakeups that use
 the creator fallback; a new direct member action takes precedence.
 

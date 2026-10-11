@@ -7,7 +7,7 @@ const activity = { id: "a", type: "activity", actor_type: "member", actor_id: "u
 const parsers = [
   (fields: object) => CommentSchema.parse({ ...comment, ...fields }),
   (fields: object) => ChatMessageSchema.parse({ ...message, ...fields }),
-  (fields: object) => TimelineEntriesSchema.parse([{ ...activity, ...fields }])[0],
+  (fields: object) => TimelineEntriesSchema.parse([{ ...activity, ...fields }])[0]!,
 ];
 
 describe("historical bot attribution", () => {
