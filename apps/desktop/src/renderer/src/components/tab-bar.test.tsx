@@ -22,6 +22,7 @@ type MockStripGroup = {
   name: string;
   collapsed: boolean;
   color: "blue";
+  projectId?: string;
 };
 
 const state = vi.hoisted(() => ({

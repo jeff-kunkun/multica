@@ -429,6 +429,13 @@ function extractWorkspaceSlug(path: string): string | null {
 // ---------------------------------------------------------------------------
 
 /** Split a tab URL into pathname and the search+hash suffix. */
+const MAX_GROUP_NAME = 80;
+
+/** A group name as stored: trimmed and capped. */
+function groupNameFrom(name: string): string {
+  return name.trim().slice(0, MAX_GROUP_NAME);
+}
+
 export function splitTabUrl(url: string): { pathname: string; suffix: string } {
   const searchIdx = url.indexOf("?");
   const hashIdx = url.indexOf("#");
@@ -823,7 +830,7 @@ export function sanitizeStripGroups(value: unknown): TabStripGroup[] {
     seen.add(raw.id);
     groups.push({
       id: raw.id,
-      name: typeof raw.name === "string" ? raw.name.slice(0, 80) : "",
+      name: typeof raw.name === "string" ? raw.name.slice(0, MAX_GROUP_NAME) : "",
       collapsed: raw.collapsed === true,
       color: isStripGroupColor(raw.color)
         ? raw.color
@@ -890,7 +897,7 @@ function placeTabByProject(
     } else {
       const created: TabStripGroup = {
         id: createId(),
-        name: titles[tab.projectId] ?? "",
+        name: groupNameFrom(titles[tab.projectId] ?? ""),
         collapsed: false,
         color: projectGroupColor(tab.projectId),
         projectId: tab.projectId,
@@ -1769,7 +1776,7 @@ export const useTabStore = create<TabStore>()(
 
       renameTabGroup(groupId, name) {
         const { byWorkspace } = get();
-        const nextName = name.trim().slice(0, 80);
+        const nextName = groupNameFrom(name);
         for (const slug of Object.keys(byWorkspace)) {
           const group = byWorkspace[slug];
           const index = group.groups.findIndex((candidate) => candidate.id === groupId);
@@ -1904,9 +1911,12 @@ export const useTabStore = create<TabStore>()(
         let groupsChanged = false;
         let groups = group.groups.map((candidate) => {
           const title = candidate.projectId ? titles[candidate.projectId] : undefined;
-          if (!title || title === candidate.name) return candidate;
+          // Compare in stored form, or a long title never matches and every
+          // sync rewrites the strip.
+          const name = title ? groupNameFrom(title) : "";
+          if (!name || name === candidate.name) return candidate;
           groupsChanged = true;
-          return { ...candidate, name: title.slice(0, 80) };
+          return { ...candidate, name };
         });
         if (changed.length === 0 && !groupsChanged) return;
         if (tabGroupMode === "project") {

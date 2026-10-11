@@ -23,9 +23,22 @@ export function useTabProjectSync(slug: string | null, tabs: Tab[]): Project[] {
   const syncTabProjects = useTabStore((s) => s.syncTabProjects);
   const enabled = !!wsId && !!slug;
 
+  // Keyed on id + url only: the sync itself rewrites tab objects, and
+  // re-running on that would feed back into another sync.
+  const tabsKey = tabs.map((tab) => `${tab.id} ${tab.url}`).join("\n");
   const subjects = useMemo(
-    () => tabs.map((tab) => ({ tab, subject: parseTabSubject(tab.url) })),
-    [tabs],
+    () =>
+      tabsKey
+        .split("\n")
+        .filter(Boolean)
+        .map((line) => {
+          const space = line.indexOf(" ");
+          return {
+            id: line.slice(0, space),
+            subject: parseTabSubject(line.slice(space + 1)),
+          };
+        }),
+    [tabsKey],
   );
   const hasChat = subjects.some(
     ({ subject }) => subject.kind === "chat" && !!subject.sessionId,
@@ -67,27 +80,27 @@ export function useTabProjectSync(slug: string | null, tabs: Tab[]): Project[] {
       if (query.data) issueProject.set(issueIds[index], query.data.project_id ?? null);
     });
     const resolved: Record<string, string | null> = {};
-    for (const { tab, subject } of subjects) {
+    for (const { id, subject } of subjects) {
       switch (subject.kind) {
         case "chat": {
           if (!subject.sessionId) {
-            resolved[tab.id] = null;
+            resolved[id] = null;
             break;
           }
           const session = sessions?.find((s) => s.id === subject.sessionId);
-          if (session) resolved[tab.id] = session.project_id ?? null;
+          if (session) resolved[id] = session.project_id ?? null;
           break;
         }
         case "issue":
           if (issueProject.has(subject.id)) {
-            resolved[tab.id] = issueProject.get(subject.id) ?? null;
+            resolved[id] = issueProject.get(subject.id) ?? null;
           }
           break;
         case "project":
-          resolved[tab.id] = subject.id;
+          resolved[id] = subject.id;
           break;
         default:
-          resolved[tab.id] = null;
+          resolved[id] = null;
       }
     }
     const titles: Record<string, string> = {};
