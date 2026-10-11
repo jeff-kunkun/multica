@@ -234,7 +234,7 @@ func (s *Service) Audit(ctx context.Context, actorWS pgtype.UUID, actor Actor) (
 // Create offers a pending link from the caller's workspace (the source) to
 // the workspace named by targetSlug (any address TargetSlug reads),
 // exposing projectIDs.
-func (s *Service) Create(ctx context.Context, actorWS pgtype.UUID, actorUser pgtype.UUID, actor Actor, targetSlug string, projectIDs []pgtype.UUID) (Link, error) {
+func (s *Service) Create(ctx context.Context, actorWS pgtype.UUID, actorUser pgtype.UUID, actor Actor, targetSlug string, projectIDs []pgtype.UUID, managedOption ...bool) (Link, error) {
 	if !Decide(OpCreate, SideSource, actor) {
 		return Link{}, forbidden("only the workspace owner can link data out of the workspace")
 	}
@@ -259,11 +259,19 @@ func (s *Service) Create(ctx context.Context, actorWS pgtype.UUID, actorUser pgt
 		if err != nil {
 			return err
 		}
+		managed := true
+		if len(managedOption) > 0 {
+			managed = managedOption[0]
+		}
+		created, err = q.SetWorkspaceLinkManaged(ctx, db.SetWorkspaceLinkManagedParams{ID: created.ID, Managed: managed})
+		if err != nil {
+			return err
+		}
 		if err := q.AddWorkspaceLinkProjects(ctx, db.AddWorkspaceLinkProjectsParams{LinkID: created.ID, ProjectIds: ids}); err != nil {
 			return err
 		}
 		return audit(ctx, q, created, actorWS, actorUser, "create", map[string]any{
-			"target_slug": target.Slug, "project_ids": uuidStrings(ids),
+			"target_slug": target.Slug, "project_ids": uuidStrings(ids), "managed": managed,
 		})
 	})
 	if err != nil {

@@ -102,7 +102,7 @@ describe("WorkspaceLinksTab", () => {
     await user.click(await screen.findByRole("checkbox", { name: /Roadmap/ }));
     await user.click(screen.getByRole("button", { name: "Offer link" }));
     await waitFor(() =>
-      expect(api.createWorkspaceLink).toHaveBeenCalledWith({ target_slug: "partner", project_ids: ["p1"] }),
+      expect(api.createWorkspaceLink).toHaveBeenCalledWith({ target_slug: "partner", project_ids: ["p1"], managed: true }),
     );
   });
 
@@ -151,6 +151,7 @@ describe("WorkspaceLinksTab", () => {
         target_slug: "side",
         project_ids: ["their-1"],
         direction: "pull",
+        managed: true,
       }),
     );
   });
@@ -218,7 +219,7 @@ describe("WorkspaceLinksTab", () => {
     });
     const user = userEvent.setup();
     renderTab();
-    const switches = await screen.findAllByRole("switch", { name: "Let the viewing side manage tasks and autopilots" });
+    const switches = await screen.findAllByRole("switch", { name: "Managed access" });
     expect(switches).toHaveLength(2);
     const [mine, theirs] = switches as [HTMLElement, HTMLElement];
     expect(theirs).toHaveAttribute("aria-disabled", "true");
@@ -228,4 +229,21 @@ describe("WorkspaceLinksTab", () => {
     await user.click(mine);
     await waitFor(() => expect(api.updateWorkspaceLink).toHaveBeenCalledWith("l-out", { managed: true }));
   });
+});
+
+it("lets a new link opt out of managed access before creation", async () => {
+  api.listWorkspaceLinks.mockResolvedValue({ links: [], can: { create: true, accept: true, pull: true, manage: true, audit: false } });
+  api.lookupWorkspaceLinkTarget.mockResolvedValue({ workspace: ws("Partner", "partner") });
+  const user = userEvent.setup();
+  renderTab();
+  await screen.findByText("Pick the workspace to share with first.");
+  await user.click(screen.getByLabelText("Workspace URL to share with"));
+  await user.paste("partner");
+  await screen.findByText("Partner");
+  await user.click(screen.getByRole("checkbox", { name: /Roadmap/ }));
+  const choices = screen.getAllByRole("switch", { name: /by default/ });
+  expect(choices[0]).toHaveAttribute("aria-checked", "true");
+  await user.click(choices[0]!);
+  await user.click(screen.getByRole("button", { name: "Offer link" }));
+  await waitFor(() => expect(api.createWorkspaceLink).toHaveBeenCalledWith({ target_slug: "partner", project_ids: ["p1"], managed: false }));
 });

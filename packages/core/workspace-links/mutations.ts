@@ -14,7 +14,7 @@ function useLinkMutation<V, R>(wsId: string, fn: (vars: V) => Promise<R>) {
 }
 
 export function useCreateWorkspaceLink(wsId: string) {
-  return useLinkMutation(wsId, (body: { target_slug: string; project_ids: string[]; direction?: WorkspaceLinkDirection }) =>
+  return useLinkMutation(wsId, (body: { target_slug: string; project_ids: string[]; direction?: WorkspaceLinkDirection; managed?: boolean }) =>
     api.createWorkspaceLink(body),
   );
 }

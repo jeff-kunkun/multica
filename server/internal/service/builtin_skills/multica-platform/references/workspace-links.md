@@ -3,7 +3,7 @@
 A link lets this workspace read the status of another workspace's chosen
 projects without anyone joining it. The other workspace is the source; this one
 is the viewer. Agents read; on a managed link they also work on the source's
-issues and autopilots (see below):
+issues, autopilots and the run initiator’s own chats (see below):
 
 ```sh
 multica workspace link list --output json
@@ -39,10 +39,12 @@ not its member and every such call is refused.
 ## Managed links
 
 When `list` shows a link with `"managed": true`, you may work on the source's
-issues and autopilots for the person who started your run, with that person's
+issues, autopilots and that person’s own chats for the person who started your run, with that person's
 rights there (a guest there gets nothing). Add `--linked <source-slug>`:
 
 ```sh
+multica chat list --linked <source-slug> --output json
+multica chat send --linked <source-slug> --session <chat-id> --content-file note.md --output json
 multica issue list --linked <source-slug> --output json
 multica issue status <ID> in_progress --linked <source-slug>
 multica issue comment add <ID> --content-file note.md --linked <source-slug>
@@ -55,7 +57,17 @@ Covered: issue list/get/search/children/create/update/assign/status, comments
 (list, add), labels, custom properties (`issue property list/set/unset`);
 autopilot list/get/create/update/delete, run now (`trigger`), runs and
 triggers. `multica autopilot linked-changes <id> --linked <source-slug>` lists
-the autopilot's writes made this way (who, via which workspace, which agent). Everything else — members, settings, agents,
+the autopilot's writes made this way (who, via which workspace, which agent).
+Chat list/send are restricted to chats owned by the run initiator in the source,
+even if their normal role could see other people’s chats. Send accepts queued text
+without attachments or --wait (steer/restart are unavailable), wakes the receiving agent normally and records
+a `managed_write` with the chat ID. The JSON receipt contains `message_id`,
+`chat_session_id` and `linked_delivery` attribution. The source displays the initiator,
+viewer workspace and sending agent as a forwarded-by label; the receiving agent
+reads the content as external pasted data, not the initiator’s own instruction.
+A refused linked chat operation returns 403; inspect
+`multica workspace link view <link-id>`, do not retry through another route.
+Everything else — members, settings, agents,
 MCP, the link itself, close/handoff — is refused with 403. The run executes
 nowhere new: the work stays in the source, and each change shows there as
 "<person> 经 <your workspace>·<you>". A 403 means managed is off, the link is
@@ -82,3 +94,16 @@ its slug); the viewer's owner or admin accepts it; either side can revoke.
 Someone who owns both workspaces can instead pull from the viewer side (设置 →
 连通工作区 → 连进来的, or `create --from <workspace>`); that link is active at
 once. Anyone else must ask the source's owner to offer it.
+
+
+New links enable managed access by default (Kun’s 2026-10-11 decision): viewer
+agents may act with the run initiator’s existing rights in the source. Existing
+links keep their current switch. The source owner can opt out when creating:
+
+```sh
+multica workspace link create --to <viewer-slug> --project <project> --managed=false
+multica workspace link create --from <source-slug> --project <project> --managed=false
+```
+
+A missing source membership or guest role still grants no managed access.
+There is no receiving-chat setting or separate workspace-link send command.

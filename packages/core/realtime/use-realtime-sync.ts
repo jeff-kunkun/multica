@@ -224,6 +224,7 @@ export function applyChatMessageToCache(
       content: payload.content ?? "",
       task_id: payload.task_id ?? null,
       created_at: payload.created_at ?? new Date().toISOString(),
+      ...(payload.message_kind ? { message_kind: payload.message_kind } : {}),
       sender_user_id: payload.sender_user_id,
       via_bot_id: payload.via_bot_id,
       via_bot_name: payload.via_bot_name,

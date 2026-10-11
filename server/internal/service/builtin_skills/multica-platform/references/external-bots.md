@@ -35,6 +35,8 @@ Use the relevant references in this skill and each command's `--help`:
 - `issue update/status/assign/label/close/rerun` for issue work.
 - `issue comment add/update/delete` and its attachment flags for comment work.
 - Agent/settings commands supported by the installed CLI for administration.
+- `workspace link create` enables managed access by default; use `--managed=false` to opt out. Existing links stay unchanged.
+- `chat list/send --linked <source>` is for viewer agents with task tokens and the run initiator’s own source chats. Personal-login Bots cannot use this path or borrow a task identity.
 
 Command availability is not proof that a personal login can use the endpoint.
 In particular, `chat open` may be the agent-only chat-spawn API, and

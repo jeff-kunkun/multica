@@ -147,6 +147,7 @@ type createWorkspaceLinkRequest struct {
 	// Direction is "offer" (default: share this workspace's projects) or
 	// "pull" (read the other workspace's projects).
 	Direction string `json:"direction"`
+	Managed   *bool  `json:"managed"`
 }
 
 // CreateWorkspaceLink — POST /api/workspace-links
@@ -164,18 +165,22 @@ func (h *Handler) CreateWorkspaceLink(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	managed := true
+	if req.Managed != nil {
+		managed = *req.Managed
+	}
 	var link workspacelink.Link
 	var err error
 	switch req.Direction {
 	case "", "offer":
-		link, err = h.workspaceLinks().Create(r.Context(), ws, user, actor, req.TargetSlug, projects)
+		link, err = h.workspaceLinks().Create(r.Context(), ws, user, actor, req.TargetSlug, projects, managed)
 		if err == nil {
 			if id, perr := parseUUIDSafe(link.ID); perr == nil {
 				h.notifyWorkspaceLinkOffered(r.Context(), id, user)
 			}
 		}
 	case "pull":
-		link, err = h.workspaceLinks().Pull(r.Context(), ws, user, actor, req.TargetSlug, projects)
+		link, err = h.workspaceLinks().Pull(r.Context(), ws, user, actor, req.TargetSlug, projects, managed)
 	default:
 		writeError(w, http.StatusBadRequest, `direction must be "offer" or "pull"`)
 		return

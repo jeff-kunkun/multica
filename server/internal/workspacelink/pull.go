@@ -85,7 +85,7 @@ func (s *Service) LookupPull(ctx context.Context, actorWS, actorUser pgtype.UUID
 
 // Pull creates an active link from the workspace named by sourceAddress to
 // the caller's workspace, exposing projectIDs of that workspace.
-func (s *Service) Pull(ctx context.Context, actorWS pgtype.UUID, actorUser pgtype.UUID, actor Actor, sourceAddress string, projectIDs []pgtype.UUID) (Link, error) {
+func (s *Service) Pull(ctx context.Context, actorWS pgtype.UUID, actorUser pgtype.UUID, actor Actor, sourceAddress string, projectIDs []pgtype.UUID, managedOption ...bool) (Link, error) {
 	if !Decide(OpAccept, SideViewer, actor) {
 		return Link{}, forbidden("only owners and admins can link another workspace in")
 	}
@@ -116,12 +116,20 @@ func (s *Service) Pull(ctx context.Context, actorWS pgtype.UUID, actorUser pgtyp
 		if err != nil {
 			return err
 		}
+		managed := true
+		if len(managedOption) > 0 {
+			managed = managedOption[0]
+		}
+		created, err = q.SetWorkspaceLinkManaged(ctx, db.SetWorkspaceLinkManagedParams{ID: created.ID, Managed: managed})
+		if err != nil {
+			return err
+		}
 		if err := q.AddWorkspaceLinkProjects(ctx, db.AddWorkspaceLinkProjectsParams{LinkID: created.ID, ProjectIds: ids}); err != nil {
 			return err
 		}
 		// Each decision is audited on the side whose authority it used.
 		if err := audit(ctx, q, created, source.ID, actorUser, "create", map[string]any{
-			"project_ids": uuidStrings(ids), "pulled": true,
+			"project_ids": uuidStrings(ids), "pulled": true, "managed": managed,
 		}); err != nil {
 			return err
 		}

@@ -235,6 +235,7 @@ function CreateLinkForm({
   const { t } = useT("workspace");
   const pull = direction === "pull";
   const [address, setAddress] = useState("");
+  const [managed, setManaged] = useState(true);
   const [projectIds, setProjectIds] = useState<string[]>([]);
   const create = useCreateWorkspaceLink(wsId);
   const target = useLinkTarget(wsId, address, enabled, pull);
@@ -285,6 +286,13 @@ function CreateLinkForm({
             <ProjectPicker wsId={wsId} selected={projectIds} onChange={setProjectIds} disabled={!enabled} />
           </div>
         )}
+        <label className="flex min-h-11 items-center justify-between gap-3 border-t pt-3">
+          <span className="min-w-0">
+            <span className="block text-body">{t(($) => $.links.tab.managed_label)}</span>
+            <span className="block text-caption text-muted-foreground">{t(($) => $.links.tab.managed_create_hint)}</span>
+          </span>
+          <Switch checked={managed} onCheckedChange={setManaged} disabled={!enabled || create.isPending} />
+        </label>
         <div className="flex items-center justify-between gap-3">
           <p className="text-caption text-muted-foreground">
             {/* Hold the refusal until the server has answered, so an owner
@@ -299,11 +307,12 @@ function CreateLinkForm({
               target.workspace &&
               create.mutate(
                 pull
-                  ? { target_slug: target.workspace.slug, project_ids: picked, direction: "pull" }
-                  : { target_slug: target.workspace.slug, project_ids: picked },
+                  ? { target_slug: target.workspace.slug, project_ids: picked, direction: "pull", managed }
+                  : { target_slug: target.workspace.slug, project_ids: picked, managed },
                 {
                   onSuccess: () => {
                     setAddress("");
+                    setManaged(true);
                     setProjectIds([]);
                     toast.success(pull ? t(($) => $.links.tab.pull_created) : t(($) => $.links.tab.created));
                   },
@@ -633,8 +642,8 @@ function IncomingLinkRow({
 }
 
 /**
- * Managed access (DENE-1663): the viewer's agents may change the source's
- * tasks and autopilots for the person who started their run. The list says
+ * Managed access: the viewer's agents act in the source workspace with
+ * the permissions of the person who started their run. The list says
  * who may switch it (`can_set_managed`); everyone else sees why not.
  */
 function ManagedSwitch({ wsId, link }: { wsId: string; link: WorkspaceLink }) {
@@ -684,6 +693,8 @@ function AuditSection({ wsId }: { wsId: string }) {
         return t(($) => $.links.audit.accept);
       case "set_managed":
         return entry.detail?.managed ? t(($) => $.links.audit.set_managed_on) : t(($) => $.links.audit.set_managed_off);
+      case "deliver":
+        return t(($) => $.links.audit.deliver);
       case "managed_write":
         return t(($) => $.links.audit.managed_write, {
           agent: typeof entry.detail?.agent_name === "string" ? entry.detail.agent_name : t(($) => $.links.audit.someone),

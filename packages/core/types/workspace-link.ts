@@ -24,8 +24,8 @@ export interface WorkspaceLink {
   target: WorkspaceLinkWorkspace;
   /** Empty unless the caller is the source side's owner/admin. */
   projects: WorkspaceLinkProject[];
-  /** The viewer's agents may manage the source's issues and autopilots for
-   *  their run's originator (DENE-1663). */
+  /** The viewer's agents may act in the source workspace with their run's
+   *  originator permissions, including delegated chat delivery. */
   managed?: boolean;
   /** Whether the caller may switch `managed`; the list answers it. */
   can_set_managed?: boolean;
@@ -62,7 +62,7 @@ export interface ListWorkspaceLinksResponse {
 
 export interface WorkspaceLinkAuditEntry {
   link_id: string;
-  action: "create" | "update_projects" | "accept" | "revoke" | "set_managed" | "managed_write";
+  action: "create" | "update_projects" | "accept" | "revoke" | "set_managed" | "managed_write" | "deliver";
   actor_name: string;
   by_side: WorkspaceLinkSide;
   source_workspace_id: string;
