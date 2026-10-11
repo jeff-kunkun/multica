@@ -1,0 +1,15 @@
+const {Client}=require('pg'); const fs=require('fs');
+(async()=>{const c=new Client({connectionString:process.env.DATABASE_URL});await c.connect();await c.query('BEGIN');
+const u=(await c.query(`INSERT INTO "user"(name,email) VALUES ('Kun (local QA)','dene1794-qa@example.test') ON CONFLICT(email) DO UPDATE SET name=excluded.name RETURNING id`)).rows[0].id;
+const w=(await c.query(`INSERT INTO workspace(name,slug) VALUES ('Bot attribution QA','bot-attribution-qa') ON CONFLICT(slug) DO UPDATE SET name=excluded.name RETURNING id`)).rows[0].id;
+await c.query(`INSERT INTO member(workspace_id,user_id,role) VALUES ($1,$2,'owner') ON CONFLICT DO NOTHING`,[w,u]);
+const i=(await c.query(`INSERT INTO issue(workspace_id,title,creator_type,creator_id,status) VALUES ($1,'Bot attribution verification','member',$2,'backlog') RETURNING id`,[w,u])).rows[0].id;
+const b='00000000-0000-4000-8000-000000001794',name='Grok 外部协作 Bot 长名称用于窄屏验证';
+await c.query(`INSERT INTO comment(workspace_id,issue_id,author_type,author_id,content,via_bot_id,via_bot_name) VALUES ($5,$1,'member',$2,'Bot 留言：我拍板选 A。此处仅验证来源展示，不触发执行。',$3,$4)`,[i,u,b,name,w]);
+await c.query(`INSERT INTO comment(workspace_id,issue_id,author_type,author_id,content) VALUES ($3,$1,'member',$2,'本人登录留言：这条不显示经 Bot。')`,[i,u,w]);
+await c.query(`INSERT INTO activity_log(workspace_id,issue_id,actor_type,actor_id,action,details,via_bot_id,via_bot_name) VALUES ($1,$2,'member',$3,'status_changed','{"old_status":"todo","new_status":"backlog"}',$4,$5)`,[w,i,u,b,name]);
+const a=(await c.query(`INSERT INTO agent(workspace_id,name,runtime_mode,owner_id) VALUES ($1,'QA Agent','local',$2) RETURNING id`,[w,u])).rows[0].id;
+const ch=(await c.query(`INSERT INTO chat_session(workspace_id,creator_id,agent_id,title) VALUES ($1,$2,$3,'Bot attribution chat') RETURNING id`,[w,u,a])).rows[0].id;
+await c.query(`INSERT INTO chat_message(chat_session_id,role,content,sender_user_id,via_bot_id,via_bot_name) VALUES ($1,'user','Bot 聊天留言，历史名称应保留。',$2,$3,$4)`,[ch,u,b,name]);
+await c.query(`INSERT INTO chat_message(chat_session_id,role,content,sender_user_id) VALUES ($1,'user','本人聊天，不显示 Bot 来源。',$2)`,[ch,u]);
+await c.query('COMMIT');await c.end();fs.writeFileSync('.scratch/anti-slop-frontend/DENE-1794/seed-state.json',JSON.stringify({user:u,workspace:w,issue:i,chat:ch,email:'dene1794-qa@example.test'}));console.log({issue:i,chat:ch});})().catch(e=>{console.error(e.message);process.exit(1)});
