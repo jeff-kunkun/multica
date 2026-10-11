@@ -179,18 +179,20 @@ func (h *Handler) wakeWaitingIssue(ctx context.Context, waiter, completed db.Iss
 // running / waiting_local_directory). Protocol §5.5 and DENE-232: skip
 // enqueue when that pair is already in flight; the system comment above is
 // still the observable wake.
-// It reports whether a run was enqueued.
-func (h *Handler) dispatchWaitingOnAssigneeTrigger(ctx context.Context, waiter db.Issue, triggerCommentID pgtype.UUID) bool {
+// It reports the agent a run was enqueued for; invalid when none was.
+func (h *Handler) dispatchWaitingOnAssigneeTrigger(ctx context.Context, waiter db.Issue, triggerCommentID pgtype.UUID) pgtype.UUID {
 	if !waiter.AssigneeType.Valid || !waiter.AssigneeID.Valid {
-		return false
+		return pgtype.UUID{}
 	}
 	switch waiter.AssigneeType.String {
 	case "agent":
-		return h.triggerWaitingOnAgent(ctx, waiter, waiter.AssigneeID, triggerCommentID)
+		if h.triggerWaitingOnAgent(ctx, waiter, waiter.AssigneeID, triggerCommentID) {
+			return waiter.AssigneeID
+		}
 	case "squad":
 		return h.triggerWaitingOnSquad(ctx, waiter, triggerCommentID)
 	}
-	return false
+	return pgtype.UUID{}
 }
 
 func (h *Handler) triggerWaitingOnAgent(ctx context.Context, waiter db.Issue, agentID pgtype.UUID, triggerCommentID pgtype.UUID) bool {
@@ -218,24 +220,24 @@ func (h *Handler) triggerWaitingOnAgent(ctx context.Context, waiter db.Issue, ag
 	return true
 }
 
-func (h *Handler) triggerWaitingOnSquad(ctx context.Context, waiter db.Issue, triggerCommentID pgtype.UUID) bool {
+func (h *Handler) triggerWaitingOnSquad(ctx context.Context, waiter db.Issue, triggerCommentID pgtype.UUID) pgtype.UUID {
 	squad, err := h.Queries.GetSquadInWorkspace(ctx, db.GetSquadInWorkspaceParams{
 		ID:          waiter.AssigneeID,
 		WorkspaceID: waiter.WorkspaceID,
 	})
 	if err != nil {
-		return false
+		return pgtype.UUID{}
 	}
 	agent, err := h.Queries.GetAgent(ctx, squad.LeaderID)
 	if err != nil || !agent.RuntimeID.Valid || agent.ArchivedAt.Valid || !agent.WorkEnabled {
-		return false
+		return pgtype.UUID{}
 	}
 	hasActive, err := h.Queries.HasActiveTaskForIssueAndAgent(ctx, db.HasActiveTaskForIssueAndAgentParams{
 		IssueID: waiter.ID,
 		AgentID: squad.LeaderID,
 	})
 	if err != nil || hasActive {
-		return false
+		return pgtype.UUID{}
 	}
 	if _, err := h.TaskService.EnqueueTaskForSquadLeader(ctx, waiter, squad.LeaderID, squad.ID, triggerCommentID, service.OriginDerived); err != nil {
 		slog.Warn("waiting_on: enqueue waiter squad leader task failed",
@@ -243,9 +245,9 @@ func (h *Handler) triggerWaitingOnSquad(ctx context.Context, waiter db.Issue, tr
 			"waiter_id", uuidToString(waiter.ID),
 			"squad_id", uuidToString(squad.ID),
 			"leader_id", uuidToString(squad.LeaderID))
-		return false
+		return pgtype.UUID{}
 	}
-	return true
+	return squad.LeaderID
 }
 
 // consumeWaitingOn clears close.waiting_on once the platform has told the

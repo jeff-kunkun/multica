@@ -669,6 +669,7 @@
     "posted_partial_trigger_one": "Commentaire publié, mais {{count}} mention n'a pas été déclenchée",
     "posted_partial_trigger_other": "Commentaire publié, mais {{count}} mentions n'ont pas été déclenchées",
     "posted_partial_trigger_named": "Commentaire publié, mais {{name}} n'a pas été déclenché ({{reason}})",
+    "posted_no_wake": "Commentaire publié, mais personne n'a été réveillé : mentionnez quelqu'un ou passez le relais",
     "trigger_blocked_chip_aria": "{{name}} ne sera pas déclenché — {{reason}}",
     "trigger_blocked_invocation_not_allowed": "Cette cible est introuvable, ou vous n'avez pas la permission de l'utiliser",
     "trigger_blocked_target_unavailable": "Cette cible est indisponible",

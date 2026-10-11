@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="zh">
+<meta charset="utf-8">
+<title>DENE-1775 标签栏按项目分组 · 预览</title>
+<style>
+  body { margin: 0; padding: 32px; background: #f4f4f5; font: 13px/1.4 -apple-system, "PingFang SC", sans-serif; color: #18181b; }
+  h2 { font-size: 13px; font-weight: 500; color: #71717a; margin: 32px 0 8px; }
+  .strip { display: flex; align-items: flex-end; height: 40px; padding: 0 16px; background: #ececee; border-radius: 10px 10px 0 0; overflow: hidden; }
+  .tab { width: 150px; height: 36px; display: flex; align-items: center; gap: 6px; padding: 0 10px; color: #71717a; white-space: nowrap; overflow: hidden; flex-shrink: 0; }
+  .tab.active { background: #fff; border-radius: 8px 8px 0 0; color: #18181b; font-weight: 500; }
+  .tab .t { overflow: hidden; text-overflow: clip; mask-image: linear-gradient(to right, #000 calc(100% - 12px), transparent); }
+  .ico { width: 16px; text-align: center; flex-shrink: 0; }
+  .grp { display: flex; align-items: flex-end; height: 100%; border-radius: 6px 6px 0 0; }
+  .chip { height: 24px; margin-bottom: 4px; display: flex; align-items: center; gap: 4px; padding: 0 8px; border-radius: 6px; max-width: 160px; white-space: nowrap; }
+  .blue .chip { background: rgb(59 130 246 / .15); color: #1e40af } .blue { background: rgb(59 130 246 / .1) }
+  .green .chip { background: rgb(34 197 94 / .15); color: #166534 } .green { background: rgb(34 197 94 / .1) }
+  .purple .chip { background: rgb(168 85 247 / .15); color: #6b21a8 } .purple { background: rgb(168 85 247 / .1) }
+  .collapsed { background: none }
+  .sep { width: 1px; height: 16px; background: #d4d4d8; margin: 0 4px 10px; flex-shrink: 0; }
+  .content { height: 60px; background: #fff; border-radius: 0 0 10px 10px; }
+  .menu { display: inline-block; background: #fff; border: 1px solid #e4e4e7; border-radius: 8px; padding: 4px; min-width: 200px; box-shadow: 0 4px 16px rgb(0 0 0 / .08); }
+  .menu div { padding: 6px 8px; border-radius: 4px; display: flex; justify-content: space-between; }
+  .menu .sub { color: #71717a; }
+  .menu hr { border: 0; border-top: 1px solid #e4e4e7; margin: 4px 0; }
+  .muted { color: #a1a1aa; }
+</style>
+<body>
+
+<h2>按项目分组（默认）：固定标签 → 项目组 → 没有项目的标签</h2>
+<div class="strip">
+  <div class="tab"><span class="ico">📌</span><span class="t">我的任务</span></div>
+  <div class="sep"></div>
+  <div class="grp blue">
+    <div class="chip"><span>⌄</span><span>🛠</span><span>Multica 魔改</span></div>
+    <div class="tab active"><span class="ico">💬</span><span class="t">底部额度栏可勾选</span></div>
+    <div class="tab"><span class="ico">◐</span><span class="t">DENE-1764: Nexus 隧道</span></div>
+  </div>
+  <div class="grp green">
+    <div class="chip"><span>⌄</span><span>📝</span><span>自媒体</span></div>
+    <div class="tab"><span class="ico">💬</span><span class="t">marketingskills</span></div>
+  </div>
+  <div class="grp purple collapsed">
+    <div class="chip" style="background: rgb(168 85 247 / .15); color:#6b21a8"><span>›</span><span>🎓</span><span>硕士论文</span><span class="muted">3</span></div>
+  </div>
+  <div class="tab"><span class="ico">📥</span><span class="t">收件箱</span></div>
+  <div class="tab"><span class="ico">⚙</span><span class="t">设置</span></div>
+</div>
+<div class="content"></div>
+
+<h2>右键菜单（标签或组标签上）</h2>
+<div class="menu">
+  <div>新建组</div>
+  <div>移出组</div>
+  <hr>
+  <div>标签分组 <span class="sub">›</span></div>
+  <div style="padding-left:20px">✓ 按项目</div>
+  <div style="padding-left:20px">手动</div>
+  <div>按项目整理</div>
+  <hr>
+  <div>固定标签</div>
+  <div>关闭标签</div>
+</div>
+<p class="muted">当前标签所在的组：「折叠」置灰，说明「当前标签在这组里」。项目组不提供「重命名」，名字跟项目走。</p>
+
+<h2>手机端</h2>
+<p class="muted">这排标签只在 Desktop 有；手机网页和 apps/mobile 都没有标签栏，本次不改。</p>
+</body>
+</html>

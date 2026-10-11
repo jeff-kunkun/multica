@@ -23,6 +23,8 @@ function seedHistory() {
             title: "",
             pinned: false,
             groupId: null,
+            groupLocked: false,
+            openedAt: 0,
             history: {
               stack: ["/acme/issues", "/acme/issues/abc"],
               index: 1,

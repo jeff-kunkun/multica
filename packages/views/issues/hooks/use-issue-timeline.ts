@@ -37,6 +37,7 @@ import {
 } from "@multica/core/issues/mutations";
 import { sortTimelineEntriesAsc } from "@multica/core/issues/timeline-sort";
 import {
+  commentWokeNoOne,
   unhandledCommentTriggerOutcomes,
   mentionLabelsByTarget,
 } from "@multica/core/issues/comment-trigger-outcomes";
@@ -351,6 +352,15 @@ export function useIssueTimeline(issueId: string, userId?: string) {
     [t],
   );
 
+  // A comment is not a dispatch (DENE-1774): when it woke no one and nothing
+  // is running, say so, or the author assumes someone picked it up.
+  const noteWokeNoOne = useCallback(
+    (wake: unknown) => {
+      if (commentWokeNoOne(wake)) toast.info(t(($) => $.comment.posted_no_wake));
+    },
+    [t],
+  );
+
   // Returns true on success, false on failure. The composer keeps the user's
   // text (editor locked + button spinning) until this settles and clears only
   // on success — so a slow send no longer leaves the box full next to an
@@ -361,6 +371,7 @@ export function useIssueTimeline(issueId: string, userId?: string) {
       try {
         const comment = await createComment({ content, attachmentIds, suppressAgentIds, steerTaskIds, mode });
         warnUnhandledTriggers(comment?.trigger_outcomes, comment?.content);
+        noteWokeNoOne(comment?.wake);
         return comment.id;
       } catch (err) {
         toast.error(
@@ -371,7 +382,7 @@ export function useIssueTimeline(issueId: string, userId?: string) {
         return false;
       }
     },
-    [userId, createComment, warnUnhandledTriggers, t],
+    [userId, createComment, warnUnhandledTriggers, noteWokeNoOne, t],
   );
 
   const submitReply = useCallback(
@@ -388,6 +399,7 @@ export function useIssueTimeline(issueId: string, userId?: string) {
           mode,
         });
         warnUnhandledTriggers(comment?.trigger_outcomes, comment?.content);
+        noteWokeNoOne(comment?.wake);
         return comment.id;
       } catch (err) {
         toast.error(
@@ -398,7 +410,7 @@ export function useIssueTimeline(issueId: string, userId?: string) {
         return false;
       }
     },
-    [userId, createComment, warnUnhandledTriggers, t],
+    [userId, createComment, warnUnhandledTriggers, noteWokeNoOne, t],
   );
 
   const editComment = useCallback(
