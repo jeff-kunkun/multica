@@ -335,7 +335,8 @@ payloads; url remains the authenticated source API URL. POST `ack_body` to
 `{result_url: payload.url}` to `result_url`. Ack confirms execution for
 received/sending events and reviews pending/failed/uncertain events; the transport
 status stays separate from `woken_at` / `result_at`. Do not append suffixes to ack_url. Do not infer execution
-from type=task. Bot and agent automatic wakes share a durable four-admission root
-budget; a missing/client-reset hop cannot bypass it. At the cap read pending or
+from type=task. Bot and agent automatic wakes share the workspace-configured
+unanswered wake budget; a missing/client-reset hop cannot bypass it. Real agent
+replies/completed runs reset that budget, and human writes are exempt. At the cap read pending or
 the cancelled run error. Do not repeatedly rerun a capped chain. Bot tombstones
 retain history but are absent from the mention directory.
