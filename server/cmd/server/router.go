@@ -2622,6 +2622,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			// Comments
 			r.Route("/api/comments/{commentId}", func(r chi.Router) {
 				r.Use(h.RequireModule(permission.ModuleIssues))
+				r.Get("/attachments", h.ListCommentAttachments)
 				r.With(handler.RequireHumanActor).Get("/sub-issue-preview", h.PreviewCommentSubIssue)
 				r.With(handler.RequireHumanActor).Post("/sub-issues", h.CreateCommentSubIssue)
 				r.Put("/", h.UpdateComment)
