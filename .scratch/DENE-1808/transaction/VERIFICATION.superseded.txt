@@ -1,0 +1,57 @@
+TARGET=/Users/kunkun/.agents/multica.multica-worktrees/dene-1808-8db8821cdf00/server/internal/workspacelink/decide.go
+
+BASE_COMMIT=5e3fba219c625311230f33b9cb8a55c7dc6cfce8
+
+changed_symbol=Decide / OpDeliver / OpSetReception
+
+original_sha256=4c171d4674ba9a1fdef4b7f8afa485755a14f7484e4aa2ff0450bfad62aa703a
+
+modified_sha256=d0fe826c1961e66124b1b502cdfb3b9522548e8dd6044d3077152cad09f6fde0
+
+BASELINE
+command=["go", "test", "-v", "/Users/kunkun/.agents/multica.multica-worktrees/dene-1808-8db8821cdf00/server/.scratch/DENE-1808-transaction/BASELINE/decide.go", "/Users/kunkun/.agents/multica.multica-worktrees/dene-1808-8db8821cdf00/server/.scratch/DENE-1808-transaction/BASELINE/probe_test.go", "-count=1"]
+input=Op(deliver), viewer/member agent; guest agent; source owner agent; human owner
+stdout:
+=== RUN   TestDeliveryProbe
+viewer_agent=false guest=false source_agent=false human=false
+--- PASS: TestDeliveryProbe (0.00s)
+PASS
+ok  	command-line-arguments	0.919s
+stderr:
+exit=0
+sha256=4c171d4674ba9a1fdef4b7f8afa485755a14f7484e4aa2ff0450bfad62aa703a
+
+MODIFIED
+command=["go", "test", "-v", "/Users/kunkun/.agents/multica.multica-worktrees/dene-1808-8db8821cdf00/server/.scratch/DENE-1808-transaction/MODIFIED/decide.go", "/Users/kunkun/.agents/multica.multica-worktrees/dene-1808-8db8821cdf00/server/.scratch/DENE-1808-transaction/MODIFIED/probe_test.go", "-count=1"]
+input=Op(deliver), viewer/member agent; guest agent; source owner agent; human owner
+stdout:
+=== RUN   TestDeliveryProbe
+viewer_agent=true guest=false source_agent=false human=false
+--- PASS: TestDeliveryProbe (0.00s)
+PASS
+ok  	command-line-arguments	0.596s
+stderr:
+exit=0
+sha256=d0fe826c1961e66124b1b502cdfb3b9522548e8dd6044d3077152cad09f6fde0
+
+ROLLBACK_COMMAND=["/Users/kunkun/.agents/multica.multica-worktrees/dene-1808-8db8821cdf00/.scratch/DENE-1808/transaction/ROLLBACK.sh", "/Users/kunkun/.agents/multica.multica-worktrees/dene-1808-8db8821cdf00/server/.scratch/DENE-1808-transaction/ROLLBACK/decide.go"]
+stdout=
+stderr=
+exit=0
+
+ROLLBACK
+command=["go", "test", "-v", "/Users/kunkun/.agents/multica.multica-worktrees/dene-1808-8db8821cdf00/server/.scratch/DENE-1808-transaction/ROLLBACK/decide.go", "/Users/kunkun/.agents/multica.multica-worktrees/dene-1808-8db8821cdf00/server/.scratch/DENE-1808-transaction/ROLLBACK/probe_test.go", "-count=1"]
+input=Op(deliver), viewer/member agent; guest agent; source owner agent; human owner
+stdout:
+=== RUN   TestDeliveryProbe
+viewer_agent=false guest=false source_agent=false human=false
+--- PASS: TestDeliveryProbe (0.00s)
+PASS
+ok  	command-line-arguments	0.673s
+stderr:
+exit=0
+sha256=4c171d4674ba9a1fdef4b7f8afa485755a14f7484e4aa2ff0450bfad62aa703a
+
+patch_reconstruction=verified
+restored_hash_equals_original=true
+MODIFIED_FILE retains requested GOAL=true
