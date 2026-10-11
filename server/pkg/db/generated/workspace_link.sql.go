@@ -431,7 +431,7 @@ const listWorkspaceLinkAudit = `-- name: ListWorkspaceLinkAudit :many
 SELECT a.id, a.link_id, a.source_workspace_id, a.target_workspace_id, a.workspace_id, a.actor_id, a.action, a.detail, a.created_at, u.name AS actor_name,
        COALESCE(sw.name, a.source_workspace_id::text)::text AS source_name,
        COALESCE(tw.name, a.target_workspace_id::text)::text AS target_name,
-       COALESCE(a.detail->>'object_label', sw.issue_prefix || '-' || i.number::text, ap.title, a.detail->>'issue_ref', a.detail->>'autopilot_id', '')::text AS object_label
+       COALESCE(NULLIF(a.detail->>'object_label', ''), sw.issue_prefix || '-' || i.number::text, ap.title, a.detail->>'issue_ref', a.detail->>'autopilot_id', '')::text AS object_label
 FROM workspace_link_audit a
 LEFT JOIN "user" u ON u.id = a.actor_id
 LEFT JOIN workspace sw ON sw.id = a.source_workspace_id
