@@ -179,6 +179,7 @@ describe("BotsTab", () => {
   describe("wake settings (DENE-1793)", () => {
     const wake = (over: Record<string, unknown> = {}) => ({
       webhook_configured: true,
+      inherit_owner_follows: false,
       events: ["mention", "task"],
       hourly_limit: 6,
       quiet_hours: { enabled: true, start: "23:00", end: "08:00", timezone: "Asia/Shanghai" },
@@ -337,7 +338,7 @@ describe("BotsTab", () => {
       ...over,
     });
 
-    it("saves the whole wake_from map and states owner follows are not inherited", async () => {
+    it("saves the whole wake_from map without touching owner follows", async () => {
       wakeRef.current = {
         data: wake({
           wake_from: {
@@ -350,9 +351,9 @@ describe("BotsTab", () => {
       };
       mockUpdateWake.mockResolvedValue(wake());
       openWake();
-      expect(screen.getByTestId("bot-wake-inherit")).toHaveTextContent("Not inherited");
+      expect(screen.getByTestId("bot-wake-inherit")).not.toBeChecked();
       expect(screen.getByText("1 more no longer listed; kept when saving.")).toBeInTheDocument();
-      const save = screen.getByRole("button", { name: "Save lists" });
+      const save = screen.getByRole("button", { name: "Save" });
       expect(save).toBeDisabled();
       // Archived agents are not offered.
       await userEvent.click(screen.getByRole("combobox", { name: "Agents" }));
@@ -371,6 +372,31 @@ describe("BotsTab", () => {
           },
         }),
       );
+    });
+
+    it("saves only the owner-follows switch when that is all that changed", async () => {
+      wakeRef.current = { data: wake(), error: null };
+      mockUpdateWake.mockResolvedValue(wake({ inherit_owner_follows: true }));
+      openWake();
+      const save = screen.getByRole("button", { name: "Save" });
+      await userEvent.click(screen.getByRole("switch", { name: "Inherit the owner's followed issues" }));
+      expect(save).toBeEnabled();
+      await userEvent.click(save);
+      await waitFor(() => expect(mockUpdateWake).toHaveBeenCalledWith({ inherit_owner_follows: true }));
+    });
+
+    it("reads an enabled owner-follows switch back and can turn it off", async () => {
+      wakeRef.current = { data: wake({ inherit_owner_follows: true }), error: null };
+      mockUpdateWake.mockResolvedValue(wake());
+      openWake();
+      const toggle = screen.getByTestId("bot-wake-inherit");
+      expect(toggle).toBeChecked();
+      await userEvent.click(toggle);
+      await userEvent.click(screen.getByRole("button", { name: "Reset" }));
+      expect(toggle).toBeChecked();
+      await userEvent.click(toggle);
+      await userEvent.click(screen.getByRole("button", { name: "Save" }));
+      await waitFor(() => expect(mockUpdateWake).toHaveBeenCalledWith({ inherit_owner_follows: false }));
     });
 
     it("survives settings restored from before wake_from existed", () => {

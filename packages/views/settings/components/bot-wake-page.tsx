@@ -320,17 +320,22 @@ const fromKey = (from: BotWakeFrom) =>
 // Who may wake the bot. The server replaces the whole map on save, so the
 // draft always carries all three rules; ids the pickers no longer know about
 // (a removed member, a deleted bot) are kept rather than silently dropped.
+// The owner-follows switch rides the same draft and save button.
 function WakeFromSection({ bot, settings }: { bot: ExternalBot; settings: BotWakeSettings }) {
   const { t } = useT("settings");
   const wsId = useWorkspaceId();
   const update = useUpdateBotWake(wsId, bot.id);
   const saved = settings.wake_from;
+  // A cache snapshot from before the field existed reads as the server default.
+  const savedInherit = settings.inherit_owner_follows ?? false;
   const [draft, setDraft] = useState<BotWakeFrom>(saved);
+  const [inherit, setInherit] = useState(savedInherit);
   const savedKey = fromKey(saved);
   useEffect(() => {
     setDraft(saved);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [savedKey]);
+  useEffect(() => setInherit(savedInherit), [savedInherit]);
 
   const members = useQuery(memberListOptions(wsId));
   const agents = useQuery(agentListOptions(wsId));
@@ -345,7 +350,9 @@ function WakeFromSection({ bot, settings }: { bot: ExternalBot; settings: BotWak
   };
 
   const tooMany = SENDERS.some((k) => draft[k].ids.length > 100);
-  const dirty = fromKey(draft) !== savedKey;
+  const fromDirty = fromKey(draft) !== savedKey;
+  const inheritDirty = inherit !== savedInherit;
+  const dirty = fromDirty || inheritDirty;
 
   const setRule = (kind: BotWakeSenderKind, rule: BotWakeFromRule) =>
     setDraft((d) => ({ ...d, [kind]: rule }));
@@ -361,7 +368,10 @@ function WakeFromSection({ bot, settings }: { bot: ExternalBot; settings: BotWak
   const save = () => {
     if (!dirty || tooMany || update.isPending) return;
     update.mutate(
-      { wake_from: draft },
+      {
+        ...(fromDirty ? { wake_from: draft } : {}),
+        ...(inheritDirty ? { inherit_owner_follows: inherit } : {}),
+      },
       {
         onSuccess: () => toast.success(t(($) => $.bots.wake.toast_from_saved)),
         onError: (e) =>
@@ -454,9 +464,14 @@ function WakeFromSection({ bot, settings }: { bot: ExternalBot; settings: BotWak
           label={t(($) => $.bots.wake.inherit_label)}
           description={t(($) => $.bots.wake.inherit_hint)}
         >
-          <span data-testid="bot-wake-inherit" className="text-caption font-medium text-muted-foreground">
-            {t(($) => $.bots.wake.inherit_value)}
-          </span>
+          <label className="-mx-2 flex min-h-11 cursor-pointer items-center px-2 sm:min-h-0">
+            <Switch
+              data-testid="bot-wake-inherit"
+              aria-label={t(($) => $.bots.wake.inherit_label)}
+              checked={inherit}
+              onCheckedChange={setInherit}
+            />
+          </label>
         </SettingsRow>
         <div className="flex flex-wrap items-center justify-end gap-2 border-t border-surface-border px-4 py-3">
           {dirty ? (
@@ -464,7 +479,10 @@ function WakeFromSection({ bot, settings }: { bot: ExternalBot; settings: BotWak
               type="button"
               variant="ghost"
               className={TAP}
-              onClick={() => setDraft(saved)}
+              onClick={() => {
+                setDraft(saved);
+                setInherit(savedInherit);
+              }}
               disabled={update.isPending}
             >
               {t(($) => $.bots.wake.reset)}

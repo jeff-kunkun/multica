@@ -730,7 +730,7 @@ export interface BotQuietHours {
 }
 
 /** Who may wake the Bot, per sender kind. `ids` (UUIDs, at most 100) only
- *  with `list`. Owner subscriptions are never inherited. */
+ *  with `list`. */
 export interface BotWakeFromRule {
   mode: "all" | "none" | "list";
   ids: string[];
@@ -743,6 +743,9 @@ export type BotWakeFrom = Record<BotWakeSenderKind, BotWakeFromRule>;
 export interface BotWakeSettings {
   webhook_configured: boolean;
   wake_from: BotWakeFrom;
+  /** Also wake on issues the owner currently follows or is assigned. Off by
+   *  default; never widens chats or mentions addressed to other bots. */
+  inherit_owner_follows: boolean;
   /** Empty disables every event. */
   events: BotWakeEventType[];
   /** 0..120; 0 pauses delivery. */
@@ -755,6 +758,7 @@ export interface BotWakeSettings {
 export interface UpdateBotWakeRequest {
   /** Replaces the whole map; all three kinds are required. */
   wake_from?: BotWakeFrom;
+  inherit_owner_follows?: boolean;
   events?: BotWakeEventType[];
   hourly_limit?: number;
   quiet_hours?: BotQuietHours;
