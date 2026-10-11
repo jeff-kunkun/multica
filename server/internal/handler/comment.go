@@ -2175,16 +2175,20 @@ func (h *Handler) triggerTasksForCommentReport(ctx context.Context, issue db.Iss
 		enqueued[agentID] = result
 	}
 	outcomes := commentTriggerOutcomes(targets, enqueued)
+	woken := commentWokenRuns(resolved, enqueued)
 	// Summons (DENE-880) follow a new comment only; an edit neither answers
 	// a call nor makes a new one.
 	if len(forceFreshSession) == 0 || !forceFreshSession[0] {
 		h.recordMentionSummons(ctx, issue, comment, actorType, actorID)
 		summonWoke := h.answerSummons(ctx, issue, comment, actorType, actorID, triggerOutcomesStartedRun(outcomes))
 		if actorType == "member" {
-			h.resumeBlockedOnReply(ctx, issue, enqueued, summonWoke)
+			h.resumeBlockedOnReply(ctx, issue, enqueued, summonWoke.Valid)
+		}
+		if summonWoke.Valid {
+			woken = append(woken, h.summonAnswerWokenRun(ctx, summonWoke))
 		}
 	}
-	return outcomes, commentWokenRuns(resolved, enqueued)
+	return outcomes, woken
 }
 
 // markCommentTriggersFresh applies the edit-only session policy after trigger

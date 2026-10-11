@@ -135,7 +135,8 @@ not injected into an already running prompt. Different threads queue independent
 
 A comment is not a dispatch. `trigger_outcomes` covers only explicit mentions;
 `wake` covers the whole comment. `wake.woken` lists every run it queued, folded
-into or steered (assignee, @agent, @squad, thread or conversation), and the CLI
+into or steered (assignee, @agent, @squad, thread, conversation, or a reply
+answering a needs_human call — `summon_answer`), and the CLI
 prints it as `Woke: ...`. `wake.none_woken: true` — printed as `Woke no one` —
 means no run started, nothing is running, and the issue is open: nobody will act
 on it. The assignee never wakes itself, so a seat that posts "please continue"
