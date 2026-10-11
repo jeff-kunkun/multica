@@ -62,6 +62,25 @@ vi.mock("@multica/ui/components/ui/dropdown-menu", async () => {
     DropdownMenuLabel: ({ children }: { children: ReactNode }) => (
       <div>{children}</div>
     ),
+    DropdownMenuSeparator: () => <hr />,
+    DropdownMenuCheckboxItem: ({
+      children,
+      checked,
+      onCheckedChange,
+    }: {
+      children: ReactNode;
+      checked?: boolean;
+      onCheckedChange?: (checked: boolean) => void;
+    }) => (
+      <button
+        type="button"
+        role="menuitemcheckbox"
+        aria-checked={checked}
+        onClick={() => onCheckedChange?.(!checked)}
+      >
+        {children}
+      </button>
+    ),
     DropdownMenuRadioGroup: ({
       children,
       onValueChange,
@@ -299,6 +318,25 @@ describe("ProviderStatusBarView", () => {
 
     await user.click(screen.getByRole("button", { name: /旧机器/ }));
     expect(onSelectRuntime).toHaveBeenCalledWith("grok", "grok-old");
+  });
+
+  it("drops unticked providers and lets the user tick them back", async () => {
+    const user = userEvent.setup();
+    const onToggleProvider = vi.fn();
+    render(
+      <ProviderStatusBarView
+        providers={providers}
+        hiddenProviders={["grok"]}
+        onToggleProvider={onToggleProvider}
+      />,
+    );
+
+    expect(screen.queryByRole("button", { name: /Switch Grok quota/ })).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Plan limits" }));
+    const item = screen.getByRole("menuitemcheckbox", { name: /Grok/ });
+    expect(item).toHaveAttribute("aria-checked", "false");
+    await user.click(item);
+    expect(onToggleProvider).toHaveBeenCalledWith("grok", false);
   });
 });
 

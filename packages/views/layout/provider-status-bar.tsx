@@ -1,7 +1,8 @@
 "use client";
 
+import type { ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { ChevronDown } from "lucide-react";
+import { ChevronDown, Settings2 } from "lucide-react";
 import { useCurrentWorkspace } from "@multica/core/paths";
 import {
   providerDisplayName,
@@ -16,11 +17,13 @@ import type {
 } from "@multica/core/types";
 import {
   DropdownMenu,
+  DropdownMenuCheckboxItem,
   DropdownMenuContent,
   DropdownMenuGroup,
   DropdownMenuLabel,
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@multica/ui/components/ui/dropdown-menu";
 import {
@@ -128,12 +131,20 @@ export function ProviderStatusBar() {
   const setSelectedRuntime = useProviderQuotaSourceStore(
     (state) => state.setSelectedRuntime,
   );
+  const hiddenProviders = useProviderQuotaSourceStore(
+    (state) => state.hiddenProviders,
+  );
+  const setProviderHidden = useProviderQuotaSourceStore(
+    (state) => state.setProviderHidden,
+  );
 
   return (
     <ProviderStatusBarView
       providers={collectProviderQuotas(runtimes)}
       selectedByProvider={selectedByProvider}
       onSelectRuntime={setSelectedRuntime}
+      hiddenProviders={hiddenProviders}
+      onToggleProvider={setProviderHidden}
     />
   );
 }
@@ -142,14 +153,28 @@ export function ProviderStatusBarView({
   providers,
   selectedByProvider = {},
   onSelectRuntime,
+  hiddenProviders = [],
+  onToggleProvider,
 }: {
   providers: ProviderQuotaSummary[];
   selectedByProvider?: Record<string, string>;
   onSelectRuntime?: (provider: string, runtimeId: string) => void;
+  hiddenProviders?: readonly string[];
+  onToggleProvider?: (provider: string, hidden: boolean) => void;
 }) {
   const { t } = useT("runtimes");
   const isMobile = useIsMobile();
   if (providers.length === 0) return null;
+  const visible = providers.filter(
+    (provider) => !hiddenProviders.includes(provider.provider),
+  );
+  const picker = onToggleProvider ? (
+    <ProviderVisibilityItems
+      providers={providers}
+      hiddenProviders={hiddenProviders}
+      onToggleProvider={onToggleProvider}
+    />
+  ) : null;
 
   if (isMobile) {
     return (
@@ -158,9 +183,10 @@ export function ProviderStatusBarView({
         className="flex h-10 shrink-0 items-center border-t px-2 pe-chat-launcher"
       >
         <CompactProviderStatus
-          providers={providers}
+          providers={visible}
           selectedByProvider={selectedByProvider}
           onSelectRuntime={onSelectRuntime}
+          picker={picker}
         />
       </footer>
     );
@@ -171,7 +197,7 @@ export function ProviderStatusBarView({
       aria-label={t(($) => $.plan_limits.title)}
       className="flex h-10 shrink-0 items-center gap-4 overflow-x-auto border-t px-3 pe-chat-launcher"
     >
-      {providers.map((provider) => (
+      {visible.map((provider) => (
         <ProviderStatusEntry
           key={provider.provider}
           provider={provider}
@@ -179,8 +205,52 @@ export function ProviderStatusBarView({
           onSelectRuntime={onSelectRuntime}
         />
       ))}
+      {picker ? (
+        <DropdownMenu>
+          <DropdownMenuTrigger
+            render={
+              <button
+                type="button"
+                aria-label={t(($) => $.plan_limits.title)}
+                className="ms-auto flex size-8 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground aria-expanded:bg-muted aria-expanded:text-foreground"
+              >
+                <Settings2 className="size-3.5" />
+              </button>
+            }
+          />
+          <DropdownMenuContent align="end" side="top" className="min-w-44">
+            <DropdownMenuGroup>
+              <DropdownMenuLabel>{t(($) => $.plan_limits.title)}</DropdownMenuLabel>
+              {picker}
+            </DropdownMenuGroup>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      ) : null}
     </footer>
   );
+}
+
+/** One checkbox per provider with a snapshot; unticked ones leave the bar. */
+function ProviderVisibilityItems({
+  providers,
+  hiddenProviders,
+  onToggleProvider,
+}: {
+  providers: ProviderQuotaSummary[];
+  hiddenProviders: readonly string[];
+  onToggleProvider: (provider: string, hidden: boolean) => void;
+}) {
+  return providers.map((provider) => (
+    <DropdownMenuCheckboxItem
+      key={provider.provider}
+      checked={!hiddenProviders.includes(provider.provider)}
+      onCheckedChange={(checked) => onToggleProvider(provider.provider, !checked)}
+      closeOnClick={false}
+    >
+      <ProviderLogo provider={provider.provider} className="h-3.5 w-3.5" />
+      {providerDisplayName(provider.provider)}
+    </DropdownMenuCheckboxItem>
+  ));
 }
 
 function ProviderStatusEntry({
@@ -279,10 +349,12 @@ function CompactProviderStatus({
   providers,
   selectedByProvider,
   onSelectRuntime,
+  picker,
 }: {
   providers: ProviderQuotaSummary[];
   selectedByProvider: Record<string, string>;
   onSelectRuntime?: (provider: string, runtimeId: string) => void;
+  picker?: ReactNode;
 }) {
   const { t } = useT("runtimes");
   const locale = useLocale();
@@ -369,6 +441,15 @@ function CompactProviderStatus({
             </DropdownMenuGroup>
           );
         })}
+        {picker ? (
+          <>
+            {entries.length > 0 ? <DropdownMenuSeparator /> : null}
+            <DropdownMenuGroup>
+              <DropdownMenuLabel>{t(($) => $.plan_limits.title)}</DropdownMenuLabel>
+              {picker}
+            </DropdownMenuGroup>
+          </>
+        ) : null}
       </DropdownMenuContent>
     </DropdownMenu>
   );
