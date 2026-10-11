@@ -16,6 +16,12 @@ their sidebar. Nothing comes back to your chat automatically in this phase:
 read the other chat later with `multica chat history --session <id>` if you
 need its answer.
 
+`multica chat new --agent <name|id> "text" --wait` is the person's version: a
+person or an external bot holding a personal key (DENE-1788) starts a chat
+through the same route as the app composer, and `--wait` prints the reply
+(`multica chat send --session <id> "text" --wait` continues it). An agent run
+is refused there; keep using `chat open`.
+
 ## Task or chat
 
 | You need | Use |

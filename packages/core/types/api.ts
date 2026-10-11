@@ -680,6 +680,35 @@ export interface CreatePersonalAccessTokenResponse extends PersonalAccessToken {
   token: string;
 }
 
+// External bots (DENE-1788): a bot holds a key with the adding admin's power.
+export type ExternalBotType = "grok";
+export type ExternalBotStatus = "active" | "stopped" | "expired";
+
+export interface ExternalBot {
+  id: string;
+  name: string;
+  type: ExternalBotType;
+  status: ExternalBotStatus;
+  token_prefix: string;
+  expires_at: string | null;
+  last_used_at: string | null;
+  created_at: string;
+  stopped_at: string | null;
+}
+
+export interface CreateExternalBotRequest {
+  name: string;
+  type: ExternalBotType;
+  expires_in_days?: number;
+}
+
+/** Returned when a key is issued; the token and setup text are shown once. */
+export interface ExternalBotKeyResponse {
+  bot: ExternalBot;
+  token: string;
+  setup_text: string;
+}
+
 // Pagination
 export interface PaginationParams {
   limit?: number;
