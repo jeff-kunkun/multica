@@ -12,6 +12,7 @@
 - [Bot 唤醒限制、回执、恢复与审计](../server/docs/bot-wake-contract.md#causality-lifecycle-and-verification-limits)
 - [工作区全景命令与筛选范围](../server/internal/service/builtin_skills/multica-platform/references/overview.md)
 - [新能力的智能体可读契约与收尾检查清单](kun/agent-readable-capabilities.md)
+- [跨工作区紧凑读取：变化摘要、活动运行与快照续页](kun/fast-access.md)
 
 ## 当前适配资料
 
