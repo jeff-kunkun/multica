@@ -1,0 +1,10 @@
+{
+  "goal": "DENE-1812: 收紧可托管路由，同时保留有效任务编号、附件与源方智能体触发",
+  "findings": [
+    {
+      "id": "F1",
+      "file": "server/internal/workspacelink/managed.go:72",
+      "body": "P2: issueRef requires an alphabetic first prefix character, whereas normalizeIssuePrefix permits 1-10 uppercase letters or digits and slug-derived prefixes can start with digits. Valid source task identifiers 123-12 and 3TEAM-12 are therefore rejected by Managed before issue lookup with 403; the CLI fetchIssueRef sends exactly that identifier. Go overlay TestReviewNumericIssuePrefix reproduced rejection for both (exit 1). Preserve existing valid prefixes using the same alphanumeric grammar and add regression cases plus snapshot update."
+    }
+  ]
+}
