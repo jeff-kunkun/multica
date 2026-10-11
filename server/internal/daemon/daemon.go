@@ -8756,6 +8756,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		ProjectDescription:               task.ProjectDescription,
 		ProjectResources:                 convertProjectResourcesForEnv(task.ProjectResources),
 		Projects:                         convertProjectsForEnv(task.projectContexts()),
+		WorkspaceLinks:                   task.WorkspaceLinks,
 		ReferenceProjects:                convertReferenceProjectsForEnv(task.LinkedProjects),
 		ChatSessionID:                    task.ChatSessionID,
 		ChatChannelType:                  task.ChatChannelType,

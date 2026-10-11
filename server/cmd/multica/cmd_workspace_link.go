@@ -37,7 +37,11 @@ var workspaceLinkListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List links this workspace is on (members see only active incoming links; --pending: offers waiting for this workspace)",
 	Args:  cobra.NoArgs,
-	RunE:  runWorkspaceLinkList,
+	Long: "List accessible links. side=source means this workspace shares projects; side=viewer means it reads the source.\n" +
+		"Members and task tokens list active incoming links; managers can also list outgoing and pending links.\n" +
+		"The startup hint names both directions but grants no additional access. Use view <link-id> for incoming shared content.",
+	Example: "  multica workspace link list --output json",
+	RunE:    runWorkspaceLinkList,
 }
 
 var workspaceLinkLookupCmd = &cobra.Command{
@@ -72,7 +76,11 @@ var workspaceLinkViewCmd = &cobra.Command{
 	Use:   "view <link-id>",
 	Short: "Read the linked workspace's projects — description, directories, repos, project memory — and task status (read-only)",
 	Args:  cobra.ExactArgs(1),
-	RunE:  runWorkspaceLinkView,
+	Long: "From the viewer workspace, read an active source link's shared project context and task summaries.\n" +
+		"Task descriptions, comments and attachments are excluded. Source-side hints name the viewer only: they do not let you read that viewer.\n" +
+		"Find an accessible incoming link ID with multica workspace link list; disconnected or inaccessible links return link not found.",
+	Example: "  multica workspace link list --output json\n  multica workspace link view <link-id> --output json",
+	RunE:    runWorkspaceLinkView,
 }
 
 var workspaceLinkAuditCmd = &cobra.Command{
