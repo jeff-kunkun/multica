@@ -75,7 +75,7 @@ Root frontend commands and `make check` do not verify mobile. Docs-only changes 
 
 魔改功能按「三面齐」交付：服务端能力、Web/Desktop 界面、`multica` CLI 三处都能用，且都走同一个服务端接口和校验，不在某一面另写一份规则。界面要让人看得到、改得了，权限不足或被禁用时要说明原因；CLI 要让 Agent 不开浏览器就能查和改，`--help` 能查到用法，`--output json` 能拿到结果。Agent 需要主动调用的命令，要同步写进 `multica-platform` skill，改法见 `/multica`。某一面确实不该有（例如纯内部调度），在 PR 描述里写明缺哪一面、为什么缺；以后要补的，开票跟进，不默默省略。
 
-CLI 这一面按「像 MCP 一样」的标准交付：新功能带来的每一块信息都要有一条能读到它的命令，`--help` 写清它能看到什么、能改什么并附一个可直接运行的示例，`--output json` 字段自带含义（不用再查第二条命令就能看懂），出错时说明原因和下一步；新信息要并进工作区全景命令和外部 bot 的能力地图，不另起入口。
+每个魔改新能力按"像 MCP 一样自描述"的标准交付，最低标准与收尾清单以[智能体可读契约](docs/kun/agent-readable-capabilities.md)为准；沿用现有全景、能力地图和 Bot 入门入口。
 
 收口带 `--knowledge` 时，声明的记忆位置必须出现在本次交付的改动里：先把 AGENTS.md / CONTEXT.md / docs 改动提交到任务分支再 `multica issue close`；聊天做了实事就用 `multica chat sediment` 合进主线并记一笔（主线取 `multica.mainline` 配置、远端默认分支或唯一的 main/master，不看项目目录当前分支；无远端的仓库就地合入，有远端的必须远端主线已收到——推送或带 `--pr`），提交说明带票号或 `Chat <id>`（DENE-1661、DENE-1668）。
 
