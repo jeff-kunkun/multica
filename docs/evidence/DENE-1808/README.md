@@ -77,3 +77,5 @@ bash scripts/test-db.sh --quiet -- sh -c 'cd server && go test ./internal/worksp
 ```
 
 退出 0：workspacelink 11.924s，cmd/server 32.560s，service 0.941s，handler 1.583s，隔离数据库已删除。补测第一次在迁移 344 时因本机磁盘满退出 1，尚未执行用例；删除约 4GB 超过 24 小时未使用的可重建 Go 缓存后，上述完整命令通过，保留失败与成功日志。`ErrManagedRoute` 已明确写出附件上传和只读名字/项目资源查询。`seg`、`issueRef`、`attachment.upload`、`lookup.project_resources` 与对象名审计均保留主线版本。本轮未改 daemon 心跳、离线判定或令牌代码。
+
+最终推送前又纳入主线 `bb31d34257` 的 DENE-1806 线上证据更新；仅处理证据索引冲突，保留新主线条目及本票条目。生产代码与补充整包测试版本一致，不重复无变化的测试。
