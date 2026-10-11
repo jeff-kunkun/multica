@@ -536,6 +536,7 @@ type BotWakeEvent struct {
 	Hop            int32              `json:"hop"`
 	InheritedOwner bool               `json:"inherited_owner"`
 	WakeGeneration int64              `json:"wake_generation"`
+	DeliveryID     pgtype.UUID        `json:"delivery_id"`
 }
 
 type BotWakeWatch struct {
