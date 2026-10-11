@@ -2,6 +2,8 @@
 
 本索引只记录指向沉淀票附件的短指针；原始日志、截图和样本留在对应票据附件。
 
+- DENE-1842：聊天历史说明被隐藏的排队消息数量，CLI JSON/table 与 Web/Desktop、原生 App 同步；[真实聊天页 375/390/768/1280 截图与 CLI 对照（任务附件）](https://ai.ferryway.cc/api/attachments/01a12c10-3758-7434-b901-113262873335/download)。原生窗口及手机设备未做视觉验收。
+
 - DENE-1811：跨工作区连通双向设置、CLI 实时同步与审计分页；[验收记录及四档 HTML 预览](DENE-1811/checkpoint.md)。
 
 - DENE-1779：聊天项目筛选跟随当前对话、右侧项目变更和新建项目；手动「全部」在跳转与刷新后保留。[真实浏览器 375/390/768/1280 截图报告（任务附件）](https://ai.ferryway.cc/api/attachments/01a12929-1b8b-70e0-bb44-10f1349a356a/download)。
