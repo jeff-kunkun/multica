@@ -99,6 +99,7 @@ func (h *Handler) addBotWakeContent(ctx context.Context, e db.BotWakeEvent, payl
 		}
 		if e.SourceID == e.IssueID {
 			payload["content"] = issue.Description.String
+			payload["reply"] = map[string]any{"method": "POST", "url": payload["url"].(string) + "/comments", "headers": map[string]string{"X-Workspace-ID": uuidToString(e.WorkspaceID)}, "body": map[string]string{}, "cli": "multica issue comment add " + uuidToString(e.IssueID) + " --content-file ./reply.md"}
 			return nil
 		}
 		comment, err := h.Queries.GetCommentInWorkspace(ctx, db.GetCommentInWorkspaceParams{ID: e.SourceID, WorkspaceID: e.WorkspaceID})

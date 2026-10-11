@@ -298,7 +298,7 @@ workspaces and sources are isolated. `wake_blocked` bypasses the window. Each
 event retains its source ID, lineage and receipt. Sender, subscription,
 visibility, inheritance and chain checks are applied individually before
 content is included. Disabled members remain pending. New Bots omit `started`;
-existing saved event selections are retained.
+the old default selection is updated too; custom selections are retained.
 
 Migration 668 adds nullable `delivery_id`; older releases ignore it and still
 work with the expanded schema. Deploy the matching worker to all replicas before
@@ -325,3 +325,8 @@ For inspection without delivery or acknowledgement, use
 `delivery_id` on receipt rows identifies the persisted transport batch.
 The API option is `include_content=true` (boolean, default false). Reads
 recheck recipient and caller visibility; they do not replay or acknowledge.
+
+Downgrading migration 668 restores the prior schema and default for newly created
+Bots; already updated subscription arrays stay as saved, so a downgrade does not
+re-enable started notifications on existing Bots. Legacy retries without a
+delivery_id are processed singly by the new worker.

@@ -119,7 +119,7 @@ The same report is included in the routing-health inspection response.
 
 Ordinary notifications for one Bot and one issue/chat are grouped in a fixed
 30-second window from the first event. `started` is excluded from new Bot
-subscriptions by default; existing explicitly saved subscriptions stay unchanged.
+subscriptions by default; the old untouched default selection is updated too. Custom selections stay unchanged.
 `wake_blocked` operational alerts remain immediate. This notification batching is
 separate from merging agent runs (DENE-1857).
 
@@ -155,7 +155,8 @@ multica issue comment add <issue_id> --parent <reply_to_comment_id> --content-fi
 The API equivalent adds `content` to the delivered `reply.body`, sets
 `reply.headers` (`X-Workspace-ID`) and its own Authorization, then POSTs to
 `reply.url`; no issue/comment GET is required. Issue-description mentions have
-`content` but no comment reply target. Chat events have `content`, `message_id`,
+`content` and a top-level comment `reply` with no parent; they have no original
+comment floor. Chat events have `content`, `message_id`,
 `reply_to_message_id` and a `reply.cli` using `chat send --session` to continue
 in the same chat (chats have no comment floors). Deleted source comments carry
 an empty body and no reply action; deleted context comments remain empty

@@ -148,8 +148,10 @@ func (w *BotWakeWorker) ProcessNext(ctx context.Context) (bool, error) {
 	if err != nil {
 		return true, err
 	}
+	// Pre-upgrade retries have no delivery_id. Keep those as single events
+	// so they cannot disappear from the first-attempt-only batch selector.
 	batch := []db.BotWakeEvent{e}
-	if !alert {
+	if !alert && (e.Attempts == 0 || e.DeliveryID.Valid) {
 		batch, err = q.ListBotWakeBatch(ctx, db.ListBotWakeBatchParams{BotID: e.BotID, WorkspaceID: e.WorkspaceID, IssueID: e.IssueID, ChatSessionID: e.ChatSessionID, DeliveryID: e.DeliveryID, WindowStart: e.CreatedAt, FirstSequence: e.Sequence, WindowSeconds: w.coalesceSeconds})
 		if err != nil {
 			return true, err

@@ -267,6 +267,46 @@ func TestBotWakeBatchContentAndReply(t *testing.T) {
 		}
 	}
 	t.Log("3 messages in the same chat: 1 HTTP POST; each message body and same-chat reply location included")
+	// A retry queued by the old release has no saved delivery_id. It must
+	// still make progress instead of repeatedly selecting an empty batch.
+	dbfx.Exec(t, `INSERT INTO bot_wake_event(bot_id,workspace_id,event_type,issue_id,source_id,author_type,author_id,root_id,attempts) VALUES($1,$2,'done',$3,gen_random_uuid(),'member',$4,gen_random_uuid(),1)`, bot.ID, testWorkspaceID, issueID, testUserID)
+	beforeCalls = calls.Load()
+	if worked, err := worker.ProcessNext(ctx); err != nil || !worked {
+		t.Fatalf("legacy retry: %v %v", worked, err)
+	}
+	if calls.Load() != beforeCalls+1 || len(body["events"].([]any)) != 1 {
+		t.Fatal("legacy retry did not advance")
+	}
+	t.Log("pre-upgrade retry with attempts=1 and no delivery_id: delivered once, no empty-batch loop")
+	// Description mentions can acknowledge with a top-level comment, and
+	// deleted source bodies must never reappear through enriched event reads.
+	var mentionEvent db.BotWakeEvent
+	rows, err := testHandler.Queries.ListBotWakeEvents(ctx, db.ListBotWakeEventsParams{BotID: bot.ID, WorkspaceID: bot.WorkspaceID, Limit: 100})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, row := range rows {
+		if uuidToString(row.SourceID) == sourceID {
+			mentionEvent = row
+		}
+	}
+	descriptionEvent := mentionEvent
+	descriptionEvent.SourceID = descriptionEvent.IssueID
+	fields, err := testHandler.botWakePayloadFields(ctx, descriptionEvent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fields["reply"] == nil || fields["reply_to_comment_id"] != nil {
+		t.Fatal("description reply target incorrect")
+	}
+	dbfx.Exec(t, `UPDATE comment SET deleted_at=now() WHERE id=$1`, sourceID)
+	fields, err = testHandler.botWakePayloadFields(ctx, mentionEvent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fields["content"] != "" || fields["reply"] != nil || len(fields["attachments"].([]map[string]any)) != 0 {
+		t.Fatal("deleted source leaked")
+	}
 
 }
 
