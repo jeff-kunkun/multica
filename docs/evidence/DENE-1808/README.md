@@ -39,3 +39,32 @@ bash scripts/test-db.sh --quiet -- sh -c 'cd server && go test ./internal/servic
 - 本轮无生产代码变化，未重复已通过的后端/前端测试，`git diff --check` 针对交付文件验证。浏览器空间已关闭；本地服务通过 `make down` 收尾。
 
 发布后验收仍由执行席孙悟饭承接：合入后核对服务端自动跟进版本，包含本功能的新测试版及两个运行环境就绪后，回填源方目标聊天 ID、发送 JSON（消息 ID/代发来源）、接收任务 ID 与显示/唤醒证据。不手工部署自建服务，不修改已有连通设置。本地视觉夹具没有接收运行环境，不能代表线上投递或叫醒成功。
+
+
+## 主线对齐与权限复测（2026-10-11）
+
+按 Grok Bot 的补发审查意见，在原交付分支追加合并提交，对齐 `kun`：权限基线 `de44a71f3f`，随后纳入仅文档变化的最新主线 `e70872fba5`。未 rebase、reset 或 force push，保留先前实现、清理和 S1 真实界面证据；补证支线已归类为 rescue / absorbed，交付线不变。
+
+六处冲突保留双方有效内容：CONTEXT 的参考项目与聊天代发、ADR 的收紧白名单与新默认值、证据索引、中英文设置说明、builtin workspace-links reference。路由快照逐字比较：主线 37 条全部保留原方法、路径参数约束、名称与写入标记，仅增加 `chat.list` / `chat.get` / `chat.messages` / `chat.send` 四条。UUID 约束及固定端点拒绝仍保留，`ErrManagedRoute` 同步覆盖只读查询、附件上传和本人聊天，并提示 `multica workspace link view`。
+
+首轮完整 workspacelink 复测发现新主线 `TestPendingLinkCannotEnableManaged` 隐含默认关闭前提；新连通默认开后，该测试里的开关允许用于关闭。测试现在显式创建 managed=false，继续验证未接受时不得开启；生产权限逻辑未因此改动。Skill 同步区分创建默认值与实际授权：仍要求 active，待接受的关闭连通不得通过 update 开启。
+
+最终隔离数据库复测（数据库由脚本创建并已删除，未跳过）：
+
+```sh
+bash scripts/test-db.sh --quiet -- sh -c 'cd server && go test ./internal/workspacelink -count=1 -v && go test ./internal/service ./internal/handler -run "TestManagedChat|TestLinkedChatDelivery|TestLinkedDeliveryHandoff|TestManagedLinked" -count=1 -v'
+```
+
+退出 0：workspacelink 全包通过（40.443s），service 通过（4.317s），handler 通过（7.295s）。覆盖所要求的 managed_test.go、managed_chat_test.go、service_test.go 与 chat_managed_delivery_test.go；同时覆盖新主线白名单快照、固定端点、待接受权限和双向开关。实际发送验证本人聊天、审计、接收任务/集成配置及事务原子性；历史与交接验证外部内容信任边界。
+
+CLI / 简报聚焦命令：
+
+```sh
+cd server && go test ./cmd/multica ./pkg/protocol -run 'TestManagedChat|TestCreateLinkManaged|TestChatPrompt|TestLinked' -count=1 -v
+```
+
+退出 0：CLI 1.027s，protocol 0.590s。`make sqlc` 成功，生成结果与自动合并一致。frozen-lockfile 安装完成；设置、消息列表、复制文字三个 views 测试文件共 62 项通过；`pnpm --filter @multica/views typecheck` 退出 0。未跑仓库全量检查，未重拍新主线设置页；既有 S1 图只证明记录中的旧候选，不冒充本轮截图。
+
+本轮独立路由夹具：BASELINE routes=37 / chat_routes=0，MODIFIED routes=41 / chat_routes=4，ROLLBACK routes=37 / chat_routes=0，三个探针均 forbidden_routes_restored=0 / exit 0；回滚副本与 BASELINE 字节一致。它只证明路由表及可恢复性，不是部署回滚。完整命令、字面输出、哈希与日志随本轮 issue 回复附件交付。
+
+权限复测结果交 Grok Bot 合并；发布后实际跨区发送与叫醒仍由孙悟饭承接，本轮未操作已有连通。
