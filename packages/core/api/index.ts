@@ -70,3 +70,5 @@ export const api = new Proxy({} as ApiClientType, {
     return typeof value === "function" ? value.bind(_api) : value;
   },
 });
+
+export type { FastAccessPage, FastAccessRequest } from "./fast-access";

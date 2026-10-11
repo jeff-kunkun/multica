@@ -386,6 +386,17 @@ Two ways `mcp_config` differs from `custom_env`:
 
 Provider support is not uniform: Qwen Code accepts a managed `mcp_config` through a daemon-owned 0600 temporary JSON file passed with `--mcp-config`; it is removed when the run exits. Leave the field unset (`null`) to inherit Qwen Code native settings.
 
+#### Multica as a local MCP server
+
+Run `multica mcp serve` on the runtime host to expose nine activity/history,
+messaging and verified attachment tools. Configure command `multica`, args
+`["mcp","serve"]` through the existing MCP library/assignment flow below.
+Reuse existing login/task identity; never put credentials in tool arguments or
+substitute the host identity. `multica mcp serve --help` describes tools, limits
+and recovery. Writes may wake agents; `ambiguous_write` includes a bounded
+reconciliation read and must never be blindly retried. No remote listener or
+new key settings are introduced.
+
 #### Workspace MCP servers
 
 A workspace keeps a LIBRARY of MCP servers (workspace Settings → MCP, or

@@ -2,9 +2,14 @@
 
 本索引只记录指向沉淀票附件的短指针；原始日志、截图和样本留在对应票据附件。
 
+- DENE-1879：原生收件箱动态入口与快照页面补验；[手机截图报告](https://ai.ferryway.cc/api/attachments/01a12c47-e796-7ef2-a4e7-650de8231672/download)、[原始验证和回滚材料](https://ai.ferryway.cc/api/attachments/01a12c47-ef98-7bf9-a919-bf45e79132ac/download)。网页四档续页/刷新/关闭成功，122 条记录无漏重、未读不变；原生 App/Electron 未实跑，不代表生产性能达标。
+
+- DENE-1875：Grok 小本子[交互说明附件](https://ai.ferryway.cc/api/attachments/01a12c18-69b5-7614-a9bf-09c68d3ffb46/download)与[浏览器检查记录](https://ai.ferryway.cc/api/attachments/01a12c19-5fbf-74bf-b299-1878e1459d21/download)。方案演示，1–2 秒为目标；长期画像的 mono 回写尚待父单协调，不代表全局已同步。
+
 - DENE-1860：每台机器默认同时运行上限 12、跨运行时/工作区共用与排队原因；[并发领取、改为 8 与四档真实页面截图（任务附件）](https://ai.ferryway.cc/api/attachments/01a12c7c-6089-79c8-ac3f-f844722791a7/download)。原生 App 查看入口已补，视觉未测；不代表生产已升级。
 
 - DENE-1857：默认唤醒合并、连带停止、显式转工单后的唯一执行处；[验收、回归、CLI 契约与可撤回副本](https://ai.ferryway.cc/api/attachments/01a12c51-917a-7aeb-964c-1238e378017e/download)，[四档浏览器截图与验证边界](https://ai.ferryway.cc/api/attachments/01a12c4c-f9c0-7457-bc3f-87c15b413f2f/download)。最终 390px 停止/取消按钮已实测 44px，其余较早截图已标注；全套后端仍有主线已有失败与属性列表分页用例失败，未声明全套通过。 [终审返工：只递归子单，聊天止步，兄弟单保留运行/执行开关/重试的验证](https://ai.ferryway.cc/api/attachments/01a12c68-cff7-7846-8275-d1fdc79ce088/download)。
+
 - DENE-1865：CLI 项目名、当前用户临时文件、钥匙状态与续期提示、服务端列表投影、一次性工作区选择；[完整测试、真实 CLI 与独立副本回滚记录（任务附件）](https://ai.ferryway.cc/api/attachments/01a12c55-6e00-7d6a-85fd-77deb84386d5/download)。52 个智能体紧凑输出 20,469 字节；670 项 CLI 与 13 项相关服务端测试通过。首次已失效且无缓存的钥匙元数据为未知，Windows 仅交叉构建。
 
 - DENE-1863：外部 Bot 提及原文、楼层上下文、附件与原楼层回复、30 秒同来源分组；[四档真实截图与交付边界（任务附件）](https://ai.ferryway.cc/api/attachments/01a12c4f-4fad-7b53-963d-268ba1539f90/download)，[HTTP/CLI/迁移/重试/独立回执及夹具回滚验证包](https://ai.ferryway.cc/api/attachments/01a12c4f-51fb-799b-a07f-ed024b07d434/download)。提及也等待分组窗口，已明示约半分钟延迟；生产 Grok 与原生 App 未实测，终审待定。
@@ -68,11 +73,25 @@
 
 - DENE-1806：项目默认参考项目、自动化继承/覆盖与每次运行重新核验；[含手机版的 HTML 预览（任务附件）](https://ai.ferryway.cc/api/attachments/01a12a26-bdc6-798a-b349-f9ed72409a6c/download)。数据库、任务认领与页面截图见任务交付附件；2026-10-11 已在升级后的 WD 真实巡检 run 简报中核验 `game`、`game-multica` 的描述、资源与项目记忆，均只进入参考段。[线上简报与升级证据（任务收尾附件）](https://ai.ferryway.cc/kunkunya/issues/01a12a20-e63b-7a09-bcd7-fafbfa684a9c)。
 
+
+- DENE-1876：页面说明偏好已回写全局来源，I17 与技能分发核验通过；[脱敏核验记录](DENE-1876/README.md)（引用已合并外仓修复，原始证据留附件）。
+
+
+- DENE-1874：通用 fast-access v1 协议与 Python/SQLite 只读缓存示例；[独立公开仓库已合并交付](https://github.com/kkunkunya/virtual-bot-connect/pull/1)，[干净环境15项测试、HTTP/SSE演示、完整历史扫描与四角色回滚证据](https://ai.ferryway.cc/api/attachments/01a12c6a-1a85-76b2-9809-6d7acb5e4532/download)。Grok 已审核 head d211a2da 并合并为 bacc17fe；生产端点联调未测。Multica 只保留证据指针，外仓源码及历史不进入本交付线。
+  - 集成后 MCP 参数表修正：[独立 PR 已审合并](https://github.com/kkunkunya/virtual-bot-connect/pull/2)（Grok 已审 head 6018d4e，合并提交 b42c606）；[真实 tools/list 对照、负例及回滚证据](https://ai.ferryway.cc/api/attachments/01a12c7a-78f2-7dac-8e0b-4a9405c826b3/download)。旧表失败、修正九工具通过、回滚恢复失败；未改服务端及缓存客户端。Grok 环境尚无 mcp serve，未独立重跑，现场验证沿用执行席附件；公开修正已合并，不代表 Multica 服务端已发布。
+
+- DENE-1873：本地 stdio MCP 薄适配；[接入、工具与边界](../kun/fast-access-mcp.md)、[真实 SDK/编译后 CLI 验收及独立副本回滚附件](https://ai.ferryway.cc/api/attachments/01a12c68-be9d-7a4b-ba60-5e8288e18ff3/download)。2025-11-25 初始化与 2026-07-28 发现、九工具、权限/429/写超时查证、附件校验通过；相关 CLI 回归在隔离测试目录通过。广范围 CLI 测试受任务标记/配置环境干扰失败；未运行生产写入或新增界面验收。
+
 - DENE-1808：可托管聊天代发、新连通默认开托管（旧连通不变）；[桌面/手机 HTML 预览附件](https://ai.ferryway.cc/api/attachments/01a12a2c-418e-78c0-bef9-e084235a21f1/download)。[验证记录与验收结论](DENE-1808/README.md)：真实设置/聊天四档截图、开关提交及线上 WD 代发/叫醒已通过；Grok Bot 代 Kun 验收收单，原生截图按决定留到后续发版、不占用 Kun 前台。
 
 - DENE-1815：手机 App 连通设置、共享项目阅读、聊天只读参考项目与通知入口；[390px 手机源码实页五屏与验收 HTML](https://ai.ferryway.cc/api/attachments/01a12c05-8d5e-7b40-ae67-05569ebfd349/download)、[原图/点击记录/检查日志](https://ai.ferryway.cc/api/attachments/01a12c05-8f3a-7c62-a4a7-dee4d0b6abfa/download)。React Native Web 隔离验收数据；原生模拟器启动卡在系统迁移，原生构建未验证。
 
 ## Compact cross-workspace reads
+
+- DENE-1885：合入手机主线 f3d1892613，保留快速访问与连通工作区两套入口；[手机截图与结论](https://ai.ferryway.cc/api/attachments/01a12cb5-2cd3-7c87-bb7c-921d7e03e431/download)、[合并核对、测试日志与回滚材料](https://ai.ferryway.cc/api/attachments/01a12cb5-2df5-7e3a-b97b-3445c162b830/download)。手机类型/lint/261 项测试与 fast-access/SSE/CLI/MCP 回归通过；原生及生产一次响应性能未复测。
+
+- DENE-1882：快速访问与主线集成；[迁移、真实公开客户端联调及兼容性边界](DENE-1882/integration.md)。[脱敏原始输出与回滚材料](https://ai.ferryway.cc/api/attachments/01a12c73-1f09-78cb-b484-91aa56d04c1c/download)。本地三页读齐200条任务/17活动运行，30次p95为62.476ms、最大单页41,303字节；公开MCP文档参数差异已交父单，生产实测仍未完成。
+- DENE-1883: [bounded run projection and server-paged comment repair evidence](https://ai.ferryway.cc/api/attachments/01a12ca9-652b-7be2-9bf9-54642d6b4cb1/download). Disposable PostgreSQL, MCP SDK, CLI, query plans and independent rollback; since/checkpoint paging survives 10001 old runs and 105 Chinese root summaries are fully discoverable. Original F2 fixture ignores paging and still exceeds transport budget; preserved as negative evidence alongside the real-handler pass. Parent review and production two-workspace measurement remain open.
 
 - DENE-1870：服务端紧凑读取与 Web/Desktop 共享收件箱入口，集成于父分支；[协议](../kun/fast-access.md)、[四档真实截图报告](https://ai.ferryway.cc/api/attachments/01a12c30-6781-7d33-94d8-6399c6cbba01/download)、[SQL 改前/改后与回滚记录](https://ai.ferryway.cc/api/attachments/01a12c30-67e6-7a3d-a878-d4a99839d107/download)、[最终后端回归输出](https://ai.ferryway.cc/api/attachments/01a12c30-6844-72e6-aa30-57da9aee6405/download)。隔离数据库两工作区、17 个活动运行，5 页无漏重；前后两轮 30 次本地 p95 分别为 1.043 秒 / 43.852 毫秒，不外推生产性能。375/390/768/1280 实页与 375 关闭、未读不变已核验；浏览器续页/刷新成功、独立 Electron、原生 App 和线上实测未完成，手机入口与页面缺口由 DENE-1879 接续，线上复核归父任务。
 - DENE-1871：编译后 CLI → HTTP → 真实处理器 → 隔离 PostgreSQL 联调；[验证账本](https://ai.ferryway.cc/api/attachments/01a12c35-442d-76e1-af28-b8e9b107bf48/download)、[源码补丁](https://ai.ferryway.cc/api/attachments/01a12c35-3ed7-7946-9ac7-e8ea3ba2029f/download)。`changes` / `runs --active` 各一次业务请求；两工作区 17 个活动运行，分别 9231 / 8117 字节；显式范围及 4 页 20 条无漏重，误把快照收据当游标被拒。身份在认证后的测试边界注入，未验证登录/令牌或生产延迟；交回父分支集成，不代表已发布。

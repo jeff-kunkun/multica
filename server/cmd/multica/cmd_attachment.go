@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"crypto/sha256"
 	"fmt"
 	"net/url"
 	"os"
@@ -305,13 +304,8 @@ func attachmentDownloadURLType(rawURL string) string {
 }
 
 func verifyAttachmentBytes(att cli.AttachmentResponse, data []byte, downloadURL string) error {
-	actual := fmt.Sprintf("%x", sha256.Sum256(data))
-	if actual != att.SHA256 || int64(len(data)) != att.SizeBytes {
-		kind := "sha256"
-		if actual == att.SHA256 {
-			kind = "size"
-		}
-		return fmt.Errorf("attachment %s mismatch: expected sha256=%s size=%d; actual sha256=%s size=%d; download address type=%s; downloaded bytes discarded", kind, att.SHA256, att.SizeBytes, actual, len(data), attachmentDownloadURLType(downloadURL))
+	if err := cli.VerifyAttachment(data, att.SHA256, att.SizeBytes); err != nil {
+		return fmt.Errorf("%w; download address type=%s", err, attachmentDownloadURLType(downloadURL))
 	}
 	return nil
 }

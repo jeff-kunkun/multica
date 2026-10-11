@@ -1,3 +1,4 @@
+import { FastAccessSchema, type FastAccessPage, type FastAccessRequest } from "@multica/core/api/fast-access";
 import type { WorkspaceLink, ListWorkspaceLinksResponse, WorkspaceLinkLookup, LinkedView } from "@multica/core/types/workspace-link";
 import { WorkspaceLinkSchema, WorkspaceLinksSchema, WorkspaceLinkLookupSchema, LinkedViewSchema } from "./workspace-link-schemas";
 import { LinkedProjectSettingsSchema, LinkedProjectOptionsSchema } from "@multica/core/api/schemas";
@@ -421,6 +422,15 @@ class ApiClient {
     return parseWithFallback(raw, schema, fallback, {
       endpoint: opts?.endpoint ?? `${init.method ?? "GET"} ${path}`,
     });
+  }
+
+  async readFastAccess(request: FastAccessRequest, opts?: { signal?: AbortSignal }): Promise<FastAccessPage> {
+    const page = await this.fetchValidatedWith<FastAccessPage | null>(
+      "/api/fast-access/v1/read", FastAccessSchema, null,
+      { method: "POST", body: JSON.stringify(request) }, opts,
+    );
+    if (!page) throw new Error("Invalid activity response");
+    return page;
   }
 
   async listWorkspaceLinks(opts?: { signal?: AbortSignal }) {

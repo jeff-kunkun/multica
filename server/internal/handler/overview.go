@@ -172,6 +172,9 @@ func (h *Handler) GetOverview(w http.ResponseWriter, r *http.Request) {
 	}
 	counts := map[string]int{}
 	result := map[string]any{"bot_wake_chain": h.botWakeChainReport(r, ws), "workspace_id": ws, "compact": compact, "omitted_sections": omitted, "counts": counts}
+	result["fast_access"] = map[string]any{
+		"schema_version": "1", "mode": "durable_delta", "events": "GET /api/fast-access/v1/events", "read": "POST /api/fast-access/v1/read", "active_runs": "GET /api/fast-access/v1/runs?active=true", "limit_max": 200, "max_bytes": 50000, "history_complete": false, "mcp": map[string]any{"command": "multica", "args": []string{"mcp", "serve"}, "transport": "stdio"},
+	}
 	for name, rows := range sections {
 		counts[name] = len(rows)
 		if compact {
