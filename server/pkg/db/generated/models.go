@@ -298,6 +298,8 @@ type AgentTaskQueue struct {
 	SessionBreakReason        pgtype.Text `json:"session_break_reason"`
 	ViaBotID                  pgtype.UUID `json:"via_bot_id"`
 	ViaBotName                pgtype.Text `json:"via_bot_name"`
+	WakeRootID                pgtype.UUID `json:"wake_root_id"`
+	WakeHop                   int32       `json:"wake_hop"`
 }
 
 type AgentToLabel struct {
@@ -474,6 +476,18 @@ type BotWakeAttempt struct {
 	AttemptedAt pgtype.Timestamptz `json:"attempted_at"`
 }
 
+type BotWakeCause struct {
+	BotID  pgtype.UUID `json:"bot_id"`
+	RootID pgtype.UUID `json:"root_id"`
+	Hop    int32       `json:"hop"`
+}
+
+type BotWakeChain struct {
+	RootID      pgtype.UUID `json:"root_id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	Hops        int32       `json:"hops"`
+}
+
 type BotWakeEvent struct {
 	Sequence       int64              `json:"sequence"`
 	EventID        pgtype.UUID        `json:"event_id"`
@@ -496,6 +510,11 @@ type BotWakeEvent struct {
 	ResultAt       pgtype.Timestamptz `json:"result_at"`
 	ResultUrl      pgtype.Text        `json:"result_url"`
 	AcknowledgedAt pgtype.Timestamptz `json:"acknowledged_at"`
+	ViaBotID       pgtype.UUID        `json:"via_bot_id"`
+	ViaBotName     pgtype.Text        `json:"via_bot_name"`
+	SourceTaskID   pgtype.UUID        `json:"source_task_id"`
+	RootID         pgtype.UUID        `json:"root_id"`
+	Hop            int32              `json:"hop"`
 }
 
 type BotWakeWatch struct {
@@ -709,6 +728,8 @@ type ChatMessage struct {
 	LinkedSessionID               pgtype.UUID        `json:"linked_session_id"`
 	ViaBotID                      pgtype.UUID        `json:"via_bot_id"`
 	ViaBotName                    pgtype.Text        `json:"via_bot_name"`
+	WakeRootID                    pgtype.UUID        `json:"wake_root_id"`
+	WakeHop                       int32              `json:"wake_hop"`
 }
 
 type ChatNamingEvent struct {
@@ -877,6 +898,8 @@ type Comment struct {
 	SuppressedAgentIds []pgtype.UUID      `json:"suppressed_agent_ids"`
 	ViaBotID           pgtype.UUID        `json:"via_bot_id"`
 	ViaBotName         pgtype.Text        `json:"via_bot_name"`
+	WakeRootID         pgtype.UUID        `json:"wake_root_id"`
+	WakeHop            int32              `json:"wake_hop"`
 }
 
 type CommentReaction struct {
@@ -1508,6 +1531,9 @@ type IssueSummon struct {
 	AnsweredAt      pgtype.Timestamptz `json:"answered_at"`
 	AnswerCommentID pgtype.UUID        `json:"answer_comment_id"`
 	RemindedAt      pgtype.Timestamptz `json:"reminded_at"`
+	ViaBotID        pgtype.UUID        `json:"via_bot_id"`
+	ViaBotName      pgtype.Text        `json:"via_bot_name"`
+	SourceTaskID    pgtype.UUID        `json:"source_task_id"`
 }
 
 type IssueToLabel struct {

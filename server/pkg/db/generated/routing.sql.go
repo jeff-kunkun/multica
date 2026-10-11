@@ -284,7 +284,7 @@ VALUES (
     $5::text
 )
 ON CONFLICT (issue_id, routing_kind) WHERE routing_kind IS NOT NULL DO NOTHING
-RETURNING id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, resolved_at, resolved_by_type, resolved_by_id, source_task_id, quick_action_id, via_plugin_id, revision, recovery_settled_at, deleted_at, routing_kind, suppressed_agent_ids, via_bot_id, via_bot_name
+RETURNING id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, resolved_at, resolved_by_type, resolved_by_id, source_task_id, quick_action_id, via_plugin_id, revision, recovery_settled_at, deleted_at, routing_kind, suppressed_agent_ids, via_bot_id, via_bot_name, wake_root_id, wake_hop
 `
 
 type CreateRoutingCommentParams struct {
@@ -331,6 +331,8 @@ func (q *Queries) CreateRoutingComment(ctx context.Context, arg CreateRoutingCom
 		&i.SuppressedAgentIds,
 		&i.ViaBotID,
 		&i.ViaBotName,
+		&i.WakeRootID,
+		&i.WakeHop,
 	)
 	return i, err
 }

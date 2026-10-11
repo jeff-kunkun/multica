@@ -13,7 +13,7 @@ import (
 
 const getChatSourceMessage = `-- name: GetChatSourceMessage :one
 
-SELECT id, chat_session_id, role, content, task_id, created_at, failure_reason, elapsed_ms, message_kind, channel_media_pending_until, channel_ingested, quick_actions, channel_context_revision, channel_outbound_type, channel_outbound_installation_id, channel_outbound_chat_id, channel_outbound_message_ids, sender_user_id, linked_session_id, via_bot_id, via_bot_name FROM chat_message
+SELECT id, chat_session_id, role, content, task_id, created_at, failure_reason, elapsed_ms, message_kind, channel_media_pending_until, channel_ingested, quick_actions, channel_context_revision, channel_outbound_type, channel_outbound_installation_id, channel_outbound_chat_id, channel_outbound_message_ids, sender_user_id, linked_session_id, via_bot_id, via_bot_name, wake_root_id, wake_hop FROM chat_message
 WHERE chat_session_id = $1
   AND role = 'user'
   AND created_at <= $2
@@ -54,6 +54,8 @@ func (q *Queries) GetChatSourceMessage(ctx context.Context, arg GetChatSourceMes
 		&i.LinkedSessionID,
 		&i.ViaBotID,
 		&i.ViaBotName,
+		&i.WakeRootID,
+		&i.WakeHop,
 	)
 	return i, err
 }

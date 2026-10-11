@@ -2,7 +2,7 @@
 SELECT * FROM personal_access_token WHERE id=$1 AND workspace_id=$2 AND kind='bot';
 
 -- name: ListWakeBots :many
-SELECT * FROM personal_access_token WHERE workspace_id=$1 AND kind='bot' ORDER BY name,id;
+SELECT * FROM personal_access_token WHERE workspace_id=$1 AND kind='bot' AND deleted_at IS NULL AND NOT revoked ORDER BY name,id;
 
 -- name: GetBotWake :one
 SELECT * FROM bot_wake WHERE bot_id=$1;
@@ -32,7 +32,7 @@ UPDATE bot_wake_event SET status=$2,reason=$3,received_at=CASE WHEN $2='received
  next_attempt_at=now()+sqlc.arg(delay_seconds)::integer*interval '1 second' WHERE sequence=$1;
 
 -- name: MarkBotWakeSending :exec
-WITH sent AS (UPDATE bot_wake_event SET status='sending',sent_at=now(),attempts=attempts+1 WHERE sequence=$1 RETURNING bot_id)
+WITH sent AS (UPDATE bot_wake_event SET status='sending',sent_at=now(),attempts=attempts+1,hop=$2 WHERE sequence=$1 RETURNING bot_id)
 INSERT INTO bot_wake_attempt(bot_id) SELECT bot_id FROM sent;
 
 -- name: RecoverBotWakeUncertain :exec
@@ -55,3 +55,13 @@ UPDATE bot_wake_event SET result_at=COALESCE(result_at,clock_timestamp()),
 -- name: AcknowledgeBotWakePending :exec
 UPDATE bot_wake_event SET acknowledged_at=COALESCE(acknowledged_at,clock_timestamp())
  WHERE sequence=$1 AND status IN ('pending','failed','uncertain');
+
+-- name: EnsureBotWakeChain :exec
+INSERT INTO bot_wake_chain(root_id,workspace_id) VALUES($1,$2) ON CONFLICT DO NOTHING;
+
+-- name: ConsumeBotWakeHop :one
+UPDATE bot_wake_chain SET hops=hops+1 WHERE root_id=$1 AND workspace_id=$2 AND hops<4 RETURNING hops;
+
+-- name: RememberBotWakeCause :exec
+INSERT INTO bot_wake_cause(bot_id,root_id,hop) VALUES($1,$2,$3)
+ON CONFLICT(bot_id) DO UPDATE SET root_id=excluded.root_id,hop=excluded.hop;

@@ -307,6 +307,19 @@ func TestBotWakeLocalHTTP(t *testing.T) {
 		t.Fatal("private chat leaked")
 	}
 	t.Log("revoked chat access: no send; prior receipts hidden")
+	code, data = call("GET", base+"/pending?limit=1", raw, nil)
+	var filtered struct {
+		Events []any  `json:"events"`
+		Next   string `json:"next_cursor"`
+	}
+	if json.Unmarshal(data, &filtered) != nil || code != 200 || len(filtered.Events) != 0 || filtered.Next == "" {
+		t.Fatalf("filtered empty page lost cursor: %d %s", code, data)
+	}
+	code, data = call("GET", base+"/pending?limit=100&before="+filtered.Next, raw, nil)
+	if code != 200 || !bytes.Contains(data, []byte(`"event_id"`)) {
+		t.Fatalf("filtered pagination lost older events: %s", data)
+	}
+	t.Log("permission-filtered empty page keeps next_cursor; next page returns authorized pending events")
 	code, data = call("GET", "/api/workspaces/"+testWorkspaceID+"/bots/mentions?issue_id="+issueID, human, nil)
 	if code != 200 || !bytes.Contains(data, []byte(id)) || bytes.Contains(data, []byte("token_")) {
 		t.Fatal("directory failed")

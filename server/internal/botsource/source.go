@@ -36,3 +36,13 @@ func ActorFromContext(ctx context.Context) Actor {
 	actor, _ := ctx.Value(actorContextKey{}).(Actor)
 	return actor
 }
+
+type taskContextKey struct{}
+
+func WithTask(ctx context.Context, id pgtype.UUID) context.Context {
+	return context.WithValue(ctx, taskContextKey{}, id)
+}
+func TaskFromContext(ctx context.Context) pgtype.UUID {
+	id, _ := ctx.Value(taskContextKey{}).(pgtype.UUID)
+	return id
+}
