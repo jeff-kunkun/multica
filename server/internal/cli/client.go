@@ -657,9 +657,11 @@ func (c *APIClient) PatchJSON(ctx context.Context, path string, body any, out an
 
 // AttachmentResponse mirrors the server's upload-file response.
 type AttachmentResponse struct {
-	ID          string `json:"id"`
-	URL         string `json:"url"`
-	DownloadURL string `json:"download_url"`
+	ID             string `json:"id"`
+	URL            string `json:"url"`
+	DownloadURL    string `json:"download_url"`
+	RawDownloadURL string `json:"raw_download_url"`
+	CommentID      string `json:"comment_id"`
 	// MarkdownURL is the durable, persistable URL to embed in markdown bodies
 	// (chat replies, comments). Unlike DownloadURL it never carries a TTL.
 	MarkdownURL string `json:"markdown_url"`
@@ -1120,6 +1122,11 @@ func (c *APIClient) DownloadFile(ctx context.Context, downloadURL string) ([]byt
 	if isRelative {
 		c.setHeaders(req)
 	}
+	// These bytes are checksummed, not a preview representation. Explicit
+	// identity also stops net/http from adding gzip and transparently decoding
+	// it, while no-transform asks intermediaries to preserve the object.
+	req.Header.Set("Accept-Encoding", "identity")
+	req.Header.Set("Cache-Control", "no-cache, no-transform")
 
 	resp, err := c.HTTPClient.Do(req)
 	err = wrapTransport(req, err)
@@ -1133,7 +1140,14 @@ func (c *APIClient) DownloadFile(ctx context.Context, downloadURL string) ([]byt
 	}
 
 	const maxDownloadSize = 100 << 20 // 100 MB
-	return io.ReadAll(io.LimitReader(resp.Body, maxDownloadSize))
+	data, err := io.ReadAll(io.LimitReader(resp.Body, maxDownloadSize+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(data) > maxDownloadSize {
+		return nil, fmt.Errorf("attachment exceeds download limit of %d bytes", maxDownloadSize)
+	}
+	return data, nil
 }
 
 // HealthCheck hits the /health endpoint and returns the response body.
