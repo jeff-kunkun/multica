@@ -166,6 +166,17 @@ func TestCloseNeedsHumanSummonsAndReplyWakesExecutor(t *testing.T) {
 	if got := summonCount(t, `SELECT count(*) FROM agent_task_queue WHERE issue_id = $1 AND agent_id = $2 AND status IN ('queued','dispatched','running') AND trigger_comment_id = $3`, issue.ID, agentID, reply.ID); got != 1 {
 		t.Fatalf("executor runs woken by the reply = %d, want 1", got)
 	}
+	// The receipt names the executor the answer woke (DENE-1774).
+	if reply.Wake == nil || reply.Wake.NoneWoken || len(reply.Wake.Woken) != 1 {
+		t.Fatalf("reply wake = %+v, want the executor alone", reply.Wake)
+	}
+	var agentName string
+	if err := testPool.QueryRow(ctx, `SELECT name FROM agent WHERE id = $1`, agentID).Scan(&agentName); err != nil {
+		t.Fatalf("agent name: %v", err)
+	}
+	if got := reply.Wake.Woken[0]; got.AgentID != agentID || got.AgentName != agentName || got.Source != commentWokenSourceSummonAnswer || got.Status != DispatchQueued {
+		t.Fatalf("woken = %+v, want %s/%s summon_answer queued", got, agentID, agentName)
+	}
 	for _, row := range waitingSummons(t, testUserID) {
 		if row.IssueID == issue.ID {
 			t.Fatalf("answered call still waiting: %+v", row)
