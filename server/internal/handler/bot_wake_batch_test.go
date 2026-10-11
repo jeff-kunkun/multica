@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -360,4 +361,75 @@ func TestBotWakeBatchIsolationAndLock(t *testing.T) {
 		t.Fatalf("second worker stole locked bot: %v", err)
 	}
 	t.Log("fixed window excludes later event and different issue; second worker skips locked Bot")
+}
+
+func TestBotWakeDefaultSubscriptionUpgrade(t *testing.T) {
+	ctx := context.Background()
+	tx, err := testPool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback(ctx)
+	down, err := os.ReadFile("../../migrations/668_bot_wake_batches.down.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	up, err := os.ReadFile("../../migrations/668_bot_wake_batches.up.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tx.Exec(ctx, string(down)); err != nil {
+		t.Fatal(err)
+	}
+	q := testHandler.Queries.WithTx(tx)
+	create := func(name string) db.PersonalAccessToken {
+		t.Helper()
+		_, hash, prefix, err := mintBotToken()
+		if err != nil {
+			t.Fatal(err)
+		}
+		b, err := q.CreateBotAccessToken(ctx, db.CreateBotAccessTokenParams{UserID: parseUUID(testUserID), WorkspaceID: parseUUID(testWorkspaceID), Name: name, TokenHash: hash, TokenPrefix: prefix})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return b
+	}
+	defaultBot := create("old default")
+	customBot := create("custom started")
+	if _, err := tx.Exec(ctx, `UPDATE bot_wake SET events=ARRAY['started'] WHERE bot_id=$1`, customBot.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tx.Exec(ctx, string(up)); err != nil {
+		t.Fatal(err)
+	}
+	newBot := create("new default")
+	for _, b := range []db.PersonalAccessToken{defaultBot, newBot} {
+		rules, err := q.GetBotWake(ctx, b.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, event := range rules.Events {
+			if event == "started" {
+				t.Fatalf("default still contains started: %s", b.Name)
+			}
+		}
+	}
+	rules, err := q.GetBotWake(ctx, customBot.ID)
+	if err != nil || len(rules.Events) != 1 || rules.Events[0] != "started" {
+		t.Fatalf("custom selection lost: %+v %v", rules.Events, err)
+	}
+	// Schema downgrade remains executable and preserves saved selections.
+	if _, err := tx.Exec(ctx, string(down)); err != nil {
+		t.Fatal(err)
+	}
+	rules, err = q.GetBotWake(ctx, defaultBot.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, event := range rules.Events {
+		if event == "started" {
+			t.Fatal("downgrade re-enabled saved started")
+		}
+	}
+	t.Log("real migration down/up: old and new defaults exclude started; explicit started-only preserved; downgrade works without re-enabling saved subscriptions")
 }
