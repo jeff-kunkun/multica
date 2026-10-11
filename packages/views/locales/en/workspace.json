@@ -82,7 +82,10 @@
       "managed_label": "Let the viewing side manage tasks and autopilots",
       "managed_hint_outgoing": "When on, their agents can change tasks and autopilots here for the person who started the run.",
       "managed_hint_incoming": "When on, agents here can change their tasks and autopilots for the person who started the run.",
-      "managed_reason": "Only an owner of the sharing workspace can switch this."
+      "managed_reason": "Requires source owner rights; from here, also owner or admin rights in this workspace.",
+      "pending_only": "Waiting for this workspace",
+      "projects_reason": "Requires source owner rights; from here, also owner or admin rights in this workspace.",
+      "managed_pending": "Accept the link before enabling managed access."
     },
     "audit": {
       "title": "Audit trail",

@@ -30,6 +30,27 @@ never push to them, and never open a worktree, commit or write in its
 directories. A path marked "not on this machine" is the source's; read its
 repositories instead. Your working project and code source stay your own.
 
+The CLI uses the same `linked-projects` / `--reference LINK_ID:PROJECT_ID`
+contract as project and autopilot reference settings:
+
+```sh
+multica chat linked-projects --available --output json
+multica chat linked-projects "$MULTICA_CHAT_SESSION_ID" --output json
+multica chat linked-projects "$MULTICA_CHAT_SESSION_ID" --reference "$LINK_ID:$PROJECT_ID"
+multica chat linked-projects "$MULTICA_CHAT_SESSION_ID" --clear
+multica chat new --agent "$AGENT_ID" --reference "$LINK_ID:$PROJECT_ID" "Read the reference notes"
+```
+
+Use real IDs from `--available`; `--reference` replaces the complete selection,
+so repeat it for every reference to keep. To remove one, submit the remaining
+pairs; `--clear` removes all. `chat new` is for people/personal-key bots, not
+agent runs. These commands reuse the chat's normal access checks. JSON
+`linked_projects` entries name `project_id`, `link_id`, `title`, `source_name`,
+`available` and `unavailable_reason`. A false availability keeps the saved name
+visible, but the server does not disclose which access check failed. Disconnecting
+or unsharing stops injection in the **next** run. References never become working
+projects. `multica overview --output json` also includes chats' `linked_projects`.
+
 That is everything a read-only link exposes. Task descriptions, comments,
 attachments, private tasks, private projects and projects the source did not
 tick are never in the response, and nothing here can write to the source. Do
@@ -83,10 +104,8 @@ Someone who owns both workspaces can instead pull from the viewer side (设置 �
 连通工作区 → 连进来的, or `create --from <workspace>`); that link is active at
 once. Anyone else must ask the source's owner to offer it.
 
-A person who owns the source and is owner/admin in the viewer can also switch
-managed from the viewer side; `can_set_managed` reports this per link. Agents
-cannot switch it. Disconnect (`revoke`) deletes the link; there is no `revoked`
-status. Both sides retain audit records.
+Disconnect (`revoke`) deletes the link; there is no `revoked` status. Both
+sides retain audit records.
 
 Attachments work with `--linked` on create and comment add:
 
@@ -102,3 +121,24 @@ the source issue timeline (`issue timeline`) or `autopilot linked-changes`.
 Link audit records (`workspace_link_audit`) are visible to both owners in
 Settings → Linked workspaces. No existing link settings are changed by a command
 using `--linked`.
+
+## Settings and audit
+
+Human source owners can change projects and switch managed from either side.
+From the viewer they
+also need owner/admin rights there; `update <link-id> --project <name>` resolves
+names in the source workspace. `list` includes shared `projects` on both sides,
+`can_update_projects` and `can_set_managed`. Pending links cannot enable managed
+access: accept first. Agents still cannot manage links or read owner-only audit.
+
+Human workspace owners can read changes and managed writes (including deleted links):
+
+```sh
+multica workspace link audit --limit 50 --output json
+multica workspace link audit --cursor <next_cursor> --output json
+```
+
+Each entry names `peer_workspace_name`, `by_side`, `actor_name`, `action`, `route`,
+`object_label` (task identifier or automation name), `detail` and `created_at`.
+`next_cursor: null` marks the last page. Settings, linked reading and overview
+refresh on link-change events and after reconnect; a full-page reload is unnecessary.

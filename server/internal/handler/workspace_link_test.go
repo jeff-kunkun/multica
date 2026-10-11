@@ -11,6 +11,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
+	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/testutil"
 )
@@ -25,6 +26,7 @@ func workspaceLinkRouter() http.Handler {
 			r.Get("/", testHandler.ListWorkspaceLinks)
 			r.Post("/", testHandler.CreateWorkspaceLink)
 			r.Get("/lookup", testHandler.LookupWorkspaceLinkTarget)
+			r.Get("/audit", testHandler.ListWorkspaceLinkAudit)
 			r.Patch("/{id}", testHandler.UpdateWorkspaceLink)
 			r.Delete("/{id}", testHandler.RevokeWorkspaceLink)
 			r.Get("/{id}/view", testHandler.GetWorkspaceLinkView)
@@ -322,5 +324,66 @@ func TestWorkspaceLinkRequestNotices(t *testing.T) {
 		if n := linkNotices(t, source, who, "workspace_link_declined", false); n != 1 {
 			t.Fatalf("source manager %s holds %d declined receipts, want 1", who, n)
 		}
+	}
+}
+
+func TestWorkspaceLinkChangesNotifyBothSidesAndAuditPages(t *testing.T) {
+	tag := uuid.NewString()[:8]
+	source := dbfx.Workspace(t, "sync source", "sync-source-"+tag)
+	viewer := dbfx.Workspace(t, "sync viewer", "sync-viewer-"+tag)
+	user := dbfx.User(t, "sync owner", "sync-"+tag+"@test.invalid")
+	dbfx.Member(t, source, user, "owner")
+	dbfx.Member(t, viewer, user, "owner")
+	project := dbfx.Project(t, "shared", testutil.Cols{"workspace_id": source, "visibility": "workspace"})
+	counts := map[string]int{}
+	testHandler.Bus.Subscribe("workspace_link:changed", func(e events.Event) {
+		if e.WorkspaceID == source || e.WorkspaceID == viewer {
+			counts[e.WorkspaceID]++
+		}
+	})
+	src := linkCaller{ws: source, user: user}
+	dst := linkCaller{ws: viewer, user: user}
+	rec := src.do(t, "POST", "/api/workspace-links", fmt.Sprintf(`{"target_slug":"sync-viewer-%s","project_ids":["%s"]}`, tag, project))
+	if rec.Code != 201 {
+		t.Fatalf("create: %d %s", rec.Code, rec.Body)
+	}
+	id := decodeField(t, rec, "id")
+	path := "/api/workspace-links/" + id
+	for _, body := range []string{`{"accept":true}`, fmt.Sprintf(`{"project_ids":["%s"]}`, project), `{"managed":true}`} {
+		rec = dst.do(t, "PATCH", path, body)
+		if rec.Code != 200 {
+			t.Fatalf("patch: %d %s", rec.Code, rec.Body)
+		}
+	}
+	rec = dst.do(t, "DELETE", path, "")
+	if rec.Code != 204 {
+		t.Fatal(rec.Body)
+	}
+	if counts[source] != 5 || counts[viewer] != 5 {
+		t.Fatalf("events=%v", counts)
+	}
+	first := dst
+	first.query = "limit=1"
+	rec = first.do(t, "GET", "/api/workspace-links/audit", "")
+	if rec.Code != 200 {
+		t.Fatal(rec.Body)
+	}
+	var page struct {
+		Entries []struct {
+			ID   string `json:"id"`
+			Peer string `json:"peer_workspace_name"`
+		} `json:"entries"`
+		Next string `json:"next_cursor"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &page); err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Entries) != 1 || page.Entries[0].Peer != "sync source" || page.Next == "" {
+		t.Fatalf("page=%+v", page)
+	}
+	first.query = "limit=1&cursor=" + page.Next
+	rec = first.do(t, "GET", "/api/workspace-links/audit", "")
+	if rec.Code != 200 || strings.Contains(rec.Body.String(), page.Entries[0].ID) {
+		t.Fatalf("second: %s", rec.Body)
 	}
 }

@@ -140,3 +140,17 @@ func mustTime(t *testing.T, s string) time.Time {
 	}
 	return v
 }
+
+func TestViewerProjectUpdateRequiresBothRoles(t *testing.T) {
+	for _, role := range []permission.Role{permission.RoleOwner, permission.RoleAdmin, permission.RoleMember, permission.RoleGuest} {
+		for _, sourceRole := range []permission.Role{permission.RoleOwner, permission.RoleAdmin, permission.RoleMember, ""} {
+			for _, agent := range []bool{false, true} {
+				got := Decide(OpUpdateProjects, SideViewer, Actor{Role: role, SourceRole: sourceRole, IsAgent: agent})
+				want := !agent && sourceRole == permission.RoleOwner && (role == permission.RoleOwner || role == permission.RoleAdmin)
+				if got != want {
+					t.Errorf("viewer=%s source=%s agent=%v: %v", role, sourceRole, agent, got)
+				}
+			}
+		}
+	}
+}

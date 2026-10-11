@@ -401,9 +401,11 @@ func renderBotSetupText(in botSetupInput) string {
 	b.WriteString("multica issue list --limit 5   # 能列出任务就接好了\n\n")
 
 	b.WriteString("三、常用命令（不会用就先跑 multica <命令> --help）\n")
+	b.WriteString("- 工作区全景：multica overview --output json；连通名单与状态：multica workspace link list --output json；审计：multica workspace link audit --output json（需 owner 权限）\n")
 	b.WriteString("- 看任务：multica issue list / multica issue get <编号> / multica issue comment list <编号>\n")
 	b.WriteString("- 建任务、改任务：multica issue create / multica issue update / multica issue status <编号> <状态>\n")
 	b.WriteString("- 评论：multica issue comment add <编号> --content-file <文件>\n")
+	b.WriteString("- 聊天只读参考项目：multica chat linked-projects --available --output json 查可挂项目；multica chat linked-projects <session-id> 查看；--reference LINK_ID:PROJECT_ID 替换，--clear 取下；chat new 同样支持 --reference。断开后下一次 run 不再注入。\n")
 	b.WriteString("- 新开聊天并等回复：multica chat new --agent <智能体名字> \"消息\" --wait --output table\n")
 	b.WriteString("- 接着聊：multica chat send --session <聊天编号> \"消息\" --wait --output table；看记录：multica chat list / multica chat history --session <聊天编号>\n")
 	b.WriteString("- 传文件：multica issue comment add <编号> --content-file <文件> --attachment <要传的文件>\n\n")

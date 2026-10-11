@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"github.com/multica-ai/multica/server/internal/botsource"
 	"log/slog"
 	"net/http"
@@ -304,6 +305,14 @@ func (s *Service) Managed(next http.Handler) http.Handler {
 		}
 		r.URL.RawQuery = q.Encode()
 
+		// Capture names before a destructive operation removes the object.
+		if rt.write && params["autopilot"] != "" {
+			if id, err := util.ParseUUID(params["autopilot"]); err == nil {
+				if ap, err := s.q.GetAutopilotInWorkspace(r.Context(), db.GetAutopilotInWorkspaceParams{ID: id, WorkspaceID: grant.Source.ID}); err == nil {
+					params["object_label"] = ap.Title
+				}
+			}
+		}
 		rec := &managedRecorder{ResponseWriter: w, status: http.StatusOK, keepBody: rt.name == "issue.create" || rt.name == "autopilot.create"}
 		next.ServeHTTP(rec, r)
 		if rt.write && rec.status < 300 {
@@ -360,6 +369,7 @@ func (m *managedRecorder) Flush() {
 func (s *Service) recordManagedWrite(ctx context.Context, g ManagedGrant, rt managedRoute, params map[string]string, body []byte) {
 	detail := map[string]any{
 		"route":         rt.name,
+		"object_label":  params["object_label"],
 		"via_workspace": g.Viewer.Name,
 		"via_slug":      g.Viewer.Slug,
 		"agent_id":      util.UUIDToString(g.Agent.ID),
@@ -373,6 +383,9 @@ func (s *Service) recordManagedWrite(ctx context.Context, g ManagedGrant, rt man
 		issueID = s.managedIssueID(ctx, g.Source, params["issue"], body)
 		if issueID.Valid {
 			detail["issue_id"] = util.UUIDToString(issueID)
+			if issue, err := s.q.GetIssueInWorkspace(ctx, db.GetIssueInWorkspaceParams{ID: issueID, WorkspaceID: g.Source.ID}); err == nil {
+				detail["object_label"] = fmt.Sprintf("%s-%d", g.Source.IssuePrefix, issue.Number)
+			}
 		}
 	}
 	var autopilotID pgtype.UUID
@@ -380,6 +393,9 @@ func (s *Service) recordManagedWrite(ctx context.Context, g ManagedGrant, rt man
 		autopilotID = s.managedAutopilotID(ctx, g.Source, params["autopilot"], body)
 		if autopilotID.Valid {
 			detail["autopilot_id"] = util.UUIDToString(autopilotID)
+			if ap, err := s.q.GetAutopilotInWorkspace(ctx, db.GetAutopilotInWorkspaceParams{ID: autopilotID, WorkspaceID: g.Source.ID}); err == nil {
+				detail["object_label"] = ap.Title
+			}
 		}
 	}
 	if err := audit(ctx, s.q, g.Link, g.Viewer.ID, g.Originator, "managed_write", detail); err != nil {
@@ -492,6 +508,7 @@ func (s *Service) FillCanSetManaged(ctx context.Context, links []Link, actorUser
 		switch links[i].Side {
 		case SideSource:
 			links[i].CanSetManaged = Decide(OpSetManaged, SideSource, actor)
+			links[i].CanUpdateProjects = Decide(OpUpdateProjects, SideSource, actor)
 		case SideViewer:
 			sourceID, err := util.ParseUUID(links[i].Source.ID)
 			if err != nil {
@@ -502,6 +519,10 @@ func (s *Service) FillCanSetManaged(ctx context.Context, links []Link, actorUser
 				return err
 			}
 			links[i].CanSetManaged = ok
+			links[i].CanUpdateProjects = ok
+		}
+		if links[i].Status != "active" && !links[i].Managed {
+			links[i].CanSetManaged = false
 		}
 	}
 	return nil
@@ -525,6 +546,9 @@ func (s *Service) setManaged(ctx context.Context, q *db.Queries, link db.Workspa
 		fromViewer = true
 	default:
 		return ErrNotFound
+	}
+	if on && link.Status != "active" {
+		return invalid("accept the link before enabling managed access")
 	}
 	updated, err := q.SetWorkspaceLinkManaged(ctx, db.SetWorkspaceLinkManagedParams{ID: link.ID, Managed: on})
 	if err != nil {

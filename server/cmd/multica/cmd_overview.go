@@ -21,7 +21,9 @@ func newOverviewCommand() *cobra.Command {
 		Long: `Read agents, projects, active chats, automations, skills, squads, runtimes,
 linked workspaces and external connections from one permission-filtered snapshot.
 Restricted sections are listed in omitted_sections. Filters accept an ID or name
-and are resolved by the server; combine them to narrow the workspace map.`,
+and are resolved by the server; combine them to narrow the workspace map.
+Linked workspaces include shared projects and edit abilities; owners can read
+change history with multica workspace link audit --output json.`,
 		Example: `  multica overview
   multica overview --output json
   multica overview --project "My project" --compact

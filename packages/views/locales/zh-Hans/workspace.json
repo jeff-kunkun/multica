@@ -82,7 +82,10 @@
       "managed_label": "允许看方托管任务和自动化",
       "managed_hint_outgoing": "开启后，对方的智能体可以替发起人改这里的任务和自动化。",
       "managed_hint_incoming": "开启后，这里的智能体可以替发起人改对方的任务和自动化。",
-      "managed_reason": "只有源方工作区的所有者能开关托管。"
+      "managed_reason": "需要源方 owner 权限；从看方修改还需本工作区 owner 或 admin 权限。",
+      "pending_only": "只看待本工作区接受的连通",
+      "projects_reason": "需要源方 owner 权限；从看方修改还需本工作区 owner 或 admin 权限。",
+      "managed_pending": "接受连通后才能开启托管。"
     },
     "audit": {
       "title": "审计记录",

@@ -1,10 +1,14 @@
 package handler
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"github.com/multica-ai/multica/server/internal/daemon/execenv"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"os/exec"
 	"strings"
 	"testing"
 
@@ -108,6 +112,61 @@ func TestChatLinkedProjects(t *testing.T) {
 		t.Fatalf("linked_projects = %+v", session.LinkedProjects)
 	}
 
+	// Optional real CLI acceptance: use the compiled binary against these real
+	// handlers and this disposable database, with only authentication supplied
+	// by the existing test fixture. No production workspace is contacted.
+	var cliRead func(...string) string
+	if binary := os.Getenv("MULTICA_REFERENCE_CLI_TEST_BINARY"); binary != "" {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			r.Header.Set("X-User-ID", testUserID)
+			r = withChatTestWorkspaceCtx(t, withURLParam(r, "sessionId", session.ID))
+			switch {
+			case r.URL.Path == "/api/workspace-links/projects":
+				testHandler.ListChatLinkedProjectOptions(w, r)
+			case r.URL.Path == "/api/chat/sessions/"+session.ID && r.Method == "PATCH":
+				testHandler.UpdateChatSession(w, r)
+			case r.URL.Path == "/api/chat/sessions/"+session.ID && r.Method == "GET":
+				testHandler.GetChatSession(w, r)
+			default:
+				http.Error(w, "unexpected request", 404)
+			}
+		}))
+		defer srv.Close()
+		cliRead = func(args ...string) string {
+			t.Helper()
+			cmd := exec.Command(binary, append([]string{"chat", "linked-projects"}, args...)...)
+			cmd.Dir = t.TempDir()
+			for _, item := range os.Environ() {
+				if !strings.HasPrefix(item, "MULTICA_") {
+					cmd.Env = append(cmd.Env, item)
+				}
+			}
+			cmd.Env = append(cmd.Env, "MULTICA_SERVER_URL="+srv.URL, "MULTICA_WORKSPACE_ID="+testWorkspaceID, "MULTICA_TOKEN=mul_local_test")
+			var stderr bytes.Buffer
+			cmd.Stderr = &stderr
+			out, err := cmd.Output()
+			if err != nil {
+				t.Fatalf("CLI %v: %v stdout=%s stderr=%s", args, err, out, stderr.String())
+			}
+			t.Logf("CLI %v: %s", args, out)
+			return string(out)
+		}
+		if out := cliRead("--available"); !strings.Contains(out, shared) {
+			t.Fatalf("CLI options: %s", out)
+		}
+		cliRead(session.ID, "--clear")
+		if out := cliRead(session.ID, "--reference", link.ID+":"+shared); !strings.Contains(out, `"available": true`) {
+			t.Fatalf("CLI attach: %s", out)
+		}
+	}
+
+	for _, suffix := range []string{"", "?compact=true"} {
+		w := httptest.NewRecorder()
+		testHandler.GetOverview(w, withChatTestWorkspaceCtx(t, newRequest("GET", "/api/overview"+suffix, nil)))
+		if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), shared) || !strings.Contains(w.Body.String(), "linked_projects") {
+			t.Fatalf("overview reference projection %s: %d %s", suffix, w.Code, w.Body)
+		}
+	}
 	runtimeID := handlerTestRuntimeID(t)
 	claim := func() (string, []TaskLinkedProjectData) {
 		t.Helper()
@@ -144,6 +203,19 @@ func TestChatLinkedProjects(t *testing.T) {
 			t.Fatalf("claim workspace hints = %+v, want Acme=%v", out.Task.WorkspaceLinks, expectHint)
 		}
 		dbfx.Exec(t, `UPDATE agent_task_queue SET status = 'completed', completed_at = now() WHERE id = $1`, taskID)
+		briefContext := execenv.TaskContextForEnv{}
+		for _, ref := range out.Task.LinkedProjects {
+			briefContext.ReferenceProjects = append(briefContext.ReferenceProjects, execenv.ReferenceProjectForEnv{Title: ref.Title, SourceName: ref.SourceName, Description: ref.Description})
+		}
+		brief, err := execenv.InjectRuntimeConfig(t.TempDir(), "codex", briefContext)
+		if err != nil {
+			t.Fatal(err)
+		}
+		present := strings.Contains(brief, "## Read-only Reference Projects") && strings.Contains(brief, "### Shared brief (from Acme)") && strings.Contains(brief, "Read the shared design notes.")
+		if present != (len(out.Task.LinkedProjects) > 0) {
+			t.Fatalf("reference brief mismatch: %s", brief)
+		}
+		t.Logf("claimed run %s: reference section present=%v", taskID, present)
 		return out.Task.ProjectID, out.Task.LinkedProjects
 	}
 
@@ -162,6 +234,12 @@ func TestChatLinkedProjects(t *testing.T) {
 	// Revoke: the next run gets nothing, the chat still names it as stale.
 	if err := links.Revoke(ctx, util.MustParseUUID(testWorkspaceID), util.MustParseUUID(testUserID), owner, linkID); err != nil {
 		t.Fatalf("revoke: %v", err)
+	}
+	if cliRead != nil {
+		out := cliRead(session.ID)
+		if !strings.Contains(out, `"available": false`) || !strings.Contains(out, "no longer accessible") {
+			t.Fatalf("CLI revoked: %s", out)
+		}
 	}
 	expectHint = false
 	if _, linked := claim(); len(linked) != 0 {

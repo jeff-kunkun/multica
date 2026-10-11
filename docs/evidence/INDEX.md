@@ -2,6 +2,8 @@
 
 本索引只记录指向沉淀票附件的短指针；原始日志、截图和样本留在对应票据附件。
 
+- DENE-1811：跨工作区连通双向设置、CLI 实时同步与审计分页；[验收记录及四档 HTML 预览](DENE-1811/checkpoint.md)。
+
 - DENE-1779：聊天项目筛选跟随当前对话、右侧项目变更和新建项目；手动「全部」在跳转与刷新后保留。[真实浏览器 375/390/768/1280 截图报告（任务附件）](https://ai.ferryway.cc/api/attachments/01a12929-1b8b-70e0-bb44-10f1349a356a/download)。
 
 - DENE-1050：统一带选项提问的三面交付；[PR #448](https://github.com/jeff-kunkun/multica/pull/448)，界面预览 `preview/ask-options-card.html`。
