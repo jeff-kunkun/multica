@@ -65,3 +65,5 @@
 - DENE-1870：跨工作区紧凑读取；[协议](../kun/fast-access.md)、[后端复现与本地测量](DENE-1870/backend.md)、[共享界面验证及原生例外](DENE-1870/frontend.md)、[四档真实截图报告](https://ai.ferryway.cc/api/attachments/01a12c30-6781-7d33-94d8-6399c6cbba01/download)。本地两工作区17活动运行，30次p95为1.043秒，不代表线上结果。
 
 - DENE-1872：持久事件记录与断线续传（含三条生命周期路径实际锁等待采样补测）；[事务、回放、性能与回滚证据](DENE-1872/backend.md)。服务端、CLI、共享页面和原生查询层已同步；本地集成通过，尚未发布，原生设备与 Electron GUI 未实测。
+
+- DENE-1874：通用 fast-access v1 协议与 Python/SQLite 只读缓存示例；[独立公开仓库候选](https://github.com/kkunkunya/virtual-bot-connect/pull/1)，[干净环境15项测试、HTTP/SSE演示、完整历史扫描与四角色回滚证据](https://ai.ferryway.cc/api/attachments/01a12c6a-1a85-76b2-9809-6d7acb5e4532/download)。候选已交 Grok 审核，未宣称合并或生产联调；外仓源码及历史不进入本交付线。
