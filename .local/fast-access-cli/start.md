@@ -1,1 +1,0 @@
-已核对父单 v0.1、六点回复和开工批准。仅实现 CLI changes/runs、客户端边界测试及 builtin skill/命令文档。一次业务请求，保留完整 JSON envelope，不轮询各工作区或自动翻页，不改认证客户端/令牌/心跳。将与 DENE-1870 在父线程核对 wire schema；HTTP fixture 通过后仍需真实 API 联调，不把 fixture 当最终交付。已有 AGENTS.md 修改保持不动。

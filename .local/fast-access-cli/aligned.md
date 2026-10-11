@@ -1,1 +1,0 @@
-CLI 已读到服务端字段契约，按 schema_version="1" 和 scope.mode="workspace_ids" 对齐。续页改为只传 cursor（另允许 limit/max_bytes/output），CLI 将拒绝游标和 scope flags 并用，避免静默忽略范围；首次支持 all_visible/显式workspace/当前workspace。一次业务请求无自动翻页，原始 JSON 完整保留、大整数不转 float64，响应在解码前检查≤50000未压缩UTF-8字节。正在跑HTTP fixture边界测试，服务端就绪请提供可联调入口/本地启动方式，真实联调前本单不标完成。

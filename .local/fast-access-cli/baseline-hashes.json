@@ -1,5 +1,0 @@
-{
-  "server/cmd/multica/main.go": "177e4bef066a273d59d61d3e77554aee0604cb3dedf0fe82a27b37f29123ab37",
-  "server/cmd/multica/cmd_capabilities.go": "6638772eb045dbc19bfa40fc72d80624a8ddbefe02ca4127a001e40ff536695c",
-  "server/internal/service/builtin_skills/multica-platform/references/overview.md": "ee334ef488837eb68d12e81f1c3f4f0c19c3966c1ab9c888b2648c58889896e6"
-}

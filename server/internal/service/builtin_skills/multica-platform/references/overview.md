@@ -77,7 +77,9 @@ Read `schema_version`, `mode`, `as_of`, `coverage_from`, `scope_revision`,
 `checkpoint`, and `retention_floor`. Empty arrays mean no items on this page,
 not necessarily an empty scope. A false completeness flag means a partial page:
 continue explicitly with `next_cursor`, and save `checkpoint` only when the
-batch is complete. Null cursor/checkpoint/retention values convey the server's
+batch is complete. In `timestamp_snapshot`, `snapshot:<as_of>` is only an
+observation receipt: do not pass it as `--cursor`; start the next poll with
+`--since`. Null cursor/checkpoint/retention values convey the server's
 absence of that value; do not synthesize one. `timestamp_snapshot` is a current
 summary within stated coverage, not a durable history of deletions or every
 intermediate state. Unknown schema versions fail; install a compatible CLI.

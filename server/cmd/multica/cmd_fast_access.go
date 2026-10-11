@@ -41,7 +41,9 @@ JSON preserves the complete envelope: schema_version, mode, coverage_from, as_of
 scope_revision, changes, active_runs, complete, active_runs_complete, next_cursor,
 checkpoint and retention_floor, including additional server fields. A false
 complete or active_runs_complete means this page is partial. Follow next_cursor
-explicitly; only persist checkpoint after completion. timestamp_snapshot describes
+explicitly; only persist checkpoint after completion. In timestamp_snapshot,
+checkpoint is an observation receipt, not a cursor; start the next poll with
+--since. timestamp_snapshot describes
 current summaries, not historical deletions or every intermediate transition.
 Runs preserve the server's status and phase (queued, executing or waiting),
 including chat runs without an issue. The uncompressed UTF-8 response budget is
@@ -54,7 +56,7 @@ compatible CLI. HTTP timeout follows MULTICA_HTTP_TIMEOUT.`,
 	}
 	cmd.Flags().Bool("all-workspaces", false, "Read all workspaces visible to the caller (server-authorized)")
 	cmd.Flags().StringSlice("workspace", nil, "Workspace UUIDs (repeatable or comma-separated); defaults to current workspace")
-	cmd.Flags().String("cursor", "", "Opaque next_cursor or completed checkpoint from the server")
+	cmd.Flags().String("cursor", "", "Opaque next_cursor from the server (snapshot checkpoint is not a cursor)")
 	cmd.Flags().Int("limit", 100, "Page item limit (1-200)")
 	cmd.Flags().Int("max-bytes", fastAccessMaxBytes, "Maximum uncompressed UTF-8 response bytes (1-50000)")
 	cmd.Flags().String("output", "table", "Output format: table or json (entire envelope)")
