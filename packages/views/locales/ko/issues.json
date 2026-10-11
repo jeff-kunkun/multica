@@ -910,7 +910,8 @@
     "sparkline_now": "지금",
     "status_deferred": "재시도 중",
     "status_capacity_retry": "모델 포화 · {{retry}}번째 재시도, 다음 {{time}}",
-    "usage_label": "토큰 비용"
+    "usage_label": "토큰 비용",
+    "machine_full": "대기 중: 기기 한도 도달 ({{active}}/{{limit}})"
   },
   "runs_timeline": {
     "title": "실행 기록",

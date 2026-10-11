@@ -73,6 +73,7 @@ export const pendingChatTaskOptions = (sessionId: string | null) =>
   queryOptions({
     queryKey: chatKeys.pendingTask(sessionId ?? ""),
     queryFn: ({ signal }) => api.getPendingChatTask(sessionId!, { signal }),
+    refetchInterval: (query) => query.state.data?.status === "queued" ? 5000 : false,
     enabled: !!sessionId,
     staleTime: Infinity,
   });

@@ -316,7 +316,8 @@
       "making_edits": "修改文件",
       "searching_web": "搜索网页",
       "fallback": "处理中"
-    }
+    },
+    "machine_full": "排队中：机器已满（{{active}}/{{limit}}）"
   },
   "list": {
     "typing": "正在输入…",

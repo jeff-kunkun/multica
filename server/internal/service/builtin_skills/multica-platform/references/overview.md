@@ -30,6 +30,12 @@ mean no visible matches. Compact mode keeps identifiers and key status fields;
 full mode adds descriptions, relationships, repositories, schedules and tickets.
 It never includes prompts, API keys, environment values or webhook secrets.
 
+Runtime rows retain `machine_capacity: {active_runs, max_concurrent_runs}` in
+both full and compact mode. Counts include the owner's machine across providers
+and workspaces without exposing other workspace task identities. The default
+limit is 12; use `multica runtime capacity <runtime-id> --max-concurrent-runs 8`
+to change it as the machine owner (see `runtimes.md`).
+
 External Bot personal keys follow the same ordinary authentication and access
 rules as their owner. Task tokens retain their existing actor/visibility rules;
 they cannot read the external key inventory. See `external-bots.md` for setup.

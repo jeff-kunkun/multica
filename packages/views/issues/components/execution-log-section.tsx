@@ -677,7 +677,8 @@ export function ActiveTaskRow({
   // A deferred retry after a full model says which retry it is and when it
   // fires (DENE-1093); the seat stays open, so this is a wait, not a failure.
   const capacityRetry = task.status === "deferred" ? task.capacity_retry : undefined;
-  const label = capacityRetry
+  const reason = task.status === "queued" ? task.queue_reason : undefined;
+  const label = reason ? t(($) => $.execution_log.machine_full, { active: reason.active_runs, limit: reason.max_concurrent_runs }) : capacityRetry
     ? t(($) => $.execution_log.status_capacity_retry, {
         retry: capacityRetry.retry,
         time: new Date(capacityRetry.next_at).toLocaleTimeString(locale, {

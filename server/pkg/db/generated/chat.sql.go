@@ -3257,6 +3257,7 @@ func (q *Queries) ListPendingChatTasksByCreator(ctx context.Context, arg ListPen
 
 const listPendingChatTasksForSession = `-- name: ListPendingChatTasksForSession :many
 SELECT
+    task.runtime_id,
     task.id,
     task.status,
     task.created_at,
@@ -3291,6 +3292,7 @@ ORDER BY
 `
 
 type ListPendingChatTasksForSessionRow struct {
+	RuntimeID  pgtype.UUID        `json:"runtime_id"`
 	ID         pgtype.UUID        `json:"id"`
 	Status     string             `json:"status"`
 	CreatedAt  pgtype.Timestamptz `json:"created_at"`
@@ -3317,6 +3319,7 @@ func (q *Queries) ListPendingChatTasksForSession(ctx context.Context, chatSessio
 	for rows.Next() {
 		var i ListPendingChatTasksForSessionRow
 		if err := rows.Scan(
+			&i.RuntimeID,
 			&i.ID,
 			&i.Status,
 			&i.CreatedAt,

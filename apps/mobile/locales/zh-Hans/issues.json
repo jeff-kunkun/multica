@@ -281,7 +281,8 @@
       "reason_session_lost": "会话没能恢复",
       "reason_fresh_requested": "按要求新开"
     },
-    "skills_used": "用到 skill：{{names}}"
+    "skills_used": "用到 skill：{{names}}",
+    "machine_full": "排队中：机器已满（{{active}}/{{limit}}）"
   },
   "header_filter": "筛选",
   "new_badge": "新",

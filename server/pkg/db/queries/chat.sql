@@ -1572,6 +1572,7 @@ LIMIT 1;
 -- one-line queue preview. GetPendingChatTask remains for legacy callers that
 -- only need an existence check.
 SELECT
+    task.runtime_id,
     task.id,
     task.status,
     task.created_at,

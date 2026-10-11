@@ -101,6 +101,12 @@ func TestOverviewCountsFiltersAndCompact(t *testing.T) {
 		t.Fatal("compact changed counts")
 	}
 	for _, snapshot := range []map[string]json.RawMessage{full, compact} {
+		for _, row := range overviewTestRows(t, snapshot, "runtimes") {
+			capacity, ok := row["machine_capacity"].(map[string]any)
+			if !ok || capacity["max_concurrent_runs"] != float64(12) {
+				t.Fatalf("overview dropped default machine capacity: %v", row)
+			}
+		}
 		for _, section := range []string{"projects", "automations"} {
 			for _, row := range overviewTestRows(t, snapshot, section) {
 				for _, field := range []string{"linked_projects", "effective_linked_projects", "inherited"} {

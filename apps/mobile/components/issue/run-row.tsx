@@ -55,7 +55,7 @@ export function RunRow({ task, issueId, lineage }: Props) {
           <Text className="font-medium">{getName("agent", task.agent_id)}</Text>
           <Text className="text-muted-foreground"> · {summary}</Text>
         </Text>
-        <View className="flex-row items-center gap-2">
+        <View className="flex-row flex-wrap items-center gap-2">
           <StatusBadge task={task} />
           <Text className="text-xs text-muted-foreground">
             {timestamp ? timeAgo(timestamp) : ""}
@@ -100,7 +100,8 @@ const SESSION_REASON_KEYS: Record<string, string> = {
 
 function StatusBadge({ task }: { task: AgentTask }) {
   const { t } = useT("issues");
-  const label = t(`runs.status.${task.status}`);
+  const reason = task.status === "queued" ? task.queue_reason : undefined;
+  const label = reason ? t("runs.machine_full", { active: reason.active_runs, limit: reason.max_concurrent_runs }) : t(`runs.status.${task.status}`);
   const cls = STATUS_CLASS[task.status] ?? "text-muted-foreground";
   // For failed tasks, surface the failure_reason inline so users don't have
   // to drill in. Missing / empty / unrecognised stays as just "Failed".
