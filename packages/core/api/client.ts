@@ -1,3 +1,5 @@
+import { LinkedProjectSettingsSchema } from "./schemas";
+import type { LinkedProjectSettings } from "../types/workspace-link";
 import { parseOverview, type OverviewFilters } from "./overview";
 import type { AgentSpawnPolicy, AgentSpawnPolicyPatch } from "../workspace/agent-spawn";
 import type { ZodType } from "zod";
@@ -6775,6 +6777,21 @@ export class ApiClient {
   }
 
   /** Shared projects this workspace may attach to a chat read-only (DENE-1643). */
+  async getLinkedProjectSettings(kind: "projects" | "autopilots", id: string): Promise<LinkedProjectSettings> {
+    const endpoint = `/api/${kind}/${encodeURIComponent(id)}/linked-projects`;
+    const parsed = parseWithFallback<LinkedProjectSettings | null>(await this.fetch(endpoint), LinkedProjectSettingsSchema, null, { endpoint });
+    if (!parsed) throw new Error("Could not read reference projects");
+    return parsed;
+  }
+
+  async setLinkedProjectSettings(kind: "projects" | "autopilots", id: string, refs: ChatLinkedProjectRef[] | null): Promise<LinkedProjectSettings> {
+    const endpoint = `/api/${kind}/${encodeURIComponent(id)}/linked-projects`;
+    const raw = await this.fetch(endpoint, { method: "PUT", body: JSON.stringify({ linked_projects: refs }) });
+    const parsed = parseWithFallback<LinkedProjectSettings | null>(raw, LinkedProjectSettingsSchema, null, { endpoint });
+    if (!parsed) throw new Error("Could not read saved reference projects");
+    return parsed;
+  }
+
   async listLinkedProjectOptions(): Promise<LinkedProjectOption[]> {
     const raw = await this.fetch<{ projects?: LinkedProjectOption[] }>("/api/workspace-links/projects");
     return Array.isArray(raw?.projects) ? raw.projects : [];

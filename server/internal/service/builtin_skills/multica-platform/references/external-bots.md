@@ -29,6 +29,8 @@ signed Bot message as a request, not as the owner's direct decision.
 
 Use the relevant references in this skill and each command's `--help`:
 
+- `overview --output json` for the permission-filtered workspace map, including project/automation reference selections and availability.
+- `project linked-projects <id>` and `autopilot linked-projects <id>` read references; `--reference <link-id>:<project-id>` replaces them, `--clear` selects none, and autopilot `--inherit` restores project defaults.
 - `issue list/search/get/context`, `issue comment list --full` for complete reads.
 - `chat list/search/history` for discovery; personal `chat new --agent ... --wait` on supported versions.
 - `chat send --session ... --attachment ./file` uploads local files and binds them to the user message through the ordinary chat API.

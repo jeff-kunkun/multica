@@ -482,3 +482,13 @@ multica project repo remove <project-id> <repo-resource-id> --output json
 ```
 
 Attaching the same normalized URL twice is idempotent (`created` and `registered` come back false). `--output json` includes `repo.mode` and `repo.next_action` (`install_app`, `create_app`, `add_token`, `replace_token`, or `ask_owner`). `remove` detaches that project only; the workspace registry keeps the repository.
+
+## Default reference projects
+
+`multica project linked-projects <project-id> --output json` reads the saved and
+effective reference selection. Replace it with `--reference <link-id>:<source-project-id>`
+(repeat for multiple projects), or use `--clear` to remove all references. Discover
+source IDs with `multica workspace link list --output json` and `workspace link view <link-id>`.
+Project issue runs use these contexts in their read-only reference section.
+They never choose the working directory or repository. The server checks the
+run originator's access again at claim time, so revoked links disappear next run.

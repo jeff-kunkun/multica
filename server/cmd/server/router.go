@@ -2497,6 +2497,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Post("/", h.CreateProject)
 				r.Route("/{id}", func(r chi.Router) {
 					r.Get("/", h.GetProject)
+					r.Get("/linked-projects", h.GetProjectLinkedProjects)
+					r.Put("/linked-projects", h.PutProjectLinkedProjects)
 					r.Get("/memory", h.GetProjectMemory)
 					r.Get("/memory/check", h.GetProjectMemory)
 					r.Get("/memory/status", h.GetProjectMemory)
@@ -2558,6 +2560,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Get("/usage", h.GetAutopilotQuotaUsage)
 				r.Route("/{id}", func(r chi.Router) {
 					r.Get("/", h.GetAutopilot)
+					r.Get("/linked-projects", h.GetAutopilotLinkedProjects)
+					r.Put("/linked-projects", h.PutAutopilotLinkedProjects)
 					r.Patch("/", h.UpdateAutopilot)
 					r.Delete("/", h.DeleteAutopilot)
 					r.Post("/trigger", h.TriggerAutopilot)
