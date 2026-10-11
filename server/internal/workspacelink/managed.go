@@ -487,6 +487,7 @@ func (s *Service) FillCanSetManaged(ctx context.Context, links []Link, actorUser
 		switch links[i].Side {
 		case SideSource:
 			links[i].CanSetManaged = Decide(OpSetManaged, SideSource, actor)
+			links[i].CanUpdateProjects = Decide(OpUpdateProjects, SideSource, actor)
 		case SideViewer:
 			sourceID, err := util.ParseUUID(links[i].Source.ID)
 			if err != nil {
@@ -497,6 +498,10 @@ func (s *Service) FillCanSetManaged(ctx context.Context, links []Link, actorUser
 				return err
 			}
 			links[i].CanSetManaged = ok
+			links[i].CanUpdateProjects = ok
+		}
+		if links[i].Status != "active" && !links[i].Managed {
+			links[i].CanSetManaged = false
 		}
 	}
 	return nil
@@ -520,6 +525,9 @@ func (s *Service) setManaged(ctx context.Context, q *db.Queries, link db.Workspa
 		fromViewer = true
 	default:
 		return ErrNotFound
+	}
+	if on && link.Status != "active" {
+		return invalid("accept the link before enabling managed access")
 	}
 	updated, err := q.SetWorkspaceLinkManaged(ctx, db.SetWorkspaceLinkManagedParams{ID: link.ID, Managed: on})
 	if err != nil {

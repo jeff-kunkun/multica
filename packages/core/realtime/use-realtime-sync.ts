@@ -797,6 +797,8 @@ function invalidateWorkspaceScopedQueries(qc: QueryClient): void {
     qc.invalidateQueries({ queryKey: workspaceKeys.squads(wsId) });
     qc.invalidateQueries({ queryKey: workspaceKeys.skills(wsId) });
     qc.invalidateQueries({ queryKey: workspaceKeys.invitations(wsId) });
+    qc.invalidateQueries({ queryKey: workspaceLinkKeys.all(wsId) });
+    qc.invalidateQueries({ queryKey: ["workspaces", wsId, "overview"] });
     qc.invalidateQueries({ queryKey: projectKeys.all(wsId) });
     qc.invalidateQueries({ queryKey: runtimeKeys.all(wsId) });
     qc.invalidateQueries({ queryKey: autopilotKeys.all(wsId) });
@@ -858,6 +860,8 @@ function invalidateReconnectDetailQueries(qc: QueryClient): void {
     qc.invalidateQueries({ queryKey: workspaceKeys.squads(wsId) });
     qc.invalidateQueries({ queryKey: workspaceKeys.skills(wsId) });
     qc.invalidateQueries({ queryKey: workspaceKeys.invitations(wsId) });
+    qc.invalidateQueries({ queryKey: workspaceLinkKeys.all(wsId) });
+    qc.invalidateQueries({ queryKey: ["workspaces", wsId, "overview"] });
     qc.invalidateQueries({ queryKey: projectKeys.all(wsId) });
     qc.invalidateQueries({ queryKey: runtimeKeys.all(wsId) });
     qc.invalidateQueries({ queryKey: autopilotKeys.all(wsId) });
@@ -1479,6 +1483,12 @@ export function useRealtimeSync(
       }),
     );
 
+    const unsubWorkspaceLinkChanged = ws.on("workspace_link:changed", (p) => {
+      const wsId = getCurrentWsId();
+      if (!wsId || p.workspace_id !== wsId) return;
+      qc.invalidateQueries({ queryKey: workspaceLinkKeys.all(wsId) });
+      qc.invalidateQueries({ queryKey: ["workspaces", wsId, "overview"] });
+    });
     const unsubInboxNew = ws.on("inbox:new", async (p) => {
       const { item } = p as InboxNewPayload;
       if (!item) return;
@@ -2178,6 +2188,7 @@ export function useRealtimeSync(
       unsubIssuePropertiesChanged();
       unsubPropertyChanged.forEach((unsub) => unsub());
       unsubInboxNew();
+      unsubWorkspaceLinkChanged();
       unsubCommentCreated();
       unsubCommentUpdated();
       unsubCommentDeleted();

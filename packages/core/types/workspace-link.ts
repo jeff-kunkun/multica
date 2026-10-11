@@ -22,13 +22,14 @@ export interface WorkspaceLink {
   status: WorkspaceLinkStatus;
   source: WorkspaceLinkWorkspace;
   target: WorkspaceLinkWorkspace;
-  /** Empty unless the caller is the source side's owner/admin. */
+  /** Shared projects, filtered for privacy on the viewer side. */
   projects: WorkspaceLinkProject[];
   /** The viewer's agents may manage the source's issues and autopilots for
    *  their run's originator (DENE-1663). */
   managed?: boolean;
   /** Whether the caller may switch `managed`; the list answers it. */
   can_set_managed?: boolean;
+  can_update_projects?: boolean;
   created_at: string;
   accepted_at: string | null;
 }
@@ -61,6 +62,10 @@ export interface ListWorkspaceLinksResponse {
 }
 
 export interface WorkspaceLinkAuditEntry {
+  id?: string;
+  peer_workspace_name?: string;
+  route?: string;
+  object_label?: string;
   link_id: string;
   action: "create" | "update_projects" | "accept" | "revoke" | "set_managed" | "managed_write";
   actor_name: string;

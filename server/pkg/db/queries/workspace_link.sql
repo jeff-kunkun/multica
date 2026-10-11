@@ -60,13 +60,22 @@ INSERT INTO workspace_link_audit (link_id, source_workspace_id, target_workspace
 VALUES ($1, $2, $3, $4, $5, $6, $7);
 
 -- name: ListWorkspaceLinkAudit :many
-SELECT a.*, u.name AS actor_name
+SELECT a.*, u.name AS actor_name,
+       COALESCE(sw.name, a.source_workspace_id::text)::text AS source_name,
+       COALESCE(tw.name, a.target_workspace_id::text)::text AS target_name,
+       COALESCE(a.detail->>'object_label', sw.issue_prefix || '-' || i.number::text, ap.name, a.detail->>'issue_ref', a.detail->>'autopilot_id', '')::text AS object_label
 FROM workspace_link_audit a
 LEFT JOIN "user" u ON u.id = a.actor_id
-WHERE a.source_workspace_id = sqlc.arg('workspace_id')::uuid
-   OR a.target_workspace_id = sqlc.arg('workspace_id')::uuid
-ORDER BY a.created_at DESC
-LIMIT 200;
+LEFT JOIN workspace sw ON sw.id = a.source_workspace_id
+LEFT JOIN workspace tw ON tw.id = a.target_workspace_id
+LEFT JOIN issue i ON i.id::text = a.detail->>'issue_id' AND i.workspace_id = a.source_workspace_id
+LEFT JOIN autopilot ap ON ap.id::text = a.detail->>'autopilot_id' AND ap.workspace_id = a.source_workspace_id
+WHERE (a.source_workspace_id = sqlc.arg('workspace_id')::uuid
+   OR a.target_workspace_id = sqlc.arg('workspace_id')::uuid)
+  AND (sqlc.narg('cursor_at')::timestamptz IS NULL
+       OR (a.created_at, a.id) < (sqlc.narg('cursor_at')::timestamptz, sqlc.narg('cursor_id')::uuid))
+ORDER BY a.created_at DESC, a.id DESC
+LIMIT sqlc.arg('page_limit')::int;
 
 -- name: ListLinkedViewProjects :many
 -- What a viewer sees of the link's projects: re-checked on every read, so a

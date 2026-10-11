@@ -25,9 +25,11 @@ export const workspaceLinksOptions = (wsId: string) =>
   });
 
 export const workspaceLinkAuditOptions = (wsId: string, enabled: boolean) =>
-  queryOptions({
+  infiniteQueryOptions({
     queryKey: workspaceLinkKeys.audit(wsId),
-    queryFn: () => api.listWorkspaceLinkAudit(),
+    queryFn: ({ pageParam }) => api.listWorkspaceLinkAudit(pageParam),
+    initialPageParam: "",
+    getNextPageParam: (last) => last.next_cursor || undefined,
     enabled: !!wsId && enabled,
   });
 

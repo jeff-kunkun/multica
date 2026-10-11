@@ -56,7 +56,7 @@ function renderTab() {
 beforeEach(() => {
   vi.clearAllMocks();
   api.listProjects.mockResolvedValue({ projects: [project], total: 1 });
-  api.listWorkspaceLinkAudit.mockResolvedValue([]);
+  api.listWorkspaceLinkAudit.mockResolvedValue({ entries: [], next_cursor: null });
   api.createWorkspaceLink.mockResolvedValue({});
   api.updateWorkspaceLink.mockResolvedValue({});
   api.listWorkspaces.mockResolvedValue([
