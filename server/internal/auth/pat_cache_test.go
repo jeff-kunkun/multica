@@ -168,3 +168,22 @@ func TestPATCache_Set_RespectsClampedTTL(t *testing.T) {
 		t.Fatal("negative-TTL Set must not cache")
 	}
 }
+
+func TestPATCache_IdentityRejectsLegacyAndRetainsBot(t *testing.T) {
+	rdb := newRedisTestClient(t)
+	c := NewPATCache(rdb)
+	ctx := context.Background()
+	rdb.Set(ctx, patCacheKey("legacy"), "user-only", AuthCacheTTL)
+	if _, ok := c.GetIdentity(ctx, "legacy"); ok {
+		t.Fatal("legacy entry accepted without kind")
+	}
+	want := PATIdentity{UserID: "owner", TokenID: "bot-id", Kind: "bot", Name: "Grok"}
+	c.SetIdentity(ctx, "bot", want, AuthCacheTTL)
+	if got, ok := c.GetIdentity(ctx, "bot"); !ok || got != want {
+		t.Fatalf("identity=%#v hit=%v", got, ok)
+	}
+	c.Invalidate(ctx, "bot")
+	if _, ok := c.GetIdentity(ctx, "bot"); ok {
+		t.Fatal("revoked entry survived")
+	}
+}

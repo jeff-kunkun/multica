@@ -10,6 +10,7 @@ import (
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/multica-ai/multica/server/internal/auth"
+	"github.com/multica-ai/multica/server/internal/botsource"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
@@ -65,7 +66,7 @@ func WithDaemonContext(ctx context.Context, workspaceID, daemonID string) contex
 //
 // Both caches are optional. When non-nil:
 //   - daemonCache short-circuits the daemon_token DB lookup on the mdt_ path
-//   - patCache short-circuits the PAT DB lookup AND the last_used_at update
+//   - patCache short-circuits the personal PAT lookup AND the last_used_at update
 //     on the mul_ fallback path. This is the same cache shared with the
 //     regular Auth middleware, so a single hot PAT used by both human CLI
 //     and a daemon converges on one DB round-trip per AuthCacheTTL window.
@@ -75,7 +76,8 @@ func WithDaemonContext(ctx context.Context, workspaceID, daemonID string) contex
 // returned owner_id). When nil, mcn_ tokens are rejected at the prefix
 // branch — same fail-closed contract as the regular Auth middleware.
 //
-// Cache misses fall back to the original DB-backed behavior.
+// Cache misses and all Bot PAT hits use DB-backed validation. Bot revocation
+// must not depend on successful Redis invalidation.
 func DaemonAuth(queries *db.Queries, patCache *auth.PATCache, daemonCache *auth.DaemonTokenCache, cloudPAT *auth.CloudPATVerifier) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -88,6 +90,11 @@ func DaemonAuth(queries *db.Queries, patCache *auth.PATCache, daemonCache *auth.
 			// trust this header regardless of which auth path the
 			// request arrived on.
 			r.Header.Del("X-Actor-Source")
+			r.Header.Del("X-User-ID")
+			r.Header.Del("X-User-Email")
+			r.Header.Del("X-Actor-Bot-ID")
+			r.Header.Del("X-Actor-Bot-Name")
+			r = r.WithContext(botsource.WithContext(r.Context(), botsource.Source{}))
 
 			// Agent identity is server-set too: strip any client-supplied
 			// value here as well, so a handler reached through the daemon
@@ -119,7 +126,7 @@ func DaemonAuth(queries *db.Queries, patCache *auth.PATCache, daemonCache *auth.
 					ctx := context.WithValue(r.Context(), ctxKeyDaemonWorkspaceID, id.WorkspaceID)
 					ctx = context.WithValue(ctx, ctxKeyDaemonID, id.DaemonID)
 					ctx = context.WithValue(ctx, ctxKeyDaemonAuthPath, DaemonAuthPathDaemonToken)
-					next.ServeHTTP(w, r.WithContext(ctx))
+					serveAuthenticated(next, w, r.WithContext(ctx))
 					return
 				}
 
@@ -149,7 +156,7 @@ func DaemonAuth(queries *db.Queries, patCache *auth.PATCache, daemonCache *auth.
 				ctx := context.WithValue(r.Context(), ctxKeyDaemonWorkspaceID, identity.WorkspaceID)
 				ctx = context.WithValue(ctx, ctxKeyDaemonID, identity.DaemonID)
 				ctx = context.WithValue(ctx, ctxKeyDaemonAuthPath, DaemonAuthPathDaemonToken)
-				next.ServeHTTP(w, r.WithContext(ctx))
+				serveAuthenticated(next, w, r.WithContext(ctx))
 				return
 			}
 
@@ -193,7 +200,7 @@ func DaemonAuth(queries *db.Queries, patCache *auth.PATCache, daemonCache *auth.
 				// differently depending on which one routed it.
 				r.Header.Set("X-Actor-Source", "cloud_pat")
 				ctx := context.WithValue(r.Context(), ctxKeyDaemonAuthPath, DaemonAuthPathCloudPAT)
-				next.ServeHTTP(w, r.WithContext(ctx))
+				serveAuthenticated(next, w, r.WithContext(ctx))
 				return
 			}
 
@@ -201,13 +208,16 @@ func DaemonAuth(queries *db.Queries, patCache *auth.PATCache, daemonCache *auth.
 			if strings.HasPrefix(tokenString, "mul_") {
 				hash := auth.HashToken(tokenString)
 
-				if userID, ok := patCache.Get(r.Context(), hash); ok {
+				// Bot cache hits deliberately re-read the DB below: revocation and
+				// rotation must take effect even when Redis invalidation fails.
+				if identity, ok := patCache.GetIdentity(r.Context(), hash); ok && identity.Kind == "personal" {
+					userID := identity.UserID
 					if rejectTemporarilyDisabledUser(w, r, userID, "", DaemonAuthPathPAT) {
 						return
 					}
 					r.Header.Set("X-User-ID", userID)
 					ctx := context.WithValue(r.Context(), ctxKeyDaemonAuthPath, DaemonAuthPathPAT)
-					next.ServeHTTP(w, r.WithContext(ctx))
+					serveAuthenticated(next, w, r.WithContext(ctx))
 					return
 				}
 
@@ -232,14 +242,17 @@ func DaemonAuth(queries *db.Queries, patCache *auth.PATCache, daemonCache *auth.
 				if pat.ExpiresAt.Valid {
 					expiresAt = pat.ExpiresAt.Time
 				}
-				patCache.Set(r.Context(), hash, userID, auth.TTLForExpiry(time.Now(), expiresAt))
+				patCache.SetIdentity(r.Context(), hash, auth.PATIdentity{UserID: userID, TokenID: uuidToString(pat.ID), Kind: pat.Kind, Name: pat.Name}, auth.TTLForExpiry(time.Now(), expiresAt))
+				if pat.Kind == "bot" {
+					r = r.WithContext(botsource.WithContext(r.Context(), botsource.Source{ID: pat.ID, Name: pat.Name}))
+				}
 
 				// Cache miss = first request in this TTL window. Refresh
 				// last_used_at; subsequent hits skip the write entirely.
 				go queries.UpdatePersonalAccessTokenLastUsed(context.Background(), pat.ID)
 
 				ctx := context.WithValue(r.Context(), ctxKeyDaemonAuthPath, DaemonAuthPathPAT)
-				next.ServeHTTP(w, r.WithContext(ctx))
+				serveAuthenticated(next, w, r.WithContext(ctx))
 				return
 			}
 
@@ -272,7 +285,7 @@ func DaemonAuth(queries *db.Queries, patCache *auth.PATCache, daemonCache *auth.
 			}
 			r.Header.Set("X-User-ID", sub)
 			ctx := context.WithValue(r.Context(), ctxKeyDaemonAuthPath, DaemonAuthPathJWT)
-			next.ServeHTTP(w, r.WithContext(ctx))
+			serveAuthenticated(next, w, r.WithContext(ctx))
 		})
 	}
 }

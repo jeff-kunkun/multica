@@ -459,7 +459,7 @@ func (h *Handler) publishWorkspaceSnapshot(ctx context.Context, wsUUID pgtype.UU
 	if err != nil {
 		return
 	}
-	h.publish(protocol.EventWorkspaceUpdated, workspaceID, actorType, actorID, map[string]any{
+	h.publishWithSource(ctx, protocol.EventWorkspaceUpdated, workspaceID, actorType, actorID, map[string]any{
 		"workspace": h.workspaceToResponse(ws),
 	})
 }

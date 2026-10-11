@@ -12,6 +12,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/botsource"
 	"github.com/multica-ai/multica/server/internal/logger"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/dbid"
@@ -900,6 +901,7 @@ func (h *Handler) RunQuickAction(w http.ResponseWriter, r *http.Request) {
 	body := sanitizeNullBytes(buildQuickActionBody(qa, target))
 
 	created, err := h.Queries.CreateComment(r.Context(), db.CreateCommentParams{
+		ViaBotID: botsource.FromContext(r.Context()).ID, ViaBotName: pgtype.Text{String: botsource.FromContext(r.Context()).Name, Valid: botsource.FromContext(r.Context()).ID.Valid},
 		ID:          dbid.NewV7(),
 		IssueID:     issue.ID,
 		WorkspaceID: issue.WorkspaceID,
@@ -922,7 +924,7 @@ func (h *Handler) RunQuickAction(w http.ResponseWriter, r *http.Request) {
 
 	resp := commentToResponse(comment, nil, nil)
 	resp.IssueRevision = created.IssueRevision
-	h.publish(protocol.EventCommentCreated, workspaceID, actorType, actorID, map[string]any{
+	h.publishWithSource(r.Context(), protocol.EventCommentCreated, workspaceID, actorType, actorID, map[string]any{
 		"comment":             resp,
 		"issue_title":         issue.Title,
 		"issue_assignee_type": textToPtr(issue.AssigneeType),

@@ -1,4 +1,5 @@
 {
+  "via_bot": "{{name}} 경유",
   "avatar_upload": {
     "change": "아바타 변경",
     "remove": "제거",

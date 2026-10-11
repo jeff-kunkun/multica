@@ -327,6 +327,8 @@ export interface TaskEvidence {
  * `source` (server may add new levels), so switch on it with a default branch.
  */
 export interface TaskAttribution {
+  via_bot_id?: string | null;
+  via_bot_name?: string | null;
   /**
    * Waterfall level that resolved the accountable human:
    * `direct_human` | `delegation` | `comment_source` | `rule_owner` |

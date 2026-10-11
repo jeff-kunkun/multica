@@ -1,5 +1,7 @@
 "use client";
 
+import { ViaBot } from "../../common/via-bot";
+
 import { Fragment, memo, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { CheckCircle2, ChevronRight, CornerUpLeft, ListChevronsDownUp, Copy, Link2, Loader2, MessageSquarePlus, MoreHorizontal, Pencil, RotateCcw, Sparkles, Trash2 } from "lucide-react";
 import { toast } from "sonner";
@@ -718,8 +720,9 @@ function CommentRow({
           enableHoverCard
           showStatusDot
         />
-        <span className="cursor-pointer text-body font-medium">
+        <span className="min-w-0 cursor-pointer text-body font-medium">
           {entry.actor_name || getActorName(entry.actor_type, entry.actor_id)}
+          <ViaBot name={entry.via_bot_name} />
         </span>
         <Tooltip>
           <TooltipTrigger
@@ -1243,8 +1246,9 @@ function CommentCardImpl({
                     enableHoverCard
                     showStatusDot
                   />
-                  <span className="shrink-0 cursor-pointer text-body font-medium">
+                  <span className="min-w-0 cursor-pointer text-body font-medium">
                     {entry.actor_name || getActorName(entry.actor_type, entry.actor_id)}
+                    <ViaBot name={entry.via_bot_name} />
                   </span>
                   <Tooltip>
                     <TooltipTrigger

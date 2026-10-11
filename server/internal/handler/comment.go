@@ -17,9 +17,10 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/blockwait"
-	"github.com/multica-ai/multica/server/internal/routing"
+	"github.com/multica-ai/multica/server/internal/botsource"
 	"github.com/multica-ai/multica/server/internal/logger"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
+	"github.com/multica-ai/multica/server/internal/routing"
 	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -28,6 +29,8 @@ import (
 )
 
 type CommentResponse struct {
+	ViaBotID       *string `json:"via_bot_id,omitempty"`
+	ViaBotName     *string `json:"via_bot_name,omitempty"`
 	ID             string  `json:"id"`
 	IssueID        string  `json:"issue_id"`
 	AuthorType     string  `json:"author_type"`
@@ -121,6 +124,7 @@ func commentToResponse(c db.Comment, reactions []ReactionResponse, attachments [
 		attachments = []AttachmentResponse{}
 	}
 	return CommentResponse{
+		ViaBotID: uuidToPtr(c.ViaBotID), ViaBotName: textToPtr(c.ViaBotName),
 		ID:             uuidToString(c.ID),
 		IssueID:        uuidToString(c.IssueID),
 		AuthorType:     c.AuthorType,
@@ -830,6 +834,7 @@ func (h *Handler) fetchCommentsForList(ctx context.Context, args fetchCommentsAr
 			replies := make([]db.Comment, 0, len(rows))
 			for _, r := range rows {
 				c := db.Comment{
+					ViaBotID: r.ViaBotID, ViaBotName: r.ViaBotName,
 					ID:             r.ID,
 					IssueID:        r.IssueID,
 					AuthorType:     r.AuthorType,
@@ -925,6 +930,7 @@ func (h *Handler) fetchCommentsForList(ctx context.Context, args fetchCommentsAr
 		replies := make([]db.Comment, 0, len(rows))
 		for _, r := range rows {
 			c := db.Comment{
+				ViaBotID: r.ViaBotID, ViaBotName: r.ViaBotName,
 				ID:             r.ID,
 				IssueID:        r.IssueID,
 				AuthorType:     r.AuthorType,
@@ -1014,6 +1020,7 @@ func (h *Handler) fetchCommentsForList(ctx context.Context, args fetchCommentsAr
 				continue
 			}
 			comments = append(comments, db.Comment{
+				ViaBotID: r.ViaBotID, ViaBotName: r.ViaBotName,
 				ID:             r.ID,
 				IssueID:        r.IssueID,
 				AuthorType:     r.AuthorType,
@@ -1085,6 +1092,7 @@ func (h *Handler) fetchCommentsForList(ctx context.Context, args fetchCommentsAr
 			comments := make([]db.Comment, len(rows))
 			for i, r := range rows {
 				comments[i] = db.Comment{
+					ViaBotID: r.ViaBotID, ViaBotName: r.ViaBotName,
 					ID: r.ID, IssueID: r.IssueID, AuthorType: r.AuthorType, AuthorID: r.AuthorID,
 					Content: r.Content, Type: r.Type, CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt,
 					ParentID: r.ParentID, WorkspaceID: r.WorkspaceID, ResolvedAt: r.ResolvedAt,
@@ -1116,6 +1124,7 @@ func (h *Handler) fetchCommentsForList(ctx context.Context, args fetchCommentsAr
 		comments := make([]db.Comment, len(rows))
 		for i, r := range rows {
 			comments[i] = db.Comment{
+				ViaBotID: r.ViaBotID, ViaBotName: r.ViaBotName,
 				ID: r.ID, IssueID: r.IssueID, AuthorType: r.AuthorType, AuthorID: r.AuthorID,
 				Content: r.Content, Type: r.Type, CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt,
 				ParentID: r.ParentID, WorkspaceID: r.WorkspaceID, ResolvedAt: r.ResolvedAt,
@@ -1959,6 +1968,7 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 	}
 
 	createParams := db.CreateCommentParams{
+		ViaBotID: botsource.FromContext(r.Context()).ID, ViaBotName: util.StrToText(botsource.FromContext(r.Context()).Name),
 		ID:           dbid.NewV7(),
 		IssueID:      issue.ID,
 		WorkspaceID:  issue.WorkspaceID,
@@ -2054,7 +2064,7 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 	resp := commentToResponse(comment, nil, groupedAtt[uuidToString(comment.ID)])
 	resp.IssueRevision = created.IssueRevision
 	slog.Info("comment created", append(logger.RequestAttrs(r), "comment_id", uuidToString(comment.ID), "issue_id", issueID)...)
-	h.publish(protocol.EventCommentCreated, uuidToString(issue.WorkspaceID), authorType, authorID, map[string]any{
+	h.publishWithSource(r.Context(), protocol.EventCommentCreated, uuidToString(issue.WorkspaceID), authorType, authorID, map[string]any{
 		"comment":             resp,
 		"issue_title":         issue.Title,
 		"issue_assignee_type": textToPtr(issue.AssigneeType),
@@ -2631,11 +2641,12 @@ func (h *Handler) mergeCommentIntoPendingTask(ctx context.Context, issue db.Issu
 	}
 	overlay, connectedApps := h.TaskService.BuildRuntimeMCPOverlayForMerge(ctx, attr.UserID, trigger.Agent)
 	row, err := h.Queries.MergeCommentIntoPendingTask(ctx, db.MergeCommentIntoPendingTaskParams{
-		IssueID:                 issue.ID,
-		AgentID:                 trigger.Agent.ID,
-		NewTriggerCommentID:     newTriggerCommentID,
-		NewOriginatorUserID:     attr.UserID,
-		NewAccountableUserID:    attr.AccountableUserID,
+		IssueID:              issue.ID,
+		AgentID:              trigger.Agent.ID,
+		NewTriggerCommentID:  newTriggerCommentID,
+		NewOriginatorUserID:  attr.UserID,
+		NewAccountableUserID: attr.AccountableUserID,
+		NewViaBotID:          attr.ViaBotID, NewViaBotName: attr.ViaBotName,
 		NewOriginatorSource:     pgtype.Text{String: attr.Source.String(), Valid: true},
 		NewDelegatedFromTaskID:  attr.DelegatedFromTaskID,
 		NewRuleVersionID:        attr.RuleVersionID,
@@ -3726,6 +3737,7 @@ func (h *Handler) UpdateComment(w http.ResponseWriter, r *http.Request) {
 	}
 
 	updateParams := db.UpdateCommentParams{
+		ViaBotID: botsource.FromContext(r.Context()).ID, ViaBotName: util.StrToText(botsource.FromContext(r.Context()).Name),
 		ID:           commentUUID,
 		Content:      req.Content,
 		SourceTaskID: sourceTaskID,
@@ -3850,7 +3862,7 @@ func (h *Handler) UpdateComment(w http.ResponseWriter, r *http.Request) {
 	if issueRevision > 0 {
 		eventPayload["issue_revision"] = issueRevision
 	}
-	h.publish(protocol.EventCommentUpdated, workspaceID, actorType, actorID, eventPayload)
+	h.publishWithSource(r.Context(), protocol.EventCommentUpdated, workspaceID, actorType, actorID, eventPayload)
 
 	// The broadcast above intentionally omits trigger_outcomes — it is the
 	// editor's private feedback, not shared timeline state (MUL-4525 §2).
@@ -3963,7 +3975,7 @@ func (h *Handler) DeleteComment(w http.ResponseWriter, r *http.Request) {
 		if deleted.IssueRevision > 0 {
 			eventPayload["issue_revision"] = deleted.IssueRevision
 		}
-		h.publish(protocol.EventCommentUpdated, workspaceID, actorType, actorID, eventPayload)
+		h.publishWithSource(r.Context(), protocol.EventCommentUpdated, workspaceID, actorType, actorID, eventPayload)
 	}
 	for _, removedID := range deleted.RemovedIDs {
 		eventPayload := map[string]any{
@@ -3973,7 +3985,7 @@ func (h *Handler) DeleteComment(w http.ResponseWriter, r *http.Request) {
 		if deleted.IssueRevision > 0 {
 			eventPayload["issue_revision"] = deleted.IssueRevision
 		}
-		h.publish(protocol.EventCommentDeleted, workspaceID, actorType, actorID, eventPayload)
+		h.publishWithSource(r.Context(), protocol.EventCommentDeleted, workspaceID, actorType, actorID, eventPayload)
 	}
 	if hasIssue {
 		h.retriggerCancelledTaskSurvivors(r.Context(), issue, cancelled, comment.ID)
@@ -4379,7 +4391,7 @@ func (h *Handler) ResolveComment(w http.ResponseWriter, r *http.Request) {
 		clearedAtt := h.groupAttachments(r, []pgtype.UUID{c.ID})
 		clearedResp := commentToResponse(c, clearedReactions[clearedID], clearedAtt[clearedID])
 		slog.Info("comment unresolved (replaced)", append(logger.RequestAttrs(r), "comment_id", clearedID)...)
-		h.publish(protocol.EventCommentUnresolved, workspaceID, actorType, actorID, map[string]any{"comment": clearedResp})
+		h.publishWithSource(r.Context(), protocol.EventCommentUnresolved, workspaceID, actorType, actorID, map[string]any{"comment": clearedResp})
 	}
 
 	grouped := h.groupReactions(r, []pgtype.UUID{updated.ID})
@@ -4392,7 +4404,7 @@ func (h *Handler) ResolveComment(w http.ResponseWriter, r *http.Request) {
 	// still get their own events above — those rows did change.
 	if !wasResolved {
 		slog.Info("comment resolved", append(logger.RequestAttrs(r), "comment_id", cid)...)
-		h.publish(protocol.EventCommentResolved, workspaceID, actorType, actorID, map[string]any{"comment": resp})
+		h.publishWithSource(r.Context(), protocol.EventCommentResolved, workspaceID, actorType, actorID, map[string]any{"comment": resp})
 	}
 	writeJSON(w, http.StatusOK, resp)
 }
@@ -4421,7 +4433,7 @@ func (h *Handler) UnresolveComment(w http.ResponseWriter, r *http.Request) {
 
 	if wasResolved {
 		slog.Info("comment unresolved", append(logger.RequestAttrs(r), "comment_id", cid)...)
-		h.publish(protocol.EventCommentUnresolved, workspaceID, actorType, actorID, map[string]any{"comment": resp})
+		h.publishWithSource(r.Context(), protocol.EventCommentUnresolved, workspaceID, actorType, actorID, map[string]any{"comment": resp})
 	}
 	writeJSON(w, http.StatusOK, resp)
 }

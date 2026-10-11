@@ -1,4 +1,5 @@
 {
+  "via_bot": "经 {{name}}",
   "tabs": {
     "all": "全部",
     "created": "我创建的",

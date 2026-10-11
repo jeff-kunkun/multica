@@ -20,6 +20,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/attribution"
 	"github.com/multica-ai/multica/server/internal/blockwait"
+	"github.com/multica-ai/multica/server/internal/botsource"
 	"github.com/multica-ai/multica/server/internal/chattitle"
 	"github.com/multica-ai/multica/server/internal/entitlement"
 	"github.com/multica-ai/multica/server/internal/events"
@@ -484,6 +485,8 @@ func (s *TaskService) attributionFromComment(ctx context.Context, comment db.Com
 		CommentID:  comment.ID,
 		AuthorType: comment.AuthorType,
 		AuthorID:   comment.AuthorID,
+		ViaBotID:   comment.ViaBotID,
+		ViaBotName: comment.ViaBotName,
 	}
 	// For an agent-authored comment, walk comment.source_task_id → parent task →
 	// parent.originator_user_id (set by every agent comment-write path since
@@ -494,6 +497,7 @@ func (s *TaskService) attributionFromComment(ctx context.Context, comment db.Com
 		if parent, err := s.Queries.GetAgentTask(ctx, comment.SourceTaskID); err == nil {
 			facts.ParentOriginator = parent.OriginatorUserID
 			facts.ParentAccountable = parent.AccountableUserID
+			facts.ParentViaBotID, facts.ParentViaBotName = parent.ViaBotID, parent.ViaBotName
 		}
 	}
 	return attribution.ClassifyComment(facts, agentAuthoredSource)
@@ -527,7 +531,8 @@ func (s *TaskService) attributionForIssueTask(ctx context.Context, issue db.Issu
 	// the member who clicked rerun, not the original comment's human. So the actor is
 	// checked before the trigger-comment / origin branches.
 	if actorUserID.Valid {
-		return attribution.ClassifyDirect(attribution.DirectFacts{IssueID: issue.ID, ActorUserID: actorUserID})
+		return attribution.ClassifyDirect(attribution.DirectFacts{IssueID: issue.ID, ActorUserID: actorUserID, ViaBotID: botsource.FromContext(ctx).ID,
+			ViaBotName: botName(ctx)})
 	}
 	if triggerCommentID.Valid {
 		if s == nil || s.Queries == nil {
@@ -582,6 +587,11 @@ func (s *TaskService) attributionForIssueTask(ctx context.Context, issue db.Issu
 		IssueID:     issue.ID,
 		CreatorType: issue.CreatorType,
 		CreatorID:   issue.CreatorID,
+		ViaBotID:    botsource.FromContext(ctx).ID,
+		ViaBotName:  botName(ctx),
+	}
+	if !facts.ViaBotID.Valid {
+		facts.ViaBotID, facts.ViaBotName = issue.ViaBotID, issue.ViaBotName
 	}
 	// Member-created issues resolve without a DB read. Only origin-linked
 	// agent-created issues (quick_create, agent_create) need to load the origin
@@ -597,6 +607,7 @@ func (s *TaskService) attributionForIssueTask(ctx context.Context, issue db.Issu
 		if task, err := s.Queries.GetAgentTask(ctx, issue.OriginID); err == nil {
 			facts.OriginOriginator = task.OriginatorUserID
 			facts.OriginAccountable = task.AccountableUserID
+			facts.ViaBotID, facts.ViaBotName = task.ViaBotID, task.ViaBotName
 		}
 	}
 	return attribution.ClassifyDirect(facts)
@@ -841,7 +852,9 @@ func (s *TaskService) createAgentChainBudgetNotice(ctx context.Context, issue db
 		}
 	}
 	created, err := s.Queries.CreateComment(ctx, db.CreateCommentParams{
-		ID: dbid.NewV7(), IssueID: issue.ID, WorkspaceID: issue.WorkspaceID,
+		ViaBotID:   botsource.FromContext(ctx).ID,
+		ViaBotName: botName(ctx),
+		ID:         dbid.NewV7(), IssueID: issue.ID, WorkspaceID: issue.WorkspaceID,
 		AuthorType: "system", AuthorID: pgtype.UUID{Valid: true},
 		Content: fmt.Sprintf("%sAgent delegation chain reached the limit of %d runs. Add a human comment to reset the budget and continue, or raise the limit in workspace settings.", mention, budget),
 		Type:    "system", ParentID: parentID,
@@ -1490,6 +1503,8 @@ func (s *TaskService) enqueueIssueTaskWithCommentPlan(ctx context.Context, issue
 		HandoffNote:          pgtype.Text{String: handoffNote, Valid: handoffNote != ""},
 		OriginatorUserID:     originatorUserID,
 		AccountableUserID:    attr.AccountableUserID,
+		ViaBotID:             attr.ViaBotID,
+		ViaBotName:           attr.ViaBotName,
 		RuleVersionID:        attr.RuleVersionID,
 		RerunOfTaskID:        rerunOfTaskID,
 		RuntimeMcpOverlay:    runtimeMCPOverlay.Overlay,
@@ -1520,6 +1535,8 @@ func (s *TaskService) enqueueIssueTaskWithCommentPlan(ctx context.Context, issue
 			HeadSha:              createParams.HeadSha,
 			OriginatorUserID:     createParams.OriginatorUserID,
 			AccountableUserID:    createParams.AccountableUserID,
+			ViaBotID:             createParams.ViaBotID,
+			ViaBotName:           createParams.ViaBotName,
 			RuntimeMcpOverlay:    createParams.RuntimeMcpOverlay,
 			RuntimeConnectedApps: createParams.RuntimeConnectedApps,
 			OriginatorSource:     createParams.OriginatorSource,
@@ -1687,6 +1704,8 @@ func (s *TaskService) enqueueMentionTaskWithCommentPlan(ctx context.Context, iss
 		SquadID:              squadID,
 		OriginatorUserID:     originatorUserID,
 		AccountableUserID:    attr.AccountableUserID,
+		ViaBotID:             attr.ViaBotID,
+		ViaBotName:           attr.ViaBotName,
 		RuleVersionID:        attr.RuleVersionID,
 		RerunOfTaskID:        rerunOfTaskID,
 		RuntimeMcpOverlay:    runtimeMCPOverlay.Overlay,
@@ -1888,7 +1907,7 @@ func (s *TaskService) EnqueueQuickCreate(ctx context.Context, req QuickCreateReq
 	// Evidence is therefore intentionally NULL; the accountable human is captured on
 	// originator/accountable_user_id, so this is not a NULL-source bypass — source
 	// is still stamped direct_human (MUL-4302 §2).
-	attr := attribution.DirectHumanRun(requesterID, "", pgtype.UUID{})
+	attr := directRequestAttribution(ctx, requesterID, "", pgtype.UUID{})
 	// An unresolved requester degrades to owner_fallback (accountable = agent
 	// owner), or is refused if the workspace is fail-closed (MUL-4302 §3.5).
 	attr, err = s.applyAttributionFallback(ctx, attr, agent)
@@ -1906,6 +1925,8 @@ func (s *TaskService) EnqueueQuickCreate(ctx context.Context, req QuickCreateReq
 		Context:              contextJSON,
 		OriginatorUserID:     requesterID,
 		AccountableUserID:    attr.AccountableUserID,
+		ViaBotID:             attr.ViaBotID,
+		ViaBotName:           attr.ViaBotName,
 		RuntimeMcpOverlay:    runtimeMCPOverlay.Overlay,
 		RuntimeConnectedApps: runtimeMCPOverlay.ConnectedApps,
 		OriginatorSource:     attrSource,
@@ -2101,6 +2122,8 @@ var ErrChatSessionArchived = errors.New("chat task: session archived")
 // PreparedChatTaskEnqueue is an opaque, side-effect-free input snapshot built
 // before a caller opens a task-enqueue transaction.
 type PreparedChatTaskEnqueue struct {
+	viaBotID         pgtype.UUID
+	viaBotName       pgtype.Text
 	accountableUser  pgtype.UUID
 	attrSource       pgtype.Text
 	attrEvidenceKind pgtype.Text
@@ -2152,7 +2175,7 @@ func (s *TaskService) PrepareChatTaskEnqueue(
 		return PreparedChatTaskEnqueue{}, ErrChatTaskAgentNoRuntime
 	}
 
-	attr := attribution.DirectHumanRun(
+	attr := directRequestAttribution(ctx,
 		initiatorUserID, attribution.EvidenceChat, pgtype.UUID{},
 	)
 	attr, err = s.applyAttributionFallback(ctx, attr, agent)
@@ -2164,7 +2187,8 @@ func (s *TaskService) PrepareChatTaskEnqueue(
 	attrSource, _, attrEvidenceKind, _ := attributionCreateParams(attr)
 	return PreparedChatTaskEnqueue{
 		accountableUser: attr.AccountableUserID,
-		attrSource:      attrSource, attrEvidenceKind: attrEvidenceKind,
+		viaBotID:        attr.ViaBotID, viaBotName: attr.ViaBotName,
+		attrSource: attrSource, attrEvidenceKind: attrEvidenceKind,
 		runtimeOverlay: s.buildRuntimeMCPOverlay(ctx, initiatorUserID, agent),
 	}, nil
 }
@@ -2359,6 +2383,8 @@ func (s *TaskService) enqueueChatTaskTx(
 		FireAt:               mediaPendingUntil,
 		OriginatorUserID:     initiatorUserID,
 		AccountableUserID:    prepared.accountableUser,
+		ViaBotID:             prepared.viaBotID,
+		ViaBotName:           prepared.viaBotName,
 		ForceFreshSession:    pgtype.Bool{Bool: forceFreshSession, Valid: true},
 		RuntimeMcpOverlay:    prepared.runtimeOverlay.Overlay,
 		RuntimeConnectedApps: prepared.runtimeOverlay.ConnectedApps,
@@ -2636,7 +2662,7 @@ func (s *TaskService) sendDirectChatMessage(
 	// EnqueueChatTask writes. Without this the direct-chat path was a bypass: it set
 	// originator_user_id but left accountable_user_id / source / evidence NULL,
 	// violating the one-way invariant and dropping the audit source (MUL-4302 §2).
-	attr := attribution.DirectHumanRun(initiatorUserID, attribution.EvidenceChat, session.ID)
+	attr := directRequestAttribution(ctx, initiatorUserID, attribution.EvidenceChat, session.ID)
 	attr, err := s.applyAttributionFallback(ctx, attr, agent)
 	if err != nil {
 		return nil, err
@@ -2703,6 +2729,8 @@ func (s *TaskService) sendDirectChatMessage(
 			InitiatorUserID:      initiatorUserID,
 			OriginatorUserID:     attr.UserID,
 			AccountableUserID:    attr.AccountableUserID,
+			ViaBotID:             attr.ViaBotID,
+			ViaBotName:           attr.ViaBotName,
 			ForceFreshSession:    pgtype.Bool{Bool: false, Valid: true},
 			RuntimeMcpOverlay:    overlay.Overlay,
 			RuntimeConnectedApps: overlay.ConnectedApps,
@@ -2750,6 +2778,8 @@ func (s *TaskService) sendDirectChatMessage(
 		// Create the user message already owned by this task (task_id = task.id),
 		// so it belongs to this immutable input batch the instant it exists.
 		msg, err := qtx.CreateChatMessage(ctx, db.CreateChatMessageParams{
+			ViaBotID:      botsource.FromContext(ctx).ID,
+			ViaBotName:    botName(ctx),
 			ID:            dbid.NewV7(),
 			ChatSessionID: session.ID,
 			Role:          "user",
@@ -2871,6 +2901,8 @@ func (s *TaskService) OpenMikaOnboardingChat(ctx context.Context, session db.Cha
 		}
 
 		kickoffRow, err := qtx.CreateChatMessage(ctx, db.CreateChatMessageParams{
+			ViaBotID:      botsource.FromContext(ctx).ID,
+			ViaBotName:    botName(ctx),
 			ID:            dbid.NewV7(),
 			ChatSessionID: session.ID,
 			Role:          "user",
@@ -3415,6 +3447,13 @@ func createAssistantChatMessage(ctx context.Context, qtx *db.Queries, params db.
 	if params.Role != "assistant" {
 		return db.ChatMessage{}, fmt.Errorf("create assistant chat message: invalid role %q", params.Role)
 	}
+	if !params.ViaBotID.Valid && params.TaskID.Valid {
+		task, err := qtx.GetAgentTask(ctx, params.TaskID)
+		if err != nil {
+			return db.ChatMessage{}, fmt.Errorf("load chat message provenance: %w", err)
+		}
+		params.ViaBotID, params.ViaBotName = task.ViaBotID, task.ViaBotName
+	}
 	row, err := qtx.CreateChatMessage(ctx, params)
 	if err != nil {
 		return db.ChatMessage{}, err
@@ -3444,6 +3483,8 @@ func (s *TaskService) settleQueuedChatInput(
 	}
 	if channelIngested {
 		if _, err := createAssistantChatMessage(ctx, qtx, db.CreateChatMessageParams{
+			ViaBotID:      botsource.FromContext(ctx).ID,
+			ViaBotName:    botName(ctx),
 			ID:            dbid.NewV7(),
 			ChatSessionID: task.ChatSessionID,
 			Role:          "assistant",
@@ -3630,6 +3671,8 @@ func (s *TaskService) finalizeCancelledChatMessage(ctx context.Context, task db.
 			return nil
 		}
 		if _, err := createAssistantChatMessage(ctx, qtx, db.CreateChatMessageParams{
+			ViaBotID:      botsource.FromContext(ctx).ID,
+			ViaBotName:    botName(ctx),
 			ID:            dbid.NewV7(),
 			ChatSessionID: task.ChatSessionID,
 			Role:          "assistant",
@@ -3788,6 +3831,8 @@ func (s *TaskService) FinalizeDeferredCancelledChat(ctx context.Context, taskID 
 			return nil
 		}
 		row, err := createAssistantChatMessage(ctx, qtx, db.CreateChatMessageParams{
+			ViaBotID:      botsource.FromContext(ctx).ID,
+			ViaBotName:    botName(ctx),
 			ID:            dbid.NewV7(),
 			ChatSessionID: claimed.ChatSessionID,
 			Role:          "assistant",
@@ -5169,6 +5214,8 @@ func (s *TaskService) writeChatCompletionOutcome(ctx context.Context, qtx *db.Qu
 	}
 
 	params := db.CreateChatMessageParams{
+		ViaBotID:      botsource.FromContext(ctx).ID,
+		ViaBotName:    botName(ctx),
 		ID:            dbid.NewV7(),
 		ChatSessionID: task.ChatSessionID,
 		Role:          "assistant",
@@ -5613,6 +5660,8 @@ func (s *TaskService) FailTaskWithTransition(ctx context.Context, taskID pgtype.
 				return fmt.Errorf("release onboarding kickoff: %w", err)
 			}
 			if _, err := createAssistantChatMessage(ctx, qtx, db.CreateChatMessageParams{
+				ViaBotID:      botsource.FromContext(ctx).ID,
+				ViaBotName:    botName(ctx),
 				ID:            dbid.NewV7(),
 				ChatSessionID: t.ChatSessionID,
 				Role:          "assistant",
@@ -5807,6 +5856,8 @@ func (s *TaskService) noteDeterministicFailure(ctx context.Context, task db.Agen
 	default:
 		if issue.Status != issuestatus.Blocked {
 			updated, updateErr := s.Queries.UpdateIssueStatus(ctx, db.UpdateIssueStatusParams{
+				ActorType: pgtype.Text{String: botsource.ActorFromContext(ctx).Type, Valid: botsource.ActorFromContext(ctx).Type != ""}, ActorID: botsource.ActorFromContext(ctx).ID,
+				ViaBotID: botsource.FromContext(ctx).ID, ViaBotName: pgtype.Text{String: botsource.FromContext(ctx).Name, Valid: botsource.FromContext(ctx).ID.Valid},
 				ID: task.IssueID, Status: issuestatus.Blocked, WorkspaceID: issue.WorkspaceID,
 			})
 			if updateErr != nil {
@@ -5993,6 +6044,8 @@ func (s *TaskService) blockIssueAfterServerInterrupt(ctx context.Context, issue 
 		return false
 	}
 	updated, err := s.Queries.UpdateIssueStatus(ctx, db.UpdateIssueStatusParams{
+		ActorType: pgtype.Text{String: botsource.ActorFromContext(ctx).Type, Valid: botsource.ActorFromContext(ctx).Type != ""}, ActorID: botsource.ActorFromContext(ctx).ID,
+		ViaBotID: botsource.FromContext(ctx).ID, ViaBotName: pgtype.Text{String: botsource.FromContext(ctx).Name, Valid: botsource.FromContext(ctx).ID.Valid},
 		ID:          issue.ID,
 		Status:      issuestatus.Blocked,
 		WorkspaceID: issue.WorkspaceID,
@@ -6028,6 +6081,8 @@ func (s *TaskService) blockFailedChild(ctx context.Context, issueID pgtype.UUID,
 	case issuestatus.Blocked:
 	default:
 		updated, err := s.Queries.UpdateIssueStatus(ctx, db.UpdateIssueStatusParams{
+			ActorType: pgtype.Text{String: botsource.ActorFromContext(ctx).Type, Valid: botsource.ActorFromContext(ctx).Type != ""}, ActorID: botsource.ActorFromContext(ctx).ID,
+			ViaBotID: botsource.FromContext(ctx).ID, ViaBotName: pgtype.Text{String: botsource.FromContext(ctx).Name, Valid: botsource.FromContext(ctx).ID.Valid},
 			ID:          issue.ID,
 			Status:      issuestatus.Blocked,
 			WorkspaceID: issue.WorkspaceID,
@@ -7160,6 +7215,8 @@ func (s *TaskService) noteTaskTimeLimit(ctx context.Context, task db.AgentTaskQu
 	if retried != nil {
 		if issue.Status == issuestatus.Todo {
 			if updated, err := s.Queries.UpdateIssueStatus(ctx, db.UpdateIssueStatusParams{
+				ActorType: pgtype.Text{String: botsource.ActorFromContext(ctx).Type, Valid: botsource.ActorFromContext(ctx).Type != ""}, ActorID: botsource.ActorFromContext(ctx).ID,
+				ViaBotID: botsource.FromContext(ctx).ID, ViaBotName: pgtype.Text{String: botsource.FromContext(ctx).Name, Valid: botsource.FromContext(ctx).ID.Valid},
 				ID: issue.ID, Status: issuestatus.InProgress, WorkspaceID: issue.WorkspaceID,
 			}); err != nil {
 				slog.Warn("task time limit notice: keep issue in progress failed", "issue_id", util.UUIDToString(issue.ID), "error", err)
@@ -7222,6 +7279,8 @@ func (s *TaskService) blockIssueAfterTimeLimit(ctx context.Context, issue db.Iss
 		return false
 	}
 	updated, err := s.Queries.UpdateIssueStatus(ctx, db.UpdateIssueStatusParams{
+		ActorType: pgtype.Text{String: botsource.ActorFromContext(ctx).Type, Valid: botsource.ActorFromContext(ctx).Type != ""}, ActorID: botsource.ActorFromContext(ctx).ID,
+		ViaBotID: botsource.FromContext(ctx).ID, ViaBotName: pgtype.Text{String: botsource.FromContext(ctx).Name, Valid: botsource.FromContext(ctx).ID.Valid},
 		ID: issue.ID, Status: issuestatus.Blocked, WorkspaceID: issue.WorkspaceID,
 	})
 	if err != nil {
@@ -7298,7 +7357,9 @@ func (s *TaskService) createSystemNotice(ctx context.Context, issue db.Issue, co
 // callers that hand it to the summon entry.
 func (s *TaskService) createSystemNoticeComment(ctx context.Context, issue db.Issue, content string) *db.Comment {
 	created, err := s.Queries.CreateComment(ctx, db.CreateCommentParams{
-		ID: dbid.NewV7(), IssueID: issue.ID, WorkspaceID: issue.WorkspaceID,
+		ViaBotID:   botsource.FromContext(ctx).ID,
+		ViaBotName: botName(ctx),
+		ID:         dbid.NewV7(), IssueID: issue.ID, WorkspaceID: issue.WorkspaceID,
 		AuthorType: "system", AuthorID: pgtype.UUID{Valid: true},
 		Content: content, Type: "system", ParentID: pgtype.UUID{},
 	})
@@ -7490,6 +7551,8 @@ func (s *TaskService) HandleFailedTasks(ctx context.Context, tasks []db.AgentTas
 						)
 					} else if !hasActive && !parked {
 						updatedIssue, updateErr := s.Queries.UpdateIssueStatus(ctx, db.UpdateIssueStatusParams{
+							ActorType: pgtype.Text{String: botsource.ActorFromContext(ctx).Type, Valid: botsource.ActorFromContext(ctx).Type != ""}, ActorID: botsource.ActorFromContext(ctx).ID,
+							ViaBotID: botsource.FromContext(ctx).ID, ViaBotName: pgtype.Text{String: botsource.FromContext(ctx).Name, Valid: botsource.FromContext(ctx).ID.Valid},
 							SourceTaskID: t.ID,
 							ID:           t.IssueID,
 							Status:       "todo",
@@ -7777,6 +7840,8 @@ func (s *TaskService) ensureDelegatedFailureRecoveryComment(ctx context.Context,
 			}
 		}
 		createdComment, err := qtx.CreateComment(ctx, db.CreateCommentParams{
+			ViaBotID:     botsource.FromContext(ctx).ID,
+			ViaBotName:   botName(ctx),
 			ID:           dbid.NewV7(),
 			IssueID:      target.issue.ID,
 			WorkspaceID:  target.issue.WorkspaceID,
@@ -7883,6 +7948,8 @@ func (s *TaskService) exhaustDelegatedFailureRecovery(ctx context.Context, targe
 		}
 
 		createdComment, err := qtx.CreateComment(ctx, db.CreateCommentParams{
+			ViaBotID:     botsource.FromContext(ctx).ID,
+			ViaBotName:   botName(ctx),
 			ID:           dbid.NewV7(),
 			IssueID:      target.issue.ID,
 			WorkspaceID:  target.issue.WorkspaceID,
@@ -8100,6 +8167,8 @@ func (s *TaskService) dispatchDelegatedFailureRecovery(ctx context.Context, targ
 			SquadID:              target.source.SquadID,
 			OriginatorUserID:     originator,
 			AccountableUserID:    accountable,
+			ViaBotID:             target.failed.ViaBotID,
+			ViaBotName:           target.failed.ViaBotName,
 			RuntimeMcpOverlay:    overlay.Overlay,
 			RuntimeConnectedApps: overlay.ConnectedApps,
 			OriginatorSource:     pgtype.Text{String: string(source), Valid: true},
@@ -9056,6 +9125,8 @@ func (s *TaskService) createAgentComment(ctx context.Context, issueID, agentID p
 		}
 	}
 	created, err := s.Queries.CreateComment(ctx, db.CreateCommentParams{
+		ViaBotID:     botsource.FromContext(ctx).ID,
+		ViaBotName:   botName(ctx),
 		ID:           dbid.NewV7(),
 		IssueID:      issueID,
 		WorkspaceID:  issue.WorkspaceID,
@@ -9698,4 +9769,18 @@ func (s *TaskService) postDeliveryNotice(ctx context.Context, task db.AgentTaskQ
 		return
 	}
 	s.createAgentComment(ctx, task.IssueID, task.AgentID, notice, "system", task.TriggerCommentID, task.ID)
+}
+
+// Bot credentials retain their owner's permissions, but never their speech identity.
+func botName(ctx context.Context) pgtype.Text {
+	source := botsource.FromContext(ctx)
+	return pgtype.Text{String: source.Name, Valid: source.ID.Valid}
+}
+func directRequestAttribution(ctx context.Context, user pgtype.UUID, kind attribution.EvidenceKind, ref pgtype.UUID) attribution.Result {
+	result := attribution.DirectHumanRun(user, kind, ref)
+	result.ViaBotID, result.ViaBotName = botsource.FromContext(ctx).ID, botName(ctx)
+	if result.ViaBotID.Valid && result.Source == attribution.SourceDirectHuman {
+		result.Source = attribution.SourceViaBot
+	}
+	return result
 }

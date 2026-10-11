@@ -650,6 +650,8 @@ export function commentToTimelineEntry(comment: Comment): TimelineEntry {
   return {
     type: "comment",
     id: comment.id,
+    via_bot_id: comment.via_bot_id,
+    via_bot_name: comment.via_bot_name,
     actor_type: comment.author_type,
     actor_id: comment.author_id,
     created_at: comment.created_at,

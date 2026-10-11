@@ -20,6 +20,8 @@ type ActivityLog struct {
 	Action      string             `json:"action"`
 	Details     []byte             `json:"details"`
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	ViaBotID    pgtype.UUID        `json:"via_bot_id"`
+	ViaBotName  pgtype.Text        `json:"via_bot_name"`
 }
 
 type Agent struct {
@@ -294,6 +296,8 @@ type AgentTaskQueue struct {
 	SessionMode               pgtype.Text `json:"session_mode"`
 	ResumedFromTaskID         pgtype.UUID `json:"resumed_from_task_id"`
 	SessionBreakReason        pgtype.Text `json:"session_break_reason"`
+	ViaBotID                  pgtype.UUID `json:"via_bot_id"`
+	ViaBotName                pgtype.Text `json:"via_bot_name"`
 }
 
 type AgentToLabel struct {
@@ -657,6 +661,8 @@ type ChatMessage struct {
 	ChannelOutboundMessageIds     []string           `json:"channel_outbound_message_ids"`
 	SenderUserID                  pgtype.UUID        `json:"sender_user_id"`
 	LinkedSessionID               pgtype.UUID        `json:"linked_session_id"`
+	ViaBotID                      pgtype.UUID        `json:"via_bot_id"`
+	ViaBotName                    pgtype.Text        `json:"via_bot_name"`
 }
 
 type ChatNamingEvent struct {
@@ -823,6 +829,8 @@ type Comment struct {
 	DeletedAt          pgtype.Timestamptz `json:"deleted_at"`
 	RoutingKind        pgtype.Text        `json:"routing_kind"`
 	SuppressedAgentIds []pgtype.UUID      `json:"suppressed_agent_ids"`
+	ViaBotID           pgtype.UUID        `json:"via_bot_id"`
+	ViaBotName         pgtype.Text        `json:"via_bot_name"`
 }
 
 type CommentReaction struct {
@@ -1124,6 +1132,8 @@ type Issue struct {
 	DuplicateOfIssueID   pgtype.UUID        `json:"duplicate_of_issue_id"`
 	DomainID             pgtype.UUID        `json:"domain_id"`
 	OriginChatSessionID  pgtype.UUID        `json:"origin_chat_session_id"`
+	ViaBotID             pgtype.UUID        `json:"via_bot_id"`
+	ViaBotName           pgtype.Text        `json:"via_bot_name"`
 }
 
 type IssueChildEvent struct {
@@ -1709,6 +1719,7 @@ type PersonalAccessToken struct {
 	BotType     pgtype.Text        `json:"bot_type"`
 	WorkspaceID pgtype.UUID        `json:"workspace_id"`
 	RevokedAt   pgtype.Timestamptz `json:"revoked_at"`
+	DeletedAt   pgtype.Timestamptz `json:"deleted_at"`
 }
 
 type PinnedItem struct {

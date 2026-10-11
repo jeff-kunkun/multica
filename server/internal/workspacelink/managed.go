@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/multica-ai/multica/server/internal/botsource"
 	"log/slog"
 	"net/http"
 	"regexp"
@@ -410,6 +411,7 @@ func (s *Service) recordManagedWrite(ctx context.Context, g ManagedGrant, rt man
 		return
 	}
 	if _, err := s.q.CreateActivity(ctx, db.CreateActivityParams{
+		ViaBotID: botsource.FromContext(ctx).ID, ViaBotName: pgtype.Text{String: botsource.FromContext(ctx).Name, Valid: botsource.FromContext(ctx).ID.Valid},
 		WorkspaceID: g.Source.ID,
 		IssueID:     issueID,
 		ActorType:   pgtype.Text{String: "member", Valid: true},

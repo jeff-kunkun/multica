@@ -114,6 +114,7 @@ func (h *Handler) chatMessageHistory(r *http.Request, scope chatHistoryScope) (c
 			role = channel.HistoryRoleAssistant
 		}
 		out = append(out, channel.HistoryMessage{
+			ViaBotID: uuidToString(m.ViaBotID), ViaBotName: m.ViaBotName.String,
 			ID:     uuidToString(m.ID),
 			Role:   role,
 			Text:   m.Content,

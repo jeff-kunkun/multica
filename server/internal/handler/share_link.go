@@ -442,13 +442,13 @@ func (h *Handler) JoinByShareLink(w http.ResponseWriter, r *http.Request) {
 	}
 
 	memberResp := h.memberWithUserResponse(member, user)
-	h.publish(protocol.EventMemberAdded, wsID, "member", userID, map[string]any{
+	h.publishWithSource(r.Context(), protocol.EventMemberAdded, wsID, "member", userID, map[string]any{
 		"member": memberResp.redactedForRoster(),
 	})
 	if settledInvitationID.Valid {
 		// Same signal the accept path sends: workspace admins refresh their
 		// pending-invitation list, and the joiner's own clients converge.
-		h.publish(protocol.EventInvitationAccepted, wsID, "member", userID, map[string]any{
+		h.publishWithSource(r.Context(), protocol.EventInvitationAccepted, wsID, "member", userID, map[string]any{
 			"invitation_id": uuidToString(settledInvitationID),
 			"member":        memberResp,
 		})

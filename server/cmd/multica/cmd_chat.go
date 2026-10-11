@@ -741,9 +741,9 @@ func renderChatRead(cmd *cobra.Command, resp map[string]any, overview bool) erro
 			continue
 		}
 		if overview {
-			rows = append(rows, []string{strVal(m, "ts"), strVal(m, "role"), strVal(m, "author"), strVal(m, "thread_id"), numVal(m, "reply_count"), strVal(m, "text")})
+			rows = append(rows, []string{strVal(m, "ts"), strVal(m, "role"), withBotAttribution(strVal(m, "author"), m), strVal(m, "thread_id"), numVal(m, "reply_count"), strVal(m, "text")})
 		} else {
-			rows = append(rows, []string{strVal(m, "ts"), strVal(m, "role"), strVal(m, "author"), strVal(m, "text")})
+			rows = append(rows, []string{strVal(m, "ts"), strVal(m, "role"), withBotAttribution(strVal(m, "author"), m), strVal(m, "text")})
 		}
 	}
 	cli.PrintTable(os.Stdout, headers, rows)
@@ -947,6 +947,14 @@ func runChatHandoff(cmd *cobra.Command, _ []string) error {
 		return nil
 	}
 	return cli.PrintJSON(os.Stdout, out)
+}
+
+// withBotAttribution keeps the member identity while exposing the writing bot.
+func withBotAttribution(author string, record map[string]any) string {
+	if name := strVal(record, "via_bot_name"); name != "" {
+		return author + " (via " + name + ")"
+	}
+	return author
 }
 
 func collectChatSendAttachments(cmd *cobra.Command) ([]pendingAttachment, error) {

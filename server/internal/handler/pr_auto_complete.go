@@ -14,6 +14,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/botsource"
 	"github.com/multica-ai/multica/server/internal/issuestatus"
 	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/util"
@@ -300,7 +301,7 @@ func (h *Handler) maybeAutoCompleteIssue(ctx context.Context, workspaceID, issue
 	prefix := h.getIssuePrefix(ctx, issue.WorkspaceID)
 	resp := issueToResponse(updated, prefix)
 	h.fillStatusCategory(ctx, updated.WorkspaceID, &resp)
-	h.publish(protocol.EventIssueUpdated, uuidToString(workspaceID), "system", "", map[string]any{
+	h.publishWithSource(ctx, protocol.EventIssueUpdated, uuidToString(workspaceID), "system", "", map[string]any{
 		"issue":          resp,
 		"status_changed": true,
 		"prev_status":    issue.Status,
@@ -645,6 +646,7 @@ func (h *Handler) SetIssuePRAutoComplete(w http.ResponseWriter, r *http.Request)
 func (h *Handler) recordPRAutoCompleteActivity(ctx context.Context, issue db.Issue, actorType, actorID string, disabled bool) {
 	details, _ := json.Marshal(map[string]bool{"disabled": disabled})
 	activity, err := h.Queries.CreateActivity(ctx, db.CreateActivityParams{
+		ViaBotID: botsource.FromContext(ctx).ID, ViaBotName: pgtype.Text{String: botsource.FromContext(ctx).Name, Valid: botsource.FromContext(ctx).ID.Valid},
 		ID:          dbid.NewV7(),
 		WorkspaceID: issue.WorkspaceID,
 		IssueID:     issue.ID,
@@ -657,7 +659,7 @@ func (h *Handler) recordPRAutoCompleteActivity(ctx context.Context, issue db.Iss
 		slog.Warn("record pr auto-complete activity failed", "err", err)
 		return
 	}
-	h.publish(protocol.EventActivityCreated, uuidToString(issue.WorkspaceID), actorType, actorID, map[string]any{
+	h.publishWithSource(ctx, protocol.EventActivityCreated, uuidToString(issue.WorkspaceID), actorType, actorID, map[string]any{
 		"issue_id": uuidToString(issue.ID),
 		"entry": map[string]any{
 			"type":       "activity",

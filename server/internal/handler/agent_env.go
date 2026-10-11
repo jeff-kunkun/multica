@@ -9,6 +9,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/multica-ai/multica/server/internal/botsource"
 	"github.com/multica-ai/multica/server/internal/logger"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/dbid"
@@ -154,6 +155,7 @@ func (h *Handler) GetAgentEnv(w http.ResponseWriter, r *http.Request) {
 		"key_count":     len(revealedKeys),
 	})
 	if _, err := h.Queries.CreateActivity(r.Context(), db.CreateActivityParams{
+		ViaBotID: botsource.FromContext(r.Context()).ID, ViaBotName: pgtype.Text{String: botsource.FromContext(r.Context()).Name, Valid: botsource.FromContext(r.Context()).ID.Valid},
 		ID:          dbid.NewV7(),
 		WorkspaceID: agent.WorkspaceID,
 		IssueID:     pgtype.UUID{}, // env access is not tied to an issue
@@ -258,6 +260,7 @@ func (h *Handler) UpdateAgentEnv(w http.ResponseWriter, r *http.Request) {
 	}
 	details, _ := json.Marshal(auditDetails)
 	if _, err := qtx.CreateActivity(r.Context(), db.CreateActivityParams{
+		ViaBotID: botsource.FromContext(r.Context()).ID, ViaBotName: pgtype.Text{String: botsource.FromContext(r.Context()).Name, Valid: botsource.FromContext(r.Context()).ID.Valid},
 		ID:          dbid.NewV7(),
 		WorkspaceID: agent.WorkspaceID,
 		IssueID:     pgtype.UUID{},
@@ -291,7 +294,7 @@ func (h *Handler) UpdateAgentEnv(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	workspaceID := uuidToString(updated.WorkspaceID)
-	h.publish(protocol.EventAgentStatus, workspaceID, "member", uuidToString(member.UserID), map[string]any{"agent": broadcastAgentResponse(resp)})
+	h.publishWithSource(r.Context(), protocol.EventAgentStatus, workspaceID, "member", uuidToString(member.UserID), map[string]any{"agent": broadcastAgentResponse(resp)})
 
 	// A base role's env is also the env of every same-owner specialisation
 	// that follows it (DENE-854). The copy is not audited per child: the

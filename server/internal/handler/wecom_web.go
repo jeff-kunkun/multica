@@ -180,7 +180,7 @@ func (h *Handler) RegisterWecomBYO(w http.ResponseWriter, r *http.Request) {
 		writeWecomInstallError(w, err, wsUUID, agentUUID)
 		return
 	}
-	h.publish(protocol.EventWecomInstallationCreated, uuidToString(inst.WorkspaceID), "user", userID, map[string]any{
+	h.publishWithSource(r.Context(), protocol.EventWecomInstallationCreated, uuidToString(inst.WorkspaceID), "user", userID, map[string]any{
 		"id": uuidToString(inst.ID),
 	})
 	writeJSON(w, http.StatusOK, wecomInstallationToResponse(inst))
@@ -296,7 +296,7 @@ func (h *Handler) RevokeWecomInstallation(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusInternalServerError, "failed to revoke installation")
 		return
 	}
-	h.publish(protocol.EventWecomInstallationRevoked, uuidToString(wsUUID), "user", userID, map[string]any{
+	h.publishWithSource(r.Context(), protocol.EventWecomInstallationRevoked, uuidToString(wsUUID), "user", userID, map[string]any{
 		"id": uuidToString(instUUID),
 	})
 	w.WriteHeader(http.StatusNoContent)

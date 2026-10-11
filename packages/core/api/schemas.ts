@@ -936,6 +936,8 @@ const ChatQuickActionSchema = z.object({
 }).loose();
 
 export const ChatMessageSchema = z.object({
+  via_bot_id: z.string().nullish().catch(undefined),
+  via_bot_name: z.string().nullish().catch(undefined),
   id: z.string(),
   chat_session_id: z.string(),
   role: z.enum(["user", "assistant"]).catch("assistant"),
@@ -1042,6 +1044,8 @@ const CommentSupplementReceiptsSchema = z.array(z.unknown()).optional().catch(un
   }));
 
 const TimelineEntrySchema = z.object({
+  via_bot_id: z.string().nullish().catch(undefined),
+  via_bot_name: z.string().nullish().catch(undefined),
   type: z.string(),
   id: z.string(),
   actor_type: z.string(),
@@ -1202,6 +1206,8 @@ export const EMPTY_CREATE_FEEDBACK_RESPONSE: CreateFeedbackResponse = {
 };
 
 export const CommentSchema = z.object({
+  via_bot_id: z.string().nullish().catch(undefined),
+  via_bot_name: z.string().nullish().catch(undefined),
   id: z.string(),
   issue_id: z.string(),
   author_type: z.string(),
@@ -2429,6 +2435,8 @@ const TaskEvidenceSchema = z.object({
 }).loose();
 
 const TaskAttributionSchema = z.object({
+  via_bot_id: z.string().nullish().catch(undefined),
+  via_bot_name: z.string().nullish().catch(undefined),
   source: z.string().default("unattributed"),
   precise: z.boolean().default(false),
   initiator: AttributionUserSchema.optional(),

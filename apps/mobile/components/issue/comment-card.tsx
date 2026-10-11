@@ -426,6 +426,7 @@ function CommentBody({
     (s) => s.selectingId === entry.id,
   );
   const { getName } = useActorLookup();
+  const { t } = useT("issues");
   const userId = useAuthStore((s) => s.user?.id);
   const wsId = useWorkspaceStore((s) => s.currentWorkspaceId);
   const toggle = useToggleCommentReaction(issueId);
@@ -540,7 +541,10 @@ function CommentBody({
           size={24}
           showPresence
         />
-        <Text className="text-sm font-medium text-foreground">{name}</Text>
+        <View className="min-w-0 flex-1">
+          <Text className="text-sm font-medium text-foreground">{name}</Text>
+          {entry.via_bot_name ? <Text className="text-xs text-muted-foreground">{t("via_bot", { name: entry.via_bot_name })}</Text> : null}
+        </View>
         <Text className="text-xs text-muted-foreground">
           · {timeAgo(entry.created_at)}
           {edited ? " · (edited)" : ""}

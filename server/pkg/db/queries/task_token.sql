@@ -18,7 +18,7 @@ RETURNING *;
 -- task_kind is the run's context.type (DENE-1721): a consult run answers one
 -- question and may only read, so its scope is decided here as well. The task
 -- join is on agent_task_queue's primary key.
-SELECT tt.id,
+SELECT q.via_bot_id, q.via_bot_name, tt.id,
        tt.token_hash,
        tt.task_id,
        tt.agent_id,

@@ -775,7 +775,7 @@ func (h *Handler) carryIssueDraftAttachments(r *http.Request, session db.ChatSes
 	}
 	// The bytes are the issue's now, so every surface holding that issue's
 	// attachments is stale — the confirm's own response among them.
-	h.publish(protocol.EventIssueAttachmentsChanged, uuidToString(session.WorkspaceID), "member", uuidToString(session.CreatorID), map[string]any{
+	h.publishWithSource(r.Context(), protocol.EventIssueAttachmentsChanged, uuidToString(session.WorkspaceID), "member", uuidToString(session.CreatorID), map[string]any{
 		"issue_id": uuidToString(rootIssue.ID),
 	})
 }

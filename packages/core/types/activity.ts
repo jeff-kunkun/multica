@@ -8,6 +8,8 @@ export interface AssigneeFrequencyEntry {
 }
 
 export interface TimelineEntry {
+  via_bot_id?: string | null;
+  via_bot_name?: string | null;
   type: "activity" | "comment";
   id: string;
   actor_type: string;

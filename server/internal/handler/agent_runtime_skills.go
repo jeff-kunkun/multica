@@ -204,7 +204,7 @@ func (h *Handler) SetAgentRuntimeSkillEnabled(w http.ResponseWriter, r *http.Req
 			append(logger.RequestAttrs(r), "error", err, "agent_id", agentID)...)
 	}
 	actorType, actorID := h.resolveActor(r, requestUserID(r), uuidToString(locked.WorkspaceID))
-	h.publish(protocol.EventAgentStatus, uuidToString(locked.WorkspaceID), actorType, actorID,
+	h.publishWithSource(r.Context(), protocol.EventAgentStatus, uuidToString(locked.WorkspaceID), actorType, actorID,
 		map[string]any{"agent": broadcastAgentResponse(resp)})
 
 	w.WriteHeader(http.StatusNoContent)

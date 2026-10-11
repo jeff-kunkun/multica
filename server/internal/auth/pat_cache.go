@@ -2,6 +2,7 @@ package auth
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"log/slog"
 	"time"
@@ -20,7 +21,7 @@ const AuthCacheTTL = 10 * time.Minute
 
 // patCachePrefix namespaces auth-cache keys away from the realtime relay
 // (ws:*) and local-skill (mul:local_skill:*) keys.
-const patCachePrefix = "mul:auth:pat:"
+const patCachePrefix = "mul:auth:pat:v2:"
 
 // PATCache caches resolved PAT lookups in Redis. A nil *PATCache is safe
 // to use — every method becomes a no-op or reports a cache miss, and the
@@ -53,6 +54,10 @@ func (c *PATCache) Get(ctx context.Context, hash string) (userID string, ok bool
 		}
 		return "", false
 	}
+	var identity PATIdentity
+	if json.Unmarshal([]byte(v), &identity) == nil {
+		return identity.UserID, identity.UserID != ""
+	}
 	return v, true
 }
 
@@ -67,7 +72,42 @@ func (c *PATCache) Set(ctx context.Context, hash, userID string, ttl time.Durati
 	if c == nil || ttl <= 0 {
 		return
 	}
-	if err := c.rdb.Set(ctx, patCacheKey(hash), userID, ttl).Err(); err != nil {
+	c.SetIdentity(ctx, hash, PATIdentity{UserID: userID, Kind: "personal"}, ttl)
+}
+
+// PATIdentity preserves credential provenance in cached authentication.
+type PATIdentity struct {
+	UserID  string `json:"user_id"`
+	TokenID string `json:"token_id"`
+	Kind    string `json:"kind"`
+	Name    string `json:"name"`
+}
+
+// GetIdentity rejects legacy user-only entries: they cannot distinguish Bots.
+func (c *PATCache) GetIdentity(ctx context.Context, hash string) (PATIdentity, bool) {
+	if c == nil {
+		return PATIdentity{}, false
+	}
+	raw, err := c.rdb.Get(ctx, patCacheKey(hash)).Result()
+	if err != nil {
+		return PATIdentity{}, false
+	}
+	var id PATIdentity
+	if json.Unmarshal([]byte(raw), &id) != nil || id.UserID == "" || (id.Kind != "personal" && id.Kind != "bot") || (id.Kind == "bot" && id.TokenID == "") {
+		return PATIdentity{}, false
+	}
+	return id, true
+}
+
+func (c *PATCache) SetIdentity(ctx context.Context, hash string, identity PATIdentity, ttl time.Duration) {
+	if c == nil || ttl <= 0 {
+		return
+	}
+	value, err := json.Marshal(identity)
+	if err != nil {
+		return
+	}
+	if err := c.rdb.Set(ctx, patCacheKey(hash), value, ttl).Err(); err != nil {
 		slog.Warn("pat_cache: set failed", "error", err)
 	}
 }

@@ -162,6 +162,25 @@ func TestBotKeys_AdminAddsUsesStopsBot(t *testing.T) {
 	if rec := call("DELETE", base+"/bots/"+created.Bot.ID, adminKey, nil); rec.Code != http.StatusNoContent {
 		t.Fatalf("delete stopped bot: want 204, got %d", rec.Code)
 	}
+
+	// Deletion retains the referenced credential row for audit/event foreign keys.
+	var retained bool
+	dbfx.QueryRow(t, `SELECT revoked AND deleted_at IS NOT NULL AND name = '测试 Bot' FROM personal_access_token WHERE id = $1`, created.Bot.ID).Scan(&retained)
+	if !retained {
+		t.Fatal("deleted Bot audit row was lost")
+	}
+	rec = call("GET", base+"/bots", adminKey, nil)
+	bots = nil
+	_ = json.NewDecoder(rec.Body).Decode(&bots)
+	if rec.Code != http.StatusOK || len(bots) != 0 {
+		t.Fatalf("deleted Bot still listed: %d %+v", rec.Code, bots)
+	}
+	if rec := call("POST", base+"/bots/"+created.Bot.ID+"/rotate", adminKey, nil); rec.Code != http.StatusNotFound {
+		t.Fatalf("deleted Bot revived: %d", rec.Code)
+	}
+	if rec := call("GET", base+"/", rotated.Token, nil); rec.Code != http.StatusUnauthorized {
+		t.Fatalf("deleted Bot authenticated: %d", rec.Code)
+	}
 }
 
 func TestBotKeys_RejectsUnknownTypeAndEmptyName(t *testing.T) {

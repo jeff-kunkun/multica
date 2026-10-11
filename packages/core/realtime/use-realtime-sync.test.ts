@@ -1426,6 +1426,34 @@ describe("applyChatMessageToCache", () => {
     expect(pages?.pages[0]?.messages.map((m) => m.id)).toEqual(["msg-user", "msg-user-2"]);
   });
 
+  it.each([true, false])("preserves Bot=%s provenance in a second window with no refetch and replay", async (bot) => {
+    const qc = createQueryClient();
+    qc.setQueryDefaults(messagesKey, { staleTime: Infinity });
+    qc.setQueryDefaults(chatKeys.messagesPage(sessionId), { staleTime: Infinity });
+    qc.setQueryData<ChatMessage[]>(messagesKey, []);
+    qc.setQueryData<InfiniteData<ChatMessagesPage>>(chatKeys.messagesPage(sessionId), {
+      pages: [{ messages: [], limit: 50, has_more: false, next_cursor: null }],
+      pageParams: [null],
+    });
+    const source = bot ? { via_bot_id: "bot-pat-id", via_bot_name: "Grok" } : {};
+    const event = messagePayload({ sender_user_id: "kun", ...source });
+    applyChatMessageToCache(qc, event);
+    // The quick-actions path may cancel reconciliation. No fetch result is
+    // supplied here: the event must carry identity on its own.
+    await qc.cancelQueries({ queryKey: messagesKey });
+    await qc.cancelQueries({ queryKey: chatKeys.messagesPage(sessionId) });
+    applyChatMessageToCache(qc, event);
+    const flat = qc.getQueryData<ChatMessage[]>(messagesKey)!;
+    const paged = qc.getQueryData<InfiniteData<ChatMessagesPage>>(chatKeys.messagesPage(sessionId))!;
+    for (const rows of [flat, paged.pages[0]!.messages]) {
+      expect(rows).toHaveLength(1);
+      expect(rows[0]!.sender_user_id).toBe("kun");
+      expect(rows[0]!.via_bot_id).toBe(bot ? "bot-pat-id" : undefined);
+      expect(rows[0]!.via_bot_name).toBe(bot ? "Grok" : undefined);
+    }
+    qc.clear();
+  });
+
   it("is idempotent against the sender's own write and reconnect replay", () => {
     const qc = createQueryClient();
     // The sender's row is richer than the event: it carries the draft

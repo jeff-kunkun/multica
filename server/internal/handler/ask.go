@@ -170,7 +170,7 @@ func (h *Handler) CreateAsk(w http.ResponseWriter, r *http.Request) {
 			ActorType: pgtype.Text{String: actorType, Valid: true}, ActorID: askerID, Details: details,
 		})
 		if inboxErr == nil {
-			h.publish(protocol.EventInboxNew, workspaceID, actorType, actorID, map[string]any{"item": inboxToResponse(item)})
+			h.publishWithSource(r.Context(), protocol.EventInboxNew, workspaceID, actorType, actorID, map[string]any{"item": inboxToResponse(item)})
 		}
 	}
 	writeJSON(w, http.StatusCreated, out)
@@ -355,7 +355,7 @@ func (h *Handler) AnswerAsk(w http.ResponseWriter, r *http.Request) {
 				ActorType: pgtype.Text{String: "member", Valid: true}, ActorID: answererID, Details: raw,
 			})
 			if inboxErr == nil {
-				h.publish(protocol.EventInboxNew, workspaceID, "member", userID, map[string]any{"item": inboxToResponse(item)})
+				h.publishWithSource(r.Context(), protocol.EventInboxNew, workspaceID, "member", userID, map[string]any{"item": inboxToResponse(item)})
 			}
 		}
 	}

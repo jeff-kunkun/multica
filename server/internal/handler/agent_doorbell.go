@@ -15,6 +15,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/multica-ai/multica/server/internal/botsource"
 	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -274,7 +275,7 @@ func (h *Handler) createAccessInboxItem(ctx context.Context, issue db.Issue, rec
 	resp := inboxToResponse(item)
 	status := issue.Status
 	resp.IssueStatus = &status
-	h.publish(protocol.EventInboxNew, uuidToString(issue.WorkspaceID), "member", uuidToString(actorID), map[string]any{"item": resp})
+	h.publishWithSource(ctx, protocol.EventInboxNew, uuidToString(issue.WorkspaceID), "member", uuidToString(actorID), map[string]any{"item": resp})
 }
 
 // ringDoorbellTargets is the trigger-path side effect for mention targets the
@@ -533,6 +534,8 @@ func (h *Handler) replayAccessRequest(ctx context.Context, req db.AgentAccessReq
 		prev := issue
 		if uuidToString(issue.AssigneeID) != uuidToString(agent.ID) || issue.AssigneeType.String != "agent" {
 			issue, err = h.Queries.UpdateIssue(ctx, db.UpdateIssueParams{
+				ActorType: pgtype.Text{String: botsource.ActorFromContext(ctx).Type, Valid: botsource.ActorFromContext(ctx).Type != ""}, ActorID: botsource.ActorFromContext(ctx).ID,
+				ViaBotID: botsource.FromContext(ctx).ID, ViaBotName: pgtype.Text{String: botsource.FromContext(ctx).Name, Valid: botsource.FromContext(ctx).ID.Valid},
 				ID:            issue.ID,
 				AssigneeType:  pgtype.Text{String: "agent", Valid: true},
 				AssigneeID:    agent.ID,
@@ -547,7 +550,7 @@ func (h *Handler) replayAccessRequest(ctx context.Context, req db.AgentAccessReq
 			if err != nil {
 				return blocked(ReasonInternalError)
 			}
-			h.publish(protocol.EventIssueUpdated, uuidToString(issue.WorkspaceID), "member", uuidToString(agent.OwnerID), RoutingIssueUpdatedPayload(prev, issue))
+			h.publishWithSource(ctx, protocol.EventIssueUpdated, uuidToString(issue.WorkspaceID), "member", uuidToString(agent.OwnerID), RoutingIssueUpdatedPayload(prev, issue))
 		}
 		task, err = h.TaskService.EnqueueTaskForIssueByActor(ctx, issue, agent.OwnerID)
 	default:

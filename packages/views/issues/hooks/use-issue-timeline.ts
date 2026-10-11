@@ -53,6 +53,8 @@ function commentToTimelineEntry(c: Comment): TimelineEntry {
   return {
     type: "comment",
     id: c.id,
+    via_bot_id: c.via_bot_id,
+    via_bot_name: c.via_bot_name,
     actor_type: c.author_type,
     actor_id: c.author_id,
     content: c.content,

@@ -44,6 +44,8 @@ export function coalesceTimeline(
         prev.action === entry.action &&
         prev.actor_type === entry.actor_type &&
         prev.actor_id === entry.actor_id &&
+        prev.via_bot_id === entry.via_bot_id &&
+        prev.via_bot_name === entry.via_bot_name &&
         (NO_TIME_LIMIT_ACTIONS.has(entry.action ?? "") ||
           Math.abs(
             new Date(entry.created_at).getTime() -

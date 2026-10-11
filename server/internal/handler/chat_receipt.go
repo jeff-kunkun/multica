@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/botsource"
 	"github.com/multica-ai/multica/server/internal/closeprotocol"
 	"github.com/multica-ai/multica/server/internal/receipt"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -215,6 +216,7 @@ func (h *Handler) postSourceChatReceipt(ctx context.Context, prev, issue db.Issu
 	r.Status = nowStatus
 	r.Children = h.childReceipts(ctx, issue, h.visibleInChat(ctx, session))
 	msg, err := h.Queries.CreateChatMessage(ctx, db.CreateChatMessageParams{
+		ViaBotID: botsource.FromContext(ctx).ID, ViaBotName: pgtype.Text{String: botsource.FromContext(ctx).Name, Valid: botsource.FromContext(ctx).ID.Valid},
 		ID:            dbid.NewV7(),
 		ChatSessionID: session.ID,
 		Role:          "assistant",
@@ -229,7 +231,7 @@ func (h *Handler) postSourceChatReceipt(ctx context.Context, prev, issue db.Issu
 		slog.Warn("receipt: touch chat session failed", "chat_session_id", uuidToString(session.ID), "error", err)
 	}
 	sessionID := uuidToString(session.ID)
-	h.publishChat(protocol.EventChatMessage, uuidToString(session.WorkspaceID), "system", "", sessionID, protocol.ChatMessagePayload{
+	h.publishChatWithSource(ctx, protocol.EventChatMessage, uuidToString(session.WorkspaceID), "system", "", sessionID, protocol.ChatMessagePayload{
 		ChatSessionID: sessionID,
 		MessageID:     uuidToString(msg.ID),
 		Role:          "assistant",

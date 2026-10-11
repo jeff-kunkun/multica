@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/multica-ai/multica/server/internal/botsource"
 	"github.com/multica-ai/multica/server/internal/chattitle"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/service"
@@ -317,6 +318,7 @@ func (h *Handler) SpawnChatSession(w http.ResponseWriter, r *http.Request) {
 			return err
 		}
 		msg, err := qtx.CreateChatMessage(r.Context(), db.CreateChatMessageParams{
+			ViaBotID: botsource.FromContext(r.Context()).ID, ViaBotName: pgtype.Text{String: botsource.FromContext(r.Context()).Name, Valid: botsource.FromContext(r.Context()).ID.Valid},
 			ID:            dbid.NewV7(),
 			ChatSessionID: parent.ID,
 			Role:          "assistant",
@@ -367,7 +369,7 @@ func (h *Handler) SpawnChatSession(w http.ResponseWriter, r *http.Request) {
 	}
 	childIDString := uuidToString(child.ID)
 	parentIDString := uuidToString(parent.ID)
-	h.publishChat(protocol.EventChatMessage, workspaceID, "agent", actorID, childIDString, protocol.ChatMessagePayload{
+	h.publishChatWithSource(r.Context(), protocol.EventChatMessage, workspaceID, "agent", actorID, childIDString, protocol.ChatMessagePayload{
 		ChatSessionID: childIDString,
 		MessageID:     uuidToString(sent.Message.ID),
 		Role:          "user",
@@ -375,7 +377,7 @@ func (h *Handler) SpawnChatSession(w http.ResponseWriter, r *http.Request) {
 		TaskID:        uuidToString(sent.Task.ID),
 		CreatedAt:     timestampToString(sent.Message.CreatedAt),
 	})
-	h.publishChat(protocol.EventChatMessage, workspaceID, "agent", actorID, parentIDString, protocol.ChatMessagePayload{
+	h.publishChatWithSource(r.Context(), protocol.EventChatMessage, workspaceID, "agent", actorID, parentIDString, protocol.ChatMessagePayload{
 		ChatSessionID: parentIDString,
 		MessageID:     uuidToString(card.ID),
 		Role:          "assistant",
@@ -414,6 +416,7 @@ func (h *Handler) writeSpawnedSession(w http.ResponseWriter, r *http.Request, se
 // chat appeared.
 func (h *Handler) refuseChatSpawn(w http.ResponseWriter, r *http.Request, parent db.ChatSession, refusal *agentSpawnRefusal) {
 	msg, err := h.Queries.CreateChatMessage(r.Context(), db.CreateChatMessageParams{
+		ViaBotID: botsource.FromContext(r.Context()).ID, ViaBotName: pgtype.Text{String: botsource.FromContext(r.Context()).Name, Valid: botsource.FromContext(r.Context()).ID.Valid},
 		ID:            dbid.NewV7(),
 		ChatSessionID: parent.ID,
 		Role:          "assistant",
@@ -424,7 +427,7 @@ func (h *Handler) refuseChatSpawn(w http.ResponseWriter, r *http.Request, parent
 		slog.Warn("chat spawn refusal card failed", "parent_session_id", uuidToString(parent.ID), "error", err)
 	} else {
 		parentID := uuidToString(parent.ID)
-		h.publishChat(protocol.EventChatMessage, uuidToString(parent.WorkspaceID), "agent", "", parentID, protocol.ChatMessagePayload{
+		h.publishChatWithSource(r.Context(), protocol.EventChatMessage, uuidToString(parent.WorkspaceID), "agent", "", parentID, protocol.ChatMessagePayload{
 			ChatSessionID: parentID,
 			MessageID:     uuidToString(msg.ID),
 			Role:          "assistant",
