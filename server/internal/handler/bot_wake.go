@@ -131,8 +131,8 @@ func validateWakeURL(ctx context.Context, raw string) (*url.URL, error) {
 	return u, nil
 }
 
-// Authenticate the PAT itself, not just its inherited X-User-ID. Cache hits
-// on the normal auth middleware deliberately carry only the owner's identity.
+// Revalidate the PAT itself, independently of its inherited owner identity.
+// Bot provenance never grants administration of another Bot.
 func (h *Handler) authorizeWake(w http.ResponseWriter, r *http.Request) (db.PersonalAccessToken, bool) {
 	var zero db.PersonalAccessToken
 	user, ok := requireUserID(w, r)

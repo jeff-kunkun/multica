@@ -116,7 +116,9 @@ summary (event type + current title, at most 180 runes), authenticated API url,
 attachments [{url,size_bytes,sha256}]. No comment/chat body. Headers:
 Content-Type application/json, Authorization (exact configured value),
 X-Multica-Event-ID. URLs point to authenticated API paths, never signed storage
-capabilities. Legacy attachments without a recorded digest are omitted from the
+capabilities. `parent_id` identifies the containing issue/chat; `source_id`
+identifies the triggering comment/message (or issue/summon for lifecycle events).
+For a threaded comment reply, use the source comment ID, not the container ID. Legacy attachments without a recorded digest are omitted from the
 push and can be fetched via the normal authorized metadata route.
 
 ## Secrets and network
