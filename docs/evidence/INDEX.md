@@ -47,4 +47,4 @@
 
 - DENE-1803：工作区全景聚合接口、CLI 与共享设置入口；[验收附件](https://ai.ferryway.cc/api/attachments/01a12a17-15bf-79fb-8d0f-bcd0526d52f6/download)含 375/390/768/1280 实页截图、筛选与刷新请求记录、真实 Bot 钥匙接口测试和本地 CLI 数量对照。完整/精简 JSON 为 3457/1730 字节（隔离测试工作区）。
 
-- DENE-1808：可托管聊天代发、新连通默认开托管（旧连通不变）；[桌面/手机 HTML 预览附件](https://ai.ferryway.cc/api/attachments/01a12a2c-418e-78c0-bef9-e084235a21f1/download)。[验证记录与剩余验收](DENE-1808/README.md)；预览不代替真实页面验收，WD 线上验收需发布含本功能 CLI 的新测试版。
+- DENE-1808：可托管聊天代发、新连通默认开托管（旧连通不变）；[桌面/手机 HTML 预览附件](https://ai.ferryway.cc/api/attachments/01a12a2c-418e-78c0-bef9-e084235a21f1/download)。[验证记录与剩余验收](DENE-1808/README.md)：已补真实设置/聊天四档截图与开关提交；原生设备缺口保留，WD 线上验收需发布含本功能 CLI 的新测试版。
