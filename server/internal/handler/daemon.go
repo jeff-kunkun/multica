@@ -2505,7 +2505,9 @@ func (h *Handler) finalizeClaimDelivery(
 		if aerr != nil {
 			return fmt.Errorf("re-read agent for delivery authorization: %w", aerr)
 		}
-		if agent.RuntimeID != task.RuntimeID {
+		// Same rule as the SQL claim fence and buildClaimedTaskResponse: the
+		// agent's bound runtime or its explicit standby may receive the task.
+		if !service.AgentMayRunOnRuntime(agent, task.RuntimeID) {
 			return &service.ClaimDeliveryAuthzError{
 				Reason: "error_agent_runtime_changed",
 				Detail: "agent runtime changed before delivery",
@@ -2977,8 +2979,10 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 	// The SQL claim narrows candidates and repeats the access predicate before
 	// changing task state, but Agent mutations do not stay locked through HTTP
 	// response assembly. Recheck the freshly loaded Agent here so a rebind or
-	// owner change that committed after the claim cannot reach the daemon.
-	if agent.RuntimeID != task.RuntimeID {
+	// owner change that committed after the claim cannot reach the daemon. The
+	// agent's explicit standby runtime passes this check (DENE-1887); clearing
+	// the standby after the claim fails it like a rebind.
+	if !service.AgentMayRunOnRuntime(agent, task.RuntimeID) {
 		slog.Warn("daemon claim: agent runtime changed before delivery; refusing dispatch",
 			"task_id", uuidToString(task.ID),
 			"agent_id", uuidToString(task.AgentID),

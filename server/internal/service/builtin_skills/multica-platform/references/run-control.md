@@ -129,7 +129,13 @@ SMS to relay, a "stop now". It changes three things and nothing else:
   `fallback_runtime_id` set and that runtime is online, the task is dispatched
   there instead; the response says `fallback_runtime: true`. A standby must
   belong to the same owner and the same provider as the primary (server
-  enforced; see `agents.md`).
+  enforced; see `agents.md`). The standby's daemon claims the turn through
+  the ordinary poll (single or batch) and starts it like any other task; the
+  same eligibility rule — the agent's bound runtime or its configured
+  standby — is applied at claim, at response build and in the delivery
+  transaction, so clearing the standby or rebinding the agent while the turn
+  is in flight fails it with `invalid_task_identity` instead of handing it
+  to a machine the agent no longer names.
 
 ```bash
 multica chat send --session <id> --urgent "验证码 482913，请立刻填入" --output json

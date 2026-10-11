@@ -4101,7 +4101,10 @@ func (s *TaskService) claimTask(ctx context.Context, agentID, runtimeID pgtype.U
 		// before its state transition; the claim handler then rechecks the freshly
 		// loaded Agent before returning any payload. Runtime mutation teardown is
 		// responsible for serializing and settling the remaining queued rows.
-		if runtimeID.Valid && agent.RuntimeID != runtimeID {
+		// The agent's explicit standby runtime is eligible too (DENE-1887): an
+		// urgent turn addressed to it is otherwise claimable in SQL but dropped
+		// here, and the daemon polls forever against {"task": null}.
+		if runtimeID.Valid && !AgentMayRunOnRuntime(agent, runtimeID) {
 			outcome = "runtime_mismatch"
 			return nil
 		}
