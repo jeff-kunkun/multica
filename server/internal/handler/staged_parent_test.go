@@ -54,51 +54,61 @@ func TestStageCloseOnUnheldParentAdvancesUnderSystemRule(t *testing.T) {
 }
 
 // DENE-1777: an agent that leaves the parent's executor empty and adds a
-// staged sub-issue gets a coordinator on that parent, and a parked parent
-// starts coordinating like a plan root. No run starts on the parent.
+// staged sub-issue gets a coordinator on that parent, whether the parent was
+// created with the default todo, parked in backlog, or already coordinating.
+// The parent coordinates (in_progress) and no run starts on it.
 func TestAgentStagedChildSeatsTheParent(t *testing.T) {
 	if testHandler == nil || testPool == nil {
 		t.Skip("database not available")
 	}
 	ctx := context.Background()
-	parent := createIssueHTTP(t, "staged parent "+time.Now().Format(time.RFC3339Nano), "backlog")
-	t.Cleanup(func() { cleanupChildDoneIssue(parent.ID) })
 	agentID := handlerTestAgentID(t)
-	if _, err := testPool.Exec(ctx, `UPDATE issue SET creator_type = 'agent', creator_id = $2 WHERE id = $1`, parent.ID, agentID); err != nil {
-		t.Fatal(err)
-	}
+	for _, created := range []string{"", "backlog", "in_progress"} {
+		t.Run("status="+created, func(t *testing.T) {
+			// An empty status is CreateIssue's default (todo).
+			parent := createIssueHTTP(t, "staged parent "+time.Now().Format(time.RFC3339Nano), created)
+			t.Cleanup(func() { cleanupChildDoneIssue(parent.ID) })
+			if created == "" && parent.Status != "todo" {
+				t.Fatalf("default parent status = %q, want todo", parent.Status)
+			}
+			if _, err := testPool.Exec(ctx, `UPDATE issue SET creator_type = 'agent', creator_id = $2 WHERE id = $1`, parent.ID, agentID); err != nil {
+				t.Fatal(err)
+			}
 
-	w := httptest.NewRecorder()
-	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
-		"title": "stage one", "status": "todo", "parent_issue_id": parent.ID, "stage": 1,
-	})
-	asAgent(t, req, parent.ID)
-	testHandler.CreateIssue(w, req)
-	if w.Code != http.StatusCreated {
-		t.Fatalf("create staged child: %d %s", w.Code, w.Body.String())
-	}
-	var child IssueResponse
-	if err := json.NewDecoder(w.Body).Decode(&child); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { cleanupChildDoneIssue(child.ID) })
+			w := httptest.NewRecorder()
+			req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
+				"title": "stage one", "status": "todo", "parent_issue_id": parent.ID, "stage": 1,
+			})
+			asAgent(t, req, parent.ID)
+			ownTask := req.Header.Get("X-Task-ID")
+			testHandler.CreateIssue(w, req)
+			if w.Code != http.StatusCreated {
+				t.Fatalf("create staged child: %d %s", w.Code, w.Body.String())
+			}
+			var child IssueResponse
+			if err := json.NewDecoder(w.Body).Decode(&child); err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { cleanupChildDoneIssue(child.ID) })
 
-	var status string
-	var assigneeType, assigneeID *string
-	if err := testPool.QueryRow(ctx, `SELECT status, assignee_type, assignee_id::text FROM issue WHERE id = $1`, parent.ID).Scan(&status, &assigneeType, &assigneeID); err != nil {
-		t.Fatal(err)
-	}
-	if status != "in_progress" {
-		t.Fatalf("parent status = %q, want in_progress", status)
-	}
-	if assigneeType == nil || *assigneeType != "agent" || assigneeID == nil || *assigneeID != agentID {
-		t.Fatalf("parent assignee = %v/%v, want the creating agent", assigneeType, assigneeID)
-	}
-	var runs int
-	if err := testPool.QueryRow(ctx, `SELECT count(*) FROM agent_task_queue WHERE issue_id = $1 AND status = 'queued'`, parent.ID).Scan(&runs); err != nil {
-		t.Fatal(err)
-	}
-	if runs != 0 {
-		t.Fatalf("parent got %d queued runs, want none", runs)
+			var status string
+			var assigneeType, assigneeID *string
+			if err := testPool.QueryRow(ctx, `SELECT status, assignee_type, assignee_id::text FROM issue WHERE id = $1`, parent.ID).Scan(&status, &assigneeType, &assigneeID); err != nil {
+				t.Fatal(err)
+			}
+			if status != "in_progress" {
+				t.Fatalf("parent status = %q, want in_progress", status)
+			}
+			if assigneeType == nil || *assigneeType != "agent" || assigneeID == nil || *assigneeID != agentID {
+				t.Fatalf("parent assignee = %v/%v, want the creating agent", assigneeType, assigneeID)
+			}
+			var runs int
+			if err := testPool.QueryRow(ctx, `SELECT count(*) FROM agent_task_queue WHERE issue_id = $1 AND id <> $2`, parent.ID, ownTask).Scan(&runs); err != nil {
+				t.Fatal(err)
+			}
+			if runs != 0 {
+				t.Fatalf("parent got %d runs, want none", runs)
+			}
+		})
 	}
 }

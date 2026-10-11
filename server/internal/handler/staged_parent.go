@@ -18,10 +18,10 @@ import (
 // seatStagedParent gives an agent-created parent nobody holds a coordinator
 // once it gains a staged sub-issue (DENE-1777). Agents leave the executor
 // empty for routing, but routing only seats a root that coordinates
-// (in_progress) — a parent left in backlog was never seated, and a stage
-// close on it woke nobody. The root moves to in_progress like a plan root;
-// with routing on, routing picks the coordinator, otherwise the agent that
-// created the sub-issue holds it. No run starts: the stage barrier wakes it.
+// (in_progress) — a parent left in backlog or todo was never seated, and a
+// stage close on it woke nobody. The root moves to in_progress like a plan
+// root; with routing on, routing picks the coordinator, otherwise the agent
+// that created the sub-issue holds it. No run starts: the stage barrier wakes it.
 func (h *Handler) seatStagedParent(r *http.Request, workspaceID string, child db.Issue, creatorType, creatorID string) {
 	if creatorType != "agent" || !child.ParentIssueID.Valid || !child.Stage.Valid {
 		return

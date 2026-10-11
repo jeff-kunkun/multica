@@ -3450,7 +3450,7 @@ func (q *Queries) ReviewRoundRunState(ctx context.Context, arg ReviewRoundRunSta
 
 const seatStagedParent = `-- name: SeatStagedParent :one
 UPDATE issue AS i SET
-    status = CASE WHEN i.status = 'backlog' THEN 'in_progress' ELSE i.status END,
+    status = CASE WHEN i.status IN ('backlog', 'todo') THEN 'in_progress' ELSE i.status END,
     assignee_type = COALESCE($1::text, i.assignee_type),
     assignee_id = COALESCE($2::uuid, i.assignee_id),
     assignee_source = CASE WHEN $2::uuid IS NULL THEN i.assignee_source ELSE 'agent' END,
@@ -3459,7 +3459,7 @@ UPDATE issue AS i SET
     updated_at = now()
 WHERE i.id = $3 AND i.workspace_id = $4
   AND i.parent_issue_id IS NULL AND i.creator_type = 'agent' AND i.assignee_id IS NULL
-  AND (i.status = 'backlog' OR (i.status = 'in_progress' AND $2::uuid IS NOT NULL))
+  AND (i.status IN ('backlog', 'todo') OR (i.status = 'in_progress' AND $2::uuid IS NOT NULL))
 RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, triage_state, reviewer_type, reviewer_id, visibility, assignee_source, assignee_source_user_id, assignee_quote, progress_text, progress_source, progress_tone, progress_author_type, progress_author_id, progress_updated_at, duplicate_of_issue_id, domain_id, origin_chat_session_id
 `
 

@@ -606,7 +606,7 @@ RETURNING *;
 -- plan root, and the executor slot is filled only when an assignee is given
 -- and the slot is still empty. No run starts from this write.
 UPDATE issue AS i SET
-    status = CASE WHEN i.status = 'backlog' THEN 'in_progress' ELSE i.status END,
+    status = CASE WHEN i.status IN ('backlog', 'todo') THEN 'in_progress' ELSE i.status END,
     assignee_type = COALESCE(sqlc.narg('assignee_type')::text, i.assignee_type),
     assignee_id = COALESCE(sqlc.narg('assignee_id')::uuid, i.assignee_id),
     assignee_source = CASE WHEN sqlc.narg('assignee_id')::uuid IS NULL THEN i.assignee_source ELSE 'agent' END,
@@ -615,7 +615,7 @@ UPDATE issue AS i SET
     updated_at = now()
 WHERE i.id = sqlc.arg('id') AND i.workspace_id = sqlc.arg('workspace_id')
   AND i.parent_issue_id IS NULL AND i.creator_type = 'agent' AND i.assignee_id IS NULL
-  AND (i.status = 'backlog' OR (i.status = 'in_progress' AND sqlc.narg('assignee_id')::uuid IS NOT NULL))
+  AND (i.status IN ('backlog', 'todo') OR (i.status = 'in_progress' AND sqlc.narg('assignee_id')::uuid IS NOT NULL))
 RETURNING *;
 
 -- name: PromoteBacklogIssueToTodo :one
