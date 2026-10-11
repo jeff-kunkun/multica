@@ -110,6 +110,20 @@ export interface TabSession {
    * Pinned tabs are never grouped. Membership is persisted with the tab.
    */
   groupId: string | null;
+  /**
+   * Project the tab's page belongs to, resolved by the tab bar from the query
+   * cache (chat session, issue, project page). `null` means the page has no
+   * project; `undefined` means it has not been resolved yet. Persisted so a
+   * restart keeps tabs in their project groups before caches refill.
+   */
+  projectId?: string | null;
+  /**
+   * The user placed this tab by hand (into a group, out of one, or across
+   * groups). Project auto-grouping never moves a locked tab again.
+   */
+  groupLocked: boolean;
+  /** Monotonic open order; "Sort by project" lays a group's tabs out by it. */
+  openedAt: number;
 }
 
 /**
@@ -132,11 +146,22 @@ export type TabStripGroupColor = (typeof TAB_STRIP_GROUP_COLORS)[number];
 
 export interface TabStripGroup {
   id: string;
-  /** Empty string renders as the placeholder "Group". */
+  /**
+   * Empty string renders as the placeholder "Group". A project group keeps
+   * the project's last known title here as a cold-start label.
+   */
   name: string;
   collapsed: boolean;
   color: TabStripGroupColor;
+  /** Set on groups the project auto-grouping owns; null for hand-made groups. */
+  projectId: string | null;
 }
+
+/**
+ * How the strip forms groups. "project" (default) files each tab into its
+ * project's group as its page resolves; "manual" leaves grouping to the user.
+ */
+export type TabGroupMode = "project" | "manual";
 
 /** Back-compat alias — external consumers still say `Tab`. */
 export type Tab = TabSession;
@@ -204,6 +229,9 @@ interface TabStore {
    * Deliberately NOT persisted.
    */
   mountGeneration: number;
+
+  /** Strip grouping preference; one setting for every workspace. */
+  tabGroupMode: TabGroupMode;
 
   /**
    * Switch to a workspace.
@@ -338,6 +366,30 @@ interface TabStore {
   removeTabFromGroup: (tabId: string) => void;
   /** Dissolve a strip group. Its tabs stay open, in the same order, ungrouped. */
   ungroupTabs: (groupId: string) => void;
+  /**
+   * Record which project each tab's page belongs to (`null`: none). Tabs
+   * absent from `resolved` are still unresolved and left alone. In project
+   * mode a tab whose project changed is filed at the tail of that project's
+   * group (created after the existing groups when missing), or at the end of
+   * the strip when it has no project. `titles` refreshes project group labels.
+   */
+  syncTabProjects: (
+    slug: string,
+    resolved: Record<string, string | null>,
+    titles: Record<string, string>,
+  ) => void;
+  /** Switch grouping mode. Turning project mode on files every known tab. */
+  setTabGroupMode: (mode: TabGroupMode) => void;
+  /**
+   * One-shot tidy of the active workspace: groups ordered by name, each
+   * group's tabs by open order, ungrouped tabs after the groups.
+   */
+  arrangeTabsByProject: () => void;
+  /**
+   * Drag a whole strip group to where `overTabId` sits (that tab's group, or
+   * that loose tab). Groups move as a block; pinned tabs are never crossed.
+   */
+  moveTabGroup: (groupId: string, overTabId: string) => void;
   /**
    * After the workspace list arrives/changes (login, realtime delete), drop
    * any tab group whose slug is no longer in `validSlugs`, and repoint
@@ -530,6 +582,14 @@ function createId(): string {
   return createSafeId();
 }
 
+let lastOpenedAt = 0;
+
+/** Wall-clock open stamp, bumped so two opens in one millisecond stay ordered. */
+function nextOpenedAt(): number {
+  lastOpenedAt = Math.max(Date.now(), lastOpenedAt + 1);
+  return lastOpenedAt;
+}
+
 function makeSession(url: string, title: string): TabSession {
   return {
     id: createId(),
@@ -540,6 +600,8 @@ function makeSession(url: string, title: string): TabSession {
     history: { stack: [url], index: 0 },
     memento: emptyMemento(),
     groupId: null,
+    groupLocked: false,
+    openedAt: nextOpenedAt(),
   };
 }
 
@@ -766,9 +828,138 @@ export function sanitizeStripGroups(value: unknown): TabStripGroup[] {
       color: isStripGroupColor(raw.color)
         ? raw.color
         : TAB_STRIP_GROUP_COLORS[groups.length % TAB_STRIP_GROUP_COLORS.length],
+      projectId:
+        typeof raw.projectId === "string" && raw.projectId.length > 0
+          ? raw.projectId
+          : null,
     });
   }
   return groups;
+}
+
+/**
+ * A project's group color, derived from its id so the same project paints
+ * the same color in every workspace session and after every restart.
+ */
+export function projectGroupColor(projectId: string): TabStripGroupColor {
+  let hash = 0;
+  for (let i = 0; i < projectId.length; i++) {
+    hash = (hash * 31 + projectId.charCodeAt(i)) | 0;
+  }
+  return TAB_STRIP_GROUP_COLORS[Math.abs(hash) % TAB_STRIP_GROUP_COLORS.length];
+}
+
+function lastIndexWhere<T>(items: T[], test: (item: T) => boolean): number {
+  for (let i = items.length - 1; i >= 0; i--) {
+    if (test(items[i])) return i;
+  }
+  return -1;
+}
+
+/**
+ * File one tab by its resolved project (project mode). A tab with a project
+ * goes to the tail of that project's group, which is created after the
+ * existing groups when missing. A tab without a project leaves its project
+ * group for the end of the strip. Pinned, hand-placed, unresolved, and
+ * already-filed tabs are returned untouched.
+ */
+function placeTabByProject(
+  tabs: TabSession[],
+  groups: TabStripGroup[],
+  tabId: string,
+  titles: Record<string, string> = {},
+): { tabs: TabSession[]; groups: TabStripGroup[] } {
+  const index = tabs.findIndex((tab) => tab.id === tabId);
+  const tab = tabs[index];
+  if (!tab || tab.pinned || tab.groupLocked || tab.projectId === undefined) {
+    return { tabs, groups };
+  }
+  const current = tab.groupId
+    ? groups.find((group) => group.id === tab.groupId)
+    : undefined;
+  // A hand-made group is the user's; only a locked tab should sit there, but
+  // never pull a tab out of one regardless.
+  if (current && !current.projectId) return { tabs, groups };
+
+  let nextGroups = groups;
+  let targetId: string | null = null;
+  if (tab.projectId) {
+    const existing = groups.find((group) => group.projectId === tab.projectId);
+    if (existing) {
+      targetId = existing.id;
+    } else {
+      const created: TabStripGroup = {
+        id: createId(),
+        name: titles[tab.projectId] ?? "",
+        collapsed: false,
+        color: projectGroupColor(tab.projectId),
+        projectId: tab.projectId,
+      };
+      nextGroups = [...groups, created];
+      targetId = created.id;
+    }
+  }
+
+  if (targetId === tab.groupId) {
+    if (targetId !== null) return { tabs, groups: nextGroups };
+    // Already loose: only move when it sits in front of a group.
+    if (!tabs.slice(index + 1).some((candidate) => candidate.groupId)) {
+      return { tabs, groups: nextGroups };
+    }
+  }
+
+  const without = tabs.filter((candidate) => candidate.id !== tabId);
+  let insertAt = without.length;
+  if (targetId) {
+    const lastMember = lastIndexWhere(
+      without,
+      (candidate) => candidate.groupId === targetId,
+    );
+    insertAt =
+      lastMember >= 0
+        ? lastMember + 1
+        : Math.max(
+            lastIndexWhere(without, (candidate) => !!candidate.groupId) + 1,
+            pinnedBoundary(without),
+          );
+  }
+  return {
+    tabs: [
+      ...without.slice(0, insertAt),
+      { ...tab, groupId: targetId },
+      ...without.slice(insertAt),
+    ],
+    groups: nextGroups,
+  };
+}
+
+/** Place every resolved tab of one workspace strip (mode switched on). */
+function placeAllByProject(
+  tabs: TabSession[],
+  groups: TabStripGroup[],
+): { tabs: TabSession[]; groups: TabStripGroup[] } {
+  let next = { tabs, groups };
+  for (const tab of tabs) {
+    next = placeTabByProject(next.tabs, next.groups, tab.id);
+  }
+  return next;
+}
+
+/**
+ * Unpinned tabs as drag blocks: each strip group is one block, each loose
+ * tab its own block. Assumes the strip is packed (groups are contiguous).
+ */
+function stripBlocks(unpinned: TabSession[]): TabSession[][] {
+  const blocks: TabSession[][] = [];
+  for (const tab of unpinned) {
+    const last = blocks.at(-1);
+    if (tab.groupId && last && last[0].groupId === tab.groupId) {
+      last.push(tab);
+    } else {
+      blocks.push([tab]);
+    }
+  }
+  return blocks;
 }
 
 /**
@@ -866,13 +1057,23 @@ function reconcileGroup(
     if (recentTabIds.includes(id)) continue;
     recentTabIds.push(id);
   }
+  // The active tab's group never stays collapsed: the tab would vanish from
+  // the strip while you are on it.
+  const activeGroupId = attached.tabs.find((t) => t.id === activeTabId)?.groupId;
+  const groups =
+    activeGroupId &&
+    attached.groups.some((group) => group.id === activeGroupId && group.collapsed)
+      ? attached.groups.map((group) =>
+          group.id === activeGroupId ? { ...group, collapsed: false } : group,
+        )
+      : attached.groups;
   return {
     tabs: attached.tabs,
     activeTabId,
     browsingHistory: prev?.browsingHistory ?? [],
     browsingHistoryTitles: prev?.browsingHistoryTitles ?? {},
     recentTabIds,
-    groups: attached.groups,
+    groups,
   };
 }
 
@@ -959,6 +1160,7 @@ export const useTabStore = create<TabStore>()(
       activeWorkspaceSlug: null,
       byWorkspace: {},
       mountGeneration: 0,
+      tabGroupMode: "project",
 
       switchWorkspace(slug, openPath) {
         // Defensive no-op if slug is empty/invalid — callers like the
@@ -1473,7 +1675,7 @@ export const useTabStore = create<TabStore>()(
           const nextGroupId = target.groupId ?? null;
           return tab.groupId === nextGroupId
             ? tab
-            : { ...tab, groupId: nextGroupId };
+            : { ...tab, groupId: nextGroupId, groupLocked: true };
         });
         set({
           byWorkspace: {
@@ -1514,11 +1716,20 @@ export const useTabStore = create<TabStore>()(
           nextTab,
           ...withoutCurrent.slice(insertAt),
         ];
+        // An unpinned tab rejoins its project group in project mode.
+        const placed =
+          current.pinned && get().tabGroupMode === "project"
+            ? placeTabByProject(nextTabs, group.groups, tabId)
+            : { tabs: nextTabs, groups: group.groups };
 
         set({
           byWorkspace: {
             ...byWorkspace,
-            [slug]: reconcileGroup(group, nextTabs, group.activeTabId),
+            [slug]: reconcileGroup(
+              { ...group, groups: placed.groups },
+              placed.tabs,
+              group.activeTabId,
+            ),
           },
         });
       },
@@ -1539,9 +1750,10 @@ export const useTabStore = create<TabStore>()(
             TAB_STRIP_GROUP_COLORS[
               group.groups.length % TAB_STRIP_GROUP_COLORS.length
             ],
+          projectId: null,
         };
         const nextTabs = group.tabs.slice();
-        nextTabs[index] = { ...current, groupId: id };
+        nextTabs[index] = { ...current, groupId: id, groupLocked: true };
         set({
           byWorkspace: {
             ...byWorkspace,
@@ -1581,6 +1793,12 @@ export const useTabStore = create<TabStore>()(
           const group = byWorkspace[slug];
           const index = group.groups.findIndex((candidate) => candidate.id === groupId);
           if (index < 0) continue;
+          // The group holding the active tab cannot be collapsed (see
+          // reconcileGroup) — the tab you are on would disappear.
+          const holdsActive = group.tabs.some(
+            (tab) => tab.id === group.activeTabId && tab.groupId === groupId,
+          );
+          if (!group.groups[index].collapsed && holdsActive) return;
           const groups = group.groups.slice();
           groups[index] = {
             ...groups[index],
@@ -1614,7 +1832,7 @@ export const useTabStore = create<TabStore>()(
         }
         const nextTabs = [
           ...without.slice(0, insertAt),
-          { ...current, groupId },
+          { ...current, groupId, groupLocked: true },
           ...without.slice(insertAt),
         ];
         const groups = group.groups.map((candidate) =>
@@ -1642,7 +1860,7 @@ export const useTabStore = create<TabStore>()(
         const current = group.tabs[index];
         if (!current.groupId) return;
         const nextTabs = group.tabs.slice();
-        nextTabs[index] = { ...current, groupId: null };
+        nextTabs[index] = { ...current, groupId: null, groupLocked: true };
         set({
           byWorkspace: {
             ...byWorkspace,
@@ -1657,7 +1875,9 @@ export const useTabStore = create<TabStore>()(
           const group = byWorkspace[slug];
           if (!group.groups.some((candidate) => candidate.id === groupId)) continue;
           const nextTabs = group.tabs.map((tab) =>
-            tab.groupId === groupId ? { ...tab, groupId: null } : tab,
+            tab.groupId === groupId
+              ? { ...tab, groupId: null, groupLocked: true }
+              : tab,
           );
           set({
             byWorkspace: {
@@ -1667,6 +1887,128 @@ export const useTabStore = create<TabStore>()(
           });
           return;
         }
+      },
+
+      syncTabProjects(slug, resolved, titles) {
+        const { byWorkspace, tabGroupMode } = get();
+        const group = byWorkspace[slug];
+        if (!group) return;
+        const changed: string[] = [];
+        let tabs = group.tabs.map((tab) => {
+          if (!Object.hasOwn(resolved, tab.id)) return tab;
+          const projectId = resolved[tab.id];
+          if (tab.projectId === projectId) return tab;
+          changed.push(tab.id);
+          return { ...tab, projectId };
+        });
+        let groupsChanged = false;
+        let groups = group.groups.map((candidate) => {
+          const title = candidate.projectId ? titles[candidate.projectId] : undefined;
+          if (!title || title === candidate.name) return candidate;
+          groupsChanged = true;
+          return { ...candidate, name: title.slice(0, 80) };
+        });
+        if (changed.length === 0 && !groupsChanged) return;
+        if (tabGroupMode === "project") {
+          for (const tabId of changed) {
+            ({ tabs, groups } = placeTabByProject(tabs, groups, tabId, titles));
+          }
+        }
+        set({
+          byWorkspace: {
+            ...byWorkspace,
+            [slug]: reconcileGroup(
+              { ...group, groups },
+              tabs,
+              group.activeTabId,
+            ),
+          },
+        });
+      },
+
+      setTabGroupMode(mode) {
+        const { byWorkspace, tabGroupMode } = get();
+        if (mode === tabGroupMode) return;
+        if (mode === "manual") {
+          set({ tabGroupMode: mode });
+          return;
+        }
+        const nextByWorkspace: Record<string, WorkspaceTabGroup> = {};
+        for (const [slug, group] of Object.entries(byWorkspace)) {
+          const placed = placeAllByProject(group.tabs, group.groups);
+          nextByWorkspace[slug] = reconcileGroup(
+            { ...group, groups: placed.groups },
+            placed.tabs,
+            group.activeTabId,
+          );
+        }
+        set({ tabGroupMode: mode, byWorkspace: nextByWorkspace });
+      },
+
+      arrangeTabsByProject() {
+        const { activeWorkspaceSlug, byWorkspace } = get();
+        if (!activeWorkspaceSlug) return;
+        const group = byWorkspace[activeWorkspaceSlug];
+        if (!group) return;
+        const boundary = pinnedBoundary(group.tabs);
+        const blocks = stripBlocks(group.tabs.slice(boundary));
+        const groupBlocks = blocks.filter((block) => block[0].groupId);
+        const looseTabs = blocks
+          .filter((block) => !block[0].groupId)
+          .flat();
+        const nameOf = (block: TabSession[]) =>
+          group.groups.find((candidate) => candidate.id === block[0].groupId)
+            ?.name ?? "";
+        const sortedGroups = groupBlocks
+          .slice()
+          .sort((a, b) => nameOf(a).localeCompare(nameOf(b)))
+          .map((block) =>
+            block.slice().sort((a, b) => a.openedAt - b.openedAt),
+          );
+        const nextTabs = [
+          ...group.tabs.slice(0, boundary),
+          ...sortedGroups.flat(),
+          ...looseTabs,
+        ];
+        if (nextTabs.every((tab, index) => tab === group.tabs[index])) return;
+        set({
+          byWorkspace: {
+            ...byWorkspace,
+            [activeWorkspaceSlug]: reconcileGroup(
+              group,
+              nextTabs,
+              group.activeTabId,
+            ),
+          },
+        });
+      },
+
+      moveTabGroup(groupId, overTabId) {
+        const { activeWorkspaceSlug, byWorkspace } = get();
+        if (!activeWorkspaceSlug) return;
+        const group = byWorkspace[activeWorkspaceSlug];
+        if (!group) return;
+        const boundary = pinnedBoundary(group.tabs);
+        const blocks = stripBlocks(group.tabs.slice(boundary));
+        const from = blocks.findIndex((block) => block[0].groupId === groupId);
+        const to = blocks.findIndex((block) =>
+          block.some((tab) => tab.id === overTabId),
+        );
+        if (from < 0 || to < 0 || from === to) return;
+        const nextTabs = [
+          ...group.tabs.slice(0, boundary),
+          ...arrayMove(blocks, from, to).flat(),
+        ];
+        set({
+          byWorkspace: {
+            ...byWorkspace,
+            [activeWorkspaceSlug]: reconcileGroup(
+              group,
+              nextTabs,
+              group.activeTabId,
+            ),
+          },
+        });
       },
 
       validateWorkspaceSlugs(validSlugs) {
@@ -1717,7 +2059,7 @@ export const useTabStore = create<TabStore>()(
     }),
     {
       name: "multica_tabs",
-      version: 6,
+      version: 7,
       storage: createJSONStorage(() => createPersistStorage(defaultStorage)),
       migrate: (persistedState, version) => {
         // v1 → v2: flat `tabs` array → per-workspace grouping.
@@ -1749,10 +2091,16 @@ export const useTabStore = create<TabStore>()(
         if (version < 6 && state && typeof state === "object") {
           state = migrateV5ToV6(state as V5Persisted);
         }
-        return state as V6Persisted;
+        // v6 → v7: project auto-grouping becomes the default. Groups the
+        // user already built stay theirs (tabs locked, groups hand-made).
+        if (version < 7 && state && typeof state === "object") {
+          state = migrateV6ToV7(state as V6Persisted);
+        }
+        return state as V7Persisted;
       },
       partialize: (state) => ({
         activeWorkspaceSlug: state.activeWorkspaceSlug,
+        tabGroupMode: state.tabGroupMode,
         // mountGeneration is deliberately excluded: reload pressure must
         // never persist across restarts.
         byWorkspace: Object.fromEntries(
@@ -1773,6 +2121,9 @@ export const useTabStore = create<TabStore>()(
                 title: t.title,
                 pinned: t.pinned,
                 groupId: t.groupId,
+                projectId: t.projectId,
+                groupLocked: t.groupLocked,
+                openedAt: t.openedAt,
                 history: t.history,
                 memento: t.memento,
               })),
@@ -1790,6 +2141,7 @@ export const useTabStore = create<TabStore>()(
 interface PersistedTabState {
   activeWorkspaceSlug: string | null;
   byWorkspace: Record<string, WorkspaceTabGroup>;
+  tabGroupMode?: TabGroupMode;
 }
 
 /**
@@ -1808,8 +2160,10 @@ export function mergePersistedTabs<T extends PersistedTabState>(
   persistedState: unknown,
   currentState: T,
 ): T {
-  const persisted = persistedState as Partial<V6Persisted> | undefined;
+  const persisted = persistedState as Partial<V7Persisted> | undefined;
   if (!persisted?.byWorkspace) return currentState;
+  const tabGroupMode: TabGroupMode =
+    persisted.tabGroupMode === "manual" ? "manual" : "project";
 
   const byWorkspace: Record<string, WorkspaceTabGroup> = {};
   for (const [slug, pGroup] of Object.entries(persisted.byWorkspace)) {
@@ -1841,6 +2195,14 @@ export function mergePersistedTabs<T extends PersistedTabState>(
         title: pTab.title,
         pinned: pTab.pinned === true,
         groupId: typeof pTab.groupId === "string" ? pTab.groupId : null,
+        projectId:
+          typeof pTab.projectId === "string" || pTab.projectId === null
+            ? pTab.projectId
+            : undefined,
+        groupLocked: pTab.groupLocked === true,
+        // Payloads without a stamp keep their strip order as open order.
+        openedAt:
+          typeof pTab.openedAt === "number" ? pTab.openedAt : tabs.length,
         history: { stack, index },
         memento:
           pTab.memento && typeof pTab.memento.scroll === "object"
@@ -1896,7 +2258,7 @@ export function mergePersistedTabs<T extends PersistedTabState>(
       ? persisted.activeWorkspaceSlug
       : (Object.keys(byWorkspace)[0] ?? null);
 
-  return { ...currentState, byWorkspace, activeWorkspaceSlug };
+  return { ...currentState, byWorkspace, activeWorkspaceSlug, tabGroupMode };
 }
 
 function stepHistory(
@@ -2062,6 +2424,43 @@ interface V6PersistedGroup extends Omit<V5PersistedGroup, "tabs"> {
 interface V6Persisted {
   activeWorkspaceSlug: string | null;
   byWorkspace: Record<string, V6PersistedGroup>;
+}
+
+interface V7PersistedTab extends V6PersistedTab {
+  projectId?: string | null;
+  groupLocked?: boolean;
+  openedAt?: number;
+}
+
+interface V7PersistedGroup extends Omit<V6PersistedGroup, "tabs"> {
+  tabs: V7PersistedTab[];
+}
+
+interface V7Persisted {
+  activeWorkspaceSlug: string | null;
+  byWorkspace: Record<string, V7PersistedGroup>;
+  tabGroupMode?: TabGroupMode;
+}
+
+export function migrateV6ToV7(v6: V6Persisted): V7Persisted {
+  const byWorkspace: Record<string, V7PersistedGroup> = {};
+  for (const [slug, group] of Object.entries(v6.byWorkspace ?? {})) {
+    byWorkspace[slug] = {
+      ...group,
+      groups: sanitizeStripGroups(group.groups),
+      tabs: group.tabs.map((tab, index) => ({
+        ...tab,
+        // A tab the user already grouped by hand stays where they put it.
+        groupLocked: typeof tab.groupId === "string",
+        openedAt: index,
+      })),
+    };
+  }
+  return {
+    activeWorkspaceSlug: v6.activeWorkspaceSlug ?? null,
+    byWorkspace,
+    tabGroupMode: "project",
+  };
 }
 
 export function migrateV5ToV6(v5: V5Persisted): V6Persisted {

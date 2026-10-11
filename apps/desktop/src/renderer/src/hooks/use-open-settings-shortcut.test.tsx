@@ -27,6 +27,8 @@ function seedTabs() {
             title: "",
             pinned: false,
             groupId: null,
+            groupLocked: false,
+            openedAt: 0,
             history: { stack: ["/acme/issues"], index: 0 },
             memento: { scroll: {}, view: {} },
           },

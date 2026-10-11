@@ -23,6 +23,8 @@ function makeTab(index: number): TabSession {
     title: `Tab ${index}`,
     pinned: index === 1,
     groupId: null,
+    groupLocked: false,
+    openedAt: 0,
     history: { stack: [url, `${url}?view=detail`], index: 1 },
     memento: {
       scroll: { [`${url}::main`]: { top: index * 10, height: 1000 } },

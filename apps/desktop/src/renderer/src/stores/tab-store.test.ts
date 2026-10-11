@@ -9,6 +9,8 @@ import {
   migrateV3ToV4,
   migrateV4ToV5,
   migrateV5ToV6,
+  migrateV6ToV7,
+  projectGroupColor,
   mergePersistedTabs,
   useTabStore,
   getActiveTab,
@@ -1656,8 +1658,9 @@ describe("mergePersistedTabs (rehydration, MUL-4370)", () => {
     );
 
     const group = result.byWorkspace.acme;
+    // g1 holds the active tab, so it comes back expanded (DENE-1775).
     expect(group.groups).toEqual([
-      { id: "g1", name: "Plan", collapsed: true, color: "blue" },
+      { id: "g1", name: "Plan", collapsed: false, color: "blue", projectId: null },
     ]);
     expect(group.tabs.map((tab) => [tab.url, tab.groupId, tab.pinned])).toEqual([
       ["/acme/agents", null, true],
@@ -1864,5 +1867,239 @@ describe("migrateV5ToV6", () => {
     });
     expect(v6.byWorkspace.acme.groups).toEqual([]);
     expect(v6.byWorkspace.acme.tabs).toHaveLength(1);
+  });
+});
+
+describe("project auto-grouping (DENE-1775)", () => {
+  beforeEach(() => {
+    useTabStore.setState({ tabGroupMode: "project" });
+  });
+
+  function acme() {
+    return useTabStore.getState().byWorkspace.acme;
+  }
+  function idOf(url: string) {
+    return acme().tabs.find((tab) => tab.url === url)!.id;
+  }
+  function layout() {
+    const group = acme();
+    return group.tabs.map((tab) => {
+      const strip = group.groups.find((candidate) => candidate.id === tab.groupId);
+      return `${tab.url}@${strip ? strip.projectId ?? strip.name : "-"}`;
+    });
+  }
+  /** Seed issues + three chats, resolve chats to projects A, B, A. */
+  function seed() {
+    const store = useTabStore.getState();
+    store.switchWorkspace("acme");
+    store.addTab("/acme/chat?session=a1", "A · one");
+    store.addTab("/acme/chat/b1", "B · one");
+    store.addTab("/acme/projects/p-a", "Project A");
+    store.syncTabProjects(
+      "acme",
+      {
+        [idOf("/acme/issues")]: null,
+        [idOf("/acme/chat?session=a1")]: "p-a",
+        [idOf("/acme/chat/b1")]: "p-b",
+        [idOf("/acme/projects/p-a")]: "p-a",
+      },
+      { "p-a": "Alpha", "p-b": "Beta" },
+    );
+  }
+
+  it("groups tabs by project, project groups first, unprojected tabs last", () => {
+    seed();
+    expect(layout()).toEqual([
+      "/acme/chat?session=a1@p-a",
+      "/acme/projects/p-a@p-a",
+      "/acme/chat/b1@p-b",
+      "/acme/issues@-",
+    ]);
+    const groups = acme().groups;
+    expect(groups.map((group) => [group.projectId, group.name, group.color])).toEqual([
+      ["p-a", "Alpha", projectGroupColor("p-a")],
+      ["p-b", "Beta", projectGroupColor("p-b")],
+    ]);
+  });
+
+  it("files a newly resolved tab at its group's tail and new projects after existing groups", () => {
+    seed();
+    const store = useTabStore.getState();
+    store.addTab("/acme/chat/b2", "B · two");
+    store.addTab("/acme/chat/c1", "C · one");
+    store.syncTabProjects(
+      "acme",
+      { [idOf("/acme/chat/b2")]: "p-b", [idOf("/acme/chat/c1")]: "p-c" },
+      { "p-c": "Gamma" },
+    );
+    expect(layout()).toEqual([
+      "/acme/chat?session=a1@p-a",
+      "/acme/projects/p-a@p-a",
+      "/acme/chat/b1@p-b",
+      "/acme/chat/b2@p-b",
+      "/acme/chat/c1@p-c",
+      "/acme/issues@-",
+    ]);
+  });
+
+  it("keeps pinned tabs first and leaves them out of groups", () => {
+    const store = useTabStore.getState();
+    store.switchWorkspace("acme");
+    store.addTab("/acme/chat/a1", "chat");
+    const chatId = idOf("/acme/chat/a1");
+    store.togglePin(chatId);
+    store.syncTabProjects("acme", { [chatId]: "p-a" }, {});
+    expect(acme().tabs[0]).toMatchObject({ id: chatId, pinned: true, groupId: null });
+    // Unpinning files it into its project.
+    store.togglePin(chatId);
+    expect(layout()).toEqual(["/acme/chat/a1@p-a", "/acme/issues@-"]);
+  });
+
+  it("never moves a tab the user placed by hand", () => {
+    seed();
+    const store = useTabStore.getState();
+    const b1 = idOf("/acme/chat/b1");
+    store.removeTabFromGroup(b1);
+    expect(acme().tabs.find((tab) => tab.id === b1)?.groupLocked).toBe(true);
+    // Resolution changes do not pull it back.
+    store.syncTabProjects("acme", { [b1]: "p-a" }, {});
+    expect(acme().tabs.find((tab) => tab.id === b1)?.groupId).toBeNull();
+
+    // A hand-made group lives next to project groups.
+    const issues = idOf("/acme/issues");
+    const own = store.createTabGroup(issues);
+    store.syncTabProjects("acme", { [issues]: "p-a" }, {});
+    expect(acme().tabs.find((tab) => tab.id === issues)?.groupId).toBe(own);
+    expect(acme().groups.find((group) => group.id === own)?.projectId).toBeNull();
+  });
+
+  it("stops auto-grouping in manual mode and refiles on switching back", () => {
+    const store = useTabStore.getState();
+    store.setTabGroupMode("manual");
+    seed();
+    expect(acme().groups).toEqual([]);
+    store.setTabGroupMode("project");
+    expect(layout()).toEqual([
+      "/acme/chat?session=a1@p-a",
+      "/acme/projects/p-a@p-a",
+      "/acme/chat/b1@p-b",
+      "/acme/issues@-",
+    ]);
+  });
+
+  it("refuses to collapse the group holding the active tab", () => {
+    seed();
+    const store = useTabStore.getState();
+    const a1 = idOf("/acme/chat?session=a1");
+    const groupA = acme().tabs.find((tab) => tab.id === a1)!.groupId!;
+    const groupB = acme().tabs.find((tab) => tab.url === "/acme/chat/b1")!.groupId!;
+    store.setActiveTab(a1);
+    store.toggleTabGroupCollapsed(groupA);
+    expect(acme().groups.find((group) => group.id === groupA)?.collapsed).toBe(false);
+    store.toggleTabGroupCollapsed(groupB);
+    expect(acme().groups.find((group) => group.id === groupB)?.collapsed).toBe(true);
+    // Focusing into a collapsed group opens it.
+    store.setActiveTab(idOf("/acme/chat/b1"));
+    expect(acme().groups.find((group) => group.id === groupB)?.collapsed).toBe(false);
+  });
+
+  it("moves a whole group and sorts groups by name with tabs in open order", () => {
+    seed();
+    const store = useTabStore.getState();
+    const groupB = acme().tabs.find((tab) => tab.url === "/acme/chat/b1")!.groupId!;
+    store.moveTabGroup(groupB, idOf("/acme/chat?session=a1"));
+    expect(layout()).toEqual([
+      "/acme/chat/b1@p-b",
+      "/acme/chat?session=a1@p-a",
+      "/acme/projects/p-a@p-a",
+      "/acme/issues@-",
+    ]);
+    // Reorder inside group A, then tidy.
+    store.moveTab(2, 1);
+    expect(layout()[1]).toBe("/acme/projects/p-a@p-a");
+    store.arrangeTabsByProject();
+    expect(layout()).toEqual([
+      "/acme/chat?session=a1@p-a",
+      "/acme/projects/p-a@p-a",
+      "/acme/chat/b1@p-b",
+      "/acme/issues@-",
+    ]);
+  });
+
+  it("keeps order, colors, and mode across a restart", () => {
+    seed();
+    const store = useTabStore.getState();
+    const groupB = acme().tabs.find((tab) => tab.url === "/acme/chat/b1")!.groupId!;
+    store.moveTabGroup(groupB, idOf("/acme/chat?session=a1"));
+    store.setTabGroupMode("manual");
+    const partial = useTabStore.persist.getOptions().partialize!(
+      useTabStore.getState(),
+    );
+    const restored = mergePersistedTabs(JSON.parse(JSON.stringify(partial)), {
+      activeWorkspaceSlug: null,
+      byWorkspace: {} as Record<string, WorkspaceTabGroup>,
+      tabGroupMode: "project" as const,
+    });
+    expect(restored.tabGroupMode).toBe("manual");
+    expect(restored.byWorkspace.acme.groups).toEqual(acme().groups);
+    expect(
+      restored.byWorkspace.acme.tabs.map((tab) => [
+        tab.id,
+        tab.groupId,
+        tab.projectId,
+        tab.openedAt,
+      ]),
+    ).toEqual(
+      acme().tabs.map((tab) => [tab.id, tab.groupId, tab.projectId, tab.openedAt]),
+    );
+  });
+});
+
+describe("migrateV6ToV7", () => {
+  it("defaults to project mode and locks tabs the user had grouped", () => {
+    const tab = (id: string, groupId: string | null) => ({
+      id,
+      url: `/acme/chat/${id}`,
+      title: id,
+      pinned: false,
+      groupId,
+      history: { stack: [`/acme/chat/${id}`], index: 0 },
+      memento: { scroll: {} },
+    });
+    const v7 = migrateV6ToV7({
+      activeWorkspaceSlug: "acme",
+      byWorkspace: {
+        acme: {
+          activeTabId: "t1",
+          tabs: [tab("t1", "g1"), tab("t2", null)],
+          recentTabIds: [],
+          browsingHistory: [],
+          groups: [{ id: "g1", name: "Plan", collapsed: false, color: "red" }],
+        },
+      },
+    });
+    expect(v7.tabGroupMode).toBe("project");
+    expect(v7.byWorkspace.acme.groups).toEqual([
+      { id: "g1", name: "Plan", collapsed: false, color: "red", projectId: null },
+    ]);
+    expect(
+      v7.byWorkspace.acme.tabs.map((t) => [t.id, t.groupLocked, t.openedAt]),
+    ).toEqual([
+      ["t1", true, 0],
+      ["t2", false, 1],
+    ]);
+
+    // Unlocked tabs get filed once the tab bar resolves them.
+    const restored = mergePersistedTabs(v7, {
+      activeWorkspaceSlug: null,
+      byWorkspace: {} as Record<string, WorkspaceTabGroup>,
+    });
+    useTabStore.setState({ ...restored, tabGroupMode: "project" });
+    useTabStore.getState().syncTabProjects("acme", { t1: "p-a", t2: "p-a" }, {});
+    const group = useTabStore.getState().byWorkspace.acme;
+    const t1 = group.tabs.find((t) => t.id === "t1")!;
+    const t2 = group.tabs.find((t) => t.id === "t2")!;
+    expect(t1.groupId).toBe("g1");
+    expect(group.groups.find((g) => g.id === t2.groupId)?.projectId).toBe("p-a");
   });
 });
