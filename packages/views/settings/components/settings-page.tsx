@@ -53,6 +53,7 @@ import { AccountTab } from "./account-tab";
 import { PreferencesTab } from "./preferences-tab";
 import { TokensTab } from "./tokens-tab";
 import { BotsTab } from "./bots-tab";
+import { OverviewTab } from "./overview-tab";
 import { WorkspaceTab } from "./workspace-tab";
 import { MembersTab } from "./members-tab";
 import { CodeTab } from "./code-tab";
@@ -228,6 +229,7 @@ export function SettingsPage({ extraDeviceTabs = [] }: SettingsPageProps = {}) {
         {
           key: "workspace",
           entries: [
+            entry("overview", t(($) => $.page.tabs.overview), Network, <OverviewTab />),
             entry("workspace", t(($) => $.page.tabs.general), Settings, <WorkspaceTab />, {
               adminOnly: true,
             }),

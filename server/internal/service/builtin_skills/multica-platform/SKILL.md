@@ -15,6 +15,16 @@ have consequences you cannot take back.
 Read the invariants below, then open the reference(s) your task actually needs
 — usually one, sometimes a few. Do not read them all.
 
+## Workspace orientation
+
+When starting without a workspace map, call `multica overview --compact` first.
+One permission-scoped server request summarizes agents and their runtimes/projects,
+projects and repositories, active chats and tickets, automations, skills, squads,
+workspace links and external Bots. Use `--output json` for structured data,
+`--project <id-or-exact-name>` or `--agent <id-or-exact-name>` to narrow it.
+Omitted sections are unavailable to this caller; do not try another identity.
+See `references/overview.md` for filter semantics and examples.
+
 ## Routing
 
 | Open | When the task is about |
