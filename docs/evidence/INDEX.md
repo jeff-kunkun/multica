@@ -2,6 +2,8 @@
 
 本索引只记录指向沉淀票附件的短指针；原始日志、截图和样本留在对应票据附件。
 
+- DENE-1865：CLI 项目名、当前用户临时文件、钥匙状态与续期提示、服务端列表投影、一次性工作区选择；[完整测试、真实 CLI 与独立副本回滚记录（任务附件）](https://ai.ferryway.cc/api/attachments/01a12c55-6e00-7d6a-85fd-77deb84386d5/download)。52 个智能体紧凑输出 20,469 字节；670 项 CLI 与 13 项相关服务端测试通过。首次已失效且无缓存的钥匙元数据为未知，Windows 仅交叉构建。
+
 - DENE-1863：外部 Bot 提及原文、楼层上下文、附件与原楼层回复、30 秒同来源分组；[四档真实截图与交付边界（任务附件）](https://ai.ferryway.cc/api/attachments/01a12c4f-4fad-7b53-963d-268ba1539f90/download)，[HTTP/CLI/迁移/重试/独立回执及夹具回滚验证包](https://ai.ferryway.cc/api/attachments/01a12c4f-51fb-799b-a07f-ed024b07d434/download)。提及也等待分组窗口，已明示约半分钟延迟；生产 Grok 与原生 App 未实测，终审待定。
 
 - DENE-1864：附件大小误报修复、原始字节下载、一次重试和评论/任务批量下载；[真实附件、完整模块测试及回滚记录（任务附件）](https://ai.ferryway.cc/api/attachments/01a12c3b-d765-762d-8476-07d03d5ad1d2/download)。云电脑历史摘要失败未原地重现，独立评论入口及原始下载元数据已通过本地服务端测试。

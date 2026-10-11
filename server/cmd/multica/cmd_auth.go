@@ -67,6 +67,7 @@ const callbackHostFlagHelp = "Host/IP the OAuth callback URL points at when the 
 
 func init() {
 	authCmd.AddCommand(authStatusCmd)
+	authStatusCmd.Flags().String("output", "text", "Output format: text or json; shows active key type, source and expiry without credential material")
 	authCmd.AddCommand(authLogoutCmd)
 }
 
@@ -479,31 +480,7 @@ func runAuthStatus(cmd *cobra.Command, _ []string) error {
 		return nil
 	}
 
-	client := cli.NewAPIClient(serverURL, "", token)
-
-	ctx, cancel := cli.APIContext(context.Background())
-	defer cancel()
-
-	var me struct {
-		Name  string `json:"name"`
-		Email string `json:"email"`
-	}
-	if err := client.GetJSON(ctx, "/api/me", &me); err != nil {
-		fmt.Fprintf(os.Stderr, "Token is invalid or expired: %v\nRun 'multica login' to re-authenticate.\n", err)
-		return nil
-	}
-
-	if taskContext {
-		fmt.Fprintf(os.Stderr, "Server:  %s\nUser:    %s (%s)\n", serverURL, me.Name, me.Email)
-		return nil
-	}
-
-	prefix := token
-	if len(prefix) > 12 {
-		prefix = prefix[:12] + "..."
-	}
-	fmt.Fprintf(os.Stderr, "Server:  %s\nUser:    %s (%s)\nToken:   %s\n", serverURL, me.Name, me.Email, prefix)
-	return nil
+	return runCredentialStatus(cmd, token, serverURL)
 }
 
 const callbackSuccessHTML = `<!DOCTYPE html>

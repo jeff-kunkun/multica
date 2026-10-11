@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"github.com/multica-ai/multica/server/internal/listshape"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 
 	"bytes"
@@ -1933,7 +1934,7 @@ func (h *Handler) ListAgents(w http.ResponseWriter, r *http.Request) {
 		slog.Warn("list agents: load parent relations failed", append(logger.RequestAttrs(r), "error", err, "workspace_id", workspaceID)...)
 	}
 
-	writeJSON(w, http.StatusOK, visible)
+	writeProjectedList(w, r, visible, listshape.Agent)
 }
 
 // agentListScene reads for_issue / for_project off an agent list request:

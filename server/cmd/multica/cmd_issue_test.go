@@ -107,6 +107,11 @@ func newFlagTestCmd(name string) *cobra.Command {
 }
 
 func TestResolveTextFlag(t *testing.T) {
+	// Keep the generic external-path checks outside the permitted temp roots;
+	// real system-temp paths are covered by TestOwnedSystemTempContentFiles.
+	savedRoots := systemTempFileRoots
+	systemTempFileRoots = func() []string { return nil }
+	t.Cleanup(func() { systemTempFileRoots = savedRoots })
 	t.Run("inline value is unescaped", func(t *testing.T) {
 		c := newFlagTestCmd("description")
 		_ = c.Flags().Set("description", `para1\n\npara2`)
