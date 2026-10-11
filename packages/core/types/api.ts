@@ -729,8 +729,20 @@ export interface BotQuietHours {
   timezone: string;
 }
 
+/** Who may wake the Bot, per sender kind. `ids` (UUIDs, at most 100) only
+ *  with `list`. Owner subscriptions are never inherited. */
+export interface BotWakeFromRule {
+  mode: "all" | "none" | "list";
+  ids: string[];
+}
+
+export type BotWakeSenderKind = "member" | "agent" | "bot";
+
+export type BotWakeFrom = Record<BotWakeSenderKind, BotWakeFromRule>;
+
 export interface BotWakeSettings {
   webhook_configured: boolean;
+  wake_from: BotWakeFrom;
   /** Empty disables every event. */
   events: BotWakeEventType[];
   /** 0..120; 0 pauses delivery. */
@@ -741,6 +753,8 @@ export interface BotWakeSettings {
 /** PUT patches supplied fields. `webhook_url` and `webhook_key` go together;
  *  two empty strings disconnect. Never send `webhook_configured`. */
 export interface UpdateBotWakeRequest {
+  /** Replaces the whole map; all three kinds are required. */
+  wake_from?: BotWakeFrom;
   events?: BotWakeEventType[];
   hourly_limit?: number;
   quiet_hours?: BotQuietHours;
@@ -769,6 +783,13 @@ export interface BotWakeEvent {
   created_at: string;
   sent_at: string | null;
   received_at: string | null;
+  /** Bot's own "started" receipt; never inferred from received or result. */
+  woken_at: string | null;
+  /** May arrive before `woken_at`. */
+  result_at: string | null;
+  result_url: string | null;
+  /** Reviewed in the pending list; does not mean the Bot ran it. */
+  acknowledged_at: string | null;
 }
 
 /** A filtered page can be empty and still carry a cursor; empty cursor = end. */

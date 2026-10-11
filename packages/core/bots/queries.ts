@@ -23,6 +23,9 @@ export const BOT_WAKE_EVENT_TYPES: readonly BotWakeEventType[] = [
   "chat",
 ];
 
+/** Server limit for one acknowledgement call. */
+export const BOT_WAKE_ACK_MAX = 100;
+
 export const botKeys = {
   all: (wsId: string) => ["external-bots", wsId] as const,
   list: (wsId: string) => [...botKeys.all(wsId), "list"] as const,
@@ -120,5 +123,20 @@ export function useUpdateBotWake(wsId: string, botId: string) {
     mutationFn: (data: UpdateBotWakeRequest) => api.updateBotWake(wsId, botId, data),
     onSuccess: (saved) => qc.setQueryData(botKeys.wake(wsId, botId), saved),
     onSettled: () => qc.invalidateQueries({ queryKey: botKeys.wake(wsId, botId) }),
+  });
+}
+
+// No optimistic removal: rows leave the pending list only after the server
+// accepted the batch. Both lists refetch from the first page, so an older
+// event that failed late shows up again; no sequence high-water mark is kept.
+export function useAckBotWakePending(wsId: string, botId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (eventIds: string[]) => api.ackBotWakePending(wsId, botId, eventIds),
+    onSuccess: () =>
+      Promise.all([
+        qc.resetQueries({ queryKey: botKeys.wakeEvents(wsId, botId, true) }),
+        qc.invalidateQueries({ queryKey: botKeys.wakeEvents(wsId, botId, false) }),
+      ]),
   });
 }

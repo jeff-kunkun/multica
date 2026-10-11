@@ -4853,6 +4853,18 @@ export class ApiClient {
     );
   }
 
+  // All-or-none; acknowledging only clears the pending list, nothing is resent.
+  async ackBotWakePending(
+    workspaceId: string,
+    botId: string,
+    eventIds: string[],
+  ): Promise<{ acknowledged: number }> {
+    return this.fetch(`/api/workspaces/${workspaceId}/bots/${botId}/wake/pending/ack`, {
+      method: "POST",
+      body: JSON.stringify({ event_ids: eventIds }),
+    });
+  }
+
   // Any member: bots that may be @-mentioned, narrowed to those able to read
   // the source when one is given.
   async listBotMentionDirectory(
