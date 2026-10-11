@@ -306,5 +306,32 @@
       "status_failed": "상태를 업데이트하지 못했습니다",
       "undo_failed": "상태 변경을 되돌리지 못했습니다"
     }
+  },
+  "fast_access": {
+    "open": "활동",
+    "title": "워크스페이스 활동",
+    "close": "닫기",
+    "scope": "워크스페이스",
+    "all": "볼 수 있는 모든 워크스페이스",
+    "current": "현재 워크스페이스",
+    "refresh": "새로고침",
+    "loading": "불러오는 중...",
+    "error": "활동을 불러오지 못했습니다. 새로고침해 다시 시도하세요.",
+    "runs": "활성 실행",
+    "untitled_run": "실행",
+    "executing": "실행 중",
+    "queued": "대기열",
+    "waiting": "대기 중",
+    "unknown": "상태를 확인할 수 없음",
+    "autopilot": "자동화",
+    "no_runs": "활성 실행이 없습니다.",
+    "chats": "채팅 활동 · 최근 30분",
+    "untitled_chat": "채팅",
+    "unread": "읽지 않음: {{count}}",
+    "no_chats": "최근 채팅 활동이 없습니다.",
+    "complete": "모든 결과를 불러왔습니다.",
+    "partial": "아직 불러오지 않은 결과가 있습니다.",
+    "more": "더 불러오기",
+    "as_of": "확인 시각: {{time}}"
   }
 }

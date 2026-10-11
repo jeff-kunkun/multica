@@ -1,3 +1,4 @@
+import { parseFastAccess, type FastAccessRequest } from "./fast-access";
 import { LinkedProjectSettingsSchema } from "./schemas";
 import type { LinkedProjectSettings } from "../types/workspace-link";
 import { parseOverview, type OverviewFilters } from "./overview";
@@ -3952,6 +3953,15 @@ export class ApiClient {
     return parseWithFallback<AppConfigResponse>(raw, AppConfigSchema, EMPTY_APP_CONFIG, {
       endpoint: "GET /api/config",
     });
+  }
+
+  async readFastAccess(request: FastAccessRequest) {
+    const raw = await this.fetch<unknown>("/api/fast-access/v1/read", {
+      method: "POST", body: JSON.stringify(request),
+    });
+    const page = parseFastAccess(raw);
+    if (!page) throw new Error("Invalid activity response");
+    return page;
   }
 
   async getOverview(filters: OverviewFilters = {}) {

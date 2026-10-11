@@ -1826,13 +1826,21 @@ func (q *Queries) ListRootCommentsForIssue(ctx context.Context, arg ListRootComm
 }
 
 const listRootCommentsSinceForIssue = `-- name: ListRootCommentsSinceForIssue :many
-WITH RECURSIVE selected_roots AS (
+WITH RECURSIVE changed_ancestors(id, parent_id) AS (
+    SELECT c.id, c.parent_id FROM comment c
+    WHERE c.issue_id = $1 AND c.workspace_id = $2
+      AND GREATEST(c.created_at, c.updated_at, c.deleted_at) > $3
+    UNION
+    SELECT p.id, p.parent_id FROM comment p
+    JOIN changed_ancestors a ON a.parent_id = p.id
+    WHERE p.issue_id = $1 AND p.workspace_id = $2
+), selected_roots AS (
     SELECT c.id, c.created_at
     FROM comment c
     WHERE c.issue_id = $1
       AND c.workspace_id = $2
       AND c.parent_id IS NULL
-      AND c.created_at > $3
+      AND c.id IN (SELECT id FROM changed_ancestors WHERE parent_id IS NULL)
     ORDER BY c.created_at ASC, c.id ASC
     LIMIT $4
 ),
@@ -1840,7 +1848,7 @@ membership(id, root_id, comment_created_at) AS (
     SELECT sr.id, sr.id AS root_id, sr.created_at
     FROM selected_roots sr
     UNION ALL
-    SELECT c.id, m.root_id, c.created_at
+    SELECT c.id, m.root_id, GREATEST(c.created_at, c.updated_at, c.deleted_at)
     FROM comment c
     JOIN membership m ON c.parent_id = m.id
     WHERE c.issue_id = $1
@@ -1896,13 +1904,9 @@ type ListRootCommentsSinceForIssueRow struct {
 	LastActivityAt pgtype.Timestamptz `json:"last_activity_at"`
 }
 
-// Top-level comments created strictly after @since, each annotated with the
-// same reply_count / last_activity_at stats as ListRootCommentsForIssue. The
-// @since filter narrows which roots are returned; the stats are still computed
-// over each selected thread's full subtree (so a freshly created root with no
-// replies reports reply_count 0 and last_activity_at = its own created_at).
-// selected_roots applies the @since + @row_limit cut up front so the recursive
-// membership walk only touches the subtrees of the roots we actually return.
+// Find roots through any changed descendant, including replies under old
+// roots. Walk ancestors with UNION (cycle-safe) before applying the root cap.
+// This is a current thread directory, not a deletion/intermediate-state log.
 func (q *Queries) ListRootCommentsSinceForIssue(ctx context.Context, arg ListRootCommentsSinceForIssueParams) ([]ListRootCommentsSinceForIssueRow, error) {
 	rows, err := q.db.Query(ctx, listRootCommentsSinceForIssue,
 		arg.IssueID,
