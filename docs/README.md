@@ -5,7 +5,7 @@
 - [统一带选项提问的架构决定](adr/0001-option-questions.md)
 - [目标任务的完成线与服务端续跑](adr/0002-goal-mode.md)
 - [路由派票的执行席归属与来源可见性](adr/0003-routing-executor-ownership.md)
-- [跨工作区只读连通走单一出口，不复用访客](adr/0004-workspace-link.md)
+- [跨工作区连通使用显式出口，不复用访客](adr/0004-workspace-link.md)
 - [Web/Desktop 移动适配先抽共享外壳再修页面](adr/0005-mobile-web-shell.md)
 - [证据索引](evidence/INDEX.md)
 - [Bot 写入来源与推送集成契约](../server/docs/bot-write-provenance.md)

@@ -67,7 +67,10 @@ func route(name, method, pattern string, write bool) managedRoute {
 	return managedRoute{name: name, method: method, path: regexp.MustCompile("^" + pattern + "/?$"), write: write}
 }
 
-const seg = `[^/]+`
+// IDs are canonical UUIDs; issues additionally accept their public identifier.
+// Never use an arbitrary segment: it also matches fixed collection endpoints.
+const seg = `[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}`
+const issueRef = `(?:` + seg + `|[A-Za-z0-9]{1,10}-[1-9][0-9]*)`
 
 // managedRoutes is the whole whitelist. Lookups (labels, properties,
 // statuses, projects, members, agents, squads) are read-only and exist so
@@ -78,17 +81,17 @@ var managedRoutes = []managedRoute{
 	route("issue.search", "GET", `/api/issues/search`, false),
 	route("issue.children", "GET", `/api/issues/children`, false),
 	route("issue.create", "POST", `/api/issues`, true),
-	route("issue.get", "GET", `/api/issues/(?P<issue>`+seg+`)`, false),
-	route("issue.update", "PUT", `/api/issues/(?P<issue>`+seg+`)`, true),
-	route("issue.child_list", "GET", `/api/issues/(?P<issue>`+seg+`)/children`, false),
-	route("issue.comments", "GET", `/api/issues/(?P<issue>`+seg+`)/comments`, false),
-	route("issue.comment", "POST", `/api/issues/(?P<issue>`+seg+`)/comments`, true),
-	route("issue.timeline", "GET", `/api/issues/(?P<issue>`+seg+`)/timeline`, false),
-	route("issue.labels", "GET", `/api/issues/(?P<issue>`+seg+`)/labels`, false),
-	route("issue.label_add", "POST", `/api/issues/(?P<issue>`+seg+`)/labels`, true),
-	route("issue.label_remove", "DELETE", `/api/issues/(?P<issue>`+seg+`)/labels/`+seg, true),
-	route("issue.property_set", "PUT", `/api/issues/(?P<issue>`+seg+`)/properties/`+seg, true),
-	route("issue.property_clear", "DELETE", `/api/issues/(?P<issue>`+seg+`)/properties/`+seg, true),
+	route("issue.get", "GET", `/api/issues/(?P<issue>`+issueRef+`)`, false),
+	route("issue.update", "PUT", `/api/issues/(?P<issue>`+issueRef+`)`, true),
+	route("issue.child_list", "GET", `/api/issues/(?P<issue>`+issueRef+`)/children`, false),
+	route("issue.comments", "GET", `/api/issues/(?P<issue>`+issueRef+`)/comments`, false),
+	route("issue.comment", "POST", `/api/issues/(?P<issue>`+issueRef+`)/comments`, true),
+	route("issue.timeline", "GET", `/api/issues/(?P<issue>`+issueRef+`)/timeline`, false),
+	route("issue.labels", "GET", `/api/issues/(?P<issue>`+issueRef+`)/labels`, false),
+	route("issue.label_add", "POST", `/api/issues/(?P<issue>`+issueRef+`)/labels`, true),
+	route("issue.label_remove", "DELETE", `/api/issues/(?P<issue>`+issueRef+`)/labels/`+seg, true),
+	route("issue.property_set", "PUT", `/api/issues/(?P<issue>`+issueRef+`)/properties/`+seg, true),
+	route("issue.property_clear", "DELETE", `/api/issues/(?P<issue>`+issueRef+`)/properties/`+seg, true),
 
 	route("autopilot.list", "GET", `/api/autopilots`, false),
 	route("autopilot.cron_preview", "GET", `/api/autopilots/cron-preview`, false),
@@ -104,6 +107,8 @@ var managedRoutes = []managedRoute{
 	route("autopilot.trigger_update", "PATCH", `/api/autopilots/(?P<autopilot>`+seg+`)/triggers/`+seg, true),
 	route("autopilot.trigger_delete", "DELETE", `/api/autopilots/(?P<autopilot>`+seg+`)/triggers/`+seg, true),
 
+	route("attachment.upload", "POST", `/api/upload-file`, true),
+	route("lookup.project_resources", "GET", `/api/projects/`+seg+`/resources`, false),
 	route("lookup.labels", "GET", `/api/labels`, false),
 	route("lookup.properties", "GET", `/api/properties`, false),
 	route("lookup.statuses", "GET", `/api/issue-statuses`, false),

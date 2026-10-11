@@ -83,7 +83,7 @@ nowhere new: the work stays in the source, and each change shows there as
 gone, the person lacks the right there, or the command is not covered; say so,
 do not retry another way.
 
-Every refusal of `view` is the same `404 link not found`: the link was revoked, is still
+Every refusal of `view` is the same `404 link not found`: the link was deleted, is still
 waiting for acceptance, or your workspace is not its viewer. Report it as "no
 access", not as a bug.
 
@@ -110,15 +110,34 @@ Both accept `--reference <link-id>:<project-id>` (repeatable) or `--clear`;
 autopilots also accept `--inherit` to use the owning project's defaults.
 These settings do not enable managed access or change any existing link.
 
+Disconnect (`revoke`) deletes the link; there is no `revoked` status. Both
+sides retain audit records.
+
+Attachments work with `--linked` on create and comment add:
+
+```sh
+multica issue comment add <ID> --linked <source-slug> --content-file note.md --attachment x.png
+```
+
+Upload and attachment ownership are in the source, under the run originator's
+permissions. Read-only project resource lookup is available for CLI resolution.
+Mentioning or assigning a source agent uses the source's normal trigger rules;
+the originating person remains the run originator. Writes leave provenance in
+the source issue timeline (`issue timeline`) or `autopilot linked-changes`.
+Link audit records (`workspace_link_audit`) are visible to both owners in
+Settings → Linked workspaces. No existing link settings are changed by a command
+using `--linked`.
+
 ## Settings and audit
 
-Human source owners can change projects from either side. From the viewer they
+Human source owners can change projects and switch managed from either side.
+From the viewer they
 also need owner/admin rights there; `update <link-id> --project <name>` resolves
 names in the source workspace. `list` includes shared `projects` on both sides,
 `can_update_projects` and `can_set_managed`. Pending links cannot enable managed
 access: accept first. Agents still cannot manage links or read owner-only audit.
 
-Human workspace owners can read changes and managed writes (including revoked links):
+Human workspace owners can read changes and managed writes (including deleted links):
 
 ```sh
 multica workspace link audit --limit 50 --output json
