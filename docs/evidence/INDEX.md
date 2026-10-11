@@ -84,7 +84,11 @@
 
 - DENE-1808：可托管聊天代发、新连通默认开托管（旧连通不变）；[桌面/手机 HTML 预览附件](https://ai.ferryway.cc/api/attachments/01a12a2c-418e-78c0-bef9-e084235a21f1/download)。[验证记录与验收结论](DENE-1808/README.md)：真实设置/聊天四档截图、开关提交及线上 WD 代发/叫醒已通过；Grok Bot 代 Kun 验收收单，原生截图按决定留到后续发版、不占用 Kun 前台。
 
+- DENE-1815：手机 App 连通设置、共享项目阅读、聊天只读参考项目与通知入口；[390px 手机源码实页五屏与验收 HTML](https://ai.ferryway.cc/api/attachments/01a12c05-8d5e-7b40-ae67-05569ebfd349/download)、[原图/点击记录/检查日志](https://ai.ferryway.cc/api/attachments/01a12c05-8f3a-7c62-a4a7-dee4d0b6abfa/download)。React Native Web 隔离验收数据；原生模拟器启动卡在系统迁移，原生构建未验证。
+
 ## Compact cross-workspace reads
+
+- DENE-1885：合入手机主线 f3d1892613，保留快速访问与连通工作区两套入口；[手机截图与结论](https://ai.ferryway.cc/api/attachments/01a12cb5-2cd3-7c87-bb7c-921d7e03e431/download)、[合并核对、测试日志与回滚材料](https://ai.ferryway.cc/api/attachments/01a12cb5-2df5-7e3a-b97b-3445c162b830/download)。手机类型/lint/261 项测试与 fast-access/SSE/CLI/MCP 回归通过；原生及生产一次响应性能未复测。
 
 - DENE-1882：快速访问与主线集成；[迁移、真实公开客户端联调及兼容性边界](DENE-1882/integration.md)。[脱敏原始输出与回滚材料](https://ai.ferryway.cc/api/attachments/01a12c73-1f09-78cb-b484-91aa56d04c1c/download)。本地三页读齐200条任务/17活动运行，30次p95为62.476ms、最大单页41,303字节；公开MCP文档参数差异已交父单，生产实测仍未完成。
 - DENE-1883: [bounded run projection and server-paged comment repair evidence](https://ai.ferryway.cc/api/attachments/01a12ca9-652b-7be2-9bf9-54642d6b4cb1/download). Disposable PostgreSQL, MCP SDK, CLI, query plans and independent rollback; since/checkpoint paging survives 10001 old runs and 105 Chinese root summaries are fully discoverable. Original F2 fixture ignores paging and still exceeds transport budget; preserved as negative evidence alongside the real-handler pass. Parent review and production two-workspace measurement remain open.

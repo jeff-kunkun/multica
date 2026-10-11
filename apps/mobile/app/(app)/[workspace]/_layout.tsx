@@ -1,3 +1,5 @@
+import { useWorkspaceLinksRealtime } from "@/data/realtime/use-workspace-links-realtime";
+import { useChatReferencesDraftStore } from "@/data/stores/chat-references-draft-store";
 import { useEffect } from "react";
 import type { ComponentProps } from "react";
 import { Redirect, Stack, useLocalSearchParams } from "expo-router";
@@ -74,6 +76,7 @@ export const unstable_settings = { anchor: "(tabs)" } as const;
  * Add new realtime feature hooks here as they land (issue, chat, etc).
  */
 function RealtimeSubscriptions() {
+  useWorkspaceLinksRealtime();
   useInboxRealtime();
   useIssuesRealtime();
   useMyIssuesRealtime();
@@ -106,6 +109,8 @@ export default function WorkspaceLayout() {
   const { data: workspaces, isLoading } = useQuery(workspaceListOptions());
   const setCurrentWorkspace = useWorkspaceStore((s) => s.setCurrentWorkspace);
 
+  useEffect(() => { useChatReferencesDraftStore.getState().clear(); return () => useChatReferencesDraftStore.getState().clear(); }, [slug]);
+
   const matched = workspaces?.find((w) => w.slug === slug);
 
   useEffect(() => {
@@ -133,6 +138,8 @@ export default function WorkspaceLayout() {
     <RealtimeProvider>
       <RealtimeSubscriptions />
       <Stack>
+        <Stack.Screen name="workspace-links/projects" options={SHEET_OPTIONS} />
+        <Stack.Screen name="chat-references" options={SHEET_OPTIONS} />
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
         <Stack.Screen
           name="issue/[id]"

@@ -1,4 +1,6 @@
 import { FastAccessSchema, type FastAccessPage, type FastAccessRequest } from "@multica/core/api/fast-access";
+import type { WorkspaceLink, ListWorkspaceLinksResponse, WorkspaceLinkLookup, LinkedView } from "@multica/core/types/workspace-link";
+import { WorkspaceLinkSchema, WorkspaceLinksSchema, WorkspaceLinkLookupSchema, LinkedViewSchema } from "./workspace-link-schemas";
 import { LinkedProjectSettingsSchema, LinkedProjectOptionsSchema } from "@multica/core/api/schemas";
 import type { LinkedProjectSettings, LinkedProjectOption, ChatLinkedProjectRef } from "@multica/core/types/workspace-link";
 /**
@@ -429,6 +431,49 @@ class ApiClient {
     );
     if (!page) throw new Error("Invalid activity response");
     return page;
+  }
+
+  async listWorkspaceLinks(opts?: { signal?: AbortSignal }) {
+    const result = await this.fetchValidated<ListWorkspaceLinksResponse | null>("/api/workspace-links", WorkspaceLinksSchema, null, opts);
+    if (!result) throw new Error("Could not read workspace links");
+    return result;
+  }
+
+  async lookupWorkspaceLink(target: string, opts?: { signal?: AbortSignal }) {
+    const result = await this.fetchValidated<WorkspaceLinkLookup | null>(`/api/workspace-links/lookup?target=${encodeURIComponent(target)}`, WorkspaceLinkLookupSchema, null, opts);
+    if (!result) throw new Error("Could not read workspace");
+    return result;
+  }
+
+  async writeWorkspaceLink(id: string | null, body: { project_ids: string[] } | { accept: true } | { managed: boolean } | { target_slug: string; project_ids: string[]; direction: "offer" | "pull" }) {
+    const result = await this.fetchValidatedWith<WorkspaceLink | null>(`/api/workspace-links${id ? `/${encodeURIComponent(id)}` : ""}`, WorkspaceLinkSchema, null, { method: id ? "PATCH" : "POST", body: JSON.stringify(body) });
+    if (!result) throw new Error("Could not read saved workspace link");
+    return result;
+  }
+
+  async revokeWorkspaceLink(id: string): Promise<void> {
+    await this.fetch(`/api/workspace-links/${encodeURIComponent(id)}`, { method: "DELETE" });
+  }
+
+  async getLinkedView(id: string, projectId: string, cursor: string, opts?: { signal?: AbortSignal }) {
+    const search = new URLSearchParams({ limit: "50" });
+    if (projectId) search.set("project_id", projectId);
+    if (cursor) search.set("cursor", cursor);
+    const result = await this.fetchValidated<LinkedView | null>(`/api/workspace-links/${encodeURIComponent(id)}/view?${search}`, LinkedViewSchema, null, opts);
+    if (!result) throw new Error("Could not read shared projects");
+    return result;
+  }
+
+  async getChatSession(id: string, opts?: { signal?: AbortSignal }): Promise<ChatSession> {
+    const result = await this.fetchValidated<ChatSession | null>(`/api/chat/sessions/${encodeURIComponent(id)}`, ChatSessionSchema, null, opts);
+    if (!result) throw new Error("Could not read chat");
+    return result;
+  }
+
+  async setChatReferences(id: string, refs: ChatLinkedProjectRef[]): Promise<ChatSession> {
+    const result = await this.fetchValidatedWith<ChatSession | null>(`/api/chat/sessions/${encodeURIComponent(id)}`, ChatSessionSchema, null, { method: "PATCH", body: JSON.stringify({ linked_projects: refs }) });
+    if (!result) throw new Error("Could not read saved chat");
+    return result;
   }
 
   async getProjectReferences(id: string, opts?: { signal?: AbortSignal }): Promise<LinkedProjectSettings> {
@@ -1192,8 +1237,6 @@ class ApiClient {
 
   // --- Chat ---
   // Mirrors the surface area of packages/core/api/client.ts chat methods.
-  // v1 omits getChatSession + updateChatSession (rename) — see the v1 cut
-  // list in /Users/qingnaiyuan/.claude/plans/plan-velvety-puddle.md.
 
   async listChatSessions(
     opts?: { signal?: AbortSignal },
@@ -1210,7 +1253,7 @@ class ApiClient {
   }
 
   async createChatSession(
-    data: { agent_id: string; title?: string },
+    data: { agent_id: string; title?: string; linked_projects?: ChatLinkedProjectRef[] },
   ): Promise<ChatSession> {
     // Strict parse — a malformed create response derails the optimistic
     // burst (we need the new session id to seed caches). Fallback would
