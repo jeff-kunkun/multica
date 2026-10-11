@@ -2,7 +2,7 @@
 
 本索引只记录指向沉淀票附件的短指针；原始日志、截图和样本留在对应票据附件。
 
-- DENE-1857：默认唤醒合并、连带停止、显式转工单后的唯一执行处；[验收、回归、CLI 契约与可撤回副本](https://ai.ferryway.cc/api/attachments/01a12c3a-0f6e-7df8-8ac4-849b5a87c3f6/download)。全套后端仍有主线已有失败与属性列表分页用例失败，未声明全套通过。
+- DENE-1857：默认唤醒合并、连带停止、显式转工单后的唯一执行处；[验收、回归、CLI 契约与可撤回副本](https://ai.ferryway.cc/api/attachments/01a12c4c-569d-7873-8e00-09cc19ed1275/download)，[四档浏览器截图与验证边界](https://ai.ferryway.cc/api/attachments/01a12c4c-f9c0-7457-bc3f-87c15b413f2f/download)。最终 390px 停止/取消按钮已实测 44px，其余较早截图已标注；全套后端仍有主线已有失败与属性列表分页用例失败，未声明全套通过。
 - DENE-1849：Bot 唤醒上限同步回执、回复清零、人类豁免、可配置与权限审计；[真实 CLI、数据库与回滚验证包（任务附件）](https://ai.ferryway.cc/api/attachments/01a12c18-eb12-70ee-8751-8abb4f016f65/download)，[四档真实截图与浏览器验收边界](https://ai.ferryway.cc/api/attachments/01a12c22-cc11-7099-bd52-46c78950714e/download)。
 
 - DENE-1852（认证故障部分）：本机排队故障根因、先留现场再恢复、失效凭据断连及桌面端恢复；[本地验证记录](DENE-1852/auth-recovery.md)。未代表自动改派、通知、自启或并发上限已完成。
