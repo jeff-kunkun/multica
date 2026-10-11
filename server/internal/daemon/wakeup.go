@@ -131,8 +131,11 @@ func (d *Daemon) runTaskWakeupConnection(ctx context.Context, runtimeIDs []strin
 		HandshakeTimeout: 10 * time.Second,
 		Proxy:            http.ProxyFromEnvironment,
 	}
-	conn, _, err := dialer.DialContext(ctx, wsURL, headers)
+	conn, response, err := dialer.DialContext(ctx, wsURL, headers)
 	if err != nil {
+		if response != nil {
+			d.client.observeAuthStatus(response.StatusCode, d.client.Token())
+		}
 		return 0, err
 	}
 	connectedAt := time.Now()
