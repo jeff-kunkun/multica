@@ -47,3 +47,34 @@ Conservative global permission epochs may reset unaffected scopes. Current-state
 ## Knowledge audit
 
 The protocol/rollout document, built-in multica-platform overview reference, documentation index and evidence index are updated. No new domain vocabulary or architectural decision beyond the approved parent protocol needs a separate ADR. Repository/runtime instructions and global managed configuration are unchanged. Parent review remains required before stage three.
+
+## Parent-requested lock-wait supplement
+
+This supplement measures the three actual generated lifecycle SQL paths, replacing the generic-update timing as evidence of their lock waits. Production code is unchanged. Command (exit 0):
+
+```sh
+bash scripts/test-db.sh --quiet -- sh -c 'cd server && go test ./internal/handler -run "TestFastJournalLifecycle(LockMeasurement|BaselineModifiedRollback)$" -count=1 -v'
+```
+
+Disposable PostgreSQL fixture: one workspace, runtime, agent and eligible task per transaction. Each of 12 cells has 10 serial samples, no discarded warmups (120 transactions). Writer concurrency is one; contended cells add one transaction holding that workspace feed row plus one observer connection. Uncontended cells have writer and observer only. BASELINE disables only task capture; MODIFIED enables it. Inputs and production-generated offline/timeout/recovery SQL are identical. Existing baseline/modified/down-rollback behavior checks were rerun and passed.
+
+Total time spans BEGIN through COMMIT, excluding pool acquisition and task reset. For contention, the holder locks the feed before writer start and is released no earlier than 80 ms after writer start. The observer queries `pg_locks.waitstart` and `pg_blocking_pids(writer_pid)` using a separate connection, asserting the blocked writer is waiting on that holder. The server waitstart to last still-waiting observation is a lower bound; to a later non-waiting observation is an upper bound. These are observed wait intervals, not subtraction of baseline latency or the requested hold duration. Polls sleep 1 ms plus query/scheduling latency. Short waits can be missed; 0 means **no wait observed**, not proof of zero wait. Nearest-rank p50/p95 (5th/10th of 10); interval endpoints summarized separately bound those quantiles.
+
+All values in ms:
+
+| Path | Mode | Feed held | Total p50 / p95 | Observed wait p50 bounds | Observed wait p95 bounds |
+| --- | --- | --- | --- | --- | --- |
+| offline | BASELINE | false | 0.615 / 0.915 | 0.000–0.000 | 0.000–0.000 |
+| offline | BASELINE | true | 0.841 / 3.273 | 0.000–0.000 | 0.000–0.000 |
+| offline | MODIFIED | false | 1.839 / 4.085 | 0.000–0.000 | 0.000–0.000 |
+| offline | MODIFIED | true | 82.009 / 84.134 | 79.176–81.756 | 79.957–83.850 |
+| timeout | BASELINE | false | 2.084 / 4.414 | 0.000–0.000 | 0.000–0.000 |
+| timeout | BASELINE | true | 1.087 / 33.829 | 0.000–0.000 | 0.000–0.000 |
+| timeout | MODIFIED | false | 1.125 / 3.238 | 0.000–0.000 | 0.000–0.000 |
+| timeout | MODIFIED | true | 82.008 / 142.178 | 79.595–82.203 | 80.767–142.520 |
+| restart | BASELINE | false | 0.903 / 2.155 | 0.000–0.000 | 0.000–0.000 |
+| restart | BASELINE | true | 0.755 / 3.193 | 0.000–0.000 | 0.000–0.000 |
+| restart | MODIFIED | false | 1.214 / 3.812 | 0.000–0.000 | 0.000–0.000 |
+| restart | MODIFIED | true | 81.808 / 87.782 | 79.372–81.614 | 80.329–87.578 |
+
+Every contended modified sample observed an ungranted lock; baseline and uncontended controls observed none. The timeout modified p95 interval is broad (80.767–142.520 ms), so this run cannot resolve its exact wait completion; the 142.178 ms total and 33.829 ms baseline contended outlier are retained. Scheduling/polling uncertainty is visible rather than reported as exact database accounting. These small local fixtures do not establish production throughput or latency limits. Parent review remains required; this supplement does not advance stage three. Raw sample rows and command output are in the updated task evidence attachment.
