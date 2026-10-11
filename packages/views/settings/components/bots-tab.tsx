@@ -91,8 +91,14 @@ export function BotsTab() {
   }));
   const typeItems = [{ value: "grok", label: t(($) => $.bots.type.grok) }];
 
-  const fmtDate = (iso: string) =>
-    new Date(iso).toLocaleDateString(locale, { month: "short", day: "numeric" });
+  const fmtDate = (iso: string) => {
+    const d = new Date(iso);
+    return d.toLocaleDateString(locale, {
+      year: d.getFullYear() === new Date().getFullYear() ? undefined : "numeric",
+      month: "short",
+      day: "numeric",
+    });
+  };
   const fmtDateTime = (iso: string) =>
     new Date(iso).toLocaleString(locale, {
       month: "short",
@@ -244,13 +250,20 @@ export function BotsTab() {
                     ) : null}
                   </span>
                 }
-                description={t(($) => $.bots.meta, {
-                  type: t(($) => $.bots.type[bot.type]),
-                  lastUsed: bot.last_used_at
-                    ? t(($) => $.bots.last_used, { date: fmtDateTime(bot.last_used_at) })
-                    : t(($) => $.bots.last_used_never),
-                  created: fmtDate(bot.created_at),
-                })}
+                description={[
+                  t(($) => $.bots.meta, {
+                    type: t(($) => $.bots.type[bot.type]),
+                    lastUsed: bot.last_used_at
+                      ? t(($) => $.bots.last_used, { date: fmtDateTime(bot.last_used_at) })
+                      : t(($) => $.bots.last_used_never),
+                    created: fmtDate(bot.created_at),
+                  }),
+                  bot.status === "active" && bot.expires_at
+                    ? t(($) => $.bots.expires, { date: fmtDate(bot.expires_at) })
+                    : null,
+                ]
+                  .filter(Boolean)
+                  .join(" · ")}
               >
                 <DropdownMenu>
                   <DropdownMenuTrigger

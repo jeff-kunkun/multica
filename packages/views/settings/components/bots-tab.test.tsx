@@ -26,7 +26,7 @@ vi.mock("@multica/core/hooks", () => ({ useWorkspaceId: () => "ws-1" }));
 vi.mock("@multica/core/permissions", () => ({
   useCurrentMember: () => ({ role: roleRef.current }),
 }));
-const mutation = (fn: ReturnType<typeof vi.fn>) => ({
+const mutation = (fn: (arg: unknown) => unknown) => ({
   isPending: false,
   mutate: (arg: unknown, cb?: { onSuccess?: (r: unknown) => void; onError?: (e: unknown) => void }) =>
     Promise.resolve(fn(arg)).then(cb?.onSuccess, cb?.onError),

@@ -2151,6 +2151,7 @@
     "meta": "{{type}} · {{lastUsed}} · added {{created}}",
     "last_used": "Last used {{date}}",
     "last_used_never": "Never used",
+    "expires": "Expires {{date}}",
     "actions_aria": "Actions for {{name}}",
     "new_key": "New key",
     "stop": "Stop",

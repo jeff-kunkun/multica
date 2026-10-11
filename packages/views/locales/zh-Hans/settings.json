@@ -2151,6 +2151,7 @@
     "meta": "{{type}} · {{lastUsed}} · {{created}} 添加",
     "last_used": "最近使用 {{date}}",
     "last_used_never": "还没用过",
+    "expires": "{{date}} 到期",
     "actions_aria": "{{name}} 的操作",
     "new_key": "发新钥匙",
     "stop": "停用",
