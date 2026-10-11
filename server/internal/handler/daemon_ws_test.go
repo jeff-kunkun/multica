@@ -1,15 +1,51 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/multica-ai/multica/server/internal/auth"
+	"github.com/multica-ai/multica/server/internal/daemonws"
 	"github.com/multica-ai/multica/server/internal/testutil"
 )
+
+func TestDaemonWebSocketPATRevalidation(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	for _, mutation := range []struct{ name, sql string }{
+		{"revoked", "UPDATE personal_access_token SET revoked = true WHERE id = $1"},
+		{"expired", "UPDATE personal_access_token SET expires_at = now() - interval '1 second' WHERE id = $1"},
+		{"deleted", "UPDATE personal_access_token SET deleted_at = now() WHERE id = $1"},
+		{"rotated", "UPDATE personal_access_token SET token_hash = token_hash || '-rotated' WHERE id = $1"},
+	} {
+		t.Run(mutation.name, func(t *testing.T) {
+			token := "mul_" + uuid.NewString()
+			id := dbfx.Insert(t, "personal_access_token", testutil.Cols{"user_id": testUserID, "name": "WS revalidation", "token_hash": auth.HashToken(token), "token_prefix": token[:12]})
+			req := newRequest(http.MethodGet, "/api/daemon/ws", nil)
+			req.Header.Set("Authorization", "Bearer "+token)
+			identity, ok := testHandler.buildDaemonWebSocketIdentity(httptest.NewRecorder(), req, nil, testUserID)
+			if !ok || identity.Revalidate == nil {
+				t.Fatal("PAT connection has no credential revalidation")
+			}
+			if err := identity.Revalidate(context.Background()); err != nil {
+				t.Fatalf("valid PAT: %v", err)
+			}
+			if _, err := testPool.Exec(context.Background(), mutation.sql, id); err != nil {
+				t.Fatal(err)
+			}
+			if err := identity.Revalidate(context.Background()); !errors.Is(err, daemonws.ErrAuthExpired) {
+				t.Fatalf("%s PAT still authorizes the old connection: %v", mutation.name, err)
+			}
+		})
+	}
+}
 
 func TestDaemonWebSocketMissingHubIsInternalError(t *testing.T) {
 	h := &Handler{}
