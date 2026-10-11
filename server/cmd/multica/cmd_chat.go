@@ -268,11 +268,15 @@ accepted urgent turn restarts any reply in progress (so only the chat's
 creator or an agent may send one), sits at the head of the queue, and is
 failed with failure_reason=pickup_timeout plus a chat notice when no daemon
 starts it by pickup_deadline_at (30s). --urgent always waits for that pickup
-result: it returns as soon as the turn is picked up (task_status=running,
-pickup_elapsed_ms) and exits nonzero with task_status and reason
-(runtime_offline, pickup_timeout) when it is refused or nobody starts it by
-the deadline. --wait adds nothing and --wait-timeout does not apply; read the
-reply later with multica chat history.
+result and never longer than pickup_deadline_at: it returns as soon as the
+turn is picked up (task_status=running, pickup_elapsed_ms) and exits nonzero
+with task_status and reason (runtime_offline, pickup_timeout) when it is
+refused or nobody starts it by the deadline. If the server has not judged the
+turn when the deadline passes, the command stops waiting on its own:
+task_status is whatever the server last reported (possibly still dispatched)
+and reason_source=sender marks that the sender gave up; reason_source=server
+marks a verdict the server wrote. --wait adds nothing and --wait-timeout does
+not apply; read the reply later with multica chat history.
 
   multica chat send --session <id|url> --urgent "验证码 482913，请立刻填入" --output json
 `,
@@ -343,7 +347,7 @@ func init() {
 	chatSendCmd.Flags().String("content-file", "", "Read the message from this file instead of the argument")
 	chatSendCmd.Flags().String("mode", "", "Default: merge into existing work; choose steer, queue or restart explicitly")
 	chatSendCmd.Flags().String("per-quote", "", "Exact words from this caller’s earlier human message in this chat; server verifies the quote before exempting it from the Bot wake-chain limit")
-	chatSendCmd.Flags().Bool("urgent", false, "Deliver now or fail now: refused (exit nonzero, JSON reason + next_steps) when the agent's runtime is offline and no online fallback runtime is configured; otherwise goes to the head of the queue (restart semantics) and waits for the pickup: exit 0 once a daemon starts it (task_status=running), nonzero with reason=pickup_timeout if none does by the server's 30s deadline. --wait-timeout does not apply.")
+	chatSendCmd.Flags().Bool("urgent", false, "Deliver now or fail now: refused (exit nonzero, JSON reason + next_steps) when the agent's runtime is offline and no online fallback runtime is configured; otherwise goes to the head of the queue (restart semantics) and waits for the pickup: exit 0 once a daemon starts it (task_status=running), nonzero with reason=pickup_timeout as soon as the server's 30s deadline (pickup_deadline_at) passes without one, never later; task_status then reports what the server last said. --wait-timeout does not apply.")
 	chatSendCmd.Flags().String("output", "json", "Output format: table or json")
 	chatSendCmd.Flags().StringSlice("attachment", nil, "Local files to attach to this message (repeatable)")
 	chatSendCmd.Flags().Bool("allow-external-file", false, "Allow attachment paths outside the working directory")
@@ -1093,12 +1097,6 @@ var chatPickupPollInterval = 2 * time.Second
 // server did not return one; it mirrors the server's 30 s promise.
 const urgentPickupFallbackDeadline = 30 * time.Second
 
-// urgentPickupGrace is how long past the server's deadline the command keeps
-// polling for the server's own verdict (its sweep runs every 5 s) before
-// reporting pickup_timeout itself. The server, not this grace, decides the
-// task's fate; the grace only lets the command show the server's reason.
-var urgentPickupGrace = 10 * time.Second
-
 // urgentPickupDeadline reads the server's pickup_deadline_at from the send
 // receipt: the instant by which a daemon must have started the turn.
 func urgentPickupDeadline(out map[string]any) time.Time {
@@ -1112,41 +1110,65 @@ func urgentPickupDeadline(out map[string]any) time.Time {
 
 // waitChatPickup polls the turn's progress until a daemon has started it
 // (task_status running or a terminal state). A refused or timed-out pickup
-// comes back as an error carrying the server's reason; the returned map is
-// merged into the send output either way, with pickup_elapsed_ms added.
+// comes back as an error carrying the reason; the returned map is merged
+// into the send output either way, with pickup_elapsed_ms added.
 //
-// deadline is the server's pickup_deadline_at. Once it has passed, the loop
-// keeps polling for the server's verdict for urgentPickupGrace; a turn that
-// is still not running by then is reported as pickup_timeout, the reason the
-// server's sweep writes for it.
+// deadline is the server's pickup_deadline_at and bounds the whole wait: every
+// progress request and every sleep runs under a context that expires at that
+// instant, so the command returns within the 30 s the server promised even
+// when a request is slow or the server's sweep has not judged the turn yet.
+// When the deadline passes without a server verdict the map keeps the last
+// task_status the server reported (it may still be dispatched) and sets
+// reason=pickup_timeout with reason_source=sender: the sender stopped waiting;
+// the server alone decides the task's fate. A verdict the server did write
+// (failed/cancelled) carries reason_source=server.
 func waitChatPickup(client *cli.APIClient, sessionID, taskID string, deadline time.Time) (map[string]any, error) {
 	if taskID == "" {
 		return nil, fmt.Errorf("no task to wait for")
 	}
 	started := time.Now()
-	cutoff := deadline.Add(urgentPickupGrace)
+	waitCtx, stopWaiting := context.WithDeadline(context.Background(), deadline)
+	defer stopWaiting()
 	path := "/api/chat/sessions/" + url.PathEscape(sessionID) + "/progress?task_id=" + url.QueryEscape(taskID)
+	last := map[string]any{}
+	gaveUp := func() (map[string]any, error) {
+		last["pickup_elapsed_ms"] = time.Since(started).Milliseconds()
+		last["reason"] = "pickup_timeout"
+		last["reason_source"] = "sender"
+		status := strVal(last, "task_status")
+		if status == "" {
+			status = "unknown"
+		}
+		return last, fmt.Errorf("urgent message not picked up by its deadline %s (waited %s): sender stopped waiting; task_status=%s reason=pickup_timeout runtime=%v", deadline.UTC().Format(time.RFC3339), time.Since(started).Round(time.Millisecond), status, last["runtime"])
+	}
 	for {
-		ctx, cancel := cli.APIContext(context.Background())
+		ctx, cancel := cli.APIContext(waitCtx)
 		var diagnostics map[string]any
 		err := client.GetJSON(ctx, path, &diagnostics)
 		cancel()
 		if err != nil {
+			if waitCtx.Err() != nil {
+				return gaveUp()
+			}
 			return nil, fmt.Errorf("wait for pickup: %w", err)
 		}
 		delete(diagnostics, "progress")
 		diagnostics["pickup_elapsed_ms"] = time.Since(started).Milliseconds()
+		last = diagnostics
 		switch strVal(diagnostics, "task_status") {
 		case "running", "completed":
 			return diagnostics, nil
 		case "failed", "cancelled":
+			diagnostics["reason_source"] = "server"
 			return diagnostics, fmt.Errorf("urgent message was not picked up: %s (task_status=%s)", strVal(diagnostics, "reason"), strVal(diagnostics, "task_status"))
 		}
-		if now := time.Now(); now.After(cutoff) {
-			diagnostics["reason"] = "pickup_timeout"
-			return diagnostics, fmt.Errorf("urgent message not picked up by its deadline %s (waited %s); task_status=%s reason=pickup_timeout runtime=%v", deadline.UTC().Format(time.RFC3339), now.Sub(started).Round(time.Millisecond), strVal(diagnostics, "task_status"), diagnostics["runtime"])
+		timer := time.NewTimer(chatPickupPollInterval)
+		select {
+		case <-waitCtx.Done():
+			timer.Stop()
+			return gaveUp()
+		case <-timer.C:
 		}
-		time.Sleep(chatPickupPollInterval)
 	}
 }
 

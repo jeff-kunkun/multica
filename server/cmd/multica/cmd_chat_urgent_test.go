@@ -78,9 +78,24 @@ func urgentTestServer(t *testing.T, deadlineIn time.Duration, fallback bool, pro
 
 func fastPickupPolling(t *testing.T) {
 	t.Helper()
-	oldPoll, oldGrace := chatPickupPollInterval, urgentPickupGrace
-	chatPickupPollInterval, urgentPickupGrace = 20*time.Millisecond, 300*time.Millisecond
-	t.Cleanup(func() { chatPickupPollInterval, urgentPickupGrace = oldPoll, oldGrace })
+	oldPoll := chatPickupPollInterval
+	chatPickupPollInterval = 20 * time.Millisecond
+	t.Cleanup(func() { chatPickupPollInterval = oldPoll })
+}
+
+// deadlineTolerance is the slack a wait may run past pickup_deadline_at for
+// the command to shut down and print: the bound the review (DENE-1886) asked
+// for is deadline + 1 s, never deadline + a grace of its own.
+const deadlineTolerance = time.Second
+
+// slowUntilCancelled blocks a progress handler for `d` or until the client
+// hangs up, whichever comes first, standing in for a server that answers a
+// progress request late.
+func slowUntilCancelled(r *http.Request, d time.Duration) {
+	select {
+	case <-time.After(d):
+	case <-r.Context().Done():
+	}
 }
 
 func decodeReceipt(t *testing.T, output string) map[string]any {
@@ -125,7 +140,8 @@ func TestChatSendUrgentAloneWaitsForPickupAndSucceeds(t *testing.T) {
 }
 
 // Online but nobody starts the turn: the command waits until the server's
-// deadline, reports the server's pickup_timeout verdict, and exits nonzero.
+// deadline, reports the server's pickup_timeout verdict, and exits nonzero
+// within a second of pickup_deadline_at.
 func TestChatSendUrgentOnlineButNotPickedUpFailsAtServerDeadline(t *testing.T) {
 	fastPickupPolling(t)
 	const deadlineIn = 400 * time.Millisecond
@@ -144,22 +160,78 @@ func TestChatSendUrgentOnlineButNotPickedUpFailsAtServerDeadline(t *testing.T) {
 		t.Fatalf("unstarted urgent turn must exit nonzero with pickup_timeout: %v", err)
 	}
 	receipt := decodeReceipt(t, output)
-	if receipt["reason"] != "pickup_timeout" || receipt["task_status"] != "failed" || receipt["message_id"] != "msg-1" {
+	if receipt["reason"] != "pickup_timeout" || receipt["message_id"] != "msg-1" {
 		t.Fatalf("receipt = %v", receipt)
 	}
-	if elapsed < deadlineIn || elapsed > deadlineIn+urgentPickupGrace {
-		t.Fatalf("waited %s; must hold until the server deadline (%s) and no longer than its grace (%s)", elapsed, deadlineIn, urgentPickupGrace)
+	// Depending on whether the last poll landed before or after the deadline,
+	// the verdict is the server's (failed) or the sender's own give-up; both
+	// are honest about task_status and neither waits past the deadline.
+	switch receipt["reason_source"] {
+	case "server":
+		if receipt["task_status"] != "failed" {
+			t.Fatalf("server verdict must carry its task_status: %v", receipt)
+		}
+	case "sender":
+		if receipt["task_status"] != "dispatched" {
+			t.Fatalf("sender give-up must keep the last reported task_status: %v", receipt)
+		}
+	default:
+		t.Fatalf("reason_source = %v", receipt["reason_source"])
+	}
+	if elapsed < deadlineIn-50*time.Millisecond || elapsed > deadlineIn+deadlineTolerance {
+		t.Fatalf("waited %s; must hold until the server deadline (%s) and stop within %s of it", elapsed, deadlineIn, deadlineTolerance)
 	}
 }
 
-// The server's deadline passed but its sweep has not flipped the row yet:
-// after the grace the command stops on its own with reason pickup_timeout
-// rather than waiting on --wait-timeout (10 minutes here).
-func TestChatSendUrgentGivesUpAfterDeadlineGraceWithoutServerVerdict(t *testing.T) {
+// The reviewer's counterexample (DENE-1886): the server never judges the
+// turn — every poll says dispatched, forever. The old grace made the command
+// return at deadline + 10 s (40.04 s measured). It must stop at the deadline,
+// say the server still has it dispatched, and mark that the sender gave up.
+func TestChatSendUrgentServerNeverDecidesStopsAtDeadline(t *testing.T) {
 	fastPickupPolling(t)
-	const deadlineIn = 200 * time.Millisecond
-	srv, _ := urgentTestServer(t, deadlineIn, false, func(_ int, _ bool) map[string]any {
+	const deadlineIn = 300 * time.Millisecond
+	srv, polls := urgentTestServer(t, deadlineIn, false, func(_ int, _ bool) map[string]any {
+		return map[string]any{"task_id": urgentTestTask, "task_status": "dispatched", "reason": "dispatched", "runtime": map[string]any{"status": "online", "name": "mac"}}
+	})
+	cmd := urgentSendCommand(t, srv)
+	started := time.Now()
+	output, err := captureStdout(t, func() error { return runChatSend(cmd, []string{"验证码 482913"}) })
+	elapsed := time.Since(started)
+	if err == nil || cli.ExitCodeFor(err) == 0 || !strings.Contains(err.Error(), "pickup_timeout") || !strings.Contains(err.Error(), "task_status=dispatched") {
+		t.Fatalf("error = %v", err)
+	}
+	receipt := decodeReceipt(t, output)
+	if receipt["reason"] != "pickup_timeout" || receipt["reason_source"] != "sender" || receipt["task_status"] != "dispatched" {
+		t.Fatalf("receipt must not forge a failed task: %v", receipt)
+	}
+	if polls.Load() < 2 {
+		t.Fatalf("polled %d times; must keep polling up to the deadline", polls.Load())
+	}
+	if elapsed < deadlineIn-50*time.Millisecond || elapsed > deadlineIn+deadlineTolerance {
+		t.Fatalf("waited %s, want pickup_deadline_at (%s) within %s, not deadline + grace", elapsed, deadlineIn, deadlineTolerance)
+	}
+}
+
+// A progress request that stalls near the deadline cannot drag the wait past
+// it: the request runs under the deadline context, is cut at the deadline,
+// and the receipt keeps the last status the server did report.
+func TestChatSendUrgentSlowProgressNearDeadlineStillStopsAtDeadline(t *testing.T) {
+	fastPickupPolling(t)
+	const deadlineIn = 300 * time.Millisecond
+	var req atomic.Pointer[http.Request]
+	srv, polls := urgentTestServer(t, deadlineIn, false, func(poll int, _ bool) map[string]any {
+		if poll >= 3 {
+			// Far slower than the time left before the deadline.
+			slowUntilCancelled(req.Load(), 5*time.Second)
+		}
 		return map[string]any{"task_id": urgentTestTask, "task_status": "waiting_local_directory", "reason": "waiting_local_directory"}
+	})
+	// urgentTestServer hides the request from the progress callback; wrap the
+	// handler so the slow poll can watch for the client hanging up.
+	inner := srv.Config.Handler
+	srv.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		req.Store(r)
+		inner.ServeHTTP(w, r)
 	})
 	cmd := urgentSendCommand(t, srv)
 	started := time.Now()
@@ -169,11 +241,49 @@ func TestChatSendUrgentGivesUpAfterDeadlineGraceWithoutServerVerdict(t *testing.
 		t.Fatalf("error = %v", err)
 	}
 	receipt := decodeReceipt(t, output)
-	if receipt["reason"] != "pickup_timeout" || receipt["task_status"] != "waiting_local_directory" {
+	if receipt["reason"] != "pickup_timeout" || receipt["reason_source"] != "sender" || receipt["task_status"] != "waiting_local_directory" {
 		t.Fatalf("receipt = %v", receipt)
 	}
-	if elapsed < deadlineIn+urgentPickupGrace || elapsed > deadlineIn+urgentPickupGrace+time.Second {
-		t.Fatalf("waited %s, want deadline (%s) + grace (%s)", elapsed, deadlineIn, urgentPickupGrace)
+	if polls.Load() < 3 {
+		t.Fatalf("polled %d times; the slow poll never happened", polls.Load())
+	}
+	if elapsed < deadlineIn-50*time.Millisecond || elapsed > deadlineIn+deadlineTolerance {
+		t.Fatalf("waited %s; a slow progress request must be cut at the deadline (%s + %s)", elapsed, deadlineIn, deadlineTolerance)
+	}
+}
+
+// The very first progress request stalls past the deadline: the command
+// still stops at the deadline and, knowing nothing newer, reports the send
+// receipt's status rather than inventing one.
+func TestChatSendUrgentFirstProgressRequestStallsStopsAtDeadline(t *testing.T) {
+	fastPickupPolling(t)
+	const deadlineIn = 300 * time.Millisecond
+	var req atomic.Pointer[http.Request]
+	srv, _ := urgentTestServer(t, deadlineIn, false, func(_ int, _ bool) map[string]any {
+		slowUntilCancelled(req.Load(), 5*time.Second)
+		return map[string]any{"task_id": urgentTestTask, "task_status": "running"}
+	})
+	inner := srv.Config.Handler
+	srv.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		req.Store(r)
+		inner.ServeHTTP(w, r)
+	})
+	cmd := urgentSendCommand(t, srv)
+	started := time.Now()
+	output, err := captureStdout(t, func() error { return runChatSend(cmd, []string{"验证码 482913"}) })
+	elapsed := time.Since(started)
+	if err == nil || !strings.Contains(err.Error(), "pickup_timeout") || !strings.Contains(err.Error(), "task_status=unknown") {
+		t.Fatalf("error = %v", err)
+	}
+	receipt := decodeReceipt(t, output)
+	if receipt["reason"] != "pickup_timeout" || receipt["reason_source"] != "sender" || receipt["task_id"] != urgentTestTask || receipt["message_id"] != "msg-1" {
+		t.Fatalf("receipt = %v", receipt)
+	}
+	if _, forged := receipt["task_status"]; forged {
+		t.Fatalf("no progress ever answered; task_status must not be invented: %v", receipt)
+	}
+	if elapsed > deadlineIn+deadlineTolerance {
+		t.Fatalf("waited %s; must stop at the deadline (%s + %s)", elapsed, deadlineIn, deadlineTolerance)
 	}
 }
 

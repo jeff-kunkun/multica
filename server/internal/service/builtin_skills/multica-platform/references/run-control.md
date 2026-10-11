@@ -141,10 +141,16 @@ multica chat send --session <id> --urgent "验证码 482913，请立刻填入" -
 - `--urgent` always waits for the **pickup** (task_status `running`), not the
   full reply: exit 0 with `pickup_elapsed_ms` once a daemon starts the turn;
   nonzero with `task_status`, `reason` (`pickup_timeout`) and `runtime` when
-  nobody starts it by `pickup_deadline_at`. The wait is bounded by that server
-  deadline, not by `--wait-timeout`; `--wait` adds nothing. A zero exit means
-  the message is being read now. Read the reply later with
-  `multica chat history`.
+  nobody starts it by `pickup_deadline_at`. The wait ends at that server
+  deadline and never later: every progress request and pause runs under it,
+  so a slow request or a late server sweep cannot stretch the command past
+  the 30 s. `--wait-timeout` does not apply; `--wait` adds nothing. When the
+  server has not judged the turn by the deadline, `task_status` is whatever
+  it last reported (it may still be `dispatched`) and `reason_source: sender`
+  says the sender stopped waiting; `reason_source: server` marks a verdict the
+  server wrote (`failed`/`cancelled`). Only the server decides the task's
+  fate. A zero exit means the message is being read now. Read the reply later
+  with `multica chat history`.
 - `--urgent` is not available with `--linked` (linked-workspace sends) and is
   not a flag of `chat new`; open the chat first, then send urgent.
 - `multica chat progress --session <id> --history --output json` shows
