@@ -139,6 +139,10 @@ services:
       # Unset falls back to a key derived from JWT_SECRET.
       MULTICA_ROUTING_SECRET_KEY: ${MULTICA_ROUTING_SECRET_KEY:-}
       MULTICA_LOG_EXPORT_SECRET_KEY: ${MULTICA_LOG_EXPORT_SECRET_KEY:-}
+      # Persist an independent base64 32-byte key in protected operator config
+      # before enabling Bot webhooks. Shared by blue/green via extends.
+      # Empty preserves legacy ciphertext compatibility; see bot-wake-contract.md.
+      MULTICA_BOT_WAKE_SECRET_KEY: ${MULTICA_BOT_WAKE_SECRET_KEY:-}
       # Public URL the API is reachable at from the open internet, no
       # trailing slash. Used to mint absolute webhook URLs for autopilot
       # webhook triggers. Leave unset behind a same-origin reverse proxy
