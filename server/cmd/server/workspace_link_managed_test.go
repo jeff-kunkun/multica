@@ -110,6 +110,20 @@ func TestManagedLinkThroughRouter(t *testing.T) {
 		t.Fatalf("create issue: %d %v", code, issue)
 	}
 	issueID, _ := issue["id"].(string)
+	// Prefixes accepted by workspace creation must pass the managed gate too.
+	number := scan(`SELECT number::text FROM issue WHERE id=$1`, issueID)
+	for _, prefix := range []string{"123", "3TEAM", "1234567890"} {
+		exec(`UPDATE workspace SET issue_prefix=$1 WHERE id=$2`, prefix, source)
+		if code, body := do(token, "GET", "/api/issues/"+prefix+"-"+number, nil, true); code != http.StatusOK || body["id"] != issueID {
+			t.Fatalf("managed numeric prefix %s: %d %v", prefix, code, body)
+		}
+	}
+	exec(`UPDATE workspace SET issue_prefix='MGD' WHERE id=$1`, source)
+	for _, path := range []string{"/api/issues/limit-usage", "/api/issues/child-progress", "/api/issues/parking", "/api/issues/grouped", "/api/issues/stall-actions", "/api/autopilots/usage"} {
+		if code, body := do(token, "GET", path, nil, true); code != http.StatusForbidden {
+			t.Fatalf("fixed path %s: %d %v", path, code, body)
+		}
+	}
 	if ws := scan(`SELECT workspace_id::text FROM issue WHERE id = $1`, issueID); ws != source {
 		t.Fatalf("issue landed in %s, want the source", ws)
 	}
