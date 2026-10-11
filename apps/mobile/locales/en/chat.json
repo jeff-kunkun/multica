@@ -130,6 +130,7 @@
     "default": "Run failed",
     "queued_expired": "Expired in queue",
     "runtime_offline": "Daemon offline",
+    "pickup_timeout": "Urgent message not picked up in time",
     "runtime_reconnect_timeout": "Daemon did not reconnect in time",
     "runtime_recovery": "Daemon restarted",
     "timeout": "Run timed out",

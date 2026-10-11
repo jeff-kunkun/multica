@@ -26,6 +26,7 @@ export const REASONS = new Set([
   // Platform / scheduler side.
   "queued_expired",
   "runtime_offline",
+  "pickup_timeout",
   "runtime_reconnect_timeout",
   "runtime_recovery",
   "timeout",

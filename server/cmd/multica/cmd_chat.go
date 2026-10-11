@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"net/url"
 	"os"
 	"strconv"
@@ -247,6 +248,21 @@ access was refused; inspect multica workspace link view <link-id>.
   multica chat send --session <id|url> "Use the staging database instead" --mode steer
   multica chat send --session <id|url> --content-file ./msg.md --mode queue
   multica chat send --session <id|url> "再补一句" --wait   # print the agent's reply
+
+--urgent is for messages that are worthless late (a verification code, a
+relayed SMS). It never queues behind an offline machine: if the agent's
+runtime cannot claim right now, the send is refused with reason
+"runtime_offline: <runtime> last_seen <time>" and next_steps, unless the agent
+has a fallback runtime (multica agent update --fallback-runtime) that is
+online — then the turn runs there and JSON carries fallback_runtime=true. An
+accepted urgent turn restarts any reply in progress (so only the chat's
+creator or an agent may send one), sits at the head of the queue, and is
+failed with failure_reason=pickup_timeout plus a chat notice when no daemon
+starts it by pickup_deadline_at (30s). --urgent --wait returns as soon as the
+turn is picked up (task_status=running) and exits nonzero with the reason
+when it is refused or times out.
+
+  multica chat send --session <id|url> --urgent --wait "验证码 482913，请立刻填入" --output json
 `,
 	Args: cobra.MaximumNArgs(1),
 	RunE: runChatSend,
@@ -309,6 +325,7 @@ func init() {
 	chatSendCmd.Flags().String("content-file", "", "Read the message from this file instead of the argument")
 	chatSendCmd.Flags().String("per-quote", "", "Exact words from this caller’s earlier human message in this chat; server verifies the quote before exempting it from the Bot wake-chain limit")
 	chatSendCmd.Flags().String("mode", "queue", "While the agent is replying: steer, queue or restart")
+	chatSendCmd.Flags().Bool("urgent", false, "Deliver now or fail now: refused (exit nonzero, JSON reason + next_steps) when the agent's runtime is offline and no online fallback runtime is configured; otherwise goes to the head of the queue (restart semantics) and fails with pickup_timeout if no daemon starts it within 30s. With --wait, waits for the pickup instead of the full reply.")
 	chatSendCmd.Flags().String("output", "json", "Output format: table or json")
 	chatSendCmd.Flags().StringSlice("attachment", nil, "Local files to attach to this message (repeatable)")
 	chatSendCmd.Flags().Bool("allow-external-file", false, "Allow attachment paths outside the working directory")
@@ -933,10 +950,23 @@ func runChatSend(cmd *cobra.Command, args []string) error {
 		}
 		attachmentIDs = append(attachmentIDs, id)
 	}
+	urgent, _ := cmd.Flags().GetBool("urgent")
+	if urgent && strings.TrimSpace(linked) != "" {
+		return fmt.Errorf("chat send --urgent is not available with --linked")
+	}
 	path := "/api/chat/sessions/" + url.PathEscape(ref.ID) + "/messages"
-	if err := client.PostJSON(ctx, path, map[string]any{"content": content, "mode": mode, "attachment_ids": attachmentIDs, "per_quote": flagString(cmd, "per-quote")}, &out); err != nil {
+	body := map[string]any{"content": content, "mode": mode, "attachment_ids": attachmentIDs, "per_quote": flagString(cmd, "per-quote")}
+	if urgent {
+		body["urgent"] = true
+	}
+	if err := client.PostJSON(ctx, path, body, &out); err != nil {
 		if strings.TrimSpace(linked) != "" {
 			return linkedChatRefusal(cmd, err, "chat send")
+		}
+		if urgent {
+			if refused, uerr := urgentSendRefusal(err, output); refused {
+				return uerr
+			}
 		}
 		return sendModeRefusal(err, output, "chat send")
 	}
@@ -949,6 +979,34 @@ func runChatSend(cmd *cobra.Command, args []string) error {
 		return blockedChatSendError(out)
 	}
 	printChatRuntimeWarning(cmd, out)
+	if urgent {
+		if wait, _ := cmd.Flags().GetBool("wait"); wait {
+			timeout, _ := cmd.Flags().GetDuration("wait-timeout")
+			pickup, err := waitChatPickup(client, ref.ID, strVal(out, "task_id"), timeout)
+			for key, value := range pickup {
+				out[key] = value
+			}
+			if err != nil {
+				if output != "table" {
+					_ = cli.PrintJSON(os.Stdout, out)
+				}
+				return err
+			}
+		}
+		if output == "table" {
+			where := "primary runtime"
+			if out["fallback_runtime"] == true {
+				where = "fallback runtime"
+			}
+			fmt.Printf("Sent urgent (%v, %s): message %v, task %v", out["mode"], where, out["message_id"], out["task_id"])
+			if status := strVal(out, "task_status"); status != "" {
+				fmt.Printf(", task_status %s", status)
+			}
+			fmt.Println()
+			return nil
+		}
+		return cli.PrintJSON(os.Stdout, out)
+	}
 	if wait, _ := cmd.Flags().GetBool("wait"); wait {
 		return finishChatSend(cmd, client, ref.ID, out)
 	}
@@ -957,6 +1015,71 @@ func runChatSend(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 	return cli.PrintJSON(os.Stdout, out)
+}
+
+// urgentSendRefusal recognises the 409 an urgent send gets when the agent's
+// runtime is offline and no online fallback is configured. The body is
+// printed as-is (reason + next_steps) and the exit is nonzero; nothing was
+// saved, so there is nothing to avoid resending.
+func urgentSendRefusal(err error, output string) (bool, error) {
+	var httpErr *cli.HTTPError
+	if !errors.As(err, &httpErr) || httpErr.StatusCode != http.StatusConflict {
+		return false, nil
+	}
+	var refusal map[string]any
+	if json.Unmarshal([]byte(httpErr.Body), &refusal) != nil || strVal(refusal, "code") != "runtime_offline" {
+		return false, nil
+	}
+	if output != "table" {
+		_ = cli.PrintJSON(os.Stdout, refusal)
+	}
+	steps := ""
+	if list, ok := refusal["next_steps"].([]any); ok {
+		parts := make([]string, 0, len(list))
+		for _, item := range list {
+			parts = append(parts, fmt.Sprint(item))
+		}
+		steps = "; next steps: " + strings.Join(parts, " | ")
+	}
+	detail := strVal(refusal, "reason")
+	if fb := strVal(refusal, "fallback_reason"); fb != "" {
+		detail += "; fallback: " + fb
+	}
+	return true, fmt.Errorf("chat send --urgent refused, nothing was sent: %s%s", detail, steps)
+}
+
+var chatPickupPollInterval = 2 * time.Second
+
+// waitChatPickup polls the turn's progress until a daemon has started it
+// (task_status running or a terminal state). A refused or timed-out pickup
+// comes back as an error carrying the server's reason; the returned map is
+// merged into the send output either way.
+func waitChatPickup(client *cli.APIClient, sessionID, taskID string, timeout time.Duration) (map[string]any, error) {
+	if taskID == "" {
+		return nil, fmt.Errorf("no task to wait for")
+	}
+	deadline := time.Now().Add(timeout)
+	path := "/api/chat/sessions/" + url.PathEscape(sessionID) + "/progress?task_id=" + url.QueryEscape(taskID)
+	for {
+		ctx, cancel := cli.APIContext(context.Background())
+		var diagnostics map[string]any
+		err := client.GetJSON(ctx, path, &diagnostics)
+		cancel()
+		if err != nil {
+			return nil, fmt.Errorf("wait for pickup: %w", err)
+		}
+		delete(diagnostics, "progress")
+		switch strVal(diagnostics, "task_status") {
+		case "running", "completed":
+			return diagnostics, nil
+		case "failed", "cancelled":
+			return diagnostics, fmt.Errorf("urgent message was not picked up: %s (task_status=%s)", strVal(diagnostics, "reason"), strVal(diagnostics, "task_status"))
+		}
+		if time.Now().After(deadline) {
+			return diagnostics, fmt.Errorf("urgent message not picked up after %s; task_status=%s reason=%s runtime=%v", timeout, strVal(diagnostics, "task_status"), strVal(diagnostics, "reason"), diagnostics["runtime"])
+		}
+		time.Sleep(chatPickupPollInterval)
+	}
 }
 
 func blockedChatSendError(out map[string]any) error {

@@ -74,8 +74,12 @@ type AgentResponse struct {
 	// timestamp, device, owner, configuration, or credential fields; clients
 	// use it only when the full runtime row is unavailable.
 	RuntimeAvailability string `json:"runtime_availability,omitempty"`
-	Name                string `json:"name"`
-	Description         string `json:"description"`
+	// FallbackRuntimeID is the explicitly configured second runtime an urgent
+	// chat turn may go to when RuntimeID is offline (DENE-1844). Same owner and
+	// provider as RuntimeID, enforced on write. Empty when none is configured.
+	FallbackRuntimeID string `json:"fallback_runtime_id,omitempty"`
+	Name              string `json:"name"`
+	Description       string `json:"description"`
 	// Instructions is what this agent's owner wrote. For a system agent it
 	// holds only the workspace's own notes — the product half lives in
 	// SystemInstructions and is never stored on the row.
@@ -319,6 +323,7 @@ func (h *Handler) agentToResponse(a db.Agent) AgentResponse {
 		WorkspaceID:              uuidToString(a.WorkspaceID),
 		RuntimeID:                uuidToString(a.RuntimeID),
 		RuntimeBound:             a.RuntimeID.Valid,
+		FallbackRuntimeID:        uuidToString(a.FallbackRuntimeID),
 		Name:                     a.Name,
 		Description:              a.Description,
 		Instructions:             a.Instructions,
@@ -2637,7 +2642,11 @@ type UpdateAgentRequest struct {
 	ConversationStarters *[]AgentConversationStarter `json:"conversation_starters"`
 	AvatarURL            *string                     `json:"avatar_url"`
 	RuntimeID            *string                     `json:"runtime_id"`
-	RuntimeConfig        any                         `json:"runtime_config"`
+	// FallbackRuntimeID (DENE-1844): a runtime id sets the fallback, "" clears
+	// it. Must share owner and provider with the primary runtime and differ
+	// from it. Refused on a specialisation that follows its base role.
+	FallbackRuntimeID *string `json:"fallback_runtime_id"`
+	RuntimeConfig     any     `json:"runtime_config"`
 	// custom_env is intentionally NOT updatable through this endpoint.
 	// Use `PUT /api/agents/{id}/env` for env changes — that path admits
 	// the agent owner or a workspace owner/admin, denies agent actors,
@@ -2987,7 +2996,7 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 	// following child's runtime by accident is the drift this feature exists to
 	// stop, and the message names the one field that resolves it.
 	runtimeFieldsTouched := false
-	for _, field := range []string{"runtime_id", "runtime_config", "model", "thinking_level", "service_tier"} {
+	for _, field := range []string{"runtime_id", "fallback_runtime_id", "runtime_config", "model", "thinking_level", "service_tier"} {
 		if _, ok := rawFields[field]; ok {
 			runtimeFieldsTouched = true
 			break
@@ -3140,6 +3149,55 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 		params.RuntimeMode = pgtype.Text{String: runtime.RuntimeMode, Valid: true}
 		targetRuntimeID = runtime.ID
 		targetProvider = runtime.Provider
+	}
+	// Fallback runtime (DENE-1844). Validated against the primary runtime this
+	// update leaves behind, so "move the primary and set the fallback" in one
+	// call checks the pair that will actually be stored.
+	shouldClearFallbackRuntime := false
+	if req.FallbackRuntimeID != nil && strings.TrimSpace(*req.FallbackRuntimeID) == "" {
+		shouldClearFallbackRuntime = true
+	} else if req.FallbackRuntimeID != nil {
+		fallbackUUID, ok := parseUUIDOrBadRequest(w, *req.FallbackRuntimeID, "fallback_runtime_id")
+		if !ok {
+			return
+		}
+		if !targetRuntimeID.Valid {
+			writeError(w, http.StatusBadRequest, "set a primary runtime_id before configuring a fallback runtime")
+			return
+		}
+		primary, err := h.Queries.GetAgentRuntimeForWorkspace(r.Context(), db.GetAgentRuntimeForWorkspaceParams{ID: targetRuntimeID, WorkspaceID: existing.WorkspaceID})
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "the agent's primary runtime could not be loaded; set runtime_id first")
+			return
+		}
+		fallback, err := h.Queries.GetAgentRuntimeForWorkspace(r.Context(), db.GetAgentRuntimeForWorkspaceParams{ID: fallbackUUID, WorkspaceID: existing.WorkspaceID})
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid fallback_runtime_id")
+			return
+		}
+		if err := fallbackRuntimeCompatible(primary, fallback); err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		member, ok := h.workspaceMember(w, r, uuidToString(existing.WorkspaceID))
+		if !ok {
+			return
+		}
+		if !canUseRuntimeForAgent(member, fallback) {
+			writeError(w, http.StatusForbidden, "this runtime is private; only its owner can use it as a fallback")
+			return
+		}
+		params.FallbackRuntimeID = fallback.ID
+	} else if req.RuntimeID != nil && existing.FallbackRuntimeID.Valid {
+		// The primary moved and the stored fallback was not re-sent: keep it
+		// only if it still pairs with the new primary, otherwise clear it. A
+		// fallback on a different owner or provider must never survive a
+		// primary change silently.
+		primary, perr := h.Queries.GetAgentRuntimeForWorkspace(r.Context(), db.GetAgentRuntimeForWorkspaceParams{ID: targetRuntimeID, WorkspaceID: existing.WorkspaceID})
+		fallback, ferr := h.Queries.GetAgentRuntimeForWorkspace(r.Context(), db.GetAgentRuntimeForWorkspaceParams{ID: existing.FallbackRuntimeID, WorkspaceID: existing.WorkspaceID})
+		if perr != nil || ferr != nil || fallbackRuntimeCompatible(primary, fallback) != nil {
+			shouldClearFallbackRuntime = true
+		}
 	}
 	if req.CustomArgs != nil {
 		provider := targetProvider
@@ -3556,6 +3614,14 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			slog.Warn("clear agent mcp_config failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
 			writeError(w, http.StatusInternalServerError, "failed to clear mcp_config: "+err.Error())
+			return
+		}
+	}
+	if shouldClearFallbackRuntime {
+		updated, err = q.ClearAgentFallbackRuntime(r.Context(), updated.ID)
+		if err != nil {
+			slog.Warn("clear agent fallback_runtime_id failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
+			writeError(w, http.StatusInternalServerError, "failed to clear fallback_runtime_id: "+err.Error())
 			return
 		}
 	}

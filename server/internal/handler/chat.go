@@ -1142,19 +1142,32 @@ type SendChatMessageRequest struct {
 	// mid-reply), queue (after the reply; default) or restart (stop the reply
 	// and start over from this message). Ignored when nothing is replying.
 	Mode string `json:"mode,omitempty"`
+	// Urgent (DENE-1844) refuses the send when the agent's runtime is offline
+	// and no online fallback runtime is configured, dispatches to the fallback
+	// otherwise, puts the turn at the head of the queue (restart semantics),
+	// and fails it with pickup_timeout when no daemon starts it within
+	// service.UrgentChatPickupDeadline.
+	Urgent bool `json:"urgent,omitempty"`
 }
 
 type SendChatMessageResponse struct {
-	Runtime        *ChatRuntimeResponse       `json:"runtime"`
-	Warning        string                     `json:"warning,omitempty"`
-	ReasonCode     string                     `json:"reason_code,omitempty"`
-	ChatSessionID  string                     `json:"chat_session_id,omitempty"`
-	MessageKind    string                     `json:"message_kind,omitempty"`
-	LinkedDelivery *ManagedChatDeliverySource `json:"linked_delivery,omitempty"`
-	MessageID      string                     `json:"message_id"`
-	TaskID         string                     `json:"task_id"`
-	SupportsQueue  bool                       `json:"supports_queue"`
-	Queued         bool                       `json:"queued"`
+	Runtime *ChatRuntimeResponse `json:"runtime"`
+	// Urgent echoes the request flag; PickupDeadlineAt is when the turn fails
+	// with pickup_timeout unless a daemon starts it first. FallbackRuntime is
+	// true when the turn went to the configured fallback because the primary
+	// runtime was offline.
+	Urgent           bool                       `json:"urgent,omitempty"`
+	PickupDeadlineAt *string                    `json:"pickup_deadline_at,omitempty"`
+	FallbackRuntime  bool                       `json:"fallback_runtime,omitempty"`
+	Warning          string                     `json:"warning,omitempty"`
+	ReasonCode       string                     `json:"reason_code,omitempty"`
+	ChatSessionID    string                     `json:"chat_session_id,omitempty"`
+	MessageKind      string                     `json:"message_kind,omitempty"`
+	LinkedDelivery   *ManagedChatDeliverySource `json:"linked_delivery,omitempty"`
+	MessageID        string                     `json:"message_id"`
+	TaskID           string                     `json:"task_id"`
+	SupportsQueue    bool                       `json:"supports_queue"`
+	Queued           bool                       `json:"queued"`
 	// Mode is what actually happened: steer, queue, restart, or start when
 	// nothing was replying. A steer whose reply ended first reports queue.
 	Mode string `json:"mode"`
@@ -1204,6 +1217,10 @@ func (h *Handler) SendChatMessage(w http.ResponseWriter, r *http.Request) {
 			writeWorkspaceLinkError(w, workspacelink.ErrManagedDenied)
 			return
 		}
+		if req.Urgent {
+			writeError(w, http.StatusBadRequest, "urgent is not supported for linked-workspace sends")
+			return
+		}
 		h.sendManagedChatMessage(w, r, session, grant, req)
 		return
 	}
@@ -1211,6 +1228,18 @@ func (h *Handler) SendChatMessage(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		writeError(w, http.StatusBadRequest, "mode must be steer, queue or restart")
 		return
+	}
+	// An urgent turn must start within its pickup deadline, and the claim
+	// serialises turns per chat: while an earlier reply is still running the
+	// urgent one could not be picked up at all. Restart is the one mode that
+	// clears the way, so urgent implies it (DENE-1844); PrioritizeQueuedChatTask
+	// then gives the turn the same head-of-queue rank a restart already uses.
+	if req.Urgent {
+		if mode == sendModeSteer {
+			writeError(w, http.StatusBadRequest, "urgent cannot be combined with mode=steer; an urgent message restarts the reply")
+			return
+		}
+		mode = sendModeRestart
 	}
 
 	// Pre-validate attachment ids early so invalid input returns 400 before
@@ -1335,9 +1364,27 @@ func (h *Handler) SendChatMessage(w http.ResponseWriter, r *http.Request) {
 	// web chat the person who typed is actorID (attachment owner). The task
 	// itself is authorized as taskUserID — the creator, when somebody else
 	// is speaking in a shared chat — so the run uses the creator's quota.
-	sent, err := h.TaskService.SendDirectChatMessage(r.Context(), session, agent, taskUserID, req.Content, attachmentIDs, actorType, parseUUID(actorID))
+	// Urgent delivery decides the runtime before anything is persisted: an
+	// offline primary with no online fallback is a refusal with the reason and
+	// the next steps, and nothing is written (DENE-1844).
+	var sendOpts service.DirectChatSendOptions
+	if req.Urgent {
+		opts, refusal, err := h.urgentChatDispatch(r.Context(), agent)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to check the agent's runtime")
+			return
+		}
+		if refusal != nil {
+			writeJSON(w, http.StatusConflict, refusal)
+			return
+		}
+		sendOpts = opts
+	}
+	sent, err := h.TaskService.SendDirectChatMessageWithOptions(r.Context(), session, agent, taskUserID, req.Content, attachmentIDs, actorType, parseUUID(actorID), sendOpts)
 	if err != nil {
 		switch {
+		case errors.Is(err, service.ErrChatFallbackRuntimeChanged):
+			writeError(w, http.StatusConflict, "the agent's fallback runtime changed while sending; send again")
 		case errors.Is(err, service.ErrChatSessionArchived):
 			writeError(w, http.StatusConflict, "chat session is archived")
 		case errors.Is(err, service.ErrChatTaskAgentArchived):
@@ -1433,15 +1480,23 @@ func (h *Handler) SendChatMessage(w http.ResponseWriter, r *http.Request) {
 		warning = service.BotWakeWarning(task, agent.Name)
 		reason = "bot_wake_chain_limit"
 	}
+	var pickupDeadline *string
+	if task.PickupDeadlineAt.Valid {
+		deadline := timestampToString(task.PickupDeadlineAt)
+		pickupDeadline = &deadline
+	}
 	writeJSON(w, http.StatusCreated, SendChatMessageResponse{
 		Runtime: diagnostics.Runtime, Warning: warning, ReasonCode: reason,
-		MessageID:     uuidToString(msg.ID),
-		TaskID:        uuidToString(task.ID),
-		SupportsQueue: true,
-		Queued:        sent.Queued,
-		Mode:          applied,
-		CreatedAt:     timestampToString(task.CreatedAt),
-		AttachmentIDs: boundAttachmentIDs,
+		Urgent:           req.Urgent,
+		PickupDeadlineAt: pickupDeadline,
+		FallbackRuntime:  sendOpts.RuntimeID.Valid,
+		MessageID:        uuidToString(msg.ID),
+		TaskID:           uuidToString(task.ID),
+		SupportsQueue:    true,
+		Queued:           sent.Queued,
+		Mode:             applied,
+		CreatedAt:        timestampToString(task.CreatedAt),
+		AttachmentIDs:    boundAttachmentIDs,
 	})
 }
 

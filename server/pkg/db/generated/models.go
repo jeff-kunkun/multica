@@ -69,6 +69,7 @@ type Agent struct {
 	DispatchMode          string        `json:"dispatch_mode"`
 	DispatchProjects      []pgtype.UUID `json:"dispatch_projects"`
 	SeriesOverride        string        `json:"series_override"`
+	FallbackRuntimeID     pgtype.UUID   `json:"fallback_runtime_id"`
 }
 
 type AgentAccessPass struct {
@@ -272,37 +273,38 @@ type AgentTaskQueue struct {
 	// The row id referenced by trigger_evidence_kind (a comment id, autopilot_run id, rule_version id, source task id, ...). No FK; resolvable per-kind in the app layer (MUL-4302 §2).
 	TriggerEvidenceRefID pgtype.UUID `json:"trigger_evidence_ref_id"`
 	// The one human accountable for this run, for audit / visibility / cost only — NEVER consulted for authorization (that is originator_user_id). Invariant: when originator_user_id IS NOT NULL, this equals it; the two diverge only when originator_user_id IS NULL (autopilot rule_owner / degraded owner_fallback name an accountable human while authorization carries none). No FK, no cascade (MUL-4302 §1/§7). NULL means no accountable human was resolved: a pre-migration row, OR a NEW row whose audit source is not-yet-resolved / unattributed (e.g. run_only autopilot until rule_owner lands) — NOT pre-migration only.
-	AccountableUserID         pgtype.UUID `json:"accountable_user_id"`
-	SessionRolloutMissing     bool        `json:"session_rollout_missing"`
-	RetiredSessionID          pgtype.Text `json:"retired_session_id"`
-	QuickActionsDisabled      bool        `json:"quick_actions_disabled"`
-	RegenerateQuickActionsFor pgtype.UUID `json:"regenerate_quick_actions_for"`
-	BranchName                pgtype.Text `json:"branch_name"`
-	DurableWorkDir            pgtype.Text `json:"durable_work_dir"`
-	ChannelContextRevision    pgtype.Int8 `json:"channel_context_revision"`
-	CommentThreadID           pgtype.UUID `json:"comment_thread_id"`
-	CancelledByType           pgtype.Text `json:"cancelled_by_type"`
-	CancelledByID             pgtype.UUID `json:"cancelled_by_id"`
-	CancelledByName           pgtype.Text `json:"cancelled_by_name"`
-	IssueSnapshot             []byte      `json:"issue_snapshot"`
-	CodeDecision              []byte      `json:"code_decision"`
-	FailureInputVersion       pgtype.Text `json:"failure_input_version"`
-	FailureFingerprint        pgtype.Text `json:"failure_fingerprint"`
-	WorkThreadID              pgtype.UUID `json:"work_thread_id"`
-	ContextGeneration         int32       `json:"context_generation"`
-	ContextMessageLimit       int32       `json:"context_message_limit"`
-	ContextTokenBudget        int32       `json:"context_token_budget"`
-	ContinuityBreakReason     pgtype.Text `json:"continuity_break_reason"`
-	SessionMode               pgtype.Text `json:"session_mode"`
-	ResumedFromTaskID         pgtype.UUID `json:"resumed_from_task_id"`
-	SessionBreakReason        pgtype.Text `json:"session_break_reason"`
-	ViaBotID                  pgtype.UUID `json:"via_bot_id"`
-	ViaBotName                pgtype.Text `json:"via_bot_name"`
-	WakeRootID                pgtype.UUID `json:"wake_root_id"`
-	WakeHop                   int32       `json:"wake_hop"`
-	WakeGeneration            int64       `json:"wake_generation"`
-	WakeReserved              bool        `json:"wake_reserved"`
-	WakeHumanQuote            pgtype.Text `json:"wake_human_quote"`
+	AccountableUserID         pgtype.UUID        `json:"accountable_user_id"`
+	SessionRolloutMissing     bool               `json:"session_rollout_missing"`
+	RetiredSessionID          pgtype.Text        `json:"retired_session_id"`
+	QuickActionsDisabled      bool               `json:"quick_actions_disabled"`
+	RegenerateQuickActionsFor pgtype.UUID        `json:"regenerate_quick_actions_for"`
+	BranchName                pgtype.Text        `json:"branch_name"`
+	DurableWorkDir            pgtype.Text        `json:"durable_work_dir"`
+	ChannelContextRevision    pgtype.Int8        `json:"channel_context_revision"`
+	CommentThreadID           pgtype.UUID        `json:"comment_thread_id"`
+	CancelledByType           pgtype.Text        `json:"cancelled_by_type"`
+	CancelledByID             pgtype.UUID        `json:"cancelled_by_id"`
+	CancelledByName           pgtype.Text        `json:"cancelled_by_name"`
+	IssueSnapshot             []byte             `json:"issue_snapshot"`
+	CodeDecision              []byte             `json:"code_decision"`
+	FailureInputVersion       pgtype.Text        `json:"failure_input_version"`
+	FailureFingerprint        pgtype.Text        `json:"failure_fingerprint"`
+	WorkThreadID              pgtype.UUID        `json:"work_thread_id"`
+	ContextGeneration         int32              `json:"context_generation"`
+	ContextMessageLimit       int32              `json:"context_message_limit"`
+	ContextTokenBudget        int32              `json:"context_token_budget"`
+	ContinuityBreakReason     pgtype.Text        `json:"continuity_break_reason"`
+	SessionMode               pgtype.Text        `json:"session_mode"`
+	ResumedFromTaskID         pgtype.UUID        `json:"resumed_from_task_id"`
+	SessionBreakReason        pgtype.Text        `json:"session_break_reason"`
+	ViaBotID                  pgtype.UUID        `json:"via_bot_id"`
+	ViaBotName                pgtype.Text        `json:"via_bot_name"`
+	WakeRootID                pgtype.UUID        `json:"wake_root_id"`
+	WakeHop                   int32              `json:"wake_hop"`
+	WakeGeneration            int64              `json:"wake_generation"`
+	WakeReserved              bool               `json:"wake_reserved"`
+	WakeHumanQuote            pgtype.Text        `json:"wake_human_quote"`
+	PickupDeadlineAt          pgtype.Timestamptz `json:"pickup_deadline_at"`
 }
 
 type AgentToLabel struct {

@@ -229,6 +229,7 @@ func init() {
 	agentUpdateCmd.Flags().String("instructions", "", "New instructions")
 	agentUpdateCmd.Flags().String("conversation-starters", "", "New conversation starters as a JSON array of {\"label\",\"prompt\"} objects (at most 3; label ≤80, prompt ≤4000). Pass '[]' to clear. Omit to leave the stored value unchanged.")
 	agentUpdateCmd.Flags().String("runtime-id", "", "New runtime ID")
+	agentUpdateCmd.Flags().String("fallback-runtime", "", "Second runtime that an urgent chat message (chat send --urgent) runs on when the primary runtime is offline. Must belong to the same owner and run the same provider as --runtime-id; the server refuses anything else. Pass 'none' to clear. Not inherited by name: a specialisation that follows its base role gets the base role's. Example: multica agent update <agent-id> --fallback-runtime <runtime-id>")
 	agentUpdateCmd.Flags().String("runtime-config", "", "New runtime config as JSON string")
 	agentUpdateCmd.Flags().String("model", "", "New model identifier. Pass an empty string to clear and fall back to the runtime default.")
 	agentUpdateCmd.Flags().String("thinking-level", "", "New reasoning/effort level for the agent's runtime (e.g. Claude: low|medium|high|xhigh|max; Codex values come from the runtime model catalog). The set is runtime/model-specific; malformed values are rejected server-side and the daemon validates the exact model/level pair. Some runtimes (e.g. hermes) expose no reasoning control and reject every value. Pass an empty string to clear and fall back to the runtime default.")
@@ -693,12 +694,13 @@ func runAgentGet(cmd *cobra.Command, args []string) error {
 		return cli.PrintJSON(os.Stdout, agent)
 	}
 
-	headers := []string{"ID", "NAME", "STATUS", "RUNTIME", "SERIES", "SOURCE", "VISIBILITY", "AVATAR_URL", "DESCRIPTION"}
+	headers := []string{"ID", "NAME", "STATUS", "RUNTIME", "FALLBACK_RUNTIME", "SERIES", "SOURCE", "VISIBILITY", "AVATAR_URL", "DESCRIPTION"}
 	rows := [][]string{{
 		strVal(agent, "id"),
 		strVal(agent, "name"),
 		strVal(agent, "status"),
 		strVal(agent, "runtime_mode"),
+		strVal(agent, "fallback_runtime_id"),
 		strVal(agent, "series"),
 		strVal(agent, "series_source"),
 		strVal(agent, "visibility"),
@@ -921,6 +923,13 @@ func runAgentUpdate(cmd *cobra.Command, args []string) error {
 		v, _ := cmd.Flags().GetString("runtime-id")
 		body["runtime_id"] = v
 	}
+	if cmd.Flags().Changed("fallback-runtime") {
+		v, _ := cmd.Flags().GetString("fallback-runtime")
+		if strings.EqualFold(strings.TrimSpace(v), "none") {
+			v = ""
+		}
+		body["fallback_runtime_id"] = v
+	}
 	if cmd.Flags().Changed("runtime-config") {
 		v, _ := cmd.Flags().GetString("runtime-config")
 		var rc any
@@ -1022,7 +1031,7 @@ func runAgentUpdate(cmd *cobra.Command, args []string) error {
 	}
 
 	if len(body) == 0 {
-		return fmt.Errorf("no fields to update; use --name, --description, --instructions, --conversation-starters, --runtime-id, --runtime-config, --model, --thinking-level, --service-tier, --routing-tier, --routing-usage, --series, --dispatch-mode, --dispatch-projects, --custom-args, --mcp-config, --visibility, --status, --max-concurrent-tasks, --parent-agent-id, --runtime-inherited, or --work-enabled (env vars now live behind `multica agent env set <id>`)")
+		return fmt.Errorf("no fields to update; use --name, --description, --instructions, --conversation-starters, --runtime-id, --fallback-runtime, --runtime-config, --model, --thinking-level, --service-tier, --routing-tier, --routing-usage, --series, --dispatch-mode, --dispatch-projects, --custom-args, --mcp-config, --visibility, --status, --max-concurrent-tasks, --parent-agent-id, --runtime-inherited, or --work-enabled (env vars now live behind `multica agent env set <id>`)")
 	}
 
 	ctx, cancel := cli.APIContext(context.Background())

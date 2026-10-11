@@ -767,6 +767,7 @@ func main() {
 		go telemetryWorker.Run(sweepCtx)
 	}
 	go runDelegatedFailureRecoverySweeper(sweepCtx, taskSvc)
+	go runPickupDeadlineSweeper(sweepCtx, taskSvc)
 	go runBlockWaitSweeper(sweepCtx, h)
 	// Seven-day runtime retention does not share the 30-second liveness tick:
 	// its bounded transactions run independently once per hour, so a slow GC

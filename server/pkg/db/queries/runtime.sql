@@ -346,6 +346,32 @@ WHERE task.id = victims.id
   AND task.status IN ('dispatched', 'running', 'waiting_local_directory')
 RETURNING task.*;
 
+-- name: FailTasksPastPickupDeadline :many
+-- Urgent chat turns (DENE-1844) carry pickup_deadline_at: the instant by which
+-- a daemon must have started them. A row still queued or dispatched past it
+-- fails with 'pickup_timeout' so the sender learns within seconds that nobody
+-- picked the message up, instead of waiting for the runtime-offline grace.
+-- A running row is left alone: it was picked up, the deadline is satisfied.
+WITH victims AS (
+  SELECT task.id
+  FROM agent_task_queue task
+  WHERE task.pickup_deadline_at IS NOT NULL
+    AND task.pickup_deadline_at < now()
+    AND task.status IN ('queued', 'dispatched')
+  ORDER BY task.pickup_deadline_at
+  LIMIT @max_per_tick::int
+  FOR UPDATE OF task SKIP LOCKED
+)
+UPDATE agent_task_queue AS task
+SET status = 'failed', completed_at = now(),
+    error = 'urgent message was not picked up before its deadline',
+    failure_reason = 'pickup_timeout',
+    wait_reason = NULL
+FROM victims
+WHERE task.id = victims.id
+  AND task.status IN ('queued', 'dispatched')
+RETURNING task.*;
+
 -- name: ListAgentRuntimesByOwner :many
 SELECT * FROM agent_runtime
 WHERE workspace_id = $1 AND owner_id = $2
