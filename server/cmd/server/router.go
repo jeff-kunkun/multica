@@ -2058,6 +2058,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Put("/bots/{botId}/wake", h.PutBotWake)
 					r.Get("/bots/{botId}/wake/events", h.ListBotWakeEvents)
 					r.Get("/bots/{botId}/wake/pending", h.ListBotWakeEvents)
+ r.Post("/bots/{botId}/wake/pending/ack", h.AcknowledgeBotWakePending)
+ r.Post("/bots/{botId}/wake/events/{eventId}/woken", h.RecordBotWakeReceipt)
+ r.Post("/bots/{botId}/wake/events/{eventId}/result", h.RecordBotWakeReceipt)
 				})
 
 				// External bot keys (DENE-1788): admin-only, and never from an

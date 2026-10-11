@@ -26,7 +26,7 @@ never automatically replayed. Disabled, quiet and limited events remain pending.
 			cmd.Flags().Bool("config-stdin", false, "Read JSON settings from standard input")
 			cmd.Long = `Update only supplied fields. Pass JSON using exactly one of --config-file
 or --config-stdin. Never pass secret values as command arguments.
-Fields: events (array), hourly_limit (0..120), quiet_hours
+Fields: wake_from {member,agent,bot}: {mode: all|none|list, ids: []}, events (array), hourly_limit (0..120), quiet_hours
 {enabled,start,end,timezone}, webhook_url, webhook_key.
 Write URL and key together. The key is the complete Authorization header value
 (e.g. Bearer …), as specified by the receiver. Two empty strings disconnect.
@@ -34,10 +34,11 @@ Defaults: 6 attempts/hour, 23:00–08:00 Asia/Shanghai.`
 		}
 		if verb == "events" || verb == "pending" {
 			cmd.Flags().Int("limit", 50, "Page size (1..100)")
-			cmd.Flags().String("before", "", "next_cursor from the preceding page")
+			cmd.Flags().String("before", "", "next_cursor from preceding page; pending consumers restart at first page after each scan")
 		}
 		wake.AddCommand(cmd)
 	}
+	addBotWakeReceipts(wake)
 	botCmd.AddCommand(wake)
 }
 func runBotWake(cmd *cobra.Command, args []string, verb string) error {

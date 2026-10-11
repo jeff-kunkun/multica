@@ -26,7 +26,15 @@ type BotQuietHours struct {
 	End      string `json:"end"`
 	Timezone string `json:"timezone"`
 }
+type BotWakeFromRule struct {
+	Mode string   `json:"mode"`
+	IDs  []string `json:"ids"`
+}
+type BotWakeFrom map[string]BotWakeFromRule
+
 type BotWakeResponse struct {
+	WakeFrom BotWakeFrom `json:"wake_from"`
+
 	WebhookConfigured bool          `json:"webhook_configured"`
 	Events            []string      `json:"events"`
 	HourlyLimit       int32         `json:"hourly_limit"`
@@ -45,9 +53,30 @@ func NewBotWakeSecretBox(secret string) (*secretbox.Box, error) {
 func wakeResponse(c db.BotWake) BotWakeResponse {
 	r := BotWakeResponse{WebhookConfigured: len(c.WebhookSecret) > 0, Events: c.Events, HourlyLimit: c.HourlyLimit}
 	_ = json.Unmarshal(c.QuietHours, &r.QuietHours)
+	_ = json.Unmarshal(c.WakeFrom, &r.WakeFrom)
 	return r
 }
 func validateWakeRules(r BotWakeResponse) error {
+	if len(r.WakeFrom) != 3 {
+		return errors.New("wake_from requires member, agent and bot rules")
+	}
+	for _, kind := range []string{"member", "agent", "bot"} {
+		rule, ok := r.WakeFrom[kind]
+		if !ok || (rule.Mode != "all" && rule.Mode != "none" && rule.Mode != "list") || len(rule.IDs) > 100 {
+			return errors.New("invalid wake_from rule")
+		}
+		seen := map[string]bool{}
+		for _, id := range rule.IDs {
+			if _, err := parseUUIDSafe(id); err != nil || seen[id] {
+				return errors.New("invalid wake_from ids")
+			}
+			seen[id] = true
+		}
+		if rule.Mode != "list" && len(rule.IDs) > 0 {
+			return errors.New("ids require list mode")
+		}
+	}
+
 	if r.HourlyLimit < 0 || r.HourlyLimit > 120 {
 		return errors.New("hourly_limit must be between 0 and 120")
 	}
@@ -173,6 +202,7 @@ func (h *Handler) PutBotWake(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req struct {
+		WakeFrom    *BotWakeFrom   `json:"wake_from"`
 		Events      *[]string      `json:"events"`
 		HourlyLimit *int32         `json:"hourly_limit"`
 		QuietHours  *BotQuietHours `json:"quiet_hours"`
@@ -203,6 +233,9 @@ func (h *Handler) PutBotWake(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	rules := wakeResponse(c)
+	if req.WakeFrom != nil {
+		rules.WakeFrom = *req.WakeFrom
+	}
 	if req.Events != nil {
 		rules.Events = *req.Events
 	}
@@ -249,7 +282,8 @@ func (h *Handler) PutBotWake(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	quiet, _ := json.Marshal(rules.QuietHours)
-	saved, err := q.UpdateBotWake(r.Context(), db.UpdateBotWakeParams{BotID: bot.ID, Events: rules.Events, HourlyLimit: rules.HourlyLimit, QuietHours: quiet, WebhookSecret: sealed})
+	from, _ := json.Marshal(rules.WakeFrom)
+	saved, err := q.UpdateBotWake(r.Context(), db.UpdateBotWakeParams{BotID: bot.ID, Events: rules.Events, HourlyLimit: rules.HourlyLimit, QuietHours: quiet, WakeFrom: from, WebhookSecret: sealed})
 	if err != nil {
 		writeError(w, 500, "failed to save wake rules")
 		return
@@ -324,7 +358,7 @@ func (h *Handler) ListBotWakeEvents(w http.ResponseWriter, r *http.Request) {
 		if !h.wakeVisible(r.Context(), e, bot.UserID) || !h.wakeVisible(r.Context(), e, parseUUID(requestUserID(r))) {
 			continue
 		}
-		result = append(result, map[string]any{"event_id": uuidToString(e.EventID), "sequence": e.Sequence, "type": e.EventType, "issue_id": uuidToString(e.IssueID), "chat_session_id": uuidToString(e.ChatSessionID), "status": e.Status, "reason": e.Reason, "attempts": e.Attempts, "created_at": e.CreatedAt.Time, "sent_at": timestampToPtr(e.SentAt), "received_at": timestampToPtr(e.ReceivedAt)})
+		result = append(result, map[string]any{"event_id": uuidToString(e.EventID), "sequence": e.Sequence, "type": e.EventType, "issue_id": uuidToString(e.IssueID), "chat_session_id": uuidToString(e.ChatSessionID), "status": e.Status, "reason": e.Reason, "attempts": e.Attempts, "created_at": e.CreatedAt.Time, "sent_at": timestampToPtr(e.SentAt), "received_at": timestampToPtr(e.ReceivedAt), "woken_at": timestampToPtr(e.WokenAt), "result_at": timestampToPtr(e.ResultAt), "result_url": e.ResultUrl, "acknowledged_at": timestampToPtr(e.AcknowledgedAt)})
 	}
 	if int64(len(rows)) == limit {
 		next = strconv.FormatInt(rows[len(rows)-1].Sequence, 10)

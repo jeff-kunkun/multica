@@ -307,3 +307,19 @@ upload still targets the current agent chat task. Download verifies
 size and sha256 before publishing a file; rejected bytes leave no file. Old
 attachments acquire a checksum from authenticated server storage on metadata
 read. A server that cannot supply a checksum is refused; do not bypass it.
+
+### Bot execution receipts and review acknowledgements
+
+`multica bot mentions [--issue UUID|--chat UUID]` lists source-visible Bot targets.
+`multica bot wake woken BOT EVENT` records start receipt. `multica bot wake result
+BOT EVENT --result-url URL` records a result pointing to the event's canonical
+issue/chat API URL. Both are idempotent and separate from HTTP receipt.
+`multica bot wake ack BOT EVENT...` acknowledges 1..100 pending review events in
+one transaction; it does not claim execution or replay the webhook.
+
+For incremental review use `wake pending`, follow every `next_cursor` through
+`--before`, including empty filtered pages, acknowledge only processed events,
+then start again without a cursor. Never use creation sequence as a high-water
+mark: older queued events may fail later, and sequence is not commit order.
+Settings accept `wake_from` with member/agent/bot rules `{mode:all|none|list,ids:[]}`.
+See `server/docs/bot-wake-contract.md` for the trusted-source deployment gate.
