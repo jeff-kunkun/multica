@@ -162,6 +162,10 @@ func (h *Handler) fastDurableCollect(r *http.Request, viewer string, req fastReq
 	currentReq := req
 	currentReq.Since = nil
 	currentReq.countSince = req.Since
+	currentReq.runFloor = &floor
+	// Delta run authorization is resolved only for each bounded journal page.
+	// Do not materialize terminal attempts into the current-object snapshot.
+	currentReq.activeOnly = previous != nil || req.Since != nil
 	if previous != nil {
 		currentReq.countSince = &previous.AsOf
 	}
@@ -194,7 +198,11 @@ func (h *Handler) fastDurableCollect(r *http.Request, viewer string, req fastReq
 				b.Lower[scope.ID] = previous.Watermarks[scope.ID]
 			} else {
 				var low int64
-				if err = tx.QueryRow(r.Context(), `SELECT COALESCE((SELECT floor_seq FROM fast_access_feed WHERE workspace_id=$1),0)`, parseUUID(scope.ID)).Scan(&low); err != nil {
+				// Skip only the prefix preceding the first eligible event. This
+				// also keeps active-first pages clear of opportunistic pruning
+				// of older physical rows. Never use max(seq) of excluded rows:
+				// that could skip an eligible event before an excluded one.
+				if err = tx.QueryRow(r.Context(), `SELECT COALESCE(min(seq)-1,$3) FROM fast_access_journal WHERE workspace_id=$1 AND seq<=$3 AND changed_at >= $2`, parseUUID(scope.ID), req.Since, upper[scope.ID]).Scan(&low); err != nil {
 					return nil, err
 				}
 				b.Lower[scope.ID] = low
@@ -210,7 +218,7 @@ func (h *Handler) fastDurableCollect(r *http.Request, viewer string, req fastReq
 	return b, nil
 }
 
-func (h *Handler) fastCheckBatch(r *http.Request, viewer string, b *fastBatch) error {
+func (h *Handler) fastCheckBatch(r *http.Request, viewer string, b *fastBatch, pageItems ...fastItem) error {
 	_, revision, _, floor, err := h.fastState(r, viewer, b.Request)
 	if errors.Is(err, errFastScope) {
 		return errFastPermission
@@ -224,7 +232,7 @@ func (h *Handler) fastCheckBatch(r *http.Request, viewer string, b *fastBatch) e
 	if b.AsOf.Before(floor) {
 		return errFastReset
 	}
-	if len(b.Items) == 0 && len(b.Current) == 0 {
+	if len(b.Items) == 0 && len(b.Current) == 0 && len(pageItems) == 0 {
 		return nil
 	}
 	// Object/source rechecks are mandatory even when the epoch is unchanged.
@@ -234,7 +242,7 @@ func (h *Handler) fastCheckBatch(r *http.Request, viewer string, b *fastBatch) e
 	if err != nil {
 		return err
 	}
-	authorized := append(append([]fastItem{}, b.Items...), b.Current...)
+	authorized := append(append(append([]fastItem{}, b.Items...), b.Current...), pageItems...)
 	items, err := h.fastRows(r.Context(), scopes, req, b.AsOf, authorized)
 	if err != nil {
 		return err
@@ -306,7 +314,7 @@ func (h *Handler) fastDurableRead(w http.ResponseWriter, r *http.Request, req fa
 	response, raw, end, err := fastPage(b, offset, req.Limit, req.MaxBytes, next, checkpoint)
 	scanned := b.Lower
 	if b.Delta {
-		response, raw, end, scanned, err = h.fastDeltaPage(r, b, offset, req.Limit, req.MaxBytes, next, checkpoint)
+		response, raw, end, scanned, err = h.fastDeltaPage(r, viewer, b, offset, req.Limit, req.MaxBytes, next, checkpoint)
 	}
 	if err != nil {
 		if b.Delta && !errors.Is(err, errFastBudget) {
@@ -317,7 +325,7 @@ func (h *Handler) fastDurableRead(w http.ResponseWriter, r *http.Request, req fa
 		return
 	}
 	// Recheck after collecting, before emitting or persisting a page.
-	if err = h.fastCheckBatch(r, viewer, b); err != nil {
+	if err = h.fastCheckBatch(r, viewer, b, response.Changes...); err != nil {
 		fastWriteFailure(w, err)
 		return
 	}
@@ -347,7 +355,7 @@ func (h *Handler) fastDurableRead(w http.ResponseWriter, r *http.Request, req fa
 // Historical event pages scan a bounded number of journal entries against a
 // fixed upper bound and fixed, authorized summaries. Invisible events consume
 // scan positions, not response slots; an empty page can still have next_cursor.
-func (h *Handler) fastDeltaPage(r *http.Request, b *fastBatch, offset, limit, budget int, next, checkpoint string) (fastResponse, []byte, int, map[string]int64, error) {
+func (h *Handler) fastDeltaPage(r *http.Request, viewer string, b *fastBatch, offset, limit, budget int, next, checkpoint string) (fastResponse, []byte, int, map[string]int64, error) {
 	tx, err := h.TxStarter.Begin(r.Context())
 	if err != nil {
 		return fastResponse{}, nil, offset, nil, err
@@ -405,6 +413,13 @@ func (h *Handler) fastDeltaPage(r *http.Request, b *fastBatch, offset, limit, bu
 		}
 	}
 	remaining := limit - len(response.ActiveRuns)
+	reader := *h
+	reader.DB = tx
+	reader.Queries = h.Queries.WithTx(tx)
+	scopes, err := reader.fastScopes(r, viewer, b.Request)
+	if err != nil {
+		return response, nil, end, scanned, err
+	}
 	visible := map[string]fastItem{}
 	for _, i := range b.Current {
 		visible[fastKey(i)] = i
@@ -426,15 +441,43 @@ func (h *Handler) fastDeltaPage(r *http.Request, b *fastBatch, offset, limit, bu
 			if e != nil {
 				return response, nil, end, scanned, e
 			}
-			exhausted := true
+			type journalEvent struct {
+				seq                     int64
+				event, kind, id, status string
+				changed                 time.Time
+			}
+			events := []journalEvent{}
+			runIDs := []fastItem{}
 			for rows.Next() {
-				var seq int64
-				var event, kind, id, status string
-				var changed time.Time
-				if e = rows.Scan(&seq, &event, &kind, &id, &status, &changed); e != nil {
+				var ev journalEvent
+				if e = rows.Scan(&ev.seq, &ev.event, &ev.kind, &ev.id, &ev.status, &ev.changed); e != nil {
 					rows.Close()
 					return response, nil, end, scanned, e
 				}
+				events = append(events, ev)
+				if fastIncludes(b.Request, "run_changes") && (ev.kind == "run" || ev.kind == "autopilot_run") {
+					runIDs = append(runIDs, fastItem{WorkspaceID: ws, Kind: ev.kind, ID: ev.id})
+				}
+			}
+			e = rows.Err()
+			rows.Close()
+			if e != nil {
+				return response, nil, end, scanned, e
+			}
+			if len(runIDs) > 0 {
+				runReq := b.Request
+				runReq.Include = []string{"run_changes"}
+				projections, e := reader.fastRows(r.Context(), scopes, runReq, b.AsOf, runIDs)
+				if e != nil {
+					return response, nil, end, scanned, e
+				}
+				for _, item := range projections {
+					visible[fastKey(item)] = item
+				}
+			}
+			exhausted := true
+			for _, ev := range events {
+				seq, event, kind, id, status, changed := ev.seq, ev.event, ev.kind, ev.id, ev.status, ev.changed
 				remaining--
 				item, ok := visible[ws+"/"+kind+"/"+id]
 				if (kind == "run" || kind == "autopilot_run") && !fastIncludes(b.Request, "run_changes") {
@@ -453,7 +496,6 @@ func (h *Handler) fastDeltaPage(r *http.Request, b *fastBatch, offset, limit, bu
 					response.Changes = append(response.Changes, item)
 					fits, e := pack()
 					if e != nil {
-						rows.Close()
 						return response, nil, end, scanned, e
 					}
 					if !fits {
@@ -468,11 +510,6 @@ func (h *Handler) fastDeltaPage(r *http.Request, b *fastBatch, offset, limit, bu
 					exhausted = false
 					break
 				}
-			}
-			e = rows.Err()
-			rows.Close()
-			if e != nil {
-				return response, nil, end, scanned, e
 			}
 			if exhausted {
 				scanned[ws] = b.Watermarks[ws]

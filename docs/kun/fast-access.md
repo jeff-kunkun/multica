@@ -42,8 +42,10 @@ cursor/limit/max_bytes and either `scope=all_visible` or comma-separated
 
 After applying **all** pages, use the completed checkpoint as the next read's
 cursor. Commit summaries and that position together. Every page shares a fixed
-upper watermark and materialized values. Incomplete pages never advance the
-checkpoint. Changes committed during pagination appear in the next delta.
+upper watermark. Issue/chat and active-run summaries are materialized; terminal
+run projections are authorized in bounded journal pages, with immutable event
+identity/status/time from the journal and currently authorized source labels.
+Incomplete pages never advance the checkpoint. Changes committed during pagination appear in the next delta.
 Filtered-out events still advance the completed watermark, including empty pages.
 
 A delta run entry carries stable `event_id` and decimal-string `revision`.
@@ -116,6 +118,11 @@ never a false complete result. Narrow the workspace scope. Historical journal
 length is not capped to that object count: each page scans at most the requested
 limit against the fixed upper watermark. A filtered page can be empty and partial;
 continue its cursor. Fixed current summaries are stored once and shared by pages.
+Delta collection never projects all historical terminal runs: each journal page authorizes only
+its run IDs, plus the separately collected current active set. Fresh baseline
+run summaries cover current active runs and runs referenced by retained journal
+entries, not all-time completed attempts. The same bounded delta path serves SSE.
+Source access is rechecked again before emitting read pages or SSE notifications.
 
 Read quota remains 60/minute, burst 10, per originator **per API process** (as in the
 first phase); deployment-wide read quota requires a shared limiter. Every page

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
@@ -262,7 +263,7 @@ func (h *Handler) fastRows(ctx context.Context, scopes []fastWorkspace, req fast
 				return nil, err
 			}
 		}
-		if (fastIncludes(req, "active_runs") || fastIncludes(req, "run_changes")) && s.Viewer.userID.Valid {
+		if (fastIncludes(req, "active_runs") || fastIncludes(req, "run_changes")) && s.Viewer.userID.Valid && (!req.activeOnly || fastIncludes(req, "active_runs")) {
 			items, err := h.fastRunRows(ctx, s, req, since, authorize)
 			if err != nil {
 				return nil, err
@@ -306,8 +307,12 @@ func (h *Handler) fastRunRows(ctx context.Context, s fastWorkspace, req fastRequ
 	window := q.add(since)
 	changed := "GREATEST(t.created_at,t.dispatched_at,t.started_at,t.completed_at)"
 	filter := fastActiveSQL
-	if fastIncludes(req, "run_changes") {
-		filter = "(" + filter + " OR " + changed + ">=" + window + "::timestamptz)"
+	if fastIncludes(req, "run_changes") && !req.activeOnly {
+		if req.runFloor != nil {
+			filter = "t.id IN (SELECT a.id FROM agent_task_queue a WHERE a.agent_id=ANY(" + agents + "::uuid[]) AND " + strings.ReplaceAll(fastActiveSQL, "t.", "a.") + " UNION SELECT j.entity_id FROM fast_access_journal j WHERE j.workspace_id=" + ws + "::uuid AND j.kind='run' AND j.changed_at>=" + q.add(*req.runFloor) + "::timestamptz) AND " + window + "::timestamptz IS NOT NULL"
+		} else {
+			filter = "(" + filter + " OR " + changed + ">=" + window + "::timestamptz)"
+		}
 	} else {
 		filter += " AND " + window + "::timestamptz IS NOT NULL"
 	}
@@ -356,8 +361,12 @@ func (h *Handler) fastRunRows(ctx context.Context, s fastWorkspace, req fastRequ
 	agents = q.add(s.Agents)
 	window = q.add(since)
 	filter = "ar.status IN ('issue_created','running')"
-	if fastIncludes(req, "run_changes") {
-		filter = "(" + filter + " OR GREATEST(ar.created_at,ar.triggered_at,ar.completed_at)>=" + window + "::timestamptz)"
+	if fastIncludes(req, "run_changes") && !req.activeOnly {
+		if req.runFloor != nil {
+			filter = "ar.id IN (SELECT a.id FROM autopilot_run a JOIN autopilot p ON p.id=a.autopilot_id WHERE p.workspace_id=" + ws + "::uuid AND a.status IN ('issue_created','running') UNION SELECT j.entity_id FROM fast_access_journal j WHERE j.workspace_id=" + ws + "::uuid AND j.kind='autopilot_run' AND j.changed_at>=" + q.add(*req.runFloor) + "::timestamptz) AND " + window + "::timestamptz IS NOT NULL"
+		} else {
+			filter = "(" + filter + " OR GREATEST(ar.created_at,ar.triggered_at,ar.completed_at)>=" + window + "::timestamptz)"
+		}
 	} else {
 		filter += " AND " + window + "::timestamptz IS NOT NULL"
 	}

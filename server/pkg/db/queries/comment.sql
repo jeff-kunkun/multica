@@ -166,6 +166,58 @@ JOIN comment c ON c.id = sr.id
 JOIN thread_stats ts ON ts.root_id = sr.id
 ORDER BY c.created_at ASC, c.id ASC;
 
+-- name: ListRootCommentDirectoryPage :many
+-- Explicit live directory: optional since retains changed descendants under
+-- old roots. Apply chronological offset/limit before expanding thread stats;
+-- callers probe one extra root and return the actual next offset after packing.
+-- This is a current thread directory, not a deletion/intermediate-state log.
+WITH RECURSIVE changed_ancestors(id, parent_id) AS (
+    SELECT c.id, c.parent_id FROM comment c
+    WHERE c.issue_id = @issue_id AND c.workspace_id = @workspace_id
+      AND sqlc.narg(since)::timestamptz IS NOT NULL
+      AND GREATEST(c.created_at, c.updated_at, c.deleted_at) > sqlc.narg(since)::timestamptz
+    UNION
+    SELECT p.id, p.parent_id FROM comment p
+    JOIN changed_ancestors a ON a.parent_id = p.id
+    WHERE p.issue_id = @issue_id AND p.workspace_id = @workspace_id
+), selected_roots AS (
+    SELECT c.id, c.created_at
+    FROM comment c
+    WHERE c.issue_id = @issue_id
+      AND c.workspace_id = @workspace_id
+      AND c.parent_id IS NULL
+      AND (sqlc.narg(since)::timestamptz IS NULL OR c.id IN (SELECT id FROM changed_ancestors WHERE parent_id IS NULL))
+    ORDER BY c.created_at ASC, c.id ASC
+    LIMIT @row_limit OFFSET @row_offset
+),
+membership(id, root_id, comment_created_at) AS (
+    SELECT sr.id, sr.id AS root_id, sr.created_at
+    FROM selected_roots sr
+    UNION ALL
+    SELECT c.id, m.root_id, GREATEST(c.created_at, c.updated_at, c.deleted_at)
+    FROM comment c
+    JOIN membership m ON c.parent_id = m.id
+    WHERE c.issue_id = @issue_id
+      AND c.workspace_id = @workspace_id
+),
+thread_stats AS (
+    SELECT root_id,
+           (COUNT(*) - 1)::int AS reply_count,
+           MAX(comment_created_at)::timestamptz AS last_activity_at
+    FROM membership
+    GROUP BY root_id
+)
+SELECT c.id, c.issue_id, c.author_type, c.author_id, c.content, c.type,
+       c.created_at, c.updated_at, c.parent_id, c.workspace_id,
+       c.resolved_at, c.resolved_by_type, c.resolved_by_id,
+       c.source_task_id, c.quick_action_id, c.revision, c.deleted_at, c.via_bot_id, c.via_bot_name,
+       ts.reply_count AS reply_count,
+       ts.last_activity_at AS last_activity_at
+FROM selected_roots sr
+JOIN comment c ON c.id = sr.id
+JOIN thread_stats ts ON ts.root_id = sr.id
+ORDER BY c.created_at ASC, c.id ASC;
+
 -- name: ListThreadCommentsForIssuePaged :many
 -- Resolves @anchor_id to its thread root, recursively expands every descendant,
 -- and returns the root + only the @reply_limit most recent replies (per the

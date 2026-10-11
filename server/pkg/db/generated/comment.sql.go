@@ -1721,6 +1721,139 @@ func (q *Queries) ListReviewPassHeads(ctx context.Context, commentIds []pgtype.U
 	return items, nil
 }
 
+const listRootCommentDirectoryPage = `-- name: ListRootCommentDirectoryPage :many
+WITH RECURSIVE changed_ancestors(id, parent_id) AS (
+    SELECT c.id, c.parent_id FROM comment c
+    WHERE c.issue_id = $1 AND c.workspace_id = $2
+      AND $3::timestamptz IS NOT NULL
+      AND GREATEST(c.created_at, c.updated_at, c.deleted_at) > $3::timestamptz
+    UNION
+    SELECT p.id, p.parent_id FROM comment p
+    JOIN changed_ancestors a ON a.parent_id = p.id
+    WHERE p.issue_id = $1 AND p.workspace_id = $2
+), selected_roots AS (
+    SELECT c.id, c.created_at
+    FROM comment c
+    WHERE c.issue_id = $1
+      AND c.workspace_id = $2
+      AND c.parent_id IS NULL
+      AND ($3::timestamptz IS NULL OR c.id IN (SELECT id FROM changed_ancestors WHERE parent_id IS NULL))
+    ORDER BY c.created_at ASC, c.id ASC
+    LIMIT $5 OFFSET $4
+),
+membership(id, root_id, comment_created_at) AS (
+    SELECT sr.id, sr.id AS root_id, sr.created_at
+    FROM selected_roots sr
+    UNION ALL
+    SELECT c.id, m.root_id, GREATEST(c.created_at, c.updated_at, c.deleted_at)
+    FROM comment c
+    JOIN membership m ON c.parent_id = m.id
+    WHERE c.issue_id = $1
+      AND c.workspace_id = $2
+),
+thread_stats AS (
+    SELECT root_id,
+           (COUNT(*) - 1)::int AS reply_count,
+           MAX(comment_created_at)::timestamptz AS last_activity_at
+    FROM membership
+    GROUP BY root_id
+)
+SELECT c.id, c.issue_id, c.author_type, c.author_id, c.content, c.type,
+       c.created_at, c.updated_at, c.parent_id, c.workspace_id,
+       c.resolved_at, c.resolved_by_type, c.resolved_by_id,
+       c.source_task_id, c.quick_action_id, c.revision, c.deleted_at, c.via_bot_id, c.via_bot_name,
+       ts.reply_count AS reply_count,
+       ts.last_activity_at AS last_activity_at
+FROM selected_roots sr
+JOIN comment c ON c.id = sr.id
+JOIN thread_stats ts ON ts.root_id = sr.id
+ORDER BY c.created_at ASC, c.id ASC
+`
+
+type ListRootCommentDirectoryPageParams struct {
+	IssueID     pgtype.UUID        `json:"issue_id"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	Since       pgtype.Timestamptz `json:"since"`
+	RowOffset   int32              `json:"row_offset"`
+	RowLimit    int32              `json:"row_limit"`
+}
+
+type ListRootCommentDirectoryPageRow struct {
+	ID             pgtype.UUID        `json:"id"`
+	IssueID        pgtype.UUID        `json:"issue_id"`
+	AuthorType     string             `json:"author_type"`
+	AuthorID       pgtype.UUID        `json:"author_id"`
+	Content        string             `json:"content"`
+	Type           string             `json:"type"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+	ParentID       pgtype.UUID        `json:"parent_id"`
+	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
+	ResolvedAt     pgtype.Timestamptz `json:"resolved_at"`
+	ResolvedByType pgtype.Text        `json:"resolved_by_type"`
+	ResolvedByID   pgtype.UUID        `json:"resolved_by_id"`
+	SourceTaskID   pgtype.UUID        `json:"source_task_id"`
+	QuickActionID  pgtype.UUID        `json:"quick_action_id"`
+	Revision       int64              `json:"revision"`
+	DeletedAt      pgtype.Timestamptz `json:"deleted_at"`
+	ViaBotID       pgtype.UUID        `json:"via_bot_id"`
+	ViaBotName     pgtype.Text        `json:"via_bot_name"`
+	ReplyCount     int32              `json:"reply_count"`
+	LastActivityAt pgtype.Timestamptz `json:"last_activity_at"`
+}
+
+// Explicit live directory: optional since retains changed descendants under
+// old roots. Apply chronological offset/limit before expanding thread stats;
+// callers probe one extra root and return the actual next offset after packing.
+// This is a current thread directory, not a deletion/intermediate-state log.
+func (q *Queries) ListRootCommentDirectoryPage(ctx context.Context, arg ListRootCommentDirectoryPageParams) ([]ListRootCommentDirectoryPageRow, error) {
+	rows, err := q.db.Query(ctx, listRootCommentDirectoryPage,
+		arg.IssueID,
+		arg.WorkspaceID,
+		arg.Since,
+		arg.RowOffset,
+		arg.RowLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListRootCommentDirectoryPageRow{}
+	for rows.Next() {
+		var i ListRootCommentDirectoryPageRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.IssueID,
+			&i.AuthorType,
+			&i.AuthorID,
+			&i.Content,
+			&i.Type,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.ParentID,
+			&i.WorkspaceID,
+			&i.ResolvedAt,
+			&i.ResolvedByType,
+			&i.ResolvedByID,
+			&i.SourceTaskID,
+			&i.QuickActionID,
+			&i.Revision,
+			&i.DeletedAt,
+			&i.ViaBotID,
+			&i.ViaBotName,
+			&i.ReplyCount,
+			&i.LastActivityAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listRootCommentsForIssue = `-- name: ListRootCommentsForIssue :many
 WITH RECURSIVE selected_roots AS (
     SELECT c.id, c.created_at

@@ -54,10 +54,16 @@ only after complete; clear cached summaries and positions on reset/scope changes
 Every JSON API body and logical result payload is bounded to 50000 bytes (MCP
 wraps the payload as both text and structured content). A too-large
 response fails explicitly instead of emitting partial JSON. Historical reads
-use the existing API's page limits. Root directories use that API's existing
-hard cap and propagate `comments_truncated`; `offset` / `next_offset` slice its
-live root window, **not** a durable cursor or a guarantee of complete history.
-A root directory exceeding the byte cap must be narrowed to a known thread.
+use the existing API's page limits. Root directories send `limit` / `offset`
+to the comment API before transport reads the body. The server selects roots in
+`(created_at,id)` order, probes one extra root, and packs at most 48000 bytes
+(including escaped metadata) before emitting `X-Multica-Next-Offset`. MCP exposes
+that position as `next_offset`; follow it even when fewer than `limit` roots fit.
+`comments_truncated` indicates more roots. All roots in an unchanged directory
+are discoverable; offsets are a **live directory**, not a durable synchronization
+cursor. Concurrent insertions/deletions can move positions; use `changes_read`
+for synchronization. A single oversized entry fails explicitly. Unpaged CLI
+roots-only/since/summary modes and thread cursors retain their existing behavior.
 Thread cursors preserve both `before` and `before_id`. Default previews retain
 `content_truncated`. Explicit full text is still subject to the byte bound;
 reduce the page size when needed. This adapter does not add a second history

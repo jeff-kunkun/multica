@@ -22,6 +22,8 @@ type fastScope struct {
 }
 type fastRequest struct {
 	countSince *time.Time
+	runFloor   *time.Time
+	activeOnly bool
 	Scope      *fastScope `json:"scope,omitempty"`
 	Since      *time.Time `json:"since,omitempty"`
 	Cursor     string     `json:"cursor,omitempty"`

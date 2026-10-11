@@ -419,6 +419,8 @@ func (a *adapter) comments(ctx context.Context, in CommentsInput) (map[string]an
 			return invalid("full/before require thread_id")
 		}
 		q.Set("roots_only", "true")
+		q.Set("limit", strconv.Itoa(limit))
+		q.Set("offset", strconv.Itoa(in.Offset))
 	}
 	raw, h, err := a.request(ctx, in.WorkspaceID, "GET", "/api/issues/"+in.ID+"/comments?"+q.Encode(), nil)
 	if err != nil {
@@ -430,12 +432,13 @@ func (a *adapter) comments(ctx context.Context, in CommentsInput) (map[string]an
 	}
 	out := map[string]any{"comments": []any{}, "next_cursor": nil, "comments_truncated": h.Get("X-Comments-Truncated") == "true"}
 	if in.ThreadID == "" {
-		start := min(in.Offset, len(rows))
-		end := min(start+limit, len(rows))
-		if end < len(rows) {
-			out["next_offset"] = end
+		if next := h.Get("X-Multica-Next-Offset"); next != "" {
+			n, err := strconv.Atoi(next)
+			if err != nil || n <= in.Offset {
+				return nil, errors.New("invalid directory continuation")
+			}
+			out["next_offset"] = n
 		}
-		rows = rows[start:end]
 		out["pagination"] = "live_root_directory"
 	} else if h.Get("X-Multica-Next-Before") != "" {
 		out["next_cursor"] = map[string]any{"before": h.Get("X-Multica-Next-Before"), "before_id": h.Get("X-Multica-Next-Before-Id")}

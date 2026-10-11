@@ -110,7 +110,7 @@ func (h *Handler) FastAccessEvents(w http.ResponseWriter, r *http.Request) {
 			// their own applied checkpoint and paginate a fixed read snapshot.
 			b.Items = nil
 			b.ActiveCount = 0
-			page, _, _, scanned, e := h.fastDeltaPage(r, b, 0, 200, 50000, "next", "checkpoint")
+			page, _, _, scanned, e := h.fastDeltaPage(r, viewer, b, 0, 200, 50000, "next", "checkpoint")
 			if e != nil {
 				write("event: read_required\ndata: {}\n\n")
 				return
@@ -129,7 +129,7 @@ func (h *Handler) FastAccessEvents(w http.ResponseWriter, r *http.Request) {
 					return
 				}
 			}
-			if e = h.fastCheckBatch(r, viewer, b); e != nil {
+			if e = h.fastCheckBatch(r, viewer, b, page.Changes...); e != nil {
 				write("event: scope_reset\ndata: {\"code\":\"scope_reset\"}\n\n")
 				return
 			}

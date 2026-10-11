@@ -210,8 +210,14 @@ func TestFastDurablePaginationResetAndEmptyFilter(t *testing.T) {
 	}
 }
 func TestFastDurableSSEReplayAndScopeReset(t *testing.T) {
+
+	rt := dbfx.Runtime(t, "SSE old history runtime")
+	agent := dbfx.Agent(t, "SSE old history agent", rt)
+	fastMustExec(t, `INSERT INTO agent_task_queue(agent_id,runtime_id,status,created_at,completed_at) SELECT $1::uuid,$2::uuid,'completed',now()-interval '30 days',now()-interval '30 days' FROM generate_series(1,10001)`, agent, rt)
+	fastMustExec(t, `UPDATE fast_access_meta SET coverage_from=now()-interval '1 hour',permission_changed_at=now()-interval '1 hour'`)
+	fastMustExec(t, `UPDATE fast_access_journal SET changed_at=now()-interval '30 days' WHERE kind='run' AND workspace_id=$1`, testWorkspaceID)
 	issue := dbfx.Issue(t, "SSE issue", testutil.Cols{"visibility": "workspace"})
-	cp := fastSnapshot(t, "issues")
+	cp := fastSnapshot(t, "issues", "run_changes", "active_runs")
 	fastMustExec(t, `UPDATE issue SET title='between baseline and subscribe' WHERE id=$1`, parseUUID(issue))
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		authenticated := withChatTestWorkspaceCtx(t, newRequest("GET", r.URL.String(), nil)).WithContext(r.Context())
