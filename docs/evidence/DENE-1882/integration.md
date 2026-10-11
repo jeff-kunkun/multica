@@ -38,7 +38,7 @@ Synthetic since30m fixture: two workspaces, 200 changed issues, 17 active runs. 
 | Cross-workspace compact changes + all active runs | One service API with explicit/all-visible scopes; CLI and MCP preserve envelope. Local fixture passes with pagination. Production two-workspace check remains open. |
 | Chat unread / last activity and old-root replies | Projection fields and descendant-aware SQL retained; existing snapshot/CLI tests pass and never mark chats read. |
 | Reconnect without skipped changes | Committed read checkpoint, stable event IDs and at-least-once replay; public client reconnect and SQLite contents pass. No exactly-once network claim. |
-| Nine compact MCP read/write tools | SDK discovery and all nine tools pass; summary/full bounds, 403/429, ambiguous-write reconciliation and attachment integrity retained. Public document parameter differences below remain unresolved. |
+| Nine compact MCP read/write tools | SDK discovery and all nine tools pass; summary/full bounds, 403/429, ambiguous-write reconciliation and attachment integrity retained. The original public document differences below were subsequently corrected by the public-repository owner; see the evidence index. |
 | Read-only local cache | Public SQLite objects/active/seen/state, numeric-string revisions, atomic completed checkpoint, last_sync_at/cache_age/stale_reason match protocol. Offline reads show offline_unverified. No transcript/credential stored. |
 | No heartbeat/runtime/credential redesign | No authored changes in those surfaces; approved task-status journal seam only. Upstream changes retained by merge. |
 
@@ -58,10 +58,38 @@ The public protocol's intended table differs from the actual strict SDK schemas.
 | chat_send | chat_id | id, content, mode, workspace_id |
 | attachment_download | attachment_id | attachment_id plus optional workspace_id; aligned |
 
-Reported to the parent coordination thread before delivery. The public repository's original owner must align its document with discovered tool schemas; this child does not publish an external fix. Parent must retain this hold on a blanket “public contract fully compatible” claim.
+Reported to the parent coordination thread before the first delivery. The sibling delivery now records the public owner's correction in PR 2 (approved head 6018d4e, merge b42c606), with nine-tool schema evidence linked from the [evidence index](../INDEX.md#compact-cross-workspace-reads). The table above preserves the original bacc17fe finding, not an outstanding document blocker. This child made no external publication; production compatibility remains unverified.
 
 ## Rollback and knowledge audit
 
 The evidence attachment contains MODIFIED_FILE (SQL group), DIFF_FILE.patch, VERIFICATION.txt and executable ROLLBACK.sh. Baseline reconstruction has the actual 668 collision; allocator-renumbered copy has none; rollback on a separate copy restores the exact baseline hash and collision. Patch reconstruction reproduces the modified hash. This file-copy rollback is separate from the actual database down/up and lifecycle behavior tests above. Never use the copy script as a production migration rollback command.
 
 Knowledge audit: protocol migration number, MCP original-byte behavior and built-in overview instructions updated; stale “since required” wording removed; both index families preserved and duplicate obsolete stage-one entries consolidated. AGENTS receives only upstream's tracked protocol pointer; no runtime injection. No new domain term, ADR, design contract, project configuration or global skill distribution. Parent delivery branch remains the release owner; child closes back to it without pushing or opening a PR.
+
+## Follow-up integration after unified PR creation
+
+Merged `origin/kun` `d7e8d4fa8e` into the existing child line from parent tip
+`0e52c9ad62`, preserving the two new mainline deliveries (wakeup coalescing /
+related stops and machine capacity). Only evidence-index and built-in overview
+reference text conflicted; both sides are retained. The ten files changed on
+both branches were inspected: mobile/shared API methods, package exports,
+capability map, routes, overview projection, generated models and documentation.
+All 32 fast-access implementation files are byte-identical to the starting
+parent tip. No authored daemon/runtime/credential/UI change was added.
+
+`make sqlc` produced no additional generated diff; `make migration-lint` passes
+with mainline 669–671 and fast-access 673–677. After the required frozen-lockfile
+install, core/views/mobile typechecks and three core test files (241 tests)
+passed. Disposable PostgreSQL runs passed fast-access/durable/journal, overview,
+machine capacity, MCP/CLI fast-access/capability/runtime-capacity checks, plus
+related-stop, default-comment merge and retry-discard checks. The optional
+external Python integration is not rerun in this follow-up; its earlier local
+measurements remain historical. No browser/device or production revalidation
+is claimed. Staged `git diff --check` passes; the only excluded working-tree
+whitespace is the uncommitted runtime AGENTS injection.
+
+Knowledge audit: preserve both documentation families and the sibling's public
+MCP correction evidence; replace this report's obsolete open-document-blocker
+wording with that recorded resolution. No new architectural rule, interface,
+project setting or global skill change. Delivery remains through child close
+into the parent branch; the parent's existing unified PR remains its owner.

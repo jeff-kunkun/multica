@@ -6,6 +6,10 @@
 
 - DENE-1875：Grok 小本子[交互说明附件](https://ai.ferryway.cc/api/attachments/01a12c18-69b5-7614-a9bf-09c68d3ffb46/download)与[浏览器检查记录](https://ai.ferryway.cc/api/attachments/01a12c19-5fbf-74bf-b299-1878e1459d21/download)。方案演示，1–2 秒为目标；长期画像的 mono 回写尚待父单协调，不代表全局已同步。
 
+- DENE-1860：每台机器默认同时运行上限 12、跨运行时/工作区共用与排队原因；[并发领取、改为 8 与四档真实页面截图（任务附件）](https://ai.ferryway.cc/api/attachments/01a12c7c-6089-79c8-ac3f-f844722791a7/download)。原生 App 查看入口已补，视觉未测；不代表生产已升级。
+
+- DENE-1857：默认唤醒合并、连带停止、显式转工单后的唯一执行处；[验收、回归、CLI 契约与可撤回副本](https://ai.ferryway.cc/api/attachments/01a12c51-917a-7aeb-964c-1238e378017e/download)，[四档浏览器截图与验证边界](https://ai.ferryway.cc/api/attachments/01a12c4c-f9c0-7457-bc3f-87c15b413f2f/download)。最终 390px 停止/取消按钮已实测 44px，其余较早截图已标注；全套后端仍有主线已有失败与属性列表分页用例失败，未声明全套通过。 [终审返工：只递归子单，聊天止步，兄弟单保留运行/执行开关/重试的验证](https://ai.ferryway.cc/api/attachments/01a12c68-cff7-7846-8275-d1fdc79ce088/download)。
+
 - DENE-1865：CLI 项目名、当前用户临时文件、钥匙状态与续期提示、服务端列表投影、一次性工作区选择；[完整测试、真实 CLI 与独立副本回滚记录（任务附件）](https://ai.ferryway.cc/api/attachments/01a12c55-6e00-7d6a-85fd-77deb84386d5/download)。52 个智能体紧凑输出 20,469 字节；670 项 CLI 与 13 项相关服务端测试通过。首次已失效且无缓存的钥匙元数据为未知，Windows 仅交叉构建。
 
 - DENE-1863：外部 Bot 提及原文、楼层上下文、附件与原楼层回复、30 秒同来源分组；[四档真实截图与交付边界（任务附件）](https://ai.ferryway.cc/api/attachments/01a12c4f-4fad-7b53-963d-268ba1539f90/download)，[HTTP/CLI/迁移/重试/独立回执及夹具回滚验证包](https://ai.ferryway.cc/api/attachments/01a12c4f-51fb-799b-a07f-ed024b07d434/download)。提及也等待分组窗口，已明示约半分钟延迟；生产 Grok 与原生 App 未实测，终审待定。

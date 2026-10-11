@@ -16,7 +16,6 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/analytics"
-	"github.com/multica-ai/multica/server/internal/botsource"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/service"
@@ -261,7 +260,7 @@ func (h *Handler) ListChatSessions(w http.ResponseWriter, r *http.Request) {
 					continue
 				}
 			}
-			resp = append(resp, chatSessionListResponse(s.ID, s.WorkspaceID, s.AgentID, s.CreatorID, s.ProjectID, s.Title, s.Status, s.Visibility, s.ViewerAccess, s.AgentName, s.Pinned, s.ProjectNudgeDismissedAt, s.CreatedAt, s.UpdatedAt, s.UnreadCount, s.ExtraCount, s.AgentRuntimeBound, s.AgentArchived, s.LastMessageAt, s.LastMessageContent, s.LastMessageRole, s.LastMessageFailureReason, s.LastMessageKind, s.LastMessageSenderID, s.TitleLocked, s.ProgressText, s.ProgressSource, s.ProgressTone, s.ProgressAuthorType, s.ProgressAuthorID, s.ProgressUpdatedAt))
+			resp = append(resp, chatSessionListResponse(s.ID, s.WorkspaceID, s.AgentID, s.CreatorID, s.ProjectID, s.Title, s.Status, s.Visibility, s.ViewerAccess, s.AgentName, s.Pinned, s.ProjectNudgeDismissedAt, s.CreatedAt, s.UpdatedAt, s.UnreadCount, s.ExtraCount, s.AgentRuntimeBound, s.AgentArchived, s.LastMessageAt, s.LastMessageContent, s.LastMessageRole, s.LastMessageFailureReason, s.LastMessageKind, s.LastMessageSenderID, s.TitleLocked, s.ProgressText, s.ProgressSource, s.ProgressTone, s.ProgressAuthorType, s.ProgressAuthorID, s.ProgressUpdatedAt, s.ConvertedIssueID))
 			resp[len(resp)-1].OriginSessionID = uuidToPtr(s.OriginSessionID)
 		}
 	} else {
@@ -281,7 +280,7 @@ func (h *Handler) ListChatSessions(w http.ResponseWriter, r *http.Request) {
 					continue
 				}
 			}
-			resp = append(resp, chatSessionListResponse(s.ID, s.WorkspaceID, s.AgentID, s.CreatorID, s.ProjectID, s.Title, s.Status, s.Visibility, s.ViewerAccess, s.AgentName, s.Pinned, s.ProjectNudgeDismissedAt, s.CreatedAt, s.UpdatedAt, s.UnreadCount, s.ExtraCount, s.AgentRuntimeBound, s.AgentArchived, s.LastMessageAt, s.LastMessageContent, s.LastMessageRole, s.LastMessageFailureReason, s.LastMessageKind, s.LastMessageSenderID, s.TitleLocked, s.ProgressText, s.ProgressSource, s.ProgressTone, s.ProgressAuthorType, s.ProgressAuthorID, s.ProgressUpdatedAt))
+			resp = append(resp, chatSessionListResponse(s.ID, s.WorkspaceID, s.AgentID, s.CreatorID, s.ProjectID, s.Title, s.Status, s.Visibility, s.ViewerAccess, s.AgentName, s.Pinned, s.ProjectNudgeDismissedAt, s.CreatedAt, s.UpdatedAt, s.UnreadCount, s.ExtraCount, s.AgentRuntimeBound, s.AgentArchived, s.LastMessageAt, s.LastMessageContent, s.LastMessageRole, s.LastMessageFailureReason, s.LastMessageKind, s.LastMessageSenderID, s.TitleLocked, s.ProgressText, s.ProgressSource, s.ProgressTone, s.ProgressAuthorType, s.ProgressAuthorID, s.ProgressUpdatedAt, s.ConvertedIssueID))
 			resp[len(resp)-1].OriginSessionID = uuidToPtr(s.OriginSessionID)
 		}
 	}
@@ -420,6 +419,10 @@ func (h *Handler) ConvertChatSessionToGoal(w http.ResponseWriter, r *http.Reques
 	if !ok {
 		return
 	}
+	if uuidToString(session.CreatorID) != userID {
+		writeError(w, http.StatusForbidden, "only the person who started this chat can convert it")
+		return
+	}
 	messages, err := h.Queries.ListChatMessages(r.Context(), session.ID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to read chat transcript")
@@ -449,12 +452,22 @@ func (h *Handler) ConvertChatSessionToGoal(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	actorType, actorID := h.resolveActor(r, userID, workspaceID)
+	agent, err := h.Queries.GetAgent(r.Context(), session.AgentID)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "agent not found")
+		return
+	}
+	if actorType != "member" || !h.canInvokeAgent(r.Context(), agent, actorType, actorID, h.invokeOriginatorFromRequest(r, actorType, actorID), workspaceID) {
+		h.writeDispatchBlocked(w, http.StatusForbidden, ReasonInvocationNotAllowed)
+		return
+	}
+
 	spawnSlots, ok := h.gateAgentIssueSpawn(w, r, session.WorkspaceID, actorType, actorID, 1)
 	if !ok {
 		return
 	}
 	defer spawnSlots.release()
-	result, err := h.IssueService.Create(r.Context(), service.IssueCreateParams{
+	result, err := h.IssueService.ConvertChatToIssue(r.Context(), session.ID, service.IssueCreateParams{
 		WorkspaceID: session.WorkspaceID,
 		Title:       title,
 		Description: pgtype.Text{String: seed, Valid: seed != ""},
@@ -465,24 +478,21 @@ func (h *Handler) ConvertChatSessionToGoal(w http.ResponseWriter, r *http.Reques
 		GoalMode: true, OriginChatSessionID: session.ID,
 	}, service.IssueCreateOpts{ActorID: userID, AnalyticsAgentID: uuidToString(session.AgentID), Platform: "web"})
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to create goal issue")
+		switch {
+		case errors.Is(err, service.ErrChatConversionForbidden):
+			writeError(w, http.StatusForbidden, err.Error())
+		case errors.Is(err, service.ErrChatSessionArchived):
+			writeError(w, http.StatusConflict, "chat session is archived")
+		default:
+			slog.Error("chat goal conversion failed", "chat_session_id", uuidToString(session.ID), "error", err)
+			writeError(w, http.StatusInternalServerError, "failed to create goal issue")
+		}
 		return
 	}
 	spawnSlots.fill(r.Context(), result.Issue.ID)
 	prefix := h.getIssuePrefix(r.Context(), session.WorkspaceID)
 	resp := issueToResponse(result.Issue, prefix)
-	// Leave a visible bridge in the conversation so the conversion is
-	// discoverable after the composer closes. The issue remains the source of
-	// truth; this message is only the chat-side link record.
-	if _, messageErr := h.Queries.CreateChatMessage(r.Context(), db.CreateChatMessageParams{
-		ViaBotID: botsource.FromContext(r.Context()).ID, ViaBotName: pgtype.Text{String: botsource.FromContext(r.Context()).Name, Valid: botsource.FromContext(r.Context()).ID.Valid},
-		ChatSessionID: session.ID,
-		Role:          "assistant",
-		Content:       fmt.Sprintf("已转成目标任务 [%s](mention://issue/%s)", resp.Identifier, resp.ID),
-		MessageKind:   pgtype.Text{String: "goal_link", Valid: true},
-	}); messageErr != nil {
-		slog.Warn("chat goal conversion link message failed", "session_id", uuidToString(session.ID), "issue_id", resp.ID, "error", messageErr)
-	}
+	h.publishChat(protocol.EventChatSessionInvalidated, workspaceID, "member", userID, uuidToString(session.ID), protocol.ChatSessionInvalidatedPayload{ChatSessionID: uuidToString(session.ID)})
 	writeJSON(w, http.StatusCreated, map[string]any{"issue": resp, "chat_session_id": uuidToString(session.ID)})
 }
 
@@ -1138,9 +1148,8 @@ type SendChatMessageRequest struct {
 	PerQuote      string   `json:"per_quote,omitempty"`
 	Content       string   `json:"content"`
 	AttachmentIDs []string `json:"attachment_ids"`
-	// Mode says what to do when the agent is still replying: steer (read it
-	// mid-reply), queue (after the reply; default) or restart (stop the reply
-	// and start over from this message). Ignored when nothing is replying.
+	// An omitted mode merges into this chat's existing execution. Explicit
+	// steer, queue and restart preserve their requested delivery behavior.
 	Mode string `json:"mode,omitempty"`
 }
 
@@ -1227,6 +1236,13 @@ func (h *Handler) SendChatMessage(w http.ResponseWriter, r *http.Request) {
 	// can no longer reach. Agent senders bypass to preserve A2A collaboration.
 	session, ok := h.gatePublicChatSessionForUser(w, r, userID, workspaceID, sessionID)
 	if !ok {
+		return
+	}
+	if session.ConvertedIssueID.Valid {
+		writeJSON(w, http.StatusConflict, map[string]any{
+			"error": "This chat has moved to a task. Continue there to add instructions.",
+			"code":  "chat_converted", "issue_id": uuidToString(session.ConvertedIssueID),
+		})
 		return
 	}
 	if req.PerQuote != "" {
@@ -1334,9 +1350,13 @@ func (h *Handler) SendChatMessage(w http.ResponseWriter, r *http.Request) {
 	// web chat the person who typed is actorID (attachment owner). The task
 	// itself is authorized as taskUserID — the creator, when somebody else
 	// is speaking in a shared chat — so the run uses the creator's quota.
-	sent, err := h.TaskService.SendDirectChatMessage(r.Context(), session, agent, taskUserID, req.Content, attachmentIDs, actorType, parseUUID(actorID))
+	sent, err := h.TaskService.SendDirectChatMessageWithMode(r.Context(), session, agent, taskUserID, req.Content, attachmentIDs, actorType, parseUUID(actorID), req.Mode)
 	if err != nil {
 		switch {
+		case errors.Is(err, service.ErrChatMergeUnsupported):
+			writeSteerUnsupported(w, "the running reply cannot read this message; send with queue or restart")
+		case errors.Is(err, service.ErrChatSessionConverted):
+			writeErrorCode(w, http.StatusConflict, "chat_converted", "This chat has moved to a task. Continue there to add instructions.")
 		case errors.Is(err, service.ErrChatSessionArchived):
 			writeError(w, http.StatusConflict, "chat session is archived")
 		case errors.Is(err, service.ErrChatTaskAgentArchived):
@@ -1406,7 +1426,14 @@ func (h *Handler) SendChatMessage(w http.ResponseWriter, r *http.Request) {
 	// (DENE-1037). Until then the first-message title stands.
 
 	applied := "start"
-	if sent.Queued && task.Status != "cancelled" {
+	if sent.Merged {
+		applied = "merge"
+		if sent.Steered {
+			applied = sendModeSteer
+			h.notifyTaskSupplementAvailable(task)
+		}
+	}
+	if sent.Queued && !sent.Merged && task.Status != "cancelled" {
 		applied = sendModeQueue
 		switch {
 		case mode == sendModeSteer && steerable:
@@ -1710,9 +1737,10 @@ func (h *Handler) ListChatMessagesPage(w http.ResponseWriter, r *http.Request) {
 // optimistic seeds don't have a real task created_at and the timer needs to
 // survive refresh / reopen.
 type PendingChatTaskResponse struct {
-	TaskID    string `json:"task_id,omitempty"`
-	Status    string `json:"status,omitempty"`
-	CreatedAt string `json:"created_at,omitempty"`
+	QueueReason *MachineQueueReason `json:"queue_reason,omitempty"`
+	TaskID      string              `json:"task_id,omitempty"`
+	Status      string              `json:"status,omitempty"`
+	CreatedAt   string              `json:"created_at,omitempty"`
 	// WaitReason explains a waiting_local_directory hold: which directory the
 	// task is parked on and, when known, the short id of the task holding it.
 	// Emitted only for that status — on any other one the column still carries
@@ -1744,11 +1772,12 @@ func waitReasonForStatus(status string, reason pgtype.Text) string {
 }
 
 type QueuedChatTaskResponse struct {
-	TaskID    string `json:"task_id"`
-	Status    string `json:"status"`
-	CreatedAt string `json:"created_at"`
-	MessageID string `json:"message_id,omitempty"`
-	Content   string `json:"content,omitempty"`
+	QueueReason *MachineQueueReason `json:"queue_reason,omitempty"`
+	TaskID      string              `json:"task_id"`
+	Status      string              `json:"status"`
+	CreatedAt   string              `json:"created_at"`
+	MessageID   string              `json:"message_id,omitempty"`
+	Content     string              `json:"content,omitempty"`
 	// Steering: this message was steered into the reply and is waiting to be
 	// read. Read: it leaves the queue. Not read: it runs after the reply.
 	Steering bool `json:"steering,omitempty"`
@@ -2086,6 +2115,16 @@ func (h *Handler) GetPendingChatTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	queueRows := make([]AgentTaskResponse, len(tasks))
+	for i, task := range tasks {
+		queueRows[i] = AgentTaskResponse{RuntimeID: uuidToString(task.RuntimeID), Status: task.Status}
+	}
+	h.hydrateMachineQueueReasons(r.Context(), queueRows)
+	queueByID := map[string]*MachineQueueReason{}
+	for i, task := range tasks {
+		queueByID[uuidToString(task.ID)] = queueRows[i].QueueReason
+	}
+
 	steering := map[string]bool{}
 	if ids, err := h.Queries.ListSteeringChatFollowups(r.Context(), session.ID); err == nil {
 		for _, id := range ids {
@@ -2099,16 +2138,18 @@ func (h *Handler) GetPendingChatTask(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		queued = append(queued, QueuedChatTaskResponse{
-			TaskID:    uuidToString(task.ID),
-			Status:    task.Status,
-			CreatedAt: timestampToString(task.CreatedAt),
-			MessageID: uuidToString(task.MessageID),
-			Content:   task.Content,
-			Steering:  steering[uuidToString(task.ID)],
+			QueueReason: queueByID[uuidToString(task.ID)],
+			TaskID:      uuidToString(task.ID),
+			Status:      task.Status,
+			CreatedAt:   timestampToString(task.CreatedAt),
+			MessageID:   uuidToString(task.MessageID),
+			Content:     task.Content,
+			Steering:    steering[uuidToString(task.ID)],
 		})
 	}
 
 	resp := PendingChatTaskResponse{
+		QueueReason:   queueByID[uuidToString(head.ID)],
 		TaskID:        uuidToString(head.ID),
 		Status:        head.Status,
 		CreatedAt:     timestampToString(head.CreatedAt),
@@ -2379,11 +2420,12 @@ func (h *Handler) CancelTaskByUser(w http.ResponseWriter, r *http.Request) {
 // ---------------------------------------------------------------------------
 
 type ChatSessionResponse struct {
-	ID          string  `json:"id"`
-	WorkspaceID string  `json:"workspace_id"`
-	AgentID     string  `json:"agent_id"`
-	CreatorID   string  `json:"creator_id"`
-	ProjectID   *string `json:"project_id"`
+	ID               string  `json:"id"`
+	WorkspaceID      string  `json:"workspace_id"`
+	AgentID          string  `json:"agent_id"`
+	CreatorID        string  `json:"creator_id"`
+	ProjectID        *string `json:"project_id"`
+	ConvertedIssueID *string `json:"converted_issue_id"`
 	// ProjectIDs is the session's full project set in selection order
 	// (DENE-523); ProjectID above mirrors its first entry for older clients.
 	// Always an array — empty when the session carries no project context.
@@ -2663,7 +2705,7 @@ func chatSessionListResponse(
 	unreadCount, extraCount int32,
 	agentRuntimeBound, agentArchived bool,
 	lastAt pgtype.Timestamptz, lastContent, lastRole string, lastFailure pgtype.Text, lastKind string, lastSender pgtype.UUID,
-	titleLocked bool, progressText, progressSource, progressTone, progressAuthorType string, progressAuthorID pgtype.UUID, progressUpdatedAt pgtype.Timestamptz,
+	titleLocked bool, progressText, progressSource, progressTone, progressAuthorType string, progressAuthorID pgtype.UUID, progressUpdatedAt pgtype.Timestamptz, convertedIssueID pgtype.UUID,
 ) ChatSessionResponse {
 	return ChatSessionResponse{
 		ID:                    uuidToString(id),
@@ -2671,6 +2713,7 @@ func chatSessionListResponse(
 		AgentID:               uuidToString(agentID),
 		CreatorID:             uuidToString(creatorID),
 		ProjectID:             uuidToPtr(projectID),
+		ConvertedIssueID:      uuidToPtr(convertedIssueID),
 		Title:                 title,
 		TitleLocked:           titleLocked,
 		Progress:              progressResponse(progressText, progressSource, progressTone, progressAuthorType, progressAuthorID, progressUpdatedAt),
@@ -2768,15 +2811,16 @@ type ChatMessageResponse struct {
 
 func chatSessionToResponse(s db.ChatSession) ChatSessionResponse {
 	return ChatSessionResponse{
-		ID:          uuidToString(s.ID),
-		WorkspaceID: uuidToString(s.WorkspaceID),
-		AgentID:     uuidToString(s.AgentID),
-		CreatorID:   uuidToString(s.CreatorID),
-		ProjectID:   uuidToPtr(s.ProjectID),
-		Title:       s.Title,
-		TitleLocked: s.TitleLocked,
-		Progress:    progressResponse(s.ProgressText, s.ProgressSource, s.ProgressTone, s.ProgressAuthorType, s.ProgressAuthorID, s.ProgressUpdatedAt),
-		Status:      s.Status,
+		ID:               uuidToString(s.ID),
+		WorkspaceID:      uuidToString(s.WorkspaceID),
+		AgentID:          uuidToString(s.AgentID),
+		CreatorID:        uuidToString(s.CreatorID),
+		ProjectID:        uuidToPtr(s.ProjectID),
+		ConvertedIssueID: uuidToPtr(s.ConvertedIssueID),
+		Title:            s.Title,
+		TitleLocked:      s.TitleLocked,
+		Progress:         progressResponse(s.ProgressText, s.ProgressSource, s.ProgressTone, s.ProgressAuthorType, s.ProgressAuthorID, s.ProgressUpdatedAt),
+		Status:           s.Status,
 		// Pinned is per viewer (DENE-866); decorateChatSession fills it in.
 		Visibility:            s.Visibility,
 		OriginType:            textToPtr(s.OriginType),

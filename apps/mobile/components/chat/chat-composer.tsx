@@ -108,6 +108,7 @@ export function ChatComposer({
   const wsSlug = useWorkspaceStore((s) => s.currentWorkspaceSlug);
   const { t } = useT("chat");
 
+  const modeWasChosenRef = useRef(false);
   const onSubmit = useCallback(
     async ({
       content,
@@ -120,7 +121,7 @@ export function ChatComposer({
     }) => {
       // `onSend` may be sync or async; await is safe in both cases. If it
       // throws, MessageComposer's catch restores text + chips.
-      await onSend(content, attachmentIds, mode);
+      await onSend(content, attachmentIds, modeWasChosenRef.current ? mode : undefined);
     },
     [onSend],
   );
@@ -140,6 +141,7 @@ export function ChatComposer({
   useEffect(() => {
     if (!sending) {
       setChosenMode(null);
+      modeWasChosenRef.current = false;
       setSheetOpen(false);
     }
   }, [sending]);
@@ -184,6 +186,7 @@ export function ChatComposer({
                 {allowStop ? <StopButton onPress={handleStop} /> : null}
                 <SendModeButton
                   mode={sendMode}
+                  automatic={!chosenMode}
                   canSend={canSend}
                   submitting={submitting}
                   onSend={() => submit(sendMode)}
@@ -198,12 +201,13 @@ export function ChatComposer({
     />
     <SendModeSheet
       visible={sheetOpen && sendModeActive}
-      mode={sendMode}
+      mode={chosenMode ? sendMode : null}
       steerSupported={steerSupported === true}
       steerProvider={steerProvider}
       steerMode={steerMode}
       onClose={() => setSheetOpen(false)}
       onPick={(next) => {
+        modeWasChosenRef.current = true;
         setChosenMode(next);
         setSheetOpen(false);
         // A draft goes out right away in the picked mode; an empty draft
@@ -227,12 +231,14 @@ function modeLabelKey(mode: ChatSendMode) {
 /** Split send button: the label half sends in `mode`, ▾ opens the sheet. */
 function SendModeButton({
   mode,
+  automatic,
   canSend,
   submitting,
   onSend,
   onOpenMenu,
 }: {
   mode: ChatSendMode;
+  automatic?: boolean;
   canSend: boolean;
   submitting: boolean;
   onSend: () => void;
@@ -241,7 +247,7 @@ function SendModeButton({
   const { colorScheme } = useColorScheme();
   const theme = THEME[colorScheme];
   const { t } = useT("chat");
-  const label = t(modeLabelKey(mode));
+  const label = automatic ? t("composer.send") : t(modeLabelKey(mode));
   return (
     <View className="h-8 flex-row items-center overflow-hidden rounded-full bg-primary">
       <Pressable
@@ -287,7 +293,7 @@ function SendModeSheet({
   onPick,
 }: {
   visible: boolean;
-  mode: ChatSendMode;
+  mode: ChatSendMode | null;
   steerSupported: boolean;
   steerProvider?: string;
   steerMode?: string;

@@ -112,6 +112,7 @@ export function promotePendingChatTask(
     return {
       ...current,
       status,
+      queue_reason: status === "queued" ? current.queue_reason : undefined,
       wait_reason: resolveWaitReason(status, waitReason, current.wait_reason),
       queued_tasks: queue.filter((task) => task.task_id !== taskID),
     };
@@ -126,6 +127,7 @@ export function promotePendingChatTask(
     ...promoted,
     supports_queue: current.supports_queue,
     status,
+    queue_reason: status === "queued" ? promoted.queue_reason : undefined,
     wait_reason: resolveWaitReason(status, waitReason, undefined),
     created_at: promoted.created_at || createdAt || "",
     queued_tasks: uniqueQueue([

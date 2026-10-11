@@ -1532,8 +1532,8 @@ type CreateCommentRequest struct {
 	// one: its agent keeps the normal trigger.
 	SteerTaskIDs []string `json:"steer_task_ids"`
 	// Mode is the one-word form of the same choice (DENE-1346): steer adds the
-	// comment to the running turns of every agent it wakes, queue (default)
-	// waits for them, restart stops them first. Steer is refused with the
+	// comment to the running turns of every agent it wakes, explicit queue
+	// waits for them, restart stops them first. Omitted mode merges into existing work. Steer is refused with the
 	// reason and the usable modes when no woken turn can read it.
 	// handoff and parallel (DENE-1350) are for an @agent who is not running:
 	// handoff stops every other agent's run here, writes the handoff card and
@@ -1840,6 +1840,9 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 	// Determine author identity: agent (via X-Agent-ID header) or member.
 	authorType, authorID := h.resolveActor(r, userID, uuidToString(issue.WorkspaceID))
 
+	if req.Mode == sendModeQueue || req.Mode == commentModeParallel || req.Mode == commentModeHandoff || req.Mode == sendModeRestart {
+		r = r.WithContext(service.WithSeparateIssueRun(r.Context()))
+	}
 	handoffMode := req.Mode == commentModeHandoff
 	sendMode := req.Mode
 	if handoffMode || req.Mode == commentModeParallel {
@@ -2186,6 +2189,17 @@ func (h *Handler) triggerTasksForCommentReport(ctx context.Context, issue db.Iss
 	h.noteMissedMentionRelays(ctx, issue, comment.ID, targets)
 	h.ringDoorbellTargets(ctx, issue, comment, actorType, actorID, targets)
 	resolved := triggers
+	attachments, attachmentErr := h.Queries.ListAttachmentsByComment(ctx, db.ListAttachmentsByCommentParams{CommentID: comment.ID, WorkspaceID: issue.WorkspaceID})
+	if !service.SeparateIssueRun(ctx) && len(steerTaskIDs) == 0 && attachmentErr == nil && len(attachments) == 0 {
+		running, err := h.Queries.ListIssueSteerTargets(ctx, issue.ID)
+		if err == nil {
+			for _, task := range running {
+				if task.Capability == protocol.DaemonCapabilityTaskSupplementV1 {
+					steerTaskIDs = append(steerTaskIDs, task.ID)
+				}
+			}
+		}
+	}
 	triggers, steered := h.steerCommentAgentTriggers(ctx, issue, comment, actorType, triggers, steerTaskIDs)
 	enqueued := h.enqueueCommentAgentTriggers(ctx, issue, comment.ID, triggers)
 	for agentID, result := range steered {
@@ -2394,7 +2408,7 @@ func (h *Handler) resolveCommentTriggerEnqueue(ctx context.Context, issue db.Iss
 			}
 			// No same-head QUEUED row to fold into (merge missed). The two paths
 			// resolve differently.
-			if !lostRace && !trigger.NonLeaderAgentReply {
+			if !lostRace && !trigger.NonLeaderAgentReply && service.SeparateIssueRun(ctx) {
 				// (b) AlreadyPending path: this comment arrived AFTER its task, so
 				// it is newer than the task and completion reconcile covers it by
 				// timestamp; MUL-4195 leaves the claimed task untouched. Defer to
@@ -2541,6 +2555,9 @@ func commentEnqueueFailureReason(err error) DispatchReasonCode {
 // active" is never the same as "a run is active". See decidePostMergeMiss /
 // decideSuppressedLeaderOutcome for the two decisions.
 func (h *Handler) hasActiveTaskForIssueAndAgent(ctx context.Context, issueID, agentID, threadCommentID pgtype.UUID) (bool, error) {
+	if !service.SeparateIssueRun(ctx) {
+		return h.Queries.HasActiveTaskForIssueAndAgent(ctx, db.HasActiveTaskForIssueAndAgentParams{IssueID: issueID, AgentID: agentID})
+	}
 	active, err := h.Queries.HasActiveTaskForIssueAndAgentInThread(ctx, db.HasActiveTaskForIssueAndAgentInThreadParams{
 		ThreadCommentID: threadCommentID,
 		IssueID:         issueID,
@@ -2670,6 +2687,7 @@ func (h *Handler) mergeCommentIntoPendingTask(ctx context.Context, issue db.Issu
 		IssueID:              issue.ID,
 		AgentID:              trigger.Agent.ID,
 		NewTriggerCommentID:  newTriggerCommentID,
+		AcrossThreads:        !service.SeparateIssueRun(ctx),
 		NewOriginatorUserID:  attr.UserID,
 		NewAccountableUserID: attr.AccountableUserID,
 		NewViaBotID:          attr.ViaBotID, NewViaBotName: attr.ViaBotName,
@@ -2718,10 +2736,11 @@ func (h *Handler) mergeCommentIntoPendingTask(ctx context.Context, issue db.Issu
 // comment as a single bounded follow-up (#5914). See the query doc.
 func (h *Handler) registerPlannedCommentForActiveTask(ctx context.Context, issue db.Issue, agentID, commentID pgtype.UUID, headSha pgtype.Text) (bool, error) {
 	row, err := h.Queries.RegisterPlannedCommentForActiveTask(ctx, db.RegisterPlannedCommentForActiveTaskParams{
-		CommentID: commentID,
-		IssueID:   issue.ID,
-		AgentID:   agentID,
-		HeadSha:   headSha,
+		CommentID:     commentID,
+		AcrossThreads: !service.SeparateIssueRun(ctx),
+		IssueID:       issue.ID,
+		AgentID:       agentID,
+		HeadSha:       headSha,
 	})
 	if err != nil {
 		if isNotFound(err) {
@@ -3306,8 +3325,8 @@ func (h *Handler) routeAssignedSquadLeaderFallback(ctx context.Context, issue db
 }
 
 func (h *Handler) hasPendingTaskForIssueAndAgent(ctx context.Context, issueID, agentID pgtype.UUID, opts commentTriggerComputeOptions) (bool, error) {
-	if !opts.ThreadCommentID.Valid {
-		return false, nil
+	if !service.SeparateIssueRun(ctx) && !opts.ExcludeTriggerCommentID.Valid {
+		return h.Queries.HasActiveTaskForIssueAndAgent(ctx, db.HasActiveTaskForIssueAndAgentParams{IssueID: issueID, AgentID: agentID})
 	}
 	// Key dedup on the reviewed head so re-pushing to the PR mid-review
 	// invalidates dedup and a fresh run enqueues against the new HEAD (TEN-356).

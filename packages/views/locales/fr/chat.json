@@ -321,7 +321,8 @@
       "making_edits": "Modifications en cours",
       "searching_web": "Recherche sur le web",
       "fallback": "Au travail"
-    }
+    },
+    "machine_full": "En attente : machine pleine ({{active}}/{{limit}})"
   },
   "list": {
     "typing": "Rédaction…",

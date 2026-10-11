@@ -174,12 +174,11 @@ func TestEnqueueMentionedAgentTasks_SelfMentionCrossIssueEnqueues(t *testing.T) 
 	}
 }
 
-// TestEnqueueMentionedAgentTasks_SelfMentionWhileRunningQueuesFollowup proves
+// TestEnqueueMentionedAgentTasks_SelfMentionWhileRunningMerges proves
 // that a self-mention posted in the same issue an agent is currently running
 // in does NOT pre-empt the natural queue-coalescing behavior: a `running`
-// task is not "pending" for dedup purposes, so a new queued follow-up is
-// added and the agent picks it up on its next cycle.
-func TestEnqueueMentionedAgentTasks_SelfMentionWhileRunningQueuesFollowup(t *testing.T) {
+// task owns additional default inputs without a queued duplicate.
+func TestEnqueueMentionedAgentTasks_SelfMentionWhileRunningMerges(t *testing.T) {
 	if testHandler == nil || testPool == nil {
 		t.Skip("database not available")
 	}
@@ -200,8 +199,8 @@ func TestEnqueueMentionedAgentTasks_SelfMentionWhileRunningQueuesFollowup(t *tes
 
 	enqueueMentionedAgentTasksForTest(t, ctx, fx.IssueA, fx.CommentA, nil, "agent", fx.JID)
 
-	if got := countQueuedOrDispatched(t, fx.JID, fx.IssueAID); got != 1 {
-		t.Fatalf("after self-mention while running: expected 1 new queued follow-up, got %d", got)
+	if got := countQueuedOrDispatched(t, fx.JID, fx.IssueAID); got != 0 {
+		t.Fatalf("after self-mention while running: expected no queued duplicate, got %d", got)
 	}
 }
 

@@ -114,7 +114,9 @@
     "mode_steer_unsupported": "{{cli}} can't read messages mid-reply yet",
     "mode_steer_unsupported_generic": "This agent can't read messages mid-reply yet",
     "enter_hint": "Enter = {{mode}}",
-    "steer_fell_back_toast": "This reply can't take a message mid-reply, so it was queued"
+    "steer_fell_back_toast": "This reply can't take a message mid-reply, so it was queued",
+    "converted_to_issue": "Work continues in the issue",
+    "open_converted_issue": "Open issue"
   },
   "queue": {
     "title_one": "{{count}} queued message",
@@ -321,7 +323,8 @@
       "making_edits": "Making edits",
       "searching_web": "Searching the web",
       "fallback": "Working"
-    }
+    },
+    "machine_full": "Queued: machine full ({{active}}/{{limit}})"
   },
   "list": {
     "typing": "Typing…",

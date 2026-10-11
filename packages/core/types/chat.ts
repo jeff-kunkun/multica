@@ -1,3 +1,4 @@
+import type { MachineQueueReason } from "./agent";
 import type { AgentTask } from "./agent";
 import type { Progress } from "./progress";
 import type { ChatLinkedProject } from "./workspace-link";
@@ -115,6 +116,8 @@ export interface AgentChatPage {
 }
 
 export interface ChatSession {
+  /** The issue that owns execution after this chat was converted. */
+  converted_issue_id?: string | null;
   id: string;
   workspace_id: string;
   agent_id: string;
@@ -396,6 +399,7 @@ export interface ChatDraftRestoresResponse {
  * so the timer survives refresh / reopen without "resetting to 0s".
  */
 export interface ChatQueuedTask {
+  queue_reason?: MachineQueueReason;
   task_id: string;
   status: string;
   created_at: string;
@@ -412,6 +416,7 @@ export interface PrioritizeQueuedChatTaskResponse {
 }
 
 export interface ChatPendingTask {
+  queue_reason?: MachineQueueReason;
   task_id?: string;
   status?: string;
   created_at?: string;

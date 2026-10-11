@@ -803,6 +803,7 @@ type ChatSession struct {
 	OriginSessionID         pgtype.UUID        `json:"origin_session_id"`
 	OriginTaskID            pgtype.UUID        `json:"origin_task_id"`
 	OriginClientKey         pgtype.Text        `json:"origin_client_key"`
+	ConvertedIssueID        pgtype.UUID        `json:"converted_issue_id"`
 }
 
 type ChatSessionLinkReadAudit struct {
@@ -856,18 +857,19 @@ type ChatSessionRead struct {
 }
 
 type ChatTaskSupplement struct {
-	TaskID         pgtype.UUID        `json:"task_id"`
-	ChatMessageID  pgtype.UUID        `json:"chat_message_id"`
-	FollowupTaskID pgtype.UUID        `json:"followup_task_id"`
-	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
-	ChatSessionID  pgtype.UUID        `json:"chat_session_id"`
-	AuthorID       pgtype.UUID        `json:"author_id"`
-	Status         string             `json:"status"`
-	FailureReason  pgtype.Text        `json:"failure_reason"`
-	AttemptCount   int32              `json:"attempt_count"`
-	CreatedAt      pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
-	DeliveredAt    pgtype.Timestamptz `json:"delivered_at"`
+	TaskID              pgtype.UUID        `json:"task_id"`
+	ChatMessageID       pgtype.UUID        `json:"chat_message_id"`
+	FollowupTaskID      pgtype.UUID        `json:"followup_task_id"`
+	WorkspaceID         pgtype.UUID        `json:"workspace_id"`
+	ChatSessionID       pgtype.UUID        `json:"chat_session_id"`
+	AuthorID            pgtype.UUID        `json:"author_id"`
+	Status              string             `json:"status"`
+	FailureReason       pgtype.Text        `json:"failure_reason"`
+	AttemptCount        int32              `json:"attempt_count"`
+	CreatedAt           pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt           pgtype.Timestamptz `json:"updated_at"`
+	DeliveredAt         pgtype.Timestamptz `json:"delivered_at"`
+	RecoveredIntoTaskID pgtype.UUID        `json:"recovered_into_task_id"`
 }
 
 type ChatVisibilityNotice struct {
@@ -2083,6 +2085,12 @@ type ReviewPassHead struct {
 	PrUrl     string             `json:"pr_url"`
 	HeadSha   string             `json:"head_sha"`
 	CreatedAt pgtype.Timestamptz `json:"created_at"`
+}
+
+type RuntimeMachineCapacity struct {
+	MachineKey        string             `json:"machine_key"`
+	MaxConcurrentRuns int32              `json:"max_concurrent_runs"`
+	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
 }
 
 type RuntimeProfile struct {

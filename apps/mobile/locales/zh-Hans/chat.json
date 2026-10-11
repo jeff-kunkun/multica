@@ -78,7 +78,8 @@
     "searching_code": "正在搜索代码",
     "making_edits": "正在修改",
     "searching_web": "正在搜索网页",
-    "retrying": "重试中"
+    "retrying": "重试中",
+    "machine_full": "排队中：机器已满（{{active}}/{{limit}}）"
   },
   "alerts": {
     "no_permission_title": "无权运行该智能体",
@@ -231,5 +232,15 @@
     "title": "本聊天的单",
     "just_changed": "刚变",
     "needs_you": "要你处理"
-  }
+  },
+  "stop_work": {
+    "title": "停止这件事？",
+    "description": "停止排队和正在运行的工作，已生成内容会保留。",
+    "keep": "继续运行",
+    "confirm": "停止这个聊天",
+    "confirm_related": "连带停止",
+    "failed": "停止失败，请重试。"
+  },
+  "converted_to_issue": "这件事已转到任务中执行",
+  "open_converted_issue": "前往任务"
 }

@@ -184,6 +184,7 @@ var workspaceDeletionManifest = map[string]workspaceDeleteAction{
 	"transfer_attachment_upload":         workspaceDelete,
 	"transfer_attachment_upload_chunk":   workspaceDelete,
 	"user":                               workspaceDeleteKeep,
+	"runtime_machine_capacity":           workspaceDeleteKeep, // owner-scoped, shared across workspaces
 	"user_composio_connection":           workspaceDeleteKeep,
 	"user_password_credential":           workspaceDeleteKeep,
 	"vcs_commit_status":                  workspaceDelete,

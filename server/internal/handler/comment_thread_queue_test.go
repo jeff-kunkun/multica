@@ -7,12 +7,13 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/testutil"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
-func TestCommentThreadQueuesMergeAndExecuteIndependently(t *testing.T) {
-	ctx := context.Background()
+func TestExplicitCommentThreadQueuesMergeAndExecuteIndependently(t *testing.T) {
+	ctx := service.WithSeparateIssueRun(context.Background())
 	runtimeID := dbfx.Runtime(t, "thread queue runtime")
 	agentID := dbfx.Agent(t, "thread queue agent", runtimeID)
 	issueID := dbfx.Issue(t, "thread queue issue", testutil.Cols{"assignee_type": "agent", "assignee_id": agentID})

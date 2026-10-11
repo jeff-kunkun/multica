@@ -28,6 +28,9 @@ import (
 type raceInjectTxStarter struct {
 	pool   *pgxpool.Pool
 	inject func()
+	// Empty keeps the historical batch-seal hook. Merge tests can inject at
+	// their own read boundary, which no longer executes the batch-seal SQL.
+	queryName string
 }
 
 func (s *raceInjectTxStarter) Begin(ctx context.Context) (pgx.Tx, error) {
@@ -35,12 +38,13 @@ func (s *raceInjectTxStarter) Begin(ctx context.Context) (pgx.Tx, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &raceInjectTx{Tx: tx, inject: s.inject}, nil
+	return &raceInjectTx{Tx: tx, inject: s.inject, queryName: s.queryName}, nil
 }
 
 type raceInjectTx struct {
 	pgx.Tx
-	inject func()
+	inject    func()
+	queryName string
 }
 
 type failNamedExecTxStarter struct {
@@ -71,11 +75,24 @@ func (t *failNamedExecTx) Exec(ctx context.Context, sql string, args ...any) (pg
 }
 
 func (t *raceInjectTx) Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error) {
-	if strings.Contains(sql, "LinkUnownedChannelChatMessagesToTask") && t.inject != nil {
+	t.injectBefore(sql)
+	return t.Tx.Exec(ctx, sql, args...)
+}
+
+func (t *raceInjectTx) Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error) {
+	t.injectBefore(sql)
+	return t.Tx.Query(ctx, sql, args...)
+}
+
+func (t *raceInjectTx) injectBefore(sql string) {
+	queryName := t.queryName
+	if queryName == "" {
+		queryName = "LinkUnownedChannelChatMessagesToTask"
+	}
+	if strings.Contains(sql, queryName) && t.inject != nil {
 		t.inject()
 		t.inject = nil
 	}
-	return t.Tx.Exec(ctx, sql, args...)
 }
 
 func TestEnqueueChannelChatTask_ContextClearFailureRollsBackTaskAndSeal(t *testing.T) {

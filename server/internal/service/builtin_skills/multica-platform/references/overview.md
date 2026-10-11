@@ -30,6 +30,12 @@ mean no visible matches. Compact mode keeps identifiers and key status fields;
 full mode adds descriptions, relationships, repositories, schedules and tickets.
 It never includes prompts, API keys, environment values or webhook secrets.
 
+Runtime rows retain `machine_capacity: {active_runs, max_concurrent_runs}` in
+both full and compact mode. Counts include the owner's machine across providers
+and workspaces without exposing other workspace task identities. The default
+limit is 12; use `multica runtime capacity <runtime-id> --max-concurrent-runs 8`
+to change it as the machine owner (see `runtimes.md`).
+
 External Bot personal keys follow the same ordinary authentication and access
 rules as their owner. Task tokens retain their existing actor/visibility rules;
 they cannot read the external key inventory. See `external-bots.md` for setup.
@@ -111,6 +117,16 @@ The `fast_access.mcp` discovery field names the local `multica mcp serve` stdio
 adapter. Find it in `capabilities` and read `mcp serve --help` for configuration,
 tool schemas and ambiguous-write recovery. Existing workspace/agent MCP settings
 assign it; no new credentials are created.
+
+`multica capabilities --output json` includes `execution_rules`: default wakeup
+coalescing, explicit queue/restart alternatives, permission-scoped related
+stops, and the chat-to-issue execution transfer. Read these before starting
+another run or stopping work. Use `issue halt --related`,
+`issue status cancelled --related` or `chat stop --related` for a related stop;
+ordinary status cancellation alone does not interrupt runs. The detailed
+contract is in `run-control.md`. Related stops recurse only through child
+issues. Reached source/bound/spawned chats never expand to other tickets or
+further chat relationships; only the named chat supplies direct chat links.
 
 `bot_wake_chain` describes the workspace-wide Bot wake guard even in compact
 mode: `limit`, `reason_code`, `reset`, `human_exempt`,

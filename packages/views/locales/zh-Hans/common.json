@@ -231,5 +231,18 @@
     "projects": "适合所选项目",
     "generic": "通用",
     "other": "其他"
+  },
+  "stop_work": {
+    "title": "停止这件事？",
+    "description": "停止排队和正在运行的工作，已生成内容会保留。",
+    "related": "连带停止子单和关联聊天",
+    "keep": "继续运行",
+    "confirm": "停止",
+    "confirm_related": "连带停止",
+    "cancel_title": "取消任务？",
+    "cancel_description": "任务将被取消。可同时停止关联的运行。",
+    "cancel_keep": "保留任务",
+    "cancel_confirm": "取消任务",
+    "cancel_confirm_related": "取消并连带停止"
   }
 }

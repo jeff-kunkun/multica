@@ -942,7 +942,8 @@
     "sparkline_now": "Now",
     "status_deferred": "Retrying",
     "status_capacity_retry": "Model at capacity · retry {{retry}}, next at {{time}}",
-    "usage_label": "Token cost"
+    "usage_label": "Token cost",
+    "machine_full": "Queued: machine full ({{active}}/{{limit}})"
   },
   "runs_timeline": {
     "title": "Runs",

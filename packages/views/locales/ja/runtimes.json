@@ -85,6 +85,12 @@
       "toast_saved": "マシンの名前を変更しました",
       "toast_cleared": "マシン名をクリアしました",
       "toast_failed": "マシンの名前変更に失敗しました"
+    },
+    "capacity": {
+      "label": "同時実行の上限",
+      "running": "実行中 {{active}}/{{limit}}",
+      "owner_only": "上限を変更できるのはマシンの所有者のみです。",
+      "failed": "保存できませんでした。もう一度お試しください。"
     }
   },
   "health": {

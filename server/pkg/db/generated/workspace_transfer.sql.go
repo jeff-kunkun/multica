@@ -116,7 +116,7 @@ func (q *Queries) GetTransferAttachmentUpload(ctx context.Context, arg GetTransf
 }
 
 const getTransferChatSession = `-- name: GetTransferChatSession :one
-SELECT id, workspace_id, agent_id, creator_id, title, session_id, work_dir, status, created_at, updated_at, unread_since, runtime_id, last_read_at, is_agent_intro, pinned_at, project_id, explicitly_created_at, project_nudge_dismissed_at, visibility, title_locked, progress_text, progress_source, progress_tone, progress_author_type, progress_author_id, progress_updated_at, origin_type, origin_session_id, origin_task_id, origin_client_key FROM chat_session
+SELECT id, workspace_id, agent_id, creator_id, title, session_id, work_dir, status, created_at, updated_at, unread_since, runtime_id, last_read_at, is_agent_intro, pinned_at, project_id, explicitly_created_at, project_nudge_dismissed_at, visibility, title_locked, progress_text, progress_source, progress_tone, progress_author_type, progress_author_id, progress_updated_at, origin_type, origin_session_id, origin_task_id, origin_client_key, converted_issue_id FROM chat_session
 WHERE id = $1 AND workspace_id = $2
 `
 
@@ -159,6 +159,7 @@ func (q *Queries) GetTransferChatSession(ctx context.Context, arg GetTransferCha
 		&i.OriginSessionID,
 		&i.OriginTaskID,
 		&i.OriginClientKey,
+		&i.ConvertedIssueID,
 	)
 	return i, err
 }

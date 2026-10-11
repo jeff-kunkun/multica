@@ -80,5 +80,11 @@
     "system": "System",
     "system_notifications": "System notifications",
     "system_description": "Account changes, security alerts, product updates."
+  },
+  "machines": {
+    "title": "Machines",
+    "capacity": "Running {{active}}/{{limit}}",
+    "limit": "Concurrent run limit {{limit}}",
+    "failed": "Could not load. Try again."
   }
 }
