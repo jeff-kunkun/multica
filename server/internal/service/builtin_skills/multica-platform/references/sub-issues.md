@@ -44,6 +44,13 @@ Advancement is agent-driven: the server only detects the closed barrier and
 wakes the parent assignee, who then decides whether to promote the next stage's
 `backlog` sub-issues to `todo`.
 
+A parent nobody holds still advances: a closed stage promotes the next stage's
+sub-issues whose description says there is no extra dependency, and the rest
+reach a person's inbox. When you, an agent, add a staged sub-issue to a
+top-level parent you created without an executor, the server seats a
+coordinator on it (routing's pick, else you) and moves a `backlog` parent to
+`in_progress`; no run starts until a stage closes.
+
 ```bash
 # Stage 1 runs now; later stages parked until promoted
 multica issue create --title "Research A" --parent <id> --assignee <agent> --stage 1 --status todo

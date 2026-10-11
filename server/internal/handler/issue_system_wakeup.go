@@ -51,6 +51,13 @@ type systemWakeupResponse struct {
 	// Blocked says why the rule would not start a run right now: "backlog",
 	// "member_assignee" (it notifies the member instead) or "no_assignee".
 	Blocked string `json:"blocked"`
+	// OnMet is what happens when the condition is met now, for agents that
+	// cannot see the panel: "wake" (the agent or squad leader gets a run),
+	// "notify" (the member gets an inbox item), "advance" (nobody holds the
+	// parent: the platform promotes next-stage sub-issues with no extra
+	// dependency and calls a person for the rest, DENE-1777), "hold" (parked
+	// in backlog), "off" or "paused".
+	OnMet string `json:"on_met"`
 	// WorkspaceDefault is the rule's workspace-wide setting, which applies
 	// until the issue sets its own.
 	WorkspaceDefault bool `json:"workspace_default"`
@@ -158,6 +165,20 @@ func (h *Handler) childDoneSystemWakeup(r *http.Request, parent db.Issue) (*syst
 	}
 	if out.Blocked == "" && out.Target == nil {
 		out.Blocked = "no_assignee"
+	}
+	switch {
+	case out.PausedReason != nil:
+		out.OnMet = "paused"
+	case !out.Enabled:
+		out.OnMet = "off"
+	case out.Blocked == "backlog":
+		out.OnMet = "hold"
+	case out.Blocked == "member_assignee":
+		out.OnMet = "notify"
+	case out.Blocked == "no_assignee" || !service.SystemRuleReaches(ctx, h.Queries, parent):
+		out.OnMet = "advance"
+	default:
+		out.OnMet = "wake"
 	}
 	return out, nil
 }

@@ -600,6 +600,24 @@ WHERE workspace_id = sqlc.arg(workspace_id)
   AND NOT COALESCE(id = ANY(sqlc.arg(excluded_issue_ids)::uuid[]), false)
 RETURNING *;
 
+-- name: SeatStagedParent :one
+-- An agent-created parent nobody holds becomes the coordinator of the staged
+-- sub-issues it gains (DENE-1777): a parked root moves to in_progress like a
+-- plan root, and the executor slot is filled only when an assignee is given
+-- and the slot is still empty. No run starts from this write.
+UPDATE issue AS i SET
+    status = CASE WHEN i.status = 'backlog' THEN 'in_progress' ELSE i.status END,
+    assignee_type = COALESCE(sqlc.narg('assignee_type')::text, i.assignee_type),
+    assignee_id = COALESCE(sqlc.narg('assignee_id')::uuid, i.assignee_id),
+    assignee_source = CASE WHEN sqlc.narg('assignee_id')::uuid IS NULL THEN i.assignee_source ELSE 'agent' END,
+    revision = i.revision + 1,
+    last_activity_at = GREATEST(COALESCE(i.last_activity_at, i.updated_at), now()),
+    updated_at = now()
+WHERE i.id = sqlc.arg('id') AND i.workspace_id = sqlc.arg('workspace_id')
+  AND i.parent_issue_id IS NULL AND i.creator_type = 'agent' AND i.assignee_id IS NULL
+  AND (i.status = 'backlog' OR (i.status = 'in_progress' AND sqlc.narg('assignee_id')::uuid IS NOT NULL))
+RETURNING *;
+
 -- name: PromoteBacklogIssueToTodo :one
 -- Stage advance only. A child still in backlog moves to todo; a second close
 -- that arrives after the first already promoted the row matches nothing, so
