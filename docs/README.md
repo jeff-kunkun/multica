@@ -11,6 +11,7 @@
 - [Bot 写入来源与推送集成契约](../server/docs/bot-write-provenance.md)
 - [工作区全景命令与筛选范围](../server/internal/service/builtin_skills/multica-platform/references/overview.md)
 - [新能力的智能体可读契约与收尾检查清单](kun/agent-readable-capabilities.md)
+- [Compact cross-workspace read and durable replay protocol](kun/fast-access.md)
 
 ## 当前适配资料
 

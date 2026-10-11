@@ -2,6 +2,8 @@
 
 本索引只记录指向沉淀票附件的短指针；原始日志、截图和样本留在对应票据附件。
 
+- DENE-1879：原生收件箱动态入口与快照页面补验；[手机截图报告](https://ai.ferryway.cc/api/attachments/01a12c47-e796-7ef2-a4e7-650de8231672/download)、[原始验证和回滚材料](https://ai.ferryway.cc/api/attachments/01a12c47-ef98-7bf9-a919-bf45e79132ac/download)。网页四档续页/刷新/关闭成功，122 条记录无漏重、未读不变；原生 App/Electron 未实跑，不代表生产性能达标。
+
 - DENE-1875：Grok 小本子[交互说明附件](https://ai.ferryway.cc/api/attachments/01a12c18-69b5-7614-a9bf-09c68d3ffb46/download)与[浏览器检查记录](https://ai.ferryway.cc/api/attachments/01a12c19-5fbf-74bf-b299-1878e1459d21/download)。方案演示，1–2 秒为目标；长期画像的 mono 回写尚待父单协调，不代表全局已同步。
 
 - DENE-1852（认证故障部分）：本机排队故障根因、先留现场再恢复、失效凭据断连及桌面端恢复；[本地验证记录](DENE-1852/auth-recovery.md)。未代表自动改派、通知、自启或并发上限已完成。
@@ -60,3 +62,6 @@
 - DENE-1808：可托管聊天代发、新连通默认开托管（旧连通不变）；[桌面/手机 HTML 预览附件](https://ai.ferryway.cc/api/attachments/01a12a2c-418e-78c0-bef9-e084235a21f1/download)。[验证记录与剩余验收](DENE-1808/README.md)：已补真实设置/聊天四档截图与开关提交；原生设备缺口保留，WD 线上验收需发布含本功能 CLI 的新测试版。
 
 - DENE-1876：页面说明偏好已回写全局来源，I17 与技能分发核验通过；[脱敏核验记录](DENE-1876/README.md)（引用已合并外仓修复，原始证据留附件）。
+- DENE-1870：跨工作区紧凑读取；[协议](../kun/fast-access.md)、[后端复现与本地测量](DENE-1870/backend.md)、[共享界面验证及原生例外](DENE-1870/frontend.md)、[四档真实截图报告](https://ai.ferryway.cc/api/attachments/01a12c30-6781-7d33-94d8-6399c6cbba01/download)。本地两工作区17活动运行，30次p95为1.043秒，不代表线上结果。
+
+- DENE-1872：持久事件记录与断线续传；[事务、回放、性能与回滚证据](DENE-1872/backend.md)。服务端、CLI、共享页面和原生查询层已同步；本地集成通过，尚未发布，原生设备与 Electron GUI 未实测。

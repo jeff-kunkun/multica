@@ -82,6 +82,11 @@ func init() {
 	versionCmd.GroupID = groupAdditional
 
 	rootCmd.AddCommand(overviewCmd)
+	for _, runs := range []bool{false, true} {
+		cmd := newFastAccessCommand(runs)
+		cmd.GroupID = groupCore
+		rootCmd.AddCommand(cmd)
+	}
 	rootCmd.AddCommand(capabilitiesCmd)
 	rootCmd.AddCommand(issueCmd)
 	rootCmd.AddCommand(projectCmd)
