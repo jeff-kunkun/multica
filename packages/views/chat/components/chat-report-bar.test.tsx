@@ -28,6 +28,19 @@ vi.mock("../../navigation", () => ({
     <a href={href} {...rest}>{children}</a>
   ),
 }));
+const snapshot = vi.hoisted(() => ({ current: [] as { issue_id: string; agent_id: string; status: string }[] }));
+vi.mock("@multica/core/agents", () => ({
+  agentTaskSnapshotOptions: (wsId: string) => ({
+    queryKey: ["snapshot", wsId],
+    queryFn: async () => snapshot.current,
+  }),
+}));
+vi.mock("@multica/core/workspace/queries", () => ({
+  agentListOptions: (wsId: string) => ({
+    queryKey: ["agents", wsId],
+    queryFn: async () => [{ id: "a1", name: "Goku" }],
+  }),
+}));
 vi.mock("@multica/ui/hooks/use-mobile", () => ({ useIsMobile: () => false }));
 
 const now = Date.now();
@@ -57,6 +70,7 @@ describe("ChatReportBar", () => {
   beforeEach(() => {
     localStorage.clear();
     setTicket.mockClear();
+    snapshot.current = [];
   });
 
   it("stays hidden while the chat has opened no tickets", async () => {
@@ -114,5 +128,17 @@ describe("ChatReportBar", () => {
       { sessionId: "chat-a", issue: "DENE-2", remove: true },
       expect.anything(),
     );
+  });
+
+  it("names the agent on each open ticket and flags in-progress ones nobody runs", async () => {
+    snapshot.current = [{ issue_id: "DENE-1", agent_id: "a1", status: "running" }];
+    tickets.current = [
+      ticket("DENE-1", "Being run", { status: "in_progress" }),
+      ticket("DENE-2", "Stalled", { status: "in_progress" }),
+    ];
+    renderBar();
+    fireEvent.click(await screen.findByText(/2 issues from this chat/));
+    expect(await screen.findByText(/Goku working/)).toBeTruthy();
+    expect(screen.getByText(/nobody working/)).toBeTruthy();
   });
 });

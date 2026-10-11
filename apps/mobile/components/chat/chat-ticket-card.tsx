@@ -27,6 +27,7 @@ import { chatKeys } from "@/data/queries/chat";
 import { useUpdateIssue } from "@/data/mutations/issues";
 import { useUnpinChatTicket } from "@/data/mutations/chat";
 import { useIssueStatuses } from "@/lib/use-issue-statuses";
+import { useChatTicketWorkLabel } from "@/lib/use-chat-ticket-work";
 import { useColorScheme } from "@/lib/use-color-scheme";
 import { THEME } from "@/lib/theme";
 import { useT } from "@/lib/i18n";
@@ -78,12 +79,14 @@ function ChatTicketRow({
   const unassigned = !ticket.assignee_type || !ticket.assignee_id;
   const mine =
     ticket.assignee_type === "member" && ticket.assignee_id === userId;
+  const workLabel = useChatTicketWorkLabel(wsId);
   const owner = unassigned
     ? t("tickets.routing")
     : t("tickets.to", { name: ticket.assignee_name || ticket.identifier });
   const detail = [
     t(`tickets.source.${ticket.source}`),
     catalog.labelOf(ticket.status),
+    settled ? "" : workLabel(ticket),
     owner,
     ticket.goal,
   ]
