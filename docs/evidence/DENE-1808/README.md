@@ -79,3 +79,18 @@ bash scripts/test-db.sh --quiet -- sh -c 'cd server && go test ./internal/worksp
 退出 0：workspacelink 11.924s，cmd/server 32.560s，service 0.941s，handler 1.583s，隔离数据库已删除。补测第一次在迁移 344 时因本机磁盘满退出 1，尚未执行用例；删除约 4GB 超过 24 小时未使用的可重建 Go 缓存后，上述完整命令通过，保留失败与成功日志。`ErrManagedRoute` 已明确写出附件上传和只读名字/项目资源查询。`seg`、`issueRef`、`attachment.upload`、`lookup.project_resources` 与对象名审计均保留主线版本。本轮未改 daemon 心跳、离线判定或令牌代码。
 
 最终推送前又纳入主线 `bb31d34257` 的 DENE-1806 线上证据更新；仅处理证据索引冲突，保留新主线条目及本票条目。生产代码与补充整包测试版本一致，不重复无变化的测试。
+
+## 合并后上线验收接续（2026-10-11 17:25 UTC）
+
+PR #634 已 squash 合入 `kun`，功能提交 `7121f543`。本轮不修改实现、不重复合并，也未发送生产验收消息。
+
+- 已有 Linux CLI `v0.6.3-test.6` 指向 `95e4202b9c035180cc5c963bee8e768955d46d51`，不包含功能提交（祖先检查退出 1）。ai-multica `/usr/local/bin/multica version` 同样报告 test.6、commit `95e4202b9`。
+- 只读自动更新回执 `/var/lib/multica/autoupdate.json`：17:22:03Z 的 `deployed_commit=95e4202b9…`，`target_commit=9e827e990a63dcc998f62f213b2784373bea5ec5`，`result=pending`；目标 backend 镜像尚不存在。没有手工启动部署或修改自动更新配置。
+- 从刚 fetch 的 `origin/kun` tip `9e827e990a63dcc998f62f213b2784373bea5ec5` 创建并推送 CLI 测试标签 `v0.6.3-test.7`，包含 `7121f543`（祖先检查退出 0）。任务分支保持原位，未切分支；Desktop cut dry-run 的当前工作区检查失败，因此没有在任务分支运行正式 cut。这次只发布 CLI，Desktop 产物没有构建或宣称完成。
+- 按既有借用仓库流程启动 [CLI 打包](https://github.com/kkunkunya/multica-image-builder/actions/runs/38159454642) 和 [自建镜像构建](https://github.com/kkunkunya/multica-image-builder/actions/runs/38159520015)。本记录时仍在构建，不能当作发布成功；下一轮核对 Release 的五份资产、校验和及版本，再升级生产运行环境。
+- 接收候选已从本人可见聊天目录和历史确认：`01a12a08-cb06-7503-bdf2-f06c9d58d150`，孙悟空游戏，标题「game · test/dev 服务器巡检：机器人建群与跳板权限」，创建人 kunkunya。目录确认不等于已投递；必须由 WD 的真实任务令牌再次核对源方目录，再发送一次并保留消息 JSON、接收任务及来源显示证据。
+- 原生设备缺口仍在：`xcrun simctl list devices booted` 报 simctl 不可用；`adb devices -l` 只有表头，没有连接设备。没有原生运行版本或截图可报。等待条件是可用 iOS 模拟器或 Android/iOS 设备及包含本功能的 App；网页截图不代替原生证据。
+
+已登记一次性接续唤醒 `01a12bff-96df-7655-bbbf-8fa7f959eb99`，17:40:33Z 唤醒孙悟饭：核对上述构建和自动部署 → 校验并升级 grok生产服/deepseek生产服（先查是否共用守护进程和活跃任务）→ WD 真实投递与叫醒 → 原生证据。任务保持未完成，不把本轮环境检查算作线上验收通过。
+
+知识审计：沿用已合并 ADR、CONTEXT 和平台 skill；本轮仅新增版本及验收接续事实，无新增权限或配置规则。原路由四件套从上一轮附件恢复并重新打开，补充执行 BASELINE/MODIFIED/ROLLBACK 探针，仍为 37/41/37 条路由、0/4/0 条聊天路由；这是夹具检查，不是部署回滚。
