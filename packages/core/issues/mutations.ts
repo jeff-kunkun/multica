@@ -886,6 +886,8 @@ export function useCreateComment(issueId: string) {
       const entry: TimelineEntry = {
         type: "comment",
         id: comment.id,
+        via_bot_id: comment.via_bot_id,
+        via_bot_name: comment.via_bot_name,
         actor_type: comment.author_type,
         actor_id: comment.author_id,
         content: comment.content,

@@ -129,7 +129,7 @@ func (q *Queries) ListChatKnowledgeSediments(ctx context.Context, arg ListChatKn
 }
 
 const listProjectDoneIssuesWithoutSediment = `-- name: ListProjectDoneIssuesWithoutSediment :many
-SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority, i.assignee_type, i.assignee_id, i.creator_type, i.creator_id, i.parent_issue_id, i.acceptance_criteria, i.context_refs, i.position, i.due_date, i.created_at, i.updated_at, i.number, i.project_id, i.origin_type, i.origin_id, i.first_executed_at, i.start_date, i.metadata, i.stage, i.properties, i.revision, i.last_activity_at, i.triage_state, i.reviewer_type, i.reviewer_id, i.visibility, i.assignee_source, i.assignee_source_user_id, i.assignee_quote, i.progress_text, i.progress_source, i.progress_tone, i.progress_author_type, i.progress_author_id, i.progress_updated_at, i.duplicate_of_issue_id, i.domain_id, i.origin_chat_session_id FROM issue i
+SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority, i.assignee_type, i.assignee_id, i.creator_type, i.creator_id, i.parent_issue_id, i.acceptance_criteria, i.context_refs, i.position, i.due_date, i.created_at, i.updated_at, i.number, i.project_id, i.origin_type, i.origin_id, i.first_executed_at, i.start_date, i.metadata, i.stage, i.properties, i.revision, i.last_activity_at, i.triage_state, i.reviewer_type, i.reviewer_id, i.visibility, i.assignee_source, i.assignee_source_user_id, i.assignee_quote, i.progress_text, i.progress_source, i.progress_tone, i.progress_author_type, i.progress_author_id, i.progress_updated_at, i.duplicate_of_issue_id, i.domain_id, i.origin_chat_session_id, i.via_bot_id, i.via_bot_name FROM issue i
 WHERE i.workspace_id = $1 AND i.project_id = $2
   AND i.status = 'done'
   AND i.updated_at >= $3
@@ -208,6 +208,8 @@ func (q *Queries) ListProjectDoneIssuesWithoutSediment(ctx context.Context, arg 
 			&i.DuplicateOfIssueID,
 			&i.DomainID,
 			&i.OriginChatSessionID,
+			&i.ViaBotID,
+			&i.ViaBotName,
 		); err != nil {
 			return nil, err
 		}
@@ -393,7 +395,7 @@ func (q *Queries) ListProjectKnowledgeSedimentsSince(ctx context.Context, arg Li
 }
 
 const listProjectSedimentRounds = `-- name: ListProjectSedimentRounds :many
-SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority, i.assignee_type, i.assignee_id, i.creator_type, i.creator_id, i.parent_issue_id, i.acceptance_criteria, i.context_refs, i.position, i.due_date, i.created_at, i.updated_at, i.number, i.project_id, i.origin_type, i.origin_id, i.first_executed_at, i.start_date, i.metadata, i.stage, i.properties, i.revision, i.last_activity_at, i.triage_state, i.reviewer_type, i.reviewer_id, i.visibility, i.assignee_source, i.assignee_source_user_id, i.assignee_quote, i.progress_text, i.progress_source, i.progress_tone, i.progress_author_type, i.progress_author_id, i.progress_updated_at, i.duplicate_of_issue_id, i.domain_id, i.origin_chat_session_id,
+SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority, i.assignee_type, i.assignee_id, i.creator_type, i.creator_id, i.parent_issue_id, i.acceptance_criteria, i.context_refs, i.position, i.due_date, i.created_at, i.updated_at, i.number, i.project_id, i.origin_type, i.origin_id, i.first_executed_at, i.start_date, i.metadata, i.stage, i.properties, i.revision, i.last_activity_at, i.triage_state, i.reviewer_type, i.reviewer_id, i.visibility, i.assignee_source, i.assignee_source_user_id, i.assignee_quote, i.progress_text, i.progress_source, i.progress_tone, i.progress_author_type, i.progress_author_id, i.progress_updated_at, i.duplicate_of_issue_id, i.domain_id, i.origin_chat_session_id, i.via_bot_id, i.via_bot_name,
        EXISTS (SELECT 1 FROM knowledge_sediment ks WHERE ks.issue_id = i.id)::boolean AS wrote
 FROM issue i
 WHERE i.workspace_id = $1
@@ -476,6 +478,8 @@ func (q *Queries) ListProjectSedimentRounds(ctx context.Context, arg ListProject
 			&i.Issue.DuplicateOfIssueID,
 			&i.Issue.DomainID,
 			&i.Issue.OriginChatSessionID,
+			&i.Issue.ViaBotID,
+			&i.Issue.ViaBotName,
 			&i.Wrote,
 		); err != nil {
 			return nil, err

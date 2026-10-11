@@ -676,7 +676,7 @@ func (h *Handler) UpdateAgentRuntime(w http.ResponseWriter, r *http.Request) {
 		// Notify connected clients that runtime metadata changed so the
 		// list/detail pages refresh — matches the pattern used by
 		// DeleteAgentRuntime.
-		h.publish(protocol.EventDaemonRegister, uuidToString(rt.WorkspaceID), "member", uuidToString(member.UserID), map[string]any{
+		h.publishWithSource(r.Context(), protocol.EventDaemonRegister, uuidToString(rt.WorkspaceID), "member", uuidToString(member.UserID), map[string]any{
 			"action": "update",
 		})
 	}
@@ -1024,12 +1024,12 @@ func (h *Handler) PublishRuntimeTeardown(ctx context.Context, res service.Runtim
 		// agent:status is the generic "this agent changed" broadcast the agent
 		// update path already uses; subscribers refresh the row and see
 		// runtime_bound=false. No agent:archived here — nothing was archived.
-		h.publish(protocol.EventAgentStatus, wsID, actorType, actorID, map[string]any{
+		h.publishWithSource(ctx, protocol.EventAgentStatus, wsID, actorType, actorID, map[string]any{
 			"agent": broadcastAgentResponse(h.agentToResponse(a)),
 		})
 	}
 	for _, a := range res.PausedAutopilots {
-		h.publish(protocol.EventAutopilotUpdated, wsID, actorType, actorID, map[string]any{
+		h.publishWithSource(ctx, protocol.EventAutopilotUpdated, wsID, actorType, actorID, map[string]any{
 			"autopilot": autopilotToResponse(a, nil),
 		})
 	}

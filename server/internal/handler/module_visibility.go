@@ -236,7 +236,7 @@ func (h *Handler) SetModuleVisibility(w http.ResponseWriter, r *http.Request) {
 	})
 
 	actorType, actorID := h.resolveActor(r, requestUserID(r), wsID)
-	h.publish(protocol.EventModuleVisibilityUpdated, wsID, actorType, actorID, map[string]any{
+	h.publishWithSource(r.Context(), protocol.EventModuleVisibilityUpdated, wsID, actorType, actorID, map[string]any{
 		"workspace_id": wsID,
 		"module":       string(module),
 		"visibility":   string(vis),

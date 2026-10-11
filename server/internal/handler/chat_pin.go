@@ -63,7 +63,7 @@ func (h *Handler) setChatPin(ctx context.Context, workspaceID, userID string, se
 			}
 			return err
 		}
-		h.publish(protocol.EventPinCreated, workspaceID, "member", userID, map[string]any{"pin": pinnedItemToResponse(pin)})
+		h.publishWithSource(ctx, protocol.EventPinCreated, workspaceID, "member", userID, map[string]any{"pin": pinnedItemToResponse(pin)})
 	} else {
 		if err := h.Queries.DeletePinnedItem(ctx, db.DeletePinnedItemParams{
 			WorkspaceID: wsUUID,
@@ -73,7 +73,7 @@ func (h *Handler) setChatPin(ctx context.Context, workspaceID, userID string, se
 		}); err != nil {
 			return err
 		}
-		h.publish(protocol.EventPinDeleted, workspaceID, "member", userID, map[string]any{
+		h.publishWithSource(ctx, protocol.EventPinDeleted, workspaceID, "member", userID, map[string]any{
 			"item_type": pinnedItemTypeChat,
 			"item_id":   uuidToString(session.ID),
 		})

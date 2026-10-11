@@ -156,7 +156,7 @@ func (h *Handler) RegisterTelegramBot(w http.ResponseWriter, r *http.Request) {
 	}
 	// Broadcast so every open client invalidates its installations query and
 	// shows the new bot — matching the Slack install semantics.
-	h.publish(protocol.EventTelegramInstallationCreated, uuidToString(row.WorkspaceID), "user", userID, map[string]any{
+	h.publishWithSource(r.Context(), protocol.EventTelegramInstallationCreated, uuidToString(row.WorkspaceID), "user", userID, map[string]any{
 		"id": uuidToString(row.ID),
 	})
 	writeJSON(w, http.StatusOK, telegramInstallationToResponse(row))
@@ -197,7 +197,7 @@ func (h *Handler) RevokeTelegramInstallation(w http.ResponseWriter, r *http.Requ
 		writeError(w, http.StatusInternalServerError, "failed to revoke installation")
 		return
 	}
-	h.publish(protocol.EventTelegramInstallationRevoked, uuidToString(wsUUID), "user", userID, map[string]any{
+	h.publishWithSource(r.Context(), protocol.EventTelegramInstallationRevoked, uuidToString(wsUUID), "user", userID, map[string]any{
 		"id": uuidToString(instUUID),
 	})
 	w.WriteHeader(http.StatusNoContent)

@@ -8,6 +8,7 @@
 - [跨工作区只读连通走单一出口，不复用访客](adr/0004-workspace-link.md)
 - [Web/Desktop 移动适配先抽共享外壳再修页面](adr/0005-mobile-web-shell.md)
 - [证据索引](evidence/INDEX.md)
+- [Bot 写入来源与推送集成契约](../server/docs/bot-write-provenance.md)
 
 ## 当前适配资料
 

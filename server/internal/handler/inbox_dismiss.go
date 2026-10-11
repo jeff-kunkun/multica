@@ -10,6 +10,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/botsource"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/dbid"
@@ -83,6 +84,7 @@ func (h *Handler) DismissInbox(w http.ResponseWriter, r *http.Request) {
 	defer tx.Rollback(r.Context())
 	qtx := h.Queries.WithTx(tx)
 	created, err := qtx.CreateComment(r.Context(), db.CreateCommentParams{
+		ViaBotID: botsource.FromContext(r.Context()).ID, ViaBotName: pgtype.Text{String: botsource.FromContext(r.Context()).Name, Valid: botsource.FromContext(r.Context()).ID.Valid},
 		ID:           dbid.NewV7(),
 		IssueID:      issue.ID,
 		WorkspaceID:  issue.WorkspaceID,
@@ -120,7 +122,7 @@ func (h *Handler) DismissInbox(w http.ResponseWriter, r *http.Request) {
 	comment := created.Comment()
 	commentResp := commentToResponse(comment, nil, nil)
 	commentResp.IssueRevision = created.IssueRevision
-	h.publish(protocol.EventCommentCreated, uuidToString(issue.WorkspaceID), actorType, actorID, map[string]any{
+	h.publishWithSource(r.Context(), protocol.EventCommentCreated, uuidToString(issue.WorkspaceID), actorType, actorID, map[string]any{
 		"comment":             commentResp,
 		"issue_title":         issue.Title,
 		"issue_assignee_type": textToPtr(issue.AssigneeType),
@@ -129,7 +131,7 @@ func (h *Handler) DismissInbox(w http.ResponseWriter, r *http.Request) {
 		"issue_revision":      created.IssueRevision,
 	})
 	if dismissed.InboxItemID.Valid {
-		h.publish(protocol.EventInboxArchived, uuidToString(issue.WorkspaceID), "member", uuidToString(recipient), map[string]any{
+		h.publishWithSource(r.Context(), protocol.EventInboxArchived, uuidToString(issue.WorkspaceID), "member", uuidToString(recipient), map[string]any{
 			"item_id":      uuidToString(dismissed.InboxItemID),
 			"issue_id":     uuidToString(issue.ID),
 			"recipient_id": uuidToString(recipient),

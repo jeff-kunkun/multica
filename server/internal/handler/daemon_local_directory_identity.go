@@ -102,7 +102,7 @@ func (h *Handler) BackfillLocalDirectoryIdentity(w http.ResponseWriter, r *http.
 	}
 
 	resp := projectResourceToResponse(updated)
-	h.publish(
+	h.publishWithSource(r.Context(),
 		protocol.EventProjectResourceUpdated,
 		uuidToString(existing.WorkspaceID),
 		"daemon",

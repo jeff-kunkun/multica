@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/botsource"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -90,6 +91,7 @@ func recordWakeupActivity(ctx context.Context, q *db.Queries, w db.IssueWakeup, 
 	details["wakeup"] = preview
 	raw, _ := json.Marshal(details)
 	row, err := q.CreateActivity(ctx, db.CreateActivityParams{
+		ViaBotID: botsource.FromContext(ctx).ID, ViaBotName: pgtype.Text{String: botsource.FromContext(ctx).Name, Valid: botsource.FromContext(ctx).ID.Valid},
 		ID: dbid.NewV7(), WorkspaceID: w.WorkspaceID, IssueID: w.IssueID,
 		ActorType: pgtype.Text{String: actorType, Valid: true}, ActorID: actorID,
 		Action: action, Details: raw,

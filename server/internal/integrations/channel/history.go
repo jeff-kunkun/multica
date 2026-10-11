@@ -26,6 +26,8 @@ const (
 // platform so the agent reads a uniform list, like `multica issue comment list
 // --output json`.
 type HistoryMessage struct {
+	ViaBotID   string `json:"via_bot_id,omitempty"`
+	ViaBotName string `json:"via_bot_name,omitempty"`
 	// ID is the platform message identifier (Slack ts, Feishu message_id).
 	ID string `json:"id"`
 	// Author is a human-readable display label for the sender ("Alice",

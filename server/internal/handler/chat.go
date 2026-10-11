@@ -16,6 +16,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/analytics"
+	"github.com/multica-ai/multica/server/internal/botsource"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/service"
@@ -474,6 +475,7 @@ func (h *Handler) ConvertChatSessionToGoal(w http.ResponseWriter, r *http.Reques
 	// discoverable after the composer closes. The issue remains the source of
 	// truth; this message is only the chat-side link record.
 	if _, messageErr := h.Queries.CreateChatMessage(r.Context(), db.CreateChatMessageParams{
+		ViaBotID: botsource.FromContext(r.Context()).ID, ViaBotName: pgtype.Text{String: botsource.FromContext(r.Context()).Name, Valid: botsource.FromContext(r.Context()).ID.Valid},
 		ChatSessionID: session.ID,
 		Role:          "assistant",
 		Content:       fmt.Sprintf("已转成目标任务 [%s](mention://issue/%s)", resp.Identifier, resp.ID),
@@ -648,7 +650,7 @@ func (h *Handler) UpdateChatSession(w http.ResponseWriter, r *http.Request) {
 		}
 		payload.LinkedProjects = &linked
 	}
-	h.publishChat(protocol.EventChatSessionUpdated, workspaceID, "member", userID, resolvedSessionID, payload)
+	h.publishChatWithSource(r.Context(), protocol.EventChatSessionUpdated, workspaceID, "member", userID, resolvedSessionID, payload)
 
 	writeJSON(w, http.StatusOK, responses[0])
 }
@@ -801,7 +803,7 @@ func (h *Handler) DismissChatSessionProjectNudge(w http.ResponseWriter, r *http.
 
 	resolvedSessionID := uuidToString(updated.ID)
 	dismissed := updated.ProjectNudgeDismissedAt.Valid
-	h.publishChat(protocol.EventChatSessionUpdated, workspaceID, "member", userID, resolvedSessionID, protocol.ChatSessionUpdatedPayload{
+	h.publishChatWithSource(r.Context(), protocol.EventChatSessionUpdated, workspaceID, "member", userID, resolvedSessionID, protocol.ChatSessionUpdatedPayload{
 		ChatSessionID:         resolvedSessionID,
 		Title:                 updated.Title,
 		ProjectNudgeDismissed: &dismissed,
@@ -963,7 +965,7 @@ func (h *Handler) SetChatSessionArchived(w http.ResponseWriter, r *http.Request)
 
 	resolvedSessionID := uuidToString(updated.ID)
 	status := updated.Status
-	h.publishChat(protocol.EventChatSessionUpdated, workspaceID, "member", userID, resolvedSessionID, protocol.ChatSessionUpdatedPayload{
+	h.publishChatWithSource(r.Context(), protocol.EventChatSessionUpdated, workspaceID, "member", userID, resolvedSessionID, protocol.ChatSessionUpdatedPayload{
 		ChatSessionID: resolvedSessionID,
 		Title:         updated.Title,
 		Status:        &status,
@@ -1121,7 +1123,7 @@ func (h *Handler) DeleteChatSession(w http.ResponseWriter, r *http.Request) {
 	h.TaskService.BroadcastCancelledTasks(r.Context(), workspaceID, cancelled)
 
 	resolvedSessionID := uuidToString(session.ID)
-	h.publishChat(protocol.EventChatSessionDeleted, workspaceID, "member", userID, resolvedSessionID, protocol.ChatSessionDeletedPayload{
+	h.publishChatWithSource(r.Context(), protocol.EventChatSessionDeleted, workspaceID, "member", userID, resolvedSessionID, protocol.ChatSessionDeletedPayload{
 		ChatSessionID: resolvedSessionID,
 	})
 
@@ -1362,7 +1364,7 @@ func (h *Handler) SendChatMessage(w http.ResponseWriter, r *http.Request) {
 
 	// Broadcast the user message.
 	resolvedSessionID := uuidToString(session.ID)
-	h.publishChat(protocol.EventChatMessage, workspaceID, "member", userID, resolvedSessionID, protocol.ChatMessagePayload{
+	h.publishChatWithSource(r.Context(), protocol.EventChatMessage, workspaceID, "member", userID, resolvedSessionID, protocol.ChatMessagePayload{
 		ChatSessionID: resolvedSessionID,
 		MessageID:     uuidToString(msg.ID),
 		Role:          "user",
@@ -1754,7 +1756,7 @@ func (h *Handler) MarkChatSessionRead(w http.ResponseWriter, r *http.Request) {
 	}
 
 	resolvedSessionID := uuidToString(session.ID)
-	h.publishChat(protocol.EventChatSessionRead, workspaceID, "member", userID, resolvedSessionID, protocol.ChatSessionReadPayload{
+	h.publishChatWithSource(r.Context(), protocol.EventChatSessionRead, workspaceID, "member", userID, resolvedSessionID, protocol.ChatSessionReadPayload{
 		ChatSessionID: resolvedSessionID,
 		ReaderUserID:  userID,
 	})
@@ -2689,6 +2691,8 @@ func chatListPreview(content string) string {
 }
 
 type ChatMessageResponse struct {
+	ViaBotID      *string `json:"via_bot_id,omitempty"`
+	ViaBotName    *string `json:"via_bot_name,omitempty"`
 	ID            string  `json:"id"`
 	ChatSessionID string  `json:"chat_session_id"`
 	Role          string  `json:"role"`
@@ -2748,6 +2752,7 @@ func chatSessionToResponse(s db.ChatSession) ChatSessionResponse {
 
 func chatMessageToResponse(m db.ChatMessage, attachments []AttachmentResponse) ChatMessageResponse {
 	return ChatMessageResponse{
+		ViaBotID: uuidToPtr(m.ViaBotID), ViaBotName: textToPtr(m.ViaBotName),
 		ID:            uuidToString(m.ID),
 		ChatSessionID: uuidToString(m.ChatSessionID),
 		Role:          m.Role,

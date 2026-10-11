@@ -292,7 +292,8 @@ func (h *Handler) StopBot(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, botToResponse(row, time.Now()))
 }
 
-// DeleteBot removes a stopped bot from the list. A running bot must be
+// DeleteBot tombstones a stopped bot, preserving historical provenance and
+// wake-event foreign keys while hiding it from the directory. A running bot must be
 // stopped first so a delete never silently cuts a bot off.
 func (h *Handler) DeleteBot(w http.ResponseWriter, r *http.Request) {
 	userID, ok := requireUserID(w, r)

@@ -296,7 +296,7 @@ func (h *Handler) SetIssueVisibility(w http.ResponseWriter, r *http.Request) {
 	// exactly those recipients. Recipients who gained access have nothing
 	// cached and pick the issue up from the update that follows.
 	h.publishIssueInvalidated(wsID, actorType, actorID, uuidToString(updated.ID), "", "")
-	h.publish(protocol.EventIssueUpdated, wsID, actorType, actorID, map[string]any{
+	h.publishWithSource(r.Context(), protocol.EventIssueUpdated, wsID, actorType, actorID, map[string]any{
 		"issue": issueToResponse(updated, h.getIssuePrefix(r.Context(), issue.WorkspaceID)),
 	})
 
@@ -522,7 +522,7 @@ func (h *Handler) SetProjectVisibility(w http.ResponseWriter, r *http.Request) {
 	// names the project rather than each issue: the client refetches its lists
 	// and the HTTP filter decides what comes back.
 	h.publishIssueInvalidated(wsID, actorType, actorID, "", uuidToString(updated.ID), "")
-	h.publish(protocol.EventProjectUpdated, wsID, actorType, actorID, map[string]any{
+	h.publishWithSource(r.Context(), protocol.EventProjectUpdated, wsID, actorType, actorID, map[string]any{
 		"project": projectToResponse(updated),
 	})
 	// The sweep may also have re-scoped repositories, which live in the

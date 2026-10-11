@@ -280,7 +280,7 @@ func (h *Handler) DisposeIssue(w http.ResponseWriter, r *http.Request) {
 				writeError(w, http.StatusConflict, "executor changed meanwhile; read the issue again")
 				return
 			}
-			h.publish(protocol.EventIssueUpdated, uuidToString(cleared.WorkspaceID), "system", "", RoutingIssueUpdatedPayload(issue, cleared))
+			h.publishWithSource(r.Context(), protocol.EventIssueUpdated, uuidToString(cleared.WorkspaceID), "system", "", RoutingIssueUpdatedPayload(issue, cleared))
 			issue = cleared
 		}
 		// The wake seats through routing first and says so when it cannot.

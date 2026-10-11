@@ -835,7 +835,7 @@ func (h *Handler) UploadFile(w http.ResponseWriter, r *http.Request) {
 			// so the file is usable. Log the error for investigation.
 		} else {
 			if att.IssueRevision > 0 && att.IssueID.Valid {
-				h.publish(protocol.EventIssueAttachmentsChanged, workspaceID, uploaderType, uploaderID, map[string]any{
+				h.publishWithSource(r.Context(), protocol.EventIssueAttachmentsChanged, workspaceID, uploaderType, uploaderID, map[string]any{
 					"issue_id":       uuidToString(att.IssueID),
 					"issue_revision": att.IssueRevision,
 				})
@@ -848,7 +848,7 @@ func (h *Handler) UploadFile(w http.ResponseWriter, r *http.Request) {
 					commentID := uuidToString(comment.ID)
 					reactions := h.groupReactions(r, []pgtype.UUID{comment.ID})
 					attachments := h.groupAttachments(r, []pgtype.UUID{comment.ID})
-					h.publish(protocol.EventCommentUpdated, workspaceID, uploaderType, uploaderID, map[string]any{
+					h.publishWithSource(r.Context(), protocol.EventCommentUpdated, workspaceID, uploaderType, uploaderID, map[string]any{
 						"comment": commentToResponse(comment, reactions[commentID], attachments[commentID]),
 					})
 				}
@@ -1801,7 +1801,7 @@ func (h *Handler) DeleteAttachment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if deleted.Changed && att.IssueID.Valid {
-		h.publish(protocol.EventIssueAttachmentsChanged, workspaceID, "member", userID, map[string]any{
+		h.publishWithSource(r.Context(), protocol.EventIssueAttachmentsChanged, workspaceID, "member", userID, map[string]any{
 			"issue_id":       uuidToString(att.IssueID),
 			"issue_revision": deleted.IssueRevision,
 		})
@@ -1814,7 +1814,7 @@ func (h *Handler) DeleteAttachment(w http.ResponseWriter, r *http.Request) {
 			commentID := uuidToString(comment.ID)
 			reactions := h.groupReactions(r, []pgtype.UUID{comment.ID})
 			attachments := h.groupAttachments(r, []pgtype.UUID{comment.ID})
-			h.publish(protocol.EventCommentUpdated, workspaceID, "member", userID, map[string]any{
+			h.publishWithSource(r.Context(), protocol.EventCommentUpdated, workspaceID, "member", userID, map[string]any{
 				"comment": commentToResponse(comment, reactions[commentID], attachments[commentID]),
 			})
 		}

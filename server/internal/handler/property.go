@@ -537,7 +537,7 @@ func (h *Handler) CreateProperty(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	resp := propertyToResponse(property, 0)
-	h.publish(protocol.EventPropertyCreated, workspaceID, "member", userID, map[string]any{"property": resp})
+	h.publishWithSource(r.Context(), protocol.EventPropertyCreated, workspaceID, "member", userID, map[string]any{"property": resp})
 	writeJSON(w, http.StatusCreated, resp)
 }
 
@@ -660,7 +660,7 @@ func (h *Handler) UpdateProperty(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	resp := propertyToResponse(property, 0)
-	h.publish(protocol.EventPropertyUpdated, workspaceID, "member", userID, map[string]any{"property": resp})
+	h.publishWithSource(r.Context(), protocol.EventPropertyUpdated, workspaceID, "member", userID, map[string]any{"property": resp})
 	writeJSON(w, http.StatusOK, resp)
 }
 
@@ -759,7 +759,7 @@ func (h *Handler) SetIssueProperty(w http.ResponseWriter, r *http.Request) {
 	workspaceID := uuidToString(updated.WorkspaceID)
 	actorType, actorID := h.resolveActor(r, userID, workspaceID)
 	properties := parseIssueProperties(updated.Properties)
-	h.publish(protocol.EventIssuePropertiesChanged, workspaceID, actorType, actorID, map[string]any{
+	h.publishWithSource(r.Context(), protocol.EventIssuePropertiesChanged, workspaceID, actorType, actorID, map[string]any{
 		"issue_id":       uuidToString(updated.ID),
 		"properties":     properties,
 		"issue_revision": updated.Revision,
@@ -813,7 +813,7 @@ func (h *Handler) DeleteIssueProperty(w http.ResponseWriter, r *http.Request) {
 	workspaceID := uuidToString(updated.WorkspaceID)
 	actorType, actorID := h.resolveActor(r, userID, workspaceID)
 	properties := parseIssueProperties(updated.Properties)
-	h.publish(protocol.EventIssuePropertiesChanged, workspaceID, actorType, actorID, map[string]any{
+	h.publishWithSource(r.Context(), protocol.EventIssuePropertiesChanged, workspaceID, actorType, actorID, map[string]any{
 		"issue_id":       uuidToString(updated.ID),
 		"properties":     properties,
 		"issue_revision": updated.Revision,

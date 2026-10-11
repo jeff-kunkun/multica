@@ -232,10 +232,13 @@ func TestViewLeakProofs(t *testing.T) {
 
 	// Every refusal is the same 404.
 	for name, call := range map[string]func() error{
-		"guest":            func() error { _, e := w.svc.View(ctx, w.viewer, permission.RoleGuest, id, Page{}); return e },
-		"source side":      func() error { _, e := w.svc.View(ctx, w.source, permission.RoleOwner, id, Page{}); return e },
-		"unrelated ws":     func() error { _, e := w.svc.View(ctx, w.other, permission.RoleOwner, id, Page{}); return e },
-		"unticked project": func() error { _, e := w.svc.View(ctx, w.viewer, permission.RoleOwner, id, Page{ProjectID: w.unticked}); return e },
+		"guest":        func() error { _, e := w.svc.View(ctx, w.viewer, permission.RoleGuest, id, Page{}); return e },
+		"source side":  func() error { _, e := w.svc.View(ctx, w.source, permission.RoleOwner, id, Page{}); return e },
+		"unrelated ws": func() error { _, e := w.svc.View(ctx, w.other, permission.RoleOwner, id, Page{}); return e },
+		"unticked project": func() error {
+			_, e := w.svc.View(ctx, w.viewer, permission.RoleOwner, id, Page{ProjectID: w.unticked})
+			return e
+		},
 		"no such link": func() error {
 			_, e := w.svc.View(ctx, w.viewer, permission.RoleOwner, uid(t, uuid.NewString()), Page{})
 			return e
@@ -342,8 +345,8 @@ func TestViewDTOFieldSet(t *testing.T) {
 	_ = json.Unmarshal(raw, &top)
 
 	want := map[string][]string{
-		"":         {"issues", "link_id", "next_cursor", "projects", "source", "statuses"},
-		"source":   {"avatar_url", "name"},
+		"":       {"issues", "link_id", "next_cursor", "projects", "source", "statuses"},
+		"source": {"avatar_url", "name"},
 		// DENE-1643: sharing a project shares its project context.
 		"projects": {"description", "done", "icon", "id", "memory_line", "resources", "status", "title", "total"},
 		"issues": {"assignee_avatar_url", "assignee_name", "due_date", "identifier", "priority",

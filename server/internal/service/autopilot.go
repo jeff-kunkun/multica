@@ -15,6 +15,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/attribution"
+	"github.com/multica-ai/multica/server/internal/botsource"
 	"github.com/multica-ai/multica/server/internal/dispatch"
 	"github.com/multica-ai/multica/server/internal/entitlement"
 	"github.com/multica-ai/multica/server/internal/events"
@@ -733,6 +734,8 @@ func (s *AutopilotService) dispatchCreateIssue(ctx context.Context, ap db.Autopi
 	}
 
 	issue, err := qtx.CreateIssueWithOrigin(ctx, db.CreateIssueWithOriginParams{
+		ActorType: pgtype.Text{String: botsource.ActorFromContext(ctx).Type, Valid: botsource.ActorFromContext(ctx).Type != ""}, ActorID: botsource.ActorFromContext(ctx).ID,
+		ViaBotID: botsource.FromContext(ctx).ID, ViaBotName: pgtype.Text{String: botsource.FromContext(ctx).Name, Valid: botsource.FromContext(ctx).ID.Valid},
 		ID:           dbid.NewV7(),
 		WorkspaceID:  ap.WorkspaceID,
 		Title:        title,
@@ -1029,7 +1032,7 @@ func (s *AutopilotService) dispatchRunOnly(ctx context.Context, ap db.Autopilot,
 	// never a NULL-source bypass.
 	var autopilotAttr attribution.Result
 	if actorUserID.Valid {
-		autopilotAttr = attribution.DirectHumanRun(actorUserID, attribution.EvidenceAutopilotRun, run.ID)
+		autopilotAttr = directRequestAttribution(ctx, actorUserID, attribution.EvidenceAutopilotRun, run.ID)
 	} else {
 		autopilotAttr = triggerOwnerAttribution(ctx, s.Queries, run.TriggerID, ap.WorkspaceID, ap.ID, attribution.EvidenceAutopilotRun, run.ID)
 	}
@@ -1056,6 +1059,8 @@ func (s *AutopilotService) dispatchRunOnly(ctx context.Context, ap db.Autopilot,
 		},
 		OriginatorUserID:     autopilotAttr.UserID,
 		AccountableUserID:    autopilotAttr.AccountableUserID,
+		ViaBotID:             autopilotAttr.ViaBotID,
+		ViaBotName:           autopilotAttr.ViaBotName,
 		RuleVersionID:        autopilotAttr.RuleVersionID,
 		OriginatorSource:     apSource,
 		TriggerEvidenceKind:  apEvidenceKind,

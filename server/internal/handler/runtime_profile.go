@@ -211,7 +211,7 @@ func (h *Handler) CreateRuntimeProfile(w http.ResponseWriter, r *http.Request) {
 
 	profileID := uuidToString(profile.ID)
 	h.requestDaemonRuntimeProfileRefresh(wsID, profileID)
-	h.publish(protocol.EventDaemonRegister, wsID, "member", uuidToString(member.UserID), map[string]any{
+	h.publishWithSource(r.Context(), protocol.EventDaemonRegister, wsID, "member", uuidToString(member.UserID), map[string]any{
 		"runtime_profile_id": profileID,
 	})
 
@@ -365,7 +365,7 @@ func (h *Handler) UpdateRuntimeProfile(w http.ResponseWriter, r *http.Request) {
 
 	profileID := uuidToString(profile.ID)
 	h.requestDaemonRuntimeProfileRefresh(wsID, profileID)
-	h.publish(protocol.EventDaemonRegister, wsID, "member", uuidToString(member.UserID), map[string]any{
+	h.publishWithSource(r.Context(), protocol.EventDaemonRegister, wsID, "member", uuidToString(member.UserID), map[string]any{
 		"runtime_profile_id": profileID,
 	})
 
@@ -648,7 +648,7 @@ func (h *Handler) DeleteRuntimeProfile(w http.ResponseWriter, r *http.Request) {
 		h.publishRuntimeTeardown(r.Context(), teardown, wsID, userID)
 	}
 	h.requestDaemonRuntimeProfileRefresh(wsID, profileID)
-	h.publish(protocol.EventDaemonRegister, wsID, "member", userID, map[string]any{
+	h.publishWithSource(r.Context(), protocol.EventDaemonRegister, wsID, "member", userID, map[string]any{
 		"deleted_runtime_profile_id": profileID,
 	})
 

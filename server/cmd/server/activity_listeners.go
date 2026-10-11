@@ -34,6 +34,7 @@ func registerActivityListeners(bus *events.Bus, queries *db.Queries) {
 		}
 
 		activity, err := queries.CreateActivity(ctx, db.CreateActivityParams{
+			ViaBotID: optionalUUID(e.ViaBotID), ViaBotName: util.StrToText(e.ViaBotName),
 			ID:          dbid.NewV7(),
 			WorkspaceID: parseUUID(issue.WorkspaceID),
 			IssueID:     parseUUID(issue.ID),
@@ -92,6 +93,7 @@ func registerActivityListeners(bus *events.Bus, queries *db.Queries) {
 			}
 			details, _ := json.Marshal(detailsMap)
 			activity, err := queries.CreateActivity(ctx, db.CreateActivityParams{
+				ViaBotID: optionalUUID(e.ViaBotID), ViaBotName: util.StrToText(e.ViaBotName),
 				ID:          dbid.NewV7(),
 				WorkspaceID: parseUUID(issue.WorkspaceID),
 				IssueID:     parseUUID(issue.ID),
@@ -115,6 +117,7 @@ func registerActivityListeners(bus *events.Bus, queries *db.Queries) {
 				"to":   issue.Priority,
 			})
 			activity, err := queries.CreateActivity(ctx, db.CreateActivityParams{
+				ViaBotID: optionalUUID(e.ViaBotID), ViaBotName: util.StrToText(e.ViaBotName),
 				ID:          dbid.NewV7(),
 				WorkspaceID: parseUUID(issue.WorkspaceID),
 				IssueID:     parseUUID(issue.ID),
@@ -151,6 +154,7 @@ func registerActivityListeners(bus *events.Bus, queries *db.Queries) {
 
 			details, _ := json.Marshal(detailsMap)
 			activity, err := queries.CreateActivity(ctx, db.CreateActivityParams{
+				ViaBotID: optionalUUID(e.ViaBotID), ViaBotName: util.StrToText(e.ViaBotName),
 				ID:          dbid.NewV7(),
 				WorkspaceID: parseUUID(issue.WorkspaceID),
 				IssueID:     parseUUID(issue.ID),
@@ -181,6 +185,7 @@ func registerActivityListeners(bus *events.Bus, queries *db.Queries) {
 				"to":   newStartDate,
 			})
 			activity, err := queries.CreateActivity(ctx, db.CreateActivityParams{
+				ViaBotID: optionalUUID(e.ViaBotID), ViaBotName: util.StrToText(e.ViaBotName),
 				ID:          dbid.NewV7(),
 				WorkspaceID: parseUUID(issue.WorkspaceID),
 				IssueID:     parseUUID(issue.ID),
@@ -211,6 +216,7 @@ func registerActivityListeners(bus *events.Bus, queries *db.Queries) {
 				"to":   newDueDate,
 			})
 			activity, err := queries.CreateActivity(ctx, db.CreateActivityParams{
+				ViaBotID: optionalUUID(e.ViaBotID), ViaBotName: util.StrToText(e.ViaBotName),
 				ID:          dbid.NewV7(),
 				WorkspaceID: parseUUID(issue.WorkspaceID),
 				IssueID:     parseUUID(issue.ID),
@@ -234,6 +240,7 @@ func registerActivityListeners(bus *events.Bus, queries *db.Queries) {
 				"to":   issue.Title,
 			})
 			activity, err := queries.CreateActivity(ctx, db.CreateActivityParams{
+				ViaBotID: optionalUUID(e.ViaBotID), ViaBotName: util.StrToText(e.ViaBotName),
 				ID:          dbid.NewV7(),
 				WorkspaceID: parseUUID(issue.WorkspaceID),
 				IssueID:     parseUUID(issue.ID),
@@ -252,6 +259,7 @@ func registerActivityListeners(bus *events.Bus, queries *db.Queries) {
 
 		if descriptionChanged {
 			activity, err := queries.CreateActivity(ctx, db.CreateActivityParams{
+				ViaBotID: optionalUUID(e.ViaBotID), ViaBotName: util.StrToText(e.ViaBotName),
 				ID:          dbid.NewV7(),
 				WorkspaceID: parseUUID(issue.WorkspaceID),
 				IssueID:     parseUUID(issue.ID),
@@ -301,6 +309,7 @@ func handleTaskActivity(ctx context.Context, bus *events.Bus, queries *db.Querie
 	}
 
 	activity, err := queries.CreateActivity(ctx, db.CreateActivityParams{
+		ViaBotID: optionalUUID(e.ViaBotID), ViaBotName: util.StrToText(e.ViaBotName),
 		ID:          dbid.NewV7(),
 		WorkspaceID: issue.WorkspaceID,
 		IssueID:     parseUUID(issueID),
@@ -331,10 +340,12 @@ func publishActivityEvent(bus *events.Bus, original events.Event, activity db.Ac
 		WorkspaceID: original.WorkspaceID,
 		ActorType:   original.ActorType,
 		ActorID:     original.ActorID,
+		ViaBotID:    original.ViaBotID, ViaBotName: original.ViaBotName,
 		Payload: map[string]any{
 			"issue_id": util.UUIDToString(activity.IssueID),
 			"entry": map[string]any{
 				"type":       "activity",
+				"via_bot_id": util.UUIDToString(activity.ViaBotID), "via_bot_name": activity.ViaBotName.String,
 				"id":         util.UUIDToString(activity.ID),
 				"actor_type": actorType,
 				"actor_id":   util.UUIDToString(activity.ActorID),
@@ -363,6 +374,7 @@ func recordDuplicateMarkActivities(ctx context.Context, bus *events.Bus, queries
 	record := func(issueID, action string, details map[string]string) bool {
 		body, _ := json.Marshal(details)
 		activity, err := queries.CreateActivity(ctx, db.CreateActivityParams{
+			ViaBotID: optionalUUID(e.ViaBotID), ViaBotName: util.StrToText(e.ViaBotName),
 			ID:          dbid.NewV7(),
 			WorkspaceID: parseUUID(issue.WorkspaceID),
 			IssueID:     parseUUID(issueID),

@@ -49,7 +49,7 @@ func (h *Handler) seatStagedParent(r *http.Request, workspaceID string, child db
 		slog.Warn("staged parent: seat failed", "error", err, "parent_id", uuidToString(parent.ID))
 		return
 	default:
-		h.publish(protocol.EventIssueUpdated, workspaceID, "system", "", RoutingIssueUpdatedPayload(parent, updated))
+		h.publishWithSource(r.Context(), protocol.EventIssueUpdated, workspaceID, "system", "", RoutingIssueUpdatedPayload(parent, updated))
 	}
 	if routed {
 		h.RouteGroupNodeAsync(r, workspaceID, uuidToString(parent.ID))

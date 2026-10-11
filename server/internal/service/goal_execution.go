@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/botsource"
 	"github.com/multica-ai/multica/server/internal/issuestatus"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -130,7 +131,9 @@ func (s *TaskService) reconcileGoalAfterCompletion(ctx context.Context, task db.
 	}
 
 	if pending == 0 && len(checks) > 0 {
-		if updated, updateErr := s.Queries.UpdateIssueStatus(ctx, db.UpdateIssueStatusParams{ID: issue.ID, Status: issuestatus.InReview, WorkspaceID: issue.WorkspaceID}); updateErr == nil {
+		if updated, updateErr := s.Queries.UpdateIssueStatus(ctx, db.UpdateIssueStatusParams{
+			ActorType: pgtype.Text{String: botsource.ActorFromContext(ctx).Type, Valid: botsource.ActorFromContext(ctx).Type != ""}, ActorID: botsource.ActorFromContext(ctx).ID,
+			ViaBotID: botsource.FromContext(ctx).ID, ViaBotName: pgtype.Text{String: botsource.FromContext(ctx).Name, Valid: botsource.FromContext(ctx).ID.Valid}, ID: issue.ID, Status: issuestatus.InReview, WorkspaceID: issue.WorkspaceID}); updateErr == nil {
 			s.broadcastIssueUpdated(ctx, updated, issue.Status)
 		}
 		s.recordGoalActivity(ctx, issue, task.AgentID, "goal_round_completed", map[string]any{"round": completedRound, "passed": passed, "total": len(checks), "next": "review"})
@@ -160,7 +163,9 @@ func (s *TaskService) reconcileGoalAfterCompletion(ctx context.Context, task db.
 		return
 	}
 	if issue.Status == issuestatus.Todo || issue.Status == issuestatus.Blocked {
-		if updated, updateErr := s.Queries.UpdateIssueStatus(ctx, db.UpdateIssueStatusParams{ID: issue.ID, Status: issuestatus.InProgress, WorkspaceID: issue.WorkspaceID}); updateErr == nil {
+		if updated, updateErr := s.Queries.UpdateIssueStatus(ctx, db.UpdateIssueStatusParams{
+			ActorType: pgtype.Text{String: botsource.ActorFromContext(ctx).Type, Valid: botsource.ActorFromContext(ctx).Type != ""}, ActorID: botsource.ActorFromContext(ctx).ID,
+			ViaBotID: botsource.FromContext(ctx).ID, ViaBotName: pgtype.Text{String: botsource.FromContext(ctx).Name, Valid: botsource.FromContext(ctx).ID.Valid}, ID: issue.ID, Status: issuestatus.InProgress, WorkspaceID: issue.WorkspaceID}); updateErr == nil {
 			s.broadcastIssueUpdated(ctx, updated, issue.Status)
 			issue = updated
 		}
@@ -178,7 +183,9 @@ func (s *TaskService) stopGoalForBudget(ctx context.Context, issue db.Issue, tas
 	if err != nil {
 		return
 	}
-	if updated, updateErr := s.Queries.UpdateIssueStatus(ctx, db.UpdateIssueStatusParams{ID: issue.ID, Status: issuestatus.Blocked, WorkspaceID: issue.WorkspaceID}); updateErr == nil {
+	if updated, updateErr := s.Queries.UpdateIssueStatus(ctx, db.UpdateIssueStatusParams{
+		ActorType: pgtype.Text{String: botsource.ActorFromContext(ctx).Type, Valid: botsource.ActorFromContext(ctx).Type != ""}, ActorID: botsource.ActorFromContext(ctx).ID,
+		ViaBotID: botsource.FromContext(ctx).ID, ViaBotName: pgtype.Text{String: botsource.FromContext(ctx).Name, Valid: botsource.FromContext(ctx).ID.Valid}, ID: issue.ID, Status: issuestatus.Blocked, WorkspaceID: issue.WorkspaceID}); updateErr == nil {
 		s.broadcastIssueUpdated(ctx, updated, issue.Status)
 	}
 	s.recordGoalActivity(ctx, issue, task.AgentID, "goal_budget_exhausted", map[string]any{"round": stopped.Round, "tokens_used": stopped.TokensUsed, "runs_used": stopped.RunsUsed, "duration_seconds_used": stopped.DurationSecondsUsed})
@@ -191,7 +198,9 @@ func (s *TaskService) stopGoalForNoProgress(ctx context.Context, issue db.Issue,
 	if err != nil {
 		return
 	}
-	if updated, updateErr := s.Queries.UpdateIssueStatus(ctx, db.UpdateIssueStatusParams{ID: issue.ID, Status: issuestatus.Blocked, WorkspaceID: issue.WorkspaceID}); updateErr == nil {
+	if updated, updateErr := s.Queries.UpdateIssueStatus(ctx, db.UpdateIssueStatusParams{
+		ActorType: pgtype.Text{String: botsource.ActorFromContext(ctx).Type, Valid: botsource.ActorFromContext(ctx).Type != ""}, ActorID: botsource.ActorFromContext(ctx).ID,
+		ViaBotID: botsource.FromContext(ctx).ID, ViaBotName: pgtype.Text{String: botsource.FromContext(ctx).Name, Valid: botsource.FromContext(ctx).ID.Valid}, ID: issue.ID, Status: issuestatus.Blocked, WorkspaceID: issue.WorkspaceID}); updateErr == nil {
 		s.broadcastIssueUpdated(ctx, updated, issue.Status)
 	}
 	s.recordGoalActivity(ctx, issue, task.AgentID, "goal_no_progress", map[string]any{"rounds": rounds, "passed": passed, "total": total, "limit": goal.MaxNoProgressRounds})
@@ -217,7 +226,8 @@ func (s *TaskService) createGoalBudgetAsk(ctx context.Context, issue db.Issue, a
 
 func (s *TaskService) recordGoalActivity(ctx context.Context, issue db.Issue, agentID pgtype.UUID, action string, details map[string]any) {
 	raw, _ := json.Marshal(details)
-	_, err := s.Queries.CreateActivity(ctx, db.CreateActivityParams{ID: dbid.NewV7(), WorkspaceID: issue.WorkspaceID, IssueID: issue.ID, ActorType: pgtype.Text{String: "agent", Valid: true}, ActorID: agentID, Action: action, Details: raw})
+	_, err := s.Queries.CreateActivity(ctx, db.CreateActivityParams{
+		ViaBotID: botsource.FromContext(ctx).ID, ViaBotName: pgtype.Text{String: botsource.FromContext(ctx).Name, Valid: botsource.FromContext(ctx).ID.Valid}, ID: dbid.NewV7(), WorkspaceID: issue.WorkspaceID, IssueID: issue.ID, ActorType: pgtype.Text{String: "agent", Valid: true}, ActorID: agentID, Action: action, Details: raw})
 	if err != nil {
 		slog.Warn("goal activity write failed", "issue_id", util.UUIDToString(issue.ID), "action", action, "error", err)
 	}

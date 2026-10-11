@@ -906,7 +906,7 @@ func (h *Handler) ReportLocalSkillImportResult(w http.ResponseWriter, r *http.Re
 			writeError(w, http.StatusInternalServerError, "failed to persist import completion")
 			return
 		}
-		h.publish(protocol.EventSkillUpdated, uuidToString(rt.WorkspaceID), "member", req.CreatorID, map[string]any{"skill": resp})
+		h.publishWithSource(r.Context(), protocol.EventSkillUpdated, uuidToString(rt.WorkspaceID), "member", req.CreatorID, map[string]any{"skill": resp})
 		slog.Debug("runtime local skill overwritten", "runtime_id", runtimeID, "request_id", requestID, "skill_id", resp.ID)
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 		return
@@ -967,7 +967,7 @@ func (h *Handler) ReportLocalSkillImportResult(w http.ResponseWriter, r *http.Re
 		writeError(w, http.StatusInternalServerError, "failed to persist import completion")
 		return
 	}
-	h.publish(protocol.EventSkillCreated, uuidToString(rt.WorkspaceID), "member", req.CreatorID, map[string]any{"skill": resp})
+	h.publishWithSource(r.Context(), protocol.EventSkillCreated, uuidToString(rt.WorkspaceID), "member", req.CreatorID, map[string]any{"skill": resp})
 	slog.Debug("runtime local skill imported", "runtime_id", runtimeID, "request_id", requestID, "skill_id", resp.ID)
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }

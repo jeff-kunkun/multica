@@ -35,6 +35,13 @@ describe("AttributionBadge", () => {
     expect(screen.getByTitle("Direct member action")).toBeInTheDocument();
   });
 
+  it("shows a bot source without presenting it as a direct member action", () => {
+    renderWithI18n(<AttributionBadge attribution={{ source: "via_bot", precise: true, via_bot_id: "b1", via_bot_name: "Grok", initiator: { id: "u1", name: "Kun" } }} />);
+    expect(screen.getByText("via Grok")).toBeInTheDocument();
+    expect(screen.getByTitle("via Grok")).toBeInTheDocument();
+    expect(screen.queryByTitle("Direct member action")).not.toBeInTheDocument();
+  });
+
   it("marks a fallback guess (owner_fallback) with a warning tone", () => {
     const attribution: TaskAttribution = {
       source: "owner_fallback",

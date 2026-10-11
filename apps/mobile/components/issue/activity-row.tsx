@@ -156,6 +156,7 @@ function LeadIcon({
 }
 
 export function ActivityRow({ entry }: { entry: TimelineEntry }) {
+  const { t } = useT("issues");
   const isConsult = CONSULT_ACTIONS.has(entry.action ?? "");
   const [open, setOpen] = useState(false);
   const { getName } = useActorLookup();
@@ -182,10 +183,10 @@ export function ActivityRow({ entry }: { entry: TimelineEntry }) {
       </View>
       <Text
         className="text-xs text-muted-foreground flex-1"
-        numberOfLines={1}
       >
         <Text className="text-xs text-muted-foreground font-medium">
           {actorName}
+          {entry.via_bot_name ? ` · ${t("via_bot", { name: entry.via_bot_name })}` : ""}
         </Text>
         {verb ? (
           <Text className="text-xs text-muted-foreground"> {verb}</Text>

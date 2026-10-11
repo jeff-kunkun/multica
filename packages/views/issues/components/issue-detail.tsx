@@ -1,5 +1,7 @@
 "use client";
 
+import { ViaBot } from "../../common/via-bot";
+
 import {
   issueBehavesAs,
   issueBehavesAsAny,
@@ -403,8 +405,9 @@ function ConsultActivityRow({
           aria-expanded={open}
           className="flex min-w-0 flex-1 items-center gap-1 text-left transition-colors hover:text-foreground"
         >
-          <span className="shrink-0 font-medium">
+          <span className="min-w-0 font-medium">
             {entry.actor_name || getActorName(entry.actor_type, entry.actor_id)}
+            <ViaBot name={entry.via_bot_name} />
           </span>
           <span className="truncate">
             {failed
@@ -892,8 +895,9 @@ function ActivityBlock({
             <div className="flex min-w-0 flex-1 items-center gap-1">
               {/* The platform's own entries read as a sentence without an actor. */}
               {!(isWakeup && entry.actor_type === "system") && (
-                <span className="shrink-0 font-medium">
+                <span className="min-w-0 font-medium">
                   {entry.actor_name || getActorName(entry.actor_type, entry.actor_id)}
+                  <ViaBot name={entry.via_bot_name} />
                 </span>
               )}
               <span className="truncate">
@@ -1910,6 +1914,8 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
           prev.action === entry.action &&
           prev.actor_type === entry.actor_type &&
           prev.actor_id === entry.actor_id &&
+          prev.via_bot_id === entry.via_bot_id &&
+          prev.via_bot_name === entry.via_bot_name &&
           (NO_TIME_LIMIT_ACTIONS.has(entry.action!) ||
             Math.abs(new Date(entry.created_at).getTime() - new Date(prev.created_at).getTime()) <= COALESCE_MS)
         ) {

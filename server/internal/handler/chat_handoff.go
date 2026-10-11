@@ -194,6 +194,7 @@ func handoffMessages(rows []db.ChatMessage) []channel.HistoryMessage {
 			role = channel.HistoryRoleAssistant
 		}
 		out = append(out, channel.HistoryMessage{
+			ViaBotID: uuidToString(m.ViaBotID), ViaBotName: m.ViaBotName.String,
 			ID:     uuidToString(m.ID),
 			Role:   role,
 			Text:   m.Content,

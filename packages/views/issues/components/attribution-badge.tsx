@@ -1,5 +1,7 @@
 "use client";
 
+import { ViaBot } from "../../common/via-bot";
+
 import type { TaskAttribution } from "@multica/core/types";
 import { Badge } from "@multica/ui/components/ui/badge";
 import { ActorAvatar } from "@multica/ui/components/common/actor-avatar";
@@ -61,12 +63,16 @@ export function AttributionBadge({
   hideAvatar?: boolean;
 }) {
   const { t } = useT("issues");
+  const { t: tCommon } = useT("common");
   if (!attribution) return null;
 
   // Human-readable resolution source, defaulting to the raw label so a
   // server-added source degrades gracefully instead of showing blank.
   let sourceLabel: string;
   switch (attribution.source) {
+    case "via_bot":
+      sourceLabel = tCommon(($) => $.via_bot, { name: attribution.via_bot_name || "Bot" });
+      break;
     case "direct_human":
       sourceLabel = t(($) => $.execution_log.attribution.source_direct_human);
       break;
@@ -139,7 +145,7 @@ export function AttributionBadge({
                   className="shrink-0"
                 />
               )}
-              <span className="min-w-0 truncate">{name}</span>
+              <span className="min-w-0">{name}<ViaBot name={attribution.via_bot_name} /></span>
             </span>
           }
         />
@@ -218,8 +224,9 @@ export function AttributionBadge({
         size="xs"
         className="shrink-0"
       />
-      <span className="min-w-0 truncate">
+      <span className="min-w-0">
         {t(($) => $.execution_log.attribution.on_behalf_of, { name })}
+        <ViaBot name={attribution.via_bot_name} />
       </span>
     </Badge>
   );

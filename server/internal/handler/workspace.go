@@ -254,7 +254,7 @@ func (h *Handler) UpdateWorkspaceNaming(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusInternalServerError, "failed to update naming source")
 		return
 	}
-	h.publish(protocol.EventWorkspaceUpdated, uuidToString(updated.ID), "member", requestUserID(r), map[string]any{"workspace": h.workspaceToResponse(updated)})
+	h.publishWithSource(r.Context(), protocol.EventWorkspaceUpdated, uuidToString(updated.ID), "member", requestUserID(r), map[string]any{"workspace": h.workspaceToResponse(updated)})
 	writeJSON(w, http.StatusOK, h.workspaceNamingState(r.Context(), id, req.Source))
 }
 
@@ -779,7 +779,7 @@ func (h *Handler) UpdateWorkspace(w http.ResponseWriter, r *http.Request) {
 
 	slog.Info("workspace updated", append(logger.RequestAttrs(r), "workspace_id", id)...)
 	userID := requestUserID(r)
-	h.publish(protocol.EventWorkspaceUpdated, uuidToString(ws.ID), "member", userID, map[string]any{"workspace": h.workspaceToResponse(ws)})
+	h.publishWithSource(r.Context(), protocol.EventWorkspaceUpdated, uuidToString(ws.ID), "member", userID, map[string]any{"workspace": h.workspaceToResponse(ws)})
 	// A rename changes what daemons display; a settings edit changes how they
 	// behave — the GitHub master switch and the Co-authored-by toggle are read
 	// from this JSONB. Daemons cache settings and have no other way to learn
@@ -1027,7 +1027,7 @@ func (h *Handler) UpdateMember(w http.ResponseWriter, r *http.Request) {
 
 	userID := requestUserID(r)
 	// The workspace-wide frame is the roster row without management fields.
-	h.publish(protocol.EventMemberUpdated, uuidToString(requester.WorkspaceID), "member", userID, map[string]any{
+	h.publishWithSource(r.Context(), protocol.EventMemberUpdated, uuidToString(requester.WorkspaceID), "member", userID, map[string]any{
 		"member": h.memberWithUserResponse(updatedMember, user).redactedForRoster(),
 	})
 
@@ -1085,7 +1085,7 @@ func (h *Handler) DeleteMember(w http.ResponseWriter, r *http.Request) {
 	h.publishRevocation(r.Context(), result, wsIDStr, "member", requesterUserID)
 
 	slog.Info("member removed", append(logger.RequestAttrs(r), "member_id", uuidToString(target.ID), "workspace_id", workspaceID, "user_id", uuidToString(target.UserID))...)
-	h.publish(protocol.EventMemberRemoved, wsIDStr, "member", requesterUserID, map[string]any{
+	h.publishWithSource(r.Context(), protocol.EventMemberRemoved, wsIDStr, "member", requesterUserID, map[string]any{
 		"member_id":    uuidToString(target.ID),
 		"workspace_id": wsIDStr,
 		"user_id":      uuidToString(target.UserID),
@@ -1129,7 +1129,7 @@ func (h *Handler) LeaveWorkspace(w http.ResponseWriter, r *http.Request) {
 	h.publishRevocation(r.Context(), result, workspaceID, "member", userID)
 
 	slog.Info("member removed", append(logger.RequestAttrs(r), "member_id", uuidToString(member.ID), "workspace_id", workspaceID, "user_id", uuidToString(member.UserID))...)
-	h.publish(protocol.EventMemberRemoved, workspaceID, "member", userID, map[string]any{
+	h.publishWithSource(r.Context(), protocol.EventMemberRemoved, workspaceID, "member", userID, map[string]any{
 		"member_id":    uuidToString(member.ID),
 		"workspace_id": workspaceID,
 		"user_id":      uuidToString(member.UserID),
@@ -1735,7 +1735,7 @@ func (h *Handler) DeleteWorkspace(w http.ResponseWriter, r *http.Request) {
 	h.deleteS3Objects(r.Context(), append(sourceContextAttachmentURLs, sourceContextIntentURLs...))
 
 	slog.Info("workspace deleted", append(logger.RequestAttrs(r), "workspace_id", workspaceID)...)
-	h.publish(protocol.EventWorkspaceDeleted, workspaceID, "member", requestUserID(r), map[string]any{
+	h.publishWithSource(r.Context(), protocol.EventWorkspaceDeleted, workspaceID, "member", requestUserID(r), map[string]any{
 		"workspace_id": workspaceID,
 	})
 	h.notifyDaemonWorkspacesChanged(affectedUserIDs...)

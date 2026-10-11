@@ -92,7 +92,7 @@ func (h *Handler) AddIssueReaction(w http.ResponseWriter, r *http.Request) {
 
 	resp := addedIssueReactionToResponse(reaction)
 	if reaction.IssueRevision > 0 {
-		h.publish(protocol.EventIssueReactionAdded, workspaceID, actorType, actorID, map[string]any{
+		h.publishWithSource(r.Context(), protocol.EventIssueReactionAdded, workspaceID, actorType, actorID, map[string]any{
 			"reaction":       resp,
 			"issue_id":       uuidToString(issue.ID),
 			"issue_title":    issue.Title,
@@ -148,7 +148,7 @@ func (h *Handler) RemoveIssueReaction(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if removed.Changed {
-		h.publish(protocol.EventIssueReactionRemoved, workspaceID, actorType, actorID, map[string]any{
+		h.publishWithSource(r.Context(), protocol.EventIssueReactionRemoved, workspaceID, actorType, actorID, map[string]any{
 			"issue_id":       uuidToString(issue.ID),
 			"emoji":          req.Emoji,
 			"actor_type":     actorType,

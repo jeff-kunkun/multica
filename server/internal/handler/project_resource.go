@@ -802,7 +802,7 @@ func (h *Handler) CreateProjectResource(w http.ResponseWriter, r *http.Request) 
 
 	resp := projectResourceToResponse(resource)
 	h.noteUnconnectedProjectRepo(r.Context(), project, resource.ResourceType, resource.ResourceRef, creator)
-	h.publish(
+	h.publishWithSource(r.Context(),
 		protocol.EventProjectResourceCreated,
 		uuidToString(project.WorkspaceID),
 		"member",
@@ -993,7 +993,7 @@ func (h *Handler) UpdateProjectResource(w http.ResponseWriter, r *http.Request) 
 	}
 
 	resp := projectResourceToResponse(updated)
-	h.publish(
+	h.publishWithSource(r.Context(),
 		protocol.EventProjectResourceUpdated,
 		uuidToString(project.WorkspaceID),
 		"member",
@@ -1155,7 +1155,7 @@ func (h *Handler) DeleteProjectResource(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusInternalServerError, "failed to delete project resource")
 		return
 	}
-	h.publish(
+	h.publishWithSource(r.Context(),
 		protocol.EventProjectResourceDeleted,
 		uuidToString(project.WorkspaceID),
 		"member",
