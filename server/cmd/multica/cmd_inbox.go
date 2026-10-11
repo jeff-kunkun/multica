@@ -21,8 +21,9 @@ var inboxCmd = &cobra.Command{
 }
 
 var inboxBoardCmd = &cobra.Command{
-	Use:   "board",
-	Short: "The inbox in its seven lanes: waiting on you, stalled, running, waiting on tickets, to do, new, done today",
+	Use:        "board",
+	SuggestFor: []string{"list", "ls", "show"},
+	Short:      "The inbox in its seven lanes: waiting on you, stalled, running, waiting on tickets, to do, new, done today",
 	Long: "The same lanes the inbox page shows (DENE-975), from GET /api/inbox/board:\n\n" +
 		"  waiting  — someone called this person, or a ticket stopped waiting on them\n" +
 		"  stalled  — a ticket stopped without saying why\n" +
@@ -51,8 +52,9 @@ var inboxDismissCmd = &cobra.Command{
 		"person's inbox and records the reason as a visible issue comment. It does not\n" +
 		"change the issue status or assignee, and it does not wake anyone.\n\n" +
 		"  --reason  why the reminder is stale (required)\n",
-	Args: exactArgs(1),
-	RunE: runInboxDismiss,
+	Args:        exactArgs(1),
+	RunE:        runInboxDismiss,
+	Annotations: map[string]string{annotationBotKey: "no"},
 }
 
 func init() {

@@ -14,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/auth"
+	"github.com/multica-ai/multica/server/internal/botonboarding"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
@@ -328,6 +329,46 @@ func (h *Handler) DeleteBot(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// BotSetupTextPlaceholder stands in for the key in the setup text handed out
+// without minting one (settings page copy, `multica bot guide`).
+const BotSetupTextPlaceholder = "<钥匙>"
+
+// BotSetupTextResponse is the setup text without a key.
+type BotSetupTextResponse struct {
+	SetupText string `json:"setup_text"`
+}
+
+// GetBotSetupText returns the same setup text a new key ships with, with the
+// key replaced by a placeholder, so the settings page and the CLI can hand a
+// bot the onboarding again without issuing a new key. ?bot=<id> names the bot.
+func (h *Handler) GetBotSetupText(w http.ResponseWriter, r *http.Request) {
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
+	wsUUID, ok := parseUUIDOrBadRequest(w, chi.URLParam(r, "id"), "workspace id")
+	if !ok {
+		return
+	}
+	botName := strings.TrimSpace(r.URL.Query().Get("name"))
+	if botID := strings.TrimSpace(r.URL.Query().Get("bot")); botID != "" {
+		botUUID, ok := parseUUIDOrBadRequest(w, botID, "bot id")
+		if !ok {
+			return
+		}
+		pat, err := h.Queries.GetBotAccessToken(r.Context(), db.GetBotAccessTokenParams{ID: botUUID, WorkspaceID: wsUUID, UserID: parseUUID(userID)})
+		if err != nil {
+			writeError(w, http.StatusNotFound, "bot not found")
+			return
+		}
+		botName = pat.Name
+	}
+	if botName == "" {
+		botName = "外部 Bot"
+	}
+	writeJSON(w, http.StatusOK, BotSetupTextResponse{SetupText: h.botSetupText(r.Context(), wsUUID, botName, BotSetupTextPlaceholder)})
+}
+
 // botSetupText is the message the admin pastes to the bot. It is rendered
 // here so the settings page and `multica bot create` hand out the same text.
 func (h *Handler) botSetupText(ctx context.Context, wsUUID pgtype.UUID, botName, token string) string {
@@ -400,15 +441,9 @@ func renderBotSetupText(in botSetupInput) string {
 	fmt.Fprintf(&b, "multica workspace switch %s\n", in.WorkspaceID)
 	b.WriteString("multica issue list --limit 5   # 能列出任务就接好了\n\n")
 
-	b.WriteString("三、常用命令（不会用就先跑 multica <命令> --help）\n")
-	b.WriteString("- 工作区全景：multica overview --output json；连通名单与状态：multica workspace link list --output json；审计：multica workspace link audit --output json（需 owner 权限）\n")
-	b.WriteString("- 看任务：multica issue list / multica issue get <编号> / multica issue comment list <编号>\n")
-	b.WriteString("- 建任务、改任务：multica issue create / multica issue update / multica issue status <编号> <状态>\n")
-	b.WriteString("- 评论：multica issue comment add <编号> --content-file <文件>\n")
-	b.WriteString("- 聊天只读参考项目：multica chat linked-projects --available --output json 查可挂项目；multica chat linked-projects <session-id> 查看；--reference LINK_ID:PROJECT_ID 替换，--clear 取下；chat new 同样支持 --reference。断开后下一次 run 不再注入。\n")
-	b.WriteString("- 新开聊天并等回复：multica chat new --agent <智能体名字> \"消息\" --wait --output table\n")
-	b.WriteString("- 接着聊：multica chat send --session <聊天编号> \"消息\" --wait --output table；看记录：multica chat list / multica chat history --session <聊天编号>\n")
-	b.WriteString("- 传文件：multica issue comment add <编号> --content-file <文件> --attachment <要传的文件>\n\n")
+	b.WriteString("三、上手（这段说明由系统生成，命令清单看 multica capabilities，不用背）\n")
+	b.WriteString(botonboarding.Render())
+	b.WriteString("\n")
 
 	if len(in.Domains) > 0 {
 		b.WriteString("四、按方向派活（建任务时带 --domain <方向>，服务端会派给对应的智能体）\n")
