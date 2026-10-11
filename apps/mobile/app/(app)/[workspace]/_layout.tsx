@@ -172,6 +172,7 @@ export default function WorkspaceLayout() {
             headerLeft: () => <ModalCloseButton />,
           }}
         />
+        <Stack.Screen name="activity" options={SHEET_OPTIONS} />
         <Stack.Screen name="inbox/[id]" options={SHEET_OPTIONS} />
         {/* Issue-detail formSheet pickers. All share the same sheet config:
             explicit numeric detents to dodge expo/expo#42904+#42965 (the

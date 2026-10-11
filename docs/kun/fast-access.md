@@ -107,4 +107,8 @@ Retry 503 after a delay; correct 400 inputs; obtain access for 403; restart on
 existing auth gate; GET active runs remains read-only. No auth gate is weakened.
 
 Web/Desktop use the shared inbox activity dialog, same interface and flags. The
-native mobile exception and browser evidence are recorded in the task evidence.
+native inbox now opens its own activity formSheet using the same schema and endpoint.
+Native verification limits are recorded in `docs/evidence/DENE-1879/mobile.md`.
+
+The implemented navigation is recorded in [INTERACTION.md](../../INTERACTION.md)
+and [the activity flow](../design/flows/workspace-activity.html).

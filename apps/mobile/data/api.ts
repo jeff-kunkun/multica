@@ -1,3 +1,4 @@
+import { FastAccessSchema, type FastAccessPage, type FastAccessRequest } from "@multica/core/api/fast-access";
 import { LinkedProjectSettingsSchema, LinkedProjectOptionsSchema } from "@multica/core/api/schemas";
 import type { LinkedProjectSettings, LinkedProjectOption, ChatLinkedProjectRef } from "@multica/core/types/workspace-link";
 /**
@@ -419,6 +420,15 @@ class ApiClient {
     return parseWithFallback(raw, schema, fallback, {
       endpoint: opts?.endpoint ?? `${init.method ?? "GET"} ${path}`,
     });
+  }
+
+  async readFastAccess(request: FastAccessRequest, opts?: { signal?: AbortSignal }): Promise<FastAccessPage> {
+    const page = await this.fetchValidatedWith<FastAccessPage | null>(
+      "/api/fast-access/v1/read", FastAccessSchema, null,
+      { method: "POST", body: JSON.stringify(request) }, opts,
+    );
+    if (!page) throw new Error("Invalid activity response");
+    return page;
   }
 
   async getProjectReferences(id: string, opts?: { signal?: AbortSignal }): Promise<LinkedProjectSettings> {
