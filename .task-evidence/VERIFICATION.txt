@@ -1,0 +1,33 @@
+BASELINE
+command: ['python3', '/Users/kunkun/.agents/multica.multica-worktrees/dene-1876-8ca2b409023f/.task-evidence/check-i17.py', '/Users/kunkun/.agents/kun-agent-mono/dene-1876-profile', '/Users/kunkun/.agents/kun-agent-mono/dene-1876-profile/prompt/AGENT.md', '/Users/kunkun/.agents/multica.multica-worktrees/dene-1876-8ca2b409023f/.task-evidence/live-profile.json']
+stdout:
+I17: FAIL
+user profile「关于你」differs from prompt/AGENT.md (live 1491 chars vs rendered 1178 chars); it is the only shared launch layer a seat with an empty prompt gets
+stderr:
+exit: 1
+MODIFIED
+command: ['python3', '/Users/kunkun/.agents/multica.multica-worktrees/dene-1876-8ca2b409023f/.task-evidence/check-i17.py', '/Users/kunkun/.agents/kun-agent-mono/dene-1876-profile', '/Users/kunkun/.agents/kun-agent-mono/dene-1876-profile/prompt/AGENT.md', '/Users/kunkun/.agents/multica.multica-worktrees/dene-1876-8ca2b409023f/.task-evidence/live-profile.json']
+stdout:
+I17: PASS
+stderr:
+exit: 0
+ROLLBACK
+command: ['python3', '/Users/kunkun/.agents/multica.multica-worktrees/dene-1876-8ca2b409023f/.task-evidence/check-i17.py', '/Users/kunkun/.agents/kun-agent-mono/dene-1876-profile', '/Users/kunkun/.agents/multica.multica-worktrees/dene-1876-8ca2b409023f/.task-evidence/rollback-copy.md', '/Users/kunkun/.agents/multica.multica-worktrees/dene-1876-8ca2b409023f/.task-evidence/live-profile.json']
+stdout:
+I17: FAIL
+user profile「关于你」differs from prompt/AGENT.md (live 1491 chars vs rendered 1178 chars); it is the only shared launch layer a seat with an empty prompt gets
+stderr:
+exit: 1
+/Users/kunkun/.agents/multica.multica-worktrees/dene-1876-8ca2b409023f/.task-evidence/BASELINE.md sha256 1de83ccaae5012b24c79c861cb7276a21c7f2f26c74cbb2f85ac0ac18f42f619
+/Users/kunkun/.agents/kun-agent-mono/dene-1876-profile/prompt/AGENT.md sha256 eadc3c39bf0dfe963fae7c26b6839aa6e98082a340cbea5b623df2a102c310e2
+/Users/kunkun/.agents/multica.multica-worktrees/dene-1876-8ca2b409023f/.task-evidence/rollback-copy.md sha256 1de83ccaae5012b24c79c861cb7276a21c7f2f26c74cbb2f85ac0ac18f42f619
+Changed field: prompt/AGENT.md profile body; original repository untouched; rollback hash equals baseline.
+git apply DIFF_FILE.patch reconstructs MODIFIED_FILE.md: exit 0; stdout empty; stderr empty; bytes equal.
+git diff --check: exit 0; stdout empty; stderr empty.
+python3 scripts/check-agent-drift.py --static-only: exit 0; stdout: static gates (I8/I9/I11/I12/I13/I15/I16/I17): ok; stderr empty.
+python3 scripts/multica-skills.py drift --workspace kunkunya --json: exit 0; literal stdout in skills-drift.json; stderr in skills-drift.stderr. 98 skills and 50 seat bindings aligned. This does not mean the unpushed profile commit is merged.
+Local mono commit: d2d8e4ff7b9addf85d3f6eea6704a86708ee8f4d; base fba73c7b9cd7148ffb88fa00c5affa88335c4302. No push, PR, merge, profile write or skill sync performed.
+python3 scripts/check-agent-drift.py --workspace kunkunya --json: exit 1; literal stdout in drift.json; stderr empty (drift.stderr).
+I17 literal result: {"checked": 1, "errors": [], "warnings": []}
+Remaining errors are unchanged non-profile surfaces: nonempty instructions for gohan/trunks; piccolo family tier/runtime/thinking mismatch; Pi trial pending adoption. No changes to these surfaces.
+Latest profile re-read unchanged; original mono worktree untouched; no application source changes by this task. Current app AGENTS.md has a runtime-managed working tree modification, excluded.

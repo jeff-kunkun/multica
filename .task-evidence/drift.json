@@ -1,0 +1,938 @@
+{
+  "aligned": false,
+  "static_gates": [],
+  "canonical_sha256": "0f37fdbf3d76e800455273b0bf877f21112a7047ba01de24a5827b3cbab8b937",
+  "errors": [
+    "seat gohan: instructions carry 7456 chars; a seat stores none — the shared body belongs to the workspace profile",
+    "seat trunks: instructions carry 5107 chars; a seat stores none — the shared body belongs to the workspace profile",
+    "seat piccolo (fast): live runtime_id 'afc77478-94f6-4b01-b594-d7846cddc840' != seat fast 'd29dd6ac-4cbc-44f8-b46b-2f60f4734694'",
+    "seat piccolo (fast): live model 'claude-haiku-5-5' != seat fast 'command-code2/deepseek%2Fdeepseek-v4.1-flash'",
+    "seat piccolo (fast): live thinking_level 'xhigh' != seat fast 'low'",
+    "seat piccolo/game (fast): live runtime_id 'afc77478-94f6-4b01-b594-d7846cddc840' != seat fast 'd29dd6ac-4cbc-44f8-b46b-2f60f4734694'",
+    "seat piccolo/game (fast): live model 'claude-haiku-5-5' != seat fast 'command-code2/deepseek%2Fdeepseek-v4.1-flash'",
+    "seat piccolo/game (fast): live thinking_level 'xhigh' != seat fast 'low'",
+    "seat piccolo/overseas (fast): live runtime_id 'afc77478-94f6-4b01-b594-d7846cddc840' != seat fast 'd29dd6ac-4cbc-44f8-b46b-2f60f4734694'",
+    "seat piccolo/overseas (fast): live model 'claude-haiku-5-5' != seat fast 'command-code2/deepseek%2Fdeepseek-v4.1-flash'",
+    "seat piccolo/overseas (fast): live thinking_level 'xhigh' != seat fast 'low'",
+    "seat piccolo/selfmedia (fast): live runtime_id 'afc77478-94f6-4b01-b594-d7846cddc840' != seat fast 'd29dd6ac-4cbc-44f8-b46b-2f60f4734694'",
+    "seat piccolo/selfmedia (fast): live model 'claude-haiku-5-5' != seat fast 'command-code2/deepseek%2Fdeepseek-v4.1-flash'",
+    "seat piccolo/selfmedia (fast): live thinking_level 'xhigh' != seat fast 'low'",
+    "seat piccolo/relay (fast): live runtime_id 'afc77478-94f6-4b01-b594-d7846cddc840' != seat fast 'd29dd6ac-4cbc-44f8-b46b-2f60f4734694'",
+    "seat piccolo/relay (fast): live model 'claude-haiku-5-5' != seat fast 'command-code2/deepseek%2Fdeepseek-v4.1-flash'",
+    "seat piccolo/relay (fast): live thinking_level 'xhigh' != seat fast 'low'",
+    "pending adoption: Pi试跑 (75522dd8-a41d-48b5-875d-31ffe67e10fb) is live but not in seats.json — `multica-agents.py watch` opens its adoption issue"
+  ],
+  "field_diffs": [],
+  "notes": [],
+  "i3": {
+    "checked": 51,
+    "errors": [],
+    "warnings": []
+  },
+  "i8": {
+    "checked": 50,
+    "errors": [
+      "seat gohan: instructions carry 7456 chars; a seat stores none — the shared body belongs to the workspace profile",
+      "seat trunks: instructions carry 5107 chars; a seat stores none — the shared body belongs to the workspace profile"
+    ]
+  },
+  "i9": {
+    "checked": 50,
+    "errors": []
+  },
+  "i11": {
+    "seats": [
+      {
+        "key": "bulma",
+        "packs": [
+          "general"
+        ],
+        "resolved": 27
+      },
+      {
+        "key": "gohan",
+        "packs": [
+          "general"
+        ],
+        "resolved": 27
+      },
+      {
+        "key": "goku",
+        "packs": [
+          "general"
+        ],
+        "resolved": 27
+      },
+      {
+        "key": "trunks",
+        "packs": [
+          "general"
+        ],
+        "resolved": 27
+      },
+      {
+        "key": "goten",
+        "packs": [
+          "general"
+        ],
+        "resolved": 27
+      },
+      {
+        "key": "vegeta",
+        "packs": [
+          "general"
+        ],
+        "resolved": 27
+      },
+      {
+        "key": "android18",
+        "packs": [
+          "general"
+        ],
+        "resolved": 27
+      },
+      {
+        "key": "tenshinhan",
+        "packs": [
+          "general"
+        ],
+        "resolved": 27
+      },
+      {
+        "key": "piccolo",
+        "packs": [
+          "general"
+        ],
+        "resolved": 27
+      },
+      {
+        "key": "krillin",
+        "packs": [
+          "general"
+        ],
+        "resolved": 27
+      },
+      {
+        "key": "bulma/game",
+        "packs": [
+          "game"
+        ],
+        "resolved": 15
+      },
+      {
+        "key": "bulma/overseas",
+        "packs": [
+          "overseas"
+        ],
+        "resolved": 11
+      },
+      {
+        "key": "bulma/selfmedia",
+        "packs": [
+          "selfmedia"
+        ],
+        "resolved": 37
+      },
+      {
+        "key": "gohan/game",
+        "packs": [
+          "game"
+        ],
+        "resolved": 15
+      },
+      {
+        "key": "gohan/overseas",
+        "packs": [
+          "overseas"
+        ],
+        "resolved": 11
+      },
+      {
+        "key": "gohan/selfmedia",
+        "packs": [
+          "selfmedia"
+        ],
+        "resolved": 37
+      },
+      {
+        "key": "goku/game",
+        "packs": [
+          "game"
+        ],
+        "resolved": 15
+      },
+      {
+        "key": "goku/overseas",
+        "packs": [
+          "overseas"
+        ],
+        "resolved": 11
+      },
+      {
+        "key": "goku/selfmedia",
+        "packs": [
+          "selfmedia"
+        ],
+        "resolved": 37
+      },
+      {
+        "key": "trunks/game",
+        "packs": [
+          "game"
+        ],
+        "resolved": 15
+      },
+      {
+        "key": "trunks/overseas",
+        "packs": [
+          "overseas"
+        ],
+        "resolved": 11
+      },
+      {
+        "key": "trunks/selfmedia",
+        "packs": [
+          "selfmedia"
+        ],
+        "resolved": 37
+      },
+      {
+        "key": "goten/game",
+        "packs": [
+          "game"
+        ],
+        "resolved": 15
+      },
+      {
+        "key": "goten/overseas",
+        "packs": [
+          "overseas"
+        ],
+        "resolved": 11
+      },
+      {
+        "key": "goten/selfmedia",
+        "packs": [
+          "selfmedia"
+        ],
+        "resolved": 37
+      },
+      {
+        "key": "vegeta/game",
+        "packs": [
+          "game"
+        ],
+        "resolved": 15
+      },
+      {
+        "key": "vegeta/overseas",
+        "packs": [
+          "overseas"
+        ],
+        "resolved": 11
+      },
+      {
+        "key": "vegeta/selfmedia",
+        "packs": [
+          "selfmedia"
+        ],
+        "resolved": 37
+      },
+      {
+        "key": "android18/game",
+        "packs": [
+          "game"
+        ],
+        "resolved": 15
+      },
+      {
+        "key": "android18/overseas",
+        "packs": [
+          "overseas"
+        ],
+        "resolved": 11
+      },
+      {
+        "key": "android18/selfmedia",
+        "packs": [
+          "selfmedia"
+        ],
+        "resolved": 37
+      },
+      {
+        "key": "tenshinhan/game",
+        "packs": [
+          "game"
+        ],
+        "resolved": 15
+      },
+      {
+        "key": "tenshinhan/overseas",
+        "packs": [
+          "overseas"
+        ],
+        "resolved": 11
+      },
+      {
+        "key": "tenshinhan/selfmedia",
+        "packs": [
+          "selfmedia"
+        ],
+        "resolved": 37
+      },
+      {
+        "key": "piccolo/game",
+        "packs": [
+          "game"
+        ],
+        "resolved": 15
+      },
+      {
+        "key": "piccolo/overseas",
+        "packs": [
+          "overseas"
+        ],
+        "resolved": 11
+      },
+      {
+        "key": "piccolo/selfmedia",
+        "packs": [
+          "selfmedia"
+        ],
+        "resolved": 37
+      },
+      {
+        "key": "krillin/game",
+        "packs": [
+          "game"
+        ],
+        "resolved": 15
+      },
+      {
+        "key": "krillin/overseas",
+        "packs": [
+          "overseas"
+        ],
+        "resolved": 11
+      },
+      {
+        "key": "krillin/selfmedia",
+        "packs": [
+          "selfmedia"
+        ],
+        "resolved": 37
+      },
+      {
+        "key": "bulma/relay",
+        "packs": [
+          "relay"
+        ],
+        "resolved": 8
+      },
+      {
+        "key": "gohan/relay",
+        "packs": [
+          "relay"
+        ],
+        "resolved": 8
+      },
+      {
+        "key": "goku/relay",
+        "packs": [
+          "relay"
+        ],
+        "resolved": 8
+      },
+      {
+        "key": "trunks/relay",
+        "packs": [
+          "relay"
+        ],
+        "resolved": 8
+      },
+      {
+        "key": "goten/relay",
+        "packs": [
+          "relay"
+        ],
+        "resolved": 8
+      },
+      {
+        "key": "vegeta/relay",
+        "packs": [
+          "relay"
+        ],
+        "resolved": 8
+      },
+      {
+        "key": "android18/relay",
+        "packs": [
+          "relay"
+        ],
+        "resolved": 8
+      },
+      {
+        "key": "tenshinhan/relay",
+        "packs": [
+          "relay"
+        ],
+        "resolved": 8
+      },
+      {
+        "key": "piccolo/relay",
+        "packs": [
+          "relay"
+        ],
+        "resolved": 8
+      },
+      {
+        "key": "krillin/relay",
+        "packs": [
+          "relay"
+        ],
+        "resolved": 8
+      }
+    ],
+    "errors": []
+  },
+  "i12": {
+    "errors": []
+  },
+  "i13": {
+    "errors": [],
+    "notes": []
+  },
+  "i14": {
+    "seats": [
+      {
+        "key": "bulma",
+        "parent_agent_id": "",
+        "specialises": ""
+      },
+      {
+        "key": "gohan",
+        "parent_agent_id": "",
+        "specialises": ""
+      },
+      {
+        "key": "goku",
+        "parent_agent_id": "",
+        "specialises": ""
+      },
+      {
+        "key": "trunks",
+        "parent_agent_id": "",
+        "specialises": ""
+      },
+      {
+        "key": "goten",
+        "parent_agent_id": "",
+        "specialises": ""
+      },
+      {
+        "key": "vegeta",
+        "parent_agent_id": "",
+        "specialises": ""
+      },
+      {
+        "key": "android18",
+        "parent_agent_id": "",
+        "specialises": ""
+      },
+      {
+        "key": "tenshinhan",
+        "parent_agent_id": "",
+        "specialises": ""
+      },
+      {
+        "key": "piccolo",
+        "parent_agent_id": "",
+        "specialises": ""
+      },
+      {
+        "key": "krillin",
+        "parent_agent_id": "",
+        "specialises": ""
+      },
+      {
+        "key": "bulma/game",
+        "parent_agent_id": "d77c75f5-11ba-4bd1-bc61-bfc10e8548f8",
+        "specialises": "bulma"
+      },
+      {
+        "key": "bulma/overseas",
+        "parent_agent_id": "d77c75f5-11ba-4bd1-bc61-bfc10e8548f8",
+        "specialises": "bulma"
+      },
+      {
+        "key": "bulma/selfmedia",
+        "parent_agent_id": "d77c75f5-11ba-4bd1-bc61-bfc10e8548f8",
+        "specialises": "bulma"
+      },
+      {
+        "key": "gohan/game",
+        "parent_agent_id": "b9894e37-cf93-4732-88c7-3fb08e49d4ec",
+        "specialises": "gohan"
+      },
+      {
+        "key": "gohan/overseas",
+        "parent_agent_id": "b9894e37-cf93-4732-88c7-3fb08e49d4ec",
+        "specialises": "gohan"
+      },
+      {
+        "key": "gohan/selfmedia",
+        "parent_agent_id": "b9894e37-cf93-4732-88c7-3fb08e49d4ec",
+        "specialises": "gohan"
+      },
+      {
+        "key": "goku/game",
+        "parent_agent_id": "73f4e44b-2a52-43c4-b957-ea8b1f8b2aba",
+        "specialises": "goku"
+      },
+      {
+        "key": "goku/overseas",
+        "parent_agent_id": "73f4e44b-2a52-43c4-b957-ea8b1f8b2aba",
+        "specialises": "goku"
+      },
+      {
+        "key": "goku/selfmedia",
+        "parent_agent_id": "73f4e44b-2a52-43c4-b957-ea8b1f8b2aba",
+        "specialises": "goku"
+      },
+      {
+        "key": "trunks/game",
+        "parent_agent_id": "a9757719-e9cb-4dd3-84b0-a17492ca347e",
+        "specialises": "trunks"
+      },
+      {
+        "key": "trunks/overseas",
+        "parent_agent_id": "a9757719-e9cb-4dd3-84b0-a17492ca347e",
+        "specialises": "trunks"
+      },
+      {
+        "key": "trunks/selfmedia",
+        "parent_agent_id": "a9757719-e9cb-4dd3-84b0-a17492ca347e",
+        "specialises": "trunks"
+      },
+      {
+        "key": "goten/game",
+        "parent_agent_id": "da4b5a43-cab5-4318-b65d-cd0624872a3d",
+        "specialises": "goten"
+      },
+      {
+        "key": "goten/overseas",
+        "parent_agent_id": "da4b5a43-cab5-4318-b65d-cd0624872a3d",
+        "specialises": "goten"
+      },
+      {
+        "key": "goten/selfmedia",
+        "parent_agent_id": "da4b5a43-cab5-4318-b65d-cd0624872a3d",
+        "specialises": "goten"
+      },
+      {
+        "key": "vegeta/game",
+        "parent_agent_id": "d1591cab-9534-4ffc-89ab-b1d60940cf8f",
+        "specialises": "vegeta"
+      },
+      {
+        "key": "vegeta/overseas",
+        "parent_agent_id": "d1591cab-9534-4ffc-89ab-b1d60940cf8f",
+        "specialises": "vegeta"
+      },
+      {
+        "key": "vegeta/selfmedia",
+        "parent_agent_id": "d1591cab-9534-4ffc-89ab-b1d60940cf8f",
+        "specialises": "vegeta"
+      },
+      {
+        "key": "android18/game",
+        "parent_agent_id": "4e9b2ff3-ac41-458e-91d6-6099acbc885e",
+        "specialises": "android18"
+      },
+      {
+        "key": "android18/overseas",
+        "parent_agent_id": "4e9b2ff3-ac41-458e-91d6-6099acbc885e",
+        "specialises": "android18"
+      },
+      {
+        "key": "android18/selfmedia",
+        "parent_agent_id": "4e9b2ff3-ac41-458e-91d6-6099acbc885e",
+        "specialises": "android18"
+      },
+      {
+        "key": "tenshinhan/game",
+        "parent_agent_id": "94f49713-6818-40ff-b041-d92a709e6f88",
+        "specialises": "tenshinhan"
+      },
+      {
+        "key": "tenshinhan/overseas",
+        "parent_agent_id": "94f49713-6818-40ff-b041-d92a709e6f88",
+        "specialises": "tenshinhan"
+      },
+      {
+        "key": "tenshinhan/selfmedia",
+        "parent_agent_id": "94f49713-6818-40ff-b041-d92a709e6f88",
+        "specialises": "tenshinhan"
+      },
+      {
+        "key": "piccolo/game",
+        "parent_agent_id": "3b081982-b15e-4008-9d7b-ce2f198d6005",
+        "specialises": "piccolo"
+      },
+      {
+        "key": "piccolo/overseas",
+        "parent_agent_id": "3b081982-b15e-4008-9d7b-ce2f198d6005",
+        "specialises": "piccolo"
+      },
+      {
+        "key": "piccolo/selfmedia",
+        "parent_agent_id": "3b081982-b15e-4008-9d7b-ce2f198d6005",
+        "specialises": "piccolo"
+      },
+      {
+        "key": "krillin/game",
+        "parent_agent_id": "49c3362d-cca5-42f7-8b6e-15f5262ff755",
+        "specialises": "krillin"
+      },
+      {
+        "key": "krillin/overseas",
+        "parent_agent_id": "49c3362d-cca5-42f7-8b6e-15f5262ff755",
+        "specialises": "krillin"
+      },
+      {
+        "key": "krillin/selfmedia",
+        "parent_agent_id": "49c3362d-cca5-42f7-8b6e-15f5262ff755",
+        "specialises": "krillin"
+      },
+      {
+        "key": "bulma/relay",
+        "parent_agent_id": "d77c75f5-11ba-4bd1-bc61-bfc10e8548f8",
+        "specialises": "bulma"
+      },
+      {
+        "key": "gohan/relay",
+        "parent_agent_id": "b9894e37-cf93-4732-88c7-3fb08e49d4ec",
+        "specialises": "gohan"
+      },
+      {
+        "key": "goku/relay",
+        "parent_agent_id": "73f4e44b-2a52-43c4-b957-ea8b1f8b2aba",
+        "specialises": "goku"
+      },
+      {
+        "key": "trunks/relay",
+        "parent_agent_id": "a9757719-e9cb-4dd3-84b0-a17492ca347e",
+        "specialises": "trunks"
+      },
+      {
+        "key": "goten/relay",
+        "parent_agent_id": "da4b5a43-cab5-4318-b65d-cd0624872a3d",
+        "specialises": "goten"
+      },
+      {
+        "key": "vegeta/relay",
+        "parent_agent_id": "d1591cab-9534-4ffc-89ab-b1d60940cf8f",
+        "specialises": "vegeta"
+      },
+      {
+        "key": "android18/relay",
+        "parent_agent_id": "4e9b2ff3-ac41-458e-91d6-6099acbc885e",
+        "specialises": "android18"
+      },
+      {
+        "key": "tenshinhan/relay",
+        "parent_agent_id": "94f49713-6818-40ff-b041-d92a709e6f88",
+        "specialises": "tenshinhan"
+      },
+      {
+        "key": "piccolo/relay",
+        "parent_agent_id": "3b081982-b15e-4008-9d7b-ce2f198d6005",
+        "specialises": "piccolo"
+      },
+      {
+        "key": "krillin/relay",
+        "parent_agent_id": "49c3362d-cca5-42f7-8b6e-15f5262ff755",
+        "specialises": "krillin"
+      }
+    ],
+    "errors": []
+  },
+  "i15": {
+    "seats": [
+      {
+        "key": "bulma/game",
+        "name": "布尔玛游戏",
+        "parent": "bulma",
+        "avatar_url": "/uploads/workspaces/172e5436-954e-4d5f-b033-4683b6e3cfd0/01a0b428-563b-7ec7-b663-4686918befaa.png"
+      },
+      {
+        "key": "bulma/overseas",
+        "name": "布尔玛出海",
+        "parent": "bulma",
+        "avatar_url": "/uploads/workspaces/172e5436-954e-4d5f-b033-4683b6e3cfd0/01a0b428-67bb-7ade-b7ab-b67695b11c7f.png"
+      },
+      {
+        "key": "bulma/selfmedia",
+        "name": "布尔玛自媒体",
+        "parent": "bulma",
+        "avatar_url": "/uploads/workspaces/172e5436-954e-4d5f-b033-4683b6e3cfd0/01a0b428-7025-7da3-82ab-739b6c54336d.png"
+      },
+      {
+        "key": "gohan/game",
+        "name": "孙悟饭游戏",
+        "parent": "gohan",
+        "avatar_url": "/uploads/workspaces/172e5436-954e-4d5f-b033-4683b6e3cfd0/01a0b84b-f8e1-719b-9fa4-332412829fa6.png"
+      },
+      {
+        "key": "gohan/overseas",
+        "name": "孙悟饭出海",
+        "parent": "gohan",
+        "avatar_url": "/uploads/workspaces/172e5436-954e-4d5f-b033-4683b6e3cfd0/01a0b84c-0ca8-71fc-94af-ceb4501885a4.png"
+      },
+      {
+        "key": "gohan/selfmedia",
+        "name": "孙悟饭自媒体",
+        "parent": "gohan",
+        "avatar_url": "/uploads/workspaces/172e5436-954e-4d5f-b033-4683b6e3cfd0/01a0b84c-1834-7bc7-8341-c9621838f73c.png"
+      },
+      {
+        "key": "goku/game",
+        "name": "孙悟空游戏",
+        "parent": "goku",
+        "avatar_url": "/uploads/workspaces/172e5436-954e-4d5f-b033-4683b6e3cfd0/01a0b3cf-0087-736d-9868-26197ef04436.png"
+      },
+      {
+        "key": "goku/overseas",
+        "name": "孙悟空出海",
+        "parent": "goku",
+        "avatar_url": "/uploads/workspaces/172e5436-954e-4d5f-b033-4683b6e3cfd0/01a0b3e4-5c64-7ce9-afa8-4e1fa835a1cf.png"
+      },
+      {
+        "key": "goku/selfmedia",
+        "name": "孙悟空自媒体",
+        "parent": "goku",
+        "avatar_url": "/uploads/workspaces/172e5436-954e-4d5f-b033-4683b6e3cfd0/01a0b3e4-6355-73dc-bba2-012bc7988646.png"
+      },
+      {
+        "key": "trunks/game",
+        "name": "特兰克斯游戏",
+        "parent": "trunks",
+        "avatar_url": "/uploads/workspaces/172e5436-954e-4d5f-b033-4683b6e3cfd0/01a0b84c-41c1-7b12-a42d-67074d74306b.png"
+      },
+      {
+        "key": "trunks/overseas",
+        "name": "特兰克斯出海",
+        "parent": "trunks",
+        "avatar_url": "/uploads/workspaces/172e5436-954e-4d5f-b033-4683b6e3cfd0/01a0b84c-4eee-74bf-9503-9f5af035df3e.png"
+      },
+      {
+        "key": "trunks/selfmedia",
+        "name": "特兰克斯自媒体",
+        "parent": "trunks",
+        "avatar_url": "/uploads/workspaces/172e5436-954e-4d5f-b033-4683b6e3cfd0/01a0b84c-597b-75f4-b4a3-fc3c0de9d8c2.png"
+      },
+      {
+        "key": "goten/game",
+        "name": "孙悟天游戏",
+        "parent": "goten",
+        "avatar_url": "/uploads/workspaces/172e5436-954e-4d5f-b033-4683b6e3cfd0/01a0c392-dd41-7580-9fc1-5d114ba112bb.png"
+      },
+      {
+        "key": "goten/overseas",
+        "name": "孙悟天出海",
+        "parent": "goten",
+        "avatar_url": "/uploads/workspaces/172e5436-954e-4d5f-b033-4683b6e3cfd0/01a0c393-a975-746b-8dcd-e37a2ce1a9e2.png"
+      },
+      {
+        "key": "goten/selfmedia",
+        "name": "孙悟天自媒体",
+        "parent": "goten",
+        "avatar_url": "/uploads/workspaces/172e5436-954e-4d5f-b033-4683b6e3cfd0/01a0c394-5078-7dc5-944b-67ce5bf591d0.png"
+      },
+      {
+        "key": "vegeta/game",
+        "name": "贝吉塔游戏",
+        "parent": "vegeta",
+        "avatar_url": "/uploads/workspaces/172e5436-954e-4d5f-b033-4683b6e3cfd0/01a0b428-9296-70ee-b151-9d8ae3f47c3c.png"
+      },
+      {
+        "key": "vegeta/overseas",
+        "name": "贝吉塔出海",
+        "parent": "vegeta",
+        "avatar_url": "/uploads/workspaces/172e5436-954e-4d5f-b033-4683b6e3cfd0/01a0b428-9bee-7b94-8093-54ff027b792d.png"
+      },
+      {
+        "key": "vegeta/selfmedia",
+        "name": "贝吉塔自媒体",
+        "parent": "vegeta",
+        "avatar_url": "/uploads/workspaces/172e5436-954e-4d5f-b033-4683b6e3cfd0/01a0b428-a920-7363-bec5-6f7cf9145b63.png"
+      },
+      {
+        "key": "android18/game",
+        "name": "人造人18号游戏",
+        "parent": "android18",
+        "avatar_url": "/uploads/workspaces/172e5436-954e-4d5f-b033-4683b6e3cfd0/01a0c395-9dfb-7ad2-b421-7cd15425acb9.png"
+      },
+      {
+        "key": "android18/overseas",
+        "name": "人造人18号出海",
+        "parent": "android18",
+        "avatar_url": "/uploads/workspaces/172e5436-954e-4d5f-b033-4683b6e3cfd0/01a0c396-466d-70ed-880e-862864af1acd.png"
+      },
+      {
+        "key": "android18/selfmedia",
+        "name": "人造人18号自媒体",
+        "parent": "android18",
+        "avatar_url": "/uploads/workspaces/172e5436-954e-4d5f-b033-4683b6e3cfd0/01a0c397-384c-7d2d-8dfc-1a41c340746a.png"
+      },
+      {
+        "key": "tenshinhan/game",
+        "name": "天津饭游戏",
+        "parent": "tenshinhan",
+        "avatar_url": "/uploads/workspaces/172e5436-954e-4d5f-b033-4683b6e3cfd0/01a0ed06-e2af-75bf-9e0d-44bfafd86749.png"
+      },
+      {
+        "key": "tenshinhan/overseas",
+        "name": "天津饭出海",
+        "parent": "tenshinhan",
+        "avatar_url": "/uploads/workspaces/172e5436-954e-4d5f-b033-4683b6e3cfd0/01a0ed06-fb3e-779d-a2b4-dc011094306d.png"
+      },
+      {
+        "key": "tenshinhan/selfmedia",
+        "name": "天津饭自媒体",
+        "parent": "tenshinhan",
+        "avatar_url": "/uploads/workspaces/172e5436-954e-4d5f-b033-4683b6e3cfd0/01a0ed07-1382-7950-908d-43b691b37a10.png"
+      },
+      {
+        "key": "piccolo/game",
+        "name": "比克游戏",
+        "parent": "piccolo",
+        "avatar_url": "/uploads/workspaces/172e5436-954e-4d5f-b033-4683b6e3cfd0/01a0b428-c615-7af7-af50-80e3e66ef385.png"
+      },
+      {
+        "key": "piccolo/overseas",
+        "name": "比克出海",
+        "parent": "piccolo",
+        "avatar_url": "/uploads/workspaces/172e5436-954e-4d5f-b033-4683b6e3cfd0/01a0b428-cddd-78be-a72e-e44be1f77674.png"
+      },
+      {
+        "key": "piccolo/selfmedia",
+        "name": "比克自媒体",
+        "parent": "piccolo",
+        "avatar_url": "/uploads/workspaces/172e5436-954e-4d5f-b033-4683b6e3cfd0/01a0b428-d6d0-7c92-b628-3bac4c471803.png"
+      },
+      {
+        "key": "krillin/game",
+        "name": "克林游戏",
+        "parent": "krillin",
+        "avatar_url": "/uploads/workspaces/172e5436-954e-4d5f-b033-4683b6e3cfd0/01a0b84c-6e28-713d-b968-eb9319849533.png"
+      },
+      {
+        "key": "krillin/overseas",
+        "name": "克林出海",
+        "parent": "krillin",
+        "avatar_url": "/uploads/workspaces/172e5436-954e-4d5f-b033-4683b6e3cfd0/01a0b84c-79f9-758d-b2fb-005838e791a5.png"
+      },
+      {
+        "key": "krillin/selfmedia",
+        "name": "克林自媒体",
+        "parent": "krillin",
+        "avatar_url": "/uploads/workspaces/172e5436-954e-4d5f-b033-4683b6e3cfd0/01a0b84c-85dc-712e-8963-f980a75476f4.png"
+      },
+      {
+        "key": "bulma/relay",
+        "name": "布尔玛中转",
+        "parent": "bulma",
+        "avatar_url": "/uploads/workspaces/172e5436-954e-4d5f-b033-4683b6e3cfd0/01a0f639-c12c-74c3-9e5a-22b9bd347a22.png"
+      },
+      {
+        "key": "gohan/relay",
+        "name": "孙悟饭中转",
+        "parent": "gohan",
+        "avatar_url": "/uploads/workspaces/172e5436-954e-4d5f-b033-4683b6e3cfd0/01a0f639-cda4-7d3d-8e41-e2feda8b6e4e.png"
+      },
+      {
+        "key": "goku/relay",
+        "name": "孙悟空中转",
+        "parent": "goku",
+        "avatar_url": "/uploads/workspaces/172e5436-954e-4d5f-b033-4683b6e3cfd0/01a0f639-e341-7775-bca4-d1fe2444b1ba.png"
+      },
+      {
+        "key": "trunks/relay",
+        "name": "特兰克斯中转",
+        "parent": "trunks",
+        "avatar_url": "/uploads/workspaces/172e5436-954e-4d5f-b033-4683b6e3cfd0/01a0f639-f09c-7699-9d47-18ce418b2728.png"
+      },
+      {
+        "key": "goten/relay",
+        "name": "孙悟天中转",
+        "parent": "goten",
+        "avatar_url": "/uploads/workspaces/172e5436-954e-4d5f-b033-4683b6e3cfd0/01a0f639-fd20-7711-b6b8-8fbb7247de28.png"
+      },
+      {
+        "key": "vegeta/relay",
+        "name": "贝吉塔中转",
+        "parent": "vegeta",
+        "avatar_url": "/uploads/workspaces/172e5436-954e-4d5f-b033-4683b6e3cfd0/01a0f63a-0a6f-7189-bd28-9c9d8023ba7c.png"
+      },
+      {
+        "key": "android18/relay",
+        "name": "人造人18号中转",
+        "parent": "android18",
+        "avatar_url": "/uploads/workspaces/172e5436-954e-4d5f-b033-4683b6e3cfd0/01a0f63a-1756-76f7-81b3-a9b75f751768.png"
+      },
+      {
+        "key": "tenshinhan/relay",
+        "name": "天津饭中转",
+        "parent": "tenshinhan",
+        "avatar_url": "/uploads/workspaces/172e5436-954e-4d5f-b033-4683b6e3cfd0/01a0f63a-21fe-7614-9da7-3f29c5d752ad.png"
+      },
+      {
+        "key": "piccolo/relay",
+        "name": "比克中转",
+        "parent": "piccolo",
+        "avatar_url": "/uploads/workspaces/172e5436-954e-4d5f-b033-4683b6e3cfd0/01a0f63a-7c50-7e4b-8a3e-57214ab68de6.png"
+      },
+      {
+        "key": "krillin/relay",
+        "name": "克林中转",
+        "parent": "krillin",
+        "avatar_url": "/uploads/workspaces/172e5436-954e-4d5f-b033-4683b6e3cfd0/01a0f63a-a533-7952-8449-38d09f243c4a.png"
+      }
+    ],
+    "errors": []
+  },
+  "i16": {
+    "checked": 98,
+    "errors": [],
+    "warnings": []
+  },
+  "i17": {
+    "checked": 1,
+    "errors": [],
+    "warnings": []
+  },
+  "roster": {
+    "pending_adoption": [
+      {
+        "id": "75522dd8-a41d-48b5-875d-31ffe67e10fb",
+        "name": "Pi试跑",
+        "model": "cx/gpt-6-luna",
+        "thinking_level": "medium",
+        "runtime_id": "56f04c07-9cba-4c15-9321-231afd66127e"
+      }
+    ],
+    "pending_cleanup": [],
+    "unmanaged": [
+      {
+        "id": "822d1011-9193-4fb5-8752-e65606f042f4",
+        "name": "拉蒂兹",
+        "model": "nexus-coder",
+        "thinking_level": "",
+        "runtime_id": "742a8e71-be66-4699-b9b1-4baffdc72209",
+        "reason": "carries its own instructions (a project agent, not a base role)"
+      }
+    ]
+  },
+  "diff": ""
+}
