@@ -214,7 +214,7 @@ func TestBotWakeLocalHTTP(t *testing.T) {
 	for _, status := range []string{"in_progress", "done", "blocked"} {
 		dbfx.Exec(t, `UPDATE issue SET status=$2 WHERE id=$1`, issueID, status)
 		process()
-		if state(issueID) != "received" {
+		if state(issueID) != "pending" {
 			t.Fatalf("lifecycle %s", status)
 		}
 	}
@@ -223,27 +223,27 @@ func TestBotWakeLocalHTTP(t *testing.T) {
 	if state(summonID) != "received" {
 		t.Fatal("summon failed")
 	}
-	t.Log("started/done/blocked/needs_kun: each received once")
+	t.Log("started/done/blocked: pending without trusted actor; needs_kun received")
 	dbfx.Exec(t, `UPDATE issue SET assignee_type='member',assignee_id=$2 WHERE id=$1`, issueID, testUserID)
 	process()
-	if state(issueID) != "received" {
+	if state(issueID) != "pending" {
 		t.Fatal("task assignment missing")
 	}
-	t.Log("member assignment -> task receipt received")
+	t.Log("watched issue assignment: pending without trusted actor")
 
 	agentID := createHandlerTestAgent(t, "WakeChatAgent", []byte("[]"))
 	chatID := createHandlerTestChatSession(t, agentID)
-	message := dbfx.Insert(t, "chat_message", testutil.Cols{"chat_session_id": chatID, "role": "user", "content": "[@Bot](mention://bot/" + id + ")"})
+	message := dbfx.Insert(t, "chat_message", testutil.Cols{"chat_session_id": chatID, "role": "user", "sender_user_id": testUserID, "content": "[@Bot](mention://bot/" + id + ")"})
 	process()
 	if state(message) != "received" {
 		t.Fatal("chat mention failed")
 	}
 	follow := dbfx.Insert(t, "chat_message", testutil.Cols{"chat_session_id": chatID, "role": "assistant", "content": "reply"})
 	process()
-	if state(follow) != "received" {
+	if state(follow) != "pending" {
 		t.Fatal("chat watch failed")
 	}
-	t.Log("chat mention + subsequent chat event: received")
+	t.Log("chat mention received; assistant reply without a task actor pending")
 	code, data = call("GET", base+"/events?limit=2", raw, nil)
 	if code != 200 || !bytes.Contains(data, []byte(`"next_cursor":"`)) {
 		t.Fatalf("pagination %d %s", code, data)
@@ -297,7 +297,7 @@ func TestBotWakeLocalHTTP(t *testing.T) {
 	}
 	outsider := dbfx.Insert(t, "user", testutil.Cols{"name": "outsider", "email": "wake-outsider@example.invalid"})
 	dbfx.Exec(t, `UPDATE chat_session SET creator_id=$2,visibility='private' WHERE id=$1`, chatID, outsider)
-	hidden := dbfx.Insert(t, "chat_message", testutil.Cols{"chat_session_id": chatID, "role": "user", "content": "hidden"})
+	hidden := dbfx.Insert(t, "chat_message", testutil.Cols{"chat_session_id": chatID, "role": "user", "sender_user_id": testUserID, "content": "hidden"})
 	process()
 	if state(hidden) != "pending" {
 		t.Fatal("private chat sent")

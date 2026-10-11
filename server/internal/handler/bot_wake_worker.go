@@ -112,6 +112,18 @@ func (w *BotWakeWorker) ProcessNext(ctx context.Context) (bool, error) {
 		return pending("access unavailable")
 	}
 	rules := wakeResponse(c)
+	// Unknown trigger attribution cannot safely be treated as a human owner.
+	if e.AuthorType == "system" || !e.AuthorID.Valid {
+		return pending("source attribution unavailable")
+	}
+	if e.AuthorType == "bot" && e.AuthorID == e.BotID {
+		return pending("self wake suppressed")
+	}
+	rule, known := rules.WakeFrom[e.AuthorType]
+	if !known || rule.Mode == "none" || (rule.Mode == "list" && !slices.Contains(rule.IDs, uuidToString(e.AuthorID))) {
+		return pending("sender not allowed")
+	}
+
 	if !slices.Contains(rules.Events, e.EventType) {
 		return pending("event disabled")
 	}
@@ -254,5 +266,12 @@ func (h *Handler) botWakePayload(ctx context.Context, e db.BotWakeEvent) ([]byte
 		}
 		attachments = append(attachments, map[string]any{"url": base + "/api/attachments/" + uuidToString(a.ID) + "/download", "size_bytes": a.SizeBytes, "sha256": a.Sha256.String})
 	}
-	return json.Marshal(map[string]any{"event_id": uuidToString(e.EventID), "type": e.EventType, "issue_id": uuidToString(e.IssueID), "chat_session_id": uuidToString(e.ChatSessionID), "author": map[string]any{"type": e.AuthorType, "id": uuidToString(e.AuthorID)}, "time": e.CreatedAt.Time, "summary": summary, "url": base + link, "attachments": attachments})
+	return json.Marshal(map[string]any{"event_id": uuidToString(e.EventID), "sequence": e.Sequence, "source_id": uuidToString(e.SourceID), "parent_id": wakeParentID(e), "ack_url": base + "/api/workspaces/" + uuidToString(e.WorkspaceID) + "/bots/" + uuidToString(e.BotID) + "/wake/events/" + uuidToString(e.EventID), "type": e.EventType, "issue_id": uuidToString(e.IssueID), "chat_session_id": uuidToString(e.ChatSessionID), "author": map[string]any{"type": e.AuthorType, "id": uuidToString(e.AuthorID)}, "time": e.CreatedAt.Time, "summary": summary, "url": base + link, "attachments": attachments})
+}
+
+func wakeParentID(e db.BotWakeEvent) string {
+	if e.IssueID.Valid {
+		return uuidToString(e.IssueID)
+	}
+	return uuidToString(e.ChatSessionID)
 }
