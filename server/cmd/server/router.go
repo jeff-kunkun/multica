@@ -1374,6 +1374,12 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		slog.Info("Workspace routing keys disabled (no MULTICA_ROUTING_SECRET_KEY and no JWT_SECRET)")
 	}
 
+	if key, err := secretbox.LoadKey("MULTICA_BOT_WAKE_SECRET_KEY"); err == nil {
+		h.BotWakeSecrets, _ = secretbox.New(key)
+	} else if os.Getenv("MULTICA_BOT_WAKE_SECRET_KEY") == "" && strings.TrimSpace(os.Getenv("JWT_SECRET")) != "" {
+		h.BotWakeSecrets, _ = handler.NewBotWakeSecretBox(os.Getenv("JWT_SECRET"))
+	}
+
 	// The log-export git token follows the routing key's derivation for the
 	// same reason and with its own HMAC domain, so the two ciphertexts can
 	// never be confused. MULTICA_LOG_EXPORT_SECRET_KEY still wins when set,
@@ -2043,6 +2049,15 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Use(middleware.RequireWorkspaceRoleFromURL(queries, "id", "owner", "admin"))
 					r.Delete("/telegram/installations/{installationId}", h.RevokeTelegramInstallation)
 					r.Post("/telegram/install", h.RegisterTelegramBot)
+				})
+
+				r.Group(func(r chi.Router) {
+					r.Use(middleware.RequireWorkspaceMemberFromURL(queries, "id"))
+					r.Get("/bots/mentions", h.ListBotMentionDirectory)
+					r.Get("/bots/{botId}/wake", h.GetBotWake)
+					r.Put("/bots/{botId}/wake", h.PutBotWake)
+					r.Get("/bots/{botId}/wake/events", h.ListBotWakeEvents)
+					r.Get("/bots/{botId}/wake/pending", h.ListBotWakeEvents)
 				})
 
 				// External bot keys (DENE-1788): admin-only, and never from an

@@ -3,6 +3,7 @@ package handler
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -51,6 +52,7 @@ type chunkUpload struct {
 	size                              int64
 	issueID, commentID, chatSessionID string
 	taskID                            string
+	sha256                            string
 	chunks                            map[int][]byte
 	lastActivity                      time.Time
 }
@@ -142,6 +144,7 @@ type AttachmentResponse struct {
 	MarkdownURL string `json:"markdown_url"`
 	ContentType string `json:"content_type"`
 	SizeBytes   int64  `json:"size_bytes"`
+	SHA256      string `json:"sha256,omitempty"`
 	CreatedAt   string `json:"created_at"`
 }
 
@@ -207,6 +210,7 @@ func (h *Handler) attachmentToResponse(a db.Attachment, mode attachmentURLMode) 
 		MarkdownURL:  h.buildMarkdownURL(a, id),
 		ContentType:  a.ContentType,
 		SizeBytes:    a.SizeBytes,
+		SHA256:       a.Sha256.String,
 		CreatedAt:    a.CreatedAt.Time.Format("2006-01-02T15:04:05Z07:00"),
 	}
 	// Only CloudFront mode overrides the stable path here; the presign and proxy
@@ -427,6 +431,7 @@ func (h *Handler) StartChunkUpload(w http.ResponseWriter, r *http.Request) {
 		CommentID     string `json:"comment_id"`
 		ChatSessionID string `json:"chat_session_id"`
 		TaskID        string `json:"task_id"`
+		SHA256        string `json:"sha256"`
 	}
 	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&in); err != nil || in.Filename == "" || in.Size < 0 || in.Size > maxUploadSize {
 		writeError(w, http.StatusBadRequest, "invalid upload metadata")
@@ -444,7 +449,7 @@ func (h *Handler) StartChunkUpload(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusTooManyRequests, "too many uploads in progress")
 		return
 	}
-	chunkUploads.m[id.String()] = &chunkUpload{userID: userID, filename: in.Filename, contentType: in.ContentType, size: in.Size, issueID: in.IssueID, commentID: in.CommentID, chatSessionID: in.ChatSessionID, taskID: in.TaskID, chunks: make(map[int][]byte), lastActivity: time.Now()}
+	chunkUploads.m[id.String()] = &chunkUpload{userID: userID, filename: in.Filename, contentType: in.ContentType, size: in.Size, issueID: in.IssueID, commentID: in.CommentID, chatSessionID: in.ChatSessionID, taskID: in.TaskID, sha256: in.SHA256, chunks: make(map[int][]byte), lastActivity: time.Now()}
 	chunkUploads.Unlock()
 	writeJSON(w, http.StatusCreated, map[string]any{"upload_id": id.String(), "chunk_size": uploadChunkSize, "total_chunks": (in.Size + uploadChunkSize - 1) / uploadChunkSize})
 }
@@ -559,7 +564,7 @@ func (h *Handler) CompleteChunkUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	_, _ = part.Write(data)
-	for k, v := range map[string]string{"issue_id": u.issueID, "comment_id": u.commentID, "chat_session_id": u.chatSessionID, "task_id": u.taskID} {
+	for k, v := range map[string]string{"issue_id": u.issueID, "comment_id": u.commentID, "chat_session_id": u.chatSessionID, "task_id": u.taskID, "sha256": u.sha256} {
 		if v != "" {
 			_ = mw.WriteField(k, v)
 		}
@@ -651,6 +656,12 @@ func (h *Handler) UploadFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	digest := fmt.Sprintf("%x", sha256.Sum256(data))
+	if expected := r.FormValue("sha256"); expected != "" && expected != digest {
+		writeError(w, http.StatusBadRequest, "sha256 mismatch")
+		return
+	}
+
 	// Generate a UUIDv7 to use as both the attachment ID and S3 key.
 	id, err := uuid.NewV7()
 	if err != nil {
@@ -683,6 +694,7 @@ func (h *Handler) UploadFile(w http.ResponseWriter, r *http.Request) {
 			Filename:     header.Filename,
 			ContentType:  contentType,
 			SizeBytes:    int64(len(data)),
+			Sha256:       pgtype.Text{String: digest, Valid: true},
 		}
 
 		// An alignment carrier gets here through the single write its
@@ -916,6 +928,24 @@ func (h *Handler) GetAttachmentByID(w http.ResponseWriter, r *http.Request) {
 	att, ok := h.loadAttachmentForRequest(w, r)
 	if !ok {
 		return
+	}
+
+	// Old rows acquire a digest from server-owned storage after authorization.
+	// Bound the read by the recorded size; never certify changed/truncated bytes.
+	if !att.Sha256.Valid && h.Storage != nil {
+		reader, err := h.Storage.GetReader(r.Context(), h.Storage.KeyFromURL(att.Url))
+		if err == nil {
+			hash := sha256.New()
+			n, readErr := io.Copy(hash, io.LimitReader(reader, att.SizeBytes+1))
+			closeErr := reader.Close()
+			if readErr == nil && closeErr == nil && n == att.SizeBytes {
+				if updated, saveErr := h.Queries.SetAttachmentDigestIfMissing(r.Context(), db.SetAttachmentDigestIfMissingParams{ID: att.ID, WorkspaceID: att.WorkspaceID, Sha256: pgtype.Text{String: fmt.Sprintf("%x", hash.Sum(nil)), Valid: true}}); saveErr == nil {
+					att = updated
+				}
+			}
+		}
+		// Legacy metadata and preview links remain available if storage cannot
+		// be read here. The verified CLI refuses a response without a digest.
 	}
 
 	// Always signed, regardless of what the caller advertised: this endpoint is

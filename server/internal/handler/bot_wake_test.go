@@ -1,0 +1,386 @@
+package handler
+
+import (
+	"bytes"
+	"context"
+	"crypto/sha256"
+	"encoding/json"
+	"fmt"
+	"github.com/go-chi/chi/v5"
+	"github.com/multica-ai/multica/server/internal/middleware"
+	"github.com/multica-ai/multica/server/internal/storage"
+	"github.com/multica-ai/multica/server/internal/testutil"
+	db "github.com/multica-ai/multica/server/pkg/db/generated"
+	"io"
+	"mime/multipart"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
+	"strings"
+	"sync/atomic"
+	"testing"
+	"time"
+)
+
+// Real local sockets and disposable Postgres; NOT an actual Grok endpoint.
+func TestBotWakeLocalHTTP(t *testing.T) {
+	ctx := context.Background()
+	oldBox := testHandler.BotWakeSecrets
+	testHandler.BotWakeSecrets, _ = NewBotWakeSecretBox("local-test-only")
+	defer func() { testHandler.BotWakeSecrets = oldBox }()
+	raw, hash, prefix, err := mintBotToken()
+	if err != nil {
+		t.Fatal(err)
+	}
+	bot, err := testHandler.Queries.CreateBotAccessToken(ctx, db.CreateBotAccessTokenParams{UserID: parseUUID(testUserID), WorkspaceID: parseUUID(testWorkspaceID), Name: "wake acceptance", TokenHash: hash, TokenPrefix: prefix})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer testPool.Exec(ctx, `DELETE FROM personal_access_token WHERE id=$1`, bot.ID)
+	id := uuidToString(bot.ID)
+	issueID := dbfx.Issue(t, "Wake receipt test", testutil.Cols{"visibility": "workspace"})
+	base := "/api/workspaces/" + testWorkspaceID + "/bots/" + id + "/wake"
+	router := chi.NewRouter()
+	router.Use(middleware.Auth(testHandler.Queries, nil, nil, nil))
+	router.Route("/api/workspaces/{id}", func(r chi.Router) {
+		r.Use(middleware.RequireWorkspaceMemberFromURL(testHandler.Queries, "id"))
+		r.Get("/bots/mentions", testHandler.ListBotMentionDirectory)
+		r.Get("/bots/{botId}/wake", testHandler.GetBotWake)
+		r.Put("/bots/{botId}/wake", testHandler.PutBotWake)
+		r.Get("/bots/{botId}/wake/events", testHandler.ListBotWakeEvents)
+		r.Get("/bots/{botId}/wake/pending", testHandler.ListBotWakeEvents)
+	})
+	api := httptest.NewServer(router)
+	defer api.Close()
+	call := func(method, path, token string, body any) (int, []byte) {
+		t.Helper()
+		b, _ := json.Marshal(body)
+		req, _ := http.NewRequest(method, api.URL+path, bytes.NewReader(b))
+		req.Header.Set("Authorization", "Bearer "+token)
+		res, err := api.Client().Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer res.Body.Close()
+		data, _ := io.ReadAll(res.Body)
+		return res.StatusCode, data
+	}
+	code, data := call("GET", base, raw, nil)
+	if code != 200 || !bytes.Contains(data, []byte(`"hourly_limit":6`)) {
+		t.Fatalf("defaults %d %s", code, data)
+	}
+	t.Logf("GET defaults: %d %s", code, data)
+	var calls atomic.Int32
+	var response atomic.Int32
+	response.Store(200)
+	var slow atomic.Bool
+	receiver := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		if r.Header.Get("Authorization") != "Bearer local-fixture" {
+			t.Error("missing authorization")
+		}
+		var payload map[string]any
+		if json.NewDecoder(r.Body).Decode(&payload) != nil {
+			t.Error("invalid payload")
+		}
+		if r.Header.Get("X-Multica-Event-ID") == "" || payload["summary"] == nil {
+			t.Error("missing metadata")
+		}
+		if _, ok := payload["content"]; ok {
+			t.Error("body leaked")
+		}
+		if slow.Load() {
+			time.Sleep(150 * time.Millisecond)
+		}
+		w.WriteHeader(int(response.Load()))
+	}))
+	defer receiver.Close()
+	t.Setenv("MULTICA_PLUGIN_DEV_ORIGINS", receiver.URL)
+	worker := NewBotWakeWorker(testHandler)
+	worker.client = func(u *url.URL) *http.Client { return &http.Client{Timeout: 50 * time.Millisecond} }
+	quietOff := map[string]any{"enabled": false, "start": "23:00", "end": "08:00", "timezone": "Asia/Shanghai"}
+	put := func(body any) {
+		t.Helper()
+		code, data := call("PUT", base, raw, body)
+		if code != 200 {
+			t.Fatalf("PUT %d %s", code, data)
+		}
+		if bytes.Contains(data, []byte("local-fixture")) || bytes.Contains(data, []byte(receiver.URL)) {
+			t.Fatal("secret echoed")
+		}
+	}
+	put(map[string]any{"webhook_url": receiver.URL, "webhook_key": "Bearer local-fixture", "quiet_hours": quietOff})
+	stored, err := testHandler.Queries.GetBotWake(ctx, bot.ID)
+	if err != nil || bytes.Contains(stored.WebhookSecret, []byte("local-fixture")) {
+		t.Fatal("secret not encrypted")
+	}
+	t.Log("PUT credentials: 200; encrypted at rest; URL/key absent from response")
+	comment := func() string {
+		t.Helper()
+		return dbfx.Insert(t, "comment", testutil.Cols{"workspace_id": testWorkspaceID, "issue_id": issueID, "author_type": "member", "author_id": testUserID, "content": "[@Bot](mention://bot/" + id + ") private body"})
+	}
+	process := func() {
+		t.Helper()
+		worked, err := worker.ProcessNext(ctx)
+		if err != nil || !worked {
+			t.Fatalf("worker %v %v", worked, err)
+		}
+	}
+	state := func(source string) string {
+		t.Helper()
+		var status string
+		if err := testPool.QueryRow(ctx, `SELECT status FROM bot_wake_event WHERE bot_id=$1 AND source_id=$2 ORDER BY sequence DESC LIMIT 1`, bot.ID, source).Scan(&status); err != nil {
+			t.Fatal(err)
+		}
+		return status
+	}
+	first := comment()
+	process()
+	if state(first) != "received" || calls.Load() != 1 {
+		t.Fatal("not received")
+	}
+	t.Log("comment mention -> local HTTP 200 -> received; receiver calls=1")
+	dbfx.Exec(t, `UPDATE comment SET content=content||' edited' WHERE id=$1`, first)
+	worked, err := worker.ProcessNext(ctx)
+	if err != nil || worked || calls.Load() != 1 {
+		t.Fatal("duplicate mention resent")
+	}
+	t.Log("same source mention edited: no second receipt/send")
+	put(map[string]any{"hourly_limit": 1})
+	limited := comment()
+	process()
+	if state(limited) != "pending" || calls.Load() != 1 {
+		t.Fatal("rate limit failed")
+	}
+	t.Log("hourly limit 1: second event pending; receiver calls still 1")
+	put(map[string]any{"hourly_limit": 120, "quiet_hours": map[string]any{"enabled": true, "start": "00:00", "end": "00:00", "timezone": "Asia/Shanghai"}})
+	quiet := comment()
+	process()
+	if state(quiet) != "pending" {
+		t.Fatal("quiet failed")
+	}
+	t.Log("quiet hours: pending, no send")
+	put(map[string]any{"quiet_hours": quietOff, "events": []string{}})
+	disabled := comment()
+	process()
+	if state(disabled) != "pending" {
+		t.Fatal("disabled failed")
+	}
+	t.Log("disabled event: pending, no send")
+	put(map[string]any{"events": []string{"mention", "started", "done", "blocked", "needs_kun", "task", "chat"}})
+	response.Store(404)
+	bad := comment()
+	process()
+	if state(bad) != "failed" {
+		t.Fatal("404 failed")
+	}
+	t.Log("wrong HTTP path: failed HTTP 404")
+	response.Store(503)
+	retry := comment()
+	for n := 0; n < 3; n++ {
+		process()
+		if n < 2 {
+			dbfx.Exec(t, `UPDATE bot_wake_event SET next_attempt_at=now() WHERE bot_id=$1 AND source_id=$2`, bot.ID, retry)
+		}
+	}
+	if state(retry) != "failed" {
+		t.Fatal("retry not bounded")
+	}
+	t.Log("HTTP 503: exactly 3 attempts then failed; test advances backoff clock")
+	response.Store(200)
+	slow.Store(true)
+	uncertain := comment()
+	process()
+	if state(uncertain) != "uncertain" {
+		t.Fatal("timeout must be uncertain")
+	}
+	slow.Store(false)
+	worked, err = worker.ProcessNext(ctx)
+	if worked || err != nil {
+		t.Fatal("uncertain retried")
+	}
+	t.Log("timeout after send: uncertain, no retry")
+	tx, _ := testPool.Begin(ctx)
+	_, err = tx.Exec(ctx, `INSERT INTO comment(issue_id,workspace_id,author_type,author_id,content) VALUES($1,$2,'member',$3,$4)`, issueID, testWorkspaceID, testUserID, "[@Bot](mention://bot/"+id+")")
+	if err != nil {
+		t.Fatal(err)
+	}
+	tx.Rollback(ctx)
+	worked, err = worker.ProcessNext(ctx)
+	if worked || err != nil {
+		t.Fatal("rolled back event persisted")
+	}
+	t.Log("source transaction rollback: no queued event")
+	for _, status := range []string{"in_progress", "done", "blocked"} {
+		dbfx.Exec(t, `UPDATE issue SET status=$2 WHERE id=$1`, issueID, status)
+		process()
+		if state(issueID) != "received" {
+			t.Fatalf("lifecycle %s", status)
+		}
+	}
+	summonID := dbfx.Insert(t, "issue_summon", testutil.Cols{"workspace_id": testWorkspaceID, "issue_id": issueID, "recipient_id": testUserID, "caller_type": "member", "caller_id": testUserID, "source": "test", "reason": "decision"})
+	process()
+	if state(summonID) != "received" {
+		t.Fatal("summon failed")
+	}
+	t.Log("started/done/blocked/needs_kun: each received once")
+	dbfx.Exec(t, `UPDATE issue SET assignee_type='member',assignee_id=$2 WHERE id=$1`, issueID, testUserID)
+	process()
+	if state(issueID) != "received" {
+		t.Fatal("task assignment missing")
+	}
+	t.Log("member assignment -> task receipt received")
+
+	agentID := createHandlerTestAgent(t, "WakeChatAgent", []byte("[]"))
+	chatID := createHandlerTestChatSession(t, agentID)
+	message := dbfx.Insert(t, "chat_message", testutil.Cols{"chat_session_id": chatID, "role": "user", "content": "[@Bot](mention://bot/" + id + ")"})
+	process()
+	if state(message) != "received" {
+		t.Fatal("chat mention failed")
+	}
+	follow := dbfx.Insert(t, "chat_message", testutil.Cols{"chat_session_id": chatID, "role": "assistant", "content": "reply"})
+	process()
+	if state(follow) != "received" {
+		t.Fatal("chat watch failed")
+	}
+	t.Log("chat mention + subsequent chat event: received")
+	code, data = call("GET", base+"/events?limit=2", raw, nil)
+	if code != 200 || !bytes.Contains(data, []byte(`"next_cursor":"`)) {
+		t.Fatalf("pagination %d %s", code, data)
+	}
+	t.Logf("GET events page: %d %s", code, data)
+	code, data = call("GET", base+"/pending?limit=100", raw, nil)
+	if code != 200 || !bytes.Contains(data, []byte(`"uncertain"`)) {
+		t.Fatal("pending missing")
+	}
+	t.Log("pending contains disabled/quiet/limited/failed/uncertain receipts")
+	raw2, hash2, prefix2, _ := mintBotToken()
+	other, err := testHandler.Queries.CreateBotAccessToken(ctx, db.CreateBotAccessTokenParams{UserID: bot.UserID, WorkspaceID: bot.WorkspaceID, Name: "other", TokenHash: hash2, TokenPrefix: prefix2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer testPool.Exec(ctx, `DELETE FROM personal_access_token WHERE id=$1`, other.ID)
+	code, _ = call("GET", base, raw2, nil)
+	if code != 403 {
+		t.Fatalf("cross bot=%d", code)
+	}
+	code, _ = call("PUT", base, raw2, map[string]any{"hourly_limit": 120})
+	if code != 403 {
+		t.Fatal("cross bot write")
+	}
+	t.Log("other Bot with same owner: GET/PUT 403")
+	memberID := dbfx.User(t, "Wake member", "wake-member@example.invalid")
+	dbfx.Insert(t, "member", testutil.Cols{"workspace_id": testWorkspaceID, "user_id": memberID, "role": "member"})
+	memberKey := insertTestPATFor(t, memberID)
+	code, _ = call("GET", base, memberKey, nil)
+	if code != 403 {
+		t.Fatal("member settings access")
+	}
+	code, _ = call("GET", base+"/events", memberKey, nil)
+	if code != 403 {
+		t.Fatal("member events access")
+	}
+	code, _ = call("PUT", base, raw, map[string]any{"hourly_limit": 121})
+	if code != 400 {
+		t.Fatal("invalid limit accepted")
+	}
+	code, _ = call("PUT", base, raw, map[string]any{"webhook_url": "http://127.0.0.1:1/private", "webhook_key": "fixture"})
+	if code != 400 {
+		t.Fatal("private endpoint accepted")
+	}
+	t.Log("ordinary member settings/events:403; invalid rules/private endpoint:400")
+
+	human := insertTestPATFor(t, testUserID)
+	code, _ = call("GET", base, human, nil)
+	if code != 200 {
+		t.Fatal("human owner denied")
+	}
+	outsider := dbfx.Insert(t, "user", testutil.Cols{"name": "outsider", "email": "wake-outsider@example.invalid"})
+	dbfx.Exec(t, `UPDATE chat_session SET creator_id=$2,visibility='private' WHERE id=$1`, chatID, outsider)
+	hidden := dbfx.Insert(t, "chat_message", testutil.Cols{"chat_session_id": chatID, "role": "user", "content": "hidden"})
+	process()
+	if state(hidden) != "pending" {
+		t.Fatal("private chat sent")
+	}
+	code, data = call("GET", base+"/events?limit=100", raw, nil)
+	if code != 200 || bytes.Contains(data, []byte(chatID)) {
+		t.Fatal("private chat leaked")
+	}
+	t.Log("revoked chat access: no send; prior receipts hidden")
+	code, data = call("GET", "/api/workspaces/"+testWorkspaceID+"/bots/mentions?issue_id="+issueID, human, nil)
+	if code != 200 || !bytes.Contains(data, []byte(id)) || bytes.Contains(data, []byte("token_")) {
+		t.Fatal("directory failed")
+	}
+	t.Log("mention directory: identities only, no token metadata")
+	crash := comment()
+	dbfx.Exec(t, `UPDATE bot_wake_event SET status='sending',sent_at=now()-interval '3 minutes' WHERE bot_id=$1 AND source_id=$2`, bot.ID, crash)
+	if err := testHandler.Queries.RecoverBotWakeUncertain(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if state(crash) != "uncertain" {
+		t.Fatal("crash recovery failed")
+	}
+	t.Log("worker interruption: sending -> uncertain")
+}
+
+func TestBotWakeAttachmentSHA256(t *testing.T) {
+	t.Setenv("LOCAL_UPLOAD_DIR", t.TempDir())
+	t.Setenv("LOCAL_UPLOAD_BASE_URL", "")
+	old := testHandler.Storage
+	testHandler.Storage = storage.NewLocalStorageFromEnv()
+	defer func() { testHandler.Storage = old }()
+	data := []byte("verified attachment\n")
+	digest := fmt.Sprintf("%x", sha256.Sum256(data))
+	for _, good := range []bool{true, false} {
+		var body bytes.Buffer
+		mw := multipart.NewWriter(&body)
+		part, _ := mw.CreateFormFile("file", "sample.txt")
+		part.Write(data)
+		expected := digest
+		if !good {
+			expected = strings.Repeat("0", 64)
+		}
+		mw.WriteField("sha256", expected)
+		mw.Close()
+		req := httptest.NewRequest("POST", "/api/upload-file", &body)
+		req.Header.Set("Content-Type", mw.FormDataContentType())
+		req.Header.Set("X-User-ID", testUserID)
+		req.Header.Set("X-Workspace-ID", testWorkspaceID)
+		rec := httptest.NewRecorder()
+		testHandler.UploadFile(rec, req)
+		if !good {
+			if rec.Code != 400 || !strings.Contains(rec.Body.String(), "sha256 mismatch") {
+				t.Fatalf("bad sample %d %s", rec.Code, rec.Body)
+			}
+			t.Logf("bad upload: %d %s", rec.Code, rec.Body)
+			continue
+		}
+		if rec.Code != 200 {
+			t.Fatalf("good sample %d %s", rec.Code, rec.Body)
+		}
+		var att AttachmentResponse
+		json.Unmarshal(rec.Body.Bytes(), &att)
+		if att.SHA256 != digest {
+			t.Fatal("server digest missing")
+		}
+		stored, err := testHandler.Queries.GetAttachmentByIDOnly(context.Background(), parseUUID(att.ID))
+		if err != nil || stored.Sha256.String != digest {
+			t.Fatal("digest not saved")
+		}
+		t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM attachment WHERE id=$1`, att.ID) })
+		dreq, dw := newDownloadRequest(t, att.ID, testWorkspaceID)
+		testHandler.DownloadAttachment(dw, dreq)
+		if dw.Code != 200 || !bytes.Equal(dw.Body.Bytes(), data) {
+			t.Fatal("download failed")
+		}
+		t.Logf("good upload/download: 200 sha256=%s bytes=%d", digest, len(data))
+		dbfx.Exec(t, `UPDATE attachment SET sha256=NULL WHERE id=$1`, att.ID)
+		mreq, metaW := newDownloadRequest(t, att.ID, testWorkspaceID)
+		testHandler.GetAttachmentByID(metaW, mreq)
+		if metaW.Code != 200 || !strings.Contains(metaW.Body.String(), digest) {
+			t.Fatalf("legacy backfill %d %s", metaW.Code, metaW.Body)
+		}
+		t.Log("legacy metadata GET: checksum backfilled from authorized storage")
+
+	}
+}

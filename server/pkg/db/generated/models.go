@@ -318,6 +318,7 @@ type Attachment struct {
 	ChatMessageID   pgtype.UUID        `json:"chat_message_id"`
 	TaskID          pgtype.UUID        `json:"task_id"`
 	SourceContextID pgtype.UUID        `json:"source_context_id"`
+	Sha256          pgtype.Text        `json:"sha256"`
 }
 
 type Autopilot struct {
@@ -452,6 +453,46 @@ type AutopilotTrigger struct {
 	CreatedByType pgtype.Text `json:"created_by_type"`
 	// The member a schedule/webhook run fires AS: dispatch admission, the task's originator/accountable, and every delegated run all resolve to this one human (MUL-6951). For a trigger created since MUL-6951 it is the creator, written at creation. For a legacy trigger it is a best-effort principal inferred once by backfill and frozen (the last publisher, migration 449, else the autopilot's creator, migration 467), not proof of who created it. Ordinary edits never rewrite it, so editing the trigger cannot re-authorize its runs as the editor. NULL means no principal and the dispatch fails closed. No FK; workspace membership is re-validated on every dispatch.
 	CreatedByID pgtype.UUID `json:"created_by_id"`
+}
+
+type BotWake struct {
+	BotID         pgtype.UUID        `json:"bot_id"`
+	WebhookSecret []byte             `json:"webhook_secret"`
+	Events        []string           `json:"events"`
+	HourlyLimit   int32              `json:"hourly_limit"`
+	QuietHours    []byte             `json:"quiet_hours"`
+	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
+}
+
+type BotWakeAttempt struct {
+	BotID       pgtype.UUID        `json:"bot_id"`
+	AttemptedAt pgtype.Timestamptz `json:"attempted_at"`
+}
+
+type BotWakeEvent struct {
+	Sequence      int64              `json:"sequence"`
+	EventID       pgtype.UUID        `json:"event_id"`
+	BotID         pgtype.UUID        `json:"bot_id"`
+	WorkspaceID   pgtype.UUID        `json:"workspace_id"`
+	EventType     string             `json:"event_type"`
+	IssueID       pgtype.UUID        `json:"issue_id"`
+	ChatSessionID pgtype.UUID        `json:"chat_session_id"`
+	SourceID      pgtype.UUID        `json:"source_id"`
+	AuthorType    string             `json:"author_type"`
+	AuthorID      pgtype.UUID        `json:"author_id"`
+	Status        string             `json:"status"`
+	Reason        string             `json:"reason"`
+	Attempts      int32              `json:"attempts"`
+	NextAttemptAt pgtype.Timestamptz `json:"next_attempt_at"`
+	SentAt        pgtype.Timestamptz `json:"sent_at"`
+	ReceivedAt    pgtype.Timestamptz `json:"received_at"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+}
+
+type BotWakeWatch struct {
+	BotID         pgtype.UUID `json:"bot_id"`
+	IssueID       pgtype.UUID `json:"issue_id"`
+	ChatSessionID pgtype.UUID `json:"chat_session_id"`
 }
 
 type ChannelBindingToken struct {

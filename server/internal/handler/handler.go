@@ -204,6 +204,8 @@ type RuntimeRecoveryNotifier interface {
 }
 
 type Handler struct {
+	BotWakeSecrets         *secretbox.Box
+	BotWakeWorker          *BotWakeWorker
 	Queries                *db.Queries
 	ReadSelector           *dbreader.Selector
 	DB                     dbExecutor
@@ -604,6 +606,7 @@ func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *event
 	// under the same switch and breaker (DENE-881).
 	taskSvc.ParkingSummarizer = h.Routing
 	h.WebhookDeliveryWorker = NewWebhookDeliveryWorker(h)
+	h.BotWakeWorker = NewBotWakeWorker(h)
 	// The default passthrough scheduler reports sweeper-race recoveries so the
 	// daemon:register refresh fires even without the production batched wiring.
 	if passthrough, ok := h.HeartbeatScheduler.(*PassthroughHeartbeatScheduler); ok {
