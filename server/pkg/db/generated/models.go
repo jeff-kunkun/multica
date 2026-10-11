@@ -1020,6 +1020,59 @@ type DingtalkGroupRoute struct {
 	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
 }
 
+type FastAccessBatch struct {
+	ID        string             `json:"id"`
+	Principal string             `json:"principal"`
+	Payload   []byte             `json:"payload"`
+	ExpiresAt pgtype.Timestamptz `json:"expires_at"`
+}
+
+type FastAccessCursor struct {
+	Token     string             `json:"token"`
+	Principal string             `json:"principal"`
+	Payload   []byte             `json:"payload"`
+	ExpiresAt pgtype.Timestamptz `json:"expires_at"`
+}
+
+type FastAccessFeed struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	Seq         int64       `json:"seq"`
+	FloorSeq    int64       `json:"floor_seq"`
+}
+
+type FastAccessJournal struct {
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	Seq         int64              `json:"seq"`
+	EventID     pgtype.UUID        `json:"event_id"`
+	Kind        string             `json:"kind"`
+	EntityID    pgtype.UUID        `json:"entity_id"`
+	Status      string             `json:"status"`
+	ChangedAt   pgtype.Timestamptz `json:"changed_at"`
+}
+
+type FastAccessMetum struct {
+	Singleton           bool               `json:"singleton"`
+	CoverageFrom        pgtype.Timestamptz `json:"coverage_from"`
+	PermissionRevision  int64              `json:"permission_revision"`
+	PermissionChangedAt pgtype.Timestamptz `json:"permission_changed_at"`
+}
+
+type FastAccessPending struct {
+	Ordinal       int64       `json:"ordinal"`
+	TransactionID int64       `json:"transaction_id"`
+	WorkspaceID   pgtype.UUID `json:"workspace_id"`
+	Kind          string      `json:"kind"`
+	EntityID      pgtype.UUID `json:"entity_id"`
+	Status        string      `json:"status"`
+}
+
+type FastAccessStream struct {
+	Principal string             `json:"principal"`
+	Slot      int16              `json:"slot"`
+	LeaseID   string             `json:"lease_id"`
+	ExpiresAt pgtype.Timestamptz `json:"expires_at"`
+}
+
 type Feedback struct {
 	ID          pgtype.UUID        `json:"id"`
 	UserID      pgtype.UUID        `json:"user_id"`

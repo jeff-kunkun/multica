@@ -372,6 +372,11 @@ var (
 //     tail, and roots_only (partial-thread / reply-less reads) and composes with
 //     the default list, recent, untailed thread, and summary.
 //
+//   - roots_only + limit=<1..50> + optional offset=<N> pages the live root
+//     directory chronologically on the server. X-Multica-Next-Offset reports
+//     the next position after row/byte packing; omission means exhausted.
+//     Without limit the original CLI roots-only hard cap is unchanged.
+//
 //   - thread=<comment-uuid> — return the root of the thread containing this
 //     comment plus every descendant. The anchor may be a root or any reply;
 //     the server walks up to the root via a recursive CTE, so callers do not
@@ -631,6 +636,30 @@ func (h *Handler) writeCommentList(w http.ResponseWriter, r *http.Request, issue
 		threadTailSet = true
 	}
 
+	// Explicit directory pages are bounded before serialization/transport.
+	// Omitted limit preserves the CLI's existing roots-only modes.
+	rootLimit, rootOffset := 0, 0
+	if q.Has("limit") || q.Has("offset") {
+		if !rootsOnly || !q.Has("limit") {
+			writeError(w, http.StatusBadRequest, "limit/offset require roots_only and limit")
+			return
+		}
+		n, err := strconv.Atoi(q.Get("limit"))
+		if err != nil || n < 1 || n > 50 {
+			writeError(w, http.StatusBadRequest, "directory limit must be between 1 and 50")
+			return
+		}
+		rootLimit = n
+		if q.Has("offset") {
+			n, err = strconv.Atoi(q.Get("offset"))
+			if err != nil || n < 0 || n > 2147483597 {
+				writeError(w, http.StatusBadRequest, "invalid directory offset")
+				return
+			}
+			rootOffset = n
+		}
+	}
+
 	result, err := h.fetchCommentsForList(r.Context(), fetchCommentsArgs{
 		Issue:         issue,
 		Since:         sinceTime,
@@ -642,6 +671,8 @@ func (h *Handler) writeCommentList(w http.ResponseWriter, r *http.Request, issue
 		BeforeAt:      beforeCursor,
 		BeforeID:      beforeUUID,
 		RootsOnly:     rootsOnly,
+		RootLimit:     rootLimit,
+		RootOffset:    rootOffset,
 	})
 	if err != nil {
 		switch err {
@@ -728,6 +759,31 @@ func (h *Handler) writeCommentList(w http.ResponseWriter, r *http.Request, issue
 		w.Header().Set(HeaderCommentsTruncated, "true")
 	}
 
+	if rootLimit > 0 {
+		// Reserve space for the MCP envelope; measure escaped UTF-8 JSON,
+		// including metadata/attachments, rather than estimating by runes.
+		for len(resp) > 0 {
+			raw, err := json.Marshal(resp)
+			if err != nil {
+				writeError(w, 500, "failed to encode directory")
+				return
+			}
+			if len(raw)+1 <= 48000 {
+				break
+			}
+			resp = resp[:len(resp)-1]
+		}
+		if len(resp) == 0 && len(result.Comments) > 0 {
+			writeError(w, http.StatusUnprocessableEntity, "directory entry exceeds response budget")
+			return
+		}
+		more := result.CommentsTruncated || len(resp) < len(result.Comments)
+		if more {
+			w.Header().Set(HeaderCommentsTruncated, "true")
+			w.Header().Set("X-Multica-Next-Offset", strconv.Itoa(rootOffset+len(resp)))
+		}
+	}
+
 	writeJSON(w, http.StatusOK, resp)
 }
 
@@ -743,6 +799,8 @@ type fetchCommentsArgs struct {
 	Issue         db.Issue
 	Since         pgtype.Timestamptz
 	RootsOnly     bool
+	RootLimit     int
+	RootOffset    int
 	ThreadAnchor  string
 	ThreadTail    int
 	ThreadTailSet bool
@@ -1075,6 +1133,33 @@ func (h *Handler) fetchCommentsForList(ctx context.Context, args fetchCommentsAr
 		// they need reply context. Each root carries reply_count +
 		// last_activity_at so the reader can triage which thread to drill into.
 		stats := map[string]rootStat{}
+		if args.RootLimit > 0 {
+			rows, err := h.Queries.ListRootCommentDirectoryPage(ctx, db.ListRootCommentDirectoryPageParams{
+				IssueID: issue.ID, WorkspaceID: issue.WorkspaceID, Since: args.Since,
+				RowLimit: int32(args.RootLimit + 1), RowOffset: int32(args.RootOffset),
+			})
+			if err != nil {
+				return fetchCommentsResult{}, err
+			}
+			more := len(rows) > args.RootLimit
+			if more {
+				rows = rows[:args.RootLimit]
+			}
+			comments := make([]db.Comment, len(rows))
+			for i, r := range rows {
+				comments[i] = db.Comment{
+					ViaBotID: r.ViaBotID, ViaBotName: r.ViaBotName,
+					ID: r.ID, IssueID: r.IssueID, AuthorType: r.AuthorType, AuthorID: r.AuthorID,
+					Content: r.Content, Type: r.Type, CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt,
+					ParentID: r.ParentID, WorkspaceID: r.WorkspaceID, ResolvedAt: r.ResolvedAt,
+					ResolvedByType: r.ResolvedByType, ResolvedByID: r.ResolvedByID,
+					SourceTaskID: r.SourceTaskID, QuickActionID: r.QuickActionID, Revision: r.Revision, DeletedAt: r.DeletedAt,
+				}
+				stats[uuidToString(r.ID)] = rootStat{ReplyCount: int(r.ReplyCount), LastActivityAt: r.LastActivityAt}
+			}
+			return fetchCommentsResult{Comments: comments, RootStats: stats, CommentsTruncated: more}, nil
+		}
+
 		if args.Since.Valid {
 			rows, err := h.Queries.ListRootCommentsSinceForIssue(ctx, db.ListRootCommentsSinceForIssueParams{
 				IssueID:     issue.ID,

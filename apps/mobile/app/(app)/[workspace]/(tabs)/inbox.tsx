@@ -114,6 +114,10 @@ export default function Inbox() {
         title={t("title")}
         right={
           <>
+            <Button variant="ghost" className="min-h-11" disabled={!wsSlug}
+              onPress={() => router.push(`/${wsSlug}/activity`)}>
+              <Text>{t("fast_access.open")}</Text>
+            </Button>
             <IconButton
               name="ellipsis-horizontal"
               onPress={onPressMenu}

@@ -65,9 +65,9 @@ var capabilityDomains = []struct {
 	{"agents", "智能体", []string{"agent", "squad", "skill"}},
 	{"projects", "项目", []string{"project", "label", "domain", "property"}},
 	{"automations", "自动化", []string{"autopilot"}},
-	{"overview", "全景与收件", []string{"overview", "capabilities", "inbox", "logs"}},
+	{"overview", "全景与收件", []string{"overview", "capabilities", "inbox", "logs", "changes", "runs"}},
 	{"workspace", "工作区与接入", []string{"workspace", "connection", "github-app", "settings", "user", "bot", "transfer", "attachment", "repo"}},
-	{"local", "本机运行时", []string{"daemon", "runtime", "config", "login", "setup", "update", "version", "auth"}},
+	{"local", "本机运行时", []string{"daemon", "runtime", "config", "login", "setup", "update", "version", "auth", "mcp"}},
 }
 
 // readVerbs are leaf names that only read. Anything else is a write unless

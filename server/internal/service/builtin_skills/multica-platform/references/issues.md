@@ -537,3 +537,12 @@ For GitLab, `glab ci status` can be used directly when it returns non-zero while
 ## Issue wakeups
 
 Event, condition and timer wakeups (`multica issue wakeup ...`) and scheduled check-ins are in `references/wakeups.md`.
+
+### MCP comment directory pages
+
+`comments_list` forwards its existing `limit` (1–50) and `offset` to the server.
+Follow `next_offset` exactly; the byte budget may return fewer roots than requested.
+No `next_offset` means the live directory is exhausted. Concurrent root changes
+can move offsets; use the activity checkpoint for durable synchronization.
+The directory stays a summary read; open a selected `thread_id` for replies/full
+text. CLI roots-only/since/summary and thread modes keep their existing contract.

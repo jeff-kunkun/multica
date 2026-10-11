@@ -209,8 +209,8 @@ func TestListComments_RootsOnlyReturnsTopLevelComments(t *testing.T) {
 }
 
 // TestListComments_RootsOnlyWithSinceReturnsNewTopLevelComments proves the
-// one allowed roots-only combination: `since` narrows the root list without
-// pulling newer replies into the response.
+// thread directory includes old roots with new descendants, without
+// pulling the replies themselves into the response.
 func TestListComments_RootsOnlyWithSinceReturnsNewTopLevelComments(t *testing.T) {
 	if testHandler == nil || testPool == nil {
 		t.Skip("database not available")
@@ -221,7 +221,7 @@ func TestListComments_RootsOnlyWithSinceReturnsNewTopLevelComments(t *testing.T)
 	v.Set("roots_only", "true")
 	v.Set("since", fx.Base.Add(5*time.Minute).UTC().Format(time.RFC3339Nano))
 	_, rows := listComments(t, fx.IssueID, v.Encode())
-	eqIDs(t, ids(rows), []string{fx.Root2}, "roots_only + since")
+	eqIDs(t, ids(rows), []string{fx.Root1, fx.Root2}, "roots_only + since")
 	for _, row := range rows {
 		if row.ParentID != nil {
 			t.Fatalf("roots_only + since: expected root comment %s to have nil parent_id, got %q", row.ID, *row.ParentID)

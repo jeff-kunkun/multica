@@ -1,143 +1,175 @@
-# Compact cross-workspace reads (v1)
+# Durable compact activity (v1)
 
-`POST /api/fast-access/v1/read` and `GET /api/fast-access/v1/runs?active=true`
-share one projection, authorization resolver, response budget and quota. The
-workspace overview advertises both endpoints in `fast_access`.
+`POST /api/fast-access/v1/read`, `GET /api/fast-access/v1/runs?active=true`,
+and `GET /api/fast-access/v1/events` reuse the existing principal and source
+visibility rules. Overview advertises these endpoints. CLI `changes` and
+`runs --active` preserve the same JSON envelope; they never silently paginate.
 
-## Delivery status and entry points
+## Reading and recovery
 
-This document records stage-one deliveries DENE-1870 (server/shared view) and
-DENE-1871 (CLI), integrated into `agent/delivery/dene-1861`. It does not establish
-production availability or completion of the later journal/MCP/cache stages.
-An installed CLI without these commands needs the integrated release; do not
-reinterpret an unknown command as an empty workspace.
-
-```sh
-multica changes --since 2026-10-11T17:00:00Z --all-workspaces --output json
-multica runs --active --all-workspaces --output json
-multica changes --cursor 'SERVER_NEXT_CURSOR' --output json
-multica runs --active --cursor 'SERVER_NEXT_CURSOR' --output json
-```
-
-The CLI defaults to the current workspace. `--all-workspaces` or repeatable /
-comma-separated `--workspace <UUID>` sets the first-page scope; these options
-are mutually exclusive. `changes` requires `--since` for its first page. With
-`--cursor`, omit since and scope flags. Each invocation makes one business read,
-with no automatic pagination or retry. Preserve the complete JSON envelope and
-keep stderr separate from stdout. Continue only with `next_cursor`; the
-`snapshot:<as_of>` checkpoint is an observation receipt, not a continuation cursor.
-
-Discover the endpoints through `multica overview --output json`, then the
-commands through `multica capabilities --domain overview --output json` and
-`multica changes --help` / `multica runs --help`. The integrated builtin
-`multica-platform/references/overview.md` owns the agent command instructions.
-The shared Web/Desktop entry is Inbox → Activity; native mobile coverage and
-browser continuation/refresh success remain assigned to DENE-1879.
-
-[Verification pointers and limits](../evidence/INDEX.md#compact-cross-workspace-reads)
-record local measurements separately from production acceptance.
-
-
-## Request
+Start or rebuild current state without `since`:
 
 ```json
-{"scope":{"mode":"all_visible"},"since":"2026-10-11T12:00:00Z","include":["chats","issues","run_changes","active_runs"],"limit":100,"max_bytes":50000}
+{"scope":{"mode":"all_visible"},"include":["chats","issues","run_changes","active_runs"],"limit":100,"max_bytes":50000}
 ```
 
-Alternatively scope is `{"mode":"workspace_ids","workspace_ids":["<authorized UUID>"]}`.
-Real IDs come from the existing workspace directory/link view. An inaccessible
-explicit workspace fails the entire request with `403 scope_denied`.
-`all_visible` is the default. `since` is optional RFC3339, inclusive, and must not
-be in the future. Omission requests current state without a time filter.
-All four include values are selected by default. Unknown values are rejected.
-`limit` defaults to 100, maximum 200 (total items, not per collection).
-`max_bytes` defaults to 50000, maximum 50000 decimal **uncompressed UTF-8 JSON
-bytes**, including envelope and JSON escaping. A budget unable to hold the next
-item returns `422 byte_budget_too_small`, never an empty, non-advancing page.
+Explicit scope is `{"mode":"workspace_ids","workspace_ids":["<UUID>"]}`.
+An inaccessible requested workspace fails the whole read with `403 scope_denied`.
+All four includes are default. `since` is an optional initial RFC3339 journal-time
+window; it is not the subsequent synchronization position. A window before
+`coverage_from` fails with `410 reset_required`; a window crossing an authorization
+change/deletion requires a fresh current-state baseline. Never claim the new
+journal reconstructed events before installation.
 
-Continuation: `{"cursor":"<next_cursor>","limit":100,"max_bytes":50000}`.
-Do not combine cursor with since, scope or include. GET runs accepts `cursor`,
-`limit`, `max_bytes`, and either `scope=all_visible` or comma-separated
-`workspace_ids`. Its `active=true` parameter is mandatory.
-
-## Response and meaning
+Continue with `{"cursor":"<next_cursor>","limit":100,"max_bytes":50000}`.
+Do not repeat scope/include/since: cursors bind them. GET runs uses the same
+cursor/limit/max_bytes and either `scope=all_visible` or comma-separated
+`workspace_ids`. `active=true` is mandatory.
 
 | Field | Meaning |
 | --- | --- |
 | `schema_version` | String `"1"` |
-| `mode` | `timestamp_snapshot`; no historical deletion or intermediate-state guarantee |
-| `as_of` | Database transaction observation time, fixed across the batch |
-| `coverage_from` | Same as observation time; deliberately **not** the requested since time |
-| `scope_revision` | Opaque authorization/batch fingerprint; compare for equality only |
-| `changes` | Current issue/chat/run summaries selected by observable timestamps |
-| `active_runs` | Active agent attempts and separately typed autopilot executions, prioritized before changes |
-| `active_runs_complete` | All active records from this batch have been delivered through this page |
-| `complete` | All included records have been delivered through this page |
-| `next_cursor` | Opaque next page handle, or null when complete |
-| `checkpoint` | Null until complete; `snapshot:<as_of>` is an observation receipt, **not a durable stream cursor** |
-| `retention_floor` | Null: this implementation has no retained change journal |
+| `mode` | `durable_delta` |
+| `as_of` | Observation time, fixed for all pages in the batch |
+| `coverage_from`, `retention_floor` | Later of installation and the seven-day retention floor |
+| `scope_revision` | Opaque permission version; equality only |
+| `changes` | Current issue/chat summaries with event revisions; individual run transitions in workspace sequence order |
+| `active_runs` | Current active attempts and separately typed autopilot executions, delivered first |
+| `active_runs_complete` | All active records from the batch have been delivered |
+| `complete` | Entire batch delivered |
+| `next_cursor` | Next page only; null at completion |
+| `checkpoint` | Null until complete; thereafter a durable read/SSE starting position |
 
-Items share `workspace_id`, bounded `workspace_name`, `kind`, `id`, `revision`,
-`changed_at`, `op="upsert"`, `content_truncated`. Revision is a timestamp string,
-not a durable sequence. Identity is the tuple `(workspace_id, kind, id)`.
-Titles are at most 80 Unicode code points / 240 UTF-8 bytes; previews are at most
-160 code points / 480 bytes. JSON escaping is counted again at envelope packing.
-No prompt, task result, model configuration or transcript leaves the projection.
+After applying **all** pages, use the completed checkpoint as the next read's
+cursor. Commit summaries and that position together. Every page shares a fixed
+upper watermark. Issue/chat and active-run summaries are materialized; terminal
+run projections are authorized in bounded journal pages, with immutable event
+identity/status/time from the journal and currently authorized source labels.
+Incomplete pages never advance the checkpoint. Changes committed during pagination appear in the next delta.
+Filtered-out events still advance the completed watermark, including empty pages.
 
-- `chat`: title, preview, status, last_active_at, unread_count. Unread uses the
-  viewer's existing cursor; archived chats have zero unread. This read writes no
-  chat read state. Activity uses the latest message, session update or viewer
-  read timestamp; it cannot reconstruct deleted messages or every edit.
-- `issue`: identifier, title, status, new_comment_count (including replies under
-  old roots). `changed_fields` is omitted when unknown, not an invented field
-  diff. Link-only readers receive status summaries without comment counts.
-- `run`: one agent task attempt, including attempts with a chat and no issue.
-  Contains agent_id, source_type/source_id, title, status, phase and available
-  started_at/finished_at. Source is chat, autopilot_run, issue, or agent.
-  Active means queued/dispatched/running/waiting_local_directory, plus deferred
-  with wakeup_id. Executing means dispatched/running; waiting means deferred or
-  waiting_local_directory; queued means queued. State changes without an updated
-  database timestamp are not a durable delta; activity reads always include all
-  current active attempts regardless of since.
-- `autopilot_run`: separate execution identity, source_type=autopilot,
-  source_id=autopilot ID. Active statuses are issue_created/running. An execution
-  and its task attempt are distinct records, not duplicate attempts.
+A delta run entry carries stable `event_id` and decimal-string `revision`.
+Deduplicate event IDs and apply revisions monotonically per `(workspace_id,kind,id)`;
+do not compare across workspaces. A current-state item uses its snapshot watermark
+as its revision. Apply transition entries before overlaying `active_runs` current
+state; current active snapshots can legitimately have a later revision. Issue/chat
+updates may fold to their latest summary. This is **at least once**, not network
+exactly once. SSE notifications and the applied read checkpoint are separate.
 
-The existing comment directory `roots_only=true&since=T` now includes roots with
-changed descendants (new replies, edits, soft deletions), including old roots.
-Thread expansion remains explicit. Directory caps are unchanged; the compact
-read issue count includes all current visible comments in the window.
+Titles are capped at 80 Unicode code points/240 UTF-8 bytes; previews at
+160/480. The full escaped JSON is also bounded. No prompt, transcript, model
+configuration, task result or credential enters the projection/journal.
+Chat unread uses the existing viewer cursor; these reads never mark chats read.
+Comment activity includes new replies under old roots and edits/deletions.
 
-## Authorization, paging and operational boundary
+Active agent attempts: queued/dispatched/running/waiting_local_directory, and
+deferred with a wakeup. Executing is dispatched/running; queued and waiting remain
+distinct. Chat-only attempts are included. Autopilot executions have their own kind.
 
-A human uses their existing principal. A task uses its recorded human originator,
-never the runtime owner's private data. Cross-workspace tasks reuse the existing
-managed link gate; ordinary links grant only non-private issue status in selected,
-non-private source projects. They grant no chat or agent identity access. Each
-member workspace applies issue module/resource visibility, chat ownership/project/
-sharing rules and agent visibility. Runs must pass both agent and source-object
-checks, including all attached sources. Managed remote chats remain restricted
-to the originator's chats, matching the existing managed directory.
+## Journal and transaction boundary
 
-The initial read uses a read-only repeatable-read transaction and materializes
-compact values in a server-owned batch. Pagination keeps their order/values fixed;
-new rows do not move the batch boundary. Each page rechecks access to its objects
-and source references. Revocation or deletion invalidates the batch with
-`409 scope_reset`; discard previous pages and refresh. Cursors bind to principal,
-originating task, workspace context and request filter. They last five minutes.
-Restart or a different API replica without the batch returns `410 reset_required`.
-Use instance affinity for multi-page v1 reads; durable multi-replica continuation
-belongs to the journal phase. A batch over 10000 projected objects returns
-`422 snapshot_too_large`; narrow scope/since. It never reports truncated state as
-complete. Batch and cursor capacity errors return `503 snapshot_capacity`.
+Migration 673 adds a compact pending journal. Business row triggers stage identities
+in the same transaction; task updates stage only a **status change**, not heartbeat,
+lease refresh, prompt/context, result or usage. The deferred commit trigger sees
+all statements. It locks the permission epoch (if needed), then every affected
+workspace feed in UUID order, assigns each feed's next sequence and inserts the
+journal. Locks live until transaction commit. No journal read sees an uncommitted
+sequence or a later commit behind an uncommitted prefix. The pending sequence
+orders statements **inside** a transaction only; it is never a commit cursor.
 
-Quota is a per-originator, per-process token bucket: sustained 60/minute, burst
-10; both endpoints and every page share it. `429 rate_limited` carries
-`Retry-After: 1`. Multi-replica deployments require affinity or a shared limiter
-before claiming a deployment-wide quota. Errors have stable `code`/`message`.
-Retry 503 after a delay; correct 400 inputs; obtain access for 403; restart on
-409/410. Existing consult/read-only task credentials cannot POST through their
-existing auth gate; GET active runs remains read-only. No auth gate is weakened.
+Multi-statement transactions collect their workspace set before locking. Explicit
+`SET CONSTRAINTS ... IMMEDIATE` followed by another captured write fails with
+SQLSTATE `40001`; it cannot silently acquire feeds in the wrong order. Savepoint
+rollback removes its staged rows. There are no business-table FKs from the journal,
+so flushing cannot take business row locks after feed locks. Journal failure aborts
+the entire business transaction. Existing callers see their ordinary database
+error; this layer does not silently retry or drop journal writes.
 
-Web/Desktop use the shared inbox activity dialog, same interface and flags. The
-native mobile exception and browser evidence are recorded in the task evidence.
+No daemon, heartbeat, offline threshold, reconnect-grace, runtime table or credential
+code is modified. The existing offline/timeout/restart statements are recorded by
+the approved task-status trigger. They may now wait for the workspace feed during
+commit; the evidence includes that cost. The pending rows are deleted before commit.
+
+## Authorization and bounded resources
+
+Originator/task identity is reused, never the host's broader identity. Member and
+linked-project grants remain distinct; source authorization and agent visibility
+both apply to runs. Replay and every page revalidate access, including expiring
+agent passes. Handles bind principal, originating task, home workspace and filters.
+
+Authorization changes (including new grants) invalidate the old scope. Deletion
+uses the safe fallback `scope_reset`, with **no deleted/hidden entity ID**. The
+permission epoch is deliberately global: an unrelated permission change can also
+require rebuilding. This trades extra refreshes for a safe first implementation;
+it is not a claim of per-object tombstone delivery. Clear all cached scope summaries
+on `409 scope_reset`; rebuild without since. Never serve stale private summaries
+on a failed revalidation. A full rebuilt snapshot replaces the old cache.
+
+Page handles/materializations expire after five minutes, checkpoints after seven
+days. Both are stored in PostgreSQL and work after process restart or on another
+replica. Journal rows older than seven days and expired materializations are
+removed in bounded batches during cursor writes; idle installations may retain
+older physical rows until another read, but those rows cannot be replayed.
+
+Each HTTP response is at most 200 items and 50000 uncompressed UTF-8 bytes; default
+limit 100. Too small a byte budget is `422 byte_budget_too_small`. Current-state materializations
+are capped at 10000 projected objects; exceeding that is `422 snapshot_too_large`,
+never a false complete result. Narrow the workspace scope. Historical journal
+length is not capped to that object count: each page scans at most the requested
+limit against the fixed upper watermark. A filtered page can be empty and partial;
+continue its cursor. Fixed current summaries are stored once and shared by pages.
+Delta collection never projects all historical terminal runs: each journal page authorizes only
+its run IDs, plus the separately collected current active set. Fresh baseline
+run summaries cover current active runs and runs referenced by retained journal
+entries, not all-time completed attempts. The same bounded delta path serves SSE.
+Source access is rechecked again before emitting read pages or SSE notifications.
+
+Read quota remains 60/minute, burst 10, per originator **per API process** (as in the
+first phase); deployment-wide read quota requires a shared limiter. Every page
+counts; `429` includes `Retry-After`. Stream quota is shared in PostgreSQL: two
+live leases per originator, renewed at keepalive and expired after 45 seconds.
+
+## SSE
+
+Subscribe with a completed read checkpoint in `?cursor=...`; on reconnect,
+`Last-Event-ID` takes precedence. Page handles are rejected. An expired position
+returns HTTP 410 before stream headers. An invalidated scope returns HTTP 409.
+
+`change` frames carry event_id, workspace_id, entity_kind, entity_id, revision,
+op and changed_at. The stream polls the journal every second; Redis/WS are not
+required for correctness. No existing webhook is replaced. After the complete
+notification batch a `checkpoint` frame carries the new opaque SSE `id`. Losing
+the connection before that frame replays the batch with the same event IDs.
+
+Keepalive comments occur every 30 seconds. Access is rechecked at each polling
+iteration and before delivery; live revocation emits `scope_reset` and closes.
+An event buffer is bounded to 1 MB and writes have a five-second deadline; overflow
+emits `read_required` and closes, so consumers read/rebuild rather than lose data.
+No producer goroutine can build an unbounded backlog. A failed stream releases its
+lease, and database checkpoints allow replay.
+
+## Clients, rollout and rollback
+
+`multica changes --all-workspaces --output json` rebuilds current state;
+`multica changes --cursor '<checkpoint>' --output json` reads the next delta.
+`--since` remains for initial retained windows. Errors preserve machine-readable
+codes; callers clear both the position and summaries on 409/410.
+
+Web/Desktop's shared activity query starts a current snapshot, revalidates every
+30 seconds and on focus, and clears loaded pages when revalidation fails. It does
+not maintain a second incremental mirror. Core accepts both v1 modes during
+rollout. Native activity entry and browser walkthrough are coordinated with the
+companion mobile/UI delivery; that entry must use the same reset/clear rules.
+
+The migration is additive and existing writers remain compatible. Deploy new
+readers only after applying it. To roll back, first restore the previous reader,
+then apply the paired down migration; it removes only the journal/cursor/stream
+objects and capture triggers. Existing business rows remain untouched. Reapplying
+starts a new coverage period; old cursors must reset. The native down migration
+and three lifecycle behaviors are exercised on a disposable test database.
+
+Native Inbox → Activity uses a registered formSheet and the mobile API's AbortSignal
+handling with the shared pure schema. The existing [interaction map](../../INTERACTION.md)
+and [browser evidence](../evidence/DENE-1879/browser.md) describe the initial
+snapshot entry. Durable-mode/cache changes are recorded separately in the second
+phase evidence; the earlier screenshots do not prove durable-mode behavior.
