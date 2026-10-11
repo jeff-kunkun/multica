@@ -214,23 +214,38 @@ provenance. Private agent identity and nonmember author identity are redacted.
 Deleted Bot credentials remain as audit tombstones; the directory omits them,
 the worker marks old queued events pending, and settings PUT returns 410.
 
-`bot_wake_cause` stores each Bot's current root, so omitting a parent/hop header
-cannot create a new chain. `bot_wake_chain` serializes a maximum of four automatic
-wake admissions across a root, including all branches. This is deliberately more
-conservative than four hops per branch. Dispatch records the cause before network
-I/O; retries of the same event reuse its admission and still count toward the
-hourly attempt budget. A new genuine member event starts a new root. Independent
-Bot actions remain in their last server-owned root until another delivered event
-provides a cause; a Bot cannot reset this with client-supplied metadata.
+`bot_wake_cause` stores each Bot's current root. `bot_wake_chain` serializes
+unanswered automatic admissions across that root and all branches. The workspace
+setting `bot_wake_chain_limit` defaults to 4, accepts integers 1–100, and is
+editable in Settings → Agent permissions → Run limits and through
+`multica settings get|set bot_wake_chain_limit`. Pending tasks reserve capacity:
+an offline recipient admits four sends, and the fifth is reported blocked.
+A task cancelled/failed before running releases its reservation. Generation
+stamps prevent a stale cancellation from subtracting a new round's capacity.
+Actual agent output or a completed run that reached running resets the count.
+The counter is server-owned; client actor/hop fields never reset it.
 
-Task queue inserts inherit from a parent run, triggering comment, or authenticated
-Bot association and consume the same root budget. Runs persist wake_root_id and
-wake_hop; task-token replies recover them through source_task_id. At the cap the
-run is persisted cancelled with error `bot wake chain limit (4)` and cannot be
-requeued. Bot delivery at the cap stays pending with that reason. Genuine direct
-human runs are not charged to an old automation root. Existing pre-upgrade queued
-events without trusted lineage stay pending (`source lineage unavailable`).
-No arbitrary client `hop`, actor header or payload can change these counters.
+Task inserts inherit a parent run, triggering comment, or authenticated Bot
+association. At the cap they persist cancelled with `bot wake chain limit (N)`.
+The send result includes saved message/task IDs, `mode: blocked`,
+`reason_code: bot_wake_chain_limit` and a recovery warning. The CLI prints the
+receipt and exits nonzero; `--wait` never waits on the cancelled task. A saved
+issue comment includes a blocked outcome per target and the CLI warns on stderr.
+Do not resend a saved message merely because its wake was blocked.
+
+Genuine direct human runs bypass this guard. `--per-quote` must exactly match
+that caller's original non-Bot human message in the same chat or issue; the
+handler checks before saving and the database verifies again at admission.
+Every rejected task creates `bot_wake_block` and a `wake_blocked` webhook event
+for its initiating Bot. Operational alerts bypass sender filters, event switches,
+quiet hours, hourly wake limits and the chain counter; inactive Bots, visibility
+checks and webhook credential checks still apply. Delivery failure remains
+inspectable in the durable wake event. Overview and routing health expose the
+workspace limit and permission-scoped last-24-hour audit for inspection/daily
+reports. Runtime task tokens cannot raise the guard through settings updates.
+Existing pre-upgrade queued events without trusted lineage remain pending
+(`source lineage unavailable`). No arbitrary client metadata changes this budget.
+
 
 Local acceptance includes an authenticated HTTP Bot A -> Bot B -> agent task ->
 Bot A chain, a worker recreation, cap/cancellation, source actor differing from

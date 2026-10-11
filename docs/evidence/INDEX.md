@@ -4,6 +4,8 @@
 
 - DENE-1862：外部 Bot 来源降级、额度/静默补发、提及额度独立与回执路径；[本地验证记录](DENE-1862/verification.md)，手机真实截图与生产 Grok 确认尚未完成。
 
+- DENE-1849：Bot 唤醒上限同步回执、回复清零、人类豁免、可配置与权限审计；[真实 CLI、数据库与回滚验证包（任务附件）](https://ai.ferryway.cc/api/attachments/01a12c18-eb12-70ee-8751-8abb4f016f65/download)，[四档真实截图与浏览器验收边界](https://ai.ferryway.cc/api/attachments/01a12c22-cc11-7099-bd52-46c78950714e/download)。
+
 - DENE-1852（认证故障部分）：本机排队故障根因、先留现场再恢复、失效凭据断连及桌面端恢复；[本地验证记录](DENE-1852/auth-recovery.md)。未代表自动改派、通知、自启或并发上限已完成。
 
 - DENE-1811：跨工作区连通双向设置、CLI 实时同步与审计分页；[验收记录及四档 HTML 预览](DENE-1811/checkpoint.md)。

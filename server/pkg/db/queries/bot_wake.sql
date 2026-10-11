@@ -35,7 +35,7 @@ UPDATE bot_wake_event SET status=$2,reason=CASE WHEN $2='received' AND (woken_at
  next_attempt_at=now()+sqlc.arg(delay_seconds)::integer*interval '1 second' WHERE sequence=$1;
 
 -- name: MarkBotWakeSending :exec
-WITH sent AS (UPDATE bot_wake_event SET status='sending',sent_at=now(),attempts=attempts+1,hop=$2 WHERE sequence=$1 RETURNING bot_id,event_type)
+WITH sent AS (UPDATE bot_wake_event SET status='sending',sent_at=now(),attempts=attempts+1,hop=$2,wake_generation=sqlc.arg(wake_generation)::bigint WHERE sequence=$1 RETURNING bot_id,event_type)
 INSERT INTO bot_wake_attempt(bot_id) SELECT bot_id FROM sent
  WHERE event_type<>'mention';
 
@@ -77,7 +77,7 @@ UPDATE bot_wake_event SET acknowledged_at=COALESCE(acknowledged_at,clock_timesta
 INSERT INTO bot_wake_chain(root_id,workspace_id) VALUES($1,$2) ON CONFLICT DO NOTHING;
 
 -- name: ConsumeBotWakeHop :one
-UPDATE bot_wake_chain SET hops=hops+1 WHERE root_id=$1 AND workspace_id=$2 AND hops<4 RETURNING hops;
+UPDATE bot_wake_chain SET hops=hops+1 WHERE root_id=$1 AND workspace_id=$2 AND hops<workspace_bot_wake_limit(workspace_id) RETURNING hops;
 
 -- name: RememberBotWakeCause :exec
 INSERT INTO bot_wake_cause(bot_id,root_id,hop) VALUES($1,$2,$3)
@@ -86,3 +86,22 @@ ON CONFLICT(bot_id) DO UPDATE SET root_id=excluded.root_id,hop=excluded.hop;
 -- name: BotOwnerFollowsIssue :one
 SELECT EXISTS(SELECT 1 FROM issue i WHERE i.id=$1 AND i.assignee_type='member' AND i.assignee_id=$2)
  OR EXISTS(SELECT 1 FROM issue_subscriber s WHERE s.issue_id=$1 AND s.user_type='member' AND s.user_id=$2)::boolean;
+
+-- name: VerifyBotWakeHumanQuote :one
+SELECT bot_wake_quote_valid(@workspace_id::uuid,@user_id::uuid,sqlc.narg(issue_id)::uuid,sqlc.narg(chat_session_id)::uuid,@quote::text)::boolean;
+
+-- name: RefundBotWakeHop :exec
+UPDATE bot_wake_chain SET hops=GREATEST(0,hops-1)
+WHERE root_id=$1 AND generation=$2;
+
+-- name: GetBotWakeChainGeneration :one
+SELECT generation FROM bot_wake_chain WHERE root_id=$1;
+
+-- name: RecordBotWakeDeliveryBlock :exec
+WITH recorded AS (
+ INSERT INTO bot_wake_block(workspace_id,bot_id,root_id,issue_id,chat_session_id,limit_value)
+ VALUES(@workspace_id,@origin_bot_id,@root_id,sqlc.narg(issue_id),sqlc.narg(chat_session_id),@limit_value)
+ RETURNING id
+)
+INSERT INTO bot_wake_event(bot_id,workspace_id,event_type,issue_id,chat_session_id,source_id,author_type,author_id,via_bot_id,root_id,hop,reason)
+SELECT @origin_bot_id,@workspace_id,'wake_blocked',sqlc.narg(issue_id),sqlc.narg(chat_session_id),@source_id,'bot',@target_bot_id,@origin_bot_id,@root_id,@limit_value,@reason FROM recorded;

@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/multica-ai/multica/server/internal/service"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/remotemcp"
 )
@@ -116,10 +117,11 @@ func (w *BotWakeWorker) ProcessNext(ctx context.Context) (bool, error) {
 	if !w.h.wakeVisible(ctx, e, bot.UserID) {
 		return pending("access unavailable")
 	}
+	alert := e.EventType == "wake_blocked"
 	rules := wakeResponse(c)
 	// Some issue writes do not set transaction-local actor metadata. Recover
 	// an actual run's actor where available; never impersonate an issue owner.
-	if (e.AuthorType == "system" || !e.AuthorID.Valid) && e.SourceTaskID.Valid {
+	if !alert && (e.AuthorType == "system" || !e.AuthorID.Valid) && e.SourceTaskID.Valid {
 		if task, err := q.GetAgentTaskInWorkspace(ctx, db.GetAgentTaskInWorkspaceParams{ID: e.SourceTaskID, WorkspaceID: e.WorkspaceID}); err == nil {
 			e.AuthorType, e.AuthorID = "agent", task.AgentID
 			if err := q.RestoreBotWakeAuthor(ctx, db.RestoreBotWakeAuthorParams{Sequence: e.Sequence, AuthorID: e.AuthorID}); err != nil {
@@ -127,7 +129,7 @@ func (w *BotWakeWorker) ProcessNext(ctx context.Context) (bool, error) {
 			}
 		}
 	}
-	if e.AuthorType == "bot" && e.AuthorID == e.BotID {
+	if !alert && e.AuthorType == "bot" && e.AuthorID == e.BotID {
 		return pending("self wake suppressed")
 	}
 	if e.InheritedOwner {
@@ -142,24 +144,24 @@ func (w *BotWakeWorker) ProcessNext(ctx context.Context) (bool, error) {
 			return pending("owner no longer follows source")
 		}
 	}
-	if e.AuthorType != "system" && e.AuthorID.Valid {
+	if !alert && e.AuthorType != "system" && e.AuthorID.Valid {
 		rule, known := rules.WakeFrom[e.AuthorType]
 		if !known || rule.Mode == "none" || (rule.Mode == "list" && !slices.Contains(rule.IDs, uuidToString(e.AuthorID))) {
 			return pending("sender not allowed")
 		}
 	}
 
-	if !slices.Contains(rules.Events, e.EventType) {
+	if !alert && !slices.Contains(rules.Events, e.EventType) {
 		return pending("event disabled")
 	}
-	if wakeQuiet(rules.QuietHours, time.Now()) {
+	if !alert && wakeQuiet(rules.QuietHours, time.Now()) {
 		return pending("quiet hours")
 	}
 	count, err := q.CountRecentBotWakeAttempts(ctx, e.BotID)
 	if err != nil {
 		return true, err
 	}
-	if rules.HourlyLimit == 0 || (e.EventType != "mention" && count >= int64(rules.HourlyLimit)) {
+	if !alert && (rules.HourlyLimit == 0 || (e.EventType != "mention" && count >= int64(rules.HourlyLimit))) {
 		return pending("hourly limit")
 	}
 	if len(c.WebhookSecret) == 0 {
@@ -180,31 +182,53 @@ func (w *BotWakeWorker) ProcessNext(ctx context.Context) (bool, error) {
 	if err != nil {
 		return pending("webhook endpoint unavailable")
 	}
+	workspace, err := q.GetWorkspace(ctx, e.WorkspaceID)
+	if err != nil {
+		return true, err
+	}
 	var payload []byte
 	if !e.RootID.Valid {
 		return pending("source lineage unavailable")
 	}
-	if e.Attempts == 0 {
+	if e.Attempts == 0 && !alert {
 		if err = q.EnsureBotWakeChain(ctx, db.EnsureBotWakeChainParams{RootID: e.RootID, WorkspaceID: e.WorkspaceID}); err != nil {
 			return true, err
 		}
 		hop, hopErr := q.ConsumeBotWakeHop(ctx, db.ConsumeBotWakeHopParams{RootID: e.RootID, WorkspaceID: e.WorkspaceID})
 		if errors.Is(hopErr, pgx.ErrNoRows) {
-			return pending("bot wake chain limit (4)")
+			limit := service.BotWakeChainLimit(workspace.Settings)
+			reason := fmt.Sprintf("bot wake chain limit (%d)", limit)
+			origin := e.ViaBotID
+			if !origin.Valid {
+				origin = e.BotID
+			}
+			if err := q.RecordBotWakeDeliveryBlock(ctx, db.RecordBotWakeDeliveryBlockParams{WorkspaceID: e.WorkspaceID, OriginBotID: origin, TargetBotID: e.BotID, RootID: e.RootID, IssueID: e.IssueID, ChatSessionID: e.ChatSessionID, LimitValue: int32(limit), SourceID: e.SourceID, Reason: reason}); err != nil {
+				return true, err
+			}
+			return pending(reason)
 		}
 		if hopErr != nil {
 			return true, hopErr
 		}
 		e.Hop = hop
 	}
-	if err = q.RememberBotWakeCause(ctx, db.RememberBotWakeCauseParams{BotID: e.BotID, RootID: e.RootID, Hop: e.Hop}); err != nil {
-		return true, err
+	generation := e.WakeGeneration
+	if e.Attempts == 0 && !alert {
+		generation, err = q.GetBotWakeChainGeneration(ctx, e.RootID)
+		if err != nil {
+			return true, err
+		}
+	}
+	if !alert {
+		if err = q.RememberBotWakeCause(ctx, db.RememberBotWakeCauseParams{BotID: e.BotID, RootID: e.RootID, Hop: e.Hop}); err != nil {
+			return true, err
+		}
 	}
 	payload, err = w.h.botWakePayload(ctx, e)
 	if err != nil {
 		return true, err
 	}
-	if err = q.MarkBotWakeSending(ctx, db.MarkBotWakeSendingParams{Sequence: e.Sequence, Hop: e.Hop}); err != nil {
+	if err = q.MarkBotWakeSending(ctx, db.MarkBotWakeSendingParams{Sequence: e.Sequence, Hop: e.Hop, WakeGeneration: generation}); err != nil {
 		return true, err
 	}
 	// Commit BEFORE the network write. A crash after this point must never
@@ -226,6 +250,11 @@ func (w *BotWakeWorker) ProcessNext(ctx context.Context) (bool, error) {
 	// A canceled request/server context must still record the observed result.
 	recordCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
+	if !alert && status == "failed" && strings.HasPrefix(reason, "connection failed before send") {
+		if err := w.h.Queries.RefundBotWakeHop(recordCtx, db.RefundBotWakeHopParams{RootID: e.RootID, Generation: generation}); err != nil {
+			return true, err
+		}
+	}
 	return true, w.h.Queries.FinishBotWakeEvent(recordCtx, db.FinishBotWakeEventParams{Sequence: e.Sequence, Status: status, Reason: reason, DelaySeconds: delay})
 }
 func (w *BotWakeWorker) deliver(ctx context.Context, endpoint *url.URL, key string, payload []byte) (string, string) {
@@ -304,6 +333,9 @@ func (h *Handler) botWakePayload(ctx context.Context, e db.BotWakeEvent) ([]byte
 	if err != nil {
 		return nil, err
 	}
+	if e.EventType == "wake_blocked" {
+		summary = fmt.Sprintf("%s: %s", summary, e.Reason)
+	}
 	if runes := []rune(summary); len(runes) > 180 {
 		summary = string(runes[:180])
 	}
@@ -318,7 +350,19 @@ func (h *Handler) botWakePayload(ctx context.Context, e db.BotWakeEvent) ([]byte
 		attachments = append(attachments, map[string]any{"url": base + "/api/attachments/" + uuidToString(a.ID) + "/download", "size_bytes": a.SizeBytes, "sha256": a.Sha256.String})
 	}
 	receiptBase := base + "/api/workspaces/" + uuidToString(e.WorkspaceID) + "/bots/" + uuidToString(e.BotID) + "/wake"
-	return json.Marshal(map[string]any{"event_id": uuidToString(e.EventID), "sequence": e.Sequence, "source_id": uuidToString(e.SourceID), "parent_id": wakeParentID(e), "ack_url": receiptBase + "/pending/ack", "ack_body": map[string]any{"event_ids": []string{uuidToString(e.EventID)}}, "woken_url": receiptBase + "/events/" + uuidToString(e.EventID) + "/woken", "result_url": receiptBase + "/events/" + uuidToString(e.EventID) + "/result", "root_id": uuidToString(e.RootID), "hop": e.Hop, "source_task_id": uuidToString(e.SourceTaskID), "web_url": base + webPath, "type": e.EventType, "issue_id": uuidToString(e.IssueID), "chat_session_id": uuidToString(e.ChatSessionID), "author": h.wakeAuthor(ctx, e), "time": e.CreatedAt.Time, "summary": summary, "url": base + link, "attachments": attachments})
+	payload := map[string]any{"event_id": uuidToString(e.EventID), "sequence": e.Sequence, "source_id": uuidToString(e.SourceID), "parent_id": wakeParentID(e), "ack_url": receiptBase + "/pending/ack", "ack_body": map[string]any{"event_ids": []string{uuidToString(e.EventID)}}, "woken_url": receiptBase + "/events/" + uuidToString(e.EventID) + "/woken", "result_url": receiptBase + "/events/" + uuidToString(e.EventID) + "/result", "root_id": uuidToString(e.RootID), "hop": e.Hop, "source_task_id": uuidToString(e.SourceTaskID), "web_url": base + webPath, "type": e.EventType, "issue_id": uuidToString(e.IssueID), "chat_session_id": uuidToString(e.ChatSessionID), "author": h.wakeAuthor(ctx, e), "time": e.CreatedAt.Time, "summary": summary, "url": base + link, "attachments": attachments}
+	if e.EventType == "wake_blocked" {
+		payload["reason_code"] = "bot_wake_chain_limit"
+		payload["reason"] = e.Reason
+		payload["limit"] = e.Hop
+		if e.AuthorType == "bot" {
+			payload["target_bot_id"] = uuidToString(e.AuthorID)
+		} else {
+			payload["agent_id"] = uuidToString(e.AuthorID)
+		}
+		payload["recovery"] = "Wait for an agent reply or completed run, or send a human message. A workspace admin can change the limit."
+	}
+	return json.Marshal(payload)
 }
 
 func wakeParentID(e db.BotWakeEvent) string {
