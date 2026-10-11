@@ -249,6 +249,21 @@ export function ChatPage() {
   // opens a chat by replacing the list) and a discarded tab's reload.
   const projectFilter = useChatListViewStore((s) => s.projectFilter);
   const setProjectFilter = useChatListViewStore((s) => s.setProjectFilter);
+  const selectProjectFilter = useChatListViewStore((s) => s.selectProjectFilter);
+  const followProjects = useChatListViewStore((s) => s.followProjects);
+  const listWorkspaceSlug = useChatListViewStore((s) => s.hydratedWorkspaceSlug);
+  // Follow resolved conversation/draft changes, not list-filter changes:
+  // selecting an empty project on the left must stay there until a new chat
+  // starts. Existing sessions follow the Query cache, including rollbacks.
+  const conversationProjectKey = c.activeProjectIds.join(",");
+  const conversationResolved = Boolean(c.currentSession);
+  useEffect(() => {
+    if (!isCurrentChatRoute || getCurrentSlug() !== workspaceSlug || !c.projectsLoaded) return;
+    if (listWorkspaceSlug !== workspaceSlug) return;
+    if (c.activeSessionId !== urlSession) return;
+    if (c.activeSessionId ? !conversationResolved : !composingNew) return;
+    followProjects(conversationProjectKey ? conversationProjectKey.split(",") : []);
+  }, [isCurrentChatRoute, workspaceSlug, listWorkspaceSlug, urlSession, c.projectsLoaded, c.activeSessionId, conversationResolved, composingNew, conversationProjectKey, followProjects]);
   const [switcherOpen, setSwitcherOpen] = useState(false);
   const startDirectRef = useRef<() => void>(() => {});
   const dismissProjectNudge = useDismissChatProjectNudge();
@@ -333,16 +348,18 @@ export function ChatPage() {
   // URL → store: deep link, refresh, notification click, back/forward.
   useEffect(() => {
     if (!isCurrentChatRoute || getCurrentSlug() !== workspaceSlug) return;
+    if (listWorkspaceSlug !== workspaceSlug) return;
     if (!urlSession && !composingNew) conversationEntry.current = null;
     if (urlSession !== useChatStore.getState().activeSessionId) {
       c.setActiveSession(urlSession);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- reconcile URL/route changes, not store updates
-  }, [isCurrentChatRoute, workspaceSlug, urlSession]);
+  }, [isCurrentChatRoute, workspaceSlug, listWorkspaceSlug, urlSession]);
 
   // store → URL: thread selection, "new chat", and sessions created by sending.
   useEffect(() => {
     if (!isCurrentChatRoute || getCurrentSlug() !== workspaceSlug) return;
+    if (listWorkspaceSlug !== workspaceSlug) return;
     const live = useChatStore.getState().activeSessionId;
     const current = chatSessionIdFromLocation(pathname, searchParams);
     const pushSync = pushNextSessionSync.current;
@@ -363,7 +380,7 @@ export function ChatPage() {
       if (pathname !== canonical) replace(canonical);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- reconcile store/route changes, not URL updates
-  }, [isCurrentChatRoute, workspaceSlug, c.activeSessionId]);
+  }, [isCurrentChatRoute, workspaceSlug, listWorkspaceSlug, c.activeSessionId]);
 
   // How wide the project bar needs to be for every chip to fit on its two
   // rows; the divider snaps to it and double-click expands to it.
@@ -484,7 +501,7 @@ export function ChatPage() {
   startDirectRef.current = startDirect;
 
   const changeProjectFilter = (next: ChatProjectFilter) => {
-    setProjectFilter(next);
+    selectProjectFilter(next);
     const userId = c.user?.id ?? null;
     // Compact shows one pane: switching projects lands on that project's
     // thread list, not inside its last chat.
@@ -666,12 +683,12 @@ export function ChatPage() {
     );
   }, [c.projects, c.sessions]);
 
-  const browsedProjectTitle =
-    projectFilter.type === "project"
-      ? (c.projects ?? []).find((project) => project.id === projectFilter.id)?.title
-      : null;
+  const newChatProjectId = !c.currentSession && composingNew
+    ? c.activeProjectIds[0]
+    : projectFilter.type === "project" ? projectFilter.id : null;
+  const browsedProjectTitle = (c.projects ?? []).find((project) => project.id === newChatProjectId)?.title;
   const projectCaption =
-    projectFilter.type === "project"
+    newChatProjectId
       ? browsedProjectTitle
         ? t(($) => $.page.new_chat_in_project, { title: browsedProjectTitle })
         : null
