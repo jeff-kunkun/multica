@@ -163,11 +163,11 @@ func TestFastJournalLifecycleBaselineModifiedRollback(t *testing.T) {
 	if err := testPool.QueryRow(ctx, `SELECT status FROM agent_task_queue WHERE id=$1`, parseUUID(task)).Scan(&status); err != nil || status != "running" {
 		t.Fatalf("rollback status=%s err=%v", status, err)
 	}
-	down, err := os.ReadFile("../../migrations/668_fast_access_journal.down.sql")
+	down, err := os.ReadFile("../../migrations/673_fast_access_journal.down.sql")
 	if err != nil {
 		t.Fatal(err)
 	}
-	up, err := os.ReadFile("../../migrations/668_fast_access_journal.up.sql")
+	up, err := os.ReadFile("../../migrations/673_fast_access_journal.up.sql")
 	if err != nil {
 		t.Fatal(err)
 	}

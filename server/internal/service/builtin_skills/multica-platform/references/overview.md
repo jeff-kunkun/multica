@@ -52,8 +52,8 @@ or agents to reconstruct these results.
 
 Omit `--all-workspaces` to use the current workspace, or pass `--workspace <UUID>`
 (repeatable or comma-separated). Find IDs with `multica workspace list --output json`.
-`--workspace` and `--all-workspaces` are mutually exclusive. For changes, the first
-page requires `--since` (RFC3339); a subsequent read uses the opaque `--cursor`
+`--workspace` and `--all-workspaces` are mutually exclusive. For changes, omit `--since` to rebuild current state, or set an RFC3339
+journal window within retention; a subsequent read uses the opaque `--cursor`
 instead. Do not repeat scope flags with a cursor: the server already binds it
 to scope and filters. The CLI never decodes or manufactures cursors.
 
@@ -111,3 +111,14 @@ The `fast_access.mcp` discovery field names the local `multica mcp serve` stdio
 adapter. Find it in `capabilities` and read `mcp serve --help` for configuration,
 tool schemas and ambiguous-write recovery. Existing workspace/agent MCP settings
 assign it; no new credentials are created.
+
+`bot_wake_chain` describes the workspace-wide Bot wake guard even in compact
+mode: `limit`, `reason_code`, `reset`, `human_exempt`,
+`verified_quote_exempt`, and `settings_key`. When audit access is permitted,
+`blocked_last_24h` and up to 100 `recent_blocks` include each attempted wake's
+Bot, target, root, task/issue/chat identifiers, limit and timestamp. This guard
+summary is workspace-wide, independently of project/agent filters. External Bot
+callers see only their own Bot's visible records; human owners/admins see viewer-visible records. Other
+members and task tokens see no audit identifiers. Include these counts and records in patrol
+and dispatch daily reports; treat `audit_read_failed` as unavailable evidence,
+never as zero. Recovery and quote verification: `external-bots.md`.

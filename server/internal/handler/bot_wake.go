@@ -39,6 +39,7 @@ type BotWakeResponse struct {
 	WebhookConfigured bool          `json:"webhook_configured"`
 	Events            []string      `json:"events"`
 	HourlyLimit       int32         `json:"hourly_limit"`
+	LimitedCount      int64         `json:"limited_count"`
 	QuietHours        BotQuietHours `json:"quiet_hours"`
 }
 type botWakeSecrets struct {
@@ -195,7 +196,22 @@ func (h *Handler) GetBotWake(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 500, "failed to load wake rules")
 		return
 	}
-	writeJSON(w, 200, wakeResponse(c))
+	h.writeWakeSettings(w, r, c, bot)
+}
+
+func (h *Handler) writeWakeSettings(w http.ResponseWriter, r *http.Request, c db.BotWake, bot db.PersonalAccessToken) {
+	limited, err := h.Queries.ListLimitedBotWakeEvents(r.Context(), db.ListLimitedBotWakeEventsParams{BotID: bot.ID, WorkspaceID: bot.WorkspaceID})
+	if err != nil {
+		writeError(w, 500, "failed to load deferred events")
+		return
+	}
+	response := wakeResponse(c)
+	for _, e := range limited {
+		if h.wakeVisible(r.Context(), e, bot.UserID) && h.wakeVisible(r.Context(), e, parseUUID(requestUserID(r))) {
+			response.LimitedCount++
+		}
+	}
+	writeJSON(w, 200, response)
 }
 func (h *Handler) PutBotWake(w http.ResponseWriter, r *http.Request) {
 	bot, ok := h.authorizeWake(w, r)
@@ -297,11 +313,15 @@ func (h *Handler) PutBotWake(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 500, "failed to save wake rules")
 		return
 	}
+	if err = q.RescheduleDeferredBotWakeEvents(r.Context(), bot.ID); err != nil {
+		writeError(w, 500, "failed to reschedule deferred events")
+		return
+	}
 	if err = tx.Commit(r.Context()); err != nil {
 		writeError(w, 500, "failed to save wake rules")
 		return
 	}
-	writeJSON(w, 200, wakeResponse(saved))
+	h.writeWakeSettings(w, r, saved, bot)
 }
 
 // Reuse resource visibility, including private chat semantics, at send AND read.
@@ -356,6 +376,14 @@ func (h *Handler) ListBotWakeEvents(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	includeContent := false
+	if value := r.URL.Query().Get("include_content"); value != "" {
+		includeContent, err = strconv.ParseBool(value)
+		if err != nil {
+			writeError(w, 400, "include_content must be boolean")
+			return
+		}
+	}
 	rows, err := h.Queries.ListBotWakeEvents(r.Context(), db.ListBotWakeEventsParams{BotID: bot.ID, WorkspaceID: bot.WorkspaceID, Limit: int32(limit), BeforeSequence: before, PendingOnly: strings.HasSuffix(r.URL.Path, "/pending")})
 	if err != nil {
 		writeError(w, 500, "failed to list events")
@@ -367,7 +395,16 @@ func (h *Handler) ListBotWakeEvents(w http.ResponseWriter, r *http.Request) {
 		if !h.wakeVisible(r.Context(), e, bot.UserID) || !h.wakeVisible(r.Context(), e, parseUUID(requestUserID(r))) {
 			continue
 		}
-		result = append(result, map[string]any{"event_id": uuidToString(e.EventID), "hop": e.Hop, "root_id": uuidToString(e.RootID), "source_task_id": uuidToString(e.SourceTaskID), "sequence": e.Sequence, "type": e.EventType, "issue_id": uuidToString(e.IssueID), "chat_session_id": uuidToString(e.ChatSessionID), "status": e.Status, "reason": e.Reason, "attempts": e.Attempts, "created_at": e.CreatedAt.Time, "sent_at": timestampToPtr(e.SentAt), "received_at": timestampToPtr(e.ReceivedAt), "woken_at": timestampToPtr(e.WokenAt), "result_at": timestampToPtr(e.ResultAt), "result_url": e.ResultUrl, "acknowledged_at": timestampToPtr(e.AcknowledgedAt)})
+		item := map[string]any{"delivery_id": uuidToString(e.DeliveryID), "event_id": uuidToString(e.EventID), "hop": e.Hop, "root_id": uuidToString(e.RootID), "source_task_id": uuidToString(e.SourceTaskID), "sequence": e.Sequence, "type": e.EventType, "issue_id": uuidToString(e.IssueID), "chat_session_id": uuidToString(e.ChatSessionID), "status": e.Status, "reason": e.Reason, "attempts": e.Attempts, "created_at": e.CreatedAt.Time, "sent_at": timestampToPtr(e.SentAt), "received_at": timestampToPtr(e.ReceivedAt), "woken_at": timestampToPtr(e.WokenAt), "result_at": timestampToPtr(e.ResultAt), "result_url": e.ResultUrl, "acknowledged_at": timestampToPtr(e.AcknowledgedAt)}
+		if includeContent {
+			payload, err := h.botWakePayloadFields(r.Context(), e)
+			if err != nil {
+				writeError(w, 500, "failed to load event content")
+				return
+			}
+			item["payload"] = payload
+		}
+		result = append(result, item)
 	}
 	if int64(len(rows)) == limit {
 		next = strconv.FormatInt(rows[len(rows)-1].Sequence, 10)

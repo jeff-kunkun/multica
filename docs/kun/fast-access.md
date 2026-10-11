@@ -66,7 +66,7 @@ distinct. Chat-only attempts are included. Autopilot executions have their own k
 
 ## Journal and transaction boundary
 
-Migration 668 adds a compact pending journal. Business row triggers stage identities
+Migration 673 adds a compact pending journal. Business row triggers stage identities
 in the same transaction; task updates stage only a **status change**, not heartbeat,
 lease refresh, prompt/context, result or usage. The deferred commit trigger sees
 all statements. It locks the permission epoch (if needed), then every affected

@@ -246,6 +246,7 @@ func (h *Handler) EscalateIssue(w http.ResponseWriter, r *http.Request) {
 // model identifier the workspace itself typed in, and whether the last call
 // worked.
 type routingHealthResponse struct {
+	BotWakeChain *botWakeChainReport `json:"bot_wake_chain,omitempty"`
 	// Rules is the rule table that decides the tier (DENE-1677), read-only:
 	// it ships with the server, like ladder.json.
 	Rules             routing.RuleTableView `json:"rules"`
@@ -469,7 +470,10 @@ func (h *Handler) GetRoutingHealth(w http.ResponseWriter, r *http.Request) {
 		// No router wired at all: the product is the pre-routing product, and
 		// saying "off" is the honest answer rather than an error the settings
 		// page would have to interpret.
-		writeJSON(w, http.StatusOK, offlineRoutingHealth())
+		resp := offlineRoutingHealth()
+		audit := h.botWakeChainReport(r, workspaceID)
+		resp.BotWakeChain = &audit
+		writeJSON(w, http.StatusOK, resp)
 		return
 	}
 	rep, err := h.Routing.Health(r.Context(), workspaceID)
@@ -479,7 +483,10 @@ func (h *Handler) GetRoutingHealth(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to read routing health")
 		return
 	}
-	writeJSON(w, http.StatusOK, h.routingHealthPayload(r.Context(), workspaceID, rep))
+	resp := h.routingHealthPayload(r.Context(), workspaceID, rep)
+	audit := h.botWakeChainReport(r, workspaceID)
+	resp.BotWakeChain = &audit
+	writeJSON(w, http.StatusOK, resp)
 }
 
 // CheckRoutingHealth backs POST /api/workspaces/{id}/routing/health/check —
@@ -488,7 +495,10 @@ func (h *Handler) GetRoutingHealth(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) CheckRoutingHealth(w http.ResponseWriter, r *http.Request) {
 	workspaceID := chi.URLParam(r, "id")
 	if h.Routing == nil {
-		writeJSON(w, http.StatusOK, offlineRoutingHealth())
+		resp := offlineRoutingHealth()
+		audit := h.botWakeChainReport(r, workspaceID)
+		resp.BotWakeChain = &audit
+		writeJSON(w, http.StatusOK, resp)
 		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), routeTimeout)
@@ -500,7 +510,10 @@ func (h *Handler) CheckRoutingHealth(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to check the routing model")
 		return
 	}
-	writeJSON(w, http.StatusOK, h.routingHealthPayload(ctx, workspaceID, rep))
+	resp := h.routingHealthPayload(ctx, workspaceID, rep)
+	audit := h.botWakeChainReport(r, workspaceID)
+	resp.BotWakeChain = &audit
+	writeJSON(w, http.StatusOK, resp)
 }
 
 func offlineRoutingHealth() routingHealthResponse {

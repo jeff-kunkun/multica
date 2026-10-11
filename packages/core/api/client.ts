@@ -355,6 +355,7 @@ import {
   type ConfigImportResult,
 } from "./config-transfer";
 import {
+  BotWakeDeliveryStatsSchema,
   RuntimeProfileSchema,
   RuntimeProfileListSchema,
   AgentTaskListSchema,
@@ -4853,7 +4854,9 @@ export class ApiClient {
 
   // Bot wake (DENE-1792): owner/admin or the bot's own key.
   async getBotWake(workspaceId: string, botId: string): Promise<BotWakeSettings> {
-    return this.fetch(`/api/workspaces/${workspaceId}/bots/${botId}/wake`);
+    const path = `/api/workspaces/${workspaceId}/bots/${botId}/wake`;
+    const raw = await this.fetch<BotWakeSettings>(path);
+    return parseWithFallback(raw, BotWakeDeliveryStatsSchema, raw, { endpoint: `GET ${path}` });
   }
 
   async updateBotWake(
@@ -4861,10 +4864,12 @@ export class ApiClient {
     botId: string,
     data: UpdateBotWakeRequest,
   ): Promise<BotWakeSettings> {
-    return this.fetch(`/api/workspaces/${workspaceId}/bots/${botId}/wake`, {
+    const path = `/api/workspaces/${workspaceId}/bots/${botId}/wake`;
+    const raw = await this.fetch<BotWakeSettings>(path, {
       method: "PUT",
       body: JSON.stringify(data),
     });
+    return parseWithFallback(raw, BotWakeDeliveryStatsSchema, raw, { endpoint: `PUT ${path}` });
   }
 
   async listBotWakeEvents(

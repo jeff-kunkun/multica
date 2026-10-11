@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -19,16 +20,31 @@ var attachmentCmd = &cobra.Command{
 }
 
 var attachmentDownloadCmd = &cobra.Command{
-	Use:   "download <attachment-id>",
-	Short: "Download an attachment to a local file",
-	Long:  "Download an attachment by its ID to a local file.",
+	Use:   "download [attachment-id]",
+	Short: "Download a verified attachment or all attachments on a comment/issue",
+	Long: `Download checksummed attachment bytes to local files. Select one attachment
+ID, --comment <id>, or --issue <id-or-identifier>. With --issue and --comment
+together, download only that comment's attachments on the issue.
+Read real attachment/comment IDs from issue get or issue comment list JSON.
+The server enforces the current account/workspace's issue visibility and file access.
+
+Use -o/--output-dir for the destination directory, or --output-file for an
+exact path when downloading a single ID. --output json controls the result
+format, not the destination. Each file is checked before replacing a destination;
+a checksum/size mismatch retries once from authenticated raw storage.
+Batch downloads disambiguate repeated filenames with the attachment ID and
+return downloaded files and per-file failures as JSON. Successful files remain
+available if another file fails; the command exits nonzero for any failure.`,
 	Example: `  # Download an image attachment to the current directory
   $ multica attachment download abc123
 
   # Download to a directory inside the working directory (keep agent
   # downloads out of /tmp and other machine-shared paths, MUL-4252)
-  $ multica attachment download abc123 -o ./attachments`,
-	Args: exactArgs(1),
+  $ multica attachment download abc123 -o ./attachments
+  $ multica attachment download abc123 --output-file ./reports/report.pdf
+  $ multica attachment download --comment <comment-id> -o ./attachments
+  $ multica attachment download --issue DENE-123 -o ./attachments`,
+	Args: cobra.MaximumNArgs(1),
 	RunE: runAttachmentDownload,
 }
 
@@ -64,6 +80,10 @@ func init() {
 	attachmentCmd.AddCommand(attachmentUploadCmd)
 
 	attachmentDownloadCmd.Flags().StringP("output-dir", "o", ".", "Directory to save the downloaded file")
+	attachmentDownloadCmd.Flags().String("output-file", "", "Exact destination path for a single attachment (overrides -o/--output-dir)")
+	attachmentDownloadCmd.Flags().String("comment", "", "Download all attachments on a comment ID")
+	attachmentDownloadCmd.Flags().String("issue", "", "Download all attachments on an issue ID or identifier")
+	attachmentDownloadCmd.Flags().String("output", "json", "Result format: json (destination is -o/--output-dir or --output-file)")
 	attachmentUploadCmd.Flags().String("task", "", "Chat task id to attach to (defaults to MULTICA_TASK_ID)")
 	attachmentUploadCmd.Flags().String("issue", "", "Issue ID or identifier; works with Bot PATs, mutually exclusive with --task")
 }
@@ -159,84 +179,203 @@ func escapeMarkdownLabel(s string) string {
 	).Replace(s)
 }
 
+type attachmentDownloadResult struct {
+	ID       string `json:"id"`
+	Filename string `json:"filename"`
+	Path     string `json:"path"`
+	Size     int64  `json:"size"`
+	SHA256   string `json:"sha256"`
+}
+
 func runAttachmentDownload(cmd *cobra.Command, args []string) error {
+	commentID, _ := cmd.Flags().GetString("comment")
+	issueInput, _ := cmd.Flags().GetString("issue")
+	outputFile, _ := cmd.Flags().GetString("output-file")
+	format, _ := cmd.Flags().GetString("output")
+	if format != "" && format != "json" {
+		return fmt.Errorf("--output accepts json; use -o/--output-dir or --output-file for the destination")
+	}
+	batch := commentID != "" || issueInput != ""
+	if (len(args) == 0 && !batch) || (len(args) > 0 && batch) {
+		return fmt.Errorf("select one attachment ID, --comment <id>, or --issue <id-or-identifier>")
+	}
+	if batch && outputFile != "" {
+		return fmt.Errorf("--output-file requires a single attachment ID; use -o/--output-dir for batches")
+	}
 	client, err := newAPIClient(cmd)
 	if err != nil {
 		return err
 	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), cli.AtLeastAPITimeout(60*time.Second))
+	ctx, cancel := context.WithTimeout(context.Background(), cli.AtLeastAPITimeout(10*time.Minute))
 	defer cancel()
-
-	// Fetch attachment metadata (includes signed download_url).
-	var att map[string]any
-	if err := client.GetJSON(ctx, "/api/attachments/"+args[0], &att); err != nil {
-		return fmt.Errorf("get attachment: %w", err)
+	if !batch {
+		result, err := downloadAttachment(ctx, client, args[0], cmd, "")
+		if err != nil {
+			return err
+		}
+		return cli.PrintJSON(os.Stdout, result)
 	}
-
-	downloadURL := strVal(att, "download_url")
-	if downloadURL == "" {
-		return fmt.Errorf("attachment has no download URL")
-	}
-
-	filename := filepath.Base(strVal(att, "filename"))
-	if filename == "" || filename == "." {
-		filename = args[0]
-	}
-
-	// Download the file content.
-	data, err := client.DownloadFile(ctx, downloadURL)
-	if err != nil {
-		return fmt.Errorf("download file: %w", err)
-	}
-
-	// Validate before writing any destination bytes; a corrupt response never
-	// replaces an existing good file. No unverified temporary file is retained.
-	expected := strVal(att, "sha256")
-	if err := cli.VerifyAttachment(data, expected, att["size_bytes"]); err != nil {
-		return err
-	}
-
-	// Write to the output directory, creating it if needed so `-o` works
-	// against a directory that does not exist yet (the help example's
-	// `-o ./attachments` in a clean workdir).
-	outputDir, _ := cmd.Flags().GetString("output-dir")
-	if outputDir != "" {
-		if err := os.MkdirAll(outputDir, 0o755); err != nil {
-			return fmt.Errorf("create output directory: %w", err)
+	var attachments []cli.AttachmentResponse
+	if issueInput != "" {
+		ref, err := resolveIssueRef(ctx, client, issueInput)
+		if err != nil {
+			return err
+		}
+		if err := client.GetJSON(ctx, "/api/issues/"+url.PathEscape(ref.ID)+"/attachments", &attachments); err != nil {
+			return err
+		}
+	} else {
+		if err := client.GetJSON(ctx, "/api/comments/"+url.PathEscape(commentID)+"/attachments", &attachments); err != nil {
+			return err
 		}
 	}
-	destPath := filepath.Join(outputDir, filename)
+	// Reserve every original name before assigning duplicates: an existing
+	// report-<id>.pdf must not be overwritten by a renamed report.pdf.
+	names := make(map[string]int)
+	used := make(map[string]bool)
+	for _, att := range attachments {
+		if commentID != "" && issueInput != "" && att.CommentID != commentID {
+			continue
+		}
+		name := attachmentFilename(att.Filename, att.ID)
+		names[strings.ToLower(name)]++
+		used[strings.ToLower(name)] = true
+	}
+	results := make([]attachmentDownloadResult, 0)
+	failures := make([]map[string]string, 0)
+	seen := make(map[string]bool)
+	for _, att := range attachments {
+		if commentID != "" && issueInput != "" && att.CommentID != commentID {
+			continue
+		}
+		if seen[att.ID] {
+			continue
+		}
+		seen[att.ID] = true
+		name := attachmentFilename(att.Filename, att.ID)
+		if names[strings.ToLower(name)] > 1 {
+			ext := filepath.Ext(name)
+			stem := strings.TrimSuffix(name, ext) + "-" + filepath.Base(att.ID)
+			name = stem + ext
+			for i := 2; used[strings.ToLower(name)]; i++ {
+				name = fmt.Sprintf("%s-%d%s", stem, i, ext)
+			}
+			used[strings.ToLower(name)] = true
+		}
+		result, err := downloadAttachment(ctx, client, att.ID, cmd, name)
+		if err != nil {
+			failures = append(failures, map[string]string{"id": att.ID, "error": err.Error()})
+			continue
+		}
+		results = append(results, result)
+	}
+	if err := cli.PrintJSON(os.Stdout, map[string]any{"files": results, "failures": failures}); err != nil {
+		return err
+	}
+	if len(failures) > 0 {
+		return fmt.Errorf("%d attachment downloads failed; %d files saved", len(failures), len(results))
+	}
+	return nil
+}
 
+func attachmentFilename(name, id string) string {
+	name = filepath.Base(name)
+	if name == "" || name == "." || name == ".." || name == string(filepath.Separator) {
+		return filepath.Base(id)
+	}
+	return name
+}
+
+func attachmentDownloadURLType(rawURL string) string {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return "invalid"
+	}
+	if u.Query().Get("raw") == "1" {
+		return "authenticated raw storage"
+	}
+	if !u.IsAbs() {
+		return "relative API/storage"
+	}
+	if u.RawQuery != "" {
+		return "signed/absolute storage"
+	}
+	return "absolute storage/CDN"
+}
+
+func verifyAttachmentBytes(att cli.AttachmentResponse, data []byte, downloadURL string) error {
+	if err := cli.VerifyAttachment(data, att.SHA256, att.SizeBytes); err != nil {
+		return fmt.Errorf("%w; download address type=%s", err, attachmentDownloadURLType(downloadURL))
+	}
+	return nil
+}
+
+func downloadAttachment(ctx context.Context, client *cli.APIClient, id string, cmd *cobra.Command, batchName string) (attachmentDownloadResult, error) {
+	var result attachmentDownloadResult
+	// Typed metadata preserves integer sizes; map[string]any converted large
+	// sizes to scientific notation, which ParseInt rejected (DENE-1864).
+	var att cli.AttachmentResponse
+	if err := client.GetJSON(ctx, "/api/attachments/"+url.PathEscape(id), &att); err != nil {
+		return result, fmt.Errorf("get attachment: %w", err)
+	}
+	downloadURL := att.RawDownloadURL
+	if downloadURL == "" {
+		downloadURL = att.DownloadURL
+	}
+	if downloadURL == "" {
+		return result, fmt.Errorf("attachment has no download URL")
+	}
+	if att.SHA256 == "" {
+		return result, fmt.Errorf("attachment has no sha256; server must provide a verified checksum")
+	}
+	data, err := client.DownloadFile(ctx, downloadURL)
+	if err != nil {
+		return result, fmt.Errorf("download file (%s): %w", attachmentDownloadURLType(downloadURL), err)
+	}
+	if firstErr := verifyAttachmentBytes(att, data, downloadURL); firstErr != nil {
+		fmt.Fprintln(os.Stderr, firstErr.Error()+"; retrying once from raw storage")
+		rawURL := "/api/attachments/" + url.PathEscape(id) + "/download?raw=1"
+		data, err = client.DownloadFile(ctx, rawURL)
+		if err != nil {
+			return result, fmt.Errorf("%v; raw download retry: %w", firstErr, err)
+		}
+		if err = verifyAttachmentBytes(att, data, rawURL); err != nil {
+			return result, fmt.Errorf("%v; raw download retry failed: %w; check the stored object and attachment metadata before retrying", firstErr, err)
+		}
+	}
+	filename := attachmentFilename(att.Filename, id)
+	if batchName != "" {
+		filename = batchName
+	}
+	outputDir, _ := cmd.Flags().GetString("output-dir")
+	destPath := filepath.Join(outputDir, filename)
+	if outputFile, _ := cmd.Flags().GetString("output-file"); outputFile != "" {
+		destPath = outputFile
+		filename = filepath.Base(destPath)
+	}
+	outputDir = filepath.Dir(destPath)
+	if err := os.MkdirAll(outputDir, 0o755); err != nil {
+		return result, fmt.Errorf("create output directory: %w", err)
+	}
 	file, err := os.CreateTemp(outputDir, ".multica-download-*")
 	if err != nil {
-		return fmt.Errorf("write file: %w", err)
+		return result, fmt.Errorf("write file: %w", err)
 	}
 	defer os.Remove(file.Name())
 	if _, err = file.Write(data); err != nil {
 		file.Close()
-		return fmt.Errorf("write file: %w", err)
+		return result, fmt.Errorf("write file: %w", err)
 	}
 	if err = file.Close(); err != nil {
-		return fmt.Errorf("close file: %w", err)
+		return result, fmt.Errorf("close file: %w", err)
 	}
 	if err = os.Rename(file.Name(), destPath); err != nil {
-		return fmt.Errorf("save file: %w", err)
+		return result, fmt.Errorf("save file: %w", err)
 	}
-
-	// Print the absolute path so agents can reference the file.
 	abs, err := filepath.Abs(destPath)
 	if err != nil {
 		abs = destPath
 	}
 	fmt.Fprintln(os.Stderr, "Downloaded:", abs)
-
-	// Also print as JSON for --output json compatibility.
-	return cli.PrintJSON(os.Stdout, map[string]any{
-		"id":       strVal(att, "id"),
-		"filename": filename,
-		"path":     abs,
-		"size":     att["size_bytes"],
-		"sha256":   expected,
-	})
+	return attachmentDownloadResult{ID: att.ID, Filename: filename, Path: abs, Size: att.SizeBytes, SHA256: att.SHA256}, nil
 }

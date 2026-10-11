@@ -74,7 +74,8 @@ no invented idempotency guarantee. Server-generated canonical_url is retained
 when present; legacy endpoints do not supply it, and the adapter does not invent
 workspace-slug URLs.
 
-Downloads reuse `DownloadFile` and the CLI's shared size/SHA256 verifier (100 MiB
+Downloads prefer `raw_download_url` (falling back to `download_url` on older
+servers) and reuse `DownloadFile` and the CLI's shared size/SHA256 verifier (100 MiB
 maximum). Only verified bytes are written, into a unique 0700 directory and 0600
 file beneath the operator's `--download-dir` (default `./attachments`). The tool
 cannot choose an arbitrary destination. Signed URLs, credential fields and raw

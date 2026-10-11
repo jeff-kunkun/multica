@@ -2858,9 +2858,11 @@ export const EMPTY_CHAT_PENDING_TASK: ChatPendingTask = {};
 export const SendChatMessageResponseSchema: z.ZodType<SendChatMessageResponse> = z.object({
   message_id: z.string().min(1),
   task_id: z.string().min(1),
+  warning: z.string().optional(),
+  reason_code: z.string().optional(),
   supports_queue: z.boolean().optional(),
   queued: z.boolean().optional().catch(undefined),
-  mode: z.enum(["steer", "queue", "restart", "start"]).optional().catch(undefined),
+  mode: z.enum(["steer", "queue", "restart", "start", "blocked"]).optional().catch(undefined),
   created_at: z.string().min(1),
   attachment_ids: z.array(z.string()).nullish().transform((ids) => ids ?? undefined),
 }).loose();
@@ -5172,3 +5174,8 @@ export const EMPTY_TEST_REPO_BINDING_RESPONSE: TestRepoBindingResponse = {
   binding: EMPTY_REPO_BINDING,
   ok: false,
 };
+
+/** Validate additive delivery statistics without narrowing older wake settings. */
+export const BotWakeDeliveryStatsSchema = z.object({
+  limited_count: z.number().int().nonnegative().safe().optional().catch(0).default(0),
+}).passthrough();

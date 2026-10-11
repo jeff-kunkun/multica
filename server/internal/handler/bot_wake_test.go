@@ -88,8 +88,8 @@ func TestBotWakeLocalHTTP(t *testing.T) {
 		if r.Header.Get("X-Multica-Event-ID") == "" || payload["summary"] == nil {
 			t.Error("missing metadata")
 		}
-		if _, ok := payload["content"]; ok {
-			t.Error("body leaked")
+		if payload["type"] == "mention" && payload["content"] == nil {
+			t.Error("mention body missing")
 		}
 		if slow.Load() {
 			time.Sleep(150 * time.Millisecond)
@@ -99,6 +99,7 @@ func TestBotWakeLocalHTTP(t *testing.T) {
 	defer receiver.Close()
 	t.Setenv("MULTICA_PLUGIN_DEV_ORIGINS", receiver.URL)
 	worker := NewBotWakeWorker(testHandler)
+	worker.coalesceSeconds = 0
 	worker.client = func(u *url.URL) *http.Client { return &http.Client{Timeout: 50 * time.Millisecond} }
 	quietOff := map[string]any{"enabled": false, "start": "23:00", "end": "08:00", "timezone": "Asia/Shanghai"}
 	put := func(body any) {
@@ -151,10 +152,10 @@ func TestBotWakeLocalHTTP(t *testing.T) {
 	put(map[string]any{"hourly_limit": 1})
 	limited := comment()
 	process()
-	if state(limited) != "pending" || calls.Load() != 1 {
-		t.Fatal("rate limit failed")
+	if state(limited) != "received" || calls.Load() != 2 {
+		t.Fatal("mention must bypass hourly limit")
 	}
-	t.Log("hourly limit 1: second event pending; receiver calls still 1")
+	t.Log("hourly limit 1: mentions bypass quota")
 	put(map[string]any{"hourly_limit": 120, "quiet_hours": map[string]any{"enabled": true, "start": "00:00", "end": "00:00", "timezone": "Asia/Shanghai"}})
 	quiet := comment()
 	process()
@@ -162,6 +163,7 @@ func TestBotWakeLocalHTTP(t *testing.T) {
 		t.Fatal("quiet failed")
 	}
 	t.Log("quiet hours: pending, no send")
+	dbfx.Exec(t, `UPDATE bot_wake_event SET acknowledged_at=now() WHERE bot_id=$1 AND source_id=$2`, bot.ID, quiet)
 	put(map[string]any{"quiet_hours": quietOff, "events": []string{}})
 	disabled := comment()
 	process()
@@ -216,7 +218,7 @@ func TestBotWakeLocalHTTP(t *testing.T) {
 	for _, status := range []string{"in_progress", "done", "blocked"} {
 		dbfx.Exec(t, `UPDATE issue SET status=$2 WHERE id=$1`, issueID, status)
 		process()
-		if state(issueID) != "pending" {
+		if state(issueID) != "received" {
 			t.Fatalf("lifecycle %s", status)
 		}
 	}
@@ -225,13 +227,13 @@ func TestBotWakeLocalHTTP(t *testing.T) {
 	if state(summonID) != "received" {
 		t.Fatal("summon failed")
 	}
-	t.Log("started/done/blocked: pending without trusted actor; needs_kun received")
+	t.Log("started/done/blocked: delivered with unknown attribution; needs_kun received")
 	dbfx.Exec(t, `UPDATE issue SET assignee_type='member',assignee_id=$2 WHERE id=$1`, issueID, testUserID)
 	process()
-	if state(issueID) != "pending" {
+	if state(issueID) != "received" {
 		t.Fatal("task assignment missing")
 	}
-	t.Log("watched issue assignment: pending without trusted actor")
+	t.Log("watched issue assignment: delivered with unknown attribution")
 
 	agentID := createHandlerTestAgent(t, "WakeChatAgent", []byte("[]"))
 	chatID := createHandlerTestChatSession(t, agentID)
@@ -242,10 +244,10 @@ func TestBotWakeLocalHTTP(t *testing.T) {
 	}
 	follow := dbfx.Insert(t, "chat_message", testutil.Cols{"chat_session_id": chatID, "role": "assistant", "content": "reply"})
 	process()
-	if state(follow) != "pending" {
+	if state(follow) != "received" {
 		t.Fatal("chat watch failed")
 	}
-	t.Log("chat mention received; assistant reply without a task actor pending")
+	t.Log("chat mention and assistant reply without a task actor received")
 	code, data = call("GET", base+"/events?limit=2", raw, nil)
 	if code != 200 || !bytes.Contains(data, []byte(`"next_cursor":"`)) {
 		t.Fatalf("pagination %d %s", code, data)
@@ -463,8 +465,8 @@ func TestBotWakeOwnerFollowsHTTP(t *testing.T) {
 		if r.Header.Get("X-Multica-Event-ID") == "" || payload["summary"] == nil {
 			t.Error("missing metadata")
 		}
-		if _, ok := payload["content"]; ok {
-			t.Error("body leaked")
+		if payload["type"] == "mention" && payload["content"] == nil {
+			t.Error("mention body missing")
 		}
 		if slow.Load() {
 			time.Sleep(150 * time.Millisecond)
@@ -474,6 +476,7 @@ func TestBotWakeOwnerFollowsHTTP(t *testing.T) {
 	defer receiver.Close()
 	t.Setenv("MULTICA_PLUGIN_DEV_ORIGINS", receiver.URL)
 	worker := NewBotWakeWorker(testHandler)
+	worker.coalesceSeconds = 0
 	worker.client = func(u *url.URL) *http.Client { return &http.Client{Timeout: 50 * time.Millisecond} }
 	quietOff := map[string]any{"enabled": false, "start": "23:00", "end": "08:00", "timezone": "Asia/Shanghai"}
 	put := func(body any) {
@@ -554,10 +557,10 @@ func TestBotWakeOwnerFollowsHTTP(t *testing.T) {
 		t.Fatal(reason)
 	}
 	dbfx.Exec(t, `UPDATE issue SET assignee_type='member',assignee_id=$2 WHERE id=$1`, issueID, testUserID)
-	drain() // This test-only unattributed assignment cannot send.
+	drain() // Unattributed assignments now deliver with an explicit unknown actor.
 	change("blocked")
 	drain()
-	if calls.Load() != 2 {
+	if calls.Load() != 3 {
 		t.Fatalf("owner assignment missing: %d", calls.Load())
 	}
 	// Current private-source permission still wins over subscription inheritance.
@@ -567,7 +570,7 @@ func TestBotWakeOwnerFollowsHTTP(t *testing.T) {
 	change("done")
 	drain()
 	dbfx.QueryRow(t, `SELECT reason FROM bot_wake_event WHERE bot_id=$1 ORDER BY sequence DESC LIMIT 1`, bot.ID).Scan(&reason)
-	if reason != "access unavailable" || calls.Load() != 2 {
+	if reason != "access unavailable" || calls.Load() != 3 {
 		t.Fatalf("inheritance permission: %s sent=%d", reason, calls.Load())
 	}
 	if bin := os.Getenv("BOT_WAKE_TEST_CLI"); bin != "" {

@@ -755,6 +755,8 @@ export interface BotWakeSettings {
   events: BotWakeEventType[];
   /** 0..120; 0 pauses delivery. */
   hourly_limit: number;
+  /** Unacknowledged, visible events currently held by the hourly limit. */
+  limited_count?: number;
   quiet_hours: BotQuietHours;
 }
 

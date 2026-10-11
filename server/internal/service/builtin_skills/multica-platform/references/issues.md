@@ -30,6 +30,19 @@ The first argument is the status key and the remaining arguments are issue keys
 or UUIDs. `--no-start` adds the same `suppress_run` control as single-issue
 status changes. `--output json` returns the resolved issue IDs and server batch
 result. `batch-status` is accepted as an alias.
+## Project names and body files
+
+`issue create/list --project` and `chat list/search --project` accept a full
+UUID, ID prefix or exact project title (case-insensitive). Duplicate titles
+return candidates with UUID, title and status; choose the UUID. The project
+lookup stays in the selected workspace and requests only id/title/status.
+
+`--content-file` and `--description-file` accept files in the current working
+directory or regular files owned by the current OS user under the system temp
+directory (`/tmp`, `$TMPDIR`, or the platform temp root). Symlinks are resolved
+before checking containment and ownership. Other locations require
+`--allow-external-file`; attachment and other file flags keep their own rules.
+
 ## Sub-issues: todo starts work now, backlog parks it
 The steps are in `references/sub-issues.md`. `--status backlog` parks a child instead of starting it. `` `--stage <N>` `` groups children into a stage, and the parent is woken when a whole stage finishes. Promote one parked child with `multica issue status <child-id> todo`.
 
@@ -44,6 +57,35 @@ multica issue comment update <comment-id> --content-file ./comment.md --expected
 ```
 
 If another editor changed the comment, reconcile the latest body before retrying; do not advance the revision and overwrite it. Authors, workspace owners, and admins can edit comments; attachments remain unchanged.
+
+## Downloading attachments
+
+Read attachment IDs from `issue get <issue> --output json` or a bounded
+`issue comment list` response, then download verified bytes with:
+
+```bash
+multica attachment download <attachment-id> -o ./attachments --output json
+multica attachment download <attachment-id> --output-file ./report.pdf
+multica attachment download --comment <comment-id> -o ./attachments
+multica attachment download --issue DENE-123 -o ./attachments
+```
+
+`-o/--output-dir` is the destination directory; `--output-file` is an exact
+path for one attachment ID only. `--output json` selects result formatting.
+Combine `--issue` and `--comment` to select just that comment on the issue;
+this also works against older servers without the comment attachment endpoint.
+The server applies the same issue visibility and attachment access rules.
+
+Downloads prefer authenticated raw storage, request identity/no-transform
+bytes, and verify sha256 and integer byte size before replacing a file. A
+mismatch reports expected/actual values and address type, retries raw storage
+once, then fails without publishing corrupt bytes. Missing server checksums
+are refused; do not bypass verification. Single-file JSON has `id`,
+`filename`, absolute `path`, integer `size` in bytes, and `sha256`. Batch JSON
+has `files` with those fields and `failures` with attachment `id` and `error`;
+empty selections return empty lists. Duplicate filenames include attachment
+IDs. Partial failure keeps successful files and exits nonzero: retry the failed
+IDs from `failures`, rather than the entire batch.
 
 ## PR linking and close intent are two distinct contracts
 
