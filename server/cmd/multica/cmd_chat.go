@@ -217,6 +217,7 @@ the modes that work; nothing is sent.
 
   multica chat send --session <id|url> "Use the staging database instead" --mode steer
   multica chat send --session <id|url> --content-file ./msg.md --mode queue
+  multica chat send --session <id|url> "再补一句" --wait   # print the agent's reply
 `,
 	Args: cobra.MaximumNArgs(1),
 	RunE: runChatSend,
@@ -872,6 +873,9 @@ func runChatSend(cmd *cobra.Command, args []string) error {
 	path := "/api/chat/sessions/" + url.PathEscape(ref.ID) + "/messages"
 	if err := client.PostJSON(ctx, path, map[string]any{"content": content, "mode": mode}, &out); err != nil {
 		return sendModeRefusal(err, output, "chat send")
+	}
+	if wait, _ := cmd.Flags().GetBool("wait"); wait {
+		return finishChatSend(cmd, client, ref.ID, out)
 	}
 	if output == "table" {
 		fmt.Printf("Sent (%v): message %v\n", out["mode"], out["message_id"])
