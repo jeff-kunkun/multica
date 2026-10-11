@@ -28,6 +28,7 @@ describe("useChatListViewStore", () => {
 
     expect(saved("ws-a")).toEqual({
       projectFilter: { type: "project", id: "proj-1" },
+      keepAllProjects: false,
       search: "release",
       view: "archived",
       historyExpanded: true,
@@ -66,5 +67,49 @@ describe("useChatListViewStore", () => {
     expect(state.search).toBe("");
     expect(state.view).toBe("history");
     expect(state.historyExpanded).toBe(false);
+  });
+
+  it("follows linked chats and project changes, including a newly created project", () => {
+    const store = useChatListViewStore.getState();
+    store.selectProjectFilter({ type: "project", id: "media" });
+    store.followProjects(["ipa"]);
+    expect(useChatListViewStore.getState().projectFilter).toEqual({ type: "project", id: "ipa" });
+    store.followProjects(["new-project"]);
+    expect(useChatListViewStore.getState().projectFilter).toEqual({ type: "project", id: "new-project" });
+  });
+
+  it("follows from default All, but preserves explicit All across reloads", async () => {
+    const store = useChatListViewStore.getState();
+    store.followProjects(["ipa"]);
+    expect(useChatListViewStore.getState().projectFilter).toEqual({ type: "project", id: "ipa" });
+    store.selectProjectFilter({ type: "all" });
+    await useChatListViewStore.persist.rehydrate();
+    store.followProjects(["media"]);
+    expect(useChatListViewStore.getState().projectFilter).toEqual({ type: "all" });
+    store.selectProjectFilter({ type: "project", id: "media" });
+    store.followProjects(["ipa"]);
+    expect(useChatListViewStore.getState().projectFilter).toEqual({ type: "project", id: "ipa" });
+  });
+
+  it("keeps a matching multi-project filter and follows detachment", () => {
+    const store = useChatListViewStore.getState();
+    store.selectProjectFilter({ type: "project", id: "ipa" });
+    store.followProjects(["media", "ipa"]);
+    expect(useChatListViewStore.getState().projectFilter).toEqual({ type: "project", id: "ipa" });
+    store.followProjects([]);
+    expect(useChatListViewStore.getState().projectFilter).toEqual({ type: "none" });
+  });
+
+  it("does not overwrite explicit All before the workspace snapshot rehydrates", async () => {
+    sessionStorage.setItem(`${KEY}:ws-b`, JSON.stringify({ state: {
+      projectFilter: { type: "all" }, keepAllProjects: true,
+    }, version: 0 }));
+    setCurrentWorkspace("ws-b", "ws-b-id");
+    useChatListViewStore.getState().followProjects(["ipa"]);
+    expect(saved("ws-b")?.keepAllProjects).toBe(true);
+    await useChatListViewStore.persist.rehydrate();
+    useChatListViewStore.getState().followProjects(["ipa"]);
+    expect(useChatListViewStore.getState().projectFilter).toEqual({ type: "all" });
+    expect(useChatListViewStore.getState().hydratedWorkspaceSlug).toBe("ws-b");
   });
 });

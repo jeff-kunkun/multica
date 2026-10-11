@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { ChevronsUpDown, GripVertical, Pin } from "lucide-react";
 import { cn } from "@multica/ui/lib/utils";
 import { useIsCompact } from "@multica/ui/hooks/use-mobile";
@@ -214,12 +214,6 @@ export function ChatProjectBar({
   const menuOwnsSelection =
     (filter.type === "project" && !visibleIds.includes(filter.id)) ||
     (filter.type === "none" && !visibleIds.includes(NONE_CHIP));
-
-  useEffect(() => {
-    if (filter.type !== "project" || projects.length === 0) return;
-    if (titleById.has(filter.id)) return;
-    onFilterChange({ type: "all" });
-  }, [filter, projects.length, titleById, onFilterChange]);
 
   const select = (next: ChatProjectFilter) => {
     onFilterChange(next);
@@ -468,6 +462,7 @@ export function ChatProjectBar({
                     return (
                       <ProjectRow
                         key={row.id}
+                        selected={filter.type === "project" && filter.id === row.id}
                         title={titleById.get(row.id) ?? ""}
                         icon={<ProjectIcon project={projectById.get(row.id)} size="sm" />}
                         countLabel={t(($) => $.project_bar.chat_count, { count: row.chatCount })}
@@ -513,6 +508,7 @@ export function ChatProjectBar({
                 <SectionLabel>&nbsp;</SectionLabel>
                 <ProjectRow
                   title={noneLabel}
+                  selected={filter.type === "none"}
                   countLabel={t(($) => $.project_bar.chat_count, {
                     count: sessions.filter(
                       (session) =>
@@ -600,6 +596,7 @@ function SectionLabel({ children }: { children: React.ReactNode }) {
 
 function ProjectRow({
   title,
+  selected = false,
   icon,
   countLabel,
   pinned,
@@ -619,6 +616,7 @@ function ProjectRow({
   onDrop,
 }: {
   title: string;
+  selected?: boolean;
   /** The project's own icon; the no-project row has none. */
   icon?: React.ReactNode;
   countLabel: string;
@@ -649,7 +647,7 @@ function ProjectRow({
       onDrop={onDrop}
       className={cn(
         "flex items-center gap-2 px-3 py-1.5 hover:bg-accent",
-        dragOver && "bg-accent",
+        (dragOver || selected) && "bg-accent",
       )}
     >
       {draggable ? (
@@ -662,6 +660,7 @@ function ProjectRow({
       <button
         type="button"
         aria-label={`${title}, ${countLabel}`}
+        aria-pressed={selected}
         onClick={onSelect}
         className="flex min-w-0 flex-1 items-center gap-2 text-left"
       >

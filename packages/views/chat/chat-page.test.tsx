@@ -213,6 +213,7 @@ vi.mock("./components/use-chat-controller", async () => {
 });
 
 import { ChatPage } from "./chat-page";
+import { useChatListViewStore } from "@multica/core/chat/list-view-store";
 
 const agent: Agent = {
   id: "agent-1",
@@ -308,10 +309,27 @@ beforeEach(() => {
   sessionsRef.current = { list: [], loaded: false };
   projectsRef.current = undefined;
   platformWorkspace.slug = "acme";
+  useChatListViewStore.setState({
+    hydratedWorkspaceSlug: "acme",
+    projectFilter: { type: "all" },
+    keepAllProjects: false,
+  });
   layout.width = DESKTOP;
 });
 
 describe("ChatPage URL synchronization", () => {
+  it("waits for workspace restoration before replacing a linked chat with a saved session", () => {
+    storeRef.current = { activeSessionId: "saved-session" };
+    useChatListViewStore.setState({ hydratedWorkspaceSlug: null });
+    const { replace } = renderPage("", { pathname: "/acme/chat/linked-session" });
+    expect(storeRef.current.activeSessionId).toBe("saved-session");
+    expect(replace).not.toHaveBeenCalled();
+
+    act(() => useChatListViewStore.setState({ hydratedWorkspaceSlug: "acme" }));
+    expect(storeRef.current.activeSessionId).toBe("linked-session");
+    expect(replace).not.toHaveBeenCalledWith("/acme/chat/saved-session");
+  });
+
   it.each(["/globex/issues", "/acme/issues"])(
     "does not redirect back to chat when the retained page observes %s",
     (pathname) => {

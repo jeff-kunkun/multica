@@ -5,6 +5,7 @@ import { createJSONStorage, persist } from "zustand/middleware";
 import { sessionStorageAdapter } from "../platform/storage";
 import {
   createWorkspaceAwareStorage,
+  getCurrentSlug,
   registerForWorkspaceRehydration,
 } from "../platform/workspace-storage";
 import type { ChatProjectFilter } from "./project-bar";
@@ -25,18 +26,26 @@ import type { ChatProjectFilter } from "./project-bar";
 export type ChatListView = "history" | "archived";
 
 interface ChatListViewState {
+  /** Prevent mount effects overwriting a workspace snapshot before rehydration. */
+  hydratedWorkspaceSlug: string | null;
   projectFilter: ChatProjectFilter;
+  /** Only an explicit All pick stops the list following the conversation. */
+  keepAllProjects: boolean;
   search: string;
   view: ChatListView;
   historyExpanded: boolean;
   setProjectFilter: (filter: ChatProjectFilter) => void;
+  selectProjectFilter: (filter: ChatProjectFilter) => void;
+  followProjects: (ids: readonly string[]) => void;
   setSearch: (search: string) => void;
   setView: (view: ChatListView) => void;
   setHistoryExpanded: (expanded: boolean) => void;
 }
 
 const DEFAULTS = {
+  hydratedWorkspaceSlug: null as string | null,
   projectFilter: { type: "all" } as ChatProjectFilter,
+  keepAllProjects: false,
   search: "",
   view: "history" as ChatListView,
   historyExpanded: false,
@@ -51,9 +60,22 @@ function isProjectFilter(value: unknown): value is ChatProjectFilter {
 
 export const useChatListViewStore = create<ChatListViewState>()(
   persist(
-    (set) => ({
+    (set, get) => ({
       ...DEFAULTS,
       setProjectFilter: (projectFilter) => set({ projectFilter }),
+      selectProjectFilter: (projectFilter) => set({
+        projectFilter,
+        keepAllProjects: projectFilter.type === "all",
+      }),
+      followProjects: (ids) => {
+        const { projectFilter, keepAllProjects, hydratedWorkspaceSlug } = get();
+        if (!hydratedWorkspaceSlug || hydratedWorkspaceSlug !== getCurrentSlug()) return;
+        if (keepAllProjects && projectFilter.type === "all") return;
+        // Multi-project chats keep the browsed project when it still belongs.
+        if (projectFilter.type === "project" && ids.includes(projectFilter.id)) return;
+        if (ids.length === 0 && projectFilter.type === "none") return;
+        set({ projectFilter: ids[0] ? { type: "project", id: ids[0] } : { type: "none" } });
+      },
       setSearch: (search) => set({ search }),
       setView: (view) => set({ view }),
       setHistoryExpanded: (historyExpanded) => set({ historyExpanded }),
@@ -63,6 +85,7 @@ export const useChatListViewStore = create<ChatListViewState>()(
       storage: createJSONStorage(() => createWorkspaceAwareStorage(sessionStorageAdapter)),
       partialize: (state) => ({
         projectFilter: state.projectFilter,
+        keepAllProjects: state.keepAllProjects,
         search: state.search,
         view: state.view,
         historyExpanded: state.historyExpanded,
@@ -76,7 +99,9 @@ export const useChatListViewStore = create<ChatListViewState>()(
         const p = (persisted ?? {}) as Partial<Record<keyof typeof DEFAULTS, unknown>>;
         return {
           ...current,
+          hydratedWorkspaceSlug: getCurrentSlug(),
           projectFilter: isProjectFilter(p.projectFilter) ? p.projectFilter : DEFAULTS.projectFilter,
+          keepAllProjects: p.keepAllProjects === true && isProjectFilter(p.projectFilter) && p.projectFilter.type === "all",
           search: typeof p.search === "string" ? p.search : DEFAULTS.search,
           view: p.view === "archived" ? "archived" : DEFAULTS.view,
           historyExpanded: p.historyExpanded === true,
