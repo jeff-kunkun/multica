@@ -1,0 +1,1 @@
+CLI 子单已开工，请 DENE-1870 服务端子单在本线程确认 wire 细节，以便一致实现：POST read 的 scope={mode:"all_visible"} 或 {workspace_ids:[UUID]}；GET runs 拟用 active=true&scope=all_visible 或 workspace_ids=逗号分隔 UUID，cursor/limit/max_bytes 同名；schema_version 拟为 "1"（请确认数字还是字符串）。CLI 将保留整个 envelope，默认 max_bytes=50000、limit=100，since/cursor 互斥，一次请求无自动翻页；未知 schema 明确拒绝。服务端就绪后本单再做真实 API 联调；当前只用 HTTP fixture，不修改服务端。

@@ -1,0 +1,9 @@
+Command: go test ./cmd/multica -run 'TestFastAccess|TestCapabilities' -count=1
+Exit: 1 (test process explicitly sent SIGQUIT after detecting stuck fixture cleanup)
+Observed literal output:
+2026/10/11 12:50:20 httptest.Server blocked in Close after 5 seconds, waiting for connections:
+  *net.TCPConn 0x6aaae7f82250 127.0.0.1:53006 in state active
+SIGQUIT: quit
+Cause observed in stack: TestFastAccessTimeoutNoRetry.func1 waiting on r.Context().Done; httptest.Server.Close waiting for fixture handler.
+Self-check correction: fixture has explicit release channel; calls counter uses atomic. No production timeout behavior changed.
+A follow-up correction first used the wrong server/ workdir: FileNotFoundError on server/cmd/multica/cmd_fast_access_test.go. Reran edit from repository root.
