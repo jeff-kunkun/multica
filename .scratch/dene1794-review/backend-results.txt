@@ -1,0 +1,326 @@
+==> Creating test database 'multica_dene_1794_b3eb09912623_573_t179170314966352'
+==> Migrating 'multica_dene_1794_b3eb09912623_573_t179170314966352'
+02:19:26.482 INF running pre-migration hook version=035_task_queue_issue_id_index direction=up
+02:19:26.549 INF running pre-migration hook version=067_task_queue_claim_candidate_index direction=up
+02:19:26.558 INF running pre-migration hook version=074_task_usage_updated_at_index direction=up
+02:19:26.559 INF running pre-migration hook version=075_task_usage_created_at_index direction=up
+02:19:26.563 INF running pre-migration hook version=078_task_usage_created_at_legacy_index direction=up
+02:19:26.572 INF running pre-migration hook version=080_agent_task_queue_queued_index direction=up
+02:19:26.615 INF running pre-migration hook version=103_drop_legacy_daily_rollups direction=up
+02:19:26.618 INF task_usage hourly rollup hook: task_usage empty, watermark stamped from db now()
+02:19:26.618 INF task_usage hourly rollup hook: skipped reason=task_usage_empty watermark_stamped=true
+02:19:26.624 INF running pre-migration hook version=106_member_user_workspace_index direction=up
+02:19:26.658 INF running pre-migration hook version=114_agent_task_queue_running_started_at_index direction=up
+02:19:26.659 INF running pre-migration hook version=115_agent_runtime_last_seen_at_index direction=up
+02:19:26.663 INF running pre-migration hook version=119_user_created_at_index direction=up
+02:19:26.691 INF running pre-migration hook version=125_agent_task_queue_dispatched_prepare_index direction=up
+02:19:26.707 INF running pre-migration hook version=135_comment_workspace_index direction=up
+02:19:26.715 INF running pre-migration hook version=138_issue_title_trgm_index direction=up
+02:19:26.716 INF running pre-migration hook version=139_issue_description_trgm_index direction=up
+02:19:26.716 INF running pre-migration hook version=140_comment_content_trgm_index direction=up
+02:19:26.717 INF running pre-migration hook version=141_project_title_trgm_index direction=up
+02:19:26.718 INF running pre-migration hook version=142_project_description_trgm_index direction=up
+02:19:26.719 INF running pre-migration hook version=143_agent_task_queue_chat_pending_v2 direction=up
+02:19:26.726 INF running pre-migration hook version=153_chat_pinned_agent_user_ws_index direction=up
+02:19:26.728 INF running pre-migration hook version=156_chat_session_pinned_index direction=up
+02:19:26.731 INF running pre-migration hook version=160_chat_message_input_owner_index direction=up
+02:19:26.736 INF running pre-migration hook version=165_attachment_task_id_index direction=up
+02:19:26.738 INF running pre-migration hook version=167_resource_label_namespace_index direction=up
+02:19:26.739 INF running pre-migration hook version=168_resource_label_type_index direction=up
+02:19:26.740 INF running pre-migration hook version=169_agent_label_lookup_index direction=up
+02:19:26.741 INF running pre-migration hook version=170_skill_label_lookup_index direction=up
+02:19:26.743 INF running pre-migration hook version=172_agent_system_identity_index direction=up
+02:19:26.747 INF running pre-migration hook version=177_autopilot_run_webhook_delivery_index direction=up
+02:19:26.749 INF running pre-migration hook version=178_webhook_delivery_queue_index direction=up
+02:19:26.751 INF running pre-migration hook version=181_task_chat_finalize_deferred_index direction=up
+02:19:26.754 INF running pre-migration hook version=183_chat_draft_restore_index direction=up
+02:19:26.758 INF running pre-migration hook version=187_autopilot_rule_version_index direction=up
+02:19:26.764 INF running pre-migration hook version=192_issue_properties_gin_index direction=up
+02:19:26.766 INF running pre-migration hook version=194_issue_property_workspace_name_index direction=up
+02:19:26.767 INF running pre-migration hook version=195_issue_property_workspace_index direction=up
+02:19:26.770 INF running pre-migration hook version=198_agent_task_attribution_strict_constraint_validate direction=up
+02:19:26.771 INF attribution backfill: no rows needed reconciliation before migration 198
+02:19:26.771 INF attribution backfill hook: complete rows_backfilled=0 batches=0 mismatch_normalized=0
+02:19:26.773 INF running pre-migration hook version=200_inbox_archived_listing_index direction=up
+02:19:26.774 INF running pre-migration hook version=201_inbox_active_by_issue_index direction=up
+02:19:26.776 INF running pre-migration hook version=203_issue_workspace_assignee_index direction=up
+02:19:26.777 INF running pre-migration hook version=204_issue_workspace_parent_index direction=up
+02:19:26.779 INF running pre-migration hook version=205_issue_workspace_position_index direction=up
+02:19:26.782 INF running pre-migration hook version=208_client_usage_daily_unique_index direction=up
+02:19:26.784 INF running pre-migration hook version=210_client_usage_daily_query_index direction=up
+02:19:26.785 INF running pre-migration hook version=211_client_usage_daily_workspace_index direction=up
+02:19:26.789 INF running pre-migration hook version=215_chat_session_project_index direction=up
+02:19:26.796 INF running pre-migration hook version=217_vcs_connection_workspace_index direction=up
+02:19:26.797 INF running pre-migration hook version=218_vcs_pull_request_workspace_index direction=up
+02:19:26.798 INF running pre-migration hook version=219_vcs_pull_request_connection_index direction=up
+02:19:26.799 INF running pre-migration hook version=220_issue_vcs_pull_request_pr_index direction=up
+02:19:26.799 INF running pre-migration hook version=221_vcs_commit_status_lookup_index direction=up
+02:19:26.802 INF running pre-migration hook version=223_github_pr_check_run_pr_ordinal_index direction=up
+02:19:26.807 INF running pre-migration hook version=228_channel_media_pending_object_key_index direction=up
+02:19:26.809 INF running pre-migration hook version=230_channel_media_pending_object_claim_index direction=up
+02:19:26.811 INF running pre-migration hook version=231_agent_task_queue_terminal_completed_at_index direction=up
+02:19:26.812 INF running pre-migration hook version=232_channel_media_pending_object_due_index direction=up
+02:19:26.813 INF running pre-migration hook version=233_agent_task_queue_agent_terminal_latest_index direction=up
+02:19:26.819 INF running pre-migration hook version=238_quick_action_workspace_index direction=up
+02:19:26.821 INF running pre-migration hook version=241_comment_parent_lookup_index direction=up
+02:19:26.826 INF running pre-migration hook version=244_issue_dependency_issue_index direction=up
+02:19:26.828 INF running pre-migration hook version=245_issue_dependency_depends_on_index direction=up
+02:19:26.829 INF running pre-migration hook version=246_inbox_item_issue_index direction=up
+02:19:26.831 INF running pre-migration hook version=247_comment_parent_index direction=up
+02:19:26.832 INF running pre-migration hook version=248_agent_task_trigger_comment_index direction=up
+02:19:26.839 INF running pre-migration hook version=255_agent_task_queue_chat_pending_deferred_v3 direction=up
+02:19:26.842 INF running pre-migration hook version=257_agent_task_queue_channel_media_pending_unique_v2 direction=up
+02:19:26.846 INF running pre-migration hook version=261_agent_task_queue_terminal_completed_at_v2 direction=up
+02:19:26.851 INF running pre-migration hook version=266_issue_view_owner_index direction=up
+02:19:26.852 INF running pre-migration hook version=267_issue_view_shared_index direction=up
+02:19:26.858 INF running pre-migration hook version=273_agent_task_queue_runtime_id_index direction=up
+02:19:26.859 INF running pre-migration hook version=274_task_token_workspace_id_index direction=up
+02:19:26.861 INF running pre-migration hook version=275_task_token_agent_id_index direction=up
+02:19:26.862 INF running pre-migration hook version=276_chat_draft_restore_task_id_index direction=up
+02:19:26.863 INF running pre-migration hook version=277_autopilot_run_task_id_index direction=up
+02:19:26.864 INF running pre-migration hook version=278_agent_task_queue_agent_id_keyset_index direction=up
+02:19:26.866 INF running pre-migration hook version=279_agent_task_queue_issue_id_keyset_index direction=up
+02:19:26.867 INF running pre-migration hook version=281_agent_workspace_id_keyset_index direction=up
+02:19:26.869 INF running pre-migration hook version=282_issue_workspace_id_keyset_index direction=up
+02:19:26.870 INF running pre-migration hook version=283_agent_runtime_workspace_id_keyset_index direction=up
+02:19:26.880 INF running pre-migration hook version=286_plugin_identity_key_index direction=up
+02:19:26.882 INF running pre-migration hook version=287_plugin_release_version_index direction=up
+02:19:26.883 INF running pre-migration hook version=288_plugin_installation_workspace_plugin_index direction=up
+02:19:26.884 INF running pre-migration hook version=289_plugin_contribution_key_index direction=up
+02:19:26.886 INF running pre-migration hook version=290_plugin_contribution_ordinal_index direction=up
+02:19:26.887 INF running pre-migration hook version=291_plugin_grant_revision_index direction=up
+02:19:26.888 INF running pre-migration hook version=292_plugin_binding_revision_index direction=up
+02:19:26.890 INF running pre-migration hook version=293_plugin_installation_workspace_index direction=up
+02:19:26.898 INF running pre-migration hook version=295_plugin_artifact_file_index direction=up
+02:19:26.900 INF running pre-migration hook version=296_plugin_snapshot_revision_index direction=up
+02:19:26.901 INF running pre-migration hook version=297_plugin_execution_task_index direction=up
+02:19:26.902 INF running pre-migration hook version=298_plugin_health_index direction=up
+02:19:26.903 INF running pre-migration hook version=299_agent_task_plugin_manifest_index direction=up
+02:19:26.909 INF running pre-migration hook version=305_dingtalk_group_route_installation_conversation_unique direction=up
+02:19:26.910 INF running pre-migration hook version=306_dingtalk_group_route_workspace_index direction=up
+02:19:26.911 INF running pre-migration hook version=307_dingtalk_group_route_id_unique direction=up
+02:19:26.913 INF running pre-migration hook version=309_agent_runtime_id_index direction=up
+02:19:26.915 INF running pre-migration hook version=311_plugin_identity_scoped_key_index direction=up
+02:19:26.921 INF running pre-migration hook version=316_workspace_mcp_server_name_unique direction=up
+02:19:26.922 INF running pre-migration hook version=317_agent_mcp_server_server_index direction=up
+02:19:26.926 INF running pre-migration hook version=320_plugin_installation_config_revision_index direction=up
+02:19:26.928 INF running pre-migration hook version=321_plugin_installation_config_workspace_index direction=up
+02:19:26.929 INF running pre-migration hook version=322_plugin_remote_mcp_secret_revision_index direction=up
+02:19:26.930 INF running pre-migration hook version=323_plugin_remote_mcp_secret_workspace_index direction=up
+02:19:26.932 INF running pre-migration hook version=324_plugin_remote_mcp_one_active_secret_index direction=up
+02:19:26.935 INF running pre-migration hook version=326_plugin_remote_mcp_oauth_state_expiry_index direction=up
+02:19:26.938 INF running pre-migration hook version=328_workspace_share_link_id_uidx direction=up
+02:19:26.940 INF running pre-migration hook version=330_workspace_share_link_active_ws_uidx direction=up
+02:19:26.941 INF running pre-migration hook version=331_workspace_share_link_code_uidx direction=up
+02:19:26.944 INF running pre-migration hook version=333_issue_status_pkey_index direction=up
+02:19:26.945 INF running pre-migration hook version=335_issue_status_workspace_key_index direction=up
+02:19:26.946 INF running pre-migration hook version=336_issue_status_workspace_name_index direction=up
+02:19:26.951 INF running pre-migration hook version=343_comment_delegated_failure_pending_index direction=up
+02:19:26.965 INF running pre-migration hook version=345_plugin_installation_workspace_key_index direction=up
+02:19:26.966 INF running pre-migration hook version=346_plugin_storage_scope_key_index direction=up
+02:19:26.967 INF running pre-migration hook version=347_plugin_secret_installation_key_index direction=up
+02:19:26.969 INF running pre-migration hook version=349_agent_task_queue_chat_terminal_resume_index direction=up
+02:19:26.970 INF running pre-migration hook version=350_agent_task_queue_chat_retired_session_index direction=up
+02:19:26.974 INF running pre-migration hook version=353_autopilot_quota_period_scope_index direction=up
+02:19:26.975 INF running pre-migration hook version=354_autopilot_quota_reservation_id_index direction=up
+02:19:26.976 INF running pre-migration hook version=355_autopilot_quota_reservation_key_index direction=up
+02:19:26.977 INF running pre-migration hook version=356_autopilot_run_quota_reservation_index direction=up
+02:19:26.979 INF running pre-migration hook version=357_webhook_delivery_replay_idempotency_index direction=up
+02:19:26.980 INF running pre-migration hook version=358_autopilot_quota_reservation_state_index direction=up
+02:19:26.982 INF running pre-migration hook version=361_issue_last_activity_index direction=up
+02:19:26.985 INF running pre-migration hook version=363_plugin_invocation_installation_index direction=up
+02:19:26.986 INF running pre-migration hook version=364_plugin_invocation_created_at_index direction=up
+02:19:26.996 INF running pre-migration hook version=378_channel_chat_context_generation_key direction=up
+02:19:27.001 INF running pre-migration hook version=384_create_dingtalk_group_presence_identity_index direction=up
+02:19:27.002 INF running pre-migration hook version=385_create_dingtalk_group_presence_activity_index direction=up
+02:19:27.005 INF running pre-migration hook version=388_create_dingtalk_bot_identity_installation_index direction=up
+02:19:27.008 INF running pre-migration hook version=390_agent_task_queue_dispatched_reclaim_v2_index direction=up
+02:19:27.014 INF running pre-migration hook version=393_plugin_package_workspace_key_index direction=up
+02:19:27.016 INF running pre-migration hook version=394_plugin_package_version_unique_index direction=up
+02:19:27.017 INF running pre-migration hook version=395_plugin_package_version_package_index direction=up
+02:19:27.018 INF running pre-migration hook version=396_plugin_package_file_path_index direction=up
+02:19:27.019 INF running pre-migration hook version=397_plugin_installation_package_version_index direction=up
+02:19:27.020 INF running pre-migration hook version=398_issue_workspace_status_position_index direction=up
+02:19:27.023 INF running pre-migration hook version=400_plugin_hook_schedule_installation_key_index direction=up
+02:19:27.025 INF running pre-migration hook version=401_plugin_hook_schedule_enabled_index direction=up
+02:19:27.030 INF running pre-migration hook version=408_issue_source_context_id_index direction=up
+02:19:27.031 INF running pre-migration hook version=409_issue_source_context_issue_index direction=up
+02:19:27.032 INF running pre-migration hook version=410_issue_source_context_origin_task_index direction=up
+02:19:27.033 INF running pre-migration hook version=411_attachment_source_context_index direction=up
+02:19:27.034 INF running pre-migration hook version=412_issue_source_context_object_intent_key_index direction=up
+02:19:27.034 INF running pre-migration hook version=413_issue_source_context_object_intent_due_index direction=up
+02:19:27.036 INF running pre-migration hook version=414_issue_source_context_object_intent_context_index direction=up
+02:19:27.038 INF running pre-migration hook version=416_seat_capacity_operation_token_index direction=up
+02:19:27.040 INF running pre-migration hook version=418_seat_capacity_due_index direction=up
+02:19:27.041 INF running pre-migration hook version=419_seat_capacity_share_join_index direction=up
+02:19:27.044 INF running pre-migration hook version=421_channel_chat_active_route_index direction=up
+02:19:27.046 INF running pre-migration hook version=423_channel_task_delivery_pkey_index direction=up
+02:19:27.048 INF running pre-migration hook version=426_channel_outbound_message_id_index direction=up
+02:19:27.050 INF running pre-migration hook version=428_channel_task_delivery_binding_index direction=up
+02:19:27.051 INF running pre-migration hook version=429_channel_task_delivery_installation_index direction=up
+02:19:27.052 INF running pre-migration hook version=430_channel_outbound_message_binding_index direction=up
+02:19:27.054 INF running pre-migration hook version=431_chat_explicit_origin_backfill direction=up
+02:19:27.055 INF Chat origin backfill: complete visited=0 backfilled=0 pages=0
+02:19:27.056 INF running pre-migration hook version=438_agent_runtime_online_last_seen_index direction=up
+02:19:27.057 INF running pre-migration hook version=439_agent_runtime_offline_last_seen_index direction=up
+02:19:27.058 INF running pre-migration hook version=440_github_pr_head_sha_index direction=up
+02:19:27.060 INF running pre-migration hook version=443_issue_project_status_index direction=up
+02:19:27.062 INF running pre-migration hook version=445_comment_delegated_failure_unsettled_index direction=up
+02:19:27.063 INF running pre-migration hook version=446_issue_properties_bigm_index direction=up
+02:19:27.069 INF running pre-migration hook version=452_agent_task_pending_thread_unique direction=up
+02:19:27.074 INF running pre-migration hook version=459_chat_message_assistant_task_index direction=up
+02:19:27.076 INF running pre-migration hook version=460_agent_task_queue_autopilot_run_created_at_index direction=up
+02:19:27.079 INF running pre-migration hook version=465_agent_task_queue_chat_with_session_index direction=up
+02:19:27.080 INF running pre-migration hook version=466_activity_log_member_assignee_frequency_index direction=up
+02:19:27.090 INF running pre-migration hook version=472_agent_task_queue_chat_session_index direction=up
+02:19:27.095 INF running pre-migration hook version=474_dingtalk_bot_identity_workspace_index direction=up
+02:19:27.097 INF running pre-migration hook version=476_project_member_unique direction=up
+02:19:27.099 INF running pre-migration hook version=477_project_member_project_index direction=up
+02:19:27.103 INF running pre-migration hook version=478_project_member_member_index direction=up
+02:19:27.106 INF running pre-migration hook version=480_instance_telemetry_state_singleton_index direction=up
+02:19:27.109 INF running pre-migration hook version=481_stage_wakeup_failure_unswept_index direction=up
+02:19:27.114 INF running pre-migration hook version=482_agent_task_queue_telemetry_started_index direction=up
+02:19:27.116 INF running pre-migration hook version=482_stage_wakeup_failure_parent_index direction=up
+02:19:27.120 INF running pre-migration hook version=484_issue_triage_state_index direction=up
+02:19:27.123 INF running pre-migration hook version=486_issue_draft_origin_unique direction=up
+02:19:27.124 INF running pre-migration hook version=486_maintenance_job_id_index direction=up
+02:19:27.126 INF running pre-migration hook version=487_maintenance_job_idempotency_index direction=up
+02:19:27.127 INF running pre-migration hook version=488_agent_parent_index direction=up
+02:19:27.128 INF running pre-migration hook version=488_maintenance_job_active_index direction=up
+02:19:27.138 INF running pre-migration hook version=494_chat_session_project_unique direction=up
+02:19:27.139 INF running pre-migration hook version=495_chat_session_project_project_index direction=up
+02:19:27.141 INF running pre-migration hook version=495_issue_to_label_label_id_index direction=up
+02:19:27.142 INF running pre-migration hook version=496_chat_session_agent_id_index direction=up
+02:19:27.144 INF running pre-migration hook version=497_agent_task_queue_delegated_failure_evidence_index direction=up
+02:19:27.145 INF running pre-migration hook version=498_chat_session_runtime_id_index direction=up
+02:19:27.146 INF running pre-migration hook version=498_project_resource_local_directory_identity direction=up
+02:19:27.148 INF running pre-migration hook version=499_project_resource_local_directory_repo direction=up
+02:19:27.153 INF running pre-migration hook version=504_comment_routing_kind_unique direction=up
+02:19:27.163 INF running pre-migration hook version=513_visibility_audit_workspace_index direction=up
+02:19:27.165 INF running pre-migration hook version=514_visibility_audit_resource_index direction=up
+02:19:27.166 INF running pre-migration hook version=515_issue_visibility_index direction=up
+02:19:27.177 INF running pre-migration hook version=521_resource_share_unique direction=up
+02:19:27.179 INF running pre-migration hook version=522_resource_share_member_index direction=up
+02:19:27.204 INF running pre-migration hook version=538_issue_plan_origin_unique direction=up
+02:19:27.244 INF running pre-migration hook version=570_channel_reply_delivery_turn_index direction=up
+02:19:27.245 INF running pre-migration hook version=571_channel_reply_delivery_installation_index direction=up
+02:19:27.246 INF running pre-migration hook version=572_channel_reply_delivery_binding_index direction=up
+02:19:27.249 INF running pre-migration hook version=575_wakeup_id direction=up
+02:19:27.251 INF running pre-migration hook version=576_wakeup_issue direction=up
+02:19:27.252 INF running pre-migration hook version=577_wakeup_due direction=up
+02:19:27.253 INF running pre-migration hook version=578_wakeup_receipt_id direction=up
+02:19:27.254 INF running pre-migration hook version=579_wakeup_receipt_key direction=up
+02:19:27.255 INF running pre-migration hook version=580_wakeup_receipt_pending direction=up
+02:19:27.257 INF running pre-migration hook version=583_wakeup_event_issue direction=up
+02:19:27.260 INF running pre-migration hook version=585_wakeup_workspace_summary direction=up
+02:19:27.262 INF running pre-migration hook version=586_wakeup_run_lookup direction=up
+02:19:27.263 INF running pre-migration hook version=588_wakeup_workspace_history direction=up
+02:19:27.264 INF running pre-migration hook version=589_wakeup_active_runs direction=up
+02:19:27.266 INF running pre-migration hook version=590_wakeup_terminal_runs direction=up
+02:19:27.267 INF running pre-migration hook version=591_wakeup_receipt_expiry direction=up
+02:19:27.269 INF running pre-migration hook version=593_wakeup_pending_event direction=up
+02:19:27.273 INF running pre-migration hook version=599_github_pr_address_index direction=up
+02:19:27.274 INF running pre-migration hook version=601_issue_duplicate_of_index direction=up
+02:19:27.277 INF running pre-migration hook version=603_task_supplement_request_index direction=up
+02:19:27.278 INF running pre-migration hook version=604_task_supplement_capability_index direction=up
+02:19:27.279 INF running pre-migration hook version=605_task_supplement_comment_index direction=up
+02:19:27.284 INF running pre-migration hook version=610_issue_pr_automation_workspace_index direction=up
+02:19:27.285 INF running pre-migration hook version=611_issue_pull_request_exclusion_workspace_index direction=up
+02:19:27.286 INF running pre-migration hook version=612_task_supplement_comment_task_index direction=up
+02:19:27.290 INF running pre-migration hook version=616_agent_task_history_page_index direction=up
+02:19:27.292 INF running pre-migration hook version=618_wakeup_expiry_index direction=up
+02:19:27.294 INF running pre-migration hook version=620_wakeup_system_rule_index direction=up
+02:19:27.297 INF running pre-migration hook version=623_issue_child_event_id direction=up
+02:19:27.299 INF running pre-migration hook version=624_issue_child_event_pending direction=up
+02:19:27.304 INF running pre-migration hook version=626_search_index_change_workspace_index direction=up
+02:19:27.305 INF running pre-migration hook version=627_search_index_change_changed_at_index direction=up
+02:19:27.325 INF running pre-migration hook version=637_agent_domain_unique_index direction=up
+02:19:27.337 INF running pre-migration hook version=647_issue_origin_chat_session_index direction=up
+EmailService: DEV mode — codes printed to stdout (set MULTICA_DEV_VERIFICATION_CODE in .env for a fixed local code)
+2026/10/11 02:20:08 INFO llm retry policy max_retries=2 source=default request_timeout=1m0s enabled=false disable_thinking=false
+=== RUN   TestBotKeys_AdminAddsUsesStopsBot
+2026/10/11 02:20:08 WARN auth: invalid PAT path=/api/workspaces/d6a5c300-d404-4a84-8389-6257df42138f/ error="no rows in result set"
+2026/10/11 02:20:08 WARN auth: invalid PAT path=/api/workspaces/d6a5c300-d404-4a84-8389-6257df42138f/ error="no rows in result set"
+2026/10/11 02:20:08 WARN auth: invalid PAT path=/api/workspaces/d6a5c300-d404-4a84-8389-6257df42138f/ error="no rows in result set"
+--- PASS: TestBotKeys_AdminAddsUsesStopsBot (0.04s)
+=== RUN   TestBotKeys_RejectsUnknownTypeAndEmptyName
+--- PASS: TestBotKeys_RejectsUnknownTypeAndEmptyName (0.00s)
+=== RUN   TestBotWriteProvenanceSurvivesDeletion
+2026/10/11 02:20:08 INFO comment created user_id=56012b0a-6c03-4e35-a42e-760073a43f35 comment_id=01a129d5-5388-7bbb-8f9f-3448dc13cbe9 issue_id=3f9c86e4-43a3-4d4e-84b1-530398d86051
+2026/10/11 02:20:08 INFO comment created user_id=56012b0a-6c03-4e35-a42e-760073a43f35 comment_id=01a129d5-5394-7ccd-b71e-004a9cf23ebd issue_id=3f9c86e4-43a3-4d4e-84b1-530398d86051
+2026/10/11 02:20:08 INFO issue updated user_id=56012b0a-6c03-4e35-a42e-760073a43f35 issue_id=3f9c86e4-43a3-4d4e-84b1-530398d86051 workspace_id=90c489a8-bcd9-4499-89e9-94c1a5975ebd
+2026/10/11 02:20:08 INFO direct chat task enqueued task_id=01a129d5-53a0-77a5-8424-a6d255819002 chat_session_id=ca619360-4715-4b60-ac25-364c07873cec agent_id=ed52151f-53fb-49fc-a608-3f804572900e
+2026/10/11 02:20:08 WARN auth: invalid PAT path=/issues/3f9c86e4-43a3-4d4e-84b1-530398d86051/comments error="no rows in result set"
+--- PASS: TestBotWriteProvenanceSurvivesDeletion (0.07s)
+=== RUN   TestBotAssignmentIsNotHumanOverride
+--- PASS: TestBotAssignmentIsNotHumanOverride (0.00s)
+=== RUN   TestBotCommentCannotSupplyInitiatorQuote
+2026/10/11 02:20:08 INFO issue created user_id=56012b0a-6c03-4e35-a42e-760073a43f35 issue_id=01a129d5-53dc-78f8-a934-397e0838355f title="Bot words are not person words" status=todo workspace_id=90c489a8-bcd9-4499-89e9-94c1a5975ebd
+--- PASS: TestBotCommentCannotSupplyInitiatorQuote (0.03s)
+PASS
+ok  	github.com/multica-ai/multica/server/internal/handler	1.492s
+=== RUN   TestBotDirectRunAndPersistedCommentProvenance
+--- PASS: TestBotDirectRunAndPersistedCommentProvenance (0.00s)
+=== RUN   TestBotPersistedIssueSourceSurvivesBackgroundWake
+--- PASS: TestBotPersistedIssueSourceSurvivesBackgroundWake (0.10s)
+PASS
+ok  	github.com/multica-ai/multica/server/internal/service	1.191s
+=== RUN   TestBotAuthProvenance
+=== RUN   TestBotAuthProvenance/regular
+=== RUN   TestBotAuthProvenance/regular/miss
+2026/10/11 02:20:08 WARN auth: invalid PAT path=/api/me error="no rows in result set"
+=== RUN   TestBotAuthProvenance/regular/hit
+    bot_source_auth_test.go:66: REDIS_TEST_URL not set
+=== RUN   TestBotAuthProvenance/daemon
+=== RUN   TestBotAuthProvenance/daemon/miss
+2026/10/11 02:20:08 WARN daemon_auth: invalid PAT path=/api/me error="no rows in result set"
+=== RUN   TestBotAuthProvenance/daemon/hit
+    bot_source_auth_test.go:66: REDIS_TEST_URL not set
+--- PASS: TestBotAuthProvenance (0.00s)
+    --- PASS: TestBotAuthProvenance/regular (0.00s)
+        --- PASS: TestBotAuthProvenance/regular/miss (0.00s)
+        --- SKIP: TestBotAuthProvenance/regular/hit (0.00s)
+    --- PASS: TestBotAuthProvenance/daemon (0.00s)
+        --- PASS: TestBotAuthProvenance/daemon/miss (0.00s)
+        --- SKIP: TestBotAuthProvenance/daemon/hit (0.00s)
+=== RUN   TestHumanAuthCannotForgeBotSource
+--- PASS: TestHumanAuthCannotForgeBotSource (0.00s)
+=== RUN   TestAuthenticatedActorRejectsSpoofedUserOnDaemonToken
+    bot_source_auth_test.go:149: REDIS_TEST_URL not set
+--- SKIP: TestAuthenticatedActorRejectsSpoofedUserOnDaemonToken (0.00s)
+PASS
+ok  	github.com/multica-ai/multica/server/internal/middleware	1.089s
+testing: warning: no tests to run
+PASS
+ok  	github.com/multica-ai/multica/server/internal/auth	0.968s [no tests to run]
+=== RUN   TestBotAttributionPreservesPrincipalWithoutHumanSpeech
+--- PASS: TestBotAttributionPreservesPrincipalWithoutHumanSpeech (0.00s)
+=== RUN   TestBotAttributionSurvivesAgentDelegation
+--- PASS: TestBotAttributionSurvivesAgentDelegation (0.00s)
+PASS
+ok  	github.com/multica-ai/multica/server/internal/attribution	0.899s
+EmailService: DEV mode — codes printed to stdout (set MULTICA_DEV_VERIFICATION_CODE in .env for a fixed local code)
+2026/10/11 02:20:08 INFO S3_BUCKET not set, cloud upload disabled
+2026/10/11 02:20:08 INFO local storage initialized dir=./data/uploads baseURL=""
+2026/10/11 02:20:08 INFO CLOUDFRONT_KEY_PAIR_ID not set, signed cookies disabled
+2026/10/11 02:20:08 INFO llm retry policy max_retries=2 source=default request_timeout=1m0s enabled=false disable_thinking=false
+2026/10/11 02:20:08 INFO channel engine: lease backend configured backend=postgres ttl=3m0s renew_interval=1m0s poll_interval=30s
+2026/10/11 02:20:08 INFO lark integration disabled (MULTICA_LARK_SECRET_KEY not set)
+2026/10/11 02:20:08 INFO slack integration disabled (MULTICA_SLACK_SECRET_KEY not set)
+2026/10/11 02:20:08 INFO dingtalk integration disabled (MULTICA_DINGTALK_SECRET_KEY not set)
+2026/10/11 02:20:08 INFO wecom integration disabled (MULTICA_WECOM_SECRET_KEY not set)
+2026/10/11 02:20:08 INFO telegram integration disabled (MULTICA_TELEGRAM_SECRET_KEY not set)
+2026/10/11 02:20:08 INFO composio integration disabled (COMPOSIO_API_KEY not set)
+2026/10/11 02:20:08 INFO vcs integration disabled (MULTICA_VCS_SECRET_KEY not set)
+2026/10/11 02:20:08 INFO Plugin secrets disabled (MULTICA_PLUGIN_SECRET_KEY not set)
+2026/10/11 02:20:08 WARN auth rate limiting disabled: REDIS_URL not configured
+=== RUN   TestBotActivityProvenance
+--- PASS: TestBotActivityProvenance (0.03s)
+=== RUN   TestBotWriterContextReachesTrigger
+--- PASS: TestBotWriterContextReachesTrigger (0.01s)
+PASS
+ok  	github.com/multica-ai/multica/server/cmd/server	1.321s
+testing: warning: no tests to run
+PASS
+ok  	github.com/multica-ai/multica/server/cmd/multica	1.134s [no tests to run]
+==> Dropping test database 'multica_dene_1794_b3eb09912623_573_t179170314966352'

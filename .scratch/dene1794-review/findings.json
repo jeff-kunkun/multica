@@ -1,0 +1,10 @@
+{
+  "goal": "DENE-1794: Bot 写入始终显示经 Bot，不能冒充人的发言",
+  "findings": [
+    {
+      "id": "F1",
+      "file": "packages/core/realtime/use-realtime-sync.ts:220",
+      "body": "阻断：服务端 ChatMessagePayload 已携带 via_bot_id/name，但 applyChatMessageToCache 在构造 user 消息时漏掉两字段，ChatMessageEventPayload 类型也未扩展。实际调用该函数并检查 flat/paged Query cache，Bot 事件有来源而两个缓存均无来源。页面 ViaBot 仅依赖 message.via_bot_name，实时消息在补充 refetch 完成前显示成本人；已有源码记录 refetch 会被取消且 staleTime Infinity 时不会恢复。补充来源字段到事件类型与缓存转换，并覆盖 second-window/取消refetch 回归，才能放行。"
+    }
+  ]
+}
