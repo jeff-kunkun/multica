@@ -11,6 +11,7 @@ import {
   externalBotListOptions,
   useCreateExternalBot,
   useDeleteExternalBot,
+  useExternalBotSetupText,
   useRotateExternalBotKey,
   useStopExternalBot,
 } from "@multica/core/bots";
@@ -82,6 +83,22 @@ export function BotsTab() {
   const rotate = useRotateExternalBotKey(wsId);
   const stop = useStopExternalBot(wsId);
   const remove = useDeleteExternalBot(wsId);
+  const setupText = useExternalBotSetupText(wsId);
+
+  // Same text the key came with, key swapped for a placeholder, so a bot that
+  // lost its instructions gets them again without a new key.
+  const copySetupFor = async (bot: ExternalBot) => {
+    try {
+      const res = await setupText.mutateAsync(bot.id);
+      if (await copyText(res.setup_text)) {
+        toast.success(t(($) => $.bots.toast_setup_copied, { name: bot.name }));
+      } else {
+        toast.error(t(($) => $.bots.toast_failed));
+      }
+    } catch (e) {
+      fail(e);
+    }
+  };
 
   const [adding, setAdding] = useState(false);
   const [name, setName] = useState("");
@@ -324,6 +341,9 @@ export function BotsTab() {
                     }
                   />
                   <DropdownMenuContent align="end" className="w-auto">
+                    <DropdownMenuItem onClick={() => void copySetupFor(bot)}>
+                      {t(($) => $.bots.copy_setup)}
+                    </DropdownMenuItem>
                     <DropdownMenuItem onClick={() => setConfirm({ kind: "rotate", bot })}>
                       {t(($) => $.bots.new_key)}
                     </DropdownMenuItem>

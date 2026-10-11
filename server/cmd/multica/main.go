@@ -46,6 +46,7 @@ func init() {
 
 	// Core commands
 	overviewCmd.GroupID = groupCore
+	capabilitiesCmd.GroupID = groupCore
 	issueCmd.GroupID = groupCore
 	projectCmd.GroupID = groupCore
 	labelCmd.GroupID = groupCore
@@ -81,6 +82,7 @@ func init() {
 	versionCmd.GroupID = groupAdditional
 
 	rootCmd.AddCommand(overviewCmd)
+	rootCmd.AddCommand(capabilitiesCmd)
 	rootCmd.AddCommand(issueCmd)
 	rootCmd.AddCommand(projectCmd)
 	rootCmd.AddCommand(labelCmd)
@@ -112,6 +114,7 @@ func init() {
 	rootCmd.AddCommand(versionCmd)
 
 	initHelp(rootCmd)
+	installUnknownSubcommandGuard(rootCmd)
 }
 
 func main() {

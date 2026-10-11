@@ -101,6 +101,7 @@ import type {
   ExternalBot,
   CreateExternalBotRequest,
   ExternalBotKeyResponse,
+  ExternalBotSetupTextResponse,
   BotWakeSettings,
   UpdateBotWakeRequest,
   BotWakeEventPage,
@@ -4817,6 +4818,12 @@ export class ApiClient {
       method: "POST",
       body: JSON.stringify(data),
     });
+  }
+
+  /** Setup text again, key replaced by a placeholder; `botId` addresses the bot by name. */
+  async getExternalBotSetupText(workspaceId: string, botId?: string): Promise<ExternalBotSetupTextResponse> {
+    const qs = botId ? `?bot=${encodeURIComponent(botId)}` : "";
+    return this.fetch(`/api/workspaces/${workspaceId}/bots/setup-text${qs}`);
   }
 
   async rotateExternalBotKey(workspaceId: string, botId: string): Promise<ExternalBotKeyResponse> {
