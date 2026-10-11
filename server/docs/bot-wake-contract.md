@@ -71,8 +71,11 @@ recipients of a source event share its generated event ID. The worker polls the
 local durable outbox each second (not Grok or a Mac bridge), uses SKIP LOCKED,
 serializes the rate decision on the Bot row and counts non-mention attempts, including
 retries, in a rolling one-hour window. Settings updates serialize on the
-same row. Sources with ready mentions are selected first; ordinary notifications wait
-for a fixed 30-second source window. Mentions bypass the ordinary-event limit
+same row. Sources containing mentions are prioritized among eligible windows. All
+notification types, including mentions, wait for a fixed 30-second source window
+from the first event; only wake_blocked bypasses it. This deliberately adds about
+30 seconds to a standalone mention in exchange for one push per source window,
+so it does not promise an immediate acknowledgement. Mentions bypass the ordinary-event limit
 (default 6) and consume no hourly quota; zero explicitly pauses all pushes, and quiet hours still apply to mentions.
 Legacy attempts recorded before this release age out of the window after one hour.
 A request already in flight may complete after a rule changes.

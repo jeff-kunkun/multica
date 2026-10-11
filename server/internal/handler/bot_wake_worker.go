@@ -215,6 +215,9 @@ func (w *BotWakeWorker) ProcessNext(ctx context.Context) (bool, error) {
 		return true, tx.Commit(ctx)
 	}
 	e = admitted[0]
+	// Preserve the existing single current cause: a multi-root batch uses
+	// its first admitted event for subsequent Bot writes. Each event still
+	// retains its own root/hop and admission accounting in the payload.
 	if !alert {
 		if err := q.RememberBotWakeCause(ctx, db.RememberBotWakeCauseParams{BotID: e.BotID, RootID: e.RootID, Hop: e.Hop}); err != nil {
 			return true, err

@@ -118,7 +118,9 @@ The same report is included in the routing-health inspection response.
 ## Mention delivery and replying in place
 
 Ordinary notifications for one Bot and one issue/chat are grouped in a fixed
-30-second window from the first event. `started` is excluded from new Bot
+30-second window from the first event, including explicit mentions. A standalone
+mention therefore waits about 30 seconds before its first push; the reply
+convention starts when the Bot receives it. `started` is excluded from new Bot
 subscriptions by default; the old untouched default selection is updated too. Custom selections stay unchanged.
 `wake_blocked` operational alerts remain immediate. This notification batching is
 separate from merging agent runs (DENE-1857).
