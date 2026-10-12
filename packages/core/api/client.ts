@@ -4199,14 +4199,6 @@ export class ApiClient {
   }
 
   /** The 分工规则 as the server holds it, plus the series and tiers a row may name. */
-  async listRoutingShadowTickets(workspaceId: string, offset = 0): Promise<{ items: { id: string; title: string }[]; next_offset: number }> {
-    return this.fetch(`/api/workspaces/${workspaceId}/routing/shadow?days=30&offset=${offset}`);
-  }
-
-  async compareRoutingShadow(workspaceId: string, issueId: string): Promise<import("../workspace/routing-shadow").RoutingShadowResult> {
-    return this.fetch(`/api/workspaces/${workspaceId}/routing/shadow/${issueId}`, { method: "POST", body: JSON.stringify({}) });
-  }
-
   async getRoutingDispatch(workspaceId: string): Promise<RoutingDispatch> {
     const raw = await this.fetch<unknown>(
       `/api/workspaces/${workspaceId}/routing/dispatch`,

@@ -14,7 +14,7 @@ interface UseAutoSaveOptions<T> {
   isEqual: (left: T, right: T) => boolean;
 }
 
-interface AutoSaveResult<T> {
+export interface AutoSaveResult<T> {
   status: SettingsSaveStatus;
   flush: () => void;
   saveNow: (value: T) => void;

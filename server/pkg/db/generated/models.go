@@ -2071,6 +2071,7 @@ type Project struct {
 	DomainIds        []pgtype.UUID      `json:"domain_ids"`
 	LinkedProjects   []byte             `json:"linked_projects"`
 	ExecutorAgentIds []pgtype.UUID      `json:"executor_agent_ids"`
+	RoutingDisabled  bool               `json:"routing_disabled"`
 }
 
 type ProjectMember struct {

@@ -23,13 +23,13 @@ import {
 // switches at their defaults.
 const JUDGE_ONLY: Pick<
   RoutingSettings,
-  "judge_enabled" | "analysis" | "usage_priority" | "allow_upshift" | "strongest_gate" | "decision_mode" | "consult_per_issue" | "prefer_continuation" | "prefer_idle" | "learn_from_outcomes" | "learn_low_rate" | "learn_window_days" | "judged_review"
+  "judge_enabled" | "analysis" | "usage_priority" | "allow_upshift" | "strongest_gate" | "consult_per_issue" | "prefer_continuation" | "prefer_idle" | "learn_from_outcomes" | "learn_low_rate" | "learn_window_days" | "judged_review"
 > = {
   judge_enabled: true,
   analysis: { enabled: false, model: "", base_url: "" },
   usage_priority: true,
   allow_upshift: false,
-  strongest_gate: true, decision_mode: "legacy" as const, consult_per_issue: 3,
+  strongest_gate: true, consult_per_issue: 3,
   prefer_continuation: false,
   prefer_idle: false,
   learn_from_outcomes: false,
@@ -71,7 +71,7 @@ describe("parseRoutingSettings", () => {
       analysis: { enabled: false, model: "", base_url: "" },
       usage_priority: true,
       allow_upshift: false,
-      strongest_gate: true, decision_mode: "legacy" as const, consult_per_issue: 3,
+      strongest_gate: true, consult_per_issue: 3,
       prefer_continuation: false,
       prefer_idle: false,
       learn_from_outcomes: false,
@@ -87,7 +87,7 @@ describe("parseRoutingSettings", () => {
     expect(parseRoutingSettings({ routing: { enabled: true } })).toMatchObject({
       usage_priority: true,
       allow_upshift: false,
-      strongest_gate: true, decision_mode: "legacy" as const, consult_per_issue: 3,
+      strongest_gate: true, consult_per_issue: 3,
       prefer_continuation: false,
       prefer_idle: false,
       learn_from_outcomes: false,
@@ -279,7 +279,7 @@ describe("withRoutingSettings", () => {
         analysis: { enabled: false, model: "", base_url: "" },
         usage_priority: true,
         allow_upshift: false,
-        strongest_gate: true, decision_mode: "legacy" as const, consult_per_issue: 3,
+        strongest_gate: true, consult_per_issue: 3,
         prefer_continuation: false,
         prefer_idle: false,
         learn_from_outcomes: false,
@@ -308,7 +308,7 @@ describe("withRoutingSettings", () => {
       analysis: { enabled: false, model: "", base_url: "" },
       usage_priority: true,
       allow_upshift: false,
-      strongest_gate: true, decision_mode: "legacy" as const, consult_per_issue: 3,
+      strongest_gate: true, consult_per_issue: 3,
       prefer_continuation: false,
       prefer_idle: false,
       learn_from_outcomes: false,
@@ -340,7 +340,7 @@ describe("withRoutingSettings", () => {
         judge_enabled: false,
         usage_priority: true,
         allow_upshift: false,
-        strongest_gate: true, decision_mode: "legacy" as const, consult_per_issue: 3,
+        strongest_gate: true, consult_per_issue: 3,
         prefer_continuation: false,
         prefer_idle: false,
         learn_from_outcomes: false,
@@ -361,7 +361,7 @@ describe("withRoutingSettings", () => {
         judge_enabled: false,
         usage_priority: true,
         allow_upshift: false,
-        strongest_gate: true, decision_mode: "legacy" as const, consult_per_issue: 3,
+        strongest_gate: true, consult_per_issue: 3,
         prefer_continuation: false,
         prefer_idle: false,
         learn_from_outcomes: false,
@@ -433,8 +433,43 @@ describe("withRoutingSettings", () => {
 
   it("round-trips through parse", () => {
     const next = { enabled: true, model: "m", confidence_threshold: 0.42, stale_review_hours: 24, base_url: "", policy_prompt: "", ...JUDGE_ONLY };
-    expect(parseRoutingSettings(withRoutingSettings({}, next))).toEqual({ ...next, decision_mode: "legacy",
-      consult_per_issue: 3 });
+    expect(parseRoutingSettings(withRoutingSettings({}, next))).toEqual({ ...next, consult_per_issue: 3 });
+  });
+});
+
+describe("retired fields (DENE-1966)", () => {
+  // A block saved by an older client still loads: decision_mode is not read,
+  // every hidden knob keeps its stored value, and the next save drops only
+  // decision_mode.
+  const old = {
+    routing: {
+      enabled: true, model: "m", decision_mode: "active", judge_enabled: true,
+      analysis: { enabled: true, model: "a", base_url: "" },
+      confidence_threshold: 0.5, usage_priority: false, allow_upshift: true,
+      learn_low_rate: 0.4, learn_window_days: 14, judged_review: true, prefer_continuation: true,
+      projects: { p1: "frontend" },
+    },
+  };
+
+  it("loads an old block and keeps the hidden knobs", () => {
+    const parsed = parseRoutingSettings(old);
+    expect(parsed).not.toHaveProperty("decision_mode");
+    expect(parsed).toMatchObject({
+      confidence_threshold: 0.5, usage_priority: false, allow_upshift: true,
+      learn_low_rate: 0.4, learn_window_days: 14, judged_review: true, prefer_continuation: true,
+    });
+    expect(routingState(parsed)).toBe("enabled");
+    expect(routingMode(parsed)).toBe("analysis_judge");
+  });
+
+  it("saves the hidden knobs back unchanged and drops decision_mode", () => {
+    const block = withRoutingSettings(old, parseRoutingSettings(old)).routing as Record<string, unknown>;
+    expect(block).not.toHaveProperty("decision_mode");
+    expect(block).toMatchObject({
+      confidence_threshold: 0.5, usage_priority: false, allow_upshift: true,
+      learn_low_rate: 0.4, learn_window_days: 14, judged_review: true, prefer_continuation: true,
+      projects: { p1: "frontend" },
+    });
   });
 });
 

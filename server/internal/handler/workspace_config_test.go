@@ -311,7 +311,7 @@ func TestWorkspaceConfigRoundTripAndConflicts(t *testing.T) {
 	dbfx.InsertNoID(t, "agent_skill", testutil.Cols{"agent_id": agentID, "skill_id": skillID, "enabled": true},
 		"agent_id = $1 AND skill_id = $2", agentID, skillID)
 	dbfx.Squad(t, squadName, agentID, testutil.Cols{"workspace_id": src})
-	dbfx.Project(t, projectTitle, testutil.Cols{"workspace_id": src, "status": "in_progress"})
+	dbfx.Project(t, projectTitle, testutil.Cols{"workspace_id": src, "status": "in_progress", "routing_disabled": true})
 	dbfx.Insert(t, "autopilot", testutil.Cols{
 		"workspace_id": src, "title": apTitle, "assignee_type": "agent", "assignee_id": agentID,
 		"status": "active", "execution_mode": "create_issue", "created_by_type": "member", "created_by_id": testUserID,
@@ -363,6 +363,10 @@ func TestWorkspaceConfigRoundTripAndConflicts(t *testing.T) {
 	}
 	if n := dbfx.Count(t, `SELECT count(*) FROM project WHERE workspace_id = $1 AND title = $2`, dst, projectTitle); n != 1 {
 		t.Fatalf("expected 1 imported project, got %d", n)
+	}
+	// DENE-1966: a project with automatic dispatch off stays off in the copy.
+	if n := dbfx.Count(t, `SELECT count(*) FROM project WHERE workspace_id = $1 AND title = $2 AND routing_disabled`, dst, projectTitle); n != 1 {
+		t.Fatal("imported project lost its routing-off switch")
 	}
 	if n := dbfx.Count(t, `SELECT count(*) FROM autopilot WHERE workspace_id = $1 AND title = $2`, dst, apTitle); n != 1 {
 		t.Fatalf("expected 1 imported autopilot, got %d", n)

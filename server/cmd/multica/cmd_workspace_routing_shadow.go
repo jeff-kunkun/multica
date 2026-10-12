@@ -10,7 +10,7 @@ import (
 
 var workspaceRoutingShadowCmd = &cobra.Command{
 	Use: "shadow", Short: "Compare reasoning against recent tickets without assigning or starting runs",
-	Long: "Use the current analysis model, roster and routing prompt on recent ticket text. Writes no issue state. Each ticket makes one model call. Default: last 30 days, at most 20 tickets. Use --limit 1000 for a larger review; --offset resumes later pages. Review results before setting --decision-mode active.",
+	Long: "Use the current analysis model, roster and routing prompt on recent ticket text. Writes no issue state. Each ticket makes one model call. Default: last 30 days, at most 20 tickets. Use --limit 1000 for a larger review; --offset resumes later pages. A one-off comparison: routing itself never runs this path.",
 	Args: cobra.NoArgs, RunE: runWorkspaceRoutingShadow,
 }
 

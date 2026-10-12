@@ -727,17 +727,9 @@ func (h *Handler) UpdateWorkspace(w http.ResponseWriter, r *http.Request) {
 						return
 					}
 				}
-				if mode, exists := block["decision_mode"]; exists && mode != "legacy" && mode != "shadow" && mode != "active" {
-					writeError(w, http.StatusBadRequest, "decision_mode must be legacy, shadow or active")
-					return
-				}
-				if block["decision_mode"] == "active" {
-					analysis, _ := block["analysis"].(map[string]any)
-					if analysis["enabled"] != true {
-						writeError(w, http.StatusBadRequest, "active reasoning requires the analysis model")
-						return
-					}
-				}
+				// decision_mode is retired (DENE-1966): routing has one path.
+				// Older clients still send it; it is accepted and dropped.
+				delete(block, "decision_mode")
 			}
 
 		}

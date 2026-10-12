@@ -22,15 +22,6 @@ type ReasoningSeat struct {
 	Usage  string `json:"usage"`
 }
 
-func (s Settings) EffectiveDecisionMode() string {
-	switch s.DecisionMode {
-	case "active", "shadow":
-		return s.DecisionMode
-	default:
-		return "legacy"
-	}
-}
-
 func reasoningSeats(l Ladder, seats []Seat, roster map[string]Agent) []ReasoningSeat {
 	out := make([]ReasoningSeat, 0, len(seats))
 	for _, seat := range seats {

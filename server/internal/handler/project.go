@@ -57,6 +57,9 @@ type ProjectResponse struct {
 	// automatic dispatch picks only these agents for its work. Empty means
 	// every seat may be picked.
 	ExecutorAgentIDs []string `json:"executor_agent_ids"`
+	// RoutingDisabled turns automatic dispatch off for this project's tickets
+	// (DENE-1966); manual assignment keeps working.
+	RoutingDisabled bool `json:"routing_disabled"`
 }
 
 func projectToResponse(p db.Project) ProjectResponse {
@@ -78,6 +81,7 @@ func projectToResponse(p db.Project) ProjectResponse {
 		CreatedBy:        uuidToString(p.CreatedBy),
 		DomainIDs:        domainIDStrings(p.DomainIds),
 		ExecutorAgentIDs: executorAgentIDsOrEmpty(p),
+		RoutingDisabled:  p.RoutingDisabled,
 	}
 }
 
@@ -164,6 +168,10 @@ type UpdateProjectRequest struct {
 	// ExecutorAgentIDs replaces the executor allowlist when present (agent
 	// ids); an empty list lifts it. Workspace owner/admin only.
 	ExecutorAgentIDs *[]string `json:"executor_agent_ids"`
+	// RoutingDisabled turns routing off (true) or back on (false) for this
+	// project when present. Workspace owner/admin only, like the routing
+	// settings themselves.
+	RoutingDisabled *bool `json:"routing_disabled"`
 }
 
 func (h *Handler) ListProjects(w http.ResponseWriter, r *http.Request) {
@@ -728,6 +736,11 @@ func (h *Handler) UpdateProject(w http.ResponseWriter, r *http.Request) {
 		}
 		executorIDs = ids
 	}
+	if req.RoutingDisabled != nil {
+		if _, ok := h.requireWorkspaceRole(w, r, workspaceID, "project not found", "owner", "admin"); !ok {
+			return
+		}
+	}
 	tx, err := h.TxStarter.Begin(r.Context())
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to update project")
@@ -751,6 +764,14 @@ func (h *Handler) UpdateProject(w http.ResponseWriter, r *http.Request) {
 			ID: project.ID, WorkspaceID: project.WorkspaceID, ExecutorAgentIds: executorIDs,
 		}); err != nil {
 			writeError(w, http.StatusInternalServerError, "failed to update project executors")
+			return
+		}
+	}
+	if req.RoutingDisabled != nil {
+		if project, err = qtx.SetProjectRoutingDisabled(r.Context(), db.SetProjectRoutingDisabledParams{
+			ID: project.ID, WorkspaceID: project.WorkspaceID, RoutingDisabled: *req.RoutingDisabled,
+		}); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to update project routing")
 			return
 		}
 	}

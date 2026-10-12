@@ -6,34 +6,40 @@ import (
 	"testing"
 )
 
-func TestReasoningOwnsTierAndSeatWithReferenceOnly(t *testing.T) {
-	for _, mode := range []string{"active", "shadow"} {
-		t.Run(mode, func(t *testing.T) {
+// TestStoredDecisionModeIsIgnored pins DENE-1966: routing has one path. A
+// block saved with any former decision_mode still parses and routes the same
+// way — the rule table sets the tier — and the analysis model is asked the
+// table's questions only, never to pick the seat.
+func TestStoredDecisionModeIsIgnored(t *testing.T) {
+	for _, mode := range []string{"", "legacy", "shadow", "active"} {
+		t.Run("mode="+mode, func(t *testing.T) {
 			store, analyst := dispatchStore(t, "前端", nil)
 			store.settings.DecisionMode = mode
 			off := false
 			store.settings.JudgeEnabled = &off
-			store.settings.PolicyPrompt = "简单前端修复由中档处理，按实际工作选人"
 			analyst.record.Decision = &ReasoningDecision{Tier: "medium", SeatID: "m-codex", Confidence: 0.95, Reason: "局部页面问题，无需强档", Reviewer: ReviewerNone}
-			judge := &fakeJudge{verdict: strongVerdict()}
-			out := routeWith(t, store, judge, analyst)
-			want := "medium"
-			if mode == "shadow" {
-				want = "strong"
+			out := routeWith(t, store, &fakeJudge{verdict: strongVerdict()}, analyst)
+			if out.ExecutorWritten == nil || out.ExecutorWritten.TierKey != "strong" {
+				t.Fatalf("mode=%q got=%+v", mode, out.ExecutorWritten)
 			}
-			if out.ExecutorWritten == nil || out.ExecutorWritten.TierKey != want {
-				t.Fatalf("mode=%s got=%+v", mode, out.ExecutorWritten)
+			if analyst.analyzes != 1 || analyst.lastSt.Reasoning || len(analyst.lastSt.EligibleSeats) != 0 {
+				t.Fatalf("analysis asked to pick a seat: calls=%d state=%+v", analyst.analyzes, analyst.lastSt)
 			}
-			if analyst.analyzes != 1 {
-				t.Fatalf("calls=%d", analyst.analyzes)
-			}
-			if analyst.lastSt.PolicyPrompt != store.settings.PolicyPrompt || analyst.lastSt.ReferenceRules == nil || len(analyst.lastSt.EligibleSeats) != 3 {
-				t.Fatalf("missing inference context: %+v", analyst.lastSt)
-			}
-			if !strings.Contains(strings.Join(store.comments[KindAssignment], "\n"), "局部页面问题") {
-				t.Fatal("missing reasoning")
+			if strings.Contains(strings.Join(store.comments[KindAssignment], "\n"), "局部页面问题") {
+				t.Fatal("a reasoning pick leaked into the decision comment")
 			}
 		})
+	}
+}
+
+func TestParseSettingsKeepsRetiredFields(t *testing.T) {
+	raw := []byte(`{"routing":{"enabled":true,"model":"m","decision_mode":"active","confidence_threshold":0.5,"usage_priority":false,"allow_upshift":true,"learn_low_rate":0.4,"learn_window_days":14,"judged_review":true,"prefer_continuation":true,"base_url":"https://example.test"}}`)
+	s := ParseSettings(raw)
+	if !s.Enabled || s.Threshold() != 0.5 || s.AllowUpshift != true || s.LowRate() != 0.4 || s.LearnWindowDaysOrDefault() != 14 || !s.JudgedReview || !s.PreferContinuation || s.BaseURL != "https://example.test" {
+		t.Fatalf("stored values lost: %+v", s)
+	}
+	if !s.JudgeOn() || s.State() != StateEnabled {
+		t.Fatalf("a stored active mode switched the judge off: judge=%v state=%s", s.JudgeOn(), s.State())
 	}
 }
 

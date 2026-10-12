@@ -29,7 +29,7 @@
 
 | 表 | 结论 | 导出字段 | 排除字段 | 理由 |
 | --- | --- | --- | --- | --- |
-| `workspace` | 部分导出 | `settings`（JSON 整体）、`context`、`repos`（`[{url, description, ref}]`）、`issue_prefix`、`attribution_fail_closed`；`name`、`slug`、`description`、`avatar_url` 仅作为 `source` 元数据记录 | `issue_counter`、`id`、`slug`、`name`（不写入目标） | 目标工作区已由用户创建并命名，导入只补配置。`issue_prefix` 只在目标工作区尚无任何任务时才写入，否则跳过并告警。`settings` 已知键只有 `always_redact_env`（布尔），其余键未确认，整体透传。 |
+| `workspace` | 部分导出 | `settings`（JSON 整体）、`context`、`repos`（`[{url, description, ref}]`）、`issue_prefix`、`attribution_fail_closed`；`name`、`slug`、`description`、`avatar_url` 仅作为 `source` 元数据记录 | `issue_counter`、`id`、`slug`、`name`（不写入目标） | 目标工作区已由用户创建并命名，导入只补配置。`issue_prefix` 只在目标工作区尚无任何任务时才写入，否则跳过并告警。`settings` 已知键只有 `always_redact_env`（布尔），其余键未确认，整体透传；`routing` 块随之整体带过去，里面已退役的 `decision_mode` 照样读得进，下次保存路由设置时丢掉（DENE-1966）。 |
 | `issue_status` | 导出 | `key`、`name`、`description`、`category`、`color`、`position`、`is_system` | `archived_at`（转为 `archived` 布尔） | 状态目录是最核心的工作区配置。7 个内置 `key` 在目标工作区一定已存在，导入按 `key` 匹配后只更新 `name/description/color/position`；自定义状态新建。`category` 与 `key` 创建后不可变，与目标冲突时视为冲突。 |
 | `issue_label` | 导出 | `name`、`color`、`description`、`resource_type`（`issue`/`agent`/`skill`） | 无 | 三个命名空间各自独立，唯一键是 `(workspace_id, resource_type, lower(name))`。 |
 | `issue_property` | 导出 | `name`、`type`、`description`、`icon`、`config.options[{id,name,color}]`、`position` | `archived_at` | 属性定义不含任何成员引用；`actor` / `multi_actor` 只是类型名，成员引用存在任务的属性值里，那是运行态，不在导出范围。`config.options[].id` 原样保留（见「未确认」）。 |
@@ -79,7 +79,7 @@
 
 | 表 | 结论 | 导出字段 | 排除字段 | 理由 |
 | --- | --- | --- | --- | --- |
-| `project` | 导出 | `title`、`description`、`icon`、`status`、`priority`、`lead_type`、`lead_id`（成员或智能体引用）、`start_date`、`due_date` | 无 | 项目是配置也是容器；任务不导出，项目壳导出。`status IN ('completed','cancelled')` 的默认不导出（视同归档）。 |
+| `project` | 导出 | `title`、`description`、`icon`、`status`、`priority`、`lead_type`、`lead_id`（成员或智能体引用）、`start_date`、`due_date`、`routing_disabled`（本项目关自动派单，DENE-1966；旧包没有这个键时不改目标值） | 无 | 项目是配置也是容器；任务不导出，项目壳导出。`status IN ('completed','cancelled')` 的默认不导出（视同归档）。 |
 | `project_resource`（`github_repo`） | 导出 | `resource_type`、`resource_ref`（`{url, default_branch_hint, ref}`）、`label`、`position` | `created_by` | 纯 URL 引用，可移植。 |
 | `project_resource`（`local_directory`） | 部分导出 | 同上，`resource_ref = {local_path, daemon_id, label, execution_mode}` | `created_by` | `daemon_id` 绑定某台机器上的守护进程注册；导入时只有目标工作区能看到同一 `daemon_id` 的运行时才写入，否则跳过并记 `unmapped_refs`（见「未确认」）。 |
 | `skill`（`plugin_installation_id IS NULL`） | 导出 | `name`、`description`、`content`、`config` | `created_by`（改为导入者）、`plugin_installation_id` | 与现有技能导入共用创建路径和冲突词表。 |

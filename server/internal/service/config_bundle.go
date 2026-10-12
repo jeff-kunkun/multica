@@ -291,6 +291,9 @@ type ConfigProject struct {
 	StartDate   *string                 `json:"start_date"`
 	DueDate     *string                 `json:"due_date"`
 	Resources   []ConfigProjectResource `json:"resources"`
+	// Automatic dispatch off for this project (DENE-1966). Nil in bundles
+	// from before the field, which leaves the target's value alone.
+	RoutingDisabled *bool `json:"routing_disabled,omitempty"`
 }
 
 type ConfigProjectResource struct {

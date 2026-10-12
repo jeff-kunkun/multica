@@ -89,3 +89,9 @@ RETURNING *;
 UPDATE project SET executor_agent_ids = sqlc.arg('executor_agent_ids')::uuid[], updated_at = now()
 WHERE id = $1 AND workspace_id = $2
 RETURNING *;
+
+-- name: SetProjectRoutingDisabled :one
+-- Turns automatic dispatch off (or back on) for one project (DENE-1966).
+UPDATE project SET routing_disabled = sqlc.arg('routing_disabled')::boolean, updated_at = now()
+WHERE id = $1 AND workspace_id = $2
+RETURNING *;

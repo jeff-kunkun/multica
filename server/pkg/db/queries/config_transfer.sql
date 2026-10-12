@@ -188,7 +188,7 @@ LIMIT 1;
 DELETE FROM squad_member WHERE squad_id = $1;
 
 -- name: ExportProjects :many
-SELECT id, title, description, icon, status, priority, lead_type, lead_id, start_date, due_date
+SELECT id, title, description, icon, status, priority, lead_type, lead_id, start_date, due_date, routing_disabled
 FROM project
 WHERE workspace_id = $1
   AND (

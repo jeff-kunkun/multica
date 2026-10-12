@@ -1,23 +1,15 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { toast } from "sonner";
+import type { ReactNode } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { ChevronRight } from "lucide-react";
 import { Button } from "@multica/ui/components/ui/button";
 import { Input } from "@multica/ui/components/ui/input";
 import { Textarea } from "@multica/ui/components/ui/textarea";
 import { Switch } from "@multica/ui/components/ui/switch";
-import { Badge } from "@multica/ui/components/ui/badge";
-import { api } from "@multica/core/api";
-import { useCurrentWorkspace } from "@multica/core/paths";
-import { useCurrentMember } from "@multica/core/permissions";
+import { cn } from "@multica/ui/lib/utils";
 import { runtimeListOptions } from "@multica/core/runtimes";
-import {
-  routingHealthOptions,
-  workspaceKeys,
-  workspaceListOptions,
-  memberListOptions,
-} from "@multica/core/workspace/queries";
+import { memberListOptions } from "@multica/core/workspace/queries";
 import {
   roleHealth,
   type RoutingHealth,
@@ -27,20 +19,10 @@ import {
 } from "@multica/core/workspace/routing-health";
 import { DEFAULT_ROUTING_POLICY_PROMPT } from "@multica/core/workspace/routing-policy-prompt";
 import {
-  normalizeLearnLowRate,
-  normalizeLearnWindowDays,
-  normalizeStaleReviewHours,
-  normalizeThreshold,
-  parseRoutingSettings,
   routingGatewayIsComplete,
-  routingMode,
-  routingState,
-  withRoutingSettings,
-  type RoutingRole,
-  type RoutingSettings,
   type RoutingState,
 } from "@multica/core/workspace/routing-settings";
-import type { Workspace } from "@multica/core/types";
+import { AppLink, useNavigation } from "../../navigation";
 import { useT } from "../../i18n";
 import {
   SettingsCard,
@@ -49,8 +31,8 @@ import {
   SettingsSection,
   SettingsTab,
 } from "./settings-layout";
-import { useAutoSave } from "./use-auto-save";
-import { RoutingShadowSection } from "./routing-shadow";
+import { resolveSettingsLocation, settingsHref } from "./settings-navigation";
+import { useRoutingForm, type RoutingForm } from "./use-routing-form";
 import { RoutingSeatsTable } from "./routing-seats-table";
 import { RoutingDomainsSection } from "./routing-domains";
 import { RoutingDispatchSection } from "./routing-dispatch";
@@ -58,422 +40,409 @@ import { RuntimePicker } from "../../agents/components/runtime-picker";
 import { ModelDropdown } from "../../agents/components/model-dropdown";
 import { ThinkingSettingField } from "../../agents/components/inspector/thinking-prop-row";
 
+/** The sub-pages, opened with `?tab=routing&integration=<page>`. */
+export const ROUTING_PAGES = ["model", "rules", "seats"] as const;
+type RoutingPage = (typeof ROUTING_PAGES)[number];
+
+function isRoutingPage(value: string | null): value is RoutingPage {
+  return (ROUTING_PAGES as readonly string[]).includes(value ?? "");
+}
+
 /**
- * The routing section — the ONLY screen this feature adds.
+ * The routing page (DENE-1966): four rows and a short "more" fold.
  *
- * The 验收席 slot renders through the existing custom-property panel and the
- * routing decisions render as ordinary comments, so neither needed a change.
- * Hiding the slot while routing is off is done by archiving the property
- * definition, which the property panel already honours.
+ * Routing has one path — the rule table sets the tier and the judge may raise
+ * it one rung — so the page only offers what still changes that path: the
+ * switch, the model that reads tickets, the division rules, and the seats.
+ * Knobs that no longer have a control keep their stored values; the form
+ * hook carries them through every save.
  *
- * The model field accepts manual ids but also gets a catalog from the selected
- * gateway. The server keeps the credential on its side, returns ids only, and
- * the first id fills an empty field; manual entry stays available for gateways
- * that do not implement `/models`.
- *
- * Two protocols can be on the other end. An OpenAI-compatible gateway is
- * asked for JSON; a TypeSafe System One endpoint (Jev) is asked for a typed
- * judgment with its probability distribution. The section names which one is
- * in use, because the confidence the threshold gates on means different things
- * on the two: measured on one, self-reported on the other.
- *
- * Which gateway is now a workspace decision. It did not used to be: the judge
- * borrowed the deployment's MULTICA_LLM_* configuration, which is fine for one
- * operator on their own box and stops being fine the moment the instance is
- * shared with a team — "ask whoever runs the server to edit an env var and
- * restart" is not a setting, and it is the same answer for every workspace on
- * the machine. Both fields stay optional: leave them empty and the deployment
- * gateway is used exactly as before.
- *
- * The key is the one field here that is write-only. It is sealed server-side
- * and stripped from every response, so there is nothing to render back — the
- * box shows whether a key is stored, never which.
- *
- * Two model roles, each with its own switch, endpoint and key (DENE-923): the
- * analysis model reads the whole ticket and reduces it to facts; the judge
- * picks the tier. Either, both or neither can be on, and the section says
- * which combination is in effect.
+ * Each of the three detail rows opens a sub-page through the URL, so the
+ * browser's back button and the phone back stack both work.
  */
 export function RoutingTab() {
+  const form = useRoutingForm();
+  const navigation = useNavigation();
+  const requested = resolveSettingsLocation(navigation.searchParams).integration;
+  const href = (page?: RoutingPage) =>
+    settingsHref(navigation.pathname, navigation.searchParams, "routing", { integration: page });
+
+  if (isRoutingPage(requested)) {
+    return <RoutingSubPage page={requested} form={form} backHref={href()} />;
+  }
+  return <RoutingOverview form={form} href={href} />;
+}
+
+function SaveState({ form }: { form: RoutingForm }) {
   const { t } = useT("settings");
-  const qc = useQueryClient();
-  const workspace = useCurrentWorkspace();
-  // Definitions are owner/admin work, like every other workspace-level
-  // setting. Members see the section and its state but cannot change it.
-  const { role, userId } = useCurrentMember(workspace?.id ?? "");
-  const canManage = role === "owner" || role === "admin";
-  const { data: runtimes = [], isLoading: runtimesLoading } = useQuery(
-    runtimeListOptions(workspace?.id ?? ""),
+  return (
+    <SettingsSaveState
+      status={form.autoSave.status}
+      savingLabel={t(($) => $.routing.policy_saving)}
+      savedLabel={t(($) => $.routing.policy_saved)}
+      errorLabel={t(($) => $.routing.policy_save_error)}
+    />
   );
-  const { data: members = [] } = useQuery(memberListOptions(workspace?.id ?? ""));
+}
 
-  const saved = useMemo(
-    () => parseRoutingSettings(workspace?.settings),
-    [workspace?.settings],
-  );
-
-  const [enabled, setEnabled] = useState(saved.enabled);
-  const [model, setModel] = useState(saved.model);
-  const [judgeEnabled, setJudgeEnabled] = useState(saved.judge_enabled);
-  const [analysisEnabled, setAnalysisEnabled] = useState(saved.analysis.enabled);
-  const [analysisModel, setAnalysisModel] = useState(saved.analysis.model);
-  const [analysisBaseUrl, setAnalysisBaseUrl] = useState(saved.analysis.base_url);
-  const [analysisSource, setAnalysisSource] = useState(saved.analysis.source ?? "api_gateway");
-  const [analysisRuntimeId, setAnalysisRuntimeId] = useState(saved.analysis.runtime_id ?? "");
-  const analysisRuntime = runtimes.find((runtime) => runtime.id === analysisRuntimeId) ?? null;
-  const [analysisThinkingLevel, setAnalysisThinkingLevel] = useState(saved.analysis.thinking_level ?? "low");
-  const [threshold, setThreshold] = useState(String(saved.confidence_threshold));
-  const [staleHours, setStaleHours] = useState(String(saved.stale_review_hours));
-  const [baseUrl, setBaseUrl] = useState(saved.base_url);
-  const [policyPrompt, setPolicyPrompt] = useState(saved.policy_prompt ?? "");
-  const [usagePriority, setUsagePriority] = useState(saved.usage_priority);
-  const [allowUpshift, setAllowUpshift] = useState(saved.allow_upshift);
-  const [consultLimit, setConsultLimit] = useState(String(saved.consult_per_issue ?? 3));
-  const [decisionMode, setDecisionMode] = useState(saved.decision_mode ?? "legacy");
-  const [strongestGate, setStrongestGate] = useState(saved.strongest_gate);
-  const [preferContinuation, setPreferContinuation] = useState(saved.prefer_continuation);
-  const [preferIdle, setPreferIdle] = useState(saved.prefer_idle);
-  const [learnFromOutcomes, setLearnFromOutcomes] = useState(saved.learn_from_outcomes);
-  // Typed as a percentage; stored as a share.
-  const [learnRate, setLearnRate] = useState(String(Math.round(saved.learn_low_rate * 100)));
-  const [learnDays, setLearnDays] = useState(String(saved.learn_window_days));
-  const [judgedReview, setJudgedReview] = useState(saved.judged_review);
-  // Held apart from the auto-saved draft on purpose. Auto-save fires while
-  // somebody is still typing, and a half-typed credential saved to the server
-  // is both useless and a real key sitting in a row nobody will think to
-  // clear. The key is committed by an explicit button instead.
-  const [analysisKeyInput, setAnalysisKeyInput] = useState("");
-
-  // Reset only when the workspace changes, not on every cached-object
-  // replacement — an unrelated mutation must not wipe an unsaved edit.
-  useEffect(() => {
-    const next = parseRoutingSettings(workspace?.settings);
-    setEnabled(next.enabled);
-    setModel(next.model);
-    setJudgeEnabled(next.judge_enabled);
-    setAnalysisEnabled(next.analysis.enabled);
-    setAnalysisModel(next.analysis.model);
-    setAnalysisBaseUrl(next.analysis.base_url);
-    setAnalysisSource(next.analysis.source ?? "api_gateway");
-    setAnalysisRuntimeId(next.analysis.runtime_id ?? "");
-    setAnalysisThinkingLevel(next.analysis.thinking_level ?? "low");
-    setThreshold(String(next.confidence_threshold));
-    setStaleHours(String(next.stale_review_hours));
-    setBaseUrl(next.base_url);
-    setPolicyPrompt(next.policy_prompt ?? "");
-    setUsagePriority(next.usage_priority);
-    setAllowUpshift(next.allow_upshift);
-    setStrongestGate(next.strongest_gate);
-    setConsultLimit(String(next.consult_per_issue ?? 3));
-    setDecisionMode(next.decision_mode ?? "legacy");
-    setPreferContinuation(next.prefer_continuation);
-    setPreferIdle(next.prefer_idle);
-    setLearnFromOutcomes(next.learn_from_outcomes);
-    setLearnRate(String(Math.round(next.learn_low_rate * 100)));
-    setLearnDays(String(next.learn_window_days));
-    setJudgedReview(next.judged_review);
-    setAnalysisKeyInput("");
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [workspace?.id]);
-
-  const draft: RoutingSettings = useMemo(
-    () => ({
-      enabled,
-      model,
-      judge_enabled: judgeEnabled,
-      analysis: {
-        enabled: analysisEnabled,
-        model: analysisModel,
-        base_url: analysisBaseUrl,
-        source: analysisSource,
-        runtime_id: analysisRuntimeId,
-        thinking_level: analysisThinkingLevel,
-      },
-      confidence_threshold: normalizeThreshold(Number(threshold)),
-      stale_review_hours: normalizeStaleReviewHours(Number(staleHours)),
-      base_url: baseUrl,
-      policy_prompt: policyPrompt,
-      usage_priority: usagePriority,
-      allow_upshift: allowUpshift,
-      strongest_gate: strongestGate,
-      consult_per_issue: Math.min(20, Math.max(1, Math.round(Number(consultLimit) || 3))),
-      decision_mode: decisionMode,
-      prefer_continuation: preferContinuation,
-      prefer_idle: preferIdle,
-      learn_from_outcomes: learnFromOutcomes,
-      learn_low_rate: normalizeLearnLowRate(Number(learnRate) / 100),
-      learn_window_days: normalizeLearnWindowDays(Number(learnDays)),
-      judged_review: judgedReview,
-    }),
-    [
-      enabled,
-      model,
-      judgeEnabled,
-      analysisEnabled,
-      analysisModel,
-      analysisBaseUrl,
-      analysisSource,
-      analysisRuntimeId,
-      analysisThinkingLevel,
-      threshold,
-      staleHours,
-      baseUrl,
-      policyPrompt,
-      usagePriority,
-      allowUpshift,
-      strongestGate,
-      decisionMode,
-      consultLimit,
-      preferContinuation,
-      preferIdle,
-      learnFromOutcomes,
-      learnRate,
-      learnDays,
-      judgedReview,
-    ],
-  );
-
-  const autoSave = useAutoSave({
-    value: draft,
-    savedValue: saved,
-    onSave: async (next) => {
-      if (!workspace) return;
-      const updated = await api.updateWorkspace(workspace.id, {
-        settings: withRoutingSettings(workspace.settings, next),
-      });
-      qc.setQueryData(
-        workspaceListOptions().queryKey,
-        (old: Workspace[] | undefined) =>
-          old?.map((ws) => (ws.id === updated.id ? updated : ws)),
-      );
-      // The health report is derived from the settings that were just
-      // replaced, so the cached copy is stale the moment this resolves.
-      // Without this the chip keeps describing the previous configuration for
-      // up to a refetch interval.
-      await qc.invalidateQueries({
-        queryKey: workspaceKeys.routingHealth(workspace.id),
-      });
-    },
-    enabled: !!workspace && canManage,
-    isEqual: (a, b) =>
-      a.enabled === b.enabled &&
-      a.model.trim() === b.model.trim() &&
-      a.judge_enabled === b.judge_enabled &&
-      a.analysis.enabled === b.analysis.enabled &&
-      a.analysis.model.trim() === b.analysis.model.trim() &&
-      a.analysis.base_url.trim() === b.analysis.base_url.trim() &&
-      a.analysis.source === b.analysis.source &&
-      (a.analysis.runtime_id ?? "").trim() === (b.analysis.runtime_id ?? "").trim() &&
-      (a.analysis.thinking_level ?? "low") === (b.analysis.thinking_level ?? "low") &&
-      a.confidence_threshold === b.confidence_threshold &&
-      a.stale_review_hours === b.stale_review_hours &&
-      a.base_url.trim() === b.base_url.trim() &&
-      (a.policy_prompt ?? "").trim() === (b.policy_prompt ?? "").trim() &&
-      a.usage_priority === b.usage_priority &&
-      a.allow_upshift === b.allow_upshift &&
-      a.strongest_gate === b.strongest_gate &&
-      a.consult_per_issue === b.consult_per_issue &&
-      a.decision_mode === b.decision_mode &&
-      a.prefer_continuation === b.prefer_continuation &&
-      a.prefer_idle === b.prefer_idle &&
-      a.learn_from_outcomes === b.learn_from_outcomes &&
-      a.learn_low_rate === b.learn_low_rate &&
-      a.learn_window_days === b.learn_window_days &&
-      a.judged_review === b.judged_review,
-  });
-
-  // Live health from the server. Without it the fourth state is unreachable:
-  // the stored fields cannot know that the model is rejected or cooling down,
-  // and the routing design deliberately keeps that off every ticket — so a
-  // failure the section did not show would be visible nowhere but the server
-  // log (DENE-633 review, F2).
-  const health = useQuery({
-    ...routingHealthOptions(workspace?.id ?? ""),
-    enabled: !!workspace?.id,
-  });
-
-  const analysisHealth = roleHealth(health.data, "analysis");
-
-  const recheck = useMutation({
-    mutationFn: () => api.checkRoutingHealth(workspace?.id ?? ""),
-    onSuccess: (next) => {
-      qc.setQueryData(workspaceKeys.routingHealth(workspace?.id ?? ""), next);
-    },
-    onError: (error) =>
-      toast.error(error instanceof Error && error.message ? error.message : t(($) => $.routing.health_recheck_failed)),
-  });
-
-  // The key write. Explicit rather than auto-saved (see keyInput), and it
-  // sends the rest of the draft along because the server replaces the whole
-  // settings column — sending the key alone would revert an unsaved model or
-  // endpoint edit made in the same sitting.
-  const saveKey = useMutation({
-    mutationFn: async ({ role, key }: { role: RoutingRole; key: string }) => {
-      if (!workspace) return;
-      const updated = await api.updateWorkspace(workspace.id, {
-        settings:
-          role === "judge"
-            ? withRoutingSettings(workspace.settings, draft, key)
-            : withRoutingSettings(workspace.settings, draft, undefined, key),
-      });
-      qc.setQueryData(
-        workspaceListOptions().queryKey,
-        (old: Workspace[] | undefined) =>
-          old?.map((ws) => (ws.id === updated.id ? updated : ws)),
-      );
-      await qc.invalidateQueries({
-        queryKey: workspaceKeys.routingHealth(workspace.id),
-      });
-    },
-    // The box is emptied either way (below), so a failure must say so —
-    // otherwise an empty box reads as a stored key.
-    onError: (error) =>
-      toast.error(error instanceof Error && error.message ? error.message : t(($) => $.routing.gateway_key_save_error)),
-    // Cleared whichever way it went: on success the key is stored and there
-    // is nothing to show, and on failure leaving a credential in a text box
-    // behind a red message is not something to do to somebody.
-    onSettled: () => setAnalysisKeyInput(""),
-  });
-
-  // The draft wins over the server report while an edit is in flight: a person
-  // who just switched routing off should not keep reading a red chip about the
-  // model they stopped using. Health only decides the enabled/ineffective
-  // split, and only once the draft itself says enabled — and only on the
-  // server's explicit `ineffective`, so a health report that has not caught up
-  // with the switch yet cannot report a fault that does not exist.
-  const state = routingState(draft, health.data);
-  const defaultPrompt =
-    health.data?.default_policy_prompt?.trim() || DEFAULT_ROUTING_POLICY_PROMPT;
-  const shownPrompt = policyPrompt.trim() === "" ? defaultPrompt : policyPrompt;
-
+function RoutingOverview({
+  form,
+  href,
+}: {
+  form: RoutingForm;
+  href: (page?: RoutingPage) => string;
+}) {
+  const { t } = useT("settings");
+  const { draft, canManage } = form;
+  const modelName = draft.analysis.model.trim();
   return (
     <SettingsTab
       title={t(($) => $.routing.title)}
       description={t(($) => $.routing.description)}
+      actions={<SaveState form={form} />}
     >
       <SettingsSection>
-        <StateBanner
-          state={state}
-          health={health.data}
+        <StateLine
+          state={form.state}
+          health={form.health.data}
           canManage={canManage}
-          checking={recheck.isPending}
-          onRecheck={() => recheck.mutate()}
+          checking={form.recheck.isPending}
+          onRecheck={() => form.recheck.mutate()}
         />
-      </SettingsSection>
-
-      <SettingsSection title={t(($) => $.routing.section_title)}><SettingsCard>
-<SettingsRow
+        <SettingsCard>
+          <SettingsRow
             label={t(($) => $.routing.enabled_label)}
             description={t(($) => $.routing.enabled_description)}
           >
             <Switch
-              checked={enabled}
+              checked={draft.enabled}
               disabled={!canManage}
-              onCheckedChange={setEnabled}
+              onCheckedChange={(enabled) => form.set({ enabled })}
               aria-label={t(($) => $.routing.enabled_label)}
             />
           </SettingsRow>
-<SettingsRow
-            label={t(($) => $.routing.stale_hours_label)}
-            description={t(($) => $.routing.stale_hours_description)}
-            size="code"
+          <SettingsRow
+            label={t(($) => $.routing.model_row_label)}
+            description={t(($) => $.routing.model_row_description)}
           >
-            <Input
-              type="number"
-              min={1}
-              max={720}
-              step={1}
-              value={staleHours}
-              // Same gate as the threshold: this row runs only while routing
-              // is on, and it is deliberately not a switch of its own.
-              disabled={!canManage || !enabled}
-              onChange={(e) => setStaleHours(e.target.value)}
-              aria-label={t(($) => $.routing.stale_hours_label)}
-            />
+            <RowLink href={href("model")}>
+              {modelName || t(($) => $.routing.model_unset)}
+            </RowLink>
           </SettingsRow>
-<SettingsRow label={t(($) => $.routing.consult_limit_label)} description={t(($) => $.routing.consult_limit_description)}>
-            <Input type="number" min={1} max={20} className="min-h-11 w-24" aria-label={t(($) => $.routing.consult_limit_label)} disabled={!canManage} value={consultLimit} onChange={(e) => setConsultLimit(e.target.value)} />
-          </SettingsRow></SettingsCard></SettingsSection>
-      <SettingsSection
-        title={t(($) => $.routing.analysis_title)}
-        description={t(($) => $.routing.analysis_description)}
-      >
-        <SettingsCard>
-
-          {analysisSource === "api_gateway" ? <SettingsRow
-            label={t(($) => $.routing.analysis_model_label)}
-            description={t(($) => $.routing.analysis_model_description)}
-            size="text"
+          <SettingsRow
+            label={t(($) => $.routing.rules_row_label)}
+            description={t(($) => $.routing.rules_row_description)}
           >
-            <Input
-              value={analysisModel}
-              disabled={!canManage}
-              placeholder={t(($) => $.routing.model_placeholder)}
-              onChange={(e) => { setAnalysisEnabled(true); setAnalysisModel(e.target.value); }}
-              aria-label={t(($) => $.routing.analysis_model_label)}
-            />
-          </SettingsRow> : null}
-          <SettingsRow label={t(($) => $.routing.analysis_source_label)} description={t(($) => $.routing.analysis_source_description)} size="text">
-            <select
-              className="h-9 w-full rounded-md border border-border bg-background px-3 text-sm"
-              value={analysisSource}
-              disabled={!canManage}
-              onChange={(e) => setAnalysisSource(e.target.value as typeof analysisSource)}
-              aria-label={t(($) => $.routing.analysis_source_label)}
-            >
-              <option value="api_gateway">{t(($) => $.routing.analysis_source_api_gateway)}</option>
-              <option value="runtime_subscription">{t(($) => $.routing.analysis_source_runtime)}</option>
-            </select>
+            <RowLink href={href("rules")}>
+              {canManage ? t(($) => $.routing.row_edit) : t(($) => $.routing.row_view)}
+            </RowLink>
           </SettingsRow>
-          {analysisSource === "runtime_subscription" ? (
-            <>
-              <RuntimePicker runtimes={runtimes} runtimesLoading={runtimesLoading} members={members} currentUserId={userId} selectedRuntimeId={analysisRuntimeId} onSelect={setAnalysisRuntimeId} disabled={!canManage} />
-              <ModelDropdown runtimeId={analysisRuntime?.id ?? null} runtimeOnline={analysisRuntime?.status === "online"} value={analysisModel} onChange={setAnalysisModel} disabled={!canManage || !analysisEnabled || !analysisRuntime} />
-              <ThinkingSettingField label={t(($) => $.routing.analysis_thinking_label)} runtimeId={analysisRuntime?.id ?? null} runtimeOnline={analysisRuntime?.status === "online"} provider={analysisRuntime?.provider ?? ""} model={analysisModel} value={analysisThinkingLevel} canEdit={canManage && analysisEnabled && !!analysisRuntime} onChange={setAnalysisThinkingLevel} />
-            </>
-          ) : null}
-          {analysisSource === "api_gateway" ? <EndpointRows
-            urlLabel={t(($) => $.routing.analysis_url_label)}
-            keyLabel={t(($) => $.routing.analysis_key_label)}
-            baseUrl={analysisBaseUrl}
-            onBaseUrl={setAnalysisBaseUrl}
-            keyInput={analysisKeyInput}
-            onKeyInput={setAnalysisKeyInput}
-            endpoint={analysisHealth}
-            health={health.data}
-            canManage={canManage}
-            saving={saveKey.isPending}
-            onSaveKey={(key) => saveKey.mutate({ role: "analysis", key })}
-          /> : null}
+          <SettingsRow
+            label={t(($) => $.routing.seats_row_label)}
+            description={t(($) => $.routing.seats_row_description)}
+          >
+            <RowLink href={href("seats")}>{t(($) => $.routing.row_view)}</RowLink>
+          </SettingsRow>
         </SettingsCard>
-        <RoleEndpointNote health={health.data} role={analysisHealth} />
-        <GatewayPairNote
-          baseUrl={analysisBaseUrl}
-          keyStored={analysisHealth?.gateway_key_set === true}
-        />
+        {canManage ? null : <LockedNote />}
       </SettingsSection>
 
+      <details className="group">
+        <summary className="flex min-h-11 cursor-pointer items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground">
+          <ChevronRight aria-hidden="true" className="size-4 transition-transform group-open:rotate-90" />
+          {t(($) => $.routing.more)}
+        </summary>
+        <div className="mt-3">
+          <MoreSettings form={form} />
+        </div>
+      </details>
+    </SettingsTab>
+  );
+}
+
+/** A row's way into its sub-page: the current value, then a chevron. */
+function RowLink({ href, children }: { href: string; children: ReactNode }) {
+  return (
+    <AppLink
+      href={href}
+      className="-mr-2 flex min-h-11 min-w-0 max-w-48 items-center gap-1 rounded-md px-2 text-body text-muted-foreground hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring sm:max-w-64"
+    >
+      <span className="truncate">{children}</span>
+      <ChevronRight aria-hidden="true" className="size-4 shrink-0" />
+    </AppLink>
+  );
+}
+
+function LockedNote() {
+  const { t } = useT("settings");
+  return (
+    <p className="px-0.5 text-caption leading-5 text-muted-foreground">
+      {t(($) => $.routing.locked_member)}
+    </p>
+  );
+}
+
+/** The five knobs that stay adjustable outside the four rows. */
+function MoreSettings({ form }: { form: RoutingForm }) {
+  const { t } = useT("settings");
+  const { draft, canManage } = form;
+  return (
+    <SettingsCard>
+      <SettingsRow
+        label={t(($) => $.routing.stale_hours_label)}
+        description={t(($) => $.routing.stale_hours_description)}
+        size="code"
+      >
+        <Input
+          type="number"
+          min={1}
+          max={720}
+          step={1}
+          value={form.staleHoursText}
+          disabled={!canManage}
+          onChange={(e) => form.setStaleHoursText(e.target.value)}
+          aria-label={t(($) => $.routing.stale_hours_label)}
+        />
+      </SettingsRow>
+      <SettingsRow
+        label={t(($) => $.routing.strongest_gate_label)}
+        description={t(($) => $.routing.strongest_gate_description)}
+      >
+        <Switch
+          checked={draft.strongest_gate}
+          disabled={!canManage}
+          onCheckedChange={(strongest_gate) => form.set({ strongest_gate })}
+          aria-label={t(($) => $.routing.strongest_gate_label)}
+        />
+      </SettingsRow>
+      <SettingsRow
+        label={t(($) => $.routing.load_label)}
+        description={
+          draft.prefer_idle
+            ? t(($) => $.routing.load_description_on)
+            : t(($) => $.routing.load_description_shadow)
+        }
+      >
+        <Switch
+          checked={draft.prefer_idle}
+          disabled={!canManage}
+          onCheckedChange={(prefer_idle) => form.set({ prefer_idle })}
+          aria-label={t(($) => $.routing.load_label)}
+        />
+      </SettingsRow>
+      <SettingsRow
+        label={t(($) => $.routing.learn_label)}
+        description={
+          draft.learn_from_outcomes
+            ? t(($) => $.routing.learn_description_on)
+            : t(($) => $.routing.learn_description_shadow)
+        }
+      >
+        <Switch
+          checked={draft.learn_from_outcomes}
+          disabled={!canManage}
+          onCheckedChange={(learn_from_outcomes) => form.set({ learn_from_outcomes })}
+          aria-label={t(($) => $.routing.learn_label)}
+        />
+      </SettingsRow>
+      <SettingsRow
+        label={t(($) => $.routing.consult_limit_label)}
+        description={t(($) => $.routing.consult_limit_description)}
+        size="code"
+      >
+        <Input
+          type="number"
+          min={1}
+          max={20}
+          value={form.consultText}
+          disabled={!canManage}
+          onChange={(e) => form.setConsultText(e.target.value)}
+          aria-label={t(($) => $.routing.consult_limit_label)}
+        />
+      </SettingsRow>
+    </SettingsCard>
+  );
+}
+
+function RoutingSubPage({
+  page,
+  form,
+  backHref,
+}: {
+  page: RoutingPage;
+  form: RoutingForm;
+  backHref: string;
+}) {
+  const { t } = useT("settings");
+  const title = {
+    model: t(($) => $.routing.model_row_label),
+    rules: t(($) => $.routing.rules_row_label),
+    seats: t(($) => $.routing.seats_row_label),
+  }[page];
+  const description = {
+    model: t(($) => $.routing.model_page_description),
+    rules: t(($) => $.routing.rules_page_description),
+    seats: t(($) => $.routing.seats_page_description),
+  }[page];
+  return (
+    <SettingsTab
+      title={title}
+      description={description}
+      actions={page === "seats" ? null : <SaveState form={form} />}
+      breadcrumb={
+        <nav
+          aria-label={t(($) => $.routing.title)}
+          className="flex items-center gap-1.5 text-caption text-muted-foreground"
+        >
+          <AppLink
+            href={backHref}
+            className="flex min-h-11 items-center rounded-sm hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring"
+          >
+            {t(($) => $.routing.title)}
+          </AppLink>
+          <ChevronRight aria-hidden="true" className="size-3" />
+          <span aria-current="page" className="truncate text-foreground">
+            {title}
+          </span>
+        </nav>
+      }
+    >
+      {page === "model" ? <ModelBlock form={form} /> : null}
+      {page === "rules" ? <RulesBlock form={form} /> : null}
+      {page === "seats" ? <SeatsBlock form={form} /> : null}
+      {form.canManage || page === "seats" ? null : <LockedNote />}
+    </SettingsTab>
+  );
+}
+
+/** The model that reads each ticket and answers the rule table's questions. */
+function ModelBlock({ form }: { form: RoutingForm }) {
+  const { t } = useT("settings");
+  const { draft, canManage, wsId } = form;
+  const { data: runtimes = [], isLoading: runtimesLoading } = useQuery(runtimeListOptions(wsId));
+  const { data: members = [] } = useQuery(memberListOptions(wsId));
+  const analysis = draft.analysis;
+  const source = analysis.source ?? "api_gateway";
+  const runtimeId = analysis.runtime_id ?? "";
+  const runtime = runtimes.find((r) => r.id === runtimeId) ?? null;
+  const analysisHealth = roleHealth(form.health.data, "analysis");
+  return (
+    <SettingsSection>
+      <SettingsCard>
+        <SettingsRow
+          label={t(($) => $.routing.analysis_source_label)}
+          description={t(($) => $.routing.analysis_source_description)}
+          size="text"
+        >
+          <select
+            className="h-11 w-full rounded-md border border-border bg-background px-3 text-sm"
+            value={source}
+            disabled={!canManage}
+            onChange={(e) => form.setAnalysis({ source: e.target.value as typeof source })}
+            aria-label={t(($) => $.routing.analysis_source_label)}
+          >
+            <option value="api_gateway">{t(($) => $.routing.analysis_source_api_gateway)}</option>
+            <option value="runtime_subscription">{t(($) => $.routing.analysis_source_runtime)}</option>
+          </select>
+        </SettingsRow>
+        {source === "api_gateway" ? (
+          <>
+            <SettingsRow
+              label={t(($) => $.routing.analysis_model_label)}
+              description={t(($) => $.routing.analysis_model_description)}
+              size="text"
+            >
+              <Input
+                value={analysis.model}
+                disabled={!canManage}
+                placeholder={t(($) => $.routing.model_placeholder)}
+                onChange={(e) => form.setAnalysis({ enabled: true, model: e.target.value })}
+                aria-label={t(($) => $.routing.analysis_model_label)}
+              />
+            </SettingsRow>
+            <EndpointRows
+              urlLabel={t(($) => $.routing.analysis_url_label)}
+              keyLabel={t(($) => $.routing.analysis_key_label)}
+              baseUrl={analysis.base_url}
+              onBaseUrl={(base_url) => form.setAnalysis({ base_url })}
+              keyInput={form.analysisKeyInput}
+              onKeyInput={form.setAnalysisKeyInput}
+              endpoint={analysisHealth}
+              health={form.health.data}
+              canManage={canManage}
+              saving={form.saveKey.isPending}
+              onSaveKey={(key) => form.saveKey.mutate({ role: "analysis", key })}
+            />
+          </>
+        ) : (
+          <>
+            <RuntimePicker
+              runtimes={runtimes}
+              runtimesLoading={runtimesLoading}
+              members={members}
+              currentUserId={form.userId}
+              selectedRuntimeId={runtimeId}
+              onSelect={(runtime_id) => form.setAnalysis({ runtime_id })}
+              disabled={!canManage}
+            />
+            <ModelDropdown
+              runtimeId={runtime?.id ?? null}
+              runtimeOnline={runtime?.status === "online"}
+              value={analysis.model}
+              onChange={(model) => form.setAnalysis({ model })}
+              disabled={!canManage || !analysis.enabled || !runtime}
+            />
+            <ThinkingSettingField
+              label={t(($) => $.routing.analysis_thinking_label)}
+              runtimeId={runtime?.id ?? null}
+              runtimeOnline={runtime?.status === "online"}
+              provider={runtime?.provider ?? ""}
+              model={analysis.model}
+              value={analysis.thinking_level ?? "low"}
+              canEdit={canManage && analysis.enabled && !!runtime}
+              onChange={(thinking_level) => form.setAnalysis({ thinking_level })}
+            />
+          </>
+        )}
+      </SettingsCard>
+      {source === "api_gateway" ? (
+        <>
+          <RoleEndpointNote health={form.health.data} role={analysisHealth} />
+          <GatewayPairNote
+            baseUrl={analysis.base_url}
+            keyStored={analysisHealth?.gateway_key_set === true}
+          />
+        </>
+      ) : null}
+    </SettingsSection>
+  );
+}
+
+/** Who does what: the division rules, the prompt, and the tier table. */
+function RulesBlock({ form }: { form: RoutingForm }) {
+  const { t } = useT("settings");
+  const { draft, canManage } = form;
+  const defaultPrompt =
+    form.health.data?.default_policy_prompt?.trim() || DEFAULT_ROUTING_POLICY_PROMPT;
+  const prompt = draft.policy_prompt ?? "";
+  const shownPrompt = prompt.trim() === "" ? defaultPrompt : prompt;
+  return (
+    <>
+      <RoutingDispatchSection wsId={form.wsId} canManage={canManage} />
       <SettingsSection
         title={t(($) => $.routing.policy_label)}
+        description={t(($) => $.routing.policy_description)}
         action={
-          <div className="flex items-center gap-2">
-            <SettingsSaveState
-              status={autoSave.status}
-              savingLabel={t(($) => $.routing.policy_saving)}
-              savedLabel={t(($) => $.routing.policy_saved)}
-              errorLabel={t(($) => $.routing.policy_save_error)}
-            />
-            {canManage ? (
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                onClick={() => setPolicyPrompt("")}
-              >
-                {t(($) => $.routing.policy_restore)}
-              </Button>
-            ) : null}
-          </div>
+          canManage ? (
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={() => form.set({ policy_prompt: "" })}
+            >
+              {t(($) => $.routing.policy_restore)}
+            </Button>
+          ) : null
         }
       >
         <Textarea
@@ -483,238 +452,36 @@ export function RoutingTab() {
           aria-label={t(($) => $.routing.policy_label)}
           onChange={(event) => {
             const next = event.target.value;
-            setPolicyPrompt(next.trim() === defaultPrompt.trim() ? "" : next);
+            form.set({ policy_prompt: next.trim() === defaultPrompt.trim() ? "" : next });
           }}
           className="min-h-36 text-caption leading-5"
         />
-        {autoSave.status === "error" ? (
+        {form.autoSave.status === "error" ? (
           <p className="text-caption text-destructive" role="alert">
             {t(($) => $.routing.policy_save_error)}
           </p>
         ) : null}
       </SettingsSection>
+      <RuleTableSection table={form.health.data?.rules} />
+    </>
+  );
+}
 
-      <RuleTableSection table={health.data?.rules} />
-      <details className="space-y-6"><summary className="min-h-11 cursor-pointer py-3 text-sm">{t(($) => $.routing.advanced)}</summary>
-      <SettingsSection title={t(($) => $.routing.section_title)}>
-        <SettingsCard>
-
-
-          <SettingsRow
-            label={t(($) => $.routing.threshold_label)}
-            description={t(($) => $.routing.threshold_description)}
-            size="code"
-          >
-            <Input
-              type="number"
-              min={0.05}
-              max={1}
-              step={0.05}
-              value={threshold}
-              // Greyed out while routing is off, so the number cannot look
-              // like it is doing something it is not.
-              disabled={!canManage || !enabled}
-              onChange={(e) => setThreshold(e.target.value)}
-              aria-label={t(($) => $.routing.threshold_label)}
-            />
-          </SettingsRow>
-
-
-
-          <SettingsRow
-            label={t(($) => $.routing.usage_priority_label)}
-            description={t(($) => $.routing.usage_priority_description)}
-          >
-            <Switch
-              checked={usagePriority}
-              disabled={!canManage || !enabled}
-              onCheckedChange={setUsagePriority}
-              aria-label={t(($) => $.routing.usage_priority_label)}
-            />
-          </SettingsRow>
-
-          <SettingsRow
-            label={t(($) => $.routing.allow_upshift_label)}
-            description={t(($) => $.routing.allow_upshift_description)}
-          >
-            <Switch
-              // Upshift picks by usage, so it has nothing to go on while
-              // usage priority is off.
-              checked={allowUpshift && usagePriority}
-              disabled={!canManage || !enabled || !usagePriority}
-              onCheckedChange={setAllowUpshift}
-              aria-label={t(($) => $.routing.allow_upshift_label)}
-            />
-          </SettingsRow>
-
-
-
-
-
-          <SettingsRow size="select-wide" label={t(($) => $.routing.decision_mode_label)} description={t(($) => $.routing.decision_mode_description)}>
-            <select className="h-11 w-full rounded-md border bg-background px-3 text-sm" value={decisionMode}
-              disabled={!canManage} aria-label={t(($) => $.routing.decision_mode_label)}
-              onChange={(event) => setDecisionMode(event.target.value as "legacy" | "shadow" | "active")}>
-              <option value="legacy">{t(($) => $.routing.decision_legacy)}</option>
-              <option value="shadow">{t(($) => $.routing.decision_shadow)}</option>
-              <option value="active" disabled={!analysisEnabled}>{t(($) => $.routing.decision_active)}</option>
-            </select>
-          </SettingsRow>
-
-
-
-          <SettingsRow
-            label={t(($) => $.routing.strongest_gate_label)}
-            description={t(($) => $.routing.strongest_gate_description)}
-          >
-            <Switch
-              checked={strongestGate}
-              disabled={!canManage || !enabled}
-              onCheckedChange={setStrongestGate}
-              aria-label={t(($) => $.routing.strongest_gate_label)}
-            />
-          </SettingsRow>
-
-          <SettingsRow
-            label={t(($) => $.routing.continuation_label)}
-            description={
-              preferContinuation
-                ? t(($) => $.routing.continuation_description_on)
-                : t(($) => $.routing.continuation_description_shadow)
-            }
-          >
-            <Switch
-              checked={preferContinuation}
-              disabled={!canManage || !enabled}
-              onCheckedChange={setPreferContinuation}
-              aria-label={t(($) => $.routing.continuation_label)}
-            />
-          </SettingsRow>
-
-          <SettingsRow
-            label={t(($) => $.routing.load_label)}
-            description={
-              preferIdle
-                ? t(($) => $.routing.load_description_on)
-                : t(($) => $.routing.load_description_shadow)
-            }
-          >
-            <Switch
-              checked={preferIdle}
-              disabled={!canManage || !enabled}
-              onCheckedChange={setPreferIdle}
-              aria-label={t(($) => $.routing.load_label)}
-            />
-          </SettingsRow>
-
-          <SettingsRow
-            label={t(($) => $.routing.learn_label)}
-            description={
-              learnFromOutcomes
-                ? t(($) => $.routing.learn_description_on)
-                : t(($) => $.routing.learn_description_shadow)
-            }
-          >
-            <Switch
-              checked={learnFromOutcomes}
-              disabled={!canManage || !enabled}
-              onCheckedChange={setLearnFromOutcomes}
-              aria-label={t(($) => $.routing.learn_label)}
-            />
-          </SettingsRow>
-
-          <SettingsRow
-            label={t(($) => $.routing.learn_rate_label)}
-            description={t(($) => $.routing.learn_rate_description)}
-            size="code"
-          >
-            <Input
-              type="number"
-              min={1}
-              max={100}
-              step={5}
-              value={learnRate}
-              // The rate and window also drive the shadow line, so they stay
-              // editable while the switch is off.
-              disabled={!canManage || !enabled}
-              onChange={(e) => setLearnRate(e.target.value)}
-              aria-label={t(($) => $.routing.learn_rate_label)}
-            />
-          </SettingsRow>
-
-          <SettingsRow
-            label={t(($) => $.routing.learn_window_label)}
-            description={t(($) => $.routing.learn_window_description)}
-            size="code"
-          >
-            <Input
-              type="number"
-              min={1}
-              max={365}
-              step={1}
-              value={learnDays}
-              disabled={!canManage || !enabled}
-              onChange={(e) => setLearnDays(e.target.value)}
-              aria-label={t(($) => $.routing.learn_window_label)}
-            />
-          </SettingsRow>
-
-        </SettingsCard>
-        <p
-          className="px-0.5 text-caption leading-5 text-muted-foreground"
-          data-mode={routingMode(draft)}
-        >
-          {t(($) => $.routing.modes[routingMode(draft)])}
-        </p>
-      </SettingsSection>
-
-      <RoutingShadowSection wsId={workspace?.id ?? ""} canRun={canManage && analysisEnabled} />
-
-      <RoutingDispatchSection wsId={workspace?.id ?? ""} canManage={canManage} />
-
-      <SettingsSection
-        title={t(($) => $.routing.quota_title)}
-        description={t(($) => $.routing.quota_description)}
-      >
-        <SettingsCard>
-          {(health.data?.provider_quotas ?? []).map((quota) => {
-            let value = t(($) => $.routing.quota_unknown);
-            if (quota.status === "quota_exhausted") {
-              value = t(($) => $.routing.quota_exhausted);
-            } else if (quota.status === "available" && quota.used_percent != null) {
-              value = t(($) => $.routing.quota_available, {
-                percent: Math.round(quota.used_percent),
-              });
-            }
-            const reset = quota.reset_at
-              ? t(($) => $.routing.quota_resets, { when: quota.reset_at })
-              : "";
-            const updated = quota.observed_at
-              ? t(($) => $.routing.quota_updated, { when: quota.observed_at })
-              : "";
-            return (
-              <SettingsRow key={quota.provider} label={providerLabel(quota.provider)}>
-                <span className="font-mono text-caption tabular-nums text-muted-foreground">
-                  {[value, reset, updated].filter(Boolean).join(" · ")}
-                </span>
-              </SettingsRow>
-            );
-          })}
-        </SettingsCard>
-      </SettingsSection>
-
-      <RoutingDomainsSection wsId={workspace?.id ?? ""} canManage={canManage} />
-
+/** Which seat takes which tier, and what each one is good at. */
+function SeatsBlock({ form }: { form: RoutingForm }) {
+  const { t } = useT("settings");
+  return (
+    <>
       <SettingsSection
         title={t(($) => $.routing.seats_title)}
         description={t(($) => $.routing.filters_placeholder)}
       >
         <SettingsCard>
-          <RoutingSeatsTable wsId={workspace?.id ?? ""} canManage={canManage} />
+          <RoutingSeatsTable wsId={form.wsId} canManage={form.canManage} />
         </SettingsCard>
       </SettingsSection>
-      </details>
-    </SettingsTab>
+      <RoutingDomainsSection wsId={form.wsId} canManage={form.canManage} />
+    </>
   );
 }
 
@@ -890,19 +657,6 @@ export function ruleCondition(
   return parts.length ? parts.join(" · ") : words.catchAll;
 }
 
-function providerLabel(provider: string): string {
-  switch (provider) {
-    case "claude":
-      return "Claude";
-    case "codex":
-      return "Codex";
-    case "grok":
-      return "Grok";
-    default:
-      return provider;
-  }
-}
-
 /**
  * The half-filled pair.
  *
@@ -933,13 +687,13 @@ function GatewayPairNote({
 }
 
 /**
- * The four states, each with its own chip and its own sentence.
+ * The four states, each with its own colour and its own sentence.
  *
  * `incomplete` is the one that must never be collapsed into `enabled`:
  * somebody who flipped the switch and walked away will otherwise believe
  * routing is working while the product behaves exactly as it did before.
  */
-function StateBanner({
+function StateLine({
   state,
   health,
   canManage,
@@ -953,67 +707,47 @@ function StateBanner({
   onRecheck: () => void;
 }) {
   const { t } = useT("settings");
-  const chip: Record<
-    RoutingState,
-    { variant: "secondary" | "destructive" | "default"; className?: string }
-  > = {
-    off: { variant: "secondary" },
-    incomplete: {
-      variant: "secondary",
-      className: "bg-warning/15 text-warning-foreground",
-    },
-    enabled: { variant: "default", className: "bg-success/15 text-success" },
-    ineffective: { variant: "destructive" },
+  const dot: Record<RoutingState, string> = {
+    off: "bg-muted-foreground/40",
+    incomplete: "bg-warning",
+    enabled: "bg-success",
+    ineffective: "bg-destructive",
   };
 
-  const lastCheckedLabel = (
-    translate: typeof t,
-    unixSeconds: number,
-  ): string => {
+  const lastCheckedLabel = (unixSeconds: number): string => {
     const { unit, n } = timeAgoBucket(unixSeconds);
-    if (unit === "now") return translate(($) => $.routing.health_time_just_now);
-    if (unit === "minutes")
-      return translate(($) => $.routing.health_time_minutes_ago, { n });
-    return translate(($) => $.routing.health_time_hours_ago, { n });
+    if (unit === "now") return t(($) => $.routing.health_time_just_now);
+    if (unit === "minutes") return t(($) => $.routing.health_time_minutes_ago, { n });
+    return t(($) => $.routing.health_time_hours_ago, { n });
   };
 
-  const detail =
-    state === "ineffective" && health?.reason
-      ? `${t(($) => $.routing.states.ineffective.detail)} ${t(($) => $.routing.health_reason_label)}: ${health.reason}`
-      : t(($) => $.routing.states[state].detail);
+  let detail: string = t(($) => $.routing.states[state].detail);
+  if (state === "ineffective" && health?.reason) {
+    detail = `${detail} ${t(($) => $.routing.health_reason_label)}: ${health.reason}`;
+  } else if (state === "enabled") {
+    detail = health?.last_success_at
+      ? t(($) => $.routing.health_connected, { when: lastCheckedLabel(health.last_success_at) })
+      : t(($) => $.routing.health_never_checked);
+  }
+  if (state === "ineffective" && health?.retry_after_seconds) {
+    detail = `${detail} ${t(($) => $.routing.health_retry_in, {
+      minutes: Math.max(1, Math.round(health.retry_after_seconds / 60)),
+    })}`;
+  }
 
   return (
-    <div className="flex flex-col gap-2 rounded-lg border border-surface-border px-4 py-3 sm:flex-row sm:items-start sm:gap-4">
-      <Badge
-        variant={chip[state].variant}
-        className={chip[state].className}
-        data-state={state}
-      >
-        {t(($) => $.routing.states[state].chip)}
-      </Badge>
-      <div className="flex min-w-0 flex-1 flex-col gap-1">
-        <p className="text-caption leading-5 text-muted-foreground">{detail}</p>
-        {state === "enabled" && (
-          <p className="text-caption leading-5 text-muted-foreground">
-            {health?.last_success_at
-              ? t(($) => $.routing.health_connected, {
-                  when: lastCheckedLabel(t, health.last_success_at),
-                })
-              : t(($) => $.routing.health_never_checked)}
-          </p>
-        )}
-        {state === "ineffective" && health?.retry_after_seconds ? (
-          <p className="text-caption leading-5 text-muted-foreground">
-            {t(($) => $.routing.health_retry_in, {
-              minutes: Math.max(1, Math.round(health.retry_after_seconds / 60)),
-            })}
-          </p>
-        ) : null}
-      </div>
-      {/* Offered for both live states, not just the broken one: a person who
-          just typed a model identifier wants to know it works before they
-          find out from a ticket that never got dispatched. */}
-      {canManage && (state === "enabled" || state === "ineffective") && (
+    <div className="flex min-h-11 items-center gap-3 px-0.5">
+      <span aria-hidden="true" className={cn("size-2 shrink-0 rounded-full", dot[state])} />
+      <p className="min-w-0 flex-1 text-caption leading-5 text-muted-foreground">
+        <span className="font-medium text-foreground" data-state={state}>
+          {t(($) => $.routing.states[state].chip)}
+        </span>
+        {" · "}
+        {detail}
+      </p>
+      {/* Offered for both live states: somebody who just typed a model id
+          wants to know it works before a ticket finds out for them. */}
+      {canManage && (state === "enabled" || state === "ineffective") ? (
         <Button
           type="button"
           variant="outline"
@@ -1022,11 +756,9 @@ function StateBanner({
           onClick={onRecheck}
           className="shrink-0"
         >
-          {checking
-            ? t(($) => $.routing.health_checking)
-            : t(($) => $.routing.health_recheck)}
+          {checking ? t(($) => $.routing.health_checking) : t(($) => $.routing.health_recheck)}
         </Button>
-      )}
+      ) : null}
     </div>
   );
 }

@@ -104,7 +104,7 @@ func (h *Handler) rulePick(
 		// Handing a ticket to a person is not something routing decides.
 		return ruling
 	}
-	if h.Routing == nil || !h.Routing.Active(r.Context(), workspaceID) {
+	if !h.routingActiveFor(r.Context(), workspaceID, scene.Project) {
 		return ruling
 	}
 	if resultingStatus == "todo" || resultingStatus == "backlog" {
@@ -427,4 +427,23 @@ func (h *Handler) seatForQuote(ctx context.Context, workspaceID string, assignee
 		return pgtype.UUID{}, false
 	}
 	return seat.ID, true
+}
+
+// routingActiveFor reports whether routing will judge a ticket in this
+// project: the workspace switch is on and the project has not turned routing
+// off (DENE-1966). No project, or one that cannot be read, follows the
+// workspace switch alone.
+func (h *Handler) routingActiveFor(ctx context.Context, workspaceID string, projectID pgtype.UUID) bool {
+	if h.Routing == nil || !h.Routing.Active(ctx, workspaceID) {
+		return false
+	}
+	if !projectID.Valid {
+		return true
+	}
+	wsID, err := util.ParseUUID(workspaceID)
+	if err != nil {
+		return true
+	}
+	project, err := h.Queries.GetProjectInWorkspace(ctx, db.GetProjectInWorkspaceParams{ID: projectID, WorkspaceID: wsID})
+	return err != nil || !project.RoutingDisabled
 }

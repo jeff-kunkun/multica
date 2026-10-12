@@ -28,19 +28,18 @@ var workspaceRoutingSetCmd = &cobra.Command{
 --enabled on|off, --policy-prompt-file, --model (with --source/--runtime),
 --consult-per-issue, and --stale-review-hours.
 
-A single reasoning model chooses the tier and seat with a reason. Consult and
-review target the executor's next higher tier. Series preferences only rank
-candidates. The strongest tier is never a fallback; review cannot select its
-own executor. One rejected review returns to the executor; the second escalates.
+Routing has one path: the analysis model answers the rule table's questions,
+the table sets the tier, and the judge model (when on) may raise it one rung.
+Consult and review target the executor's next higher tier. The strongest tier
+is never a fallback; review cannot select its own executor.
 
-Migration: legacy preserves pre-cutover decisions; shadow records one-model
-comparisons without changing the reference-rule tier; active uses reasoning.
-Run workspace routing shadow --days 30 before switching --decision-mode active.
+Run workspace routing shadow --days 30 to compare the analysis model against
+recent tickets; it is a one-off comparison and never changes dispatch.
 
-The remaining tuning flags are advanced compatibility settings. Continuation,
-load, learning, upshift and the legacy strongest gate do not override active
-reasoning selection. --judged-review is retained for old clients and has no
-effect: review follows the common purpose selector.`,
+The remaining tuning flags (continuation, load, learning, usage priority,
+upshift, strongest gate, judged review, confidence threshold) are not shown in
+the settings page; stored values keep applying and these flags change them.
+Turn routing off for one project with: multica project update <id> --routing off`,
 	Args: cobra.NoArgs,
 	RunE: runWorkspaceRoutingSet,
 }
@@ -49,7 +48,6 @@ func init() {
 	workspaceRoutingSetCmd.Flags().String("enabled", "", "Routing master switch: on or off")
 	workspaceRoutingSetCmd.Flags().String("policy-prompt-file", "", "Read the routing prompt from a UTF-8 file; an empty file restores the default reference prompt")
 	workspaceRoutingSetCmd.Flags().String("consult-per-issue", "", "Consult limit per issue, 1..20 (default 3)")
-	workspaceRoutingSetCmd.Flags().String("decision-mode", "", "legacy, shadow (compare without changing dispatch), or active (reasoning model chooses); run routing shadow first")
 
 	workspaceRoutingSetCmd.Flags().String("output", "json", "Output format: json")
 
@@ -128,8 +126,8 @@ func routingView(block map[string]any) map[string]any {
 	_ = json.Unmarshal(raw, &fallbackSettings)
 	return map[string]any{
 		"enabled": fallbackSettings.Enabled, "policy_prompt": fallbackSettings.EffectivePolicyPrompt(),
-		"decision_mode": fallbackSettings.EffectiveDecisionMode(), "consult_per_issue": fallbackSettings.ConsultLimit(),
-		"source": analysis["source"], "runtime_id": analysis["runtime_id"], "model": analysis["model"], "thinking_level": analysis["thinking_level"],
+		"consult_per_issue": fallbackSettings.ConsultLimit(),
+		"source":            analysis["source"], "runtime_id": analysis["runtime_id"], "model": analysis["model"], "thinking_level": analysis["thinking_level"],
 		"prefer_continuation": continuation, "continuation_mode": switchMode(continuation),
 		"prefer_idle": idle, "load_mode": switchMode(idle),
 		"learn_from_outcomes": learn, "learn_mode": switchMode(learn), "learn_low_rate": lowRate, "learn_window_days": windowDays,
@@ -262,10 +260,6 @@ func runWorkspaceRoutingSet(cmd *cobra.Command, _ []string) error {
 			return fmt.Errorf("--consult-per-issue must be an integer from 1 to 20")
 		}
 		block["consult_per_issue"] = n
-	}
-	decisionMode, _ := cmd.Flags().GetString("decision-mode")
-	if decisionMode != "" {
-		block["decision_mode"] = decisionMode
 	}
 	if continuation != "" {
 		block["prefer_continuation"] = continuation == "on"

@@ -89,9 +89,6 @@ func (r *Router) assignmentComment(
 	var b strings.Builder
 	b.WriteString("## 自动选派\n\n")
 	reason, detail := executorPickReason(issue, needExecutor, executor, executorSource, dec.RaisedFrom != "")
-	if dec.Decider == DeciderReasoning && executorSource == pickJudge {
-		detail = "推理模型定档选人：" + v.Reason
-	}
 	b.WriteString(PickReasonLine(reason, detail))
 	if continuationNote != "" {
 		b.WriteString(continuationNote + "\n\n")
@@ -142,8 +139,6 @@ func (r *Router) assignmentComment(
 	case executor != nil && executorSource == pickFallback:
 		b.WriteString(fmt.Sprintf("- **执行席**：%s（%s档，**兜底档**——%s）→ 仍然%s。觉得档位不对直接改，改了路由不会再碰\n",
 			executor.Name, executor.TierLabel, fallbackCause(v.ExecutorTier, v.ExecutorConfidence, threshold), next))
-	case executor != nil && dec.Decider == DeciderReasoning:
-		b.WriteString(fmt.Sprintf("- **执行席**：%s（%s档，推理模型：%s）→ %s\n", executor.Name, executor.TierLabel, v.Reason, next))
 	case executor != nil && dec.Decider == DeciderRule:
 		b.WriteString(fmt.Sprintf("- **执行席**：%s（%s档，%s）→ %s\n",
 			executor.Name, executor.TierLabel, ruleTierWhy(dec), next))
