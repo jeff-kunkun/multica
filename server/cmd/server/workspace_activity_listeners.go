@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/multica-ai/multica/server/internal/events"
+	"github.com/multica-ai/multica/server/internal/handler"
 	"github.com/multica-ai/multica/server/internal/service"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
@@ -22,7 +23,9 @@ import (
 // dropped; the stream never breaks the thing that produced the event.
 func registerWorkspaceActivityListeners(bus *events.Bus, queries *db.Queries) {
 	ctx := context.Background()
+	visible := handler.NewTargetVisibility(queries)
 	route := func(in service.WorkspaceActivityInput) {
+		in.Visible = visible
 		if _, err := service.RouteWorkspaceActivity(ctx, queries, in); err != nil {
 			slog.Warn("workspace activity: route failed", "error", err, "type", in.ActivityType)
 		}

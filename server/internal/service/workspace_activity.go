@@ -73,7 +73,8 @@ type WorkspaceEventBody struct {
 	Route            string            `json:"route,omitempty"`
 	Fields           []string          `json:"fields,omitempty"`
 	EntityID         string            `json:"entity_id,omitempty"`
-	ActorKind        string            `json:"actor_kind"` // member | agent | bot | system
+	ProjectID        string            `json:"project_id,omitempty"` // the project the event belongs to: the send gate asks whether the person can still open it
+	ActorKind        string            `json:"actor_kind"`           // member | agent | bot | system
 	ActorID          string            `json:"actor_id,omitempty"`
 	ActorName        string            `json:"actor_name,omitempty"`
 	ViaBotID         string            `json:"via_bot_id,omitempty"`
@@ -220,6 +221,8 @@ func SafeFieldNames(names []string) []string {
 type WorkspaceActivityInput struct {
 	WorkspaceID  pgtype.UUID
 	IssueID      pgtype.UUID // set when the event belongs to a ticket: the ticket gate then applies
+	Target       WriteTarget // the ticket, project and chat a write touched; merged with IssueID
+	Visible      TargetVisibility
 	ActivityType string
 	DedupeKey    string
 	Body         WorkspaceEventBody
@@ -292,6 +295,12 @@ func RouteWorkspaceActivity(ctx context.Context, q *db.Queries, in WorkspaceActi
 		occurred = time.Now()
 	}
 	in.Body.Fields = SafeFieldNames(in.Body.Fields)
+	if in.IssueID.Valid {
+		in.Target.IssueID = in.IssueID
+	}
+	if in.Target.ProjectID.Valid {
+		in.Body.ProjectID = util.UUIDToString(in.Target.ProjectID)
+	}
 	body, err := marshalWorkspaceBody(in, occurred)
 	if err != nil {
 		return 0, err
@@ -315,6 +324,9 @@ func RouteWorkspaceActivity(ctx context.Context, q *db.Queries, in WorkspaceActi
 		if mErr != nil || !RoleCanSeeFamily(member.Role, in.Body.Family) {
 			continue
 		}
+		if in.Target.Any() && (in.Visible == nil || !in.Visible(ctx, b.WorkspaceID, b.UserID, in.Target)) {
+			continue // the person could not open what this is about; no judgement means no push
+		}
 		channel, chErr := q.GetHumanChannel(ctx, db.GetHumanChannelParams{WorkspaceID: b.WorkspaceID, UserID: b.UserID})
 		if chErr != nil || !HumanChannelUsable(channel) {
 			continue
@@ -328,20 +340,21 @@ func RouteWorkspaceActivity(ctx context.Context, q *db.Queries, in WorkspaceActi
 			}
 		}
 		_, createErr := q.CreateHumanNeededEvent(ctx, db.CreateHumanNeededEventParams{
-			WorkspaceID:  b.WorkspaceID,
-			BotID:        b.BotID,
-			BindingID:    b.ID,
-			TargetUserID: b.UserID,
-			EventType:    HumanEventActivity,
-			Kind:         in.ActivityType,
-			DedupeKey:    in.DedupeKey,
-			IssueID:      in.IssueID,
-			CallerType:   callerType,
-			CallerID:     in.ActorID,
-			Options:      []byte("[]"),
-			Urgency:      HumanUrgencyNormal,
-			ExpiresAt:    pgtype.Timestamptz{Time: time.Now().Add(activityRetention), Valid: true},
-			Activity:     body.raw,
+			WorkspaceID:   b.WorkspaceID,
+			BotID:         b.BotID,
+			BindingID:     b.ID,
+			TargetUserID:  b.UserID,
+			EventType:     HumanEventActivity,
+			Kind:          in.ActivityType,
+			DedupeKey:     in.DedupeKey,
+			IssueID:       in.Target.IssueID,
+			ChatSessionID: in.Target.ChatSessionID,
+			CallerType:    callerType,
+			CallerID:      in.ActorID,
+			Options:       []byte("[]"),
+			Urgency:       HumanUrgencyNormal,
+			ExpiresAt:     pgtype.Timestamptz{Time: time.Now().Add(activityRetention), Valid: true},
+			Activity:      body.raw,
 		})
 		if errors.Is(createErr, pgx.ErrNoRows) {
 			continue

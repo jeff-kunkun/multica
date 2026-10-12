@@ -8,8 +8,13 @@ what reaches the person; the server only tags each event and keeps secrets out.
 ## Who gets it
 
 Opt-in per person, on top of a verified Bot binding. `activity_scope` on the
-binding is `[]` (off, the default), `["owned"]`, `["followed"]` or both. People
-without a verified Bot, or with the scope off, see no change at all.
+binding is `[]` (off), `["owned"]`, `["followed"]`, both, or `["owner_visible_all"]`.
+**The first time a person connects a Bot the scope is `["owner_visible_all"]`**
+(DENE-1936); an explicit off (`--activity off`, or `activity_scope: []`) stays off,
+and a connection that already has a choice keeps it when saved again. The API, the
+CLI (`multica bot bind`) and the settings page behave the same, because the default
+is applied once, in `PUT /me/bot-binding`. People without a verified Bot, or with
+the scope off, see no change at all.
 
 - `owned`: tickets the person created or is assigned (directly, or through a
   squad they created, or the chat the ticket came from), and chats they own.
@@ -121,10 +126,10 @@ multica bot wake handled <bot-id> <event-id> --reason "routine progress"
 ## The whole workspace (DENE-1936, step B)
 
 `owner_visible_all` is a third scope value: everything the person can see in the
-workspace, with their permissions. Opt-in like the others
-(`multica bot bind --activity everything`, or the settings choice「我能看到的一切」),
-and it includes the ticket and chat stream, so nothing else needs switching on.
-Anyone who did not choose it sees no change.
+workspace, with their permissions. It is the default of a first connection (see
+above) and can be chosen later
+(`multica bot bind --activity everything`, or the settings choice「我能看到的一切」);
+it includes the ticket and chat stream, so nothing else needs switching on.
 
 ### What arrives
 
@@ -162,6 +167,19 @@ only to owners and admins; other families go to any member; guests get nothing.
 The row is re-checked when sent and when listed: person still a member whose
 role may see the family, binding still `owner_visible_all`.
 
+**Access of what the write touched.** A write keeps its target: the ticket,
+project or chat named by its path, a few body fields (`issue_id`,
+`parent_issue_id`, `project_id`, `chat_session_id`) or the id of what it created
+(comments and runs resolve to their ticket or chat). The event is queued only for
+a person who can open every part of it, judged by the same viewer the ticket and
+project lists use (a chat is its opener's alone). Queueing, sending and the pull
+list all go through that one judgement (`activityGate` and
+`TargetVisibility`), so a ticket that turns private, a project the person is
+removed from, or a revoked role stops both push and pull. It fails closed: a
+ticket, project, chat or run write whose target cannot be named (already deleted,
+a batch, two different tickets in one call) is not pushed. PR mirror updates are
+not access-scoped.
+
 **Field names only.** A settings change carries which fields changed, never the
 values; names that look like secrets are dropped, other strings are masked as
 above. Payload-scan tests cover the push, the pull list and the audit endpoint.
@@ -180,13 +198,32 @@ the workspace (workspace id is cleared).
 ### The four that need the owner first
 
 Delete the workspace, change members or roles, reset keys (tokens, rotate,
-reset password), change quota or billing. The server stops a Bot's call with
-`403 owner_confirmation_required` unless it carries `X-Owner-Confirmation: <short
-reference to the owner's message in the Bot chat>` (CLI: set
-`MULTICA_OWNER_CONFIRMATION` for that one command). A stopped call is itself
-audited and pushed as `bot.write_blocked`. Honest limit: the server cannot read
-the Bot chat, so the header is the Bot's attestation, recorded next to the write
-it licensed; it is a gate and a paper trail, not proof.
+reset password), change quota or billing. The Bot cannot give this go-ahead
+itself: it is a server-held object the owner grants personally.
+
+1. The Bot's first call is stopped with `403 owner_confirmation_required` and
+   the body names `confirmation_id`, `ask_id`, `status` and `expires_at`. That
+   call opened a question card for the owner (inbox, and pushed to their Bot
+   through the reliable human-needed channel as the one notice; the card is the
+   `ask:<id>` dedupe key, so retries do not ring again). The stopped call is
+   audited (`outcome: blocked`) and reaches other Bots as `bot.write_blocked`;
+   the owner's own Bot is not echoed that row, it already got the card.
+2. Only the owner's own session can answer the card, in the app or with
+   `multica ask answer`. A Bot key, its `answered` receipt, an agent run or
+   another member gets 403. Option 「允许这一次」 approves, 「不允许」 (the
+   recommendation) refuses.
+3. The Bot repeats the identical call with `X-Owner-Confirmation:
+   <confirmation_id>` (CLI: `MULTICA_OWNER_CONFIRMATION` for that one command).
+   The server spends it in one atomic step that requires: this workspace, this
+   Bot, this owner, the same method, exact path and field names (`scope_hash`;
+   values are never part of it), `approved` by the owner, unused, within 30
+   minutes. A made-up id, free text, another call's, another Bot's, an expired
+   one, a refusal and a replay all get the same 403. A refused call is read back
+   as `owner_confirmation_denied`.
+
+The audit row for the spent call keeps the confirmation id. Limits: a call that
+fails after the approval was spent burns it, and the Bot asks again; two
+simultaneous first calls can open two cards, either of which works.
 
 ### Not covered
 

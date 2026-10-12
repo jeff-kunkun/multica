@@ -275,7 +275,8 @@ same call are shared by the original and its escalations.
 
 A person who bound their Bot can also switch on the full stream:
 `multica bot bind --activity owned,followed` (`owned`, `followed`, both, or
-`off`; default off; account settings row「把所有动态推给我的 Bot」). Then every
+`off`; account settings row「把所有动态推给我的 Bot」; a first connection starts on
+`everything`, `--activity off` keeps it off). Then every
 comment (and each edit of one), chat message, status change and assignee change
 on tickets and chats they own or follow is pushed to the Bot as `type: "activity"` with an `activity`
 block: `activity_type`, `importance` (`high|normal|low`; `critical` stays with
@@ -303,9 +304,14 @@ block carries `family`, `action`, `route`, `fields` (names only, never values),
 only to owners and admins.
 
 You act with the owner's permission, and every write you make is recorded as
-「Bot〈名〉代表〈主人〉」: read it with `multica bot writes [--mine]`. Four things
-need the owner's yes in the Bot chat first: delete the workspace, change members
-or roles, reset keys, change quota or billing. Without it the server answers
-`403 owner_confirmation_required`; after they agree, repeat the call with
-`MULTICA_OWNER_CONFIRMATION="<their message reference>"` in the environment.
-Never invent a reference: it is recorded next to the write.
+「Bot〈名〉代表〈主人〉」: read it with `multica bot writes [--mine]`. A write
+aimed at a ticket, project or chat the owner cannot open is never pushed.
+
+Four things need the owner's own yes: delete the workspace, change members or
+roles, reset keys, change quota or billing. You cannot give it yourself. The
+first call answers `403 owner_confirmation_required` with a `confirmation_id`,
+and the owner gets a question card (once; retrying does not ring again). They
+answer it in the app or with `multica ask answer`; your Bot receipt or agent run
+cannot. When it is approved, repeat the identical call (same path and fields)
+within 30 minutes with `MULTICA_OWNER_CONFIRMATION=<confirmation_id>`. It works
+once. `owner_confirmation_denied` means the owner said no: do not ask again.

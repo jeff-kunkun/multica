@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	chimw "github.com/go-chi/chi/v5/middleware"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/botsource"
 	"github.com/multica-ai/multica/server/internal/service"
@@ -28,7 +30,9 @@ import (
 //     owner" (bot_write_audit), and if it is one of the four actions the owner
 //     must approve first (delete the workspace, change members or roles, reset
 //     keys, change quota or billing) it is stopped unless the request carries
-//     the owner's go-ahead (X-Owner-Confirmation).
+//     the id of a go-ahead the owner gave personally (X-Owner-Confirmation):
+//     the server opens a question card for the owner, only the owner's own
+//     answer approves it, and one repeat of the exact call spends it.
 //  2. Every successful write by anyone is handed to observe, which turns it
 //     into a workspace event for the Bots that asked for the whole workspace.
 //
@@ -39,10 +43,10 @@ import (
 // stop a dangerous write is made on method and URL path before `next`, and the
 // record of an allowed one is made after it.
 
-// ConfirmationHeader carries the owner's go-ahead for the four dangerous
-// actions: a short reference to the message in the Bot chat where the owner
-// agreed. The server records it; it cannot read the chat, so it is the Bot's
-// attestation, kept next to the write it licensed.
+// ConfirmationHeader carries the id of the owner's go-ahead for one of the four
+// dangerous actions. The id comes from the 403 that stopped the first attempt;
+// it only works once the owner approved that card themselves, for that Bot,
+// workspace and call, before it expired, and only once.
 const ConfirmationHeader = "X-Owner-Confirmation"
 
 // WriteObserver receives each successful write. It must not block for long.
@@ -50,7 +54,7 @@ type WriteObserver func(ctx context.Context, w service.WorkspaceWrite)
 
 const (
 	maxFieldScanBytes = 64 << 10
-	maxConfirmation   = 200
+	maxResponseIDScan = 16 << 10
 )
 
 var (
@@ -59,7 +63,7 @@ var (
 	safeSegmentRe = regexp.MustCompile(`^[a-z][a-z0-9_\-]{0,31}$`)
 )
 
-func BotWriteAudit(queries *db.Queries, observe WriteObserver) func(http.Handler) http.Handler {
+func BotWriteAudit(queries *db.Queries, observe WriteObserver, confirmer service.OwnerConfirmer) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if isReadMethod(r.Method) {
@@ -73,9 +77,10 @@ func BotWriteAudit(queries *db.Queries, observe WriteObserver) func(http.Handler
 				return
 			}
 
+			fields, bodyIDs := scanBody(r)
 			rec := service.WorkspaceWrite{
 				Method:    r.Method,
-				Fields:    bodyFieldNames(r),
+				Fields:    fields,
 				Dangerous: service.DangerousBotAction(r.Method, r.URL.Path),
 			}
 			actor := botsource.ActorFromContext(r.Context())
@@ -93,18 +98,18 @@ func BotWriteAudit(queries *db.Queries, observe WriteObserver) func(http.Handler
 				}
 				rec.OnBehalfOf = owner
 				if rec.Dangerous != "" {
-					confirmation = cleanConfirmation(r.Header.Get(ConfirmationHeader))
-					if confirmation == "" {
-						rec.Blocked, rec.Status = true, http.StatusForbidden
-						rec.Route = sanitizePath(r.URL.Path)
-						recordAndObserve(r.Context(), queries, observe, rec, confirmation)
-						writeConfirmationRequired(w, rec.Dangerous)
+					var ok bool
+					if confirmation, ok = authorizeDangerousWrite(w, r, queries, observe, confirmer, rec); !ok {
 						return
 					}
 				}
 			}
 
 			ww := chimw.NewWrapResponseWriter(w, r.ProtoMajor)
+			var created idCapture
+			if r.Method == http.MethodPost {
+				ww.Tee(&created)
+			}
 			next.ServeHTTP(ww, r)
 
 			rec.Status = ww.Status()
@@ -125,10 +130,21 @@ func BotWriteAudit(queries *db.Queries, observe WriteObserver) func(http.Handler
 					v := rctx.URLParams.Values[i]
 					if uuidSegmentRe.MatchString(v) {
 						if id, err := util.ParseUUID(v); err == nil && id != rec.WorkspaceID {
-							rec.EntityID = id
-							break
+							if !rec.EntityID.Valid {
+								rec.EntityID = id
+							}
+							rec.TargetIDs = append(rec.TargetIDs, id)
 						}
 					}
+				}
+			}
+			// What the write was aimed at, for the access check: the ids in its
+			// path, a few well-known body fields, and the id of what it created.
+			rec.TargetIDs = append(rec.TargetIDs, bodyIDs...)
+			if id := created.ID(); id.Valid {
+				rec.TargetIDs = append(rec.TargetIDs, id)
+				if !rec.EntityID.Valid {
+					rec.EntityID = id
 				}
 			}
 			recordAndObserve(r.Context(), queries, observe, rec, confirmation)
@@ -179,31 +195,114 @@ func recordAndObserve(parent context.Context, queries *db.Queries, observe Write
 	}
 }
 
-func writeConfirmationRequired(w http.ResponseWriter, action string) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusForbidden)
-	body, _ := json.Marshal(map[string]string{
-		"error":  "this action needs the owner's go-ahead first: ask them in the Bot chat, then repeat the call with the " + ConfirmationHeader + " header naming their message",
-		"code":   "owner_confirmation_required",
-		"action": action,
-		"header": ConfirmationHeader,
-	})
-	_, _ = w.Write(body)
-}
-
-// cleanConfirmation keeps a plain one-line reference. Anything else (empty,
-// too long, control characters) counts as no confirmation.
-func cleanConfirmation(raw string) string {
-	s := strings.TrimSpace(raw)
-	if s == "" || len(s) > maxConfirmation {
-		return ""
+// authorizeDangerousWrite is the door for the four actions that need the
+// owner's go-ahead. It returns the id of the approval it spent, or answers the
+// request itself (403) and returns false.
+//
+// The header must name a request the server holds: opened by this Bot for this
+// workspace and owner, for this exact call (method, path, field names),
+// approved by the owner personally, unexpired and not used. All of that is one
+// atomic spend in the database, so a made-up id, someone else's, another call's,
+// an old one, a replay, or one the Bot "approved" for itself all fail the same
+// way. A failed attempt opens (or finds) the request and tells the owner once.
+func authorizeDangerousWrite(w http.ResponseWriter, r *http.Request, queries *db.Queries, observe WriteObserver, confirmer service.OwnerConfirmer, rec service.WorkspaceWrite) (string, bool) {
+	if !rec.WorkspaceID.Valid {
+		writeJSONError(w, http.StatusForbidden, map[string]string{
+			"error": "this action needs the owner's go-ahead, and the request does not say which workspace it is for: send the X-Workspace-ID header",
+			"code":  "owner_confirmation_workspace_required",
+		})
+		return "", false
 	}
-	for _, r := range s {
-		if r < 0x20 || r == 0x7f {
-			return ""
+	scope := service.OwnerConfirmationScopeHash(r.Method, r.URL.Path, rec.Fields)
+	if raw := strings.TrimSpace(r.Header.Get(ConfirmationHeader)); raw != "" {
+		if id, err := util.ParseUUID(raw); err == nil {
+			_, err := queries.ConsumeBotActionConfirmation(r.Context(), db.ConsumeBotActionConfirmationParams{
+				ID: id, WorkspaceID: rec.WorkspaceID, BotID: rec.BotID, OwnerUserID: rec.OnBehalfOf, ScopeHash: scope,
+			})
+			if err == nil {
+				return util.UUIDToString(id), true
+			}
+			if !errors.Is(err, pgx.ErrNoRows) {
+				slog.Error("bot write audit: spend confirmation failed", "error", err)
+				writeJSONError(w, http.StatusInternalServerError, map[string]string{"error": "could not check the owner's go-ahead", "code": "owner_confirmation_unavailable"})
+				return "", false
+			}
 		}
 	}
-	return s
+
+	rec.Blocked, rec.Status = true, http.StatusForbidden
+	rec.Route = sanitizePath(r.URL.Path)
+	body := map[string]any{
+		"code":   "owner_confirmation_required",
+		"action": rec.Dangerous,
+		"header": ConfirmationHeader,
+	}
+	if confirmer == nil {
+		body["error"] = "this action needs the owner's go-ahead and this server cannot ask for it"
+	} else {
+		res, err := confirmer.EnsureOwnerConfirmation(r.Context(), service.OwnerConfirmationRequest{
+			WorkspaceID: rec.WorkspaceID, BotID: rec.BotID, BotName: rec.BotName, OwnerUserID: rec.OnBehalfOf,
+			Action: rec.Dangerous, Method: r.Method, Route: rec.Route, Fields: rec.Fields, ScopeHash: scope,
+		})
+		if err != nil {
+			slog.Error("bot write audit: open owner confirmation failed", "error", err, "route", rec.Route)
+			body["error"] = "this action needs the owner's go-ahead and asking for it failed; try again"
+		} else {
+			body["confirmation_id"] = util.UUIDToString(res.ID)
+			body["ask_id"] = util.UUIDToString(res.AskID)
+			body["status"] = res.Status
+			body["expires_at"] = res.ExpiresAt.UTC().Format(time.RFC3339)
+			switch res.Status {
+			case service.OwnerConfirmApproved:
+				body["error"] = "the owner approved this, but this call did not spend it: repeat the identical call with " + ConfirmationHeader + ": " + util.UUIDToString(res.ID) + " (CLI: MULTICA_OWNER_CONFIRMATION)"
+			case service.OwnerConfirmDenied:
+				body["code"] = "owner_confirmation_denied"
+				body["error"] = "the owner said no to this action"
+			default:
+				body["error"] = "the owner has been asked (a question card in their Multica inbox). Only they can approve it, in the app or with `multica ask answer`; the Bot cannot answer for them. After they approve, repeat the identical call once with " + ConfirmationHeader + ": " + util.UUIDToString(res.ID) + " (CLI: MULTICA_OWNER_CONFIRMATION)"
+			}
+		}
+	}
+	recordAndObserve(r.Context(), queries, observe, rec, "")
+	writeJSONError(w, http.StatusForbidden, body)
+	return "", false
+}
+
+func writeJSONError(w http.ResponseWriter, status int, body any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	raw, _ := json.Marshal(body)
+	_, _ = w.Write(raw)
+}
+
+// idCapture keeps the first bytes of a response so the id of what a POST created
+// can be read back for the access check. Nothing else is kept.
+type idCapture struct{ buf []byte }
+
+func (c *idCapture) Write(p []byte) (int, error) {
+	if room := maxResponseIDScan - len(c.buf); room > 0 {
+		if len(p) > room {
+			c.buf = append(c.buf, p[:room]...)
+		} else {
+			c.buf = append(c.buf, p...)
+		}
+	}
+	return len(p), nil
+}
+
+// ID is the top-level "id" of a JSON object response, when there is one.
+func (c *idCapture) ID() pgtype.UUID {
+	var obj struct {
+		ID string `json:"id"`
+	}
+	if json.Unmarshal(c.buf, &obj) != nil {
+		return pgtype.UUID{}
+	}
+	id, err := util.ParseUUID(obj.ID)
+	if err != nil {
+		return pgtype.UUID{}
+	}
+	return id
 }
 
 // writeWorkspaceID finds the workspace a write targets: the one in the path of
@@ -248,15 +347,20 @@ func sanitizePath(p string) string {
 	return strings.Join(parts, "/")
 }
 
-// bodyFieldNames returns the top-level keys of a small JSON body and puts the
-// body back for the handler. Values are parsed away and never kept.
-func bodyFieldNames(r *http.Request) []string {
+// bodyTargetKeys are the body fields that point a write at a ticket, a project
+// or a chat. Only their ids are read, and only for the access check.
+var bodyTargetKeys = []string{"issue_id", "parent_issue_id", "project_id", "chat_session_id"}
+
+// scanBody returns the top-level keys of a small JSON body and the ids it
+// points at, and puts the body back for the handler. Values are parsed away and
+// never kept.
+func scanBody(r *http.Request) ([]string, []pgtype.UUID) {
 	if r.Body == nil || r.Body == http.NoBody {
-		return nil
+		return nil, nil
 	}
 	ct := strings.ToLower(r.Header.Get("Content-Type"))
 	if ct != "" && !strings.Contains(ct, "json") {
-		return nil
+		return nil, nil
 	}
 	head, err := io.ReadAll(io.LimitReader(r.Body, maxFieldScanBytes+1))
 	rest := r.Body
@@ -265,15 +369,25 @@ func bodyFieldNames(r *http.Request) []string {
 		io.Closer
 	}{io.MultiReader(bytes.NewReader(head), rest), rest}
 	if err != nil || len(head) > maxFieldScanBytes {
-		return nil
+		return nil, nil
 	}
 	var obj map[string]json.RawMessage
 	if json.Unmarshal(head, &obj) != nil {
-		return nil
+		return nil, nil
 	}
 	names := make([]string, 0, len(obj))
 	for k := range obj {
 		names = append(names, k)
 	}
-	return service.SafeFieldNames(names)
+	var ids []pgtype.UUID
+	for _, k := range bodyTargetKeys {
+		var raw string
+		if json.Unmarshal(obj[k], &raw) != nil {
+			continue
+		}
+		if id, err := util.ParseUUID(raw); err == nil {
+			ids = append(ids, id)
+		}
+	}
+	return service.SafeFieldNames(names), ids
 }

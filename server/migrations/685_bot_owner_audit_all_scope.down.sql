@@ -1,3 +1,4 @@
+DROP TABLE IF EXISTS bot_action_confirmation;
 DROP TABLE IF EXISTS bot_write_audit;
 DROP TRIGGER IF EXISTS issue_on_behalf_of ON issue;
 DROP TRIGGER IF EXISTS agent_task_queue_on_behalf_of ON agent_task_queue;

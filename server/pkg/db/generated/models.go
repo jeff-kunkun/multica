@@ -472,6 +472,25 @@ type AutopilotTrigger struct {
 	CreatedByID pgtype.UUID `json:"created_by_id"`
 }
 
+type BotActionConfirmation struct {
+	ID          pgtype.UUID        `json:"id"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	BotID       pgtype.UUID        `json:"bot_id"`
+	BotName     string             `json:"bot_name"`
+	OwnerUserID pgtype.UUID        `json:"owner_user_id"`
+	Action      string             `json:"action"`
+	Method      string             `json:"method"`
+	ScopeHash   string             `json:"scope_hash"`
+	Route       string             `json:"route"`
+	AskID       pgtype.UUID        `json:"ask_id"`
+	Decision    string             `json:"decision"`
+	DecidedBy   pgtype.UUID        `json:"decided_by"`
+	DecidedAt   pgtype.Timestamptz `json:"decided_at"`
+	UsedAt      pgtype.Timestamptz `json:"used_at"`
+	ExpiresAt   pgtype.Timestamptz `json:"expires_at"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+}
+
 type BotWake struct {
 	BotID               pgtype.UUID        `json:"bot_id"`
 	WebhookSecret       []byte             `json:"webhook_secret"`

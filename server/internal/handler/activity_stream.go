@@ -228,10 +228,14 @@ func newActivityGate(h *Handler, ctx context.Context) *activityGate {
 }
 
 func (g *activityGate) allows(ev db.HumanNeededEvent) (bool, string) {
-	key := "w:" + uuidToString(ev.BindingID) + ":" + workspaceFamilyOf(ev)
+	family := workspaceFamilyOf(ev)
+	key := "w:" + uuidToString(ev.BindingID) + ":" + family
 	switch {
+	case family != "":
+		t := workspaceTargetOf(ev)
+		key += ":" + uuidToString(t.IssueID) + ":" + uuidToString(t.ProjectID) + ":" + uuidToString(t.ChatSessionID)
 	case ev.IssueID.Valid:
-		key = "i:" + uuidToString(ev.IssueID) + ":" + uuidToString(ev.BindingID) + ":" + workspaceFamilyOf(ev)
+		key = "i:" + uuidToString(ev.IssueID) + ":" + uuidToString(ev.BindingID)
 	case ev.ChatSessionID.Valid:
 		key = "c:" + uuidToString(ev.ChatSessionID) + ":" + uuidToString(ev.BindingID)
 	}
@@ -253,15 +257,85 @@ func workspaceFamilyOf(ev db.HumanNeededEvent) string {
 	return body.Workspace.Family
 }
 
+// workspaceTargetOf is the ticket, project and chat a workspace-level event is
+// about: what its person has to be able to open for it to be told.
+func workspaceTargetOf(ev db.HumanNeededEvent) service.WriteTarget {
+	t := service.WriteTarget{IssueID: ev.IssueID, ChatSessionID: ev.ChatSessionID}
+	var body service.ActivityBody
+	if json.Unmarshal(ev.Activity, &body) == nil && body.Workspace != nil && body.Workspace.ProjectID != "" {
+		if id, err := parseUUIDSafe(body.Workspace.ProjectID); err == nil {
+			t.ProjectID = id
+		}
+	}
+	return t
+}
+
+// TargetVisibility is the one answer to "could this person open the ticket,
+// project or chat?" for a Bot's stream. Queueing a write, sending a row and
+// listing rows for catch-up all call it, so they cannot disagree. A person who
+// is not (or no longer) a member, or whose access cannot be established, sees
+// nothing.
+func (h *Handler) TargetVisibility() service.TargetVisibility {
+	return func(ctx context.Context, ws, user pgtype.UUID, t service.WriteTarget) bool {
+		v, err := h.visibilityViewerForUser(ctx, ws, user)
+		if err != nil {
+			return false
+		}
+		return h.targetVisibleTo(ctx, v, ws, t)
+	}
+}
+
+// NewTargetVisibility is TargetVisibility for callers that have the queries but
+// no handler (the event-bus listeners).
+func NewTargetVisibility(q *db.Queries) service.TargetVisibility {
+	return (&Handler{Queries: q}).TargetVisibility()
+}
+
+// targetVisibleTo checks every part of the target against the viewer. A chat is
+// its opener's own; a ticket and a project follow the sharing rules the lists
+// use. Anything that cannot be loaded, or sits in another workspace, is not
+// visible.
+func (h *Handler) targetVisibleTo(ctx context.Context, v visibilityViewer, ws pgtype.UUID, t service.WriteTarget) bool {
+	if t.IssueID.Valid {
+		issue, err := h.Queries.GetIssue(ctx, t.IssueID)
+		if err != nil || issue.WorkspaceID != ws || !v.canSeeIssue(issue) {
+			return false
+		}
+	}
+	if t.ProjectID.Valid {
+		project, err := h.Queries.GetProjectInWorkspace(ctx, db.GetProjectInWorkspaceParams{ID: t.ProjectID, WorkspaceID: ws})
+		if err != nil || !v.canSeeProject(project) {
+			return false
+		}
+	}
+	if t.ChatSessionID.Valid {
+		chat, err := h.Queries.GetChatSessionInWorkspace(ctx, db.GetChatSessionInWorkspaceParams{ID: t.ChatSessionID, WorkspaceID: ws})
+		if err != nil || !v.userID.Valid || chat.CreatorID != v.userID {
+			return false
+		}
+	}
+	return true
+}
+
+func (g *activityGate) viewer(ev db.HumanNeededEvent) (*visibilityViewer, bool) {
+	if viewer, ok := g.viewers[ev.TargetUserID]; ok {
+		return viewer, true
+	}
+	v, err := g.h.visibilityViewerForUser(g.ctx, ev.WorkspaceID, ev.TargetUserID)
+	if err != nil {
+		return nil, false
+	}
+	g.viewers[ev.TargetUserID] = &v
+	return &v, true
+}
+
 func (g *activityGate) decide(ev db.HumanNeededEvent) (bool, string) {
 	q := g.h.Queries
-	var covering []db.MemberBotBinding
-	var err error
 	if family := workspaceFamilyOf(ev); family != "" {
 		// Workspace-level events: the person must still be a member whose role
-		// may see this kind of event, and the binding must still ask for the
-		// whole workspace. A ticket-bound one (a run) then also has to pass the
-		// ticket checks below.
+		// may see this kind of event, the binding must still ask for the whole
+		// workspace, and whatever the event is about (a ticket, a project, a
+		// chat) must still be something they can open.
 		member, mErr := q.GetMemberByUserAndWorkspace(g.ctx, db.GetMemberByUserAndWorkspaceParams{UserID: ev.TargetUserID, WorkspaceID: ev.WorkspaceID})
 		if mErr != nil || !service.RoleCanSeeFamily(member.Role, family) {
 			return false, "access unavailable"
@@ -280,26 +354,26 @@ func (g *activityGate) decide(ev db.HumanNeededEvent) (bool, string) {
 		if !covered {
 			return false, "outside activity scope"
 		}
-		if !ev.IssueID.Valid {
+		t := workspaceTargetOf(ev)
+		if !t.Any() {
 			return true, ""
 		}
+		viewer, ok := g.viewer(ev)
+		if !ok || !g.h.targetVisibleTo(g.ctx, *viewer, ev.WorkspaceID, t) {
+			return false, "access unavailable"
+		}
+		return true, ""
 	}
+	var covering []db.MemberBotBinding
+	var err error
 	switch {
 	case ev.IssueID.Valid:
 		issue, getErr := q.GetIssue(g.ctx, ev.IssueID)
 		if getErr != nil || issue.WorkspaceID != ev.WorkspaceID {
 			return false, "access unavailable"
 		}
-		viewer, ok := g.viewers[ev.TargetUserID]
-		if !ok {
-			v, vErr := g.h.visibilityViewerForUser(g.ctx, ev.WorkspaceID, ev.TargetUserID)
-			if vErr != nil {
-				return false, "access unavailable"
-			}
-			viewer = &v
-			g.viewers[ev.TargetUserID] = viewer
-		}
-		if !viewer.canSeeIssue(issue) {
+		viewer, ok := g.viewer(ev)
+		if !ok || !viewer.canSeeIssue(issue) {
 			return false, "access unavailable"
 		}
 		covering, err = q.ListActivityBindingsForIssue(g.ctx, db.ListActivityBindingsForIssueParams{WorkspaceID: ev.WorkspaceID, ID: ev.IssueID})

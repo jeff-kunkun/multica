@@ -44,7 +44,7 @@ affected.
 
 Only you can bind your own Bot: not an agent, and not a Bot's own key.
 
-Full activity stream (opt-in, per person): --activity also pushes what happens
+Full activity stream (per person): --activity sets what else is pushed
 in your tickets and chats — every comment, chat message, status change and
 reassignment — to the same Bot, tagged with importance (critical | high |
 normal | low) and categories (needs_human, risk, decision, result, progress,
@@ -63,13 +63,20 @@ passwords (they are masked before sending).
                              and quota — all writes, by field name only (never a
                              value). Settings you cannot open are not pushed.
                              (spelled owner_visible_all in the API)
-  --activity off             switch the stream off (default)
+  --activity off             switch the stream off
+
+Binding a Bot for the first time turns the full stream on (everything); leave
+--activity out to accept that. Binding again, or changing other settings, keeps
+the choice you already made, and --activity off stays off.
 
 What a Bot does with your permission is audited as "Bot〈name〉代表〈you〉"
 (multica bot writes). Deleting the workspace, changing members or roles,
-resetting keys and changing quota or billing are held until you have said yes in
-the Bot chat; the Bot then repeats the call with the header
-X-Owner-Confirmation naming your message.
+resetting keys and changing quota or billing are held until YOU have said yes
+yourself: the first attempt opens a question card in your Multica inbox (and on
+your Bot), you answer it there or with multica ask answer — a Bot cannot — and
+the Bot then repeats the identical call once with the header
+X-Owner-Confirmation set to the confirmation id it was given. It works for that
+one call, in this workspace, for 30 minutes, once.
 
 With a binding already in place the Bot name can be left out to change only
 settings: multica bot bind --activity owned.`,
@@ -88,7 +95,8 @@ var botBindStatusCmd = &cobra.Command{
 	Short: "Show whether your decisions go to your Bot, and if the channel is healthy",
 	Long: `Prints bound, state (none | unverified | ok | broken), a one-line message, the
 mode, the Bot, open_count — how many decisions the Bot still owes you — and
-activity_scope, which part of the full activity stream is on ([] = off).`,
+activity_scope, which part of the full activity stream is on ([] = off; a first
+bind starts with owner_visible_all).`,
 	Args:        exactArgs(0),
 	RunE:        runBotBindStatus,
 	Annotations: map[string]string{annotationAccess: "read", annotationBotKey: "no"},
@@ -186,7 +194,7 @@ func init() {
 	botBindCmd.Flags().String("mode", "", "bot_first (default) or mirror")
 	botBindCmd.Flags().Int("resend-after", 0, "Seconds without a receipt before the event is sent again (30..3600, default 180)")
 	botBindCmd.Flags().Int("escalate-after", 0, "Seconds after the Bot woke without telling you before escalating (60..7200, default 300)")
-	botBindCmd.Flags().String("activity", "", "Full activity stream: owned, followed, owned,followed, everything, or off")
+	botBindCmd.Flags().String("activity", "", "Full activity stream: owned, followed, owned,followed, everything, or off (a first bind defaults to everything)")
 	for _, c := range []*cobra.Command{botBindCmd, botBindStatusCmd, botUnbindCmd, botBindVerifyCmd} {
 		c.Flags().String("output", "table", "Output format: table or json")
 	}

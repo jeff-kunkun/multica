@@ -200,7 +200,10 @@ func (h *Handler) PutBotBinding(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "重发等待 30–3600 秒，升级等待 60–7200 秒")
 		return
 	}
-	scope := []string{}
+	// First time a person connects a Bot, the full stream is on: the confirmed
+	// default (DENE-1936). A connection that already exists keeps its own choice,
+	// and an explicit empty list is the person switching the stream off.
+	scope := []string{service.ActivityScopeAll}
 	if hasExisting {
 		scope = existing.ActivityScope
 	}

@@ -20,14 +20,18 @@ type WorkspaceWrite struct {
 	Route       string // chi pattern, never the raw path
 	Fields      []string
 	EntityID    pgtype.UUID
-	Status      int
-	ActorType   string // member | agent | ""
-	ActorID     pgtype.UUID
-	BotID       pgtype.UUID
-	BotName     string
-	OnBehalfOf  pgtype.UUID
-	Dangerous   string
-	Blocked     bool
+	// TargetIDs are every id the request pointed at (path, a few body fields, the
+	// id of what it created); the access check resolves them to a ticket,
+	// project and chat.
+	TargetIDs  []pgtype.UUID
+	Status     int
+	ActorType  string // member | agent | ""
+	ActorID    pgtype.UUID
+	BotID      pgtype.UUID
+	BotName    string
+	OnBehalfOf pgtype.UUID
+	Dangerous  string
+	Blocked    bool
 }
 
 // issueFieldsCoveredByTicketStream are the ticket changes the ticket stream
@@ -60,14 +64,33 @@ func coveredByTicketStream(w WorkspaceWrite, family string) bool {
 }
 
 // RouteWorkspaceWrite turns a write into a workspace event for every Bot that
-// asked for the whole workspace.
-func RouteWorkspaceWrite(ctx context.Context, q *db.Queries, w WorkspaceWrite) (int, error) {
+// asked for the whole workspace, and whose owner could open what the write
+// touched. visible is that judgement (the handler's, shared with the send gate
+// and the pull list); a write aimed at a ticket, project or chat is not pushed
+// without it, nor when its target cannot be found.
+//
+// A write the owner's own Bot was stopped on (Blocked) is not echoed to that
+// owner as an activity row: they hear it once through the approval card.
+func RouteWorkspaceWrite(ctx context.Context, q *db.Queries, w WorkspaceWrite, visible TargetVisibility) (int, error) {
 	if !w.WorkspaceID.Valid {
 		return 0, nil
 	}
 	family := ClassifyWorkspaceRoute(w.Route)
 	if !w.Blocked && coveredByTicketStream(w, family) {
 		return 0, nil
+	}
+	var target WriteTarget
+	if !w.Blocked {
+		if len(w.TargetIDs) > 0 {
+			t, ok := ResolveWriteTarget(ctx, q, w.WorkspaceID, w.TargetIDs)
+			if !ok {
+				return 0, nil // two different tickets (or projects, chats) in one write
+			}
+			target = t
+		}
+		if FamilyAccessScoped(family) && !target.Any() {
+			return 0, nil // aimed at something we cannot name (deleted, batch): not told
+		}
 	}
 	body := WorkspaceEventBody{
 		Family:    family,
@@ -122,6 +145,8 @@ func RouteWorkspaceWrite(ctx context.Context, q *db.Queries, w WorkspaceWrite) (
 		ActivityType: activityType,
 		DedupeKey:    "ws:write:" + uuid.NewString(),
 		Body:         body,
+		Target:       target,
+		Visible:      visible,
 		ActorType:    actorType,
 		ActorID:      w.ActorID,
 	}

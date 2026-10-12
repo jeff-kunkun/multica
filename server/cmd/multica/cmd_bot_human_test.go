@@ -145,7 +145,7 @@ func TestBotWritesCommandListsAuditAndSendsConfirmation(t *testing.T) {
 	}))
 	defer srv.Close()
 	setCLITestServerEnv(t, srv.URL)
-	t.Setenv("MULTICA_OWNER_CONFIRMATION", " chat msg 42 ")
+	t.Setenv("MULTICA_OWNER_CONFIRMATION", " 0192f3a4-0000-7000-8000-000000000042 ")
 
 	cmd := &cobra.Command{}
 	cmd.Flags().Int("limit", 0, "")
@@ -162,7 +162,7 @@ func TestBotWritesCommandListsAuditAndSendsConfirmation(t *testing.T) {
 	if gotURI != "/api/workspaces/ws-1/bot-writes?limit=5&mine=1" {
 		t.Fatalf("request: %s", gotURI)
 	}
-	if gotConfirm != "chat msg 42" {
+	if gotConfirm != "0192f3a4-0000-7000-8000-000000000042" {
 		t.Fatalf("confirmation header: %q", gotConfirm)
 	}
 	if !strings.Contains(out.String(), "Bot〈小助〉代表〈阿坤〉") || !strings.Contains(out.String(), "fields=name") {

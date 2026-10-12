@@ -61,3 +61,33 @@ CREATE TABLE bot_write_audit (
 );
 CREATE INDEX bot_write_audit_workspace ON bot_write_audit (workspace_id, created_at DESC);
 CREATE INDEX bot_write_audit_owner ON bot_write_audit (on_behalf_of_user_id, created_at DESC);
+
+-- The owner's go-ahead for the four actions a Bot may only take after they said
+-- so (delete the workspace, change members or roles, reset keys, change quota or
+-- billing). It is a server record, not a sentence the Bot writes: one row per
+-- request, bound to the Bot, its owner, the workspace and the exact call
+-- (method + path), approved only by the owner themselves from a session that is
+-- not a Bot's, valid for 30 minutes and usable once. The question the owner
+-- answers is an ordinary card (agent_ask, kind 'owner_confirmation').
+CREATE TABLE bot_action_confirmation (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    workspace_id uuid NOT NULL REFERENCES workspace(id) ON DELETE CASCADE,
+    bot_id uuid NOT NULL,
+    bot_name text NOT NULL DEFAULT '',
+    owner_user_id uuid NOT NULL,
+    action text NOT NULL,
+    method text NOT NULL,
+    -- sha256 over workspace, Bot, method and path: the call this go-ahead is for.
+    scope_hash text NOT NULL,
+    -- The route with ids and odd segments blanked, for showing to the owner.
+    route text NOT NULL,
+    ask_id uuid NOT NULL REFERENCES agent_ask(id) ON DELETE CASCADE,
+    decision text NOT NULL DEFAULT 'pending' CHECK (decision IN ('pending', 'approved', 'denied')),
+    decided_by uuid,
+    decided_at timestamptz,
+    used_at timestamptz,
+    expires_at timestamptz NOT NULL,
+    created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX bot_action_confirmation_scope ON bot_action_confirmation (bot_id, scope_hash, created_at DESC);
+CREATE UNIQUE INDEX bot_action_confirmation_ask ON bot_action_confirmation (ask_id);

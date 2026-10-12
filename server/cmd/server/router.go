@@ -1735,10 +1735,10 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	// One instance for both authenticated trees (DENE-1936): see the comment on
 	// the main authenticated group below.
 	botWriteAudit := middleware.BotWriteAudit(queries, func(ctx context.Context, w service.WorkspaceWrite) {
-		if _, err := service.RouteWorkspaceWrite(ctx, queries, w); err != nil {
+		if _, err := service.RouteWorkspaceWrite(ctx, queries, w, h.TargetVisibility()); err != nil {
 			slog.Warn("workspace activity: route write failed", "error", err, "route", w.Route)
 		}
-	})
+	}, h)
 
 	// Browser-session relay for sandboxed plugin surfaces. The iframe talks to
 	// the host over MessagePort; the host calls this internal route with the
