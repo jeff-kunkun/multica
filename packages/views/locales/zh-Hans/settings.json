@@ -715,6 +715,20 @@
       "granted": "当前浏览器可以弹出通知横幅。",
       "denied": "已被浏览器拦截。请在浏览器设置中为本站点开启通知权限。",
       "enabled_badge": "已启用"
+    },
+    "decisions": {
+      "title": "要我决定的事",
+      "label": "交给我的 Bot",
+      "none": "不用 Bot（只在站内）",
+      "no_bots": "你还没有 Bot，先到「Bot」里添加。",
+      "state_none": "选你自己的 Bot，要你决定的事会推给它。",
+      "state_ok": "要你决定的事先推给 {{name}}。",
+      "state_unverified": "等 {{name}} 确认能收到。",
+      "state_broken": "{{name}} 连不上，要你决定的事暂时回到站内。",
+      "check_again": "重新确认",
+      "mirror_label": "站内也提醒我",
+      "mirror_hint": "除了 Bot，站内照常提醒。",
+      "toast_failed": "没能更新 Bot 设置"
     }
   },
   "tokens": {

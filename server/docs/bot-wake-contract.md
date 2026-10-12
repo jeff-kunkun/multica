@@ -353,3 +353,64 @@ Downgrading migration 668 restores the prior schema and default for newly create
 Bots; already updated subscription arrays stay as saved, so a downgrade does not
 re-enable started notifications on existing Bots. Legacy retries without a
 delivery_id are processed singly by the new worker.
+
+## Human-needed events (DENE-1933)
+
+A person's own Bot can be the channel for everything that needs their decision.
+This is a second outbox, separate from the ordinary wake queue above, so it
+never waits behind quiet hours, the hourly limit or the 30-second grouping.
+
+### Binding
+
+`member_bot_binding`: one active row per (workspace, person). Only the person
+can write it, from their own login (an agent task token or a Bot key is
+refused), and only for a Bot they own that has a webhook configured.
+
+| Route | Purpose |
+|---|---|
+| `GET /api/workspaces/{id}/me/bot-binding` | `bound`, `state` (`none \| unverified \| ok \| broken`), `message`, `mode`, `bot_id`, `bot_name`, `verified_at`, `open_count` |
+| `PUT .../me/bot-binding` | `{bot_id, mode: bot_first\|mirror, resend_after_seconds, escalate_after_seconds}`; sends `binding.verify` |
+| `POST .../me/bot-binding/verify` | send `binding.verify` again |
+| `DELETE .../me/bot-binding` | unbind; open calls return to the app as unread |
+
+`unverified` until the Bot's `woken` receipt for `binding.verify` arrives.
+`broken` when the Bot is stopped, its key invalid or its webhook removed; the
+person gets one in-app hint and decisions go to the app. Unbound or unverified
+people behave exactly as before.
+
+### Event
+
+`type: "human_needed"` (also `human_needed.escalation`, `binding.verify`) with
+the usual envelope (`event_id`, `sequence`, `woken_url`, `summary`, ...) plus
+`relayed_url`, `answered_url`, `pending_url` and a `human_needed` block:
+`kind`, `target_user_id`, `target_name`, `question`, `options[{id,label}]`,
+`urgency` (`normal|urgent`), `deadline|null`, `source_url`, `mode`,
+`escalation`, `parent_event_id`. Dedupe key per source (for a mention:
+`mention:<comment|issue>:<user>`), so one @ is one event.
+
+### Delivery and receipts
+
+States: `queued → sending → sent → woken → relayed → answered`, or `expired` /
+`cancelled`. HTTP 200 = `sent`. Anything else is retried with backoff 5s, 15s,
+45s, 2m, 5m, 10m, 20m, then every 30m until it succeeds or expires.
+
+| Receipt | Route (under `/api/workspaces/{id}/bots/{botId}`) | Meaning |
+|---|---|---|
+| woken | `POST /wake/events/{eventId}/woken` (also `/ack`) | Bot received and understood; on `binding.verify` it verifies the binding |
+| relayed | `POST /wake/events/{eventId}/relayed {channel, message_ref}` | the Bot **told the person** |
+| answered | `POST /wake/events/{eventId}/answered {answer, comment_id}` | the person answered; for a ticket `comment_id` is the person's comment the Bot posted, which wakes the asker and clears the block |
+| list | `GET /human-needed?status=&limit=&before=` | open calls, to catch up |
+
+Timers (per binding, defaults): not `woken` within 180 s → sent again; `woken`
+but not `relayed` within 300 s → one `human_needed.escalation`, the app row turns
+unread, workspace owners are reminded; the nudge repeats every 30 min until
+relayed. Urgency never changes delivery timing on the server; quiet hours are
+the Bot's decision.
+
+### Producers
+
+`SummonWith` (issue_summon, needs_kun, blocked/in_review waiting on a person,
+approvals), the mention listener (`mention://member`), and the new
+`POST /api/issues/{id}/ask-human` and `POST /api/chat/sessions/{id}/ask-human`
+(CLI `multica issue ask-human`, `multica chat ask-human`). Modes: `bot_first`
+keeps the app row as a quiet read copy; `mirror` also alerts in the app.

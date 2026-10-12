@@ -9,6 +9,7 @@ import type {
   BotMentionSource,
   BotWakeEventType,
   CreateExternalBotRequest,
+  PutBotBindingRequest,
   UpdateBotWakeRequest,
 } from "../types";
 
@@ -31,6 +32,7 @@ export const BOT_WAKE_ACK_MAX = 100;
 export const botKeys = {
   all: (wsId: string) => ["external-bots", wsId] as const,
   list: (wsId: string) => [...botKeys.all(wsId), "list"] as const,
+  binding: (wsId: string) => [...botKeys.all(wsId), "binding"] as const,
   wake: (wsId: string, botId: string) => [...botKeys.all(wsId), "wake", botId] as const,
   wakeEvents: (wsId: string, botId: string, pending: boolean) =>
     [...botKeys.wake(wsId, botId), pending ? "pending" : "events"] as const,
@@ -47,6 +49,16 @@ export const externalBotListOptions = (wsId: string, enabled = true) =>
     queryKey: botKeys.list(wsId),
     queryFn: () => api.listExternalBots(wsId),
     enabled: !!wsId && enabled,
+  });
+
+// Your own decision channel. It changes without you (the Bot confirms, stops),
+// so it is re-read while the page is open.
+export const botBindingOptions = (wsId: string) =>
+  queryOptions({
+    queryKey: botKeys.binding(wsId),
+    queryFn: () => api.getBotBinding(wsId),
+    enabled: !!wsId,
+    refetchInterval: 10_000,
   });
 
 export const botWakeOptions = (wsId: string, botId: string) =>
@@ -149,5 +161,34 @@ export function useAckBotWakePending(wsId: string, botId: string) {
         qc.resetQueries({ queryKey: botKeys.wakeEvents(wsId, botId, true) }),
         qc.invalidateQueries({ queryKey: botKeys.wakeEvents(wsId, botId, false) }),
       ]),
+  });
+}
+
+// No optimistic state: the page shows what the server answered, because the
+// server decides whether the Bot has confirmed.
+export function usePutBotBinding(wsId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (data: PutBotBindingRequest) => api.putBotBinding(wsId, data),
+    onSuccess: (saved) => qc.setQueryData(botKeys.binding(wsId), saved),
+    onSettled: () => qc.invalidateQueries({ queryKey: botKeys.binding(wsId) }),
+  });
+}
+
+export function useVerifyBotBinding(wsId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => api.verifyBotBinding(wsId),
+    onSuccess: (saved) => qc.setQueryData(botKeys.binding(wsId), saved),
+    onSettled: () => qc.invalidateQueries({ queryKey: botKeys.binding(wsId) }),
+  });
+}
+
+export function useDeleteBotBinding(wsId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => api.deleteBotBinding(wsId),
+    onSuccess: (saved) => qc.setQueryData(botKeys.binding(wsId), saved),
+    onSettled: () => qc.invalidateQueries({ queryKey: botKeys.binding(wsId) }),
   });
 }
