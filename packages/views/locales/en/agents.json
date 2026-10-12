@@ -256,6 +256,8 @@
     "prop_speed": "Speed",
     "prop_visibility": "Visibility",
     "prop_concurrency": "Concurrency",
+    "prop_concurrency_hint": "One run per issue at a time",
+    "prop_concurrency_hint_machine": "One run per issue at a time; the machine's slots are shared ({{active}}/{{limit}} in use)",
     "prop_work_enabled": "Accept work",
     "prop_work_enabled_hint": "When off, this seat takes no new work; running work continues.",
     "prop_work_pause_balance": "Paused: the account is out of balance. Top up or switch accounts, then turn this back on.",

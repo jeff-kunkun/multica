@@ -45,6 +45,58 @@ func (q *Queries) GetRuntimeMachineKey(ctx context.Context, id pgtype.UUID) (str
 	return machine_key, err
 }
 
+const listQueuedTaskBlockers = `-- name: ListQueuedTaskBlockers :many
+SELECT atq.id AS task_id,
+    a.max_concurrent_tasks::integer AS agent_max,
+    (SELECT count(*) FROM agent_task_queue r
+        WHERE r.agent_id = atq.agent_id
+          AND r.status IN ('dispatched', 'running', 'waiting_local_directory'))::bigint AS agent_running,
+    (atq.issue_id IS NOT NULL AND EXISTS (
+        SELECT 1 FROM agent_task_queue active
+        WHERE active.agent_id = atq.agent_id
+          AND active.issue_id = atq.issue_id
+          AND active.status IN ('dispatched', 'running', 'waiting_local_directory')))::boolean AS issue_serial
+FROM agent_task_queue atq
+JOIN agent a ON a.id = atq.agent_id
+WHERE atq.id = ANY($1::uuid[]) AND atq.status = 'queued'
+`
+
+type ListQueuedTaskBlockersRow struct {
+	TaskID       pgtype.UUID `json:"task_id"`
+	AgentMax     int32       `json:"agent_max"`
+	AgentRunning int64       `json:"agent_running"`
+	IssueSerial  bool        `json:"issue_serial"`
+}
+
+// Why a queued task has not started yet, beyond the machine cap: the agent is
+// at its own max_concurrent_tasks, or the same agent already has a live task
+// on the same issue (ClaimAgentTask runs one per (issue, agent)). Mirrors
+// CountRunningTasks and the NOT EXISTS fence in ClaimAgentTask; keep in sync.
+func (q *Queries) ListQueuedTaskBlockers(ctx context.Context, taskIds []pgtype.UUID) ([]ListQueuedTaskBlockersRow, error) {
+	rows, err := q.db.Query(ctx, listQueuedTaskBlockers, taskIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListQueuedTaskBlockersRow{}
+	for rows.Next() {
+		var i ListQueuedTaskBlockersRow
+		if err := rows.Scan(
+			&i.TaskID,
+			&i.AgentMax,
+			&i.AgentRunning,
+			&i.IssueSerial,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listRuntimeMachineCapacities = `-- name: ListRuntimeMachineCapacities :many
 WITH active AS (
     SELECT runtime_machine_key(r.daemon_id, r.owner_id, r.id) AS machine_key, count(*)::bigint AS active_runs

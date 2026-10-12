@@ -1,4 +1,4 @@
-import type { AgentTask } from "@multica/core/types";
+import type { AgentTask, MachineQueueReason } from "@multica/core/types";
 import { useT } from "../../i18n";
 import { stripMentionMarkdown } from "../utils/strip-mention-markdown";
 
@@ -99,6 +99,19 @@ export function useStatusLabel(status: AgentTask["status"]): string {
     case "cancelled": return t(($) => $.execution_log.status_cancelled);
     default: return status;
   }
+}
+
+/** Why a queued run has not started: same-issue order, agent limit, or full machine. */
+export function useQueueReasonLabel(): (reason: MachineQueueReason) => string {
+  const { t } = useT("issues");
+  return (reason) => {
+    const counts = { active: reason.active_runs, limit: reason.max_concurrent_runs };
+    switch (reason.code) {
+      case "issue_serial": return t(($) => $.execution_log.queue_issue_serial);
+      case "agent_capacity": return t(($) => $.execution_log.queue_agent_full, counts);
+      default: return t(($) => $.execution_log.machine_full, counts);
+    }
+  };
 }
 
 /**

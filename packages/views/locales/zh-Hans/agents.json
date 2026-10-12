@@ -240,6 +240,8 @@
     "prop_speed": "速度",
     "prop_visibility": "可见性",
     "prop_concurrency": "并发",
+    "prop_concurrency_hint": "同一张单一次只跑一个",
+    "prop_concurrency_hint_machine": "同一张单一次只跑一个；整机名额与本机其他智能体共用（已用 {{active}}/{{limit}}）",
     "prop_work_enabled": "承接工作",
     "prop_work_enabled_hint": "关闭后不再承接新工作，进行中的运行不受影响。",
     "prop_work_pause_balance": "账号余额已用完，已暂停。充值或换账号后重新打开。",

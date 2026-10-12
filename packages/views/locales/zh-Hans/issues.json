@@ -912,7 +912,9 @@
     "status_deferred": "重试中",
     "status_capacity_retry": "模型满载，第 {{retry}} 次重试，下次 {{time}}",
     "usage_label": "Token 成本",
-    "machine_full": "排队中：机器已满（{{active}}/{{limit}}）"
+    "machine_full": "排队中：机器已满（{{active}}/{{limit}}）",
+    "queue_agent_full": "排队中：该智能体已达并发上限（{{active}}/{{limit}}）",
+    "queue_issue_serial": "排队中：该智能体在同一张单上还有任务在跑，需等它结束"
   },
   "runs_timeline": {
     "title": "运行记录",

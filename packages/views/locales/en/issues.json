@@ -944,7 +944,9 @@
     "status_deferred": "Retrying",
     "status_capacity_retry": "Model at capacity · retry {{retry}}, next at {{time}}",
     "usage_label": "Token cost",
-    "machine_full": "Queued: machine full ({{active}}/{{limit}})"
+    "machine_full": "Queued: machine full ({{active}}/{{limit}})",
+    "queue_agent_full": "Queued: this agent is at its limit ({{active}}/{{limit}})",
+    "queue_issue_serial": "Queued: waiting for this agent's earlier run on the same issue"
   },
   "runs_timeline": {
     "title": "Runs",

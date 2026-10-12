@@ -28,7 +28,7 @@ import { formatDuration } from "../../agents/components/agent-activity-hover-con
 import { failureNeedsAction, isCancelledOutcome, runOutcomeLabel } from "../../agents/components/tabs/task-failure";
 import { TerminateTaskConfirmDialog } from "./terminate-task-confirm-dialog";
 import { TaskStatusIcon } from "./task-status-icon";
-import { useStatusLabel } from "./task-run-labels";
+import { useQueueReasonLabel, useStatusLabel } from "./task-run-labels";
 import { commentRunOutput, isActiveCommentRun, showCommentRunInHeader, type CommentRun } from "./comment-runs";
 
 import { useRunAnimationVisibility, useRunDisclosureMotion } from "./use-run-comment-motion";
@@ -171,6 +171,7 @@ export function InlineCommentRun({ run, className, viewState, showIdentity = fal
     : current?.kind === "error" ? t(($) => $.inline_run.error)
     : current?.kind === "skill" ? t(($) => $.inline_run.skill_step, { name: current.item.tool ?? "" })
     : t(($) => $.inline_run.waiting_response);
+  const queueReasonLabel = useQueueReasonLabel();
   const machineQueueReason = task.status === "queued" ? task.queue_reason : undefined;
   const summary = task.status === "queued" ? t(($) => $.inline_run.queued)
     : task.status === "dispatched" ? t(($) => $.inline_run.starting)
@@ -263,7 +264,7 @@ export function InlineCommentRun({ run, className, viewState, showIdentity = fal
       </div>
       <div className={cn(showIdentity && "pl-8")}>
         {machineQueueReason && <p role="status" className="mt-1 whitespace-normal text-caption text-muted-foreground">
-          {t(($) => $.execution_log.machine_full, { active: machineQueueReason.active_runs, limit: machineQueueReason.max_concurrent_runs })}
+          {queueReasonLabel(machineQueueReason)}
         </p>}
         <RunSessionCaption lineage={sessionLineage} />
         <RunSkillsLine names={skillsUsed} />

@@ -3253,5 +3253,9 @@ describe("Machine capacity queue diagnostics", () => {
     expect(ChatPendingTaskSchema.parse({ status: "queued" }).queue_reason).toBeUndefined();
     expect(ChatPendingTaskSchema.parse({ status: "queued", queue_reason: { ...queue_reason, max_concurrent_runs: 0 } }).queue_reason).toBeUndefined();
     expect(ChatPendingTaskSchema.parse({ status: "queued", queue_reason: "full" }).queue_reason).toBeUndefined();
+    for (const code of ["agent_capacity", "issue_serial"]) {
+      expect(ChatPendingTaskSchema.parse({ status: "queued", queue_reason: { ...queue_reason, code } }).queue_reason?.code).toBe(code);
+    }
+    expect(ChatPendingTaskSchema.parse({ status: "queued", queue_reason: { ...queue_reason, code: "other" } }).queue_reason).toBeUndefined();
   });
 });

@@ -93,3 +93,36 @@ func TestMachineCapacityPatchAndQueueReason(t *testing.T) {
 	}
 	t.Log("machine full exposes 8/8 in task and chat HTTP projection; counts dispatched and directory-waiting reservations")
 }
+
+func TestQueueReasonNamesTheBlocker(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	rt, owner, _ := runtimeVisibilityFixture(t)
+	f := &testutil.Fixture{Pool: testPool, WorkspaceID: testWorkspaceID, UserID: owner}
+	busy := f.Agent(t, "Busy one", rt)
+	idle := f.Agent(t, "Roomy", rt, testutil.Cols{"max_concurrent_tasks": 5})
+	issueA := f.Issue(t, "Reason A")
+	issueB := f.Issue(t, "Reason B")
+	f.Task(t, busy, testutil.Cols{"runtime_id": rt, "issue_id": issueA, "status": "running"})
+	sameIssue := f.Task(t, busy, testutil.Cols{"runtime_id": rt, "issue_id": issueA})
+	otherIssue := f.Task(t, busy, testutil.Cols{"runtime_id": rt, "issue_id": issueB})
+	free := f.Task(t, idle, testutil.Cols{"runtime_id": rt, "issue_id": issueA})
+
+	rows := []AgentTaskResponse{
+		{ID: sameIssue, RuntimeID: rt, Status: "queued"},
+		{ID: otherIssue, RuntimeID: rt, Status: "queued"},
+		{ID: free, RuntimeID: rt, Status: "queued"},
+	}
+	testHandler.hydrateMachineQueueReasons(ctx, rows)
+	if r := rows[0].QueueReason; r == nil || r.Code != "issue_serial" || r.ActiveRuns != 1 || r.MaxConcurrentRuns != 1 {
+		t.Fatalf("same issue: %+v", r)
+	}
+	if r := rows[1].QueueReason; r == nil || r.Code != "agent_capacity" || r.ActiveRuns != 1 || r.MaxConcurrentRuns != 1 {
+		t.Fatalf("agent at limit: %+v", r)
+	}
+	if rows[2].QueueReason != nil {
+		t.Fatalf("agent with room and a quiet machine got a reason: %+v", rows[2].QueueReason)
+	}
+}

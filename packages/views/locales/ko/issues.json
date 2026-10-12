@@ -912,7 +912,9 @@
     "status_deferred": "재시도 중",
     "status_capacity_retry": "모델 포화 · {{retry}}번째 재시도, 다음 {{time}}",
     "usage_label": "토큰 비용",
-    "machine_full": "대기 중: 기기 한도 도달 ({{active}}/{{limit}})"
+    "machine_full": "대기 중: 기기 한도 도달 ({{active}}/{{limit}})",
+    "queue_agent_full": "대기 중: 이 에이전트의 동시 실행 한도 도달 ({{active}}/{{limit}})",
+    "queue_issue_serial": "대기 중: 같은 이슈의 이전 실행이 끝나기를 기다리는 중"
   },
   "runs_timeline": {
     "title": "실행 기록",

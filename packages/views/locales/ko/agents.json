@@ -240,6 +240,8 @@
     "prop_speed": "속도",
     "prop_visibility": "공개 범위",
     "prop_concurrency": "동시 실행",
+    "prop_concurrency_hint": "같은 이슈에서는 한 번에 하나만 실행",
+    "prop_concurrency_hint_machine": "같은 이슈에서는 한 번에 하나만 실행. 기기 슬롯은 공유 (사용 중 {{active}}/{{limit}})",
     "prop_work_enabled": "작업 수락",
     "prop_work_enabled_hint": "끄면 새 작업을 받지 않으며, 실행 중인 작업은 계속됩니다.",
     "prop_work_pause_balance": "계정 잔액이 소진되어 일시 중지되었습니다. 충전하거나 계정을 바꾼 뒤 다시 켜세요.",

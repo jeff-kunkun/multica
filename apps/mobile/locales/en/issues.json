@@ -286,7 +286,9 @@
       "reason_fresh_requested": "fresh session requested"
     },
     "skills_used": "Skills used: {{names}}",
-    "machine_full": "Queued: machine full ({{active}}/{{limit}})"
+    "machine_full": "Queued: machine full ({{active}}/{{limit}})",
+    "agent_full": "Queued: this agent is at its limit ({{active}}/{{limit}})",
+    "issue_serial": "Queued: waiting for this agent's earlier run on the same issue"
   },
   "header_filter": "Filter",
   "new_badge": "New",
