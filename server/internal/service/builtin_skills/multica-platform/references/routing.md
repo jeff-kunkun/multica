@@ -159,6 +159,19 @@ person attached), `兜底` (the verdict was too weak, so the fallback rung),
 (the ladder's seat was busy, so a less busy seat of the same rung and
 direction took it).
 
+**分工规则 (DENE-1834).** The analysis model answers one more numbered
+question, the kind of work (任务类别), from the workspace's plain-language
+division of labour. The default reads 「前端、审美交给 Claude，Codex 主要负责审查。
+文档、沉淀类最多中档。」: a matching row filters the eligible seats to that model
+series (a hard filter, unlike the judge's `preferred_series` which only reorders
+within one rung) and may cap the tier. When the series has nobody online with
+headroom the ticket does not wait: routing picks across series by tier and the
+「自动选派」 comment says 「Claude 系列没人能接（…），换系列按档位选」. The same
+facts print on the routing receipt of `issue create` / `chat new` / chat → goal
+(`category`, `rule`, `series`, `series_fallback` in `--output json`). Changing
+the rule list re-asks the category on the next route; the rest of a fresh
+analysis is reused as before.
+
 **接着做 (DENE-1202).** A ticket continuing earlier work — a sibling one stage
 earlier under the same parent, the parent itself, or a ticket created by the
 same agent run — goes back to that work's executor when the seat is on the
