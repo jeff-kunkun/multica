@@ -38,6 +38,15 @@
     "mode_restart_process": "新进程 · 接着同一段会话",
     "mode_steer_unsupported": "{{cli}} 还不能在回复中途读消息",
     "mode_steer_unsupported_generic": "这个智能体还不能在回复中途读消息",
+    "mode_replace": "替换",
+    "mode_replace_desc": "停掉这一轮，作废排队的旧消息",
+    "mode_replace_process": "新进程 · 接着同一段会话",
+    "mode_replace_creator_only": "只有发起这个聊天的人能替换",
+    "replace_confirm_title": "替换之前的指令？",
+    "replace_confirm_desc_other": "会停掉正在回的这一轮，并取消 {{count}} 条排队消息。旧消息会标成已被替换。",
+    "replace_confirm_desc_none": "会停掉正在回的这一轮。之前的消息会标成已被替换。",
+    "replace_confirm_keep": "先不换",
+    "replace_confirm_action": "替换",
     "steer_fell_back_toast": "这条回复读不了插话，已改为排队"
   },
   "empty": {

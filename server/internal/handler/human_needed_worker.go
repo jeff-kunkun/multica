@@ -108,8 +108,22 @@ func (w *HumanNeededWorker) finish(ev db.HumanNeededEvent, delivered bool, reaso
 	// Three failed pushes in a row: put it in front of the person in the app
 	// and mark the channel broken. Retries go on in the background.
 	if ev.Attempts+1 == 3 && ev.EventType == service.HumanEventNeeded {
-		_ = w.h.Queries.SetMemberBotBindingBroken(ctx, ev.BindingID)
+		w.markChannelBroken(ctx, ev.BindingID, ev.WorkspaceID, ev.TargetUserID)
 		service.FallbackHumanNeededInApp(ctx, w.h.Queries, w.h.Bus, ev)
+	}
+}
+
+// markChannelBroken flags the binding and tells the person once: only the
+// healthy -> broken change writes the notice, however many calls or sweeps
+// notice the same outage afterwards.
+func (w *HumanNeededWorker) markChannelBroken(ctx context.Context, bindingID, workspaceID, userID pgtype.UUID) {
+	changed, err := w.h.Queries.SetMemberBotBindingBroken(ctx, bindingID)
+	if err != nil {
+		slog.Warn("human needed: flag channel broken failed", "error", err)
+		return
+	}
+	if changed > 0 {
+		service.NotifyHumanChannelBroken(ctx, w.h.Queries, w.h.Bus, workspaceID, userID)
 	}
 }
 
@@ -314,6 +328,11 @@ func (h *Handler) humanNeededPayloadFields(ctx context.Context, ev db.HumanNeede
 	if ev.ParentEventID.Valid {
 		block["parent_event_id"] = uuidToString(ev.ParentEventID)
 	}
+	if ev.AskID.Valid {
+		if card := h.askCardForPayload(ctx, ev); card != nil {
+			block["ask"] = card
+		}
+	}
 	fields["human_needed"] = block
 	lead := "要你决定"
 	if ev.EventType == service.HumanEventEscalation {
@@ -470,10 +489,10 @@ func (w *HumanNeededWorker) checkChannels(ctx context.Context) {
 	for _, row := range rows {
 		healthy := row.BotActive && row.WebhookConfigured
 		if !healthy {
-			if row.BrokenNotifiedAt.Valid {
-				continue
-			}
-			_ = q.SetMemberBotBindingBroken(ctx, row.ID)
+			// Flag and tell the person once, but always move the open calls:
+			// three failed pushes may have flagged the channel already, and the
+			// calls that were still waiting must not be stranded behind that.
+			w.markChannelBroken(ctx, row.ID, row.WorkspaceID, row.UserID)
 			open, listErr := q.ListOpenHumanNeededForBinding(ctx, row.ID)
 			if listErr != nil {
 				continue

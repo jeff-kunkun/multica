@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"strconv"
@@ -17,6 +18,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/blockwait"
 	"github.com/multica-ai/multica/server/internal/service"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
+	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
 // Everything a person's Bot owes them (DENE-1933): the personal binding, the
@@ -426,8 +428,9 @@ func (h *Handler) AnswerHumanNeeded(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req struct {
-		Answer    string `json:"answer"`
-		CommentID string `json:"comment_id"`
+		Answer    string            `json:"answer"`
+		Answers   map[string]string `json:"answers"`
+		CommentID string            `json:"comment_id"`
 	}
 	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 16384))
 	dec.DisallowUnknownFields()
@@ -447,8 +450,39 @@ func (h *Handler) AnswerHumanNeeded(w http.ResponseWriter, r *http.Request) {
 			ev = parent
 		}
 	}
+	answer := truncateRunes(strings.TrimSpace(req.Answer), 4000)
 	comment := pgtype.UUID{}
-	if strings.TrimSpace(req.CommentID) != "" {
+	switch {
+	case ev.AskID.Valid:
+		// A question card: the answers fill the card, which resumes the asker.
+		if len(req.Answers) == 0 {
+			writeError(w, http.StatusBadRequest, "这是一张选择题卡片：answers 要带题号到选项 id，如 {\"0\":\"approve\"}")
+			return
+		}
+		if _, askErr := h.answerAskCore(ctx, askAnswer{Workspace: ev.WorkspaceID, AskID: ev.AskID, Answers: req.Answers, Answerer: ev.TargetUserID, Bot: &bot}); askErr != nil && askErr.Code != http.StatusConflict {
+			writeError(w, askErr.Code, askErr.Msg)
+			return
+		}
+		if answer == "" {
+			raw, _ := json.Marshal(req.Answers)
+			answer = string(raw)
+		}
+	case ev.ChatSessionID.Valid:
+		// A chat question: the answer is written into the chat as the person
+		// and the asking agent's run is queued.
+		if answer == "" {
+			writeError(w, http.StatusBadRequest, "聊天里的提问要带 answer：对方的回答原话")
+			return
+		}
+		if ev.Status == "answered" {
+			break // a repeated receipt must not send the answer twice
+		}
+		if err := h.writeChatAnswer(ctx, ev, bot, answer); err != nil {
+			slog.Warn("human needed: chat answer failed", "error", err, "event_id", uuidToString(ev.EventID))
+			writeError(w, http.StatusConflict, "回答没能写进聊天："+err.Error())
+			return
+		}
+	case strings.TrimSpace(req.CommentID) != "":
 		cid, err := parseUUIDSafe(strings.TrimSpace(req.CommentID))
 		if err != nil {
 			writeError(w, http.StatusBadRequest, "invalid comment_id")
@@ -460,11 +494,10 @@ func (h *Handler) AnswerHumanNeeded(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		comment = c.ID
-	} else if ev.IssueID.Valid && ev.Kind != service.SummonSourceMention {
+	case ev.IssueID.Valid && ev.Kind != service.SummonSourceMention:
 		writeError(w, http.StatusBadRequest, "票上的提问要带 comment_id：先用 Bot 令牌把答案评论到票上，再回报")
 		return
 	}
-	answer := truncateRunes(strings.TrimSpace(req.Answer), 4000)
 	if err := h.Queries.RecordHumanNeededAnswered(ctx, db.RecordHumanNeededAnsweredParams{
 		EventID:         ev.EventID,
 		Answer:          pgtype.Text{String: answer, Valid: answer != ""},
@@ -520,7 +553,7 @@ func (h *Handler) ListHumanNeededForBot(w http.ResponseWriter, r *http.Request) 
 		_ = json.Unmarshal(ev.Options, &options)
 		out = append(out, map[string]any{
 			"event_id": uuidToString(ev.EventID), "type": ev.EventType, "kind": ev.Kind, "status": ev.Status,
-			"issue_id": uuidToPtr(ev.IssueID), "chat_session_id": uuidToPtr(ev.ChatSessionID),
+			"issue_id": uuidToPtr(ev.IssueID), "chat_session_id": uuidToPtr(ev.ChatSessionID), "ask_id": uuidToPtr(ev.AskID),
 			"question": ev.Question, "options": options, "urgency": ev.Urgency,
 			"deadline": timestampToPtr(ev.Deadline), "created_at": timestampToString(ev.CreatedAt),
 			"woken_at": timestampToPtr(ev.WokenAt), "relayed_at": timestampToPtr(ev.RelayedAt),
@@ -558,6 +591,7 @@ type AskHumanRequest struct {
 
 type AskHumanResponse struct {
 	SummonID    string   `json:"summon_id,omitempty"`
+	AskID       string   `json:"ask_id,omitempty"`
 	RecipientID string   `json:"recipient_id"`
 	Recipient   string   `json:"recipient_name"`
 	ViaBot      bool     `json:"via_bot"`
@@ -643,7 +677,27 @@ func (h *Handler) AskHumanIssue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	actorType, actorID := h.resolveActor(r, userID, uuidToString(issue.WorkspaceID))
+	// A question with choices is a card (agent_ask): the same object the app,
+	// `multica ask` and the Bot fill in. A free-text question has no choices
+	// to make a card from, so it stays a ticket comment the person replies to.
+	var askID pgtype.UUID
+	var askDetails map[string]any
+	if cardOptions := askCardOptions(options); cardOptions != nil {
+		card, cardErr := h.insertAsk(r.Context(), askInsert{
+			Workspace: issue.WorkspaceID, Issue: issue.ID, AskerType: actorType, AskerID: parseUUID(actorID),
+			Title: question, Questions: []AskQuestion{{Text: question, Options: cardOptions}},
+			Mode: "needs_you", Recipient: target, Kind: "ask_human",
+		})
+		if cardErr != nil {
+			writeError(w, http.StatusInternalServerError, "ask failed: "+cardErr.Error())
+			return
+		}
+		askID = parseUUID(card.ID)
+		askDetails = map[string]any{"ask_id": card.ID}
+	}
 	out, err := h.summonPerson(r.Context(), service.SummonInput{
+		AskID:      askID,
+		Details:    askDetails,
 		Issue:      issue,
 		Recipient:  target,
 		CallerType: actorType,
@@ -655,6 +709,9 @@ func (h *Handler) AskHumanIssue(w http.ResponseWriter, r *http.Request) {
 		Urgent:     req.Urgent,
 		Deadline:   deadline,
 	})
+	if err != nil || out.Duplicate {
+		h.cancelAskCard(r.Context(), askID)
+	}
 	if err != nil {
 		if errors.Is(err, service.ErrSummonNotMember) {
 			writeError(w, http.StatusBadRequest, "--to "+req.To+" 不是这个工作区的成员")
@@ -667,6 +724,9 @@ func (h *Handler) AskHumanIssue(w http.ResponseWriter, r *http.Request) {
 	resp := AskHumanResponse{
 		SummonID: uuidToString(out.Summon.ID), RecipientID: uuidToString(target), Recipient: name,
 		Duplicate: out.Duplicate, Blocked: blocked,
+	}
+	if askID.Valid && !out.Duplicate {
+		resp.AskID = uuidToString(askID)
 	}
 	if ch, chErr := h.Queries.GetHumanChannel(r.Context(), db.GetHumanChannelParams{WorkspaceID: issue.WorkspaceID, UserID: target}); chErr == nil && service.HumanChannelUsable(ch) {
 		resp.ViaBot = true
@@ -683,6 +743,36 @@ func (h *Handler) AskHumanIssue(w http.ResponseWriter, r *http.Request) {
 		resp.Result = append(resp.Result, "票已改成阻塞，等 "+name+" 回答；他答完平台叫醒你")
 	}
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// askCardOptions turns the --option list into card choices when a card can be
+// made (2 to 6 choices); anything else is a free-text question.
+func askCardOptions(options []service.HumanNeededOption) []AskOption {
+	if len(options) < 2 || len(options) > 6 {
+		return nil
+	}
+	out := make([]AskOption, 0, len(options))
+	seen := map[string]bool{}
+	for i, o := range options {
+		id := strings.TrimSpace(o.ID)
+		if id == "" || seen[id] {
+			id = fmt.Sprintf("o%d", i+1)
+		}
+		seen[id] = true
+		out = append(out, AskOption{ID: id, Label: o.Label})
+	}
+	return out
+}
+
+// cancelAskCard drops a card nobody will see (the call was a duplicate or
+// failed after the card was made).
+func (h *Handler) cancelAskCard(ctx context.Context, askID pgtype.UUID) {
+	if !askID.Valid {
+		return
+	}
+	if _, err := h.DB.Exec(ctx, `UPDATE agent_ask SET status='cancelled' WHERE id=$1 AND status='open'`, askID); err != nil {
+		slog.Warn("ask-human: cancel unused card failed", "error", err, "ask_id", uuidToString(askID))
+	}
 }
 
 // resolveAskTarget turns --to into a workspace member: "owner" is the
@@ -765,9 +855,10 @@ func (h *Handler) unblockAfterAsk(ctx context.Context, issueID, answerer pgtype.
 }
 
 // AskHumanChat is POST /api/chat/sessions/{sessionId}/ask-human — `multica chat
-// ask-human`. An agent in a chat needs its person to decide: push it to their
-// Bot, with the chat as the place to answer. Without a Bot nothing extra
-// happens: the person already sees the chat.
+// ask-human`. An agent in a chat needs its person to decide. The question is
+// written into the chat first, so the person sees it whether or not they have
+// a Bot; with a Bot it is also pushed there, and the Bot's answer comes back
+// into the chat as the person's reply and wakes the asking agent.
 func (h *Handler) AskHumanChat(w http.ResponseWriter, r *http.Request) {
 	userID, ok := requireUserID(w, r)
 	if !ok {
@@ -788,29 +879,155 @@ func (h *Handler) AskHumanChat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	actorType, actorID := h.resolveActor(r, userID, uuidToString(session.WorkspaceID))
-	route, err := service.RouteHumanNeeded(r.Context(), h.Queries, service.HumanNeededInput{
-		WorkspaceID:   session.WorkspaceID,
-		Target:        session.CreatorID,
-		Kind:          "chat_ask",
-		DedupeKey:     "chat:" + uuidToString(session.ID) + ":" + strconv.FormatInt(time.Now().UnixNano(), 36),
+	// A question with choices is a card (agent_ask), the same object the app,
+	// the inbox, `multica ask` and the Bot fill in; the answer is written back
+	// into this chat and wakes the asking agent. A free-text question has no
+	// choices to make a card from and stays a chat message.
+	var card AskResponse
+	var insert askInsert
+	hasCard := false
+	if cardOptions := askCardOptions(options); cardOptions != nil {
+		insert = askInsert{
+			Workspace: session.WorkspaceID, AskerType: actorType, AskerID: parseUUID(actorID),
+			Title: question, Questions: []AskQuestion{{Text: question, Options: cardOptions}},
+			Mode: "needs_you", Recipient: session.CreatorID, Kind: "ask_human", ChatSession: session.ID,
+			Urgent: req.Urgent, Deadline: deadline,
+		}
+		var cardErr error
+		card, cardErr = h.insertAsk(r.Context(), insert)
+		if cardErr != nil {
+			writeError(w, http.StatusInternalServerError, "ask failed: "+cardErr.Error())
+			return
+		}
+		hasCard = true
+	}
+	msg, err := h.Queries.CreateChatMessage(r.Context(), db.CreateChatMessageParams{
 		ChatSessionID: session.ID,
-		CallerType:    actorType,
-		CallerID:      parseUUID(actorID),
-		Question:      question,
-		Options:       options,
-		Urgent:        req.Urgent,
-		Deadline:      deadline,
+		Role:          "assistant",
+		Content:       chatAskContent(question, options),
 	})
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "ask failed")
+		if hasCard {
+			h.cancelAskCard(r.Context(), parseUUID(card.ID))
+		}
+		writeError(w, http.StatusInternalServerError, "ask failed: 提问没能写进聊天")
 		return
 	}
-	resp := AskHumanResponse{RecipientID: uuidToString(session.CreatorID), ViaBot: route.Routed}
+	sessionID := uuidToString(session.ID)
+	h.publishChatWithSource(r.Context(), protocol.EventChatMessage, uuidToString(session.WorkspaceID), actorType, actorID, sessionID, protocol.ChatMessagePayload{
+		ChatSessionID: sessionID,
+		MessageID:     uuidToString(msg.ID),
+		Role:          "assistant",
+		Content:       msg.Content,
+		CreatedAt:     timestampToString(msg.CreatedAt),
+	})
+	resp := AskHumanResponse{RecipientID: uuidToString(session.CreatorID)}
+	var route service.HumanNeededResult
+	if hasCard {
+		route = h.deliverAskToPerson(r.Context(), card, insert, session.CreatorID, uuidToString(session.WorkspaceID), actorID)
+		resp.AskID = card.ID
+	} else {
+		var routeErr error
+		route, routeErr = service.RouteHumanNeeded(r.Context(), h.Queries, service.HumanNeededInput{
+			WorkspaceID:   session.WorkspaceID,
+			Target:        session.CreatorID,
+			Kind:          "chat_ask",
+			DedupeKey:     "chat:" + sessionID + ":" + uuidToString(msg.ID),
+			ChatSessionID: session.ID,
+			CallerType:    actorType,
+			CallerID:      parseUUID(actorID),
+			Question:      question,
+			Options:       options,
+			Urgent:        req.Urgent,
+			Deadline:      deadline,
+		})
+		if routeErr != nil {
+			writeError(w, http.StatusInternalServerError, "ask failed")
+			return
+		}
+	}
+	resp.ViaBot = route.Routed
 	if route.Routed {
 		resp.EventID = uuidToString(route.Event.EventID)
-		resp.Result = []string{"已推给对方的 Bot，由 Bot 转达给本人"}
+		resp.Result = []string{"提问已写进聊天，并推给对方的 Bot；他在聊天里答或让 Bot 转达，回答会回到这个聊天叫醒你"}
 	} else {
-		resp.Result = []string{"对方没有连接 Bot：他在聊天里直接看到你的提问"}
+		resp.Result = []string{"提问已写进聊天：对方没有连接 Bot（或 Bot 暂时不可用），他在聊天里直接看到；他回复后你继续"}
+	}
+	if hasCard {
+		resp.Result = append(resp.Result, "选择题已做成提问卡，站内收件箱、`multica ask` 和 Bot 都能回答，回答会写回这个聊天")
 	}
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// chatAskContent is the question as the chat shows it: the sentence, then the
+// choices when there are any.
+func chatAskContent(question string, options []service.HumanNeededOption) string {
+	if len(options) == 0 {
+		return question
+	}
+	var b strings.Builder
+	b.WriteString(question)
+	for i, o := range options {
+		fmt.Fprintf(&b, "\n%d. %s", i+1, o.Label)
+	}
+	return b.String()
+}
+
+// writeChatAnswer puts the answer a person gave through their Bot into the
+// chat as their own message and queues the asking agent's run, the same send
+// the app makes when they type it themselves.
+func (h *Handler) writeChatAnswer(ctx context.Context, ev db.HumanNeededEvent, bot db.PersonalAccessToken, answer string) error {
+	return h.sendChatAnswer(ctx, ev.WorkspaceID, ev.ChatSessionID, ev.TargetUserID, bot.Name, answer, nil)
+}
+
+// sendChatAnswer is the one way an answer lands in a chat: as the chat owner's
+// message (naming the Bot that carried it, if any), plus the asking agent's
+// queued run. Free-text replies and chat question cards both come through here.
+// within, when set, commits with the message: a question card is answered in
+// the same transaction, so a failed write leaves it open.
+func (h *Handler) sendChatAnswer(ctx context.Context, workspace, chatID, person pgtype.UUID, botName, answer string, within func(*db.Queries) error) error {
+	session, err := h.Queries.GetChatSession(ctx, chatID)
+	if err != nil || session.WorkspaceID != workspace || session.CreatorID != person {
+		return errors.New("聊天不属于这位主人")
+	}
+	agent, err := h.Queries.GetAgent(ctx, session.AgentID)
+	if err != nil {
+		return errors.New("聊天的智能体不存在")
+	}
+	content := answer
+	if botName != "" {
+		content = fmt.Sprintf("（Bot「%s」代表本人转达）\n%s", botName, answer)
+	}
+	sent, err := h.TaskService.SendDirectChatMessageWithOptions(ctx, session, agent, person, content, nil, "member", person, service.DirectChatSendOptions{Within: within})
+	if err != nil {
+		return err
+	}
+	if err := h.Queries.SetChatMessageSender(ctx, db.SetChatMessageSenderParams{ID: sent.Message.ID, SenderUserID: person}); err != nil {
+		slog.Warn("human needed: record chat answer sender failed", "error", err)
+	}
+	sessionID := uuidToString(session.ID)
+	h.publishChatWithSource(ctx, protocol.EventChatMessage, uuidToString(session.WorkspaceID), "member", uuidToString(person), sessionID, protocol.ChatMessagePayload{
+		ChatSessionID: sessionID,
+		MessageID:     uuidToString(sent.Message.ID),
+		Role:          "user",
+		Content:       content,
+		TaskID:        uuidToString(sent.Task.ID),
+		CreatedAt:     timestampToString(sent.Message.CreatedAt),
+		SenderUserID:  uuidToString(person),
+	})
+	return nil
+}
+
+// askCardForPayload is the card a Bot fills in, as it goes out on the wire.
+func (h *Handler) askCardForPayload(ctx context.Context, ev db.HumanNeededEvent) map[string]any {
+	var title string
+	var qraw []byte
+	if err := h.DB.QueryRow(ctx, `SELECT title, questions FROM agent_ask WHERE id=$1 AND workspace_id=$2`, ev.AskID, ev.WorkspaceID).Scan(&title, &qraw); err != nil {
+		return nil
+	}
+	var questions []AskQuestion
+	if json.Unmarshal(qraw, &questions) != nil {
+		return nil
+	}
+	return map[string]any{"id": uuidToString(ev.AskID), "title": title, "questions": questions}
 }

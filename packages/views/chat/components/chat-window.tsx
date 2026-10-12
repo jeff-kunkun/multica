@@ -1181,6 +1181,8 @@ export function ChatWindow() {
         steerSupported={pendingTask?.steer_supported === true}
         steerProvider={pendingTask?.steer_provider}
         steerMode={pendingTask?.steer_mode}
+        queuedCount={pendingTask?.hidden_queued_count ?? pendingTask?.queued_tasks?.length ?? 0}
+        replaceUnavailable={sharedSpeaker ? t(($) => $.input.mode_replace_creator_only) : undefined}
         disabled={
           isSessionArchived ||
           isAgentArchived ||

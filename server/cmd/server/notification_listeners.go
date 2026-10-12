@@ -896,8 +896,10 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 					}
 				}
 				skip := map[string]bool{e.ActorID: true}
+				// The edit's timestamp names this addition for the Bot route.
+				descDetails, _ := json.Marshal(map[string]string{"description_version": issue.UpdatedAt})
 				notifyMentionedMembers(bus, queries, e, added, issue.ID, issue.Title, issue.Status,
-					issue.Title, skip, emptyDetails)
+					issue.Title, skip, descDetails)
 			}
 		}
 	})

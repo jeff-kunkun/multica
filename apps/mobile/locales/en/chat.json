@@ -38,6 +38,16 @@
     "mode_restart_process": "New process · resumes the same session",
     "mode_steer_unsupported": "{{cli}} can't read messages mid-reply yet",
     "mode_steer_unsupported_generic": "This agent can't read messages mid-reply yet",
+    "mode_replace": "Replace",
+    "mode_replace_desc": "Stop this reply and void queued messages",
+    "mode_replace_process": "New process · resumes the same session",
+    "mode_replace_creator_only": "Only the person who started this chat can replace",
+    "replace_confirm_title": "Replace earlier instructions?",
+    "replace_confirm_desc_one": "This stops the current reply and cancels {{count}} queued message. Earlier messages are marked as replaced.",
+    "replace_confirm_desc_other": "This stops the current reply and cancels {{count}} queued messages. Earlier messages are marked as replaced.",
+    "replace_confirm_desc_none": "This stops the current reply. Earlier messages are marked as replaced.",
+    "replace_confirm_keep": "Keep",
+    "replace_confirm_action": "Replace",
     "steer_fell_back_toast": "This reply can't take a message mid-reply, so it was queued"
   },
   "empty": {

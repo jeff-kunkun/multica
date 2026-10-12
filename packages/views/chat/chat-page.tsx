@@ -947,6 +947,8 @@ export function ChatPage() {
         steerSupported={c.pendingTask?.steer_supported === true}
         steerProvider={c.pendingTask?.steer_provider}
         steerMode={c.pendingTask?.steer_mode}
+        queuedCount={c.pendingTask?.hidden_queued_count ?? c.pendingTask?.queued_tasks?.length ?? 0}
+        replaceUnavailable={c.sharedSpeaker ? t(($) => $.input.mode_replace_creator_only) : undefined}
         disabled={
           c.isSessionArchived ||
           c.isAgentArchived ||

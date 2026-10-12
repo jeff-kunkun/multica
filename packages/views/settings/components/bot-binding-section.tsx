@@ -67,8 +67,13 @@ export function BotBindingSection() {
   const busy = put.isPending || remove.isPending || verify.isPending;
   const name = binding?.bot_name ?? "";
 
+  // A bound Bot that was stopped is no longer in the active list, but the
+  // selector still has to show its name rather than its id.
+  const boundId = binding?.bound ? binding.bot_id : undefined;
+  const boundGone = !!boundId && !activeBots.some((bot) => bot.id === boundId);
   const items = [
     { value: NO_BOT, label: t(($) => $.notifications.decisions.none) },
+    ...(boundGone && boundId ? [{ value: boundId, label: name }] : []),
     ...activeBots.map((bot) => ({ value: bot.id, label: bot.name })),
   ];
 

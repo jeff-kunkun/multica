@@ -13,7 +13,7 @@
  *     the server takes follow-ups, Stop stays and a split「插话 ▾」button
  *     sits beside it. The main half sends in the current mode (steer when
  *     the CLI supports it, else queue); ▾ opens a bottom sheet with
- *     steer / queue / restart, each with its process line, steer disabled
+ *     steer / queue / restart / replace, each with its process line, steer disabled
  *     with the reason when the CLI can't take it. Return and the main half
  *     use the same mode; the choice lasts for this reply only.
  *   - **Mention picker mode=chat**: chat is user ↔ single agent so
@@ -34,7 +34,7 @@
  * now ~50 LOC plus the StopButton subcomponent.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ActivityIndicator, Modal, Pressable, View } from "react-native";
+import { ActivityIndicator, Alert, Modal, Pressable, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import type { ChatSendMode } from "@multica/core/types";
@@ -82,6 +82,10 @@ interface Props {
   steerProvider?: string;
   /** "restart" when steering stops the CLI and resumes its session. */
   steerMode?: string;
+  /** Queued messages a replace send would cancel, stated in its confirm. */
+  queuedCount?: number;
+  /** Why replace is unavailable for this person; unset when allowed. */
+  replaceUnavailable?: string;
   /** Hard-disable typing + send. Used when there's no usable agent in the
    *  workspace or the session is archived (legacy). */
   disabled?: boolean;
@@ -102,6 +106,8 @@ export function ChatComposer({
   steerSupported,
   steerProvider,
   steerMode,
+  queuedCount = 0,
+  replaceUnavailable,
   disabled = false,
   disabledReason,
 }: Props) {
@@ -121,15 +127,28 @@ export function ChatComposer({
     }) => {
       // `onSend` may be sync or async; await is safe in both cases. If it
       // throws, MessageComposer's catch restores text + chips.
-      await onSend(content, attachmentIds, modeWasChosenRef.current ? mode : undefined);
+      const sendMode = modeWasChosenRef.current ? mode : undefined;
+      // Replace stops the reply and cancels the queue, so it is confirmed
+      // first; declining throws so the draft comes back untouched. `sendMode`
+      // is fixed above, so a reply ending while the alert is open does not
+      // turn a confirmed replace into a plain send.
+      if (sendMode === "replace" && !(await confirmReplace(t, queuedCount))) {
+        throw new Error("replace declined");
+      }
+      await onSend(content, attachmentIds, sendMode);
+      // Replace is one-shot: the next message goes back to the default mode.
+      if (sendMode === "replace") {
+        setChosenMode(null);
+        modeWasChosenRef.current = false;
+      }
     },
-    [onSend],
+    [onSend, queuedCount, t],
   );
 
   // The mode for this reply only; a new reply starts from the default again.
   const [chosenMode, setChosenMode] = useState<ChatSendMode | null>(null);
   const [sheetOpen, setSheetOpen] = useState(false);
-  const sendMode = effectiveChatSendMode(chosenMode, steerSupported);
+  const sendMode = effectiveChatSendMode(chosenMode, steerSupported, !replaceUnavailable);
   const sendModeActive = sending && allowSendWhileRunning && !disabled;
   // Latest send handle from the composer's running slot. The sheet lives
   // outside the composer so it survives the composer collapsing to its pill
@@ -205,6 +224,7 @@ export function ChatComposer({
       steerSupported={steerSupported === true}
       steerProvider={steerProvider}
       steerMode={steerMode}
+      replaceUnavailable={replaceUnavailable}
       onClose={() => setSheetOpen(false)}
       onPick={(next) => {
         modeWasChosenRef.current = true;
@@ -225,7 +245,29 @@ function modeLabelKey(mode: ChatSendMode) {
     ? "composer.mode_steer"
     : mode === "queue"
       ? "composer.mode_queue"
-      : "composer.mode_restart";
+      : mode === "replace"
+        ? "composer.mode_replace"
+        : "composer.mode_restart";
+}
+
+/** Native confirm for a replace send, naming how many queued messages it cancels. */
+function confirmReplace(
+  t: ReturnType<typeof useT>["t"],
+  queuedCount: number,
+): Promise<boolean> {
+  return new Promise((resolve) => {
+    Alert.alert(
+      t("composer.replace_confirm_title"),
+      queuedCount > 0
+        ? t("composer.replace_confirm_desc", { count: queuedCount })
+        : t("composer.replace_confirm_desc_none"),
+      [
+        { text: t("composer.replace_confirm_keep"), style: "cancel", onPress: () => resolve(false) },
+        { text: t("composer.replace_confirm_action"), style: "destructive", onPress: () => resolve(true) },
+      ],
+      { cancelable: true, onDismiss: () => resolve(false) },
+    );
+  });
 }
 
 /** Split send button: the label half sends in `mode`, ▾ opens the sheet. */
@@ -282,13 +324,14 @@ function SendModeButton({
   );
 }
 
-/** Bottom sheet listing the three modes, one 44pt+ row each. */
+/** Bottom sheet listing the send modes, one 44pt+ row each. */
 function SendModeSheet({
   visible,
   mode,
   steerSupported,
   steerProvider,
   steerMode,
+  replaceUnavailable,
   onClose,
   onPick,
 }: {
@@ -297,6 +340,7 @@ function SendModeSheet({
   steerSupported: boolean;
   steerProvider?: string;
   steerMode?: string;
+  replaceUnavailable?: string;
   onClose: () => void;
   onPick: (mode: ChatSendMode) => void;
 }) {
@@ -311,7 +355,9 @@ function SendModeSheet({
           : "composer.mode_steer_desc"
       : m === "queue"
         ? "composer.mode_queue_desc"
-        : "composer.mode_restart_desc";
+        : m === "replace"
+          ? "composer.mode_replace_desc"
+          : "composer.mode_restart_desc";
   const processKey = (m: ChatSendMode) =>
     m === "steer"
       ? steerMode === "restart"
@@ -321,10 +367,15 @@ function SendModeSheet({
           : "composer.mode_steer_process"
       : m === "queue"
         ? "composer.mode_queue_process"
-        : "composer.mode_restart_process";
+        : m === "replace"
+          ? "composer.mode_replace_process"
+          : "composer.mode_restart_process";
   const steerReason = steerProvider
     ? t("composer.mode_steer_unsupported", { cli: steerCliName(steerProvider) })
     : t("composer.mode_steer_unsupported_generic");
+  // The reason a row cannot be picked, or null when it can.
+  const unavailable = (m: ChatSendMode) =>
+    m === "steer" && !steerSupported ? steerReason : m === "replace" ? (replaceUnavailable ?? null) : null;
 
   return (
     <Modal
@@ -347,7 +398,8 @@ function SendModeSheet({
             {t("composer.mode_menu")}
           </Text>
           {CHAT_SEND_MODES.map((m) => {
-            const disabled = m === "steer" && !steerSupported;
+            const reason = unavailable(m);
+            const disabled = !!reason;
             const selected = m === mode;
             return (
               <Pressable
@@ -367,7 +419,7 @@ function SendModeSheet({
                     {t(modeLabelKey(m))}
                   </Text>
                   <Text className="text-xs text-muted-foreground">
-                    {disabled ? steerReason : t(descKey(m))}
+                    {reason ?? t(descKey(m))}
                   </Text>
                   {!disabled ? (
                     <Text className="text-xs text-muted-foreground">

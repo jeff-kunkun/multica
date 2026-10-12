@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"log/slog"
+	"strings"
 
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/service"
@@ -28,7 +29,8 @@ func routeMentionToBot(queries *db.Queries, e events.Event, recipientID, issueID
 	source := issue.ID
 	question := issueTitle
 	var d struct {
-		CommentID string `json:"comment_id"`
+		CommentID          string `json:"comment_id"`
+		DescriptionVersion string `json:"description_version"`
 	}
 	var comment db.Comment
 	if json.Unmarshal(details, &d) == nil && d.CommentID != "" {
@@ -40,11 +42,21 @@ func routeMentionToBot(queries *db.Queries, e events.Event, recipientID, issueID
 			}
 		}
 	}
+	key := service.HumanMentionKey(source, target)
+	if d.DescriptionVersion != "" && !comment.ID.Valid {
+		// An @ added to the description: the edit that added it is its
+		// identity, so the same edit never pushes twice and taking the @ out
+		// and putting it back later is a new ask carrying what was written.
+		key = service.HumanDescriptionMentionKey(issue.ID, target, d.DescriptionVersion)
+		if issue.Description.Valid {
+			question = descriptionMentionLine(issue.Description.String, recipientID)
+		}
+	}
 	route, err := service.RouteHumanNeeded(ctx, queries, service.HumanNeededInput{
 		WorkspaceID: issue.WorkspaceID,
 		Target:      target,
 		Kind:        service.SummonSourceMention,
-		DedupeKey:   service.HumanMentionKey(source, target),
+		DedupeKey:   key,
 		IssueID:     issue.ID,
 		InboxItemID: item.ID,
 		CommentID:   comment.ID,
@@ -62,4 +74,16 @@ func routeMentionToBot(queries *db.Queries, e events.Event, recipientID, issueID
 		}
 	}
 	return item
+}
+
+// descriptionMentionLine is the part of a description that asks the person: the
+// line carrying their @, or the whole text when it cannot be told apart.
+func descriptionMentionLine(description, userID string) string {
+	needle := "mention://member/" + userID
+	for _, line := range strings.Split(description, "\n") {
+		if strings.Contains(line, needle) {
+			return line
+		}
+	}
+	return description
 }

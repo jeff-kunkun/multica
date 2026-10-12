@@ -385,8 +385,11 @@ the usual envelope (`event_id`, `sequence`, `woken_url`, `summary`, ...) plus
 `relayed_url`, `answered_url`, `pending_url` and a `human_needed` block:
 `kind`, `target_user_id`, `target_name`, `question`, `options[{id,label}]`,
 `urgency` (`normal|urgent`), `deadline|null`, `source_url`, `mode`,
-`escalation`, `parent_event_id`. Dedupe key per source (for a mention:
-`mention:<comment|issue>:<user>`), so one @ is one event.
+`escalation`, `parent_event_id`, and for a question card `ask`
+(`{id, title, questions[{text, options[{id,label,recommended}]}]}`). Dedupe key
+per source (for a mention: `mention:<comment|issue>:<user>`; for an @ added to a
+description: `mention:<issue>:<user>:desc:<edit time>`; for a card: `ask:<id>`;
+for a chat question: `chat:<session>:<message>`), so one @ is one event.
 
 ### Delivery and receipts
 
@@ -398,8 +401,8 @@ States: `queued → sending → sent → woken → relayed → answered`, or `ex
 |---|---|---|
 | woken | `POST /wake/events/{eventId}/woken` (also `/ack`) | Bot received and understood; on `binding.verify` it verifies the binding |
 | relayed | `POST /wake/events/{eventId}/relayed {channel, message_ref}` | the Bot **told the person** |
-| answered | `POST /wake/events/{eventId}/answered {answer, comment_id}` | the person answered; for a ticket `comment_id` is the person's comment the Bot posted, which wakes the asker and clears the block |
-| list | `GET /human-needed?status=&limit=&before=` | open calls, to catch up |
+| answered | `POST /wake/events/{eventId}/answered {answer, comment_id, answers}` | the person answered. Ticket: `comment_id` is the person's comment the Bot posted, which wakes the asker and clears the block. Card (`human_needed.ask` present): `answers` maps question index to option id and fills the `agent_ask` card, then the server comments as the person and wakes the asker once (403 if the card was asked of someone else, a repeat is a no-op). Chat: a choice question is a card too (`human_needed.ask` present, `chat_session_id` set): `answers` fills it and the chosen option is written into the chat as the person's message, queuing the agent's run once; a free-text chat question takes `answer`, written the same way |
+| list | `GET /human-needed?status=&limit=&before=` | open calls (rows carry `issue_id`, `chat_session_id`, `ask_id`), to catch up |
 
 Timers (per binding, defaults): not `woken` within 180 s → sent again; `woken`
 but not `relayed` within 300 s → one `human_needed.escalation`, the app row turns
@@ -413,7 +416,13 @@ the Bot's decision.
 approvals), the mention listener (`mention://member`), and the new
 `POST /api/issues/{id}/ask-human` and `POST /api/chat/sessions/{id}/ask-human`
 (CLI `multica issue ask-human`, `multica chat ask-human`). Modes: `bot_first`
-keeps the app row as a quiet read copy; `mirror` also alerts in the app.
+keeps the app row as a quiet read copy; `mirror` also alerts in the app. A
+`needs_you` card (`POST /api/asks`) for a bound person and an ask-human with
+two to six options each carry an `agent_ask` (`ask_id` on the event). A chat
+ask-human writes its question into the chat first, so it is visible with or
+without a Bot. When a channel turns bad the person gets one in-app notice per
+outage and every open call returns to the app, including calls still waiting
+after the notice.
 
 ### Activity stream (DENE-1935)
 
