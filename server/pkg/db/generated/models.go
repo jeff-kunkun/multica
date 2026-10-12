@@ -12,16 +12,17 @@ import (
 )
 
 type ActivityLog struct {
-	ID          pgtype.UUID        `json:"id"`
-	WorkspaceID pgtype.UUID        `json:"workspace_id"`
-	IssueID     pgtype.UUID        `json:"issue_id"`
-	ActorType   pgtype.Text        `json:"actor_type"`
-	ActorID     pgtype.UUID        `json:"actor_id"`
-	Action      string             `json:"action"`
-	Details     []byte             `json:"details"`
-	CreatedAt   pgtype.Timestamptz `json:"created_at"`
-	ViaBotID    pgtype.UUID        `json:"via_bot_id"`
-	ViaBotName  pgtype.Text        `json:"via_bot_name"`
+	ID               pgtype.UUID        `json:"id"`
+	WorkspaceID      pgtype.UUID        `json:"workspace_id"`
+	IssueID          pgtype.UUID        `json:"issue_id"`
+	ActorType        pgtype.Text        `json:"actor_type"`
+	ActorID          pgtype.UUID        `json:"actor_id"`
+	Action           string             `json:"action"`
+	Details          []byte             `json:"details"`
+	CreatedAt        pgtype.Timestamptz `json:"created_at"`
+	ViaBotID         pgtype.UUID        `json:"via_bot_id"`
+	ViaBotName       pgtype.Text        `json:"via_bot_name"`
+	OnBehalfOfUserID pgtype.UUID        `json:"on_behalf_of_user_id"`
 }
 
 type Agent struct {
@@ -308,6 +309,7 @@ type AgentTaskQueue struct {
 	WakeReserved              bool               `json:"wake_reserved"`
 	WakeHumanQuote            pgtype.Text        `json:"wake_human_quote"`
 	PickupDeadlineAt          pgtype.Timestamptz `json:"pickup_deadline_at"`
+	OnBehalfOfUserID          pgtype.UUID        `json:"on_behalf_of_user_id"`
 }
 
 type AgentToLabel struct {
@@ -470,6 +472,25 @@ type AutopilotTrigger struct {
 	CreatedByID pgtype.UUID `json:"created_by_id"`
 }
 
+type BotActionConfirmation struct {
+	ID          pgtype.UUID        `json:"id"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	BotID       pgtype.UUID        `json:"bot_id"`
+	BotName     string             `json:"bot_name"`
+	OwnerUserID pgtype.UUID        `json:"owner_user_id"`
+	Action      string             `json:"action"`
+	Method      string             `json:"method"`
+	ScopeHash   string             `json:"scope_hash"`
+	Route       string             `json:"route"`
+	AskID       pgtype.UUID        `json:"ask_id"`
+	Decision    string             `json:"decision"`
+	DecidedBy   pgtype.UUID        `json:"decided_by"`
+	DecidedAt   pgtype.Timestamptz `json:"decided_at"`
+	UsedAt      pgtype.Timestamptz `json:"used_at"`
+	ExpiresAt   pgtype.Timestamptz `json:"expires_at"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+}
+
 type BotWake struct {
 	BotID               pgtype.UUID        `json:"bot_id"`
 	WebhookSecret       []byte             `json:"webhook_secret"`
@@ -552,6 +573,24 @@ type BotWakeWatch struct {
 	BotID         pgtype.UUID `json:"bot_id"`
 	IssueID       pgtype.UUID `json:"issue_id"`
 	ChatSessionID pgtype.UUID `json:"chat_session_id"`
+}
+
+type BotWriteAudit struct {
+	ID               pgtype.UUID        `json:"id"`
+	WorkspaceID      pgtype.UUID        `json:"workspace_id"`
+	BotID            pgtype.UUID        `json:"bot_id"`
+	BotName          string             `json:"bot_name"`
+	OnBehalfOfUserID pgtype.UUID        `json:"on_behalf_of_user_id"`
+	Method           string             `json:"method"`
+	Route            string             `json:"route"`
+	Family           string             `json:"family"`
+	EntityID         pgtype.UUID        `json:"entity_id"`
+	Fields           []string           `json:"fields"`
+	StatusCode       int32              `json:"status_code"`
+	Outcome          string             `json:"outcome"`
+	Dangerous        pgtype.Text        `json:"dangerous"`
+	Confirmation     pgtype.Text        `json:"confirmation"`
+	CreatedAt        pgtype.Timestamptz `json:"created_at"`
 }
 
 type ChannelBindingToken struct {
@@ -763,6 +802,7 @@ type ChatMessage struct {
 	WakeHop                       int32              `json:"wake_hop"`
 	SupersededAt                  pgtype.Timestamptz `json:"superseded_at"`
 	SupersededByMessageID         pgtype.UUID        `json:"superseded_by_message_id"`
+	OnBehalfOfUserID              pgtype.UUID        `json:"on_behalf_of_user_id"`
 }
 
 type ChatNamingEvent struct {
@@ -936,6 +976,7 @@ type Comment struct {
 	WakeRootID         pgtype.UUID        `json:"wake_root_id"`
 	WakeHop            int32              `json:"wake_hop"`
 	HumanQuote         pgtype.Text        `json:"human_quote"`
+	OnBehalfOfUserID   pgtype.UUID        `json:"on_behalf_of_user_id"`
 }
 
 type CommentReaction struct {
@@ -1334,6 +1375,7 @@ type Issue struct {
 	OriginChatSessionID  pgtype.UUID        `json:"origin_chat_session_id"`
 	ViaBotID             pgtype.UUID        `json:"via_bot_id"`
 	ViaBotName           pgtype.Text        `json:"via_bot_name"`
+	OnBehalfOfUserID     pgtype.UUID        `json:"on_behalf_of_user_id"`
 }
 
 type IssueChildEvent struct {

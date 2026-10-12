@@ -33,6 +33,7 @@ export const botKeys = {
   all: (wsId: string) => ["external-bots", wsId] as const,
   list: (wsId: string) => [...botKeys.all(wsId), "list"] as const,
   binding: (wsId: string) => [...botKeys.all(wsId), "binding"] as const,
+  writes: (wsId: string) => [...botKeys.all(wsId), "writes"] as const,
   wake: (wsId: string, botId: string) => [...botKeys.all(wsId), "wake", botId] as const,
   wakeEvents: (wsId: string, botId: string, pending: boolean) =>
     [...botKeys.wake(wsId, botId), pending ? "pending" : "events"] as const,
@@ -67,6 +68,20 @@ export const botWakeOptions = (wsId: string, botId: string) =>
     queryFn: () => api.getBotWake(wsId, botId),
     enabled: !!wsId && !!botId,
     refetchInterval: 5_000,
+  });
+
+const WRITE_PAGE = 10;
+
+// Writes Bots made in a person's name; the server shows owners and admins the
+// whole workspace and everyone else only their own.
+export const botWritesOptions = (wsId: string) =>
+  infiniteQueryOptions({
+    queryKey: botKeys.writes(wsId),
+    queryFn: ({ pageParam }) =>
+      api.listBotWrites(wsId, { limit: WRITE_PAGE, before: pageParam || undefined }),
+    initialPageParam: "",
+    getNextPageParam: (last) => last.next_cursor || undefined,
+    enabled: !!wsId,
   });
 
 const WAKE_EVENT_PAGE = 20;

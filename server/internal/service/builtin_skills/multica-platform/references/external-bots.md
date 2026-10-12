@@ -275,7 +275,8 @@ same call are shared by the original and its escalations.
 
 A person who bound their Bot can also switch on the full stream:
 `multica bot bind --activity owned,followed` (`owned`, `followed`, both, or
-`off`; default off; account settings row「把所有动态推给我的 Bot」). Then every
+`off`; account settings row「把所有动态推给我的 Bot」; a first connection starts on
+`everything`, `--activity off` keeps it off). Then every
 comment (and each edit of one), chat message, status change and assignee change
 on tickets and chats they own or follow is pushed to the Bot as `type: "activity"` with an `activity`
 block: `activity_type`, `importance` (`high|normal|low`; `critical` stays with
@@ -292,5 +293,33 @@ multica bot wake activity <bot-id> --importance high     # catch up after downti
 multica bot wake handled <bot-id> <event-id> --reason "…" # optional: looked, nobody needs telling
 ```
 
-PRs, runs, projects, settings and
-members are not in the stream yet.
+### Whole workspace (DENE-1936)
+
+`multica bot bind --activity everything` (`owner_visible_all`) widens it to
+everything the person can see: PRs, runs, projects, settings, members, agents,
+autopilots, skills, runtimes, integrations, squads, routing, billing, keys — every
+successful write, plus run endings and PR updates. The `activity.workspace`
+block carries `family`, `action`, `route`, `fields` (names only, never values),
+`entity_id`, `actor_*`, `via_bot_*`, `on_behalf_of_*`. Management families go
+only to owners and admins.
+
+You act with the owner's permission, and every write you make is recorded as
+「Bot〈名〉代表〈主人〉」: read it with `multica bot writes [--mine]`. A write
+aimed at a ticket, project or chat the owner cannot open is never pushed. A PR
+update is pushed only when the owner can open every ticket the PR is linked to
+(`issue_ids`) and its repository (`attrs.repo`); a PR linked to no ticket is not
+pushed at all.
+
+Four things need the owner's own yes: delete the workspace, change members or
+roles, reset keys, change quota or billing. You cannot give it yourself. The
+first call answers `403 owner_confirmation_required` with a `confirmation_id`,
+and the owner gets a question card (once; retrying does not ring again). They
+answer it in the app or with `multica ask answer`; your Bot receipt or agent run
+cannot. The card shows the target and each field's value (credentials
+masked). When it is approved, repeat the identical call — same method, path,
+query and body values; key order does not matter — within 30 minutes with
+`MULTICA_OWNER_CONFIRMATION=<confirmation_id>`. It works once. Any changed
+value (another member, role or amount) is a new request and opens a new card.
+A body the server cannot read whole or unambiguously (not JSON, over 64 KB, or
+one key named twice in any letter case) is refused with
+`owner_confirmation_unscannable`: send plain JSON, each key once. `owner_confirmation_denied` means the owner said no: do not ask again.

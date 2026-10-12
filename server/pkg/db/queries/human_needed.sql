@@ -269,13 +269,16 @@ RETURNING *;
 -- Bindings whose stream covers this ticket: verified, scope on, and the person
 -- either owns it (created it, is assigned, leads the squad it is assigned to,
 -- or opened the chat that made it) or follows it (an active subscription,
--- which includes everyone @-ed or delegated for).
+-- which includes everyone @-ed or delegated for), or asked for everything they
+-- can see (owner_visible_all: the send-time gate then checks the ticket is
+-- really visible to them).
 SELECT b.* FROM member_bot_binding b
 JOIN issue i ON i.id = $2 AND i.workspace_id = b.workspace_id
 WHERE b.workspace_id = $1 AND b.revoked_at IS NULL AND b.verified_at IS NOT NULL
   AND cardinality(b.activity_scope) > 0
   AND (
-    ('owned' = ANY(b.activity_scope) AND (
+    'owner_visible_all' = ANY(b.activity_scope)
+    OR ('owned' = ANY(b.activity_scope) AND (
         (i.creator_type = 'member' AND i.creator_id = b.user_id)
         OR (i.assignee_type = 'member' AND i.assignee_id = b.user_id)
         OR (i.assignee_type = 'squad' AND EXISTS (
@@ -290,11 +293,18 @@ WHERE b.workspace_id = $1 AND b.revoked_at IS NULL AND b.verified_at IS NOT NULL
   );
 
 -- name: ListActivityBindingsForChat :many
--- A chat is the opener's own: only 'owned' reaches it.
+-- A chat is the opener's own: only 'owned' (or the all-scope) reaches it.
 SELECT b.* FROM member_bot_binding b
 JOIN chat_session cs ON cs.id = $2 AND cs.workspace_id = b.workspace_id AND cs.creator_id = b.user_id
 WHERE b.workspace_id = $1 AND b.revoked_at IS NULL AND b.verified_at IS NOT NULL
-  AND 'owned' = ANY(b.activity_scope);
+  AND ('owned' = ANY(b.activity_scope) OR 'owner_visible_all' = ANY(b.activity_scope));
+
+-- name: ListWorkspaceActivityBindings :many
+-- Bindings that asked for the whole workspace (DENE-1936). Who may see what is
+-- decided per event, by role, when it is queued and again when it is sent.
+SELECT * FROM member_bot_binding
+WHERE workspace_id = $1 AND revoked_at IS NULL AND verified_at IS NOT NULL
+  AND 'owner_visible_all' = ANY(activity_scope);
 
 -- name: CountQueuedActivityForBot :one
 SELECT count(*) FROM human_needed_event

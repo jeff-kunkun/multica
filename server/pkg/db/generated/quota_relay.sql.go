@@ -478,7 +478,7 @@ func (q *Queries) ListIssueWorkerAgentIDs(ctx context.Context, issueID pgtype.UU
 }
 
 const listOpenIssuesForBrokenSeat = `-- name: ListOpenIssuesForBrokenSeat :many
-SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority, i.assignee_type, i.assignee_id, i.creator_type, i.creator_id, i.parent_issue_id, i.acceptance_criteria, i.context_refs, i.position, i.due_date, i.created_at, i.updated_at, i.number, i.project_id, i.origin_type, i.origin_id, i.first_executed_at, i.start_date, i.metadata, i.stage, i.properties, i.revision, i.last_activity_at, i.triage_state, i.reviewer_type, i.reviewer_id, i.visibility, i.assignee_source, i.assignee_source_user_id, i.assignee_quote, i.progress_text, i.progress_source, i.progress_tone, i.progress_author_type, i.progress_author_id, i.progress_updated_at, i.duplicate_of_issue_id, i.domain_id, i.origin_chat_session_id, i.via_bot_id, i.via_bot_name
+SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority, i.assignee_type, i.assignee_id, i.creator_type, i.creator_id, i.parent_issue_id, i.acceptance_criteria, i.context_refs, i.position, i.due_date, i.created_at, i.updated_at, i.number, i.project_id, i.origin_type, i.origin_id, i.first_executed_at, i.start_date, i.metadata, i.stage, i.properties, i.revision, i.last_activity_at, i.triage_state, i.reviewer_type, i.reviewer_id, i.visibility, i.assignee_source, i.assignee_source_user_id, i.assignee_quote, i.progress_text, i.progress_source, i.progress_tone, i.progress_author_type, i.progress_author_id, i.progress_updated_at, i.duplicate_of_issue_id, i.domain_id, i.origin_chat_session_id, i.via_bot_id, i.via_bot_name, i.on_behalf_of_user_id
 FROM issue i
 WHERE i.workspace_id = $1
   AND i.assignee_type = 'agent'
@@ -564,6 +564,7 @@ func (q *Queries) ListOpenIssuesForBrokenSeat(ctx context.Context, arg ListOpenI
 			&i.OriginChatSessionID,
 			&i.ViaBotID,
 			&i.ViaBotName,
+			&i.OnBehalfOfUserID,
 		); err != nil {
 			return nil, err
 		}
@@ -786,7 +787,7 @@ func (q *Queries) ListQuotaAccountSiblings(ctx context.Context, arg ListQuotaAcc
 }
 
 const listUnstartedIssuesForAgent = `-- name: ListUnstartedIssuesForAgent :many
-SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority, i.assignee_type, i.assignee_id, i.creator_type, i.creator_id, i.parent_issue_id, i.acceptance_criteria, i.context_refs, i.position, i.due_date, i.created_at, i.updated_at, i.number, i.project_id, i.origin_type, i.origin_id, i.first_executed_at, i.start_date, i.metadata, i.stage, i.properties, i.revision, i.last_activity_at, i.triage_state, i.reviewer_type, i.reviewer_id, i.visibility, i.assignee_source, i.assignee_source_user_id, i.assignee_quote, i.progress_text, i.progress_source, i.progress_tone, i.progress_author_type, i.progress_author_id, i.progress_updated_at, i.duplicate_of_issue_id, i.domain_id, i.origin_chat_session_id, i.via_bot_id, i.via_bot_name
+SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority, i.assignee_type, i.assignee_id, i.creator_type, i.creator_id, i.parent_issue_id, i.acceptance_criteria, i.context_refs, i.position, i.due_date, i.created_at, i.updated_at, i.number, i.project_id, i.origin_type, i.origin_id, i.first_executed_at, i.start_date, i.metadata, i.stage, i.properties, i.revision, i.last_activity_at, i.triage_state, i.reviewer_type, i.reviewer_id, i.visibility, i.assignee_source, i.assignee_source_user_id, i.assignee_quote, i.progress_text, i.progress_source, i.progress_tone, i.progress_author_type, i.progress_author_id, i.progress_updated_at, i.duplicate_of_issue_id, i.domain_id, i.origin_chat_session_id, i.via_bot_id, i.via_bot_name, i.on_behalf_of_user_id
 FROM issue i
 WHERE i.workspace_id = $1
   AND i.assignee_type = 'agent'
@@ -886,6 +887,7 @@ func (q *Queries) ListUnstartedIssuesForAgent(ctx context.Context, arg ListUnsta
 			&i.OriginChatSessionID,
 			&i.ViaBotID,
 			&i.ViaBotName,
+			&i.OnBehalfOfUserID,
 		); err != nil {
 			return nil, err
 		}
@@ -941,7 +943,7 @@ func (q *Queries) LockDueQuotaBreakers(ctx context.Context, limit int32) ([]Agen
 }
 
 const lockIssueForQuotaRelay = `-- name: LockIssueForQuotaRelay :one
-SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, triage_state, reviewer_type, reviewer_id, visibility, assignee_source, assignee_source_user_id, assignee_quote, progress_text, progress_source, progress_tone, progress_author_type, progress_author_id, progress_updated_at, duplicate_of_issue_id, domain_id, origin_chat_session_id, via_bot_id, via_bot_name FROM issue
+SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, triage_state, reviewer_type, reviewer_id, visibility, assignee_source, assignee_source_user_id, assignee_quote, progress_text, progress_source, progress_tone, progress_author_type, progress_author_id, progress_updated_at, duplicate_of_issue_id, domain_id, origin_chat_session_id, via_bot_id, via_bot_name, on_behalf_of_user_id FROM issue
 WHERE id = $1
 FOR UPDATE
 `
@@ -996,6 +998,7 @@ func (q *Queries) LockIssueForQuotaRelay(ctx context.Context, id pgtype.UUID) (I
 		&i.OriginChatSessionID,
 		&i.ViaBotID,
 		&i.ViaBotName,
+		&i.OnBehalfOfUserID,
 	)
 	return i, err
 }
@@ -1032,7 +1035,7 @@ func (q *Queries) LockQuotaRelayBySourceTask(ctx context.Context, sourceTaskID p
 }
 
 const lockTaskForQuotaRelay = `-- name: LockTaskForQuotaRelay :one
-SELECT id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for, branch_name, durable_work_dir, channel_context_revision, comment_thread_id, cancelled_by_type, cancelled_by_id, cancelled_by_name, issue_snapshot, code_decision, failure_input_version, failure_fingerprint, work_thread_id, context_generation, context_message_limit, context_token_budget, continuity_break_reason, session_mode, resumed_from_task_id, session_break_reason, via_bot_id, via_bot_name, wake_root_id, wake_hop, wake_generation, wake_reserved, wake_human_quote, pickup_deadline_at FROM agent_task_queue
+SELECT id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for, branch_name, durable_work_dir, channel_context_revision, comment_thread_id, cancelled_by_type, cancelled_by_id, cancelled_by_name, issue_snapshot, code_decision, failure_input_version, failure_fingerprint, work_thread_id, context_generation, context_message_limit, context_token_budget, continuity_break_reason, session_mode, resumed_from_task_id, session_break_reason, via_bot_id, via_bot_name, wake_root_id, wake_hop, wake_generation, wake_reserved, wake_human_quote, pickup_deadline_at, on_behalf_of_user_id FROM agent_task_queue
 WHERE id = $1
 FOR UPDATE
 `
@@ -1119,6 +1122,7 @@ func (q *Queries) LockTaskForQuotaRelay(ctx context.Context, id pgtype.UUID) (Ag
 		&i.WakeReserved,
 		&i.WakeHumanQuote,
 		&i.PickupDeadlineAt,
+		&i.OnBehalfOfUserID,
 	)
 	return i, err
 }
@@ -1162,7 +1166,7 @@ WHERE id = $2
   AND workspace_id = $3
   AND assignee_type = 'agent'
   AND assignee_id = $4
-RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, triage_state, reviewer_type, reviewer_id, visibility, assignee_source, assignee_source_user_id, assignee_quote, progress_text, progress_source, progress_tone, progress_author_type, progress_author_id, progress_updated_at, duplicate_of_issue_id, domain_id, origin_chat_session_id, via_bot_id, via_bot_name
+RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, triage_state, reviewer_type, reviewer_id, visibility, assignee_source, assignee_source_user_id, assignee_quote, progress_text, progress_source, progress_tone, progress_author_type, progress_author_id, progress_updated_at, duplicate_of_issue_id, domain_id, origin_chat_session_id, via_bot_id, via_bot_name, on_behalf_of_user_id
 `
 
 type ReassignIssueToAgentIfCurrentParams struct {
@@ -1227,6 +1231,7 @@ func (q *Queries) ReassignIssueToAgentIfCurrent(ctx context.Context, arg Reassig
 		&i.OriginChatSessionID,
 		&i.ViaBotID,
 		&i.ViaBotName,
+		&i.OnBehalfOfUserID,
 	)
 	return i, err
 }
