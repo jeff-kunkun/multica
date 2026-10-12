@@ -9,6 +9,7 @@ import (
 	"io"
 	"mime/multipart"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -31,6 +32,10 @@ func TestAttachmentRawUploadDownload(t *testing.T) {
 		{"report.pdf", "application/pdf", "%PDF-1.7\x00\xff\r\n"},
 		{"shot.png", "image/png", "\x89PNG\r\n\x1a\n\x00\xff"},
 		{"report.txt", "text/plain; charset=utf-8", "文本\r\n"},
+		// DENE-1946: over 1 MiB, the size where CDN rewriting of previews
+		// (injected scripts, re-encoding) first showed up as size/sha256 drift.
+		{"large.html", "text/html; charset=utf-8", strings.Repeat("<!doctype html><p>字节</p>", 60000)},
+		{"large.pdf", "application/pdf", strings.Repeat("%PDF-1.7\x00\xff\r\n", 150000)},
 	} {
 		t.Run(f.name, func(t *testing.T) {
 			data := []byte(f.body)

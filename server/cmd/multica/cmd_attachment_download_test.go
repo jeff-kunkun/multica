@@ -203,3 +203,39 @@ func TestAttachmentDownloadSelectors(t *testing.T) {
 		t.Fatal("accepted ID and comment together")
 	}
 }
+
+// DENE-1946: a CDN that rewrites a preview (injected script, +367 bytes on a
+// >1 MiB HTML) must not cost the user the file. The registered size/sha256
+// describe the stored object, so the raw retry delivers it intact.
+func TestAttachmentDownloadLargeCDNRewriteFallsBackToRaw(t *testing.T) {
+	good := bytes.Repeat([]byte("<!doctype html><p>字节</p>"), 60000)
+	rewritten := append(append([]byte{}, good...), bytes.Repeat([]byte("x"), 367)...)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/api/attachments/fixture":
+			json.NewEncoder(w).Encode(map[string]any{"id": "fixture", "filename": "large.html", "download_url": "/preview", "size_bytes": len(good), "sha256": fmt.Sprintf("%x", sha256.Sum256(good))})
+		case r.URL.Path == "/preview":
+			w.Write(rewritten)
+		case r.URL.Query().Get("raw") == "1":
+			w.Write(good)
+		default:
+			t.Errorf("unexpected URL %s", r.URL)
+		}
+	}))
+	defer srv.Close()
+	setCLITestServerEnv(t, srv.URL)
+	t.Setenv("MULTICA_TOKEN", "mat_test-token")
+	cmd := newAttachmentDownloadTestCmd()
+	dest := filepath.Join(t.TempDir(), "large.html")
+	cmd.Flags().Set("output-file", dest)
+	stderr := captureStderr(t)
+	if _, err := captureStdout(t, func() error { return runAttachmentDownload(cmd, []string{"fixture"}) }); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(stderr.read(), "retrying once from raw storage") {
+		t.Fatal("expected the raw retry warning")
+	}
+	if got, _ := os.ReadFile(dest); !bytes.Equal(got, good) {
+		t.Fatalf("saved %d bytes, want %d exact bytes", len(got), len(good))
+	}
+}
