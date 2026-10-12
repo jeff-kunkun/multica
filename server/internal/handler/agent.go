@@ -3376,6 +3376,30 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// A level a runtime's own config declares per model (Qwen Code) is checked
+	// against the state the request lands on whenever the level, the model or
+	// the runtime changes: a model switch can leave a level the new model never
+	// declared, and saving it would look set while doing nothing (DENE-1950).
+	if effectiveThinking := effectiveThinkingLevel(params, existing, shouldClearThinkingLevel); effectiveThinking != "" &&
+		(req.ThinkingLevel != nil || req.Model != nil || req.RuntimeID != nil) {
+		provider := targetProvider
+		if provider == "" {
+			var ok bool
+			provider, ok = h.resolveAgentProvider(r, existing.WorkspaceID, targetRuntimeID)
+			if !ok {
+				writeError(w, http.StatusInternalServerError, "failed to resolve runtime for thinking_level validation")
+				return
+			}
+		}
+		if msg := h.declaredThinkingRejection(r.Context(), provider, targetRuntimeID, effectiveModelValue(params, existing), effectiveThinking); msg != "" {
+			if req.ThinkingLevel == nil {
+				msg += "; pass thinking_level=\"\" to clear the existing level"
+			}
+			writeError(w, http.StatusBadRequest, msg)
+			return
+		}
+	}
+
 	// routing_tier is workspace configuration rather than a runtime override:
 	// it says how strong this seat is for automatic dispatch. A key or its
 	// label is accepted, only the key is stored, and anything else is refused

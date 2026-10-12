@@ -34,7 +34,7 @@ vi.mock("@multica/core/api", () => ({
   },
 }));
 
-import { ThinkingPropRow } from "./thinking-prop-row";
+import { ThinkingPropRow, ThinkingSettingField } from "./thinking-prop-row";
 
 const CLAUDE_MODEL: RuntimeModel = {
   id: "claude-sonnet-4-6",
@@ -400,5 +400,136 @@ describe("ThinkingPropRow", () => {
     const clearButton = await screen.findByTitle(/Clear the override/i);
     fireEvent.click(clearButton);
     expect(onChange).toHaveBeenCalledWith("");
+  });
+});
+
+// Qwen levels are declared per model in Qwen Code's own settings
+// (modelProviders[].capabilities.reasoning), bound to the endpoint. The
+// daemon tags them with `source` (DENE-1950).
+const QWEN_DECLARED_MODEL: RuntimeModel = {
+  id: "nexus-coder",
+  label: "nexus-coder",
+  default: true,
+  thinking: {
+    supported_levels: [
+      { value: "low", label: "Low" },
+      { value: "medium", label: "Medium" },
+      { value: "xhigh", label: "Extra high" },
+      { value: "none", label: "Off" },
+    ],
+    source:
+      "~/.qwen/settings.json · modelProviders.openai[nexus-coder].capabilities.reasoning",
+  },
+};
+
+function renderQwenField(
+  props: Partial<React.ComponentProps<typeof ThinkingSettingField>> = {},
+) {
+  const onChange = vi.fn();
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
+  const utils = render(
+    <I18nProvider locale="en" resources={TEST_RESOURCES}>
+      <QueryClientProvider client={queryClient}>
+        <ThinkingSettingField
+          label="Thinking"
+          runtimeId="runtime-1"
+          runtimeOnline
+          provider="qwen"
+          model="nexus-coder"
+          value=""
+          canEdit
+          onChange={onChange}
+          {...props}
+        />
+      </QueryClientProvider>
+    </I18nProvider>,
+  );
+  return { ...utils, onChange };
+}
+
+describe("ThinkingSettingField for declared Qwen levels (DENE-1950)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockInitiateListModels.mockResolvedValue(listResult([QWEN_DECLARED_MODEL]));
+    mockGetListModelsResult.mockResolvedValue(listResult([QWEN_DECLARED_MODEL]));
+  });
+
+  afterEach(() => {
+    cleanup();
+  });
+
+  it("offers follow-default plus exactly the declared levels, and says when it applies", async () => {
+    const { onChange } = renderQwenField();
+
+    expect(
+      await screen.findByText(enAgents.pickers.thinking_next_run),
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button"));
+    for (const label of ["Low", "Medium", "Extra high", "Thinking off"]) {
+      expect(await screen.findByText(label)).toBeInTheDocument();
+    }
+    expect(screen.queryByText("High")).toBeNull();
+    expect(screen.queryByText("Max")).toBeNull();
+    // Follow default is a regular option, not the clear footer.
+    expect(screen.getAllByText("Follow default").length).toBeGreaterThan(0);
+    expect(screen.queryByTitle(/Clear the override/i)).toBeNull();
+
+    fireEvent.click(screen.getByText("Thinking off"));
+    expect(onChange).toHaveBeenCalledWith("none");
+  });
+
+  it("returns to follow-default from a saved level", async () => {
+    const { onChange } = renderQwenField({ value: "xhigh" });
+
+    await screen.findByText("Extra high");
+    fireEvent.click(screen.getByRole("button"));
+    fireEvent.click(await screen.findByText("Follow default"));
+    expect(onChange).toHaveBeenCalledWith("");
+  });
+
+  it("names the reason instead of hiding the row when the runtime is offline", () => {
+    renderQwenField({ runtimeOnline: false });
+
+    expect(
+      screen.getByText(enAgents.pickers.thinking_reason_offline),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("button")).toBeNull();
+  });
+
+  it("keeps a saved level readable and names the reason while offline", () => {
+    renderQwenField({ runtimeOnline: false, value: "none" });
+
+    expect(screen.getByText("Thinking off")).toBeInTheDocument();
+    expect(
+      screen.getByText(enAgents.pickers.thinking_reason_offline),
+    ).toBeInTheDocument();
+  });
+
+  it("names the reason when the model declares no levels", async () => {
+    mockInitiateListModels.mockResolvedValue(listResult([NO_THINKING_MODEL]));
+    renderQwenField({ model: "gemini-2.5-pro" });
+
+    expect(
+      await screen.findByText(enAgents.pickers.thinking_reason_undeclared),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("button")).toBeNull();
+  });
+
+  it("names the reason when the model list cannot be read", async () => {
+    mockInitiateListModels.mockRejectedValue(new Error("boom"));
+    renderQwenField();
+
+    expect(
+      await screen.findByText(enAgents.pickers.thinking_reason_error),
+    ).toBeInTheDocument();
+  });
+
+  it("shows the saved level read-only when the viewer cannot edit", async () => {
+    renderQwenField({ value: "low", canEdit: false });
+
+    expect(await screen.findByText("Low")).toBeInTheDocument();
+    expect(screen.queryByRole("button")).toBeNull();
   });
 });

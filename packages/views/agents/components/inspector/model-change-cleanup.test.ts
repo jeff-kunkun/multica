@@ -142,6 +142,18 @@ describe("buildModelChangeUpdate (MUL-5390)", () => {
     ).toEqual({ model: "custom-local-build" });
   });
 
+  it("clears a Qwen level when the new model is missing from the catalog (DENE-1950)", () => {
+    expect(
+      buildModelChangeUpdate({
+        provider: "qwen",
+        model: "custom-local-build",
+        thinkingLevel: "xhigh",
+        serviceTier: "",
+        catalog: CATALOG,
+      }),
+    ).toEqual({ model: "custom-local-build", thinking_level: "" });
+  });
+
   it("clears an unsupported override on a context-tagged Claude model", () => {
     expect(
       buildModelChangeUpdate({

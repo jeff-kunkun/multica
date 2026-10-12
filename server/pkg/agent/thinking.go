@@ -933,6 +933,27 @@ var thinkingDynamicCatalogProviders = map[string]bool{
 	"grok":     true,
 	"opencode": true,
 	"kimi":     true,
+	// Qwen Code has no effort flag. Its levels are what the user's own Qwen
+	// settings declare per model (capabilities.reasoning), and the daemon
+	// delivers one through a per-task system-settings file (DENE-1950). See
+	// ThinkingDeclaredPerModel for the stricter server-side check.
+	"qwen": true,
+}
+
+// thinkingDeclaredPerModelProviders are runtimes whose levels exist only
+// because the user declared them for a specific model in the runtime's own
+// config. Nothing about the provider name implies a level is accepted, so the
+// server checks a save against the reported catalog: no catalog yet, a model
+// that declares nothing, or an undeclared level are all refused, instead of
+// being stored and then dropped at run time.
+var thinkingDeclaredPerModelProviders = map[string]bool{
+	"qwen": true,
+}
+
+// ThinkingDeclaredPerModel reports whether a provider's thinking levels must
+// be confirmed against the runtime's reported catalog before they are saved.
+func ThinkingDeclaredPerModel(providerType string) bool {
+	return thinkingDeclaredPerModelProviders[providerType]
 }
 
 // acpCatalogThinkingProviders are the ACP runtimes that discover their effort

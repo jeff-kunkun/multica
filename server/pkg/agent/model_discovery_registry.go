@@ -38,7 +38,10 @@ type modelDiscoveryDecl struct {
 	Reason      string
 	Discover    modelDiscoverer
 	Endpoint    modelEndpointSource
-	ListCommand modelListCommand
+	// AnnotateEndpoint adds what the runtime's own config declares about the
+	// models the endpoint listed (Qwen's per-model thinking levels). Optional.
+	AnnotateEndpoint modelEndpointAnnotator
+	ListCommand      modelListCommand
 }
 
 // modelDiscoveryMu guards modelDiscoveryByProvider. Tests install a temporary
@@ -85,7 +88,7 @@ var modelDiscoveryByProvider = map[string]modelDiscoveryDecl{
 	// ModelDiscovery cannot fall through to another family's command.
 	"devin":    {Kind: modelDiscoveryDedicated},
 	"omp":      {Kind: modelDiscoveryDedicated},
-	"qwen":     {Kind: modelDiscoveryChain, Endpoint: qwenModelEndpoint},
+	"qwen":     {Kind: modelDiscoveryChain, Endpoint: qwenModelEndpoint, AnnotateEndpoint: qwenAnnotateEndpointModels},
 	"qwenpaw":  {Kind: modelDiscoveryManual, Reason: "session/set_model writes the shared agent profile, not the task"},
 	"mcode":    {Kind: modelDiscoveryManual, Reason: "MCode ACP exposes no session-scoped model selection"},
 	"zeroclaw": {Kind: modelDiscoveryManual, Reason: "ZeroClaw has no session/set_model; the model comes from its agent profile"},

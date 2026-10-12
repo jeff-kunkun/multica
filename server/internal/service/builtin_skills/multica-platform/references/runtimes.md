@@ -32,6 +32,7 @@ multica runtime capacity <runtime-id> --max-concurrent-runs 8 --output json
 multica runtime usage <runtime-id> --output json
 multica runtime activity <runtime-id> --output json
 multica runtime update <runtime-id> --target-version <version> --output json
+multica runtime models <runtime-id> [--refresh] --output json
 multica runtime agent-cli <runtime-id> --output json
 multica runtime agent-cli <runtime-id> --update-now --output json
 multica runtime agent-cli <runtime-id> --follow on|off
@@ -54,6 +55,11 @@ produced no output. Subagent totals require final per-model usage. Streams that
 omit response IDs retain best-effort per-event input/cache accounting. These
 fallback figures can be incomplete; use the provider's billing records for
 actual charges. This correction applies to new runs, not historical usage rows.
+
+`runtime models` lists the models a runtime reports and, per model, the thinking
+levels `agent update --thinking-level` accepts (with DEFAULT and SOURCE when the
+runtime declares them, e.g. Qwen Code). It may answer from the server cache;
+`--refresh` asks the daemon again and fails with a reason when it is offline.
 
 `runtime update` upgrades the Multica daemon itself. `runtime agent-cli` is
 about the provider CLI behind a built-in local runtime (Claude, Codex, ...):

@@ -31,6 +31,7 @@ export function ThinkingPicker({
   canEdit = true,
   variant = "chip",
   showLabel = true,
+  declared = false,
   onChange,
 }: {
   /** Persisted thinking_level — "" means "follow local CLI config". */
@@ -44,19 +45,53 @@ export function ThinkingPicker({
   canEdit?: boolean;
   variant?: "chip" | "field";
   showLabel?: boolean;
+  /** Levels come from the runtime's own per-model declaration (Qwen Code,
+   *  DENE-1950) rather than a CLI catalog. The tokens are then shared names,
+   *  so they get localized labels, and "follow default" is an ordinary first
+   *  option instead of a footer that only appears once a level is set. */
+  declared?: boolean;
   onChange: (next: string) => Promise<void> | void;
 }) {
   const { t } = useT("agents");
   const [open, setOpen] = useState(false);
+
+  const levelLabel = (l: RuntimeModelThinkingLevel): string => {
+    if (!declared) return l.label;
+    switch (l.value) {
+      case "low":
+        return t(($) => $.pickers.thinking_level_low);
+      case "medium":
+        return t(($) => $.pickers.thinking_level_medium);
+      case "high":
+        return t(($) => $.pickers.thinking_level_high);
+      case "xhigh":
+        return t(($) => $.pickers.thinking_level_xhigh);
+      case "max":
+        return t(($) => $.pickers.thinking_level_max);
+      case "none":
+        return t(($) => $.pickers.thinking_level_none);
+      default:
+        return l.label;
+    }
+  };
+  const defaultLabel = declared
+    ? t(($) => $.pickers.thinking_follow_default)
+    : t(($) => $.pickers.thinking_default);
 
   const selected = value ? levels.find((l) => l.value === value) : undefined;
   // Unknown-but-set value (model swap that dropped the option, CLI upgrade
   // that trimmed the catalog): show the raw token so the user can see what
   // is actually persisted and clear it, rather than silently labelling it
   // "Default" when the backend would still send the stale value.
+  // A declared token stays readable even when the list is unavailable
+  // (runtime offline): the names are shared, not per-CLI.
   const triggerLabel = selected
-    ? selected.label
-    : value || t(($) => $.pickers.thinking_default);
+    ? levelLabel(selected)
+    : value
+      ? declared
+        ? levelLabel({ value, label: value })
+        : value
+      : defaultLabel;
   const triggerTitle = t(($) => $.pickers.thinking_tooltip, {
     value: triggerLabel,
   });
@@ -142,6 +177,15 @@ export function ThinkingPicker({
         </>
       }
     >
+      {declared && (
+        <PickerItem selected={value === ""} onClick={() => void select("")}>
+          <span className="block min-w-0 flex-1 text-left">
+            <span className="truncate text-label font-medium">
+              {defaultLabel}
+            </span>
+          </span>
+        </PickerItem>
+      )}
       {levels.map((l) => (
         <PickerItem
           key={l.value}
@@ -160,7 +204,9 @@ export function ThinkingPicker({
               factory default is irrelevant to what actually fires, so
               flagging one option as "default" was misleading. */}
           <span className="block min-w-0 flex-1 text-left">
-            <span className="truncate text-label font-medium">{l.label}</span>
+            <span className="truncate text-label font-medium">
+              {levelLabel(l)}
+            </span>
             {l.description && (
               <span className="mt-0.5 block text-micro leading-snug text-muted-foreground">
                 {l.description}
@@ -170,7 +216,7 @@ export function ThinkingPicker({
         </PickerItem>
       ))}
 
-      {value && (
+      {value && !declared && (
         <button
           type="button"
           onClick={() => void select("")}

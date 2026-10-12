@@ -105,10 +105,44 @@ func (b *qwenBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 		mcpFileCleanup = func() { cleanupMcpConfigTemp(mcpConfigPath) }
 		args = append(args, "--mcp-config", mcpConfigPath)
 	}
+	// A thinking level rides a per-task system-settings file (DENE-1950):
+	// the existing system settings plus the level, so the shared
+	// ~/.qwen/settings.json and every other caller stay untouched.
+	var thinkingSettingsPath string
+	var thinkingFileCleanup func()
+	env := b.cfg.Env
+	if opts.ThinkingLevel != "" {
+		body, err := buildQwenThinkingSettings(opts.ThinkingLevel, opts.Model, opts.Cwd, b.cfg.Env)
+		if err != nil {
+			cancel()
+			if mcpFileCleanup != nil {
+				mcpFileCleanup()
+			}
+			return nil, fmt.Errorf("qwen thinking level %q: %w", opts.ThinkingLevel, err)
+		}
+		path, err := writeQwenThinkingSettings(body)
+		if err != nil {
+			cancel()
+			if mcpFileCleanup != nil {
+				mcpFileCleanup()
+			}
+			return nil, fmt.Errorf("write qwen thinking settings: %w", err)
+		}
+		thinkingSettingsPath = path
+		thinkingFileCleanup = func() { cleanupQwenThinkingSettings(thinkingSettingsPath) }
+		env = make(map[string]string, len(b.cfg.Env)+1)
+		for key, value := range b.cfg.Env {
+			env[key] = value
+		}
+		env["QWEN_CODE_SYSTEM_SETTINGS_PATH"] = thinkingSettingsPath
+	}
 	// Clean up if a later setup step returns before the result goroutine owns it.
 	defer func() {
 		if mcpFileCleanup != nil {
 			mcpFileCleanup()
+		}
+		if thinkingFileCleanup != nil {
+			thinkingFileCleanup()
 		}
 	}()
 	cmd, _, _ := b.cfg.commandAt(execName).execVia(runCtx, chooseQwenInvocation, lookedUp, args, b.cfg.Logger)
@@ -118,7 +152,7 @@ func (b *qwenBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 	if opts.Cwd != "" {
 		cmd.Dir = opts.Cwd
 	}
-	cmd.Env = buildEnv(b.cfg.Env)
+	cmd.Env = buildEnv(env)
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -141,7 +175,8 @@ func (b *qwenBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 	}
 	// cmd.Start succeeded; result goroutine now owns cleanup.
 	mcpFileCleanup = nil
-	b.cfg.Logger.Info("qwen started", "pid", cmd.Process.Pid, "cwd", opts.Cwd, "model", opts.Model)
+	thinkingFileCleanup = nil
+	b.cfg.Logger.Info("qwen started", "pid", cmd.Process.Pid, "cwd", opts.Cwd, "model", opts.Model, "thinking_level", opts.ThinkingLevel)
 
 	// The prompt is delivered on stdin (see buildQwenArgs). Write it from its
 	// own goroutine so it cannot deadlock against the stdout reader below: a
@@ -169,6 +204,9 @@ func (b *qwenBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 		defer close(resCh)
 		if mcpConfigPath != "" {
 			defer cleanupMcpConfigTemp(mcpConfigPath)
+		}
+		if thinkingSettingsPath != "" {
+			defer cleanupQwenThinkingSettings(thinkingSettingsPath)
 		}
 
 		started := time.Now()

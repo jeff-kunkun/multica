@@ -49,7 +49,17 @@ func discoverQwenModels(ctx context.Context, overlay map[string]string) ([]Model
 	if err != nil {
 		return nil, err
 	}
-	return discoverCompatibleEndpointModels(ctx, baseURL, apiKey, model)
+	models, err := discoverCompatibleEndpointModels(ctx, baseURL, apiKey, model)
+	if err != nil {
+		return nil, err
+	}
+	return annotateQwenThinking(models, overlay, baseURL), nil
+}
+
+// qwenAnnotateEndpointModels attaches the thinking levels Qwen settings declare
+// for the listed models (see qwen_thinking.go).
+func qwenAnnotateEndpointModels(ctx context.Context, baseURL string, models []Model) []Model {
+	return annotateQwenThinking(models, ModelEnvOverlay(ctx), baseURL)
 }
 
 // qwenEndpoint is the OpenAI-compatible route one Qwen config resolves to.
@@ -80,6 +90,11 @@ type qwenProviderRow struct {
 	Name    string `json:"name"`
 	BaseURL string `json:"baseUrl"`
 	EnvKey  string `json:"envKey"`
+	// Capabilities.Reasoning is Qwen Code's per-model thinking declaration,
+	// kept raw so a malformed one leaves the rest of the file readable.
+	Capabilities struct {
+		Reasoning json.RawMessage `json:"reasoning"`
+	} `json:"capabilities"`
 }
 
 // resolveQwenEndpoint merges the Qwen home with an optional env overlay.
