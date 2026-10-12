@@ -146,9 +146,6 @@ func (l Ladder) WithDomains(names []string) Ladder {
 func (l Ladder) For(settings Settings) Ladder {
 	l.dispatchPolicy = settings.DispatchPolicy
 	l = l.WithDomains(settings.Domains).WithProjects(settings.Projects).WithSeatOrder(settings.SeatOrder())
-	if settings.EffectiveDecisionMode() != "legacy" {
-		l.order.AllowUpshift = false
-	}
 	return l
 }
 

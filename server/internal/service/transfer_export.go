@@ -1001,6 +1001,10 @@ func sourceExportProjects(ctx context.Context, src TransferSourceClient, bundle 
 			Status:      strField(raw, "status"),
 			Priority:    strField(raw, "priority"),
 		}
+		if _, ok := raw["routing_disabled"]; ok {
+			off := boolField(raw, "routing_disabled")
+			p.RoutingDisabled = &off
+		}
 		if leadType := strField(raw, "lead_type"); leadType != "" {
 			p.Lead = &ConfigPolymorphicRef{Type: leadType, ID: strField(raw, "lead_id")}
 		}

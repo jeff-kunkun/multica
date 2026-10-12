@@ -907,6 +907,13 @@ func (st *importState) importProjects(ctx context.Context, q *db.Queries, dry bo
 			if err != nil {
 				return "", err
 			}
+			if p.RoutingDisabled != nil && *p.RoutingDisabled != row.RoutingDisabled {
+				if _, err := q.SetProjectRoutingDisabled(ctx, db.SetProjectRoutingDisabledParams{
+					ID: row.ID, WorkspaceID: st.env.TargetID, RoutingDisabled: *p.RoutingDisabled,
+				}); err != nil {
+					return "", err
+				}
+			}
 			for i, res := range p.Resources {
 				ref := []byte(res.ResourceRef)
 				if res.ResourceType == "local_directory" {

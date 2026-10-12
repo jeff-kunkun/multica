@@ -48,6 +48,9 @@ type Issue struct {
 	// ProjectSeats is the project's executor allowlist (DENE-1959): agent ids
 	// automatic dispatch may pick for this ticket. Empty admits every seat.
 	ProjectSeats []string
+	// ProjectRoutingOff is the project's own off switch (DENE-1966): its
+	// tickets are left as a workspace with routing off leaves them.
+	ProjectRoutingOff bool
 	// ProjectDomains are the project's domains in workspace order, and Domain
 	// is the issue's own (DENE-1451; empty = generic). See IssueScene.
 	ProjectDomains []string

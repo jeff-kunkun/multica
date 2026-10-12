@@ -183,9 +183,6 @@ func (r *Router) PickSeat(ctx context.Context, workspaceID string, req PickReque
 		pick.Tier = seat.TierKey
 	}
 	reason, detail := executorPickReason(issue, true, &seat, source, d.RaisedFrom != "")
-	if d.Decider == DeciderReasoning && source == pickJudge {
-		detail = "推理模型定档选人：" + verdict.Reason
-	}
 	if source == pickFallback && why != "" {
 		detail += "（" + why + "）"
 	}

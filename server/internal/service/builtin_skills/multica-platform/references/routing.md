@@ -350,23 +350,19 @@ Consequences for how you work:
 - Read `action` in `--output json` as what was WRITTEN. `assigned`: a slot was
   filled. `declined`: nothing was written, which now means somebody else won
   the write. `noop`: nothing to decide. Only `assigned` is a dispatch.
-- **Decision rollout.** Existing settings without `decision_mode` keep `legacy`
-  until compared; new UI configurations start in `shadow`, with no independent
-  judge call. `multica workspace routing set --decision-mode shadow`
-  makes one analysis call return numbered facts plus a tier, eligible seat ID,
-  reason and confidence. It reads `policy_prompt`, the whole ticket, available
-  seats and reference rules. Shadow keeps the old assignment; `active` uses the
-  model's choice instead of first-match rules. Low confidence raises at most one
-  tier, never into strongest as a fallback. Invalid or unavailable selections
-  cannot bypass server eligibility or the safe fallback policy.
-- **Compare before activating.** `multica workspace routing shadow --days 30
-  --limit 20 --output json` makes at most 20 model calls, writes no issue state
-  and starts no runs. `next_offset` resumes with `--offset`; increase `--limit`
-  up to 1000 for a wider review. These are past ticket texts evaluated with the
-  CURRENT roster and policy, not reconstructed historical quota. Keep partial
-  errors in the report. The settings page runs the same endpoint in batches.
-  Grok reviews the report before `--decision-mode active`; do not claim a live
-  comparison or activate a rollout merely because fixture tests passed.
+- **One path (DENE-1966).** The rule table sets the tier; the judge may only
+  raise it one rung. A stored `decision_mode` (legacy / shadow / active) still
+  reads and is ignored; `--decision-mode` is gone. Low confidence never lands
+  on strongest as a fallback, and nothing bypasses server eligibility.
+- **Compare offline.** `multica workspace routing shadow --days 30 --limit 20
+  --output json` asks the analysis model to pick a seat for past tickets with
+  the CURRENT roster and policy. It makes at most `--limit` model calls, writes
+  no issue state and starts no runs; `next_offset` resumes with `--offset`.
+  It is a CLI-only report — the settings page no longer runs it.
+- **Project off (DENE-1966).** `multica project update <p> --routing off`
+  (owner/admin; `on` restores) makes routing leave that project's tickets
+  alone exactly as if the workspace switch were off — no slot, no comment.
+  `multica project get <p> --output json` shows `routing_disabled`.
 - The issue's **scene** decides which specialisation on a rung gets the
   work; it never changes the rung or the confidence. The scene is the issue's
   own domain; else all of its project's domains; else generic. Every
@@ -401,7 +397,7 @@ settings page reads):
 multica workspace routing rules
 ```
 
-Only the legacy migration comparison retains the old judge behavior. There it may only **raise** the table's
+The judge may only **raise** the table's
 tier by one rung, with a reason; a lower or two-rung answer is not used, and
 the decision comment says so. `multica issue route <id> --output json`
 reports `tier` (used), `judged_tier` (set only when the judge's answer was

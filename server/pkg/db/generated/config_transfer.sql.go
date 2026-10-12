@@ -748,7 +748,7 @@ func (q *Queries) ExportProjectResources(ctx context.Context, projectIds []pgtyp
 }
 
 const exportProjects = `-- name: ExportProjects :many
-SELECT id, title, description, icon, status, priority, lead_type, lead_id, start_date, due_date
+SELECT id, title, description, icon, status, priority, lead_type, lead_id, start_date, due_date, routing_disabled
 FROM project
 WHERE workspace_id = $1
   AND (
@@ -764,16 +764,17 @@ type ExportProjectsParams struct {
 }
 
 type ExportProjectsRow struct {
-	ID          pgtype.UUID `json:"id"`
-	Title       string      `json:"title"`
-	Description pgtype.Text `json:"description"`
-	Icon        pgtype.Text `json:"icon"`
-	Status      string      `json:"status"`
-	Priority    string      `json:"priority"`
-	LeadType    pgtype.Text `json:"lead_type"`
-	LeadID      pgtype.UUID `json:"lead_id"`
-	StartDate   pgtype.Date `json:"start_date"`
-	DueDate     pgtype.Date `json:"due_date"`
+	ID              pgtype.UUID `json:"id"`
+	Title           string      `json:"title"`
+	Description     pgtype.Text `json:"description"`
+	Icon            pgtype.Text `json:"icon"`
+	Status          string      `json:"status"`
+	Priority        string      `json:"priority"`
+	LeadType        pgtype.Text `json:"lead_type"`
+	LeadID          pgtype.UUID `json:"lead_id"`
+	StartDate       pgtype.Date `json:"start_date"`
+	DueDate         pgtype.Date `json:"due_date"`
+	RoutingDisabled bool        `json:"routing_disabled"`
 }
 
 func (q *Queries) ExportProjects(ctx context.Context, arg ExportProjectsParams) ([]ExportProjectsRow, error) {
@@ -796,6 +797,7 @@ func (q *Queries) ExportProjects(ctx context.Context, arg ExportProjectsParams) 
 			&i.LeadID,
 			&i.StartDate,
 			&i.DueDate,
+			&i.RoutingDisabled,
 		); err != nil {
 			return nil, err
 		}
@@ -1274,7 +1276,7 @@ func (q *Queries) GetEarliestAutopilotByTitle(ctx context.Context, arg GetEarlie
 }
 
 const getEarliestProjectByTitle = `-- name: GetEarliestProjectByTitle :one
-SELECT id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, start_date, due_date, visibility, created_by, domain_ids, linked_projects, executor_agent_ids FROM project
+SELECT id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, start_date, due_date, visibility, created_by, domain_ids, linked_projects, executor_agent_ids, routing_disabled FROM project
 WHERE workspace_id = $1 AND title = $2
 ORDER BY created_at ASC
 LIMIT 1
@@ -1307,6 +1309,7 @@ func (q *Queries) GetEarliestProjectByTitle(ctx context.Context, arg GetEarliest
 		&i.DomainIds,
 		&i.LinkedProjects,
 		&i.ExecutorAgentIds,
+		&i.RoutingDisabled,
 	)
 	return i, err
 }

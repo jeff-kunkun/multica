@@ -31,7 +31,7 @@ func (h *Handler) seatStagedParent(r *http.Request, workspaceID string, child db
 	if err != nil || parent.ParentIssueID.Valid || parent.AssigneeID.Valid || parent.CreatorType != "agent" {
 		return
 	}
-	routed := h.Routing != nil && h.Routing.Active(ctx, workspaceID)
+	routed := h.routingActiveFor(ctx, workspaceID, parent.ProjectID)
 	params := db.SeatStagedParentParams{ID: parent.ID, WorkspaceID: parent.WorkspaceID}
 	if !routed {
 		agentID, err := util.ParseUUID(creatorID)

@@ -2,7 +2,6 @@ package routing
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -13,8 +12,7 @@ const (
 	DeciderNone = "none"
 	// DeciderRule — the rule table decided, possibly raised one rung by the
 	// judge (Trace.Judge says).
-	DeciderRule      = "rule"
-	DeciderReasoning = "reasoning"
+	DeciderRule = "rule"
 )
 
 // decision is the todo row's answer before any seat is looked up: a verdict,
@@ -131,24 +129,7 @@ func (r *Router) decide(ctx context.Context, workspaceID string, settings Settin
 	d.Verdict, d.Decider = row.Verdict(facts), DeciderRule
 	trace.Rule = TraceRule{Index: index, ID: row.ID, Label: row.Label, Tier: row.Tier, Reviewer: row.Reviewer}
 
-	if settings.EffectiveDecisionMode() != "legacy" {
-		trace.ReasoningMode = settings.EffectiveDecisionMode()
-		if rec != nil {
-			trace.Reasoning = rec.Decision
-		}
-		if settings.EffectiveDecisionMode() == "active" {
-			if rec == nil {
-				return d, fmt.Errorf("%w: reasoning model did not answer", ErrJudgeUnavailable)
-			}
-			v, why := reasoningVerdict(rec.Decision, settings, r.ladder(), state.EligibleSeats)
-			if why != "" {
-				return d, fmt.Errorf("%w: %s", ErrJudgeUnavailable, why)
-			}
-			d.Verdict, d.Decider = v, DeciderReasoning
-		}
-	}
-
-	if settings.EffectiveDecisionMode() == "legacy" && settings.JudgeOn() && r.Judge != nil && !(d.Decider == DeciderReasoning && rec.Decision.Confidence < settings.Threshold()) {
+	if settings.JudgeOn() && r.Judge != nil {
 		if rec != nil {
 			state.Facts = d.Facts
 			if d.Mode == ModeBoth {
@@ -259,16 +240,8 @@ func (r *Router) ladder() Ladder {
 func (r *Router) analysis(ctx context.Context, workspaceID string, settings Settings, issue Issue, state JudgeState) (*AnalysisRecord, bool, error) {
 	model := settings.AnalysisTarget().Model
 	policy := settings.EffectiveDispatchPolicy()
-	reasoning := settings.EffectiveDecisionMode() != "legacy" && settings.AnalysisOn()
 	rules := r.rules()
-	fingerprint, _ := json.Marshal(struct {
-		Prompt string
-		Policy DispatchPolicy
-		Rules  RuleTable
-		Seats  []ReasoningSeat
-	}{settings.EffectivePolicyPrompt(), policy, rules, state.EligibleSeats})
-	decisionHash := ContentHash(model, string(fingerprint))
-	if rec := issue.Analysis; rec != nil && rec.Fresh(issue, model) && (!reasoning || (rec.Decision != nil && rec.DecisionHash == decisionHash)) && (rec.Source == FactsFromCreator || sameStrings(rec.Categories, policy.CategoryNames())) {
+	if rec := issue.Analysis; rec != nil && rec.Fresh(issue, model) && (rec.Source == FactsFromCreator || sameStrings(rec.Categories, policy.CategoryNames())) {
 		// A creator's record always counts; an analysis record only in a
 		// mode that would have made the call.
 		if rec.Source == FactsFromCreator || settings.AnalysisOn() {
@@ -294,15 +267,11 @@ func (r *Router) analysis(ctx context.Context, workspaceID string, settings Sett
 	requestCtx := WithAnalysisRequest(ctx, workspaceID, issue.ID, issue.ContentHash)
 	// The questions are about the work, not about who does it: the seat,
 	// quota and tier context stays with the judge.
-	if !reasoning {
-		state.Candidates, state.Seats, state.ProviderQuotas, state.EligibleSeats = nil, nil, nil, nil
-		state.RoutingPolicy, state.PolicyPrompt = RoutingPolicy{}, ""
-	} else {
-		state.PolicyPrompt = settings.EffectivePolicyPrompt()
-	}
+	state.Candidates, state.Seats, state.ProviderQuotas, state.EligibleSeats = nil, nil, nil, nil
+	state.RoutingPolicy, state.PolicyPrompt = RoutingPolicy{}, ""
 	rec, err := r.Analyst.Analyze(requestCtx, settings.AnalysisTarget(), AnalysisState{
 		JudgeState: state, Description: issue.Description, Categories: policy.CategoryOptions(),
-		Reasoning: reasoning, ReferenceRules: &rules, Preferences: &policy,
+		ReferenceRules: &rules, Preferences: &policy,
 	})
 	if err != nil {
 		if settings.AnalysisTarget().UsesRuntime() {
@@ -312,9 +281,6 @@ func (r *Router) analysis(ctx context.Context, workspaceID string, settings Sett
 	}
 	r.analysisFailures.Delete(failureKey)
 	rec.Hash = issue.ContentHash
-	if reasoning {
-		rec.DecisionHash = decisionHash
-	}
 	rec.Model = model
 	if len(rec.Categories) == 0 {
 		// The record answers the category list it was asked; an analyst that
@@ -348,21 +314,6 @@ func (r *Router) PreAnalyze(ctx context.Context, workspaceID string, issueID str
 		return err
 	}
 	state := JudgeState{Title: issue.Title, DescriptionSummary: issue.DescriptionSummary, Status: issue.Status}
-	if settings.EffectiveDecisionMode() != "legacy" {
-		roster, e := r.Store.Roster(ctx, workspaceID)
-		if e != nil {
-			return e
-		}
-		roster = ForProject(roster, issue.ProjectID, issue.ProjectSeats)
-		l := r.ladder().For(settings)
-		scene := l.IssueScene(issue)
-		eligible, loaded, e := r.decisionContext(ctx, workspaceID, settings, issue, scene, l.assignmentCandidates(scene, roster))
-		if e != nil {
-			return e
-		}
-		state = loaded
-		state.EligibleSeats = reasoningSeats(l, eligible, roster)
-	}
 	_, _, err = r.analysis(ctx, workspaceID, settings, issue, state)
 	return err
 }
@@ -449,21 +400,7 @@ func decisionSourceLine(d decision, settings Settings, l Ladder) string {
 		}
 	}
 	reviewer := map[ReviewerKind]string{ReviewerSeat: "要验收", ReviewerNone: "不需要验收"}[t.Rule.Reviewer]
-	if d.Decider == DeciderReasoning {
-		b.WriteString(fmt.Sprintf("- **参考规则**：第 %d 行「%s」建议%s档（仅参考）\n", t.Rule.Index, t.Rule.Label, tierLabel(l, t.Rule.Tier)))
-	} else {
-		b.WriteString(fmt.Sprintf("- **规则**：第 %d 行「%s」→ %s档，%s\n", t.Rule.Index, t.Rule.Label, tierLabel(l, t.Rule.Tier), reviewer))
-	}
-	if t.Reasoning != nil {
-		label := "推理模型"
-		if t.ReasoningMode != "active" {
-			label = "影子对比（未用于派单）"
-		}
-		b.WriteString(fmt.Sprintf("- **%s**：%s档，置信度 %s；%s\n", label, tierLabel(l, t.Reasoning.Tier), pct(t.Reasoning.Confidence), t.Reasoning.Reason))
-		if t.ReasoningMode == "active" && t.Reasoning.Confidence < settings.Threshold() {
-			b.WriteString("- **置信度不足**：最多上调一档；最强档不作低置信度兜底\n")
-		}
-	}
+	b.WriteString(fmt.Sprintf("- **规则**：第 %d 行「%s」→ %s档，%s\n", t.Rule.Index, t.Rule.Label, tierLabel(l, t.Rule.Tier), reviewer))
 	if j := t.Judge; j != nil {
 		b.WriteString("- **判断模型** " + modelName(settings.Model) + "：")
 		switch j.Effect {

@@ -6,6 +6,7 @@ import { useDefaultLayout, usePanelRef } from "react-resizable-panels";
 import { Check, ChevronRight, Headphones, Link2, MessageSquare, MoreHorizontal, PanelRight, Pin, PinOff, Trash2, UserMinus } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { cn } from "@multica/ui/lib/utils";
+import { Switch } from "@multica/ui/components/ui/switch";
 import { copyText } from "@multica/ui/lib/clipboard";
 import { toast } from "sonner";
 import type { ProjectStatus, ProjectPriority } from "@multica/core/types";
@@ -102,6 +103,42 @@ function PropRow({
         {children}
       </div>
     </div>
+  );
+}
+
+/**
+ * Automatic dispatch for this project's work (DENE-1966). Off means routing
+ * neither picks nor replaces an executor here; people and agents assign by
+ * hand. The line under the switch says what the state means, or why it is
+ * read-only.
+ */
+function ProjectRoutingRow({
+  off,
+  canEdit,
+  onChange,
+}: {
+  off: boolean;
+  canEdit: boolean;
+  onChange: (off: boolean) => void;
+}) {
+  const { t } = useT("projects");
+  const label = t(($) => $.detail.prop_routing);
+  const hint = !canEdit
+    ? t(($) => $.detail.executors_admin_only)
+    : off
+      ? t(($) => $.detail.routing_off)
+      : t(($) => $.detail.routing_on);
+  return (
+    <PropRow label={label}>
+      <Switch
+        size="sm"
+        checked={!off}
+        disabled={!canEdit}
+        onCheckedChange={(on) => onChange(!on)}
+        aria-label={label}
+      />
+      <span className="min-w-0 whitespace-normal py-1 text-muted-foreground">{hint}</span>
+    </PropRow>
   );
 }
 
@@ -459,6 +496,11 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
               onChange={(ids) => handleUpdateField({ executor_agent_ids: ids })}
             />
           </PropRow>
+          <ProjectRoutingRow
+            off={project.routing_disabled === true}
+            canEdit={isWorkspaceAdmin && !isGuest}
+            onChange={(off) => handleUpdateField({ routing_disabled: off })}
+          />
         </div>}
       </div>
 

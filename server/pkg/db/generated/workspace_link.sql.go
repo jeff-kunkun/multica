@@ -187,7 +187,7 @@ func (q *Queries) InsertWorkspaceLinkAudit(ctx context.Context, arg InsertWorksp
 }
 
 const listLinkedReferenceProjects = `-- name: ListLinkedReferenceProjects :many
-SELECT p.id, p.workspace_id, p.title, p.description, p.icon, p.status, p.lead_type, p.lead_id, p.created_at, p.updated_at, p.priority, p.start_date, p.due_date, p.visibility, p.created_by, p.domain_ids, p.linked_projects, p.executor_agent_ids FROM workspace_link_project lp
+SELECT p.id, p.workspace_id, p.title, p.description, p.icon, p.status, p.lead_type, p.lead_id, p.created_at, p.updated_at, p.priority, p.start_date, p.due_date, p.visibility, p.created_by, p.domain_ids, p.linked_projects, p.executor_agent_ids, p.routing_disabled FROM workspace_link_project lp
 JOIN project p ON p.id = lp.project_id
 WHERE lp.link_id = $1::uuid
   AND p.workspace_id = $2::uuid
@@ -234,6 +234,7 @@ func (q *Queries) ListLinkedReferenceProjects(ctx context.Context, arg ListLinke
 			&i.DomainIds,
 			&i.LinkedProjects,
 			&i.ExecutorAgentIds,
+			&i.RoutingDisabled,
 		); err != nil {
 			return nil, err
 		}

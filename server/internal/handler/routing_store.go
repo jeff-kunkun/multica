@@ -131,11 +131,12 @@ func (s routingStore) issueView(ctx context.Context, row db.Issue) (routing.Issu
 		out.ProjectName = scene.ProjectName
 		out.ProjectDomains = scene.Project
 		out.Domain = scene.Issue
-		seats, err := service.LoadProjectExecutorSeats(ctx, s.h.Queries, row.WorkspaceID, row.ProjectID)
+		project, err := s.h.Queries.GetProjectInWorkspace(ctx, db.GetProjectInWorkspaceParams{ID: row.ProjectID, WorkspaceID: row.WorkspaceID})
 		if err != nil {
 			return out, err
 		}
-		out.ProjectSeats = seats
+		out.ProjectSeats = service.ProjectExecutorSeats(project)
+		out.ProjectRoutingOff = project.RoutingDisabled
 	}
 	if labels, err := s.h.Queries.ListLabelsByIssue(ctx, db.ListLabelsByIssueParams{
 		IssueID: row.ID, WorkspaceID: row.WorkspaceID,

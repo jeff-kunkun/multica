@@ -72,7 +72,13 @@ relay, reviewer and advisor picks — chooses only these agents for work in the
 project, and declines when none of them can take it instead of reaching
 outside the list. Repeat the flag per agent (name or id); --executor ""
 lifts the limit. @mention and manual assignment are not limited. Read it
-back from executor_agent_ids in "multica project get <id> --output json".`,
+back from executor_agent_ids in "multica project get <id> --output json".
+
+--routing off turns automatic dispatch off for this project (owner/admin
+only): its tickets are not picked, replaced or re-picked by routing, and an
+executor set by hand or by an agent stands. --routing on turns it back on.
+Other projects are not affected. Read it back from routing_disabled in
+"multica project get <id> --output json".`,
 	Args: exactArgs(1),
 	RunE: runProjectUpdate,
 }
@@ -331,6 +337,7 @@ func init() {
 	projectUpdateCmd.Flags().String("lead", "", "New lead name (member or agent)")
 	projectUpdateCmd.Flags().String("start-date", "", "New start date (calendar day, YYYY-MM-DD; pass empty string to clear)")
 	projectUpdateCmd.Flags().String("due-date", "", "New due date (calendar day, YYYY-MM-DD; pass empty string to clear)")
+	projectUpdateCmd.Flags().String("routing", "", "on or off: turn automatic dispatch on or off for this project's tickets (owner/admin)")
 	projectUpdateCmd.Flags().StringArray("executor", nil, "Replace the executor allowlist: only these agents (name or id, repeatable) are picked automatically for this project; --executor \"\" lifts it")
 	projectUpdateCmd.Flags().StringArray("domain", nil, "Replace the project's domains (repeatable; --domain \"\" or --domain 通用 clears to generic). See `multica domain list`")
 	projectUpdateCmd.Flags().String("output", "json", "Output format: table or json")
@@ -633,8 +640,20 @@ func runProjectUpdate(cmd *cobra.Command, args []string) error {
 		body["executor_agent_ids"] = ids
 	}
 
+	if cmd.Flags().Changed("routing") {
+		v, _ := cmd.Flags().GetString("routing")
+		switch strings.TrimSpace(v) {
+		case "on":
+			body["routing_disabled"] = false
+		case "off":
+			body["routing_disabled"] = true
+		default:
+			return fmt.Errorf("--routing must be on or off")
+		}
+	}
+
 	if len(body) == 0 {
-		return fmt.Errorf("no fields to update; use flags like --title, --status, --description, --icon, --lead, --start-date, --due-date, --domain, --executor")
+		return fmt.Errorf("no fields to update; use flags like --title, --status, --description, --icon, --lead, --start-date, --due-date, --domain, --executor, --routing")
 	}
 
 	var result map[string]any

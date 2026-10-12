@@ -64,7 +64,10 @@
     "executors": "Executors",
     "executors_any": "Any agent",
     "executors_header": "Automatic dispatch only picks these; none picked means any",
-    "executors_admin_only": "Only workspace admins can change this"
+    "executors_admin_only": "Only workspace admins can change this",
+    "routing": "Automatic dispatch",
+    "routing_on": "Routing picks who works on this project",
+    "routing_off": "Off: routing leaves this project's tickets alone"
   },
   "resources": {
     "title": "Resources",

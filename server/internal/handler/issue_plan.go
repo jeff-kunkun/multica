@@ -326,7 +326,7 @@ func (h *Handler) ApplyPlan(w http.ResponseWriter, r *http.Request) {
 		// routing never saw it; a plan root of our own with no seat (routing
 		// off, no assignee in the plan) gets its creator.
 		for _, issue := range res.Issues {
-			if issue.ParentIssueID == root.ID && issue.Stage.Valid && (rootExists || !h.Routing.Active(r.Context(), workspaceID)) {
+			if issue.ParentIssueID == root.ID && issue.Stage.Valid && (rootExists || !h.routingActiveFor(r.Context(), workspaceID, root.ProjectID)) {
 				h.seatStagedParent(r, workspaceID, issue, creatorType, creatorID)
 				break
 			}

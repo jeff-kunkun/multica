@@ -545,9 +545,10 @@ func (h *Handler) ConvertChatSessionToGoal(w http.ResponseWriter, r *http.Reques
 	defer spawnSlots.release()
 	// Who runs the goal (DENE-1834): with routing on, the executor slot is
 	// left empty and routing judges the goal like any ticket, so the chat's
-	// agent is not inherited by habit. With routing off it stays the chat's
-	// agent, reported as 人工.
-	routed := h.Routing != nil && h.Routing.Active(r.Context(), workspaceID)
+	// agent is not inherited by habit. With routing off — for the workspace
+	// or for the goal's project (DENE-1966) — it stays the chat's agent,
+	// reported as 人工.
+	routed := h.routingActiveFor(r.Context(), workspaceID, session.ProjectID)
 	params := service.IssueCreateParams{
 		WorkspaceID: session.WorkspaceID,
 		Title:       title,

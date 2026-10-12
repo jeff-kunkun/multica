@@ -70,7 +70,9 @@ const DefaultStaleReviewHours = 24
 type Settings struct {
 	ConsultPerIssue *int `json:"consult_per_issue,omitempty"`
 
-	// Shadow is the rollout default: compare without changing the executor.
+	// DecisionMode is retired (DENE-1966): routing has one path — the rule
+	// table sets the tier and the judge may raise it one rung. The field is
+	// still read so a stored legacy/shadow/active value parses, and ignored.
 	DecisionMode string `json:"decision_mode,omitempty"`
 
 	Enabled bool `json:"enabled"`
@@ -232,9 +234,6 @@ func (s Settings) AnalysisOn() bool { return s.Analysis != nil && s.Analysis.Ena
 // the analysis role on, which only a writer that knows about roles can do,
 // and such a writer states the judge switch explicitly anyway.
 func (s Settings) JudgeOn() bool {
-	if s.EffectiveDecisionMode() != "legacy" {
-		return false
-	}
 	if s.JudgeEnabled != nil {
 		return *s.JudgeEnabled
 	}

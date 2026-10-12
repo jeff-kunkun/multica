@@ -1,7 +1,8 @@
 /**
  * Project properties section. Tappable rows for Status / Priority / Lead /
- * Domain / Executors.
- * Each row opens a picker sheet via the corresponding `onPress*` callback.
+ * Domain / Executors, plus the automatic-dispatch switch (DENE-1966).
+ * Each tappable row opens a picker sheet via the corresponding `onPress*`
+ * callback; the switch writes straight through like the web row does.
  *
  * Layout mirrors iOS Settings rows: label on left, current value on right
  * with a disclosure chevron, full-width separator below each row. Tapping
@@ -25,6 +26,10 @@ import { useQuery } from "@tanstack/react-query";
 import { useActorLookup } from "@/data/use-actor-name";
 import { domainListOptions } from "@/data/queries/domains";
 import { agentListOptions } from "@/data/queries/agents";
+import { memberListOptions } from "@/data/queries/members";
+import { useAuthStore } from "@/data/auth-store";
+import { useUpdateProject } from "@/data/mutations/projects";
+import { Switch } from "@/components/ui/switch";
 import { useWorkspaceStore } from "@/data/workspace-store";
 import { useColorScheme } from "@/lib/use-color-scheme";
 import { THEME } from "@/lib/theme";
@@ -58,6 +63,13 @@ export function ProjectPropertiesSection({
   const executorNames = (project.executor_agent_ids ?? [])
     .map((id) => agents.find((a) => a.id === id)?.name)
     .filter((n): n is string => Boolean(n));
+  // Same gate as the executor picker and the web row: owner/admin only.
+  const userId = useAuthStore((s) => s.user?.id);
+  const { data: members = [] } = useQuery(memberListOptions(wsId));
+  const role = members.find((m) => m.user_id === userId)?.role;
+  const canEditRouting = role === "owner" || role === "admin";
+  const updateProject = useUpdateProject(project.id);
+  const routingOff = project.routing_disabled === true;
   const leadName =
     project.lead_type && project.lead_id
       ? getName(project.lead_type, project.lead_id)
@@ -154,6 +166,25 @@ export function ProjectPropertiesSection({
           </Text>
         }
       />
+      <Separator />
+      <View className="flex-row items-center gap-3 px-4 py-3">
+        <View className="flex-1">
+          <Text className="text-sm text-foreground">{t("properties.routing")}</Text>
+          <Text numberOfLines={1} className="text-xs text-muted-foreground">
+            {!canEditRouting
+              ? t("properties.executors_admin_only")
+              : routingOff
+                ? t("properties.routing_off")
+                : t("properties.routing_on")}
+          </Text>
+        </View>
+        <Switch
+          checked={!routingOff}
+          disabled={!canEditRouting}
+          onCheckedChange={(on) => updateProject.mutate({ routing_disabled: !on })}
+          accessibilityLabel={t("properties.routing")}
+        />
+      </View>
     </View>
   );
 }

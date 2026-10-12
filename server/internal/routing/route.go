@@ -117,6 +117,10 @@ func (r *Router) log() *slog.Logger {
 // caller deciding whether an agent's executor pick can be dropped (DENE-1033)
 // asks this first: with routing off nobody would fill the slot afterwards, so
 // the pick stays as it always was. An unreadable setting counts as off.
+// ReasonProjectRoutingOff is the skip reason for a ticket whose project
+// turned routing off.
+const ReasonProjectRoutingOff = "routing is off for this project"
+
 func (r *Router) Active(ctx context.Context, workspaceID string) bool {
 	settings, err := r.Store.Settings(ctx, workspaceID)
 	return err == nil && settings.State().Active()
@@ -235,6 +239,12 @@ func (r *Router) admit(ctx context.Context, workspaceID, issueID string) (Settin
 		return settings, Issue{}, &Outcome{State: state, Action: ActionSkipped, Reason: "issue unreadable"}, err
 	}
 
+	if issue.ProjectRoutingOff {
+		// The project turned routing off (DENE-1966): the same silence as a
+		// workspace that never turned it on — no pick, no swap, no comment.
+		return settings, issue, &Outcome{State: state, Action: ActionSkipped, Reason: ReasonProjectRoutingOff}, nil
+	}
+
 	if issue.AssignedToHuman() && !humanHeldIsRoutable(issue) {
 		// A person's ticket is a person's ticket. Nothing is filled, nothing
 		// is said, nobody is pinged.
@@ -283,44 +293,130 @@ const (
 	fillBlocked
 )
 
-// routeTodo is the only row that fills slots.
+// routeTodo is the only row that fills slots. It is one decision in four
+// steps (DENE-1966), each reading what the step before it settled:
+//
+//  1. candidates — who could take this ticket at all;
+//  2. tier — how strong the seat must be (person's label, rule table, judge,
+//     分工规则);
+//  3. pick — which seat fills the executor slot and which the reviewer slot;
+//  4. reason — what was written and why, said once on the ticket.
+//
+// A step that ends the decision early returns the outcome to deliver.
 func (r *Router) routeTodo(ctx context.Context, workspaceID string, settings Settings, issue Issue, mode fillMode) (Outcome, error) {
-	// Declined until a write proves otherwise: the action is derived from what
-	// was written, at the bottom of this function.
-	out := Outcome{State: StateEnabled, Action: ActionDeclined}
-
-	needExecutor := issue.AssigneeType == ""
-	needReviewer := issue.ParentIssueID == "" && issue.Reviewer.Empty()
-
-	if !needExecutor && !needReviewer {
+	p := &todoPass{
+		r: r, workspaceID: workspaceID, settings: settings, issue: issue, mode: mode,
+		// Declined until a write proves otherwise: the action is derived from
+		// what was written, in the reason step.
+		out:          Outcome{State: StateEnabled, Action: ActionDeclined},
+		needExecutor: issue.AssigneeType == "",
+		needReviewer: issue.ParentIssueID == "" && issue.Reviewer.Empty(),
+	}
+	if !p.needExecutor && !p.needReviewer {
 		// Both slots already hold a value, whoever wrote them. Repeated status
 		// flips land here: nothing to fill, so nothing is asked, written, or
 		// said. This is where idempotence comes from — no bookkeeping, just
 		// the emptiness of the slots.
 		return Outcome{State: StateEnabled, Action: ActionNoop, Reason: "no empty slot"}, nil
 	}
-
-	ladder := r.Ladder.For(settings)
-	scene := ladder.IssueScene(issue)
-	roster, err := r.Store.Roster(ctx, workspaceID)
-	if err != nil {
-		return Outcome{State: StateEnabled, Action: ActionSkipped, Reason: "roster unreadable"}, err
+	for _, step := range []func(context.Context) (*Outcome, error){p.findCandidates, p.setTier, p.pickSeats} {
+		if out, err := step(ctx); out != nil || err != nil {
+			if out == nil {
+				out = &p.out
+			}
+			return *out, err
+		}
 	}
-	roster = ForProject(roster, issue.ProjectID, issue.ProjectSeats)
-	candidates := ladder.assignmentCandidates(scene, roster)
+	return p.writeReason(ctx)
+}
+
+// todoPass carries one routeTodo decision between its steps.
+type todoPass struct {
+	r            *Router
+	workspaceID  string
+	settings     Settings
+	issue        Issue
+	mode         fillMode
+	out          Outcome
+	needExecutor bool
+	needReviewer bool
+
+	// candidates
+	ladder     Ladder
+	scene      Scene
+	roster     map[string]Agent
+	candidates []Seat
+	eligible   []Seat
+	state      JudgeState
+
+	// tier
+	requestedTier string
+	labelled      bool
+	labelSeat     Seat
+	labelSeatOK   bool
+	ignored       []string
+	dec           decision
+	verdict       Verdict
+	threshold     float64
+	notes         []string
+	fresh         []Seat
+	snaps         map[string]SeatSnapshot
+	dispatch      DispatchMatch
+	pickRoster    map[string]Agent
+
+	// pick
+	executor         *Seat
+	executorSource   string
+	seriesNote       string
+	cont             ContinuationPick
+	load             LoadPick
+	learn            LearnPick
+	learnApplied     bool
+	reviewer         ReviewerRef
+	reviewerFallback bool
+	fallbackWhy      string
+	humanSignoff     bool
+}
+
+func (p *todoPass) skipped(reason string, err error) (*Outcome, error) {
+	return &Outcome{State: StateEnabled, Action: ActionSkipped, Reason: reason}, err
+}
+
+func (p *todoPass) deliver(ctx context.Context, body string, out Outcome) (*Outcome, error) {
+	o, err := p.r.deliver(ctx, p.workspaceID, p.issue, KindAssignment, body, false, out)
+	return &o, err
+}
+
+// findCandidates is step 1: the seats this ticket's direction and project allow,
+// and which of them can take work now.
+func (p *todoPass) findCandidates(ctx context.Context) (*Outcome, error) {
+	r, issue := p.r, p.issue
+	p.ladder = r.Ladder.For(p.settings)
+	p.scene = p.ladder.IssueScene(issue)
+	roster, err := r.Store.Roster(ctx, p.workspaceID)
+	if err != nil {
+		return p.skipped("roster unreadable", err)
+	}
+	p.roster = ForProject(roster, issue.ProjectID, issue.ProjectSeats)
+	p.candidates = p.ladder.assignmentCandidates(p.scene, p.roster)
 	// Coordinator requests in the body become Bot mentions in PostComment.
 	// The deliver mention flag targets a human creator/owner, not Grok.
-	if len(candidates) == 0 {
-		return r.deliver(ctx, workspaceID, issue, KindAssignment, "没有可自动选派的席位"+projectSeatsNote(issue)+"；未派出，请 Grok 协调。", false, Outcome{State: StateEnabled, Action: ActionAdvised, Reason: "no routable seat"})
+	if len(p.candidates) == 0 {
+		return p.deliver(ctx, "没有可自动选派的席位"+projectSeatsNote(issue)+"；未派出，请 Grok 协调。", Outcome{State: StateEnabled, Action: ActionAdvised, Reason: "no routable seat"})
 	}
-	eligible, state, err := r.decisionContext(ctx, workspaceID, settings, issue, scene, candidates)
+	p.eligible, p.state, err = r.decisionContext(ctx, p.workspaceID, p.settings, issue, p.scene, p.candidates)
 	if err != nil {
-		return Outcome{State: StateEnabled, Action: ActionSkipped, Reason: "routing context incomplete"}, err
+		return p.skipped("routing context incomplete", err)
 	}
-	if len(eligible) == 0 {
-		return r.deliver(ctx, workspaceID, issue, KindAssignment, "候选均不在线或没有额度"+projectSeatsNote(issue)+"；未派出，请 Grok 协调。", false, Outcome{State: StateEnabled, Action: ActionAdvised, Reason: "no eligible seat"})
+	if len(p.eligible) == 0 {
+		return p.deliver(ctx, "候选均不在线或没有额度"+projectSeatsNote(issue)+"；未派出，请 Grok 协调。", Outcome{State: StateEnabled, Action: ActionAdvised, Reason: "no eligible seat"})
 	}
+	return nil, nil
+}
 
+// setTier is step 2: how strong the seat must be.
+func (p *todoPass) setTier(ctx context.Context) (*Outcome, error) {
+	r, issue, settings := p.r, p.issue, p.settings
 	// A tier label on the ticket is an answer, not a hint: when it names a
 	// rung that exists AND that seat can take work, the executor slot is
 	// filled from it and the judge is never asked about strength. A dead
@@ -330,280 +426,290 @@ func (r *Router) routeTodo(ctx context.Context, workspaceID string, settings Set
 	// Only a person's label counts. A tier label an agent attached is the same
 	// guess as an agent naming a seat, and is set aside for the same reason
 	// (DENE-1033).
-	requestedTier, labelled := r.Ladder.RequestedTier(issue.HumanLabels())
-	var ignored []string
+	p.requestedTier, p.labelled = r.Ladder.RequestedTier(issue.HumanLabels())
 	if issue.IgnoredAgentPick() {
-		ignored = append(ignored, NoticeAgentPickIgnored)
+		p.ignored = append(p.ignored, NoticeAgentPickIgnored)
 	}
-	if !labelled && len(issue.AgentLabels) > 0 {
+	if !p.labelled && len(issue.AgentLabels) > 0 {
 		if _, agentTier := r.Ladder.RequestedTier(issue.AgentLabels); agentTier {
-			ignored = append(ignored, NoticeAgentTierLabelIgnored)
+			p.ignored = append(p.ignored, NoticeAgentTierLabelIgnored)
 		}
 	}
-	labelSeat, labelSeatOK := Seat{}, false
-	if labelled {
-		labelSeat, labelSeatOK = SeatByTier(eligible, requestedTier)
+	if p.labelled {
+		p.labelSeat, p.labelSeatOK = SeatByTier(p.eligible, p.requestedTier)
 	}
-	executorFromLabel := needExecutor && labelSeatOK
+	executorFromLabel := p.needExecutor && p.labelSeatOK
 
-	state.CandidateSeries = ladder.candidateSeries(roster)
-	state.EligibleSeats = reasoningSeats(ladder, eligible, roster)
-	var verdict Verdict
-	dec := decision{Mode: settings.Mode(), Decider: DeciderNone}
-	if needReviewer || !executorFromLabel {
-		d, err := r.decide(ctx, workspaceID, settings, issue, state)
+	p.state.CandidateSeries = p.ladder.candidateSeries(p.roster)
+	p.state.EligibleSeats = reasoningSeats(p.ladder, p.eligible, p.roster)
+	p.dec = decision{Mode: settings.Mode(), Decider: DeciderNone}
+	if p.needReviewer || !executorFromLabel {
+		d, err := r.decide(ctx, p.workspaceID, settings, issue, p.state)
 		if err != nil {
-			return r.reportUnavailable(ctx, workspaceID, issue, err)
+			o, err := r.reportUnavailable(ctx, p.workspaceID, issue, err)
+			return &o, err
 		}
 		if d.Decider != DeciderNone {
-			r.Breaker.Succeed(workspaceID)
+			r.Breaker.Succeed(p.workspaceID)
 		}
-		dec, verdict = d, d.Verdict
-		out.Tier, out.JudgedTier = d.Verdict.ExecutorTier, d.RaisedFrom
-		out.Trace = d.Trace
+		p.dec, p.verdict = d, d.Verdict
+		p.out.Tier, p.out.JudgedTier = d.Verdict.ExecutorTier, d.RaisedFrom
+		p.out.Trace = d.Trace
 	}
 
-	threshold := settings.Threshold()
-	var notes []string
+	p.threshold = settings.Threshold()
 
 	// The observation can go stale between the question and the write. Read
 	// it again and only then pick. A seat that died in that gap is not
 	// written; another eligible seat is, when one remains.
-	fresh, snaps, err := r.eligibleNowWithSnapshots(ctx, workspaceID, settings, candidates)
+	var err error
+	p.fresh, p.snaps, err = r.eligibleNowWithSnapshots(ctx, p.workspaceID, settings, p.candidates)
 	if err != nil {
-		return Outcome{State: StateEnabled, Action: ActionSkipped, Reason: "routing context incomplete"}, err
+		return p.skipped("routing context incomplete", err)
 	}
 	// 分工规则 (DENE-1834): the category the analysis read picks a row, the
 	// row filters the seats by series and may cap the tier. A person's tier
 	// label still wins the rung; the series filter applies either way.
-	var dispatch DispatchMatch
-	pickRoster := roster
-	if needExecutor {
-		fresh, pickRoster, verdict, dispatch = ladder.dispatch(settings.EffectiveDispatchPolicy(), dec.Facts, fresh, roster, verdict)
-		out.Dispatch = dispatch
-		if dispatch.Capped != "" {
-			out.Tier = verdict.ExecutorTier
+	p.pickRoster = p.roster
+	if p.needExecutor {
+		p.fresh, p.pickRoster, p.verdict, p.dispatch = p.ladder.dispatch(settings.EffectiveDispatchPolicy(), p.dec.Facts, p.fresh, p.roster, p.verdict)
+		p.out.Dispatch = p.dispatch
+		if p.dispatch.Capped != "" {
+			p.out.Tier = p.verdict.ExecutorTier
 		}
-		if labelSeatOK && !seatIn(fresh, labelSeat) && dispatch.Filtered {
-			labelSeatOK = false
-			notes = append(notes, "labelled tier "+requestedTier+" has no seat in series "+dispatch.Series)
+		if p.labelSeatOK && !seatIn(p.fresh, p.labelSeat) && p.dispatch.Filtered {
+			p.labelSeatOK = false
+			p.notes = append(p.notes, "labelled tier "+p.requestedTier+" has no seat in series "+p.dispatch.Series)
 		}
 	}
+	if p.labelled && !p.labelSeatOK && !p.dispatch.Filtered {
+		p.notes = append(p.notes, "labelled tier "+p.requestedTier+" was not eligible")
+	}
+	if line := p.dispatch.Line(p.ladder); line != "" {
+		p.notes = append(p.notes, line)
+	}
+	if j := judgeNote(p.dec.Trace); j != "" {
+		p.notes = append(p.notes, j)
+	}
+	return nil, nil
+}
 
-	// --- executor slot ---------------------------------------------------
-	// A verdict under the threshold is a weak answer, not a missing one: it
-	// lands on the ladder's fallback rung — the generic strong seat — instead
-	// of leaving the ticket in todo for somebody to notice. A seat the
-	// snapshot says cannot take work is not a fallback. The confidence stays
-	// visible in the decision comment.
-	var executor *Seat
-	seriesNote := ""
-	executorSource := ""
-	var cont ContinuationPick
-	var load LoadPick
-	var learn LearnPick
+// pickSeats is step 3: the seat on the settled tier for each empty slot.
+func (p *todoPass) pickSeats(ctx context.Context) (*Outcome, error) {
+	if p.needExecutor {
+		if out, err := p.pickExecutor(ctx); out != nil || err != nil {
+			return out, err
+		}
+	}
+	if p.needReviewer {
+		return p.pickReviewer(ctx)
+	}
+	return nil, nil
+}
+
+// pickExecutor fills the executor slot.
+//
+// A verdict under the threshold is a weak answer, not a missing one: it
+// lands on the ladder's fallback rung — the generic strong seat — instead
+// of leaving the ticket in todo for somebody to notice. A seat the
+// snapshot says cannot take work is not a fallback. The confidence stays
+// visible in the decision comment.
+func (p *todoPass) pickExecutor(ctx context.Context) (*Outcome, error) {
+	r, issue, settings, ladder := p.r, p.issue, p.settings, p.ladder
+	if len(p.fresh) == 0 {
+		p.notes = append(p.notes, "executor not filled: no eligible seat")
+		return nil, nil
+	}
+	verdict, dispatch := p.verdict, p.dispatch
+	labelStill := p.labelSeatOK && seatIn(p.fresh, p.labelSeat)
+	seat, source, why := r.pickConfiguredExecutor(settings, issue.ProjectID, ladder, p.fresh, p.pickRoster, p.labelSeat, labelStill, verdict, p.threshold, issue)
+	if seat.ID == "" {
+		return p.deliver(ctx, "## 自动选派\n\n**为什么是他**：兜底 —— "+why+"\n\n未派出；请调整兜底席或人工指派。", Outcome{State: StateEnabled, Action: ActionSkipped, Reason: why})
+	}
 	var class *OutcomeClass
-	learnApplied := false
-	if labelled && !labelSeatOK && !dispatch.Filtered {
-		notes = append(notes, "labelled tier "+requestedTier+" was not eligible")
-	}
-	if line := dispatch.Line(ladder); line != "" {
-		notes = append(notes, line)
-	}
-	if j := judgeNote(dec.Trace); j != "" {
-		notes = append(notes, j)
-	}
-	if needExecutor {
-		if len(fresh) == 0 {
-			notes = append(notes, "executor not filled: no eligible seat")
-		} else {
-			labelStill := labelSeatOK && seatIn(fresh, labelSeat)
-			seat, source, why := r.pickConfiguredExecutor(settings, issue.ProjectID, ladder, fresh, pickRoster, labelSeat, labelStill, verdict, threshold, issue)
-			if seat.ID == "" {
-				return r.deliver(ctx, workspaceID, issue, KindAssignment, "## 自动选派\n\n**为什么是他**：兜底 —— "+why+"\n\n未派出；请调整兜底席或人工指派。", false, Outcome{State: StateEnabled, Action: ActionSkipped, Reason: why})
-			}
-			// 从结果里学 only revisits the table's own tier: a label is a
-			// person's call and a fallback is no judgement to learn from.
-			if source == pickJudge && dec.Decider == DeciderRule && dec.Facts != nil {
-				c := ClassOf(scene, verdict.ExecutorTier, *dec.Facts)
-				class = &c
-				learn = r.learned(ctx, workspaceID, settings, ladder, c)
-				if learn.Raise && settings.LearnFromOutcomes {
-					if up, ok := SeatByTier(fresh, learn.To); ok {
-						seat, source, learnApplied = up, pickLearned, true
-						seat.Learned = learn.Detail()
-					}
-				}
-			}
-			// 最强档门槛: the top rung only when nobody on the middle rungs
-			// can take it and its seat is not tight. A person's label is
-			// their call and is not gated.
-			// A learned raise to the top is evidence that the strong rung
-			// was not suitable for this class, which is the gate's own
-			// test, so it is not gated.
-			var gate StrongestGate
-			if !labelStill && source != pickLearned && !verdict.Reasoned && settings.StrongestGateOn() {
-				seat, gate = ladder.gateStrongest(seat, candidates, fresh, pickRoster, snaps)
-				out.StrongestGate = gate
-				if gate.Moved && class != nil {
-					// The outcome class names the judged rung; the seat is
-					// now a rung below, so nothing is recorded to learn from.
-					class = nil
-				}
-				if seat.ID == "" {
-					return r.deliver(ctx, workspaceID, issue, KindAssignment, "## 自动选派\n\n**为什么是他**：兜底 —— "+gate.Why+"；未派出，请人工指派或调整可用席位。", false, Outcome{State: StateEnabled, Action: ActionSkipped, Reason: gate.Why})
-				}
-				if line := gate.Line(ladder); line != "" {
-					notes = append(notes, line)
-				}
-			}
-			tierSeat, tierSource, tierWhy := seat, source, why
-			// 接着做 ranks above the ladder's pick but not above a person's
-			// tier label: the label is a person's instruction about strength.
-			if !labelStill && source != pickFallback && !verdict.Reasoned {
-				cont, err = r.continuation(ctx, workspaceID, settings, ladder, pickRoster, scene, issue, seat)
-				if err != nil {
-					return Outcome{State: StateEnabled, Action: ActionSkipped, Reason: "routing context incomplete"}, err
-				}
-				if cont.OK && settings.PreferContinuation {
-					seat, source, why = cont.Seat, pickContinuation, ""
-					seat.Continues = cont.Detail()
-				} else {
-					// 负载 only reorders the ladder's own cell, so it runs
-					// after 接着做 has declined (DENE-1203).
-					load, err = r.load(ctx, workspaceID, settings, ladder, pickRoster, seat)
-					if err != nil {
-						return Outcome{State: StateEnabled, Action: ActionSkipped, Reason: "routing context incomplete"}, err
-					}
-					if load.Moved && settings.PreferIdle {
-						seat, source = load.Seat, pickLoad
-						seat.Balanced = load.Detail()
-					}
-				}
-			}
-			if !labelStill && source != pickFallback && verdict.PreferredSeries != "" && !dispatch.Filtered {
-				preferred, matched, preferenceErr := r.availableSeriesSeat(ctx, workspaceID, settings, ladder, scene, roster, seat, verdict.PreferredSeries)
-				if preferenceErr != nil {
-					return Outcome{State: StateEnabled, Action: ActionSkipped, Reason: "routing context incomplete"}, preferenceErr
-				}
-				if matched {
-					if preferred.ID != seat.ID {
-						// Series changes the seat within the chosen tier. Restore
-						// the tier provenance, not the displaced seat's reason.
-						source, why = tierSource, tierWhy
-						preferred.Learned = tierSeat.Learned
-						cont, load = ContinuationPick{}, LoadPick{}
-					}
-					seat = preferred
-					seriesNote = "系列偏好：" + verdict.PreferredSeries + "；同档可用席位 " + seat.Name
-					notes = append(notes, seriesNote)
-				} else {
-					seriesNote = "系列偏好：" + verdict.PreferredSeries + "；同档没有可用席位，沿用原选择"
-					notes = append(notes, seriesNote)
-				}
-			}
-			written, err := r.Store.AssignAgentIfUnassigned(ctx, workspaceID, issue.ID, seat, mode == fillStarts)
-			if err != nil {
-				return out, err
-			}
-			if written {
-				executor, executorSource = &seat, source
-				out.ExecutorWritten = &seat
-				if class != nil {
-					r.recordOutcome(ctx, workspaceID, issue.ID, *class)
-				}
-				if why != "" {
-					notes = append(notes, "executor fell back to "+seat.Name+": "+why)
-				}
-			} else {
-				notes = append(notes, "executor not filled: the slot was taken before this call wrote it")
+	// 从结果里学 only revisits the table's own tier: a label is a
+	// person's call and a fallback is no judgement to learn from.
+	if source == pickJudge && p.dec.Decider == DeciderRule && p.dec.Facts != nil {
+		c := ClassOf(p.scene, verdict.ExecutorTier, *p.dec.Facts)
+		class = &c
+		p.learn = r.learned(ctx, p.workspaceID, settings, ladder, c)
+		if p.learn.Raise && settings.LearnFromOutcomes {
+			if up, ok := SeatByTier(p.fresh, p.learn.To); ok {
+				seat, source, p.learnApplied = up, pickLearned, true
+				seat.Learned = p.learn.Detail()
 			}
 		}
 	}
+	// 最强档门槛: the top rung only when nobody on the middle rungs
+	// can take it and its seat is not tight. A person's label is
+	// their call and is not gated.
+	// A learned raise to the top is evidence that the strong rung
+	// was not suitable for this class, which is the gate's own
+	// test, so it is not gated.
+	if !labelStill && source != pickLearned && !verdict.Reasoned && settings.StrongestGateOn() {
+		var gate StrongestGate
+		seat, gate = ladder.gateStrongest(seat, p.candidates, p.fresh, p.pickRoster, p.snaps)
+		p.out.StrongestGate = gate
+		if gate.Moved && class != nil {
+			// The outcome class names the judged rung; the seat is
+			// now a rung below, so nothing is recorded to learn from.
+			class = nil
+		}
+		if seat.ID == "" {
+			return p.deliver(ctx, "## 自动选派\n\n**为什么是他**：兜底 —— "+gate.Why+"；未派出，请人工指派或调整可用席位。", Outcome{State: StateEnabled, Action: ActionSkipped, Reason: gate.Why})
+		}
+		if line := gate.Line(ladder); line != "" {
+			p.notes = append(p.notes, line)
+		}
+	}
+	tierSeat, tierSource, tierWhy := seat, source, why
+	// 接着做 ranks above the ladder's pick but not above a person's
+	// tier label: the label is a person's instruction about strength.
+	if !labelStill && source != pickFallback && !verdict.Reasoned {
+		cont, err := r.continuation(ctx, p.workspaceID, settings, ladder, p.pickRoster, p.scene, issue, seat)
+		p.cont = cont
+		if err != nil {
+			return p.skipped("routing context incomplete", err)
+		}
+		if cont.OK && settings.PreferContinuation {
+			seat, source, why = cont.Seat, pickContinuation, ""
+			seat.Continues = cont.Detail()
+		} else {
+			// 负载 only reorders the ladder's own cell, so it runs
+			// after 接着做 has declined (DENE-1203).
+			load, err := r.load(ctx, p.workspaceID, settings, ladder, p.pickRoster, seat)
+			p.load = load
+			if err != nil {
+				return p.skipped("routing context incomplete", err)
+			}
+			if load.Moved && settings.PreferIdle {
+				seat, source = load.Seat, pickLoad
+				seat.Balanced = load.Detail()
+			}
+		}
+	}
+	if !labelStill && source != pickFallback && verdict.PreferredSeries != "" && !dispatch.Filtered {
+		preferred, matched, preferenceErr := r.availableSeriesSeat(ctx, p.workspaceID, settings, ladder, p.scene, p.roster, seat, verdict.PreferredSeries)
+		if preferenceErr != nil {
+			return p.skipped("routing context incomplete", preferenceErr)
+		}
+		if matched {
+			if preferred.ID != seat.ID {
+				// Series changes the seat within the chosen tier. Restore
+				// the tier provenance, not the displaced seat's reason.
+				source, why = tierSource, tierWhy
+				preferred.Learned = tierSeat.Learned
+				p.cont, p.load = ContinuationPick{}, LoadPick{}
+			}
+			seat = preferred
+			p.seriesNote = "系列偏好：" + verdict.PreferredSeries + "；同档可用席位 " + seat.Name
+		} else {
+			p.seriesNote = "系列偏好：" + verdict.PreferredSeries + "；同档没有可用席位，沿用原选择"
+		}
+		p.notes = append(p.notes, p.seriesNote)
+	}
+	written, err := r.Store.AssignAgentIfUnassigned(ctx, p.workspaceID, issue.ID, seat, p.mode == fillStarts)
+	if err != nil {
+		return &p.out, err
+	}
+	if !written {
+		p.notes = append(p.notes, "executor not filled: the slot was taken before this call wrote it")
+		return nil, nil
+	}
+	p.executor, p.executorSource = &seat, source
+	p.out.ExecutorWritten = &seat
+	if class != nil {
+		r.recordOutcome(ctx, p.workspaceID, issue.ID, *class)
+	}
+	if why != "" {
+		p.notes = append(p.notes, "executor fell back to "+seat.Name+": "+why)
+	}
+	return nil, nil
+}
 
-	// --- reviewer slot ---------------------------------------------------
-	// Same rule for the second slot: an automatic dispatch fills both. An
-	// unusable verdict stays on the executor's rung and picks another model
-	// family, or one rung down when that rung has no second family. It never
-	// steps up, so the strongest rung appears only when the judge names it
-	// with confidence. The slot never names a person: see decideReviewer.
-	reviewer := ReviewerRef{}
-	reviewerFallback := false
-	fallbackWhy := ""
+// pickReviewer fills the reviewer slot.
+//
+// Same rule for the second slot: an automatic dispatch fills both. An
+// unusable verdict stays on the executor's rung and picks another model
+// family, or one rung down when that rung has no second family. It never
+// steps up, so the strongest rung appears only when the judge names it
+// with confidence. The slot never names a person: see decideReviewer.
+func (p *todoPass) pickReviewer(ctx context.Context) (*Outcome, error) {
+	r, issue, ladder, verdict, executor := p.r, p.issue, p.ladder, p.verdict, p.executor
 	// The judge asking for a person is kept as a note on the ticket rather
 	// than as the slot's value. The seat does the mechanical check and pings
 	// the person for the call it cannot make.
-	humanSignoff := needReviewer && verdict.Reviewer == ReviewerHuman
-	if needReviewer {
-		ref, ok := r.decideReviewer(verdict, ladder, scene, roster, fresh, executor, issue)
-		if ok && (verdict.ReviewerTier == "" || (executor != nil && (executor.TierKey == "medium" || executor.TierKey == "weak"))) {
-			// The table's check landed where the ladder put it; say why.
-			_, fallbackWhy = r.fallbackReviewer(ladder, scene, roster, fresh, executor, issue)
+	p.humanSignoff = verdict.Reviewer == ReviewerHuman
+	ref, ok := r.decideReviewer(verdict, ladder, p.scene, p.roster, p.fresh, executor, issue)
+	if ok && (verdict.ReviewerTier == "" || (executor != nil && (executor.TierKey == "medium" || executor.TierKey == "weak"))) {
+		// The table's check landed where the ladder put it; say why.
+		_, p.fallbackWhy = r.fallbackReviewer(ladder, p.scene, p.roster, p.fresh, executor, issue)
+	}
+	why := ""
+	switch {
+	case !ok && p.humanSignoff:
+		why = "judge asked for a person, and the reviewer slot never names one"
+	case !ok && p.dec.Decider == DeciderNone:
+		why = "no model was asked"
+	case !ok:
+		why = "judge named tier \"" + verdict.ReviewerTier + "\", which has no seat here"
+	case verdict.ReviewerConfidence < p.threshold:
+		ok = false
+		why = "confidence " + pct(verdict.ReviewerConfidence) + " < threshold " + pct(p.threshold)
+	}
+	if !ok {
+		ref, p.fallbackWhy = r.fallbackReviewer(ladder, p.scene, p.roster, p.fresh, executor, issue)
+		p.reviewerFallback = true
+		p.notes = append(p.notes, "reviewer fell back to "+ref.Label()+": "+why)
+	}
+	if ref.Kind == ReviewerAgent && !seatIn(p.fresh, Seat{ID: ref.ID}) {
+		eligible, err := r.seatStillEligible(ctx, p.workspaceID, p.settings, ref.ID)
+		if err != nil {
+			return &p.out, err
 		}
-		why := ""
-		switch {
-		case !ok && humanSignoff:
-			why = "judge asked for a person, and the reviewer slot never names one"
-		case !ok && dec.Decider == DeciderNone:
-			why = "no model was asked"
-		case !ok:
-			why = "judge named tier \"" + verdict.ReviewerTier + "\", which has no seat here"
-		case verdict.ReviewerConfidence < threshold:
-			ok = false
-			why = "confidence " + pct(verdict.ReviewerConfidence) + " < threshold " + pct(threshold)
-		}
-		switch {
-		case !ok:
-			var ladderWhy string
-			ref, ladderWhy = r.fallbackReviewer(ladder, scene, roster, fresh, executor, issue)
-			reviewerFallback = true
-			fallbackWhy = ladderWhy
-			notes = append(notes, "reviewer fell back to "+ref.Label()+": "+why)
-		}
-		if ref.Kind == ReviewerAgent && !seatIn(fresh, Seat{ID: ref.ID}) {
-			eligible, err := r.seatStillEligible(ctx, workspaceID, settings, ref.ID)
-			if err != nil {
-				return out, err
-			}
-			if !eligible {
-				notes = append(notes, "reviewer not filled: seat became ineligible")
-				ref = ReviewerRef{}
-			}
-		}
-		if !ref.Empty() {
-			written, err := r.Store.SetReviewerIfUnset(ctx, workspaceID, issue.ID, ref)
-			if err != nil {
-				return out, err
-			}
-			if written {
-				reviewer = ref
-				out.ReviewerWritten = ref
-			} else {
-				notes = append(notes, "reviewer not filled: the slot was taken before this call wrote it")
-			}
+		if !eligible {
+			p.notes = append(p.notes, "reviewer not filled: seat became ineligible")
+			ref = ReviewerRef{}
 		}
 	}
+	if ref.Empty() {
+		return nil, nil
+	}
+	written, err := r.Store.SetReviewerIfUnset(ctx, p.workspaceID, issue.ID, ref)
+	if err != nil {
+		return &p.out, err
+	}
+	if written {
+		p.reviewer = ref
+		p.out.ReviewerWritten = ref
+	} else {
+		p.notes = append(p.notes, "reviewer not filled: the slot was taken before this call wrote it")
+	}
+	return nil, nil
+}
 
+// writeReason is step 4: the outcome and the one assignment comment.
+func (p *todoPass) writeReason(ctx context.Context) (Outcome, error) {
+	r, issue, settings, ladder, out, executor := p.r, p.issue, p.settings, p.ladder, p.out, p.executor
 	// The action reports the writes, not the fact that this row ran. A partial
 	// fill is still "assigned", and Reason carries what was not written and
 	// every slot that took a fallback.
 	if out.ExecutorWritten != nil || !out.ReviewerWritten.Empty() {
 		out.Action = ActionAssigned
 	}
-	out.Reason = strings.Join(notes, "; ")
+	out.Reason = strings.Join(p.notes, "; ")
 	if out.ExecutorWritten != nil {
-		out.ExecutorReason, out.ExecutorDetail = executorPickReason(issue, needExecutor, executor, executorSource, dec.RaisedFrom != "")
+		out.ExecutorReason, out.ExecutorDetail = executorPickReason(issue, p.needExecutor, executor, p.executorSource, p.dec.RaisedFrom != "")
 	}
 	if out.Trace != nil {
 		if executor != nil {
 			out.Trace.Seat = executor.Name
 		}
-		if !reviewer.Empty() {
-			out.Trace.Reviewer = reviewer.Label()
+		if !p.reviewer.Empty() {
+			out.Trace.Reviewer = p.reviewer.Label()
 		}
 	}
 
-	// --- notify ----------------------------------------------------------
 	// The one condition that earns an @: the ticket is in a state where
 	// nobody will move it. Here that means the executor slot is still empty,
 	// so the ticket sits in todo until a person notices.
@@ -612,31 +718,31 @@ func (r *Router) routeTodo(ctx context.Context, workspaceID string, settings Set
 	// ticket nobody will move.
 	// A blocked ticket's empty slot is said by the blocked row's advice, which
 	// names the fact and the action, so this comment does not @ for it too.
-	stillUnassigned := needExecutor && executor == nil
-	notify := stillUnassigned && mode != fillParked && mode != fillBlocked
-	body := r.assignmentComment(issue, scene, candidates, verdict, threshold,
-		executor, executorSource, reviewer, reviewerFallback, fallbackWhy, humanSignoff,
-		needExecutor, needReviewer, notify, mode, dec, settings, ignored,
-		ContinuationLine(cont, settings.PreferContinuation, executor),
-		LoadLine(load, settings.PreferIdle, executor),
-		learnLine(learn, settings.LearnFromOutcomes, learnApplied, executor, executorSource))
-	if seriesNote != "" {
-		body += "\n\n" + seriesNote
+	stillUnassigned := p.needExecutor && executor == nil
+	notify := stillUnassigned && p.mode != fillParked && p.mode != fillBlocked
+	body := r.assignmentComment(issue, p.scene, p.candidates, p.verdict, p.threshold,
+		executor, p.executorSource, p.reviewer, p.reviewerFallback, p.fallbackWhy, p.humanSignoff,
+		p.needExecutor, p.needReviewer, notify, p.mode, p.dec, settings, p.ignored,
+		ContinuationLine(p.cont, settings.PreferContinuation, executor),
+		LoadLine(p.load, settings.PreferIdle, executor),
+		learnLine(p.learn, settings.LearnFromOutcomes, p.learnApplied, executor, p.executorSource))
+	if p.seriesNote != "" {
+		body += "\n\n" + p.seriesNote
 	}
-	if line := dispatch.Line(ladder); line != "" {
+	if line := p.dispatch.Line(ladder); line != "" {
 		body += "\n\n" + line
 	}
 	if line := out.StrongestGate.Line(ladder); line != "" {
 		body += "\n\n" + line
 	}
-	if note := DemotionFootnote(ladder, roster, executor); note != "" {
+	if note := DemotionFootnote(ladder, p.roster, executor); note != "" {
 		body += "\n\n" + note
 	}
 	if note := UpshiftFootnote(executor); note != "" {
 		body += "\n\n" + note
 	}
 
-	return r.deliver(ctx, workspaceID, issue, KindAssignment, body, notify, out)
+	return r.deliver(ctx, p.workspaceID, issue, KindAssignment, body, notify, out)
 }
 
 // learnLine is LearnLine for the seat this call wrote; with nothing written

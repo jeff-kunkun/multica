@@ -35,6 +35,9 @@ export interface Project {
    *  agent ids for the project's work; empty = every seat. Older servers omit
    *  this field. */
   executor_agent_ids?: string[];
+  /** Automatic dispatch is off for this project's work (DENE-1966): routing
+   *  neither picks nor replaces an executor. Older servers omit this field. */
+  routing_disabled?: boolean;
 }
 
 /** Checklist slot, without a daemon observation. Close dialogs read this. */
@@ -214,6 +217,8 @@ export interface UpdateProjectRequest {
   domain_ids?: string[];
   /** Replaces the executor allowlist (owner/admin only); [] lifts it. */
   executor_agent_ids?: string[];
+  /** Turns automatic dispatch off (true) or on (false) for this project (owner/admin only). */
+  routing_disabled?: boolean;
 }
 
 export interface ListProjectsResponse {

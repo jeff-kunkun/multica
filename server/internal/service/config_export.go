@@ -558,16 +558,17 @@ func exportProjects(ctx context.Context, q *db.Queries, opts ConfigExportOptions
 			lead = &ConfigPolymorphicRef{Type: r.LeadType.String, ID: uuidString(r.LeadID)}
 		}
 		out = append(out, ConfigProject{
-			SourceID:    pid,
-			Title:       r.Title,
-			Description: textOrEmpty(r.Description),
-			Icon:        textPtr(r.Icon),
-			Status:      r.Status,
-			Priority:    r.Priority,
-			Lead:        lead,
-			StartDate:   datePtr(r.StartDate),
-			DueDate:     datePtr(r.DueDate),
-			Resources:   res,
+			SourceID:        pid,
+			Title:           r.Title,
+			Description:     textOrEmpty(r.Description),
+			Icon:            textPtr(r.Icon),
+			Status:          r.Status,
+			Priority:        r.Priority,
+			Lead:            lead,
+			StartDate:       datePtr(r.StartDate),
+			DueDate:         datePtr(r.DueDate),
+			Resources:       res,
+			RoutingDisabled: &r.RoutingDisabled,
 		})
 	}
 	bundle.Entities.Projects = out

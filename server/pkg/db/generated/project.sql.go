@@ -33,7 +33,7 @@ INSERT INTO project (
     $11::uuid,
     COALESCE($12::text, 'private'),
     COALESCE($13::uuid[], '{}'::uuid[])
-) RETURNING id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, start_date, due_date, visibility, created_by, domain_ids, linked_projects, executor_agent_ids
+) RETURNING id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, start_date, due_date, visibility, created_by, domain_ids, linked_projects, executor_agent_ids, routing_disabled
 `
 
 type CreateProjectParams struct {
@@ -88,6 +88,7 @@ func (q *Queries) CreateProject(ctx context.Context, arg CreateProjectParams) (P
 		&i.DomainIds,
 		&i.LinkedProjects,
 		&i.ExecutorAgentIds,
+		&i.RoutingDisabled,
 	)
 	return i, err
 }
@@ -108,7 +109,7 @@ func (q *Queries) DeleteProject(ctx context.Context, arg DeleteProjectParams) er
 }
 
 const getProjectInWorkspace = `-- name: GetProjectInWorkspace :one
-SELECT id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, start_date, due_date, visibility, created_by, domain_ids, linked_projects, executor_agent_ids FROM project
+SELECT id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, start_date, due_date, visibility, created_by, domain_ids, linked_projects, executor_agent_ids, routing_disabled FROM project
 WHERE id = $1 AND workspace_id = $2
 `
 
@@ -139,6 +140,7 @@ func (q *Queries) GetProjectInWorkspace(ctx context.Context, arg GetProjectInWor
 		&i.DomainIds,
 		&i.LinkedProjects,
 		&i.ExecutorAgentIds,
+		&i.RoutingDisabled,
 	)
 	return i, err
 }
@@ -243,7 +245,7 @@ func (q *Queries) ListProjectIDsLedByMember(ctx context.Context, arg ListProject
 }
 
 const listProjects = `-- name: ListProjects :many
-SELECT id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, start_date, due_date, visibility, created_by, domain_ids, linked_projects, executor_agent_ids FROM project
+SELECT id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, start_date, due_date, visibility, created_by, domain_ids, linked_projects, executor_agent_ids, routing_disabled FROM project
 WHERE workspace_id = $1
   AND ($2::text IS NULL OR status = $2)
   AND ($3::text IS NULL OR priority = $3)
@@ -284,6 +286,7 @@ func (q *Queries) ListProjects(ctx context.Context, arg ListProjectsParams) ([]P
 			&i.DomainIds,
 			&i.LinkedProjects,
 			&i.ExecutorAgentIds,
+			&i.RoutingDisabled,
 		); err != nil {
 			return nil, err
 		}
@@ -338,7 +341,7 @@ func (q *Queries) LockProjectForDelete(ctx context.Context, arg LockProjectForDe
 const setProjectExecutorAgents = `-- name: SetProjectExecutorAgents :one
 UPDATE project SET executor_agent_ids = $3::uuid[], updated_at = now()
 WHERE id = $1 AND workspace_id = $2
-RETURNING id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, start_date, due_date, visibility, created_by, domain_ids, linked_projects, executor_agent_ids
+RETURNING id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, start_date, due_date, visibility, created_by, domain_ids, linked_projects, executor_agent_ids, routing_disabled
 `
 
 type SetProjectExecutorAgentsParams struct {
@@ -370,6 +373,47 @@ func (q *Queries) SetProjectExecutorAgents(ctx context.Context, arg SetProjectEx
 		&i.DomainIds,
 		&i.LinkedProjects,
 		&i.ExecutorAgentIds,
+		&i.RoutingDisabled,
+	)
+	return i, err
+}
+
+const setProjectRoutingDisabled = `-- name: SetProjectRoutingDisabled :one
+UPDATE project SET routing_disabled = $3::boolean, updated_at = now()
+WHERE id = $1 AND workspace_id = $2
+RETURNING id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, start_date, due_date, visibility, created_by, domain_ids, linked_projects, executor_agent_ids, routing_disabled
+`
+
+type SetProjectRoutingDisabledParams struct {
+	ID              pgtype.UUID `json:"id"`
+	WorkspaceID     pgtype.UUID `json:"workspace_id"`
+	RoutingDisabled bool        `json:"routing_disabled"`
+}
+
+// Turns automatic dispatch off (or back on) for one project (DENE-1966).
+func (q *Queries) SetProjectRoutingDisabled(ctx context.Context, arg SetProjectRoutingDisabledParams) (Project, error) {
+	row := q.db.QueryRow(ctx, setProjectRoutingDisabled, arg.ID, arg.WorkspaceID, arg.RoutingDisabled)
+	var i Project
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.Title,
+		&i.Description,
+		&i.Icon,
+		&i.Status,
+		&i.LeadType,
+		&i.LeadID,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Priority,
+		&i.StartDate,
+		&i.DueDate,
+		&i.Visibility,
+		&i.CreatedBy,
+		&i.DomainIds,
+		&i.LinkedProjects,
+		&i.ExecutorAgentIds,
+		&i.RoutingDisabled,
 	)
 	return i, err
 }
@@ -379,7 +423,7 @@ UPDATE project SET
     visibility = $3,
     updated_at = now()
 WHERE id = $1 AND workspace_id = $2
-RETURNING id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, start_date, due_date, visibility, created_by, domain_ids, linked_projects, executor_agent_ids
+RETURNING id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, start_date, due_date, visibility, created_by, domain_ids, linked_projects, executor_agent_ids, routing_disabled
 `
 
 type SetProjectVisibilityParams struct {
@@ -410,6 +454,7 @@ func (q *Queries) SetProjectVisibility(ctx context.Context, arg SetProjectVisibi
 		&i.DomainIds,
 		&i.LinkedProjects,
 		&i.ExecutorAgentIds,
+		&i.RoutingDisabled,
 	)
 	return i, err
 }
@@ -427,7 +472,7 @@ UPDATE project SET
     due_date = $10,
     updated_at = now()
 WHERE id = $1
-RETURNING id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, start_date, due_date, visibility, created_by, domain_ids, linked_projects, executor_agent_ids
+RETURNING id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, start_date, due_date, visibility, created_by, domain_ids, linked_projects, executor_agent_ids, routing_disabled
 `
 
 type UpdateProjectParams struct {
@@ -476,6 +521,7 @@ func (q *Queries) UpdateProject(ctx context.Context, arg UpdateProjectParams) (P
 		&i.DomainIds,
 		&i.LinkedProjects,
 		&i.ExecutorAgentIds,
+		&i.RoutingDisabled,
 	)
 	return i, err
 }

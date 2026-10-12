@@ -48,6 +48,17 @@ vi.mock("@multica/core/paths", async (importOriginal) => ({
   useCurrentWorkspace: () => workspace.current,
 }));
 
+const nav = vi.hoisted(() => ({ search: "tab=routing" }));
+vi.mock("../../navigation", () => ({
+  useNavigation: () => ({
+    pathname: "/acme/settings",
+    searchParams: new URLSearchParams(nav.search),
+  }),
+  AppLink: ({ href, children, ...rest }: { href: string; children: React.ReactNode }) => (
+    <a href={href} {...rest}>{children}</a>
+  ),
+}));
+
 vi.mock("@multica/core/permissions", () => ({
   useCurrentMember: () => ({ role: member.role, isLoading: false }),
 }));
@@ -58,7 +69,9 @@ import { workspaceKeys } from "@multica/core/workspace/queries";
 import { runtimeKeys } from "@multica/core/runtimes";
 import { RoutingTab } from "./routing-tab";
 
-function render() {
+/** Mount the main view, or one sub-page (`?integration=<page>`). */
+function render(page?: "model" | "rules" | "seats") {
+  nav.search = page ? `tab=routing&integration=${page}` : "tab=routing";
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   // The query provider is nested INSIDE the element rather than passed as
   // `wrapper`: renderWithI18n supplies its own wrapper, and a second one here
@@ -157,12 +170,11 @@ function fieldByLabel(label: RegExp): HTMLElement {
   return matches[0]!;
 }
 
-const JUDGE_MODEL = /^(model|模型)$/i;
 const ANALYSIS_MODEL = /^(model|模型)$/i;
-const JUDGE_KEY = /^analysis api key$/i;
+const ANALYSIS_KEY = /^analysis api key$/i;
 
 function masterSwitch() {
-  return screen.getByRole("switch", { name: /enable automatic dispatch|启用自动选派/i });
+  return screen.getByRole("switch", { name: /^(automatic dispatch|自动派活)$/i });
 }
 
 function chip() {
@@ -177,13 +189,13 @@ describe("RoutingTab", () => {
       { id: "rt-1", name: "Mac", status: "online", provider: "claude" },
     ]);
     workspace.current.settings = {
-      routing: { analysis: { enabled: true, runtime_id: "rt-1" } },
+      routing: { analysis: { enabled: true, source: "runtime_subscription", runtime_id: "rt-1" } },
     };
-    const { qc } = render();
+    const { qc } = render("model");
     await waitFor(() =>
       expect(qc.getQueryData(runtimeKeys.list("ws-1"))).toBeDefined(),
     );
-    expect(chip()).not.toBeNull();
+    expect(screen.getByRole("heading", { name: /judging model/i })).toBeInTheDocument();
   });
 
   it("shows the off state for a workspace that has never configured routing", () => {
@@ -207,12 +219,81 @@ describe("RoutingTab", () => {
     expect(chip()?.getAttribute("data-state")).toBe("enabled");
   });
 
-  it("exposes one reasoning role and keeps advanced settings collapsed", () => {
+  // DENE-1966: the main view is four rows; everything else is a sub-page or
+  // the five-item fold.
+  it("shows four rows and a closed fold of five", () => {
     render();
-    expect(screen.queryByRole("switch", { name: /use the judge model/i })).toBeNull();
-    expect(document.querySelector("details")).not.toHaveAttribute("open");
-    expect(fieldByLabel(/^model$/i)).toBeInTheDocument();
+    expect(masterSwitch()).toBeInTheDocument();
+    for (const [name, page] of [
+      [/judging model/i, "model"],
+      [/division rules/i, "rules"],
+      [/seats and tiers/i, "seats"],
+    ] as const) {
+      const row = screen.getByText(name, { selector: "p,span,div,label,h3" }).closest("[class*='min-h-16']");
+      const link = row?.querySelector("a");
+      expect(link?.getAttribute("href")).toContain(`integration=${page}`);
+    }
+    const fold = document.querySelector("details")!;
+    expect(fold).not.toHaveAttribute("open");
+    expect(fold.querySelectorAll("[role=switch]")).toHaveLength(3);
+    expect(fold.querySelectorAll("input[type=number]")).toHaveLength(2);
+    expect(screen.queryByLabelText(/confidence threshold/i)).toBeNull();
+    expect(screen.queryByRole("switch", { name: /prefer ample usage|allow one tier up|previous executor/i })).toBeNull();
+    expect(screen.queryByRole("textbox")).toBeNull();
     expect(listRoutingModels).not.toHaveBeenCalled();
+  });
+
+  it("names the model on its row and opens it as a sub-page", async () => {
+    workspace.current.settings = { routing: { analysis: { enabled: true, model: "reasoner-x" } } };
+    render();
+    expect(screen.getByRole("link", { name: /reasoner-x/ })).toBeInTheDocument();
+    render("model");
+    expect(screen.getAllByRole("link", { name: /^routing$/i }).at(-1)?.getAttribute("href")).toBe("/acme/settings?tab=routing");
+  });
+
+  // Knobs without a control keep what was stored: the form starts from the
+  // saved block, so a save never resets them to defaults.
+  it("keeps hidden stored knobs when a visible one is saved", async () => {
+    workspace.current.settings = {
+      routing: {
+        enabled: true,
+        model: "judge-x",
+        decision_mode: "active",
+        confidence_threshold: 0.8,
+        usage_priority: false,
+        allow_upshift: true,
+        learn_low_rate: 0.5,
+        learn_window_days: 14,
+        prefer_continuation: true,
+        judged_review: true,
+        base_url: "https://judge.example",
+        analysis: { enabled: true, model: "reasoner" },
+      },
+    };
+    render();
+    await userEvent.click(screen.getByRole("switch", { name: "Guard the strongest tier" }));
+    await waitFor(() => expect(updateWorkspace).toHaveBeenCalled());
+    const routing = updateWorkspace.mock.calls.at(-1)?.[1].settings.routing as Record<string, unknown>;
+    expect(routing).toMatchObject({
+      strongest_gate: false,
+      model: "judge-x",
+      confidence_threshold: 0.8,
+      usage_priority: false,
+      allow_upshift: true,
+      learn_low_rate: 0.5,
+      learn_window_days: 14,
+      prefer_continuation: true,
+      judged_review: true,
+      base_url: "https://judge.example",
+    });
+    expect("decision_mode" in routing).toBe(false);
+  });
+
+  it("does not save on open for a block stored in its short form", async () => {
+    workspace.current.settings = { routing: { enabled: true, analysis: { enabled: true, model: "m" } } };
+    render();
+    await new Promise((resolve) => setTimeout(resolve, 800));
+    expect(updateWorkspace).not.toHaveBeenCalled();
   });
 
   // The protocol line, not the host line. A workspace that configured Jev saw
@@ -238,7 +319,7 @@ describe("RoutingTab", () => {
       gateway_key_set: true,
     });
 
-    const { qc } = render();
+    const { qc } = render("model");
     await healthSettled(qc);
 
     // The System One explanation paragraph was dropped from the copy; the page
@@ -255,7 +336,7 @@ describe("RoutingTab", () => {
       routing: { enabled: true, model: "gpt-5.6-luna" },
     };
 
-    const { qc } = render();
+    const { qc } = render("model");
     await healthSettled(qc);
 
     expect(
@@ -265,7 +346,7 @@ describe("RoutingTab", () => {
 
   it("saves the stored fields under the routing key and leaves the rest of settings alone", async () => {
     workspace.current.settings = { theme: "dark" };
-    render();
+    render("model");
 
     // A never-configured workspace starts on the analysis model alone.
     const model = fieldByLabel(ANALYSIS_MODEL);
@@ -290,7 +371,6 @@ describe("RoutingTab", () => {
       usage_priority: true,
       allow_upshift: false,
       strongest_gate: true,
-      decision_mode: "shadow",
       consult_per_issue: 3,
       prefer_continuation: false,
       prefer_idle: false,
@@ -310,13 +390,13 @@ describe("RoutingTab", () => {
 
   it("saves the per-issue consultation limit", async () => {
     render();
-    fireEvent.change(fieldByLabel(/^consults per issue$/i), {target:{value:"5"}});
+    fireEvent.change(fieldByLabel(/^consults per ticket$/i), {target:{value:"5"}});
     await waitFor(() => expect(updateWorkspace).toHaveBeenCalled());
     expect(updateWorkspace.mock.calls.at(-1)?.[1].settings.routing.consult_per_issue).toBe(5);
   });
 
   it("saves the analysis key into the analysis block only", async () => {
-    render();
+    render("model");
     await userEvent.type(fieldByLabel(/^analysis api key$/i), "sk-analysis");
     const saves = screen.getAllByRole("button", { name: /save key|保存 key/i });
     await userEvent.click(saves[0]!);
@@ -347,9 +427,9 @@ describe("RoutingTab", () => {
   // back. These three tests are the whole contract of that box.
   it("never renders a stored key back into the field", async () => {
     getRoutingHealth.mockResolvedValue({ ...HEALTHY, gateway_key_set: true });
-    const { qc } = render();
+    const { qc } = render("model");
     await healthSettled(qc);
-    const key = fieldByLabel(JUDGE_KEY) as HTMLInputElement;
+    const key = fieldByLabel(ANALYSIS_KEY) as HTMLInputElement;
     expect(key.value).toBe("");
     expect(key.type).toBe("password");
     // Not even a mask. The placeholder says a key exists; it does not stand
@@ -358,8 +438,8 @@ describe("RoutingTab", () => {
   });
 
   it("sends the typed key only when the save button is pressed", async () => {
-    render();
-    const key = fieldByLabel(JUDGE_KEY);
+    render("model");
+    const key = fieldByLabel(ANALYSIS_KEY);
     await userEvent.type(key, "sk-live-abc");
     // Typing alone must not write: auto-save would store half-typed keys.
     expect(updateWorkspace).not.toHaveBeenCalled();
@@ -378,8 +458,8 @@ describe("RoutingTab", () => {
 
   it("says so when the key is refused, since the box empties either way", async () => {
     updateWorkspace.mockRejectedValue(new Error("only owners and admins can change settings"));
-    render();
-    const key = fieldByLabel(JUDGE_KEY);
+    render("model");
+    const key = fieldByLabel(ANALYSIS_KEY);
     await userEvent.type(key, "sk-live-abc");
     await userEvent.click(screen.getAllByRole("button", { name: /save key|保存 key/i })[0]!);
     await waitFor(() => expect(toastError).toHaveBeenCalledWith("only owners and admins can change settings"));
@@ -387,7 +467,7 @@ describe("RoutingTab", () => {
   });
 
   it("saves the endpoint url with the ordinary fields", async () => {
-    render();
+    render("model");
     await userEvent.type(
       fieldByLabel(/^analysis endpoint url$/i),
       "https://gw.example/v1",
@@ -406,10 +486,10 @@ describe("RoutingTab", () => {
       ...HEALTHY,
       workspace_key_storable: false,
     });
-    const { qc } = render();
+    const { qc } = render("model");
     await healthSettled(qc);
     await waitFor(() =>
-      expect(fieldByLabel(JUDGE_KEY)).toBeDisabled(),
+      expect(fieldByLabel(ANALYSIS_KEY)).toBeDisabled(),
     );
   });
 
@@ -420,17 +500,15 @@ describe("RoutingTab", () => {
     // than the native attribute, so assert the behaviour too: a member who
     // clicks it must not produce a write.
     expect(masterSwitch()).toHaveAttribute("data-disabled");
-    expect(fieldByLabel(JUDGE_MODEL)).toBeDisabled();
-
+    expect(screen.getByText(/only owners and admins can change this/i)).toBeInTheDocument();
     await userEvent.click(masterSwitch());
     await new Promise((resolve) => setTimeout(resolve, 800));
     expect(updateWorkspace).not.toHaveBeenCalled();
+
+    render("model");
+    expect(fieldByLabel(ANALYSIS_MODEL)).toBeDisabled();
   });
 
-  it("greys out the threshold while routing is off so it cannot look active", () => {
-    render();
-    expect(fieldByLabel(/confidence threshold|置信度阈值/i)).toBeDisabled();
-  });
 
   // The regression the fourth state exists for: a configured workspace whose
   // model is rejected or cooling down. Routing keeps that off every ticket by
@@ -472,7 +550,7 @@ describe("RoutingTab", () => {
     workspace.current.settings = {
       routing: { enabled: true, model: "gpt-5.6-luna", confidence_threshold: 0.7 },
     };
-    const { qc } = render();
+    const { qc } = render("model");
     await healthSettled(qc);
     expect(await screen.findByText(/api\.openai\.com/)).toBeTruthy();
     expect(fieldByLabel(/^model$/i)).toBeInTheDocument();
@@ -490,7 +568,7 @@ describe("RoutingTab", () => {
       gateway_default_model: "",
       gateway_configured: false,
     });
-    const { qc } = render();
+    const { qc } = render("model");
     await healthSettled(qc);
     expect(fieldByLabel(/^analysis endpoint url$/i)).not.toBeDisabled();
     expect(screen.queryByText(/MULTICA_LLM_BASE_URL/)).toBeNull();
@@ -529,6 +607,7 @@ describe("RoutingTab", () => {
   // workspace, and "not usable" there means "routing is off", not "the model
   // is broken" (DENE-633 review, N1).
   it("does not report a fault while health still describes the settings being replaced", async () => {
+    workspace.current.settings = { routing: { analysis: { enabled: true, model: "gpt-5.6-luna" } } };
     getRoutingHealth.mockResolvedValue({
       ...HEALTHY,
       state: "off",
@@ -539,10 +618,6 @@ describe("RoutingTab", () => {
     await healthSettled(qc);
 
     await userEvent.click(masterSwitch());
-    await userEvent.type(
-      fieldByLabel(ANALYSIS_MODEL),
-      "gpt-5.6-luna",
-    );
 
     await waitFor(() => expect(updateWorkspace).toHaveBeenCalled());
     expect(chip()?.getAttribute("data-state")).toBe("enabled");
@@ -599,7 +674,7 @@ describe("RoutingTab", () => {
 
   it("shows the default routing prompt, saves an edit, restores the default, and keeps the draft when save fails", async () => {
     const user = userEvent.setup();
-    render();
+    render("rules");
     const box = fieldByLabel(/routing prompt/i);
     expect(box).toHaveValue(DEFAULT_ROUTING_POLICY_PROMPT);
 
@@ -628,31 +703,12 @@ describe("RoutingTab", () => {
 });
 
 describe("RoutingTab seat order switches", () => {
-  it("writes usage priority and upshift into the routing block", async () => {
-    workspace.current.settings = {
-      routing: { enabled: true, model: "gpt-5.6-luna" },
-    };
-    render();
-    const usage = screen.getByRole("switch", { name: "Prefer ample usage" });
-    const upshift = screen.getByRole("switch", { name: "Allow one tier up" });
-    expect(usage).toHaveAttribute("data-checked");
-    expect(upshift).not.toHaveAttribute("data-checked");
-
-    await userEvent.click(upshift);
-    await waitFor(() => expect(updateWorkspace).toHaveBeenCalled());
-    const [, body] = updateWorkspace.mock.calls.at(-1) as [
-      string,
-      { settings: { routing: Record<string, unknown> } },
-    ];
-    expect(body.settings.routing.usage_priority).toBe(true);
-    expect(body.settings.routing.allow_upshift).toBe(true);
-  });
 
   // DENE-1834: 最强档门槛 is on by default and switches off into the routing block.
   it("writes the strongest-tier gate into the routing block", async () => {
     workspace.current.settings = { routing: { enabled: true, model: "gpt-5.6-luna" } };
     render();
-    const gate = screen.getByRole("switch", { name: "Strongest tier only when nobody else can" });
+    const gate = screen.getByRole("switch", { name: "Guard the strongest tier" });
     expect(gate).toHaveAttribute("data-checked");
     await userEvent.click(gate);
     await waitFor(() => expect(updateWorkspace).toHaveBeenCalled());
@@ -663,38 +719,19 @@ describe("RoutingTab seat order switches", () => {
     expect(body.settings.routing.strongest_gate).toBe(false);
   });
 
-  // DENE-1202: 接着做 defaults to shadow mode, and the row says which mode it is.
-  it("switches 接着做 from shadow to live and saves it", async () => {
+
+  // DENE-1203: 负载分流 is its own switch, off by default.
+  it("switches 负载分流 on and saves it", async () => {
     workspace.current.settings = {
       routing: { enabled: true, model: "gpt-5.6-luna" },
     };
     render();
-    const continuation = screen.getByRole("switch", { name: "Prefer the previous executor" });
-    expect(continuation).not.toHaveAttribute("data-checked");
-    expect(screen.getByText(/^Shadow mode:.*who this rule/)).toBeInTheDocument();
-
-    await userEvent.click(continuation);
-    expect(screen.getByText(/^Live: a ticket continuing/)).toBeInTheDocument();
-    await waitFor(() => expect(updateWorkspace).toHaveBeenCalled());
-    const [, body] = updateWorkspace.mock.calls.at(-1) as [
-      string,
-      { settings: { routing: Record<string, unknown> } },
-    ];
-    expect(body.settings.routing.prefer_continuation).toBe(true);
-  });
-
-  // DENE-1203: 负载分流 is its own switch, shadow by default.
-  it("switches 负载分流 from shadow to live and saves it", async () => {
-    workspace.current.settings = {
-      routing: { enabled: true, model: "gpt-5.6-luna" },
-    };
-    render();
-    const load = screen.getByRole("switch", { name: "Spread across idle seats" });
+    const load = screen.getByRole("switch", { name: "Balance by load" });
     expect(load).not.toHaveAttribute("data-checked");
-    expect(screen.getByText(/^Shadow mode:.*less busy seat/)).toBeInTheDocument();
+    expect(screen.getByText(/^Off: the dispatch comment only notes who/)).toBeInTheDocument();
 
     await userEvent.click(load);
-    expect(screen.getByText(/^Live: within the picked tier/)).toBeInTheDocument();
+    expect(screen.getByText(/^On: within a tier/)).toBeInTheDocument();
     await waitFor(() => expect(updateWorkspace).toHaveBeenCalled());
     const [, body] = updateWorkspace.mock.calls.at(-1) as [
       string,
@@ -704,25 +741,19 @@ describe("RoutingTab seat order switches", () => {
     expect(body.settings.routing.prefer_continuation).toBe(false);
   });
 
-  // DENE-1722: 从结果里学 is its own switch, shadow by default; the rate is
-  // typed as a percentage and stored as a share.
-  it("switches 从结果里学 from shadow to live and saves its thresholds", async () => {
+  // DENE-1722: 从结果里学 is its own switch; its rate and window keep their
+  // stored values now that they have no control (DENE-1966).
+  it("switches 从结果里学 on and keeps its stored thresholds", async () => {
     workspace.current.settings = {
-      routing: { enabled: true, model: "gpt-5.6-luna" },
+      routing: { enabled: true, model: "gpt-5.6-luna", learn_low_rate: 0.5, learn_window_days: 14 },
     };
     render();
     const learn = screen.getByRole("switch", { name: "Learn from outcomes" });
     expect(learn).not.toHaveAttribute("data-checked");
-    expect(screen.getByText(/^Shadow mode:.*raise the tier/)).toBeInTheDocument();
+    expect(screen.queryByRole("spinbutton", { name: /share|window/i })).toBeNull();
 
     await userEvent.click(learn);
-    expect(screen.getByText(/^Live: when tickets of the same kind/)).toBeInTheDocument();
-    const rate = screen.getByRole("spinbutton", { name: "Judged-low share (%)" });
-    await userEvent.clear(rate);
-    await userEvent.type(rate, "50");
-    const days = screen.getByRole("spinbutton", { name: "Window (days)" });
-    await userEvent.clear(days);
-    await userEvent.type(days, "14");
+    expect(screen.getByText(/^On: raise one tier/)).toBeInTheDocument();
     await waitFor(() => {
       const [, body] = updateWorkspace.mock.calls.at(-1) as [
         string,
@@ -745,7 +776,7 @@ describe("RoutingTab seat order switches", () => {
     render();
     expect(screen.queryByRole("switch", { name: /judged/i })).toBeNull();
 
-    await userEvent.click(screen.getByRole("switch", { name: "Spread across idle seats" }));
+    await userEvent.click(screen.getByRole("switch", { name: "Balance by load" }));
     await waitFor(() => expect(updateWorkspace).toHaveBeenCalled());
     const [, body] = updateWorkspace.mock.calls.at(-1) as [
       string,
@@ -756,9 +787,9 @@ describe("RoutingTab seat order switches", () => {
 
   it("shows the rule table read-only, one row per rule", async () => {
     getRoutingHealth.mockResolvedValue({ ...HEALTHY, rules: RULES });
-    const { qc } = render();
+    const { qc } = render("rules");
     await healthSettled(qc);
-    expect(await screen.findByText("Reference rules (advisory in reasoning mode)")).toBeInTheDocument();
+    expect(await screen.findByText("Tier rules")).toBeInTheDocument();
     expect(screen.getByText("改动范围：跨模块")).toBeInTheDocument();
     expect(screen.getByText("Any question unanswered")).toBeInTheDocument();
     expect(screen.getByText("改动范围：小 · 需求：清楚")).toBeInTheDocument();
@@ -768,23 +799,9 @@ describe("RoutingTab seat order switches", () => {
   });
 
   it("hides the rule table on a backend that predates it", async () => {
-    const { qc } = render();
+    const { qc } = render("rules");
     await healthSettled(qc);
     expect(screen.queryByText("Tier rules")).toBeNull();
   });
 
-  it("greys out upshift while usage priority is off", () => {
-    workspace.current.settings = {
-      routing: {
-        enabled: true,
-        model: "gpt-5.6-luna",
-        usage_priority: false,
-        allow_upshift: true,
-      },
-    };
-    render();
-    const upshift = screen.getByRole("switch", { name: "Allow one tier up" });
-    expect(upshift).toHaveAttribute("data-disabled");
-    expect(upshift).not.toHaveAttribute("data-checked");
-  });
 });
