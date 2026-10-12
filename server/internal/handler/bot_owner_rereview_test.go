@@ -105,6 +105,55 @@ func TestOwnerApprovalIsForTheExactMemberAndRole(t *testing.T) {
 	}
 }
 
+// R1, fourth review: a role named twice in two letter cases means member in one
+// order and admin in the other to the real member handler, yet sorts to one
+// map. Such a body is refused outright, so no approval can stand for both.
+func TestOwnerApprovalRefusesARoleNamedTwice(t *testing.T) {
+	asMember := `{"email":"alice@example.invalid","Role":"admin","role":"member"}`
+	asAdmin := `{"email":"alice@example.invalid","role":"member","Role":"admin"}`
+	for body, want := range map[string]string{asMember: "member", asAdmin: "admin"} {
+		var req CreateMemberRequest
+		if err := json.Unmarshal([]byte(body), &req); err != nil || req.Role != want {
+			t.Fatalf("the hazard itself: %s decodes to %q, want %q", body, req.Role, want)
+		}
+	}
+	f := newHumanNeededFixture(t, true)
+	var started string
+	dbfx.QueryRow(t, `SELECT now()::text`).Scan(&started)
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM agent_ask WHERE workspace_id=$1 AND kind='owner_confirmation' AND created_at >= $2::timestamptz`, testWorkspaceID, started)
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM bot_write_audit WHERE bot_id=$1`, f.bot.ID)
+	})
+	forwarded := 0
+	r := chi.NewRouter()
+	r.Use(func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+			req.Header.Set("X-User-ID", testUserID)
+			next.ServeHTTP(w, req.WithContext(botsource.WithContext(req.Context(), botsource.Source{ID: f.bot.ID, Name: "Review Bot"})))
+		})
+	})
+	r.Use(middleware.BotWriteAudit(testHandler.Queries, nil, testHandler))
+	r.Post("/api/workspaces/{id}/members", func(w http.ResponseWriter, _ *http.Request) {
+		forwarded++
+		w.WriteHeader(http.StatusOK)
+	})
+	for _, body := range []string{asMember, asAdmin} {
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodPost, "/api/workspaces/"+testWorkspaceID+"/members", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		r.ServeHTTP(rec, req)
+		if rec.Code != http.StatusForbidden || !strings.Contains(rec.Body.String(), "owner_confirmation_unscannable") {
+			t.Fatalf("%s: %d %s", body, rec.Code, rec.Body)
+		}
+	}
+	if forwarded != 0 {
+		t.Fatalf("an ambiguous body reached the handler %d times", forwarded)
+	}
+	if n := dbfx.Count(t, `SELECT count(*) FROM agent_ask WHERE workspace_id=$1 AND kind='owner_confirmation' AND created_at >= $2::timestamptz`, testWorkspaceID, started); n != 0 {
+		t.Fatalf("an ambiguous body opened %d cards for the owner to approve", n)
+	}
+}
+
 func prEvent(title, repo string, linked ...string) service.WorkspaceActivityInput {
 	owner, name, _ := strings.Cut(repo, "/")
 	in, _ := service.PullRequestActivity(parseUUID(testWorkspaceID), service.ActivityPRUpdated, "updated", map[string]any{

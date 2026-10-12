@@ -435,6 +435,31 @@ func TestBotWriteAuditApprovalIsForTheExactContent(t *testing.T) {
 			t.Fatalf("status %d body %s", rec.Code, rec.Body)
 		}
 	})
+	t.Run("a key named twice is refused, whatever its case or depth", func(t *testing.T) {
+		for name, body := range map[string]string{
+			"case alias":          `{"email":"alice@example.invalid","Role":"admin","role":"member"}`,
+			"case alias, swapped": `{"email":"alice@example.invalid","role":"member","Role":"admin"}`,
+			"exact repeat":        `{"email":"alice@example.invalid","role":"member","role":"admin"}`,
+			"nested":              `{"plan":{"seats":5,"SEATS":500}}`,
+			"inside an array":     `{"items":[{"id":1},{"role":"member","ROLE":"admin"}]}`,
+			"kelvin sign":         "{\"kind\":\"a\",\"\u212aind\":\"b\"}",
+		} {
+			h := newAuditHarness(t, true)
+			h.approve("POST", members, alice)
+			rec := h.do("POST", members, body, map[string]string{ConfirmationHeader: auditConfirmation})
+			if rec.Code != http.StatusForbidden || h.handled != 0 || !strings.Contains(rec.Body.String(), "owner_confirmation_unscannable") {
+				t.Fatalf("%s: status %d handled %d body %s", name, rec.Code, h.handled, rec.Body)
+			}
+			if len(h.store.spends) != 0 || len(h.confirmer.calls) != 0 {
+				t.Fatalf("%s: an ambiguous body neither spends nor asks", name)
+			}
+		}
+		h := newAuditHarness(t, true)
+		rec := h.do("POST", members, `{"a":{"x":1},"b":{"x":2},"c":[{"x":3},{"x":4}]}`, nil)
+		if strings.Contains(rec.Body.String(), "owner_confirmation_unscannable") || len(h.confirmer.calls) != 1 {
+			t.Fatalf("the same key in different objects is not a repeat: %s", rec.Body)
+		}
+	})
 	t.Run("the identical call, reordered, goes through once", func(t *testing.T) {
 		h := newAuditHarness(t, true)
 		h.approve("POST", members, alice)

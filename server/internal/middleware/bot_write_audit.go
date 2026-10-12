@@ -221,7 +221,7 @@ func authorizeDangerousWrite(w http.ResponseWriter, r *http.Request, queries *db
 		rec.Route = sanitizePath(r.URL.Path)
 		recordAndObserve(r.Context(), queries, observe, rec, "")
 		writeJSONError(w, http.StatusForbidden, map[string]string{
-			"error": "this action needs the owner's go-ahead for exactly this request, and its body could not be read whole: send it as one JSON document under 64 KB",
+			"error": "this action needs the owner's go-ahead for exactly this request, and its body could not be read whole and unambiguously: send it as one JSON document under 64 KB, naming each key once",
 			"code":  "owner_confirmation_unscannable",
 		})
 		return "", false

@@ -320,5 +320,6 @@ masked). When it is approved, repeat the identical call — same method, path,
 query and body values; key order does not matter — within 30 minutes with
 `MULTICA_OWNER_CONFIRMATION=<confirmation_id>`. It works once. Any changed
 value (another member, role or amount) is a new request and opens a new card.
-A body the server cannot read whole (not JSON, over 64 KB) is refused with
-`owner_confirmation_unscannable`: send plain JSON instead. `owner_confirmation_denied` means the owner said no: do not ask again.
+A body the server cannot read whole or unambiguously (not JSON, over 64 KB, or
+one key named twice in any letter case) is refused with
+`owner_confirmation_unscannable`: send plain JSON, each key once. `owner_confirmation_denied` means the owner said no: do not ask again.

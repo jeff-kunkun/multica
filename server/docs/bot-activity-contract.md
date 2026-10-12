@@ -233,7 +233,9 @@ itself: it is a server-held object the owner grants personally.
 The card shows what is being approved: the target (member name, email and
 current role when the path or body names one), each body field as
 `name=value` (values clipped, credentials masked) and the query. A body the
-server cannot read whole (not JSON, over 64 KB, unparseable) is refused with
+server cannot read whole or unambiguously (not JSON, over 64 KB, unparseable,
+or an object naming one key twice in any letter case, at any depth, which a
+handler could read either way) is refused with
 `403 owner_confirmation_unscannable` and opens no card. The audit row never
 keeps values.
 

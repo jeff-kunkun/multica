@@ -6,10 +6,12 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"io"
 	"net/url"
 	"sort"
 	"strings"
 	"time"
+	"unicode"
 	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5/pgtype"
@@ -88,8 +90,12 @@ func OwnerConfirmationScopeHash(method, path, query string, body []byte) string 
 
 // CanonicalJSON re-encodes a JSON document so the same content always gives the
 // same bytes (keys sorted, whitespace dropped, numbers kept as written). ok is
-// false when the input is not one JSON document.
+// false when the input is not one JSON document, or when an object names a key
+// twice (in any letter case), which a handler could read either way.
 func CanonicalJSON(raw []byte) ([]byte, bool) {
+	if !unambiguousKeys(raw) {
+		return nil, false
+	}
 	dec := json.NewDecoder(bytes.NewReader(raw))
 	dec.UseNumber()
 	var v any
@@ -101,6 +107,76 @@ func CanonicalJSON(raw []byte) ([]byte, bool) {
 	}
 	out, err := json.Marshal(v)
 	return out, err == nil
+}
+
+// unambiguousKeys reports whether no object in the document, at any depth,
+// names the same key twice. Go decodes into structs matching keys without
+// regard to case, last one winning, so {"Role":"admin","role":"member"} and its
+// reordering mean different things to a handler yet decode to one sorted map:
+// such a body cannot be bound to one approval and is refused (DENE-1936 R1).
+// Keys are compared under the same case folding the decoder uses.
+func unambiguousKeys(raw []byte) bool {
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.UseNumber()
+	// One set of folded keys per open object; nil for an open array.
+	var open []map[string]bool
+	expectKey := func() bool { return len(open) > 0 && open[len(open)-1] != nil }
+	inKeyPos := true // the next token in the innermost object is a key
+	for {
+		tok, err := dec.Token()
+		if err == io.EOF {
+			return len(open) == 0
+		}
+		if err != nil {
+			return false
+		}
+		switch t := tok.(type) {
+		case json.Delim:
+			switch t {
+			case '{':
+				open = append(open, map[string]bool{})
+				inKeyPos = true
+				continue
+			case '[':
+				open = append(open, nil)
+			case '}', ']':
+				open = open[:len(open)-1]
+			}
+		case string:
+			if expectKey() && inKeyPos {
+				k := foldKey(t)
+				if open[len(open)-1][k] {
+					return false
+				}
+				open[len(open)-1][k] = true
+				inKeyPos = false
+				continue
+			}
+		}
+		// A value just ended (scalar, or a closed object/array): the next token
+		// of an enclosing object is a key again.
+		if t, ok := tok.(json.Delim); ok && t == '[' {
+			continue
+		}
+		inKeyPos = true
+	}
+}
+
+// foldKey maps every rune to the smallest rune of its case-folding orbit, so
+// foldKey(a) == foldKey(b) exactly when strings.EqualFold(a, b), the rule Go's
+// JSON decoder uses to match keys to struct fields.
+func foldKey(s string) string {
+	var b strings.Builder
+	for _, r := range s {
+		m := r
+		for f := unicode.SimpleFold(r); f != r; f = unicode.SimpleFold(f) {
+			if f < m {
+				m = f
+			}
+		}
+		b.WriteRune(m)
+	}
+	return b.String()
 }
 
 // CanonicalQuery orders a raw query string so parameter order does not matter.
