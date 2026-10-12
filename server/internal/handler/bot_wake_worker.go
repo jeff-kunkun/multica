@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/multica-ai/multica/server/internal/service"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/remotemcp"
@@ -24,6 +25,7 @@ import (
 type BotWakeWorker struct {
 	h               *Handler
 	done            chan struct{}
+	blockedHeads    map[string]int64
 	coalesceSeconds int32 // production 30; legacy delivery tests use zero
 	// Only tests replace this factory; production always uses the DNS-pinned,
 	// no-proxy, no-redirect public HTTPS transport.
@@ -44,6 +46,7 @@ func (w *BotWakeWorker) Run(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-maintenance.C:
+			w.reportBlockedQueues(ctx)
 			if err := w.h.Queries.RecoverBotWakeUncertain(ctx); err != nil {
 				slog.Error("bot wake recovery failed")
 			}
@@ -54,7 +57,7 @@ func (w *BotWakeWorker) Run(ctx context.Context) {
 			for n := 0; n < 100; n++ {
 				worked, err := w.ProcessNext(ctx)
 				if err != nil {
-					slog.Error("bot wake processing failed")
+					slog.Error("bot wake processing failed", "error", err)
 					break
 				}
 				if !worked {
@@ -74,7 +77,7 @@ func (w *BotWakeWorker) WaitWithTimeout(d time.Duration) bool {
 		return false
 	}
 }
-func (w *BotWakeWorker) ProcessNext(ctx context.Context) (bool, error) {
+func (w *BotWakeWorker) ProcessNext(ctx context.Context) (worked bool, resultErr error) {
 	starter, ok := w.h.DB.(txStarter)
 	if !ok {
 		return false, errors.New("wake database unavailable")
@@ -91,6 +94,43 @@ func (w *BotWakeWorker) ProcessNext(ctx context.Context) (bool, error) {
 	}
 	if err != nil {
 		return false, err
+	}
+	// Isolate pre-send failures after rolling back ALL admission/counter changes.
+	// PostgreSQL statement errors abort a transaction, so recording a failure in
+	// that same transaction would simply fail again and poison the head forever.
+	failedEvent := e
+	committed := false
+	defer func() {
+		if resultErr == nil || committed {
+			return
+		}
+		originalErr := resultErr
+		_ = tx.Rollback(ctx)
+		slog.Error("bot wake event processing failed", "sequence", failedEvent.Sequence, "error", originalErr)
+		if ctx.Err() != nil {
+			return
+		}
+		recordCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		// Persist a safe reason; raw database errors belong in server logs.
+		reason := "event preparation failed"
+		var pgErr *pgconn.PgError
+		if errors.As(originalErr, &pgErr) {
+			reason += " (SQLSTATE " + pgErr.Code + ")"
+		}
+		if errors.Is(originalErr, pgx.ErrNoRows) {
+			reason += ": source lookup returned no rows"
+		}
+		reason += "; sequence " + fmt.Sprint(failedEvent.Sequence)
+		_, recordErr := w.h.Queries.RecordBotWakeProcessingFailure(recordCtx, db.RecordBotWakeProcessingFailureParams{Sequence: failedEvent.Sequence, Reason: reason})
+		if recordErr != nil {
+			resultErr = fmt.Errorf("sequence %d: %w (record failure: %v)", failedEvent.Sequence, originalErr, recordErr)
+			return
+		}
+		worked, resultErr = true, nil
+	}()
+	if err := q.RecordBotWakeProcessed(ctx, e.BotID); err != nil {
+		return true, err
 	}
 	c, err := q.LockBotWake(ctx, e.BotID)
 	if err != nil {
@@ -173,6 +213,7 @@ func (w *BotWakeWorker) ProcessNext(ctx context.Context) (bool, error) {
 		deliveryID = e.EventID
 	}
 	for _, member := range batch {
+		failedEvent = member
 		member, err = w.restoreEventActor(ctx, q, member)
 		if err != nil {
 			return true, err
@@ -215,6 +256,7 @@ func (w *BotWakeWorker) ProcessNext(ctx context.Context) (bool, error) {
 		return true, tx.Commit(ctx)
 	}
 	e = admitted[0]
+	failedEvent = e
 	// Preserve the existing single current cause: a multi-root batch uses
 	// its first admitted event for subsequent Bot writes. Each event still
 	// retains its own root/hop and admission accounting in the payload.
@@ -240,6 +282,7 @@ func (w *BotWakeWorker) ProcessNext(ctx context.Context) (bool, error) {
 	if err = tx.Commit(ctx); err != nil {
 		return true, err
 	}
+	committed = true
 	status, reason := w.deliver(ctx, endpoint, secret.Key, payload)
 	delay := int32(0)
 	if status == "retry" {
@@ -474,4 +517,24 @@ func (w *BotWakeWorker) admitEvent(ctx context.Context, q *db.Queries, e db.BotW
 	}
 	e.WakeGeneration = generation
 	return e, generation, "", nil
+}
+
+// This alert is independent of the blocked webhook queue: operators can still
+// see it when the delivery worker or database lookup cannot make progress.
+func (w *BotWakeWorker) reportBlockedQueues(ctx context.Context) {
+	rows, err := w.h.Queries.ListBlockedBotWakeQueues(ctx)
+	if err != nil {
+		slog.Error("bot wake health check failed", "error", err)
+		return
+	}
+	current := make(map[string]int64, len(rows))
+	for _, row := range rows {
+		id := uuidToString(row.BotID)
+		current[id] = row.HeadSequence
+		if w.blockedHeads[id] == row.HeadSequence {
+			continue
+		}
+		slog.Error("wake_blocked", "bot_id", uuidToString(row.BotID), "sequence", row.HeadSequence, "reason", "queued for more than five minutes")
+	}
+	w.blockedHeads = current
 }
