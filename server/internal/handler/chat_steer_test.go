@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/go-chi/chi/v5"
@@ -303,4 +304,137 @@ func TestCreateCommentModeSteer(t *testing.T) {
 			t.Fatalf("queued follow-ups = %d, want one started by the comment", n)
 		}
 	})
+}
+
+func TestChatReplaceVoidsTheRunningReplyAndTheQueue(t *testing.T) {
+	f := newChatSteerFixture(t, "kimi", false)
+	var q1, q2 SendChatMessageResponse
+	sendChatWithMode(t, f.sessionID, "old follow-up 1", sendModeQueue).Want(http.StatusCreated).JSON(&q1)
+	sendChatWithMode(t, f.sessionID, "old follow-up 2", sendModeQueue).Want(http.StatusCreated).JSON(&q2)
+
+	var sent SendChatMessageResponse
+	sendChatWithMode(t, f.sessionID, "never mind, do this instead", sendModeReplace).Want(http.StatusCreated).JSON(&sent)
+	if sent.Mode != sendModeReplace || sent.ChatReplaceOutcome == nil {
+		t.Fatalf("send = %+v, want a replace outcome", sent)
+	}
+	if sent.NewTaskID != sent.TaskID {
+		t.Fatalf("new_task_id = %s, want %s", sent.NewTaskID, sent.TaskID)
+	}
+	for _, id := range []string{f.headID, q1.TaskID, q2.TaskID} {
+		var status string
+		dbfx.QueryRow(t, `SELECT status FROM agent_task_queue WHERE id = $1`, id).Scan(&status)
+		if status != "cancelled" {
+			t.Fatalf("task %s status = %s, want cancelled", id, status)
+		}
+		found := false
+		for _, got := range sent.CancelledTaskIDs {
+			found = found || got == id
+		}
+		if !found {
+			t.Fatalf("cancelled_task_ids %v is missing %s", sent.CancelledTaskIDs, id)
+		}
+	}
+	// The messages stay in the transcript, marked, pointing at the new one.
+	for _, id := range []string{q1.MessageID, q2.MessageID} {
+		var by *string
+		dbfx.QueryRow(t, `SELECT superseded_by_message_id::text FROM chat_message WHERE id = $1`, id).Scan(&by)
+		if by == nil || *by != sent.MessageID {
+			t.Fatalf("message %s superseded_by = %v, want %s", id, by, sent.MessageID)
+		}
+	}
+	var triggerSuperseded, triggerCount int
+	dbfx.QueryRow(t, `SELECT count(*) FILTER (WHERE superseded_at IS NOT NULL), count(*) FROM chat_message WHERE task_id = $1 AND role = 'user'`, f.headID).Scan(&triggerSuperseded, &triggerCount)
+	if triggerCount != 1 || triggerSuperseded != 1 {
+		t.Fatalf("running turn's message: %d superseded of %d, want 1 of 1 kept", triggerSuperseded, triggerCount)
+	}
+	if len(sent.SupersededMessageIDs) != 3 {
+		t.Fatalf("superseded_message_ids = %v, want 3", sent.SupersededMessageIDs)
+	}
+	var newSuperseded bool
+	dbfx.QueryRow(t, `SELECT superseded_at IS NOT NULL FROM chat_message WHERE id = $1`, sent.MessageID).Scan(&newSuperseded)
+	if newSuperseded {
+		t.Fatal("the new message must not be superseded")
+	}
+	if pending := chatPending(t, f.sessionID); pending.TaskID != sent.TaskID {
+		t.Fatalf("pending head = %s, want the replacing message %s", pending.TaskID, sent.TaskID)
+	}
+}
+
+func TestChatReplaceWithNothingRunningStillVoidsTheQueue(t *testing.T) {
+	f := newChatSteerFixture(t, "kimi", false)
+	dbfx.Exec(t, `UPDATE agent_task_queue SET status = 'completed', completed_at = now() WHERE id = $1`, f.headID)
+	// Nothing claimed: a queued head the daemon has not picked up yet.
+	var q1 SendChatMessageResponse
+	sendChatWithMode(t, f.sessionID, "old unclaimed ask", sendModeQueue).Want(http.StatusCreated).JSON(&q1)
+
+	var sent SendChatMessageResponse
+	sendChatWithMode(t, f.sessionID, "new ask", sendModeReplace).Want(http.StatusCreated).JSON(&sent)
+	if sent.Mode != sendModeReplace || sent.Queued {
+		t.Fatalf("send = %+v, want a replace that runs straight away", sent)
+	}
+	var status string
+	dbfx.QueryRow(t, `SELECT status FROM agent_task_queue WHERE id = $1`, q1.TaskID).Scan(&status)
+	if status != "cancelled" {
+		t.Fatalf("old queued task status = %s, want cancelled", status)
+	}
+	if len(sent.SupersededMessageIDs) != 1 || sent.SupersededMessageIDs[0] != q1.MessageID {
+		t.Fatalf("superseded_message_ids = %v, want [%s]", sent.SupersededMessageIDs, q1.MessageID)
+	}
+	if len(sent.CancelledTaskIDs) != 1 || sent.CancelledTaskIDs[0] != q1.TaskID {
+		t.Fatalf("cancelled_task_ids = %v, want [%s]", sent.CancelledTaskIDs, q1.TaskID)
+	}
+	if pending := chatPending(t, f.sessionID); pending.TaskID != sent.TaskID {
+		t.Fatalf("pending head = %s, want %s", pending.TaskID, sent.TaskID)
+	}
+}
+
+func TestChatReplaceIsReadableFromTheMessageList(t *testing.T) {
+	f := newChatSteerFixture(t, "kimi", false)
+	var sent SendChatMessageResponse
+	sendChatWithMode(t, f.sessionID, "changed my mind", sendModeReplace).Want(http.StatusCreated).JSON(&sent)
+	req := newRequest(http.MethodGet, "/api/chat/sessions/"+f.sessionID+"/messages", nil)
+	req = withChatTestWorkspaceCtx(t, withURLParam(req, "sessionId", f.sessionID))
+	var messages []ChatMessageResponse
+	testutil.Call(t, testHandler.ListChatMessages, req).Want(http.StatusOK).JSON(&messages)
+	marked := 0
+	for _, m := range messages {
+		if m.SupersededAt != nil {
+			marked++
+			if m.SupersededByMessageID == nil || *m.SupersededByMessageID != sent.MessageID {
+				t.Fatalf("message %s superseded_by = %v, want %s", m.ID, m.SupersededByMessageID, sent.MessageID)
+			}
+		}
+	}
+	if marked != 1 {
+		t.Fatalf("%d superseded messages listed, want the original ask only", marked)
+	}
+}
+
+func TestChatReplaceTellsTheClaimedRunTheOldInstructionsAreVoid(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	runtimeID := handlerTestRuntimeID(t)
+	agentID := createHandlerTestAgent(t, "ChatReplaceClaimAgent", []byte("[]"))
+	sessionID := createHandlerTestChatSession(t, agentID)
+	dbfx.Cleanup(t, `DELETE FROM agent_task_queue WHERE chat_session_id = $1`, sessionID)
+	sendChatWithMode(t, sessionID, "old ask", sendModeQueue).Want(http.StatusCreated)
+	sendChatWithMode(t, sessionID, "new ask", sendModeReplace).Want(http.StatusCreated)
+
+	req := newDaemonTokenRequest(http.MethodPost, "/api/daemon/runtimes/"+runtimeID+"/claim", nil, testWorkspaceID, "chat-replace-claim-test")
+	var response struct {
+		Task *struct {
+			ChatMessage string `json:"chat_message"`
+		} `json:"task"`
+	}
+	testutil.Call(t, testHandler.ClaimTaskByRuntime, withURLParam(req, "runtimeId", runtimeID)).Want(http.StatusOK).JSON(&response)
+	if response.Task == nil {
+		t.Fatal("nothing claimed")
+	}
+	if !strings.HasPrefix(response.Task.ChatMessage, chatReplaceNotice) || !strings.HasSuffix(response.Task.ChatMessage, "new ask") {
+		t.Fatalf("chat_message = %q, want the replace notice then the new ask", response.Task.ChatMessage)
+	}
+	if strings.Contains(response.Task.ChatMessage, "old ask") {
+		t.Fatalf("chat_message = %q must not carry the voided ask", response.Task.ChatMessage)
+	}
 }

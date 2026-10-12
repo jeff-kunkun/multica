@@ -425,6 +425,9 @@
     "reason_session_lost": "이전 세션을 복원하지 못함",
     "reason_fresh_requested": "새 세션 요청"
   },
+  "superseded": {
+    "label": "새 지시로 대체됨"
+  },
   "report": {
     "bar_other": "이 채팅의 티켓 {{count}}건",
     "bar_fresh_other": "이 채팅의 티켓 {{count}}건 · 방금 바뀜 {{fresh}}",

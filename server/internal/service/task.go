@@ -2653,6 +2653,13 @@ type DirectChatSendResult struct {
 	InitialTitle       string
 	Merged             bool
 	Steered            bool
+	// Replace outcome (DENE-1932): the queued turns that were cancelled, the
+	// messages marked superseded, and the claimed or deferred turns the send
+	// stopped (StopFailed lists the ones that could not be stopped).
+	CancelledTasks       []db.AgentTaskQueue
+	SupersededMessageIDs []pgtype.UUID
+	StoppedTaskIDs       []pgtype.UUID
+	StopFailedTaskIDs    []pgtype.UUID
 }
 
 var ErrChatSessionAlreadyStarted = errors.New("chat session already has a user message")
@@ -2685,6 +2692,13 @@ type DirectChatSendOptions struct {
 	// Mode is the client's explicit send mode. Empty means "merge into the
 	// session's queued or active run" (DENE-1857); urgent never merges.
 	Mode string
+	// Replace is the "replace" send mode (DENE-1932): in the same transaction
+	// that writes the new message, every queued turn is cancelled and its
+	// message, with the messages of the turn being answered, is marked
+	// superseded; the claimed turn is stopped after the commit. CancelledBy
+	// names who asked.
+	Replace     bool
+	CancelledBy TaskCancellationActor
 }
 
 // SendDirectChatMessage atomically persists one web/mobile direct-chat turn:
@@ -2833,6 +2847,40 @@ func (s *TaskService) sendDirectChatMessage(
 		}
 		priority := int32(2) // medium priority for chat; matches EnqueueChatTask
 		var pickupDeadline pgtype.Timestamptz
+		// Replace clears the way before the new turn exists, so the queue
+		// position below is computed against what is left: the claimed turn
+		// (stopped after the commit), never an older queued instruction.
+		var replacedOwners []pgtype.UUID
+		if opts.Replace {
+			priority = UrgentChatPriority
+			cancelled, err := qtx.CancelQueuedChatTasksForReplace(ctx, db.CancelQueuedChatTasksForReplaceParams{
+				CancelledByType: pgtype.Text{String: opts.CancelledBy.Type, Valid: opts.CancelledBy.Type != ""},
+				CancelledByID:   opts.CancelledBy.ID,
+				CancelledByName: pgtype.Text{String: opts.CancelledBy.Name, Valid: opts.CancelledBy.Name != ""},
+				ChatSessionID:   session.ID,
+			})
+			if err != nil {
+				return fmt.Errorf("cancel queued chat tasks for replace: %w", err)
+			}
+			if err := SettleTerminalTaskState(ctx, qtx, cancelled...); err != nil {
+				return err
+			}
+			out.CancelledTasks = cancelled
+			for _, t := range cancelled {
+				replacedOwners = append(replacedOwners, t.ID, chatInputOwnerID(t))
+			}
+			active, err := qtx.ListReplaceableActiveChatTasks(ctx, session.ID)
+			if err != nil {
+				return fmt.Errorf("list chat tasks to stop for replace: %w", err)
+			}
+			for _, t := range active {
+				out.StoppedTaskIDs = append(out.StoppedTaskIDs, t.ID)
+				replacedOwners = append(replacedOwners, t.ID)
+				if t.ChatInputTaskID.Valid {
+					replacedOwners = append(replacedOwners, t.ChatInputTaskID)
+				}
+			}
+		}
 		if opts.Urgent {
 			priority = UrgentChatPriority
 			pickupDeadline = pgtype.Timestamptz{Time: time.Now().Add(UrgentChatPickupDeadline), Valid: true}
@@ -2954,6 +3002,17 @@ func (s *TaskService) sendDirectChatMessage(
 			return fmt.Errorf("create user chat message: %w", err)
 		}
 		out.Message = msg
+		if opts.Replace && len(replacedOwners) > 0 {
+			superseded, err := qtx.MarkChatMessagesSuperseded(ctx, db.MarkChatMessagesSupersededParams{
+				SupersededByMessageID: msg.ID,
+				ChatSessionID:         session.ID,
+				TaskIds:               replacedOwners,
+			})
+			if err != nil {
+				return fmt.Errorf("mark replaced chat messages: %w", err)
+			}
+			out.SupersededMessageIDs = superseded
+		}
 		if out.Steered {
 			if _, err := qtx.CreateMergedChatTaskSupplement(ctx, db.CreateMergedChatTaskSupplementParams{
 				TaskID: task.ID, ChatMessageID: msg.ID, ChatSessionID: session.ID,
@@ -3029,7 +3088,37 @@ func (s *TaskService) sendDirectChatMessage(
 		s.broadcastTaskEvent(ctx, protocol.EventTaskQueued, out.Task)
 		s.NotifyTaskEnqueued(ctx, out.Task)
 	}
+	if opts.Replace {
+		s.finishChatReplace(ctx, agent.ID, &out, opts.CancelledBy)
+	}
 	return &out, nil
+}
+
+// finishChatReplace is the part of a replace that cannot sit inside the send
+// transaction: telling clients and runtimes about the cancelled queue, and
+// stopping the claimed turn through the ordinary cancel path. The new turn is
+// already committed at the head of the queue, so a stop that fails leaves it
+// to run as soon as the old turn ends.
+func (s *TaskService) finishChatReplace(ctx context.Context, agentID pgtype.UUID, out *DirectChatSendResult, by TaskCancellationActor) {
+	for _, task := range out.CancelledTasks {
+		slog.Info("task cancelled", "task_id", util.UUIDToString(task.ID), "reason", "chat_replace")
+		s.captureTaskCancelled(ctx, task)
+	}
+	for _, id := range out.StoppedTaskIDs {
+		// KeepInput: the stopped turn's message stays in the transcript,
+		// marked superseded, instead of going back to the composer.
+		if _, err := s.CancelTaskWithResult(ctx, id, CancelTaskOptions{CancelledBy: by, UserInitiated: true, KeepInput: true}); err != nil {
+			slog.Warn("replace chat message: stop reply failed", "task_id", util.UUIDToString(id), "error", err)
+			out.StopFailedTaskIDs = append(out.StopFailedTaskIDs, id)
+		}
+	}
+	if len(out.CancelledTasks) > 0 {
+		s.ReconcileAgentStatus(ctx, agentID)
+		for _, task := range out.CancelledTasks {
+			s.broadcastTaskEvent(ctx, protocol.EventTaskCancelled, task)
+		}
+		s.notifyTasksFinished(out.CancelledTasks)
+	}
 }
 
 // MikaOnboardingOpenResult carries the two rows that open a Mika conversation.
@@ -3321,7 +3410,10 @@ type CancelTaskOptions struct {
 	// the prompt back. See protocol.AppCapabilityChatDraftRestoreV1.
 	ClientSupportsDraftRestore bool
 	// QueuedOnly turns queue edit/remove into a session-scoped compare-and-set.
-	QueuedOnly          bool
+	QueuedOnly bool
+	// KeepInput stops a chat turn without handing its message back to the
+	// composer: the message stays in the transcript (DENE-1932 replace).
+	KeepInput           bool
 	ExpectedChatSession pgtype.UUID
 	QueueAction         string
 	// ErrorMessage / FailureReason, when set, are persisted onto the cancelled
@@ -3791,7 +3883,7 @@ func (s *TaskService) finalizeCancelledChatMessage(ctx context.Context, task db.
 		if err != nil {
 			return fmt.Errorf("list cancelled chat task messages: %w", err)
 		}
-		restorable := !hasMessages
+		restorable := !hasMessages && !opts.KeepInput
 		if restorable {
 			// Channel-ingested user messages are the durable record of what
 			// the platform sender wrote — the sender has no Multica composer

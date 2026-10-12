@@ -373,10 +373,12 @@ function MessageRow({
     // `packages/views/chat/components/chat-message-list.tsx` user branch.
     // Width is capped at 80% so the bubble keeps the iMessage-style
     // trailing alignment instead of stretching across the column.
+    const superseded = Boolean(message.superseded_at);
     const body = (
       <View
         className={cn(
           "self-end max-w-[80%] gap-1.5 rounded-xl border-2 px-3.5 py-2 transition-colors",
+          superseded && "opacity-60",
           isSelecting
             ? "bg-primary/5 border-primary/30"
             : longPress.isPressed
@@ -396,6 +398,9 @@ function MessageRow({
           attachments={message.attachments}
           content={message.content}
         />
+        {superseded ? (
+          <Text className="text-xs text-muted-foreground">{t("superseded.label")}</Text>
+        ) : null}
       </View>
     );
     if (isSelecting) return body;

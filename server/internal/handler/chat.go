@@ -1228,7 +1228,8 @@ type SendChatMessageRequest struct {
 	Content       string   `json:"content"`
 	AttachmentIDs []string `json:"attachment_ids"`
 	// An omitted mode merges into this chat's existing execution. Explicit
-	// steer, queue and restart preserve their requested delivery behavior.
+	// steer, queue and restart preserve their requested delivery behavior;
+	// replace also voids every older queued instruction (DENE-1932).
 	Mode string `json:"mode,omitempty"`
 	// Urgent (DENE-1844) refuses the send when the agent's runtime is offline
 	// and no online fallback runtime is configured, dispatches to the fallback
@@ -1236,6 +1237,43 @@ type SendChatMessageRequest struct {
 	// and fails it with pickup_timeout when no daemon starts it within
 	// service.UrgentChatPickupDeadline.
 	Urgent bool `json:"urgent,omitempty"`
+}
+
+// ChatReplaceOutcome is what a replace send changed: the stopped and cancelled
+// turns, and the older messages now marked superseded. Arrays are always
+// present (possibly empty) so a caller never has to tell absent from none.
+type ChatReplaceOutcome struct {
+	NewTaskID            string   `json:"new_task_id"`
+	CancelledTaskIDs     []string `json:"cancelled_task_ids"`
+	SupersededMessageIDs []string `json:"superseded_message_ids"`
+	// StopFailedTaskIDs lists replies that could not be stopped; the new turn
+	// runs as soon as they end.
+	StopFailedTaskIDs []string `json:"stop_failed_task_ids,omitempty"`
+}
+
+func newChatReplaceOutcome(sent *service.DirectChatSendResult) *ChatReplaceOutcome {
+	out := &ChatReplaceOutcome{
+		NewTaskID:            uuidToString(sent.Task.ID),
+		CancelledTaskIDs:     []string{},
+		SupersededMessageIDs: []string{},
+	}
+	for _, t := range sent.CancelledTasks {
+		out.CancelledTaskIDs = append(out.CancelledTaskIDs, uuidToString(t.ID))
+	}
+	stopFailed := map[string]bool{}
+	for _, id := range sent.StopFailedTaskIDs {
+		stopFailed[uuidToString(id)] = true
+		out.StopFailedTaskIDs = append(out.StopFailedTaskIDs, uuidToString(id))
+	}
+	for _, id := range sent.StoppedTaskIDs {
+		if !stopFailed[uuidToString(id)] {
+			out.CancelledTaskIDs = append(out.CancelledTaskIDs, uuidToString(id))
+		}
+	}
+	for _, id := range sent.SupersededMessageIDs {
+		out.SupersededMessageIDs = append(out.SupersededMessageIDs, uuidToString(id))
+	}
+	return out
 }
 
 type SendChatMessageResponse struct {
@@ -1256,9 +1294,11 @@ type SendChatMessageResponse struct {
 	TaskID           string                     `json:"task_id"`
 	SupportsQueue    bool                       `json:"supports_queue"`
 	Queued           bool                       `json:"queued"`
-	// Mode is what actually happened: steer, queue, restart, or start when
-	// nothing was replying. A steer whose reply ended first reports queue.
+	// Mode is what actually happened: steer, queue, restart, replace, or start
+	// when nothing was replying. A steer whose reply ended first reports queue.
 	Mode string `json:"mode"`
+	// Set only by mode=replace.
+	*ChatReplaceOutcome
 	// AttachmentIDs are the attachment rows actually bound to this message by
 	// the server. The client diffs these against the ids it requested so it
 	// can warn the user when an attachment silently failed to bind — no extra
@@ -1309,12 +1349,16 @@ func (h *Handler) SendChatMessage(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, "urgent is not supported for linked-workspace sends")
 			return
 		}
+		if req.Mode == sendModeReplace {
+			writeError(w, http.StatusBadRequest, "replace is not supported for linked-workspace sends")
+			return
+		}
 		h.sendManagedChatMessage(w, r, session, grant, req)
 		return
 	}
-	mode, ok := normalizeSendMode(req.Mode)
+	mode, ok := normalizeChatSendMode(req.Mode)
 	if !ok {
-		writeError(w, http.StatusBadRequest, "mode must be steer, queue or restart")
+		writeError(w, http.StatusBadRequest, "mode must be steer, queue, restart or replace")
 		return
 	}
 	// An urgent turn must start within its pickup deadline, and the claim
@@ -1327,7 +1371,10 @@ func (h *Handler) SendChatMessage(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, "urgent cannot be combined with mode=steer; an urgent message restarts the reply")
 			return
 		}
-		mode = sendModeRestart
+		// Replace already stops the reply and takes the head of the queue.
+		if mode != sendModeReplace {
+			mode = sendModeRestart
+		}
 	}
 
 	// Pre-validate attachment ids early so invalid input returns 400 before
@@ -1444,7 +1491,7 @@ func (h *Handler) SendChatMessage(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		steerTarget, steerable = target, replying
-	case sendModeRestart:
+	case sendModeRestart, sendModeReplace:
 		// Stopping a reply is the creator's call, same as the stop button.
 		if actorType != "agent" && uuidToString(session.CreatorID) != userID {
 			writeError(w, http.StatusForbidden, "only the person who started this chat can stop its reply")
@@ -1463,6 +1510,10 @@ func (h *Handler) SendChatMessage(w http.ResponseWriter, r *http.Request) {
 	// offline primary with no online fallback is a refusal with the reason and
 	// the next steps, and nothing is written (DENE-1844).
 	sendOpts := service.DirectChatSendOptions{Mode: req.Mode}
+	if mode == sendModeReplace {
+		sendOpts.Replace = true
+		sendOpts.CancelledBy = h.taskCancellationActor(r.Context(), actorType, actorID)
+	}
 	if req.Urgent {
 		opts, refusal, err := h.urgentChatDispatch(r.Context(), agent)
 		if err != nil {
@@ -1474,6 +1525,7 @@ func (h *Handler) SendChatMessage(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		opts.Mode = mode
+		opts.Replace, opts.CancelledBy = sendOpts.Replace, sendOpts.CancelledBy
 		sendOpts = opts
 	}
 	sent, err := h.TaskService.SendDirectChatMessageWithOptions(r.Context(), session, agent, taskUserID, req.Content, attachmentIDs, actorType, parseUUID(actorID), sendOpts)
@@ -1561,7 +1613,9 @@ func (h *Handler) SendChatMessage(w http.ResponseWriter, r *http.Request) {
 			h.notifyTaskSupplementAvailable(task)
 		}
 	}
-	if sent.Queued && !sent.Merged && task.Status != "cancelled" {
+	if mode == sendModeReplace {
+		applied = sendModeReplace
+	} else if sent.Queued && !sent.Merged && task.Status != "cancelled" {
 		applied = sendModeQueue
 		switch {
 		case mode == sendModeSteer && steerable:
@@ -1587,6 +1641,10 @@ func (h *Handler) SendChatMessage(w http.ResponseWriter, r *http.Request) {
 		warning = service.BotWakeWarning(task, agent.Name)
 		reason = "bot_wake_chain_limit"
 	}
+	var replaceOutcome *ChatReplaceOutcome
+	if mode == sendModeReplace {
+		replaceOutcome = newChatReplaceOutcome(sent)
+	}
 	var pickupDeadline *string
 	if task.PickupDeadlineAt.Valid {
 		deadline := timestampToString(task.PickupDeadlineAt)
@@ -1594,16 +1652,17 @@ func (h *Handler) SendChatMessage(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusCreated, SendChatMessageResponse{
 		Runtime: diagnostics.Runtime, Warning: warning, ReasonCode: reason,
-		Urgent:           req.Urgent,
-		PickupDeadlineAt: pickupDeadline,
-		FallbackRuntime:  sendOpts.RuntimeID.Valid,
-		MessageID:        uuidToString(msg.ID),
-		TaskID:           uuidToString(task.ID),
-		SupportsQueue:    true,
-		Queued:           sent.Queued,
-		Mode:             applied,
-		CreatedAt:        timestampToString(task.CreatedAt),
-		AttachmentIDs:    boundAttachmentIDs,
+		Urgent:             req.Urgent,
+		PickupDeadlineAt:   pickupDeadline,
+		FallbackRuntime:    sendOpts.RuntimeID.Valid,
+		MessageID:          uuidToString(msg.ID),
+		TaskID:             uuidToString(task.ID),
+		SupportsQueue:      true,
+		Queued:             sent.Queued,
+		Mode:               applied,
+		ChatReplaceOutcome: replaceOutcome,
+		CreatedAt:          timestampToString(task.CreatedAt),
+		AttachmentIDs:      boundAttachmentIDs,
 	})
 }
 
@@ -2964,6 +3023,11 @@ type ChatMessageResponse struct {
 	// agent can `multica attachment download <id>` rather than guessing
 	// from a markdown URL that may expire.
 	Attachments []AttachmentResponse `json:"attachments,omitempty"`
+	// SupersededAt is set when a newer instruction replaced this message
+	// (DENE-1932); SupersededByMessageID names that instruction. Clients mark
+	// the message as no longer in force.
+	SupersededAt          *string `json:"superseded_at,omitempty"`
+	SupersededByMessageID *string `json:"superseded_by_message_id,omitempty"`
 }
 
 func chatSessionToResponse(s db.ChatSession) ChatSessionResponse {
@@ -3005,6 +3069,9 @@ func chatMessageToResponse(m db.ChatMessage, attachments []AttachmentResponse) C
 		SenderUserID:  uuidToPtr(m.SenderUserID),
 
 		LinkedSessionID: uuidToPtr(m.LinkedSessionID),
+
+		SupersededAt:          timestampToPtr(m.SupersededAt),
+		SupersededByMessageID: uuidToPtr(m.SupersededByMessageID),
 	}
 }
 

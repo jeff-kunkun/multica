@@ -58,8 +58,9 @@ When the budget is spent the issue becomes `blocked` with a comment instead of s
 
 ## Message a reply that is still running
 
-A chat message or an issue comment can reach an agent mid-reply in three ways.
-`multica chat send` and `multica issue comment add` both take `--mode`:
+A chat message or an issue comment can reach an agent mid-reply in three ways
+(a chat has a fourth, `replace`, below). `multica chat send` and
+`multica issue comment add` both take `--mode`:
 
 | Mode | What happens | CLI process | Session |
 | --- | --- | --- | --- |
@@ -70,8 +71,24 @@ A chat message or an issue comment can reach an agent mid-reply in three ways.
 ```bash
 multica chat send --session <chat-id> --content-file ./msg.md --mode steer
 multica issue comment add <issue-id> --content-file ./msg.md --mode restart
+multica chat send --session <chat-id> --content-file ./msg.md --mode replace --wait --output json
 ```
 
+- `replace` (chat only) is for a changed mind: **意图改变用 `--mode replace`**。
+  One transaction cancels every queued follow-up of the chat, marks those
+  messages and the running turn's trigger message superseded (the chat shows
+  "已被新指令替换"), stops the running reply and starts a new run from the new
+  message at the head of the queue. With nothing running it still voids the
+  queued old messages and runs the new one. The new run is told the earlier
+  instructions are void. Only the chat creator or an agent run may use it; a
+  personal token works. Managed/linked chats refuse it with 400.
+  `--output json` returns `new_task_id`, `cancelled_task_ids`,
+  `superseded_message_ids` (and `stop_failed_task_ids` if a stop did not land);
+  `--wait` waits for the new reply. Plain `restart` keeps queued messages;
+  `replace` drops them.
+- `multica chat clear-queue --session <id>` only empties the queued follow-ups
+  (the head already claimed and the running reply stay); `--output json` gives
+  `{"chat_session_id":…, "cleared":true}`.
 - `steer` reaches the run in one of two ways, decided by its CLI:
   - Claude, Codex, Grok, OpenCode 1.x and Pi read it in the running process
     after the current step.
@@ -141,7 +158,8 @@ SMS to relay, a "stop now". It changes three things and nothing else:
 multica chat send --session <id> --urgent "验证码 482913，请立刻填入" --output json
 ```
 
-- `--urgent` implies `--mode restart`; combining it with `--mode steer` is a
+- `--urgent` implies `--mode restart` (an explicit `--mode replace` is kept);
+  combining it with `--mode steer` is a
   400. Only the person who started the chat (or an agent run) may restart a
   reply, so a shared-chat guest gets 403 as with any restart.
 - `--urgent` always waits for the **pickup** (task_status `running`), not the
