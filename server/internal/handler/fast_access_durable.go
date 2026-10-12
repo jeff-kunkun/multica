@@ -218,7 +218,14 @@ func (h *Handler) fastDurableCollect(r *http.Request, viewer string, req fastReq
 	return b, nil
 }
 
-func (h *Handler) fastCheckBatch(r *http.Request, viewer string, b *fastBatch, pageItems ...fastItem) error {
+// fastCheckBatch rechecks a batch against live permission state. resumed is
+// true when b was loaded from a stored cursor: only then is its revision
+// compared with the live global epoch. A batch collected in this very request
+// fixed its revision inside the read snapshot, so comparing it would turn any
+// unrelated membership write elsewhere in the database into a spurious
+// scope_reset on a first read. Object and source visibility are rechecked
+// either way, which is what catches a real revocation.
+func (h *Handler) fastCheckBatch(r *http.Request, viewer string, b *fastBatch, resumed bool, pageItems ...fastItem) error {
 	_, revision, _, floor, err := h.fastState(r, viewer, b.Request)
 	if errors.Is(err, errFastScope) {
 		return errFastPermission
@@ -226,7 +233,7 @@ func (h *Handler) fastCheckBatch(r *http.Request, viewer string, b *fastBatch, p
 	if err != nil {
 		return err
 	}
-	if revision != b.ScopeRevision {
+	if resumed && revision != b.ScopeRevision {
 		return errFastPermission
 	}
 	if b.AsOf.Before(floor) {
@@ -281,7 +288,7 @@ func (h *Handler) fastDurableRead(w http.ResponseWriter, r *http.Request, req fa
 			fastWriteFailure(w, err)
 			return
 		}
-		if err = h.fastCheckBatch(r, viewer, &c.Batch); err != nil {
+		if err = h.fastCheckBatch(r, viewer, &c.Batch, true); err != nil {
 			fastWriteFailure(w, err)
 			return
 		}
@@ -324,8 +331,10 @@ func (h *Handler) fastDurableRead(w http.ResponseWriter, r *http.Request, req fa
 		}
 		return
 	}
-	// Recheck after collecting, before emitting or persisting a page.
-	if err = h.fastCheckBatch(r, viewer, b, response.Changes...); err != nil {
+	// Recheck object visibility after collecting, before emitting or persisting
+	// a page. A stored cursor was revision-checked above; a fresh batch carries
+	// the revision of its own snapshot.
+	if err = h.fastCheckBatch(r, viewer, b, false, response.Changes...); err != nil {
 		fastWriteFailure(w, err)
 		return
 	}

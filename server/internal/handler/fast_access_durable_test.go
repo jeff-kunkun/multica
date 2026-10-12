@@ -23,8 +23,12 @@ func fastMustExec(t *testing.T, sql string, args ...any) {
 }
 func fastSnapshot(t *testing.T, include ...string) fastResponse {
 	t.Helper()
+	return fastSnapshotIn(t, testWorkspaceID, include...)
+}
+func fastSnapshotIn(t *testing.T, workspaceID string, include ...string) fastResponse {
+	t.Helper()
 	resetFastQuota()
-	b, w := fastCall(t, fastRequest{Scope: &fastScope{Mode: "workspace_ids", WorkspaceIDs: []string{testWorkspaceID}}, Include: include, Limit: 200})
+	b, w := fastCall(t, fastRequest{Scope: &fastScope{Mode: "workspace_ids", WorkspaceIDs: []string{workspaceID}}, Include: include, Limit: 200})
 	if w.Code != 200 || !b.Complete || b.Checkpoint == nil {
 		t.Fatalf("snapshot: %d %s", w.Code, w.Body.String())
 	}

@@ -37,17 +37,23 @@ func resetFastQuota() {
 	store.Unlock()
 }
 func TestFastAccessSnapshot(t *testing.T) {
-	runtime := dbfx.Runtime(t, "fast-runtime")
-	agent := dbfx.Agent(t, "fast-agent", runtime)
+	// Two workspaces this test owns: the shared "Handler Tests" workspace also
+	// holds active runs left by earlier tests, which would change the exact
+	// active_runs count asserted below.
+	ws1 := dbfx.Workspace(t, "Handler fixture", "fast-"+strings.ToLower(randomID()), testutil.Cols{"issue_prefix": "FA"})
+	dbfx.Member(t, ws1, testUserID, "owner")
+	fx := testutil.New(testPool, ws1, testUserID)
+	runtime := fx.Runtime(t, "fast-runtime")
+	agent := fx.Agent(t, "fast-agent", runtime)
 	ws2 := dbfx.Workspace(t, "Production fixture", "fast-"+strings.ToLower(randomID()), testutil.Cols{"issue_prefix": "FX"})
 	dbfx.Member(t, ws2, testUserID, "owner")
 	runtime2 := dbfx.Runtime(t, "fast-second", testutil.Cols{"workspace_id": ws2})
 	agent2 := dbfx.Agent(t, "fast-second-agent", runtime2, testutil.Cols{"workspace_id": ws2})
-	chat := dbfx.ChatSession(t, agent, testutil.Cols{"title": strings.Repeat("中文🙂", 50), "explicitly_created_at": testutil.Raw("now()"), "last_read_at": testutil.Raw("now()-interval '1 hour'")})
-	dbfx.Insert(t, "chat_message", testutil.Cols{"chat_session_id": chat, "role": "assistant", "content": strings.Repeat("🙂界<", 90)})
-	old := dbfx.Issue(t, "old root issue", testutil.Cols{"created_at": testutil.Raw("now()-interval '2 hours'"), "updated_at": testutil.Raw("now()-interval '2 hours'")})
-	root := dbfx.Comment(t, old, "old root", testutil.Cols{"created_at": testutil.Raw("now()-interval '2 hours'"), "updated_at": testutil.Raw("now()-interval '2 hours'")})
-	dbfx.Comment(t, old, "new reply", testutil.Cols{"parent_id": root})
+	chat := fx.ChatSession(t, agent, testutil.Cols{"title": strings.Repeat("中文🙂", 50), "explicitly_created_at": testutil.Raw("now()"), "last_read_at": testutil.Raw("now()-interval '1 hour'")})
+	fx.Insert(t, "chat_message", testutil.Cols{"chat_session_id": chat, "role": "assistant", "content": strings.Repeat("🙂界<", 90)})
+	old := fx.Issue(t, "old root issue", testutil.Cols{"created_at": testutil.Raw("now()-interval '2 hours'"), "updated_at": testutil.Raw("now()-interval '2 hours'")})
+	root := fx.Comment(t, old, "old root", testutil.Cols{"created_at": testutil.Raw("now()-interval '2 hours'"), "updated_at": testutil.Raw("now()-interval '2 hours'")})
+	fx.Comment(t, old, "new reply", testutil.Cols{"parent_id": root})
 	for i := 0; i < 17; i++ {
 		a, rt := agent, runtime
 		if i >= 9 {
@@ -64,16 +70,16 @@ func TestFastAccessSnapshot(t *testing.T) {
 			cols["status"] = "deferred"
 			cols["context"] = []byte(`{"wakeup_id":"11111111-1111-1111-1111-111111111111"}`)
 		}
-		dbfx.Task(t, a, cols)
+		fx.Task(t, a, cols)
 	}
 	stranger := dbfx.User(t, "other", "fast-private-"+randomID()+"@example.test")
-	dbfx.Member(t, testWorkspaceID, stranger, "member")
-	hidden := dbfx.Issue(t, "HIDDEN-ISSUE", testutil.Cols{"creator_id": stranger, "visibility": "private"})
-	dbfx.Task(t, agent, testutil.Cols{"runtime_id": runtime, "status": "running", "issue_id": hidden})
-	privateChat := dbfx.ChatSession(t, agent, testutil.Cols{"creator_id": stranger, "visibility": "private", "title": "HIDDEN-CHAT", "explicitly_created_at": testutil.Raw("now()")})
-	dbfx.Task(t, agent, testutil.Cols{"runtime_id": runtime, "status": "running", "chat_session_id": privateChat})
+	dbfx.Member(t, ws1, stranger, "member")
+	hidden := fx.Issue(t, "HIDDEN-ISSUE", testutil.Cols{"creator_id": stranger, "visibility": "private"})
+	fx.Task(t, agent, testutil.Cols{"runtime_id": runtime, "status": "running", "issue_id": hidden})
+	privateChat := fx.ChatSession(t, agent, testutil.Cols{"creator_id": stranger, "visibility": "private", "title": "HIDDEN-CHAT", "explicitly_created_at": testutil.Raw("now()")})
+	fx.Task(t, agent, testutil.Cols{"runtime_id": runtime, "status": "running", "chat_session_id": privateChat})
 	since := time.Now().Add(-30 * time.Minute)
-	req := fastRequest{Scope: &fastScope{Mode: "workspace_ids", WorkspaceIDs: []string{testWorkspaceID, ws2}}, Limit: 200}
+	req := fastRequest{Scope: &fastScope{Mode: "workspace_ids", WorkspaceIDs: []string{ws1, ws2}}, Limit: 200}
 	resetFastQuota()
 	resp, w := fastCall(t, req)
 	if w.Code != 200 {
@@ -110,7 +116,7 @@ func TestFastAccessSnapshot(t *testing.T) {
 	if time.Since(unread) < 50*time.Minute {
 		t.Fatal("read cursor advanced")
 	}
-	roots, err := testHandler.Queries.ListRootCommentsSinceForIssue(context.Background(), db.ListRootCommentsSinceForIssueParams{IssueID: parseUUID(old), WorkspaceID: parseUUID(testWorkspaceID), Since: pgtype.Timestamptz{Time: since, Valid: true}, RowLimit: 100})
+	roots, err := testHandler.Queries.ListRootCommentsSinceForIssue(context.Background(), db.ListRootCommentsSinceForIssueParams{IssueID: parseUUID(old), WorkspaceID: parseUUID(ws1), Since: pgtype.Timestamptz{Time: since, Valid: true}, RowLimit: 100})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -131,7 +137,7 @@ func TestFastAccessSnapshot(t *testing.T) {
 		seen[fastKey(v)] = true
 	}
 	pages := 1
-	dbfx.Task(t, agent, testutil.Cols{"runtime_id": runtime, "status": "running"}) // must stay outside frozen batch
+	fx.Task(t, agent, testutil.Cols{"runtime_id": runtime, "status": "running"}) // must stay outside frozen batch
 	for page.NextCursor != nil {
 		resetFastQuota()
 		page, w = fastCall(t, fastRequest{Cursor: *page.NextCursor, Limit: 5, MaxBytes: 3000})

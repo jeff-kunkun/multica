@@ -51,27 +51,34 @@ func (d historyPlanDB) Query(ctx context.Context, sql string, args ...any) (pgx.
 }
 
 func TestFastDurableOldHistoryPages(t *testing.T) {
-	rt := dbfx.Runtime(t, "history runtime")
-	a := dbfx.Agent(t, "history agent", rt)
+	// The shared "Handler Tests" workspace accumulates active runs from earlier
+	// tests (handler-enqueued tasks and autopilot executions outlive their
+	// fixtures), so the exact active set is only known in a workspace this
+	// test owns.
+	ws := dbfx.Workspace(t, "History fixture", "history-"+strings.ToLower(randomID()), testutil.Cols{"issue_prefix": "HIS"})
+	dbfx.Member(t, ws, testUserID, "owner")
+	fx := testutil.New(testPool, ws, testUserID)
+	rt := fx.Runtime(t, "history runtime")
+	a := fx.Agent(t, "history agent", rt)
 	fastMustExec(t, `INSERT INTO agent_task_queue(agent_id,runtime_id,status,created_at,completed_at) SELECT $1::uuid,$2::uuid,'completed',now()-interval '30 days',now()-interval '30 days' FROM generate_series(1,10001)`, a, rt)
 	fastMustExec(t, `UPDATE fast_access_meta SET coverage_from=now()-interval '1 hour',permission_changed_at=now()-interval '1 hour'`)
-	fastMustExec(t, `UPDATE fast_access_journal SET changed_at=now()-interval '30 days' WHERE kind='run' AND workspace_id=$1`, testWorkspaceID)
+	fastMustExec(t, `UPDATE fast_access_journal SET changed_at=now()-interval '30 days' WHERE kind='run' AND workspace_id=$1`, ws)
 	// Rebuilding a cache after retention also excludes all-time terminal history.
-	cp := fastSnapshot(t, "issues", "run_changes", "active_runs")
+	cp := fastSnapshotIn(t, ws, "issues", "run_changes", "active_runs")
 	since := time.Now()
-	issue := dbfx.Issue(t, "recent issue")
-	task := dbfx.Task(t, a, testutil.Cols{"runtime_id": rt, "status": "queued", "created_at": testutil.Raw("now()-interval '30 days'")})
+	issue := fx.Issue(t, "recent issue")
+	task := fx.Task(t, a, testutil.Cols{"runtime_id": rt, "status": "queued", "created_at": testutil.Raw("now()-interval '30 days'")})
 	for _, status := range []string{"dispatched", "running", "completed"} {
 		fastMustExec(t, `UPDATE agent_task_queue SET status=$2 WHERE id=$1`, parseUUID(task), status)
 	}
 	active := map[string]bool{}
 	for _, status := range []string{"queued", "dispatched", "running", "waiting_local_directory", "deferred"} {
-		id := dbfx.Task(t, a, testutil.Cols{"runtime_id": rt, "status": status, "created_at": testutil.Raw("now()-interval '30 days'"), "context": []byte(`{"wakeup_id":"11111111-1111-1111-1111-111111111111"}`)})
+		id := fx.Task(t, a, testutil.Cols{"runtime_id": rt, "status": status, "created_at": testutil.Raw("now()-interval '30 days'"), "context": []byte(`{"wakeup_id":"11111111-1111-1111-1111-111111111111"}`)})
 		active[id] = true
 	}
 
 	fastMustExec(t, "ANALYZE agent_task_queue")
-	reqPlan := fastRequest{Scope: &fastScope{Mode: "workspace_ids", WorkspaceIDs: []string{testWorkspaceID}}, Include: []string{"run_changes", "active_runs"}, activeOnly: true}
+	reqPlan := fastRequest{Scope: &fastScope{Mode: "workspace_ids", WorkspaceIDs: []string{ws}}, Include: []string{"run_changes", "active_runs"}, activeOnly: true}
 	scopes, err := testHandler.fastScopes(withChatTestWorkspaceCtx(t, newRequest("GET", "/", nil)), testUserID, reqPlan)
 	if err != nil {
 		t.Fatal(err)
@@ -82,7 +89,7 @@ func TestFastDurableOldHistoryPages(t *testing.T) {
 		t.Fatal(err)
 	}
 	reqPlan.activeOnly = false
-	if _, err := reader.fastRows(context.Background(), scopes, reqPlan, time.Now(), []fastItem{{WorkspaceID: testWorkspaceID, Kind: "run", ID: task}}); err != nil {
+	if _, err := reader.fastRows(context.Background(), scopes, reqPlan, time.Now(), []fastItem{{WorkspaceID: ws, Kind: "run", ID: task}}); err != nil {
 		t.Fatal(err)
 	}
 	var expectedEvents string
@@ -91,7 +98,7 @@ func TestFastDurableOldHistoryPages(t *testing.T) {
 			req := fastRequest{Limit: 1, MaxBytes: 2000}
 			if mode == "since" {
 				req.Since = &since
-				req.Scope = &fastScope{Mode: "workspace_ids", WorkspaceIDs: []string{testWorkspaceID}}
+				req.Scope = &fastScope{Mode: "workspace_ids", WorkspaceIDs: []string{ws}}
 			} else {
 				req.Cursor = *cp.Checkpoint
 			}

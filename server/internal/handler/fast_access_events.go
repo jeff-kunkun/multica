@@ -39,7 +39,7 @@ func (h *Handler) FastAccessEvents(w http.ResponseWriter, r *http.Request) {
 		fastError(w, 400, "invalid_request", "finish pagination before subscribing")
 		return
 	}
-	if err = h.fastCheckBatch(r, viewer, &c.Batch); err != nil {
+	if err = h.fastCheckBatch(r, viewer, &c.Batch, true); err != nil {
 		fastWriteFailure(w, err)
 		return
 	}
@@ -129,7 +129,7 @@ func (h *Handler) FastAccessEvents(w http.ResponseWriter, r *http.Request) {
 					return
 				}
 			}
-			if e = h.fastCheckBatch(r, viewer, b, page.Changes...); e != nil {
+			if e = h.fastCheckBatch(r, viewer, b, false, page.Changes...); e != nil {
 				write("event: scope_reset\ndata: {\"code\":\"scope_reset\"}\n\n")
 				return
 			}
