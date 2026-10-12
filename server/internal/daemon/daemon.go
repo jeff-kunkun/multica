@@ -5120,6 +5120,7 @@ func (d *Daemon) handleModelList(ctx context.Context, rt Runtime, requestID stri
 	type modelThinkingWire struct {
 		SupportedLevels []thinkingLevelWire `json:"supported_levels"`
 		DefaultLevel    string              `json:"default_level,omitempty"`
+		Source          string              `json:"source,omitempty"`
 	}
 	type modelServiceTierWire struct {
 		ID          string `json:"id"`
@@ -5166,6 +5167,7 @@ func (d *Daemon) handleModelList(ctx context.Context, rt Runtime, requestID stri
 			entry.Thinking = &modelThinkingWire{
 				SupportedLevels: levels,
 				DefaultLevel:    m.Thinking.DefaultLevel,
+				Source:          m.Thinking.Source,
 			}
 		}
 		for _, tier := range m.ServiceTiers {

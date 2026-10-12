@@ -16,6 +16,10 @@ const modelListCommandTimeout = 15 * time.Second
 // runtime's own config. The key is for the local probe only.
 type modelEndpointSource func(ctx context.Context) (baseURL, apiKey, defaultModel string, err error)
 
+// modelEndpointAnnotator decorates the list an endpoint returned with what the
+// runtime's config declares for those models, bound to that base URL.
+type modelEndpointAnnotator func(ctx context.Context, baseURL string, models []Model) []Model
+
 // modelListCommand is a readonly catalog command a runtime has explicitly
 // registered. The chain never invents args or a parser: a declaration with
 // no args or no parser is not probed with `models` or `--list-models`.
@@ -159,6 +163,9 @@ func walkModelDiscoveryChain(
 					firstFail = err
 				}
 			} else {
+				if decl.AnnotateEndpoint != nil {
+					models = decl.AnnotateEndpoint(ctx, baseURL, models)
+				}
 				return Catalog{Models: models}, nil
 			}
 		}

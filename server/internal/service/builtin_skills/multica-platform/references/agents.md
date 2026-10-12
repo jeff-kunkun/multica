@@ -264,6 +264,19 @@ provider's fixed-enum or safe-token gate, and the daemon performs the exact
 model/level check. A runtime whose provider has no thinking concept rejects any
 non-empty value with a 400.
 
+Qwen Code (`qwen`) is the declared exception: its levels come from the
+runtime's own config — a `modelProviders.<authType>[<model>].capabilities.reasoning`
+block in the Qwen settings (`thinking`, `disableField`, `efforts`, optional
+`defaultEffort`) — so they bind to that runtime + endpoint + model, never to the
+provider name. `multica runtime models <runtime-id>` shows them with a SOURCE
+column (and DEFAULT when declared). The server checks a Qwen `thinking_level`
+against that reported catalog at save time and answers with a 400 and the
+reason when the runtime has not reported (offline/never asked), the model
+declares nothing, or the level is not declared. `none` turns thinking off; an
+empty string follows the model's default. Switching `model` while a level is
+set is refused unless the same update sends `thinking_level=""`. A new level
+applies from the next run; a running task keeps the level it started with.
+
 `service_tier` is the matching first-class Codex speed control. It has three
 distinct states:
 
