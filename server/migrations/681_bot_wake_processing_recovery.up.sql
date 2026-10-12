@@ -5,20 +5,25 @@ ALTER TABLE bot_wake ADD COLUMN last_processed_at timestamptz,
 -- One ordinary chat notification per reply, including replies completed by UPDATE.
 CREATE OR REPLACE FUNCTION bot_wake_capture() RETURNS trigger LANGUAGE plpgsql AS $$
 DECLARE ws uuid; iid uuid; cid uuid; sid uuid; typ text; body text := ''; atype text := 'system'; aid uuid;
- via uuid; vname text; stask uuid; root uuid; hops integer:=0;
+ msg chat_message%ROWTYPE; via uuid; vname text; stask uuid; root uuid; hops integer:=0;
  eid uuid := gen_random_uuid(); b record; mentioned boolean; interested boolean; inherited boolean;
 BEGIN
  IF TG_TABLE_NAME='comment' THEN
   iid:=NEW.issue_id; sid:=NEW.id; body:=NEW.content; typ:='mention'; atype:=NEW.author_type; aid:=NEW.author_id;
   SELECT workspace_id INTO ws FROM issue WHERE id=iid;
   via:=NEW.via_bot_id;vname:=NEW.via_bot_name;stask:=NEW.source_task_id;root:=NEW.wake_root_id;hops:=NEW.wake_hop;
- ELSIF TG_TABLE_NAME='chat_message' THEN
-  IF NEW.role='assistant' AND (NEW.content='' OR COALESCE(NEW.failure_reason,'')<>'' OR NEW.message_kind='no_response') THEN RETURN NEW; END IF;
-  cid:=NEW.chat_session_id; sid:=NEW.id; body:=NEW.content; typ:='chat';
-  via:=NEW.via_bot_id;vname:=NEW.via_bot_name;stask:=NEW.task_id;root:=NEW.wake_root_id;hops:=NEW.wake_hop;
+ ELSIF TG_TABLE_NAME IN ('chat_message','attachment') THEN
+  IF TG_TABLE_NAME='attachment' THEN
+   IF NEW.chat_message_id IS NULL THEN RETURN NEW; END IF;
+   SELECT * INTO msg FROM chat_message WHERE id=NEW.chat_message_id;
+   IF NOT FOUND THEN RETURN NEW; END IF;
+  ELSE msg:=NEW; END IF;
+  IF msg.role='assistant' AND ((msg.content='' AND NOT EXISTS(SELECT 1 FROM attachment WHERE chat_message_id=msg.id)) OR COALESCE(msg.failure_reason,'')<>'' OR msg.message_kind='no_response') THEN RETURN NEW; END IF;
+  cid:=msg.chat_session_id; sid:=msg.id; body:=msg.content; typ:='chat';
+  via:=msg.via_bot_id;vname:=msg.via_bot_name;stask:=msg.task_id;root:=msg.wake_root_id;hops:=msg.wake_hop;
   SELECT workspace_id INTO ws FROM chat_session WHERE id=cid;
-  IF NEW.sender_user_id IS NOT NULL THEN atype:='member'; aid:=NEW.sender_user_id;
-  ELSIF NEW.task_id IS NOT NULL THEN SELECT 'agent',agent_id INTO atype,aid FROM agent_task_queue WHERE id=NEW.task_id;
+  IF msg.sender_user_id IS NOT NULL THEN atype:='member'; aid:=msg.sender_user_id;
+  ELSIF msg.task_id IS NOT NULL THEN SELECT 'agent',agent_id INTO atype,aid FROM agent_task_queue WHERE id=msg.task_id;
   END IF;
   atype:=COALESCE(atype,'system');
  ELSIF TG_TABLE_NAME='issue_summon' THEN
@@ -80,8 +85,13 @@ BEGIN
   IF typ='chat' AND NOT mentioned AND EXISTS(SELECT 1 FROM bot_wake_event e WHERE e.bot_id=b.id AND e.source_id=sid AND e.event_type='chat') THEN CONTINUE; END IF;
   IF mentioned OR (typ<>'mention' AND (interested OR inherited)) THEN
    INSERT INTO bot_wake_event(event_id,bot_id,workspace_id,event_type,issue_id,chat_session_id,source_id,author_type,author_id,via_bot_id,via_bot_name,source_task_id,root_id,hop,inherited_owner)
-   VALUES(eid,b.id,ws,CASE WHEN mentioned THEN 'mention' ELSE typ END,iid,cid,sid,atype,aid,via,vname,stask,root,hops,inherited) ON CONFLICT DO NOTHING;
+   VALUES(CASE WHEN mentioned THEN gen_random_uuid() ELSE eid END,b.id,ws,CASE WHEN mentioned THEN 'mention' ELSE typ END,iid,cid,sid,atype,aid,via,vname,stask,root,hops,inherited) ON CONFLICT DO NOTHING;
   END IF;
  END LOOP;
  RETURN NEW;
 END $$;
+
+-- Completion creates the message before binding its files. Capture only after
+-- binding, in the same transaction, so a file-only reply is not an empty placeholder.
+CREATE TRIGGER bot_wake_chat_attachment AFTER INSERT OR UPDATE OF chat_message_id ON attachment
+ FOR EACH ROW EXECUTE FUNCTION bot_wake_capture();

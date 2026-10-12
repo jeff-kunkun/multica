@@ -169,8 +169,11 @@ marked failed after three failures; `processing_attempts` is separate from HTTP
 `uncertain` events automatically. An old queue drains in batches of up to 100
 first-attempt events for the same Bot/workspace, including different sources;
 each event still passes current visibility, sender, event and chain checks.
-Completed assistant chat messages notify Bots watching that chat; empty/failed
-replies are skipped, and completing a placeholder emits one `chat` event.
+Completed assistant chat messages notify Bots watching that chat, including
+file-only replies once their attachments are bound. Empty placeholders, failed
+replies and `no_response` outcomes are skipped. Each reply emits at most one
+ordinary `chat` event; a later first explicit mention emits its own `mention`
+event, while repeated mentions remain deduplicated.
 
 Every webhook has `delivery_id` and an ordered `events` array, including a
 single-event delivery. The top-level legacy fields mirror the first admitted

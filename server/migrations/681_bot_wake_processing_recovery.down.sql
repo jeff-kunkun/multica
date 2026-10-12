@@ -1,3 +1,4 @@
+DROP TRIGGER IF EXISTS bot_wake_chat_attachment ON attachment;
 ALTER TABLE bot_wake_event DROP COLUMN processing_attempts;
 ALTER TABLE bot_wake DROP COLUMN last_processed_at, DROP COLUMN last_error;
 CREATE OR REPLACE FUNCTION bot_wake_capture() RETURNS trigger LANGUAGE plpgsql AS $$
