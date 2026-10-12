@@ -125,6 +125,12 @@ reassign with `--per-quote` then. When the person never named anyone, create
 the ticket without an executor. Do not quote comments from third parties or
 other agents: they never count.
 
+**自领 (DENE-1834 part 5).** A sub-issue you create under the ticket your own
+run is working (`--parent <that ticket>`) and assign to yourself needs no
+quote: the server keeps the pick, records the source as `self_claim`, and the
+receipt / comment says 自领. Under any other parent, or naming any other
+seat, the same create is an unquoted agent pick and routing decides.
+
 A seat routing filled is a stand-in. When a person's decision replaces it —
 their own hand, or their words through `--per-quote` — the runs that seat's
 assignment started are cancelled, so two seats never work the same ticket. Its

@@ -29,6 +29,11 @@ const (
 	SourceAgent = "agent"
 	// SourceRouter — the routing module filled the slot.
 	SourceRouter = "router"
+	// SourceSelfClaim — an agent created a sub-issue under the ticket its own
+	// run is working and named itself executor (DENE-1834 part 5). It is
+	// breaking its own work down, not guessing at a seat, so the pick stands
+	// and is labelled 自领.
+	SourceSelfClaim = "self_claim"
 )
 
 // NoticeAgentPickIgnored is the one sentence a routing comment says when an

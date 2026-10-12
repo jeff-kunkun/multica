@@ -163,6 +163,7 @@
     "automation": "Set by an automation",
     "agent": "An agent's own pick",
     "router": "Picked by routing",
+    "self_claim": "Kept by the agent working the parent",
     "quote_text": "“{{quote}}”"
   },
   "close_protocol": {

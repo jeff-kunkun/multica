@@ -55,6 +55,8 @@ func heldExecutorLine(issue Issue) string {
 		return "由自动化按配置指定"
 	case SourceRouter:
 		return "路由已经选过"
+	case SourceSelfClaim:
+		return "做父票的智能体拆出这张子票，自己接着做"
 	}
 	return "由你指定"
 }

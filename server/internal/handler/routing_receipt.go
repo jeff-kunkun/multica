@@ -151,6 +151,8 @@ func heldSource(source string) routing.PickReason {
 		return routing.PickReasonQuote
 	case routing.SourceRouter:
 		return routing.PickReasonTier
+	case routing.SourceSelfClaim:
+		return routing.PickReasonSelfClaim
 	}
 	return routing.PickReasonHuman
 }
