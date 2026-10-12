@@ -109,11 +109,9 @@ func TestClaimTask_IssueProjectInForeignWorkspace_DegradesToWorkspaceRepos(t *te
 	})
 	_, foreignProjectID := foreignWorkspaceWithProject(t, "foreign-issue-project-ws", "FIP")
 
-	var agentID, runtimeID string
-	dbfx.QueryRow(t,
-		`SELECT id, runtime_id FROM agent WHERE workspace_id = $1 LIMIT 1`,
-		testWorkspaceID,
-	).Scan(&agentID, &runtimeID)
+	// A dedicated agent and runtime: the shared workspace's first agent has
+	// tasks queued by other tests, and the claim would hand one of those back.
+	agentID, runtimeID, _ := createRuntimeGuardAgent(t, context.Background())
 
 	issueID := dbfx.Issue(t, "issue pointing at a foreign project", testutil.Cols{
 		"project_id": foreignProjectID,
@@ -241,11 +239,9 @@ func TestClaimTask_ProjectResourceFromForeignWorkspace_IsFilteredOut(t *testing.
 		"position":      2,
 	})
 
-	var agentID, runtimeID string
-	dbfx.QueryRow(t,
-		`SELECT id, runtime_id FROM agent WHERE workspace_id = $1 LIMIT 1`,
-		testWorkspaceID,
-	).Scan(&agentID, &runtimeID)
+	// A dedicated agent and runtime: the shared workspace's first agent has
+	// tasks queued by other tests, and the claim would hand one of those back.
+	agentID, runtimeID, _ := createRuntimeGuardAgent(t, context.Background())
 
 	issueID := dbfx.Issue(t, "issue with a mismatched project resource", testutil.Cols{
 		"project_id": projectID,
@@ -293,11 +289,8 @@ func TestClaimTask_AutopilotRunOnlyForeignWorkspace_CancelsTask(t *testing.T) {
 		t.Skip("database not available")
 	}
 
-	var localAgentID, localRuntimeID string
-	dbfx.QueryRow(t,
-		`SELECT id, runtime_id FROM agent WHERE workspace_id = $1 LIMIT 1`,
-		testWorkspaceID,
-	).Scan(&localAgentID, &localRuntimeID)
+	// Dedicated agent and runtime, see TestClaimTask_IssueProjectInForeignWorkspace_DegradesToWorkspaceRepos.
+	localAgentID, localRuntimeID, _ := createRuntimeGuardAgent(t, context.Background())
 
 	foreignWorkspaceID, foreignProjectID := foreignWorkspaceWithProject(t, "foreign-autopilot-ws", "FAW")
 

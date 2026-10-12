@@ -154,7 +154,7 @@ var workspaceDeletionManifest = map[string]workspaceDeleteAction{
 	"workspace_mcp_server":               workspaceDelete,
 	"notification_preference":            workspaceDelete,
 	"password_reset_audit":               workspaceDeleteDetach,
-	"personal_access_token":              workspaceDeleteKeep,
+	"personal_access_token":              workspaceDelete, // bot keys (659) cascade on workspace_id; personal rows have NULL and stay
 	"pinned_item":                        workspaceDelete,
 	"plugin_installation":                workspaceDelete,
 	"plugin_hook_schedule":               workspaceDelete,

@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"os/exec"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -161,42 +162,64 @@ func TestFastAccessCLIHandlerIntegration(t *testing.T) {
 			t.Fatal("scope escaped")
 		}
 	}
-	page, err := invoke(false, "--all-workspaces", "--limit", "5")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if page["complete"] != false || page["checkpoint"] != nil {
-		t.Fatal("first page falsely complete")
-	}
-	unique := map[string]bool{}
-	pages := 0
-	batchAsOf := page["as_of"]
-	for {
-		pages++
-		if page["as_of"] != batchAsOf {
-			t.Fatal("batch boundary changed")
-		}
-		for _, section := range []string{"active_runs", "changes"} {
-			for _, raw := range page[section].([]any) {
-				r := raw.(map[string]any)
-				key := fmt.Sprint(r["workspace_id"], r["kind"], r["id"])
-				if unique[key] {
-					t.Fatal("duplicate item")
-				}
-				unique[key] = true
-			}
-		}
-		if page["complete"] == true {
-			break
-		}
-		cursor, ok := page["next_cursor"].(string)
-		if !ok || pages > 8 {
-			t.Fatal("pagination did not progress")
-		}
-		page, err = invoke(false, "--cursor", cursor, "--limit", "5")
+	// The permission epoch is one global counter: any membership or visibility
+	// write anywhere in the shared test database between two pages of one
+	// batch answers the cursor page with scope_reset, which is the documented
+	// contract (discard the cursor and rebuild). The walk below does exactly
+	// that, a bounded number of times; a cursor that never resumes still fails.
+	var page map[string]any
+	var unique map[string]bool
+	var pages int
+	for rebuild := 0; ; rebuild++ {
+		page, err = invoke(false, "--all-workspaces", "--limit", "5")
 		if err != nil {
 			t.Fatal(err)
 		}
+		if page["complete"] != false || page["checkpoint"] != nil {
+			t.Fatal("first page falsely complete")
+		}
+		unique = map[string]bool{}
+		pages = 0
+		batchAsOf := page["as_of"]
+		reset := false
+		for {
+			pages++
+			if page["as_of"] != batchAsOf {
+				t.Fatal("batch boundary changed")
+			}
+			for _, section := range []string{"active_runs", "changes"} {
+				for _, raw := range page[section].([]any) {
+					r := raw.(map[string]any)
+					key := fmt.Sprint(r["workspace_id"], r["kind"], r["id"])
+					if unique[key] {
+						t.Fatal("duplicate item")
+					}
+					unique[key] = true
+				}
+			}
+			if page["complete"] == true {
+				break
+			}
+			cursor, ok := page["next_cursor"].(string)
+			if !ok || pages > 8 {
+				t.Fatal("pagination did not progress")
+			}
+			page, err = invoke(false, "--cursor", cursor, "--limit", "5")
+			if err != nil && strings.Contains(err.Error(), `"scope_reset"`) {
+				reset = true
+				break
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+		}
+		if !reset {
+			break
+		}
+		if rebuild >= 4 {
+			t.Fatal("cursor pages kept answering scope_reset across five rebuilt batches")
+		}
+		t.Logf("cursor page answered scope_reset (permission epoch moved elsewhere in the shared database); rebuilding batch %d", rebuild+2)
 	}
 	want := len(full["active_runs"].([]any)) + len(full["changes"].([]any))
 	if len(unique) != want || page["active_runs_complete"] != true || page["checkpoint"] == nil {
