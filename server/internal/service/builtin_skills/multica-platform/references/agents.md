@@ -276,6 +276,11 @@ declares nothing, or the level is not declared. `none` turns thinking off; an
 empty string follows the model's default. Switching `model` while a level is
 set is refused unless the same update sends `thinking_level=""`. A new level
 applies from the next run; a running task keeps the level it started with.
+If a saved Qwen level stops being declared later (declaration removed, other
+endpoint or model), the daemon refuses the run with that reason
+(`agent_error.missing_config`, not auto-retried) instead of clearing the level
+and running the default; fix it by picking a declared level, clearing it with
+`--thinking-level ""`, or restoring the declaration.
 
 `service_tier` is the matching first-class Codex speed control. It has three
 distinct states:
