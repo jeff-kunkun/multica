@@ -430,7 +430,7 @@ reverse of a seat's `dispatch_projects`; both apply.
   seat. Seats already on an issue are not replaced when the list changes.
 - **An existing 验收席 off the list** is not woken by automatic acceptance
   (handoff, failed-review retry, stale wake): a listed seat that did not work
-  on the issue covers it, and the review is not handed back later; with none,
+  on the issue and is not offline or out of quota covers it, and the review is not handed back later; with none,
   the issue waits in 待验收 for a person to name a reviewer.
 - **A chat in several projects** is bounded by every non-empty list (their
   intersection, whatever the order of `project_ids`); lists with no agent in

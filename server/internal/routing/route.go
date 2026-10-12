@@ -1069,6 +1069,24 @@ func (r *Router) handOffToSubstitute(ctx context.Context, workspaceID string, se
 			avoid = append(avoid, id)
 		}
 	}
+	// The roster only knows who is switched on; a cover that is offline or
+	// out of quota cannot take the review either. Unknown is not a reason
+	// to drop a seat.
+	ids := make([]string, 0, len(roster))
+	for _, agent := range roster {
+		if agent.ID != "" && agent.ID != disabled.ID {
+			ids = append(ids, agent.ID)
+		}
+	}
+	facts, err := r.Store.RoutingFacts(ctx, workspaceID, ids, settings.ProviderKeys())
+	if err != nil {
+		return Outcome{State: StateEnabled, Action: ActionSkipped, Reason: "routing context incomplete"}, err
+	}
+	for _, id := range ids {
+		if snap, ok := facts.Seats[id]; ok && Unselectable(snap.Availability) {
+			avoid = append(avoid, id)
+		}
+	}
 	replacement, steppedDown, ok := SubstituteSeat(ladder, holder, roster, avoid, scene)
 	if !ok {
 		body := disabledReviewerStuck(disabled.Name)

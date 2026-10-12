@@ -341,3 +341,56 @@ func TestListedReviewerIsStillWoken(t *testing.T) {
 		t.Fatalf("handoffs = %v relays = %+v, want the listed reviewer woken directly", store.handoffs, store.relays)
 	}
 }
+
+// The listed cover must be able to work now: a listed seat that is offline or
+// out of quota does not take the review, and with nobody left the ticket keeps
+// its reviewer and says why, on every automatic acceptance wake.
+func TestOffListReviewerCoverSkipsUnavailableListedSeats(t *testing.T) {
+	ctx := context.Background()
+	wakes := map[string]func(*Router) error{
+		"acceptance handoff":   func(r *Router) error { _, err := r.Route(ctx, "ws", "issue-1"); return err },
+		"failed review":        func(r *Router) error { _, err := r.CoverFailedReview(ctx, "ws", "issue-1", false); return err },
+		"forced failed review": func(r *Router) error { _, err := r.CoverFailedReview(ctx, "ws", "issue-1", true); return err },
+		"stale wake":           func(r *Router) error { _, err := r.RouteStale(ctx, "ws", "issue-1"); return err },
+	}
+	judge := func() *fakeJudge {
+		return &fakeJudge{verdict: confidentVerdict(), stale: StaleDecision{Action: StaleWake, Confidence: 0.95}}
+	}
+	for what, wake := range wakes {
+		for _, availability := range []string{AvailabilityUnreachable, AvailabilityQuotaExhausted} {
+			t.Run(what+", every listed cover "+availability, func(t *testing.T) {
+				store := offListReviewStore(allowlist)
+				store.facts = RoutingFacts{Seats: map[string]SeatSnapshot{
+					"a-piccolo-g": {AgentID: "a-piccolo-g", Availability: availability},
+					"a-vegeta-g":  {AgentID: "a-vegeta-g", Availability: availability},
+				}}
+				if err := wake(newRouter(store, judge())); err != nil {
+					t.Fatalf("wake: %v", err)
+				}
+				if len(store.handoffs) != 0 || len(store.reviewer) != 0 || len(store.relays) != 0 {
+					t.Fatalf("handoffs = %v reviewer = %v relays = %+v, want nothing written", store.handoffs, store.reviewer, store.relays)
+				}
+				if store.issue.AssigneeID != "a-piccolo-g" || store.issue.Reviewer.ID != "a-goku-g" {
+					t.Fatalf("assignee = %s reviewer = %s, want both untouched", store.issue.AssigneeID, store.issue.Reviewer.ID)
+				}
+				if !strings.Contains(allComments(store), "名单外席位不兜底") {
+					t.Fatalf("the stuck note does not say why:\n%s", allComments(store))
+				}
+			})
+		}
+
+		t.Run(what+", one listed cover out, another free", func(t *testing.T) {
+			store := offListReviewStore([]string{"a-piccolo-g", "a-vegeta-g", "a-vegeta"})
+			store.facts = RoutingFacts{Seats: map[string]SeatSnapshot{
+				"a-vegeta-g": {AgentID: "a-vegeta-g", Availability: AvailabilityQuotaExhausted},
+				// a-vegeta has no snapshot: unknown is not unavailable.
+			}}
+			if err := wake(newRouter(store, judge())); err != nil {
+				t.Fatalf("wake: %v", err)
+			}
+			if len(store.handoffs) != 1 || store.handoffs[0] != "agent:a-vegeta" {
+				t.Fatalf("handoffs = %v, want the free listed 贝吉塔", store.handoffs)
+			}
+		})
+	}
+}
