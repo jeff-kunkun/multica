@@ -33,7 +33,7 @@ INSERT INTO project (
     $11::uuid,
     COALESCE($12::text, 'private'),
     COALESCE($13::uuid[], '{}'::uuid[])
-) RETURNING id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, start_date, due_date, visibility, created_by, domain_ids, linked_projects
+) RETURNING id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, start_date, due_date, visibility, created_by, domain_ids, linked_projects, executor_agent_ids
 `
 
 type CreateProjectParams struct {
@@ -87,6 +87,7 @@ func (q *Queries) CreateProject(ctx context.Context, arg CreateProjectParams) (P
 		&i.CreatedBy,
 		&i.DomainIds,
 		&i.LinkedProjects,
+		&i.ExecutorAgentIds,
 	)
 	return i, err
 }
@@ -107,7 +108,7 @@ func (q *Queries) DeleteProject(ctx context.Context, arg DeleteProjectParams) er
 }
 
 const getProjectInWorkspace = `-- name: GetProjectInWorkspace :one
-SELECT id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, start_date, due_date, visibility, created_by, domain_ids, linked_projects FROM project
+SELECT id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, start_date, due_date, visibility, created_by, domain_ids, linked_projects, executor_agent_ids FROM project
 WHERE id = $1 AND workspace_id = $2
 `
 
@@ -137,6 +138,7 @@ func (q *Queries) GetProjectInWorkspace(ctx context.Context, arg GetProjectInWor
 		&i.CreatedBy,
 		&i.DomainIds,
 		&i.LinkedProjects,
+		&i.ExecutorAgentIds,
 	)
 	return i, err
 }
@@ -241,7 +243,7 @@ func (q *Queries) ListProjectIDsLedByMember(ctx context.Context, arg ListProject
 }
 
 const listProjects = `-- name: ListProjects :many
-SELECT id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, start_date, due_date, visibility, created_by, domain_ids, linked_projects FROM project
+SELECT id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, start_date, due_date, visibility, created_by, domain_ids, linked_projects, executor_agent_ids FROM project
 WHERE workspace_id = $1
   AND ($2::text IS NULL OR status = $2)
   AND ($3::text IS NULL OR priority = $3)
@@ -281,6 +283,7 @@ func (q *Queries) ListProjects(ctx context.Context, arg ListProjectsParams) ([]P
 			&i.CreatedBy,
 			&i.DomainIds,
 			&i.LinkedProjects,
+			&i.ExecutorAgentIds,
 		); err != nil {
 			return nil, err
 		}
@@ -332,12 +335,51 @@ func (q *Queries) LockProjectForDelete(ctx context.Context, arg LockProjectForDe
 	return id, err
 }
 
+const setProjectExecutorAgents = `-- name: SetProjectExecutorAgents :one
+UPDATE project SET executor_agent_ids = $3::uuid[], updated_at = now()
+WHERE id = $1 AND workspace_id = $2
+RETURNING id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, start_date, due_date, visibility, created_by, domain_ids, linked_projects, executor_agent_ids
+`
+
+type SetProjectExecutorAgentsParams struct {
+	ID               pgtype.UUID   `json:"id"`
+	WorkspaceID      pgtype.UUID   `json:"workspace_id"`
+	ExecutorAgentIds []pgtype.UUID `json:"executor_agent_ids"`
+}
+
+// The project's automatic-dispatch allowlist (DENE-1959); empty lifts it.
+func (q *Queries) SetProjectExecutorAgents(ctx context.Context, arg SetProjectExecutorAgentsParams) (Project, error) {
+	row := q.db.QueryRow(ctx, setProjectExecutorAgents, arg.ID, arg.WorkspaceID, arg.ExecutorAgentIds)
+	var i Project
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.Title,
+		&i.Description,
+		&i.Icon,
+		&i.Status,
+		&i.LeadType,
+		&i.LeadID,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Priority,
+		&i.StartDate,
+		&i.DueDate,
+		&i.Visibility,
+		&i.CreatedBy,
+		&i.DomainIds,
+		&i.LinkedProjects,
+		&i.ExecutorAgentIds,
+	)
+	return i, err
+}
+
 const setProjectVisibility = `-- name: SetProjectVisibility :one
 UPDATE project SET
     visibility = $3,
     updated_at = now()
 WHERE id = $1 AND workspace_id = $2
-RETURNING id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, start_date, due_date, visibility, created_by, domain_ids, linked_projects
+RETURNING id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, start_date, due_date, visibility, created_by, domain_ids, linked_projects, executor_agent_ids
 `
 
 type SetProjectVisibilityParams struct {
@@ -367,6 +409,7 @@ func (q *Queries) SetProjectVisibility(ctx context.Context, arg SetProjectVisibi
 		&i.CreatedBy,
 		&i.DomainIds,
 		&i.LinkedProjects,
+		&i.ExecutorAgentIds,
 	)
 	return i, err
 }
@@ -384,7 +427,7 @@ UPDATE project SET
     due_date = $10,
     updated_at = now()
 WHERE id = $1
-RETURNING id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, start_date, due_date, visibility, created_by, domain_ids, linked_projects
+RETURNING id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, start_date, due_date, visibility, created_by, domain_ids, linked_projects, executor_agent_ids
 `
 
 type UpdateProjectParams struct {
@@ -432,6 +475,7 @@ func (q *Queries) UpdateProject(ctx context.Context, arg UpdateProjectParams) (P
 		&i.CreatedBy,
 		&i.DomainIds,
 		&i.LinkedProjects,
+		&i.ExecutorAgentIds,
 	)
 	return i, err
 }

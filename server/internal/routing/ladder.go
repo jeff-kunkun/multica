@@ -475,6 +475,9 @@ type Agent struct {
 	// project is the ticket's project the roster was read for (ForProject);
 	// it decides whether a project-limited seat is a candidate.
 	project string
+	// projectSeats is that project's executor allowlist (DENE-1959); empty
+	// admits every seat.
+	projectSeats []string
 }
 
 // agentDirection is the direction a seat serves: its recorded domain, or by

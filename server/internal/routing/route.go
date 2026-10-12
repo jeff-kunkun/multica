@@ -306,19 +306,19 @@ func (r *Router) routeTodo(ctx context.Context, workspaceID string, settings Set
 	if err != nil {
 		return Outcome{State: StateEnabled, Action: ActionSkipped, Reason: "roster unreadable"}, err
 	}
-	roster = ForProject(roster, issue.ProjectID)
+	roster = ForProject(roster, issue.ProjectID, issue.ProjectSeats)
 	candidates := ladder.assignmentCandidates(scene, roster)
 	// Coordinator requests in the body become Bot mentions in PostComment.
 	// The deliver mention flag targets a human creator/owner, not Grok.
 	if len(candidates) == 0 {
-		return r.deliver(ctx, workspaceID, issue, KindAssignment, "没有可自动选派的席位；未派出，请 Grok 协调。", false, Outcome{State: StateEnabled, Action: ActionAdvised, Reason: "no routable seat"})
+		return r.deliver(ctx, workspaceID, issue, KindAssignment, "没有可自动选派的席位"+projectSeatsNote(issue)+"；未派出，请 Grok 协调。", false, Outcome{State: StateEnabled, Action: ActionAdvised, Reason: "no routable seat"})
 	}
 	eligible, state, err := r.decisionContext(ctx, workspaceID, settings, issue, scene, candidates)
 	if err != nil {
 		return Outcome{State: StateEnabled, Action: ActionSkipped, Reason: "routing context incomplete"}, err
 	}
 	if len(eligible) == 0 {
-		return r.deliver(ctx, workspaceID, issue, KindAssignment, "候选均不在线或没有额度；未派出，请 Grok 协调。", false, Outcome{State: StateEnabled, Action: ActionAdvised, Reason: "no eligible seat"})
+		return r.deliver(ctx, workspaceID, issue, KindAssignment, "候选均不在线或没有额度"+projectSeatsNote(issue)+"；未派出，请 Grok 协调。", false, Outcome{State: StateEnabled, Action: ActionAdvised, Reason: "no eligible seat"})
 	}
 
 	// A tier label on the ticket is an answer, not a hint: when it names a
@@ -718,7 +718,7 @@ func (r *Router) continuation(ctx context.Context, workspaceID string, settings 
 	seats := make(map[string]ContinuationSeat, len(ids))
 	for _, id := range ids {
 		agent, onRoster := agentByID(roster, id)
-		_, unpickable := SeatSelectable(agent.State, SelectContext{ProjectID: agent.project})
+		_, unpickable := SeatSelectable(agent.selectState(), agent.selectContext())
 		seats[id] = ContinuationSeat{
 			Seat:         seatFromRoster(ladder, roster, id),
 			OnRoster:     onRoster,
@@ -796,7 +796,7 @@ func (r *Router) PickAcceptanceSeat(ctx context.Context, workspaceID string, iss
 	if err != nil {
 		return ReviewerRef{}, "读不到席位名册", false
 	}
-	roster = ForProject(roster, issue.ProjectID)
+	roster = ForProject(roster, issue.ProjectID, issue.ProjectSeats)
 	candidates := ladder.assignmentCandidates(scene, roster)
 	candidates, err = r.eligibleNow(ctx, workspaceID, settings, candidates)
 	if err != nil {
@@ -999,7 +999,7 @@ func (r *Router) routeInReview(ctx context.Context, workspaceID string, settings
 	if err != nil {
 		return out, err
 	}
-	roster = ForProject(roster, issue.ProjectID)
+	roster = ForProject(roster, issue.ProjectID, issue.ProjectSeats)
 	seatAgent, ok := agentByID(roster, issue.Reviewer.ID)
 	if !ok {
 		card, found, err := r.Store.OffRosterSeat(ctx, workspaceID, issue.Reviewer.ID)
@@ -1151,7 +1151,7 @@ func (r *Router) decideReviewerNow(ctx context.Context, workspaceID string, sett
 	if err != nil {
 		return ReviewerRef{}, Outcome{State: StateEnabled, Action: ActionSkipped, Reason: "roster unreadable"}, err
 	}
-	roster = ForProject(roster, issue.ProjectID)
+	roster = ForProject(roster, issue.ProjectID, issue.ProjectSeats)
 	candidates := ladder.assignmentCandidates(scene, roster)
 	if len(candidates) == 0 {
 		return ReviewerRef{}, noop("ladder has no seat in this workspace"), nil
@@ -1271,7 +1271,7 @@ func (r *Router) routeBlocked(ctx context.Context, workspaceID string, settings 
 	if err != nil {
 		return out, err
 	}
-	roster = ForProject(roster, issue.ProjectID)
+	roster = ForProject(roster, issue.ProjectID, issue.ProjectSeats)
 	candidates := ladder.assignmentCandidates(scene, roster)
 	_, state, err := r.decisionContext(ctx, workspaceID, settings, issue, scene, candidates)
 	if err != nil {

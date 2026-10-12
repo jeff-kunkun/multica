@@ -48,7 +48,7 @@ func (r *Router) CoverFailedReview(ctx context.Context, workspaceID, issueID str
 	if err != nil {
 		return Outcome{}, err
 	}
-	roster = ForProject(roster, issue.ProjectID)
+	roster = ForProject(roster, issue.ProjectID, issue.ProjectSeats)
 	out := Outcome{State: StateEnabled, Action: ActionHandedOff}
 	seat, onRoster := agentByID(roster, issue.Reviewer.ID)
 	if !onRoster {

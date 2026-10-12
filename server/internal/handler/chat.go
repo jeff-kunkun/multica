@@ -231,6 +231,12 @@ func (h *Handler) routeChatAgent(w http.ResponseWriter, r *http.Request, workspa
 		pickReq.ProjectID = util.UUIDToString(projectID)
 		scene := service.LoadDomainScene(r.Context(), h.Queries, workspaceUUID, pgtype.UUID{}, projectID)
 		pickReq.ProjectName, pickReq.ProjectDomains = scene.ProjectName, scene.Project
+		seats, err := service.LoadProjectExecutorSeats(r.Context(), h.Queries, workspaceUUID, projectID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to read the project's executor allowlist")
+			return RoutingReceipt{}, false
+		}
+		pickReq.ProjectSeats = seats
 	}
 	rr, err := h.pickAgentForChat(r.Context(), util.UUIDToString(workspaceUUID), pickReq)
 	switch {

@@ -33,6 +33,8 @@ func NormalizeDispatchMode(raw string) (string, bool) {
 // Every field's zero value is the selectable one, so a caller that never read
 // a fact does not exclude the seat by accident.
 type SeatState struct {
+	// ID is the agent id, read against a project's executor allowlist.
+	ID       string
 	Archived bool
 	// Disabled is work_enabled=false.
 	Disabled bool
@@ -61,6 +63,10 @@ type SelectContext struct {
 	// selectable only for a ticket in one of them, so a path that does not
 	// say which ticket it picks for never picks a limited seat.
 	ProjectID string
+	// ProjectSeats is that project's executor allowlist (DENE-1959): when
+	// non-empty, only these agent ids are selectable for its work. Empty
+	// admits every seat.
+	ProjectSeats []string
 	// AnyProject skips the project check, for a roster shared across
 	// tickets that applies ServesProject per ticket itself.
 	AnyProject bool
@@ -75,6 +81,9 @@ const (
 	ReasonUntiered     = "untiered"
 	ReasonBreakerOpen  = "breaker_open"
 	ReasonOutOfProject = "out_of_project"
+	// ReasonNotProjectSeat is a seat the ticket's project does not list as
+	// an executor (DENE-1959).
+	ReasonNotProjectSeat = "not_project_seat"
 )
 
 // SeatSelectable is the one answer to "may automatic dispatch pick this seat
@@ -96,6 +105,8 @@ func SeatSelectable(s SeatState, c SelectContext) (bool, string) {
 		return false, ReasonNoRuntime
 	case !c.AnyProject && !ServesProject(s.Projects, c.ProjectID):
 		return false, ReasonOutOfProject
+	case !c.AnyProject && !ProjectAdmits(c.ProjectSeats, s.ID):
+		return false, ReasonNotProjectSeat
 	case c.NeedTier && strings.TrimSpace(c.Tier) == "":
 		return false, ReasonUntiered
 	case c.BreakerOpen:
@@ -132,21 +143,68 @@ func ServesProject(projects []string, projectID string) bool {
 	return false
 }
 
+// ProjectAdmits reports whether a project's executor allowlist lets
+// automatic dispatch pick agentID. An empty list admits every seat; a listed
+// one admits only its members, and a seat whose id is unknown never passes,
+// so a caller that forgot to read the id fails closed.
+func ProjectAdmits(seats []string, agentID string) bool {
+	if len(seats) == 0 {
+		return true
+	}
+	agentID = strings.TrimSpace(agentID)
+	if agentID == "" {
+		return false
+	}
+	for _, s := range seats {
+		if strings.EqualFold(strings.TrimSpace(s), agentID) {
+			return true
+		}
+	}
+	return false
+}
+
 // autoPickable is SeatSelectable for a roster seat on the routing paths. The
 // project is the one ForProject stamped on the roster.
 func (a Agent) autoPickable() bool {
-	ok, _ := SeatSelectable(a.State, SelectContext{ProjectID: a.project})
+	ok, _ := SeatSelectable(a.selectState(), a.selectContext())
 	return ok
 }
 
+// selectState is the seat's record with its roster id filled in, so the
+// project allowlist can be checked even when the store left State.ID empty.
+func (a Agent) selectState() SeatState {
+	s := a.State
+	if s.ID == "" {
+		s.ID = a.ID
+	}
+	return s
+}
+
+// selectContext is the project ForProject stamped on the roster seat.
+func (a Agent) selectContext() SelectContext {
+	return SelectContext{ProjectID: a.project, ProjectSeats: a.projectSeats}
+}
+
 // ForProject returns the roster as seen from a ticket in projectID: a seat
-// limited to other projects stays on it, so it can still be found as a
-// holder, but the candidate builders drop it (DENE-1648).
-func ForProject(roster map[string]Agent, projectID string) map[string]Agent {
+// limited to other projects (DENE-1648), or left off the project's executor
+// allowlist seats (DENE-1959), stays on it, so it can still be found as a
+// holder, but the candidate builders drop it.
+func ForProject(roster map[string]Agent, projectID string, seats []string) map[string]Agent {
 	out := make(map[string]Agent, len(roster))
 	for name, a := range roster {
 		a.project = projectID
+		a.projectSeats = seats
 		out[name] = a
 	}
 	return out
+}
+
+// projectSeatsNote tells a decline comment that the project's executor
+// allowlist bounded the search, so nobody reads 未派出 as a routing fault
+// that a seat outside the list could have fixed.
+func projectSeatsNote(issue Issue) string {
+	if len(issue.ProjectSeats) == 0 {
+		return ""
+	}
+	return "（本项目限定执行人名单，名单外席位不兜底）"
 }

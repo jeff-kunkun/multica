@@ -69,7 +69,7 @@ func (r *Router) escalate(ctx context.Context, workspaceID, issueID, reason, rev
 	if err != nil {
 		return esc, err
 	}
-	roster = ForProject(roster, issue.ProjectID)
+	roster = ForProject(roster, issue.ProjectID, issue.ProjectSeats)
 	var holder Agent
 	for _, a := range roster {
 		if a.ID == issue.AssigneeID {

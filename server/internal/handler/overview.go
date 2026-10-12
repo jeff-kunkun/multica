@@ -114,7 +114,7 @@ func (h *Handler) GetOverview(w http.ResponseWriter, r *http.Request) {
 	omitted := []string{}
 	sources := []overviewSource{
 		{"agents", "", "id name description model runtime_id runtime_mode runtime_availability parent_agent_id parent_agent_name domain_id routing_tier thinking_level service_tier work_enabled work_pause dispatch_mode dispatch_projects skills", h.ListAgents, ""},
-		{"projects", "projects", "id title description status lead_type lead_id domain_ids", h.ListProjects, permission.ModuleProjects},
+		{"projects", "projects", "id title description status lead_type lead_id domain_ids executor_agent_ids", h.ListProjects, permission.ModuleProjects},
 		{"chats", "", "id title project_id agent_id agent_name status last_active_at linked_projects", h.ListChatDirectory, ""},
 		{"automations", "autopilots", "id title description project_id assignee_type assignee_id status execution_mode trigger_kinds next_run_at", h.ListAutopilots, ""},
 		{"skills", "", "id name description", h.ListSkills, ""},

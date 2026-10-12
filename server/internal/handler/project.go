@@ -17,6 +17,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/issuestatus"
 	"github.com/multica-ai/multica/server/internal/logger"
 	"github.com/multica-ai/multica/server/internal/permission"
+	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
@@ -52,27 +53,40 @@ type ProjectResponse struct {
 	// DomainIDs are the workspace domains this project works in (DENE-1451).
 	// Empty means generic. Its issues each pick one of them.
 	DomainIDs []string `json:"domain_ids"`
+	// ExecutorAgentIDs is the project's executor allowlist (DENE-1959):
+	// automatic dispatch picks only these agents for its work. Empty means
+	// every seat may be picked.
+	ExecutorAgentIDs []string `json:"executor_agent_ids"`
 }
 
 func projectToResponse(p db.Project) ProjectResponse {
 	return ProjectResponse{
-		ID:          uuidToString(p.ID),
-		WorkspaceID: uuidToString(p.WorkspaceID),
-		Title:       p.Title,
-		Description: textToPtr(p.Description),
-		Icon:        textToPtr(p.Icon),
-		Status:      p.Status,
-		Priority:    p.Priority,
-		LeadType:    textToPtr(p.LeadType),
-		LeadID:      uuidToPtr(p.LeadID),
-		StartDate:   dateToPtr(p.StartDate),
-		DueDate:     dateToPtr(p.DueDate),
-		CreatedAt:   timestampToString(p.CreatedAt),
-		UpdatedAt:   timestampToString(p.UpdatedAt),
-		Visibility:  p.Visibility,
-		CreatedBy:   uuidToString(p.CreatedBy),
-		DomainIDs:   domainIDStrings(p.DomainIds),
+		ID:               uuidToString(p.ID),
+		WorkspaceID:      uuidToString(p.WorkspaceID),
+		Title:            p.Title,
+		Description:      textToPtr(p.Description),
+		Icon:             textToPtr(p.Icon),
+		Status:           p.Status,
+		Priority:         p.Priority,
+		LeadType:         textToPtr(p.LeadType),
+		LeadID:           uuidToPtr(p.LeadID),
+		StartDate:        dateToPtr(p.StartDate),
+		DueDate:          dateToPtr(p.DueDate),
+		CreatedAt:        timestampToString(p.CreatedAt),
+		UpdatedAt:        timestampToString(p.UpdatedAt),
+		Visibility:       p.Visibility,
+		CreatedBy:        uuidToString(p.CreatedBy),
+		DomainIDs:        domainIDStrings(p.DomainIds),
+		ExecutorAgentIDs: executorAgentIDsOrEmpty(p),
 	}
+}
+
+// executorAgentIDsOrEmpty is the allowlist for the API: always a list.
+func executorAgentIDsOrEmpty(p db.Project) []string {
+	if ids := service.ProjectExecutorSeats(p); ids != nil {
+		return ids
+	}
+	return []string{}
 }
 
 func (h *Handler) loadProjectIssueStats(ctx context.Context, workspaceID, projectID pgtype.UUID) (int64, int64) {
@@ -147,6 +161,9 @@ type UpdateProjectRequest struct {
 	// DomainIDs replaces the project's domains when present (ids or names);
 	// an empty list makes the project generic.
 	DomainIDs *[]string `json:"domain_ids"`
+	// ExecutorAgentIDs replaces the executor allowlist when present (agent
+	// ids); an empty list lifts it. Workspace owner/admin only.
+	ExecutorAgentIDs *[]string `json:"executor_agent_ids"`
 }
 
 func (h *Handler) ListProjects(w http.ResponseWriter, r *http.Request) {
@@ -697,6 +714,20 @@ func (h *Handler) UpdateProject(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	var executorIDs []pgtype.UUID
+	if req.ExecutorAgentIDs != nil {
+		// Who may be picked automatically is routing configuration, not
+		// project content: the same owner/admin gate as the routing settings.
+		if _, ok := h.requireWorkspaceRole(w, r, workspaceID, "project not found", "owner", "admin"); !ok {
+			return
+		}
+		ids, msg := h.resolveProjectExecutors(r.Context(), wsUUID, *req.ExecutorAgentIDs)
+		if msg != "" {
+			writeError(w, http.StatusBadRequest, msg)
+			return
+		}
+		executorIDs = ids
+	}
 	tx, err := h.TxStarter.Begin(r.Context())
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to update project")
@@ -712,6 +743,14 @@ func (h *Handler) UpdateProject(w http.ResponseWriter, r *http.Request) {
 	if req.DomainIDs != nil {
 		if project, err = h.setProjectDomains(r.Context(), qtx, project, domainIDs); err != nil {
 			writeError(w, http.StatusInternalServerError, "failed to update project domains")
+			return
+		}
+	}
+	if req.ExecutorAgentIDs != nil {
+		if project, err = qtx.SetProjectExecutorAgents(r.Context(), db.SetProjectExecutorAgentsParams{
+			ID: project.ID, WorkspaceID: project.WorkspaceID, ExecutorAgentIds: executorIDs,
+		}); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to update project executors")
 			return
 		}
 	}
@@ -1138,4 +1177,34 @@ func (h *Handler) SearchProjects(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"projects": resp,
 	})
+}
+
+// resolveProjectExecutors validates an executor allowlist (DENE-1959): each
+// entry is an agent id in this workspace that is not archived; duplicates
+// collapse, and an empty list lifts the limit. The second value is the 400
+// message.
+func (h *Handler) resolveProjectExecutors(ctx context.Context, workspaceID pgtype.UUID, raw []string) ([]pgtype.UUID, string) {
+	out := make([]pgtype.UUID, 0, len(raw))
+	seen := make(map[string]bool, len(raw))
+	for _, value := range raw {
+		value = strings.TrimSpace(value)
+		id, err := util.ParseUUID(value)
+		if err != nil {
+			return nil, fmt.Sprintf("executor_agent_ids: %q is not an agent id", value)
+		}
+		key := util.UUIDToString(id)
+		if seen[key] {
+			continue
+		}
+		agent, err := h.Queries.GetAgentInWorkspace(ctx, db.GetAgentInWorkspaceParams{ID: id, WorkspaceID: workspaceID})
+		if err != nil {
+			return nil, fmt.Sprintf("executor_agent_ids: %s is not an agent in this workspace", value)
+		}
+		if agent.ArchivedAt.Valid {
+			return nil, fmt.Sprintf("executor_agent_ids: %s (%s) is archived", value, agent.Name)
+		}
+		seen[key] = true
+		out = append(out, id)
+	}
+	return out, ""
 }

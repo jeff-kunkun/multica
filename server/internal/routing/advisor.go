@@ -30,7 +30,7 @@ func (r *Router) AdvisorCandidates(ctx context.Context, workspaceID, issueID, as
 		return nil, "", err
 	}
 	ladder := r.Ladder.For(settings)
-	roster = ForProject(roster, issue.ProjectID)
+	roster = ForProject(roster, issue.ProjectID, issue.ProjectSeats)
 
 	issue.AssigneeType, issue.AssigneeID = "agent", askerID
 	candidates := ladder.assignmentCandidates(ladder.IssueScene(issue), roster)
