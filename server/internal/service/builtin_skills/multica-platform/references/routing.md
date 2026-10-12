@@ -18,7 +18,9 @@ What it may do, and only when the slot is still **empty**:
   for a unified review of the full child tree.
 - **`todo`** — fill the assignee with a seat from the tier ladder (seats with
   `dispatch_mode: mention_only` are never on it, whatever their tier, and a
-  seat with `dispatch_projects` set is on it only for those projects' issues). For a
+  seat with `dispatch_projects` set is on it only for those projects' issues;
+  a project with `executor_agent_ids` set puts only those seats on it — see
+  [Project executor allowlist](#project-executor-allowlist)). For a
   top-level issue, also fill the issue's 验收席 with a seat or 「不需要验收」.
   **Routing never writes a person
   into 验收席**: an issue a person holds is one routing never touches again, so
@@ -414,3 +416,29 @@ for legacy comparison; active reasoning still chooses the tier and seat once. Th
 changed without the browser: `multica workspace routing set --source
 runtime_subscription --runtime <id> --model <id> --thinking low`. Use
 `api_gateway` to retain the OpenAI-compatible path.
+
+## Project executor allowlist
+
+A project can name the only seats automatic dispatch may pick for its issues
+and chats (`executor_agent_ids`, DENE-1959). Empty means no limit. It is the
+reverse of a seat's `dispatch_projects`; both apply.
+
+- **Limited:** every automatic pick for an issue or chat in the project —
+  initial executor and 验收席, chat auto-routing and its fallbacks, 接着做,
+  escalate, 兜底, quota relay, safety relay, seat relay, advisor picks.
+- **Not limited:** @mention, assignment by a person, delegation to a named
+  seat. Seats already on an issue are not replaced when the list changes.
+- **Nobody on the list can take it** (disabled, offline, out of quota,
+  archived): routing stops and the comment ends with
+  「本项目限定执行人名单，名单外席位不兜底」; a chat returns the decline
+  "no seat on the project's executor allowlist …". It never falls back to a
+  seat off the list.
+
+```bash
+multica project get <project-id> --output json            # executor_agent_ids: [] = no limit
+multica project update <project-id> --executor 拉蒂兹 --executor <agent-id> --output json
+multica project update <project-id> --executor "" --output json   # clear
+```
+
+Only workspace owners and admins change it (403 otherwise); every id must be
+a live agent of this workspace (400 otherwise).

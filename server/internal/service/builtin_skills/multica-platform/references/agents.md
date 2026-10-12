@@ -81,7 +81,9 @@ A following specialisation inherits it with the tier and usage.
 A seat can also be **limited to projects** (`dispatch_projects`, DENE-1648):
 automatic dispatch — routing, quota relay, seat relay — picks it only for
 issues in those projects. Empty means every project. @mention, assignment and
-delegation are not limited. Not inherited by followers.
+delegation are not limited. Not inherited by followers. The reverse — a
+project naming the only seats it accepts — is the project's
+`executor_agent_ids` (see routing.md, Project executor allowlist).
 
 ```bash
 multica agent update <agent-id> --dispatch-projects IPA-input,game --output json   # titles, ids or id prefixes
