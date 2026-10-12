@@ -54,7 +54,14 @@ export function buildModelChangeUpdate(input: {
     input.model,
     input.provider,
   );
-  if (!entry) return update;
+  if (!entry) {
+    // Qwen levels are declared per model, so a model the catalog does not
+    // list has none; the server would refuse to keep the old one (DENE-1950).
+    if (input.provider === "qwen" && input.thinkingLevel) {
+      update.thinking_level = "";
+    }
+    return update;
+  }
 
   const supportsThinking = (entry.thinking?.supported_levels ?? []).some(
     (level) => level.value === input.thinkingLevel,

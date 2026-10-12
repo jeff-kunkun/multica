@@ -64,6 +64,7 @@ export function ThinkingPropRow({
       <ThinkingPicker
         value={value}
         levels={levels}
+        declared={isDeclared(entry, provider)}
         canEdit={canEdit}
         onChange={onChange}
       />
@@ -96,24 +97,69 @@ export function ThinkingSettingField({
   const modelsQuery = useQuery(
     runtimeModelsOptions(runtimeOnline ? runtimeId : null, agentId),
   );
+  const { t } = useT("agents");
   const models = modelsQuery.data?.models ?? [];
   const entry = pickModelEntry(models, model, provider);
   const levels = entry?.thinking?.supported_levels ?? [];
+  const declared = isDeclared(entry, provider);
+  // Qwen levels exist only when its own settings declare them for this
+  // model on this endpoint, so an empty list is a state worth naming
+  // rather than a provider without the feature (DENE-1950).
+  const reason =
+    levels.length === 0 && DECLARED_PROVIDERS.has(provider)
+      ? !runtimeOnline
+        ? t(($) => $.pickers.thinking_reason_offline)
+        : modelsQuery.isPending
+          ? t(($) => $.pickers.thinking_reason_loading)
+          : modelsQuery.isError
+            ? t(($) => $.pickers.thinking_reason_error)
+            : t(($) => $.pickers.thinking_reason_undeclared)
+      : undefined;
 
-  if (levels.length === 0 && !value) return null;
+  if (levels.length === 0 && !value) {
+    if (!reason) return null;
+    return (
+      <SettingsRow label={label} description={reason} size="select-wide">
+        <ThinkingPicker
+          variant="field"
+          showLabel={false}
+          value=""
+          levels={[]}
+          declared
+          canEdit={false}
+          onChange={onChange}
+        />
+      </SettingsRow>
+    );
+  }
 
   return (
-    <SettingsRow label={label} size="select-wide">
+    <SettingsRow
+      label={label}
+      description={
+        reason ??
+        (declared ? t(($) => $.pickers.thinking_next_run) : undefined)
+      }
+      size="select-wide"
+    >
       <ThinkingPicker
         variant="field"
         showLabel={false}
         value={value}
         levels={levels}
+        declared={declared}
         canEdit={canEdit}
         onChange={onChange}
       />
     </SettingsRow>
   );
+}
+
+/** Providers whose levels are declared per model in the runtime's own config. */
+const DECLARED_PROVIDERS = new Set(["qwen"]);
+
+function isDeclared(entry: RuntimeModel | undefined, provider: string) {
+  return DECLARED_PROVIDERS.has(provider) || Boolean(entry?.thinking?.source);
 }
 
 function pickModelEntry(

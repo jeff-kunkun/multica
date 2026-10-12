@@ -1638,6 +1638,11 @@ export interface RuntimeModelThinking {
    *  means "no override; let the local CLI config decide", which may
    *  itself differ from this value. */
   default_level?: string;
+  /** Where the levels were declared, when they come from the runtime's own
+   *  config rather than the CLI (Qwen Code's modelProviders
+   *  capabilities.reasoning). Present means the levels are user-declared
+   *  for this model on this endpoint. */
+  source?: string;
 }
 
 export interface RuntimeModelThinkingLevel {

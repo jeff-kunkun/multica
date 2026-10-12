@@ -5120,6 +5120,7 @@ func (d *Daemon) handleModelList(ctx context.Context, rt Runtime, requestID stri
 	type modelThinkingWire struct {
 		SupportedLevels []thinkingLevelWire `json:"supported_levels"`
 		DefaultLevel    string              `json:"default_level,omitempty"`
+		Source          string              `json:"source,omitempty"`
 	}
 	type modelServiceTierWire struct {
 		ID          string `json:"id"`
@@ -5166,6 +5167,7 @@ func (d *Daemon) handleModelList(ctx context.Context, rt Runtime, requestID stri
 			entry.Thinking = &modelThinkingWire{
 				SupportedLevels: levels,
 				DefaultLevel:    m.Thinking.DefaultLevel,
+				Source:          m.Thinking.Source,
 			}
 		}
 		for _, tier := range m.ServiceTiers {
@@ -6629,6 +6631,9 @@ func taskRunFailureReason(err error) string {
 	// this host — filesystem faults, and the per-provider local config
 	// Prepare writes or validates — whose text Classify can only read as
 	// agent output (#7913).
+	if errors.Is(err, errThinkingLevelUndeclared) {
+		return taskfailure.ReasonAgentMissingConfig.String()
+	}
 	var envSetupErr *environmentSetupError
 	if errors.As(err, &envSetupErr) {
 		return taskfailure.ReasonEnvironmentPrepareFailed.String()
@@ -8428,7 +8433,17 @@ type taskModelSelection struct {
 	Model         string
 	ThinkingLevel string
 	ServiceTier   string
+	// ThinkingRefusal is set when the saved thinking_level must not be
+	// dropped quietly and the run must not start (DENE-1950): the level of a
+	// per-model declared provider (Qwen Code) that the verified catalog no
+	// longer declares. The message says what to change.
+	ThinkingRefusal string
 }
+
+// errThinkingLevelUndeclared marks a run refused because its saved thinking
+// level is no longer declared for the model it would run. It is a config
+// problem on the agent, so it is reported as missing_config and not retried.
+var errThinkingLevelUndeclared = errors.New("thinking level not declared for this model")
 
 // resolveTaskModelSelection settles the model selector and its capability
 // overrides against the runtime's own model catalog, reading that catalog at
@@ -8526,6 +8541,19 @@ func resolveTaskModelSelection(
 				"thinking_level", sel.ThinkingLevel,
 				"error", err,
 			)
+		} else if !ok && agent.ThinkingDeclaredPerModel(provider) {
+			// A declared level was accepted at save time against the catalog of
+			// that moment. If the declaration has since gone (removed from the
+			// settings, another endpoint, another model), clearing it here would
+			// run the model's default while the agent still shows the saved
+			// level, so the run is refused with a reason instead.
+			catalog, _ := loadCatalog()
+			sel.ThinkingRefusal = declaredThinkingRefusal(catalog, provider, sel.Model, sel.ThinkingLevel)
+			taskLog.Warn("thinking_level: no longer declared for this model; refusing the run",
+				"provider", provider,
+				"model", sel.Model,
+				"thinking_level", sel.ThinkingLevel,
+			)
 		} else if !ok {
 			taskLog.Warn("thinking_level: not valid for this (provider, model); skipping injection",
 				"provider", provider,
@@ -8537,6 +8565,40 @@ func resolveTaskModelSelection(
 	}
 
 	return sel
+}
+
+// declaredThinkingRefusal is the run failure shown for a saved level the
+// model no longer declares: what is saved, what the model offers now, and the
+// two ways out.
+func declaredThinkingRefusal(catalog agent.Catalog, provider, model, level string) string {
+	target := model
+	if target == "" {
+		for _, m := range catalog.Models {
+			if m.Default {
+				target = m.ID
+				break
+			}
+		}
+	}
+	offered := "none declared"
+	for _, m := range catalog.Models {
+		if m.ID != target || m.Thinking == nil || len(m.Thinking.SupportedLevels) == 0 {
+			continue
+		}
+		values := make([]string, 0, len(m.Thinking.SupportedLevels))
+		for _, l := range m.Thinking.SupportedLevels {
+			values = append(values, l.Value)
+		}
+		offered = "declared now: " + strings.Join(values, ", ")
+	}
+	name := target
+	if name == "" {
+		name = "(runtime default)"
+	}
+	return fmt.Sprintf("this agent's thinking level %q is no longer declared for %s model %q (%s). "+
+		"The run did not start, so the saved level is not silently ignored: pick a declared level, "+
+		"or set thinking back to follow default (thinking_level=\"\"), or restore the model's declaration",
+		level, provider, name, offered)
 }
 
 // qualifyTaskModel promotes a persisted model id to the canonical
@@ -9913,6 +9975,9 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	}
 	selection := resolveTaskModelSelection(ctx, provider, agent.NewCommand(entry.Path, profileFixedArgs),
 		taskModelSelection{Model: model, ThinkingLevel: thinkingLevel, ServiceTier: serviceTier}, taskLog)
+	if selection.ThinkingRefusal != "" {
+		return TaskResult{}, fmt.Errorf("%w: %s", errThinkingLevelUndeclared, selection.ThinkingRefusal)
+	}
 	model, thinkingLevel, serviceTier = selection.Model, selection.ThinkingLevel, selection.ServiceTier
 
 	var idleWatchdogTimeout time.Duration

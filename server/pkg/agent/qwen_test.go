@@ -80,6 +80,9 @@ func fakeQwenScript() string {
 	return `#!/bin/sh
 if [ -n "$QWEN_ARGS_FILE" ]; then printf '%s\n' "$@" > "$QWEN_ARGS_FILE"; fi
 if [ -n "$QWEN_STDIN_FILE" ]; then cat > "$QWEN_STDIN_FILE"; fi
+if [ -n "$QWEN_SYS_CAPTURE_FILE" ]; then
+  if [ -n "$QWEN_CODE_SYSTEM_SETTINGS_PATH" ]; then cp "$QWEN_CODE_SYSTEM_SETTINGS_PATH" "$QWEN_SYS_CAPTURE_FILE"; printf '%s' "$QWEN_CODE_SYSTEM_SETTINGS_PATH" > "$QWEN_SYS_CAPTURE_FILE.path"; else printf 'unset' > "$QWEN_SYS_CAPTURE_FILE"; fi
+fi
 while [ "$#" -gt 0 ]; do
   if [ "$1" = "--mcp-config" ] && [ -n "$QWEN_MCP_CAPTURE_FILE" ]; then cp "$2" "$QWEN_MCP_CAPTURE_FILE"; break; fi
   shift

@@ -90,6 +90,10 @@ type ModelThinking struct {
 	// provided. Empty means "the runtime picks, we don't know" — the
 	// UI shows "Default" as a generic option.
 	DefaultLevel string `json:"default_level,omitempty"`
+	// Source names where the levels were declared, for catalogs read from a
+	// user's own config rather than the CLI (Qwen Code's modelProviders row).
+	// Empty for catalogs the CLI reports itself.
+	Source string `json:"source,omitempty"`
 }
 
 // ThinkingLevel is one entry in a ModelThinking.SupportedLevels list.

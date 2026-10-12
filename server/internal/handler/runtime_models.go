@@ -139,6 +139,9 @@ type ModelServiceTier struct {
 type ModelThinking struct {
 	SupportedLevels []ThinkingLevel `json:"supported_levels"`
 	DefaultLevel    string          `json:"default_level,omitempty"`
+	// Source names where the levels were declared (Qwen's modelProviders row);
+	// empty when the CLI reports them itself.
+	Source string `json:"source,omitempty"`
 }
 
 // ThinkingLevel is the wire shape for a single entry in a model's

@@ -428,6 +428,10 @@ func (h *Handler) thinkingLevelAcceptedForRuntime(w http.ResponseWriter, r *http
 		writeError(w, http.StatusBadRequest, thinkingNeedsExplicitModelRejection(runtime.Provider))
 		return false
 	}
+	if msg := h.declaredThinkingRejection(r.Context(), runtime.Provider, runtime.ID, model, level); msg != "" {
+		writeError(w, http.StatusBadRequest, msg)
+		return false
+	}
 	return true
 }
 
