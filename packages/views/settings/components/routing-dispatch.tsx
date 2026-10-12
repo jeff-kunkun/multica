@@ -260,6 +260,9 @@ function DispatchRuleRow({
             </option>
           ))}
         </select>
+        <Input type="number" min={0} max={100} step={0.1} value={rule.weight ?? 1}
+          disabled={!editable} className="h-11 w-24" aria-label={t(($) => $.routing.dispatch_weight)}
+          onChange={(event) => onChange({ weight: Number(event.target.value) })} />
         <select
           value={rule.max_tier ?? ""}
           disabled={!editable}

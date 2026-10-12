@@ -10,6 +10,7 @@ import (
 // escalation from it must land on 强, not skip to the strongest rung.
 func TestEscalateReadsTheTagNotTheLadderName(t *testing.T) {
 	store := newFakeStore()
+	store.issue.ConsultCount = 1
 	store.roster = map[string]Agent{
 		"布尔玛":  {ID: "a-bulma", Name: "布尔玛", Tier: "strongest", Usage: UsageTight},
 		"孙悟空":  {ID: "a-goku", Name: "孙悟空", Tier: "strong"},

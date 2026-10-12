@@ -219,6 +219,9 @@ func (h *Handler) EscalateIssue(w http.ResponseWriter, r *http.Request) {
 	case errors.Is(err, routing.ErrNotEnabled):
 		writeError(w, http.StatusConflict, "routing is not enabled for this workspace")
 		return
+	case errors.Is(err, routing.ErrConsultRequired):
+		writeError(w, http.StatusConflict, err.Error())
+		return
 	case errors.Is(err, routing.ErrNotEscalatable):
 		writeError(w, http.StatusConflict, "this ticket has no agent executor to escalate from")
 		return

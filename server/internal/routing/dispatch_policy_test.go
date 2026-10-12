@@ -105,7 +105,7 @@ func TestReviseDispatchPolicyBumpsVersionAndKeepsTheOrigins(t *testing.T) {
 	if rev.Version != 1 || rev.By != "Kun" || rev.At != "2026-10-11T09:00:00Z" {
 		t.Fatalf("revision = %+v", rev)
 	}
-	for _, want := range []string{"~ 审查→Codex → 审查→Gemini", "~ 文档沉淀 封顶中档 → 文档沉淀 封顶弱档", "− 审美→Claude"} {
+	for _, want := range []string{"~ 审查→Codex（权重 1） → 审查→Gemini（权重 1）", "~ 文档沉淀 封顶中档 → 文档沉淀 封顶弱档", "− 审美→Claude"} {
 		if !strings.Contains(rev.RulesDiff, want) {
 			t.Fatalf("rules diff %q lacks %q", rev.RulesDiff, want)
 		}
@@ -123,7 +123,7 @@ func TestReviseDispatchPolicyBumpsVersionAndKeepsTheOrigins(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if second.Version != 2 || len(second.History) != 2 || second.History[1].RulesDiff != "+ 数据→Codex" || second.History[1].By != "Grok Bot" {
+	if second.Version != 2 || len(second.History) != 2 || second.History[1].RulesDiff != "+ 数据→Codex（权重 1）" || second.History[1].By != "Grok Bot" {
 		t.Fatalf("second = %+v", second.History)
 	}
 

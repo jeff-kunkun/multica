@@ -44,7 +44,7 @@
     {"id": "cross_module", "label": "跨模块", "when": {"scope": ["cross_module"]}, "tier": "strong", "reviewer": "seat"},
     {"id": "vague", "label": "需求模糊", "when": {"clarity": ["vague"]}, "tier": "strong", "reviewer": "seat"},
     {"id": "unknown", "label": "有一题答不出", "any_unknown": true, "tier": "medium", "reviewer": "seat"},
-    {"id": "simple", "label": "小改动、需求清楚、代价低", "when": {"scope": ["small"], "clarity": ["clear"], "risk": ["low"]}, "tier": "weak", "reviewer": "none"},
-    {"id": "default", "label": "其余", "tier": "medium", "reviewer": "none"}
+    {"id": "simple", "label": "小改动、需求清楚、代价低", "when": {"scope": ["small"], "clarity": ["clear"], "risk": ["low"]}, "tier": "weak", "reviewer": "seat"},
+    {"id": "default", "label": "其余", "tier": "medium", "reviewer": "seat"}
   ]
 }

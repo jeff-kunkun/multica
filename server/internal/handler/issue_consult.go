@@ -129,6 +129,9 @@ func (h *Handler) CreateIssueConsult(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	limit := policy.Consult.PerIssue
+	if settings, err := (routingStore{h: h}).Settings(r.Context(), uuidToString(issue.WorkspaceID)); err == nil && settings.ConsultPerIssue != nil {
+		limit = *settings.ConsultPerIssue
+	}
 	if limit <= 0 {
 		limit = maxAgentSpawnLimit
 	}
@@ -143,10 +146,16 @@ func (h *Handler) CreateIssueConsult(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to find an advisor: "+err.Error())
 		return
 	}
+	if refusal != "" {
+		if _, err := (routingStore{h: h}).PostComment(r.Context(), uuidToString(issue.WorkspaceID), uuidToString(issue.ID), routing.CommentKind("consult_unavailable"), "咨询未派出：目标档和相邻档没有在线且有额度的席位，最强档不作兜底；请 Grok 协调。"); err != nil {
+			writeError(w, 500, "cannot record unavailable advisor: "+err.Error())
+			return
+		}
+	}
 	switch refusal {
 	case routing.AdvisorNoStrongSeat:
 		writeConsultRefusal(w, consultRefusal{status: http.StatusConflict, code: ConsultRefusedNoAdvisor,
-			message: "no other seat sits on the strongest tier for this ticket; keep working on your own judgment"})
+			message: "no eligible advisor at the target or adjacent tier; the coordinator has been requested"})
 		return
 	case routing.AdvisorAllUnavailable:
 		writeConsultRefusal(w, consultRefusal{status: http.StatusConflict, code: ConsultRefusedUnavailable,
@@ -210,8 +219,12 @@ func (h *Handler) ListIssueConsults(w http.ResponseWriter, r *http.Request) {
 		}
 		out = append(out, h.consultToResponse(r.Context(), c))
 	}
+	limit := policy.Consult.PerIssue
+	if settings, err := (routingStore{h: h}).Settings(r.Context(), uuidToString(issue.WorkspaceID)); err == nil && settings.ConsultPerIssue != nil {
+		limit = *settings.ConsultPerIssue
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"consults": out, "used": used, "limit": policy.Consult.PerIssue, "enabled": policy.Consult.Enabled,
+		"consults": out, "used": used, "limit": limit, "enabled": policy.Consult.Enabled,
 	})
 }
 

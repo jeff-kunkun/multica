@@ -73,7 +73,7 @@ func TestRoutingDispatchPreviewConfirmAndHistory(t *testing.T) {
 		t.Fatalf("origins = %s/%s", saved.Policy.Rules[0].Origin, saved.Policy.Rules[1].Origin)
 	}
 	rev := saved.Policy.History[0]
-	if rev.By == "" || !strings.Contains(rev.RulesDiff, "~ 前端→Claude（说明或来源句改了）") || !strings.Contains(rev.RulesDiff, "− 文档沉淀 封顶中档") {
+	if rev.By == "" || !strings.Contains(rev.RulesDiff, "~ 前端→Claude（权重 1）（说明或来源句改了）") || !strings.Contains(rev.RulesDiff, "− 文档沉淀 封顶中档") {
 		t.Fatalf("revision = %+v", rev)
 	}
 

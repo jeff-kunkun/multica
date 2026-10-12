@@ -29,7 +29,7 @@ const JUDGE_ONLY: Pick<
   analysis: { enabled: false, model: "", base_url: "" },
   usage_priority: true,
   allow_upshift: false,
-  strongest_gate: true,
+  strongest_gate: true, decision_mode: "legacy" as const, consult_per_issue: 3,
   prefer_continuation: false,
   prefer_idle: false,
   learn_from_outcomes: false,
@@ -71,7 +71,7 @@ describe("parseRoutingSettings", () => {
       analysis: { enabled: false, model: "", base_url: "" },
       usage_priority: true,
       allow_upshift: false,
-      strongest_gate: true,
+      strongest_gate: true, decision_mode: "legacy" as const, consult_per_issue: 3,
       prefer_continuation: false,
       prefer_idle: false,
       learn_from_outcomes: false,
@@ -87,7 +87,7 @@ describe("parseRoutingSettings", () => {
     expect(parseRoutingSettings({ routing: { enabled: true } })).toMatchObject({
       usage_priority: true,
       allow_upshift: false,
-      strongest_gate: true,
+      strongest_gate: true, decision_mode: "legacy" as const, consult_per_issue: 3,
       prefer_continuation: false,
       prefer_idle: false,
       learn_from_outcomes: false,
@@ -279,7 +279,7 @@ describe("withRoutingSettings", () => {
         analysis: { enabled: false, model: "", base_url: "" },
         usage_priority: true,
         allow_upshift: false,
-        strongest_gate: true,
+        strongest_gate: true, decision_mode: "legacy" as const, consult_per_issue: 3,
         prefer_continuation: false,
         prefer_idle: false,
         learn_from_outcomes: false,
@@ -308,7 +308,7 @@ describe("withRoutingSettings", () => {
       analysis: { enabled: false, model: "", base_url: "" },
       usage_priority: true,
       allow_upshift: false,
-      strongest_gate: true,
+      strongest_gate: true, decision_mode: "legacy" as const, consult_per_issue: 3,
       prefer_continuation: false,
       prefer_idle: false,
       learn_from_outcomes: false,
@@ -340,7 +340,7 @@ describe("withRoutingSettings", () => {
         judge_enabled: false,
         usage_priority: true,
         allow_upshift: false,
-        strongest_gate: true,
+        strongest_gate: true, decision_mode: "legacy" as const, consult_per_issue: 3,
         prefer_continuation: false,
         prefer_idle: false,
         learn_from_outcomes: false,
@@ -361,7 +361,7 @@ describe("withRoutingSettings", () => {
         judge_enabled: false,
         usage_priority: true,
         allow_upshift: false,
-        strongest_gate: true,
+        strongest_gate: true, decision_mode: "legacy" as const, consult_per_issue: 3,
         prefer_continuation: false,
         prefer_idle: false,
         learn_from_outcomes: false,
@@ -433,7 +433,8 @@ describe("withRoutingSettings", () => {
 
   it("round-trips through parse", () => {
     const next = { enabled: true, model: "m", confidence_threshold: 0.42, stale_review_hours: 24, base_url: "", policy_prompt: "", ...JUDGE_ONLY };
-    expect(parseRoutingSettings(withRoutingSettings({}, next))).toEqual(next);
+    expect(parseRoutingSettings(withRoutingSettings({}, next))).toEqual({ ...next, decision_mode: "legacy",
+      consult_per_issue: 3 });
   });
 });
 

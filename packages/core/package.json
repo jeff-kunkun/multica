@@ -38,6 +38,7 @@
     "./workspace/switcher-preference": "./workspace/switcher-preference.ts",
     "./workspace/routing-settings": "./workspace/routing-settings.ts",
     "./workspace/routing-health": "./workspace/routing-health.ts",
+    "./workspace/routing-shadow": "./workspace/routing-shadow.ts",
     "./workspace/routing-dispatch": "./workspace/routing-dispatch.ts",
     "./workspace/routing-policy-prompt": "./workspace/routing-policy-prompt.ts",
     "./issue-statuses": "./issue-statuses/index.ts",

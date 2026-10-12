@@ -1881,6 +1881,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					// it is member-visible like the health report; an agent
 					// run reads the rules it works under the same way.
 					r.Get("/routing/dispatch", h.GetRoutingDispatch)
+					r.Get("/routing/shadow", h.ListRoutingShadowTickets)
 				})
 				// Admin-level access
 				r.Group(func(r chi.Router) {
@@ -1900,6 +1901,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					// PUT is the confirmation that makes the rows take
 					// effect (DENE-1834 part 4).
 					r.Post("/routing/dispatch/preview", h.PreviewRoutingDispatch)
+					r.Post("/routing/shadow/{issueId}", h.CompareRoutingShadow)
 					r.Put("/routing/dispatch", h.UpdateRoutingDispatch)
 					r.Get("/config/export", h.ExportWorkspaceConfig)
 					r.Post("/config/import", h.ImportWorkspaceConfig)

@@ -2,20 +2,17 @@ package routing
 
 import (
 	"fmt"
+	"math"
+	"sort"
 	"strings"
 )
 
 // This file is the 分工规则 (DENE-1834): Kun's plain-language division of
 // labour, kept as a table the server can apply.
 //
-// The rule table (rules.json) decides how strong a seat the work needs. The
-// dispatch policy decides which model family does which kind of work:
-// "前端、审美交给 Claude，Codex 主要负责审查". The analysis model answers one
-// more numbered question — which category the ticket is — and the matching
-// row then filters candidates by series (a hard filter, stronger than the
-// judge's preferred_series which only reorders within a rung) and may cap
-// the tier (文档、沉淀类最多中档). A row with nobody available falls back to
-// the whole roster and says so: the work must not wait on a family.
+// Category rules are weighted preferences. They never remove candidates.
+// Legacy tier caps remain for rollout comparison; active reasoning reads them
+// as reference together with the owner policy.
 
 // DispatchPolicy is the text a person wrote and the rows read from it.
 type DispatchPolicy struct {
@@ -31,12 +28,15 @@ type DispatchPolicy struct {
 
 // DispatchRule is one row: a kind of work, and what the policy says about it.
 type DispatchRule struct {
+	// Nil preserves the old preference at weight 1; zero disables it.
+	Weight *float64 `json:"weight,omitempty"`
+
 	ID string `json:"id"`
 	// Category is the kind of work as the person names it (前端 / 审查 /
 	// 文档沉淀). Hint is the one line the analysis model reads to recognise it.
 	Category string `json:"category"`
 	Hint     string `json:"hint,omitempty"`
-	// Series is the model family the work goes to; empty means no filter.
+	// Series is the model family the work goes to; empty means no preference.
 	Series string `json:"series,omitempty"`
 	// MaxTier caps the rung (weak / medium / strong / strongest); empty means
 	// the rule table's tier stands.
@@ -98,6 +98,9 @@ func (p *DispatchPolicy) Validate(l Ladder) error {
 			return fmt.Errorf("rule %q: %v", r.Category, err)
 		}
 		r.Series = series
+		if r.Weight != nil && (math.IsNaN(*r.Weight) || *r.Weight < 0 || *r.Weight > 100) {
+			return fmt.Errorf("rule %q weight must be between 0 and 100", r.Category)
+		}
 		if r.MaxTier != "" {
 			key, ok := l.NormalizeTier(r.MaxTier)
 			if !ok {
@@ -183,7 +186,7 @@ func (m DispatchMatch) Line(l Ladder) string {
 	b.WriteString("任务类别：" + m.Category + "；命中规则「" + m.Rule + "」")
 	if m.Series != "" {
 		if m.Filtered {
-			b.WriteString("；按 " + m.Series + " 系列筛候选")
+			b.WriteString("；按 " + m.Series + " 系列偏好排序（候选全部保留）")
 		} else {
 			b.WriteString("；" + m.Series + " 系列" + m.Fallback + "，换系列按档位选")
 		}
@@ -234,7 +237,7 @@ func (l Ladder) dispatch(policy DispatchPolicy, facts *Facts, seats []Seat, rost
 	if m.Rule == "" {
 		m.Rule = rule.Category
 	}
-	if capped, lowered := l.CapTier(v.ExecutorTier, rule.MaxTier); lowered {
+	if capped, lowered := l.CapTier(v.ExecutorTier, rule.MaxTier); lowered && !v.Reasoned {
 		m.Capped = rule.MaxTier
 		v.ExecutorTier = capped
 		v.ExecutorConfidence = 1
@@ -243,21 +246,44 @@ func (l Ladder) dispatch(policy DispatchPolicy, facts *Facts, seats []Seat, rost
 		return seats, roster, v, m
 	}
 	m.Series = rule.Series
-	filtered := make([]Seat, 0, len(seats))
-	narrowed := map[string]Agent{}
-	for _, s := range seats {
-		a, found := agentByID(roster, s.ID)
-		if found && strings.EqualFold(l.agentSeries(a), rule.Series) {
-			filtered = append(filtered, s)
-			narrowed[a.Name] = a
-		}
-	}
-	if len(filtered) == 0 {
-		m.Fallback = seriesAbsence(l, roster, rule.Series)
+	weight := rule.PreferenceWeight()
+	if weight == 0 {
+		m.Fallback = "偏好权重为 0"
 		return seats, roster, v, m
 	}
-	m.Filtered = true
-	return filtered, narrowed, v, m
+	matches := func(s Seat) bool {
+		a, found := agentByID(roster, s.ID)
+		return found && strings.EqualFold(l.agentSeries(a), rule.Series)
+	}
+	out := append([]Seat(nil), seats...)
+	score := func(s Seat) float64 {
+		a, _ := agentByID(roster, s.ID)
+		value := -float64(UsageRank(a.Usage))
+		if matches(s) {
+			value += weight
+		}
+		return value
+	}
+	sort.SliceStable(out, func(i, j int) bool { return score(out[i]) > score(out[j]) })
+	for _, seat := range out {
+		if seat.TierKey == v.ExecutorTier && matches(seat) {
+			m.Filtered = true
+			break
+		}
+	}
+	if !m.Filtered {
+		m.Fallback = "在本档没有可用席位（系列偏好未匹配）"
+		found := false
+		for _, seat := range out {
+			if matches(seat) {
+				found = true
+			}
+		}
+		if !found {
+			m.Fallback = seriesAbsence(l, roster, rule.Series)
+		}
+	}
+	return out, roster, v, m
 }
 
 // seriesAbsence says why a series contributed nobody: it has no seat in the
@@ -269,4 +295,11 @@ func seriesAbsence(l Ladder, roster map[string]Agent, series string) string {
 		}
 	}
 	return "没有可派的席位"
+}
+
+func (r DispatchRule) PreferenceWeight() float64 {
+	if r.Weight == nil {
+		return 1
+	}
+	return *r.Weight
 }

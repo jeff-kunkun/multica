@@ -118,7 +118,7 @@ func TestTodoFillsBothSlotsAndDoesNotMention(t *testing.T) {
 	}
 	// The unknown row asks for a check next to the executor: 孙悟空游戏 has
 	// no second model family on its rung here, so one rung down.
-	if len(store.reviewer) != 1 || store.reviewer[0] != "贝吉塔游戏" {
+	if len(store.reviewer) != 1 || store.reviewer[0] != "孙悟空" {
 		t.Errorf("reviewer writes = %v, want [贝吉塔游戏]", store.reviewer)
 	}
 	// Dispatched to an agent: somebody is on it, so an @ would be noise.
@@ -129,7 +129,7 @@ func TestTodoFillsBothSlotsAndDoesNotMention(t *testing.T) {
 		t.Errorf("subscribed %v with no mention to deliver", store.subs)
 	}
 	body := store.comments[KindAssignment][0]
-	for _, want := range []string{"孙悟空游戏", "贝吉塔游戏", "游戏", "路由没有改过状态"} {
+	for _, want := range []string{"孙悟空游戏", "孙悟空", "游戏", "路由没有改过状态"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("decision comment is missing %q:\n%s", want, body)
 		}
@@ -249,8 +249,8 @@ func TestJudgeBelowTheTableStillDispatchesOnTheTable(t *testing.T) {
 	if len(store.assigns) != 1 || store.assigns[0] != "贝吉塔游戏" {
 		t.Errorf("assigns = %v, want the table's medium rung (贝吉塔游戏), not the weak pick", store.assigns)
 	}
-	if len(store.reviewer) != 1 || store.reviewer[0] != "比克游戏" {
-		t.Errorf("reviewer = %v, want the rung below the executor, not the strongest", store.reviewer)
+	if len(store.reviewer) != 1 || store.reviewer[0] != "孙悟空游戏" {
+		t.Errorf("reviewer = %v, want the rung above the executor, not the strongest", store.reviewer)
 	}
 	if out.Action != ActionAssigned {
 		t.Errorf("action = %q, want %q", out.Action, ActionAssigned)
@@ -279,7 +279,7 @@ func TestReviewerIsNeverTheSeatThatDidTheWork(t *testing.T) {
 	}
 	// Same rung, and this roster has no second model family there, so the check
 	// steps down. It does not promote into the strongest rung.
-	if store.reviewer[0] != "贝吉塔游戏" {
+	if store.reviewer[0] != "孙悟空" {
 		t.Errorf("reviewer = %q, want 贝吉塔游戏 — one rung down, not the strongest", store.reviewer[0])
 	}
 }
@@ -291,6 +291,12 @@ func TestReviewerCollisionOnTopRungFallsToTheRungBelow(t *testing.T) {
 	// seat is free; this test is about the reviewer slot behind a top-rung
 	// executor, so the gate is off here.
 	store.settings.StrongestGate = boolPtr(false)
+	for key, a := range store.roster {
+		if a.Name == "布尔玛游戏" {
+			a.Usage = UsageAmple
+			store.roster[key] = a
+		}
+	}
 	v := confidentVerdict()
 	v.ExecutorTier = "strongest"
 	v.ReviewerTier = "strongest"
@@ -325,7 +331,7 @@ func TestNeedsHumanStillWritesASeat(t *testing.T) {
 		t.Fatalf("reviewer kind = %q, want %q — the slot may never name a person",
 			out.ReviewerWritten.Kind, ReviewerAgent)
 	}
-	if len(store.reviewer) != 1 || store.reviewer[0] != "贝吉塔游戏" {
+	if len(store.reviewer) != 1 || store.reviewer[0] != "孙悟空" {
 		t.Errorf("reviewer = %v, want [贝吉塔游戏] — same tier has no second model, so one rung down", store.reviewer)
 	}
 	body := store.comments[KindAssignment][0]
@@ -340,7 +346,7 @@ func TestNeedsHumanStillWritesASeat(t *testing.T) {
 	}
 }
 
-func TestNoReviewNeededWritesAValueRatherThanLeavingTheSlotEmpty(t *testing.T) {
+func TestDefaultRuleAlwaysAssignsAReviewer(t *testing.T) {
 	// An empty slot is re-judged on every later status change. "No review
 	// needed" has to be written down for the rule to ever close.
 	store := newFakeStore()
@@ -351,11 +357,11 @@ func TestNoReviewNeededWritesAValueRatherThanLeavingTheSlotEmpty(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if out.ReviewerWritten.Kind != ReviewerNoReview {
+	if out.ReviewerWritten.Kind != ReviewerAgent {
 		t.Errorf("ReviewerWritten = %q, want %q", out.ReviewerWritten.Label(), LabelNoReview)
 	}
-	if len(store.reviewer) != 1 || store.reviewer[0] != LabelNoReview {
-		t.Errorf("reviewer = %v, want [不需要验收]", store.reviewer)
+	if len(store.reviewer) != 1 || store.reviewer[0] != "孙悟空" {
+		t.Errorf("reviewer = %v, want [贝吉塔游戏]", store.reviewer)
 	}
 	if out.Mentioned {
 		t.Error("mentioned somebody on an issue that will run to completion by itself")
@@ -485,10 +491,10 @@ func TestPickAcceptanceSeatChangesFamily(t *testing.T) {
 	if ref.ID == "a-goku" || ref.ID == "" {
 		t.Fatalf("reviewer = %+v, want a different seat", ref)
 	}
-	if ref.ID != "a-goten" && ref.ID != "a-trunks" {
+	if ref.ID != "a-goku-g" {
 		t.Fatalf("reviewer = %+v, want 孙悟天 or 特兰克斯", ref)
 	}
-	if !strings.Contains(why, "同档换一家模型") && !strings.Contains(why, "下一档") {
+	if !strings.Contains(why, "相邻档") {
 		t.Fatalf("why = %q, want the cross-family rule", why)
 	}
 
@@ -1100,13 +1106,13 @@ func TestInReviewFillsAnEmptyReviewerSlotAndHandsOff(t *testing.T) {
 	}
 	// The table asks for a check; the ladder puts it next to the holder,
 	// one rung down because strong has no second family here.
-	if out.ReviewerWritten.Label() != "贝吉塔游戏" {
+	if out.ReviewerWritten.Label() != "孙悟空" {
 		t.Errorf("reviewer written = %q, want 贝吉塔游戏", out.ReviewerWritten.Label())
 	}
-	if len(store.reviewer) != 1 || store.reviewer[0] != "贝吉塔游戏" {
+	if len(store.reviewer) != 1 || store.reviewer[0] != "孙悟空" {
 		t.Errorf("reviewer slot = %v, want [贝吉塔游戏]", store.reviewer)
 	}
-	if len(store.handoffs) != 1 || store.handoffs[0] != "agent:a-vegeta-g" {
+	if len(store.handoffs) != 1 || store.handoffs[0] != "agent:a-goku" {
 		t.Errorf("handoffs = %v, want [agent:a-vegeta-g]", store.handoffs)
 	}
 	body := store.comments[KindHandoff][0]
@@ -1178,14 +1184,14 @@ func TestOffLadderExecutorFallsBackToTheFallbackRungNotTheStrongest(t *testing.T
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if out.ReviewerWritten.Label() != "孙悟空游戏" {
+	if out.ReviewerWritten.Label() != "贝吉塔游戏" {
 		t.Errorf("reviewer = %q, want 孙悟空游戏 — an unlabelled executor lands on the fallback rung",
 			out.ReviewerWritten.Label())
 	}
 	if strings.Contains(out.ReviewerWritten.Label(), "布尔玛") {
 		t.Errorf("reviewer = %q, fallback must not be the strongest rung", out.ReviewerWritten.Label())
 	}
-	if len(store.handoffs) != 1 || store.handoffs[0] != "agent:a-goku-g" {
+	if len(store.handoffs) != 1 || store.handoffs[0] != "agent:a-vegeta-g" {
 		t.Errorf("handoffs = %v, want [agent:a-goku-g]", store.handoffs)
 	}
 }
@@ -1242,7 +1248,7 @@ func TestStrongExecutorFallbackReviewerIsNotStrongest(t *testing.T) {
 	if out.ReviewerWritten.Label() == "布尔玛游戏" || strings.Contains(out.ReviewerWritten.Label(), "孙悟饭") {
 		t.Fatalf("reviewer = %q, fallback must not be the strongest rung", out.ReviewerWritten.Label())
 	}
-	if out.ReviewerWritten.Label() != "贝吉塔游戏" {
+	if out.ReviewerWritten.Label() != "孙悟空" {
 		t.Errorf("reviewer = %q, want 贝吉塔游戏", out.ReviewerWritten.Label())
 	}
 	body := store.comments[KindAssignment][0]
@@ -1270,7 +1276,7 @@ func TestStrongExecutorFallbackReviewerUsesAnotherModelOnTheSameTier(t *testing.
 		t.Fatalf("reviewer = %q, want 特兰克斯游戏 — the other model family on the strong rung", out.ReviewerWritten.Label())
 	}
 	body := store.comments[KindAssignment][0]
-	if !strings.Contains(body, "同档换一家模型") {
+	if !strings.Contains(body, "相邻档") {
 		t.Errorf("comment does not say the reviewer stayed on the rung:\n%s", body)
 	}
 }
@@ -1283,7 +1289,7 @@ func TestRuleTableDecidesTheReviewerWhateverJudgedReviewSays(t *testing.T) {
 		for _, tc := range []struct {
 			facts Facts
 			seat  bool
-		}{{mediumFacts, false}, {strongFacts, true}} {
+		}{{mediumFacts, true}, {strongFacts, true}} {
 			store := newFakeStore()
 			store.settings.JudgedReview = on
 			withCreatorFacts(store, tc.facts)

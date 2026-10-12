@@ -36,6 +36,9 @@ const (
 // confidence, and nothing else. No prose the product depends on, no action, no
 // status.
 type Verdict struct {
+	MaxFallbackTier string `json:"-"`
+	Reasoned        bool   `json:"-"`
+	ExecutorID      string `json:"executor_id,omitempty"`
 	PreferredSeries string `json:"preferred_series,omitempty"`
 	// ExecutorTier is a tier key from the ladder.
 	ExecutorTier string `json:"executor_tier"`
@@ -76,17 +79,18 @@ type Advice struct {
 // decision is noise. Credentials and full issue bodies are absent because this
 // payload leaves the deployment.
 type JudgeState struct {
-	Title              string   `json:"title"`
-	DescriptionSummary string   `json:"description_summary"`
-	Labels             []string `json:"labels,omitempty"`
-	Project            string   `json:"project,omitempty"`
-	Repository         string   `json:"repository,omitempty"`
-	Status             string   `json:"status"`
-	ParentExecutor     string   `json:"parent_executor,omitempty"`
-	HasChildren        bool     `json:"has_children"`
-	Direction          string   `json:"direction,omitempty"`
-	Candidates         []string `json:"candidate_tiers"`
-	CandidateSeries    []string `json:"candidate_series,omitempty"`
+	EligibleSeats      []ReasoningSeat `json:"eligible_seats,omitempty"`
+	Title              string          `json:"title"`
+	DescriptionSummary string          `json:"description_summary"`
+	Labels             []string        `json:"labels,omitempty"`
+	Project            string          `json:"project,omitempty"`
+	Repository         string          `json:"repository,omitempty"`
+	Status             string          `json:"status"`
+	ParentExecutor     string          `json:"parent_executor,omitempty"`
+	HasChildren        bool            `json:"has_children"`
+	Direction          string          `json:"direction,omitempty"`
+	Candidates         []string        `json:"candidate_tiers"`
+	CandidateSeries    []string        `json:"candidate_series,omitempty"`
 	// RoutingPolicy and PolicyPrompt are the tier preference. Omitted on
 	// questions that do not choose a tier, so a stale-review request does
 	// not grow a blank policy object.

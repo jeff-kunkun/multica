@@ -80,8 +80,8 @@ func (l Ladder) gateStrongest(seat Seat, candidates, eligible []Seat, roster map
 				return alt, g
 			}
 		}
-		g.Why = seat.Name + " 额度紧张，但没有别的可用席位，只能派她"
-		return seat, g
+		g.Why = seat.Name + " 额度紧张，且没有其他可用席位，停止自动派单"
+		return Seat{}, g
 	}
 	g.Why = "为什么非她不可：" + l.middleAbsence(candidates, eligible, snaps) + "；" + seat.Name + " 额度" + UsageLabel(agent.Usage)
 	return seat, g

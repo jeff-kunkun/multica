@@ -121,6 +121,7 @@ func (r *Router) PickSeat(ctx context.Context, workspaceID string, req PickReque
 	state.Seats = OrderSeatViews(candidates, facts.Seats)
 	state.ProviderQuotas = EnsureProviderQuotas(facts.Providers, settings.ProviderKeys())
 	state.CandidateSeries = ladder.candidateSeries(roster)
+	state.EligibleSeats = reasoningSeats(ladder, eligible, roster)
 
 	d, err := r.decide(ctx, workspaceID, settings, issue, state)
 	if err != nil {
@@ -138,8 +139,8 @@ func (r *Router) PickSeat(ctx context.Context, workspaceID string, req PickReque
 	if dispatch.Capped != "" {
 		pick.Tier = verdict.ExecutorTier
 	}
-	seat, source, why := r.pickExecutor(eligible, Seat{}, false, verdict, settings.Threshold())
-	if settings.StrongestGateOn() {
+	seat, source, why := r.pickConfiguredExecutor(settings, req.ProjectID, ladder, eligible, pickRoster, Seat{}, false, verdict, settings.Threshold(), issue)
+	if !verdict.Reasoned && settings.StrongestGateOn() {
 		var gate StrongestGate
 		seat, gate = ladder.gateStrongest(seat, candidates, eligible, pickRoster, facts.Seats)
 		pick.StrongestGate = gate
@@ -149,11 +150,11 @@ func (r *Router) PickSeat(ctx context.Context, workspaceID string, req PickReque
 	if err != nil {
 		return pick, err
 	}
-	if load.Moved && settings.PreferIdle {
+	if source != pickFallback && !verdict.Reasoned && load.Moved && settings.PreferIdle {
 		seat, source = load.Seat, pickLoad
 		seat.Balanced = load.Detail()
 	}
-	if verdict.PreferredSeries != "" && !dispatch.Filtered {
+	if source != pickFallback && verdict.PreferredSeries != "" && !dispatch.Filtered {
 		preferred, matched, err := r.availableSeriesSeat(ctx, workspaceID, settings, ladder, scene, roster, seat, verdict.PreferredSeries)
 		if err != nil {
 			return pick, err
@@ -166,13 +167,16 @@ func (r *Router) PickSeat(ctx context.Context, workspaceID string, req PickReque
 		}
 	}
 	if seat.ID == "" {
-		pick.Declined = "no eligible seat"
+		pick.Declined = why
 		return pick, nil
 	}
 	if pick.Tier == "" {
 		pick.Tier = seat.TierKey
 	}
 	reason, detail := executorPickReason(issue, true, &seat, source, d.RaisedFrom != "")
+	if d.Decider == DeciderReasoning && source == pickJudge {
+		detail = "推理模型定档选人：" + verdict.Reason
+	}
 	if source == pickFallback && why != "" {
 		detail += "（" + why + "）"
 	}

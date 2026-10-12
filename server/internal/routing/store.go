@@ -9,8 +9,10 @@ import (
 // to the judge in trimmed form or used by the state table; nothing else about
 // an issue reaches this package.
 type Issue struct {
-	ID    string
-	Title string
+	ConsultCount int
+	AdvisorIDs   []string
+	ID           string
+	Title        string
 	// DescriptionSummary is a clipped description for the judge.
 	DescriptionSummary string
 	// Description is the body the analysis role reads, bounded by the store.
