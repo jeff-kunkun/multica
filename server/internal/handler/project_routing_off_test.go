@@ -139,3 +139,26 @@ func TestWorkspaceSettingsAcceptAndDropDecisionMode(t *testing.T) {
 		t.Fatalf("stored routing block = %v, want decision_mode dropped and the rest kept", stored)
 	}
 }
+
+// A chat turned into a goal inside a routing-off project keeps the chat's
+// agent: routing will skip the goal, so leaving the seat empty for it would
+// strand the goal with nobody on it (DENE-1966 review).
+func TestConvertChatToGoalInARoutingOffProjectKeepsTheChatAgent(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	routableSeat(t, "Routing-off goal seat")
+	project := createProjectPermissionTestProject(t, "routing off goal project")
+	dbfx.Exec(t, `UPDATE project SET routing_disabled = true WHERE id = $1`, project.ID)
+	chatAgent := createHandlerTestAgent(t, "Routing-off goal chat agent", []byte("[]"))
+	sessionID := createHandlerTestChatSession(t, chatAgent)
+	dbfx.Exec(t, `UPDATE chat_session SET title = 'routing off goal', project_id = $2 WHERE id = $1`, sessionID, project.ID)
+	seedGoalChatMessage(t, sessionID, "把这个聊天变成目标", "user")
+	req := withURLParam(withChatTestWorkspaceCtx(t, newRequest(http.MethodPost, "/api/chat/sessions/"+sessionID+"/to-goal", nil)), "sessionId", sessionID)
+	resp := testutil.Call(t, testHandler.ConvertChatSessionToGoal, req).Want(http.StatusCreated).Map()
+	issue := resp["issue"].(map[string]any)
+	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1`, issue["id"]) })
+	if issue["assignee_id"] != chatAgent {
+		t.Fatalf("goal assignee = %v, want the chat's agent %s", issue["assignee_id"], chatAgent)
+	}
+}
