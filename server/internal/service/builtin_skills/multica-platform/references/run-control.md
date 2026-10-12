@@ -83,7 +83,7 @@ multica chat send --session <chat-id> --content-file ./msg.md --mode replace --w
   instructions are void. Only the chat creator or an agent run may use it; a
   personal token works. Managed/linked chats refuse it with 400.
   `--output json` returns `new_task_id`, `cancelled_task_ids`,
-  `superseded_message_ids` (and `stop_failed_task_ids` if a stop did not land);
+  `superseded_message_ids`; refused sends leave older instructions untouched.
   `--wait` waits for the new reply. Plain `restart` keeps queued messages;
   `replace` drops them.
 - `multica chat clear-queue --session <id>` only empties the queued follow-ups
