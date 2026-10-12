@@ -2,6 +2,8 @@
 
 本索引只记录指向沉淀票附件的短指针；原始日志、截图和样本留在对应票据附件。
 
+- DENE-1935：个人 Bot 动态流、当前权限与订阅范围复核、完整载荷打码；[独立终审与真实 HTTP 接收端验证](https://ai.ferryway.cc/api/attachments/01a13035-93ff-7a27-bd1a-fd25fd026279/download)、[设置页与手机预览](https://ai.ferryway.cc/api/attachments/01a12fee-b52f-7462-977f-8c7b26b8119e/download)。验证均在 Grok Bot box；此前五项阻断与两处打码边界已解除。真实 Grok 收信及生产动态流尚未验证，合并整合验证与部署结论以本票最新收尾为准。
+
 - DENE-1932：聊天「替换」发送（`chat send --mode replace`）与 `chat clear-queue`，旧排队消息标「已被新指令替换」；[手机 390/375/768/1280 真实页面截图（任务附件）](https://ai.ferryway.cc/api/attachments/01a12fad-fcb5-7c97-acbb-ee37d2036093/download)。截图来自本机真实接口；Web/手机输入框暂无「替换」按钮，原生 App 标记未在真机/模拟器上看过。
 
 - DENE-1917：派活/咨询/验收统一选人、系列权重及禁止最强档兜底；[真实四档页面与验证边界](https://ai.ferryway.cc/api/attachments/01a12ec5-f1bd-790f-bf50-961f4a59be0f/download)、[原始测试与可回滚副本](https://ai.ferryway.cc/api/attachments/01a12ec5-f488-711e-94c1-ad09912930d5/download)、[根因与交付记录](DENE-1917/verification.md)。本地通过，未切换线上；真实近 30 天影子比较待新接口部署后执行。 [合并后审查修订：强档同档优先、按档位兜底、Bot 通知与订阅实测](https://ai.ferryway.cc/api/attachments/01a12ed3-6315-788d-b251-8bd73ef2de55/download)。
