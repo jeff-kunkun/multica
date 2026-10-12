@@ -105,6 +105,14 @@ func RouteHumanNeeded(ctx context.Context, q *db.Queries, in HumanNeededInput) (
 	if options == nil {
 		options = []HumanNeededOption{}
 	}
+	// Whatever entry point built them, an option id that carries a credential
+	// is dropped (the label still shows); callers are told at validation.
+	options = append(make([]HumanNeededOption, 0, len(options)), options...)
+	for i := range options {
+		if options[i].ID != "" && MaskSecrets(options[i].ID) != options[i].ID {
+			options[i].ID = ""
+		}
+	}
 	rawOptions, err := json.Marshal(options)
 	if err != nil {
 		return out, err

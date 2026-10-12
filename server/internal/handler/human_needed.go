@@ -581,7 +581,13 @@ func (req AskHumanRequest) validate() (string, []service.HumanNeededOption, time
 		if label == "" {
 			continue
 		}
-		options = append(options, service.HumanNeededOption{ID: truncateRunes(strings.TrimSpace(o.ID), 40), Label: label})
+		id := truncateRunes(strings.TrimSpace(o.ID), 40)
+		if id != "" && service.MaskSecrets(id) != id {
+			// An id is echoed back by the Bot to answer; a credential in it would be
+			// masked on the way out and the answer would no longer match.
+			return "", nil, time.Time{}, "选项 ID 里不能放钥匙、令牌或密码，换成 a / b 这样的短标识"
+		}
+		options = append(options, service.HumanNeededOption{ID: id, Label: label})
 	}
 	var deadline time.Time
 	if raw := strings.TrimSpace(req.Deadline); raw != "" {

@@ -62,16 +62,22 @@ Webhook body: the usual envelope (`event_id`, `sequence`, `woken_url`,
 
 The finished body is masked as a whole just before it is sent: every string in
 it (summary, author name, ticket and chat titles, excerpt, the human_needed
-question and option labels) goes through `MaskSecrets`, not only the excerpt.
-Ids, enums and links (`*_id`, `*_url`, `type`, `kind`, `status`, times) are left
-alone so receipts keep working. The same pass covers the two pull lists
+question, option ids and labels) goes through `MaskSecrets`, not only the
+excerpt. What is kept verbatim is kept by its shape, never by its key name: a
+whole-string UUID or RFC 3339 time, and an `http(s)` link without
+`user:password@`, which is masked piece by piece between the slashes so receipt
+links keep working. An option id is whatever the asker typed, so one that holds
+a credential is refused when the question is asked (HTTP 400) and dropped if it
+still reaches the outbox. The same pass covers the two pull lists
 (`.../activity` and `.../human-needed`).
 
 `MaskSecrets` replaces PEM blocks, known key prefixes, bearer tokens, passwords
 in URLs and long random runs. For a credential field (`password`, `passwd`,
 `secret`, `token`, `api_key`, `密码`, `口令`, …) the value is masked from its
-first character and a quoted value is masked whole, spaces included, so
-`{"password":"ab"}` and `{"password":"two words"}` both lose the value. It errs
+first character and a quoted value is masked whole, spaces, newlines and
+escaped quotes or backslashes included (the way `json.Marshal` writes them), so
+`{"password":"ab"}`, `{"password":"two words"}` and `{"password":"a\"b\\c"}` all
+lose the value. It errs
 toward masking; commit SHAs, UUIDs, URLs and paths are kept. Attachments and raw
 message bodies are not pushed, only the excerpt (1000 characters at most).
 

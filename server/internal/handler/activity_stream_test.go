@@ -596,3 +596,54 @@ func TestWebhookBodiesAreMaskedWholeNotFieldByField(t *testing.T) {
 		}
 	}
 }
+
+func TestWebhookMasksEscapedQuotePasswordsAndOptionIDs(t *testing.T) {
+	f := newHumanNeededFixture(t, true)
+	agent := agentActor(t)
+	const secretID = "sk-ReviewOnlySyntheticKey1234567890"
+	field, _ := json.Marshal(map[string]string{"password": "ab\"cd\\ef\nTAILSUFFIX9"})
+
+	// A legacy row whose option id holds a credential: nothing leaves, receipts stay.
+	issue := dbfx.Issue(t, "Deploy", testutil.Cols{"visibility": "workspace"})
+	res := f.route(t, issue, "needed-optid", false)
+	dbfx.Exec(t, `UPDATE human_needed_event SET question=$2, options=$3::jsonb WHERE event_id=$1`,
+		uuidToString(res.Event.EventID), "发布吗？ "+string(field),
+		`[{"id":"`+secretID+`","label":"yes"},{"id":"b","label":"no"}]`)
+	if ok, _ := f.worker.ProcessNext(context.Background()); !ok {
+		t.Fatal("nothing processed")
+	}
+	raw, _ := f.lastBody.Load().([]byte)
+	for _, leak := range []string{"ReviewOnlySynthetic", "TAILSUFFIX9"} {
+		if strings.Contains(string(raw), leak) {
+			t.Fatalf("human_needed body leaked %q:\n%s", leak, raw)
+		}
+	}
+	if !strings.Contains(string(raw), "ack_url") || !strings.Contains(string(raw), `"id":"b"`) {
+		t.Fatalf("masking broke receipts or ordinary options: %s", raw)
+	}
+
+	// An activity push of a comment that quotes the password field.
+	setActivityScope(t, f, "owned")
+	routeActivity(t, service.ActivityInput{
+		IssueID: parseUUID(issue), Type: service.ActivityCommentCreated, DedupeKey: "act:comment:escaped-quote",
+		SourceID: "eq", ActorType: "agent", ActorID: parseUUID(agent), Text: "已改 " + string(field),
+	})
+	if ok, _ := f.worker.ProcessNext(context.Background()); !ok {
+		t.Fatal("activity not processed")
+	}
+	raw, _ = f.lastBody.Load().([]byte)
+	if strings.Contains(string(raw), "TAILSUFFIX9") {
+		t.Fatalf("activity body leaked the password tail:\n%s", raw)
+	}
+}
+
+func TestAskRefusesCredentialsInOptionIDs(t *testing.T) {
+	bad := AskHumanRequest{Question: "发布吗？", Options: []service.HumanNeededOption{{ID: "sk-ReviewOnlySyntheticKey1234567890", Label: "是"}}}
+	if _, _, _, problem := bad.validate(); problem == "" {
+		t.Fatal("an option id holding a key was accepted")
+	}
+	ok := AskHumanRequest{Question: "发布吗？", Options: []service.HumanNeededOption{{ID: "a", Label: "是"}, {ID: "no-go", Label: "否"}}}
+	if _, opts, _, problem := ok.validate(); problem != "" || len(opts) != 2 || opts[1].ID != "no-go" {
+		t.Fatalf("ordinary options broke: %q %v", problem, opts)
+	}
+}
