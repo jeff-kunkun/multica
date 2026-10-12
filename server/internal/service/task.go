@@ -3619,16 +3619,26 @@ func chatInputOwnerID(task db.AgentTaskQueue) pgtype.UUID {
 // same transaction, while cancellation commits that status in its prior
 // transaction (#5219). Otherwise the head query still selects the settling task
 // and reanchoring its successor is a no-op.
+// chatWriteSource picks the bot provenance for an assistant message written on
+// behalf of task: the bot acting in this request when there is one, otherwise
+// the bot that queued the task. Callers already hold the task row, so no
+// re-read is needed (a row that only exists in the caller's memory, as in the
+// completion-outcome tests, must not fail the write).
+func chatWriteSource(ctx context.Context, task db.AgentTaskQueue) chatSource {
+	if source := botsource.FromContext(ctx); source.ID.Valid {
+		return chatSource{ID: source.ID, Name: botName(ctx)}
+	}
+	return chatSource{ID: task.ViaBotID, Name: task.ViaBotName}
+}
+
+type chatSource struct {
+	ID   pgtype.UUID
+	Name pgtype.Text
+}
+
 func createAssistantChatMessage(ctx context.Context, qtx *db.Queries, params db.CreateChatMessageParams) (db.ChatMessage, error) {
 	if params.Role != "assistant" {
 		return db.ChatMessage{}, fmt.Errorf("create assistant chat message: invalid role %q", params.Role)
-	}
-	if !params.ViaBotID.Valid && params.TaskID.Valid {
-		task, err := qtx.GetAgentTask(ctx, params.TaskID)
-		if err != nil {
-			return db.ChatMessage{}, fmt.Errorf("load chat message provenance: %w", err)
-		}
-		params.ViaBotID, params.ViaBotName = task.ViaBotID, task.ViaBotName
 	}
 	row, err := qtx.CreateChatMessage(ctx, params)
 	if err != nil {
@@ -3659,8 +3669,8 @@ func (s *TaskService) settleQueuedChatInput(
 	}
 	if channelIngested {
 		if _, err := createAssistantChatMessage(ctx, qtx, db.CreateChatMessageParams{
-			ViaBotID:      botsource.FromContext(ctx).ID,
-			ViaBotName:    botName(ctx),
+			ViaBotID:      chatWriteSource(ctx, task).ID,
+			ViaBotName:    chatWriteSource(ctx, task).Name,
 			ID:            dbid.NewV7(),
 			ChatSessionID: task.ChatSessionID,
 			Role:          "assistant",
@@ -3847,8 +3857,8 @@ func (s *TaskService) finalizeCancelledChatMessage(ctx context.Context, task db.
 			return nil
 		}
 		if _, err := createAssistantChatMessage(ctx, qtx, db.CreateChatMessageParams{
-			ViaBotID:      botsource.FromContext(ctx).ID,
-			ViaBotName:    botName(ctx),
+			ViaBotID:      chatWriteSource(ctx, task).ID,
+			ViaBotName:    chatWriteSource(ctx, task).Name,
 			ID:            dbid.NewV7(),
 			ChatSessionID: task.ChatSessionID,
 			Role:          "assistant",
@@ -4007,8 +4017,8 @@ func (s *TaskService) FinalizeDeferredCancelledChat(ctx context.Context, taskID 
 			return nil
 		}
 		row, err := createAssistantChatMessage(ctx, qtx, db.CreateChatMessageParams{
-			ViaBotID:      botsource.FromContext(ctx).ID,
-			ViaBotName:    botName(ctx),
+			ViaBotID:      chatWriteSource(ctx, claimed).ID,
+			ViaBotName:    chatWriteSource(ctx, claimed).Name,
 			ID:            dbid.NewV7(),
 			ChatSessionID: claimed.ChatSessionID,
 			Role:          "assistant",
@@ -5445,9 +5455,10 @@ func (s *TaskService) writeChatCompletionOutcome(ctx context.Context, qtx *db.Qu
 		}
 	}
 
+	source := chatWriteSource(ctx, task)
 	params := db.CreateChatMessageParams{
-		ViaBotID:      botsource.FromContext(ctx).ID,
-		ViaBotName:    botName(ctx),
+		ViaBotID:      source.ID,
+		ViaBotName:    source.Name,
 		ID:            dbid.NewV7(),
 		ChatSessionID: task.ChatSessionID,
 		Role:          "assistant",
@@ -5904,8 +5915,8 @@ func (s *TaskService) FailTaskWithTransition(ctx context.Context, taskID pgtype.
 				return fmt.Errorf("release onboarding kickoff: %w", err)
 			}
 			if _, err := createAssistantChatMessage(ctx, qtx, db.CreateChatMessageParams{
-				ViaBotID:      botsource.FromContext(ctx).ID,
-				ViaBotName:    botName(ctx),
+				ViaBotID:      chatWriteSource(ctx, t).ID,
+				ViaBotName:    chatWriteSource(ctx, t).Name,
 				ID:            dbid.NewV7(),
 				ChatSessionID: t.ChatSessionID,
 				Role:          "assistant",
