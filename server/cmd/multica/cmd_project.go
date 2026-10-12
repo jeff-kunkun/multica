@@ -73,8 +73,8 @@ project, and declines when none of them can take it instead of reaching
 outside the list. Repeat the flag per agent (name or id); --executor ""
 lifts the limit. @mention and manual assignment are not limited. Read it
 back from executor_agent_ids in "multica project get <id> --output json".`,
-	Args:  exactArgs(1),
-	RunE:  runProjectUpdate,
+	Args: exactArgs(1),
+	RunE: runProjectUpdate,
 }
 
 var projectDeleteCmd = &cobra.Command{
