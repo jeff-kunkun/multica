@@ -3,14 +3,15 @@
  * Mirrors `packages/views/chat/components/chat-send-mode.tsx` and
  * `send-chat-message.ts`: steer is read mid-reply by the same process, queue
  * runs after the reply, restart stops the reply and starts over from the
- * message. Pure so the vitest lane covers it.
+ * message, replace also voids every queued older message (DENE-1934). Pure
+ * so the vitest lane covers it.
  */
 import type {
   ChatSendMode,
   SendChatMessageResponse,
 } from "@multica/core/types";
 
-export const CHAT_SEND_MODES: ChatSendMode[] = ["steer", "queue", "restart"];
+export const CHAT_SEND_MODES: ChatSendMode[] = ["steer", "queue", "restart", "replace"];
 
 /** The mode the send button uses while a reply is running: steer when the CLI can take it. */
 export function defaultChatSendMode(
@@ -23,8 +24,10 @@ export function defaultChatSendMode(
 export function effectiveChatSendMode(
   chosen: ChatSendMode | null,
   steerSupported: boolean | undefined,
+  replaceAllowed = true,
 ): ChatSendMode {
   if (chosen === "steer" && !steerSupported) return "queue";
+  if (chosen === "replace" && !replaceAllowed) return defaultChatSendMode(steerSupported);
   return chosen ?? defaultChatSendMode(steerSupported);
 }
 

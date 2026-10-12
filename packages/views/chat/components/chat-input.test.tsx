@@ -744,6 +744,81 @@ describe("ChatInput project context", () => {
     expect(onSend.mock.calls[0]![4]).toBe("restart");
   });
 
+  it("confirms a replace with the queued count before sending", async () => {
+    const onSend = vi.fn<ChatInputOnSend>(async () => true);
+    renderInput({ isRunning: true, allowSubmitWhileRunning: true, steerSupported: true, queuedCount: 2, onSend });
+
+    fireEvent.change(screen.getByTestId("editor"), {
+      target: { value: "do this instead" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Send mode" }));
+    const menu = await screen.findByRole("menu");
+    expect(within(menu).getByText("Stop this reply and void queued messages")).toBeInTheDocument();
+    fireEvent.click(within(menu).getByRole("menuitemradio", { name: /^Replace/ }));
+
+    const dialog = await screen.findByRole("alertdialog");
+    expect(within(dialog).getByText(/cancels 2 queued messages/)).toBeInTheDocument();
+    expect(onSend).not.toHaveBeenCalled();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Replace" }));
+
+    await waitFor(() => expect(onSend).toHaveBeenCalledTimes(1));
+    expect(onSend.mock.calls[0]![4]).toBe("replace");
+    // One-shot: the next send is back on the default mode.
+    await waitFor(() => expect(screen.getByText("Enter = Send")).toBeInTheDocument());
+  });
+
+  it("keeps a confirmed replace when the reply ends while the confirm is open", async () => {
+    const onSend = vi.fn<ChatInputOnSend>(async () => true);
+    const running = { isRunning: true, allowSubmitWhileRunning: true, steerSupported: true, queuedCount: 1, onSend };
+    const { rerender } = renderInput(running);
+
+    fireEvent.change(screen.getByTestId("editor"), {
+      target: { value: "do this instead" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Send mode" }));
+    const menu = await screen.findByRole("menu");
+    fireEvent.click(within(menu).getByRole("menuitemradio", { name: /^Replace/ }));
+    const dialog = await screen.findByRole("alertdialog");
+
+    rerender(element({ ...running, isRunning: false }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "Replace" }));
+
+    await waitFor(() => expect(onSend).toHaveBeenCalledTimes(1));
+    expect(onSend.mock.calls[0]![4]).toBe("replace");
+  });
+
+  it("keeps the draft when a replace is declined", async () => {
+    const onSend = vi.fn<ChatInputOnSend>(async () => true);
+    renderInput({ isRunning: true, allowSubmitWhileRunning: true, onSend });
+
+    fireEvent.change(screen.getByTestId("editor"), {
+      target: { value: "maybe not" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Send mode" }));
+    const menu = await screen.findByRole("menu");
+    fireEvent.click(within(menu).getByRole("menuitemradio", { name: /^Replace/ }));
+    const dialog = await screen.findByRole("alertdialog");
+    expect(within(dialog).getByText("This stops the current reply. Earlier messages are marked as replaced.")).toBeInTheDocument();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Keep" }));
+
+    await waitFor(() => expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument());
+    expect(onSend).not.toHaveBeenCalled();
+    expect(screen.getByTestId("editor")).toHaveValue("maybe not");
+  });
+
+  it("says why replace is off for someone who did not start the chat", async () => {
+    renderInput({
+      isRunning: true,
+      allowSubmitWhileRunning: true,
+      replaceUnavailable: "Only the person who started this chat can replace",
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Send mode" }));
+    const menu = await screen.findByRole("menu");
+    expect(within(menu).getByText("Only the person who started this chat can replace")).toBeInTheDocument();
+    expect(within(menu).getByRole("menuitemradio", { name: /^Replace/ })).toHaveAttribute("aria-disabled", "true");
+  });
+
   it("says an ACP CLI stops the current step to take a steer", async () => {
     renderInput({ isRunning: true, allowSubmitWhileRunning: true, steerSupported: true, steerProvider: "kimi", steerMode: "handoff" });
 
