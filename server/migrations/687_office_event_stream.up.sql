@@ -106,6 +106,25 @@ CREATE INDEX office_event_delivery_bot ON office_event_delivery (bot_id, id DESC
 CREATE INDEX office_event_delivery_unrelayed ON office_event_delivery (received_at)
     WHERE must_relay AND status = 'received' AND fallback_at IS NULL;
 
+-- A person a must-relay result belongs to who had no usable Bot when it was
+-- sealed (never connected, or disconnected). One row per person: an in-app
+-- reminder (only for people who have used a Bot here), and a fresh delivery
+-- once they connect and verify a Bot again.
+CREATE TABLE office_event_gap (
+    id BIGSERIAL PRIMARY KEY,
+    event_id UUID NOT NULL REFERENCES office_event(event_id) ON DELETE CASCADE,
+    workspace_id UUID NOT NULL,
+    user_id UUID NOT NULL,
+    reason TEXT NOT NULL,
+    fallback_at TIMESTAMPTZ,
+    resolved_at TIMESTAMPTZ,
+    resolved_bot_id UUID,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE (event_id, user_id)
+);
+CREATE INDEX office_event_gap_open ON office_event_gap (workspace_id, user_id)
+    WHERE resolved_at IS NULL;
+
 -- ---- capture ----
 
 CREATE FUNCTION office_actor() RETURNS jsonb LANGUAGE plpgsql STABLE AS $$

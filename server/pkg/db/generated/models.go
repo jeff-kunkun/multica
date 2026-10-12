@@ -2017,6 +2017,18 @@ type OfficeEventDelivery struct {
 	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
 }
 
+type OfficeEventGap struct {
+	ID            int64              `json:"id"`
+	EventID       pgtype.UUID        `json:"event_id"`
+	WorkspaceID   pgtype.UUID        `json:"workspace_id"`
+	UserID        pgtype.UUID        `json:"user_id"`
+	Reason        string             `json:"reason"`
+	FallbackAt    pgtype.Timestamptz `json:"fallback_at"`
+	ResolvedAt    pgtype.Timestamptz `json:"resolved_at"`
+	ResolvedBotID pgtype.UUID        `json:"resolved_bot_id"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+}
+
 type PasswordResetAudit struct {
 	ID          pgtype.UUID        `json:"id"`
 	UserID      pgtype.UUID        `json:"user_id"`

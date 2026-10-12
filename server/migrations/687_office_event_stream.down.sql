@@ -35,5 +35,6 @@ DROP FUNCTION IF EXISTS office_mask(jsonb);
 DROP FUNCTION IF EXISTS office_is_secret_key(text);
 DROP FUNCTION IF EXISTS office_uuid(text);
 DROP FUNCTION IF EXISTS office_actor();
+DROP TABLE IF EXISTS office_event_gap;
 DROP TABLE IF EXISTS office_event_delivery;
 DROP TABLE IF EXISTS office_event;

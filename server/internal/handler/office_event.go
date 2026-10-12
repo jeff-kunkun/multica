@@ -187,10 +187,10 @@ func (h *Handler) officeEventPush(view map[string]any, d db.OfficeEventDelivery)
 	view["delivery"] = map[string]any{
 		"attempt":    d.Attempts + 1,
 		"redelivery": d.SentAt.Valid,
-		// The last push may have reached the Bot with its answer lost: look
-		// the event_id up in the inbox and resend that receipt; act only on
-		// steps not yet done.
-		"reconcile":   d.UncertainAt.Valid,
+		// Anything sent before may be in the Bot's inbox already (its 200,
+		// receipt or the claim itself may have been lost): look the event_id
+		// up, resend that receipt, act only on steps not yet done.
+		"reconcile":   d.SentAt.Valid || d.UncertainAt.Valid,
 		"bot_id":      uuidToString(d.BotID),
 		"reason":      d.Reason,
 		"must_relay":  d.MustRelay,
@@ -442,7 +442,7 @@ func (h *Handler) OfficeEventReceipt(w http.ResponseWriter, r *http.Request) {
 // officeArtifactReceipts checks per-file receipts: the file must be in this
 // event's catalogue, the status one of sent/failed/skipped, a sent file names
 // where it went (ref), a failed one says why (error). A file already recorded
-// as sent stays sent: a late or repeated receipt never takes it back.
+// as sent stays sent: the merge in AckOfficeDelivery never takes it back.
 func (h *Handler) officeArtifactReceipts(ctx context.Context, eventID pgtype.UUID, d db.OfficeEventDelivery, req officeReceiptRequest) (map[string]any, string) {
 	out := map[string]any{}
 	if len(req.Artifacts) == 0 {
@@ -458,8 +458,6 @@ func (h *Handler) officeArtifactReceipts(ctx context.Context, eventID pgtype.UUI
 			catalogue[id] = true
 		}
 	}
-	prior := map[string]map[string]any{}
-	_ = json.Unmarshal(d.Artifacts, &prior)
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	for _, a := range req.Artifacts {
 		id, err := parseUUIDStrict(a.ID)
@@ -467,6 +465,9 @@ func (h *Handler) officeArtifactReceipts(ctx context.Context, eventID pgtype.UUI
 			return nil, "artifact id must be an attachment id"
 		}
 		key := uuidToString(id)
+		if _, dup := out[key]; dup {
+			return nil, "artifact " + key + " appears twice"
+		}
 		if !catalogue[key] {
 			return nil, "artifact " + key + " is not a file of this event"
 		}
@@ -482,9 +483,6 @@ func (h *Handler) officeArtifactReceipts(ctx context.Context, eventID pgtype.UUI
 		case "skipped":
 		default:
 			return nil, "artifact status must be sent, failed or skipped"
-		}
-		if p, ok := prior[key]; ok && p["status"] == "sent" && a.Status != "sent" {
-			continue
 		}
 		out[key] = map[string]any{"status": a.Status, "ref": clip(a.Ref, 500), "error": clip(a.Error, 500), "at": now}
 	}

@@ -359,11 +359,14 @@ Receiver rules the server holds you to:
   `received`; read every member of a batch, not just the first.
 - `relayed` needs `--channel` and `--ref` (the message id where you told the
   person); `relay_failed` needs `--error`. Per file: `=sent:<ref>`,
-  `=failed:<error>` or `=skipped`, only for files in that event's `artifacts`;
-  a file once sent stays sent.
-- `delivery.reconcile: true` means the previous push may already be in your
+  `=failed:<error>` or `=skipped`, only for files in that event's `artifacts`,
+  each file once per receipt; a file once sent stays sent.
+- `delivery.reconcile: true` (any resend of something already sent, also
+  after a server restart) means the previous push may already be in your
   inbox: look the `event_id` up, re-send the receipt you have, and do only the
   steps still missing (never tell the person twice).
 - After a restart, list `multica events deliveries --bot <bot-id> --status
   sent,received` and finish what your inbox shows as not done.
-- `recipient_gap` on an event says nobody could be reached through a Bot.
+- `recipient_gap` on an event says an owner could not be reached through a
+  Bot; once they reconnect and verify, missed results from the last week are
+  delivered to the new connection.

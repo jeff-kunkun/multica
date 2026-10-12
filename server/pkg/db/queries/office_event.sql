@@ -69,7 +69,11 @@ WHERE d.id IN (
 RETURNING d.*;
 
 -- name: RequeueStuckOfficeDeliveries :exec
-UPDATE office_event_delivery SET status = CASE WHEN sent_at IS NULL THEN 'pending' ELSE 'sent' END,
+-- A claim left in 'sending' by a crash may already have reached the Bot, so
+-- it is treated like a lost answer: sent, uncertain, resent with reconcile.
+UPDATE office_event_delivery SET status = 'sent',
+    sent_at = COALESCE(sent_at, now()),
+    uncertain_at = now(),
     next_attempt_at = now(), updated_at = now()
 WHERE status = 'sending' AND updated_at < now() - interval '2 minutes';
 
@@ -144,7 +148,13 @@ UPDATE office_event_delivery SET
                        WHEN @stage::text = 'relayed' THEN '' ELSE relay_error END,
     handled_reason = CASE WHEN @stage::text = 'handled' THEN @handled_reason::text ELSE handled_reason END,
     blocked_reason = CASE WHEN status = 'blocked' AND @stage::text <> 'relay_failed' THEN '' ELSE blocked_reason END,
-    artifacts = artifacts || @artifacts::jsonb,
+    -- Merged in the row lock, so concurrent receipts cannot take back a
+    -- file already recorded as sent.
+    artifacts = artifacts || (
+        SELECT COALESCE(jsonb_object_agg(e.key, e.value), '{}'::jsonb)
+        FROM jsonb_each(@artifacts::jsonb) e
+        WHERE COALESCE(office_event_delivery.artifacts -> e.key ->> 'status', '') <> 'sent'
+           OR e.value ->> 'status' = 'sent'),
     updated_at = now()
 WHERE id = @id
 RETURNING *;
@@ -221,3 +231,66 @@ WHERE a.workspace_id = @workspace_id AND (
 )
 ORDER BY a.created_at, a.id
 LIMIT 200;
+
+-- name: CreateOfficeEventGap :exec
+INSERT INTO office_event_gap (event_id, workspace_id, user_id, reason)
+VALUES (@event_id, @workspace_id, @user_id, @reason)
+ON CONFLICT (event_id, user_id) DO NOTHING;
+
+-- name: ListOfficeEventGaps :many
+SELECT * FROM office_event_gap WHERE event_id = $1 ORDER BY id;
+
+-- name: ListOfficeGapFallbackDue :many
+-- Open gaps of people who have used a Bot in this workspace (someone who
+-- never connected one reads results in the app anyway): one reminder each.
+SELECT sqlc.embed(g), sqlc.embed(e)
+FROM office_event_gap g
+JOIN office_event e ON e.event_id = g.event_id
+WHERE g.fallback_at IS NULL AND g.resolved_at IS NULL
+  AND EXISTS (SELECT 1 FROM member_bot_binding b
+              WHERE b.workspace_id = g.workspace_id AND b.user_id = g.user_id)
+ORDER BY g.id
+LIMIT @lim;
+
+-- name: MarkOfficeGapFallback :exec
+UPDATE office_event_gap SET fallback_at = now() WHERE id = $1 AND fallback_at IS NULL;
+
+-- name: ListOfficeGapsRestorable :many
+-- Recent open gaps whose person has a verified Bot again.
+SELECT sqlc.embed(g), sqlc.embed(b), e.must_relay
+FROM office_event_gap g
+JOIN office_event e ON e.event_id = g.event_id
+JOIN member_bot_binding b ON b.workspace_id = g.workspace_id AND b.user_id = g.user_id
+    AND b.revoked_at IS NULL AND b.verified_at IS NOT NULL
+WHERE g.resolved_at IS NULL AND g.created_at > now() - make_interval(secs => @window_seconds::int)
+ORDER BY g.id
+LIMIT @lim;
+
+-- name: ResolveOfficeGap :exec
+UPDATE office_event_gap SET resolved_at = now(), resolved_bot_id = @bot_id
+WHERE id = @id AND resolved_at IS NULL;
+
+-- name: ListOfficeDeliveriesRestorable :many
+-- Recent owner rows blocked because the person's Bot connection was gone or
+-- unverified, whose person now has a verified one (the same Bot or another).
+SELECT sqlc.embed(d), sqlc.embed(b)
+FROM office_event_delivery d
+JOIN member_bot_binding b ON b.workspace_id = d.workspace_id AND b.user_id = d.target_user_id
+    AND b.revoked_at IS NULL AND b.verified_at IS NOT NULL
+WHERE d.status = 'blocked' AND d.reason = 'owner' AND d.blocked_reason = @channel_reason::text
+  AND d.created_at > now() - make_interval(secs => @window_seconds::int)
+ORDER BY d.id
+LIMIT @lim;
+
+-- name: RequeueOfficeDelivery :exec
+UPDATE office_event_delivery SET
+    status = CASE WHEN sent_at IS NULL THEN 'pending' ELSE 'sent' END,
+    blocked_reason = '', next_attempt_at = now(), updated_at = now()
+WHERE id = $1 AND status = 'blocked';
+
+-- name: MoveOfficeDelivery :exec
+-- The person connected another Bot and the result went there: this row is
+-- closed as a record, without its own in-app reminder.
+UPDATE office_event_delivery SET
+    blocked_reason = @blocked_reason, fallback_at = COALESCE(fallback_at, now()), updated_at = now()
+WHERE id = @id AND status = 'blocked';

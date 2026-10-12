@@ -19,6 +19,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/testutil"
+	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
 // The office event stream (DENE-1963): real local sockets and a disposable
@@ -645,5 +646,200 @@ func TestOfficeEventTicketFilesLateBindingAndNewVersions(t *testing.T) {
 	}
 	if !got[direct] || !got[late] || !got[again] {
 		t.Fatalf("finished ticket catalogue %v misses its files", out["artifacts"])
+	}
+}
+
+// Second review hold P1-1: a claim a crash left in "sending", and a resend
+// after a 200 whose receipt never came, may both already be in the Bot's
+// inbox: each goes out again marked reconcile.
+func TestOfficeEventCrashAndLostReceiptBothResendAsReconcile(t *testing.T) {
+	f := newOfficeFixture(t)
+	push := func() map[string]any {
+		t.Helper()
+		var pushed map[string]any
+		_ = json.Unmarshal(f.lastBody.Load().([]byte), &pushed)
+		return pushed["delivery"].(map[string]any)
+	}
+
+	// Server died between claiming the row and recording the answer.
+	crashed := ownedIssue(t, "Crash mid-push")
+	asActor(t, dbactor.Actor{Type: "member", ID: summonSecondMember(t)}, `UPDATE issue SET status='in_review' WHERE id=$1`, crashed)
+	ev := latestOfficeEvent(t, `issue_id=$1`, crashed)
+	f.seal(t)
+	dbfx.Exec(t, `UPDATE office_event_delivery SET status='sending', updated_at=now()-interval '5 minutes' WHERE event_id=$1`, ev.eventID)
+	f.worker.Sweep(context.Background())
+	var uncertain, sent bool
+	dbfx.QueryRow(t, `SELECT uncertain_at IS NOT NULL, sent_at IS NOT NULL FROM office_event_delivery WHERE event_id=$1`, ev.eventID).Scan(&uncertain, &sent)
+	if status, _, _, _ := deliveryStatus(t, ev.eventID, uuidToString(f.bot.ID)); status != "sent" || !uncertain || !sent {
+		t.Fatalf("after a crash: %s uncertain=%v sent=%v, want sent + uncertain", status, uncertain, sent)
+	}
+	f.worker.DeliverDue(context.Background())
+	if d := push(); d["reconcile"] != true || d["redelivery"] != true {
+		t.Fatalf("push after a crash %v", d)
+	}
+
+	// 200 came back, the Bot's receipt did not.
+	lost := ownedIssue(t, "Receipt lost")
+	asActor(t, dbactor.Actor{Type: "member", ID: summonSecondMember(t)}, `UPDATE issue SET status='in_review' WHERE id=$1`, lost)
+	ev = latestOfficeEvent(t, `issue_id=$1`, lost)
+	f.seal(t)
+	f.worker.DeliverDue(context.Background())
+	if d := push(); d["reconcile"] != false {
+		t.Fatalf("first push already says reconcile: %v", d)
+	}
+	dbfx.Exec(t, `UPDATE office_event_delivery SET next_attempt_at=now() WHERE event_id=$1`, ev.eventID)
+	f.worker.DeliverDue(context.Background())
+	if d := push(); d["reconcile"] != true || d["redelivery"] != true {
+		t.Fatalf("resend after a 200 %v", d)
+	}
+}
+
+// Second review hold P1-2: file receipts merge atomically; a sent file is
+// never taken back, whatever order receipts land in, and one receipt cannot
+// name the same file twice.
+func TestOfficeEventFileReceiptsMergeAtomically(t *testing.T) {
+	f := newOfficeFixture(t)
+	issue := ownedIssue(t, "Two files")
+	agent := dbfx.Agent(t, "files agent", testRuntimeID)
+	att := dbfx.Insert(t, "attachment", testutil.Cols{"workspace_id": testWorkspaceID, "issue_id": issue,
+		"uploader_type": "agent", "uploader_id": agent, "filename": "a.pdf", "url": "fixture/a.pdf",
+		"content_type": "application/pdf", "size_bytes": 3, "sha256": strings.Repeat("e", 64)})
+	f.seal(t)
+	ev := latestOfficeEvent(t, `attachment_id=$1`, att)
+	receipt := f.botPath() + "/office-events/" + ev.eventID + "/receipt"
+
+	if code, out := f.call(t, "POST", receipt, map[string]any{"stage": "received", "artifacts": []map[string]any{
+		{"id": att, "status": "failed", "error": "x"}, {"id": att, "status": "sent", "ref": "tg:1"}}}); code != http.StatusBadRequest {
+		t.Fatalf("duplicate file id: %d %v, want 400", code, out)
+	}
+	// Two receipts race: one says sent, a stale one says failed. Whatever
+	// the order, sent wins.
+	bodies := []map[string]any{
+		{"stage": "received", "artifacts": []map[string]any{{"id": att, "status": "sent", "ref": "tg:2"}}},
+		{"stage": "received", "artifacts": []map[string]any{{"id": att, "status": "failed", "error": "late"}}},
+	}
+	for round := 0; round < 5; round++ {
+		dbfx.Exec(t, `UPDATE office_event_delivery SET artifacts='{}' WHERE event_id=$1`, ev.eventID)
+		done := make(chan int, len(bodies))
+		for _, b := range bodies {
+			go func(b map[string]any) {
+				code, _ := f.call(t, "POST", receipt, b)
+				done <- code
+			}(b)
+		}
+		for range bodies {
+			if code := <-done; code != 200 {
+				t.Fatalf("receipt %d", code)
+			}
+		}
+		var status string
+		dbfx.QueryRow(t, `SELECT artifacts->$2->>'status' FROM office_event_delivery WHERE event_id=$1`, ev.eventID, att).Scan(&status)
+		if status != "sent" {
+			t.Fatalf("round %d: file %s, want sent", round, status)
+		}
+	}
+}
+
+// Second review hold P1-3: an owner whose Bot was disconnected when the
+// result came is a gap of their own (another owner's Bot does not hide it),
+// gets one in-app reminder, and gets the result on their Bot once they
+// reconnect, also when they connect a different Bot.
+func TestOfficeEventDisconnectedOwnerIsRemindedAndCaughtUpOnReconnect(t *testing.T) {
+	f := newOfficeFixture(t)
+	dbfx.Exec(t, `UPDATE office_event_gap SET resolved_at=now() WHERE resolved_at IS NULL`)
+	dbfx.Exec(t, `UPDATE member_bot_binding SET revoked_at=now() WHERE id=$1`, f.binding)
+	peer := summonSecondMember(t)
+	agent := dbfx.Agent(t, "reconnect agent", testRuntimeID)
+	issue := dbfx.Insert(t, "issue", testutil.Cols{
+		"workspace_id": testWorkspaceID, "title": "Hand it over", "status": "in_progress", "priority": "none",
+		"creator_type": "member", "creator_id": testUserID, "assignee_type": "member", "assignee_id": peer,
+		"number": nextTestIssueNumber(t),
+	})
+	asActor(t, dbactor.Actor{Type: "agent", ID: agent}, `UPDATE issue SET status='in_review' WHERE id=$1`, issue)
+	ev := latestOfficeEvent(t, `issue_id=$1 AND event_type='issue.status_changed'`, issue)
+	f.seal(t)
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM inbox_item WHERE details->>'office_event_id'=$1`, ev.eventID)
+	})
+
+	gaps := func() map[string]bool {
+		out := map[string]bool{}
+		rows, err := testPool.Query(context.Background(), `SELECT user_id::text, resolved_at IS NOT NULL FROM office_event_gap WHERE event_id=$1`, ev.eventID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var u string
+			var resolved bool
+			_ = rows.Scan(&u, &resolved)
+			out[u] = resolved
+		}
+		return out
+	}
+	if g := gaps(); len(g) != 2 || g[testUserID] || g[peer] {
+		t.Fatalf("gaps %v, want both owners open", g)
+	}
+	var gap string
+	dbfx.QueryRow(t, `SELECT recipient_gap FROM office_event WHERE event_id=$1`, ev.eventID).Scan(&gap)
+	if gap != officeGapNoBot {
+		t.Fatalf("recipient_gap %q", gap)
+	}
+
+	inbox := func(user string) int {
+		return dbfx.Count(t, `SELECT count(*) FROM inbox_item WHERE recipient_id=$1 AND details->>'office_event_id'=$2`, user, ev.eventID)
+	}
+	f.worker.Fallback(context.Background())
+	f.worker.Fallback(context.Background())
+	if inbox(testUserID) != 1 || inbox(peer) != 0 {
+		t.Fatalf("reminders: owner with a past Bot %d (want 1), never-connected peer %d (want 0)", inbox(testUserID), inbox(peer))
+	}
+
+	f.worker.Restore(context.Background())
+	if g := gaps(); g[testUserID] {
+		t.Fatal("restored while still disconnected")
+	}
+	dbfx.Exec(t, `UPDATE member_bot_binding SET revoked_at=NULL WHERE id=$1`, f.binding)
+	f.worker.Restore(context.Background())
+	if g := gaps(); !g[testUserID] || g[peer] {
+		t.Fatalf("after reconnect gaps %v, want owner resolved, peer open", g)
+	}
+	f.worker.DeliverDue(context.Background())
+	status, reason, _, _ := deliveryStatus(t, ev.eventID, uuidToString(f.bot.ID))
+	if status != "sent" || reason != "owner" {
+		t.Fatalf("caught-up delivery %s/%s", status, reason)
+	}
+
+	// A row blocked because the connection went away moves to a new Bot.
+	later := ownedIssue(t, "After the switch")
+	asActor(t, dbactor.Actor{Type: "agent", ID: agent}, `UPDATE issue SET status='in_review' WHERE id=$1`, later)
+	ev2 := latestOfficeEvent(t, `issue_id=$1 AND event_type='issue.status_changed'`, later)
+	f.seal(t)
+	dbfx.Exec(t, `UPDATE member_bot_binding SET revoked_at=now() WHERE id=$1`, f.binding)
+	f.worker.DeliverDue(context.Background())
+	if status, _, blocked, _ := deliveryStatus(t, ev2.eventID, uuidToString(f.bot.ID)); status != "blocked" || blocked != officeBlockedChannel {
+		t.Fatalf("after disconnect %s %q", status, blocked)
+	}
+	_, hash, prefix, err := mintBotToken()
+	if err != nil {
+		t.Fatal(err)
+	}
+	bot2, err := testHandler.Queries.CreateBotAccessToken(context.Background(), db.CreateBotAccessTokenParams{UserID: parseUUID(testUserID),
+		WorkspaceID: parseUUID(testWorkspaceID), Name: "second bot", TokenHash: hash, TokenPrefix: prefix})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _, _ = testPool.Exec(context.Background(), `DELETE FROM personal_access_token WHERE id=$1`, bot2.ID) })
+	b2 := dbfx.Insert(t, "member_bot_binding", testutil.Cols{"workspace_id": testWorkspaceID, "user_id": testUserID, "bot_id": uuidToString(bot2.ID)})
+	dbfx.Exec(t, `UPDATE member_bot_binding SET verified_at=now() WHERE id=$1`, b2)
+	f.worker.Restore(context.Background())
+	if status, reason, _, _ := deliveryStatus(t, ev2.eventID, uuidToString(bot2.ID)); status != "pending" || reason != "owner" {
+		t.Fatalf("new Bot delivery %q/%q", status, reason)
+	}
+	var moved string
+	var fallback bool
+	dbfx.QueryRow(t, `SELECT blocked_reason, fallback_at IS NOT NULL FROM office_event_delivery WHERE event_id=$1 AND bot_id=$2`, ev2.eventID, uuidToString(f.bot.ID)).Scan(&moved, &fallback)
+	if moved != officeMovedToNewBot || !fallback {
+		t.Fatalf("old row %q fallback=%v", moved, fallback)
 	}
 }

@@ -27,7 +27,13 @@ UPDATE office_event_delivery SET
                        WHEN $1::text = 'relayed' THEN '' ELSE relay_error END,
     handled_reason = CASE WHEN $1::text = 'handled' THEN $5::text ELSE handled_reason END,
     blocked_reason = CASE WHEN status = 'blocked' AND $1::text <> 'relay_failed' THEN '' ELSE blocked_reason END,
-    artifacts = artifacts || $6::jsonb,
+    -- Merged in the row lock, so concurrent receipts cannot take back a
+    -- file already recorded as sent.
+    artifacts = artifacts || (
+        SELECT COALESCE(jsonb_object_agg(e.key, e.value), '{}'::jsonb)
+        FROM jsonb_each($6::jsonb) e
+        WHERE COALESCE(office_event_delivery.artifacts -> e.key ->> 'status', '') <> 'sent'
+           OR e.value ->> 'status' = 'sent'),
     updated_at = now()
 WHERE id = $7
 RETURNING id, event_id, workspace_id, bot_id, binding_id, target_user_id, reason, must_relay, status, attempts, last_error, next_attempt_at, last_attempt_at, sent_at, received_at, relayed_at, relay_channel, relay_ref, relay_error, handled_reason, blocked_reason, fallback_at, uncertain_at, artifacts, created_at, updated_at
@@ -213,6 +219,29 @@ func (q *Queries) CreateOfficeEventDelivery(ctx context.Context, arg CreateOffic
 		arg.MustRelay,
 		arg.Status,
 		arg.BlockedReason,
+	)
+	return err
+}
+
+const createOfficeEventGap = `-- name: CreateOfficeEventGap :exec
+INSERT INTO office_event_gap (event_id, workspace_id, user_id, reason)
+VALUES ($1, $2, $3, $4)
+ON CONFLICT (event_id, user_id) DO NOTHING
+`
+
+type CreateOfficeEventGapParams struct {
+	EventID     pgtype.UUID `json:"event_id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	UserID      pgtype.UUID `json:"user_id"`
+	Reason      string      `json:"reason"`
+}
+
+func (q *Queries) CreateOfficeEventGap(ctx context.Context, arg CreateOfficeEventGapParams) error {
+	_, err := q.db.Exec(ctx, createOfficeEventGap,
+		arg.EventID,
+		arg.WorkspaceID,
+		arg.UserID,
+		arg.Reason,
 	)
 	return err
 }
@@ -566,6 +595,124 @@ func (q *Queries) ListOfficeDeliveriesForEvent(ctx context.Context, eventID pgty
 	return items, nil
 }
 
+const listOfficeDeliveriesRestorable = `-- name: ListOfficeDeliveriesRestorable :many
+SELECT d.id, d.event_id, d.workspace_id, d.bot_id, d.binding_id, d.target_user_id, d.reason, d.must_relay, d.status, d.attempts, d.last_error, d.next_attempt_at, d.last_attempt_at, d.sent_at, d.received_at, d.relayed_at, d.relay_channel, d.relay_ref, d.relay_error, d.handled_reason, d.blocked_reason, d.fallback_at, d.uncertain_at, d.artifacts, d.created_at, d.updated_at, b.id, b.workspace_id, b.user_id, b.bot_id, b.mode, b.resend_after_seconds, b.escalate_after_seconds, b.created_at, b.updated_at, b.verified_at, b.revoked_at, b.broken_notified_at, b.activity_scope
+FROM office_event_delivery d
+JOIN member_bot_binding b ON b.workspace_id = d.workspace_id AND b.user_id = d.target_user_id
+    AND b.revoked_at IS NULL AND b.verified_at IS NOT NULL
+WHERE d.status = 'blocked' AND d.reason = 'owner' AND d.blocked_reason = $1::text
+  AND d.created_at > now() - make_interval(secs => $2::int)
+ORDER BY d.id
+LIMIT $3
+`
+
+type ListOfficeDeliveriesRestorableParams struct {
+	ChannelReason string `json:"channel_reason"`
+	WindowSeconds int32  `json:"window_seconds"`
+	Lim           int32  `json:"lim"`
+}
+
+type ListOfficeDeliveriesRestorableRow struct {
+	OfficeEventDelivery OfficeEventDelivery `json:"office_event_delivery"`
+	MemberBotBinding    MemberBotBinding    `json:"member_bot_binding"`
+}
+
+// Recent owner rows blocked because the person's Bot connection was gone or
+// unverified, whose person now has a verified one (the same Bot or another).
+func (q *Queries) ListOfficeDeliveriesRestorable(ctx context.Context, arg ListOfficeDeliveriesRestorableParams) ([]ListOfficeDeliveriesRestorableRow, error) {
+	rows, err := q.db.Query(ctx, listOfficeDeliveriesRestorable, arg.ChannelReason, arg.WindowSeconds, arg.Lim)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListOfficeDeliveriesRestorableRow{}
+	for rows.Next() {
+		var i ListOfficeDeliveriesRestorableRow
+		if err := rows.Scan(
+			&i.OfficeEventDelivery.ID,
+			&i.OfficeEventDelivery.EventID,
+			&i.OfficeEventDelivery.WorkspaceID,
+			&i.OfficeEventDelivery.BotID,
+			&i.OfficeEventDelivery.BindingID,
+			&i.OfficeEventDelivery.TargetUserID,
+			&i.OfficeEventDelivery.Reason,
+			&i.OfficeEventDelivery.MustRelay,
+			&i.OfficeEventDelivery.Status,
+			&i.OfficeEventDelivery.Attempts,
+			&i.OfficeEventDelivery.LastError,
+			&i.OfficeEventDelivery.NextAttemptAt,
+			&i.OfficeEventDelivery.LastAttemptAt,
+			&i.OfficeEventDelivery.SentAt,
+			&i.OfficeEventDelivery.ReceivedAt,
+			&i.OfficeEventDelivery.RelayedAt,
+			&i.OfficeEventDelivery.RelayChannel,
+			&i.OfficeEventDelivery.RelayRef,
+			&i.OfficeEventDelivery.RelayError,
+			&i.OfficeEventDelivery.HandledReason,
+			&i.OfficeEventDelivery.BlockedReason,
+			&i.OfficeEventDelivery.FallbackAt,
+			&i.OfficeEventDelivery.UncertainAt,
+			&i.OfficeEventDelivery.Artifacts,
+			&i.OfficeEventDelivery.CreatedAt,
+			&i.OfficeEventDelivery.UpdatedAt,
+			&i.MemberBotBinding.ID,
+			&i.MemberBotBinding.WorkspaceID,
+			&i.MemberBotBinding.UserID,
+			&i.MemberBotBinding.BotID,
+			&i.MemberBotBinding.Mode,
+			&i.MemberBotBinding.ResendAfterSeconds,
+			&i.MemberBotBinding.EscalateAfterSeconds,
+			&i.MemberBotBinding.CreatedAt,
+			&i.MemberBotBinding.UpdatedAt,
+			&i.MemberBotBinding.VerifiedAt,
+			&i.MemberBotBinding.RevokedAt,
+			&i.MemberBotBinding.BrokenNotifiedAt,
+			&i.MemberBotBinding.ActivityScope,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listOfficeEventGaps = `-- name: ListOfficeEventGaps :many
+SELECT id, event_id, workspace_id, user_id, reason, fallback_at, resolved_at, resolved_bot_id, created_at FROM office_event_gap WHERE event_id = $1 ORDER BY id
+`
+
+func (q *Queries) ListOfficeEventGaps(ctx context.Context, eventID pgtype.UUID) ([]OfficeEventGap, error) {
+	rows, err := q.db.Query(ctx, listOfficeEventGaps, eventID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []OfficeEventGap{}
+	for rows.Next() {
+		var i OfficeEventGap
+		if err := rows.Scan(
+			&i.ID,
+			&i.EventID,
+			&i.WorkspaceID,
+			&i.UserID,
+			&i.Reason,
+			&i.FallbackAt,
+			&i.ResolvedAt,
+			&i.ResolvedBotID,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listOfficeEvents = `-- name: ListOfficeEvents :many
 SELECT id, event_id, workspace_id, family, event_type, object_type, object_id, issue_id, chat_session_id, chat_message_id, comment_id, task_id, attachment_id, changes, actor_type, actor_id, via_bot_id, on_behalf_of_user_id, actor_task_id, actor_source, occurred_at, stream_seq, sealed_at, meaning, summary, must_relay, pending_approval, business_key, recipient_gap FROM office_event
 WHERE workspace_id = $1
@@ -735,6 +882,150 @@ func (q *Queries) ListOfficeFallbackDue(ctx context.Context, arg ListOfficeFallb
 			&i.OfficeEvent.PendingApproval,
 			&i.OfficeEvent.BusinessKey,
 			&i.OfficeEvent.RecipientGap,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listOfficeGapFallbackDue = `-- name: ListOfficeGapFallbackDue :many
+SELECT g.id, g.event_id, g.workspace_id, g.user_id, g.reason, g.fallback_at, g.resolved_at, g.resolved_bot_id, g.created_at, e.id, e.event_id, e.workspace_id, e.family, e.event_type, e.object_type, e.object_id, e.issue_id, e.chat_session_id, e.chat_message_id, e.comment_id, e.task_id, e.attachment_id, e.changes, e.actor_type, e.actor_id, e.via_bot_id, e.on_behalf_of_user_id, e.actor_task_id, e.actor_source, e.occurred_at, e.stream_seq, e.sealed_at, e.meaning, e.summary, e.must_relay, e.pending_approval, e.business_key, e.recipient_gap
+FROM office_event_gap g
+JOIN office_event e ON e.event_id = g.event_id
+WHERE g.fallback_at IS NULL AND g.resolved_at IS NULL
+  AND EXISTS (SELECT 1 FROM member_bot_binding b
+              WHERE b.workspace_id = g.workspace_id AND b.user_id = g.user_id)
+ORDER BY g.id
+LIMIT $1
+`
+
+type ListOfficeGapFallbackDueRow struct {
+	OfficeEventGap OfficeEventGap `json:"office_event_gap"`
+	OfficeEvent    OfficeEvent    `json:"office_event"`
+}
+
+// Open gaps of people who have used a Bot in this workspace (someone who
+// never connected one reads results in the app anyway): one reminder each.
+func (q *Queries) ListOfficeGapFallbackDue(ctx context.Context, lim int32) ([]ListOfficeGapFallbackDueRow, error) {
+	rows, err := q.db.Query(ctx, listOfficeGapFallbackDue, lim)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListOfficeGapFallbackDueRow{}
+	for rows.Next() {
+		var i ListOfficeGapFallbackDueRow
+		if err := rows.Scan(
+			&i.OfficeEventGap.ID,
+			&i.OfficeEventGap.EventID,
+			&i.OfficeEventGap.WorkspaceID,
+			&i.OfficeEventGap.UserID,
+			&i.OfficeEventGap.Reason,
+			&i.OfficeEventGap.FallbackAt,
+			&i.OfficeEventGap.ResolvedAt,
+			&i.OfficeEventGap.ResolvedBotID,
+			&i.OfficeEventGap.CreatedAt,
+			&i.OfficeEvent.ID,
+			&i.OfficeEvent.EventID,
+			&i.OfficeEvent.WorkspaceID,
+			&i.OfficeEvent.Family,
+			&i.OfficeEvent.EventType,
+			&i.OfficeEvent.ObjectType,
+			&i.OfficeEvent.ObjectID,
+			&i.OfficeEvent.IssueID,
+			&i.OfficeEvent.ChatSessionID,
+			&i.OfficeEvent.ChatMessageID,
+			&i.OfficeEvent.CommentID,
+			&i.OfficeEvent.TaskID,
+			&i.OfficeEvent.AttachmentID,
+			&i.OfficeEvent.Changes,
+			&i.OfficeEvent.ActorType,
+			&i.OfficeEvent.ActorID,
+			&i.OfficeEvent.ViaBotID,
+			&i.OfficeEvent.OnBehalfOfUserID,
+			&i.OfficeEvent.ActorTaskID,
+			&i.OfficeEvent.ActorSource,
+			&i.OfficeEvent.OccurredAt,
+			&i.OfficeEvent.StreamSeq,
+			&i.OfficeEvent.SealedAt,
+			&i.OfficeEvent.Meaning,
+			&i.OfficeEvent.Summary,
+			&i.OfficeEvent.MustRelay,
+			&i.OfficeEvent.PendingApproval,
+			&i.OfficeEvent.BusinessKey,
+			&i.OfficeEvent.RecipientGap,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listOfficeGapsRestorable = `-- name: ListOfficeGapsRestorable :many
+SELECT g.id, g.event_id, g.workspace_id, g.user_id, g.reason, g.fallback_at, g.resolved_at, g.resolved_bot_id, g.created_at, b.id, b.workspace_id, b.user_id, b.bot_id, b.mode, b.resend_after_seconds, b.escalate_after_seconds, b.created_at, b.updated_at, b.verified_at, b.revoked_at, b.broken_notified_at, b.activity_scope, e.must_relay
+FROM office_event_gap g
+JOIN office_event e ON e.event_id = g.event_id
+JOIN member_bot_binding b ON b.workspace_id = g.workspace_id AND b.user_id = g.user_id
+    AND b.revoked_at IS NULL AND b.verified_at IS NOT NULL
+WHERE g.resolved_at IS NULL AND g.created_at > now() - make_interval(secs => $1::int)
+ORDER BY g.id
+LIMIT $2
+`
+
+type ListOfficeGapsRestorableParams struct {
+	WindowSeconds int32 `json:"window_seconds"`
+	Lim           int32 `json:"lim"`
+}
+
+type ListOfficeGapsRestorableRow struct {
+	OfficeEventGap   OfficeEventGap   `json:"office_event_gap"`
+	MemberBotBinding MemberBotBinding `json:"member_bot_binding"`
+	MustRelay        bool             `json:"must_relay"`
+}
+
+// Recent open gaps whose person has a verified Bot again.
+func (q *Queries) ListOfficeGapsRestorable(ctx context.Context, arg ListOfficeGapsRestorableParams) ([]ListOfficeGapsRestorableRow, error) {
+	rows, err := q.db.Query(ctx, listOfficeGapsRestorable, arg.WindowSeconds, arg.Lim)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListOfficeGapsRestorableRow{}
+	for rows.Next() {
+		var i ListOfficeGapsRestorableRow
+		if err := rows.Scan(
+			&i.OfficeEventGap.ID,
+			&i.OfficeEventGap.EventID,
+			&i.OfficeEventGap.WorkspaceID,
+			&i.OfficeEventGap.UserID,
+			&i.OfficeEventGap.Reason,
+			&i.OfficeEventGap.FallbackAt,
+			&i.OfficeEventGap.ResolvedAt,
+			&i.OfficeEventGap.ResolvedBotID,
+			&i.OfficeEventGap.CreatedAt,
+			&i.MemberBotBinding.ID,
+			&i.MemberBotBinding.WorkspaceID,
+			&i.MemberBotBinding.UserID,
+			&i.MemberBotBinding.BotID,
+			&i.MemberBotBinding.Mode,
+			&i.MemberBotBinding.ResendAfterSeconds,
+			&i.MemberBotBinding.EscalateAfterSeconds,
+			&i.MemberBotBinding.CreatedAt,
+			&i.MemberBotBinding.UpdatedAt,
+			&i.MemberBotBinding.VerifiedAt,
+			&i.MemberBotBinding.RevokedAt,
+			&i.MemberBotBinding.BrokenNotifiedAt,
+			&i.MemberBotBinding.ActivityScope,
+			&i.MustRelay,
 		); err != nil {
 			return nil, err
 		}
@@ -943,6 +1234,33 @@ func (q *Queries) MarkOfficeFallback(ctx context.Context, id int64) error {
 	return err
 }
 
+const markOfficeGapFallback = `-- name: MarkOfficeGapFallback :exec
+UPDATE office_event_gap SET fallback_at = now() WHERE id = $1 AND fallback_at IS NULL
+`
+
+func (q *Queries) MarkOfficeGapFallback(ctx context.Context, id int64) error {
+	_, err := q.db.Exec(ctx, markOfficeGapFallback, id)
+	return err
+}
+
+const moveOfficeDelivery = `-- name: MoveOfficeDelivery :exec
+UPDATE office_event_delivery SET
+    blocked_reason = $1, fallback_at = COALESCE(fallback_at, now()), updated_at = now()
+WHERE id = $2 AND status = 'blocked'
+`
+
+type MoveOfficeDeliveryParams struct {
+	BlockedReason string `json:"blocked_reason"`
+	ID            int64  `json:"id"`
+}
+
+// The person connected another Bot and the result went there: this row is
+// closed as a record, without its own in-app reminder.
+func (q *Queries) MoveOfficeDelivery(ctx context.Context, arg MoveOfficeDeliveryParams) error {
+	_, err := q.db.Exec(ctx, moveOfficeDelivery, arg.BlockedReason, arg.ID)
+	return err
+}
+
 const nextOfficeEventSeq = `-- name: NextOfficeEventSeq :one
 SELECT (COALESCE(MAX(stream_seq), 0) + 1)::bigint FROM office_event
 `
@@ -954,14 +1272,45 @@ func (q *Queries) NextOfficeEventSeq(ctx context.Context) (int64, error) {
 	return column_1, err
 }
 
+const requeueOfficeDelivery = `-- name: RequeueOfficeDelivery :exec
+UPDATE office_event_delivery SET
+    status = CASE WHEN sent_at IS NULL THEN 'pending' ELSE 'sent' END,
+    blocked_reason = '', next_attempt_at = now(), updated_at = now()
+WHERE id = $1 AND status = 'blocked'
+`
+
+func (q *Queries) RequeueOfficeDelivery(ctx context.Context, id int64) error {
+	_, err := q.db.Exec(ctx, requeueOfficeDelivery, id)
+	return err
+}
+
 const requeueStuckOfficeDeliveries = `-- name: RequeueStuckOfficeDeliveries :exec
-UPDATE office_event_delivery SET status = CASE WHEN sent_at IS NULL THEN 'pending' ELSE 'sent' END,
+UPDATE office_event_delivery SET status = 'sent',
+    sent_at = COALESCE(sent_at, now()),
+    uncertain_at = now(),
     next_attempt_at = now(), updated_at = now()
 WHERE status = 'sending' AND updated_at < now() - interval '2 minutes'
 `
 
+// A claim left in 'sending' by a crash may already have reached the Bot, so
+// it is treated like a lost answer: sent, uncertain, resent with reconcile.
 func (q *Queries) RequeueStuckOfficeDeliveries(ctx context.Context) error {
 	_, err := q.db.Exec(ctx, requeueStuckOfficeDeliveries)
+	return err
+}
+
+const resolveOfficeGap = `-- name: ResolveOfficeGap :exec
+UPDATE office_event_gap SET resolved_at = now(), resolved_bot_id = $1
+WHERE id = $2 AND resolved_at IS NULL
+`
+
+type ResolveOfficeGapParams struct {
+	BotID pgtype.UUID `json:"bot_id"`
+	ID    int64       `json:"id"`
+}
+
+func (q *Queries) ResolveOfficeGap(ctx context.Context, arg ResolveOfficeGapParams) error {
+	_, err := q.db.Exec(ctx, resolveOfficeGap, arg.BotID, arg.ID)
 	return err
 }
 

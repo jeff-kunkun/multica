@@ -44,6 +44,7 @@ const (
 	officeSealBatch     = 200
 	officeDeliverBatch  = 20
 	officeFallbackGrace = 5 * time.Minute
+	officeRestoreWindow = 7 * 24 * time.Hour
 )
 
 func NewOfficeEventWorker(h *Handler, wake *BotWakeWorker) *OfficeEventWorker {
@@ -104,6 +105,7 @@ func (w *OfficeEventWorker) Sweep(ctx context.Context) {
 	if err := w.h.Queries.RequeueStuckOfficeDeliveries(ctx); err != nil {
 		slog.Warn("office events: requeue failed", "error", err)
 	}
+	w.Restore(ctx)
 	w.Fallback(ctx)
 }
 
@@ -131,7 +133,7 @@ func (w *OfficeEventWorker) Seal(ctx context.Context) (int, error) {
 		class := service.ClassifyOffice(facts)
 		// A lookup that failed is not "nobody": the whole batch waits for the
 		// next tick rather than sealing an event with recipients missing.
-		recipients, gap, err := w.recipients(ctx, ev, class)
+		recipients, gap, unreached, err := w.recipients(ctx, ev, class)
 		if err != nil {
 			return 0, fmt.Errorf("recipients of %s: %w", uuidToString(ev.EventID), err)
 		}
@@ -142,6 +144,13 @@ func (w *OfficeEventWorker) Seal(ctx context.Context) (int, error) {
 			RecipientGap: gap,
 		}); err != nil {
 			return 0, err
+		}
+		for _, user := range unreached {
+			if err := q.CreateOfficeEventGap(ctx, db.CreateOfficeEventGapParams{
+				EventID: ev.EventID, WorkspaceID: ev.WorkspaceID, UserID: user, Reason: officeGapNoBot,
+			}); err != nil {
+				return 0, err
+			}
 		}
 		seq++
 		for _, r := range recipients {
@@ -201,7 +210,9 @@ type officeRecipient struct {
 }
 
 // Recipient gaps, recorded on the event when a result that must reach
-// someone has nobody it can reach through a Bot.
+// someone cannot reach (all of) them through a Bot. Each owner without a Bot
+// also gets an office_event_gap row: reminder in the app, delivery on
+// reconnect.
 const (
 	officeGapNoOwner = "没有可通知的主人：这条结果不属于任何人的任务或聊天"
 	officeGapNoBot   = "主人没有连接 Bot，结果只在应用里"
@@ -215,9 +226,12 @@ const (
 //
 // An owner whose Bot is connected but not verified still gets a row, blocked
 // with the reason, so the result is not lost: it goes to their inbox and
-// comes back with a retry once the Bot is verified. Any lookup that fails
-// returns the error; the caller must not seal on a partial answer.
-func (w *OfficeEventWorker) recipients(ctx context.Context, ev db.OfficeEvent, class service.OfficeClass) ([]officeRecipient, string, error) {
+// comes back once the Bot is verified. Owners of a must-relay result with no
+// Bot at all are returned as unreached, one by one, so one owner's Bot never
+// hides another's gap. Any lookup that fails returns the error; the caller
+// must not seal on a partial answer.
+func (w *OfficeEventWorker) recipients(ctx context.Context, ev db.OfficeEvent, class service.OfficeClass) ([]officeRecipient, string, []pgtype.UUID, error) {
+	var unreached []pgtype.UUID
 	seen := map[string]bool{}
 	var out []officeRecipient
 	add := func(r officeRecipient) error {
@@ -238,47 +252,56 @@ func (w *OfficeEventWorker) recipients(ctx context.Context, ev db.OfficeEvent, c
 	if ownerWorthy {
 		owners, err := w.owners(ctx, ev)
 		if err != nil {
-			return nil, "", err
+			return nil, "", nil, err
 		}
-		reachable := false
 		for _, user := range owners {
 			if w.ownAction(ev, user) {
-				reachable = true // they did it; nobody is missing
-				continue
+				continue // they did it; nobody is missing
 			}
 			b, err := w.h.Queries.GetOfficeBindingForUser(ctx, db.GetOfficeBindingForUserParams{WorkspaceID: ev.WorkspaceID, UserID: user})
 			if errors.Is(err, pgx.ErrNoRows) {
+				if !class.MustRelay {
+					continue
+				}
+				visible, err := w.h.officeEventVisibleErr(ctx, ev, user)
+				if err != nil {
+					return nil, "", nil, err
+				}
+				if visible {
+					unreached = append(unreached, user)
+				}
 				continue
 			}
 			if err != nil {
-				return nil, "", err
+				return nil, "", nil, err
 			}
 			r := officeRecipient{binding: b, reason: "owner"}
 			if !b.VerifiedAt.Valid {
 				r.blocked = officeBlockedChannel
 			}
 			if err := add(r); err != nil {
-				return nil, "", err
+				return nil, "", nil, err
 			}
-			reachable = true
 		}
-		if class.MustRelay && !reachable {
-			gap = officeGapNoBot
-			if len(owners) == 0 {
+		if class.MustRelay {
+			switch {
+			case len(owners) == 0:
 				gap = officeGapNoOwner
+			case len(unreached) > 0:
+				gap = officeGapNoBot
 			}
 		}
 	}
 	stream, err := w.h.Queries.ListOfficeStreamBindings(ctx, ev.WorkspaceID)
 	if err != nil {
-		return nil, "", err
+		return nil, "", nil, err
 	}
 	for _, b := range stream {
 		if err := add(officeRecipient{binding: b, reason: "stream"}); err != nil {
-			return nil, "", err
+			return nil, "", nil, err
 		}
 	}
-	return out, gap, nil
+	return out, gap, unreached, nil
 }
 
 func (w *OfficeEventWorker) ownAction(ev db.OfficeEvent, user pgtype.UUID) bool {
@@ -409,6 +432,7 @@ const (
 	officeBlockedNoWebhook  = "Bot 没有设置接收地址；设好地址后点重试，也可以用拉取接口补收"
 	officeBlockedBadWebhook = "Bot 的接收地址不可用（只接受公网 HTTPS）；改好地址后点重试"
 	officeBlockedRejected   = "Bot 拒收（%s）；检查 Bot 的接收密钥后点重试"
+	officeMovedToNewBot     = "已改送到新连接的 Bot"
 )
 
 func (w *OfficeEventWorker) push(ctx context.Context, d db.OfficeEventDelivery) {
@@ -532,7 +556,7 @@ func (w *OfficeEventWorker) block(d db.OfficeEventDelivery, reason, detail strin
 }
 
 // Fallback puts results that must reach a person, and did not, in their
-// inbox: once per delivery.
+// inbox: once per delivery, and once per person whose Bot was not connected.
 func (w *OfficeEventWorker) Fallback(ctx context.Context) int {
 	rows, err := w.h.Queries.ListOfficeFallbackDue(ctx, db.ListOfficeFallbackDueParams{
 		GraceSeconds: int32(officeFallbackGrace.Seconds()), Lim: 50,
@@ -541,49 +565,156 @@ func (w *OfficeEventWorker) Fallback(ctx context.Context) int {
 		slog.Warn("office events: fallback scan failed", "error", err)
 		return 0
 	}
+	n := 0
 	for _, row := range rows {
 		d, ev := row.OfficeEventDelivery, row.OfficeEvent
 		body := "你的 Bot 还没确认把这条结果告诉你，这里补一条。"
 		if d.Status == "blocked" {
 			body = "没能送到你的 Bot：" + d.BlockedReason
 		}
-		if ev.PendingApproval {
-			body += "（系统改成完成，正式发布仍待批准，不代表可以发布。）"
-		}
-		details, _ := json.Marshal(map[string]string{
-			"office_event_id": uuidToString(ev.EventID),
-			"chat_session_id": uuidToString(ev.ChatSessionID),
-			"meaning":         ev.Meaning,
-		})
-		item, err := w.h.Queries.CreateInboxItem(ctx, db.CreateInboxItemParams{
-			ID:            dbid.NewV7(),
-			WorkspaceID:   ev.WorkspaceID,
-			RecipientType: "member",
-			RecipientID:   d.TargetUserID,
-			Type:          service.InboxTypeNeedsYou,
-			Severity:      "attention",
-			IssueID:       ev.IssueID,
-			Title:         firstNonEmpty(ev.Summary, ev.EventType),
-			Body:          pgtype.Text{String: body, Valid: true},
-			ActorType:     pgtype.Text{String: "system", Valid: true},
-			Details:       details,
-		})
+		visible, err := w.h.officeEventVisibleErr(ctx, ev, d.TargetUserID)
 		if err != nil {
-			slog.Warn("office events: fallback row failed", "error", err, "delivery", d.ID)
+			continue
+		}
+		if visible && !w.remind(ctx, ev, d.TargetUserID, body) {
 			continue
 		}
 		if err := w.h.Queries.MarkOfficeFallback(ctx, d.ID); err != nil {
 			slog.Warn("office events: remember fallback failed", "error", err, "delivery", d.ID)
 		}
-		status := ""
-		if ev.IssueID.Valid {
-			if issue, err := w.h.Queries.GetIssue(ctx, ev.IssueID); err == nil {
-				status = issue.Status
-			}
-		}
-		service.PublishInboxNew(w.h.Bus, item, status)
+		n++
 	}
-	return len(rows)
+	gaps, err := w.h.Queries.ListOfficeGapFallbackDue(ctx, 50)
+	if err != nil {
+		slog.Warn("office events: gap fallback scan failed", "error", err)
+		return n
+	}
+	for _, row := range gaps {
+		g, ev := row.OfficeEventGap, row.OfficeEvent
+		visible, err := w.h.officeEventVisibleErr(ctx, ev, g.UserID)
+		if err != nil {
+			continue
+		}
+		if visible && !w.remind(ctx, ev, g.UserID, "你的 Bot 没有连接，这条结果只在应用里；重新连接并验证 Bot 后会补发给它。") {
+			continue
+		}
+		if err := w.h.Queries.MarkOfficeGapFallback(ctx, g.ID); err != nil {
+			slog.Warn("office events: remember gap fallback failed", "error", err, "gap", g.ID)
+		}
+		n++
+	}
+	return n
+}
+
+// remind writes one in-app notice about an office event. It reports whether
+// the notice was written.
+func (w *OfficeEventWorker) remind(ctx context.Context, ev db.OfficeEvent, user pgtype.UUID, body string) bool {
+	if ev.PendingApproval {
+		body += "（系统改成完成，正式发布仍待批准，不代表可以发布。）"
+	}
+	details, _ := json.Marshal(map[string]string{
+		"office_event_id": uuidToString(ev.EventID),
+		"chat_session_id": uuidToString(ev.ChatSessionID),
+		"meaning":         ev.Meaning,
+	})
+	item, err := w.h.Queries.CreateInboxItem(ctx, db.CreateInboxItemParams{
+		ID:            dbid.NewV7(),
+		WorkspaceID:   ev.WorkspaceID,
+		RecipientType: "member",
+		RecipientID:   user,
+		Type:          service.InboxTypeNeedsYou,
+		Severity:      "attention",
+		IssueID:       ev.IssueID,
+		Title:         firstNonEmpty(ev.Summary, ev.EventType),
+		Body:          pgtype.Text{String: body, Valid: true},
+		ActorType:     pgtype.Text{String: "system", Valid: true},
+		Details:       details,
+	})
+	if err != nil {
+		slog.Warn("office events: fallback row failed", "error", err, "event", uuidToString(ev.EventID))
+		return false
+	}
+	status := ""
+	if ev.IssueID.Valid {
+		if issue, err := w.h.Queries.GetIssue(ctx, ev.IssueID); err == nil {
+			status = issue.Status
+		}
+	}
+	service.PublishInboxNew(w.h.Bus, item, status)
+	return true
+}
+
+// Restore brings results back to a person who connects and verifies a Bot
+// again: open gaps get a delivery to that Bot, and owner rows blocked because
+// the connection was gone are requeued (same Bot) or moved (new Bot). Only
+// results from the last week, and only what the person can still see.
+func (w *OfficeEventWorker) Restore(ctx context.Context) int {
+	window := int32(officeRestoreWindow.Seconds())
+	n := 0
+	gaps, err := w.h.Queries.ListOfficeGapsRestorable(ctx, db.ListOfficeGapsRestorableParams{WindowSeconds: window, Lim: 100})
+	if err != nil {
+		slog.Warn("office events: gap restore scan failed", "error", err)
+	}
+	for _, row := range gaps {
+		g, b := row.OfficeEventGap, row.MemberBotBinding
+		if w.redeliver(ctx, g.EventID, g.WorkspaceID, b, row.MustRelay) {
+			if err := w.h.Queries.ResolveOfficeGap(ctx, db.ResolveOfficeGapParams{ID: g.ID, BotID: b.BotID}); err != nil {
+				slog.Warn("office events: resolve gap failed", "error", err, "gap", g.ID)
+				continue
+			}
+			n++
+		}
+	}
+	blocked, err := w.h.Queries.ListOfficeDeliveriesRestorable(ctx, db.ListOfficeDeliveriesRestorableParams{
+		ChannelReason: officeBlockedChannel, WindowSeconds: window, Lim: 100,
+	})
+	if err != nil {
+		slog.Warn("office events: delivery restore scan failed", "error", err)
+	}
+	for _, row := range blocked {
+		d, b := row.OfficeEventDelivery, row.MemberBotBinding
+		if b.BotID == d.BotID {
+			if err := w.h.Queries.RequeueOfficeDelivery(ctx, d.ID); err != nil {
+				slog.Warn("office events: requeue failed", "error", err, "delivery", d.ID)
+				continue
+			}
+			n++
+			continue
+		}
+		if w.redeliver(ctx, d.EventID, d.WorkspaceID, b, d.MustRelay) {
+			if err := w.h.Queries.MoveOfficeDelivery(ctx, db.MoveOfficeDeliveryParams{ID: d.ID, BlockedReason: officeMovedToNewBot}); err != nil {
+				slog.Warn("office events: move delivery failed", "error", err, "delivery", d.ID)
+				continue
+			}
+			n++
+		}
+	}
+	return n
+}
+
+// redeliver opens a delivery of one event to a person's current Bot after
+// checking they can still see it. It reports whether the event is now owed
+// to that Bot (false on a lookup failure: try again next sweep).
+func (w *OfficeEventWorker) redeliver(ctx context.Context, eventID, workspaceID pgtype.UUID, b db.MemberBotBinding, mustRelay bool) bool {
+	ev, err := w.h.Queries.GetOfficeEvent(ctx, db.GetOfficeEventParams{EventID: eventID, WorkspaceID: workspaceID})
+	if err != nil {
+		return false
+	}
+	visible, err := w.h.officeEventVisibleErr(ctx, ev, b.UserID)
+	if err != nil {
+		return false
+	}
+	if !visible {
+		return true // nothing is owed any more
+	}
+	if err := w.h.Queries.CreateOfficeEventDelivery(ctx, db.CreateOfficeEventDeliveryParams{
+		EventID: ev.EventID, WorkspaceID: ev.WorkspaceID, BotID: b.BotID, BindingID: b.ID,
+		TargetUserID: b.UserID, Reason: "owner", MustRelay: mustRelay, Status: "pending",
+	}); err != nil {
+		slog.Warn("office events: restore delivery failed", "error", err, "event", uuidToString(ev.EventID))
+		return false
+	}
+	return true
 }
 
 func firstNonEmpty(values ...string) string {

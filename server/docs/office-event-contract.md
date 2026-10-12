@@ -108,10 +108,16 @@ Each entry in `artifacts`: `id`, `filename`, `content_type`, `size`, `sha256`,
 - Nobody is told about their own action. An agent's result is not the
   person's own action, even when their Bot started the run.
 - An owner whose Bot is connected but not verified still gets a row, blocked
-  with the reason: it reaches their inbox and goes out with a retry once the
-  Bot is verified. An owner with no Bot reads results in the app.
-- A must-relay result nobody could be reached for carries `recipient_gap`
-  (no owner at all, or no owner with a Bot).
+  with the reason: it reaches their inbox and goes out by itself once the
+  Bot is verified.
+- An owner of a must-relay result with no Bot (never connected, or
+  disconnected) gets a gap row of their own, so another owner's Bot never
+  hides it. Someone who has used a Bot here gets one in-app reminder; when
+  they connect and verify a Bot again (within a week), the result is
+  delivered to it. A row blocked because the connection went away is
+  requeued on reconnect, or moved to the new Bot if they switched.
+- A must-relay result carries `recipient_gap` when it has no owner at all,
+  or an owner without a Bot.
 - If any of these lookups fails, the event is not sealed; it is tried again,
   never sealed with recipients missing.
 
@@ -129,7 +135,10 @@ When a request went out and its answer was lost (timeout after sending, some
 5xx), the Bot may already have it. That is not treated as a failure: the next
 push waits like after a 200, and carries `delivery.reconcile: true`, so the Bot
 looks the `event_id` up in its inbox, re-sends the receipt it has, and does
-only what is still missing. `uncertain_at` on the delivery records it.
+only what is still missing. `uncertain_at` on the delivery records it. The
+same holds for a claim left in `sending` by a server restart, and for any
+resend after a 200: every push of something already sent carries
+`reconcile: true`.
 
 The Bot is expected to store the event in its own durable inbox before it
 answers `received`, and after a restart to list its open deliveries and
@@ -151,11 +160,14 @@ pending → sending → sent (200) → received → relayed | handled
 
 `artifacts: [{id, status: sent|failed|skipped, ref, error}]` records each file
 separately: only files in this event's `artifacts`, `sent` needs `ref`,
-`failed` needs `error` (else 400 `invalid_artifact_receipt`). A file once
-`sent` stays sent; a late or repeated receipt cannot take it back.
+`failed` needs `error`, each file once per receipt (else 400
+`invalid_artifact_receipt`). A file once `sent` stays sent: receipts merge
+under the row lock, so a late, repeated or concurrent receipt cannot take it
+back.
 
 A must-relay result still not `relayed` or `handled` five minutes after it was
-queued, or blocked, goes to the person's inbox once.
+queued, or blocked, goes to the person's inbox once, if they can still see
+it.
 
 Blocked deliveries keep their reason (Bot disconnected, key revoked, no or
 unusable webhook, recipient lost access, stream switched off, Bot rejected),
