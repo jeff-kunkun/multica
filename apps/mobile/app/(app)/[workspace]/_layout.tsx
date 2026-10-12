@@ -259,6 +259,10 @@ export default function WorkspaceLayout() {
           options={SHEET_OPTIONS}
         />
         <Stack.Screen
+          name="project/[id]/picker/executors"
+          options={SHEET_OPTIONS}
+        />
+        <Stack.Screen
           name="project/[id]/add-resource"
           options={SHEET_OPTIONS}
         />

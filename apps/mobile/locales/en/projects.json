@@ -60,7 +60,11 @@
     "status": "Status",
     "priority": "Priority",
     "lead": "Lead",
-    "unassigned": "Unassigned"
+    "unassigned": "Unassigned",
+    "executors": "Executors",
+    "executors_any": "Any agent",
+    "executors_header": "Automatic dispatch only picks these; none picked means any",
+    "executors_admin_only": "Only workspace admins can change this"
   },
   "resources": {
     "title": "Resources",
