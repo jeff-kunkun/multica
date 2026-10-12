@@ -758,6 +758,8 @@ type ChatMessage struct {
 	ViaBotName                    pgtype.Text        `json:"via_bot_name"`
 	WakeRootID                    pgtype.UUID        `json:"wake_root_id"`
 	WakeHop                       int32              `json:"wake_hop"`
+	SupersededAt                  pgtype.Timestamptz `json:"superseded_at"`
+	SupersededByMessageID         pgtype.UUID        `json:"superseded_by_message_id"`
 }
 
 type ChatNamingEvent struct {

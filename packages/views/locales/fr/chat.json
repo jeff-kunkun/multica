@@ -430,6 +430,9 @@
     "reason_session_lost": "la session précédente n'a pas pu être restaurée",
     "reason_fresh_requested": "nouvelle session demandée"
   },
+  "superseded": {
+    "label": "Remplacé par une instruction plus récente"
+  },
   "report": {
     "bar_one": "{{count}} ticket de cette discussion",
     "bar_other": "{{count}} tickets de cette discussion",

@@ -16,7 +16,10 @@ reading chats never changes unread state. Use `multica chat history` for a
 bounded transcript after choosing a session.
 
 To message a chat while its agent may still be replying, use
-`multica chat send --session <id> --content-file <path> --mode steer|queue|restart`.
+`multica chat send --session <id> --content-file <path> --mode steer|queue|restart|replace`.
+When Kun changes their mind, use `--mode replace` (voids queued old messages and
+the running reply, runs the new message); `multica chat clear-queue --session <id>`
+just drops the queued follow-ups.
 A message that is worthless late (a verification code, a relayed SMS) goes with
 `--urgent`: refused at once when the runtime is offline, otherwise head of the
 queue, and the command exits 0 only once a daemon has started the turn within
