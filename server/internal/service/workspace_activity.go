@@ -74,6 +74,7 @@ type WorkspaceEventBody struct {
 	Fields           []string          `json:"fields,omitempty"`
 	EntityID         string            `json:"entity_id,omitempty"`
 	ProjectID        string            `json:"project_id,omitempty"` // the project the event belongs to: the send gate asks whether the person can still open it
+	IssueIDs         []string          `json:"issue_ids,omitempty"`  // every ticket a PR event is linked to: the send gate asks about each
 	ActorKind        string            `json:"actor_kind"`           // member | agent | bot | system
 	ActorID          string            `json:"actor_id,omitempty"`
 	ActorName        string            `json:"actor_name,omitempty"`
@@ -300,6 +301,13 @@ func RouteWorkspaceActivity(ctx context.Context, q *db.Queries, in WorkspaceActi
 	}
 	if in.Target.ProjectID.Valid {
 		in.Body.ProjectID = util.UUIDToString(in.Target.ProjectID)
+	}
+	if in.Body.Family == FamilyPR && !in.Target.Established(FamilyPR) {
+		return 0, nil // a PR linked to no ticket has no access to judge: not told
+	}
+	in.Body.IssueIDs = nil
+	for _, id := range in.Target.IssueIDs {
+		in.Body.IssueIDs = append(in.Body.IssueIDs, util.UUIDToString(id))
 	}
 	body, err := marshalWorkspaceBody(in, occurred)
 	if err != nil {

@@ -77,10 +77,11 @@ func BotWriteAudit(queries *db.Queries, observe WriteObserver, confirmer service
 				return
 			}
 
-			fields, bodyIDs := scanBody(r)
+			scanned := scanBody(r)
+			bodyIDs := scanned.ids
 			rec := service.WorkspaceWrite{
 				Method:    r.Method,
-				Fields:    fields,
+				Fields:    scanned.fields,
 				Dangerous: service.DangerousBotAction(r.Method, r.URL.Path),
 			}
 			actor := botsource.ActorFromContext(r.Context())
@@ -99,7 +100,7 @@ func BotWriteAudit(queries *db.Queries, observe WriteObserver, confirmer service
 				rec.OnBehalfOf = owner
 				if rec.Dangerous != "" {
 					var ok bool
-					if confirmation, ok = authorizeDangerousWrite(w, r, queries, observe, confirmer, rec); !ok {
+					if confirmation, ok = authorizeDangerousWrite(w, r, queries, observe, confirmer, rec, scanned); !ok {
 						return
 					}
 				}
@@ -200,12 +201,12 @@ func recordAndObserve(parent context.Context, queries *db.Queries, observe Write
 // request itself (403) and returns false.
 //
 // The header must name a request the server holds: opened by this Bot for this
-// workspace and owner, for this exact call (method, path, field names),
+// workspace and owner, for this exact call (method, path, query, body values),
 // approved by the owner personally, unexpired and not used. All of that is one
 // atomic spend in the database, so a made-up id, someone else's, another call's,
 // an old one, a replay, or one the Bot "approved" for itself all fail the same
 // way. A failed attempt opens (or finds) the request and tells the owner once.
-func authorizeDangerousWrite(w http.ResponseWriter, r *http.Request, queries *db.Queries, observe WriteObserver, confirmer service.OwnerConfirmer, rec service.WorkspaceWrite) (string, bool) {
+func authorizeDangerousWrite(w http.ResponseWriter, r *http.Request, queries *db.Queries, observe WriteObserver, confirmer service.OwnerConfirmer, rec service.WorkspaceWrite, scanned scannedBody) (string, bool) {
 	if !rec.WorkspaceID.Valid {
 		writeJSONError(w, http.StatusForbidden, map[string]string{
 			"error": "this action needs the owner's go-ahead, and the request does not say which workspace it is for: send the X-Workspace-ID header",
@@ -213,7 +214,19 @@ func authorizeDangerousWrite(w http.ResponseWriter, r *http.Request, queries *db
 		})
 		return "", false
 	}
-	scope := service.OwnerConfirmationScopeHash(r.Method, r.URL.Path, rec.Fields)
+	if !scanned.complete {
+		// The approval is for exactly this call; a body that cannot be read
+		// whole cannot be bound to one, so it is refused rather than guessed.
+		rec.Blocked, rec.Status = true, http.StatusForbidden
+		rec.Route = sanitizePath(r.URL.Path)
+		recordAndObserve(r.Context(), queries, observe, rec, "")
+		writeJSONError(w, http.StatusForbidden, map[string]string{
+			"error": "this action needs the owner's go-ahead for exactly this request, and its body could not be read whole: send it as one JSON document under 64 KB",
+			"code":  "owner_confirmation_unscannable",
+		})
+		return "", false
+	}
+	scope := service.OwnerConfirmationScopeHash(r.Method, r.URL.Path, r.URL.RawQuery, scanned.canonical)
 	if raw := strings.TrimSpace(r.Header.Get(ConfirmationHeader)); raw != "" {
 		if id, err := util.ParseUUID(raw); err == nil {
 			_, err := queries.ConsumeBotActionConfirmation(r.Context(), db.ConsumeBotActionConfirmationParams{
@@ -243,6 +256,9 @@ func authorizeDangerousWrite(w http.ResponseWriter, r *http.Request, queries *db
 		res, err := confirmer.EnsureOwnerConfirmation(r.Context(), service.OwnerConfirmationRequest{
 			WorkspaceID: rec.WorkspaceID, BotID: rec.BotID, BotName: rec.BotName, OwnerUserID: rec.OnBehalfOf,
 			Action: rec.Dangerous, Method: r.Method, Route: rec.Route, Fields: rec.Fields, ScopeHash: scope,
+			Values:  service.OwnerConfirmationValues(scanned.canonical),
+			Query:   service.OwnerConfirmationQueryText(r.URL.RawQuery),
+			PathIDs: pathIDs(r.URL.Path, rec.WorkspaceID),
 		})
 		if err != nil {
 			slog.Error("bot write audit: open owner confirmation failed", "error", err, "route", rec.Route)
@@ -351,16 +367,25 @@ func sanitizePath(p string) string {
 // or a chat. Only their ids are read, and only for the access check.
 var bodyTargetKeys = []string{"issue_id", "parent_issue_id", "project_id", "chat_session_id"}
 
-// scanBody returns the top-level keys of a small JSON body and the ids it
-// points at, and puts the body back for the handler. Values are parsed away and
-// never kept.
-func scanBody(r *http.Request) ([]string, []pgtype.UUID) {
-	if r.Body == nil || r.Body == http.NoBody {
-		return nil, nil
+// scannedBody is what the audit reads from a request body. Values are only
+// kept as the canonical bytes the owner's approval is bound to; they are not
+// recorded anywhere.
+type scannedBody struct {
+	fields    []string
+	ids       []pgtype.UUID
+	canonical []byte // CanonicalJSON of the body; nil for no body
+	complete  bool   // the whole body was read and understood
+}
+
+// scanBody returns the top-level keys of a small JSON body, the ids it points
+// at and its canonical form, and puts the body back for the handler.
+func scanBody(r *http.Request) scannedBody {
+	if r.Body == nil || r.Body == http.NoBody || r.ContentLength == 0 {
+		return scannedBody{complete: true}
 	}
 	ct := strings.ToLower(r.Header.Get("Content-Type"))
 	if ct != "" && !strings.Contains(ct, "json") {
-		return nil, nil
+		return scannedBody{}
 	}
 	head, err := io.ReadAll(io.LimitReader(r.Body, maxFieldScanBytes+1))
 	rest := r.Body
@@ -369,25 +394,47 @@ func scanBody(r *http.Request) ([]string, []pgtype.UUID) {
 		io.Closer
 	}{io.MultiReader(bytes.NewReader(head), rest), rest}
 	if err != nil || len(head) > maxFieldScanBytes {
-		return nil, nil
+		return scannedBody{}
 	}
+	if len(bytes.TrimSpace(head)) == 0 {
+		return scannedBody{complete: true}
+	}
+	canonical, ok := service.CanonicalJSON(head)
+	if !ok {
+		return scannedBody{}
+	}
+	out := scannedBody{canonical: canonical, complete: true}
 	var obj map[string]json.RawMessage
 	if json.Unmarshal(head, &obj) != nil {
-		return nil, nil
+		return out
 	}
 	names := make([]string, 0, len(obj))
 	for k := range obj {
 		names = append(names, k)
 	}
-	var ids []pgtype.UUID
 	for _, k := range bodyTargetKeys {
 		var raw string
 		if json.Unmarshal(obj[k], &raw) != nil {
 			continue
 		}
 		if id, err := util.ParseUUID(raw); err == nil {
-			ids = append(ids, id)
+			out.ids = append(out.ids, id)
 		}
 	}
-	return service.SafeFieldNames(names), ids
+	out.fields = service.SafeFieldNames(names)
+	return out
+}
+
+// pathIDs are the ids in a raw path other than the workspace's own.
+func pathIDs(path string, workspace pgtype.UUID) []pgtype.UUID {
+	var out []pgtype.UUID
+	for _, seg := range strings.Split(path, "/") {
+		if !uuidSegmentRe.MatchString(seg) {
+			continue
+		}
+		if id, err := util.ParseUUID(seg); err == nil && id != workspace {
+			out = append(out, id)
+		}
+	}
+	return out
 }

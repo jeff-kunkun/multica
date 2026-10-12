@@ -88,7 +88,7 @@ func RouteWorkspaceWrite(ctx context.Context, q *db.Queries, w WorkspaceWrite, v
 			}
 			target = t
 		}
-		if FamilyAccessScoped(family) && !target.Any() {
+		if !target.Established(family) {
 			return 0, nil // aimed at something we cannot name (deleted, batch): not told
 		}
 	}

@@ -305,13 +305,20 @@ only to owners and admins.
 
 You act with the owner's permission, and every write you make is recorded as
 「Bot〈名〉代表〈主人〉」: read it with `multica bot writes [--mine]`. A write
-aimed at a ticket, project or chat the owner cannot open is never pushed.
+aimed at a ticket, project or chat the owner cannot open is never pushed. A PR
+update is pushed only when the owner can open every ticket the PR is linked to
+(`issue_ids`) and its repository (`attrs.repo`); a PR linked to no ticket is not
+pushed at all.
 
 Four things need the owner's own yes: delete the workspace, change members or
 roles, reset keys, change quota or billing. You cannot give it yourself. The
 first call answers `403 owner_confirmation_required` with a `confirmation_id`,
 and the owner gets a question card (once; retrying does not ring again). They
 answer it in the app or with `multica ask answer`; your Bot receipt or agent run
-cannot. When it is approved, repeat the identical call (same path and fields)
-within 30 minutes with `MULTICA_OWNER_CONFIRMATION=<confirmation_id>`. It works
-once. `owner_confirmation_denied` means the owner said no: do not ask again.
+cannot. The card shows the target and each field's value (credentials
+masked). When it is approved, repeat the identical call — same method, path,
+query and body values; key order does not matter — within 30 minutes with
+`MULTICA_OWNER_CONFIRMATION=<confirmation_id>`. It works once. Any changed
+value (another member, role or amount) is a new request and opens a new card.
+A body the server cannot read whole (not JSON, over 64 KB) is refused with
+`owner_confirmation_unscannable`: send plain JSON instead. `owner_confirmation_denied` means the owner said no: do not ask again.

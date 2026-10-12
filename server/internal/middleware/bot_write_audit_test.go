@@ -199,9 +199,18 @@ func TestBotWriteAuditRecordsBotWritesAsOnBehalfOfTheOwner(t *testing.T) {
 }
 
 // approve is what the owner's own click does: it makes the confirmation
-// spendable for exactly one call.
-func (h *auditHarness) approve(method, path string, fields []string) {
-	h.store.approvals[auditConfirmation] = service.OwnerConfirmationScopeHash(method, path, fields)
+// spendable for exactly one call, body values included.
+func (h *auditHarness) approve(method, path, body string) {
+	h.store.approvals[auditConfirmation] = scopeOf(method, path, body)
+}
+
+func scopeOf(method, path, body string) string {
+	var canonical []byte
+	if body != "" {
+		canonical, _ = service.CanonicalJSON([]byte(body))
+	}
+	p, q, _ := strings.Cut(path, "?")
+	return service.OwnerConfirmationScopeHash(method, p, q, canonical)
 }
 
 func TestBotWriteAuditStopsTheFourDangerousActionsUntilTheOwnerApproves(t *testing.T) {
@@ -221,7 +230,7 @@ func TestBotWriteAuditStopsTheFourDangerousActionsUntilTheOwnerApproves(t *testi
 					t.Fatalf("body lacks %q: %s", want, rec.Body)
 				}
 			}
-			if len(h.confirmer.calls) != 1 || h.confirmer.calls[0].ScopeHash != service.OwnerConfirmationScopeHash(c.method, c.path, nil) {
+			if len(h.confirmer.calls) != 1 || h.confirmer.calls[0].ScopeHash != scopeOf(c.method, c.path, `{}`) {
 				t.Fatalf("the owner must be asked once for this exact call: %+v", h.confirmer.calls)
 			}
 			if len(h.store.inserted) != 1 || h.store.inserted[0][8] != "blocked" || h.store.inserted[0][11].(pgtype.Text).String != c.action {
@@ -234,7 +243,7 @@ func TestBotWriteAuditStopsTheFourDangerousActionsUntilTheOwnerApproves(t *testi
 			// The owner approves that card: the repeat goes through and the
 			// audit keeps the id of the approval it spent.
 			h = newAuditHarness(t, true)
-			h.approve(c.method, c.path, nil)
+			h.approve(c.method, c.path, `{}`)
 			rec = h.do(c.method, c.path, `{}`, map[string]string{ConfirmationHeader: auditConfirmation})
 			if rec.Code != http.StatusOK || h.handled != 1 {
 				t.Fatalf("approved: status %d handled %d body %s", rec.Code, h.handled, rec.Body)
@@ -277,7 +286,7 @@ func TestBotWriteAuditRefusesFabricatedWrongObjectAndReplayedConfirmations(t *te
 	})
 	t.Run("approved for another call", func(t *testing.T) {
 		h := newAuditHarness(t, true)
-		h.approve("POST", other, nil)
+		h.approve("POST", other, "")
 		rec := h.do("DELETE", path, "", map[string]string{ConfirmationHeader: auditConfirmation})
 		if rec.Code != http.StatusForbidden || h.handled != 0 {
 			t.Fatalf("a go-ahead for the members call must not delete the workspace: %d", rec.Code)
@@ -288,7 +297,7 @@ func TestBotWriteAuditRefusesFabricatedWrongObjectAndReplayedConfirmations(t *te
 	})
 	t.Run("different fields", func(t *testing.T) {
 		h := newAuditHarness(t, true)
-		h.approve("POST", other, []string{"role"})
+		h.approve("POST", other, `{"role":"admin"}`)
 		rec := h.do("POST", other, `{"role":"admin","email":"x@y.z"}`, map[string]string{ConfirmationHeader: auditConfirmation})
 		if rec.Code != http.StatusForbidden || h.handled != 0 {
 			t.Fatalf("an approval is for the fields it showed: %d", rec.Code)
@@ -296,7 +305,7 @@ func TestBotWriteAuditRefusesFabricatedWrongObjectAndReplayedConfirmations(t *te
 	})
 	t.Run("replayed", func(t *testing.T) {
 		h := newAuditHarness(t, true)
-		h.approve("DELETE", path, nil)
+		h.approve("DELETE", path, "")
 		if rec := h.do("DELETE", path, "", map[string]string{ConfirmationHeader: auditConfirmation}); rec.Code != http.StatusOK {
 			t.Fatalf("first use: %d", rec.Code)
 		}
@@ -371,4 +380,86 @@ func TestSanitizePathNeverKeepsAnIdOrToken(t *testing.T) {
 	if got != "/api/workspaces/{id}/plugins/{x}/token" {
 		t.Fatalf("sanitizePath = %q", got)
 	}
+}
+
+// R1 (second review): the owner approves what the call does, not its shape. The
+// same fields with other values, another query, or a body that cannot be read
+// whole do not spend the approval; the identical call does, once.
+func TestBotWriteAuditApprovalIsForTheExactContent(t *testing.T) {
+	members := "/api/workspaces/" + auditWS + "/members"
+	alice := `{"email":"alice@example.invalid","role":"member"}`
+
+	t.Run("same fields, another member and role", func(t *testing.T) {
+		h := newAuditHarness(t, true)
+		h.approve("POST", members, alice)
+		rec := h.do("POST", members, `{"email":"mallory@example.invalid","role":"admin"}`, map[string]string{ConfirmationHeader: auditConfirmation})
+		if rec.Code != http.StatusForbidden || h.handled != 0 {
+			t.Fatalf("Mallory/admin spent Alice/member's approval: status %d handled %d", rec.Code, h.handled)
+		}
+		if _, still := h.store.approvals[auditConfirmation]; !still {
+			t.Fatal("a refused attempt must not spend the approval")
+		}
+		if len(h.confirmer.calls) != 1 || h.confirmer.calls[0].ScopeHash == scopeOf("POST", members, alice) {
+			t.Fatalf("the changed call must ask the owner again, as a new card: %+v", h.confirmer.calls)
+		}
+	})
+	t.Run("same fields, another amount", func(t *testing.T) {
+		h := newAuditHarness(t, true)
+		h.approve("POST", members, `{"seats":5}`)
+		if rec := h.do("POST", members, `{"seats":500}`, map[string]string{ConfirmationHeader: auditConfirmation}); rec.Code != http.StatusForbidden {
+			t.Fatalf("another amount went through: %d", rec.Code)
+		}
+	})
+	t.Run("another query", func(t *testing.T) {
+		h := newAuditHarness(t, true)
+		h.approve("POST", members+"?role=member", alice)
+		if rec := h.do("POST", members+"?role=admin", alice, map[string]string{ConfirmationHeader: auditConfirmation}); rec.Code != http.StatusForbidden {
+			t.Fatalf("another query went through: %d", rec.Code)
+		}
+	})
+	t.Run("a body too big to read whole", func(t *testing.T) {
+		h := newAuditHarness(t, true)
+		big := `{"email":"alice@example.invalid","pad":"` + strings.Repeat("x", maxFieldScanBytes) + `"}`
+		h.approve("POST", members, big)
+		rec := h.do("POST", members, big, map[string]string{ConfirmationHeader: auditConfirmation})
+		if rec.Code != http.StatusForbidden || h.handled != 0 || !strings.Contains(rec.Body.String(), "owner_confirmation_unscannable") {
+			t.Fatalf("an unreadable body must be refused: status %d body %s", rec.Code, rec.Body)
+		}
+		if len(h.store.spends) != 0 || len(h.confirmer.calls) != 0 {
+			t.Fatal("an unreadable body neither spends nor asks")
+		}
+	})
+	t.Run("a body that is not JSON", func(t *testing.T) {
+		h := newAuditHarness(t, true)
+		if rec := h.do("POST", members, `email=alice`, nil); rec.Code != http.StatusForbidden || !strings.Contains(rec.Body.String(), "owner_confirmation_unscannable") {
+			t.Fatalf("status %d body %s", rec.Code, rec.Body)
+		}
+	})
+	t.Run("the identical call, reordered, goes through once", func(t *testing.T) {
+		h := newAuditHarness(t, true)
+		h.approve("POST", members, alice)
+		same := `{ "role":"member", "email":"alice@example.invalid" }`
+		if rec := h.do("POST", members, same, map[string]string{ConfirmationHeader: auditConfirmation}); rec.Code != http.StatusOK || h.handled != 1 {
+			t.Fatalf("the approved call: status %d handled %d", rec.Code, h.handled)
+		}
+		if rec := h.do("POST", members, same, map[string]string{ConfirmationHeader: auditConfirmation}); rec.Code != http.StatusForbidden || h.handled != 1 {
+			t.Fatalf("a second use: status %d", rec.Code)
+		}
+	})
+	t.Run("the card shows what is approved, credentials masked", func(t *testing.T) {
+		h := newAuditHarness(t, true)
+		h.do("POST", members+"?notify=yes", `{"email":"alice@example.invalid","role":"member","password":"hunter2-Very-Secret"}`, nil)
+		if len(h.confirmer.calls) != 1 {
+			t.Fatalf("calls = %+v", h.confirmer.calls)
+		}
+		q := service.OwnerConfirmationQuestion(h.confirmer.calls[0])
+		for _, want := range []string{"email=alice@example.invalid", "role=member", "notify=yes"} {
+			if !strings.Contains(q, want) {
+				t.Fatalf("card lacks %q: %s", want, q)
+			}
+		}
+		if strings.Contains(q, "hunter2") || strings.Contains(fmt.Sprintf("%+v %+v", h.store.inserted, h.observed), "alice@example.invalid") {
+			t.Fatalf("a credential reached the card, or a value reached the audit: %s", q)
+		}
+	})
 }

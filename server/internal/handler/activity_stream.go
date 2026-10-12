@@ -11,6 +11,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/repoident"
 	"github.com/multica-ai/multica/server/internal/service"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
@@ -233,7 +234,10 @@ func (g *activityGate) allows(ev db.HumanNeededEvent) (bool, string) {
 	switch {
 	case family != "":
 		t := workspaceTargetOf(ev)
-		key += ":" + uuidToString(t.IssueID) + ":" + uuidToString(t.ProjectID) + ":" + uuidToString(t.ChatSessionID)
+		key += ":" + uuidToString(t.IssueID) + ":" + uuidToString(t.ProjectID) + ":" + uuidToString(t.ChatSessionID) + ":" + t.Repo
+		for _, id := range t.IssueIDs {
+			key += ":" + uuidToString(id)
+		}
 	case ev.IssueID.Valid:
 		key = "i:" + uuidToString(ev.IssueID) + ":" + uuidToString(ev.BindingID)
 	case ev.ChatSessionID.Valid:
@@ -262,10 +266,26 @@ func workspaceFamilyOf(ev db.HumanNeededEvent) string {
 func workspaceTargetOf(ev db.HumanNeededEvent) service.WriteTarget {
 	t := service.WriteTarget{IssueID: ev.IssueID, ChatSessionID: ev.ChatSessionID}
 	var body service.ActivityBody
-	if json.Unmarshal(ev.Activity, &body) == nil && body.Workspace != nil && body.Workspace.ProjectID != "" {
-		if id, err := parseUUIDSafe(body.Workspace.ProjectID); err == nil {
+	if json.Unmarshal(ev.Activity, &body) != nil || body.Workspace == nil {
+		return t
+	}
+	w := body.Workspace
+	if w.ProjectID != "" {
+		if id, err := parseUUIDSafe(w.ProjectID); err == nil {
 			t.ProjectID = id
 		}
+	}
+	for _, raw := range w.IssueIDs {
+		id, err := parseUUIDSafe(raw)
+		if err != nil {
+			// A ticket that cannot be read back cannot be judged: point at
+			// nothing that exists, so the gate says no.
+			id = pgtype.UUID{Bytes: [16]byte{0xff}, Valid: true}
+		}
+		t.IssueIDs = append(t.IssueIDs, id)
+	}
+	if w.Family == service.FamilyPR {
+		t.Repo = w.Attrs["repo"]
 	}
 	return t
 }
@@ -296,11 +316,17 @@ func NewTargetVisibility(q *db.Queries) service.TargetVisibility {
 // use. Anything that cannot be loaded, or sits in another workspace, is not
 // visible.
 func (h *Handler) targetVisibleTo(ctx context.Context, v visibilityViewer, ws pgtype.UUID, t service.WriteTarget) bool {
-	if t.IssueID.Valid {
-		issue, err := h.Queries.GetIssue(ctx, t.IssueID)
+	for _, id := range append([]pgtype.UUID{t.IssueID}, t.IssueIDs...) {
+		if !id.Valid {
+			continue
+		}
+		issue, err := h.Queries.GetIssue(ctx, id)
 		if err != nil || issue.WorkspaceID != ws || !v.canSeeIssue(issue) {
 			return false
 		}
+	}
+	if t.Repo != "" && !h.repoVisibleTo(ctx, v, ws, t.Repo) {
+		return false
 	}
 	if t.ProjectID.Valid {
 		project, err := h.Queries.GetProjectInWorkspace(ctx, db.GetProjectInWorkspaceParams{ID: t.ProjectID, WorkspaceID: ws})
@@ -311,6 +337,28 @@ func (h *Handler) targetVisibleTo(ctx context.Context, v visibilityViewer, ws pg
 	if t.ChatSessionID.Valid {
 		chat, err := h.Queries.GetChatSessionInWorkspace(ctx, db.GetChatSessionInWorkspaceParams{ID: t.ChatSessionID, WorkspaceID: ws})
 		if err != nil || !v.userID.Valid || chat.CreatorID != v.userID {
+			return false
+		}
+	}
+	return true
+}
+
+// repoVisibleTo checks "owner/name" against the workspace's repository
+// registry. Every registered entry for that repository has to be one the viewer
+// may see; a repository the workspace never registered has no sharing of its
+// own and is judged by the tickets alone. An unreadable registry sees nothing.
+func (h *Handler) repoVisibleTo(ctx context.Context, v visibilityViewer, ws pgtype.UUID, repo string) bool {
+	workspace, err := h.Queries.GetWorkspace(ctx, ws)
+	if err != nil {
+		return false
+	}
+	suffix := "/" + strings.ToLower(strings.Trim(repo, "/"))
+	for _, entry := range decodeWorkspaceRepos(workspace.Repos) {
+		key := strings.ToLower(string(repoident.NormalizeURL(entry.URL)))
+		if key == "" || !strings.HasSuffix(key, suffix) {
+			continue
+		}
+		if !v.canSeeRepo(entry, h.repoProjectIDs(ctx, ws, entry.URL)) {
 			return false
 		}
 	}
@@ -355,6 +403,9 @@ func (g *activityGate) decide(ev db.HumanNeededEvent) (bool, string) {
 			return false, "outside activity scope"
 		}
 		t := workspaceTargetOf(ev)
+		if family == service.FamilyPR && !t.Established(family) {
+			return false, "access unavailable" // a PR is read through its tickets; none named, none told
+		}
 		if !t.Any() {
 			return true, ""
 		}

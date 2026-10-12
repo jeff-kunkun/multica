@@ -10,6 +10,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/multica-ai/multica/server/internal/events"
+	"github.com/multica-ai/multica/server/internal/testutil"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
@@ -68,13 +69,14 @@ func TestWorkspaceActivityListenersFeedTheWholeWorkspaceScope(t *testing.T) {
 		t.Fatal(err)
 	}
 	publish()
-	// PR updated + run failed + autopilot run done; the retry attempt and the
-	// chat's own run are not the workspace's business.
-	if n := count(); n != 3 {
-		t.Fatalf("whole-workspace Bot got %d events, want 3", n)
+	// Run failed + autopilot run done; the retry attempt and the chat's own run
+	// are not the workspace's business, and a PR linked to no ticket has no
+	// access to judge, so it is not told (DENE-1936 review S2).
+	if n := count(); n != 2 {
+		t.Fatalf("whole-workspace Bot got %d events, want 2", n)
 	}
 	publish() // the same things again: deduplicated, not repeated
-	if n := count(); n != 3 {
+	if n := count(); n != 2 {
 		t.Fatalf("repeated events were queued again: %d", n)
 	}
 }
@@ -100,5 +102,40 @@ func TestMainRegistersTheWorkspaceActivityListeners(t *testing.T) {
 	}
 	if !strings.Contains(string(src), "registerWorkspaceActivityListeners(") {
 		t.Fatal("main.go does not register the workspace activity listeners")
+	}
+}
+
+// S2, the reviewer's probe inverted: a PR linked to a private ticket the owner
+// cannot open is not queued; the same PR on a ticket they can open is, and the
+// row carries the ticket so sending and listing judge it again.
+func TestWorkspaceActivityListenersKeepAPRsTicketAccess(t *testing.T) {
+	ctx := context.Background()
+	fx, bot := activityBinding(t, "owner_visible_all")
+	peer := fx.User(t, "Private peer", uuid.NewString()+"@review.invalid")
+	fx.Member(t, testWorkspaceID, peer, "member")
+	hidden := fx.Issue(t, "Private work", testutil.Cols{"visibility": "private", "creator_type": "member", "creator_id": peer})
+	open := fx.Issue(t, "Open work", testutil.Cols{"visibility": "workspace"})
+	q := db.New(testPool)
+	bus := events.New()
+	registerWorkspaceActivityListeners(bus, q)
+	publish := func(title string, linked ...string) {
+		bus.Publish(events.Event{Type: protocol.EventPullRequestUpdated, WorkspaceID: testWorkspaceID, ActorType: "system", Payload: map[string]any{
+			"pull_request":     map[string]any{"id": uuid.NewString(), "title": title, "state": "open", "number": 7, "repo_owner": "acme", "repo_name": "app", "html_url": "https://example.invalid/acme/app/pull/7"},
+			"linked_issue_ids": linked,
+		}})
+	}
+
+	publish("Confidential acquisition work", hidden)
+	publish("Half confidential", open, hidden)
+	if n := activityEvents(t, fx, bot); n != 0 {
+		t.Fatalf("a PR on a ticket the owner cannot open was queued (%d)", n)
+	}
+	publish("Open change", open)
+	var issueID *string
+	if err := testPool.QueryRow(ctx, `SELECT issue_id::text FROM human_needed_event WHERE bot_id=$1 AND event_type='activity' AND kind='pr.updated'`, bot).Scan(&issueID); err != nil {
+		t.Fatal(err)
+	}
+	if issueID == nil || *issueID != open {
+		t.Fatalf("the PR row must carry its ticket, got %v", issueID)
 	}
 }

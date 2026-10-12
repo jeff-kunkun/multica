@@ -4,9 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/botsource"
 	"github.com/multica-ai/multica/server/internal/service"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -27,6 +29,9 @@ func (h *Handler) EnsureOwnerConfirmation(ctx context.Context, req service.Owner
 		return service.OwnerConfirmation{}, err
 	}
 	title := service.OwnerConfirmationTitle(req.BotName, req.Action)
+	if req.Object == "" {
+		req.Object = h.confirmationObject(ctx, req.WorkspaceID, req.PathIDs)
+	}
 	questions := []AskQuestion{{
 		Text: service.OwnerConfirmationQuestion(req),
 		Options: []AskOption{
@@ -69,6 +74,28 @@ func (h *Handler) EnsureOwnerConfirmation(ctx context.Context, req service.Owner
 	}
 	h.deliverAskToPerson(ctx, ask, insert, req.OwnerUserID, uuidToString(req.WorkspaceID), uuidToString(req.OwnerUserID))
 	return ownerConfirmationFromRow(row, true), nil
+}
+
+// confirmationObject names who a dangerous call points at, for the owner to
+// check on the card: a member (by member or user id) as name and email. Ids that
+// are not members of this workspace are left out.
+func (h *Handler) confirmationObject(ctx context.Context, ws pgtype.UUID, ids []pgtype.UUID) string {
+	var names []string
+	for _, id := range ids {
+		m, err := h.Queries.GetMember(ctx, id)
+		if err != nil || m.WorkspaceID != ws {
+			m, err = h.Queries.GetMemberByUserAndWorkspace(ctx, db.GetMemberByUserAndWorkspaceParams{UserID: id, WorkspaceID: ws})
+		}
+		if err != nil {
+			continue
+		}
+		u, err := h.Queries.GetUser(ctx, m.UserID)
+		if err != nil {
+			continue
+		}
+		names = append(names, strings.TrimSpace(u.Name+" "+u.Email)+"（现为 "+m.Role+"）")
+	}
+	return strings.Join(names, "、")
 }
 
 func ownerConfirmationFromRow(row db.BotActionConfirmation, created bool) service.OwnerConfirmation {

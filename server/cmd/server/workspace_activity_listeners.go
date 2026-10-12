@@ -2,8 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
-	"fmt"
 	"log/slog"
 	"strings"
 	"time"
@@ -38,28 +36,11 @@ func registerWorkspaceActivityListeners(bus *events.Bus, queries *db.Queries) {
 	} {
 		kind := kind
 		bus.Subscribe(kind.event, func(e events.Event) {
-			pr := prFromPayload(e.Payload)
-			if pr["id"] == "" {
-				return
+			// Only a PR linked to tickets is told, and only to people who can
+			// open every one of them (and its repository).
+			if in, ok := service.PullRequestActivity(parseUUID(e.WorkspaceID), kind.activity, kind.verb, e.Payload); ok {
+				route(in)
 			}
-			attrs := map[string]string{}
-			for _, k := range []string{"number", "state", "title", "html_url", "repo", "merged_at"} {
-				if pr[k] != "" {
-					attrs[k] = pr[k]
-				}
-			}
-			route(service.WorkspaceActivityInput{
-				WorkspaceID:  parseUUID(e.WorkspaceID),
-				ActivityType: kind.activity,
-				DedupeKey:    fmt.Sprintf("ws:pr:%s:%s:%s:%s:%s", pr["id"], kind.verb, pr["state"], pr["merged_at"], pr["pr_updated_at"]),
-				Body: service.WorkspaceEventBody{
-					Family: service.FamilyPR, Action: kind.verb, ActorKind: "system", EntityID: pr["id"], Attrs: attrs,
-				},
-				ActorType:  "system",
-				Importance: service.ImportanceNormal,
-				Categories: []string{service.CategoryProgress},
-				OccurredAt: time.Now(),
-			})
 		})
 	}
 
@@ -140,39 +121,4 @@ func registerWorkspaceActivityListeners(bus *events.Bus, queries *db.Queries) {
 			OccurredAt: time.Now(),
 		})
 	})
-}
-
-// prFromPayload flattens the "pull_request" value of a pull_request:* event to
-// the handful of plain strings the stream carries. Producers send a typed
-// response struct, so it goes through JSON rather than a type switch.
-func prFromPayload(payload any) map[string]string {
-	out := map[string]string{}
-	m, ok := payload.(map[string]any)
-	if !ok {
-		return out
-	}
-	raw, err := json.Marshal(m["pull_request"])
-	if err != nil {
-		return out
-	}
-	var pr map[string]any
-	if json.Unmarshal(raw, &pr) != nil {
-		return out
-	}
-	str := func(k string) string {
-		switch v := pr[k].(type) {
-		case string:
-			return v
-		case float64:
-			return fmt.Sprintf("%d", int64(v))
-		}
-		return ""
-	}
-	for _, k := range []string{"id", "number", "state", "title", "html_url", "merged_at", "pr_updated_at"} {
-		out[k] = str(k)
-	}
-	if owner, name := str("repo_owner"), str("repo_name"); owner != "" && name != "" {
-		out["repo"] = owner + "/" + name
-	}
-	return out
 }

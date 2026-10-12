@@ -177,8 +177,16 @@ list all go through that one judgement (`activityGate` and
 `TargetVisibility`), so a ticket that turns private, a project the person is
 removed from, or a revoked role stops both push and pull. It fails closed: a
 ticket, project, chat or run write whose target cannot be named (already deleted,
-a batch, two different tickets in one call) is not pushed. PR mirror updates are
-not access-scoped.
+a batch, two different tickets in one call) is not pushed.
+
+**PR updates keep their tickets' and repository's access.** A PR mirror has no
+access of its own: its event carries every linked ticket (`issue_ids`) and its
+repository (`attrs.repo`). It is queued, sent and listed only for a person who
+can open every linked ticket and, when the repository is in the workspace repo
+registry, that repository (the project-scoped repo rule). A PR linked to no
+ticket is not told to anyone; unlinking or a ticket turning private stops push
+and pull of the queued row. The repo check fails closed when the workspace
+cannot be read.
 
 **Field names only.** A settings change carries which fields changed, never the
 values; names that look like secrets are dropped, other strings are masked as
@@ -215,11 +223,19 @@ itself: it is a server-held object the owner grants personally.
 3. The Bot repeats the identical call with `X-Owner-Confirmation:
    <confirmation_id>` (CLI: `MULTICA_OWNER_CONFIRMATION` for that one command).
    The server spends it in one atomic step that requires: this workspace, this
-   Bot, this owner, the same method, exact path and field names (`scope_hash`;
-   values are never part of it), `approved` by the owner, unused, within 30
-   minutes. A made-up id, free text, another call's, another Bot's, an expired
+   Bot, this owner, the same method, exact path, query and body values
+   (`scope_hash` over the canonical JSON, so key order and spacing do not
+   matter but any changed value, member or role does), `approved` by the
+   owner, unused, within 30 minutes. A made-up id, free text, another call's, another Bot's, an expired
    one, a refusal and a replay all get the same 403. A refused call is read back
    as `owner_confirmation_denied`.
+
+The card shows what is being approved: the target (member name, email and
+current role when the path or body names one), each body field as
+`name=value` (values clipped, credentials masked) and the query. A body the
+server cannot read whole (not JSON, over 64 KB, unparseable) is refused with
+`403 owner_confirmation_unscannable` and opens no card. The audit row never
+keeps values.
 
 The audit row for the spent call keeps the confirmation id. Limits: a call that
 fails after the approval was spent burns it, and the Bot asks again; two

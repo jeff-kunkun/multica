@@ -160,7 +160,7 @@ func ownerConfirmationFor(t *testing.T, f *humanNeededFixture, route string) ser
 	req := service.OwnerConfirmationRequest{
 		WorkspaceID: parseUUID(testWorkspaceID), BotID: f.bot.ID, BotName: "Fixture Bot", OwnerUserID: parseUUID(testUserID),
 		Action: service.DangerDeleteWorkspace, Method: http.MethodDelete, Route: route, Fields: nil,
-		ScopeHash: service.OwnerConfirmationScopeHash(http.MethodDelete, route, nil),
+		ScopeHash: service.OwnerConfirmationScopeHash(http.MethodDelete, route, "", nil),
 	}
 	res, err := testHandler.EnsureOwnerConfirmation(context.Background(), req)
 	if err != nil {
@@ -176,7 +176,7 @@ func spend(t *testing.T, id pgtype.UUID, f *humanNeededFixture, route string) er
 	t.Helper()
 	_, err := testHandler.Queries.ConsumeBotActionConfirmation(context.Background(), db.ConsumeBotActionConfirmationParams{
 		ID: id, WorkspaceID: parseUUID(testWorkspaceID), BotID: f.bot.ID, OwnerUserID: parseUUID(testUserID),
-		ScopeHash: service.OwnerConfirmationScopeHash(http.MethodDelete, route, nil),
+		ScopeHash: service.OwnerConfirmationScopeHash(http.MethodDelete, route, "", nil),
 	})
 	return err
 }
@@ -254,7 +254,7 @@ func TestOwnerConfirmationIsOnlyTheOwnersToGive(t *testing.T) {
 	})
 	if _, err := testHandler.Queries.ConsumeBotActionConfirmation(context.Background(), db.ConsumeBotActionConfirmationParams{
 		ID: res.ID, WorkspaceID: parseUUID(testWorkspaceID), BotID: otherBot.ID, OwnerUserID: parseUUID(testUserID),
-		ScopeHash: service.OwnerConfirmationScopeHash(http.MethodDelete, route, nil),
+		ScopeHash: service.OwnerConfirmationScopeHash(http.MethodDelete, route, "", nil),
 	}); err != pgx.ErrNoRows {
 		t.Fatalf("an approval was spent by another Bot: %v", err)
 	}
@@ -281,7 +281,7 @@ func TestOwnerConfirmationExpiresAndNoIsNo(t *testing.T) {
 	again, err := testHandler.EnsureOwnerConfirmation(context.Background(), service.OwnerConfirmationRequest{
 		WorkspaceID: parseUUID(testWorkspaceID), BotID: f.bot.ID, BotName: "Fixture Bot", OwnerUserID: parseUUID(testUserID),
 		Action: service.DangerDeleteWorkspace, Method: http.MethodDelete, Route: route,
-		ScopeHash: service.OwnerConfirmationScopeHash(http.MethodDelete, route, nil),
+		ScopeHash: service.OwnerConfirmationScopeHash(http.MethodDelete, route, "", nil),
 	})
 	if err != nil || again.ID != denied.ID || again.Status != service.OwnerConfirmDenied {
 		t.Fatalf("a refused call should read back as refused: %+v %v", again, err)
@@ -320,7 +320,7 @@ func TestBlockedDangerousCallReachesTheOwnersBotOnce(t *testing.T) {
 		again, err := testHandler.EnsureOwnerConfirmation(context.Background(), service.OwnerConfirmationRequest{
 			WorkspaceID: parseUUID(testWorkspaceID), BotID: f.bot.ID, BotName: "Fixture Bot", OwnerUserID: parseUUID(testUserID),
 			Action: service.DangerDeleteWorkspace, Method: http.MethodDelete, Route: route,
-			ScopeHash: service.OwnerConfirmationScopeHash(http.MethodDelete, route, nil),
+			ScopeHash: service.OwnerConfirmationScopeHash(http.MethodDelete, route, "", nil),
 		})
 		if err != nil || again.ID != first.ID || again.Created {
 			t.Fatalf("retry %d opened another request: %+v %v", i, again, err)

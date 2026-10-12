@@ -18,11 +18,31 @@ type WriteTarget struct {
 	IssueID       pgtype.UUID
 	ProjectID     pgtype.UUID
 	ChatSessionID pgtype.UUID
+	// IssueIDs are further tickets the event is about (a PR's linked tickets):
+	// the person must be able to open every one of them.
+	IssueIDs []pgtype.UUID
+	// Repo is "owner/name" of the repository the event is about. A repository
+	// registered with the workspace follows its own sharing.
+	Repo string
 }
 
 // Any reports whether the write is aimed at something that has its own access.
 func (t WriteTarget) Any() bool {
-	return t.IssueID.Valid || t.ProjectID.Valid || t.ChatSessionID.Valid
+	return t.IssueID.Valid || t.ProjectID.Valid || t.ChatSessionID.Valid || len(t.IssueIDs) > 0 || t.Repo != ""
+}
+
+// Established says whether a family's event has what its access is judged
+// against. Ticket, project and run events need some target; a PR needs a
+// ticket, because the tickets it is linked to are where its access lives (the
+// PR list is only read through a ticket). Other families are workspace-wide.
+func (t WriteTarget) Established(family string) bool {
+	switch {
+	case family == FamilyPR:
+		return t.IssueID.Valid || len(t.IssueIDs) > 0
+	case FamilyAccessScoped(family):
+		return t.Any()
+	}
+	return true
 }
 
 // TargetVisibility answers whether one person can open the target. The handler
@@ -35,7 +55,7 @@ type TargetVisibility func(ctx context.Context, workspaceID, userID pgtype.UUID,
 // cannot be found is not pushed: not knowing is not a reason to say it.
 func FamilyAccessScoped(family string) bool {
 	switch family {
-	case FamilyIssue, FamilyProject, FamilyRun:
+	case FamilyIssue, FamilyProject, FamilyRun, FamilyPR:
 		return true
 	}
 	return false
