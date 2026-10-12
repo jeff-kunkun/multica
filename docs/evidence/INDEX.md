@@ -2,7 +2,7 @@
 
 本索引只记录指向沉淀票附件的短指针；原始日志、截图和样本留在对应票据附件。
 
-- DENE-1959：项目执行人名单 `executor_agent_ids`，自动选人（派单、验收、聊天、接着做、升档、兜底、额度/安全/席位接力、顾问）只在名单里挑，名单内都不能接就停下；[预览、1280/390 本机真实截图](DENE-1959/preview.html)。截图与 CLI 读回均为本机隔离环境测试数据；原生 App 只过 typecheck/lint/test，未在模拟器上看过；线上 IPA-input 写入待部署后执行。
+- DENE-1959：项目执行人名单 `executor_agent_ids`，自动选人（派单、验收、聊天、接着做、升档、兜底、额度/安全/席位接力、顾问）只在名单里挑，名单内都不能接就停下；[预览、1280/768/390/375 本机真实截图](DENE-1959/preview.html)；已定验收席不在名单内时自动验收换名单内席位、多项目聊天取名单交集。截图与 CLI 读回均为本机隔离环境测试数据；原生 App 只过 typecheck/lint/test，未在模拟器上看过；线上 IPA-input 写入待部署后执行。
 
 - DENE-1935：个人 Bot 动态流、当前权限与订阅范围复核、完整载荷打码；[独立终审与真实 HTTP 接收端验证](https://ai.ferryway.cc/api/attachments/01a13035-93ff-7a27-bd1a-fd25fd026279/download)、[设置页与手机预览](https://ai.ferryway.cc/api/attachments/01a12fee-b52f-7462-977f-8c7b26b8119e/download)。验证均在 Grok Bot box；此前五项阻断与两处打码边界已解除。真实 Grok 收信及生产动态流尚未验证，合并整合验证与部署结论以本票最新收尾为准。
 
