@@ -12,8 +12,8 @@ import (
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
-// DENE-1721 acceptance on the server: a weak seat working a ticket consults
-// the strongest seat; the 4th ask on the ticket is refused with a reason; an
+// DENE-1721 acceptance on the server: a medium seat working a ticket consults
+// a strong seat; the 4th ask on the ticket is refused with a reason; an
 // answered consult lands its answer, a timeline line and the goal budget.
 func TestIssueConsult_LimitAnswerActivityAndBudget(t *testing.T) {
 	if testPool == nil {
@@ -32,8 +32,8 @@ func TestIssueConsult_LimitAnswerActivityAndBudget(t *testing.T) {
 		"workspace_id": testWorkspaceID,
 		"metadata":     testutil.Raw(`'{"capabilities":["` + protocol.DaemonCapabilityConsultV1 + `"]}'::jsonb`),
 	})
-	asker := dbfx.Agent(t, "consult-asker", runtime, testutil.Cols{"workspace_id": testWorkspaceID, "owner_id": testUserID, "routing_tier": "weak"})
-	advisor := dbfx.Agent(t, "consult-advisor", runtime, testutil.Cols{"workspace_id": testWorkspaceID, "owner_id": testUserID, "routing_tier": "strongest"})
+	asker := dbfx.Agent(t, "consult-asker", runtime, testutil.Cols{"workspace_id": testWorkspaceID, "owner_id": testUserID, "routing_tier": "medium"})
+	advisor := dbfx.Agent(t, "consult-advisor", runtime, testutil.Cols{"workspace_id": testWorkspaceID, "owner_id": testUserID, "routing_tier": "strong"})
 	issue := dbfx.Insert(t, "issue", testutil.Cols{
 		"workspace_id": testWorkspaceID, "title": "consult ticket", "status": "in_progress", "priority": "none",
 		"creator_type": "member", "creator_id": testUserID, "number": nextTestIssueNumber(t),

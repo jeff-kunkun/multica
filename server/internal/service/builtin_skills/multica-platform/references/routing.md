@@ -160,18 +160,46 @@ and the server's own moves (acceptance handoff, quota relay, reviewer relay,
 Every 「自动选派」 comment opens with one line, **为什么是他**, naming the source
 of the executor: `原话` (a person's verified words), `人工` (a person or their
 automation put it there), `档位` (routing's tier ladder, or a tier label a
-person attached), `兜底` (the verdict was too weak, so the fallback rung),
+person attached), `兜底` (insufficient confidence or no eligible seat in the target tier; the comment names the actual cause),
 `接着做` (the seat that did the related earlier work continues it), `负载`
 (the ladder's seat was busy, so a less busy seat of the same rung and
 direction took it).
 
+**Unified selection (DENE-1917).** Dispatch (`do`), consultation (`consult`)
+and acceptance (`review`) use one selector. Do gets its target tier and seat from
+one reasoning response using `policy_prompt`; reference rules do not decide it.
+Consult/review target one tier above the executor. The only reviewer exclusion
+is the executor itself: an advisor may review. First use the target tier in the
+same direction, then adjacent tiers (one above, then one below). Family
+preferences add weight; they never remove candidates. Strongest may only be an
+explicit target with ample quota, never a fallback. No seat means no dispatch;
+the comment explains why and mentions the workspace's Grok Bot via the existing
+visibility-checked Bot outbox. Project fallback-seat configuration is not used.
+
+Settings → Routing shows five main settings: prompt (with reference table),
+reasoning model, consult limit, review reminder hours, master switch. Tuning and
+migration comparison live under Advanced; there is no independent judge control.
+CLI uses the same server settings:
+
+```bash
+multica workspace routing get --output json
+multica workspace routing set --enabled on --model MODEL --policy-prompt-file ./routing.txt --consult-per-issue 3 --stale-review-hours 1
+```
+
+A reviewer rejects using `multica issue comment add <id> --verdict hold
+--content-file ./findings.md`. The first rejection returns to the delivering
+executor; a second rejection escalates one tier through `route(do)` and retains
+the reviewer. Duplicate hold events in the same review stay do not increment
+the count. A failed reviewer *run* is an infrastructure failure, not a rejection;
+its existing retry/relay protocol is unchanged.
+
 **分工规则 (DENE-1834).** The analysis model answers one more numbered
 question, the kind of work (任务类别), from the workspace's plain-language
 division of labour. The default reads 「前端、审美交给 Claude，Codex 主要负责审查。
-文档、沉淀类最多中档。」: a matching row filters the eligible seats to that model
-series (a hard filter, unlike the judge's `preferred_series` which only reorders
-within one rung) and may cap the tier. When the series has nobody online with
-headroom the ticket does not wait: routing picks across series by tier and the
+文档、沉淀类最多中档。」: a matching row gives that model
+series a weighted bonus (0–100, default 1; 0 disables it), never a
+filter. All candidates remain. The old mode retains category tier caps; reasoning
+reads those as reference. When no preferred family can take the selected tier, routing picks across series by tier and the
 「自动选派」 comment says 「Claude 系列没人能接（…），换系列按档位选」. The same
 facts print on the routing receipt of `issue create` / `chat new` / chat → goal
 (`category`, `rule`, `series`, `series_fallback` in `--output json`). Changing
@@ -286,19 +314,19 @@ multica workspace routing set --learn-low-rate 0.4 --learn-window-days 14
 So when a ticket is beyond your seat, say so with `issue escalate`; that call
 is what teaches routing, a comment saying "too hard" is not.
 
-**按判断配验收 (DENE-1252)** has no effect since DENE-1677: the rule table
-below decides whether a ticket gets a 验收席. `--judged-review` is still
+**按判断配验收 (DENE-1252)** is legacy configuration only: `review`
+uses the unified selector, not a model vote on whether to review. `--judged-review` is still
 accepted so old configs read, and changes nothing.
 
 If a ticket turned out too hard for its seat, do not pick a stronger one.
-Ask routing to re-judge:
+Consult first; if the advice did not unblock the work, ask routing to re-judge:
 
 ```bash
 multica issue escalate <id> --reason "what is beyond this seat"
 ```
 
-It takes a reason only — no person, no tier. The server moves the ticket up the
-ladder, writes one comment, and reports `at_top: true` when nothing is
+It takes a reason only — no person, no tier. The server checks for a prior consultation when an advisor is available, moves the ticket up the
+ladder, writes the number of consultations in its comment, and reports `at_top: true` when nothing is
 stronger. A person picking on the web or desktop, or an automation a person
 configured, is never second-guessed.
 
@@ -320,14 +348,23 @@ Consequences for how you work:
 - Read `action` in `--output json` as what was WRITTEN. `assigned`: a slot was
   filled. `declined`: nothing was written, which now means somebody else won
   the write. `noop`: nothing to decide. Only `assigned` is a dispatch.
-- **The tier comes from the rule table, not a model (DENE-1677).** The
-  analysis model answers four numbered questions (改动范围, 需求, 出错代价,
-  要人拍板); only the option number is read. The first matching row of the
-  table names the tier and whether a 验收席 is needed. An answer that is not a
-  number in range, a timeout or a garbled reply counts as 答不出, and 答不出 or
-  cross-module never lands on the weakest rung. The reviewer seat follows the
-  executor: same rung from another model family, else one rung down. A judge
-  answer below confidence threshold is ignored and the table stands.
+- **Decision rollout.** Existing settings without `decision_mode` keep `legacy`
+  until compared; new UI configurations start in `shadow`, with no independent
+  judge call. `multica workspace routing set --decision-mode shadow`
+  makes one analysis call return numbered facts plus a tier, eligible seat ID,
+  reason and confidence. It reads `policy_prompt`, the whole ticket, available
+  seats and reference rules. Shadow keeps the old assignment; `active` uses the
+  model's choice instead of first-match rules. Low confidence raises at most one
+  tier, never into strongest as a fallback. Invalid or unavailable selections
+  cannot bypass server eligibility or the safe fallback policy.
+- **Compare before activating.** `multica workspace routing shadow --days 30
+  --limit 20 --output json` makes at most 20 model calls, writes no issue state
+  and starts no runs. `next_offset` resumes with `--offset`; increase `--limit`
+  up to 1000 for a wider review. These are past ticket texts evaluated with the
+  CURRENT roster and policy, not reconstructed historical quota. Keep partial
+  errors in the report. The settings page runs the same endpoint in batches.
+  Grok reviews the report before `--decision-mode active`; do not claim a live
+  comparison or activate a rollout merely because fixture tests passed.
 - The issue's **scene** decides which specialisation on a rung gets the
   work; it never changes the rung or the confidence. The scene is the issue's
   own domain; else all of its project's domains; else generic. Every
@@ -362,7 +399,7 @@ settings page reads):
 multica workspace routing rules
 ```
 
-With the judge on (mode `judge` or `both`) it may only **raise** the table's
+Only the legacy migration comparison retains the old judge behavior. There it may only **raise** the table's
 tier by one rung, with a reason; a lower or two-rung answer is not used, and
 the decision comment says so. `multica issue route <id> --output json`
 reports `tier` (used), `judged_tier` (set only when the judge's answer was
@@ -372,8 +409,8 @@ number read, the rule row, the judge's effect (`raised` / `agreed` /
 trace in prose.
 
 Agent-created tickets should pass `--routing-facts` with scope, clarity, risk,
-and needs_human (plus an optional summary). The creator facts are accepted
-immediately and skip a duplicate analysis call. The analysis source can be
+and needs_human (plus an optional summary). Creator facts are accepted
+for legacy comparison; active reasoning still chooses the tier and seat once. The analysis source can be
 changed without the browser: `multica workspace routing set --source
 runtime_subscription --runtime <id> --model <id> --thinking low`. Use
 `api_gateway` to retain the OpenAI-compatible path.

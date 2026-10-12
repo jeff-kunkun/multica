@@ -64,6 +64,7 @@ Each rule is one kind of work and what the text says about it:
 - category: the kind of work in the person's own words (e.g. 前端, 审查, 文档沉淀). Short, unique.
 - hint: one English line a classifier can use to recognise that kind of work from a ticket.
 - series: the model family that kind of work goes to, exactly as named in the text (e.g. Claude, Codex, Gemini). Empty when the sentence names no family. Prefer a name from known_series when the text clearly means it.
+- weight: preference bonus from 0 to 100; default 1, 0 disables the preference. Never an exclusion.
 - max_tier: a tier key from tiers when the sentence caps how strong a seat the work may get (「最多中档」 → the key whose label is 中). Empty otherwise.
 - source: the exact sentence or clause of the text this rule came from, copied verbatim.
 
@@ -224,7 +225,7 @@ func ResetDispatchPolicy(current *DispatchPolicy, l Ladder, by string, now time.
 }
 
 func sameDispatchRule(a, b DispatchRule) bool {
-	return a.Category == b.Category && a.Hint == b.Hint && strings.EqualFold(a.Series, b.Series) && a.MaxTier == b.MaxTier && a.Source == b.Source
+	return a.PreferenceWeight() == b.PreferenceWeight() && a.Category == b.Category && a.Hint == b.Hint && strings.EqualFold(a.Series, b.Series) && a.MaxTier == b.MaxTier && a.Source == b.Source
 }
 
 func dispatchTextDiff(before, after string) string {
@@ -274,7 +275,7 @@ func dispatchRulesDiff(l Ladder, before, after []DispatchRule) string {
 func (r DispatchRule) Describe(l Ladder) string {
 	s := r.Category
 	if r.Series != "" {
-		s += "→" + r.Series
+		s += fmt.Sprintf("→%s（权重 %g）", r.Series, r.PreferenceWeight())
 	}
 	if r.MaxTier != "" {
 		s += " 封顶" + tierLabel(l, r.MaxTier) + "档"

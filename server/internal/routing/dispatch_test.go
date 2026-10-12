@@ -45,7 +45,7 @@ func TestDispatchFrontendGoesToClaudeSeries(t *testing.T) {
 		t.Fatalf("dispatch = %+v", out.Dispatch)
 	}
 	body := strings.Join(store.comments[KindAssignment], "\n")
-	for _, want := range []string{"任务类别：前端", "前端、审美交给 Claude", "按 Claude 系列筛候选"} {
+	for _, want := range []string{"任务类别：前端", "前端、审美交给 Claude", "按 Claude 系列偏好排序"} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("assignment comment lacks %q:\n%s", want, body)
 		}

@@ -718,6 +718,29 @@ func (h *Handler) UpdateWorkspace(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
 		}
+		if incoming, ok := req.Settings.(map[string]any); ok {
+			if block, ok := incoming["routing"].(map[string]any); ok {
+				if limit, exists := block["consult_per_issue"]; exists {
+					n, ok := limit.(float64)
+					if !ok || n < 1 || n > 20 || n != float64(int(n)) {
+						writeError(w, 400, "consult_per_issue must be an integer between 1 and 20")
+						return
+					}
+				}
+				if mode, exists := block["decision_mode"]; exists && mode != "legacy" && mode != "shadow" && mode != "active" {
+					writeError(w, http.StatusBadRequest, "decision_mode must be legacy, shadow or active")
+					return
+				}
+				if block["decision_mode"] == "active" {
+					analysis, _ := block["analysis"].(map[string]any)
+					if analysis["enabled"] != true {
+						writeError(w, http.StatusBadRequest, "active reasoning requires the analysis model")
+						return
+					}
+				}
+			}
+
+		}
 		// The client cannot echo back the routing key or the log-export git
 		// token it was never sent, so the stored ones are carried forward
 		// unless this write explicitly sets or clears them. Without this, any

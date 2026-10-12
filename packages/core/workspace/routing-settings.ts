@@ -61,6 +61,8 @@ export interface RoutingAnalysisSettings {
 }
 
 export interface RoutingSettings {
+  consult_per_issue?: number;
+  decision_mode?: "legacy" | "shadow" | "active";
   enabled: boolean;
   /**
    * Model identifier for the routing judge. Empty while the judge is on is
@@ -186,6 +188,8 @@ export type RoutingState = "off" | "incomplete" | "enabled" | "ineffective";
  * judge is an opt-in second step.
  */
 export const DEFAULT_ROUTING_SETTINGS: RoutingSettings = {
+  consult_per_issue: 3,
+  decision_mode: "shadow",
   enabled: false,
   model: "",
   judge_enabled: false,
@@ -239,6 +243,8 @@ export function parseRoutingSettings(
     : { enabled: false, model: "", base_url: "" };
   return {
     enabled: block.enabled === true,
+    consult_per_issue: typeof block.consult_per_issue === "number" && Number.isInteger(block.consult_per_issue) && block.consult_per_issue > 0 && block.consult_per_issue <= 20 ? block.consult_per_issue : 3,
+    decision_mode: block.decision_mode === "active" || block.decision_mode === "shadow" ? block.decision_mode : "legacy",
     model: typeof block.model === "string" ? block.model : "",
     // A block saved before the split has no switch: it only had the judge,
     // and it keeps it. Same reading as JudgeOn on the server.
@@ -331,13 +337,14 @@ export function routingState(
   // A role that is on with no model is incomplete, whichever role it is.
   // Both off is not: it is the deliberate "no model" mode.
   if (settings.analysis.enabled && (settings.analysis.model.trim() === "" || (settings.analysis.source === "runtime_subscription" && (settings.analysis.runtime_id ?? "").trim() === ""))) return "incomplete";
-  if (settings.judge_enabled && settings.model.trim() === "") return "incomplete";
+  if ((settings.decision_mode ?? "legacy") === "legacy" && settings.judge_enabled && settings.model.trim() === "") return "incomplete";
   if (health?.state === "ineffective") return "ineffective";
   return "enabled";
 }
 
 /** Which roles are on. Mirrors `Settings.Mode` on the server. */
 export function routingMode(settings: RoutingSettings): RoutingMode {
+  if (settings.decision_mode === "active" || settings.decision_mode === "shadow") return settings.analysis.enabled ? "analysis" : "none";
   if (settings.analysis.enabled) return settings.judge_enabled ? "analysis_judge" : "analysis";
   return settings.judge_enabled ? "judge" : "none";
 }
@@ -392,6 +399,8 @@ export function withRoutingSettings(
   const block: Record<string, unknown> = {
     ...(isRecord(stored) ? stored : {}),
     enabled: next.enabled,
+    consult_per_issue: next.consult_per_issue ?? 3,
+    decision_mode: next.decision_mode ?? "legacy",
     model: next.model.trim(),
     confidence_threshold: normalizeThreshold(next.confidence_threshold),
     stale_review_hours: normalizeStaleReviewHours(next.stale_review_hours),

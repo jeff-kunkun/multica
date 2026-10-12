@@ -17,16 +17,16 @@ multica issue consult <id> --resume <consult-id>   # the wait ran out; the answe
 | Before you deliver | the diff or result: "review this before I close" |
 | Stuck between two approaches | both options and what you cannot judge |
 
-A ticket gets a few consults (3 by default; Settings → Agent permissions →
-Consult). Do not ask for what you can look up, and do not consult instead of
+A ticket gets a few consults (3 by default; Settings → Routing → Consults per issue; the permission to consult remains in Agent permissions). Do not ask for what you can look up, and do not consult instead of
 working. The advisor sees the issue, its state card and your question — not
 your working copy — so paste the code, diff or error that matters.
 
 ## Who answers
 
-The server picks a seat on the strongest tier of the routing ladder: one that
-fits the issue's direction first, then an idle one, then usage headroom. Never
-you. The seat's daemon must be online and new enough to run consults.
+The unified `route(ticket, consult)` selector targets one tier above the executor,
+with the same direction and soft family preferences used for dispatch and review.
+It tries an adjacent tier when needed (above before below), never strongest as
+a fallback. Never you. The seat's daemon must be online and new enough to run consults.
 
 ## Cost
 
@@ -44,7 +44,7 @@ your own judgment.
 | `consult_not_a_run` | only a run working this issue can consult; people comment and @mention |
 | `consult_disabled` | the workspace switched consults off |
 | `consult_limit_reached` | this issue used its consults (`limit` says how many) |
-| `consult_no_advisor` | no other seat sits on the strongest tier |
+| `consult_no_advisor` | no eligible seat at the target or adjacent tier |
 | `consult_advisors_unavailable` | every strong seat is out of quota, offline or busy |
 
 A consult that got no answer (the advisor run failed or was cancelled) ends
@@ -56,3 +56,7 @@ A consult that got no answer (the advisor run failed or was cancelled) ends
 |---|---|
 | advice, and keep the ticket | `multica issue consult` |
 | a stronger seat to take the ticket over | `multica issue escalate` |
+
+Consult before requesting escalation when an advisor is available. Escalation
+records how many consultations have finished. Advisors may also be reviewers;
+only the executor is excluded from reviewing its own delivery.

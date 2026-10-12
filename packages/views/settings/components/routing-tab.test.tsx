@@ -100,6 +100,7 @@ const HEALTHY = {
   gateway_protocol: "openai" as const,
   gateway_key_set: false,
   workspace_key_storable: true,
+  roles: [{role:"analysis", enabled:true, model:"reasoner", gateway_host:"api.openai.com", gateway_scope:"deployment",gateway_key_set:false,gateway_protocol:"openai"}],
 };
 
 const RULES = parseRoutingHealth({
@@ -156,9 +157,9 @@ function fieldByLabel(label: RegExp): HTMLElement {
   return matches[0]!;
 }
 
-const JUDGE_MODEL = /^(judge model|判断模型)$/i;
-const ANALYSIS_MODEL = /^(analysis model|分析模型)$/i;
-const JUDGE_KEY = /^api key$/i;
+const JUDGE_MODEL = /^(model|模型)$/i;
+const ANALYSIS_MODEL = /^(model|模型)$/i;
+const JUDGE_KEY = /^analysis api key$/i;
 
 function masterSwitch() {
   return screen.getByRole("switch", { name: /enable automatic dispatch|启用自动选派/i });
@@ -206,26 +207,12 @@ describe("RoutingTab", () => {
     expect(chip()?.getAttribute("data-state")).toBe("enabled");
   });
 
-  it("fills an empty model from the saved gateway catalog", async () => {
-    workspace.current.settings = {
-      routing: { enabled: true, model: "", base_url: "https://gw.example/v1" },
-    };
-    getRoutingHealth.mockResolvedValue({
-      ...HEALTHY,
-      gateway_scope: "workspace",
-      gateway_host: "gw.example",
-      gateway_key_set: true,
-    });
-    listRoutingModels.mockResolvedValue({ models: ["gateway-model", "backup-model"] });
-
+  it("exposes one reasoning role and keeps advanced settings collapsed", () => {
     render();
-
-    await waitFor(() =>
-      expect(fieldByLabel(JUDGE_MODEL)).toHaveValue(
-        "gateway-model",
-      ),
-    );
-    expect(listRoutingModels).toHaveBeenCalledWith("ws-1");
+    expect(screen.queryByRole("switch", { name: /use the judge model/i })).toBeNull();
+    expect(document.querySelector("details")).not.toHaveAttribute("open");
+    expect(fieldByLabel(/^model$/i)).toBeInTheDocument();
+    expect(listRoutingModels).not.toHaveBeenCalled();
   });
 
   // The protocol line, not the host line. A workspace that configured Jev saw
@@ -246,6 +233,7 @@ describe("RoutingTab", () => {
       model: "jev-latest",
       gateway_scope: "workspace",
       gateway_host: "api.typesafe.ai",
+      roles: [{role:"analysis",enabled:true,model:"reasoner",gateway_host:"api.typesafe.ai",gateway_scope:"workspace",gateway_key_set:true}],
       gateway_protocol: "systemone",
       gateway_key_set: true,
     });
@@ -302,6 +290,8 @@ describe("RoutingTab", () => {
       usage_priority: true,
       allow_upshift: false,
       strongest_gate: true,
+      decision_mode: "shadow",
+      consult_per_issue: 3,
       prefer_continuation: false,
       prefer_idle: false,
       learn_from_outcomes: false,
@@ -318,26 +308,11 @@ describe("RoutingTab", () => {
     });
   });
 
-  it("switches each model role on and off on its own", async () => {
+  it("saves the per-issue consultation limit", async () => {
     render();
-    // The judge model box is greyed out until its role is on.
-    expect(fieldByLabel(JUDGE_MODEL)).toBeDisabled();
-    await userEvent.click(
-      screen.getByRole("switch", { name: /use the judge model|启用判断模型/i }),
-    );
-    expect(fieldByLabel(JUDGE_MODEL)).not.toBeDisabled();
-    await userEvent.click(
-      screen.getByRole("switch", { name: /use the analysis model|启用分析模型/i }),
-    );
-    expect(document.querySelector("[data-mode]")?.getAttribute("data-mode")).toBe("judge");
-
+    fireEvent.change(fieldByLabel(/^consults per issue$/i), {target:{value:"5"}});
     await waitFor(() => expect(updateWorkspace).toHaveBeenCalled());
-    const [, body] = updateWorkspace.mock.calls.at(-1) as [
-      string,
-      { settings: { routing: { judge_enabled: boolean; analysis: { enabled: boolean } } } },
-    ];
-    expect(body.settings.routing.judge_enabled).toBe(true);
-    expect(body.settings.routing.analysis.enabled).toBe(false);
+    expect(updateWorkspace.mock.calls.at(-1)?.[1].settings.routing.consult_per_issue).toBe(5);
   });
 
   it("saves the analysis key into the analysis block only", async () => {
@@ -390,13 +365,13 @@ describe("RoutingTab", () => {
     expect(updateWorkspace).not.toHaveBeenCalled();
 
     // The judge card's button is the second: the analysis card comes first.
-    await userEvent.click(screen.getAllByRole("button", { name: /save key|保存 key/i })[1]!);
+    await userEvent.click(screen.getAllByRole("button", { name: /save key|保存 key/i })[0]!);
     await waitFor(() => expect(updateWorkspace).toHaveBeenCalled());
     const [, body] = updateWorkspace.mock.calls.at(-1) as [
       string,
       { settings: { routing: Record<string, unknown> } },
     ];
-    expect(body.settings.routing.api_key).toBe("sk-live-abc");
+    expect((body.settings.routing.analysis as Record<string, unknown>).api_key).toBe("sk-live-abc");
     // And the box is emptied, so a credential is not left sitting in the DOM.
     await waitFor(() => expect((key as HTMLInputElement).value).toBe(""));
   });
@@ -406,7 +381,7 @@ describe("RoutingTab", () => {
     render();
     const key = fieldByLabel(JUDGE_KEY);
     await userEvent.type(key, "sk-live-abc");
-    await userEvent.click(screen.getAllByRole("button", { name: /save key|保存 key/i })[1]!);
+    await userEvent.click(screen.getAllByRole("button", { name: /save key|保存 key/i })[0]!);
     await waitFor(() => expect(toastError).toHaveBeenCalledWith("only owners and admins can change settings"));
     await waitFor(() => expect((key as HTMLInputElement).value).toBe(""));
   });
@@ -414,7 +389,7 @@ describe("RoutingTab", () => {
   it("saves the endpoint url with the ordinary fields", async () => {
     render();
     await userEvent.type(
-      fieldByLabel(/^(endpoint url|端点 url)$/i),
+      fieldByLabel(/^analysis endpoint url$/i),
       "https://gw.example/v1",
     );
     await waitFor(() => expect(updateWorkspace).toHaveBeenCalled());
@@ -422,7 +397,7 @@ describe("RoutingTab", () => {
       string,
       { settings: { routing: Record<string, unknown> } },
     ];
-    expect(body.settings.routing.base_url).toBe("https://gw.example/v1");
+    expect((body.settings.routing.analysis as Record<string, unknown>).base_url).toBe("https://gw.example/v1");
     expect("api_key" in body.settings.routing).toBe(false);
   });
 
@@ -500,7 +475,7 @@ describe("RoutingTab", () => {
     const { qc } = render();
     await healthSettled(qc);
     expect(await screen.findByText(/api\.openai\.com/)).toBeTruthy();
-    expect(screen.getByText(/gpt-5\.6-mini/)).toBeTruthy();
+    expect(fieldByLabel(/^model$/i)).toBeInTheDocument();
   });
 
   // The single most common reason routing silently does nothing, and the one
@@ -517,7 +492,7 @@ describe("RoutingTab", () => {
     });
     const { qc } = render();
     await healthSettled(qc);
-    expect(await screen.findByText(/No endpoint is available/)).toBeTruthy();
+    expect(fieldByLabel(/^analysis endpoint url$/i)).not.toBeDisabled();
     expect(screen.queryByText(/MULTICA_LLM_BASE_URL/)).toBeNull();
   });
 
@@ -783,13 +758,13 @@ describe("RoutingTab seat order switches", () => {
     getRoutingHealth.mockResolvedValue({ ...HEALTHY, rules: RULES });
     const { qc } = render();
     await healthSettled(qc);
-    expect(await screen.findByText("Tier rules")).toBeInTheDocument();
+    expect(await screen.findByText("Reference rules (advisory in reasoning mode)")).toBeInTheDocument();
     expect(screen.getByText("改动范围：跨模块")).toBeInTheDocument();
     expect(screen.getByText("Any question unanswered")).toBeInTheDocument();
     expect(screen.getByText("改动范围：小 · 需求：清楚")).toBeInTheDocument();
     expect(screen.getByText("Nothing above matched")).toBeInTheDocument();
-    expect(screen.getByText("强档, reviewed")).toBeInTheDocument();
-    expect(screen.getAllByText("弱档, no review")).toHaveLength(1);
+    expect(screen.getByText("强档 · automatic review by tier")).toBeInTheDocument();
+    expect(screen.getAllByText("弱档 · automatic review by tier")).toHaveLength(1);
   });
 
   it("hides the rule table on a backend that predates it", async () => {

@@ -309,14 +309,14 @@ func (r *Router) routeTodo(ctx context.Context, workspaceID string, settings Set
 	roster = ForProject(roster, issue.ProjectID)
 	candidates := ladder.assignmentCandidates(scene, roster)
 	if len(candidates) == 0 {
-		return Outcome{State: StateEnabled, Action: ActionNoop, Reason: "ladder has no seat in this workspace"}, nil
+		return r.deliver(ctx, workspaceID, issue, KindAssignment, "没有可自动选派的席位；未派出，请 Grok 协调。", false, Outcome{State: StateEnabled, Action: ActionAdvised, Reason: "no routable seat"})
 	}
 	eligible, state, err := r.decisionContext(ctx, workspaceID, settings, issue, scene, candidates)
 	if err != nil {
 		return Outcome{State: StateEnabled, Action: ActionSkipped, Reason: "routing context incomplete"}, err
 	}
 	if len(eligible) == 0 {
-		return Outcome{State: StateEnabled, Action: ActionNoop, Reason: "no eligible seat"}, nil
+		return r.deliver(ctx, workspaceID, issue, KindAssignment, "候选均不在线或没有额度；未派出，请 Grok 协调。", false, Outcome{State: StateEnabled, Action: ActionAdvised, Reason: "no eligible seat"})
 	}
 
 	// A tier label on the ticket is an answer, not a hint: when it names a
@@ -345,6 +345,7 @@ func (r *Router) routeTodo(ctx context.Context, workspaceID string, settings Set
 	executorFromLabel := needExecutor && labelSeatOK
 
 	state.CandidateSeries = ladder.candidateSeries(roster)
+	state.EligibleSeats = reasoningSeats(ladder, eligible, roster)
 	var verdict Verdict
 	dec := decision{Mode: settings.Mode(), Decider: DeciderNone}
 	if needReviewer || !executorFromLabel {
@@ -415,7 +416,10 @@ func (r *Router) routeTodo(ctx context.Context, workspaceID string, settings Set
 			notes = append(notes, "executor not filled: no eligible seat")
 		} else {
 			labelStill := labelSeatOK && seatIn(fresh, labelSeat)
-			seat, source, why := r.pickExecutor(fresh, labelSeat, labelStill, verdict, threshold)
+			seat, source, why := r.pickConfiguredExecutor(settings, issue.ProjectID, ladder, fresh, pickRoster, labelSeat, labelStill, verdict, threshold, issue)
+			if seat.ID == "" {
+				return r.deliver(ctx, workspaceID, issue, KindAssignment, "## 自动选派\n\n**为什么是他**：兜底 —— "+why+"\n\n未派出；请调整兜底席或人工指派。", false, Outcome{State: StateEnabled, Action: ActionSkipped, Reason: why})
+			}
 			// 从结果里学 only revisits the table's own tier: a label is a
 			// person's call and a fallback is no judgement to learn from.
 			if source == pickJudge && dec.Decider == DeciderRule && dec.Facts != nil {
@@ -436,13 +440,16 @@ func (r *Router) routeTodo(ctx context.Context, workspaceID string, settings Set
 			// was not suitable for this class, which is the gate's own
 			// test, so it is not gated.
 			var gate StrongestGate
-			if !labelStill && source != pickLearned && settings.StrongestGateOn() {
+			if !labelStill && source != pickLearned && !verdict.Reasoned && settings.StrongestGateOn() {
 				seat, gate = ladder.gateStrongest(seat, candidates, fresh, pickRoster, snaps)
 				out.StrongestGate = gate
 				if gate.Moved && class != nil {
 					// The outcome class names the judged rung; the seat is
 					// now a rung below, so nothing is recorded to learn from.
 					class = nil
+				}
+				if seat.ID == "" {
+					return r.deliver(ctx, workspaceID, issue, KindAssignment, "## 自动选派\n\n**为什么是他**：兜底 —— "+gate.Why+"；未派出，请人工指派或调整可用席位。", false, Outcome{State: StateEnabled, Action: ActionSkipped, Reason: gate.Why})
 				}
 				if line := gate.Line(ladder); line != "" {
 					notes = append(notes, line)
@@ -451,7 +458,7 @@ func (r *Router) routeTodo(ctx context.Context, workspaceID string, settings Set
 			tierSeat, tierSource, tierWhy := seat, source, why
 			// 接着做 ranks above the ladder's pick but not above a person's
 			// tier label: the label is a person's instruction about strength.
-			if !labelStill {
+			if !labelStill && source != pickFallback && !verdict.Reasoned {
 				cont, err = r.continuation(ctx, workspaceID, settings, ladder, pickRoster, scene, issue, seat)
 				if err != nil {
 					return Outcome{State: StateEnabled, Action: ActionSkipped, Reason: "routing context incomplete"}, err
@@ -472,7 +479,7 @@ func (r *Router) routeTodo(ctx context.Context, workspaceID string, settings Set
 					}
 				}
 			}
-			if !labelStill && verdict.PreferredSeries != "" && !dispatch.Filtered {
+			if !labelStill && source != pickFallback && verdict.PreferredSeries != "" && !dispatch.Filtered {
 				preferred, matched, preferenceErr := r.availableSeriesSeat(ctx, workspaceID, settings, ladder, scene, roster, seat, verdict.PreferredSeries)
 				if preferenceErr != nil {
 					return Outcome{State: StateEnabled, Action: ActionSkipped, Reason: "routing context incomplete"}, preferenceErr
@@ -527,7 +534,7 @@ func (r *Router) routeTodo(ctx context.Context, workspaceID string, settings Set
 	humanSignoff := needReviewer && verdict.Reviewer == ReviewerHuman
 	if needReviewer {
 		ref, ok := r.decideReviewer(verdict, ladder, scene, roster, fresh, executor, issue)
-		if ok && verdict.Reviewer == ReviewerSeat && verdict.ReviewerTier == "" {
+		if ok && (verdict.ReviewerTier == "" || (executor != nil && (executor.TierKey == "medium" || executor.TierKey == "weak"))) {
 			// The table's check landed where the ladder put it; say why.
 			_, fallbackWhy = r.fallbackReviewer(ladder, scene, roster, fresh, executor, issue)
 		}
@@ -544,11 +551,6 @@ func (r *Router) routeTodo(ctx context.Context, workspaceID string, settings Set
 			why = "confidence " + pct(verdict.ReviewerConfidence) + " < threshold " + pct(threshold)
 		}
 		switch {
-		case !ok && settings.JudgedReview && unsureReviewer(verdict, dec, threshold):
-			// 按判断配验收: only a confident call for a check fills a seat.
-			// Without one the executor merges and closes on its own.
-			ref = ReviewerRef{Kind: ReviewerNoReview}
-			notes = append(notes, "reviewer left to the executor under judged review: "+why)
 		case !ok:
 			var ladderWhy string
 			ref, ladderWhy = r.fallbackReviewer(ladder, scene, roster, fresh, executor, issue)
@@ -689,9 +691,7 @@ func (r *Router) pickExecutor(candidates []Seat, labelSeat Seat, labelled bool, 
 	}
 	fallback, fallbackOK := r.Ladder.FallbackSeat(candidates)
 	if !fallbackOK {
-		// Unreachable while candidates is non-empty; keeping the judge's seat
-		// is still better than returning nothing.
-		return seat, pickJudge, ""
+		return Seat{}, pickFallback, why + "; no safe fallback seat"
 	}
 	return fallback, pickFallback, why
 }
@@ -788,14 +788,18 @@ func (r *Router) PickAcceptanceSeat(ctx context.Context, workspaceID string, iss
 	if len(ladder.Tiers) == 0 {
 		ladder = DefaultLadder
 	}
-	ladder = ladder.WithDomains(settings.Domains).WithProjects(settings.Projects).WithSeatOrder(settings.SeatOrder())
+	ladder = ladder.For(settings)
 	scene := ladder.IssueScene(issue)
 	roster, err := r.Store.Roster(ctx, workspaceID)
 	if err != nil {
 		return ReviewerRef{}, "读不到席位名册", false
 	}
 	roster = ForProject(roster, issue.ProjectID)
-	candidates := ladder.SceneCandidates(scene, roster)
+	candidates := ladder.assignmentCandidates(scene, roster)
+	candidates, err = r.eligibleNow(ctx, workspaceID, settings, candidates)
+	if err != nil {
+		return ReviewerRef{}, "读不到席位可用状态", false
+	}
 	ref, why := r.fallbackReviewer(ladder, scene, roster, candidates, nil, issue)
 	if ref.Kind != ReviewerAgent || ref.ID == "" || ref.ID == issue.AssigneeID {
 		if why == "" {
@@ -806,84 +810,17 @@ func (r *Router) PickAcceptanceSeat(ctx context.Context, workspaceID string, iss
 	return ref, why, true
 }
 
-// fallbackReviewer is the reviewer the ladder implies when the judge cannot
-// name one with confidence. It never resolves to a person, and it never
-// resolves to the strongest rung: that rung is written only when the judge
-// names it above the threshold. The check stays on the holder's rung and
-// changes model family, or moves one rung down when the rung has no second
-// family. 「不需要验收」 is the answer when this workspace has no second seat
-// at all. The second return value is why, for the decision comment.
+// fallbackReviewer adapts review to the common selector: one tier above the
+// executor, adjacent-tier fallback, and never self-review.
 func (r *Router) fallbackReviewer(ladder Ladder, scene Scene, roster map[string]Agent, candidates []Seat, executor *Seat, issue Issue) (ReviewerRef, string) {
-	holder := Seat{}
-	switch {
-	case executor != nil:
-		holder = *executor
-	case issue.AssigneeType == "agent" && issue.AssigneeID != "":
-		holder = seatFromRoster(ladder, roster, issue.AssigneeID)
-	default:
-		seat, ok := fallbackNotStrongest(ladder, candidates)
-		if !ok {
-			return ReviewerRef{Kind: ReviewerNoReview}, "没有不在最强档上的席位能验"
-		}
-		return seatReviewer(seat), "本票还没有执行席，交兜底档验"
+	if executor != nil {
+		issue.AssigneeType, issue.AssigneeID = "agent", executor.ID
 	}
-	if holder.TierKey == "" {
-		if _, onLadder := SeatIndex(candidates, holder); !onLadder {
-			seat, ok := fallbackNotStrongest(ladder, candidates)
-			if ok && seat.ID != holder.ID {
-				return seatReviewer(seat), "执行席不在档位阶梯上，交兜底档验"
-			}
-		}
+	selection := r.routeTicket(ladder, Settings{}, ticketRoute{Ticket: issue, Candidates: candidates, Roster: roster}, PurposeReview)
+	if len(selection.Seats) == 0 {
+		return ReviewerRef{}, selection.Why
 	}
-	// The strongest rung is closed on this path even when the holder already
-	// sits on it: a same-tier swap would still be strongest, and the judge
-	// did not clear that bar.
-	if !strings.EqualFold(holder.TierKey, "strongest") {
-		if alt, ok := ladder.SceneTierAlternate(holder, scene, roster); ok {
-			return seatReviewer(alt), "按「同档换一家模型」选的"
-		}
-	}
-	if down, ok := stepDown(candidates, holder.TierKey); ok && down.ID != holder.ID {
-		if strings.EqualFold(holder.TierKey, "strongest") {
-			return seatReviewer(down), "执行席已在最强档，同档不再派最强档，改由下一档复核"
-		}
-		return seatReviewer(down), "同档没有第二家模型，改由下一档复核"
-	}
-	return ReviewerRef{Kind: ReviewerNoReview}, "这个工作区只有一个席位，没有第二个席位能验"
-}
-
-// fallbackNotStrongest is the rung an unconfident reviewer may land on when
-// there is no holder to stay next to. The declared fallback is used when it
-// is not the strongest rung; otherwise the first weaker candidate is.
-func fallbackNotStrongest(ladder Ladder, candidates []Seat) (Seat, bool) {
-	if seat, ok := ladder.FallbackSeat(candidates); ok && !strings.EqualFold(seat.TierKey, "strongest") {
-		return seat, true
-	}
-	for _, seat := range candidates {
-		if !strings.EqualFold(seat.TierKey, "strongest") {
-			return seat, true
-		}
-	}
-	return Seat{}, false
-}
-
-// stepDown is the candidate one rung below tierKey. Candidates are ordered
-// strongest first, one seat per rung. It never walks onto the strongest rung.
-func stepDown(candidates []Seat, tierKey string) (Seat, bool) {
-	if tierKey == "" {
-		return Seat{}, false
-	}
-	for i, seat := range candidates {
-		if !strings.EqualFold(seat.TierKey, tierKey) || i+1 >= len(candidates) {
-			continue
-		}
-		next := candidates[i+1]
-		if strings.EqualFold(next.TierKey, "strongest") {
-			return Seat{}, false
-		}
-		return next, true
-	}
-	return Seat{}, false
+	return seatReviewer(selection.Seats[0]), selection.Why
 }
 
 func seatFromRoster(ladder Ladder, roster map[string]Agent, id string) Seat {
@@ -909,55 +846,10 @@ func seatReviewer(s Seat) ReviewerRef {
 	return ReviewerRef{Kind: ReviewerAgent, ID: s.ID, Name: s.Name}
 }
 
-// decideReviewer turns a verdict branch into the reference to write. A
-// reviewer may never be the seat that did the work — checking your own output
-// is not a check — so a collision stays on the judged rung and changes model
-// family, or moves one rung down when that rung has no second family. It does
-// not step up: a higher rung, including the strongest, is written only when
-// the judge named that rung.
-//
-// No branch here can produce a person. A ticket whose reviewer slot names a
-// member gets handed to that member at 待验收, and from that moment routing
-// never touches it again (an issue a person holds is that person's ticket), so
-// the ticket freezes on somebody's desk. "This acceptance needs a person" is
-// handled instead by keeping the ticket on a seat and pinging the person —
-// see the human-signoff note in the decision comment.
+// decideReviewer keeps the old call boundary while all policy lives in routeTicket.
 func (r *Router) decideReviewer(v Verdict, ladder Ladder, scene Scene, roster map[string]Agent, candidates []Seat, executor *Seat, issue Issue) (ReviewerRef, bool) {
-	switch v.Reviewer {
-	case ReviewerNone:
-		return ReviewerRef{Kind: ReviewerNoReview}, true
-	case ReviewerHuman:
-		// Reported as "not resolvable" so the caller takes the ladder
-		// fallback, exactly as it does for any other unusable answer.
-		return ReviewerRef{}, false
-	case ReviewerSeat:
-		if v.ReviewerTier == "" {
-			// The rule table asks for a check and leaves the seat to the
-			// ladder: the holder's rung in another model family, or one
-			// rung down (DENE-1677).
-			ref, _ := r.fallbackReviewer(ladder, scene, roster, candidates, executor, issue)
-			return ref, !ref.Empty()
-		}
-		seat, ok := SeatByTier(candidates, v.ReviewerTier)
-		if !ok {
-			return ReviewerRef{}, false
-		}
-		collides := (executor != nil && seat.ID == executor.ID) ||
-			(executor == nil && issue.AssigneeType == "agent" && seat.ID == issue.AssigneeID)
-		if collides {
-			if alt, ok := ladder.SceneTierAlternate(seat, scene, roster); ok {
-				seat = alt
-			} else if other, ok := stepDown(candidates, seat.TierKey); ok && other.ID != seat.ID {
-				// With 「允许上调一档」 the rung below can be served by the very
-				// seat above it, so the step down has to be checked again.
-				seat = other
-			} else {
-				return ReviewerRef{}, false
-			}
-		}
-		return seatReviewer(seat), true
-	}
-	return ReviewerRef{}, false
+	ref, _ := r.fallbackReviewer(ladder, scene, roster, candidates, executor, issue)
+	return ref, !ref.Empty()
 }
 
 // unsureReviewer reports a reviewer verdict that 按判断配验收 reads as "no
@@ -1258,11 +1150,11 @@ func (r *Router) decideReviewerNow(ctx context.Context, workspaceID string, sett
 		return ReviewerRef{}, Outcome{State: StateEnabled, Action: ActionSkipped, Reason: "roster unreadable"}, err
 	}
 	roster = ForProject(roster, issue.ProjectID)
-	candidates := ladder.SceneCandidates(scene, roster)
+	candidates := ladder.assignmentCandidates(scene, roster)
 	if len(candidates) == 0 {
 		return ReviewerRef{}, noop("ladder has no seat in this workspace"), nil
 	}
-	eligible, state, err := r.decisionContext(ctx, workspaceID, settings, issue, scene, candidates)
+	eligible, _, err := r.decisionContext(ctx, workspaceID, settings, issue, scene, candidates)
 	if err != nil {
 		return ReviewerRef{}, Outcome{State: StateEnabled, Action: ActionSkipped, Reason: "routing context incomplete"}, err
 	}
@@ -1270,15 +1162,7 @@ func (r *Router) decideReviewerNow(ctx context.Context, workspaceID string, sett
 		return ReviewerRef{}, noop("no eligible seat"), nil
 	}
 
-	dec, err := r.decide(ctx, workspaceID, settings, issue, state)
-	if err != nil {
-		out, err := r.reportUnavailable(ctx, workspaceID, issue, err)
-		return ReviewerRef{}, out, err
-	}
-	if dec.Decider != DeciderNone {
-		r.Breaker.Succeed(workspaceID)
-	}
-	verdict := dec.Verdict
+	verdict := Verdict{Reviewer: ReviewerSeat, ReviewerConfidence: 1}
 
 	fresh, err := r.eligibleNow(ctx, workspaceID, settings, candidates)
 	if err != nil {
@@ -1302,10 +1186,11 @@ func (r *Router) decideReviewerNow(ctx context.Context, workspaceID string, sett
 		}
 	}
 	if ref.Empty() {
-		// Nothing nameable. The slot stays empty rather than holding a
-		// reference to nobody.
-		return ReviewerRef{}, noop("no reviewer could be resolved"), nil
+		_, why := r.fallbackReviewer(ladder, scene, roster, fresh, nil, issue)
+		out, err := r.deliver(ctx, workspaceID, issue, CommentKind("review_unavailable"), "验收未派出："+why, false, Outcome{State: StateEnabled, Action: ActionAdvised, Reason: why})
+		return ReviewerRef{}, out, err
 	}
+
 	written, err := r.Store.SetReviewerIfUnset(ctx, workspaceID, issue.ID, ref)
 	if err != nil {
 		return ReviewerRef{}, Outcome{State: StateEnabled, Action: ActionHandedOff}, err
@@ -1385,7 +1270,7 @@ func (r *Router) routeBlocked(ctx context.Context, workspaceID string, settings 
 		return out, err
 	}
 	roster = ForProject(roster, issue.ProjectID)
-	candidates := ladder.SceneCandidates(scene, roster)
+	candidates := ladder.assignmentCandidates(scene, roster)
 	_, state, err := r.decisionContext(ctx, workspaceID, settings, issue, scene, candidates)
 	if err != nil {
 		return Outcome{State: StateEnabled, Action: ActionSkipped, Reason: "routing context incomplete"}, err
@@ -1554,6 +1439,7 @@ func (r *Router) decisionContext(ctx context.Context, workspaceID string, settin
 	state.RoutingPolicy = DefaultRoutingPolicy
 	state.PolicyPrompt = settings.EffectivePolicyPrompt()
 	state.Seats = OrderSeatViews(candidates, facts.Seats)
+	state.EligibleSeats = reasoningSeats(r.ladder(), eligible, nil)
 	state.ProviderQuotas = EnsureProviderQuotas(facts.Providers, settings.ProviderKeys())
 	return eligible, state, nil
 }

@@ -144,6 +144,7 @@ func TestQuotedExecutorIsKeptAndCreditedToTheSpeaker(t *testing.T) {
 
 func TestEscalateMovesUpAndCannotNameAnybody(t *testing.T) {
 	store := newFakeStore()
+	store.issue.ConsultCount = 1
 	store.issue.Status = "in_progress"
 	store.issue.AssigneeType = "agent"
 	store.issue.AssigneeID = "a-piccolo-g" // 比克游戏, weak rung

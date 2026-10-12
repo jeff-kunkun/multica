@@ -7,7 +7,7 @@ import (
 
 func newWorkspaceRoutingSetTestCmd() *cobra.Command {
 	cmd := newRoutingProjectsTestCmd()
-	for _, f := range []string{"source", "runtime", "model", "thinking", "continuation", "load", "usage-priority", "allow-upshift", "strongest-gate", "judged-review", "confidence-threshold", "stale-review-hours", "learn", "learn-low-rate", "learn-window-days"} {
+	for _, f := range []string{"enabled", "decision-mode", "consult-per-issue", "policy-prompt-file", "source", "runtime", "model", "thinking", "continuation", "load", "usage-priority", "allow-upshift", "strongest-gate", "judged-review", "confidence-threshold", "stale-review-hours", "learn", "learn-low-rate", "learn-window-days"} {
 		cmd.Flags().String(f, "", "")
 	}
 	return cmd
@@ -249,5 +249,25 @@ func TestWorkspaceRoutingSetLearn(t *testing.T) {
 		if err := runWorkspaceRoutingSet(bad, nil); err == nil {
 			t.Fatalf("want an error for --%s %s", flag, value)
 		}
+	}
+}
+
+func TestWorkspaceRoutingSetSingleModelAndConsultLimit(t *testing.T) {
+	var patched map[string]any
+	routingProjectsServer(t, map[string]any{"routing": map[string]any{"policy_prompt": "preserved"}}, &patched)
+	cmd := newWorkspaceRoutingSetTestCmd()
+	for key, value := range map[string]string{"enabled": "on", "decision-mode": "active", "consult-per-issue": "4", "model": "reasoning-model"} {
+		if err := cmd.Flags().Set(key, value); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := runWorkspaceRoutingSet(cmd, nil); err != nil {
+		t.Fatal(err)
+	}
+	settings := patched["settings"].(map[string]any)
+	block := settings["routing"].(map[string]any)
+	analysis := block["analysis"].(map[string]any)
+	if block["enabled"] != true || block["decision_mode"] != "active" || block["consult_per_issue"] != float64(4) || block["policy_prompt"] != "preserved" || analysis["model"] != "reasoning-model" || analysis["enabled"] != true {
+		t.Fatalf("settings: %#v", block)
 	}
 }

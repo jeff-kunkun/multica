@@ -8,6 +8,7 @@ import { parseWithFallback } from "../api/schema";
  * server only through the preview → confirm pair, never by autosave.
  */
 export interface DispatchRule {
+  weight?: number;
   id: string;
   category: string;
   hint?: string;
@@ -55,6 +56,7 @@ export interface DispatchPreview {
 }
 
 const DispatchRuleSchema = z.object({
+  weight: z.number().min(0).max(100).optional(),
   id: z.string().default(""),
   category: z.string().default(""),
   hint: z.string().optional(),

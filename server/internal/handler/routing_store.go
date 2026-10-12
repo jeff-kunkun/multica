@@ -94,6 +94,16 @@ func (s routingStore) issueView(ctx context.Context, row db.Issue) (routing.Issu
 		Description:  clipRunes(row.Description.String, analysisDescriptionLimit),
 		ContentHash:  routing.ContentHash(row.Title, row.Description.String),
 	}
+	consults, err := s.h.Queries.ListIssueConsults(ctx, row.ID)
+	if err != nil {
+		return out, err
+	}
+	for _, c := range consults {
+		if c.Status == "answered" || c.Status == "failed" {
+			out.ConsultCount++
+		}
+		out.AdvisorIDs = append(out.AdvisorIDs, uuidToString(c.AdvisorAgentID))
+	}
 	if rec, ok := analysisRecordFromMetadata(row.Metadata); ok {
 		out.Analysis = &rec
 	}
@@ -850,6 +860,20 @@ func (s routingStore) PostComment(ctx context.Context, workspaceID, issueID stri
 	id, err := util.ParseUUID(issueID)
 	if err != nil {
 		return false, err
+	}
+	// Use a structured mention so the existing transactional Bot outbox can
+	// notify the coordinator; delivery still obeys its source visibility rules.
+	if strings.Contains(body, "请 Grok 协调") {
+		bots, err := s.h.Queries.ListWakeBots(ctx, wsID)
+		if err != nil {
+			return false, err
+		}
+		for _, bot := range bots {
+			if strings.EqualFold(bot.BotType.String, "grok") {
+				body = strings.ReplaceAll(body, "请 Grok 协调", "请 [@Grok](mention://bot/"+util.UUIDToString(bot.ID)+") 协调")
+				break
+			}
+		}
 	}
 	// author_type='system', author_id=zero UUID, matching the other
 	// platform-authored comments. Clients branch on author_type.

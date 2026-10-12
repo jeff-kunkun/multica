@@ -137,6 +137,9 @@ const (
 // were read from, and the fingerprint of the content they describe. A record
 // written before DENE-1677 may carry a tier pick of its own; it is ignored.
 type AnalysisRecord struct {
+	Decision     *ReasoningDecision `json:"decision,omitempty"`
+	DecisionHash string             `json:"decision_hash,omitempty"`
+
 	Facts Facts `json:"facts"`
 	// Answers is the per-question trace. Absent on facts a creator supplied.
 	Answers []Answer `json:"answers,omitempty"`
@@ -202,6 +205,10 @@ func (rec AnalysisRecord) Fresh(issue Issue, model string) bool {
 // AnalysisState is what the analysis model reads: the judge's state plus the
 // whole body, which never reaches the judge.
 type AnalysisState struct {
+	Reasoning      bool            `json:"reasoning,omitempty"`
+	ReferenceRules *RuleTable      `json:"reference_rules,omitempty"`
+	Preferences    *DispatchPolicy `json:"category_preferences,omitempty"`
+
 	JudgeState
 	Description string `json:"description"`
 	// Discussion is the recent conversation on the ticket, oldest first and
@@ -310,7 +317,11 @@ func (a LLMAnalyst) ask(ctx context.Context, target Target, system string, st an
 
 // Analyze asks the questions in one call.
 func (a LLMAnalyst) Analyze(ctx context.Context, target Target, st AnalysisState) (AnalysisRecord, error) {
-	raw, err := a.ask(ctx, target, analyzeSystemPrompt+categoryPrompt(st.Categories), st, 400)
+	system, budget := analyzeSystemPrompt, int64(400)
+	if st.Reasoning {
+		system, budget = reasoningSystemPrompt, 1200
+	}
+	raw, err := a.ask(ctx, target, system+categoryPrompt(st.Categories), st, budget)
 	if err != nil {
 		return AnalysisRecord{}, err
 	}
@@ -364,6 +375,12 @@ func ParseAnalysisResultWith(raw, model string, categories []CategoryOption) (An
 	facts, answers := DefaultRules.read(reply)
 	facts.Summary = clipRunes(rawAnswer(reply["summary"]), 200)
 	rec := AnalysisRecord{Facts: facts, Answers: answers, Source: FactsFromAnalysis, Model: model}
+	if value, ok := reply["decision"]; ok {
+		var d ReasoningDecision
+		if json.Unmarshal(value, &d) == nil {
+			rec.Decision = &d
+		}
+	}
 	if len(categories) > 0 {
 		a := Answer{Key: "category", Label: "任务类别", Value: Unknown, ValueLabel: unknownLabel}
 		raw := rawAnswer(reply["category"])

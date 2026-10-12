@@ -71,12 +71,9 @@ func printRuleTable(t routing.RuleTableView) {
 		}
 		fmt.Printf("  %s: %s\n", q.Label, strings.Join(opts, " · "))
 	}
-	fmt.Println("Rules (first match wins):")
+	fmt.Println("Reference rules (active reasoning treats these as reference only):")
 	for _, r := range t.Rules {
-		review := "要验收"
-		if r.Reviewer == routing.ReviewerNone {
-			review = "不需要验收"
-		}
+		review := "按档位自动验收"
 		fmt.Printf("  %d. %s → %s档，%s%s\n", r.Index, r.Label, r.TierLabel, review, ruleCondition(r, labels))
 	}
 }

@@ -199,7 +199,7 @@ func TestSubstitutePrefersAmple(t *testing.T) {
 	}
 }
 
-func TestRouteUpshiftsAndSaysSo(t *testing.T) {
+func TestLegacyUpshiftCannotBypassUnifiedTargetTier(t *testing.T) {
 	store := newFakeStore()
 	store.settings.AllowUpshift = true
 	store.issue.ProjectName = ""
@@ -218,16 +218,16 @@ func TestRouteUpshiftsAndSaysSo(t *testing.T) {
 	if _, err := newRouter(store, judge).Route(context.Background(), "ws", "issue-1"); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(store.assigns) != 1 || store.assigns[0] != "特兰克斯" {
+	if len(store.assigns) != 1 || store.assigns[0] != "人造人18号" {
 		t.Fatalf("assigns = %v, want [特兰克斯] — every medium seat is tight", store.assigns)
 	}
 	// The reviewer must not be the seat that now does the work, even though
 	// it serves both the medium and the strong rung.
-	if len(store.reviewer) != 1 || store.reviewer[0] == "特兰克斯" {
+	if len(store.reviewer) != 1 || store.reviewer[0] == store.assigns[0] {
 		t.Errorf("reviewer = %v, must not be the executor", store.reviewer)
 	}
 	body := store.comments[KindAssignment][0]
-	if !strings.Contains(body, "上调一档") {
+	if strings.Contains(body, "上调一档") {
 		t.Errorf("decision comment does not mention the upshift:\n%s", body)
 	}
 }

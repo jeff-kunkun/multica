@@ -35,9 +35,10 @@ type Tier struct {
 // Ladder is the candidate source: the ordered tiers, the known directions, and
 // the project -> direction table. It is pure data loaded from ladder.json.
 type Ladder struct {
-	Tiers      []Tier            `json:"tiers"`
-	Directions []string          `json:"directions"`
-	Projects   map[string]string `json:"projects"`
+	dispatchPolicy *DispatchPolicy
+	Tiers          []Tier            `json:"tiers"`
+	Directions     []string          `json:"directions"`
+	Projects       map[string]string `json:"projects"`
 	// Fallback names the rung an unconfident verdict lands on. Routing always
 	// dispatches, so "the judge was not sure" has to resolve to a seat; this
 	// is that seat, chosen once as data rather than per call.
@@ -143,7 +144,12 @@ func (l Ladder) WithDomains(names []string) Ladder {
 // For is the ladder one workspace routes on: its domains, its project rows,
 // and its seat order laid over the shipped defaults.
 func (l Ladder) For(settings Settings) Ladder {
-	return l.WithDomains(settings.Domains).WithProjects(settings.Projects).WithSeatOrder(settings.SeatOrder())
+	l.dispatchPolicy = settings.DispatchPolicy
+	l = l.WithDomains(settings.Domains).WithProjects(settings.Projects).WithSeatOrder(settings.SeatOrder())
+	if settings.EffectiveDecisionMode() != "legacy" {
+		l.order.AllowUpshift = false
+	}
+	return l
 }
 
 // IssueScene resolves the scene an issue routes in (DENE-1477): its own
@@ -769,19 +775,14 @@ func (l Ladder) SceneTierAlternate(holder Seat, scene Scene, roster map[string]A
 	return pool[0], true
 }
 
-// FallbackSeat is the seat routing dispatches to when the judge's answer is
-// unusable — under the threshold, or naming a rung this workspace has no seat
-// on. It prefers the ladder's declared fallback rung and otherwise takes the
-// strongest candidate present, because a ticket parked in todo costs more than
-// a seat a person has to change.
+// FallbackSeat never spends the scarce top rung to compensate for a missing seat.
 func (l Ladder) FallbackSeat(candidates []Seat) (Seat, bool) {
-	if len(candidates) == 0 {
-		return Seat{}, false
-	}
-	if l.Fallback != "" {
-		if seat, ok := SeatByTier(candidates, l.Fallback); ok {
-			return seat, true
+	for _, tier := range append([]string{l.Fallback}, l.TierKeys()...) {
+		for _, seat := range candidates {
+			if seat.TierKey == tier && l.fallbackSafe(seat, Agent{}) {
+				return seat, true
+			}
 		}
 	}
-	return candidates[0], true
+	return Seat{}, false
 }

@@ -88,7 +88,11 @@ func (r *Router) assignmentComment(
 ) string {
 	var b strings.Builder
 	b.WriteString("## 自动选派\n\n")
-	b.WriteString(PickReasonLine(executorPickReason(issue, needExecutor, executor, executorSource, dec.RaisedFrom != "")))
+	reason, detail := executorPickReason(issue, needExecutor, executor, executorSource, dec.RaisedFrom != "")
+	if dec.Decider == DeciderReasoning && executorSource == pickJudge {
+		detail = "推理模型定档选人：" + v.Reason
+	}
+	b.WriteString(PickReasonLine(reason, detail))
 	if continuationNote != "" {
 		b.WriteString(continuationNote + "\n\n")
 	}
@@ -136,8 +140,10 @@ func (r *Router) assignmentComment(
 		b.WriteString(fmt.Sprintf("- **执行席**：%s（%s档，**兜底档**——没有启用模型）→ %s。觉得档位不对直接改，改了路由不会再碰\n",
 			executor.Name, executor.TierLabel, next))
 	case executor != nil && executorSource == pickFallback:
-		b.WriteString(fmt.Sprintf("- **执行席**：%s（%s档，**兜底档**——裁决置信度 %s 低于阈值 %s，或它点的档位这里没有席位）→ 仍然%s。觉得档位不对直接改，改了路由不会再碰\n",
-			executor.Name, executor.TierLabel, pct(v.ExecutorConfidence), pct(threshold), next))
+		b.WriteString(fmt.Sprintf("- **执行席**：%s（%s档，**兜底档**——%s）→ 仍然%s。觉得档位不对直接改，改了路由不会再碰\n",
+			executor.Name, executor.TierLabel, fallbackCause(v.ExecutorTier, v.ExecutorConfidence, threshold), next))
+	case executor != nil && dec.Decider == DeciderReasoning:
+		b.WriteString(fmt.Sprintf("- **执行席**：%s（%s档，推理模型：%s）→ %s\n", executor.Name, executor.TierLabel, v.Reason, next))
 	case executor != nil && dec.Decider == DeciderRule:
 		b.WriteString(fmt.Sprintf("- **执行席**：%s（%s档，%s）→ %s\n",
 			executor.Name, executor.TierLabel, ruleTierWhy(dec), next))
@@ -161,8 +167,8 @@ func (r *Router) assignmentComment(
 	case reviewerFallback && !reviewer.Empty() && dec.Decider == DeciderNone:
 		b.WriteString(fmt.Sprintf("- **验收席**：%s（**兜底**——没有启用模型，%s）\n", reviewer.Label(), fallbackWhy))
 	case reviewerFallback && !reviewer.Empty():
-		b.WriteString(fmt.Sprintf("- **验收席**：%s（**兜底**——裁决置信度 %s 低于阈值 %s，%s）\n",
-			reviewer.Label(), pct(v.ReviewerConfidence), pct(threshold), fallbackWhy))
+		b.WriteString(fmt.Sprintf("- **验收席**：%s（**兜底**——%s，%s）\n",
+			reviewer.Label(), fallbackCause(v.ExecutorTier, v.ReviewerConfidence, threshold), fallbackWhy))
 	case reviewer.Kind == ReviewerNoReview && dec.Decider == DeciderRule && v.Reviewer == ReviewerNone:
 		b.WriteString(fmt.Sprintf("- **验收席**：本票不需要验收（规则表第 %d 行；执行人验证后自己合并关单）。要人复核就自己填一个\n", dec.Trace.Rule.Index))
 	case reviewer.Kind == ReviewerNoReview && settings.JudgedReview && !(v.Reviewer == ReviewerNone && v.ReviewerConfidence >= threshold):
@@ -176,7 +182,7 @@ func (r *Router) assignmentComment(
 		b.WriteString(fmt.Sprintf("- **验收席**：%s（置信度 %s ≥ 阈值 %s）\n",
 			reviewer.Label(), pct(v.ReviewerConfidence), pct(threshold)))
 	default:
-		b.WriteString("- **验收席**：⚠️ 未填——这一格在本次裁决与写入之间被别人占了\n")
+		b.WriteString("- **验收席**：未派出：" + fallbackWhy + "；请 Grok 协调。\n")
 	}
 
 	b.WriteString(directionLine(issue, scene))

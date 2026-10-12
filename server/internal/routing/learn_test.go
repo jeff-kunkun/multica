@@ -124,6 +124,7 @@ func TestLearnSmallClassSaysNothing(t *testing.T) {
 // seat takes the ticket.
 func TestEscalateMarksTheTicketUnderjudged(t *testing.T) {
 	store := newFakeStore()
+	store.issue.ConsultCount = 1
 	store.issue.Status = "in_progress"
 	store.issue.AssigneeType = "agent"
 	store.issue.AssigneeID = "a-piccolo-g"

@@ -76,7 +76,7 @@ func executorPickReason(issue Issue, needExecutor bool, executor *Seat, executor
 	case pickLearned:
 		return PickReasonTier, executor.Learned
 	case pickFallback:
-		return PickReasonFallback, "判断不够确定或没有判断，落到兜底档"
+		return PickReasonFallback, "置信度不足或本档没有可用席位，按统一选人规则选席"
 	}
 	if raised {
 		return PickReasonTier, "按规则下限抬到的" + executor.TierLabel + "档"

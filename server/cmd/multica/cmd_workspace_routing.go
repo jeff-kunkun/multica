@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 
 	"github.com/multica-ai/multica/server/internal/cli"
 	"github.com/multica-ai/multica/server/internal/routing"
@@ -22,41 +23,36 @@ var workspaceRoutingCmd = &cobra.Command{
 var workspaceRoutingGetCmd = &cobra.Command{Use: "get", Short: "Show analysis routing settings, thresholds, and switches", Args: cobra.NoArgs, RunE: runWorkspaceRoutingGet}
 var workspaceRoutingSetCmd = &cobra.Command{
 	Use:   "set",
-	Short: "Set routing analysis, thresholds, or switches",
-	Long: `Set analysis source, runtime, model, thinking level, thresholds, or dispatch switches.
+	Short: "Set the routing prompt, reasoning model, consult limit, reminder, or master switch",
+	Long: `Configure the five primary routing settings:
+--enabled on|off, --policy-prompt-file, --model (with --source/--runtime),
+--consult-per-issue, and --stale-review-hours.
 
---continuation on|off is 接着做: a ticket continuing a previous stage, its
-parent, or its batch goes back to that work's executor when the seat is strong
-enough, online, not out of quota, and in the right direction. Off (the default)
-is shadow mode: routing keeps its own pick and only says in the assignment
-comment who the rule would have picked.
+A single reasoning model chooses the tier and seat with a reason. Consult and
+review target the executor's next higher tier. Series preferences only rank
+candidates. The strongest tier is never a fallback; review cannot select its
+own executor. One rejected review returns to the executor; the second escalates.
 
---load on|off is 负载分流: inside the rung and direction routing picked, the
-seat with fewer unfinished runs (queued or running) takes the ticket; when all
-are equally busy the usual order stands. Off (the default) is shadow mode, as
-above. With both switches on, --continuation wins.
+Migration: legacy preserves pre-cutover decisions; shadow records one-model
+comparisons without changing the reference-rule tier; active uses reasoning.
+Run workspace routing shadow --days 30 before switching --decision-mode active.
 
---learn on|off is 从结果里学: a class of tickets (direction × tier × scope,
-clarity, risk) whose recent tickets were escalated by their executor or held
-at acceptance often enough gets its next ticket one tier higher. Off (the
-default) is shadow mode, as above. --learn-low-rate (0, 1] is the share that
-triggers it (default 0.3), --learn-window-days [1, 365] how far back it looks
-(default 30); a class needs at least 5 tickets. See the numbers with:
-multica workspace routing learning --output json
-
---strongest-gate on|off is 最强档门槛 (DENE-1834): the strongest tier takes a
-ticket only when its seat is not tagged 紧张 and no strong or medium seat can
-take the work; the assignment comment then says 为什么非她不可. On by default;
-a person's tier label and 允许上调一档 are not gated.
-
---judged-review on|off is 按判断配验收. It is kept so old configs still read:
-since DENE-1677 the rule table (multica workspace routing rules) decides
-whether a ticket needs a check, so the switch has no effect.`,
+The remaining tuning flags are advanced compatibility settings. Continuation,
+load, learning, upshift and the legacy strongest gate do not override active
+reasoning selection. --judged-review is retained for old clients and has no
+effect: review follows the common purpose selector.`,
 	Args: cobra.NoArgs,
 	RunE: runWorkspaceRoutingSet,
 }
 
 func init() {
+	workspaceRoutingSetCmd.Flags().String("enabled", "", "Routing master switch: on or off")
+	workspaceRoutingSetCmd.Flags().String("policy-prompt-file", "", "Read the routing prompt from a UTF-8 file; an empty file restores the default reference prompt")
+	workspaceRoutingSetCmd.Flags().String("consult-per-issue", "", "Consult limit per issue, 1..20 (default 3)")
+	workspaceRoutingSetCmd.Flags().String("decision-mode", "", "legacy, shadow (compare without changing dispatch), or active (reasoning model chooses); run routing shadow first")
+
+	workspaceRoutingSetCmd.Flags().String("output", "json", "Output format: json")
+
 	workspaceRoutingGetCmd.Flags().String("output", "json", "Output format: json")
 	workspaceRoutingSetCmd.Flags().String("source", "", "Analysis source: api_gateway or runtime_subscription")
 	workspaceRoutingSetCmd.Flags().String("runtime", "", "Runtime ID for runtime_subscription")
@@ -70,7 +66,7 @@ func init() {
 	workspaceRoutingSetCmd.Flags().String("usage-priority", "", "用量优先 switch: on (ample seats first) or off (stable name order)")
 	workspaceRoutingSetCmd.Flags().String("allow-upshift", "", "允许上调一档 switch: on (borrow an ample seat from the tier above) or off")
 	workspaceRoutingSetCmd.Flags().String("strongest-gate", "", "最强档门槛 switch: on (strongest tier only when quota is not tight and no strong/medium seat can take it) or off")
-	workspaceRoutingSetCmd.Flags().String("judged-review", "", "按判断配验收 switch (no effect since the rule table decides the check; kept for old configs)")
+	workspaceRoutingSetCmd.Flags().String("judged-review", "", "Legacy review switch (no effect; common selector decides review)")
 	workspaceRoutingSetCmd.Flags().String("confidence-threshold", "", "Confidence floor for the routing model (0, 1]")
 	workspaceRoutingSetCmd.Flags().String("stale-review-hours", "", "Hours before an inactive in-review ticket is checked (0, 8760]")
 	workspaceRoutingCmd.AddCommand(workspaceRoutingGetCmd, workspaceRoutingSetCmd)
@@ -127,7 +123,12 @@ func routingView(block map[string]any) map[string]any {
 	if value, ok := numberFromRoutingBlock(block, "stale_review_hours"); ok && value > 0 && value <= 24*365 {
 		staleReviewHours = value
 	}
+	raw, _ := json.Marshal(block)
+	var fallbackSettings routing.Settings
+	_ = json.Unmarshal(raw, &fallbackSettings)
 	return map[string]any{
+		"enabled": fallbackSettings.Enabled, "policy_prompt": fallbackSettings.EffectivePolicyPrompt(),
+		"decision_mode": fallbackSettings.EffectiveDecisionMode(), "consult_per_issue": fallbackSettings.ConsultLimit(),
 		"source": analysis["source"], "runtime_id": analysis["runtime_id"], "model": analysis["model"], "thinking_level": analysis["thinking_level"],
 		"prefer_continuation": continuation, "continuation_mode": switchMode(continuation),
 		"prefer_idle": idle, "load_mode": switchMode(idle),
@@ -240,6 +241,32 @@ func runWorkspaceRoutingSet(cmd *cobra.Command, _ []string) error {
 	if block == nil {
 		block = map[string]any{}
 	}
+	enabled, _ := cmd.Flags().GetString("enabled")
+	if enabled != "" {
+		if enabled != "on" && enabled != "off" {
+			return fmt.Errorf("--enabled must be on or off")
+		}
+		block["enabled"] = enabled == "on"
+	}
+	if path, _ := cmd.Flags().GetString("policy-prompt-file"); path != "" {
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		block["policy_prompt"] = strings.TrimSpace(string(raw))
+	}
+	consultLimit, _ := cmd.Flags().GetString("consult-per-issue")
+	if consultLimit != "" {
+		n, err := strconv.Atoi(consultLimit)
+		if err != nil || n < 1 || n > 20 {
+			return fmt.Errorf("--consult-per-issue must be an integer from 1 to 20")
+		}
+		block["consult_per_issue"] = n
+	}
+	decisionMode, _ := cmd.Flags().GetString("decision-mode")
+	if decisionMode != "" {
+		block["decision_mode"] = decisionMode
+	}
 	if continuation != "" {
 		block["prefer_continuation"] = continuation == "on"
 	}
@@ -285,6 +312,7 @@ func runWorkspaceRoutingSet(cmd *cobra.Command, _ []string) error {
 	}
 	if model != "" {
 		analysis["model"] = model
+		analysis["enabled"] = true
 	}
 	if thinking != "" {
 		analysis["thinking_level"] = thinking

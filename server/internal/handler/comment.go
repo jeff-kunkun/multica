@@ -29,6 +29,7 @@ import (
 )
 
 type CommentResponse struct {
+	RoutingWarning string  `json:"routing_warning,omitempty"`
 	ViaBotID       *string `json:"via_bot_id,omitempty"`
 	ViaBotName     *string `json:"via_bot_name,omitempty"`
 	ID             string  `json:"id"`
@@ -2148,7 +2149,12 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 	}
 	// A hold is routing's other "tiered too low" signal (DENE-1722). A ticket
 	// routing never tiered has no class and is left alone.
+	reviewRoutingWarning := ""
 	if comment.IssueID.Valid && blockwait.Verdict(comment.Content) == "hold" {
+		if err := h.applyReviewRejection(r.Context(), comment); err != nil {
+			reviewRoutingWarning = "验收打回已记录，但未能交棒：" + err.Error()
+			slog.Error("review rejection routing failed", "issue_id", uuidToString(comment.IssueID), "error", err)
+		}
 		if err := markUnderjudged(r.Context(), h.Queries, comment.WorkspaceID, comment.IssueID, routing.SignalHeld); err != nil {
 			slog.Warn("record review hold for routing failed", append(logger.RequestAttrs(r), "error", err, "comment_id", uuidToString(comment.ID))...)
 		}
@@ -2158,6 +2164,9 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 	groupedAtt := h.groupAttachments(r, []pgtype.UUID{comment.ID})
 	resp := commentToResponse(comment, nil, groupedAtt[uuidToString(comment.ID)])
 	resp.IssueRevision = created.IssueRevision
+	if reviewRoutingWarning != "" {
+		resp.RoutingWarning = reviewRoutingWarning
+	}
 	slog.Info("comment created", append(logger.RequestAttrs(r), "comment_id", uuidToString(comment.ID), "issue_id", issueID)...)
 	h.publishWithSource(r.Context(), protocol.EventCommentCreated, uuidToString(issue.WorkspaceID), authorType, authorID, map[string]any{
 		"comment":             resp,

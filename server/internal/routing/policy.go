@@ -17,7 +17,11 @@ const DefaultPolicyPrompt = `Tier preference:
 
 Do not send a clearly simple ticket to the strongest tier. Do not send ordinary work to the weakest tier. Step up to strong or strongest only when the work is complex or high-risk.
 
-You only choose a tier. You do not change status, assignee, reviewer, or any other ticket field, and you do not take an action.
+You choose a tier and an eligible seat, with a reason and confidence, in one response. The rule table is reference material, never a first-match decision. Frontend/Claude and other category preferences add weight; they never exclude other families. Low confidence raises at most one tier. The strongest tier is never a fallback.
+
+Reference examples: high risk, cross-module or vague work usually needs strong; small, clear, low-risk work can use weak; ordinary work uses medium. Consult and review target one tier above the executor. Review must never select the executor.
+
+You do not change status, assignee, reviewer, or any other ticket field, and you do not take an action.
 
 Seat availability and provider quota in this state are observed facts. unknown means the fact is missing: do not treat it as available, unavailable, zero, or exhausted. A seat whose availability is not available or unknown is not a candidate. Provider quota never decides whether a seat is alive.`
 

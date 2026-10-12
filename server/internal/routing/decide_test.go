@@ -440,8 +440,8 @@ func TestRuleTableLadder(t *testing.T) {
 		want     string
 		reviewer ReviewerKind
 	}{
-		{Facts{Scope: ScopeSmall, Clarity: ClarityClear, Risk: RiskLow}, "weak", ReviewerNone},
-		{Facts{Scope: ScopeModule, Clarity: ClarityClear, Risk: RiskMedium}, "medium", ReviewerNone},
+		{Facts{Scope: ScopeSmall, Clarity: ClarityClear, Risk: RiskLow}, "weak", ReviewerSeat},
+		{Facts{Scope: ScopeModule, Clarity: ClarityClear, Risk: RiskMedium}, "medium", ReviewerSeat},
 		{Facts{Scope: ScopeCrossModule, Clarity: ClarityClear, Risk: RiskLow}, "strong", ReviewerSeat},
 		{Facts{Scope: ScopeSmall, Clarity: ClarityVague, Risk: RiskLow}, "strong", ReviewerSeat},
 		{Facts{Scope: ScopeSmall, Clarity: ClarityClear, Risk: RiskHigh}, "strong", ReviewerSeat},

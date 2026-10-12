@@ -34,7 +34,7 @@ func assignmentBody(store *fakeStore) string {
 }
 
 func TestStrongestYieldsToAStrongSeat(t *testing.T) {
-	store := strongestStore(UsageNormal)
+	store := strongestStore(UsageAmple)
 	out, err := newRouter(store, &fakeJudge{verdict: strongestVerdict()}).Route(context.Background(), "ws", "issue-1")
 	if err != nil || out.ExecutorWritten == nil || out.ExecutorWritten.ID != "goku" {
 		t.Fatalf("out = %+v err = %v, want the strong seat", out.ExecutorWritten, err)
@@ -67,7 +67,7 @@ func TestStrongestStaysWhenMiddleRungsHaveNobody(t *testing.T) {
 		}
 	}
 	// No seat on a middle rung at all is said as such.
-	store2 := strongestStore(UsageNormal)
+	store2 := strongestStore(UsageAmple)
 	delete(store2.roster, "孙悟空")
 	delete(store2.roster, "克林")
 	out2, _ := newRouter(store2, &fakeJudge{verdict: strongestVerdict()}).Route(context.Background(), "ws", "issue-1")
@@ -76,38 +76,27 @@ func TestStrongestStaysWhenMiddleRungsHaveNobody(t *testing.T) {
 	}
 }
 
-func TestStrongestTightYieldsEvenToTheWeakRung(t *testing.T) {
+func TestStrongestTightCannotSkipToWeakOrForceDispatch(t *testing.T) {
 	store := strongestStore(UsageTight)
-	store.facts = RoutingFacts{Seats: map[string]SeatSnapshot{
-		"goku":    {AgentID: "goku", Availability: AvailabilityDead},
-		"krillin": {AgentID: "krillin", Availability: AvailabilityDead},
-	}}
+	delete(store.roster, "孙悟空")
+	delete(store.roster, "克林")
 	out, err := newRouter(store, &fakeJudge{verdict: strongestVerdict()}).Route(context.Background(), "ws", "issue-1")
-	if err != nil || out.ExecutorWritten == nil || out.ExecutorWritten.ID != "raditz" {
-		t.Fatalf("out = %+v err = %v, want the weak seat", out.ExecutorWritten, err)
+	if err != nil || out.ExecutorWritten != nil || out.Action != ActionSkipped {
+		t.Fatalf("%+v %v", out, err)
 	}
-	if !strings.Contains(assignmentBody(store), "布尔玛 额度紧张，强档 孙悟空 离线，中档 克林 离线，不派最强档，改派弱档") {
-		t.Fatalf("comment:\n%s", assignmentBody(store))
-	}
-	// Alone on the ladder she still takes it, and the comment says so.
-	store2 := strongestStore(UsageTight)
-	for _, name := range []string{"孙悟空", "克林", "拉蒂兹"} {
-		delete(store2.roster, name)
-	}
-	out2, _ := newRouter(store2, &fakeJudge{verdict: strongestVerdict()}).Route(context.Background(), "ws", "issue-1")
-	if out2.ExecutorWritten == nil || out2.ExecutorWritten.ID != "bulma" || !strings.Contains(out2.StrongestGate.Why, "只能派她") {
-		t.Fatalf("out = %+v gate = %+v", out2.ExecutorWritten, out2.StrongestGate)
+	if !strings.Contains(assignmentBody(store), "最强档不作兜底") {
+		t.Fatal(assignmentBody(store))
 	}
 }
 
 func TestStrongestGateRespectsLabelAndSwitch(t *testing.T) {
-	store := strongestStore(UsageNormal)
+	store := strongestStore(UsageAmple)
 	store.issue.Labels = []string{"最强"}
 	out, err := newRouter(store, &fakeJudge{verdict: confidentVerdict()}).Route(context.Background(), "ws", "issue-1")
 	if err != nil || out.ExecutorWritten == nil || out.ExecutorWritten.ID != "bulma" || out.StrongestGate.Checked {
 		t.Fatalf("labelled: out = %+v gate = %+v err = %v", out.ExecutorWritten, out.StrongestGate, err)
 	}
-	store2 := strongestStore(UsageNormal)
+	store2 := strongestStore(UsageAmple)
 	store2.settings.StrongestGate = boolPtr(false)
 	out2, _ := newRouter(store2, &fakeJudge{verdict: strongestVerdict()}).Route(context.Background(), "ws", "issue-1")
 	if out2.ExecutorWritten == nil || out2.ExecutorWritten.ID != "bulma" || out2.StrongestGate.Checked {
@@ -118,7 +107,7 @@ func TestStrongestGateRespectsLabelAndSwitch(t *testing.T) {
 func TestPickSeatAppliesStrongestGate(t *testing.T) {
 	// A chat has no creator facts: the analysis role answers, and the table
 	// lands on strong so the judge's strongest is an accepted raise.
-	store := &cachingStore{fakeStore: strongestStore(UsageNormal)}
+	store := &cachingStore{fakeStore: strongestStore(UsageAmple)}
 	store.settings = analysisAndJudge()
 	r := newRouter(store, &fakeJudge{verdict: strongestVerdict()})
 	r.Analyst = &fakeAnalyst{record: AnalysisRecord{Facts: strongFacts, Source: FactsFromAnalysis}}

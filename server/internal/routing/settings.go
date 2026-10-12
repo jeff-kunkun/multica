@@ -68,6 +68,11 @@ const DefaultStaleReviewHours = 24
 // section writes exactly these names, and changing one is a breaking change
 // for any workspace already configured.
 type Settings struct {
+	ConsultPerIssue *int `json:"consult_per_issue,omitempty"`
+
+	// Shadow is the rollout default: compare without changing the executor.
+	DecisionMode string `json:"decision_mode,omitempty"`
+
 	Enabled bool `json:"enabled"`
 	// Model is a model identifier passed through to the server-internal LLM
 	// layer. Empty while the switch is on is the "incomplete" state: somebody
@@ -227,6 +232,9 @@ func (s Settings) AnalysisOn() bool { return s.Analysis != nil && s.Analysis.Ena
 // the analysis role on, which only a writer that knows about roles can do,
 // and such a writer states the judge switch explicitly anyway.
 func (s Settings) JudgeOn() bool {
+	if s.EffectiveDecisionMode() != "legacy" {
+		return false
+	}
 	if s.JudgeEnabled != nil {
 		return *s.JudgeEnabled
 	}
@@ -405,4 +413,13 @@ func (s Settings) StaleAfter() time.Duration {
 // StrongestGateOn reports whether 「最强档门槛」 applies; a missing key is on.
 func (s Settings) StrongestGateOn() bool {
 	return s.StrongestGate == nil || *s.StrongestGate
+}
+
+// ReviewReturns is an internal default: one correction, then escalate.
+func (s Settings) ReviewReturns() int { return 1 }
+func (s Settings) ConsultLimit() int {
+	if s.ConsultPerIssue != nil && *s.ConsultPerIssue > 0 && *s.ConsultPerIssue <= 20 {
+		return *s.ConsultPerIssue
+	}
+	return 3
 }
