@@ -767,6 +767,26 @@ describe("ChatInput project context", () => {
     await waitFor(() => expect(screen.getByText("Enter = Send")).toBeInTheDocument());
   });
 
+  it("keeps a confirmed replace when the reply ends while the confirm is open", async () => {
+    const onSend = vi.fn<ChatInputOnSend>(async () => true);
+    const running = { isRunning: true, allowSubmitWhileRunning: true, steerSupported: true, queuedCount: 1, onSend };
+    const { rerender } = renderInput(running);
+
+    fireEvent.change(screen.getByTestId("editor"), {
+      target: { value: "do this instead" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Send mode" }));
+    const menu = await screen.findByRole("menu");
+    fireEvent.click(within(menu).getByRole("menuitemradio", { name: /^Replace/ }));
+    const dialog = await screen.findByRole("alertdialog");
+
+    rerender(element({ ...running, isRunning: false }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "Replace" }));
+
+    await waitFor(() => expect(onSend).toHaveBeenCalledTimes(1));
+    expect(onSend.mock.calls[0]![4]).toBe("replace");
+  });
+
   it("keeps the draft when a replace is declined", async () => {
     const onSend = vi.fn<ChatInputOnSend>(async () => true);
     renderInput({ isRunning: true, allowSubmitWhileRunning: true, onSend });

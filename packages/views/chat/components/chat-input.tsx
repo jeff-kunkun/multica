@@ -590,7 +590,11 @@ export function ChatInput({
         });
         return false;
       }
-      if (sendModeActive && sendModeRef.current === "replace" && !(await confirmReplace())) {
+      // The mode is fixed when the send starts: the reply can end while the
+      // replace confirm is open, which clears the chosen mode, and a confirmed
+      // replace must not go out as a plain send.
+      const modeAtSubmit = sendModeActive ? sendModeRef.current : undefined;
+      if (modeAtSubmit === "replace" && !(await confirmReplace())) {
         return false;
       }
       // Only send attachment IDs for uploads still present in the content.
@@ -657,7 +661,7 @@ export function ChatInput({
         uniqueActiveIds.length > 0 ? uniqueActiveIds : undefined,
         commitInput,
         draftAttachments.filter((attachment) => uniqueActiveIds.includes(attachment.id)),
-        sendModeActive ? sendModeRef.current : undefined,
+        modeAtSubmit,
       );
       // Owner rejected the send (or threw, which useComposerSubmit also treats
       // as a rejection): the draft was never committed, so it stays put for
@@ -665,7 +669,7 @@ export function ChatInput({
       if (accepted === false) return false;
       if (!committed) commitInput();
       // Replace is one-shot: the next message goes back to the default mode.
-      if (sendModeActive && sendModeRef.current === "replace") setChosenMode(null);
+      if (modeAtSubmit === "replace") setChosenMode(null);
       return true;
     },
   });

@@ -129,7 +129,9 @@ export function ChatComposer({
       // throws, MessageComposer's catch restores text + chips.
       const sendMode = modeWasChosenRef.current ? mode : undefined;
       // Replace stops the reply and cancels the queue, so it is confirmed
-      // first; declining throws so the draft comes back untouched.
+      // first; declining throws so the draft comes back untouched. `sendMode`
+      // is fixed above, so a reply ending while the alert is open does not
+      // turn a confirmed replace into a plain send.
       if (sendMode === "replace" && !(await confirmReplace(t, queuedCount))) {
         throw new Error("replace declined");
       }
