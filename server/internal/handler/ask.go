@@ -449,6 +449,17 @@ func (h *Handler) answerAskCore(ctx context.Context, in askAnswer) (map[string]s
 	if in.Bot != nil && recipient.Valid && recipient != in.Answerer {
 		return nil, &askError{403, "这张提问不是问这位 Bot 的主人的"}
 	}
+	// The owner's go-ahead for a dangerous Bot action is theirs alone: not a
+	// Bot's receipt, not an agent run, not another member. This is what makes
+	// "the owner approved" something the server can stand behind.
+	if kind == service.OwnerConfirmationKind {
+		if !ownerAnsweredPersonally(ctx, in) {
+			return nil, &askError{403, "这张卡只有主人本人能答：请本人在 Multica 里点这张提问卡，或用 multica ask answer；Bot 和智能体不能代答"}
+		}
+		if !recipient.Valid || recipient != in.Answerer {
+			return nil, &askError{403, "这张卡是问另一个人的，只有对方本人能答"}
+		}
+	}
 	// A card asked in a chat is that chat's owner's to answer: the answer is
 	// written back into their chat.
 	if chatID.Valid && recipient.Valid && recipient != in.Answerer {
@@ -502,6 +513,8 @@ func (h *Handler) answerAskCore(ctx context.Context, in askAnswer) (map[string]s
 	// `multica ask answer`, or through their Bot.
 	var err error
 	switch {
+	case kind == service.OwnerConfirmationKind:
+		err = h.decideOwnerConfirmation(ctx, in, answers, closeAsk)
 	case chatID.Valid:
 		err = h.resumeChatAsker(ctx, in, chatID, questions, answers, closeAsk)
 	case kind != "" || in.Bot != nil:
@@ -512,12 +525,15 @@ func (h *Handler) answerAskCore(ctx context.Context, in askAnswer) (map[string]s
 	if errors.Is(err, errAskTaken) {
 		return nil, &askError{409, "ask is already answered or not found"}
 	}
+	if errors.Is(err, errConfirmationGone) {
+		return nil, &askError{410, "这个点头请求已经过期或已有结论，这次回答没有生效；需要的话让 Bot 重新发起"}
+	}
 	if err != nil {
 		slog.Warn("ask: answer not carried back", "error", err, "ask_id", uuidToString(in.AskID))
 		return nil, &askError{500, "回答没能送回提问的人，提问卡还开着，请再答一次：" + err.Error()}
 	}
 	// Inbox delivery is the durable record for the asker.
-	if mode == "needs_you" && in.Answerer.Valid && !chatID.Valid {
+	if mode == "needs_you" && in.Answerer.Valid && !chatID.Valid && kind != service.OwnerConfirmationKind {
 		recipientType := "agent"
 		if askerType == "member" {
 			recipientType = "member"

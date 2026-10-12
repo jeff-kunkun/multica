@@ -639,7 +639,7 @@ const listActivityBindingsForChat = `-- name: ListActivityBindingsForChat :many
 SELECT b.id, b.workspace_id, b.user_id, b.bot_id, b.mode, b.resend_after_seconds, b.escalate_after_seconds, b.created_at, b.updated_at, b.verified_at, b.revoked_at, b.broken_notified_at, b.activity_scope FROM member_bot_binding b
 JOIN chat_session cs ON cs.id = $2 AND cs.workspace_id = b.workspace_id AND cs.creator_id = b.user_id
 WHERE b.workspace_id = $1 AND b.revoked_at IS NULL AND b.verified_at IS NOT NULL
-  AND 'owned' = ANY(b.activity_scope)
+  AND ('owned' = ANY(b.activity_scope) OR 'owner_visible_all' = ANY(b.activity_scope))
 `
 
 type ListActivityBindingsForChatParams struct {
@@ -647,7 +647,7 @@ type ListActivityBindingsForChatParams struct {
 	ID          pgtype.UUID `json:"id"`
 }
 
-// A chat is the opener's own: only 'owned' reaches it.
+// A chat is the opener's own: only 'owned' (or the all-scope) reaches it.
 func (q *Queries) ListActivityBindingsForChat(ctx context.Context, arg ListActivityBindingsForChatParams) ([]MemberBotBinding, error) {
 	rows, err := q.db.Query(ctx, listActivityBindingsForChat, arg.WorkspaceID, arg.ID)
 	if err != nil {
@@ -688,7 +688,8 @@ JOIN issue i ON i.id = $2 AND i.workspace_id = b.workspace_id
 WHERE b.workspace_id = $1 AND b.revoked_at IS NULL AND b.verified_at IS NOT NULL
   AND cardinality(b.activity_scope) > 0
   AND (
-    ('owned' = ANY(b.activity_scope) AND (
+    'owner_visible_all' = ANY(b.activity_scope)
+    OR ('owned' = ANY(b.activity_scope) AND (
         (i.creator_type = 'member' AND i.creator_id = b.user_id)
         OR (i.assignee_type = 'member' AND i.assignee_id = b.user_id)
         OR (i.assignee_type = 'squad' AND EXISTS (
@@ -711,7 +712,9 @@ type ListActivityBindingsForIssueParams struct {
 // Bindings whose stream covers this ticket: verified, scope on, and the person
 // either owns it (created it, is assigned, leads the squad it is assigned to,
 // or opened the chat that made it) or follows it (an active subscription,
-// which includes everyone @-ed or delegated for).
+// which includes everyone @-ed or delegated for), or asked for everything they
+// can see (owner_visible_all: the send-time gate then checks the ticket is
+// really visible to them).
 func (q *Queries) ListActivityBindingsForIssue(ctx context.Context, arg ListActivityBindingsForIssueParams) ([]MemberBotBinding, error) {
 	rows, err := q.db.Query(ctx, listActivityBindingsForIssue, arg.WorkspaceID, arg.ID)
 	if err != nil {
@@ -1170,6 +1173,48 @@ func (q *Queries) ListOpenHumanNeededForBinding(ctx context.Context, bindingID p
 			&i.LastNudgeAt,
 			&i.ExpiresAt,
 			&i.Activity,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listWorkspaceActivityBindings = `-- name: ListWorkspaceActivityBindings :many
+SELECT id, workspace_id, user_id, bot_id, mode, resend_after_seconds, escalate_after_seconds, created_at, updated_at, verified_at, revoked_at, broken_notified_at, activity_scope FROM member_bot_binding
+WHERE workspace_id = $1 AND revoked_at IS NULL AND verified_at IS NOT NULL
+  AND 'owner_visible_all' = ANY(activity_scope)
+`
+
+// Bindings that asked for the whole workspace (DENE-1936). Who may see what is
+// decided per event, by role, when it is queued and again when it is sent.
+func (q *Queries) ListWorkspaceActivityBindings(ctx context.Context, workspaceID pgtype.UUID) ([]MemberBotBinding, error) {
+	rows, err := q.db.Query(ctx, listWorkspaceActivityBindings, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []MemberBotBinding{}
+	for rows.Next() {
+		var i MemberBotBinding
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.UserID,
+			&i.BotID,
+			&i.Mode,
+			&i.ResendAfterSeconds,
+			&i.EscalateAfterSeconds,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.VerifiedAt,
+			&i.RevokedAt,
+			&i.BrokenNotifiedAt,
+			&i.ActivityScope,
 		); err != nil {
 			return nil, err
 		}
