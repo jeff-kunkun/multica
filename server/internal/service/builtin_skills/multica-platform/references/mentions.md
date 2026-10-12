@@ -357,7 +357,8 @@ multica chat ask-human --question "..." --option "..."   # in a chat; asks the c
 
 The server writes the structured comment, blocks the ticket on that person and
 pushes a `human_needed` event to their Bot when they have one (inbox and @
-otherwise). Their answer — in the app or through the Bot — wakes you and clears
+otherwise). With two or more options the question is also a card (`ask_id`).
+Each @ added to a description is its own ask: the same edit never pushes twice,
+removing the @ and adding it back pushes again with the line that carries it. Their answer — in the app or through the Bot — wakes you and clears
 the block. As a backstop, an agent's @ of a person with a Bot is also pushed to
 that Bot, but it carries no question or options: do not rely on it.
-

@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -394,6 +395,413 @@ func TestAskHumanForBoundPersonGoesToTheBotAndAnswerUnblocks(t *testing.T) {
 	dbfx.QueryRow(t, `SELECT status FROM human_needed_event WHERE event_id=$1`, eventID).Scan(&status)
 	if status == "queued" || status == "sent" || status == "woken" || status == "relayed" {
 		t.Fatalf("event still open after the answer: %s", status)
+	}
+	_ = f
+}
+
+// agentRequest is a request the way a running agent sends it: the person's
+// credentials plus the agent and task headers the CLI adds.
+func agentRequest(method, path string, body any, agentID, taskID string) *http.Request {
+	req := newRequest(method, path, body)
+	req.Header.Set("X-Agent-ID", agentID)
+	req.Header.Set("X-Task-ID", taskID)
+	return req
+}
+
+// openRuns counts the runs an agent has waiting or going on a ticket.
+func openRuns(t *testing.T, issueID, agentID string) int {
+	t.Helper()
+	return summonCount(t, `SELECT count(*) FROM agent_task_queue WHERE issue_id=$1 AND agent_id=$2 AND status IN ('queued','dispatched','running')`, issueID, agentID)
+}
+
+// deliver pushes the next queued event to the Bot and records the Bot's two
+// receipts, as a live Bot would.
+func (f *humanNeededFixture) deliver(t *testing.T, eventID string) {
+	t.Helper()
+	if worked, err := f.worker.ProcessNext(context.Background()); err != nil || !worked {
+		t.Fatalf("push %v %v", worked, err)
+	}
+	for _, step := range []struct {
+		path string
+		body map[string]any
+	}{
+		{"woken", map[string]any{}},
+		{"relayed", map[string]any{"channel": "telegram", "message_ref": "m1"}},
+	} {
+		if code, data := f.call(t, "POST", "/bots/"+uuidToString(f.bot.ID)+"/wake/events/"+eventID+"/"+step.path, step.body); code != 200 {
+			t.Fatalf("%s %d %s", step.path, code, data)
+		}
+	}
+}
+
+func decodeAskHuman(t *testing.T, w *httptest.ResponseRecorder) AskHumanResponse {
+	t.Helper()
+	if w.Code != http.StatusOK {
+		t.Fatalf("ask-human %d: %s", w.Code, w.Body.String())
+	}
+	var resp AskHumanResponse
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode ask-human: %v", err)
+	}
+	return resp
+}
+
+// A running agent asks a person who has a Bot, with choices. The question is a
+// card; the Bot pushes it, the person answers there, and the Bot's `answered`
+// fills the card, lifts the block and queues exactly one run for the agent —
+// however many times the receipt is repeated.
+func TestAgentAsksBoundPersonCardAnsweredByBotWakesAgentOnce(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	issue := createIssueHTTP(t, "agent asks a bound person", "in_progress")
+	agentID := handlerTestAgentID(t)
+	setIssueAssigneeDirect(t, issue.ID, "agent", agentID)
+	taskID := insertIssueTaskWithStatus(t, agentID, issue.ID, "running")
+	f := newHumanNeededFixture(t, true)
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM inbox_item WHERE issue_id = $1`, issue.ID)
+		testPool.Exec(context.Background(), `DELETE FROM issue_summon WHERE issue_id = $1`, issue.ID)
+		testPool.Exec(context.Background(), `DELETE FROM agent_ask WHERE issue_id = $1`, issue.ID)
+	})
+
+	w := httptest.NewRecorder()
+	testHandler.AskHumanIssue(w, withURLParam(agentRequest("POST", "/api/issues/"+issue.ID+"/ask-human", map[string]any{
+		"to": testUserID, "question": "Ship it?",
+		"options": []map[string]string{{"id": "yes", "label": "Yes"}, {"id": "no", "label": "No"}},
+	}, agentID, taskID), "id", issue.ID))
+	resp := decodeAskHuman(t, w)
+	if !resp.ViaBot || !resp.Blocked || resp.AskID == "" {
+		t.Fatalf("ask: %+v", resp)
+	}
+	var eventID, eventAsk string
+	if err := testPool.QueryRow(context.Background(), `SELECT event_id::text, ask_id::text FROM human_needed_event WHERE issue_id=$1 AND event_type='human_needed'`, issue.ID).Scan(&eventID, &eventAsk); err != nil || eventAsk != resp.AskID {
+		t.Fatalf("event %q ask %q (want %q): %v", eventID, eventAsk, resp.AskID, err)
+	}
+	f.deliver(t, eventID)
+	// The pushed payload carries the card the Bot fills in.
+	var payload struct {
+		HumanNeeded struct {
+			Ask struct {
+				ID        string `json:"id"`
+				Questions []struct {
+					Options []struct {
+						ID string `json:"id"`
+					} `json:"options"`
+				} `json:"questions"`
+			} `json:"ask"`
+		} `json:"human_needed"`
+	}
+	body, _ := f.lastBody.Load().([]byte)
+	if err := json.Unmarshal(body, &payload); err != nil || payload.HumanNeeded.Ask.ID != resp.AskID || len(payload.HumanNeeded.Ask.Questions) != 1 {
+		t.Fatalf("payload does not carry the card: %v %s", err, body)
+	}
+
+	// The agent finished its turn after asking; the answer must start the next one.
+	dbfx.Exec(t, `UPDATE agent_task_queue SET status='completed' WHERE id=$1`, taskID)
+	if got := openRuns(t, issue.ID, agentID); got != 0 {
+		t.Fatalf("runs before the answer = %d", got)
+	}
+	answer := func() (int, []byte) {
+		return f.call(t, "POST", "/bots/"+uuidToString(f.bot.ID)+"/wake/events/"+eventID+"/answered", map[string]any{"answers": map[string]string{"0": "yes"}})
+	}
+	if code, data := answer(); code != 200 {
+		t.Fatalf("answered %d %s", code, data)
+	}
+	var askStatus, askAnswers, eventStatus string
+	dbfx.QueryRow(t, `SELECT status, answers::text FROM agent_ask WHERE id=$1`, resp.AskID).Scan(&askStatus, &askAnswers)
+	dbfx.QueryRow(t, `SELECT status FROM human_needed_event WHERE event_id=$1`, eventID).Scan(&eventStatus)
+	if askStatus != "answered" || !strings.Contains(askAnswers, "yes") || eventStatus != "answered" {
+		t.Fatalf("card %s %s, event %s", askStatus, askAnswers, eventStatus)
+	}
+	if got := issueStatus(t, issue.ID); got != "in_progress" {
+		t.Fatalf("the answer did not lift the block: %s", got)
+	}
+	if got := openRuns(t, issue.ID, agentID); got != 1 {
+		t.Fatalf("runs after the answer = %d, want exactly 1", got)
+	}
+	var viaBot bool
+	dbfx.QueryRow(t, `SELECT via_bot_id IS NOT NULL FROM comment WHERE issue_id=$1 AND content LIKE '%Ship it?%' ORDER BY created_at DESC LIMIT 1`, issue.ID).Scan(&viaBot)
+	if !viaBot {
+		t.Fatal("the answer comment does not show the Bot carried it")
+	}
+	// A repeated receipt neither errors nor starts a second run.
+	if code, data := answer(); code != 200 {
+		t.Fatalf("repeated answered %d %s", code, data)
+	}
+	if got := openRuns(t, issue.ID, agentID); got != 1 {
+		t.Fatalf("runs after the repeat = %d, want still 1", got)
+	}
+}
+
+// A card someone else's Bot may not fill: the answerer must be the person asked.
+func TestBotCannotAnswerSomeoneElsesCard(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	issue := createIssueHTTP(t, "card for the peer", "in_progress")
+	peer := summonSecondMember(t)
+	f := newHumanNeededFixture(t, true)
+	card := dbfx.Insert(t, "agent_ask", testutil.Cols{
+		"workspace_id": testWorkspaceID, "issue_id": issue.ID, "asker_type": "member", "asker_id": testUserID,
+		"title": "For the peer", "mode": "needs_you", "recipient_id": peer,
+		"questions": `[{"text":"Ok?","options":[{"id":"a","label":"A"},{"id":"b","label":"B"}]}]`,
+	})
+	ev := f.route(t, issue.ID, "k-foreign-card", false)
+	dbfx.Exec(t, `UPDATE human_needed_event SET ask_id=$1 WHERE event_id=$2`, card, uuidToString(ev.Event.EventID))
+	code, _ := f.call(t, "POST", "/bots/"+uuidToString(f.bot.ID)+"/wake/events/"+uuidToString(ev.Event.EventID)+"/answered", map[string]any{"answers": map[string]string{"0": "a"}})
+	if code != http.StatusForbidden {
+		t.Fatalf("a Bot answered a card asked of someone else: %d", code)
+	}
+	var status string
+	dbfx.QueryRow(t, `SELECT status FROM agent_ask WHERE id=$1`, card).Scan(&status)
+	if status != "open" {
+		t.Fatalf("card status %s", status)
+	}
+}
+
+// The existing question card (`multica ask`, POST /api/asks) for a person with
+// a Bot goes through the Bot too: an event carrying the card, the in-app row
+// kept but read, and the Bot's answer fills the card and resumes the asker.
+func TestExistingAskCardForBoundPersonGoesToBotAndAnswerResumesAsker(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	issue := createIssueHTTP(t, "needs_you card for a bound person", "in_progress")
+	agentID := handlerTestAgentID(t)
+	setIssueAssigneeDirect(t, issue.ID, "agent", agentID)
+	taskID := insertIssueTaskWithStatus(t, agentID, issue.ID, "running")
+	f := newHumanNeededFixture(t, true)
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM inbox_item WHERE issue_id = $1`, issue.ID)
+		testPool.Exec(context.Background(), `DELETE FROM agent_ask WHERE issue_id = $1`, issue.ID)
+	})
+
+	w := httptest.NewRecorder()
+	testHandler.CreateAsk(w, agentRequest("POST", "/api/asks", map[string]any{
+		"title": "Which colour?", "issue_id": issue.ID, "mode": "needs_you",
+		"questions": []AskQuestion{{Text: "Colour", Options: []AskOption{{ID: "red", Label: "Red"}, {ID: "blue", Label: "Blue"}}}},
+	}, agentID, taskID))
+	if w.Code != http.StatusCreated {
+		t.Fatalf("create ask %d %s", w.Code, w.Body.String())
+	}
+	var card AskResponse
+	if err := json.NewDecoder(w.Body).Decode(&card); err != nil {
+		t.Fatal(err)
+	}
+	var eventID, askID string
+	if err := testPool.QueryRow(context.Background(), `SELECT event_id::text, ask_id::text FROM human_needed_event WHERE issue_id=$1 AND event_type='human_needed'`, issue.ID).Scan(&eventID, &askID); err != nil || askID != card.ID {
+		t.Fatalf("event %q ask %q (want %q): %v", eventID, askID, card.ID, err)
+	}
+	if got := summonCount(t, `SELECT count(*) FROM inbox_item WHERE issue_id=$1 AND recipient_id=$2 AND type='needs_you' AND NOT read`, issue.ID, testUserID); got != 0 {
+		t.Fatalf("the Bot path left %d unread in-app rows", got)
+	}
+	f.deliver(t, eventID)
+	dbfx.Exec(t, `UPDATE agent_task_queue SET status='completed' WHERE id=$1`, taskID)
+	if code, data := f.call(t, "POST", "/bots/"+uuidToString(f.bot.ID)+"/wake/events/"+eventID+"/answered", map[string]any{"answers": map[string]string{"0": "blue"}}); code != 200 {
+		t.Fatalf("answered %d %s", code, data)
+	}
+	var status, answers string
+	dbfx.QueryRow(t, `SELECT status, answers::text FROM agent_ask WHERE id=$1`, card.ID).Scan(&status, &answers)
+	if status != "answered" || !strings.Contains(answers, "blue") {
+		t.Fatalf("card %s %s", status, answers)
+	}
+	if got := openRuns(t, issue.ID, agentID); got != 1 {
+		t.Fatalf("the asker was not resumed exactly once: %d runs", got)
+	}
+}
+
+func chatAskRequest(t *testing.T, sessionID string, body any) *http.Request {
+	t.Helper()
+	req := newRequest("POST", "/api/chat/sessions/"+sessionID+"/ask-human", body)
+	member, err := testHandler.Queries.GetMemberByUserAndWorkspace(context.Background(), db.GetMemberByUserAndWorkspaceParams{
+		UserID: parseUUID(testUserID), WorkspaceID: parseUUID(testWorkspaceID),
+	})
+	if err != nil {
+		t.Fatalf("load member: %v", err)
+	}
+	req = req.WithContext(middleware.SetMemberContext(req.Context(), testWorkspaceID, member))
+	return withURLParam(req, "sessionId", sessionID)
+}
+
+func chatMessages(t *testing.T, sessionID, role string) []string {
+	t.Helper()
+	rows, err := testPool.Query(context.Background(), `SELECT content FROM chat_message WHERE chat_session_id=$1 AND role=$2 ORDER BY created_at`, sessionID, role)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var c string
+		if err := rows.Scan(&c); err != nil {
+			t.Fatal(err)
+		}
+		out = append(out, c)
+	}
+	return out
+}
+
+// Chat round trip with a Bot: the question lands in the chat, the Bot's answer
+// is written back as the person's message, and the asking agent gets one run.
+// Without a Bot (or with a broken one) the question is still in the chat, so
+// the person sees it where they are.
+func TestChatAskHumanRoundTripAndFallback(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	agentID, sessionID, _, _ := setupDirectChatSession(t, ctx, "ask-human chat")
+	ask := map[string]any{"question": "Which domain?", "options": []map[string]string{{"id": "a", "label": "a.example.com"}, {"id": "b", "label": "b.example.com"}}}
+	run := func() AskHumanResponse {
+		w := httptest.NewRecorder()
+		ask["urgent"] = false
+		testHandler.AskHumanChat(w, chatAskRequest(t, sessionID, ask))
+		return decodeAskHuman(t, w)
+	}
+	// Unbound: no Bot event, the question is a visible chat message.
+	resp := run()
+	if resp.ViaBot || resp.EventID != "" {
+		t.Fatalf("unbound chat ask: %+v", resp)
+	}
+	if msgs := chatMessages(t, sessionID, "assistant"); len(msgs) != 1 || !strings.Contains(msgs[0], "Which domain?") || !strings.Contains(msgs[0], "a.example.com") {
+		t.Fatalf("question not in the chat: %q", msgs)
+	}
+
+	// Bound and verified: routed to the Bot as well as written to the chat.
+	f := newHumanNeededFixture(t, true)
+	resp = run()
+	if !resp.ViaBot || resp.EventID == "" {
+		t.Fatalf("bound chat ask: %+v", resp)
+	}
+	if msgs := chatMessages(t, sessionID, "assistant"); len(msgs) != 2 {
+		t.Fatalf("chat has %d question messages, want 2", len(msgs))
+	}
+	f.deliver(t, resp.EventID)
+	var payload struct {
+		HumanNeeded struct {
+			ChatSessionID string `json:"chat_session_id"`
+		} `json:"human_needed"`
+	}
+	body, _ := f.lastBody.Load().([]byte)
+	_ = json.Unmarshal(body, &payload)
+
+	if code, data := f.call(t, "POST", "/bots/"+uuidToString(f.bot.ID)+"/wake/events/"+resp.EventID+"/answered", map[string]any{}); code != 400 {
+		t.Fatalf("a chat answer without text must be refused: %d %s", code, data)
+	}
+	answerBody := map[string]any{"answer": "b.example.com"}
+	if code, data := f.call(t, "POST", "/bots/"+uuidToString(f.bot.ID)+"/wake/events/"+resp.EventID+"/answered", answerBody); code != 200 {
+		t.Fatalf("answered %d %s", code, data)
+	}
+	if msgs := chatMessages(t, sessionID, "user"); len(msgs) != 1 || !strings.Contains(msgs[0], "b.example.com") {
+		t.Fatalf("the answer is not in the chat as the person's message: %q", msgs)
+	}
+	if got := summonCount(t, `SELECT count(*) FROM agent_task_queue WHERE chat_session_id=$1 AND agent_id=$2 AND status IN ('queued','dispatched','running')`, sessionID, agentID); got != 1 {
+		t.Fatalf("chat runs after the answer = %d, want 1", got)
+	}
+	// A repeated receipt writes nothing more.
+	if code, data := f.call(t, "POST", "/bots/"+uuidToString(f.bot.ID)+"/wake/events/"+resp.EventID+"/answered", answerBody); code != 200 {
+		t.Fatalf("repeated answered %d %s", code, data)
+	}
+	if msgs := chatMessages(t, sessionID, "user"); len(msgs) != 1 {
+		t.Fatalf("the repeat wrote the answer twice: %q", msgs)
+	}
+
+	// Broken channel: the Bot is stopped, so the next question is not routed
+	// but is still in the chat.
+	dbfx.Exec(t, `UPDATE personal_access_token SET revoked=true WHERE id=$1`, uuidToString(f.bot.ID))
+	resp = run()
+	if resp.ViaBot || resp.EventID != "" {
+		t.Fatalf("a stopped Bot was still routed: %+v", resp)
+	}
+	if msgs := chatMessages(t, sessionID, "assistant"); len(msgs) != 3 {
+		t.Fatalf("chat has %d question messages, want 3", len(msgs))
+	}
+}
+
+// The Bot channel goes bad: after three failed pushes the person gets one
+// notice and the call is back in the app; stopping the Bot afterwards must
+// still move every other open call, without a second notice.
+func TestBrokenChannelNoticesOnceAndFallsBackEverything(t *testing.T) {
+	ctx := context.Background()
+	issue := dbfx.Issue(t, "Broken channel", testutil.Cols{"visibility": "workspace"})
+	f := newHumanNeededFixture(t, true)
+	t.Cleanup(func() {
+		testPool.Exec(ctx, `DELETE FROM inbox_item WHERE recipient_id=$1 AND title='你的 Bot 暂时收不到消息'`, testUserID)
+	})
+	notices := func() int {
+		return summonCount(t, `SELECT count(*) FROM inbox_item WHERE recipient_id=$1 AND details->>'human_needed'='channel_broken'`, testUserID)
+	}
+	before := notices()
+
+	f.response.Store(500)
+	first := f.route(t, issue, "k-broken-1", false)
+	second := f.route(t, issue, "k-broken-2", false)
+	firstID := uuidToString(first.Event.EventID)
+	for attempt := 1; attempt <= 3; attempt++ {
+		dbfx.Exec(t, `UPDATE human_needed_event SET next_attempt_at=now() WHERE event_id=$1`, firstID)
+		dbfx.Exec(t, `UPDATE human_needed_event SET next_attempt_at=now() + interval '1 hour' WHERE event_id=$1`, uuidToString(second.Event.EventID))
+		if worked, err := f.worker.ProcessNext(ctx); err != nil || !worked {
+			t.Fatalf("attempt %d: %v %v", attempt, worked, err)
+		}
+	}
+	if got := notices() - before; got != 1 {
+		t.Fatalf("notices after three failures = %d, want 1", got)
+	}
+	var unread bool
+	dbfx.QueryRow(t, `SELECT NOT read FROM inbox_item WHERE id=$1`, uuidToString(first.Event.InboxItemID)).Scan(&unread)
+	if !unread {
+		t.Fatal("the failed call was not put back in the app")
+	}
+
+	// Now the Bot is stopped. The still-waiting second call must fall back,
+	// and the already-flagged channel must not notice a second time.
+	dbfx.Exec(t, `UPDATE personal_access_token SET revoked=true WHERE id=$1`, uuidToString(f.bot.ID))
+	f.worker.Sweep(ctx)
+	f.worker.Sweep(ctx)
+	if got := notices() - before; got != 1 {
+		t.Fatalf("notices after stopping the Bot = %d, want still 1", got)
+	}
+	var status string
+	dbfx.QueryRow(t, `SELECT status FROM human_needed_event WHERE event_id=$1`, uuidToString(second.Event.EventID)).Scan(&status)
+	if status != "cancelled" {
+		t.Fatalf("the waiting call was left on a dead Bot: %s", status)
+	}
+	dbfx.QueryRow(t, `SELECT NOT read FROM inbox_item WHERE id=$1`, uuidToString(second.Event.InboxItemID)).Scan(&unread)
+	if !unread {
+		t.Fatal("the waiting call was not put back in the app")
+	}
+}
+
+// A call whose in-app row was never made still reaches the person: the
+// fallback creates the row instead of returning early.
+func TestFallbackCreatesTheInAppRowWhenThereWasNone(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	agentID, sessionID, _, _ := setupDirectChatSession(t, ctx, "fallback row")
+	_ = agentID
+	f := newHumanNeededFixture(t, true)
+	res, err := service.RouteHumanNeeded(ctx, testHandler.Queries, service.HumanNeededInput{
+		WorkspaceID: parseUUID(testWorkspaceID), Target: parseUUID(testUserID), Kind: "chat_ask",
+		DedupeKey: "chat-fallback", ChatSessionID: parseUUID(sessionID), Question: "Which domain?",
+	})
+	if err != nil || !res.Routed || res.Event.InboxItemID.Valid {
+		t.Fatalf("route: %+v %v", res, err)
+	}
+	service.FallbackHumanNeededInApp(ctx, testHandler.Queries, testHandler.Bus, res.Event)
+	var inbox string
+	dbfx.QueryRow(t, `SELECT COALESCE(inbox_item_id::text,'') FROM human_needed_event WHERE event_id=$1`, uuidToString(res.Event.EventID)).Scan(&inbox)
+	if inbox == "" {
+		t.Fatal("the fallback left no in-app row")
+	}
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM inbox_item WHERE id=$1`, inbox) })
+	var unread bool
+	var body string
+	dbfx.QueryRow(t, `SELECT NOT read, COALESCE(body,'') FROM inbox_item WHERE id=$1`, inbox).Scan(&unread, &body)
+	if !unread || !strings.Contains(body, "Which domain?") {
+		t.Fatalf("fallback row unread=%v body=%q", unread, body)
 	}
 	_ = f
 }

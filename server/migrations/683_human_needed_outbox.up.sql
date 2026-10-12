@@ -49,6 +49,8 @@ CREATE TABLE human_needed_event (
     summon_id UUID,
     inbox_item_id UUID,
     source_comment_id UUID,
+    -- The question card (agent_ask) this call carries: the Bot's answer fills it.
+    ask_id UUID REFERENCES agent_ask(id) ON DELETE CASCADE,
     caller_type TEXT NOT NULL DEFAULT 'system',
     caller_id UUID,
     question TEXT NOT NULL DEFAULT '',
@@ -83,5 +85,14 @@ CREATE INDEX human_needed_event_ready
 CREATE INDEX human_needed_event_open
     ON human_needed_event (bot_id, sequence DESC)
     WHERE status IN ('queued', 'sending', 'sent', 'woken', 'relayed') AND event_type <> 'binding.verify';
+CREATE INDEX human_needed_event_ask ON human_needed_event (ask_id) WHERE ask_id IS NOT NULL;
+CREATE INDEX human_needed_event_chat ON human_needed_event (chat_session_id, target_user_id) WHERE chat_session_id IS NOT NULL;
 CREATE INDEX human_needed_event_summon ON human_needed_event (summon_id) WHERE summon_id IS NOT NULL;
 CREATE INDEX human_needed_event_parent ON human_needed_event (parent_event_id) WHERE parent_event_id IS NOT NULL;
+
+-- A question card can be addressed to one person (the Bot answers on their
+-- behalf) and can say what asked it: kind 'ask_human' / 'human_needed' cards
+-- resume the asker when answered, whoever answers.
+ALTER TABLE agent_ask
+    ADD COLUMN recipient_id UUID REFERENCES "user"(id) ON DELETE CASCADE,
+    ADD COLUMN kind TEXT NOT NULL DEFAULT '';

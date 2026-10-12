@@ -13,6 +13,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
+	"github.com/multica-ai/multica/server/pkg/dbid"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
@@ -55,6 +56,7 @@ type HumanNeededInput struct {
 	SummonID      pgtype.UUID
 	InboxItemID   pgtype.UUID
 	CommentID     pgtype.UUID
+	AskID         pgtype.UUID // the question card this call carries
 	CallerType    string
 	CallerID      pgtype.UUID
 	Question      string
@@ -134,6 +136,7 @@ func RouteHumanNeeded(ctx context.Context, q *db.Queries, in HumanNeededInput) (
 		SummonID:        in.SummonID,
 		InboxItemID:     in.InboxItemID,
 		SourceCommentID: in.CommentID,
+		AskID:           in.AskID,
 		CallerType:      callerType,
 		CallerID:        in.CallerID,
 		Question:        truncateRunesForHuman(strings.TrimSpace(in.Question), 1000),
@@ -221,26 +224,86 @@ func PublishInboxNew(bus *events.Bus, item db.InboxItem, issueStatus string) {
 }
 
 // FallbackHumanNeededInApp puts a call back in front of the person in the app
-// (DENE-1933): the Bot channel failed or the Bot did not relay in time. The
-// in-app row was kept silently; this makes it unread again.
+// (DENE-1933): the Bot channel failed or the Bot did not relay in time. A call
+// that kept an in-app row has it made unread again; one that had none (a chat
+// question) gets a row now, so the person is never left with nothing to see.
 func FallbackHumanNeededInApp(ctx context.Context, q *db.Queries, bus *events.Bus, ev db.HumanNeededEvent) {
-	if !ev.InboxItemID.Valid {
-		return
-	}
-	item, err := q.MarkInboxUnread(ctx, ev.InboxItemID)
-	if err != nil {
-		if !errors.Is(err, pgx.ErrNoRows) {
-			slog.Warn("human needed: in-app fallback failed", "error", err, "event_id", util.UUIDToString(ev.EventID))
-		}
-		return
-	}
 	status := ""
+	title := "要你决定"
 	if ev.IssueID.Valid {
 		if issue, getErr := q.GetIssue(ctx, ev.IssueID); getErr == nil {
 			status = issue.Status
+			title = issue.Title
+		}
+	} else if ev.ChatSessionID.Valid {
+		if chat, getErr := q.GetChatSession(ctx, ev.ChatSessionID); getErr == nil && chat.Title != "" {
+			title = chat.Title
 		}
 	}
+	if ev.InboxItemID.Valid {
+		item, err := q.MarkInboxUnread(ctx, ev.InboxItemID)
+		if err == nil {
+			PublishInboxNew(bus, item, status)
+			return
+		}
+		if !errors.Is(err, pgx.ErrNoRows) {
+			slog.Warn("human needed: in-app fallback failed", "error", err, "event_id", util.UUIDToString(ev.EventID))
+			return
+		}
+	}
+	details := map[string]string{"human_needed": "fallback"}
+	if ev.AskID.Valid {
+		details["ask_id"] = util.UUIDToString(ev.AskID)
+	}
+	if ev.ChatSessionID.Valid {
+		details["chat_session_id"] = util.UUIDToString(ev.ChatSessionID)
+	}
+	raw, _ := json.Marshal(details)
+	item, err := q.CreateInboxItem(ctx, db.CreateInboxItemParams{
+		ID:            dbid.NewV7(),
+		WorkspaceID:   ev.WorkspaceID,
+		RecipientType: "member",
+		RecipientID:   ev.TargetUserID,
+		Type:          InboxTypeNeedsYou,
+		Severity:      "action_required",
+		IssueID:       ev.IssueID,
+		Title:         title,
+		Body:          pgtype.Text{String: ev.Question, Valid: ev.Question != ""},
+		ActorType:     pgtype.Text{String: ev.CallerType, Valid: true},
+		ActorID:       ev.CallerID,
+		Details:       raw,
+	})
+	if err != nil {
+		slog.Warn("human needed: in-app fallback row failed", "error", err, "event_id", util.UUIDToString(ev.EventID))
+		return
+	}
+	if err := q.AttachHumanNeededInboxItem(ctx, db.AttachHumanNeededInboxItemParams{EventID: ev.EventID, InboxItemID: item.ID}); err != nil {
+		slog.Warn("human needed: remember fallback row failed", "error", err, "event_id", util.UUIDToString(ev.EventID))
+	}
 	PublishInboxNew(bus, item, status)
+}
+
+// NotifyHumanChannelBroken tells a person in the app that their Bot can no
+// longer take calls, once per outage: callers gate it on the binding's
+// healthy -> broken change.
+func NotifyHumanChannelBroken(ctx context.Context, q *db.Queries, bus *events.Bus, workspaceID, userID pgtype.UUID) {
+	item, err := q.CreateInboxItem(ctx, db.CreateInboxItemParams{
+		ID:            dbid.NewV7(),
+		WorkspaceID:   workspaceID,
+		RecipientType: "member",
+		RecipientID:   userID,
+		Type:          InboxTypeNeedsYou,
+		Severity:      "action_required",
+		Title:         "你的 Bot 暂时收不到消息",
+		Body:          pgtype.Text{String: "要你决定的事先放回站内提醒；到 设置 → 通知 看看 Bot 的连接，恢复后会自动改回 Bot。", Valid: true},
+		ActorType:     pgtype.Text{String: "system", Valid: true},
+		Details:       []byte(`{"human_needed":"channel_broken"}`),
+	})
+	if err != nil {
+		slog.Warn("human needed: channel broken notice failed", "error", err, "user_id", util.UUIDToString(userID))
+		return
+	}
+	PublishInboxNew(bus, item, "")
 }
 
 // HumanMentionKey is the dedupe key for an @-mention of a person in a comment
@@ -248,6 +311,13 @@ func FallbackHumanNeededInApp(ctx context.Context, q *db.Queries, bus *events.Bu
 // use it, so one @ is one push.
 func HumanMentionKey(source, target pgtype.UUID) string {
 	return "mention:" + util.UUIDToString(source) + ":" + util.UUIDToString(target)
+}
+
+// HumanDescriptionMentionKey is the key for an @ added to a description. The
+// version names the edit that added it, so the same edit never pushes twice
+// but removing the @ and adding it again later is a new ask.
+func HumanDescriptionMentionKey(issueID, target pgtype.UUID, version string) string {
+	return "mention:" + util.UUIDToString(issueID) + ":" + util.UUIDToString(target) + ":desc:" + version
 }
 
 // MentionQuestion is what a Bot is told when someone @s a person in a comment:

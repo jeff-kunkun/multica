@@ -258,9 +258,13 @@ multica bot wake human-needed <bot-id>                              # what you s
 
 `answered` posts the answer as a comment on the ticket as the person (your key
 acts as its owner), which is what wakes the asking agent and clears the block;
-`--comment-id` reuses a comment you already posted. Not woken in 3 minutes: the
+`--comment-id` reuses a comment you already posted. When the event carries an
+`ask` block (a question card, `ask_id` in `human-needed`), answer it with
+`--answers 0=<option-id>[,1=...]` instead: the server fills the card, comments
+as the person, and wakes the asker once — do not comment yourself. For a chat
+event (`chat_session_id`, no `issue_id`), `--answer` is written into the chat
+as the person's own message and wakes the agent that asked. Not woken in 3 minutes: the
 event is sent again. Woken but not `relayed` in 5 minutes: you get a
 `human_needed.escalation`, the call returns to the app as unread, workspace
 owners are reminded, and the nudge repeats every 30 minutes. Receipts for the
 same call are shared by the original and its escalations.
-

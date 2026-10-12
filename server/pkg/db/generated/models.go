@@ -113,6 +113,8 @@ type AgentAsk struct {
 	Status      string             `json:"status"`
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 	AnsweredAt  pgtype.Timestamptz `json:"answered_at"`
+	RecipientID pgtype.UUID        `json:"recipient_id"`
+	Kind        string             `json:"kind"`
 }
 
 type AgentBuilderDraft struct {
@@ -1220,6 +1222,7 @@ type HumanNeededEvent struct {
 	SummonID        pgtype.UUID        `json:"summon_id"`
 	InboxItemID     pgtype.UUID        `json:"inbox_item_id"`
 	SourceCommentID pgtype.UUID        `json:"source_comment_id"`
+	AskID           pgtype.UUID        `json:"ask_id"`
 	CallerType      string             `json:"caller_type"`
 	CallerID        pgtype.UUID        `json:"caller_id"`
 	Question        string             `json:"question"`

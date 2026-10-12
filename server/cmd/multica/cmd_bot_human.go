@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/url"
 	"os"
@@ -191,13 +192,19 @@ asking agent and clears the block. Then the event is closed as answered.
 
   --answer       the person's answer, in their words
   --comment-id   use a comment you already posted instead of posting --answer
+  --answers      for a question card (the event lists "ask"): question number
+                 to option id, e.g. 0=approve,1=later or {"0":"approve"}
 
-For a chat event the answer only closes the chase; reply in the chat itself.`,
+A question card is filled by --answers; the server then comments on the ticket
+as the person and wakes the asking agent once, so do not comment yourself.
+For a chat event --answer is written into the chat as the person, which
+wakes the agent that asked.`,
 		Args: exactArgs(2),
 		RunE: runBotHumanAnswered,
 	}
 	answered.Flags().String("answer", "", "The person's answer")
 	answered.Flags().String("comment-id", "", "Comment you already posted as the answer")
+	answered.Flags().String("answers", "", "Card answers: question number to option id (0=a,1=b or JSON)")
 	answered.Flags().String("output", "json", "Output format: json")
 
 	open := &cobra.Command{
@@ -250,8 +257,13 @@ func runBotHumanAnswered(cmd *cobra.Command, args []string) error {
 	}
 	answer, _ := cmd.Flags().GetString("answer")
 	commentID, _ := cmd.Flags().GetString("comment-id")
-	if strings.TrimSpace(answer) == "" && commentID == "" {
-		return fmt.Errorf("provide --answer (or --comment-id)")
+	answersFlag, _ := cmd.Flags().GetString("answers")
+	answers, err := parseCardAnswers(answersFlag)
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(answer) == "" && commentID == "" && len(answers) == 0 {
+		return fmt.Errorf("provide --answer, --answers (for a question card) or --comment-id")
 	}
 	client, wsID, ctx, cancel, err := botClient(cmd)
 	if err != nil {
@@ -259,16 +271,17 @@ func runBotHumanAnswered(cmd *cobra.Command, args []string) error {
 	}
 	defer cancel()
 	base := botsPath(wsID) + "/" + botID
-	if commentID == "" && strings.TrimSpace(answer) != "" {
+	if commentID == "" && len(answers) == 0 && strings.TrimSpace(answer) != "" {
 		// A ticket event needs the answer as a comment by the person; the Bot's
 		// key acts as its owner, so posting it here is what wakes the asker.
-		issueID, err := humanEventIssue(ctx, client, base, eventID)
+		// A card or chat event is answered by the server itself.
+		ref, err := humanEventRef(ctx, client, base, eventID)
 		if err != nil {
 			return err
 		}
-		if issueID != "" {
+		if ref.IssueID != "" && ref.AskID == "" {
 			var posted map[string]any
-			if err := client.PostJSON(ctx, "/api/issues/"+url.PathEscape(issueID)+"/comments", map[string]any{"content": answer}, &posted); err != nil {
+			if err := client.PostJSON(ctx, "/api/issues/"+url.PathEscape(ref.IssueID)+"/comments", map[string]any{"content": answer}, &posted); err != nil {
 				return fmt.Errorf("post the answer on the ticket: %w", err)
 			}
 			commentID = strVal(posted, "id")
@@ -278,6 +291,9 @@ func runBotHumanAnswered(cmd *cobra.Command, args []string) error {
 	if commentID != "" {
 		body["comment_id"] = commentID
 	}
+	if len(answers) > 0 {
+		body["answers"] = answers
+	}
 	var out map[string]any
 	if err := client.PostJSON(ctx, base+"/wake/events/"+eventID+"/answered", body, &out); err != nil {
 		return fmt.Errorf("bot wake answered: %w", err)
@@ -285,21 +301,49 @@ func runBotHumanAnswered(cmd *cobra.Command, args []string) error {
 	return cli.PrintJSON(cmd.OutOrStdout(), out)
 }
 
-// humanEventIssue finds the ticket a human_needed event is about ("" for a
-// chat event), by scanning the Bot's open list.
-func humanEventIssue(ctx context.Context, client *cli.APIClient, base, eventID string) (string, error) {
+// parseCardAnswers reads --answers: a JSON object, or "0=a,1=b" pairs.
+func parseCardAnswers(raw string) (map[string]string, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil, nil
+	}
+	out := map[string]string{}
+	if strings.HasPrefix(raw, "{") {
+		if err := json.Unmarshal([]byte(raw), &out); err != nil {
+			return nil, fmt.Errorf("--answers is not valid JSON: %w", err)
+		}
+		return out, nil
+	}
+	for _, pair := range strings.Split(raw, ",") {
+		k, v, ok := strings.Cut(strings.TrimSpace(pair), "=")
+		if !ok || strings.TrimSpace(k) == "" || strings.TrimSpace(v) == "" {
+			return nil, fmt.Errorf("--answers wants question=option pairs like 0=approve,1=later, got %q", pair)
+		}
+		out[strings.TrimSpace(k)] = strings.TrimSpace(v)
+	}
+	return out, nil
+}
+
+type humanEventRefs struct {
+	IssueID string
+	AskID   string
+}
+
+// humanEventRef finds the ticket and question card a human_needed event is
+// about (both empty for a chat event), by scanning the Bot's open list.
+func humanEventRef(ctx context.Context, client *cli.APIClient, base, eventID string) (humanEventRefs, error) {
 	var page struct {
 		Events []map[string]any `json:"events"`
 	}
 	if err := client.GetJSON(ctx, base+"/human-needed?status=sent,woken,relayed,queued&limit=200", &page); err != nil {
-		return "", fmt.Errorf("look up the event: %w", err)
+		return humanEventRefs{}, fmt.Errorf("look up the event: %w", err)
 	}
 	for _, e := range page.Events {
 		if strVal(e, "event_id") == eventID {
-			return strVal(e, "issue_id"), nil
+			return humanEventRefs{IssueID: strVal(e, "issue_id"), AskID: strVal(e, "ask_id")}, nil
 		}
 	}
-	return "", fmt.Errorf("event %s is not open for this Bot", eventID)
+	return humanEventRefs{}, fmt.Errorf("event %s is not open for this Bot", eventID)
 }
 
 func runBotHumanList(cmd *cobra.Command, args []string) error {
@@ -349,8 +393,10 @@ var issueAskHumanCmd = &cobra.Command{
 	Short: "Ask a person to decide: pushed to their Bot if they have one, blocks the issue until they answer",
 	Long: askHumanLong + `
 
-The issue is set to blocked with that person as the next owner. Their answer
-(in the app, or through their Bot) unblocks it and wakes the asking agent.`,
+The issue is set to blocked with that person as the next owner. With two or
+more --option the question is also a card (the output shows ask_id); answering
+the card, in the app or through their Bot, unblocks the issue and wakes you
+once. Without options it is a free-text question answered by a comment.`,
 	Example: `  multica issue ask-human DENE-12 --to owner --question "上线还是再等一天？" --option 现在上线 --option 明天上线
   multica issue ask-human DENE-12 --to 张三 --question "需要你批准这笔费用" --urgent --output json`,
 	Args: exactArgs(1),
@@ -362,8 +408,11 @@ var chatAskHumanCmd = &cobra.Command{
 	Short: "Ask the person you are chatting with to decide, through their Bot if they have one",
 	Long: askHumanLong + `
 
-In a chat the person asked is the chat's owner; --to is not needed. Without a
-Bot nothing extra is sent: they already see the chat.`,
+In a chat the person asked is the chat's owner; --to is not needed. The
+question is written into the chat as a message. With a Bot it is also pushed
+there, and the Bot's answer is written back into the chat as the person, which
+wakes you. Without a Bot, or when the Bot is unreachable, they see it in the
+chat and in their inbox.`,
 	Example: `  multica chat ask-human --question "用哪个域名？" --option a.example.com --option b.example.com`,
 	Args:    exactArgs(0),
 	RunE:    runChatAskHuman,
@@ -406,6 +455,9 @@ func printAskHuman(cmd *cobra.Command, out map[string]any) error {
 		return cli.PrintJSON(os.Stdout, out)
 	}
 	fmt.Printf("Asked: %v\nVia Bot: %v\n", out["recipient_name"], out["via_bot"])
+	if id := strVal(out, "ask_id"); id != "" {
+		fmt.Printf("Card: %s\n", id)
+	}
 	if lines, ok := out["result"].([]any); ok {
 		for _, l := range lines {
 			fmt.Printf("- %v\n", l)

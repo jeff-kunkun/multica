@@ -1591,6 +1591,14 @@ func (h *Handler) SendChatMessage(w http.ResponseWriter, r *http.Request) {
 		SenderUserID:  uuidToString(msg.SenderUserID),
 	})
 
+	// The person wrote in the chat: any question their Bot was still chasing
+	// for this chat (DENE-1933) is answered.
+	if actorType != "agent" {
+		if err := h.Queries.SettleHumanNeededByChat(r.Context(), db.SettleHumanNeededByChatParams{ChatSessionID: session.ID, TargetUserID: parseUUID(userID)}); err != nil {
+			slog.Warn("human needed: settle by chat failed", "error", err, "chat_session_id", resolvedSessionID)
+		}
+	}
+
 	// Naming waits for the agent's first reply: the chat:done recap
 	// (chat_recap.go) titles the chat from the opening plus the reply
 	// (DENE-1037). Until then the first-message title stands.

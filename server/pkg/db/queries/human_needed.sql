@@ -57,7 +57,9 @@ LEFT JOIN personal_access_token p ON p.id = b.bot_id AND p.workspace_id = b.work
 LEFT JOIN bot_wake w ON w.bot_id = b.bot_id
 WHERE b.revoked_at IS NULL AND b.verified_at IS NOT NULL;
 
--- name: SetMemberBotBindingBroken :exec
+-- name: SetMemberBotBindingBroken :execrows
+-- Rows affected = 1 only on the healthy -> broken change, so the person is
+-- told once per outage.
 UPDATE member_bot_binding SET broken_notified_at = now() WHERE id = $1 AND broken_notified_at IS NULL;
 
 -- name: ClearMemberBotBindingBroken :exec
@@ -70,12 +72,12 @@ UPDATE member_bot_binding SET broken_notified_at = NULL WHERE id = $1 AND broken
 -- the same @): it attaches the row so the in-app fallback can find it.
 INSERT INTO human_needed_event (
     workspace_id, bot_id, binding_id, target_user_id, event_type, parent_event_id,
-    kind, dedupe_key, issue_id, chat_session_id, summon_id, inbox_item_id, source_comment_id,
+    kind, dedupe_key, issue_id, chat_session_id, summon_id, inbox_item_id, source_comment_id, ask_id,
     caller_type, caller_id, question, options, urgency, deadline, expires_at
 ) VALUES (
     $1, $2, $3, $4, $5, sqlc.narg('parent_event_id'),
     $6, $7, sqlc.narg('issue_id'), sqlc.narg('chat_session_id'), sqlc.narg('summon_id'),
-    sqlc.narg('inbox_item_id'), sqlc.narg('source_comment_id'),
+    sqlc.narg('inbox_item_id'), sqlc.narg('source_comment_id'), sqlc.narg('ask_id'),
     $8, sqlc.narg('caller_id'), $9, $10, $11, sqlc.narg('deadline'),
     COALESCE(sqlc.narg('expires_at')::timestamptz, now() + interval '7 days')
 )
@@ -253,3 +255,24 @@ WHERE binding_id = $1 AND status = 'queued' AND attempts >= 3;
 
 -- name: ListWorkspaceOwnerIDs :many
 SELECT user_id FROM member WHERE workspace_id = $1 AND role = 'owner' ORDER BY created_at;
+
+-- name: AttachHumanNeededInboxItem :exec
+-- The in-app fallback for a call that had no inbox row (a chat question) makes
+-- one; remember it so a second fallback re-opens the same row.
+UPDATE human_needed_event SET inbox_item_id = $2
+WHERE event_id = $1 AND inbox_item_id IS NULL;
+
+-- name: SettleHumanNeededByAsk :exec
+-- The card was answered (in the app or through the Bot): the chase is over.
+UPDATE human_needed_event
+SET status = 'answered', answered_at = COALESCE(answered_at, now()),
+    woken_at = COALESCE(woken_at, now()), relayed_at = COALESCE(relayed_at, now())
+WHERE ask_id = $1 AND status IN ('queued', 'sending', 'sent', 'woken', 'relayed');
+
+-- name: SettleHumanNeededByChat :exec
+-- The person wrote in the chat the question was asked in: that is the answer.
+UPDATE human_needed_event
+SET status = 'answered', answered_at = now(),
+    woken_at = COALESCE(woken_at, now()), relayed_at = COALESCE(relayed_at, now())
+WHERE chat_session_id = $1 AND target_user_id = $2 AND event_type = 'human_needed'
+  AND status IN ('queued', 'sending', 'sent', 'woken', 'relayed');

@@ -72,6 +72,9 @@ type SummonInput struct {
 	Options  []HumanNeededOption
 	Urgent   bool
 	Deadline time.Time
+	// AskID is the question card (agent_ask) behind this call, when it has
+	// one: the Bot's answer fills the card, and the in-app row carries it.
+	AskID pgtype.UUID
 }
 
 // SummonResult reports what landed. Duplicate means an unanswered call to
@@ -248,6 +251,7 @@ func routeSummonToBot(ctx context.Context, q *db.Queries, in SummonInput, row db
 		SummonID:    row.ID,
 		InboxItemID: inboxID,
 		CommentID:   commentID,
+		AskID:       in.AskID,
 		CallerType:  row.CallerType,
 		CallerID:    row.CallerID,
 		Question:    firstNonEmpty(in.Question, row.Reason),

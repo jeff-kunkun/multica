@@ -29,3 +29,28 @@ server opens one `needs_you` ask on the issue with `review_stuck.retry` (换席�
 `review_stuck.member` (我来验) and `review_stuck.close` (直接关票). The answer is
 carried out by the server: retry looks for another acceptance seat, member
 makes the answerer the reviewer, close marks the issue done.
+
+### Cards and the person's Bot (DENE-1933)
+
+A person who connected a Bot gets their cards through it. A `needs_you` card
+for them, and every `multica issue ask-human` that carries two to six
+`--option`s (the output shows `ask_id`), becomes one `human_needed` event
+carrying the card: the push payload has an `ask` block with the questions and
+option ids, and `GET /api/asks/<ask-id>` returns the same card. The in-app row
+stays, read, as the record. The Bot's `answered` receipt fills the card:
+
+```sh
+multica bot wake answered <bot-id> <event-id> --answers 0=approve,1=later
+```
+
+`--answers` maps question numbers to option ids (or JSON `{"0":"approve"}`).
+Only the person the card was asked of can be answered for: another person's
+Bot is refused. Answering fills the card exactly like `multica ask answer`,
+leaves a comment on the ticket as the person marked "Bot X for Y", lifts the
+ask-human block and queues one run for the agent that asked; a repeated receipt
+changes nothing. Do not also post a comment yourself. Questions with fewer than
+two options are free-text: no card, the person answers with a ticket comment.
+In a chat, `multica chat ask-human` writes the question into the chat as a
+message (options as a numbered list); the Bot's `--answer` is written back as
+the person's own message, which queues the run, and the person typing in the
+chat settles the Bot's chase too.
