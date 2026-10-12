@@ -287,5 +287,8 @@ from current capacity, so it disappears after a slot becomes available.
 Issue runs also name the nearer blocker, most specific first: `issue_serial`
 (the same agent already has a live run on this issue; one per issue and agent,
 shown 1/1), `agent_capacity` (the agent is at its own `max_concurrent_tasks`;
-`multica agent update --max-concurrent-tasks`), then `machine_capacity`. A
-queued run with no `queue_reason` is waiting for the next claim cycle.
+`multica agent update --max-concurrent-tasks`), then `machine_capacity`. These
+three are the only capacity reasons; a queued run with none of them is held by
+another gate (agent work switched off, runtime offline or stale, work-thread or
+chat-session serialization) or has not been claimed yet — check those before
+assuming it just waits.

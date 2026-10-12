@@ -38,3 +38,4 @@ CLI 能力地图列出命令、Bot 权限和使用示例。
 `agent_capacity`（智能体已达自身 `max_concurrent_tasks`）、`machine_capacity`（整机已满）。
 智能体详情的「并发」行说明同单串行规则并显示本机当前占用。
 聊天待运行只返回 `machine_capacity`。
+没有 `queue_reason` 不等于“只是在等下一轮”：智能体关了接活、运行时离线或心跳过期、同一工作线程或聊天会话串行，也会让任务留在排队，这些目前不产出原因。
