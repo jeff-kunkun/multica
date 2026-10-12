@@ -368,5 +368,5 @@ Receiver rules the server holds you to:
 - After a restart, list `multica events deliveries --bot <bot-id> --status
   sent,received` and finish what your inbox shows as not done.
 - `recipient_gap` on an event says an owner could not be reached through a
-  Bot; once they reconnect and verify, missed results from the last week are
+  Bot; once they reconnect and verify, missed results (of any age) are
   delivered to the new connection.

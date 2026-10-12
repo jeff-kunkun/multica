@@ -601,14 +601,12 @@ FROM office_event_delivery d
 JOIN member_bot_binding b ON b.workspace_id = d.workspace_id AND b.user_id = d.target_user_id
     AND b.revoked_at IS NULL AND b.verified_at IS NOT NULL
 WHERE d.status = 'blocked' AND d.reason = 'owner' AND d.blocked_reason = $1::text
-  AND d.created_at > now() - make_interval(secs => $2::int)
 ORDER BY d.id
-LIMIT $3
+LIMIT $2
 `
 
 type ListOfficeDeliveriesRestorableParams struct {
 	ChannelReason string `json:"channel_reason"`
-	WindowSeconds int32  `json:"window_seconds"`
 	Lim           int32  `json:"lim"`
 }
 
@@ -617,10 +615,10 @@ type ListOfficeDeliveriesRestorableRow struct {
 	MemberBotBinding    MemberBotBinding    `json:"member_bot_binding"`
 }
 
-// Recent owner rows blocked because the person's Bot connection was gone or
+// Owner rows (any age) blocked because the person's Bot connection was gone or
 // unverified, whose person now has a verified one (the same Bot or another).
 func (q *Queries) ListOfficeDeliveriesRestorable(ctx context.Context, arg ListOfficeDeliveriesRestorableParams) ([]ListOfficeDeliveriesRestorableRow, error) {
-	rows, err := q.db.Query(ctx, listOfficeDeliveriesRestorable, arg.ChannelReason, arg.WindowSeconds, arg.Lim)
+	rows, err := q.db.Query(ctx, listOfficeDeliveriesRestorable, arg.ChannelReason, arg.Lim)
 	if err != nil {
 		return nil, err
 	}
@@ -976,15 +974,10 @@ FROM office_event_gap g
 JOIN office_event e ON e.event_id = g.event_id
 JOIN member_bot_binding b ON b.workspace_id = g.workspace_id AND b.user_id = g.user_id
     AND b.revoked_at IS NULL AND b.verified_at IS NOT NULL
-WHERE g.resolved_at IS NULL AND g.created_at > now() - make_interval(secs => $1::int)
+WHERE g.resolved_at IS NULL
 ORDER BY g.id
-LIMIT $2
+LIMIT $1
 `
-
-type ListOfficeGapsRestorableParams struct {
-	WindowSeconds int32 `json:"window_seconds"`
-	Lim           int32 `json:"lim"`
-}
 
 type ListOfficeGapsRestorableRow struct {
 	OfficeEventGap   OfficeEventGap   `json:"office_event_gap"`
@@ -992,9 +985,10 @@ type ListOfficeGapsRestorableRow struct {
 	MustRelay        bool             `json:"must_relay"`
 }
 
-// Recent open gaps whose person has a verified Bot again.
-func (q *Queries) ListOfficeGapsRestorable(ctx context.Context, arg ListOfficeGapsRestorableParams) ([]ListOfficeGapsRestorableRow, error) {
-	rows, err := q.db.Query(ctx, listOfficeGapsRestorable, arg.WindowSeconds, arg.Lim)
+// Open gaps whose person has a verified Bot again, oldest first. No age
+// limit: a result is owed until it is delivered or no longer visible.
+func (q *Queries) ListOfficeGapsRestorable(ctx context.Context, lim int32) ([]ListOfficeGapsRestorableRow, error) {
+	rows, err := q.db.Query(ctx, listOfficeGapsRestorable, lim)
 	if err != nil {
 		return nil, err
 	}

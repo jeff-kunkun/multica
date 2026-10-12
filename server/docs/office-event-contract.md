@@ -113,7 +113,7 @@ Each entry in `artifacts`: `id`, `filename`, `content_type`, `size`, `sha256`,
 - An owner of a must-relay result with no Bot (never connected, or
   disconnected) gets a gap row of their own, so another owner's Bot never
   hides it. Someone who has used a Bot here gets one in-app reminder; when
-  they connect and verify a Bot again (within a week), the result is
+  they connect and verify a Bot again (no age limit), the result is
   delivered to it. A row blocked because the connection went away is
   requeued on reconnect, or moved to the new Bot if they switched.
 - A must-relay result carries `recipient_gap` when it has no owner at all,

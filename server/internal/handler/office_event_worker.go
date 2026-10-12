@@ -44,7 +44,6 @@ const (
 	officeSealBatch     = 200
 	officeDeliverBatch  = 20
 	officeFallbackGrace = 5 * time.Minute
-	officeRestoreWindow = 7 * 24 * time.Hour
 )
 
 func NewOfficeEventWorker(h *Handler, wake *BotWakeWorker) *OfficeEventWorker {
@@ -646,12 +645,12 @@ func (w *OfficeEventWorker) remind(ctx context.Context, ev db.OfficeEvent, user 
 
 // Restore brings results back to a person who connects and verifies a Bot
 // again: open gaps get a delivery to that Bot, and owner rows blocked because
-// the connection was gone are requeued (same Bot) or moved (new Bot). Only
-// results from the last week, and only what the person can still see.
+// the connection was gone are requeued (same Bot) or moved (new Bot).
+// Whatever its age, and only what the person can still see; one that is no
+// longer visible is closed without sending. Each sweep takes a bounded batch.
 func (w *OfficeEventWorker) Restore(ctx context.Context) int {
-	window := int32(officeRestoreWindow.Seconds())
 	n := 0
-	gaps, err := w.h.Queries.ListOfficeGapsRestorable(ctx, db.ListOfficeGapsRestorableParams{WindowSeconds: window, Lim: 100})
+	gaps, err := w.h.Queries.ListOfficeGapsRestorable(ctx, 100)
 	if err != nil {
 		slog.Warn("office events: gap restore scan failed", "error", err)
 	}
@@ -666,7 +665,7 @@ func (w *OfficeEventWorker) Restore(ctx context.Context) int {
 		}
 	}
 	blocked, err := w.h.Queries.ListOfficeDeliveriesRestorable(ctx, db.ListOfficeDeliveriesRestorableParams{
-		ChannelReason: officeBlockedChannel, WindowSeconds: window, Lim: 100,
+		ChannelReason: officeBlockedChannel, Lim: 100,
 	})
 	if err != nil {
 		slog.Warn("office events: delivery restore scan failed", "error", err)

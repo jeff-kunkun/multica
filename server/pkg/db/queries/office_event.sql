@@ -256,13 +256,14 @@ LIMIT @lim;
 UPDATE office_event_gap SET fallback_at = now() WHERE id = $1 AND fallback_at IS NULL;
 
 -- name: ListOfficeGapsRestorable :many
--- Recent open gaps whose person has a verified Bot again.
+-- Open gaps whose person has a verified Bot again, oldest first. No age
+-- limit: a result is owed until it is delivered or no longer visible.
 SELECT sqlc.embed(g), sqlc.embed(b), e.must_relay
 FROM office_event_gap g
 JOIN office_event e ON e.event_id = g.event_id
 JOIN member_bot_binding b ON b.workspace_id = g.workspace_id AND b.user_id = g.user_id
     AND b.revoked_at IS NULL AND b.verified_at IS NOT NULL
-WHERE g.resolved_at IS NULL AND g.created_at > now() - make_interval(secs => @window_seconds::int)
+WHERE g.resolved_at IS NULL
 ORDER BY g.id
 LIMIT @lim;
 
@@ -271,14 +272,13 @@ UPDATE office_event_gap SET resolved_at = now(), resolved_bot_id = @bot_id
 WHERE id = @id AND resolved_at IS NULL;
 
 -- name: ListOfficeDeliveriesRestorable :many
--- Recent owner rows blocked because the person's Bot connection was gone or
+-- Owner rows (any age) blocked because the person's Bot connection was gone or
 -- unverified, whose person now has a verified one (the same Bot or another).
 SELECT sqlc.embed(d), sqlc.embed(b)
 FROM office_event_delivery d
 JOIN member_bot_binding b ON b.workspace_id = d.workspace_id AND b.user_id = d.target_user_id
     AND b.revoked_at IS NULL AND b.verified_at IS NOT NULL
 WHERE d.status = 'blocked' AND d.reason = 'owner' AND d.blocked_reason = @channel_reason::text
-  AND d.created_at > now() - make_interval(secs => @window_seconds::int)
 ORDER BY d.id
 LIMIT @lim;
 

@@ -843,3 +843,61 @@ func TestOfficeEventDisconnectedOwnerIsRemindedAndCaughtUpOnReconnect(t *testing
 		t.Fatalf("old row %q fallback=%v", moved, fallback)
 	}
 }
+
+// Third review hold: a result is owed until it is delivered or no longer
+// visible, however long the person stayed disconnected. A month-old gap and a
+// month-old blocked row both catch up on reconnect (also to a new Bot); one
+// the person can no longer see is closed without sending.
+func TestOfficeEventCatchUpHasNoAgeLimitButStillChecksAccess(t *testing.T) {
+	f := newOfficeFixture(t)
+	dbfx.Exec(t, `UPDATE office_event_gap SET resolved_at=now() WHERE resolved_at IS NULL`)
+	agent := dbfx.Agent(t, "old results agent", testRuntimeID)
+	result := func(title string) (string, string) {
+		issue := ownedIssue(t, title)
+		asActor(t, dbactor.Actor{Type: "agent", ID: agent}, `UPDATE issue SET status='in_review' WHERE id=$1`, issue)
+		return issue, latestOfficeEvent(t, `issue_id=$1 AND event_type='issue.status_changed'`, issue).eventID
+	}
+
+	// Blocked while connected, a month ago.
+	_, blockedEv := result("Blocked long ago")
+	f.seal(t)
+	dbfx.Exec(t, `UPDATE member_bot_binding SET revoked_at=now() WHERE id=$1`, f.binding)
+	f.worker.DeliverDue(context.Background())
+	// Produced while disconnected, a month ago; and one whose ticket is gone.
+	_, gapEv := result("Missed long ago")
+	goneIssue, goneEv := result("Ticket deleted since")
+	f.seal(t)
+	month := `now() - interval '30 days'`
+	dbfx.Exec(t, `UPDATE office_event_delivery SET created_at=`+month+` WHERE event_id=$1`, blockedEv)
+	dbfx.Exec(t, `UPDATE office_event_gap SET created_at=`+month+` WHERE event_id = ANY($1::uuid[])`, []string{gapEv, goneEv})
+	dbfx.Exec(t, `DELETE FROM issue WHERE id=$1`, goneIssue)
+
+	_, hash, prefix, err := mintBotToken()
+	if err != nil {
+		t.Fatal(err)
+	}
+	bot2, err := testHandler.Queries.CreateBotAccessToken(context.Background(), db.CreateBotAccessTokenParams{UserID: parseUUID(testUserID),
+		WorkspaceID: parseUUID(testWorkspaceID), Name: "bot after a month", TokenHash: hash, TokenPrefix: prefix})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _, _ = testPool.Exec(context.Background(), `DELETE FROM personal_access_token WHERE id=$1`, bot2.ID) })
+	b2 := dbfx.Insert(t, "member_bot_binding", testutil.Cols{"workspace_id": testWorkspaceID, "user_id": testUserID, "bot_id": uuidToString(bot2.ID)})
+	dbfx.Exec(t, `UPDATE member_bot_binding SET verified_at=now() WHERE id=$1`, b2)
+	f.worker.Restore(context.Background())
+
+	newBot := uuidToString(bot2.ID)
+	for name, ev := range map[string]string{"month-old blocked row": blockedEv, "month-old gap": gapEv} {
+		if status, reason, _, _ := deliveryStatus(t, ev, newBot); status != "pending" || reason != "owner" {
+			t.Fatalf("%s on the new Bot: %q/%q, want a pending owner delivery", name, status, reason)
+		}
+	}
+	if n := dbfx.Count(t, `SELECT count(*) FROM office_event_delivery WHERE event_id=$1`, goneEv); n != 0 {
+		t.Fatalf("result the person can no longer see was queued %d times", n)
+	}
+	var resolved bool
+	dbfx.QueryRow(t, `SELECT resolved_at IS NOT NULL FROM office_event_gap WHERE event_id=$1`, goneEv).Scan(&resolved)
+	if !resolved {
+		t.Fatal("invisible gap left open: it would be rescanned forever")
+	}
+}
