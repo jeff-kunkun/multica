@@ -966,6 +966,9 @@ export const ChatMessageSchema = z.object({
   session_mode: z.enum(["new", "resumed"]).optional().catch(undefined),
   resumed_from_run: z.string().optional().catch(undefined),
   session_break_reason: z.string().optional().catch(undefined),
+  // Replaced by a newer instruction (DENE-1932): additive, degraded alone.
+  superseded_at: z.string().nullish().catch(undefined),
+  superseded_by_message_id: z.string().nullish().catch(undefined),
 }).loose();
 
 export const ChatMessageListSchema = z.array(ChatMessageSchema).default([]);
@@ -2896,7 +2899,7 @@ export const SendChatMessageResponseSchema: z.ZodType<SendChatMessageResponse> =
   reason_code: z.string().optional(),
   supports_queue: z.boolean().optional(),
   queued: z.boolean().optional().catch(undefined),
-  mode: z.enum(["steer", "queue", "restart", "start", "blocked"]).optional().catch(undefined),
+  mode: z.enum(["steer", "queue", "restart", "replace", "start", "blocked"]).optional().catch(undefined),
   created_at: z.string().min(1),
   attachment_ids: z.array(z.string()).nullish().transform((ids) => ids ?? undefined),
 }).loose();

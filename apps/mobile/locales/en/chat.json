@@ -176,6 +176,7 @@
     "truncated": "…(truncated)",
     "error": "Error"
   },
+  "superseded.label": "Replaced by a newer instruction",
   "session_lineage.new": "New session",
   "session_lineage.reason_agent_changed": "agent changed",
   "session_lineage.reason_runtime_changed": "last session is on another machine",

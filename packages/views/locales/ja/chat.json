@@ -425,6 +425,9 @@
     "reason_session_lost": "前のセッションを復元できませんでした",
     "reason_fresh_requested": "新規セッションを指定"
   },
+  "superseded": {
+    "label": "新しい指示に置き換えられました"
+  },
   "report": {
     "bar_other": "このチャットのチケット {{count}} 件",
     "bar_fresh_other": "このチャットのチケット {{count}} 件 · 変更 {{fresh}}",

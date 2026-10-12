@@ -281,6 +281,12 @@ export interface ChatMessage {
   session_mode?: import("./agent").SessionMode;
   resumed_from_run?: string;
   session_break_reason?: import("./agent").SessionBreakReason | (string & {});
+  /**
+   * Set when a newer instruction replaced this user message (DENE-1932). The
+   * message stays in the transcript; the UI marks it as no longer in force.
+   */
+  superseded_at?: string | null;
+  superseded_by_message_id?: string | null;
 }
 
 export interface ChatShareGrant {
@@ -323,7 +329,7 @@ export interface ChatMessagesPage {
  * mid-reply in the same process, queue answers it after the reply, restart
  * stops the reply and starts over from it.
  */
-export type ChatSendMode = "steer" | "queue" | "restart";
+export type ChatSendMode = "steer" | "queue" | "restart" | "replace";
 
 export interface SendChatMessageResponse {
   runtime?: { status: string; name: string; last_seen_at: string | null } | null;
@@ -331,6 +337,10 @@ export interface SendChatMessageResponse {
   task_id: string;
   /** What actually happened; `start` when nothing was replying. */
   mode?: ChatSendMode | "start" | "blocked";
+  /** Only for `mode: "replace"`: what the replace changed. */
+  new_task_id?: string;
+  cancelled_task_ids?: string[];
+  superseded_message_ids?: string[];
   warning?: string;
   reason_code?: string;
   /** True when the server supports queued follow-up sends. */

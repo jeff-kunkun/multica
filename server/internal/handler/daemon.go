@@ -3953,7 +3953,6 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 			}
 		}
 		resp.ChatMessage = strings.Join(parts, "\n\n")
-
 		// Fail closed: a task-owned direct task that resolves to no user text
 		// (and is not the agent's proactive intro) must never dispatch an
 		// empty prompt. The send path creates the owning user message in the
@@ -3979,6 +3978,17 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 
 		if strings.TrimSpace(resp.ThreadName) == "" && resp.ChatMessage != "" {
 			resp.ThreadName = resp.ChatMessage
+		}
+
+		if len(messageIDs) > 0 && resp.ChatMessage != "" {
+			// A replace voided older instructions in this chat. The resumed
+			// session still holds them, so say so; a failed read only skips the
+			// notice.
+			if replaced, err := h.Queries.CountChatMessagesSupersededBy(r.Context(), db.CountChatMessagesSupersededByParams{
+				ChatSessionID: cs.ID, Column2: messageIDs,
+			}); err == nil && replaced > 0 {
+				resp.ChatMessage = chatReplaceNotice + "\n\n" + resp.ChatMessage
+			}
 		}
 	}
 
@@ -4525,6 +4535,9 @@ func localDirectoryModeClaimBlockReason(resources []ProjectResourceData, runtime
 
 // ClaimTaskByRuntime atomically claims the next queued task for a runtime.
 // The response includes the agent's name and skills, fetched fresh from the DB.
+// chatReplaceNotice leads the prompt of a run started by a replace send.
+const chatReplaceNotice = "[This message replaces your earlier instructions in this chat. Drop any work they started and do not carry them out; follow only what follows.]"
+
 func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 	runtimeID := chi.URLParam(r, "runtimeId")
 	start := time.Now()

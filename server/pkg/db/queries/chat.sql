@@ -2060,3 +2060,46 @@ WHERE chat_session_id = $1 AND workspace_id = $2;
 INSERT INTO chat_session_linked_project (workspace_id, chat_session_id, link_id, project_id, title, source_name, position)
 VALUES ($1, $2, $3, $4, $5, $6, $7)
 ON CONFLICT (chat_session_id, link_id, project_id) DO NOTHING;
+
+-- name: CancelQueuedChatTasksForReplace :many
+-- DENE-1932: replace drops EVERY queued turn, including the positional head
+-- that has not been claimed yet (CancelQueuedAgentTasksForSession spares it).
+-- Runs under the chat-session and agent locks, before the new turn exists.
+UPDATE agent_task_queue AS queued
+SET status = 'cancelled', completed_at = now(), prepare_lease_expires_at = NULL,
+    cancelled_by_type = sqlc.arg('cancelled_by_type'),
+    cancelled_by_id = sqlc.narg('cancelled_by_id'),
+    cancelled_by_name = sqlc.narg('cancelled_by_name')
+WHERE queued.chat_session_id = sqlc.arg('chat_session_id')
+  AND queued.status = 'queued'
+  AND queued.regenerate_quick_actions_for IS NULL
+RETURNING queued.*;
+
+-- name: ListReplaceableActiveChatTasks :many
+-- The turns a replace must stop: claimed ones and a deferred retry waiting to
+-- resume the old instruction.
+SELECT task.id, task.chat_input_task_id
+FROM agent_task_queue AS task
+WHERE task.chat_session_id = $1
+  AND task.status IN ('dispatched', 'running', 'waiting_local_directory', 'deferred')
+  AND task.regenerate_quick_actions_for IS NULL
+ORDER BY task.created_at ASC, task.id ASC;
+
+-- name: MarkChatMessagesSuperseded :many
+-- Marks the user messages owned by the replaced turns. The messages stay in
+-- the transcript; the mark is what tells a reader they are no longer in force.
+UPDATE chat_message
+SET superseded_at = now(), superseded_by_message_id = sqlc.arg('superseded_by_message_id')
+WHERE chat_session_id = sqlc.arg('chat_session_id')
+  AND role = 'user'
+  AND task_id = ANY(sqlc.arg('task_ids')::uuid[])
+  AND id <> sqlc.arg('superseded_by_message_id')
+  AND superseded_at IS NULL
+RETURNING id;
+
+-- name: CountChatMessagesSupersededBy :one
+-- How many earlier messages the given messages replaced. The claim uses it to
+-- tell the run that older instructions in this chat are void (DENE-1932).
+SELECT count(*) FROM chat_message
+WHERE chat_session_id = $1
+  AND superseded_by_message_id = ANY($2::uuid[]);

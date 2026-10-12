@@ -318,6 +318,9 @@ export const ChatMessageSchema: z.ZodType<ChatMessage> = z.object({
   session_mode: z.enum(["new", "resumed"]).optional().catch(undefined),
   resumed_from_run: z.string().optional().catch(undefined),
   session_break_reason: z.string().optional().catch(undefined),
+  // DENE-1932: replaced by a newer instruction; additive, degraded alone.
+  superseded_at: z.string().nullish().catch(undefined),
+  superseded_by_message_id: z.string().nullish().catch(undefined),
   // One malformed optional suggestion must not erase an otherwise valid
   // conversation. The server validates these too; this is mixed-version and
   // corrupted-cache defense at the mobile boundary.
@@ -408,7 +411,7 @@ export const SendChatMessageResponseSchema: z.ZodType<SendChatMessageResponse> =
   task_id: z.string(),
   supports_queue: z.boolean().optional(),
   queued: z.boolean().optional().catch(undefined),
-  mode: z.enum(["steer", "queue", "restart", "start"]).optional().catch(undefined),
+  mode: z.enum(["steer", "queue", "restart", "replace", "start"]).optional().catch(undefined),
   created_at: z.string().default(""),
 }).loose();
 

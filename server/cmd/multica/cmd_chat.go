@@ -33,6 +33,17 @@ var chatStopCmd = &cobra.Command{
 	Args:  cobra.MaximumNArgs(1), RunE: runChatStop,
 }
 
+var chatClearQueueCmd = &cobra.Command{
+	Use:   "clear-queue [session-id|url]",
+	Short: "Drop the messages queued behind the current reply, keeping the reply",
+	Long: `Cancel every message queued behind the reply in progress and remove them from
+the chat; the reply itself keeps running. To stop the reply too and mark the
+dropped messages "superseded" instead of removing them, send the new
+instruction with multica chat send --mode replace.`,
+	Example: "  multica chat clear-queue --session <id|url>",
+	Args:    cobra.MaximumNArgs(1), RunE: runChatClearQueue,
+}
+
 var chatListCmd = &cobra.Command{
 	Use:     "list",
 	Short:   "List chats visible to the task initiator (with --linked: only their own source chats)",
@@ -223,7 +234,7 @@ brief) returns the chat already opened instead of a second one.
 
 var chatSendCmd = &cobra.Command{
 	Use:   "send [text]",
-	Short: "Send a message to a chat, steering, queueing or restarting its reply",
+	Short: "Send a message to a chat, steering, queueing, restarting or replacing its reply",
 	Long: `Send a message to a chat as if typed in its composer. --mode decides what
 happens when the agent is still replying (ignored when it is not):
 
@@ -234,6 +245,13 @@ happens when the agent is still replying (ignored when it is not):
   queue    explicitly answer it after this reply finishes (new process, same session)
   restart  stop the reply now and start over from this message (new process,
            same session; the half-done step is dropped)
+  replace  the person changed their mind: cancel every queued older message,
+           stop the reply now, mark all of them "superseded" (the chat shows
+           "replaced by a newer instruction") and start over from this message.
+           Use it, not queue or restart, when the new message voids earlier
+           ones. With nothing running it still voids the queued ones. JSON adds
+           new_task_id, cancelled_task_ids and superseded_message_ids. Only the
+           chat's creator or an agent may send it.
 
 Without --mode, merge into the queued or active run instead of creating another
 run. Queued messages form one input batch; an active reply receives the message
@@ -263,6 +281,7 @@ access was refused; inspect multica workspace link view <link-id>.
 
   multica chat send --session <id|url> "Use the staging database instead" --mode steer
   multica chat send --session <id|url> --content-file ./msg.md --mode queue
+  multica chat send --session <id|url> "算了，改成只改文案" --mode replace --wait
   multica chat send --session <id|url> "再补一句" --wait   # print the agent's reply
 
 --urgent is for messages that are worthless late (a verification code, a
@@ -317,6 +336,9 @@ func init() {
 		c.Flags().String("output", "json", "Output format: table or json")
 	}
 	chatCmd.AddCommand(chatStopCmd)
+	chatCmd.AddCommand(chatClearQueueCmd)
+	chatClearQueueCmd.Flags().String("session", "", "Chat session id or URL (defaults to MULTICA_CHAT_SESSION_ID)")
+	chatClearQueueCmd.Flags().String("output", "json", "Output format: table or json")
 	chatStopCmd.Flags().Bool("related", false, "Also stop related issues and chats (every target requires access)")
 	chatStopCmd.Flags().String("session", "", "Chat session id or URL (defaults to MULTICA_CHAT_SESSION_ID)")
 	chatStopCmd.Flags().String("output", "json", "Output format: table or json")
@@ -352,7 +374,7 @@ func init() {
 	chatHandoffCmd.Flags().String("output", "json", "Output format: table or json")
 	chatSendCmd.Flags().String("session", "", "Chat session id or URL (required)")
 	chatSendCmd.Flags().String("content-file", "", "Read the message from this file instead of the argument")
-	chatSendCmd.Flags().String("mode", "", "Default: merge into existing work; choose steer, queue or restart explicitly")
+	chatSendCmd.Flags().String("mode", "", "Default: merge into existing work; choose steer, queue, restart or replace explicitly")
 	chatSendCmd.Flags().String("per-quote", "", "Exact words from this caller’s earlier human message in this chat; server verifies the quote before exempting it from the Bot wake-chain limit")
 	chatSendCmd.Flags().Bool("urgent", false, "Deliver now or fail now: refused (exit nonzero, JSON reason + next_steps) when the agent's runtime is offline and no online fallback runtime is configured; otherwise goes to the head of the queue (restart semantics) and waits for the pickup: exit 0 once a daemon starts it (task_status=running), nonzero with reason=pickup_timeout as soon as the server's 30s deadline (pickup_deadline_at) passes without one, never later; task_status then reports what the server last said. --wait-timeout does not apply.")
 	chatSendCmd.Flags().String("output", "json", "Output format: table or json")
@@ -958,9 +980,9 @@ func runChatSend(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("chat send --linked supports --mode queue only; remove --mode or pass --mode queue")
 	}
 	switch mode {
-	case "", "steer", "queue", "restart":
+	case "", "steer", "queue", "restart", "replace":
 	default:
-		return fmt.Errorf("chat send: --mode must be steer, queue or restart")
+		return fmt.Errorf("chat send: --mode must be steer, queue, restart or replace")
 	}
 	content := ""
 	if len(args) == 1 {
@@ -1260,6 +1282,35 @@ func linkedChatRefusal(cmd *cobra.Command, err error, verb string) error {
 		return fmt.Errorf("%s: %w; inspect `multica workspace link view <link-id>` for this source", verb, err)
 	}
 	return fmt.Errorf("%s: %w", verb, err)
+}
+
+func runChatClearQueue(cmd *cobra.Command, args []string) error {
+	session, _ := cmd.Flags().GetString("session")
+	if len(args) > 0 {
+		session = args[0]
+	}
+	if strings.TrimSpace(session) == "" {
+		session = os.Getenv("MULTICA_CHAT_SESSION_ID")
+	}
+	ref, err := parseChatSessionLinkRef(session)
+	if err != nil {
+		return fmt.Errorf("chat clear-queue: provide a session id or --session: %w", err)
+	}
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := cli.APIContext(context.Background())
+	defer cancel()
+	if err := client.DeleteJSON(ctx, "/api/chat/sessions/"+url.PathEscape(ref.ID)+"/queued-tasks"); err != nil {
+		return fmt.Errorf("clear chat queue: %w", err)
+	}
+	output, _ := cmd.Flags().GetString("output")
+	if output == "table" {
+		fmt.Fprintln(os.Stdout, "Cleared the queued messages")
+		return nil
+	}
+	return cli.PrintJSON(os.Stdout, map[string]any{"chat_session_id": ref.ID, "cleared": true})
 }
 
 func runChatStop(cmd *cobra.Command, args []string) error {
