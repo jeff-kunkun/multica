@@ -365,6 +365,8 @@ func TestAskHumanForBoundPersonGoesToTheBotAndAnswerUnblocks(t *testing.T) {
 	}
 	issue := createIssueHTTP(t, "ask human bound", "in_progress")
 	asker := summonSecondMember(t)
+	// Issues default to private; the asker is a plain member who must see it.
+	dbfx.Exec(t, `UPDATE issue SET visibility='workspace' WHERE id=$1`, issue.ID)
 	f := newHumanNeededFixture(t, true)
 	t.Cleanup(func() {
 		testPool.Exec(context.Background(), `DELETE FROM inbox_item WHERE issue_id = $1`, issue.ID)
