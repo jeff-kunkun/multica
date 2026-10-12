@@ -591,6 +591,21 @@ deleted_lark_user_bindings AS (
 ),
 deleted_lark_binding_tokens AS (
     DELETE FROM lark_binding_token WHERE workspace_id = $1
+),
+deleted_chat_followed_issues AS (
+    DELETE FROM chat_followed_issue WHERE workspace_id = $1
+),
+deleted_issue_consults AS (
+    DELETE FROM issue_consult WHERE workspace_id = $1
+),
+deleted_issue_routing_outcomes AS (
+    DELETE FROM issue_routing_outcome WHERE workspace_id = $1
+),
+deleted_fast_access_feed AS (
+    DELETE FROM fast_access_feed WHERE workspace_id = $1
+),
+deleted_fast_access_journal AS (
+    DELETE FROM fast_access_journal WHERE workspace_id = $1
 )
 UPDATE channel_media_pending_object
 SET state = CASE

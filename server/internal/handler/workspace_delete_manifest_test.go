@@ -42,6 +42,7 @@ var workspaceDeletionManifest = map[string]workspaceDeleteAction{
 	"attachment":                      workspaceDelete,
 	"autopilot":                       workspaceDelete,
 	"autopilot_collaborator":          workspaceDelete,
+	"autopilot_linked_change":         workspaceDelete,
 	"autopilot_quota_period":          workspaceDelete,
 	"autopilot_quota_reservation":     workspaceDelete,
 	"autopilot_rule_version":          workspaceDelete,
@@ -61,6 +62,7 @@ var workspaceDeletionManifest = map[string]workspaceDeleteAction{
 	"channel_task_delivery":           workspaceDelete,
 	"channel_user_binding":            workspaceDelete,
 	"chat_draft_restore":              workspaceDelete,
+	"chat_followed_issue":             workspaceDelete,
 	"chat_message":                    workspaceDelete,
 	"chat_task_supplement":            workspaceDelete,
 	"chat_pinned_agent":               workspaceDelete,
@@ -83,6 +85,13 @@ var workspaceDeletionManifest = map[string]workspaceDeleteAction{
 	"dingtalk_group_presence":         workspaceDelete,
 	"dingtalk_bot_identity":           workspaceDelete,
 	"dingtalk_group_route":            workspaceDelete,
+	"fast_access_batch":               workspaceDeleteKeep, // viewer-keyed cursor state; expires on its own
+	"fast_access_cursor":              workspaceDeleteKeep, // viewer-keyed cursor state; expires on its own
+	"fast_access_feed":                workspaceDelete,
+	"fast_access_journal":             workspaceDelete,
+	"fast_access_meta":                workspaceDeleteKeep,   // global singleton
+	"fast_access_pending":             workspaceDeleteSettle, // transaction-local staging; the deferred flush settles it at commit
+	"fast_access_stream":              workspaceDeleteKeep,   // viewer-keyed stream leases; expire on their own
 	"feedback":                        workspaceDeleteDetach,
 	// One App for the whole deployment. The workspace link is ON DELETE SET NULL,
 	// so tearing down a workspace detaches the row and keeps the private key.
@@ -103,6 +112,7 @@ var workspaceDeletionManifest = map[string]workspaceDeleteAction{
 	"issue_wakeup":                       workspaceDelete,
 	"issue_wakeup_receipt":               workspaceDelete,
 	"issue_child_event":                  workspaceDelete,
+	"issue_consult":                      workspaceDelete,
 	"issue_view":                         workspaceDelete,
 	"issue_view_preference":              workspaceDelete,
 	"issue_delivery_branch":              workspaceDelete,
@@ -122,6 +132,7 @@ var workspaceDeletionManifest = map[string]workspaceDeleteAction{
 	"issue_reaction":                     workspaceDelete,
 	"issue_progress":                     workspaceDelete,
 	"issue_rejection":                    workspaceDelete,
+	"issue_routing_outcome":              workspaceDelete,
 	"issue_source_context":               workspaceDelete,
 	"issue_source_context_object_intent": workspaceDeleteSettle,
 	"issue_status":                       workspaceDelete,
@@ -160,6 +171,7 @@ var workspaceDeletionManifest = map[string]workspaceDeleteAction{
 	"project_resource":                   workspaceDelete,
 	"quick_action":                       workspaceDelete,
 	"resource_share":                     workspaceDelete,
+	"review_pass_head":                   workspaceDelete,
 	"runtime_machine_watch":              workspaceDelete,
 	"runtime_outage":                     workspaceDelete,
 	"runtime_profile":                    workspaceDelete,
