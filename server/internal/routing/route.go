@@ -306,19 +306,19 @@ func (r *Router) routeTodo(ctx context.Context, workspaceID string, settings Set
 	if err != nil {
 		return Outcome{State: StateEnabled, Action: ActionSkipped, Reason: "roster unreadable"}, err
 	}
-	roster = ForProject(roster, issue.ProjectID)
+	roster = ForProject(roster, issue.ProjectID, issue.ProjectSeats)
 	candidates := ladder.assignmentCandidates(scene, roster)
 	// Coordinator requests in the body become Bot mentions in PostComment.
 	// The deliver mention flag targets a human creator/owner, not Grok.
 	if len(candidates) == 0 {
-		return r.deliver(ctx, workspaceID, issue, KindAssignment, "没有可自动选派的席位；未派出，请 Grok 协调。", false, Outcome{State: StateEnabled, Action: ActionAdvised, Reason: "no routable seat"})
+		return r.deliver(ctx, workspaceID, issue, KindAssignment, "没有可自动选派的席位"+projectSeatsNote(issue)+"；未派出，请 Grok 协调。", false, Outcome{State: StateEnabled, Action: ActionAdvised, Reason: "no routable seat"})
 	}
 	eligible, state, err := r.decisionContext(ctx, workspaceID, settings, issue, scene, candidates)
 	if err != nil {
 		return Outcome{State: StateEnabled, Action: ActionSkipped, Reason: "routing context incomplete"}, err
 	}
 	if len(eligible) == 0 {
-		return r.deliver(ctx, workspaceID, issue, KindAssignment, "候选均不在线或没有额度；未派出，请 Grok 协调。", false, Outcome{State: StateEnabled, Action: ActionAdvised, Reason: "no eligible seat"})
+		return r.deliver(ctx, workspaceID, issue, KindAssignment, "候选均不在线或没有额度"+projectSeatsNote(issue)+"；未派出，请 Grok 协调。", false, Outcome{State: StateEnabled, Action: ActionAdvised, Reason: "no eligible seat"})
 	}
 
 	// A tier label on the ticket is an answer, not a hint: when it names a
@@ -718,7 +718,7 @@ func (r *Router) continuation(ctx context.Context, workspaceID string, settings 
 	seats := make(map[string]ContinuationSeat, len(ids))
 	for _, id := range ids {
 		agent, onRoster := agentByID(roster, id)
-		_, unpickable := SeatSelectable(agent.State, SelectContext{ProjectID: agent.project})
+		_, unpickable := SeatSelectable(agent.selectState(), agent.selectContext())
 		seats[id] = ContinuationSeat{
 			Seat:         seatFromRoster(ladder, roster, id),
 			OnRoster:     onRoster,
@@ -796,7 +796,7 @@ func (r *Router) PickAcceptanceSeat(ctx context.Context, workspaceID string, iss
 	if err != nil {
 		return ReviewerRef{}, "读不到席位名册", false
 	}
-	roster = ForProject(roster, issue.ProjectID)
+	roster = ForProject(roster, issue.ProjectID, issue.ProjectSeats)
 	candidates := ladder.assignmentCandidates(scene, roster)
 	candidates, err = r.eligibleNow(ctx, workspaceID, settings, candidates)
 	if err != nil {
@@ -999,7 +999,7 @@ func (r *Router) routeInReview(ctx context.Context, workspaceID string, settings
 	if err != nil {
 		return out, err
 	}
-	roster = ForProject(roster, issue.ProjectID)
+	roster = ForProject(roster, issue.ProjectID, issue.ProjectSeats)
 	seatAgent, ok := agentByID(roster, issue.Reviewer.ID)
 	if !ok {
 		card, found, err := r.Store.OffRosterSeat(ctx, workspaceID, issue.Reviewer.ID)
@@ -1014,7 +1014,12 @@ func (r *Router) routeInReview(ctx context.Context, workspaceID string, settings
 				ReviewerWritten: out.ReviewerWritten,
 			}, nil
 		}
-		return r.handOffToSubstitute(ctx, workspaceID, settings, issue, roster, card, out, false)
+		return r.handOffToSubstitute(ctx, workspaceID, settings, issue, roster, card, out, coverDisabled)
+	}
+	// A reviewer chosen before the project named its executors is not woken
+	// once it is off the list: the wake is a new automatic pick.
+	if !ProjectAdmits(issue.ProjectSeats, seatAgent.ID) {
+		return r.handOffToSubstitute(ctx, workspaceID, settings, issue, roster, seatAgent, out, coverOffList)
 	}
 	facts, err := r.Store.RoutingFacts(ctx, workspaceID, []string{seatAgent.ID}, settings.ProviderKeys())
 	if err != nil {
@@ -1022,7 +1027,7 @@ func (r *Router) routeInReview(ctx context.Context, workspaceID string, settings
 	}
 	if snap, ok := facts.Seats[seatAgent.ID]; ok && Unselectable(snap.Availability) {
 		if snap.Availability == AvailabilityDisabled {
-			return r.handOffToSubstitute(ctx, workspaceID, settings, issue, roster, seatAgent, out, false)
+			return r.handOffToSubstitute(ctx, workspaceID, settings, issue, roster, seatAgent, out, coverDisabled)
 		}
 		return Outcome{State: StateEnabled, Action: ActionNoop, Reason: "reviewer seat is not eligible"}, nil
 	}
@@ -1041,9 +1046,11 @@ func (r *Router) routeInReview(ctx context.Context, workspaceID string, settings
 // work. The slot already names them, so they stay the designated reviewer:
 // recovery may give the ticket back only before the cover has started.
 //
-// failed is true when the seat is still switched on but its acceptance runs
-// keep failing (DENE-1647); only the wording differs.
-func (r *Router) handOffToSubstitute(ctx context.Context, workspaceID string, settings Settings, issue Issue, roster map[string]Agent, disabled Agent, out Outcome, failed bool) (Outcome, error) {
+// cause says why the reviewer cannot take it: switched off, its acceptance
+// runs keep failing (DENE-1647), or it is off the project's executor list
+// (DENE-1959). Only the wording differs, except that an off-list reviewer is
+// not the designated one any more, so recovery never hands the ticket back.
+func (r *Router) handOffToSubstitute(ctx context.Context, workspaceID string, settings Settings, issue Issue, roster map[string]Agent, disabled Agent, out Outcome, cause reviewerCover) (Outcome, error) {
 	ladder := r.Ladder.For(settings)
 	scene := ladder.IssueScene(issue)
 	holder := seatFromRoster(ladder, map[string]Agent{disabled.Name: disabled}, disabled.ID)
@@ -1062,13 +1069,35 @@ func (r *Router) handOffToSubstitute(ctx context.Context, workspaceID string, se
 			avoid = append(avoid, id)
 		}
 	}
+	// The roster only knows who is switched on; a cover that is offline or
+	// out of quota cannot take the review either. Unknown is not a reason
+	// to drop a seat.
+	ids := make([]string, 0, len(roster))
+	for _, agent := range roster {
+		if agent.ID != "" && agent.ID != disabled.ID {
+			ids = append(ids, agent.ID)
+		}
+	}
+	facts, err := r.Store.RoutingFacts(ctx, workspaceID, ids, settings.ProviderKeys())
+	if err != nil {
+		return Outcome{State: StateEnabled, Action: ActionSkipped, Reason: "routing context incomplete"}, err
+	}
+	for _, id := range ids {
+		if snap, ok := facts.Seats[id]; ok && Unselectable(snap.Availability) {
+			avoid = append(avoid, id)
+		}
+	}
 	replacement, steppedDown, ok := SubstituteSeat(ladder, holder, roster, avoid, scene)
 	if !ok {
 		body := disabledReviewerStuck(disabled.Name)
 		kind := CommentKind("reviewer_off:" + disabled.ID)
-		if failed {
+		switch cause {
+		case coverFailed:
 			body = failedReviewerStuck(disabled.Name)
 			kind = CommentKind("reviewer_failed:" + disabled.ID)
+		case coverOffList:
+			body = offListReviewerStuck(disabled.Name)
+			kind = CommentKind("reviewer_off_list:" + disabled.ID)
 		}
 		stuck, err := r.deliver(ctx, workspaceID, issue, kind, body, true, out)
 		if err != nil {
@@ -1096,7 +1125,7 @@ func (r *Router) handOffToSubstitute(ctx context.Context, workspaceID string, se
 		OriginalName:    disabled.Name,
 		ReplacementID:   replacement.ID,
 		ReplacementName: replacement.Name,
-		Designated:      true,
+		Designated:      cause != coverOffList,
 		CoveredAt:       time.Now().UTC(),
 	}); err != nil {
 		return out, err
@@ -1107,8 +1136,11 @@ func (r *Router) handOffToSubstitute(ctx context.Context, workspaceID string, se
 		return out, err
 	}
 	note := disabledReviewerNote(disabled.Name, replacement.Name, steppedDown)
-	if failed {
+	switch cause {
+	case coverFailed:
 		note = failedReviewerNote(disabled.Name, replacement.Name, steppedDown)
+	case coverOffList:
+		note = offListReviewerNote(disabled.Name, replacement.Name)
 	}
 	body := note + "\n\n" + r.handoffComment(issue, replacement.Name, false)
 	delivered, err := r.deliver(ctx, workspaceID, issue, KindHandoff, body, false, out)
@@ -1120,6 +1152,15 @@ func (r *Router) handOffToSubstitute(ctx context.Context, workspaceID string, se
 	}
 	return delivered, nil
 }
+
+// reviewerCover is why an acceptance wake goes to a substitute.
+type reviewerCover int
+
+const (
+	coverDisabled reviewerCover = iota
+	coverFailed
+	coverOffList
+)
 
 // agentByID finds a seat in the roster by id. The roster is keyed by name
 // because the ladder addresses seats by name; the reviewer slot addresses
@@ -1151,7 +1192,7 @@ func (r *Router) decideReviewerNow(ctx context.Context, workspaceID string, sett
 	if err != nil {
 		return ReviewerRef{}, Outcome{State: StateEnabled, Action: ActionSkipped, Reason: "roster unreadable"}, err
 	}
-	roster = ForProject(roster, issue.ProjectID)
+	roster = ForProject(roster, issue.ProjectID, issue.ProjectSeats)
 	candidates := ladder.assignmentCandidates(scene, roster)
 	if len(candidates) == 0 {
 		return ReviewerRef{}, noop("ladder has no seat in this workspace"), nil
@@ -1271,7 +1312,7 @@ func (r *Router) routeBlocked(ctx context.Context, workspaceID string, settings 
 	if err != nil {
 		return out, err
 	}
-	roster = ForProject(roster, issue.ProjectID)
+	roster = ForProject(roster, issue.ProjectID, issue.ProjectSeats)
 	candidates := ladder.assignmentCandidates(scene, roster)
 	_, state, err := r.decisionContext(ctx, workspaceID, settings, issue, scene, candidates)
 	if err != nil {

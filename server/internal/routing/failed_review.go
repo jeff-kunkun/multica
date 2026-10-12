@@ -48,7 +48,7 @@ func (r *Router) CoverFailedReview(ctx context.Context, workspaceID, issueID str
 	if err != nil {
 		return Outcome{}, err
 	}
-	roster = ForProject(roster, issue.ProjectID)
+	roster = ForProject(roster, issue.ProjectID, issue.ProjectSeats)
 	out := Outcome{State: StateEnabled, Action: ActionHandedOff}
 	seat, onRoster := agentByID(roster, issue.Reviewer.ID)
 	if !onRoster {
@@ -59,7 +59,10 @@ func (r *Router) CoverFailedReview(ctx context.Context, workspaceID, issueID str
 		if !found {
 			return noop("reviewer seat not in roster"), nil
 		}
-		return r.handOffToSubstitute(ctx, workspaceID, settings, issue, roster, card, out, true)
+		return r.handOffToSubstitute(ctx, workspaceID, settings, issue, roster, card, out, coverFailed)
+	}
+	if !ProjectAdmits(issue.ProjectSeats, seat.ID) {
+		return r.handOffToSubstitute(ctx, workspaceID, settings, issue, roster, seat, out, coverOffList)
 	}
 	if !force {
 		facts, err := r.Store.RoutingFacts(ctx, workspaceID, []string{seat.ID}, settings.ProviderKeys())
@@ -74,5 +77,5 @@ func (r *Router) CoverFailedReview(ctx context.Context, workspaceID, issueID str
 			return Outcome{State: StateEnabled, Action: ActionWoken, Reason: "retried the reviewer seat after a failed run"}, nil
 		}
 	}
-	return r.handOffToSubstitute(ctx, workspaceID, settings, issue, roster, seat, out, true)
+	return r.handOffToSubstitute(ctx, workspaceID, settings, issue, roster, seat, out, coverFailed)
 }

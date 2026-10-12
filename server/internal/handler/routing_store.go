@@ -131,6 +131,11 @@ func (s routingStore) issueView(ctx context.Context, row db.Issue) (routing.Issu
 		out.ProjectName = scene.ProjectName
 		out.ProjectDomains = scene.Project
 		out.Domain = scene.Issue
+		seats, err := service.LoadProjectExecutorSeats(ctx, s.h.Queries, row.WorkspaceID, row.ProjectID)
+		if err != nil {
+			return out, err
+		}
+		out.ProjectSeats = seats
 	}
 	if labels, err := s.h.Queries.ListLabelsByIssue(ctx, db.ListLabelsByIssueParams{
 		IssueID: row.ID, WorkspaceID: row.WorkspaceID,

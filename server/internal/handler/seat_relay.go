@@ -64,6 +64,10 @@ func (h *Handler) substituteAgent(ctx context.Context, workspaceID pgtype.UUID, 
 	if issue.ProjectID.Valid {
 		projectID = uuidToString(issue.ProjectID)
 	}
+	projectSeats, err := service.LoadProjectExecutorSeats(ctx, h.Queries, workspaceID, issue.ProjectID)
+	if err != nil {
+		return db.Agent{}, routing.Seat{}, false
+	}
 	agents, err := h.Queries.ListAgents(ctx, workspaceID)
 	if err != nil {
 		return db.Agent{}, routing.Seat{}, false
@@ -73,7 +77,7 @@ func (h *Handler) substituteAgent(ctx context.Context, workspaceID pgtype.UUID, 
 	seats := newSeatDomains(routingStore{h: h}.domainNames(ctx, workspaceID), agents)
 	for _, agent := range agents {
 		state := service.AgentSeatState(agent)
-		if ok, _ := routing.SeatSelectable(state, routing.SelectContext{ProjectID: projectID}); !ok {
+		if ok, _ := routing.SeatSelectable(state, routing.SelectContext{ProjectID: projectID, ProjectSeats: projectSeats}); !ok {
 			continue
 		}
 		id := uuidToString(agent.ID)

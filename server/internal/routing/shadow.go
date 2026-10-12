@@ -38,7 +38,7 @@ func (r *Router) CompareShadow(ctx context.Context, workspaceID, issueID string)
 	if err != nil {
 		return ShadowComparison{}, err
 	}
-	roster = ForProject(roster, issue.ProjectID)
+	roster = ForProject(roster, issue.ProjectID, issue.ProjectSeats)
 	shadowSettings := settings
 	shadowSettings.DecisionMode = "active"
 	l := r.ladder().For(shadowSettings)

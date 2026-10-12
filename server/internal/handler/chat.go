@@ -80,7 +80,7 @@ func (h *Handler) CreateChatSession(w http.ResponseWriter, r *http.Request) {
 	// reported as 人工 below.
 	var receipt *RoutingReceipt
 	if strings.TrimSpace(req.AgentID) == "" {
-		rr, ok := h.routeChatAgent(w, r, workspaceUUID, projectID, req)
+		rr, ok := h.routeChatAgent(w, r, workspaceUUID, projectIDs, req)
 		if !ok {
 			return
 		}
@@ -225,13 +225,28 @@ func (h *Handler) CreateChatSession(w http.ResponseWriter, r *http.Request) {
 // title, brief and project scene. It writes the refusal itself: routing off
 // (400, name an agent), nobody pickable (409, with the candidates and who is
 // offline), or the judge unreachable (503).
-func (h *Handler) routeChatAgent(w http.ResponseWriter, r *http.Request, workspaceUUID pgtype.UUID, projectID pgtype.UUID, req CreateChatSessionRequest) (RoutingReceipt, bool) {
+func (h *Handler) routeChatAgent(w http.ResponseWriter, r *http.Request, workspaceUUID pgtype.UUID, projectIDs []pgtype.UUID, req CreateChatSessionRequest) (RoutingReceipt, bool) {
 	pickReq := routing.PickRequest{Title: req.Title, Text: req.Brief}
-	if projectID.Valid {
+	if projectID := primaryChatSessionProjectID(projectIDs); projectID.Valid {
 		pickReq.ProjectID = util.UUIDToString(projectID)
 		scene := service.LoadDomainScene(r.Context(), h.Queries, workspaceUUID, pgtype.UUID{}, projectID)
 		pickReq.ProjectName, pickReq.ProjectDomains = scene.ProjectName, scene.Project
 	}
+	// Every project the chat joins bounds the pick, not only the first:
+	// the seat must be on each non-empty executor list (DENE-1959).
+	seats, restricted, err := service.LoadProjectsExecutorSeats(r.Context(), h.Queries, workspaceUUID, projectIDs)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to read the project's executor allowlist")
+		return RoutingReceipt{}, false
+	}
+	if restricted && len(seats) == 0 {
+		writeJSON(w, http.StatusConflict, map[string]any{
+			"error": "no agent can take this chat: the executor allowlists of its projects share no agent; open it in one project, or name an agent with agent_id",
+			"code":  "no_agent_available",
+		})
+		return RoutingReceipt{}, false
+	}
+	pickReq.ProjectSeats = seats
 	rr, err := h.pickAgentForChat(r.Context(), util.UUIDToString(workspaceUUID), pickReq)
 	switch {
 	case errors.Is(err, routing.ErrRoutingInactive):

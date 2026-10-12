@@ -353,7 +353,7 @@ func (r *Router) PreAnalyze(ctx context.Context, workspaceID string, issueID str
 		if e != nil {
 			return e
 		}
-		roster = ForProject(roster, issue.ProjectID)
+		roster = ForProject(roster, issue.ProjectID, issue.ProjectSeats)
 		l := r.ladder().For(settings)
 		scene := l.IssueScene(issue)
 		eligible, loaded, e := r.decisionContext(ctx, workspaceID, settings, issue, scene, l.assignmentCandidates(scene, roster))

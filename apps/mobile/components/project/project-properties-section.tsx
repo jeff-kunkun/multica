@@ -1,6 +1,6 @@
 /**
  * Project properties section. Tappable rows for Status / Priority / Lead /
- * Domain.
+ * Domain / Executors.
  * Each row opens a picker sheet via the corresponding `onPress*` callback.
  *
  * Layout mirrors iOS Settings rows: label on left, current value on right
@@ -24,6 +24,7 @@ import {
 import { useQuery } from "@tanstack/react-query";
 import { useActorLookup } from "@/data/use-actor-name";
 import { domainListOptions } from "@/data/queries/domains";
+import { agentListOptions } from "@/data/queries/agents";
 import { useWorkspaceStore } from "@/data/workspace-store";
 import { useColorScheme } from "@/lib/use-color-scheme";
 import { THEME } from "@/lib/theme";
@@ -35,6 +36,7 @@ interface Props {
   onPressPriority: () => void;
   onPressLead: () => void;
   onPressDomain: () => void;
+  onPressExecutors: () => void;
 }
 
 export function ProjectPropertiesSection({
@@ -43,6 +45,7 @@ export function ProjectPropertiesSection({
   onPressPriority,
   onPressLead,
   onPressDomain,
+  onPressExecutors,
 }: Props) {
   const { getName } = useActorLookup();
   const { t } = useT("projects");
@@ -51,6 +54,10 @@ export function ProjectPropertiesSection({
   const domainNames = domains
     .filter((d) => (project.domain_ids ?? []).includes(d.id))
     .map((d) => d.name);
+  const { data: agents = [] } = useQuery(agentListOptions(wsId));
+  const executorNames = (project.executor_agent_ids ?? [])
+    .map((id) => agents.find((a) => a.id === id)?.name)
+    .filter((n): n is string => Boolean(n));
   const leadName =
     project.lead_type && project.lead_id
       ? getName(project.lead_type, project.lead_id)
@@ -124,6 +131,26 @@ export function ProjectPropertiesSection({
             {domainNames.length > 0
               ? domainNames.join("、")
               : t("common:domain.generic")}
+          </Text>
+        }
+      />
+      <Separator />
+      <Row
+        label={t("properties.executors")}
+        onPress={onPressExecutors}
+        left={null}
+        right={
+          <Text
+            numberOfLines={1}
+            className={
+              executorNames.length > 0
+                ? "flex-1 text-sm text-foreground"
+                : "flex-1 text-sm text-muted-foreground"
+            }
+          >
+            {executorNames.length > 0
+              ? executorNames.join("、")
+              : t("properties.executors_any")}
           </Text>
         }
       />

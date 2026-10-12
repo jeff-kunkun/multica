@@ -239,6 +239,13 @@ export default function ProjectDetail() {
                   params: { workspace: wsSlug, id },
                 });
             }}
+            onPressExecutors={() => {
+              if (wsSlug)
+                router.push({
+                  pathname: "/[workspace]/project/[id]/picker/executors",
+                  params: { workspace: wsSlug, id },
+                });
+            }}
           />
           <View className="px-4 py-3"><ProjectReferencesSetting projectId={id} /></View>
           <ProjectResourcesSection

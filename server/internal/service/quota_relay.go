@@ -693,10 +693,16 @@ func quotaPickForIssue(ctx context.Context, qtx *db.Queries, failed quotarelay.S
 	if issue.ProjectID.Valid {
 		projectID = util.UUIDToString(issue.ProjectID)
 	}
+	// The project's executor allowlist (DENE-1959) bounds the relay like any
+	// other automatic pick; an unreadable one relays to nobody.
+	projectSeats, err := LoadProjectExecutorSeats(ctx, qtx, issue.WorkspaceID, issue.ProjectID)
+	if err != nil {
+		return quotarelay.Choice{}, false
+	}
 	fitted := make([]quotarelay.Seat, len(roster))
 	for i, seat := range roster {
 		seat.Fit = routing.DomainFit(scene, seat.Direction).Rank()
-		seat.Eligible = seat.Eligible && routing.ServesProject(seat.Projects, projectID)
+		seat.Eligible = seat.Eligible && routing.ServesProject(seat.Projects, projectID) && routing.ProjectAdmits(projectSeats, seat.ID)
 		fitted[i] = seat
 	}
 	return quotarelay.Pick(failed, fitted, routing.DefaultLadder.TierKeys())
