@@ -719,7 +719,35 @@ export type BotBindingState = "none" | "unverified" | "ok" | "broken";
 export type BotBindingMode = "bot_first" | "mirror";
 // Full activity stream (DENE-1935): which tickets and chats feed the Bot.
 // Empty means the stream is off.
-export type BotActivityScope = "owned" | "followed";
+// "owner_visible_all" (DENE-1936) is everything you can see in the workspace:
+// PRs, runs, projects, settings, members, agents and every other write.
+export type BotActivityScope = "owned" | "followed" | "owner_visible_all";
+
+/** One write a Bot made in a person's name (DENE-1936): route and field names only. */
+export interface BotWriteAuditEntry {
+  id: string;
+  bot_id: string;
+  bot_name: string;
+  on_behalf_of_user_id: string;
+  on_behalf_of_name: string;
+  method: string;
+  route: string;
+  family: string;
+  entity_id: string | null;
+  fields: string[];
+  status_code: number;
+  outcome: "done" | "blocked";
+  dangerous: string | null;
+  confirmation: string | null;
+  /** "Bot〈name〉代表〈owner〉", ready to show. */
+  label: string;
+  created_at: string;
+}
+
+export interface BotWriteAuditPage {
+  writes: BotWriteAuditEntry[];
+  next_cursor: string;
+}
 
 export interface BotBinding {
   bound: boolean;

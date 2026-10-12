@@ -45,7 +45,11 @@ multica bot wake answered <bot-id> <event-id> --answers 0=approve,1=later
 
 `--answers` maps question numbers to option ids (or JSON `{"0":"approve"}`).
 Only the person the card was asked of can be answered for: another person's
-Bot is refused. Answering fills the card exactly like `multica ask answer`,
+Bot is refused. An `owner_confirmation` card (a Bot asking its owner before
+deleting the workspace, changing members, resetting keys or changing billing,
+DENE-1936) is the exception: it is pushed to the owner's Bot as a notice, but
+only the owner's own session answers it; the Bot's `answered` receipt, an agent
+run or another member is refused. Answering fills the card exactly like `multica ask answer`,
 leaves a comment on the ticket as the person marked "Bot X for Y", lifts the
 ask-human block and queues one run for the agent that asked; a repeated receipt
 changes nothing. Do not also post a comment yourself. Questions with fewer than

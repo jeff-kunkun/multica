@@ -11,6 +11,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/repoident"
 	"github.com/multica-ai/multica/server/internal/service"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
@@ -32,11 +33,14 @@ func (h *Handler) activityPayloadFields(fields map[string]any, ev db.HumanNeeded
 		body.Categories = []string{}
 	}
 	targetKind := "issue"
-	if ev.ChatSessionID.Valid {
+	switch {
+	case ev.ChatSessionID.Valid:
 		targetKind = "chat"
+	case !ev.IssueID.Valid:
+		targetKind = "workspace"
 	}
 	fields["schema"] = service.ActivitySchema
-	fields["activity"] = map[string]any{
+	block := map[string]any{
 		"activity_type":  body.ActivityType,
 		"importance":     body.Importance,
 		"categories":     body.Categories,
@@ -49,6 +53,11 @@ func (h *Handler) activityPayloadFields(fields map[string]any, ev db.HumanNeeded
 		"to_status":      body.ToStatus,
 		"occurred_at":    body.OccurredAt,
 		"target_user_id": uuidToString(ev.TargetUserID),
+	}
+	fields["activity"] = block
+	if body.Workspace != nil {
+		// Names and ids only; the scrub pass over the whole body still runs.
+		block["workspace"] = body.Workspace
 	}
 	if author, ok := fields["author"].(map[string]any); ok {
 		if name, ok := author["name"].(string); ok {
@@ -168,13 +177,17 @@ scan:
 			if body.Categories == nil {
 				body.Categories = []string{}
 			}
-			out = append(out, map[string]any{
+			row := map[string]any{
 				"event_id": uuidToString(ev.EventID), "sequence": ev.Sequence, "status": ev.Status,
 				"activity_type": body.ActivityType, "importance": body.Importance, "categories": body.Categories,
 				"excerpt": body.Excerpt, "from_status": body.FromStatus, "to_status": body.ToStatus,
 				"issue_id": uuidToPtr(ev.IssueID), "chat_session_id": uuidToPtr(ev.ChatSessionID),
 				"source_id": body.SourceID, "occurred_at": body.OccurredAt, "created_at": timestampToString(ev.CreatedAt),
-			})
+			}
+			if body.Workspace != nil {
+				row["workspace"] = body.Workspace
+			}
+			out = append(out, row)
 			if len(out) == int(limit) {
 				next = strconv.FormatInt(ev.Sequence, 10)
 				break scan
@@ -216,8 +229,15 @@ func newActivityGate(h *Handler, ctx context.Context) *activityGate {
 }
 
 func (g *activityGate) allows(ev db.HumanNeededEvent) (bool, string) {
-	key := "x"
+	family := workspaceFamilyOf(ev)
+	key := "w:" + uuidToString(ev.BindingID) + ":" + family
 	switch {
+	case family != "":
+		t := workspaceTargetOf(ev)
+		key += ":" + uuidToString(t.IssueID) + ":" + uuidToString(t.ProjectID) + ":" + uuidToString(t.ChatSessionID) + ":" + t.Repo
+		for _, id := range t.IssueIDs {
+			key += ":" + uuidToString(id)
+		}
 	case ev.IssueID.Valid:
 		key = "i:" + uuidToString(ev.IssueID) + ":" + uuidToString(ev.BindingID)
 	case ev.ChatSessionID.Valid:
@@ -231,8 +251,170 @@ func (g *activityGate) allows(ev db.HumanNeededEvent) (bool, string) {
 	return ok, reason
 }
 
+// workspaceFamilyOf is the family of a workspace-level event ("" for the
+// ticket and chat stream).
+func workspaceFamilyOf(ev db.HumanNeededEvent) string {
+	var body service.ActivityBody
+	if json.Unmarshal(ev.Activity, &body) != nil || body.Workspace == nil {
+		return ""
+	}
+	return body.Workspace.Family
+}
+
+// workspaceTargetOf is the ticket, project and chat a workspace-level event is
+// about: what its person has to be able to open for it to be told.
+func workspaceTargetOf(ev db.HumanNeededEvent) service.WriteTarget {
+	t := service.WriteTarget{IssueID: ev.IssueID, ChatSessionID: ev.ChatSessionID}
+	var body service.ActivityBody
+	if json.Unmarshal(ev.Activity, &body) != nil || body.Workspace == nil {
+		return t
+	}
+	w := body.Workspace
+	if w.ProjectID != "" {
+		if id, err := parseUUIDSafe(w.ProjectID); err == nil {
+			t.ProjectID = id
+		}
+	}
+	for _, raw := range w.IssueIDs {
+		id, err := parseUUIDSafe(raw)
+		if err != nil {
+			// A ticket that cannot be read back cannot be judged: point at
+			// nothing that exists, so the gate says no.
+			id = pgtype.UUID{Bytes: [16]byte{0xff}, Valid: true}
+		}
+		t.IssueIDs = append(t.IssueIDs, id)
+	}
+	if w.Family == service.FamilyPR {
+		t.Repo = w.Attrs["repo"]
+	}
+	return t
+}
+
+// TargetVisibility is the one answer to "could this person open the ticket,
+// project or chat?" for a Bot's stream. Queueing a write, sending a row and
+// listing rows for catch-up all call it, so they cannot disagree. A person who
+// is not (or no longer) a member, or whose access cannot be established, sees
+// nothing.
+func (h *Handler) TargetVisibility() service.TargetVisibility {
+	return func(ctx context.Context, ws, user pgtype.UUID, t service.WriteTarget) bool {
+		v, err := h.visibilityViewerForUser(ctx, ws, user)
+		if err != nil {
+			return false
+		}
+		return h.targetVisibleTo(ctx, v, ws, t)
+	}
+}
+
+// NewTargetVisibility is TargetVisibility for callers that have the queries but
+// no handler (the event-bus listeners).
+func NewTargetVisibility(q *db.Queries) service.TargetVisibility {
+	return (&Handler{Queries: q}).TargetVisibility()
+}
+
+// targetVisibleTo checks every part of the target against the viewer. A chat is
+// its opener's own; a ticket and a project follow the sharing rules the lists
+// use. Anything that cannot be loaded, or sits in another workspace, is not
+// visible.
+func (h *Handler) targetVisibleTo(ctx context.Context, v visibilityViewer, ws pgtype.UUID, t service.WriteTarget) bool {
+	for _, id := range append([]pgtype.UUID{t.IssueID}, t.IssueIDs...) {
+		if !id.Valid {
+			continue
+		}
+		issue, err := h.Queries.GetIssue(ctx, id)
+		if err != nil || issue.WorkspaceID != ws || !v.canSeeIssue(issue) {
+			return false
+		}
+	}
+	if t.Repo != "" && !h.repoVisibleTo(ctx, v, ws, t.Repo) {
+		return false
+	}
+	if t.ProjectID.Valid {
+		project, err := h.Queries.GetProjectInWorkspace(ctx, db.GetProjectInWorkspaceParams{ID: t.ProjectID, WorkspaceID: ws})
+		if err != nil || !v.canSeeProject(project) {
+			return false
+		}
+	}
+	if t.ChatSessionID.Valid {
+		chat, err := h.Queries.GetChatSessionInWorkspace(ctx, db.GetChatSessionInWorkspaceParams{ID: t.ChatSessionID, WorkspaceID: ws})
+		if err != nil || !v.userID.Valid || chat.CreatorID != v.userID {
+			return false
+		}
+	}
+	return true
+}
+
+// repoVisibleTo checks "owner/name" against the workspace's repository
+// registry. Every registered entry for that repository has to be one the viewer
+// may see; a repository the workspace never registered has no sharing of its
+// own and is judged by the tickets alone. An unreadable registry sees nothing.
+func (h *Handler) repoVisibleTo(ctx context.Context, v visibilityViewer, ws pgtype.UUID, repo string) bool {
+	workspace, err := h.Queries.GetWorkspace(ctx, ws)
+	if err != nil {
+		return false
+	}
+	suffix := "/" + strings.ToLower(strings.Trim(repo, "/"))
+	for _, entry := range decodeWorkspaceRepos(workspace.Repos) {
+		key := strings.ToLower(string(repoident.NormalizeURL(entry.URL)))
+		if key == "" || !strings.HasSuffix(key, suffix) {
+			continue
+		}
+		if !v.canSeeRepo(entry, h.repoProjectIDs(ctx, ws, entry.URL)) {
+			return false
+		}
+	}
+	return true
+}
+
+func (g *activityGate) viewer(ev db.HumanNeededEvent) (*visibilityViewer, bool) {
+	if viewer, ok := g.viewers[ev.TargetUserID]; ok {
+		return viewer, true
+	}
+	v, err := g.h.visibilityViewerForUser(g.ctx, ev.WorkspaceID, ev.TargetUserID)
+	if err != nil {
+		return nil, false
+	}
+	g.viewers[ev.TargetUserID] = &v
+	return &v, true
+}
+
 func (g *activityGate) decide(ev db.HumanNeededEvent) (bool, string) {
 	q := g.h.Queries
+	if family := workspaceFamilyOf(ev); family != "" {
+		// Workspace-level events: the person must still be a member whose role
+		// may see this kind of event, the binding must still ask for the whole
+		// workspace, and whatever the event is about (a ticket, a project, a
+		// chat) must still be something they can open.
+		member, mErr := q.GetMemberByUserAndWorkspace(g.ctx, db.GetMemberByUserAndWorkspaceParams{UserID: ev.TargetUserID, WorkspaceID: ev.WorkspaceID})
+		if mErr != nil || !service.RoleCanSeeFamily(member.Role, family) {
+			return false, "access unavailable"
+		}
+		all, aErr := q.ListWorkspaceActivityBindings(g.ctx, ev.WorkspaceID)
+		if aErr != nil {
+			return false, "access unavailable"
+		}
+		covered := false
+		for _, b := range all {
+			if b.ID == ev.BindingID {
+				covered = true
+				break
+			}
+		}
+		if !covered {
+			return false, "outside activity scope"
+		}
+		t := workspaceTargetOf(ev)
+		if family == service.FamilyPR && !t.Established(family) {
+			return false, "access unavailable" // a PR is read through its tickets; none named, none told
+		}
+		if !t.Any() {
+			return true, ""
+		}
+		viewer, ok := g.viewer(ev)
+		if !ok || !g.h.targetVisibleTo(g.ctx, *viewer, ev.WorkspaceID, t) {
+			return false, "access unavailable"
+		}
+		return true, ""
+	}
 	var covering []db.MemberBotBinding
 	var err error
 	switch {
@@ -241,16 +423,8 @@ func (g *activityGate) decide(ev db.HumanNeededEvent) (bool, string) {
 		if getErr != nil || issue.WorkspaceID != ev.WorkspaceID {
 			return false, "access unavailable"
 		}
-		viewer, ok := g.viewers[ev.TargetUserID]
-		if !ok {
-			v, vErr := g.h.visibilityViewerForUser(g.ctx, ev.WorkspaceID, ev.TargetUserID)
-			if vErr != nil {
-				return false, "access unavailable"
-			}
-			viewer = &v
-			g.viewers[ev.TargetUserID] = viewer
-		}
-		if !viewer.canSeeIssue(issue) {
+		viewer, ok := g.viewer(ev)
+		if !ok || !viewer.canSeeIssue(issue) {
 			return false, "access unavailable"
 		}
 		covering, err = q.ListActivityBindingsForIssue(g.ctx, db.ListActivityBindingsForIssueParams{WorkspaceID: ev.WorkspaceID, ID: ev.IssueID})

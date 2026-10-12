@@ -360,6 +360,14 @@ func (c *APIClient) setHeaders(req *http.Request) {
 	if c.LinkedWorkspace != "" {
 		req.Header.Set("X-Linked-Workspace", c.LinkedWorkspace)
 	}
+	// A Bot's key may delete the workspace, change members or roles, reset keys
+	// or change quota/billing only with the owner's go-ahead (DENE-1936). The
+	// first attempt is refused with a confirmation id; once the owner has
+	// approved that card themselves, repeating the call with the id here spends
+	// it (once, for that exact call).
+	if ref := strings.TrimSpace(os.Getenv("MULTICA_OWNER_CONFIRMATION")); ref != "" {
+		req.Header.Set("X-Owner-Confirmation", ref)
+	}
 
 	platform := c.Platform
 	if platform == "" {

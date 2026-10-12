@@ -4,6 +4,7 @@ export {
   botKeys,
   externalBotListOptions,
   botBindingOptions,
+  botWritesOptions,
   botWakeOptions,
   botWakeEventsOptions,
   botMentionDirectoryOptions,

@@ -8,6 +8,7 @@ import { BotBindingSection } from "./bot-binding-section";
 const fixture = vi.hoisted(() => ({
   binding: {} as Record<string, unknown>,
   put: vi.fn(),
+  writes: [] as Record<string, unknown>[],
 }));
 
 vi.mock("@multica/core/hooks", () => ({ useWorkspaceId: () => "ws" }));
@@ -18,6 +19,12 @@ vi.mock("@multica/core/bots", () => ({
   botBindingOptions: () => ({
     queryKey: ["binding", "ws"],
     queryFn: async () => fixture.binding,
+  }),
+  botWritesOptions: () => ({
+    queryKey: ["writes", "ws"],
+    queryFn: async () => ({ writes: fixture.writes, next_cursor: "" }),
+    initialPageParam: "",
+    getNextPageParam: () => undefined,
   }),
   externalBotListOptions: () => ({
     queryKey: ["bots", "ws"],
@@ -51,6 +58,7 @@ const bound = (scope: string[]) => ({
 beforeEach(() => {
   fixture.put.mockReset();
   fixture.binding = bound([]);
+  fixture.writes = [];
 });
 
 it("hides the activity stream row until a Bot is connected", async () => {
@@ -80,4 +88,26 @@ it("reads a followed-only scope back as its own choice", async () => {
   mount();
   const trigger = await screen.findByRole("combobox", { name: "Send everything to my Bot" });
   expect(trigger).toHaveTextContent("Tickets I follow");
+});
+
+it("offers the whole workspace and saves it as one scope", async () => {
+  mount();
+  const trigger = await screen.findByRole("combobox", { name: "Send everything to my Bot" });
+  await userEvent.click(trigger);
+  await userEvent.click(await screen.findByRole("option", { name: "Everything I can see" }));
+  await waitFor(() =>
+    expect(fixture.put).toHaveBeenCalledWith({ activity_scope: ["owner_visible_all"] }, expect.anything()),
+  );
+});
+
+it("reads the whole-workspace scope back and lists what the Bot did in their name", async () => {
+  fixture.binding = bound(["owner_visible_all"]);
+  fixture.writes = [
+    { id: "w1", bot_name: "Grok Bot", on_behalf_of_name: "Kun", family: "agent", fields: ["name"], outcome: "done" },
+    { id: "w2", bot_name: "Grok Bot", on_behalf_of_name: "Kun", family: "member", fields: [], outcome: "blocked" },
+  ];
+  mount();
+  const trigger = await screen.findByRole("combobox", { name: "Send everything to my Bot" });
+  expect(trigger).toHaveTextContent("Everything I can see");
+  expect(await screen.findAllByText("Via Bot “Grok Bot” for Kun")).toHaveLength(2);
 });

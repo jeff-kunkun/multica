@@ -12,7 +12,7 @@ import (
 )
 
 const getChatConvertedIssue = `-- name: GetChatConvertedIssue :one
-SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority, i.assignee_type, i.assignee_id, i.creator_type, i.creator_id, i.parent_issue_id, i.acceptance_criteria, i.context_refs, i.position, i.due_date, i.created_at, i.updated_at, i.number, i.project_id, i.origin_type, i.origin_id, i.first_executed_at, i.start_date, i.metadata, i.stage, i.properties, i.revision, i.last_activity_at, i.triage_state, i.reviewer_type, i.reviewer_id, i.visibility, i.assignee_source, i.assignee_source_user_id, i.assignee_quote, i.progress_text, i.progress_source, i.progress_tone, i.progress_author_type, i.progress_author_id, i.progress_updated_at, i.duplicate_of_issue_id, i.domain_id, i.origin_chat_session_id, i.via_bot_id, i.via_bot_name FROM chat_session c
+SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority, i.assignee_type, i.assignee_id, i.creator_type, i.creator_id, i.parent_issue_id, i.acceptance_criteria, i.context_refs, i.position, i.due_date, i.created_at, i.updated_at, i.number, i.project_id, i.origin_type, i.origin_id, i.first_executed_at, i.start_date, i.metadata, i.stage, i.properties, i.revision, i.last_activity_at, i.triage_state, i.reviewer_type, i.reviewer_id, i.visibility, i.assignee_source, i.assignee_source_user_id, i.assignee_quote, i.progress_text, i.progress_source, i.progress_tone, i.progress_author_type, i.progress_author_id, i.progress_updated_at, i.duplicate_of_issue_id, i.domain_id, i.origin_chat_session_id, i.via_bot_id, i.via_bot_name, i.on_behalf_of_user_id FROM chat_session c
 JOIN issue i ON i.id = c.converted_issue_id AND i.workspace_id = c.workspace_id
 WHERE c.id = $1 AND c.workspace_id = $2
 `
@@ -72,12 +72,13 @@ func (q *Queries) GetChatConvertedIssue(ctx context.Context, arg GetChatConverte
 		&i.OriginChatSessionID,
 		&i.ViaBotID,
 		&i.ViaBotName,
+		&i.OnBehalfOfUserID,
 	)
 	return i, err
 }
 
 const getChatMergeTarget = `-- name: GetChatMergeTarget :one
-SELECT t.id, t.agent_id, t.issue_id, t.status, t.priority, t.dispatched_at, t.started_at, t.completed_at, t.result, t.error, t.created_at, t.context, t.runtime_id, t.session_id, t.work_dir, t.trigger_comment_id, t.chat_session_id, t.autopilot_run_id, t.attempt, t.max_attempts, t.parent_task_id, t.failure_reason, t.trigger_summary, t.force_fresh_session, t.is_leader_task, t.wait_reason, t.initiator_user_id, t.handoff_note, t.prepare_lease_expires_at, t.squad_id, t.runtime_mcp_overlay, t.escalation_for_task_id, t.fire_at, t.originator_user_id, t.runtime_connected_apps, t.coalesced_comment_ids, t.delivered_comment_ids, t.chat_input_task_id, t.chat_finalize_deferred_at, t.originator_source, t.delegated_from_task_id, t.retry_of_task_id, t.rerun_of_task_id, t.rule_version_id, t.trigger_evidence_kind, t.trigger_evidence_ref_id, t.accountable_user_id, t.session_rollout_missing, t.retired_session_id, t.quick_actions_disabled, t.regenerate_quick_actions_for, t.branch_name, t.durable_work_dir, t.channel_context_revision, t.comment_thread_id, t.cancelled_by_type, t.cancelled_by_id, t.cancelled_by_name, t.issue_snapshot, t.code_decision, t.failure_input_version, t.failure_fingerprint, t.work_thread_id, t.context_generation, t.context_message_limit, t.context_token_budget, t.continuity_break_reason, t.session_mode, t.resumed_from_task_id, t.session_break_reason, t.via_bot_id, t.via_bot_name, t.wake_root_id, t.wake_hop, t.wake_generation, t.wake_reserved, t.wake_human_quote, t.pickup_deadline_at FROM agent_task_queue t
+SELECT t.id, t.agent_id, t.issue_id, t.status, t.priority, t.dispatched_at, t.started_at, t.completed_at, t.result, t.error, t.created_at, t.context, t.runtime_id, t.session_id, t.work_dir, t.trigger_comment_id, t.chat_session_id, t.autopilot_run_id, t.attempt, t.max_attempts, t.parent_task_id, t.failure_reason, t.trigger_summary, t.force_fresh_session, t.is_leader_task, t.wait_reason, t.initiator_user_id, t.handoff_note, t.prepare_lease_expires_at, t.squad_id, t.runtime_mcp_overlay, t.escalation_for_task_id, t.fire_at, t.originator_user_id, t.runtime_connected_apps, t.coalesced_comment_ids, t.delivered_comment_ids, t.chat_input_task_id, t.chat_finalize_deferred_at, t.originator_source, t.delegated_from_task_id, t.retry_of_task_id, t.rerun_of_task_id, t.rule_version_id, t.trigger_evidence_kind, t.trigger_evidence_ref_id, t.accountable_user_id, t.session_rollout_missing, t.retired_session_id, t.quick_actions_disabled, t.regenerate_quick_actions_for, t.branch_name, t.durable_work_dir, t.channel_context_revision, t.comment_thread_id, t.cancelled_by_type, t.cancelled_by_id, t.cancelled_by_name, t.issue_snapshot, t.code_decision, t.failure_input_version, t.failure_fingerprint, t.work_thread_id, t.context_generation, t.context_message_limit, t.context_token_budget, t.continuity_break_reason, t.session_mode, t.resumed_from_task_id, t.session_break_reason, t.via_bot_id, t.via_bot_name, t.wake_root_id, t.wake_hop, t.wake_generation, t.wake_reserved, t.wake_human_quote, t.pickup_deadline_at, t.on_behalf_of_user_id FROM agent_task_queue t
 WHERE t.chat_session_id = $1
   AND t.status IN ('queued', 'dispatched', 'running', 'waiting_local_directory', 'deferred')
   AND t.regenerate_quick_actions_for IS NULL
@@ -172,12 +173,13 @@ func (q *Queries) GetChatMergeTarget(ctx context.Context, chatSessionID pgtype.U
 		&i.WakeReserved,
 		&i.WakeHumanQuote,
 		&i.PickupDeadlineAt,
+		&i.OnBehalfOfUserID,
 	)
 	return i, err
 }
 
 const getQueuedChatMergeTarget = `-- name: GetQueuedChatMergeTarget :one
-SELECT t.id, t.agent_id, t.issue_id, t.status, t.priority, t.dispatched_at, t.started_at, t.completed_at, t.result, t.error, t.created_at, t.context, t.runtime_id, t.session_id, t.work_dir, t.trigger_comment_id, t.chat_session_id, t.autopilot_run_id, t.attempt, t.max_attempts, t.parent_task_id, t.failure_reason, t.trigger_summary, t.force_fresh_session, t.is_leader_task, t.wait_reason, t.initiator_user_id, t.handoff_note, t.prepare_lease_expires_at, t.squad_id, t.runtime_mcp_overlay, t.escalation_for_task_id, t.fire_at, t.originator_user_id, t.runtime_connected_apps, t.coalesced_comment_ids, t.delivered_comment_ids, t.chat_input_task_id, t.chat_finalize_deferred_at, t.originator_source, t.delegated_from_task_id, t.retry_of_task_id, t.rerun_of_task_id, t.rule_version_id, t.trigger_evidence_kind, t.trigger_evidence_ref_id, t.accountable_user_id, t.session_rollout_missing, t.retired_session_id, t.quick_actions_disabled, t.regenerate_quick_actions_for, t.branch_name, t.durable_work_dir, t.channel_context_revision, t.comment_thread_id, t.cancelled_by_type, t.cancelled_by_id, t.cancelled_by_name, t.issue_snapshot, t.code_decision, t.failure_input_version, t.failure_fingerprint, t.work_thread_id, t.context_generation, t.context_message_limit, t.context_token_budget, t.continuity_break_reason, t.session_mode, t.resumed_from_task_id, t.session_break_reason, t.via_bot_id, t.via_bot_name, t.wake_root_id, t.wake_hop, t.wake_generation, t.wake_reserved, t.wake_human_quote, t.pickup_deadline_at FROM agent_task_queue t
+SELECT t.id, t.agent_id, t.issue_id, t.status, t.priority, t.dispatched_at, t.started_at, t.completed_at, t.result, t.error, t.created_at, t.context, t.runtime_id, t.session_id, t.work_dir, t.trigger_comment_id, t.chat_session_id, t.autopilot_run_id, t.attempt, t.max_attempts, t.parent_task_id, t.failure_reason, t.trigger_summary, t.force_fresh_session, t.is_leader_task, t.wait_reason, t.initiator_user_id, t.handoff_note, t.prepare_lease_expires_at, t.squad_id, t.runtime_mcp_overlay, t.escalation_for_task_id, t.fire_at, t.originator_user_id, t.runtime_connected_apps, t.coalesced_comment_ids, t.delivered_comment_ids, t.chat_input_task_id, t.chat_finalize_deferred_at, t.originator_source, t.delegated_from_task_id, t.retry_of_task_id, t.rerun_of_task_id, t.rule_version_id, t.trigger_evidence_kind, t.trigger_evidence_ref_id, t.accountable_user_id, t.session_rollout_missing, t.retired_session_id, t.quick_actions_disabled, t.regenerate_quick_actions_for, t.branch_name, t.durable_work_dir, t.channel_context_revision, t.comment_thread_id, t.cancelled_by_type, t.cancelled_by_id, t.cancelled_by_name, t.issue_snapshot, t.code_decision, t.failure_input_version, t.failure_fingerprint, t.work_thread_id, t.context_generation, t.context_message_limit, t.context_token_budget, t.continuity_break_reason, t.session_mode, t.resumed_from_task_id, t.session_break_reason, t.via_bot_id, t.via_bot_name, t.wake_root_id, t.wake_hop, t.wake_generation, t.wake_reserved, t.wake_human_quote, t.pickup_deadline_at, t.on_behalf_of_user_id FROM agent_task_queue t
 WHERE t.chat_session_id = $1
   AND t.status IN ('queued', 'deferred')
   AND t.regenerate_quick_actions_for IS NULL
@@ -271,6 +273,7 @@ func (q *Queries) GetQueuedChatMergeTarget(ctx context.Context, chatSessionID pg
 		&i.WakeReserved,
 		&i.WakeHumanQuote,
 		&i.PickupDeadlineAt,
+		&i.OnBehalfOfUserID,
 	)
 	return i, err
 }
