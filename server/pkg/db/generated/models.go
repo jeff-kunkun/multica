@@ -1202,6 +1202,46 @@ type GithubPullRequestCheckSuite struct {
 	UpdatedAt  pgtype.Timestamptz `json:"updated_at"`
 }
 
+type HumanNeededEvent struct {
+	Sequence        int64              `json:"sequence"`
+	EventID         pgtype.UUID        `json:"event_id"`
+	WorkspaceID     pgtype.UUID        `json:"workspace_id"`
+	BotID           pgtype.UUID        `json:"bot_id"`
+	BindingID       pgtype.UUID        `json:"binding_id"`
+	TargetUserID    pgtype.UUID        `json:"target_user_id"`
+	EventType       string             `json:"event_type"`
+	ParentEventID   pgtype.UUID        `json:"parent_event_id"`
+	Kind            string             `json:"kind"`
+	DedupeKey       string             `json:"dedupe_key"`
+	IssueID         pgtype.UUID        `json:"issue_id"`
+	ChatSessionID   pgtype.UUID        `json:"chat_session_id"`
+	SummonID        pgtype.UUID        `json:"summon_id"`
+	InboxItemID     pgtype.UUID        `json:"inbox_item_id"`
+	SourceCommentID pgtype.UUID        `json:"source_comment_id"`
+	CallerType      string             `json:"caller_type"`
+	CallerID        pgtype.UUID        `json:"caller_id"`
+	Question        string             `json:"question"`
+	Options         []byte             `json:"options"`
+	Urgency         string             `json:"urgency"`
+	Deadline        pgtype.Timestamptz `json:"deadline"`
+	Status          string             `json:"status"`
+	Reason          string             `json:"reason"`
+	Attempts        int32              `json:"attempts"`
+	NextAttemptAt   pgtype.Timestamptz `json:"next_attempt_at"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	SentAt          pgtype.Timestamptz `json:"sent_at"`
+	WokenAt         pgtype.Timestamptz `json:"woken_at"`
+	RelayedAt       pgtype.Timestamptz `json:"relayed_at"`
+	RelayChannel    pgtype.Text        `json:"relay_channel"`
+	RelayRef        pgtype.Text        `json:"relay_ref"`
+	AnsweredAt      pgtype.Timestamptz `json:"answered_at"`
+	Answer          pgtype.Text        `json:"answer"`
+	AnswerCommentID pgtype.UUID        `json:"answer_comment_id"`
+	EscalatedAt     pgtype.Timestamptz `json:"escalated_at"`
+	LastNudgeAt     pgtype.Timestamptz `json:"last_nudge_at"`
+	ExpiresAt       pgtype.Timestamptz `json:"expires_at"`
+}
+
 type InboxItem struct {
 	ID            pgtype.UUID        `json:"id"`
 	WorkspaceID   pgtype.UUID        `json:"workspace_id"`
@@ -1841,6 +1881,21 @@ type Member struct {
 	UserID      pgtype.UUID        `json:"user_id"`
 	Role        string             `json:"role"`
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+}
+
+type MemberBotBinding struct {
+	ID                   pgtype.UUID        `json:"id"`
+	WorkspaceID          pgtype.UUID        `json:"workspace_id"`
+	UserID               pgtype.UUID        `json:"user_id"`
+	BotID                pgtype.UUID        `json:"bot_id"`
+	Mode                 string             `json:"mode"`
+	ResendAfterSeconds   int32              `json:"resend_after_seconds"`
+	EscalateAfterSeconds int32              `json:"escalate_after_seconds"`
+	CreatedAt            pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt            pgtype.Timestamptz `json:"updated_at"`
+	VerifiedAt           pgtype.Timestamptz `json:"verified_at"`
+	RevokedAt            pgtype.Timestamptz `json:"revoked_at"`
+	BrokenNotifiedAt     pgtype.Timestamptz `json:"broken_notified_at"`
 }
 
 type NotificationPreference struct {

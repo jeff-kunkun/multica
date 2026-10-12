@@ -719,6 +719,20 @@
       "granted": "Ce navigateur peut afficher des bannières de notification.",
       "denied": "Bloqué par votre navigateur. Activez les notifications pour ce site dans ses réglages.",
       "enabled_badge": "Activé"
+    },
+    "decisions": {
+      "title": "Décisions qui vous attendent",
+      "label": "Les envoyer à mon Bot",
+      "none": "Aucun Bot (dans l'app seulement)",
+      "no_bots": "Vous n'avez pas encore de Bot. Ajoutez-en un dans Bots.",
+      "state_none": "Choisissez votre propre Bot ; ce qui attend votre décision lui est envoyé.",
+      "state_ok": "Ce qui attend votre décision va d'abord à {{name}}.",
+      "state_unverified": "En attente de la confirmation de {{name}}.",
+      "state_broken": "{{name}} est injoignable ; les décisions reviennent dans l'app.",
+      "check_again": "Revérifier",
+      "mirror_label": "Me prévenir aussi dans l'app",
+      "mirror_hint": "Garder l'alerte dans l'app en plus du Bot.",
+      "toast_failed": "Échec de la mise à jour du réglage Bot"
     }
   },
   "tokens": {

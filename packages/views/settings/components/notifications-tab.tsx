@@ -8,6 +8,7 @@ import type { NotificationGroupKey, NotificationPreferences } from "@multica/cor
 import { Switch } from "@multica/ui/components/ui/switch";
 import { toast } from "sonner";
 import { useT } from "../../i18n";
+import { BotBindingSection } from "./bot-binding-section";
 import { BrowserNotificationSetting } from "./browser-notification-setting";
 import {
   SettingsCard,
@@ -59,6 +60,8 @@ export function NotificationsTab() {
 
   return (
     <SettingsTab title={t(($) => $.page.tabs.notifications)} scope="workspace-only">
+      <BotBindingSection />
+
       <SettingsSection
         title={t(($) => $.notifications.title)}
         description={t(($) => $.notifications.description)}

@@ -104,6 +104,8 @@ import type {
   ExternalBotKeyResponse,
   ExternalBotSetupTextResponse,
   BotWakeSettings,
+  BotBinding,
+  PutBotBindingRequest,
   UpdateBotWakeRequest,
   BotWakeEventPage,
   BotMentionTarget,
@@ -4904,6 +4906,26 @@ export class ApiClient {
 
   async deleteExternalBot(workspaceId: string, botId: string): Promise<void> {
     await this.fetch(`/api/workspaces/${workspaceId}/bots/${botId}`, { method: "DELETE" });
+  }
+
+  // Your own Bot channel for decisions (DENE-1933): only you, from your login.
+  async getBotBinding(workspaceId: string): Promise<BotBinding> {
+    return this.fetch(`/api/workspaces/${workspaceId}/me/bot-binding`);
+  }
+
+  async putBotBinding(workspaceId: string, data: PutBotBindingRequest): Promise<BotBinding> {
+    return this.fetch(`/api/workspaces/${workspaceId}/me/bot-binding`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async verifyBotBinding(workspaceId: string): Promise<BotBinding> {
+    return this.fetch(`/api/workspaces/${workspaceId}/me/bot-binding/verify`, { method: "POST" });
+  }
+
+  async deleteBotBinding(workspaceId: string): Promise<BotBinding> {
+    return this.fetch(`/api/workspaces/${workspaceId}/me/bot-binding`, { method: "DELETE" });
   }
 
   // Bot wake (DENE-1792): owner/admin or the bot's own key.
