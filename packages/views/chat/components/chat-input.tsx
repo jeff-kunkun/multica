@@ -19,7 +19,7 @@ import {
 } from "../../editor/use-coordinated-uploads";
 import { SubmitButton } from "@multica/ui/components/common/submit-button";
 import { ChatAddMenu } from "./chat-add-menu";
-import { ChatSendModeButton, effectiveChatSendMode } from "./chat-send-mode";
+import { ChatReplaceConfirmDialog, ChatSendModeButton, effectiveChatSendMode } from "./chat-send-mode";
 import { CHAT_COLUMN, CHAT_GUTTER } from "./chat-column";
 import { useChatStore, DRAFT_NEW_SESSION } from "@multica/core/chat";
 import { replaceProjectId } from "@multica/core/chat/project-context";
@@ -124,6 +124,10 @@ interface ChatInputProps {
   steerProvider?: string;
   /** How a steer reaches the reply; "restart" restarts the CLI. */
   steerMode?: string;
+  /** Queued messages a replace send would cancel, stated in its confirm. */
+  queuedCount?: number;
+  /** Why replace is unavailable for this person; unset when allowed. */
+  replaceUnavailable?: string;
   disabled?: boolean;
   /** True when the user has no agent available — disables the editor and
    *  surfaces a distinct placeholder. Kept separate from `disabled` so
@@ -200,6 +204,8 @@ export function ChatInput({
   steerSupported,
   steerProvider,
   steerMode,
+  queuedCount = 0,
+  replaceUnavailable,
   disabled,
   noAgent,
   agentArchived,
@@ -526,7 +532,7 @@ export function ChatInput({
   // it for one send.
   const sendModeActive = !!isRunning && !!allowSubmitWhileRunning;
   const [chosenMode, setChosenMode] = useState<ChatSendMode | null>(null);
-  const sendMode = effectiveChatSendMode(chosenMode, steerSupported);
+  const sendMode = effectiveChatSendMode(chosenMode, steerSupported, !replaceUnavailable);
   const sendModeRef = useRef<ChatSendMode | undefined>(chosenMode ?? undefined);
   useLayoutEffect(() => {
     sendModeRef.current = chosenMode ? sendMode : undefined;
@@ -534,6 +540,20 @@ export function ChatInput({
   useEffect(() => {
     if (!isRunning) setChosenMode(null);
   }, [isRunning]);
+  // A replace send waits on this confirm; declining keeps the draft.
+  const [replaceConfirmOpen, setReplaceConfirmOpen] = useState(false);
+  const replaceSettleRef = useRef<((confirmed: boolean) => void) | null>(null);
+  const confirmReplace = () =>
+    new Promise<boolean>((resolve) => {
+      replaceSettleRef.current = resolve;
+      setReplaceConfirmOpen(true);
+    });
+  const settleReplace = (confirmed: boolean) => {
+    replaceSettleRef.current?.(confirmed);
+    replaceSettleRef.current = null;
+    setReplaceConfirmOpen(false);
+  };
+  useEffect(() => () => replaceSettleRef.current?.(false), []);
 
   const { submitting, submit } = useComposerSubmit({
     editorRef,
@@ -568,6 +588,13 @@ export function ChatInput({
           loaded: editorDraftKeyRef.current,
           selected: draftKey,
         });
+        return false;
+      }
+      // The mode is fixed when the send starts: the reply can end while the
+      // replace confirm is open, which clears the chosen mode, and a confirmed
+      // replace must not go out as a plain send.
+      const modeAtSubmit = sendModeActive ? sendModeRef.current : undefined;
+      if (modeAtSubmit === "replace" && !(await confirmReplace())) {
         return false;
       }
       // Only send attachment IDs for uploads still present in the content.
@@ -634,13 +661,15 @@ export function ChatInput({
         uniqueActiveIds.length > 0 ? uniqueActiveIds : undefined,
         commitInput,
         draftAttachments.filter((attachment) => uniqueActiveIds.includes(attachment.id)),
-        sendModeActive ? sendModeRef.current : undefined,
+        modeAtSubmit,
       );
       // Owner rejected the send (or threw, which useComposerSubmit also treats
       // as a rejection): the draft was never committed, so it stays put for
       // retry. Only a commit — here or by the owner — clears it.
       if (accepted === false) return false;
       if (!committed) commitInput();
+      // Replace is one-shot: the next message goes back to the default mode.
+      if (modeAtSubmit === "replace") setChosenMode(null);
       return true;
     },
   });
@@ -879,7 +908,9 @@ export function ChatInput({
                     ? t(($) => $.input.mode_steer)
                     : sendMode === "queue"
                       ? t(($) => $.input.mode_queue)
-                      : t(($) => $.input.mode_restart),
+                      : sendMode === "replace"
+                        ? t(($) => $.input.mode_replace)
+                        : t(($) => $.input.mode_restart),
                 })}
               </span>
               <SubmitButton
@@ -895,6 +926,7 @@ export function ChatInput({
                 steerSupported={steerSupported}
                 steerProvider={steerProvider}
                 steerMode={steerMode}
+                replaceUnavailable={replaceUnavailable}
                 canSend={!hasNothingToSend && !submitting && !gate.uploading && !disabled && !noAgent}
                 loading={submitting || gate.uploading}
                 onModeChange={setChosenMode}
@@ -929,6 +961,7 @@ export function ChatInput({
         </div>
         {uploadEnabled && isDragOver && <FileDropOverlay />}
       </div>
+      <ChatReplaceConfirmDialog open={replaceConfirmOpen} queuedCount={queuedCount} onSettle={settleReplace} />
     </div>
   );
 }

@@ -696,6 +696,12 @@ export default function ChatTab() {
           steerSupported={pendingTask?.steer_supported === true}
           steerProvider={pendingTask?.steer_provider}
           steerMode={pendingTask?.steer_mode}
+          queuedCount={pendingTask?.hidden_queued_count ?? pendingTask?.queued_tasks?.length ?? 0}
+          replaceUnavailable={
+            activeSession && activeSession.creator_id !== userId
+              ? t("composer.mode_replace_creator_only")
+              : undefined
+          }
           disabled={disabled}
           disabledReason={disabledReason}
         />

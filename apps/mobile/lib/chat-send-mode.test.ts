@@ -21,6 +21,12 @@ describe("chat send mode", () => {
     expect(effectiveChatSendMode(null, true)).toBe("steer");
   });
 
+  it("falls back from replace when this person cannot replace", () => {
+    expect(effectiveChatSendMode("replace", true)).toBe("replace");
+    expect(effectiveChatSendMode("replace", true, false)).toBe("steer");
+    expect(effectiveChatSendMode("replace", false, false)).toBe("queue");
+  });
+
   it("names the CLI", () => {
     expect(steerCliName("codex")).toBe("Codex");
     expect(steerCliName("")).toBe("");

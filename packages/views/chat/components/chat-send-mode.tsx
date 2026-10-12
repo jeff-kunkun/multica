@@ -3,6 +3,10 @@
 import { useState, type SyntheticEvent } from "react";
 import { ChevronDown, Loader2 } from "lucide-react";
 import type { ChatSendMode } from "@multica/core/types";
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from "@multica/ui/components/ui/alert-dialog";
 import { Button } from "@multica/ui/components/ui/button";
 import {
   DropdownMenu,
@@ -20,7 +24,7 @@ import { useIsMobile } from "@multica/ui/hooks/use-mobile";
 import { cn } from "@multica/ui/lib/utils";
 import { useT } from "../../i18n";
 
-const MODES: ChatSendMode[] = ["steer", "queue", "restart"];
+const MODES: ChatSendMode[] = ["steer", "queue", "restart", "replace"];
 
 /** The mode Enter uses while a reply is running: steer when the CLI can take it. */
 export function defaultChatSendMode(steerSupported: boolean | undefined): ChatSendMode {
@@ -31,8 +35,10 @@ export function defaultChatSendMode(steerSupported: boolean | undefined): ChatSe
 export function effectiveChatSendMode(
   chosen: ChatSendMode | null,
   steerSupported: boolean | undefined,
+  replaceAllowed = true,
 ): ChatSendMode {
   if (chosen === "steer" && !steerSupported) return "queue";
+  if (chosen === "replace" && !replaceAllowed) return defaultChatSendMode(steerSupported);
   return chosen ?? defaultChatSendMode(steerSupported);
 }
 
@@ -52,6 +58,8 @@ interface ChatSendModeButtonProps {
   steerProvider?: string;
   /** "restart" when steering stops the CLI and resumes its session. */
   steerMode?: string;
+  /** Why replace is unavailable here (DENE-1934); unset when it is allowed. */
+  replaceUnavailable?: string;
   /** False while the draft is empty or a send is in flight. */
   canSend: boolean;
   loading?: boolean;
@@ -71,6 +79,7 @@ export function ChatSendModeButton({
   steerSupported,
   steerProvider,
   steerMode,
+  replaceUnavailable,
   canSend,
   loading,
   onModeChange,
@@ -85,7 +94,9 @@ export function ChatSendModeButton({
       ? t(($) => $.input.mode_steer)
       : m === "queue"
         ? t(($) => $.input.mode_queue)
-        : t(($) => $.input.mode_restart);
+        : m === "replace"
+          ? t(($) => $.input.mode_replace)
+          : t(($) => $.input.mode_restart);
   const description = (m: ChatSendMode) =>
     m === "steer"
       ? steerMode === "restart"
@@ -95,7 +106,9 @@ export function ChatSendModeButton({
           : t(($) => $.input.mode_steer_desc)
       : m === "queue"
         ? t(($) => $.input.mode_queue_desc)
-        : t(($) => $.input.mode_restart_desc);
+        : m === "replace"
+          ? t(($) => $.input.mode_replace_desc)
+          : t(($) => $.input.mode_restart_desc);
   const processLine = (m: ChatSendMode) =>
     m === "steer"
       ? steerMode === "restart"
@@ -105,25 +118,32 @@ export function ChatSendModeButton({
           : t(($) => $.input.mode_steer_process)
       : m === "queue"
         ? t(($) => $.input.mode_queue_process)
-        : t(($) => $.input.mode_restart_process);
+        : m === "replace"
+          ? t(($) => $.input.mode_replace_process)
+          : t(($) => $.input.mode_restart_process);
   const steerReason = steerProvider
     ? t(($) => $.input.mode_steer_unsupported, { cli: cliName(steerProvider) })
     : t(($) => $.input.mode_steer_unsupported_generic);
 
+  // The reason a row cannot be picked, or null when it can.
+  const unavailable = (m: ChatSendMode) =>
+    m === "steer" && !steerSupported ? steerReason : m === "replace" ? (replaceUnavailable ?? null) : null;
+
   const pick = (next: ChatSendMode) => {
-    if (next === "steer" && !steerSupported) return;
+    if (unavailable(next)) return;
     onModeChange(next);
     setSheetOpen(false);
     if (canSend) onSend(next);
   };
 
   const rowText = (m: ChatSendMode) => {
-    const disabled = m === "steer" && !steerSupported;
+    const reason = unavailable(m);
+    const disabled = !!reason;
     return (
       <span className="flex min-w-0 flex-col gap-0.5 text-left">
         <span>{label(m)}</span>
         <span className="text-caption text-muted-foreground">
-          {disabled ? steerReason : description(m)}
+          {reason ?? description(m)}
         </span>
         {!disabled && (
           <span className="text-caption text-muted-foreground">{processLine(m)}</span>
@@ -139,6 +159,10 @@ export function ChatSendModeButton({
       variant="default"
       className="w-6 rounded-l-none rounded-r-full border-l border-primary-foreground/20"
       aria-label={t(($) => $.input.mode_menu)}
+      // On phones the tap would blur the editor and shift the composer
+      // before the click lands, so the sheet never opened.
+      onPointerDown={isMobile ? keepFocusInComposer : undefined}
+      onMouseDown={isMobile ? keepFocusInComposer : undefined}
       onClick={isMobile ? () => setSheetOpen(true) : undefined}
     >
       <ChevronDown aria-hidden="true" />
@@ -166,7 +190,7 @@ export function ChatSendModeButton({
             <SheetContent side="bottom" showCloseButton={false} className="gap-0 px-2 pt-2 pb-[max(0.5rem,env(safe-area-inset-bottom))]">
               <SheetTitle className="sr-only">{t(($) => $.input.mode_menu)}</SheetTitle>
               {MODES.map((m) => {
-                const disabled = m === "steer" && !steerSupported;
+                const disabled = !!unavailable(m);
                 return (
                   <button
                     key={m}
@@ -199,7 +223,7 @@ export function ChatSendModeButton({
                 <DropdownMenuRadioItem
                   key={m}
                   value={m}
-                  disabled={m === "steer" && !steerSupported}
+                  disabled={!!unavailable(m)}
                   className="items-start py-1.5"
                 >
                   {rowText(m)}
@@ -210,5 +234,48 @@ export function ChatSendModeButton({
         </DropdownMenu>
       )}
     </div>
+  );
+}
+
+/**
+ * Confirms a replace send (DENE-1934): it stops the running reply and cancels
+ * every queued message, so the count is stated before anything is sent.
+ */
+export function ChatReplaceConfirmDialog({
+  open,
+  queuedCount,
+  onSettle,
+}: {
+  open: boolean;
+  queuedCount: number;
+  onSettle: (confirmed: boolean) => void;
+}) {
+  const { t } = useT("chat");
+  return (
+    <AlertDialog open={open} onOpenChange={(next) => { if (!next) onSettle(false); }}>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>{t(($) => $.input.replace_confirm_title)}</AlertDialogTitle>
+          <AlertDialogDescription>
+            {queuedCount > 0
+              ? t(($) => $.input.replace_confirm_desc, { count: queuedCount })
+              : t(($) => $.input.replace_confirm_desc_none)}
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel className="min-h-11">{t(($) => $.input.replace_confirm_keep)}</AlertDialogCancel>
+          <AlertDialogAction
+            className="min-h-11"
+            variant="destructive"
+            onClick={(event) => {
+              event.preventDefault();
+              onSettle(true);
+            }}
+          >
+            {t(($) => $.input.replace_confirm_action)}
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
   );
 }

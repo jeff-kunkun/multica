@@ -963,6 +963,7 @@ export function useChatController(opts?: { isActive?: boolean }) {
     isAgentArchived,
     isAgentAccessRevoked,
     isChatViewOnly,
+    sharedSpeaker,
     isAgentRuntimeBound,
     activeAgent,
     routingAvailable,
