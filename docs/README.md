@@ -14,6 +14,7 @@
 - [外部 Bot 提及原文、原楼层回复与 30 秒通知合并](../server/internal/service/builtin_skills/multica-platform/references/external-bots.md#mention-delivery-and-replying-in-place)
 - [Bot 唤醒限制、回执、恢复与审计](../server/docs/bot-wake-contract.md#causality-lifecycle-and-verification-limits)
 - [要人决定的事推给本人的 Bot](kun/human-needed.md)
+- [本人名下与关注任务、聊天的 Bot 动态流契约](../server/docs/bot-activity-contract.md)
 - [每台机器同时运行上限](kun/machine-run-capacity.md)
 - [工作区全景命令与筛选范围](../server/internal/service/builtin_skills/multica-platform/references/overview.md)
 - [运行合并、连带停止与聊天转单](../server/internal/service/builtin_skills/multica-platform/references/run-control.md)

@@ -717,6 +717,9 @@ export interface ExternalBotKeyResponse {
 // back in the app).
 export type BotBindingState = "none" | "unverified" | "ok" | "broken";
 export type BotBindingMode = "bot_first" | "mirror";
+// Full activity stream (DENE-1935): which tickets and chats feed the Bot.
+// Empty means the stream is off.
+export type BotActivityScope = "owned" | "followed";
 
 export interface BotBinding {
   bound: boolean;
@@ -725,6 +728,8 @@ export interface BotBinding {
   bot_id?: string;
   bot_name?: string;
   mode?: BotBindingMode;
+  /** Always an array; [] = activity stream off. */
+  activity_scope?: BotActivityScope[];
   resend_after_seconds?: number;
   escalate_after_seconds?: number;
   verified_at?: string | null;
@@ -735,6 +740,7 @@ export interface BotBinding {
 export interface PutBotBindingRequest {
   bot_id?: string;
   mode?: BotBindingMode;
+  activity_scope?: BotActivityScope[];
   resend_after_seconds?: number;
   escalate_after_seconds?: number;
 }

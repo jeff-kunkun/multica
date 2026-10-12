@@ -154,9 +154,27 @@ func (w *HumanNeededWorker) push(ctx context.Context, ev db.HumanNeededEvent) {
 		w.cancel(ev, "channel unavailable")
 		return
 	}
-	if ev.IssueID.Valid && !w.targetCanSeeIssue(ctx, ev) {
-		w.cancel(ev, "access unavailable")
+	if ev.EventType == service.HumanEventActivity && len(channel.ActivityScope) == 0 {
+		w.cancel(ev, "activity stream switched off")
 		return
+	}
+	if ev.EventType == service.HumanEventActivity {
+		// Re-decided at send time against the stream as it stands now: the
+		// person may have lost sight of the ticket, stopped following it,
+		// handed it on, or narrowed the scope since the row was queued.
+		if ok, reason := newActivityGate(w.h, ctx).allows(ev); !ok {
+			w.cancel(ev, reason)
+			return
+		}
+	} else {
+		if ev.IssueID.Valid && !w.targetCanSeeIssue(ctx, ev) {
+			w.cancel(ev, "access unavailable")
+			return
+		}
+		if ev.ChatSessionID.Valid && !w.targetOwnsChat(ctx, ev) {
+			w.cancel(ev, "access unavailable")
+			return
+		}
 	}
 	wake, err := w.h.Queries.GetBotWake(ctx, ev.BotID)
 	if err != nil || len(wake.WebhookSecret) == 0 || w.h.BotWakeSecrets == nil {
@@ -183,6 +201,12 @@ func (w *HumanNeededWorker) push(ctx context.Context, ev db.HumanNeededEvent) {
 		w.finish(ev, false, "payload unavailable")
 		return
 	}
+	// Whatever the builders copied in, nothing leaves unmasked.
+	fields, err = service.ScrubPayload(fields)
+	if err != nil {
+		w.finish(ev, false, "payload unavailable")
+		return
+	}
 	payload, err := marshalBotWakeBatch(ev.EventID, []map[string]any{fields})
 	if err != nil {
 		w.finish(ev, false, "payload unavailable")
@@ -199,6 +223,14 @@ func (w *HumanNeededWorker) targetCanSeeIssue(ctx context.Context, ev db.HumanNe
 	}
 	viewer, err := w.h.visibilityViewerForUser(ctx, ev.WorkspaceID, ev.TargetUserID)
 	return err == nil && viewer.canSeeIssue(issue)
+}
+
+// targetOwnsChat is the send-time check for chat events: a chat is the
+// opener's own, so anyone else (a changed owner, a deleted session) gets
+// nothing.
+func (w *HumanNeededWorker) targetOwnsChat(ctx context.Context, ev db.HumanNeededEvent) bool {
+	chat, err := w.h.Queries.GetChatSession(ctx, ev.ChatSessionID)
+	return err == nil && chat.WorkspaceID == ev.WorkspaceID && chat.CreatorID == ev.TargetUserID
 }
 
 // humanNeededPayloadFields is the webhook body for one event. It keeps the
@@ -221,6 +253,7 @@ func (h *Handler) humanNeededPayloadFields(ctx context.Context, ev db.HumanNeede
 		"woken_url":    eventURL + "/woken",
 		"relayed_url":  eventURL + "/relayed",
 		"answered_url": eventURL + "/answered",
+		"handled_url":  eventURL + "/handled",
 		"pending_url":  base + "/api/workspaces/" + uuidToString(ev.WorkspaceID) + "/bots/" + uuidToString(ev.BotID) + "/human-needed",
 		"ack_url":      eventURL + "/ack",
 		"ack_body":     map[string]any{},
@@ -265,6 +298,9 @@ func (h *Handler) humanNeededPayloadFields(ctx context.Context, ev db.HumanNeede
 		fields["source_id"] = uuidToString(ev.SourceCommentID)
 	}
 	fields["author"] = h.humanNeededAsker(ctx, ev)
+	if ev.EventType == service.HumanEventActivity {
+		return h.activityPayloadFields(fields, ev, title, sourceURL)
+	}
 	targetName := ""
 	if u, getErr := h.Queries.GetUser(ctx, ev.TargetUserID); getErr == nil {
 		targetName = u.Name
@@ -273,12 +309,16 @@ func (h *Handler) humanNeededPayloadFields(ctx context.Context, ev db.HumanNeede
 		"kind":           ev.Kind,
 		"target_user_id": uuidToString(ev.TargetUserID),
 		"target_name":    targetName,
-		"question":       ev.Question,
+		"question":       service.MaskSecrets(ev.Question),
 		"options":        options,
 		"urgency":        ev.Urgency,
 		"source_url":     sourceURL,
 		"mode":           channel.Mode,
 		"escalation":     ev.EventType == service.HumanEventEscalation,
+		// human_needed is the top lane of the stream: the same tags the
+		// activity events carry, so one filter covers both.
+		"importance": service.ImportanceCritical,
+		"categories": []string{service.CategoryNeedsHuman},
 	}
 	if ev.Deadline.Valid {
 		block["deadline"] = ev.Deadline.Time
@@ -298,7 +338,9 @@ func (h *Handler) humanNeededPayloadFields(ctx context.Context, ev db.HumanNeede
 	if ev.EventType == service.HumanEventEscalation {
 		lead = "还没转达给你，请尽快看"
 	}
-	summary := fmt.Sprintf("%s：%s", lead, ev.Question)
+	// Masked before the cut: a secret truncated to a stub is no longer
+	// recognisable as one.
+	summary := fmt.Sprintf("%s：%s", lead, service.MaskSecrets(ev.Question))
 	if title != "" {
 		summary = fmt.Sprintf("%s（%s）", summary, title)
 	}
@@ -337,6 +379,9 @@ func (w *HumanNeededWorker) Sweep(ctx context.Context) {
 	}
 	if err := q.ExpireHumanNeeded(ctx); err != nil {
 		slog.Error("human needed: expire failed", "error", err)
+	}
+	if _, err := q.PurgeActivityEvents(ctx); err != nil {
+		slog.Error("activity stream: purge failed", "error", err)
 	}
 	if _, err := q.ResendUnwokenHumanNeeded(ctx); err != nil {
 		slog.Error("human needed: resend failed", "error", err)

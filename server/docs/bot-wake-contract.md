@@ -423,3 +423,9 @@ ask-human writes its question into the chat first, so it is visible with or
 without a Bot. When a channel turns bad the person gets one in-app notice per
 outage and every open call returns to the app, including calls still waiting
 after the notice.
+
+### Activity stream (DENE-1935)
+
+The same outbox also carries the full activity stream (`type: "activity"`) for
+people who switched `activity_scope` on. Contract, tags and receipts:
+[bot-activity-contract.md](bot-activity-contract.md).

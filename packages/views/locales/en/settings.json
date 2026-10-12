@@ -732,6 +732,12 @@
       "check_again": "Check again",
       "mirror_label": "Also alert me in the app",
       "mirror_hint": "Keep the in-app alert as well as the Bot.",
+      "activity_label": "Send everything to my Bot",
+      "activity_hint": "All comments, chats and status changes.",
+      "activity_off": "Off",
+      "activity_owned": "Tickets and chats I own",
+      "activity_followed": "Tickets I follow",
+      "activity_both": "Mine and followed",
       "toast_failed": "Failed to update your Bot setting"
     }
   },

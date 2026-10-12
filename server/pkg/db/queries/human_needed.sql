@@ -73,13 +73,14 @@ UPDATE member_bot_binding SET broken_notified_at = NULL WHERE id = $1 AND broken
 INSERT INTO human_needed_event (
     workspace_id, bot_id, binding_id, target_user_id, event_type, parent_event_id,
     kind, dedupe_key, issue_id, chat_session_id, summon_id, inbox_item_id, source_comment_id, ask_id,
-    caller_type, caller_id, question, options, urgency, deadline, expires_at
+    caller_type, caller_id, question, options, urgency, deadline, expires_at, activity
 ) VALUES (
     $1, $2, $3, $4, $5, sqlc.narg('parent_event_id'),
     $6, $7, sqlc.narg('issue_id'), sqlc.narg('chat_session_id'), sqlc.narg('summon_id'),
     sqlc.narg('inbox_item_id'), sqlc.narg('source_comment_id'), sqlc.narg('ask_id'),
     $8, sqlc.narg('caller_id'), $9, $10, $11, sqlc.narg('deadline'),
-    COALESCE(sqlc.narg('expires_at')::timestamptz, now() + interval '7 days')
+    COALESCE(sqlc.narg('expires_at')::timestamptz, now() + interval '7 days'),
+    sqlc.narg('activity')::jsonb
 )
 ON CONFLICT (bot_id, event_type, dedupe_key) DO UPDATE
 SET inbox_item_id = EXCLUDED.inbox_item_id
@@ -94,7 +95,7 @@ SET status = 'sending', next_attempt_at = now() + interval '2 minutes'
 WHERE e.sequence = (
     SELECT s.sequence FROM human_needed_event s
     WHERE s.status = 'queued' AND s.next_attempt_at <= now()
-    ORDER BY s.next_attempt_at, s.sequence
+    ORDER BY (s.event_type = 'activity'), s.next_attempt_at, s.sequence
     FOR UPDATE SKIP LOCKED
     LIMIT 1
 )
@@ -255,6 +256,83 @@ WHERE binding_id = $1 AND status = 'queued' AND attempts >= 3;
 
 -- name: ListWorkspaceOwnerIDs :many
 SELECT user_id FROM member WHERE workspace_id = $1 AND role = 'owner' ORDER BY created_at;
+
+-- ---- activity stream (DENE-1935) ----
+
+-- name: SetMemberBotBindingActivityScope :one
+UPDATE member_bot_binding
+SET activity_scope = $2, updated_at = now()
+WHERE id = $1 AND revoked_at IS NULL
+RETURNING *;
+
+-- name: ListActivityBindingsForIssue :many
+-- Bindings whose stream covers this ticket: verified, scope on, and the person
+-- either owns it (created it, is assigned, leads the squad it is assigned to,
+-- or opened the chat that made it) or follows it (an active subscription,
+-- which includes everyone @-ed or delegated for).
+SELECT b.* FROM member_bot_binding b
+JOIN issue i ON i.id = $2 AND i.workspace_id = b.workspace_id
+WHERE b.workspace_id = $1 AND b.revoked_at IS NULL AND b.verified_at IS NOT NULL
+  AND cardinality(b.activity_scope) > 0
+  AND (
+    ('owned' = ANY(b.activity_scope) AND (
+        (i.creator_type = 'member' AND i.creator_id = b.user_id)
+        OR (i.assignee_type = 'member' AND i.assignee_id = b.user_id)
+        OR (i.assignee_type = 'squad' AND EXISTS (
+              SELECT 1 FROM squad sq WHERE sq.id = i.assignee_id AND sq.creator_id = b.user_id))
+        OR (i.origin_chat_session_id IS NOT NULL AND EXISTS (
+              SELECT 1 FROM chat_session cs WHERE cs.id = i.origin_chat_session_id AND cs.creator_id = b.user_id))
+    ))
+    OR ('followed' = ANY(b.activity_scope) AND EXISTS (
+        SELECT 1 FROM issue_subscriber sub
+        WHERE sub.issue_id = i.id AND sub.user_type = 'member' AND sub.user_id = b.user_id
+          AND sub.unsubscribed_at IS NULL))
+  );
+
+-- name: ListActivityBindingsForChat :many
+-- A chat is the opener's own: only 'owned' reaches it.
+SELECT b.* FROM member_bot_binding b
+JOIN chat_session cs ON cs.id = $2 AND cs.workspace_id = b.workspace_id AND cs.creator_id = b.user_id
+WHERE b.workspace_id = $1 AND b.revoked_at IS NULL AND b.verified_at IS NOT NULL
+  AND 'owned' = ANY(b.activity_scope);
+
+-- name: CountQueuedActivityForBot :one
+SELECT count(*) FROM human_needed_event
+WHERE bot_id = $1 AND event_type = 'activity' AND status IN ('queued', 'sending');
+
+-- name: HasHumanNeededForComment :one
+-- A comment already pushed to this Bot as "you are needed" (an @, a summon, an
+-- ask) is not pushed a second time as plain activity.
+SELECT EXISTS (
+    SELECT 1 FROM human_needed_event
+    WHERE bot_id = $1 AND source_comment_id = $2 AND event_type IN ('human_needed', 'human_needed.escalation')
+)::boolean;
+
+-- name: RecordActivityHandled :exec
+-- The Bot looked and decided nobody needs telling. A handled receipt also
+-- proves the Bot woke.
+UPDATE human_needed_event
+SET status = CASE WHEN status IN ('queued', 'sending', 'sent', 'woken', 'relayed') THEN 'handled' ELSE status END,
+    woken_at = COALESCE(woken_at, now()),
+    reason = CASE WHEN status IN ('queued', 'sending', 'sent', 'woken', 'relayed') THEN sqlc.arg('reason')::text ELSE reason END
+WHERE event_id = $1 AND event_type = 'activity';
+
+-- name: ListActivityForBot :many
+-- What the stream still holds for a Bot that missed pushes (restart, outage).
+SELECT * FROM human_needed_event
+WHERE bot_id = $1 AND workspace_id = $2 AND event_type = 'activity'
+  AND status = ANY($3::text[])
+  AND (sqlc.narg('before')::bigint IS NULL OR sequence < sqlc.narg('before')::bigint)
+ORDER BY sequence DESC
+LIMIT $4;
+
+-- name: PurgeActivityEvents :execrows
+-- Finished stream rows are history nobody reads; keep two weeks.
+DELETE FROM human_needed_event
+WHERE event_type = 'activity'
+  AND created_at < now() - interval '14 days'
+  AND status NOT IN ('queued', 'sending', 'sent', 'woken', 'relayed');
+
 
 -- name: AttachHumanNeededInboxItem :exec
 -- The in-app fallback for a call that had no inbox row (a chat question) makes
