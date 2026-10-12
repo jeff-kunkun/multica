@@ -1000,6 +1000,17 @@ describe("ChatPendingTaskSchema", () => {
 });
 
 describe("SendChatMessageResponseSchema", () => {
+  it("retains offline diagnostics and tolerates older or malformed servers", () => {
+    const send = { message_id: "m1", task_id: "t1", created_at: "2026-10-11T09:00:10Z" };
+    const runtime = { status: "offline", name: "Claude (test)", last_seen_at: "2026-10-11T09:00:10Z" };
+    expect(SendChatMessageResponseSchema.parse({ ...send, runtime, warning: "runtime_offline" }))
+      .toMatchObject({ runtime, warning: "runtime_offline" });
+    expect(SendChatMessageResponseSchema.parse(send).runtime).toBeUndefined();
+    expect(SendChatMessageResponseSchema.parse({ ...send, runtime: { status: 0 }, warning: 0 }))
+      .toMatchObject({ message_id: "m1", task_id: "t1" });
+    expect(SendChatMessageResponseSchema.parse({ ...send, runtime: null }).runtime).toBeNull();
+  });
+
   const base = {
     message_id: "message-1",
     task_id: "task-1",
@@ -3232,5 +3243,15 @@ describe("IssueStateCardSchema source (DENE-1672)", () => {
     });
     expect(withSource.source?.excerpt).toBe("把登录改成新令牌");
     expect(IssueStateCardSchema.parse({ source: null }).source).toBeNull();
+  });
+});
+
+describe("Machine capacity queue diagnostics", () => {
+  it("accepts live machine counts and degrades older or malformed fields", () => {
+    const queue_reason = { code: "machine_capacity", active_runs: 12, max_concurrent_runs: 12 };
+    expect(ChatPendingTaskSchema.parse({ status: "queued", queue_reason }).queue_reason).toEqual(queue_reason);
+    expect(ChatPendingTaskSchema.parse({ status: "queued" }).queue_reason).toBeUndefined();
+    expect(ChatPendingTaskSchema.parse({ status: "queued", queue_reason: { ...queue_reason, max_concurrent_runs: 0 } }).queue_reason).toBeUndefined();
+    expect(ChatPendingTaskSchema.parse({ status: "queued", queue_reason: "full" }).queue_reason).toBeUndefined();
   });
 });

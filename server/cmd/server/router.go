@@ -2060,6 +2060,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Get("/bots/{botId}/wake/pending", h.ListBotWakeEvents)
 					r.Post("/bots/{botId}/wake/pending/ack", h.AcknowledgeBotWakePending)
 					r.Post("/bots/{botId}/wake/events/{eventId}/woken", h.RecordBotWakeReceipt)
+					// Older webhook payloads supplied this base receipt URL.
+					r.Post("/bots/{botId}/wake/events/{eventId}", h.RecordBotWakeReceipt)
+					r.Post("/bots/{botId}/wake/events/{eventId}/ack", h.RecordBotWakeReceipt)
 					r.Post("/bots/{botId}/wake/events/{eventId}/result", h.RecordBotWakeReceipt)
 				})
 
@@ -2619,6 +2622,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			// Comments
 			r.Route("/api/comments/{commentId}", func(r chi.Router) {
 				r.Use(h.RequireModule(permission.ModuleIssues))
+				r.Get("/attachments", h.ListCommentAttachments)
 				r.With(handler.RequireHumanActor).Get("/sub-issue-preview", h.PreviewCommentSubIssue)
 				r.With(handler.RequireHumanActor).Post("/sub-issues", h.CreateCommentSubIssue)
 				r.Put("/", h.UpdateComment)
@@ -2776,6 +2780,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			r.Route("/api/runtimes", func(r chi.Router) {
 				r.Use(h.RequireModule(permission.ModuleRuntimes))
 				r.Get("/", h.ListAgentRuntimes)
+				r.Get("/outages", h.ListRuntimeOutages)
 				r.Route("/{runtimeId}", func(r chi.Router) {
 					r.Patch("/", h.UpdateAgentRuntime)
 					r.Get("/usage", h.GetRuntimeUsage)
@@ -2833,6 +2838,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			// Workspace-wide agent task snapshot for presence derivation:
 			// every active task + each agent's most recent terminal task.
 			r.Get("/api/agent-task-snapshot", h.ListWorkspaceAgentTaskSnapshot)
+			r.Post("/api/fast-access/v1/read", h.ReadFastAccess)
+			r.Get("/api/fast-access/v1/runs", h.ListFastAccessRuns)
+			r.Get("/api/fast-access/v1/events", h.FastAccessEvents)
 			r.Get("/api/issue-wakeup-summaries", h.ListWorkspaceWakeupSummaries)
 			r.Get("/api/issue-wakeups", h.ListWorkspaceWakeups)
 			r.Get("/api/issue-wakeup-paused", h.ListPausedWakeups)
@@ -2867,6 +2875,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Route("/{sessionId}", func(r chi.Router) {
 					r.Get("/", h.GetChatSession)
 					r.Post("/to-goal", h.ConvertChatSessionToGoal)
+					r.Post("/stop", h.StopChatSession)
 					r.Get("/tickets", h.ListChatSessionTickets)
 					// Pin / take down by hand (DENE-1719) — `multica chat tickets add|remove`.
 					r.Post("/tickets", h.AddChatSessionTicket)

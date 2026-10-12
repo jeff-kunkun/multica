@@ -85,6 +85,12 @@
       "toast_saved": "マシンの名前を変更しました",
       "toast_cleared": "マシン名をクリアしました",
       "toast_failed": "マシンの名前変更に失敗しました"
+    },
+    "capacity": {
+      "label": "同時実行の上限",
+      "running": "実行中 {{active}}/{{limit}}",
+      "owner_only": "上限を変更できるのはマシンの所有者のみです。",
+      "failed": "保存できませんでした。もう一度お試しください。"
     }
   },
   "health": {
@@ -496,5 +502,11 @@
     "table_cache_r": "キャッシュ R",
     "table_cache_w": "キャッシュ W",
     "no_data": "まだ使用量データがありません"
+  },
+  "alerts": {
+    "label": "マシンの切断通知",
+    "description": "自分のマシンが3分以上切断したときと復旧時に、自分とBotに通知します。",
+    "retry": "読み込み失敗。再試行",
+    "save_failed": "保存できませんでした。再試行してください。"
   }
 }

@@ -445,7 +445,7 @@ func TestCreateComment_DualRoleAgentWorkerCommentWakesLeader(t *testing.T) {
 		t.Fatalf("CreateComment: expected 201, got %d: %s", w.Code, w.Body.String())
 	}
 
-	// A new leader-role task is enqueued so the leader coordinates next steps.
+	// The existing run owns the new instruction; a second leader-role run would duplicate the same work.
 	var leaderTasks int
 	if err := testPool.QueryRow(ctx, `
 		SELECT count(*) FROM agent_task_queue
@@ -453,8 +453,8 @@ func TestCreateComment_DualRoleAgentWorkerCommentWakesLeader(t *testing.T) {
 	`, issueID, fx.LeaderID).Scan(&leaderTasks); err != nil {
 		t.Fatalf("count leader tasks: %v", err)
 	}
-	if leaderTasks != 1 {
-		t.Fatalf("after worker comment from dual-role agent: expected 1 queued leader task, got %d", leaderTasks)
+	if leaderTasks != 0 {
+		t.Fatalf("after worker comment from dual-role agent: expected no queued duplicate, got %d", leaderTasks)
 	}
 }
 

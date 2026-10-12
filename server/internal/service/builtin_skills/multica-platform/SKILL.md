@@ -1,6 +1,6 @@
 ---
 name: multica-platform
-description: "Asks, open a chat, consult, goals, inbox, project board/report, sub-issues, wakeups, routing, close protocol, stall, driver, halt, mention, agents, specialisation, squads, autopilot, projects, runtimes, progress, state card, skill import, transfer, linked workspace, bots, GitHub App. Not app code."
+description: "Overview, asks, open a chat, consult, goals, inbox, project board/report, sub-issues, wakeups, routing, close protocol, stall, driver, halt, mention, agents, specialisation, squads, autopilot, projects, runtimes, progress, state card, skill import, transfer, linked workspace, bots, GitHub App. Not app code."
 user-invocable: false
 allowed-tools: Bash(multica *), Bash(git *), Bash(gh *)
 ---
@@ -31,7 +31,7 @@ See `references/overview.md` for filter semantics and examples.
 |---|---|
 | `references/issues.md` | Issues: PR linking vs close intent, reading a linked PR's state, custom properties, status side effects, who else is running, charts vs attached files in a comment |
 | `references/drivers.md` | Who drives an open issue (`driver` in `issue get` / `issue children`), the patrol's rerun-then-escalate, and `multica issue dispose` for one nobody drives |
-| `references/run-control.md` | Stopping every run on one issue (halt / resume), the chain budget, the run time limit, and steer / queue / restart for a message to a running reply |
+| `references/run-control.md` | Stopping issue/chat work with optional related targets, halt / resume, default wakeup merging, the chain budget, the run time limit, and explicit steer / queue / restart |
 | `references/wakeups.md` | Issue wakeups: events, conditions (`--until-*`), timers, check-ins, runaway protection |
 | `references/stall-actions.md` | Automatic stall actions: 24-hour keep announcements, parent auto-close, 7-day undo, and CLI/API commands |
 | `references/goals.md` | Task goals: draft a completion line, confirm the human lock, track budget, and finish a goal |
@@ -53,7 +53,7 @@ See `references/overview.md` for filter semantics and examples.
 | `references/project-board.md` | The user asks for the full open-ticket panorama by project: `multica project board` (one or more projects, or the whole workspace) |
 | `references/consult.md` | Asking a strong-tier seat one question while you keep the ticket (`multica issue consult`): when to ask, the per-issue limit, cost, refusal codes |
 | `references/chat-spawn.md` | Opening a chat with another agent from a chat (`multica chat open`): task-or-chat table, limits, refusal codes |
-| `references/workspace-links.md` | Reading another workspace's shared projects through a link: `multica workspace link list` / `view`, pending link requests (`list --pending`), what the view contains, why it says link not found; on a managed link, working on the source's issues and autopilots with `--linked <source-slug>` |
+| `references/workspace-links.md` | Reading another workspace's shared projects through a link: `multica workspace link list` / `view`, pending link requests (`list --pending`), what the view contains, why it says link not found; on a managed link, working on the source's issues, autopilots and initiator-owned chats (`chat list/send`) with `--linked <source-slug>`; new links default to managed, opt out with `create --managed=false` |
 | `references/transfer.md` | `multica transfer export` / `import` / `bind-runtimes`, and the kun `/transfer/*` endpoints |
 | `references/skill-import.md` | Importing a skill into this workspace from a URL or a local archive |
 | `references/github-app.md` | GitHub App identity for this deployment: status, and a setup link a person opens to create the App |
@@ -81,11 +81,22 @@ where an id belongs, and never invent a UUID: an id that is well-formed but
 belongs to nothing fails in ways that read like a permission error, which sends
 you debugging access when the real problem was the id.
 
+**Bounded CLI reads.** `agent list`, `chat list/search` and `runtime list`
+accept `--compact --output json` (recommended) or `--fields id,name,status`
+(use `title` for chats). Explicit fields override compact defaults; the API
+projects after permission checks and the CLI also trims older-server responses.
+API read commands accept `--workspace <UUID|slug|exact-name>` for this invocation;
+case-insensitive names must be unique. The parameter wins over the environment
+and saved profile; the chosen workspace and conflicts are printed on stderr,
+so stdout keeps its existing JSON shape. `--linked` remains a separate route;
+commands with an existing local `--workspace` (such as cross-workspace
+`changes/runs` and transfer) retain their own scope contract.
+
 **`--output json` writes to stdout; warnings and confirmations go to stderr.**
 Do not merge them (`2>&1`) into anything that parses the output — that makes a
 write which SUCCEEDED look like it failed, and invites a duplicate retry.
 
-**Long-tail settings:** `multica settings get <key>` and `multica settings set <key> --value-json '<json>'` (secrets via `--value-file` or `--value-stdin`); `repo.shares` revokes with `{"url","member_id","revoke":true}`. The key table is `docs/kun/settings-cli-coverage.md`.
+**Long-tail settings:** `multica settings get <key>` and `multica settings set <key> --value-json '<json>'` (secrets via `--value-file` or `--value-stdin`); `repo.shares` revokes with `{"url","member_id","revoke":true}`. The key table is `docs/kun/settings-cli-coverage.md`; Bot wake limits and recovery: `references/external-bots.md`.
 
 **Writes are real.** Creating, updating, deleting, assigning, commenting,
 mentioning, triggering and status changes mutate durable workspace state or
@@ -112,8 +123,8 @@ effects and API field meanings, read `references/issues.md`.
 
 Use the read-only chat directory before opening a transcript:
 
-- `multica chat list [--project <id>] [--all-projects] [--since <RFC3339>] [--output json|table]`
-- `multica chat search <词> [--project <id>] [--all-projects] [--since <RFC3339>] [--output json|table]`
+- `multica chat list [--project <id-or-exact-name>] [--compact] [--all-projects] [--since <RFC3339>] [--output json|table]`
+- `multica chat search <词> [--project <id-or-exact-name>] [--compact] [--all-projects] [--since <RFC3339>] [--output json|table]`
 
 Task-scoped commands default to the current project. Use `--all-projects` to
 opt in to a workspace-wide directory. Visibility follows the person who
@@ -123,6 +134,10 @@ bounded transcript after choosing a session.
 
 To message a chat while its agent may still be replying, use
 `multica chat send --session <id> --content-file <path> --mode steer|queue|restart`.
+A message that is worthless late (a verification code, a relayed SMS) goes with
+`--urgent`: refused at once when the runtime is offline, otherwise head of the
+queue, and the command exits 0 only once a daemon has started the turn within
+the 30 s pickup deadline (`run-control.md` → "Urgent delivery").
 The same `--mode` works on `multica issue comment add`, which also takes
 `handoff` / `parallel` when you @ an agent other than the one running; a chat
 moves to another agent with `multica chat handoff --to <agent>`. What each mode costs,

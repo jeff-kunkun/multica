@@ -2505,7 +2505,9 @@ func (h *Handler) finalizeClaimDelivery(
 		if aerr != nil {
 			return fmt.Errorf("re-read agent for delivery authorization: %w", aerr)
 		}
-		if agent.RuntimeID != task.RuntimeID {
+		// Same rule as the SQL claim fence and buildClaimedTaskResponse: the
+		// agent's bound runtime or its explicit standby may receive the task.
+		if !service.AgentMayRunOnRuntime(agent, task.RuntimeID) {
 			return &service.ClaimDeliveryAuthzError{
 				Reason: "error_agent_runtime_changed",
 				Detail: "agent runtime changed before delivery",
@@ -2977,8 +2979,10 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 	// The SQL claim narrows candidates and repeats the access predicate before
 	// changing task state, but Agent mutations do not stay locked through HTTP
 	// response assembly. Recheck the freshly loaded Agent here so a rebind or
-	// owner change that committed after the claim cannot reach the daemon.
-	if agent.RuntimeID != task.RuntimeID {
+	// owner change that committed after the claim cannot reach the daemon. The
+	// agent's explicit standby runtime passes this check (DENE-1887); clearing
+	// the standby after the claim fails it like a rebind.
+	if !service.AgentMayRunOnRuntime(agent, task.RuntimeID) {
 		slog.Warn("daemon claim: agent runtime changed before delivery; refusing dispatch",
 			"task_id", uuidToString(task.ID),
 			"agent_id", uuidToString(task.AgentID),
@@ -3938,7 +3942,7 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 		}
 		for _, m := range unanswered {
 			if strings.TrimSpace(m.Content) != "" {
-				parts = append(parts, m.Content)
+				parts = append(parts, protocol.ChatPromptContent(m.MessageKind, m.Content))
 			}
 			for _, a := range attsByMessage[uuidToString(m.ID)] {
 				resp.ChatMessageAttachments = append(resp.ChatMessageAttachments, ChatAttachmentMeta{
@@ -4928,13 +4932,22 @@ func (h *Handler) StartTask(w http.ResponseWriter, r *http.Request) {
 	}
 	if err != nil {
 		slog.Warn("start task failed", "task_id", taskID, "error", err)
-		if errors.Is(err, pgx.ErrNoRows) {
+		switch {
+		case errors.Is(err, service.ErrTaskPickupExpired):
+			// The urgent turn was failed with pickup_timeout in the start
+			// transaction (DENE-1884). 409 makes the daemon discard the claim
+			// instead of reporting a second failure for the same task.
+			writeJSON(w, http.StatusConflict, map[string]string{
+				"error": "urgent task missed its pickup deadline; it was failed with pickup_timeout",
+				"code":  string(taskfailure.ReasonPickupTimeout),
+			})
+		case errors.Is(err, pgx.ErrNoRows):
 			status := http.StatusConflict
 			if legacy {
 				status = http.StatusBadRequest
 			}
 			writeError(w, status, "task claim is stale or task is no longer startable")
-		} else {
+		default:
 			writeError(w, http.StatusInternalServerError, "failed to start task")
 		}
 		return
@@ -6561,6 +6574,7 @@ func (h *Handler) ListTasksByIssue(w http.ResponseWriter, r *http.Request) {
 	for i, t := range tasks {
 		resp[i] = taskToResponse(t, workspaceID)
 	}
+	h.hydrateMachineQueueReasons(r.Context(), resp)
 	attachCapacityRetries(allTasks, resp)
 	h.hydrateTaskSupplementMetadata(r.Context(), r, issue.WorkspaceID, tasks, resp)
 	// Execution-log rows render the "on behalf of <member>" badge, so this

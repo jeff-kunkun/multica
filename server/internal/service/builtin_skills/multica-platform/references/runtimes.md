@@ -5,6 +5,7 @@ processes and claims queued tasks from the server.
 
 - [Core model](#core-model)
 - [CLI](#cli)
+- [Machine run capacity](#machine-run-capacity)
 - [Task CLI boundary](#task-cli-boundary)
 - [Debugging an agent that did not run](#debugging-an-agent-that-did-not-run)
 - [Repos](#repos)
@@ -25,7 +26,9 @@ The chain is:
 ## CLI
 
 ```bash
-multica runtime list --output json
+multica runtime list --compact --output json
+multica runtime capacity <runtime-id> --output json
+multica runtime capacity <runtime-id> --max-concurrent-runs 8 --output json
 multica runtime usage <runtime-id> --output json
 multica runtime activity <runtime-id> --output json
 multica runtime update <runtime-id> --target-version <version> --output json
@@ -195,7 +198,11 @@ Check in this order:
 1. Was a task supposed to be created? Inspect issue/comment/autopilot context.
 2. Is the assignee an agent or squad? A squad routes to its leader.
 3. Is the agent archived or bound to a runtime the actor cannot use?
-4. Is the runtime online? `multica runtime list --output json`.
+4. Is the runtime online? `multica runtime list --output json`. An urgent
+   chat turn (`chat send --urgent`) may be addressed to the agent's standby
+   runtime (`fallback_runtime_id`); the standby claims and starts it through
+   the normal daemon poll. Any other runtime, including one of the same owner
+   and provider, never receives it.
 5. Did the daemon heartbeat recently? Runtime `last_seen_at` is the visible clue.
 6. Did the task get claimed or is it stuck pending/running/waiting for local directory?
 7. If repo checkout failed, classify it after checking whether repo context was
@@ -226,3 +233,53 @@ Workspace repos and project resources are not the same thing:
 Do not add a project resource just because `repo checkout` failed. First
 determine whether the user asked for durable project context or just a task
 checkout.
+
+## Machine disconnect alerts
+
+`multica runtime outages --output json` reads the owner's latest 100 machine
+outages in the selected workspace. `machine_name` identifies the physical host;
+`runtime_ids` lists its runtimes. `started_at` is the confirmed offline
+transition, `ended_at` is null until recovery, and `alerted_at` is null for a
+short restart or muted alert. `overview --output json` includes `runtime_outages`.
+
+`multica runtime alerts --output json` reads the personal setting;
+`multica runtime alerts on|off` changes inbox and owner Bot alerts together.
+A previously-online runtime must stay offline for more than three
+minutes; machine-level grouping includes affected runtimes. Brief daemon
+restarts produce no disconnect/recovery pair. Recovery of all affected runtimes
+ends the outage. Only the owner reads these records.
+Bot delivery still follows the receiver's event subscriptions, quiet hours and
+hourly limit. It does not follow issue subscriptions or sender wake rules.
+
+## Machine run capacity
+
+A device shares one simultaneous-run limit across its registered providers and
+workspaces (`daemon_id` scoped to the runtime owner, so another account cannot
+reuse a daemon name to change its capacity; an ownerless runtime or one without
+a daemon id has its own capacity).
+The default is **12**, alongside each agent's existing `max_concurrent_tasks`.
+Dispatched, running and directory-waiting tasks reserve slots. Overflow stays
+queued; reclaiming an existing dispatch consumes no extra slot.
+
+```bash
+multica runtime list --output json
+multica runtime capacity <runtime-id> --output json
+multica runtime capacity <runtime-id> --max-concurrent-runs 8 --output json
+```
+
+`capacity` without the flag is read-only; with it, it PATCHes
+`/api/runtimes/:id` with `max_concurrent_runs` (integer 1..100). Only the
+runtime owner can change the machine limit; workspace-admin access alone is
+insufficient. External Bot keys use their owner's same permission gate. The
+stable refusal codes are `invalid_machine_capacity` (choose an integer 1..100)
+and `machine_capacity_owner_required` (ask the machine owner to change it). The
+response and `overview` runtimes expose `machine_capacity.active_runs` and
+`machine_capacity.max_concurrent_runs`, counting all runs on that device without
+revealing other workspaces' tasks. Lowering the cap preserves active runs and
+holds new claims until the count drops below it. Web/Desktop machine cards edit
+the setting; the native App settings show it.
+
+Issue runs and chat pending tasks expose `queue_reason` with
+`code: "machine_capacity"`, `active_runs`, `max_concurrent_runs` while queued on
+a full machine. Clients show “排队中：机器已满（12/12）”; the reason is recomputed
+from current capacity, so it disappears after a slot becomes available.

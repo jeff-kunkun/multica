@@ -38,6 +38,7 @@ import {
   type ModelCatalog,
 } from "./inspector/model-change-cleanup";
 import { RuntimePicker } from "./inspector/runtime-picker";
+import { FallbackRuntimePicker } from "./inspector/fallback-runtime-field";
 import { DispatchProjectsField } from "./inspector/dispatch-projects-field";
 import { ThinkingSettingField } from "./inspector/thinking-prop-row";
 import { ServiceTierSettingField } from "./inspector/service-tier-setting-field";
@@ -374,6 +375,20 @@ export function AgentDetailInspector({
                   service_tier: "",
                 })
               }
+            />
+          </SettingsRow>
+          <SettingsRow
+            label={t(($) => $.inspector.prop_fallback_runtime)}
+            description={t(($) => $.inspector.prop_fallback_runtime_hint)}
+            size="select-wide"
+          >
+            <FallbackRuntimePicker
+              value={agent.fallback_runtime_id ?? ""}
+              primaryRuntimeId={agent.runtime_id ?? ""}
+              runtimes={runtimes}
+              currentUserId={currentUserId ?? ""}
+              canEdit={canEditRuntime}
+              onChange={(id) => update({ fallback_runtime_id: id })}
             />
           </SettingsRow>
           <SettingsRow

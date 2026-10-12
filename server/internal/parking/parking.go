@@ -377,6 +377,7 @@ var failureLabels = map[string]string{
 	"timeout":                                     "运行超时",
 	"task_time_limit":                             "运行到达时限",
 	"runtime_offline":                             "运行时离线",
+	"pickup_timeout":                              "加急消息无人接起",
 	"runtime_reconnect_timeout":                   "运行时重连超时",
 	"runtime_recovery":                            "运行时重启中断",
 	"queued_expired":                              "排队过期",

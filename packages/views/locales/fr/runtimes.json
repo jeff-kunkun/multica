@@ -89,6 +89,12 @@
       "toast_saved": "Machine renommée",
       "toast_cleared": "Nom de la machine effacé",
       "toast_failed": "Échec du renommage de la machine"
+    },
+    "capacity": {
+      "label": "Limite des exécutions simultanées",
+      "running": "En cours {{active}}/{{limit}}",
+      "owner_only": "Seul le propriétaire peut modifier cette limite.",
+      "failed": "Enregistrement impossible. Réessayez."
     }
   },
   "health": {
@@ -512,5 +518,11 @@
     "window_balance_cny": "Solde CNY",
     "window_balance_usd": "Solde USD",
     "switch_source": "Basculer sur le quota {{provider}}"
+  },
+  "alerts": {
+    "label": "Alertes de déconnexion",
+    "description": "Me prévenir, ainsi que mes Bots, après 3 minutes de déconnexion ou au retour en ligne.",
+    "retry": "Échec du chargement. Réessayer",
+    "save_failed": "Échec de la sauvegarde. Réessayer."
   }
 }

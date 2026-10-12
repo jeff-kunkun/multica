@@ -1,5 +1,7 @@
 "use client";
 
+import { ConvertedChatNotice } from "./components/converted-chat-notice";
+
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ArrowLeft, MessageSquare } from "lucide-react";
 import { toast } from "sonner";
@@ -900,7 +902,7 @@ export function ChatPage() {
           agentName={c.activeAgent.name}
         />
       ) : (
-        <OfflineBanner agentName={c.activeAgent?.name} availability={c.availability} />
+        <OfflineBanner agentName={c.activeAgent?.name} availability={c.availability} lastSeenAt={c.runtimeLastSeenAt} />
       )}
 
       <ChatQueue
@@ -928,7 +930,11 @@ export function ChatPage() {
         </div>
       )}
 
+      {c.currentSession?.converted_issue_id ? (
+        <ConvertedChatNotice issueId={c.currentSession.converted_issue_id} />
+      ) : (
       <ChatInput
+        stopSessionId={c.activeSessionId ?? undefined}
         onSend={c.handleSend}
         restoreDraftRequest={c.restoreDraftRequest}
         conversationStarterRequest={c.conversationStarterRequest}
@@ -964,12 +970,14 @@ export function ChatPage() {
         focusRequest={c.focusInputRequest}
         onConvertToGoal={c.activeSessionId ? async () => {
           const result = await api.convertChatSessionToGoal(c.activeSessionId!);
+          void queryClient.invalidateQueries({ queryKey: ["chat"] });
           // The server appends a link message to this chat; refetch to show it.
           void queryClient.invalidateQueries({ queryKey: chatKeys.messages(c.activeSessionId!) });
           void queryClient.invalidateQueries({ queryKey: chatKeys.messagesPage(c.activeSessionId!) });
           openGoalCompletion({ issueId: result.issue.id, title: result.issue.title });
         } : undefined}
       />
+      )}
     </div>
   );
 

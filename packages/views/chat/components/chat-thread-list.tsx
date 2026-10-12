@@ -21,7 +21,7 @@ import { useWorkspaceId } from "@multica/core/hooks";
 import { paths, useWorkspaceSlug } from "@multica/core/paths";
 import { useWorkspacePresenceMap } from "@multica/core/agents";
 import { api } from "@multica/core/api";
-import { pendingChatTasksOptions, chatKeys, sortChatSessions } from "@multica/core/chat/queries";
+import { pendingChatTasksOptions, sortChatSessions } from "@multica/core/chat/queries";
 import {
   useDeleteChatSession,
   useSetChatSessionArchived,
@@ -40,13 +40,12 @@ import {
   type RowActionItem,
 } from "../../common/row-actions-menu";
 import { resolveClickIntent, useOptionalNavigation } from "../../navigation";
-import { createLogger } from "@multica/core/logger";
-import { removeChatMessageFromCaches } from "@multica/core/realtime";
+import { toast } from "sonner";
+import { StopWorkDialog } from "../../common/stop-work-dialog";
 import { useLocale, useT } from "../../i18n";
 import { HighlightText } from "../../search/highlight-text";
 import { ProgressLine } from "../../common/progress-line";
 
-const apiLogger = createLogger("chat.api");
 
 // History view shows every pinned chat plus this many recent unpinned ones;
 // the rest sit behind "Show more". Same idea as the sidebar's pinned preview.
@@ -212,42 +211,17 @@ export function ChatThreadList({
     });
   };
 
-  const handleConfirmStop = (
-    session: ChatSession,
-    task: PendingChatTasksResponse["tasks"][number],
-  ) => {
+  const handleConfirmStop = async (session: ChatSession, task: PendingChatTasksResponse["tasks"][number], related = false) => {
+    if (stoppingTaskId) return;
     setStoppingTaskId(task.task_id);
-    queryClient.setQueryData<PendingChatTasksResponse>(chatKeys.pendingTasks(wsId), (current) => {
-      if (!current) return current;
-      return {
-        ...current,
-        tasks: current.tasks.filter((item) => item.task_id !== task.task_id),
-      };
-    });
-    queryClient.setQueryData(chatKeys.pendingTask(session.id), {});
-    queryClient.invalidateQueries({ queryKey: chatKeys.messages(session.id) });
-    queryClient.invalidateQueries({ queryKey: chatKeys.messagesPage(session.id) });
-
-    api.cancelTaskById(task.task_id).then(
-      (result) => {
-        const restored = result.cancelled_chat_message;
-        if (restored?.restore_to_input) {
-          removeChatMessageFromCaches(queryClient, restored.chat_session_id, restored.message_id);
-        }
-        apiLogger.info("cancelTask.success (list row)", { taskId: task.task_id, sessionId: session.id });
-      },
-      (err) =>
-        apiLogger.warn("cancelTask.error (list row; task may have already finished)", {
-          taskId: task.task_id,
-          sessionId: session.id,
-          err,
-        }),
-    ).finally(() => {
-      queryClient.invalidateQueries({ queryKey: chatKeys.pendingTasks(wsId) });
-      queryClient.invalidateQueries({ queryKey: chatKeys.pendingTask(session.id) });
-      setStoppingTaskId(null);
+    try {
+      await api.stopChatSession(session.id, related);
       setConfirmingStopId(null);
-    });
+      void queryClient.invalidateQueries({ queryKey: ["chat"] });
+      if (related) void queryClient.invalidateQueries({ queryKey: ["issues"] });
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : t(($) => $.queue.action_failed_toast));
+    } finally { setStoppingTaskId(null); }
   };
 
   const renderRow = (session: ChatSession) => {
@@ -496,18 +470,9 @@ export function ChatThreadList({
                   onConfirm={() => handleConfirmDelete(session)}
                 />
               ) : isConfirmingStop && pendingTask ? (
-                <ConfirmRow
-                  label={t(($) => $.session_history.stop_dialog.title)}
-                  cancelText={t(($) => $.session_history.stop_dialog.cancel)}
-                  confirmText={
-                    stoppingTaskId === pendingTask.task_id
-                      ? t(($) => $.session_history.stop_dialog.confirming)
-                      : t(($) => $.session_history.stop_dialog.confirm)
-                  }
-                  pending={stoppingTaskId === pendingTask.task_id}
-                  onCancel={() => setConfirmingStopId(null)}
-                  onConfirm={() => handleConfirmStop(session, pendingTask)}
-                />
+                <StopWorkDialog open pending={stoppingTaskId === pendingTask.task_id}
+                  onOpenChange={(next) => { if (!next) setConfirmingStopId(null); }}
+                  onConfirm={(related) => void handleConfirmStop(session, pendingTask, related)} />
               ) : (
                 <>
                   <div className="flex min-w-0 flex-1 items-center gap-1.5 overflow-hidden text-caption">

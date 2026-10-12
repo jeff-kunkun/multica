@@ -16,7 +16,10 @@ func init() {
 	wake := &cobra.Command{Use: "wake", Short: "Manage receiver-owned event webhooks and receipts", Long: `Read or update a bot's wake rules, and inspect delivered or pending events.
 The bot may manage only itself; workspace administrators may manage any bot.
 HTTP 200 means received, not running or completed. Uncertain deliveries are
-never automatically replayed. Disabled, quiet and limited events remain pending.`}
+never automatically replayed. Quiet and hourly-limited events are automatically
+delivered later in sequence order; mentions bypass positive hourly limits and
+do not consume them. 0 pauses all pushes. Get reports the saved hourly_limit
+and limited_count (visible events held by that limit).`}
 	for _, verb := range []string{"get", "set", "events", "pending"} {
 		verb := verb
 		cmd := &cobra.Command{Use: verb + " <bot-id>", Short: map[string]string{"get": "Read wake rules (no secrets)", "set": "Update rules or write webhook credentials from file/stdin", "events": "List paginated delivery receipts", "pending": "List paginated events awaiting review"}[verb], Args: exactArgs(1), RunE: func(cmd *cobra.Command, args []string) error { return runBotWake(cmd, args, verb) }}
@@ -26,13 +29,16 @@ never automatically replayed. Disabled, quiet and limited events remain pending.
 			cmd.Flags().Bool("config-stdin", false, "Read JSON settings from standard input")
 			cmd.Long = `Update only supplied fields. Pass JSON using exactly one of --config-file
 or --config-stdin. Never pass secret values as command arguments.
-Fields: inherit_owner_follows (boolean, default false; member issue subscriptions/assignments), wake_from {member,agent,bot}: {mode: all|none|list, ids: []}, events (array), hourly_limit (0..120), quiet_hours
+Fields: inherit_owner_follows (boolean, default false; member issue subscriptions/assignments), wake_from {member,agent,bot}: {mode: all|none|list, ids: []}, events (array: mention, started, done, blocked, needs_kun, task, chat, runtime.offline, runtime.online), hourly_limit (0..120), quiet_hours
 {enabled,start,end,timezone}, webhook_url, webhook_key.
 Write URL and key together. The key is the complete Authorization header value
 (e.g. Bearer …), as specified by the receiver. Two empty strings disconnect.
-Defaults: 6 attempts/hour, 23:00–08:00 Asia/Shanghai.`
+Defaults: 6 attempts/hour, 23:00–08:00 Asia/Shanghai. New subscriptions exclude started.
+Ordinary events for one issue/chat are grouped for 30 seconds; webhooks include events[].`
 		}
 		if verb == "events" || verb == "pending" {
+			cmd.Flags().Bool("with-content", false, "Include current mention/chat payload: content, thread previews, attachments and reply location; visibility checked, no delivery or acknowledgement")
+			cmd.Example = "  multica bot wake " + verb + " <bot-id-from-bot-mentions> --with-content --limit 5 --output json"
 			cmd.Flags().Int("limit", 50, "Page size (1..100)")
 			cmd.Flags().String("before", "", "next_cursor from preceding page; pending consumers restart at first page after each scan")
 		}
@@ -87,6 +93,9 @@ func runBotWake(cmd *cobra.Command, args []string, verb string) error {
 		}
 		before, _ := cmd.Flags().GetString("before")
 		path += "/" + verb + "?limit=" + fmt.Sprint(limit) + "&before=" + url.QueryEscape(before)
+		if withContent, _ := cmd.Flags().GetBool("with-content"); withContent {
+			path += "&include_content=true"
+		}
 	}
 	var response map[string]any
 	if verb == "set" {

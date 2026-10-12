@@ -50,7 +50,9 @@ import {
   pickContentLang,
 } from "../../onboarding/templates";
 import { ConnectRemoteDialog } from "./connect-remote-dialog";
+import { RuntimeAlertSetting } from "./runtime-alert-setting";
 import { CloudRuntimeDialog } from "./cloud-runtime-dialog";
+import { MachineCapacityControl } from "./machine-capacity-control";
 import { ProviderLogo } from "./provider-logo";
 import { buildWorkloadIndex, RuntimeList } from "./runtime-list";
 import { pendingRuntimeFromProfile } from "./pending-runtime";
@@ -97,7 +99,7 @@ export function RuntimesPage({
   const [showCloudRuntimeDialog, setShowCloudRuntimeDialog] = useState(false);
 
   const { data: runtimes = [], isLoading: runtimesLoading } = useQuery(
-    runtimeListOptions(wsId),
+    { ...runtimeListOptions(wsId), refetchInterval: 5000 },
   );
   const { data: runtimeProfiles = [], isLoading: profilesLoading } = useQuery(
     runtimeProfileListOptions(wsId),
@@ -173,6 +175,8 @@ export function RuntimesPage({
         cloudRuntimeEnabled={cloudRuntimeEnabled}
         onOpenCloudRuntime={() => setShowCloudRuntimeDialog(true)}
       />
+
+      {!isGuest && <div className={cn(PAGE_RAIL, PAGE_GUTTER)}><RuntimeAlertSetting /></div>}
 
       {showEmpty ? (
         isGuest ? (
@@ -523,12 +527,15 @@ function MachineRow({ machine }: { machine: RuntimeMachine }) {
   );
 
   return (
+    <div className="flex min-w-0 flex-col">
     <AppLink
       href={paths.runtimeDetail(locator)}
-      className="group flex min-w-0 items-center gap-3 px-4 py-3.5 transition-colors hover:bg-accent/40 focus-visible:bg-accent/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+      className="group flex min-w-0 flex-1 items-center gap-3 px-4 py-3.5 transition-colors hover:bg-accent/40 focus-visible:bg-accent/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
     >
       {body}
     </AppLink>
+    <div className="px-4 pb-3"><MachineCapacityControl runtimes={machine.runtimes} /></div>
+    </div>
   );
 }
 

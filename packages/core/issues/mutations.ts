@@ -224,6 +224,7 @@ export function useUpdateIssue() {
       // a rapid follow-up edit. mutationFn still sends the full payload.
       const {
         suppress_run: _suppressRun,
+        related_stop: _relatedStop,
         duplicate_of_issue_id: _duplicateOfIssueId,
         description: _description,
         description_base: _descriptionBase,
@@ -336,6 +337,7 @@ export function useUpdateIssue() {
       // is the plain surgical patch it always was.
       const {
         suppress_run: _suppressRun,
+        related_stop: _relatedStop,
         duplicate_of_issue_id: _duplicateOfIssueId,
         description_base: _descriptionBase,
         move_intent: _moveIntent,
@@ -553,6 +555,7 @@ export function useBatchUpdateIssues() {
       // until a refetch returns the committed result.
       const {
         suppress_run: _suppressRun,
+        related_stop: _relatedStop,
         description: _description,
         description_base: _descriptionBase,
         ...patch
@@ -1259,7 +1262,7 @@ export function useCancelIssueRun(issueId: string) {
 export function useHaltIssueRuns(issueId: string, workspaceId?: string) {
   const client = useQueryClient();
   return useMutation({
-    mutationFn: () => api.haltIssue(issueId),
+    mutationFn: (options?: { related?: boolean }) => api.haltIssue(issueId, options?.related ?? false),
     onSuccess: () => {
       client.invalidateQueries({ queryKey: issueKeys.tasks(issueId) });
       if (workspaceId) client.invalidateQueries({ queryKey: issueKeys.detail(workspaceId, issueId) });

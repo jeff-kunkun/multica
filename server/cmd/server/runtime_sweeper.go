@@ -28,6 +28,13 @@ const (
 	// latency-sensitive 30-second liveness path. GC remains independently
 	// bounded by runtimeGCTickTimeout once each hourly round begins.
 	runtimeGCSweepInterval = time.Hour
+	// pickupDeadlineSweepInterval is the cadence of the urgent-turn pickup
+	// check (DENE-1844). The deadline itself is 30 seconds, so a 30-second tick
+	// would report a miss up to a minute late; five seconds keeps the sender's
+	// wait close to the promised deadline and the query is a partial-index scan.
+	pickupDeadlineSweepInterval = 5 * time.Second
+	// pickupDeadlineFailBatchSize bounds one pickup tick.
+	pickupDeadlineFailBatchSize = 200
 	// delegatedFailureRecoverySweepInterval keeps the low-probability durable
 	// recovery scan off the latency-sensitive runtime liveness path.
 	delegatedFailureRecoverySweepInterval = 5 * time.Minute
@@ -41,6 +48,13 @@ const (
 	// delayed. A daemon that actually restarts bypasses this grace through the
 	// explicit RecoverOrphanedTasksForRuntime path.
 	defaultRuntimeReconnectGrace = 3 * time.Hour
+	// defaultChatRuntimeReconnectGrace is the shorter grace for chat turns
+	// (DENE-1839). The sender is waiting on the reply, so a runtime that stays
+	// offline past this fails the turn and tells the chat which machine went
+	// away. Issue runs keep defaultRuntimeReconnectGrace: a laptop closing for a
+	// few minutes must not kill a multi-hour run. Override with
+	// MULTICA_CHAT_RUNTIME_RECONNECT_GRACE; still clamped to the heartbeat window.
+	defaultChatRuntimeReconnectGrace = 3 * time.Minute
 	// A reconnect grace below the heartbeat freshness window would allow the
 	// stale-task backstop to fail work while the same runtime was still eligible
 	// to claim new work. Clamp configuration to keep those policies ordered.
@@ -160,13 +174,13 @@ func runPeriodicSweep(ctx context.Context, interval time.Duration, sweep func())
 // hot heartbeat path; the DB is allowed to lag up to runtimeHeartbeatDBFlushInterval).
 // When liveness is unavailable or errors, we fall back to trusting the DB
 // stale window — that is the original behavior.
-func runRuntimeSweeper(ctx context.Context, queries *db.Queries, liveness handler.LivenessStore, taskSvc *service.TaskService, bus *events.Bus, reconnectGrace time.Duration) {
+func runRuntimeSweeper(ctx context.Context, queries *db.Queries, liveness handler.LivenessStore, taskSvc *service.TaskService, bus *events.Bus, reconnectGrace, chatReconnectGrace time.Duration) {
 	runPeriodicSweep(ctx, sweepInterval, func() {
 		// These stages retain their existing cadence and ordering. Runtime GC and
 		// delegated-failure recovery run in independent lower-frequency loops.
 		sweepStaleRuntimes(ctx, queries, liveness, taskSvc, bus)
 		sweepQuotaBreakers(ctx, taskSvc)
-		sweepOfflineRuntimeTasks(ctx, queries, taskSvc, reconnectGrace)
+		sweepOfflineRuntimeTasks(ctx, queries, taskSvc, reconnectGrace, chatReconnectGrace)
 		sweepExpiredRuntimeReconnectRetries(ctx, queries, taskSvc, reconnectGrace)
 		sweepStaleTasks(ctx, queries, taskSvc, bus, reconnectGrace)
 		sweepTaskTimeLimits(ctx, taskSvc)
@@ -193,6 +207,31 @@ func sweepQuotaBreakers(ctx context.Context, taskSvc *service.TaskService) {
 	} else if finished > 0 {
 		slog.Info("runtime sweeper: finished pending quota relays", "count", finished)
 	}
+}
+
+// runPickupDeadlineSweeper fails urgent chat turns nobody started before
+// their pickup deadline (DENE-1844). Its own loop: the runtime liveness tick is
+// too slow for a 30-second promise.
+func runPickupDeadlineSweeper(ctx context.Context, taskSvc *service.TaskService) {
+	runPeriodicSweep(ctx, pickupDeadlineSweepInterval, func() {
+		sweepPickupDeadlines(ctx, taskSvc)
+	})
+}
+
+func sweepPickupDeadlines(ctx context.Context, taskSvc *service.TaskService) {
+	if taskSvc == nil {
+		return
+	}
+	failed, err := taskSvc.FailTasksPastPickupDeadline(ctx, pickupDeadlineFailBatchSize)
+	if err != nil {
+		slog.Warn("pickup sweeper: failed to expire urgent tasks", "error", err)
+		return
+	}
+	if len(failed) == 0 {
+		return
+	}
+	slog.Info("pickup sweeper: urgent tasks missed their pickup deadline", "count", len(failed))
+	taskSvc.HandleFailedTasks(ctx, failed)
 }
 
 func runDelegatedFailureRecoverySweeper(ctx context.Context, taskSvc *service.TaskService) {
@@ -322,16 +361,18 @@ func sweepStaleRuntimes(ctx context.Context, queries *db.Queries, liveness handl
 // sweepOfflineRuntimeTasks terminates work only after the runtime's last
 // heartbeat has exceeded the bounded reconnect grace. Running it every tick is
 // essential: the grace usually expires long after sweepStaleRuntimes performed
-// the one-time online→offline transition.
-func sweepOfflineRuntimeTasks(ctx context.Context, queries *db.Queries, taskSvc *service.TaskService, reconnectGrace time.Duration) (stats runtimeSweepStageStats) {
+// the one-time online→offline transition. Chat turns use chatReconnectGrace,
+// issue and other runs reconnectGrace (DENE-1839).
+func sweepOfflineRuntimeTasks(ctx context.Context, queries *db.Queries, taskSvc *service.TaskService, reconnectGrace, chatReconnectGrace time.Duration) (stats runtimeSweepStageStats) {
 	startedAt := time.Now()
 	defer func() {
 		observeRuntimeSweepStage(taskServiceMetrics(taskSvc), obsmetrics.RuntimeSweepStageOfflineTasks, startedAt, stats)
 	}()
 
 	failedTasks, err := taskSvc.FailTasksForOfflineRuntimes(ctx, db.FailTasksForOfflineRuntimesParams{
-		ReconnectGraceSecs: reconnectGrace.Seconds(),
-		MaxPerTick:         offlineTaskFailBatchSize,
+		ReconnectGraceSecs:     reconnectGrace.Seconds(),
+		ChatReconnectGraceSecs: chatReconnectGrace.Seconds(),
+		MaxPerTick:             offlineTaskFailBatchSize,
 	})
 	if err != nil {
 		slog.Warn("runtime sweeper: failed to clean up long-offline tasks", "error", err)

@@ -1,3 +1,4 @@
+import type { ChatLinkedProjectRef } from "@multica/core/types";
 /**
  * Mobile chat mutations — create session, delete session, mark session read,
  * take a ticket off a chat.
@@ -21,7 +22,7 @@ export function useCreateChatSession() {
   const wsId = useWorkspaceStore((s) => s.currentWorkspaceId);
 
   return useMutation({
-    mutationFn: (data: { agent_id: string; title?: string }) =>
+    mutationFn: (data: { agent_id: string; title?: string; linked_projects?: ChatLinkedProjectRef[] }) =>
       api.createChatSession(data),
     onSettled: () => {
       // Optimistic prepend isn't done here — the chat screen seeds caches

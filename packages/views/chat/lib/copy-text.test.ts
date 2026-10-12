@@ -103,6 +103,9 @@ describe("canonicalAnswerText", () => {
 });
 
 describe("conversationToMarkdown", () => {
+  it("does not attribute a linked delivery to the user", () => {
+    expect(conversationToMarkdown("Chat", [{ ...message("Kun 经 WD·Agent 代发"), role: "user", message_kind: "linked_delivery" }], { user: "You", assistant: "Assistant" })).toBe("# Chat\n\nKun 经 WD·Agent 代发\n");
+  });
   it("renders title and both roles, skipping hidden rows", () => {
     const kickoff: ChatMessage = {
       ...message("INTERNAL"),

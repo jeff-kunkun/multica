@@ -330,6 +330,8 @@ func TestManagedRouteExactParameters(t *testing.T) {
 		"/api/issues/limit-usage", "/api/issues/child-progress", "/api/issues/parking",
 		"/api/issues/grouped", "/api/issues/stall-actions", "/api/autopilots/usage",
 		"/api/issues/future-endpoint", "/api/autopilots/future-endpoint",
+		"/api/chat/sessions/future-endpoint", "/api/chat/sessions/future-endpoint/messages",
+		"/api/chat/sessions/01a12a2a-d7c1-7b2c-86d9-8ac9c11e7b44/handoff",
 		"/api/projects/not-an-id/resources", "/api/issues/WL-0", "/api/issues/WL-12/extra", "/api/issues/ABCDEFGHIJK-12", "/api/issues/-12",
 	} {
 		for _, method := range []string{"GET", "POST", "PUT", "PATCH", "DELETE"} {

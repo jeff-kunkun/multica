@@ -68,6 +68,10 @@ export function getInboxDisplayTitle(item: InboxItem): string {
   // Resolve system-notice titles through the selected UI locale. Mirror
   // rather than exposing backend fallback copy that can include raw counts.
   switch (item.type) {
+    case "runtime.offline":
+      return i18n.t("inbox:type.runtime_offline");
+    case "runtime.online":
+      return i18n.t("inbox:type.runtime_online");
     case "autopilot_quota_exceeded":
       return i18n.t("inbox:type.autopilot_quota_exceeded");
   }
@@ -93,6 +97,7 @@ export function getInboxNavigationTarget(
   historyToken: string,
 ) {
   if (!workspace) return null;
+  if (item.type.startsWith("workspace_link_")) return { pathname: "/[workspace]/workspace-links" as const, params: { workspace } };
   if (item.issue_id) {
     return {
       pathname: "/[workspace]/issue/[id]" as const,
@@ -105,6 +110,7 @@ export function getInboxNavigationTarget(
     };
   }
   if (
+    item.type === "runtime.offline" || item.type === "runtime.online" ||
     item.type === "autopilot_quota_exceeded" ||
     item.type === "autopilot_paused"
   ) {

@@ -116,6 +116,12 @@ import type {
 import type { CloudRuntimeNode } from "../runtimes/cloud-runtime";
 import type { CreateFeedbackResponse } from "../feedback/types";
 
+const MachineCapacitySchema = z.object({
+  active_runs: z.number().int().nonnegative(),
+  max_concurrent_runs: z.number().int().min(1).max(100),
+});
+const MachineQueueReasonSchema = MachineCapacitySchema.extend({ code: z.literal("machine_capacity") });
+
 export const PluginConfigFieldSchema = z.object({
   key: z.string(),
   type: z.string().default("string"),
@@ -948,7 +954,7 @@ export const ChatMessageSchema = z.object({
   failure_reason: z.string().nullable().optional(),
   elapsed_ms: z.number().nullable().optional(),
   message_kind: z
-    .enum(["message", "no_response", "onboarding_kickoff", "onboarding_opening", "chat_spawn", "chat_spawn_refused", "issue_receipt"])
+    .enum(["message", "no_response", "onboarding_kickoff", "onboarding_opening", "chat_spawn", "chat_spawn_refused", "issue_receipt", "linked_delivery"])
     .catch("message")
     .optional(),
   // Optional additive data degrades independently: a malformed suggestion
@@ -966,6 +972,7 @@ export const ChatMessageListSchema = z.array(ChatMessageSchema).default([]);
 export const EMPTY_CHAT_MESSAGE_LIST: ChatMessage[] = [];
 
 export const ChatMessagesPageSchema = z.object({
+  hidden_queued_count: z.number().int().nonnegative().optional().catch(undefined),
   messages: z.array(ChatMessageSchema).default([]),
   limit: z.number().default(50),
   has_more: z.boolean().default(false),
@@ -1330,6 +1337,12 @@ export const IssueDisposeResponseSchema = z.object({
   driver: IssueDriverSchema.optional().catch(undefined),
   created: z.array(z.string()).optional(),
   note: z.string().optional(),
+}).loose();
+
+export const WorkStopResponseSchema = z.object({
+  cancelled_count: z.number().default(0),
+  issue_ids: z.array(z.string()).default([]),
+  chat_session_ids: z.array(z.string()).default([]),
 }).loose();
 
 export const IssueAgentGuardResponseSchema = z.object({
@@ -2062,6 +2075,7 @@ export const JevStatusSnapshotSchema = z.object({
 }).loose();
 
 export const AgentRuntimeSchema = z.object({
+  machine_capacity: MachineCapacitySchema.optional().catch(undefined),
   id: z.string(),
   workspace_id: z.string(),
   daemon_id: z.string().nullable(),
@@ -2510,6 +2524,7 @@ export const CodeDecisionSchema = z.object({
 }).loose();
 
 export const AgentTaskSchema = z.object({
+  queue_reason: MachineQueueReasonSchema.optional().catch(undefined),
   wakeup_id: z.string().optional().catch(undefined),
   cancelled_by_comment_change: z.boolean().optional().catch(undefined),
   cancelled_by: TaskCancellationActorSchema.optional().catch(undefined),
@@ -2691,6 +2706,7 @@ const ChatLastMessageSchema = z.object({
     "no_response",
     "onboarding_kickoff",
     "onboarding_opening",
+    "linked_delivery",
   ]).optional().catch(undefined),
   sender_user_id: z.string().nullable().optional(),
 }).loose();
@@ -2735,6 +2751,7 @@ const ChatChannelSourceSchema = z.object({
 }).loose();
 
 export const ChatSessionSchema: z.ZodType<ChatSession> = z.object({
+  converted_issue_id: z.string().nullable().optional().catch(undefined),
   id: z.string(),
   workspace_id: z.string().default(""),
   agent_id: z.string().default(""),
@@ -2837,6 +2854,7 @@ export const ChatDraftRestoresResponseSchema = z.object({
 }).loose();
 
 const ChatQueuedTaskSchema = z.object({
+  queue_reason: MachineQueueReasonSchema.optional().catch(undefined),
   task_id: z.string(),
   status: z.string().default("queued"),
   created_at: z.string().default(""),
@@ -2856,6 +2874,8 @@ const ChatQueuedTasksSchema = z.array(z.unknown()).transform((tasks) =>
 // fields optional so callers can distinguish an older server from an empty
 // queue. A malformed queue row is ignored without discarding a valid head.
 export const ChatPendingTaskSchema: z.ZodType<ChatPendingTask> = z.object({
+  hidden_queued_count: z.number().int().nonnegative().optional().catch(undefined),
+  queue_reason: MachineQueueReasonSchema.optional().catch(undefined),
   task_id: z.string().optional(),
   status: z.string().optional(),
   created_at: z.string().optional(),
@@ -2869,11 +2889,14 @@ export const ChatPendingTaskSchema: z.ZodType<ChatPendingTask> = z.object({
 export const EMPTY_CHAT_PENDING_TASK: ChatPendingTask = {};
 
 export const SendChatMessageResponseSchema: z.ZodType<SendChatMessageResponse> = z.object({
+  runtime: z.object({ status: z.string(), name: z.string(), last_seen_at: z.string().nullable() }).nullish().catch(undefined),
   message_id: z.string().min(1),
   task_id: z.string().min(1),
+  warning: z.string().optional().catch(undefined),
+  reason_code: z.string().optional(),
   supports_queue: z.boolean().optional(),
   queued: z.boolean().optional().catch(undefined),
-  mode: z.enum(["steer", "queue", "restart", "start"]).optional().catch(undefined),
+  mode: z.enum(["steer", "queue", "restart", "start", "blocked"]).optional().catch(undefined),
   created_at: z.string().min(1),
   attachment_ids: z.array(z.string()).nullish().transform((ids) => ids ?? undefined),
 }).loose();
@@ -5185,3 +5208,8 @@ export const EMPTY_TEST_REPO_BINDING_RESPONSE: TestRepoBindingResponse = {
   binding: EMPTY_REPO_BINDING,
   ok: false,
 };
+
+/** Validate additive delivery statistics without narrowing older wake settings. */
+export const BotWakeDeliveryStatsSchema = z.object({
+  limited_count: z.number().int().nonnegative().safe().optional().catch(0).default(0),
+}).passthrough();

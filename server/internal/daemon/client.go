@@ -98,6 +98,9 @@ type Client struct {
 	baseURL string
 	token   string
 	client  *http.Client
+	// Installed before Run starts any goroutines. Only rejection of this
+	// client's own credential may stop the daemon, never a task/MCP token.
+	onUnauthorized func()
 
 	// bundleClient downloads skill bundles. Unlike client it carries no fixed
 	// Timeout: bundles can be large and slow on jittery links, so the caller
@@ -119,6 +122,32 @@ type Client struct {
 	legacyWorkspaceEndpointEnabled bool
 	issueGCBatchMu                 sync.Mutex
 	legacyIssueGCBatchEnabled      bool
+}
+
+func (c *Client) observeAuthStatus(status int, token string) {
+	if status == http.StatusUnauthorized && token != "" && token == c.token && c.onUnauthorized != nil {
+		c.onUnauthorized()
+	}
+}
+
+// An endpoint can return 401 because it requires a different token kind (for
+// example local-directory identity backfill requires a daemon token). Confirm
+// rejection at the identity endpoint before stopping a machine. Use the raw
+// transport so a rejected probe cannot recursively trigger itself.
+func (c *Client) credentialRejected(ctx context.Context) bool {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/api/me", nil)
+	if err != nil {
+		return false
+	}
+	req.Header.Set("Authorization", "Bearer "+c.token)
+	c.setIdentityHeaders(req)
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return false
+	}
+	defer resp.Body.Close()
+	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 4096))
+	return resp.StatusCode == http.StatusUnauthorized
 }
 
 // NewClient creates a new daemon API client.
@@ -986,6 +1015,7 @@ func (c *Client) ListWorkspaces(ctx context.Context) ([]WorkspaceInfo, error) {
 		return append([]WorkspaceInfo(nil), c.workspaceCache...), nil
 	}
 	if resp.StatusCode >= 400 {
+		c.observeAuthStatus(resp.StatusCode, c.token)
 		data, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 		return nil, &requestError{Method: http.MethodGet, Path: path, StatusCode: resp.StatusCode, Body: strings.TrimSpace(string(data))}
 	}
@@ -1483,6 +1513,7 @@ func (c *Client) postJSONViaObserved(ctx context.Context, httpClient *http.Clien
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		c.observeAuthStatus(resp.StatusCode, c.token)
 		data, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 		return &requestError{Method: http.MethodPost, Path: path, StatusCode: resp.StatusCode, Body: strings.TrimSpace(string(data))}
 	}
@@ -1522,6 +1553,7 @@ func (c *Client) getJSONWithToken(ctx context.Context, path, token string, respB
 	defer resp.Body.Close()
 
 	if resp.StatusCode >= 400 {
+		c.observeAuthStatus(resp.StatusCode, token)
 		data, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 		return &requestError{Method: http.MethodGet, Path: path, StatusCode: resp.StatusCode, Body: strings.TrimSpace(string(data))}
 	}
@@ -1556,6 +1588,7 @@ func (c *Client) postJSONWithToken(ctx context.Context, path, token string, reqB
 	defer resp.Body.Close()
 
 	if resp.StatusCode >= 400 {
+		c.observeAuthStatus(resp.StatusCode, token)
 		data, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 		return &requestError{Method: http.MethodPost, Path: path, StatusCode: resp.StatusCode, Body: strings.TrimSpace(string(data))}
 	}

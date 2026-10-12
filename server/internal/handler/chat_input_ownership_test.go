@@ -30,10 +30,19 @@ func setupDirectChatSession(t *testing.T, ctx context.Context, title string) (ag
 	return agentID, sessionID, runtimeID, daemonID
 }
 
-// sendDirectChat drives the transactional direct-send service path and returns
-// the owning task id. The user message is created inside the same transaction
-// with task_id = the new task, and the task owns its own input batch.
+// sendDirectChat drives the default transactional direct-send path and returns
+// its execution owner. queueDirectChat explicitly requests a separate batch.
 func sendDirectChat(t *testing.T, ctx context.Context, agentID, sessionID, content string) string {
+	t.Helper()
+	return sendDirectChatWithMode(t, ctx, agentID, sessionID, content, "")
+}
+
+func queueDirectChat(t *testing.T, ctx context.Context, agentID, sessionID, content string) string {
+	t.Helper()
+	return sendDirectChatWithMode(t, ctx, agentID, sessionID, content, "queue")
+}
+
+func sendDirectChatWithMode(t *testing.T, ctx context.Context, agentID, sessionID, content, mode string) string {
 	t.Helper()
 	sess, err := testHandler.Queries.GetChatSession(ctx, parseUUID(sessionID))
 	if err != nil {
@@ -43,7 +52,7 @@ func sendDirectChat(t *testing.T, ctx context.Context, agentID, sessionID, conte
 	if err != nil {
 		t.Fatalf("load agent: %v", err)
 	}
-	res, err := testHandler.TaskService.SendDirectChatMessage(ctx, sess, ag, parseUUID(testUserID), content, nil, "member", parseUUID(testUserID))
+	res, err := testHandler.TaskService.SendDirectChatMessageWithMode(ctx, sess, ag, parseUUID(testUserID), content, nil, "member", parseUUID(testUserID), mode)
 	if err != nil {
 		t.Fatalf("SendDirectChatMessage: %v", err)
 	}
@@ -92,7 +101,7 @@ func assertChatTranscriptContents(t *testing.T, messages []db.ChatMessage, want 
 }
 
 // TestDirectChat_TaskOwnsItsOwnInputBatch is the core input-boundary contract
-// (MUL-4351): each direct send owns exactly the user message it created. When
+// (MUL-4351): each deliberately queued turn owns its own input batch. When
 // U1→T1 and U2→T2 are both queued, T1's claim must deliver ONLY U1 (never
 // "U1\n\nU2" the way the trailing-message selector would), and after T1
 // completes, T2 delivers ONLY U2.
@@ -104,7 +113,7 @@ func TestDirectChat_TaskOwnsItsOwnInputBatch(t *testing.T) {
 	agentID, sessionID, runtimeID, daemonID := setupDirectChatSession(t, ctx, "ownership chat")
 
 	t1 := sendDirectChat(t, ctx, agentID, sessionID, "看上海天气")
-	t2 := sendDirectChat(t, ctx, agentID, sessionID, "还有青岛")
+	t2 := queueDirectChat(t, ctx, agentID, sessionID, "还有青岛")
 
 	// Both tasks own their own input batch.
 	assertTaskInputOwner(t, ctx, t1, t1)
@@ -144,8 +153,8 @@ func TestDirectChat_ClaimKeepsQueuedTurnsPairedWithReplies(t *testing.T) {
 	agentID, sessionID, runtimeID, daemonID := setupDirectChatSession(t, ctx, "queued transcript order")
 
 	t1 := sendDirectChat(t, ctx, agentID, sessionID, "user A")
-	t2 := sendDirectChat(t, ctx, agentID, sessionID, "user B")
-	t3 := sendDirectChat(t, ctx, agentID, sessionID, "user C")
+	t2 := queueDirectChat(t, ctx, agentID, sessionID, "user B")
+	t3 := queueDirectChat(t, ctx, agentID, sessionID, "user C")
 
 	inputABeforeClaim, err := testHandler.Queries.ListChatInputMessages(ctx, parseUUID(t1))
 	if err != nil || len(inputABeforeClaim) != 1 {
@@ -349,10 +358,10 @@ func TestDirectChat_RetryClaimDoesNotMoveOriginalInput(t *testing.T) {
 	}
 }
 
-// TestDirectChat_RunningTaskDoesNotAbsorbNewMessage pins the acceptance case:
-// while T1 is running, a message sent from another surface lands on T2 and is
-// never folded into T1's already-sealed input batch.
-func TestDirectChat_RunningTaskDoesNotAbsorbNewMessage(t *testing.T) {
+// Explicit queue preserves independent input batches while T1 is running.
+// Default sends merge instead; TestDefaultChatSendsMergeIntoRunningReplyWithoutFollowups
+// verifies their delivery through the supplement claim and acknowledgement API.
+func TestDirectChat_ExplicitQueueDoesNotAbsorbNewMessage(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
 	}
@@ -362,7 +371,7 @@ func TestDirectChat_RunningTaskDoesNotAbsorbNewMessage(t *testing.T) {
 	t1 := sendDirectChat(t, ctx, agentID, sessionID, "first")
 	markTaskRunning(t, ctx, t1)
 	// A second message arrives mid-run and gets its own task.
-	t2 := sendDirectChat(t, ctx, agentID, sessionID, "second")
+	t2 := queueDirectChat(t, ctx, agentID, sessionID, "second")
 	if t1 == t2 {
 		t.Fatal("second send must create a distinct task")
 	}
@@ -471,9 +480,10 @@ func TestCompleteTask_ChatCallbackIdempotent(t *testing.T) {
 
 // TestFailTask_ChatRetryInheritsInputOwnerAndPriority: a transient failure of a
 // task-owned direct task creates a retry child that reuses the SAME input owner
-// (so it reads the same user messages) and keeps a bumped priority. A
-// runtime_offline retry remains deferred until the runtime is healthy, then is
-// claimed ahead of fresh chat tasks.
+// (so it reads the same user messages) and keeps a bumped priority. A provider
+// server error retries after a backoff, so the child waits deferred and is then
+// claimed ahead of fresh chat tasks. (runtime_offline no longer retries a chat
+// turn, DENE-1839; see TestRetryGatesOpen_ChatRuntimeOfflineIsFinal.)
 func TestFailTask_ChatRetryInheritsInputOwnerAndPriority(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
@@ -483,7 +493,7 @@ func TestFailTask_ChatRetryInheritsInputOwnerAndPriority(t *testing.T) {
 	rootID := sendDirectChat(t, ctx, agentID, sessionID, "root question")
 	markTaskRunning(t, ctx, rootID)
 
-	if _, err := testHandler.TaskService.FailTask(ctx, parseUUID(rootID), "runtime went away", "", "", "", "runtime_offline", false, "", ""); err != nil {
+	if _, err := testHandler.TaskService.FailTask(ctx, parseUUID(rootID), "provider returned 503", "", "", "", "agent_error.provider_server_error", false, "", ""); err != nil {
 		t.Fatalf("fail task: %v", err)
 	}
 
@@ -504,7 +514,7 @@ func TestFailTask_ChatRetryInheritsInputOwnerAndPriority(t *testing.T) {
 		t.Fatalf("chat retry must be bumped above fresh chat priority (2); got %d", childPriority)
 	}
 	if childStatus != "deferred" {
-		t.Fatalf("runtime_offline retry child must be deferred, got %q", childStatus)
+		t.Fatalf("backoff retry child must be deferred, got %q", childStatus)
 	}
 	// The root direct task starts at attempt 1, so its first retry is attempt 2.
 	var rootAttempt int
@@ -535,7 +545,7 @@ func TestFailTask_ChatFailureKeepsNextTurnAfterOutcome(t *testing.T) {
 	ctx := context.Background()
 	agentID, sessionID, _, _ := setupDirectChatSession(t, ctx, "failed turn order")
 	t1 := sendDirectChat(t, ctx, agentID, sessionID, "user A")
-	sendDirectChat(t, ctx, agentID, sessionID, "user B")
+	queueDirectChat(t, ctx, agentID, sessionID, "user B")
 	markTaskRunning(t, ctx, t1)
 
 	if _, err := testHandler.TaskService.FailTask(ctx, parseUUID(t1), "assistant failure", "", "", "", "agent_error.unknown", false, "", ""); err != nil {
@@ -560,7 +570,7 @@ func TestCancelTask_ChatStoppedKeepsNextTurnAfterOutcome(t *testing.T) {
 	ctx := context.Background()
 	agentID, sessionID, _, _ := setupDirectChatSession(t, ctx, "cancelled turn order")
 	t1 := sendDirectChat(t, ctx, agentID, sessionID, "user A")
-	sendDirectChat(t, ctx, agentID, sessionID, "user B")
+	queueDirectChat(t, ctx, agentID, sessionID, "user B")
 	markTaskRunning(t, ctx, t1)
 	insertTaskTranscriptRow(t, ctx, t1)
 
@@ -586,7 +596,7 @@ func TestCancelTask_DeferredStoppedKeepsNextTurnAfterOutcome(t *testing.T) {
 	ctx := context.Background()
 	agentID, sessionID, _, _ := setupDirectChatSession(t, ctx, "deferred cancelled turn order")
 	t1 := sendDirectChat(t, ctx, agentID, sessionID, "user A")
-	sendDirectChat(t, ctx, agentID, sessionID, "user B")
+	queueDirectChat(t, ctx, agentID, sessionID, "user B")
 	markTaskRunning(t, ctx, t1)
 
 	if _, err := testHandler.TaskService.CancelTaskWithResult(ctx, parseUUID(t1), service.CancelTaskOptions{ClientSupportsDraftRestore: true}); err != nil {

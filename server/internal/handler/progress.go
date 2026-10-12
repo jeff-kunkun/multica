@@ -242,5 +242,38 @@ func (h *Handler) ListChatProgress(w http.ResponseWriter, r *http.Request) {
 	for _, row := range rows {
 		items = append(items, ProgressResponse{Text: row.Text, Source: row.Source, Tone: row.Tone, AuthorType: row.AuthorType, AuthorID: uuidToString(row.AuthorID), UpdatedAt: timestampToString(row.CreatedAt)})
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"progress": items})
+
+	var taskID pgtype.UUID
+	if raw := r.URL.Query().Get("task_id"); raw != "" {
+		var valid bool
+		taskID, valid = parseUUIDOrBadRequest(w, raw, "task_id")
+		if !valid {
+			return
+		}
+	}
+	task, err := h.Queries.GetChatDiagnosticTask(r.Context(), db.GetChatDiagnosticTaskParams{ChatSessionID: session.ID, TaskID: taskID})
+	var currentTask *db.AgentTaskQueue
+	if err == nil {
+		currentTask = &task
+	} else if !errors.Is(err, pgx.ErrNoRows) {
+		writeError(w, http.StatusInternalServerError, "failed to read chat task")
+		return
+	} else if taskID.Valid {
+		writeError(w, http.StatusNotFound, "task not found in this chat")
+		return
+	}
+	agent, err := h.Queries.GetAgent(r.Context(), session.AgentID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to read chat agent")
+		return
+	}
+	diagnostics, err := h.chatDiagnostics(r.Context(), agent.RuntimeID, currentTask)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to read chat diagnostics")
+		return
+	}
+	writeJSON(w, http.StatusOK, struct {
+		Progress []ProgressResponse `json:"progress"`
+		ChatDiagnostics
+	}{items, diagnostics})
 }

@@ -55,6 +55,7 @@ export function useUpdateRuntime(wsId: string) {
       runtimeId: string;
       patch: {
         visibility?: "private" | "public";
+        max_concurrent_runs?: number;
         // Empty string clears the custom name; omit to leave unchanged.
         custom_name?: string;
         apply_to_machine?: boolean;

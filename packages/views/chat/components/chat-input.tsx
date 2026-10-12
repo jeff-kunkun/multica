@@ -40,6 +40,10 @@ import { AgentSceneProvider } from "../../agents/components/agent-scene-context"
 import { ProjectPicker } from "../../projects/components/project-picker";
 import { ClearablePillButton } from "../../common/pill-button";
 import { useT } from "../../i18n";
+import { api } from "@multica/core/api";
+import { useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
+import { StopWorkDialog } from "../../common/stop-work-dialog";
 import { Target } from "lucide-react";
 
 const logger = createLogger("chat.ui");
@@ -110,6 +114,7 @@ interface ChatInputProps {
    *  paste/drag/button still type into the editor but no upload fires. */
   uploadEnabled?: boolean;
   onStop?: () => void;
+  stopSessionId?: string;
   isRunning?: boolean;
   /** Enabled only after the server explicitly advertises follow-up queues. */
   allowSubmitWhileRunning?: boolean;
@@ -189,6 +194,7 @@ export function ChatInput({
   onRestoreDraftApplied,
   uploadEnabled: uploadAllowed,
   onStop,
+  stopSessionId,
   isRunning,
   allowSubmitWhileRunning,
   steerSupported,
@@ -250,6 +256,9 @@ export function ChatInput({
   //     later upload.
   // Embedded surfaces (Agent Builder) still pass `editorKeyOverride` to isolate
   // their own composer.
+  const [stopDialogOpen, setStopDialogOpen] = useState(false);
+  useEffect(() => { setStopDialogOpen(false); }, [stopSessionId]);
+  const requestStop = stopSessionId ? () => setStopDialogOpen(true) : onStop;
   const draftKey = draftKeyOverride ?? activeSessionId ?? DRAFT_NEW_SESSION;
   // Select a primitive — empty-string fallback keeps referential stability.
   const inputDraft = useChatStore((s) => s.inputDrafts[draftKey] ?? "");
@@ -518,10 +527,10 @@ export function ChatInput({
   const sendModeActive = !!isRunning && !!allowSubmitWhileRunning;
   const [chosenMode, setChosenMode] = useState<ChatSendMode | null>(null);
   const sendMode = effectiveChatSendMode(chosenMode, steerSupported);
-  const sendModeRef = useRef(sendMode);
+  const sendModeRef = useRef<ChatSendMode | undefined>(chosenMode ?? undefined);
   useLayoutEffect(() => {
-    sendModeRef.current = sendMode;
-  }, [sendMode]);
+    sendModeRef.current = chosenMode ? sendMode : undefined;
+  }, [chosenMode, sendMode]);
   useEffect(() => {
     if (!isRunning) setChosenMode(null);
   }, [isRunning]);
@@ -694,6 +703,7 @@ export function ChatInput({
         noAgent && "cursor-not-allowed",
       )}
     >
+      {stopSessionId && <ChatStopDialog key={stopSessionId} sessionId={stopSessionId} open={stopDialogOpen} onOpenChange={setStopDialogOpen} />}
       {onConvertToGoal && (
         <button
           type="button"
@@ -865,7 +875,7 @@ export function ChatInput({
                   hides it (DENE-1346). */}
               <span className="mr-1 text-caption text-muted-foreground max-sm:hidden">
                 {t(($) => $.input.enter_hint, {
-                  mode: sendMode === "steer"
+                  mode: !chosenMode ? t(($) => $.input.send_tooltip) : sendMode === "steer"
                     ? t(($) => $.input.mode_steer)
                     : sendMode === "queue"
                       ? t(($) => $.input.mode_queue)
@@ -875,12 +885,13 @@ export function ChatInput({
               <SubmitButton
                 onClick={submit}
                 running
-                onStop={onStop}
+                onStop={requestStop}
                 stopTooltip={t(($) => $.input.stop_tooltip)}
                 stopAriaLabel={t(($) => $.input.stop_tooltip)}
               />
               <ChatSendModeButton
                 mode={sendMode}
+                automatic={!chosenMode}
                 steerSupported={steerSupported}
                 steerProvider={steerProvider}
                 steerMode={steerMode}
@@ -888,7 +899,7 @@ export function ChatInput({
                 loading={submitting || gate.uploading}
                 onModeChange={setChosenMode}
                 onSend={(mode) => {
-                  sendModeRef.current = mode;
+                  sendModeRef.current = mode ?? (chosenMode ? sendMode : undefined);
                   void submit();
                 }}
               />
@@ -902,7 +913,7 @@ export function ChatInput({
               // Servers that cannot accept follow-ups keep this one slot
               // stop-only while a reply runs.
               running={!!isRunning}
-              onStop={onStop}
+              onStop={requestStop}
               tooltip={gate.uploading
                 ? tEditor(($) => $.upload.in_progress)
                 : sendShortcut
@@ -920,4 +931,24 @@ export function ChatInput({
       </div>
     </div>
   );
+}
+
+function ChatStopDialog({ sessionId, open, onOpenChange }: {
+  sessionId: string; open: boolean; onOpenChange: (open: boolean) => void;
+}) {
+  const { t } = useT("chat");
+  const queryClient = useQueryClient();
+  const [stopping, setStopping] = useState(false);
+  const confirmStop = async (related: boolean) => {
+    if (stopping) return;
+    setStopping(true);
+    try {
+      await api.stopChatSession(sessionId, related);
+      void queryClient.invalidateQueries({ queryKey: ["chat"] });
+      if (related) void queryClient.invalidateQueries({ queryKey: ["issues"] });
+      onOpenChange(false);
+    } catch (error) { toast.error(error instanceof Error ? error.message : t(($) => $.queue.action_failed_toast)); }
+    finally { setStopping(false); }
+  };
+  return <StopWorkDialog open={open} onOpenChange={onOpenChange} pending={stopping} onConfirm={(related) => void confirmStop(related)} />;
 }

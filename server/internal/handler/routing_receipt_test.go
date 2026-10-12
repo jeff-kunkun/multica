@@ -135,3 +135,29 @@ func TestChatCreateWithoutAgentRefusesWhenRoutingOff(t *testing.T) {
 		t.Fatalf("code = %d body = %s, want 400 naming agent_id", resp.Code, resp.Body.String())
 	}
 }
+
+func TestConvertChatToGoalRoutesExecutorAndWritesOneLink(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	seat := routableSeat(t, "Receipt Seat goal-convert")
+	chatAgent := createHandlerTestAgent(t, "Receipt Chat Agent goal-convert", []byte("[]"))
+	sessionID := createHandlerTestChatSession(t, chatAgent)
+	dbfx.Exec(t, `UPDATE chat_session SET title = 'DENE-1834 routed goal conversion' WHERE id = $1`, sessionID)
+	seedGoalChatMessage(t, sessionID, "把这个聊天变成目标", "user")
+	req := withURLParam(withChatTestWorkspaceCtx(t, newRequest(http.MethodPost, "/api/chat/sessions/"+sessionID+"/to-goal", nil)), "sessionId", sessionID)
+	resp := testutil.Call(t, testHandler.ConvertChatSessionToGoal, req).Want(http.StatusCreated).Map()
+	issue := resp["issue"].(map[string]any)
+	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1`, issue["id"]) })
+	rr := receiptOf(t, resp)
+	if rr["routed"] != true || rr["agent_id"] != seat || issue["assignee_id"] != seat {
+		t.Fatalf("receipt = %v issue assignee = %v, want routing's %s, not the chat's %s", rr, issue["assignee_id"], seat, chatAgent)
+	}
+	var links int
+	if err := testPool.QueryRow(context.Background(), `SELECT count(*) FROM chat_message WHERE chat_session_id = $1 AND message_kind = 'goal_link'`, sessionID).Scan(&links); err != nil {
+		t.Fatalf("count goal_link: %v", err)
+	}
+	if links != 1 {
+		t.Fatalf("goal_link messages = %d, want exactly 1", links)
+	}
+}

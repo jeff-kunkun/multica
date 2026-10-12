@@ -190,6 +190,12 @@ export function useSettingsSearchIndex(
         title: t(($) => $.agent_permissions.timeout_label),
         description: t(($) => $.agent_permissions.timeout_description),
       },
+      {
+        tab: "agent-permissions",
+        anchor: "bot-wake-chain",
+        title: t(($) => $.agent_permissions.bot_wake_chain_label),
+        description: t(($) => $.agent_permissions.bot_wake_chain_description),
+      },
       { tab: "workspace", anchor: "leave", title: t(($) => $.workspace.leave_title) },
       { tab: "workspace", anchor: "delete", title: t(($) => $.workspace.delete_title) },
       { tab: "members", anchor: "invitations", title: t(($) => $.members.pending_label) },

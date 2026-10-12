@@ -1,3 +1,4 @@
+import { ChatLinkedProjectSchema } from "./workspace-link-schemas";
 /**
  * Mobile-local zod schemas + fallbacks for endpoints whose responses aren't
  * yet schematised in @multica/core/api/schemas. Lenient by design — see the
@@ -51,6 +52,12 @@ import { IssueSchema } from "@multica/core/api/schemas";
  *  is even looser (only `id`); mobile validates more because the upload
  *  flow inserts `url` directly into editable text and an empty `url` would
  *  produce a broken link the user only notices after submit. */
+const MachineCapacitySchema = z.object({
+  active_runs: z.number().int().nonnegative(),
+  max_concurrent_runs: z.number().int().min(1).max(100),
+});
+const MachineQueueReasonSchema = MachineCapacitySchema.extend({ code: z.literal("machine_capacity") });
+
 export const AttachmentSchema: z.ZodType<Attachment> = z.object({
   id: z.string(),
   workspace_id: z.string().default(""),
@@ -266,6 +273,8 @@ export const EMPTY_LIST_PROJECT_RESOURCES_RESPONSE: ListProjectResourcesResponse
 // fields mobile keys behaviour on — `id` and `chat_session_id` — are required.
 
 export const ChatSessionSchema: z.ZodType<ChatSession> = z.object({
+  linked_projects: z.array(ChatLinkedProjectSchema).optional().catch(undefined),
+  converted_issue_id: z.string().nullable().optional().catch(undefined),
   id: z.string(),
   workspace_id: z.string().default(""),
   agent_id: z.string().default(""),
@@ -304,7 +313,7 @@ export const ChatMessageSchema: z.ZodType<ChatMessage> = z.object({
   attachments: z.array(AttachmentSchema).optional(),
   failure_reason: z.string().nullable().optional(),
   elapsed_ms: z.number().nullable().optional(),
-  message_kind: z.enum(["message", "no_response"]).catch("message").optional(),
+  message_kind: z.enum(["message", "no_response", "linked_delivery"]).catch("message").optional(),
   // DENE-1345: whether this reply's run carried the CLI session forward.
   session_mode: z.enum(["new", "resumed"]).optional().catch(undefined),
   resumed_from_run: z.string().optional().catch(undefined),
@@ -358,6 +367,7 @@ export const EMPTY_CHAT_TICKETS_RESPONSE: ChatTicketsResponse = {
 };
 
 const ChatQueuedTaskSchema = z.object({
+  queue_reason: MachineQueueReasonSchema.optional().catch(undefined),
   task_id: z.string(),
   status: z.string().default("queued"),
   created_at: z.string().default(""),
@@ -377,6 +387,8 @@ const ChatQueuedTasksSchema = z.array(z.unknown()).transform((tasks) =>
 // task is in flight. Ignore malformed queue rows without discarding a valid
 // head, matching packages/core/api/schemas.ts.
 export const ChatPendingTaskSchema: z.ZodType<ChatPendingTask> = z.object({
+  hidden_queued_count: z.number().int().nonnegative().optional().catch(undefined),
+  queue_reason: MachineQueueReasonSchema.optional().catch(undefined),
   task_id: z.string().optional(),
   status: z.string().optional(),
   created_at: z.string().optional(),
@@ -390,6 +402,8 @@ export const ChatPendingTaskSchema: z.ZodType<ChatPendingTask> = z.object({
 export const EMPTY_CHAT_PENDING_TASK: ChatPendingTask = {};
 
 export const SendChatMessageResponseSchema: z.ZodType<SendChatMessageResponse> = z.object({
+  runtime: z.object({ status: z.string(), name: z.string(), last_seen_at: z.string().nullable() }).nullish().catch(undefined),
+  warning: z.string().optional().catch(undefined),
   message_id: z.string(),
   task_id: z.string(),
   supports_queue: z.boolean().optional(),
@@ -479,6 +493,7 @@ export const EMPTY_SEARCH_PROJECTS_RESPONSE: SearchProjectsResponse = {
 // value this build has never seen must survive parsing and degrade at render.
 
 export const AgentTaskSchema: z.ZodType<AgentTask> = z.object({
+  queue_reason: MachineQueueReasonSchema.optional().catch(undefined),
   id: z.string(),
   agent_id: z.string().default(""),
   runtime_id: z.string().default(""),
@@ -769,6 +784,8 @@ export const EMPTY_AGENT_LIST: Agent[] = [];
 // fields default safely so a backend that adds optional new metadata
 // (timezone, visibility flags, etc.) doesn't break the parse.
 export const RuntimeSchema: z.ZodType<RuntimeDevice> = z.object({
+  custom_name: z.string().nullable().optional().catch(undefined),
+  machine_capacity: MachineCapacitySchema.optional().catch(undefined),
   id: z.string(),
   workspace_id: z.string().default(""),
   daemon_id: z.string().nullable().default(null),

@@ -24,11 +24,12 @@ var (
 var debugFlag bool
 
 var rootCmd = &cobra.Command{
-	Use:           "multica",
-	Short:         "Multica CLI — local agent runtime and management tool",
-	Long:          "Work seamlessly with Multica from the command line.",
-	SilenceUsage:  true,
-	SilenceErrors: true,
+	Use:               "multica",
+	Short:             "Multica CLI — local agent runtime and management tool",
+	Long:              "Work seamlessly with Multica from the command line.",
+	SilenceUsage:      true,
+	SilenceErrors:     true,
+	PersistentPreRunE: prepareWorkspaceSelection,
 }
 
 func init() {
@@ -41,6 +42,7 @@ func init() {
 
 	rootCmd.PersistentFlags().String("server-url", "", "Multica server URL (env: MULTICA_SERVER_URL)")
 	rootCmd.PersistentFlags().String("workspace-id", "", "Workspace ID (env: MULTICA_WORKSPACE_ID)")
+	rootCmd.PersistentFlags().String("workspace", "", "Workspace UUID, slug or exact name (case-insensitive); overrides MULTICA_WORKSPACE_ID and --workspace-id for this invocation")
 	rootCmd.PersistentFlags().String("profile", "", "Configuration profile name (e.g. dev) — isolates config, daemon state, and workspaces")
 	rootCmd.PersistentFlags().BoolVar(&debugFlag, "debug", false, "Print full error details on failure (env: MULTICA_DEBUG)")
 
@@ -82,6 +84,14 @@ func init() {
 	versionCmd.GroupID = groupAdditional
 
 	rootCmd.AddCommand(overviewCmd)
+	mcpCommand := newMCPCommand()
+	mcpCommand.GroupID = groupCore
+	rootCmd.AddCommand(mcpCommand)
+	for _, runs := range []bool{false, true} {
+		cmd := newFastAccessCommand(runs)
+		cmd.GroupID = groupCore
+		rootCmd.AddCommand(cmd)
+	}
 	rootCmd.AddCommand(capabilitiesCmd)
 	rootCmd.AddCommand(issueCmd)
 	rootCmd.AddCommand(projectCmd)
@@ -129,7 +139,7 @@ func main() {
 	cli.CleanupStaleUpdateArtifacts()
 	if err := rootCmd.Execute(); err != nil {
 		if err != errSilent {
-			fmt.Fprintln(os.Stderr, cli.FormatError(err, debugFlag))
+			fmt.Fprintln(os.Stderr, cli.FormatError(authFailureHint(rootCmd, err), debugFlag))
 		}
 		os.Exit(cli.ExitCodeFor(err))
 	}

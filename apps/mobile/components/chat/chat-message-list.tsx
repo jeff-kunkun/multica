@@ -132,6 +132,8 @@ export function ChatMessageList({
   // Top-level selection subscription gates the outer "tap-outside-to-dismiss"
   // Pressable below. When null, the Pressable stays disabled and every tap
   // passes through to the list cells / bubble long-press wrappers normally.
+  const { t } = useT("chat");
+  const hiddenQueuedCount = pendingTask?.hidden_queued_count ?? pendingTask?.queued_tasks?.length ?? 0;
   const selectingId = useChatSelectStore((s) => s.selectingId);
 
   // Every image in this session, in message order (MUL-5752), so tapping one
@@ -165,7 +167,7 @@ export function ChatMessageList({
     );
   }
 
-  if (messages.length === 0) {
+  if (messages.length === 0 && !pendingTask?.task_id && hiddenQueuedCount === 0) {
     // Empty new-chat state. Lives here (rather than the parent screen) so
     // the empty state and the rendered list share spacing/layout rules.
     return (
@@ -240,7 +242,7 @@ export function ChatMessageList({
       extraData={ticketGroups}
       ItemSeparatorComponent={MessageSeparator}
       ListFooterComponent={
-        showLiveSection || ticketGroups.tail.length > 0 ? (
+        showLiveSection || ticketGroups.tail.length > 0 || hiddenQueuedCount > 0 ? (
           <View style={{ paddingTop: showLiveSection ? 12 : 0 }} className="gap-2">
             {showLiveTimeline ? (
               <ChatTimeline items={liveTaskMessages ?? []} isStreaming />
@@ -251,6 +253,11 @@ export function ChatMessageList({
                 taskMessages={liveTaskMessages}
                 availability={availability}
               />
+            ) : null}
+            {hiddenQueuedCount > 0 ? (
+              <Text className="text-sm text-muted-foreground" accessibilityRole="text">
+                {t("queue.hidden_messages", { count: hiddenQueuedCount })}
+              </Text>
             ) : null}
             <ChatTicketCard sessionId={ticketsSessionId} tickets={ticketGroups.tail} />
           </View>
@@ -342,6 +349,10 @@ function MessageRow({
     (s) => s.selectingId === message.id,
   );
   const longPress = useChatMessageLongPress(message);
+
+  if (message.message_kind === "linked_delivery") {
+    return <View className="rounded-lg border border-border px-3.5 py-2"><Text selectable className="text-sm text-foreground">{message.content}</Text></View>;
+  }
 
   if (isFailure) {
     return (

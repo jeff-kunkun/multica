@@ -94,6 +94,7 @@ The failure reasons shown in the execution log and usage stats fall into two gro
 | Reason | Meaning | What to do |
 | --- | --- | --- |
 | `runtime_offline` | The runtime went offline during the run | Restore the runtime and retry; see [Daemon and runtimes](/daemon-runtimes) |
+| `pickup_timeout` | An urgent chat message (`chat send --urgent`) was not picked up within 30 seconds | Not retried automatically; send to another agent or configure a standby runtime and resend |
 | `queued_expired` | The runtime stopped heartbeating for longer than the reconnect grace, and the run had also been queued that long | Confirm the runtime is online, then retry |
 | `runtime_recovery` | The daemon reclaimed an interrupted run after restarting | Retry directly |
 | `environment_prepare_failed` | The daemon could not set up the execution environment for this run — its working directory, or the local runtime config written into it | Read the raw error to see which step failed, then check that machine: disk space, permissions, a directory still in use, or the AI coding tool's local config |

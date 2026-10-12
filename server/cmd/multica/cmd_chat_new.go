@@ -33,6 +33,10 @@ receipt then says 人工. With routing off the server asks you to name one.
 Nobody online means a refusal naming who is offline; --agent still queues
 for that agent.
 
+A Bot wake blocked by bot_wake_chain_limit keeps the new chat and saved
+message, prints their receipt (routing included), and exits nonzero before
+waiting. Do not resend the saved message; see chat send --help for recovery.
+
 Attach read-only references with --reference LINK_ID:PROJECT_ID (repeatable).
 Find IDs with "multica chat linked-projects --available --output json".
 References are not working projects; disconnecting stops injection in the next run.
@@ -59,7 +63,7 @@ func init() {
 	chatNewCmd.Flags().String("output", "json", "Output format: table or json")
 
 	chatSendCmd.Flags().Bool("wait", false, "Wait for the agent's reply to this message and print it")
-	chatSendCmd.Flags().Duration("wait-timeout", 10*time.Minute, "How long --wait waits for the reply")
+	chatSendCmd.Flags().Duration("wait-timeout", 10*time.Minute, "How long --wait waits; timeout exits nonzero with task_status, reason and runtime last_seen_at")
 }
 
 func runChatNew(cmd *cobra.Command, args []string) error {
@@ -126,6 +130,20 @@ func runChatNew(cmd *cobra.Command, args []string) error {
 	if routing, ok := session["routing"].(map[string]any); ok {
 		out["routing"] = routing
 	}
+	for _, key := range []string{"mode", "warning", "reason_code", "runtime"} {
+		if value, present := sent[key]; present {
+			out[key] = value
+		}
+	}
+	if out["mode"] == "blocked" {
+		if output, _ := cmd.Flags().GetString("output"); output == "json" {
+			if err := cli.PrintJSON(os.Stdout, out); err != nil {
+				return err
+			}
+		}
+		return fmt.Errorf("chat new: chat %s created: %w", sessionID, blockedChatSendError(out))
+	}
+	printChatRuntimeWarning(cmd, out)
 	return finishChatSend(cmd, client, sessionID, out)
 }
 
@@ -158,6 +176,11 @@ func finishChatSend(cmd *cobra.Command, client *cli.APIClient, sessionID string,
 		timeout, _ := cmd.Flags().GetDuration("wait-timeout")
 		reply, err := waitChatReply(client, sessionID, strVal(out, "task_id"), timeout)
 		if err != nil {
+			if reply != nil {
+				for key, value := range reply {
+					out[key] = value
+				}
+			}
 			if output != "table" {
 				_ = cli.PrintJSON(os.Stdout, out)
 			}
@@ -206,7 +229,15 @@ func waitChatReply(client *cli.APIClient, sessionID, taskID string, timeout time
 			}
 		}
 		if time.Now().After(deadline) {
-			return nil, fmt.Errorf("no reply after %s; read it later with: multica chat history --session %s", timeout, sessionID)
+			ctx, cancel := cli.APIContext(context.Background())
+			var diagnostics map[string]any
+			err := client.GetJSON(ctx, "/api/chat/sessions/"+url.PathEscape(sessionID)+"/progress?task_id="+url.QueryEscape(taskID), &diagnostics)
+			cancel()
+			if err != nil {
+				return nil, fmt.Errorf("no reply after %s; task diagnostics unavailable: %w; read it later with: multica chat progress --session %s --history", timeout, err, sessionID)
+			}
+			delete(diagnostics, "progress")
+			return diagnostics, fmt.Errorf("no reply after %s; task_status=%s reason=%s runtime=%v; read it later with: multica chat progress --session %s --history", timeout, strVal(diagnostics, "task_status"), strVal(diagnostics, "reason"), diagnostics["runtime"], sessionID)
 		}
 		time.Sleep(chatReplyPollInterval)
 	}
@@ -233,4 +264,10 @@ func routingReceiptLine(rr map[string]any) string {
 		line += " (offline)"
 	}
 	return line
+}
+
+func printChatRuntimeWarning(cmd *cobra.Command, out map[string]any) {
+	if warning := strVal(out, "warning"); warning != "" {
+		fmt.Fprintln(cmd.ErrOrStderr(), "Warning:", warning)
+	}
 }

@@ -30,6 +30,19 @@ The first argument is the status key and the remaining arguments are issue keys
 or UUIDs. `--no-start` adds the same `suppress_run` control as single-issue
 status changes. `--output json` returns the resolved issue IDs and server batch
 result. `batch-status` is accepted as an alias.
+## Project names and body files
+
+`issue create/list --project` and `chat list/search --project` accept a full
+UUID, ID prefix or exact project title (case-insensitive). Duplicate titles
+return candidates with UUID, title and status; choose the UUID. The project
+lookup stays in the selected workspace and requests only id/title/status.
+
+`--content-file` and `--description-file` accept files in the current working
+directory or regular files owned by the current OS user under the system temp
+directory (`/tmp`, `$TMPDIR`, or the platform temp root). Symlinks are resolved
+before checking containment and ownership. Other locations require
+`--allow-external-file`; attachment and other file flags keep their own rules.
+
 ## Sub-issues: todo starts work now, backlog parks it
 The steps are in `references/sub-issues.md`. `--status backlog` parks a child instead of starting it. `` `--stage <N>` `` groups children into a stage, and the parent is woken when a whole stage finishes. Promote one parked child with `multica issue status <child-id> todo`.
 
@@ -44,6 +57,35 @@ multica issue comment update <comment-id> --content-file ./comment.md --expected
 ```
 
 If another editor changed the comment, reconcile the latest body before retrying; do not advance the revision and overwrite it. Authors, workspace owners, and admins can edit comments; attachments remain unchanged.
+
+## Downloading attachments
+
+Read attachment IDs from `issue get <issue> --output json` or a bounded
+`issue comment list` response, then download verified bytes with:
+
+```bash
+multica attachment download <attachment-id> -o ./attachments --output json
+multica attachment download <attachment-id> --output-file ./report.pdf
+multica attachment download --comment <comment-id> -o ./attachments
+multica attachment download --issue DENE-123 -o ./attachments
+```
+
+`-o/--output-dir` is the destination directory; `--output-file` is an exact
+path for one attachment ID only. `--output json` selects result formatting.
+Combine `--issue` and `--comment` to select just that comment on the issue;
+this also works against older servers without the comment attachment endpoint.
+The server applies the same issue visibility and attachment access rules.
+
+Downloads prefer authenticated raw storage, request identity/no-transform
+bytes, and verify sha256 and integer byte size before replacing a file. A
+mismatch reports expected/actual values and address type, retries raw storage
+once, then fails without publishing corrupt bytes. Missing server checksums
+are refused; do not bypass verification. Single-file JSON has `id`,
+`filename`, absolute `path`, integer `size` in bytes, and `sha256`. Batch JSON
+has `files` with those fields and `failures` with attachment `id` and `error`;
+empty selections return empty lists. Duplicate filenames include attachment
+IDs. Partial failure keeps successful files and exits nonzero: retry the failed
+IDs from `failures`, rather than the entire batch.
 
 ## PR linking and close intent are two distinct contracts
 
@@ -395,6 +437,14 @@ started — `first_run`, `agent_changed`, `runtime_changed`, `session_lost`
 `multica chat history --output json` carries the same three fields on chat
 messages. Rows older than this field omit all three.
 
+`multica chat history --session <id> --output json` also returns
+`hidden_queued_count`: the session-wide number of user messages waiting behind
+the current turn and omitted from the transcript. Add it to the visible rows
+when comparing with `message_count`; older cursor pages are a separate gap.
+A nonzero count means the inputs are queued, not missing. The current-session
+history fallback reports the same field; context-generation reads already
+include their queued rows and report zero.
+
 `waiting_local_directory` is the `in_place` path-mutex wait. Tasks on a
 `shared` or `worktree` `local_directory` do not take that mutex, so they do
 not enter this status for the directory lock. If several tasks on an umbrella
@@ -487,3 +537,12 @@ For GitLab, `glab ci status` can be used directly when it returns non-zero while
 ## Issue wakeups
 
 Event, condition and timer wakeups (`multica issue wakeup ...`) and scheduled check-ins are in `references/wakeups.md`.
+
+### MCP comment directory pages
+
+`comments_list` forwards its existing `limit` (1–50) and `offset` to the server.
+Follow `next_offset` exactly; the byte budget may return fewer roots than requested.
+No `next_offset` means the live directory is exhausted. Concurrent root changes
+can move offsets; use the activity checkpoint for durable synchronization.
+The directory stays a summary read; open a selected `thread_id` for replies/full
+text. CLI roots-only/since/summary and thread modes keep their existing contract.

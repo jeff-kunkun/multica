@@ -8,7 +8,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// linkedFlag sends an issue or autopilot command to a linked source
+// linkedFlag sends an issue, autopilot or supported chat command to a linked source
 // workspace through a managed link (DENE-1663). The server checks the link,
 // the switch, the run's originator and the route on every call.
 const linkedFlag = "linked"
@@ -50,11 +50,11 @@ func useLinkedWorkspace(client *cli.APIClient, ref string) error {
 			continue
 		}
 		if !l.Managed {
-			return fmt.Errorf("--linked %s: the link is read-only; its owner can turn managed on with `multica workspace link update %s --managed on`", ref, l.ID)
+			return fmt.Errorf("403 --linked %s: the link is read-only; inspect `multica workspace link view %s`; its owner can enable managed access", ref, l.ID)
 		}
 		client.WorkspaceID = l.Source.ID
 		client.LinkedWorkspace = l.Source.ID
 		return nil
 	}
-	return fmt.Errorf("--linked %s: no active link from that workspace to this one (see `multica workspace link list`)", ref)
+	return fmt.Errorf("403 --linked %s: no active link from that workspace to this one; inspect `multica workspace link view <link-id>` (find IDs with `multica workspace link list`)", ref)
 }

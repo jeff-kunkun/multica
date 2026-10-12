@@ -115,7 +115,9 @@
     "issue_stall_action": "Action de stagnation",
     "workspace_link_request": "Demande de liaison",
     "workspace_link_accepted": "Liaison acceptée",
-    "workspace_link_declined": "Liaison refusée"
+    "workspace_link_declined": "Liaison refusée",
+    "runtime_offline": "Machine hors ligne",
+    "runtime_online": "Machine en ligne"
   },
   "labels": {
     "set_status_to": "Statut défini sur",
@@ -312,5 +314,32 @@
       "status_failed": "Impossible de mettre à jour le statut",
       "undo_failed": "Impossible d’annuler le changement de statut"
     }
+  },
+  "fast_access": {
+    "open": "Activité",
+    "title": "Activité des espaces",
+    "close": "Fermer",
+    "scope": "Espaces de travail",
+    "all": "Tous les espaces visibles",
+    "current": "Espace actuel",
+    "refresh": "Actualiser",
+    "loading": "Chargement...",
+    "error": "Impossible de charger l’activité. Actualisez pour réessayer.",
+    "runs": "Exécutions actives",
+    "untitled_run": "Exécution",
+    "executing": "En cours",
+    "queued": "En attente",
+    "waiting": "En attente",
+    "unknown": "État indisponible",
+    "autopilot": "Automatisation",
+    "no_runs": "Aucune exécution active.",
+    "chats": "Conversations · 30 dernières minutes",
+    "untitled_chat": "Conversation",
+    "unread": "Non lus : {{count}}",
+    "no_chats": "Aucune activité récente.",
+    "complete": "Tous les résultats sont chargés.",
+    "partial": "Il reste des résultats à charger.",
+    "more": "Charger la suite",
+    "as_of": "Observé à {{time}}"
   }
 }

@@ -115,7 +115,9 @@
     "issue_stall_action": "Stall action",
     "workspace_link_request": "Link request",
     "workspace_link_accepted": "Link accepted",
-    "workspace_link_declined": "Link declined"
+    "workspace_link_declined": "Link declined",
+    "runtime_offline": "Machine offline",
+    "runtime_online": "Machine online"
   },
   "labels": {
     "set_status_to": "Set status to",
@@ -312,5 +314,32 @@
       "status_failed": "Could not update status",
       "undo_failed": "Could not undo the status change"
     }
+  },
+  "fast_access": {
+    "open": "Activity",
+    "title": "Workspace activity",
+    "close": "Close",
+    "scope": "Workspaces",
+    "all": "All visible workspaces",
+    "current": "Current workspace",
+    "refresh": "Refresh",
+    "loading": "Loading...",
+    "error": "Activity could not be loaded. Refresh to try again.",
+    "runs": "Active runs",
+    "untitled_run": "Run",
+    "executing": "Executing",
+    "queued": "Queued",
+    "waiting": "Waiting",
+    "unknown": "Status unavailable",
+    "autopilot": "Automation",
+    "no_runs": "No active runs.",
+    "chats": "Chat activity · last 30 minutes",
+    "untitled_chat": "Chat",
+    "unread": "Unread: {{count}}",
+    "no_chats": "No recent chat activity.",
+    "complete": "All results loaded.",
+    "partial": "More results remain.",
+    "more": "Load more",
+    "as_of": "Observed at {{time}}"
   }
 }

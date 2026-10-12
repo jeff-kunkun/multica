@@ -206,6 +206,9 @@ UPDATE agent SET
     runtime_config = COALESCE(sqlc.narg('runtime_config'), runtime_config),
     runtime_mode = COALESCE(sqlc.narg('runtime_mode'), runtime_mode),
     runtime_id = COALESCE(sqlc.narg('runtime_id'), runtime_id),
+    -- Fallback runtime for urgent chat turns (DENE-1844); NULL-clear goes
+    -- through ClearAgentFallbackRuntime, same two-query pattern as thinking_level.
+    fallback_runtime_id = COALESCE(sqlc.narg('fallback_runtime_id'), fallback_runtime_id),
     visibility = COALESCE(sqlc.narg('visibility'), visibility),
     permission_mode = COALESCE(sqlc.narg('permission_mode'), permission_mode),
     status = COALESCE(sqlc.narg('status'), status),
@@ -314,6 +317,7 @@ RETURNING *;
 -- routing changes, so that write and this one commit together.
 UPDATE agent AS child
 SET runtime_id = parent.runtime_id,
+    fallback_runtime_id = parent.fallback_runtime_id,
     runtime_mode = parent.runtime_mode,
     runtime_config = parent.runtime_config,
     model = parent.model,
@@ -332,6 +336,7 @@ WHERE child.parent_agent_id = parent.id
   AND child.archived_at IS NULL
   AND parent.id = @parent_agent_id
   AND (child.runtime_id IS DISTINCT FROM parent.runtime_id
+    OR child.fallback_runtime_id IS DISTINCT FROM parent.fallback_runtime_id
     OR child.runtime_mode IS DISTINCT FROM parent.runtime_mode
     OR child.runtime_config IS DISTINCT FROM parent.runtime_config
     OR child.model IS DISTINCT FROM parent.model
@@ -379,6 +384,13 @@ GROUP BY parent_agent_id;
 -- dedicated query when the agent owner removes every toolkit; subsequent
 -- dispatch decisions treat NULL identically to `{}` (both -> no overlay).
 UPDATE agent SET composio_toolkit_allowlist = NULL, updated_at = now()
+WHERE id = $1
+RETURNING *;
+
+-- name: ClearAgentFallbackRuntime :one
+-- Explicit NULL-clear for fallback_runtime_id (DENE-1844): the agent keeps
+-- only its primary runtime and urgent chat turns fail fast when it is offline.
+UPDATE agent SET fallback_runtime_id = NULL, updated_at = now()
 WHERE id = $1
 RETURNING *;
 
@@ -832,7 +844,20 @@ SELECT
     COALESCE(sqlc.narg('new_task_id')::uuid, gen_random_uuid())
 FROM agent_task_queue p
 WHERE p.id = $1
+  AND COALESCE(p.context->>'work_stopped', 'false') <> 'true'
+  AND NOT EXISTS (
+    SELECT 1 FROM chat_session converted
+    WHERE converted.id = p.chat_session_id
+      AND (converted.converted_issue_id IS NOT NULL OR converted.status <> 'active')
+  )
   AND lock_task_owner_rows(p.agent_id, p.issue_id, p.runtime_id)
+  AND NOT EXISTS (
+    SELECT 1 FROM agent_task_queue active
+    WHERE active.id <> p.id
+      AND ((p.issue_id IS NOT NULL AND active.issue_id = p.issue_id)
+        OR (p.chat_session_id IS NOT NULL AND active.chat_session_id = p.chat_session_id))
+      AND active.status IN ('queued', 'dispatched', 'running', 'waiting_local_directory', 'deferred')
+  )
 ON CONFLICT (issue_id, agent_id, (COALESCE(comment_thread_id, '00000000-0000-0000-0000-000000000000'::uuid))) WHERE status IN ('queued', 'dispatched')
        OR (status = 'deferred' AND context->>'channel_issue_media_pending' = 'true')
 DO NOTHING
@@ -1066,7 +1091,8 @@ WHERE id = (
           JOIN agent_runtime r ON r.id = atq.runtime_id
           WHERE a.id = atq.agent_id
             -- A task's persisted runtime is not authority after an agent rebind.
-            AND a.runtime_id = atq.runtime_id
+            -- The configured fallback runtime may also claim (DENE-1844 urgent relay).
+            AND (a.runtime_id = atq.runtime_id OR a.fallback_runtime_id = atq.runtime_id)
             -- Reversible seat gate (DENE-714). Queued work stays queued until
             -- the seat is turned back on. Already-dispatched reclaim queries
             -- do NOT check this: disable must not interrupt an in-flight claim.
@@ -1190,7 +1216,8 @@ WHERE id = (
           FROM agent a
           JOIN agent_runtime r ON r.id = atq.runtime_id
           WHERE a.id = atq.agent_id
-            AND a.runtime_id = atq.runtime_id
+            -- The configured fallback runtime may also claim (DENE-1844 urgent relay).
+            AND (a.runtime_id = atq.runtime_id OR a.fallback_runtime_id = atq.runtime_id)
             AND (
                 r.visibility = 'public'
                 OR (
@@ -1237,7 +1264,8 @@ WHERE id IN (
           FROM agent a
           JOIN agent_runtime r ON r.id = atq.runtime_id
           WHERE a.id = atq.agent_id
-            AND a.runtime_id = atq.runtime_id
+            -- The configured fallback runtime may also claim (DENE-1844 urgent relay).
+            AND (a.runtime_id = atq.runtime_id OR a.fallback_runtime_id = atq.runtime_id)
             AND (
                 r.visibility = 'public'
                 OR (
@@ -1285,7 +1313,8 @@ WHERE id IN (
           FROM agent a
           JOIN agent_runtime r ON r.id = atq.runtime_id
           WHERE a.id = atq.agent_id
-            AND a.runtime_id = atq.runtime_id
+            -- The configured fallback runtime may also claim (DENE-1844 urgent relay).
+            AND (a.runtime_id = atq.runtime_id OR a.fallback_runtime_id = atq.runtime_id)
             AND (
                 r.visibility = 'public'
                 OR (
@@ -1325,7 +1354,8 @@ SELECT EXISTS (
           FROM agent a
           JOIN agent_runtime r ON r.id = atq.runtime_id
           WHERE a.id = atq.agent_id
-            AND a.runtime_id = atq.runtime_id
+            -- The configured fallback runtime may also claim (DENE-1844 urgent relay).
+            AND (a.runtime_id = atq.runtime_id OR a.fallback_runtime_id = atq.runtime_id)
             AND (
                 r.visibility = 'public'
                 OR (
@@ -2348,7 +2378,9 @@ WHERE context->>'wakeup_id' IS NULL AND issue_id = @issue_id
 -- target: a dispatched / waiting_local_directory / running task has already had
 -- its claim response built. Folding afterward would add a planned id that is
 -- absent from that response's delivered_comment_ids receipt; completion
--- reconciliation handles it instead. Ordinary 'deferred' rows remain excluded:
+-- reconciliation handles it instead. Default wakes include retry/backoff deferred
+-- rows; explicit thread modes retain the original media-only rule. Wakeup timers
+-- are excluded by wakeup_id. Previously ordinary 'deferred' rows were excluded:
 -- assignee-fallback escalations have their own fire_at lifecycle and may coexist
 -- with a queued primary. The one exception is a task explicitly marked
 -- channel_issue_media_pending. It is the issue's sole assigned-agent task and
@@ -2403,12 +2435,12 @@ SET coalesced_comment_ids = (
     runtime_connected_apps = sqlc.narg('new_runtime_connected_apps')
 WHERE id = (
     SELECT t.id FROM agent_task_queue t
-    WHERE t.context->>'wakeup_id' IS NULL AND t.issue_id = @issue_id
+    WHERE (@across_threads::boolean OR t.context->>'wakeup_id' IS NULL) AND t.issue_id = @issue_id
       AND t.agent_id = @agent_id
-      AND t.comment_thread_id IS NOT DISTINCT FROM comment_thread_root_id(@new_trigger_comment_id::uuid)
+      AND (@across_threads::boolean OR t.comment_thread_id IS NOT DISTINCT FROM comment_thread_root_id(@new_trigger_comment_id::uuid))
       AND (
           t.status = 'queued'
-          OR (t.status = 'deferred' AND t.context->>'channel_issue_media_pending' = 'true')
+          OR (t.status = 'deferred' AND ((@across_threads::boolean AND t.context->>'wakeup_id' IS NULL) OR t.context->>'channel_issue_media_pending' = 'true'))
       )
       -- Head-scoped (TEN-356, #5914): never fold across HEADs. The physical
       -- unique index is per (issue_id, agent_id, thread), so an insert-race loser can
@@ -2459,9 +2491,9 @@ SET coalesced_comment_ids = (
     )
 WHERE id = (
     SELECT t.id FROM agent_task_queue t
-    WHERE t.context->>'wakeup_id' IS NULL AND t.issue_id = @issue_id
+    WHERE (@across_threads::boolean OR t.context->>'wakeup_id' IS NULL) AND t.issue_id = @issue_id
       AND t.agent_id = @agent_id
-      AND t.comment_thread_id IS NOT DISTINCT FROM comment_thread_root_id(@comment_id::uuid)
+      AND (@across_threads::boolean OR t.comment_thread_id IS NOT DISTINCT FROM comment_thread_root_id(@comment_id::uuid))
       AND t.status IN ('dispatched', 'running', 'waiting_local_directory')
       AND (
           COALESCE(sqlc.narg('head_sha')::text, '') = ''
@@ -2699,22 +2731,12 @@ ORDER BY recovery.created_at ASC, recovery.id ASC
 LIMIT @max_per_tick;
 
 -- name: HasActiveTaskForIssueAndAgent :one
--- MUL-4195: true when the (issue, agent) pair has any non-terminal task in a
--- state whose completion will run completion reconciliation — queued,
--- dispatched, running, waiting_local_directory, or the explicitly-marked
--- channel-media deferred state. Used by the comment enqueue
--- path: when a merge into a pre-claim task fails (the task is already
--- dispatched/running, or a mismatched pre-claim task exists), a fresh queued
--- INSERT would collide with idx_one_pending_task_per_issue_agent AND would risk
--- a duplicate run. Instead the caller relies on that active task's completion
--- reconcile to schedule the guaranteed follow-up, and only enqueues fresh when
--- NO active task exists.
+-- Default work includes retry/backoff deferred rows. Future wakeup timers do
+-- not own normal inputs, but once queued/running they are active executions.
 SELECT count(*) > 0 AS has_active FROM agent_task_queue
 WHERE issue_id = $1 AND agent_id = $2
-  AND (
-    status IN ('queued', 'dispatched', 'running', 'waiting_local_directory')
-    OR (status = 'deferred' AND context->>'channel_issue_media_pending' = 'true')
-  );
+  AND (status IN ('queued', 'dispatched', 'running', 'waiting_local_directory')
+    OR (status = 'deferred' AND context->>'wakeup_id' IS NULL));
 
 -- name: HasActiveTaskForIssueAndAgentInThread :one
 -- Active execution and pending work in this comment thread only.
@@ -2760,7 +2782,7 @@ WHERE atq.runtime_id = $1
       FROM agent a
       JOIN agent_runtime r ON r.id = atq.runtime_id
       WHERE a.id = atq.agent_id
-        AND a.runtime_id = atq.runtime_id
+        AND (a.runtime_id = atq.runtime_id OR a.fallback_runtime_id = atq.runtime_id)
         AND a.work_enabled
         AND (
             r.visibility = 'public'
@@ -2882,7 +2904,7 @@ WHERE atq.runtime_id = ANY(@runtime_ids::uuid[])
       FROM agent a
       JOIN agent_runtime r ON r.id = atq.runtime_id
       WHERE a.id = atq.agent_id
-        AND a.runtime_id = atq.runtime_id
+        AND (a.runtime_id = atq.runtime_id OR a.fallback_runtime_id = atq.runtime_id)
         AND a.work_enabled
         AND (
             r.visibility = 'public'

@@ -85,6 +85,12 @@
       "toast_saved": "기기 이름을 변경했습니다",
       "toast_cleared": "기기 이름을 지웠습니다",
       "toast_failed": "기기 이름 변경에 실패했습니다"
+    },
+    "capacity": {
+      "label": "동시 실행 한도",
+      "running": "실행 중 {{active}}/{{limit}}",
+      "owner_only": "기기 소유자만 한도를 변경할 수 있습니다.",
+      "failed": "저장하지 못했습니다. 다시 시도해 주세요."
     }
   },
   "health": {
@@ -496,5 +502,11 @@
     "table_cache_r": "캐시 R",
     "table_cache_w": "캐시 W",
     "no_data": "아직 사용량 데이터가 없습니다"
+  },
+  "alerts": {
+    "label": "머신 연결 끊김 알림",
+    "description": "내 머신이 3분 이상 연결이 끊기거나 복구되면 나와 Bot에 알립니다.",
+    "retry": "불러오기 실패. 다시 시도",
+    "save_failed": "저장 실패. 다시 시도하세요."
   }
 }

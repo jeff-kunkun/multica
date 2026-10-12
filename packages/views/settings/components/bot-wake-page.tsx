@@ -611,6 +611,13 @@ function RulesSection({ bot, settings }: { bot: ExternalBot; settings: BotWakeSe
             </div>
           </SettingsRow>
           <SettingsRow
+            label={t(($) => $.bots.wake.effective_hourly_limit, { count: saved.hourly_limit })}
+            description={settings.limited_count ? t(($) => $.bots.wake.limited_count, { count: settings.limited_count }) : undefined}
+            size="none"
+          >
+            {null}
+          </SettingsRow>
+          <SettingsRow
             label={t(($) => $.bots.wake.quiet)}
             description={t(($) => $.bots.wake.quiet_hint)}
           >
@@ -885,7 +892,7 @@ function EventRow({
     ? paths.issueDetail(event.issue_id)
     : event.chat_session_id
       ? paths.chatSession(event.chat_session_id)
-      : null;
+      : event.runtime_outage ? paths.runtimes() : null;
   // Each receipt stands on its own: "started" comes only from the bot's woken
   // receipt, never from delivery or a result, and a result may arrive first.
   const delivered = event.status === "received" || !!event.received_at;
@@ -895,7 +902,7 @@ function EventRow({
     (!event.woken_at || new Date(event.result_at) < new Date(event.woken_at));
   const source = sourceHref ? (
     <AppLink href={sourceHref} className="inline-flex min-h-11 items-center underline-offset-2 hover:text-foreground hover:underline sm:min-h-0">
-      {event.issue_id ? t(($) => $.bots.wake.source_issue) : t(($) => $.bots.wake.source_chat)}
+      {event.runtime_outage?.machine_name ?? (event.issue_id ? t(($) => $.bots.wake.source_issue) : t(($) => $.bots.wake.source_chat))}
     </AppLink>
   ) : null;
 

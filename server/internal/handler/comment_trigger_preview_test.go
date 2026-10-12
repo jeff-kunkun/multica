@@ -465,7 +465,7 @@ func TestPreviewCommentTriggers_ExplicitMentionSuppressesAssigneeFallback(t *tes
 	}
 }
 
-func TestCreateComment_ExplicitMentionQueuesDifferentThreadsIndependently(t *testing.T) {
+func TestCreateComment_ExplicitQueueKeepsDifferentThreadsIndependent(t *testing.T) {
 	if testHandler == nil || testPool == nil {
 		t.Skip("database not available")
 	}
@@ -479,13 +479,13 @@ func TestCreateComment_ExplicitMentionQueuesDifferentThreadsIndependently(t *tes
 		t.Fatalf("initial mention queued tasks = %d, want 1", got)
 	}
 
-	preview := previewCommentTriggersForTest(t, issueID, map[string]any{"content": content + " again"})
+	preview := previewCommentTriggersForTest(t, issueID, map[string]any{"content": content + " again", "mode": "queue"})
 	requirePreviewAgents(t, preview, mentionedID)
 	if preview.Agents[0].Source != string(commentTriggerSourceMentionAgent) {
 		t.Fatalf("preview source = %q, want %q", preview.Agents[0].Source, commentTriggerSourceMentionAgent)
 	}
 
-	postCommentForTriggerPreviewTest(t, issueID, map[string]any{"content": content + " again"})
+	postCommentForTriggerPreviewTest(t, issueID, map[string]any{"content": content + " again", "mode": "queue"})
 	if got := countQueuedCommentTriggerTasks(t, issueID, mentionedID); got != 2 {
 		t.Fatalf("separate thread queued tasks = %d, want 2", got)
 	}
@@ -1033,7 +1033,7 @@ func TestPreviewCommentTriggers_MalformedMentionIDDoesNotPanic(t *testing.T) {
 	}
 }
 
-func TestPreviewCommentTriggers_AllSuppressesAssigneeAndNewThreadQueuesSeparately(t *testing.T) {
+func TestPreviewCommentTriggers_AllSuppressesAssigneeAndNewThreadMerges(t *testing.T) {
 	if testHandler == nil || testPool == nil {
 		t.Skip("database not available")
 	}
@@ -1067,8 +1067,8 @@ func TestPreviewCommentTriggers_AllSuppressesAssigneeAndNewThreadQueuesSeparatel
 	postCommentForTriggerPreviewTest(t, issueID, map[string]any{
 		"content": "can you continue here?",
 	})
-	if got := countQueuedCommentTriggerTasks(t, issueID, agentID); got != 2 {
-		t.Fatalf("assignment and new comment thread queued tasks = %d, want 2", got)
+	if got := countQueuedCommentTriggerTasks(t, issueID, agentID); got != 1 {
+		t.Fatalf("assignment and new comment thread queued tasks = %d, want 1", got)
 	}
 }
 

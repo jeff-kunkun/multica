@@ -90,7 +90,9 @@ func TestEnqueueChatTaskSealsMessageStrandedByPredecessorReply(t *testing.T) {
 // TestEnqueueChatTaskSealsMessageWhenReplyCommitsDuringEnqueue closes the same
 // boundary one level tighter: the predecessor's reply row commits on another
 // connection AFTER the enqueue transaction has begun, so the seal statement's
-// READ COMMITTED snapshot is the first thing in that transaction to see it.
+// READ COMMITTED snapshot of the default merge read is the first thing in that
+// transaction to see it. The running turn remains the input's execution owner;
+// an unread receipt makes the input available after that turn ends.
 // Same prior art as the media-deferral race above.
 func TestEnqueueChatTaskSealsMessageWhenReplyCommitsDuringEnqueue(t *testing.T) {
 	pool := newResolveOriginatorPool(t)
@@ -115,8 +117,10 @@ func TestEnqueueChatTaskSealsMessageWhenReplyCommitsDuringEnqueue(t *testing.T) 
 	racing := &TaskService{
 		Queries: q,
 		Bus:     events.New(),
-		TxStarter: &raceInjectTxStarter{pool: pool, inject: func() {
-			// Turn 1's reply row, committed by a concurrent completion.
+		TxStarter: &raceInjectTxStarter{pool: pool, queryName: "ListUnownedChannelChatMessagesForMerge", inject: func() {
+			// Commit the predecessor's reply row on another connection. Its
+			// terminal status change shares the session fence; this injection
+			// isolates the input selector's transcript snapshot boundary.
 			if _, err := pool.Exec(ctx, `
 				INSERT INTO chat_message (chat_session_id, role, content, task_id)
 				VALUES ($1, 'assistant', '通了。', $2)`, chatSessionID, first.ID); err != nil {
@@ -133,14 +137,24 @@ func TestEnqueueChatTaskSealsMessageWhenReplyCommitsDuringEnqueue(t *testing.T) 
 	if !injected {
 		t.Fatal("race injection did not run")
 	}
+	if next.ID != first.ID {
+		t.Fatalf("default channel input created %s instead of merging %s", util.UUIDToString(next.ID), util.UUIDToString(first.ID))
+	}
 
 	var owner pgtype.UUID
 	if err := pool.QueryRow(ctx, `SELECT task_id FROM chat_message WHERE id = $1`, stranded).Scan(&owner); err != nil {
 		t.Fatalf("load waiting message: %v", err)
 	}
 	if !owner.Valid || owner.Bytes != next.ID.Bytes {
-		t.Fatalf("waiting user message task_id = %q, want the new turn %q",
+		t.Fatalf("waiting user message task_id = %q, want its merged execution %q",
 			util.UUIDToString(owner), util.UUIDToString(next.ID))
+	}
+	var unread int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM chat_task_supplement WHERE task_id=$1 AND chat_message_id=$2 AND followup_task_id=task_id AND status<>'delivered'`, first.ID, stranded).Scan(&unread); err != nil {
+		t.Fatal(err)
+	}
+	if unread != 1 {
+		t.Fatalf("waiting user input has %d unread delivery receipts, want 1", unread)
 	}
 }
 

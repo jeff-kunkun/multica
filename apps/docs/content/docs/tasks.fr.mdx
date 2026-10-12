@@ -94,6 +94,7 @@ Les motifs d'échec affichés dans le journal d'exécution et dans les Statistiq
 | Motif | Signification | Que faire |
 | --- | --- | --- |
 | `runtime_offline` | Le runtime est passé hors ligne pendant l'exécution | Rétablissez le runtime et relancez ; voir [Daemon et runtimes](/daemon-runtimes) |
+| `pickup_timeout` | Un message de chat urgent (`chat send --urgent`) n'a pas été pris en charge dans les 30 secondes | Pas de nouvelle tentative automatique ; envoyez-le à un autre agent ou configurez un runtime de secours puis renvoyez |
 | `queued_expired` | Le runtime a cessé d'envoyer des signaux de vie pendant plus longtemps que le délai de grâce de reconnexion, et l'exécution était aussi en file d'attente depuis aussi longtemps | Vérifiez que le runtime est en ligne, puis relancez |
 | `runtime_recovery` | Le daemon a récupéré une exécution interrompue après son redémarrage | Relancez directement |
 | `environment_prepare_failed` | Le daemon n'a pas pu préparer l'environnement d'exécution — son répertoire de travail, ou la configuration locale du runtime qui y est écrite | Lisez l'erreur brute pour savoir quelle étape a échoué, puis vérifiez cette machine : espace disque, permissions, répertoire encore utilisé, ou configuration locale de l'outil de codage IA |

@@ -7,6 +7,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/multica-ai/multica/server/internal/listshape"
+	"net/http"
 	"net/url"
 	"os"
 	"strconv"
@@ -24,11 +26,19 @@ var chatCmd = &cobra.Command{
 	Short: "Read a chat conversation, or send to one",
 }
 
+var chatStopCmd = &cobra.Command{
+	Use:   "stop [session-id|url]",
+	Short: "Stop all queued and active runs in a chat",
+	Long:  "Stop a chat's active, queued and deferred runs. With --related, also stop its source/spawned chats, bound issues and descendants. Every related chat must belong to the requesting person; every issue and private agent requires access. New human messages may start work again.",
+	Args:  cobra.MaximumNArgs(1), RunE: runChatStop,
+}
+
 var chatListCmd = &cobra.Command{
-	Use:   "list",
-	Short: "List chats visible to the task initiator",
-	Args:  cobra.NoArgs,
-	RunE:  runChatDirectoryList,
+	Use:     "list",
+	Short:   "List chats visible to the task initiator (with --linked: only their own source chats)",
+	Example: "  multica chat list --linked studio --output json",
+	Args:    cobra.NoArgs,
+	RunE:    runChatDirectoryList,
 }
 
 var chatSearchCmd = &cobra.Command{
@@ -53,7 +63,8 @@ It is the SAME command regardless of which channel the conversation came from.
 Pass --session <url|id> to read a different chat in this workspace instead of
 the one you are running in. The link looks like …/chat/<session-id> (an older
 ?session=<id> link works too). The default is a short summary plus the latest
-messages, not the full transcript. Page older messages with --before
+messages, not the full transcript. hidden_queued_count is the session-wide number
+of queued user messages omitted from this transcript (not an older-page count). Page older messages with --before
 <next_cursor>.
 
 When the user says "接管这个：<link>", run:
@@ -93,7 +104,12 @@ platform writes after each reply.
   multica chat progress --history
 
 --tone sets the dot colour: working (blue, default), waiting (yellow),
-stuck (red), done (green). --history lists earlier lines, newest first.`,
+stuck (red), done (green). --history lists earlier lines, newest first, plus
+task_status, reason, queue_ahead (turns before this one), and runtime
+(status, name, last_seen_at). Reasons include runtime_offline, running_no_logs,
+and queued_behind_N.
+
+  multica chat progress --session <session-id> --history --output json`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: runChatProgress,
 }
@@ -215,17 +231,61 @@ happens when the agent is still replying (ignored when it is not):
            (same process, same session on Claude, Codex, Grok, OpenCode 1.x
            and Pi; Cursor, Copilot, CodeArts, DevEco, Antigravity and OpenClaw
            restart the CLI on the same session to read it right away)
-  queue    answer it after this reply finishes (new process, same session;
-           default)
+  queue    explicitly answer it after this reply finishes (new process, same session)
   restart  stop the reply now and start over from this message (new process,
            same session; the half-done step is dropped)
 
-When the running CLI cannot steer, the send is refused with the reason and
-the modes that work; nothing is sent.
+Without --mode, merge into the queued or active run instead of creating another
+run. Queued messages form one input batch; an active reply receives the message
+as a supplement. A CLI without live-input support returns a refusal with the
+reason and explicit queue/restart choices; nothing is sent.
+
+The response includes runtime (status, name, last_seen_at). Offline sends are
+accepted with warning in JSON and stderr. With --wait, timeout exits nonzero
+and returns task_status, reason and queue_ahead plus runtime last_seen_at.
+Reasons include runtime_offline, running_no_logs and queued_behind_N.
+
+  multica chat send --session <session-id> "Hello" --wait --wait-timeout 20s --output json
+
+Bot wake-chain admission defaults to four unacknowledged triggers. A blocked
+send saves the message, prints its receipt, and exits nonzero with the reason;
+do not resend it. A genuine agent reply or completed run resets the chain.
+Human messages and server-verified --per-quote messages are exempt.
+Read or change the limit with multica settings get/set bot_wake_chain_limit.
+
+With --linked <source>, a viewer agent can send to the run initiator’s own chat
+through a managed link. Messages carry a forwarded-by label and enter the
+receiver brief as external content. Only queued text is supported; --wait is unavailable.
+JSON includes message_id, chat_session_id and linked_delivery provenance. A 403 means
+access was refused; inspect multica workspace link view <link-id>.
+
+  multica chat send --linked studio --session 019abcde-1234-7000-8000-000000000001 --content-file note.md --output json
 
   multica chat send --session <id|url> "Use the staging database instead" --mode steer
   multica chat send --session <id|url> --content-file ./msg.md --mode queue
   multica chat send --session <id|url> "再补一句" --wait   # print the agent's reply
+
+--urgent is for messages that are worthless late (a verification code, a
+relayed SMS). It never queues behind an offline machine: if the agent's
+runtime cannot claim right now, the send is refused with reason
+"runtime_offline: <runtime> last_seen <time>" and next_steps, unless the agent
+has a fallback runtime (multica agent update --fallback-runtime) that is
+online — then the turn runs there and JSON carries fallback_runtime=true. An
+accepted urgent turn restarts any reply in progress (so only the chat's
+creator or an agent may send one), sits at the head of the queue, and is
+failed with failure_reason=pickup_timeout plus a chat notice when no daemon
+starts it by pickup_deadline_at (30s). --urgent always waits for that pickup
+result and never longer than pickup_deadline_at: it returns as soon as the
+turn is picked up (task_status=running, pickup_elapsed_ms) and exits nonzero
+with task_status and reason (runtime_offline, pickup_timeout) when it is
+refused or nobody starts it by the deadline. If the server has not judged the
+turn when the deadline passes, the command stops waiting on its own:
+task_status is whatever the server last reported (possibly still dispatched)
+and reason_source=sender marks that the sender gave up; reason_source=server
+marks a verdict the server wrote. --wait adds nothing and --wait-timeout does
+not apply; read the reply later with multica chat history.
+
+  multica chat send --session <id|url> --urgent "验证码 482913，请立刻填入" --output json
 `,
 	Args: cobra.MaximumNArgs(1),
 	RunE: runChatSend,
@@ -249,11 +309,17 @@ left as it is. Only the chat's owner can hand it over.
 
 func init() {
 	for _, c := range []*cobra.Command{chatListCmd, chatSearchCmd} {
-		c.Flags().String("project", "", "Filter to a project id (defaults to the current project)")
+		c.Flags().String("project", "", "Filter to a project UUID, prefix or exact name (case-insensitive; defaults to the current project)")
+		addListShapeFlags(c)
+		c.Example = "  multica chat list --project \"My project\" --compact --output json\n  multica chat list --fields id,title,status --workspace \"My workspace\""
 		c.Flags().Bool("all-projects", false, "Search across every project visible to the task initiator")
 		c.Flags().String("since", "", "Only chats active since an RFC3339 timestamp")
 		c.Flags().String("output", "json", "Output format: table or json")
 	}
+	chatCmd.AddCommand(chatStopCmd)
+	chatStopCmd.Flags().Bool("related", false, "Also stop related issues and chats (every target requires access)")
+	chatStopCmd.Flags().String("session", "", "Chat session id or URL (defaults to MULTICA_CHAT_SESSION_ID)")
+	chatStopCmd.Flags().String("output", "json", "Output format: table or json")
 	chatCmd.AddCommand(chatListCmd)
 	chatCmd.AddCommand(chatSearchCmd)
 	for _, c := range []*cobra.Command{chatHistoryCmd, chatThreadCmd} {
@@ -279,13 +345,16 @@ func init() {
 	}
 	chatCmd.AddCommand(chatOpenCmd)
 	chatCmd.AddCommand(chatSendCmd)
+	addLinkedFlag(chatListCmd, chatSendCmd)
 	chatCmd.AddCommand(chatHandoffCmd)
 	chatHandoffCmd.Flags().String("session", "", "Chat session id or URL (defaults to MULTICA_CHAT_SESSION_ID)")
 	chatHandoffCmd.Flags().String("to", "", "Agent to hand the chat to: name or id (required)")
 	chatHandoffCmd.Flags().String("output", "json", "Output format: table or json")
 	chatSendCmd.Flags().String("session", "", "Chat session id or URL (required)")
 	chatSendCmd.Flags().String("content-file", "", "Read the message from this file instead of the argument")
-	chatSendCmd.Flags().String("mode", "queue", "While the agent is replying: steer, queue or restart")
+	chatSendCmd.Flags().String("mode", "", "Default: merge into existing work; choose steer, queue or restart explicitly")
+	chatSendCmd.Flags().String("per-quote", "", "Exact words from this caller’s earlier human message in this chat; server verifies the quote before exempting it from the Bot wake-chain limit")
+	chatSendCmd.Flags().Bool("urgent", false, "Deliver now or fail now: refused (exit nonzero, JSON reason + next_steps) when the agent's runtime is offline and no online fallback runtime is configured; otherwise goes to the head of the queue (restart semantics) and waits for the pickup: exit 0 once a daemon starts it (task_status=running), nonzero with reason=pickup_timeout as soon as the server's 30s deadline (pickup_deadline_at) passes without one, never later; task_status then reports what the server last said. --wait-timeout does not apply.")
 	chatSendCmd.Flags().String("output", "json", "Output format: table or json")
 	chatSendCmd.Flags().StringSlice("attachment", nil, "Local files to attach to this message (repeatable)")
 	chatSendCmd.Flags().Bool("allow-external-file", false, "Allow attachment paths outside the working directory")
@@ -508,14 +577,17 @@ func reportOrListProgress(ctx context.Context, cmd *cobra.Command, client *cli.A
 		if len(args) > 0 {
 			return fmt.Errorf("%s progress: --history takes no text", noun)
 		}
-		var out struct {
-			Progress []map[string]any `json:"progress"`
-		}
+		var out map[string]any
 		if err := client.GetJSON(ctx, path, &out); err != nil {
 			return fmt.Errorf("list %s progress: %w", noun, err)
 		}
 		if output == "table" {
-			for _, p := range out.Progress {
+			if status := strVal(out, "task_status"); status != "" {
+				fmt.Printf("Task: %s; reason: %s; runtime: %v\n", status, strVal(out, "reason"), out["runtime"])
+			}
+			items, _ := out["progress"].([]any)
+			for _, item := range items {
+				p, _ := item.(map[string]any)
 				fmt.Printf("%v  %-7v %-7v %v\n", p["updated_at"], p["tone"], p["source"], p["text"])
 			}
 			return nil
@@ -557,7 +629,11 @@ func runChatDirectory(cmd *cobra.Command, keyword string) error {
 	defer cancel()
 	q := url.Values{}
 	if project, _ := cmd.Flags().GetString("project"); strings.TrimSpace(project) != "" {
-		q.Set("project", strings.TrimSpace(project))
+		ref, err := resolveProjectID(ctx, client, project)
+		if err != nil {
+			return err
+		}
+		q.Set("project", ref.ID)
 	}
 	if all, _ := cmd.Flags().GetBool("all-projects"); all {
 		q.Set("all_projects", "true")
@@ -568,17 +644,30 @@ func runChatDirectory(cmd *cobra.Command, keyword string) error {
 	if strings.TrimSpace(keyword) != "" {
 		q.Set("q", keyword)
 	}
+	fields, err := listShapeQuery(cmd, q, listshape.Chat)
+	if err != nil {
+		return err
+	}
 	path := "/api/chat/directory"
 	if encoded := q.Encode(); encoded != "" {
 		path += "?" + encoded
 	}
 	var rows []map[string]any
 	if err := client.GetJSON(ctx, path, &rows); err != nil {
-		return fmt.Errorf("list chats: %w", err)
+		return linkedChatRefusal(cmd, err, "list chats")
 	}
+	listshape.Filter(rows, fields)
 	output, _ := cmd.Flags().GetString("output")
 	if output != "table" {
 		return cli.PrintJSON(os.Stdout, rows)
+	}
+	if compact, _ := cmd.Flags().GetBool("compact"); compact {
+		tableRows := make([][]string, 0, len(rows))
+		for _, row := range rows {
+			tableRows = append(tableRows, []string{strVal(row, "id"), strVal(row, "title"), strVal(row, "project_title"), strVal(row, "agent_name"), strVal(row, "status"), strVal(row, "last_active_at"), numVal(row, "message_count")})
+		}
+		cli.PrintTable(os.Stdout, []string{"ID", "TITLE", "PROJECT", "AGENT", "STATUS", "LAST_ACTIVE", "MESSAGES"}, tableRows)
+		return nil
 	}
 	headers := []string{"TITLE", "PROJECT", "AGENT", "ORIGINATOR", "LAST_ACTIVE", "MESSAGES", "SUMMARY"}
 	tableRows := make([][]string, 0, len(rows))
@@ -757,6 +846,9 @@ func renderChatRead(cmd *cobra.Command, resp map[string]any, overview bool) erro
 		}
 	}
 	cli.PrintTable(os.Stdout, headers, rows)
+	if count := numVal(resp, "hidden_queued_count"); count != "" {
+		fmt.Fprintf(os.Stdout, "另有 %s 条排队消息\n", count)
+	}
 	if cursor := strVal(resp, "next_cursor"); cursor != "" && strVal(resp, "summary") != "" {
 		fmt.Fprintf(os.Stdout, "next_cursor: %s\n", cursor)
 	}
@@ -845,6 +937,15 @@ func runChatOpen(cmd *cobra.Command, _ []string) error {
 }
 
 func runChatSend(cmd *cobra.Command, args []string) error {
+	linked, _ := cmd.Flags().GetString(linkedFlag)
+	if strings.TrimSpace(linked) != "" {
+		attachments, _ := cmd.Flags().GetStringSlice("attachment")
+		wait, _ := cmd.Flags().GetBool("wait")
+		if len(attachments) > 0 || wait {
+			return fmt.Errorf("chat send --linked supports text only without --wait; remove --attachment and --wait, then inspect the returned message_id")
+		}
+	}
+
 	// No MULTICA_CHAT_SESSION_ID fallback: a chat run sending to the chat it
 	// is answering would queue a turn for itself.
 	session, _ := cmd.Flags().GetString("session")
@@ -853,8 +954,11 @@ func runChatSend(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("chat send: --session is required: %w", err)
 	}
 	mode, _ := cmd.Flags().GetString("mode")
+	if strings.TrimSpace(linked) != "" && mode != "queue" {
+		return fmt.Errorf("chat send --linked supports --mode queue only; remove --mode or pass --mode queue")
+	}
 	switch mode {
-	case "steer", "queue", "restart":
+	case "", "steer", "queue", "restart":
 	default:
 		return fmt.Errorf("chat send: --mode must be steer, queue or restart")
 	}
@@ -895,9 +999,66 @@ func runChatSend(cmd *cobra.Command, args []string) error {
 		}
 		attachmentIDs = append(attachmentIDs, id)
 	}
+	urgent, _ := cmd.Flags().GetBool("urgent")
+	if urgent && strings.TrimSpace(linked) != "" {
+		return fmt.Errorf("chat send --urgent is not available with --linked")
+	}
 	path := "/api/chat/sessions/" + url.PathEscape(ref.ID) + "/messages"
-	if err := client.PostJSON(ctx, path, map[string]any{"content": content, "mode": mode, "attachment_ids": attachmentIDs}, &out); err != nil {
+	body := map[string]any{"content": content, "attachment_ids": attachmentIDs, "per_quote": flagString(cmd, "per-quote")}
+	if mode != "" {
+		body["mode"] = mode
+	}
+	if urgent {
+		body["urgent"] = true
+	}
+	if err := client.PostJSON(ctx, path, body, &out); err != nil {
+		if strings.TrimSpace(linked) != "" {
+			return linkedChatRefusal(cmd, err, "chat send")
+		}
+		if urgent {
+			if refused, uerr := urgentSendRefusal(err, output); refused {
+				return uerr
+			}
+		}
 		return sendModeRefusal(err, output, "chat send")
+	}
+	if out["mode"] == "blocked" {
+		if output == "json" {
+			if err := cli.PrintJSON(os.Stdout, out); err != nil {
+				return err
+			}
+		}
+		return blockedChatSendError(out)
+	}
+	printChatRuntimeWarning(cmd, out)
+	if urgent {
+		// An urgent send is only done once a daemon has it (DENE-1884): the
+		// command always waits for the pickup result, up to the server's
+		// pickup_deadline_at, and exits nonzero when nobody started the turn.
+		// --wait adds nothing here and --wait-timeout does not apply.
+		pickup, err := waitChatPickup(client, ref.ID, strVal(out, "task_id"), urgentPickupDeadline(out))
+		for key, value := range pickup {
+			out[key] = value
+		}
+		if err != nil {
+			if output != "table" {
+				_ = cli.PrintJSON(os.Stdout, out)
+			}
+			return err
+		}
+		if output == "table" {
+			where := "primary runtime"
+			if out["fallback_runtime"] == true {
+				where = "fallback runtime"
+			}
+			fmt.Printf("Sent urgent (%v, %s): message %v, task %v", out["mode"], where, out["message_id"], out["task_id"])
+			if status := strVal(out, "task_status"); status != "" {
+				fmt.Printf(", task_status %s", status)
+			}
+			fmt.Println()
+			return nil
+		}
+		return cli.PrintJSON(os.Stdout, out)
 	}
 	if wait, _ := cmd.Flags().GetBool("wait"); wait {
 		return finishChatSend(cmd, client, ref.ID, out)
@@ -907,6 +1068,126 @@ func runChatSend(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 	return cli.PrintJSON(os.Stdout, out)
+}
+
+// urgentSendRefusal recognises the 409 an urgent send gets when the agent's
+// runtime is offline and no online fallback is configured. The body is
+// printed as-is (reason + next_steps) and the exit is nonzero; nothing was
+// saved, so there is nothing to avoid resending.
+func urgentSendRefusal(err error, output string) (bool, error) {
+	var httpErr *cli.HTTPError
+	if !errors.As(err, &httpErr) || httpErr.StatusCode != http.StatusConflict {
+		return false, nil
+	}
+	var refusal map[string]any
+	if json.Unmarshal([]byte(httpErr.Body), &refusal) != nil || strVal(refusal, "code") != "runtime_offline" {
+		return false, nil
+	}
+	if output != "table" {
+		_ = cli.PrintJSON(os.Stdout, refusal)
+	}
+	steps := ""
+	if list, ok := refusal["next_steps"].([]any); ok {
+		parts := make([]string, 0, len(list))
+		for _, item := range list {
+			parts = append(parts, fmt.Sprint(item))
+		}
+		steps = "; next steps: " + strings.Join(parts, " | ")
+	}
+	detail := strVal(refusal, "reason")
+	if fb := strVal(refusal, "fallback_reason"); fb != "" {
+		detail += "; fallback: " + fb
+	}
+	return true, fmt.Errorf("chat send --urgent refused, nothing was sent: %s%s", detail, steps)
+}
+
+var chatPickupPollInterval = 2 * time.Second
+
+// urgentPickupFallbackDeadline stands in for pickup_deadline_at when an older
+// server did not return one; it mirrors the server's 30 s promise.
+const urgentPickupFallbackDeadline = 30 * time.Second
+
+// urgentPickupDeadline reads the server's pickup_deadline_at from the send
+// receipt: the instant by which a daemon must have started the turn.
+func urgentPickupDeadline(out map[string]any) time.Time {
+	if raw := strVal(out, "pickup_deadline_at"); raw != "" {
+		if deadline, err := time.Parse(time.RFC3339Nano, raw); err == nil {
+			return deadline
+		}
+	}
+	return time.Now().Add(urgentPickupFallbackDeadline)
+}
+
+// waitChatPickup polls the turn's progress until a daemon has started it
+// (task_status running or a terminal state). A refused or timed-out pickup
+// comes back as an error carrying the reason; the returned map is merged
+// into the send output either way, with pickup_elapsed_ms added.
+//
+// deadline is the server's pickup_deadline_at and bounds the whole wait: every
+// progress request and every sleep runs under a context that expires at that
+// instant, so the command returns within the 30 s the server promised even
+// when a request is slow or the server's sweep has not judged the turn yet.
+// When the deadline passes without a server verdict the map keeps the last
+// task_status the server reported (it may still be dispatched) and sets
+// reason=pickup_timeout with reason_source=sender: the sender stopped waiting;
+// the server alone decides the task's fate. A verdict the server did write
+// (failed/cancelled) carries reason_source=server.
+func waitChatPickup(client *cli.APIClient, sessionID, taskID string, deadline time.Time) (map[string]any, error) {
+	if taskID == "" {
+		return nil, fmt.Errorf("no task to wait for")
+	}
+	started := time.Now()
+	waitCtx, stopWaiting := context.WithDeadline(context.Background(), deadline)
+	defer stopWaiting()
+	path := "/api/chat/sessions/" + url.PathEscape(sessionID) + "/progress?task_id=" + url.QueryEscape(taskID)
+	last := map[string]any{}
+	gaveUp := func() (map[string]any, error) {
+		last["pickup_elapsed_ms"] = time.Since(started).Milliseconds()
+		last["reason"] = "pickup_timeout"
+		last["reason_source"] = "sender"
+		status := strVal(last, "task_status")
+		if status == "" {
+			status = "unknown"
+		}
+		return last, fmt.Errorf("urgent message not picked up by its deadline %s (waited %s): sender stopped waiting; task_status=%s reason=pickup_timeout runtime=%v", deadline.UTC().Format(time.RFC3339), time.Since(started).Round(time.Millisecond), status, last["runtime"])
+	}
+	for {
+		ctx, cancel := cli.APIContext(waitCtx)
+		var diagnostics map[string]any
+		err := client.GetJSON(ctx, path, &diagnostics)
+		cancel()
+		if err != nil {
+			if waitCtx.Err() != nil {
+				return gaveUp()
+			}
+			return nil, fmt.Errorf("wait for pickup: %w", err)
+		}
+		delete(diagnostics, "progress")
+		diagnostics["pickup_elapsed_ms"] = time.Since(started).Milliseconds()
+		last = diagnostics
+		switch strVal(diagnostics, "task_status") {
+		case "running", "completed":
+			return diagnostics, nil
+		case "failed", "cancelled":
+			diagnostics["reason_source"] = "server"
+			return diagnostics, fmt.Errorf("urgent message was not picked up: %s (task_status=%s)", strVal(diagnostics, "reason"), strVal(diagnostics, "task_status"))
+		}
+		timer := time.NewTimer(chatPickupPollInterval)
+		select {
+		case <-waitCtx.Done():
+			timer.Stop()
+			return gaveUp()
+		case <-timer.C:
+		}
+	}
+}
+
+func blockedChatSendError(out map[string]any) error {
+	warning, _ := out["warning"].(string)
+	if warning == "" {
+		warning = "Bot wake-chain limit reached; wait for the agent to reply or complete a run, use a human login, or ask an administrator to change bot_wake_chain_limit"
+	}
+	return fmt.Errorf("message %v saved, but agent was not woken: %s; do not resend the saved message", out["message_id"], warning)
 }
 
 // sendModeRefusal turns a steer refusal into the reason plus the modes that
@@ -970,4 +1251,44 @@ func withBotAttribution(author string, record map[string]any) string {
 func collectChatSendAttachments(cmd *cobra.Command) ([]pendingAttachment, error) {
 	paths, _ := cmd.Flags().GetStringSlice("attachment")
 	return collectLocalAttachments(cmd, paths)
+}
+
+// linkedChatRefusal preserves the server status and gives the supported next step.
+func linkedChatRefusal(cmd *cobra.Command, err error, verb string) error {
+	linked, _ := cmd.Flags().GetString(linkedFlag)
+	if strings.TrimSpace(linked) != "" {
+		return fmt.Errorf("%s: %w; inspect `multica workspace link view <link-id>` for this source", verb, err)
+	}
+	return fmt.Errorf("%s: %w", verb, err)
+}
+
+func runChatStop(cmd *cobra.Command, args []string) error {
+	session, _ := cmd.Flags().GetString("session")
+	if len(args) > 0 {
+		session = args[0]
+	}
+	if strings.TrimSpace(session) == "" {
+		session = os.Getenv("MULTICA_CHAT_SESSION_ID")
+	}
+	ref, err := parseChatSessionLinkRef(session)
+	if err != nil {
+		return fmt.Errorf("chat stop: provide a session id or --session: %w", err)
+	}
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+	ctx, cancel := cli.APIContext(context.Background())
+	defer cancel()
+	related, _ := cmd.Flags().GetBool("related")
+	var result map[string]any
+	if err := client.PostJSON(ctx, "/api/chat/sessions/"+url.PathEscape(ref.ID)+"/stop", map[string]any{"related": related}, &result); err != nil {
+		return fmt.Errorf("stop chat: %w", err)
+	}
+	output, _ := cmd.Flags().GetString("output")
+	if output == "table" {
+		fmt.Fprintf(os.Stdout, "Stopped %v runs\n", result["cancelled_count"])
+		return nil
+	}
+	return cli.PrintJSON(os.Stdout, result)
 }

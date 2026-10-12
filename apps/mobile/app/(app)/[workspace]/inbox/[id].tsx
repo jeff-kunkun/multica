@@ -124,7 +124,7 @@ export default function InboxNoticeDetail() {
         </View>
       ) : !item ||
         (item.type !== "autopilot_quota_exceeded" &&
-          item.type !== "autopilot_paused") ? (
+          item.type !== "autopilot_paused" && item.type !== "runtime.offline" && item.type !== "runtime.online") ? (
         <View className="px-4 py-8">
           <Text className="text-sm text-muted-foreground text-center">
             {t("detail.unavailable")}

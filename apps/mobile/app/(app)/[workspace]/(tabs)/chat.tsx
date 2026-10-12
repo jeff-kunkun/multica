@@ -1,3 +1,4 @@
+import { chatDraftReferences, useChatReferencesDraftStore } from "@/data/stores/chat-references-draft-store";
 /**
  * Chat tab — single-screen IA.
  *
@@ -36,7 +37,10 @@ import {
   KeyboardAvoidingView,
   Platform,
   View,
+  Pressable,
 } from "react-native";
+import { Text } from "@/components/ui/text";
+import { Button } from "@/components/ui/button";
 import { router } from "expo-router";
 import { useFocusEffect, useIsFocused } from "@react-navigation/native";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -121,6 +125,7 @@ export default function ChatTab() {
     }
   }, [t]);
   const wsId = useWorkspaceStore((s) => s.currentWorkspaceId);
+  const referenceCount = useChatReferencesDraftStore((s) => s.workspaceId === wsId ? s.refs.length : 0);
   const wsSlug = useWorkspaceStore((s) => s.currentWorkspaceSlug);
   const userId = useAuthStore((s) => s.user?.id);
 
@@ -299,7 +304,9 @@ export default function ChatTab() {
           const session = await createSession.mutateAsync({
             agent_id: currentAgent.id,
             title: titleSeed.slice(0, 50),
+            linked_projects: chatDraftReferences(wsId),
           });
+          useChatReferencesDraftStore.getState().clear();
           return session.id;
         } finally {
           sessionPromiseRef.current = null;
@@ -308,7 +315,7 @@ export default function ChatTab() {
       sessionPromiseRef.current = promise;
       return promise;
     },
-    [activeSessionId, currentAgent, createSession],
+    [activeSessionId, currentAgent, createSession, wsId],
   );
 
   const handleSend = useCallback(
@@ -462,18 +469,20 @@ export default function ChatTab() {
   // ── Cancel in-flight ───────────────────────────────────────────────────
   const handleStop = useCallback(() => {
     if (!pendingTask?.task_id || !activeSessionId) return;
-    if (pendingTask.status === "queued") return;
-    const taskId = pendingTask.task_id;
     const sessionId = activeSessionId;
-    qc.setQueryData<ChatPendingTask>(chatKeys.pendingTask(sessionId), (old) =>
-      removePendingChatTask(old, taskId),
-    );
-    void api.cancelTaskById(taskId)
-      .catch(() => {
-        // Silent — task may have already terminated server-side.
-      })
-      .finally(() => invalidatePendingTask(qc, sessionId));
-  }, [pendingTask?.task_id, pendingTask?.status, activeSessionId, qc]);
+    const stop = async (related: boolean) => {
+      try {
+        await api.stopChatSession(sessionId, related);
+        await qc.invalidateQueries({ queryKey: ["chat"] });
+        if (related) await qc.invalidateQueries({ queryKey: ["issues"] });
+      } catch { Alert.alert(t("stop_work.failed")); }
+    };
+    Alert.alert(t("stop_work.title"), t("stop_work.description"), [
+      { text: t("stop_work.keep"), style: "cancel" },
+      { text: t("stop_work.confirm"), style: "destructive", onPress: () => void stop(false) },
+      { text: t("stop_work.confirm_related"), style: "destructive", onPress: () => void stop(true) },
+    ]);
+  }, [pendingTask?.task_id, activeSessionId, qc, t]);
 
   // ── Queue actions (DENE-1362, mirrors Web's use-chat-task-actions) ──────
   const handleSendQueuedNow = useCallback(
@@ -533,6 +542,7 @@ export default function ChatTab() {
 
   // ── Header / sheet actions ─────────────────────────────────────────────
   const handleNewChat = useCallback(() => {
+    useChatReferencesDraftStore.getState().clear();
     if (availableAgents.length > 1) {
       setAgentPickerOpen(true);
       return;
@@ -623,6 +633,7 @@ export default function ChatTab() {
           />
         }
       />
+      <Pressable accessibilityRole="button" className="min-h-11 justify-center border-b border-border px-4" onPress={() => { if (wsSlug) router.push({ pathname: "/[workspace]/chat-references", params: { workspace: wsSlug, ...(activeSessionId ? { sessionId: activeSessionId } : {}) } }); }}><Text className="text-sm text-muted-foreground">{t("references")}{(activeSession ? activeSession.linked_projects?.length : referenceCount) ? ` · ${activeSession ? activeSession.linked_projects?.length : referenceCount}` : ""}</Text>{activeSession?.linked_projects?.some((ref) => !ref.available) && <Text className="text-sm text-destructive">{t("references_unavailable")}</Text>}</Pressable>
       {availability === "none" ? <NoAgentBanner /> : null}
       <KeyboardAvoidingView
         behavior={Platform.OS === "ios" ? "padding" : undefined}
@@ -648,6 +659,7 @@ export default function ChatTab() {
           <OfflineBanner
             agentName={currentAgent?.name}
             availability={presenceAvailability}
+            lastSeenAt={presenceDetail === "loading" ? undefined : presenceDetail.runtimeLastSeenAt}
           />
         ) : currentAgent ? (
           <RuntimeRequiredBanner agentName={currentAgent.name} />
@@ -663,6 +675,14 @@ export default function ChatTab() {
           onSendNow={handleSendQueuedNow}
           onRemove={handleRemoveQueued}
         />
+        {activeSession?.converted_issue_id ? (
+          <View className="gap-2 px-4 py-3">
+            <Text className="text-sm text-muted-foreground">{t("converted_to_issue")}</Text>
+            <Button variant="outline" onPress={() => {
+              if (wsSlug) router.push(`/${wsSlug}/issue/${activeSession.converted_issue_id}`);
+            }}><Text>{t("open_converted_issue")}</Text></Button>
+          </View>
+        ) : (
         <ChatComposer
           value={draft}
           onChangeText={(next) => setDraft(draftKey, next)}
@@ -671,7 +691,7 @@ export default function ChatTab() {
           }
           onStop={handleStop}
           sending={sending}
-          allowStop={pendingTask?.status !== "queued"}
+          allowStop={!!pendingTask?.task_id}
           allowSendWhileRunning={pendingTask?.supports_queue === true}
           steerSupported={pendingTask?.steer_supported === true}
           steerProvider={pendingTask?.steer_provider}
@@ -679,6 +699,7 @@ export default function ChatTab() {
           disabled={disabled}
           disabledReason={disabledReason}
         />
+        )}
       </KeyboardAvoidingView>
 
       <AgentPickerSheet

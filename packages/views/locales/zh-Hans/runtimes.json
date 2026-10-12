@@ -85,6 +85,12 @@
       "toast_saved": "已重命名机器",
       "toast_cleared": "已清除机器名称",
       "toast_failed": "重命名机器失败"
+    },
+    "capacity": {
+      "label": "同时运行上限",
+      "running": "运行中 {{active}}/{{limit}}",
+      "owner_only": "只有机器主人能修改上限。",
+      "failed": "保存失败，请重试。"
     }
   },
   "health": {
@@ -496,5 +502,11 @@
     "table_cache_r": "缓存读",
     "table_cache_w": "缓存写",
     "no_data": "还没有使用数据"
+  },
+  "alerts": {
+    "label": "机器掉线告警",
+    "description": "我的机器掉线超过 3 分钟及恢复时，通知我和我的 Bot。",
+    "retry": "加载失败，重试",
+    "save_failed": "保存失败，请重试"
   }
 }

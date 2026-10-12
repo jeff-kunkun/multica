@@ -3993,6 +3993,7 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 }
 
 type UpdateIssueRequest struct {
+	RelatedStop      bool    `json:"related_stop,omitempty"`
 	ExpectedRevision *int64  `json:"expected_revision,omitempty"`
 	Title            *string `json:"title"`
 	// TitleBase is the title adopted by the editor before producing Title. It
@@ -4402,6 +4403,32 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		statusKeyForGuard = statusKey
 		params.Status = pgtype.Text{String: statusKey, Valid: true}
 	}
+	var relatedStopPlan *workStopPlan
+	if req.RelatedStop {
+		if _, present := rawFields["duplicate_of_issue_id"]; present {
+			writeError(w, http.StatusBadRequest, "related_stop cannot be combined with duplicate_of_issue_id")
+			return
+		}
+		if statusKeyForGuard != issuestatus.Cancelled {
+			writeError(w, http.StatusBadRequest, "related_stop requires cancelled status")
+			return
+		}
+		// Keep this composite action to a status change, so all writes can
+		// use its single transaction and ordinary cancellation checks.
+		for key := range rawFields {
+			switch key {
+			case "status", "expected_revision", "related_stop", "suppress_run":
+			default:
+				writeError(w, http.StatusBadRequest, "related_stop only supports a cancellation status change")
+				return
+			}
+		}
+		var authorized bool
+		relatedStopPlan, authorized = h.authorizeWorkStop(w, r, "issue", prevIssue.ID, prevIssue.WorkspaceID, true)
+		if !authorized {
+			return
+		}
+	}
 	var blockRecord blockwait.Record
 	persistBlock := false
 	// Resolved once: the blocked gate (DENE-850) and the review gate (DENE-869)
@@ -4712,7 +4739,9 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 
 	var issue db.Issue
 	attachmentsChanged := false
-	if req.Description != nil || req.TitleBase != nil || req.DescriptionBase != nil || len(attachmentIDs) > 0 {
+	if relatedStopPlan != nil {
+		issue, err = h.updateIssueAndStopRelatedWork(r, params, relatedStopPlan)
+	} else if req.Description != nil || req.TitleBase != nil || req.DescriptionBase != nil || len(attachmentIDs) > 0 {
 		var lockedPrev db.Issue
 		issue, lockedPrev, attachmentsChanged, err = h.updateIssueAtomically(
 			r.Context(), prevIssue.WorkspaceID, params, rawFields, req.TitleBase, req.DescriptionBase, attachmentIDs, statusKeyForGuard,

@@ -32,6 +32,17 @@ describe("ChatPendingTaskSchema", () => {
 });
 
 describe("SendChatMessageResponseSchema", () => {
+  it("retains offline diagnostics and tolerates older or malformed servers", () => {
+    const send = { message_id: "m1", task_id: "t1", created_at: "2026-10-11T09:00:10Z" };
+    const runtime = { status: "offline", name: "Claude (test)", last_seen_at: "2026-10-11T09:00:10Z" };
+    expect(SendChatMessageResponseSchema.parse({ ...send, runtime, warning: "runtime_offline" }))
+      .toMatchObject({ runtime, warning: "runtime_offline" });
+    expect(SendChatMessageResponseSchema.parse(send).runtime).toBeUndefined();
+    expect(SendChatMessageResponseSchema.parse({ ...send, runtime: { status: 0 }, warning: 0 }))
+      .toMatchObject({ message_id: "m1", task_id: "t1" });
+    expect(SendChatMessageResponseSchema.parse({ ...send, runtime: null }).runtime).toBeNull();
+  });
+
   const base = {
     message_id: "message-1",
     task_id: "task-1",

@@ -67,6 +67,7 @@ export function enqueuePendingChatTask(
     );
     return {
       ...current,
+      hidden_queued_count: undefined,
       ...task,
       status,
       created_at: current.created_at || task.created_at,
@@ -82,6 +83,7 @@ export function enqueuePendingChatTask(
   }
   return {
     ...current,
+    hidden_queued_count: undefined,
     queued_tasks: normalizeQueue([...(current.queued_tasks ?? []), task]),
   };
 }
@@ -111,7 +113,9 @@ export function promotePendingChatTask(
   if (current?.task_id === taskID) {
     return {
       ...current,
+      hidden_queued_count: undefined,
       status,
+      queue_reason: status === "queued" ? current.queue_reason : undefined,
       wait_reason: resolveWaitReason(status, waitReason, current.wait_reason),
       queued_tasks: queue.filter((task) => task.task_id !== taskID),
     };
@@ -126,6 +130,7 @@ export function promotePendingChatTask(
     ...promoted,
     supports_queue: current.supports_queue,
     status,
+    queue_reason: status === "queued" ? promoted.queue_reason : undefined,
     wait_reason: resolveWaitReason(status, waitReason, undefined),
     created_at: promoted.created_at || createdAt || "",
     queued_tasks: uniqueQueue([
@@ -143,6 +148,7 @@ export function removePendingChatTask(
   if (current.task_id !== taskID) {
     return {
       ...current,
+      hidden_queued_count: undefined,
       queued_tasks: (current.queued_tasks ?? []).filter((task) => task.task_id !== taskID),
     };
   }
@@ -167,6 +173,7 @@ export function prioritizePendingChatTask(
   if (!selected) return current;
   return {
     ...current,
+    hidden_queued_count: undefined,
     queued_tasks: [selected, ...queue.filter((task) => task.task_id !== taskID)],
   };
 }

@@ -43,6 +43,10 @@ type HistoryMessage struct {
 	// TS is the platform timestamp string, sortable lexicographically within a
 	// platform (Slack "1700000000.000100"). It doubles as the paging cursor.
 	TS string `json:"ts"`
+	// FailureReason is set when this assistant row records a failed run rather
+	// than a reply (runtime_offline, timeout, ...). Text then holds the detail
+	// of why, not an answer (DENE-1839).
+	FailureReason string `json:"failure_reason,omitempty"`
 
 	// Session lineage of the Multica run behind this message (DENE-1345):
 	// "new" or "resumed", the run whose session it resumed, and why a new one
@@ -67,6 +71,7 @@ type HistoryMessage struct {
 // HistoryPage is one normalized page. Messages are ordered OLDEST-FIRST so the
 // transcript reads top-to-bottom like the chat does.
 type HistoryPage struct {
+	HiddenQueuedCount int32 `json:"hidden_queued_count,omitempty"`
 	// ChannelType is the platform the history came from ("slack"). Empty when
 	// the session is not bound to any channel (a web-only chat session).
 	ChannelType string `json:"channel_type,omitempty"`

@@ -112,7 +112,9 @@
     "issue_stall_action": "停滞処理",
     "workspace_link_request": "連携リクエスト",
     "workspace_link_accepted": "連携が承認されました",
-    "workspace_link_declined": "連携が拒否されました"
+    "workspace_link_declined": "連携が拒否されました",
+    "runtime_offline": "マシンがオフライン",
+    "runtime_online": "マシンがオンライン"
   },
   "labels": {
     "set_status_to": "ステータスを変更:",
@@ -306,5 +308,32 @@
       "status_failed": "ステータスを更新できませんでした",
       "undo_failed": "ステータス変更を元に戻せませんでした"
     }
+  },
+  "fast_access": {
+    "open": "アクティビティ",
+    "title": "ワークスペースの動き",
+    "close": "閉じる",
+    "scope": "ワークスペース",
+    "all": "閲覧可能なすべてのワークスペース",
+    "current": "現在のワークスペース",
+    "refresh": "更新",
+    "loading": "読み込み中...",
+    "error": "読み込めませんでした。更新して再試行してください。",
+    "runs": "アクティブな実行",
+    "untitled_run": "実行",
+    "executing": "実行中",
+    "queued": "キュー待ち",
+    "waiting": "待機中",
+    "unknown": "状態を取得できません",
+    "autopilot": "自動化",
+    "no_runs": "アクティブな実行はありません。",
+    "chats": "チャットの動き · 過去30分",
+    "untitled_chat": "チャット",
+    "unread": "未読：{{count}}",
+    "no_chats": "最近のチャットの動きはありません。",
+    "complete": "すべて読み込みました。",
+    "partial": "未読み込みの結果があります。",
+    "more": "さらに読み込む",
+    "as_of": "確認時刻：{{time}}"
   }
 }

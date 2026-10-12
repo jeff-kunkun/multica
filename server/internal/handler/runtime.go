@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/multica-ai/multica/server/internal/listshape"
 	"log/slog"
 	"net/http"
 	"strconv"
@@ -22,11 +23,22 @@ import (
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
+type MachineCapacityResponse struct {
+	ActiveRuns        int64 `json:"active_runs"`
+	MaxConcurrentRuns int32 `json:"max_concurrent_runs"`
+}
+
+type MachineQueueReason struct {
+	Code string `json:"code"`
+	MachineCapacityResponse
+}
+
 type AgentRuntimeResponse struct {
-	ID          string  `json:"id"`
-	WorkspaceID string  `json:"workspace_id"`
-	DaemonID    *string `json:"daemon_id"`
-	Name        string  `json:"name"`
+	MachineCapacity *MachineCapacityResponse `json:"machine_capacity,omitempty"`
+	ID              string                   `json:"id"`
+	WorkspaceID     string                   `json:"workspace_id"`
+	DaemonID        *string                  `json:"daemon_id"`
+	Name            string                   `json:"name"`
 	// CustomName is the user-set display override (MUL-4217); null when the
 	// runtime still uses its daemon-proposed Name. Clients show
 	// CustomName ?? Name and seed the rename field from this raw value.
@@ -519,6 +531,7 @@ func (h *Handler) resolveViewingTZ(r *http.Request) string {
 // Only fields users may legitimately edit are listed; other runtime metadata
 // (provider, daemon_id, status…) flows in from the daemon and is read-only here.
 type UpdateAgentRuntimeRequest struct {
+	MaxConcurrentRuns *int32 `json:"max_concurrent_runs,omitempty"`
 	// Visibility flips a runtime between "private" (default — only the owner
 	// can bind agents) and "public" (any workspace member can). Runtime owner
 	// only, gated by canSetRuntimeVisibility — narrower than the rest of this
@@ -607,7 +620,45 @@ func (h *Handler) UpdateAgentRuntime(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	if req.MaxConcurrentRuns != nil {
+		if *req.MaxConcurrentRuns < 1 || *req.MaxConcurrentRuns > 100 {
+			writeErrorCode(w, http.StatusBadRequest, "invalid_machine_capacity", "max_concurrent_runs must be an integer between 1 and 100; choose a value in that range")
+			return
+		}
+		// The setting affects the owner's device across workspaces. Workspace
+		// administration alone does not authorize changing someone else's host.
+		if !rt.OwnerID.Valid || rt.OwnerID != member.UserID {
+			writeErrorCode(w, http.StatusForbidden, "machine_capacity_owner_required", "only the machine owner can change its run limit; ask the owner to update it")
+			return
+		}
+	}
+
 	changed := false
+
+	if req.MaxConcurrentRuns != nil {
+		tx, err := h.TxStarter.Begin(r.Context())
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to update machine capacity")
+			return
+		}
+		defer tx.Rollback(r.Context())
+		qtx := h.Queries.WithTx(tx)
+		key, err := qtx.GetRuntimeMachineKey(r.Context(), runtimeUUID)
+		if err == nil {
+			err = qtx.LockRuntimeMachineCapacity(r.Context(), key)
+		}
+		if err == nil {
+			err = qtx.SetRuntimeMachineCapacity(r.Context(), db.SetRuntimeMachineCapacityParams{MachineKey: key, MaxConcurrentRuns: *req.MaxConcurrentRuns})
+		}
+		if err == nil {
+			err = tx.Commit(r.Context())
+		}
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to update machine capacity")
+			return
+		}
+		changed = true
+	}
 
 	if needVisibility {
 		updated, err := h.Queries.UpdateAgentRuntimeVisibility(r.Context(), db.UpdateAgentRuntimeVisibilityParams{
@@ -681,7 +732,10 @@ func (h *Handler) UpdateAgentRuntime(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
-	writeJSON(w, http.StatusOK, runtimeToResponse(rt))
+	resp := runtimeToResponse(rt)
+	rows := []AgentRuntimeResponse{resp}
+	h.hydrateRuntimeMachineCapacities(r.Context(), rows)
+	writeJSON(w, http.StatusOK, rows[0])
 }
 
 func canEditRuntime(member db.Member, rt db.AgentRuntime) bool {
@@ -999,7 +1053,8 @@ func (h *Handler) ListAgentRuntimes(w http.ResponseWriter, r *http.Request) {
 		resp[i] = runtimeToResponse(rt)
 	}
 
-	writeJSON(w, http.StatusOK, resp)
+	h.hydrateRuntimeMachineCapacities(r.Context(), resp)
+	writeProjectedList(w, r, resp, listshape.Runtime)
 }
 
 // DeleteAgentRuntime deletes a runtime after permission and dependency checks.

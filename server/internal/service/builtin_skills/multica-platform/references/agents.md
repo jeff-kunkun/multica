@@ -1,5 +1,9 @@
 # Agents
 
+For discovery, use `multica agent list --compact --output json`;
+`--fields id,name,status` selects an explicit projection instead.
+The full list remains the default for existing consumers.
+
 The contract for Multica's agent-creation path: what the create entry points
 accept, what the server validates and rejects, how each field is persisted, and
 which fields the daemon actually reads at claim time. This is not a
@@ -82,6 +86,8 @@ delegation are not limited. Not inherited by followers.
 ```bash
 multica agent update <agent-id> --dispatch-projects IPA-input,game --output json   # titles, ids or id prefixes
 multica agent update <agent-id> --dispatch-projects "" --output json               # every project again
+multica agent update <agent-id> --fallback-runtime <runtime-id> --output json      # standby for chat send --urgent (same owner + provider)
+multica agent update <agent-id> --fallback-runtime none --output json              # no standby
 ```
 
 A full model is not a closed seat (DENE-1093). A run that fails with
@@ -222,6 +228,7 @@ the child own its runtime instead of following the base role's.
 | `max_concurrent_tasks` | `max_concurrent_tasks` | integer from 1 through 50; out-of-range values return 400 | scheduler task cap; defaults to `6` |
 | `work_enabled` | `work_enabled` | boolean; omitted on update preserves | reversible seat gate (DENE-714). Default `true`. `false` keeps the seat in the list but routing will not pick it, assignment will not wake it, and claim will not take a new run. Running tasks are not cancelled. A base role sets its direct specialisations to the same value, both off and on. Turning a seat on requeues its stranded `todo` / `in_progress` issues. CLI: `agent update --work-enabled=true\|false`. Distinct from archive |
 | `dispatch_mode` | `dispatch_mode` | `auto` (default) or `mention_only`; omitted on update preserves; anything else returns 400 | automatic-dispatch gate (DENE-1600). `mention_only` keeps the tier but routing, quota relay and seat relay never select it; @mention, assignment and delegation still run it. Followers inherit it. CLI: `agent update --dispatch-mode auto\|mention_only` |
+| `fallback_runtime_id` | `fallback_runtime_id` (nullable) | must be a different runtime of this workspace with the same `owner_id` and `provider` as `runtime_id`; set a primary runtime first; the caller must be allowed to use it; `""` clears | standby for `chat send --urgent` only (DENE-1844): an urgent message whose primary runtime is offline is dispatched here when it is online. Ordinary chat and issue runs never use it. Changing `runtime_id` to an incompatible pair clears it. Followers inherit it with the runtime profile. CLI: `agent update --fallback-runtime <runtime-id\|none>`; `agent get` shows `FALLBACK_RUNTIME` |
 | `dispatch_projects` | `dispatch_projects` | project ids of this workspace; omitted on update preserves, `[]` clears; an unknown id returns 400 | automatic dispatch only picks the seat for issues in these projects (DENE-1648); empty = every project. @mention, assignment and delegation are not limited. Not inherited by followers. CLI: `agent update --dispatch-projects <titles\|ids>` |
 
 Defaults when omitted or explicitly `null`: `max_concurrent_tasks` → `6`.
@@ -381,6 +388,17 @@ Two ways `mcp_config` differs from `custom_env`:
   it, and a workspace may force redaction for everyone.
 
 Provider support is not uniform: Qwen Code accepts a managed `mcp_config` through a daemon-owned 0600 temporary JSON file passed with `--mcp-config`; it is removed when the run exits. Leave the field unset (`null`) to inherit Qwen Code native settings.
+
+#### Multica as a local MCP server
+
+Run `multica mcp serve` on the runtime host to expose nine activity/history,
+messaging and verified attachment tools. Configure command `multica`, args
+`["mcp","serve"]` through the existing MCP library/assignment flow below.
+Reuse existing login/task identity; never put credentials in tool arguments or
+substitute the host identity. `multica mcp serve --help` describes tools, limits
+and recovery. Writes may wake agents; `ambiguous_write` includes a bounded
+reconciliation read and must never be blindly retried. No remote listener or
+new key settings are introduced.
 
 #### Workspace MCP servers
 

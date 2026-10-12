@@ -18,12 +18,14 @@ func newOverviewCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "overview",
 		Short: "See the workspace map in one request",
-		Long: `Read agents, projects, active chats, automations, skills, squads, runtimes,
+		Long: `Read agents, projects, active chats, automations, skills, squads, runtimes and your recent machine outages,
 linked workspaces and external connections from one permission-filtered snapshot.
 Restricted sections are listed in omitted_sections. Filters accept an ID or name
 and are resolved by the server; combine them to narrow the workspace map.
 Linked workspaces include shared projects and edit abilities; owners can read
-change history with multica workspace link audit --output json.`,
+change history with multica workspace link audit --output json.
+Bot wake-chain settings and the last 24 hours of permitted block records are
+in bot_wake_chain; include them in patrol and dispatch daily reports.`,
 		Example: `  multica overview
   multica overview --output json
   multica overview --project "My project" --compact
@@ -75,7 +77,16 @@ func runOverview(cmd *cobra.Command, _ []string) error {
 
 func printOverview(w io.Writer, snapshot map[string]any, compact bool) error {
 	fmt.Fprintf(w, "Workspace: %v\n", snapshot["workspace_id"])
-	sections := []string{"agents", "projects", "chats", "automations", "skills", "squads", "runtimes", "workspace_links", "external_connections"}
+	if guard, ok := snapshot["bot_wake_chain"].(map[string]any); ok {
+		fmt.Fprintf(w, "Bot wake-chain limit: %v; reset: agent reply or completed run; human/verified quote exempt.\n", guard["limit"])
+		if count, ok := guard["blocked_last_24h"]; ok {
+			fmt.Fprintf(w, "Bot wakes blocked in the last 24h: %v (details: --output json).\n", count)
+		}
+		if failed, _ := guard["audit_read_failed"].(bool); failed {
+			fmt.Fprintln(w, "Bot wake-block audit could not be read; inspect server logs.")
+		}
+	}
+	sections := []string{"agents", "projects", "chats", "automations", "skills", "squads", "runtimes", "runtime_outages", "workspace_links", "external_connections"}
 	for _, section := range sections {
 		rows := objectList(snapshot[section])
 		fmt.Fprintf(w, "\n%s (%d)\n", strings.ReplaceAll(section, "_", " "), len(rows))

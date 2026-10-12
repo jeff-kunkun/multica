@@ -971,6 +971,7 @@ export function useChatController(opts?: { isActive?: boolean }) {
     customizeConversationStartersHref,
     noAgent,
     availability,
+    runtimeLastSeenAt: presenceDetail === "loading" ? undefined : presenceDetail.runtimeLastSeenAt,
     // messages
     messages,
     pendingTask,
