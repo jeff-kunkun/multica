@@ -56,13 +56,27 @@ passwords (they are masked before sending).
                              or opened the chat for; and your own chats
   --activity followed        tickets you follow (subscribed, @-ed, delegated)
   --activity owned,followed  both
+  --activity everything      everything you can see in the workspace: every ticket
+                             you may open, plus PRs, runs, projects, settings,
+                             members, agents, autopilots, skills, runtimes,
+                             integrations, squads, labels, routing rules, billing
+                             and quota — all writes, by field name only (never a
+                             value). Settings you cannot open are not pushed.
+                             (spelled owner_visible_all in the API)
   --activity off             switch the stream off (default)
+
+What a Bot does with your permission is audited as "Bot〈name〉代表〈you〉"
+(multica bot writes). Deleting the workspace, changing members or roles,
+resetting keys and changing quota or billing are held until you have said yes in
+the Bot chat; the Bot then repeats the call with the header
+X-Owner-Confirmation naming your message.
 
 With a binding already in place the Bot name can be left out to change only
 settings: multica bot bind --activity owned.`,
 	Example: `  multica bot bind "Multica 管家"
   multica bot bind "Multica 管家" --mode mirror --escalate-after 600
   multica bot bind --activity owned,followed
+  multica bot bind --activity everything
   multica bot bind --activity off`,
 	Args:        cobra.MaximumNArgs(1),
 	RunE:        runBotBind,
@@ -97,12 +111,82 @@ var botBindVerifyCmd = &cobra.Command{
 	Annotations: map[string]string{annotationAccess: "write", annotationBotKey: "no"},
 }
 
+var botWritesCmd = &cobra.Command{
+	Use:   "writes",
+	Short: "List what Bots did with an owner's permission (Bot〈name〉代表〈owner〉)",
+	Long: `Every write made with a Bot's key is recorded as "Bot〈name〉代表〈owner〉": the
+route, the names of the fields it touched (never their values), the outcome, and
+for the four actions that need the owner's go-ahead first (delete workspace,
+change members or roles, reset keys, change quota or billing) the confirmation
+the Bot gave or "blocked" when it gave none.
+
+Owners and admins see the whole workspace; everyone else sees the writes made
+in their own name.`,
+	Example: `  multica bot writes
+  multica bot writes --mine --output json`,
+	Args:        exactArgs(0),
+	RunE:        runBotWrites,
+	Annotations: map[string]string{annotationAccess: "read", annotationBotKey: "no"},
+}
+
+func runBotWrites(cmd *cobra.Command, _ []string) error {
+	client, wsID, ctx, cancel, err := botClient(cmd)
+	if err != nil {
+		return err
+	}
+	defer cancel()
+	q := url.Values{}
+	if n, _ := cmd.Flags().GetInt("limit"); n > 0 {
+		q.Set("limit", fmt.Sprint(n))
+	}
+	if b, _ := cmd.Flags().GetString("before"); b != "" {
+		q.Set("before", b)
+	}
+	if mine, _ := cmd.Flags().GetBool("mine"); mine {
+		q.Set("mine", "1")
+	}
+	var out map[string]any
+	if err := client.GetJSON(ctx, "/api/workspaces/"+url.PathEscape(wsID)+"/bot-writes?"+q.Encode(), &out); err != nil {
+		return fmt.Errorf("bot writes: %w", err)
+	}
+	if format, _ := cmd.Flags().GetString("output"); format == "json" {
+		return cli.PrintJSON(cmd.OutOrStdout(), out)
+	}
+	rows, _ := out["writes"].([]any)
+	for _, raw := range rows {
+		row, _ := raw.(map[string]any)
+		fields := ""
+		if list, ok := row["fields"].([]any); ok && len(list) > 0 {
+			names := make([]string, 0, len(list))
+			for _, f := range list {
+				names = append(names, fmt.Sprint(f))
+			}
+			fields = " fields=" + strings.Join(names, ",")
+		}
+		note := ""
+		if row["outcome"] == "blocked" {
+			note = " [blocked: needs owner's go-ahead]"
+		} else if row["dangerous"] != nil {
+			note = fmt.Sprintf(" [confirmed: %v]", row["confirmation"])
+		}
+		fmt.Fprintf(cmd.OutOrStdout(), "%v  %v  %v %v%s%s\n", row["created_at"], row["label"], row["method"], row["route"], fields, note)
+	}
+	if next, _ := out["next_cursor"].(string); next != "" {
+		fmt.Fprintf(cmd.OutOrStdout(), "next: --before %s\n", next)
+	}
+	return nil
+}
+
 func init() {
-	botCmd.AddCommand(botBindCmd, botBindStatusCmd, botUnbindCmd, botBindVerifyCmd)
+	botCmd.AddCommand(botBindCmd, botBindStatusCmd, botUnbindCmd, botBindVerifyCmd, botWritesCmd)
+	botWritesCmd.Flags().Int("limit", 50, "Page size (1..200)")
+	botWritesCmd.Flags().String("before", "", "next_cursor from the previous page")
+	botWritesCmd.Flags().Bool("mine", false, "Only writes made in your own name (admins see the whole workspace by default)")
+	botWritesCmd.Flags().String("output", "table", "Output format: table or json")
 	botBindCmd.Flags().String("mode", "", "bot_first (default) or mirror")
 	botBindCmd.Flags().Int("resend-after", 0, "Seconds without a receipt before the event is sent again (30..3600, default 180)")
 	botBindCmd.Flags().Int("escalate-after", 0, "Seconds after the Bot woke without telling you before escalating (60..7200, default 300)")
-	botBindCmd.Flags().String("activity", "", "Full activity stream: owned, followed, owned,followed, or off")
+	botBindCmd.Flags().String("activity", "", "Full activity stream: owned, followed, owned,followed, everything, or off")
 	for _, c := range []*cobra.Command{botBindCmd, botBindStatusCmd, botUnbindCmd, botBindVerifyCmd} {
 		c.Flags().String("output", "table", "Output format: table or json")
 	}
@@ -176,8 +260,10 @@ func parseActivityScope(raw string) ([]string, error) {
 			scope = append(scope, p)
 		case "all", "both":
 			scope = append(scope, "owned", "followed")
+		case "everything", "owner_visible_all":
+			scope = append(scope, "owner_visible_all")
 		default:
-			return nil, fmt.Errorf("--activity: %q is not owned, followed, owned,followed or off", part)
+			return nil, fmt.Errorf("--activity: %q is not owned, followed, owned,followed, everything or off", part)
 		}
 	}
 	return scope, nil

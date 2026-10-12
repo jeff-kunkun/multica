@@ -106,6 +106,7 @@ import type {
   BotWakeSettings,
   BotBinding,
   PutBotBindingRequest,
+  BotWriteAuditPage,
   UpdateBotWakeRequest,
   BotWakeEventPage,
   BotMentionTarget,
@@ -4946,6 +4947,18 @@ export class ApiClient {
       body: JSON.stringify(data),
     });
     return parseWithFallback(raw, BotWakeDeliveryStatsSchema, raw, { endpoint: `PUT ${path}` });
+  }
+
+  // What Bots did in people's names (DENE-1936): route and field names only.
+  async listBotWrites(
+    workspaceId: string,
+    params: { before?: string; limit?: number } = {},
+  ): Promise<BotWriteAuditPage> {
+    const search = new URLSearchParams();
+    if (params.limit) search.set("limit", String(params.limit));
+    if (params.before) search.set("before", params.before);
+    const qs = search.toString();
+    return this.fetch(`/api/workspaces/${workspaceId}/bot-writes${qs ? `?${qs}` : ""}`);
   }
 
   async listBotWakeEvents(

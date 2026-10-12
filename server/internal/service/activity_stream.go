@@ -37,6 +37,10 @@ const (
 
 	ActivityScopeOwned    = "owned"
 	ActivityScopeFollowed = "followed"
+	// ActivityScopeAll (DENE-1936) is everything the person can see in the
+	// workspace: every ticket they may open, plus workspace-level events (PRs,
+	// runs, projects, settings, members, agents ...) their role allows.
+	ActivityScopeAll = "owner_visible_all"
 
 	ImportanceCritical = "critical"
 	ImportanceHigh     = "high"
@@ -69,7 +73,7 @@ const (
 )
 
 // ErrInvalidActivityScope is returned for a scope name the server does not know.
-var ErrInvalidActivityScope = errors.New("activity scope must be owned and/or followed")
+var ErrInvalidActivityScope = errors.New("activity scope must be owned, followed and/or owner_visible_all")
 
 // NormalizeActivityScope validates and orders a scope list. Empty is valid: it
 // switches the stream off.
@@ -80,13 +84,13 @@ func NormalizeActivityScope(in []string) ([]string, error) {
 		if s == "" {
 			continue
 		}
-		if s != ActivityScopeOwned && s != ActivityScopeFollowed {
+		if s != ActivityScopeOwned && s != ActivityScopeFollowed && s != ActivityScopeAll {
 			return nil, fmt.Errorf("%w: %q", ErrInvalidActivityScope, raw)
 		}
 		seen[s] = true
 	}
 	out := make([]string, 0, len(seen))
-	for _, s := range []string{ActivityScopeOwned, ActivityScopeFollowed} {
+	for _, s := range []string{ActivityScopeOwned, ActivityScopeFollowed, ActivityScopeAll} {
 		if seen[s] {
 			out = append(out, s)
 		}
@@ -443,6 +447,9 @@ type ActivityBody struct {
 	FromStatus   string   `json:"from_status,omitempty"`
 	ToStatus     string   `json:"to_status,omitempty"`
 	OccurredAt   string   `json:"occurred_at"`
+
+	// Workspace-level events (DENE-1936) only. Names and ids, never values.
+	Workspace *WorkspaceEventBody `json:"workspace,omitempty"`
 }
 
 // ActivityInput is one thing that happened, as a producer saw it.

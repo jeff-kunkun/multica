@@ -1,11 +1,12 @@
 "use client";
 
-import { useQuery } from "@tanstack/react-query";
+import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useCurrentMember } from "@multica/core/permissions";
 import {
   botBindingOptions,
+  botWritesOptions,
   externalBotListOptions,
   useDeleteBotBinding,
   usePutBotBinding,
@@ -26,16 +27,18 @@ import { SettingsCard, SettingsRow, SettingsSection } from "./settings-layout";
 
 const NO_BOT = "none";
 
-type ActivityChoice = "off" | "owned" | "followed" | "both";
+type ActivityChoice = "off" | "owned" | "followed" | "both" | "everything";
 
 const SCOPE_BY_CHOICE: Record<ActivityChoice, BotActivityScope[]> = {
   off: [],
   owned: ["owned"],
   followed: ["followed"],
   both: ["owned", "followed"],
+  everything: ["owner_visible_all"],
 };
 
 function choiceOf(scope: BotActivityScope[] | undefined): ActivityChoice {
+  if (scope?.includes("owner_visible_all")) return "everything";
   const owned = scope?.includes("owned") ?? false;
   const followed = scope?.includes("followed") ?? false;
   if (owned && followed) return "both";
@@ -83,7 +86,30 @@ export function BotBindingSection() {
     { value: "owned", label: t(($) => $.notifications.decisions.activity_owned) },
     { value: "followed", label: t(($) => $.notifications.decisions.activity_followed) },
     { value: "both", label: t(($) => $.notifications.decisions.activity_both) },
+    { value: "everything", label: t(($) => $.notifications.decisions.activity_everything) },
   ];
+  const writes = useInfiniteQuery({ ...botWritesOptions(wsId), enabled: !!wsId && !!binding?.bound });
+  const writeRows = writes.data?.pages.flatMap((page) => page.writes) ?? [];
+
+  const familyLabels: Record<string, string> = {
+    pr: t(($) => $.notifications.decisions.writes_family.pr),
+    run: t(($) => $.notifications.decisions.writes_family.run),
+    project: t(($) => $.notifications.decisions.writes_family.project),
+    settings: t(($) => $.notifications.decisions.writes_family.settings),
+    member: t(($) => $.notifications.decisions.writes_family.member),
+    agent: t(($) => $.notifications.decisions.writes_family.agent),
+    autopilot: t(($) => $.notifications.decisions.writes_family.autopilot),
+    skill: t(($) => $.notifications.decisions.writes_family.skill),
+    runtime: t(($) => $.notifications.decisions.writes_family.runtime),
+    integration: t(($) => $.notifications.decisions.writes_family.integration),
+    squad: t(($) => $.notifications.decisions.writes_family.squad),
+    routing: t(($) => $.notifications.decisions.writes_family.routing),
+    billing: t(($) => $.notifications.decisions.writes_family.billing),
+    access: t(($) => $.notifications.decisions.writes_family.access),
+    issue: t(($) => $.notifications.decisions.writes_family.issue),
+    other: t(($) => $.notifications.decisions.writes_family.other),
+  };
+  const familyLabel = (family: string) => familyLabels[family] ?? familyLabels.other;
 
   const fail = (err: unknown) =>
     toast.error(
@@ -183,7 +209,11 @@ export function BotBindingSection() {
           <SettingsRow
             anchor="decisions-activity"
             label={t(($) => $.notifications.decisions.activity_label)}
-            description={t(($) => $.notifications.decisions.activity_hint)}
+            description={
+              activityChoice === "everything"
+                ? t(($) => $.notifications.decisions.activity_everything_hint)
+                : t(($) => $.notifications.decisions.activity_hint)
+            }
             size="select-wide"
           >
             <Select
@@ -212,6 +242,54 @@ export function BotBindingSection() {
                 ))}
               </SelectContent>
             </Select>
+          </SettingsRow>
+        ) : null}
+        {binding?.bound ? (
+          <SettingsRow
+            anchor="decisions-writes"
+            label={t(($) => $.notifications.decisions.writes_title)}
+            description={writeRows.length === 0 ? t(($) => $.notifications.decisions.writes_empty) : undefined}
+            size="select-wide"
+          >
+            {writeRows.length > 0 ? (
+              <ul className="flex min-w-0 flex-col gap-2 text-sm">
+                {writeRows.map((row) => (
+                  <li key={row.id} className="min-w-0">
+                    <span className="block [overflow-wrap:anywhere]">
+                      {t(($) => $.notifications.decisions.writes_who, {
+                        bot: row.bot_name,
+                        owner: row.on_behalf_of_name,
+                      })}
+                    </span>
+                    <span
+                      className={`block text-caption [overflow-wrap:anywhere] ${
+                        row.outcome === "blocked" ? "text-destructive" : "text-muted-foreground"
+                      }`}
+                    >
+                      {row.outcome === "blocked"
+                        ? t(($) => $.notifications.decisions.writes_blocked)
+                        : t(($) => $.notifications.decisions.writes_line, {
+                            family: familyLabel(row.family),
+                            fields: row.fields.join(", ") || "-",
+                          })}
+                    </span>
+                  </li>
+                ))}
+                {writes.hasNextPage ? (
+                  <li>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      disabled={writes.isFetchingNextPage}
+                      onClick={() => void writes.fetchNextPage()}
+                    >
+                      {t(($) => $.notifications.decisions.writes_more)}
+                    </Button>
+                  </li>
+                ) : null}
+              </ul>
+            ) : null}
           </SettingsRow>
         ) : null}
       </SettingsCard>

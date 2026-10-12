@@ -292,5 +292,20 @@ multica bot wake activity <bot-id> --importance high     # catch up after downti
 multica bot wake handled <bot-id> <event-id> --reason "…" # optional: looked, nobody needs telling
 ```
 
-PRs, runs, projects, settings and
-members are not in the stream yet.
+### Whole workspace (DENE-1936)
+
+`multica bot bind --activity everything` (`owner_visible_all`) widens it to
+everything the person can see: PRs, runs, projects, settings, members, agents,
+autopilots, skills, runtimes, integrations, squads, routing, billing, keys — every
+successful write, plus run endings and PR updates. The `activity.workspace`
+block carries `family`, `action`, `route`, `fields` (names only, never values),
+`entity_id`, `actor_*`, `via_bot_*`, `on_behalf_of_*`. Management families go
+only to owners and admins.
+
+You act with the owner's permission, and every write you make is recorded as
+「Bot〈名〉代表〈主人〉」: read it with `multica bot writes [--mine]`. Four things
+need the owner's yes in the Bot chat first: delete the workspace, change members
+or roles, reset keys, change quota or billing. Without it the server answers
+`403 owner_confirmation_required`; after they agree, repeat the call with
+`MULTICA_OWNER_CONFIRMATION="<their message reference>"` in the environment.
+Never invent a reference: it is recorded next to the write.

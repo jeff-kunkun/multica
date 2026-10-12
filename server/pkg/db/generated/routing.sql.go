@@ -51,7 +51,7 @@ SET assignee_type = $1::text,
 WHERE id = $3::uuid
   AND workspace_id = $4::uuid
   AND assignee_id IS NULL
-RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, triage_state, reviewer_type, reviewer_id, visibility, assignee_source, assignee_source_user_id, assignee_quote, progress_text, progress_source, progress_tone, progress_author_type, progress_author_id, progress_updated_at, duplicate_of_issue_id, domain_id, origin_chat_session_id, via_bot_id, via_bot_name
+RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, triage_state, reviewer_type, reviewer_id, visibility, assignee_source, assignee_source_user_id, assignee_quote, progress_text, progress_source, progress_tone, progress_author_type, progress_author_id, progress_updated_at, duplicate_of_issue_id, domain_id, origin_chat_session_id, via_bot_id, via_bot_name, on_behalf_of_user_id
 `
 
 type AssignIssueIfUnassignedParams struct {
@@ -127,6 +127,7 @@ func (q *Queries) AssignIssueIfUnassigned(ctx context.Context, arg AssignIssueIf
 		&i.OriginChatSessionID,
 		&i.ViaBotID,
 		&i.ViaBotName,
+		&i.OnBehalfOfUserID,
 	)
 	return i, err
 }
@@ -168,7 +169,7 @@ SET status = 'done',
 WHERE id = $1::uuid
   AND workspace_id = $2::uuid
   AND status = ANY($3::text[])
-RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, triage_state, reviewer_type, reviewer_id, visibility, assignee_source, assignee_source_user_id, assignee_quote, progress_text, progress_source, progress_tone, progress_author_type, progress_author_id, progress_updated_at, duplicate_of_issue_id, domain_id, origin_chat_session_id, via_bot_id, via_bot_name
+RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, triage_state, reviewer_type, reviewer_id, visibility, assignee_source, assignee_source_user_id, assignee_quote, progress_text, progress_source, progress_tone, progress_author_type, progress_author_id, progress_updated_at, duplicate_of_issue_id, domain_id, origin_chat_session_id, via_bot_id, via_bot_name, on_behalf_of_user_id
 `
 
 type CompleteIssueFromReviewParams struct {
@@ -231,6 +232,7 @@ func (q *Queries) CompleteIssueFromReview(ctx context.Context, arg CompleteIssue
 		&i.OriginChatSessionID,
 		&i.ViaBotID,
 		&i.ViaBotName,
+		&i.OnBehalfOfUserID,
 	)
 	return i, err
 }
@@ -284,7 +286,7 @@ VALUES (
     $5::text
 )
 ON CONFLICT (issue_id, routing_kind) WHERE routing_kind IS NOT NULL DO NOTHING
-RETURNING id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, resolved_at, resolved_by_type, resolved_by_id, source_task_id, quick_action_id, via_plugin_id, revision, recovery_settled_at, deleted_at, routing_kind, suppressed_agent_ids, via_bot_id, via_bot_name, wake_root_id, wake_hop, human_quote
+RETURNING id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, resolved_at, resolved_by_type, resolved_by_id, source_task_id, quick_action_id, via_plugin_id, revision, recovery_settled_at, deleted_at, routing_kind, suppressed_agent_ids, via_bot_id, via_bot_name, wake_root_id, wake_hop, human_quote, on_behalf_of_user_id
 `
 
 type CreateRoutingCommentParams struct {
@@ -334,6 +336,7 @@ func (q *Queries) CreateRoutingComment(ctx context.Context, arg CreateRoutingCom
 		&i.WakeRootID,
 		&i.WakeHop,
 		&i.HumanQuote,
+		&i.OnBehalfOfUserID,
 	)
 	return i, err
 }
@@ -459,7 +462,7 @@ func (q *Queries) LastEnteredReviewAt(ctx context.Context, arg LastEnteredReview
 }
 
 const listIssuesRelayedFromReviewer = `-- name: ListIssuesRelayedFromReviewer :many
-SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, triage_state, reviewer_type, reviewer_id, visibility, assignee_source, assignee_source_user_id, assignee_quote, progress_text, progress_source, progress_tone, progress_author_type, progress_author_id, progress_updated_at, duplicate_of_issue_id, domain_id, origin_chat_session_id, via_bot_id, via_bot_name FROM issue
+SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, triage_state, reviewer_type, reviewer_id, visibility, assignee_source, assignee_source_user_id, assignee_quote, progress_text, progress_source, progress_tone, progress_author_type, progress_author_id, progress_updated_at, duplicate_of_issue_id, domain_id, origin_chat_session_id, via_bot_id, via_bot_name, on_behalf_of_user_id FROM issue
 WHERE workspace_id = $1
   AND status = 'in_review'
   AND metadata @> jsonb_build_object(
@@ -532,6 +535,7 @@ func (q *Queries) ListIssuesRelayedFromReviewer(ctx context.Context, arg ListIss
 			&i.OriginChatSessionID,
 			&i.ViaBotID,
 			&i.ViaBotName,
+			&i.OnBehalfOfUserID,
 		); err != nil {
 			return nil, err
 		}
@@ -888,7 +892,7 @@ SET assignee_type = $1::text,
     updated_at = now()
 WHERE id = $3::uuid
   AND workspace_id = $4::uuid
-RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, triage_state, reviewer_type, reviewer_id, visibility, assignee_source, assignee_source_user_id, assignee_quote, progress_text, progress_source, progress_tone, progress_author_type, progress_author_id, progress_updated_at, duplicate_of_issue_id, domain_id, origin_chat_session_id, via_bot_id, via_bot_name
+RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, triage_state, reviewer_type, reviewer_id, visibility, assignee_source, assignee_source_user_id, assignee_quote, progress_text, progress_source, progress_tone, progress_author_type, progress_author_id, progress_updated_at, duplicate_of_issue_id, domain_id, origin_chat_session_id, via_bot_id, via_bot_name, on_behalf_of_user_id
 `
 
 type ReassignIssueParams struct {
@@ -961,6 +965,7 @@ func (q *Queries) ReassignIssue(ctx context.Context, arg ReassignIssueParams) (I
 		&i.OriginChatSessionID,
 		&i.ViaBotID,
 		&i.ViaBotName,
+		&i.OnBehalfOfUserID,
 	)
 	return i, err
 }
@@ -1011,7 +1016,7 @@ WHERE id = $2::uuid
   AND workspace_id = $3::uuid
   AND reviewer_type = 'agent'
   AND reviewer_id = $4::uuid
-RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, triage_state, reviewer_type, reviewer_id, visibility, assignee_source, assignee_source_user_id, assignee_quote, progress_text, progress_source, progress_tone, progress_author_type, progress_author_id, progress_updated_at, duplicate_of_issue_id, domain_id, origin_chat_session_id, via_bot_id, via_bot_name
+RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, triage_state, reviewer_type, reviewer_id, visibility, assignee_source, assignee_source_user_id, assignee_quote, progress_text, progress_source, progress_tone, progress_author_type, progress_author_id, progress_updated_at, duplicate_of_issue_id, domain_id, origin_chat_session_id, via_bot_id, via_bot_name, on_behalf_of_user_id
 `
 
 type ReplaceIssueReviewerIfCurrentParams struct {
@@ -1079,6 +1084,7 @@ func (q *Queries) ReplaceIssueReviewerIfCurrent(ctx context.Context, arg Replace
 		&i.OriginChatSessionID,
 		&i.ViaBotID,
 		&i.ViaBotName,
+		&i.OnBehalfOfUserID,
 	)
 	return i, err
 }
@@ -1090,7 +1096,7 @@ SET assignee_source = $1::text,
     assignee_quote = $3::text
 WHERE id = $4::uuid
   AND workspace_id = $5::uuid
-RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, triage_state, reviewer_type, reviewer_id, visibility, assignee_source, assignee_source_user_id, assignee_quote, progress_text, progress_source, progress_tone, progress_author_type, progress_author_id, progress_updated_at, duplicate_of_issue_id, domain_id, origin_chat_session_id, via_bot_id, via_bot_name
+RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, triage_state, reviewer_type, reviewer_id, visibility, assignee_source, assignee_source_user_id, assignee_quote, progress_text, progress_source, progress_tone, progress_author_type, progress_author_id, progress_updated_at, duplicate_of_issue_id, domain_id, origin_chat_session_id, via_bot_id, via_bot_name, on_behalf_of_user_id
 `
 
 type SetIssueAssigneeSourceParams struct {
@@ -1160,6 +1166,7 @@ func (q *Queries) SetIssueAssigneeSource(ctx context.Context, arg SetIssueAssign
 		&i.OriginChatSessionID,
 		&i.ViaBotID,
 		&i.ViaBotName,
+		&i.OnBehalfOfUserID,
 	)
 	return i, err
 }
@@ -1173,7 +1180,7 @@ SET properties = jsonb_set(properties, ARRAY[$1::text], $2::jsonb, true),
 WHERE id = $3::uuid
   AND workspace_id = $4::uuid
   AND NOT (properties ? $1::text)
-RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, triage_state, reviewer_type, reviewer_id, visibility, assignee_source, assignee_source_user_id, assignee_quote, progress_text, progress_source, progress_tone, progress_author_type, progress_author_id, progress_updated_at, duplicate_of_issue_id, domain_id, origin_chat_session_id, via_bot_id, via_bot_name
+RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, triage_state, reviewer_type, reviewer_id, visibility, assignee_source, assignee_source_user_id, assignee_quote, progress_text, progress_source, progress_tone, progress_author_type, progress_author_id, progress_updated_at, duplicate_of_issue_id, domain_id, origin_chat_session_id, via_bot_id, via_bot_name, on_behalf_of_user_id
 `
 
 type SetIssuePropertyValueIfUnsetParams struct {
@@ -1241,6 +1248,7 @@ func (q *Queries) SetIssuePropertyValueIfUnset(ctx context.Context, arg SetIssue
 		&i.OriginChatSessionID,
 		&i.ViaBotID,
 		&i.ViaBotName,
+		&i.OnBehalfOfUserID,
 	)
 	return i, err
 }
@@ -1255,7 +1263,7 @@ SET reviewer_type = $1::text,
 WHERE id = $3::uuid
   AND workspace_id = $4::uuid
   AND reviewer_type IS NULL
-RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, triage_state, reviewer_type, reviewer_id, visibility, assignee_source, assignee_source_user_id, assignee_quote, progress_text, progress_source, progress_tone, progress_author_type, progress_author_id, progress_updated_at, duplicate_of_issue_id, domain_id, origin_chat_session_id, via_bot_id, via_bot_name
+RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, triage_state, reviewer_type, reviewer_id, visibility, assignee_source, assignee_source_user_id, assignee_quote, progress_text, progress_source, progress_tone, progress_author_type, progress_author_id, progress_updated_at, duplicate_of_issue_id, domain_id, origin_chat_session_id, via_bot_id, via_bot_name, on_behalf_of_user_id
 `
 
 type SetIssueReviewerIfUnsetParams struct {
@@ -1324,6 +1332,7 @@ func (q *Queries) SetIssueReviewerIfUnset(ctx context.Context, arg SetIssueRevie
 		&i.OriginChatSessionID,
 		&i.ViaBotID,
 		&i.ViaBotName,
+		&i.OnBehalfOfUserID,
 	)
 	return i, err
 }
@@ -1337,7 +1346,7 @@ SET reviewer_type = 'member',
     updated_at = now()
 WHERE id = $2::uuid
   AND workspace_id = $3::uuid
-RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, triage_state, reviewer_type, reviewer_id, visibility, assignee_source, assignee_source_user_id, assignee_quote, progress_text, progress_source, progress_tone, progress_author_type, progress_author_id, progress_updated_at, duplicate_of_issue_id, domain_id, origin_chat_session_id, via_bot_id, via_bot_name
+RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, triage_state, reviewer_type, reviewer_id, visibility, assignee_source, assignee_source_user_id, assignee_quote, progress_text, progress_source, progress_tone, progress_author_type, progress_author_id, progress_updated_at, duplicate_of_issue_id, domain_id, origin_chat_session_id, via_bot_id, via_bot_name, on_behalf_of_user_id
 `
 
 type SetIssueReviewerToMemberParams struct {
@@ -1398,6 +1407,7 @@ func (q *Queries) SetIssueReviewerToMember(ctx context.Context, arg SetIssueRevi
 		&i.OriginChatSessionID,
 		&i.ViaBotID,
 		&i.ViaBotName,
+		&i.OnBehalfOfUserID,
 	)
 	return i, err
 }

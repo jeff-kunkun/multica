@@ -79,6 +79,7 @@ var workspaceDeletionManifest = map[string]workspaceDeleteAction{
 	"comment":                         workspaceDelete,
 	"comment_reaction":                workspaceDelete,
 	"connection_nudge":                workspaceDelete,
+	"bot_write_audit":                 workspaceDeleteDetach, // no FKs on purpose: what a Bot did in a workspace outlives it; routes and field names only
 	"contact_sales_inquiry":           workspaceDeleteKeep,
 	"daemon_connection":               workspaceDelete,
 	"daemon_token":                    workspaceDelete,

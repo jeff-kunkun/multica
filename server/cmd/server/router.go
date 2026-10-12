@@ -1732,12 +1732,21 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		})
 	})
 
+	// One instance for both authenticated trees (DENE-1936): see the comment on
+	// the main authenticated group below.
+	botWriteAudit := middleware.BotWriteAudit(queries, func(ctx context.Context, w service.WorkspaceWrite) {
+		if _, err := service.RouteWorkspaceWrite(ctx, queries, w); err != nil {
+			slog.Warn("workspace activity: route write failed", "error", err, "route", w.Route)
+		}
+	})
+
 	// Browser-session relay for sandboxed plugin surfaces. The iframe talks to
 	// the host over MessagePort; the host calls this internal route with the
 	// signed-in user's session and the installation header. Keeping it outside
 	// /v1 prevents the Public API from accepting session cookies.
 	r.Group(func(r chi.Router) {
 		r.Use(middleware.Auth(queries, patCache, cloudPATVerifier, cfSigner))
+		r.Use(botWriteAudit)
 		r.Route(pluginBridgePrefix, func(r chi.Router) {
 			registerPluginActionRoutes(r, h)
 			// ui / manual only. `event` is dispatched by the host off the event
@@ -1760,6 +1769,14 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		// then holds for routes nobody has written yet. See
 		// internal/middleware/guest.go for what a guest still may write.
 		r.Use(middleware.GuestReadOnly(queries))
+		// Every write, by anyone, becomes a workspace event for the Bots whose
+		// owner asked for the whole workspace; a write made with a Bot's key is
+		// audited as the Bot acting on behalf of its owner, and the four
+		// confirm-first actions are held until the owner has said yes
+		// (DENE-1936). One interceptor for the same reason as the guest one:
+		// route 251 is covered the day it is added. The route-walk test in
+		// bot_write_audit_coverage_test.go keeps it that way.
+		r.Use(botWriteAudit)
 
 		// Plugin Action API. Called by the HOST PAGE on the signed-in user's
 		// session after a surface asks for something over the postMessage
@@ -2095,6 +2112,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Put("/me/bot-binding", h.PutBotBinding)
 					r.Delete("/me/bot-binding", h.DeleteBotBinding)
 					r.Post("/me/bot-binding/verify", h.VerifyBotBinding)
+					// What Bots did in a person's name (DENE-1936).
+					r.Get("/bot-writes", h.ListBotWriteAudit)
 				})
 
 				// External bot keys (DENE-1788): admin-only, and never from an

@@ -45,8 +45,9 @@ type BotBindingResponse struct {
 	EscalateAfterSeconds int32   `json:"escalate_after_seconds,omitempty"`
 	VerifiedAt           *string `json:"verified_at,omitempty"`
 	OpenCount            int64   `json:"open_count"`
-	// ActivityScope is which tickets and chats the full activity stream
-	// covers: "owned", "followed", both, or empty (off).
+	// ActivityScope is what the full activity stream covers: "owned",
+	// "followed", "owner_visible_all" (everything the person can see in the
+	// workspace), a mix, or empty (off).
 	ActivityScope []string `json:"activity_scope"`
 }
 
@@ -206,7 +207,7 @@ func (h *Handler) PutBotBinding(w http.ResponseWriter, r *http.Request) {
 	if req.ActivityScope != nil {
 		normalized, scopeErr := service.NormalizeActivityScope(*req.ActivityScope)
 		if scopeErr != nil {
-			writeError(w, http.StatusBadRequest, "动态流范围只能是 owned（我的）、followed（我关注的）或两者都选")
+			writeError(w, http.StatusBadRequest, "动态流范围只能是 owned（我的）、followed（我关注的）、owner_visible_all（我能看到的一切）的组合")
 			return
 		}
 		scope = normalized

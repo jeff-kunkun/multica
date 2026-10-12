@@ -14,19 +14,21 @@ import (
 
 func TestParseActivityScope(t *testing.T) {
 	for in, want := range map[string][]string{
-		"owned":          {"owned"},
-		"followed,owned": {"followed", "owned"},
-		"both":           {"owned", "followed"},
-		"off":            {},
-		"":               {},
-		" none ":         {},
+		"owned":             {"owned"},
+		"followed,owned":    {"followed", "owned"},
+		"both":              {"owned", "followed"},
+		"off":               {},
+		"":                  {},
+		" none ":            {},
+		"everything":        {"owner_visible_all"},
+		"owner_visible_all": {"owner_visible_all"},
 	} {
 		got, err := parseActivityScope(in)
 		if err != nil || !reflect.DeepEqual(got, want) {
 			t.Errorf("%q -> %v %v, want %v", in, got, err, want)
 		}
 	}
-	if _, err := parseActivityScope("everything"); err == nil {
+	if _, err := parseActivityScope("galaxy"); err == nil {
 		t.Fatal("unknown scope accepted")
 	}
 }
@@ -126,5 +128,44 @@ func TestBotWakeHandledAndActivityCommands(t *testing.T) {
 	}
 	if !reflect.DeepEqual(seen, want) {
 		t.Fatalf("requests:\n%v\nwant\n%v", seen, want)
+	}
+}
+
+func TestBotWritesCommandListsAuditAndSendsConfirmation(t *testing.T) {
+	var gotURI, gotConfirm string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotURI, gotConfirm = r.URL.RequestURI(), r.Header.Get("X-Owner-Confirmation")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"writes": []any{map[string]any{
+				"created_at": "2026-10-12T00:00:00Z", "label": "Bot〈小助〉代表〈阿坤〉", "method": "PATCH",
+				"route": "/api/agents/{id}", "fields": []any{"name"}, "outcome": "done",
+			}},
+			"next_cursor": "",
+		})
+	}))
+	defer srv.Close()
+	setCLITestServerEnv(t, srv.URL)
+	t.Setenv("MULTICA_OWNER_CONFIRMATION", " chat msg 42 ")
+
+	cmd := &cobra.Command{}
+	cmd.Flags().Int("limit", 0, "")
+	cmd.Flags().String("before", "", "")
+	cmd.Flags().Bool("mine", false, "")
+	cmd.Flags().String("output", "table", "")
+	_ = cmd.Flags().Set("limit", "5")
+	_ = cmd.Flags().Set("mine", "true")
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	if err := runBotWrites(cmd, nil); err != nil {
+		t.Fatal(err)
+	}
+	if gotURI != "/api/workspaces/ws-1/bot-writes?limit=5&mine=1" {
+		t.Fatalf("request: %s", gotURI)
+	}
+	if gotConfirm != "chat msg 42" {
+		t.Fatalf("confirmation header: %q", gotConfirm)
+	}
+	if !strings.Contains(out.String(), "Bot〈小助〉代表〈阿坤〉") || !strings.Contains(out.String(), "fields=name") {
+		t.Fatalf("output: %s", out.String())
 	}
 }

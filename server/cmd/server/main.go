@@ -616,6 +616,7 @@ func main() {
 	registerActivityListeners(bus, queries)
 	registerNotificationListeners(bus, queries)
 	registerActivityStreamListeners(bus, queries)
+	registerWorkspaceActivityListeners(bus, queries)
 	registerSummonListeners(bus, queries)
 
 	metricsConfig := obsmetrics.ConfigFromEnv()

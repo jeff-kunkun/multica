@@ -32,11 +32,14 @@ func (h *Handler) activityPayloadFields(fields map[string]any, ev db.HumanNeeded
 		body.Categories = []string{}
 	}
 	targetKind := "issue"
-	if ev.ChatSessionID.Valid {
+	switch {
+	case ev.ChatSessionID.Valid:
 		targetKind = "chat"
+	case !ev.IssueID.Valid:
+		targetKind = "workspace"
 	}
 	fields["schema"] = service.ActivitySchema
-	fields["activity"] = map[string]any{
+	block := map[string]any{
 		"activity_type":  body.ActivityType,
 		"importance":     body.Importance,
 		"categories":     body.Categories,
@@ -49,6 +52,11 @@ func (h *Handler) activityPayloadFields(fields map[string]any, ev db.HumanNeeded
 		"to_status":      body.ToStatus,
 		"occurred_at":    body.OccurredAt,
 		"target_user_id": uuidToString(ev.TargetUserID),
+	}
+	fields["activity"] = block
+	if body.Workspace != nil {
+		// Names and ids only; the scrub pass over the whole body still runs.
+		block["workspace"] = body.Workspace
 	}
 	if author, ok := fields["author"].(map[string]any); ok {
 		if name, ok := author["name"].(string); ok {
@@ -168,13 +176,17 @@ scan:
 			if body.Categories == nil {
 				body.Categories = []string{}
 			}
-			out = append(out, map[string]any{
+			row := map[string]any{
 				"event_id": uuidToString(ev.EventID), "sequence": ev.Sequence, "status": ev.Status,
 				"activity_type": body.ActivityType, "importance": body.Importance, "categories": body.Categories,
 				"excerpt": body.Excerpt, "from_status": body.FromStatus, "to_status": body.ToStatus,
 				"issue_id": uuidToPtr(ev.IssueID), "chat_session_id": uuidToPtr(ev.ChatSessionID),
 				"source_id": body.SourceID, "occurred_at": body.OccurredAt, "created_at": timestampToString(ev.CreatedAt),
-			})
+			}
+			if body.Workspace != nil {
+				row["workspace"] = body.Workspace
+			}
+			out = append(out, row)
 			if len(out) == int(limit) {
 				next = strconv.FormatInt(ev.Sequence, 10)
 				break scan
@@ -216,10 +228,10 @@ func newActivityGate(h *Handler, ctx context.Context) *activityGate {
 }
 
 func (g *activityGate) allows(ev db.HumanNeededEvent) (bool, string) {
-	key := "x"
+	key := "w:" + uuidToString(ev.BindingID) + ":" + workspaceFamilyOf(ev)
 	switch {
 	case ev.IssueID.Valid:
-		key = "i:" + uuidToString(ev.IssueID) + ":" + uuidToString(ev.BindingID)
+		key = "i:" + uuidToString(ev.IssueID) + ":" + uuidToString(ev.BindingID) + ":" + workspaceFamilyOf(ev)
 	case ev.ChatSessionID.Valid:
 		key = "c:" + uuidToString(ev.ChatSessionID) + ":" + uuidToString(ev.BindingID)
 	}
@@ -231,10 +243,47 @@ func (g *activityGate) allows(ev db.HumanNeededEvent) (bool, string) {
 	return ok, reason
 }
 
+// workspaceFamilyOf is the family of a workspace-level event ("" for the
+// ticket and chat stream).
+func workspaceFamilyOf(ev db.HumanNeededEvent) string {
+	var body service.ActivityBody
+	if json.Unmarshal(ev.Activity, &body) != nil || body.Workspace == nil {
+		return ""
+	}
+	return body.Workspace.Family
+}
+
 func (g *activityGate) decide(ev db.HumanNeededEvent) (bool, string) {
 	q := g.h.Queries
 	var covering []db.MemberBotBinding
 	var err error
+	if family := workspaceFamilyOf(ev); family != "" {
+		// Workspace-level events: the person must still be a member whose role
+		// may see this kind of event, and the binding must still ask for the
+		// whole workspace. A ticket-bound one (a run) then also has to pass the
+		// ticket checks below.
+		member, mErr := q.GetMemberByUserAndWorkspace(g.ctx, db.GetMemberByUserAndWorkspaceParams{UserID: ev.TargetUserID, WorkspaceID: ev.WorkspaceID})
+		if mErr != nil || !service.RoleCanSeeFamily(member.Role, family) {
+			return false, "access unavailable"
+		}
+		all, aErr := q.ListWorkspaceActivityBindings(g.ctx, ev.WorkspaceID)
+		if aErr != nil {
+			return false, "access unavailable"
+		}
+		covered := false
+		for _, b := range all {
+			if b.ID == ev.BindingID {
+				covered = true
+				break
+			}
+		}
+		if !covered {
+			return false, "outside activity scope"
+		}
+		if !ev.IssueID.Valid {
+			return true, ""
+		}
+	}
 	switch {
 	case ev.IssueID.Valid:
 		issue, getErr := q.GetIssue(g.ctx, ev.IssueID)

@@ -118,7 +118,78 @@ multica bot wake activity <bot-id> --importance high
 multica bot wake handled <bot-id> <event-id> --reason "routine progress"
 ```
 
-## Not in this step
+## The whole workspace (DENE-1936, step B)
 
-PRs, runs, projects, settings and workspace members/agents, and a Bot acting
-with the owner's full permission (audited as on their behalf) are step B.
+`owner_visible_all` is a third scope value: everything the person can see in the
+workspace, with their permissions. Opt-in like the others
+(`multica bot bind --activity everything`, or the settings choice「我能看到的一切」),
+and it includes the ticket and chat stream, so nothing else needs switching on.
+Anyone who did not choose it sees no change.
+
+### What arrives
+
+Same envelope and the same outbox as above, with an extra `activity.workspace`
+block (ids, names, field names only):
+
+```json
+{
+  "family": "agent", "action": "update", "route": "PATCH /api/agents/{id}",
+  "fields": ["name", "instructions"], "entity_id": "<uuid>",
+  "actor_kind": "member|agent|bot|system", "actor_id": "…", "actor_name": "…",
+  "via_bot_id": "…", "via_bot_name": "…",
+  "on_behalf_of_user_id": "…", "on_behalf_of_name": "…",
+  "dangerous": "", "attrs": {}
+}
+```
+
+`activity_type`: `workspace.write` (any successful write), `pr.updated|linked|unlinked`,
+`run.completed|failed|cancelled`, `autopilot.run`, and `bot.write_blocked`
+(a Bot's dangerous call was stopped; always `high`, tagged `risk`, `needs_human`).
+`family`: `pr run project settings member agent autopilot skill runtime
+integration squad routing billing access issue other`.
+
+Writes come from one interceptor in front of every authenticated route
+(`middleware.BotWriteAudit`), so a route added tomorrow is covered the day it is
+added; `TestBotWriteAuditCoversEveryWriteRoute` walks the router and
+fails on a route that is not. Ticket writes the ticket stream already reports
+(comments, chat messages, status and assignee changes) are not said twice.
+Run endings and PR mirror updates come from the event bus. Not pushed: a
+runtime flipping online/offline in the sweeper (no write, no bus event), a
+chat's own runs, and retry attempts.
+
+Roles: management families (`billing member access integration settings`) go
+only to owners and admins; other families go to any member; guests get nothing.
+The row is re-checked when sent and when listed: person still a member whose
+role may see the family, binding still `owner_visible_all`.
+
+**Field names only.** A settings change carries which fields changed, never the
+values; names that look like secrets are dropped, other strings are masked as
+above. Payload-scan tests cover the push, the pull list and the audit endpoint.
+
+### Bot permission = the owner's, and every write is labelled
+
+A Bot key acts as its owner, nothing more. Every write made with it is recorded
+in `bot_write_audit` as「Bot〈名〉代表〈主人〉」: bot id and name, owner, route
+pattern, family, entity id, field names, status, outcome. Rows that Bots author
+also carry `on_behalf_of_user_id` next to `via_bot_id` (comment, chat message,
+activity log, run, issue). Read it with `multica bot writes [--mine] [--limit N]
+[--before CURSOR]` or `GET /api/workspaces/{id}/bot-writes`; owners and admins
+see the whole workspace, a member sees their own. The row survives deletion of
+the workspace (workspace id is cleared).
+
+### The four that need the owner first
+
+Delete the workspace, change members or roles, reset keys (tokens, rotate,
+reset password), change quota or billing. The server stops a Bot's call with
+`403 owner_confirmation_required` unless it carries `X-Owner-Confirmation: <short
+reference to the owner's message in the Bot chat>` (CLI: set
+`MULTICA_OWNER_CONFIRMATION` for that one command). A stopped call is itself
+audited and pushed as `bot.write_blocked`. Honest limit: the server cannot read
+the Bot chat, so the header is the Bot's attestation, recorded next to the write
+it licensed; it is a gate and a paper trail, not proof.
+
+### Not covered
+
+Unverified in production until the release is deployed and a real Grok Bot
+receives it. `apps/mobile` has no Bot-binding screen, so there is no native
+change; the mobile web page was checked at 390px.
