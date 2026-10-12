@@ -2694,8 +2694,8 @@ type DirectChatSendOptions struct {
 	// Replace is the "replace" send mode (DENE-1932): in the same transaction
 	// that writes the new message, every queued turn is cancelled and its
 	// message, with the messages of the turn being answered, is marked
-	// superseded; the claimed turn is stopped after the commit. CancelledBy
-	// names who asked.
+	// superseded; the claimed turn is cancelled in that transaction too.
+	// Runtime notifications follow the commit. CancelledBy names who asked.
 	Replace     bool
 	CancelledBy TaskCancellationActor
 }
