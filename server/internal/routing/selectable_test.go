@@ -147,11 +147,11 @@ func TestProjectLimitedSeatOnlyInItsProjects(t *testing.T) {
 		"克林":  {ID: "krillin", Name: "克林", Tier: "weak"},
 		"拉蒂兹": {ID: "raditz", Name: "拉蒂兹", Tier: "weak", Usage: "ample", State: ipa},
 	}
-	weak, ok := SeatByTier(DefaultLadder.SceneCandidates(GenericScene, ForProject(roster, "p-other")), "weak")
+	weak, ok := SeatByTier(DefaultLadder.SceneCandidates(GenericScene, ForProject(roster, "p-other", nil)), "weak")
 	if !ok || weak.ID != "krillin" {
 		t.Fatalf("other project: weak rung = %+v, want 克林", weak)
 	}
-	weak, ok = SeatByTier(DefaultLadder.SceneCandidates(GenericScene, ForProject(roster, "p-ipa")), "weak")
+	weak, ok = SeatByTier(DefaultLadder.SceneCandidates(GenericScene, ForProject(roster, "p-ipa", nil)), "weak")
 	if !ok || weak.ID != "raditz" {
 		t.Fatalf("own project: weak rung = %+v, want the ample 拉蒂兹", weak)
 	}

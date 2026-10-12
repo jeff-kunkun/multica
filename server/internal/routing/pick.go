@@ -21,6 +21,8 @@ type PickRequest struct {
 	ProjectID      string
 	ProjectName    string
 	ProjectDomains []string
+	// ProjectSeats is the project's executor allowlist (DENE-1959).
+	ProjectSeats []string
 }
 
 // PickCandidate is one seat routing considered, with the reason it was set
@@ -91,6 +93,7 @@ func (r *Router) PickSeat(ctx context.Context, workspaceID string, req PickReque
 		ProjectID:          req.ProjectID,
 		ProjectName:        req.ProjectName,
 		ProjectDomains:     req.ProjectDomains,
+		ProjectSeats:       req.ProjectSeats,
 	}
 
 	ladder := r.Ladder.For(settings)
@@ -99,9 +102,12 @@ func (r *Router) PickSeat(ctx context.Context, workspaceID string, req PickReque
 	if err != nil {
 		return Pick{}, err
 	}
-	roster = ForProject(roster, issue.ProjectID)
+	roster = ForProject(roster, issue.ProjectID, issue.ProjectSeats)
 	candidates := ladder.assignmentCandidates(scene, roster)
 	if len(candidates) == 0 {
+		if len(issue.ProjectSeats) > 0 {
+			return Pick{Declined: "no seat on the project's executor allowlist can be picked"}, nil
+		}
 		return Pick{Declined: "ladder has no seat in this workspace"}, nil
 	}
 	facts, err := r.Store.RoutingFacts(ctx, workspaceID, seatIDs(candidates), settings.ProviderKeys())
@@ -112,6 +118,9 @@ func (r *Router) PickSeat(ctx context.Context, workspaceID string, req PickReque
 	eligible := EligibleSeats(candidates, facts.Seats)
 	if len(eligible) == 0 {
 		pick.Declined = "no eligible seat"
+		if len(issue.ProjectSeats) > 0 {
+			pick.Declined = "no seat on the project's executor allowlist is available"
+		}
 		return pick, nil
 	}
 

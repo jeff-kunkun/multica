@@ -64,8 +64,17 @@ var projectCreateCmd = &cobra.Command{
 var projectUpdateCmd = &cobra.Command{
 	Use:   "update <id>",
 	Short: "Update a project",
-	Args:  exactArgs(1),
-	RunE:  runProjectUpdate,
+	Long: `Update a project.
+
+--executor sets the project's executor allowlist (owner/admin only): automatic
+dispatch — new tickets, new chats, continuation, escalation, quota and seat
+relay, reviewer and advisor picks — chooses only these agents for work in the
+project, and declines when none of them can take it instead of reaching
+outside the list. Repeat the flag per agent (name or id); --executor ""
+lifts the limit. @mention and manual assignment are not limited. Read it
+back from executor_agent_ids in "multica project get <id> --output json".`,
+	Args: exactArgs(1),
+	RunE: runProjectUpdate,
 }
 
 var projectDeleteCmd = &cobra.Command{
@@ -322,6 +331,7 @@ func init() {
 	projectUpdateCmd.Flags().String("lead", "", "New lead name (member or agent)")
 	projectUpdateCmd.Flags().String("start-date", "", "New start date (calendar day, YYYY-MM-DD; pass empty string to clear)")
 	projectUpdateCmd.Flags().String("due-date", "", "New due date (calendar day, YYYY-MM-DD; pass empty string to clear)")
+	projectUpdateCmd.Flags().StringArray("executor", nil, "Replace the executor allowlist: only these agents (name or id, repeatable) are picked automatically for this project; --executor \"\" lifts it")
 	projectUpdateCmd.Flags().StringArray("domain", nil, "Replace the project's domains (repeatable; --domain \"\" or --domain 通用 clears to generic). See `multica domain list`")
 	projectUpdateCmd.Flags().String("output", "json", "Output format: table or json")
 
@@ -606,8 +616,25 @@ func runProjectUpdate(cmd *cobra.Command, args []string) error {
 		body["domain_ids"] = ids
 	}
 
+	if cmd.Flags().Changed("executor") {
+		v, _ := cmd.Flags().GetStringArray("executor")
+		// --executor "" lifts the allowlist: every seat may be picked again.
+		ids := []string{}
+		for _, ref := range v {
+			if ref = strings.TrimSpace(ref); ref == "" {
+				continue
+			}
+			id, err := resolveAgent(ctx, client, ref)
+			if err != nil {
+				return fmt.Errorf("--executor %q: %w", ref, err)
+			}
+			ids = append(ids, id)
+		}
+		body["executor_agent_ids"] = ids
+	}
+
 	if len(body) == 0 {
-		return fmt.Errorf("no fields to update; use flags like --title, --status, --description, --icon, --lead, --start-date, --due-date, --domain")
+		return fmt.Errorf("no fields to update; use flags like --title, --status, --description, --icon, --lead, --start-date, --due-date, --domain, --executor")
 	}
 
 	var result map[string]any

@@ -15,6 +15,7 @@ import { useUpdateProject, useDeleteProject } from "@multica/core/projects/mutat
 import { pinListOptions } from "@multica/core/pins";
 import { useCreatePin, useDeletePin } from "@multica/core/pins";
 import { memberListOptions, agentListOptions } from "@multica/core/workspace/queries";
+import { ProjectExecutorSelect } from "./project-executor-select";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useModalStore } from "@multica/core/modals";
 import { useIssuesScope } from "@multica/core/issues/stores";
@@ -448,6 +449,14 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
               options={domains.map((d) => ({ id: d.id, name: d.name }))}
               selected={project.domain_ids ?? []}
               onChange={(ids) => handleUpdateField({ domain_ids: ids })}
+            />
+          </PropRow>
+          <PropRow label={t(($) => $.detail.prop_executors)}>
+            <ProjectExecutorSelect
+              agents={agents}
+              selected={project.executor_agent_ids ?? []}
+              canEdit={isWorkspaceAdmin}
+              onChange={(ids) => handleUpdateField({ executor_agent_ids: ids })}
             />
           </PropRow>
         </div>}

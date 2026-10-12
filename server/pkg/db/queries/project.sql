@@ -83,3 +83,9 @@ UPDATE project SET
     updated_at = now()
 WHERE id = $1 AND workspace_id = $2
 RETURNING *;
+
+-- name: SetProjectExecutorAgents :one
+-- The project's automatic-dispatch allowlist (DENE-1959); empty lifts it.
+UPDATE project SET executor_agent_ids = sqlc.arg('executor_agent_ids')::uuid[], updated_at = now()
+WHERE id = $1 AND workspace_id = $2
+RETURNING *;

@@ -1274,7 +1274,7 @@ func (q *Queries) GetEarliestAutopilotByTitle(ctx context.Context, arg GetEarlie
 }
 
 const getEarliestProjectByTitle = `-- name: GetEarliestProjectByTitle :one
-SELECT id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, start_date, due_date, visibility, created_by, domain_ids, linked_projects FROM project
+SELECT id, workspace_id, title, description, icon, status, lead_type, lead_id, created_at, updated_at, priority, start_date, due_date, visibility, created_by, domain_ids, linked_projects, executor_agent_ids FROM project
 WHERE workspace_id = $1 AND title = $2
 ORDER BY created_at ASC
 LIMIT 1
@@ -1306,6 +1306,7 @@ func (q *Queries) GetEarliestProjectByTitle(ctx context.Context, arg GetEarliest
 		&i.CreatedBy,
 		&i.DomainIds,
 		&i.LinkedProjects,
+		&i.ExecutorAgentIds,
 	)
 	return i, err
 }

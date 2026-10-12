@@ -31,6 +31,10 @@ export interface Project {
   /** Domain ids this project carries, in workspace order; empty = generic
    *  (DENE-1451). Older servers omit this field. */
   domain_ids?: string[];
+  /** Executor allowlist (DENE-1959): automatic dispatch picks only these
+   *  agent ids for the project's work; empty = every seat. Older servers omit
+   *  this field. */
+  executor_agent_ids?: string[];
 }
 
 /** Checklist slot, without a daemon observation. Close dialogs read this. */
@@ -208,6 +212,8 @@ export interface UpdateProjectRequest {
   due_date?: string | null;
   /** Replaces the project's domains; [] makes it generic. */
   domain_ids?: string[];
+  /** Replaces the executor allowlist (owner/admin only); [] lifts it. */
+  executor_agent_ids?: string[];
 }
 
 export interface ListProjectsResponse {
