@@ -23,14 +23,14 @@ UPDATE office_event_delivery SET
     relayed_at = CASE WHEN $1::text = 'relayed' THEN COALESCE(relayed_at, now()) ELSE relayed_at END,
     relay_channel = CASE WHEN $2::text <> '' THEN $2::text ELSE relay_channel END,
     relay_ref = CASE WHEN $3::text <> '' THEN $3::text ELSE relay_ref END,
-    relay_error = CASE WHEN $1::text = 'relay_failed' THEN $4::text
+    relay_error = CASE WHEN $1::text = 'relay_failed' AND status <> 'relayed' THEN $4::text
                        WHEN $1::text = 'relayed' THEN '' ELSE relay_error END,
     handled_reason = CASE WHEN $1::text = 'handled' THEN $5::text ELSE handled_reason END,
     blocked_reason = CASE WHEN status = 'blocked' AND $1::text <> 'relay_failed' THEN '' ELSE blocked_reason END,
     artifacts = artifacts || $6::jsonb,
     updated_at = now()
 WHERE id = $7
-RETURNING id, event_id, workspace_id, bot_id, binding_id, target_user_id, reason, must_relay, status, attempts, last_error, next_attempt_at, last_attempt_at, sent_at, received_at, relayed_at, relay_channel, relay_ref, relay_error, handled_reason, blocked_reason, fallback_at, artifacts, created_at, updated_at
+RETURNING id, event_id, workspace_id, bot_id, binding_id, target_user_id, reason, must_relay, status, attempts, last_error, next_attempt_at, last_attempt_at, sent_at, received_at, relayed_at, relay_channel, relay_ref, relay_error, handled_reason, blocked_reason, fallback_at, uncertain_at, artifacts, created_at, updated_at
 `
 
 type AckOfficeDeliveryParams struct {
@@ -80,6 +80,7 @@ func (q *Queries) AckOfficeDelivery(ctx context.Context, arg AckOfficeDeliveryPa
 		&i.HandledReason,
 		&i.BlockedReason,
 		&i.FallbackAt,
+		&i.UncertainAt,
 		&i.Artifacts,
 		&i.CreatedAt,
 		&i.UpdatedAt,
@@ -124,7 +125,7 @@ WHERE d.id IN (
     LIMIT $1
     FOR UPDATE SKIP LOCKED
 )
-RETURNING d.id, d.event_id, d.workspace_id, d.bot_id, d.binding_id, d.target_user_id, d.reason, d.must_relay, d.status, d.attempts, d.last_error, d.next_attempt_at, d.last_attempt_at, d.sent_at, d.received_at, d.relayed_at, d.relay_channel, d.relay_ref, d.relay_error, d.handled_reason, d.blocked_reason, d.fallback_at, d.artifacts, d.created_at, d.updated_at
+RETURNING d.id, d.event_id, d.workspace_id, d.bot_id, d.binding_id, d.target_user_id, d.reason, d.must_relay, d.status, d.attempts, d.last_error, d.next_attempt_at, d.last_attempt_at, d.sent_at, d.received_at, d.relayed_at, d.relay_channel, d.relay_ref, d.relay_error, d.handled_reason, d.blocked_reason, d.fallback_at, d.uncertain_at, d.artifacts, d.created_at, d.updated_at
 `
 
 // Pending rows that are due, and sent rows whose receipt never came (resent
@@ -162,6 +163,7 @@ func (q *Queries) ClaimDueOfficeDeliveries(ctx context.Context, limit int32) ([]
 			&i.HandledReason,
 			&i.BlockedReason,
 			&i.FallbackAt,
+			&i.UncertainAt,
 			&i.Artifacts,
 			&i.CreatedAt,
 			&i.UpdatedAt,
@@ -178,23 +180,28 @@ func (q *Queries) ClaimDueOfficeDeliveries(ctx context.Context, limit int32) ([]
 
 const createOfficeEventDelivery = `-- name: CreateOfficeEventDelivery :exec
 INSERT INTO office_event_delivery (
-    event_id, workspace_id, bot_id, binding_id, target_user_id, reason, must_relay
-) VALUES ($1, $2, $3, $4, $5, $6, $7)
+    event_id, workspace_id, bot_id, binding_id, target_user_id, reason, must_relay, status, blocked_reason
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 ON CONFLICT (event_id, bot_id) DO UPDATE SET
     must_relay = office_event_delivery.must_relay OR EXCLUDED.must_relay,
     reason = CASE WHEN EXCLUDED.reason = 'owner' THEN 'owner' ELSE office_event_delivery.reason END
 `
 
 type CreateOfficeEventDeliveryParams struct {
-	EventID      pgtype.UUID `json:"event_id"`
-	WorkspaceID  pgtype.UUID `json:"workspace_id"`
-	BotID        pgtype.UUID `json:"bot_id"`
-	BindingID    pgtype.UUID `json:"binding_id"`
-	TargetUserID pgtype.UUID `json:"target_user_id"`
-	Reason       string      `json:"reason"`
-	MustRelay    bool        `json:"must_relay"`
+	EventID       pgtype.UUID `json:"event_id"`
+	WorkspaceID   pgtype.UUID `json:"workspace_id"`
+	BotID         pgtype.UUID `json:"bot_id"`
+	BindingID     pgtype.UUID `json:"binding_id"`
+	TargetUserID  pgtype.UUID `json:"target_user_id"`
+	Reason        string      `json:"reason"`
+	MustRelay     bool        `json:"must_relay"`
+	Status        string      `json:"status"`
+	BlockedReason string      `json:"blocked_reason"`
 }
 
+// status is pending, or blocked (with its reason) when the owner's Bot is
+// connected but cannot take it yet: the row is the durable record of the gap,
+// raises the in-app fallback, and comes back with a retry once fixed.
 func (q *Queries) CreateOfficeEventDelivery(ctx context.Context, arg CreateOfficeEventDeliveryParams) error {
 	_, err := q.db.Exec(ctx, createOfficeEventDelivery,
 		arg.EventID,
@@ -204,6 +211,8 @@ func (q *Queries) CreateOfficeEventDelivery(ctx context.Context, arg CreateOffic
 		arg.TargetUserID,
 		arg.Reason,
 		arg.MustRelay,
+		arg.Status,
+		arg.BlockedReason,
 	)
 	return err
 }
@@ -211,7 +220,7 @@ func (q *Queries) CreateOfficeEventDelivery(ctx context.Context, arg CreateOffic
 const getOfficeBindingForUser = `-- name: GetOfficeBindingForUser :one
 SELECT b.id, b.workspace_id, b.user_id, b.bot_id, b.mode, b.resend_after_seconds, b.escalate_after_seconds, b.created_at, b.updated_at, b.verified_at, b.revoked_at, b.broken_notified_at, b.activity_scope FROM member_bot_binding b
 WHERE b.workspace_id = $1 AND b.user_id = $2
-  AND b.revoked_at IS NULL AND b.verified_at IS NOT NULL
+  AND b.revoked_at IS NULL
 `
 
 type GetOfficeBindingForUserParams struct {
@@ -219,6 +228,9 @@ type GetOfficeBindingForUserParams struct {
 	UserID      pgtype.UUID `json:"user_id"`
 }
 
+// The person's current Bot binding, verified or not: an unverified one is a
+// gap to record, not a reason to forget the result. No row = the person has
+// no Bot (or disconnected it) and reads results in the app.
 func (q *Queries) GetOfficeBindingForUser(ctx context.Context, arg GetOfficeBindingForUserParams) (MemberBotBinding, error) {
 	row := q.db.QueryRow(ctx, getOfficeBindingForUser, arg.WorkspaceID, arg.UserID)
 	var i MemberBotBinding
@@ -241,7 +253,7 @@ func (q *Queries) GetOfficeBindingForUser(ctx context.Context, arg GetOfficeBind
 }
 
 const getOfficeDeliveryForBot = `-- name: GetOfficeDeliveryForBot :one
-SELECT id, event_id, workspace_id, bot_id, binding_id, target_user_id, reason, must_relay, status, attempts, last_error, next_attempt_at, last_attempt_at, sent_at, received_at, relayed_at, relay_channel, relay_ref, relay_error, handled_reason, blocked_reason, fallback_at, artifacts, created_at, updated_at FROM office_event_delivery WHERE event_id = $1 AND bot_id = $2
+SELECT id, event_id, workspace_id, bot_id, binding_id, target_user_id, reason, must_relay, status, attempts, last_error, next_attempt_at, last_attempt_at, sent_at, received_at, relayed_at, relay_channel, relay_ref, relay_error, handled_reason, blocked_reason, fallback_at, uncertain_at, artifacts, created_at, updated_at FROM office_event_delivery WHERE event_id = $1 AND bot_id = $2
 `
 
 type GetOfficeDeliveryForBotParams struct {
@@ -275,6 +287,7 @@ func (q *Queries) GetOfficeDeliveryForBot(ctx context.Context, arg GetOfficeDeli
 		&i.HandledReason,
 		&i.BlockedReason,
 		&i.FallbackAt,
+		&i.UncertainAt,
 		&i.Artifacts,
 		&i.CreatedAt,
 		&i.UpdatedAt,
@@ -283,7 +296,7 @@ func (q *Queries) GetOfficeDeliveryForBot(ctx context.Context, arg GetOfficeDeli
 }
 
 const getOfficeEvent = `-- name: GetOfficeEvent :one
-SELECT id, event_id, workspace_id, family, event_type, object_type, object_id, issue_id, chat_session_id, chat_message_id, comment_id, task_id, attachment_id, changes, actor_type, actor_id, via_bot_id, on_behalf_of_user_id, actor_task_id, actor_source, occurred_at, stream_seq, sealed_at, meaning, summary, must_relay, pending_approval, business_key FROM office_event WHERE event_id = $1 AND workspace_id = $2
+SELECT id, event_id, workspace_id, family, event_type, object_type, object_id, issue_id, chat_session_id, chat_message_id, comment_id, task_id, attachment_id, changes, actor_type, actor_id, via_bot_id, on_behalf_of_user_id, actor_task_id, actor_source, occurred_at, stream_seq, sealed_at, meaning, summary, must_relay, pending_approval, business_key, recipient_gap FROM office_event WHERE event_id = $1 AND workspace_id = $2
 `
 
 type GetOfficeEventParams struct {
@@ -323,6 +336,7 @@ func (q *Queries) GetOfficeEvent(ctx context.Context, arg GetOfficeEventParams) 
 		&i.MustRelay,
 		&i.PendingApproval,
 		&i.BusinessKey,
+		&i.RecipientGap,
 	)
 	return i, err
 }
@@ -334,6 +348,7 @@ WHERE a.workspace_id = $1 AND (
     OR ($3::uuid IS NOT NULL AND a.chat_message_id = $3::uuid)
     OR ($4::uuid IS NOT NULL AND a.comment_id = $4::uuid)
     OR ($5::uuid IS NOT NULL AND a.task_id = $5::uuid)
+    OR ($6::uuid IS NOT NULL AND a.issue_id = $6::uuid)
 )
 ORDER BY a.created_at, a.id
 LIMIT 200
@@ -345,10 +360,12 @@ type ListAttachmentsForOfficeEventParams struct {
 	ChatMessageID pgtype.UUID `json:"chat_message_id"`
 	CommentID     pgtype.UUID `json:"comment_id"`
 	TaskID        pgtype.UUID `json:"task_id"`
+	IssueID       pgtype.UUID `json:"issue_id"`
 }
 
 // The files that belong to an event: the one it names, the files on the chat
-// message or comment it names, and the files a run uploaded.
+// message or comment it names, the files a run uploaded, and for a ticket
+// that finished or changed hands, every file on the ticket.
 func (q *Queries) ListAttachmentsForOfficeEvent(ctx context.Context, arg ListAttachmentsForOfficeEventParams) ([]Attachment, error) {
 	rows, err := q.db.Query(ctx, listAttachmentsForOfficeEvent,
 		arg.WorkspaceID,
@@ -356,6 +373,7 @@ func (q *Queries) ListAttachmentsForOfficeEvent(ctx context.Context, arg ListAtt
 		arg.ChatMessageID,
 		arg.CommentID,
 		arg.TaskID,
+		arg.IssueID,
 	)
 	if err != nil {
 		return nil, err
@@ -393,7 +411,7 @@ func (q *Queries) ListAttachmentsForOfficeEvent(ctx context.Context, arg ListAtt
 }
 
 const listOfficeDeliveries = `-- name: ListOfficeDeliveries :many
-SELECT d.id, d.event_id, d.workspace_id, d.bot_id, d.binding_id, d.target_user_id, d.reason, d.must_relay, d.status, d.attempts, d.last_error, d.next_attempt_at, d.last_attempt_at, d.sent_at, d.received_at, d.relayed_at, d.relay_channel, d.relay_ref, d.relay_error, d.handled_reason, d.blocked_reason, d.fallback_at, d.artifacts, d.created_at, d.updated_at, e.id, e.event_id, e.workspace_id, e.family, e.event_type, e.object_type, e.object_id, e.issue_id, e.chat_session_id, e.chat_message_id, e.comment_id, e.task_id, e.attachment_id, e.changes, e.actor_type, e.actor_id, e.via_bot_id, e.on_behalf_of_user_id, e.actor_task_id, e.actor_source, e.occurred_at, e.stream_seq, e.sealed_at, e.meaning, e.summary, e.must_relay, e.pending_approval, e.business_key
+SELECT d.id, d.event_id, d.workspace_id, d.bot_id, d.binding_id, d.target_user_id, d.reason, d.must_relay, d.status, d.attempts, d.last_error, d.next_attempt_at, d.last_attempt_at, d.sent_at, d.received_at, d.relayed_at, d.relay_channel, d.relay_ref, d.relay_error, d.handled_reason, d.blocked_reason, d.fallback_at, d.uncertain_at, d.artifacts, d.created_at, d.updated_at, e.id, e.event_id, e.workspace_id, e.family, e.event_type, e.object_type, e.object_id, e.issue_id, e.chat_session_id, e.chat_message_id, e.comment_id, e.task_id, e.attachment_id, e.changes, e.actor_type, e.actor_id, e.via_bot_id, e.on_behalf_of_user_id, e.actor_task_id, e.actor_source, e.occurred_at, e.stream_seq, e.sealed_at, e.meaning, e.summary, e.must_relay, e.pending_approval, e.business_key, e.recipient_gap
 FROM office_event_delivery d
 JOIN office_event e ON e.event_id = d.event_id
 WHERE d.bot_id = $1
@@ -453,6 +471,7 @@ func (q *Queries) ListOfficeDeliveries(ctx context.Context, arg ListOfficeDelive
 			&i.OfficeEventDelivery.HandledReason,
 			&i.OfficeEventDelivery.BlockedReason,
 			&i.OfficeEventDelivery.FallbackAt,
+			&i.OfficeEventDelivery.UncertainAt,
 			&i.OfficeEventDelivery.Artifacts,
 			&i.OfficeEventDelivery.CreatedAt,
 			&i.OfficeEventDelivery.UpdatedAt,
@@ -484,6 +503,7 @@ func (q *Queries) ListOfficeDeliveries(ctx context.Context, arg ListOfficeDelive
 			&i.OfficeEvent.MustRelay,
 			&i.OfficeEvent.PendingApproval,
 			&i.OfficeEvent.BusinessKey,
+			&i.OfficeEvent.RecipientGap,
 		); err != nil {
 			return nil, err
 		}
@@ -496,7 +516,7 @@ func (q *Queries) ListOfficeDeliveries(ctx context.Context, arg ListOfficeDelive
 }
 
 const listOfficeDeliveriesForEvent = `-- name: ListOfficeDeliveriesForEvent :many
-SELECT id, event_id, workspace_id, bot_id, binding_id, target_user_id, reason, must_relay, status, attempts, last_error, next_attempt_at, last_attempt_at, sent_at, received_at, relayed_at, relay_channel, relay_ref, relay_error, handled_reason, blocked_reason, fallback_at, artifacts, created_at, updated_at FROM office_event_delivery WHERE event_id = $1 ORDER BY id
+SELECT id, event_id, workspace_id, bot_id, binding_id, target_user_id, reason, must_relay, status, attempts, last_error, next_attempt_at, last_attempt_at, sent_at, received_at, relayed_at, relay_channel, relay_ref, relay_error, handled_reason, blocked_reason, fallback_at, uncertain_at, artifacts, created_at, updated_at FROM office_event_delivery WHERE event_id = $1 ORDER BY id
 `
 
 func (q *Queries) ListOfficeDeliveriesForEvent(ctx context.Context, eventID pgtype.UUID) ([]OfficeEventDelivery, error) {
@@ -531,6 +551,7 @@ func (q *Queries) ListOfficeDeliveriesForEvent(ctx context.Context, eventID pgty
 			&i.HandledReason,
 			&i.BlockedReason,
 			&i.FallbackAt,
+			&i.UncertainAt,
 			&i.Artifacts,
 			&i.CreatedAt,
 			&i.UpdatedAt,
@@ -546,7 +567,7 @@ func (q *Queries) ListOfficeDeliveriesForEvent(ctx context.Context, eventID pgty
 }
 
 const listOfficeEvents = `-- name: ListOfficeEvents :many
-SELECT id, event_id, workspace_id, family, event_type, object_type, object_id, issue_id, chat_session_id, chat_message_id, comment_id, task_id, attachment_id, changes, actor_type, actor_id, via_bot_id, on_behalf_of_user_id, actor_task_id, actor_source, occurred_at, stream_seq, sealed_at, meaning, summary, must_relay, pending_approval, business_key FROM office_event
+SELECT id, event_id, workspace_id, family, event_type, object_type, object_id, issue_id, chat_session_id, chat_message_id, comment_id, task_id, attachment_id, changes, actor_type, actor_id, via_bot_id, on_behalf_of_user_id, actor_task_id, actor_source, occurred_at, stream_seq, sealed_at, meaning, summary, must_relay, pending_approval, business_key, recipient_gap FROM office_event
 WHERE workspace_id = $1
   AND stream_seq IS NOT NULL
   AND stream_seq > $2
@@ -613,6 +634,7 @@ func (q *Queries) ListOfficeEvents(ctx context.Context, arg ListOfficeEventsPara
 			&i.MustRelay,
 			&i.PendingApproval,
 			&i.BusinessKey,
+			&i.RecipientGap,
 		); err != nil {
 			return nil, err
 		}
@@ -625,7 +647,7 @@ func (q *Queries) ListOfficeEvents(ctx context.Context, arg ListOfficeEventsPara
 }
 
 const listOfficeFallbackDue = `-- name: ListOfficeFallbackDue :many
-SELECT d.id, d.event_id, d.workspace_id, d.bot_id, d.binding_id, d.target_user_id, d.reason, d.must_relay, d.status, d.attempts, d.last_error, d.next_attempt_at, d.last_attempt_at, d.sent_at, d.received_at, d.relayed_at, d.relay_channel, d.relay_ref, d.relay_error, d.handled_reason, d.blocked_reason, d.fallback_at, d.artifacts, d.created_at, d.updated_at, e.id, e.event_id, e.workspace_id, e.family, e.event_type, e.object_type, e.object_id, e.issue_id, e.chat_session_id, e.chat_message_id, e.comment_id, e.task_id, e.attachment_id, e.changes, e.actor_type, e.actor_id, e.via_bot_id, e.on_behalf_of_user_id, e.actor_task_id, e.actor_source, e.occurred_at, e.stream_seq, e.sealed_at, e.meaning, e.summary, e.must_relay, e.pending_approval, e.business_key
+SELECT d.id, d.event_id, d.workspace_id, d.bot_id, d.binding_id, d.target_user_id, d.reason, d.must_relay, d.status, d.attempts, d.last_error, d.next_attempt_at, d.last_attempt_at, d.sent_at, d.received_at, d.relayed_at, d.relay_channel, d.relay_ref, d.relay_error, d.handled_reason, d.blocked_reason, d.fallback_at, d.uncertain_at, d.artifacts, d.created_at, d.updated_at, e.id, e.event_id, e.workspace_id, e.family, e.event_type, e.object_type, e.object_id, e.issue_id, e.chat_session_id, e.chat_message_id, e.comment_id, e.task_id, e.attachment_id, e.changes, e.actor_type, e.actor_id, e.via_bot_id, e.on_behalf_of_user_id, e.actor_task_id, e.actor_source, e.occurred_at, e.stream_seq, e.sealed_at, e.meaning, e.summary, e.must_relay, e.pending_approval, e.business_key, e.recipient_gap
 FROM office_event_delivery d
 JOIN office_event e ON e.event_id = d.event_id
 WHERE d.must_relay AND d.fallback_at IS NULL
@@ -680,6 +702,7 @@ func (q *Queries) ListOfficeFallbackDue(ctx context.Context, arg ListOfficeFallb
 			&i.OfficeEventDelivery.HandledReason,
 			&i.OfficeEventDelivery.BlockedReason,
 			&i.OfficeEventDelivery.FallbackAt,
+			&i.OfficeEventDelivery.UncertainAt,
 			&i.OfficeEventDelivery.Artifacts,
 			&i.OfficeEventDelivery.CreatedAt,
 			&i.OfficeEventDelivery.UpdatedAt,
@@ -711,6 +734,7 @@ func (q *Queries) ListOfficeFallbackDue(ctx context.Context, arg ListOfficeFallb
 			&i.OfficeEvent.MustRelay,
 			&i.OfficeEvent.PendingApproval,
 			&i.OfficeEvent.BusinessKey,
+			&i.OfficeEvent.RecipientGap,
 		); err != nil {
 			return nil, err
 		}
@@ -765,7 +789,7 @@ func (q *Queries) ListOfficeStreamBindings(ctx context.Context, workspaceID pgty
 }
 
 const listUnsealedOfficeEvents = `-- name: ListUnsealedOfficeEvents :many
-SELECT id, event_id, workspace_id, family, event_type, object_type, object_id, issue_id, chat_session_id, chat_message_id, comment_id, task_id, attachment_id, changes, actor_type, actor_id, via_bot_id, on_behalf_of_user_id, actor_task_id, actor_source, occurred_at, stream_seq, sealed_at, meaning, summary, must_relay, pending_approval, business_key FROM office_event
+SELECT id, event_id, workspace_id, family, event_type, object_type, object_id, issue_id, chat_session_id, chat_message_id, comment_id, task_id, attachment_id, changes, actor_type, actor_id, via_bot_id, on_behalf_of_user_id, actor_task_id, actor_source, occurred_at, stream_seq, sealed_at, meaning, summary, must_relay, pending_approval, business_key, recipient_gap FROM office_event
 WHERE stream_seq IS NULL
 ORDER BY id
 LIMIT $1
@@ -809,6 +833,7 @@ func (q *Queries) ListUnsealedOfficeEvents(ctx context.Context, limit int32) ([]
 			&i.MustRelay,
 			&i.PendingApproval,
 			&i.BusinessKey,
+			&i.RecipientGap,
 		); err != nil {
 			return nil, err
 		}
@@ -880,6 +905,34 @@ func (q *Queries) MarkOfficeDeliverySent(ctx context.Context, arg MarkOfficeDeli
 	return err
 }
 
+const markOfficeDeliveryUncertain = `-- name: MarkOfficeDeliveryUncertain :exec
+UPDATE office_event_delivery SET
+    status = 'sent',
+    attempts = attempts + 1,
+    last_attempt_at = now(),
+    sent_at = COALESCE(sent_at, now()),
+    uncertain_at = now(),
+    last_error = $1,
+    next_attempt_at = $2,
+    updated_at = now()
+WHERE id = $3 AND status = 'sending'
+`
+
+type MarkOfficeDeliveryUncertainParams struct {
+	LastError     string             `json:"last_error"`
+	NextAttemptAt pgtype.Timestamptz `json:"next_attempt_at"`
+	ID            int64              `json:"id"`
+}
+
+// The request went out but the answer was lost: the Bot may already have it.
+// Treated as sent, not failed: the next attempt waits the receipt timeout (a
+// receipt that arrives meanwhile closes it) and goes out marked reconcile,
+// so the Bot answers from its inbox instead of acting on it twice.
+func (q *Queries) MarkOfficeDeliveryUncertain(ctx context.Context, arg MarkOfficeDeliveryUncertainParams) error {
+	_, err := q.db.Exec(ctx, markOfficeDeliveryUncertain, arg.LastError, arg.NextAttemptAt, arg.ID)
+	return err
+}
+
 const markOfficeFallback = `-- name: MarkOfficeFallback :exec
 UPDATE office_event_delivery SET fallback_at = now(), updated_at = now()
 WHERE id = $1 AND fallback_at IS NULL
@@ -946,8 +999,9 @@ UPDATE office_event SET
     summary = $3,
     must_relay = $4,
     pending_approval = $5,
-    business_key = CASE WHEN business_key = '' THEN $6 ELSE business_key END
-WHERE id = $7 AND stream_seq IS NULL
+    business_key = CASE WHEN business_key = '' THEN $6 ELSE business_key END,
+    recipient_gap = $7
+WHERE id = $8 AND stream_seq IS NULL
 `
 
 type SealOfficeEventParams struct {
@@ -957,6 +1011,7 @@ type SealOfficeEventParams struct {
 	MustRelay       bool        `json:"must_relay"`
 	PendingApproval bool        `json:"pending_approval"`
 	BusinessKey     string      `json:"business_key"`
+	RecipientGap    string      `json:"recipient_gap"`
 	ID              int64       `json:"id"`
 }
 
@@ -968,6 +1023,7 @@ func (q *Queries) SealOfficeEvent(ctx context.Context, arg SealOfficeEventParams
 		arg.MustRelay,
 		arg.PendingApproval,
 		arg.BusinessKey,
+		arg.RecipientGap,
 		arg.ID,
 	)
 	return err

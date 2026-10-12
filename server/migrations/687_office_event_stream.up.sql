@@ -49,12 +49,17 @@ CREATE TABLE office_event (
     must_relay BOOLEAN NOT NULL DEFAULT false,
     pending_approval BOOLEAN NOT NULL DEFAULT false,
     -- The same business fact on the older activity lane carries the same key.
-    business_key TEXT NOT NULL DEFAULT ''
+    business_key TEXT NOT NULL DEFAULT '',
+    -- Set by the dispatcher when a result that must reach someone has nobody
+    -- to reach (no owner, or the owner's Bot cannot take it). Readable on
+    -- the event; never silently empty.
+    recipient_gap TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX office_event_unsealed ON office_event (id) WHERE stream_seq IS NULL;
 CREATE INDEX office_event_stream ON office_event (workspace_id, stream_seq) WHERE stream_seq IS NOT NULL;
 CREATE INDEX office_event_issue ON office_event (issue_id, stream_seq) WHERE issue_id IS NOT NULL;
 CREATE INDEX office_event_chat ON office_event (chat_session_id, stream_seq) WHERE chat_session_id IS NOT NULL;
+CREATE INDEX office_event_attachment ON office_event (attachment_id) WHERE attachment_id IS NOT NULL;
 
 -- One row per event per Bot.
 --   pending -> sending -> sent (HTTP 200, no receipt yet) -> received -> relayed
@@ -87,6 +92,8 @@ CREATE TABLE office_event_delivery (
     blocked_reason TEXT NOT NULL DEFAULT '',
     -- In-app notice when a must_relay event was not relayed in time.
     fallback_at TIMESTAMPTZ,
+    -- Last time a push went out and its answer was lost (the Bot may have it).
+    uncertain_at TIMESTAMPTZ,
     -- Per-file receipts: {"<attachment id>": {"status","ref","error","at"}}.
     artifacts JSONB NOT NULL DEFAULT '{}',
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -235,19 +242,23 @@ CREATE TRIGGER office_run_finished AFTER UPDATE OF status ON agent_task_queue
     FOR EACH ROW WHEN (OLD.status IS DISTINCT FROM NEW.status AND NEW.status IN ('completed', 'failed', 'cancelled'))
     EXECUTE FUNCTION office_capture_run();
 
--- A file joined a comment or a chat message: on upload with its place
--- already known, or bound later (an agent's file is bound when its run ends).
--- A new upload under the same name is a new attachment, so a new event.
+-- A file reached a place someone looks at: a ticket (directly, as most agent
+-- deliverables do), a comment or a chat message. On upload with its place
+-- already known, or bound later (a draft's files when the ticket is created,
+-- an agent's chat file when its reply is posted). One event per file: the
+-- first place it lands. A new upload under the same name is a new attachment,
+-- so a new event.
 CREATE FUNCTION office_capture_attachment() RETURNS trigger LANGUAGE plpgsql AS $$
 DECLARE
     sess uuid := NEW.chat_session_id;
 BEGIN
-    IF NEW.comment_id IS NULL AND NEW.chat_message_id IS NULL THEN
+    IF NEW.issue_id IS NULL AND NEW.comment_id IS NULL AND NEW.chat_message_id IS NULL THEN
         RETURN NULL;
     END IF;
-    IF TG_OP = 'UPDATE'
-       AND NEW.comment_id IS NOT DISTINCT FROM OLD.comment_id
-       AND NEW.chat_message_id IS NOT DISTINCT FROM OLD.chat_message_id THEN
+    IF TG_OP = 'UPDATE' AND (OLD.issue_id IS NOT NULL OR OLD.comment_id IS NOT NULL OR OLD.chat_message_id IS NOT NULL) THEN
+        RETURN NULL; -- already announced when it first landed
+    END IF;
+    IF EXISTS (SELECT 1 FROM office_event WHERE attachment_id = NEW.id AND event_type = 'artifact.attached') THEN
         RETURN NULL;
     END IF;
     IF sess IS NULL AND NEW.chat_message_id IS NOT NULL THEN
@@ -256,10 +267,10 @@ BEGIN
     PERFORM office_emit(NEW.workspace_id, 'artifact', 'artifact.attached', 'attachment', NEW.id::text,
         NEW.issue_id, sess, NEW.chat_message_id, NEW.comment_id, NEW.task_id, NEW.id,
         jsonb_build_array(jsonb_build_object('field', 'filename', 'old', NULL, 'new', NEW.filename)),
-        'artifact:' || NEW.id || ':' || COALESCE(NEW.comment_id, NEW.chat_message_id));
+        'artifact:' || NEW.id);
     RETURN NULL;
 END $$;
-CREATE TRIGGER office_attachment AFTER INSERT OR UPDATE OF comment_id, chat_message_id ON attachment
+CREATE TRIGGER office_attachment AFTER INSERT OR UPDATE OF issue_id, comment_id, chat_message_id ON attachment
     FOR EACH ROW EXECUTE FUNCTION office_capture_attachment();
 
 -- Settings, members, routing and configuration: every column that changed,

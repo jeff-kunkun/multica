@@ -63,6 +63,9 @@ func (h *Handler) officeEventView(ctx context.Context, ev db.OfficeEvent, viewer
 	if ev.PendingApproval {
 		view["notice"] = "系统改成完成，正式发布仍待批准。这不是发布许可。"
 	}
+	if ev.RecipientGap != "" {
+		view["recipient_gap"] = ev.RecipientGap
+	}
 	if ev.IssueID.Valid {
 		if issue, err := h.Queries.GetIssue(ctx, ev.IssueID); err == nil {
 			view["issue"] = map[string]any{
@@ -101,6 +104,8 @@ func (h *Handler) officeArtifacts(ctx context.Context, ev db.OfficeEvent) []map[
 		params.ChatMessageID = ev.ChatMessageID
 	case strings.HasPrefix(ev.EventType, "run."):
 		params.TaskID = ev.TaskID
+	case ev.EventType == "issue.status_changed" && officeCarriesTicketFiles(ev.Meaning):
+		params.IssueID = ev.IssueID
 	}
 	out := []map[string]any{}
 	rows, err := h.Queries.ListAttachmentsForOfficeEvent(ctx, params)
@@ -136,6 +141,17 @@ func (h *Handler) officeArtifacts(ctx context.Context, ev db.OfficeEvent) []map[
 	return out
 }
 
+// officeCarriesTicketFiles: a ticket that finished, changed hands or waits
+// for release approval carries every file on it, so the person gets the
+// deliverables with the news, not just the status.
+func officeCarriesTicketFiles(meaning string) bool {
+	switch meaning {
+	case service.OfficeMeaningTaskDone, service.OfficeMeaningHandoff, service.OfficeMeaningPendingRel:
+		return true
+	}
+	return false
+}
+
 func (h *Handler) officeActor(ctx context.Context, ev db.OfficeEvent, viewer pgtype.UUID) map[string]any {
 	a := map[string]any{"type": ev.ActorType, "id": uuidToString(ev.ActorID), "source": ev.ActorSource}
 	switch ev.ActorType {
@@ -169,8 +185,12 @@ func (h *Handler) officeActor(ctx context.Context, ev db.OfficeEvent, viewer pgt
 func (h *Handler) officeEventPush(view map[string]any, d db.OfficeEventDelivery) map[string]any {
 	base := strings.TrimRight(h.cfg.PublicURL, "/")
 	view["delivery"] = map[string]any{
-		"attempt":     d.Attempts + 1,
-		"redelivery":  d.SentAt.Valid,
+		"attempt":    d.Attempts + 1,
+		"redelivery": d.SentAt.Valid,
+		// The last push may have reached the Bot with its answer lost: look
+		// the event_id up in the inbox and resend that receipt; act only on
+		// steps not yet done.
+		"reconcile":   d.UncertainAt.Valid,
 		"bot_id":      uuidToString(d.BotID),
 		"reason":      d.Reason,
 		"must_relay":  d.MustRelay,
@@ -212,6 +232,7 @@ func (h *Handler) officeDeliveryView(d db.OfficeEventDelivery) map[string]any {
 		"relay_error":     d.RelayError,
 		"handled_reason":  d.HandledReason,
 		"fallback_at":     ts(d.FallbackAt),
+		"uncertain_at":    ts(d.UncertainAt),
 		"artifacts":       artifacts,
 		"cursor":          d.ID,
 	}
@@ -389,14 +410,22 @@ func (h *Handler) OfficeEventReceipt(w http.ResponseWriter, r *http.Request) {
 			"this result must reach the person: tell them, then send stage relayed")
 		return
 	}
-	artifacts := map[string]any{}
-	now := time.Now().UTC().Format(time.RFC3339Nano)
-	for _, a := range req.Artifacts {
-		if _, err := parseUUIDStrict(a.ID); err != nil {
-			writeError(w, http.StatusBadRequest, "artifact id must be an attachment id")
-			return
-		}
-		artifacts[a.ID] = map[string]any{"status": a.Status, "ref": clip(a.Ref, 500), "error": clip(a.Error, 500), "at": now}
+	// The server cannot see the person's chat app; it can insist the Bot
+	// names where it told them, so "relayed" is a checkable claim and not a
+	// bare word.
+	if req.Stage == "relayed" && (strings.TrimSpace(req.Channel) == "" || strings.TrimSpace(req.MessageRef) == "") {
+		writeErrorCode(w, http.StatusBadRequest, "relay_proof_required",
+			"stage relayed needs channel and message_ref: where you told the person, and the message id there")
+		return
+	}
+	if req.Stage == "relay_failed" && strings.TrimSpace(req.Error) == "" {
+		writeError(w, http.StatusBadRequest, "stage relay_failed needs error")
+		return
+	}
+	artifacts, msg := h.officeArtifactReceipts(r.Context(), eventID, d, req)
+	if msg != "" {
+		writeErrorCode(w, http.StatusBadRequest, "invalid_artifact_receipt", msg)
+		return
 	}
 	raw, _ := json.Marshal(artifacts)
 	updated, err := h.Queries.AckOfficeDelivery(r.Context(), db.AckOfficeDeliveryParams{
@@ -408,6 +437,58 @@ func (h *Handler) OfficeEventReceipt(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeScrubbed(w, (h.officeDeliveryView(updated)))
+}
+
+// officeArtifactReceipts checks per-file receipts: the file must be in this
+// event's catalogue, the status one of sent/failed/skipped, a sent file names
+// where it went (ref), a failed one says why (error). A file already recorded
+// as sent stays sent: a late or repeated receipt never takes it back.
+func (h *Handler) officeArtifactReceipts(ctx context.Context, eventID pgtype.UUID, d db.OfficeEventDelivery, req officeReceiptRequest) (map[string]any, string) {
+	out := map[string]any{}
+	if len(req.Artifacts) == 0 {
+		return out, ""
+	}
+	ev, err := h.Queries.GetOfficeEvent(ctx, db.GetOfficeEventParams{EventID: eventID, WorkspaceID: d.WorkspaceID})
+	if err != nil {
+		return nil, "event not found"
+	}
+	catalogue := map[string]bool{}
+	for _, a := range h.officeArtifacts(ctx, ev) {
+		if id, _ := a["id"].(string); id != "" {
+			catalogue[id] = true
+		}
+	}
+	prior := map[string]map[string]any{}
+	_ = json.Unmarshal(d.Artifacts, &prior)
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	for _, a := range req.Artifacts {
+		id, err := parseUUIDStrict(a.ID)
+		if err != nil {
+			return nil, "artifact id must be an attachment id"
+		}
+		key := uuidToString(id)
+		if !catalogue[key] {
+			return nil, "artifact " + key + " is not a file of this event"
+		}
+		switch a.Status {
+		case "sent":
+			if strings.TrimSpace(a.Ref) == "" {
+				return nil, "artifact " + key + ": sent needs ref (where the file went)"
+			}
+		case "failed":
+			if strings.TrimSpace(a.Error) == "" {
+				return nil, "artifact " + key + ": failed needs error"
+			}
+		case "skipped":
+		default:
+			return nil, "artifact status must be sent, failed or skipped"
+		}
+		if p, ok := prior[key]; ok && p["status"] == "sent" && a.Status != "sent" {
+			continue
+		}
+		out[key] = map[string]any{"status": a.Status, "ref": clip(a.Ref, 500), "error": clip(a.Error, 500), "at": now}
+	}
+	return out, ""
 }
 
 // ListBotOfficeDeliveries is a Bot's own ledger: what it was sent, what it

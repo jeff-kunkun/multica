@@ -339,7 +339,7 @@ older activity lane carries the same `business_key`.
 
 ```bash
 multica events receipt <event-id> --bot <bot-id> --stage received
-multica events receipt <event-id> --bot <bot-id> --stage relayed --channel telegram --ref <msg-id> --file <attachment-id>=sent
+multica events receipt <event-id> --bot <bot-id> --stage relayed --channel telegram --ref <msg-id> --file <attachment-id>=sent:<file-msg-id>
 multica events receipt <event-id> --bot <bot-id> --stage handled --reason "…"   # 409 must_relay if not relayed first
 multica events list --after <stream-seq> --output json      # catch up by cursor
 multica events deliveries --bot <bot-id> --status blocked   # what is stuck and why
@@ -352,3 +352,18 @@ multica events download <attachment-id>
 「系统改成完成，正式发布仍待批准」 means routing closed a release ticket: it is not
 a deploy permission. A must-relay result you do not relay reaches the person's
 inbox instead.
+
+Receiver rules the server holds you to:
+
+- Store the event (by `event_id`) in your own durable inbox **before** posting
+  `received`; read every member of a batch, not just the first.
+- `relayed` needs `--channel` and `--ref` (the message id where you told the
+  person); `relay_failed` needs `--error`. Per file: `=sent:<ref>`,
+  `=failed:<error>` or `=skipped`, only for files in that event's `artifacts`;
+  a file once sent stays sent.
+- `delivery.reconcile: true` means the previous push may already be in your
+  inbox: look the `event_id` up, re-send the receipt you have, and do only the
+  steps still missing (never tell the person twice).
+- After a restart, list `multica events deliveries --bot <bot-id> --status
+  sent,received` and finish what your inbox shows as not done.
+- `recipient_gap` on an event says nobody could be reached through a Bot.

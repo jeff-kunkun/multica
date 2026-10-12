@@ -129,19 +129,30 @@ func (w *OfficeEventWorker) Seal(ctx context.Context) (int, error) {
 	for _, ev := range rows {
 		facts := w.facts(ctx, ev)
 		class := service.ClassifyOffice(facts)
+		// A lookup that failed is not "nobody": the whole batch waits for the
+		// next tick rather than sealing an event with recipients missing.
+		recipients, gap, err := w.recipients(ctx, ev, class)
+		if err != nil {
+			return 0, fmt.Errorf("recipients of %s: %w", uuidToString(ev.EventID), err)
+		}
 		if err := q.SealOfficeEvent(ctx, db.SealOfficeEventParams{
 			ID: ev.ID, StreamSeq: pgtype.Int8{Int64: seq, Valid: true},
 			Meaning: class.Meaning, Summary: class.Summary, MustRelay: class.MustRelay,
 			PendingApproval: class.PendingApproval, BusinessKey: officeFallbackBusinessKey(ev),
+			RecipientGap: gap,
 		}); err != nil {
 			return 0, err
 		}
 		seq++
-		for _, r := range w.recipients(ctx, ev, class) {
+		for _, r := range recipients {
+			status := "pending"
+			if r.blocked != "" {
+				status = "blocked"
+			}
 			if err := q.CreateOfficeEventDelivery(ctx, db.CreateOfficeEventDeliveryParams{
 				EventID: ev.EventID, WorkspaceID: ev.WorkspaceID, BotID: r.binding.BotID,
 				BindingID: r.binding.ID, TargetUserID: r.binding.UserID, Reason: r.reason,
-				MustRelay: class.MustRelay && r.reason == "owner",
+				MustRelay: class.MustRelay && r.reason == "owner", Status: status, BlockedReason: r.blocked,
 			}); err != nil {
 				return 0, err
 			}
@@ -186,40 +197,88 @@ func (w *OfficeEventWorker) facts(ctx context.Context, ev db.OfficeEvent) servic
 type officeRecipient struct {
 	binding db.MemberBotBinding
 	reason  string // owner | stream
+	blocked string // set when the owner's Bot cannot take it yet
 }
+
+// Recipient gaps, recorded on the event when a result that must reach
+// someone has nobody it can reach through a Bot.
+const (
+	officeGapNoOwner = "没有可通知的主人：这条结果不属于任何人的任务或聊天"
+	officeGapNoBot   = "主人没有连接 Bot，结果只在应用里"
+)
 
 // recipients is who the event is for, decided when it is sealed. Owners (the
 // person whose chat or ticket it is) get results and run endings whether or
 // not they stream everything; a person who streams everything gets what they
 // can see. Nobody is told about their own action; an agent's result is never
 // treated as the person's own, even when their Bot started the run.
-func (w *OfficeEventWorker) recipients(ctx context.Context, ev db.OfficeEvent, class service.OfficeClass) []officeRecipient {
+//
+// An owner whose Bot is connected but not verified still gets a row, blocked
+// with the reason, so the result is not lost: it goes to their inbox and
+// comes back with a retry once the Bot is verified. Any lookup that fails
+// returns the error; the caller must not seal on a partial answer.
+func (w *OfficeEventWorker) recipients(ctx context.Context, ev db.OfficeEvent, class service.OfficeClass) ([]officeRecipient, string, error) {
 	seen := map[string]bool{}
 	var out []officeRecipient
-	add := func(b db.MemberBotBinding, reason string) {
-		key := uuidToString(b.BotID)
-		if seen[key] || w.ownAction(ev, b.UserID) || !w.canSee(ctx, ev, b.UserID) {
-			return
+	add := func(r officeRecipient) error {
+		key := uuidToString(r.binding.BotID)
+		if seen[key] || w.ownAction(ev, r.binding.UserID) {
+			return nil
+		}
+		visible, err := w.h.officeEventVisibleErr(ctx, ev, r.binding.UserID)
+		if err != nil || !visible {
+			return err
 		}
 		seen[key] = true
-		out = append(out, officeRecipient{binding: b, reason: reason})
+		out = append(out, r)
+		return nil
 	}
+	gap := ""
 	ownerWorthy := class.MustRelay || class.Meaning == service.OfficeMeaningRoundDone || class.Meaning == service.OfficeMeaningFailed
 	if ownerWorthy {
-		for _, user := range w.owners(ctx, ev) {
+		owners, err := w.owners(ctx, ev)
+		if err != nil {
+			return nil, "", err
+		}
+		reachable := false
+		for _, user := range owners {
+			if w.ownAction(ev, user) {
+				reachable = true // they did it; nobody is missing
+				continue
+			}
 			b, err := w.h.Queries.GetOfficeBindingForUser(ctx, db.GetOfficeBindingForUserParams{WorkspaceID: ev.WorkspaceID, UserID: user})
-			if err == nil {
-				add(b, "owner")
+			if errors.Is(err, pgx.ErrNoRows) {
+				continue
+			}
+			if err != nil {
+				return nil, "", err
+			}
+			r := officeRecipient{binding: b, reason: "owner"}
+			if !b.VerifiedAt.Valid {
+				r.blocked = officeBlockedChannel
+			}
+			if err := add(r); err != nil {
+				return nil, "", err
+			}
+			reachable = true
+		}
+		if class.MustRelay && !reachable {
+			gap = officeGapNoBot
+			if len(owners) == 0 {
+				gap = officeGapNoOwner
 			}
 		}
 	}
 	stream, err := w.h.Queries.ListOfficeStreamBindings(ctx, ev.WorkspaceID)
-	if err == nil {
-		for _, b := range stream {
-			add(b, "stream")
+	if err != nil {
+		return nil, "", err
+	}
+	for _, b := range stream {
+		if err := add(officeRecipient{binding: b, reason: "stream"}); err != nil {
+			return nil, "", err
 		}
 	}
-	return out
+	return out, gap, nil
 }
 
 func (w *OfficeEventWorker) ownAction(ev db.OfficeEvent, user pgtype.UUID) bool {
@@ -227,30 +286,53 @@ func (w *OfficeEventWorker) ownAction(ev db.OfficeEvent, user pgtype.UUID) bool 
 }
 
 // owners are the people a result belongs to: the chat's opener; the ticket's
-// creator, its assignee, and the opener of the chat it came from.
-func (w *OfficeEventWorker) owners(ctx context.Context, ev db.OfficeEvent) []pgtype.UUID {
+// creator, its assignee, and the opener of the chat it came from. A row that
+// no longer exists names nobody; any other failure is returned.
+func (w *OfficeEventWorker) owners(ctx context.Context, ev db.OfficeEvent) ([]pgtype.UUID, error) {
 	var out []pgtype.UUID
+	seen := map[pgtype.UUID]bool{}
+	push := func(u pgtype.UUID) {
+		if u.Valid && !seen[u] {
+			seen[u] = true
+			out = append(out, u)
+		}
+	}
+	chatOpener := func(id pgtype.UUID) error {
+		chat, err := w.h.Queries.GetChatSession(ctx, id)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil
+		}
+		if err == nil {
+			push(chat.CreatorID)
+		}
+		return err
+	}
 	if ev.ChatSessionID.Valid {
-		if chat, err := w.h.Queries.GetChatSession(ctx, ev.ChatSessionID); err == nil {
-			out = append(out, chat.CreatorID)
+		if err := chatOpener(ev.ChatSessionID); err != nil {
+			return nil, err
 		}
 	}
 	if ev.IssueID.Valid {
-		if issue, err := w.h.Queries.GetIssue(ctx, ev.IssueID); err == nil {
-			if issue.CreatorType == "member" {
-				out = append(out, issue.CreatorID)
-			}
-			if issue.AssigneeType.String == "member" && issue.AssigneeID.Valid {
-				out = append(out, issue.AssigneeID)
-			}
-			if issue.OriginChatSessionID.Valid {
-				if chat, err := w.h.Queries.GetChatSession(ctx, issue.OriginChatSessionID); err == nil {
-					out = append(out, chat.CreatorID)
-				}
+		issue, err := w.h.Queries.GetIssue(ctx, ev.IssueID)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return out, nil
+		}
+		if err != nil {
+			return nil, err
+		}
+		if issue.CreatorType == "member" {
+			push(issue.CreatorID)
+		}
+		if issue.AssigneeType.String == "member" && issue.AssigneeID.Valid {
+			push(issue.AssigneeID)
+		}
+		if issue.OriginChatSessionID.Valid {
+			if err := chatOpener(issue.OriginChatSessionID); err != nil {
+				return nil, err
 			}
 		}
 	}
-	return out
+	return out, nil
 }
 
 // canSee is the one access rule for push and pull: settings and members are
@@ -261,26 +343,48 @@ func (w *OfficeEventWorker) canSee(ctx context.Context, ev db.OfficeEvent, user 
 }
 
 func (h *Handler) officeEventVisible(ctx context.Context, ev db.OfficeEvent, user pgtype.UUID) bool {
+	ok, err := h.officeEventVisibleErr(ctx, ev, user)
+	return err == nil && ok
+}
+
+// officeEventVisibleErr tells "cannot see" (false) from "could not check"
+// (error), for callers that must not mistake one for the other.
+func (h *Handler) officeEventVisibleErr(ctx context.Context, ev db.OfficeEvent, user pgtype.UUID) (bool, error) {
+	gone := func(err error) (bool, error) {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return false, nil
+		}
+		return false, err
+	}
 	member, err := h.Queries.GetMemberByUserAndWorkspace(ctx, db.GetMemberByUserAndWorkspaceParams{UserID: user, WorkspaceID: ev.WorkspaceID})
 	if err != nil {
-		return false
+		return gone(err)
 	}
 	if ev.Family == "config" {
-		return member.Role == "owner" || member.Role == "admin"
+		return member.Role == "owner" || member.Role == "admin", nil
 	}
 	if ev.IssueID.Valid {
 		issue, err := h.Queries.GetIssue(ctx, ev.IssueID)
-		if err != nil || issue.WorkspaceID != ev.WorkspaceID {
-			return false
+		if err != nil {
+			return gone(err)
+		}
+		if issue.WorkspaceID != ev.WorkspaceID {
+			return false, nil
 		}
 		viewer, err := h.visibilityViewerForUser(ctx, ev.WorkspaceID, user)
-		return err == nil && viewer.canSeeIssue(issue)
+		if err != nil {
+			return gone(err)
+		}
+		return viewer.canSeeIssue(issue), nil
 	}
 	if ev.ChatSessionID.Valid {
 		chat, err := h.Queries.GetChatSession(ctx, ev.ChatSessionID)
-		return err == nil && chat.WorkspaceID == ev.WorkspaceID && chat.CreatorID == user
+		if err != nil {
+			return gone(err)
+		}
+		return chat.WorkspaceID == ev.WorkspaceID && chat.CreatorID == user, nil
 	}
-	return false
+	return false, nil
 }
 
 // DeliverDue pushes one batch of due deliveries. It returns how many it took.
@@ -364,7 +468,9 @@ func (w *OfficeEventWorker) push(ctx context.Context, d db.OfficeEventDelivery) 
 		}
 	case "failed":
 		w.block(d, fmt.Sprintf(officeBlockedRejected, detail), detail, true)
-	default: // retry, uncertain: the same event_id goes again; the Bot dedupes.
+	case "uncertain":
+		w.uncertain(d, detail)
+	default: // retry: it did not arrive; the same event_id goes again.
 		w.retry(d, detail)
 	}
 }
@@ -387,6 +493,21 @@ func (w *OfficeEventWorker) endpoint(ctx context.Context, bot pgtype.UUID) (*url
 		return nil, "", officeBlockedBadWebhook
 	}
 	return endpoint, secret.Key, ""
+}
+
+// uncertain: the request went out and the answer was lost, so the Bot may
+// already hold it. Not resent at once: a receipt that arrives within the
+// receipt timeout closes it; otherwise the next push says reconcile, and the
+// Bot answers from its inbox instead of acting on it again.
+func (w *OfficeEventWorker) uncertain(d db.OfficeEventDelivery, detail string) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	next := time.Now().Add(service.OfficeReceiptTimeout(int(d.Attempts)))
+	if err := w.h.Queries.MarkOfficeDeliveryUncertain(ctx, db.MarkOfficeDeliveryUncertainParams{
+		ID: d.ID, LastError: "uncertain: " + detail, NextAttemptAt: pgtype.Timestamptz{Time: next, Valid: true},
+	}); err != nil {
+		slog.Warn("office events: record uncertain failed", "error", err, "delivery", d.ID)
+	}
 }
 
 func (w *OfficeEventWorker) retry(d db.OfficeEventDelivery, detail string) {

@@ -1985,6 +1985,7 @@ type OfficeEvent struct {
 	MustRelay        bool               `json:"must_relay"`
 	PendingApproval  bool               `json:"pending_approval"`
 	BusinessKey      string             `json:"business_key"`
+	RecipientGap     string             `json:"recipient_gap"`
 }
 
 type OfficeEventDelivery struct {
@@ -2010,6 +2011,7 @@ type OfficeEventDelivery struct {
 	HandledReason string             `json:"handled_reason"`
 	BlockedReason string             `json:"blocked_reason"`
 	FallbackAt    pgtype.Timestamptz `json:"fallback_at"`
+	UncertainAt   pgtype.Timestamptz `json:"uncertain_at"`
 	Artifacts     []byte             `json:"artifacts"`
 	CreatedAt     pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`

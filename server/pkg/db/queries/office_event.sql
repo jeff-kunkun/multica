@@ -23,13 +23,17 @@ UPDATE office_event SET
     summary = @summary,
     must_relay = @must_relay,
     pending_approval = @pending_approval,
-    business_key = CASE WHEN business_key = '' THEN @business_key ELSE business_key END
+    business_key = CASE WHEN business_key = '' THEN @business_key ELSE business_key END,
+    recipient_gap = @recipient_gap
 WHERE id = @id AND stream_seq IS NULL;
 
 -- name: CreateOfficeEventDelivery :exec
+-- status is pending, or blocked (with its reason) when the owner's Bot is
+-- connected but cannot take it yet: the row is the durable record of the gap,
+-- raises the in-app fallback, and comes back with a retry once fixed.
 INSERT INTO office_event_delivery (
-    event_id, workspace_id, bot_id, binding_id, target_user_id, reason, must_relay
-) VALUES ($1, $2, $3, $4, $5, $6, $7)
+    event_id, workspace_id, bot_id, binding_id, target_user_id, reason, must_relay, status, blocked_reason
+) VALUES (@event_id, @workspace_id, @bot_id, @binding_id, @target_user_id, @reason, @must_relay, @status, @blocked_reason)
 ON CONFLICT (event_id, bot_id) DO UPDATE SET
     must_relay = office_event_delivery.must_relay OR EXCLUDED.must_relay,
     reason = CASE WHEN EXCLUDED.reason = 'owner' THEN 'owner' ELSE office_event_delivery.reason END;
@@ -82,6 +86,22 @@ UPDATE office_event_delivery SET
     updated_at = now()
 WHERE id = @id AND status = 'sending';
 
+-- name: MarkOfficeDeliveryUncertain :exec
+-- The request went out but the answer was lost: the Bot may already have it.
+-- Treated as sent, not failed: the next attempt waits the receipt timeout (a
+-- receipt that arrives meanwhile closes it) and goes out marked reconcile,
+-- so the Bot answers from its inbox instead of acting on it twice.
+UPDATE office_event_delivery SET
+    status = 'sent',
+    attempts = attempts + 1,
+    last_attempt_at = now(),
+    sent_at = COALESCE(sent_at, now()),
+    uncertain_at = now(),
+    last_error = @last_error,
+    next_attempt_at = @next_attempt_at,
+    updated_at = now()
+WHERE id = @id AND status = 'sending';
+
 -- name: MarkOfficeDeliveryRetry :exec
 UPDATE office_event_delivery SET
     status = CASE WHEN sent_at IS NULL THEN 'pending' ELSE 'sent' END,
@@ -120,7 +140,7 @@ UPDATE office_event_delivery SET
     relayed_at = CASE WHEN @stage::text = 'relayed' THEN COALESCE(relayed_at, now()) ELSE relayed_at END,
     relay_channel = CASE WHEN @relay_channel::text <> '' THEN @relay_channel::text ELSE relay_channel END,
     relay_ref = CASE WHEN @relay_ref::text <> '' THEN @relay_ref::text ELSE relay_ref END,
-    relay_error = CASE WHEN @stage::text = 'relay_failed' THEN @relay_error::text
+    relay_error = CASE WHEN @stage::text = 'relay_failed' AND status <> 'relayed' THEN @relay_error::text
                        WHEN @stage::text = 'relayed' THEN '' ELSE relay_error END,
     handled_reason = CASE WHEN @stage::text = 'handled' THEN @handled_reason::text ELSE handled_reason END,
     blocked_reason = CASE WHEN status = 'blocked' AND @stage::text <> 'relay_failed' THEN '' ELSE blocked_reason END,
@@ -180,19 +200,24 @@ WHERE b.workspace_id = $1
   AND 'owner_visible_all' = ANY(b.activity_scope);
 
 -- name: GetOfficeBindingForUser :one
+-- The person's current Bot binding, verified or not: an unverified one is a
+-- gap to record, not a reason to forget the result. No row = the person has
+-- no Bot (or disconnected it) and reads results in the app.
 SELECT b.* FROM member_bot_binding b
 WHERE b.workspace_id = $1 AND b.user_id = $2
-  AND b.revoked_at IS NULL AND b.verified_at IS NOT NULL;
+  AND b.revoked_at IS NULL;
 
 -- name: ListAttachmentsForOfficeEvent :many
 -- The files that belong to an event: the one it names, the files on the chat
--- message or comment it names, and the files a run uploaded.
+-- message or comment it names, the files a run uploaded, and for a ticket
+-- that finished or changed hands, every file on the ticket.
 SELECT * FROM attachment a
 WHERE a.workspace_id = @workspace_id AND (
        (sqlc.narg(attachment_id)::uuid IS NOT NULL AND a.id = sqlc.narg(attachment_id)::uuid)
     OR (sqlc.narg(chat_message_id)::uuid IS NOT NULL AND a.chat_message_id = sqlc.narg(chat_message_id)::uuid)
     OR (sqlc.narg(comment_id)::uuid IS NOT NULL AND a.comment_id = sqlc.narg(comment_id)::uuid)
     OR (sqlc.narg(task_id)::uuid IS NOT NULL AND a.task_id = sqlc.narg(task_id)::uuid)
+    OR (sqlc.narg(issue_id)::uuid IS NOT NULL AND a.issue_id = sqlc.narg(issue_id)::uuid)
 )
 ORDER BY a.created_at, a.id
 LIMIT 200;

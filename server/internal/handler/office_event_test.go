@@ -435,3 +435,215 @@ func TestOfficeEventPoolStampsTheActorPerRequest(t *testing.T) {
 		t.Fatalf("second write blamed on %s/%s", ev.actorType, ev.actorID)
 	}
 }
+
+// Review hold P1-1: an owner whose Bot is connected but not verified is a
+// recorded gap (blocked row, inbox fallback, retry once verified), and a
+// must-relay result nobody can be reached for says so on the event.
+func TestOfficeEventUnverifiedOwnerBotIsARecordedGapNotALoss(t *testing.T) {
+	f := newOfficeFixture(t)
+	dbfx.Exec(t, `UPDATE member_bot_binding SET verified_at=NULL WHERE id=$1`, f.binding)
+	issue := ownedIssue(t, "Ship the summary")
+	agent := dbfx.Agent(t, "gap agent", testRuntimeID)
+	asActor(t, dbactor.Actor{Type: "agent", ID: agent}, `UPDATE issue SET status='in_review' WHERE id=$1`, issue)
+	ev := latestOfficeEvent(t, `issue_id=$1 AND event_type='issue.status_changed'`, issue)
+	f.seal(t)
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM inbox_item WHERE details->>'office_event_id'=$1`, ev.eventID)
+	})
+
+	status, reason, blocked, _ := deliveryStatus(t, ev.eventID, uuidToString(f.bot.ID))
+	if status != "blocked" || reason != "owner" || blocked != officeBlockedChannel {
+		t.Fatalf("unverified owner Bot: %q/%q/%q, want a blocked owner row", status, reason, blocked)
+	}
+	f.worker.Fallback(context.Background())
+	if n := dbfx.Count(t, `SELECT count(*) FROM inbox_item WHERE recipient_id=$1 AND details->>'office_event_id'=$2`, testUserID, ev.eventID); n != 1 {
+		t.Fatalf("inbox fallback for the gap = %d, want 1", n)
+	}
+
+	dbfx.Exec(t, `UPDATE member_bot_binding SET verified_at=now() WHERE id=$1`, f.binding)
+	if code, out := f.call(t, "POST", f.botPath()+"/office-deliveries/retry", map[string]any{"event_id": ev.eventID}); code != 200 || out["requeued"].(float64) != 1 {
+		t.Fatalf("retry %d %v", code, out)
+	}
+	f.worker.DeliverDue(context.Background())
+	if status, _, _, _ := deliveryStatus(t, ev.eventID, uuidToString(f.bot.ID)); status != "sent" || f.calls.Load() != 1 {
+		t.Fatalf("after verifying: %s, calls=%d", status, f.calls.Load())
+	}
+}
+
+func TestOfficeEventMustRelayWithNobodyToReachRecordsTheGap(t *testing.T) {
+	f := newOfficeFixture(t)
+	agent := dbfx.Agent(t, "orphan agent", testRuntimeID)
+	orphan := dbfx.Insert(t, "issue", testutil.Cols{
+		"workspace_id": testWorkspaceID, "title": "Nobody's ticket", "status": "in_progress", "priority": "none",
+		"creator_type": "agent", "creator_id": agent, "number": nextTestIssueNumber(t),
+	})
+	peer := summonSecondMember(t)
+	peers := dbfx.Insert(t, "issue", testutil.Cols{
+		"workspace_id": testWorkspaceID, "title": "Peer without a Bot", "status": "in_progress", "priority": "none",
+		"creator_type": "member", "creator_id": peer, "number": nextTestIssueNumber(t),
+	})
+	asActor(t, dbactor.Actor{Type: "agent", ID: agent}, `UPDATE issue SET status='done' WHERE id = ANY($1::uuid[])`, []string{orphan, peers})
+	f.seal(t)
+	gap := func(issue string) string {
+		var g string
+		dbfx.QueryRow(t, `SELECT recipient_gap FROM office_event WHERE issue_id=$1 AND event_type='issue.status_changed'`, issue).Scan(&g)
+		return g
+	}
+	if g := gap(orphan); g != officeGapNoOwner {
+		t.Fatalf("ownerless gap = %q", g)
+	}
+	if g := gap(peers); g != officeGapNoBot {
+		t.Fatalf("owner without a Bot gap = %q", g)
+	}
+	ev := latestOfficeEvent(t, `issue_id=$1 AND event_type='issue.status_changed'`, orphan)
+	code, out := f.call(t, "GET", "/office-events/"+ev.eventID, nil)
+	if out["recipient_gap"] != officeGapNoOwner {
+		t.Fatalf("pull does not show the gap: %d %v", code, out)
+	}
+}
+
+// Review hold P1-2: "relayed" needs proof of where, files must belong to the
+// event, and a late receipt never takes back what was confirmed.
+func TestOfficeEventReceiptsNeedProofAndNeverGoBack(t *testing.T) {
+	f := newOfficeFixture(t)
+	issue := ownedIssue(t, "Deliver the deck")
+	agent := dbfx.Agent(t, "deck agent", testRuntimeID)
+	att := dbfx.Insert(t, "attachment", testutil.Cols{"workspace_id": testWorkspaceID, "issue_id": issue,
+		"uploader_type": "agent", "uploader_id": agent, "filename": "deck.pdf", "url": "fixture/deck.pdf",
+		"content_type": "application/pdf", "size_bytes": 7, "sha256": strings.Repeat("c", 64)})
+	other := ownedIssue(t, "Unrelated")
+	stranger := dbfx.Insert(t, "attachment", testutil.Cols{"workspace_id": testWorkspaceID, "issue_id": other,
+		"uploader_type": "member", "uploader_id": testUserID, "filename": "x.png", "url": "fixture/x.png",
+		"content_type": "image/png", "size_bytes": 1})
+	f.seal(t)
+	ev := latestOfficeEvent(t, `attachment_id=$1`, att)
+	receipt := f.botPath() + "/office-events/" + ev.eventID + "/receipt"
+
+	for name, body := range map[string]map[string]any{
+		"relayed without anything": {"stage": "relayed"},
+		"relayed without ref":      {"stage": "relayed", "channel": "telegram"},
+		"relay_failed without why": {"stage": "relay_failed"},
+		"file of another event": {"stage": "received", "artifacts": []map[string]any{
+			{"id": stranger, "status": "sent", "ref": "tg:9"}}},
+		"sent file without ref": {"stage": "received", "artifacts": []map[string]any{{"id": att, "status": "sent"}}},
+		"unknown file status":   {"stage": "received", "artifacts": []map[string]any{{"id": att, "status": "done"}}},
+	} {
+		if code, out := f.call(t, "POST", receipt, body); code != http.StatusBadRequest {
+			t.Fatalf("%s: %d %v, want 400", name, code, out)
+		}
+	}
+	if status, _, _, _ := deliveryStatus(t, ev.eventID, uuidToString(f.bot.ID)); status != "pending" {
+		t.Fatalf("a rejected receipt moved the row to %s", status)
+	}
+
+	code, out := f.call(t, "POST", receipt, map[string]any{"stage": "relayed", "channel": "telegram", "message_ref": "tg:1",
+		"artifacts": []map[string]any{{"id": att, "status": "sent", "ref": "tg:2"}}})
+	if code != 200 || out["status"] != "relayed" {
+		t.Fatalf("relayed with proof %d %v", code, out)
+	}
+	// Late, contradicting receipts change nothing already confirmed.
+	code, out = f.call(t, "POST", receipt, map[string]any{"stage": "relay_failed", "error": "late",
+		"artifacts": []map[string]any{{"id": att, "status": "failed", "error": "late"}}})
+	if code != 200 || out["status"] != "relayed" || out["relay_error"] != "" {
+		t.Fatalf("late relay_failed moved a relayed row: %d %v", code, out)
+	}
+	if file := out["artifacts"].(map[string]any)[att].(map[string]any); file["status"] != "sent" || file["ref"] != "tg:2" {
+		t.Fatalf("late file receipt took back a sent file: %v", file)
+	}
+}
+
+// Review hold P1-3: an answer lost after the request went out is not resent
+// at once; the next push asks the Bot to reconcile from its inbox.
+func TestOfficeEventUncertainPushWaitsAndThenAsksToReconcile(t *testing.T) {
+	f := newOfficeFixture(t)
+	issue := ownedIssue(t, "Lost answer")
+	asActor(t, dbactor.Actor{Type: "member", ID: summonSecondMember(t)}, `UPDATE issue SET status='in_review' WHERE id=$1`, issue)
+	ev := latestOfficeEvent(t, `issue_id=$1`, issue)
+	f.seal(t)
+
+	f.response.Store(500)
+	f.worker.DeliverDue(context.Background())
+	var uncertain bool
+	var next time.Time
+	dbfx.QueryRow(t, `SELECT uncertain_at IS NOT NULL, next_attempt_at FROM office_event_delivery WHERE event_id=$1`, ev.eventID).Scan(&uncertain, &next)
+	if status, _, _, _ := deliveryStatus(t, ev.eventID, uuidToString(f.bot.ID)); status != "sent" || !uncertain {
+		t.Fatalf("after a lost answer: %s uncertain=%v, want sent + uncertain", status, uncertain)
+	}
+	if time.Until(next) < time.Minute {
+		t.Fatalf("an uncertain push is retried at once (next in %s)", time.Until(next))
+	}
+	f.worker.DeliverDue(context.Background())
+	if f.calls.Load() != 1 {
+		t.Fatalf("resent blindly: %d calls", f.calls.Load())
+	}
+
+	f.response.Store(200)
+	dbfx.Exec(t, `UPDATE office_event_delivery SET next_attempt_at=now() WHERE event_id=$1`, ev.eventID)
+	f.worker.DeliverDue(context.Background())
+	var pushed map[string]any
+	_ = json.Unmarshal(f.lastBody.Load().([]byte), &pushed)
+	d := pushed["delivery"].(map[string]any)
+	if pushed["event_id"] != ev.eventID || d["reconcile"] != true || d["redelivery"] != true {
+		t.Fatalf("follow-up push %v", d)
+	}
+}
+
+// Review hold P1-4: files that land straight on a ticket (most agent
+// deliverables), files bound later, and new versions under the same name are
+// each one event; a finished ticket carries its files.
+func TestOfficeEventTicketFilesLateBindingAndNewVersions(t *testing.T) {
+	f := newOfficeFixture(t)
+	issue := ownedIssue(t, "Release notes")
+	agent := dbfx.Agent(t, "notes agent", testRuntimeID)
+	file := func(cols testutil.Cols) string {
+		base := testutil.Cols{"workspace_id": testWorkspaceID, "uploader_type": "agent", "uploader_id": agent,
+			"filename": "notes.html", "url": "fixture/notes.html", "content_type": "text/html", "size_bytes": 5,
+			"sha256": strings.Repeat("d", 64)}
+		for k, v := range cols {
+			base[k] = v
+		}
+		return dbfx.Insert(t, "attachment", base)
+	}
+	events := func(att string) int {
+		return dbfx.Count(t, `SELECT count(*) FROM office_event WHERE attachment_id=$1 AND event_type='artifact.attached'`, att)
+	}
+
+	direct := file(testutil.Cols{"issue_id": issue})
+	if events(direct) != 1 {
+		t.Fatalf("a file uploaded straight to the ticket made %d events", events(direct))
+	}
+	late := file(testutil.Cols{})
+	if events(late) != 0 {
+		t.Fatal("a file with no place yet made an event")
+	}
+	dbfx.Exec(t, `UPDATE attachment SET issue_id=$1 WHERE id=$2`, issue, late)
+	if events(late) != 1 {
+		t.Fatalf("binding a file to the ticket later made %d events", events(late))
+	}
+	comment := dbfx.Comment(t, issue, "attached")
+	dbfx.Exec(t, `UPDATE attachment SET comment_id=$1 WHERE id=$2`, comment, late)
+	if events(late) != 1 {
+		t.Fatalf("moving an announced file into a comment announced it again (%d)", events(late))
+	}
+	again := file(testutil.Cols{"issue_id": issue})
+	if events(again) != 1 {
+		t.Fatal("a new version under the same name made no event")
+	}
+	f.seal(t)
+	ev := latestOfficeEvent(t, `attachment_id=$1`, direct)
+	if ev.meaning != service.OfficeMeaningArtifact || !ev.mustRelay {
+		t.Fatalf("ticket file sealed as %+v", ev)
+	}
+
+	asActor(t, dbactor.Actor{Type: "agent", ID: agent}, `UPDATE issue SET status='done' WHERE id=$1`, issue)
+	f.seal(t)
+	done := latestOfficeEvent(t, `issue_id=$1 AND event_type='issue.status_changed'`, issue)
+	_, out := f.call(t, "GET", "/office-events/"+done.eventID, nil)
+	got := map[string]bool{}
+	for _, a := range out["artifacts"].([]any) {
+		got[a.(map[string]any)["id"].(string)] = true
+	}
+	if !got[direct] || !got[late] || !got[again] {
+		t.Fatalf("finished ticket catalogue %v misses its files", out["artifacts"])
+	}
+}

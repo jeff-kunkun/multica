@@ -90,14 +90,19 @@ var eventsReceiptCmd = &cobra.Command{
 receipt arrives the same event_id is pushed again with backoff.
 
   received      stored durably on the Bot side
-  relayed       told the person (--channel, --ref name where)
+  relayed       told the person; --channel and --ref (the message id there) are required
   handled       looked, nothing to tell (--reason); refused for must_relay events
-  relay_failed  could not tell the person (--error); the app shows it to them
+  relay_failed  could not tell the person (--error, required); the app shows it to them
 
-Repeats are safe. --bot is the delivery.bot_id from the push.`,
+Per file: --file <attachment-id>=sent:<ref> (where it went), =failed:<error> or
+=skipped. Only files of this event; a file once sent stays sent.
+
+Repeats are safe. --bot is the delivery.bot_id from the push. When the push
+says delivery.reconcile, the previous one may already be in your inbox: send
+the receipt you already have instead of acting twice.`,
 	Example: `  multica events receipt <event-id> --bot <bot-id> --stage received
   multica events receipt <event-id> --bot <bot-id> --stage relayed --channel telegram --ref msg:4411
-  multica events receipt <event-id> --bot <bot-id> --stage relayed --file <attachment-id>=sent`,
+  multica events receipt <event-id> --bot <bot-id> --stage relayed --channel telegram --ref msg:4411 --file <attachment-id>=sent:msg:4412`,
 	Args:        exactArgs(1),
 	RunE:        runEventsReceipt,
 	Annotations: map[string]string{annotationAccess: "write", annotationBotKey: "yes"},
@@ -274,11 +279,23 @@ func runEventsReceipt(cmd *cobra.Command, args []string) error {
 	if len(files) > 0 {
 		list := make([]map[string]string, 0, len(files))
 		for _, f := range files {
-			id, status, ok := strings.Cut(f, "=")
-			if !ok || (status != "sent" && status != "failed" && status != "skipped") {
-				return fmt.Errorf("--file takes <attachment-id>=sent|failed|skipped, got %q", f)
+			id, outcome, ok := strings.Cut(f, "=")
+			status, detail, _ := strings.Cut(outcome, ":")
+			entry := map[string]string{"id": id, "status": status}
+			switch {
+			case !ok:
+			case status == "sent" && detail != "":
+				entry["ref"] = detail
+			case status == "failed" && detail != "":
+				entry["error"] = detail
+			case status == "skipped":
+			default:
+				ok = false
 			}
-			list = append(list, map[string]string{"id": id, "status": status})
+			if !ok {
+				return fmt.Errorf("--file takes <attachment-id>=sent:<ref>, =failed:<error> or =skipped, got %q", f)
+			}
+			list = append(list, entry)
 		}
 		body["artifacts"] = list
 	}
@@ -386,7 +403,7 @@ func init() {
 	eventsReceiptCmd.Flags().String("ref", "", "Message id on that channel")
 	eventsReceiptCmd.Flags().String("reason", "", "Why nothing needed telling (handled)")
 	eventsReceiptCmd.Flags().String("error", "", "Why the person could not be told (relay_failed)")
-	eventsReceiptCmd.Flags().StringArray("file", nil, "Per-file outcome <attachment-id>=sent|failed|skipped (repeatable)")
+	eventsReceiptCmd.Flags().StringArray("file", nil, "Per-file outcome <attachment-id>=sent:<ref>|failed:<error>|skipped (repeatable)")
 	_ = eventsReceiptCmd.MarkFlagRequired("bot")
 	_ = eventsReceiptCmd.MarkFlagRequired("stage")
 

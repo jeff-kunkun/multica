@@ -24,7 +24,7 @@ workspace teardown.
 | `chat` | `chat.replied` | a message an agent or Bot posted in a chat |
 | `chat` or `issue` | `run.completed`, `run.failed`, `run.cancelled` | an agent run ended (family follows where it ran) |
 | `issue` | `issue.status_changed` | ticket status moved |
-| `artifact` | `artifact.attached` | a file was attached to a comment or chat message |
+| `artifact` | `artifact.attached` | a file landed on a ticket, a comment or a chat message: on upload or bound later; once per file, so a new version under the same name is a new event |
 | `config` | `config.<table>.<insert\|update\|delete>` | workspace settings, members, agents, squads, projects, Bot bindings and webhooks, tokens, MCP servers, skills, statuses, properties, runtime profiles, shares, links, GitHub installations |
 
 The actor comes from the request that made the write (person, agent, Bot key
@@ -85,6 +85,11 @@ It grants nothing: do not deploy on it.
 
 ### Files
 
+A chat reply lists the files on its message, a run the files it uploaded, a
+file event its own file, and a ticket that finished, was handed over or waits
+for release approval every file on the ticket. Push and pull build the list
+the same way.
+
 Each entry in `artifacts`: `id`, `filename`, `content_type`, `size`, `sha256`,
 `status` (`ready`, `unverifiable` when no checksum was recorded, `deleted`),
 `download_url` (needs the same credentials as the API; never anonymous),
@@ -102,6 +107,13 @@ Each entry in `artifacts`: `id`, `filename`, `content_type`, `size`, `sha256`,
   is blocked, never sent.
 - Nobody is told about their own action. An agent's result is not the
   person's own action, even when their Bot started the run.
+- An owner whose Bot is connected but not verified still gets a row, blocked
+  with the reason: it reaches their inbox and goes out with a retry once the
+  Bot is verified. An owner with no Bot reads results in the app.
+- A must-relay result nobody could be reached for carries `recipient_gap`
+  (no owner at all, or no owner with a Bot).
+- If any of these lookups fails, the event is not sealed; it is tried again,
+  never sealed with recipients missing.
 
 ## Push and receipts
 
@@ -113,6 +125,16 @@ The push is a webhook POST to the Bot's wake URL (same signing as wake), body
 sent again: 2, 5, 15, then every 30 minutes after a 200; 15 s, 1, 3, 10, then
 every 30 minutes after a failure. It never expires. Dedupe on `event_id`.
 
+When a request went out and its answer was lost (timeout after sending, some
+5xx), the Bot may already have it. That is not treated as a failure: the next
+push waits like after a 200, and carries `delivery.reconcile: true`, so the Bot
+looks the `event_id` up in its inbox, re-sends the receipt it has, and does
+only what is still missing. `uncertain_at` on the delivery records it.
+
+The Bot is expected to store the event in its own durable inbox before it
+answers `received`, and after a restart to list its open deliveries and
+finish them from that inbox.
+
 ```text
 pending → sending → sent (200) → received → relayed | handled
                          ↘ blocked (reason, attempts, last error, next attempt)
@@ -123,12 +145,14 @@ pending → sending → sent (200) → received → relayed | handled
 | `stage` | Means |
 |---|---|
 | `received` | the Bot has it; stops resending |
-| `relayed` | the Bot told the person (`channel`, `message_ref`) |
-| `relay_failed` | could not tell them (`error`); counts as received |
+| `relayed` | the Bot told the person. `channel` and `message_ref` required (400 `relay_proof_required`). The server records the Bot's claim; it cannot see the chat app |
+| `relay_failed` | could not tell them (`error`, required); counts as received. Never undoes a `relayed` |
 | `handled` | nobody needs telling (`reason`). **Refused with 409 `must_relay`** on a must-relay event that was not relayed first |
 
 `artifacts: [{id, status: sent|failed|skipped, ref, error}]` records each file
-separately.
+separately: only files in this event's `artifacts`, `sent` needs `ref`,
+`failed` needs `error` (else 400 `invalid_artifact_receipt`). A file once
+`sent` stays sent; a late or repeated receipt cannot take it back.
 
 A must-relay result still not `relayed` or `handled` five minutes after it was
 queued, or blocked, goes to the person's inbox once.
