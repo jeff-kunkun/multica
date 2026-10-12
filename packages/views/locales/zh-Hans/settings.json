@@ -1939,6 +1939,8 @@
     "usage_priority_description": "同档内先派用量充足的席位",
     "allow_upshift_label": "允许上调一档",
     "allow_upshift_description": "本档全部紧张时，改派上一档用量充足的席位",
+    "strongest_gate_label": "最强档只派非她不可的活",
+    "strongest_gate_description": "额度不紧张且强档、中档都没人能接时才派最强档，并写明原因",
     "continuation_label": "接着做",
     "continuation_description_on": "已生效：上一阶段、父票或同批票的执行人档位够、在线、有额度时，后续票直接派给这个席位。",
     "continuation_description_shadow": "影子运行：不改实际选择，只在路由评论里写「按新规则会选谁」。打开后才真的生效。",

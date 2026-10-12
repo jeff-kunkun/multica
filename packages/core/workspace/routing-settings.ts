@@ -107,6 +107,13 @@ export interface RoutingSettings {
    */
   allow_upshift: boolean;
   /**
+   * 「最强档门槛」(DENE-1834): the strongest tier takes a ticket only when its
+   * seat is not tight and no strong or medium seat can take the work; the
+   * assignment comment says why. Default on; the server reads a missing key
+   * as on.
+   */
+  strongest_gate: boolean;
+  /**
    * 「接着做」(DENE-1202): a ticket continuing a previous stage, its parent,
    * or its batch goes back to that work's executor when the seat can take it.
    * Default off, which is shadow mode — routing keeps its own pick and the
@@ -189,6 +196,7 @@ export const DEFAULT_ROUTING_SETTINGS: RoutingSettings = {
   policy_prompt: "",
   usage_priority: true,
   allow_upshift: false,
+  strongest_gate: true,
   prefer_continuation: false,
   prefer_idle: false,
   learn_from_outcomes: false,
@@ -243,6 +251,7 @@ export function parseRoutingSettings(
     policy_prompt: typeof block.policy_prompt === "string" ? block.policy_prompt : "",
     usage_priority: block.usage_priority !== false,
     allow_upshift: block.allow_upshift === true,
+    strongest_gate: block.strongest_gate !== false,
     prefer_continuation: block.prefer_continuation === true,
     prefer_idle: block.prefer_idle === true,
     learn_from_outcomes: block.learn_from_outcomes === true,
@@ -390,6 +399,7 @@ export function withRoutingSettings(
     policy_prompt: (next.policy_prompt ?? "").trim(),
     usage_priority: next.usage_priority,
     allow_upshift: next.allow_upshift,
+    strongest_gate: next.strongest_gate,
     prefer_continuation: next.prefer_continuation,
     prefer_idle: next.prefer_idle,
     learn_from_outcomes: next.learn_from_outcomes,

@@ -291,6 +291,7 @@ describe("RoutingTab", () => {
       policy_prompt: "",
       usage_priority: true,
       allow_upshift: false,
+      strongest_gate: true,
       prefer_continuation: false,
       prefer_idle: false,
       learn_from_outcomes: false,
@@ -660,6 +661,21 @@ describe("RoutingTab seat order switches", () => {
     ];
     expect(body.settings.routing.usage_priority).toBe(true);
     expect(body.settings.routing.allow_upshift).toBe(true);
+  });
+
+  // DENE-1834: 最强档门槛 is on by default and switches off into the routing block.
+  it("writes the strongest-tier gate into the routing block", async () => {
+    workspace.current.settings = { routing: { enabled: true, model: "gpt-5.6-luna" } };
+    render();
+    const gate = screen.getByRole("switch", { name: "Strongest tier only when nobody else can" });
+    expect(gate).toHaveAttribute("data-checked");
+    await userEvent.click(gate);
+    await waitFor(() => expect(updateWorkspace).toHaveBeenCalled());
+    const [, body] = updateWorkspace.mock.calls.at(-1) as [
+      string,
+      { settings: { routing: Record<string, unknown> } },
+    ];
+    expect(body.settings.routing.strongest_gate).toBe(false);
   });
 
   // DENE-1202: 接着做 defaults to shadow mode, and the row says which mode it is.

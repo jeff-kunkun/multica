@@ -50,7 +50,9 @@ type Pick struct {
 	JudgedTier string
 	Declined   string
 	Candidates []PickCandidate
-	Trace      *Trace
+	// StrongestGate is what the 最强档门槛 did (DENE-1834).
+	StrongestGate StrongestGate
+	Trace         *Trace
 	// Dispatch is what the 分工规则 did (DENE-1834).
 	Dispatch DispatchMatch
 }
@@ -137,6 +139,11 @@ func (r *Router) PickSeat(ctx context.Context, workspaceID string, req PickReque
 		pick.Tier = verdict.ExecutorTier
 	}
 	seat, source, why := r.pickExecutor(eligible, Seat{}, false, verdict, settings.Threshold())
+	if settings.StrongestGateOn() {
+		var gate StrongestGate
+		seat, gate = ladder.gateStrongest(seat, candidates, eligible, pickRoster, facts.Seats)
+		pick.StrongestGate = gate
+	}
 	tierSource := source
 	load, err := r.load(ctx, workspaceID, settings, ladder, pickRoster, seat)
 	if err != nil {
@@ -168,6 +175,9 @@ func (r *Router) PickSeat(ctx context.Context, workspaceID string, req PickReque
 	reason, detail := executorPickReason(issue, true, &seat, source, d.RaisedFrom != "")
 	if source == pickFallback && why != "" {
 		detail += "（" + why + "）"
+	}
+	if line := pick.StrongestGate.Line(ladder); line != "" {
+		detail += "；" + line
 	}
 	if pick.Trace != nil {
 		pick.Trace.Seat = seat.Name

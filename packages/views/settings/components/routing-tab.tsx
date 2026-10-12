@@ -126,6 +126,7 @@ export function RoutingTab() {
   const [policyPrompt, setPolicyPrompt] = useState(saved.policy_prompt ?? "");
   const [usagePriority, setUsagePriority] = useState(saved.usage_priority);
   const [allowUpshift, setAllowUpshift] = useState(saved.allow_upshift);
+  const [strongestGate, setStrongestGate] = useState(saved.strongest_gate);
   const [preferContinuation, setPreferContinuation] = useState(saved.prefer_continuation);
   const [preferIdle, setPreferIdle] = useState(saved.prefer_idle);
   const [learnFromOutcomes, setLearnFromOutcomes] = useState(saved.learn_from_outcomes);
@@ -162,6 +163,7 @@ export function RoutingTab() {
     setPolicyPrompt(next.policy_prompt ?? "");
     setUsagePriority(next.usage_priority);
     setAllowUpshift(next.allow_upshift);
+    setStrongestGate(next.strongest_gate);
     setPreferContinuation(next.prefer_continuation);
     setPreferIdle(next.prefer_idle);
     setLearnFromOutcomes(next.learn_from_outcomes);
@@ -195,6 +197,7 @@ export function RoutingTab() {
       policy_prompt: policyPrompt,
       usage_priority: usagePriority,
       allow_upshift: allowUpshift,
+      strongest_gate: strongestGate,
       prefer_continuation: preferContinuation,
       prefer_idle: preferIdle,
       learn_from_outcomes: learnFromOutcomes,
@@ -218,6 +221,7 @@ export function RoutingTab() {
       policyPrompt,
       usagePriority,
       allowUpshift,
+      strongestGate,
       preferContinuation,
       preferIdle,
       learnFromOutcomes,
@@ -288,6 +292,7 @@ export function RoutingTab() {
       (a.policy_prompt ?? "").trim() === (b.policy_prompt ?? "").trim() &&
       a.usage_priority === b.usage_priority &&
       a.allow_upshift === b.allow_upshift &&
+      a.strongest_gate === b.strongest_gate &&
       a.prefer_continuation === b.prefer_continuation &&
       a.prefer_idle === b.prefer_idle &&
       a.learn_from_outcomes === b.learn_from_outcomes &&
@@ -495,6 +500,18 @@ export function RoutingTab() {
               disabled={!canManage || !enabled || !usagePriority}
               onCheckedChange={setAllowUpshift}
               aria-label={t(($) => $.routing.allow_upshift_label)}
+            />
+          </SettingsRow>
+
+          <SettingsRow
+            label={t(($) => $.routing.strongest_gate_label)}
+            description={t(($) => $.routing.strongest_gate_description)}
+          >
+            <Switch
+              checked={strongestGate}
+              disabled={!canManage || !enabled}
+              onCheckedChange={setStrongestGate}
+              aria-label={t(($) => $.routing.strongest_gate_label)}
             />
           </SettingsRow>
 
