@@ -308,6 +308,8 @@ func (r *Router) routeTodo(ctx context.Context, workspaceID string, settings Set
 	}
 	roster = ForProject(roster, issue.ProjectID)
 	candidates := ladder.assignmentCandidates(scene, roster)
+	// Coordinator requests in the body become Bot mentions in PostComment.
+	// The deliver mention flag targets a human creator/owner, not Grok.
 	if len(candidates) == 0 {
 		return r.deliver(ctx, workspaceID, issue, KindAssignment, "没有可自动选派的席位；未派出，请 Grok 协调。", false, Outcome{State: StateEnabled, Action: ActionAdvised, Reason: "no routable seat"})
 	}

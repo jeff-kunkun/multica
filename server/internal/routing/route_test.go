@@ -494,7 +494,7 @@ func TestPickAcceptanceSeatChangesFamily(t *testing.T) {
 	if ref.ID != "a-goku-g" {
 		t.Fatalf("reviewer = %+v, want 孙悟天 or 特兰克斯", ref)
 	}
-	if !strings.Contains(why, "相邻档") {
+	if !strings.Contains(why, "同档另一位") {
 		t.Fatalf("why = %q, want the cross-family rule", why)
 	}
 
@@ -1276,7 +1276,7 @@ func TestStrongExecutorFallbackReviewerUsesAnotherModelOnTheSameTier(t *testing.
 		t.Fatalf("reviewer = %q, want 特兰克斯游戏 — the other model family on the strong rung", out.ReviewerWritten.Label())
 	}
 	body := store.comments[KindAssignment][0]
-	if !strings.Contains(body, "相邻档") {
+	if !strings.Contains(body, "同档另一位") {
 		t.Errorf("comment does not say the reviewer stayed on the rung:\n%s", body)
 	}
 }

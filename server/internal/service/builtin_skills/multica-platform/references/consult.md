@@ -23,8 +23,7 @@ your working copy — so paste the code, diff or error that matters.
 
 ## Who answers
 
-The unified `route(ticket, consult)` selector targets one tier above the executor,
-with the same direction and soft family preferences used for dispatch and review.
+The unified `route(ticket, consult)` selector targets one tier above weak/medium executors. Strong executors first try another strong peer (prefer another model family), then an ample-quota strongest seat. It uses the same direction and soft family preferences used for dispatch and review.
 It tries an adjacent tier when needed (above before below), never strongest as
 a fallback. Never you. The seat's daemon must be online and new enough to run consults.
 
