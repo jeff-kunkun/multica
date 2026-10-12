@@ -208,7 +208,7 @@ export function TaskStatusPill({
   );
 
   const { t } = useT("chat");
-  const reason = status === "queued" ? pendingTask.queue_reason : undefined;
+  const reason = status === "queued" && pendingTask.queue_reason?.code === "machine_capacity" ? pendingTask.queue_reason : undefined;
   const label = reason ? t(($) => $.status_pill.machine_full, { active: reason.active_runs, limit: reason.max_concurrent_runs }) : stage.label;
   return (
     <div

@@ -232,6 +232,8 @@
     "prop_speed": "速度",
     "prop_visibility": "公開範囲",
     "prop_concurrency": "同時実行数",
+    "prop_concurrency_hint": "同じイシューでは一度に1つだけ実行",
+    "prop_concurrency_hint_machine": "同じイシューでは一度に1つだけ実行。マシンの枠は共有（使用中 {{active}}/{{limit}}）",
     "prop_work_enabled": "作業を受け付ける",
     "prop_work_enabled_hint": "オフにすると新しい作業を受けなくなります。実行中の作業は続きます。",
     "prop_work_pause_balance": "アカウントの残高が尽きたため停止中です。チャージするかアカウントを切り替えてから、再びオンにしてください。",

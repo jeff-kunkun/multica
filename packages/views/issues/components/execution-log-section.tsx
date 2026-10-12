@@ -43,7 +43,7 @@ import {
 } from "./issue-run-timeline";
 import { canRetryRun, RetryRunButton } from "./retry-run-button";
 import { TaskStatusIcon } from "./task-status-icon";
-import { useStatusLabel, useTriggerText } from "./task-run-labels";
+import { useQueueReasonLabel, useStatusLabel, useTriggerText } from "./task-run-labels";
 import { currentPath, useOptionalNavigation } from "../../navigation";
 import {
   hasIssueUsageDeepLink,
@@ -681,11 +681,12 @@ export function ActiveTaskRow({
   const locale = useLocale();
   const tone = STATUS_TONE[task.status];
   const statusLabel = useStatusLabel(task.status);
+  const queueReasonLabel = useQueueReasonLabel();
   // A deferred retry after a full model says which retry it is and when it
   // fires (DENE-1093); the seat stays open, so this is a wait, not a failure.
   const capacityRetry = task.status === "deferred" ? task.capacity_retry : undefined;
   const reason = task.status === "queued" ? task.queue_reason : undefined;
-  const label = reason ? t(($) => $.execution_log.machine_full, { active: reason.active_runs, limit: reason.max_concurrent_runs }) : capacityRetry
+  const label = reason ? queueReasonLabel(reason) : capacityRetry
     ? t(($) => $.execution_log.status_capacity_retry, {
         retry: capacityRetry.retry,
         time: new Date(capacityRetry.next_at).toLocaleTimeString(locale, {

@@ -111,7 +111,9 @@ export interface MachineCapacity {
 }
 
 export interface MachineQueueReason extends MachineCapacity {
-  code: "machine_capacity";
+  // machine_capacity: whole device full; agent_capacity: the agent is at its own
+  // limit; issue_serial: the same agent already runs on this issue (1/1).
+  code: "machine_capacity" | "agent_capacity" | "issue_serial";
 }
 
 export interface RuntimeDevice {

@@ -432,6 +432,14 @@ export function AgentDetailInspector({
           />
           <SettingsRow
             label={t(($) => $.inspector.prop_concurrency)}
+            description={
+              runtime?.machine_capacity
+                ? t(($) => $.inspector.prop_concurrency_hint_machine, {
+                    active: runtime.machine_capacity.active_runs,
+                    limit: runtime.machine_capacity.max_concurrent_runs,
+                  })
+                : t(($) => $.inspector.prop_concurrency_hint)
+            }
             size="select-wide"
           >
             <ConcurrencyField

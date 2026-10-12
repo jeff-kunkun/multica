@@ -159,7 +159,7 @@ export function StatusPill({
         : pendingTask?.status;
   const elapsedSec = Math.max(0, Math.floor((Date.now() - anchorMs) / 1000));
   const stage = pickStage(status, taskMessages, availability, t);
-  const reason = status === "queued" ? pendingTask?.queue_reason : undefined;
+  const reason = status === "queued" && pendingTask?.queue_reason?.code === "machine_capacity" ? pendingTask.queue_reason : undefined;
   const label = reason ? t("chat:status.machine_full", { active: reason.active_runs, limit: reason.max_concurrent_runs }) : stage.label;
 
   return (

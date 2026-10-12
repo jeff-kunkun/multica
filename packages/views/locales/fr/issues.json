@@ -883,7 +883,9 @@
     "status_deferred": "Nouvelle tentative",
     "status_capacity_retry": "Modèle saturé · tentative {{retry}}, prochaine à {{time}}",
     "usage_label": "Coût en tokens",
-    "machine_full": "En attente : machine pleine ({{active}}/{{limit}})"
+    "machine_full": "En attente : machine pleine ({{active}}/{{limit}})",
+    "queue_agent_full": "En attente : cet agent a atteint sa limite ({{active}}/{{limit}})",
+    "queue_issue_serial": "En attente : l'exécution précédente du même agent sur ce ticket doit se terminer"
   },
   "runs_timeline": {
     "title": "Exécutions",

@@ -56,7 +56,7 @@ const MachineCapacitySchema = z.object({
   active_runs: z.number().int().nonnegative(),
   max_concurrent_runs: z.number().int().min(1).max(100),
 });
-const MachineQueueReasonSchema = MachineCapacitySchema.extend({ code: z.literal("machine_capacity") });
+const MachineQueueReasonSchema = MachineCapacitySchema.extend({ code: z.enum(["machine_capacity", "agent_capacity", "issue_serial"]) });
 
 export const AttachmentSchema: z.ZodType<Attachment> = z.object({
   id: z.string(),

@@ -282,7 +282,9 @@
       "reason_fresh_requested": "按要求新开"
     },
     "skills_used": "用到 skill：{{names}}",
-    "machine_full": "排队中：机器已满（{{active}}/{{limit}}）"
+    "machine_full": "排队中：机器已满（{{active}}/{{limit}}）",
+    "agent_full": "排队中：该智能体已达并发上限（{{active}}/{{limit}}）",
+    "issue_serial": "排队中：该智能体在同一张单上还有任务在跑，需等它结束"
   },
   "header_filter": "筛选",
   "new_badge": "新",

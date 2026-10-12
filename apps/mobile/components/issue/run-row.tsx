@@ -101,7 +101,8 @@ const SESSION_REASON_KEYS: Record<string, string> = {
 function StatusBadge({ task }: { task: AgentTask }) {
   const { t } = useT("issues");
   const reason = task.status === "queued" ? task.queue_reason : undefined;
-  const label = reason ? t("runs.machine_full", { active: reason.active_runs, limit: reason.max_concurrent_runs }) : t(`runs.status.${task.status}`);
+  const reasonKey = reason?.code === "issue_serial" ? "runs.issue_serial" : reason?.code === "agent_capacity" ? "runs.agent_full" : "runs.machine_full";
+  const label = reason ? t(reasonKey, { active: reason.active_runs, limit: reason.max_concurrent_runs }) : t(`runs.status.${task.status}`);
   const cls = STATUS_CLASS[task.status] ?? "text-muted-foreground";
   // For failed tasks, surface the failure_reason inline so users don't have
   // to drill in. Missing / empty / unrecognised stays as just "Failed".

@@ -194,6 +194,8 @@
     "prop_speed": "Vitesse",
     "prop_visibility": "Visibilité",
     "prop_concurrency": "Parallélisme",
+    "prop_concurrency_hint": "Une exécution à la fois par ticket",
+    "prop_concurrency_hint_machine": "Une exécution à la fois par ticket ; les emplacements de la machine sont partagés ({{active}}/{{limit}} utilisés)",
     "prop_owner": "Propriétaire",
     "prop_created": "Création",
     "prop_updated": "Mise à jour",
