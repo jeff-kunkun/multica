@@ -1,7 +1,10 @@
 # Bot write provenance (DENE-1794)
 
 Bot credentials grant their owner's content permissions, but are not evidence
-that the owner personally spoke or approved an assignment.
+that the owner personally spoke. Quotes relayed by a bot therefore never pass
+`--per-quote`. An executor a bot key names directly is the holder's own hand
+(人工) and stands, since DENE-1834: the bot is the member's channel into
+Multica, and the write keeps its `via_bot` provenance.
 
 ## API and storage
 

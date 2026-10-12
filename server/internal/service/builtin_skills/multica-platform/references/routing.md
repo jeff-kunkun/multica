@@ -94,9 +94,11 @@ server does not write it, routing judges from scratch and says in one sentence
 that a pick was ignored, without saying who was suggested. The CLI prints the
 same hint on stderr and `--output json` carries `assignee_ignored: true`. A
 tier label you attach (e.g. `strongest`) is ignored the same way; only a label
-a person attached counts.
+a person attached counts. A bot key (an external bot acting for the member
+who holds it, e.g. a steward bot relaying the owner's order) is that member's
+own hand: its pick stands as 人工 and the receipt says 「调用方经 <Bot> 指定」.
 
-The only exception is words from the person you are talking to. When THAT
+The only exception for an agent is words from the person you are talking to. When THAT
 person said it out loud earlier in the same direct chat or issue thread, pass
 their exact words (the server checks the original message and its author):
 

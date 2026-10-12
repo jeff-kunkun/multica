@@ -232,7 +232,12 @@
     "history_group": "Historique des discussions",
     "agent_filter_placeholder": "Rechercher des agents...",
     "agent_needs_runtime": "Runtime requis",
-    "agent_needs_runtime_hint": "Associez un runtime avant de démarrer une discussion avec cet agent"
+    "agent_needs_runtime_hint": "Associez un runtime avant de démarrer une discussion avec cet agent",
+    "routed_pick": "Laisser le routage choisir",
+    "routed_pick_hint": "Sans nommer d'agent : le routeur choisit selon le message et le projet",
+    "routed_pending": "Après envoi, le routage choisit l'agent selon le message et le projet",
+    "routed_result": "Routé vers : ",
+    "routed_result_offline": "(runtime hors ligne ; le message attend son retour)"
   },
   "empty_state": {
     "first_time_title": "Discutez avec vos agents",

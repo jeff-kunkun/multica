@@ -227,7 +227,12 @@
     "history_group": "チャット履歴",
     "agent_filter_placeholder": "エージェントを検索...",
     "agent_needs_runtime": "ランタイム未設定",
-    "agent_needs_runtime_hint": "このエージェントとチャットする前にランタイムを設定してください"
+    "agent_needs_runtime_hint": "このエージェントとチャットする前にランタイムを設定してください",
+    "routed_pick": "ルーティングに任せる",
+    "routed_pick_hint": "エージェントを指定せず、内容とプロジェクトから選びます",
+    "routed_pending": "送信後、内容とプロジェクトからエージェントを選びます",
+    "routed_result": "ルーティング結果：",
+    "routed_result_offline": "（ランタイムがオフラインのため、メッセージは復帰まで待機します）"
   },
   "empty_state": {
     "first_time_title": "エージェントとチャット",

@@ -55,6 +55,11 @@ type Outcome struct {
 	Reason string
 	// ExecutorWritten is the seat this call put in the executor slot, if any.
 	ExecutorWritten *Seat
+	// ExecutorReason and ExecutorDetail are the closed word and the sentence
+	// the assignment comment prints for the executor written on this call
+	// (DENE-1834): a receipt can say "why him" without reading the comment.
+	ExecutorReason PickReason
+	ExecutorDetail string
 	// ReviewerWritten is the reviewer this call wrote, if any. Empty Kind
 	// means this call did not write the slot.
 	ReviewerWritten ReviewerRef
@@ -539,6 +544,9 @@ func (r *Router) routeTodo(ctx context.Context, workspaceID string, settings Set
 		out.Action = ActionAssigned
 	}
 	out.Reason = strings.Join(notes, "; ")
+	if out.ExecutorWritten != nil {
+		out.ExecutorReason, out.ExecutorDetail = executorPickReason(issue, needExecutor, executor, executorSource, dec.RaisedFrom != "")
+	}
 	if out.Trace != nil {
 		if executor != nil {
 			out.Trace.Seat = executor.Name

@@ -5263,7 +5263,11 @@ export class ApiClient {
 
   async createChatSession(
     data: {
-      agent_id: string;
+      /** Leave out and the server routes the chat to an agent from `brief`
+       *  (DENE-1834); the response's `routing` says who and why. */
+      agent_id?: string;
+      /** The first message, for routing. Ignored when `agent_id` is set. */
+      brief?: string;
       title?: string;
       /** The session's project set, in selection order (DENE-522). Mutually
        *  exclusive with `project_id` — the server rejects both at once rather

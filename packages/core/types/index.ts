@@ -210,6 +210,7 @@ export {
 } from "./attachment-url";
 export type {
   ChatSession,
+  ChatRoutingReceipt,
   AgentChat,
   AgentChatPage,
   ChatDirectoryItem,

@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="zh-Hans">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DENE-1834 聊天「由路由选派」预览</title>
+<style>
+  :root{--fg:#1f2328;--muted:#6b7280;--bg:#fff;--muted-bg:#f3f4f6;--border:#e5e7eb;--accent:#eef2ff;--ok:#16a34a;--warn:#d97706}
+  *{box-sizing:border-box}
+  body{margin:0;padding:24px;font:14px/1.5 -apple-system,"PingFang SC","Helvetica Neue",sans-serif;color:var(--fg);background:#fafafa}
+  h1{font-size:18px;margin:0 0 4px}
+  h2{font-size:14px;margin:28px 0 8px;color:var(--muted);font-weight:500}
+  p.sub{margin:0 0 20px;color:var(--muted)}
+  .frames{display:flex;gap:24px;flex-wrap:wrap;align-items:flex-start}
+  .frame{background:var(--bg);border:1px solid var(--border);border-radius:10px;overflow:hidden}
+  .frame .bar{padding:6px 10px;font-size:12px;color:var(--muted);border-bottom:1px solid var(--border);background:#fcfcfc}
+  .desk{width:640px}.mob{width:390px}
+  .composer{padding:12px}
+  .banner{display:flex;gap:6px;align-items:flex-start;padding:6px 10px;border-radius:6px;background:var(--muted-bg);color:var(--muted);font-size:12px;border:1px solid var(--border);margin-bottom:6px}
+  .banner svg{flex:none;margin-top:2px}
+  .input{border:1px solid var(--border);border-radius:10px;padding:10px;min-height:72px;display:flex;flex-direction:column;justify-content:space-between}
+  .input .text{color:var(--muted)}
+  .input .row{display:flex;align-items:center;justify-content:space-between;margin-top:8px}
+  .chip{display:inline-flex;align-items:center;gap:6px;padding:4px 6px;border-radius:6px;font-size:12px;font-weight:500}
+  .chip:hover{background:var(--muted-bg)}
+  .send{width:28px;height:28px;border-radius:50%;background:var(--fg);display:inline-block}
+  .picker{width:256px;border:1px solid var(--border);border-radius:8px;background:var(--bg);box-shadow:0 8px 24px rgba(0,0,0,.08);margin:12px;overflow:hidden}
+  .picker .search{padding:8px 10px;border-bottom:1px solid var(--border);color:var(--muted);font-size:13px}
+  .picker .item{display:flex;align-items:center;gap:8px;padding:7px 10px;font-size:13px;min-height:44px}
+  .picker .item.sel{background:var(--accent)}
+  .picker .group{padding:6px 10px 2px;font-size:11px;color:var(--muted)}
+  .avatar{width:20px;height:20px;border-radius:50%;background:#d1d5db;flex:none;display:inline-flex;align-items:center;justify-content:center}
+  .avatar.route{background:var(--muted-bg);color:var(--muted)}
+  .dot{width:7px;height:7px;border-radius:50%;background:var(--ok);margin-left:auto}
+  .mob .picker{width:100%;margin:0;border-radius:12px 12px 0 0;border-bottom:0}
+  .note{font-size:12px;color:var(--muted);margin-top:4px}
+  code{font-size:12px;background:var(--muted-bg);padding:1px 4px;border-radius:4px}
+  table{border-collapse:collapse;font-size:13px;margin-top:8px}
+  td,th{border:1px solid var(--border);padding:6px 10px;text-align:left;vertical-align:top}
+  th{background:var(--muted-bg);font-weight:500}
+  @media (max-width:720px){body{padding:12px}.desk{width:100%}.mob{width:100%}}
+</style>
+</head>
+<body>
+<h1>聊天新建入口：由路由选派</h1>
+<p class="sub">DENE-1834 · Web/Desktop 共享视图 · 路由开启时才出现这一项；路由关闭时界面与现状完全一样。</p>
+
+<h2>1. 选智能体时，第一项是「由路由选派」（左 1280 桌面 · 右 390 手机）</h2>
+<div class="frames">
+  <div class="frame desk">
+    <div class="bar">新对话 ⊕ → 智能体选择</div>
+    <div class="picker">
+      <div class="search">搜索智能体...</div>
+      <div class="item sel"><span class="avatar route"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="6" cy="19" r="3"/><path d="M9 19h8.5a3.5 3.5 0 0 0 0-7h-11a3.5 3.5 0 0 1 0-7H15"/><circle cx="18" cy="5" r="3"/></svg></span><span>由路由选派</span></div>
+      <div class="group">适合本项目</div>
+      <div class="item"><span class="avatar"></span><span>布尔玛</span><span class="dot"></span></div>
+      <div class="item"><span class="avatar"></span><span>孙悟天</span><span class="dot"></span></div>
+      <div class="group">其他</div>
+      <div class="item"><span class="avatar"></span><span>拉蒂兹</span><span class="dot" style="background:#9ca3af"></span></div>
+    </div>
+    <p class="note" style="padding:0 12px 12px">悬停提示：不选智能体，发送后按内容和项目选一个</p>
+  </div>
+  <div class="frame mob">
+    <div class="bar">390px · 底部弹出，行高 44px</div>
+    <div style="height:120px"></div>
+    <div class="picker">
+      <div class="search">搜索智能体...</div>
+      <div class="item sel"><span class="avatar route"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="6" cy="19" r="3"/><path d="M9 19h8.5a3.5 3.5 0 0 0 0-7h-11a3.5 3.5 0 0 1 0-7H15"/><circle cx="18" cy="5" r="3"/></svg></span><span>由路由选派</span></div>
+      <div class="group">适合本项目</div>
+      <div class="item"><span class="avatar"></span><span>布尔玛</span><span class="dot"></span></div>
+      <div class="item"><span class="avatar"></span><span>孙悟天</span><span class="dot"></span></div>
+    </div>
+  </div>
+</div>
+
+<h2>2. 选了之后、发送之前：输入框上一行说明，左下角不再显示具体智能体</h2>
+<div class="frames">
+  <div class="frame desk"><div class="bar">1280</div>
+    <div class="composer">
+      <div class="banner"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="6" cy="19" r="3"/><path d="M9 19h8.5a3.5 3.5 0 0 0 0-7h-11a3.5 3.5 0 0 1 0-7H15"/><circle cx="18" cy="5" r="3"/></svg><span>由路由选派：发送后按内容和项目选智能体</span></div>
+      <div class="input"><div class="text">帮我看看昨天的发版为什么失败</div><div class="row"><span class="chip"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="6" cy="19" r="3"/><path d="M9 19h8.5a3.5 3.5 0 0 0 0-7h-11a3.5 3.5 0 0 1 0-7H15"/><circle cx="18" cy="5" r="3"/></svg>由路由选派 ▾</span><span class="send"></span></div></div>
+    </div>
+  </div>
+  <div class="frame mob"><div class="bar">390</div>
+    <div class="composer">
+      <div class="banner"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="6" cy="19" r="3"/><path d="M9 19h8.5a3.5 3.5 0 0 0 0-7h-11a3.5 3.5 0 0 1 0-7H15"/><circle cx="18" cy="5" r="3"/></svg><span>由路由选派：发送后按内容和项目选智能体</span></div>
+      <div class="input"><div class="text">帮我看看昨天的发版为什么失败</div><div class="row"><span class="chip">由路由选派 ▾</span><span class="send"></span></div></div>
+    </div>
+  </div>
+</div>
+
+<h2>3. 发送之后：同一行换成结果，谁、为什么，和服务端回执一字不差</h2>
+<div class="frames">
+  <div class="frame desk"><div class="bar">1280 · 已选中</div>
+    <div class="composer">
+      <div class="banner"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="6" cy="19" r="3"/><path d="M9 19h8.5a3.5 3.5 0 0 0 0-7h-11a3.5 3.5 0 0 1 0-7H15"/><circle cx="18" cy="5" r="3"/></svg><span>由路由选派：布尔玛（档位 · 强）发版与部署在布尔玛的领域内，本轮空闲</span></div>
+      <div class="input"><div class="text">继续输入…</div><div class="row"><span class="chip"><span class="avatar"></span>布尔玛 ▾</span><span class="send"></span></div></div>
+    </div>
+  </div>
+  <div class="frame mob"><div class="bar">390 · 候选全离线</div>
+    <div class="composer">
+      <div class="banner"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="6" cy="19" r="3"/><path d="M9 19h8.5a3.5 3.5 0 0 0 0-7h-11a3.5 3.5 0 0 1 0-7H15"/><circle cx="18" cy="5" r="3"/></svg><span>由路由选派：拉蒂兹（兜底）同域席位全部离线，先排给默认席位（运行时离线，消息会排队等它上线）</span></div>
+      <div class="input"><div class="text">继续输入…</div><div class="row"><span class="chip"><span class="avatar"></span>拉蒂兹 ▾</span><span class="send"></span></div></div>
+    </div>
+  </div>
+</div>
+
+<h2>4. 其他面的同一回执</h2>
+<table>
+  <tr><th>面</th><th>看到什么</th></tr>
+  <tr><td><code>multica chat new "…"</code>（不带 <code>--agent</code>）</td><td>一行 <code>Agent: 布尔玛 [档位 · 强] 发版与部署在布尔玛的领域内</code>；<code>--output json</code> 带 <code>routing.{source,agent,tier,reason,candidates}</code></td></tr>
+  <tr><td><code>multica issue create</code>（Bot 钥匙 / 个人令牌，不带 <code>--assignee</code>）</td><td>同一行回执直接返回；无人可用时 <code>source</code> 为「无可用席位」，候选离线时 <code>offline: true</code></td></tr>
+  <tr><td>聊天 → 建目标（to-goal）</td><td>路由开启：走路由并返回回执；路由关闭：继承聊天的智能体，回执标「人工」</td></tr>
+</table>
+<p class="note">apps/mobile 原生 App：本票未改。它的聊天页有自己的智能体选择表，且尚未读取工作区路由设置；另开票补。</p>
+</body>
+</html>

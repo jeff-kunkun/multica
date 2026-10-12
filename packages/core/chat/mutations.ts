@@ -110,7 +110,8 @@ export function useCreateChatSession() {
 
   return useMutation({
     mutationFn: (data: {
-      agent_id: string;
+      agent_id?: string;
+      brief?: string;
       title?: string;
       project_ids?: string[];
       linked_projects?: ChatLinkedProjectRef[];
@@ -123,7 +124,11 @@ export function useCreateChatSession() {
       return api.createChatSession(data);
     },
     onSuccess: (session) => {
-      logger.info("createChatSession.success", { sessionId: session.id, agentId: session.agent_id });
+      logger.info("createChatSession.success", {
+        sessionId: session.id,
+        agentId: session.agent_id,
+        routed: session.routing?.routed ?? false,
+      });
     },
     onError: (err) => {
       logger.error("createChatSession.error", err);
