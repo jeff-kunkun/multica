@@ -728,6 +728,12 @@
       "check_again": "再確認",
       "mirror_label": "アプリ内でも通知する",
       "mirror_hint": "Bot に加えてアプリ内の通知も残します。",
+      "activity_label": "すべての動きを Bot に送る",
+      "activity_hint": "コメント・チャット・状態変更のすべて。",
+      "activity_off": "オフ",
+      "activity_owned": "自分のチケットとチャット",
+      "activity_followed": "フォロー中のチケット",
+      "activity_both": "自分のものとフォロー中",
       "toast_failed": "Bot 設定を更新できませんでした"
     }
   },

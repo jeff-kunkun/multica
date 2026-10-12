@@ -25,7 +25,7 @@ func botBindingPath(wsID string) string {
 }
 
 var botBindCmd = &cobra.Command{
-	Use:   "bind <bot>",
+	Use:   "bind [bot]",
 	Short: "Send the things that need your decision to your own Bot",
 	Long: `Choose your own Bot (id, id prefix or exact name) as the place your decisions
 go. Whatever needs you — an @ of you, an ask-human, a blocked ticket waiting on
@@ -41,10 +41,29 @@ affected.
                      read copy that turns unread if the Bot fails
   --mode mirror      the Bot and the app both alert you
 
-Only you can bind your own Bot: not an agent, and not a Bot's own key.`,
+Only you can bind your own Bot: not an agent, and not a Bot's own key.
+
+Full activity stream (opt-in, per person): --activity also pushes what happens
+in your tickets and chats — every comment, chat message, status change and
+reassignment — to the same Bot, tagged with importance (critical | high |
+normal | low) and categories (needs_human, risk, decision, result, progress,
+completion, failure, info) so the Bot can filter. human_needed stays the top
+lane and is never held behind it. Event text never carries keys, tokens or
+passwords (they are masked before sending).
+
+  --activity owned           tickets you created, are assigned, lead the squad of,
+                             or opened the chat for; and your own chats
+  --activity followed        tickets you follow (subscribed, @-ed, delegated)
+  --activity owned,followed  both
+  --activity off             switch the stream off (default)
+
+With a binding already in place the Bot name can be left out to change only
+settings: multica bot bind --activity owned.`,
 	Example: `  multica bot bind "Multica 管家"
-  multica bot bind "Multica 管家" --mode mirror --escalate-after 600`,
-	Args:        exactArgs(1),
+  multica bot bind "Multica 管家" --mode mirror --escalate-after 600
+  multica bot bind --activity owned,followed
+  multica bot bind --activity off`,
+	Args:        cobra.MaximumNArgs(1),
 	RunE:        runBotBind,
 	Annotations: map[string]string{annotationAccess: "write", annotationBotKey: "no"},
 }
@@ -53,7 +72,8 @@ var botBindStatusCmd = &cobra.Command{
 	Use:   "status",
 	Short: "Show whether your decisions go to your Bot, and if the channel is healthy",
 	Long: `Prints bound, state (none | unverified | ok | broken), a one-line message, the
-mode, the Bot, and open_count — how many decisions the Bot still owes you.`,
+mode, the Bot, open_count — how many decisions the Bot still owes you — and
+activity_scope, which part of the full activity stream is on ([] = off).`,
 	Args:        exactArgs(0),
 	RunE:        runBotBindStatus,
 	Annotations: map[string]string{annotationAccess: "read", annotationBotKey: "no"},
@@ -81,6 +101,7 @@ func init() {
 	botBindCmd.Flags().String("mode", "", "bot_first (default) or mirror")
 	botBindCmd.Flags().Int("resend-after", 0, "Seconds without a receipt before the event is sent again (30..3600, default 180)")
 	botBindCmd.Flags().Int("escalate-after", 0, "Seconds after the Bot woke without telling you before escalating (60..7200, default 300)")
+	botBindCmd.Flags().String("activity", "", "Full activity stream: owned, followed, owned,followed, or off")
 	for _, c := range []*cobra.Command{botBindCmd, botBindStatusCmd, botUnbindCmd, botBindVerifyCmd} {
 		c.Flags().String("output", "table", "Output format: table or json")
 	}
@@ -93,6 +114,15 @@ func printBotBinding(cmd *cobra.Command, out map[string]any) error {
 	fmt.Printf("State: %v\n%v\n", out["state"], out["message"])
 	if out["bound"] == true {
 		fmt.Printf("Bot: %v\nMode: %v\nOpen: %v\n", out["bot_name"], out["mode"], out["open_count"])
+		scope := "off"
+		if list, ok := out["activity_scope"].([]any); ok && len(list) > 0 {
+			parts := make([]string, 0, len(list))
+			for _, v := range list {
+				parts = append(parts, fmt.Sprint(v))
+			}
+			scope = strings.Join(parts, ",")
+		}
+		fmt.Printf("Activity stream: %s\n", scope)
 	}
 	return nil
 }
@@ -103,11 +133,21 @@ func runBotBind(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	defer cancel()
-	id, err := resolveBotID(ctx, client, wsID, args[0])
-	if err != nil {
-		return err
+	body := map[string]any{}
+	if len(args) == 1 {
+		id, err := resolveBotID(ctx, client, wsID, args[0])
+		if err != nil {
+			return err
+		}
+		body["bot_id"] = id
 	}
-	body := map[string]any{"bot_id": id}
+	if raw, _ := cmd.Flags().GetString("activity"); cmd.Flags().Changed("activity") {
+		scope, err := parseActivityScope(raw)
+		if err != nil {
+			return err
+		}
+		body["activity_scope"] = scope
+	}
 	if mode, _ := cmd.Flags().GetString("mode"); mode != "" {
 		body["mode"] = mode
 	}
@@ -122,6 +162,24 @@ func runBotBind(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("bot bind: %w", err)
 	}
 	return printBotBinding(cmd, out)
+}
+
+// parseActivityScope turns the --activity value into the scope list the
+// server stores: "off" (or "none", or empty) is the empty list.
+func parseActivityScope(raw string) ([]string, error) {
+	scope := []string{}
+	for _, part := range strings.Split(raw, ",") {
+		switch p := strings.ToLower(strings.TrimSpace(part)); p {
+		case "", "off", "none":
+		case "owned", "followed":
+			scope = append(scope, p)
+		case "all", "both":
+			scope = append(scope, "owned", "followed")
+		default:
+			return nil, fmt.Errorf("--activity: %q is not owned, followed, owned,followed or off", part)
+		}
+	}
+	return scope, nil
 }
 
 func runBotBindStatus(cmd *cobra.Command, _ []string) error {
@@ -211,7 +269,42 @@ For a chat event the answer only closes the chase; reply in the chat itself.`,
 	open.Flags().String("before", "", "next_cursor from the previous page")
 	open.Flags().String("output", "json", "Output format: json")
 
-	wake.AddCommand(relayed, answered, open)
+	handled := &cobra.Command{
+		Use:   "handled <bot-id> <event-id>",
+		Short: "Record that the Bot looked at an activity event and nobody needs telling",
+		Long: `Optional receipt for an activity-stream event (type "activity"). A pushed
+activity is already delivered once your webhook answers 200; send this when you
+decided the person does not need to hear about it, or after you told them, so
+the catch-up list (bot wake activity) no longer shows it.
+
+  --reason  one line: why it was dropped or how it was passed on
+
+Not valid for human_needed events: those must be relayed, not handled.`,
+		Args: exactArgs(2),
+		RunE: runBotActivityHandled,
+	}
+	handled.Flags().String("reason", "", "Why nobody needs telling, or how the person was told")
+	handled.Flags().String("output", "json", "Output format: json")
+
+	activity := &cobra.Command{
+		Use:   "activity <bot-id>",
+		Short: "List activity-stream events still held for this Bot (catch up after downtime)",
+		Long: `Lists full-stream events (comments, chat messages, status changes) newest
+first. Rows are kept 3 days; a Bot that was down longer catches up from the
+tickets themselves. Default status: queued,sent,woken,relayed (everything not
+yet handled).
+
+  --importance  floor: critical | high | normal | low (high shows high and above)`,
+		Args: exactArgs(1),
+		RunE: runBotActivityList,
+	}
+	activity.Flags().String("status", "", "Comma list of statuses (default queued,sent,woken,relayed)")
+	activity.Flags().String("importance", "", "Only this importance and above")
+	activity.Flags().Int("limit", 50, "Page size (1..200)")
+	activity.Flags().String("before", "", "next_cursor from the previous page")
+	activity.Flags().String("output", "json", "Output format: json")
+
+	wake.AddCommand(relayed, answered, open, handled, activity)
 }
 
 func parseBotEvent(args []string) (string, string, error) {
@@ -239,6 +332,54 @@ func runBotHumanRelayed(cmd *cobra.Command, args []string) error {
 	path := botsPath(wsID) + "/" + botID + "/wake/events/" + eventID + "/relayed"
 	if err := client.PostJSON(ctx, path, map[string]any{"channel": channel, "message_ref": ref}, &out); err != nil {
 		return fmt.Errorf("bot wake relayed: %w", err)
+	}
+	return cli.PrintJSON(cmd.OutOrStdout(), out)
+}
+
+func runBotActivityHandled(cmd *cobra.Command, args []string) error {
+	botID, eventID, err := parseBotEvent(args)
+	if err != nil {
+		return err
+	}
+	client, wsID, ctx, cancel, err := botClient(cmd)
+	if err != nil {
+		return err
+	}
+	defer cancel()
+	reason, _ := cmd.Flags().GetString("reason")
+	var out map[string]any
+	path := botsPath(wsID) + "/" + botID + "/wake/events/" + eventID + "/handled"
+	if err := client.PostJSON(ctx, path, map[string]any{"reason": reason}, &out); err != nil {
+		return fmt.Errorf("bot wake handled: %w", err)
+	}
+	return cli.PrintJSON(cmd.OutOrStdout(), out)
+}
+
+func runBotActivityList(cmd *cobra.Command, args []string) error {
+	if _, err := uuid.Parse(args[0]); err != nil {
+		return fmt.Errorf("provide the full bot UUID")
+	}
+	client, wsID, ctx, cancel, err := botClient(cmd)
+	if err != nil {
+		return err
+	}
+	defer cancel()
+	q := url.Values{}
+	if s, _ := cmd.Flags().GetString("status"); s != "" {
+		q.Set("status", s)
+	}
+	if s, _ := cmd.Flags().GetString("importance"); s != "" {
+		q.Set("importance", s)
+	}
+	if n, _ := cmd.Flags().GetInt("limit"); n > 0 {
+		q.Set("limit", fmt.Sprint(n))
+	}
+	if b, _ := cmd.Flags().GetString("before"); b != "" {
+		q.Set("before", b)
+	}
+	var out map[string]any
+	if err := client.GetJSON(ctx, botsPath(wsID)+"/"+args[0]+"/activity?"+q.Encode(), &out); err != nil {
+		return fmt.Errorf("bot wake activity: %w", err)
 	}
 	return cli.PrintJSON(cmd.OutOrStdout(), out)
 }

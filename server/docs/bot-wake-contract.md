@@ -414,3 +414,9 @@ approvals), the mention listener (`mention://member`), and the new
 `POST /api/issues/{id}/ask-human` and `POST /api/chat/sessions/{id}/ask-human`
 (CLI `multica issue ask-human`, `multica chat ask-human`). Modes: `bot_first`
 keeps the app row as a quiet read copy; `mirror` also alerts in the app.
+
+### Activity stream (DENE-1935)
+
+The same outbox also carries the full activity stream (`type: "activity"`) for
+people who switched `activity_scope` on. Contract, tags and receipts:
+[bot-activity-contract.md](bot-activity-contract.md).

@@ -140,7 +140,15 @@ func (w *HumanNeededWorker) push(ctx context.Context, ev db.HumanNeededEvent) {
 		w.cancel(ev, "channel unavailable")
 		return
 	}
+	if ev.EventType == service.HumanEventActivity && len(channel.ActivityScope) == 0 {
+		w.cancel(ev, "activity stream switched off")
+		return
+	}
 	if ev.IssueID.Valid && !w.targetCanSeeIssue(ctx, ev) {
+		w.cancel(ev, "access unavailable")
+		return
+	}
+	if ev.ChatSessionID.Valid && !w.targetOwnsChat(ctx, ev) {
 		w.cancel(ev, "access unavailable")
 		return
 	}
@@ -187,6 +195,14 @@ func (w *HumanNeededWorker) targetCanSeeIssue(ctx context.Context, ev db.HumanNe
 	return err == nil && viewer.canSeeIssue(issue)
 }
 
+// targetOwnsChat is the send-time check for chat events: a chat is the
+// opener's own, so anyone else (a changed owner, a deleted session) gets
+// nothing.
+func (w *HumanNeededWorker) targetOwnsChat(ctx context.Context, ev db.HumanNeededEvent) bool {
+	chat, err := w.h.Queries.GetChatSession(ctx, ev.ChatSessionID)
+	return err == nil && chat.WorkspaceID == ev.WorkspaceID && chat.CreatorID == ev.TargetUserID
+}
+
 // humanNeededPayloadFields is the webhook body for one event. It keeps the
 // envelope of the ordinary wake (event_id, type, summary, urls, author) and
 // adds the human_needed block the Bot acts on.
@@ -207,6 +223,7 @@ func (h *Handler) humanNeededPayloadFields(ctx context.Context, ev db.HumanNeede
 		"woken_url":    eventURL + "/woken",
 		"relayed_url":  eventURL + "/relayed",
 		"answered_url": eventURL + "/answered",
+		"handled_url":  eventURL + "/handled",
 		"pending_url":  base + "/api/workspaces/" + uuidToString(ev.WorkspaceID) + "/bots/" + uuidToString(ev.BotID) + "/human-needed",
 		"ack_url":      eventURL + "/ack",
 		"ack_body":     map[string]any{},
@@ -251,6 +268,9 @@ func (h *Handler) humanNeededPayloadFields(ctx context.Context, ev db.HumanNeede
 		fields["source_id"] = uuidToString(ev.SourceCommentID)
 	}
 	fields["author"] = h.humanNeededAsker(ctx, ev)
+	if ev.EventType == service.HumanEventActivity {
+		return h.activityPayloadFields(fields, ev, title, sourceURL)
+	}
 	targetName := ""
 	if u, getErr := h.Queries.GetUser(ctx, ev.TargetUserID); getErr == nil {
 		targetName = u.Name
@@ -259,12 +279,16 @@ func (h *Handler) humanNeededPayloadFields(ctx context.Context, ev db.HumanNeede
 		"kind":           ev.Kind,
 		"target_user_id": uuidToString(ev.TargetUserID),
 		"target_name":    targetName,
-		"question":       ev.Question,
+		"question":       service.MaskSecrets(ev.Question),
 		"options":        options,
 		"urgency":        ev.Urgency,
 		"source_url":     sourceURL,
 		"mode":           channel.Mode,
 		"escalation":     ev.EventType == service.HumanEventEscalation,
+		// human_needed is the top lane of the stream: the same tags the
+		// activity events carry, so one filter covers both.
+		"importance": service.ImportanceCritical,
+		"categories": []string{service.CategoryNeedsHuman},
 	}
 	if ev.Deadline.Valid {
 		block["deadline"] = ev.Deadline.Time
@@ -318,6 +342,9 @@ func (w *HumanNeededWorker) Sweep(ctx context.Context) {
 	}
 	if err := q.ExpireHumanNeeded(ctx); err != nil {
 		slog.Error("human needed: expire failed", "error", err)
+	}
+	if _, err := q.PurgeActivityEvents(ctx); err != nil {
+		slog.Error("activity stream: purge failed", "error", err)
 	}
 	if _, err := q.ResendUnwokenHumanNeeded(ctx); err != nil {
 		slog.Error("human needed: resend failed", "error", err)

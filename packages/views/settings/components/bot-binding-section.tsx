@@ -11,6 +11,7 @@ import {
   usePutBotBinding,
   useVerifyBotBinding,
 } from "@multica/core/bots";
+import type { BotActivityScope } from "@multica/core/types";
 import { Button } from "@multica/ui/components/ui/button";
 import {
   Select,
@@ -24,6 +25,24 @@ import { useT } from "../../i18n";
 import { SettingsCard, SettingsRow, SettingsSection } from "./settings-layout";
 
 const NO_BOT = "none";
+
+type ActivityChoice = "off" | "owned" | "followed" | "both";
+
+const SCOPE_BY_CHOICE: Record<ActivityChoice, BotActivityScope[]> = {
+  off: [],
+  owned: ["owned"],
+  followed: ["followed"],
+  both: ["owned", "followed"],
+};
+
+function choiceOf(scope: BotActivityScope[] | undefined): ActivityChoice {
+  const owned = scope?.includes("owned") ?? false;
+  const followed = scope?.includes("followed") ?? false;
+  if (owned && followed) return "both";
+  if (owned) return "owned";
+  if (followed) return "followed";
+  return "off";
+}
 
 /**
  * 把要我决定的事交给我的 Bot (DENE-1933). Each person turns this on for
@@ -51,6 +70,14 @@ export function BotBindingSection() {
   const items = [
     { value: NO_BOT, label: t(($) => $.notifications.decisions.none) },
     ...activeBots.map((bot) => ({ value: bot.id, label: bot.name })),
+  ];
+
+  const activityChoice = choiceOf(binding?.activity_scope);
+  const activityItems: { value: ActivityChoice; label: string }[] = [
+    { value: "off", label: t(($) => $.notifications.decisions.activity_off) },
+    { value: "owned", label: t(($) => $.notifications.decisions.activity_owned) },
+    { value: "followed", label: t(($) => $.notifications.decisions.activity_followed) },
+    { value: "both", label: t(($) => $.notifications.decisions.activity_both) },
   ];
 
   const fail = (err: unknown) =>
@@ -145,6 +172,41 @@ export function BotBindingSection() {
                 put.mutate({ mode: checked ? "mirror" : "bot_first" }, { onError: fail })
               }
             />
+          </SettingsRow>
+        ) : null}
+        {binding?.bound ? (
+          <SettingsRow
+            anchor="decisions-activity"
+            label={t(($) => $.notifications.decisions.activity_label)}
+            description={t(($) => $.notifications.decisions.activity_hint)}
+            size="select-wide"
+          >
+            <Select
+              items={activityItems}
+              value={activityChoice}
+              onValueChange={(value) => {
+                if (!value || value === activityChoice) return;
+                put.mutate(
+                  { activity_scope: SCOPE_BY_CHOICE[value as ActivityChoice] },
+                  { onError: fail },
+                );
+              }}
+              disabled={busy}
+            >
+              <SelectTrigger
+                className="w-full min-w-0"
+                aria-label={t(($) => $.notifications.decisions.activity_label)}
+              >
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {activityItems.map((item) => (
+                  <SelectItem key={item.value} value={item.value}>
+                    {item.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </SettingsRow>
         ) : null}
       </SettingsCard>

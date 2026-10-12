@@ -1242,6 +1242,7 @@ type HumanNeededEvent struct {
 	EscalatedAt     pgtype.Timestamptz `json:"escalated_at"`
 	LastNudgeAt     pgtype.Timestamptz `json:"last_nudge_at"`
 	ExpiresAt       pgtype.Timestamptz `json:"expires_at"`
+	Activity        []byte             `json:"activity"`
 }
 
 type InboxItem struct {
@@ -1898,6 +1899,7 @@ type MemberBotBinding struct {
 	VerifiedAt           pgtype.Timestamptz `json:"verified_at"`
 	RevokedAt            pgtype.Timestamptz `json:"revoked_at"`
 	BrokenNotifiedAt     pgtype.Timestamptz `json:"broken_notified_at"`
+	ActivityScope        []string           `json:"activity_scope"`
 }
 
 type NotificationPreference struct {

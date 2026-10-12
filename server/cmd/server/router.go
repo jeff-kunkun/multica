@@ -2080,6 +2080,10 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Post("/bots/{botId}/wake/events/{eventId}/relayed", h.RelayHumanNeeded)
 					r.Post("/bots/{botId}/wake/events/{eventId}/answered", h.AnswerHumanNeeded)
 					r.Get("/bots/{botId}/human-needed", h.ListHumanNeededForBot)
+					// The full activity stream (DENE-1935): the optional
+					// "looked, nobody needs telling" receipt and the catch-up list.
+					r.Post("/bots/{botId}/wake/events/{eventId}/handled", h.HandledActivity)
+					r.Get("/bots/{botId}/activity", h.ListActivityForBot)
 				})
 
 				// Your own Bot channel for decisions (DENE-1933): only the

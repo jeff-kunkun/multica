@@ -728,6 +728,12 @@
       "check_again": "다시 확인",
       "mirror_label": "앱에서도 알림",
       "mirror_hint": "Bot 과 함께 앱 알림도 유지합니다.",
+      "activity_label": "모든 활동을 내 Bot 에 보내기",
+      "activity_hint": "댓글·채팅·상태 변경 전부.",
+      "activity_off": "끔",
+      "activity_owned": "내 이슈와 채팅",
+      "activity_followed": "팔로우한 이슈",
+      "activity_both": "내 것과 팔로우한 것",
       "toast_failed": "Bot 설정을 업데이트하지 못했습니다"
     }
   },

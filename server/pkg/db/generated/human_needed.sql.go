@@ -34,11 +34,11 @@ SET status = 'sending', next_attempt_at = now() + interval '2 minutes'
 WHERE e.sequence = (
     SELECT s.sequence FROM human_needed_event s
     WHERE s.status = 'queued' AND s.next_attempt_at <= now()
-    ORDER BY s.next_attempt_at, s.sequence
+    ORDER BY (s.event_type = 'activity'), s.next_attempt_at, s.sequence
     FOR UPDATE SKIP LOCKED
     LIMIT 1
 )
-RETURNING e.sequence, e.event_id, e.workspace_id, e.bot_id, e.binding_id, e.target_user_id, e.event_type, e.parent_event_id, e.kind, e.dedupe_key, e.issue_id, e.chat_session_id, e.summon_id, e.inbox_item_id, e.source_comment_id, e.caller_type, e.caller_id, e.question, e.options, e.urgency, e.deadline, e.status, e.reason, e.attempts, e.next_attempt_at, e.created_at, e.sent_at, e.woken_at, e.relayed_at, e.relay_channel, e.relay_ref, e.answered_at, e.answer, e.answer_comment_id, e.escalated_at, e.last_nudge_at, e.expires_at
+RETURNING e.sequence, e.event_id, e.workspace_id, e.bot_id, e.binding_id, e.target_user_id, e.event_type, e.parent_event_id, e.kind, e.dedupe_key, e.issue_id, e.chat_session_id, e.summon_id, e.inbox_item_id, e.source_comment_id, e.caller_type, e.caller_id, e.question, e.options, e.urgency, e.deadline, e.status, e.reason, e.attempts, e.next_attempt_at, e.created_at, e.sent_at, e.woken_at, e.relayed_at, e.relay_channel, e.relay_ref, e.answered_at, e.answer, e.answer_comment_id, e.escalated_at, e.last_nudge_at, e.expires_at, e.activity
 `
 
 // The claim pushes next_attempt_at two minutes out, so a crash between the
@@ -84,6 +84,7 @@ func (q *Queries) ClaimNextHumanNeededEvent(ctx context.Context) (HumanNeededEve
 		&i.EscalatedAt,
 		&i.LastNudgeAt,
 		&i.ExpiresAt,
+		&i.Activity,
 	)
 	return i, err
 }
@@ -122,22 +123,35 @@ func (q *Queries) CountOpenHumanNeededForBot(ctx context.Context, botID pgtype.U
 	return count, err
 }
 
+const countQueuedActivityForBot = `-- name: CountQueuedActivityForBot :one
+SELECT count(*) FROM human_needed_event
+WHERE bot_id = $1 AND event_type = 'activity' AND status IN ('queued', 'sending')
+`
+
+func (q *Queries) CountQueuedActivityForBot(ctx context.Context, botID pgtype.UUID) (int64, error) {
+	row := q.db.QueryRow(ctx, countQueuedActivityForBot, botID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const createHumanNeededEvent = `-- name: CreateHumanNeededEvent :one
 INSERT INTO human_needed_event (
     workspace_id, bot_id, binding_id, target_user_id, event_type, parent_event_id,
     kind, dedupe_key, issue_id, chat_session_id, summon_id, inbox_item_id, source_comment_id,
-    caller_type, caller_id, question, options, urgency, deadline, expires_at
+    caller_type, caller_id, question, options, urgency, deadline, expires_at, activity
 ) VALUES (
     $1, $2, $3, $4, $5, $12,
     $6, $7, $13, $14, $15,
     $16, $17,
     $8, $18, $9, $10, $11, $19,
-    COALESCE($20::timestamptz, now() + interval '7 days')
+    COALESCE($20::timestamptz, now() + interval '7 days'),
+    $21::jsonb
 )
 ON CONFLICT (bot_id, event_type, dedupe_key) DO UPDATE
 SET inbox_item_id = EXCLUDED.inbox_item_id
 WHERE human_needed_event.inbox_item_id IS NULL AND EXCLUDED.inbox_item_id IS NOT NULL
-RETURNING sequence, event_id, workspace_id, bot_id, binding_id, target_user_id, event_type, parent_event_id, kind, dedupe_key, issue_id, chat_session_id, summon_id, inbox_item_id, source_comment_id, caller_type, caller_id, question, options, urgency, deadline, status, reason, attempts, next_attempt_at, created_at, sent_at, woken_at, relayed_at, relay_channel, relay_ref, answered_at, answer, answer_comment_id, escalated_at, last_nudge_at, expires_at
+RETURNING sequence, event_id, workspace_id, bot_id, binding_id, target_user_id, event_type, parent_event_id, kind, dedupe_key, issue_id, chat_session_id, summon_id, inbox_item_id, source_comment_id, caller_type, caller_id, question, options, urgency, deadline, status, reason, attempts, next_attempt_at, created_at, sent_at, woken_at, relayed_at, relay_channel, relay_ref, answered_at, answer, answer_comment_id, escalated_at, last_nudge_at, expires_at, activity
 `
 
 type CreateHumanNeededEventParams struct {
@@ -161,6 +175,7 @@ type CreateHumanNeededEventParams struct {
 	CallerID        pgtype.UUID        `json:"caller_id"`
 	Deadline        pgtype.Timestamptz `json:"deadline"`
 	ExpiresAt       pgtype.Timestamptz `json:"expires_at"`
+	Activity        []byte             `json:"activity"`
 }
 
 // The unique (bot, type, dedupe key) index is the dedupe: a repeated source
@@ -189,6 +204,7 @@ func (q *Queries) CreateHumanNeededEvent(ctx context.Context, arg CreateHumanNee
 		arg.CallerID,
 		arg.Deadline,
 		arg.ExpiresAt,
+		arg.Activity,
 	)
 	var i HumanNeededEvent
 	err := row.Scan(
@@ -229,6 +245,7 @@ func (q *Queries) CreateHumanNeededEvent(ctx context.Context, arg CreateHumanNee
 		&i.EscalatedAt,
 		&i.LastNudgeAt,
 		&i.ExpiresAt,
+		&i.Activity,
 	)
 	return i, err
 }
@@ -236,7 +253,7 @@ func (q *Queries) CreateHumanNeededEvent(ctx context.Context, arg CreateHumanNee
 const createMemberBotBinding = `-- name: CreateMemberBotBinding :one
 INSERT INTO member_bot_binding (workspace_id, user_id, bot_id, mode, resend_after_seconds, escalate_after_seconds)
 VALUES ($1, $2, $3, $4, $5, $6)
-RETURNING id, workspace_id, user_id, bot_id, mode, resend_after_seconds, escalate_after_seconds, created_at, updated_at, verified_at, revoked_at, broken_notified_at
+RETURNING id, workspace_id, user_id, bot_id, mode, resend_after_seconds, escalate_after_seconds, created_at, updated_at, verified_at, revoked_at, broken_notified_at, activity_scope
 `
 
 type CreateMemberBotBindingParams struct {
@@ -271,6 +288,7 @@ func (q *Queries) CreateMemberBotBinding(ctx context.Context, arg CreateMemberBo
 		&i.VerifiedAt,
 		&i.RevokedAt,
 		&i.BrokenNotifiedAt,
+		&i.ActivityScope,
 	)
 	return i, err
 }
@@ -321,7 +339,7 @@ func (q *Queries) FinishHumanNeededDelivery(ctx context.Context, arg FinishHuman
 }
 
 const getHumanChannel = `-- name: GetHumanChannel :one
-SELECT b.id, b.workspace_id, b.user_id, b.bot_id, b.mode, b.resend_after_seconds, b.escalate_after_seconds, b.created_at, b.updated_at, b.verified_at, b.revoked_at, b.broken_notified_at,
+SELECT b.id, b.workspace_id, b.user_id, b.bot_id, b.mode, b.resend_after_seconds, b.escalate_after_seconds, b.created_at, b.updated_at, b.verified_at, b.revoked_at, b.broken_notified_at, b.activity_scope,
        (p.id IS NOT NULL AND NOT p.revoked AND p.deleted_at IS NULL
          AND (p.expires_at IS NULL OR p.expires_at > now())
          AND p.user_id = b.user_id AND p.kind = 'bot')::boolean AS bot_active,
@@ -351,6 +369,7 @@ type GetHumanChannelRow struct {
 	VerifiedAt           pgtype.Timestamptz `json:"verified_at"`
 	RevokedAt            pgtype.Timestamptz `json:"revoked_at"`
 	BrokenNotifiedAt     pgtype.Timestamptz `json:"broken_notified_at"`
+	ActivityScope        []string           `json:"activity_scope"`
 	BotActive            bool               `json:"bot_active"`
 	WebhookConfigured    bool               `json:"webhook_configured"`
 	BotName              string             `json:"bot_name"`
@@ -375,6 +394,7 @@ func (q *Queries) GetHumanChannel(ctx context.Context, arg GetHumanChannelParams
 		&i.VerifiedAt,
 		&i.RevokedAt,
 		&i.BrokenNotifiedAt,
+		&i.ActivityScope,
 		&i.BotActive,
 		&i.WebhookConfigured,
 		&i.BotName,
@@ -383,7 +403,7 @@ func (q *Queries) GetHumanChannel(ctx context.Context, arg GetHumanChannelParams
 }
 
 const getHumanNeededEventByID = `-- name: GetHumanNeededEventByID :one
-SELECT sequence, event_id, workspace_id, bot_id, binding_id, target_user_id, event_type, parent_event_id, kind, dedupe_key, issue_id, chat_session_id, summon_id, inbox_item_id, source_comment_id, caller_type, caller_id, question, options, urgency, deadline, status, reason, attempts, next_attempt_at, created_at, sent_at, woken_at, relayed_at, relay_channel, relay_ref, answered_at, answer, answer_comment_id, escalated_at, last_nudge_at, expires_at FROM human_needed_event WHERE event_id = $1
+SELECT sequence, event_id, workspace_id, bot_id, binding_id, target_user_id, event_type, parent_event_id, kind, dedupe_key, issue_id, chat_session_id, summon_id, inbox_item_id, source_comment_id, caller_type, caller_id, question, options, urgency, deadline, status, reason, attempts, next_attempt_at, created_at, sent_at, woken_at, relayed_at, relay_channel, relay_ref, answered_at, answer, answer_comment_id, escalated_at, last_nudge_at, expires_at, activity FROM human_needed_event WHERE event_id = $1
 `
 
 func (q *Queries) GetHumanNeededEventByID(ctx context.Context, eventID pgtype.UUID) (HumanNeededEvent, error) {
@@ -427,12 +447,13 @@ func (q *Queries) GetHumanNeededEventByID(ctx context.Context, eventID pgtype.UU
 		&i.EscalatedAt,
 		&i.LastNudgeAt,
 		&i.ExpiresAt,
+		&i.Activity,
 	)
 	return i, err
 }
 
 const getHumanNeededEventForBot = `-- name: GetHumanNeededEventForBot :one
-SELECT sequence, event_id, workspace_id, bot_id, binding_id, target_user_id, event_type, parent_event_id, kind, dedupe_key, issue_id, chat_session_id, summon_id, inbox_item_id, source_comment_id, caller_type, caller_id, question, options, urgency, deadline, status, reason, attempts, next_attempt_at, created_at, sent_at, woken_at, relayed_at, relay_channel, relay_ref, answered_at, answer, answer_comment_id, escalated_at, last_nudge_at, expires_at FROM human_needed_event
+SELECT sequence, event_id, workspace_id, bot_id, binding_id, target_user_id, event_type, parent_event_id, kind, dedupe_key, issue_id, chat_session_id, summon_id, inbox_item_id, source_comment_id, caller_type, caller_id, question, options, urgency, deadline, status, reason, attempts, next_attempt_at, created_at, sent_at, woken_at, relayed_at, relay_channel, relay_ref, answered_at, answer, answer_comment_id, escalated_at, last_nudge_at, expires_at, activity FROM human_needed_event
 WHERE bot_id = $1 AND workspace_id = $2 AND event_id = $3
 FOR UPDATE
 `
@@ -484,13 +505,14 @@ func (q *Queries) GetHumanNeededEventForBot(ctx context.Context, arg GetHumanNee
 		&i.EscalatedAt,
 		&i.LastNudgeAt,
 		&i.ExpiresAt,
+		&i.Activity,
 	)
 	return i, err
 }
 
 const getMemberBotBinding = `-- name: GetMemberBotBinding :one
 
-SELECT id, workspace_id, user_id, bot_id, mode, resend_after_seconds, escalate_after_seconds, created_at, updated_at, verified_at, revoked_at, broken_notified_at FROM member_bot_binding
+SELECT id, workspace_id, user_id, bot_id, mode, resend_after_seconds, escalate_after_seconds, created_at, updated_at, verified_at, revoked_at, broken_notified_at, activity_scope FROM member_bot_binding
 WHERE workspace_id = $1 AND user_id = $2 AND revoked_at IS NULL
 `
 
@@ -516,12 +538,13 @@ func (q *Queries) GetMemberBotBinding(ctx context.Context, arg GetMemberBotBindi
 		&i.VerifiedAt,
 		&i.RevokedAt,
 		&i.BrokenNotifiedAt,
+		&i.ActivityScope,
 	)
 	return i, err
 }
 
 const getMemberBotBindingByID = `-- name: GetMemberBotBindingByID :one
-SELECT id, workspace_id, user_id, bot_id, mode, resend_after_seconds, escalate_after_seconds, created_at, updated_at, verified_at, revoked_at, broken_notified_at FROM member_bot_binding WHERE id = $1
+SELECT id, workspace_id, user_id, bot_id, mode, resend_after_seconds, escalate_after_seconds, created_at, updated_at, verified_at, revoked_at, broken_notified_at, activity_scope FROM member_bot_binding WHERE id = $1
 `
 
 func (q *Queries) GetMemberBotBindingByID(ctx context.Context, id pgtype.UUID) (MemberBotBinding, error) {
@@ -540,8 +563,224 @@ func (q *Queries) GetMemberBotBindingByID(ctx context.Context, id pgtype.UUID) (
 		&i.VerifiedAt,
 		&i.RevokedAt,
 		&i.BrokenNotifiedAt,
+		&i.ActivityScope,
 	)
 	return i, err
+}
+
+const hasHumanNeededForComment = `-- name: HasHumanNeededForComment :one
+SELECT EXISTS (
+    SELECT 1 FROM human_needed_event
+    WHERE bot_id = $1 AND source_comment_id = $2 AND event_type IN ('human_needed', 'human_needed.escalation')
+)::boolean
+`
+
+type HasHumanNeededForCommentParams struct {
+	BotID           pgtype.UUID `json:"bot_id"`
+	SourceCommentID pgtype.UUID `json:"source_comment_id"`
+}
+
+// A comment already pushed to this Bot as "you are needed" (an @, a summon, an
+// ask) is not pushed a second time as plain activity.
+func (q *Queries) HasHumanNeededForComment(ctx context.Context, arg HasHumanNeededForCommentParams) (bool, error) {
+	row := q.db.QueryRow(ctx, hasHumanNeededForComment, arg.BotID, arg.SourceCommentID)
+	var column_1 bool
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
+const listActivityBindingsForChat = `-- name: ListActivityBindingsForChat :many
+SELECT b.id, b.workspace_id, b.user_id, b.bot_id, b.mode, b.resend_after_seconds, b.escalate_after_seconds, b.created_at, b.updated_at, b.verified_at, b.revoked_at, b.broken_notified_at, b.activity_scope FROM member_bot_binding b
+JOIN chat_session cs ON cs.id = $2 AND cs.workspace_id = b.workspace_id AND cs.creator_id = b.user_id
+WHERE b.workspace_id = $1 AND b.revoked_at IS NULL AND b.verified_at IS NOT NULL
+  AND 'owned' = ANY(b.activity_scope)
+`
+
+type ListActivityBindingsForChatParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	ID          pgtype.UUID `json:"id"`
+}
+
+// A chat is the opener's own: only 'owned' reaches it.
+func (q *Queries) ListActivityBindingsForChat(ctx context.Context, arg ListActivityBindingsForChatParams) ([]MemberBotBinding, error) {
+	rows, err := q.db.Query(ctx, listActivityBindingsForChat, arg.WorkspaceID, arg.ID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []MemberBotBinding{}
+	for rows.Next() {
+		var i MemberBotBinding
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.UserID,
+			&i.BotID,
+			&i.Mode,
+			&i.ResendAfterSeconds,
+			&i.EscalateAfterSeconds,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.VerifiedAt,
+			&i.RevokedAt,
+			&i.BrokenNotifiedAt,
+			&i.ActivityScope,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listActivityBindingsForIssue = `-- name: ListActivityBindingsForIssue :many
+SELECT b.id, b.workspace_id, b.user_id, b.bot_id, b.mode, b.resend_after_seconds, b.escalate_after_seconds, b.created_at, b.updated_at, b.verified_at, b.revoked_at, b.broken_notified_at, b.activity_scope FROM member_bot_binding b
+JOIN issue i ON i.id = $2 AND i.workspace_id = b.workspace_id
+WHERE b.workspace_id = $1 AND b.revoked_at IS NULL AND b.verified_at IS NOT NULL
+  AND cardinality(b.activity_scope) > 0
+  AND (
+    ('owned' = ANY(b.activity_scope) AND (
+        (i.creator_type = 'member' AND i.creator_id = b.user_id)
+        OR (i.assignee_type = 'member' AND i.assignee_id = b.user_id)
+        OR (i.assignee_type = 'squad' AND EXISTS (
+              SELECT 1 FROM squad sq WHERE sq.id = i.assignee_id AND sq.creator_id = b.user_id))
+        OR (i.origin_chat_session_id IS NOT NULL AND EXISTS (
+              SELECT 1 FROM chat_session cs WHERE cs.id = i.origin_chat_session_id AND cs.creator_id = b.user_id))
+    ))
+    OR ('followed' = ANY(b.activity_scope) AND EXISTS (
+        SELECT 1 FROM issue_subscriber sub
+        WHERE sub.issue_id = i.id AND sub.user_type = 'member' AND sub.user_id = b.user_id
+          AND sub.unsubscribed_at IS NULL))
+  )
+`
+
+type ListActivityBindingsForIssueParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	ID          pgtype.UUID `json:"id"`
+}
+
+// Bindings whose stream covers this ticket: verified, scope on, and the person
+// either owns it (created it, is assigned, leads the squad it is assigned to,
+// or opened the chat that made it) or follows it (an active subscription,
+// which includes everyone @-ed or delegated for).
+func (q *Queries) ListActivityBindingsForIssue(ctx context.Context, arg ListActivityBindingsForIssueParams) ([]MemberBotBinding, error) {
+	rows, err := q.db.Query(ctx, listActivityBindingsForIssue, arg.WorkspaceID, arg.ID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []MemberBotBinding{}
+	for rows.Next() {
+		var i MemberBotBinding
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.UserID,
+			&i.BotID,
+			&i.Mode,
+			&i.ResendAfterSeconds,
+			&i.EscalateAfterSeconds,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.VerifiedAt,
+			&i.RevokedAt,
+			&i.BrokenNotifiedAt,
+			&i.ActivityScope,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listActivityForBot = `-- name: ListActivityForBot :many
+SELECT sequence, event_id, workspace_id, bot_id, binding_id, target_user_id, event_type, parent_event_id, kind, dedupe_key, issue_id, chat_session_id, summon_id, inbox_item_id, source_comment_id, caller_type, caller_id, question, options, urgency, deadline, status, reason, attempts, next_attempt_at, created_at, sent_at, woken_at, relayed_at, relay_channel, relay_ref, answered_at, answer, answer_comment_id, escalated_at, last_nudge_at, expires_at, activity FROM human_needed_event
+WHERE bot_id = $1 AND workspace_id = $2 AND event_type = 'activity'
+  AND status = ANY($3::text[])
+  AND ($5::bigint IS NULL OR sequence < $5::bigint)
+ORDER BY sequence DESC
+LIMIT $4
+`
+
+type ListActivityForBotParams struct {
+	BotID       pgtype.UUID `json:"bot_id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	Column3     []string    `json:"column_3"`
+	Limit       int32       `json:"limit"`
+	Before      pgtype.Int8 `json:"before"`
+}
+
+// What the stream still holds for a Bot that missed pushes (restart, outage).
+func (q *Queries) ListActivityForBot(ctx context.Context, arg ListActivityForBotParams) ([]HumanNeededEvent, error) {
+	rows, err := q.db.Query(ctx, listActivityForBot,
+		arg.BotID,
+		arg.WorkspaceID,
+		arg.Column3,
+		arg.Limit,
+		arg.Before,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []HumanNeededEvent{}
+	for rows.Next() {
+		var i HumanNeededEvent
+		if err := rows.Scan(
+			&i.Sequence,
+			&i.EventID,
+			&i.WorkspaceID,
+			&i.BotID,
+			&i.BindingID,
+			&i.TargetUserID,
+			&i.EventType,
+			&i.ParentEventID,
+			&i.Kind,
+			&i.DedupeKey,
+			&i.IssueID,
+			&i.ChatSessionID,
+			&i.SummonID,
+			&i.InboxItemID,
+			&i.SourceCommentID,
+			&i.CallerType,
+			&i.CallerID,
+			&i.Question,
+			&i.Options,
+			&i.Urgency,
+			&i.Deadline,
+			&i.Status,
+			&i.Reason,
+			&i.Attempts,
+			&i.NextAttemptAt,
+			&i.CreatedAt,
+			&i.SentAt,
+			&i.WokenAt,
+			&i.RelayedAt,
+			&i.RelayChannel,
+			&i.RelayRef,
+			&i.AnsweredAt,
+			&i.Answer,
+			&i.AnswerCommentID,
+			&i.EscalatedAt,
+			&i.LastNudgeAt,
+			&i.ExpiresAt,
+			&i.Activity,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listHumanChannelHealth = `-- name: ListHumanChannelHealth :many
@@ -599,7 +838,7 @@ func (q *Queries) ListHumanChannelHealth(ctx context.Context) ([]ListHumanChanne
 }
 
 const listHumanNeededForBot = `-- name: ListHumanNeededForBot :many
-SELECT sequence, event_id, workspace_id, bot_id, binding_id, target_user_id, event_type, parent_event_id, kind, dedupe_key, issue_id, chat_session_id, summon_id, inbox_item_id, source_comment_id, caller_type, caller_id, question, options, urgency, deadline, status, reason, attempts, next_attempt_at, created_at, sent_at, woken_at, relayed_at, relay_channel, relay_ref, answered_at, answer, answer_comment_id, escalated_at, last_nudge_at, expires_at FROM human_needed_event
+SELECT sequence, event_id, workspace_id, bot_id, binding_id, target_user_id, event_type, parent_event_id, kind, dedupe_key, issue_id, chat_session_id, summon_id, inbox_item_id, source_comment_id, caller_type, caller_id, question, options, urgency, deadline, status, reason, attempts, next_attempt_at, created_at, sent_at, woken_at, relayed_at, relay_channel, relay_ref, answered_at, answer, answer_comment_id, escalated_at, last_nudge_at, expires_at, activity FROM human_needed_event
 WHERE bot_id = $1 AND workspace_id = $2 AND event_type = 'human_needed'
   AND status = ANY($3::text[])
   AND ($5::bigint IS NULL OR sequence < $5::bigint)
@@ -670,6 +909,7 @@ func (q *Queries) ListHumanNeededForBot(ctx context.Context, arg ListHumanNeeded
 			&i.EscalatedAt,
 			&i.LastNudgeAt,
 			&i.ExpiresAt,
+			&i.Activity,
 		); err != nil {
 			return nil, err
 		}
@@ -682,7 +922,7 @@ func (q *Queries) ListHumanNeededForBot(ctx context.Context, arg ListHumanNeeded
 }
 
 const listHumanNeededToEscalate = `-- name: ListHumanNeededToEscalate :many
-SELECT e.sequence, e.event_id, e.workspace_id, e.bot_id, e.binding_id, e.target_user_id, e.event_type, e.parent_event_id, e.kind, e.dedupe_key, e.issue_id, e.chat_session_id, e.summon_id, e.inbox_item_id, e.source_comment_id, e.caller_type, e.caller_id, e.question, e.options, e.urgency, e.deadline, e.status, e.reason, e.attempts, e.next_attempt_at, e.created_at, e.sent_at, e.woken_at, e.relayed_at, e.relay_channel, e.relay_ref, e.answered_at, e.answer, e.answer_comment_id, e.escalated_at, e.last_nudge_at, e.expires_at FROM human_needed_event e
+SELECT e.sequence, e.event_id, e.workspace_id, e.bot_id, e.binding_id, e.target_user_id, e.event_type, e.parent_event_id, e.kind, e.dedupe_key, e.issue_id, e.chat_session_id, e.summon_id, e.inbox_item_id, e.source_comment_id, e.caller_type, e.caller_id, e.question, e.options, e.urgency, e.deadline, e.status, e.reason, e.attempts, e.next_attempt_at, e.created_at, e.sent_at, e.woken_at, e.relayed_at, e.relay_channel, e.relay_ref, e.answered_at, e.answer, e.answer_comment_id, e.escalated_at, e.last_nudge_at, e.expires_at, e.activity FROM human_needed_event e
 JOIN member_bot_binding b ON b.id = e.binding_id
 WHERE e.event_type = 'human_needed' AND e.escalated_at IS NULL
   AND e.status IN ('sent', 'woken')
@@ -743,6 +983,7 @@ func (q *Queries) ListHumanNeededToEscalate(ctx context.Context) ([]HumanNeededE
 			&i.EscalatedAt,
 			&i.LastNudgeAt,
 			&i.ExpiresAt,
+			&i.Activity,
 		); err != nil {
 			return nil, err
 		}
@@ -755,7 +996,7 @@ func (q *Queries) ListHumanNeededToEscalate(ctx context.Context) ([]HumanNeededE
 }
 
 const listHumanNeededToNudge = `-- name: ListHumanNeededToNudge :many
-SELECT sequence, event_id, workspace_id, bot_id, binding_id, target_user_id, event_type, parent_event_id, kind, dedupe_key, issue_id, chat_session_id, summon_id, inbox_item_id, source_comment_id, caller_type, caller_id, question, options, urgency, deadline, status, reason, attempts, next_attempt_at, created_at, sent_at, woken_at, relayed_at, relay_channel, relay_ref, answered_at, answer, answer_comment_id, escalated_at, last_nudge_at, expires_at FROM human_needed_event
+SELECT sequence, event_id, workspace_id, bot_id, binding_id, target_user_id, event_type, parent_event_id, kind, dedupe_key, issue_id, chat_session_id, summon_id, inbox_item_id, source_comment_id, caller_type, caller_id, question, options, urgency, deadline, status, reason, attempts, next_attempt_at, created_at, sent_at, woken_at, relayed_at, relay_channel, relay_ref, answered_at, answer, answer_comment_id, escalated_at, last_nudge_at, expires_at, activity FROM human_needed_event
 WHERE event_type = 'human_needed' AND escalated_at IS NOT NULL
   AND status IN ('sent', 'woken', 'queued')
   AND COALESCE(last_nudge_at, escalated_at) < now() - interval '30 minutes'
@@ -811,6 +1052,7 @@ func (q *Queries) ListHumanNeededToNudge(ctx context.Context) ([]HumanNeededEven
 			&i.EscalatedAt,
 			&i.LastNudgeAt,
 			&i.ExpiresAt,
+			&i.Activity,
 		); err != nil {
 			return nil, err
 		}
@@ -823,7 +1065,7 @@ func (q *Queries) ListHumanNeededToNudge(ctx context.Context) ([]HumanNeededEven
 }
 
 const listOpenHumanNeededForBinding = `-- name: ListOpenHumanNeededForBinding :many
-SELECT sequence, event_id, workspace_id, bot_id, binding_id, target_user_id, event_type, parent_event_id, kind, dedupe_key, issue_id, chat_session_id, summon_id, inbox_item_id, source_comment_id, caller_type, caller_id, question, options, urgency, deadline, status, reason, attempts, next_attempt_at, created_at, sent_at, woken_at, relayed_at, relay_channel, relay_ref, answered_at, answer, answer_comment_id, escalated_at, last_nudge_at, expires_at FROM human_needed_event
+SELECT sequence, event_id, workspace_id, bot_id, binding_id, target_user_id, event_type, parent_event_id, kind, dedupe_key, issue_id, chat_session_id, summon_id, inbox_item_id, source_comment_id, caller_type, caller_id, question, options, urgency, deadline, status, reason, attempts, next_attempt_at, created_at, sent_at, woken_at, relayed_at, relay_channel, relay_ref, answered_at, answer, answer_comment_id, escalated_at, last_nudge_at, expires_at, activity FROM human_needed_event
 WHERE binding_id = $1 AND event_type = 'human_needed'
   AND status IN ('queued', 'sending', 'sent', 'woken', 'relayed')
 ORDER BY sequence
@@ -876,6 +1118,7 @@ func (q *Queries) ListOpenHumanNeededForBinding(ctx context.Context, bindingID p
 			&i.EscalatedAt,
 			&i.LastNudgeAt,
 			&i.ExpiresAt,
+			&i.Activity,
 		); err != nil {
 			return nil, err
 		}
@@ -918,6 +1161,42 @@ WHERE event_id = $1
 
 func (q *Queries) MarkHumanNeededEscalated(ctx context.Context, eventID pgtype.UUID) error {
 	_, err := q.db.Exec(ctx, markHumanNeededEscalated, eventID)
+	return err
+}
+
+const purgeActivityEvents = `-- name: PurgeActivityEvents :execrows
+DELETE FROM human_needed_event
+WHERE event_type = 'activity'
+  AND created_at < now() - interval '14 days'
+  AND status NOT IN ('queued', 'sending', 'sent', 'woken', 'relayed')
+`
+
+// Finished stream rows are history nobody reads; keep two weeks.
+func (q *Queries) PurgeActivityEvents(ctx context.Context) (int64, error) {
+	result, err := q.db.Exec(ctx, purgeActivityEvents)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const recordActivityHandled = `-- name: RecordActivityHandled :exec
+UPDATE human_needed_event
+SET status = CASE WHEN status IN ('queued', 'sending', 'sent', 'woken', 'relayed') THEN 'handled' ELSE status END,
+    woken_at = COALESCE(woken_at, now()),
+    reason = CASE WHEN status IN ('queued', 'sending', 'sent', 'woken', 'relayed') THEN $2::text ELSE reason END
+WHERE event_id = $1 AND event_type = 'activity'
+`
+
+type RecordActivityHandledParams struct {
+	EventID pgtype.UUID `json:"event_id"`
+	Reason  string      `json:"reason"`
+}
+
+// The Bot looked and decided nobody needs telling. A handled receipt also
+// proves the Bot woke.
+func (q *Queries) RecordActivityHandled(ctx context.Context, arg RecordActivityHandledParams) error {
+	_, err := q.db.Exec(ctx, recordActivityHandled, arg.EventID, arg.Reason)
 	return err
 }
 
@@ -1022,7 +1301,7 @@ const revokeMemberBotBinding = `-- name: RevokeMemberBotBinding :one
 UPDATE member_bot_binding
 SET revoked_at = now(), updated_at = now()
 WHERE workspace_id = $1 AND user_id = $2 AND revoked_at IS NULL
-RETURNING id, workspace_id, user_id, bot_id, mode, resend_after_seconds, escalate_after_seconds, created_at, updated_at, verified_at, revoked_at, broken_notified_at
+RETURNING id, workspace_id, user_id, bot_id, mode, resend_after_seconds, escalate_after_seconds, created_at, updated_at, verified_at, revoked_at, broken_notified_at, activity_scope
 `
 
 type RevokeMemberBotBindingParams struct {
@@ -1046,6 +1325,42 @@ func (q *Queries) RevokeMemberBotBinding(ctx context.Context, arg RevokeMemberBo
 		&i.VerifiedAt,
 		&i.RevokedAt,
 		&i.BrokenNotifiedAt,
+		&i.ActivityScope,
+	)
+	return i, err
+}
+
+const setMemberBotBindingActivityScope = `-- name: SetMemberBotBindingActivityScope :one
+
+UPDATE member_bot_binding
+SET activity_scope = $2, updated_at = now()
+WHERE id = $1 AND revoked_at IS NULL
+RETURNING id, workspace_id, user_id, bot_id, mode, resend_after_seconds, escalate_after_seconds, created_at, updated_at, verified_at, revoked_at, broken_notified_at, activity_scope
+`
+
+type SetMemberBotBindingActivityScopeParams struct {
+	ID            pgtype.UUID `json:"id"`
+	ActivityScope []string    `json:"activity_scope"`
+}
+
+// ---- activity stream (DENE-1935) ----
+func (q *Queries) SetMemberBotBindingActivityScope(ctx context.Context, arg SetMemberBotBindingActivityScopeParams) (MemberBotBinding, error) {
+	row := q.db.QueryRow(ctx, setMemberBotBindingActivityScope, arg.ID, arg.ActivityScope)
+	var i MemberBotBinding
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.UserID,
+		&i.BotID,
+		&i.Mode,
+		&i.ResendAfterSeconds,
+		&i.EscalateAfterSeconds,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.VerifiedAt,
+		&i.RevokedAt,
+		&i.BrokenNotifiedAt,
+		&i.ActivityScope,
 	)
 	return i, err
 }
@@ -1066,7 +1381,7 @@ SET status = 'answered', answered_at = now(), answer_comment_id = $3,
 WHERE issue_id = $1 AND target_user_id = $2 AND summon_id IS NULL
   AND event_type = 'human_needed'
   AND status IN ('sent', 'woken', 'relayed')
-RETURNING sequence, event_id, workspace_id, bot_id, binding_id, target_user_id, event_type, parent_event_id, kind, dedupe_key, issue_id, chat_session_id, summon_id, inbox_item_id, source_comment_id, caller_type, caller_id, question, options, urgency, deadline, status, reason, attempts, next_attempt_at, created_at, sent_at, woken_at, relayed_at, relay_channel, relay_ref, answered_at, answer, answer_comment_id, escalated_at, last_nudge_at, expires_at
+RETURNING sequence, event_id, workspace_id, bot_id, binding_id, target_user_id, event_type, parent_event_id, kind, dedupe_key, issue_id, chat_session_id, summon_id, inbox_item_id, source_comment_id, caller_type, caller_id, question, options, urgency, deadline, status, reason, attempts, next_attempt_at, created_at, sent_at, woken_at, relayed_at, relay_channel, relay_ref, answered_at, answer, answer_comment_id, escalated_at, last_nudge_at, expires_at, activity
 `
 
 type SettleHumanNeededByCommentParams struct {
@@ -1124,6 +1439,7 @@ func (q *Queries) SettleHumanNeededByComment(ctx context.Context, arg SettleHuma
 			&i.EscalatedAt,
 			&i.LastNudgeAt,
 			&i.ExpiresAt,
+			&i.Activity,
 		); err != nil {
 			return nil, err
 		}
@@ -1166,7 +1482,7 @@ const updateMemberBotBindingSettings = `-- name: UpdateMemberBotBindingSettings 
 UPDATE member_bot_binding
 SET mode = $2, resend_after_seconds = $3, escalate_after_seconds = $4, updated_at = now()
 WHERE id = $1 AND revoked_at IS NULL
-RETURNING id, workspace_id, user_id, bot_id, mode, resend_after_seconds, escalate_after_seconds, created_at, updated_at, verified_at, revoked_at, broken_notified_at
+RETURNING id, workspace_id, user_id, bot_id, mode, resend_after_seconds, escalate_after_seconds, created_at, updated_at, verified_at, revoked_at, broken_notified_at, activity_scope
 `
 
 type UpdateMemberBotBindingSettingsParams struct {
@@ -1197,6 +1513,7 @@ func (q *Queries) UpdateMemberBotBindingSettings(ctx context.Context, arg Update
 		&i.VerifiedAt,
 		&i.RevokedAt,
 		&i.BrokenNotifiedAt,
+		&i.ActivityScope,
 	)
 	return i, err
 }

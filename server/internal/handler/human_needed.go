@@ -43,6 +43,9 @@ type BotBindingResponse struct {
 	EscalateAfterSeconds int32   `json:"escalate_after_seconds,omitempty"`
 	VerifiedAt           *string `json:"verified_at,omitempty"`
 	OpenCount            int64   `json:"open_count"`
+	// ActivityScope is which tickets and chats the full activity stream
+	// covers: "owned", "followed", both, or empty (off).
+	ActivityScope []string `json:"activity_scope"`
 }
 
 func humanChannelState(c db.GetHumanChannelRow) (string, string) {
@@ -62,7 +65,8 @@ func (h *Handler) botBindingResponse(ctx context.Context, c db.GetHumanChannelRo
 		Bound: true, State: state, Message: message,
 		BotID: uuidToString(c.BotID), BotName: c.BotName, Mode: c.Mode,
 		ResendAfterSeconds: c.ResendAfterSeconds, EscalateAfterSeconds: c.EscalateAfterSeconds,
-		VerifiedAt: timestampToPtr(c.VerifiedAt),
+		VerifiedAt:    timestampToPtr(c.VerifiedAt),
+		ActivityScope: append([]string{}, c.ActivityScope...),
 	}
 	if n, err := h.Queries.CountOpenHumanNeededForBot(ctx, c.BotID); err == nil {
 		resp.OpenCount = n
@@ -104,7 +108,7 @@ func (h *Handler) GetBotBinding(w http.ResponseWriter, r *http.Request) {
 	}
 	c, err := h.Queries.GetHumanChannel(r.Context(), db.GetHumanChannelParams{WorkspaceID: ws, UserID: user})
 	if errors.Is(err, pgx.ErrNoRows) {
-		writeJSON(w, http.StatusOK, BotBindingResponse{State: humanStateNone, Message: "没有连接 Bot；要你决定的事走站内提醒"})
+		writeJSON(w, http.StatusOK, BotBindingResponse{State: humanStateNone, Message: "没有连接 Bot；要你决定的事走站内提醒", ActivityScope: []string{}})
 		return
 	}
 	if err != nil {
@@ -119,6 +123,9 @@ type putBotBindingRequest struct {
 	Mode                 string `json:"mode"`
 	ResendAfterSeconds   *int32 `json:"resend_after_seconds"`
 	EscalateAfterSeconds *int32 `json:"escalate_after_seconds"`
+	// ActivityScope switches the full activity stream: absent leaves it as
+	// is, [] turns it off.
+	ActivityScope *[]string `json:"activity_scope"`
 }
 
 // PutBotBinding is PUT /api/workspaces/{id}/me/bot-binding: choose your own
@@ -190,6 +197,18 @@ func (h *Handler) PutBotBinding(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "重发等待 30–3600 秒，升级等待 60–7200 秒")
 		return
 	}
+	scope := []string{}
+	if hasExisting {
+		scope = existing.ActivityScope
+	}
+	if req.ActivityScope != nil {
+		normalized, scopeErr := service.NormalizeActivityScope(*req.ActivityScope)
+		if scopeErr != nil {
+			writeError(w, http.StatusBadRequest, "动态流范围只能是 owned（我的）、followed（我关注的）或两者都选")
+			return
+		}
+		scope = normalized
+	}
 	var binding db.MemberBotBinding
 	if hasExisting && existing.BotID == botID {
 		binding, err = h.Queries.UpdateMemberBotBindingSettings(ctx, db.UpdateMemberBotBindingSettingsParams{
@@ -208,6 +227,12 @@ func (h *Handler) PutBotBinding(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to save bot binding")
 		return
 	}
+	if !stringSlicesEqual(binding.ActivityScope, scope) {
+		if binding, err = h.Queries.SetMemberBotBindingActivityScope(ctx, db.SetMemberBotBindingActivityScopeParams{ID: binding.ID, ActivityScope: scope}); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to save activity scope")
+			return
+		}
+	}
 	if !binding.VerifiedAt.Valid {
 		if _, err := service.CreateHumanChannelVerify(ctx, h.Queries, binding); err != nil {
 			slog.Warn("bot binding: verify event failed", "error", err)
@@ -219,6 +244,18 @@ func (h *Handler) PutBotBinding(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, h.botBindingResponse(ctx, c))
+}
+
+func stringSlicesEqual(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }
 
 // VerifyBotBinding is POST .../me/bot-binding/verify: ask the Bot to confirm
