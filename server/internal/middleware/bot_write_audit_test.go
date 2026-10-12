@@ -74,7 +74,10 @@ type auditRow struct{ err error }
 
 func (r auditRow) Scan(...interface{}) error { return r.err }
 
-func uuidKey(u pgtype.UUID) string { return fmt.Sprintf("%x", u.Bytes) }
+func uuidKey(u pgtype.UUID) string {
+	b := u.Bytes
+	return fmt.Sprintf("%x-%x-%x-%x-%x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:16])
+}
 
 func mustUUIDNoT(s string) pgtype.UUID {
 	var u pgtype.UUID
