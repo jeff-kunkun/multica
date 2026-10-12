@@ -1955,6 +1955,8 @@
     "usage_priority_description": "Dans un palier, les sièges à usage large passent en premier",
     "allow_upshift_label": "Autoriser un palier au-dessus",
     "allow_upshift_description": "Si tous les sièges du palier sont serrés, un siège large du palier supérieur est choisi",
+    "strongest_gate_label": "Palier le plus fort seulement si personne d’autre",
+    "strongest_gate_description": "Utilisé seulement si son quota n’est pas serré et qu’aucun siège fort ou moyen ne peut prendre le travail ; le commentaire dit pourquoi",
     "continuation_label": "Préférer l'exécutant précédent",
     "continuation_description_on": "Actif : un ticket qui poursuit l'étape précédente, son parent ou son lot va à l'exécutant de ce travail s'il est assez fort, en ligne et dispose de quota.",
     "continuation_description_shadow": "Mode fantôme : le routage garde son choix et indique seulement dans le commentaire qui cette règle choisirait. Activez pour l'appliquer.",

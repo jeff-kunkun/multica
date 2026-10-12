@@ -1955,6 +1955,8 @@
     "usage_priority_description": "Within a tier, seats with ample usage go first",
     "allow_upshift_label": "Allow one tier up",
     "allow_upshift_description": "When every seat on the tier is tight, use an ample seat from the tier above",
+    "strongest_gate_label": "Strongest tier only when nobody else can",
+    "strongest_gate_description": "Used only when its quota is not tight and no strong or medium seat can take the work; the comment says why",
     "continuation_label": "Prefer the previous executor",
     "continuation_description_on": "Live: a ticket continuing a previous stage, its parent, or its batch goes to that work's executor when the seat is strong enough, online and has quota.",
     "continuation_description_shadow": "Shadow mode: routing keeps its own pick and only notes in the assignment comment who this rule would pick. Turn on to apply it.",

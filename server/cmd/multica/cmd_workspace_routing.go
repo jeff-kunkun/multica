@@ -44,6 +44,11 @@ triggers it (default 0.3), --learn-window-days [1, 365] how far back it looks
 (default 30); a class needs at least 5 tickets. See the numbers with:
 multica workspace routing learning --output json
 
+--strongest-gate on|off is 最强档门槛 (DENE-1834): the strongest tier takes a
+ticket only when its seat is not tagged 紧张 and no strong or medium seat can
+take the work; the assignment comment then says 为什么非她不可. On by default;
+a person's tier label and 允许上调一档 are not gated.
+
 --judged-review on|off is 按判断配验收. It is kept so old configs still read:
 since DENE-1677 the rule table (multica workspace routing rules) decides
 whether a ticket needs a check, so the switch has no effect.`,
@@ -64,6 +69,7 @@ func init() {
 	workspaceRoutingSetCmd.Flags().String("learn-window-days", "", "从结果里学: days of history the rate is taken over, [1, 365]")
 	workspaceRoutingSetCmd.Flags().String("usage-priority", "", "用量优先 switch: on (ample seats first) or off (stable name order)")
 	workspaceRoutingSetCmd.Flags().String("allow-upshift", "", "允许上调一档 switch: on (borrow an ample seat from the tier above) or off")
+	workspaceRoutingSetCmd.Flags().String("strongest-gate", "", "最强档门槛 switch: on (strongest tier only when quota is not tight and no strong/medium seat can take it) or off")
 	workspaceRoutingSetCmd.Flags().String("judged-review", "", "按判断配验收 switch (no effect since the rule table decides the check; kept for old configs)")
 	workspaceRoutingSetCmd.Flags().String("confidence-threshold", "", "Confidence floor for the routing model (0, 1]")
 	workspaceRoutingSetCmd.Flags().String("stale-review-hours", "", "Hours before an inactive in-review ticket is checked (0, 8760]")
@@ -98,6 +104,11 @@ func routingView(block map[string]any) map[string]any {
 		usagePriority = true
 	}
 	allowUpshift, _ := block["allow_upshift"].(bool)
+	strongestGate, ok := block["strongest_gate"].(bool)
+	if !ok {
+		// Missing reads as on, the same as the server.
+		strongestGate = true
+	}
 	learn, _ := block["learn_from_outcomes"].(bool)
 	lowRate := routing.DefaultLearnLowRate
 	if value, ok := numberFromRoutingBlock(block, "learn_low_rate"); ok && value > 0 && value <= 1 {
@@ -121,7 +132,7 @@ func routingView(block map[string]any) map[string]any {
 		"prefer_continuation": continuation, "continuation_mode": switchMode(continuation),
 		"prefer_idle": idle, "load_mode": switchMode(idle),
 		"learn_from_outcomes": learn, "learn_mode": switchMode(learn), "learn_low_rate": lowRate, "learn_window_days": windowDays,
-		"usage_priority": usagePriority, "allow_upshift": allowUpshift, "judged_review": judgedReview,
+		"usage_priority": usagePriority, "allow_upshift": allowUpshift, "strongest_gate": strongestGate, "judged_review": judgedReview,
 		"confidence_threshold": confidenceThreshold, "stale_review_hours": staleReviewHours,
 	}
 }
@@ -191,6 +202,10 @@ func runWorkspaceRoutingSet(cmd *cobra.Command, _ []string) error {
 	if allowUpshift != "" && allowUpshift != "on" && allowUpshift != "off" {
 		return fmt.Errorf("--allow-upshift must be on or off")
 	}
+	strongestGate, _ := cmd.Flags().GetString("strongest-gate")
+	if strongestGate != "" && strongestGate != "on" && strongestGate != "off" {
+		return fmt.Errorf("--strongest-gate must be on or off")
+	}
 	judgedReview, _ := cmd.Flags().GetString("judged-review")
 	if judgedReview != "" && judgedReview != "on" && judgedReview != "off" {
 		return fmt.Errorf("--judged-review must be on or off")
@@ -242,6 +257,9 @@ func runWorkspaceRoutingSet(cmd *cobra.Command, _ []string) error {
 	}
 	if usagePriority != "" {
 		block["usage_priority"] = usagePriority == "on"
+	}
+	if strongestGate != "" {
+		block["strongest_gate"] = strongestGate == "on"
 	}
 	if allowUpshift != "" {
 		block["allow_upshift"] = allowUpshift == "on"

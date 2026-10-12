@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="zh-Hans">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DENE-1834 设置页「最强档门槛」预览</title>
+<style>
+  :root{--fg:#1f2328;--muted:#6b7280;--bg:#fff;--border:#e5e7eb;--on:#1f2328}
+  *{box-sizing:border-box}
+  body{margin:0;padding:24px;font:14px/1.5 -apple-system,"PingFang SC","Helvetica Neue",sans-serif;color:var(--fg);background:#fafafa}
+  h1{font-size:18px;margin:0 0 4px}
+  p.sub{margin:0 0 20px;color:var(--muted)}
+  h2{font-size:14px;margin:28px 0 8px;color:var(--muted);font-weight:500}
+  .frames{display:flex;gap:24px;flex-wrap:wrap;align-items:flex-start}
+  .frame{background:var(--bg);border:1px solid var(--border);border-radius:10px;overflow:hidden}
+  .frame .bar{padding:6px 10px;font-size:12px;color:var(--muted);border-bottom:1px solid var(--border);background:#fcfcfc}
+  .desk{width:640px}.mob{width:390px}
+  .rows{padding:4px 16px}
+  .row{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;padding:12px 0;border-bottom:1px solid var(--border)}
+  .row:last-child{border-bottom:0}
+  .row .label{font-weight:500}
+  .row .desc{color:var(--muted);font-size:13px;margin-top:2px}
+  .sw{flex:none;width:36px;height:20px;border-radius:999px;background:#d1d5db;position:relative;margin-top:2px}
+  .sw::after{content:"";position:absolute;top:2px;left:2px;width:16px;height:16px;border-radius:50%;background:#fff}
+  .sw.on{background:var(--on)}.sw.on::after{left:18px}
+  .new{outline:2px solid #1f2328;outline-offset:-2px;border-radius:6px;padding:12px 6px;margin:0 -6px}
+  pre{background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:12px;font-size:12px;overflow:auto;white-space:pre-wrap}
+  .note{color:var(--muted);font-size:12px}
+</style>
+</head>
+<body>
+<h1>设置 → 路由：新增一行「最强档只派非她不可的活」</h1>
+<p class="sub">沿用现有行式布局（名称 + 一句说明 + 开关），默认开。放在「允许上调一档」下面。粗框标出新行。</p>
+
+<div class="frames">
+  <div class="frame desk">
+    <div class="bar">桌面 / 网页 · 1280 宽（截取路由分区）</div>
+    <div class="rows">
+      <div class="row"><div><div class="label">用量优先</div><div class="desc">同档内先派用量充足的席位</div></div><div class="sw on"></div></div>
+      <div class="row"><div><div class="label">允许上调一档</div><div class="desc">本档全部紧张时，改派上一档用量充足的席位</div></div><div class="sw"></div></div>
+      <div class="row new"><div><div class="label">最强档只派非她不可的活</div><div class="desc">额度不紧张且强档、中档都没人能接时才派最强档，并写明原因</div></div><div class="sw on"></div></div>
+      <div class="row"><div><div class="label">接着做</div><div class="desc">影子运行：只在评论里说会选谁，不改实际选择</div></div><div class="sw"></div></div>
+    </div>
+  </div>
+  <div class="frame mob">
+    <div class="bar">手机网页 · 390 宽</div>
+    <div class="rows">
+      <div class="row"><div><div class="label">允许上调一档</div><div class="desc">本档全部紧张时，改派上一档用量充足的席位</div></div><div class="sw"></div></div>
+      <div class="row new"><div><div class="label">最强档只派非她不可的活</div><div class="desc">额度不紧张且强档、中档都没人能接时才派最强档，并写明原因</div></div><div class="sw on"></div></div>
+      <div class="row"><div><div class="label">接着做</div><div class="desc">影子运行：只在评论里说会选谁，不改实际选择</div></div><div class="sw"></div></div>
+    </div>
+  </div>
+</div>
+
+<h2>派单评论里多的一行（两种结果）</h2>
+<pre>最强档门槛：强档有合适席位 孙悟空，不派最强档，改派强档</pre>
+<pre>最强档门槛：为什么非她不可：强档 孙悟空 离线，中档 克林 额度用尽；布尔玛 额度充足</pre>
+
+<h2>命令行</h2>
+<pre>multica workspace routing get            # strongest_gate: true
+multica workspace routing set --strongest-gate off</pre>
+<p class="note">原生 App 没有路由设置页，没有同一屏，所以本件不改 apps/mobile。</p>
+</body>
+</html>

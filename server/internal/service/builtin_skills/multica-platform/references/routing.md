@@ -198,6 +198,20 @@ multica workspace routing set --usage-priority off
 multica workspace routing set --allow-upshift on
 ```
 
+**最强档门槛 (DENE-1834).** The strongest tier is the scarce one: routing writes
+it only when its seat is not tagged 紧张 **and** no seat on the strong or
+medium rung can take the work (offline, out of quota, missing, or filtered
+out by the 分工规则). When it does, the 「自动选派」 comment carries a line
+starting 「最强档门槛：为什么非她不可」 naming, rung by rung, why nobody else
+could; when it does not, the line says which lower seat took the ticket and
+why (「强档有合适席位 X」 or 「X 额度紧张」). A tight top seat yields even to
+the weak rung. A person's tier label, 允许上调一档 and a 从结果里学 raise are
+not gated. On by default (`strongest_gate`), off with:
+
+```bash
+multica workspace routing set --strongest-gate off
+```
+
 Both flags write the existing `settings.routing` fields used by the web
 settings page; they do not create a CLI-only policy.
 

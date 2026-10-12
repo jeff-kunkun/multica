@@ -7,7 +7,7 @@ import (
 
 func newWorkspaceRoutingSetTestCmd() *cobra.Command {
 	cmd := newRoutingProjectsTestCmd()
-	for _, f := range []string{"source", "runtime", "model", "thinking", "continuation", "load", "usage-priority", "allow-upshift", "judged-review", "confidence-threshold", "stale-review-hours", "learn", "learn-low-rate", "learn-window-days"} {
+	for _, f := range []string{"source", "runtime", "model", "thinking", "continuation", "load", "usage-priority", "allow-upshift", "strongest-gate", "judged-review", "confidence-threshold", "stale-review-hours", "learn", "learn-low-rate", "learn-window-days"} {
 		cmd.Flags().String(f, "", "")
 	}
 	return cmd
@@ -77,6 +77,25 @@ func TestWorkspaceRoutingSetTierSwitches(t *testing.T) {
 	}
 	if got := routingView(block); got["usage_priority"] != false || got["allow_upshift"] != true {
 		t.Fatalf("view = %v", got)
+	}
+	// DENE-1834: 最强档门槛 reads as on when the key is missing, and off is written.
+	if got := routingView(block); got["strongest_gate"] != true {
+		t.Fatalf("strongest_gate default = %v, want on", got["strongest_gate"])
+	}
+	cmd = newWorkspaceRoutingSetTestCmd()
+	_ = cmd.Flags().Set("strongest-gate", "off")
+	if err := runWorkspaceRoutingSet(cmd, nil); err != nil {
+		t.Fatalf("set: %v", err)
+	}
+	settings, _ = patched["settings"].(map[string]any)
+	block, _ = settings["routing"].(map[string]any)
+	if block["strongest_gate"] != false || routingView(block)["strongest_gate"] != false {
+		t.Fatalf("strongest_gate not written: %v", block)
+	}
+	cmd = newWorkspaceRoutingSetTestCmd()
+	_ = cmd.Flags().Set("strongest-gate", "maybe")
+	if err := runWorkspaceRoutingSet(cmd, nil); err == nil {
+		t.Fatal("want an error for --strongest-gate maybe")
 	}
 }
 
