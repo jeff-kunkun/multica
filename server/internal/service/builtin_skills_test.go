@@ -354,6 +354,7 @@ func TestPlatformSkillDescriptionNamesEveryDomain(t *testing.T) {
 	triggerWords := map[string]string{
 		"references/overview.md":        "overview",
 		"references/issues.md":          "issue",
+		"references/status-effects.md":  "status",
 		"references/sub-issues.md":      "sub-issue",
 		"references/wakeups.md":         "wakeup",
 		"references/github-app.md":      "github app",
@@ -361,6 +362,7 @@ func TestPlatformSkillDescriptionNamesEveryDomain(t *testing.T) {
 		"references/close-protocol.md":  "close protocol",
 		"references/mentions.md":        "mention",
 		"references/agents.md":          "agent",
+		"references/agent-env.md":       "env",
 		"references/specialisations.md": "specialisation",
 		"references/squads.md":          "squad",
 		"references/autopilots.md":      "autopilot",
@@ -534,9 +536,6 @@ func TestPlatformSkillCoversPlatformContracts(t *testing.T) {
 				"--resolve-properties",
 				"display_values",
 				"`value` keeps the stored ids",
-				"Acceptance is parent-scoped",
-				"the parent is the one issue that moves to unified `in_review`",
-				"--blocked-by <DENE-N>",
 			},
 			notWant: []string{
 				// MUL-6966 phase 1 banned teaching the generic KV bag.
@@ -665,8 +664,6 @@ func TestPlatformSkillCoversPlatformContracts(t *testing.T) {
 				"`model` is a first-class persisted column",
 				"custom_env",
 				"Never put credentials or other secrets in `custom_args`",
-				"--custom-env-stdin",
-				"--custom-env-file",
 				"multica agent skills add <agent-id> --skill-ids <skill-id> --output json",
 				"multica agent skills list <agent-id> --output json",
 				"multica agent get <agent-id> --output json",
@@ -682,6 +679,30 @@ func TestPlatformSkillCoversPlatformContracts(t *testing.T) {
 				"Define the job first",
 				"Run a low-risk task",
 				"Decision flow",
+			},
+		},
+		{
+			// DENE-1896 split the env/secrets section out of agents.md, which had
+			// crossed the 500-line supporting-file budget. These anchors moved
+			// with the text.
+			file: "references/agent-env.md",
+			want: []string{
+				"--custom-env-stdin",
+				"--custom-env-file",
+				"multica agent create --name <name> --runtime-id <runtime-id>",
+				"write-only",
+			},
+		},
+		{
+			// DENE-1896 split the status side-effect contracts out of issues.md
+			// for the same budget reason. The status keys stay documented in
+			// issues.md; this file must not invent a parallel set.
+			file: "references/status-effects.md",
+			want: []string{
+				"A status change is not cosmetic",
+				"Acceptance is parent-scoped",
+				"the parent is the one issue that moves to unified `in_review`",
+				"--blocked-by <DENE-N>",
 			},
 		},
 		{

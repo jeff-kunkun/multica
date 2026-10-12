@@ -1,6 +1,6 @@
 ---
 name: multica-platform
-description: "Overview, ask, open a chat, consult, goal, inbox, project board/report, sub-issue, wakeup, routing, close protocol, stall, driver, halt, mention, agent, specialisation, squad, autopilot, project, runtime, progress, state card, skill import, transfer, linked workspace, bot, GitHub App. Not app code."
+description: "Overview, ask, open a chat, consult, goal, inbox, project board/report, sub-issue, wakeup, routing, close protocol, stall, driver, halt, mention, agent, specialisation, squad, autopilot, project, runtime, progress, state card, skill import, transfer, linked workspace, bot, GitHub App, status, env."
 user-invocable: false
 allowed-tools: Bash(multica *), Bash(git *), Bash(gh *)
 ---
@@ -29,7 +29,8 @@ See `references/overview.md` for filter semantics and examples.
 
 | Open | When the task is about |
 |---|---|
-| `references/issues.md` | Issues: PR linking vs close intent, reading a linked PR's state, custom properties, status side effects, who else is running, charts vs attached files in a comment |
+| `references/issues.md` | Issues: PR linking vs close intent, reading a linked PR's state, custom properties, who else is running, charts vs attached files in a comment |
+| `references/status-effects.md` | What a status change makes the server do: Backlog parking, In Review completion and parent-scoped acceptance, Blocked failure fields, In Progress recovery |
 | `references/drivers.md` | Who drives an open issue (`driver` in `issue get` / `issue children`), the patrol's rerun-then-escalate, and `multica issue dispose` for one nobody drives |
 | `references/run-control.md` | Stopping issue/chat work with optional related targets, halt / resume, default wakeup merging, the chain budget, the run time limit, and explicit steer / queue / restart |
 | `references/wakeups.md` | Issue wakeups: events, conditions (`--until-*`), timers, check-ins, runaway protection |
@@ -40,7 +41,8 @@ See `references/overview.md` for filter semantics and examples.
 | `references/state-card.md` | Picking up an issue: `multica issue context` (goal, decisions, where it stands, last baton, what changed since you), and writing decisions with `--decision` |
 | `references/close-protocol.md` | Closing an issue: the eight `close.*` keys, conclusion / status / next owner / wake decision tables, blocked-close fields, dispatcher stage promotion |
 | `references/mentions.md` | Writing a `mention://` link: which types enqueue a run, which are inert, why one silently did nothing; a comment that "Woke no one" |
-| `references/agents.md` | Creating, copying or debugging an agent definition: fields, secrets, MCP config, skill binding |
+| `references/agents.md` | Creating, copying or debugging an agent definition: fields, skill binding |
+| `references/agent-env.md` | Agent env and secrets: `custom_env` input channels, redaction, write-only MCP server config |
 | `references/asks.md` | Option questions raised and answered by agents |
 | `references/specialisations.md` | Base roles and specialisations: create by base role + domain, what a child inherits, the two-level cap, runtime following, solidify, the archive guard |
 | `references/squads.md` | Squads: leader routing, roster, recording leader activity, why a squad did or did not run |
@@ -118,7 +120,7 @@ once the ticket is past `todo` (details in `references/routing.md`).
 
 **Status keys identify workflow states; categories describe lifecycle only.**
 Custom statuses do not inherit built-in automation behavior. For status side
-effects and API field meanings, read `references/issues.md`.
+effects read `references/status-effects.md`; for API field meanings, `references/issues.md`.
 
 **Catch up with the state card; Comment reads stay bounded.** `multica issue
 context <id>` lists the goal, settled decisions, where it stands, the last
