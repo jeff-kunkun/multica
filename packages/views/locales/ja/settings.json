@@ -715,6 +715,26 @@
       "granted": "このブラウザは通知バナーを表示できます。",
       "denied": "ブラウザによってブロックされています。ブラウザの設定でこのサイトの通知を許可してください。",
       "enabled_badge": "有効"
+    },
+    "decisions": {
+      "title": "あなたの判断が必要なこと",
+      "label": "自分の Bot に送る",
+      "none": "Bot なし（アプリ内のみ）",
+      "no_bots": "Bot がまだありません。先に Bot を追加してください。",
+      "state_none": "自分の Bot を選ぶと、判断が必要なことがそこに届きます。",
+      "state_ok": "判断が必要なことは先に {{name}} に届きます。",
+      "state_unverified": "{{name}} の受信確認を待っています。",
+      "state_broken": "{{name}} に届きません。判断はアプリ内に戻ります。",
+      "check_again": "再確認",
+      "mirror_label": "アプリ内でも通知する",
+      "mirror_hint": "Bot に加えてアプリ内の通知も残します。",
+      "activity_label": "すべての動きを Bot に送る",
+      "activity_hint": "コメント・チャット・状態変更のすべて。",
+      "activity_off": "オフ",
+      "activity_owned": "自分のチケットとチャット",
+      "activity_followed": "フォロー中のチケット",
+      "activity_both": "自分のものとフォロー中",
+      "toast_failed": "Bot 設定を更新できませんでした"
     }
   },
   "tokens": {

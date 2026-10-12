@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -29,6 +30,7 @@ const (
 	SummonSourceTimeLimit  = "time_limit"  // a run hit the workspace time limit
 	SummonSourceQuotaRelay = "quota_relay" // quota tripped with no seat to relay to
 	SummonSourceMention    = "mention"     // a person or agent @-mentioned a member
+	SummonSourceAskHuman   = "ask_human"   // `multica issue ask-human`: a structured question
 )
 
 // InboxTypeNeedsYou is the inbox row the summon entry writes by default.
@@ -64,6 +66,15 @@ type SummonInput struct {
 	InboxType  string
 	InboxTitle string
 	Details    map[string]any
+	// Question, Options, Urgent and Deadline shape what a Bot-connected person
+	// is told (DENE-1933). Question defaults to Reason.
+	Question string
+	Options  []HumanNeededOption
+	Urgent   bool
+	Deadline time.Time
+	// AskID is the question card (agent_ask) behind this call, when it has
+	// one: the Bot's answer fills the card, and the in-app row carries it.
+	AskID pgtype.UUID
 }
 
 // SummonResult reports what landed. Duplicate means an unanswered call to
@@ -215,9 +226,50 @@ func SummonWith(ctx context.Context, q *db.Queries, in SummonInput) (SummonResul
 	}
 	out.Summon.CommentID = commentID
 	out.Summon.InboxItemID = inboxID
+	if err := routeSummonToBot(ctx, q, in, row, commentID, inboxID, &out); err != nil {
+		return out, err
+	}
 	return out, q.SetIssueSummonDelivery(ctx, db.SetIssueSummonDeliveryParams{
 		ID: row.ID, CommentID: commentID, InboxItemID: inboxID,
 	})
+}
+
+// routeSummonToBot hands the call to the recipient's Bot when they have a
+// usable binding (DENE-1933). Without one nothing changes. The in-app row
+// stays either way, silently read when the Bot is the channel.
+func routeSummonToBot(ctx context.Context, q *db.Queries, in SummonInput, row db.IssueSummon, commentID, inboxID pgtype.UUID, out *SummonResult) error {
+	key := "summon:" + util.UUIDToString(row.ID)
+	if in.Source == SummonSourceMention && commentID.Valid {
+		key = HumanMentionKey(commentID, in.Recipient)
+	}
+	route, err := RouteHumanNeeded(ctx, q, HumanNeededInput{
+		WorkspaceID: in.Issue.WorkspaceID,
+		Target:      in.Recipient,
+		Kind:        row.Source,
+		DedupeKey:   key,
+		IssueID:     in.Issue.ID,
+		SummonID:    row.ID,
+		InboxItemID: inboxID,
+		CommentID:   commentID,
+		AskID:       in.AskID,
+		CallerType:  row.CallerType,
+		CallerID:    row.CallerID,
+		Question:    firstNonEmpty(in.Question, row.Reason),
+		Options:     in.Options,
+		Urgent:      in.Urgent,
+		Deadline:    in.Deadline,
+	})
+	if err != nil {
+		return err
+	}
+	if route.Silent() && out.InboxItem != nil {
+		read, err := q.MarkInboxRead(ctx, out.InboxItem.ID)
+		if err != nil {
+			return err
+		}
+		out.InboxItem = &read
+	}
+	return nil
 }
 
 // Publish broadcasts what a summon wrote. SummonWith callers inside their own
@@ -236,31 +288,7 @@ func (s Summoner) Publish(issue db.Issue, out SummonResult) {
 		})
 	}
 	if out.InboxItem != nil {
-		item := *out.InboxItem
-		s.Bus.Publish(events.Event{
-			Type:        protocol.EventInboxNew,
-			WorkspaceID: wsID,
-			ActorType:   item.ActorType.String,
-			ActorID:     util.UUIDToString(item.ActorID),
-			Payload: map[string]any{"item": map[string]any{
-				"id":             util.UUIDToString(item.ID),
-				"workspace_id":   util.UUIDToString(item.WorkspaceID),
-				"recipient_type": item.RecipientType,
-				"recipient_id":   util.UUIDToString(item.RecipientID),
-				"type":           item.Type,
-				"severity":       item.Severity,
-				"issue_id":       util.UUIDToPtr(item.IssueID),
-				"title":          item.Title,
-				"body":           util.TextToPtr(item.Body),
-				"read":           item.Read,
-				"archived":       item.Archived,
-				"created_at":     util.TimestampToString(item.CreatedAt),
-				"actor_type":     util.TextToPtr(item.ActorType),
-				"actor_id":       util.UUIDToPtr(item.ActorID),
-				"details":        json.RawMessage(item.Details),
-				"issue_status":   issue.Status,
-			}},
-		})
+		PublishInboxNew(s.Bus, *out.InboxItem, issue.Status)
 	}
 }
 
@@ -335,6 +363,7 @@ func SettleSummonInbox(ctx context.Context, q *db.Queries, bus *events.Bus, summ
 	for _, s := range summons {
 		ids = append(ids, s.ID)
 	}
+	SettleHumanNeededForSummons(ctx, q, summons)
 	rows, err := q.MarkIssueSummonInboxRead(ctx, ids)
 	if err != nil {
 		slog.Warn("summon: read inbox rows failed", "error", err)

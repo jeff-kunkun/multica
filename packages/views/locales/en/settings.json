@@ -719,6 +719,26 @@
       "granted": "This browser can show notification banners.",
       "denied": "Blocked by your browser. Enable notifications for this site in your browser settings.",
       "enabled_badge": "Enabled"
+    },
+    "decisions": {
+      "title": "Decisions that need you",
+      "label": "Send them to my Bot",
+      "none": "No Bot (in-app only)",
+      "no_bots": "You have no Bot yet. Add one under Bots first.",
+      "state_none": "Pick your own Bot; what needs your decision is sent to it.",
+      "state_ok": "What needs your decision goes to {{name}} first.",
+      "state_unverified": "Waiting for {{name}} to confirm it can receive.",
+      "state_broken": "{{name}} is not reachable; decisions are back in the app.",
+      "check_again": "Check again",
+      "mirror_label": "Also alert me in the app",
+      "mirror_hint": "Keep the in-app alert as well as the Bot.",
+      "activity_label": "Send everything to my Bot",
+      "activity_hint": "All comments, chats and status changes.",
+      "activity_off": "Off",
+      "activity_owned": "Tickets and chats I own",
+      "activity_followed": "Tickets I follow",
+      "activity_both": "Mine and followed",
+      "toast_failed": "Failed to update your Bot setting"
     }
   },
   "tokens": {

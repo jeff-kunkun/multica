@@ -31,6 +31,11 @@ func (h *Handler) RecordBotWakeReceipt(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, "invalid receipt")
 		return
 	}
+	// A human-needed event (or a binding handshake) has its own table; the
+	// same woken receipt works for it (DENE-1933).
+	if !strings.HasSuffix(r.URL.Path, "/result") && req.ResultURL == "" && h.recordHumanNeededWoken(w, r, bot, id) {
+		return
+	}
 	starter, ok := h.DB.(txStarter)
 	if !ok {
 		writeError(w, 503, "wake storage unavailable")
