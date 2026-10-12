@@ -617,10 +617,17 @@ const MessageBubble = memo(function MessageBubble({
 
   if (message.role === "user") {
     const copyContent = canonicalAnswerText(message).trim();
+    const superseded = Boolean(message.superseded_at);
     return (
       <div className="flex justify-end">
         <div className="flex max-w-[80%] flex-col items-end gap-1">
-          <div className="rounded-2xl bg-muted px-3.5 py-2 text-body break-words">
+          <div
+            data-superseded={superseded ? "" : undefined}
+            className={cn(
+              "rounded-2xl bg-muted px-3.5 py-2 text-body break-words",
+              superseded && "text-muted-foreground opacity-70",
+            )}
+          >
             <MessageAuthor senderId={message.sender_user_id} creatorId={creatorId} />
             <ViaBot name={message.via_bot_name} />
             {/* User messages are authored as markdown in ContentEditor, so they
@@ -640,6 +647,7 @@ const MessageBubble = memo(function MessageBubble({
               className="mt-1.5"
             />
           </div>
+          {superseded && <SupersededNote />}
           {copyContent.length > 0 && <MessageCopyButton content={copyContent} />}
         </div>
       </div>
@@ -674,6 +682,16 @@ const MessageBubble = memo(function MessageBubble({
     </>
   );
 });
+
+/** The caption under a user message a newer instruction replaced (DENE-1932). */
+function SupersededNote() {
+  const { t } = useT("chat");
+  return (
+    <span data-chat-superseded className="text-caption text-muted-foreground">
+      {t(($) => $.superseded.label)}
+    </span>
+  );
+}
 
 /**
  * A rule above a reply whose run could not carry the conversation's CLI

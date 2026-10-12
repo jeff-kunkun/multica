@@ -430,6 +430,9 @@
     "reason_session_lost": "previous session could not be restored",
     "reason_fresh_requested": "fresh session requested"
   },
+  "superseded": {
+    "label": "Replaced by a newer instruction"
+  },
   "report": {
     "bar_one": "{{count}} issue from this chat",
     "bar_other": "{{count}} issues from this chat",

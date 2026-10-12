@@ -2,6 +2,8 @@
 
 本索引只记录指向沉淀票附件的短指针；原始日志、截图和样本留在对应票据附件。
 
+- DENE-1932：聊天「替换」发送（`chat send --mode replace`）与 `chat clear-queue`，旧排队消息标「已被新指令替换」；[手机 390/375/768/1280 真实页面截图（任务附件）](https://ai.ferryway.cc/api/attachments/01a12fad-fcb5-7c97-acbb-ee37d2036093/download)。截图来自本机真实接口；Web/手机输入框暂无「替换」按钮，原生 App 标记未在真机/模拟器上看过。
+
 - DENE-1917：派活/咨询/验收统一选人、系列权重及禁止最强档兜底；[真实四档页面与验证边界](https://ai.ferryway.cc/api/attachments/01a12ec5-f1bd-790f-bf50-961f4a59be0f/download)、[原始测试与可回滚副本](https://ai.ferryway.cc/api/attachments/01a12ec5-f488-711e-94c1-ad09912930d5/download)、[根因与交付记录](DENE-1917/verification.md)。本地通过，未切换线上；真实近 30 天影子比较待新接口部署后执行。 [合并后审查修订：强档同档优先、按档位兜底、Bot 通知与订阅实测](https://ai.ferryway.cc/api/attachments/01a12ed3-6315-788d-b251-8bd73ef2de55/download)。
 
 - DENE-1915：Bot 毒事件隔离、三次退避、积压合批、聊天完成通知和队列健康；[375/390/768/1280 真实设置页截图与边界](https://ai.ferryway.cc/api/attachments/01a12e8d-2a1c-7c24-9e45-8f92bbf282e7/download)、[原版/修改版/回滚与回归验证](https://ai.ferryway.cc/api/attachments/01a12e8d-2a80-7545-88aa-c57a78355542/download)。线上每秒失败已见日志，但原错误文本缺失；执行席读取 Grok 设置被拒绝，未上线、未重放积压、未确认真实 Grok 通知。原生 App 无 Bot 管理入口，未改；桌面原生窗口未验。 本轮终审修正：[后来点名与纯附件完成回复的正式回归、修改及回滚证据](https://ai.ferryway.cc/api/attachments/01a12e98-fd53-75e5-b8ca-6c06c1fa27af/download)；全部 handler BotWake 测试通过，生产边界不变。

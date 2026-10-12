@@ -425,6 +425,9 @@
     "reason_session_lost": "会话没能恢复",
     "reason_fresh_requested": "按要求新开"
   },
+  "superseded": {
+    "label": "已被新指令替换"
+  },
   "report": {
     "bar_other": "本聊天 {{count}} 张单",
     "bar_fresh_other": "本聊天 {{count}} 张单 · 刚变 {{fresh}}",

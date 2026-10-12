@@ -1121,3 +1121,49 @@ describe("ChatMessageList queued-history explanation (DENE-1842)", () => {
     expect(screen.queryByText("2 more messages queued")).not.toBeInTheDocument();
   });
 });
+
+describe("ChatMessageList superseded marker (DENE-1932)", () => {
+  function renderUserMessages(superseded: boolean) {
+    const base = {
+      chat_session_id: "s1",
+      role: "user" as const,
+      task_id: TASK_ID,
+      created_at: new Date(0).toISOString(),
+    };
+    return render(
+      <I18nProvider locale="en" resources={TEST_RESOURCES}>
+        <QueryClientProvider client={new QueryClient()}>
+          <ChatMessageList
+            messages={[
+              {
+                ...base,
+                id: "old",
+                content: "old instruction",
+                ...(superseded
+                  ? { superseded_at: "2026-10-12T00:00:00Z", superseded_by_message_id: "new" }
+                  : {}),
+              },
+              { ...base, id: "new", content: "new instruction" },
+            ]}
+            pendingTask={undefined}
+            availability="online"
+          />
+        </QueryClientProvider>
+      </I18nProvider>,
+    );
+  }
+
+  it("marks only the replaced user message", async () => {
+    const { container } = renderUserMessages(true);
+    await screen.findByText("old instruction");
+    const notes = container.querySelectorAll("[data-chat-superseded]");
+    expect(notes).toHaveLength(1);
+    expect(notes[0]).toHaveTextContent("Replaced by a newer instruction");
+  });
+
+  it("shows no marker when nothing was replaced", async () => {
+    const { container } = renderUserMessages(false);
+    await screen.findByText("old instruction");
+    expect(container.querySelector("[data-chat-superseded]")).toBeNull();
+  });
+});

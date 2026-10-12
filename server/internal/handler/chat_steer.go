@@ -27,6 +27,10 @@ const (
 	// sendModeRestart stops the reply now and starts over from this message,
 	// in a new run that resumes the same session.
 	sendModeRestart = "restart"
+	// sendModeReplace is for a changed mind (DENE-1932): every queued older
+	// instruction is cancelled and marked superseded, the reply in progress is
+	// stopped, and this message starts the next run. Chat send only.
+	sendModeReplace = "replace"
 )
 
 // errCodeSteerUnsupported marks a steer the running CLI cannot take. The
@@ -41,6 +45,14 @@ func normalizeSendMode(mode string) (string, bool) {
 		return mode, true
 	}
 	return "", false
+}
+
+// normalizeChatSendMode is normalizeSendMode plus the chat-only replace mode.
+func normalizeChatSendMode(mode string) (string, bool) {
+	if mode == sendModeReplace {
+		return mode, true
+	}
+	return normalizeSendMode(mode)
 }
 
 // steerUnsupportedReason names why a running reply cannot take a message.
