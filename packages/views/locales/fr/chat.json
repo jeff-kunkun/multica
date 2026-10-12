@@ -114,7 +114,9 @@
     "mode_steer_unsupported": "{{cli}} ne peut pas encore lire un message en cours de réponse",
     "mode_steer_unsupported_generic": "Cet agent ne peut pas encore lire un message en cours de réponse",
     "enter_hint": "Entrée = {{mode}}",
-    "steer_fell_back_toast": "Cette réponse ne peut pas lire le message en cours, il a été mis en file d'attente"
+    "steer_fell_back_toast": "Cette réponse ne peut pas lire le message en cours, il a été mis en file d'attente",
+    "converted_to_issue": "Le travail se poursuit dans la tâche",
+    "open_converted_issue": "Ouvrir la tâche"
   },
   "queue": {
     "hidden_messages": "{{count}} messages supplémentaires en attente",

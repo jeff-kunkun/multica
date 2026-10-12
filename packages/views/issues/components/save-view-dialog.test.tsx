@@ -84,6 +84,7 @@ function renderSaveDialog(scope: SaveViewScope) {
 
 async function openVisibility(user: ReturnType<typeof userEvent.setup>) {
   await user.click(screen.getByRole("combobox", { name: "Visibility" }));
+  await screen.findByRole("listbox");
 }
 
 describe("SaveViewDialog visibility", () => {
@@ -97,7 +98,7 @@ describe("SaveViewDialog visibility", () => {
     expect(
       screen.getByRole("option", { name: "Visible to workspace members" }),
     ).toBeInTheDocument();
-    expect(screen.getByRole("option", { name: "Project members" })).toBeInTheDocument();
+    expect(await screen.findByRole("option", { name: "Project members" })).toBeInTheDocument();
     expect(
       screen.getByText(
         "Visible only to members of this project, and only on this project page",
@@ -131,7 +132,7 @@ describe("SaveViewDialog visibility", () => {
 
     await user.type(screen.getByLabelText("Name"), "Sprint board");
     await openVisibility(user);
-    await user.click(screen.getByRole("option", { name: "Project members" }));
+    await user.click(await screen.findByRole("option", { name: "Project members" }));
     await user.click(screen.getByRole("button", { name: "Create view" }));
 
     expect(mocks.createMutate).toHaveBeenCalledTimes(1);

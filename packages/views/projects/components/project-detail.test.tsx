@@ -46,9 +46,16 @@ vi.mock("@tanstack/react-query", () => ({
 vi.mock("@multica/core/projects/queries", () => ({
   projectDetailOptions: () => ({ queryKey: ["project-detail"] }),
   projectMemoryOptions: () => ({ queryKey: ["project-memory"] }),
+  projectMemoryMonitorOptions: () => ({ queryKey: ["project-memory-monitor"] }),
   projectKeys: {
     detail: (wsId: string, id: string) => ["projects", wsId, "detail", id],
   },
+}));
+
+// Keep the real reference-projects section rendered while isolating its mutation.
+vi.mock("@multica/core/workspace-links", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@multica/core/workspace-links")>()),
+  useSetLinkedProjectSettings: () => ({ mutate: vi.fn(), isPending: false }),
 }));
 
 vi.mock("@multica/core/projects/mutations", () => ({

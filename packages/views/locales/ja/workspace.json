@@ -83,7 +83,10 @@
       "managed_hint_outgoing": "相手のエージェントが依頼者の権限でここを操作できます。",
       "managed_hint_incoming": "ここのエージェントが依頼者の権限で相手側を操作できます。",
       "managed_reason": "共有側ワークスペースのオーナーだけが切り替えられます。",
-      "managed_create_hint": "閲覧側のエージェントが依頼者の権限で代行します。無効にできます。"
+      "managed_create_hint": "閲覧側のエージェントが依頼者の権限で代行します。無効にできます。",
+      "pending_only": "このワークスペースの承認待ちのみ",
+      "projects_reason": "接続元の owner 権限が必要です。ここから変更するには、このワークスペースの owner または admin 権限も必要です。",
+      "managed_pending": "接続を承認すると管理アクセスを有効にできます。"
     },
     "audit": {
       "title": "監査記録",

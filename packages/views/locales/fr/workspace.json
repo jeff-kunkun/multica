@@ -83,7 +83,10 @@
       "managed_hint_outgoing": "Leurs agents peuvent agir ici avec les droits de l’initiateur.",
       "managed_hint_incoming": "Les agents peuvent agir là-bas avec les droits de l’initiateur.",
       "managed_reason": "Seul un propriétaire de l’espace qui partage peut changer ce réglage.",
-      "managed_create_hint": "Par défaut, les agents lecteurs agissent avec les droits de l’initiateur ; vous pouvez désactiver cette option."
+      "managed_create_hint": "Par défaut, les agents lecteurs agissent avec les droits de l’initiateur ; vous pouvez désactiver cette option.",
+      "pending_only": "En attente de cet espace de travail uniquement",
+      "projects_reason": "Le rôle owner est requis dans l’espace source. Pour modifier depuis ici, le rôle owner ou admin est aussi requis dans cet espace.",
+      "managed_pending": "Acceptez la liaison avant d’activer l’accès géré."
     },
     "audit": {
       "title": "Historique",

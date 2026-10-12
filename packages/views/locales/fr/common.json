@@ -233,5 +233,18 @@
     "projects": "Pour les projets choisis",
     "generic": "Généraux",
     "other": "Autres"
+  },
+  "stop_work": {
+    "title": "Arrêter le travail ?",
+    "description": "Les exécutions en attente et en cours seront arrêtées. Les résultats partiels resteront disponibles.",
+    "related": "Arrêter aussi les sous-tâches et les discussions associées",
+    "keep": "Continuer",
+    "confirm": "Arrêter le travail",
+    "confirm_related": "Arrêter le travail associé",
+    "cancel_title": "Annuler la tâche ?",
+    "cancel_description": "La tâche sera annulée. Choisissez si les exécutions associées doivent aussi être arrêtées.",
+    "cancel_keep": "Conserver la tâche",
+    "cancel_confirm": "Annuler la tâche",
+    "cancel_confirm_related": "Annuler et arrêter le travail associé"
   }
 }

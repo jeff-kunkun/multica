@@ -231,5 +231,18 @@
     "projects": "選択中のプロジェクト向け",
     "generic": "汎用",
     "other": "その他"
+  },
+  "stop_work": {
+    "title": "作業を停止しますか？",
+    "description": "待機中と実行中の処理を停止します。途中までの出力は残ります。",
+    "related": "子タスクと関連チャットも停止する",
+    "keep": "実行を続ける",
+    "confirm": "作業を停止",
+    "confirm_related": "関連する作業を停止",
+    "cancel_title": "タスクをキャンセルしますか？",
+    "cancel_description": "タスクをキャンセルします。関連する実行も停止するか選んでください。",
+    "cancel_keep": "タスクを残す",
+    "cancel_confirm": "タスクをキャンセル",
+    "cancel_confirm_related": "キャンセルして関連する作業を停止"
   }
 }

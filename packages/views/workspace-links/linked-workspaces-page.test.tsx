@@ -95,7 +95,7 @@ describe("LinkedWorkspacesPage", () => {
     });
     renderPage();
     expect(
-      await screen.findByText("Partner allows managed access: agents can work on its tasks and autopilots for you"),
+      await screen.findByText("Partner allows managed access: agents can act with the initiator’s permissions"),
     ).toBeInTheDocument();
     expect(screen.queryByText("Read-only view of Partner")).not.toBeInTheDocument();
   });

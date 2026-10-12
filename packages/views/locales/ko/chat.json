@@ -112,7 +112,9 @@
     "mode_steer_unsupported": "{{cli}}는 아직 답장 중에 메시지를 읽을 수 없습니다",
     "mode_steer_unsupported_generic": "이 에이전트는 아직 답장 중에 메시지를 읽을 수 없습니다",
     "enter_hint": "Enter = {{mode}}",
-    "steer_fell_back_toast": "이 답장은 중간에 메시지를 읽을 수 없어 대기열에 넣었습니다"
+    "steer_fell_back_toast": "이 답장은 중간에 메시지를 읽을 수 없어 대기열에 넣었습니다",
+    "converted_to_issue": "태스크에서 작업이 계속됩니다",
+    "open_converted_issue": "태스크 열기"
   },
   "queue": {
     "hidden_messages": "메시지 {{count}}개 추가 대기 중",

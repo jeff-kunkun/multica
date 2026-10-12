@@ -12,6 +12,11 @@ import type {
 } from "@multica/core/types";
 import { renderWithI18n } from "../../test/i18n";
 
+// Billing dates use the viewer's timezone; fixtures are UTC instants.
+function localBillingDate(value: string) {
+  return new Intl.DateTimeFormat("en", { dateStyle: "medium" }).format(new Date(value));
+}
+
 const mocks = vi.hoisted(() => ({
   useQuery: vi.fn(),
   checkout: vi.fn(),
@@ -782,7 +787,7 @@ describe("BillingTab", () => {
     expect(screen.getByText("4 seats")).toBeInTheDocument();
     expect(screen.getByText("1 seat")).toBeInTheDocument();
     expect(screen.getByText("0 seats")).toBeInTheDocument();
-    expect(screen.getByText(/4 seats from Feb 1, 2030/)).toBeInTheDocument();
+    expect(screen.getByText(`4 seats from ${localBillingDate("2030-02-01T00:00:00Z")}`)).toBeInTheDocument();
     expect(screen.getAllByText("4 members")).toHaveLength(1);
     expect(screen.getByText("Available seats").closest("summary")).toBeNull();
     const formula = "Purchased seats minus members and reserved invitations.";
@@ -1299,11 +1304,11 @@ describe("BillingTab", () => {
     renderWithI18n(<BillingTab />);
 
     expect(
-      screen.getByText(/Update your payment method by Feb 15, 2030/),
+      screen.getByText(`Update your payment method by ${localBillingDate("2030-02-15T00:00:00Z")}`, { exact: false }),
     ).toBeInTheDocument();
     expect(screen.getByText("Cancellation is scheduled")).toBeInTheDocument();
     expect(
-      screen.getByText(/subscription will cancel on Mar 1, 2030/),
+      screen.getByText(`subscription will cancel on ${localBillingDate("2030-03-01T00:00:00Z")}`, { exact: false }),
     ).toBeInTheDocument();
   });
 
@@ -1353,13 +1358,13 @@ describe("BillingTab", () => {
     renderWithI18n(<BillingTab />);
 
     expect(
-      screen.getByText(/subscription will cancel on Apr 1, 2030/),
+      screen.getByText(`subscription will cancel on ${localBillingDate("2030-04-01T00:00:00Z")}`, { exact: false }),
     ).toBeInTheDocument();
-    expect(screen.getByText(/4 seats from Apr 1, 2030/)).toBeInTheDocument();
-    expect(screen.getByText("Apr 1, 2030")).toBeInTheDocument();
-    expect(screen.queryByText("Mar 1, 2030")).not.toBeInTheDocument();
+    expect(screen.getByText(`4 seats from ${localBillingDate("2030-04-01T00:00:00Z")}`)).toBeInTheDocument();
+    expect(screen.getByText(localBillingDate("2030-04-01T00:00:00Z"))).toBeInTheDocument();
+    expect(screen.queryByText(localBillingDate("2030-03-01T00:00:00Z"))).not.toBeInTheDocument();
     expect(
-      screen.queryByText(/subscription will cancel on Mar 1, 2030/),
+      screen.queryByText(`subscription will cancel on ${localBillingDate("2030-03-01T00:00:00Z")}`, { exact: false }),
     ).not.toBeInTheDocument();
     expect(screen.queryByText(/Pro remains available/)).not.toBeInTheDocument();
   });

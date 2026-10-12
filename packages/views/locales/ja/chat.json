@@ -112,7 +112,9 @@
     "mode_steer_unsupported": "{{cli}} はまだ返信の途中でメッセージを読めません",
     "mode_steer_unsupported_generic": "このエージェントはまだ返信の途中でメッセージを読めません",
     "enter_hint": "Enter = {{mode}}",
-    "steer_fell_back_toast": "この返信は途中でメッセージを読めないため、キューに入れました"
+    "steer_fell_back_toast": "この返信は途中でメッセージを読めないため、キューに入れました",
+    "converted_to_issue": "作業はタスクで続行されます",
+    "open_converted_issue": "タスクを開く"
   },
   "queue": {
     "hidden_messages": "ほかに {{count}} 件のメッセージが待機中",
