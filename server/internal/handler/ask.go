@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -100,6 +101,10 @@ type askInsert struct {
 	Kind      string
 	// ChatSession is the chat the card was asked in, when it was.
 	ChatSession pgtype.UUID
+	// Urgent and Deadline are the asker's own words on how soon the answer
+	// is needed; they travel to the Bot with the card.
+	Urgent   bool
+	Deadline time.Time
 }
 
 func (h *Handler) insertAsk(ctx context.Context, in askInsert) (AskResponse, error) {
@@ -261,6 +266,8 @@ func (h *Handler) deliverAskToPerson(ctx context.Context, ask AskResponse, in as
 		CallerID:      in.AskerID,
 		Question:      askQuestionText(in.Title, in.Questions),
 		Options:       askHumanOptions(in.Questions),
+		Urgent:        in.Urgent,
+		Deadline:      in.Deadline,
 	})
 	if routeErr != nil {
 		slog.Warn("human needed: route ask failed", "error", routeErr, "ask_id", ask.ID)
@@ -475,18 +482,39 @@ func (h *Handler) answerAskCore(ctx context.Context, in askAnswer) (map[string]s
 		answers[key] = value
 	}
 	raw, _ := json.Marshal(answers)
-	var status string
-	if err := h.DB.QueryRow(ctx, `UPDATE agent_ask SET answers=$1,status='answered',answered_at=now() WHERE id=$2 AND workspace_id=$3 AND status='open' RETURNING status`, raw, in.AskID, in.Workspace).Scan(&status); err != nil {
-		if err == pgx.ErrNoRows {
-			return nil, &askError{409, "ask is already answered or not found"}
-		}
-		return nil, &askError{500, "failed to answer ask"}
-	}
 	workspaceID := uuidToString(in.Workspace)
 	answererID := uuidToString(in.Answerer)
-	// The Bot's chase is over, whoever answered.
-	if err := h.Queries.SettleHumanNeededByAsk(ctx, in.AskID); err != nil {
-		slog.Warn("human needed: settle by ask failed", "error", err, "ask_id", uuidToString(in.AskID))
+	// Answering the card and carrying the answer back to whoever asked commit
+	// together: a card whose write-back failed is still open, so the same
+	// answer can be given again and resumes the asker exactly once.
+	closeAsk := func(q *db.Queries) error {
+		if _, err := q.AnswerAsk(ctx, db.AnswerAskParams{Answers: raw, ID: in.AskID, WorkspaceID: in.Workspace}); err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return errAskTaken
+			}
+			return err
+		}
+		// The Bot's chase is over, whoever answered.
+		return q.SettleHumanNeededByAsk(ctx, in.AskID)
+	}
+	// A card the platform opened for a person (ask-human, a Bot-routed ask)
+	// resumes whoever asked, however it was answered: in the app, with
+	// `multica ask answer`, or through their Bot.
+	var err error
+	switch {
+	case chatID.Valid:
+		err = h.resumeChatAsker(ctx, in, chatID, questions, answers, closeAsk)
+	case kind != "" || in.Bot != nil:
+		err = h.resumeAskAsker(ctx, in, title, questions, answers, askerType, askerID, issueID, closeAsk)
+	default:
+		err = closeAsk(h.Queries)
+	}
+	if errors.Is(err, errAskTaken) {
+		return nil, &askError{409, "ask is already answered or not found"}
+	}
+	if err != nil {
+		slog.Warn("ask: answer not carried back", "error", err, "ask_id", uuidToString(in.AskID))
+		return nil, &askError{500, "回答没能送回提问的人，提问卡还开着，请再答一次：" + err.Error()}
 	}
 	// Inbox delivery is the durable record for the asker.
 	if mode == "needs_you" && in.Answerer.Valid && !chatID.Valid {
@@ -504,24 +532,20 @@ func (h *Handler) answerAskCore(ctx context.Context, in askAnswer) (map[string]s
 			h.publishWithSource(ctx, protocol.EventInboxNew, workspaceID, "member", answererID, map[string]any{"item": inboxToResponse(item)})
 		}
 	}
-	// A card the platform opened for a person (ask-human, a Bot-routed ask)
-	// resumes whoever asked, however it was answered: in the app, with
-	// `multica ask answer`, or through their Bot.
-	if chatID.Valid {
-		h.resumeChatAsker(ctx, in, chatID, questions, answers)
-	} else if kind != "" || in.Bot != nil {
-		h.resumeAskAsker(ctx, in, title, questions, answers, askerType, askerID, issueID)
-	}
 	// A platform ask with its own effect (DENE-1647): the answer is carried
 	// out here, so the CLI, the issue card and the inbox all act the same.
 	h.applyReviewStuckAnswer(ctx, in.Workspace, issueID, answererID, answers["0"])
 	return answers, nil
 }
 
+// errAskTaken says another caller answered the card first.
+var errAskTaken = errors.New("ask is already answered")
+
 // resumeChatAsker writes a chat card's answer back into the chat as the
-// person's own message, which queues the asking agent's run. Several questions
-// read as one line each; the Bot, when one carried it, is named in the message.
-func (h *Handler) resumeChatAsker(ctx context.Context, in askAnswer, chatID pgtype.UUID, questions []AskQuestion, answers map[string]string) {
+// person's own message, which queues the asking agent's run, and answers the
+// card in the same transaction. Several questions read as one line each; the
+// Bot, when one carried it, is named in the message.
+func (h *Handler) resumeChatAsker(ctx context.Context, in askAnswer, chatID pgtype.UUID, questions []AskQuestion, answers map[string]string, closeAsk func(*db.Queries) error) error {
 	var lines []string
 	for i, q := range questions {
 		value := answers[fmt.Sprintf("%d", i)]
@@ -541,23 +565,32 @@ func (h *Handler) resumeChatAsker(ctx context.Context, in askAnswer, chatID pgty
 	if in.Bot != nil {
 		botName = in.Bot.Name
 	}
-	if err := h.sendChatAnswer(ctx, in.Workspace, chatID, in.Answerer, botName, strings.Join(lines, "\n")); err != nil {
-		slog.Warn("ask: chat answer failed", "error", err, "ask_id", uuidToString(in.AskID))
+	err := h.sendChatAnswer(ctx, in.Workspace, chatID, in.Answerer, botName, strings.Join(lines, "\n"), closeAsk)
+	// A chat that was archived or turned into a ticket has nobody left to
+	// resume: the card is closed on its own rather than left open for good.
+	if errors.Is(err, service.ErrChatSessionArchived) || errors.Is(err, service.ErrChatSessionConverted) {
+		slog.Warn("ask: chat is closed, card answered without a message", "ask_id", uuidToString(in.AskID))
+		return closeAsk(h.Queries)
 	}
+	return err
 }
 
 // resumeAskAsker records the answer on the ticket as the person's own comment
 // and wakes whoever is waiting: the open summon is answered (which also lifts
 // an ask-human block and wakes its caller), and an agent that asked without a
 // summon is woken directly. The comment is the audit line, "Bot X for owner Y"
-// when a Bot carried it.
-func (h *Handler) resumeAskAsker(ctx context.Context, in askAnswer, title string, questions []AskQuestion, answers map[string]string, askerType string, askerID, issueID pgtype.UUID) {
+// when a Bot carried it, and it commits together with the card's answer, so a
+// failed write leaves the card open for the same answer to be given again.
+func (h *Handler) resumeAskAsker(ctx context.Context, in askAnswer, title string, questions []AskQuestion, answers map[string]string, askerType string, askerID, issueID pgtype.UUID, closeAsk func(*db.Queries) error) error {
 	if !issueID.Valid {
-		return
+		return closeAsk(h.Queries)
 	}
 	issue, err := h.Queries.GetIssue(ctx, issueID)
-	if err != nil || issue.WorkspaceID != in.Workspace {
-		return
+	if errors.Is(err, pgx.ErrNoRows) || (err == nil && issue.WorkspaceID != in.Workspace) {
+		return closeAsk(h.Queries)
+	}
+	if err != nil {
+		return err
 	}
 	var b strings.Builder
 	if in.Bot != nil {
@@ -583,10 +616,28 @@ func (h *Handler) resumeAskAsker(ctx context.Context, in askAnswer, title string
 		params.ViaBotID = in.Bot.ID
 		params.ViaBotName = pgtype.Text{String: in.Bot.Name, Valid: true}
 	}
-	created, err := h.Queries.CreateComment(ctx, params)
+	var created db.CreateCommentRow
+	write := func(q *db.Queries) error {
+		if err := closeAsk(q); err != nil {
+			return err
+		}
+		var err error
+		created, err = q.CreateComment(ctx, params)
+		return err
+	}
+	if h.TxStarter == nil {
+		err = write(h.Queries)
+	} else {
+		var tx pgx.Tx
+		if tx, err = h.TxStarter.Begin(ctx); err == nil {
+			defer tx.Rollback(ctx)
+			if err = write(h.Queries.WithTx(tx)); err == nil {
+				err = tx.Commit(ctx)
+			}
+		}
+	}
 	if err != nil {
-		slog.Warn("ask: answer comment failed", "error", err, "issue_id", uuidToString(issue.ID))
-		return
+		return err
 	}
 	comment := created.Comment()
 	h.publishWithSource(ctx, protocol.EventCommentCreated, uuidToString(issue.WorkspaceID), "member", uuidToString(in.Answerer), map[string]any{
@@ -601,4 +652,5 @@ func (h *Handler) resumeAskAsker(ctx context.Context, in askAnswer, title string
 	if !woken.Valid && askerType == "agent" {
 		h.triggerWaitingOnAgent(ctx, issue, askerID, comment.ID)
 	}
+	return nil
 }

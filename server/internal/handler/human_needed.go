@@ -836,6 +836,7 @@ func (h *Handler) AskHumanChat(w http.ResponseWriter, r *http.Request) {
 			Workspace: session.WorkspaceID, AskerType: actorType, AskerID: parseUUID(actorID),
 			Title: question, Questions: []AskQuestion{{Text: question, Options: cardOptions}},
 			Mode: "needs_you", Recipient: session.CreatorID, Kind: "ask_human", ChatSession: session.ID,
+			Urgent: req.Urgent, Deadline: deadline,
 		}
 		var cardErr error
 		card, cardErr = h.insertAsk(r.Context(), insert)
@@ -921,13 +922,15 @@ func chatAskContent(question string, options []service.HumanNeededOption) string
 // chat as their own message and queues the asking agent's run, the same send
 // the app makes when they type it themselves.
 func (h *Handler) writeChatAnswer(ctx context.Context, ev db.HumanNeededEvent, bot db.PersonalAccessToken, answer string) error {
-	return h.sendChatAnswer(ctx, ev.WorkspaceID, ev.ChatSessionID, ev.TargetUserID, bot.Name, answer)
+	return h.sendChatAnswer(ctx, ev.WorkspaceID, ev.ChatSessionID, ev.TargetUserID, bot.Name, answer, nil)
 }
 
 // sendChatAnswer is the one way an answer lands in a chat: as the chat owner's
 // message (naming the Bot that carried it, if any), plus the asking agent's
 // queued run. Free-text replies and chat question cards both come through here.
-func (h *Handler) sendChatAnswer(ctx context.Context, workspace, chatID, person pgtype.UUID, botName, answer string) error {
+// within, when set, commits with the message: a question card is answered in
+// the same transaction, so a failed write leaves it open.
+func (h *Handler) sendChatAnswer(ctx context.Context, workspace, chatID, person pgtype.UUID, botName, answer string, within func(*db.Queries) error) error {
 	session, err := h.Queries.GetChatSession(ctx, chatID)
 	if err != nil || session.WorkspaceID != workspace || session.CreatorID != person {
 		return errors.New("聊天不属于这位主人")
@@ -940,7 +943,7 @@ func (h *Handler) sendChatAnswer(ctx context.Context, workspace, chatID, person 
 	if botName != "" {
 		content = fmt.Sprintf("（Bot「%s」代表本人转达）\n%s", botName, answer)
 	}
-	sent, err := h.TaskService.SendDirectChatMessage(ctx, session, agent, person, content, nil, "member", person)
+	sent, err := h.TaskService.SendDirectChatMessageWithOptions(ctx, session, agent, person, content, nil, "member", person, service.DirectChatSendOptions{Within: within})
 	if err != nil {
 		return err
 	}

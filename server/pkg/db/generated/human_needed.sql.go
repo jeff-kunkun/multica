@@ -11,6 +11,29 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const answerAsk = `-- name: AnswerAsk :one
+UPDATE agent_ask
+SET answers = $1, status = 'answered', answered_at = now()
+WHERE id = $2 AND workspace_id = $3 AND status = 'open'
+RETURNING id
+`
+
+type AnswerAskParams struct {
+	Answers     []byte      `json:"answers"`
+	ID          pgtype.UUID `json:"id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+}
+
+// Fill a question card. The status guard is the exactly-once: the one caller
+// that flips it open -> answered owns the resume, and a card whose resume
+// failed in the same transaction is still open for the retry.
+func (q *Queries) AnswerAsk(ctx context.Context, arg AnswerAskParams) (pgtype.UUID, error) {
+	row := q.db.QueryRow(ctx, answerAsk, arg.Answers, arg.ID, arg.WorkspaceID)
+	var id pgtype.UUID
+	err := row.Scan(&id)
+	return id, err
+}
+
 const attachHumanNeededInboxItem = `-- name: AttachHumanNeededInboxItem :exec
 UPDATE human_needed_event SET inbox_item_id = $2
 WHERE event_id = $1 AND inbox_item_id IS NULL

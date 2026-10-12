@@ -65,3 +65,9 @@ A card made for a person with a Bot binding (`multica ask --mode needs_you`,
 `issue ask-human`, `chat ask-human`) resumes the asking agent once however it
 is answered: through the Bot, in the app or with `multica ask answer`, also in
 mirror mode and when the Bot channel is broken.
+
+Answering the card and carrying the answer back (the chat message, or the
+ticket comment) commit together. If the write fails the card stays open and the
+error says so: give the same answer again and it lands once; an answer repeated
+after that is refused with 409 and writes nothing. `--urgent` and `--deadline`
+on `chat ask-human` apply to a choice card and to free text alike.

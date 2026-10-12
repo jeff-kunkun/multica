@@ -262,6 +262,15 @@ SELECT user_id FROM member WHERE workspace_id = $1 AND role = 'owner' ORDER BY c
 UPDATE human_needed_event SET inbox_item_id = $2
 WHERE event_id = $1 AND inbox_item_id IS NULL;
 
+-- name: AnswerAsk :one
+-- Fill a question card. The status guard is the exactly-once: the one caller
+-- that flips it open -> answered owns the resume, and a card whose resume
+-- failed in the same transaction is still open for the retry.
+UPDATE agent_ask
+SET answers = $1, status = 'answered', answered_at = now()
+WHERE id = $2 AND workspace_id = $3 AND status = 'open'
+RETURNING id;
+
 -- name: SettleHumanNeededByAsk :exec
 -- The card was answered (in the app or through the Bot): the chase is over.
 UPDATE human_needed_event

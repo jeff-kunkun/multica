@@ -2698,6 +2698,11 @@ type DirectChatSendOptions struct {
 	// Runtime notifications follow the commit. CancelledBy names who asked.
 	Replace     bool
 	CancelledBy TaskCancellationActor
+	// Within runs first inside the send's transaction. An error from it rolls
+	// the whole send back, and a send that fails rolls Within's writes back
+	// with it: a question card is only answered together with the message that
+	// carries the answer (DENE-1933).
+	Within func(qtx *db.Queries) error
 }
 
 // SendDirectChatMessage atomically persists one web/mobile direct-chat turn:
@@ -2797,6 +2802,11 @@ func (s *TaskService) sendDirectChatMessage(
 	if err := s.runInTxWith(ctx, func(qtx *db.Queries, tx pgx.Tx) error {
 		if beforeSend != nil {
 			if err := beforeSend(qtx); err != nil {
+				return err
+			}
+		}
+		if opts.Within != nil {
+			if err := opts.Within(qtx); err != nil {
 				return err
 			}
 		}

@@ -1025,3 +1025,208 @@ func TestBoundCardAnsweredInAppResumesAskerInEveryChannelState(t *testing.T) {
 		})
 	}
 }
+
+// breakInserts makes inserts into table fail for rows matching cond (a boolean
+// expression over NEW) until heal runs: a write that fails once and then works.
+func breakInserts(t *testing.T, table, cond string) (heal func()) {
+	t.Helper()
+	name := fmt.Sprintf("dene1933_fault_%d", time.Now().UnixNano())
+	dbfx.Exec(t, fmt.Sprintf(`CREATE FUNCTION %s() RETURNS trigger LANGUAGE plpgsql AS $f$ BEGIN IF %s THEN RAISE EXCEPTION 'injected write fault'; END IF; RETURN NEW; END $f$`, name, cond))
+	dbfx.Exec(t, fmt.Sprintf(`CREATE TRIGGER %s BEFORE INSERT ON %s FOR EACH ROW EXECUTE FUNCTION %s()`, name, table, name))
+	healed := false
+	heal = func() {
+		if healed {
+			return
+		}
+		healed = true
+		testPool.Exec(context.Background(), fmt.Sprintf(`DROP TRIGGER IF EXISTS %s ON %s`, name, table))
+		testPool.Exec(context.Background(), fmt.Sprintf(`DROP FUNCTION IF EXISTS %s()`, name))
+	}
+	t.Cleanup(heal)
+	return heal
+}
+
+// findKey walks decoded JSON for the first value under key.
+func findKey(v any, key string) (any, bool) {
+	switch x := v.(type) {
+	case map[string]any:
+		if got, ok := x[key]; ok {
+			return got, true
+		}
+		for _, child := range x {
+			if got, ok := findKey(child, key); ok {
+				return got, true
+			}
+		}
+	case []any:
+		for _, child := range x {
+			if got, ok := findKey(child, key); ok {
+				return got, true
+			}
+		}
+	}
+	return nil, false
+}
+
+// A question asked in a chat keeps how soon the asker needs the answer, with
+// choices (the shared card) and without (free text): the saved event and what
+// the Bot is sent both carry it.
+func TestChatQuestionsKeepUrgencyAndDeadline(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	for _, tc := range []struct {
+		name    string
+		options []map[string]string
+	}{
+		{"card", []map[string]string{{"id": "a", "label": "a.example.com"}, {"id": "b", "label": "b.example.com"}}},
+		{"free text", nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, sessionID, _, _ := setupDirectChatSession(t, ctx, "urgency "+tc.name)
+			f := newHumanNeededFixture(t, true)
+			deadline := time.Now().Add(3 * time.Hour).UTC().Truncate(time.Second)
+			w := httptest.NewRecorder()
+			testHandler.AskHumanChat(w, chatAskRequest(t, sessionID, map[string]any{
+				"question": "Which domain?", "options": tc.options, "urgent": true, "deadline": deadline.Format(time.RFC3339),
+			}))
+			resp := decodeAskHuman(t, w)
+			if resp.EventID == "" {
+				t.Fatalf("not routed to the Bot: %+v", resp)
+			}
+			var urgency string
+			var saved time.Time
+			dbfx.QueryRow(t, `SELECT urgency, deadline FROM human_needed_event WHERE event_id=$1`, resp.EventID).Scan(&urgency, &saved)
+			if urgency != "urgent" || !saved.Equal(deadline) {
+				t.Fatalf("saved event urgency=%q deadline=%v, want urgent %v", urgency, saved, deadline)
+			}
+			f.deliver(t, resp.EventID)
+			var sent any
+			if err := json.Unmarshal(f.lastBody.Load().([]byte), &sent); err != nil {
+				t.Fatal(err)
+			}
+			if got, _ := findKey(sent, "urgency"); got != "urgent" {
+				t.Fatalf("the Bot was sent urgency %v", got)
+			}
+			got, _ := findKey(sent, "deadline")
+			text, _ := got.(string)
+			if at, err := time.Parse(time.RFC3339Nano, text); err != nil || !at.Equal(deadline) {
+				t.Fatalf("the Bot was sent deadline %v", got)
+			}
+		})
+	}
+}
+
+// A card answer and the message that carries it commit together. When the
+// write into the chat fails the card stays open, so the same answer given
+// again after the fault clears restores the message and wakes the asker once,
+// and answering again after that changes nothing.
+func TestChatChoiceCardRetriesAfterAWriteFault(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	for _, via := range []string{"app", "bot"} {
+		t.Run(via, func(t *testing.T) {
+			agentID, sessionID, _, _ := setupDirectChatSession(t, ctx, "write fault "+via)
+			f := newHumanNeededFixture(t, true)
+			resp := chatCard(t, sessionID)
+			f.deliver(t, resp.EventID)
+			answer := func() int {
+				if via == "app" {
+					return answerCardInApp(t, resp.AskID, "b")
+				}
+				code, _ := f.call(t, "POST", "/bots/"+uuidToString(f.bot.ID)+"/wake/events/"+resp.EventID+"/answered", map[string]any{"answers": map[string]string{"0": "b"}})
+				return code
+			}
+			heal := breakInserts(t, "chat_message", fmt.Sprintf("NEW.chat_session_id = '%s' AND NEW.role = 'user'", sessionID))
+			if code := answer(); code == 200 {
+				t.Fatalf("an answer that could not reach the chat reported success")
+			}
+			var cardStatus, eventStatus string
+			dbfx.QueryRow(t, `SELECT status FROM agent_ask WHERE id=$1`, resp.AskID).Scan(&cardStatus)
+			dbfx.QueryRow(t, `SELECT status FROM human_needed_event WHERE event_id=$1`, resp.EventID).Scan(&eventStatus)
+			if cardStatus != "open" || eventStatus == "answered" {
+				t.Fatalf("after the failed write the card is %q and the event %q; both must stay open for the retry", cardStatus, eventStatus)
+			}
+			heal()
+			if code := answer(); code != 200 {
+				t.Fatalf("the retry after the fault cleared: %d", code)
+			}
+			if msgs := chatMessages(t, sessionID, "user"); len(msgs) != 1 || !strings.Contains(msgs[0], "b.example.com") {
+				t.Fatalf("the retry did not restore the message once: %q", msgs)
+			}
+			if got := chatRuns(t, sessionID, agentID); got != 1 {
+				t.Fatalf("chat runs = %d, want 1", got)
+			}
+			dbfx.QueryRow(t, `SELECT status FROM agent_ask WHERE id=$1`, resp.AskID).Scan(&cardStatus)
+			dbfx.QueryRow(t, `SELECT status FROM human_needed_event WHERE event_id=$1`, resp.EventID).Scan(&eventStatus)
+			if cardStatus != "answered" || eventStatus != "answered" {
+				t.Fatalf("after the retry the card is %q and the event %q", cardStatus, eventStatus)
+			}
+			for i := 0; i < 2; i++ {
+				answer() // the repeat is refused or ignored, never written twice
+			}
+			if msgs := chatMessages(t, sessionID, "user"); len(msgs) != 1 {
+				t.Fatalf("repeated answers wrote %d messages", len(msgs))
+			}
+			if got := chatRuns(t, sessionID, agentID); got != 1 {
+				t.Fatalf("repeated answers queued %d runs, want 1", got)
+			}
+		})
+	}
+}
+
+// The same holds for a card on a ticket: the answer and its audit comment
+// commit together, so a failed comment leaves the card open for the retry.
+func TestTicketCardRetriesAfterAWriteFault(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	issue := createIssueHTTP(t, "ticket card write fault", "in_progress")
+	agentID := handlerTestAgentID(t)
+	setIssueAssigneeDirect(t, issue.ID, "agent", agentID)
+	taskID := insertIssueTaskWithStatus(t, agentID, issue.ID, "running")
+	f := newHumanNeededFixture(t, true)
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM inbox_item WHERE issue_id = $1`, issue.ID)
+		testPool.Exec(context.Background(), `DELETE FROM agent_ask WHERE issue_id = $1`, issue.ID)
+	})
+	w := httptest.NewRecorder()
+	testHandler.CreateAsk(w, agentRequest("POST", "/api/asks", map[string]any{
+		"title": "Which colour?", "issue_id": issue.ID, "mode": "needs_you",
+		"questions": []AskQuestion{{Text: "Colour", Options: []AskOption{{ID: "red", Label: "Red"}, {ID: "blue", Label: "Blue"}}}},
+	}, agentID, taskID))
+	if w.Code != http.StatusCreated {
+		t.Fatalf("create ask %d %s", w.Code, w.Body.String())
+	}
+	var card AskResponse
+	_ = json.NewDecoder(w.Body).Decode(&card)
+	var eventID string
+	dbfx.QueryRow(t, `SELECT event_id::text FROM human_needed_event WHERE ask_id=$1`, card.ID).Scan(&eventID)
+	f.deliver(t, eventID)
+	dbfx.Exec(t, `UPDATE agent_task_queue SET status='completed' WHERE id=$1`, taskID)
+	heal := breakInserts(t, "comment", fmt.Sprintf("NEW.issue_id = '%s'", issue.ID))
+	if code := answerCardInApp(t, card.ID, "blue"); code == 200 {
+		t.Fatalf("an answer whose comment could not be written reported success")
+	}
+	var status string
+	dbfx.QueryRow(t, `SELECT status FROM agent_ask WHERE id=$1`, card.ID).Scan(&status)
+	if status != "open" {
+		t.Fatalf("after the failed write the card is %q, want open", status)
+	}
+	heal()
+	if code := answerCardInApp(t, card.ID, "blue"); code != 200 {
+		t.Fatalf("the retry after the fault cleared: %d", code)
+	}
+	if code := answerCardInApp(t, card.ID, "blue"); code != http.StatusConflict {
+		t.Fatalf("a repeat must be refused: %d", code)
+	}
+	if got := summonCount(t, `SELECT count(*) FROM comment WHERE issue_id=$1 AND content LIKE '%%回答了提问%%'`, issue.ID); got != 1 {
+		t.Fatalf("%d answer comments, want 1", got)
+	}
+	if got := openRuns(t, issue.ID, agentID); got != 1 {
+		t.Fatalf("the asker was resumed %d times, want exactly once", got)
+	}
+}
