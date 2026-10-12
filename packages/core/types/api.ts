@@ -750,6 +750,13 @@ export type BotWakeSenderKind = "member" | "agent" | "bot";
 export type BotWakeFrom = Record<BotWakeSenderKind, BotWakeFromRule>;
 
 export interface BotWakeSettings {
+  worker?: {
+    last_processed_at: string | null;
+    last_error: string;
+    head_sequence: number;
+    stuck_seconds: number;
+    blocked: boolean;
+  };
   webhook_configured: boolean;
   wake_from: BotWakeFrom;
   /** Also wake on issues the owner currently follows or is assigned. Off by

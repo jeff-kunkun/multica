@@ -19,7 +19,10 @@ HTTP 200 means received, not running or completed. Uncertain deliveries are
 never automatically replayed. Quiet and hourly-limited events are automatically
 delivered later in sequence order; mentions bypass positive hourly limits and
 do not consume them. 0 pauses all pushes. Get reports the saved hourly_limit
-and limited_count (visible events held by that limit).`}
+and limited_count (visible events held by that limit), plus worker health:
+last_processed_at, last_error, head_sequence, stuck_seconds and blocked.
+Preparation failures retry at 5/10 seconds, then fail after three attempts.
+Backlog older than five minutes is grouped into batches of up to 100 events.`}
 	for _, verb := range []string{"get", "set", "events", "pending"} {
 		verb := verb
 		cmd := &cobra.Command{Use: verb + " <bot-id>", Short: map[string]string{"get": "Read wake rules (no secrets)", "set": "Update rules or write webhook credentials from file/stdin", "events": "List paginated delivery receipts", "pending": "List paginated events awaiting review"}[verb], Args: exactArgs(1), RunE: func(cmd *cobra.Command, args []string) error { return runBotWake(cmd, args, verb) }}

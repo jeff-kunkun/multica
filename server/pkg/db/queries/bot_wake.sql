@@ -40,14 +40,16 @@ FOR UPDATE OF b SKIP LOCKED LIMIT 1;
 -- name: ListBotWakeBatch :many
 SELECT * FROM bot_wake_event
 WHERE bot_id=sqlc.arg(bot_id) AND workspace_id=sqlc.arg(workspace_id) AND status='queued'
- AND issue_id IS NOT DISTINCT FROM sqlc.narg(issue_id)::uuid
- AND chat_session_id IS NOT DISTINCT FROM sqlc.narg(chat_session_id)::uuid
+ AND ((created_at<now()-interval '5 minutes' AND sqlc.arg(window_start)::timestamptz<now()-interval '5 minutes')
+      OR (issue_id IS NOT DISTINCT FROM sqlc.narg(issue_id)::uuid
+          AND chat_session_id IS NOT DISTINCT FROM sqlc.narg(chat_session_id)::uuid))
  AND event_type<>'wake_blocked'
  AND ((sqlc.narg(delivery_id)::uuid IS NOT NULL AND delivery_id=sqlc.narg(delivery_id)::uuid)
       OR (sqlc.narg(delivery_id)::uuid IS NULL AND delivery_id IS NULL AND attempts=0
           AND (created_at,sequence)>=(sqlc.arg(window_start)::timestamptz,sqlc.arg(first_sequence)::bigint)
-          AND created_at<=sqlc.arg(window_start)::timestamptz+sqlc.arg(window_seconds)::integer*interval '1 second'))
-ORDER BY sequence FOR UPDATE;
+          AND next_attempt_at<=now()
+          AND (created_at<now()-interval '5 minutes' OR created_at<=sqlc.arg(window_start)::timestamptz+sqlc.arg(window_seconds)::integer*interval '1 second')))
+ORDER BY sequence LIMIT CASE WHEN sqlc.narg(delivery_id)::uuid IS NULL THEN 100 ELSE NULL END FOR UPDATE;
 
 -- name: MarkBotWakeBatchMemberSending :exec
 UPDATE bot_wake_event SET status='sending',sent_at=now(),attempts=attempts+1,
@@ -135,3 +137,28 @@ WITH recorded AS (
 )
 INSERT INTO bot_wake_event(bot_id,workspace_id,event_type,issue_id,chat_session_id,source_id,author_type,author_id,via_bot_id,root_id,hop,reason)
 SELECT sqlc.arg(origin_bot_id),sqlc.arg(workspace_id),'wake_blocked',sqlc.narg(issue_id),sqlc.narg(chat_session_id),sqlc.arg(source_id),'bot',sqlc.arg(target_bot_id),sqlc.arg(origin_bot_id),sqlc.arg(root_id),sqlc.arg(limit_value),sqlc.arg(reason) FROM recorded;
+
+-- name: RecordBotWakeProcessingFailure :one
+WITH failed AS (
+ UPDATE bot_wake_event SET processing_attempts=processing_attempts+1,
+ status=CASE WHEN processing_attempts>=2 THEN 'failed' ELSE 'queued' END,
+ reason=sqlc.arg(reason)::text,
+ next_attempt_at=now()+CASE WHEN processing_attempts=0 THEN interval '5 seconds' ELSE interval '10 seconds' END
+ WHERE sequence=sqlc.arg(sequence) AND status IN ('queued','pending')
+ RETURNING bot_id
+)
+UPDATE bot_wake SET last_processed_at=now(),last_error=sqlc.arg(reason)::text
+WHERE bot_id=(SELECT bot_id FROM failed) RETURNING bot_id;
+
+-- name: RecordBotWakeProcessed :exec
+UPDATE bot_wake SET last_processed_at=now() WHERE bot_id=$1;
+
+-- name: GetBotWakeQueueHealth :one
+SELECT COALESCE(min(sequence),0)::bigint AS head_sequence,
+ COALESCE(EXTRACT(epoch FROM now()-min(created_at)),0)::bigint AS stuck_seconds
+FROM bot_wake_event WHERE bot_id=$1 AND status='queued' AND next_attempt_at<=now();
+
+-- name: ListBlockedBotWakeQueues :many
+SELECT bot_id,min(sequence)::bigint AS head_sequence FROM bot_wake_event
+WHERE status='queued' AND next_attempt_at<=now() AND created_at<now()-interval '5 minutes'
+GROUP BY bot_id;

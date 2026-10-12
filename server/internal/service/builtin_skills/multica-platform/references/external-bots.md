@@ -160,6 +160,18 @@ subscriptions by default; the old untouched default selection is updated too. Cu
 `wake_blocked` operational alerts remain immediate. This notification batching is
 separate from merging agent runs (DENE-1857).
 
+`multica bot wake get <bot-id> --output json` includes `worker` health:
+`last_processed_at`, `last_error`, `head_sequence`, `stuck_seconds`, `blocked`.
+A queue older than five minutes logs one `wake_blocked` alert per head sequence.
+Preparation errors are isolated after rollback, retried after 5/10 seconds and
+marked failed after three failures; `processing_attempts` is separate from HTTP
+`attempts`. Use the logged sequence to find the original error. Never replay
+`uncertain` events automatically. An old queue drains in batches of up to 100
+first-attempt events for the same Bot/workspace, including different sources;
+each event still passes current visibility, sender, event and chain checks.
+Completed assistant chat messages notify Bots watching that chat; empty/failed
+replies are skipped, and completing a placeholder emits one `chat` event.
+
 Every webhook has `delivery_id` and an ordered `events` array, including a
 single-event delivery. The top-level legacy fields mirror the first admitted
 event; handle **each** element of `events`, deduplicating its `event_id`. Each

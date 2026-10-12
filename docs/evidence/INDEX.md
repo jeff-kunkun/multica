@@ -2,6 +2,8 @@
 
 本索引只记录指向沉淀票附件的短指针；原始日志、截图和样本留在对应票据附件。
 
+- DENE-1915：Bot 毒事件隔离、三次退避、积压合批、聊天完成通知和队列健康；[375/390/768/1280 真实设置页截图与边界](https://ai.ferryway.cc/api/attachments/01a12e8d-2a1c-7c24-9e45-8f92bbf282e7/download)、[原版/修改版/回滚与回归验证](https://ai.ferryway.cc/api/attachments/01a12e8d-2a80-7545-88aa-c57a78355542/download)。线上每秒失败已见日志，但原错误文本缺失；执行席读取 Grok 设置被拒绝，未上线、未重放积压、未确认真实 Grok 通知。原生 App 无 Bot 管理入口，未改；桌面原生窗口未验。
+
 - DENE-1843：运行时机器掉线告警的同机聚合、CLI 记录与开关、Web/Desktop 和原生通知设置入口；[运行时页 375/390/768/1280 开启与关闭实页截图（任务附件）](https://ai.ferryway.cc/api/attachments/01a12c55-9f14-78af-b58e-55ab05ab47eb/download)。网页开关保存与刷新验证通过；真实 Telegram 停机/恢复演练移交父票 DENE-1819 上线后核对，未记为已通过；原生窗口和实体手机未做视觉验收。
 
 - DENE-1842：聊天历史说明被隐藏的排队消息数量，CLI JSON/table 与 Web/Desktop、原生 App 同步；[真实聊天页 375/390/768/1280 截图与 CLI 对照（任务附件）](https://ai.ferryway.cc/api/attachments/01a12c10-3758-7434-b901-113262873335/download)。原生窗口及手机设备未做视觉验收。
