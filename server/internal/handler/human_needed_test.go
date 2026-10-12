@@ -307,6 +307,9 @@ func askHumanHTTP(t *testing.T, asker, issueID, to string) (int, AskHumanRespons
 	}), "id", issueID)
 	testHandler.AskHumanIssue(w, req)
 	var resp AskHumanResponse
+	if w.Code != http.StatusOK {
+		t.Logf("ask-human %d: %s", w.Code, w.Body.String())
+	}
 	if w.Code == http.StatusOK {
 		if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
 			t.Fatalf("decode ask-human: %v", err)
