@@ -749,6 +749,56 @@ export interface BotWriteAuditPage {
   next_cursor: string;
 }
 
+/** Where one office event stands for your Bot (DENE-1963). */
+export type OfficeDeliveryStatus =
+  | "pending"
+  | "sending"
+  | "sent"
+  | "received"
+  | "relayed"
+  | "handled"
+  | "blocked";
+
+export interface OfficeDelivery {
+  event_id: string;
+  bot_id: string;
+  target_user_id: string;
+  reason: string;
+  must_relay: boolean;
+  status: OfficeDeliveryStatus;
+  attempts: number;
+  last_error: string;
+  blocked_reason: string;
+  next_attempt_at: string | null;
+  last_attempt_at: string | null;
+  sent_at: string | null;
+  received_at: string | null;
+  relayed_at: string | null;
+  relay_channel: string;
+  relay_error: string;
+  handled_reason: string;
+  fallback_at: string | null;
+  cursor: number;
+  event: {
+    event_type: string;
+    family: string;
+    meaning: string;
+    summary: string;
+    stream_seq: number;
+    pending_approval: boolean;
+    issue_id: string;
+    chat_session_id: string;
+    occurred_at: string;
+  };
+}
+
+export interface OfficeDeliveryPage {
+  deliveries: OfficeDelivery[];
+  next_cursor: number;
+  /** false = you have no Bot to deliver to. */
+  connected: boolean;
+}
+
 export interface BotBinding {
   bound: boolean;
   state: BotBindingState;

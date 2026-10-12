@@ -447,6 +447,9 @@ type ActivityBody struct {
 	FromStatus   string   `json:"from_status,omitempty"`
 	ToStatus     string   `json:"to_status,omitempty"`
 	OccurredAt   string   `json:"occurred_at"`
+	// The same fact on the office event stream (DENE-1963) carries the same
+	// key, so a Bot that gets both shows it once.
+	BusinessKey string `json:"business_key,omitempty"`
 
 	// Workspace-level events (DENE-1936) only. Names and ids, never values.
 	Workspace *WorkspaceEventBody `json:"workspace,omitempty"`
@@ -460,6 +463,7 @@ type ActivityInput struct {
 	CommentID     pgtype.UUID
 	Type          string
 	DedupeKey     string
+	BusinessKey   string // see ActivityBody.BusinessKey
 	SourceID      string // comment or message id
 	ActorType     string
 	ActorID       pgtype.UUID
@@ -500,7 +504,8 @@ func RouteActivity(ctx context.Context, q *db.Queries, in ActivityInput) (int, e
 		ActivityType: in.Type, Importance: importance, Categories: categories,
 		Excerpt: activityText(in), SourceID: in.SourceID,
 		FromStatus: in.FromStatus, ToStatus: in.ToStatus,
-		OccurredAt: occurred.UTC().Format(time.RFC3339Nano),
+		OccurredAt:  occurred.UTC().Format(time.RFC3339Nano),
+		BusinessKey: in.BusinessKey,
 	})
 	if err != nil {
 		return 0, err

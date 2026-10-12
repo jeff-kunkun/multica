@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"github.com/multica-ai/multica/server/internal/dbactor"
 	"log/slog"
 	"net/url"
 	"os"
@@ -108,6 +109,11 @@ func newSizedDBPool(ctx context.Context, dbURL string, connectTimeout time.Durat
 		return nil, err
 	}
 	applyPoolSizing(cfg, dbURL, sizing)
+	if !sizing.requireReadOnly {
+		// Every write connection carries the writer's identity for the office
+		// event stream triggers (DENE-1963). The replica never writes.
+		cfg.PrepareConn = dbactor.PrepareConn
+	}
 	return pgxpool.NewWithConfig(ctx, cfg)
 }
 

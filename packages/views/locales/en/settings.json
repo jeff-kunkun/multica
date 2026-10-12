@@ -764,6 +764,24 @@
         "issue": "Issue",
         "other": "Other"
       },
+      "deliveries_title": "Delivery log",
+      "deliveries_hint": "Whether each result reached your Bot and was passed on to you.",
+      "deliveries_empty": "Nothing yet",
+      "deliveries_retry": "Retry",
+      "deliveries_retry_all": "Retry all",
+      "deliveries_retried": "Queued {{count}} again",
+      "deliveries_more": "Load more",
+      "deliveries_must_relay": "Must reach you",
+      "deliveries_retrying": "Attempt {{count}} failed: {{error}}",
+      "deliveries_status": {
+        "pending": "Waiting to send",
+        "sending": "Sending",
+        "sent": "Sent, Bot hasn't confirmed",
+        "received": "Bot got it, not passed on yet",
+        "relayed": "Passed on to you",
+        "handled": "Bot handled it",
+        "blocked": "Can't be delivered"
+      },
       "toast_failed": "Failed to update your Bot setting"
     }
   },

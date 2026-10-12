@@ -122,6 +122,14 @@
 
 **未回复原因**：`chat send --wait` 超时和 `chat progress --history` 给出的服务端裁定，说明这一回合为什么还没有回复：`runtime_offline`、`running_no_logs`、`queued_behind_N`、`awaiting_dispatch`、`waiting_local_directory`、`retry_scheduled`，或终态失败原因。它是服务端判的，客户端不该靠等了多久自己猜（DENE-1841）。聊天历史里排在当前回合后面、还没显示的用户消息计在 `hidden_queued_count`，有数就是在排队不是丢了（DENE-1842）。
 
+## 办公室事件流
+
+**办公室事件流（office event stream）**：工作区里发生的事——聊天回复、运行结束、任务状态、交付的文件、设置/成员/路由/配置变化——由数据库在业务写入的同一事务里记下，每条有 `event_id` 和不跳号的 `stream_seq`，带真实操作者和「Bot 代主人」关系，凭据字段打码。Bot 可按游标拉取，也会逐条收到推给主人的事件（DENE-1963，契约 `server/docs/office-event-contract.md`）。_避免_：活动流（那是按 30 秒合并的旧通道）
+
+**送达回执**：Bot 对单条事件的确认，分两段记：`received`（Bot 收到）和 `relayed`（已转告主人）；`handled` 表示无须转告，必须转告（`must_relay`）的结果不能直接记成 handled。HTTP 200 不算回执，没回执就用同一 `event_id` 无限退避重发；发不出去的记为「送不出去」并写明原因，修好后重试。必须转告却一直没转告的结果，改在站内收件箱提醒一次。_避免_：已送达（不说清是哪一段）
+
+**本轮完成 / 交棒 / 任务全部完成**：事件的 `meaning` 分别是 `round_done`（一次运行结束，票可能还在继续）、`handoff`（交给验收或别人）、`task_done`（整张票完成）。路由把发布类的票自动改成完成时，记为 `release_pending_approval`：「系统改成完成，正式发布仍待批准」，不是发布许可。
+
 ## 驱动者
 
 **驱动者**：让一张未关闭的票继续往前走的那一方，只有三种：一条活着的运行（排队、延时或在跑）、一条平台记下且到点会被检查的等待（`blocked_by`、叫醒时间、带超时的等待条件），或一个被点名的人（执行席上的成员、`needs_human`）。每张未关闭的票任何时刻都至少有一个驱动者；运行失败且没有排上重试时，服务端把智能体负责的票转为 `blocked` 并记下失败叫醒时间，由巡检到点叫醒执行人（DENE-1339，ADR-0006）。没有驱动者的票，巡检先在原席位重跑两次，再上报父票负责人，由其用 `multica issue dispose` 处置（DENE-1342）。

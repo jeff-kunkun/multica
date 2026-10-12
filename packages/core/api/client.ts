@@ -107,6 +107,7 @@ import type {
   BotBinding,
   PutBotBindingRequest,
   BotWriteAuditPage,
+  OfficeDeliveryPage,
   UpdateBotWakeRequest,
   BotWakeEventPage,
   BotMentionTarget,
@@ -4959,6 +4960,30 @@ export class ApiClient {
     if (params.before) search.set("before", params.before);
     const qs = search.toString();
     return this.fetch(`/api/workspaces/${workspaceId}/bot-writes${qs ? `?${qs}` : ""}`);
+  }
+
+  // Your Bot's office-event ledger (DENE-1963): what was sent, confirmed,
+  // passed on to you, or is stuck and why.
+  async listMyOfficeDeliveries(
+    workspaceId: string,
+    params: { before?: number; limit?: number; status?: string[] } = {},
+  ): Promise<OfficeDeliveryPage> {
+    const search = new URLSearchParams();
+    if (params.limit) search.set("limit", String(params.limit));
+    if (params.before) search.set("before", String(params.before));
+    if (params.status?.length) search.set("status", params.status.join(","));
+    const qs = search.toString();
+    return this.fetch(`/api/workspaces/${workspaceId}/me/office-deliveries${qs ? `?${qs}` : ""}`);
+  }
+
+  async retryMyOfficeDeliveries(
+    workspaceId: string,
+    eventId?: string,
+  ): Promise<{ requeued: number }> {
+    return this.fetch(`/api/workspaces/${workspaceId}/me/office-deliveries/retry`, {
+      method: "POST",
+      body: JSON.stringify(eventId ? { event_id: eventId } : {}),
+    });
   }
 
   async listBotWakeEvents(

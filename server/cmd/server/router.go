@@ -2101,6 +2101,14 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					// "looked, nobody needs telling" receipt and the catch-up list.
 					r.Post("/bots/{botId}/wake/events/{eventId}/handled", h.HandledActivity)
 					r.Get("/bots/{botId}/activity", h.ListActivityForBot)
+					// The office event stream (DENE-1963): per-event receipts
+					// and the Bot's own delivery ledger.
+					r.Post("/bots/{botId}/office-events/{eventId}/receipt", h.OfficeEventReceipt)
+					r.Get("/bots/{botId}/office-deliveries", h.ListBotOfficeDeliveries)
+					r.Post("/bots/{botId}/office-deliveries/retry", h.RetryBotOfficeDeliveries)
+					// Pull by cursor; a Bot key reads as its owner.
+					r.Get("/office-events", h.ListOfficeEvents)
+					r.Get("/office-events/{eventId}", h.GetOfficeEvent)
 				})
 
 				// Your own Bot channel for decisions (DENE-1933): only the
@@ -2112,6 +2120,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Put("/me/bot-binding", h.PutBotBinding)
 					r.Delete("/me/bot-binding", h.DeleteBotBinding)
 					r.Post("/me/bot-binding/verify", h.VerifyBotBinding)
+					r.Get("/me/office-deliveries", h.ListMyOfficeDeliveries)
+					r.Post("/me/office-deliveries/retry", h.RetryMyOfficeDeliveries)
 					// What Bots did in a person's name (DENE-1936).
 					r.Get("/bot-writes", h.ListBotWriteAudit)
 				})

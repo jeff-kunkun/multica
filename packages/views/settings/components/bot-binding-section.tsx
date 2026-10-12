@@ -23,6 +23,7 @@ import {
 } from "@multica/ui/components/ui/select";
 import { Switch } from "@multica/ui/components/ui/switch";
 import { useT } from "../../i18n";
+import { OfficeDeliveriesRow } from "./office-deliveries-row";
 import { SettingsCard, SettingsRow, SettingsSection } from "./settings-layout";
 
 const NO_BOT = "none";
@@ -292,6 +293,7 @@ export function BotBindingSection() {
             ) : null}
           </SettingsRow>
         ) : null}
+        {binding?.bound ? <OfficeDeliveriesRow wsId={wsId} /> : null}
       </SettingsCard>
     </SettingsSection>
   );

@@ -226,6 +226,7 @@ type WorkspaceActivityInput struct {
 	Visible      TargetVisibility
 	ActivityType string
 	DedupeKey    string
+	BusinessKey  string // see ActivityBody.BusinessKey
 	Body         WorkspaceEventBody
 	ActorType    string
 	ActorID      pgtype.UUID
@@ -390,8 +391,9 @@ func marshalWorkspaceBody(in WorkspaceActivityInput, occurred time.Time) (worksp
 	out, err := json.Marshal(ActivityBody{
 		ActivityType: in.ActivityType, Importance: importance, Categories: categories,
 		Excerpt: WorkspaceActivityExcerpt(wb), SourceID: wb.EntityID,
-		OccurredAt: occurred.UTC().Format(time.RFC3339Nano),
-		Workspace:  &wb,
+		OccurredAt:  occurred.UTC().Format(time.RFC3339Nano),
+		BusinessKey: in.BusinessKey,
+		Workspace:   &wb,
 	})
 	return workspaceBodyJSON{raw: out, importance: importance}, err
 }

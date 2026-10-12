@@ -525,6 +525,12 @@ deleted_autopilot_subscribers AS (
 deleted_webhook_deliveries AS (
     DELETE FROM webhook_delivery WHERE workspace_id = $1
 ),
+deleted_office_deliveries AS (
+    DELETE FROM office_event_delivery WHERE workspace_id = $1
+),
+deleted_office_events AS (
+    DELETE FROM office_event WHERE workspace_id = $1
+),
 deleted_github_check_runs AS (
     DELETE FROM github_pull_request_check_run
     WHERE pr_id IN (SELECT id FROM ws_github_prs)

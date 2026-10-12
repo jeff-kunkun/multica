@@ -2,6 +2,7 @@ package routing
 
 import (
 	"context"
+	"github.com/multica-ai/multica/server/internal/dbactor"
 	"strings"
 	"time"
 )
@@ -263,7 +264,9 @@ func (r *Router) routeStale(ctx context.Context, workspaceID string, settings Se
 // completeStale aligns the status to an acceptance the ticket already carries.
 func (r *Router) completeStale(ctx context.Context, workspaceID string, issue Issue, d StaleDecision, threshold float64) (Outcome, error) {
 	out := Outcome{State: StateEnabled, Action: ActionCompleted}
-	written, err := r.Store.CompleteFromReview(ctx, workspaceID, issue.ID)
+	// Labelled so the office event stream knows the system, not a person,
+	// marked it done (DENE-1963: release work then still waits for approval).
+	written, err := r.Store.CompleteFromReview(dbactor.System(ctx, "routing"), workspaceID, issue.ID)
 	if err != nil {
 		return out, err
 	}
