@@ -52,6 +52,7 @@ import {
 import { useAutoSave } from "./use-auto-save";
 import { RoutingSeatsTable } from "./routing-seats-table";
 import { RoutingDomainsSection } from "./routing-domains";
+import { RoutingDispatchSection } from "./routing-dispatch";
 import { RuntimePicker } from "../../agents/components/runtime-picker";
 import { ModelDropdown } from "../../agents/components/model-dropdown";
 import { ThinkingSettingField } from "../../agents/components/inspector/thinking-prop-row";
@@ -609,6 +610,8 @@ export function RoutingTab() {
       </SettingsSection>
 
       <RuleTableSection table={health.data?.rules} />
+
+      <RoutingDispatchSection wsId={workspace?.id ?? ""} canManage={canManage} />
 
       <SettingsSection
         title={t(($) => $.routing.analysis_title)}

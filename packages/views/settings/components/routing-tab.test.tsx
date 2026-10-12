@@ -14,6 +14,7 @@ const checkRoutingHealth = vi.hoisted(() => vi.fn());
 const listRoutingModels = vi.hoisted(() => vi.fn());
 const listAgents = vi.hoisted(() => vi.fn());
 const listRuntimes = vi.hoisted(() => vi.fn());
+const getRoutingDispatch = vi.hoisted(() => vi.fn());
 const toastError = vi.hoisted(() => vi.fn());
 vi.mock("sonner", () => ({ toast: { error: toastError, success: vi.fn() } }));
 const member = vi.hoisted(() => ({ role: "owner" as "owner" | "admin" | "member" }));
@@ -37,6 +38,7 @@ vi.mock("@multica/core/api", async (importOriginal) => {
       listRoutingModels,
       listAgents,
       listRuntimes,
+      getRoutingDispatch,
     },
   };
 });
@@ -127,6 +129,14 @@ beforeEach(() => {
   listRoutingModels.mockResolvedValue({ models: [] });
   listAgents.mockReset();
   listAgents.mockResolvedValue([]);
+  getRoutingDispatch.mockReset();
+  getRoutingDispatch.mockResolvedValue({
+    policy: { text: "", rules: [] },
+    is_default: true,
+    series: [],
+    tiers: [],
+    editable: true,
+  });
   updateWorkspace.mockImplementation(async (_id: string, body: { settings?: unknown }) => ({
     ...workspace.current,
     settings: body.settings,
