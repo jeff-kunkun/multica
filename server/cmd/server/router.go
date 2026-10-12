@@ -1877,6 +1877,10 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					// that it is currently broken. Only admins can change it.
 					r.Get("/routing/health", h.GetRoutingHealth)
 					r.Get("/routing/learning", h.GetRoutingLearning)
+					// The division of labour in force (DENE-1834). Reading
+					// it is member-visible like the health report; an agent
+					// run reads the rules it works under the same way.
+					r.Get("/routing/dispatch", h.GetRoutingDispatch)
 				})
 				// Admin-level access
 				r.Group(func(r chi.Router) {
@@ -1892,6 +1896,11 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					// Model discovery also makes an outbound request with the
 					// workspace/deployment credential, so keep it admin-only.
 					r.Post("/routing/models", h.ListRoutingModels)
+					// Plain-language 分工规则: preview dials the model, the
+					// PUT is the confirmation that makes the rows take
+					// effect (DENE-1834 part 4).
+					r.Post("/routing/dispatch/preview", h.PreviewRoutingDispatch)
+					r.Put("/routing/dispatch", h.UpdateRoutingDispatch)
 					r.Get("/config/export", h.ExportWorkspaceConfig)
 					r.Post("/config/import", h.ImportWorkspaceConfig)
 					r.Post("/transfer/config", h.ImportWorkspaceTransferConfig)

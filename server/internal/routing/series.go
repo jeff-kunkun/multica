@@ -87,6 +87,10 @@ func (l Ladder) preferredSeriesSeat(base Seat, preferred string, scene Scene, ro
 	return base, false
 }
 
+// CandidateSeries lists the model families with an auto-pickable seat on
+// the ladder, sorted, for a reader editing the 分工规则.
+func (l Ladder) CandidateSeries(roster map[string]Agent) []string { return l.candidateSeries(roster) }
+
 func (l Ladder) candidateSeries(roster map[string]Agent) []string {
 	seen := map[string]bool{}
 	for _, a := range roster {

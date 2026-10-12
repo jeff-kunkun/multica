@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="zh-Hans">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DENE-1834 设置页「分工规则」预览</title>
+<style>
+  :root{--fg:#1f2328;--muted:#6b7280;--bg:#fff;--border:#e5e7eb}
+  *{box-sizing:border-box}
+  body{margin:0;padding:24px;font:14px/1.5 -apple-system,"PingFang SC","Helvetica Neue",sans-serif;color:var(--fg);background:#fafafa}
+  h1{font-size:18px;margin:0 0 4px}
+  p.sub{margin:0 0 20px;color:var(--muted)}
+  h2{font-size:14px;margin:28px 0 8px;color:var(--muted);font-weight:500}
+  .frames{display:flex;gap:24px;flex-wrap:wrap;align-items:flex-start}
+  .frame{background:var(--bg);border:1px solid var(--border);border-radius:10px;overflow:hidden}
+  .frame .bar{padding:6px 10px;font-size:12px;color:var(--muted);border-bottom:1px solid var(--border);background:#fcfcfc}
+  .desk{width:720px}.mob{width:390px}
+  .head{padding:14px 16px 6px}
+  .head .t{font-weight:600}.head .d{color:var(--muted);font-size:13px}
+  .head .act{float:right;font-size:12px;color:var(--muted)}
+  .rows{padding:4px 16px}
+  .row{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;padding:12px 0;border-bottom:1px solid var(--border)}
+  .row:last-child{border-bottom:0}
+  .mob .row{flex-direction:column;gap:8px}
+  .row .label{font-weight:500}
+  .row .desc{color:var(--muted);font-size:13px;margin-top:2px}
+  .ctl{flex:none;width:384px;display:flex;flex-direction:column;gap:8px}
+  .mob .ctl{width:100%}
+  textarea,.sel,.inp{font:inherit;font-size:13px;border:1px solid var(--border);border-radius:6px;padding:6px 8px;background:#fff;color:var(--fg)}
+  textarea{width:100%;height:84px;resize:none}
+  .btns{display:flex;justify-content:flex-end;gap:8px}
+  .btn{font-size:13px;padding:5px 12px;border-radius:6px;border:1px solid var(--border);background:#fff}
+  .btn.primary{background:var(--fg);color:#fff;border-color:var(--fg)}
+  .btn.off{opacity:.5}
+  .rule{display:flex;flex-direction:column;gap:6px;padding:12px 0;border-bottom:1px solid var(--border)}
+  .rule .line{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
+  .inp{width:140px;height:30px}.sel{height:30px}
+  .mob .inp{width:100%}
+  .origin{font-size:12px;color:var(--muted)}
+  .src{font-size:12px;color:var(--muted)}
+  .rm{margin-left:auto;font-size:13px;color:var(--muted)}
+  .foot{display:flex;justify-content:space-between;align-items:center;padding:12px 0}
+  .foot .note{color:var(--muted);font-size:13px}
+  .hist{margin-top:12px}
+  .hist .row .diff{color:var(--muted);font-size:13px;white-space:pre-wrap;text-align:right;flex:none;width:384px}
+  .mob .hist .row .diff{width:100%;text-align:left}
+  pre{background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:12px;font-size:12px;overflow:auto;white-space:pre-wrap}
+  .note{color:var(--muted);font-size:12px}
+</style>
+</head>
+<body>
+<h1>设置 → 路由：新增分区「分工规则」</h1>
+<p class="sub">放在「定档规则」表下面。一段大白话 → 解析预览 → 逐行可改 → 点「生效」才写入；每次生效记一版，列在下面。行式布局，颜色只表状态，没有徽章和提示框。</p>
+
+<div class="frames">
+  <div class="frame desk">
+    <div class="bar">桌面 / 网页 · 1280 宽（截取路由分区）</div>
+    <div class="head"><span class="act">恢复默认</span><div class="t">分工规则</div><div class="d">用大白话写谁做什么，解析成规则表，确认后才生效，每次改动留痕。</div></div>
+    <div class="rows">
+      <div class="row">
+        <div><div class="label">规则原文</div><div class="desc">一句话一条规则，例如「前端、审美交给 Claude，Codex 主要负责审查」。</div></div>
+        <div class="ctl">
+          <textarea>前端、审美交给 Claude，Codex 主要负责审查。文档、沉淀类最多中档。数据处理交给 Codex。</textarea>
+          <div class="btns"><span class="btn">解析预览</span></div>
+        </div>
+      </div>
+      <div class="rule"><div class="line"><span class="inp">前端</span><span class="sel">Claude</span><span class="sel">不限档位</span><span class="origin">默认</span><span class="rm">删除</span></div><div class="src">来源：「前端、审美交给 Claude，Codex 主要负责审查。」</div></div>
+      <div class="rule"><div class="line"><span class="inp">审查</span><span class="sel">Codex</span><span class="sel">不限档位</span><span class="origin">默认</span><span class="rm">删除</span></div><div class="src">来源：「前端、审美交给 Claude，Codex 主要负责审查。」</div></div>
+      <div class="rule"><div class="line"><span class="inp">文档沉淀</span><span class="sel">不限系列</span><span class="sel">最多中档</span><span class="origin">默认</span><span class="rm">删除</span></div><div class="src">来源：「文档、沉淀类最多中档。」</div></div>
+      <div class="rule"><div class="line"><span class="inp">数据</span><span class="sel">Codex</span><span class="sel">不限档位</span><span class="origin">模型解析</span><span class="rm">删除</span></div><div class="src">来源：「数据处理交给 Codex。」</div></div>
+      <div class="foot"><span class="note">预览中的规则还没生效。</span><span class="btn primary">生效</span></div>
+    </div>
+    <div class="rows hist">
+      <div class="row"><div><div class="label">第 2 版</div><div class="desc">Kun · 2026/10/11 16:02</div></div><div class="diff">+ 数据→Codex</div></div>
+      <div class="row"><div><div class="label">第 1 版</div><div class="desc">Kun · 2026/10/10 21:30</div></div><div class="diff">「前端、审美交给 Claude…」→「前端、审美交给 Claude，Codex…」；~ 审查→Codex（说明或来源句改了）</div></div>
+    </div>
+  </div>
+
+  <div class="frame mob">
+    <div class="bar">手机网页 · 390 宽</div>
+    <div class="head"><span class="act">恢复默认</span><div class="t">分工规则</div><div class="d">用大白话写谁做什么，解析成规则表，确认后才生效，每次改动留痕。</div></div>
+    <div class="rows">
+      <div class="row">
+        <div><div class="label">规则原文</div><div class="desc">一句话一条规则，例如「前端、审美交给 Claude，Codex 主要负责审查」。</div></div>
+        <div class="ctl">
+          <textarea>前端、审美交给 Claude，Codex 主要负责审查。文档、沉淀类最多中档。数据处理交给 Codex。</textarea>
+          <div class="btns"><span class="btn">解析预览</span></div>
+        </div>
+      </div>
+      <div class="rule"><div class="line"><span class="inp">前端</span><span class="sel">Claude</span><span class="sel">不限档位</span><span class="origin">默认</span><span class="rm">删除</span></div><div class="src">来源：「前端、审美交给 Claude，Codex 主要负责审查。」</div></div>
+      <div class="rule"><div class="line"><span class="inp">数据</span><span class="sel">Codex</span><span class="sel">不限档位</span><span class="origin">模型解析</span><span class="rm">删除</span></div><div class="src">来源：「数据处理交给 Codex。」</div></div>
+      <div class="foot"><span class="note">预览中的规则还没生效。</span><span class="btn primary">生效</span></div>
+    </div>
+    <div class="rows hist">
+      <div class="row"><div><div class="label">第 2 版</div><div class="desc">Kun · 2026/10/11 16:02</div></div><div class="diff">+ 数据→Codex</div></div>
+    </div>
+  </div>
+</div>
+
+<h2>不能改的时候（同一位置，一句原因）</h2>
+<pre>规则原文   只有管理员能改。            （普通成员：文本框和按钮都禁用，没有「生效」）
+规则原文   智能体只能看，不能改。      （任务令牌的 run 打开设置页）</pre>
+
+<h2>命令行（Agent 不开浏览器也能查、能改）</h2>
+<pre>multica workspace routing policy show                       # 原文、规则行（来源句 + 默认/模型解析/手改）、版本和改动记录
+multica workspace routing policy preview --text "数据处理交给 Codex。" --output json > preview.json   # 只解析，不写入
+multica workspace routing policy apply --file preview.json   # 确认生效，记一版
+multica workspace routing policy apply --reset               # 恢复默认</pre>
+<p class="note">服务端校验：至少一条规则、系列和档位必须在本工作区的阶梯里、没变化不记版；任务令牌只能 show。手机端：行内控件自动换行堆叠，原文框和按钮撑满宽度，改动记录纵向排。apps/mobile 原生 App 没有路由设置页，不改。</p>
+</body>
+</html>

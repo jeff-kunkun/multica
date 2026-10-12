@@ -31,6 +31,7 @@ export const workspaceKeys = {
   assigneeFrequency: (wsId: string) => ["workspaces", wsId, "assignee-frequency"] as const,
   mcpServers: (wsId: string) => ["workspaces", wsId, "mcp-servers"] as const,
   routingHealth: (wsId: string) => ["workspaces", wsId, "routing-health"] as const,
+  routingDispatch: (wsId: string) => ["workspaces", wsId, "routing-dispatch"] as const,
   modules: (wsId: string) => ["workspaces", wsId, "modules"] as const,
   naming: (wsId: string) => ["workspaces", wsId, "naming"] as const,
 };
@@ -82,6 +83,14 @@ export function routingHealthOptions(wsId: string) {
     queryFn: () => api.getRoutingHealth(wsId),
     staleTime: 30_000,
     refetchInterval: 60_000,
+  });
+}
+
+export function routingDispatchOptions(wsId: string) {
+  return queryOptions({
+    queryKey: workspaceKeys.routingDispatch(wsId),
+    queryFn: () => api.getRoutingDispatch(wsId),
+    staleTime: 30_000,
   });
 }
 

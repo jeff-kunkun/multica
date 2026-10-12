@@ -172,6 +172,17 @@ facts print on the routing receipt of `issue create` / `chat new` / chat → goa
 the rule list re-asks the category on the next route; the rest of a fresh
 analysis is reused as before.
 
+The rule list is edited through a preview → confirm pair, never by autosave:
+`multica workspace routing policy show` prints the text, the rows (each with
+the sentence it came from and whether it was parsed, edited by hand, or the
+default) and the revision log; `policy preview --text "…"` (or `--text-file`)
+asks the routing judge to read rows out of plain language and writes nothing;
+`policy apply --file preview.json` confirms rows a person has checked and
+records a numbered revision (`--reset` restores the default). A task-token
+run can `show` but not `preview` or `apply` — the owner confirms in the
+settings page (路由 → 分工规则) or the CLI as a person. A row edited by hand
+loses its `origin: model`; the server labels it 手改 in the revision.
+
 **接着做 (DENE-1202).** A ticket continuing earlier work — a sibling one stage
 earlier under the same parent, the parent itself, or a ticket created by the
 same agent run — goes back to that work's executor when the seat is on the
