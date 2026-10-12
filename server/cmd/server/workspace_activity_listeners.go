@@ -76,6 +76,7 @@ func registerWorkspaceActivityListeners(bus *events.Bus, queries *db.Queries) {
 				IssueID:      optionalUUID(attrs["issue_id"]),
 				ActivityType: kind.activity,
 				DedupeKey:    "ws:run:" + taskID + ":" + kind.activity,
+				BusinessKey:  "run:" + taskID + ":" + strings.TrimPrefix(kind.activity, "run."),
 				Body: service.WorkspaceEventBody{
 					Family: service.FamilyRun, Action: strings.TrimPrefix(kind.activity, "run."), ActorKind: "system", EntityID: taskID, Attrs: attrs,
 				},

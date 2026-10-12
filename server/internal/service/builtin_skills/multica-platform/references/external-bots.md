@@ -323,3 +323,32 @@ value (another member, role or amount) is a new request and opens a new card.
 A body the server cannot read whole or unambiguously (not JSON, over 64 KB, or
 one key named twice in any letter case) is refused with
 `owner_confirmation_unscannable`: send plain JSON, each key once. `owner_confirmation_denied` means the owner said no: do not ask again.
+
+## Office event stream (DENE-1963)
+
+Results meant for your owner — chat replies, handoffs, finished or blocked
+tickets, delivered files, settings and member changes — also arrive one by one
+as `type: "office_event"` with an `event_id`, a gap-free `stream_seq`, a
+`meaning` (`round_done` one run ended / `handoff` / `task_done` the whole ticket
+/ `reply` / `blocked` / `failed` / `artifact` / `release_pending_approval` /
+`change`), the real `actor` (and `via_bot_id` + `on_behalf_of_user_id` when a
+Bot acted for someone) and an `artifacts` catalog (filename, size, sha256,
+authorized download). An HTTP 200 is not a receipt: the same `event_id` comes
+back, forever, until you post one. Dedupe on `event_id`; the same fact on the
+older activity lane carries the same `business_key`.
+
+```bash
+multica events receipt <event-id> --bot <bot-id> --stage received
+multica events receipt <event-id> --bot <bot-id> --stage relayed --channel telegram --ref <msg-id> --file <attachment-id>=sent
+multica events receipt <event-id> --bot <bot-id> --stage handled --reason "…"   # 409 must_relay if not relayed first
+multica events list --after <stream-seq> --output json      # catch up by cursor
+multica events deliveries --bot <bot-id> --status blocked   # what is stuck and why
+multica events retry --bot <bot-id> [--event <event-id>]
+multica events download <attachment-id>
+```
+
+`must_relay: true` means tell the person, even if a similar message went out
+(`bypass_semantic_dedupe`). `pending_approval: true` with the notice
+「系统改成完成，正式发布仍待批准」 means routing closed a release ticket: it is not
+a deploy permission. A must-relay result you do not relay reaches the person's
+inbox instead.

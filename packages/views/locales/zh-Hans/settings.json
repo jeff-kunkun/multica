@@ -760,6 +760,24 @@
         "issue": "任务",
         "other": "其他"
       },
+      "deliveries_title": "送达记录",
+      "deliveries_hint": "每条结果是否送到 Bot、是否转告了你。",
+      "deliveries_empty": "还没有",
+      "deliveries_retry": "重试",
+      "deliveries_retry_all": "全部重试",
+      "deliveries_retried": "已重新排队 {{count}} 条",
+      "deliveries_more": "加载更多",
+      "deliveries_must_relay": "必须转告你",
+      "deliveries_retrying": "第 {{count}} 次没送到：{{error}}",
+      "deliveries_status": {
+        "pending": "等待发送",
+        "sending": "发送中",
+        "sent": "已发出，Bot 未确认",
+        "received": "Bot 已收到，还没转告你",
+        "relayed": "已转告你",
+        "handled": "Bot 已处理",
+        "blocked": "送不出去"
+      },
       "toast_failed": "没能更新 Bot 设置"
     }
   },

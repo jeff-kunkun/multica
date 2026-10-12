@@ -98,6 +98,9 @@ func registerActivityStreamListeners(bus *events.Bus, queries *db.Queries) {
 			in.Type = service.ActivityStatusChanged
 			in.FromStatus, in.ToStatus = prev, issue.status
 			in.DedupeKey = "act:status:" + issue.id + ":" + prev + ">" + issue.status + ":" + issue.updatedAt
+			if at, err := time.Parse(time.RFC3339Nano, issue.updatedAt); err == nil {
+				in.BusinessKey = service.OfficeIssueStatusKey(issue.id, prev, issue.status, at)
+			}
 			route(in)
 		}
 		if assigneeChanged {
@@ -146,6 +149,7 @@ func registerActivityStreamListeners(bus *events.Bus, queries *db.Queries) {
 			ChatSessionID: parseUUID(msg.ChatSessionID),
 			Type:          service.ActivityChatMessage,
 			DedupeKey:     "act:chat:" + msg.MessageID,
+			BusinessKey:   "chat-message:" + msg.MessageID,
 			SourceID:      msg.MessageID,
 			ActorType:     actorType,
 			ActorID:       optionalUUID(actorID),

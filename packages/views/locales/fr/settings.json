@@ -764,6 +764,24 @@
         "issue": "Ticket",
         "other": "Autre"
       },
+      "deliveries_title": "Suivi des envois",
+      "deliveries_hint": "Si chaque résultat a atteint votre Bot et vous a été transmis.",
+      "deliveries_empty": "Rien pour l’instant",
+      "deliveries_retry": "Réessayer",
+      "deliveries_retry_all": "Tout réessayer",
+      "deliveries_retried": "{{count}} remis en file",
+      "deliveries_more": "Charger plus",
+      "deliveries_must_relay": "Doit vous parvenir",
+      "deliveries_retrying": "Tentative {{count}} échouée : {{error}}",
+      "deliveries_status": {
+        "pending": "En attente d’envoi",
+        "sending": "Envoi en cours",
+        "sent": "Envoyé, non confirmé par le Bot",
+        "received": "Reçu par le Bot, pas encore transmis",
+        "relayed": "Transmis à vous",
+        "handled": "Traité par le Bot",
+        "blocked": "Impossible à livrer"
+      },
       "toast_failed": "Échec de la mise à jour du réglage Bot"
     }
   },

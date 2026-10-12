@@ -15,6 +15,7 @@
 - [Bot 唤醒限制、回执、恢复与审计](../server/docs/bot-wake-contract.md#causality-lifecycle-and-verification-limits)
 - [要人决定的事推给本人的 Bot](kun/human-needed.md)
 - [个人 Bot 动态流、主人确认与代理审计契约](../server/docs/bot-activity-contract.md)
+- [办公室事件流、逐条回执与成果送达契约](../server/docs/office-event-contract.md)
 - [每台机器同时运行上限](kun/machine-run-capacity.md)
 - [Qwen Code 思考档位按模型声明（含 Nexus 客户端说明）](kun/qwen-thinking-levels.md)
 - [工作区全景命令与筛选范围](../server/internal/service/builtin_skills/multica-platform/references/overview.md)

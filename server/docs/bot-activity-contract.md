@@ -5,6 +5,11 @@ A person who connected their own Bot and switched a scope on gets what happens
 in their tickets and chats pushed to that Bot as it happens. The Bot decides
 what reaches the person; the server only tags each event and keeps secrets out.
 
+Results that must reach the person with a per-event receipt (chat replies,
+handoffs, finished tickets, files, config changes) also travel on the
+[office event stream](office-event-contract.md); the same fact carries the same
+`business_key` on both, so show it once.
+
 ## Who gets it
 
 Opt-in per person, on top of a verified Bot binding. `activity_scope` on the

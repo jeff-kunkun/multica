@@ -1956,6 +1956,65 @@ type NotificationPreference struct {
 	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
 }
 
+type OfficeEvent struct {
+	ID               int64              `json:"id"`
+	EventID          pgtype.UUID        `json:"event_id"`
+	WorkspaceID      pgtype.UUID        `json:"workspace_id"`
+	Family           string             `json:"family"`
+	EventType        string             `json:"event_type"`
+	ObjectType       string             `json:"object_type"`
+	ObjectID         string             `json:"object_id"`
+	IssueID          pgtype.UUID        `json:"issue_id"`
+	ChatSessionID    pgtype.UUID        `json:"chat_session_id"`
+	ChatMessageID    pgtype.UUID        `json:"chat_message_id"`
+	CommentID        pgtype.UUID        `json:"comment_id"`
+	TaskID           pgtype.UUID        `json:"task_id"`
+	AttachmentID     pgtype.UUID        `json:"attachment_id"`
+	Changes          []byte             `json:"changes"`
+	ActorType        string             `json:"actor_type"`
+	ActorID          pgtype.UUID        `json:"actor_id"`
+	ViaBotID         pgtype.UUID        `json:"via_bot_id"`
+	OnBehalfOfUserID pgtype.UUID        `json:"on_behalf_of_user_id"`
+	ActorTaskID      pgtype.UUID        `json:"actor_task_id"`
+	ActorSource      string             `json:"actor_source"`
+	OccurredAt       pgtype.Timestamptz `json:"occurred_at"`
+	StreamSeq        pgtype.Int8        `json:"stream_seq"`
+	SealedAt         pgtype.Timestamptz `json:"sealed_at"`
+	Meaning          string             `json:"meaning"`
+	Summary          string             `json:"summary"`
+	MustRelay        bool               `json:"must_relay"`
+	PendingApproval  bool               `json:"pending_approval"`
+	BusinessKey      string             `json:"business_key"`
+}
+
+type OfficeEventDelivery struct {
+	ID            int64              `json:"id"`
+	EventID       pgtype.UUID        `json:"event_id"`
+	WorkspaceID   pgtype.UUID        `json:"workspace_id"`
+	BotID         pgtype.UUID        `json:"bot_id"`
+	BindingID     pgtype.UUID        `json:"binding_id"`
+	TargetUserID  pgtype.UUID        `json:"target_user_id"`
+	Reason        string             `json:"reason"`
+	MustRelay     bool               `json:"must_relay"`
+	Status        string             `json:"status"`
+	Attempts      int32              `json:"attempts"`
+	LastError     string             `json:"last_error"`
+	NextAttemptAt pgtype.Timestamptz `json:"next_attempt_at"`
+	LastAttemptAt pgtype.Timestamptz `json:"last_attempt_at"`
+	SentAt        pgtype.Timestamptz `json:"sent_at"`
+	ReceivedAt    pgtype.Timestamptz `json:"received_at"`
+	RelayedAt     pgtype.Timestamptz `json:"relayed_at"`
+	RelayChannel  string             `json:"relay_channel"`
+	RelayRef      string             `json:"relay_ref"`
+	RelayError    string             `json:"relay_error"`
+	HandledReason string             `json:"handled_reason"`
+	BlockedReason string             `json:"blocked_reason"`
+	FallbackAt    pgtype.Timestamptz `json:"fallback_at"`
+	Artifacts     []byte             `json:"artifacts"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
+}
+
 type PasswordResetAudit struct {
 	ID          pgtype.UUID        `json:"id"`
 	UserID      pgtype.UUID        `json:"user_id"`

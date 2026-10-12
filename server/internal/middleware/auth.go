@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/auth"
 	"github.com/multica-ai/multica/server/internal/botsource"
+	"github.com/multica-ai/multica/server/internal/dbactor"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
@@ -378,5 +379,30 @@ func serveAuthenticated(next http.Handler, w http.ResponseWriter, r *http.Reques
 	if actor.Type == "" {
 		actor.ID = pgtype.UUID{}
 	}
-	next.ServeHTTP(w, r.WithContext(botsource.WithActor(r.Context(), actor)))
+	ctx := botsource.WithActor(r.Context(), actor)
+	next.ServeHTTP(w, r.WithContext(dbactor.With(ctx, dbActor(r, ctx, actor))))
+}
+
+// dbActor is who the office event stream (DENE-1963) records for writes made
+// by this request: the person, the agent run, or a person's Bot acting for
+// them (the Bot key resolves to its owner, so the owner is the actor and the
+// Bot is via).
+func dbActor(r *http.Request, ctx context.Context, actor botsource.Actor) dbactor.Actor {
+	out := dbactor.Actor{Type: actor.Type, Source: r.Header.Get("X-Actor-Source")}
+	if actor.Type == "" {
+		out.Type = "system"
+	}
+	if actor.ID.Valid {
+		out.ID = util.UUIDToString(actor.ID)
+	}
+	if task := botsource.TaskFromContext(ctx); task.Valid {
+		out.TaskID = util.UUIDToString(task)
+	}
+	if bot := botsource.FromContext(ctx); bot.ID.Valid {
+		out.ViaBotID = util.UUIDToString(bot.ID)
+		if actor.Type == "member" {
+			out.OnBehalfOf = out.ID
+		}
+	}
+	return out
 }

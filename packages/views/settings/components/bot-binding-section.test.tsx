@@ -9,6 +9,8 @@ const fixture = vi.hoisted(() => ({
   binding: {} as Record<string, unknown>,
   put: vi.fn(),
   writes: [] as Record<string, unknown>[],
+  deliveries: [] as Record<string, unknown>[],
+  retry: vi.fn(),
 }));
 
 vi.mock("@multica/core/hooks", () => ({ useWorkspaceId: () => "ws" }));
@@ -30,6 +32,13 @@ vi.mock("@multica/core/bots", () => ({
     queryKey: ["bots", "ws"],
     queryFn: async () => [{ id: "bot-1", name: "Grok Bot", status: "active" }],
   }),
+  officeDeliveriesOptions: () => ({
+    queryKey: ["deliveries", "ws"],
+    queryFn: async () => ({ deliveries: fixture.deliveries, next_cursor: 0, connected: true }),
+    initialPageParam: 0,
+    getNextPageParam: () => undefined,
+  }),
+  useRetryOfficeDeliveries: () => ({ mutate: fixture.retry, isPending: false }),
   usePutBotBinding: () => ({ mutate: fixture.put, isPending: false }),
   useDeleteBotBinding: () => ({ mutate: vi.fn(), isPending: false }),
   useVerifyBotBinding: () => ({ mutate: vi.fn(), isPending: false }),
@@ -59,6 +68,8 @@ beforeEach(() => {
   fixture.put.mockReset();
   fixture.binding = bound([]);
   fixture.writes = [];
+  fixture.deliveries = [];
+  fixture.retry.mockReset();
 });
 
 it("hides the activity stream row until a Bot is connected", async () => {
@@ -110,4 +121,42 @@ it("reads the whole-workspace scope back and lists what the Bot did in their nam
   const trigger = await screen.findByRole("combobox", { name: "Send everything to my Bot" });
   expect(trigger).toHaveTextContent("Everything I can see");
   expect(await screen.findAllByText("Via Bot “Grok Bot” for Kun")).toHaveLength(2);
+});
+
+const delivery = (over: Record<string, unknown>) => ({
+  event_id: "ev-1",
+  status: "relayed",
+  must_relay: false,
+  attempts: 1,
+  last_error: "",
+  blocked_reason: "",
+  cursor: 1,
+  event: { summary: "Fix login · done" },
+  ...over,
+});
+
+it("shows where each result stands and retries only what is stuck", async () => {
+  fixture.deliveries = [
+    delivery({ event_id: "ev-1", cursor: 2, status: "relayed" }),
+    delivery({
+      event_id: "ev-2",
+      cursor: 1,
+      status: "blocked",
+      must_relay: true,
+      blocked_reason: "Bot key revoked",
+      event: { summary: "Release ticket · done" },
+    }),
+  ];
+  mount();
+  await screen.findByText("Release ticket · done");
+  expect(screen.getByText("Passed on to you")).toBeInTheDocument();
+  expect(screen.getByText("Bot key revoked · Must reach you")).toBeInTheDocument();
+
+  const retries = screen.getAllByRole("button", { name: "Retry" });
+  expect(retries).toHaveLength(1);
+  await userEvent.click(retries[0]!);
+  expect(fixture.retry).toHaveBeenCalledWith("ev-2", expect.anything());
+
+  await userEvent.click(screen.getByRole("button", { name: "Retry all" }));
+  expect(fixture.retry).toHaveBeenLastCalledWith(undefined, expect.anything());
 });
