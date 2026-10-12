@@ -41,6 +41,23 @@ type RoutingReceipt struct {
 	Offline      bool   `json:"offline,omitempty"`
 	// Candidates lists every seat routing considered and why one was skipped.
 	Candidates []routing.PickCandidate `json:"candidates,omitempty"`
+	// Category, Rule and Series are the 分工规则 part (DENE-1834): the kind of
+	// work the ticket was read as, the sentence of the policy that matched,
+	// and the series the candidates were filtered to. SeriesFallback says
+	// why the series was not used when it names nobody available.
+	Category       string `json:"category,omitempty"`
+	Rule           string `json:"rule,omitempty"`
+	Series         string `json:"series,omitempty"`
+	SeriesFallback string `json:"series_fallback,omitempty"`
+}
+
+func (rr *RoutingReceipt) withDispatch(m routing.DispatchMatch) {
+	rr.Category, rr.Rule = m.Category, m.Rule
+	if m.Filtered {
+		rr.Series = m.Series
+	} else if m.Series != "" {
+		rr.SeriesFallback = m.Series + " 系列" + m.Fallback + "，换系列"
+	}
 }
 
 // Receipt sources that are not a pick.
@@ -56,6 +73,7 @@ func (rr RoutingReceipt) Picked() bool { return rr.AgentID != "" }
 // receiptFromPick turns a ticketless pick into a receipt.
 func receiptFromPick(pick routing.Pick) RoutingReceipt {
 	out := RoutingReceipt{Candidates: pick.Candidates, Tier: pick.Tier}
+	out.withDispatch(pick.Dispatch)
 	if pick.Seat == nil {
 		out.Source = ReceiptSourceNone
 		out.Reason = pick.Declined
@@ -85,6 +103,7 @@ func receiptFromPick(pick routing.Pick) RoutingReceipt {
 // the race), the holder on the ticket is reported with its recorded source.
 func (h *Handler) receiptFromOutcome(ctx context.Context, workspaceID, issueID string, out routing.Outcome, err error) RoutingReceipt {
 	rr := RoutingReceipt{Tier: out.Tier}
+	rr.withDispatch(out.Dispatch)
 	if err != nil {
 		rr.Source, rr.Reason = ReceiptSourceFailed, err.Error()
 		return rr

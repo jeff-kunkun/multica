@@ -76,6 +76,9 @@ type Outcome struct {
 	// the matched rule, the judge's part, and the seats written. Nil when no
 	// decision was made on this call.
 	Trace *Trace
+	// Dispatch is what the 分工规则 did on this call (DENE-1834): category,
+	// matched sentence, series filter or its fallback.
+	Dispatch DispatchMatch
 }
 
 // Router is the module both entry points call. The HTTP hooks call Route
@@ -356,6 +359,7 @@ func (r *Router) routeTodo(ctx context.Context, workspaceID string, settings Set
 	}
 
 	threshold := settings.Threshold()
+	var notes []string
 
 	// The observation can go stale between the question and the write. Read
 	// it again and only then pick. A seat that died in that gap is not
@@ -363,6 +367,22 @@ func (r *Router) routeTodo(ctx context.Context, workspaceID string, settings Set
 	fresh, err := r.eligibleNow(ctx, workspaceID, settings, candidates)
 	if err != nil {
 		return Outcome{State: StateEnabled, Action: ActionSkipped, Reason: "routing context incomplete"}, err
+	}
+	// 分工规则 (DENE-1834): the category the analysis read picks a row, the
+	// row filters the seats by series and may cap the tier. A person's tier
+	// label still wins the rung; the series filter applies either way.
+	var dispatch DispatchMatch
+	pickRoster := roster
+	if needExecutor {
+		fresh, pickRoster, verdict, dispatch = ladder.dispatch(settings.EffectiveDispatchPolicy(), dec.Facts, fresh, roster, verdict)
+		out.Dispatch = dispatch
+		if dispatch.Capped != "" {
+			out.Tier = verdict.ExecutorTier
+		}
+		if labelSeatOK && !seatIn(fresh, labelSeat) && dispatch.Filtered {
+			labelSeatOK = false
+			notes = append(notes, "labelled tier "+requestedTier+" has no seat in series "+dispatch.Series)
+		}
 	}
 
 	// --- executor slot ---------------------------------------------------
@@ -372,7 +392,6 @@ func (r *Router) routeTodo(ctx context.Context, workspaceID string, settings Set
 	// snapshot says cannot take work is not a fallback. The confidence stays
 	// visible in the decision comment.
 	var executor *Seat
-	var notes []string
 	seriesNote := ""
 	executorSource := ""
 	var cont ContinuationPick
@@ -380,8 +399,11 @@ func (r *Router) routeTodo(ctx context.Context, workspaceID string, settings Set
 	var learn LearnPick
 	var class *OutcomeClass
 	learnApplied := false
-	if labelled && !labelSeatOK {
+	if labelled && !labelSeatOK && !dispatch.Filtered {
 		notes = append(notes, "labelled tier "+requestedTier+" was not eligible")
+	}
+	if line := dispatch.Line(ladder); line != "" {
+		notes = append(notes, line)
 	}
 	if j := judgeNote(dec.Trace); j != "" {
 		notes = append(notes, j)
@@ -409,7 +431,7 @@ func (r *Router) routeTodo(ctx context.Context, workspaceID string, settings Set
 			// 接着做 ranks above the ladder's pick but not above a person's
 			// tier label: the label is a person's instruction about strength.
 			if !labelStill {
-				cont, err = r.continuation(ctx, workspaceID, settings, ladder, roster, scene, issue, seat)
+				cont, err = r.continuation(ctx, workspaceID, settings, ladder, pickRoster, scene, issue, seat)
 				if err != nil {
 					return Outcome{State: StateEnabled, Action: ActionSkipped, Reason: "routing context incomplete"}, err
 				}
@@ -419,7 +441,7 @@ func (r *Router) routeTodo(ctx context.Context, workspaceID string, settings Set
 				} else {
 					// 负载 only reorders the ladder's own cell, so it runs
 					// after 接着做 has declined (DENE-1203).
-					load, err = r.load(ctx, workspaceID, settings, ladder, roster, seat)
+					load, err = r.load(ctx, workspaceID, settings, ladder, pickRoster, seat)
 					if err != nil {
 						return Outcome{State: StateEnabled, Action: ActionSkipped, Reason: "routing context incomplete"}, err
 					}
@@ -429,7 +451,7 @@ func (r *Router) routeTodo(ctx context.Context, workspaceID string, settings Set
 					}
 				}
 			}
-			if !labelStill && verdict.PreferredSeries != "" {
+			if !labelStill && verdict.PreferredSeries != "" && !dispatch.Filtered {
 				preferred, matched, preferenceErr := r.availableSeriesSeat(ctx, workspaceID, settings, ladder, scene, roster, seat, verdict.PreferredSeries)
 				if preferenceErr != nil {
 					return Outcome{State: StateEnabled, Action: ActionSkipped, Reason: "routing context incomplete"}, preferenceErr
@@ -575,6 +597,9 @@ func (r *Router) routeTodo(ctx context.Context, workspaceID string, settings Set
 		learnLine(learn, settings.LearnFromOutcomes, learnApplied, executor, executorSource))
 	if seriesNote != "" {
 		body += "\n\n" + seriesNote
+	}
+	if line := dispatch.Line(ladder); line != "" {
+		body += "\n\n" + line
 	}
 	if note := DemotionFootnote(ladder, roster, executor); note != "" {
 		body += "\n\n" + note

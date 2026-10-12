@@ -154,6 +154,9 @@ type Settings struct {
 	// fallback seat, and the executor merges and closes. Off by default,
 	// which keeps the fallback seat.
 	JudgedReview bool `json:"judged_review,omitempty"`
+	// DispatchPolicy is 「分工规则」 (DENE-1834): the plain-language division
+	// of labour and the rows read from it. Nil means DefaultDispatchPolicy.
+	DispatchPolicy *DispatchPolicy `json:"dispatch_policy,omitempty"`
 
 	// JudgeEnabled switches the judge role — Model, BaseURL and the key above
 	// are that role's fields, because the judge is the only model routing had

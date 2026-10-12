@@ -135,6 +135,16 @@ func TestRoutingReceiptLine(t *testing.T) {
 	if got := routingReceiptLine(map[string]any{"source": "无可用席位", "reason": "全员离线"}); got != "Agent: nobody [无可用席位] 全员离线" {
 		t.Fatalf("line = %q", got)
 	}
+	// DENE-1834 分工规则: the category, the sentence it matched and the series
+	// filter (or why the series was left) print on the same line.
+	got = routingReceiptLine(map[string]any{"source": "档位", "agent": "布玛", "tier_label": "强", "series": "Claude", "category": "前端", "rule": "前端、审美交给 Claude", "reason": "按档位选"})
+	if got != "Agent: 布玛 [档位 · 强 · Claude 系列] 类别 前端「前端、审美交给 Claude」； 按档位选" {
+		t.Fatalf("line = %q", got)
+	}
+	got = routingReceiptLine(map[string]any{"source": "档位", "agent": "孙悟空", "tier": "strong", "category": "前端", "rule": "前端、审美交给 Claude", "series_fallback": "Claude 系列没人能接（离线、忙或额度紧），换系列", "reason": "按档位选"})
+	if got != "Agent: 孙悟空 [档位 · strong] 类别 前端「前端、审美交给 Claude」 Claude 系列没人能接（离线、忙或额度紧），换系列； 按档位选" {
+		t.Fatalf("line = %q", got)
+	}
 }
 
 func TestRunChatNewRefusesAgentRuns(t *testing.T) {

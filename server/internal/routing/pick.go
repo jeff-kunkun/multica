@@ -51,6 +51,8 @@ type Pick struct {
 	Declined   string
 	Candidates []PickCandidate
 	Trace      *Trace
+	// Dispatch is what the 分工规则 did (DENE-1834).
+	Dispatch DispatchMatch
 }
 
 // PickSeat chooses an executor seat for work that is not a ticket, with the
@@ -128,9 +130,15 @@ func (r *Router) PickSeat(ctx context.Context, workspaceID string, req PickReque
 	}
 	pick.Tier, pick.JudgedTier, pick.Trace = d.Verdict.ExecutorTier, d.RaisedFrom, d.Trace
 
-	seat, source, why := r.pickExecutor(eligible, Seat{}, false, d.Verdict, settings.Threshold())
+	verdict := d.Verdict
+	eligible, pickRoster, verdict, dispatch := ladder.dispatch(settings.EffectiveDispatchPolicy(), d.Facts, eligible, roster, verdict)
+	pick.Dispatch = dispatch
+	if dispatch.Capped != "" {
+		pick.Tier = verdict.ExecutorTier
+	}
+	seat, source, why := r.pickExecutor(eligible, Seat{}, false, verdict, settings.Threshold())
 	tierSource := source
-	load, err := r.load(ctx, workspaceID, settings, ladder, roster, seat)
+	load, err := r.load(ctx, workspaceID, settings, ladder, pickRoster, seat)
 	if err != nil {
 		return pick, err
 	}
@@ -138,8 +146,8 @@ func (r *Router) PickSeat(ctx context.Context, workspaceID string, req PickReque
 		seat, source = load.Seat, pickLoad
 		seat.Balanced = load.Detail()
 	}
-	if d.Verdict.PreferredSeries != "" {
-		preferred, matched, err := r.availableSeriesSeat(ctx, workspaceID, settings, ladder, scene, roster, seat, d.Verdict.PreferredSeries)
+	if verdict.PreferredSeries != "" && !dispatch.Filtered {
+		preferred, matched, err := r.availableSeriesSeat(ctx, workspaceID, settings, ladder, scene, roster, seat, verdict.PreferredSeries)
 		if err != nil {
 			return pick, err
 		}

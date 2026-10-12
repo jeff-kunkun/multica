@@ -256,7 +256,20 @@ func routingReceiptLine(rr map[string]any) string {
 	} else if tier := strVal(rr, "tier"); tier != "" {
 		line += " · " + tier
 	}
+	if series := strVal(rr, "series"); series != "" {
+		line += " · " + series + " 系列"
+	}
 	line += "]"
+	if category := strVal(rr, "category"); category != "" {
+		line += " 类别 " + category
+		if rule := strVal(rr, "rule"); rule != "" {
+			line += "「" + rule + "」"
+		}
+		if fb := strVal(rr, "series_fallback"); fb != "" {
+			line += " " + fb
+		}
+		line += "；"
+	}
 	if reason := strVal(rr, "reason"); reason != "" {
 		line += " " + reason
 	}
