@@ -150,7 +150,7 @@ naming the way out, and the CLI prints it on stderr. The ways out:
 | a stronger seat | `multica issue escalate <id> --reason "..."` |
 | advice from a stronger seat, keeping the ticket | `multica issue consult <id> --question-file <path>` (`references/consult.md`) |
 | someone else to take it | `multica issue close <id> --outcome blocked --evidence-file <path> ...` — routing advises |
-| a person to decide | `multica issue summon <id> --to <member> --reason "..."` |
+| a person to decide | `multica issue ask-human <id> --to <member\|owner> --question "..." --option "..."` (blocks the ticket on them; their answer wakes you) — or `multica issue summon <id> --to <member> --reason "..."` for a plain call |
 | the person already named the new owner | `--per-quote "<原话>"`, checked as above |
 
 Re-sending the executor already in the slot, handing the ticket to a person,

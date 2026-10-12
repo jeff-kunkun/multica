@@ -561,6 +561,9 @@ func notifyMentionedMembers(
 ) {
 	// Collect the set of member IDs to notify.
 	recipientIDs := map[string]bool{}
+	// Only a person named directly is asked to decide something; @all and
+	// @squad are announcements and never go to a Bot (DENE-1933).
+	directIDs := map[string]bool{}
 
 	hasAll := false
 	var squadIDs []string
@@ -574,6 +577,7 @@ func notifyMentionedMembers(
 				continue
 			}
 			recipientIDs[m.ID] = true
+			directIDs[m.ID] = true
 		}
 		if m.Type == "squad" {
 			squadIDs = append(squadIDs, m.ID)
@@ -647,6 +651,9 @@ func notifyMentionedMembers(
 		if err != nil {
 			slog.Error("mention inbox creation failed", "mentioned_id", id, "error", err)
 			continue
+		}
+		if directIDs[id] {
+			item = routeMentionToBot(queries, e, id, issueID, issueTitle, item, details)
 		}
 		resp := inboxItemToResponse(item)
 		resp["issue_status"] = issueStatus
@@ -889,8 +896,10 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 					}
 				}
 				skip := map[string]bool{e.ActorID: true}
+				// The edit's timestamp names this addition for the Bot route.
+				descDetails, _ := json.Marshal(map[string]string{"description_version": issue.UpdatedAt})
 				notifyMentionedMembers(bus, queries, e, added, issue.ID, issue.Title, issue.Status,
-					issue.Title, skip, emptyDetails)
+					issue.Title, skip, descDetails)
 			}
 		}
 	})

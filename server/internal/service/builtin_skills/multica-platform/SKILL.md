@@ -114,7 +114,7 @@ must do it. Only 「你来做」 (or your name) self-assigns with `--per-quote "
 comment first (how you read the ask, which direction you will take), comment at
 key milestones, and finish only with `multica issue close`. Too hard →
 `multica issue escalate`. Someone else should take it → close `blocked` and let
-routing advise. A person must decide → `multica issue summon`. **Never assign
+routing advise. A person must decide → `multica issue ask-human <id> --to <member|owner> --question "..." [--option ...]` (never @ them: a person with a Bot is reached through it, and their answer wakes you); a bare call without a question → `multica issue summon`. **Never assign
 the ticket to someone else yourself**; with routing on, the server refuses it
 once the ticket is past `todo` (details in `references/routing.md`).
 

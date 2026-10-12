@@ -2075,6 +2075,22 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Post("/bots/{botId}/wake/events/{eventId}", h.RecordBotWakeReceipt)
 					r.Post("/bots/{botId}/wake/events/{eventId}/ack", h.RecordBotWakeReceipt)
 					r.Post("/bots/{botId}/wake/events/{eventId}/result", h.RecordBotWakeReceipt)
+					// What a Bot owes its person (DENE-1933): receipts for the
+					// relay and the answer, and the open list to catch up on.
+					r.Post("/bots/{botId}/wake/events/{eventId}/relayed", h.RelayHumanNeeded)
+					r.Post("/bots/{botId}/wake/events/{eventId}/answered", h.AnswerHumanNeeded)
+					r.Get("/bots/{botId}/human-needed", h.ListHumanNeededForBot)
+				})
+
+				// Your own Bot channel for decisions (DENE-1933): only the
+				// person, never an agent's task token or a Bot's key.
+				r.Group(func(r chi.Router) {
+					r.Use(middleware.RequireWorkspaceMemberFromURL(queries, "id"))
+					r.Use(handler.RequireHumanActor)
+					r.Get("/me/bot-binding", h.GetBotBinding)
+					r.Put("/me/bot-binding", h.PutBotBinding)
+					r.Delete("/me/bot-binding", h.DeleteBotBinding)
+					r.Post("/me/bot-binding/verify", h.VerifyBotBinding)
 				})
 
 				// External bot keys (DENE-1788): admin-only, and never from an
@@ -2384,6 +2400,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					// visible @ and an open call the reply answers —
 					// `multica issue summon`.
 					r.Post("/summon", h.SummonIssue)
+					// A structured question to one person, pushed to their Bot
+					// when they have one (DENE-1933) — `multica issue ask-human`.
+					r.Post("/ask-human", h.AskHumanIssue)
 					// Promote the next stage once the one below is terminal
 					// (DENE-864) — `multica issue stage advance`.
 					r.Post("/stage-advance", h.AdvanceIssueStage)
@@ -2901,6 +2920,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Patch("/archive", h.SetChatSessionArchived)
 					r.Delete("/", h.DeleteChatSession)
 					r.Post("/messages", h.SendChatMessage)
+					// `multica chat ask-human` (DENE-1933).
+					r.Post("/ask-human", h.AskHumanChat)
 					r.Post("/title", h.WriteChatTitle)
 					r.Post("/progress", h.WriteChatProgress)
 					r.Get("/progress", h.ListChatProgress)

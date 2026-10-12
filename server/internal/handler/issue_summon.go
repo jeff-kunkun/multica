@@ -310,6 +310,19 @@ func (h *Handler) answerSummons(ctx context.Context, issue db.Issue, comment db.
 		return pgtype.UUID{}
 	}
 	service.SettleSummonInbox(ctx, h.Queries, h.Bus, answered)
+	// The person answered in the app: the Bot's chase is over, and a ticket an
+	// ask-human parked on them is free to go again (DENE-1933).
+	if _, err := h.Queries.SettleHumanNeededByComment(ctx, db.SettleHumanNeededByCommentParams{
+		IssueID: issue.ID, TargetUserID: parseUUID(actorID), AnswerCommentID: comment.ID,
+	}); err != nil {
+		slog.Warn("human needed: settle by comment failed", "error", err, "issue_id", uuidToString(issue.ID))
+	}
+	for _, s := range answered {
+		if s.Source == service.SummonSourceAskHuman {
+			h.unblockAfterAsk(ctx, issue.ID, s.RecipientID)
+			break
+		}
+	}
 	if len(answered) == 0 || woke {
 		return pgtype.UUID{}
 	}

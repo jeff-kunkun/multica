@@ -222,3 +222,51 @@ For inspection without delivery or acknowledgement, use
 `delivery_id` on receipt rows identifies the persisted transport batch.
 The API option is `include_content=true` (boolean, default false). Reads
 recheck recipient and caller visibility; they do not replay or acknowledge.
+
+## Decisions that need a person (DENE-1933)
+
+A person can connect **their own** Bot as the place decisions go
+(`multica bot bind <bot>`, or the account settings row「把要我决定的事交给我的 Bot」).
+The Bot then owes that person everything that needs them: an @, an agent's
+`ask-human`, a ticket blocked on them, an approval, a needs_kun. HTTP 200 only
+means the Bot received it — **the Bot must tell the person**, then say so.
+
+Binding handshake: the server sends `type: "binding.verify"`; answer with the
+usual `woken` receipt (`multica bot wake woken <bot-id> <event-id>`). Until then
+decisions still go to the app. If the Bot is stopped, its key is invalid or the
+webhook is removed, decisions fall back to the app and `multica bot status`
+shows `broken`. People without a Bot are not affected.
+
+A decision arrives as `type: "human_needed"` (or `human_needed.escalation`) with
+a `human_needed` block: `kind` (mention, ask_human, needs_human, ...),
+`target_user_id`, `target_name`, `question`, `options[]` (`{id,label}`),
+`urgency` (`normal|urgent`), `deadline` (or null), `source_url`, `mode`,
+`escalation`. It bypasses the 30-second grouping and the hourly limit. Delivery
+is at-least-once with backoff (5s, 15s, 45s, 2m, 5m … 30m): dedupe on
+`event_id`. Night hours (default 23:00–08:00 America/Chicago) are the Bot's call:
+hold `normal` events until morning, never `urgent` ones — the server always
+pushes at once.
+
+State: `queued → sent → woken → relayed → answered | expired`. Report each step:
+
+```sh
+multica bot wake woken    <bot-id> <event-id>                       # received and understood
+multica bot wake relayed  <bot-id> <event-id> --channel telegram --message-ref <id>   # you TOLD the person
+multica bot wake answered <bot-id> <event-id> --answer "..."        # their answer
+multica bot wake human-needed <bot-id>                              # what you still owe (catch up after a restart)
+```
+
+`answered` posts the answer as a comment on the ticket as the person (your key
+acts as its owner), which is what wakes the asking agent and clears the block;
+`--comment-id` reuses a comment you already posted. When the event carries an
+`ask` block (a question card, `ask_id` in `human-needed`), answer it with
+`--answers 0=<option-id>[,1=...]` instead: the server fills the card, comments
+as the person, and wakes the asker once — do not comment yourself. A chat
+choice question is a card too (`ask` block): `--answers` fills it, the chosen
+option is written into the chat as the person's own message and the agent that
+asked is woken once. A free-text chat event (`chat_session_id`, no `ask`) takes
+`--answer`, written into the chat the same way. Not woken in 3 minutes: the
+event is sent again. Woken but not `relayed` in 5 minutes: you get a
+`human_needed.escalation`, the call returns to the app as unread, workspace
+owners are reminded, and the nudge repeats every 30 minutes. Receipts for the
+same call are shared by the original and its escalations.

@@ -3,6 +3,7 @@ export {
   BOT_WAKE_ACK_MAX,
   botKeys,
   externalBotListOptions,
+  botBindingOptions,
   botWakeOptions,
   botWakeEventsOptions,
   botMentionDirectoryOptions,
@@ -11,6 +12,9 @@ export {
   useExternalBotSetupText,
   useStopExternalBot,
   useDeleteExternalBot,
+  usePutBotBinding,
+  useVerifyBotBinding,
+  useDeleteBotBinding,
   useUpdateBotWake,
   useAckBotWakePending,
 } from "./queries";
