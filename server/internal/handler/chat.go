@@ -1246,9 +1246,6 @@ type ChatReplaceOutcome struct {
 	NewTaskID            string   `json:"new_task_id"`
 	CancelledTaskIDs     []string `json:"cancelled_task_ids"`
 	SupersededMessageIDs []string `json:"superseded_message_ids"`
-	// StopFailedTaskIDs lists replies that could not be stopped; the new turn
-	// runs as soon as they end.
-	StopFailedTaskIDs []string `json:"stop_failed_task_ids,omitempty"`
 }
 
 func newChatReplaceOutcome(sent *service.DirectChatSendResult) *ChatReplaceOutcome {
@@ -1260,15 +1257,8 @@ func newChatReplaceOutcome(sent *service.DirectChatSendResult) *ChatReplaceOutco
 	for _, t := range sent.CancelledTasks {
 		out.CancelledTaskIDs = append(out.CancelledTaskIDs, uuidToString(t.ID))
 	}
-	stopFailed := map[string]bool{}
-	for _, id := range sent.StopFailedTaskIDs {
-		stopFailed[uuidToString(id)] = true
-		out.StopFailedTaskIDs = append(out.StopFailedTaskIDs, uuidToString(id))
-	}
-	for _, id := range sent.StoppedTaskIDs {
-		if !stopFailed[uuidToString(id)] {
-			out.CancelledTaskIDs = append(out.CancelledTaskIDs, uuidToString(id))
-		}
+	for _, t := range sent.StoppedTasks {
+		out.CancelledTaskIDs = append(out.CancelledTaskIDs, uuidToString(t.ID))
 	}
 	for _, id := range sent.SupersededMessageIDs {
 		out.SupersededMessageIDs = append(out.SupersededMessageIDs, uuidToString(id))
@@ -1642,7 +1632,8 @@ func (h *Handler) SendChatMessage(w http.ResponseWriter, r *http.Request) {
 		reason = "bot_wake_chain_limit"
 	}
 	var replaceOutcome *ChatReplaceOutcome
-	if mode == sendModeReplace {
+	// A refused replace changed nothing, so it reports no outcome.
+	if mode == sendModeReplace && applied != "blocked" {
 		replaceOutcome = newChatReplaceOutcome(sent)
 	}
 	var pickupDeadline *string

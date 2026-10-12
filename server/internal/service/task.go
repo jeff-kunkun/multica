@@ -2655,11 +2655,10 @@ type DirectChatSendResult struct {
 	Steered            bool
 	// Replace outcome (DENE-1932): the queued turns that were cancelled, the
 	// messages marked superseded, and the claimed or deferred turns the send
-	// stopped (StopFailed lists the ones that could not be stopped).
+	// stopped.
 	CancelledTasks       []db.AgentTaskQueue
 	SupersededMessageIDs []pgtype.UUID
-	StoppedTaskIDs       []pgtype.UUID
-	StopFailedTaskIDs    []pgtype.UUID
+	StoppedTasks         []db.AgentTaskQueue
 }
 
 var ErrChatSessionAlreadyStarted = errors.New("chat session already has a user message")
@@ -2795,7 +2794,7 @@ func (s *TaskService) sendDirectChatMessage(
 	attrSource, _, attrEvidenceKind, attrEvidenceRef := attributionCreateParams(attr)
 
 	var out DirectChatSendResult
-	if err := s.runInTx(ctx, func(qtx *db.Queries) error {
+	if err := s.runInTxWith(ctx, func(qtx *db.Queries, tx pgx.Tx) error {
 		if beforeSend != nil {
 			if err := beforeSend(qtx); err != nil {
 				return err
@@ -2847,81 +2846,80 @@ func (s *TaskService) sendDirectChatMessage(
 		}
 		priority := int32(2) // medium priority for chat; matches EnqueueChatTask
 		var pickupDeadline pgtype.Timestamptz
-		// Replace clears the way before the new turn exists, so the queue
-		// position below is computed against what is left: the claimed turn
-		// (stopped after the commit), never an older queued instruction.
-		var replacedOwners []pgtype.UUID
 		if opts.Replace {
 			priority = UrgentChatPriority
-			cancelled, err := qtx.CancelQueuedChatTasksForReplace(ctx, db.CancelQueuedChatTasksForReplaceParams{
-				CancelledByType: pgtype.Text{String: opts.CancelledBy.Type, Valid: opts.CancelledBy.Type != ""},
-				CancelledByID:   opts.CancelledBy.ID,
-				CancelledByName: pgtype.Text{String: opts.CancelledBy.Name, Valid: opts.CancelledBy.Name != ""},
-				ChatSessionID:   session.ID,
-			})
-			if err != nil {
-				return fmt.Errorf("cancel queued chat tasks for replace: %w", err)
-			}
-			if err := SettleTerminalTaskState(ctx, qtx, cancelled...); err != nil {
-				return err
-			}
-			out.CancelledTasks = cancelled
-			for _, t := range cancelled {
-				replacedOwners = append(replacedOwners, t.ID, chatInputOwnerID(t))
-			}
-			active, err := qtx.ListReplaceableActiveChatTasks(ctx, session.ID)
-			if err != nil {
-				return fmt.Errorf("list chat tasks to stop for replace: %w", err)
-			}
-			for _, t := range active {
-				out.StoppedTaskIDs = append(out.StoppedTaskIDs, t.ID)
-				replacedOwners = append(replacedOwners, t.ID)
-				if t.ChatInputTaskID.Valid {
-					replacedOwners = append(replacedOwners, t.ChatInputTaskID)
-				}
-			}
 		}
 		if opts.Urgent {
 			priority = UrgentChatPriority
 			pickupDeadline = pgtype.Timestamptz{Time: time.Now().Add(UrgentChatPickupDeadline), Valid: true}
 		}
 
-		// The database status of every newly-created task is "queued" until a
-		// daemon claims it. Product queue semantics are positional instead: this
-		// send is a follow-up only when another visible task in the same session
-		// is already ahead of it. Deferred retries count because they resume an
-		// older turn before this one. The session + agent locks serialize sibling
-		// sends, retries, terminal writes, and claims around this read.
-		queued, err := qtx.HasPendingChatTurnForSession(ctx, session.ID)
-		if err != nil {
-			return fmt.Errorf("check direct chat queue position: %w", err)
-		}
-		out.Queued = queued
-
-		var task db.AgentTaskQueue
-		// An urgent turn is always its own task: it carries a runtime choice,
-		// a priority and a pickup deadline that an existing run would not get.
-		if opts.Mode == "" && !opts.Urgent {
-			task, err = qtx.GetChatMergeTarget(ctx, session.ID)
-			if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-				return fmt.Errorf("find chat merge target: %w", err)
-			}
-			if err == nil {
-				// The immutable initial input was already dispatched. Only a
-				// capability handshake permits adding a live supplement.
-				if task.Status != "queued" && task.Status != "deferred" {
-					cap, capErr := qtx.GetTaskSupplementCapability(ctx, task.ID)
-					if task.Status != "running" || capErr != nil || cap.Capability != protocol.DaemonCapabilityTaskSupplementV1 || len(attachmentIDs) > 0 {
-						return ErrChatMergeUnsupported
-					}
-					out.Steered = true
+		// createTurn writes this send's own task. The database status of every
+		// newly-created task is "queued" until a daemon claims it. Product queue
+		// semantics are positional instead: this send is a follow-up only when
+		// another visible task in the same session is already ahead of it.
+		// Deferred retries count because they resume an older turn before this
+		// one. The session + agent locks serialize sibling sends, retries,
+		// terminal writes, and claims around this read.
+		//
+		// A replace first clears the way (queued turns cancelled, claimed turns
+		// cancelled, their messages superseded) so the position below is
+		// computed against what is left: nothing. Every one of those writes is
+		// in this transaction: a claimed turn that stayed running until after
+		// the commit could finish in between and hand its unread supplements to
+		// the new turn.
+		var replacedOwners []pgtype.UUID
+		createTurn := func(q *db.Queries, replace bool) error {
+			if replace {
+				cancelled, err := q.CancelQueuedChatTasksForReplace(ctx, db.CancelQueuedChatTasksForReplaceParams{
+					CancelledByType: pgtype.Text{String: opts.CancelledBy.Type, Valid: opts.CancelledBy.Type != ""},
+					CancelledByID:   opts.CancelledBy.ID,
+					CancelledByName: pgtype.Text{String: opts.CancelledBy.Name, Valid: opts.CancelledBy.Name != ""},
+					ChatSessionID:   session.ID,
+				})
+				if err != nil {
+					return fmt.Errorf("cancel queued chat tasks for replace: %w", err)
 				}
-				out.Merged = true
-				out.Queued = false
+				if err := SettleTerminalTaskState(ctx, q, cancelled...); err != nil {
+					return err
+				}
+				out.CancelledTasks = cancelled
+				for _, t := range cancelled {
+					replacedOwners = append(replacedOwners, t.ID, chatInputOwnerID(t))
+				}
+				active, err := q.ListReplaceableActiveChatTasks(ctx, session.ID)
+				if err != nil {
+					return fmt.Errorf("list chat tasks to stop for replace: %w", err)
+				}
+				for _, t := range active {
+					stopped, err := q.CancelAgentTaskByUser(ctx, db.CancelAgentTaskByUserParams{
+						ID:              t.ID,
+						CancelledByType: pgtype.Text{String: opts.CancelledBy.Type, Valid: true},
+						CancelledByID:   opts.CancelledBy.ID,
+						CancelledByName: pgtype.Text{String: opts.CancelledBy.Name, Valid: opts.CancelledBy.Name != ""},
+					})
+					if errors.Is(err, pgx.ErrNoRows) {
+						continue // finished on its own while we held the lock queue
+					}
+					if err != nil {
+						return fmt.Errorf("stop chat task for replace: %w", err)
+					}
+					if err := SettleTerminalTaskState(ctx, q, stopped); err != nil {
+						return err
+					}
+					if err := q.AdvanceCancelledChatSessionPointer(ctx, stopped.ID); err != nil {
+						return err
+					}
+					out.StoppedTasks = append(out.StoppedTasks, stopped)
+					replacedOwners = append(replacedOwners, stopped.ID, chatInputOwnerID(stopped))
+				}
 			}
-		}
-		if !out.Merged {
-			task, err = qtx.CreateChatTask(ctx, db.CreateChatTaskParams{
+			queued, err := q.HasPendingChatTurnForSession(ctx, session.ID)
+			if err != nil {
+				return fmt.Errorf("check direct chat queue position: %w", err)
+			}
+			out.Queued = queued
+			task, err := q.CreateChatTask(ctx, db.CreateChatTaskParams{
 				WakeHumanQuote:       pgtype.Text{String: botWakeHumanQuote(ctx), Valid: botWakeHumanQuote(ctx) != ""},
 				ID:                   dbid.NewV7(),
 				AgentID:              session.AgentID,
@@ -2946,10 +2944,65 @@ func (s *TaskService) sendDirectChatMessage(
 			}
 			// Claim this task's own input batch (chat_input_task_id = id) in the same
 			// transaction, before the user message is written with task_id = task.id.
-			task, err = qtx.SetChatTaskInputOwnerSelf(ctx, task.ID)
+			out.Task, err = q.SetChatTaskInputOwnerSelf(ctx, task.ID)
 			if err != nil {
 				return fmt.Errorf("stamp direct chat input owner: %w", err)
 			}
+			return nil
+		}
+
+		var task db.AgentTaskQueue
+		// An urgent turn is always its own task: it carries a runtime choice,
+		// a priority and a pickup deadline that an existing run would not get.
+		if opts.Mode == "" && !opts.Urgent {
+			task, err = qtx.GetChatMergeTarget(ctx, session.ID)
+			if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+				return fmt.Errorf("find chat merge target: %w", err)
+			}
+			if err == nil {
+				// The immutable initial input was already dispatched. Only a
+				// capability handshake permits adding a live supplement.
+				if task.Status != "queued" && task.Status != "deferred" {
+					cap, capErr := qtx.GetTaskSupplementCapability(ctx, task.ID)
+					if task.Status != "running" || capErr != nil || cap.Capability != protocol.DaemonCapabilityTaskSupplementV1 || len(attachmentIDs) > 0 {
+						return ErrChatMergeUnsupported
+					}
+					out.Steered = true
+				}
+				out.Merged = true
+				out.Queued = false
+			}
+		}
+		if !out.Merged {
+			if opts.Replace && tx != nil {
+				// The Bot wake budget can refuse the new turn only after the
+				// old queue is already rewritten. Do the rewrite under a
+				// savepoint: a refused replace leaves the old instructions
+				// exactly as they were and is recorded as the plain refused
+				// send it would have been.
+				sp, err := tx.Begin(ctx)
+				if err != nil {
+					return fmt.Errorf("savepoint for replace: %w", err)
+				}
+				if err := createTurn(qtx.WithTx(sp), true); err != nil {
+					_ = sp.Rollback(ctx)
+					return err
+				}
+				if botWakeTaskError(out.Task) != nil {
+					if err := sp.Rollback(ctx); err != nil {
+						return fmt.Errorf("undo refused replace: %w", err)
+					}
+					out.CancelledTasks, out.StoppedTasks, replacedOwners = nil, nil, nil
+					if err := createTurn(qtx, false); err != nil {
+						return err
+					}
+				} else if err := sp.Commit(ctx); err != nil {
+					return fmt.Errorf("release replace savepoint: %w", err)
+				}
+			} else if err := createTurn(qtx, opts.Replace); err != nil {
+				return err
+			}
+			task = out.Task
 		} else if !task.ChatInputTaskID.Valid && !out.Steered {
 			// Legacy/channel tasks still select trailing history; direct sends
 			// must own their message batch before it can be appended safely.
@@ -3096,28 +3149,27 @@ func (s *TaskService) sendDirectChatMessage(
 
 // finishChatReplace is the part of a replace that cannot sit inside the send
 // transaction: telling clients and runtimes about the cancelled queue, and
-// stopping the claimed turn through the ordinary cancel path. The new turn is
-// already committed at the head of the queue, so a stop that fails leaves it
-// to run as soon as the old turn ends.
+// finishing the stopped turns' transcript. The cancellations themselves were
+// committed with the new turn.
 func (s *TaskService) finishChatReplace(ctx context.Context, agentID pgtype.UUID, out *DirectChatSendResult, by TaskCancellationActor) {
 	for _, task := range out.CancelledTasks {
 		slog.Info("task cancelled", "task_id", util.UUIDToString(task.ID), "reason", "chat_replace")
 		s.captureTaskCancelled(ctx, task)
 	}
-	for _, id := range out.StoppedTaskIDs {
+	for _, task := range out.StoppedTasks {
+		slog.Info("task cancelled", "task_id", util.UUIDToString(task.ID), "reason", "chat_replace")
+		s.captureTaskCancelled(ctx, task)
 		// KeepInput: the stopped turn's message stays in the transcript,
 		// marked superseded, instead of going back to the composer.
-		if _, err := s.CancelTaskWithResult(ctx, id, CancelTaskOptions{CancelledBy: by, UserInitiated: true, KeepInput: true}); err != nil {
-			slog.Warn("replace chat message: stop reply failed", "task_id", util.UUIDToString(id), "error", err)
-			out.StopFailedTaskIDs = append(out.StopFailedTaskIDs, id)
-		}
+		s.finalizeCancelledChatMessage(ctx, task, CancelTaskOptions{CancelledBy: by, UserInitiated: true, KeepInput: true})
 	}
-	if len(out.CancelledTasks) > 0 {
+	ended := append(append([]db.AgentTaskQueue{}, out.CancelledTasks...), out.StoppedTasks...)
+	if len(ended) > 0 {
 		s.ReconcileAgentStatus(ctx, agentID)
-		for _, task := range out.CancelledTasks {
+		for _, task := range ended {
 			s.broadcastTaskEvent(ctx, protocol.EventTaskCancelled, task)
 		}
-		s.notifyTasksFinished(out.CancelledTasks)
+		s.notifyTasksFinished(ended)
 	}
 }
 
@@ -8849,15 +8901,21 @@ func (s *TaskService) dispatchDelegatedFailureRecoveryComment(ctx context.Contex
 // (e.g. some tests construct TaskService directly), fn runs against the
 // regular Queries handle without transactional guarantees.
 func (s *TaskService) runInTx(ctx context.Context, fn func(*db.Queries) error) error {
+	return s.runInTxWith(ctx, func(q *db.Queries, _ pgx.Tx) error { return fn(q) })
+}
+
+// runInTxWith is runInTx for a body that needs the transaction itself, to open
+// a savepoint. The tx is nil when the service runs without a TxStarter.
+func (s *TaskService) runInTxWith(ctx context.Context, fn func(*db.Queries, pgx.Tx) error) error {
 	if s.TxStarter == nil {
-		return fn(s.Queries)
+		return fn(s.Queries, nil)
 	}
 	tx, err := s.TxStarter.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("begin tx: %w", err)
 	}
 	defer tx.Rollback(ctx)
-	if err := fn(s.Queries.WithTx(tx)); err != nil {
+	if err := fn(s.Queries.WithTx(tx), tx); err != nil {
 		return err
 	}
 	return tx.Commit(ctx)
