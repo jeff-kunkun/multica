@@ -23,12 +23,13 @@ import {
 // switches at their defaults.
 const JUDGE_ONLY: Pick<
   RoutingSettings,
-  "judge_enabled" | "analysis" | "usage_priority" | "allow_upshift" | "prefer_continuation" | "prefer_idle" | "learn_from_outcomes" | "learn_low_rate" | "learn_window_days" | "judged_review"
+  "judge_enabled" | "analysis" | "usage_priority" | "allow_upshift" | "strongest_gate" | "prefer_continuation" | "prefer_idle" | "learn_from_outcomes" | "learn_low_rate" | "learn_window_days" | "judged_review"
 > = {
   judge_enabled: true,
   analysis: { enabled: false, model: "", base_url: "" },
   usage_priority: true,
   allow_upshift: false,
+  strongest_gate: true,
   prefer_continuation: false,
   prefer_idle: false,
   learn_from_outcomes: false,
@@ -70,6 +71,7 @@ describe("parseRoutingSettings", () => {
       analysis: { enabled: false, model: "", base_url: "" },
       usage_priority: true,
       allow_upshift: false,
+      strongest_gate: true,
       prefer_continuation: false,
       prefer_idle: false,
       learn_from_outcomes: false,
@@ -85,6 +87,7 @@ describe("parseRoutingSettings", () => {
     expect(parseRoutingSettings({ routing: { enabled: true } })).toMatchObject({
       usage_priority: true,
       allow_upshift: false,
+      strongest_gate: true,
       prefer_continuation: false,
       prefer_idle: false,
       learn_from_outcomes: false,
@@ -276,6 +279,7 @@ describe("withRoutingSettings", () => {
         analysis: { enabled: false, model: "", base_url: "" },
         usage_priority: true,
         allow_upshift: false,
+        strongest_gate: true,
         prefer_continuation: false,
         prefer_idle: false,
         learn_from_outcomes: false,
@@ -304,6 +308,7 @@ describe("withRoutingSettings", () => {
       analysis: { enabled: false, model: "", base_url: "" },
       usage_priority: true,
       allow_upshift: false,
+      strongest_gate: true,
       prefer_continuation: false,
       prefer_idle: false,
       learn_from_outcomes: false,
@@ -335,6 +340,7 @@ describe("withRoutingSettings", () => {
         judge_enabled: false,
         usage_priority: true,
         allow_upshift: false,
+        strongest_gate: true,
         prefer_continuation: false,
         prefer_idle: false,
         learn_from_outcomes: false,
@@ -355,6 +361,7 @@ describe("withRoutingSettings", () => {
         judge_enabled: false,
         usage_priority: true,
         allow_upshift: false,
+        strongest_gate: true,
         prefer_continuation: false,
         prefer_idle: false,
         learn_from_outcomes: false,

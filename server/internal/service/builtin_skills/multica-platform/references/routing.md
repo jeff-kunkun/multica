@@ -94,9 +94,11 @@ server does not write it, routing judges from scratch and says in one sentence
 that a pick was ignored, without saying who was suggested. The CLI prints the
 same hint on stderr and `--output json` carries `assignee_ignored: true`. A
 tier label you attach (e.g. `strongest`) is ignored the same way; only a label
-a person attached counts.
+a person attached counts. A bot key (an external bot acting for the member
+who holds it, e.g. a steward bot relaying the owner's order) is that member's
+own hand: its pick stands as 人工 and the receipt says 「调用方经 <Bot> 指定」.
 
-The only exception is words from the person you are talking to. When THAT
+The only exception for an agent is words from the person you are talking to. When THAT
 person said it out loud earlier in the same direct chat or issue thread, pass
 their exact words (the server checks the original message and its author):
 
@@ -122,6 +124,12 @@ not go back to the person for words. If the person names someone later,
 reassign with `--per-quote` then. When the person never named anyone, create
 the ticket without an executor. Do not quote comments from third parties or
 other agents: they never count.
+
+**自领 (DENE-1834 part 5).** A sub-issue you create under the ticket your own
+run is working (`--parent <that ticket>`) and assign to yourself needs no
+quote: the server keeps the pick, records the source as `self_claim`, and the
+receipt / comment says 自领. Under any other parent, or naming any other
+seat, the same create is an unquoted agent pick and routing decides.
 
 A seat routing filled is a stand-in. When a person's decision replaces it —
 their own hand, or their words through `--per-quote` — the runs that seat's
@@ -157,6 +165,30 @@ person attached), `兜底` (the verdict was too weak, so the fallback rung),
 (the ladder's seat was busy, so a less busy seat of the same rung and
 direction took it).
 
+**分工规则 (DENE-1834).** The analysis model answers one more numbered
+question, the kind of work (任务类别), from the workspace's plain-language
+division of labour. The default reads 「前端、审美交给 Claude，Codex 主要负责审查。
+文档、沉淀类最多中档。」: a matching row filters the eligible seats to that model
+series (a hard filter, unlike the judge's `preferred_series` which only reorders
+within one rung) and may cap the tier. When the series has nobody online with
+headroom the ticket does not wait: routing picks across series by tier and the
+「自动选派」 comment says 「Claude 系列没人能接（…），换系列按档位选」. The same
+facts print on the routing receipt of `issue create` / `chat new` / chat → goal
+(`category`, `rule`, `series`, `series_fallback` in `--output json`). Changing
+the rule list re-asks the category on the next route; the rest of a fresh
+analysis is reused as before.
+
+The rule list is edited through a preview → confirm pair, never by autosave:
+`multica workspace routing policy show` prints the text, the rows (each with
+the sentence it came from and whether it was parsed, edited by hand, or the
+default) and the revision log; `policy preview --text "…"` (or `--text-file`)
+asks the routing judge to read rows out of plain language and writes nothing;
+`policy apply --file preview.json` confirms rows a person has checked and
+records a numbered revision (`--reset` restores the default). A task-token
+run can `show` but not `preview` or `apply` — the owner confirms in the
+settings page (路由 → 分工规则) or the CLI as a person. A row edited by hand
+loses its `origin: model`; the server labels it 手改 in the revision.
+
 **接着做 (DENE-1202).** A ticket continuing earlier work — a sibling one stage
 earlier under the same parent, the parent itself, or a ticket created by the
 same agent run — goes back to that work's executor when the seat is on the
@@ -181,6 +213,20 @@ shown as `true` when omitted (the web and server default it on), and
 multica workspace routing get
 multica workspace routing set --usage-priority off
 multica workspace routing set --allow-upshift on
+```
+
+**最强档门槛 (DENE-1834).** The strongest tier is the scarce one: routing writes
+it only when its seat is not tagged 紧张 **and** no seat on the strong or
+medium rung can take the work (offline, out of quota, missing, or filtered
+out by the 分工规则). When it does, the 「自动选派」 comment carries a line
+starting 「最强档门槛：为什么非她不可」 naming, rung by rung, why nobody else
+could; when it does not, the line says which lower seat took the ticket and
+why (「强档有合适席位 X」 or 「X 额度紧张」). A tight top seat yields even to
+the weak rung. A person's tier label, 允许上调一档 and a 从结果里学 raise are
+not gated. On by default (`strongest_gate`), off with:
+
+```bash
+multica workspace routing set --strongest-gate off
 ```
 
 Both flags write the existing `settings.routing` fields used by the web

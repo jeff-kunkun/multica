@@ -235,7 +235,8 @@ func (r *Router) ladder() Ladder {
 // judge-only mode. cached reports that a record was reused.
 func (r *Router) analysis(ctx context.Context, workspaceID string, settings Settings, issue Issue, state JudgeState) (*AnalysisRecord, bool, error) {
 	model := settings.AnalysisTarget().Model
-	if rec := issue.Analysis; rec != nil && rec.Fresh(issue, model) {
+	policy := settings.EffectiveDispatchPolicy()
+	if rec := issue.Analysis; rec != nil && rec.Fresh(issue, model) && (rec.Source == FactsFromCreator || sameStrings(rec.Categories, policy.CategoryNames())) {
 		// A creator's record always counts; an analysis record only in a
 		// mode that would have made the call.
 		if rec.Source == FactsFromCreator || settings.AnalysisOn() {
@@ -266,6 +267,7 @@ func (r *Router) analysis(ctx context.Context, workspaceID string, settings Sett
 	rec, err := r.Analyst.Analyze(requestCtx, settings.AnalysisTarget(), AnalysisState{
 		JudgeState:  state,
 		Description: issue.Description,
+		Categories:  policy.CategoryOptions(),
 	})
 	if err != nil {
 		if settings.AnalysisTarget().UsesRuntime() {
@@ -276,7 +278,12 @@ func (r *Router) analysis(ctx context.Context, workspaceID string, settings Sett
 	r.analysisFailures.Delete(failureKey)
 	rec.Hash = issue.ContentHash
 	rec.Model = model
-	if cache, ok := r.Store.(AnalysisCache); ok && rec.Hash != "" {
+	if len(rec.Categories) == 0 {
+		// The record answers the category list it was asked; an analyst that
+		// does not echo it still answered this policy's list.
+		rec.Categories = policy.CategoryNames()
+	}
+	if cache, ok := r.Store.(AnalysisCache); ok && rec.Hash != "" && issue.ID != "" {
 		// A cache that cannot be written only costs the next call; it never
 		// turns a good answer into a failed route.
 		if err := cache.SaveAnalysis(ctx, workspaceID, issue.ID, rec); err != nil {
@@ -437,4 +444,17 @@ func writeAnswers(b *strings.Builder, answers []Answer) {
 		}
 		b.WriteString("\n")
 	}
+}
+
+// sameStrings is slice equality for the category freshness check.
+func sameStrings(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }

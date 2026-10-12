@@ -8,7 +8,6 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 
-	"github.com/multica-ai/multica/server/internal/botsource"
 	"github.com/multica-ai/multica/server/internal/routing"
 	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/util"
@@ -62,10 +61,13 @@ func (e *heldExecutor) is(assigneeType pgtype.Text, assigneeID pgtype.UUID) bool
 func (h *Handler) rulePick(
 	r *http.Request, workspaceID, actorType, actorID string,
 	assigneeType pgtype.Text, assigneeID pgtype.UUID, quote, resultingStatus string,
-	held *heldExecutor, scene sceneRef,
+	held *heldExecutor, scene sceneRef, parent pgtype.UUID,
 ) assignmentRuling {
-	if actorType != "agent" && !botsource.FromContext(r.Context()).ID.Valid {
-		// A person's own hand. Whatever quote they sent is not needed.
+	if actorType != "agent" {
+		// A person's own hand, directly or through a bot key (DENE-1834): the
+		// key acts for the member who holds it, the write already carries its
+		// via_bot provenance, and routing only fills an empty slot. Whatever
+		// quote they sent is not needed.
 		ruling := assignmentRuling{Apply: true, Source: routing.SourceHuman}
 		if id, err := util.ParseUUID(actorID); err == nil && actorType == "member" {
 			ruling.SourceUser = id
@@ -86,6 +88,15 @@ func (h *Handler) rulePick(
 		}
 		// Not verified: from here on it is an unquoted pick (DENE-1613).
 		quoteFailed = true
+	}
+
+	// 自领 (DENE-1834 part 5): a create under the ticket this run is working,
+	// naming the running agent itself, is the agent breaking its own work
+	// down, not guessing at a seat. The pick stands and is labelled so.
+	if held == nil && parent.Valid && assigneeType.Valid && assigneeType.String == "agent" && uuidToString(assigneeID) == actorID {
+		if task, ok := h.liveTaskOf(r, actorID); ok && task.IssueID.Valid && task.IssueID == parent {
+			return assignmentRuling{Apply: true, Source: routing.SourceSelfClaim}
+		}
 	}
 
 	ruling := assignmentRuling{Apply: true, Source: routing.SourceAgent}

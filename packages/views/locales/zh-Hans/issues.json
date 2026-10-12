@@ -161,6 +161,7 @@
     "automation": "自动化指派",
     "agent": "智能体自己点的名",
     "router": "路由选的",
+    "self_claim": "做父票的智能体自领的子票",
     "quote_text": "“{{quote}}”"
   },
   "close_protocol": {

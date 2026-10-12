@@ -217,7 +217,14 @@ export interface IssueSourceContext {
 /** Who decided the executor: a person's own hand, an automation a person
  *  configured, a person's words an agent relayed, an agent's own idea, or
  *  routing. */
-export type IssueAssigneeSource = "human" | "automation" | "quote" | "agent" | "router";
+export type IssueAssigneeSource =
+  | "human"
+  | "automation"
+  | "quote"
+  | "agent"
+  | "router"
+  // The agent working the parent split off this sub-issue and kept it (自领).
+  | "self_claim";
 /** The original a duplicate points at: enough to link it and show its status. */
 export interface IssueDuplicateOf {
   id: string;

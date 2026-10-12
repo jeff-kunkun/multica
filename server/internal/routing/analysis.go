@@ -53,6 +53,9 @@ type Facts struct {
 	// Unanswered lists the boolean questions that came back Unknown; the
 	// enum fields carry Unknown in place.
 	Unanswered []string `json:"unanswered,omitempty"`
+	// Category is the kind of work the dispatch policy asked about (DENE-1834):
+	// one of the policy's categories, 其他, or empty when nobody asked.
+	Category string `json:"category,omitempty"`
 	// Summary is one sentence for a human reader. It is never parsed.
 	Summary string `json:"summary,omitempty"`
 }
@@ -144,6 +147,9 @@ type AnalysisRecord struct {
 	Model string `json:"model,omitempty"`
 	// Hash is ContentHash of the ticket the record describes.
 	Hash string `json:"hash"`
+	// Categories is the category list the record was asked with; a policy
+	// whose categories differ makes the record stale (DENE-1834).
+	Categories []string `json:"categories,omitempty"`
 }
 
 // AnalysisMetadataKey is the issue-metadata key the record is cached under.
@@ -202,6 +208,9 @@ type AnalysisState struct {
 	// clipped. It is read only for the blocked row, where "where is it stuck"
 	// usually lives in the comments rather than in the body.
 	Discussion []string `json:"discussion,omitempty"`
+	// Categories is the dispatch policy's category question (DENE-1834): the
+	// model answers "category" with one option number.
+	Categories []CategoryOption `json:"task_categories,omitempty"`
 }
 
 // Analyst is the analysis role. Like Judge, implementations must not write
@@ -301,7 +310,7 @@ func (a LLMAnalyst) ask(ctx context.Context, target Target, system string, st an
 
 // Analyze asks the questions in one call.
 func (a LLMAnalyst) Analyze(ctx context.Context, target Target, st AnalysisState) (AnalysisRecord, error) {
-	raw, err := a.ask(ctx, target, analyzeSystemPrompt, st, 400)
+	raw, err := a.ask(ctx, target, analyzeSystemPrompt+categoryPrompt(st.Categories), st, 400)
 	if err != nil {
 		return AnalysisRecord{}, err
 	}
@@ -310,7 +319,25 @@ func (a LLMAnalyst) Analyze(ctx context.Context, target Target, st AnalysisState
 	// that transport detail at the boundary so the rest of routing consumes the
 	// same facts object for both sources.
 	raw = unwrapRuntimeAnalysis(raw)
-	return ParseAnalysisResult(raw, target.Model)
+	return ParseAnalysisResultWith(raw, target.Model, st.Categories)
+}
+
+// categoryPrompt renders the dispatch policy's category question after the
+// fixed sheet; empty when no policy asked.
+func categoryPrompt(opts []CategoryOption) string {
+	if len(opts) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("\ncategory: Which kind of work is this ticket mostly? Pick the closest; the last option is none of the above.\n")
+	for i, o := range opts {
+		b.WriteString(fmt.Sprintf("  %d. %s", i+1, o.Category))
+		if o.Hint != "" {
+			b.WriteString(" — " + o.Hint)
+		}
+		b.WriteString("\n")
+	}
+	return b.String()
 }
 
 // ParseAnalysisResult reads a runtime or gateway reply at the common routing
@@ -322,6 +349,13 @@ func (a LLMAnalyst) Analyze(ctx context.Context, target Target, st AnalysisState
 // is read for its option number alone; anything else is Unknown for that one
 // question.
 func ParseAnalysisResult(raw, model string) (AnalysisRecord, error) {
+	return ParseAnalysisResultWith(raw, model, nil)
+}
+
+// ParseAnalysisResultWith is ParseAnalysisResult with the dispatch policy's
+// category options the sheet was asked with: the category answer is read as
+// a number against them, like every other question (DENE-1834).
+func ParseAnalysisResultWith(raw, model string, categories []CategoryOption) (AnalysisRecord, error) {
 	var reply map[string]json.RawMessage
 	raw = unwrapRuntimeAnalysis(raw)
 	if err := json.Unmarshal([]byte(raw), &reply); err != nil || reply == nil {
@@ -329,7 +363,21 @@ func ParseAnalysisResult(raw, model string) (AnalysisRecord, error) {
 	}
 	facts, answers := DefaultRules.read(reply)
 	facts.Summary = clipRunes(rawAnswer(reply["summary"]), 200)
-	return AnalysisRecord{Facts: facts, Answers: answers, Source: FactsFromAnalysis, Model: model}, nil
+	rec := AnalysisRecord{Facts: facts, Answers: answers, Source: FactsFromAnalysis, Model: model}
+	if len(categories) > 0 {
+		a := Answer{Key: "category", Label: "任务类别", Value: Unknown, ValueLabel: unknownLabel}
+		raw := rawAnswer(reply["category"])
+		a.Raw = clipRunes(oneLine(raw), 40)
+		if n := firstNumber(raw); n >= 1 && n <= len(categories) {
+			a.Choice, a.Value, a.ValueLabel = n, categories[n-1].Category, categories[n-1].Category
+		}
+		rec.Facts.Category = a.Value
+		rec.Answers = append(rec.Answers, a)
+		for _, o := range categories {
+			rec.Categories = append(rec.Categories, o.Category)
+		}
+	}
+	return rec, nil
 }
 
 // unwrapRuntimeAnalysis extracts the model message from the common CLI

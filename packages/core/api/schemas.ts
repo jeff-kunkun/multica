@@ -2711,6 +2711,19 @@ const ChatLastMessageSchema = z.object({
   sender_user_id: z.string().nullable().optional(),
 }).loose();
 
+const ChatRoutingReceiptSchema = z.object({
+  source: z.string().default(""),
+  routed: z.boolean().default(false),
+  agent_id: z.string().optional().catch(undefined),
+  agent: z.string().optional().catch(undefined),
+  tier: z.string().optional().catch(undefined),
+  tier_label: z.string().optional().catch(undefined),
+  reason: z.string().optional().catch(undefined),
+  availability: z.string().optional().catch(undefined),
+  offline: z.boolean().optional().catch(undefined),
+  candidates: z.array(z.string()).optional().catch(undefined),
+}).loose();
+
 const ChatLinkedProjectSchema = z.object({
   link_id: z.string(),
   project_id: z.string(),
@@ -2766,6 +2779,7 @@ export const ChatSessionSchema: z.ZodType<ChatSession> = z.object({
   origin_type: z.literal("chat").nullable().optional().catch(undefined),
   origin_session_id: z.string().nullable().optional().catch(undefined),
   origin_title: z.string().nullable().optional().catch(undefined),
+  routing: ChatRoutingReceiptSchema.optional().catch(undefined),
   created_at: z.string().default(""),
   updated_at: z.string().default(""),
 }).loose();

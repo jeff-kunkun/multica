@@ -287,6 +287,10 @@ func TestReviewerIsNeverTheSeatThatDidTheWork(t *testing.T) {
 func TestReviewerCollisionOnTopRungFallsToTheRungBelow(t *testing.T) {
 	store := newFakeStore()
 	withCreatorFacts(store, strongFacts)
+	// The 最强档门槛 (DENE-1834) would move this executor down while a strong
+	// seat is free; this test is about the reviewer slot behind a top-rung
+	// executor, so the gate is off here.
+	store.settings.StrongestGate = boolPtr(false)
 	v := confidentVerdict()
 	v.ExecutorTier = "strongest"
 	v.ReviewerTier = "strongest"

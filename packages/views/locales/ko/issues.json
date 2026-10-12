@@ -161,6 +161,7 @@
     "automation": "자동화가 지정",
     "agent": "에이전트가 스스로 지정",
     "router": "라우팅이 선택",
+    "self_claim": "상위 티켓 담당 에이전트가 직접 맡음",
     "quote_text": "“{{quote}}”"
   },
   "close_protocol": {

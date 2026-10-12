@@ -90,6 +90,9 @@ type IssueResponse struct {
 	// went to routing), or a refused in-flight reassignment with the commands
 	// to use instead.
 	AssigneeIgnoredReason string `json:"assignee_ignored_reason,omitempty"`
+	// Routing is set on a create that asked for route_sync (DENE-1834): who
+	// holds the executor slot and why, in the 自动选派 source words.
+	Routing *RoutingReceipt `json:"routing,omitempty"`
 	// ReviewerType / ReviewerID are the acceptance slot, shaped exactly like
 	// the assignee pair: a REFERENCE to an agent or a member, not a copy of a
 	// name, so renaming or archiving the target cannot leave stale text behind.
@@ -3369,6 +3372,13 @@ type CreateIssueRequest struct {
 	// otherwise ask the analysis model for (DENE-923). They are cached
 	// against this content, so editing the ticket later invalidates them.
 	RoutingFacts *routing.Facts `json:"routing_facts,omitempty"`
+
+	// RouteSync asks for the routing answer in this response (DENE-1834):
+	// the executor slot is filled inline and `routing` says who and why.
+	// Without it the slot is filled by the detached hook and the caller
+	// reads the 自动选派 comment later. Ignored when the caller's own
+	// executor stands; then `routing` just reports 人工.
+	RouteSync bool `json:"route_sync,omitempty"`
 }
 
 // UnmarshalJSON rejects duplicate object members before Go's ordinary map
@@ -3771,7 +3781,7 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 	assigneeIgnored := false
 	assigneeIgnoredReason := ""
 	if assigneeType.Valid {
-		ruling = h.rulePick(r, workspaceID, creatorType, actualCreatorID, assigneeType, assigneeID, deref(req.AssigneeQuote), status, nil, sceneRef{Domain: createDomain, Project: predictProject})
+		ruling = h.rulePick(r, workspaceID, creatorType, actualCreatorID, assigneeType, assigneeID, deref(req.AssigneeQuote), status, nil, sceneRef{Domain: createDomain, Project: predictProject}, parentIssueID)
 		if ruling.Apply && ruling.Seat.Valid {
 			assigneeID = ruling.Seat
 		}
@@ -3953,7 +3963,33 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 			slog.Warn("routing facts write failed", append(logger.RequestAttrs(r), "error", err, "issue_id", uuidToString(issue.ID))...)
 		}
 	}
-	h.RouteIssueAsync(r, workspaceID, uuidToString(issue.ID))
+	if req.RouteSync {
+		// The caller wants the answer now (DENE-1834). Same Route as the
+		// hook, run inline instead of detached; the hook is then skipped so
+		// the pass is not made twice.
+		if assigneeType.Valid {
+			rr := h.receiptForHeldSlot(r.Context(), workspaceID, assigneeType, assigneeID)
+			if ruling.Source == routing.SourceSelfClaim {
+				rr.Source, rr.Reason = string(routing.PickReasonSelfClaim), "做父票的智能体拆出这张子票，自己接着做"
+			}
+			resp.Routing = &rr
+			h.RouteIssueAsync(r, workspaceID, uuidToString(issue.ID))
+		} else {
+			rr := h.routeIssueSync(r.Context(), workspaceID, uuidToString(issue.ID))
+			if assigneeIgnored && assigneeIgnoredReason != "" {
+				rr.Reason = assigneeIgnoredReason + "；" + rr.Reason
+			}
+			resp.Routing = &rr
+			if fresh, err := h.Queries.GetIssue(r.Context(), issue.ID); err == nil {
+				refreshed := issueToResponse(fresh, prefix)
+				resp.AssigneeType, resp.AssigneeID = refreshed.AssigneeType, refreshed.AssigneeID
+				resp.AssigneeSource, resp.AssigneeSourceUserID = refreshed.AssigneeSource, refreshed.AssigneeSourceUserID
+				resp.ReviewerType, resp.ReviewerID = refreshed.ReviewerType, refreshed.ReviewerID
+			}
+		}
+	} else {
+		h.RouteIssueAsync(r, workspaceID, uuidToString(issue.ID))
+	}
 	h.seatStagedParent(r, workspaceID, issue, creatorType, actualCreatorID)
 
 	writeJSON(w, http.StatusCreated, resp)
@@ -4629,7 +4665,7 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 				resulting = params.Status.String
 			}
 			ruling := h.rulePick(r, workspaceID, actorType, actorID, params.AssigneeType, params.AssigneeID, deref(req.AssigneeQuote), resulting,
-				&heldExecutor{Type: prevIssue.AssigneeType, ID: prevIssue.AssigneeID}, sceneRef{Domain: targetDomain, Project: targetProject})
+				&heldExecutor{Type: prevIssue.AssigneeType, ID: prevIssue.AssigneeID}, sceneRef{Domain: targetDomain, Project: targetProject}, pgtype.UUID{})
 			if ruling.Apply {
 				if ruling.Seat.Valid {
 					params.AssigneeID = ruling.Seat
@@ -5695,7 +5731,7 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 					resulting = params.Status.String
 				}
 				ruling := h.rulePick(r, workspaceID, pickActorType, pickActorID, params.AssigneeType, params.AssigneeID, deref(req.Updates.AssigneeQuote), resulting,
-					&heldExecutor{Type: prevIssue.AssigneeType, ID: prevIssue.AssigneeID}, sceneRef{Domain: batchDomain, Project: batchTargetProject})
+					&heldExecutor{Type: prevIssue.AssigneeType, ID: prevIssue.AssigneeID}, sceneRef{Domain: batchDomain, Project: batchTargetProject}, pgtype.UUID{})
 				if ruling.Apply {
 					if ruling.Seat.Valid {
 						params.AssigneeID = ruling.Seat

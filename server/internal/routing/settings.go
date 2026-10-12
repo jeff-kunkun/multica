@@ -127,6 +127,11 @@ type Settings struct {
 	// before a tight one. A pointer because the default is ON and a workspace
 	// saved before the field existed must read as on (DENE-922).
 	UsagePriority *bool `json:"usage_priority,omitempty"`
+	// StrongestGate is 「最强档门槛」 (DENE-1834): the top rung takes a ticket
+	// only when its seat is not tagged tight and no strong or medium seat can
+	// take the work, and the comment says 为什么非她不可. A pointer because
+	// the default is ON.
+	StrongestGate *bool `json:"strongest_gate,omitempty"`
 	// AllowUpshift is 「允许上调一档」: when every seat on the judged rung is
 	// tight, the rung above's ample seat takes the work. Off by default.
 	AllowUpshift bool `json:"allow_upshift,omitempty"`
@@ -154,6 +159,9 @@ type Settings struct {
 	// fallback seat, and the executor merges and closes. Off by default,
 	// which keeps the fallback seat.
 	JudgedReview bool `json:"judged_review,omitempty"`
+	// DispatchPolicy is 「分工规则」 (DENE-1834): the plain-language division
+	// of labour and the rows read from it. Nil means DefaultDispatchPolicy.
+	DispatchPolicy *DispatchPolicy `json:"dispatch_policy,omitempty"`
 
 	// JudgeEnabled switches the judge role — Model, BaseURL and the key above
 	// are that role's fields, because the judge is the only model routing had
@@ -392,4 +400,9 @@ func (s Settings) StaleAfter() time.Duration {
 		return DefaultStaleReviewHours * time.Hour
 	}
 	return time.Duration(h * float64(time.Hour))
+}
+
+// StrongestGateOn reports whether 「最强档门槛」 applies; a missing key is on.
+func (s Settings) StrongestGateOn() bool {
+	return s.StrongestGate == nil || *s.StrongestGate
 }

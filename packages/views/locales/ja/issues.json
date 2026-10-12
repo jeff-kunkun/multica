@@ -161,6 +161,7 @@
     "automation": "自動化による指名",
     "agent": "エージェント自身の指名",
     "router": "ルーティングが選択",
+    "self_claim": "親チケット担当エージェントが自ら引き受け",
     "quote_text": "「{{quote}}」"
   },
   "close_protocol": {

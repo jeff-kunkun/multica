@@ -40,6 +40,9 @@ export function AssigneeSourceNote({ issue }: { issue: Issue }) {
     case "router":
       label = t(($) => $.assignee_source.router);
       break;
+    case "self_claim":
+      label = t(($) => $.assignee_source.self_claim);
+      break;
     default:
       return null;
   }

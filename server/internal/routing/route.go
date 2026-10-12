@@ -55,6 +55,11 @@ type Outcome struct {
 	Reason string
 	// ExecutorWritten is the seat this call put in the executor slot, if any.
 	ExecutorWritten *Seat
+	// ExecutorReason and ExecutorDetail are the closed word and the sentence
+	// the assignment comment prints for the executor written on this call
+	// (DENE-1834): a receipt can say "why him" without reading the comment.
+	ExecutorReason PickReason
+	ExecutorDetail string
 	// ReviewerWritten is the reviewer this call wrote, if any. Empty Kind
 	// means this call did not write the slot.
 	ReviewerWritten ReviewerRef
@@ -71,6 +76,11 @@ type Outcome struct {
 	// the matched rule, the judge's part, and the seats written. Nil when no
 	// decision was made on this call.
 	Trace *Trace
+	// StrongestGate is what the 最强档门槛 did on this call (DENE-1834).
+	StrongestGate StrongestGate
+	// Dispatch is what the 分工规则 did on this call (DENE-1834): category,
+	// matched sentence, series filter or its fallback.
+	Dispatch DispatchMatch
 }
 
 // Router is the module both entry points call. The HTTP hooks call Route
@@ -351,13 +361,30 @@ func (r *Router) routeTodo(ctx context.Context, workspaceID string, settings Set
 	}
 
 	threshold := settings.Threshold()
+	var notes []string
 
 	// The observation can go stale between the question and the write. Read
 	// it again and only then pick. A seat that died in that gap is not
 	// written; another eligible seat is, when one remains.
-	fresh, err := r.eligibleNow(ctx, workspaceID, settings, candidates)
+	fresh, snaps, err := r.eligibleNowWithSnapshots(ctx, workspaceID, settings, candidates)
 	if err != nil {
 		return Outcome{State: StateEnabled, Action: ActionSkipped, Reason: "routing context incomplete"}, err
+	}
+	// 分工规则 (DENE-1834): the category the analysis read picks a row, the
+	// row filters the seats by series and may cap the tier. A person's tier
+	// label still wins the rung; the series filter applies either way.
+	var dispatch DispatchMatch
+	pickRoster := roster
+	if needExecutor {
+		fresh, pickRoster, verdict, dispatch = ladder.dispatch(settings.EffectiveDispatchPolicy(), dec.Facts, fresh, roster, verdict)
+		out.Dispatch = dispatch
+		if dispatch.Capped != "" {
+			out.Tier = verdict.ExecutorTier
+		}
+		if labelSeatOK && !seatIn(fresh, labelSeat) && dispatch.Filtered {
+			labelSeatOK = false
+			notes = append(notes, "labelled tier "+requestedTier+" has no seat in series "+dispatch.Series)
+		}
 	}
 
 	// --- executor slot ---------------------------------------------------
@@ -367,7 +394,6 @@ func (r *Router) routeTodo(ctx context.Context, workspaceID string, settings Set
 	// snapshot says cannot take work is not a fallback. The confidence stays
 	// visible in the decision comment.
 	var executor *Seat
-	var notes []string
 	seriesNote := ""
 	executorSource := ""
 	var cont ContinuationPick
@@ -375,8 +401,11 @@ func (r *Router) routeTodo(ctx context.Context, workspaceID string, settings Set
 	var learn LearnPick
 	var class *OutcomeClass
 	learnApplied := false
-	if labelled && !labelSeatOK {
+	if labelled && !labelSeatOK && !dispatch.Filtered {
 		notes = append(notes, "labelled tier "+requestedTier+" was not eligible")
+	}
+	if line := dispatch.Line(ladder); line != "" {
+		notes = append(notes, line)
 	}
 	if j := judgeNote(dec.Trace); j != "" {
 		notes = append(notes, j)
@@ -400,11 +429,30 @@ func (r *Router) routeTodo(ctx context.Context, workspaceID string, settings Set
 					}
 				}
 			}
+			// 最强档门槛: the top rung only when nobody on the middle rungs
+			// can take it and its seat is not tight. A person's label is
+			// their call and is not gated.
+			// A learned raise to the top is evidence that the strong rung
+			// was not suitable for this class, which is the gate's own
+			// test, so it is not gated.
+			var gate StrongestGate
+			if !labelStill && source != pickLearned && settings.StrongestGateOn() {
+				seat, gate = ladder.gateStrongest(seat, candidates, fresh, pickRoster, snaps)
+				out.StrongestGate = gate
+				if gate.Moved && class != nil {
+					// The outcome class names the judged rung; the seat is
+					// now a rung below, so nothing is recorded to learn from.
+					class = nil
+				}
+				if line := gate.Line(ladder); line != "" {
+					notes = append(notes, line)
+				}
+			}
 			tierSeat, tierSource, tierWhy := seat, source, why
 			// 接着做 ranks above the ladder's pick but not above a person's
 			// tier label: the label is a person's instruction about strength.
 			if !labelStill {
-				cont, err = r.continuation(ctx, workspaceID, settings, ladder, roster, scene, issue, seat)
+				cont, err = r.continuation(ctx, workspaceID, settings, ladder, pickRoster, scene, issue, seat)
 				if err != nil {
 					return Outcome{State: StateEnabled, Action: ActionSkipped, Reason: "routing context incomplete"}, err
 				}
@@ -414,7 +462,7 @@ func (r *Router) routeTodo(ctx context.Context, workspaceID string, settings Set
 				} else {
 					// 负载 only reorders the ladder's own cell, so it runs
 					// after 接着做 has declined (DENE-1203).
-					load, err = r.load(ctx, workspaceID, settings, ladder, roster, seat)
+					load, err = r.load(ctx, workspaceID, settings, ladder, pickRoster, seat)
 					if err != nil {
 						return Outcome{State: StateEnabled, Action: ActionSkipped, Reason: "routing context incomplete"}, err
 					}
@@ -424,7 +472,7 @@ func (r *Router) routeTodo(ctx context.Context, workspaceID string, settings Set
 					}
 				}
 			}
-			if !labelStill && verdict.PreferredSeries != "" {
+			if !labelStill && verdict.PreferredSeries != "" && !dispatch.Filtered {
 				preferred, matched, preferenceErr := r.availableSeriesSeat(ctx, workspaceID, settings, ladder, scene, roster, seat, verdict.PreferredSeries)
 				if preferenceErr != nil {
 					return Outcome{State: StateEnabled, Action: ActionSkipped, Reason: "routing context incomplete"}, preferenceErr
@@ -539,6 +587,9 @@ func (r *Router) routeTodo(ctx context.Context, workspaceID string, settings Set
 		out.Action = ActionAssigned
 	}
 	out.Reason = strings.Join(notes, "; ")
+	if out.ExecutorWritten != nil {
+		out.ExecutorReason, out.ExecutorDetail = executorPickReason(issue, needExecutor, executor, executorSource, dec.RaisedFrom != "")
+	}
 	if out.Trace != nil {
 		if executor != nil {
 			out.Trace.Seat = executor.Name
@@ -567,6 +618,12 @@ func (r *Router) routeTodo(ctx context.Context, workspaceID string, settings Set
 		learnLine(learn, settings.LearnFromOutcomes, learnApplied, executor, executorSource))
 	if seriesNote != "" {
 		body += "\n\n" + seriesNote
+	}
+	if line := dispatch.Line(ladder); line != "" {
+		body += "\n\n" + line
+	}
+	if line := out.StrongestGate.Line(ladder); line != "" {
+		body += "\n\n" + line
 	}
 	if note := DemotionFootnote(ladder, roster, executor); note != "" {
 		body += "\n\n" + note
@@ -1503,11 +1560,18 @@ func (r *Router) decisionContext(ctx context.Context, workspaceID string, settin
 
 // eligibleNow re-reads the summary immediately before a conditional write.
 func (r *Router) eligibleNow(ctx context.Context, workspaceID string, settings Settings, candidates []Seat) ([]Seat, error) {
+	seats, _, err := r.eligibleNowWithSnapshots(ctx, workspaceID, settings, candidates)
+	return seats, err
+}
+
+// eligibleNowWithSnapshots is eligibleNow keeping the snapshot it read, for
+// a sentence that names why a seat was left out.
+func (r *Router) eligibleNowWithSnapshots(ctx context.Context, workspaceID string, settings Settings, candidates []Seat) ([]Seat, map[string]SeatSnapshot, error) {
 	facts, err := r.Store.RoutingFacts(ctx, workspaceID, seatIDs(candidates), settings.ProviderKeys())
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	return EligibleSeats(candidates, facts.Seats), nil
+	return EligibleSeats(candidates, facts.Seats), facts.Seats, nil
 }
 
 func seatIDs(candidates []Seat) []string {

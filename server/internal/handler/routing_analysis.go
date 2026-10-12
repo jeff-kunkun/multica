@@ -158,7 +158,14 @@ func (h *Handler) persistLateRoutingAnalysis(req *routingAnalysisRequest, raw st
 	if req.workspaceID == "" || req.issueID == "" || req.contentHash == "" || h.Routing == nil {
 		return
 	}
-	rec, err := routing.ParseAnalysisResult(raw, req.model)
+	// The late answer was asked this workspace's category list (分工规则),
+	// so it is read with the same list; a policy saved since then makes the
+	// record stale on the next route, which is what the freshness check wants.
+	var categories []routing.CategoryOption
+	if settings, err := h.Routing.Store.Settings(context.Background(), req.workspaceID); err == nil {
+		categories = settings.EffectiveDispatchPolicy().CategoryOptions()
+	}
+	rec, err := routing.ParseAnalysisResultWith(raw, req.model, categories)
 	if err != nil {
 		return
 	}

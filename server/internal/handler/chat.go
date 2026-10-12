@@ -18,6 +18,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/analytics"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/middleware"
+	"github.com/multica-ai/multica/server/internal/routing"
 	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/util"
 	"github.com/multica-ai/multica/server/internal/workspacelink"
@@ -46,6 +47,10 @@ type CreateChatSessionRequest struct {
 	// LinkedProjects attaches projects shared through a workspace link as
 	// read-only references (DENE-1643). They never become the chat's project.
 	LinkedProjects []ChatLinkedProjectRef `json:"linked_projects"`
+	// Brief is the opening message, read only when agent_id is empty: routing
+	// judges it the way it judges a ticket body and picks the agent
+	// (DENE-1834). It is not stored; the caller still sends the message.
+	Brief string `json:"brief"`
 }
 
 func (h *Handler) CreateChatSession(w http.ResponseWriter, r *http.Request) {
@@ -60,14 +65,6 @@ func (h *Handler) CreateChatSession(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
-	if req.AgentID == "" {
-		writeError(w, http.StatusBadRequest, "agent_id is required")
-		return
-	}
-	agentID, ok := parseUUIDOrBadRequest(w, req.AgentID, "agent_id")
-	if !ok {
-		return
-	}
 	workspaceUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace id")
 	if !ok {
 		return
@@ -77,6 +74,23 @@ func (h *Handler) CreateChatSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	projectID := primaryChatSessionProjectID(projectIDs)
+	// No agent named: routing picks one (DENE-1834). The rule lives here, so
+	// the composer, the CLI and an external bot's key all get the same seat
+	// for the same brief. A named agent is the caller's own call and is
+	// reported as 人工 below.
+	var receipt *RoutingReceipt
+	if strings.TrimSpace(req.AgentID) == "" {
+		rr, ok := h.routeChatAgent(w, r, workspaceUUID, projectID, req)
+		if !ok {
+			return
+		}
+		receipt = &rr
+		req.AgentID = rr.AgentID
+	}
+	agentID, ok := parseUUIDOrBadRequest(w, req.AgentID, "agent_id")
+	if !ok {
+		return
+	}
 	linkedRefs, ok := parseChatLinkedProjectRefs(w, req.LinkedProjects)
 	if !ok {
 		return
@@ -109,8 +123,16 @@ func (h *Handler) CreateChatSession(w http.ResponseWriter, r *http.Request) {
 	// chat sessions are judged by the top-of-chain originator.
 	actorType, actorID := h.resolveActor(r, userID, workspaceID)
 	if !h.canInvokeAgent(r.Context(), agent, actorType, actorID, h.invokeOriginatorFromRequest(r, actorType, actorID), workspaceID) {
+		if receipt != nil {
+			writeError(w, http.StatusForbidden, "routing picked "+agent.Name+", which you may not invoke; name an agent you may use with agent_id")
+			return
+		}
 		writeError(w, http.StatusForbidden, "you do not have access to this agent")
 		return
+	}
+	if receipt == nil {
+		rr := h.receiptForNamedAgent(r.Context(), workspaceID, agent)
+		receipt = &rr
 	}
 
 	// Create inside a tx that first takes a FOR KEY SHARE lock on the workspace
@@ -195,7 +217,46 @@ func (h *Handler) CreateChatSession(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to load chat access")
 		return
 	}
+	responses[0].Routing = receipt
 	writeJSON(w, http.StatusCreated, responses[0])
+}
+
+// routeChatAgent asks routing for the agent a chat opens with, from its
+// title, brief and project scene. It writes the refusal itself: routing off
+// (400, name an agent), nobody pickable (409, with the candidates and who is
+// offline), or the judge unreachable (503).
+func (h *Handler) routeChatAgent(w http.ResponseWriter, r *http.Request, workspaceUUID pgtype.UUID, projectID pgtype.UUID, req CreateChatSessionRequest) (RoutingReceipt, bool) {
+	pickReq := routing.PickRequest{Title: req.Title, Text: req.Brief}
+	if projectID.Valid {
+		pickReq.ProjectID = util.UUIDToString(projectID)
+		scene := service.LoadDomainScene(r.Context(), h.Queries, workspaceUUID, pgtype.UUID{}, projectID)
+		pickReq.ProjectName, pickReq.ProjectDomains = scene.ProjectName, scene.Project
+	}
+	rr, err := h.pickAgentForChat(r.Context(), util.UUIDToString(workspaceUUID), pickReq)
+	switch {
+	case errors.Is(err, routing.ErrRoutingInactive):
+		writeJSON(w, http.StatusBadRequest, map[string]any{
+			"error":   "agent_id is required: routing is off in this workspace, so nobody can pick an agent for you; name one with agent_id or turn routing on in Settings → Routing",
+			"code":    "routing_inactive",
+			"routing": rr,
+		})
+		return rr, false
+	case err != nil:
+		writeJSON(w, http.StatusServiceUnavailable, map[string]any{
+			"error":   "routing could not pick an agent: " + err.Error() + "; retry, or name one with agent_id",
+			"code":    "routing_unavailable",
+			"routing": rr,
+		})
+		return rr, false
+	case !rr.Picked():
+		writeJSON(w, http.StatusConflict, map[string]any{
+			"error":   "no agent can take this chat right now: " + rr.Reason + "; name one with agent_id to queue for it anyway",
+			"code":    "no_agent_available",
+			"routing": rr,
+		})
+		return rr, false
+	}
+	return rr, true
 }
 
 func (h *Handler) ListChatSessions(w http.ResponseWriter, r *http.Request) {
@@ -467,16 +528,24 @@ func (h *Handler) ConvertChatSessionToGoal(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	defer spawnSlots.release()
-	result, err := h.IssueService.ConvertChatToIssue(r.Context(), session.ID, service.IssueCreateParams{
+	// Who runs the goal (DENE-1834): with routing on, the executor slot is
+	// left empty and routing judges the goal like any ticket, so the chat's
+	// agent is not inherited by habit. With routing off it stays the chat's
+	// agent, reported as 人工.
+	routed := h.Routing != nil && h.Routing.Active(r.Context(), workspaceID)
+	params := service.IssueCreateParams{
 		WorkspaceID: session.WorkspaceID,
 		Title:       title,
 		Description: pgtype.Text{String: seed, Valid: seed != ""},
 		Status:      "todo", Priority: "none",
-		AssigneeType: pgtype.Text{String: "agent", Valid: true}, AssigneeID: session.AgentID,
 		CreatorType: "member", CreatorID: creatorID,
 		ProjectID: session.ProjectID, ProjectPinned: session.ProjectID.Valid,
 		GoalMode: true, OriginChatSessionID: session.ID,
-	}, service.IssueCreateOpts{ActorID: userID, AnalyticsAgentID: uuidToString(session.AgentID), Platform: "web"})
+	}
+	if !routed {
+		params.AssigneeType, params.AssigneeID = pgtype.Text{String: "agent", Valid: true}, session.AgentID
+	}
+	result, err := h.IssueService.ConvertChatToIssue(r.Context(), session.ID, params, service.IssueCreateOpts{ActorID: userID, AnalyticsAgentID: uuidToString(session.AgentID), Platform: "web"})
 	if err != nil {
 		switch {
 		case errors.Is(err, service.ErrChatConversionForbidden):
@@ -491,9 +560,19 @@ func (h *Handler) ConvertChatSessionToGoal(w http.ResponseWriter, r *http.Reques
 	}
 	spawnSlots.fill(r.Context(), result.Issue.ID)
 	prefix := h.getIssuePrefix(r.Context(), session.WorkspaceID)
+	var receipt RoutingReceipt
+	if routed {
+		receipt = h.routeIssueSync(r.Context(), workspaceID, uuidToString(result.Issue.ID))
+		if fresh, ferr := h.Queries.GetIssue(r.Context(), result.Issue.ID); ferr == nil {
+			result.Issue = fresh
+		}
+	} else {
+		receipt = h.receiptForHeldSlot(r.Context(), workspaceID, params.AssigneeType, params.AssigneeID)
+	}
 	resp := issueToResponse(result.Issue, prefix)
+	resp.Routing = &receipt
 	h.publishChat(protocol.EventChatSessionInvalidated, workspaceID, "member", userID, uuidToString(session.ID), protocol.ChatSessionInvalidatedPayload{ChatSessionID: uuidToString(session.ID)})
-	writeJSON(w, http.StatusCreated, map[string]any{"issue": resp, "chat_session_id": uuidToString(session.ID)})
+	writeJSON(w, http.StatusCreated, map[string]any{"issue": resp, "chat_session_id": uuidToString(session.ID), "routing": receipt})
 }
 
 type UpdateChatSessionRequest struct {
@@ -2540,6 +2619,9 @@ type ChatSessionResponse struct {
 	// older Chat that remains readable and writable in Multica.
 	ChannelSource         *ChatSessionChannelSourceResponse `json:"channel_source,omitempty"`
 	IsCurrentChannelRoute *bool                             `json:"is_current_channel_route,omitempty"`
+	// Routing is set on the create response only: who the chat opened with
+	// and why (DENE-1834). 人工 when the caller named the agent.
+	Routing *RoutingReceipt `json:"routing,omitempty"`
 	// OriginSessionID names the chat an agent opened this one from
 	// (DENE-1271). OriginTitle is that chat's title, filled only on
 	// single-session reads and only when the viewer can open it.

@@ -346,6 +346,13 @@ import {
   type RoutingModels,
 } from "../workspace/routing-models";
 import {
+  parseDispatchPreview,
+  parseRoutingDispatch,
+  type DispatchPreview,
+  type RoutingDispatch,
+  type RoutingDispatchUpdate,
+} from "../workspace/routing-dispatch";
+import {
   parseConfigBundle,
   parseConfigImportReport,
   reportFromImportError,
@@ -4189,6 +4196,38 @@ export class ApiClient {
     return parseRoutingModels(raw);
   }
 
+  /** The 分工规则 as the server holds it, plus the series and tiers a row may name. */
+  async getRoutingDispatch(workspaceId: string): Promise<RoutingDispatch> {
+    const raw = await this.fetch<unknown>(
+      `/api/workspaces/${workspaceId}/routing/dispatch`,
+    );
+    return parseRoutingDispatch(raw);
+  }
+
+  /**
+   * Ask the routing judge to read rows out of plain text. Writes nothing:
+   * the rows come back for a person to check before `updateRoutingDispatch`.
+   */
+  async previewRoutingDispatch(workspaceId: string, text: string): Promise<DispatchPreview> {
+    const raw = await this.fetch<unknown>(
+      `/api/workspaces/${workspaceId}/routing/dispatch/preview`,
+      { method: "POST", body: JSON.stringify({ text }) },
+    );
+    return parseDispatchPreview(raw);
+  }
+
+  /** Confirm the reviewed rows (or reset to default); the server records the revision. */
+  async updateRoutingDispatch(
+    workspaceId: string,
+    update: RoutingDispatchUpdate,
+  ): Promise<RoutingDispatch> {
+    const raw = await this.fetch<unknown>(
+      `/api/workspaces/${workspaceId}/routing/dispatch`,
+      { method: "PUT", body: JSON.stringify(update) },
+    );
+    return parseRoutingDispatch(raw);
+  }
+
   async exportWorkspaceConfig(workspaceId: string): Promise<ConfigBundle> {
     const raw = await this.fetch<unknown>(
       `/api/workspaces/${workspaceId}/config/export`,
@@ -5263,7 +5302,11 @@ export class ApiClient {
 
   async createChatSession(
     data: {
-      agent_id: string;
+      /** Leave out and the server routes the chat to an agent from `brief`
+       *  (DENE-1834); the response's `routing` says who and why. */
+      agent_id?: string;
+      /** The first message, for routing. Ignored when `agent_id` is set. */
+      brief?: string;
       title?: string;
       /** The session's project set, in selection order (DENE-522). Mutually
        *  exclusive with `project_id` — the server rejects both at once rather
