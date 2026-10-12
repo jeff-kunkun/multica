@@ -329,7 +329,7 @@ For incremental review use `wake pending`, follow every `next_cursor` through
 then start again without a cursor. Never use creation sequence as a high-water
 mark: older queued events may fail later, and sequence is not commit order.
 Settings accept `wake_from` with member/agent/bot rules `{mode:all|none|list,ids:[]}`.
-See `server/docs/bot-wake-contract.md` for the trusted-source deployment gate.
+The trusted-source deployment gate (which sources a deployment accepts wakes from) is operator configuration; ask the deployment owner for the Bot wake contract.
 
 The server attaches source_id/parent_id, web_url, root_id/hop and ack_url to wake
 payloads; url remains the authenticated source API URL. POST `ack_body` to

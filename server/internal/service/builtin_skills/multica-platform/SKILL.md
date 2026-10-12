@@ -1,6 +1,6 @@
 ---
 name: multica-platform
-description: "Overview, asks, open a chat, consult, goals, inbox, project board/report, sub-issues, wakeups, routing, close protocol, stall, driver, halt, mention, agents, specialisation, squads, autopilot, projects, runtimes, progress, state card, skill import, transfer, linked workspace, bots, GitHub App. Not app code."
+description: "Overview, ask, open a chat, consult, goal, inbox, project board/report, sub-issue, wakeup, routing, close protocol, stall, driver, halt, mention, agent, specialisation, squad, autopilot, project, runtime, progress, state card, skill import, transfer, linked workspace, bot, GitHub App. Not app code."
 user-invocable: false
 allowed-tools: Bash(multica *), Bash(git *), Bash(gh *)
 ---
@@ -52,6 +52,7 @@ See `references/overview.md` for filter semantics and examples.
 | `references/project-report.md` | The user asks to hear a project's report (听汇报, 有什么新进展, 上次以来): `multica project report --mark-heard`, the fixed spoken shape with a Mermaid chart, and acting on its buttons |
 | `references/project-board.md` | The user asks for the full open-ticket panorama by project: `multica project board` (one or more projects, or the whole workspace) |
 | `references/consult.md` | Asking a strong-tier seat one question while you keep the ticket (`multica issue consult`): when to ask, the per-issue limit, cost, refusal codes |
+| `references/chats.md` | The chat directory and transcripts (`chat list` / `search` / `history`), messaging a running chat (`chat send` modes, `--urgent`), `chat handoff`, `chat to-goal` |
 | `references/chat-spawn.md` | Opening a chat with another agent from a chat (`multica chat open`): task-or-chat table, limits, refusal codes |
 | `references/workspace-links.md` | Reading another workspace's shared projects through a link: `multica workspace link list` / `view`, pending link requests (`list --pending`), what the view contains, why it says link not found; on a managed link, working on the source's issues, autopilots and initiator-owned chats (`chat list/send`) with `--linked <source-slug>`; new links default to managed, opt out with `create --managed=false` |
 | `references/transfer.md` | `multica transfer export` / `import` / `bind-runtimes`, and the kun `/transfer/*` endpoints |
@@ -118,41 +119,6 @@ once the ticket is past `todo` (details in `references/routing.md`).
 **Status keys identify workflow states; categories describe lifecycle only.**
 Custom statuses do not inherit built-in automation behavior. For status side
 effects and API field meanings, read `references/issues.md`.
-
-## Chats
-
-Use the read-only chat directory before opening a transcript:
-
-- `multica chat list [--project <id-or-exact-name>] [--compact] [--all-projects] [--since <RFC3339>] [--output json|table]`
-- `multica chat search <词> [--project <id-or-exact-name>] [--compact] [--all-projects] [--since <RFC3339>] [--output json|table]`
-
-Task-scoped commands default to the current project. Use `--all-projects` to
-opt in to a workspace-wide directory. Visibility follows the person who
-started the task, so another member's private chats stay hidden. Listing and
-reading chats never changes unread state. Use `multica chat history` for a
-bounded transcript after choosing a session.
-
-To message a chat while its agent may still be replying, use
-`multica chat send --session <id> --content-file <path> --mode steer|queue|restart`.
-A message that is worthless late (a verification code, a relayed SMS) goes with
-`--urgent`: refused at once when the runtime is offline, otherwise head of the
-queue, and the command exits 0 only once a daemon has started the turn within
-the 30 s pickup deadline (`run-control.md` → "Urgent delivery").
-The same `--mode` works on `multica issue comment add`, which also takes
-`handoff` / `parallel` when you @ an agent other than the one running; a chat
-moves to another agent with `multica chat handoff --to <agent>`. What each mode costs,
-and what happens when the running CLI cannot steer, is in
-`references/run-control.md`.
-
-To promote the current conversation into a goal task, use
-`multica chat to-goal --session <id-or-url>`. The server creates the issue with
-the chat's agent as executor; confirm the completion line with `multica goal`.
-Add `--output json` when another tool needs the new issue id.
-
-To talk to another agent without creating work, open a chat from your chat:
-`multica chat open --agent <name> --brief-file ./brief.md`. Work with an owner
-and a deliverable is still an issue. Limits and refusal codes:
-`references/chat-spawn.md`.
 
 **Catch up with the state card; Comment reads stay bounded.** `multica issue
 context <id>` lists the goal, settled decisions, where it stands, the last

@@ -377,6 +377,7 @@ func TestPlatformSkillDescriptionNamesEveryDomain(t *testing.T) {
 		"references/stall-actions.md":   "stall",
 		"references/workspace-links.md": "linked workspace",
 		"references/chat-spawn.md":      "open a chat",
+		"references/chats.md":           "chat",
 		"references/consult.md":         "consult",
 		"references/drivers.md":         "driver",
 		"references/run-control.md":     "halt",
