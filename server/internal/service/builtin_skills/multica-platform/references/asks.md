@@ -51,6 +51,17 @@ ask-human block and queues one run for the agent that asked; a repeated receipt
 changes nothing. Do not also post a comment yourself. Questions with fewer than
 two options are free-text: no card, the person answers with a ticket comment.
 In a chat, `multica chat ask-human` writes the question into the chat as a
-message (options as a numbered list); the Bot's `--answer` is written back as
-the person's own message, which queues the run, and the person typing in the
-chat settles the Bot's chase too.
+message (options as a numbered list). With 2–6 options it is also the same
+shared card: it shows in the person's inbox, `multica ask list/get/answer` reads
+and fills it, and the Bot answers it with `--answers`. Whoever fills it (the
+Bot, the app, the CLI), the chosen option is written into that chat as the
+person's own message and queues the asking agent's run once; a repeated answer
+is refused, and only the chat's owner can answer. The person typing a reply in
+the chat instead closes the card and settles the Bot's chase. Fewer than two
+options stays free text: no card, and the Bot's `--answer` is written back as
+the person's message.
+
+A card made for a person with a Bot binding (`multica ask --mode needs_you`,
+`issue ask-human`, `chat ask-human`) resumes the asking agent once however it
+is answered: through the Bot, in the app or with `multica ask answer`, also in
+mirror mode and when the Bot channel is broken.

@@ -92,7 +92,9 @@ CREATE INDEX human_needed_event_parent ON human_needed_event (parent_event_id) W
 
 -- A question card can be addressed to one person (the Bot answers on their
 -- behalf) and can say what asked it: kind 'ask_human' / 'human_needed' cards
--- resume the asker when answered, whoever answers.
+-- resume the asker when answered, whoever answers. A card asked in a chat
+-- remembers the chat, so the answer lands back there.
 ALTER TABLE agent_ask
     ADD COLUMN recipient_id UUID REFERENCES "user"(id) ON DELETE CASCADE,
-    ADD COLUMN kind TEXT NOT NULL DEFAULT '';
+    ADD COLUMN kind TEXT NOT NULL DEFAULT '',
+    ADD COLUMN chat_session_id UUID REFERENCES chat_session(id) ON DELETE CASCADE;

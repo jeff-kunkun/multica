@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -664,6 +665,9 @@ func TestChatAskHumanRoundTripAndFallback(t *testing.T) {
 	if resp.ViaBot || resp.EventID != "" {
 		t.Fatalf("unbound chat ask: %+v", resp)
 	}
+	if resp.AskID == "" {
+		t.Fatalf("a chat choice question must be a shared card: %+v", resp)
+	}
 	if msgs := chatMessages(t, sessionID, "assistant"); len(msgs) != 1 || !strings.Contains(msgs[0], "Which domain?") || !strings.Contains(msgs[0], "a.example.com") {
 		t.Fatalf("question not in the chat: %q", msgs)
 	}
@@ -687,9 +691,9 @@ func TestChatAskHumanRoundTripAndFallback(t *testing.T) {
 	_ = json.Unmarshal(body, &payload)
 
 	if code, data := f.call(t, "POST", "/bots/"+uuidToString(f.bot.ID)+"/wake/events/"+resp.EventID+"/answered", map[string]any{}); code != 400 {
-		t.Fatalf("a chat answer without text must be refused: %d %s", code, data)
+		t.Fatalf("a card answer without choices must be refused: %d %s", code, data)
 	}
-	answerBody := map[string]any{"answer": "b.example.com"}
+	answerBody := map[string]any{"answers": map[string]string{"0": "b"}}
 	if code, data := f.call(t, "POST", "/bots/"+uuidToString(f.bot.ID)+"/wake/events/"+resp.EventID+"/answered", answerBody); code != 200 {
 		t.Fatalf("answered %d %s", code, data)
 	}
@@ -804,4 +808,220 @@ func TestFallbackCreatesTheInAppRowWhenThereWasNone(t *testing.T) {
 		t.Fatalf("fallback row unread=%v body=%q", unread, body)
 	}
 	_ = f
+}
+
+// chatCard has the agent ask a choice question in a chat; the question is a
+// shared card.
+func chatCard(t *testing.T, sessionID string) AskHumanResponse {
+	t.Helper()
+	w := httptest.NewRecorder()
+	testHandler.AskHumanChat(w, chatAskRequest(t, sessionID, map[string]any{
+		"question": "Which domain?",
+		"options":  []map[string]string{{"id": "a", "label": "a.example.com"}, {"id": "b", "label": "b.example.com"}},
+	}))
+	resp := decodeAskHuman(t, w)
+	if resp.AskID == "" {
+		t.Fatalf("chat choice question has no shared ask_id: %+v", resp)
+	}
+	return resp
+}
+
+func answerCardInApp(t *testing.T, askID, choice string) int {
+	t.Helper()
+	w := httptest.NewRecorder()
+	testHandler.AnswerAsk(w, withURLParam(newRequest("POST", "/api/asks/"+askID+"/answer", map[string]any{"answers": map[string]string{"0": choice}}), "id", askID))
+	return w.Code
+}
+
+func chatRuns(t *testing.T, sessionID, agentID string) int {
+	t.Helper()
+	return summonCount(t, `SELECT count(*) FROM agent_task_queue WHERE chat_session_id=$1 AND agent_id=$2 AND status IN ('queued','dispatched','running')`, sessionID, agentID)
+}
+
+// A chat choice question is the shared card: it shows in the inbox, the Bot
+// fills it, and the answer is written back into the chat and wakes the asking
+// agent once, however often the answer is repeated.
+func TestChatChoiceCardAnsweredByBotWritesBackAndResumesOnce(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	agentID, sessionID, _, _ := setupDirectChatSession(t, ctx, "chat card via bot")
+	f := newHumanNeededFixture(t, true)
+	resp := chatCard(t, sessionID)
+	if !resp.ViaBot || resp.EventID == "" {
+		t.Fatalf("bound chat card not routed: %+v", resp)
+	}
+	var kind, status string
+	dbfx.QueryRow(t, `SELECT kind, status FROM agent_ask WHERE id=$1 AND chat_session_id=$2 AND recipient_id=$3`, resp.AskID, sessionID, testUserID).Scan(&kind, &status)
+	if status != "open" || kind == "" {
+		t.Fatalf("card kind %q status %q", kind, status)
+	}
+	if got := summonCount(t, `SELECT count(*) FROM inbox_item WHERE recipient_id=$1 AND type='needs_you' AND details->>'ask_id'=$2`, testUserID, resp.AskID); got != 1 {
+		t.Fatalf("the inbox has %d rows for the card, want 1", got)
+	}
+	f.deliver(t, resp.EventID)
+	body := map[string]any{"answers": map[string]string{"0": "b"}}
+	for i := 0; i < 2; i++ {
+		if code, data := f.call(t, "POST", "/bots/"+uuidToString(f.bot.ID)+"/wake/events/"+resp.EventID+"/answered", body); code != 200 {
+			t.Fatalf("answered %d %s", code, data)
+		}
+	}
+	if msgs := chatMessages(t, sessionID, "user"); len(msgs) != 1 || !strings.Contains(msgs[0], "b.example.com") || !strings.Contains(msgs[0], "Bot") {
+		t.Fatalf("the answer is not in the chat once, naming the Bot: %q", msgs)
+	}
+	if got := chatRuns(t, sessionID, agentID); got != 1 {
+		t.Fatalf("chat runs = %d, want 1", got)
+	}
+	if code := answerCardInApp(t, resp.AskID, "a"); code != http.StatusConflict {
+		t.Fatalf("a second answer in the app must be refused: %d", code)
+	}
+	if got := chatRuns(t, sessionID, agentID); got != 1 {
+		t.Fatalf("chat runs after the refused repeat = %d, want 1", got)
+	}
+}
+
+// The same card answered in the app (the Bot never answered, or the person
+// has no Bot at all) fills it, writes the answer into the chat as their own
+// message and resumes the asker.
+func TestChatChoiceCardAnsweredInAppWritesBackAndResumes(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	for _, bound := range []bool{false, true} {
+		t.Run(fmt.Sprintf("bound=%v", bound), func(t *testing.T) {
+			agentID, sessionID, _, _ := setupDirectChatSession(t, ctx, "chat card in app")
+			if bound {
+				newHumanNeededFixture(t, true)
+			}
+			resp := chatCard(t, sessionID)
+			if code := answerCardInApp(t, resp.AskID, "a"); code != 200 {
+				t.Fatalf("bound=%v answer in app: %d", bound, code)
+			}
+			if msgs := chatMessages(t, sessionID, "user"); len(msgs) != 1 || !strings.Contains(msgs[0], "a.example.com") || strings.Contains(msgs[0], "Bot") {
+				t.Fatalf("bound=%v the answer is not the person's own message: %q", bound, msgs)
+			}
+			if got := chatRuns(t, sessionID, agentID); got != 1 {
+				t.Fatalf("bound=%v chat runs = %d, want 1", bound, got)
+			}
+			if bound {
+				var open int
+				dbfx.QueryRow(t, `SELECT count(*) FROM human_needed_event WHERE ask_id=$1 AND status NOT IN ('answered','expired','cancelled')`, resp.AskID).Scan(&open)
+				if open != 0 {
+					t.Fatalf("the Bot is still chasing an answered card: %d events", open)
+				}
+			}
+		})
+	}
+}
+
+// A person who types their reply in the chat answers the question too: the
+// card must not stay open to answer a second time.
+func TestChatChoiceCardClosesWhenThePersonTypesTheirReply(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	_, sessionID, _, _ := setupDirectChatSession(t, ctx, "chat card typed reply")
+	resp := chatCard(t, sessionID)
+	w := httptest.NewRecorder()
+	testHandler.SendChatMessage(w, chatAskRequest(t, sessionID, map[string]any{"content": "b please"}))
+	if w.Code >= 300 {
+		t.Fatalf("send %d %s", w.Code, w.Body.String())
+	}
+	var status string
+	dbfx.QueryRow(t, `SELECT status FROM agent_ask WHERE id=$1`, resp.AskID).Scan(&status)
+	if status != "cancelled" {
+		t.Fatalf("card status %q after a typed reply, want cancelled", status)
+	}
+}
+
+// Someone else cannot answer a card asked in another person's chat.
+func TestChatChoiceCardOnlyTheChatOwnerAnswers(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	_, sessionID, _, _ := setupDirectChatSession(t, ctx, "chat card owner only")
+	resp := chatCard(t, sessionID)
+	other := dbfx.Insert(t, "user", testutil.Cols{"name": "Other Person", "email": "chat-card-other-" + resp.AskID + "@example.com"})
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/asks/"+resp.AskID+"/answer", map[string]any{"answers": map[string]string{"0": "a"}})
+	req.Header.Set("X-User-ID", other)
+	testHandler.AnswerAsk(w, withURLParam(req, "id", resp.AskID))
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("another member answering: %d %s", w.Code, w.Body.String())
+	}
+	// Nor can they read it: the question is from a private chat.
+	for _, read := range []struct {
+		name string
+		call func(http.ResponseWriter, *http.Request)
+		req  *http.Request
+	}{
+		{"get", testHandler.GetAsk, withURLParam(newRequest("GET", "/api/asks/"+resp.AskID, nil), "id", resp.AskID)},
+		{"list", testHandler.ListAsks, newRequest("GET", "/api/asks", nil)},
+	} {
+		read.req.Header.Set("X-User-ID", other)
+		rec := httptest.NewRecorder()
+		read.call(rec, read.req)
+		if strings.Contains(rec.Body.String(), resp.AskID) {
+			t.Fatalf("%s showed another member's chat card: %s", read.name, rec.Body.String())
+		}
+	}
+	// The chat's owner still sees it.
+	ownReq := newRequest("GET", "/api/asks", nil)
+	rec := httptest.NewRecorder()
+	testHandler.ListAsks(rec, ownReq)
+	if !strings.Contains(rec.Body.String(), resp.AskID) {
+		t.Fatalf("the owner does not see their own chat card: %s", rec.Body.String())
+	}
+}
+
+// An existing question card (`multica ask`) for a Bot-bound person wakes the
+// asker once whichever way it is answered, including in the app after the
+// Bot never got to it, in mirror mode, or with a broken channel.
+func TestBoundCardAnsweredInAppResumesAskerInEveryChannelState(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	for _, state := range []string{"healthy", "mirror", "stopped"} {
+		t.Run(state, func(t *testing.T) {
+			issue := createIssueHTTP(t, "in-app answer "+state, "in_progress")
+			agentID := handlerTestAgentID(t)
+			setIssueAssigneeDirect(t, issue.ID, "agent", agentID)
+			taskID := insertIssueTaskWithStatus(t, agentID, issue.ID, "running")
+			f := newHumanNeededFixture(t, true)
+			switch state {
+			case "mirror":
+				dbfx.Exec(t, `UPDATE member_bot_binding SET mode='mirror' WHERE id=$1`, f.binding)
+			case "stopped":
+				dbfx.Exec(t, `UPDATE personal_access_token SET revoked=true WHERE id=$1`, uuidToString(f.bot.ID))
+			}
+			t.Cleanup(func() {
+				testPool.Exec(context.Background(), `DELETE FROM inbox_item WHERE issue_id = $1`, issue.ID)
+				testPool.Exec(context.Background(), `DELETE FROM agent_ask WHERE issue_id = $1`, issue.ID)
+			})
+			w := httptest.NewRecorder()
+			testHandler.CreateAsk(w, agentRequest("POST", "/api/asks", map[string]any{
+				"title": "Which colour?", "issue_id": issue.ID, "mode": "needs_you",
+				"questions": []AskQuestion{{Text: "Colour", Options: []AskOption{{ID: "red", Label: "Red"}, {ID: "blue", Label: "Blue"}}}},
+			}, agentID, taskID))
+			if w.Code != http.StatusCreated {
+				t.Fatalf("create ask %d %s", w.Code, w.Body.String())
+			}
+			var card AskResponse
+			_ = json.NewDecoder(w.Body).Decode(&card)
+			dbfx.Exec(t, `UPDATE agent_task_queue SET status='completed' WHERE id=$1`, taskID)
+			if code := answerCardInApp(t, card.ID, "blue"); code != 200 {
+				t.Fatalf("answer in app: %d", code)
+			}
+			if code := answerCardInApp(t, card.ID, "red"); code != http.StatusConflict {
+				t.Fatalf("a repeated answer must be refused: %d", code)
+			}
+			if got := openRuns(t, issue.ID, agentID); got != 1 {
+				t.Fatalf("the asker was resumed %d times, want exactly once", got)
+			}
+		})
+	}
 }

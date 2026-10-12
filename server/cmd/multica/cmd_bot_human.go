@@ -197,8 +197,9 @@ asking agent and clears the block. Then the event is closed as answered.
 
 A question card is filled by --answers; the server then comments on the ticket
 as the person and wakes the asking agent once, so do not comment yourself.
-For a chat event --answer is written into the chat as the person, which
-wakes the agent that asked.`,
+A chat question with choices is a card too: --answers fills it and the
+chosen option is written into the chat as the person, which wakes the agent
+that asked. A free-text chat question takes --answer, written the same way.`,
 		Args: exactArgs(2),
 		RunE: runBotHumanAnswered,
 	}
@@ -409,10 +410,12 @@ var chatAskHumanCmd = &cobra.Command{
 	Long: askHumanLong + `
 
 In a chat the person asked is the chat's owner; --to is not needed. The
-question is written into the chat as a message. With a Bot it is also pushed
-there, and the Bot's answer is written back into the chat as the person, which
-wakes you. Without a Bot, or when the Bot is unreachable, they see it in the
-chat and in their inbox.`,
+question is written into the chat as a message. With 2 to 6 --option values it
+is also a question card (the same one the inbox, 'multica ask' and the Bot
+fill in); whoever answers it, the choice is written back into the chat as the
+person, which wakes you once. With a Bot it is also pushed there. Without a
+Bot, or when the Bot is unreachable, they see it in the chat and in their
+inbox. Free-text questions (no options) stay a chat message.`,
 	Example: `  multica chat ask-human --question "用哪个域名？" --option a.example.com --option b.example.com`,
 	Args:    exactArgs(0),
 	RunE:    runChatAskHuman,

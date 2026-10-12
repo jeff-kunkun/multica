@@ -824,12 +824,36 @@ func (h *Handler) AskHumanChat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	actorType, actorID := h.resolveActor(r, userID, uuidToString(session.WorkspaceID))
+	// A question with choices is a card (agent_ask), the same object the app,
+	// the inbox, `multica ask` and the Bot fill in; the answer is written back
+	// into this chat and wakes the asking agent. A free-text question has no
+	// choices to make a card from and stays a chat message.
+	var card AskResponse
+	var insert askInsert
+	hasCard := false
+	if cardOptions := askCardOptions(options); cardOptions != nil {
+		insert = askInsert{
+			Workspace: session.WorkspaceID, AskerType: actorType, AskerID: parseUUID(actorID),
+			Title: question, Questions: []AskQuestion{{Text: question, Options: cardOptions}},
+			Mode: "needs_you", Recipient: session.CreatorID, Kind: "ask_human", ChatSession: session.ID,
+		}
+		var cardErr error
+		card, cardErr = h.insertAsk(r.Context(), insert)
+		if cardErr != nil {
+			writeError(w, http.StatusInternalServerError, "ask failed: "+cardErr.Error())
+			return
+		}
+		hasCard = true
+	}
 	msg, err := h.Queries.CreateChatMessage(r.Context(), db.CreateChatMessageParams{
 		ChatSessionID: session.ID,
 		Role:          "assistant",
 		Content:       chatAskContent(question, options),
 	})
 	if err != nil {
+		if hasCard {
+			h.cancelAskCard(r.Context(), parseUUID(card.ID))
+		}
 		writeError(w, http.StatusInternalServerError, "ask failed: 提问没能写进聊天")
 		return
 	}
@@ -841,29 +865,40 @@ func (h *Handler) AskHumanChat(w http.ResponseWriter, r *http.Request) {
 		Content:       msg.Content,
 		CreatedAt:     timestampToString(msg.CreatedAt),
 	})
-	route, err := service.RouteHumanNeeded(r.Context(), h.Queries, service.HumanNeededInput{
-		WorkspaceID:   session.WorkspaceID,
-		Target:        session.CreatorID,
-		Kind:          "chat_ask",
-		DedupeKey:     "chat:" + sessionID + ":" + uuidToString(msg.ID),
-		ChatSessionID: session.ID,
-		CallerType:    actorType,
-		CallerID:      parseUUID(actorID),
-		Question:      question,
-		Options:       options,
-		Urgent:        req.Urgent,
-		Deadline:      deadline,
-	})
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "ask failed")
-		return
+	resp := AskHumanResponse{RecipientID: uuidToString(session.CreatorID)}
+	var route service.HumanNeededResult
+	if hasCard {
+		route = h.deliverAskToPerson(r.Context(), card, insert, session.CreatorID, uuidToString(session.WorkspaceID), actorID)
+		resp.AskID = card.ID
+	} else {
+		var routeErr error
+		route, routeErr = service.RouteHumanNeeded(r.Context(), h.Queries, service.HumanNeededInput{
+			WorkspaceID:   session.WorkspaceID,
+			Target:        session.CreatorID,
+			Kind:          "chat_ask",
+			DedupeKey:     "chat:" + sessionID + ":" + uuidToString(msg.ID),
+			ChatSessionID: session.ID,
+			CallerType:    actorType,
+			CallerID:      parseUUID(actorID),
+			Question:      question,
+			Options:       options,
+			Urgent:        req.Urgent,
+			Deadline:      deadline,
+		})
+		if routeErr != nil {
+			writeError(w, http.StatusInternalServerError, "ask failed")
+			return
+		}
 	}
-	resp := AskHumanResponse{RecipientID: uuidToString(session.CreatorID), ViaBot: route.Routed}
+	resp.ViaBot = route.Routed
 	if route.Routed {
 		resp.EventID = uuidToString(route.Event.EventID)
 		resp.Result = []string{"提问已写进聊天，并推给对方的 Bot；他在聊天里答或让 Bot 转达，回答会回到这个聊天叫醒你"}
 	} else {
 		resp.Result = []string{"提问已写进聊天：对方没有连接 Bot（或 Bot 暂时不可用），他在聊天里直接看到；他回复后你继续"}
+	}
+	if hasCard {
+		resp.Result = append(resp.Result, "选择题已做成提问卡，站内收件箱、`multica ask` 和 Bot 都能回答，回答会写回这个聊天")
 	}
 	writeJSON(w, http.StatusOK, resp)
 }
@@ -886,31 +921,41 @@ func chatAskContent(question string, options []service.HumanNeededOption) string
 // chat as their own message and queues the asking agent's run, the same send
 // the app makes when they type it themselves.
 func (h *Handler) writeChatAnswer(ctx context.Context, ev db.HumanNeededEvent, bot db.PersonalAccessToken, answer string) error {
-	session, err := h.Queries.GetChatSession(ctx, ev.ChatSessionID)
-	if err != nil || session.WorkspaceID != ev.WorkspaceID || session.CreatorID != ev.TargetUserID {
+	return h.sendChatAnswer(ctx, ev.WorkspaceID, ev.ChatSessionID, ev.TargetUserID, bot.Name, answer)
+}
+
+// sendChatAnswer is the one way an answer lands in a chat: as the chat owner's
+// message (naming the Bot that carried it, if any), plus the asking agent's
+// queued run. Free-text replies and chat question cards both come through here.
+func (h *Handler) sendChatAnswer(ctx context.Context, workspace, chatID, person pgtype.UUID, botName, answer string) error {
+	session, err := h.Queries.GetChatSession(ctx, chatID)
+	if err != nil || session.WorkspaceID != workspace || session.CreatorID != person {
 		return errors.New("聊天不属于这位主人")
 	}
 	agent, err := h.Queries.GetAgent(ctx, session.AgentID)
 	if err != nil {
 		return errors.New("聊天的智能体不存在")
 	}
-	content := fmt.Sprintf("（Bot「%s」代表本人转达）\n%s", bot.Name, answer)
-	sent, err := h.TaskService.SendDirectChatMessage(ctx, session, agent, ev.TargetUserID, content, nil, "member", ev.TargetUserID)
+	content := answer
+	if botName != "" {
+		content = fmt.Sprintf("（Bot「%s」代表本人转达）\n%s", botName, answer)
+	}
+	sent, err := h.TaskService.SendDirectChatMessage(ctx, session, agent, person, content, nil, "member", person)
 	if err != nil {
 		return err
 	}
-	if err := h.Queries.SetChatMessageSender(ctx, db.SetChatMessageSenderParams{ID: sent.Message.ID, SenderUserID: ev.TargetUserID}); err != nil {
+	if err := h.Queries.SetChatMessageSender(ctx, db.SetChatMessageSenderParams{ID: sent.Message.ID, SenderUserID: person}); err != nil {
 		slog.Warn("human needed: record chat answer sender failed", "error", err)
 	}
 	sessionID := uuidToString(session.ID)
-	h.publishChatWithSource(ctx, protocol.EventChatMessage, uuidToString(session.WorkspaceID), "member", uuidToString(ev.TargetUserID), sessionID, protocol.ChatMessagePayload{
+	h.publishChatWithSource(ctx, protocol.EventChatMessage, uuidToString(session.WorkspaceID), "member", uuidToString(person), sessionID, protocol.ChatMessagePayload{
 		ChatSessionID: sessionID,
 		MessageID:     uuidToString(sent.Message.ID),
 		Role:          "user",
 		Content:       content,
 		TaskID:        uuidToString(sent.Task.ID),
 		CreatedAt:     timestampToString(sent.Message.CreatedAt),
-		SenderUserID:  uuidToString(ev.TargetUserID),
+		SenderUserID:  uuidToString(person),
 	})
 	return nil
 }

@@ -98,14 +98,16 @@ type askInsert struct {
 	Mode      string
 	Recipient pgtype.UUID
 	Kind      string
+	// ChatSession is the chat the card was asked in, when it was.
+	ChatSession pgtype.UUID
 }
 
 func (h *Handler) insertAsk(ctx context.Context, in askInsert) (AskResponse, error) {
 	questions, _ := json.Marshal(in.Questions)
 	var id, storedIssue, asker pgtype.UUID
 	var created time.Time
-	err := h.DB.QueryRow(ctx, `INSERT INTO agent_ask(workspace_id,issue_id,asker_type,asker_id,title,questions,mode,recipient_id,kind) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id,issue_id,asker_id,created_at`,
-		in.Workspace, in.Issue, in.AskerType, in.AskerID, in.Title, questions, in.Mode, in.Recipient, in.Kind).Scan(&id, &storedIssue, &asker, &created)
+	err := h.DB.QueryRow(ctx, `INSERT INTO agent_ask(workspace_id,issue_id,asker_type,asker_id,title,questions,mode,recipient_id,kind,chat_session_id) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id,issue_id,asker_id,created_at`,
+		in.Workspace, in.Issue, in.AskerType, in.AskerID, in.Title, questions, in.Mode, in.Recipient, in.Kind, in.ChatSession).Scan(&id, &storedIssue, &asker, &created)
 	if err != nil {
 		return AskResponse{}, err
 	}
@@ -208,6 +210,12 @@ func (h *Handler) CreateAsk(w http.ResponseWriter, r *http.Request) {
 	insert := askInsert{Workspace: ws, Issue: issueID, AskerType: actorType, AskerID: askerID, Title: title, Questions: req.Questions, Mode: req.Mode}
 	if req.Mode == "needs_you" {
 		insert.Recipient = recipientID
+		// A card for a person with a Bot binding resumes its asker whoever
+		// answers it (the Bot, the app, the CLI), also when the channel is
+		// broken or mirrored and they answer in the app.
+		if _, chErr := h.Queries.GetHumanChannel(r.Context(), db.GetHumanChannelParams{WorkspaceID: ws, UserID: recipientID}); chErr == nil {
+			insert.Kind = "ask"
+		}
 	}
 	out, err := h.insertAsk(r.Context(), insert)
 	if err != nil {
@@ -224,7 +232,7 @@ func (h *Handler) CreateAsk(w http.ResponseWriter, r *http.Request) {
 // call to the person's Bot when they have one (DENE-1933). The card itself
 // stays the source of truth: the inbox row only stores its id, so every
 // surface renders the same card through GET /api/asks.
-func (h *Handler) deliverAskToPerson(ctx context.Context, ask AskResponse, in askInsert, recipient pgtype.UUID, workspaceID, actorID string) {
+func (h *Handler) deliverAskToPerson(ctx context.Context, ask AskResponse, in askInsert, recipient pgtype.UUID, workspaceID, actorID string) service.HumanNeededResult {
 	askID := parseUUID(ask.ID)
 	details, _ := json.Marshal(map[string]string{"ask_id": ask.ID})
 	item, err := h.Queries.CreateInboxItem(ctx, db.CreateInboxItemParams{
@@ -234,20 +242,25 @@ func (h *Handler) deliverAskToPerson(ctx context.Context, ask AskResponse, in as
 		ActorType: pgtype.Text{String: in.AskerType, Valid: true}, ActorID: in.AskerID, Details: details,
 	})
 	if err != nil {
-		return
+		return service.HumanNeededResult{}
+	}
+	kind := "ask"
+	if in.ChatSession.Valid {
+		kind = "chat_ask"
 	}
 	route, routeErr := service.RouteHumanNeeded(ctx, h.Queries, service.HumanNeededInput{
-		WorkspaceID: in.Workspace,
-		Target:      recipient,
-		Kind:        "ask",
-		DedupeKey:   "ask:" + ask.ID,
-		IssueID:     in.Issue,
-		InboxItemID: item.ID,
-		AskID:       askID,
-		CallerType:  in.AskerType,
-		CallerID:    in.AskerID,
-		Question:    askQuestionText(in.Title, in.Questions),
-		Options:     askHumanOptions(in.Questions),
+		WorkspaceID:   in.Workspace,
+		Target:        recipient,
+		Kind:          kind,
+		DedupeKey:     "ask:" + ask.ID,
+		IssueID:       in.Issue,
+		ChatSessionID: in.ChatSession,
+		InboxItemID:   item.ID,
+		AskID:         askID,
+		CallerType:    in.AskerType,
+		CallerID:      in.AskerID,
+		Question:      askQuestionText(in.Title, in.Questions),
+		Options:       askHumanOptions(in.Questions),
 	})
 	if routeErr != nil {
 		slog.Warn("human needed: route ask failed", "error", routeErr, "ask_id", ask.ID)
@@ -257,6 +270,18 @@ func (h *Handler) deliverAskToPerson(ctx context.Context, ask AskResponse, in as
 		}
 	}
 	h.publishWithSource(ctx, protocol.EventInboxNew, workspaceID, in.AskerType, actorID, map[string]any{"item": inboxToResponse(item)})
+	return route
+}
+
+// askViewer is the person looking at cards; a card asked in a chat is only
+// visible to the chat's owner. Without a person it is the zero id, which sees
+// no chat cards.
+func askViewer(r *http.Request) pgtype.UUID {
+	id, err := util.ParseUUID(requestUserID(r))
+	if err != nil {
+		return pgtype.UUID{}
+	}
+	return id
 }
 
 func (h *Handler) GetAsk(w http.ResponseWriter, r *http.Request) {
@@ -275,7 +300,7 @@ func (h *Handler) GetAsk(w http.ResponseWriter, r *http.Request) {
 	var qraw, araw []byte
 	var issueID, askerID pgtype.UUID
 	var answered *time.Time
-	err = h.DB.QueryRow(r.Context(), `SELECT id,issue_id,asker_type,asker_id,title,questions,answers,mode,status,created_at,answered_at FROM agent_ask WHERE id=$1 AND workspace_id=$2`, id, ws).Scan(&id, &issueID, &out.AskerType, &askerID, &out.Title, &qraw, &araw, &out.Mode, &out.Status, &out.CreatedAt, &answered)
+	err = h.DB.QueryRow(r.Context(), `SELECT id,issue_id,asker_type,asker_id,title,questions,answers,mode,status,created_at,answered_at FROM agent_ask WHERE id=$1 AND workspace_id=$2 AND (chat_session_id IS NULL OR recipient_id=$3)`, id, ws, askViewer(r)).Scan(&id, &issueID, &out.AskerType, &askerID, &out.Title, &qraw, &araw, &out.Mode, &out.Status, &out.CreatedAt, &answered)
 	if err != nil {
 		if err == pgx.ErrNoRows {
 			writeError(w, 404, "ask not found")
@@ -320,7 +345,7 @@ func (h *Handler) ListAsks(w http.ResponseWriter, r *http.Request) {
 		}
 		issueID = parsed
 	}
-	rows, err := h.DB.Query(r.Context(), `SELECT id,issue_id,asker_type,asker_id,title,questions,answers,mode,status,created_at,answered_at FROM agent_ask WHERE workspace_id=$1 AND ($2='' OR status=$2) AND ($3::uuid IS NULL OR issue_id=$3) ORDER BY created_at DESC LIMIT 100`, ws, status, issueID)
+	rows, err := h.DB.Query(r.Context(), `SELECT id,issue_id,asker_type,asker_id,title,questions,answers,mode,status,created_at,answered_at FROM agent_ask WHERE workspace_id=$1 AND ($2='' OR status=$2) AND ($3::uuid IS NULL OR issue_id=$3) AND (chat_session_id IS NULL OR recipient_id=$4) ORDER BY created_at DESC LIMIT 100`, ws, status, issueID, askViewer(r))
 	if err != nil {
 		writeError(w, 500, "failed to list asks")
 		return
@@ -406,9 +431,9 @@ type askAnswer struct {
 // the currently visible tab.
 func (h *Handler) answerAskCore(ctx context.Context, in askAnswer) (map[string]string, *askError) {
 	var qraw []byte
-	var askerID, issueID, recipient pgtype.UUID
+	var askerID, issueID, recipient, chatID pgtype.UUID
 	var askerType, mode, kind, title string
-	if err := h.DB.QueryRow(ctx, `SELECT questions, asker_type, asker_id, issue_id, mode, kind, title, recipient_id FROM agent_ask WHERE id=$1 AND workspace_id=$2 AND status='open'`, in.AskID, in.Workspace).Scan(&qraw, &askerType, &askerID, &issueID, &mode, &kind, &title, &recipient); err != nil {
+	if err := h.DB.QueryRow(ctx, `SELECT questions, asker_type, asker_id, issue_id, mode, kind, title, recipient_id, chat_session_id FROM agent_ask WHERE id=$1 AND workspace_id=$2 AND status='open'`, in.AskID, in.Workspace).Scan(&qraw, &askerType, &askerID, &issueID, &mode, &kind, &title, &recipient, &chatID); err != nil {
 		if err == pgx.ErrNoRows {
 			return nil, &askError{409, "ask is already answered or not found"}
 		}
@@ -416,6 +441,11 @@ func (h *Handler) answerAskCore(ctx context.Context, in askAnswer) (map[string]s
 	}
 	if in.Bot != nil && recipient.Valid && recipient != in.Answerer {
 		return nil, &askError{403, "这张提问不是问这位 Bot 的主人的"}
+	}
+	// A card asked in a chat is that chat's owner's to answer: the answer is
+	// written back into their chat.
+	if chatID.Valid && recipient.Valid && recipient != in.Answerer {
+		return nil, &askError{403, "这张提问是在别人的聊天里问的，只有对方能回答"}
 	}
 	var questions []AskQuestion
 	if err := json.Unmarshal(qraw, &questions); err != nil {
@@ -459,7 +489,7 @@ func (h *Handler) answerAskCore(ctx context.Context, in askAnswer) (map[string]s
 		slog.Warn("human needed: settle by ask failed", "error", err, "ask_id", uuidToString(in.AskID))
 	}
 	// Inbox delivery is the durable record for the asker.
-	if mode == "needs_you" && in.Answerer.Valid {
+	if mode == "needs_you" && in.Answerer.Valid && !chatID.Valid {
 		recipientType := "agent"
 		if askerType == "member" {
 			recipientType = "member"
@@ -475,14 +505,45 @@ func (h *Handler) answerAskCore(ctx context.Context, in askAnswer) (map[string]s
 		}
 	}
 	// A card the platform opened for a person (ask-human, a Bot-routed ask)
-	// resumes whoever asked, however it was answered.
-	if kind != "" || in.Bot != nil {
+	// resumes whoever asked, however it was answered: in the app, with
+	// `multica ask answer`, or through their Bot.
+	if chatID.Valid {
+		h.resumeChatAsker(ctx, in, chatID, questions, answers)
+	} else if kind != "" || in.Bot != nil {
 		h.resumeAskAsker(ctx, in, title, questions, answers, askerType, askerID, issueID)
 	}
 	// A platform ask with its own effect (DENE-1647): the answer is carried
 	// out here, so the CLI, the issue card and the inbox all act the same.
 	h.applyReviewStuckAnswer(ctx, in.Workspace, issueID, answererID, answers["0"])
 	return answers, nil
+}
+
+// resumeChatAsker writes a chat card's answer back into the chat as the
+// person's own message, which queues the asking agent's run. Several questions
+// read as one line each; the Bot, when one carried it, is named in the message.
+func (h *Handler) resumeChatAsker(ctx context.Context, in askAnswer, chatID pgtype.UUID, questions []AskQuestion, answers map[string]string) {
+	var lines []string
+	for i, q := range questions {
+		value := answers[fmt.Sprintf("%d", i)]
+		for _, o := range q.Options {
+			if o.ID == value {
+				value = o.Label
+				break
+			}
+		}
+		if len(questions) == 1 {
+			lines = append(lines, value)
+		} else {
+			lines = append(lines, fmt.Sprintf("%s：%s", strings.TrimSpace(q.Text), value))
+		}
+	}
+	botName := ""
+	if in.Bot != nil {
+		botName = in.Bot.Name
+	}
+	if err := h.sendChatAnswer(ctx, in.Workspace, chatID, in.Answerer, botName, strings.Join(lines, "\n")); err != nil {
+		slog.Warn("ask: chat answer failed", "error", err, "ask_id", uuidToString(in.AskID))
+	}
 }
 
 // resumeAskAsker records the answer on the ticket as the person's own comment
