@@ -118,7 +118,14 @@ func TestHandoffChatSessionOpensWithSummary(t *testing.T) {
 		req := newRequest(http.MethodPost, "/api/chat/sessions/"+sessionID+"/handoff", map[string]any{"to": to})
 		return testutil.Call(t, testHandler.HandoffChatSession, withChatTestWorkspaceCtx(t, withURLParam(req, "sessionId", sessionID)))
 	}
-	call("Chat handoff A").Want(http.StatusBadRequest)
+	// Handing off to the chat's own agent opens a fresh same-role chat that
+	// carries only the summary (#602); only an unknown target is refused.
+	var same HandoffChatSessionResponse
+	call("Chat handoff A").Want(http.StatusCreated).JSON(&same)
+	dbfx.Cleanup(t, `DELETE FROM agent_task_queue WHERE chat_session_id = $1`, same.Session.ID)
+	if same.Session.AgentID != agentA || same.Session.ID == sessionID || same.FromSessionID != sessionID {
+		t.Fatalf("same-agent handoff response = %+v", same)
+	}
 	call("nobody").Want(http.StatusBadRequest)
 
 	var resp HandoffChatSessionResponse

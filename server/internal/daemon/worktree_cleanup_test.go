@@ -281,8 +281,17 @@ func TestScheduledCleanupRunsWithDaemonGCDisabled(t *testing.T) {
 	worktreeCleanupStartupDelay = time.Millisecond
 	t.Cleanup(func() { worktreeCleanupStartupDelay = 30 * time.Second })
 	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	go d.worktreeCleanupLoop(ctx)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		d.worktreeCleanupLoop(ctx)
+	}()
+	// The pass deletes the branch inside .git after the directory is gone;
+	// let it finish before TempDir removal races it.
+	t.Cleanup(func() {
+		cancel()
+		<-done
+	})
 
 	deadline := time.Now().Add(10 * time.Second)
 	for {
@@ -294,6 +303,8 @@ func TestScheduledCleanupRunsWithDaemonGCDisabled(t *testing.T) {
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
+	cancel()
+	<-done
 	// Removal went through git, so the repository has no orphan metadata left.
 	if out := runGitForGC(t, repo, "worktree", "list"); strings.Contains(out, copyPath) {
 		t.Fatalf("git still lists the removed copy:\n%s", out)

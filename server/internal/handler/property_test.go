@@ -595,7 +595,21 @@ func TestListIssuesPropertyFilterAndSort(t *testing.T) {
 		buf, _ := json.Marshal(map[string][]string{box.ID: values})
 		return "?limit=200&properties=" + url.QueryEscape(string(buf))
 	}
-	noneGot := ids(listIssues(noValueQuery("__none__")))
+	// The shared workspace holds far more than one page of issues without
+	// this property, and ListIssues caps a page at 100 rows, so walk the
+	// pages: these checks are about membership, not position.
+	listAllIssues := func(query string) []IssueResponse {
+		t.Helper()
+		var all []IssueResponse
+		for offset := 0; ; offset += 100 {
+			page := listIssues(query + fmt.Sprintf("&offset=%d", offset))
+			all = append(all, page...)
+			if len(page) < 100 {
+				return all
+			}
+		}
+	}
+	noneGot := ids(listAllIssues(noValueQuery("__none__")))
 	if _, present := noneGot[target]; present {
 		t.Fatalf("no-value filter included the issue with the property set")
 	}
@@ -604,7 +618,7 @@ func TestListIssuesPropertyFilterAndSort(t *testing.T) {
 	}
 
 	// OR within a definition: "true" plus "no value" covers set and unset.
-	both := ids(listIssues(noValueQuery("true", "__none__")))
+	both := ids(listAllIssues(noValueQuery("true", "__none__")))
 	if _, present := both[target]; !present {
 		t.Fatalf("OR no-value filter missed the set issue")
 	}

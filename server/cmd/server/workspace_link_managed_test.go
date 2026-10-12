@@ -56,8 +56,12 @@ func TestManagedLinkThroughRouter(t *testing.T) {
 
 	sourceRuntime := scan(`INSERT INTO agent_runtime (workspace_id, name, runtime_mode, provider, status, device_info, metadata, owner_id, last_seen_at)
 		VALUES ($1, 'src rt', 'cloud', 'integration_test_runtime', 'online', '', '{}'::jsonb, $2, now()) RETURNING id::text`, source, testUserID)
-	sourceAgent := scan(`INSERT INTO agent (workspace_id, name, description, runtime_mode, runtime_config, runtime_id, visibility, max_concurrent_tasks, owner_id)
-		VALUES ($1, 'Source Agent', '', 'cloud', '{}'::jsonb, $2, 'workspace', 1, $3) RETURNING id::text`, source, sourceRuntime, testUserID)
+	// Private on both axes. The whole backend suite shares one database, and a
+	// visibility='workspace' agent relying on the permission_mode default has
+	// the shape a legacy-backfill replay elsewhere may rewrite to public_to
+	// mid-run, which would open the 403 probe below from outside this test.
+	sourceAgent := scan(`INSERT INTO agent (workspace_id, name, description, runtime_mode, runtime_config, runtime_id, visibility, permission_mode, max_concurrent_tasks, owner_id)
+		VALUES ($1, 'Source Agent', '', 'cloud', '{}'::jsonb, $2, 'private', 'private', 1, $3) RETURNING id::text`, source, sourceRuntime, testUserID)
 
 	// The viewer-side run: the runtime belongs to testUser, the run was
 	// started by originator.

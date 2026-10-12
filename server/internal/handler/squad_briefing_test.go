@@ -341,7 +341,10 @@ func TestBuildSquadLeaderBriefing_MentionsRoundTrip(t *testing.T) {
 	addHumanMember(t, squad.ID, userID, "")
 
 	out := buildSquadLeaderBriefing(ctx, testHandler.Queries, squad, true)
-	mentions := util.ParseMentions(out)
+	// The roster shows each mention inside a code span so the briefing itself
+	// never wakes anyone (the parser skips code, DENE-1792); the leader copies
+	// the text out of the span. Check the copied form round-trips.
+	mentions := util.ParseMentions(strings.ReplaceAll(out, "`", ""))
 
 	wantIDs := map[string]string{
 		leaderID: "agent",

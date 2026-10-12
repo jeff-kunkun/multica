@@ -671,9 +671,10 @@ func TestDeleteCommentCancelsTriggeredTasks(t *testing.T) {
 	})
 }
 
-// TestCommentThreadsQueueSeparatelyFromAssignment verifies that each root
-// comment queues independently of other threads and the assignment task.
-func TestCommentThreadsQueueSeparatelyFromAssignment(t *testing.T) {
+// TestDefaultCommentsMergeIntoAssignment verifies the DENE-1857 default: root
+// comments posted without a mode merge into the issue's existing queued work
+// instead of opening one task per thread.
+func TestDefaultCommentsMergeIntoAssignment(t *testing.T) {
 	agentID := getAgentID(t)
 	issueID := createIssueAssignedToAgent(t, "Coalescing test", agentID)
 	t.Cleanup(func() {
@@ -682,9 +683,47 @@ func TestCommentThreadsQueueSeparatelyFromAssignment(t *testing.T) {
 		resp.Body.Close()
 	})
 
-	// Distinct root comments must not merge with each other or the assignment.
 	first := postComment(t, issueID, "First comment", nil)
 	second := postComment(t, issueID, "Second comment", nil)
+
+	if n := countPendingTasks(t, issueID); n != 1 {
+		t.Fatalf("expected both default comments to merge into the assignment task, got %d", n)
+	}
+	var trigger string
+	var coalesced []string
+	if err := testPool.QueryRow(context.Background(), `SELECT trigger_comment_id::text, coalesced_comment_ids::text[] FROM agent_task_queue WHERE issue_id=$1 AND agent_id=$2 AND status IN ('queued','dispatched')`, issueID, agentID).Scan(&trigger, &coalesced); err != nil {
+		t.Fatal(err)
+	}
+	if trigger != second || len(coalesced) != 1 || coalesced[0] != first {
+		t.Errorf("merged task: trigger=%s coalesced=%v, want trigger=%s coalesced=[%s]", trigger, coalesced, second, first)
+	}
+}
+
+// TestExplicitQueueCommentsStaySeparateFromAssignment keeps the per-thread
+// guarantee for the explicit mode that still promises it: each root comment
+// posted with mode=queue owns its own task next to the assignment task.
+func TestExplicitQueueCommentsStaySeparateFromAssignment(t *testing.T) {
+	agentID := getAgentID(t)
+	issueID := createIssueAssignedToAgent(t, "Explicit queue test", agentID)
+	t.Cleanup(func() {
+		clearTasks(t, issueID)
+		resp := authRequest(t, "DELETE", "/api/issues/"+issueID, nil)
+		resp.Body.Close()
+	})
+	post := func(content string) string {
+		t.Helper()
+		resp := authRequest(t, "POST", "/api/issues/"+issueID+"/comments", map[string]any{"content": content, "type": "comment", "mode": "queue"})
+		if resp.StatusCode != 201 {
+			b, _ := io.ReadAll(resp.Body)
+			resp.Body.Close()
+			t.Fatalf("post queue comment: expected 201, got %d: %s", resp.StatusCode, b)
+		}
+		var comment map[string]any
+		readJSON(t, resp, &comment)
+		return comment["id"].(string)
+	}
+	first := post("First comment")
+	second := post("Second comment")
 
 	if n := countPendingTasks(t, issueID); n != 3 {
 		t.Fatalf("expected assignment plus two independent thread tasks, got %d", n)

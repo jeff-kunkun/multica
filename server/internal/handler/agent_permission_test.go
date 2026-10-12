@@ -114,15 +114,18 @@ func TestMigrationBackfill_VisibilityToPermission(t *testing.T) {
 	}
 	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM agent WHERE id = $1`, agentID) })
 
-	// Exact backfill statements from migration 130 (idempotent).
-	if _, err := testPool.Exec(ctx, `UPDATE agent SET permission_mode = 'public_to' WHERE visibility = 'workspace'`); err != nil {
+	// Backfill statements from migration 130 (idempotent), scoped to this
+	// test's own row: the suite shares one database across packages, and the
+	// unscoped form rewrote other tests' visibility='workspace' agents to
+	// public_to while they were running.
+	if _, err := testPool.Exec(ctx, `UPDATE agent SET permission_mode = 'public_to' WHERE visibility = 'workspace' AND id = $1`, agentID); err != nil {
 		t.Fatalf("backfill update: %v", err)
 	}
 	if _, err := testPool.Exec(ctx, `
 		INSERT INTO agent_invocation_target (agent_id, target_type, target_id, created_by)
-		SELECT id, 'workspace', workspace_id, NULL FROM agent WHERE visibility = 'workspace'
+		SELECT id, 'workspace', workspace_id, NULL FROM agent WHERE visibility = 'workspace' AND id = $1
 		ON CONFLICT (agent_id, target_type, target_id) DO NOTHING
-	`); err != nil {
+	`, agentID); err != nil {
 		t.Fatalf("backfill insert targets: %v", err)
 	}
 

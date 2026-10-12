@@ -216,7 +216,20 @@ func (h *Handler) chatNamingSource(ctx context.Context, session db.ChatSession) 
 // never matched a multi-line or long first message, so rules never ran).
 func openingStillTitles(title, opening string) bool {
 	title = strings.TrimSpace(title)
-	return title == "" || title == strings.TrimSpace(opening) || title == chattitle.Derive(opening)
+	if title == "" || title == strings.TrimSpace(opening) || title == chattitle.Derive(opening) {
+		return true
+	}
+	// Chats titled before Derive learned to skip embed-only lines (and by
+	// clients still running that rule) carry the first raw line as their
+	// placeholder, e.g. "image.png" for a screenshot pasted ahead of the
+	// question. That is still an untouched placeholder, not a human title.
+	for _, line := range strings.Split(opening, "\n") {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		return title == chattitle.Derive(line)
+	}
+	return false
 }
 
 // openingTitleSource drops lines that are only an image/file embed so a
