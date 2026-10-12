@@ -339,3 +339,53 @@ func TestEscalateTakesAReasonAndNothingElse(t *testing.T) {
 		})
 	}
 }
+
+// DENE-1834 part 5: a sub-issue an agent creates under the ticket its own run
+// is working, naming itself, is kept and labelled 自领; the same create under
+// any other parent is still the agent's own pick and goes to routing.
+func TestSelfClaimedSubIssueUnderOwnParentIsKept(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	enableDraftSuggestRouting(t, tierJudge{tier: "medium", confidence: 0.95})
+	f := originRun(t, "selfclaim", "请帮我看看这个", "member", testUserID, testUserID)
+	var home string
+	dbfx.QueryRow(t, `SELECT issue_id::text FROM agent_task_queue WHERE id = $1`, f.task).Scan(&home)
+
+	create := func(parent string) map[string]any {
+		body := map[string]any{
+			"title": "agent splits its own work", "status": "todo",
+			"assignee_type": "agent", "assignee_id": f.caller, "route_sync": true,
+		}
+		if parent != "" {
+			body["parent_issue_id"] = parent
+		}
+		req := newRequest(http.MethodPost, "/api/issues?workspace_id="+testWorkspaceID, body)
+		req.Header.Set("X-Agent-ID", f.caller)
+		req.Header.Set("X-Task-ID", f.task)
+		resp := testutil.Call(t, testHandler.CreateIssue, req).Want(http.StatusCreated).Map()
+		id, _ := resp["id"].(string)
+		t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1`, id) })
+		return resp
+	}
+
+	kept := create(home)
+	if kept["assignee_id"] != f.caller || kept["assignee_ignored"] == true {
+		t.Fatalf("self-claim under own parent was not kept: %v", kept)
+	}
+	if _, source, _, _ := originOf(t, kept["id"].(string)); source == nil || *source != "self_claim" {
+		t.Fatalf("assignee_source = %v, want self_claim", source)
+	}
+	if rr := receiptOf(t, kept); rr["source"] != "自领" || rr["routed"] != false {
+		t.Fatalf("receipt = %v, want 自领", rr)
+	}
+
+	other := originIssue(t, "someone else's parent selfclaim")
+	elsewhere := create(other)
+	if elsewhere["assignee_ignored"] != true {
+		t.Fatalf("self-pick under another parent must still go to routing: %v", elsewhere)
+	}
+	if _, source, _, _ := originOf(t, elsewhere["id"].(string)); source == nil || *source == "self_claim" {
+		t.Fatalf("assignee_source = %v, must not be self_claim", source)
+	}
+}

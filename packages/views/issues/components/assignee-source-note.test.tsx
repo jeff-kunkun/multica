@@ -55,6 +55,11 @@ describe("AssigneeSourceNote", () => {
     cleanup();
     renderWithI18n(<AssigneeSourceNote issue={issue({ assignee_source: "agent" })} />);
     expect(screen.getByTestId("assignee-source-note").dataset.source).toBe("agent");
+    cleanup();
+    renderWithI18n(<AssigneeSourceNote issue={issue({ assignee_source: "self_claim" })} />);
+    expect(screen.getByTestId("assignee-source-note").textContent).toBe(
+      "Kept by the agent working the parent",
+    );
   });
 
   it("stays silent without a record or without an executor", () => {

@@ -25,6 +25,9 @@ const (
 	// PickReasonLoad — the ladder's seat was busy, and a seat of the same
 	// rung and direction with fewer runs took it (DENE-1203).
 	PickReasonLoad PickReason = "负载"
+	// PickReasonSelfClaim — the agent working the parent ticket split off
+	// this sub-issue and kept it for itself (DENE-1834 part 5).
+	PickReasonSelfClaim PickReason = "自领"
 )
 
 // PickReasonLine is the comment's first line. Empty reason means no executor
@@ -48,6 +51,8 @@ func heldPickReason(source string) PickReason {
 		return PickReasonQuote
 	case SourceRouter:
 		return PickReasonTier
+	case SourceSelfClaim:
+		return PickReasonSelfClaim
 	}
 	return PickReasonHuman
 }

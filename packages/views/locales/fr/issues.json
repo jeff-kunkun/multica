@@ -1615,6 +1615,7 @@
     "automation": "Défini par une automatisation",
     "agent": "Choix propre d'un agent",
     "router": "Choisi par le routage",
+    "self_claim": "Gardé par l’agent qui traite le ticket parent",
     "quote_text": "« {{quote}} »"
   },
   "close_protocol": {

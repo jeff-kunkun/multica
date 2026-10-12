@@ -3781,7 +3781,7 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 	assigneeIgnored := false
 	assigneeIgnoredReason := ""
 	if assigneeType.Valid {
-		ruling = h.rulePick(r, workspaceID, creatorType, actualCreatorID, assigneeType, assigneeID, deref(req.AssigneeQuote), status, nil, sceneRef{Domain: createDomain, Project: predictProject})
+		ruling = h.rulePick(r, workspaceID, creatorType, actualCreatorID, assigneeType, assigneeID, deref(req.AssigneeQuote), status, nil, sceneRef{Domain: createDomain, Project: predictProject}, parentIssueID)
 		if ruling.Apply && ruling.Seat.Valid {
 			assigneeID = ruling.Seat
 		}
@@ -3969,6 +3969,9 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 		// the pass is not made twice.
 		if assigneeType.Valid {
 			rr := h.receiptForHeldSlot(r.Context(), workspaceID, assigneeType, assigneeID)
+			if ruling.Source == routing.SourceSelfClaim {
+				rr.Source, rr.Reason = string(routing.PickReasonSelfClaim), "做父票的智能体拆出这张子票，自己接着做"
+			}
 			resp.Routing = &rr
 			h.RouteIssueAsync(r, workspaceID, uuidToString(issue.ID))
 		} else {
@@ -4662,7 +4665,7 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 				resulting = params.Status.String
 			}
 			ruling := h.rulePick(r, workspaceID, actorType, actorID, params.AssigneeType, params.AssigneeID, deref(req.AssigneeQuote), resulting,
-				&heldExecutor{Type: prevIssue.AssigneeType, ID: prevIssue.AssigneeID}, sceneRef{Domain: targetDomain, Project: targetProject})
+				&heldExecutor{Type: prevIssue.AssigneeType, ID: prevIssue.AssigneeID}, sceneRef{Domain: targetDomain, Project: targetProject}, pgtype.UUID{})
 			if ruling.Apply {
 				if ruling.Seat.Valid {
 					params.AssigneeID = ruling.Seat
@@ -5728,7 +5731,7 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 					resulting = params.Status.String
 				}
 				ruling := h.rulePick(r, workspaceID, pickActorType, pickActorID, params.AssigneeType, params.AssigneeID, deref(req.Updates.AssigneeQuote), resulting,
-					&heldExecutor{Type: prevIssue.AssigneeType, ID: prevIssue.AssigneeID}, sceneRef{Domain: batchDomain, Project: batchTargetProject})
+					&heldExecutor{Type: prevIssue.AssigneeType, ID: prevIssue.AssigneeID}, sceneRef{Domain: batchDomain, Project: batchTargetProject}, pgtype.UUID{})
 				if ruling.Apply {
 					if ruling.Seat.Valid {
 						params.AssigneeID = ruling.Seat

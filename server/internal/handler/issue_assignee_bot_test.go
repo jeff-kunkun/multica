@@ -15,11 +15,11 @@ func TestBotAssignmentIsTheKeyHoldersHand(t *testing.T) {
 	h := &Handler{}
 	r := httptest.NewRequest("POST", "/", nil)
 	r = r.WithContext(botsource.WithContext(context.Background(), botsource.Source{ID: pgtype.UUID{Bytes: [16]byte{1}, Valid: true}, Name: "Bot"}))
-	ruling := h.rulePick(r, "", "member", testUserID, pgtype.Text{String: "agent", Valid: true}, pgtype.UUID{Bytes: [16]byte{2}, Valid: true}, "", "todo", nil, sceneRef{})
+	ruling := h.rulePick(r, "", "member", testUserID, pgtype.Text{String: "agent", Valid: true}, pgtype.UUID{Bytes: [16]byte{2}, Valid: true}, "", "todo", nil, sceneRef{}, pgtype.UUID{})
 	if !ruling.Apply || ruling.Source != routing.SourceHuman || !ruling.SourceUser.Valid {
 		t.Fatalf("bot key's pick was not kept as the member's hand: %+v", ruling)
 	}
-	ordinary := h.rulePick(httptest.NewRequest("POST", "/", nil), "", "member", "", pgtype.Text{}, pgtype.UUID{}, "", "todo", nil, sceneRef{})
+	ordinary := h.rulePick(httptest.NewRequest("POST", "/", nil), "", "member", "", pgtype.Text{}, pgtype.UUID{}, "", "todo", nil, sceneRef{}, pgtype.UUID{})
 	if ordinary.Source != routing.SourceHuman {
 		t.Fatalf("ordinary member changed: %+v", ordinary)
 	}
