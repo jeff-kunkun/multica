@@ -238,7 +238,7 @@ func (r *Router) routeStale(ctx context.Context, workspaceID string, settings Se
 	if !called {
 		// No model is switched on. Waking is the default every weak answer
 		// falls to anyway, and it writes no status.
-		return r.wakeStale(ctx, workspaceID, issue, StaleDecision{Action: StaleWake, Reason: "没有启用分析或判断模型，直接叫醒验收席"}, quiet)
+		return r.wakeStale(ctx, workspaceID, settings, issue, StaleDecision{Action: StaleWake, Reason: "没有启用分析或判断模型，直接叫醒验收席"}, quiet)
 	}
 	decision, err := r.Judge.Stale(ctx, target, r.staleState(issue, quiet, remarks))
 	if err != nil {
@@ -257,7 +257,7 @@ func (r *Router) routeStale(ctx context.Context, workspaceID string, settings Se
 		decision.Confidence >= settings.Threshold() {
 		return r.completeStale(ctx, workspaceID, issue, decision, settings.Threshold())
 	}
-	return r.wakeStale(ctx, workspaceID, issue, decision, quiet)
+	return r.wakeStale(ctx, workspaceID, settings, issue, decision, quiet)
 }
 
 // completeStale aligns the status to an acceptance the ticket already carries.
@@ -289,7 +289,7 @@ func (r *Router) completeStale(ctx context.Context, workspaceID string, issue Is
 // wakes nobody — so that half is a comment plus an @, and the one-comment-per
 // -kind index makes it happen exactly once per ticket, which is the whole
 // point of the @-once rule.
-func (r *Router) wakeStale(ctx context.Context, workspaceID string, issue Issue, d StaleDecision, quiet time.Duration) (Outcome, error) {
+func (r *Router) wakeStale(ctx context.Context, workspaceID string, settings Settings, issue Issue, d StaleDecision, quiet time.Duration) (Outcome, error) {
 	out := Outcome{State: StateEnabled, Action: ActionWoken}
 
 	if issue.Reviewer.Kind == ReviewerMember {
@@ -318,6 +318,9 @@ func (r *Router) wakeStale(ctx context.Context, workspaceID string, issue Issue,
 	seat, ok := agentByID(roster, issue.Reviewer.ID)
 	if !ok {
 		return Outcome{State: StateEnabled, Action: ActionNoop, Reason: "reviewer seat not in roster"}, nil
+	}
+	if !ProjectAdmits(issue.ProjectSeats, seat.ID) {
+		return r.handOffToSubstitute(ctx, workspaceID, settings, issue, roster, seat, out, coverOffList)
 	}
 	if err := r.Store.Handoff(ctx, workspaceID, issue.ID, "agent", seat.ID); err != nil {
 		return out, err

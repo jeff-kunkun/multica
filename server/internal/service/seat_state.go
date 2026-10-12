@@ -66,3 +66,34 @@ func LoadProjectExecutorSeats(ctx context.Context, q *db.Queries, workspaceID, p
 	}
 	return ProjectExecutorSeats(p), nil
 }
+
+// LoadProjectsExecutorSeats is the executor list for work that belongs to
+// several projects at once (a chat opened in more than one): a seat must be
+// on every non-empty list. restricted reports that at least one project has
+// a list; restricted with no seats means no agent satisfies them all, and
+// the caller must decline rather than read the empty list as "no limit".
+func LoadProjectsExecutorSeats(ctx context.Context, q *db.Queries, workspaceID pgtype.UUID, projectIDs []pgtype.UUID) ([]string, bool, error) {
+	var out []string
+	restricted := false
+	for _, projectID := range projectIDs {
+		seats, err := LoadProjectExecutorSeats(ctx, q, workspaceID, projectID)
+		if err != nil {
+			return nil, false, err
+		}
+		if len(seats) == 0 {
+			continue
+		}
+		if !restricted {
+			restricted, out = true, seats
+			continue
+		}
+		kept := out[:0:0]
+		for _, id := range out {
+			if routing.ProjectAdmits(seats, id) {
+				kept = append(kept, id)
+			}
+		}
+		out = kept
+	}
+	return out, restricted, nil
+}

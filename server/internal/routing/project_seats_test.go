@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 )
 
 // DENE-1959: a project's executor allowlist bounds every automatic pick for
@@ -244,5 +245,99 @@ func TestSubstituteSeatStaysInsideProjectSeats(t *testing.T) {
 	roster = ForProject(roster, "p-ipa", []string{"gohan"})
 	if got, _, ok := SubstituteSeat(DefaultLadder, Seat{ID: "gohan", Name: "孙悟饭", TierKey: "strongest"}, roster, nil, GenericScene); ok {
 		t.Fatalf("substitute = %+v, want none: the only listed seat is the one that failed", got)
+	}
+}
+
+// offListReviewStore is a ticket awaiting acceptance whose reviewer seat was
+// picked before the project had an allowlist and is not on it now.
+func offListReviewStore(seats []string) *fakeStore {
+	store := allowlistStore()
+	store.issue.ProjectSeats = seats
+	store.issue.Status = "in_review"
+	store.issue.AssigneeType = "agent"
+	store.issue.AssigneeID = "a-piccolo-g"
+	store.issue.Reviewer = ReviewerRef{Kind: ReviewerAgent, ID: "a-goku-g", Name: "孙悟空游戏"}
+	store.issue.LastActivityAt = time.Now().Add(-7 * 24 * time.Hour)
+	store.workspaces = []string{"ws"}
+	store.staleIDs = []string{"issue-1"}
+	return store
+}
+
+func allComments(store *fakeStore) string {
+	var parts []string
+	for _, body := range store.comments {
+		parts = append(parts, body...)
+	}
+	return strings.Join(parts, "\n")
+}
+
+func assertOffListReviewerNotWoken(t *testing.T, what string, store *fakeStore) {
+	t.Helper()
+	for _, h := range store.handoffs {
+		if h == "agent:a-goku-g" {
+			t.Fatalf("%s woke the unlisted reviewer: %v", what, store.handoffs)
+		}
+	}
+}
+
+// Every automatic acceptance wake (handoff, failed-review retry, stale wake)
+// checks the allowlist as it stands now: a reviewer picked before the list
+// existed is not woken, a listed seat that did not work on the ticket covers
+// it, and the cover does not hand the review back later.
+func TestOffListReviewerIsCoveredInsideProjectSeats(t *testing.T) {
+	ctx := context.Background()
+	wakes := map[string]func(*Router) error{
+		"acceptance handoff": func(r *Router) error { _, err := r.Route(ctx, "ws", "issue-1"); return err },
+		"failed review":      func(r *Router) error { _, err := r.CoverFailedReview(ctx, "ws", "issue-1", false); return err },
+		"forced failed review": func(r *Router) error {
+			_, err := r.CoverFailedReview(ctx, "ws", "issue-1", true)
+			return err
+		},
+		"stale wake": func(r *Router) error { _, err := r.RouteStale(ctx, "ws", "issue-1"); return err },
+	}
+	for what, wake := range wakes {
+		t.Run(what, func(t *testing.T) {
+			store := offListReviewStore(allowlist)
+			judge := &fakeJudge{verdict: confidentVerdict(), stale: StaleDecision{Action: StaleWake, Confidence: 0.95}}
+			if err := wake(newRouter(store, judge)); err != nil {
+				t.Fatalf("wake: %v", err)
+			}
+			assertOffListReviewerNotWoken(t, what, store)
+			if len(store.handoffs) != 1 || store.handoffs[0] != "agent:a-vegeta-g" {
+				t.Fatalf("handoffs = %v, want the listed 贝吉塔游戏 (the executor 比克游戏 cannot review itself)", store.handoffs)
+			}
+			if len(store.relays) != 1 || store.relays[0].Designated {
+				t.Fatalf("relays = %+v, want one cover that never hands the review back", store.relays)
+			}
+			if !strings.Contains(allComments(store), "不在本项目的执行人名单里") {
+				t.Fatalf("no note names the allowlist:\n%s", allComments(store))
+			}
+		})
+
+		t.Run(what+", nobody listed can review", func(t *testing.T) {
+			store := offListReviewStore([]string{"a-piccolo-g"})
+			judge := &fakeJudge{verdict: confidentVerdict(), stale: StaleDecision{Action: StaleWake, Confidence: 0.95}}
+			if err := wake(newRouter(store, judge)); err != nil {
+				t.Fatalf("wake: %v", err)
+			}
+			if len(store.handoffs) != 0 {
+				t.Fatalf("handoffs = %v, want nobody woken outside the list", store.handoffs)
+			}
+			if !strings.Contains(allComments(store), "名单外席位不兜底") {
+				t.Fatalf("the stuck note does not name the allowlist:\n%s", allComments(store))
+			}
+		})
+	}
+}
+
+// A listed reviewer is still woken as before.
+func TestListedReviewerIsStillWoken(t *testing.T) {
+	store := offListReviewStore(allowlist)
+	store.issue.Reviewer = ReviewerRef{Kind: ReviewerAgent, ID: "a-vegeta-g", Name: "贝吉塔游戏"}
+	if _, err := newRouter(store, &fakeJudge{verdict: confidentVerdict()}).Route(context.Background(), "ws", "issue-1"); err != nil {
+		t.Fatalf("route: %v", err)
+	}
+	if len(store.handoffs) != 1 || store.handoffs[0] != "agent:a-vegeta-g" || len(store.relays) != 0 {
+		t.Fatalf("handoffs = %v relays = %+v, want the listed reviewer woken directly", store.handoffs, store.relays)
 	}
 }

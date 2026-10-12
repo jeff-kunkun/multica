@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/multica-ai/multica/server/internal/util"
 	"github.com/multica-ai/multica/server/pkg/taskfailure"
 )
 
@@ -57,4 +58,44 @@ func TestSafetyRelayStaysInsideProjectExecutors(t *testing.T) {
 		t.Fatal("the listed seat of another house was not used")
 	}
 	assertAssignee(t, w, w.mediumID)
+}
+
+// A designated reviewer that comes back on does not take the review back
+// from its cover once the project's allowlist no longer names it; while the
+// list still names it, the review goes back as before.
+func TestReclaimDesignatedReviewRespectsProjectExecutors(t *testing.T) {
+	for name, delisted := range map[string]bool{"still listed": false, "delisted": true} {
+		t.Run(name, func(t *testing.T) {
+			w := seedQuotaWorld(t, string(taskfailure.ReasonAgentProviderQuotaLimit), "Weekly usage limit reached", true)
+			ctx := context.Background()
+			if delisted {
+				putIssueInAllowlistedProject(t, w, w.sameID)
+			} else {
+				putIssueInAllowlistedProject(t, w, w.failedID, w.sameID)
+			}
+			if _, err := w.pool.Exec(ctx, `
+				UPDATE issue SET status = 'in_review', reviewer_type = 'agent', reviewer_id = $2::uuid,
+					metadata = jsonb_build_object('reviewer_relay', jsonb_build_object(
+						'original_id', $3::text, 'replacement_id', $4::text, 'designated', true,
+						'covered_at', to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')))
+				WHERE id = $1`, w.issueID, w.sameID, w.failedID, w.sameID); err != nil {
+				t.Fatalf("seed relay: %v", err)
+			}
+			failedUUID := util.MustParseUUID(w.failedID)
+			if err := w.service().ReclaimDesignatedReviews(ctx, failedUUID); err != nil {
+				t.Fatalf("reclaim: %v", err)
+			}
+			var reviewer string
+			if err := w.pool.QueryRow(ctx, `SELECT reviewer_id::text FROM issue WHERE id = $1`, w.issueID).Scan(&reviewer); err != nil {
+				t.Fatal(err)
+			}
+			want := w.failedID
+			if delisted {
+				want = w.sameID
+			}
+			if reviewer != want {
+				t.Fatalf("reviewer = %s, want %s", reviewer, want)
+			}
+		})
+	}
 }

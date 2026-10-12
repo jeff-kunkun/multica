@@ -428,6 +428,14 @@ reverse of a seat's `dispatch_projects`; both apply.
   escalate, 兜底, quota relay, safety relay, seat relay, advisor picks.
 - **Not limited:** @mention, assignment by a person, delegation to a named
   seat. Seats already on an issue are not replaced when the list changes.
+- **An existing 验收席 off the list** is not woken by automatic acceptance
+  (handoff, failed-review retry, stale wake): a listed seat that did not work
+  on the issue covers it, and the review is not handed back later; with none,
+  the issue waits in 待验收 for a person to name a reviewer.
+- **A chat in several projects** is bounded by every non-empty list (their
+  intersection, whatever the order of `project_ids`); lists with no agent in
+  common refuse the chat with 409 `no_agent_available` — name one with
+  `agent_id`, or open it in one project.
 - **Nobody on the list can take it** (disabled, offline, out of quota,
   archived): routing stops and the comment ends with
   「本项目限定执行人名单，名单外席位不兜底」; a chat returns the decline

@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/botsource"
+	"github.com/multica-ai/multica/server/internal/routing"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/dbid"
@@ -68,6 +69,15 @@ func (s *TaskService) reclaimOneReview(ctx context.Context, agent db.Agent, issu
 		return nil
 	}
 	if !issue.ReviewerID.Valid || util.UUIDToString(issue.ReviewerID) != meta.ReplacementID {
+		return nil
+	}
+	// A seat the project's executor list no longer names does not get the
+	// review back (DENE-1959); the cover keeps it.
+	seats, err := LoadProjectExecutorSeats(ctx, s.Queries, issue.WorkspaceID, issue.ProjectID)
+	if err != nil {
+		return err
+	}
+	if !routing.ProjectAdmits(seats, util.UUIDToString(agent.ID)) {
 		return nil
 	}
 	since, err := time.Parse(time.RFC3339Nano, meta.CoveredAt)

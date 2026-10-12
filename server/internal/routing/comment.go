@@ -287,6 +287,20 @@ func disabledReviewerStuck(from string) string {
 	return fmt.Sprintf("验收席 %s 已停用，不接新活。同档没有另一家供应商，降一档也没有能接的席位。这张票停在待验收，需要人指定验收席。", from)
 }
 
+func offListReviewerNote(from, to string) string {
+	if from == "" {
+		from = "原验收席"
+	}
+	return fmt.Sprintf("验收席 %s 不在本项目的执行人名单里，这次不叫醒它，改由名单内的 %s 验收。", from, to)
+}
+
+func offListReviewerStuck(from string) string {
+	if from == "" {
+		from = "原验收席"
+	}
+	return fmt.Sprintf("验收席 %s 不在本项目的执行人名单里，名单内也没有能接验收的席位。这张票停在待验收，需要人指定验收席（名单外席位不兜底）。", from)
+}
+
 func failedReviewerNote(from, to string, steppedDown bool) string {
 	if from == "" {
 		from = "原验收席"
