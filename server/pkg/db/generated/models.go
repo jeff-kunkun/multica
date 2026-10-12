@@ -476,6 +476,8 @@ type BotWake struct {
 	UpdatedAt           pgtype.Timestamptz `json:"updated_at"`
 	WakeFrom            []byte             `json:"wake_from"`
 	InheritOwnerFollows bool               `json:"inherit_owner_follows"`
+	LastProcessedAt     pgtype.Timestamptz `json:"last_processed_at"`
+	LastError           string             `json:"last_error"`
 }
 
 type BotWakeAttempt struct {
@@ -510,36 +512,37 @@ type BotWakeChain struct {
 }
 
 type BotWakeEvent struct {
-	Sequence        int64              `json:"sequence"`
-	EventID         pgtype.UUID        `json:"event_id"`
-	BotID           pgtype.UUID        `json:"bot_id"`
-	WorkspaceID     pgtype.UUID        `json:"workspace_id"`
-	EventType       string             `json:"event_type"`
-	IssueID         pgtype.UUID        `json:"issue_id"`
-	ChatSessionID   pgtype.UUID        `json:"chat_session_id"`
-	SourceID        pgtype.UUID        `json:"source_id"`
-	AuthorType      string             `json:"author_type"`
-	AuthorID        pgtype.UUID        `json:"author_id"`
-	Status          string             `json:"status"`
-	Reason          string             `json:"reason"`
-	Attempts        int32              `json:"attempts"`
-	NextAttemptAt   pgtype.Timestamptz `json:"next_attempt_at"`
-	SentAt          pgtype.Timestamptz `json:"sent_at"`
-	ReceivedAt      pgtype.Timestamptz `json:"received_at"`
-	CreatedAt       pgtype.Timestamptz `json:"created_at"`
-	WokenAt         pgtype.Timestamptz `json:"woken_at"`
-	ResultAt        pgtype.Timestamptz `json:"result_at"`
-	ResultUrl       pgtype.Text        `json:"result_url"`
-	AcknowledgedAt  pgtype.Timestamptz `json:"acknowledged_at"`
-	ViaBotID        pgtype.UUID        `json:"via_bot_id"`
-	ViaBotName      pgtype.Text        `json:"via_bot_name"`
-	SourceTaskID    pgtype.UUID        `json:"source_task_id"`
-	RootID          pgtype.UUID        `json:"root_id"`
-	Hop             int32              `json:"hop"`
-	InheritedOwner  bool               `json:"inherited_owner"`
-	WakeGeneration  int64              `json:"wake_generation"`
-	DeliveryID      pgtype.UUID        `json:"delivery_id"`
-	RuntimeOutageID pgtype.UUID        `json:"runtime_outage_id"`
+	Sequence           int64              `json:"sequence"`
+	EventID            pgtype.UUID        `json:"event_id"`
+	BotID              pgtype.UUID        `json:"bot_id"`
+	WorkspaceID        pgtype.UUID        `json:"workspace_id"`
+	EventType          string             `json:"event_type"`
+	IssueID            pgtype.UUID        `json:"issue_id"`
+	ChatSessionID      pgtype.UUID        `json:"chat_session_id"`
+	SourceID           pgtype.UUID        `json:"source_id"`
+	AuthorType         string             `json:"author_type"`
+	AuthorID           pgtype.UUID        `json:"author_id"`
+	Status             string             `json:"status"`
+	Reason             string             `json:"reason"`
+	Attempts           int32              `json:"attempts"`
+	NextAttemptAt      pgtype.Timestamptz `json:"next_attempt_at"`
+	SentAt             pgtype.Timestamptz `json:"sent_at"`
+	ReceivedAt         pgtype.Timestamptz `json:"received_at"`
+	CreatedAt          pgtype.Timestamptz `json:"created_at"`
+	WokenAt            pgtype.Timestamptz `json:"woken_at"`
+	ResultAt           pgtype.Timestamptz `json:"result_at"`
+	ResultUrl          pgtype.Text        `json:"result_url"`
+	AcknowledgedAt     pgtype.Timestamptz `json:"acknowledged_at"`
+	ViaBotID           pgtype.UUID        `json:"via_bot_id"`
+	ViaBotName         pgtype.Text        `json:"via_bot_name"`
+	SourceTaskID       pgtype.UUID        `json:"source_task_id"`
+	RootID             pgtype.UUID        `json:"root_id"`
+	Hop                int32              `json:"hop"`
+	InheritedOwner     bool               `json:"inherited_owner"`
+	WakeGeneration     int64              `json:"wake_generation"`
+	DeliveryID         pgtype.UUID        `json:"delivery_id"`
+	RuntimeOutageID    pgtype.UUID        `json:"runtime_outage_id"`
+	ProcessingAttempts int32              `json:"processing_attempts"`
 }
 
 type BotWakeWatch struct {

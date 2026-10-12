@@ -132,6 +132,31 @@ export function BotWakePage({ bot }: { bot: ExternalBot }) {
   return (
     <>
       <WebhookSection bot={bot} settings={wake.data} />
+      {wake.data.worker ? (
+        <SettingsSection title={t(($) => $.bots.wake.worker_title)}>
+          <SettingsCard>
+            <SettingsRow
+              label={wake.data.worker.blocked
+                ? t(($) => $.bots.wake.worker_blocked)
+                : wake.data.worker.head_sequence > 0
+                  ? t(($) => $.bots.wake.worker_waiting)
+                  : t(($) => $.bots.wake.worker_clear)}
+              description={wake.data.worker.last_processed_at
+                ? t(($) => $.bots.wake.worker_last_processed, {
+                    time: new Date(wake.data.worker.last_processed_at).toLocaleString(),
+                  })
+                : t(($) => $.bots.wake.worker_not_processed)}
+            >
+              <Button className="min-h-11" size="sm" variant="outline" onClick={() => void wake.refetch()}>
+                {t(($) => $.bots.wake.worker_refresh)}
+              </Button>
+            </SettingsRow>
+            {wake.data.worker.last_error ? (
+              <SettingsRow label={t(($) => $.bots.wake.worker_error)}>{null}</SettingsRow>
+            ) : null}
+          </SettingsCard>
+        </SettingsSection>
+      ) : null}
       {/* A cache snapshot from before the server knew wake_from can paint
           first; the section waits for the refetch instead of guessing. */}
       {wake.data.wake_from ? <WakeFromSection bot={bot} settings={wake.data} /> : null}

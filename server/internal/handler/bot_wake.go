@@ -32,9 +32,18 @@ type BotWakeFromRule struct {
 }
 type BotWakeFrom map[string]BotWakeFromRule
 
+type BotWakeWorkerHealth struct {
+	LastProcessedAt *time.Time `json:"last_processed_at"`
+	LastError       string     `json:"last_error"`
+	HeadSequence    int64      `json:"head_sequence"`
+	StuckSeconds    int64      `json:"stuck_seconds"`
+	Blocked         bool       `json:"blocked"`
+}
+
 type BotWakeResponse struct {
-	InheritOwnerFollows bool        `json:"inherit_owner_follows"`
-	WakeFrom            BotWakeFrom `json:"wake_from"`
+	Worker              BotWakeWorkerHealth `json:"worker"`
+	InheritOwnerFollows bool                `json:"inherit_owner_follows"`
+	WakeFrom            BotWakeFrom         `json:"wake_from"`
 
 	WebhookConfigured bool          `json:"webhook_configured"`
 	Events            []string      `json:"events"`
@@ -205,7 +214,16 @@ func (h *Handler) writeWakeSettings(w http.ResponseWriter, r *http.Request, c db
 		writeError(w, 500, "failed to load deferred events")
 		return
 	}
+	health, err := h.Queries.GetBotWakeQueueHealth(r.Context(), bot.ID)
+	if err != nil {
+		writeError(w, 500, "failed to load worker health")
+		return
+	}
 	response := wakeResponse(c)
+	response.Worker = BotWakeWorkerHealth{LastError: c.LastError, HeadSequence: health.HeadSequence, StuckSeconds: health.StuckSeconds, Blocked: health.StuckSeconds > 300}
+	if c.LastProcessedAt.Valid {
+		response.Worker.LastProcessedAt = &c.LastProcessedAt.Time
+	}
 	for _, e := range limited {
 		if h.wakeVisible(r.Context(), e, bot.UserID) && h.wakeVisible(r.Context(), e, parseUUID(requestUserID(r))) {
 			response.LimitedCount++
@@ -408,7 +426,7 @@ func (h *Handler) ListBotWakeEvents(w http.ResponseWriter, r *http.Request) {
 			}
 			runtimeDetails = runtimeOutageResponse(outage)
 		}
-		item := map[string]any{"runtime_outage": runtimeDetails, "runtime_outage_id": uuidToString(e.RuntimeOutageID), "delivery_id": uuidToString(e.DeliveryID), "event_id": uuidToString(e.EventID), "hop": e.Hop, "root_id": uuidToString(e.RootID), "source_task_id": uuidToString(e.SourceTaskID), "sequence": e.Sequence, "type": e.EventType, "issue_id": uuidToString(e.IssueID), "chat_session_id": uuidToString(e.ChatSessionID), "status": e.Status, "reason": e.Reason, "attempts": e.Attempts, "created_at": e.CreatedAt.Time, "sent_at": timestampToPtr(e.SentAt), "received_at": timestampToPtr(e.ReceivedAt), "woken_at": timestampToPtr(e.WokenAt), "result_at": timestampToPtr(e.ResultAt), "result_url": e.ResultUrl, "acknowledged_at": timestampToPtr(e.AcknowledgedAt)}
+		item := map[string]any{"runtime_outage": runtimeDetails, "runtime_outage_id": uuidToString(e.RuntimeOutageID), "delivery_id": uuidToString(e.DeliveryID), "event_id": uuidToString(e.EventID), "hop": e.Hop, "root_id": uuidToString(e.RootID), "source_task_id": uuidToString(e.SourceTaskID), "sequence": e.Sequence, "type": e.EventType, "issue_id": uuidToString(e.IssueID), "chat_session_id": uuidToString(e.ChatSessionID), "status": e.Status, "reason": e.Reason, "attempts": e.Attempts, "processing_attempts": e.ProcessingAttempts, "created_at": e.CreatedAt.Time, "sent_at": timestampToPtr(e.SentAt), "received_at": timestampToPtr(e.ReceivedAt), "woken_at": timestampToPtr(e.WokenAt), "result_at": timestampToPtr(e.ResultAt), "result_url": e.ResultUrl, "acknowledged_at": timestampToPtr(e.AcknowledgedAt)}
 		if includeContent {
 			payload, err := h.botWakePayloadFields(r.Context(), e)
 			if err != nil {
