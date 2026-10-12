@@ -168,7 +168,7 @@ direction took it).
 **Unified selection (DENE-1917).** Dispatch (`do`), consultation (`consult`)
 and acceptance (`review`) use one selector. Do gets its target tier and seat from
 one reasoning response using `policy_prompt`; reference rules do not decide it.
-Consult/review target one tier above the executor. The only reviewer exclusion
+Consult/review target one tier above weak/medium executors. Strong executors use another strong peer first (prefer another model family); only when no peer is available may they use an ample-quota strongest seat. The only reviewer exclusion
 is the executor itself: an advisor may review. First use the target tier in the
 same direction, then adjacent tiers (one above, then one below). Family
 preferences add weight; they never remove candidates. Strongest may only be an

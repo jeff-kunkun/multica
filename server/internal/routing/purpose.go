@@ -41,9 +41,15 @@ func (r *Router) routeTicket(l Ladder, settings Settings, in ticketRoute, purpos
 	}
 	scene := l.IssueScene(in.Ticket)
 	target := in.TargetTier
+	strongPeerFirst := false
+	holderSeries := ""
 	if purpose != PurposeDo {
 		holder := seatFromRoster(l, in.Roster, in.Ticket.AssigneeID)
 		rank := tierRank(l, holder.TierKey)
+		strongPeerFirst = rank == 1
+		if a, ok := agentByID(in.Roster, holder.ID); ok {
+			holderSeries = l.agentSeries(a)
+		}
 		if rank < 0 {
 			target = "medium"
 			in.ExplicitTier = false
@@ -79,14 +85,20 @@ func (r *Router) routeTicket(l Ladder, settings Settings, in ticketRoute, purpos
 		if at == 0 {
 			return at == rank && in.ExplicitTier && a.Usage == UsageAmple
 		}
-		if at != rank && (a.Usage == UsageTight || !l.fallbackSafe(seat, a)) {
+		if at != rank && !(strongPeerFirst && at == 1) && (a.Usage == UsageTight || !l.fallbackSafe(seat)) {
 			return false
 		}
 		return true
 	}
 	// The requested rung, then exactly one rung above, then one below. Never
 	// silently climb multiple rungs or use the strongest as a substitute.
-	for _, at := range []int{rank, rank - 1, rank + 1} {
+	order := []int{rank, rank - 1, rank + 1}
+	// Strong executors consult/review with a peer first. Only then may an
+	// explicitly targeted strongest seat with ample quota take this purpose.
+	if strongPeerFirst {
+		order = []int{1, 0}
+	}
+	for _, at := range order {
 		if at < 0 || at >= len(l.Tiers) || (at == 0 && at != rank) {
 			continue
 		}
@@ -102,7 +114,13 @@ func (r *Router) routeTicket(l Ladder, settings Settings, in ticketRoute, purpos
 		sort.SliceStable(pool, func(i, j int) bool {
 			a, _ := agentByID(in.Roster, pool[i].ID)
 			b, _ := agentByID(in.Roster, pool[j].ID)
-			return l.AgentFit(scene, a).Rank() < l.AgentFit(scene, b).Rank()
+			if l.AgentFit(scene, a) != l.AgentFit(scene, b) {
+				return l.AgentFit(scene, a).Rank() < l.AgentFit(scene, b).Rank()
+			}
+			if strongPeerFirst && at == 1 && holderSeries != "" {
+				return l.agentSeries(a) != holderSeries && l.agentSeries(b) == holderSeries
+			}
+			return false
 		})
 		best, _ := agentByID(in.Roster, pool[0].ID)
 		for i, seat := range pool {
@@ -122,10 +140,14 @@ func (r *Router) routeTicket(l Ladder, settings Settings, in ticketRoute, purpos
 			}
 		}
 		why := "目标档可用席位；系列偏好只参与排序"
-		if at != rank {
+		fallback := at != rank && !(strongPeerFirst && at == 1)
+		if strongPeerFirst && at == 1 {
+			why = "强档执行人优先由同档另一位咨询或验收，优先其他系列"
+		}
+		if fallback {
 			why = "目标档无可用席位（已包含其他系列），改用相邻档"
 		}
-		return ticketSelection{Seats: pool, Tier: l.Tiers[at].Key, Fallback: at != rank, Why: why}
+		return ticketSelection{Seats: pool, Tier: l.Tiers[at].Key, Fallback: fallback, Why: why}
 	}
 	return ticketSelection{Tier: target, Why: "目标档及相邻档均无可用席位；最强档不作兜底，请 Grok 协调"}
 }

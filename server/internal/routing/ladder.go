@@ -779,7 +779,7 @@ func (l Ladder) SceneTierAlternate(holder Seat, scene Scene, roster map[string]A
 func (l Ladder) FallbackSeat(candidates []Seat) (Seat, bool) {
 	for _, tier := range append([]string{l.Fallback}, l.TierKeys()...) {
 		for _, seat := range candidates {
-			if seat.TierKey == tier && l.fallbackSafe(seat, Agent{}) {
+			if seat.TierKey == tier && l.fallbackSafe(seat) {
 				return seat, true
 			}
 		}

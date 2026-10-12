@@ -58,3 +58,57 @@ func TestConsultAndReviewMediumUseStrongNotBulma(t *testing.T) {
 		}
 	}
 }
+
+func TestStrongExecutorPurposeOrder(t *testing.T) {
+	for _, purpose := range []Purpose{PurposeDo, PurposeConsult, PurposeReview} {
+		for _, tc := range []struct {
+			name  string
+			peer  bool
+			usage string
+			want  string
+		}{
+			{"peer before ample strongest", true, UsageAmple, "gohan"},
+			{"explicit strongest only after peers unavailable", false, UsageAmple, "bulma"},
+			{"tight strongest never used", false, UsageTight, ""},
+			{"unknown strongest quota never used", false, "unknown", ""},
+		} {
+			t.Run(string(purpose)+"/"+tc.name, func(t *testing.T) {
+				roster := reviewPolicyRoster()
+				delete(roster, "特兰克斯")
+				delete(roster, "天津饭")
+				delete(roster, "克林")
+				if !tc.peer {
+					delete(roster, "孙悟饭")
+				}
+				a := roster["布尔玛"]
+				a.Usage = tc.usage
+				roster["布尔玛"] = a
+				l := DefaultLadder.For(Settings{})
+				r := newRouter(newFakeStore(), nil)
+				got := r.routeTicket(l, Settings{}, ticketRoute{Ticket: Issue{AssigneeID: "goku"}, TargetTier: "strong", ExplicitTier: true, Roster: roster, Candidates: l.assignmentCandidates(GenericScene, roster)}, purpose)
+				want := tc.want
+				if purpose == PurposeDo {
+					want = "goku"
+				} // Dispatch is unaffected by the consult/review peer preference.
+				id := ""
+				if len(got.Seats) > 0 {
+					id = got.Seats[0].ID
+				}
+				if id != want {
+					t.Fatalf("got=%+v want=%s", got, want)
+				}
+			})
+		}
+	}
+}
+
+func TestFallbackUsesTierNotSeatName(t *testing.T) {
+	for _, name := range []string{"布尔玛", "其他席位"} {
+		for _, tier := range []string{"medium", "strongest"} {
+			got := DefaultLadder.fallbackSafe(Seat{ID: "seat", Name: name, TierKey: tier})
+			if got != (tier == "medium") {
+				t.Fatalf("name=%s tier=%s allowed=%v", name, tier, got)
+			}
+		}
+	}
+}

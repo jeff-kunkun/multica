@@ -1,11 +1,7 @@
 package routing
 
-import (
-	"strings"
-)
-
-func (l Ladder) fallbackSafe(s Seat, a Agent) bool {
-	return s.ID != "" && s.TierKey != "strongest" && (len(l.Tiers) == 0 || s.TierKey != l.Tiers[0].Key) && !s.Upshifted && !strings.HasPrefix(s.Name, "布尔玛") && a.Base != "布尔玛"
+func (l Ladder) fallbackSafe(s Seat) bool {
+	return s.ID != "" && s.TierKey != "strongest" && (len(l.Tiers) == 0 || s.TierKey != l.Tiers[0].Key) && !s.Upshifted
 }
 
 func fallbackCause(tier string, confidence, threshold float64) string {
