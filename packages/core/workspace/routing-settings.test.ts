@@ -23,7 +23,7 @@ import {
 // switches at their defaults.
 const JUDGE_ONLY: Pick<
   RoutingSettings,
-  "judge_enabled" | "analysis" | "usage_priority" | "allow_upshift" | "strongest_gate" | "prefer_continuation" | "prefer_idle" | "learn_from_outcomes" | "learn_low_rate" | "learn_window_days" | "judged_review"
+  "judge_enabled" | "analysis" | "usage_priority" | "allow_upshift" | "strongest_gate" | "decision_mode" | "consult_per_issue" | "prefer_continuation" | "prefer_idle" | "learn_from_outcomes" | "learn_low_rate" | "learn_window_days" | "judged_review"
 > = {
   judge_enabled: true,
   analysis: { enabled: false, model: "", base_url: "" },
