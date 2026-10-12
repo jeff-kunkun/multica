@@ -1,0 +1,265 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bot 连接统一方案</title>
+<style>
+:root{--ink:#1d1d1f;--sub:#5f6368;--line:#e3e3e6;--bg:#fafaf8;--card:#fff;--keep:#1f6f43;--merge:#8a5a00;--close:#9b2c2c;--out:#4b5563;--acc:#2b59c3}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.65 -apple-system,BlinkMacSystemFont,"PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif}
+main{max-width:760px;margin:0 auto;padding:20px 16px 48px}
+h1{font-size:22px;line-height:1.35;margin:4px 0 10px}
+h2{font-size:19px;margin:34px 0 10px;padding-top:6px;border-top:1px solid var(--line)}
+h3{font-size:16px;margin:18px 0 6px}
+p{margin:8px 0}
+.lead{font-size:18px;font-weight:600}
+.meta{color:var(--sub);font-size:13px}
+.analogy{background:#fff7e6;border-left:4px solid #e0a100;padding:10px 12px;border-radius:6px;margin:12px 0}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:12px 14px;margin:10px 0}
+ul{padding-left:20px;margin:6px 0}
+li{margin:4px 0}
+.seg{display:flex;gap:8px;flex-wrap:wrap;margin:10px 0}
+.seg button{min-height:44px;padding:8px 14px;border:1px solid var(--line);background:#fff;border-radius:22px;font-size:15px;color:var(--ink);cursor:pointer}
+.seg button[aria-pressed="true"]{background:var(--ink);color:#fff;border-color:var(--ink)}
+.seg button:focus-visible,summary:focus-visible{outline:3px solid var(--acc);outline-offset:2px}
+.svgbox{background:#fff;border:1px solid var(--line);border-radius:10px;padding:8px;overflow-x:auto}
+.svgbox svg{display:block;width:100%;min-width:320px;height:auto}
+.cap{font-size:14px;color:var(--sub);margin:6px 2px 0}
+.item{display:grid;grid-template-columns:1fr auto;gap:2px 10px;padding:10px 0;border-bottom:1px solid var(--line)}
+.item:last-child{border-bottom:0}
+.item b{font-size:15.5px}
+.item .why{grid-column:1/-1;color:var(--sub);font-size:14.5px}
+.item .now{grid-column:1/-1;font-size:14.5px}
+.tag{font-size:13px;font-weight:700;padding:2px 9px;border-radius:12px;white-space:nowrap;align-self:start;border:1.5px solid currentColor}
+.t-keep{color:var(--keep)}.t-merge{color:var(--merge)}.t-close{color:var(--close)}.t-out{color:var(--out)}
+.plan li{margin:8px 0}
+.todo{background:#eef3ff;border:1px solid #c9d6f5;border-radius:10px;padding:12px 14px}
+details{margin-top:34px;border:1px solid var(--line);border-radius:10px;background:#fff}
+summary{cursor:pointer;padding:14px;min-height:44px;font-weight:600}
+.eng{padding:0 14px 14px;font-size:14px}
+.eng table{border-collapse:collapse;width:100%;font-size:13px}
+.eng td,.eng th{border:1px solid var(--line);padding:5px 6px;vertical-align:top;text-align:left}
+.tablewrap{overflow-x:auto}
+code{font-size:12.5px;background:#f2f2f4;padding:1px 4px;border-radius:4px;word-break:break-all}
+[hidden]{display:none!important}
+@media (prefers-reduced-motion:no-preference){.fade{animation:f .25s ease}@keyframes f{from{opacity:0}to{opacity:1}}}
+</style>
+</head>
+<body>
+<main>
+<p class="meta">Bot 连接统一方案 · 2026-10-13 · 只是建议，没有关单、合单，也没动线上</p>
+<h1>以后所有 Bot 只从「一个出口」收消息：办公室发生什么就记一笔，按项目送给对应的 Bot，收到要回话，断线了自己回来补</h1>
+<p class="lead">根本道理：把好几条各管一段的通知线收成一条。只要一条线可靠，就不需要 Bot 每半小时来巡一次，省下的就是那些巡检烧掉的 token。</p>
+<div class="analogy">打个比方：现在像办公室有四个前台，各自给你打电话，有时打重，有时漏打。你只好每半小时自己下楼看一眼信箱。改完以后只留一个收发室，每封信都登记编号，按部门投进对应的信格：塔罗的信进塔罗格，没写部门的交给总管家。收件人签了字才算送到，没签字就隔一会儿再送。</div>
+
+<h2>结论</h2>
+<div class="card">
+<ul>
+<li><b>大部分东西已经做好了。</b>「一有事就推给 Grok」「办公室事件流（保证送到、文件能下载）」「Grok 快速看全局」这三块，代码都已经上线。没完成的只是拿真 Grok 测试那几项。</li>
+<li><b>问题不在缺功能，在于线太多。</b>现在同一件事可能从四条旧线、一条新线一起送出来，Grok 那边还开着三个例行，其中两个是巡检。</li>
+<li><b>方向：</b>以新的「办公室事件流」作为唯一主线。旧线只保留兼容，不再加新东西。Grok 的巡检降成低频补漏。</li>
+<li><b>你新提的「一键接入」和「按项目分给项目 Bot」</b>也放进这条主线来做。新 Bot 连上以后自己登记收件地址，你不用手填地址和钥匙。现有的钥匙和登录一律不动。</li>
+<li><b>每个 Bot 都像你一样能看到全局：</b>所有项目的单、事件、聊天、收件箱都能直接读。「按项目分发」只决定一件事<b>默认先推给谁</b>，不是限制谁能看什么；「平时只管自己项目」写在各 Bot 自己的规矩里，Multica 不另加限制。</li>
+<li><b>单子整理：</b>建议<b>关 3 条</b>，<b>保留 3 条</b>（作为主线和收尾），<b>3 条挪出本范围</b>（本来就不是 Bot 连接的事，另外这次新发现的一条观点帖已经写完，等你点头发），其余都已经完成，不用处理。</li>
+</ul>
+</div>
+
+<h3>现在 vs 以后</h3>
+<div class="seg" role="group" aria-label="切换现在和以后">
+<button type="button" aria-pressed="true" data-v="now">现在</button>
+<button type="button" aria-pressed="false" data-v="after">改完以后</button>
+</div>
+<div class="svgbox fade" id="v-now">
+<svg viewBox="0 0 640 330" role="img" aria-labelledby="tnow">
+<title id="tnow">现在：四条旧线加一条新线都能推给 Grok，Grok 另外还有两个定时巡检</title>
+<rect x="10" y="125" width="130" height="80" rx="10" fill="#f1f3f7" stroke="#9aa3b2"/>
+<text x="75" y="160" text-anchor="middle" font-size="15">办公室</text><text x="75" y="182" text-anchor="middle" font-size="12" fill="#5f6368">票、聊天、设置</text>
+<g font-size="12">
+<rect x="210" y="14" width="190" height="40" rx="8" fill="#fff" stroke="#c9a400"/><text x="305" y="39" text-anchor="middle">叫醒铃（@ 和完成）</text>
+<rect x="210" y="74" width="190" height="40" rx="8" fill="#fff" stroke="#c9a400"/><text x="305" y="99" text-anchor="middle">要你决定的事</text>
+<rect x="210" y="134" width="190" height="40" rx="8" fill="#fff" stroke="#c9a400"/><text x="305" y="159" text-anchor="middle">全部动态</text>
+<rect x="210" y="194" width="190" height="40" rx="8" fill="#fff" stroke="#2b59c3" stroke-width="2"/><text x="305" y="219" text-anchor="middle">办公室事件流（新）</text>
+<rect x="210" y="254" width="190" height="40" rx="8" fill="#fff" stroke="#c9a400"/><text x="305" y="279" text-anchor="middle">快速查看（主动来读）</text>
+</g>
+<g stroke="#9aa3b2" fill="none"><path d="M140 150 L210 34"/><path d="M140 158 L210 94"/><path d="M140 165 L210 154"/><path d="M140 172 L210 214"/><path d="M140 180 L210 274"/></g>
+<rect x="480" y="110" width="150" height="110" rx="10" fill="#fdf1f1" stroke="#9b2c2c"/>
+<text x="555" y="140" text-anchor="middle" font-size="15">Grok</text>
+<text x="555" y="163" text-anchor="middle" font-size="12">即时收件</text>
+<text x="555" y="182" text-anchor="middle" font-size="12" fill="#9b2c2c">每 5 分钟巡聊天</text>
+<text x="555" y="201" text-anchor="middle" font-size="12" fill="#9b2c2c">每 30 分钟补漏</text>
+<g stroke="#9aa3b2" fill="none"><path d="M400 34 L480 140"/><path d="M400 94 L480 150"/><path d="M400 154 L480 160"/><path d="M400 214 L480 175"/><path d="M480 200 L400 274"/></g>
+</svg>
+<p class="cap">同一件事可能被几条线各推一次，靠 Grok 自己去重。两个巡检每天都在耗 token。项目 Bot 现在还接不进来。</p>
+</div>
+<div class="svgbox fade" id="v-after" hidden>
+<svg viewBox="0 0 640 330" role="img" aria-labelledby="taft">
+<title id="taft">改完：办公室只出一条事件流，按项目投给项目 Bot，没有项目的投给 Grok 总管家；收到要回执，断线回来自己补</title>
+<rect x="10" y="125" width="120" height="80" rx="10" fill="#f1f3f7" stroke="#9aa3b2"/>
+<text x="70" y="160" text-anchor="middle" font-size="15">办公室</text><text x="70" y="182" text-anchor="middle" font-size="12" fill="#5f6368">票、聊天、设置</text>
+<rect x="170" y="115" width="150" height="100" rx="10" fill="#eef3ff" stroke="#2b59c3" stroke-width="2"/>
+<text x="245" y="150" text-anchor="middle" font-size="15">一个收发室</text><text x="245" y="172" text-anchor="middle" font-size="12">每封都有编号</text><text x="245" y="191" text-anchor="middle" font-size="12">签收才算到</text>
+<path d="M130 165 L170 165" stroke="#2b59c3" stroke-width="2"/>
+<g font-size="13">
+<rect x="400" y="10" width="170" height="44" rx="8" fill="#fff" stroke="#1f6f43"/><text x="485" y="37" text-anchor="middle">塔罗 Bot</text>
+<rect x="400" y="68" width="170" height="44" rx="8" fill="#fff" stroke="#1f6f43"/><text x="485" y="95" text-anchor="middle">自媒体 Bot</text>
+<rect x="400" y="126" width="170" height="44" rx="8" fill="#fff" stroke="#1f6f43"/><text x="485" y="153" text-anchor="middle">游戏 WD Bot</text>
+<rect x="400" y="184" width="170" height="44" rx="8" fill="#fff" stroke="#1f6f43"/><text x="485" y="211" text-anchor="middle">Multica 魔改 Bot</text>
+<rect x="400" y="250" width="170" height="54" rx="8" fill="#fdf6e3" stroke="#8a5a00" stroke-width="2"/><text x="485" y="273" text-anchor="middle">Grok 总管家</text><text x="485" y="292" text-anchor="middle" font-size="11" fill="#5f6368">不属于任何项目的</text>
+</g>
+<g stroke="#2b59c3" fill="none"><path d="M320 140 L400 32"/><path d="M320 150 L400 90"/><path d="M320 160 L400 148"/><path d="M320 172 L400 206"/><path d="M320 190 L400 276"/></g>
+<path d="M585 300 C 630 330, 260 340, 245 215" stroke="#1f6f43" stroke-dasharray="5 4" fill="none"/>
+<text x="600" y="322" text-anchor="end" font-size="11" fill="#1f6f43">回执 / 断线后补拉</text>
+</svg>
+<p class="cap">只有一条线，一件事只送一次。Bot 掉线回来以后，从上次签收的地方接着补。巡检只在实在没收到时兜底，频率很低。</p>
+</div>
+
+<h2>对你有什么影响</h2>
+<div class="card">
+<ul>
+<li><b>省 token：</b>Grok 的「每 5 分钟巡聊天」可以停掉，「每 30 分钟补漏」降到几小时一次。具体省多少，要等新线稳定跑几天才能量出来，现在<b>查不到</b>准确数字。</li>
+<li><b>不会再漏报、重报：</b>办公室完成了、交棒了、出了文件，你在 Grok 那边一定收得到，同一件事只收一次。</li>
+<li><b>以后加 Bot 很省事：</b>在设置里点「添加 Bot」并选好项目，把出来的一段话贴给新 Bot，它会自己登记收件地址，事件就开始按项目送过去。</li>
+<li><b>不变的：</b>现有钥匙和登录一律不换；Grok 现在的收件方式也不变，只是它收到的东西变整齐了。</li>
+</ul>
+</div>
+
+<h2>现有单子逐条建议</h2>
+<div class="seg" role="group" aria-label="按建议筛选">
+<button type="button" aria-pressed="true" data-f="all">全部</button>
+<button type="button" aria-pressed="false" data-f="keep">保留</button>
+<button type="button" aria-pressed="false" data-f="close">关闭 / 合并</button>
+<button type="button" aria-pressed="false" data-f="out">挪出本范围</button>
+<button type="button" aria-pressed="false" data-f="done">已完成</button>
+</div>
+<div class="card" id="items">
+<div class="item" data-k="keep"><b>办公室事件流 + 成果送达</b><span class="tag t-keep">保留·主线</span><span class="now">现在：已经上线，真 Grok 测了一半（收件、文件下载、撤权后补发都通过了）。</span><span class="why">理由：它就是以后唯一的那条线。剩下几项（设置变化、断网恢复、重复只送一次、重启续传）测完就收。</span></div>
+<div class="item" data-k="keep"><b>Grok 叫醒真机测试</b><span class="tag t-keep">保留·缩小</span><span class="now">现在：卡着等今晚「云电脑暂停后能不能被叫醒」的试验，费用还不知道。</span><span class="why">理由：只剩暂停唤醒和费用这两项，测完就关。其它测试已经由主线覆盖，不用重复测。</span></div>
+<div class="item" data-k="keep"><b>Grok 快速看全局</b><span class="tag t-keep">保留·等打包</span><span class="now">现在：功能已经做完，等统一出新版后在线上量一次速度。</span><span class="why">理由：它负责断线回来补拉，和主线配合。出新版后量一次就收。</span></div>
+<div class="item" data-k="close"><b>「Grok 互相 @、一有事就叫醒」总改造</b><span class="tag t-close">关闭→并入叫醒测试</span><span class="now">现在：标着「进行中」，其实代码已经全部上线。</span><span class="why">理由：剩下的只有真机证据，已经在上面那张测试单里。留着它只会让人以为还在开发。</span></div>
+<div class="item" data-k="close"><b>真机测试记录</b><span class="tag t-close">关闭→并入叫醒测试</span><span class="now">现在：挂起，里面只是测试记录。</span><span class="why">理由：同一件事记了两处。并过去，只留一个账本。</span></div>
+<div class="item" data-k="close"><b>事件流测试用的假单</b><span class="tag t-close">主线测完就关</span><span class="now">现在：挂起，是故意让它变状态的测试单。</span><span class="why">理由：开它就是为了测试，测完没用了。</span></div>
+<div class="item" data-k="out"><b>AI 记忆存到云盘（灾备）</b><span class="tag t-out">挪出·独立保留</span><span class="now">现在：卡着，技能资料备份到一半。</span><span class="why">理由：它管「东西丢了怎么恢复」，和 Bot 怎么连是两件事。</span></div>
+<div class="item" data-k="out"><b>换模型总闸方案 + 7 个订阅的登录迁移</b><span class="tag t-out">挪出·独立保留</span><span class="now">现在：方案过了，迁移在等你晨报后的授权。</span><span class="why">理由：它管 AI 从哪儿用模型，不管 Bot 怎么收消息。</span></div>
+<div class="item" data-k="out"><b>公开仓库传播力技能</b><span class="tag t-out">挪出·独立保留</span><span class="now">现在：还没开始。</span><span class="why">理由：属于自媒体的写法沉淀，不是连接的事。</span></div>
+<div class="item" data-k="done"><b>（新发现）「事件驱动多 Agent」观点帖</b><span class="tag t-out">已完成·等你点头发</span><span class="now">现在：三个平台的终稿和配图都已经出了，还没发。</span><span class="why">理由：是自媒体的事，不属于连接；发不发由你定。</span></div>
+<div class="item" data-k="done"><b>公开仓库系列（整理、改版、办公室叙事、X 稿重写）</b><span class="tag t-out">已完成</span><span class="now">现在：都已完成，其中一张取消了；「办公室叙事」重复开了两张，两张都做完了。</span><span class="why">理由：不用处理。以后改说明文档时，照下面「以后做」的第 4 条改。</span></div>
+<div class="item" data-k="done"><b>项目记忆补齐</b><span class="tag t-out">已完成</span><span class="now">现在：已完成。</span><span class="why">理由：不用处理。</span></div>
+<div class="item" data-k="done"><b>「一键接入」（你新提的）</b><span class="tag t-keep">进本方案</span><span class="now">现在：按你的意思没有单独开单，放进本方案的「先做」。</span><span class="why">理由：你批准后，再开一张实现单去做。</span></div>
+</div>
+
+<h2>统一方案</h2>
+<div class="seg" role="group" aria-label="切换先做、以后做、不做">
+<button type="button" aria-pressed="true" data-p="p1">先做（6 件）</button>
+<button type="button" aria-pressed="false" data-p="p2">以后做（5 件）</button>
+<button type="button" aria-pressed="false" data-p="p3">不做（5 件）</button>
+</div>
+<div class="card plan fade" id="p1">
+<ol>
+<li><b>定一条主线。</b>以后所有通知都走「办公室事件流」。旧的叫醒、要你决定、全部动态三条线照常能用，但不再加新功能。同一件事在新旧线上带同一个编号，Grok 只告诉你一次。<span class="meta">（这一条已经有了，只需要定成规矩）</span></li>
+<li><b>一键接入（你新提的）。</b>设置里「添加 Bot」时选一个项目。系统给出一段话，贴给新 Bot。Bot 用自己的新钥匙把收件地址登记好，然后回一句「收到了」，你那边就显示「已连通」。你不用填地址、钥匙或别的参数。能一直挂着的 Bot 连收件地址都不用登记，自己往外连上来取就行。<span class="meta">（「Bot 自己登记收件地址」已经能做；「绑项目」和「自动确认连通」要新做）</span></li>
+<li><b>按项目分发（你新提的）。</b>塔罗、自媒体、游戏 WD、Multica 魔改四个项目各配一个项目 Bot，属于哪个项目的事就<b>默认先推</b>给哪个。不属于任何项目的、或者那个项目还没配 Bot 的，一律送给 Grok 总管家，这样不会有事情没人收。<b>这只管「推给谁」，不管「谁能看」：</b>每个 Bot 都和你一样能看到全局，跨项目的东西直接去读；「平时只管自己项目」写进各 Bot 自己的规矩，Multica 这边不加按项目的看不看得见。项目 Bot 一律挂在你名下开，默认打开「全部动态」，这样它看到的和你一模一样。<span class="meta">（要新做：现在只按「谁的事」送，还不按项目送；查过了，现在没有任何按项目限制 Bot 看东西的设置）</span></li>
+<li><b>断线回来自己补。</b>Bot 每签收一次就记一个位置，掉线回来以后从这个位置往后补，不会把「没收到」当成「没事」。离线太久补不全时，系统明确告诉它「请从头核一遍」。<span class="meta">（大部分已经有了，要补的是「请从头核一遍」这个明确信号）</span></li>
+<li><b>Grok 的巡检降下来。</b>新线稳定后，「每 5 分钟巡聊天」停掉（聊天回复已经在新线里了），「每 30 分钟补漏」改成几小时一次。改之前先比一周的数据，确认没有漏。顺手把 Grok 规矩里「新线还没上线时先本地记账」那段过时的话删掉，再补一句：收到「请从头核一遍」就从头核。<span class="meta">（只改 Grok 那边的例行和规矩，Multica 不用动）</span></li>
+<li><b>收尾真机测试。</b>主线剩下的几项、暂停唤醒、费用记录测完以后，关掉上面建议关的三张单。</li>
+</ol>
+</div>
+<div class="card plan fade" id="p2" hidden>
+<ol>
+<li><b>真正拆掉旧线。</b>新线稳定一个月左右，再把旧的三条线合并或关掉，Bot 那边的规矩也同步简化。</li>
+<li><b>收件登记设有效期。</b>Bot 很久没签收，就自动暂停给它送，并提醒你一次，免得没人管的旧 Bot 一直占着。</li>
+<li><b>Bot 只用两个动作。</b>「找」（看单、看聊天、看谁在干活）和「做」（发评论、发消息、派活）。现在给 Bot 的工具有九个，以后收成两个，更省 token，也更少出错。先在一个项目上试。</li>
+<li><b>公开仓库说明重写。</b>按「助手 → 收发室 → 各台电脑」三层重写，加一段「如果你是 AI」的上手说明，致谢参考的开源项目。仓库照旧不放机器名、地址和钥匙。</li>
+<li><b>每个 Bot 和每个席位附一句说明。</b>写清它擅长什么、能不能碰线上，派活时用得上。</li>
+</ol>
+</div>
+<div class="card plan fade" id="p3" hidden>
+<ol>
+<li><b>不整套换成别人的开源项目。</b>它只管「助手指挥写代码的 AI」，没有派活、记账、验收这些。照它的思路改，比整套换划算。</li>
+<li><b>不另外架一个云上中转站。</b>我们已经有服务器，再加一套只是多一个要维护的东西。</li>
+<li><b>不换钥匙、不换登录。</b>新 Bot 用自己的新钥匙；Grok 现在的钥匙和登录一律不动。</li>
+<li><b>不加复杂的安全层。</b>沿用现在的签名和权限检查就够了，不加双向证书、白名单这些。</li>
+<li><b>信箱桥接不扩展。</b>它只保留「派执行任务到云电脑」这一个用途，通知不再走它。</li>
+</ol>
+</div>
+
+<h2>要你做的</h2>
+<div class="todo">
+<ol>
+<li><b>点头或改方向：</b>「以办公室事件流作为唯一主线、Grok 巡检降频」，同意吗？</li>
+<li><b>一键接入和按项目分发：</b>现在 Multica 里只登记了 Grok 一个 Bot，四个项目 Bot 要新开。用 Grok 还是别家的账号，由你定。另外，项目里的事要不要同时<b>推</b>一份给 Grok 总管家？反正它本来就能看到全局，我建议<b>不推</b>，只有「要你拍板」的事才推给总管家。</li>
+<li><b>单子处理：</b>同意上面「关闭 / 合并」那 3 条吗？你说可以，就交给管家去执行。</li>
+</ol>
+<p class="meta">点头以后：开一张实现单做「先做」的第 2、3、4 条，其余几条由管家和现有单子收尾。</p>
+</div>
+
+<details>
+<summary>工程师看（来源、代码现状、对照）</summary>
+<div class="eng">
+<p><b>单号对照与建议</b>（查询时间 2026-10-12 20:30–21:00 UTC，<code>multica issue get/comment list</code>）</p>
+<div class="tablewrap"><table>
+<tr><th>单</th><th>状态</th><th>建议</th><th>依据</th></tr>
+<tr><td>DENE-1963</td><td>in_review</td><td>保留·主线</td><td>PR #676 已合（2bed51546e），实例 server_version=2bed515；Grok 已验 must_relay、PDF/HTML/图/同名新版下载、撤权恢复；缺 config 事件、5xx/断网、lost-receipt reconcile、接收端重启、同 event_id 幂等</td></tr>
+<tr><td>DENE-1800</td><td>blocked</td><td>保留·缩小</td><td>暂停唤醒 probe 定在 2026-10-13 03:25Z；费用未知</td></tr>
+<tr><td>DENE-1861</td><td>in_review</td><td>保留·等打包</td><td>PR #656 已合（1870/1872/1873/1879/1882），20:34Z 统一版本消冲突补验证后再进 in_review；等统一打包后量 p95≤2s、≤50000B；Grok 侧本地缓存（提案第 4 块）状态查不到</td></tr>
+<tr><td>DENE-1791</td><td>in_progress</td><td>关闭→并入 1800</td><td>PR #628 + 1792/1793/1794 全 done；12:22Z 起只剩真机证据</td></tr>
+<tr><td>DENE-1845</td><td>backlog</td><td>关闭→并入 1800</td><td>纯测试记录，与 1800 重复</td></tr>
+<tr><td>DENE-1984</td><td>blocked</td><td>1963 验完就关</td><td>联调抛砖单</td></tr>
+<tr><td>DENE-1782</td><td>blocked</td><td>挪出</td><td>Google Drive 灾备；65 项技能仍暂扣</td></tr>
+<tr><td>DENE-1979 / 1983</td><td>in_progress / blocked</td><td>挪出</td><td>magpie 模型网关；1983 等晨报授权，0/7 独立鉴权</td></tr>
+<tr><td>DENE-1837</td><td>backlog</td><td>挪出</td><td>自媒体 skill</td></tr>
+<tr><td>DENE-1987（补）</td><td>done</td><td>不处理</td><td>自媒体观点帖终稿已出，未发布，等 Kun</td></tr>
+<tr><td>DENE-1801/1836/1969/1970/1975、1802</td><td>done</td><td>不处理</td><td>1838 cancelled；1969/1970 重复都 done</td></tr>
+</table></div>
+<p><b>现有推送通道（源码）</b></p>
+<ul>
+<li>wake：<code>server/docs/bot-wake-contract.md</code>，<code>bot wake get/set/pending/ack</code>；Bot PAT 可 PUT 自己的 webhook_url/key（只写不回显）；每 Bot 有 events/hourly_limit/quiet_hours。</li>
+<li>human-needed（DENE-1933）、activity stream（DENE-1935/1936，<code>bot bind --activity everything</code>，<code>bot_write_audit</code>、四类 owner confirmation）：<code>server/docs/bot-activity-contract.md</code>。</li>
+<li>office event stream（DENE-1963）：迁移 687，<code>office_event</code>/<code>office_event_delivery</code>/<code>office_event_gap</code>，触发器同事务落库，<code>stream_seq</code> 无缝；200 不算回执，回执 received→relayed|handled，无限期退避，<code>delivery.reconcile</code>；<code>business_key</code> 跨通道去重；CLI <code>multica events list|get|download|receipt|deliveries|retry</code>。</li>
+<li>fast access（DENE-1861）：<code>POST /api/fast-access/v1/read</code>、<code>runs?active=true</code>、SSE <code>/events</code>（410 过期、<code>scope_reset</code>、<code>read_required</code>），本地 MCP 9 个工具（<code>server/internal/fastmcp/server.go</code>，<code>docs/kun/fast-access-mcp.md</code>）。</li>
+<li>收件人按 owner/可见性选，<b>没有 project→bot 映射</b>，这是第 3 条要新做的；Bot 是按人绑定的。</li>
+</ul>
+<p><b>agenvo 借鉴点对照</b></p>
+<div class="tablewrap"><table>
+<tr><th>借鉴点</th><th>现状</th><th>落到</th></tr>
+<tr><td>只往外连、不开端口</td><td>部分：SSE/拉取是外连；Grok 例行只能收 webhook</td><td>先做 2：能常驻的 Bot 走 SSE</td></tr>
+<tr><td>只露两个工具</td><td>缺：MCP 9 个工具</td><td>以后做 3</td></tr>
+<tr><td>状态变化即推事件</td><td>有：office stream 触发器</td><td>先做 1</td></tr>
+<tr><td>断线重同步信号</td><td>部分：cursor、reconcile、SSE 410/scope_reset；webhook 侧没有显式 resync_required</td><td>先做 4</td></tr>
+<tr><td>按事件 ID 去重、先看状态</td><td>有：event_id + business_key + reconcile</td><td>—</td></tr>
+<tr><td>每台机器/agent 附说明</td><td>部分：agent 描述、overview</td><td>以后做 5</td></tr>
+<tr><td>订阅有效期</td><td>缺：office 投递永不过期；Bot 钥匙有到期提示</td><td>以后做 2</td></tr>
+</table></div>
+<p><b>Grok 侧规则</b>（原文来自本票 20:35Z 回复的两个附件，multica-notify-prompt.md 4642B，sha256 cdf02f80…；office-event-receiver-rules.md 959B）：先按 event_id 查 status.json 去重 → <code>bot wake woken</code> → 读全文判断是否要 Kun；要 Kun 的即时转告（<b>夜间不打扰已取消</b>），回 <code>relayed</code>（channel+message_ref），Kun 回复后回 <code>answered</code>；mention 就地处理，普通 done/task/chat/runtime 只记账；<b>「不转发给其他 Bot」</b>。第 7 节 office_event：先写持久收件表再回 received、must_relay 转告带 channel/ref、文件 download+size/sha256 校验后回 <code>--file id=sent:ref</code>、reconcile 只补缺步、重启后 <code>events deliveries --status sent,received</code>、pending_approval 固定话术、business_key 新旧只告一次。另有三个例行：<code>multica</code>（webhook）、<code>multica-2</code>（每 5 分钟聊天巡检）、<code>multica-30</code>（:13/:43 翻 pending）。</p>
+<p><b>Grok 侧待改</b>（只写建议，不动）：① 第 7 节和接收规则仍写「PR#676 合并前线上无 events CLI，本地记账标 receipt_pending_cli」，#676 已合、实例已是 2bed515，这段过时；② 没有处理 office_event_gap / 重同步信号的条目；③ 第 3/4 节仍以旧 wake 回执为主路径，主线定下后应改为 office receipt 为主、wake 回执兼容；④ 「不转发给其他 Bot」与项目路由一致——项目事件由 Multica 直接推给项目 Bot，不经 Grok 转。</p>
+<p><b>可见性核对（Kun 纠正：各 Bot 全局可见，按项目只是默认推送）</b>：源码里没有任何 project→bot 映射或按项目限制 Bot 可见性的代码（grep <code>project_bot</code> 等为空）；Grok 现有 wake 规则无项目过滤，wake_from agent/member 均为 all。Bot 用自己的个人令牌，权限 = 主人权限，因此全局可见的前提是：<br>· 项目 Bot 必须挂在 Kun 名下开（挂别人名下就只能看那人能看的）；<br>· 绑定时 <code>activity_scope</code> 含 <code>owner_visible_all</code>（<code>office_event_worker.go:459</code> 对 stream 事件要求此项），一键接入应默认打开；<br>· 跨工作区读取受工作区连接规则约束（<code>fast_access_data.go:150</code> 只读已连接且非 private 的项目），这是工作区连接的设定，不是按 Bot 的限制，列为「待核」，不改。<br>普通的 private 项目 / project 可见性（迁移 475–479）是对人的权限，Kun 能看的 Bot 就能看，不需要改。</p>
+<p><b>不一致</b>：Grok 仍同时跑旧 wake 例行和新 office handler，并保留 5 分钟聊天巡检，但 <code>chat.replied</code> 已进新流。这是先做 5 的依据。</p>
+<p><b>聊天来源</b>：「完成即通知+产物推送 漏洞彻查」（Kun 17:27Z 批准事件流扩大范围）；「借云端虚拟机分担本机负载」（Kun 10-11：「我在外面就只用 grok 控制我的 Multica……事无巨细的给我汇报」）；「外部 Bot 默认走路由开票」；「bot 全景与自动入门」；「外部 Bot 接入判断」。附件 M-001-agenvo.md。</p>
+</div>
+</details>
+</main>
+<script>
+(function(){
+  function group(sel,attr,fn){
+    var btns=document.querySelectorAll(sel+' button['+attr+']');
+    btns.forEach(function(b){b.addEventListener('click',function(){
+      btns.forEach(function(x){x.setAttribute('aria-pressed',x===b?'true':'false')});
+      fn(b.getAttribute(attr));
+    })});
+  }
+  group('.seg','data-v',function(v){
+    document.getElementById('v-now').hidden=v!=='now';
+    document.getElementById('v-after').hidden=v!=='after';
+  });
+  group('.seg','data-p',function(v){
+    ['p1','p2','p3'].forEach(function(id){document.getElementById(id).hidden=id!==v});
+  });
+  group('.seg','data-f',function(v){
+    document.querySelectorAll('#items .item').forEach(function(it){
+      it.hidden=!(v==='all'||it.getAttribute('data-k')===v);
+    });
+  });
+})();
+</script>
+</body>
+</html>
