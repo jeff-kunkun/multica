@@ -25,12 +25,13 @@ import (
 // identical call still goes through, once.
 func TestOwnerApprovalIsForTheExactMemberAndRole(t *testing.T) {
 	f := newHumanNeededFixture(t, true)
-	// Every refused call opens a card, the spent-approval retry included; none
-	// may outlive the test and show up in another's count of open cards.
+	// Every refused call opens a card, the spent-approval retry included, and
+	// every call is audited; none may outlive the test into another's counts.
 	var started string
 	dbfx.QueryRow(t, `SELECT now()::text`).Scan(&started)
 	t.Cleanup(func() {
 		_, _ = testPool.Exec(context.Background(), `DELETE FROM agent_ask WHERE workspace_id=$1 AND kind='owner_confirmation' AND created_at >= $2::timestamptz`, testWorkspaceID, started)
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM bot_write_audit WHERE bot_id=$1`, f.bot.ID)
 	})
 	var forwarded []string
 	r := chi.NewRouter()
