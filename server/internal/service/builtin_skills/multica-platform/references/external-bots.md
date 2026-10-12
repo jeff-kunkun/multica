@@ -269,13 +269,15 @@ same call are shared by the original and its escalations.
 A person who bound their Bot can also switch on the full stream:
 `multica bot bind --activity owned,followed` (`owned`, `followed`, both, or
 `off`; default off; account settings row「把所有动态推给我的 Bot」). Then every
-comment, chat message, status change and assignee change on tickets and chats
-they own or follow is pushed to the Bot as `type: "activity"` with an `activity`
+comment (and each edit of one), chat message, status change and assignee change
+on tickets and chats they own or follow is pushed to the Bot as `type: "activity"` with an `activity`
 block: `activity_type`, `importance` (`high|normal|low`; `critical` stays with
 `human_needed`), `categories[]` (`needs_human, risk, decision, result,
 progress, completion, failure, info`), `excerpt`, `source_url`, `from_status` /
-`to_status`. **You filter**: decide what is worth telling the person. Secrets
-are masked server-side; attachments are not pushed. HTTP 200 is delivered —
+`to_status`. **You filter**: decide what is worth telling the person. The whole
+body is masked server-side (not just the excerpt); attachments are not pushed.
+A row is re-checked when it is sent and when you list it: if the person lost
+sight of the ticket or the scope no longer covers it, it is not delivered. HTTP 200 is delivered —
 nothing is resent or escalated, dedupe on `event_id`.
 
 ```sh

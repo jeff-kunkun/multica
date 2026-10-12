@@ -23,10 +23,11 @@ takes `activity_scope`; omitting it keeps the current value.
 
 | `activity_type` | Source |
 |---|---|
-| `comment` | a comment on a ticket |
-| `chat_message` | a message in a chat session |
-| `status_changed` | ticket status moved (`from_status`, `to_status`) |
-| `assignee_changed` | ticket assignee changed |
+| `comment.created` | a comment on a ticket |
+| `comment.edited` | a comment's text was edited (once per edit; attachment, resolve and delete changes are not edits) |
+| `chat.message` | a message in a chat session |
+| `status.changed` | ticket status moved (`from_status`, `to_status`), whoever moved it: a person, an agent, or a background job |
+| `assignee.changed` | ticket assignee changed |
 
 Never pushed: the person's own actions, anything their own Bot wrote, a comment
 that was already pushed as `human_needed`, chat delivery notices.
@@ -37,7 +38,7 @@ Webhook body: the usual envelope (`event_id`, `sequence`, `woken_url`,
 
 ```json
 {
-  "activity_type": "comment",
+  "activity_type": "comment.created",
   "importance": "high",
   "categories": ["risk"],
   "excerpt": "…first 1000 chars, secrets masked…",
@@ -59,20 +60,34 @@ Webhook body: the usual envelope (`event_id`, `sequence`, `woken_url`,
 
 ## No secrets
 
-Every free-text field passes `MaskSecrets` before it leaves: PEM blocks, known
-key prefixes, bearer tokens, `password=`/`token=` assignments, passwords in
-URLs and long random runs are replaced; commit SHAs, UUIDs, URLs and paths are
-kept. Attachments and raw message bodies are not pushed, only the excerpt.
+The finished body is masked as a whole just before it is sent: every string in
+it (summary, author name, ticket and chat titles, excerpt, the human_needed
+question and option labels) goes through `MaskSecrets`, not only the excerpt.
+Ids, enums and links (`*_id`, `*_url`, `type`, `kind`, `status`, times) are left
+alone so receipts keep working. The same pass covers the two pull lists
+(`.../activity` and `.../human-needed`).
+
+`MaskSecrets` replaces PEM blocks, known key prefixes, bearer tokens, passwords
+in URLs and long random runs. For a credential field (`password`, `passwd`,
+`secret`, `token`, `api_key`, `密码`, `口令`, …) the value is masked from its
+first character and a quoted value is masked whole, spaces included, so
+`{"password":"ab"}` and `{"password":"two words"}` both lose the value. It errs
+toward masking; commit SHAs, UUIDs, URLs and paths are kept. Attachments and raw
+message bodies are not pushed, only the excerpt (1000 characters at most).
 
 ## Delivery
 
 Rides the human-needed outbox, so delivery, backoff and expiry are shared, but
 nobody chases an activity: HTTP 200 means delivered (`sent`) and it is never
-resent, escalated or nudged. At send time the server re-checks that the scope
-is still on, the person can still see the ticket, and still owns the chat;
-otherwise the event is cancelled. `human_needed` is always claimed first.
-Dedupe is per source (`act:comment:<id>`, `act:chat:<id>`, status and assignee
-changes by ticket and timestamp), so one thing is one event.
+resent, escalated or nudged. At send time the server decides again, against
+the stream as it stands now: the binding is still verified and not revoked, the
+person can still see the ticket, and the current scope still covers the source
+(`owned`: still creator, assignee, squad lead or chat opener; `followed`: still
+subscribed; a chat is only its opener's). Otherwise the event is cancelled and
+not sent. `human_needed` is always claimed first.
+Dedupe is per source (`act:comment:<id>`, `act:comment-edit:<id>:<revision>`,
+`act:chat:<id>`, status and assignee changes by ticket and timestamp), so one
+thing is one event.
 
 Retention: unsent rows expire after 72 h; finished rows are purged after 14
 days. Low-importance events stop queuing when a Bot already has 2000 waiting
@@ -85,7 +100,11 @@ Optional: `POST /api/workspaces/{id}/bots/{botId}/wake/events/{eventId}/handled`
 `{reason}` closes an activity the Bot looked at and decided nobody needs telling
 about. `GET .../bots/{botId}/activity?status=&importance=&limit=&before=` lists
 the rows still held (default `queued,sent,woken,relayed`), newest first, for
-catching up after downtime.
+catching up after downtime. The list is filtered by the same send-time decision:
+a row whose ticket the person can no longer see, or that the current scope no
+longer covers, is not returned. A page that filtering empties is followed by the
+next one (up to ten pages per request), so `next_cursor` always resumes where
+the scan stopped.
 
 ```sh
 multica bot bind --activity owned,followed

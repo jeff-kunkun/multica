@@ -1,6 +1,7 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -239,10 +240,15 @@ var (
 	secretPEM    = regexp.MustCompile(`(?s)-----BEGIN [A-Z ]*PRIVATE KEY-----.*?(-----END [A-Z ]*PRIVATE KEY-----|$)`)
 	secretPrefix = regexp.MustCompile(`\b(?:(?:mul|mat|msk|mpat|mbt)_[A-Za-z0-9_\-]{8,}|sk-[A-Za-z0-9_\-]{16,}|gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|AKIA[0-9A-Z]{16}|xox[abprs]-[A-Za-z0-9\-]{10,}|AIza[0-9A-Za-z_\-]{30,}|eyJ[A-Za-z0-9_\-]{8,}\.[A-Za-z0-9_\-]{8,}\.[A-Za-z0-9_\-]{8,})`)
 	secretBearer = regexp.MustCompile(`(?i)\b(bearer|basic)\s+[A-Za-z0-9._\-~+/=]{8,}`)
-	secretAssign = regexp.MustCompile(`(?i)(password|passwd|pwd|passphrase|secret|token|api[_\- ]?key|apikey|access[_\- ]?key|private[_\- ]?key|credential|authorization|webhook[_\- ]?key|密码|口令|密钥|令牌|钥匙|凭据)(["']?\s*[:=：]\s*["']?)([^\s"',;，；]{3,})`)
-	secretURLPwd = regexp.MustCompile(`(://[^/\s:@]+:)[^@\s/]+@`)
-	secretLong   = regexp.MustCompile(`[A-Za-z0-9_\-+/=]{32,}`)
-	gitSHA       = regexp.MustCompile(`^[0-9a-f]{40}$`)
+	// A credential field is "name, separator, value". A quoted value is masked
+	// whole, whatever it holds (spaces, one character); an unquoted one runs to
+	// the next separator and is masked from its first character: "ab" is a
+	// password like any other.
+	secretAssignQuoted = regexp.MustCompile(`(?i)(password|passwd|pwd|passphrase|secret|token|api[_\- ]?key|apikey|access[_\- ]?key|private[_\- ]?key|credential|authorization|webhook[_\- ]?key|密码|口令|密钥|令牌|钥匙|凭据)(["']?\s*[:=：]\s*)("[^"\n]*"|'[^'\n]*'|“[^”\n]*”|「[^」\n]*」|‘[^’\n]*’)`)
+	secretAssign       = regexp.MustCompile(`(?i)(password|passwd|pwd|passphrase|secret|token|api[_\- ]?key|apikey|access[_\- ]?key|private[_\- ]?key|credential|authorization|webhook[_\- ]?key|密码|口令|密钥|令牌|钥匙|凭据)(["']?\s*[:=：]\s*["'“「‘]?)([^\s"',;，；”」’]+)`)
+	secretURLPwd       = regexp.MustCompile(`(://[^/\s:@]+:)[^@\s/]+@`)
+	secretLong         = regexp.MustCompile(`[A-Za-z0-9_\-+/=]{32,}`)
+	gitSHA             = regexp.MustCompile(`^[0-9a-f]{40}$`)
 )
 
 // MaskSecrets replaces anything in text that looks like a credential. It errs
@@ -255,6 +261,7 @@ func MaskSecrets(text string) string {
 	text = secretPEM.ReplaceAllString(text, maskedSecret)
 	text = secretPrefix.ReplaceAllString(text, maskedSecret)
 	text = secretBearer.ReplaceAllString(text, "$1 "+maskedSecret)
+	text = secretAssignQuoted.ReplaceAllStringFunc(text, maskQuotedValue)
 	text = secretAssign.ReplaceAllString(text, "$1$2"+maskedSecret)
 	text = secretURLPwd.ReplaceAllString(text, "${1}"+maskedSecret+"@")
 	text = secretLong.ReplaceAllStringFunc(text, func(m string) string {
@@ -264,6 +271,20 @@ func MaskSecrets(text string) string {
 		return m
 	})
 	return text
+}
+
+// maskQuotedValue masks the quoted value of a credential field and keeps the
+// quote marks, so masked JSON stays valid JSON.
+func maskQuotedValue(m string) string {
+	sub := secretAssignQuoted.FindStringSubmatch(m)
+	if sub == nil {
+		return m
+	}
+	quoted := []rune(sub[3])
+	if len(quoted) <= 2 {
+		return m // an empty value hides nothing
+	}
+	return sub[1] + sub[2] + string(quoted[0]) + maskedSecret + string(quoted[len(quoted)-1])
 }
 
 // looksLikeSecretRun decides about one long run of token characters: a path
@@ -306,32 +327,55 @@ func looksLikeSecretRun(m string) bool {
 	return len(m) >= 40 && hasDigit && hasLetter && hasUpper && hasLower
 }
 
-// ScrubFields masks every string in a webhook body, whatever put it there.
-// It is the last gate before the network: the builders only copy whitelisted
-// fields, and this catches a secret that rode in inside one of them.
-func ScrubFields(v any) any {
+// ScrubPayload is the last gate before the network. The builders mask the free
+// text they know about; this walks the finished body as it will be sent
+// (summary, author, titles, options, the human_needed block, whatever a later
+// change adds) and masks every string in it, so protection does not depend on
+// each builder remembering. The body goes through JSON first, which flattens
+// typed values (option structs, slices of strings) into what the Bot receives.
+func ScrubPayload(fields map[string]any) (map[string]any, error) {
+	raw, err := json.Marshal(fields)
+	if err != nil {
+		return nil, err
+	}
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.UseNumber()
+	var out map[string]any
+	if err := dec.Decode(&out); err != nil {
+		return nil, err
+	}
+	scrubValue(out)
+	return out, nil
+}
+
+// ScrubFields masks every string in v in place and returns it.
+func ScrubFields(v any) any { return scrubValue(v) }
+
+// scrubExempt are the structural keys whose values are ids, links and enums
+// the Bot has to read verbatim; a 36-character id is not a secret, and a
+// receipt URL broken by the masker would strand the event.
+func scrubExempt(key string) bool {
+	k := strings.ToLower(key)
+	return k == "id" || k == "type" || k == "kind" || k == "schema" || k == "time" ||
+		strings.HasSuffix(k, "_id") || strings.HasSuffix(k, "_url") || strings.HasSuffix(k, "_at") ||
+		k == "url" || k == "activity_type" || k == "importance" || k == "status" || k == "mode" || k == "urgency"
+}
+
+func scrubValue(v any) any {
 	switch t := v.(type) {
 	case string:
 		return MaskSecrets(t)
 	case map[string]any:
 		for k, val := range t {
-			t[k] = ScrubFields(val)
+			if scrubExempt(k) {
+				continue
+			}
+			t[k] = scrubValue(val)
 		}
 		return t
 	case []any:
 		for i, val := range t {
-			t[i] = ScrubFields(val)
-		}
-		return t
-	case []map[string]any:
-		for i := range t {
-			ScrubFields(t[i])
-		}
-		return t
-	case []HumanNeededOption:
-		for i := range t {
-			t[i].Label = MaskSecrets(t[i].Label)
-			t[i].ID = MaskSecrets(t[i].ID)
+			t[i] = scrubValue(val)
 		}
 		return t
 	}

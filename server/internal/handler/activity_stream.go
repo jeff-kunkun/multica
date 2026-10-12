@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -138,34 +139,133 @@ func (h *Handler) ListActivityForBot(w http.ResponseWriter, r *http.Request) {
 	if raw := strings.TrimSpace(r.URL.Query().Get("importance")); raw != "" {
 		minRank = raw
 	}
-	rows, err := h.Queries.ListActivityForBot(r.Context(), db.ListActivityForBotParams{
-		BotID: bot.ID, WorkspaceID: bot.WorkspaceID, Column3: statuses, Before: before, Limit: limit,
-	})
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to list activity")
-		return
-	}
-	out := make([]map[string]any, 0, len(rows))
-	for _, ev := range rows {
-		var body service.ActivityBody
-		_ = json.Unmarshal(ev.Activity, &body)
-		if !service.ActivityAtLeast(body.Importance, minRank) {
-			continue
-		}
-		if body.Categories == nil {
-			body.Categories = []string{}
-		}
-		out = append(out, map[string]any{
-			"event_id": uuidToString(ev.EventID), "sequence": ev.Sequence, "status": ev.Status,
-			"activity_type": body.ActivityType, "importance": body.Importance, "categories": body.Categories,
-			"excerpt": service.MaskSecrets(body.Excerpt), "from_status": body.FromStatus, "to_status": body.ToStatus,
-			"issue_id": uuidToPtr(ev.IssueID), "chat_session_id": uuidToPtr(ev.ChatSessionID),
-			"source_id": body.SourceID, "occurred_at": body.OccurredAt, "created_at": timestampToString(ev.CreatedAt),
-		})
-	}
+	// The list is filtered by what the person may see and what their stream
+	// covers right now, not by what was true when a row was queued; a page that
+	// filtering empties is followed by the next one, so a hidden run of rows
+	// never hides the visible ones behind it.
+	gate := newActivityGate(h, r.Context())
+	out := make([]map[string]any, 0, limit)
 	next := ""
-	if len(rows) == int(limit) {
-		next = strconv.FormatInt(rows[len(rows)-1].Sequence, 10)
+	cursor := before
+scan:
+	for scans := 0; scans < activityListMaxScans; scans++ {
+		rows, err := h.Queries.ListActivityForBot(r.Context(), db.ListActivityForBotParams{
+			BotID: bot.ID, WorkspaceID: bot.WorkspaceID, Column3: statuses, Before: cursor, Limit: limit,
+		})
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to list activity")
+			return
+		}
+		for _, ev := range rows {
+			var body service.ActivityBody
+			_ = json.Unmarshal(ev.Activity, &body)
+			if !service.ActivityAtLeast(body.Importance, minRank) {
+				continue
+			}
+			if ok, _ := gate.allows(ev); !ok {
+				continue
+			}
+			if body.Categories == nil {
+				body.Categories = []string{}
+			}
+			out = append(out, map[string]any{
+				"event_id": uuidToString(ev.EventID), "sequence": ev.Sequence, "status": ev.Status,
+				"activity_type": body.ActivityType, "importance": body.Importance, "categories": body.Categories,
+				"excerpt": body.Excerpt, "from_status": body.FromStatus, "to_status": body.ToStatus,
+				"issue_id": uuidToPtr(ev.IssueID), "chat_session_id": uuidToPtr(ev.ChatSessionID),
+				"source_id": body.SourceID, "occurred_at": body.OccurredAt, "created_at": timestampToString(ev.CreatedAt),
+			})
+			if len(out) == int(limit) {
+				next = strconv.FormatInt(ev.Sequence, 10)
+				break scan
+			}
+		}
+		if len(rows) < int(limit) {
+			next = ""
+			break
+		}
+		last := rows[len(rows)-1].Sequence
+		cursor = pgtype.Int8{Int64: last, Valid: true}
+		next = strconv.FormatInt(last, 10)
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"events": out, "next_cursor": next})
+	writeScrubbedJSON(w, map[string]any{"events": out, "next_cursor": next})
+}
+
+// activityListMaxScans bounds how many pages one catch-up request may read
+// while filtering; the cursor it returns resumes where it stopped.
+const activityListMaxScans = 10
+
+// activityGate answers, for an activity row, whether it may still reach its
+// person: the person is still a member who can see the ticket, and their
+// binding is still live with a scope that covers the source. It runs where a
+// row is sent and where a row is listed, so the two cannot disagree.
+type activityGate struct {
+	h       *Handler
+	ctx     context.Context
+	viewers map[pgtype.UUID]*visibilityViewer
+	checked map[string]gateResult
+}
+
+type gateResult struct {
+	ok     bool
+	reason string
+}
+
+func newActivityGate(h *Handler, ctx context.Context) *activityGate {
+	return &activityGate{h: h, ctx: ctx, viewers: map[pgtype.UUID]*visibilityViewer{}, checked: map[string]gateResult{}}
+}
+
+func (g *activityGate) allows(ev db.HumanNeededEvent) (bool, string) {
+	key := "x"
+	switch {
+	case ev.IssueID.Valid:
+		key = "i:" + uuidToString(ev.IssueID) + ":" + uuidToString(ev.BindingID)
+	case ev.ChatSessionID.Valid:
+		key = "c:" + uuidToString(ev.ChatSessionID) + ":" + uuidToString(ev.BindingID)
+	}
+	if r, ok := g.checked[key]; ok {
+		return r.ok, r.reason
+	}
+	ok, reason := g.decide(ev)
+	g.checked[key] = gateResult{ok, reason}
+	return ok, reason
+}
+
+func (g *activityGate) decide(ev db.HumanNeededEvent) (bool, string) {
+	q := g.h.Queries
+	var covering []db.MemberBotBinding
+	var err error
+	switch {
+	case ev.IssueID.Valid:
+		issue, getErr := q.GetIssue(g.ctx, ev.IssueID)
+		if getErr != nil || issue.WorkspaceID != ev.WorkspaceID {
+			return false, "access unavailable"
+		}
+		viewer, ok := g.viewers[ev.TargetUserID]
+		if !ok {
+			v, vErr := g.h.visibilityViewerForUser(g.ctx, ev.WorkspaceID, ev.TargetUserID)
+			if vErr != nil {
+				return false, "access unavailable"
+			}
+			viewer = &v
+			g.viewers[ev.TargetUserID] = viewer
+		}
+		if !viewer.canSeeIssue(issue) {
+			return false, "access unavailable"
+		}
+		covering, err = q.ListActivityBindingsForIssue(g.ctx, db.ListActivityBindingsForIssueParams{WorkspaceID: ev.WorkspaceID, ID: ev.IssueID})
+	case ev.ChatSessionID.Valid:
+		covering, err = q.ListActivityBindingsForChat(g.ctx, db.ListActivityBindingsForChatParams{WorkspaceID: ev.WorkspaceID, ID: ev.ChatSessionID})
+	default:
+		return false, "access unavailable"
+	}
+	if err != nil {
+		return false, "access unavailable"
+	}
+	for _, b := range covering {
+		if b.ID == ev.BindingID {
+			return true, ""
+		}
+	}
+	return false, "outside activity scope"
 }

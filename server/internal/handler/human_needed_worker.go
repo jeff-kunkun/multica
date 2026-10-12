@@ -144,13 +144,23 @@ func (w *HumanNeededWorker) push(ctx context.Context, ev db.HumanNeededEvent) {
 		w.cancel(ev, "activity stream switched off")
 		return
 	}
-	if ev.IssueID.Valid && !w.targetCanSeeIssue(ctx, ev) {
-		w.cancel(ev, "access unavailable")
-		return
-	}
-	if ev.ChatSessionID.Valid && !w.targetOwnsChat(ctx, ev) {
-		w.cancel(ev, "access unavailable")
-		return
+	if ev.EventType == service.HumanEventActivity {
+		// Re-decided at send time against the stream as it stands now: the
+		// person may have lost sight of the ticket, stopped following it,
+		// handed it on, or narrowed the scope since the row was queued.
+		if ok, reason := newActivityGate(w.h, ctx).allows(ev); !ok {
+			w.cancel(ev, reason)
+			return
+		}
+	} else {
+		if ev.IssueID.Valid && !w.targetCanSeeIssue(ctx, ev) {
+			w.cancel(ev, "access unavailable")
+			return
+		}
+		if ev.ChatSessionID.Valid && !w.targetOwnsChat(ctx, ev) {
+			w.cancel(ev, "access unavailable")
+			return
+		}
 	}
 	wake, err := w.h.Queries.GetBotWake(ctx, ev.BotID)
 	if err != nil || len(wake.WebhookSecret) == 0 || w.h.BotWakeSecrets == nil {
@@ -173,6 +183,12 @@ func (w *HumanNeededWorker) push(ctx context.Context, ev db.HumanNeededEvent) {
 		return
 	}
 	fields, err := w.h.humanNeededPayloadFields(ctx, ev, channel)
+	if err != nil {
+		w.finish(ev, false, "payload unavailable")
+		return
+	}
+	// Whatever the builders copied in, nothing leaves unmasked.
+	fields, err = service.ScrubPayload(fields)
 	if err != nil {
 		w.finish(ev, false, "payload unavailable")
 		return
@@ -303,7 +319,9 @@ func (h *Handler) humanNeededPayloadFields(ctx context.Context, ev db.HumanNeede
 	if ev.EventType == service.HumanEventEscalation {
 		lead = "还没转达给你，请尽快看"
 	}
-	summary := fmt.Sprintf("%s：%s", lead, ev.Question)
+	// Masked before the cut: a secret truncated to a stub is no longer
+	// recognisable as one.
+	summary := fmt.Sprintf("%s：%s", lead, service.MaskSecrets(ev.Question))
 	if title != "" {
 		summary = fmt.Sprintf("%s（%s）", summary, title)
 	}

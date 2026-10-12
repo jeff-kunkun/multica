@@ -366,3 +366,233 @@ func TestActivityPurgeKeepsOpenRows(t *testing.T) {
 	}
 	_ = time.Now
 }
+
+// activityCaller serves the Bot's pull routes for a test and calls them with
+// the Bot's own token.
+func activityCaller(t *testing.T, f *humanNeededFixture) func(method, path string) (int, []byte) {
+	t.Helper()
+	router := chi.NewRouter()
+	router.Use(middleware.Auth(testHandler.Queries, nil, nil, nil))
+	router.Route("/api/workspaces/{id}", func(r chi.Router) {
+		r.Use(middleware.RequireWorkspaceMemberFromURL(testHandler.Queries, "id"))
+		r.Get("/bots/{botId}/activity", testHandler.ListActivityForBot)
+		r.Get("/bots/{botId}/human-needed", testHandler.ListHumanNeededForBot)
+	})
+	srv := httptest.NewServer(router)
+	t.Cleanup(srv.Close)
+	return func(method, path string) (int, []byte) {
+		req, _ := http.NewRequest(method, srv.URL+"/api/workspaces/"+testWorkspaceID+"/bots/"+uuidToString(f.bot.ID)+path, nil)
+		req.Header.Set("Authorization", "Bearer "+f.token)
+		res, err := srv.Client().Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer res.Body.Close()
+		data, _ := io.ReadAll(res.Body)
+		return res.StatusCode, data
+	}
+}
+
+// A row queued while the person could see the ticket must not be readable
+// through the catch-up list once they cannot, and the same goes for a stream
+// that no longer covers it.
+func TestActivityCatchUpListFollowsTheCurrentAccess(t *testing.T) {
+	f := newHumanNeededFixture(t, true)
+	agent := agentActor(t)
+	call := activityCaller(t, f)
+	// Someone else's ticket, followed by this person.
+	issue := dbfx.Issue(t, "Followed then hidden", testutil.Cols{"visibility": "workspace", "creator_type": "member", "creator_id": summonSecondMember(t)})
+	dbfx.Exec(t, `INSERT INTO issue_subscriber (issue_id, user_type, user_id, reason) VALUES ($1,'member',$2,'manual')`, issue, testUserID)
+	setActivityScope(t, f, "followed")
+	routeActivity(t, service.ActivityInput{
+		IssueID: parseUUID(issue), Type: service.ActivityCommentCreated, DedupeKey: "act:comment:catchup",
+		SourceID: "catchup", ActorType: "agent", ActorID: parseUUID(agent), Text: "REVIEW_PRIVATE_EXCERPT",
+	})
+	if code, data := call("GET", "/activity"); code != 200 || !strings.Contains(string(data), "REVIEW_PRIVATE_EXCERPT") {
+		t.Fatalf("visible row missing: %d %s", code, data)
+	}
+
+	// The ticket goes private: the person no longer sees it, so the Bot must not.
+	dbfx.Exec(t, `UPDATE issue SET visibility='private' WHERE id=$1`, issue)
+	if code, data := call("GET", "/activity"); code != 200 || strings.Contains(string(data), "REVIEW_PRIVATE_EXCERPT") {
+		t.Fatalf("a hidden ticket's text was served: %d %s", code, data)
+	}
+	dbfx.Exec(t, `UPDATE issue SET visibility='workspace' WHERE id=$1`, issue)
+
+	// Narrowing the stream to owned, or unfollowing, takes it away too.
+	setActivityScope(t, f, "owned")
+	if _, data := call("GET", "/activity"); strings.Contains(string(data), "REVIEW_PRIVATE_EXCERPT") {
+		t.Fatalf("a narrowed scope still served the row: %s", data)
+	}
+	setActivityScope(t, f, "followed")
+	if _, data := call("GET", "/activity"); !strings.Contains(string(data), "REVIEW_PRIVATE_EXCERPT") {
+		t.Fatalf("row should be back: %s", data)
+	}
+	dbfx.Exec(t, `UPDATE issue_subscriber SET unsubscribed_at=now() WHERE issue_id=$1`, issue)
+	if _, data := call("GET", "/activity"); strings.Contains(string(data), "REVIEW_PRIVATE_EXCERPT") {
+		t.Fatalf("an unfollowed ticket's row was served: %s", data)
+	}
+}
+
+// Filtering must not strand the rows behind a run of hidden ones.
+func TestActivityCatchUpListSkipsHiddenRunsWithoutEmptyPages(t *testing.T) {
+	f := newHumanNeededFixture(t, true)
+	agent := agentActor(t)
+	call := activityCaller(t, f)
+	setActivityScope(t, f, "owned")
+	visible := dbfx.Issue(t, "Visible", testutil.Cols{"visibility": "workspace"})
+	routeActivity(t, service.ActivityInput{
+		IssueID: parseUUID(visible), Type: service.ActivityCommentCreated, DedupeKey: "act:comment:old-visible",
+		SourceID: "ov", ActorType: "agent", ActorID: parseUUID(agent), Text: "OLD_VISIBLE_ROW",
+	})
+	hidden := dbfx.Issue(t, "Hidden", testutil.Cols{"visibility": "workspace"})
+	for i := 0; i < 5; i++ {
+		routeActivity(t, service.ActivityInput{
+			IssueID: parseUUID(hidden), Type: service.ActivityCommentCreated, DedupeKey: "act:comment:h" + string(rune('a'+i)),
+			SourceID: "h", ActorType: "agent", ActorID: parseUUID(agent), Text: "HIDDEN_ROW",
+		})
+	}
+	dbfx.Exec(t, `UPDATE issue SET visibility='private', creator_type='agent', creator_id=$2 WHERE id=$1`, hidden, agent)
+	code, data := call("GET", "/activity?limit=2")
+	if code != 200 || !strings.Contains(string(data), "OLD_VISIBLE_ROW") || strings.Contains(string(data), "HIDDEN_ROW") {
+		t.Fatalf("limit=2 over five hidden rows: %d %s", code, data)
+	}
+}
+
+// A queued row is judged again when it is about to go out.
+func TestActivityPushIsReDecidedAtSendTime(t *testing.T) {
+	agent := agentActor(t)
+	cases := []struct {
+		name   string
+		change func(t *testing.T, f *humanNeededFixture, issue string)
+	}{
+		{"scope narrowed from followed to owned", func(t *testing.T, f *humanNeededFixture, _ string) { setActivityScope(t, f, "owned") }},
+		{"unfollowed", func(t *testing.T, _ *humanNeededFixture, issue string) {
+			dbfx.Exec(t, `UPDATE issue_subscriber SET unsubscribed_at=now() WHERE issue_id=$1`, issue)
+		}},
+		{"ticket became private", func(t *testing.T, _ *humanNeededFixture, issue string) {
+			dbfx.Exec(t, `UPDATE issue SET visibility='private' WHERE id=$1`, issue)
+		}},
+		{"binding revoked", func(t *testing.T, f *humanNeededFixture, _ string) {
+			dbfx.Exec(t, `UPDATE member_bot_binding SET revoked_at=now() WHERE id=$1`, f.binding)
+		}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			f := newHumanNeededFixture(t, true)
+			issue := dbfx.Issue(t, "Send time "+c.name, testutil.Cols{"visibility": "workspace", "creator_type": "member", "creator_id": summonSecondMember(t)})
+			dbfx.Exec(t, `INSERT INTO issue_subscriber (issue_id, user_type, user_id, reason) VALUES ($1,'member',$2,'manual')`, issue, testUserID)
+			setActivityScope(t, f, "followed")
+			if n := routeActivity(t, service.ActivityInput{
+				IssueID: parseUUID(issue), Type: service.ActivityCommentCreated, DedupeKey: "act:comment:sendtime",
+				SourceID: "st", ActorType: "agent", ActorID: parseUUID(agent), Text: "进展",
+			}); n != 1 {
+				t.Fatalf("queued %d", n)
+			}
+			c.change(t, f, issue)
+			before := f.calls.Load()
+			f.worker.ProcessNext(context.Background())
+			if f.calls.Load() != before {
+				t.Fatal("a row no longer covered was pushed")
+			}
+		})
+	}
+
+	t.Run("chat handed to someone else", func(t *testing.T) {
+		f := newHumanNeededFixture(t, true)
+		chat := dbfx.ChatSession(t, agent)
+		setActivityScope(t, f, "owned")
+		if n := routeActivity(t, service.ActivityInput{
+			ChatSessionID: parseUUID(chat), Type: service.ActivityChatMessage, DedupeKey: "act:chat:sendtime",
+			SourceID: "cm", ActorType: "agent", ActorID: parseUUID(agent), Text: "查完了",
+		}); n != 1 {
+			t.Fatalf("queued %d", n)
+		}
+		stranger := summonSecondMember(t)
+		dbfx.Exec(t, `UPDATE chat_session SET creator_id=$2 WHERE id=$1`, chat, stranger)
+		before := f.calls.Load()
+		f.worker.ProcessNext(context.Background())
+		if f.calls.Load() != before {
+			t.Fatal("a chat that changed hands was pushed")
+		}
+	})
+
+	t.Run("still covered is pushed", func(t *testing.T) {
+		f := newHumanNeededFixture(t, true)
+		issue := dbfx.Issue(t, "Still covered", testutil.Cols{"visibility": "workspace"})
+		setActivityScope(t, f, "owned")
+		routeActivity(t, service.ActivityInput{
+			IssueID: parseUUID(issue), Type: service.ActivityCommentCreated, DedupeKey: "act:comment:stillok",
+			SourceID: "ok", ActorType: "agent", ActorID: parseUUID(agent), Text: "进展",
+		})
+		f.worker.ProcessNext(context.Background())
+		if f.calls.Load() != 1 {
+			t.Fatalf("calls %d", f.calls.Load())
+		}
+	})
+}
+
+// Nothing in a pushed or pulled body carries a credential, whichever field it
+// rode in: question, summary, title, author name, option labels.
+func TestWebhookBodiesAreMaskedWholeNotFieldByField(t *testing.T) {
+	f := newHumanNeededFixture(t, true)
+	agent := agentActor(t)
+	call := activityCaller(t, f)
+	leaks := []string{"review only secret", "ReviewOnlySecret123", `"password":"ab"`, `\"password\":\"ab\"`}
+
+	// human_needed: question, summary, option labels.
+	issue := dbfx.Issue(t, `Deploy {"password":"review only secret"}`, testutil.Cols{"visibility": "workspace"})
+	res := f.route(t, issue, "needed-secret", false)
+	dbfx.Exec(t, `UPDATE human_needed_event SET question=$2, options=$3::jsonb WHERE event_id=$1`,
+		uuidToString(res.Event.EventID),
+		`发布吗？ {"password":"review only secret"} token=ReviewOnlySecret123`,
+		`[{"id":"yes","label":"用 {\"password\":\"ab\"} 发布"}]`)
+	if ok, _ := f.worker.ProcessNext(context.Background()); !ok {
+		t.Fatal("nothing processed")
+	}
+	raw, _ := f.lastBody.Load().([]byte)
+	for _, leak := range leaks {
+		if strings.Contains(string(raw), leak) {
+			t.Fatalf("human_needed body leaked %q:\n%s", leak, raw)
+		}
+	}
+	if !strings.Contains(string(raw), "ack_url") {
+		t.Fatalf("masking broke the receipt links: %s", raw)
+	}
+
+	// activity push: excerpt and the ticket title.
+	setActivityScope(t, f, "owned")
+	routeActivity(t, service.ActivityInput{
+		IssueID: parseUUID(issue), Type: service.ActivityCommentCreated, DedupeKey: "act:comment:secret-push",
+		SourceID: "sp", ActorType: "agent", ActorID: parseUUID(agent), Text: `密码 {"password":"review only secret"} 已改 {"password":"ab"}`,
+	})
+	if ok, _ := f.worker.ProcessNext(context.Background()); !ok {
+		t.Fatal("activity not processed")
+	}
+	raw, _ = f.lastBody.Load().([]byte)
+	for _, leak := range leaks {
+		if strings.Contains(string(raw), leak) {
+			t.Fatalf("activity body leaked %q:\n%s", leak, raw)
+		}
+	}
+
+	// the two pull lists
+	code, data := call("GET", "/activity?status=sent,queued")
+	if code != 200 {
+		t.Fatalf("activity list: %d", code)
+	}
+	for _, leak := range leaks {
+		if strings.Contains(string(data), leak) {
+			t.Fatalf("activity list leaked %q: %s", leak, data)
+		}
+	}
+	code, data = call("GET", "/human-needed?status=sent,queued")
+	if code != 200 {
+		t.Fatalf("human-needed list: %d %s", code, data)
+	}
+	for _, leak := range leaks {
+		if strings.Contains(string(data), leak) {
+			t.Fatalf("human-needed list leaked %q: %s", leak, data)
+		}
+	}
+}

@@ -1,23 +1,32 @@
 package service
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 )
 
 func TestMaskSecretsRemovesCredentialsAndKeepsOrdinaryText(t *testing.T) {
 	cases := map[string]string{
-		"password: hunter2-super":                              "hunter2-super",
-		"密码=abc12345":                                          "abc12345",
-		"api_key: AKIAABCDEFGHIJKLMNOP":                        "AKIAABCDEFGHIJKLMNOP",
-		"Authorization: Bearer abcdef1234567890xyz":            "abcdef1234567890xyz",
-		"clone https://user:s3cretpass@example.com/repo":       "s3cretpass",
-		"sk-abcdefghijklmnopqrstuvwx":                          "sk-abcdefghijklmnopqrstuvwx",
-		"mul_AbCdEfGhIjKlMnOp":                                 "mul_AbCdEfGhIjKlMnOp",
-		"ghp_abcdefghijklmnopqrstuvwxyz0123":                   "ghp_abcdefghijklmnopqrstuvwxyz0123",
-		"eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.abc12345def": "eyJhbGciOiJIUzI1NiJ9",
+		"password: hunter2-super":                                                 "hunter2-super",
+		"密码=abc12345":                                                             "abc12345",
+		"api_key: AKIAABCDEFGHIJKLMNOP":                                           "AKIAABCDEFGHIJKLMNOP",
+		"Authorization: Bearer abcdef1234567890xyz":                               "abcdef1234567890xyz",
+		"clone https://user:s3cretpass@example.com/repo":                          "s3cretpass",
+		"sk-abcdefghijklmnopqrstuvwx":                                             "sk-abcdefghijklmnopqrstuvwx",
+		"mul_AbCdEfGhIjKlMnOp":                                                    "mul_AbCdEfGhIjKlMnOp",
+		"ghp_abcdefghijklmnopqrstuvwxyz0123":                                      "ghp_abcdefghijklmnopqrstuvwxyz0123",
+		"eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.abc12345def":            "eyJhbGciOiJIUzI1NiJ9",
 		"-----BEGIN RSA PRIVATE KEY-----\nMIIEabc\n-----END RSA PRIVATE KEY-----": "MIIEabc",
-		"blob Zm9vYmFyYmF6cXV4MTIzNDU2Nzg5MGFiY2RlZmdoaWo=":      "Zm9vYmFyYmF6cXV4MTIzNDU2Nzg5MGFiY2RlZmdoaWo",
+		"blob Zm9vYmFyYmF6cXV4MTIzNDU2Nzg5MGFiY2RlZmdoaWo=":                       "Zm9vYmFyYmF6cXV4MTIzNDU2Nzg5MGFiY2RlZmdoaWo",
+		// short values and values with spaces, when the field is a credential
+		`{"password":"ab"}`:                  "ab",
+		`{"password":"review only secret"}`:  "only secret",
+		`{"Password": "review only secret"}`: "review",
+		`password = 'two words'`:             "two words",
+		`密码：“带 空格 的口令”`:                      "空格",
+		`DB_PASSWORD=x9`:                     "x9",
+		`{"api_key":"a b","note":"fine"}`:    "a b",
 	}
 	for in, leak := range cases {
 		out := MaskSecrets(in)
@@ -79,5 +88,49 @@ func TestNormalizeActivityScope(t *testing.T) {
 	}
 	if _, err := NormalizeActivityScope([]string{"all"}); err == nil {
 		t.Fatal("unknown scope accepted")
+	}
+}
+
+func TestMaskSecretsKeepsMaskedJSONValid(t *testing.T) {
+	out := MaskSecrets(`{"password":"review only secret","note":"keep me"}`)
+	var v map[string]string
+	if err := json.Unmarshal([]byte(out), &v); err != nil {
+		t.Fatalf("masked JSON no longer parses: %v: %s", err, out)
+	}
+	if v["note"] != "keep me" || v["password"] == "review only secret" {
+		t.Fatalf("wrong result: %v", v)
+	}
+	if again := MaskSecrets(out); again != out {
+		t.Fatalf("masking is not idempotent: %q -> %q", out, again)
+	}
+}
+
+func TestScrubPayloadMasksEveryStringButNotLinksOrIds(t *testing.T) {
+	in := map[string]any{
+		"summary":  `要你决定：{"password":"review only secret"}`,
+		"event_id": "01a12fc8-ec8b-734b-9b03-13f01c9d710d",
+		"ack_url":  "https://example.com/api/workspaces/01a12fc8-ec8b-734b-9b03-13f01c9d710d/bots/01a12fc8-ec8b-734b-9b03-13f01c9d710d/wake/events/01a12fc8-ec8b-734b-9b03-13f01c9d710d/ack",
+		"sequence": int64(9007199254740993),
+		"author":   map[string]any{"type": "member", "name": "token: abc"},
+		"human_needed": map[string]any{
+			"question": `密码 "ab c"`,
+			"options":  []HumanNeededOption{{ID: "yes", Label: `{"password":"ab"}`}},
+		},
+	}
+	out, err := ScrubPayload(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := json.Marshal(out)
+	for _, leak := range []string{"review only secret", `"ab c"`, `\"ab\"`, "token: abc"} {
+		if strings.Contains(string(raw), leak) {
+			t.Errorf("leaked %q: %s", leak, raw)
+		}
+	}
+	if out["event_id"] != in["event_id"] || out["ack_url"] != in["ack_url"] {
+		t.Errorf("ids or links were changed: %v", out)
+	}
+	if !strings.Contains(string(raw), "9007199254740993") {
+		t.Errorf("large number lost precision: %s", raw)
 	}
 }

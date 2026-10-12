@@ -531,7 +531,19 @@ func (h *Handler) ListHumanNeededForBot(w http.ResponseWriter, r *http.Request) 
 	if len(rows) == int(limit) {
 		next = strconv.FormatInt(rows[len(rows)-1].Sequence, 10)
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"events": out, "next_cursor": next})
+	writeScrubbedJSON(w, map[string]any{"events": out, "next_cursor": next})
+}
+
+// writeScrubbedJSON answers a Bot with a body that has been through
+// service.ScrubPayload: a pull list carries the same free text a push does, so
+// it gets the same last gate.
+func writeScrubbedJSON(w http.ResponseWriter, body map[string]any) {
+	clean, err := service.ScrubPayload(body)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to render response")
+		return
+	}
+	writeJSON(w, http.StatusOK, clean)
 }
 
 // ---- asking a person ----
