@@ -108,6 +108,27 @@ Removing it: delete `server/internal/mirror`, its block in
 `docker-compose.selfhost.yml`, and drop the `mirror_link` table. Nothing
 else refers to it.
 
+## Moving to the schema baseline
+
+Migrations up to 585 are compressed into `001_baseline` (see
+`server/cmd/migrate/README.md`). A database that stopped before 585 is refused,
+and the office database was created at 573, so the first deploy of a baseline
+build needs an empty database. Any deploy left to the timer would fail its
+health check and roll back, and wiping early lets the old build recreate a
+573 database. Do it in this order, once both baseline images exist:
+
+```bash
+cd /opt/multica-main
+sudo systemctl stop multica-main-autoupdate.timer
+docker compose -p multica-main down
+docker volume rm multica-main_pgdata
+sudo systemctl start multica-main-autoupdate.service   # deploys the tip on an empty database
+sudo systemctl start multica-main-autoupdate.timer
+```
+
+The password-login bootstrap recreates Kun's account from `.env`; workspaces,
+agents and tokens start over, so log the `office` CLI profile in again.
+
 ## Operating
 
 ```bash
