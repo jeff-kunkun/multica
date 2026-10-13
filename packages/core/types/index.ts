@@ -168,3 +168,11 @@ export type {
   ConnectVCSRequest,
   ConnectVCSResponse,
 } from "./vcs";
+export type {
+  Plan,
+  PlanStep,
+  IssuePlans,
+  PlanApprover,
+  Meeting,
+  MeetingIssue,
+} from "./plan";

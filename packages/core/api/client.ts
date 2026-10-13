@@ -4,6 +4,10 @@ import type { ArchivedInboxPage, ArchivedInboxFacets } from "../types/inbox";
 import { configStore } from "../config";
 import type {
   Issue,
+  IssuePlans,
+  Meeting,
+  Plan,
+  PlanApprover,
   CreateIssueRequest,
   MoveIssueRequest,
   UpdateIssueRequest,
@@ -271,6 +275,14 @@ import {
   EMPTY_WORKSPACE_MCP_SERVER,
   WorkspaceMcpServerListSchema,
   WorkspaceBotListSchema,
+  IssuePlansSchema,
+  EMPTY_ISSUE_PLANS,
+  ApprovePlanResponseSchema,
+  PlanApproverListSchema,
+  PlanApproverSchema,
+  EMPTY_PLAN_APPROVER,
+  MeetingListSchema,
+  EMPTY_MEETINGS,
   WorkspaceBotWithSecretsSchema,
   EMPTY_WORKSPACE_BOT,
   EMPTY_WORKSPACE_BOT_LIST,
@@ -2331,6 +2343,56 @@ export class ApiClient {
 
   async deleteBot(botId: string): Promise<void> {
     await this.fetch<unknown>(`/api/bots/${encodeURIComponent(botId)}`, { method: "DELETE" });
+  }
+
+  /** Every plan version on an issue (newest first) and whether the caller may approve. */
+  async listIssuePlans(issueId: string): Promise<IssuePlans> {
+    const raw = await this.fetch<unknown>(`/api/issues/${encodeURIComponent(issueId)}/plans`);
+    return parseWithFallback(raw, IssuePlansSchema, EMPTY_ISSUE_PLANS, {
+      endpoint: "GET /api/issues/{id}/plans",
+    });
+  }
+
+  /** Approves one plan version; each step becomes a child issue and starts. */
+  async approvePlan(issueId: string, version: number): Promise<Plan | null> {
+    const raw = await this.fetch<unknown>(
+      `/api/issues/${encodeURIComponent(issueId)}/plans/${version}/approve`,
+      { method: "POST" },
+    );
+    return parseWithFallback(raw, ApprovePlanResponseSchema, { plan: null }, {
+      endpoint: "POST /api/issues/{id}/plans/{version}/approve",
+    }).plan;
+  }
+
+  async listPlanApprovers(): Promise<PlanApprover[]> {
+    const raw = await this.fetch<unknown>("/api/plan-approvers");
+    return parseWithFallback(raw, PlanApproverListSchema, { approvers: [] }, {
+      endpoint: "GET /api/plan-approvers",
+    }).approvers;
+  }
+
+  async addPlanApprover(userId: string): Promise<PlanApprover> {
+    const raw = await this.fetch<unknown>("/api/plan-approvers", {
+      method: "POST",
+      body: JSON.stringify({ user_id: userId }),
+    });
+    return parseWithFallback(raw, PlanApproverSchema, EMPTY_PLAN_APPROVER, {
+      endpoint: "POST /api/plan-approvers",
+    });
+  }
+
+  async removePlanApprover(userId: string): Promise<void> {
+    await this.fetch<unknown>(`/api/plan-approvers/${encodeURIComponent(userId)}`, {
+      method: "DELETE",
+    });
+  }
+
+  /** Meeting-room list: meeting issues and issues carrying a plan. */
+  async listMeetings(): Promise<Meeting[]> {
+    const raw = await this.fetch<unknown>("/api/meetings");
+    return parseWithFallback(raw, MeetingListSchema, { meetings: EMPTY_MEETINGS }, {
+      endpoint: "GET /api/meetings",
+    }).meetings;
   }
 
   /** Removes a library entry and every assignment to it. */

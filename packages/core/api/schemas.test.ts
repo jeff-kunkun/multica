@@ -52,6 +52,13 @@ import {
   EMPTY_LIST_ISSUE_STATUSES_RESPONSE,
   EMPTY_ISSUE_STATUS_ENTRY,
 } from "./schemas";
+import {
+  EMPTY_ISSUE_PLANS,
+  EMPTY_MEETINGS,
+  IssuePlansSchema,
+  MeetingListSchema,
+  PlanApproverListSchema,
+} from "./schemas";
 import { parseWithFallback } from "./schema";
 
 const baseIssue = {
@@ -1937,5 +1944,61 @@ describe("WorkspaceBotSchema", () => {
   });
   it("falls back to an empty list for a non-array reply", () => {
     expect(parseWithFallback({ bots: [] }, WorkspaceBotListSchema, [], { endpoint: "GET /api/bots" })).toEqual([]);
+  });
+});
+
+describe("plan and meeting schemas", () => {
+  const plan = {
+    id: "plan-1",
+    issue_id: "issue-1",
+    version: 2,
+    status: "proposed",
+    goal: "Ship it",
+    steps: [{ title: "Build", assignee_type: "agent", assignee_id: "a-1", issue_id: null }],
+    comment_id: "c-1",
+  };
+
+  it("keeps good plans and defaults missing approval to false", () => {
+    const parsed = IssuePlansSchema.parse({ plans: [plan] });
+    expect(parsed.can_approve).toBe(false);
+    expect(parsed.plans[0]?.steps[0]?.title).toBe("Build");
+    expect(parsed.plans[0]?.approved_by).toBeNull();
+  });
+
+  it("falls back on malformed plan payloads without hiding the card", () => {
+    const parsed = IssuePlansSchema.parse({
+      plans: [{ ...plan, steps: "nope", version: "x" }],
+      can_approve: "yes",
+    });
+    expect(parsed.can_approve).toBe(false);
+    expect(parsed.plans[0]?.steps).toEqual([]);
+    expect(parsed.plans[0]?.version).toBe(0);
+    expect(
+      parseWithFallback("garbage", IssuePlansSchema, EMPTY_ISSUE_PLANS, {
+        endpoint: "GET /api/issues/{id}/plans",
+      }),
+    ).toEqual(EMPTY_ISSUE_PLANS);
+  });
+
+  it("parses meetings with a missing plan and bad counters", () => {
+    const parsed = MeetingListSchema.parse({
+      meetings: [
+        { issue: { id: "i-1", title: "Q" }, plan: "bad", steps_total: -1, steps_done: "2" },
+      ],
+    });
+    expect(parsed.meetings[0]?.plan).toBeNull();
+    expect(parsed.meetings[0]?.steps_total).toBe(0);
+    expect(parsed.meetings[0]?.steps_done).toBe(0);
+    expect(
+      parseWithFallback(42, MeetingListSchema, { meetings: EMPTY_MEETINGS }, {
+        endpoint: "GET /api/meetings",
+      }).meetings,
+    ).toEqual([]);
+  });
+
+  it("defaults approver fields and survives a non-object reply", () => {
+    const parsed = PlanApproverListSchema.parse({ approvers: [{ user_id: "u-1" }] });
+    expect(parsed.approvers[0]).toEqual({ user_id: "u-1", name: "", granted_by: "", created_at: "" });
+    expect(PlanApproverListSchema.parse({ approvers: "x" }).approvers).toEqual([]);
   });
 });

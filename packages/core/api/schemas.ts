@@ -45,6 +45,9 @@ import type {
   WorkspaceBot,
   WorkspaceBotWithSecrets,
   WorkspaceMcpServer,
+  IssuePlans,
+  Meeting,
+  PlanApprover,
 } from "../types";
 import type { CreateFeedbackResponse } from "../feedback/types";
 
@@ -2212,3 +2215,95 @@ export const RuntimeProfileSchema = z
     runtime_type: profile.runtime_type || profile.protocol_family,
   }));
 export const RuntimeProfileListSchema = z.array(RuntimeProfileSchema);
+
+// Plans and meetings (kun-main office). Unknown statuses pass through as
+// strings; malformed fields fall back so one bad row never hides the card.
+const nullableString = z.string().nullish().catch(null).transform((v) => v ?? null);
+
+export const PlanStepSchema = z
+  .object({
+    title: z.string().catch("").default(""),
+    assignee_type: z.string().catch("").default(""),
+    assignee_id: z.string().catch("").default(""),
+    issue_id: nullableString,
+  })
+  .loose();
+
+export const PlanSchema = z
+  .object({
+    id: z.string().default(""),
+    issue_id: z.string().catch("").default(""),
+    version: z.number().int().catch(0).default(0),
+    status: z.string().catch("").default(""),
+    author_type: z.string().catch("").default(""),
+    author_id: z.string().catch("").default(""),
+    goal: z.string().catch("").default(""),
+    out_of_scope: z.string().catch("").default(""),
+    steps: z.array(PlanStepSchema).catch([]).default([]),
+    done_when: z.string().catch("").default(""),
+    comment_id: nullableString,
+    approved_by: nullableString,
+    approved_at: nullableString,
+    created_at: z.string().catch("").default(""),
+  })
+  .loose();
+
+export const IssuePlansSchema = z
+  .object({
+    plans: z.array(PlanSchema).catch([]).default([]),
+    can_approve: z.boolean().catch(false).default(false),
+  })
+  .loose();
+
+export const EMPTY_ISSUE_PLANS: IssuePlans = { plans: [], can_approve: false };
+
+export const ApprovePlanResponseSchema = z
+  .object({ plan: PlanSchema.nullish().catch(null).transform((v) => v ?? null) })
+  .loose();
+
+export const PlanApproverSchema = z
+  .object({
+    user_id: z.string().default(""),
+    name: z.string().catch("").default(""),
+    granted_by: z.string().catch("").default(""),
+    created_at: z.string().catch("").default(""),
+  })
+  .loose();
+
+export const PlanApproverListSchema = z
+  .object({ approvers: z.array(PlanApproverSchema).catch([]).default([]) })
+  .loose();
+
+export const EMPTY_PLAN_APPROVER: PlanApprover = {
+  user_id: "",
+  name: "",
+  granted_by: "",
+  created_at: "",
+};
+
+export const MeetingSchema = z
+  .object({
+    issue: z
+      .object({
+        id: z.string().default(""),
+        identifier: z.string().catch("").default(""),
+        title: z.string().catch("").default(""),
+        status: z.string().catch("").default(""),
+        assignee_type: nullableString,
+        assignee_id: nullableString,
+        project_id: nullableString,
+        created_at: z.string().catch("").default(""),
+        updated_at: z.string().catch("").default(""),
+      })
+      .loose(),
+    plan: PlanSchema.nullish().catch(null).transform((v) => v ?? null),
+    steps_total: z.number().int().nonnegative().catch(0).default(0),
+    steps_done: z.number().int().nonnegative().catch(0).default(0),
+  })
+  .loose();
+
+export const MeetingListSchema = z
+  .object({ meetings: z.array(MeetingSchema).catch([]).default([]) })
+  .loose();
+
+export const EMPTY_MEETINGS: Meeting[] = [];
