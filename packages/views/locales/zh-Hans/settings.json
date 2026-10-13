@@ -310,8 +310,8 @@
     "my_account": "我的账号",
     "workspace_fallback": "工作区",
     "tabs": {
-      "profile": "个人资料",
-      "preferences": "偏好设置",
+      "profile": "账号",
+      "preferences": "外观",
       "shortcuts": "快捷键",
       "issue": "任务",
       "notifications": "通知",
@@ -320,14 +320,17 @@
       "github": "GitHub",
       "labs": "实验室",
       "members": "成员",
-      "bots": "Bot",
+      "bots": "Bot 接入",
       "labels": "标签",
       "issue_statuses": "任务状态",
       "properties": "属性",
       "mcp": "MCP 服务器",
-      "code": "代码"
+      "code": "代码",
+      "approvers": "批准权",
+      "local_run": "本机运行"
     },
     "groups": {
+      "office": "常用",
       "personal": "个人",
       "workspace": "工作区",
       "issues": "任务与工作流",

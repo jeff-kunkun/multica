@@ -57,6 +57,8 @@ import {
   useOptionalNavigation,
 } from "../navigation";
 import { IssueMentionCard } from "../issues/components/issue-mention-card";
+import { IssueAgentActivityIndicator } from "../issues/components/issue-agent-activity-indicator";
+import { useIssueMentionActivity } from "./issue-activity";
 import { useResolveIssueIdentifier } from "../issues/hooks";
 import { ProjectMentionCard } from "../projects/components/project-mention-card";
 import { useLinkHover, LinkHoverCard } from "../editor/link-hover-card";
@@ -120,9 +122,15 @@ function useClosedFence(offset: number | undefined): ClosedFence | undefined {
  * (e.g. collapsed-comment expanders) from mention clicks.
  */
 function IssueMentionLink({ issueId, label }: { issueId: string; label?: string }) {
+  const showActivity = useIssueMentionActivity();
   return (
     <span className="inline align-middle" onClick={(e) => e.stopPropagation()}>
       <IssueMentionCard issueId={issueId} fallbackLabel={label} />
+      {showActivity && (
+        <span className="ml-1 inline-flex align-middle">
+          <IssueAgentActivityIndicator issueId={issueId} hoverCard={false} />
+        </span>
+      )}
     </span>
   );
 }

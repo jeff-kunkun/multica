@@ -145,7 +145,7 @@ describe("proxy runtime upstream rewrites", () => {
       expect(res.headers.get("x-middleware-rewrite")).toBeNull();
       expect(
         res.headers.get(`x-middleware-request-${MULTICA_LOCALE_HEADER}`),
-      ).toBe("en");
+      ).toBe("zh-Hans");
     });
   });
 
@@ -157,7 +157,7 @@ describe("proxy runtime upstream rewrites", () => {
       expect(res.headers.get("x-middleware-rewrite")).toBeNull();
       expect(
         res.headers.get(`x-middleware-request-${MULTICA_LOCALE_HEADER}`),
-      ).toBe("en");
+      ).toBe("zh-Hans");
     });
   });
 
@@ -231,7 +231,7 @@ describe("proxy runtime upstream rewrites", () => {
       expect(res.headers.get("x-middleware-rewrite")).toBeNull();
       expect(
         res.headers.get(`x-middleware-request-${MULTICA_LOCALE_HEADER}`),
-      ).toBe("en");
+      ).toBe("zh-Hans");
     } finally {
       restoreEnv("REMOTE_API_URL", previous);
     }

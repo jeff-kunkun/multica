@@ -310,8 +310,8 @@
     "my_account": "My Account",
     "workspace_fallback": "Workspace",
     "tabs": {
-      "profile": "Profile",
-      "preferences": "Preferences",
+      "profile": "Account",
+      "preferences": "Appearance",
       "shortcuts": "Shortcuts",
       "issue": "Issue",
       "notifications": "Notifications",
@@ -320,14 +320,17 @@
       "github": "GitHub",
       "labs": "Labs",
       "members": "Members",
-      "bots": "Bots",
+      "bots": "Bot access",
       "labels": "Labels",
       "issue_statuses": "Issue Statuses",
       "properties": "Properties",
       "mcp": "MCP servers",
-      "code": "Code"
+      "code": "Code",
+      "approvers": "Approval rights",
+      "local_run": "Local runs"
     },
     "groups": {
+      "office": "Everyday",
       "personal": "Personal",
       "workspace": "Workspace",
       "issues": "Issues & workflow",

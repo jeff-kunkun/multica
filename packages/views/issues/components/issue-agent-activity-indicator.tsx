@@ -2,13 +2,15 @@
 
 import { memo, useCallback, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { ShimmerText } from "@multica/ui/components/common/shimmer-text";
+import { BorderBeam } from "@multica/ui/components/common/border-beam";
+import { cn } from "@multica/ui/lib/utils";
 import {
   HoverCard,
   HoverCardTrigger,
   HoverCardContent,
 } from "@multica/ui/components/ui/hover-card";
 import { useWorkspaceId } from "@multica/core/hooks";
+import { useActorName } from "@multica/core/workspace/hooks";
 import { agentTaskSnapshotOptions } from "@multica/core/agents";
 import type { AgentTask } from "@multica/core/types";
 import type { AvatarSize } from "@multica/ui/lib/avatar-size";
@@ -54,8 +56,9 @@ interface IssueAgentActivityIndicatorProps {
  * in the top-right of board cards and right after the identifier in list
  * rows. Derives state from the workspace-wide agent task snapshot:
  *
- *   - has ≥1 running task  → tiny avatar stack + shimmering "Working"
- *   - 0 running, ≥1 queued → half-opacity stack + muted "Queued"
+ *   - has ≥1 running task  → avatar stack + "{name} is working" in a
+ *                            border-beam chip (the header chip's face)
+ *   - 0 running, ≥1 queued → half-opacity stack + muted "{name} is queued"
  *   - no tasks             → return null (no chrome, no placeholder)
  *
  * The shimmer shares chat's ShimmerText component. Earlier iterations layered
@@ -93,6 +96,7 @@ export const IssueAgentActivityIndicator = memo(
   }: IssueAgentActivityIndicatorProps) {
     const { t } = useT("issues");
     const wsId = useWorkspaceId();
+    const { getActorName } = useActorName();
     const [open, setOpen] = useState(false);
     const select = useCallback(
       (snapshot: AgentTask[]) => selectIssueTasks(snapshot, issueId),
@@ -121,9 +125,20 @@ export const IssueAgentActivityIndicator = memo(
     if (agentIds.length === 0) return null;
     const hoverTasks = [...groups.running, ...groups.queued];
     const isRunning = opacity === "full";
-    const label = isRunning
-      ? t(($) => $.agent_activity.status_running)
-      : t(($) => $.agent_activity.status_queued);
+    // Same face as the issue header chip: who is on it, by name, with the
+    // brand beam while something is genuinely running.
+    const label =
+      agentIds.length === 1
+        ? t(($) => (isRunning ? $.agent_live.is_working : $.agent_live.is_queued), {
+            name: getActorName("agent", agentIds[0] ?? ""),
+          })
+        : t(
+            ($) =>
+              isRunning
+                ? $.agent_activity.hover_header
+                : $.agent_activity.hover_header_queued,
+            { count: agentIds.length },
+          );
 
     const badge = (
       <>
@@ -133,18 +148,25 @@ export const IssueAgentActivityIndicator = memo(
           opacity={opacity}
           max={3}
         />
-        <ShimmerText
-          active={isRunning}
-          className="text-micro text-muted-foreground"
+        <span
+          className={cn(
+            "min-w-0 truncate text-micro",
+            isRunning ? "text-info" : "text-muted-foreground",
+          )}
         >
           {label}
-        </ShimmerText>
+        </span>
+        {isRunning && <BorderBeam />}
       </>
+    );
+    const chipClass = cn(
+      "inline-flex min-w-0 max-w-[10rem] shrink-0 items-center gap-1 rounded-md px-1 py-0.5",
+      isRunning && "relative bg-brand/5",
     );
 
     if (!hoverCard) {
       return (
-        <span className="inline-flex shrink-0 items-center gap-1">{badge}</span>
+        <span className={chipClass}>{badge}</span>
       );
     }
 
@@ -159,7 +181,10 @@ export const IssueAgentActivityIndicator = memo(
               aria-label={label}
               onFocus={() => setOpen(true)}
               onBlur={() => setOpen(false)}
-              className="inline-flex shrink-0 items-center gap-1 rounded-sm focus-visible:outline-2 focus-visible:outline-ring"
+              className={cn(
+                chipClass,
+                "focus-visible:outline-2 focus-visible:outline-ring",
+              )}
             />
           }
         >

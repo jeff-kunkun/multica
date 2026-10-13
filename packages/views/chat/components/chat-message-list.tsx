@@ -27,7 +27,7 @@ import {
 } from "lucide-react";
 import { useScrollFade } from "@multica/ui/hooks/use-scroll-fade";
 import { isTaskMessageTaskId, taskMessagesOptions } from "@multica/core/chat/queries";
-import { RichContent } from "../../rich-content";
+import { IssueMentionActivityProvider, RichContent } from "../../rich-content";
 import { RichContentScrollRootProvider } from "../../rich-content/scroll-root";
 import { copyText } from "@multica/ui/lib/clipboard";
 import { AttachmentList } from "../../issues/components/comment-card";
@@ -282,6 +282,7 @@ export function ChatMessageList({
       // "near-viewport" against that element rather than the browser viewport —
       // otherwise a diagram only starts loading once it is already on screen.
       <RichContentScrollRootProvider scrollRoot={scrollContainerEl}>
+      <IssueMentionActivityProvider value>
       <Virtuoso
         ref={virtuosoRef}
         customScrollParent={scrollContainerEl}
@@ -333,6 +334,7 @@ export function ChatMessageList({
           </div>
         )}
       />
+      </IssueMentionActivityProvider>
       </RichContentScrollRootProvider>
       )}
     </div>

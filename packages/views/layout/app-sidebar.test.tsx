@@ -141,6 +141,7 @@ vi.mock("@multica/core/paths", async (importOriginal) => ({
     myIssues: () => "/acme/my-issues",
     issues: () => "/acme/issues",
     projects: () => "/acme/projects",
+    meetings: () => "/acme/meetings",
     agents: () => "/acme/agents",
     usage: () => "/acme/usage",
     runtimes: () => "/acme/runtimes",
@@ -384,7 +385,7 @@ describe("workspace-switcher dropdown per-workspace dot", () => {
 });
 
 describe("navigation item presentation", () => {
-  it("keeps Analytics and Settings styled like the other nav items", () => {
+  it("keeps Settings styled like the other nav items", () => {
     const { container } = render(<AppSidebar />);
     const referenceClassName = container.querySelector(
       'button[data-href="/acme/issues"]',
@@ -392,7 +393,7 @@ describe("navigation item presentation", () => {
 
     expect(referenceClassName).toBeTruthy();
 
-    for (const href of ["/acme/usage", "/acme/settings"]) {
+    for (const href of ["/acme/meetings", "/acme/settings"]) {
       expect(container.querySelector(`button[data-href="${href}"]`)?.className).toBe(
         referenceClassName,
       );

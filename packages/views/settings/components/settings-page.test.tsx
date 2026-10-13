@@ -22,6 +22,8 @@ vi.mock("./issue-statuses-tab", stub("IssueStatusesTab"));
 vi.mock("./properties-tab", stub("PropertiesTab"));
 vi.mock("./keyboard-shortcuts-tab", stub("KeyboardShortcutsTab"));
 vi.mock("./mcp-tab", stub("McpTab"));
+vi.mock("./approvers-tab", stub("ApproversTab"));
+vi.mock("./local-run-tab", stub("LocalRunTab"));
 
 const shell = vi.hoisted(() => ({
   role: "owner" as "owner" | "admin" | "member",
@@ -138,8 +140,15 @@ describe("SettingsPage nav trigger", () => {
 describe("SettingsPage information architecture", () => {
   it("groups pages by who they affect, then by topic", () => {
     renderWithI18n(<SettingsPage />);
+    // The five everyday pages come first, in one group.
+    const everyday = within(nav()).getByRole("region", { name: /Everyday/ });
+    expect(
+      within(everyday)
+        .getAllByRole("link")
+        .map((link) => link.textContent),
+    ).toEqual(["Account", "Bot access", "Approval rights", "Local runs", "Appearance"]);
+
     const personal = within(nav()).getByRole("region", { name: /Personal/ });
-    expect(within(personal).getByRole("link", { name: "Preferences" })).toBeInTheDocument();
     expect(within(personal).getByRole("link", { name: "API Tokens" })).toBeInTheDocument();
 
     // The workspace group is named after the workspace it configures.
@@ -169,7 +178,7 @@ describe("SettingsPage information architecture", () => {
     navigationState.search = "tab=issue";
     renderWithI18n(<SettingsPage />);
     expect(screen.getByText("PreferencesTab")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Preferences" })).toHaveAttribute(
+    expect(screen.getByRole("link", { name: "Appearance" })).toHaveAttribute(
       "aria-current",
       "page",
     );
@@ -236,7 +245,7 @@ describe("SettingsPage search", () => {
 
     const results = screen.getByRole("listbox", { name: "Search settings" });
     const option = within(results).getByRole("option", { name: /Time zone/ });
-    expect(option).toHaveTextContent("Personal › Preferences");
+    expect(option).toHaveTextContent("Everyday › Appearance");
 
     fireEvent.click(option);
     expect(push).toHaveBeenCalledWith(

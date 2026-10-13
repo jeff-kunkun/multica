@@ -10,11 +10,13 @@ import {
   KeyRound,
   Laptop,
   ListPlus,
+  Monitor,
   Lock,
   Search,
   Server,
   Settings,
   SlidersHorizontal,
+  Stamp,
   Tags,
   User,
   Users,
@@ -33,6 +35,8 @@ import { AccountTab } from "./account-tab";
 import { PreferencesTab } from "./preferences-tab";
 import { TokensTab } from "./tokens-tab";
 import { BotsTab } from "./bots-tab";
+import { ApproversTab } from "./approvers-tab";
+import { LocalRunTab } from "./local-run-tab";
 import { WorkspaceTab } from "./workspace-tab";
 import { MembersTab } from "./members-tab";
 import { CodeTab } from "./code-tab";
@@ -74,7 +78,7 @@ interface SettingsSubgroup {
 }
 
 interface SettingsScopeGroup {
-  key: "personal" | "workspace" | "device";
+  key: "office" | "personal" | "workspace" | "device";
   label: string;
   /** Leading mark: whose settings these are. */
   mark: React.ReactNode;
@@ -103,6 +107,31 @@ export function SettingsPage({ extraDeviceTabs = [] }: SettingsPageProps = {}) {
   ): SettingsEntry => ({ value, label, icon, content, ...options });
 
   const groups: SettingsScopeGroup[] = [
+    // The five settings the office uses day to day; the rest stay below.
+    {
+      key: "office",
+      label: t(($) => $.page.groups.office),
+      mark: <Settings aria-hidden="true" className="size-4 text-muted-foreground" />,
+      subgroups: [
+        {
+          key: "office",
+          entries: [
+            entry("profile", t(($) => $.page.tabs.profile), User, <AccountTab />),
+            entry("bots", t(($) => $.page.tabs.bots), Bot, <BotsTab />, {
+              adminOnly: true,
+            }),
+            entry("approvers", t(($) => $.page.tabs.approvers), Stamp, <ApproversTab />),
+            entry("local-run", t(($) => $.page.tabs.local_run), Monitor, <LocalRunTab />),
+            entry(
+              "preferences",
+              t(($) => $.page.tabs.preferences),
+              SlidersHorizontal,
+              <PreferencesTab />,
+            ),
+          ],
+        },
+      ],
+    },
     {
       key: "personal",
       label: t(($) => $.page.groups.personal),
@@ -119,13 +148,6 @@ export function SettingsPage({ extraDeviceTabs = [] }: SettingsPageProps = {}) {
         {
           key: "personal",
           entries: [
-            entry("profile", t(($) => $.page.tabs.profile), User, <AccountTab />),
-            entry(
-              "preferences",
-              t(($) => $.page.tabs.preferences),
-              SlidersHorizontal,
-              <PreferencesTab />,
-            ),
             entry(
               "notifications",
               t(($) => $.page.tabs.notifications),
@@ -163,9 +185,6 @@ export function SettingsPage({ extraDeviceTabs = [] }: SettingsPageProps = {}) {
               adminOnly: true,
             }),
             entry("members", t(($) => $.page.tabs.members), Users, <MembersTab />, {
-              adminOnly: true,
-            }),
-            entry("bots", t(($) => $.page.tabs.bots), Bot, <BotsTab />, {
               adminOnly: true,
             }),
           ],

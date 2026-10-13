@@ -62,13 +62,13 @@ describe("resolveEmergencyLocale", () => {
     expect(resolveEmergencyLocale()).toBe("zh-Hans");
   });
 
-  it("falls back to English when the browser language is not shipped", async () => {
+  it("falls back to Chinese when the browser language is not shipped", async () => {
     setBrowserLanguages(["ja-JP", "ja"]);
     const { reset, onRecoverableError } = await hydrateGlobalError("ja-JP");
 
-    expect(document.documentElement.lang).toBe("en");
-    expect(document.body).toHaveTextContent("Something went wrong");
-    expect(document.querySelector("button")).toHaveTextContent("Reload");
+    expect(document.documentElement.lang).toBe("zh-CN");
+    expect(document.body).toHaveTextContent("出现了问题");
+    expect(document.querySelector("button")).toHaveTextContent("重新加载");
     expect(onRecoverableError).not.toHaveBeenCalled();
 
     await act(async () => {

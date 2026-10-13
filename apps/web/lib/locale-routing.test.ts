@@ -33,29 +33,16 @@ describe("locale routing", () => {
     ).toBe("en");
   });
 
-  it("falls back to Accept-Language when no cookie is set", () => {
+  it("defaults to Chinese and ignores Accept-Language when no cookie is set", () => {
     expect(
       resolveLocaleFromSignals({
-        acceptLanguage: "zh-CN,zh;q=0.9,en;q=0.8",
+        acceptLanguage: "en-US,en;q=0.9",
       }),
     ).toBe("zh-Hans");
-  });
-
-  it("falls back to English for Korean, Japanese, and French browser signals", () => {
     expect(
       resolveLocaleFromSignals({
         acceptLanguage: "ko-KR,ko;q=0.9",
       }),
-    ).toBe("en");
-    expect(
-      resolveLocaleFromSignals({
-        acceptLanguage: "ja-JP,ja;q=0.9",
-      }),
-    ).toBe("en");
-    expect(
-      resolveLocaleFromSignals({
-        acceptLanguage: "fr-FR,fr;q=0.9",
-      }),
-    ).toBe("en");
+    ).toBe("zh-Hans");
   });
 });

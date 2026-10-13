@@ -19,6 +19,7 @@ import enModals from "./en/modals.json";
 import enRuntimes from "./en/runtimes.json";
 import enLayout from "./en/layout.json";
 import enUsage from "./en/usage.json";
+import enOffice from "./en/office.json";
 import enUi from "./en/ui.json";
 import zhHansCommon from "./zh-Hans/common.json";
 import zhHansAuth from "./zh-Hans/auth.json";
@@ -40,6 +41,7 @@ import zhHansModals from "./zh-Hans/modals.json";
 import zhHansRuntimes from "./zh-Hans/runtimes.json";
 import zhHansLayout from "./zh-Hans/layout.json";
 import zhHansUsage from "./zh-Hans/usage.json";
+import zhHansOffice from "./zh-Hans/office.json";
 import zhHansUi from "./zh-Hans/ui.json";
 
 // Single source of truth for the resource bundle. Both apps (web layout +
@@ -67,6 +69,7 @@ export const RESOURCES: Record<SupportedLocale, LocaleResources> = {
     runtimes: enRuntimes,
     layout: enLayout,
     usage: enUsage,
+    office: enOffice,
     ui: enUi,
   },
   "zh-Hans": {
@@ -90,6 +93,7 @@ export const RESOURCES: Record<SupportedLocale, LocaleResources> = {
     runtimes: zhHansRuntimes,
     layout: zhHansLayout,
     usage: zhHansUsage,
+    office: zhHansOffice,
     ui: zhHansUi,
   },
 };

@@ -11,6 +11,10 @@ vi.mock("@multica/core/hooks", () => ({
   useWorkspaceId: () => "ws-1",
 }));
 
+vi.mock("@multica/core/workspace/hooks", () => ({
+  useActorName: () => ({ getActorName: () => "Go" }),
+}));
+
 vi.mock("@multica/core/agents", () => ({
   agentTaskSnapshotOptions: (wsId: string) => ({
     queryKey: ["agents", "task-snapshot", wsId],
@@ -139,7 +143,7 @@ describe("IssueAgentActivityIndicator", () => {
     expect(screen.queryByTestId("hover-card-trigger")).toBeNull();
     // The cue itself survives — only the popup behind it is dropped.
     expect(screen.getByTestId("agent-avatar-stack")).not.toBeNull();
-    expect(screen.getByText("Working", { ignore: '[aria-hidden="true"] *' })).not.toBeNull();
+    expect(screen.getByText("Go is working", { ignore: '[aria-hidden="true"] *' })).not.toBeNull();
   });
 
   it("renders nothing when no agent is on the issue", () => {
