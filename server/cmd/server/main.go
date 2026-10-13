@@ -26,6 +26,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/logger"
 	"github.com/multica-ai/multica/server/internal/maintenance"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
+	"github.com/multica-ai/multica/server/internal/mirror"
 	"github.com/multica-ai/multica/server/internal/profiling"
 	"github.com/multica-ai/multica/server/internal/realtime"
 	"github.com/multica-ai/multica/server/internal/scheduler"
@@ -753,6 +754,16 @@ func main() {
 		go telemetryWorker.Run(sweepCtx)
 	}
 	go runDelegatedFailureRecoverySweeper(sweepCtx, taskSvc)
+	if cfg, ok := mirror.ConfigFromEnv(); ok {
+		src, err := mirror.NewPGSource(sweepCtx, pool, cfg.Workspace, cfg.TargetURL+"#"+cfg.TargetWorkspace)
+		if err != nil {
+			slog.Error("mirror disabled: workspace not found", "workspace", cfg.Workspace, "error", err)
+		} else {
+			remote := mirror.NewHTTPRemote(cfg.TargetURL, cfg.TargetToken, cfg.TargetWorkspace)
+			slog.Info("mirror enabled", "workspace", cfg.Workspace, "target", cfg.TargetURL)
+			go mirror.New(src, remote, cfg.Interval, slog.Default()).Run(sweepCtx)
+		}
+	}
 	// Seven-day runtime retention does not share the 30-second liveness tick:
 	// its bounded transactions run independently once per hour, so a slow GC
 	// round cannot delay offline detection or task recovery.

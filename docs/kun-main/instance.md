@@ -41,6 +41,38 @@ username/password/email in `/opt/multica-main/.env` turn on password login;
 reset behind the team's shared authenticator code. Secrets live only in that
 `.env` (mode 600).
 
+## Mirror to the kun-line instance
+
+People who stay on ai.ferryway.cc read Kun's board through a one-way copy:
+the office backend (`server/internal/mirror`) copies one workspace's
+projects, issues and comments into a workspace on ai.ferryway.cc through its
+public API, every 20 seconds. Nothing is changed on the kun line and nothing
+flows back; edits made on the copy are overwritten by the next change here.
+
+What is copied: projects; issues (title, description, status, priority,
+parent, project; the executor and the office identifier as a footer line);
+comments with author and time as a header line. Mentions become plain text.
+A deleted issue or project becomes cancelled there; a deleted comment is
+removed. Progress lives in the `mirror_link` table, so a restart resumes.
+
+Setup, once:
+
+1. On ai.ferryway.cc, create the workspace 「Kun 新办公室（镜像）」 and invite
+   the people who should read it. Leave routing off there.
+2. Create a personal access token there as a member of that workspace.
+3. Add to `/opt/multica-main/.env` and redeploy:
+
+```bash
+MULTICA_MIRROR_WORKSPACE=<office workspace slug>
+MULTICA_MIRROR_TARGET_URL=https://ai.ferryway.cc
+MULTICA_MIRROR_TARGET_TOKEN=mul_...
+MULTICA_MIRROR_TARGET_WORKSPACE=<ai.ferryway.cc workspace id>
+```
+
+All four unset means off. The log shows `mirror enabled` at start and
+`mirror: copy failed` for anything the target refused; failures retry on the
+next pass. Run only one office backend with the mirror on.
+
 ## Operating
 
 ```bash
