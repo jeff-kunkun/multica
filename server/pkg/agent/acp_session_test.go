@@ -312,21 +312,14 @@ done
 func TestACPBackendsReportRejectedResume(t *testing.T) {
 	t.Parallel()
 
+	// The office build no longer ships these ACP backends. The table stays so
+	// a future engine that resumes over ACP can be pinned here again.
 	cases := []struct {
 		agentType string
 		binary    string
 		rpc       string
 		env       map[string]string
-	}{
-		{agentType: "qoder", binary: "qodercli", rpc: "session/resume"},
-		{agentType: "hermes", binary: "hermes", rpc: "session/resume"},
-		{agentType: "kimi", binary: "kimi", rpc: "session/resume"},
-		{agentType: "kiro", binary: "kiro", rpc: "session/load"},
-		{agentType: "traecli", binary: "traecli", rpc: "session/load"},
-		// Grok refuses to reach session/load without a credential; supply one
-		// through Config so the test does not depend on ambient env.
-		{agentType: "grok", binary: "grok", rpc: "session/load", env: map[string]string{"XAI_API_KEY": "test-only-key"}},
-	}
+	}{}
 
 	for _, tc := range cases {
 		t.Run(tc.agentType, func(t *testing.T) {

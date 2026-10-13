@@ -8044,10 +8044,8 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	if task.Agent != nil && provider == "openclaw" {
 		openclawMode, openclawGateway = decodeOpenclawRuntimeConfig(task.Agent.RuntimeConfig, d.logger)
 	}
-	var agentEnvOverrides map[string]string
 	var agentCustomArgs []string
 	if task.Agent != nil {
-		agentEnvOverrides = task.Agent.CustomEnv
 		agentCustomArgs = task.Agent.CustomArgs
 	}
 	// Effective Codex CLI args the task will launch with, normalized through the
@@ -8067,87 +8065,15 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		extraArgs := append(append([]string{}, profileFixedArgs...), defaultArgsForProvider(d.cfg, provider)...)
 		codexSandboxArgs = agent.NormalizeCodexLaunchArgs(extraArgs, agentCustomArgs, effectiveMcpConfig, d.logger)
 	}
-	// Hermes: resolve the overlay source home through one resolver contract —
-	// the selection parsed from custom_args (agent.ParseHermesProfileArgs) plus
-	// the agent's custom_env HERMES_HOME feed execenv.ResolveHermesProfile, which
-	// reproduces Hermes' own profile semantics (root derivation, explicit vs.
-	// sticky selection, reserved/invalid failure). A reserved/invalid selection
-	// fails the task closed, matching Hermes' sys.exit(1). The selected source
-	// home is exported to hermesEnv["HERMES_HOME"] so ${HERMES_HOME} in a
-	// profile's skills.external_dirs expands against the selected profile home,
-	// as native Hermes does before loading config.yaml. The parsed occurrence is
-	// stripped from the acp argv at launch (only when the overlay is built) so
-	// the flag can't re-point HERMES_HOME past the overlay.
+	// Hermes, Reasonix, and the other removed engines no longer resolve a
+	// task environment. The prepare params stay zero so a stale runtime id
+	// cannot seed an overlay for a backend this daemon cannot launch.
 	var hermesSourceHome string
 	var hermesSourceMustExist bool
 	var hermesEnv map[string]string
 	var hermesMemoryStore string
 	var hermesSessionStore string
-	if provider == "hermes" {
-		// Resolve from the argv hermes will actually parse — launch prefix,
-		// the filtered custom args, then `acp` — which agent.HermesLaunchArgv
-		// assembles the same way the backend does. A custom runtime profile's
-		// fixed_args are the launch prefix now, so they are scanned before
-		// custom_args, and the backend's own `acp` token closes the argv and
-		// participates in the scan. Approximating that argv reads a different
-		// profile than the process does, and the overlay ends up seeded from
-		// the wrong home (GH #7046).
-		sel := agent.ParseHermesProfileArgs(agent.HermesLaunchArgv(profileFixedArgs, agentCustomArgs, d.logger))
-		res := execenv.ResolveHermesProfile(agentEnvOverrides["HERMES_HOME"], sel.Name, sel.Found, sel.Inline)
-		if res.Err != nil {
-			return TaskResult{}, fmt.Errorf("resolve hermes profile: %w", res.Err)
-		}
-		hermesSourceHome = res.SourceHome
-		hermesSourceMustExist = res.MustExist
-		// Which home the overlay is seeded from decides whether the task sees
-		// the user's provider config at all, and it is derived from the daemon
-		// PROCESS environment — invisible from the shell the user tests
-		// `hermes acp` in, which is why a mismatch reads as "works by hand,
-		// fails under Multica" (GH #6872). One line, at Info, so the answer is
-		// in the daemon log before anything fails rather than reconstructed
-		// afterwards.
-		taskLog.Info("hermes home resolved",
-			"source_home", hermesSourceHome,
-			"from_custom_env", strings.TrimSpace(agentEnvOverrides["HERMES_HOME"]) != "",
-			"must_exist", hermesSourceMustExist,
-		)
-		hermesEnv = sanitizeAgentEnv(agentEnvOverrides)
-		if hermesEnv == nil {
-			hermesEnv = map[string]string{}
-		}
-		hermesEnv["HERMES_HOME"] = res.SourceHome
-		// The overlay links memories/ here so the agent's long-term memory
-		// survives the task instead of being reset by every run (#6638). Keyed on
-		// the resolved source home so switching an agent's profile switches its
-		// memory line, matching Hermes' own "a profile is an isolated instance"
-		// model. Guarded from the GC for the whole task, as the Codex store below.
-		if store := execenv.HermesMemoryStorePath(d.cfg.Profile, task.AgentID, res.SourceHome); store != "" {
-			hermesMemoryStore = store
-			d.markActiveStore(store)
-			defer d.unmarkActiveStore(store)
-		}
-		// The overlay links state.db here so the conversation transcript
-		// survives the task and a follow-up turn can actually resume it
-		// (GH #6806). Keyed on (agent, resolved source home, conversation):
-		// tasks of one conversation are serial, so the shard has a single
-		// writer, while two issues never share a database. Guarded from the GC
-		// for the whole task, as the stores above and below.
-		if store := execenv.HermesSessionStorePath(d.cfg.Profile, task.AgentID, res.SourceHome, taskCtx); store != "" {
-			hermesSessionStore = store
-			d.markActiveStore(store)
-			defer d.unmarkActiveStore(store)
-		}
-	}
-	// Reasonix locates its user config from the environment (REASONIX_HOME, and
-	// the platform config dirs behind it), which an agent's custom_env may
-	// re-point or clear. The per-task reasonix.toml has to restate the
-	// permissions from whichever config the child ends up loading, so the deny
-	// rules the runtime owner set there survive the task-scoped config that
-	// overrides them — hence the same sanitized env the child is launched with.
 	var reasonixEnv map[string]string
-	if provider == "reasonix" {
-		reasonixEnv = sanitizeAgentEnv(agentEnvOverrides)
-	}
 	envReused := false
 	priorClaim, priorWorkDir, lockedPriorInfo, reusable, reuseErr := d.lockReusablePriorEnvRoot(ctx, task, localAssignment, envClaim.RootDir())
 	if reuseErr != nil {
@@ -8628,39 +8554,9 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	if task.Agent != nil {
 		agentCustomEnv = task.Agent.CustomEnv
 	}
-	layerCustomEnvAndHermesHome(agentEnv, agentCustomEnv, env.HermesHome, d.logger)
-	if provider == "reasonix" {
-		reasonixStateHome, err := prepareReasonixTaskStateHome(d.cfg.Profile, task.RuntimeID, task.AgentID)
-		if err != nil {
-			return TaskResult{}, fmt.Errorf("prepare reasonix state home: %w", err)
-		}
-		agentEnv["REASONIX_STATE_HOME"] = reasonixStateHome
-	}
-	if provider == "dsh" {
-		dshSessionRoot, err := prepareDshTaskSessionRoot(d.cfg.Profile, task.RuntimeID, task.AgentID)
-		if err != nil {
-			return TaskResult{}, fmt.Errorf("prepare dsh session root: %w", err)
-		}
-		agentEnv["MULTICA_DSH_SESSION_ROOT"] = dshSessionRoot
-		agentEnv["DSH_TELEMETRY_DISABLED"] = "1"
-	}
+	layerCustomEnvAndHermesHome(agentEnv, agentCustomEnv, "", d.logger)
 	if err := configureCodexTaskShellEnvironment(provider, env.CodexHome, os.Environ(), agentEnv, agentCustomEnv, d.logger); err != nil {
 		return TaskResult{}, err
-	}
-	// The overlay is authoritative once built, so nothing on the command line
-	// may re-point HERMES_HOME out of it. Both argv regions are stripped
-	// together, against the same assembled argv the resolver read: a selection
-	// can straddle them (a prefix ending in a bare `-p` captures the first
-	// custom arg), which per-region stripping cannot see.
-	var hermesOverlayCustomArgs []string
-	hermesOverlayActive := provider == "hermes" && env != nil && env.HermesHome != ""
-	if hermesOverlayActive {
-		var rawCustomArgs []string
-		if task.Agent != nil {
-			rawCustomArgs = task.Agent.CustomArgs
-		}
-		profileFixedArgs, hermesOverlayCustomArgs = agent.StripHermesProfileSelectors(
-			profileFixedArgs, rawCustomArgs, d.logger)
 	}
 	// Resolve the backend through the unified runtime resolver: built-in
 	// runtime identities (e.g. "omp") dispatch through NewRuntime, protocol
@@ -8728,11 +8624,6 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	if task.Agent != nil {
 		customArgs = task.Agent.CustomArgs
 		mcpConfig = effectiveMcpConfig
-	}
-	if hermesOverlayActive {
-		// Stripped above, alongside the launch prefix. A skill-less hermes task
-		// has no overlay to protect and keeps its flags untouched.
-		customArgs = hermesOverlayCustomArgs
 	}
 	thinkingLevel := ""
 	serviceTier := ""

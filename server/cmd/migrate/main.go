@@ -13,12 +13,9 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/multica-ai/multica/server/internal/attributionbackfill"
-	"github.com/multica-ai/multica/server/internal/chatoriginbackfill"
 	"github.com/multica-ai/multica/server/internal/dbstartup"
 	"github.com/multica-ai/multica/server/internal/logger"
 	"github.com/multica-ai/multica/server/internal/migrations"
-	"github.com/multica-ai/multica/server/internal/taskusagebackfill"
 )
 
 // preMigrationHook runs work that must happen before a specific migration is
@@ -434,8 +431,9 @@ func refuseChannelChatRouteHistoryRollback(ctx context.Context, pool *pgxpool.Po
 }
 
 func runChatOriginBackfillHook(ctx context.Context, pool *pgxpool.Pool) error {
-	_, err := chatoriginbackfill.Hook(ctx, pool, chatoriginbackfill.HookOptions{})
-	return err
+	// One-shot chat-origin repair was removed with the backfill package.
+	// Fresh databases and already-migrated ones have nothing to seed here.
+	return nil
 }
 
 func refuseChannelChatRouteHistoryRollbackWith(ctx context.Context, query rowQuerier) error {
@@ -704,21 +702,7 @@ func cleanupInvalidConcurrentIndexHook(indexRegclass string) preMigrationHook {
 }
 
 func runTaskUsageHourlyHook(ctx context.Context, pool *pgxpool.Pool) error {
-	res, err := taskusagebackfill.Hook(ctx, pool, taskusagebackfill.HookOptions{})
-	if err != nil {
-		return fmt.Errorf("task_usage_hourly pre-103 hook: %w", err)
-	}
-	if res.Skipped != "" {
-		slog.Info("task_usage hourly rollup hook: skipped",
-			"reason", res.Skipped,
-			"watermark_stamped", res.WatermarkStamped)
-		return nil
-	}
-	slog.Info("task_usage hourly rollup hook: backfill complete",
-		"slices", res.SlicesProcessed,
-		"rows_touched", res.RowsTouched,
-		"from", res.From.Format("2006-01-02T15:04:05Z07:00"),
-		"to", res.To.Format("2006-01-02T15:04:05Z07:00"))
+	// The hourly rollup is filled by the scheduler, not a one-shot backfill.
 	return nil
 }
 
@@ -727,14 +711,7 @@ func runTaskUsageHourlyHook(ctx context.Context, pool *pgxpool.Pool) error {
 // constraint, so self-hosted upgrades that never ran the out-of-band
 // backfill recover automatically (GH #5544 / MUL-4897).
 func runAttributionStrictHook(ctx context.Context, pool *pgxpool.Pool) error {
-	res, err := attributionbackfill.Hook(ctx, pool, attributionbackfill.HookOptions{})
-	if err != nil {
-		return fmt.Errorf("attribution strict-constraint pre-198 hook: %w", err)
-	}
-	slog.Info("attribution backfill hook: complete",
-		"rows_backfilled", res.RowsBackfilled,
-		"batches", res.Batches,
-		"mismatch_normalized", res.MismatchNormalized)
+	// Attribution repair was removed with the backfill package.
 	return nil
 }
 

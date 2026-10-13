@@ -7,7 +7,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"slices"
 	"strings"
 	"testing"
 )
@@ -274,30 +273,6 @@ func TestLogAgentCommandRedactsTextAndJSON(t *testing.T) {
 	}
 }
 
-func TestBackendFactoriesSetCommandLogProvider(t *testing.T) {
-	t.Parallel()
-
-	claude, err := New("claude", Config{Logger: slog.Default()})
-	if err != nil {
-		t.Fatalf("New(claude): %v", err)
-	}
-	if got := claude.(*claudeBackend).cfg.provider; got != "claude" {
-		t.Fatalf("claude log provider = %q, want claude", got)
-	}
-
-	omp, err := NewRuntime("omp", Config{Logger: slog.Default()})
-	if err != nil {
-		t.Fatalf("NewRuntime(omp): %v", err)
-	}
-	if got := omp.(*piBackend).cfg.provider; got != "omp" {
-		t.Fatalf("omp log provider = %q, want omp", got)
-	}
-}
-
-// TestClaudeBackendLaunchesWrapperSubcommandFirst is the end-to-end proof:
-// a real subprocess, spawned through the real backend, records the argv it was
-// handed. The fake wrapper stands in for `ccms` and never touches a
-// user-installed CLI.
 func TestClaudeBackendLaunchesWrapperSubcommandFirst(t *testing.T) {
 	t.Parallel()
 
@@ -369,27 +344,6 @@ func TestLaunchPrefixOutranksExtraArgs(t *testing.T) {
 
 // TestBuiltinRuntimeIdentitiesFilterLaunchPrefix: NewRuntime composes New, so
 // a runtime identity (omp) inherits the same prefix policy as its family.
-func TestBuiltinRuntimeIdentitiesFilterLaunchPrefix(t *testing.T) {
-	t.Parallel()
-
-	backend, err := ResolveBackend("omp", Config{
-		ExecutablePath: "wrapper",
-		LaunchPrefix:   []string{"start", "q36", "-p"},
-		Logger:         slog.Default(),
-	})
-	if err != nil {
-		t.Fatalf("ResolveBackend(omp): %v", err)
-	}
-	got := backend.(*piBackend).cfg.LaunchPrefix
-	if strings.Join(got, "\x00") != "start\x00q36" {
-		t.Fatalf("runtime identity did not inherit prefix filtering: %v", got)
-	}
-}
-
-// TestCodexLaunchPrefixCannotShadowManagedConfig: prefix-first wins ordinary
-// flag conflicts on purpose, but Codex `-c key=value` beats the daemon-written
-// config.toml from any argv position. A fixed_args entry aimed at a managed
-// namespace has to be removed, not merely outranked.
 func TestCodexLaunchPrefixCannotShadowManagedConfig(t *testing.T) {
 	t.Parallel()
 
@@ -431,8 +385,9 @@ func TestFilterLaunchPrefixKeepsPositionalCollidingWithSubcommand(t *testing.T) 
 		{"traecli", []string{"serve", "acp"}, []string{"serve", "acp"}},
 		{"grok", []string{"agent", "stdio"}, []string{"agent", "stdio"}},
 		{"grok", []string{"leader", "headless"}, []string{"leader", "headless"}},
-		// Flags in the same prefix are still filtered; grok blocks -p.
-		{"grok", []string{"agent", "-p", "stdio"}, []string{"agent", "stdio"}},
+		// Removed engines are an unknown family: the prefix is kept whole,
+		// including a flag that used to be on that engine's blocklist.
+		{"grok", []string{"agent", "-p", "stdio"}, []string{"agent", "-p", "stdio"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.family+"/"+strings.Join(tc.prefix, "_"), func(t *testing.T) {
@@ -460,248 +415,6 @@ func TestFilterLaunchPrefixConsumesBlockedFlagValue(t *testing.T) {
 	}
 }
 
-// TestDimLaunchPrefixFiltersBlockedFlags proves the Dim launch-prefix safety
-// policy: allowed positional tokens reach the command ahead of the hardcoded
-// `acp` subcommand, while protocol-breaking flags (--help, --auth-setup,
-// --remote, -h, acp) are stripped. Without this the fixed_args regression
-// this round fixed could return silently.
-func TestDimLaunchPrefixFiltersBlockedFlags(t *testing.T) {
-	t.Parallel()
-
-	// Allowed positional prefix tokens survive and precede `acp`.
-	cfg := Config{LaunchPrefix: []string{"start", "q36"}, Logger: slog.Default()}
-	argv := cfg.commandAt("wrapper").Argv("acp")
-	if idx := prefixIndex(argv, []string{"start", "q36", "acp"}); idx != 0 {
-		t.Fatalf("dim: allowed prefix must precede the acp subcommand, got %v", argv)
-	}
-
-	// Protocol-breaking flags are removed from the prefix.
-	got := filterLaunchPrefix(
-		[]string{"start", "--help", "--auth-setup", "--remote", "-h", "q36"},
-		"dim", slog.Default())
-	want := []string{"start", "q36"}
-	if strings.Join(got, "\x00") != strings.Join(want, "\x00") {
-		t.Fatalf("dim: blocked flags must be stripped, got %v, want %v", got, want)
-	}
-}
-
-// TestZeroclawLaunchPrefixFiltersBlockedFlags proves the ZeroClaw
-// launch-prefix safety policy: allowed positional tokens reach the command
-// ahead of the hardcoded `acp` subcommand, while protocol-breaking flags
-// (--help, -h, login, --login, --auth, acp) are stripped.
-func TestZeroclawLaunchPrefixFiltersBlockedFlags(t *testing.T) {
-	t.Parallel()
-
-	// Allowed positional prefix tokens survive and precede `acp`.
-	cfg := Config{LaunchPrefix: []string{"start", "q36"}, Logger: slog.Default()}
-	argv := cfg.commandAt("wrapper").Argv("acp")
-	if idx := prefixIndex(argv, []string{"start", "q36", "acp"}); idx != 0 {
-		t.Fatalf("zeroclaw: allowed prefix must precede the acp subcommand, got %v", argv)
-	}
-
-	// Protocol-breaking flags are removed from the prefix.
-	got := filterLaunchPrefix(
-		[]string{"start", "--help", "--login", "--auth", "-h", "q36"},
-		"zeroclaw", slog.Default())
-	want := []string{"start", "q36"}
-	if strings.Join(got, "\x00") != strings.Join(want, "\x00") {
-		t.Fatalf("zeroclaw: blocked flags must be stripped, got %v, want %v", got, want)
-	}
-}
-
-// TestHermesLaunchArgvMatchesBackendAssembly: the daemon must resolve the
-// profile from the argv the backend actually builds — global custom args ahead
-// of the `acp` subcommand (GH #8878), `acp`'s own flags behind it — not from a
-// concatenation that leaves `acp` out.
-func TestHermesLaunchArgvMatchesBackendAssembly(t *testing.T) {
-	t.Parallel()
-
-	prefix := []string{"--yolo"}
-	custom := []string{"-p", "research", "--yes", "--provider", "zai"}
-
-	argv := HermesLaunchArgv(prefix, custom, slog.Default())
-	if want := []string{"--yolo", "-p", "research", "--provider", "zai", "acp", "--yes"}; strings.Join(argv, "\x00") != strings.Join(want, "\x00") {
-		t.Fatalf("HermesLaunchArgv = %v, want %v", argv, want)
-	}
-	// It must equal what the backend hands the launch boundary.
-	backend := Command{Prefix: prefix}.Argv(hermesCLIArgs(prefix, custom, slog.Default())...)
-	if strings.Join(argv, "\x00") != strings.Join(backend, "\x00") {
-		t.Fatalf("resolver argv %v diverges from backend argv %v", argv, backend)
-	}
-	if sel := ParseHermesProfileArgs(argv); !sel.Found || sel.Name != "research" {
-		t.Fatalf("selection = %+v, want research — the profile the process really reads", sel)
-	}
-
-	// `acp` participates in the scan: a prefix ending in a bare `-p` selects a
-	// profile named `acp`, which the prefix-only approximation cannot see.
-	bare := []string{"-p"}
-	if sel := ParseHermesProfileArgs(HermesLaunchArgv(bare, []string{"--yes"}, slog.Default())); !sel.Found || sel.Name != "acp" {
-		t.Fatalf("selection = %+v, want the `acp` token hermes itself consumes", sel)
-	}
-	if naive := ParseHermesProfileArgs(append(bare, "--yes")); naive.Found {
-		t.Fatalf("expected the approximation without `acp` to disagree, got %+v", naive)
-	}
-}
-
-// TestHermesCLIArgsPlaceFlagsAroundSubcommand pins GH #8878: Hermes accepts its
-// global flags only before the subcommand and the flags `acp` declares only
-// after it — `hermes acp --provider zai` and `hermes --yes acp` both exit with
-// a usage error, `hermes --provider zai acp --yes` launches. A global flag left
-// without its value must not capture `acp` either: Hermes would read it as that
-// flag's value and start interactive chat instead of the ACP server.
-func TestHermesCLIArgsPlaceFlagsAroundSubcommand(t *testing.T) {
-	t.Parallel()
-
-	cases := []struct {
-		name   string
-		prefix []string
-		custom []string
-		want   []string
-	}{
-		{"no custom args", nil, nil, []string{"acp"}},
-		{"global flags go before acp", nil, []string{"--provider", "zai", "--yolo"}, []string{"--provider", "zai", "--yolo", "acp"}},
-		{"acp flags stay after acp", nil, []string{"--yes", "-y", "--accept-hooks"}, []string{"acp", "--yes", "-y", "--accept-hooks"}},
-		{"mixed keeps each group's order", nil, []string{"--yes", "-p", "research", "--accept-hooks", "--provider", "zai"}, []string{"-p", "research", "--provider", "zai", "acp", "--yes", "--accept-hooks"}},
-		{"a value stays with its flag", nil, []string{"-m", "--yes"}, []string{"-m", "--yes", "acp"}},
-		{"blocked acp is still filtered", nil, []string{"acp", "--yolo"}, []string{"--yolo", "acp"}},
-		{"inline value is complete", nil, []string{"--provider=zai"}, []string{"--provider=zai", "acp"}},
-		{"bare value flag is dropped", nil, []string{"--provider"}, []string{"acp"}},
-		{"bare value flag after a pair is dropped", nil, []string{"-m", "x", "--reasoning"}, []string{"-m", "x", "acp"}},
-		{"bare profile flag is dropped", nil, []string{"--yolo", "-p"}, []string{"--yolo", "acp"}},
-		{"bare optional-value flag is dropped", nil, []string{"-c", "--yes"}, []string{"acp", "--yes"}},
-		{"a flag that is itself a value is kept", nil, []string{"--model", "--provider"}, []string{"--model", "--provider", "acp"}},
-		{"prefix pairs with the first custom arg", []string{"--model"}, []string{"--provider"}, []string{"--provider", "acp"}},
-		// Behind `acp`, `--y` is `--yes`; in front, the root parser would read
-		// it as `--yolo` and turn off dangerous-command approval.
-		{"an abbreviated acp flag stays after acp", nil, []string{"--y"}, []string{"acp", "--y"}},
-		{"abbreviations acp resolves stay after acp", nil, []string{"--ye", "--acc", "--provider", "zai"}, []string{"--provider", "zai", "acp", "--ye", "--acc"}},
-		{"an ambiguous acp prefix keeps its position", nil, []string{"--se"}, []string{"acp", "--se"}},
-		{"an abbreviated global flag goes before acp", nil, []string{"--prov", "zai", "--y"}, []string{"--prov", "zai", "acp", "--y"}},
-		{"an inline abbreviated value is complete", nil, []string{"--prov=zai"}, []string{"--prov=zai", "acp"}},
-		{"a bare abbreviated value flag is dropped", nil, []string{"--yolo", "--prov"}, []string{"--yolo", "acp"}},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			got := hermesCLIArgs(tc.prefix, tc.custom, slog.Default())
-			if strings.Join(got, "\x00") != strings.Join(tc.want, "\x00") {
-				t.Fatalf("hermesCLIArgs(%v, %v) = %v, want %v", tc.prefix, tc.custom, got, tc.want)
-			}
-			if i := hermesACPIndex(got); got[i] != "acp" || slices.Index(tc.want, "acp") != i {
-				t.Fatalf("hermesACPIndex(%v) = %d, want the subcommand's position", got, i)
-			}
-		})
-	}
-}
-
-// TestIsHermesACPSubcommandFlag: a token stays behind `acp` whenever the acp
-// subparser would read it as its own option — argparse resolves unambiguous
-// long-option abbreviations, so a string match would let `--y` (`--yes`) move
-// in front of `acp`, where the root parser reads it as `--yolo`.
-func TestIsHermesACPSubcommandFlag(t *testing.T) {
-	t.Parallel()
-
-	for token, want := range map[string]bool{
-		"--yes": true, "--y": true, "--ye": true, "-y": true, "-yh": true,
-		"--accept-hooks": true, "--acc": true, "--setup-browser": true,
-		"--se": true, "--yes=1": true, "--help": true,
-		"--yolo": false, "--provider": false, "--prov": false, "-p": false,
-		"--": false, "zai": false, "": false,
-	} {
-		if got := isHermesACPSubcommandFlag(token); got != want {
-			t.Errorf("isHermesACPSubcommandFlag(%q) = %v, want %v", token, got, want)
-		}
-	}
-}
-
-// TestStripHermesProfileSelectorsSpansRegionBoundary: a launch prefix ending in
-// a bare `-p` captures the first custom arg — or, with none, the backend's own
-// `acp` token — as its profile value. Neither region holds a complete
-// selection, so stripping them separately leaves the selector live and the
-// task walks out of the overlay.
-func TestStripHermesProfileSelectorsSpansRegionBoundary(t *testing.T) {
-	t.Parallel()
-
-	prefix, custom := StripHermesProfileSelectors([]string{"-p"}, []string{"research", "--yolo"}, slog.Default())
-
-	if sel := ParseHermesProfileArgs(Command{Prefix: prefix}.Argv(hermesCLIArgsFrom(custom)...)); sel.Found {
-		t.Fatalf("launched argv still selects %q: prefix=%v custom=%v", sel.Name, prefix, custom)
-	}
-	if len(prefix) != 0 {
-		t.Fatalf("the straddling `-p` must be removed from the prefix, got %v", prefix)
-	}
-	if strings.Join(custom, "\x00") != "--yolo" {
-		t.Fatalf("custom = %v, want only the captured value removed", custom)
-	}
-
-	// With no custom args the prefix captures `acp`, which the backend owns and
-	// re-adds at launch: only the flag goes.
-	prefix, custom = StripHermesProfileSelectors([]string{"wrapper-sub", "-p"}, nil, slog.Default())
-	if strings.Join(prefix, "\x00") != "wrapper-sub" || len(custom) != 0 {
-		t.Fatalf("prefix = %v, custom = %v, want only the `-p` removed", prefix, custom)
-	}
-}
-
-// TestStripHermesProfileSelectorsRemovesEveryOccurrence: hermes honours the
-// first selection and ignores the rest, so removing one promotes the next.
-// With prefix and custom args configured separately, several selections is
-// ordinary configuration rather than a user mistake.
-func TestStripHermesProfileSelectorsRemovesEveryOccurrence(t *testing.T) {
-	t.Parallel()
-
-	prefix, custom := StripHermesProfileSelectors(
-		[]string{"wrapper-sub", "-p", "research"},
-		[]string{"--profile=ops", "--model", "x", "-p", "third"},
-		slog.Default())
-
-	argv := Command{Prefix: prefix}.Argv(hermesCLIArgsFrom(custom)...)
-	if sel := ParseHermesProfileArgs(argv); sel.Found {
-		t.Fatalf("a selection survived: %+v in %v", sel, argv)
-	}
-	if strings.Join(prefix, "\x00") != "wrapper-sub" {
-		t.Fatalf("prefix = %v, want the command identity kept and the selector gone", prefix)
-	}
-	if strings.Join(custom, "\x00") != strings.Join([]string{"--model", "x"}, "\x00") {
-		t.Fatalf("custom = %v, want unrelated args kept", custom)
-	}
-}
-
-// TestStripHermesProfileSelectorsKeepsCustomArgOrder: `acp`'s own flags launch
-// behind the subcommand, so the assembled argv reorders custom args. Stripping
-// must still remove the selection's own tokens and hand the rest back in their
-// configured order.
-func TestStripHermesProfileSelectorsKeepsCustomArgOrder(t *testing.T) {
-	t.Parallel()
-
-	prefix, custom := StripHermesProfileSelectors(nil,
-		[]string{"--yes", "-p", "research", "--accept-hooks", "--provider", "zai"}, slog.Default())
-	if len(prefix) != 0 {
-		t.Fatalf("prefix = %v, want empty", prefix)
-	}
-	if want := []string{"--yes", "--accept-hooks", "--provider", "zai"}; strings.Join(custom, "\x00") != strings.Join(want, "\x00") {
-		t.Fatalf("custom = %v, want %v", custom, want)
-	}
-}
-
-// TestStripHermesProfileSelectorsLeavesInvalidSelectionAlone: a value hermes
-// itself discards redirects nothing, so removing it would only mangle the
-// user's argv.
-func TestStripHermesProfileSelectorsLeavesInvalidSelectionAlone(t *testing.T) {
-	t.Parallel()
-
-	prefix, custom := StripHermesProfileSelectors(nil, []string{"-p", "NOT_A_PROFILE"}, slog.Default())
-	if len(prefix) != 0 {
-		t.Fatalf("prefix = %v, want empty", prefix)
-	}
-	if strings.Join(custom, "\x00") != strings.Join([]string{"-p", "NOT_A_PROFILE"}, "\x00") {
-		t.Fatalf("custom = %v, want the discarded selection left untouched", custom)
-	}
-}
-
-// TestCodexLaunchPrefixCannotOverrideExplicitFastMode is Elon's must-fix 3.
-// `--disable fast_mode` beats `--enable fast_mode` regardless of argv order and
-// `-c features.fast_mode=false` beats config.toml from any position, so being
-// first does not make the prefix lose. Both spellings have to be removed.
 func TestCodexLaunchPrefixCannotOverrideExplicitFastMode(t *testing.T) {
 	t.Parallel()
 

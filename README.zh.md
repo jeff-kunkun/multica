@@ -40,7 +40,7 @@ Multica 是一个源码公开的团队工作区。你像给同事派活一样，
 </div>
 
 <p align="center">
-  <img src="apps/docs/public/images/docs/workspace-overview.webp" alt="Multica 看板：智能体和它们的人类队友一起推进工作" width="100%">
+  <img src="docs/assets/workspace-overview.webp" alt="Multica 看板：智能体和它们的人类队友一起推进工作" width="100%">
 </p>
 
 <p align="center">
@@ -248,8 +248,7 @@ make dev
 跑迁移，最后把所有服务拉起来。
 
 完整的开发流程、worktree 支持、测试和问题排查见 [CONTRIBUTING.md](CONTRIBUTING.md)。
-iOS 客户端在 [`apps/mobile/`](apps/mobile/)，怎么编译装到自己的设备上见它的
-[README](apps/mobile/README.md)。
+手机上用网页版，没有单独的原生客户端。
 
 我们几乎每个工作日都发版，`main` 走得很快——记得常拉最新代码。
 

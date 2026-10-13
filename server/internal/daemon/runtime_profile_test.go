@@ -269,19 +269,19 @@ func TestRegisterRuntimes_ProfileReusesDiscoveredProviderCommand(t *testing.T) {
 	stubLookPath(t, map[string]string{})
 
 	profiles := []RuntimeProfile{{
-		ID:             "prof-codearts",
+		ID:             "prof-claude",
 		WorkspaceID:    "ws-1",
-		DisplayName:    "CodeArts Profile",
-		ProtocolFamily: "codearts",
-		CommandName:    "codearts",
+		DisplayName:    "Claude Profile",
+		ProtocolFamily: "claude",
+		CommandName:    "claude",
 		Enabled:        true,
 	}}
 	fx := newProfileRegisterFixture(t, profiles, http.StatusOK)
 	d := fx.daemon
 	d.cfg.Agents = map[string]AgentEntry{
-		"codearts": {
-			Path:    `C:\Users\tester\.codeartsdoer\installers\codearts.cmd`,
-			Command: "codearts",
+		"claude": {
+			Path:    "/opt/claude",
+			Command: "claude",
 		},
 	}
 
@@ -289,15 +289,15 @@ func TestRegisterRuntimes_ProfileReusesDiscoveredProviderCommand(t *testing.T) {
 		t.Fatalf("registerRuntimesForWorkspace: %v", err)
 	}
 
-	got := d.profileLaunchSpecs["prof-codearts"]
-	if got.path != `C:\Users\tester\.codeartsdoer\installers\codearts.cmd` {
-		t.Errorf("profileLaunchSpecs[prof-codearts].path = %q, want discovered CodeArts path", got.path)
+	got := d.profileLaunchSpecs["prof-claude"]
+	if got.path != "/opt/claude" {
+		t.Errorf("profileLaunchSpecs[prof-claude].path = %q, want discovered Claude path", got.path)
 	}
 	if len(fx.sentRuntimes) != 2 {
 		t.Fatalf("sent runtimes = %d, want built-in plus profile: %+v", len(fx.sentRuntimes), fx.sentRuntimes)
 	}
-	if fx.sentRuntimes[1]["profile_id"] != "prof-codearts" || fx.sentRuntimes[1]["type"] != "codearts" {
-		t.Fatalf("profile runtime = %+v, want CodeArts prof-codearts", fx.sentRuntimes[1])
+	if fx.sentRuntimes[1]["profile_id"] != "prof-claude" || fx.sentRuntimes[1]["type"] != "claude" {
+		t.Fatalf("profile runtime = %+v, want Claude prof-claude", fx.sentRuntimes[1])
 	}
 }
 
@@ -523,14 +523,14 @@ func TestCustomCommandPathForRuntime(t *testing.T) {
 func TestRegisterRuntimes_ProfileCompatibilityTarget(t *testing.T) {
 	t.Cleanup(stubAgentVersion(t))
 	stubLookPath(t, map[string]string{"wrapper": "/opt/bin/wrapper"})
-	for _, target := range []string{"", "pi", "omp"} {
+	for _, target := range []string{"", "claude", "opencode"} {
 		t.Run("target="+target, func(t *testing.T) {
-			fx := newProfileRegisterFixture(t, []RuntimeProfile{{ID: "prof-1", ProtocolFamily: "pi", RuntimeType: target, CommandName: "wrapper", FixedArgs: []string{"launch"}, Enabled: true}}, http.StatusOK)
+			fx := newProfileRegisterFixture(t, []RuntimeProfile{{ID: "prof-1", ProtocolFamily: "claude", RuntimeType: target, CommandName: "wrapper", FixedArgs: []string{"launch"}, Enabled: true}}, http.StatusOK)
 			fx.daemon.cfg.Agents = map[string]AgentEntry{}
 			resp, _, _, err := fx.daemon.registerRuntimesForWorkspaceLocked(context.Background(), "ws-1")
 			want := target
 			if want == "" {
-				want = "pi"
+				want = "claude"
 			}
 			if err != nil || len(resp.Runtimes) != 1 || resp.Runtimes[0].Provider != want || resp.Runtimes[0].ProfileID != "prof-1" {
 				t.Fatalf("lost compatibility target or provenance: %+v, %v", resp, err)

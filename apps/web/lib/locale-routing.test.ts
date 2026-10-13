@@ -8,8 +8,9 @@ describe("locale routing", () => {
   it("accepts only app-supported locale identifiers", () => {
     expect(isSupportedLocale("en")).toBe(true);
     expect(isSupportedLocale("zh-Hans")).toBe(true);
-    expect(isSupportedLocale("ko")).toBe(true);
-    expect(isSupportedLocale("ja")).toBe(true);
+    expect(isSupportedLocale("ko")).toBe(false);
+    expect(isSupportedLocale("ja")).toBe(false);
+    expect(isSupportedLocale("fr")).toBe(false);
     expect(isSupportedLocale("zh")).toBe(false);
     expect(isSupportedLocale(null)).toBe(false);
   });
@@ -40,19 +41,21 @@ describe("locale routing", () => {
     ).toBe("zh-Hans");
   });
 
-  it("matches Korean browser language signals", () => {
+  it("falls back to English for Korean, Japanese, and French browser signals", () => {
     expect(
       resolveLocaleFromSignals({
-        acceptLanguage: "ko-KR,ko;q=0.9,en;q=0.8",
+        acceptLanguage: "ko-KR,ko;q=0.9",
       }),
-    ).toBe("ko");
-  });
-
-  it("matches Japanese browser language signals", () => {
+    ).toBe("en");
     expect(
       resolveLocaleFromSignals({
-        acceptLanguage: "ja-JP,ja;q=0.9,en;q=0.8",
+        acceptLanguage: "ja-JP,ja;q=0.9",
       }),
-    ).toBe("ja");
+    ).toBe("en");
+    expect(
+      resolveLocaleFromSignals({
+        acceptLanguage: "fr-FR,fr;q=0.9",
+      }),
+    ).toBe("en");
   });
 });

@@ -212,13 +212,13 @@ describe("CallbackPage", () => {
     ).toBeInTheDocument();
 
     view.rerender(
-      <I18nProvider locale="ja" resources={RESOURCES}>
+      <I18nProvider locale="en" resources={RESOURCES}>
         <CallbackPage />
       </I18nProvider>,
     );
 
     expect(
-      await screen.findByText("Googleから今回のログインに必要なメールアドレスが提供されませんでした。"),
+      await screen.findByText("Google did not provide an email address for this sign-in."),
     ).toBeInTheDocument();
     expect(mockLoginWithGoogle).toHaveBeenCalledTimes(1);
     expect(mockPush).not.toHaveBeenCalled();
