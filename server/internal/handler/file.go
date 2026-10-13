@@ -471,7 +471,7 @@ func (h *Handler) UploadFile(w http.ResponseWriter, r *http.Request) {
 				ID:          issueUUID,
 				WorkspaceID: parseUUID(workspaceID),
 			})
-			if err != nil {
+			if err != nil || !h.requestCanSeeIssue(r, issue) {
 				writeError(w, http.StatusForbidden, "invalid issue_id")
 				return
 			}
@@ -1465,7 +1465,7 @@ func (h *Handler) DeleteAttachment(w http.ResponseWriter, r *http.Request) {
 	uploaderID := uuidToString(att.UploaderID)
 	isUploader := att.UploaderType == "member" && uploaderID == userID
 	member, hasMember := ctxMember(r.Context())
-	isAdmin := hasMember && (member.Role == "admin" || member.Role == "owner")
+	isAdmin := hasMember && member.Role == "owner"
 
 	if !isUploader && !isAdmin {
 		writeError(w, http.StatusForbidden, "not authorized to delete this attachment")

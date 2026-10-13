@@ -78,10 +78,7 @@ func (h *Handler) CreateShareLink(w http.ResponseWriter, r *http.Request) {
 
 	role := "member"
 	if req.Role != "" {
-		r := strings.ToLower(strings.TrimSpace(req.Role))
-		if r == "admin" {
-			role = "admin"
-		} else if r != "member" {
+		if strings.ToLower(strings.TrimSpace(req.Role)) != "member" {
 			writeError(w, http.StatusBadRequest, "invalid role")
 			return
 		}

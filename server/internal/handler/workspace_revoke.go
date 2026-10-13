@@ -178,6 +178,11 @@ func (h *Handler) revokeAndRemoveMember(ctx context.Context, workspaceID, userID
 	if err := qtx.DeleteMember(ctx, memberID); err != nil {
 		return empty, err
 	}
+	// Project shares are membership-scoped; a member who rejoins starts with
+	// none.
+	if err := qtx.DeleteProjectMembersByUser(ctx, db.DeleteProjectMembersByUserParams{WorkspaceID: workspaceID, UserID: userID}); err != nil {
+		return empty, err
+	}
 
 	if err := tx.Commit(ctx); err != nil {
 		return empty, err

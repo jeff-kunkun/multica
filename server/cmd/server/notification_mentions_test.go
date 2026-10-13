@@ -35,6 +35,7 @@ func TestNotification_MalformedMemberMentionPreservesValidRecipients(t *testing.
 				"preferences":  `{"mentions":"muted"}`,
 			})
 			issueID := fx.Issue(t, "Malformed mention")
+			shareTestIssues(t, []string{issueID}, recipientID, mutedID)
 			fx.Cleanup(t, `DELETE FROM inbox_item WHERE issue_id = $1`, issueID)
 			fx.Cleanup(t, `DELETE FROM issue_subscriber WHERE issue_id = $1`, issueID)
 

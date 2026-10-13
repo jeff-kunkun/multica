@@ -133,7 +133,7 @@ func (h *Handler) requireWorkspaceMcpWriter(w http.ResponseWriter, r *http.Reque
 		writeError(w, http.StatusForbidden, "agents cannot modify the workspace MCP servers")
 		return false
 	}
-	if !roleAllowed(member.Role, "owner", "admin") {
+	if member.Role != "owner" {
 		writeError(w, http.StatusForbidden, "insufficient permissions")
 		return false
 	}

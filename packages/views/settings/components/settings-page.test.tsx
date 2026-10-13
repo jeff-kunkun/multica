@@ -26,7 +26,7 @@ vi.mock("./approvers-tab", stub("ApproversTab"));
 vi.mock("./local-run-tab", stub("LocalRunTab"));
 
 const shell = vi.hoisted(() => ({
-  role: "owner" as "owner" | "admin" | "member",
+  role: "owner" as "owner" | "member",
 }));
 
 vi.mock("@multica/core/paths", () => ({
@@ -199,7 +199,7 @@ describe("SettingsPage information architecture", () => {
     renderWithI18n(<SettingsPage />);
     const general = screen.getByRole("link", { name: /^General/ });
     expect(
-      within(general).getByLabelText("Only owners and admins can change this"),
+      within(general).getByLabelText("Only the workspace owner can change this"),
     ).toBeInTheDocument();
     // Labels stay editable for every member, so they carry no lock.
     const labels = screen.getByRole("link", { name: "Labels" });

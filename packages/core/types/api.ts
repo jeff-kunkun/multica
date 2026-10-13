@@ -1,6 +1,5 @@
 import type { Issue, IssueMetadata, IssueStatus, IssueStatusCategory, IssuePriority, IssueAssigneeType } from "./issue";
 import type { IssuePropertyValues, PropertyFilterValue } from "./property";
-import type { MemberRole } from "./workspace";
 import type { Project, ProjectStatus } from "./project";
 
 // Issue API
@@ -580,11 +579,6 @@ export interface UpdateMeRequest {
 
 export interface CreateMemberRequest {
   email: string;
-  role?: MemberRole;
-}
-
-export interface UpdateMemberRequest {
-  role: MemberRole;
 }
 
 // Personal Access Tokens

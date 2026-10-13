@@ -1196,7 +1196,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   const currentUserRole =
     members.find((m) => m.user_id === user?.id)?.role ?? null;
   const canModerateComments =
-    currentUserRole === "owner" || currentUserRole === "admin";
+    currentUserRole === "owner";
   const { data: allIssues = [] } = useQuery(issueListOptions(wsId));
   const { getActorName } = useActorName();
   const resolveStatusLabel = useStatusLabel(wsId);

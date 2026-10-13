@@ -149,7 +149,7 @@ Migrations
   highest one on `origin/kun-main`, so upstream merges stay conflict-free.
 - Kun-main's own migrations: 573 (password login), 574 (office runtime families),
   575 (mirror links), 576–577 (project-manager Bots), 578–581 (plans, one run
-  per issue), 582–583 (meetings).
+  per issue), 582–583 (project sharing), 584–585 (meetings).
 - Compressing migrations into a baseline is DENE-2018's job; do not do it ad hoc.
 
 Fork changes stay small: prefer a minimal patch over porting kun-line code

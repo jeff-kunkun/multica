@@ -1,4 +1,8 @@
-export type MemberRole = "owner" | "admin" | "member";
+/**
+ * The workspace owner sees and edits everything; a member sees only the
+ * projects shared with them.
+ */
+export type MemberRole = "owner" | "member";
 
 export interface WorkspaceRepo {
   url: string;

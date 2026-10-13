@@ -72,7 +72,7 @@ func (h *Handler) AddReaction(w http.ResponseWriter, r *http.Request) {
 		WorkspaceID: wsUUID,
 	})
 	// A deleted comment's tombstone takes no reactions.
-	if err != nil || comment.DeletedAt.Valid {
+	if err != nil || comment.DeletedAt.Valid || !h.requestCanSeeComment(r, comment) {
 		writeError(w, http.StatusNotFound, "comment not found")
 		return
 	}
@@ -161,7 +161,7 @@ func (h *Handler) RemoveReaction(w http.ResponseWriter, r *http.Request) {
 		WorkspaceID: wsUUID,
 	})
 	// A deleted comment's tombstone has no reactions left to remove.
-	if err != nil || comment.DeletedAt.Valid {
+	if err != nil || comment.DeletedAt.Valid || !h.requestCanSeeComment(r, comment) {
 		writeError(w, http.StatusNotFound, "comment not found")
 		return
 	}

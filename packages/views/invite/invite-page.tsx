@@ -196,9 +196,7 @@ export function InvitePage({ invitationId, onBack }: InvitePageProps) {
             </h2>
             <p className="text-body text-muted-foreground">
               <strong>{invitation.inviter_name || invitation.inviter_email}</strong>{" "}
-              {invitation.role === "admin"
-                ? t(($) => $.main.invited_role_admin)
-                : t(($) => $.main.invited_role_member)}
+              {t(($) => $.main.invited_role_member)}
             </p>
           </div>
 

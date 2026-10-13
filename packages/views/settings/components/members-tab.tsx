@@ -9,7 +9,6 @@ import {
   MoreHorizontal,
   Plus,
   Search,
-  Shield,
   Trash2,
   User,
   UserMinus,
@@ -57,10 +56,6 @@ import {
   DropdownMenuTrigger,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuSub,
-  DropdownMenuSubTrigger,
-  DropdownMenuSubContent,
 } from "@multica/ui/components/ui/dropdown-menu";
 import { toast } from "sonner";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -87,7 +82,6 @@ type MembersView = "members" | "invitations" | "links";
 
 const ROLE_ICONS: Record<MemberRole, typeof Crown> = {
   owner: Crown,
-  admin: Shield,
   member: User,
 };
 
@@ -110,17 +104,10 @@ function useRoleLabels() {
   return {
     owner: {
       label: t(($) => $.members.roles.owner.label),
-      description: t(($) => $.members.roles.owner.description),
       icon: ROLE_ICONS.owner,
-    },
-    admin: {
-      label: t(($) => $.members.roles.admin.label),
-      description: t(($) => $.members.roles.admin.description),
-      icon: ROLE_ICONS.admin,
     },
     member: {
       label: t(($) => $.members.roles.member.label),
-      description: t(($) => $.members.roles.member.description),
       icon: ROLE_ICONS.member,
     },
   } as const;
@@ -129,22 +116,14 @@ function useRoleLabels() {
 function MemberRow({
   member,
   canManage,
-  canManageOwners,
-  ownerCount,
   isSelf,
   busy,
-  onRoleChange,
   onRemove,
 }: {
   member: MemberWithUser;
   canManage: boolean;
-  canManageOwners: boolean;
-  /** Total number of owners in this workspace — needed to gate demoting the
-   *  last owner per `workspace.go:497-507`. */
-  ownerCount: number;
   isSelf: boolean;
   busy: boolean;
-  onRoleChange: (role: MemberRole) => void;
   onRemove: () => void;
 }) {
   const { t } = useT("settings");
@@ -152,10 +131,9 @@ function MemberRow({
   const roleConfig = useRoleLabels();
   const rc = roleConfig[member.role];
   const RoleIcon = rc.icon;
-  const canEditRole = canManage && !isSelf && (member.role !== "owner" || canManageOwners);
-  const canRemove = canManage && !isSelf && (member.role !== "owner" || canManageOwners);
-  const isLastOwner = member.role === "owner" && ownerCount <= 1;
-  const showMenu = canEditRole || canRemove;
+  // The owner cannot be removed and cannot leave; members can be removed by
+  // the owner.
+  const canRemove = canManage && !isSelf && member.role !== "owner";
 
   return (
     <div className="flex items-center gap-3 px-4 py-3">
@@ -181,7 +159,7 @@ function MemberRow({
         {rc.label}
       </span>
       <span className="flex size-7 shrink-0 items-center justify-center">
-      {showMenu && (
+      {canRemove && (
         <DropdownMenu>
           <DropdownMenuTrigger
             render={
@@ -196,58 +174,10 @@ function MemberRow({
             }
           />
           <DropdownMenuContent align="end" className="w-auto">
-            {canEditRole && (
-              <DropdownMenuSub>
-                <DropdownMenuSubTrigger>
-                  <Shield className="h-3.5 w-3.5" />
-                  {t(($) => $.members.change_role)}
-                </DropdownMenuSubTrigger>
-                <DropdownMenuSubContent className="w-auto">
-                  {(Object.entries(roleConfig) as [MemberRole, (typeof roleConfig)[MemberRole]][]).map(
-                    ([role, config]) => {
-                      if (role === "owner" && !canManageOwners) return null;
-                      const Icon = config.icon;
-                      const wouldDemoteLastOwner =
-                        isLastOwner && role !== "owner";
-                      return (
-                        <DropdownMenuItem
-                          key={role}
-                          onClick={() =>
-                            wouldDemoteLastOwner ? undefined : onRoleChange(role)
-                          }
-                          disabled={wouldDemoteLastOwner}
-                          title={
-                            wouldDemoteLastOwner
-                              ? t(($) => $.members.cannot_demote_last_owner_title)
-                              : undefined
-                          }
-                        >
-                          <Icon className="h-3.5 w-3.5" />
-                          <div className="flex flex-col">
-                            <span>{config.label}</span>
-                            <span className="text-caption text-muted-foreground font-normal">
-                              {wouldDemoteLastOwner
-                                ? t(($) => $.members.cannot_demote_last_owner)
-                                : config.description}
-                            </span>
-                          </div>
-                          {member.role === role && (
-                            <span className="ml-auto text-caption text-muted-foreground">{"✓"}</span>
-                          )}
-                        </DropdownMenuItem>
-                      );
-                    }
-                  )}
-                </DropdownMenuSubContent>
-              </DropdownMenuSub>
-            )}
-            {canEditRole && canRemove && <DropdownMenuSeparator />}
-            {canRemove && (
-              <DropdownMenuItem variant="destructive" onClick={onRemove}>
-                <UserMinus className="h-3.5 w-3.5" />
-                {t(($) => $.members.remove_action)}
-              </DropdownMenuItem>
-            )}
+            <DropdownMenuItem variant="destructive" onClick={onRemove}>
+              <UserMinus className="h-3.5 w-3.5" />
+              {t(($) => $.members.remove_action)}
+            </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
       )}
@@ -269,8 +199,6 @@ function InvitationRow({
 }) {
   const { t } = useT("settings");
   const locale = useLocale();
-  const roleConfig = useRoleLabels();
-  const rc = roleConfig[invitation.role];
 
   return (
     <div className="flex items-center gap-3 px-4 py-3">
@@ -286,7 +214,6 @@ function InvitationRow({
           })}
         </div>
       </div>
-      <span className="w-24 shrink-0 text-body">{rc.label}</span>
       <span className="flex size-7 shrink-0 items-center justify-center">
         {canManage && (
           <Button
@@ -319,8 +246,6 @@ function ShareLinkRow({
 }) {
   const { t } = useT("settings");
   const locale = useLocale();
-  const roleConfig = useRoleLabels();
-  const rc = roleConfig[link.role];
   const navigation = useOptionalNavigation();
   const joinUrl = buildShareLinkUrl(navigation, link.code);
 
@@ -341,7 +266,6 @@ function ShareLinkRow({
           {joinUrl}
         </div>
       </div>
-      <span className="w-24 shrink-0 text-body">{rc.label}</span>
       <Button
         variant="ghost"
         size="icon-sm"
@@ -365,7 +289,6 @@ function ShareLinkRow({
 
 export function MembersTab() {
   const { t } = useT("settings");
-  const roleConfig = useRoleLabels();
   const user = useAuthStore((s) => s.user);
   const workspace = useCurrentWorkspace();
   const qc = useQueryClient();
@@ -400,13 +323,11 @@ export function MembersTab() {
   };
   const [memberQuery, setMemberQuery] = useState("");
   const [inviteEmail, setInviteEmail] = useState("");
-  const [inviteRole, setInviteRole] = useState<MemberRole>("member");
   const [inviteLoading, setInviteLoading] = useState(false);
   const [memberActionId, setMemberActionId] = useState<string | null>(null);
   const [invitationActionId, setInvitationActionId] = useState<string | null>(null);
   const [shareLinkActionId, setShareLinkActionId] = useState<string | null>(null);
   const [shareLinkLoading, setShareLinkLoading] = useState(false);
-  const [shareLinkRole, setShareLinkRole] = useState<MemberRole>("member");
   const [shareLinkExpiry, setShareLinkExpiry] = useState<string>("168"); // default 7 days
   const [confirmAction, setConfirmAction] = useState<{
     title: string;
@@ -416,10 +337,8 @@ export function MembersTab() {
   } | null>(null);
 
   const currentMember = members.find((m) => m.user_id === user?.id) ?? null;
-  const canManageWorkspace = currentMember?.role === "owner" || currentMember?.role === "admin";
-  const isOwner = currentMember?.role === "owner";
-  const ownerCount = members.filter((m) => m.role === "owner").length;
-  // Only owners/admins may list share links; skip the request for plain
+  const canManageWorkspace = currentMember?.role === "owner";
+  // Only the owner may list share links; skip the request for plain
   // members (the server would 403) once the current member's role is known.
   const { data: shareLinks = [] } = useQuery(shareLinkListOptions(wsId, canManageWorkspace));
   const needle = memberQuery.trim().toLocaleLowerCase();
@@ -432,11 +351,10 @@ export function MembersTab() {
     : members;
 
   const sendInvitation = useCallback(
-    async (email: string, role: MemberRole) => {
+    async (email: string) => {
       if (!workspace) return;
-      await api.createMember(workspace.id, { email, role });
+      await api.createMember(workspace.id, { email });
       setInviteEmail("");
-      setInviteRole("member");
       await qc.invalidateQueries({
         queryKey: workspaceKeys.invitations(wsId),
       });
@@ -448,10 +366,9 @@ export function MembersTab() {
   const handleInviteMember = async () => {
     if (!workspace) return;
     const email = inviteEmail.trim();
-    const role = inviteRole;
     setInviteLoading(true);
     try {
-      await sendInvitation(email, role);
+      await sendInvitation(email);
       setInviteOpen(false);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : t(($) => $.members.toast_invitation_failed));
@@ -482,20 +399,6 @@ export function MembersTab() {
     });
   };
 
-  const handleRoleChange = async (memberId: string, role: MemberRole) => {
-    if (!workspace) return;
-    setMemberActionId(memberId);
-    try {
-      await api.updateMember(workspace.id, memberId, { role });
-      qc.invalidateQueries({ queryKey: workspaceKeys.members(wsId) });
-      toast.success(t(($) => $.members.toast_role_updated));
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : t(($) => $.members.toast_role_failed));
-    } finally {
-      setMemberActionId(null);
-    }
-  };
-
   const handleRemoveMember = (member: MemberWithUser) => {
     if (!workspace) return;
     setConfirmAction({
@@ -521,7 +424,7 @@ export function MembersTab() {
     if (!workspace) return;
     setShareLinkLoading(true);
     try {
-      await api.createShareLink(workspace.id, { role: shareLinkRole, expires_in: parseInt(shareLinkExpiry) || undefined });
+      await api.createShareLink(workspace.id, { expires_in: parseInt(shareLinkExpiry) || undefined });
       qc.invalidateQueries({ queryKey: workspaceKeys.shareLinks(wsId) });
       setShareLinkOpen(false);
       toast.success(t(($) => $.members.toast_share_link_created));
@@ -572,10 +475,6 @@ export function MembersTab() {
 
   if (!workspace) return null;
 
-  const roleItems = (["member", "admin"] as const).map((value) => ({
-    value,
-    label: roleConfig[value].label,
-  }));
   const expiryOptions = [
     { value: "24", label: t(($) => $.members.expiry_24h) },
     { value: "168", label: t(($) => $.members.expiry_7d) },
@@ -648,11 +547,8 @@ export function MembersTab() {
                   <MemberRow
                     member={m}
                     canManage={canManageWorkspace}
-                    canManageOwners={isOwner}
-                    ownerCount={ownerCount}
                     isSelf={m.user_id === user?.id}
                     busy={memberActionId === m.id}
-                    onRoleChange={(role) => handleRoleChange(m.id, role)}
                     onRemove={() => handleRemoveMember(m)}
                   />
                 </div>
@@ -729,30 +625,6 @@ export function MembersTab() {
                 autoFocus
               />
             </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="invite-role">{t(($) => $.members.role_label)}</Label>
-              <Select
-                items={roleItems}
-                value={inviteRole}
-                onValueChange={(value) => setInviteRole(value as MemberRole)}
-              >
-                <SelectTrigger id="invite-role" className="w-full">
-                  <SelectValue>{() => roleConfig[inviteRole].label}</SelectValue>
-                </SelectTrigger>
-                <SelectContent>
-                  {roleItems.map((item) => (
-                    <SelectItem key={item.value} value={item.value}>
-                      <span className="flex flex-col">
-                        <span>{item.label}</span>
-                        <span className="text-caption text-muted-foreground">
-                          {roleConfig[item.value].description}
-                        </span>
-                      </span>
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
             <DialogFooter>
               <Button
                 type="button"
@@ -786,25 +658,6 @@ export function MembersTab() {
             <DialogDescription>{t(($) => $.members.share_links_description)}</DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
-            <div className="space-y-1.5">
-              <Label htmlFor="share-link-role">{t(($) => $.members.role_label)}</Label>
-              <Select
-                items={roleItems}
-                value={shareLinkRole}
-                onValueChange={(value) => setShareLinkRole(value as MemberRole)}
-              >
-                <SelectTrigger id="share-link-role" className="w-full">
-                  <SelectValue>{() => roleConfig[shareLinkRole].label}</SelectValue>
-                </SelectTrigger>
-                <SelectContent>
-                  {roleItems.map((item) => (
-                    <SelectItem key={item.value} value={item.value}>
-                      {item.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
             <div className="space-y-1.5">
               <Label htmlFor="share-link-expiry">{t(($) => $.members.expiry_label)}</Label>
               <Select

@@ -3546,7 +3546,7 @@ func TestMembershipCache_InvalidatedOnDeleteMember(t *testing.T) {
 	installFreshMembershipCache(t)
 	ctx := context.Background()
 
-	targetUserID, targetMemberID := createEphemeralMember(t, testWorkspaceID, "delete", "admin")
+	targetUserID, targetMemberID := createEphemeralMember(t, testWorkspaceID, "delete", "member")
 	testHandler.MembershipCache.Set(ctx, targetUserID, testWorkspaceID)
 	if !testHandler.MembershipCache.Get(ctx, targetUserID, testWorkspaceID) {
 		t.Fatal("setup: expected cache hit after Set")
@@ -3558,31 +3558,6 @@ func TestMembershipCache_InvalidatedOnDeleteMember(t *testing.T) {
 
 	if testHandler.MembershipCache.Get(ctx, targetUserID, testWorkspaceID) {
 		t.Fatal("DeleteMember handler did not invalidate membership cache for removed user")
-	}
-}
-
-// TestMembershipCache_InvalidatedOnUpdateMember drives a real UpdateMember
-// (role change) call and asserts the cache entry is invalidated. The cache
-// stores only the existence of membership, but UpdateMember still flushes
-// the entry so any downstream caller that did add role-aware caching later
-// would not silently see a stale role.
-func TestMembershipCache_InvalidatedOnUpdateMember(t *testing.T) {
-	if testHandler == nil {
-		t.Skip("database not available")
-	}
-	installFreshMembershipCache(t)
-	ctx := context.Background()
-
-	targetUserID, targetMemberID := createEphemeralMember(t, testWorkspaceID, "update", "admin")
-	testHandler.MembershipCache.Set(ctx, targetUserID, testWorkspaceID)
-
-	req := newRequest("PUT", "/api/workspaces/"+testWorkspaceID+"/members/"+targetMemberID,
-		map[string]any{"role": "member"})
-	req = withURLParams(req, "id", testWorkspaceID, "memberId", targetMemberID)
-	testutil.Call(t, testHandler.UpdateMember, req).Want(http.StatusOK)
-
-	if testHandler.MembershipCache.Get(ctx, targetUserID, testWorkspaceID) {
-		t.Fatal("UpdateMember handler did not invalidate membership cache for updated user")
 	}
 }
 
@@ -3598,7 +3573,7 @@ func TestMembershipCache_InvalidatedOnLeaveWorkspace(t *testing.T) {
 	installFreshMembershipCache(t)
 	ctx := context.Background()
 
-	targetUserID, _ := createEphemeralMember(t, testWorkspaceID, "leave", "admin")
+	targetUserID, _ := createEphemeralMember(t, testWorkspaceID, "leave", "member")
 	testHandler.MembershipCache.Set(ctx, targetUserID, testWorkspaceID)
 
 	req := newRequestAsUser(targetUserID, "DELETE", "/api/workspaces/"+testWorkspaceID+"/leave", nil)
@@ -3636,7 +3611,7 @@ func TestMembershipCache_InvalidatedOnDeleteWorkspace(t *testing.T) {
 		INSERT INTO member (workspace_id, user_id, role) VALUES ($1, $2, 'owner')
 	`, wsID, testUserID)
 
-	extraUserID, _ := createEphemeralMember(t, wsID, "ws-delete-extra", "admin")
+	extraUserID, _ := createEphemeralMember(t, wsID, "ws-delete-extra", "member")
 
 	testHandler.MembershipCache.Set(ctx, testUserID, wsID)
 	testHandler.MembershipCache.Set(ctx, extraUserID, wsID)

@@ -523,7 +523,7 @@ func main() {
 	} else {
 		slog.Info("realtime: REDIS_URL is unset — using in-memory hub (single-node mode)")
 	}
-	registerListeners(bus, broadcaster)
+	registerListeners(bus, broadcaster, db.New(pool))
 
 	analyticsClient := analytics.NewFromEnv()
 	defer analyticsClient.Close()

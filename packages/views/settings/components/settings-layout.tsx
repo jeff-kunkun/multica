@@ -337,7 +337,7 @@ export function SettingsReadOnlyNotice({ wsId }: { wsId: string }) {
     enabled: !!wsId,
   });
   const managers = members
-    .filter((member) => member.role === "owner" || member.role === "admin")
+    .filter((member) => member.role === "owner")
     .map((member) => member.name)
     .filter(Boolean)
     .slice(0, 3);

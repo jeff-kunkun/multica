@@ -57,7 +57,7 @@ export function McpTab() {
   const wsId = workspace?.id ?? "";
   const currentMember = useCurrentMember(wsId);
   const canManage =
-    currentMember.role === "owner" || currentMember.role === "admin";
+    currentMember.role === "owner";
 
   const serversQuery = useQuery(workspaceMcpServersOptions(wsId));
   const createServer = useCreateWorkspaceMcpServer(wsId);

@@ -46,7 +46,7 @@ export function useWorkspaceAgentAvailability(): WorkspaceAgentAvailability {
 
   const rawRole = members?.find((m) => m.user_id === userId)?.role;
   const role =
-    rawRole === "owner" || rawRole === "admin" || rawRole === "member"
+    rawRole === "owner" || rawRole === "member"
       ? rawRole
       : null;
 

@@ -17,6 +17,12 @@ type fakeScopeQuerier struct {
 	tasks    map[[16]byte]db.AgentTaskQueue
 	issues   map[[16]byte]db.Issue
 	sessions map[[16]byte]db.ChatSession
+	// hidden lists viewer ids that cannot see an issue (project sharing).
+	hidden map[[16]byte]map[[16]byte]bool
+}
+
+func (f *fakeScopeQuerier) CanSeeIssue(_ context.Context, arg db.CanSeeIssueParams) (bool, error) {
+	return !f.hidden[arg.IssueID.Bytes][arg.Viewer.Bytes], nil
 }
 
 func (f *fakeScopeQuerier) GetAgentTask(_ context.Context, id pgtype.UUID) (db.AgentTaskQueue, error) {
@@ -186,6 +192,25 @@ func TestScopeAuthorizer_IssueTaskWorkspaceOnly(t *testing.T) {
 	}
 }
 
+// TestScopeAuthorizer_IssueTaskRequiresIssueVisibility: a member the issue's
+// project is not shared with cannot subscribe to its task stream.
+func TestScopeAuthorizer_IssueTaskRequiresIssueVisibility(t *testing.T) {
+	wsStr, wsUUID := mustUUID(t)
+	memberStr, memberUUID := mustUUID(t)
+	taskStr, taskUUID := mustUUID(t)
+	_, issueUUID := mustUUID(t)
+
+	q := &fakeScopeQuerier{
+		tasks:  map[[16]byte]db.AgentTaskQueue{taskUUID.Bytes: {ID: taskUUID, IssueID: issueUUID}},
+		issues: map[[16]byte]db.Issue{issueUUID.Bytes: {ID: issueUUID, WorkspaceID: wsUUID}},
+		hidden: map[[16]byte]map[[16]byte]bool{issueUUID.Bytes: {memberUUID.Bytes: true}},
+	}
+	ok, err := newScopeAuthorizer(q).AuthorizeScope(context.Background(), memberStr, wsStr, realtime.ScopeTask, taskStr)
+	if err != nil || ok {
+		t.Fatalf("member without access to the issue must be denied: ok=%v err=%v", ok, err)
+	}
+}
+
 // failingScopeQuerier returns a non-ErrNoRows error from every lookup,
 // simulating a transient database failure (pool exhaustion, cancelled
 // context, network blip). Such errors must propagate out of AuthorizeScope
@@ -200,6 +225,9 @@ func (failingScopeQuerier) GetIssue(context.Context, pgtype.UUID) (db.Issue, err
 }
 func (failingScopeQuerier) GetChatSession(context.Context, pgtype.UUID) (db.ChatSession, error) {
 	return db.ChatSession{}, errors.New("connection reset by peer")
+}
+func (failingScopeQuerier) CanSeeIssue(context.Context, db.CanSeeIssueParams) (bool, error) {
+	return false, errors.New("connection reset by peer")
 }
 
 // errOnInnerQuerier succeeds for GetAgentTask (so the task path reaches its
@@ -217,6 +245,9 @@ func (*errOnInnerQuerier) GetIssue(context.Context, pgtype.UUID) (db.Issue, erro
 }
 func (*errOnInnerQuerier) GetChatSession(context.Context, pgtype.UUID) (db.ChatSession, error) {
 	return db.ChatSession{}, errors.New("connection reset by peer")
+}
+func (*errOnInnerQuerier) CanSeeIssue(context.Context, db.CanSeeIssueParams) (bool, error) {
+	return false, errors.New("connection reset by peer")
 }
 
 // TestScopeAuthorizer_DoesNotSwallowQueryErrors pins #6037: a real database

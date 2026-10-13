@@ -163,7 +163,7 @@ export function IssueStatusesTab() {
     if (!currentUser) return null;
     return members.find((m) => m.user_id === currentUser.id)?.role ?? null;
   }, [members, currentUser]);
-  const isAdmin = myRole === "owner" || myRole === "admin";
+  const isAdmin = myRole === "owner";
   // The status a merge moves issues to is set on the Code page (MUL-7726);
   // its row carries a badge linking there.
   const mergeTarget = derivePRMergeStatus(useCurrentWorkspace());

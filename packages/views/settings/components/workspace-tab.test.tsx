@@ -22,8 +22,8 @@ const workspaceRef = vi.hoisted(() => ({
 }));
 const membersRef = vi.hoisted(() => ({
   current: [
-    { user_id: "user-1", role: "owner" as "owner" | "admin" | "member", name: "Ada" },
-  ] as { user_id: string; role: "owner" | "admin" | "member"; name?: string }[],
+    { user_id: "user-1", role: "owner" as "owner" | "member", name: "Ada" },
+  ] as { user_id: string; role: "owner" | "member"; name?: string }[],
 }));
 
 vi.mock("@tanstack/react-query", () => ({

@@ -95,7 +95,7 @@ beforeEach(() => {
   url.set("tab=members");
   data.members = [
     member("user-1", "Ada Lovelace", "owner"),
-    member("user-2", "Grace Hopper", "admin"),
+    member("user-2", "Grace Hopper", "member"),
     member("user-3", "Alan Turing", "member"),
   ];
   data.invitations = [
@@ -191,13 +191,14 @@ describe("MembersTab", () => {
 
     await user.click(screen.getByRole("button", { name: "Invite member" }));
     const dialog = await screen.findByRole("dialog", { name: "Invite member" });
+    // Invitations always grant member; there is no role to pick.
+    expect(within(dialog).queryByRole("combobox")).toBeNull();
     await user.type(within(dialog).getByRole("textbox", { name: "Email" }), "new@acme.dev");
     await user.click(within(dialog).getByRole("button", { name: "Invite" }));
 
     await waitFor(() =>
       expect(mockCreateMember).toHaveBeenCalledWith("ws-1", {
         email: "new@acme.dev",
-        role: "member",
       }),
     );
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());

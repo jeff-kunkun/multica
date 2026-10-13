@@ -43,14 +43,13 @@ func TestCanUseRuntimeForAgent_Pure(t *testing.T) {
 		rt     db.AgentRuntime
 		want   bool
 	}{
-		// no workspace owner / admin override: role never widens access
+		// no workspace owner override: role never widens access
 		{"workspace owner on private runtime owned by another", otherUserID, "owner", privateRT, false},
-		{"workspace admin on private runtime owned by another", otherUserID, "admin", privateRT, false},
-		{"workspace admin on someone else's public runtime", otherUserID, "admin", publicRT, true},
+		{"workspace owner on someone else's public runtime", otherUserID, "owner", publicRT, true},
 		// runtime owner
 		{"runtime owner on own private runtime", ownerUserID, "member", privateRT, true},
 		{"runtime owner on own public runtime", ownerUserID, "member", publicRT, true},
-		{"runtime owner who is also a workspace admin", ownerUserID, "admin", privateRT, true},
+		{"runtime owner who is also the workspace owner", ownerUserID, "owner", privateRT, true},
 		// public runtime allows anyone in workspace
 		{"plain member on someone else's public runtime", otherUserID, "member", publicRT, true},
 		// private runtime owned by someone else is denied to everyone
@@ -60,7 +59,7 @@ func TestCanUseRuntimeForAgent_Pure(t *testing.T) {
 		// can be issued a task token for them (MUL-3292)
 		{"workspace owner on an ownerless private runtime", otherUserID, "owner", ownerlessPrivateRT, false},
 		{"plain member on an ownerless public runtime", otherUserID, "member", ownerlessPublicRT, false},
-		{"workspace admin on an ownerless public runtime", otherUserID, "admin", ownerlessPublicRT, false},
+		{"workspace owner on an ownerless public runtime", otherUserID, "owner", ownerlessPublicRT, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -264,16 +263,16 @@ func TestListAgentRuntimes_HidesOtherMembersPrivateRuntimes(t *testing.T) {
 	}
 }
 
-func TestListAgentRuntimes_AllowsAdminsToGovernPrivateRuntimes(t *testing.T) {
+func TestListAgentRuntimes_AllowsOwnersToGovernPrivateRuntimes(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
 	}
 
-	privateRuntimeID, _, adminID := runtimeVisibilityFixture(t)
-	promoteRuntimeTestMemberToAdmin(t, adminID)
+	privateRuntimeID, _, ownerID := runtimeVisibilityFixture(t)
+	promoteRuntimeTestMemberToOwner(t, ownerID)
 
 	w := testutil.Call(t, testHandler.ListAgentRuntimes,
-		newRequestAs(adminID, http.MethodGet, "/api/runtimes", nil),
+		newRequestAs(ownerID, http.MethodGet, "/api/runtimes", nil),
 	).Want(http.StatusOK)
 	var runtimes []AgentRuntimeResponse
 	w.JSON(&runtimes)
@@ -283,7 +282,7 @@ func TestListAgentRuntimes_AllowsAdminsToGovernPrivateRuntimes(t *testing.T) {
 			return
 		}
 	}
-	t.Fatalf("admin runtime list did not include private runtime %s", privateRuntimeID)
+	t.Fatalf("owner runtime list did not include private runtime %s", privateRuntimeID)
 }
 
 func TestPrivateRuntimeReadEndpointsHideKnownRuntimeFromNonOwners(t *testing.T) {
@@ -330,9 +329,9 @@ func TestPrivateRuntimeReadEndpointsHideKnownRuntimeFromNonOwners(t *testing.T) 
 		})
 	}
 
-	promoteRuntimeTestMemberToAdmin(t, plainMemberID)
+	promoteRuntimeTestMemberToOwner(t, plainMemberID)
 	for _, tc := range tests {
-		t.Run("workspace admin/"+tc.name, func(t *testing.T) {
+		t.Run("workspace owner/"+tc.name, func(t *testing.T) {
 			w := httptest.NewRecorder()
 			req := withURLParams(newRequestAs(plainMemberID, tc.method, tc.path, nil), tc.params...)
 			tc.handle(w, req)
@@ -517,7 +516,6 @@ func TestCanSetRuntimeVisibility_Pure(t *testing.T) {
 	}{
 		{"runtime owner", ownerUserID, "member", ownedRT, true},
 		{"workspace owner who does not own the runtime", otherUserID, "owner", ownedRT, false},
-		{"workspace admin who does not own the runtime", otherUserID, "admin", ownedRT, false},
 		{"plain member", otherUserID, "member", ownedRT, false},
 		{"workspace owner on an ownerless runtime", otherUserID, "owner", ownerlessRT, false},
 	}

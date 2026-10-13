@@ -100,12 +100,12 @@ func createTestShareLink(t *testing.T, workspaceID, role string, maxUses int32, 
 
 // --- Tests ---
 
-func TestCreateShareLink_RequiresOwnerAdmin(t *testing.T) {
+func TestCreateShareLink_RequiresOwner(t *testing.T) {
 	clearShareLinksForTestWorkspace(t)
 
 	r := chi.NewRouter()
 	r.Route("/api/workspaces/{id}", func(r chi.Router) {
-		r.Use(middleware.RequireWorkspaceRoleFromURL(testHandler.Queries, "id", "owner", "admin"))
+		r.Use(middleware.RequireWorkspaceRoleFromURL(testHandler.Queries, "id", "owner"))
 		r.Post("/share-links", testHandler.CreateShareLink)
 	})
 
@@ -130,13 +130,13 @@ func TestCreateShareLink_RequiresOwnerAdmin(t *testing.T) {
 	}
 }
 
-func TestListShareLinks_RequiresOwnerAdmin(t *testing.T) {
+func TestListShareLinks_RequiresOwner(t *testing.T) {
 	clearShareLinksForTestWorkspace(t)
 	createTestShareLink(t, testWorkspaceID, "member", 0, 0)
 
 	r := chi.NewRouter()
 	r.Route("/api/workspaces/{id}", func(r chi.Router) {
-		r.Use(middleware.RequireWorkspaceRoleFromURL(testHandler.Queries, "id", "owner", "admin"))
+		r.Use(middleware.RequireWorkspaceRoleFromURL(testHandler.Queries, "id", "owner"))
 		r.Get("/share-links", testHandler.ListShareLinks)
 	})
 
@@ -181,6 +181,32 @@ func TestCreateShareLink_InvalidatesOldLink(t *testing.T) {
 	}
 	if active {
 		t.Fatal("old share link must be deactivated after creating a new one")
+	}
+}
+
+// Share links only ever grant the member role; the retired admin role and
+// owner are rejected before any link is written.
+func TestCreateShareLink_RejectsNonMemberRole(t *testing.T) {
+	clearShareLinksForTestWorkspace(t)
+
+	for _, role := range []string{"admin", "owner"} {
+		req := newRequest("POST", "/api/workspaces/"+testWorkspaceID+"/share-links", CreateShareLinkRequest{Role: role})
+		req = withURLParam(req, "id", testWorkspaceID)
+		w := httptest.NewRecorder()
+		testHandler.CreateShareLink(w, req)
+		if w.Code != http.StatusBadRequest {
+			t.Fatalf("role %q: expected 400, got %d: %s", role, w.Code, w.Body.String())
+		}
+	}
+
+	var links int
+	if err := testPool.QueryRow(context.Background(),
+		`SELECT count(*) FROM workspace_share_link WHERE workspace_id = $1`, parseUUID(testWorkspaceID),
+	).Scan(&links); err != nil {
+		t.Fatal(err)
+	}
+	if links != 0 {
+		t.Fatalf("share links written = %d, want 0", links)
 	}
 }
 
@@ -468,13 +494,13 @@ func invitationStatusOf(t *testing.T, invitationID string) (string, string) {
 // that pending invitation settled in the same transaction: otherwise the row
 // keeps holding its seat reservation, keeps showing in their pending list,
 // and a later Accept on it dies on the CreateMember 409. The link's role
-// wins — the user chose this entry point — and the invitation row keeps its
-// own role, only its status is settled.
+// wins — the user chose this entry point — and only the invitation's status
+// is settled.
 func TestJoinShareLink_SettlesPendingInvitation(t *testing.T) {
 	clearShareLinksForTestWorkspace(t)
 	link := createTestShareLink(t, testWorkspaceID, "member", 5, 0)
 	userID := createTestUserAndMember(t, "")
-	invitationID := pendingInvitationForShareJoiner(t, userID, shareJoinerEmail(t, userID), "admin")
+	invitationID := pendingInvitationForShareJoiner(t, userID, shareJoinerEmail(t, userID), "member")
 
 	req := newRequest("POST", "/api/share-links/join", JoinByShareLinkRequest{Code: link.Code})
 	req.Header.Set("X-User-ID", userID)
@@ -488,8 +514,8 @@ func TestJoinShareLink_SettlesPendingInvitation(t *testing.T) {
 	if status != "accepted" {
 		t.Fatalf("invitation status = %q, want accepted", status)
 	}
-	if role != "admin" {
-		t.Fatalf("invitation role = %q, want untouched admin", role)
+	if role != "member" {
+		t.Fatalf("invitation role = %q, want untouched member", role)
 	}
 	var memberRole string
 	if err := testPool.QueryRow(context.Background(),
@@ -504,7 +530,7 @@ func TestJoinShareLink_SettlesPendingInvitation(t *testing.T) {
 }
 
 // The settled invitation signals its conclusion on the same channel the
-// accept path uses, so workspace admins refresh their pending-invitation
+// accept path uses, so workspace owners refresh their pending-invitation
 // list instead of holding a row that is already over.
 func TestJoinShareLink_SettledInvitationPublishesAcceptedEvent(t *testing.T) {
 	clearShareLinksForTestWorkspace(t)
@@ -545,7 +571,7 @@ func TestJoinShareLink_SettledInvitationPublishesAcceptedEvent(t *testing.T) {
 // before — the settle lookup misses and changes nothing.
 func TestJoinShareLink_NoPendingInvitationJoinsNormally(t *testing.T) {
 	clearShareLinksForTestWorkspace(t)
-	link := createTestShareLink(t, testWorkspaceID, "admin", 5, 0)
+	link := createTestShareLink(t, testWorkspaceID, "member", 5, 0)
 	userID := createTestUserAndMember(t, "")
 
 	req := newRequest("POST", "/api/share-links/join", JoinByShareLinkRequest{Code: link.Code})
@@ -569,7 +595,7 @@ func TestJoinShareLink_NoPendingInvitationJoinsNormally(t *testing.T) {
 
 func TestGetShareLinkInfo_PublicResponseSlim(t *testing.T) {
 	clearShareLinksForTestWorkspace(t)
-	link := createTestShareLink(t, testWorkspaceID, "admin", 0, 0)
+	link := createTestShareLink(t, testWorkspaceID, "member", 0, 0)
 
 	req := newRequest("GET", "/api/share-links/"+link.Code, nil)
 	req = withURLParam(req, "code", link.Code)
@@ -621,7 +647,7 @@ func TestShareLink_CrossWorkspaceDenied(t *testing.T) {
 
 	r := chi.NewRouter()
 	r.Route("/api/workspaces/{id}", func(r chi.Router) {
-		r.Use(middleware.RequireWorkspaceRoleFromURL(testHandler.Queries, "id", "owner", "admin"))
+		r.Use(middleware.RequireWorkspaceRoleFromURL(testHandler.Queries, "id", "owner"))
 		r.Post("/share-links", testHandler.CreateShareLink)
 	})
 

@@ -71,7 +71,7 @@ func TestMain(m *testing.M) {
 	go hub.Run()
 
 	bus := events.New()
-	registerListeners(bus, hub)
+	registerListeners(bus, hub, nil)
 	// Same wiring as main.go: HTTP writes through the test server log activity.
 	registerActivityListeners(bus, db.New(pool))
 	router := NewRouter(pool, hub, bus, analytics.NoopClient{}, nil)
@@ -731,7 +731,7 @@ func TestWorkspacesThroughRouter(t *testing.T) {
 
 // TestDeleteWorkspaceRequiresOwner is a defense-in-depth regression test for the
 // permission gate on DELETE /api/workspaces/{id}. It creates a separate workspace
-// in which the integration test user is only an "admin" (not "owner") and asserts
+// in which the integration test user is only a "member" (not "owner") and asserts
 // that DELETE returns 403, leaving the workspace intact. This guards against both
 // router misconfiguration (missing middleware) and handler regressions.
 func TestDeleteWorkspaceRequiresOwner(t *testing.T) {
@@ -755,9 +755,9 @@ func TestDeleteWorkspaceRequiresOwner(t *testing.T) {
 
 	if _, err := testPool.Exec(ctx, `
 		INSERT INTO member (workspace_id, user_id, role)
-		VALUES ($1, $2, 'admin')
+		VALUES ($1, $2, 'member')
 	`, wsID, testUserID); err != nil {
-		t.Fatalf("create admin member: %v", err)
+		t.Fatalf("create member: %v", err)
 	}
 
 	req, err := http.NewRequest("DELETE", testServer.URL+"/api/workspaces/"+wsID, nil)

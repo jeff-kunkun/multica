@@ -617,7 +617,7 @@ describe("createMentionSuggestion", () => {
     // must NOT surface Bob's personal agent to admin Alice.
     const qc = fakeQc({
       members: [
-        { user_id: "u1", name: "Alice", role: "admin" },
+        { user_id: "u1", name: "Alice", role: "owner" },
         { user_id: "u2", name: "Bob", role: "member" },
       ],
       agents: [

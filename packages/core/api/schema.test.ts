@@ -62,6 +62,72 @@ describe("ApiClient schema fallback", () => {
     });
   });
 
+  describe("workspace members and roles", () => {
+    it("reads a legacy or unknown role as member", async () => {
+      stubFetchJson([
+        { id: "m1", workspace_id: "ws-1", user_id: "u1", role: "owner", name: "Kun" },
+        { id: "m2", workspace_id: "ws-1", user_id: "u2", role: "admin", name: "Ada" },
+        { id: "m3", workspace_id: "ws-1", user_id: "u3", role: 42 },
+        { id: "m4", workspace_id: "ws-1", user_id: "u4" },
+      ]);
+      const client = new ApiClient("https://api.example.test");
+      const members = await client.listMembers("ws-1");
+      expect(members.map((m) => m.role)).toEqual(["owner", "member", "member", "member"]);
+    });
+
+    it("drops malformed member rows and survives a non-array body", async () => {
+      stubFetchJson([{ id: "m1", workspace_id: "ws-1", user_id: "u1", role: "member" }, { nope: true }]);
+      const client = new ApiClient("https://api.example.test");
+      await expect(client.listMembers("ws-1")).resolves.toHaveLength(1);
+
+      stubFetchJson({ members: "wrong" });
+      await expect(client.listMembers("ws-1")).resolves.toEqual([]);
+    });
+
+    it("reads a legacy share-link role as member", async () => {
+      stubFetchJson({ workspace_name: "Office", workspace_slug: "office", role: "admin" });
+      const client = new ApiClient("https://api.example.test");
+      await expect(client.getShareLinkInfo("code")).resolves.toMatchObject({ role: "member" });
+    });
+  });
+
+  describe("project members", () => {
+    it("parses the shared-with list and drops malformed rows", async () => {
+      stubFetchJson({
+        members: [
+          { user_id: "u1", created_at: "2026-10-13T00:00:00Z" },
+          { user_id: 7 },
+          { user_id: "u2" },
+        ],
+      });
+      const client = new ApiClient("https://api.example.test");
+      await expect(client.listProjectMembers("p1")).resolves.toEqual({
+        members: [
+          { user_id: "u1", created_at: "2026-10-13T00:00:00Z" },
+          { user_id: "u2", created_at: "" },
+        ],
+      });
+    });
+
+    it("falls back to an empty list when the body is malformed", async () => {
+      stubFetchJson({ members: null });
+      const client = new ApiClient("https://api.example.test");
+      await expect(client.listProjectMembers("p1")).resolves.toEqual({ members: [] });
+
+      stubFetchJson(["not", "an", "object"]);
+      await expect(client.listProjectMembers("p1")).resolves.toEqual({ members: [] });
+    });
+
+    it("falls back to the requested user when the add reply is malformed", async () => {
+      stubFetchJson({ unexpected: true }, 201);
+      const client = new ApiClient("https://api.example.test");
+      await expect(client.addProjectMember("p1", "u9")).resolves.toEqual({
+        user_id: "u9",
+        created_at: "",
+      });
+    });
+  });
+
   describe("listTimeline", () => {
     it("falls back to an empty array when the body is null", async () => {
       stubFetchJson(null);

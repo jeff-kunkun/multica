@@ -551,6 +551,7 @@ func TestCustomTerminalStatusCountsAsTerminalInSQL(t *testing.T) {
 		}))
 		rows, err := testHandler.Queries.ListOpenIssues(ctx, db.ListOpenIssuesParams{
 			WorkspaceID:        parseUUID(testWorkspaceID),
+			Viewer:             parseUUID(testUserID),
 			TerminalStatusKeys: terminalStatusKeys,
 		})
 		if err != nil {
@@ -622,6 +623,7 @@ func TestCustomTerminalStatusCountsAsTerminalInSQL(t *testing.T) {
 		rows, err := testHandler.Queries.ChildIssueProgress(ctx, db.ChildIssueProgressParams{
 			WorkspaceID:        parseUUID(testWorkspaceID),
 			TerminalStatusKeys: terminalStatusKeys,
+			Viewer:             parseUUID(testUserID),
 		})
 		if err != nil {
 			t.Fatalf("ChildIssueProgress: %v", err)

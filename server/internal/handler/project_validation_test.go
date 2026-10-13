@@ -93,7 +93,7 @@ func TestUpdateProjectInvalidStatusReturns400(t *testing.T) {
 	}
 }
 
-func TestDeleteProjectRequiresAdminOrOwner(t *testing.T) {
+func TestDeleteProjectRequiresOwner(t *testing.T) {
 	memberUserID := createProjectPermissionTestMember(t, "member")
 	project := createProjectPermissionTestProject(t, "delete permission denied project")
 
@@ -115,17 +115,17 @@ func TestDeleteProjectRequiresAdminOrOwner(t *testing.T) {
 	}
 }
 
-func TestDeleteProjectAllowsAdmin(t *testing.T) {
-	adminUserID := createProjectPermissionTestMember(t, "admin")
-	project := createProjectPermissionTestProject(t, "delete permission admin project")
+func TestDeleteProjectAllowsOwner(t *testing.T) {
+	project := createProjectPermissionTestProject(t, "delete permission owner project")
 
+	// testUserID is the workspace owner.
 	w := httptest.NewRecorder()
-	req := newRequestAs(adminUserID, "DELETE", "/api/projects/"+project.ID, nil)
+	req := newRequest("DELETE", "/api/projects/"+project.ID, nil)
 	req = withURLParam(req, "id", project.ID)
 	testHandler.DeleteProject(w, req)
 
 	if w.Code != http.StatusNoContent {
-		t.Fatalf("expected 204 for admin project delete, got %d: %s", w.Code, w.Body.String())
+		t.Fatalf("expected 204 for owner project delete, got %d: %s", w.Code, w.Body.String())
 	}
 
 	var exists bool
@@ -133,7 +133,7 @@ func TestDeleteProjectAllowsAdmin(t *testing.T) {
 		t.Fatalf("verify project deleted: %v", err)
 	}
 	if exists {
-		t.Fatal("project still exists after admin delete")
+		t.Fatal("project still exists after owner delete")
 	}
 }
 
@@ -191,4 +191,17 @@ func createProjectPermissionTestProject(t *testing.T, title string) ProjectRespo
 		_, _ = testPool.Exec(context.Background(), `DELETE FROM project WHERE id = $1`, project.ID)
 	})
 	return project
+}
+
+// sharedTestProject creates a project in the test workspace and shares it with
+// the given members, so non-owner members can see the issues placed in it.
+func sharedTestProject(t *testing.T, title string, memberIDs ...string) string {
+	t.Helper()
+	projectID := dbfx.Project(t, title)
+	for _, userID := range memberIDs {
+		dbfx.Exec(t, `INSERT INTO project_member (workspace_id, project_id, user_id, created_by) VALUES ($1, $2, $3, $4)`,
+			testWorkspaceID, projectID, userID, testUserID)
+	}
+	dbfx.Cleanup(t, `DELETE FROM project_member WHERE project_id = $1`, projectID)
+	return projectID
 }

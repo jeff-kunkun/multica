@@ -651,7 +651,7 @@ export default function SkillsPage() {
   const myRole =
     members.find((m: MemberWithUser) => m.user_id === currentUserId)?.role ??
     null;
-  const isAdmin = myRole === "owner" || myRole === "admin";
+  const isAdmin = myRole === "owner";
 
   const actionsCtx: SkillActionsContext = {
     wsId,

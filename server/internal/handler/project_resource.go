@@ -503,8 +503,9 @@ func isValidGitRepoURL(s string) bool {
 	return true
 }
 
-// loadProjectForResource resolves the project, enforces workspace ownership,
-// and returns its DB row. Used by all project_resource handlers.
+// loadProjectForResource resolves the project, enforces workspace ownership
+// and project visibility, and returns its DB row. Used by the project detail
+// and all project_resource handlers.
 func (h *Handler) loadProjectForResource(w http.ResponseWriter, r *http.Request, projectIDParam string) (db.Project, bool) {
 	projectUUID, ok := parseUUIDOrBadRequest(w, projectIDParam, "project id")
 	if !ok {
@@ -517,7 +518,7 @@ func (h *Handler) loadProjectForResource(w http.ResponseWriter, r *http.Request,
 	project, err := h.Queries.GetProjectInWorkspace(r.Context(), db.GetProjectInWorkspaceParams{
 		ID: projectUUID, WorkspaceID: wsUUID,
 	})
-	if err != nil {
+	if err != nil || !h.requestCanSeeProject(r, wsUUID, project.ID) {
 		writeError(w, http.StatusNotFound, "project not found")
 		return db.Project{}, false
 	}

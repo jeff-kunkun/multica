@@ -2999,7 +2999,7 @@ func (h *Handler) UpdateComment(w http.ResponseWriter, r *http.Request) {
 		WorkspaceID: wsUUID,
 	})
 	// A deleted comment's tombstone has nothing left to edit.
-	if err != nil || existing.DeletedAt.Valid {
+	if err != nil || existing.DeletedAt.Valid || !h.requestCanSeeComment(r, existing) {
 		writeError(w, http.StatusNotFound, "comment not found")
 		return
 	}
@@ -3020,9 +3020,9 @@ func (h *Handler) UpdateComment(w http.ResponseWriter, r *http.Request) {
 
 	actorType, actorID := h.resolveActor(r, userID, workspaceID)
 	isAuthor := existing.AuthorType == actorType && uuidToString(existing.AuthorID) == actorID
-	isAdmin := roleAllowed(member.Role, "owner", "admin")
+	isAdmin := member.Role == "owner"
 	if !isAuthor && !isAdmin {
-		writeError(w, http.StatusForbidden, "only comment author or admin can edit")
+		writeError(w, http.StatusForbidden, "only the comment author or the workspace owner can edit")
 		return
 	}
 
@@ -3276,7 +3276,7 @@ func (h *Handler) DeleteComment(w http.ResponseWriter, r *http.Request) {
 		ID:          commentUUID,
 		WorkspaceID: wsUUID,
 	})
-	if err != nil {
+	if err != nil || !h.requestCanSeeComment(r, comment) {
 		writeError(w, http.StatusNotFound, "comment not found")
 		return
 	}
@@ -3288,9 +3288,9 @@ func (h *Handler) DeleteComment(w http.ResponseWriter, r *http.Request) {
 
 	actorType, actorID := h.resolveActor(r, userID, workspaceID)
 	isAuthor := comment.AuthorType == actorType && uuidToString(comment.AuthorID) == actorID
-	isAdmin := roleAllowed(member.Role, "owner", "admin")
+	isAdmin := member.Role == "owner"
 	if !isAuthor && !isAdmin {
-		writeError(w, http.StatusForbidden, "only comment author or admin can delete")
+		writeError(w, http.StatusForbidden, "only the comment author or the workspace owner can delete")
 		return
 	}
 	issue, err := h.Queries.GetIssue(r.Context(), comment.IssueID)
@@ -3694,7 +3694,7 @@ func (h *Handler) loadCommentForActor(w http.ResponseWriter, r *http.Request) (d
 		WorkspaceID: wsUUID,
 	})
 	// A deleted comment's tombstone cannot be a thread's resolution.
-	if err != nil || comment.DeletedAt.Valid {
+	if err != nil || comment.DeletedAt.Valid || !h.requestCanSeeComment(r, comment) {
 		writeError(w, http.StatusNotFound, "comment not found")
 		return db.Comment{}, "", "", "", false
 	}

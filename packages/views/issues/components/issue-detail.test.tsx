@@ -82,7 +82,7 @@ vi.mock("@multica/core/workspace/hooks", () => ({
 vi.mock("@multica/core/workspace/queries", () => ({
   memberListOptions: () => ({
     queryKey: ["workspaces", "ws-1", "members"],
-    queryFn: () => Promise.resolve([{ user_id: "user-1", name: "Test User", email: "test@test.com", role: "admin" }]),
+    queryFn: () => Promise.resolve([{ user_id: "user-1", name: "Test User", email: "test@test.com", role: "owner" }]),
   }),
   agentListOptions: () => ({
     queryKey: ["workspaces", "ws-1", "agents"],
@@ -329,7 +329,7 @@ const mockApiObj = vi.hoisted(() => ({
   listAttachments: vi.fn().mockResolvedValue([]),
   addCommentReaction: vi.fn(),
   removeCommentReaction: vi.fn(),
-  listMembers: vi.fn().mockResolvedValue([{ user_id: "user-1", name: "Test User", email: "test@test.com", role: "admin" }]),
+  listMembers: vi.fn().mockResolvedValue([{ user_id: "user-1", name: "Test User", email: "test@test.com", role: "owner" }]),
   listAgents: vi.fn().mockResolvedValue([]),
   getAgent: vi.fn().mockResolvedValue(null),
   listRuntimes: vi.fn().mockResolvedValue([]),
@@ -723,7 +723,7 @@ describe("IssueDetail (shared)", () => {
     mockApiObj.listTaskMessages.mockResolvedValue([]);
     mockApiObj.rerunIssue.mockResolvedValue({ id: "task-rerun" });
     mockApiObj.listMembers.mockResolvedValue([
-      { user_id: "user-1", name: "Test User", email: "test@test.com", role: "admin" },
+      { user_id: "user-1", name: "Test User", email: "test@test.com", role: "owner" },
     ]);
     mockApiObj.listAgents.mockResolvedValue([]);
     // Reset project mock — individual tests override per case. Default fixture

@@ -136,7 +136,7 @@ export function RepositoriesSection() {
   const queryClient = useQueryClient();
   const navigation = useNavigation();
   const { role } = useCurrentMember(wsId);
-  const canManageWorkspace = role === "owner" || role === "admin";
+  const canManageWorkspace = role === "owner";
   const repositories = workspace?.repos ?? EMPTY_REPOSITORIES;
 
   const [draft, setDraft] = useState<RepositoryDraft | null>(null);

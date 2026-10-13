@@ -88,6 +88,7 @@ func TestNotification_IssueCreated_AssigneeNotified(t *testing.T) {
 	t.Cleanup(func() { cleanupTestUser(t, assigneeEmail) })
 
 	issueID := createTestIssue(t, testWorkspaceID, testUserID)
+	shareTestIssues(t, []string{issueID}, assigneeID)
 	t.Cleanup(func() {
 		cleanupInboxForIssue(t, issueID)
 		cleanupTestIssue(t, issueID)
@@ -252,6 +253,7 @@ func TestNotification_StatusChanged(t *testing.T) {
 	t.Cleanup(func() { cleanupTestUser(t, sub2Email) })
 
 	issueID := createTestIssue(t, testWorkspaceID, testUserID)
+	shareTestIssues(t, []string{issueID}, sub1ID, sub2ID)
 	t.Cleanup(func() {
 		cleanupInboxForIssue(t, issueID)
 		cleanupTestIssue(t, issueID)
@@ -331,6 +333,7 @@ func TestNotification_StatusChanged_Muted(t *testing.T) {
 	t.Cleanup(func() { cleanupTestUser(t, normalEmail) })
 
 	issueID := createTestIssue(t, testWorkspaceID, testUserID)
+	shareTestIssues(t, []string{issueID}, mutedID, normalID)
 	t.Cleanup(func() {
 		cleanupInboxForIssue(t, issueID)
 		cleanupTestIssue(t, issueID)
@@ -390,6 +393,7 @@ func TestNotification_CommentCreated(t *testing.T) {
 	t.Cleanup(func() { cleanupTestUser(t, sub1Email) })
 
 	issueID := createTestIssue(t, testWorkspaceID, testUserID)
+	shareTestIssues(t, []string{issueID}, commenterID, sub1ID)
 	t.Cleanup(func() {
 		cleanupInboxForIssue(t, issueID)
 		cleanupTestIssue(t, issueID)
@@ -472,6 +476,7 @@ func TestNotification_SystemCommentSkipsInboxAndMentions(t *testing.T) {
 	t.Cleanup(func() { cleanupTestUser(t, targetEmail) })
 
 	issueID := createTestIssue(t, testWorkspaceID, testUserID)
+	shareTestIssues(t, []string{issueID}, subID, targetID)
 	t.Cleanup(func() {
 		cleanupInboxForIssue(t, issueID)
 		cleanupTestIssue(t, issueID)
@@ -568,6 +573,7 @@ func TestNotification_AssigneeChanged(t *testing.T) {
 	t.Cleanup(func() { cleanupTestUser(t, bystanderEmail) })
 
 	issueID := createTestIssue(t, testWorkspaceID, testUserID)
+	shareTestIssues(t, []string{issueID}, oldAssigneeID, newAssigneeID, bystanderID)
 	t.Cleanup(func() {
 		cleanupInboxForIssue(t, issueID)
 		cleanupTestIssue(t, issueID)
@@ -739,6 +745,7 @@ func TestNotification_PriorityChanged(t *testing.T) {
 	t.Cleanup(func() { cleanupTestUser(t, sub1Email) })
 
 	issueID := createTestIssue(t, testWorkspaceID, testUserID)
+	shareTestIssues(t, []string{issueID}, sub1ID)
 	t.Cleanup(func() {
 		cleanupInboxForIssue(t, issueID)
 		cleanupTestIssue(t, issueID)
@@ -804,6 +811,7 @@ func TestNotification_DueDateChanged(t *testing.T) {
 	t.Cleanup(func() { cleanupTestUser(t, sub1Email) })
 
 	issueID := createTestIssue(t, testWorkspaceID, testUserID)
+	shareTestIssues(t, []string{issueID}, sub1ID)
 	t.Cleanup(func() {
 		cleanupInboxForIssue(t, issueID)
 		cleanupTestIssue(t, issueID)
@@ -865,6 +873,7 @@ func TestNotification_StartDateChanged(t *testing.T) {
 	t.Cleanup(func() { cleanupTestUser(t, sub1Email) })
 
 	issueID := createTestIssue(t, testWorkspaceID, testUserID)
+	shareTestIssues(t, []string{issueID}, sub1ID)
 	t.Cleanup(func() {
 		cleanupInboxForIssue(t, issueID)
 		cleanupTestIssue(t, issueID)
@@ -930,6 +939,7 @@ func TestNotification_ParentBubble_StatusChanged(t *testing.T) {
 		cleanupTestIssue(t, parentID)
 	})
 	subID := createTestSubIssue(t, testWorkspaceID, testUserID, parentID)
+	shareTestIssues(t, []string{parentID, subID}, parentSubID)
 	t.Cleanup(func() {
 		cleanupInboxForIssue(t, subID)
 		cleanupTestIssue(t, subID)
@@ -996,6 +1006,7 @@ func TestNotification_ParentBubble_NewCommentSuppressed(t *testing.T) {
 		cleanupTestIssue(t, parentID)
 	})
 	subID := createTestSubIssue(t, testWorkspaceID, testUserID, parentID)
+	shareTestIssues(t, []string{parentID, subID}, commenterID, parentSubID)
 	t.Cleanup(func() {
 		cleanupInboxForIssue(t, subID)
 		cleanupTestIssue(t, subID)
@@ -1044,6 +1055,7 @@ func TestNotification_ParentBubble_PriorityChangeSuppressed(t *testing.T) {
 		cleanupTestIssue(t, parentID)
 	})
 	subID := createTestSubIssue(t, testWorkspaceID, testUserID, parentID)
+	shareTestIssues(t, []string{parentID, subID}, parentSubID)
 	t.Cleanup(func() {
 		cleanupInboxForIssue(t, subID)
 		cleanupTestIssue(t, subID)
@@ -1145,6 +1157,7 @@ func TestNotification_StatusChange_ArchivesStaleTaskFailed(t *testing.T) {
 	t.Cleanup(func() { cleanupTestUser(t, subEmail) })
 
 	issueID := createTestIssue(t, testWorkspaceID, testUserID)
+	shareTestIssues(t, []string{issueID}, subID)
 	t.Cleanup(func() {
 		cleanupInboxForIssue(t, issueID)
 		cleanupTestIssue(t, issueID)
@@ -1335,5 +1348,38 @@ func TestNotification_StatusChange_ReopenSurfacesNewTaskFailed(t *testing.T) {
 	}
 	if archived != 1 {
 		t.Fatalf("expected 1 archived task_failed row preserved from prior cycle, got %d", archived)
+	}
+}
+
+// shareTestIssues moves the issues into a fresh project shared with userIDs,
+// so plain members pass the recipient visibility check (migration 582).
+func shareTestIssues(t *testing.T, issueIDs []string, userIDs ...string) {
+	t.Helper()
+	ctx := context.Background()
+	var projectID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO project (workspace_id, title, status, priority)
+		VALUES ($1, 'notification test project', 'planned', 'none')
+		RETURNING id
+	`, testWorkspaceID).Scan(&projectID); err != nil {
+		t.Fatalf("shareTestIssues: create project: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `UPDATE issue SET project_id = NULL WHERE project_id = $1`, projectID)
+		testPool.Exec(context.Background(), `DELETE FROM project_member WHERE project_id = $1`, projectID)
+		testPool.Exec(context.Background(), `DELETE FROM project WHERE id = $1`, projectID)
+	})
+	for _, userID := range userIDs {
+		if _, err := testPool.Exec(ctx, `
+			INSERT INTO project_member (workspace_id, project_id, user_id, created_by)
+			VALUES ($1, $2, $3, $4)
+		`, testWorkspaceID, projectID, userID, testUserID); err != nil {
+			t.Fatalf("shareTestIssues: share project: %v", err)
+		}
+	}
+	for _, issueID := range issueIDs {
+		if _, err := testPool.Exec(ctx, `UPDATE issue SET project_id = $1 WHERE id = $2`, projectID, issueID); err != nil {
+			t.Fatalf("shareTestIssues: move issue: %v", err)
+		}
 	}
 }

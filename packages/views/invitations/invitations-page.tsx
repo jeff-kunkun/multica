@@ -226,10 +226,7 @@ function InvitationRow({
     invitation.inviter_name ||
     invitation.inviter_email ||
     t(($) => $.batch.row_inviter_fallback);
-  const roleLine =
-    invitation.role === "admin"
-      ? t(($) => $.batch.row_invited_admin, { inviter })
-      : t(($) => $.batch.row_invited_member, { inviter });
+  const roleLine = t(($) => $.batch.row_invited_member, { inviter });
   return (
     <li>
       <label

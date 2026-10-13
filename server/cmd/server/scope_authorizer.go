@@ -18,6 +18,7 @@ type scopeAuthQuerier interface {
 	GetAgentTask(ctx context.Context, id pgtype.UUID) (db.AgentTaskQueue, error)
 	GetIssue(ctx context.Context, id pgtype.UUID) (db.Issue, error)
 	GetChatSession(ctx context.Context, id pgtype.UUID) (db.ChatSession, error)
+	CanSeeIssue(ctx context.Context, arg db.CanSeeIssueParams) (bool, error)
 }
 
 // dbScopeAuthorizer implements realtime.ScopeAuthorizer for the per-task and
@@ -62,13 +63,20 @@ func (a *dbScopeAuthorizer) AuthorizeScope(ctx context.Context, userID, workspac
 		if err != nil {
 			return scopeLookupErr(err)
 		}
-		// Issue tasks: visible to any workspace member.
+		// Issue tasks: visible to workspace members who can see the issue.
 		if task.IssueID.Valid {
 			issue, err := a.q.GetIssue(ctx, task.IssueID)
 			if err != nil {
 				return scopeLookupErr(err)
 			}
-			return issue.WorkspaceID == wsUUID, nil
+			if issue.WorkspaceID != wsUUID {
+				return false, nil
+			}
+			uidUUID, err := util.ParseUUID(userID)
+			if err != nil {
+				return false, nil
+			}
+			return a.q.CanSeeIssue(ctx, db.CanSeeIssueParams{Viewer: uidUUID, IssueID: issue.ID})
 		}
 		// Chat tasks: only the chat session's creator may subscribe, mirroring
 		// the HTTP layer's creator-only access on chat resources.

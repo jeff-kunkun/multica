@@ -25,7 +25,7 @@ import (
 // custom property definitions, and multica issue property {list|set|unset} —
 // typed values on a single issue. See server/internal/handler/property.go
 // for the validation contract (11 types, 20 active definitions/workspace,
-// owner/admin-only definition management, agents rejected on definition
+// owner-only definition management, agents rejected on definition
 // writes).
 //
 // CLI ergonomics: properties, select options and actor values are addressed BY
@@ -75,7 +75,7 @@ var propertyGetCmd = &cobra.Command{
 
 var propertyCreateCmd = &cobra.Command{
 	Use:   "create",
-	Short: "Create a property definition (workspace owner/admin only)",
+	Short: "Create a property definition (workspace owner only)",
 	Long: `Create a property definition. Types: text, number, select, multi_select,
 date, checkbox, url, actor, multi_actor, multi_text, multi_url. Select types
 take repeatable --option flags:
@@ -100,7 +100,7 @@ JSON is required for entries containing commas or input starting with "[":
 
 var propertyUpdateCmd = &cobra.Command{
 	Use:   "update <id-or-name>",
-	Short: "Update a property definition (owner/admin only; type is immutable)",
+	Short: "Update a property definition (owner only; type is immutable)",
 	Long: `Update a property definition. --option flags REPLACE the full option list;
 existing options are matched by name so their ids (and issue values) survive.`,
 	Args: exactArgs(1),

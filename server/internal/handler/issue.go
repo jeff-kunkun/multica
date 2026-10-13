@@ -711,6 +711,7 @@ func buildSearchQuery(phrase string, terms []string, queryNum int, hasNum bool, 
 
 	limitParam := nextArg(nil)
 	offsetParam := nextArg(nil)
+	viewerParam := nextArg(nil) // last: viewer for can_see_issue, filled by caller
 
 	// Stage one scans this workspace's issues once and retains only the narrow
 	// flags and sort fields needed to choose a page. Do not force this CTE to be
@@ -750,7 +751,7 @@ func buildSearchQuery(phrase string, terms []string, queryNum int, hasNum bool, 
 		)
 	}
 
-	issueWhere := "i.workspace_id = " + wsParam
+	issueWhere := fmt.Sprintf("i.workspace_id = %s AND can_see_issue(%s::uuid, i)", wsParam, viewerParam)
 	if terminalStatusesParam != "" {
 		issueWhere += fmt.Sprintf(" AND NOT (i.status = ANY(%s::text[]))", terminalStatusesParam)
 	}
@@ -1032,10 +1033,11 @@ func (h *Handler) SearchIssues(w http.ResponseWriter, r *http.Request) {
 	}
 
 	sqlQuery, args := buildSearchQuery(q, terms, queryNum, hasNum, includeClosed, terminalStatusKeys)
-	// Fill placeholder args: $4 = workspace_id, last two = limit, offset
+	// Fill placeholder args: $4 = workspace_id, last three = limit, offset, viewer
 	args[3] = wsUUID
-	args[len(args)-2] = limit
-	args[len(args)-1] = offset
+	args[len(args)-3] = limit
+	args[len(args)-2] = offset
+	args[len(args)-1] = h.viewerID(r, workspaceID)
 
 	var results []searchResult
 	err := runSearchQuery(ctx, h.TxStarter, sqlQuery, args, func(rows pgx.Rows) error {
@@ -1252,6 +1254,7 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 		}
 		issues, err := h.Queries.ListOpenIssues(ctx, db.ListOpenIssuesParams{
 			WorkspaceID:        wsUUID,
+			Viewer:             h.viewerID(r, workspaceID),
 			TerminalStatusKeys: terminalStatusKeys,
 			Priority:           priorityFilter,
 			AssigneeID:         assigneeFilter,
@@ -1416,6 +1419,7 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 		args = append(args, v)
 		return "$" + strconv.Itoa(len(args))
 	}
+	where = append(where, fmt.Sprintf("can_see_issue(%s::uuid, i)", addArg(h.viewerID(r, workspaceID))))
 	if len(statusCategoriesFilter) > 0 {
 		// Expanded to concrete status keys rather than filtered through
 		// issue_effective_status(): wrapping the column in a function makes the
@@ -1885,6 +1889,7 @@ func (h *Handler) ListGroupedIssues(w http.ResponseWriter, r *http.Request) {
 		args = append(args, v)
 		return "$" + strconv.Itoa(len(args))
 	}
+	where = append(where, fmt.Sprintf("can_see_issue(%s::uuid, i)", addArg(h.viewerID(r, workspaceID))))
 
 	statuses := splitCommaParam(r.URL.Query().Get("statuses"))
 	if len(statuses) == 0 {
@@ -2345,7 +2350,10 @@ func (h *Handler) ListChildIssues(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	children, err := h.Queries.ListChildIssues(r.Context(), issue.ID)
+	children, err := h.Queries.ListChildIssues(r.Context(), db.ListChildIssuesParams{
+		ParentIssueID: issue.ID,
+		Viewer:        h.viewerID(r, uuidToString(issue.WorkspaceID)),
+	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list child issues")
 		return
@@ -2431,6 +2439,7 @@ func (h *Handler) ListChildrenByParents(w http.ResponseWriter, r *http.Request) 
 	children, err := h.Queries.ListChildrenByParents(r.Context(), db.ListChildrenByParentsParams{
 		WorkspaceID: wsUUID,
 		ParentIds:   parentIDs,
+		Viewer:      h.viewerID(r, uuidToString(wsUUID)),
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list child issues")
@@ -2478,6 +2487,7 @@ func (h *Handler) ChildIssueProgress(w http.ResponseWriter, r *http.Request) {
 	rows, err := h.Queries.ChildIssueProgress(r.Context(), db.ChildIssueProgressParams{
 		WorkspaceID:        wsUUID,
 		TerminalStatusKeys: terminalStatusKeys,
+		Viewer:             h.viewerID(r, uuidToString(wsUUID)),
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to get child issue progress")
@@ -2751,11 +2761,6 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	if status, msg := h.validateAssigneePair(r.Context(), r, workspaceID, assigneeType, assigneeID); status != 0 {
-		writeError(w, status, msg)
-		return
-	}
-
 	if req.ProjectID != nil {
 		id, ok := parseUUIDOrBadRequest(w, *req.ProjectID, "project_id")
 		if !ok {
@@ -2763,6 +2768,22 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 		}
 		projectID = id
 	}
+	// A caller files issues only into projects and under parents it can see;
+	// hidden ones answer exactly like missing ones.
+	if projectID.Valid && !h.requestCanSeeProject(r, wsUUID, projectID) {
+		writeError(w, http.StatusBadRequest, "project not found in this workspace")
+		return
+	}
+	if parentIssueID.Valid && !h.requestCanSeeIssueID(r, wsUUID, parentIssueID) {
+		writeError(w, http.StatusBadRequest, "parent issue not found in this workspace")
+		return
+	}
+
+	if status, msg := h.validateAssigneePair(r.Context(), r, workspaceID, assigneeType, assigneeID); status != 0 {
+		writeError(w, status, msg)
+		return
+	}
+
 	// Project existence and the final parent boundary check are enforced inside
 	// IssueService.Create atomically with the create.
 
@@ -3235,7 +3256,7 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 			if _, err := h.Queries.GetIssueInWorkspace(r.Context(), db.GetIssueInWorkspaceParams{
 				ID:          newParentID,
 				WorkspaceID: prevIssue.WorkspaceID,
-			}); err != nil {
+			}); err != nil || !h.requestCanSeeIssueID(r, prevIssue.WorkspaceID, newParentID) {
 				writeError(w, http.StatusBadRequest, "parent issue not found in this workspace")
 				return
 			}
@@ -3266,7 +3287,10 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 			if _, err := h.Queries.GetProjectInWorkspace(r.Context(), db.GetProjectInWorkspaceParams{
 				ID:          projectUUID,
 				WorkspaceID: prevIssue.WorkspaceID,
-			}); err != nil {
+			}); err != nil || !h.requestCanSeeProject(r, prevIssue.WorkspaceID, projectUUID) {
+				if err == nil {
+					err = pgx.ErrNoRows
+				}
 				if !isNotFound(err) {
 					slog.Error("update issue: validate project scope",
 						append(logger.RequestAttrs(r), "project_id", uuidToString(projectUUID), "error", err)...)
@@ -3796,7 +3820,10 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 		if _, err := h.Queries.GetProjectInWorkspace(r.Context(), db.GetProjectInWorkspaceParams{
 			ID:          projectUUID,
 			WorkspaceID: wsUUID,
-		}); err != nil {
+		}); err != nil || !h.requestCanSeeProject(r, wsUUID, projectUUID) {
+			if err == nil {
+				err = pgx.ErrNoRows
+			}
 			if !isNotFound(err) {
 				slog.Error("batch update issues: validate project scope",
 					append(logger.RequestAttrs(r), "project_id", uuidToString(projectUUID), "error", err)...)
@@ -3825,7 +3852,7 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 			ID:          issueUUID,
 			WorkspaceID: wsUUID,
 		})
-		if err != nil {
+		if err != nil || !h.requestCanSeeIssue(r, prevIssue) {
 			continue
 		}
 
@@ -3910,7 +3937,7 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 				if _, err := h.Queries.GetIssueInWorkspace(r.Context(), db.GetIssueInWorkspaceParams{
 					ID:          newParentID,
 					WorkspaceID: prevIssue.WorkspaceID,
-				}); err != nil {
+				}); err != nil || !h.requestCanSeeIssueID(r, prevIssue.WorkspaceID, newParentID) {
 					continue
 				}
 				// Cycle detection: walk up from the new parent to ensure we don't reach this issue.
@@ -4078,7 +4105,7 @@ func (h *Handler) BatchDeleteIssues(w http.ResponseWriter, r *http.Request) {
 			ID:          issueUUID,
 			WorkspaceID: wsUUID,
 		})
-		if err != nil {
+		if err != nil || !h.requestCanSeeIssue(r, issue) {
 			continue
 		}
 

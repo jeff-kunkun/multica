@@ -94,12 +94,12 @@ func (h *Handler) authorizeAgentEnv(w http.ResponseWriter, r *http.Request) (db.
 		return db.Agent{}, db.Member{}, false
 	}
 
-	member, ok := h.requireWorkspaceRole(w, r, workspaceID, "agent not found", "owner", "admin", "member")
+	member, ok := h.requireWorkspaceRole(w, r, workspaceID, "agent not found", "owner", "member")
 	if !ok {
 		return db.Agent{}, db.Member{}, false
 	}
 	if !canManageAgentEnv(agent, member) {
-		writeError(w, http.StatusForbidden, "only the agent owner or a workspace owner/admin can manage this agent's env")
+		writeError(w, http.StatusForbidden, "only the agent owner or the workspace owner can manage this agent's env")
 		return db.Agent{}, db.Member{}, false
 	}
 
@@ -119,7 +119,7 @@ func (h *Handler) authorizeAgentEnv(w http.ResponseWriter, r *http.Request) (db.
 // lookup succeeded, and the empty-owner guard below closes the case
 // from the other side as well.
 func canManageAgentEnv(agent db.Agent, member db.Member) bool {
-	if roleAllowed(member.Role, "owner", "admin") {
+	if member.Role == "owner" {
 		return true
 	}
 	ownerID := uuidToString(agent.OwnerID)

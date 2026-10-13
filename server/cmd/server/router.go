@@ -582,16 +582,13 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					// entries are write-only.
 					r.Get("/mcp-servers", h.ListWorkspaceMcpServers)
 				})
-				// Admin-level access
+				// Owner-only access
 				r.Group(func(r chi.Router) {
-					r.Use(middleware.RequireWorkspaceRoleFromURL(queries, "id", "owner", "admin"))
+					r.Use(middleware.RequireWorkspaceRoleFromURL(queries, "id", "owner"))
 					r.Put("/", h.UpdateWorkspace)
 					r.Patch("/", h.UpdateWorkspace)
 					r.Post("/members", h.CreateInvitation)
-					r.Route("/members/{memberId}", func(r chi.Router) {
-						r.Patch("/", h.UpdateMember)
-						r.Delete("/", h.DeleteMember)
-					})
+					r.Delete("/members/{memberId}", h.DeleteMember)
 					r.Delete("/invitations/{invitationId}", h.RevokeInvitation)
 					// Curating the shared MCP library is an admin action.
 					// Creating an entry binds it to no agent; an agent owner
@@ -615,7 +612,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				// the read-only list endpoint lives in the member-level group
 				// above so non-admins can see the workspace's connection state.
 				r.Group(func(r chi.Router) {
-					r.Use(middleware.RequireWorkspaceRoleFromURL(queries, "id", "owner", "admin"))
+					r.Use(middleware.RequireWorkspaceRoleFromURL(queries, "id", "owner"))
 					r.Get("/github/connect", h.GitHubConnect)
 					r.Get("/github/installations/{installationId}/repositories", h.ListGitHubInstallationRepositories)
 					r.Delete("/github/installations/{installationId}", h.DeleteGitHubInstallation)
@@ -796,6 +793,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Post("/resources", h.CreateProjectResource)
 					r.Put("/resources/{resourceId}", h.UpdateProjectResource)
 					r.Delete("/resources/{resourceId}", h.DeleteProjectResource)
+					r.Get("/members", h.ListProjectMembers)
+					r.Post("/members", h.AddProjectMember)
+					r.Delete("/members/{userId}", h.RemoveProjectMember)
 				})
 			})
 

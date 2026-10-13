@@ -1,7 +1,6 @@
 {
   "role": {
     "owner": "Owner",
-    "admin": "Admin",
     "member": "Member"
   },
   "card": {

@@ -121,7 +121,7 @@ export function PropertiesTab() {
 
   const { data: members = [] } = useQuery(memberListOptions(wsId));
   const currentMember = members.find((m) => m.user_id === user?.id) ?? null;
-  const canManage = currentMember?.role === "owner" || currentMember?.role === "admin";
+  const canManage = currentMember?.role === "owner";
 
   const { data: properties = [], isLoading } = useQuery(propertyListOptions(wsId, true));
   const update = useUpdateProperty();

@@ -440,7 +440,7 @@ func handlerWorkspaceMember(t *testing.T, slug string) string {
 	email := slug + "-" + time.Now().Format("150405.000000") + "@example.test"
 	dbfx.QueryRow(t, `INSERT INTO "user" (name, email) VALUES ($1, $2) RETURNING id`,
 		"Reconcile Test "+slug, email).Scan(&userID)
-	dbfx.Exec(t, `INSERT INTO member (workspace_id, user_id, role) VALUES ($1, $2, 'admin')`,
+	dbfx.Exec(t, `INSERT INTO member (workspace_id, user_id, role) VALUES ($1, $2, 'member')`,
 		testWorkspaceID, userID)
 	t.Cleanup(func() {
 		testPool.Exec(context.Background(), `DELETE FROM member WHERE user_id = $1`, userID)

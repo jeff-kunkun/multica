@@ -26,6 +26,7 @@ import { currentPath, useNavigation } from "../../navigation";
 import { TitleEditor, ContentEditor, type ContentEditorRef } from "../../editor";
 import { PriorityIcon } from "../../issues/components/priority-icon";
 import { ProjectResourcesSection } from "./project-resources-section";
+import { ProjectSharedWith } from "./project-shared-with";
 import { ProjectStartDatePicker } from "./project-start-date-picker";
 import { ProjectDueDatePicker } from "./project-due-date-picker";
 import { IssueSurface } from "../../issues/surface/issue-surface";
@@ -136,10 +137,10 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
     enabled: !!userId,
   });
   const isPinned = pinnedItems.some((p) => p.item_type === "project" && p.item_id === projectId);
-  const isWorkspaceAdmin = useMemo(() => {
+  const isWorkspaceOwner = useMemo(() => {
     if (!userId) return false;
     const me = members.find((m) => m.user_id === userId);
-    return me?.role === "owner" || me?.role === "admin";
+    return me?.role === "owner";
   }, [members, userId]);
   const createPin = useCreatePin();
   const deletePinMut = useDeletePin();
@@ -406,6 +407,9 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
               </PopoverContent>
             </Popover>
           </PropRow>
+          <PropRow label={t(($) => $.detail.prop_shared_with)}>
+            <ProjectSharedWith wsId={wsId} projectId={project.id} canEdit={isWorkspaceOwner} />
+          </PropRow>
           <PropRow label={t(($) => $.detail.prop_start_date)}>
             <ProjectStartDatePicker startDate={project.start_date} onUpdate={handleUpdateField} />
           </PropRow>
@@ -515,7 +519,7 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
                     <Link2 className="h-3.5 w-3.5" />
                     {t(($) => $.detail.copy_link)}
                   </DropdownMenuItem>
-                  {isWorkspaceAdmin && (
+                  {isWorkspaceOwner && (
                     <>
                       <DropdownMenuSeparator />
                       <DropdownMenuItem
@@ -583,7 +587,7 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
       </ResizablePanelGroup>
 
       {/* Delete confirmation */}
-      {isWorkspaceAdmin && (
+      {isWorkspaceOwner && (
         <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
           <AlertDialogContent>
             <AlertDialogHeader>

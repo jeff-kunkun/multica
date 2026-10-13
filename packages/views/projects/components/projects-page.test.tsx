@@ -234,7 +234,7 @@ function projectRow() {
 beforeEach(() => {
   mocks.projects = [PROJECT];
   mocks.members = [
-    { user_id: "user-1", name: "User One", role: "admin" },
+    { user_id: "user-1", name: "User One", role: "owner" },
   ];
   mocks.agents = [];
   mocks.pins = [];

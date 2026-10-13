@@ -117,7 +117,7 @@ func mergeSkillConfigOrigin(existingConfig []byte, origin map[string]any) map[st
 // config.origin are replaced with the fresh upstream state. Unlike the
 // creator-only import-overwrite path, refresh follows the canManageSkill
 // policy (workspace owner/admin or creator): the source URL is pinned on the
-// skill itself, so a refreshing admin cannot inject arbitrary content.
+// skill itself, so a refreshing owner cannot inject arbitrary content.
 func (h *Handler) RefreshSkill(w http.ResponseWriter, r *http.Request) {
 	skill, ok := h.loadSkillForUser(w, r, chi.URLParam(r, "id"))
 	if !ok {
@@ -132,14 +132,14 @@ func (h *Handler) RefreshSkill(w http.ResponseWriter, r *http.Request) {
 	// the 45s fetch budget. Mirrors canManageSkill, keeping the member row to
 	// re-check permission inside the overwrite transaction.
 	workspaceID := uuidToString(skill.WorkspaceID)
-	member, ok := h.requireWorkspaceRole(w, r, workspaceID, "skill not found", "owner", "admin", "member")
+	member, ok := h.requireWorkspaceRole(w, r, workspaceID, "skill not found", "owner", "member")
 	if !ok {
 		return
 	}
-	isAdmin := roleAllowed(member.Role, "owner", "admin")
+	isAdmin := member.Role == "owner"
 	isCreator := skill.CreatedBy.Valid && uuidToString(skill.CreatedBy) == userID
 	if !isAdmin && !isCreator {
-		writeError(w, http.StatusForbidden, "only the skill creator or a workspace admin can update this skill from its source")
+		writeError(w, http.StatusForbidden, "only the skill creator or the workspace owner can update this skill from its source")
 		return
 	}
 
@@ -188,7 +188,7 @@ func (h *Handler) RefreshSkill(w http.ResponseWriter, r *http.Request) {
 		case errors.Is(err, errSkillOverwriteNotFound):
 			writeError(w, http.StatusNotFound, "skill not found")
 		case errors.Is(err, errSkillOverwriteForbidden):
-			writeError(w, http.StatusForbidden, "only the skill creator or a workspace admin can update this skill from its source")
+			writeError(w, http.StatusForbidden, "only the skill creator or the workspace owner can update this skill from its source")
 		case errors.Is(err, errSkillOverwriteNameConflict):
 			writeError(w, http.StatusConflict, "a skill named \""+newName+"\" already exists in this workspace")
 		default:

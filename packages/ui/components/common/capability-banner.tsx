@@ -8,9 +8,7 @@ type Reason =
   | "not_authenticated"
   | "not_member"
   | "not_owner_role"
-  | "not_admin_role"
   | "not_resource_owner"
-  | "last_owner"
   | "private_visibility"
   | "unknown";
 
@@ -69,20 +67,16 @@ function getCopy(reason: Reason, noun: string, ownerName?: string): string {
       return `Join this workspace to edit this ${noun}.`;
     case "not_owner_role":
       return `View only — only the workspace owner can manage this ${noun}.`;
-    case "not_admin_role":
-      return `View only — only workspace owners and admins can manage this ${noun}.`;
     case "not_resource_owner":
       if (ownerName) {
-        return `View only — only ${ownerName} and workspace admins can edit this ${noun}.`;
+        return `View only — only ${ownerName} and the workspace owner can edit this ${noun}.`;
       }
-      return `View only — only the ${noun} owner and workspace admins can edit this ${noun}.`;
-    case "last_owner":
-      return `A workspace must keep at least one owner — promote another member first.`;
+      return `View only — only the ${noun} owner and the workspace owner can edit this ${noun}.`;
     case "private_visibility":
       if (ownerName) {
-        return `Personal ${noun} — only ${ownerName} and workspace admins can use this.`;
+        return `Personal ${noun} — only ${ownerName} can use this.`;
       }
-      return `Personal ${noun} — only the owner and workspace admins can use this.`;
+      return `Personal ${noun} — only its owner can use this.`;
     case "allowed":
     case "unknown":
       return ""; // unreachable; component returned null above

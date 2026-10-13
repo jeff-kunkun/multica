@@ -70,12 +70,18 @@ func childTaskCount(t *testing.T, parentID string) int {
 }
 
 // A second workspace member with the plain "member" role.
-func planTestMember(t *testing.T) string {
+// planTestMember adds a plain member who can see the plan's issue: the
+// issue is moved into a project shared with them, so the approval checks
+// under test are what decide, not project visibility.
+func planTestMember(t *testing.T, s planTestSetup) string {
 	t.Helper()
 	suffix := time.Now().UnixNano()
 	userID := dbfx.User(t, "Plan Member", fmt.Sprintf("plan-member-%d@multica.ai", suffix))
 	dbfx.Member(t, testWorkspaceID, userID, "member")
 	dbfx.Cleanup(t, `DELETE FROM plan_approver WHERE user_id = $1`, userID)
+	projectID := sharedTestProject(t, "plan project "+t.Name(), userID)
+	dbfx.Exec(t, `UPDATE issue SET project_id = $1 WHERE id = $2`, projectID, s.issueID)
+	dbfx.Cleanup(t, `UPDATE issue SET project_id = NULL WHERE project_id = $1`, projectID)
 	return userID
 }
 
@@ -140,7 +146,7 @@ func TestApprovePlanRejectsUnauthorizedCallers(t *testing.T) {
 
 	t.Run("plain member", func(t *testing.T) {
 		req := approveRequest(s.issueID, 1)
-		req.Header.Set("X-User-ID", planTestMember(t))
+		req.Header.Set("X-User-ID", planTestMember(t, s))
 		testutil.Call(t, testHandler.ApprovePlan, req).Want(http.StatusForbidden)
 	})
 	t.Run("agent task token", func(t *testing.T) {
@@ -231,7 +237,7 @@ func TestApprovePlanCreatesStepIssuesAndStartsThem(t *testing.T) {
 func TestPlanApproverGrant(t *testing.T) {
 	s := newPlanTestSetup(t)
 	proposePlan(t, s.issueID, s.proposeBody(), http.StatusCreated)
-	memberID := planTestMember(t)
+	memberID := planTestMember(t, s)
 
 	// A plain member cannot grant themselves approval.
 	selfGrant := newRequest(http.MethodPost, "/api/plan-approvers", map[string]any{"user_id": memberID})

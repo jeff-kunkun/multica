@@ -56,7 +56,6 @@ const (
 
 	// Member events
 	EventMemberAdded   = "member:added"
-	EventMemberUpdated = "member:updated"
 	EventMemberRemoved = "member:removed"
 
 	// Subscriber events
@@ -87,6 +86,7 @@ const (
 	EventProjectCreated         = "project:created"
 	EventProjectUpdated         = "project:updated"
 	EventProjectDeleted         = "project:deleted"
+	EventProjectMembersChanged  = "project:members_changed"
 	EventProjectResourceCreated = "project_resource:created"
 	EventProjectResourceUpdated = "project_resource:updated"
 	EventProjectResourceDeleted = "project_resource:deleted"

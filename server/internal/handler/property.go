@@ -412,7 +412,7 @@ func (h *Handler) requirePropertyAdmin(w http.ResponseWriter, r *http.Request) (
 		writeError(w, http.StatusForbidden, "agents cannot manage property definitions")
 		return "", "", false
 	}
-	if _, roleOK := h.requireWorkspaceRole(w, r, workspaceID, "workspace not found", "owner", "admin"); !roleOK {
+	if _, roleOK := h.requireWorkspaceRole(w, r, workspaceID, "workspace not found", "owner"); !roleOK {
 		return "", "", false
 	}
 	return workspaceID, userID, true
