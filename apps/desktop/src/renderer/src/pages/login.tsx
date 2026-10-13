@@ -22,7 +22,7 @@ export function DesktopLoginPage() {
   const googleClientId = useConfigStore((state) => state.googleClientId);
   const handleGoogleLogin = () => {
     // Open web login page in the default browser with platform=desktop flag.
-    // The web callback will redirect back via multica:// deep link with the token.
+    // The web callback will redirect back via multica-office:// deep link with the token.
     window.desktopAPI.openExternal(
       `${webUrl}/login?platform=desktop`,
     );

@@ -1,6 +1,6 @@
 {
   "name": "@multica/desktop",
-  "productName": "Multica",
+  "productName": "Multica Office",
   "version": "0.6.2",
   "private": true,
   "description": "Multica Desktop — native desktop client for the Multica platform.",
