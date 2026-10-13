@@ -122,9 +122,11 @@ win:
     - nsis
   artifactName: multica-desktop-${version}-windows-${arch}.${ext}
 publish:
+  # kun-main only: never jeff-kunkun/multica, whose feed colleagues' Desktop
+  # follows.
   provider: github
-  owner: multica-ai
-  repo: multica
+  owner: kkunkunya
+  repo: multica-main-release
   # Align with our CLI release flow which pre-creates a *published* GitHub
   # Release via `gh release create`. The electron-builder default of
   # `releaseType: draft` conflicts with `existingType=release` and causes

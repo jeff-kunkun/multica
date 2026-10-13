@@ -20,8 +20,10 @@ import {
   InputOTPSlot,
 } from "@multica/ui/components/ui/input-otp";
 import { useAuthStore } from "@multica/core/auth";
+import { useConfigStore } from "@multica/core/config";
 import { workspaceKeys } from "@multica/core/workspace/queries";
 import { api } from "@multica/core/api";
+import { paths } from "@multica/core/paths";
 import type { User } from "@multica/core/types";
 import { useT } from "../i18n";
 
@@ -57,6 +59,8 @@ interface LoginPageProps {
   onTokenObtained?: () => void;
   /** Override Google login handler (e.g. desktop opens browser externally). When provided, renders the Google button even if `google` config is omitted. */
   onGoogleLogin?: () => void;
+  /** Override the signup link (e.g. desktop opens the web signup page externally). */
+  onSignup?: () => void;
   /** Slot rendered at the bottom of the sign-in card, below the
    *  Google button. The web shell uses it for a "Prefer the desktop
    *  app?" prompt; desktop omits it (a download prompt inside the app
@@ -67,6 +71,9 @@ interface LoginPageProps {
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+// Mirrors the server's minPasswordSignupPasswordLen (auth_password.go).
+const MIN_PASSWORD_LEN = 8;
 
 export function redirectToCliCallback(url: string, token: string, state: string) {
   const separator = url.includes("?") ? "&" : "?";
@@ -105,14 +112,28 @@ export function LoginPage({
   cliCallback,
   onTokenObtained,
   onGoogleLogin,
+  onSignup,
   extra,
 }: LoginPageProps) {
   const { t } = useT("auth");
   const qc = useQueryClient();
-  const [step, setStep] = useState<"email" | "code" | "cli_confirm">("email");
+  const passwordAuth = useConfigStore((state) => state.passwordAuth);
+  const allowSignup = useConfigStore((state) => state.allowSignup);
+  // Self-service reset needs the team 2FA gate: without it a username alone
+  // would be enough to take over an account, so the server refuses (DENE-1416).
+  const passwordReset = useConfigStore(
+    (state) => state.passwordAuth && state.signupTotpRequired,
+  );
+  const [step, setStep] = useState<"email" | "code" | "cli_confirm" | "reset">("email");
   const [email, setEmail] = useState("");
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
   const [code, setCode] = useState("");
   const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
+  const [resetTotp, setResetTotp] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmNewPassword, setConfirmNewPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [cooldown, setCooldown] = useState(0);
   const [existingUser, setExistingUser] = useState<User | null>(null);
@@ -172,6 +193,97 @@ export function LoginPage({
     const timer = setTimeout(() => setCooldown((c) => c - 1), 1000);
     return () => clearTimeout(timer);
   }, [cooldown]);
+
+  const finishLogin = useCallback(
+    async (token?: string) => {
+      if (cliCallback && token) {
+        localStorage.setItem("multica_token", token);
+        api.setToken(token);
+        onTokenObtained?.();
+        redirectToCliCallback(cliCallback.url, token, cliCallback.state);
+        return;
+      }
+      const wsList = await api.listWorkspaces();
+      qc.setQueryData(workspaceKeys.list(), wsList);
+      onTokenObtained?.();
+      onSuccess();
+    },
+    [cliCallback, onSuccess, onTokenObtained, qc],
+  );
+
+  const handlePasswordLogin = useCallback(
+    async (e?: React.FormEvent) => {
+      e?.preventDefault();
+      if (!username) {
+        setError(t(($) => $.common.username_required));
+        return;
+      }
+      if (!password) {
+        setError(t(($) => $.common.password_required));
+        return;
+      }
+      setLoading(true);
+      setError("");
+      try {
+        if (cliCallback) {
+          const { token } = await api.loginWithPassword(username, password);
+          await finishLogin(token);
+          return;
+        }
+        await useAuthStore.getState().loginWithPassword(username, password);
+        await finishLogin();
+      } catch (err) {
+        setError(
+          err instanceof Error
+            ? err.message
+            : t(($) => $.errors.password_invalid),
+        );
+      } finally {
+        setLoading(false);
+      }
+    },
+    [username, password, cliCallback, finishLogin, t],
+  );
+
+  const handlePasswordReset = useCallback(
+    async (e?: React.FormEvent) => {
+      e?.preventDefault();
+      if (!username) {
+        setError(t(($) => $.common.username_required));
+        return;
+      }
+      if (!resetTotp.trim()) {
+        setError(t(($) => $.common.totp_required));
+        return;
+      }
+      if (newPassword.length < MIN_PASSWORD_LEN) {
+        setError(t(($) => $.common.password_min));
+        return;
+      }
+      if (newPassword !== confirmNewPassword) {
+        setError(t(($) => $.errors.password_mismatch));
+        return;
+      }
+      setLoading(true);
+      setError("");
+      try {
+        await api.resetPassword(username, resetTotp.trim(), newPassword);
+        setStep("email");
+        setPassword("");
+        setResetTotp("");
+        setNewPassword("");
+        setConfirmNewPassword("");
+        setNotice(t(($) => $.reset.done));
+      } catch (err) {
+        setError(
+          err instanceof Error ? err.message : t(($) => $.errors.reset_failed),
+        );
+      } finally {
+        setLoading(false);
+      }
+    },
+    [username, resetTotp, newPassword, confirmNewPassword, t],
+  );
 
   const handleSendCode = useCallback(
     async (e?: React.FormEvent) => {
@@ -414,7 +526,107 @@ export function LoginPage({
   }
 
   // -------------------------------------------------------------------------
-  // Email step
+  // Forgot password step
+  // -------------------------------------------------------------------------
+
+  if (step === "reset") {
+    return (
+      <div className="flex min-h-svh items-center justify-center">
+        <Card className="w-full max-w-sm">
+          <CardHeader className="text-center">
+            {logo && <div className="mx-auto mb-4">{logo}</div>}
+            <CardTitle className="text-display-sm">
+              {t(($) => $.reset.title)}
+            </CardTitle>
+            <CardDescription>{t(($) => $.reset.description)}</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <form id="reset-form" onSubmit={handlePasswordReset} className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="reset-username">{t(($) => $.common.username)}</Label>
+                <Input
+                  id="reset-username"
+                  type="text"
+                  autoComplete="username"
+                  placeholder={t(($) => $.common.username_placeholder)}
+                  value={username}
+                  onChange={(e) => setUsername(e.target.value)}
+                  autoFocus={!username}
+                  required
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="reset-totp">{t(($) => $.common.totp)}</Label>
+                <Input
+                  id="reset-totp"
+                  type="text"
+                  inputMode="numeric"
+                  autoComplete="one-time-code"
+                  pattern="[0-9]*"
+                  maxLength={6}
+                  placeholder={t(($) => $.common.totp_placeholder)}
+                  value={resetTotp}
+                  onChange={(e) => setResetTotp(e.target.value)}
+                  autoFocus={!!username}
+                  required
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="reset-new-password">{t(($) => $.reset.new_password)}</Label>
+                <Input
+                  id="reset-new-password"
+                  type="password"
+                  autoComplete="new-password"
+                  value={newPassword}
+                  onChange={(e) => setNewPassword(e.target.value)}
+                  required
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="reset-confirm-password">{t(($) => $.common.confirm_password)}</Label>
+                <Input
+                  id="reset-confirm-password"
+                  type="password"
+                  autoComplete="new-password"
+                  value={confirmNewPassword}
+                  onChange={(e) => setConfirmNewPassword(e.target.value)}
+                  required
+                />
+              </div>
+              {error && <p className="text-body text-destructive">{error}</p>}
+            </form>
+          </CardContent>
+          <CardFooter className="flex flex-col gap-3">
+            <Button
+              type="submit"
+              form="reset-form"
+              className="w-full"
+              size="lg"
+              disabled={
+                loading || !username || !resetTotp || !newPassword || !confirmNewPassword
+              }
+            >
+              {loading ? t(($) => $.reset.submitting) : t(($) => $.reset.submit)}
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              className="w-full"
+              onClick={() => {
+                setStep("email");
+                setError("");
+              }}
+            >
+              {t(($) => $.common.back)}
+            </Button>
+          </CardFooter>
+        </Card>
+      </div>
+    );
+  }
+
+  // -------------------------------------------------------------------------
+  // Email / password step
   // -------------------------------------------------------------------------
 
   return (
@@ -426,7 +638,9 @@ export function LoginPage({
             {t(($) => $.signin.title)}
           </CardTitle>
           <CardDescription>
-            {t(($) => $.signin.description)}
+            {passwordAuth
+              ? t(($) => $.signin.password_description)
+              : t(($) => $.signin.description)}
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -437,23 +651,75 @@ export function LoginPage({
               </AlertDescription>
             </Alert>
           )}
-          <form id="login-form" onSubmit={handleSendCode} className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="login-email">{t(($) => $.common.email)}</Label>
-              <Input
-                id="login-email"
-                type="email"
-                placeholder={t(($) => $.common.email_placeholder)}
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                autoFocus
-                required
-              />
-            </div>
-            {error && (
-              <p className="text-body text-destructive">{error}</p>
-            )}
-          </form>
+          {notice && (
+            <Alert>
+              <AlertDescription>{notice}</AlertDescription>
+            </Alert>
+          )}
+          {passwordAuth ? (
+            <form id="login-form" onSubmit={handlePasswordLogin} className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="login-username">{t(($) => $.common.username)}</Label>
+                <Input
+                  id="login-username"
+                  type="text"
+                  autoComplete="username"
+                  placeholder={t(($) => $.common.username_placeholder)}
+                  value={username}
+                  onChange={(e) => setUsername(e.target.value)}
+                  autoFocus
+                  required
+                />
+              </div>
+              <div className="space-y-2">
+                <div className="flex items-center justify-between gap-2">
+                  <Label htmlFor="login-password">{t(($) => $.common.password)}</Label>
+                  {passwordReset && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setStep("reset");
+                        setError("");
+                        setNotice("");
+                      }}
+                      className="text-body text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
+                    >
+                      {t(($) => $.reset.forgot)}
+                    </button>
+                  )}
+                </div>
+                <Input
+                  id="login-password"
+                  type="password"
+                  autoComplete="current-password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  required
+                />
+              </div>
+              {error && (
+                <p className="text-body text-destructive">{error}</p>
+              )}
+            </form>
+          ) : (
+            <form id="login-form" onSubmit={handleSendCode} className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="login-email">{t(($) => $.common.email)}</Label>
+                <Input
+                  id="login-email"
+                  type="email"
+                  placeholder={t(($) => $.common.email_placeholder)}
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  autoFocus
+                  required
+                />
+              </div>
+              {error && (
+                <p className="text-body text-destructive">{error}</p>
+              )}
+            </form>
+          )}
         </CardContent>
         <CardFooter className="flex flex-col gap-3">
           <Button
@@ -461,12 +727,39 @@ export function LoginPage({
             form="login-form"
             className="w-full"
             size="lg"
-            disabled={!email || loading}
+            disabled={
+              loading || (passwordAuth ? !username || !password : !email)
+            }
           >
-            {loading
-              ? t(($) => $.signin.sending)
-              : t(($) => $.signin.continue)}
+            {passwordAuth
+              ? loading
+                ? t(($) => $.signin.signing_in)
+                : t(($) => $.signin.sign_in)
+              : loading
+                ? t(($) => $.signin.sending)
+                : t(($) => $.signin.continue)}
           </Button>
+          {passwordAuth && allowSignup && (
+            <p className="text-body text-muted-foreground">
+              {t(($) => $.signin.no_account)}{" "}
+              {onSignup ? (
+                <button
+                  type="button"
+                  onClick={onSignup}
+                  className="font-medium text-foreground underline decoration-foreground/30 underline-offset-4 hover:decoration-foreground/70"
+                >
+                  {t(($) => $.signin.create_account)}
+                </button>
+              ) : (
+                <a
+                  href={paths.signup()}
+                  className="font-medium text-foreground underline decoration-foreground/30 underline-offset-4 hover:decoration-foreground/70"
+                >
+                  {t(($) => $.signin.create_account)}
+                </a>
+              )}
+            </p>
+          )}
           {(google || onGoogleLogin) && (
             <Button
               type="button"

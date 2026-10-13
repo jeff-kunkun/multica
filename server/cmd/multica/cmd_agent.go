@@ -288,9 +288,11 @@ func newAPIClient(cmd *cobra.Command) (*cli.APIClient, error) {
 	return client, nil
 }
 
+// kun-main ships its own instance: the default server is the office, not
+// Multica Cloud. Web and API share one host there.
 const (
-	defaultCloudServerURL = "https://api.multica.ai"
-	defaultCloudAppURL    = "https://multica.ai"
+	defaultCloudServerURL = "https://office.ferryway.cc"
+	defaultCloudAppURL    = "https://office.ferryway.cc"
 )
 
 func tryResolveServerURL(cmd *cobra.Command) string {

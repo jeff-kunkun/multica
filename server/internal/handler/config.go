@@ -34,6 +34,12 @@ type AppConfig struct {
 	// from the JSON when false to keep responses identical to the
 	// previous shape for the common managed-cloud case (#3433).
 	WorkspaceCreationDisabled bool `json:"workspace_creation_disabled,omitempty"`
+	// PasswordAuth tells the login page to collect username + password
+	// instead of an email code (MULTICA_PASSWORD_AUTH).
+	PasswordAuth bool `json:"password_auth,omitempty"`
+	// SignupTotpRequired tells signup and reset to collect the shared team
+	// 2FA code (MULTICA_SIGNUP_TOTP_SECRET).
+	SignupTotpRequired bool `json:"signup_totp_required,omitempty"`
 	// Public daemon setup config consumed by the web app at runtime so
 	// self-hosted instances can show `multica setup self-host` commands
 	// with the operator's own domains instead of Multica Cloud defaults.
@@ -127,6 +133,8 @@ func (h *Handler) GetConfig(w http.ResponseWriter, r *http.Request) {
 	config.AttachmentPublicURL = h.cfg.PublicURL
 	config.CdnSigned = h.CFSigner != nil
 	config.DaemonServerURL, config.DaemonAppURL = daemonSetupURLsFromEnv()
+	_, config.PasswordAuth = passwordAuthConfigured()
+	_, config.SignupTotpRequired = signupTOTPSecret()
 	config.VCSIntegrationAvailable = h.cfg.VCSIntegrationEnabled
 	config.FeatureFlags = featureflags.EvaluateFrontendPublicFlags(r.Context(), h.FeatureFlags)
 	// Only surface the build version on self-hosted deployments. The managed

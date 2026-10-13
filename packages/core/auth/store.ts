@@ -41,6 +41,13 @@ export interface AuthState {
   retryAuthentication: () => void;
   sendCode: (email: string) => Promise<void>;
   verifyCode: (email: string, code: string) => Promise<User>;
+  loginWithPassword: (username: string, password: string) => Promise<User>;
+  signupWithPassword: (
+    username: string,
+    password: string,
+    email?: string,
+    totp?: string,
+  ) => Promise<User>;
   loginWithGoogle: (code: string, redirectUri: string) => Promise<User>;
   loginWithToken: (token: string) => Promise<User>;
   logout: () => void;
@@ -76,6 +83,40 @@ export function createAuthStore(options: AuthStoreOptions) {
       const { token, user } = await api.verifyCode(email, code);
       if (!cookieAuth) {
         // Token mode: persist for Electron / legacy.
+        storage.setItem("multica_token", token);
+        api.setToken(token);
+      }
+      onLogin?.();
+      identifyAnalytics(user.id, { email: user.email, name: user.name });
+      set({ user, isLoading: false, status: "authenticated", expired: false });
+      return user;
+    },
+
+    loginWithPassword: async (username: string, password: string) => {
+      const { token, user } = await api.loginWithPassword(username, password);
+      if (!cookieAuth) {
+        storage.setItem("multica_token", token);
+        api.setToken(token);
+      }
+      onLogin?.();
+      identifyAnalytics(user.id, { email: user.email, name: user.name });
+      set({ user, isLoading: false, status: "authenticated", expired: false });
+      return user;
+    },
+
+    signupWithPassword: async (
+      username: string,
+      password: string,
+      email?: string,
+      totp?: string,
+    ) => {
+      const { token, user } = await api.signupWithPassword(
+        username,
+        password,
+        email,
+        totp,
+      );
+      if (!cookieAuth) {
         storage.setItem("multica_token", token);
         api.setToken(token);
       }
