@@ -1493,7 +1493,8 @@ type CreateCommentRequest struct {
 	// SteerTaskIDs are the running turns the author chose to add this comment
 	// to, instead of starting a follow-up run for their agents. A turn that
 	// has ended, or cannot take additional input, is never swapped for another
-	// one: its agent keeps the normal trigger.
+	// one: its agent keeps the normal trigger. Absent means no choice: the
+	// comment steers every running turn that can take it.
 	SteerTaskIDs []string `json:"steer_task_ids"`
 }
 
@@ -1778,6 +1779,14 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 	// always a normal trigger.
 	if len(attachmentIDs) > 0 {
 		steerTaskIDs = nil
+	}
+	// A client that sent no choice (steer_task_ids absent, not empty) gets the
+	// default: the comment goes to every running turn on the issue that can
+	// read it mid-reply; recipients without one queue normally.
+	if req.SteerTaskIDs == nil && len(attachmentIDs) == 0 {
+		if running, err := h.Queries.ListIssueSteerableTaskIDs(r.Context(), issue.ID); err == nil {
+			steerTaskIDs = running
+		}
 	}
 
 	// Determine author identity: agent (via X-Agent-ID header) or member.

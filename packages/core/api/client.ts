@@ -1691,7 +1691,9 @@ export class ApiClient {
         ...(parentId ? { parent_id: parentId } : {}),
         ...(attachmentIds?.length ? { attachment_ids: attachmentIds } : {}),
         ...(suppressAgentIds?.length ? { suppress_agent_ids: suppressAgentIds } : {}),
-        ...(steerTaskIds?.length ? { steer_task_ids: steerTaskIds } : {}),
+        // An empty list is an explicit "steer nothing"; omitting it lets the
+        // server steer every running turn that can take the comment.
+        ...(steerTaskIds ? { steer_task_ids: steerTaskIds } : {}),
       }),
     });
   }

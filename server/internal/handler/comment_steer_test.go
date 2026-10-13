@@ -260,3 +260,54 @@ func TestUpdateCommentKeepsTheLatestEditsSuppression(t *testing.T) {
 		t.Fatalf("the latest edit starts A, but an earlier edit's choice stayed: %v", saved.SuppressedAgentIds)
 	}
 }
+
+func TestCreateCommentDefaultsToTheAssigneesRunningTurn(t *testing.T) {
+	f := newSupplementFixture(t, "claude", "running", true)
+	dbfx.Exec(t, `UPDATE issue SET assignee_type = 'agent', assignee_id = $2 WHERE id = $1`, f.issueID, f.agentID)
+	dbfx.Exec(t, `UPDATE agent_task_queue SET delivered_comment_ids = ARRAY[trigger_comment_id] WHERE id = $1`, f.taskID)
+	dbfx.Cleanup(t, `DELETE FROM agent_task_queue WHERE issue_id = $1`, f.issueID)
+
+	var created CommentResponse
+	postSteeredComment(t, f.issueID, "", "Requirement changed: only fix web.").Want(http.StatusCreated).JSON(&created)
+	if len(created.Supplements) != 1 || created.Supplements[0].TaskID != f.taskID {
+		t.Fatalf("receipts = %+v, want the assignee's running turn", created.Supplements)
+	}
+	if outcome, ok := outcomeFor(created.TriggerOutcomes, f.agentID); ok && outcome.Status != DispatchSteered {
+		t.Fatalf("assignee outcome = %+v, want steered", outcome)
+	}
+	if n := dbfx.Count(t, `SELECT count(*) FROM agent_task_queue WHERE issue_id = $1`, f.issueID); n != 1 {
+		t.Fatalf("plain comment created %d runs, want the running turn only", n)
+	}
+	completeTaskViaDaemon(t, f.taskID)
+	if n := dbfx.Count(t, `SELECT count(*) FROM agent_task_queue WHERE issue_id = $1`, f.issueID); n != 1 {
+		t.Fatalf("completion replayed the steered comment into %d runs", n)
+	}
+}
+
+func TestAgentMentionDefaultsToTheMentionedAgentsRunningTurn(t *testing.T) {
+	f := newSupplementFixture(t, "claude", "running", true)
+	dbfx.Cleanup(t, `DELETE FROM agent_task_queue WHERE issue_id = $1`, f.issueID)
+	authorAgentID := dbfx.Agent(t, "Steering author", f.runtimeID)
+	authorTaskID := dbfx.Task(t, authorAgentID, testutil.Cols{
+		"runtime_id": f.runtimeID, "status": "running", "originator_user_id": testUserID, "accountable_user_id": testUserID,
+	})
+
+	req := newRequest(http.MethodPost, "/api/issues/"+f.issueID+"/comments", map[string]any{
+		"content": agentMention("Supplement", f.agentID) + " reviewer says: keep the API stable",
+	})
+	req.Header.Set("X-Actor-Source", "task_token")
+	req.Header.Set("X-Agent-ID", authorAgentID)
+	req.Header.Set("X-Task-ID", authorTaskID)
+	var created CommentResponse
+	testutil.Call(t, testHandler.CreateComment, withURLParam(req, "id", f.issueID)).Want(http.StatusCreated).JSON(&created)
+	if outcome, ok := outcomeFor(created.TriggerOutcomes, f.agentID); !ok || outcome.Status != DispatchSteered {
+		t.Fatalf("mentioned agent outcome = %+v (%v), want steered", outcome, ok)
+	}
+	if n := dbfx.Count(t, `SELECT count(*) FROM agent_task_queue WHERE agent_id = $1`, f.agentID); n != 1 {
+		t.Fatalf("mentioned agent has %d runs, want its running turn only", n)
+	}
+	claimed, err := testHandler.Queries.ClaimNextTaskSupplement(context.Background(), parseUUID(f.taskID))
+	if err != nil || claimed.AuthorName != "Steering author" {
+		t.Fatalf("claimed author = %q (%v), want the authoring agent's name", claimed.AuthorName, err)
+	}
+}
