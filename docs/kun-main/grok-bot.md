@@ -39,7 +39,7 @@ tokens are accepted: a person's token gets 403.
 | Open a topic (an issue that asks an agent for a plan) | `open_topic` |
 | Read the plan | `read_plan` |
 | Ask the owner to approve | `request_approval` |
-| Approve (Bots with `--can-release` only) | `approve_plan` |
+| Approve the version you read (Bots with `--can-release` only) | `approve_plan` |
 | Break the work into tickets | `create_issue`, `assign_issue` |
 | Track progress | `set_status`, `add_comment`, `get_events` |
 | Close | `close_issue` |
@@ -49,7 +49,7 @@ A typical loop:
 1. `create_project`.
 2. `open_topic` assigned to a planning agent.
 3. Wait for the plan event, then call `read_plan`.
-4. Call `request_approval`, or `approve_plan` if the Bot may release.
+4. Call `request_approval`, or `approve_plan` with the version it read if the Bot may release.
 5. Call `create_issue` for each piece of work.
 6. Close each ticket with `close_issue` when it is done.
 

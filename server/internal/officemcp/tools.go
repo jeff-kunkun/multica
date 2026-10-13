@@ -281,11 +281,12 @@ func officeTools() []tool {
 			},
 		},
 		{
-			Name:        "read_plan",
-			Description: "Read the current plan on an issue: what to do, what not to do, steps with owners, done-when, version and approval state.",
-			Schema:      schema([]string{"issue"}, map[string]any{"issue": strProp(issueDesc)}),
+			Name: "read_plan",
+			Description: "Read the plans on an issue, newest version first: what to do, what not to do, steps with owners, " +
+				"done-when, version and approval state, plus can_approve for this Bot.",
+			Schema: schema([]string{"issue"}, map[string]any{"issue": strProp(issueDesc)}),
 			Call: func(c *caller, a args) (any, error) {
-				path, err := issuePath(a, "/plan")
+				path, err := issuePath(a, "/plans")
 				if err != nil {
 					return nil, err
 				}
@@ -333,10 +334,21 @@ func officeTools() []tool {
 		},
 		{
 			Name:        "approve_plan",
-			Description: "Approve the current plan on an issue, which creates its work tickets and starts them. Only allowed when this Bot was granted release authority (see whoami).",
-			Schema:      schema([]string{"issue"}, map[string]any{"issue": strProp(issueDesc)}),
+			Description: "Approve one plan version on an issue, which creates its work tickets and starts them. " +
+				"Only the newest version can be approved. Only allowed when this Bot was granted release authority (see whoami).",
+			Schema: schema([]string{"issue", "version"}, map[string]any{
+				"issue":   strProp(issueDesc),
+				"version": map[string]any{"type": "integer", "minimum": 1, "description": "The plan version you read and are approving."},
+			}),
 			Call: func(c *caller, a args) (any, error) {
-				path, err := issuePath(a, "/plan/approve")
+				version, err := a.required("version")
+				if err != nil {
+					return nil, err
+				}
+				if n, err := strconv.Atoi(version); err != nil || n < 1 {
+					return nil, errors.New("version must be a positive integer")
+				}
+				path, err := issuePath(a, "/plans/"+version+"/approve")
 				if err != nil {
 					return nil, err
 				}

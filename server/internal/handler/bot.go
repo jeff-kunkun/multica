@@ -478,7 +478,9 @@ func (h *Handler) BotEventsAfter(ctx context.Context, workspaceID pgtype.UUID, a
 }
 
 // canRelease reports whether userID may release (approve) work in the
-// workspace: the workspace owner, or a Bot the owner marked as able to.
+// workspace: the workspace owner, a member the owner granted plan approval,
+// or a Bot the owner marked as able to. A Bot is decided by its own flag
+// alone, so revoking it takes effect even if it was also granted otherwise.
 func (h *Handler) canRelease(ctx context.Context, workspaceID, userID pgtype.UUID) (bool, error) {
 	if bot, err := h.Queries.GetWorkspaceBotByUser(ctx, userID); err == nil {
 		return bot.CanRelease && bot.WorkspaceID == workspaceID, nil
@@ -494,5 +496,8 @@ func (h *Handler) canRelease(ctx context.Context, workspaceID, userID pgtype.UUI
 	if err != nil {
 		return false, err
 	}
-	return member.Role == "owner", nil
+	if member.Role == "owner" {
+		return true, nil
+	}
+	return h.Queries.IsPlanApprover(ctx, db.IsPlanApproverParams{WorkspaceID: workspaceID, UserID: userID})
 }

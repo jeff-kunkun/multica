@@ -3,10 +3,12 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/multica-ai/multica/server/internal/auth"
 	"github.com/multica-ai/multica/server/internal/util"
@@ -131,6 +133,10 @@ func TestCanRelease(t *testing.T) {
 	ws := util.MustParseUUID(testWorkspaceID)
 	releaser := createTestBot(t, map[string]any{"name": "Releaser", "can_release": true})
 	helper := createTestBot(t, map[string]any{"name": "Helper"})
+	approver := dbfx.User(t, "Approver "+t.Name(), fmt.Sprintf("approver-%d@multica.ai", time.Now().UnixNano()))
+	dbfx.Member(t, testWorkspaceID, approver, "member")
+	dbfx.Exec(t, `INSERT INTO plan_approver (workspace_id, user_id, granted_by) VALUES ($1, $2, $3)`, testWorkspaceID, approver, testUserID)
+	dbfx.Cleanup(t, `DELETE FROM plan_approver WHERE user_id = $1`, approver)
 
 	for _, tc := range []struct {
 		name string
@@ -140,6 +146,7 @@ func TestCanRelease(t *testing.T) {
 		{"owner", testUserID, true},
 		{"bot with release", releaser.UserID, true},
 		{"bot without release", helper.UserID, false},
+		{"granted approver", approver, true},
 		{"stranger", "00000000-0000-0000-0000-000000000001", false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

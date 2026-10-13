@@ -43,7 +43,8 @@ func fakeAPI(t *testing.T, calls *[]recorded) http.Handler {
 	r.Post("/api/issues", record(201, `{"id":"i1","identifier":"OFF-1"}`))
 	r.Put("/api/issues/{id}", record(200, `{"id":"i1","status":"done"}`))
 	r.Post("/api/issues/{id}/comments", record(201, `{"id":"c1"}`))
-	r.Get("/api/issues/{id}/plan", record(404, `{"error":"no plan yet"}`))
+	r.Get("/api/issues/{id}/plans", record(404, `{"error":"no plan yet"}`))
+	r.Post("/api/issues/{id}/plans/{version}/approve", record(200, `{"plan":{"version":2,"status":"approved"},"issues":[]}`))
 	r.Get("/api/bot/events", record(200, `{"events":[],"next_cursor":7,"has_more":false}`))
 	r.Get("/api/projects", record(200, `[{"id":"p1","title":"Site","status":"planned","secret":"x"}]`))
 	lookup := func(_ context.Context, userID string) (Bot, bool) {
@@ -228,5 +229,27 @@ func TestListToolsTrimFields(t *testing.T) {
 	text, isErr := toolText(t, resp)
 	if isErr || strings.Contains(text, "secret") || !strings.Contains(text, `"Site"`) {
 		t.Fatalf("list_projects = %q", text)
+	}
+}
+
+func TestApprovePlanNamesTheVersion(t *testing.T) {
+	var calls []recorded
+	h := fakeAPI(t, &calls)
+	_, resp := rpc(t, h, "bot-user",
+		`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"approve_plan","arguments":{"issue":"OFF-1","version":2}}}`)
+	if _, isErr := toolText(t, resp); isErr {
+		t.Fatalf("approve_plan failed: %v", resp)
+	}
+	if len(calls) != 1 || calls[0].Method != "POST" || calls[0].Path != "/api/issues/OFF-1/plans/2/approve" {
+		t.Fatalf("calls = %+v", calls)
+	}
+
+	for _, bad := range []string{`{"issue":"OFF-1"}`, `{"issue":"OFF-1","version":0}`, `{"issue":"OFF-1","version":1.5}`} {
+		calls = nil
+		_, resp = rpc(t, h, "bot-user",
+			`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"approve_plan","arguments":`+bad+`}}`)
+		if _, isErr := toolText(t, resp); !isErr || len(calls) != 0 {
+			t.Fatalf("%s: want a tool error and no API call, got %v / %d calls", bad, resp, len(calls))
+		}
 	}
 }

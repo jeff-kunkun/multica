@@ -379,8 +379,9 @@ func (h *Handler) createPlanStepIssue(r *http.Request, parent db.Issue, plan db.
 	return res.Issue, nil
 }
 
-// canApprovePlan: a human caller who is a workspace owner, or a member the
-// owner granted approval. Agents and machine credentials never approve.
+// canApprovePlan: a workspace owner, a member the owner granted approval, or
+// a Bot the owner marked as able to release. Agents and machine credentials
+// never approve.
 func (h *Handler) canApprovePlan(ctx context.Context, r *http.Request, workspaceID string) bool {
 	if isMachineCredentialActor(r) {
 		return false
@@ -389,14 +390,15 @@ func (h *Handler) canApprovePlan(ctx context.Context, r *http.Request, workspace
 	if actorType, _ := h.resolveActor(r, userID, workspaceID); actorType != "member" {
 		return false
 	}
-	member, err := h.getWorkspaceMember(ctx, userID, workspaceID)
+	wsUUID, err := util.ParseUUID(workspaceID)
 	if err != nil {
 		return false
 	}
-	if member.Role == "owner" {
-		return true
+	userUUID, err := util.ParseUUID(userID)
+	if err != nil {
+		return false
 	}
-	ok, err := h.Queries.IsPlanApprover(ctx, db.IsPlanApproverParams{WorkspaceID: member.WorkspaceID, UserID: member.UserID})
+	ok, err := h.canRelease(ctx, wsUUID, userUUID)
 	return err == nil && ok
 }
 

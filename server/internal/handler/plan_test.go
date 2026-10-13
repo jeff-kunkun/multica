@@ -273,3 +273,40 @@ func TestPlanApproverGrant(t *testing.T) {
 	req.Header.Set("X-User-ID", memberID)
 	testutil.Call(t, testHandler.ApprovePlan, req).Want(http.StatusForbidden)
 }
+
+// A Bot's release flag is what decides: no separate approver grant needed,
+// and revoking the flag stops it on the next plan.
+func TestBotReleaseFlagGovernsPlanApproval(t *testing.T) {
+	s := newPlanTestSetup(t)
+	releaser := createTestBot(t, map[string]any{"name": "Releaser " + t.Name(), "can_release": true})
+	helper := createTestBot(t, map[string]any{"name": "Helper " + t.Name()})
+	projectID := sharedTestProject(t, "bot plan project "+t.Name(), releaser.UserID, helper.UserID)
+	dbfx.Exec(t, `UPDATE issue SET project_id = $1 WHERE id = $2`, projectID, s.issueID)
+	dbfx.Cleanup(t, `UPDATE issue SET project_id = NULL WHERE project_id = $1`, projectID)
+	proposePlan(t, s.issueID, s.proposeBody(), http.StatusCreated)
+
+	asBot := func(userID string, version int) *http.Request {
+		req := approveRequest(s.issueID, version)
+		req.Header.Set("X-User-ID", userID)
+		return req
+	}
+	testutil.Call(t, testHandler.ApprovePlan, asBot(helper.UserID, 1)).Want(http.StatusForbidden)
+	if n := childIssueCount(t, s.issueID); n != 0 {
+		t.Fatalf("bot without release created %d issues", n)
+	}
+
+	testutil.Call(t, testHandler.ApprovePlan, asBot(releaser.UserID, 1)).Want(http.StatusOK)
+	if n := childIssueCount(t, s.issueID); n != 2 {
+		t.Fatalf("releasing bot created %d issues, want 2", n)
+	}
+
+	revoke := withURLParam(newRequest(http.MethodPatch, "/api/bots/"+releaser.ID, map[string]any{"can_release": false}), "botId", releaser.ID)
+	testutil.Call(t, testHandler.UpdateBot, revoke).Want(http.StatusOK)
+	proposePlan(t, s.issueID, s.proposeBody(), http.StatusCreated)
+	testutil.Call(t, testHandler.ApprovePlan, asBot(releaser.UserID, 2)).Want(http.StatusForbidden)
+
+	// An approver grant on the Bot's user does not bypass its own flag.
+	dbfx.Exec(t, `INSERT INTO plan_approver (workspace_id, user_id, granted_by) VALUES ($1, $2, $3)`, testWorkspaceID, releaser.UserID, testUserID)
+	dbfx.Cleanup(t, `DELETE FROM plan_approver WHERE user_id = $1`, releaser.UserID)
+	testutil.Call(t, testHandler.ApprovePlan, asBot(releaser.UserID, 2)).Want(http.StatusForbidden)
+}
