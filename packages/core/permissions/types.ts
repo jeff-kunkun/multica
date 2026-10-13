@@ -23,9 +23,7 @@ export type DecisionReason =
   | "not_authenticated"
   | "not_member"
   | "not_owner_role"
-  | "not_admin_role"
   | "not_resource_owner"
-  | "last_owner"
   | "private_visibility"
   | "unknown";
 

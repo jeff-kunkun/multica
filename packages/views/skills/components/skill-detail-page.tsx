@@ -798,7 +798,7 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
     wsId,
     agents,
     currentUserId,
-    isAdmin: myRole === "owner" || myRole === "admin",
+    isAdmin: myRole === "owner",
   };
 
   const [name, setName] = useState("");

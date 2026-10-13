@@ -8,10 +8,18 @@ const (
 	ScopeUser      = "user"
 	ScopeTask      = "task"
 	ScopeChat      = "chat"
+	// ScopeMember is one member's slice of a workspace (MemberScopeID). Events
+	// about issues and projects go here, only to members who may see them.
+	ScopeMember = "member"
 	// ScopeDaemonRuntime routes daemon wakeup frames through the Redis relay.
 	// It is consumed by the daemon WebSocket hub, not by browser clients.
 	ScopeDaemonRuntime = "daemon_runtime"
 )
+
+// MemberScopeID is the ScopeMember room id of a user inside a workspace.
+func MemberScopeID(workspaceID, userID string) string {
+	return workspaceID + ":" + userID
+}
 
 // Broadcaster is the abstraction every realtime event producer should depend
 // on instead of *Hub directly.

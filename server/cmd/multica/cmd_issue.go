@@ -331,7 +331,7 @@ var issueCommentAddCmd = &cobra.Command{
 var issueCommentUpdateCmd = &cobra.Command{
 	Use:   "update <comment-id>",
 	Short: "Update a comment",
-	Long: "Update a comment you authored. Workspace owners and admins can update any comment.\n\n" +
+	Long: "Update a comment you authored. The workspace owner can update any comment.\n\n" +
 		"Pass the revision returned by `multica issue comment list <issue-id> --output json`; " +
 		"the update is rejected if another editor changed the comment first. On that rejection, " +
 		"read the latest body and merge your change into it before retrying. Do not just resend " +

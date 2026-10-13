@@ -51,7 +51,7 @@ func TestLoadAgentRuntimeAvailability_PrivilegedViewerSkipsRuntimeQuery(t *testi
 		RuntimeID: util.MustParseUUID("11111111-1111-1111-1111-111111111111"),
 	}}
 
-	for _, role := range []string{"owner", "admin"} {
+	for _, role := range []string{"owner"} {
 		t.Run(role, func(t *testing.T) {
 			got, err := h.loadAgentRuntimeAvailability(
 				context.Background(),
@@ -73,7 +73,7 @@ func TestLoadAgentRuntimeAvailability_PrivilegedViewerSkipsRuntimeQuery(t *testi
 
 // TestMemberAllowedToViewAgent_Pure exercises the pure predicate that drives
 // the private-agent VIEW gate. For a private agent it must allow:
-//   - workspace owner / admin (regardless of agent ownership)
+//   - workspace owner (regardless of agent ownership)
 //   - the agent owner (regardless of role)
 //
 // And deny everyone else. This test runs without a database.
@@ -93,9 +93,8 @@ func TestMemberAllowedToViewAgent_Pure(t *testing.T) {
 		want   bool
 	}{
 		{"workspace owner, not agent owner", otherUserID, "owner", true},
-		{"workspace admin, not agent owner", otherUserID, "admin", true},
 		{"agent owner with member role", ownerUserID, "member", true},
-		{"agent owner with admin role", ownerUserID, "admin", true},
+		{"agent owner who is also workspace owner", ownerUserID, "owner", true},
 		{"plain member, not agent owner", otherUserID, "member", false},
 		{"plain member with no role string", otherUserID, "", false},
 	}

@@ -107,7 +107,7 @@ const {
       id: string;
       workspace_id: string;
       user_id: string;
-      role: "owner" | "admin" | "member";
+      role: "owner" | "member";
       created_at: string;
       name: string;
       email: string;
@@ -540,7 +540,7 @@ describe("SearchCommand", () => {
         id: "member-2",
         workspace_id: "ws-test",
         user_id: "user-2",
-        role: "admin",
+        role: "owner",
         created_at: "2026-01-01T00:00:00Z",
         name: "Bob Liu",
         email: "bob@example.com",

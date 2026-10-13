@@ -152,15 +152,10 @@ export function WorkspaceTab() {
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
 
   const currentMember = members.find((m) => m.user_id === user?.id) ?? null;
-  const canManageWorkspace = currentMember?.role === "owner" || currentMember?.role === "admin";
+  const canManageWorkspace = currentMember?.role === "owner";
+  // The owner cannot leave (and ownership cannot move), so only members get
+  // a Leave action.
   const isOwner = currentMember?.role === "owner";
-  // Mirror the backend invariant (server/internal/handler/workspace.go:569):
-  // a workspace must always have at least one owner, so the sole owner can't
-  // leave. Pre-flight here instead of letting the 400 round-trip become a
-  // confusing toast — disable Leave and tell the user what they need to do.
-  const ownerCount = members.filter((m) => m.role === "owner").length;
-  const isSoleOwner = isOwner && ownerCount <= 1;
-  const isSoleMember = members.length <= 1;
 
   // Reset form state only when the user switches to a different workspace.
   // Keying on workspace?.id (not the object ref) avoids wiping unsaved edits
@@ -476,31 +471,27 @@ export function WorkspaceTab() {
       </SettingsSection>
 
       {/* Danger Zone — gated on the member query settling so the owner-only
-          Delete button and the sole-owner Leave guidance don't flash in
+          Delete button and the member-only Leave button don't flash in
           after mount. */}
-      {membersFetched && (
+      {membersFetched && currentMember && (
         <SettingsSection title={t(($) => $.workspace.danger_zone)}>
           <SettingsCard>
-            <SettingsRow
-              anchor="leave"
-              label={t(($) => $.workspace.leave_title)}
-              description={
-                isSoleOwner
-                  ? isSoleMember
-                    ? t(($) => $.workspace.leave_sole_member)
-                    : t(($) => $.workspace.leave_sole_owner)
-                  : t(($) => $.workspace.leave_default)
-              }
-            >
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={handleLeaveWorkspace}
-                disabled={actionId === "leave" || isSoleOwner}
+            {!isOwner && (
+              <SettingsRow
+                anchor="leave"
+                label={t(($) => $.workspace.leave_title)}
+                description={t(($) => $.workspace.leave_default)}
               >
-                {actionId === "leave" ? t(($) => $.workspace.leaving) : t(($) => $.workspace.leave_button)}
-              </Button>
-            </SettingsRow>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleLeaveWorkspace}
+                  disabled={actionId === "leave"}
+                >
+                  {actionId === "leave" ? t(($) => $.workspace.leaving) : t(($) => $.workspace.leave_button)}
+                </Button>
+              </SettingsRow>
+            )}
 
             {isOwner && (
               <SettingsRow

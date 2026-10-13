@@ -103,11 +103,11 @@ describe("VCSConnectionRows", () => {
     expect(screen.getByRole("button", { name: "Connect" })).toBeDisabled();
   });
 
-  it("asks members to contact an admin when nothing is connected", () => {
+  it("asks members to contact the owner when nothing is connected", () => {
     listing.current.can_manage = false;
     renderWithI18n(<VCSConnectionRows />);
 
     expect(screen.queryByRole("button", { name: "Connect" })).toBeNull();
-    expect(screen.getByText(/Ask a workspace admin/)).toBeInTheDocument();
+    expect(screen.getByText(/Ask the workspace owner/)).toBeInTheDocument();
   });
 });

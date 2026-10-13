@@ -37,6 +37,6 @@ export function canEditSkill(
   skill: SkillSummary,
   opts: { userId: string | null; role: MemberRole | null },
 ): boolean {
-  if (opts.role === "admin" || opts.role === "owner") return true;
+  if (opts.role === "owner") return true;
   return skill.created_by === opts.userId;
 }

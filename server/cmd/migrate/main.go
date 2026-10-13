@@ -355,6 +355,7 @@ var concurrentIndexCleanups = map[string]string{
 	"579_plan_issue_version_idx":                                "plan_issue_version_idx",
 	"580_plan_approver_member_idx":                              "plan_approver_member_idx",
 	"581_task_one_active_per_issue":                             "agent_task_queue_one_active_per_issue_idx",
+	"583_project_member_idx":                                    "project_member_project_user_idx",
 }
 
 // concurrentDownIndexCleanups covers every migration whose down direction

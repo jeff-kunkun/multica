@@ -144,7 +144,7 @@ func (h *Handler) agentToResponse(a db.Agent) AgentResponse {
 	// only to count keys; the map never reaches the response. A coarse
 	// has_custom_env / key_count is what the UI gets — to read the values
 	// the caller must hit GET /api/agents/{id}/env (agent owner or
-	// workspace owner/admin, audited).
+	// workspace owner, audited).
 	envKeyCount := 0
 	if a.CustomEnv != nil {
 		var customEnv map[string]string
@@ -967,7 +967,7 @@ func computeTaskKind(t db.AgentTaskQueue) string {
 func (h *Handler) loadAgentRuntimeAvailability(ctx context.Context, agents []db.Agent, workspaceID, viewerID, viewerRole string, now time.Time) (map[string]string, error) {
 	// Owner/admin runtime lists already contain every row, so their normal
 	// client-side derivation is authoritative and no projection query is needed.
-	if roleAllowed(viewerRole, "owner", "admin") {
+	if viewerRole == "owner" {
 		return map[string]string{}, nil
 	}
 
@@ -998,7 +998,7 @@ func (h *Handler) loadAgentRuntimeAvailability(ctx context.Context, agents []db.
 		if uuidToString(runtime.WorkspaceID) != workspaceID {
 			continue
 		}
-		// ListAgentRuntimes exposes every row to workspace owner/admin and only
+		// ListAgentRuntimes exposes every row to workspace owner and only
 		// owner/public rows to regular members. Keep the coarse bridge for the
 		// rows that the viewer's runtime list cannot carry.
 		if runtime.Visibility == "public" ||
@@ -1079,7 +1079,7 @@ func (h *Handler) ListAgents(w http.ResponseWriter, r *http.Request) {
 
 	// Resolve the request actor once. Agents bypass the view gate to preserve
 	// A2A collaboration; members see a private agent only when they own it or
-	// are workspace owner/admin, and a public_to agent only when on its
+	// are workspace owner, and a public_to agent only when on its
 	// invocation allow-list. Targets are batch-loaded to avoid an N+1 and
 	// reused to enrich each response's invocation_targets.
 	actorType, actorID := h.resolveActor(r, userID, workspaceID)
@@ -1530,7 +1530,7 @@ type UpdateAgentRequest struct {
 	RuntimeConfig        any                         `json:"runtime_config"`
 	// custom_env is intentionally NOT updatable through this endpoint.
 	// Use `PUT /api/agents/{id}/env` for env changes — that path admits
-	// the agent owner or a workspace owner/admin, denies agent actors,
+	// the agent owner or a workspace owner, denies agent actors,
 	// and writes a persisted audit log entry. A `PUT /api/agents/{id}`
 	// body that carries
 	// `custom_env` is rejected with 400 in the handler below so a
@@ -1589,12 +1589,12 @@ func workspaceAlwaysRedactSecrets(settings []byte) bool {
 
 // canViewAgentSecrets checks whether the requesting user is allowed to
 // see the agent's secret-bearing fields (currently `mcp_config`). Only
-// the agent owner or workspace owner/admin qualify; for everyone else
+// the agent owner or workspace owner qualify; for everyone else
 // the response is redacted. `custom_env` is no longer part of an agent
 // resource response (see MUL-2600), so this predicate is shared only by
 // the remaining mcp_config redaction path.
 func canViewAgentSecrets(agent db.Agent, userID string, memberRole string) bool {
-	if roleAllowed(memberRole, "owner", "admin") {
+	if memberRole == "owner" {
 		return true
 	}
 	return uuidToString(agent.OwnerID) == userID
@@ -1646,15 +1646,15 @@ func redactAgentResponseForActor(resp *AgentResponse, actorType string) {
 }
 
 // canManageAgent checks whether the current user can update or archive an agent.
-// Only the agent owner or workspace owner/admin can manage any agent,
+// Only the agent owner or workspace owner can manage any agent,
 // regardless of whether it is public or private.
 func (h *Handler) canManageAgent(w http.ResponseWriter, r *http.Request, agent db.Agent) bool {
 	wsID := uuidToString(agent.WorkspaceID)
-	member, ok := h.requireWorkspaceRole(w, r, wsID, "agent not found", "owner", "admin", "member")
+	member, ok := h.requireWorkspaceRole(w, r, wsID, "agent not found", "owner", "member")
 	if !ok {
 		return false
 	}
-	isAdmin := roleAllowed(member.Role, "owner", "admin")
+	isAdmin := member.Role == "owner"
 	isAgentOwner := uuidToString(agent.OwnerID) == requestUserID(r)
 	if !isAdmin && !isAgentOwner {
 		writeError(w, http.StatusForbidden, "only the agent owner can manage this agent")
@@ -1686,7 +1686,7 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 	// users believing they had rotated a secret when the value was
 	// actually unchanged. env values move only through `PUT
 	// /api/agents/{id}/env` — that endpoint admits the agent owner or a
-	// workspace owner/admin, denies agent actors, and writes a queryable
+	// workspace owner, denies agent actors, and writes a queryable
 	// audit row.
 	if _, ok := rawFields["custom_env"]; ok {
 		writeError(w, http.StatusBadRequest, "custom_env is no longer accepted on this endpoint; use PUT /api/agents/{id}/env (or `multica agent env set`)")

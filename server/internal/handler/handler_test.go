@@ -1275,12 +1275,10 @@ func TestUpdateWorkspaceRejectsMalformedID(t *testing.T) {
 	testutil.Call(t, testHandler.UpdateWorkspace, req).Want(http.StatusBadRequest)
 }
 
-func TestUpdateMemberRejectsMalformedMemberID(t *testing.T) {
-	req := newRequest("PATCH", "/api/workspaces/"+testWorkspaceID+"/members/not-a-uuid", map[string]any{
-		"role": "member",
-	})
+func TestDeleteMemberRejectsMalformedMemberID(t *testing.T) {
+	req := newRequest("DELETE", "/api/workspaces/"+testWorkspaceID+"/members/not-a-uuid", nil)
 	req = withURLParams(req, "id", testWorkspaceID, "memberId", "not-a-uuid")
-	testutil.Call(t, testHandler.UpdateMember, req).Want(http.StatusBadRequest)
+	testutil.Call(t, testHandler.DeleteMember, req).Want(http.StatusBadRequest)
 }
 
 func TestRevokeInvitationRejectsMalformedInvitationID(t *testing.T) {

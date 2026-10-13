@@ -136,3 +136,13 @@ export interface ListProjectResourcesResponse {
   resources: ProjectResource[];
   total: number;
 }
+
+/** A workspace member a project is shared with. */
+export interface ProjectMember {
+  user_id: string;
+  created_at: string;
+}
+
+export interface ListProjectMembersResponse {
+  members: ProjectMember[];
+}

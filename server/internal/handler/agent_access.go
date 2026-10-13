@@ -152,7 +152,7 @@ func (h *Handler) canAccessPrivateAgent(ctx context.Context, agent db.Agent, act
 	if err != nil {
 		return false
 	}
-	if roleAllowed(member.Role, "owner", "admin") {
+	if member.Role == "owner" {
 		return true
 	}
 	if agent.PermissionMode != "public_to" {
@@ -189,7 +189,7 @@ func memberHitsInvocationTargets(targets []db.AgentInvocationTarget, userID stri
 // everything; a regular member sees a public_to agent only when on its
 // allow-list, and never sees other members' private agents.
 func memberAllowedToViewAgent(agent db.Agent, targets []db.AgentInvocationTarget, userID, role string) bool {
-	if roleAllowed(role, "owner", "admin") {
+	if role == "owner" {
 		return true
 	}
 	if uuidToString(agent.OwnerID) == userID {
@@ -355,7 +355,7 @@ func (h *Handler) restrictedAgentIDs(ctx context.Context, workspaceID, actorType
 	}
 
 	// Whether per-agent visibility can restrict anything for this actor at all.
-	judgeUserAgents := actorType == "member" && !roleAllowed(role, "owner", "admin")
+	judgeUserAgents := actorType == "member" && role != "owner"
 	var targetsByAgent map[string][]db.AgentInvocationTarget
 	if judgeUserAgents {
 		var ok bool

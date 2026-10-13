@@ -116,7 +116,7 @@ export function RuntimeDetail({
     ? members.find((m) => m.user_id === user.id)
     : null;
   const isAdmin = currentMember
-    ? currentMember.role === "owner" || currentMember.role === "admin"
+    ? currentMember.role === "owner"
     : false;
   const isRuntimeOwner = user && runtime.owner_id === user.id;
   const canEditRuntime = isAdmin || isRuntimeOwner;

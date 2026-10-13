@@ -22,9 +22,9 @@ func setRuntimeTestMemberRole(t *testing.T, userID, role string) {
 	}
 }
 
-func promoteRuntimeTestMemberToAdmin(t *testing.T, userID string) {
+func promoteRuntimeTestMemberToOwner(t *testing.T, userID string) {
 	t.Helper()
-	setRuntimeTestMemberRole(t, userID, "admin")
+	setRuntimeTestMemberRole(t, userID, "owner")
 }
 
 func TestInitiateUpdateRequiresRuntimeManager(t *testing.T) {
@@ -38,7 +38,7 @@ func TestInitiateUpdateRequiresRuntimeManager(t *testing.T) {
 		wantStatus int
 	}{
 		{name: "runtime owner", actor: "runtime_owner", wantStatus: http.StatusOK},
-		{name: "workspace admin on another private runtime", actor: "workspace_admin", wantStatus: http.StatusNotFound},
+		{name: "workspace owner on another private runtime", actor: "workspace_owner", wantStatus: http.StatusNotFound},
 		{name: "plain member on another private runtime", actor: "plain_member", wantStatus: http.StatusNotFound},
 	}
 
@@ -47,8 +47,8 @@ func TestInitiateUpdateRequiresRuntimeManager(t *testing.T) {
 			runtimeID, runtimeOwnerID, plainMemberID := runtimeVisibilityFixture(t)
 			actorID := runtimeOwnerID
 			switch tc.actor {
-			case "workspace_admin":
-				promoteRuntimeTestMemberToAdmin(t, plainMemberID)
+			case "workspace_owner":
+				promoteRuntimeTestMemberToOwner(t, plainMemberID)
 				actorID = plainMemberID
 			case "plain_member":
 				actorID = plainMemberID
@@ -91,7 +91,7 @@ func TestGetUpdateRequiresRuntimeManager(t *testing.T) {
 		wantStatus int
 	}{
 		{name: "runtime owner", actor: "runtime_owner", wantStatus: http.StatusOK},
-		{name: "workspace admin on another private runtime", actor: "workspace_admin", wantStatus: http.StatusNotFound},
+		{name: "workspace owner on another private runtime", actor: "workspace_owner", wantStatus: http.StatusNotFound},
 		{name: "plain member on another private runtime", actor: "plain_member", wantStatus: http.StatusNotFound},
 	}
 
@@ -100,8 +100,8 @@ func TestGetUpdateRequiresRuntimeManager(t *testing.T) {
 			runtimeID, runtimeOwnerID, plainMemberID := runtimeVisibilityFixture(t)
 			actorID := runtimeOwnerID
 			switch tc.actor {
-			case "workspace_admin":
-				promoteRuntimeTestMemberToAdmin(t, plainMemberID)
+			case "workspace_owner":
+				promoteRuntimeTestMemberToOwner(t, plainMemberID)
 				actorID = plainMemberID
 			case "plain_member":
 				actorID = plainMemberID
@@ -127,12 +127,12 @@ func TestGetUpdateRequiresRuntimeManager(t *testing.T) {
 	}
 }
 
-func TestGetUpdateAllowsInitiatorAfterAdminDemotionOnPublicRuntime(t *testing.T) {
+func TestGetUpdateAllowsInitiatorAfterOwnerDemotionOnPublicRuntime(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
 	}
 
-	runtimeID, _, adminID := runtimeVisibilityFixture(t)
+	runtimeID, _, ownerID := runtimeVisibilityFixture(t)
 	if _, err := testPool.Exec(context.Background(), `
 		UPDATE agent_runtime
 		SET visibility = 'public'
@@ -140,11 +140,11 @@ func TestGetUpdateAllowsInitiatorAfterAdminDemotionOnPublicRuntime(t *testing.T)
 	`, runtimeID); err != nil {
 		t.Fatalf("make runtime public: %v", err)
 	}
-	promoteRuntimeTestMemberToAdmin(t, adminID)
+	promoteRuntimeTestMemberToOwner(t, ownerID)
 
 	initRecorder := httptest.NewRecorder()
 	initRequest := withURLParam(
-		newRequestAs(adminID, http.MethodPost, "/api/runtimes/"+runtimeID+"/update", map[string]any{
+		newRequestAs(ownerID, http.MethodPost, "/api/runtimes/"+runtimeID+"/update", map[string]any{
 			"target_version": "v9.9.9",
 		}),
 		"runtimeId",
@@ -162,16 +162,16 @@ func TestGetUpdateAllowsInitiatorAfterAdminDemotionOnPublicRuntime(t *testing.T)
 	if update.InitiatorUserID != "" {
 		t.Fatalf("initiator user ID leaked in API response: %q", update.InitiatorUserID)
 	}
-	setRuntimeTestMemberRole(t, adminID, "member")
+	setRuntimeTestMemberRole(t, ownerID, "member")
 
 	pollRecorder := httptest.NewRecorder()
 	pollRequest := withURLParams(
-		newRequestAs(adminID, http.MethodGet, "/api/runtimes/"+runtimeID+"/update/"+update.ID, nil),
+		newRequestAs(ownerID, http.MethodGet, "/api/runtimes/"+runtimeID+"/update/"+update.ID, nil),
 		"runtimeId", runtimeID,
 		"updateId", update.ID,
 	)
 	testHandler.GetUpdate(pollRecorder, pollRequest)
 	if pollRecorder.Code != http.StatusOK {
-		t.Fatalf("poll after admin demotion: expected 200, got %d: %s", pollRecorder.Code, pollRecorder.Body.String())
+		t.Fatalf("poll after owner demotion: expected 200, got %d: %s", pollRecorder.Code, pollRecorder.Body.String())
 	}
 }

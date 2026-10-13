@@ -322,6 +322,7 @@ SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority,
        i.revision
 FROM issue i
 WHERE i.workspace_id = $1
+  AND can_see_issue(sqlc.arg('viewer')::uuid, i)
   -- Negate only known terminal keys so an unknown legacy key remains visible.
   AND NOT (i.status = ANY(sqlc.arg('terminal_status_keys')::text[]))
   AND (sqlc.narg('priority')::text IS NULL OR i.priority = sqlc.narg('priority'))
@@ -425,9 +426,10 @@ WHERE i.workspace_id = $1
 -- not relative to siblings, so ordering by it interleaves children
 -- unpredictably across batches and statuses; number is a per-workspace
 -- monotonic counter and is sibling-stable.
-SELECT * FROM issue
-WHERE parent_issue_id = $1
-ORDER BY number ASC;
+SELECT i.* FROM issue i
+WHERE i.parent_issue_id = $1
+  AND can_see_issue(sqlc.arg('viewer')::uuid, i)
+ORDER BY i.number ASC;
 
 -- name: ListChildrenByParents :many
 -- Batched variant of ListChildIssues: returns all children for the given
@@ -437,10 +439,11 @@ ORDER BY number ASC;
 -- enumerate children of parents in workspaces they don't belong to.
 -- Within each parent, order by number ASC for the same sibling-stable
 -- creation order as ListChildIssues.
-SELECT * FROM issue
-WHERE workspace_id = sqlc.arg('workspace_id')
-  AND parent_issue_id = ANY(sqlc.arg('parent_ids')::uuid[])
-ORDER BY parent_issue_id, number ASC;
+SELECT i.* FROM issue i
+WHERE i.workspace_id = sqlc.arg('workspace_id')
+  AND i.parent_issue_id = ANY(sqlc.arg('parent_ids')::uuid[])
+  AND can_see_issue(sqlc.arg('viewer')::uuid, i)
+ORDER BY i.parent_issue_id, i.number ASC;
 
 -- name: CountCreatedIssueAssignees :many
 -- Count assignees on issues created by a specific user.
@@ -460,10 +463,11 @@ GROUP BY assignee_type, assignee_id;
 SELECT parent_issue_id,
        COUNT(*)::bigint AS total,
        COUNT(*) FILTER (WHERE status = ANY(sqlc.arg('terminal_status_keys')::text[]))::bigint AS done
-FROM issue
-WHERE workspace_id = $1
-  AND parent_issue_id IS NOT NULL
-GROUP BY parent_issue_id;
+FROM issue i
+WHERE i.workspace_id = $1
+  AND i.parent_issue_id IS NOT NULL
+  AND can_see_issue(sqlc.arg('viewer')::uuid, i)
+GROUP BY i.parent_issue_id;
 
 -- SearchIssues: moved to handler (dynamic SQL for multi-word search support).
 

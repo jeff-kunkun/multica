@@ -135,7 +135,7 @@
     "load_failed_title": "无法加载该智能体",
     "load_failed_default": "获取该智能体时出错。",
     "no_access_title": "你没有访问该智能体的权限",
-    "no_access_hint": "只有该私密智能体的拥有者或工作区管理员可以查看。",
+    "no_access_hint": "只有该私密智能体的拥有者或工作区所有者可以查看。",
     "try_again": "重试",
     "archived_banner": "该智能体已归档，无法被分配或提及。",
     "runtime_required_banner": "该智能体的配置和历史记录已保留，但需要绑定运行时后才能运行。",
@@ -424,7 +424,7 @@
       "workspace_notes_placeholder": "写下这个智能体应该始终知道的上下文。\n\n# 示例\n我们的主仓库是 github.com/acme/platform。\n即使聊天用中文，任务也一律用英文写。\n周五不部署。"
     },
     "env": {
-      "intro_readonly": "在智能体进程启动时注入。只有工作区所有者 / 管理员可以查看或编辑值；每次解锁和编辑都会写入工作区审计日志。",
+      "intro_readonly": "在智能体进程启动时注入。只有工作区所有者可以查看或编辑值；每次解锁和编辑都会写入工作区审计日志。",
       "empty_readonly": "尚未配置环境变量。",
       "intro_prefix": "在智能体进程启动时注入（例如 ",
       "intro_separator": "、",
@@ -568,7 +568,7 @@
       "invalid_json": "JSON 无效：{{error}}",
       "save_failed_toast": "无法保存 MCP 配置",
       "redacted_title": "已配置，但当前不可见",
-      "redacted_hint": "只有智能体 owner 或工作区 admin 可以查看此配置。",
+      "redacted_hint": "只有智能体拥有者或工作区所有者可以查看此配置。",
       "dialog_json_help": "以 JSON 编辑完整的服务器配置。"
     },
     "runtime_config": {

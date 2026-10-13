@@ -16,7 +16,10 @@ import type {
   InboxItem,
   InboxWorkspaceUnread,
   Label,
+  MemberRole,
   MemberWithUser,
+  ProjectMember,
+  ListProjectMembersResponse,
   IssueProperty,
   ListPropertiesResponse,
   IssuePropertiesResponse,
@@ -2108,6 +2111,12 @@ export const EMPTY_WORKSPACE_BOT: WorkspaceBotWithSecrets = {
 
 export const EMPTY_WORKSPACE_BOT_LIST: WorkspaceBot[] = [];
 
+// Workspace roles collapsed to owner / member. Anything else a server sends
+// (a legacy "admin", a future role) reads as "member": the narrower grant.
+export const MemberRoleSchema = z
+  .unknown()
+  .transform((role): MemberRole => (role === "owner" ? "owner" : "member"));
+
 // Share links. Introduced with the workspace share-link invite flow; schemas
 // mirror the API responses so malformed payloads fall back to safe defaults.
 export const ShareLinkSchema = z.object({
@@ -2115,7 +2124,7 @@ export const ShareLinkSchema = z.object({
   workspace_id: z.string(),
   code: z.string(),
   created_by: z.string(),
-  role: z.string(),
+  role: MemberRoleSchema,
   expires_at: z.string().nullable().optional().default(null),
   max_uses: z.number().nullable().optional().default(null),
   use_count: z.number().optional().default(0),
@@ -2144,7 +2153,7 @@ export const ShareLinkInfoSchema = z.object({
   workspace_name: z.string().optional().default(""),
   workspace_slug: z.string().optional().default(""),
   creator_name: z.string().optional().default(""),
-  role: z.string().optional().default("member"),
+  role: MemberRoleSchema,
 }).loose();
 
 export const EMPTY_SHARE_LINK_INFO: ShareLinkInfo = {
@@ -2157,12 +2166,44 @@ export const MemberWithUserSchema = z.object({
   id: z.string(),
   workspace_id: z.string(),
   user_id: z.string(),
-  role: z.string(),
+  role: MemberRoleSchema,
   created_at: z.string().optional().default(""),
   name: z.string().optional().default(""),
   email: z.string().optional().default(""),
   avatar_url: z.string().nullable().optional().default(null),
 }).loose();
+
+// Rows that fail to parse are dropped rather than blanking the whole list.
+export const MemberWithUserListSchema = z
+  .array(z.unknown())
+  .catch([])
+  .transform((rows) =>
+    rows.flatMap((row) => {
+      const parsed = MemberWithUserSchema.safeParse(row);
+      return parsed.success ? [parsed.data] : [];
+    }),
+  );
+
+export const ProjectMemberSchema = z.object({
+  user_id: z.string(),
+  created_at: z.string().optional().default(""),
+}).loose();
+
+export const EMPTY_PROJECT_MEMBER: ProjectMember = { user_id: "", created_at: "" };
+
+export const ListProjectMembersResponseSchema = z.object({
+  members: z
+    .array(z.unknown())
+    .nullish()
+    .transform((rows) =>
+      (rows ?? []).flatMap((row) => {
+        const parsed = ProjectMemberSchema.safeParse(row);
+        return parsed.success ? [parsed.data] : [];
+      }),
+    ),
+}).loose();
+
+export const EMPTY_LIST_PROJECT_MEMBERS_RESPONSE: ListProjectMembersResponse = { members: [] };
 
 export const JoinShareLinkResponseSchema = z.object({
   member: MemberWithUserSchema,

@@ -338,6 +338,9 @@ func (h *Hub) Run() {
 			h.subscribe(client, ScopeWorkspace, client.workspaceID)
 			if client.userID != "" {
 				h.subscribe(client, ScopeUser, client.userID)
+				if client.workspaceID != "" {
+					h.subscribe(client, ScopeMember, MemberScopeID(client.workspaceID, client.userID))
+				}
 			}
 			slog.Info("ws client connected", "workspace_id", client.workspaceID, "user_id", client.userID, "total_clients", total)
 
@@ -968,9 +971,10 @@ func (c *Client) handleFrame(raw []byte) {
 
 func (c *Client) handleSubscribe(scope, id string) {
 	switch scope {
-	case ScopeWorkspace, ScopeUser:
+	case ScopeWorkspace, ScopeUser, ScopeMember:
 		// Implicit scopes — only allowed if it matches the connection identity.
-		if (scope == ScopeWorkspace && id != c.workspaceID) || (scope == ScopeUser && id != c.userID) {
+		if (scope == ScopeWorkspace && id != c.workspaceID) || (scope == ScopeUser && id != c.userID) ||
+			(scope == ScopeMember && id != MemberScopeID(c.workspaceID, c.userID)) {
 			M.SubscribeDeniedTotal(scope).Add(1)
 			c.sendJSON(map[string]any{
 				"type": "subscribe_error",

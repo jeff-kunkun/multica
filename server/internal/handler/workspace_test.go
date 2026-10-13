@@ -133,7 +133,7 @@ func TestDeleteWorkspace_RequiresOwner(t *testing.T) {
 
 	dbfx.Exec(t, `
 INSERT INTO member (workspace_id, user_id, role)
-VALUES ($1, $2, 'admin')
+VALUES ($1, $2, 'member')
 `, wsID, testUserID)
 
 	req := newRequest("DELETE", "/api/workspaces/"+wsID, nil)
@@ -843,9 +843,9 @@ func setupRevocationFixture(t *testing.T, slug, daemonID string) revocationFixtu
 		"issue_prefix": "REV",
 	})
 
-	// Requester (= testUserID) is always an owner so DeleteMember authorization
-	// passes. Two owners total so LeaveWorkspace doesn't trip the "must keep
-	// at least one owner" guard.
+	// Requester (= testUserID) is the owner so DeleteMember authorization
+	// passes. The target is a plain member: owners can neither be removed nor
+	// leave.
 	dbfx.Exec(t, `
 INSERT INTO member (workspace_id, user_id, role) VALUES ($1, $2, 'owner')
 `, wsID, testUserID)
@@ -867,7 +867,7 @@ INSERT INTO member (workspace_id, user_id, role) VALUES ($1, $2, 'owner')
 	memberID := dbfx.Insert(t, "member", testutil.Cols{
 		"workspace_id": wsID,
 		"user_id":      targetUserID,
-		"role":         "owner",
+		"role":         "member",
 	})
 
 	runtimeID := dbfx.Runtime(t, "Target Runtime", testutil.Cols{
@@ -945,7 +945,7 @@ func assertRevoked(t *testing.T, fx revocationFixture) {
 	}
 }
 
-// TestDeleteMember_RevokesTargetRuntimes verifies that when an admin removes
+// TestDeleteMember_RevokesTargetRuntimes verifies that when the owner removes
 // another member from a workspace, every runtime owned by the removed member
 // has its agents archived, its in-flight tasks cancelled, its row flipped
 // offline, and its daemon_token rows deleted — all atomically with the member
@@ -976,6 +976,61 @@ func TestLeaveWorkspace_RevokesOwnRuntimes(t *testing.T) {
 	testutil.Call(t, testHandler.LeaveWorkspace, req).Want(http.StatusNoContent)
 
 	assertRevoked(t, fx)
+}
+
+// TestDeleteMember_RefusesOwner and TestLeaveWorkspace_RefusesOwner pin the
+// single-owner model: the owner can neither be removed nor leave, and the
+// member row survives the refused request.
+func ownerOnlyWorkspace(t *testing.T, slug string) (wsID, ownerMemberID string) {
+	t.Helper()
+	_, _ = testPool.Exec(context.Background(), `DELETE FROM workspace WHERE slug = $1`, slug)
+	wsID = dbfx.Insert(t, "workspace", testutil.Cols{
+		"name":         "Owner Guard " + slug,
+		"slug":         slug,
+		"description":  "owner guard test",
+		"issue_prefix": "OWG",
+	})
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM member WHERE workspace_id = $1`, wsID)
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM workspace WHERE id = $1`, wsID)
+	})
+	ownerMemberID = dbfx.Insert(t, "member", testutil.Cols{
+		"workspace_id": wsID,
+		"user_id":      testUserID,
+		"role":         "owner",
+	})
+	return wsID, ownerMemberID
+}
+
+func assertMemberExists(t *testing.T, memberID string) {
+	t.Helper()
+	var exists bool
+	dbfx.QueryRow(t, `SELECT EXISTS (SELECT 1 FROM member WHERE id = $1)`, memberID).Scan(&exists)
+	if !exists {
+		t.Fatal("owner member row was removed")
+	}
+}
+
+func TestDeleteMember_RefusesOwner(t *testing.T) {
+	wsID, ownerMemberID := ownerOnlyWorkspace(t, "handler-tests-owner-remove")
+
+	req := newRequest("DELETE", "/api/workspaces/"+wsID+"/members/"+ownerMemberID, nil)
+	req.Header.Set("X-Workspace-ID", wsID)
+	req = withURLParams(req, "id", wsID, "memberId", ownerMemberID)
+	testutil.Call(t, testHandler.DeleteMember, req).Want(http.StatusBadRequest)
+
+	assertMemberExists(t, ownerMemberID)
+}
+
+func TestLeaveWorkspace_RefusesOwner(t *testing.T) {
+	wsID, ownerMemberID := ownerOnlyWorkspace(t, "handler-tests-owner-leave")
+
+	req := newRequest("DELETE", "/api/workspaces/"+wsID+"/leave", nil)
+	req.Header.Set("X-Workspace-ID", wsID)
+	req = withURLParam(req, "id", wsID)
+	testutil.Call(t, testHandler.LeaveWorkspace, req).Want(http.StatusBadRequest)
+
+	assertMemberExists(t, ownerMemberID)
 }
 
 // TestDeleteMember_CancelsTasksFromAgentReassignment covers a subtle
@@ -1094,7 +1149,7 @@ INSERT INTO member (workspace_id, user_id, role) VALUES ($1, $2, 'owner')
 	memberID := dbfx.Insert(t, "member", testutil.Cols{
 		"workspace_id": wsID,
 		"user_id":      targetUserID,
-		"role":         "admin",
+		"role":         "member",
 	})
 
 	req := newRequest("DELETE", "/api/workspaces/"+wsID+"/members/"+memberID, nil)

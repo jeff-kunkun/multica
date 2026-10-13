@@ -380,11 +380,11 @@ func TestInitiateImportLocalSkill_RequiresRuntimeOwner(t *testing.T) {
 	}
 
 	runtimeID := createRuntimeLocalSkillTestRuntime(t, testUserID)
-	adminUserID := createRuntimeLocalSkillTestMember(t, "admin")
+	otherOwnerID := createRuntimeLocalSkillTestMember(t, "owner")
 
 	w := httptest.NewRecorder()
 	req := withURLParams(
-		newRequestAsUser(adminUserID, http.MethodPost, "/api/runtimes/"+runtimeID+"/local-skills/import", map[string]any{
+		newRequestAsUser(otherOwnerID, http.MethodPost, "/api/runtimes/"+runtimeID+"/local-skills/import", map[string]any{
 			"skill_key": "review-helper",
 		}),
 		"runtimeId", runtimeID,
@@ -445,7 +445,7 @@ func TestGetLocalSkillImportRequest_RequiresRuntimeOwner(t *testing.T) {
 	}
 
 	runtimeID := createRuntimeLocalSkillTestRuntime(t, testUserID)
-	adminUserID := createRuntimeLocalSkillTestMember(t, "admin")
+	otherOwnerID := createRuntimeLocalSkillTestMember(t, "owner")
 	importReq, err := testHandler.LocalSkillImportStore.Create(context.Background(), LocalSkillImportRequestInput{
 		RuntimeID: runtimeID,
 		CreatorID: testUserID,
@@ -457,7 +457,7 @@ func TestGetLocalSkillImportRequest_RequiresRuntimeOwner(t *testing.T) {
 
 	w := httptest.NewRecorder()
 	req := withURLParams(
-		newRequestAsUser(adminUserID, http.MethodGet, "/api/runtimes/"+runtimeID+"/local-skills/import/"+importReq.ID, nil),
+		newRequestAsUser(otherOwnerID, http.MethodGet, "/api/runtimes/"+runtimeID+"/local-skills/import/"+importReq.ID, nil),
 		"runtimeId", runtimeID,
 		"requestId", importReq.ID,
 	)

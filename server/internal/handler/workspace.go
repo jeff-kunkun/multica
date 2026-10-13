@@ -560,91 +560,11 @@ func normalizeMemberRole(role string) (string, bool) {
 
 	role = strings.TrimSpace(role)
 	switch role {
-	case "owner", "admin", "member":
+	case "member":
 		return role, true
 	default:
 		return "", false
 	}
-}
-
-type UpdateMemberRequest struct {
-	Role string `json:"role"`
-}
-
-func (h *Handler) UpdateMember(w http.ResponseWriter, r *http.Request) {
-	workspaceID := workspaceIDFromURL(r, "id")
-	requester, ok := h.workspaceMember(w, r, workspaceID)
-	if !ok {
-		return
-	}
-
-	memberID := chi.URLParam(r, "memberId")
-	memberUUID, ok := parseUUIDOrBadRequest(w, memberID, "member id")
-	if !ok {
-		return
-	}
-	target, err := h.Queries.GetMember(r.Context(), memberUUID)
-	if err != nil || uuidToString(target.WorkspaceID) != uuidToString(requester.WorkspaceID) {
-		writeError(w, http.StatusNotFound, "member not found")
-		return
-	}
-
-	var req UpdateMemberRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid request body")
-		return
-	}
-	if strings.TrimSpace(req.Role) == "" {
-		writeError(w, http.StatusBadRequest, "role is required")
-		return
-	}
-
-	role, valid := normalizeMemberRole(req.Role)
-	if !valid {
-		writeError(w, http.StatusBadRequest, "invalid member role")
-		return
-	}
-
-	if (target.Role == "owner" || role == "owner") && requester.Role != "owner" {
-		writeError(w, http.StatusForbidden, "insufficient permissions")
-		return
-	}
-
-	if target.Role == "owner" && role != "owner" {
-		members, err := h.Queries.ListMembers(r.Context(), target.WorkspaceID)
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, "failed to update member")
-			return
-		}
-		if countOwners(members) <= 1 {
-			writeError(w, http.StatusBadRequest, "workspace must have at least one owner")
-			return
-		}
-	}
-
-	updatedMember, err := h.Queries.UpdateMemberRole(r.Context(), db.UpdateMemberRoleParams{
-		ID:   target.ID,
-		Role: role,
-	})
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to update member")
-		return
-	}
-
-	h.MembershipCache.Invalidate(r.Context(), uuidToString(target.UserID), workspaceID)
-
-	user, err := h.Queries.GetUser(r.Context(), updatedMember.UserID)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to load member")
-		return
-	}
-
-	userID := requestUserID(r)
-	h.publish(protocol.EventMemberUpdated, uuidToString(requester.WorkspaceID), "member", userID, map[string]any{
-		"member": h.memberWithUserResponse(updatedMember, user),
-	})
-
-	writeJSON(w, http.StatusOK, h.memberWithUserResponse(updatedMember, user))
 }
 
 func (h *Handler) DeleteMember(w http.ResponseWriter, r *http.Request) {
@@ -665,21 +585,10 @@ func (h *Handler) DeleteMember(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if target.Role == "owner" && requester.Role != "owner" {
-		writeError(w, http.StatusForbidden, "insufficient permissions")
-		return
-	}
-
+	// A workspace has exactly one owner, who cannot be removed.
 	if target.Role == "owner" {
-		members, err := h.Queries.ListMembers(r.Context(), target.WorkspaceID)
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, "failed to delete member")
-			return
-		}
-		if countOwners(members) <= 1 {
-			writeError(w, http.StatusBadRequest, "workspace must have at least one owner")
-			return
-		}
+		writeError(w, http.StatusBadRequest, "the workspace owner cannot be removed")
+		return
 	}
 
 	requesterUserID := requestUserID(r)
@@ -715,15 +624,8 @@ func (h *Handler) LeaveWorkspace(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if member.Role == "owner" {
-		members, err := h.Queries.ListMembers(r.Context(), member.WorkspaceID)
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, "failed to leave workspace")
-			return
-		}
-		if countOwners(members) <= 1 {
-			writeError(w, http.StatusBadRequest, "workspace must have at least one owner")
-			return
-		}
+		writeError(w, http.StatusBadRequest, "the workspace owner cannot leave; delete the workspace instead")
+		return
 	}
 
 	result, err := h.revokeAndRemoveMember(r.Context(), member.WorkspaceID, member.UserID, member.ID, member.UserID)

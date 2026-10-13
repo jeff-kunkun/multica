@@ -8,7 +8,7 @@ import { NavigationProvider, type NavigationAdapter } from "../../navigation";
 import { ProjectDetail } from "./project-detail";
 
 const mocks = vi.hoisted(() => ({
-  role: "admin",
+  role: "owner",
   copyText: vi.fn(),
   deleteProject: vi.fn(),
   getShareableUrl: vi.fn((path: string) => `https://app.example${path}`),
@@ -47,6 +47,11 @@ vi.mock("@multica/core/projects/queries", () => ({
 vi.mock("@multica/core/projects/mutations", () => ({
   useUpdateProject: () => ({ mutate: vi.fn() }),
   useDeleteProject: () => ({ mutate: mocks.deleteProject }),
+}));
+
+// Sharing has its own component test; keep this suite on the detail shell.
+vi.mock("./project-shared-with", () => ({
+  ProjectSharedWith: () => null,
 }));
 
 vi.mock("@multica/core/pins", () => ({
@@ -294,7 +299,7 @@ function renderProjectDetail() {
 }
 
 beforeEach(() => {
-  mocks.role = "admin";
+  mocks.role = "owner";
   mocks.copyText.mockReset().mockResolvedValue(true);
   mocks.deleteProject.mockReset();
   mocks.getShareableUrl.mockClear();

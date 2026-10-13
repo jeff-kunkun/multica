@@ -114,7 +114,7 @@ func (h *Handler) ListVCSConnections(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	member, _ := middleware.MemberFromContext(r.Context())
-	canManage := roleAllowed(member.Role, "owner", "admin")
+	canManage := member.Role == "owner"
 
 	// Deployments where the integration is off (the managed cloud) report
 	// available=false and nothing else, so the UI hides the whole section

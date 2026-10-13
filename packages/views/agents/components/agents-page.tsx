@@ -842,10 +842,10 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
     return m;
   }, [members]);
 
-  const isWorkspaceAdmin = useMemo(() => {
+  const isWorkspaceOwner = useMemo(() => {
     if (!currentUser) return false;
     const me = members.find((m) => m.user_id === currentUser.id);
-    return me?.role === "owner" || me?.role === "admin";
+    return me?.role === "owner";
   }, [members, currentUser]);
 
   // Scope counts come from the FULL set (filters never affect them).
@@ -889,7 +889,7 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
         lastActiveDays: lastActiveDaysAgo(activity),
         owner: agent.owner_id ? membersById.get(agent.owner_id) ?? null : null,
         isOwnedByMe: isOwner,
-        canManage: isWorkspaceAdmin || isOwner,
+        canManage: isWorkspaceOwner || isOwner,
       };
     });
   }, [
@@ -901,7 +901,7 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
     presenceMap,
     activityMap,
     runCountsById,
-    isWorkspaceAdmin,
+    isWorkspaceOwner,
   ]);
 
   // Visible rows: local search + filters, then sort.

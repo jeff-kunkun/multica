@@ -26,12 +26,6 @@ describe("canEditSkill", () => {
     ).toBe(true);
   });
 
-  it("allows workspace admins to edit any skill", () => {
-    expect(
-      canEditSkill(skill, { userId: "user-bob", role: "admin" }),
-    ).toBe(true);
-  });
-
   it("allows the creator to edit their own skill", () => {
     expect(
       canEditSkill(skill, { userId: "user-alice", role: "member" }),

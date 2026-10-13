@@ -340,7 +340,7 @@
     "search_empty": "No matching settings",
     "search_results_one": "{{count}} result",
     "search_results_other": "{{count}} results",
-    "admin_only": "Only owners and admins can change this"
+    "admin_only": "Only the workspace owner can change this"
   },
   "properties": {
     "title": "Properties",
@@ -386,7 +386,7 @@
     "editor": {
       "create_title": "New property",
       "edit_title": "Edit property",
-      "admin_hint": "Only workspace owners and admins can manage property definitions.",
+      "admin_hint": "Only the workspace owner can manage property definitions.",
       "icon": "Icon",
       "choose_icon": "Choose icon",
       "remove_icon": "Remove icon",
@@ -580,8 +580,6 @@
     "toast_save_failed": "Failed to save workspace settings",
     "danger_zone": "Danger Zone",
     "leave_title": "Leave workspace",
-    "leave_sole_owner": "You're the only owner. Promote another member to owner first, or delete the workspace.",
-    "leave_sole_member": "You're the only member. Delete the workspace to leave.",
     "leave_default": "Remove yourself from this workspace.",
     "leave_button": "Leave workspace",
     "leaving": "Leaving...",
@@ -634,7 +632,7 @@
     "disconnect_confirm_action": "Disconnect",
     "not_configured": "GitHub integration is not configured for this deployment. Operators must set",
     "not_configured_and": "and",
-    "contact_admin_to_connect": "GitHub is not connected for this workspace. Ask an admin or owner to set up the GitHub App.",
+    "contact_admin_to_connect": "GitHub is not connected for this workspace. Ask the workspace owner to set up the GitHub App.",
     "connected_by": "Connected by {{name}}",
     "toast_not_configured": "GitHub integration is not configured for this deployment",
     "toast_open_failed": "Failed to open GitHub install",
@@ -667,7 +665,7 @@
     "disconnect": "Disconnect",
     "disconnecting": "Disconnecting...",
     "not_configured": "Git provider integration is not configured on this server. Ask an administrator to set",
-    "contact_admin": "Ask a workspace admin to connect a Git provider instance.",
+    "contact_admin": "Ask the workspace owner to connect a Git provider instance.",
     "webhook_setup_title": "Finish setup in your provider",
     "webhook_setup_description": "Add a webhook on your repository or organisation with the URL and secret below. Forgejo/Gitea: choose the Gitea format and the Pull Request (and Commit Status) events. GitLab: paste the secret as the token and enable Merge request and Pipeline events.",
     "webhook_url_label": "Webhook URL",
@@ -731,7 +729,7 @@
     "delete_confirm_description": "This repository will be removed from the workspace immediately.",
     "delete_confirm_cancel": "Cancel",
     "delete_confirm_action": "Delete repository",
-    "manage_hint": "Only admins and owners can manage repositories.",
+    "manage_hint": "Only the workspace owner can manage repositories.",
     "toast_save_failed": "Failed to save repositories",
     "add_manually": "Enter a URL...",
     "add_title": "Add repository",
@@ -847,30 +845,19 @@
     "revoke_invitation_description": "Revoke the invitation to {{email}}? They will no longer be able to join this workspace.",
     "toast_invitation_revoked": "Invitation revoked",
     "toast_invitation_revoke_failed": "Failed to revoke invitation",
-    "toast_role_updated": "Role updated",
-    "toast_role_failed": "Failed to update member",
     "toast_member_removed": "Member removed",
     "toast_member_remove_failed": "Failed to remove member",
     "remove_member_title": "Remove {{name}}",
     "remove_member_description": "Remove {{name}} from {{workspace}}? They will lose access to this workspace.",
     "confirm_cancel": "Cancel",
     "confirm_action": "Confirm",
-    "change_role": "Change role",
     "remove_action": "Remove from workspace",
-    "cannot_demote_last_owner_title": "Promote another member to owner first — a workspace must keep at least one owner.",
-    "cannot_demote_last_owner": "Cannot demote the last owner",
     "roles": {
       "owner": {
-        "label": "Owner",
-        "description": "Full access, manage all settings"
-      },
-      "admin": {
-        "label": "Admin",
-        "description": "Manage members and settings"
+        "label": "Owner"
       },
       "member": {
-        "label": "Member",
-        "description": "Create and work on issues"
+        "label": "Member"
       }
     },
     "share_links_create_title": "Create share link",
@@ -893,13 +880,12 @@
     "members_label": "Members",
     "pending_label": "Pending invitations",
     "share_links_label": "Share links",
-    "share_links_description": "Anyone with the link can join with the chosen role until it expires or you revoke it.",
+    "share_links_description": "Anyone with the link can join as a member until it expires or you revoke it.",
     "search_placeholder": "Search name or email",
     "no_results": "No members match this search.",
     "no_invitations": "No pending invitations.",
     "no_share_links": "No share links yet.",
     "email_label": "Email",
-    "role_label": "Role",
     "expiry_label": "Expires after",
     "you": "You",
     "joined": "Joined {{date}}",
@@ -926,8 +912,8 @@
     },
     "read_only": {
       "title": "View only",
-      "description": "Only workspace owners and admins can change these settings.",
-      "contact": "Only owners and admins can change these settings. Ask {{names}}.",
+      "description": "Only the workspace owner can change these settings.",
+      "contact": "Only the workspace owner can change these settings. Ask {{names}}.",
       "separator": ", "
     }
   },

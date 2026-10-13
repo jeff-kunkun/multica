@@ -90,7 +90,7 @@ function JoinInner() {
         }
         setJoining(false);
         if (code === "seat_capacity_full") {
-          setJoinError("All purchased member seats are in use. Ask a workspace admin to add a seat before trying again.");
+          setJoinError("All purchased member seats are in use. Ask the workspace owner to add a seat before trying again.");
           return;
         }
         if (code === "seat_capacity_unavailable") {
@@ -134,9 +134,7 @@ function JoinInner() {
               )}
               <p className="flex items-center justify-center gap-2 text-center text-body text-muted-foreground">
                 <span>You&apos;ll join this workspace as</span>
-                <Badge variant="outline">
-                  {info.role === "admin" ? "Administrator" : "Member"}
-                </Badge>
+                <Badge variant="outline">Member</Badge>
               </p>
               {!user && (
                 <p className="text-center text-body text-muted-foreground">

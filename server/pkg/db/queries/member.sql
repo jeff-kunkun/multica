@@ -16,11 +16,6 @@ INSERT INTO member (workspace_id, user_id, role)
 VALUES ($1, $2, $3)
 RETURNING *;
 
--- name: UpdateMemberRole :one
-UPDATE member SET role = $2
-WHERE id = $1
-RETURNING *;
-
 -- name: DeleteMember :exec
 DELETE FROM member WHERE id = $1;
 

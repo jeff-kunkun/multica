@@ -162,7 +162,7 @@ export function RuntimeDetailPage({
     ? members.find((member) => member.user_id === currentUserId)
     : null;
   const isAdmin =
-    currentMember?.role === "owner" || currentMember?.role === "admin";
+    currentMember?.role === "owner";
   const canAddRuntime =
     isAdmin && machine?.mode === "local" && !!machine.daemonId;
   const renameTarget = useMemo(() => {

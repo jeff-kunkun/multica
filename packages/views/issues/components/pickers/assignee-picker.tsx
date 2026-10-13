@@ -34,7 +34,7 @@ export function canAssignAgent(
 ): boolean {
   return canAssignAgentToIssue(agent, {
     userId: userId ?? null,
-    role: memberRole === "owner" || memberRole === "admin" || memberRole === "member"
+    role: memberRole === "owner" || memberRole === "member"
       ? memberRole
       : null,
   }).allowed;
@@ -210,7 +210,6 @@ function AssigneePickerImpl({
               userId: user?.id ?? null,
               role:
                 memberRole === "owner" ||
-                memberRole === "admin" ||
                 memberRole === "member"
                   ? memberRole
                   : null,

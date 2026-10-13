@@ -15,15 +15,17 @@ const childIssueProgress = `-- name: ChildIssueProgress :many
 SELECT parent_issue_id,
        COUNT(*)::bigint AS total,
        COUNT(*) FILTER (WHERE status = ANY($2::text[]))::bigint AS done
-FROM issue
-WHERE workspace_id = $1
-  AND parent_issue_id IS NOT NULL
-GROUP BY parent_issue_id
+FROM issue i
+WHERE i.workspace_id = $1
+  AND i.parent_issue_id IS NOT NULL
+  AND can_see_issue($3::uuid, i)
+GROUP BY i.parent_issue_id
 `
 
 type ChildIssueProgressParams struct {
 	WorkspaceID        pgtype.UUID `json:"workspace_id"`
 	TerminalStatusKeys []string    `json:"terminal_status_keys"`
+	Viewer             pgtype.UUID `json:"viewer"`
 }
 
 type ChildIssueProgressRow struct {
@@ -33,7 +35,7 @@ type ChildIssueProgressRow struct {
 }
 
 func (q *Queries) ChildIssueProgress(ctx context.Context, arg ChildIssueProgressParams) ([]ChildIssueProgressRow, error) {
-	rows, err := q.db.Query(ctx, childIssueProgress, arg.WorkspaceID, arg.TerminalStatusKeys)
+	rows, err := q.db.Query(ctx, childIssueProgress, arg.WorkspaceID, arg.TerminalStatusKeys, arg.Viewer)
 	if err != nil {
 		return nil, err
 	}
@@ -750,10 +752,16 @@ func (q *Queries) GetIssueMetadataInWorkspace(ctx context.Context, arg GetIssueM
 }
 
 const listChildIssues = `-- name: ListChildIssues :many
-SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, triage_state, duplicate_of_issue_id FROM issue
-WHERE parent_issue_id = $1
-ORDER BY number ASC
+SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority, i.assignee_type, i.assignee_id, i.creator_type, i.creator_id, i.parent_issue_id, i.acceptance_criteria, i.context_refs, i.position, i.due_date, i.created_at, i.updated_at, i.number, i.project_id, i.origin_type, i.origin_id, i.first_executed_at, i.start_date, i.metadata, i.stage, i.properties, i.revision, i.last_activity_at, i.triage_state, i.duplicate_of_issue_id FROM issue i
+WHERE i.parent_issue_id = $1
+  AND can_see_issue($2::uuid, i)
+ORDER BY i.number ASC
 `
+
+type ListChildIssuesParams struct {
+	ParentIssueID pgtype.UUID `json:"parent_issue_id"`
+	Viewer        pgtype.UUID `json:"viewer"`
+}
 
 // Order by number ASC so sub-issues display in stable creation order
 // (oldest first), matching how a parent's plan reads top-to-bottom. The
@@ -761,8 +769,8 @@ ORDER BY number ASC
 // not relative to siblings, so ordering by it interleaves children
 // unpredictably across batches and statuses; number is a per-workspace
 // monotonic counter and is sibling-stable.
-func (q *Queries) ListChildIssues(ctx context.Context, parentIssueID pgtype.UUID) ([]Issue, error) {
-	rows, err := q.db.Query(ctx, listChildIssues, parentIssueID)
+func (q *Queries) ListChildIssues(ctx context.Context, arg ListChildIssuesParams) ([]Issue, error) {
+	rows, err := q.db.Query(ctx, listChildIssues, arg.ParentIssueID, arg.Viewer)
 	if err != nil {
 		return nil, err
 	}
@@ -813,15 +821,17 @@ func (q *Queries) ListChildIssues(ctx context.Context, parentIssueID pgtype.UUID
 }
 
 const listChildrenByParents = `-- name: ListChildrenByParents :many
-SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, triage_state, duplicate_of_issue_id FROM issue
-WHERE workspace_id = $1
-  AND parent_issue_id = ANY($2::uuid[])
-ORDER BY parent_issue_id, number ASC
+SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority, i.assignee_type, i.assignee_id, i.creator_type, i.creator_id, i.parent_issue_id, i.acceptance_criteria, i.context_refs, i.position, i.due_date, i.created_at, i.updated_at, i.number, i.project_id, i.origin_type, i.origin_id, i.first_executed_at, i.start_date, i.metadata, i.stage, i.properties, i.revision, i.last_activity_at, i.triage_state, i.duplicate_of_issue_id FROM issue i
+WHERE i.workspace_id = $1
+  AND i.parent_issue_id = ANY($2::uuid[])
+  AND can_see_issue($3::uuid, i)
+ORDER BY i.parent_issue_id, i.number ASC
 `
 
 type ListChildrenByParentsParams struct {
 	WorkspaceID pgtype.UUID   `json:"workspace_id"`
 	ParentIds   []pgtype.UUID `json:"parent_ids"`
+	Viewer      pgtype.UUID   `json:"viewer"`
 }
 
 // Batched variant of ListChildIssues: returns all children for the given
@@ -832,7 +842,7 @@ type ListChildrenByParentsParams struct {
 // Within each parent, order by number ASC for the same sibling-stable
 // creation order as ListChildIssues.
 func (q *Queries) ListChildrenByParents(ctx context.Context, arg ListChildrenByParentsParams) ([]Issue, error) {
-	rows, err := q.db.Query(ctx, listChildrenByParents, arg.WorkspaceID, arg.ParentIds)
+	rows, err := q.db.Query(ctx, listChildrenByParents, arg.WorkspaceID, arg.ParentIds, arg.Viewer)
 	if err != nil {
 		return nil, err
 	}
@@ -1057,14 +1067,15 @@ SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority,
        i.revision
 FROM issue i
 WHERE i.workspace_id = $1
+  AND can_see_issue($2::uuid, i)
   -- Negate only known terminal keys so an unknown legacy key remains visible.
-  AND NOT (i.status = ANY($2::text[]))
-  AND ($3::text IS NULL OR i.priority = $3)
-  AND ($4::uuid IS NULL OR i.assignee_id = $4)
-  AND ($5::uuid[] IS NULL OR i.assignee_id = ANY($5::uuid[]))
-  AND ($6::uuid IS NULL OR i.creator_id = $6)
-  AND ($7::uuid IS NULL OR i.project_id = $7)
-  AND ($8::jsonb IS NULL OR i.metadata @> $8::jsonb)
+  AND NOT (i.status = ANY($3::text[]))
+  AND ($4::text IS NULL OR i.priority = $4)
+  AND ($5::uuid IS NULL OR i.assignee_id = $5)
+  AND ($6::uuid[] IS NULL OR i.assignee_id = ANY($6::uuid[]))
+  AND ($7::uuid IS NULL OR i.creator_id = $7)
+  AND ($8::uuid IS NULL OR i.project_id = $8)
+  AND ($9::jsonb IS NULL OR i.metadata @> $9::jsonb)
   -- properties_filter is a jsonb array of groups, each group an array of
   -- patterns (built by parsePropertiesFilterParam): the issue must match at
   -- least one pattern from EVERY group (AND of ORs). Three pattern shapes:
@@ -1082,10 +1093,10 @@ WHERE i.workspace_id = $1
   -- terminal-status predicate intentionally remains a filter rather than a
   -- positive index narrowing so unknown legacy status keys stay visible.
   AND (
-    $9::jsonb IS NULL
+    $10::jsonb IS NULL
     OR NOT EXISTS (
       SELECT 1
-      FROM jsonb_array_elements($9::jsonb) AS pf(alternatives)
+      FROM jsonb_array_elements($10::jsonb) AS pf(alternatives)
       WHERE NOT EXISTS (
         SELECT 1
         FROM jsonb_array_elements(pf.alternatives) AS alt(pattern)
@@ -1123,11 +1134,11 @@ WHERE i.workspace_id = $1
     )
   )
   AND (
-    $10::uuid IS NULL
+    $11::uuid IS NULL
     OR (i.assignee_type = 'agent' AND i.assignee_id IN (
           SELECT a.id FROM agent a
            WHERE a.workspace_id = $1
-             AND a.owner_id     = $10::uuid
+             AND a.owner_id     = $11::uuid
     ))
   )
 ORDER BY i.position ASC, i.created_at DESC
@@ -1135,6 +1146,7 @@ ORDER BY i.position ASC, i.created_at DESC
 
 type ListOpenIssuesParams struct {
 	WorkspaceID        pgtype.UUID   `json:"workspace_id"`
+	Viewer             pgtype.UUID   `json:"viewer"`
 	TerminalStatusKeys []string      `json:"terminal_status_keys"`
 	Priority           pgtype.Text   `json:"priority"`
 	AssigneeID         pgtype.UUID   `json:"assignee_id"`
@@ -1177,6 +1189,7 @@ type ListOpenIssuesRow struct {
 func (q *Queries) ListOpenIssues(ctx context.Context, arg ListOpenIssuesParams) ([]ListOpenIssuesRow, error) {
 	rows, err := q.db.Query(ctx, listOpenIssues,
 		arg.WorkspaceID,
+		arg.Viewer,
 		arg.TerminalStatusKeys,
 		arg.Priority,
 		arg.AssigneeID,

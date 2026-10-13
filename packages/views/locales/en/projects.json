@@ -80,7 +80,8 @@
     "no_issues_yet": "No issues yet",
     "toast_link_copied": "Link copied",
     "toast_project_deleted": "Project deleted",
-    "toast_move_issue_failed": "Failed to move issue"
+    "toast_move_issue_failed": "Failed to move issue",
+    "prop_shared_with": "Shared with"
   },
   "resources": {
     "section_header": "Resources",
@@ -182,5 +183,14 @@
     "direction_desc": "Descending",
     "section_columns": "Columns",
     "view": "View"
+  },
+  "sharing": {
+    "not_shared": "Not shared",
+    "count_one": "{{count}} member",
+    "count_other": "{{count}} members",
+    "search_placeholder": "Search members...",
+    "no_members": "No other members",
+    "no_results": "No results",
+    "toast_failed": "Failed to update sharing"
   }
 }

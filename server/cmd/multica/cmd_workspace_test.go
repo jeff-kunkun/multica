@@ -683,7 +683,6 @@ func newWorkspaceMemberInviteTestCmd() *cobra.Command {
 	cmd.Flags().String("server-url", "", "")
 	cmd.Flags().String("workspace-id", "", "")
 	cmd.Flags().String("profile", "", "")
-	cmd.Flags().String("role", "member", "")
 	cmd.Flags().String("output", "json", "")
 	return cmd
 }
@@ -728,12 +727,13 @@ func TestRunWorkspaceMemberInvitePostsInvitation(t *testing.T) {
 	if gotBody["email"] != "alice@example.com" {
 		t.Fatalf("body email = %v, want alice@example.com", gotBody["email"])
 	}
-	if gotBody["role"] != "member" {
-		t.Fatalf("body role = %v, want member (default)", gotBody["role"])
+	// Invitees always join as member; the CLI no longer sends a role.
+	if _, ok := gotBody["role"]; ok {
+		t.Fatalf("body = %v, want no role key", gotBody)
 	}
 }
 
-func TestRunWorkspaceMemberInviteUsesWorkspaceArgAndRoleFlag(t *testing.T) {
+func TestRunWorkspaceMemberInviteUsesWorkspaceArg(t *testing.T) {
 	redirectTestHome(t, t.TempDir())
 	t.Setenv("MULTICA_TOKEN", "test-token")
 
@@ -746,13 +746,12 @@ func TestRunWorkspaceMemberInviteUsesWorkspaceArgAndRoleFlag(t *testing.T) {
 			t.Fatalf("decode request body: %v", err)
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]any{"invitee_email": "bob@example.com", "role": "admin", "status": "pending"})
+		_ = json.NewEncoder(w).Encode(map[string]any{"invitee_email": "bob@example.com", "role": "member", "status": "pending"})
 	}))
 	defer srv.Close()
 	t.Setenv("MULTICA_SERVER_URL", srv.URL)
 
 	cmd := newWorkspaceMemberInviteTestCmd()
-	_ = cmd.Flags().Set("role", "admin")
 	// A full UUID positional is forwarded as-is, without a /api/workspaces lookup.
 	if err := runWorkspaceMemberInvite(cmd, []string{"bob@example.com", wsUUID}); err != nil {
 		t.Fatalf("runWorkspaceMemberInvite: %v", err)
@@ -760,41 +759,7 @@ func TestRunWorkspaceMemberInviteUsesWorkspaceArgAndRoleFlag(t *testing.T) {
 	if gotPath != "/api/workspaces/"+wsUUID+"/members" {
 		t.Fatalf("path = %q, want /api/workspaces/%s/members", gotPath, wsUUID)
 	}
-	if gotBody["role"] != "admin" {
-		t.Fatalf("body role = %v, want admin", gotBody["role"])
-	}
-}
-
-func TestRunWorkspaceMemberInviteRejectsOwnerRole(t *testing.T) {
-	redirectTestHome(t, t.TempDir())
-	t.Setenv("MULTICA_TOKEN", "test-token")
-	t.Setenv("MULTICA_WORKSPACE_ID", "workspace-123")
-
-	called := false
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		called = true
-	}))
-	defer srv.Close()
-	t.Setenv("MULTICA_SERVER_URL", srv.URL)
-
-	cmd := newWorkspaceMemberInviteTestCmd()
-	_ = cmd.Flags().Set("role", "owner")
-	if err := runWorkspaceMemberInvite(cmd, []string{"alice@example.com"}); err == nil {
-		t.Fatal("expected error for --role owner, got nil")
-	}
-	if called {
-		t.Fatal("owner role should be rejected client-side without an HTTP call")
-	}
-}
-
-func TestRunWorkspaceMemberInviteRejectsUnknownRole(t *testing.T) {
-	redirectTestHome(t, t.TempDir())
-	t.Setenv("MULTICA_TOKEN", "test-token")
-	t.Setenv("MULTICA_WORKSPACE_ID", "workspace-123")
-
-	cmd := newWorkspaceMemberInviteTestCmd()
-	_ = cmd.Flags().Set("role", "superuser")
-	if err := runWorkspaceMemberInvite(cmd, []string{"alice@example.com"}); err == nil {
-		t.Fatal("expected error for unknown --role, got nil")
+	if _, ok := gotBody["role"]; ok {
+		t.Fatalf("body = %v, want no role key", gotBody)
 	}
 }

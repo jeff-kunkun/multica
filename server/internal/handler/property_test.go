@@ -1238,6 +1238,11 @@ func TestIssueActorPropertyFacets(t *testing.T) {
 
 	firstIssueID := createPropertyTestIssue(t, "actor facet first")
 	secondIssueID := createPropertyTestIssue(t, "actor facet second")
+	// Both issues live in a project shared with the plain member, so project
+	// visibility does not hide them from that member's facet.
+	projectID := sharedTestProject(t, "actor facet project", plainMemberID)
+	dbfx.Exec(t, `UPDATE issue SET project_id = $1 WHERE id = ANY($2::uuid[])`, projectID, []string{firstIssueID, secondIssueID})
+	dbfx.Cleanup(t, `UPDATE issue SET project_id = NULL WHERE project_id = $1`, projectID)
 
 	if w := setIssuePropertyRaw(t, firstIssueID, property.ID, memberRef); w.Code != http.StatusOK {
 		t.Fatalf("set first actor value: expected 200, got %d: %s", w.Code, w.Body.String())

@@ -26,7 +26,7 @@ const server = (over: Record<string, unknown>) => ({
 const data = vi.hoisted(() => ({
   servers: [] as Array<Record<string, unknown>>,
   isLoading: false,
-  role: "owner" as "owner" | "admin" | "member",
+  role: "owner" as "owner" | "member",
 }));
 
 vi.mock("@tanstack/react-query", () => ({
@@ -525,7 +525,7 @@ describe("McpTab", () => {
     ).toBeNull();
     expect(screen.queryByRole("button", { name: /Remove server/ })).toBeNull();
     expect(
-      screen.getByText(/Only workspace owners and admins/),
+      screen.getByText(/Only the workspace owner/),
     ).toBeInTheDocument();
   });
 

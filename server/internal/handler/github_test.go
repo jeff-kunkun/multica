@@ -1808,7 +1808,7 @@ func TestWebhook_PullRequest_MetadataPreservesMergeable(t *testing.T) {
 // TestListGitHubInstallations_RoleGating covers the read-only relaxation
 // in MUL-2413: the endpoint is now reachable by any workspace member, but
 // the handler strips the numeric installation_id and reports `can_manage`
-// based on the caller's role. Admins / owners still receive the full row.
+// based on the caller's role. Owners still receive the full row.
 func TestListGitHubInstallations_RoleGating(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("handler test fixture not initialized (no DB?)")
@@ -1845,8 +1845,8 @@ func TestListGitHubInstallations_RoleGating(t *testing.T) {
 		return body
 	}
 
-	t.Run("admin sees installation_id + can_manage true", func(t *testing.T) {
-		body := call(t, "admin")
+	t.Run("owner sees installation_id + can_manage true", func(t *testing.T) {
+		body := call(t, "owner")
 		if got, _ := body["can_manage"].(bool); !got {
 			t.Errorf("can_manage = %v, want true", body["can_manage"])
 		}
@@ -1857,22 +1857,10 @@ func TestListGitHubInstallations_RoleGating(t *testing.T) {
 		row, _ := installs[0].(map[string]any)
 		gotID, ok := row["installation_id"].(float64)
 		if !ok {
-			t.Fatalf("admin response missing installation_id: %v", row)
+			t.Fatalf("owner response missing installation_id: %v", row)
 		}
 		if int64(gotID) != installationID {
 			t.Errorf("installation_id = %v, want %d", gotID, installationID)
-		}
-	})
-
-	t.Run("owner sees installation_id + can_manage true", func(t *testing.T) {
-		body := call(t, "owner")
-		if got, _ := body["can_manage"].(bool); !got {
-			t.Errorf("can_manage = %v, want true", body["can_manage"])
-		}
-		installs, _ := body["installations"].([]any)
-		row, _ := installs[0].(map[string]any)
-		if _, ok := row["installation_id"]; !ok {
-			t.Errorf("owner response missing installation_id: %v", row)
 		}
 	})
 
@@ -1880,7 +1868,7 @@ func TestListGitHubInstallations_RoleGating(t *testing.T) {
 		body := call(t, "member")
 		canManage, _ := body["can_manage"].(bool)
 		if canManage {
-			t.Errorf("can_manage = true, want false for non-admin member")
+			t.Errorf("can_manage = true, want false for non-owner member")
 		}
 		installs, _ := body["installations"].([]any)
 		if len(installs) == 0 {
@@ -1888,7 +1876,7 @@ func TestListGitHubInstallations_RoleGating(t *testing.T) {
 		}
 		row, _ := installs[0].(map[string]any)
 		if _, present := row["installation_id"]; present {
-			t.Errorf("installation_id must be omitted for non-admin members, row=%v", row)
+			t.Errorf("installation_id must be omitted for non-owner members, row=%v", row)
 		}
 		// Display fields the read-only view still needs must round-trip.
 		if got, _ := row["account_login"].(string); got != "role-gating-acct" {
@@ -1912,10 +1900,10 @@ func TestListGitHubInstallations_RoleGating(t *testing.T) {
 // TestGitHubRoutes_RoleGating exercises the router-level middleware split
 // introduced in MUL-2413: GET installations runs under
 // RequireWorkspaceMemberFromURL while connect / delete remain behind
-// RequireWorkspaceRoleFromURL(owner, admin). The handler-level tests above
+// RequireWorkspaceRoleFromURL(owner). The handler-level tests above
 // inject a member into context directly and so do not cover the middleware
 // itself — a future routing change that accidentally moved one of the
-// admin-only routes into the member group would slip past them.
+// owner-only routes into the member group would slip past them.
 func TestGitHubRoutes_RoleGating(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("handler test fixture not initialized (no DB?)")
@@ -1945,14 +1933,14 @@ INSERT INTO "user" (name, email) VALUES ($1, $2) RETURNING id
 `, "GHR "+label, email).Scan(&id)
 		return id
 	}
-	adminUserID := mkUser(t, "admin")
+	ownerUserID := mkUser(t, "owner")
 	memberUserID := mkUser(t, "member")
 	outsiderUserID := mkUser(t, "outsider")
 
 	for _, m := range []struct {
 		userID, role string
 	}{
-		{adminUserID, "admin"},
+		{ownerUserID, "owner"},
 		{memberUserID, "member"},
 	} {
 		dbfx.Exec(t, `
@@ -1973,7 +1961,7 @@ INSERT INTO member (workspace_id, user_id, role) VALUES ($1, $2, $3)
 
 	t.Cleanup(func() {
 		_, _ = testPool.Exec(context.Background(), `DELETE FROM workspace WHERE id = $1`, wsID)
-		for _, uid := range []string{adminUserID, memberUserID, outsiderUserID} {
+		for _, uid := range []string{ownerUserID, memberUserID, outsiderUserID} {
 			_, _ = testPool.Exec(context.Background(), `DELETE FROM "user" WHERE id = $1`, uid)
 		}
 	})
@@ -1989,7 +1977,7 @@ INSERT INTO member (workspace_id, user_id, role) VALUES ($1, $2, $3)
 			r.Get("/github/installations", testHandler.ListGitHubInstallations)
 		})
 		r.Group(func(r chi.Router) {
-			r.Use(middleware.RequireWorkspaceRoleFromURL(testHandler.Queries, "id", "owner", "admin"))
+			r.Use(middleware.RequireWorkspaceRoleFromURL(testHandler.Queries, "id", "owner"))
 			r.Get("/github/connect", testHandler.GitHubConnect)
 			r.Get("/github/installations/{installationId}/repositories", testHandler.ListGitHubInstallationRepositories)
 			r.Delete("/github/installations/{installationId}", testHandler.DeleteGitHubInstallation)
@@ -2011,8 +1999,8 @@ INSERT INTO member (workspace_id, user_id, role) VALUES ($1, $2, $3)
 		if code := exercise(t, http.MethodGet, "/api/workspaces/"+wsID+"/github/installations", memberUserID); code != http.StatusOK {
 			t.Errorf("member GET installations: want 200, got %d", code)
 		}
-		if code := exercise(t, http.MethodGet, "/api/workspaces/"+wsID+"/github/installations", adminUserID); code != http.StatusOK {
-			t.Errorf("admin GET installations: want 200, got %d", code)
+		if code := exercise(t, http.MethodGet, "/api/workspaces/"+wsID+"/github/installations", ownerUserID); code != http.StatusOK {
+			t.Errorf("owner GET installations: want 200, got %d", code)
 		}
 	})
 
@@ -2024,9 +2012,9 @@ INSERT INTO member (workspace_id, user_id, role) VALUES ($1, $2, $3)
 		}
 	})
 
-	t.Run("GET connect remains owner/admin only", func(t *testing.T) {
-		if code := exercise(t, http.MethodGet, "/api/workspaces/"+wsID+"/github/connect", adminUserID); code != http.StatusOK {
-			t.Errorf("admin GET connect: want 200, got %d", code)
+	t.Run("GET connect remains owner only", func(t *testing.T) {
+		if code := exercise(t, http.MethodGet, "/api/workspaces/"+wsID+"/github/connect", ownerUserID); code != http.StatusOK {
+			t.Errorf("owner GET connect: want 200, got %d", code)
 		}
 		if code := exercise(t, http.MethodGet, "/api/workspaces/"+wsID+"/github/connect", memberUserID); code != http.StatusForbidden {
 			t.Errorf("member GET connect: want 403, got %d", code)
@@ -2036,7 +2024,7 @@ INSERT INTO member (workspace_id, user_id, role) VALUES ($1, $2, $3)
 		}
 	})
 
-	t.Run("GET repositories remains owner/admin only", func(t *testing.T) {
+	t.Run("GET repositories remains owner only", func(t *testing.T) {
 		path := "/api/workspaces/" + wsID + "/github/installations/" + uuidToString(createdInst.ID) + "/repositories"
 		if code := exercise(t, http.MethodGet, path, memberUserID); code != http.StatusForbidden {
 			t.Errorf("member GET repositories: want 403, got %d", code)
@@ -2046,7 +2034,7 @@ INSERT INTO member (workspace_id, user_id, role) VALUES ($1, $2, $3)
 		}
 	})
 
-	t.Run("DELETE installation remains owner/admin only", func(t *testing.T) {
+	t.Run("DELETE installation remains owner only", func(t *testing.T) {
 		// Member: 403 — middleware rejects before the handler runs.
 		if code := exercise(t, http.MethodDelete, "/api/workspaces/"+wsID+"/github/installations/"+uuidToString(createdInst.ID), memberUserID); code != http.StatusForbidden {
 			t.Errorf("member DELETE installation: want 403, got %d", code)
@@ -2055,14 +2043,14 @@ INSERT INTO member (workspace_id, user_id, role) VALUES ($1, $2, $3)
 		if code := exercise(t, http.MethodDelete, "/api/workspaces/"+wsID+"/github/installations/"+uuidToString(createdInst.ID), outsiderUserID); code != http.StatusNotFound {
 			t.Errorf("outsider DELETE installation: want 404, got %d", code)
 		}
-		// Admin: 204 and the row goes away.
-		if code := exercise(t, http.MethodDelete, "/api/workspaces/"+wsID+"/github/installations/"+uuidToString(createdInst.ID), adminUserID); code != http.StatusNoContent {
-			t.Errorf("admin DELETE installation: want 204, got %d", code)
+		// Owner: 204 and the row goes away.
+		if code := exercise(t, http.MethodDelete, "/api/workspaces/"+wsID+"/github/installations/"+uuidToString(createdInst.ID), ownerUserID); code != http.StatusNoContent {
+			t.Errorf("owner DELETE installation: want 204, got %d", code)
 		}
 		var remaining int
 		dbfx.QueryRow(t, `SELECT COUNT(*) FROM github_installation WHERE id = $1`, uuidToString(createdInst.ID)).Scan(&remaining)
 		if remaining != 0 {
-			t.Errorf("expected installation row gone after admin DELETE, got %d remaining", remaining)
+			t.Errorf("expected installation row gone after owner DELETE, got %d remaining", remaining)
 		}
 	})
 }
@@ -2070,7 +2058,7 @@ INSERT INTO member (workspace_id, user_id, role) VALUES ($1, $2, $3)
 // TestGitHubInstallationBroadcastRedaction guards Emacs' finding on PR #2886:
 // the realtime payloads we publish on installation create / uninstall must
 // not carry the numeric `installation_id`. The frontend uses these events
-// only to invalidate the installations query, so an admin client recovers
+// only to invalidate the installations query, so an owner client recovers
 // the management handle via the list endpoint — which already gates the
 // numeric id by role.
 func TestGitHubInstallationBroadcastRedaction(t *testing.T) {
@@ -2558,7 +2546,7 @@ func TestWebhook_InstallationCreatedRefreshesUnknownLogin(t *testing.T) {
 			t.Errorf("broadcast WorkspaceID = %q, want %q", ev.WorkspaceID, testWorkspaceID)
 		}
 		// The payload must carry the redacted installation shape so
-		// non-admin clients on the workspace channel can't extract the
+		// non-owner clients on the workspace channel can't extract the
 		// numeric installation_id from the broadcast itself.
 		payload, ok := ev.Payload.(map[string]any)
 		if !ok {

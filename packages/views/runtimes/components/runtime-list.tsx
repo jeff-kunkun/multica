@@ -692,7 +692,7 @@ export function RuntimeList({
     ? members.find((m) => m.user_id === user.id)
     : null;
   const isAdmin = currentMember
-    ? currentMember.role === "owner" || currentMember.role === "admin"
+    ? currentMember.role === "owner"
     : false;
 
   const workloadIndex = useMemo(

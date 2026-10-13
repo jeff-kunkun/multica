@@ -744,16 +744,6 @@ func roleAllowed(role string, roles ...string) bool {
 	return false
 }
 
-func countOwners(members []db.Member) int {
-	owners := 0
-	for _, member := range members {
-		if member.Role == "owner" {
-			owners++
-		}
-	}
-	return owners
-}
-
 func (h *Handler) getWorkspaceMember(ctx context.Context, userID, workspaceID string) (db.Member, error) {
 	userUUID, err := util.ParseUUID(userID)
 	if err != nil {
@@ -842,6 +832,10 @@ func (h *Handler) loadIssueForUser(w http.ResponseWriter, r *http.Request, issue
 	// silently returns false for non-identifier strings, falling through to
 	// the UUID path below.
 	if issue, ok := h.resolveIssueByIdentifier(r.Context(), issueID, workspaceID); ok {
+		if !h.requestCanSeeIssue(r, issue) {
+			writeError(w, http.StatusNotFound, "issue not found")
+			return db.Issue{}, false
+		}
 		return issue, true
 	}
 
@@ -861,7 +855,7 @@ func (h *Handler) loadIssueForUser(w http.ResponseWriter, r *http.Request, issue
 		ID:          issueUUID,
 		WorkspaceID: wsUUID,
 	})
-	if err != nil {
+	if err != nil || !h.requestCanSeeIssue(r, issue) {
 		writeError(w, http.StatusNotFound, "issue not found")
 		return db.Issue{}, false
 	}

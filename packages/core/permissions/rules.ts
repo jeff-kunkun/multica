@@ -1,7 +1,6 @@
 import type {
   Agent,
   Comment,
-  Member,
   MemberRole,
   RuntimeDevice,
   Skill,
@@ -19,8 +18,7 @@ import { ALLOW, deny, type Decision, type PermissionContext } from "./types";
  * sprinkling copy through the view layer.
  */
 
-const isAdminLike = (role: MemberRole | null) =>
-  role === "owner" || role === "admin";
+const isOwner = (role: MemberRole | null) => role === "owner";
 
 // ---- Agents ----------------------------------------------------------------
 
@@ -33,11 +31,11 @@ export function canEditAgent(agent: Agent, ctx: PermissionContext): Decision {
   if (ctx.userId === null) {
     return deny("not_authenticated", "Sign in to edit this agent.");
   }
-  if (isAdminLike(ctx.role)) return ALLOW;
+  if (isOwner(ctx.role)) return ALLOW;
   if (agent.owner_id !== null && agent.owner_id === ctx.userId) return ALLOW;
   return deny(
     "not_resource_owner",
-    "Only the agent owner and workspace admins can edit this agent.",
+    "Only the agent owner and the workspace owner can edit this agent.",
   );
 }
 
@@ -49,7 +47,7 @@ export function canEditAgent(agent: Agent, ctx: PermissionContext): Decision {
  *
  *   - owner: always
  *   - permission_mode "private": ONLY the owner. This is the key behavior
- *     change — workspace admins NO LONGER bypass a private agent.
+ *     change — the workspace owner does NOT bypass a private agent.
  *   - permission_mode "public_to" + workspace target: any workspace member
  *   - permission_mode "public_to" + member target: only the matching user
  *   - team target: reserved, INERT in v1 (never grants)
@@ -108,13 +106,13 @@ export function canEditSkill(skill: Skill, ctx: PermissionContext): Decision {
   if (ctx.userId === null) {
     return deny("not_authenticated", "Sign in to edit this skill.");
   }
-  if (isAdminLike(ctx.role)) return ALLOW;
+  if (isOwner(ctx.role)) return ALLOW;
   if (skill.created_by !== null && skill.created_by === ctx.userId) {
     return ALLOW;
   }
   return deny(
     "not_resource_owner",
-    "Only the creator and workspace admins can edit this skill.",
+    "Only the creator and the workspace owner can edit this skill.",
   );
 }
 
@@ -140,10 +138,10 @@ export function canEditComment(
     );
   }
   if (comment.author_id === ctx.userId) return ALLOW;
-  if (isAdminLike(ctx.role)) return ALLOW;
+  if (isOwner(ctx.role)) return ALLOW;
   return deny(
     "not_resource_owner",
-    "Only the author and workspace admins can edit this comment.",
+    "Only the author and the workspace owner can edit this comment.",
   );
 }
 
@@ -157,10 +155,10 @@ export function canDeleteComment(
   if (comment.author_type === "member" && comment.author_id === ctx.userId) {
     return ALLOW;
   }
-  if (isAdminLike(ctx.role)) return ALLOW;
+  if (isOwner(ctx.role)) return ALLOW;
   return deny(
     "not_resource_owner",
-    "Only the author and workspace admins can delete this comment.",
+    "Only the author and the workspace owner can delete this comment.",
   );
 }
 
@@ -173,23 +171,23 @@ export function canDeleteRuntime(
   if (ctx.userId === null) {
     return deny("not_authenticated", "Sign in to delete runtimes.");
   }
-  if (isAdminLike(ctx.role)) return ALLOW;
+  if (isOwner(ctx.role)) return ALLOW;
   if (runtime.owner_id !== null && runtime.owner_id === ctx.userId) {
     return ALLOW;
   }
   return deny(
     "not_resource_owner",
-    "Only the runtime owner and workspace admins can delete this runtime.",
+    "Only the runtime owner and the workspace owner can delete this runtime.",
   );
 }
 
 // ---- Workspace -------------------------------------------------------------
 
 export function canUpdateWorkspaceSettings(ctx: PermissionContext): Decision {
-  if (isAdminLike(ctx.role)) return ALLOW;
+  if (isOwner(ctx.role)) return ALLOW;
   return deny(
-    "not_admin_role",
-    "Only workspace owners and admins can update workspace settings.",
+    "not_owner_role",
+    "Only the workspace owner can update workspace settings.",
   );
 }
 
@@ -202,43 +200,9 @@ export function canDeleteWorkspace(ctx: PermissionContext): Decision {
 }
 
 export function canManageMembers(ctx: PermissionContext): Decision {
-  if (isAdminLike(ctx.role)) return ALLOW;
+  if (isOwner(ctx.role)) return ALLOW;
   return deny(
-    "not_admin_role",
-    "Only workspace owners and admins can manage members.",
+    "not_owner_role",
+    "Only the workspace owner can manage members.",
   );
-}
-
-/**
- * Encodes the role-change matrix from `workspace.go:458-530`:
- *   - admins cannot touch the owner role (neither demote owners nor promote)
- *   - the last owner cannot be demoted
- *   - non-managers cannot change roles at all
- *
- * `ownerCount` is the number of workspace members currently with role=owner.
- * Caller derives it locally from the cached member list.
- */
-export function canChangeMemberRole(
-  target: Pick<Member, "role">,
-  ownerCount: number,
-  ctx: PermissionContext,
-): Decision {
-  const manage = canManageMembers(ctx);
-  if (!manage.allowed) return manage;
-
-  if (target.role === "owner") {
-    if (ctx.role !== "owner") {
-      return deny(
-        "not_owner_role",
-        "Only the workspace owner can change another owner's role.",
-      );
-    }
-    if (ownerCount <= 1) {
-      return deny(
-        "last_owner",
-        "Promote another member to owner first — a workspace must keep at least one owner.",
-      );
-    }
-  }
-  return ALLOW;
 }

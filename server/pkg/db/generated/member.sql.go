@@ -166,27 +166,3 @@ func (q *Queries) ListMembersWithUser(ctx context.Context, workspaceID pgtype.UU
 	}
 	return items, nil
 }
-
-const updateMemberRole = `-- name: UpdateMemberRole :one
-UPDATE member SET role = $2
-WHERE id = $1
-RETURNING id, workspace_id, user_id, role, created_at
-`
-
-type UpdateMemberRoleParams struct {
-	ID   pgtype.UUID `json:"id"`
-	Role string      `json:"role"`
-}
-
-func (q *Queries) UpdateMemberRole(ctx context.Context, arg UpdateMemberRoleParams) (Member, error) {
-	row := q.db.QueryRow(ctx, updateMemberRole, arg.ID, arg.Role)
-	var i Member
-	err := row.Scan(
-		&i.ID,
-		&i.WorkspaceID,
-		&i.UserID,
-		&i.Role,
-		&i.CreatedAt,
-	)
-	return i, err
-}

@@ -20,7 +20,6 @@
   "main": {
     "join_title": "Join {{workspace_name}}",
     "fallback_workspace_name": "workspace",
-    "invited_role_admin": "invited you to join as an admin.",
     "invited_role_member": "invited you to join as a member.",
     "already_handled_accepted": "This invitation has already been accepted.",
     "already_handled_declined": "This invitation has already been declined.",
@@ -48,7 +47,6 @@
     "error_generic": "Failed to process invitations. Please try again.",
     "row_workspace_fallback": "Workspace",
     "row_inviter_fallback": "Someone",
-    "row_invited_admin": "{{inviter}} invited you as an admin",
     "row_invited_member": "{{inviter}} invited you as a member"
   }
 }

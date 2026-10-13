@@ -32,13 +32,12 @@ func TestCanManageAgentEnv_Pure(t *testing.T) {
 		want   bool
 	}{
 		{"workspace owner, not agent owner", owned, otherUserID, "owner", true},
-		{"workspace admin, not agent owner", owned, otherUserID, "admin", true},
 		{"agent owner with member role", owned, ownerUserID, "member", true},
-		{"agent owner with admin role", owned, ownerUserID, "admin", true},
+		{"agent owner who is also workspace owner", owned, ownerUserID, "owner", true},
 		{"plain member, not agent owner", owned, otherUserID, "member", false},
 		{"plain member with no role string", owned, otherUserID, "", false},
 		{"null owner_id, plain member", orphaned, otherUserID, "member", false},
-		{"null owner_id, workspace admin", orphaned, otherUserID, "admin", true},
+		{"null owner_id, workspace owner", orphaned, otherUserID, "owner", true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -180,31 +179,21 @@ func TestAgentEnv_UnrelatedMemberForbidden(t *testing.T) {
 }
 
 // TestAgentEnv_WorkspaceRolesUnchanged pins the pre-existing behavior the
-// fix must not regress: workspace owner and admin keep full access to any
-// agent's env, including agents they do not own.
+// fix must not regress: the workspace owner keeps full access to any agent's
+// env, including agents they do not own.
 func TestAgentEnv_WorkspaceRolesUnchanged(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
 	}
-	ctx := context.Background()
 
 	agentID, _ := agentEnvOwnerFixture(t, "env-role-check-agent", "env-role-check-owner@multica.test")
 
-	adminID := createPermissionTestMember(t, "env-admin@multica.test")
-	if _, err := testPool.Exec(ctx, `
-		UPDATE member SET role = 'admin' WHERE workspace_id = $1 AND user_id = $2
-	`, testWorkspaceID, adminID); err != nil {
-		t.Fatalf("promote member to admin: %v", err)
-	}
-
 	// testUserID is the workspace owner and does NOT own this agent.
-	for _, actorID := range []string{testUserID, adminID} {
-		req := withURLParam(newRequestAs(actorID, http.MethodGet, "/api/agents/"+agentID+"/env", nil), "id", agentID)
-		w := httptest.NewRecorder()
-		testHandler.GetAgentEnv(w, req)
-		if w.Code != http.StatusOK {
-			t.Fatalf("GetAgentEnv as %s: expected 200, got %d: %s", actorID, w.Code, w.Body.String())
-		}
+	req := withURLParam(newRequestAs(testUserID, http.MethodGet, "/api/agents/"+agentID+"/env", nil), "id", agentID)
+	w := httptest.NewRecorder()
+	testHandler.GetAgentEnv(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("GetAgentEnv as workspace owner: expected 200, got %d: %s", w.Code, w.Body.String())
 	}
 }
 

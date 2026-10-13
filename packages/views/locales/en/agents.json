@@ -144,7 +144,7 @@
     "load_failed_title": "Couldn't load this agent",
     "load_failed_default": "Something went wrong fetching this agent.",
     "no_access_title": "You don't have access to this agent",
-    "no_access_hint": "Only the agent owner or a workspace admin can view this private agent.",
+    "no_access_hint": "Only the agent owner or the workspace owner can view this private agent.",
     "try_again": "Try again",
     "archived_banner": "This agent is archived. It cannot be assigned or mentioned.",
     "runtime_required_banner": "This agent kept its configuration and history, but needs a runtime before it can run.",
@@ -435,7 +435,7 @@
       "workspace_notes_placeholder": "Add context this agent should always have.\n\n# Example\nOur main repository is github.com/acme/platform.\nWrite issues in English even when we chat in Chinese.\nWe do not deploy on Fridays."
     },
     "env": {
-      "intro_readonly": "Injected into the agent process at launch. Only workspace owners and admins can read or edit values; every reveal and edit is recorded in the workspace audit log.",
+      "intro_readonly": "Injected into the agent process at launch. Only the workspace owner can read or edit values; every reveal and edit is recorded in the workspace audit log.",
       "empty_readonly": "No environment variables configured.",
       "intro_prefix": "Injected into the agent process at launch (e.g. ",
       "intro_separator": ", ",
@@ -580,7 +580,7 @@
       "invalid_json": "Invalid JSON: {{error}}",
       "save_failed_toast": "Failed to save MCP config",
       "redacted_title": "Configured — hidden from your view",
-      "redacted_hint": "Only the agent owner or a workspace admin can read this config.",
+      "redacted_hint": "Only the agent owner or the workspace owner can read this config.",
       "dialog_json_help": "Edit the full server configuration as JSON."
     },
     "runtime_config": {

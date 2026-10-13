@@ -580,14 +580,14 @@ func (h *Handler) CreateSkill(w http.ResponseWriter, r *http.Request) {
 }
 
 // canManageSkill checks whether the current user can update or delete a skill.
-// The skill creator or workspace owner/admin can manage any skill.
+// The skill creator or workspace owner can manage any skill.
 func (h *Handler) canManageSkill(w http.ResponseWriter, r *http.Request, skill db.Skill) bool {
 	wsID := uuidToString(skill.WorkspaceID)
-	member, ok := h.requireWorkspaceRole(w, r, wsID, "skill not found", "owner", "admin", "member")
+	member, ok := h.requireWorkspaceRole(w, r, wsID, "skill not found", "owner", "member")
 	if !ok {
 		return false
 	}
-	isAdmin := roleAllowed(member.Role, "owner", "admin")
+	isAdmin := member.Role == "owner"
 	isSkillCreator := skill.CreatedBy.Valid && uuidToString(skill.CreatedBy) == requestUserID(r)
 	if !isAdmin && !isSkillCreator {
 		writeError(w, http.StatusForbidden, "only the skill creator can manage this skill")
@@ -599,7 +599,7 @@ func (h *Handler) canManageSkill(w http.ResponseWriter, r *http.Request, skill d
 // canOverwriteSkillByLocalImport reports whether userID may overwrite skill via
 // a runtime-local-skill re-import. This is intentionally NARROWER than
 // canManageSkill: only the original creator may overwrite by re-importing.
-// Workspace owners/admins who want to change a skill they did not create must
+// Workspace owners who want to change a skill they did not create must
 // edit it in-app instead. See MUL-2701 / MUL-2800.
 func canOverwriteSkillByLocalImport(userID string, skill db.Skill) bool {
 	return skill.CreatedBy.Valid && uuidToString(skill.CreatedBy) == userID

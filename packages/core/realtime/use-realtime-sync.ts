@@ -12,6 +12,7 @@ import { defaultStorage } from "../platform/storage";
 import { getCurrentWsId, getCurrentSlug } from "../platform/workspace-storage";
 import { issueKeys } from "../issues/queries";
 import { projectKeys } from "../projects/queries";
+import { projectMemberKeys } from "../projects/member-queries";
 import { pinKeys } from "../pins/queries";
 import { runtimeKeys } from "../runtimes/queries";
 import { labelKeys } from "../labels/queries";
@@ -71,6 +72,7 @@ import type {
   WorkspaceDeletedPayload,
   WorkspaceUpdatedPayload,
   MemberRemovedPayload,
+  ProjectMembersChangedPayload,
   IssueUpdatedPayload,
   IssueCreatedPayload,
   IssueDeletedPayload,
@@ -872,6 +874,8 @@ export function useRealtimeSync(
       // every message would flood the network. Specific chat handlers below
       // still receive it via ws.on() (a separate subscription channel).
       "task:message",
+      // Sharing changes are handled explicitly below.
+      "project:members_changed",
       // task:completed / task:failed deliberately NOT here. They go through
       // both the task-prefix invalidate (refreshes the agent-task-snapshot
       // cache) AND the chat-specific ws.on() handlers below. The two
@@ -1178,6 +1182,19 @@ export function useRealtimeSync(
           relocateAfterWorkspaceLoss(wsId);
         }
       }
+    });
+
+    // Sharing a project changes which projects and issues a member can see,
+    // so refresh the sharing list, the project list, and every issue view.
+    const unsubProjectMembersChanged = ws.on("project:members_changed", (p) => {
+      const wsId = getCurrentWsId();
+      if (!wsId) return;
+      const { project_id } = p as ProjectMembersChangedPayload;
+      if (project_id) {
+        qc.invalidateQueries({ queryKey: projectMemberKeys.list(wsId, project_id) });
+      }
+      qc.invalidateQueries({ queryKey: projectKeys.list(wsId) });
+      qc.invalidateQueries({ queryKey: issueKeys.all(wsId) });
     });
 
     const unsubMemberAdded = ws.on("member:added", (p) => {
@@ -1627,6 +1644,7 @@ export function useRealtimeSync(
       unsubWsDeleted();
       unsubMemberRemoved();
       unsubMemberAdded();
+      unsubProjectMembersChanged();
       unsubInvitationCreated();
       unsubInvitationAccepted();
       unsubInvitationDeclined();

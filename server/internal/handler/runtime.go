@@ -575,7 +575,7 @@ func (h *Handler) UpdateAgentRuntime(w http.ResponseWriter, r *http.Request) {
 			// owners/admins rename every runtime sharing the daemon_id. A NULL
 			// owner filter means "all runtimes on this machine".
 			var ownerFilter pgtype.UUID
-			if !roleAllowed(member.Role, "owner", "admin") {
+			if member.Role != "owner" {
 				ownerFilter = member.UserID
 			}
 			rows, err := h.Queries.UpdateAgentRuntimeCustomNameByDaemon(r.Context(), db.UpdateAgentRuntimeCustomNameByDaemonParams{
@@ -626,7 +626,7 @@ func (h *Handler) UpdateAgentRuntime(w http.ResponseWriter, r *http.Request) {
 }
 
 func canEditRuntime(member db.Member, rt db.AgentRuntime) bool {
-	if roleAllowed(member.Role, "owner", "admin") {
+	if member.Role == "owner" {
 		return true
 	}
 	return rt.OwnerID.Valid && uuidToString(rt.OwnerID) == uuidToString(member.UserID)
@@ -918,7 +918,7 @@ func (h *Handler) ListAgentRuntimes(w http.ResponseWriter, r *http.Request) {
 			WorkspaceID: parseUUID(workspaceID),
 			OwnerID:     parseUUID(userID),
 		})
-	} else if roleAllowed(member.Role, "owner", "admin") {
+	} else if member.Role == "owner" {
 		// Governance visibility preserves the existing owner/admin contract:
 		// admins can find a private runtime to rename or delete it, but the
 		// per-runtime read gate still denies data and machine access.

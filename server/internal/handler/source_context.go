@@ -414,6 +414,9 @@ func (h *Handler) PreviewCommentSubIssue(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	build, err := service.BuildSourceContext(r.Context(), h.Queries, wsUUID, anchorCommentID)
+	if err == nil && !h.requestCanSeeSourceIssue(r, workspaceID, build.Snapshot.SourceIssue.ID) {
+		err = service.ErrSourceIssueDeleted
+	}
 	if err != nil {
 		h.writeSourceContextError(w, err, build.Limits)
 		return
@@ -466,6 +469,9 @@ func (h *Handler) CreateCommentSubIssue(w http.ResponseWriter, r *http.Request) 
 		if _, issueErr := h.Queries.GetIssueInWorkspace(r.Context(), db.GetIssueInWorkspaceParams{ID: tokenIssueID, WorkspaceID: wsUUID}); errors.Is(issueErr, pgx.ErrNoRows) {
 			err = service.ErrSourceIssueDeleted
 		}
+	}
+	if err == nil && !h.requestCanSeeSourceIssue(r, workspaceID, build.Snapshot.SourceIssue.ID) {
+		err = service.ErrSourceIssueDeleted
 	}
 	if err != nil {
 		h.writeSourceContextError(w, err, build.Limits)
@@ -752,4 +758,14 @@ func (h *Handler) writeSourceContextError(w http.ResponseWriter, err error, limi
 		payload["limits"] = limits
 	}
 	writeJSON(w, status, payload)
+}
+
+// requestCanSeeSourceIssue hides a comment thread whose issue the viewer may
+// not see behind the same answer as a deleted source issue.
+func (h *Handler) requestCanSeeSourceIssue(r *http.Request, workspaceID, issueID string) bool {
+	id, err := util.ParseUUID(issueID)
+	if err != nil {
+		return false
+	}
+	return h.canSeeIssue(r.Context(), h.viewerID(r, workspaceID), id)
 }

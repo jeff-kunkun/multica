@@ -142,7 +142,7 @@ func (h *Handler) CreateIssueStatus(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	member, ok := h.requireWorkspaceRole(w, r, workspaceID, "workspace not found", "owner", "admin")
+	member, ok := h.requireWorkspaceRole(w, r, workspaceID, "workspace not found", "owner")
 	if !ok {
 		return
 	}
@@ -467,7 +467,7 @@ func (h *Handler) loadIssueStatusForAdmin(w http.ResponseWriter, r *http.Request
 	if !ok {
 		return db.IssueStatus{}, pgtype.UUID{}, db.Member{}, false
 	}
-	member, ok := h.requireWorkspaceRole(w, r, workspaceID, "workspace not found", "owner", "admin")
+	member, ok := h.requireWorkspaceRole(w, r, workspaceID, "workspace not found", "owner")
 	if !ok {
 		return db.IssueStatus{}, pgtype.UUID{}, db.Member{}, false
 	}
@@ -532,7 +532,7 @@ func (h *Handler) ReorderIssueStatuses(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	member, ok := h.requireWorkspaceRole(w, r, workspaceID, "workspace not found", "owner", "admin")
+	member, ok := h.requireWorkspaceRole(w, r, workspaceID, "workspace not found", "owner")
 	if !ok {
 		return
 	}

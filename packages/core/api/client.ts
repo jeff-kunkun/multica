@@ -16,7 +16,6 @@ import type {
   SearchIndexChanges,
   UpdateMeRequest,
   CreateMemberRequest,
-  UpdateMemberRequest,
   ListIssuesParams,
   ListGroupedIssuesParams,
   IssueTableFacetsRequest,
@@ -104,6 +103,8 @@ import type {
   CreateProjectResourceRequest,
   UpdateProjectResourceRequest,
   ListProjectResourcesResponse,
+  ListProjectMembersResponse,
+  ProjectMember,
   Label,
   IssueProperty,
   IssuePropertyValue,
@@ -279,6 +280,11 @@ import {
   ShareLinkListResponseSchema,
   ShareLinkInfoSchema,
   JoinShareLinkResponseSchema,
+  MemberWithUserListSchema,
+  ProjectMemberSchema,
+  EMPTY_PROJECT_MEMBER,
+  ListProjectMembersResponseSchema,
+  EMPTY_LIST_PROJECT_MEMBERS_RESPONSE,
   EMPTY_SHARE_LINK,
   EMPTY_SHARE_LINK_INFO,
   EMPTY_JOIN_SHARE_LINK_RESPONSE,
@@ -2389,19 +2395,15 @@ export class ApiClient {
 
   // Members
   async listMembers(workspaceId: string): Promise<MemberWithUser[]> {
-    return this.fetch(`/api/workspaces/${workspaceId}/members`);
+    const raw = await this.fetch<unknown>(`/api/workspaces/${workspaceId}/members`);
+    return parseWithFallback(raw, MemberWithUserListSchema, [] as MemberWithUser[], {
+      endpoint: "GET /api/workspaces/{id}/members",
+    });
   }
 
   async createMember(workspaceId: string, data: CreateMemberRequest): Promise<Invitation> {
     return this.fetch(`/api/workspaces/${workspaceId}/members`, {
       method: "POST",
-      body: JSON.stringify(data),
-    });
-  }
-
-  async updateMember(workspaceId: string, memberId: string, data: UpdateMemberRequest): Promise<MemberWithUser> {
-    return this.fetch(`/api/workspaces/${workspaceId}/members/${memberId}`, {
-      method: "PATCH",
       body: JSON.stringify(data),
     });
   }
@@ -2449,7 +2451,7 @@ export class ApiClient {
     });
   }
 
-  async createShareLink(workspaceId: string, data: { role?: string; expires_in?: number; max_uses?: number }): Promise<ShareLink> {
+  async createShareLink(workspaceId: string, data: { expires_in?: number; max_uses?: number }): Promise<ShareLink> {
     const raw = await this.fetch<unknown>(`/api/workspaces/${workspaceId}/share-links`, {
       method: "POST",
       body: JSON.stringify(data),
@@ -3032,6 +3034,29 @@ export class ApiClient {
 
   async deleteProject(id: string): Promise<void> {
     await this.fetch(`/api/projects/${id}`, { method: "DELETE" });
+  }
+
+  // Project sharing: the members a project is shared with. Reading is open to
+  // anyone who can see the project; add/remove are workspace-owner only.
+  async listProjectMembers(projectId: string): Promise<ListProjectMembersResponse> {
+    const raw = await this.fetch<unknown>(`/api/projects/${projectId}/members`);
+    return parseWithFallback(raw, ListProjectMembersResponseSchema, EMPTY_LIST_PROJECT_MEMBERS_RESPONSE, {
+      endpoint: "GET /api/projects/{id}/members",
+    });
+  }
+
+  async addProjectMember(projectId: string, userId: string): Promise<ProjectMember> {
+    const raw = await this.fetch<unknown>(`/api/projects/${projectId}/members`, {
+      method: "POST",
+      body: JSON.stringify({ user_id: userId }),
+    });
+    return parseWithFallback(raw, ProjectMemberSchema, { ...EMPTY_PROJECT_MEMBER, user_id: userId }, {
+      endpoint: "POST /api/projects/{id}/members",
+    });
+  }
+
+  async removeProjectMember(projectId: string, userId: string): Promise<void> {
+    await this.fetch(`/api/projects/${projectId}/members/${userId}`, { method: "DELETE" });
   }
 
   // Project resources

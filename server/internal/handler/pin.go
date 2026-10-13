@@ -119,14 +119,14 @@ func (h *Handler) CreatePin(w http.ResponseWriter, r *http.Request) {
 	case "issue":
 		if _, err := h.Queries.GetIssueInWorkspace(r.Context(), db.GetIssueInWorkspaceParams{
 			ID: itemUUID, WorkspaceID: wsUUID,
-		}); err != nil {
+		}); err != nil || !h.requestCanSeeIssueID(r, wsUUID, itemUUID) {
 			writeError(w, http.StatusNotFound, "issue not found")
 			return
 		}
 	case "project":
 		if _, err := h.Queries.GetProjectInWorkspace(r.Context(), db.GetProjectInWorkspaceParams{
 			ID: itemUUID, WorkspaceID: wsUUID,
-		}); err != nil {
+		}); err != nil || !h.requestCanSeeProject(r, wsUUID, itemUUID) {
 			writeError(w, http.StatusNotFound, "project not found")
 			return
 		}
