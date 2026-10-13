@@ -67,39 +67,6 @@ func forkingCLIAnswered(out []byte) bool {
 // use RunCollect too: Execute calls this synchronously before it returns a
 // Session, so a pipe-holding descendant here would bypass both the provider
 // timeout and the daemon's inactivity watchdog.
-func TestCheckOpenclawVersionReapsPipeHoldingGrandchild(t *testing.T) {
-	t.Parallel()
-
-	pidFile := filepath.Join(t.TempDir(), "helper.pid")
-	cli := writeForkingCLIOutput(t, pidFile, "OpenClaw 2026.7.1")
-
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	if err := checkOpenclawVersion(ctx, Command{Path: cli}); err != nil {
-		t.Fatalf("checkOpenclawVersion: %v", err)
-	}
-
-	pid := waitForPidFile(t, pidFile)
-	if !waitForProcessGone(pid, 2*time.Second) {
-		t.Errorf("openclaw version helper pid %d still alive after version check", pid)
-	}
-}
-
-// TestCheckOpenclawVersionAcceptsStderrOnlyVersion — the gate replaced
-// combinedOutputOwned, so stderr has to stay in the parse. A build that prints
-// its banner there would otherwise fail the minimum-version check with an empty
-// output, which skips the runtime entirely.
-func TestCheckOpenclawVersionAcceptsStderrOnlyVersion(t *testing.T) {
-	cli := writeCLI(t, "#!/bin/sh\necho 'OpenClaw 2026.7.1' >&2\n")
-
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	if err := checkOpenclawVersion(ctx, Command{Path: cli}); err != nil {
-		t.Fatalf("checkOpenclawVersion with the version on stderr: %v", err)
-	}
-}
-
-// waitForPidFile waits for the forked helper to record its pid.
 func waitForPidFile(t *testing.T, pidFile string) int {
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)

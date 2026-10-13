@@ -36,6 +36,7 @@ var workspaceDeletionManifest = map[string]workspaceDeleteAction{
 	"autopilot_run":                      workspaceDelete,
 	"autopilot_subscriber":               workspaceDelete,
 	"autopilot_trigger":                  workspaceDelete,
+	"bot_event":                          workspaceDelete,
 	"channel_binding_token":              workspaceDelete,
 	"channel_chat_context_generation":    workspaceDelete,
 	"channel_chat_session_binding":       workspaceDelete,
@@ -100,8 +101,10 @@ var workspaceDeletionManifest = map[string]workspaceDeleteAction{
 	"maintenance_job":                    workspaceDeleteKeep, // Global maintenance audit history, not workspace-owned.
 	"member":                             workspaceDelete,
 	"agent_mcp_server":                   workspaceDelete,
+	"mirror_link":                        workspaceDeleteKeep,
 	"plan":                               workspaceDelete,
 	"plan_approver":                      workspaceDelete,
+	"workspace_bot":                      workspaceDelete,
 	"workspace_mcp_server":               workspaceDelete,
 	"notification_preference":            workspaceDelete,
 	"personal_access_token":              workspaceDeleteKeep,

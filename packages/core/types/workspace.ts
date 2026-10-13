@@ -137,3 +137,28 @@ export interface ShareLinkInfo {
   creator_name?: string;
   role: MemberRole;
 }
+
+/**
+ * A project-manager Bot (Grok and the like). It is a workspace member backed
+ * by one long-lived token; `can_release` lets it approve plans for the owner.
+ * `token_prefix` is null once the token is revoked.
+ */
+export interface WorkspaceBot {
+  id: string;
+  workspace_id: string;
+  user_id: string;
+  name: string;
+  can_release: boolean;
+  webhook_url: string;
+  webhook_failures: number;
+  webhook_last_error: string;
+  token_prefix: string | null;
+  token_last_used_at: string | null;
+  created_at: string;
+}
+
+/** Create / rotate replies carry the secrets once. */
+export interface WorkspaceBotWithSecrets extends WorkspaceBot {
+  token?: string;
+  webhook_secret?: string;
+}

@@ -447,9 +447,10 @@ func TestCreateRuntimeProfile_RuntimeIdentity(t *testing.T) {
 		name, target, family string
 		status               int
 	}{
-		{"omp", "omp", "", http.StatusCreated},
-		{"legacy pi", "", "pi", http.StatusCreated},
-		{"mismatch", "omp", "codex", http.StatusBadRequest},
+		{"runtime type", "opencode", "", http.StatusCreated},
+		{"legacy family", "", "opencode", http.StatusCreated},
+		{"mismatch", "opencode", "codex", http.StatusBadRequest},
+		{"removed engine", "pi", "", http.StatusBadRequest},
 		{"unknown", "unknown", "", http.StatusBadRequest},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -474,7 +475,7 @@ func TestCreateRuntimeProfile_RuntimeIdentity(t *testing.T) {
 			if want == "" {
 				want = tc.family
 			}
-			if resp.RuntimeType != want || resp.ProtocolFamily != "pi" || resp.CommandName != "wrapper" || len(resp.FixedArgs) != 1 {
+			if resp.RuntimeType != want || resp.ProtocolFamily != "opencode" || resp.CommandName != "wrapper" || len(resp.FixedArgs) != 1 {
 				t.Fatalf("incorrect identity: %+v", resp)
 			}
 		})
@@ -485,13 +486,13 @@ func TestUpdateRuntimeProfile_RejectsIdentityChange(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
 	}
-	id := insertRuntimeProfileFixture(t, context.Background(), "Immutable Pi", "pi", "wrapper")
+	id := insertRuntimeProfileFixture(t, context.Background(), "Immutable OpenCode", "opencode", "wrapper")
 	for _, field := range []string{"runtime_type", "protocol_family"} {
 		// withURLParams, not two nested withURLParam calls: the singular helper
 		// installs a fresh chi route context each time, so the outer call would
 		// drop "id" and the handler would reject on workspace id before ever
 		// reaching the immutability check this test exists for.
-		req := withURLParams(newRequest("PATCH", "/", map[string]any{field: "omp"}), "id", testWorkspaceID, "profileId", id)
+		req := withURLParams(newRequest("PATCH", "/", map[string]any{field: "codex"}), "id", testWorkspaceID, "profileId", id)
 		w := httptest.NewRecorder()
 		testHandler.UpdateRuntimeProfile(w, req)
 		if w.Code != http.StatusBadRequest || !strings.Contains(w.Body.String(), "immutable") {

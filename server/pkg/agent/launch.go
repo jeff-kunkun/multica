@@ -445,27 +445,8 @@ func isASCIIAlpha(ch byte) bool {
 var launchPrefixBlockedArgs = map[string]map[string]blockedArgMode{
 	"antigravity": antigravityBlockedArgs,
 	"claude":      claudeBlockedArgs,
-	"codebuddy":   codebuddyBlockedArgs,
-	"codearts":    codeartsBlockedArgs,
 	"codex":       codexBlockedArgs,
-	"copilot":     copilotBlockedArgs,
-	"cursor":      cursorBlockedArgs,
-	"deveco":      devecoBlockedArgs,
-	"grok":        grokBlockedArgs,
-	"hermes":      hermesBlockedArgs,
-	"kimi":        kimiBlockedArgs,
-	"kiro":        kiroBlockedArgs,
 	"opencode":    opencodeBlockedArgs,
-	"openclaw":    openclawBlockedArgs,
-	"pi":          piBlockedArgs,
-	"qoder":       qoderBlockedArgs,
-	"qoderclicn":  qoderBlockedArgs,
-	"qwen":        qwenBlockedArgs,
-	"qwenpaw":     qwenpawBlockedArgs,
-	"reasonix":    reasonixBlockedArgs,
-	"traecli":     traecliBlockedArgs,
-	"dim":         dimBlockedArgs,
-	"zeroclaw":    zeroclawBlockedArgs,
 }
 
 // FilterLaunchPrefix is the exported form for callers outside this package —

@@ -5,14 +5,14 @@ import { providerSupportsMcpConfig } from "./mcp-support";
 describe("providerSupportsMcpConfig", () => {
   it("accepts a provider whose runtime consumes mcp_config", () => {
     expect(providerSupportsMcpConfig("claude")).toBe(true);
+    expect(providerSupportsMcpConfig("codex")).toBe(true);
+    expect(providerSupportsMcpConfig("opencode")).toBe(true);
   });
   it("rejects providers whose runtime ignores mcp_config", () => {
     expect(providerSupportsMcpConfig("antigravity")).toBe(false);
+    // Providers removed from this line are unknown, so they are rejected.
     expect(providerSupportsMcpConfig("copilot")).toBe(false);
-    expect(providerSupportsMcpConfig("pi")).toBe(true);
-    // ZeroClaw's ACP server never reads `params.mcpServers` — MCP lives in
-    // ZeroClaw's own config-dir, so a value saved here could not be honoured.
-    expect(providerSupportsMcpConfig("zeroclaw")).toBe(false);
+    expect(providerSupportsMcpConfig("pi")).toBe(false);
     expect(providerSupportsMcpConfig(undefined)).toBe(false);
     expect(providerSupportsMcpConfig(null)).toBe(false);
   });

@@ -907,3 +907,10 @@ func antigravityFormatTimeout(d time.Duration) string {
 	// that agy parses via Go's stdlib flag.Duration on the receiving side.
 	return d.String()
 }
+
+func nonNegativeTokens(n int64) int64 {
+	if n < 0 {
+		return 0
+	}
+	return n
+}

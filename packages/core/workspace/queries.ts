@@ -21,6 +21,7 @@ export const workspaceKeys = {
   skills: (wsId: string) => ["workspaces", wsId, "skills"] as const,
   assigneeFrequency: (wsId: string) => ["workspaces", wsId, "assignee-frequency"] as const,
   mcpServers: (wsId: string) => ["workspaces", wsId, "mcp-servers"] as const,
+  bots: (wsId: string) => ["workspaces", wsId, "bots"] as const,
 };
 
 export function workspaceListOptions() {
@@ -210,5 +211,14 @@ export function agentMcpServersOptions(agentId: string) {
     queryKey: ["agents", agentId, "mcp-servers"] as const,
     queryFn: () => api.listAgentMcpServers(agentId),
     enabled: agentId !== "",
+  });
+}
+
+/** Project-manager Bots. The API is owner-only; pass enabled=false otherwise. */
+export function workspaceBotsOptions(wsId: string, enabled = true) {
+  return queryOptions({
+    queryKey: workspaceKeys.bots(wsId),
+    queryFn: () => api.listBots(),
+    enabled: enabled && wsId !== "",
   });
 }

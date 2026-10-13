@@ -322,6 +322,16 @@ type AutopilotTrigger struct {
 	CreatedByID pgtype.UUID `json:"created_by_id"`
 }
 
+type BotEvent struct {
+	ID          int64              `json:"id"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	Type        string             `json:"type"`
+	ActorType   string             `json:"actor_type"`
+	ActorID     string             `json:"actor_id"`
+	Payload     []byte             `json:"payload"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+}
+
 type ChannelBindingToken struct {
 	TokenHash      string             `json:"token_hash"`
 	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
@@ -1188,6 +1198,14 @@ type Member struct {
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 }
 
+type MirrorLink struct {
+	Target          string             `json:"target"`
+	Kind            string             `json:"kind"`
+	LocalID         pgtype.UUID        `json:"local_id"`
+	RemoteID        string             `json:"remote_id"`
+	SourceUpdatedAt pgtype.Timestamptz `json:"source_updated_at"`
+}
+
 type NotificationPreference struct {
 	ID          pgtype.UUID        `json:"id"`
 	WorkspaceID pgtype.UUID        `json:"workspace_id"`
@@ -1774,6 +1792,22 @@ type Workspace struct {
 	AvatarUrl    pgtype.Text        `json:"avatar_url"`
 	// When TRUE, an agent run that resolves to no precise accountable human (would be owner_fallback) is refused at enqueue instead of degrading to the agent owner (MUL-4302 §3.5). Default FALSE = owner_fallback. Never affects authorization (originator_user_id).
 	AttributionFailClosed bool `json:"attribution_fail_closed"`
+}
+
+type WorkspaceBot struct {
+	ID                   pgtype.UUID        `json:"id"`
+	WorkspaceID          pgtype.UUID        `json:"workspace_id"`
+	UserID               pgtype.UUID        `json:"user_id"`
+	Name                 string             `json:"name"`
+	CanRelease           bool               `json:"can_release"`
+	WebhookUrl           string             `json:"webhook_url"`
+	WebhookSecret        string             `json:"webhook_secret"`
+	WebhookCursor        int64              `json:"webhook_cursor"`
+	WebhookFailures      int32              `json:"webhook_failures"`
+	WebhookNextAttemptAt pgtype.Timestamptz `json:"webhook_next_attempt_at"`
+	WebhookLastError     string             `json:"webhook_last_error"`
+	CreatedBy            pgtype.UUID        `json:"created_by"`
+	CreatedAt            pgtype.Timestamptz `json:"created_at"`
 }
 
 type WorkspaceInvitation struct {

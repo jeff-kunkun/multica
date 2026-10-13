@@ -62,6 +62,8 @@ import type {
   Workspace,
   WorkspaceRepo,
   WorkspaceMcpServer,
+  WorkspaceBot,
+  WorkspaceBotWithSecrets,
   MemberWithUser,
   User,
   Skill,
@@ -464,6 +466,10 @@ import {
   PluginInstallationSchema,
   PluginPreviewSchema,
   WorkspaceMcpServerListSchema,
+  WorkspaceBotListSchema,
+  WorkspaceBotWithSecretsSchema,
+  EMPTY_WORKSPACE_BOT,
+  EMPTY_WORKSPACE_BOT_LIST,
   WorkspaceMcpServerSchema,
   ShareLinkSchema,
   ShareLinkListResponseSchema,
@@ -1883,7 +1889,7 @@ export class ApiClient {
   async createMikaAgent(
     data: {
       runtime_id: string;
-      language: "en" | "zh" | "ko" | "ja";
+      language: "en" | "zh";
       /** Empty means "whatever the runtime defaults to". */
       model?: string;
       /** Label for the onboarding conversation, used only if this call is the
@@ -3110,6 +3116,62 @@ export class ApiClient {
     });
   }
 
+  /** Project-manager Bots of the current workspace (owner only). */
+  async listBots(): Promise<WorkspaceBot[]> {
+    const raw = await this.fetch<unknown>("/api/bots");
+    return parseWithFallback(raw, WorkspaceBotListSchema, EMPTY_WORKSPACE_BOT_LIST, {
+      endpoint: "GET /api/bots",
+    });
+  }
+
+  /** Creates a Bot; the reply carries its token and webhook secret once. */
+  async createBot(data: {
+    name: string;
+    can_release: boolean;
+    webhook_url: string;
+  }): Promise<WorkspaceBotWithSecrets> {
+    const raw = await this.fetch<unknown>("/api/bots", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+    return parseWithFallback(raw, WorkspaceBotWithSecretsSchema, EMPTY_WORKSPACE_BOT, {
+      endpoint: "POST /api/bots",
+    });
+  }
+
+  async updateBot(
+    botId: string,
+    update: { name?: string; can_release?: boolean; webhook_url?: string },
+  ): Promise<WorkspaceBotWithSecrets> {
+    const raw = await this.fetch<unknown>(`/api/bots/${encodeURIComponent(botId)}`, {
+      method: "PATCH",
+      body: JSON.stringify(update),
+    });
+    return parseWithFallback(raw, WorkspaceBotWithSecretsSchema, EMPTY_WORKSPACE_BOT, {
+      endpoint: "PATCH /api/bots/{id}",
+    });
+  }
+
+  /** Issues a new token, revoking the old one; the reply carries it once. */
+  async rotateBotToken(botId: string): Promise<WorkspaceBotWithSecrets> {
+    const raw = await this.fetch<unknown>(`/api/bots/${encodeURIComponent(botId)}/token`, {
+      method: "POST",
+    });
+    return parseWithFallback(raw, WorkspaceBotWithSecretsSchema, EMPTY_WORKSPACE_BOT, {
+      endpoint: "POST /api/bots/{id}/token",
+    });
+  }
+
+  async revokeBotToken(botId: string): Promise<void> {
+    await this.fetch<unknown>(`/api/bots/${encodeURIComponent(botId)}/token`, {
+      method: "DELETE",
+    });
+  }
+
+  async deleteBot(botId: string): Promise<void> {
+    await this.fetch<unknown>(`/api/bots/${encodeURIComponent(botId)}`, { method: "DELETE" });
+  }
+
   /** Removes a library entry and every assignment to it. */
   async deleteWorkspaceMcpServer(workspaceId: string, serverId: string): Promise<void> {
     await this.fetch<unknown>(
@@ -3854,7 +3916,7 @@ export class ApiClient {
   async startMikaOnboarding(
     sessionId: string,
     data: {
-      language: "en" | "zh" | "ko" | "ja";
+      language: "en" | "zh";
     },
     workspaceSlug?: string,
   ): Promise<StartMikaOnboardingResponse> {

@@ -341,10 +341,10 @@ describe("AgentsPage listReady gate", () => {
 
 describe("AgentsPage docs link", () => {
   it("points Learn more at the viewer's docs locale", () => {
-    renderPage("fr");
+    renderPage("zh-Hans");
 
     expect(
-      screen.getByRole("link", { name: "En savoir plus →" }),
-    ).toHaveAttribute("href", "https://multica.ai/docs/fr/agents");
+      screen.getByRole("link", { name: "了解更多 →" }),
+    ).toHaveAttribute("href", "https://multica.ai/docs/zh/agents");
   });
 });

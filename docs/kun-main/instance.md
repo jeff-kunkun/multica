@@ -41,6 +41,46 @@ username/password/email in `/opt/multica-main/.env` turn on password login;
 reset behind the team's shared authenticator code. Secrets live only in that
 `.env` (mode 600).
 
+## Mirror to the kun-line instance
+
+People who stay on ai.ferryway.cc read Kun's board through a one-way copy:
+the office backend (`server/internal/mirror`) copies one workspace's
+projects, issues and comments into Kun's existing `kunkunya` workspace on
+ai.ferryway.cc through its public API, every 20 seconds. Nothing is changed
+on the kun line and nothing flows back; edits made on the copy are
+overwritten by the next change here.
+
+What is copied: projects; issues (title, description, status, priority,
+parent, project); comments, each starting with its author's name. Mentions
+become plain text. Copied issues carry no extra markers so they read like
+Kun's own. A deleted issue or project becomes cancelled there; a deleted
+comment is removed. Progress lives in the `mirror_link` table, so a restart
+resumes.
+
+No runs start there, with routing left on: every copy is assigned to Kun as
+a member with the reviewer set to none, and issues are created in backlog
+before their real status is set. Kun-line routing and patrols leave such
+issues alone. If issue analysis is on in that workspace, it may still make
+one model call per new or edited issue text; that is not an agent run.
+
+Setup, once:
+
+1. On ai.ferryway.cc, create a personal access token as Kun. Note the
+   `kunkunya` workspace id and Kun's member user id there.
+2. Add to `/opt/multica-main/.env` and redeploy:
+
+```bash
+MULTICA_MIRROR_WORKSPACE=<office workspace slug>
+MULTICA_MIRROR_TARGET_URL=https://ai.ferryway.cc
+MULTICA_MIRROR_TARGET_TOKEN=mul_...
+MULTICA_MIRROR_TARGET_WORKSPACE=<kunkunya workspace id>
+MULTICA_MIRROR_TARGET_ASSIGNEE=<Kun's user id there>
+```
+
+Any of the five unset means off. The log shows `mirror enabled` at start and
+`mirror: copy failed` for anything the target refused; failures retry on the
+next pass. Run only one office backend with the mirror on.
+
 ## Operating
 
 ```bash

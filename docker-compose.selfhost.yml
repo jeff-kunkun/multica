@@ -5,8 +5,7 @@
 # TLS and forwards to 127.0.0.1:8080 (backend) and 127.0.0.1:3000 (frontend).
 # Do NOT change these bindings to 0.0.0.0 — Docker bypasses host firewalls
 # (UFW/iptables) by default, so the raw ports would be exposed to the internet
-# while any deployment credentials remain weak. See:
-#   apps/docs/content/docs/self-host-quickstart.mdx
+# while any deployment credentials remain weak.
 #
 # Usage:
 #   cp .env.example .env
@@ -115,6 +114,11 @@ services:
       MULTICA_PASSWORD_AUTH_PASSWORD: ${MULTICA_PASSWORD_AUTH_PASSWORD:-}
       MULTICA_PASSWORD_AUTH_EMAIL: ${MULTICA_PASSWORD_AUTH_EMAIL:-}
       MULTICA_SIGNUP_TOTP_SECRET: ${MULTICA_SIGNUP_TOTP_SECRET:-}
+      MULTICA_MIRROR_WORKSPACE: ${MULTICA_MIRROR_WORKSPACE:-}
+      MULTICA_MIRROR_TARGET_URL: ${MULTICA_MIRROR_TARGET_URL:-}
+      MULTICA_MIRROR_TARGET_TOKEN: ${MULTICA_MIRROR_TARGET_TOKEN:-}
+      MULTICA_MIRROR_TARGET_WORKSPACE: ${MULTICA_MIRROR_TARGET_WORKSPACE:-}
+      MULTICA_MIRROR_TARGET_ASSIGNEE: ${MULTICA_MIRROR_TARGET_ASSIGNEE:-}
       DISABLE_WORKSPACE_CREATION: ${DISABLE_WORKSPACE_CREATION:-}
       DO_NOT_TRACK: ${DO_NOT_TRACK:-}
       # Managed Cloud stays off for self-hosting. All managed Cloud clients use
