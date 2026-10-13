@@ -223,7 +223,8 @@ const (
 // person whose chat or ticket it is) get results and run endings whether or
 // not they stream everything; a person who streams everything gets what they
 // can see. Nobody is told about their own action; an agent's result is never
-// treated as the person's own, even when their Bot started the run.
+// treated as the person's own, even when their Bot started the run, and
+// neither is a must-relay change their Bot made in their name.
 //
 // An owner whose Bot is connected but not verified still gets a row, blocked
 // with the reason, so the result is not lost: it goes to their inbox and
@@ -237,7 +238,7 @@ func (w *OfficeEventWorker) recipients(ctx context.Context, ev db.OfficeEvent, c
 	var out []officeRecipient
 	add := func(r officeRecipient) error {
 		key := uuidToString(r.binding.BotID)
-		if seen[key] || w.ownAction(ev, r.binding.UserID) {
+		if seen[key] || ownAction(ev, class, r.binding.UserID) {
 			return nil
 		}
 		visible, err := w.h.officeEventVisibleErr(ctx, ev, r.binding.UserID)
@@ -256,7 +257,7 @@ func (w *OfficeEventWorker) recipients(ctx context.Context, ev db.OfficeEvent, c
 			return nil, "", nil, err
 		}
 		for _, user := range owners {
-			if w.ownAction(ev, user) {
+			if ownAction(ev, class, user) {
 				continue // they did it; nobody is missing
 			}
 			b, err := w.h.Queries.GetOfficeBindingForUser(ctx, db.GetOfficeBindingForUserParams{WorkspaceID: ev.WorkspaceID, UserID: user})
@@ -305,7 +306,14 @@ func (w *OfficeEventWorker) recipients(ctx context.Context, ev db.OfficeEvent, c
 	return out, gap, unreached, nil
 }
 
-func (w *OfficeEventWorker) ownAction(ev db.OfficeEvent, user pgtype.UUID) bool {
+// ownAction is a person's own change echoing back to them. Their Bot acting
+// in their name is theirs for plain progress, but not for a result that must
+// reach them: the Bot may have acted on its own (DENE-1925 was reverted by
+// one), and classification already treats it as no person's hand.
+func ownAction(ev db.OfficeEvent, class service.OfficeClass, user pgtype.UUID) bool {
+	if ev.ViaBotID.Valid && class.MustRelay {
+		return false
+	}
 	return ev.ActorType == "member" && ev.ActorID.Valid && ev.ActorID == user
 }
 

@@ -117,7 +117,9 @@ Each entry in `artifacts`: `id`, `filename`, `content_type`, `size`, `sha256`,
   A chat: its opener. Re-checked at every attempt; a recipient who lost access
   is blocked, never sent.
 - Nobody is told about their own action. An agent's result is not the
-  person's own action, even when their Bot started the run.
+  person's own action, even when their Bot started the run. A must-relay
+  change their Bot made in their name (closing a release ticket, say) is not
+  either: it reaches them as `reason: owner`, or leaves a gap without a Bot.
 - An owner whose Bot is connected but not verified still gets a row, blocked
   with the reason: it reaches their inbox and goes out by itself once the
   Bot is verified.

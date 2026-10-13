@@ -302,6 +302,69 @@ func TestOfficeEventRoutingDoneOnReleaseWorkStillWaitsForApproval(t *testing.T) 
 	}
 }
 
+// The owner's Bot closing release work in their name (DENE-1925 was a Bot
+// reverting one) must still reach the owner as a must-relay result, even with
+// an owned-only binding; without a Bot it is a recoverable gap. The person's
+// own hand stays an echo.
+func TestOfficeEventOwnersBotClosingReleaseWorkStillReachesThem(t *testing.T) {
+	f := newOfficeFixture(t)
+	setActivityScope(t, f.humanNeededFixture, "owned")
+	bot := uuidToString(f.bot.ID)
+
+	issue := ownedIssue(t, "正式发布 v3 到生产环境")
+	asActor(t, dbactor.Actor{Type: "member", ID: testUserID, ViaBotID: bot, OnBehalfOf: testUserID},
+		`UPDATE issue SET status='done' WHERE id=$1`, issue)
+	f.seal(t)
+	ev := latestOfficeEvent(t, `issue_id=$1`, issue)
+	if !ev.pendingApproval || !ev.mustRelay || ev.meaning != service.OfficeMeaningPendingRel {
+		t.Fatalf("a Bot's close sealed as %+v", ev)
+	}
+	if status, reason, _, _ := deliveryStatus(t, ev.eventID, bot); status != "pending" || reason != "owner" {
+		t.Fatalf("the owner was skipped as their own action: %q/%q", status, reason)
+	}
+	var mustRelay bool
+	dbfx.QueryRow(t, `SELECT must_relay FROM office_event_delivery WHERE event_id=$1 AND bot_id=$2`, ev.eventID, bot).Scan(&mustRelay)
+	if !mustRelay {
+		t.Fatal("the owner delivery does not carry must_relay")
+	}
+	f.worker.DeliverDue(context.Background())
+	receipt := f.botPath() + "/office-events/" + ev.eventID + "/receipt"
+	if code, _ := f.call(t, "POST", receipt, map[string]any{"stage": "received"}); code != 200 {
+		t.Fatalf("received receipt %d", code)
+	}
+	if code, out := f.call(t, "POST", receipt, map[string]any{"stage": "handled", "reason": "seen"}); code != http.StatusConflict {
+		t.Fatalf("the Bot's own release close was settled as handled: %d %v", code, out)
+	}
+
+	// Another owner without a Bot: a gap they get back in the app.
+	peer := summonSecondMember(t)
+	peerIssue := dbfx.Insert(t, "issue", testutil.Cols{
+		"workspace_id": testWorkspaceID, "title": "正式发布 v3.1", "status": "in_review", "priority": "none",
+		"creator_type": "member", "creator_id": peer, "number": nextTestIssueNumber(t),
+	})
+	asActor(t, dbactor.Actor{Type: "member", ID: peer, ViaBotID: bot, OnBehalfOf: peer},
+		`UPDATE issue SET status='done' WHERE id=$1`, peerIssue)
+	f.seal(t)
+	ev = latestOfficeEvent(t, `issue_id=$1`, peerIssue)
+	var gap string
+	dbfx.QueryRow(t, `SELECT recipient_gap FROM office_event WHERE event_id=$1`, ev.eventID).Scan(&gap)
+	if gap != officeGapNoBot {
+		t.Fatalf("a Bot-less owner: gap=%q", gap)
+	}
+	if n := dbfx.Count(t, `SELECT count(*) FROM office_event_gap WHERE event_id=$1 AND user_id=$2`, ev.eventID, peer); n != 1 {
+		t.Fatalf("the Bot-less owner has %d gap rows", n)
+	}
+
+	// The person's own hand, plain or release: still not echoed back.
+	mine := ownedIssue(t, "正式发布 v4")
+	asActor(t, dbactor.Actor{Type: "member", ID: testUserID}, `UPDATE issue SET status='done' WHERE id=$1`, mine)
+	f.seal(t)
+	ev = latestOfficeEvent(t, `issue_id=$1`, mine)
+	if ev.pendingApproval || dbfx.Count(t, `SELECT count(*) FROM office_event_delivery WHERE event_id=$1`, ev.eventID) != 0 {
+		t.Fatalf("the person's own close: %+v echoed", ev)
+	}
+}
+
 func TestOfficeEventConfigChangesAreMaskedAndOnlyForAdmins(t *testing.T) {
 	f := newOfficeFixture(t)
 	setActivityScope(t, f.humanNeededFixture, "owner_visible_all")
