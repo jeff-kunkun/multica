@@ -79,6 +79,8 @@ type fakeTarget struct {
 	calls []call
 	n     int
 	gone  map[string]bool
+	gets  map[string]any // GET path -> JSON answer; reads are not recorded
+	ids   string         // prefix of handed-out ids, default "r"
 }
 
 func (t *fakeTarget) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -86,6 +88,14 @@ func (t *fakeTarget) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	defer t.mu.Unlock()
 	if r.Header.Get("Authorization") != "Bearer tok" || r.Header.Get("X-Workspace-ID") != "ws-old" {
 		w.WriteHeader(http.StatusUnauthorized)
+		return
+	}
+	if r.Method == http.MethodGet {
+		answer, ok := t.gets[r.URL.Path]
+		if !ok || r.URL.Query().Get("offset") > "0" {
+			answer = map[string]any{"issues": []any{}}
+		}
+		_ = json.NewEncoder(w).Encode(answer)
 		return
 	}
 	var body map[string]any
@@ -98,7 +108,11 @@ func (t *fakeTarget) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	if r.Method == http.MethodPost {
 		t.n++
-		_ = json.NewEncoder(w).Encode(map[string]string{"id": fmt.Sprintf("r%d", t.n)})
+		prefix := t.ids
+		if prefix == "" {
+			prefix = "r"
+		}
+		_ = json.NewEncoder(w).Encode(map[string]string{"id": fmt.Sprintf("%s%d", prefix, t.n)})
 		return
 	}
 	w.WriteHeader(http.StatusOK)
@@ -130,7 +144,7 @@ func setup(t *testing.T) (*fakeSource, *fakeTarget, *Mirror) {
 	src.versions[KindIssue]["i1"] = t0
 	src.versions[KindIssue]["i2"] = t0
 	src.comments["c1"] = Comment{ID: "c1", IssueID: "i1", Author: "kunkunya", Content: "交给 [@孙悟空](mention://agent/x) 看 [DENE-2](mention://issue/i2)", CreatedAt: t0}
-	src.comments["c2"] = Comment{ID: "c2", IssueID: "i1", ParentID: "c1", Author: "孙悟空", Content: "收到", CreatedAt: t0}
+	src.comments["c2"] = Comment{ID: "c2", IssueID: "i1", ParentID: "c1", Author: "孙悟空", Engine: "codex", Content: "收到", CreatedAt: t0}
 	src.versions[KindComment]["c1"] = t0
 	src.versions[KindComment]["c2"] = t0
 	return src, target, m
@@ -209,10 +223,13 @@ func TestSyncCopiesTreeOnce(t *testing.T) {
 			t.Fatalf("mention leaked: %q", content)
 		}
 		if strings.Contains(content, "收到") {
+			if content != "Codex：收到" {
+				t.Fatalf("agent comment must start with its CLI: %q", content)
+			}
 			if c.Body["parent_id"] != remote["c1"] {
 				t.Fatalf("reply not threaded: %v", c.Body)
 			}
-		} else if content != "**kunkunya**：交给 @孙悟空 看 DENE-2" {
+		} else if content != "kunkunya：交给 @孙悟空 看 DENE-2" {
 			t.Fatalf("comment content = %q", content)
 		}
 	}

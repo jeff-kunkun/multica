@@ -762,8 +762,12 @@ func main() {
 			slog.Error("mirror disabled: workspace not found", "workspace", cfg.Workspace, "error", err)
 		} else {
 			remote := mirror.NewHTTPRemote(cfg.TargetURL, cfg.TargetToken, cfg.TargetWorkspace)
-			slog.Info("mirror enabled", "workspace", cfg.Workspace, "target", cfg.TargetURL)
-			go mirror.New(src, remote, cfg.TargetAssignee, cfg.Interval, slog.Default()).Run(sweepCtx)
+			m := mirror.New(src, remote, cfg.TargetAssignee, cfg.Interval, slog.Default())
+			if cfg.LocalToken != "" {
+				m.EnablePull(mirror.NewHTTPRemote(cfg.LocalURL, cfg.LocalToken, src.WorkspaceID()), cfg.TargetWorkspace)
+			}
+			slog.Info("mirror enabled", "workspace", cfg.Workspace, "target", cfg.TargetURL, "pull", cfg.LocalToken != "")
+			go m.Run(sweepCtx)
 		}
 	}
 	// Seven-day runtime retention does not share the 30-second liveness tick:
