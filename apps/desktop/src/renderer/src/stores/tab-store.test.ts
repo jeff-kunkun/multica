@@ -274,8 +274,8 @@ describe("useTabStore actions", () => {
       const store = useTabStore.getState();
       store.switchWorkspace("acme"); // A = /acme/issues, active
       store.addTab("/acme/projects", "B");
-      store.addTab("/acme/skills", "C");
-      expect(urls()).toEqual(["/acme/issues", "/acme/projects", "/acme/skills"]);
+      store.addTab("/acme/runtimes", "C");
+      expect(urls()).toEqual(["/acme/issues", "/acme/projects", "/acme/runtimes"]);
 
       store.openTab("/acme/issues/d", "D"); // background: A stays active
       const s = useTabStore.getState();
@@ -283,7 +283,7 @@ describe("useTabStore actions", () => {
         "/acme/issues",
         "/acme/issues/d",
         "/acme/projects",
-        "/acme/skills",
+        "/acme/runtimes",
       ]);
       expect(getActiveTab(s)?.url).toBe("/acme/issues");
     });
@@ -292,7 +292,7 @@ describe("useTabStore actions", () => {
       const store = useTabStore.getState();
       store.switchWorkspace("acme"); // A
       store.addTab("/acme/projects", "B");
-      store.addTab("/acme/skills", "C");
+      store.addTab("/acme/runtimes", "C");
       const bId = useTabStore.getState().byWorkspace.acme.tabs[1].id;
       store.setActiveTab(bId);
 
@@ -302,7 +302,7 @@ describe("useTabStore actions", () => {
         "/acme/issues",
         "/acme/projects",
         "/acme/issues/d",
-        "/acme/skills",
+        "/acme/runtimes",
       ]);
       expect(getActiveTab(s)?.url).toBe("/acme/issues/d"); // foreground open
     });
@@ -325,20 +325,20 @@ describe("useTabStore actions", () => {
       const store = useTabStore.getState();
       store.switchWorkspace("acme"); // A active
       store.addTab("/acme/projects", "B");
-      store.addTab("/acme/skills", "C"); // active is still A — must append anyway
-      expect(urls()).toEqual(["/acme/issues", "/acme/projects", "/acme/skills"]);
+      store.addTab("/acme/runtimes", "C"); // active is still A — must append anyway
+      expect(urls()).toEqual(["/acme/issues", "/acme/projects", "/acme/runtimes"]);
     });
 
     it("a dedupe hit focuses the existing tab without reordering", () => {
       const store = useTabStore.getState();
       store.switchWorkspace("acme"); // A active
       store.addTab("/acme/projects", "B");
-      store.addTab("/acme/skills", "C");
+      store.addTab("/acme/runtimes", "C");
 
-      store.openTab("/acme/skills", "C again"); // hits C, at the far end
+      store.openTab("/acme/runtimes", "C again"); // hits C, at the far end
       const s = useTabStore.getState();
-      expect(urls()).toEqual(["/acme/issues", "/acme/projects", "/acme/skills"]);
-      expect(getActiveTab(s)?.url).toBe("/acme/skills");
+      expect(urls()).toEqual(["/acme/issues", "/acme/projects", "/acme/runtimes"]);
+      expect(getActiveTab(s)?.url).toBe("/acme/runtimes");
     });
   });
 
@@ -1397,14 +1397,14 @@ describe("mergePersistedTabs (rehydration, MUL-4370)", () => {
     ).byWorkspace.acme.tabs[0];
   }
 
-  // A user who opened /acme/skills on an older build has "ListTodo"
+  // A user who opened /acme/runtimes on an older build has "ListTodo"
   // persisted for it. Carrying that value forward is what kept the tab bar
   // showing the wrong icon after upgrade, while the sidebar showed the new
   // one. The session must not hold an icon at all.
   it("does not carry a stale persisted icon into the session", () => {
-    const tab = rehydrate(persistedTab("/acme/skills", { icon: "ListTodo" }));
+    const tab = rehydrate(persistedTab("/acme/runtimes", { icon: "ListTodo" }));
     expect(tab).not.toHaveProperty("icon");
-    expect(tab.url).toBe("/acme/skills");
+    expect(tab.url).toBe("/acme/runtimes");
   });
 
   it("ignores an unknown or corrupted persisted icon", () => {

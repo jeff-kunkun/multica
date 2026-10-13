@@ -21,7 +21,6 @@ const draft = (): AgentDraft => ({
   model: "model-1",
   thinkingLevel: "",
   serviceTier: "",
-  skillIds: new Set(["skill-1"]),
   permissionScope: "private",
   memberIds: new Set(),
   teamIds: new Set(),
@@ -64,7 +63,6 @@ const sourceAgent = (overrides: Partial<Agent> = {}): Agent =>
     thinking_level: "high",
     service_tier: "priority",
     owner_id: "user-1",
-    skills: [{ id: "skill-1", name: "Review", description: "" }],
     created_at: "2026-07-28T00:00:00Z",
     updated_at: "2026-07-28T00:00:00Z",
     archived_at: null,
@@ -265,7 +263,6 @@ describe("agent draft execution overrides", () => {
       thinkingLevel: "high",
       serviceTier: "priority",
     });
-    expect([...duplicate.skillIds]).toEqual(["skill-1"]);
   });
 
   it("drops the execution config when the duplicate falls back to another runtime", () => {

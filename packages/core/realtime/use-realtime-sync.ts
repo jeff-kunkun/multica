@@ -545,7 +545,6 @@ function invalidateWorkspaceScopedQueries(qc: QueryClient): void {
     void onInboxInvalidate(qc, wsId);
     qc.invalidateQueries({ queryKey: workspaceKeys.agents(wsId) });
     qc.invalidateQueries({ queryKey: workspaceKeys.members(wsId) });
-    qc.invalidateQueries({ queryKey: workspaceKeys.skills(wsId) });
     qc.invalidateQueries({ queryKey: workspaceKeys.invitations(wsId) });
     qc.invalidateQueries({ queryKey: projectKeys.all(wsId) });
     qc.invalidateQueries({ queryKey: runtimeKeys.all(wsId) });
@@ -683,10 +682,6 @@ export function useRealtimeSync(
       workspace: () => {
         qc.invalidateQueries({ queryKey: workspaceKeys.list() });
       },
-      skill: () => {
-        const wsId = getCurrentWsId();
-        if (wsId) qc.invalidateQueries({ queryKey: workspaceKeys.skills(wsId) });
-      },
       project: () => {
         const wsId = getCurrentWsId();
         if (wsId) {
@@ -700,17 +695,16 @@ export function useRealtimeSync(
         }
       },
       label: () => {
-        // Label catalogs are independently scoped to issues, agents, and
-        // skills. The generic event prefix does not carry the scope into this
-        // dispatcher, so refresh all three resource projections. Issue rows
-        // embed label snapshots; agent/skill label pickers use their resource
-        // cache plus the shared label query tree.
+        // Label catalogs are independently scoped to issues and agents. The
+        // generic event prefix does not carry the scope into this dispatcher,
+        // so refresh both resource projections. Issue rows embed label
+        // snapshots; agent label pickers use their resource cache plus the
+        // shared label query tree.
         const wsId = getCurrentWsId();
         if (wsId) {
           qc.invalidateQueries({ queryKey: ["labels", wsId] });
           qc.invalidateQueries({ queryKey: issueKeys.all(wsId) });
           qc.invalidateQueries({ queryKey: workspaceKeys.agents(wsId) });
-          qc.invalidateQueries({ queryKey: workspaceKeys.skills(wsId) });
         }
       },
       // The issue status catalog (MUL-6243). An admin edits it in the settings

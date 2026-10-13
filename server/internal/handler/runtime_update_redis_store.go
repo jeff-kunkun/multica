@@ -11,7 +11,7 @@ import (
 )
 
 // Redis-backed implementation of UpdateStore. CLI updates have the same
-// pending-request shape as model-list and runtime-local-skill requests:
+// pending-request shape as model-list and runtime capability requests:
 // frontend creates the request, daemon claims it on heartbeat, daemon reports
 // a terminal result, and the UI polls by request ID. In multi-node deploys all
 // four calls can hit different API replicas, so the lifecycle must live in

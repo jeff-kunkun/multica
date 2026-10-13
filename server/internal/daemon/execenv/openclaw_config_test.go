@@ -1509,56 +1509,6 @@ func TestPrepareOpenclawConfigFailsClosedOnMalformedMcpConfig(t *testing.T) {
 	}
 }
 
-// TestPrepareOpenclawSkillWriteMatchesScanPath is the regression test the
-// MUL-2219 DoD calls out: the directory Multica writes skills into MUST be
-// the same directory the OpenClaw scanner reads from. We assert this by
-// resolving the workspaceDir the way OpenClaw does (agents.defaults.workspace
-// from the synthesized config) and proving {workspaceDir}/skills/ holds the
-// skill we wrote. Previous fixes asserted "we wrote a file" without checking
-// the scanner would ever see it; that is why MUL-2213 / #2621 needed a
-// follow-up.
-func TestPrepareOpenclawSkillWriteMatchesScanPath(t *testing.T) {
-	envRoot := t.TempDir()
-	workDir := filepath.Join(envRoot, "workdir")
-	for _, sub := range []string{workDir, filepath.Join(envRoot, "output"), filepath.Join(envRoot, "logs")} {
-		if err := os.MkdirAll(sub, 0o755); err != nil {
-			t.Fatalf("mkdir %s: %v", sub, err)
-		}
-	}
-
-	stub := installOpenclawStub(t, map[string]openclawResponse{
-		// Fresh install — no user config on disk. Wrapper carries only the
-		// workspace override, which is what the scanner reads.
-		"config file": {stdout: filepath.Join(t.TempDir(), "absent-openclaw.json")},
-	})
-
-	skills := []SkillContextForEnv{
-		{Name: "Issue Review", Content: "Review issues thoroughly."},
-		{Name: "Local Dev", Content: "Spin up the local dev env."},
-	}
-
-	result, err := prepareOpenclawConfig(envRoot, workDir, OpenclawConfigPrep{OpenclawBin: stub.bin})
-	if err != nil {
-		t.Fatalf("prepareOpenclawConfig: %v", err)
-	}
-	cfgPath := result.ConfigPath
-	if err := writeContextFiles(workDir, "openclaw", TaskContextForEnv{
-		IssueID:     "issue-1",
-		AgentSkills: skills,
-	}, nil); err != nil {
-		t.Fatalf("writeContextFiles: %v", err)
-	}
-
-	cfg := mustReadJSON(t, cfgPath)
-	wsDir := cfg["agents"].(map[string]any)["defaults"].(map[string]any)["workspace"].(string)
-	for _, s := range skills {
-		want := filepath.Join(wsDir, "skills", sanitizeSkillName(s.Name), "SKILL.md")
-		if _, err := os.Stat(want); err != nil {
-			t.Errorf("openclaw scan target %s missing — Multica's write path and the openclaw scanner are out of sync: %v", want, err)
-		}
-	}
-}
-
 // TestPrepareEnvironmentOpenclawWiresConfigPath — end-to-end: Prepare sets
 // env.OpenclawConfigPath so the daemon can export OPENCLAW_CONFIG_PATH, and
 // the path resolves to a file with the correct workspace override. With

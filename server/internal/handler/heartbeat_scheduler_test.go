@@ -18,7 +18,7 @@ func TestBatchedHeartbeatScheduler_CoalescesAndFlushes(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
 	}
-	runtimeID := createRuntimeLocalSkillTestRuntime(t, testUserID)
+	runtimeID := createOnlineTestRuntime(t, testUserID)
 
 	// Push the row's last_seen_at into the past so the post-flush value is
 	// distinguishable from the pre-flush one.
@@ -74,7 +74,7 @@ func TestBatchedHeartbeatScheduler_ExplicitDeregisterReceiptStaysOffline(t *test
 	if testHandler == nil {
 		t.Skip("database not available")
 	}
-	runtimeID := createRuntimeLocalSkillTestRuntime(t, testUserID)
+	runtimeID := createOnlineTestRuntime(t, testUserID)
 	setRuntimeLastSeenAt(t, runtimeID, time.Now())
 	rt := loadRuntime(t, runtimeID)
 	recoveries := &recordingRecoveryNotifier{}
@@ -124,7 +124,7 @@ func TestBatchedHeartbeatScheduler_StopDrains(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
 	}
-	runtimeID := createRuntimeLocalSkillTestRuntime(t, testUserID)
+	runtimeID := createOnlineTestRuntime(t, testUserID)
 	stale := time.Now().Add(-2 * time.Hour)
 	setRuntimeLastSeenAt(t, runtimeID, stale)
 	rt := loadRuntime(t, runtimeID)
@@ -165,7 +165,7 @@ func TestBatchedHeartbeatScheduler_StopFlushesLateSchedule(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
 	}
-	runtimeID := createRuntimeLocalSkillTestRuntime(t, testUserID)
+	runtimeID := createOnlineTestRuntime(t, testUserID)
 	stale := time.Now().Add(-2 * time.Hour)
 	setRuntimeLastSeenAt(t, runtimeID, stale)
 	rt := loadRuntime(t, runtimeID)
@@ -209,7 +209,7 @@ func TestBatchedHeartbeatScheduler_StopRecoveryUsesBoundedContextAndKnownWorkspa
 	if testHandler == nil {
 		t.Skip("database not available")
 	}
-	runtimeID := createRuntimeLocalSkillTestRuntime(t, testUserID)
+	runtimeID := createOnlineTestRuntime(t, testUserID)
 	setRuntimeLastSeenAt(t, runtimeID, time.Now().Add(-2*heartbeatReceiptRecoveryThreshold))
 	rt := loadRuntime(t, runtimeID)
 
@@ -278,7 +278,7 @@ func TestBatchedHeartbeatScheduler_RaceToOfflineSelfHeals(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
 	}
-	runtimeID := createRuntimeLocalSkillTestRuntime(t, testUserID)
+	runtimeID := createOnlineTestRuntime(t, testUserID)
 	setRuntimeLastSeenAt(t, runtimeID, time.Now().Add(-2*heartbeatReceiptRecoveryThreshold))
 	rt := loadRuntime(t, runtimeID)
 
@@ -325,7 +325,7 @@ func TestBatchedHeartbeatScheduler_DeletedReceiptInvalidatesRuntime(t *testing.T
 	if testHandler == nil {
 		t.Skip("database not available")
 	}
-	runtimeID := createRuntimeLocalSkillTestRuntime(t, testUserID)
+	runtimeID := createOnlineTestRuntime(t, testUserID)
 	rt := loadRuntime(t, runtimeID)
 	notifier := &recordingRuntimeGoneNotifier{}
 	sched := NewBatchedHeartbeatScheduler(testHandler.Queries, 0, notifier)
@@ -354,7 +354,7 @@ func TestPassthroughHeartbeatScheduler_TouchAndRaceRecovery(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
 	}
-	runtimeID := createRuntimeLocalSkillTestRuntime(t, testUserID)
+	runtimeID := createOnlineTestRuntime(t, testUserID)
 	stale := time.Now().Add(-time.Hour)
 	setRuntimeLastSeenAt(t, runtimeID, stale)
 	rt := loadRuntime(t, runtimeID)

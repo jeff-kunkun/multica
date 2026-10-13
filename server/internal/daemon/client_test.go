@@ -35,21 +35,12 @@ func TestClient_IdentityHeaders_PostJSON(t *testing.T) {
 			capabilities[strings.TrimSpace(capability)] = true
 		}
 		for _, want := range []string{
-			protocol.DaemonCapabilitySkillBundlesV1,
 			protocol.DaemonCapabilityCoalescedCommentsV1,
 			// The worktree gate is decided entirely from this header: if the
 			// daemon stops advertising it, every worktree task on this machine
 			// is cancelled with an upgrade prompt (MUL-5707). Pin it here so
 			// dropping it from the list can never be a silent change.
 			protocol.DaemonCapabilityLocalWorktreeV1,
-			// Same shape, opposite default: this daemon's brief names the
-			// merged multica-platform skill, and advertising that is what
-			// stops the server shipping it a redirect stub under the old name
-			// (MUL-6986). Dropping it would silently hand every task on this
-			// machine a skill it does not need; the failure is extra payload
-			// and a stale signpost, neither of which any other test would
-			// notice.
-			protocol.DaemonCapabilityPlatformSkillV1,
 			// Gates whether an automatic retry is handed its parent's workdir
 			// (MUL-7034). Dropping it silently sends those retries back to a
 			// fresh directory, losing the continuity nothing else would flag.

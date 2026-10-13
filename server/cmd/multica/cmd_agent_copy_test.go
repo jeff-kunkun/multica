@@ -42,10 +42,6 @@ func fullSourceAgent() map[string]any {
 		"service_tier":         "priority",
 		"permission_mode":      "public_to",
 		"invocation_targets":   []any{map[string]any{"target_type": "workspace"}},
-		"skills": []any{
-			map[string]any{"id": "skill-1", "name": "One"},
-			map[string]any{"id": "skill-2", "name": "Two"},
-		},
 		// Secret metadata the copy must never turn into real values.
 		"has_custom_env":       true,
 		"custom_env_key_count": 2,
@@ -143,10 +139,6 @@ func TestAgentCopySameRuntimeCopiesPortableFields(t *testing.T) {
 	}
 	if !reflect.DeepEqual(gotBody["invocation_targets"], []any{map[string]any{"target_type": "workspace"}}) {
 		t.Errorf("invocation_targets = %v", gotBody["invocation_targets"])
-	}
-	// Skills bind in the same create request.
-	if !reflect.DeepEqual(gotBody["skill_ids"], []any{"skill-1", "skill-2"}) {
-		t.Errorf("skill_ids = %v, want [skill-1 skill-2]", gotBody["skill_ids"])
 	}
 	// Secrets / machine-local config must never be copied.
 	for _, k := range []string{"custom_env", "mcp_config", "runtime_config", "has_custom_env"} {
@@ -266,10 +258,6 @@ func TestAgentCopyCrossRuntimeDropsRuntimeSpecificFields(t *testing.T) {
 	if _, ok := gotBody["service_tier"]; ok {
 		t.Errorf("service_tier must be dropped on a runtime change, got %v", gotBody["service_tier"])
 	}
-	// Skills still travel across the runtime change.
-	if !reflect.DeepEqual(gotBody["skill_ids"], []any{"skill-1", "skill-2"}) {
-		t.Errorf("skill_ids = %v", gotBody["skill_ids"])
-	}
 }
 
 // Passing --model "" across a runtime change is an explicit "accept the target
@@ -289,23 +277,6 @@ func TestAgentCopyCrossRuntimeEmptyModelIsAllowed(t *testing.T) {
 	}
 	if gotBody["model"] != "" {
 		t.Errorf("model = %v, want empty string", gotBody["model"])
-	}
-}
-
-func TestAgentCopyNoSkillsOmitsSkillIDs(t *testing.T) {
-	var gotBody map[string]any
-	srv := copyMockServer(t, fullSourceAgent(), &gotBody)
-	defer srv.Close()
-	setCopyTestEnv(t, srv.URL)
-
-	cmd := newAgentCopyTestCmd()
-	_ = cmd.Flags().Set("no-skills", "true")
-
-	if err := runAgentCopy(cmd, []string{"agent-src"}); err != nil {
-		t.Fatalf("runAgentCopy: %v", err)
-	}
-	if _, ok := gotBody["skill_ids"]; ok {
-		t.Errorf("skill_ids must be omitted with --no-skills, got %v", gotBody["skill_ids"])
 	}
 }
 

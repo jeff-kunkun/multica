@@ -9,7 +9,6 @@
     "agents": "Agents",
     "usage": "Analytics",
     "runtimes": "Runtimes",
-    "skills": "Skills",
     "settings": "Settings"
   },
   "tab": {
@@ -17,7 +16,6 @@
     "project": "Project",
     "agent": "Agent",
     "member": "Member",
-    "skill": "Skill",
     "machine": "Machine",
     "runtime": "Runtime",
     "attachment": "Attachment",

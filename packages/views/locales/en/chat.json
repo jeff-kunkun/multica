@@ -62,7 +62,6 @@
       "runtime_access_denied": "This agent can't run on its private runtime, so it couldn't reply. Make the runtime public, or rebind/copy the agent to a runtime its owner can use.",
       "runtime_recovery": "The agent restarted before it could finish. Please try again.",
       "manual": "This reply was cancelled.",
-      "skill_bundle_unavailable": "The agent's skills couldn't be downloaded, so it never got started. This is usually a connection problem — please try again.",
       "runtime_cli_timeout": "The local OpenClaw CLI didn't answer in time, so this run never started. It's a local startup timeout, not a network problem — retrying won't help until the CLI gets faster or the timeout is raised (MULTICA_OPENCLAW_CLI_TIMEOUT).",
       "environment_prepare_failed": "The machine running the agent couldn't set this run up, so it never started. The error below says what failed there — often disk space, a permission, a folder still in use, or a local config that couldn't be read. It isn't the agent or the model provider.",
       "provider_network": "The connection to the model provider dropped before the reply finished. Check your network and try again.",
@@ -142,7 +141,7 @@
   "empty_state": {
     "first_time_title": "Chat with your agents",
     "first_time_intro": "✨ They know your workspace —",
-    "first_time_pillars": "issues, projects, skills",
+    "first_time_pillars": "issues, projects, agents",
     "first_time_pillars_suffix": ".",
     "first_time_actions": "Ask for a summary, plan your day, or hand off a quick task.",
     "returning_title_named": "Hi, I'm {{name}}",

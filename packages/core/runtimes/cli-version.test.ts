@@ -31,7 +31,7 @@ describe("chatProjectContextSupported", () => {
 });
 
 describe("runtimeAdvertisesLocalWorktree", () => {
-  const capable = { capabilities: ["skill-bundles-v1", "local-worktree-v1"] };
+  const capable = { capabilities: ["other-feature-v1", "local-worktree-v1"] };
   const incapable = { cli_version: "9.9.9", capabilities: null };
   const row = (metadata: unknown, last_seen_at: string | null = "2026-08-13T00:00:00Z") => ({
     daemon_id: "d1",
@@ -41,7 +41,7 @@ describe("runtimeAdvertisesLocalWorktree", () => {
 
   it("reads the advertised capability", () => {
     expect(runtimeAdvertisesLocalWorktree([row(capable)], "d1")).toBe(true);
-    expect(runtimeAdvertisesLocalWorktree([row({ capabilities: ["skill-bundles-v1"] })], "d1")).toBe(
+    expect(runtimeAdvertisesLocalWorktree([row({ capabilities: ["other-feature-v1"] })], "d1")).toBe(
       false,
     );
   });

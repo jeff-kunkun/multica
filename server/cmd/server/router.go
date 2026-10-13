@@ -157,7 +157,7 @@ func normalizeServerVersion(v string) string {
 }
 
 // NewRouter creates the fully-configured Chi router with all middleware and routes.
-// rdb is optional: when non-nil the runtime local-skill request stores are
+// rdb is optional: when non-nil the runtime pending-request stores are
 // swapped for Redis-backed implementations so multiple API nodes share the
 // same pending queue (required for multi-node prod). This should be a request
 // path Redis client, not the realtime relay's blocking read client. A nil rdb
@@ -276,8 +276,6 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		h.UpdateStore = handler.NewRedisUpdateStore(rdb)
 		h.ModelListStore = handler.NewRedisModelListStore(rdb)
 		h.ModelCatalogCache = handler.NewRedisModelCatalogCache(rdb)
-		h.LocalSkillListStore = handler.NewRedisLocalSkillListStore(rdb)
-		h.LocalSkillImportStore = handler.NewRedisLocalSkillImportStore(rdb)
 		h.LivenessStore = handler.NewRedisLivenessStore(rdb)
 		h.InvitationRateLimiters = handler.NewRedisInvitationRateLimiters(rdb, invitationRateLimits)
 	}
@@ -482,12 +480,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		r.Post("/tasks/claim", h.ClaimTasksByRuntime)
 		r.Post("/claim", h.ClaimTasksByRuntime)
 		r.Post("/runtimes/{runtimeId}/tasks/{taskId}/prepare-lease", h.ExtendTaskPrepareLease)
-		r.Post("/runtimes/{runtimeId}/tasks/{taskId}/skill-bundles/resolve", h.ResolveTaskSkillBundles)
 		r.Get("/runtimes/{runtimeId}/tasks/pending", h.ListPendingTasksByRuntime)
 		r.Post("/runtimes/{runtimeId}/update/{updateId}/result", h.ReportUpdateResult)
 		r.Post("/runtimes/{runtimeId}/models/{requestId}/result", h.ReportModelListResult)
-		r.Post("/runtimes/{runtimeId}/local-skills/{requestId}/result", h.ReportLocalSkillListResult)
-		r.Post("/runtimes/{runtimeId}/local-skills/import/{requestId}/result", h.ReportLocalSkillImportResult)
 
 		r.Get("/tasks/{taskId}/status", h.GetTaskStatus)
 		r.Post("/tasks/{taskId}/start", h.StartTask)
@@ -877,19 +872,12 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Post("/restore", h.RestoreAgent)
 					r.Post("/cancel-tasks", h.CancelAgentTasks)
 					r.Get("/tasks", h.ListAgentTasks)
-					r.Get("/skills", h.ListAgentSkills)
-					r.Put("/skills", h.SetAgentSkills)
-					r.Post("/skills/add", h.AddAgentSkills)
 					r.Get("/labels", h.ListLabelsForAgent)
 					r.Post("/labels", h.AttachLabelToAgent)
 					r.Delete("/labels/{labelId}", h.DetachLabelFromAgent)
-					r.Put("/skills/{skillId}/enabled", h.SetAgentSkillEnabled)
-					r.Put("/runtime-skills/enabled", h.SetAgentRuntimeSkillEnabled)
-					r.Delete("/skills/{skillId}", h.RemoveAgentSkill)
-					// Workspace MCP servers assigned to this agent. Mirrors
-					// the skills routes above: a library entry does nothing
-					// until it is added here, and the binding carries its own
-					// enabled toggle.
+					// Workspace MCP servers assigned to this agent. A library
+					// entry does nothing until it is added here, and the
+					// binding carries its own enabled toggle.
 					r.Get("/mcp-servers", h.ListAgentMcpServers)
 					r.Post("/mcp-servers", h.AddAgentMcpServer)
 					r.Put("/mcp-servers/{serverId}/enabled", h.SetAgentMcpServerEnabled)
@@ -901,26 +889,6 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					// internal/handler/agent_env.go.
 					r.Get("/env", h.GetAgentEnv)
 					r.Put("/env", h.UpdateAgentEnv)
-				})
-			})
-
-			// Skills
-			r.Route("/api/skills", func(r chi.Router) {
-				r.Get("/", h.ListSkills)
-				r.Post("/", h.CreateSkill)
-				r.Get("/search", h.SearchSkills)
-				r.Post("/import", h.ImportSkill)
-				r.Route("/{id}", func(r chi.Router) {
-					r.Get("/", h.GetSkill)
-					r.Put("/", h.UpdateSkill)
-					r.Delete("/", h.DeleteSkill)
-					r.Post("/refresh", h.RefreshSkill)
-					r.Get("/labels", h.ListLabelsForSkill)
-					r.Post("/labels", h.AttachLabelToSkill)
-					r.Delete("/labels/{labelId}", h.DetachLabelFromSkill)
-					r.Get("/files", h.ListSkillFiles)
-					r.Put("/files", h.UpsertSkillFile)
-					r.Delete("/files/{fileId}", h.DeleteSkillFile)
 				})
 			})
 
@@ -949,10 +917,6 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Get("/update/{updateId}", h.GetUpdate)
 					r.Post("/models", h.InitiateListModels)
 					r.Get("/models/{requestId}", h.GetModelListRequest)
-					r.Post("/local-skills", h.InitiateListLocalSkills)
-					r.Get("/local-skills/{requestId}", h.GetLocalSkillListRequest)
-					r.Post("/local-skills/import", h.InitiateImportLocalSkill)
-					r.Get("/local-skills/import/{requestId}", h.GetLocalSkillImportRequest)
 					r.Delete("/", h.DeleteAgentRuntime)
 					// Confirmed variant of DELETE: unbind every agent bound to
 					// this runtime (they keep their configuration and chats and

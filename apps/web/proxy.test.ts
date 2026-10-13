@@ -63,7 +63,6 @@ describe("proxy legacy workspace route redirects", () => {
     ["inbox", "/acme/inbox"],
     ["my-issues", "/acme/my-issues"],
     ["runtimes", "/acme/runtimes"],
-    ["skills", "/acme/skills"],
     ["settings", "/acme/settings"],
     ["usage", "/acme/usage"],
   ])(

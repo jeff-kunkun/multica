@@ -26,7 +26,7 @@ export function ProviderChip({ provider }: { provider: string }) {
 // Maps each derived 4-state runtime health to a semantic colour class.
 // The mapping intentionally reuses our existing tokens (success/warning/
 // muted-foreground/destructive) instead of introducing runtime-specific
-// colours — keeps the palette small and consistent with Skills.
+// colours — keeps the palette small.
 // Labels flow through useT — see useHealthLabel below.
 const HEALTH_VISUAL: Record<RuntimeHealth, { dot: string; tone: string }> = {
   online: { dot: "bg-success", tone: "bg-success/10 text-success" },

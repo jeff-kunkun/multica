@@ -59,12 +59,6 @@ import type {
   WorkspaceBotWithSecrets,
   MemberWithUser,
   User,
-  Skill,
-  SkillSummary,
-  CreateSkillRequest,
-  UpdateSkillRequest,
-  SetAgentSkillsRequest,
-  SetAgentRuntimeSkillEnabledRequest,
   PersonalAccessToken,
   CreatePersonalAccessTokenRequest,
   CreatePersonalAccessTokenResponse,
@@ -81,9 +75,7 @@ import type {
   DashboardFailureByAgent,
   RuntimeUpdate,
   RuntimeModelListRequest,
-  RuntimeLocalSkillListRequest,
-  CreateRuntimeLocalSkillImportRequest,
-  RuntimeLocalSkillImportRequest,
+  RuntimeCapabilitiesRequest,
   TimelineEntry,
   AssigneeFrequencyEntry,
   TaskMessagePayload,
@@ -126,7 +118,6 @@ import type {
   UpdateIssueStatusRequest,
   IssueLabelsResponse,
   LabelResourceType,
-  ResourceLabelsResponse,
   PinnedItem,
   CreatePinRequest,
   PinnedItemType,
@@ -263,12 +254,6 @@ import {
   EMPTY_LIST_GITHUB_REPOSITORIES_RESPONSE,
   RuntimeModelListRequestSchema,
   MALFORMED_RUNTIME_MODEL_LIST_REQUEST,
-  SkillSchema,
-  EMPTY_SKILL,
-  SkillSummaryListSchema,
-  EMPTY_SKILL_SUMMARY_LIST,
-  SkillImportResultSchema,
-  EMPTY_SKILL_IMPORT_RESULT,
   IssueViewSchema,
   IssueViewListSchema,
   IssueViewPreferenceSchema,
@@ -476,37 +461,6 @@ export class PreviewUnsupportedError extends Error {
     super("attachment type not supported for inline preview");
     this.name = "PreviewUnsupportedError";
   }
-}
-
-function remapSkillImportError(err: unknown): unknown {
-  if (!(err instanceof ApiError) || !err.body || typeof err.body !== "object") {
-    return err;
-  }
-  const body = err.body as { reason?: unknown; error?: unknown };
-  const reason = typeof body.reason === "string" && body.reason ? body.reason : "";
-  const error = typeof body.error === "string" && body.error ? body.error : "";
-  const message = reason || error;
-  if (!message || message === err.message) return err;
-  return new ApiError(message, err.status, err.statusText, err.body);
-}
-
-function skillFromImportResult(raw: unknown, endpoint: string): Skill {
-  const result = parseWithFallback(
-    raw,
-    SkillImportResultSchema,
-    EMPTY_SKILL_IMPORT_RESULT,
-    { endpoint },
-  );
-  if (
-    (result.status === "created" || result.status === "updated") &&
-    result.skill
-  ) {
-    const skill = parseWithFallback(result.skill, SkillSchema, EMPTY_SKILL, {
-      endpoint,
-    });
-    if (skill.id) return skill;
-  }
-  throw new Error(result.reason || "Import failed");
 }
 
 /**
@@ -1930,36 +1884,19 @@ export class ApiClient {
     );
   }
 
-  async initiateListLocalSkills(
+  async initiateRuntimeCapabilities(
     runtimeId: string,
-  ): Promise<RuntimeLocalSkillListRequest> {
+  ): Promise<RuntimeCapabilitiesRequest> {
     return this.fetch(`/api/runtimes/${runtimeId}/local-skills`, {
       method: "POST",
     });
   }
 
-  async getListLocalSkillsResult(
+  async getRuntimeCapabilitiesResult(
     runtimeId: string,
     requestId: string,
-  ): Promise<RuntimeLocalSkillListRequest> {
+  ): Promise<RuntimeCapabilitiesRequest> {
     return this.fetch(`/api/runtimes/${runtimeId}/local-skills/${requestId}`);
-  }
-
-  async initiateImportLocalSkill(
-    runtimeId: string,
-    data: CreateRuntimeLocalSkillImportRequest,
-  ): Promise<RuntimeLocalSkillImportRequest> {
-    return this.fetch(`/api/runtimes/${runtimeId}/local-skills/import`, {
-      method: "POST",
-      body: JSON.stringify(data),
-    });
-  }
-
-  async getImportLocalSkillResult(
-    runtimeId: string,
-    requestId: string,
-  ): Promise<RuntimeLocalSkillImportRequest> {
-    return this.fetch(`/api/runtimes/${runtimeId}/local-skills/import/${requestId}`);
   }
 
   async listAgentTasksPage(
@@ -2558,129 +2495,6 @@ export class ApiClient {
       method: "DELETE",
     });
   }
-
-  // Skills
-  async listSkills(): Promise<SkillSummary[]> {
-    const raw = await this.fetch<unknown>("/api/skills");
-    return parseWithFallback(raw, SkillSummaryListSchema, EMPTY_SKILL_SUMMARY_LIST, {
-      endpoint: "GET /api/skills",
-    });
-  }
-
-  async getSkill(id: string): Promise<Skill> {
-    return this.fetch(`/api/skills/${id}`);
-  }
-
-  async createSkill(data: CreateSkillRequest): Promise<Skill> {
-    return this.fetch("/api/skills", {
-      method: "POST",
-      body: JSON.stringify(data),
-    });
-  }
-
-  async updateSkill(id: string, data: UpdateSkillRequest): Promise<Skill> {
-    return this.fetch(`/api/skills/${id}`, {
-      method: "PUT",
-      body: JSON.stringify(data),
-    });
-  }
-
-  async deleteSkill(id: string): Promise<void> {
-    await this.fetch(`/api/skills/${id}`, { method: "DELETE" });
-  }
-
-  async importSkill(data: { url: string }): Promise<Skill> {
-    return this.fetch("/api/skills/import", {
-      method: "POST",
-      body: JSON.stringify(data),
-    });
-  }
-
-  /**
-   * Imports a skill from a local .skill / .zip archive. Not routed through
-   * `this.fetch`: the browser has to set the multipart boundary itself.
-   *
-   * The archive path always returns a structured `{ status, skill, reason }`
-   * body. Created/updated responses yield the skill; anything else throws
-   * with the server's reason (or `error`) so the dialog can show it.
-   */
-  async importSkillArchive(
-    file: File,
-    onConflict?: "fail" | "overwrite" | "rename" | "skip",
-  ): Promise<Skill> {
-    const formData = new FormData();
-    formData.append("file", file, file.name || "skill.zip");
-    if (onConflict) formData.append("on_conflict", onConflict);
-
-    let res: Response;
-    try {
-      res = await this.fetchRaw("/api/skills/import", {
-        method: "POST",
-        body: formData,
-      });
-    } catch (err) {
-      throw remapSkillImportError(err);
-    }
-
-    const raw = (await res.json()) as unknown;
-    return skillFromImportResult(raw, "POST /api/skills/import");
-  }
-
-  // Re-downloads the skill from its stored config.origin source, replacing
-  // name/description/content/files in place while preserving the skill id and
-  // its agent bindings.
-  async refreshSkill(id: string): Promise<Skill> {
-    const raw = await this.fetch<unknown>(`/api/skills/${id}/refresh`, {
-      method: "POST",
-    });
-    return parseWithFallback(raw, SkillSchema, EMPTY_SKILL, {
-      endpoint: "POST /api/skills/:id/refresh",
-    });
-  }
-
-  async listAgentSkills(agentId: string): Promise<SkillSummary[]> {
-    return this.fetch(`/api/agents/${agentId}/skills`);
-  }
-
-  async setAgentSkills(agentId: string, data: SetAgentSkillsRequest): Promise<void> {
-    await this.fetch(`/api/agents/${agentId}/skills`, {
-      method: "PUT",
-      body: JSON.stringify(data),
-    });
-  }
-
-  // Incremental attach: POST /skills/add only inserts the given ids (the
-  // server upserts with ON CONFLICT DO NOTHING), so callers don't need to
-  // read the agent's current skill set first.
-  async addAgentSkills(agentId: string, data: SetAgentSkillsRequest): Promise<void> {
-    await this.fetch(`/api/agents/${agentId}/skills/add`, {
-      method: "POST",
-      body: JSON.stringify(data),
-    });
-  }
-
-	async setAgentSkillEnabled(agentId: string, skillId: string, enabled: boolean): Promise<void> {
-		await this.fetch(`/api/agents/${agentId}/skills/${skillId}/enabled`, {
-			method: "PUT",
-			body: JSON.stringify({ enabled }),
-		});
-	}
-
-  async setAgentRuntimeSkillEnabled(
-    agentId: string,
-    data: SetAgentRuntimeSkillEnabledRequest,
-  ): Promise<void> {
-    await this.fetch(`/api/agents/${agentId}/runtime-skills/enabled`, {
-      method: "PUT",
-      body: JSON.stringify(data),
-    });
-  }
-
-	async removeAgentSkill(agentId: string, skillId: string): Promise<void> {
-		await this.fetch(`/api/agents/${agentId}/skills/${skillId}`, {
-			method: "DELETE",
-		});
-	}
 
   // Personal Access Tokens
   async listPersonalAccessTokens(): Promise<PersonalAccessToken[]> {
@@ -3343,43 +3157,6 @@ export class ApiClient {
     });
     return parseWithFallback(raw, ResourceLabelsResponseSchema, EMPTY_RESOURCE_LABELS_RESPONSE, {
       endpoint: "DELETE /api/issues/{id}/labels/{labelId}",
-    });
-  }
-
-  async listLabelsForResource(
-    resourceType: "agent" | "skill",
-    resourceId: string,
-  ): Promise<ResourceLabelsResponse> {
-    const raw = await this.fetch<unknown>(`/api/${resourceType === "agent" ? "agents" : "skills"}/${resourceId}/labels`);
-    return parseWithFallback(raw, ResourceLabelsResponseSchema, EMPTY_RESOURCE_LABELS_RESPONSE, {
-      endpoint: `GET /api/${resourceType === "agent" ? "agents" : "skills"}/{id}/labels`,
-    });
-  }
-
-  async attachLabelToResource(
-    resourceType: "agent" | "skill",
-    resourceId: string,
-    labelId: string,
-  ): Promise<ResourceLabelsResponse> {
-    const raw = await this.fetch<unknown>(`/api/${resourceType === "agent" ? "agents" : "skills"}/${resourceId}/labels`, {
-      method: "POST",
-      body: JSON.stringify({ label_id: labelId }),
-    });
-    return parseWithFallback(raw, ResourceLabelsResponseSchema, EMPTY_RESOURCE_LABELS_RESPONSE, {
-      endpoint: `POST /api/${resourceType === "agent" ? "agents" : "skills"}/{id}/labels`,
-    });
-  }
-
-  async detachLabelFromResource(
-    resourceType: "agent" | "skill",
-    resourceId: string,
-    labelId: string,
-  ): Promise<ResourceLabelsResponse> {
-    const raw = await this.fetch<unknown>(`/api/${resourceType === "agent" ? "agents" : "skills"}/${resourceId}/labels/${labelId}`, {
-      method: "DELETE",
-    });
-    return parseWithFallback(raw, ResourceLabelsResponseSchema, EMPTY_RESOURCE_LABELS_RESPONSE, {
-      endpoint: `DELETE /api/${resourceType === "agent" ? "agents" : "skills"}/{id}/labels/{labelId}`,
     });
   }
 

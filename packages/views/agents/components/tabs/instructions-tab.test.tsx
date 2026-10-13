@@ -41,7 +41,6 @@ const baseAgent: Agent = {
   max_concurrent_tasks: 1,
   model: "",
   owner_id: "user-1",
-  skills: [],
   created_at: "2026-08-24T00:00:00Z",
   updated_at: "2026-08-24T00:00:00Z",
   archived_at: null,

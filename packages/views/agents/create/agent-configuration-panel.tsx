@@ -26,7 +26,6 @@ import { ServiceTierSettingField } from "../components/inspector/service-tier-se
 import { ThinkingSettingField } from "../components/inspector/thinking-prop-row";
 import { ModelDropdown } from "../components/model-dropdown";
 import { RuntimePicker } from "../components/runtime-picker";
-import { SkillMultiSelect } from "../components/skill-multi-select";
 import { ConversationStartersEditor } from "../components/conversation-starters-editor";
 
 const PERMISSION_SCOPES: AgentPermissionScope[] = [
@@ -160,12 +159,6 @@ export function AgentConfigurationPanel({
               />
             </div>
           ) : null}
-          <div className="px-4 py-4">
-            <SkillMultiSelect
-              selectedIds={draft.skillIds}
-              onChange={(ids) => set("skillIds", ids)}
-            />
-          </div>
         </SettingsCard>
       </SettingsSection>
 

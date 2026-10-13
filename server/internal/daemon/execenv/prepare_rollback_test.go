@@ -76,24 +76,26 @@ func TestPrepareRollsBackSidecarsWhenPrepareFailsInPlace(t *testing.T) {
 
 // TestPrepareRollsBackWhenWriteContextFilesFailsAfterMarker covers the earliest
 // failure window there is: writeContextFiles lays the marker down as its very
-// first act, then writes skills and project resources — either of which can
-// fail with the marker already on disk.
+// first act, then writes project resources — which can fail with the marker
+// already on disk.
 //
 // The first version of the MUL-6132 fix armed the rollback only after
 // writeContextFiles returned, so exactly these failures still stranded a marker
 // in the user's repository with nothing else beside it (MUL-6132 review). The
-// induced failure is a plain file where .agent_context must be a directory;
-// the task carries a skill because the default provider's skills tree
-// (.agent_context/skills) is now the only thing that opens that directory.
+// induced failure is a plain file where .multica/project must be a directory;
+// the task carries a project because project resources are what open it.
 func TestPrepareRollsBackWhenWriteContextFilesFailsAfterMarker(t *testing.T) {
 	workspacesRoot := t.TempDir()
 	userDir := t.TempDir()
 
 	// A regular file at the path writeContextFiles needs as a directory, one
 	// step after it writes the marker.
-	blocker := filepath.Join(userDir, ".agent_context")
+	if err := os.MkdirAll(filepath.Join(userDir, ".multica"), 0o755); err != nil {
+		t.Fatalf("seed .multica dir: %v", err)
+	}
+	blocker := filepath.Join(userDir, ".multica", "project")
 	if err := os.WriteFile(blocker, []byte("user file"), 0o644); err != nil {
-		t.Fatalf("seed .agent_context blocker: %v", err)
+		t.Fatalf("seed .multica/project blocker: %v", err)
 	}
 
 	_, err := Prepare(PrepareParams{
@@ -103,13 +105,13 @@ func TestPrepareRollsBackWhenWriteContextFilesFailsAfterMarker(t *testing.T) {
 		AgentName:      "Test Agent",
 		LocalWorkDir:   userDir,
 		Task: TaskContextForEnv{
-			IssueID:     "33333333-4444-5555-6666-777777777777",
-			AgentID:     "77777777-6666-5555-4444-333333333333",
-			AgentSkills: []SkillContextForEnv{{Name: "Go Conventions", Content: "Follow Go conventions."}},
+			IssueID:   "33333333-4444-5555-6666-777777777777",
+			AgentID:   "77777777-6666-5555-4444-333333333333",
+			ProjectID: "44444444-5555-6666-7777-888888888888",
 		},
 	}, testLogger())
 	if err == nil {
-		t.Fatal("Prepare succeeded; expected the .agent_context blocker to fail it")
+		t.Fatal("Prepare succeeded; expected the .multica/project blocker to fail it")
 	}
 
 	markerPath := filepath.Join(userDir, TaskContextMarkerRelPath)

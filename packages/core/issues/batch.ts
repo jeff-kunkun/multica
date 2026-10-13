@@ -52,9 +52,7 @@ function assigneeKey(type: IssueAssigneeType | null, id: string | null): string 
 
 /**
  * Derive the common status / priority / assignee of the selected issues.
- * Pass the already-filtered selection (the issues that are actually selected),
- * mirroring how the skill list filters its rows by `selectedIds` before
- * handing them to its batch toolbar.
+ * Pass the already-filtered selection (the issues that are actually selected).
  */
 export function commonIssueFields(issues: readonly Issue[]): CommonIssueFields {
   const status = sharedValue(issues.map((i) => i.status));

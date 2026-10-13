@@ -41,8 +41,7 @@ import {
  *
  * Two things shape this screen and are worth stating up front:
  *
- *  - A server added here is given to NO agent. It is a library entry, exactly
- *    like a workspace skill: an agent owner assigns it on the agent's own MCP
+ *  - A server added here is given to NO agent. It is a library entry: an agent owner assigns it on the agent's own MCP
  *    tab, where it also gets a per-agent on/off toggle. Nothing here reaches an
  *    agent implicitly.
  *  - The stored configuration is WRITE-ONLY. The API returns names and

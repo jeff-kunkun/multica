@@ -19,9 +19,8 @@ import (
 // into the per-task config and blocks `codex thread/start`.
 //
 // Stripping the whole `[[skills.config]]` array sidesteps the issue: Multica
-// writes the agent's currently assigned skills directly to
-// `codex-home/skills/<name>/SKILL.md`, and Codex auto-discovers them from
-// that directory. The user-level skill registry is irrelevant to a per-task
+// links the user's skill directories into `codex-home/skills/`, and Codex
+// auto-discovers them from there. The user-level skill registry is irrelevant to a per-task
 // run, so dropping it is both safe and the right scope of isolation.
 //
 // Lines outside `[[skills.config]]` blocks are preserved untouched.

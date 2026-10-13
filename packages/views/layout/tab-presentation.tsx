@@ -16,7 +16,6 @@ import {
 import { issueDetailOptions } from "@multica/core/issues/queries";
 import { projectDetailOptions } from "@multica/core/projects/queries";
 import {
-  skillDetailOptions,
   agentListOptions,
   memberListOptions,
 } from "@multica/core/workspace/queries";
@@ -65,7 +64,6 @@ const PENDING_RESOURCE_KEYS: ReadonlySet<TabLabelKey> = new Set<TabLabelKey>([
   "project",
   "agent",
   "member",
-  "skill",
   "machine",
   "runtime",
 ]);
@@ -131,10 +129,6 @@ function useTabEntityData(subject: TabSubject, wsId: string): TabEntityData {
     ...projectDetailOptions(wsId, subject.kind === "project" ? subject.id : NONE),
     enabled: false,
   }).data;
-  const skill = useQuery({
-    ...skillDetailOptions(wsId, subject.kind === "skill" ? subject.id : NONE),
-    enabled: false,
-  }).data;
 
   const agents = useQuery({ ...agentListOptions(wsId), enabled: false }).data;
   const members = useQuery({ ...memberListOptions(wsId), enabled: false }).data;
@@ -154,9 +148,6 @@ function useTabEntityData(subject: TabSubject, wsId: string): TabEntityData {
       break;
     case "project":
       if (project) data.project = { icon: project.icon, title: project.title };
-      break;
-    case "skill":
-      if (skill) data.skill = { name: skill.name };
       break;
     case "actor": {
       const name =

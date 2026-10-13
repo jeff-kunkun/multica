@@ -482,9 +482,6 @@ func TestPrepareDirectoryMode(t *testing.T) {
 		AgentName:      "Test Agent",
 		Task: TaskContextForEnv{
 			IssueID: "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
-			AgentSkills: []SkillContextForEnv{
-				{Name: "Code Review", Content: "Be concise."},
-			},
 		},
 	}, testLogger())
 	if err != nil {
@@ -537,14 +534,6 @@ func TestPrepareDirectoryMode(t *testing.T) {
 		t.Fatalf("marker issue_id = %q, want issue id", marker.IssueID)
 	}
 
-	// Verify skill files.
-	skillContent, err := os.ReadFile(filepath.Join(env.WorkDir, ".agent_context", "skills", "code-review", "SKILL.md"))
-	if err != nil {
-		t.Fatalf("failed to read SKILL.md: %v", err)
-	}
-	if !strings.Contains(string(skillContent), "Be concise.") {
-		t.Fatal("SKILL.md missing content")
-	}
 }
 
 func TestPrepareWithProjectResources(t *testing.T) {
@@ -811,45 +800,18 @@ func TestWriteContextFiles(t *testing.T) {
 
 	ctx := TaskContextForEnv{
 		IssueID: "test-issue-id-1234",
-		AgentSkills: []SkillContextForEnv{
-			{
-				Name:    "Go Conventions",
-				Content: "Follow Go conventions.",
-				Files: []SkillFileContextForEnv{
-					{Path: "templates/example.go", Content: "package main"},
-				},
-			},
-		},
 	}
 
 	if err := writeContextFiles(dir, "", ctx, nil); err != nil {
 		t.Fatalf("writeContextFiles failed: %v", err)
 	}
 
-	// writeContextFiles hydrates skills; it writes no Markdown brief of its
-	// own. The sidecar it used to write, .agent_context/issue_context.md, was
+	// writeContextFiles writes no Markdown brief of its own. The sidecar it used to write, .agent_context/issue_context.md, was
 	// a third copy of the issue id / trigger / handoff facts that the runtime
 	// brief and the per-turn message already carry, and no provider ever read
 	// it (MUL-6984).
 	if _, err := os.Stat(filepath.Join(dir, ".agent_context", "issue_context.md")); !os.IsNotExist(err) {
 		t.Fatalf("writeContextFiles wrote a sidecar brief; stat err = %v, want not-exist", err)
-	}
-
-	// Verify skill directory and files.
-	skillMd, err := os.ReadFile(filepath.Join(dir, ".agent_context", "skills", "go-conventions", "SKILL.md"))
-	if err != nil {
-		t.Fatalf("failed to read SKILL.md: %v", err)
-	}
-	if !strings.Contains(string(skillMd), "Follow Go conventions.") {
-		t.Error("SKILL.md missing content")
-	}
-
-	supportFile, err := os.ReadFile(filepath.Join(dir, ".agent_context", "skills", "go-conventions", "templates", "example.go"))
-	if err != nil {
-		t.Fatalf("failed to read supporting file: %v", err)
-	}
-	if string(supportFile) != "package main" {
-		t.Errorf("supporting file content = %q, want %q", string(supportFile), "package main")
 	}
 }
 
@@ -874,351 +836,6 @@ func TestWriteContextFilesLeavesNoAgentContextWhenNothingToWrite(t *testing.T) {
 	// must still be there.
 	if _, err := os.Stat(filepath.Join(dir, TaskContextMarkerRelPath)); err != nil {
 		t.Fatalf("task context marker missing: %v", err)
-	}
-}
-
-func TestWriteContextFilesClaudeNativeSkills(t *testing.T) {
-	t.Parallel()
-	dir := t.TempDir()
-
-	ctx := TaskContextForEnv{
-		IssueID: "claude-skill-test",
-		AgentSkills: []SkillContextForEnv{
-			{
-				Name:    "Go Conventions",
-				Content: "Follow Go conventions.",
-				Files: []SkillFileContextForEnv{
-					{Path: "templates/example.go", Content: "package main"},
-				},
-			},
-		},
-	}
-
-	if err := writeContextFiles(dir, "claude", ctx, nil); err != nil {
-		t.Fatalf("writeContextFiles failed: %v", err)
-	}
-
-	// Skills should be in .claude/skills/ (native discovery), NOT .agent_context/skills/.
-	skillMd, err := os.ReadFile(filepath.Join(dir, ".claude", "skills", "go-conventions", "SKILL.md"))
-	if err != nil {
-		t.Fatalf("failed to read .claude/skills/go-conventions/SKILL.md: %v", err)
-	}
-	if !strings.Contains(string(skillMd), "Follow Go conventions.") {
-		t.Error("SKILL.md missing content")
-	}
-
-	// Supporting files should also be under .claude/skills/.
-	supportFile, err := os.ReadFile(filepath.Join(dir, ".claude", "skills", "go-conventions", "templates", "example.go"))
-	if err != nil {
-		t.Fatalf("failed to read supporting file: %v", err)
-	}
-	if string(supportFile) != "package main" {
-		t.Errorf("supporting file content = %q, want %q", string(supportFile), "package main")
-	}
-
-	// .agent_context/skills/ should NOT exist for Claude.
-	if _, err := os.Stat(filepath.Join(dir, ".agent_context", "skills")); !os.IsNotExist(err) {
-		t.Error("expected .agent_context/skills/ to NOT exist for Claude provider")
-	}
-
-	// Nothing at all belongs under .agent_context for a native-skills
-	// provider now that the sidecar brief is gone (MUL-6984) — not even the
-	// directory. This runs in the user's own checkout on local_directory
-	// tasks, where an empty managed directory is noise.
-	if _, err := os.Stat(filepath.Join(dir, ".agent_context")); !os.IsNotExist(err) {
-		t.Errorf(".agent_context created for a native-skills provider; stat err = %v, want not-exist", err)
-	}
-}
-
-// TestWriteContextFilesCodebuddyNativeSkills is the regression guard for a
-// bug where CodeBuddy was treated as a drop-in alias for Claude and skills
-// were written to .claude/skills/. CodeBuddy Code is a Claude Code fork but
-// ships its own native config directory (~/.codebuddy, .codebuddy/) and does
-// NOT read .claude/skills/ by default — see
-// https://www.codebuddy.ai/docs/cli/skills ("Project-level Skills:
-// .codebuddy/skills/"). Skills must land under .codebuddy/skills/ instead.
-func TestWriteContextFilesCodebuddyNativeSkills(t *testing.T) {
-	t.Parallel()
-	dir := t.TempDir()
-
-	ctx := TaskContextForEnv{
-		IssueID: "codebuddy-skill-test",
-		AgentSkills: []SkillContextForEnv{
-			{
-				Name:    "Go Conventions",
-				Content: "Follow Go conventions.",
-				Files: []SkillFileContextForEnv{
-					{Path: "templates/example.go", Content: "package main"},
-				},
-			},
-		},
-	}
-
-	if err := writeContextFiles(dir, "codebuddy", ctx, nil); err != nil {
-		t.Fatalf("writeContextFiles failed: %v", err)
-	}
-
-	// Skills should be in .codebuddy/skills/ (native discovery), NOT
-	// .claude/skills/ and NOT .agent_context/skills/.
-	skillMd, err := os.ReadFile(filepath.Join(dir, ".codebuddy", "skills", "go-conventions", "SKILL.md"))
-	if err != nil {
-		t.Fatalf("failed to read .codebuddy/skills/go-conventions/SKILL.md: %v", err)
-	}
-	if !strings.Contains(string(skillMd), "Follow Go conventions.") {
-		t.Error("SKILL.md missing content")
-	}
-
-	// Supporting files should also be under .codebuddy/skills/.
-	supportFile, err := os.ReadFile(filepath.Join(dir, ".codebuddy", "skills", "go-conventions", "templates", "example.go"))
-	if err != nil {
-		t.Fatalf("failed to read supporting file: %v", err)
-	}
-	if string(supportFile) != "package main" {
-		t.Errorf("supporting file content = %q, want %q", string(supportFile), "package main")
-	}
-
-	// .claude/skills/ must NOT exist — this is the exact regression this
-	// test guards against.
-	if _, err := os.Stat(filepath.Join(dir, ".claude", "skills")); !os.IsNotExist(err) {
-		t.Error("expected .claude/skills/ to NOT exist for codebuddy provider")
-	}
-
-	// .agent_context/skills/ should NOT exist for CodeBuddy either.
-	if _, err := os.Stat(filepath.Join(dir, ".agent_context", "skills")); !os.IsNotExist(err) {
-		t.Error("expected .agent_context/skills/ to NOT exist for codebuddy provider")
-	}
-
-	// Nothing at all belongs under .agent_context for a native-skills
-	// provider now that the sidecar brief is gone (MUL-6984) — not even the
-	// directory. This runs in the user's own checkout on local_directory
-	// tasks, where an empty managed directory is noise.
-	if _, err := os.Stat(filepath.Join(dir, ".agent_context")); !os.IsNotExist(err) {
-		t.Errorf(".agent_context created for a native-skills provider; stat err = %v, want not-exist", err)
-	}
-}
-
-// TestReuseRefreshesSkillsWithoutDuplicating is the regression guard for
-// GitHub #3684: re-dispatching the same agent on the same issue goes through
-// the Reuse path, which must refresh skills in place rather than pile up
-// collision-free duplicates (issue-review, issue-review-multica,
-// issue-review-multica-2, …). Reuse rolls back the prior dispatch's writes
-// via its sidecar manifest before re-writing, so each skill lands at its
-// natural slug on every dispatch instead of dodging its own prior output.
-func TestReuseRefreshesSkillsWithoutDuplicating(t *testing.T) {
-	t.Parallel()
-
-	workspacesRoot := t.TempDir()
-	task := TaskContextForEnv{
-		IssueID: "reuse-skill-dedup",
-		AgentSkills: []SkillContextForEnv{
-			{Name: "Issue Review", Content: "Review the issue."},
-		},
-	}
-
-	env, err := Prepare(PrepareParams{
-		WorkspacesRoot: workspacesRoot,
-		WorkspaceID:    "ws-reuse-dedup",
-		TaskID:         "11112222-3333-4444-5555-666677778888",
-		Provider:       "claude",
-		Task:           task,
-	}, testLogger())
-	if err != nil {
-		t.Fatalf("Prepare failed: %v", err)
-	}
-	defer env.Cleanup(true)
-
-	skillsDir := filepath.Join(env.WorkDir, ".claude", "skills")
-
-	// Re-dispatch twice on the same persistent workdir.
-	for i := 0; i < 2; i++ {
-		if reused := Reuse(ReuseParams{
-			WorkDir:  env.WorkDir,
-			Provider: "claude",
-			Task:     task,
-		}, testLogger()); reused == nil {
-			t.Fatalf("Reuse #%d returned nil", i+1)
-		}
-	}
-
-	entries, err := os.ReadDir(skillsDir)
-	if err != nil {
-		t.Fatalf("read skills dir: %v", err)
-	}
-	var names []string
-	for _, e := range entries {
-		names = append(names, e.Name())
-	}
-	if len(names) != 1 || names[0] != "issue-review" {
-		t.Fatalf("after re-dispatch the skills dir = %v, want exactly [issue-review] with no -multica duplicates", names)
-	}
-
-	// The surviving skill keeps its natural slug in frontmatter, so the agent
-	// invokes `issue-review` and not a suffixed copy.
-	body, err := os.ReadFile(filepath.Join(skillsDir, "issue-review", "SKILL.md"))
-	if err != nil {
-		t.Fatalf("read SKILL.md: %v", err)
-	}
-	if !strings.Contains(string(body), "name: issue-review") {
-		t.Errorf("SKILL.md frontmatter should pin name: issue-review; got:\n%s", body)
-	}
-}
-
-// TestReuseReclaimsManagedSkillDirWithStrayAgentFile covers the edge case the
-// #3716 review surfaced: a prior-dispatch agent writes a file into the
-// platform's managed skill directory. CleanupSidecars on its own would keep
-// that now-non-empty directory, leaving the canonical slug occupied so the
-// next refresh dodges to issue-review-multica. Reuse must reclaim the
-// platform-owned skill directory so the refreshed skill stays at its natural
-// slug.
-func TestReuseReclaimsManagedSkillDirWithStrayAgentFile(t *testing.T) {
-	t.Parallel()
-
-	workspacesRoot := t.TempDir()
-	task := TaskContextForEnv{
-		IssueID: "reuse-stray-file",
-		AgentSkills: []SkillContextForEnv{
-			{Name: "Issue Review", Content: "Review the issue."},
-		},
-	}
-
-	env, err := Prepare(PrepareParams{
-		WorkspacesRoot: workspacesRoot,
-		WorkspaceID:    "ws-reuse-stray",
-		TaskID:         "aaaabbbb-cccc-dddd-eeee-ffff00001111",
-		Provider:       "claude",
-		Task:           task,
-	}, testLogger())
-	if err != nil {
-		t.Fatalf("Prepare failed: %v", err)
-	}
-	defer env.Cleanup(true)
-
-	skillsDir := filepath.Join(env.WorkDir, ".claude", "skills")
-
-	// Prior-run agent drops scratch inside the managed skill directory.
-	stray := filepath.Join(skillsDir, "issue-review", "agent-notes.md")
-	if err := os.WriteFile(stray, []byte("agent scratch"), 0o644); err != nil {
-		t.Fatalf("seed stray agent file: %v", err)
-	}
-
-	if reused := Reuse(ReuseParams{
-		WorkDir:  env.WorkDir,
-		Provider: "claude",
-		Task:     task,
-	}, testLogger()); reused == nil {
-		t.Fatal("Reuse returned nil")
-	}
-
-	entries, err := os.ReadDir(skillsDir)
-	if err != nil {
-		t.Fatalf("read skills dir: %v", err)
-	}
-	var names []string
-	for _, e := range entries {
-		names = append(names, e.Name())
-	}
-	if len(names) != 1 || names[0] != "issue-review" {
-		t.Fatalf("after reuse with a stray agent file the skills dir = %v, want exactly [issue-review] with no -multica duplicate", names)
-	}
-
-	// The managed skill dir is platform-owned: reclaiming it drops the agent's
-	// stray scratch (matching the Codex path) and re-creates a clean SKILL.md.
-	if _, err := os.Stat(stray); !os.IsNotExist(err) {
-		t.Errorf("expected stray file under the managed skill dir to be reclaimed; stat err = %v", err)
-	}
-	if _, err := os.Stat(filepath.Join(skillsDir, "issue-review", "SKILL.md")); err != nil {
-		t.Errorf("expected a refreshed SKILL.md at the canonical slug: %v", err)
-	}
-}
-
-// TestReuseSkillRefreshIsCanonicalAcrossProviders exercises the reuse skill
-// rollback (removeReusedManagedSkillDirs + CleanupSidecars + writeContextFiles
-// — the exact sequence Reuse runs) directly across the file-based providers,
-// including the stray-agent-file boundary. Driving the sequence rather than
-// full Reuse avoids the per-provider config setup (codex-home, openclaw
-// binary) while still covering each provider's skills-dir layout.
-func TestReuseSkillRefreshIsCanonicalAcrossProviders(t *testing.T) {
-	t.Parallel()
-
-	for _, provider := range []string{"claude", "codebuddy", "openclaw", "copilot", "qwen", ""} {
-		provider := provider
-		name := provider
-		if name == "" {
-			name = "default"
-		}
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-			workDir := t.TempDir()
-			envRoot := t.TempDir()
-			task := TaskContextForEnv{
-				IssueID: "reuse-table",
-				AgentSkills: []SkillContextForEnv{
-					{Name: "Issue Review", Content: "v1"},
-				},
-			}
-
-			// First dispatch: write context + persist the manifest.
-			m1 := &sidecarManifest{}
-			if err := writeContextFiles(workDir, provider, task, m1); err != nil {
-				t.Fatalf("first writeContextFiles: %v", err)
-			}
-			if err := writeSidecarManifest(envRoot, m1); err != nil {
-				t.Fatalf("persist manifest: %v", err)
-			}
-
-			skillsDir := skillsDirPath(workDir, provider)
-			stray := filepath.Join(skillsDir, "issue-review", "agent-notes.md")
-			if err := os.WriteFile(stray, []byte("scratch"), 0o644); err != nil {
-				t.Fatalf("seed stray file: %v", err)
-			}
-
-			// Second dispatch: same rollback + refresh sequence Reuse runs.
-			task.AgentSkills[0].Content = "v2"
-			if err := removeReusedManagedSkillDirs(envRoot, skillsDirPath(workDir, provider)); err != nil {
-				t.Fatalf("removeReusedManagedSkillDirs: %v", err)
-			}
-			if err := CleanupSidecars(envRoot); err != nil {
-				t.Fatalf("CleanupSidecars: %v", err)
-			}
-			m2 := &sidecarManifest{}
-			if err := writeContextFiles(workDir, provider, task, m2); err != nil {
-				t.Fatalf("second writeContextFiles: %v", err)
-			}
-			if err := writeSidecarManifest(envRoot, m2); err != nil {
-				t.Fatalf("persist manifest #2: %v", err)
-			}
-
-			entries, err := os.ReadDir(skillsDir)
-			if err != nil {
-				t.Fatalf("read skills dir: %v", err)
-			}
-			var names []string
-			for _, e := range entries {
-				names = append(names, e.Name())
-			}
-			if len(names) != 1 || names[0] != "issue-review" {
-				t.Fatalf("skills dir = %v, want exactly [issue-review]", names)
-			}
-			if _, err := os.Stat(stray); !os.IsNotExist(err) {
-				t.Errorf("stray agent file should be reclaimed; stat err = %v", err)
-			}
-			body, err := os.ReadFile(filepath.Join(skillsDir, "issue-review", "SKILL.md"))
-			if err != nil {
-				t.Fatalf("read refreshed SKILL.md: %v", err)
-			}
-			if !strings.Contains(string(body), "v2") {
-				t.Errorf("SKILL.md should carry refreshed content v2; got:\n%s", body)
-			}
-		})
-	}
-}
-
-func TestMcodeUsesNativeProjectSkillRoot(t *testing.T) {
-	t.Parallel()
-	workDir := t.TempDir()
-	want := filepath.Join(workDir, ".minimax", "skills")
-	if got := skillsDirPath(workDir, "mcode"); got != want {
-		t.Fatalf("skillsDirPath(mcode) = %q, want %q", got, want)
 	}
 }
 
@@ -1263,12 +880,6 @@ func TestInjectRuntimeConfigClaude(t *testing.T) {
 
 	ctx := TaskContextForEnv{
 		IssueID: "test-issue-id",
-		AgentSkills: []SkillContextForEnv{
-			{Name: "Go Conventions", Content: "Follow Go conventions.", Files: []SkillFileContextForEnv{
-				{Path: "example.go", Content: "package main"},
-			}},
-			{Name: "PR Review", Content: "Review PRs carefully."},
-		},
 	}
 
 	if _, err := InjectRuntimeConfig(dir, "claude", ctx); err != nil {
@@ -1285,22 +896,10 @@ func TestInjectRuntimeConfigClaude(t *testing.T) {
 		"Multica Agent Runtime",
 		"multica issue get",
 		"multica issue comment list",
-		// Skills are listed by on-disk slug: that is the directory
-		// writeSkillFiles creates and the only identifier the model can
-		// actually invoke (MUL-5529).
-		"go-conventions",
-		"pr-review",
-		"discovered automatically",
+		"load the `multica-platform` skill",
 	} {
 		if !strings.Contains(s, want) {
 			t.Errorf("CLAUDE.md missing %q", want)
-		}
-	}
-	// The display names must not leak into the listing — a model that reads
-	// "PR Review" and invokes it by that name gets nothing.
-	for _, absent := range []string{"Go Conventions", "PR Review"} {
-		if strings.Contains(s, absent) {
-			t.Errorf("CLAUDE.md lists display name %q instead of its slug", absent)
 		}
 	}
 }
@@ -1444,8 +1043,7 @@ func TestInjectRuntimeConfigCodex(t *testing.T) {
 	dir := t.TempDir()
 
 	ctx := TaskContextForEnv{
-		IssueID:     "test-issue-id",
-		AgentSkills: []SkillContextForEnv{{Name: "Coding", Content: "Write good code."}},
+		IssueID: "test-issue-id",
 	}
 
 	if _, err := InjectRuntimeConfig(dir, "codex", ctx); err != nil {
@@ -1461,13 +1059,9 @@ func TestInjectRuntimeConfigCodex(t *testing.T) {
 	if !strings.Contains(s, "Multica Agent Runtime") {
 		t.Error("AGENTS.md missing meta skill header")
 	}
-	// Listed by on-disk slug rather than the display name (MUL-5529).
-	if !strings.Contains(s, "coding") {
-		t.Error("AGENTS.md missing skill name")
-	}
 }
 
-func TestInjectRuntimeConfigNoSkills(t *testing.T) {
+func TestInjectRuntimeConfigPointsAtPlatformSkill(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 
@@ -1484,460 +1078,10 @@ func TestInjectRuntimeConfigNoSkills(t *testing.T) {
 
 	s := string(content)
 	if !strings.Contains(s, "multica issue get") {
-		t.Error("should reference multica CLI even without skills")
+		t.Error("should reference multica CLI")
 	}
-	if strings.Contains(s, "## Skills") {
-		t.Error("should not have Skills section when there are no skills")
-	}
-}
-
-func TestWriteContextFilesCopilotNativeSkills(t *testing.T) {
-	t.Parallel()
-	dir := t.TempDir()
-
-	ctx := TaskContextForEnv{
-		IssueID: "copilot-skill-test",
-		AgentSkills: []SkillContextForEnv{
-			{
-				Name:    "Go Conventions",
-				Content: "Follow Go conventions.",
-				Files: []SkillFileContextForEnv{
-					{Path: "templates/example.go", Content: "package main"},
-				},
-			},
-		},
-	}
-
-	if err := writeContextFiles(dir, "copilot", ctx, nil); err != nil {
-		t.Fatalf("writeContextFiles failed: %v", err)
-	}
-
-	// Copilot CLI natively discovers project-level skills from .github/skills/.
-	skillMd, err := os.ReadFile(filepath.Join(dir, ".github", "skills", "go-conventions", "SKILL.md"))
-	if err != nil {
-		t.Fatalf("failed to read .github/skills/go-conventions/SKILL.md: %v", err)
-	}
-	if !strings.Contains(string(skillMd), "Follow Go conventions.") {
-		t.Error("SKILL.md missing content")
-	}
-
-	// Supporting files should also be under .github/skills/.
-	supportFile, err := os.ReadFile(filepath.Join(dir, ".github", "skills", "go-conventions", "templates", "example.go"))
-	if err != nil {
-		t.Fatalf("failed to read supporting file: %v", err)
-	}
-	if string(supportFile) != "package main" {
-		t.Errorf("supporting file content = %q, want %q", string(supportFile), "package main")
-	}
-
-	// .agent_context/skills/ should NOT exist for Copilot.
-	if _, err := os.Stat(filepath.Join(dir, ".agent_context", "skills")); !os.IsNotExist(err) {
-		t.Error("expected .agent_context/skills/ to NOT exist for Copilot provider")
-	}
-
-	// Nothing at all belongs under .agent_context for a native-skills
-	// provider now that the sidecar brief is gone (MUL-6984) — not even the
-	// directory. This runs in the user's own checkout on local_directory
-	// tasks, where an empty managed directory is noise.
-	if _, err := os.Stat(filepath.Join(dir, ".agent_context")); !os.IsNotExist(err) {
-		t.Errorf(".agent_context created for a native-skills provider; stat err = %v, want not-exist", err)
-	}
-}
-
-func TestWriteContextFilesOpencodeNativeSkills(t *testing.T) {
-	t.Parallel()
-	dir := t.TempDir()
-
-	ctx := TaskContextForEnv{
-		IssueID: "opencode-skill-test",
-		AgentSkills: []SkillContextForEnv{
-			{
-				Name:        "Go Conventions",
-				Description: "Follow our internal Go style.",
-				Content:     "Follow Go conventions.",
-				Files: []SkillFileContextForEnv{
-					{Path: "templates/example.go", Content: "package main"},
-				},
-			},
-		},
-	}
-
-	if err := writeContextFiles(dir, "opencode", ctx, nil); err != nil {
-		t.Fatalf("writeContextFiles failed: %v", err)
-	}
-
-	// Skills should be in .opencode/skills/ (native discovery).
-	skillMd, err := os.ReadFile(filepath.Join(dir, ".opencode", "skills", "go-conventions", "SKILL.md"))
-	if err != nil {
-		t.Fatalf("failed to read .opencode/skills/go-conventions/SKILL.md: %v", err)
-	}
-	body := string(skillMd)
-	if !strings.Contains(body, "Follow Go conventions.") {
-		t.Error("SKILL.md missing content")
-	}
-	// OpenCode (and every other runtime) silently drops SKILL.md without a
-	// parseable frontmatter `name`. The synthesized frontmatter must lead
-	// with `name:` matching the parent directory slug and carry the
-	// description verbatim from the DB so OpenCode's `skill` tool can route
-	// the model to it by name. The description is always double-quoted so
-	// values that happen to be YAML keywords (`null`, `true`, `[foo]`,
-	// etc.) still parse as strings and don't get dropped.
-	prefix := body
-	if len(prefix) > 120 {
-		prefix = prefix[:120]
-	}
-	if !strings.HasPrefix(body, "---\nname: go-conventions\n") {
-		t.Errorf("SKILL.md missing synthesized frontmatter name; got: %q", prefix)
-	}
-	if !strings.Contains(body, `description: "Follow our internal Go style."`) {
-		t.Errorf("SKILL.md missing synthesized quoted description; got: %q", prefix)
-	}
-
-	// Supporting files should also be under .opencode/skills/.
-	supportFile, err := os.ReadFile(filepath.Join(dir, ".opencode", "skills", "go-conventions", "templates", "example.go"))
-	if err != nil {
-		t.Fatalf("failed to read supporting file: %v", err)
-	}
-	if string(supportFile) != "package main" {
-		t.Errorf("supporting file content = %q, want %q", string(supportFile), "package main")
-	}
-
-	// .agent_context/skills/ should NOT exist for OpenCode.
-	if _, err := os.Stat(filepath.Join(dir, ".agent_context", "skills")); !os.IsNotExist(err) {
-		t.Error("expected .agent_context/skills/ to NOT exist for OpenCode provider")
-	}
-
-	// Nothing at all belongs under .agent_context for a native-skills
-	// provider now that the sidecar brief is gone (MUL-6984) — not even the
-	// directory. This runs in the user's own checkout on local_directory
-	// tasks, where an empty managed directory is noise.
-	if _, err := os.Stat(filepath.Join(dir, ".agent_context")); !os.IsNotExist(err) {
-		t.Errorf(".agent_context created for a native-skills provider; stat err = %v, want not-exist", err)
-	}
-}
-
-// Skill content imported from upstream sources (GitHub, ClawHub, Skills.sh)
-// often already carries its own YAML frontmatter. The writer keeps that block
-// verbatim with exactly one exception: `name` is forced to the directory slug.
-//
-// The exception exists because runtimes disagree on which field identifies a
-// skill — OpenCode routes on the frontmatter `name`, Claude on the directory
-// name. Leaving an upstream `name` in place therefore gives one skill two
-// different invocable names depending on where it runs (MUL-5529). This test
-// uses opencode precisely because it is the side that would route on the
-// upstream value.
-func TestWriteContextFilesForcesSkillFrontmatterNameToSlug(t *testing.T) {
-	t.Parallel()
-	dir := t.TempDir()
-
-	ctx := TaskContextForEnv{
-		IssueID: "frontmatter-name-test",
-		AgentSkills: []SkillContextForEnv{
-			{
-				Name:        "Display Name",
-				Description: "overridden by upstream frontmatter",
-				Content:     "---\nname: upstream-name\ndescription: imported as-is\ncustom-key: keep me\n---\n\nbody",
-			},
-		},
-	}
-
-	if err := writeContextFiles(dir, "opencode", ctx, nil); err != nil {
-		t.Fatalf("writeContextFiles failed: %v", err)
-	}
-
-	skillMd, err := os.ReadFile(filepath.Join(dir, ".opencode", "skills", "display-name", "SKILL.md"))
-	if err != nil {
-		t.Fatalf("failed to read SKILL.md: %v", err)
-	}
-
-	// name matches the directory it was written into, so both routing
-	// conventions resolve to the same skill.
-	want := "---\nname: display-name\ndescription: imported as-is\ncustom-key: keep me\n---\n\nbody"
-	if string(skillMd) != want {
-		t.Errorf("frontmatter name was not normalized to the slug; got:\n%s\nwant:\n%s", skillMd, want)
-	}
-}
-
-// The directory-name == frontmatter-name invariant must survive collision
-// fallback, where the allocated slug is NOT sanitizeSkillName(Name). A
-// user-installed skill already sitting at the natural slug pushes Multica's
-// copy to `<slug>-multica`; the frontmatter has to follow it there, or the
-// skill answers to the user's slug on Claude and to its own stale name on
-// OpenCode.
-func TestWriteContextFilesFrontmatterNameFollowsCollisionSlug(t *testing.T) {
-	t.Parallel()
-	dir := t.TempDir()
-
-	// Pre-create a user-owned skill at the natural slug.
-	userSkill := filepath.Join(dir, ".opencode", "skills", "review")
-	if err := os.MkdirAll(userSkill, 0o755); err != nil {
-		t.Fatalf("seed user skill: %v", err)
-	}
-	userContent := "---\nname: review\n---\n\nuser's own skill"
-	if err := os.WriteFile(filepath.Join(userSkill, "SKILL.md"), []byte(userContent), 0o644); err != nil {
-		t.Fatalf("seed user SKILL.md: %v", err)
-	}
-
-	ctx := TaskContextForEnv{
-		IssueID: "collision-test",
-		AgentSkills: []SkillContextForEnv{
-			{Name: "Review", Content: "---\nname: whatever-upstream-said\n---\n\nmultica body"},
-		},
-	}
-
-	if err := writeContextFiles(dir, "opencode", ctx, nil); err != nil {
-		t.Fatalf("writeContextFiles failed: %v", err)
-	}
-
-	// The user's directory is untouched.
-	got, err := os.ReadFile(filepath.Join(userSkill, "SKILL.md"))
-	if err != nil {
-		t.Fatalf("read user SKILL.md: %v", err)
-	}
-	if string(got) != userContent {
-		t.Errorf("user skill was overwritten; got:\n%s", got)
-	}
-
-	// Multica's copy landed at the fallback slug and names itself after it.
-	moved, err := os.ReadFile(filepath.Join(dir, ".opencode", "skills", "review-multica", "SKILL.md"))
-	if err != nil {
-		t.Fatalf("read relocated SKILL.md: %v", err)
-	}
-	want := "---\nname: review-multica\n---\n\nmultica body"
-	if string(moved) != want {
-		t.Errorf("frontmatter name did not follow the collision slug; got:\n%s\nwant:\n%s", moved, want)
-	}
-}
-
-// The name rewrite must not disturb neighbouring keys, including a nested
-// mapping that happens to contain its own `name`. Only the top-level key is
-// the skill's identity; rewriting an indented one would splice a top-level key
-// into the middle of the nested block and corrupt the YAML.
-func TestWriteContextFilesLeavesNestedFrontmatterNameAlone(t *testing.T) {
-	t.Parallel()
-	dir := t.TempDir()
-
-	ctx := TaskContextForEnv{
-		IssueID: "nested-name-test",
-		AgentSkills: []SkillContextForEnv{
-			{
-				Name:    "Nested",
-				Content: "---\nmetadata:\n  name: inner\n---\n\nbody",
-			},
-		},
-	}
-
-	if err := writeContextFiles(dir, "opencode", ctx, nil); err != nil {
-		t.Fatalf("writeContextFiles failed: %v", err)
-	}
-
-	skillMd, err := os.ReadFile(filepath.Join(dir, ".opencode", "skills", "nested", "SKILL.md"))
-	if err != nil {
-		t.Fatalf("failed to read SKILL.md: %v", err)
-	}
-
-	// The block has no top-level name, so one is injected; `metadata.name`
-	// stays put.
-	want := "---\nname: nested\nmetadata:\n  name: inner\n---\n\nbody"
-	if string(skillMd) != want {
-		t.Errorf("nested name handling is wrong; got:\n%s\nwant:\n%s", skillMd, want)
-	}
-}
-
-// Some upstream skills (GitHub imports, Skills.sh) ship a frontmatter block
-// that sets `description` but omits `name` — the directory layout is what
-// identifies the skill there. OpenCode's scanner requires a parseable `name`
-// in the frontmatter or it silently drops the SKILL.md. The writer must
-// inject `name: <slug>` into the existing block (not replace it) so the
-// upstream description and body still ride along intact.
-func TestWriteContextFilesInjectsNameIntoNamelessFrontmatter(t *testing.T) {
-	t.Parallel()
-	dir := t.TempDir()
-
-	preExisting := "---\ndescription: Review pull requests\n---\n\nbody"
-	ctx := TaskContextForEnv{
-		IssueID: "inject-name-test",
-		AgentSkills: []SkillContextForEnv{
-			{
-				Name:        "Review PRs",
-				Description: "DB description ignored when content already carries one",
-				Content:     preExisting,
-			},
-		},
-	}
-
-	if err := writeContextFiles(dir, "opencode", ctx, nil); err != nil {
-		t.Fatalf("writeContextFiles failed: %v", err)
-	}
-
-	skillMd, err := os.ReadFile(filepath.Join(dir, ".opencode", "skills", "review-prs", "SKILL.md"))
-	if err != nil {
-		t.Fatalf("failed to read SKILL.md: %v", err)
-	}
-	got := string(skillMd)
-	want := "---\nname: review-prs\ndescription: Review pull requests\n---\n\nbody"
-	if got != want {
-		t.Errorf("SKILL.md was not patched correctly;\n got: %q\nwant: %q", got, want)
-	}
-}
-
-// OpenClaw's native skill scanner reads {workspaceDir}/skills/. The daemon
-// pairs writeContextFiles with a per-task synthesized openclaw-config.json
-// (see openclaw_config.go) that pins agents.defaults.workspace to workDir,
-// so writing skills to {workDir}/skills/ is what the CLI actually scans.
-// This test pins the post-MUL-2219 write path; the previous fallback into
-// .agent_context/skills/ was a dead drop the openclaw scanner never read.
-func TestWriteContextFilesOpenclawNativeSkills(t *testing.T) {
-	t.Parallel()
-	dir := t.TempDir()
-
-	ctx := TaskContextForEnv{
-		IssueID: "openclaw-skill-test",
-		AgentSkills: []SkillContextForEnv{
-			{
-				Name:    "Go Conventions",
-				Content: "Follow Go conventions.",
-				Files: []SkillFileContextForEnv{
-					{Path: "templates/example.go", Content: "package main"},
-				},
-			},
-		},
-	}
-
-	if err := writeContextFiles(dir, "openclaw", ctx, nil); err != nil {
-		t.Fatalf("writeContextFiles failed: %v", err)
-	}
-
-	skillMd, err := os.ReadFile(filepath.Join(dir, "skills", "go-conventions", "SKILL.md"))
-	if err != nil {
-		t.Fatalf("failed to read skills/go-conventions/SKILL.md: %v", err)
-	}
-	if !strings.Contains(string(skillMd), "Follow Go conventions.") {
-		t.Error("SKILL.md missing content")
-	}
-
-	supportFile, err := os.ReadFile(filepath.Join(dir, "skills", "go-conventions", "templates", "example.go"))
-	if err != nil {
-		t.Fatalf("failed to read supporting file: %v", err)
-	}
-	if string(supportFile) != "package main" {
-		t.Errorf("supporting file content = %q, want %q", string(supportFile), "package main")
-	}
-
-	// The pre-MUL-2219 fallback path must NOT be written: openclaw never scans it.
-	if _, err := os.Stat(filepath.Join(dir, ".agent_context", "skills")); !os.IsNotExist(err) {
-		t.Error(".agent_context/skills/ MUST NOT be written for openclaw — the scanner does not read that path")
-	}
-	if _, err := os.Stat(filepath.Join(dir, ".openclaw", "skills")); !os.IsNotExist(err) {
-		t.Error(".openclaw/skills/ MUST NOT be written — openclaw never scans that path; writing there is a dead drop")
-	}
-}
-
-func TestWriteContextFilesKiroNativeSkills(t *testing.T) {
-	t.Parallel()
-	dir := t.TempDir()
-
-	ctx := TaskContextForEnv{
-		IssueID: "kiro-skill-test",
-		AgentSkills: []SkillContextForEnv{
-			{Name: "Go Conventions", Content: "Follow Go conventions."},
-		},
-	}
-
-	if err := writeContextFiles(dir, "kiro", ctx, nil); err != nil {
-		t.Fatalf("writeContextFiles failed: %v", err)
-	}
-
-	skillMd, err := os.ReadFile(filepath.Join(dir, ".kiro", "skills", "go-conventions", "SKILL.md"))
-	if err != nil {
-		t.Fatalf("failed to read .kiro/skills/go-conventions/SKILL.md: %v", err)
-	}
-	if !strings.Contains(string(skillMd), "Follow Go conventions.") {
-		t.Error("SKILL.md missing content")
-	}
-	if _, err := os.Stat(filepath.Join(dir, ".agent_context", "skills")); !os.IsNotExist(err) {
-		t.Error("expected .agent_context/skills/ to NOT exist for Kiro provider")
-	}
-}
-
-func TestWriteContextFilesQoderNativeSkills(t *testing.T) {
-	t.Parallel()
-	dir := t.TempDir()
-
-	ctx := TaskContextForEnv{
-		IssueID: "qoder-skill-test",
-		AgentSkills: []SkillContextForEnv{
-			{Name: "Go Conventions", Content: "Follow Go conventions."},
-		},
-	}
-
-	if err := writeContextFiles(dir, "qoder", ctx, nil); err != nil {
-		t.Fatalf("writeContextFiles failed: %v", err)
-	}
-
-	skillMd, err := os.ReadFile(filepath.Join(dir, ".qoder", "skills", "go-conventions", "SKILL.md"))
-	if err != nil {
-		t.Fatalf("failed to read .qoder/skills/go-conventions/SKILL.md: %v", err)
-	}
-	if !strings.Contains(string(skillMd), "Follow Go conventions.") {
-		t.Error("SKILL.md missing content")
-	}
-	if _, err := os.Stat(filepath.Join(dir, ".agent_context", "skills")); !os.IsNotExist(err) {
-		t.Error("expected .agent_context/skills/ to NOT exist for Qoder provider")
-	}
-}
-
-func TestWriteContextFilesQoderCNNativeSkills(t *testing.T) {
-	t.Parallel()
-	dir := t.TempDir()
-
-	ctx := TaskContextForEnv{
-		IssueID: "qoderclicn-skill-test",
-		AgentSkills: []SkillContextForEnv{
-			{Name: "Go Conventions", Content: "Follow Go conventions."},
-		},
-	}
-
-	if err := writeContextFiles(dir, "qoderclicn", ctx, nil); err != nil {
-		t.Fatalf("writeContextFiles failed: %v", err)
-	}
-
-	skillMd, err := os.ReadFile(filepath.Join(dir, ".qoder", "skills", "go-conventions", "SKILL.md"))
-	if err != nil {
-		t.Fatalf("failed to read .qoder/skills/go-conventions/SKILL.md: %v", err)
-	}
-	if !strings.Contains(string(skillMd), "Follow Go conventions.") {
-		t.Error("SKILL.md missing content")
-	}
-	if _, err := os.Stat(filepath.Join(dir, ".agent_context", "skills")); !os.IsNotExist(err) {
-		t.Error("expected .agent_context/skills/ to NOT exist for Qoder CN provider")
-	}
-}
-
-func TestWriteContextFilesQwenNativeSkills(t *testing.T) {
-	t.Parallel()
-	dir := t.TempDir()
-
-	ctx := TaskContextForEnv{
-		IssueID: "qwen-skill-test",
-		AgentSkills: []SkillContextForEnv{
-			{Name: "Go Conventions", Content: "Follow Go conventions."},
-		},
-	}
-
-	if err := writeContextFiles(dir, "qwen", ctx, nil); err != nil {
-		t.Fatalf("writeContextFiles failed: %v", err)
-	}
-
-	skillMd, err := os.ReadFile(filepath.Join(dir, ".qwen", "skills", "go-conventions", "SKILL.md"))
-	if err != nil {
-		t.Fatalf("failed to read .qwen/skills/go-conventions/SKILL.md: %v", err)
-	}
-	if !strings.Contains(string(skillMd), "Follow Go conventions.") {
-		t.Error("SKILL.md missing content")
-	}
-	if _, err := os.Stat(filepath.Join(dir, ".agent_context", "skills")); !os.IsNotExist(err) {
-		t.Error("expected .agent_context/skills/ to NOT exist for Qwen provider")
+	if !strings.Contains(s, "load the `multica-platform` skill") {
+		t.Error("Skills section should point at the platform skill")
 	}
 }
 
@@ -1946,8 +1090,7 @@ func TestInjectRuntimeConfigOpencode(t *testing.T) {
 	dir := t.TempDir()
 
 	ctx := TaskContextForEnv{
-		IssueID:     "test-issue-id",
-		AgentSkills: []SkillContextForEnv{{Name: "Coding", Content: "Write good code."}},
+		IssueID: "test-issue-id",
 	}
 
 	if _, err := InjectRuntimeConfig(dir, "opencode", ctx); err != nil {
@@ -1964,13 +1107,6 @@ func TestInjectRuntimeConfigOpencode(t *testing.T) {
 	if !strings.Contains(s, "Multica Agent Runtime") {
 		t.Error("AGENTS.md missing meta skill header")
 	}
-	// Listed by on-disk slug rather than the display name (MUL-5529).
-	if !strings.Contains(s, "coding") {
-		t.Error("AGENTS.md missing skill name")
-	}
-	if !strings.Contains(s, "discovered automatically") {
-		t.Error("AGENTS.md missing native skill discovery hint")
-	}
 
 	// CLAUDE.md should NOT exist.
 	if _, err := os.Stat(filepath.Join(dir, "CLAUDE.md")); !os.IsNotExist(err) {
@@ -1983,8 +1119,7 @@ func TestInjectRuntimeConfigKiro(t *testing.T) {
 	dir := t.TempDir()
 
 	ctx := TaskContextForEnv{
-		IssueID:     "test-issue-id",
-		AgentSkills: []SkillContextForEnv{{Name: "Coding", Content: "Write good code."}},
+		IssueID: "test-issue-id",
 	}
 
 	if _, err := InjectRuntimeConfig(dir, "kiro", ctx); err != nil {
@@ -2000,13 +1135,6 @@ func TestInjectRuntimeConfigKiro(t *testing.T) {
 	if !strings.Contains(s, "Multica Agent Runtime") {
 		t.Error("AGENTS.md missing meta skill header")
 	}
-	// Listed by on-disk slug rather than the display name (MUL-5529).
-	if !strings.Contains(s, "coding") {
-		t.Error("AGENTS.md missing skill name")
-	}
-	if !strings.Contains(s, "discovered automatically") {
-		t.Error("AGENTS.md missing native skill discovery hint")
-	}
 }
 
 func TestInjectRuntimeConfigQoder(t *testing.T) {
@@ -2014,8 +1142,7 @@ func TestInjectRuntimeConfigQoder(t *testing.T) {
 	dir := t.TempDir()
 
 	ctx := TaskContextForEnv{
-		IssueID:     "test-issue-id",
-		AgentSkills: []SkillContextForEnv{{Name: "Coding", Content: "Write good code."}},
+		IssueID: "test-issue-id",
 	}
 
 	if _, err := InjectRuntimeConfig(dir, "qoder", ctx); err != nil {
@@ -2031,13 +1158,6 @@ func TestInjectRuntimeConfigQoder(t *testing.T) {
 	if !strings.Contains(s, "Multica Agent Runtime") {
 		t.Error("AGENTS.md missing meta skill header")
 	}
-	// Listed by on-disk slug rather than the display name (MUL-5529).
-	if !strings.Contains(s, "coding") {
-		t.Error("AGENTS.md missing skill name")
-	}
-	if !strings.Contains(s, "discovered automatically") {
-		t.Error("AGENTS.md missing native skill discovery hint")
-	}
 }
 
 func TestInjectRuntimeConfigQoderCN(t *testing.T) {
@@ -2045,8 +1165,7 @@ func TestInjectRuntimeConfigQoderCN(t *testing.T) {
 	dir := t.TempDir()
 
 	ctx := TaskContextForEnv{
-		IssueID:     "test-qoderclicn-issue-id",
-		AgentSkills: []SkillContextForEnv{{Name: "Coding", Content: "Write good code."}},
+		IssueID: "test-qoderclicn-issue-id",
 	}
 
 	if _, err := InjectRuntimeConfig(dir, "qoderclicn", ctx); err != nil {
@@ -2062,16 +1181,14 @@ func TestInjectRuntimeConfigQoderCN(t *testing.T) {
 	}
 }
 
-// TestInjectRuntimeConfigAntigravity pins that AGENTS.md for Antigravity
-// advertises native skill discovery (rather than the .agent_context fallback)
-// — the CLI inherits Gemini CLI's workspace skill layout at .agents/skills/.
+// TestInjectRuntimeConfigAntigravity pins that the brief for Antigravity lands
+// in AGENTS.md and never points at the old .agent_context skills fallback.
 func TestInjectRuntimeConfigAntigravity(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 
 	ctx := TaskContextForEnv{
-		IssueID:     "test-issue-id",
-		AgentSkills: []SkillContextForEnv{{Name: "Coding", Content: "Write good code."}},
+		IssueID: "test-issue-id",
 	}
 
 	if _, err := InjectRuntimeConfig(dir, "antigravity", ctx); err != nil {
@@ -2087,13 +1204,6 @@ func TestInjectRuntimeConfigAntigravity(t *testing.T) {
 	if !strings.Contains(s, "Multica Agent Runtime") {
 		t.Error("AGENTS.md missing meta skill header")
 	}
-	// Listed by on-disk slug rather than the display name (MUL-5529).
-	if !strings.Contains(s, "coding") {
-		t.Error("AGENTS.md missing skill name")
-	}
-	if !strings.Contains(s, "discovered automatically") {
-		t.Error("AGENTS.md for Antigravity should advertise native skill discovery")
-	}
 	if strings.Contains(s, ".agent_context/skills/") {
 		t.Error("AGENTS.md for Antigravity must not reference the .agent_context/skills/ fallback")
 	}
@@ -2107,8 +1217,7 @@ func TestInjectRuntimeConfigDim(t *testing.T) {
 	dir := t.TempDir()
 
 	ctx := TaskContextForEnv{
-		IssueID:     "test-issue-id",
-		AgentSkills: []SkillContextForEnv{{Name: "Coding", Content: "Write good code."}},
+		IssueID: "test-issue-id",
 	}
 
 	if _, err := InjectRuntimeConfig(dir, "dim", ctx); err != nil {
@@ -2123,44 +1232,6 @@ func TestInjectRuntimeConfigDim(t *testing.T) {
 	s := string(content)
 	if !strings.Contains(s, "Multica Agent Runtime") {
 		t.Error("AGENTS.md missing meta skill header")
-	}
-	if !strings.Contains(s, "coding") {
-		t.Error("AGENTS.md missing skill name")
-	}
-	if !strings.Contains(s, "discovered automatically") {
-		t.Error("AGENTS.md for Dim should advertise native skill discovery")
-	}
-}
-
-// TestWriteContextFilesAntigravityNativeSkills pins that skills for the
-// antigravity provider land in {workDir}/.agents/skills/<slug>/, matching the
-// CLI's native workspace discovery path (Gemini CLI lineage).
-func TestWriteContextFilesAntigravityNativeSkills(t *testing.T) {
-	t.Parallel()
-	dir := t.TempDir()
-
-	ctx := TaskContextForEnv{
-		IssueID: "antigravity-skill-test",
-		AgentSkills: []SkillContextForEnv{
-			{Name: "Go Conventions", Content: "Follow Go conventions."},
-		},
-	}
-
-	if err := writeContextFiles(dir, "antigravity", ctx, nil); err != nil {
-		t.Fatalf("writeContextFiles failed: %v", err)
-	}
-
-	skillMd, err := os.ReadFile(filepath.Join(dir, ".agents", "skills", "go-conventions", "SKILL.md"))
-	if err != nil {
-		t.Fatalf("failed to read .agents/skills/go-conventions/SKILL.md: %v", err)
-	}
-	if !strings.Contains(string(skillMd), "Follow Go conventions.") {
-		t.Error("SKILL.md missing content")
-	}
-	// The fallback path must NOT be written — Antigravity's scanner reads
-	// .agents/skills/, not .agent_context/skills/.
-	if _, err := os.Stat(filepath.Join(dir, ".agent_context", "skills")); !os.IsNotExist(err) {
-		t.Error(".agent_context/skills/ MUST NOT be written for antigravity — its scanner does not read that path")
 	}
 }
 
@@ -2384,8 +1455,7 @@ func TestInjectRuntimeConfigHermes(t *testing.T) {
 	dir := t.TempDir()
 
 	ctx := TaskContextForEnv{
-		IssueID:     "test-issue-id",
-		AgentSkills: []SkillContextForEnv{{Name: "Coding", Content: "Write good code."}},
+		IssueID: "test-issue-id",
 	}
 
 	if _, err := InjectRuntimeConfig(dir, "hermes", ctx); err != nil {
@@ -2402,17 +1472,6 @@ func TestInjectRuntimeConfigHermes(t *testing.T) {
 	if !strings.Contains(s, "Multica Agent Runtime") {
 		t.Error("AGENTS.md missing meta skill header")
 	}
-	// Listed by on-disk slug rather than the display name (MUL-5529).
-	if !strings.Contains(s, "coding") {
-		t.Error("AGENTS.md missing skill name")
-	}
-	// Hermes now discovers skills from the daemon-seeded per-task
-	// HERMES_HOME/skills (see hermes_home.go), so AGENTS.md must use the
-	// "discovered automatically" framing and must NOT point the agent at the
-	// old .agent_context/skills/ fallback it never read (issue #5242).
-	if !strings.Contains(s, "discovered automatically") {
-		t.Error("AGENTS.md for Hermes should describe skills as discovered automatically")
-	}
 	if strings.Contains(s, ".agent_context/skills/") {
 		t.Error("AGENTS.md for Hermes should not reference the .agent_context/skills/ fallback path")
 	}
@@ -2420,40 +1479,6 @@ func TestInjectRuntimeConfigHermes(t *testing.T) {
 	// CLAUDE.md should NOT exist.
 	if _, err := os.Stat(filepath.Join(dir, "CLAUDE.md")); !os.IsNotExist(err) {
 		t.Error("expected CLAUDE.md to NOT exist for Hermes provider")
-	}
-}
-
-// TestWriteContextFilesHermesSkipsWorkdirSkills asserts that Hermes skills are
-// NOT materialized into the workdir. Hermes has no workspace-relative skill
-// discovery; the daemon seeds them into a per-task HERMES_HOME/skills instead
-// (see prepareHermesHome / TestPrepareHermesHome). Writing the old
-// .agent_context/skills/ fallback was pure dead weight the CLI never read
-// (issue #5242).
-func TestWriteContextFilesHermesSkipsWorkdirSkills(t *testing.T) {
-	t.Parallel()
-	dir := t.TempDir()
-
-	ctx := TaskContextForEnv{
-		IssueID: "hermes-skill-test",
-		AgentSkills: []SkillContextForEnv{
-			{Name: "Go Conventions", Content: "Follow Go conventions."},
-		},
-	}
-
-	if err := writeContextFiles(dir, "hermes", ctx, nil); err != nil {
-		t.Fatalf("writeContextFiles failed: %v", err)
-	}
-
-	// No skills dir should be created in the workdir for Hermes — not the old
-	// fallback, and not an empty leftover directory either.
-	if _, err := os.Stat(filepath.Join(dir, ".agent_context", "skills")); !os.IsNotExist(err) {
-		t.Errorf("expected no .agent_context/skills/ for Hermes, got err=%v", err)
-	}
-
-	// And no .agent_context at all: the sidecar brief that used to justify
-	// the directory is gone (MUL-6984), so Hermes leaves the workdir clean.
-	if _, err := os.Stat(filepath.Join(dir, ".agent_context")); !os.IsNotExist(err) {
-		t.Errorf(".agent_context created for Hermes; stat err = %v, want not-exist", err)
 	}
 }
 
@@ -4471,119 +3496,6 @@ func TestReuseInvalidatesUnboundLegacyModelsCache(t *testing.T) {
 	}
 }
 
-func TestReuseWritesMissingCodexWorkspaceSkills(t *testing.T) {
-	// Cannot use t.Parallel() with t.Setenv.
-
-	sharedHome := t.TempDir()
-	t.Setenv("CODEX_HOME", sharedHome)
-
-	workspacesRoot := t.TempDir()
-	env, err := Prepare(PrepareParams{
-		WorkspacesRoot: workspacesRoot,
-		WorkspaceID:    "ws-codex-skill-reuse",
-		TaskID:         "b5f6a7b8-c9d0-1234-efab-567890123456",
-		AgentName:      "Codex Agent",
-		Provider:       "codex",
-		Task:           TaskContextForEnv{IssueID: "reuse-skill-test"},
-	}, testLogger())
-	if err != nil {
-		t.Fatalf("Prepare failed: %v", err)
-	}
-	defer env.Cleanup(true)
-
-	if err := os.RemoveAll(filepath.Join(env.CodexHome, "skills")); err != nil {
-		t.Fatalf("remove codex skills dir: %v", err)
-	}
-
-	reused := Reuse(ReuseParams{WorkDir: env.WorkDir, Provider: "codex", Task: TaskContextForEnv{
-		IssueID: "reuse-skill-test",
-		AgentSkills: []SkillContextForEnv{
-			{
-				Name:    "Writing",
-				Content: "Write clearly.",
-				Files:   []SkillFileContextForEnv{{Path: "examples/example.md", Content: "Example"}},
-			},
-		},
-	}}, testLogger())
-	if reused == nil {
-		t.Fatal("Reuse returned nil")
-	}
-
-	data, err := os.ReadFile(filepath.Join(reused.CodexHome, "skills", "writing", "SKILL.md"))
-	if err != nil {
-		t.Fatalf("missing reused codex workspace skill: %v", err)
-	}
-	if !strings.Contains(string(data), "Write clearly.") {
-		t.Errorf("skill content = %q", data)
-	}
-	example, err := os.ReadFile(filepath.Join(reused.CodexHome, "skills", "writing", "examples", "example.md"))
-	if err != nil {
-		t.Fatalf("missing reused codex workspace skill support file: %v", err)
-	}
-	if string(example) != "Example" {
-		t.Errorf("support file content = %q", example)
-	}
-}
-
-func TestReuseUpdatesCodexWorkspaceSkills(t *testing.T) {
-	// Cannot use t.Parallel() with t.Setenv.
-
-	sharedHome := t.TempDir()
-	t.Setenv("CODEX_HOME", sharedHome)
-
-	workspacesRoot := t.TempDir()
-	env, err := Prepare(PrepareParams{
-		WorkspacesRoot: workspacesRoot,
-		WorkspaceID:    "ws-codex-skill-update",
-		TaskID:         "c5f6a7b8-c9d0-1234-efab-567890123456",
-		AgentName:      "Codex Agent",
-		Provider:       "codex",
-		Task: TaskContextForEnv{
-			IssueID: "reuse-skill-update-test",
-			AgentSkills: []SkillContextForEnv{
-				{
-					Name:    "Writing",
-					Content: "Old writing guidance.",
-					Files:   []SkillFileContextForEnv{{Path: "examples/example.md", Content: "Old example"}},
-				},
-			},
-		},
-	}, testLogger())
-	if err != nil {
-		t.Fatalf("Prepare failed: %v", err)
-	}
-	defer env.Cleanup(true)
-
-	reused := Reuse(ReuseParams{WorkDir: env.WorkDir, Provider: "codex", Task: TaskContextForEnv{
-		IssueID: "reuse-skill-update-test",
-		AgentSkills: []SkillContextForEnv{
-			{
-				Name:    "Writing",
-				Content: "Updated writing guidance.",
-				Files:   []SkillFileContextForEnv{{Path: "examples/example.md", Content: "Updated example"}},
-			},
-		},
-	}}, testLogger())
-	if reused == nil {
-		t.Fatal("Reuse returned nil")
-	}
-
-	data, err := os.ReadFile(filepath.Join(reused.CodexHome, "skills", "writing", "SKILL.md"))
-	if err != nil {
-		t.Fatalf("missing reused codex workspace skill: %v", err)
-	}
-	if !strings.Contains(string(data), "Updated writing guidance.") {
-		t.Errorf("skill content = %q", data)
-	}
-	example, err := os.ReadFile(filepath.Join(reused.CodexHome, "skills", "writing", "examples", "example.md"))
-	if err != nil {
-		t.Fatalf("missing reused codex workspace skill support file: %v", err)
-	}
-	if string(example) != "Updated example" {
-		t.Errorf("support file content = %q", example)
-	}
-}
-
 // TestPrepareCodexSeedsUserSkills covers the fix for #1922: skills the user
 // installs under ~/.codex/skills/ must be discoverable by the codex CLI
 // inside a Multica task, despite the daemon redirecting CODEX_HOME to a
@@ -4646,59 +3558,6 @@ func TestPrepareCodexSeedsUserSkills(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(env.CodexHome, "skills", ".DS_Store")); !os.IsNotExist(err) {
 		t.Errorf("ignored dotfile leaked into codex-home/skills: err=%v", err)
-	}
-}
-
-// TestPrepareCodexWorkspaceSkillBeatsUserSkillOnConflict checks that when a
-// workspace-assigned skill shares a sanitized name with a user-installed
-// skill, the workspace version fully replaces the user version (rather than
-// leaving stale user files lingering).
-func TestPrepareCodexWorkspaceSkillBeatsUserSkillOnConflict(t *testing.T) {
-	// Cannot use t.Parallel() with t.Setenv.
-
-	sharedHome := t.TempDir()
-	t.Setenv("CODEX_HOME", sharedHome)
-
-	userSkillDir := filepath.Join(sharedHome, "skills", "writing")
-	if err := os.MkdirAll(filepath.Join(userSkillDir, "drafts"), 0o755); err != nil {
-		t.Fatalf("seed user writing skill: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(userSkillDir, "SKILL.md"), []byte("user writing"), 0o644); err != nil {
-		t.Fatalf("seed user SKILL.md: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(userSkillDir, "drafts", "stale.md"), []byte("stale"), 0o644); err != nil {
-		t.Fatalf("seed user stale file: %v", err)
-	}
-
-	env, err := Prepare(PrepareParams{
-		WorkspacesRoot: t.TempDir(),
-		WorkspaceID:    "ws-skill-conflict",
-		TaskID:         "e7f8a9b0-c1d2-3456-efab-789012345678",
-		AgentName:      "Codex Agent",
-		Provider:       "codex",
-		Task: TaskContextForEnv{
-			IssueID: "skill-conflict-test",
-			AgentSkills: []SkillContextForEnv{
-				{Name: "Writing", Content: "workspace writing"},
-			},
-		},
-	}, testLogger())
-	if err != nil {
-		t.Fatalf("Prepare failed: %v", err)
-	}
-	defer env.Cleanup(true)
-
-	data, err := os.ReadFile(filepath.Join(env.CodexHome, "skills", "writing", "SKILL.md"))
-	if err != nil {
-		t.Fatalf("workspace skill not written: %v", err)
-	}
-	if !strings.Contains(string(data), "workspace writing") {
-		t.Errorf("SKILL.md = %q, want workspace content", data)
-	}
-	// The user's stale support file must not leak through — seeding is
-	// skipped entirely for names that workspace skills claim.
-	if _, err := os.Stat(filepath.Join(env.CodexHome, "skills", "writing", "drafts", "stale.md")); !os.IsNotExist(err) {
-		t.Errorf("user-skill stale file leaked despite workspace conflict: err=%v", err)
 	}
 }
 
@@ -4842,68 +3701,6 @@ func TestReuseSeedsUserSkillUpdates(t *testing.T) {
 	}
 	if string(data) != "v2" {
 		t.Errorf("after Reuse, user skill content = %q, want %q", data, "v2")
-	}
-}
-
-// TestReuseClearsUserSkillResidueOnWorkspaceConflict locks in the fix for
-// the GPT-Boy review on PR #2519: when round 1 seeded a user skill named
-// `writing` (including support files) and round 2 reuses the same workdir
-// with a workspace skill `Writing`, the user-version support files must not
-// linger under the workspace skill's directory.
-func TestReuseClearsUserSkillResidueOnWorkspaceConflict(t *testing.T) {
-	// Cannot use t.Parallel() with t.Setenv.
-
-	sharedHome := t.TempDir()
-	t.Setenv("CODEX_HOME", sharedHome)
-
-	userSkillDir := filepath.Join(sharedHome, "skills", "writing")
-	if err := os.MkdirAll(filepath.Join(userSkillDir, "drafts"), 0o755); err != nil {
-		t.Fatalf("seed user skill dir: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(userSkillDir, "SKILL.md"), []byte("user writing"), 0o644); err != nil {
-		t.Fatalf("seed user SKILL.md: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(userSkillDir, "drafts", "stale.md"), []byte("stale"), 0o644); err != nil {
-		t.Fatalf("seed user support file: %v", err)
-	}
-
-	env, err := Prepare(PrepareParams{
-		WorkspacesRoot: t.TempDir(),
-		WorkspaceID:    "ws-reuse-conflict",
-		TaskID:         "c1d2e3f4-a5b6-7890-abcd-123456789012",
-		AgentName:      "Codex Agent",
-		Provider:       "codex",
-		Task:           TaskContextForEnv{IssueID: "reuse-conflict-test"},
-	}, testLogger())
-	if err != nil {
-		t.Fatalf("Prepare failed: %v", err)
-	}
-	defer env.Cleanup(true)
-
-	// Round 1 had no workspace skill, so the user version should be present.
-	if _, err := os.Stat(filepath.Join(env.CodexHome, "skills", "writing", "drafts", "stale.md")); err != nil {
-		t.Fatalf("user support file should be seeded in round 1: %v", err)
-	}
-
-	reused := Reuse(ReuseParams{WorkDir: env.WorkDir, Provider: "codex", Task: TaskContextForEnv{
-		IssueID: "reuse-conflict-test",
-		AgentSkills: []SkillContextForEnv{
-			{Name: "Writing", Content: "workspace writing"},
-		},
-	}}, testLogger())
-	if reused == nil {
-		t.Fatal("Reuse returned nil")
-	}
-
-	data, err := os.ReadFile(filepath.Join(reused.CodexHome, "skills", "writing", "SKILL.md"))
-	if err != nil {
-		t.Fatalf("workspace SKILL.md missing after reuse: %v", err)
-	}
-	if !strings.Contains(string(data), "workspace writing") {
-		t.Errorf("SKILL.md = %q, want workspace content", data)
-	}
-	if _, err := os.Stat(filepath.Join(reused.CodexHome, "skills", "writing", "drafts", "stale.md")); !os.IsNotExist(err) {
-		t.Errorf("round-1 user support file leaked into round-2 workspace skill dir, err=%v", err)
 	}
 }
 
@@ -5608,7 +4405,6 @@ func TestBriefCarriesNoMetadataGuidance(t *testing.T) {
 			ctx: TaskContextForEnv{
 				IssueID:          "issue-md-1",
 				TriggerCommentID: "comment-md-1",
-				AgentSkills:      []SkillContextForEnv{platformSkillFixture()},
 			},
 			provider: "claude",
 			filename: "CLAUDE.md",
@@ -5616,8 +4412,7 @@ func TestBriefCarriesNoMetadataGuidance(t *testing.T) {
 		{
 			name: "assignment_triggered",
 			ctx: TaskContextForEnv{
-				IssueID:     "issue-md-2",
-				AgentSkills: []SkillContextForEnv{platformSkillFixture()},
+				IssueID: "issue-md-2",
 			},
 			provider: "claude",
 			filename: "CLAUDE.md",

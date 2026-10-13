@@ -221,12 +221,6 @@ const (
 	// RuntimeLookupSourceRuntimeModelPoll is the browser polling a model
 	// discovery request (every 500ms while the picker waits).
 	RuntimeLookupSourceRuntimeModelPoll = "runtime_model_poll"
-	// RuntimeLookupSourceRuntimeLocalSkillPoll is the browser polling a local
-	// skill / MCP discovery request.
-	RuntimeLookupSourceRuntimeLocalSkillPoll = "runtime_local_skill_poll"
-	// RuntimeLookupSourceRuntimeLocalSkillImportPoll is the browser polling a
-	// local skill import, which the UI allows up to ten of concurrently.
-	RuntimeLookupSourceRuntimeLocalSkillImportPoll = "runtime_local_skill_import_poll"
 	// RuntimeLookupSourceRuntimeUpdatePoll is the browser polling CLI update
 	// progress.
 	RuntimeLookupSourceRuntimeUpdatePoll = "runtime_update_poll"
@@ -267,8 +261,6 @@ func AllRuntimeLookupSources() []string {
 		RuntimeLookupSourceHeartbeatHTTP,
 		RuntimeLookupSourceDaemonAPI,
 		RuntimeLookupSourceRuntimeModelPoll,
-		RuntimeLookupSourceRuntimeLocalSkillPoll,
-		RuntimeLookupSourceRuntimeLocalSkillImportPoll,
 		RuntimeLookupSourceRuntimeUpdatePoll,
 		RuntimeLookupSourceRuntimeAPI,
 		RuntimeLookupSourceIssue,

@@ -750,27 +750,6 @@ describe("ReadonlyContent inline data-URI images", () => {
   });
 });
 
-describe("ReadonlyContent slash command rendering", () => {
-  it("renders slash skill links as slash command pills", () => {
-    const { container } = render(
-      <ReadonlyContent content="[/deploy](slash://skill/abc-123)" />,
-    );
-
-    const pill = container.querySelector(".slash-command");
-    expect(pill).not.toBeNull();
-    expect(pill?.textContent).toBe("/deploy");
-  });
-
-  it("does not affect regular links", () => {
-    const { container } = render(
-      <ReadonlyContent content="[docs](https://example.com)" />,
-    );
-
-    expect(container.querySelector(".slash-command")).toBeNull();
-    expect(container.querySelector("a")).not.toBeNull();
-  });
-});
-
 describe("ReadonlyContent bare URL autolinking (MUL-4242)", () => {
   // A bare URL wrapped in bold used to be linkified into [url**](url**), which
   // swallowed the closing `**`: the bold never closed (leading `**` showed as

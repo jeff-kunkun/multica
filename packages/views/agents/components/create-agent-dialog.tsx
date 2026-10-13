@@ -6,7 +6,6 @@ import { ModelDropdown } from "./model-dropdown";
 import { RuntimePicker } from "./runtime-picker";
 import { isRuntimeUsableForUser } from "@multica/core/runtimes";
 import { InstructionsEditor } from "./instructions-editor";
-import { SkillMultiSelect } from "./skill-multi-select";
 import { AvatarUploadControl } from "../../common/avatar-upload-control";
 import type {
   Agent,
@@ -53,14 +52,8 @@ export function CreateAgentDialog({
   // pre-populated from this agent, and the hidden fields
   // (instructions / custom_args / custom_env / max_concurrent_tasks)
   // are forwarded to the create call so the new agent is a true clone.
-  // Skills are copied separately by the caller after createAgent
-  // succeeds — they're not part of CreateAgentRequest.
   template?: Agent | null;
   onClose: () => void;
-  // Returns the created Agent so the dialog can run a follow-up
-  // setAgentSkills with the IDs the user picked in the form. Pre-skill-
-  // section callers can keep returning `void`; the dialog tolerates a
-  // falsy return (no follow-up runs).
   onCreate: (data: CreateAgentRequest) => Promise<Agent | void>;
 }) {
   const { t } = useT("agents");
@@ -78,9 +71,6 @@ export function CreateAgentDialog({
   const [model, setModel] = useState(template?.model ?? "");
   const [instructions, setInstructions] = useState(template?.instructions ?? "");
   const [avatarUrl, setAvatarUrl] = useState<string | null>(template?.avatar_url ?? null);
-  const [selectedSkillIds, setSelectedSkillIds] = useState<Set<string>>(
-    () => new Set(template?.skills.map((s) => s.id) ?? []),
-  );
   const [creating, setCreating] = useState(false);
 
   // Duplicate-mode pre-fill: clone lands on the source agent's runtime so
@@ -121,12 +111,11 @@ export function CreateAgentDialog({
         instructions: trimmedInstructions || undefined,
         avatar_url: avatarUrl ?? undefined,
         visibility,
-        skill_ids: [...selectedSkillIds],
       };
       if (template) {
         // Duplicate path: forward the hidden config fields the source
         // agent had so the clone is functional out of the box (args /
-        // concurrency). Skills flow through the dialog form. As of
+        // concurrency). As of
         // MUL-2600 the agent resource shape no longer carries
         // custom_env values, so duplication cannot copy env at all —
         // the user has to re-set env on the clone via the env tab
@@ -279,7 +268,7 @@ export function CreateAgentDialog({
               disabled={!selectedRuntime}
             />
 
-            {/* --- Optional sections (instructions / skills) ---
+            {/* --- Optional section (instructions) ---
                 Collapsed by default so quick-create stays fast.
                 Duplicate pre-fills everything from the source agent. */}
             <InstructionsEditor
@@ -290,11 +279,6 @@ export function CreateAgentDialog({
                   ? t(($) => $.create_dialog.instructions.placeholder_duplicate)
                   : t(($) => $.create_dialog.instructions.placeholder_blank)
               }
-            />
-
-            <SkillMultiSelect
-              selectedIds={selectedSkillIds}
-              onChange={setSelectedSkillIds}
             />
           </div>
         </div>

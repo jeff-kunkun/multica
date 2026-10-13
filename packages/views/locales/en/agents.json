@@ -175,7 +175,6 @@
     "section_properties": "Properties",
     "section_details": "Details",
     "section_details_hint": "Read-only ownership and lifecycle information.",
-    "section_skills": "Skills",
     "prop_runtime": "Runtime",
     "prop_model": "Model",
     "prop_thinking": "Thinking",
@@ -206,10 +205,6 @@
     "attention_title": "Runs need attention",
     "attention_queued_one": "{{count}} run is queued while the runtime is unavailable.",
     "attention_queued_other": "{{count}} runs are queued while the runtime is unavailable."
-  },
-  "skill_attach": {
-    "trigger_aria": "Attach a workspace skill",
-    "trigger_label": "Attach"
   },
   "pickers": {
     "concurrency_tooltip": "Concurrency · {{value}} max concurrent runs",
@@ -271,7 +266,6 @@
     "activity": "Activity",
     "tasks": "Runs",
     "instructions": "Instructions",
-    "skills": "Skills",
     "environment": "Environment",
     "custom_args": "Custom Args",
     "mcp_config": "MCP",
@@ -299,7 +293,7 @@
       },
       "template": {
         "title": "Use a template",
-        "description": "Start from curated instructions and skills, then adapt every detail to your workspace."
+        "description": "Start from curated instructions, then adapt every detail to your workspace."
       },
       "ai": {
         "title": "Build with AI",
@@ -332,7 +326,7 @@
     },
     "live_draft": "Agent configuration",
     "live_draft_hint": "You can edit the draft directly.",
-    "duplicate_env_notice": "Instructions, skills and command arguments are copied. Environment variables, MCP servers and machine-local runtime config are not.",
+    "duplicate_env_notice": "Instructions and command arguments are copied. Environment variables, MCP servers and machine-local runtime config are not.",
     "duplicate_runtime_reset_notice": "The original runtime is unavailable, so this copy runs on another one. Model, thinking level and speed were cleared because they only apply to the runtime they were chosen on.",
     "create_and_open": "Create & open agent",
     "creating": "Creating agent…",
@@ -353,7 +347,7 @@
   "create_dialog": {
     "title_create": "Create Agent",
     "title_duplicate": "Duplicate Agent",
-    "description_duplicate": "Create a new agent based on \"{{name}}\". Instructions, env, and skills are copied for you.",
+    "description_duplicate": "Create a new agent based on \"{{name}}\". Instructions and env are copied for you.",
     "name_label": "Name",
     "name_placeholder": "e.g. Deep Research Agent",
     "description_label": "Description",
@@ -375,25 +369,12 @@
     "creating": "Creating...",
     "cancel": "Cancel",
     "create_failed_toast": "Failed to create agent",
-    "skill_attach_failed_toast": "Agent created, but failed to attach skills: {{error}}",
     "instructions": {
       "label": "Instructions",
       "placeholder_blank": "Click to write instructions…",
       "placeholder_duplicate": "Click to view or edit the duplicated instructions",
       "collapse": "Collapse",
       "editor_placeholder": "Write what this agent should do, what to focus on, what to avoid…"
-    },
-    "skills_section": {
-      "label": "Skills",
-      "placeholder": "Add skills from workspace",
-      "selected_one": "{{count}} selected — click to edit",
-      "selected_other": "{{count}} selected — click to edit",
-      "collapse": "Collapse",
-      "list_empty_multi": "No skills in this workspace yet. Create or import one first.",
-      "list_loading": "Loading…",
-      "list_empty_default": "No skills available.",
-      "list_no_match": "No skills match.",
-      "search_placeholder": "Search skills…"
     },
     "avatar": {
       "change_aria": "Change avatar",
@@ -602,49 +583,6 @@
       "saved_toast": "Routing config saved",
       "save_failed_toast": "Failed to save routing config"
     },
-    "skills": {
-      "assigned_title": "Assigned to agent",
-      "assigned_hint": "Turn off a skill to pause its use without removing it.",
-      "runtime_title": "Inherited from runtime",
-      "runtime_hint": "Discovered automatically from {{runtime}} and available whenever this agent runs there.",
-      "workspace_badge": "Workspace",
-      "inherited_badge": "Inherited",
-      "refresh_action": "Refresh",
-      "no_description": "No description",
-      "toggle_aria": "Toggle {{name}}",
-      "remove_aria": "Remove {{name}}",
-      "toggle_failed_toast": "Failed to change skill status",
-      "runtime_toggle_aria": "Toggle inherited {{name}}",
-      "runtime_toggle_failed_toast": "Failed to change inherited skill status",
-      "runtime_missing": "Assign a local runtime to discover inherited skills.",
-      "runtime_offline": "The local runtime is offline. Reconnect it to refresh inherited skills.",
-      "runtime_discovering": "Discovering skills from the local runtime…",
-      "runtime_failed": "Couldn't discover runtime skills. Try again.",
-      "runtime_forbidden": "You don't have permission to view this runtime's skills.",
-      "runtime_unsupported": "This runtime does not expose local skills.",
-      "runtime_empty": "No local skills were found for this runtime.",
-      "detail_title": "Skill details",
-      "detail_loading": "Loading skill details…",
-      "detail_source": "Source",
-      "detail_provider": "Provider",
-      "detail_plugin": "Plugin",
-      "detail_files": "Files",
-      "detail_supporting_files": "Supporting files",
-      "add_action": "Add skill",
-      "empty_title": "No skills assigned",
-      "remove_failed_toast": "Failed to remove skill",
-      "add_dialog_title": "Add skill",
-      "add_dialog_search_placeholder": "Search skills",
-      "add_dialog_empty": "All workspace skills are already assigned.",
-      "add_dialog_no_match": "No skills match your search.",
-      "add_dialog_empty_partial": "No more skills to add — this agent already has all of them.",
-      "add_dialog_saving": "Adding…",
-      "add_dialog_confirm_default": "Add",
-      "add_dialog_confirm_one": "Add {{count}} skill",
-      "add_dialog_confirm_other": "Add {{count}} skills",
-      "add_dialog_cancel": "Cancel",
-      "add_failed_toast": "Failed to add skill"
-    },
     "activity": {
       "status": {
         "queued": "Queued",
@@ -748,7 +686,6 @@
     "unavailable": "Agent unavailable",
     "detail_link": "Detail →",
     "runtime_label": "Runtime",
-    "skills_label": "Skills",
     "owner_label": "Owner",
     "unknown_runtime": "Unknown runtime",
     "model_label": "Model",
@@ -861,7 +798,6 @@
       "iteration_limit": "Hit the iteration limit",
       "agent_blocked": "Waiting on human input",
       "api_invalid_request": "Rejected by the model API",
-      "skill_bundle_unavailable": "Couldn't download the agent's skills",
       "runtime_cli_timeout": "Local runtime CLI timed out",
       "environment_prepare_failed": "Couldn't prepare the execution environment",
       "runtime_access_denied": "This agent can't run on its private runtime, so it couldn't reply. Make the runtime public, or rebind/copy the agent to a runtime its owner can use.",

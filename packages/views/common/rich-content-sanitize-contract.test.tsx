@@ -163,12 +163,6 @@ describe.each(SURFACES)("sanitize contract — $name", ({ render: renderSurface 
 
     expect(container.querySelector("mark")?.textContent).toBe("hi");
   });
-
-  it("allows the slash:// protocol", () => {
-    const container = renderSurface("[/deploy](slash://skill/abc-123)");
-
-    expect(container.querySelector(".slash-command")?.textContent).toBe("/deploy");
-  });
 });
 
 // Code-block *rendering* is deliberately not asserted cross-surface yet: chat

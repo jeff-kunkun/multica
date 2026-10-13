@@ -99,7 +99,6 @@ const baseAgent: Agent = {
   max_concurrent_tasks: 1,
   model: "",
   owner_id: "user-1",
-  skills: [],
   created_at: "2026-05-28T00:00:00Z",
   updated_at: "2026-05-28T00:00:00Z",
   archived_at: null,
@@ -695,8 +694,6 @@ describe("McpConfigTab", () => {
 
   it("lists inherited MCP servers discovered from the assigned runtime", async () => {
     mockRuntimeCapabilities.mockResolvedValue({
-      skills: [],
-      supported: true,
       mcpServers: [
         { name: "linear", transport: "http", source: "User config", enabled: true },
       ],

@@ -8,7 +8,7 @@ import (
 )
 
 // Reuses the newRedisTestClient helper from
-// runtime_local_skills_redis_store_test.go: same Redis instance, same gating
+// runtime_capabilities_redis_store_test.go: same Redis instance, same gating
 // on REDIS_TEST_URL, same FlushDB-per-test isolation.
 
 // TestRedisModelListStore_EnvelopePersistsRunStartedAt is a pure marshal/

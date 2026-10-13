@@ -276,7 +276,6 @@ function ReplyInput({
             currentIssueId={issueId}
             attachments={pendingAttachments}
             enableSlashCommands
-            slashCommandMode="command"
           />
         </div>
         )}

@@ -26,7 +26,7 @@ import {
 /**
  * Selects which agent hover-card payload to render when `enableHoverCard` is
  * on. Two surfaces, two intents:
- * - `"profile"` (default) — static identity (description, runtime, skills,
+ * - `"profile"` (default) — static identity (description, runtime, model,
  *   owner). Used by 20+ "who is this agent?" surfaces (comment authors,
  *   pickers, list rows).
  * - `"live"` — live activity peek (workload, current issue, last activity).

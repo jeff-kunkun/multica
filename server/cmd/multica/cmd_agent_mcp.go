@@ -11,15 +11,14 @@ import (
 	"github.com/multica-ai/multica/server/internal/cli"
 )
 
-// Assigning a workspace MCP server to an agent, mirroring `agent skills`.
+// Assigning a workspace MCP server to an agent.
 
 var agentMcpCmd = &cobra.Command{
 	Use:   "mcp",
 	Short: "Manage which workspace MCP servers an agent uses",
 	Long: "Assigns MCP servers from the workspace library to an agent. A library " +
 		"entry does nothing until it is added to an agent here, and each " +
-		"assignment carries its own on/off toggle — the same shape as workspace " +
-		"skills.\n\n" +
+		"assignment carries its own on/off toggle.\n\n" +
 		"This is separate from the agent's OWN mcp_config ('agent update " +
 		"--mcp-config'), which holds servers private to that agent. Both are " +
 		"merged at claim time; the agent's own entry wins on a name collision.",

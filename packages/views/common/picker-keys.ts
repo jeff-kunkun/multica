@@ -19,7 +19,7 @@
  * switching, so standard keyboard accessibility is preserved.
  *
  * Centralizing the rule here keeps every picker built on
- * `createSuggestionPopupRender` (mention, slash-skill, builtin command, and any
+ * `createSuggestionPopupRender` (mention, builtin command, and any
  * future suggestion list) consistent instead of each list re-deciding what
  * counts as "accept". Callers use it in place of a bare `event.key === "Enter"`
  * check, so `Tab` becomes a strict alias of `Enter` inside their accept branch.

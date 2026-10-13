@@ -440,7 +440,7 @@ func TestGetConfigExposesFrontendFeatureFlags(t *testing.T) {
 	if _, published := cfg.FeatureFlags["composio_mcp_apps"]; published {
 		t.Fatalf("composio_mcp_apps: retired with the connected-apps feature, must not be published")
 	}
-	// Billing, plugins and the agent builder are gone from this build. Installed
+	// Billing, plugins, the agent builder and skills are gone from this build. Installed
 	// clients fail closed on these keys, so leaving them unpublished hides the
 	// entry points those clients would otherwise render.
 	for _, retired := range []string{
@@ -449,13 +449,11 @@ func TestGetConfigExposesFrontendFeatureFlags(t *testing.T) {
 		"private_plugins_v1",
 		"remote_mcp_plugins_v1",
 		"agents_agent_builder",
+		"agents_skill_toggles",
 	} {
 		if _, published := cfg.FeatureFlags[retired]; published {
 			t.Fatalf("retired flag %q must not be published", retired)
 		}
-	}
-	if !cfg.FeatureFlags["agents_skill_toggles"] {
-		t.Fatalf("agents_skill_toggles: want true for installed v0.4.0 clients, got false")
 	}
 	if !cfg.FeatureFlags["settings_resource_labels"] {
 		t.Fatalf("settings_resource_labels: want true for installed clients, got false")

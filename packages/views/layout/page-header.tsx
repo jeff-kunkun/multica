@@ -16,8 +16,8 @@ import { SidebarTrigger, useSidebarSafe } from "@multica/ui/components/ui/sideba
 export const PAGE_GUTTER = "px-4";
 
 /**
- * The centred column a detail page reads inside: `runtimes`, and the agent and
- * skill detail pages. A detail page is a document about one entity, not a
+ * The centred column a detail page reads inside: `runtimes` and the agent
+ * detail page. A detail page is a document about one entity, not a
  * table, so past a point more width stops helping and starts stretching a
  * two-column layout apart.
  *

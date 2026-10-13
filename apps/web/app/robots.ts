@@ -19,7 +19,6 @@ export default function robots(): MetadataRoute.Robots {
           "/settings",
           "/my-issues",
           "/runtimes",
-          "/skills",
         ],
       },
     ],

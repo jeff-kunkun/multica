@@ -1,7 +1,7 @@
 import { Lock } from "lucide-react";
 import { cn } from "@multica/ui/lib/utils";
 
-type Resource = "agent" | "skill" | "comment" | "runtime" | "workspace";
+type Resource = "agent" | "comment" | "runtime" | "workspace";
 
 type Reason =
   | "allowed"
@@ -14,7 +14,6 @@ type Reason =
 
 const RESOURCE_NOUN: Record<Resource, string> = {
   agent: "agent",
-  skill: "skill",
   comment: "comment",
   runtime: "runtime",
   workspace: "workspace",
@@ -23,7 +22,7 @@ const RESOURCE_NOUN: Record<Resource, string> = {
 /**
  * Read-only banner for resource detail pages — appears when the current user
  * cannot edit the resource. Single component owns all the copy variants so
- * the wording stays consistent across agent, skill, runtime detail pages.
+ * the wording stays consistent across agent and runtime detail pages.
  *
  * Returns `null` when the user *can* edit (reason === "allowed") so callers
  * can mount it unconditionally.

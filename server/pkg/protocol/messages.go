@@ -3,10 +3,8 @@ package protocol
 import "encoding/json"
 
 const (
-	DaemonCapabilitySkillBundlesV1      = "skill-bundles-v1"
 	DaemonCapabilityCoalescedCommentsV1 = "coalesced-comments-v1"
 	DaemonCapabilityExecutionManifestV1 = "execution-manifest-v1"
-	DaemonCapabilityAgentSkillV1        = "agent-skill-v1"
 	// DaemonCapabilityLocalWorktreeV1 advertises that the daemon implements
 	// worktree mode for local_directory resources (execution_mode=worktree).
 	//
@@ -30,19 +28,6 @@ const (
 	// the extra deferred-task lookup for clients that opt in, and an older
 	// server's missing fields make a newer daemon retain its short fallback.
 	DaemonCapabilityClaimPollHintsV1 = "claim-poll-hints-v1"
-
-	// DaemonCapabilityPlatformSkillV1 advertises that the daemon's runtime
-	// brief names the merged `multica-platform` skill instead of the
-	// per-domain built-ins it replaced (MUL-6986).
-	//
-	// The brief is assembled by the daemon, so a backend upgrade does not
-	// rewrite it: a daemon released before that merge still tells the agent to
-	// "read the `multica-working-on-issues` skill", a name this server no
-	// longer ships. Without this gate the pointer dangles and the agent is left
-	// hunting for a skill that is not installed. When it is absent the server
-	// ships a redirect stub under the old name; when it is present it ships
-	// nothing extra, so the stub retires itself as daemons update.
-	DaemonCapabilityPlatformSkillV1 = "platform-skill-v1"
 
 	// DaemonCapabilityCheckoutKeepsWorkV1 advertises that the daemon's
 	// `multica repo checkout` keeps an existing checkout that holds work
@@ -146,9 +131,7 @@ type WorkspacesChangedPayload struct{}
 // heartbeat, which claims whatever is queued) — so an unknown value from a
 // newer server stays safe on an older daemon.
 const (
-	PendingWorkKindModelList        = "model_list"
-	PendingWorkKindLocalSkills      = "local_skills"
-	PendingWorkKindLocalSkillImport = "local_skill_import"
+	PendingWorkKindModelList = "model_list"
 )
 
 // PendingWorkPayload is sent from server to daemon as a wakeup hint when a
@@ -339,8 +322,7 @@ type ChatSessionUpdatedPayload struct {
 // Mirrors the body of POST /api/daemon/heartbeat so both transports share
 // identical semantics.
 type DaemonHeartbeatRequestPayload struct {
-	RuntimeID           string `json:"runtime_id"`
-	SupportsBatchImport bool   `json:"supports_batch_import,omitempty"`
+	RuntimeID string `json:"runtime_id"`
 }
 
 // DaemonHeartbeatAckPayload is the server's reply to DaemonHeartbeatRequestPayload.
@@ -356,19 +338,12 @@ type DaemonHeartbeatRequestPayload struct {
 // and re-registers; without it the dead UUID would keep heartbeating until the
 // daemon process restarts.
 type DaemonHeartbeatAckPayload struct {
-	RuntimeID               string                                  `json:"runtime_id"`
-	Status                  string                                  `json:"status"`
-	ServerCapabilities      []string                                `json:"server_capabilities,omitempty"`
-	RuntimeGone             bool                                    `json:"runtime_gone,omitempty"`
-	PendingUpdate           *DaemonHeartbeatPendingUpdate           `json:"pending_update,omitempty"`
-	PendingModelList        *DaemonHeartbeatPendingModelList        `json:"pending_model_list,omitempty"`
-	PendingLocalSkills      *DaemonHeartbeatPendingLocalSkills      `json:"pending_local_skills,omitempty"`
-	PendingLocalSkillImport *DaemonHeartbeatPendingLocalSkillImport `json:"pending_local_skill_import,omitempty"`
-	// PendingLocalSkillImports carries multiple import requests in a single
-	// heartbeat so the daemon can process them concurrently. Old daemons
-	// that don't know this field silently ignore it (standard JSON behavior)
-	// and fall back to the singular PendingLocalSkillImport above.
-	PendingLocalSkillImports []DaemonHeartbeatPendingLocalSkillImport `json:"pending_local_skill_imports,omitempty"`
+	RuntimeID          string                           `json:"runtime_id"`
+	Status             string                           `json:"status"`
+	ServerCapabilities []string                         `json:"server_capabilities,omitempty"`
+	RuntimeGone        bool                             `json:"runtime_gone,omitempty"`
+	PendingUpdate      *DaemonHeartbeatPendingUpdate    `json:"pending_update,omitempty"`
+	PendingModelList   *DaemonHeartbeatPendingModelList `json:"pending_model_list,omitempty"`
 }
 
 // HeartbeatStatusRuntimeGone is the ack Status used when the runtime row no
@@ -386,17 +361,4 @@ type DaemonHeartbeatPendingUpdate struct {
 // enumerate the runtime's supported models.
 type DaemonHeartbeatPendingModelList struct {
 	ID string `json:"id"`
-}
-
-// DaemonHeartbeatPendingLocalSkills describes a request for the runtime's
-// local-skill inventory.
-type DaemonHeartbeatPendingLocalSkills struct {
-	ID string `json:"id"`
-}
-
-// DaemonHeartbeatPendingLocalSkillImport describes a request to import a
-// specific runtime local skill.
-type DaemonHeartbeatPendingLocalSkillImport struct {
-	ID       string `json:"id"`
-	SkillKey string `json:"skill_key"`
 }

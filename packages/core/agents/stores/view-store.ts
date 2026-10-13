@@ -11,8 +11,7 @@ import type { AccessScope } from "../effective-access";
 
 // View preferences for the agents list page: scope, sort, column visibility,
 // and filters. Persisted per workspace, per user/device. Row selection is
-// session-scoped on purpose (same rationale as the skills view
-// store).
+// session-scoped on purpose.
 
 // Scope mixes the ownership lens (mine/all) with the archived lifecycle
 // stage. Impure on paper, but the three are mutually exclusive in practice

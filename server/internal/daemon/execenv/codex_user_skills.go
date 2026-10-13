@@ -23,18 +23,11 @@ import (
 // (exposeSharedCodexPluginCache). A skill directory is read-only input to the
 // CLI, so the write isolation a copy incidentally bought has no requester.
 //
-// Workspace-assigned skills take precedence on name conflict: any user skill
-// whose sanitized name matches a workspace skill's sanitized name is skipped
-// here, and writeSkillFiles then writes the workspace version into a clean
-// slot. writeSkillFiles never writes through a link it did not create:
-// allocateCollisionFreeSkillDir probes with os.Lstat, so a link left here
-// counts as occupied and the workspace skill lands in a `-multica` sibling.
-//
 // Per-skill failures are logged and skipped — a single broken user skill
 // must not prevent the task from running. Returning an error is reserved for
 // failures that would affect every skill: listing the shared skills
 // directory, or creating the per-task skills directory.
-func seedUserCodexSkills(codexHome string, workspaceSkills []SkillContextForEnv, logger *slog.Logger) error {
+func seedUserCodexSkills(codexHome string, logger *slog.Logger) error {
 	sharedSkillsDir := filepath.Join(resolveSharedCodexHome(), "skills")
 
 	info, err := os.Stat(sharedSkillsDir)
@@ -48,11 +41,6 @@ func seedUserCodexSkills(codexHome string, workspaceSkills []SkillContextForEnv,
 		return nil
 	}
 
-	reserved := make(map[string]struct{}, len(workspaceSkills))
-	for _, s := range workspaceSkills {
-		reserved[sanitizeSkillName(s.Name)] = struct{}{}
-	}
-
 	entries, err := os.ReadDir(sharedSkillsDir)
 	if err != nil {
 		return fmt.Errorf("read shared skills dir: %w", err)
@@ -62,10 +50,6 @@ func seedUserCodexSkills(codexHome string, workspaceSkills []SkillContextForEnv,
 	for _, entry := range entries {
 		name := entry.Name()
 		if name == "" || strings.HasPrefix(name, ".") {
-			continue
-		}
-		if _, claimed := reserved[sanitizeSkillName(name)]; claimed {
-			logger.Info("execenv: codex user-skill yields to workspace skill", "name", name)
 			continue
 		}
 		src := filepath.Join(sharedSkillsDir, name)

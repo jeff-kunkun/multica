@@ -38,7 +38,7 @@ import (
 )
 
 // randomID returns a random 16-byte hex string used as a request ID for
-// in-memory stores (model list, local skills, CLI update, etc.).
+// in-memory stores (model list, runtime capabilities, CLI update, etc.).
 func randomID() string {
 	b := make([]byte, 16)
 	rand.Read(b)
@@ -148,8 +148,8 @@ type WorkspaceSetRefreshNotifier interface {
 }
 
 // DaemonPendingWorkNotifier pushes a runtime-scoped "heartbeat now" hint to the
-// daemon so a queued heartbeat-carried request (model discovery, capability
-// discovery, or local-skill import) is picked up immediately instead of on the
+// daemon so a queued heartbeat-carried request (model or capability
+// discovery) is picked up immediately instead of on the
 // daemon's next scheduled tick (MUL-5444).
 // Satisfied by both *daemonws.Hub (single-node) and *daemonws.RelayNotifier
 // (multi-node, fans out through Redis).
@@ -193,8 +193,6 @@ type Handler struct {
 	EmailService           *service.EmailService
 	UpdateStore            UpdateStore
 	ModelListStore         ModelListStore
-	LocalSkillListStore    LocalSkillListStore
-	LocalSkillImportStore  LocalSkillImportStore
 	FeatureFlags           *featureflag.Service
 	// IssueStatusCatalog reads the workspace status catalog. Defaults to
 	// Queries; a test can substitute a counting wrapper to assert HOW MANY
@@ -329,8 +327,6 @@ func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *event
 		UpdateStore:            NewInMemoryUpdateStore(),
 		ModelListStore:         NewInMemoryModelListStore(),
 		ModelCatalogCache:      NewInMemoryModelCatalogCache(),
-		LocalSkillListStore:    NewInMemoryLocalSkillListStore(),
-		LocalSkillImportStore:  NewInMemoryLocalSkillImportStore(),
 		LivenessStore:          NewNoopLivenessStore(),
 		HeartbeatScheduler:     NewPassthroughHeartbeatScheduler(queries),
 		Storage:                store,

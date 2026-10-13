@@ -3,7 +3,6 @@ import { createMemoryRouter, Outlet, useMatches } from "react-router-dom";
 import type { RouteObject } from "react-router-dom";
 import { IssueDetailPage } from "./pages/issue-detail-page";
 import { ProjectDetailPage } from "./pages/project-detail-page";
-import { SkillDetailPage } from "./pages/skill-detail-page";
 import { AgentDetailPage } from "./pages/agent-detail-page";
 import { MemberDetailPage } from "./pages/member-detail-page";
 import {
@@ -16,7 +15,6 @@ import { ProjectsPage } from "@multica/views/projects/components";
 import { DashboardPage } from "@multica/views/dashboard";
 import { MeetingsPage } from "@multica/views/plans";
 import { MyIssuesPage } from "@multica/views/my-issues";
-import { SkillsPage } from "@multica/views/skills";
 import { DesktopRuntimesPage } from "./components/desktop-runtimes-page";
 import { DesktopAgentsPage } from "./components/desktop-agents-page";
 import { ManualCreateAgentPage } from "@multica/views/agents";
@@ -159,12 +157,6 @@ export const appRoutes: RouteObject[] = [
             path: "runtimes/:id/runtime/:runtimeId",
             element: <RuntimeSettingsPage />,
             handle: { title: "Runtime" },
-          },
-          { path: "skills", element: <SkillsPage />, handle: { title: "Skills" } },
-          {
-            path: "skills/:id",
-            element: <SkillDetailPage />,
-            handle: { title: "Skill" },
           },
           { path: "agents", element: <DesktopAgentsPage />, handle: { title: "Agents" } },
           {

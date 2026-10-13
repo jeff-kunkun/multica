@@ -1,4 +1,3 @@
-import type { Label } from "./label";
 
 export type AgentStatus = "idle" | "working" | "blocked" | "error" | "offline";
 
@@ -553,9 +552,6 @@ export interface Agent {
    */
   service_tier?: string;
   owner_id: string | null;
-  skills: AgentSkillSummary[];
-  /** Runtime-local skills this agent must not inherit. Older servers omit it. */
-  disabled_runtime_skills?: DisabledRuntimeSkill[];
   created_at: string;
   updated_at: string;
   archived_at: string | null;
@@ -567,39 +563,6 @@ export interface AgentConversationStarter {
   label: string;
   /** Full editable text copied into the composer when selected. */
   prompt: string;
-}
-
-export interface DisabledRuntimeSkill {
-  runtime_id: string;
-  provider: string;
-  root: "provider" | "universal" | "plugin";
-  key: string;
-  name?: string;
-  plugin?: string;
-}
-
-export interface SetAgentRuntimeSkillEnabledRequest {
-  runtime_id: string;
-  root: "provider" | "universal" | "plugin";
-  key: string;
-  name: string;
-  plugin?: string;
-  enabled: boolean;
-}
-
-/**
- * Minimal skill shape embedded in an Agent payload (`GET /api/agents`,
- * `GET /api/agents/:id`). Only id/name/description are populated — the
- * agent list batch query joins exactly those three columns. For full skill
- * info, use `GET /api/agents/:id/skills` (returns `SkillSummary[]`) or
- * `GET /api/skills/:id` (returns the full `Skill`).
- */
-export interface AgentSkillSummary {
-  id: string;
-  name: string;
-  description: string;
-	/** Older servers omit this field; consumers must treat that as enabled. */
-	enabled?: boolean;
 }
 
 export interface CreateAgentRequest {
@@ -632,8 +595,6 @@ export interface CreateAgentRequest {
   /** Optional creation-source attribution. Surfaced as the `template`
    *  property on the `agent_created` PostHog event. */
   template?: string;
-  /** Workspace skill IDs attached atomically with the agent row. */
-  skill_ids?: string[];
 }
 
 /** Who may invoke the agent being created, as the creation form models it. */
@@ -658,7 +619,6 @@ export interface StoredAgentDraft {
   model: string;
   thinking_level: string;
   service_tier: string;
-  skill_ids: string[];
   permission_scope: AgentPermissionScope;
   member_ids: string[];
   team_ids: string[];
@@ -743,78 +703,6 @@ export interface AgentEnvResponse {
  */
 export interface UpdateAgentEnvRequest {
   custom_env: Record<string, string>;
-}
-
-// Skills
-
-/**
- * Lightweight skill shape returned by list endpoints (`GET /api/skills`,
- * `GET /api/agents/:id/skills`). The full SKILL.md `content` is intentionally
- * omitted — bodies routinely run 50–200KB each and shipping them in list
- * payloads tripped CLI timeouts on high-latency links (GH
- * multica-ai/multica#2174). Use `Skill` from a detail endpoint when you need
- * the body. For skills embedded in an `Agent` payload see `AgentSkillSummary`.
- */
-export interface SkillSummary {
-  id: string;
-  workspace_id: string;
-  name: string;
-  description: string;
-  config: Record<string, unknown>;
-  created_by: string | null;
-  created_at: string;
-  updated_at: string;
-  /** Present only when returned from an agent-scoped assignment endpoint. */
-  enabled?: boolean;
-  /** Present on workspace skill lists after a backend that bulk-attaches labels. */
-  labels?: Label[];
-}
-
-export interface Skill extends SkillSummary {
-  content: string;
-  files: SkillFile[];
-}
-
-export interface SkillFile {
-  id: string;
-  skill_id: string;
-  path: string;
-  content: string;
-  created_at: string;
-  updated_at: string;
-}
-
-export interface CreateSkillRequest {
-  name: string;
-  description?: string;
-  content?: string;
-  config?: Record<string, unknown>;
-  files?: { path: string; content: string }[];
-}
-
-/** Structured body of POST /api/skills/import when uploading an archive. */
-export interface SkillImportResult {
-  status: "created" | "updated" | "conflict" | "skipped" | "failed";
-  reason?: string;
-  skill?: Skill;
-  existing_skill?: {
-    id: string;
-    name: string;
-    created_by?: string;
-    can_overwrite?: boolean;
-  };
-}
-
-export interface UpdateSkillRequest {
-  name?: string;
-  description?: string;
-  content?: string;
-  config?: Record<string, unknown>;
-  files?: { path: string; content: string }[];
-}
-
-export interface SetAgentSkillsRequest {
-  skill_ids: string[];
 }
 
 export interface IssueUsageSummary {
@@ -1147,42 +1035,12 @@ export interface RuntimeModelsResult {
   cachedAt?: string;
 }
 
-export type RuntimeLocalSkillStatus =
+export type RuntimeCapabilitiesStatus =
   | "pending"
   | "running"
   | "completed"
-  | "conflict"
   | "failed"
   | "timeout";
-
-export type RuntimeLocalSkillImportAction = "overwrite";
-
-export interface RuntimeLocalSkillImportConflict {
-  existing_skill_id: string;
-  existing_created_by?: string;
-  can_overwrite: boolean;
-}
-
-export interface RuntimeLocalSkillSummary {
-  key: string;
-  name: string;
-  description?: string;
-  source_path: string;
-  provider: string;
-  /**
-   * Which discovery root surfaced this skill: "provider" for the runtime's
-   * own skill directory (e.g. ~/.claude/skills) or "universal" for the
-   * cross-tool ~/.agents/skills fallback. Daemons that predate multi-root
-   * discovery omit the field; treat `undefined` as unknown rather than
-   * asserting either origin.
-   */
-  root?: "provider" | "universal" | "plugin";
-  /** Enabled runtime plugin that contributed this skill, when applicable. */
-  plugin?: string;
-  /** New daemons set this only when they can enforce per-agent disablement. */
-  can_disable?: boolean;
-  file_count: number;
-}
 
 export interface RuntimeLocalMcpServerSummary {
 	name: string;
@@ -1191,12 +1049,11 @@ export interface RuntimeLocalMcpServerSummary {
 	enabled: boolean;
 }
 
-export interface RuntimeLocalSkillListRequest {
+/** Daemon discovery round trip that reports the runtime's local MCP inventory. */
+export interface RuntimeCapabilitiesRequest {
   id: string;
   runtime_id: string;
-  status: RuntimeLocalSkillStatus;
-  skills?: RuntimeLocalSkillSummary[];
-  supported: boolean;
+  status: RuntimeCapabilitiesStatus;
 	mcp_servers?: RuntimeLocalMcpServerSummary[];
 	mcp_supported?: boolean;
   error?: string;
@@ -1204,41 +1061,7 @@ export interface RuntimeLocalSkillListRequest {
   updated_at: string;
 }
 
-export interface CreateRuntimeLocalSkillImportRequest {
-  skill_key: string;
-  name?: string;
-  description?: string;
-  action?: RuntimeLocalSkillImportAction;
-  target_skill_id?: string;
-  supports_conflict?: boolean;
-}
-
-export interface RuntimeLocalSkillImportRequest {
-  id: string;
-  runtime_id: string;
-  skill_key: string;
-  name?: string;
-  description?: string;
-  action?: RuntimeLocalSkillImportAction;
-  target_skill_id?: string;
-  supports_conflict?: boolean;
-  status: RuntimeLocalSkillStatus;
-  skill?: Skill;
-  conflict?: RuntimeLocalSkillImportConflict;
-  error?: string;
-  created_at: string;
-  updated_at: string;
-}
-
-export interface RuntimeLocalSkillsResult {
-  skills: RuntimeLocalSkillSummary[];
-  supported: boolean;
+export interface RuntimeCapabilitiesResult {
 	mcpServers: RuntimeLocalMcpServerSummary[];
 	mcpSupported: boolean;
-}
-
-export interface RuntimeLocalSkillImportResult {
-  status: "created" | "updated" | "conflict";
-  skill?: Skill;
-  conflict?: RuntimeLocalSkillImportConflict;
 }

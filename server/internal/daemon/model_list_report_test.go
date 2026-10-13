@@ -2,11 +2,39 @@ package daemon
 
 import (
 	"context"
+	"log/slog"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 )
+
+// withFastRuntimeReportBackoffs swaps in zero-delay retries for the duration
+// of a test so the suite doesn't pay real sleep latency.
+func withFastRuntimeReportBackoffs(t *testing.T) {
+	t.Helper()
+	prev := runtimeReportBackoffs
+	runtimeReportBackoffs = []time.Duration{0, 0, 0, 0}
+	t.Cleanup(func() { runtimeReportBackoffs = prev })
+}
+
+// runtimeReportDaemon wires a Daemon around an httptest.Server that counts
+// every inbound request, so the retry path runs against the real Client.
+func runtimeReportDaemon(t *testing.T, handler http.HandlerFunc) (*Daemon, *int32) {
+	t.Helper()
+	var calls int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&calls, 1)
+		handler(w, r)
+	}))
+	t.Cleanup(srv.Close)
+	return &Daemon{
+		client: NewClient(srv.URL),
+		logger: slog.Default(),
+	}, &calls
+}
 
 // TestReportModelListResult_RetriesOn500AndEventuallySucceeds pins the
 // regression GPT-Boy flagged on PR #2022: handleModelList used to call
@@ -16,10 +44,10 @@ import (
 // eliminate. With the retry helper in place a transient store failure on
 // the server side gets re-tried until it lands.
 func TestReportModelListResult_RetriesOn500AndEventuallySucceeds(t *testing.T) {
-	withFastLocalSkillReportBackoffs(t)
+	withFastRuntimeReportBackoffs(t)
 
 	var hits int32
-	d, calls := localSkillReportDaemon(t, func(w http.ResponseWriter, _ *http.Request) {
+	d, calls := runtimeReportDaemon(t, func(w http.ResponseWriter, _ *http.Request) {
 		n := atomic.AddInt32(&hits, 1)
 		if n <= 2 {
 			http.Error(w, "{}", http.StatusInternalServerError)
@@ -40,9 +68,9 @@ func TestReportModelListResult_RetriesOn500AndEventuallySucceeds(t *testing.T) {
 // expired or was cross-workspace) is treated as terminal — retrying just
 // burns heartbeat cycles.
 func TestReportModelListResult_DoesNotRetryOn4xx(t *testing.T) {
-	withFastLocalSkillReportBackoffs(t)
+	withFastRuntimeReportBackoffs(t)
 
-	d, calls := localSkillReportDaemon(t, func(w http.ResponseWriter, _ *http.Request) {
+	d, calls := runtimeReportDaemon(t, func(w http.ResponseWriter, _ *http.Request) {
 		http.Error(w, `{"error":"request not found"}`, http.StatusNotFound)
 	})
 
@@ -57,10 +85,10 @@ func TestReportModelListResult_DoesNotRetryOn4xx(t *testing.T) {
 // posts to, so a future client refactor doesn't silently aim reports at the
 // wrong endpoint.
 func TestReportModelListResult_SendsCorrectPath(t *testing.T) {
-	withFastLocalSkillReportBackoffs(t)
+	withFastRuntimeReportBackoffs(t)
 
 	var path string
-	d, _ := localSkillReportDaemon(t, func(w http.ResponseWriter, r *http.Request) {
+	d, _ := runtimeReportDaemon(t, func(w http.ResponseWriter, r *http.Request) {
 		path = r.URL.Path
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte(`{"status":"ok"}`))

@@ -28,7 +28,7 @@ func TestRequestHasClientCapability(t *testing.T) {
 	}{
 		{name: "absent"},
 		{name: "exact", header: protocol.DaemonCapabilityCoalescedCommentsV1, want: true},
-		{name: "comma separated and trimmed", header: "skill-bundles-v1,  coalesced-comments-v1  ", want: true},
+		{name: "comma separated and trimmed", header: "execution-manifest-v1,  coalesced-comments-v1  ", want: true},
 		{name: "substring", header: "xcoalesced-comments-v1", want: false},
 		{name: "case sensitive", header: "Coalesced-Comments-V1", want: false},
 		{name: "unknown", header: "future-comments-v2", want: false},
@@ -262,7 +262,7 @@ func TestClaimTaskByRuntime_CoalescedDeliveryMatrix(t *testing.T) {
 
 	t.Run("legacy daemon receives one compatible bundle", func(t *testing.T) {
 		fixture := createCommentDeliveryFixture(t, "Legacy comment delivery")
-		task := claimCommentDeliveryFixture(t, fixture, protocol.DaemonCapabilitySkillBundlesV1)
+		task := claimCommentDeliveryFixture(t, fixture, protocol.DaemonCapabilityExecutionManifestV1)
 
 		// A v0.3.41-shaped decoder knows only this old comment field. All input
 		// must still be available through it; structured fields are deliberately
@@ -296,7 +296,7 @@ func TestClaimTaskByRuntime_CoalescedDeliveryMatrix(t *testing.T) {
 
 	t.Run("capable daemon receives ordered structured comments", func(t *testing.T) {
 		fixture := createCommentDeliveryFixture(t, "Structured comment delivery")
-		capabilities := protocol.DaemonCapabilitySkillBundlesV1 + "," + protocol.DaemonCapabilityCoalescedCommentsV1
+		capabilities := protocol.DaemonCapabilityExecutionManifestV1 + "," + protocol.DaemonCapabilityCoalescedCommentsV1
 		task := claimCommentDeliveryFixture(t, fixture, capabilities)
 
 		if task.TriggerCommentContent != fixture.content[2] {

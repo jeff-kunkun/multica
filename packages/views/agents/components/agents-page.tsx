@@ -78,8 +78,7 @@ import { useLocale, useT } from "../../i18n";
 import { matchesPinyin } from "../../editor/extensions/pinyin-match";
 
 // Column template — single source of truth for header, rows, and skeletons.
-// Same conventions as the skills list (see list-grid.tsx):
-// deterministic var-width tracks, two-zone responsiveness (≥@2xl WYSIWYG
+// Deterministic var-width tracks, two-zone responsiveness (≥@2xl WYSIWYG
 // with min-width + horizontal-scroll escape valve; <@2xl static core set of
 // name + status, toggles don't apply).
 //

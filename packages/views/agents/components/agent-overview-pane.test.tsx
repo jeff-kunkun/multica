@@ -38,9 +38,6 @@ vi.mock("./agent-access-settings", () => ({
 vi.mock("./tabs/instructions-tab", () => ({
   InstructionsTab: () => <div>instructions-tab</div>,
 }));
-vi.mock("./tabs/skills-tab", () => ({
-  SkillsTab: () => <div>skills-tab</div>,
-}));
 vi.mock("./tabs/env-tab", () => ({
   EnvTab: () => <div>env-tab</div>,
 }));
@@ -77,7 +74,6 @@ const baseAgent: Agent = {
   max_concurrent_tasks: 1,
   model: "",
   owner_id: "user-1",
-  skills: [],
   created_at: "2026-05-28T00:00:00Z",
   updated_at: "2026-05-28T00:00:00Z",
   archived_at: null,

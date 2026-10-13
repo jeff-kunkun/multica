@@ -232,10 +232,10 @@ func TestPrepareDshTaskSessionRoot(t *testing.T) {
 func TestLayerCustomEnvKeepsReasonixCredentialsHomeButBlocksStateHome(t *testing.T) {
 	t.Parallel()
 	agentEnv := map[string]string{}
-	layerCustomEnvAndHermesHome(agentEnv, map[string]string{
+	layerCustomEnv(agentEnv, map[string]string{
 		"REASONIX_HOME":       "/operator/reasonix-home",
 		"REASONIX_STATE_HOME": "/unsafe/shared-state",
-	}, "", nil)
+	}, nil)
 	if got := agentEnv["REASONIX_HOME"]; got != "/operator/reasonix-home" {
 		t.Fatalf("REASONIX_HOME = %q, want operator-owned home", got)
 	}
@@ -256,65 +256,23 @@ func TestValidateReasonixStateSegmentRejectsTraversal(t *testing.T) {
 	}
 }
 
-// TestLayerCustomEnvAndHermesHome exercises the daemon-assembled child env for
-// HERMES_HOME: no overlay passes the user's value through, an overlay overrides
-// it, and blocklisted keys are still dropped.
-func TestLayerCustomEnvAndHermesHome(t *testing.T) {
+// TestLayerCustomEnvDropsBlockedKeys checks that user custom env passes
+// through while daemon-owned keys stay out of the child env.
+func TestLayerCustomEnvDropsBlockedKeys(t *testing.T) {
 	t.Parallel()
-
-	tests := []struct {
-		name        string
-		customEnv   map[string]string
-		overlayHome string
-		wantHermes  string // "" means the key must be absent
-		wantAbsent  []string
-	}{
-		{
-			name:        "no skills: user HERMES_HOME passes through",
-			customEnv:   map[string]string{"HERMES_HOME": "/home/u/.hermes-research"},
-			overlayHome: "",
-			wantHermes:  "/home/u/.hermes-research",
-		},
-		{
-			name:        "skills bound: overlay overrides user HERMES_HOME",
-			customEnv:   map[string]string{"HERMES_HOME": "/home/u/.hermes-research"},
-			overlayHome: "/tmp/task/hermes-home",
-			wantHermes:  "/tmp/task/hermes-home",
-		},
-		{
-			name:        "no custom home, no overlay: key absent",
-			customEnv:   map[string]string{"ANTHROPIC_API_KEY": "sk"},
-			overlayHome: "",
-			wantHermes:  "",
-		},
-		{
-			name:        "blocklisted key dropped, overlay still applied",
-			customEnv:   map[string]string{"CODEX_HOME": "/evil", "MULTICA_TOKEN": "x"},
-			overlayHome: "/tmp/task/hermes-home",
-			wantHermes:  "/tmp/task/hermes-home",
-			wantAbsent:  []string{"CODEX_HOME", "MULTICA_TOKEN"},
-		},
+	agentEnv := map[string]string{}
+	layerCustomEnv(agentEnv, map[string]string{
+		"ANTHROPIC_API_KEY": "sk",
+		"CODEX_HOME":        "/evil",
+		"MULTICA_TOKEN":     "x",
+	}, nil)
+	if got := agentEnv["ANTHROPIC_API_KEY"]; got != "sk" {
+		t.Fatalf("ANTHROPIC_API_KEY = %q, want sk", got)
 	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			agentEnv := map[string]string{}
-			layerCustomEnvAndHermesHome(agentEnv, tt.customEnv, tt.overlayHome, nil)
-
-			if got, ok := agentEnv["HERMES_HOME"]; tt.wantHermes == "" {
-				if ok {
-					t.Errorf("HERMES_HOME should be absent, got %q", got)
-				}
-			} else if got != tt.wantHermes {
-				t.Errorf("HERMES_HOME = %q, want %q", got, tt.wantHermes)
-			}
-			for _, k := range tt.wantAbsent {
-				if _, ok := agentEnv[k]; ok {
-					t.Errorf("blocklisted key %q should not be applied", k)
-				}
-			}
-		})
+	for _, k := range []string{"CODEX_HOME", "MULTICA_TOKEN"} {
+		if _, ok := agentEnv[k]; ok {
+			t.Errorf("blocklisted key %q should not be applied", k)
+		}
 	}
 }
 
@@ -573,11 +531,11 @@ func TestTaskMulticaEnvironmentIncludesPrivateConfigRoot(t *testing.T) {
 		t.Fatalf("taskMulticaEnvironment() = %#v, want %#v", env, want)
 	}
 
-	layerCustomEnvAndHermesHome(env, map[string]string{
+	layerCustomEnv(env, map[string]string{
 		"MULTICA_TASK_CONFIG_ROOT":     "/owner/config",
 		"MULTICA_TASK_WORKSPACES_ROOT": "/owner/multica_workspaces",
 		"MULTICA_TOKEN":                "mul_owner_sentinel",
-	}, "", nil)
+	}, nil)
 	if env["MULTICA_TASK_CONFIG_ROOT"] != taskRoot {
 		t.Fatalf("custom env replaced task config root: %q", env["MULTICA_TASK_CONFIG_ROOT"])
 	}
@@ -632,7 +590,7 @@ func TestTaskMulticaEnvironmentRespectsClaudeTempOverride(t *testing.T) {
 		for _, value := range []string{"/custom/claude-temp", ""} {
 			custom := map[string]string{key: value}
 			env = taskMulticaEnvironment(Task{Agent: &AgentData{CustomEnv: custom}}, "claude", "", "", "", "", "", 0, 0, "/task/tmp")
-			layerCustomEnvAndHermesHome(env, custom, "", nil)
+			layerCustomEnv(env, custom, nil)
 			if env[key] != value {
 				t.Fatalf("custom %s = %q, want user's %q", key, env[key], value)
 			}
@@ -868,12 +826,7 @@ func TestBuildPromptContainsIssueID(t *testing.T) {
 	issueID := "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
 	prompt := BuildPrompt(Task{
 		IssueID: issueID,
-		Agent: &AgentData{
-			Name: "Local Codex",
-			Skills: []SkillData{
-				{Name: "Concise", Content: "Be concise."},
-			},
-		},
+		Agent:   &AgentData{Name: "Local Codex"},
 	}, "claude")
 
 	// Prompt should contain the issue ID and CLI hint.
@@ -886,12 +839,6 @@ func TestBuildPromptContainsIssueID(t *testing.T) {
 		}
 	}
 
-	// Skills should NOT be inlined in the prompt (they're in runtime config).
-	for _, absent := range []string{"## Agent Skills", "Be concise."} {
-		if strings.Contains(prompt, absent) {
-			t.Fatalf("prompt should NOT contain %q (skills are in runtime config)", absent)
-		}
-	}
 }
 
 // TestSessionContinuityNoticeMatchesSurface locks the MUL-5722 split. The same
@@ -1899,17 +1846,12 @@ func TestGateResumeToReachableSession(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name      string
-		sessionID string
-		priorDir  string
-		envDir    string
-		// sessionHomeUnreachable models a provider whose session store this run
-		// cannot reach even though the workdir matches — the Hermes
-		// local_directory case (GH #6806). Zero value keeps the cwd-keyed
-		// providers' behaviour.
-		sessionHomeUnreachable bool
-		wantSession            string
-		wantReused             bool
+		name        string
+		sessionID   string
+		priorDir    string
+		envDir      string
+		wantSession string
+		wantReused  bool
 	}{
 		{
 			name:        "same workdir keeps session",
@@ -1943,19 +1885,6 @@ func TestGateResumeToReachableSession(t *testing.T) {
 			wantSession: "",
 			wantReused:  false,
 		},
-		{
-			// The local_directory flow: workdir is the user's own directory
-			// and therefore identical across tasks, but reuse is disabled so
-			// the session store is a fresh, empty one. Forwarding the id here
-			// is what made every turn silently restart the conversation.
-			name:                   "matching workdir but unreachable session store drops session",
-			sessionID:              "sess-1",
-			priorDir:               "/repo",
-			envDir:                 "/repo",
-			sessionHomeUnreachable: true,
-			wantSession:            "",
-			wantReused:             false,
-		},
 	}
 
 	for _, tt := range tests {
@@ -1980,7 +1909,7 @@ func TestGateResumeToReachableSession(t *testing.T) {
 			task := Task{PriorSessionID: tt.sessionID, PriorWorkDir: priorDir}
 			taskCtx := execenv.TaskContextForEnv{PriorSessionResumed: tt.sessionID != ""}
 
-			reachable := gateResumeToReachableSession(&task, &taskCtx, "claude", envDir, !tt.sessionHomeUnreachable, false, false, slog.Default())
+			reachable := gateResumeToReachableSession(&task, &taskCtx, "claude", envDir, false, false, slog.Default())
 
 			if reachable != tt.wantReused {
 				t.Fatalf("reachable = %v, want %v", reachable, tt.wantReused)
@@ -2046,7 +1975,7 @@ func TestGateCodexResumeAcrossLocalWorktrees(t *testing.T) {
 			}
 			store := execenv.CodexSessionStorePath("test", taskCtx)
 			eligible := codexWorktreeResumeEligible(env, store)
-			if got := gateResumeToReachableSession(&task, &taskCtx, tt.provider, env.WorkDir, true, false, eligible, slog.Default()); got {
+			if got := gateResumeToReachableSession(&task, &taskCtx, tt.provider, env.WorkDir, false, eligible, slog.Default()); got {
 				if tt.provider == "codex" && !tt.rolloutPresent {
 					gateCodexResumeToRolloutPresence(&task, &taskCtx, tt.provider, t.TempDir(), slog.Default())
 				} else {
@@ -2058,106 +1987,6 @@ func TestGateCodexResumeAcrossLocalWorktrees(t *testing.T) {
 			}
 			if taskCtx.PriorSessionResumed != tt.wantResume || task.PriorSessionResumeUnavailable == tt.wantResume || taskCtx.PriorSessionResumeUnavailable == tt.wantResume {
 				t.Fatalf("inconsistent resume state: task=%+v taskCtx=%+v", task, taskCtx)
-			}
-		})
-	}
-}
-
-// Hermes resumes from HERMES_HOME, independently of the task's cwd (#9062).
-func TestGateHermesResumeToSessionHome(t *testing.T) {
-	t.Parallel()
-	for _, tt := range []struct {
-		name        string
-		sameWorkdir bool
-		history     bool
-		envReused   bool
-		noStore     bool
-		want        bool
-	}{
-		{name: "changed worktree with history", history: true, want: true},
-		{name: "in place with history", sameWorkdir: true, history: true, want: true},
-		{name: "changed worktree with unavailable history"},
-		{name: "in place with unavailable history", sameWorkdir: true},
-		{name: "empty store despite reused environment", sameWorkdir: true, envReused: true},
-		{name: "unmounted store in fresh environment", noStore: true},
-		{name: "task local history in reused environment", sameWorkdir: true, noStore: true, envReused: true, want: true},
-	} {
-		t.Run(tt.name, func(t *testing.T) {
-			priorDir, workDir := t.TempDir(), t.TempDir()
-			if tt.sameWorkdir {
-				workDir = priorDir
-			}
-			env := &execenv.Environment{HermesSessionStore: "conversation-store", HermesSessionHistoryPresent: tt.history}
-			if tt.noStore {
-				env.HermesSessionStore = ""
-			}
-			task := Task{PriorSessionID: "session-1", PriorWorkDir: priorDir}
-			taskCtx := execenv.TaskContextForEnv{PriorSessionResumed: true}
-			got := gateResumeToReachableSession(&task, &taskCtx, "hermes", workDir,
-				sessionHomeReachable("hermes", env, tt.envReused), false, false, slog.Default())
-			if got != tt.want || (task.PriorSessionID == "session-1") != tt.want || taskCtx.PriorSessionResumed != tt.want {
-				t.Fatalf("resume = %v, session = %q, resumed = %v; want %v", got, task.PriorSessionID, taskCtx.PriorSessionResumed, tt.want)
-			}
-			if task.PriorSessionResumeUnavailable != !tt.want || taskCtx.PriorSessionResumeUnavailable != !tt.want {
-				t.Fatal("session continuity notice does not match reachability")
-			}
-		})
-	}
-}
-
-func TestHermesPreparedSessionReachability(t *testing.T) {
-	// Keep profile/store resolution inside synthetic homes, never the user's.
-	t.Setenv("MULTICA_TASK_CONFIG_ROOT", "")
-	home := t.TempDir()
-	redirectTestHome(t, home)
-	t.Setenv("USERPROFILE", home)
-	sourceHome, root := t.TempDir(), t.TempDir()
-	taskNumber := 0
-	prepare := func(t *testing.T, agentID, issueID string) *execenv.Environment {
-		t.Helper()
-		taskCtx := execenv.TaskContextForEnv{AgentID: agentID, IssueID: issueID,
-			AgentSkills: []execenv.SkillContextForEnv{{Name: "fixture", Content: "synthetic skill"}},
-		}
-		taskNumber++
-		env, err := execenv.Prepare(execenv.PrepareParams{
-			WorkspacesRoot: root, WorkspaceID: "workspace-1", TaskID: fmt.Sprintf("task-%012d", taskNumber),
-			Provider: "hermes", HermesSourceHome: sourceHome, Task: taskCtx,
-			HermesSessionStore: execenv.HermesSessionStorePath("", agentID, sourceHome, taskCtx),
-		}, slog.Default())
-		if err != nil {
-			t.Fatal(err)
-		}
-		t.Cleanup(func() { _ = env.Cleanup(true) })
-		return env
-	}
-	first := prepare(t, "agent-1", "issue-1")
-	if first.HermesSessionStore == "" {
-		if runtime.GOOS == "windows" {
-			t.Skip("host cannot mount Hermes session stores")
-		}
-		t.Fatal("Hermes session store was not mounted")
-	}
-	if err := os.WriteFile(filepath.Join(first.HermesHome, "state.db"), []byte("synthetic transcript"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	for _, tt := range []struct {
-		name, agentID, issueID string
-		want                   bool
-	}{
-		{"same conversation in fresh workdir", "agent-1", "issue-1", true},
-		{"different issue", "agent-1", "issue-2", false},
-		{"different agent", "agent-2", "issue-1", false},
-	} {
-		t.Run(tt.name, func(t *testing.T) {
-			env := prepare(t, tt.agentID, tt.issueID)
-			if sameExistingDir(first.WorkDir, env.WorkDir) {
-				t.Fatal("fixture must prepare a different task workdir")
-			}
-			task := Task{PriorSessionID: "session-1", PriorWorkDir: first.WorkDir}
-			taskCtx := execenv.TaskContextForEnv{PriorSessionResumed: true}
-			if got := gateResumeToReachableSession(&task, &taskCtx, "hermes", env.WorkDir,
-				sessionHomeReachable("hermes", env, false), false, false, slog.Default()); got != tt.want {
-				t.Fatalf("reachable = %v, want %v", got, tt.want)
 			}
 		})
 	}
@@ -2187,7 +2016,7 @@ func TestGatePiResumeToSessionFile(t *testing.T) {
 			task := Task{PriorSessionID: sessionFile, PriorWorkDir: priorDir}
 			taskCtx := execenv.TaskContextForEnv{PriorSessionResumed: true}
 
-			reachable := gateResumeToReachableSession(&task, &taskCtx, provider, envDir, true, providerRefusesMissingSessionCwd(provider, true), false, slog.Default())
+			reachable := gateResumeToReachableSession(&task, &taskCtx, provider, envDir, providerRefusesMissingSessionCwd(provider, true), false, slog.Default())
 
 			if !reachable {
 				t.Fatal("Pi-family session file should remain reachable across workdirs")
@@ -2247,7 +2076,7 @@ func TestGatePiResumeDropsUnusableSessionFile(t *testing.T) {
 			task := Task{PriorSessionID: sessionPath, PriorWorkDir: workDir}
 			taskCtx := execenv.TaskContextForEnv{PriorSessionResumed: true}
 
-			reachable := gateResumeToReachableSession(&task, &taskCtx, "pi", workDir, true, providerRefusesMissingSessionCwd("pi", true), false, slog.Default())
+			reachable := gateResumeToReachableSession(&task, &taskCtx, "pi", workDir, providerRefusesMissingSessionCwd("pi", true), false, slog.Default())
 
 			if reachable {
 				t.Fatalf("%s Pi session was treated as reachable", test.name)
@@ -2417,7 +2246,7 @@ func TestGatePiResumeChecksRecordedCwd(t *testing.T) {
 				task := Task{PriorSessionID: sessionPath, PriorWorkDir: liveDir}
 				taskCtx := execenv.TaskContextForEnv{PriorSessionResumed: true}
 
-				reachable := gateResumeToReachableSession(&task, &taskCtx, provider, workDir, true, runtime.refusesMissingCwd, false, slog.Default())
+				reachable := gateResumeToReachableSession(&task, &taskCtx, provider, workDir, runtime.refusesMissingCwd, false, slog.Default())
 
 				if reachable != wantReachable {
 					t.Fatalf("reachable = %v, want %v", reachable, wantReachable)
@@ -2517,79 +2346,6 @@ func TestShouldRetryPiRefusedResume(t *testing.T) {
 	// A run that already used a tool is never replayed, poisoned or not.
 	if shouldRetryWithFreshSession(result, priorSession, 1, "pi") {
 		t.Fatal("a run that used tools was retried")
-	}
-}
-
-func TestSessionHomeReachable(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		name       string
-		provider   string
-		env        *execenv.Environment
-		envReused  bool
-		wantReturn bool
-	}{
-		{
-			// Every non-Hermes backend keys its sessions by cwd (or resolves
-			// its own store), so this predicate must not narrow their gate.
-			name:       "cwd-keyed provider is always reachable",
-			provider:   "claude",
-			env:        &execenv.Environment{},
-			wantReturn: true,
-		},
-		{
-			name:     "hermes with a mounted store holding history",
-			provider: "hermes",
-			env: &execenv.Environment{
-				HermesSessionStore:          "/profile/hermes-sessions/a/default/issue-1",
-				HermesSessionHistoryPresent: true,
-			},
-			wantReturn: true,
-		},
-		{
-			// Mounted onto nothing: a first turn, a store the GC reclaimed
-			// between turns, a switched profile, or a dangling link. Reading
-			// "mounted" as "resumable" here would forward a dead session id.
-			name:       "hermes with a mounted but empty session store",
-			provider:   "hermes",
-			env:        &execenv.Environment{HermesSessionStore: "/profile/hermes-sessions/a/default/issue-1"},
-			wantReturn: false,
-		},
-		{
-			// A store is mounted, so the env-reuse fallback must not override
-			// the store's own answer — the transcript lives in the store now.
-			name:       "hermes with an empty store is not rescued by env reuse",
-			provider:   "hermes",
-			env:        &execenv.Environment{HermesSessionStore: "/profile/hermes-sessions/a/default/issue-1"},
-			envReused:  true,
-			wantReturn: false,
-		},
-		{
-			// No store, but the prior task's env root — and therefore its
-			// overlay's task-local state.db — carried over.
-			name:       "hermes on a reused env root",
-			provider:   "hermes",
-			env:        &execenv.Environment{},
-			envReused:  true,
-			wantReturn: true,
-		},
-		{
-			// The GH #6806 shape: a fresh overlay with an empty state.db, so
-			// no session recorded by a prior task can be found here.
-			name:       "hermes on a fresh overlay with no store",
-			provider:   "hermes",
-			env:        &execenv.Environment{},
-			wantReturn: false,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := sessionHomeReachable(tt.provider, tt.env, tt.envReused); got != tt.wantReturn {
-				t.Fatalf("sessionHomeReachable() = %v, want %v", got, tt.wantReturn)
-			}
-		})
 	}
 }
 
@@ -5992,38 +5748,6 @@ func TestWatchTaskCancellation_ReconcileRunningKeepsTickerAlive(t *testing.T) {
 	}
 }
 
-// TestSanitizeAgentEnv asserts the effective env handed to the Hermes overlay
-// for ${VAR} expansion drops daemon-blocklisted keys (so a blocked HOME in
-// custom_env can't repoint external_dirs away from what the child sees) while
-// keeping ordinary vars.
-func TestSanitizeAgentEnv(t *testing.T) {
-	t.Parallel()
-	in := map[string]string{
-		"HOME":        "/evil",
-		"PATH":        "/evil/bin",
-		"MULTICA_X":   "1",
-		"TEAM_SKILLS": "/srv/team",
-		"HERMES_HOME": "/some/home",
-	}
-	got := sanitizeAgentEnv(in)
-	for _, blocked := range []string{"HOME", "PATH", "MULTICA_X"} {
-		if _, ok := got[blocked]; ok {
-			t.Errorf("blocklisted key %q must be dropped from the effective env", blocked)
-		}
-	}
-	if got["TEAM_SKILLS"] != "/srv/team" {
-		t.Errorf("ordinary var dropped: %v", got)
-	}
-	// HERMES_HOME is not blocklisted (it drives source-home resolution), so it
-	// survives here even though the child's value is the overlay.
-	if got["HERMES_HOME"] != "/some/home" {
-		t.Errorf("HERMES_HOME should survive sanitization, got %v", got)
-	}
-	if sanitizeAgentEnv(nil) != nil {
-		t.Error("nil in should yield nil out")
-	}
-}
-
 // TestHandleTask_AcksCancelAfterPollCancelled verifies the daemon posts
 // cancel-ack when the poll goroutine interrupts the run — by then
 // runner.run has returned, so the transcript flush is complete and the
@@ -6156,20 +5880,6 @@ func TestHandleTask_AcksCancelOnPostRunStatusCheck(t *testing.T) {
 
 	if got := ackCalls.Load(); got != 1 {
 		t.Fatalf("cancel-ack calls = %d, want 1", got)
-	}
-}
-
-func TestConvertDisabledRuntimeSkillsForEnvScopesToClaimedRuntime(t *testing.T) {
-	t.Parallel()
-
-	agentData := &AgentData{DisabledRuntimeSkills: []DisabledRuntimeSkillData{
-		{RuntimeID: "runtime-1", Provider: "claude", Root: "provider", Key: "review", Name: "Review"},
-		{RuntimeID: "runtime-2", Provider: "claude", Root: "provider", Key: "other-runtime"},
-		{RuntimeID: "runtime-1", Provider: "codex", Root: "provider", Key: "other-provider"},
-	}}
-	got := convertDisabledRuntimeSkillsForEnv(agentData, "runtime-1", "claude")
-	if len(got) != 1 || got[0].Key != "review" || got[0].Name != "Review" {
-		t.Fatalf("unexpected scoped runtime skill policy: %+v", got)
 	}
 }
 

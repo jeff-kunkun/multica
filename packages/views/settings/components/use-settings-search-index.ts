@@ -134,11 +134,7 @@ export function useSettingsSearchIndex(
       { tab: "workspace", anchor: "delete", title: t(($) => $.workspace.delete_title) },
       { tab: "members", anchor: "invitations", title: t(($) => $.members.pending_label) },
       { tab: "members", anchor: "links", title: t(($) => $.members.share_links_label) },
-      {
-        tab: "labels",
-        title: t(($) => $.page.tabs.labels),
-        description: t(($) => $.labels.description),
-      },
+      { tab: "labels", title: t(($) => $.page.tabs.labels) },
       {
         tab: "properties",
         title: t(($) => $.page.tabs.properties),
