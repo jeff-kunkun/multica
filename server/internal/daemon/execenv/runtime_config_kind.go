@@ -44,18 +44,3 @@ func classifyTask(ctx TaskContextForEnv) taskKind {
 		return kindIssue
 	}
 }
-
-// hasIssueContext returns true for the kinds that operate on a real Multica
-// issue and therefore can read / write issue-scoped state. The slim
-// dispatcher gates one section on this predicate:
-//
-//   - Sub-issue Creation
-//
-// It is meaningless on the issue-less chat kind and would either render an
-// empty body or steer the agent into a guaranteed-failed CLI call. Note this
-// is a kind-based predicate, not a check on ctx.IssueID — kindIssue always
-// carries an issue id by construction (the daemon refuses to dispatch it
-// otherwise), and chat never does.
-func (k taskKind) hasIssueContext() bool {
-	return k == kindIssue
-}

@@ -27,64 +27,40 @@ func platformSkillFixture() SkillContextForEnv {
 	}
 }
 
-func TestSubIssueCreationSectionPresentForIssueRuns(t *testing.T) {
+// Sub-issue creation is a Commands line, not a section (MUL-5442 moved the
+// playbook to the multica-platform skill). The line keeps the one fact an
+// agent cannot infer: an agent-assigned todo child starts a paid run at once.
+func TestSubIssueCreationLineInCommands(t *testing.T) {
 	t.Parallel()
-	cases := []struct {
-		name string
-		ctx  TaskContextForEnv
-	}{
-		{
-			name: "assignment-triggered",
-			ctx: TaskContextForEnv{
-				IssueID:     "11111111-2222-3333-4444-555555555555",
-				AgentSkills: []SkillContextForEnv{platformSkillFixture()},
-			},
-		},
-		{
-			name: "comment-triggered",
-			ctx: TaskContextForEnv{
-				IssueID:          "22222222-3333-4444-5555-666666666666",
-				TriggerCommentID: "33333333-4444-5555-6666-777777777777",
-				AgentSkills:      []SkillContextForEnv{platformSkillFixture()},
-			},
-		},
-	}
-	for _, tc := range cases {
-		tc := tc
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			out := buildMetaSkillContent("claude", tc.ctx)
-
-			if !strings.Contains(out, "## Sub-issue Creation") {
-				t.Fatalf("expected Sub-issue Creation section in %s brief", tc.name)
+	for name, ctx := range map[string]TaskContextForEnv{
+		"assignment": {IssueID: "11111111-2222-3333-4444-555555555555", AgentSkills: []SkillContextForEnv{platformSkillFixture()}},
+		"comment":    {IssueID: "22222222-3333-4444-5555-666666666666", TriggerCommentID: "33333333-4444-5555-6666-777777777777", AgentSkills: []SkillContextForEnv{platformSkillFixture()}},
+	} {
+		out := buildMetaSkillContent("claude", ctx)
+		for _, want := range []string{
+			"[--parent <issue-id>]",
+			"[--status todo|backlog] [--stage <N>]",
+			"an agent-assigned `todo` issue starts its run at once; `backlog` parks it",
+			"sub-issues and stages",
+		} {
+			if !strings.Contains(out, want) {
+				t.Errorf("[%s] brief missing %q\n---\n%s", name, want, out)
 			}
-			for _, want := range []string{
-				// MUL-5442 demotes the full todo/backlog/stage playbook to the
-				// multica-platform skill. The brief keeps a one-line map (all
-				// three flags stay discoverable, MUL-3508 follow-up) plus the
-				// skill pointer; the skill side of the contract is asserted in
-				// internal/service (TestPlatformSkillCoversPlatformContracts).
-				"`--status todo` starts an agent-assigned child immediately",
-				"`--status backlog` parks it",
-				"`--stage <N>` groups children into ordered stages",
-				"read `references/issues.md` in the `multica-platform` skill",
-			} {
-				if !strings.Contains(out, want) {
-					t.Errorf("[%s] section missing %q", tc.name, want)
-				}
-			}
-		})
+		}
+		if strings.Contains(out, "## Sub-issue Creation") {
+			t.Errorf("[%s] the retired Sub-issue Creation section came back", name)
+		}
 	}
 }
 
 func TestIssueWorkflowCarriesSourceContextPrecedenceOnce(t *testing.T) {
 	t.Parallel()
 	out := buildMetaSkillContent("claude", TaskContextForEnv{IssueID: "issue-1"})
-	const rule = "If the issue JSON contains `source_context`"
+	const rule = "`source_context` is background only"
 	if count := strings.Count(out, rule); count != 1 {
 		t.Fatalf("source-context precedence rule count = %d, want 1", count)
 	}
-	if !strings.Contains(out, "current issue title, description, and comments are authoritative task instructions") {
+	if !strings.Contains(out, "Title, description and comments are the instructions") {
 		t.Fatal("source-context rule does not identify the current issue as authoritative")
 	}
 }
@@ -192,32 +168,16 @@ func TestStatusRuleIsFactJudgmentAtBothMoments(t *testing.T) {
 	}
 
 	for _, want := range []string{
-		// The anchor: issue state, not run lifecycle, written when it changes.
-		"**Issue status — write the state the issue is in, whenever it changes**",
-		"Status reflects the state the ISSUE is in, not your run's lifecycle",
-		// The start moment: INSIDE step 3, at the read→work boundary. A run
-		// on MUL-6460 proved a detached status-block bullet does not fire —
-		// the model is walking the numbered list when the condition triggers.
-		"3. If any part of what this turn will produce is what the issue itself asks for",
-		// Only the exact built-in key satisfies this workflow step. The
-		// started category also contains review and blocked statuses.
-		"already `in_progress`",
-		"the board should show the issue being worked while you work, not only after",
-		// No assignee gate: the judgment applies to whoever is running.
-		"whoever the assignee is",
-		// Delivery lands in in_review and the ceiling keeps `done` human.
-		"`done` stays human",
-		// Assigned deliverables must not be misread as status-neutral
-		// research: stage barriers and parent notifications key off the
-		// delivery write.
-		"stage barriers and parent notifications depend on that signal",
-		// Invariant 1: conversation does not move the board. Ancillary is
-		// defined by OUTPUT (no part of the issue's own deliverable), not by
-		// activity words like "research" that also describe real work.
-		"questions, discussion, and acknowledgements never touch status",
-		"Your turn produced none of the issue's own deliverable",
-		// Invariant 2: concurrent agents converge instead of flapping.
-		"This no-write default is what keeps concurrent runs from flapping the board",
+		// The start moment: a turn that produces the issue's own deliverable
+		// records in_progress before working.
+		"If this turn produces any of the issue's own deliverable, set `in_progress` first, unless it already is.",
+		// The end moment: the state the work reached; `done` stays with the
+		// acceptor.
+		"Leave the status true: `in_review` when delivered (`done` is set by whoever accepts it)",
+		"`blocked` when you cannot proceed",
+		// Invariant: conversation does not move the board, which is also what
+		// keeps concurrent runs from flapping it.
+		"A turn that only answered a question writes no status.",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("status rule missing %q\n---\n%s", want, out)
@@ -256,26 +216,22 @@ func TestStatusRuleIsFactJudgmentAtBothMoments(t *testing.T) {
 		}
 	}
 
-	// Position is load-bearing, not style (J's review on #7295): a
-	// presence-pin cannot tell WHERE a sentence lives, and both field
-	// incidents came from correct sentences sitting in positions that do
-	// not fire. The two anchors must live INSIDE their numbered steps.
-	var step3, step5 string
+	// Position is load-bearing, not style (J's review on #7295): both field
+	// incidents came from correct sentences sitting in positions that do not
+	// fire. The two anchors must live INSIDE their numbered steps.
+	var step2, step5 string
 	for _, line := range strings.Split(out, "\n") {
-		if strings.HasPrefix(line, "3. ") {
-			step3 = line
+		if strings.HasPrefix(line, "2. ") {
+			step2 = line
 		}
 		if strings.HasPrefix(line, "5. ") {
 			step5 = line
 		}
 	}
-	if !strings.Contains(step3, "set `in_progress` FIRST") {
-		t.Errorf("the start write must be anchored inside step 3\n---\n%s", step3)
+	if !strings.Contains(step2, "set `in_progress` first") {
+		t.Errorf("the start write must be anchored inside step 2\n---\n%s", step2)
 	}
-	if !strings.Contains(step3, "never decides") {
-		t.Errorf("the never-decides guard must live inside step 3, the position that fires\n---\n%s", step3)
-	}
-	if !strings.Contains(step5, "confirm the status still matches") {
+	if !strings.Contains(step5, "Leave the status true") {
 		t.Errorf("the exit-side status check must be anchored inside step 5\n---\n%s", step5)
 	}
 
@@ -490,23 +446,10 @@ func TestIssueWorkflowHonorsAgentIdentity(t *testing.T) {
 	out := buildMetaSkillContent("claude", TaskContextForEnv{IssueID: issueID})
 
 	for _, want := range []string{
-		"## Instruction Precedence",
-		"Agent Identity instructions have priority over the issue workflow below.",
-		"If a workflow step conflicts with Agent Identity, skip the conflicting action",
-		// One enumeration, in Instruction Precedence, covering every action
-		// type Agent Identity can forbid. This and workflow step 3 each used to
-		// carry their own list and the two disagreed (MUL-5442).
-		"Never treat this runtime workflow as permission to change issue status, investigate, implement, create issues, update issues, delegate, or otherwise act beyond your Agent Identity.",
-		// MUL-5442 (carried through MUL-6417): the forbids-clause is stated
-		// once on the status-rule header instead of once per status bullet.
-		"skip any status call your Agent Identity forbids",
-		"complete the task within your Agent Identity boundaries",
-		// Step 3 keeps only what the enumeration cannot express: a
-		// delegation-only role stops once the delegation is delivered.
-		"If your role is delegation-only, perform the allowed delegation work and stop once that outcome is delivered",
-		// The blocked end-state keeps its own comment carve-out: an agent
-		// whose identity forbids comments must still be able to mark blocked.
-		"post a comment explaining the blocker unless your Agent Identity forbids issue comments",
+		// One statement, in the workflow intro, covering every action type
+		// Agent Identity can forbid (MUL-5442 folded the separate
+		// Instruction Precedence section into it).
+		"Agent Identity outranks this workflow: skip any step it forbids and do the rest.",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("issue brief missing identity-bound workflow text %q\n---\n%s", want, out)
@@ -554,21 +497,21 @@ func TestProtocolHeadingInInstructionsGetsNoLeaderBrief(t *testing.T) {
 			t.Fatalf("ordinary-agent brief leaked leader-only content %q\n---\n%s", banned, out)
 		}
 	}
-	if !strings.Contains(out, "**Post your final results as a comment — this step is mandatory**") {
+	if !strings.Contains(out, "**Post exactly ONE comment per run**") {
 		t.Fatalf("ordinary-agent brief lost the unconditional reply obligation\n---\n%s", out)
 	}
 }
 
-// Instruction Precedence belongs to the issue workflow only; the issue-less
-// kinds must not inherit it. After MUL-5377 it applies to every issue run,
-// comment-triggered or not, because there is a single issue workflow.
+// The Agent Identity precedence rule belongs to the issue workflow only; the
+// issue-less kinds must not inherit it. After MUL-5377 it applies to every
+// issue run, comment-triggered or not, because there is a single workflow.
 func TestInstructionPrecedenceOnlyAppliesToIssueWorkflow(t *testing.T) {
 	t.Parallel()
 	if out := buildMetaSkillContent("claude", TaskContextForEnv{
 		IssueID:          "11111111-2222-3333-4444-555555555555",
 		TriggerCommentID: "22222222-3333-4444-5555-666666666666",
-	}); !strings.Contains(out, "## Instruction Precedence") {
-		t.Errorf("comment-triggered issue brief must carry Instruction Precedence\n---\n%s", out)
+	}); !strings.Contains(out, "Agent Identity outranks this workflow") {
+		t.Errorf("comment-triggered issue brief must carry the Agent Identity precedence rule\n---\n%s", out)
 	}
 
 	cases := []struct {
@@ -584,8 +527,7 @@ func TestInstructionPrecedenceOnlyAppliesToIssueWorkflow(t *testing.T) {
 			out := buildMetaSkillContent("claude", tc.ctx)
 			for _, banned := range []string{
 				"## Instruction Precedence",
-				"issue workflow below",
-				"Never treat this runtime workflow as permission to change issue status",
+				"Agent Identity outranks this workflow",
 			} {
 				if strings.Contains(out, banned) {
 					t.Errorf("%s brief must not inherit issue-only precedence text %q\n---\n%s", tc.name, banned, out)
@@ -601,8 +543,8 @@ func TestChatOutputDoesNotRequireIssueComment(t *testing.T) {
 	out := buildMetaSkillContent("claude", TaskContextForEnv{ChatSessionID: "chat-1"})
 
 	for _, want := range []string{
-		"This is a chat session",
-		"Your reply is delivered directly to the chat window the user is reading",
+		"**You are in chat mode.**",
+		"Your reply goes straight to the chat window.",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("chat brief missing chat output guidance %q\n---\n%s", want, out)
@@ -633,7 +575,7 @@ func TestChatOutputDoesNotRequireIssueComment(t *testing.T) {
 func TestOutputForbidsMidRunProgressComments(t *testing.T) {
 	wantPhrases := []string{
 		"Post exactly ONE comment per run",
-		"Do NOT post progress updates",
+		"no progress updates",
 	}
 	issueCtxs := map[string]TaskContextForEnv{
 		"assignment": {IssueID: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"},
@@ -662,36 +604,6 @@ func TestOutputForbidsMidRunProgressComments(t *testing.T) {
 	// The `runtime_brief_slim` flag was retired (MUL-4297); there is now a
 	// single brief.
 	run(t, "brief")
-}
-
-// The sub-issue creation rule must reach top-level parents that have no
-// `parent_issue_id` of their own — that is where the `todo` vs `backlog`
-// decision matters most. The section must not gate on this issue being
-// a child, and must not even mention `parent_issue_id`.
-func TestSubIssueCreationSectionIsUnconditional(t *testing.T) {
-	t.Parallel()
-	ctx := TaskContextForEnv{
-		IssueID: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
-	}
-	out := buildMetaSkillContent("claude", ctx)
-
-	const header = "## Sub-issue Creation"
-	start := strings.Index(out, header)
-	if start == -1 {
-		t.Fatalf("sub-issue creation section missing")
-	}
-	rest := out[start:]
-	end := strings.Index(rest[len(header):], "\n## ")
-	var section string
-	if end == -1 {
-		section = rest
-	} else {
-		section = rest[:len(header)+end]
-	}
-
-	if strings.Contains(section, "parent_issue_id") {
-		t.Errorf("Sub-issue Creation section must not reference `parent_issue_id` — it applies to any issue-bound run, including top-level parents:\n%s", section)
-	}
 }
 
 // Workspace Context block: workspace.context (the per-workspace system prompt
@@ -741,12 +653,12 @@ func TestWorkspaceContextRenderedAcrossTaskKinds(t *testing.T) {
 			if !strings.Contains(out, wsContext) {
 				t.Errorf("[%s] brief missing workspace context body %q", tc.name, wsContext)
 			}
-			// The block must precede Available Commands so it acts as
+			// The block must precede Commands so it acts as
 			// background framing, not a footer hidden below CLI usage.
 			ctxIdx := strings.Index(out, "## Workspace Context")
-			cmdsIdx := strings.Index(out, "## Available Commands")
+			cmdsIdx := strings.Index(out, "## Commands")
 			if ctxIdx == -1 || cmdsIdx == -1 || ctxIdx > cmdsIdx {
-				t.Errorf("[%s] `## Workspace Context` must appear above `## Available Commands` (ctx=%d, cmds=%d)", tc.name, ctxIdx, cmdsIdx)
+				t.Errorf("[%s] `## Workspace Context` must appear above `## Commands` (ctx=%d, cmds=%d)", tc.name, ctxIdx, cmdsIdx)
 			}
 		})
 	}
@@ -1651,7 +1563,7 @@ func TestMultiThreadReplyInstructionsFanOut(t *testing.T) {
 		"OLDEST thread first",
 		// MUL-5825: the posting mechanism is a pointer at the brief's
 		// canonical section plus the one multi-thread-specific delta.
-		"`## Comment Formatting`",
+		"`## Writing bodies`",
 		"DISTINCT body file per thread",
 		"never reuse a `--parent` from an earlier turn",
 	} {
@@ -1661,7 +1573,7 @@ func TestMultiThreadReplyInstructionsFanOut(t *testing.T) {
 	}
 
 	// Pin ledger (MUL-5825): the embedded file-operations cookbook was
-	// retired in favour of the `## Comment Formatting` pointer above — it
+	// retired in favour of the `## Writing bodies` pointer above — it
 	// triple-wrote the mechanism already carried by the brief and the
 	// single-thread cookbook (~1KB per multi-thread turn). These strings are
 	// the retired machinery; none may reappear in the fan-out block. The
@@ -1681,7 +1593,7 @@ func TestMultiThreadReplyInstructionsFanOut(t *testing.T) {
 		"`\\n` escape",                         // restated \n-escape rule, any phrasing
 	} {
 		if strings.Contains(out, banned) {
-			t.Errorf("fan-out block re-grew retired cookbook text %q (mechanism lives in ## Comment Formatting — MUL-5825), got:\n%s", banned, out)
+			t.Errorf("fan-out block re-grew retired cookbook text %q (mechanism lives in ## Writing bodies — MUL-5825), got:\n%s", banned, out)
 		}
 	}
 }
@@ -1964,7 +1876,7 @@ func TestBriefSkillsListIsNamesOnly(t *testing.T) {
 			t.Parallel()
 			out := buildMetaSkillContent(provider, ctx)
 
-			if !strings.Contains(out, "- **pr-review**\n") {
+			if !strings.Contains(out, "Installed (discovered automatically): pr-review.\n") {
 				t.Errorf("brief does not list the skill by slug:\n%s", out)
 			}
 			if strings.Contains(out, "Use when reviewing a pull request") {
@@ -1980,9 +1892,9 @@ func TestBriefSkillsListIsNamesOnly(t *testing.T) {
 	}
 }
 
-// TestBriefIssuePointerFollowsTheInstalledSkill ensures the sub-issue pointer
-// names the platform skill only when installed. The retired legacy skill is
-// no longer a fallback, even when an older backend still supplies it.
+// TestBriefIssuePointerFollowsTheInstalledSkill ensures the skill pointer names
+// the platform skill only when installed. The retired legacy skill is no
+// longer a fallback, even when an older backend still supplies it.
 func TestBriefIssuePointerFollowsTheInstalledSkill(t *testing.T) {
 	t.Parallel()
 
@@ -1993,28 +1905,12 @@ func TestBriefIssuePointerFollowsTheInstalledSkill(t *testing.T) {
 	cases := []struct {
 		name   string
 		skills []SkillContextForEnv
-		want   string // exact pointer text; "" = no pointer at all
+		want   bool
 	}{
-		{
-			name:   "current backend",
-			skills: []SkillContextForEnv{skill("multica-platform")},
-			want:   "`references/issues.md` in the `multica-platform` skill",
-		},
-		{
-			name:   "retired legacy skill alone has no pointer",
-			skills: []SkillContextForEnv{skill("multica-working-on-issues")},
-			want:   "",
-		},
-		{
-			name:   "platform pointer ignores the retired legacy skill",
-			skills: []SkillContextForEnv{skill("multica-working-on-issues"), skill("multica-platform")},
-			want:   "`references/issues.md` in the `multica-platform` skill",
-		},
-		{
-			name:   "neither installed",
-			skills: []SkillContextForEnv{skill("pr-review")},
-			want:   "",
-		},
+		{"current backend", []SkillContextForEnv{skill("multica-platform")}, true},
+		{"retired legacy skill alone has no pointer", []SkillContextForEnv{skill("multica-working-on-issues")}, false},
+		{"platform pointer ignores the retired legacy skill", []SkillContextForEnv{skill("multica-working-on-issues"), skill("multica-platform")}, true},
+		{"neither installed", []SkillContextForEnv{skill("pr-review")}, false},
 	}
 
 	for _, tc := range cases {
@@ -2027,23 +1923,15 @@ func TestBriefIssuePointerFollowsTheInstalledSkill(t *testing.T) {
 
 			// The flags themselves are unconditional: they stay discoverable
 			// with or without a skill to point at.
-			for _, always := range []string{
-				"`--status todo` starts an agent-assigned child immediately",
-				"`--stage <N>` groups children into ordered stages",
-			} {
-				if !strings.Contains(out, always) {
-					t.Errorf("brief lost unconditional content %q", always)
-				}
+			if !strings.Contains(out, "[--status todo|backlog] [--stage <N>]") {
+				t.Errorf("brief lost the unconditional sub-issue flags")
 			}
-
-			if tc.want == "" {
-				if strings.Contains(out, "Before creating sub-issues, read") {
-					t.Errorf("brief points at a skill with none installed:\n%s", out)
-				}
-				return
+			got := strings.Contains(out, "load the `multica-platform` skill")
+			if got != tc.want {
+				t.Errorf("platform pointer present=%v, want %v:\n%s", got, tc.want, out)
 			}
-			if !strings.Contains(out, "Before creating sub-issues, read "+tc.want+" —") {
-				t.Errorf("sub-issue pointer does not name %q:\n%s", tc.want, out)
+			if strings.Contains(out, "multica-working-on-issues` skill") {
+				t.Errorf("brief points at the retired legacy skill:\n%s", out)
 			}
 		})
 	}
@@ -2148,14 +2036,14 @@ func TestEveryBriefThatTeachesJSONOutputAlsoWarnsAgainstMergingStderr(t *testing
 		// WHICH stream carries what, so a brief that swapped the two would pass
 		// every other assertion here while telling an agent the opposite of the
 		// truth — the same defect one clause to the left.
-		wantPremise = "writes JSON to stdout; confirmations and warnings go to stderr"
+		wantPremise = "`--output json` writes JSON to stdout and notes to stderr"
 		// The prohibition itself, not just the operator it names: "Always merge
 		// them (`2>&1`)" contains `2>&1` and would pass a bare-operator check.
-		wantRule = "Do not merge them (`2>&1`)"
+		wantRule = "never merge them (`2>&1`)"
 		// The consequence, in the direction that makes the rule worth obeying;
 		// the inverse claim ("failed write looks like it succeeded") is a
 		// different bug and must not satisfy this.
-		wantWhy = "a write that SUCCEEDED look like it failed"
+		wantWhy = "a write that succeeded would read as failed"
 	)
 	briefs := map[string]string{
 		"full": buildMetaSkillContent("claude", TaskContextForEnv{IssueID: "11111111-2222-3333-4444-555555555555"}),

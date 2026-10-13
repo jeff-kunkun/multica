@@ -90,7 +90,7 @@ func TestBuildChatPromptHasNoChannelBlock(t *testing.T) {
 // binds to the reply and the browser renders it as a card, and the prompt does
 // not teach a history reader.
 func TestBuildChatPromptFileDelivery(t *testing.T) {
-	const uploadGuidance = "run `multica attachment upload <local-path>`"
+	const uploadGuidance = "`multica attachment upload <local-path>` binds a file to your reply"
 	const historyGuidance = "multica chat history"
 
 	out := buildChatPrompt(Task{
@@ -103,7 +103,7 @@ func TestBuildChatPromptFileDelivery(t *testing.T) {
 	if strings.Contains(out, historyGuidance) {
 		t.Errorf("history guidance must not be present\n--- output ---\n%s", out)
 	}
-	if !strings.Contains(out, "appears as an attachment card below it") {
+	if !strings.Contains(out, "binds a file to your reply as a card") {
 		t.Errorf("missing attachment-card copy\n--- output ---\n%s", out)
 	}
 }
@@ -285,7 +285,7 @@ func TestBuildPromptDefaultScansRootsFirst(t *testing.T) {
 	out := BuildPrompt(Task{IssueID: "issue-default-1"}, "claude")
 	for _, s := range []string{
 		"multica issue comment list issue-default-1 --roots-only --summary --compact --output json",
-		"--since",
+		"--thread <thread-id> --tail 30",
 	} {
 		if !strings.Contains(out, s) {
 			t.Errorf("default BuildPrompt missing %q\n--- output ---\n%s", s, out)
@@ -381,7 +381,7 @@ func TestBuildPromptNewCommentsHint(t *testing.T) {
 	if !strings.Contains(out, "multica issue comment list "+issueID+" --since "+since+" --compact --output json") {
 		t.Errorf("hint must point at the issue-wide --since delta read, got:\n%s", out)
 	}
-	if !strings.Contains(out, "reading it is the scan workflow step 2 requires") {
+	if !strings.Contains(out, "reading it is the workflow's comment scan") {
 		t.Errorf("hint must say the delta read answers the scan, got:\n%s", out)
 	}
 	// The full-thread read stays available for the reply itself, on --tail 30
@@ -628,7 +628,7 @@ func TestBuildPromptResumedDeltaUnavailableStillRequiresScan(t *testing.T) {
 		}
 		for _, banned := range []string{
 			"No other new comments on this issue since your last run",
-			"which answers the scan workflow step 2 requires",
+			"which answers the workflow's comment scan",
 		} {
 			if strings.Contains(out, banned) {
 				t.Errorf("resumed prompt claims an answer it does not have (%q)\n--- output ---\n%s", banned, out)
@@ -643,7 +643,7 @@ func TestBuildPromptResumedDeltaUnavailableStillRequiresScan(t *testing.T) {
 
 		for _, want := range []string{
 			"No other new comments on this issue since your last run",
-			"which answers the scan workflow step 2 requires",
+			"which answers the workflow's comment scan",
 		} {
 			if !strings.Contains(out, want) {
 				t.Errorf("authoritative empty delta lost the waiver %q\n--- output ---\n%s", want, out)
@@ -651,7 +651,7 @@ func TestBuildPromptResumedDeltaUnavailableStillRequiresScan(t *testing.T) {
 		}
 		// The waiver is the whole point of this branch: it must not also hand
 		// the scan over, or the two branches are indistinguishable.
-		if strings.Contains(out, "nothing here answers the scan workflow step 2 requires") {
+		if strings.Contains(out, "nothing here answers the workflow's comment scan") {
 			t.Errorf("authoritative empty delta rendered the unknown-delta hint\n--- output ---\n%s", out)
 		}
 	})
@@ -954,15 +954,15 @@ func TestBuildCommentPromptCrossThreadFansOutReplies(t *testing.T) {
 	if strings.Contains(out, "always use the trigger comment ID below") {
 		t.Errorf("cross-thread prompt must not emit the single-parent reply cookbook, got:\n%s", out)
 	}
-	// MUL-5825: the fan-out block points at the brief's `## Comment
-	// Formatting` for the posting mechanism instead of restating it, so the
+	// MUL-5825: the fan-out block points at the brief's `## Writing
+	// bodies` for the posting mechanism instead of restating it, so the
 	// assembled cross-thread prompt carries no `comment add` example commands
 	// at all — the `--parent` targets plus the pointer are the whole recipe.
 	if strings.Contains(out, "multica issue comment add") {
-		t.Errorf("cross-thread prompt re-grew embedded comment-add commands (mechanism lives in ## Comment Formatting — MUL-5825), got:\n%s", out)
+		t.Errorf("cross-thread prompt re-grew embedded comment-add commands (mechanism lives in ## Writing bodies — MUL-5825), got:\n%s", out)
 	}
-	if !strings.Contains(out, "`## Comment Formatting`") {
-		t.Errorf("cross-thread prompt must point at the brief's Comment Formatting mechanism, got:\n%s", out)
+	if !strings.Contains(out, "`## Writing bodies`") {
+		t.Errorf("cross-thread prompt must point at the brief's Writing bodies mechanism, got:\n%s", out)
 	}
 
 	// Chronological ordering (MUL-4348 test-round-2 problem #1): replies must be
@@ -1036,7 +1036,7 @@ func TestPerTurnContextBlocksCarryMovedBriefSections(t *testing.T) {
 		"could not be restored",
 		"## On Behalf Of",
 		"acting on behalf of **Bohan** (bohan@example.com)",
-		"credentials and access remain scoped to the runtime owner",
+		"your Multica access stays the runtime owner's",
 	} {
 		if !strings.Contains(prompt, want) {
 			t.Errorf("per-turn prompt lost moved brief content %q\n---\n%s", want, prompt)
@@ -1166,7 +1166,7 @@ func TestBriefCarriesNoModeRouter(t *testing.T) {
 			t.Errorf("brief still references the retired turn-mode split via %q (MUL-6417)\n---\n%s", banned, brief)
 		}
 	}
-	if !strings.Contains(brief, "**Issue status — write the state the issue is in, whenever it changes**") {
+	if !strings.Contains(brief, "5. Leave the status true:") {
 		t.Errorf("brief lost the unified status rule\n---\n%s", brief)
 	}
 }

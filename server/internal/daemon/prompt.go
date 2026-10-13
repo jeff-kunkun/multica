@@ -192,7 +192,6 @@ func buildPromptBody(task Task, provider string) string {
 		return buildCommentPrompt(task, provider)
 	}
 	var b strings.Builder
-	b.WriteString("You are running as a local coding agent for a Multica workspace.\n\n")
 	fmt.Fprintf(&b, "Your assigned issue ID is: %s\n\n", task.IssueID)
 	// Assignment handoff is run-scoped data from legacy clients. Keep it in the
 	// per-turn prompt rather than the cached runtime brief (MUL-5377).
@@ -200,12 +199,9 @@ func buildPromptBody(task Task, provider string) string {
 		b.WriteString("You were handed this issue with a handoff note. Treat it as the assigner's scoping instruction for this run; follow it before doing anything broader, and do not reply to it as if it were a comment:\n\n")
 		fmt.Fprintf(&b, "> %s\n\n", task.HandoffNote)
 	}
-	fmt.Fprintf(&b, "Start by running `multica issue get %s --output json` to understand your task, then complete it.\n", task.IssueID)
-	// Workflow step 2 owns the catch-up rule for every issue turn; this line
-	// only hands over the commands. It used to add "(assignment-triggered tasks
-	// treat the read as mandatory)", which read as if comment-triggered turns
-	// did not (MUL-6984).
-	fmt.Fprintf(&b, "For comment history, workflow step 2 applies. Scan the threads first with `multica issue comment list %s --roots-only --summary --compact --output json`, then expand only what matters with `--thread <thread-id> --tail 30`. For `--since` incremental polling, pagination, and folding, see `multica issue comment list --help`.\n", task.IssueID)
+	// Workflow step 1 owns the read rule for every issue turn; these lines only
+	// hand over the exact commands (MUL-6984).
+	fmt.Fprintf(&b, "Start with `multica issue get %s --output json`, then scan the comments with `multica issue comment list %s --roots-only --summary --compact --output json` and expand what matters with `--thread <thread-id> --tail 30`.\n", task.IssueID, task.IssueID)
 	return b.String()
 }
 
@@ -217,7 +213,6 @@ func buildPromptBody(task Task, provider string) string {
 // previous turn's --parent UUID.
 func buildCommentPrompt(task Task, provider string) string {
 	var b strings.Builder
-	b.WriteString("You are running as a local coding agent for a Multica workspace.\n\n")
 	fmt.Fprintf(&b, "Your assigned issue ID is: %s\n\n", task.IssueID)
 	if task.TriggerCommentContent != "" {
 		authorLabel := "A user"
@@ -230,7 +225,7 @@ func buildCommentPrompt(task Task, provider string) string {
 			}
 			authorLabel = fmt.Sprintf("Another agent (%s)", name)
 		}
-		fmt.Fprintf(&b, "[NEW COMMENT] %s just left a new comment. Focus on THIS comment — do not confuse it with previous ones:\n\n", authorLabel)
+		fmt.Fprintf(&b, "[NEW COMMENT] %s just left a new comment. Focus on THIS one, not earlier ones:\n\n", authorLabel)
 		fmt.Fprintf(&b, "> %s\n\n", task.TriggerCommentContent)
 		// MUL-4195: comments that arrived before this run started were folded
 		// into it rather than dropped. The trigger above is the newest; the
@@ -345,7 +340,7 @@ func buildCommentPrompt(task Task, provider string) string {
 	//                            server all produce that same zero, and none of
 	//                            them looked (NewCommentsDeltaKnown).
 	//
-	// Whether the scan happens is never decided here — workflow step 2 owns
+	// Whether the scan happens is never decided here — workflow step 1 owns
 	// that; these hints carry this turn's facts and exact commands. Final
 	// fallback (no trigger id, shouldn't happen here): plain read.
 	var hint string
@@ -505,6 +500,6 @@ func buildChatPrompt(task Task) string {
 		b.WriteString("Use `multica attachment download <id>` to fetch each file locally before referring to it.\n")
 		b.WriteString("When creating an issue that should preserve one of these attachments, pass `--attachment-id <id>` to `multica issue create` in addition to keeping the attachment markdown inline.\n")
 	}
-	b.WriteString("\nTo include a file or image you produced in your reply, run `multica attachment upload <local-path>`. The file binds to your reply automatically and appears as an attachment card below it even if you paste nothing. The command also returns a `markdown` snippet you may paste on its own line to place the item where you want it (files render as a card, images inline).\n")
+	b.WriteString("\n`multica attachment upload <local-path>` binds a file to your reply as a card; paste the `markdown` snippet it returns on its own line to place it inline.\n")
 	return b.String()
 }

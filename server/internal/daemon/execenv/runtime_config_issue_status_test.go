@@ -13,7 +13,7 @@ const builtInStatusLine = "- `multica issue status <id> <status>` — flip statu
 
 // catalogBridgeBullet distinguishes workflow keys from lifecycle categories;
 // it must appear exactly when a catalog is present.
-const catalogBridgeBullet = "- The workflow rules above refer to exact built-in status keys, not categories. Custom statuses share lifecycle semantics only, not built-in automation behavior.\n"
+const catalogBridgeBullet = "The workflow rules above refer to exact built-in status keys, not categories. Custom statuses share lifecycle semantics only, not built-in automation behavior.\n"
 
 func TestBriefStatusCatalogAbsentUsesBuiltInLine(t *testing.T) {
 	t.Parallel()

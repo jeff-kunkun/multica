@@ -111,14 +111,8 @@ func TestBriefSurfaceDeliveryPolicy(t *testing.T) {
 
 // TestBriefInboundAttachmentIsNotADeliverable locks the inbound half: a
 // downloaded attachment's local path is a private working copy, and the most
-// tempting one to echo back because it arrived from the conversation.
-//
-// The Attachments section owns that framing — it is what `## Output` cannot
-// express, because Output does not know an attachment felt shared. The
-// no-clickable-local-path rule itself belongs to Output and used to be restated
-// here verbatim; MUL-5442 replaced the restatement with a pointer, so this test
-// pins the framing plus the pointer and lets the delivery tests above own the
-// rule.
+// tempting one to echo back because it arrived from the conversation. The
+// Output section's local-path rule names downloaded files explicitly.
 func TestBriefInboundAttachmentIsNotADeliverable(t *testing.T) {
 	t.Parallel()
 
@@ -126,17 +120,15 @@ func TestBriefInboundAttachmentIsNotADeliverable(t *testing.T) {
 		IssueID: "i-1", TriggerCommentID: "tc-1", AgentName: "Eve", AgentID: "eve-1",
 	})
 	for _, want := range []string{
-		"private working copy",
-		"not something the reader can open",
-		"the link rules in `## Output` apply to it too",
+		"it exists only on this machine, including files you downloaded",
 	} {
 		if !strings.Contains(out, want) {
-			t.Errorf("Attachments section missing %q\n---\n%s", want, out)
+			t.Errorf("Output section missing %q\n---\n%s", want, out)
 		}
 	}
 	// The rule the pointer defers to must actually be present in the brief.
 	if !strings.Contains(out, "NEVER write an absolute path or a `file://` URL as a clickable link") {
-		t.Errorf("Attachments points at ## Output but the rule is missing\n---\n%s", out)
+		t.Errorf("Output section lost the local-path rule\n---\n%s", out)
 	}
 }
 

@@ -32,9 +32,7 @@ func TestBuildCommentReplyInstructionsCodexLinux(t *testing.T) {
 		"multica issue comment add " + issueID + " --parent " + triggerID + " --content-file ./reply.md --output table && rm ./reply.md",
 		"Write the body file first",
 		"--content-file ./reply.md",
-		"#4182",
-		"Keep the `&&`",
-		"Do NOT write literal `\\n` escapes to simulate line breaks",
+		"## Writing bodies",
 		"do NOT reuse --parent values from previous turns",
 	} {
 		if !strings.Contains(got, want) {
@@ -87,12 +85,10 @@ func TestBuildCommentReplyInstructionsNonCodexLinux(t *testing.T) {
 				for _, want := range []string{
 					"multica issue comment add " + issueID + " --parent " + triggerID + " --content-file ./reply.md --output table && rm ./reply.md",
 					// MUL-5442 cross-channel dedup: shell-hazard mechanics live in
-					// the brief's Comment Formatting; the cookbook keeps the
+					// the brief's Writing bodies; the cookbook keeps the
 					// file-first order, the command, and the pointer.
 					"Write the body file first",
-					"## Comment Formatting",
-					"#4182",
-					"Keep the `&&`",
+					"## Writing bodies",
 					"do NOT reuse --parent values from previous turns",
 					"Post your reply as a comment",
 				} {
@@ -154,7 +150,7 @@ func TestBuildCommentReplyInstructionsWindowsUsesContentFile(t *testing.T) {
 				"Write the body file first",
 				"never pipe via `--content-stdin`",
 				"PowerShell drops non-ASCII",
-				"## Comment Formatting",
+				"## Writing bodies",
 			} {
 				if !strings.Contains(got, want) {
 					t.Errorf("%s reply instructions missing %q\n---\n%s", provider, want, got)
@@ -211,16 +207,13 @@ func TestInjectRuntimeConfigKeepsTriggerCommentOutOfBrief(t *testing.T) {
 	}
 	for _, want := range []string{
 		// MUL-6417 retired the turn-mode router: one workflow, delivery
-		// routed on what the per-turn message carries. Pin the routing RULE
-		// halves — a compression that drops either delivery case must fail
-		// here.
-		"**Every issue turn runs the same workflow.**",
-		"with the `--parent` value it gives you for THIS turn",
-		"never one from an earlier turn",
-		"With no triggering comment, post a new top-level comment",
+		// routed on what the per-turn message carries. Pin both delivery
+		// cases — a compression that drops either must fail here.
+		"## Workflow",
+		"under this turn's `--parent` if given, else top-level",
 		// The no-write default that makes the un-routed workflow safe: a
 		// turn that moved nothing writes nothing (MUL-6300 → MUL-6417).
-		"questions, discussion, and acknowledgements never touch status",
+		"A turn that only answered a question writes no status.",
 	} {
 		if !strings.Contains(s, want) {
 			t.Errorf("CLAUDE.md missing %q\n---\n%s", want, s)
@@ -274,9 +267,8 @@ func TestWindowsCommentReplyInstructionsHaveNoStdin(t *testing.T) {
 // has no BuildCommentReplyInstructions override, so an agent that follows the
 // "post your final results" step literally would pipe its final comment through
 // PowerShell and drop non-ASCII bytes (#2198 / #2236 / #2376). The OS-aware
-// ## Comment Formatting section (file-only on Windows) is the single source of
-// truth; the Available Commands entry and step 5 must defer to it, not re-offer
-// stdin. The flag synopsis may still *list* `--content-stdin` as available.
+// ## Writing bodies section (file-only) is the single source of truth; the
+// Commands entry and the workflow must defer to it, not re-offer stdin.
 //
 // Not parallel: mutates the package-level runtimeGOOS.
 func TestInjectRuntimeConfigWindowsAssignmentBriefStaysFileOnly(t *testing.T) {
@@ -303,15 +295,14 @@ func TestInjectRuntimeConfigWindowsAssignmentBriefStaysFileOnly(t *testing.T) {
 			}
 			s := string(data)
 
-			// The Windows Comment Formatting section is file-only.
+			// The Writing bodies section is file-only.
 			for _, want := range []string{
-				"## Comment Formatting",
-				"On Windows, **always write the comment body to a UTF-8 file",
-				"do NOT pipe via `--content-stdin`",
-				"use `--output table` to confirm success without echoing the body",
-				"Use `--output json` instead when you need the returned comment ID, attachment details, or other response fields",
-				"Gate the cleanup on the post succeeding",
-				"empty stdout alone does not prove success",
+				"## Writing bodies",
+				"Write comment and issue bodies to a UTF-8 file",
+				"Never use inline `--content`, and never `--content-stdin`",
+				"Post with `--output table`",
+				"delete the file only after the post succeeded",
+				"in PowerShell check `$LASTEXITCODE` before `Remove-Item ./reply.md`",
 			} {
 				if !strings.Contains(s, want) {
 					t.Errorf("%s missing Windows file-only guidance %q\n---\n%s", fileName, want, s)

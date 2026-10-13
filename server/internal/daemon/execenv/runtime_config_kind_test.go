@@ -31,24 +31,6 @@ func TestClassifyTask(t *testing.T) {
 	}
 }
 
-// TestTaskKindHasIssueContext pins the predicate that gates Project
-// Context / Sub-issue Creation in the slim dispatcher.
-func TestTaskKindHasIssueContext(t *testing.T) {
-	t.Parallel()
-	cases := []struct {
-		kind taskKind
-		want bool
-	}{
-		{kindIssue, true},
-		{kindChat, false},
-	}
-	for _, tc := range cases {
-		if got := tc.kind.hasIssueContext(); got != tc.want {
-			t.Errorf("kind=%d hasIssueContext: got %v, want %v", tc.kind, got, tc.want)
-		}
-	}
-}
-
 // TestBuildMetaSkillContentBriefContent pins that buildMetaSkillContent
 // renders the (now sole) brief: the `issue get` one-liner is present and
 // the retired legacy verbose description is not.
@@ -62,7 +44,7 @@ func TestBuildMetaSkillContentBriefContent(t *testing.T) {
 		AgentID:          "eve-1",
 	})
 
-	if !strings.Contains(out, "- `multica issue get <id> --output json` — full issue.\n") {
+	if !strings.Contains(out, "- `multica issue get <id>` / `issue list` / `issue children <id>` — read issues.\n") {
 		t.Errorf("brief is missing the `issue get` one-liner\n---\n%s", out)
 	}
 	if strings.Contains(out, "Get full issue details.") {
@@ -86,14 +68,8 @@ func TestBuildMetaSkillContentIssueBodyFormatting(t *testing.T) {
 			t.Parallel()
 			out := buildMetaSkillContent("codex", ctx)
 			for _, want := range []string{
-				"## Issue Body Formatting",
-				"An issue title already serves as its H1.",
-				// The rule covers BOTH surfaces: `description` is the CLI/API
-				// field name, `body` the UI term — the alias is a cross-surface
-				// mapping, not prose (MUL-5442 stage-1 review).
-				"do not add a Markdown H1 (`# ...`) to an issue body or description",
-				"start with prose or `##` subheadings",
-				"Only add an H1 when the user specifically requests one",
+				"## Writing bodies",
+				"An issue's title is its H1, so a description starts with prose or `##` headings.",
 			} {
 				if !strings.Contains(out, want) {
 					t.Errorf("brief is missing issue-body formatting guidance %q\n---\n%s", want, out)
@@ -121,20 +97,15 @@ func TestBuildMetaSkillContentSlimKindMatrix(t *testing.T) {
 	issueKinds := map[taskKind]bool{kindIssue: true}
 	checks := []sectionCheck{
 		{"# Multica Agent Runtime", allKinds},
-		{"## Background Task Safety", allKinds},
+		{"## Background work", allKinds},
 		{"## Agent Identity", allKinds},
-		{"## Available Commands", allKinds},
-		{"## Issue Body Formatting", allKinds},
-		{"### Workflow", allKinds},
-		{"## Important: Always Use the `multica` CLI", allKinds},
+		{"## Commands", allKinds},
+		{"## Writing bodies", allKinds},
+		{"## Workflow", allKinds},
 		{"## Output", allKinds},
-		{"## Comment Formatting", issueKinds},
 		{"## Repositories", allKinds},
-		{"## Instruction Precedence", issueKinds},
-		{"## Sub-issue Creation", issueKinds},
 		{"## Skills", allKinds},
 		{"## Mentions", issueKinds},
-		{"## Attachments", issueKinds},
 	}
 
 	fixtures := map[taskKind]TaskContextForEnv{
@@ -161,33 +132,10 @@ func TestBuildMetaSkillContentSlimKindMatrix(t *testing.T) {
 	}
 }
 
-// TestBriefDueDateTeachesCalendarDayFormat pins the --due-date synopsis to
-// the calendar-day format the server canonically accepts
-// (util.ParseCalendarDate: YYYY-MM-DD; an RFC3339 value passes only at exact
-// UTC midnight). MUL-5696 found the brief teaching `<RFC3339>` while the CLI
-// help and the projects skill say YYYY-MM-DD, steering agents that computed a
-// natural timestamp into 400s.
-func TestBriefDueDateTeachesCalendarDayFormat(t *testing.T) {
-	for name, ctx := range map[string]TaskContextForEnv{
-		"issue": {IssueID: "issue-1"},
-	} {
-		out := buildMetaSkillContent("claude", ctx)
-		if !strings.Contains(out, "--due-date <YYYY-MM-DD>") {
-			t.Errorf("%s brief missing the calendar-day --due-date synopsis", name)
-		}
-		if strings.Contains(out, "--due-date <RFC3339>") {
-			t.Errorf("%s brief still teaches --due-date <RFC3339>, which the server rejects except at UTC midnight (MUL-5696)", name)
-		}
-	}
-}
-
-// TestBackgroundTaskSafetySlimHardPins asserts the slim brief carries the
-// same hardened Background Task Safety pins as the legacy brief (MUL-4140).
-// The verbose path is covered by
-// TestInjectRuntimeConfigBackgroundTaskSafetyProviderAgnostic; this locks
-// the compressed slim path so a future slim-brief trim can't quietly drop
-// the no-background-and-yield / no-"standing by" guardrails that address
-// the MUL-4091 mechanism.
+// TestBackgroundTaskSafetySlimHardPins pins the non-derivable boundaries of
+// the Background work section (MUL-4140, MUL-5223, MUL-5274): the platform
+// fact, the external-systems/CI ban with its single exception, and the
+// persistent-service handoff.
 func TestBackgroundTaskSafetySlimHardPins(t *testing.T) {
 
 	out := buildMetaSkillContent("claude", TaskContextForEnv{
@@ -196,60 +144,37 @@ func TestBackgroundTaskSafetySlimHardPins(t *testing.T) {
 	})
 
 	for _, want := range []string{
-		"## Background Task Safety",
-		// MUL-5442 judgment rewrite (owner-authorized pin renegotiation): the
-		// section now states the one platform fact, the external-systems/CI
-		// boundary with its single exception, and the review-locked
-		// persistent-service contract. Enforcement-detail pins that only
-		// restated derivations of the platform fact were retired with the
-		// prose. What stays pinned: the fact, each boundary, each exception,
-		// and the handoff triple — the things an agent cannot infer.
-		"any run-owned work still active is orphaned",
-		"no background-completion wakeup",
-		"whatever a tool response promises",
-		"Never background-and-yield",
-		"foreground tool calls that block",
-		"run unobservable work synchronously",
-		"standing by",
-		"are not run-owned: do not wait",
-		// The full compound ban, not its first item — MUL-5223 made this a
-		// non-derivable boundary, so no member may be silently dropped.
-		"do not run `gh pr checks --watch`, `gh run watch`, or sleep/retry polls",
-		"GitHub Actions after a successful push",
-		"NOT your delivery acceptance criteria",
+		"## Background work",
+		"anything still running is orphaned and its result lost",
+		"Never background work and yield",
+		"block on results in the foreground",
+		"Don't wait on CI or external systems",
+		"(no `gh pr checks --watch`, `gh run watch` or sleep polls)",
 		"CI running: <PR link>",
-		"The one exception",
-		"ONE foreground blocking call (`gh pr checks <pr> --watch`)",
-		"persistent service handoff",
-		"running service itself is the requested deliverable",
+		"wait for it in ONE foreground `gh pr checks <pr> --watch`",
+		"Only a service the user asked to keep running may outlive the turn",
 		"durable logs",
-		"cleanup handle such as PID/profile",
-		"verify readiness",
-		"URL, logs, and stop instructions",
-		"survival as best-effort, not guaranteed",
-		"Never terminate `multica` or `multica.exe` by executable name",
-		"exact child PID you started",
+		"a recorded PID",
+		"reply with URL, logs and how to stop it",
+		"its survival is best-effort",
+		"Never kill `multica` by name",
+		"stop only a PID you started",
 		"`multica daemon status --output json`",
-		"never kill it if it is the reported daemon PID",
 	} {
 		if !strings.Contains(out, want) {
-			t.Errorf("slim Background Task Safety missing hardened pin %q\n---\n%s", want, out)
+			t.Errorf("slim Background work missing hardened pin %q\n---\n%s", want, out)
 		}
 	}
-	// Exactly one exception (see the execenv provider-agnostic test for
-	// the incident this guards).
-	if got := strings.Count(out, "The one exception"); got != 1 {
+	// Exactly one CI exception.
+	if got := strings.Count(out, "explicitly ask for the CI result"); got != 1 {
 		t.Errorf("slim brief must state the CI exception exactly once, got %d\n---\n%s", got, out)
 	}
 	// `gh run watch` may only appear as a banned command, never as the
 	// section's example of how to wait properly.
 	if strings.Contains(out, "e.g. `gh run watch`") {
-		t.Errorf("slim Background Task Safety should not suggest waiting for external GitHub CI\n---\n%s", out)
+		t.Errorf("slim Background work should not suggest waiting for external GitHub CI\n---\n%s", out)
 	}
-	// MUL-5274 review: with the persistent-service exception in the list, a
-	// "The rules above ..." scoping sentence would sweep in work that is
-	// precisely no longer run-owned after handoff.
 	if strings.Contains(out, "The rules above") {
-		t.Errorf("slim Background Task Safety must not reintroduce the ambiguous \"The rules above\" scoping sentence\n---\n%s", out)
+		t.Errorf("slim Background work must not reintroduce the ambiguous \"The rules above\" scoping sentence\n---\n%s", out)
 	}
 }

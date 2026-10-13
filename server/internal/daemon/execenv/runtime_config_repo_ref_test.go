@@ -34,7 +34,7 @@ func TestRepositoriesSectionCarriesPinnedRefAndDeliveryTarget(t *testing.T) {
 	// A pin is already applied on checkout. An agent that re-passes --ref to
 	// "get back to" the branch is doing redundant work at best, and pinning a
 	// stale value at worst.
-	if !strings.Contains(out, "do not pass `--ref` to get back to it") {
+	if !strings.Contains(out, "already checked out there (no `--ref` needed)") {
 		t.Errorf("brief should say the checkout is already at the pinned ref; got:\n%s", out)
 	}
 }
@@ -74,7 +74,7 @@ func TestDeliveryRuleDoesNotAssumeThePinIsABranch(t *testing.T) {
 	}
 	out := buildMetaSkillContent("claude", ctx)
 
-	if !strings.Contains(out, "tag or a commit rather than a branch") {
+	if !strings.Contains(out, "If it starts from a tag or commit") {
 		t.Errorf("brief should carve out the tag/commit case; got:\n%s", out)
 	}
 	if !strings.Contains(out, "confirm the target branch") {
@@ -101,7 +101,7 @@ func TestProjectContextSaysThePinIsAlreadyApplied(t *testing.T) {
 	if !strings.Contains(out, "checked out there automatically") {
 		t.Errorf("Project Context should say the configured start is applied for you; got:\n%s", out)
 	}
-	if !strings.Contains(out, "only to override it") {
+	if !strings.Contains(out, "only when the task names a different revision") {
 		t.Errorf("Project Context should frame --ref as the override; got:\n%s", out)
 	}
 }

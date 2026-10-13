@@ -1130,7 +1130,7 @@ func TestBuildPromptCommentTriggered(t *testing.T) {
 	for _, want := range []string{
 		issueID,
 		commentContent,
-		"Focus on THIS comment",
+		"Focus on THIS one",
 		commentID,
 		"multica issue comment add " + issueID + " --parent " + commentID,
 		"do NOT reuse --parent values from previous turns",
