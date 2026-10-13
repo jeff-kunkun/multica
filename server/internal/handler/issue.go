@@ -95,6 +95,10 @@ type IssueResponse struct {
 	// SourceContext is detail-only. List, board, search, and children responses
 	// deliberately omit the potentially large immutable snapshot.
 	SourceContext *sourceContextDetailResponse `json:"source_context,omitempty"`
+	// OriginType says where the issue was opened from ("meeting" for the
+	// meeting room). Omitted when unknown or unset: list rows do not load it,
+	// and an absent key leaves the client's cached value untouched.
+	OriginType *string `json:"origin_type,omitempty"`
 }
 
 // IssueRefResponse names another issue inside a response: enough to render
@@ -372,6 +376,7 @@ func issueToResponse(i db.Issue, issuePrefix string) IssueResponse {
 		LastActivityAt: timestampToNanoPtr(i.LastActivityAt),
 		Metadata:       parseIssueMetadata(i.Metadata),
 		Properties:     parseIssueProperties(i.Properties),
+		OriginType:     textToPtr(i.OriginType),
 	}
 }
 
@@ -2535,6 +2540,9 @@ type CreateIssueRequest struct {
 	// as Issue.properties and the standalone property PUT endpoint.
 	Properties     map[string]json.RawMessage `json:"properties,omitempty"`
 	AllowDuplicate bool                       `json:"allow_duplicate,omitempty"`
+	// Meeting opens the issue from the meeting room (origin_type "meeting").
+	// Honored only for member creators; agents keep their agent_create origin.
+	Meeting bool `json:"meeting,omitempty"`
 }
 
 // UnmarshalJSON rejects duplicate object members before Go's ordinary map
@@ -2797,6 +2805,9 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 
 	var originType pgtype.Text
 	var originID pgtype.UUID
+	if creatorType == "member" && req.Meeting {
+		originType = pgtype.Text{String: "meeting", Valid: true}
+	}
 	if creatorType == "agent" {
 		// MUL-4305: an agent creating an issue via the ordinary create path
 		// carries no explicit origin, which historically left the new issue

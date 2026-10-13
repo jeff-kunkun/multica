@@ -6097,7 +6097,7 @@ func IssueToMapResolved(ctx context.Context, q issuestatus.Querier, issue db.Iss
 }
 
 func IssueToMap(issue db.Issue, issuePrefix string) map[string]any {
-	return map[string]any{
+	m := map[string]any{
 		"id":           util.UUIDToString(issue.ID),
 		"workspace_id": util.UUIDToString(issue.WorkspaceID),
 		"number":       issue.Number,
@@ -6132,6 +6132,11 @@ func IssueToMap(issue db.Issue, issuePrefix string) map[string]any {
 		"metadata":         util.JSONObjectOrEmpty(issue.Metadata),
 		"properties":       util.JSONObjectOrEmpty(issue.Properties),
 	}
+	// Mirrors handler.IssueResponse.OriginType, which is omitempty.
+	if issue.OriginType.Valid {
+		m["origin_type"] = issue.OriginType.String
+	}
+	return m
 }
 
 // IssueIdentifier renders the human-facing issue key ("MUL-42"). Callers that

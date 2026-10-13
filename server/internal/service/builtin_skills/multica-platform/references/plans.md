@@ -32,6 +32,13 @@ its own plan. Approval creates one sub-issue per step (status `todo`, assigned
 to the step owner) and agent-owned steps start. Approving the same version
 again only finishes steps whose issue is missing; it never duplicates them.
 
+## Meetings
+
+A meeting is an issue a member opens from the meeting room
+(`multica issue create --meeting`) so one member drafts a plan on it.
+`multica meeting list [--output json]` lists meetings and every issue carrying a
+plan: newest plan status/version and approved-plan steps done/total.
+
 ## One run per issue
 
 At most one agent run is active on an issue at a time, whichever agent owns it.

@@ -39,11 +39,15 @@ WHERE cs.id = $1
 -- IM-style list: each active session with its unread *count* (assistant
 -- messages after the read cursor), a preview of the latest message, and
 -- ordered by most-recent activity so a new reply bumps a session to the top.
+-- Unread belongs to the Bot: in a workspace with a project-manager Bot chat
+-- sessions never count as unread.
 SELECT cs.*,
-       (SELECT count(*) FROM chat_message m
-          WHERE m.chat_session_id = cs.id
-            AND m.role = 'assistant'
-            AND m.created_at > cs.last_read_at)::int AS unread_count,
+       CASE WHEN EXISTS (SELECT 1 FROM workspace_bot b WHERE b.workspace_id = cs.workspace_id) THEN 0
+            ELSE (SELECT count(*) FROM chat_message m
+                    WHERE m.chat_session_id = cs.id
+                      AND m.role = 'assistant'
+                      AND m.created_at > cs.last_read_at)
+       END::int AS unread_count,
        COALESCE(lm.content, '') AS last_message_content,
        COALESCE(lm.role, '') AS last_message_role,
        lm.created_at AS last_message_at,
@@ -72,9 +76,11 @@ ORDER BY (cs.pinned_at IS NOT NULL) DESC, cs.pinned_at DESC, COALESCE(lm.created
 -- unread state), but an archived session is read-only and hidden from history,
 -- so any residual unread is uncleanable and must not light up any badge. Gating
 -- on status here is the single source of truth for all unread surfaces (FAB,
--- sidebar Chat tab, chat-window header) — see MUL-4360.
+-- sidebar Chat tab, chat-window header) — see MUL-4360. Unread belongs to the
+-- Bot: in a workspace with a project-manager Bot unread is always 0.
 SELECT cs.*,
        CASE WHEN cs.status = 'archived' THEN 0
+            WHEN EXISTS (SELECT 1 FROM workspace_bot b WHERE b.workspace_id = cs.workspace_id) THEN 0
             ELSE (SELECT count(*) FROM chat_message m
                     WHERE m.chat_session_id = cs.id
                       AND m.role = 'assistant'

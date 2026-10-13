@@ -143,8 +143,16 @@ WHERE workspace_id = $1 AND issue_id = $2 AND type = $3 AND archived = false
 RETURNING recipient_type, recipient_id;
 
 -- name: CountUnreadInbox :one
+-- Unread belongs to the Bot: in a workspace with a project-manager Bot, only
+-- mentions written by a member (a human colleague or the Bot itself) count;
+-- everything else is the Bot's to triage. Without a Bot every item counts.
 SELECT count(*) FROM inbox_item
-WHERE workspace_id = $1 AND recipient_type = $2 AND recipient_id = $3 AND read = false AND archived = false;
+WHERE inbox_item.workspace_id = $1 AND inbox_item.recipient_type = $2 AND inbox_item.recipient_id = $3
+  AND inbox_item.read = false AND inbox_item.archived = false
+  AND (
+    NOT EXISTS (SELECT 1 FROM workspace_bot b WHERE b.workspace_id = inbox_item.workspace_id)
+    OR (inbox_item.type = 'mentioned' AND inbox_item.actor_type = 'member')
+  );
 
 -- name: CountUnreadInboxByWorkspace :many
 -- Per-workspace unread inbox counts for a recipient member, matching the
@@ -156,7 +164,9 @@ WHERE workspace_id = $1 AND recipient_type = $2 AND recipient_id = $3 AND read =
 -- as empty (MUL-3695). Items without an issue group on their own id. The
 -- member join keeps counts scoped to workspaces the user still belongs to,
 -- so a stale item left behind in a workspace the user has since left cannot
--- light the dot.
+-- light the dot. Unread belongs to the Bot: in a workspace with a
+-- project-manager Bot only member-authored mentions qualify (same rule as
+-- CountUnreadInbox), applied before dedup so only qualifying items count.
 SELECT newest.workspace_id, count(*) AS count
 FROM (
     SELECT DISTINCT ON (i.workspace_id, COALESCE(i.issue_id, i.id))
@@ -166,6 +176,10 @@ FROM (
     WHERE i.recipient_type = 'member'
       AND i.recipient_id = $1
       AND i.archived = false
+      AND (
+        NOT EXISTS (SELECT 1 FROM workspace_bot b WHERE b.workspace_id = i.workspace_id)
+        OR (i.type = 'mentioned' AND i.actor_type = 'member')
+      )
     ORDER BY i.workspace_id, COALESCE(i.issue_id, i.id), i.created_at DESC
 ) newest
 WHERE newest.read = false
