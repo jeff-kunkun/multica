@@ -7,30 +7,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
-
-	"github.com/multica-ai/multica/server/internal/testutil"
 )
-
-func TestUpdateMeFrenchLanguageRoundTrip(t *testing.T) {
-	if testHandler == nil || testPool == nil {
-		t.Skip("database not available")
-	}
-	userID := dbfx.User(t, "French user", "lang-fr@multica.ai", testutil.Cols{"language": "en"})
-	var updated UserResponse
-	testutil.Call(t, testHandler.UpdateMe, newPatchMeRequest(userID, `{"language":"fr"}`)).Want(http.StatusOK).JSON(&updated)
-	if updated.Language == nil || *updated.Language != "fr" {
-		t.Fatalf("updated language = %v, want fr", updated.Language)
-	}
-
-	// A fresh request after reload must restore French, not the old preference.
-	get := newRequest(http.MethodGet, "/api/me", nil)
-	get.Header.Set("X-User-ID", userID)
-	var reloaded UserResponse
-	testutil.Call(t, testHandler.GetMe, get).Want(http.StatusOK).JSON(&reloaded)
-	if reloaded.Language == nil || *reloaded.Language != "fr" {
-		t.Fatalf("reloaded language = %v, want fr", reloaded.Language)
-	}
-}
 
 func newLanguageTestUser(t *testing.T, email string) string {
 	t.Helper()
@@ -86,46 +63,6 @@ func TestUpdateMeAcceptsLanguage(t *testing.T) {
 	}
 }
 
-func TestUpdateMeAcceptsKoreanLanguage(t *testing.T) {
-	userID := newLanguageTestUser(t, "lang-ko@multica.ai")
-
-	w := httptest.NewRecorder()
-	req := newPatchMeRequest(userID, `{"language":"ko"}`)
-	testHandler.UpdateMe(w, req)
-
-	if w.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
-	}
-
-	var resp map[string]any
-	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
-	if got, _ := resp["language"].(string); got != "ko" {
-		t.Fatalf("expected response language=ko, got %v", resp["language"])
-	}
-}
-
-func TestUpdateMeAcceptsJapaneseLanguage(t *testing.T) {
-	userID := newLanguageTestUser(t, "lang-ja@multica.ai")
-
-	w := httptest.NewRecorder()
-	req := newPatchMeRequest(userID, `{"language":"ja"}`)
-	testHandler.UpdateMe(w, req)
-
-	if w.Code != http.StatusOK {
-		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
-	}
-
-	var resp map[string]any
-	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
-	if got, _ := resp["language"].(string); got != "ja" {
-		t.Fatalf("expected response language=ja, got %v", resp["language"])
-	}
-}
-
 func TestUpdateMeRejectsUnsupportedLanguage(t *testing.T) {
 	userID := newLanguageTestUser(t, "lang-reject@multica.ai")
 
@@ -135,6 +72,15 @@ func TestUpdateMeRejectsUnsupportedLanguage(t *testing.T) {
 
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400, got %d: %s", w.Code, w.Body.String())
+	}
+
+	// French, Japanese, and Korean were removed from this line.
+	for _, removed := range []string{"fr", "ja", "ko"} {
+		w := httptest.NewRecorder()
+		testHandler.UpdateMe(w, newPatchMeRequest(userID, `{"language":"`+removed+`"}`))
+		if w.Code != http.StatusBadRequest {
+			t.Fatalf("language %s: expected 400, got %d: %s", removed, w.Code, w.Body.String())
+		}
 	}
 
 	var lang *string
