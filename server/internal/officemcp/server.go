@@ -237,7 +237,8 @@ func (e *apiError) Error() string {
 }
 
 func (c *caller) do(method, path string, body any) (json.RawMessage, error) {
-	var reader io.Reader
+	// http.NoBody, not nil: handlers may read the body of any request.
+	var reader io.Reader = http.NoBody
 	if body != nil {
 		raw, err := json.Marshal(body)
 		if err != nil {

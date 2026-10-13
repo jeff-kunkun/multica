@@ -5,6 +5,7 @@ import {
   AlarmClock,
   Bell,
   Blocks,
+  Bot,
   CircleDot,
   CreditCard,
   FolderGit2,
@@ -42,6 +43,7 @@ import { WorkspaceAvatar } from "../../workspace/workspace-avatar";
 import { AccountTab } from "./account-tab";
 import { PreferencesTab } from "./preferences-tab";
 import { TokensTab } from "./tokens-tab";
+import { BotsTab } from "./bots-tab";
 import { WorkspaceTab } from "./workspace-tab";
 import { MembersTab } from "./members-tab";
 import { CodeTab } from "./code-tab";
@@ -187,6 +189,9 @@ export function SettingsPage({ extraDeviceTabs = [] }: SettingsPageProps = {}) {
               adminOnly: true,
             }),
             entry("members", t(($) => $.page.tabs.members), Users, <MembersTab />, {
+              adminOnly: true,
+            }),
+            entry("bots", t(($) => $.page.tabs.bots), Bot, <BotsTab />, {
               adminOnly: true,
             }),
             ...(billingEnabled
