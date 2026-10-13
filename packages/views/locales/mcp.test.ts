@@ -65,8 +65,6 @@ describe("MCP locale contracts", () => {
   it.each([
     ["en", "Rename", "Edit configuration", "Replace configuration"],
     ["zh-Hans", "重命名", "编辑配置", "替换配置"],
-    ["ja", "名前を変更", "設定を編集", "設定を置き換え"],
-    ["ko", "이름 변경", "설정 편집", "설정 교체"],
   ] as const)(
     "distinguishes rename, readable editing, and replacement actions in %s",
     (locale, rename, edit, replace) => {

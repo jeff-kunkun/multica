@@ -49,10 +49,7 @@ describe("nameToWorkspaceSlug", () => {
     // Kana is a certain signal, in any UI language.
     expect(nameToWorkspaceSlug("東京チーム")).toBe("");
     expect(nameToWorkspaceSlug("ひらがな会社")).toBe("");
-    // All-kanji names carry no signal, so the reader's locale decides.
-    expect(nameToWorkspaceSlug("東京支社", "ja")).toBe("");
-    expect(nameToWorkspaceSlug("大韓民国", "ko")).toBe("");
-    // …and the same name still romanizes for a Chinese-reading audience.
+    // The office only ships English and Chinese, so an all-Han name romanizes.
     expect(nameToWorkspaceSlug("東京支社", "zh-Hans")).toBe("dongjingzhishe");
     expect(nameToWorkspaceSlug("蜘蛛侠", "en")).toBe("zhizhuxia");
   });

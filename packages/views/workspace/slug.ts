@@ -27,8 +27,7 @@ const KANA = /[\u3041-\u3096\u309B-\u30FF\uFF66-\uFF9F]/;
  * romanizes, and fixing it needs real Japanese romaji (a segmenter plus a
  * reading dictionary), not another heuristic.
  */
-function shouldRomanize(name: string, locale?: SupportedLocale): boolean {
-  if (locale === "ja" || locale === "ko") return false;
+function shouldRomanize(name: string, _locale?: SupportedLocale): boolean {
   return !KANA.test(name);
 }
 

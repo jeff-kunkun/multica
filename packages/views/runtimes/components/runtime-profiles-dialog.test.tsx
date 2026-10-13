@@ -185,26 +185,6 @@ describe("RuntimeProfilesDialog", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("creates an Oh-My-Pi compatibility target without a client protocol mapping", async () => {
-    renderDialog({ intent: "create" });
-    fireEvent.click(screen.getByRole("button", { name: "Oh-My-Pi" }));
-    fireEvent.change(screen.getByLabelText("Display name"), {
-      target: { value: "Custom OMP" },
-    });
-    fireEvent.change(screen.getByLabelText("Command"), {
-      target: { value: "wrapper launch" },
-    });
-    fireEvent.click(screen.getByRole("button", { name: "Create runtime" }));
-    await waitFor(() =>
-      expect(mutationState.createProfile).toHaveBeenCalledWith({
-        display_name: "Custom OMP",
-        runtime_type: "omp",
-        command_name: "wrapper",
-        fixed_args: ["launch"],
-      }),
-    );
-  });
-
   it("parses a pasted command line into fixed_args on create", async () => {
     renderDialog();
 

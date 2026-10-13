@@ -1,8 +1,6 @@
 // Package agent provides a unified interface for executing prompts via
-// coding agents (Claude Code, CodeBuddy, Codex, Copilot, OpenCode, DevEco Code,
-// OpenClaw, Hermes, Pi, Oh-My-Pi, Cursor, Kimi, Reasonix, Kiro, Antigravity, Qoder,
-// Trae, Grok, Qwen Code, QwenPaw, MiniMax Code). It
-// mirrors the happy-cli AgentBackend pattern, translated to idiomatic Go.
+// the office engines: Claude Code, Codex, OpenCode, and Antigravity (Gemini).
+// It mirrors the happy-cli AgentBackend pattern, translated to idiomatic Go.
 package agent
 
 import (
@@ -347,51 +345,17 @@ type Config struct {
 }
 
 // New creates a Backend for the given agent type.
-// Supported types: "claude", "codebuddy", "codex", "copilot", "opencode", "codearts", "deveco", "openclaw", "hermes", "pi", "cursor", "kimi", "reasonix", "dsh", "kiro", "antigravity", "qoder", "qoderclicn", "traecli", "grok", "qwen", "qwenpaw", "mcode".
+// Supported types: "claude", "codex", "opencode", "antigravity".
 //
 // SupportedTypes is the canonical whitelist of agent types eligible to back a
-// custom runtime profile. It MUST stay in lockstep with the
-// runtime_profile.protocol_family CHECK constraint (migration 120, widened by
-// migration 134 to add qoder, migration 136 to add traecli, migration 175 to
-// add deveco, migration 179 to add grok, migration 202 to add qwen,
-// migration 242 to add qoderclicn, migration 253 to add qwenpaw,
-// migration 254 to add reasonix, migration 313 to add dsh, migration 342 to
-// add mcode, migration 370 to add dim, migration 403 to add zeroclaw, and
-// migration 441 to add codearts): a custom runtime profile may
-// only be based on a backend Multica officially supports.
-// qoder and qoderclicn share the same ACP backend; keeping both provider keys
-// lets the daemon auto-detect and register the international and China-region
-// binaries independently. traecli (Trae) has a New backend, launch
-// header and provider branding but was previously missing from this whitelist,
-// so the family picker rejected it (#4945). grok is the xAI Grok Build CLI
-// ACP backend (`grok agent --always-approve stdio`). qwen is Qwen Code's
-// native `qwen -p <prompt> --output-format stream-json` backend.
+// custom runtime profile. It stays in lockstep with the
+// runtime_profile.protocol_family CHECK constraint (migration 574): a custom
+// runtime profile may only be based on a backend this office still ships.
 var SupportedTypes = []string{
 	"claude",
-	"codebuddy",
 	"codex",
-	"copilot",
 	"opencode",
-	"codearts",
-	"deveco",
-	"openclaw",
-	"hermes",
-	"pi",
-	"cursor",
-	"kimi",
-	"reasonix",
-	"dsh",
-	"kiro",
 	"antigravity",
-	"qoder",
-	"qoderclicn",
-	"traecli",
-	"grok",
-	"qwen",
-	"qwenpaw",
-	"mcode",
-	"dim",
-	"zeroclaw",
 }
 
 // IsSupportedType reports whether agentType is in the SupportedTypes whitelist.
@@ -419,11 +383,7 @@ func IsSupportedType(agentType string) bool {
 // entry as soon as its backend learns to report rejections.
 var resumeRejectionUndetectable = map[string]bool{
 	"antigravity": true,
-	"copilot":     true,
-	"cursor":      true,
-	"deveco":      true,
 	"opencode":    true,
-	"codearts":    true,
 }
 
 // ResumeRejectionUndetectable reports whether agentType is a backend that
@@ -451,52 +411,12 @@ func New(agentType string, cfg Config) (Backend, error) {
 	switch agentType {
 	case "claude":
 		return &claudeBackend{cfg: cfg}, nil
-	case "codebuddy":
-		return &codebuddyBackend{cfg: cfg}, nil
 	case "codex":
 		return &codexBackend{cfg: cfg}, nil
-	case "copilot":
-		return &copilotBackend{cfg: cfg}, nil
 	case "opencode":
 		return &opencodeBackend{cfg: cfg}, nil
-	case "codearts":
-		return newCodeArtsBackend(cfg)
-	case "deveco":
-		return &devecoBackend{cfg: cfg}, nil
-	case "openclaw":
-		return &openclawBackend{cfg: cfg}, nil
-	case "hermes":
-		return &hermesBackend{cfg: cfg}, nil
-	case "pi":
-		return &piBackend{cfg: cfg}, nil
-	case "cursor":
-		return &cursorBackend{cfg: cfg}, nil
-	case "kimi":
-		return &kimiBackend{cfg: cfg}, nil
-	case "reasonix":
-		return &reasonixBackend{cfg: cfg}, nil
-	case "dsh":
-		return &dshBackend{cfg: cfg}, nil
-	case "dim":
-		return &dimBackend{cfg: cfg}, nil
-	case "kiro":
-		return &kiroBackend{cfg: cfg}, nil
 	case "antigravity":
 		return &antigravityBackend{cfg: cfg}, nil
-	case "qoder", "qoderclicn":
-		return &qoderBackend{cfg: cfg, defaultExecutable: qoderDefaultBinary(agentType)}, nil
-	case "traecli":
-		return &traecliBackend{cfg: cfg}, nil
-	case "grok":
-		return &grokBackend{cfg: cfg}, nil
-	case "qwen":
-		return &qwenBackend{cfg: cfg}, nil
-	case "qwenpaw":
-		return &qwenpawBackend{cfg: cfg}, nil
-	case "mcode":
-		return &mcodeBackend{cfg: cfg}, nil
-	case "zeroclaw":
-		return &zeroclawBackend{cfg: cfg}, nil
 	default:
 		return nil, fmt.Errorf("unknown agent type: %q (supported: %s)", agentType, strings.Join(SupportedTypes, ", "))
 	}
@@ -521,29 +441,8 @@ func DetectVersion(ctx context.Context, cmd Command) (string, error) {
 var launchHeaders = map[string]string{
 	"antigravity": "agy -p (non-interactive)",
 	"claude":      "claude (stream-json)",
-	"codebuddy":   "codebuddy (stream-json)",
 	"codex":       "codex app-server",
-	"copilot":     "copilot (json)",
-	"cursor":      "cursor-agent (stream-json)",
-	"codearts":    "codearts run (json)",
-	"deveco":      "deveco run (json)",
-	"hermes":      "hermes acp",
-	"kimi":        "kimi acp",
-	"reasonix":    "reasonix acp",
-	"dsh":         "dsh --profile multica (stdio)",
-	"kiro":        "kiro-cli acp",
-	"openclaw":    "openclaw agent (json)",
 	"opencode":    "opencode run (json)",
-	"pi":          "pi (json mode)",
-	"qoder":       "qodercli --acp",
-	"qoderclicn":  "qoderclicn --acp",
-	"traecli":     "traecli acp serve",
-	"grok":        "grok agent stdio",
-	"qwen":        "qwen -p (stream-json)",
-	"qwenpaw":     "qwenpaw acp",
-	"dim":         "dim acp",
-	"mcode":       "mcode acp",
-	"zeroclaw":    "zeroclaw acp",
 }
 
 // LaunchHeader returns the user-visible launch skeleton for agentType, or an

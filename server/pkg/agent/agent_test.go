@@ -12,47 +12,6 @@ import (
 	"time"
 )
 
-func TestNewReturnsCodebuddyBackend(t *testing.T) {
-	t.Parallel()
-	b, err := New("codebuddy", Config{ExecutablePath: "/nonexistent/codebuddy"})
-	if err != nil {
-		t.Fatalf("New(codebuddy) error: %v", err)
-	}
-	if _, ok := b.(*codebuddyBackend); !ok {
-		t.Fatalf("expected *codebuddyBackend, got %T", b)
-	}
-}
-
-func TestNewReturnsQoderBackend(t *testing.T) {
-	t.Parallel()
-	b, err := New("qoder", Config{ExecutablePath: "/nonexistent/qodercli"})
-	if err != nil {
-		t.Fatalf("New(qoder) error: %v", err)
-	}
-	qoder, ok := b.(*qoderBackend)
-	if !ok {
-		t.Fatalf("expected *qoderBackend, got %T", b)
-	}
-	if qoder.defaultExecutable != "qodercli" {
-		t.Fatalf("default executable = %q, want qodercli", qoder.defaultExecutable)
-	}
-}
-
-func TestNewReturnsQoderCNBackend(t *testing.T) {
-	t.Parallel()
-	b, err := New("qoderclicn", Config{})
-	if err != nil {
-		t.Fatalf("New(qoderclicn) error: %v", err)
-	}
-	qoder, ok := b.(*qoderBackend)
-	if !ok {
-		t.Fatalf("expected *qoderBackend, got %T", b)
-	}
-	if qoder.defaultExecutable != "qoderclicn" {
-		t.Fatalf("default executable = %q, want qoderclicn", qoder.defaultExecutable)
-	}
-}
-
 func TestNewRejectsUnknownType(t *testing.T) {
 	t.Parallel()
 	_, err := New("gpt", Config{})
