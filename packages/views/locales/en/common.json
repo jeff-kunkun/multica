@@ -246,5 +246,28 @@
     "cancel_keep": "Keep issue",
     "cancel_confirm": "Cancel issue",
     "cancel_confirm_related": "Cancel and stop related work"
+  },
+  "bot_connect": {
+    "page_title": "Let a Bot connect",
+    "loading": "Loading the request…",
+    "needs_auth": "Sign in to Multica, then agree.",
+    "sign_in": "Sign in",
+    "ask": "\"{{bot}}\" wants to connect to your workspace.",
+    "explain": "Once you agree it can follow the group, reply for you and receive what needs your decision. No key to copy, and you can stop it anytime under \"Group chat & Bots\".",
+    "code_hint": "Code {{code}} — check it matches what the Bot shows.",
+    "workspace_label": "Workspace to connect to",
+    "approve": "Agree",
+    "deny": "Refuse",
+    "done_title": "\"{{bot}}\" is connected to {{workspace}}",
+    "done_description": "You can close this page; the Bot finishes the rest itself.",
+    "denied_title": "You refused this request.",
+    "expired_title": "This request has expired. Ask the Bot to start again.",
+    "error_title": "Couldn't connect",
+    "error_missing_code": "The link has no code. Ask the Bot to send it again.",
+    "error_not_found": "This request doesn't exist. Ask the Bot to start again.",
+    "error_not_admin": "Only an owner or admin of this workspace can let a Bot in.",
+    "error_closed": "This request was already handled or has expired.",
+    "error_unknown": "Something went wrong. Try again later.",
+    "no_workspace": "You don't have a workspace yet. Create one first, then come back to agree."
   }
 }

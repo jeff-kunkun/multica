@@ -104,6 +104,17 @@ const SETTINGS_TABS: SecondaryTab[] = [
   { id: "runtime_config", labelKey: "runtime_config" },
 ];
 
+// DENE-2009: settings keep only what a person must decide. These run on
+// system defaults (or whatever is already saved) and stay changeable through
+// `multica agent update / env / mcp`, so Bots and agents can still adjust them.
+const CLI_ONLY_TABS = new Set<DetailTab>([
+  "mcp_config",
+  "composio_mcp",
+  "env",
+  "custom_args",
+  "runtime_config",
+]);
+
 const TOP_TABS: { id: DetailSection; labelKey: DetailSection }[] = [
   { id: "overview", labelKey: "overview" },
   { id: "work", labelKey: "work" },
@@ -285,6 +296,7 @@ export function AgentOverviewPane({
       agent.owner_id === currentUserId;
 
     return CAPABILITY_TABS.filter((tab) => {
+      if (CLI_ONLY_TABS.has(tab.id)) return false;
       if (tab.id === "mcp_config") return showMcp;
       if (tab.id === "composio_mcp") return showComposioMcp;
       if (tab.id === "integrations") return integrationsConfigured;
@@ -301,6 +313,7 @@ export function AgentOverviewPane({
   const visibleSettingsTabs = useMemo(
     () =>
       SETTINGS_TABS.filter((tab) => {
+        if (CLI_ONLY_TABS.has(tab.id)) return false;
         // Env is the only settings tab backed by a secret-bearing endpoint.
         // GET/PUT /api/agents/{id}/env admits the agent owner or a workspace
         // owner/admin (MUL-5438) — the same rule `canEdit` encodes — so

@@ -33,6 +33,8 @@ func TestBotWriteAuditCoversEveryWriteRoute(t *testing.T) {
 		"/auth/", "/api/auth/", "/api/webhooks/", "/webhooks/", "/api/daemon/", "/daemon/",
 		"/api/public/", "/api/callbacks/", "/api/oauth/", "/api/links/",
 		"/api/contact-sales", "/v1/",
+		// A Bot asking to connect has no key yet; the person agrees in the group.
+		"/api/bot-connect",
 	}
 
 	isAudit := func(fn func(http.Handler) http.Handler) bool {

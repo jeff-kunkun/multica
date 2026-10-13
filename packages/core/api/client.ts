@@ -102,6 +102,7 @@ import type {
   ExternalBot,
   CreateExternalBotRequest,
   ExternalBotKeyResponse,
+  BotConnectInfo,
   ExternalBotSetupTextResponse,
   BotWakeSettings,
   BotBinding,
@@ -4887,6 +4888,22 @@ export class ApiClient {
       method: "POST",
       body: JSON.stringify(data),
     });
+  }
+
+  // A Bot asking to connect (DENE-2009): read, agree once, or refuse.
+  async getBotConnect(code: string): Promise<BotConnectInfo> {
+    return this.fetch(`/api/bot-connect/${encodeURIComponent(code)}`);
+  }
+
+  async approveBotConnect(code: string, workspaceId: string): Promise<BotConnectInfo> {
+    return this.fetch(`/api/bot-connect/${encodeURIComponent(code)}/approve`, {
+      method: "POST",
+      body: JSON.stringify({ workspace_id: workspaceId }),
+    });
+  }
+
+  async denyBotConnect(code: string): Promise<BotConnectInfo> {
+    return this.fetch(`/api/bot-connect/${encodeURIComponent(code)}/deny`, { method: "POST" });
   }
 
   /** Setup text again, key replaced by a placeholder; `botId` addresses the bot by name. */

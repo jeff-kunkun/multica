@@ -53,6 +53,7 @@ import { AccountTab } from "./account-tab";
 import { PreferencesTab } from "./preferences-tab";
 import { TokensTab } from "./tokens-tab";
 import { BotsTab } from "./bots-tab";
+import { BotBindingSection } from "./bot-binding-section";
 import { OverviewTab } from "./overview-tab";
 import { WorkspaceTab } from "./workspace-tab";
 import { MembersTab } from "./members-tab";
@@ -88,6 +89,8 @@ export interface ExtraSettingsTab {
   label: string;
   icon: React.ComponentType<{ className?: string }>;
   content: React.ReactNode;
+  /** Still opens from a link, but is not listed (the system decides it). */
+  hidden?: boolean;
 }
 
 interface SettingsPageProps {
@@ -122,7 +125,8 @@ interface SettingsScopeGroup {
 const FLASH_MS = 1600;
 const ANCHOR_WAIT_MS = 1500;
 
-export function SettingsPage({ extraDeviceTabs = [] }: SettingsPageProps = {}) {
+export function SettingsPage({ extraDeviceTabs: deviceTabs = [] }: SettingsPageProps = {}) {
+  const extraDeviceTabs = deviceTabs.filter((tab) => !tab.hidden);
   const { t } = useT("settings");
   const workspace = useCurrentWorkspace();
   const workspaceName = workspace?.name ?? t(($) => $.page.workspace_fallback);
@@ -169,6 +173,85 @@ export function SettingsPage({ extraDeviceTabs = [] }: SettingsPageProps = {}) {
     { adminOnly: true },
   );
 
+  // DENE-2009: settings keep only what a person has to decide. Everything that
+  // reaches people goes through the group chat (external Bots), and the rest
+  // is either decided by the system or changed by agents through the CLI.
+  // Retired pages are no longer listed or searchable, but their URLs still
+  // open, since server redirects (GitHub App, Composio OAuth) land on them.
+  const retired: SettingsEntry[] = [
+    entry("notifications", t(($) => $.page.tabs.notifications), Bell, <NotificationsTab />),
+    entry("shortcuts", t(($) => $.page.tabs.shortcuts), Keyboard, <KeyboardShortcutsTab />),
+    ...(appsAvailable ? [entry("apps", t(($) => $.page.tabs.apps), Plug, <ConnectedAppsTab />)] : []),
+    entry("tokens", t(($) => $.page.tabs.tokens), KeyRound, <TokensTab />),
+    entry("overview", t(($) => $.page.tabs.overview), Network, <OverviewTab />),
+    entry(
+      "agent-permissions",
+      t(($) => $.page.tabs.agent_permissions),
+      BotMessageSquare,
+      <AgentPermissionsTab />,
+    ),
+    entry(
+      "project-sharing",
+      t(($) => $.page.tabs.project_sharing),
+      FolderKanban,
+      <ProjectSharingTab />,
+      { wide: true },
+    ),
+    ...(billingEnabled
+      ? [entry("billing", t(($) => $.page.tabs.billing), CreditCard, <BillingTab />)]
+      : []),
+    entry(
+      "config-transfer",
+      t(($) => $.page.tabs.config_transfer),
+      ArrowDownUp,
+      <ConfigTransferTab />,
+      { wide: true },
+    ),
+    entry(
+      "issue-statuses",
+      t(($) => $.page.tabs.issue_statuses),
+      CircleDot,
+      <IssueStatusesTab />,
+      { wide: true, adminOnly: true },
+    ),
+    entry("wakeups", t(($) => $.page.tabs.wakeups), AlarmClock, <WakeupsTab />, {
+      wide: true,
+      adminOnly: true,
+    }),
+    entry("labels", t(($) => $.page.tabs.labels), Tags, <LabelsTab />, { wide: true }),
+    entry("properties", t(($) => $.page.tabs.properties), ListPlus, <PropertiesTab />, {
+      wide: true,
+      adminOnly: true,
+    }),
+    entry("quick-actions", t(($) => $.page.tabs.quick_actions), Zap, <QuickActionsTab />, {
+      wide: true,
+    }),
+    entry("routing", t(($) => $.page.tabs.routing), Route, <RoutingTab />),
+    ...(reposAllowed
+      ? [
+          entry(
+            "git-connections",
+            t(($) => $.page.tabs.git_connections),
+            Link2,
+            <GitConnectionsTab />,
+            { wide: true },
+          ),
+        ]
+      : []),
+    entry("channels", t(($) => $.page.tabs.channels), MessagesSquare, <ChannelsTab />),
+    entry("mcp", t(($) => $.page.tabs.mcp), Server, <McpTab />, { adminOnly: true }),
+    ...(pluginsEnabled
+      ? [entry("plugins", t(($) => $.page.tabs.plugins), Blocks, <PluginsTab />, { adminOnly: true })]
+      : []),
+  ];
+  const workspaceLinksEntry = entry(
+    "workspace-links",
+    t(($) => $.page.tabs.workspace_links),
+    Network,
+    <WorkspaceLinksTab />,
+    { wide: true, count: pendingLinks || undefined },
+  );
+
   const groups: SettingsScopeGroup[] = [
     {
       key: "personal",
@@ -193,22 +276,6 @@ export function SettingsPage({ extraDeviceTabs = [] }: SettingsPageProps = {}) {
               SlidersHorizontal,
               <PreferencesTab />,
             ),
-            entry(
-              "notifications",
-              t(($) => $.page.tabs.notifications),
-              Bell,
-              <NotificationsTab />,
-            ),
-            entry(
-              "shortcuts",
-              t(($) => $.page.tabs.shortcuts),
-              Keyboard,
-              <KeyboardShortcutsTab />,
-            ),
-            ...(appsAvailable
-              ? [entry("apps", t(($) => $.page.tabs.apps), Plug, <ConnectedAppsTab />)]
-              : []),
-            entry("tokens", t(($) => $.page.tabs.tokens), KeyRound, <TokensTab />),
           ],
         },
       ],
@@ -229,123 +296,32 @@ export function SettingsPage({ extraDeviceTabs = [] }: SettingsPageProps = {}) {
         {
           key: "workspace",
           entries: [
-            entry("overview", t(($) => $.page.tabs.overview), Network, <OverviewTab />),
             entry("workspace", t(($) => $.page.tabs.general), Settings, <WorkspaceTab />, {
               adminOnly: true,
             }),
             ...(isOwner ? [membersEntry] : []),
-            entry(
-              "agent-permissions",
-              t(($) => $.page.tabs.agent_permissions),
-              BotMessageSquare,
-              <AgentPermissionsTab />,
-            ),
-            entry(
-              "project-sharing",
-              t(($) => $.page.tabs.project_sharing),
-              FolderKanban,
-              <ProjectSharingTab />,
-              { wide: true },
-            ),
-            entry(
-              "workspace-links",
-              t(($) => $.page.tabs.workspace_links),
-              Network,
-              <WorkspaceLinksTab />,
-              { wide: true, count: pendingLinks || undefined },
-            ),
-            ...(billingEnabled
+            // The one place people are reached: Bots relay decisions and
+            // activity into the group chat.
+            ...(isAdmin
               ? [
                   entry(
-                    "billing",
-                    t(($) => $.page.tabs.billing),
-                    CreditCard,
-                    <BillingTab />,
+                    "bots",
+                    t(($) => $.page.tabs.bots),
+                    Bot,
+                    <BotsTab lead={<BotBindingSection />} />,
                   ),
                 ]
               : []),
-            entry(
-              "config-transfer",
-              t(($) => $.page.tabs.config_transfer),
-              ArrowDownUp,
-              <ConfigTransferTab />,
-              { wide: true },
-            ),
-          ],
-        },
-        {
-          key: "issues",
-          label: t(($) => $.page.groups.issues),
-          entries: [
-            entry(
-              "issue-statuses",
-              t(($) => $.page.tabs.issue_statuses),
-              CircleDot,
-              <IssueStatusesTab />,
-              { wide: true, adminOnly: true },
-            ),
-            entry("wakeups", t(($) => $.page.tabs.wakeups), AlarmClock, <WakeupsTab />, {
-              wide: true,
-              adminOnly: true,
-            }),
-            entry("labels", t(($) => $.page.tabs.labels), Tags, <LabelsTab />, {
-              wide: true,
-            }),
-            entry(
-              "properties",
-              t(($) => $.page.tabs.properties),
-              ListPlus,
-              <PropertiesTab />,
-              { wide: true, adminOnly: true },
-            ),
-            entry(
-              "quick-actions",
-              t(($) => $.page.tabs.quick_actions),
-              Zap,
-              <QuickActionsTab />,
-              { wide: true },
-            ),
-            entry("routing", t(($) => $.page.tabs.routing), Route, <RoutingTab />),
-          ],
-        },
-        {
-          key: "connections",
-          label: t(($) => $.page.groups.connections),
-          entries: [
-            // Repos module visibility (kun) hides both code pages together.
+            // Repos module visibility (kun) hides the code page.
             ...(reposAllowed
               ? [
                   entry("code", t(($) => $.page.tabs.code), FolderGit2, <CodeTab />, {
                     adminOnly: true,
                   }),
-                  entry(
-                    "git-connections",
-                    t(($) => $.page.tabs.git_connections),
-                    Link2,
-                    <GitConnectionsTab />,
-                    { wide: true },
-                  ),
                 ]
               : []),
-            entry(
-              "channels",
-              t(($) => $.page.tabs.channels),
-              MessagesSquare,
-              <ChannelsTab />,
-            ),
-            ...(isAdmin
-              ? [entry("bots", t(($) => $.page.tabs.bots), Bot, <BotsTab />)]
-              : []),
-            entry("mcp", t(($) => $.page.tabs.mcp), Server, <McpTab />, {
-              adminOnly: true,
-            }),
-            ...(pluginsEnabled
-              ? [
-                  entry("plugins", t(($) => $.page.tabs.plugins), Blocks, <PluginsTab />, {
-                    adminOnly: true,
-                  }),
-                ]
-              : []),
+            // Only listed while another workspace's offer waits for an answer.
+            ...(pendingLinks ? [workspaceLinksEntry] : []),
           ],
         },
       ],
@@ -370,7 +346,7 @@ export function SettingsPage({ extraDeviceTabs = [] }: SettingsPageProps = {}) {
   // A non-owner who opens the members link directly still lands on it and is
   // told why it is closed, instead of being bounced to another tab unexplained.
   const active =
-    [...allEntries, membersEntry].find((item) => item.value === candidate) ??
+    [...allEntries, membersEntry, workspaceLinksEntry, ...retired, ...(deviceTabs as SettingsEntry[])].find((item) => item.value === candidate) ??
     allEntries[0]!;
   const href = (value: string) =>
     settingsHref(navigation.pathname, navigation.searchParams, value);

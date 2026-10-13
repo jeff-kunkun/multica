@@ -244,5 +244,28 @@
     "cancel_keep": "保留任务",
     "cancel_confirm": "取消任务",
     "cancel_confirm_related": "取消并连带停止"
+  },
+  "bot_connect": {
+    "page_title": "让 Bot 接入",
+    "loading": "正在读取接入申请…",
+    "needs_auth": "先登录 Multica，再点同意。",
+    "sign_in": "登录",
+    "ask": "「{{bot}}」想接入你的工作区。",
+    "explain": "同意后它就能看到群里的事、帮你回复和收到要你决定的事。不用复制任何钥匙，以后也能在「群聊与 Bot」里一键停用。",
+    "code_hint": "接入码 {{code}}，请确认和 Bot 那边显示的一致。",
+    "workspace_label": "接入到哪个工作区",
+    "approve": "同意接入",
+    "deny": "拒绝",
+    "done_title": "「{{bot}}」已接入{{workspace}}",
+    "done_description": "可以关掉这一页了，Bot 会自己完成剩下的步骤。",
+    "denied_title": "已拒绝这次接入。",
+    "expired_title": "这条接入申请已过期，让 Bot 重新发起。",
+    "error_title": "没办法完成接入",
+    "error_missing_code": "链接里缺少接入码，让 Bot 重新发一次链接。",
+    "error_not_found": "找不到这条接入申请，让 Bot 重新发起。",
+    "error_not_admin": "只有这个工作区的所有者或管理员能同意 Bot 接入。",
+    "error_closed": "这条申请已经处理过或过期了。",
+    "error_unknown": "出了点问题，稍后再试。",
+    "no_workspace": "你还没有工作区，先建一个再回来点同意。"
   }
 }

@@ -268,6 +268,12 @@ export function useSettingsSearchIndex(
         description: t(($) => $.bots.description),
       },
       {
+        tab: "bots",
+        anchor: "decisions-bot",
+        title: t(($) => $.notifications.decisions.label),
+        description: t(($) => $.notifications.decisions.title),
+      },
+      {
         tab: "mcp",
         title: t(($) => $.page.tabs.mcp),
         description: t(($) => $.mcp.description),

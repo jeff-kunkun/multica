@@ -52,6 +52,8 @@ function DesktopSettingsRoute() {
           label: t(($) => $.desktop.tabs.server),
           icon: Globe,
           content: <ServerSettingsTab />,
+          // The app already knows its server; the page stays for a link only.
+          hidden: true,
         },
         {
           value: "daemon",

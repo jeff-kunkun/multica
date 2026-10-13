@@ -436,7 +436,7 @@
       "project_sharing": "权限与共享",
       "workspace_links": "连通工作区",
       "agent_permissions": "智能体权限",
-      "bots": "外部 Bot",
+      "bots": "群聊与 Bot",
       "overview": "工作区全景"
     },
     "groups": {
@@ -721,7 +721,7 @@
       "label": "交给我的 Bot",
       "none": "不用 Bot（只在站内）",
       "no_bots": "你还没有 Bot，先到「Bot」里添加。",
-      "state_none": "选你自己的 Bot，要你决定的事会推给它。",
+      "state_none": "你同意一个 Bot 接入后，要你决定的事会自动推给它，不用再选。",
       "state_ok": "要你决定的事先推给 {{name}}。",
       "state_unverified": "等 {{name}} 确认能收到。",
       "state_broken": "{{name}} 连不上，要你决定的事暂时回到站内。",
@@ -2252,10 +2252,9 @@
   },
   "bots": {
     "title": "外部 Bot",
-    "description": "给外部 Bot 发一把和你同权的钥匙，Bot 用 multica 命令行直接查任务、改任务、聊天。",
-    "add": "添加 Bot",
+    "description": "Bot 接进来后用 multica 命令行查任务、改任务、在群里聊天，权限和同意它的人一样。",
     "empty": "还没有 Bot",
-    "empty_hint": "添加后会拿到一段接入指令，整段发给 Bot 即可。",
+    "empty_hint": "把上面那句话发给你的 Bot，它会发回一个链接，你点「同意」就接好了。",
     "load_failed": "Bot 列表没加载出来，刷新页面再试。",
     "type": {
       "grok": "Grok"
@@ -2275,19 +2274,6 @@
     "stop": "停用",
     "delete": "删除",
     "cancel": "取消",
-    "expiry": {
-      "never": "永不过期",
-      "365": "1 年"
-    },
-    "add_dialog": {
-      "title": "添加 Bot",
-      "name": "名字",
-      "name_placeholder": "例如：Multica 管家",
-      "type": "类型",
-      "expiry": "钥匙有效期",
-      "submit": "生成钥匙",
-      "submitting": "生成中…"
-    },
     "key_dialog": {
       "title": "发给「{{name}}」的接入指令",
       "description": "整段复制发给 Bot。钥匙只显示这一次，关掉后只能发新钥匙。",
@@ -2460,6 +2446,13 @@
       "ack_over_limit": "一次最多确认 100 条。",
       "toast_acked": "已确认 {{count}} 条，已从待看移走",
       "refresh": "重新扫描"
+    },
+    "connect": {
+      "title": "让 Bot 自己接入",
+      "description": "复制这句话发给 Bot。它会发回一个链接，你点一次「同意」就接好了，不用碰任何钥匙。",
+      "copy": "复制给 Bot",
+      "copied": "已复制，发给你的 Bot 吧",
+      "instruction": "请在你的机器上运行下面这条命令，把 <URL> 和 <KEY> 换成你自己收消息的 HTTPS 地址和密钥：{{command}}\n然后把它给出的链接发给我，我点同意后你就接入了，群消息和要我拍板的事都会直接送到你那里。"
     }
   },
   "overview": {

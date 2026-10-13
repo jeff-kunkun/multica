@@ -436,7 +436,7 @@
       "project_sharing": "権限と共有",
       "workspace_links": "連携ワークスペース",
       "agent_permissions": "エージェント権限",
-      "bots": "External bots",
+      "bots": "Group chat & Bots",
       "overview": "ワークスペースの全体像"
     },
     "groups": {
@@ -721,7 +721,7 @@
       "label": "自分の Bot に送る",
       "none": "Bot なし（アプリ内のみ）",
       "no_bots": "Bot がまだありません。先に Bot を追加してください。",
-      "state_none": "自分の Bot を選ぶと、判断が必要なことがそこに届きます。",
+      "state_none": "Bot の接続リクエストに同意すると、あなたの判断が必要な事柄は自動でその Bot に届きます。",
       "state_ok": "判断が必要なことは先に {{name}} に届きます。",
       "state_unverified": "{{name}} の受信確認を待っています。",
       "state_broken": "{{name}} に届きません。判断はアプリ内に戻ります。",
@@ -2252,10 +2252,9 @@
   },
   "bots": {
     "title": "External bots",
-    "description": "Give an external bot a key with your own access; it uses the multica CLI to read and update issues and chats.",
-    "add": "Add bot",
+    "description": "接続後、Bot は multica CLI でタスクの確認・更新やグループでのチャットを行います。権限は許可した人と同じです。",
     "empty": "No bots yet",
-    "empty_hint": "Adding one gives you setup text to paste to the bot.",
+    "empty_hint": "上の文を Bot に送ってください。Bot がリンクを返すので、一度許可すれば接続完了です。",
     "load_failed": "Couldn't load bots. Refresh the page to try again.",
     "type": {
       "grok": "Grok"
@@ -2275,19 +2274,6 @@
     "stop": "Stop",
     "delete": "Delete",
     "cancel": "Cancel",
-    "expiry": {
-      "never": "Never expires",
-      "365": "1 year"
-    },
-    "add_dialog": {
-      "title": "Add bot",
-      "name": "Name",
-      "name_placeholder": "e.g. Multica Steward",
-      "type": "Type",
-      "expiry": "Key expires",
-      "submit": "Create key",
-      "submitting": "Creating…"
-    },
     "key_dialog": {
       "title": "Setup text for {{name}}",
       "description": "Copy all of it to the bot. The key is shown only once; after closing you can only issue a new one.",
@@ -2460,6 +2446,13 @@
       "ack_over_limit": "一度に確認できるのは 100 件までです。",
       "toast_acked": "{{count}} 件を確認済みにし、保留から外しました",
       "refresh": "再スキャン"
+    },
+    "connect": {
+      "title": "Bot に自分で接続させる",
+      "description": "この文をコピーして Bot に送ってください。Bot がリンクを返すので、一度「許可」すれば接続完了。キーを扱う必要はありません。",
+      "copy": "Bot 用にコピー",
+      "copied": "コピーしました。Bot に送ってください",
+      "instruction": "自分のマシンでこれを実行してください。<URL> と <KEY> は、メッセージを受け取る自分の HTTPS アドレスとそのキーに置き換えてください：{{command}}\n表示されたリンクを送ってください。私が同意すれば接続完了で、グループのメッセージと私の判断が届くようになります。"
     }
   },
   "overview": {
