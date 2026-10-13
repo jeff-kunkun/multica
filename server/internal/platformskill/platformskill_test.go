@@ -273,12 +273,12 @@ func TestPlatformSkillDescriptionNamesEveryDomain(t *testing.T) {
 	// These are task nouns, not section headings: a task arrives as "set up a
 	// project", never as "Core model".
 	triggerWords := map[string]string{
-		"references/issues.md":       "issue",
-		"references/mentions.md":     "mention",
-		"references/plans.md":        "plan",
-		"references/agents.md":       "agent",
-		"references/projects.md":     "project",
-		"references/runtimes.md":     "runtime",
+		"references/issues.md":   "issue",
+		"references/mentions.md": "mention",
+		"references/plans.md":    "plan",
+		"references/agents.md":   "agent",
+		"references/projects.md": "project",
+		"references/runtimes.md": "runtime",
 	}
 
 	skill, ok := findSkill(t, Name)

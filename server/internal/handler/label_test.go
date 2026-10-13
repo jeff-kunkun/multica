@@ -499,7 +499,7 @@ func TestLabelNameAllowsEmoji(t *testing.T) {
 
 func TestLabelResourceTypesHaveIndependentNamespaces(t *testing.T) {
 	name := "shared-scope-label-" + uuid.NewString()[:8]
-	for _, resourceType := range []string{"issue", "agent", "skill"} {
+	for _, resourceType := range []string{"issue", "agent"} {
 		w := httptest.NewRecorder()
 		req := newRequest("POST", "/api/labels", map[string]any{
 			"resource_type": resourceType,
@@ -529,7 +529,6 @@ func TestLabelResourceTypesHaveIndependentNamespaces(t *testing.T) {
 
 func TestDeleteResourceLabelCleansAssignments(t *testing.T) {
 	agentID := createHandlerTestAgent(t, "Resource Label Cleanup", nil)
-	skillID := insertHandlerTestSkill(t, "resource-label-cleanup", "# cleanup")
 
 	create := func(resourceType string) LabelResponse {
 		t.Helper()
@@ -550,21 +549,19 @@ func TestDeleteResourceLabelCleansAssignments(t *testing.T) {
 	}
 
 	agentLabel := create("agent")
-	skillLabel := create("skill")
 	for _, link := range []struct {
 		query string
 		id    string
 		label string
 	}{
 		{`INSERT INTO agent_to_label (agent_id, label_id) VALUES ($1, $2)`, agentID, agentLabel.ID},
-		{`INSERT INTO skill_to_label (skill_id, label_id) VALUES ($1, $2)`, skillID, skillLabel.ID},
 	} {
 		if _, err := testPool.Exec(context.Background(), link.query, link.id, link.label); err != nil {
 			t.Fatalf("seed resource label assignment: %v", err)
 		}
 	}
 
-	for _, labelID := range []string{agentLabel.ID, skillLabel.ID} {
+	for _, labelID := range []string{agentLabel.ID} {
 		w := httptest.NewRecorder()
 		req := withURLParam(newRequest("DELETE", "/api/labels/"+labelID, nil), "id", labelID)
 		testHandler.DeleteLabel(w, req)
@@ -578,7 +575,6 @@ func TestDeleteResourceLabelCleansAssignments(t *testing.T) {
 		id    string
 	}{
 		{`SELECT COUNT(*) FROM agent_to_label WHERE agent_id = $1`, agentID},
-		{`SELECT COUNT(*) FROM skill_to_label WHERE skill_id = $1`, skillID},
 	} {
 		var count int
 		if err := testPool.QueryRow(context.Background(), check.query, check.id).Scan(&count); err != nil {

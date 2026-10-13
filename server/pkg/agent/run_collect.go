@@ -111,10 +111,6 @@ const collectStderrTail = probeStderrSampleBytes
 //     TestCollectStdoutLimitHasHeadroomOverTheLargestAnswer asserts — the
 //     construction lives in the test so the derivation cannot drift from the
 //     value silently.
-//   - It matches what the daemon already holds for a comparable per-task payload
-//     it reads whole into memory (internal/daemon's maxLocalSkillBundleSize is the
-//     same 8 MiB), so the two limits do not have to be reasoned about separately.
-//     Named rather than imported: pkg/agent is the lower layer.
 //
 // A cap of some size is unavoidable rather than a design choice: every caller
 // parses the answer as one document, so an answer that cannot be held in memory

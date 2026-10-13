@@ -10,12 +10,11 @@ import (
 	"github.com/google/uuid"
 )
 
-// Resource-label junction tables (agent_to_label / skill_to_label) deliberately
-// carry no foreign keys, so every bulk hard-delete entry point that removes the
-// owning agents/skills must clear their label links in the same transaction.
+// The agent_to_label junction table deliberately carries no foreign keys, so
+// every bulk hard-delete entry point that removes the owning agents must clear their label links in the same transaction.
 // These tests pin that cleanup on the four batch paths that never pass through a
 // per-entity delete: runtime delete (strict + cascade), runtime-profile delete,
-// and workspace delete. Without the sweep, a labelled agent/skill leaves a
+// and workspace delete. Without the sweep, a labelled agent leaves a
 // permanent, invisible orphan row once resource labels are enabled.
 
 // insertLabelRow creates a real issue_label so the seeded junction row is valid
@@ -47,32 +46,12 @@ func seedAgentLabel(t *testing.T, ctx context.Context, workspaceID, agentID stri
 	}
 }
 
-func seedSkillLabel(t *testing.T, ctx context.Context, workspaceID, skillID string) {
-	t.Helper()
-	labelID := insertLabelRow(t, ctx, workspaceID, "skill")
-	if _, err := testPool.Exec(ctx,
-		`INSERT INTO skill_to_label (skill_id, label_id) VALUES ($1, $2)`,
-		skillID, labelID); err != nil {
-		t.Fatalf("seed skill_to_label: %v", err)
-	}
-}
-
 func countAgentLabelAssignments(t *testing.T, ctx context.Context, agentID string) int {
 	t.Helper()
 	var n int
 	if err := testPool.QueryRow(ctx,
 		`SELECT count(*) FROM agent_to_label WHERE agent_id = $1`, agentID).Scan(&n); err != nil {
 		t.Fatalf("count agent_to_label: %v", err)
-	}
-	return n
-}
-
-func countSkillLabelAssignments(t *testing.T, ctx context.Context, skillID string) int {
-	t.Helper()
-	var n int
-	if err := testPool.QueryRow(ctx,
-		`SELECT count(*) FROM skill_to_label WHERE skill_id = $1`, skillID).Scan(&n); err != nil {
-		t.Fatalf("count skill_to_label: %v", err)
 	}
 	return n
 }
@@ -200,7 +179,7 @@ func TestDeleteAgentRuntime_CleansSystemAgentLabelAssignments(t *testing.T) {
 	}
 }
 
-func seedWorkspaceResourceLabelFixture(t *testing.T, ctx context.Context, slug string) (string, string, string) {
+func seedWorkspaceResourceLabelFixture(t *testing.T, ctx context.Context, slug string) (string, string) {
 	t.Helper()
 	_, _ = testPool.Exec(ctx, `DELETE FROM workspace WHERE slug = $1`, slug)
 
@@ -245,34 +224,24 @@ func seedWorkspaceResourceLabelFixture(t *testing.T, ctx context.Context, slug s
 	`, wsID, runtimeID, testUserID).Scan(&agentID); err != nil {
 		t.Fatalf("insert agent: %v", err)
 	}
-	var skillID string
-	if err := testPool.QueryRow(ctx, `
-		INSERT INTO skill (workspace_id, name, description, content, config, created_by)
-		VALUES ($1, 'ws-label-skill', 'fixture', '# x', '{}'::jsonb, $2)
-		RETURNING id
-	`, wsID, testUserID).Scan(&skillID); err != nil {
-		t.Fatalf("insert skill: %v", err)
-	}
 	seedAgentLabel(t, ctx, wsID, agentID)
-	seedSkillLabel(t, ctx, wsID, skillID)
 	t.Cleanup(func() {
 		_, _ = testPool.Exec(context.Background(), `DELETE FROM agent_to_label WHERE agent_id = $1`, agentID)
-		_, _ = testPool.Exec(context.Background(), `DELETE FROM skill_to_label WHERE skill_id = $1`, skillID)
 		_, _ = testPool.Exec(context.Background(), `DELETE FROM workspace WHERE id = $1`, wsID)
 	})
 
-	return wsID, agentID, skillID
+	return wsID, agentID
 }
 
 // TestDeleteWorkspace_CleansResourceLabelAssignments: workspace delete cascades
-// away the agents and skills, but the junction tables have no workspace_id and
+// away the agents, but the junction table has no workspace_id and
 // no foreign key, so both must be swept before the cascade or they orphan.
 func TestDeleteWorkspace_CleansResourceLabelAssignments(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
 	}
 	ctx := context.Background()
-	wsID, agentID, skillID := seedWorkspaceResourceLabelFixture(t, ctx, "handler-tests-delete-labels")
+	wsID, agentID := seedWorkspaceResourceLabelFixture(t, ctx, "handler-tests-delete-labels")
 
 	w := httptest.NewRecorder()
 	req := newRequest("DELETE", "/api/workspaces/"+wsID, nil)
@@ -285,14 +254,11 @@ func TestDeleteWorkspace_CleansResourceLabelAssignments(t *testing.T) {
 	if n := countAgentLabelAssignments(t, ctx, agentID); n != 0 {
 		t.Fatalf("agent_to_label rows survived workspace delete: %d", n)
 	}
-	if n := countSkillLabelAssignments(t, ctx, skillID); n != 0 {
-		t.Fatalf("skill_to_label rows survived workspace delete: %d", n)
-	}
 }
 
 // TestDeleteWorkspace_RollsBackResourceLabelCleanup verifies the resource-label
 // sweep and the later administration cleanup share one transaction. Locking the
-// workspace's member row makes that late step time out; both junction rows must
+// workspace's member row makes that late step time out; the junction row must
 // be restored when the transaction rolls back.
 func TestDeleteWorkspace_RollsBackResourceLabelCleanup(t *testing.T) {
 	if testHandler == nil {
@@ -306,7 +272,7 @@ func TestDeleteWorkspace_RollsBackResourceLabelCleanup(t *testing.T) {
 	// The teardown transaction sets its own lock_timeout (MUL-5983); shorten
 	// it so the blocked administration step fails while the test is young.
 	setWorkspaceDeleteLockTimeoutForTest(t, 50*time.Millisecond)
-	wsID, agentID, skillID := seedWorkspaceResourceLabelFixture(t, ctx, "handler-tests-delete-labels-rollback")
+	wsID, agentID := seedWorkspaceResourceLabelFixture(t, ctx, "handler-tests-delete-labels-rollback")
 
 	blocker, err := testPool.Begin(ctx)
 	if err != nil {
@@ -341,8 +307,5 @@ func TestDeleteWorkspace_RollsBackResourceLabelCleanup(t *testing.T) {
 	}
 	if n := countAgentLabelAssignments(t, ctx, agentID); n != 1 {
 		t.Fatalf("agent_to_label rows after failed workspace delete = %d, want 1", n)
-	}
-	if n := countSkillLabelAssignments(t, ctx, skillID); n != 1 {
-		t.Fatalf("skill_to_label rows after failed workspace delete = %d, want 1", n)
 	}
 }
