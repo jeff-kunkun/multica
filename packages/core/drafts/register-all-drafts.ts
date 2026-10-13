@@ -15,7 +15,6 @@
  * lifecycle. There is nothing to import here that would register them earlier.
  */
 import "../issues/stores/draft-store";
-import "../issues/stores/quick-create-store";
 import "../issues/stores/comment-draft-store";
 import "../projects/draft-store";
 import "../feedback/draft-store";
@@ -27,6 +26,15 @@ import { registerDraftCleanup } from "./cleanup-registry";
 // outlives logout or workspace removal.
 registerDraftCleanup({
   storageKey: "multica_task_supplement_drafts",
+  workspaceScoped: true,
+  resetInMemory: () => {},
+});
+
+// Retired with agent-written issue creation: the last-picked agent and the
+// keep-open toggle. Keep clearing the old persisted key so it never outlives
+// logout or workspace removal.
+registerDraftCleanup({
+  storageKey: "multica_quick_create",
   workspaceScoped: true,
   resetInMemory: () => {},
 });

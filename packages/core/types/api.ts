@@ -26,29 +26,11 @@ export interface CreateIssueRequest {
   properties?: IssuePropertyValues;
 }
 
-export interface CreateCommentSubIssueManualRequest {
+export interface CreateCommentSubIssueRequest {
   mode: "manual";
   capture_token: string;
   issue: CreateIssueRequest;
 }
-
-export interface CreateCommentSubIssueAgentRequest {
-  mode: "agent";
-  capture_token: string;
-  quick_create: {
-    agent_id?: string;
-    squad_id?: string;
-    prompt: string;
-    priority?: IssuePriority;
-    due_date?: string;
-    project_id?: string | null;
-    attachment_ids?: string[];
-  };
-}
-
-export type CreateCommentSubIssueRequest =
-  | CreateCommentSubIssueManualRequest
-  | CreateCommentSubIssueAgentRequest;
 
 export interface UpdateIssueRequest {
   /** Legacy aggregate compare-and-swap token. New text editors use field
@@ -77,19 +59,6 @@ export interface UpdateIssueRequest {
    *  MUL-3375). The assignee/status change still applies. Control field —
    *  strip from optimistic cache patches; never written onto the Issue. */
   suppress_run?: boolean;
-  /** Marks this issue as a duplicate of another issue (MUL-7349). The server
-   *  also sets status to cancelled; any later status change away from
-   *  cancelled removes the mark. Write-only — read it back through
-   *  `listIssueDuplicates`. Control field: strip from optimistic patches. */
-  duplicate_of_issue_id?: string;
-}
-
-/** Both sides of an issue's duplicate relation (MUL-7349). */
-export interface IssueDuplicates {
-  /** The original this issue duplicates, when it is marked as a duplicate. */
-  duplicate_of: Issue | null;
-  /** Issues marked as duplicates of this one. */
-  duplicates: Issue[];
 }
 
 /**
@@ -121,7 +90,7 @@ export interface IssueTriggerPreviewParams {
 }
 
 /** One issue that WILL start a run under the prospective write. `agent_id` is
- *  the runnable agent (squad leader for squads). */
+ *  the runnable agent. */
 export interface IssueTriggerPreviewItem {
   issue_id: string;
   agent_id: string;
@@ -157,8 +126,7 @@ export interface ListIssuesParams {
   assignee_id?: string;
   assignee_ids?: string[];
   /**
-   * Narrow to issues assigned to the given actor kinds (member / agent /
-   * squad). Same semantics as `ListGroupedIssuesParams.assignee_types` —
+   * Narrow to issues assigned to the given actor kinds (member / agent). Same semantics as `ListGroupedIssuesParams.assignee_types` —
    * powers the workspace Members/Agents tabs server-side.
    */
   assignee_types?: IssueAssigneeType[];
@@ -182,10 +150,8 @@ export interface ListIssuesParams {
   ids?: string[];
   /**
    * Widen the assignee filter to issues where the user is the *indirect*
-   * assignee — assignee is one of the user's owned agents, or a squad that
-   * involves the user (human member / leader-via-owned-agent / agent member
-   * owned by the user). Direct member assignment is intentionally excluded:
-   * `involves_user_id` and `assignee_id=<user>` (tab "Assigned to me") produce
+   * assignee — assignee is one of the user's owned agents. Direct member
+   * assignment is intentionally excluded: `involves_user_id` and `assignee_id=<user>` (tab "Assigned to me") produce
    * disjoint result sets by construction.
    */
   involves_user_id?: string;

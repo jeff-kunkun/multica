@@ -307,10 +307,6 @@ func (h *Handler) finalizeClaimDeliveryForTestWithRuntime(
 	if terr != nil {
 		return resp, deliveredCommentIDs, agentSkillCount, builtinSkillCount, nil, fmt.Errorf("generate token: %w", terr)
 	}
-	remoteMCPToken, daemonTokens, derr := remoteMCPDaemonTokenForClaim(resp, runtime)
-	if derr != nil {
-		return resp, deliveredCommentIDs, agentSkillCount, builtinSkillCount, nil, fmt.Errorf("remote mcp token: %w", derr)
-	}
 	commentBackedTask := task.TriggerCommentID.Valid || len(task.CoalescedCommentIds) > 0
 	receipt, deliveryFailure, ferr := h.finalizeClaimDelivery(r.Context(), task, runtime, runtimeID, runtimeWorkspaceID, &resp, db.CreateTaskTokenParams{
 		ID:          dbid.NewV7(),
@@ -320,7 +316,7 @@ func (h *Handler) finalizeClaimDeliveryForTestWithRuntime(
 		WorkspaceID: parseUUID(resp.WorkspaceID),
 		UserID:      runtime.OwnerID,
 		ExpiresAt:   pgtype.Timestamptz{Time: time.Now().Add(24 * time.Hour), Valid: true},
-	}, deliveredCommentIDs, commentBackedTask, nil, daemonTokens...)
+	}, deliveredCommentIDs, commentBackedTask, nil)
 	if ferr != nil {
 		return resp, deliveredCommentIDs, agentSkillCount, builtinSkillCount, nil, ferr
 	}
@@ -328,7 +324,6 @@ func (h *Handler) finalizeClaimDeliveryForTestWithRuntime(
 		return AgentTaskResponse{}, deliveredCommentIDs, agentSkillCount, builtinSkillCount, deliveryFailure, nil
 	}
 	resp.AuthToken = tokenStr
-	resp.RemoteMCPDaemonToken = remoteMCPToken
 	resp.DeliveredCommentIDs = uuidStringsOrEmpty(receipt)
 	return resp, deliveredCommentIDs, agentSkillCount, builtinSkillCount, nil, nil
 }
@@ -382,8 +377,8 @@ func TestClaimTaskByRuntime_RuntimeOwnerChangedAfterClaimNeverDelivered(t *testi
 	if len(deliveredCommentIDs) != 0 {
 		t.Fatalf("delivered comment ids = %v, want none", deliveredCommentIDs)
 	}
-	if resp.AuthToken != "" || resp.RemoteMCPDaemonToken != "" {
-		t.Fatalf("resp carries credentials %+v/%+v, want none — nothing may be delivered", resp.AuthToken, resp.RemoteMCPDaemonToken)
+	if resp.AuthToken != "" {
+		t.Fatalf("resp carries credential %q, want none — nothing may be delivered", resp.AuthToken)
 	}
 
 	// No task token was minted and the task settled terminal.
@@ -527,8 +522,8 @@ func TestFinalizeClaimDelivery_CurrentRuntimeOwnerMissingNeverMintsToken(t *test
 	if failure == nil || !failure.settled {
 		t.Fatalf("delivery failure = %+v, want settled ownerless-runtime failure", failure)
 	}
-	if resp.AuthToken != "" || resp.RemoteMCPDaemonToken != "" {
-		t.Fatalf("ownerless delivery returned credentials %q/%q", resp.AuthToken, resp.RemoteMCPDaemonToken)
+	if resp.AuthToken != "" {
+		t.Fatalf("ownerless delivery returned credential %q", resp.AuthToken)
 	}
 	var tokenCount int
 	dbfx.QueryRow(t, `SELECT count(*) FROM task_token WHERE task_id = $1`, taskID).Scan(&tokenCount)

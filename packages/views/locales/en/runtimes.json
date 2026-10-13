@@ -27,14 +27,6 @@
       "hint": "Connecting to the workspace..."
     }
   },
-  "mika_setup": {
-    "title": "Your runtime is ready. Start with Mika.",
-    "description": "Let Mika organize work and coordinate agents.",
-    "action": "Start with Mika",
-    "failed": "Couldn't start Mika",
-    "dialog_title": "Where should Mika run?",
-    "cancel": "Cancel"
-  },
   "machine": {
     "search_placeholder": "Search machines…",
     "filters": {
@@ -221,45 +213,6 @@
     "success_description": "Computer connected. You can now create an agent.",
     "view_runtime": "View runtime",
     "create_agent": "Create an agent"
-  },
-  "cloud_runtime": {
-    "action": "Cloud Runtime",
-    "title": "Cloud Runtime",
-    "description": "Create a cloud runtime.",
-    "create_title": "New node",
-    "nodes_title": "Fleet nodes",
-    "refresh": "Refresh",
-    "nodes_empty": "No cloud nodes",
-    "nodes_failed": "Cloud Runtime unavailable",
-    "nodes_failed_hint": "Couldn't load cloud nodes. Try again.",
-    "node_fallback_name": "Cloud node",
-    "create": "Create node",
-    "creating": "Creating...",
-    "cancel": "Cancel",
-    "toast_created": "Cloud Runtime node created",
-    "toast_create_failed": "Failed to create Cloud Runtime node",
-    "delete": "Delete node",
-    "delete_confirm": "Are you sure you want to delete this cloud node? This action cannot be undone.",
-    "toast_deleted": "Cloud node deleted",
-    "toast_delete_failed": "Failed to delete cloud node",
-    "fields": {
-      "name": "Name",
-      "instance_type": "Instance type",
-      "region": "Region",
-      "disk_size": "Disk size GiB",
-      "image_id": "AMI ID",
-      "subnet_id": "Subnet ID",
-      "key_name": "Key pair",
-      "bootstrap_pat": "Bootstrap PAT"
-    },
-    "placeholders": {
-      "name": "cloud-dev-01",
-      "key_name": "dev-key"
-    },
-    "validation": {
-      "instance_type_required": "Instance type is required",
-      "disk_size_invalid": "Disk size must be a positive integer"
-    }
   },
   "update": {
     "cli_version_label": "CLI Version:",

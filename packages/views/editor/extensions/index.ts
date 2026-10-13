@@ -45,7 +45,6 @@ import {
 } from "./issue-identifier-autolink";
 import { SlashCommandExtension } from "./slash-command-extension";
 import { createSlashCommandSuggestion, createBuiltinCommandSuggestion } from "./slash-command-suggestion";
-import type { BuiltinCommandSuggestionOptions } from "./slash-command-suggestion";
 import { SuggestionTriggerArmingExtension } from "./suggestion-trigger-arming";
 import { CodeBlockView } from "./code-block-view";
 import { PatchedListItem, PatchedTaskItem } from "./list-item";
@@ -175,13 +174,6 @@ export interface EditorExtensionsOptions {
    */
   slashCommandMode?: "skill" | "command";
   /**
-   * Quick actions offered in the "command" `/` menu, plus the resolver that
-   * turns a pick into the text it would post (MUL-5465). Both are functions so
-   * the editor is created once while still reading live data; the setup layer
-   * owns React Query access. Omit on composers with no issue context.
-   */
-  quickActionMenu?: BuiltinCommandSuggestionOptions;
-  /**
    * Resolver for Linear-style bare issue-identifier autolinking. When present
    * (and mentions are enabled), typing a boundary after `MUL-123` or pasting
    * text with identifiers resolves them and swaps in real issue mentions. A
@@ -283,7 +275,7 @@ export function createEditorExtensions(
       suggestion: !options.enableSlashCommands
         ? { char: "/", allow: () => false }
         : options.slashCommandMode === "command"
-          ? createBuiltinCommandSuggestion(options.quickActionMenu)
+          ? createBuiltinCommandSuggestion()
           : options.queryClient
             ? createSlashCommandSuggestion(options.queryClient)
             : { char: "/", allow: () => false },

@@ -175,9 +175,9 @@ type JobSpec struct {
 	// by the hook (the manager truncates anything beyond it).
 	//
 	// Designed for jobs whose plan_times do not form a uniform Cadence
-	// grid — e.g. Autopilot schedule triggers driven by arbitrary cron
-	// expressions, where each trigger is its own scope and the
-	// occurrence times are computed per-trigger from cron + timezone.
+	// grid — e.g. per-scope triggers driven by arbitrary cron
+	// expressions, where the occurrence times are computed per scope
+	// from cron + timezone.
 	//
 	// The hook is invoked once per (job, scope) per tick. Plan_times
 	// returned by the hook are passed unchanged to tryClaim, so the

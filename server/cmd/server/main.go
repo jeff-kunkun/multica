@@ -141,8 +141,8 @@ func envNonNegativeInt(name string, def int) int {
 // maxLLMRetriesLimit caps MULTICA_LLM_MAX_RETRIES. The ceiling is a latency
 // budget, not a taste call: SDK backoff is 0.5s doubling to an 8s cap, so 6
 // retries spend ~21s and 10 spend ~48s sleeping before the last attempt. Every
-// internal caller of pkg/llm runs under a far tighter deadline (8s for chat
-// quick actions, 20s for title generation), so a budget past 5 cannot finish —
+// internal caller of pkg/llm runs under a far tighter deadline (20s for chat
+// title generation), so a budget past 5 cannot finish —
 // it only converts a retryable upstream failure into a deadline-exceeded one.
 const maxLLMRetriesLimit = 5
 
@@ -269,10 +269,6 @@ func envBool(name string, def bool) bool {
 		return def
 	}
 	return v
-}
-
-func backgroundServices(h *handler.Handler) (*service.TaskService, *service.AutopilotService) {
-	return h.TaskService, h.AutopilotService
 }
 
 // jwtSecretBootError returns a non-nil error when the combination of
@@ -632,15 +628,10 @@ func main() {
 
 	// Start background workers.
 	sweepCtx, sweepCancel := context.WithCancel(context.Background())
-	autopilotCtx, autopilotCancel := context.WithCancel(context.Background())
 	telemetryWorker := selfhosttelemetry.New(pool, version, telemetryConfig, slog.Default())
-	// Reuse the router's services here. In particular, the router wires the
-	// EmptyClaim cache into TaskService; constructing a second TaskService for
-	// scheduled Autopilot dispatch would send the daemon wakeup without bumping
-	// that cache's version, so an idle runtime could keep returning an empty
-	// claim until the cache TTL expires.
-	taskSvc, autopilotSvc := backgroundServices(h)
-	registerAutopilotListeners(bus, autopilotSvc)
+	// Reuse the router's TaskService: it carries the EmptyClaim cache wiring,
+	// so background work wakes daemons and bumps that cache together.
+	taskSvc := h.TaskService
 
 	// Construct a LivenessStore that mirrors the one wired into the HTTP
 	// handler. Both the heartbeat write path (handler) and the sweeper read
@@ -690,20 +681,10 @@ func main() {
 	// instead of a slot in the runtime sweep tick.
 	go runSourceContextSweeper(sweepCtx, taskSvc)
 	go heartbeatScheduler.Run(sweepCtx)
-	go runAutopilotFailureMonitor(autopilotCtx, queries, bus, envFailureMonitorConfig())
-	if autopilotSvc.QuotaEnabled() {
-		go runAutopilotQuotaReconciler(autopilotCtx, autopilotSvc)
-	}
 	go runDBStatsLogger(sweepCtx, "primary", pool)
 	go botevents.NewDeliverer(queries).Run(sweepCtx)
 	if replicaPool != nil {
 		go runDBStatsLogger(sweepCtx, "replica", replicaPool)
-	}
-	if h.WebhookDeliveryWorker != nil {
-		go h.WebhookDeliveryWorker.Run(sweepCtx)
-	}
-	if h.SeatCapacityWorker != nil {
-		go h.SeatCapacityWorker.Run(sweepCtx)
 	}
 	// GitHub PR-card API snapshot pipeline (MUL-5265): worker pool + TTL sweeper.
 	// No-op when unconfigured (no App private key).
@@ -727,28 +708,8 @@ func main() {
 	if err := schedulerMgr.Register(scheduler.TaskUsageHourlyJob(pool)); err != nil {
 		slog.Warn("scheduler: failed to register task_usage_hourly rollup job", "error", err)
 	}
-	// MUL-3551: scheduled-Autopilot dispatch runs on the same DB-backed
-	// scheduler. The job owns its plan_times via PlansForScope (each
-	// trigger has its own cron expression, so the Cadence planner does
-	// not fit). Crash recovery, occurrence-level idempotency, lease
-	// theft, and retry are all reused from the manager + sys_cron_executions
-	// — there is no separate goroutine for scheduled Autopilot anymore.
 	if err := schedulerMgr.Register(scheduler.SearchIndexChangePruneJob(queries)); err != nil {
 		slog.Warn("scheduler: failed to register search index change prune job", "error", err)
-	}
-	if err := schedulerMgr.Register(scheduler.IssueWakeupJob(&service.IssueWakeupService{Tasks: taskSvc})); err != nil {
-		slog.Error("scheduler: register issue wakeups", "error", err)
-	}
-	if err := schedulerMgr.Register(scheduler.ChildEventSweepJob(&service.IssueWakeupService{Tasks: taskSvc})); err != nil {
-		slog.Error("scheduler: register child-done sweep", "error", err)
-	}
-	if err := schedulerMgr.Register(scheduler.AutopilotScheduleDispatchJob(pool, queries, autopilotSvc)); err != nil {
-		slog.Warn("scheduler: failed to register autopilot_schedule_dispatch job", "error", err)
-	}
-	// Manifest-declared Plugin schedules share the same durable lease and retry
-	// machinery. The job is inert while plugins_v1 is disabled.
-	if err := schedulerMgr.Register(scheduler.PluginHookScheduleDispatchJob(queries, h.PluginService)); err != nil {
-		slog.Warn("scheduler: failed to register plugin_hook_schedule_dispatch job", "error", err)
 	}
 	go func() {
 		_ = schedulerMgr.Run(sweepCtx)
@@ -799,7 +760,6 @@ func main() {
 
 	// The order below is the contract; shutdown.go states and pins it.
 	shutdownSequence{
-		StopAutopilot: autopilotCancel,
 		DrainMaintenance: func() {
 			if maintenanceServer == nil {
 				return
@@ -823,11 +783,6 @@ func main() {
 		StopRelay:      stopRelay,
 		CancelWorkers:  sweepCancel,
 		StopHeartbeats: heartbeatScheduler.Stop,
-		JoinWebhookWorker: func() {
-			if h.WebhookDeliveryWorker != nil && !h.WebhookDeliveryWorker.WaitWithTimeout(5*time.Second) {
-				slog.Warn("webhook delivery worker did not exit within shutdown timeout")
-			}
-		},
 		StopMetricsServer: func() {
 			if metricsServer == nil {
 				return

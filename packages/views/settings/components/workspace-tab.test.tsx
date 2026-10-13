@@ -37,7 +37,6 @@ vi.mock("@tanstack/react-query", () => ({
 
 vi.mock("@multica/core/paths", () => ({
   useCurrentWorkspace: () => workspaceRef.current,
-  useHasOnboarded: () => true,
   resolvePostAuthDestination: () => "/",
 }));
 

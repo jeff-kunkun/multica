@@ -171,8 +171,8 @@ type DeletePrivateIssueViewsByOwnerParams struct {
 }
 
 // Member removal: a departed member's private views are unreachable by every
-// remaining member while still consuming their quota — same rule as private
-// quick actions. Shared views are workspace furniture and survive. Pins on
+// remaining member while still consuming their quota. Shared views are
+// workspace furniture and survive. Pins on
 // the deleted views fall in the same statement (see DeleteIssueView).
 func (q *Queries) DeletePrivateIssueViewsByOwner(ctx context.Context, arg DeletePrivateIssueViewsByOwnerParams) error {
 	_, err := q.db.Exec(ctx, deletePrivateIssueViewsByOwner, arg.WorkspaceID, arg.OwnerID)

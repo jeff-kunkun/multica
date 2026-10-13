@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"testing"
-	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -43,18 +42,6 @@ func TestLockAndFindActiveDuplicatePropagatesStatusCatalogFailure(t *testing.T) 
 	)
 	if !errors.Is(err, catalogErr) || found {
 		t.Fatalf("LockAndFindActiveDuplicate = found %v, err %v; want false, catalog error", found, err)
-	}
-}
-
-func TestLockAndFindRecentAutopilotDuplicatePropagatesStatusCatalogFailure(t *testing.T) {
-	catalogErr := errors.New("status catalog unavailable")
-	q := db.New(catalogFailureDB{err: catalogErr})
-
-	_, found, err := LockAndFindRecentAutopilotDuplicate(
-		context.Background(), q, testUUID(1), testUUID(2), pgtype.UUID{}, "duplicate title", time.Hour,
-	)
-	if !errors.Is(err, catalogErr) || found {
-		t.Fatalf("LockAndFindRecentAutopilotDuplicate = found %v, err %v; want false, catalog error", found, err)
 	}
 }
 

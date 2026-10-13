@@ -672,16 +672,6 @@ Built-in statuses: `backlog`, `todo`, `in_progress`, `in_review`, `done`, `block
 shown in **Settings → Issue Statuses**, and passing an unknown value returns the full
 list.
 
-To cancel an issue because it duplicates another, mark it so the original lists it:
-
-```bash
-multica issue status <id> cancelled --duplicate-of <original>
-```
-
-`--duplicate-of` takes an issue key or full UUID and requires status `cancelled`.
-`issue update <id> --duplicate-of <original>` does the same, but cannot be combined with
-description or attachment changes. Moving the issue to any other status removes the mark.
-
 ### Comments
 
 ```bash
@@ -948,98 +938,6 @@ multica config set workspace_id <workspace-id>
 ```
 
 `config set workspace_id <id>` is the low-level interface — it writes the value verbatim without checking that the workspace exists or that you have access. Prefer `multica workspace switch <id|slug>` for day-to-day workspace changes; it does both checks before saving.
-
-## Autopilot Commands
-
-Autopilots are scheduled/triggered automations that dispatch agent tasks (either by creating an issue or by running an agent directly).
-
-### List Autopilots
-
-```bash
-multica autopilot list
-multica autopilot list --full-id
-multica autopilot list --status active --output json
-```
-
-Autopilot table IDs are short UUID prefixes; follow-up autopilot commands accept copied prefixes when they are unique in the current workspace. Use `--full-id` to print canonical UUIDs.
-
-### Get Autopilot Details
-
-```bash
-multica autopilot get <id>
-multica autopilot get <id> --output json   # includes triggers
-```
-
-In JSON output `triggers` is a **top-level key alongside `autopilot`**, not nested
-inside it — the payload is `{"autopilot": {...}, "triggers": [...], "collaborators": [...]}`.
-Read trigger ids with `jq '.triggers[].id'`, or use `autopilot trigger-list` below.
-The table output shows only the autopilot's own fields, not its triggers.
-
-### Create / Update / Delete
-
-```bash
-multica autopilot create \
-  --title "Nightly bug triage" \
-  --description "Scan todo issues and prioritize." \
-  --agent "Lambda" \
-  --mode create_issue \
-  --subscriber "Alice"
-
-multica autopilot update <id> --status paused
-multica autopilot update <id> --description "New prompt"
-multica autopilot update <id> --subscriber "Alice" --subscriber "Bob"
-multica autopilot update <id> --clear-subscribers
-multica autopilot delete <id>
-```
-
-`--mode` accepts `create_issue` (creates a new issue on each run and assigns it to the agent) or `run_only` (enqueues a direct agent task without creating an issue). `--agent` accepts either a name or UUID.
-`--subscriber` accepts a workspace member name or user ID and may be repeated; on update it replaces the autopilot's subscriber template. Subscribers receive inbox notifications for issues created by a `create_issue` autopilot. Use `--clear-subscribers` to remove all autopilot subscribers.
-
-### Manual Trigger
-
-```bash
-multica autopilot trigger <id>            # Fires the autopilot once, returns the run
-```
-
-The command exits non-zero unless the run actually started (`issue_created` or
-`running`). A `skipped` run — admission refused, runtime offline, quota
-exhausted, a duplicate already in flight — dispatched nothing; its
-`failure_reason` and `reason_code` are printed to stderr, and `--output json`
-still writes the full run to stdout first.
-
-Run as an agent (inside a task, or over A2A), the trigger is authorized as the
-human that run acts for, not as the owner of the machine it executes on. That
-human needs exactly the write access they would need to trigger it themselves —
-and it is the only access checked: the machine's owner needs no grant on the
-autopilot, only workspace membership. A run carrying no originator cannot
-trigger at all, and says so rather than failing generically.
-
-### Run History
-
-```bash
-multica autopilot runs <id>
-multica autopilot runs <id> --limit 50 --output json
-```
-
-### Schedule Triggers
-
-```bash
-multica autopilot trigger-list <autopilot-id>              # ids, kind, schedule, next run
-multica autopilot trigger-list <autopilot-id> --full-id    # canonical UUIDs
-multica autopilot trigger-add <autopilot-id> --cron "0 9 * * 1-5" --timezone "America/New_York"
-multica autopilot trigger-update <autopilot-id> <trigger-id> --enabled=false
-multica autopilot trigger-delete <autopilot-id> <trigger-id>
-```
-
-`trigger-list` is the way to obtain the `<trigger-id>` that `trigger-update`,
-`trigger-delete` and `trigger-rotate-url` require. Like autopilot ids, trigger ids
-may be passed as a short prefix as long as it is unique within that autopilot; use
-`--full-id` to print canonical UUIDs. Webhook credentials are redacted in this
-output — use `autopilot get <id> --output json --show-secrets` to reveal them.
-
-The CLI exposes cron-based `schedule` triggers via `trigger-add`, and `webhook`
-triggers via `trigger-add --kind webhook` plus `trigger-rotate-url`. The data model
-also defines an `api` kind, which is not surfaced here.
 
 ## Other Commands
 

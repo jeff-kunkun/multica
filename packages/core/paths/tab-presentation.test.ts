@@ -66,17 +66,9 @@ describe("resolveTabPresentation — direct resources", () => {
       visual: { kind: "actor", actorType: "member", id: "m1" },
       title: { kind: "text", text: "Ada" },
     });
-    expect(present("/acme/squads/sq1")).toEqual({
-      visual: { kind: "actor", actorType: "squad", id: "sq1" },
-      title: { kind: "tab", tabKey: "squad" },
-    });
   });
 
-  it("autopilot / skill / machine / runtime use a type icon + name", () => {
-    expect(present("/acme/autopilots/a1", { autopilot: { title: "Nightly" } })).toEqual({
-      visual: { kind: "icon", icon: "Zap" },
-      title: { kind: "text", text: "Nightly" },
-    });
+  it("skill / machine / runtime use a type icon + name", () => {
     expect(present("/acme/skills/s1", { skill: { name: "Deploy" } })).toEqual({
       visual: { kind: "icon", icon: "BookOpenText" },
       title: { kind: "text", text: "Deploy" },
@@ -157,11 +149,11 @@ describe("resolveTabPresentation — containers keep their icon, title tracks se
     // Selected non-issue notification → its display title.
     expect(
       present("/acme/inbox?issue=n1", {
-        inboxSelection: { kind: "item", title: "Quick create failed" },
+        inboxSelection: { kind: "item", title: "Agent blocked" },
       }),
     ).toEqual({
       visual: { kind: "icon", icon: "Inbox" },
-      title: { kind: "text", text: "Quick create failed" },
+      title: { kind: "text", text: "Agent blocked" },
     });
   });
 

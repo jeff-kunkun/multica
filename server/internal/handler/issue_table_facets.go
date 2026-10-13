@@ -213,7 +213,7 @@ func (h *Handler) issueTableFacetQuery(w http.ResponseWriter, r *http.Request, r
 		}
 		// One row per agent currently running issue work inside THIS surface,
 		// with its running-task count. Same predicate as
-		// ListWorkspaceWorkingAgents with type=issue (chat > autopilot > issue
+		// ListWorkspaceWorkingAgents with type=issue (chat > issue
 		// precedence, user-authored non-archived agents only), but the issue set
 		// comes from the surface's own compiled scope + filters instead of a
 		// second, independent workspace-wide definition. That is what keeps the

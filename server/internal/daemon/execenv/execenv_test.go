@@ -1432,26 +1432,9 @@ func TestInjectRuntimeConfigAvailableCommandsCoreOnly(t *testing.T) {
 		}
 	}
 
-	// Squad maintenance is squad-leader surface and is gated on that (MUL-5442):
-	// an agent leading no squad has no squad whose roles it could change.
+	// Squads are gone; no brief may carry the squad maintenance block.
 	if strings.Contains(s, "### Squad maintenance") {
-		t.Errorf("non-leader brief must not carry the squad maintenance block\n---\n%s", s)
-	}
-	leaderDir := t.TempDir()
-	if _, err := InjectRuntimeConfig(leaderDir, "codex", TaskContextForEnv{IssueID: "issue-1", IsSquadLeader: true}); err != nil {
-		t.Fatalf("InjectRuntimeConfig failed: %v", err)
-	}
-	leader, err := os.ReadFile(filepath.Join(leaderDir, "AGENTS.md"))
-	if err != nil {
-		t.Fatalf("failed to read leader AGENTS.md: %v", err)
-	}
-	for _, want := range []string{
-		"### Squad maintenance",
-		"multica squad member set-role <squad-id>",
-	} {
-		if !strings.Contains(string(leader), want) {
-			t.Errorf("squad-leader AGENTS.md missing %q\n---\n%s", want, leader)
-		}
+		t.Errorf("brief must not carry the squad maintenance block\n---\n%s", s)
 	}
 
 	for _, banned := range []string{
@@ -2515,91 +2498,6 @@ func TestInjectRuntimeConfigCodexWindowsUsesContentFile(t *testing.T) {
 	} {
 		if strings.Contains(s, banned) {
 			t.Errorf("AGENTS.md still carries Codex stdin mandate %q on Windows\n---\n%s", banned, s)
-		}
-	}
-}
-
-func TestInjectRuntimeConfigQuickCreateOutputPrefixAgnostic(t *testing.T) {
-	t.Parallel()
-	dir := t.TempDir()
-
-	ctx := TaskContextForEnv{QuickCreatePrompt: "create a task"}
-	if _, err := InjectRuntimeConfig(dir, "codex", ctx); err != nil {
-		t.Fatalf("InjectRuntimeConfig failed: %v", err)
-	}
-	data, err := os.ReadFile(filepath.Join(dir, "AGENTS.md"))
-	if err != nil {
-		t.Fatalf("read AGENTS.md: %v", err)
-	}
-	s := string(data)
-
-	for _, want := range []string{
-		"quick-create task",
-		"Created <identifier-or-id>: <title>",
-		// Rules moved into the Workflow section (MUL-6984); the identifier
-		// must still come from the JSON, not from scraped human output.
-		"`identifier` (preferred) or `id` (fallback) from the JSON response",
-		"never assume a workspace issue prefix",
-	} {
-		if !strings.Contains(s, want) {
-			t.Errorf("quick-create runtime config missing %q\n---\n%s", want, s)
-		}
-	}
-	for _, absent := range []string{
-		"Created MUL-<n>",
-	} {
-		if strings.Contains(s, absent) {
-			t.Errorf("quick-create runtime config should not contain %q\n---\n%s", absent, s)
-		}
-	}
-}
-
-func TestInjectRuntimeConfigAutopilotRunOnlyNoIssueWorkflow(t *testing.T) {
-	t.Parallel()
-	dir := t.TempDir()
-
-	ctx := TaskContextForEnv{
-		AutopilotRunID:       "run-1",
-		AutopilotID:          "autopilot-1",
-		AutopilotTitle:       "Daily dependency check",
-		AutopilotDescription: "Check dependencies and report outdated packages.",
-		AutopilotSource:      "manual",
-	}
-
-	if _, err := InjectRuntimeConfig(dir, "codex", ctx); err != nil {
-		t.Fatalf("InjectRuntimeConfig failed: %v", err)
-	}
-	data, err := os.ReadFile(filepath.Join(dir, "AGENTS.md"))
-	if err != nil {
-		t.Fatalf("read AGENTS.md: %v", err)
-	}
-	s := string(data)
-
-	for _, want := range []string{
-		"Autopilot in run-only mode",
-		AutopilotIssueCommandsGuard,
-		"Your final assistant output is captured automatically as the autopilot run result",
-	} {
-		if !strings.Contains(s, want) {
-			t.Errorf("autopilot runtime config missing %q\n---\n%s", want, s)
-		}
-	}
-
-	for _, absent := range []string{
-		"Run `multica issue get",
-		"Final results MUST be delivered via `multica issue comment add`",
-		// Per-run VALUES belong to the per-turn message, which renders them
-		// once (daemon.buildAutopilotPrompt). This file is the prompt-cache
-		// prefix, and its own contract is that no per-run identifier reaches
-		// it (MUL-5377); a second copy of the data here also gave MUL-5696's
-		// drift somewhere to happen (MUL-6984).
-		"run-1",
-		"autopilot-1",
-		"Daily dependency check",
-		"Check dependencies and report outdated packages.",
-	} {
-		if strings.Contains(s, absent) {
-			t.Errorf("autopilot runtime config should not contain %q\n---\n%s", absent, s)
 		}
 	}
 }
@@ -5306,8 +5204,8 @@ func TestReadGCMeta_LegacyFileDefaultsToIssueKind(t *testing.T) {
 	}
 }
 
-// New v2 meta files for chat / autopilot / quick-create round-trip without
-// being misclassified as the issue kind.
+// New v2 meta files for chat round-trip without being misclassified as the
+// issue kind.
 func TestWriteReadGCMeta_KindRoundTrip(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
@@ -5316,8 +5214,6 @@ func TestWriteReadGCMeta_KindRoundTrip(t *testing.T) {
 		want GCMetaKind
 	}{
 		{"chat", GCMeta{Kind: GCKindChat, ChatSessionID: "cs-1", WorkspaceID: "ws"}, GCKindChat},
-		{"autopilot_run", GCMeta{Kind: GCKindAutopilotRun, AutopilotRunID: "ar-1", WorkspaceID: "ws"}, GCKindAutopilotRun},
-		{"quick_create", GCMeta{Kind: GCKindQuickCreate, TaskID: "t-1", WorkspaceID: "ws"}, GCKindQuickCreate},
 	}
 	for _, tc := range cases {
 		tc := tc
@@ -5474,79 +5370,6 @@ func TestInjectRuntimeConfigMentionLoopHardening(t *testing.T) {
 			}
 		}
 	})
-}
-
-// TestInjectRuntimeConfigSquadLeaderCommentTriggeredNoAction verifies that
-// when IsSquadLeader is true and the task is comment-triggered, the generated
-// CLAUDE.md explicitly forbids posting comments that merely announce no_action.
-// This is the fix for MUL-2168 — squad leaders were posting "Exiting silently"
-// comments because the comment-triggered path lacked the prohibition.
-func TestInjectRuntimeConfigSquadLeaderCommentTriggeredNoAction(t *testing.T) {
-	t.Parallel()
-
-	dir := t.TempDir()
-	ctx := TaskContextForEnv{
-		IssueID:          "issue-1",
-		TriggerCommentID: "comment-1",
-		IsSquadLeader:    true,
-	}
-	if _, err := InjectRuntimeConfig(dir, "claude", ctx); err != nil {
-		t.Fatalf("InjectRuntimeConfig failed: %v", err)
-	}
-	data, err := os.ReadFile(filepath.Join(dir, "CLAUDE.md"))
-	if err != nil {
-		t.Fatalf("read CLAUDE.md: %v", err)
-	}
-	s := string(data)
-
-	// Both delivery imperatives — workflow step 4 and ## Output — must carry
-	// the carve-out, so that no later bullet can contradict the no_action exit
-	// (MUL-5442 #6493 review). They carry the EXCEPTION, not the rule: the
-	// rule itself is stated once, by the Squad Operating Protocol the server
-	// appends to Instructions, and both sites point there (MUL-6984).
-	for _, want := range []string{
-		"unless your outcome is `no_action`",
-		"see the no_action rule in your Squad Operating Protocol",
-		"which your Squad Operating Protocol states in full",
-	} {
-		if !strings.Contains(s, want) {
-			t.Errorf("squad leader comment-triggered CLAUDE.md missing %q", want)
-		}
-	}
-	// The unconditional ordinary-agent imperative must not coexist with the
-	// carve-out variant.
-	if strings.Contains(s, "**Post your final results as a comment — this step is mandatory**") {
-		t.Errorf("squad leader CLAUDE.md still carries the unconditional delivery step")
-	}
-	// And neither site may restate the rule's mechanics — that is what drifted
-	// when four copies of it existed.
-	for _, banned := range []string{
-		"DO NOT post a comment announcing no_action",
-		"you MUST exit without posting any comment",
-	} {
-		if strings.Contains(s, banned) {
-			t.Errorf("squad leader CLAUDE.md restates the protocol-owned no_action rule: %q", banned)
-		}
-	}
-
-	// Non-squad-leader should NOT have the squad leader rule in comment-triggered path.
-	dir2 := t.TempDir()
-	ctx2 := TaskContextForEnv{
-		IssueID:          "issue-1",
-		TriggerCommentID: "comment-1",
-		IsSquadLeader:    false,
-	}
-	if _, err := InjectRuntimeConfig(dir2, "claude", ctx2); err != nil {
-		t.Fatalf("InjectRuntimeConfig failed: %v", err)
-	}
-	data2, err := os.ReadFile(filepath.Join(dir2, "CLAUDE.md"))
-	if err != nil {
-		t.Fatalf("read CLAUDE.md: %v", err)
-	}
-	s2 := string(data2)
-	if strings.Contains(s2, "unless your outcome is `no_action`") {
-		t.Errorf("non-squad-leader CLAUDE.md should NOT contain the leader no_action carve-out")
-	}
 }
 
 // TestBuildMetaSkillContentEmitsRequestingUser pins MUL-2406's brief
@@ -6113,21 +5936,6 @@ func TestBriefCarriesNoMetadataGuidance(t *testing.T) {
 			},
 			provider: "claude",
 			filename: "CLAUDE.md",
-		},
-		{
-			name:     "quick_create",
-			ctx:      TaskContextForEnv{QuickCreatePrompt: "create a task about X"},
-			provider: "codex",
-			filename: "AGENTS.md",
-		},
-		{
-			name: "run_only_autopilot",
-			ctx: TaskContextForEnv{
-				AutopilotRunID: "run-md-1",
-				AutopilotID:    "autopilot-md-1",
-			},
-			provider: "codex",
-			filename: "AGENTS.md",
 		},
 		{
 			name:     "chat",

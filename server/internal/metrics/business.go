@@ -63,13 +63,6 @@ type BusinessMetrics struct {
 	runtimeGCDeleted               prometheus.Counter
 	runtimeGCFailed                prometheus.Counter
 	runtimeGCSkipped               *prometheus.CounterVec
-	entitlementConfigError         prometheus.Counter
-	entitlementCache               *prometheus.CounterVec
-	entitlementRefresh             *prometheus.CounterVec
-	entitlementRefreshDuration     *prometheus.HistogramVec
-	entitlementDecision            *prometheus.CounterVec
-	entitlementVersionRegression   prometheus.Counter
-	autopilotQuotaDecision         *prometheus.CounterVec
 
 	// agentRuntimeLookup counts logical agent_runtime lookups by product
 	// source — one increment per requested runtime id, whether that id was
@@ -257,34 +250,6 @@ func NewBusinessMetrics() *BusinessMetrics {
 			Name:      "skipped_total",
 			Help:      "Total runtime garbage-collection candidates safely skipped by reason.",
 		}, metricLabels("multica_runtime_gc_skipped_total")),
-		entitlementConfigError: prometheus.NewCounter(prometheus.CounterOpts{
-			Namespace: "multica", Subsystem: "entitlement", Name: "config_error_total",
-			Help: "Total startup failures caused by a malformed Multica Cloud URL for entitlement policy.",
-		}),
-		entitlementCache: prometheus.NewCounterVec(prometheus.CounterOpts{
-			Namespace: "multica", Subsystem: "entitlement", Name: "cache_total",
-			Help: "Total entitlement cache outcomes.",
-		}, metricLabels("multica_entitlement_cache_total")),
-		entitlementRefresh: prometheus.NewCounterVec(prometheus.CounterOpts{
-			Namespace: "multica", Subsystem: "entitlement", Name: "refresh_total",
-			Help: "Total entitlement refresh outcomes.",
-		}, metricLabels("multica_entitlement_refresh_total")),
-		entitlementRefreshDuration: prometheus.NewHistogramVec(prometheus.HistogramOpts{
-			Namespace: "multica", Subsystem: "entitlement", Name: "refresh_duration_seconds",
-			Help: "Duration of entitlement refreshes.", Buckets: chatClaimResumeQueryDurationBuckets,
-		}, metricLabels("multica_entitlement_refresh_duration_seconds")),
-		entitlementDecision: prometheus.NewCounterVec(prometheus.CounterOpts{
-			Namespace: "multica", Subsystem: "entitlement", Name: "decision_total",
-			Help: "Total entitlement decisions by bounded gate, action, and reason.",
-		}, metricLabels("multica_entitlement_decision_total")),
-		entitlementVersionRegression: prometheus.NewCounter(prometheus.CounterOpts{
-			Namespace: "multica", Subsystem: "entitlement", Name: "version_regression_total",
-			Help: "Total rejected entitlement subscription-version regressions.",
-		}),
-		autopilotQuotaDecision: prometheus.NewCounterVec(prometheus.CounterOpts{
-			Namespace: "multica", Subsystem: "autopilot_quota", Name: "decision_total",
-			Help: "Total autopilot quota admission outcomes.",
-		}, metricLabels("multica_autopilot_quota_decision_total")),
 		agentRuntimeLookup: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Namespace: "multica", Subsystem: "agent_runtime", Name: "lookup_total",
 			Help: "Total logical agent_runtime lookups by product source and outcome (one per requested id, not per SQL query).",
@@ -344,13 +309,6 @@ func (m *BusinessMetrics) Collectors() []prometheus.Collector {
 		m.runtimeGCDeleted,
 		m.runtimeGCFailed,
 		m.runtimeGCSkipped,
-		m.entitlementConfigError,
-		m.entitlementCache,
-		m.entitlementRefresh,
-		m.entitlementRefreshDuration,
-		m.entitlementDecision,
-		m.entitlementVersionRegression,
-		m.autopilotQuotaDecision,
 		m.agentRuntimeLookup,
 		m.issueMetadataMutation,
 		m.issueMetadataMutationDuration,
@@ -379,32 +337,6 @@ func (m *BusinessMetrics) RecordIssueMetadataMutation(op, result string, duratio
 	m.issueMetadataMutationDuration.WithLabelValues(op, result).Observe(duration.Seconds())
 }
 
-func (m *BusinessMetrics) RecordEntitlementConfigError() {
-	if m != nil {
-		m.entitlementConfigError.Inc()
-	}
-}
-
-func (m *BusinessMetrics) RecordEntitlementCache(outcome string) {
-	if m != nil {
-		m.entitlementCache.WithLabelValues(outcome).Inc()
-	}
-}
-
-func (m *BusinessMetrics) RecordEntitlementRefresh(outcome string, seconds float64) {
-	if m == nil {
-		return
-	}
-	m.entitlementRefresh.WithLabelValues(outcome).Inc()
-	m.entitlementRefreshDuration.WithLabelValues(outcome).Observe(seconds)
-}
-
-func (m *BusinessMetrics) RecordEntitlementDecision(gate, action, reason string) {
-	if m != nil {
-		m.entitlementDecision.WithLabelValues(gate, action, reason).Inc()
-	}
-}
-
 // RecordAgentRuntimeLookup counts one logical agent_runtime lookup — one
 // requested runtime id resolved, whether by a point read or as one element of
 // a batch query. It is therefore a lookup rate, not a SQL-query count: a single
@@ -422,24 +354,6 @@ func (m *BusinessMetrics) RecordAgentRuntimeLookup(source, result string) {
 		NormalizeAgentRuntimeLookupSource(source),
 		NormalizeAgentRuntimeLookupResult(result),
 	).Inc()
-}
-
-func (m *BusinessMetrics) RecordEntitlementVersionRegression() {
-	if m != nil {
-		m.entitlementVersionRegression.Inc()
-	}
-}
-
-func (m *BusinessMetrics) RecordAutopilotQuotaDecision(action, source, result string) {
-	if m == nil {
-		return
-	}
-	switch source {
-	case "schedule", "webhook", "manual", "api":
-	default:
-		source = "other"
-	}
-	m.autopilotQuotaDecision.WithLabelValues(action, source, result).Inc()
 }
 
 func (m *BusinessMetrics) RecordRuntimeGCDeleted() {
@@ -753,7 +667,7 @@ func (m *BusinessMetrics) clearTaskInProgress(taskID string) {
 }
 
 func (m *BusinessMetrics) prewarmFailureReasons() {
-	for _, source := range []string{"issue", "chat", "autopilot", "autopilot_issue", "quick_create", "other"} {
+	for _, source := range []string{"issue", "chat", "other"} {
 		for _, runtimeMode := range []string{"local", "cloud", "unknown"} {
 			for _, reason := range taskfailure.AllReasons() {
 				m.taskFailed.WithLabelValues(source, runtimeMode, reason.String()).Add(0)

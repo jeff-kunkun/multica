@@ -293,38 +293,6 @@ func TestListIssues_InvolvesUserID_MatchesOwnedAgentAssignee(t *testing.T) {
 	}
 }
 
-func TestListIssues_InvolvesUserID_MatchesSquadMember(t *testing.T) {
-	ctx := context.Background()
-	fx := setupInvolvesFixture(t)
-	wantID := insertIssueTo(t, ctx, testWorkspaceID,
-		"issue assigned to a squad I'm a member of", "squad", fx.squadMemberID)
-	if got := listIssuesInvolves(t, fx.userID); !containsIssueID(got, wantID) {
-		t.Fatalf("branch (2) miss: human-member squad assignee not surfaced (want %s, got %v)", wantID, got)
-	}
-}
-
-func TestListIssues_InvolvesUserID_MatchesLeaderViaCanonicalRelation(t *testing.T) {
-	ctx := context.Background()
-	fx := setupInvolvesFixture(t)
-	// Fixture deliberately omits the squad_member leader-copy row, so this
-	// can only match if the SQL reads squad.leader_id directly (branch 3).
-	wantID := insertIssueTo(t, ctx, testWorkspaceID,
-		"issue assigned to a squad my agent leads", "squad", fx.squadLeaderID)
-	if got := listIssuesInvolves(t, fx.userID); !containsIssueID(got, wantID) {
-		t.Fatalf("branch (3) miss: squad-leader-via-canonical assignee not surfaced (want %s, got %v)", wantID, got)
-	}
-}
-
-func TestListIssues_InvolvesUserID_MatchesSquadAgentMember(t *testing.T) {
-	ctx := context.Background()
-	fx := setupInvolvesFixture(t)
-	wantID := insertIssueTo(t, ctx, testWorkspaceID,
-		"issue assigned to a squad my agent is a member of", "squad", fx.squadAgentMemID)
-	if got := listIssuesInvolves(t, fx.userID); !containsIssueID(got, wantID) {
-		t.Fatalf("branch (4) miss: squad agent-member assignee not surfaced (want %s, got %v)", wantID, got)
-	}
-}
-
 // ---- the critical negative: tab 3 must be disjoint from tab 1 ----
 
 // Nails the semantics: `involves_user_id` MUST NOT surface issues whose
@@ -451,17 +419,5 @@ func TestListIssues_InvolvesUserID_InvalidUUIDReturns400(t *testing.T) {
 	testHandler.ListIssues(w, newRequest("GET", path, nil))
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400 on invalid UUID, got %d: %s", w.Code, w.Body.String())
-	}
-}
-
-// Grouped path also exercises canonical-leader resolution, so a single positive
-// guards the dynamic SQL builder against accidentally dropping branch (3).
-func TestListGroupedIssues_InvolvesUserID_MatchesLeaderViaCanonicalRelation(t *testing.T) {
-	ctx := context.Background()
-	fx := setupInvolvesFixture(t)
-	wantID := insertIssueTo(t, ctx, testWorkspaceID,
-		"grouped: squad my agent leads", "squad", fx.squadLeaderID)
-	if got := listGroupedIssuesInvolves(t, fx.userID); !containsIssueID(got, wantID) {
-		t.Fatalf("grouped branch (3) miss: squad-leader-via-canonical not surfaced (want %s, got %v)", wantID, got)
 	}
 }

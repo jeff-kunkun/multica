@@ -490,17 +490,14 @@ describe("projectGanttIssuesOptions", () => {
       .mockResolvedValue({ issues: [makeIssue(1)], total: 1 });
     installFakeApi(listIssues);
 
-    const agentsTab = projectGanttIssuesOptions(WS_ID, PROJECT_ID, [
-      "agent",
-      "squad",
-    ]);
+    const agentsTab = projectGanttIssuesOptions(WS_ID, PROJECT_ID, ["agent"]);
     await qc.fetchQuery(agentsTab);
 
     expect(listIssues).toHaveBeenCalledWith(
       expect.objectContaining({
         project_id: PROJECT_ID,
         scheduled: true,
-        assignee_types: ["agent", "squad"],
+        assignee_types: ["agent"],
       }),
     );
     // Distinct tabs must not share a cache entry.

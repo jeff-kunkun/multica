@@ -162,8 +162,8 @@ describe("unread filtering", () => {
   });
 
   it("keeps notifications without an issue, unlike the issue dimensions", () => {
-    // The issue-less rows are the quick-create failures — the ones that most
-    // need to stay reachable while screening for what is unhandled.
+    // Issue-less rows must stay reachable while screening for what is
+    // unhandled.
     const rows = [item("no-issue", null, null)];
 
     expect(

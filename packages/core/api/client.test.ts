@@ -3,7 +3,6 @@ import { createAuthStore } from "../auth";
 import { configStore } from "../config";
 import type { StorageAdapter, User } from "../types";
 import { ApiClient, ApiError, CHAT_DRAFT_RESTORE_CAPABILITY, clientErrorMessage } from "./client";
-import { EMPTY_PLUGIN_PACKAGE_LIST, EMPTY_PLUGIN_PREVIEW, EMPTY_PLUGIN_SURFACE_LAUNCH } from "./schemas";
 
 afterEach(() => {
   configStore.getState().setAgentConversationStartersSupported(false);
@@ -266,106 +265,6 @@ describe("ApiClient pull-request response schema", () => {
     expect(result.auto_complete).toBeNull();
     expect(result.pull_requests).toHaveLength(1);
     expect(result.pull_requests[0]?.link_source).toBeUndefined();
-  });
-});
-
-describe("ApiClient Plugin preview response schema", () => {
-  it("degrades a malformed preview so a blank scope list is never shown as approval", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn().mockResolvedValue(
-        new Response(JSON.stringify({ scopes: "issues:read" }), {
-          status: 200,
-          headers: { "Content-Type": "application/json" },
-        }),
-      ),
-    );
-
-    await expect(new ApiClient("https://api.example.test").previewPlugin(
-      "workspace-1",
-      { version_id: "version-1" },
-    )).resolves.toEqual(EMPTY_PLUGIN_PREVIEW);
-  });
-
-  // A malformed launch must not become a partly trusted frame URL.
-  it("falls back to an empty surface launch when the response is malformed", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn().mockResolvedValue(
-        new Response(JSON.stringify({ url: 42, bridge_token: "proof" }), {
-          status: 200,
-          headers: { "Content-Type": "application/json" },
-        }),
-      ),
-    );
-
-    await expect(new ApiClient("https://api.example.test").getPluginSurfaceLaunch(
-      "workspace-1",
-      "installation-1",
-      "hello",
-    )).resolves.toEqual(EMPTY_PLUGIN_SURFACE_LAUNCH);
-  });
-
-  it("falls back to an empty package list when the response is malformed", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn().mockResolvedValue(
-        new Response(JSON.stringify({ packages: "nope" }), {
-          status: 200,
-          headers: { "Content-Type": "application/json" },
-        }),
-      ),
-    );
-
-    await expect(new ApiClient("https://api.example.test").listPluginPackages("workspace-1"))
-      .resolves.toEqual(EMPTY_PLUGIN_PACKAGE_LIST);
-  });
-});
-
-describe("ApiClient Plugin surface bridge routes", () => {
-  it("relays Action API calls through the session-only bridge prefix", async () => {
-    const fetchMock = vi.fn().mockResolvedValue(
-      new Response("{}", { status: 200, headers: { "Content-Type": "application/json" } }),
-    );
-    vi.stubGlobal("fetch", fetchMock);
-
-    await new ApiClient("https://api.example.test").callPluginAction(
-      "installation-1",
-      { method: "GET", path: "/context", issueId: "MUL-42" },
-    );
-
-    expect(fetchMock.mock.calls[0]?.[0]).toBe(
-      "https://api.example.test/api/plugin-bridge/v1/context?issue_id=MUL-42",
-    );
-    expect(fetchMock.mock.calls[0]?.[1]).toMatchObject({
-      method: "GET",
-      headers: expect.objectContaining({
-        "X-Multica-Plugin-Installation": "installation-1",
-      }),
-    });
-  });
-
-  it("invokes UI hooks through the session-only bridge prefix", async () => {
-    const fetchMock = vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({
-        status: "ok",
-        hook_key: "summarize",
-        trigger: "ui",
-        latency_ms: 1,
-        attempts: 1,
-      }), { status: 200, headers: { "Content-Type": "application/json" } }),
-    );
-    vi.stubGlobal("fetch", fetchMock);
-
-    await new ApiClient("https://api.example.test").invokePluginHook(
-      "installation-1",
-      "summarize",
-      { trigger: "ui", issueId: "issue-1" },
-    );
-
-    expect(fetchMock.mock.calls[0]?.[0]).toBe(
-      "https://api.example.test/api/plugin-bridge/v1/hooks/summarize",
-    );
   });
 });
 
@@ -781,64 +680,6 @@ describe("ApiClient label response schemas", () => {
   });
 });
 
-describe("ApiClient agent builder runtime switch", () => {
-  it("PATCHes the session runtime endpoint and returns the runtime the server bound", async () => {
-    const fetchMock = vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({ runtime_id: "runtime-b" }), {
-        status: 200,
-        headers: { "Content-Type": "application/json" },
-      }),
-    );
-    vi.stubGlobal("fetch", fetchMock);
-
-    const client = new ApiClient("https://api.example.test");
-    await expect(
-      client.switchAgentBuilderRuntime("session-1", { runtime_id: "runtime-b" }),
-    ).resolves.toEqual({ runtime_id: "runtime-b" });
-
-    const call = fetchMock.mock.calls[0] as [string, RequestInit];
-    expect(call[0]).toContain("/api/agent-builder/sessions/session-1/runtime");
-    expect(call[1].method).toBe("PATCH");
-    expect(JSON.parse(String(call[1].body))).toEqual({ runtime_id: "runtime-b" });
-  });
-
-  it("falls back to the requested runtime id for a malformed success body", async () => {
-    // A 2xx means the rebind committed onto the runtime we asked for, so the
-    // fallback must say so. Reporting "unknown" here would leave the picker on
-    // the old runtime while the conversation executes on the new one — the very
-    // split this endpoint exists to close.
-    const fetchMock = vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({ runtime_id: 42 }), {
-        status: 200,
-        headers: { "Content-Type": "application/json" },
-      }),
-    );
-    vi.stubGlobal("fetch", fetchMock);
-
-    const client = new ApiClient("https://api.example.test");
-    await expect(
-      client.switchAgentBuilderRuntime("session-1", { runtime_id: "runtime-b" }),
-    ).resolves.toEqual({ runtime_id: "runtime-b" });
-  });
-
-  it("rejects without a fallback when the switch is refused", async () => {
-    // 409 (a reply in flight) means nothing was committed, so the caller must
-    // see a rejection and keep the old runtime selected.
-    const fetchMock = vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({ error: "stop the current reply before switching runtime" }), {
-        status: 409,
-        headers: { "Content-Type": "application/json" },
-      }),
-    );
-    vi.stubGlobal("fetch", fetchMock);
-
-    const client = new ApiClient("https://api.example.test");
-    await expect(
-      client.switchAgentBuilderRuntime("session-1", { runtime_id: "runtime-b" }),
-    ).rejects.toBeInstanceOf(ApiError);
-  });
-});
-
 describe("ApiClient notification preferences", () => {
   it("sends atomic preference updates with PATCH", async () => {
     const fetchMock = vi.fn().mockResolvedValue(
@@ -1199,94 +1040,6 @@ describe("ApiClient", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
-  it("uses the expected HTTP contract for autopilot endpoints", async () => {
-    const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(
-      new Response(JSON.stringify({ autopilots: [], runs: [], total: 0 }), {
-        status: 200,
-        headers: { "Content-Type": "application/json" },
-      }),
-    ));
-    vi.stubGlobal("fetch", fetchMock);
-
-    const client = new ApiClient("https://api.example.test");
-
-    await client.listAutopilots({ status: "active" });
-    await client.getAutopilot("ap-1");
-    await client.createAutopilot({
-      title: "Daily triage",
-      project_id: "project-1",
-      assignee_id: "agent-1",
-      execution_mode: "create_issue",
-    });
-    await client.updateAutopilot("ap-1", { status: "paused", project_id: null });
-    await client.deleteAutopilot("ap-1");
-    await client.triggerAutopilot("ap-1");
-    await client.getAutopilotQuotaUsage();
-    await client.listAutopilotRuns("ap-1", { limit: 10, offset: 20 });
-    await client.createAutopilotTrigger("ap-1", {
-      kind: "schedule",
-      cron_expression: "0 9 * * *",
-      timezone: "UTC",
-    });
-    await client.updateAutopilotTrigger("ap-1", "tr-1", { enabled: false });
-    await client.deleteAutopilotTrigger("ap-1", "tr-1");
-    await client.rotateAutopilotTriggerWebhookToken("ap-1", "tr-1");
-
-    const calls = fetchMock.mock.calls.map(([url, init]) => ({
-      url,
-      method: init?.method ?? "GET",
-      body: init?.body,
-      idempotencyKey: (init?.headers as Record<string, string> | undefined)?.["Idempotency-Key"],
-    }));
-
-    expect(calls).toMatchObject([
-      { url: "https://api.example.test/api/autopilots?status=active", method: "GET" },
-      { url: "https://api.example.test/api/autopilots/ap-1", method: "GET" },
-      {
-        url: "https://api.example.test/api/autopilots",
-        method: "POST",
-        body: JSON.stringify({
-          title: "Daily triage",
-          project_id: "project-1",
-          assignee_id: "agent-1",
-          execution_mode: "create_issue",
-        }),
-      },
-      {
-        url: "https://api.example.test/api/autopilots/ap-1",
-        method: "PATCH",
-        body: JSON.stringify({ status: "paused", project_id: null }),
-      },
-      { url: "https://api.example.test/api/autopilots/ap-1", method: "DELETE" },
-      {
-        url: "https://api.example.test/api/autopilots/ap-1/trigger",
-        method: "POST",
-        idempotencyKey: expect.any(String),
-      },
-      { url: "https://api.example.test/api/autopilots/usage", method: "GET" },
-      { url: "https://api.example.test/api/autopilots/ap-1/runs?limit=10&offset=20", method: "GET" },
-      {
-        url: "https://api.example.test/api/autopilots/ap-1/triggers",
-        method: "POST",
-        body: JSON.stringify({
-          kind: "schedule",
-          cron_expression: "0 9 * * *",
-          timezone: "UTC",
-        }),
-      },
-      {
-        url: "https://api.example.test/api/autopilots/ap-1/triggers/tr-1",
-        method: "PATCH",
-        body: JSON.stringify({ enabled: false }),
-      },
-      { url: "https://api.example.test/api/autopilots/ap-1/triggers/tr-1", method: "DELETE" },
-      {
-        url: "https://api.example.test/api/autopilots/ap-1/triggers/tr-1/rotate-webhook-token",
-        method: "POST",
-      },
-    ]);
-  });
-
   it("emits X-Client-* headers when identity is configured", async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(JSON.stringify([]), {
@@ -1487,107 +1240,6 @@ describe("ApiClient", () => {
     ]);
   });
 
-  it("uses the Cloud Runtime node API contract", async () => {
-    const node = {
-      id: "node-1",
-      owner_id: "user-1",
-      instance_id: "i-0123456789abcdef0",
-      region: "us-west-2",
-      instance_type: "g5.xlarge",
-      image_id: "ami-1",
-      subnet_id: "subnet-1",
-      name: "gpu-dev-01",
-      status: "launching",
-      tags: {},
-      metadata: {},
-      created_at: "2026-05-21T08:30:00Z",
-      updated_at: "2026-05-21T08:30:00Z",
-    };
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValueOnce(
-        new Response(JSON.stringify([]), {
-          status: 200,
-          headers: { "Content-Type": "application/json" },
-        }),
-      )
-      .mockResolvedValueOnce(
-        new Response(JSON.stringify(node), {
-          status: 201,
-          headers: { "Content-Type": "application/json" },
-        }),
-      );
-    vi.stubGlobal("fetch", fetchMock);
-
-    const client = new ApiClient("https://api.example.test");
-    await client.listCloudRuntimeNodes({ limit: 20, offset: 5 });
-    await client.createCloudRuntimeNode(
-      { instance_type: "g5.xlarge", name: "gpu-dev-01" },
-    );
-
-    const listCall = fetchMock.mock.calls[0]!;
-    const createCall = fetchMock.mock.calls[1]!;
-    expect(listCall[0]).toBe(
-      "https://api.example.test/api/cloud-runtime/nodes?limit=20&offset=5",
-    );
-    expect(createCall[0]).toBe(
-      "https://api.example.test/api/cloud-runtime/nodes",
-    );
-    expect(createCall[1]).toMatchObject({
-      method: "POST",
-      body: JSON.stringify({
-        instance_type: "g5.xlarge",
-        name: "gpu-dev-01",
-      }),
-    });
-  });
-
-  it("falls back when Cloud Runtime node responses drift", async () => {
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValueOnce(
-        new Response(JSON.stringify([{ id: 123 }]), {
-          status: 200,
-          headers: { "Content-Type": "application/json" },
-        }),
-      )
-      .mockResolvedValueOnce(
-        new Response(JSON.stringify({ id: 123 }), {
-          status: 201,
-          headers: { "Content-Type": "application/json" },
-        }),
-      );
-    vi.stubGlobal("fetch", fetchMock);
-
-    const client = new ApiClient("https://api.example.test");
-
-    await expect(client.listCloudRuntimeNodes()).resolves.toEqual([]);
-    await expect(
-      client.createCloudRuntimeNode({ instance_type: "g5.xlarge" }),
-    ).resolves.toMatchObject({ id: "", status: "" });
-  });
-
-  it("deleteCloudRuntimeNode sends DELETE with JSON body containing instance id", async () => {
-    const fetchMock = vi.fn().mockResolvedValueOnce(
-      new Response(null, { status: 204 }),
-    );
-    vi.stubGlobal("fetch", fetchMock);
-
-    const client = new ApiClient("https://api.example.test");
-    await client.deleteCloudRuntimeNode("i-0123456789abcdef0");
-
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    const [url, opts] = fetchMock.mock.calls[0]!;
-    expect(url).toBe("https://api.example.test/api/cloud-runtime/nodes");
-    expect(opts).toMatchObject({
-      method: "DELETE",
-      body: JSON.stringify({ instance_id: "i-0123456789abcdef0" }),
-    });
-    expect((opts.headers as Record<string, string>)["Content-Type"]).toBe(
-      "application/json",
-    );
-  });
-
   describe("getAttachment", () => {
     it("uses the attachment-owned workspace endpoint for Markdown downloads", async () => {
       const fetchMock = vi.fn().mockResolvedValue(
@@ -1734,66 +1386,6 @@ describe("ApiClient", () => {
         statusText,
         headers: { "Content-Type": "application/json" },
       });
-
-    it("falls back to the legacy full-list endpoint when the paged route 404s", async () => {
-      const legacy = [
-        {
-          id: "m1",
-          chat_session_id: "session-1",
-          role: "user",
-          content: "hi",
-          task_id: null,
-          created_at: "2026-06-01T00:00:00Z",
-          quick_actions: [],
-        },
-        {
-          id: "m2",
-          chat_session_id: "session-1",
-          role: "assistant",
-          content: "yo",
-          task_id: "task-1",
-          created_at: "2026-06-01T00:00:01Z",
-          quick_actions: [
-            { label: "Continue", prompt: "Continue with the next step", primary: true },
-          ],
-        },
-      ];
-      const fetchMock = vi
-        .fn()
-        .mockResolvedValueOnce(jsonResponse({ error: "not found" }, 404, "Not Found"))
-        .mockResolvedValueOnce(jsonResponse(legacy, 200));
-      vi.stubGlobal("fetch", fetchMock);
-
-      const client = new ApiClient("https://api.example.test");
-      const page = await client.listChatMessagesPage("session-1", { limit: 50 });
-
-      expect(fetchMock).toHaveBeenCalledTimes(2);
-      expect(fetchMock.mock.calls[0]![0]).toBe(
-        "https://api.example.test/api/chat/sessions/session-1/messages/page?limit=50",
-      );
-      expect(fetchMock.mock.calls[1]![0]).toBe(
-        "https://api.example.test/api/chat/sessions/session-1/messages",
-      );
-      expect(page).toEqual({ messages: legacy, limit: 50, has_more: false, next_cursor: null });
-    });
-
-    it("keeps a valid reply when its optional quick actions are malformed", async () => {
-      const malformed = [{
-        id: "m1",
-        chat_session_id: "session-1",
-        role: "assistant",
-        content: "safe reply",
-        task_id: "task-1",
-        created_at: "2026-06-01T00:00:00Z",
-        quick_actions: [{ label: 42, prompt: false }],
-      }];
-      vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse(malformed, 200)));
-
-      const client = new ApiClient("https://api.example.test");
-      await expect(client.listChatMessages("session-1")).resolves.toEqual([
-        expect.objectContaining({ content: "safe reply", quick_actions: [] }),
-      ]);
-    });
 
     it("falls back to an empty page for a malformed paged response", async () => {
       vi.stubGlobal(
@@ -2181,8 +1773,8 @@ describe("ApiClient", () => {
   });
 });
 
-// The onboarding flow acts on a workspace the app has not navigated to, so
-// these calls pass the slug explicitly. The server reads X-Workspace-Slug
+// Some calls act on a workspace the app has not navigated to, so they pass
+// the slug explicitly. The server reads X-Workspace-Slug
 // before ?workspace_id, so the header — not the param — is what has to carry
 // the target workspace.
 describe("ApiClient explicit workspace targeting", () => {
@@ -2201,15 +1793,6 @@ describe("ApiClient explicit workspace targeting", () => {
     const init = fetchMock.mock.calls[0]?.[1] as RequestInit;
     return (init.headers as Record<string, string>)["X-Workspace-Slug"];
   }
-
-  it("sends the given slug on Mika creation", async () => {
-    const fetchMock = stubOk({ id: "agent-1" });
-    await new ApiClient("https://api.example.test").createMikaAgent(
-      { runtime_id: "runtime-1", language: "en" },
-      "proxima-centauri",
-    );
-    expect(slugHeaderOf(fetchMock)).toBe("proxima-centauri");
-  });
 
   it("sends the given slug when listing another workspace's runtimes", async () => {
     const fetchMock = stubOk([]);
@@ -2388,73 +1971,6 @@ describe("ApiClient unsubscribe endpoints", () => {
       new ApiClient("https://api.example.test")
         .unsubscribeFromIssueSubtree("issue-1", "user-1", "member"),
     ).rejects.toBeInstanceOf(ApiError);
-  });
-});
-
-describe("ApiClient startMikaOnboarding", () => {
-  it("returns the opening a well-formed response reports", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn().mockResolvedValue(
-        new Response(
-          JSON.stringify({
-            started: true,
-            message_id: "message-1",
-            created_at: "2026-01-01T00:00:00Z",
-          }),
-          { status: 200, headers: { "Content-Type": "application/json" } },
-        ),
-      ),
-    );
-
-    await expect(
-      new ApiClient("https://api.example.test").startMikaOnboarding("session-1", {
-        language: "en",
-      }),
-    ).resolves.toEqual({
-      started: true,
-      message_id: "message-1",
-      created_at: "2026-01-01T00:00:00Z",
-    });
-  });
-
-  it("falls back to started=false when the response is malformed", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn().mockResolvedValue(
-        new Response(JSON.stringify({ started: "yes" }), {
-          status: 200,
-          headers: { "Content-Type": "application/json" },
-        }),
-      ),
-    );
-
-    // started=false is the safe reading: the flow treats it as "someone else
-    // already opened this conversation" and navigates, rather than acting on a
-    // body it could not understand.
-    await expect(
-      new ApiClient("https://api.example.test").startMikaOnboarding("session-1", {
-        language: "en",
-      }),
-    ).resolves.toEqual({ started: false });
-  });
-
-  it("tolerates a backend that omits the optional opening fields", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn().mockResolvedValue(
-        new Response(JSON.stringify({ started: false }), {
-          status: 200,
-          headers: { "Content-Type": "application/json" },
-        }),
-      ),
-    );
-
-    await expect(
-      new ApiClient("https://api.example.test").startMikaOnboarding("session-1", {
-        language: "en",
-      }),
-    ).resolves.toEqual({ started: false });
   });
 });
 
@@ -2910,7 +2426,7 @@ describe("ApiClient sliding session renewal", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     const client = new ApiClient("https://api.example.test");
-    await expect(client.markOnboardingComplete()).resolves.toBeDefined();
+    await expect(client.markAllInboxRead()).resolves.toBeDefined();
 
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
@@ -2922,7 +2438,7 @@ describe("ApiClient sliding session renewal", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     const client = new ApiClient("https://api.example.test");
-    await expect(client.markOnboardingComplete()).rejects.toBeInstanceOf(ApiError);
+    await expect(client.markAllInboxRead()).rejects.toBeInstanceOf(ApiError);
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
@@ -2934,7 +2450,7 @@ describe("ApiClient sliding session renewal", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     const client = new ApiClient("https://api.example.test");
-    await expect(client.markOnboardingComplete()).rejects.toBeInstanceOf(ApiError);
+    await expect(client.markAllInboxRead()).rejects.toBeInstanceOf(ApiError);
 
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
@@ -2970,7 +2486,7 @@ describe("ApiClient CSRF headers", () => {
     const fetchMock = vi.fn().mockImplementation(async () => jsonResponse({}));
     vi.stubGlobal("fetch", fetchMock);
 
-    await new ApiClient("https://api.example.test").markOnboardingComplete();
+    await new ApiClient("https://api.example.test").markAllInboxRead();
 
     const headers = capturedHeaders(fetchMock);
     expect(headers["X-CSRF-Token"]).toBe("session-bound");
@@ -2984,7 +2500,7 @@ describe("ApiClient CSRF headers", () => {
     const fetchMock = vi.fn().mockImplementation(async () => jsonResponse({}));
     vi.stubGlobal("fetch", fetchMock);
 
-    await new ApiClient("https://api.example.test").markOnboardingComplete();
+    await new ApiClient("https://api.example.test").markAllInboxRead();
 
     expect(capturedHeaders(fetchMock)["X-CSRF-Token"]).toBe("token-bound");
   });
@@ -2994,7 +2510,7 @@ describe("ApiClient CSRF headers", () => {
     const fetchMock = vi.fn().mockImplementation(async () => jsonResponse({}));
     vi.stubGlobal("fetch", fetchMock);
 
-    await new ApiClient("https://api.example.test").markOnboardingComplete();
+    await new ApiClient("https://api.example.test").markAllInboxRead();
 
     expect(capturedHeaders(fetchMock)["X-CSRF-Token"]).toBeUndefined();
   });
@@ -3014,7 +2530,7 @@ describe("ApiClient CSRF headers", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     const client = new ApiClient("https://api.example.test");
-    await client.markOnboardingComplete();
+    await client.markAllInboxRead();
 
     expect(capturedHeaders(fetchMock, 0)["X-CSRF-Token"]).toBe("session-bound");
     expect(capturedHeaders(fetchMock, 1)["X-CSRF-Token"]).toBe("token-bound");
@@ -3033,8 +2549,8 @@ describe("ApiClient CSRF headers", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     const client = new ApiClient("https://api.example.test");
-    await client.markOnboardingComplete();
-    await client.markOnboardingComplete();
+    await client.markAllInboxRead();
+    await client.markAllInboxRead();
 
     expect(fetchMock).toHaveBeenCalledTimes(3);
     expect(capturedHeaders(fetchMock, 2)["X-CSRF-Token"]).toBe("token-bound");
@@ -3055,10 +2571,10 @@ describe("ApiClient CSRF headers", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     const client = new ApiClient("https://api.example.test");
-    await client.markOnboardingComplete();
+    await client.markAllInboxRead();
 
     stubCookies("multica_csrf=token-bound-2; multica_csrf_session=session-bound-2");
-    await client.markOnboardingComplete();
+    await client.markAllInboxRead();
 
     expect(capturedHeaders(fetchMock, 2)["X-CSRF-Token"]).toBe("session-bound-2");
   });
@@ -3100,7 +2616,7 @@ describe("ApiClient shared credential across windows", () => {
     const fetchMock = vi.fn().mockImplementation(async () => jsonResponse({}));
     vi.stubGlobal("fetch", fetchMock);
 
-    await windowB.markOnboardingComplete();
+    await windowB.markAllInboxRead();
     expect(authHeaderOf(fetchMock, 0)).toBe("Bearer token-v1");
 
     // Window A renews; only shared storage is updated, exactly as the renewal
@@ -3108,7 +2624,7 @@ describe("ApiClient shared credential across windows", () => {
     storage.write("token-v2");
     windowA.setToken("token-v2");
 
-    await windowB.markOnboardingComplete();
+    await windowB.markAllInboxRead();
     expect(authHeaderOf(fetchMock, 1)).toBe("Bearer token-v2");
   });
 
@@ -3130,7 +2646,7 @@ describe("ApiClient shared credential across windows", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
 
-    await expect(client.markOnboardingComplete()).rejects.toBeInstanceOf(ApiError);
+    await expect(client.markAllInboxRead()).rejects.toBeInstanceOf(ApiError);
 
     expect(onUnauthorized).not.toHaveBeenCalled();
   });
@@ -3150,7 +2666,7 @@ describe("ApiClient shared credential across windows", () => {
       vi.fn().mockImplementation(async () => jsonResponse({ error: "invalid token" }, 401)),
     );
 
-    await expect(client.markOnboardingComplete()).rejects.toBeInstanceOf(ApiError);
+    await expect(client.markAllInboxRead()).rejects.toBeInstanceOf(ApiError);
 
     expect(onUnauthorized).toHaveBeenCalledTimes(1);
   });
@@ -3166,7 +2682,7 @@ describe("ApiClient shared credential across windows", () => {
       vi.fn().mockImplementation(async () => jsonResponse({ error: "invalid token" }, 401)),
     );
 
-    await expect(client.markOnboardingComplete()).rejects.toBeInstanceOf(ApiError);
+    await expect(client.markAllInboxRead()).rejects.toBeInstanceOf(ApiError);
 
     expect(onUnauthorized).toHaveBeenCalledTimes(1);
   });

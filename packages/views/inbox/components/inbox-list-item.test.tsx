@@ -73,8 +73,7 @@ vi.mock("../../common/actor-avatar", () => ({
 vi.mock("./inbox-detail-label", () => ({
   InboxDetailLabel: () => null,
   useTypeLabels: () => ({
-    autopilot_paused: "Autopilot paused",
-    autopilot_quota_exceeded: "Autopilot run limit reached",
+    task_failed: "Task failed",
   }),
 }));
 vi.mock("../../i18n", () => ({ useT: () => ({ t: () => "label" }) }));

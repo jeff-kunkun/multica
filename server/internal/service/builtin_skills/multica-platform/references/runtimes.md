@@ -56,7 +56,7 @@ polling that specific in-flight request if their admin role changes.
 bound, it refuses unless the user explicitly passes `--cascade`, which unbinds
 those agents and cancels their queued/running tasks before deleting the runtime.
 Unbinding keeps the agents and everything they own — instructions, skills,
-chats, labels, autopilots and task history — and only
+chats, labels and task history — and only
 clears the agent's runtime binding; an unbound agent cannot run until it is
 bound again (`multica agent update <id> --runtime-id <runtime-id>`), and every
 trigger path refuses it with `agent_runtime_required`.
@@ -147,8 +147,8 @@ equivalent OS boundary are required for that stronger isolation.
 
 Check in this order:
 
-1. Was a task supposed to be created? Inspect issue/comment/autopilot context.
-2. Is the assignee an agent or squad? A squad routes to its leader.
+1. Was a task supposed to be created? Inspect issue/comment context.
+2. Is the assignee an agent?
 3. Is the agent archived or bound to a runtime the actor cannot use?
 4. Is the runtime online? `multica runtime list --output json`.
 5. Did the daemon heartbeat recently? Runtime `last_seen_at` is the visible clue.

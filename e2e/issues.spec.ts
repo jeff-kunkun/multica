@@ -1,6 +1,6 @@
 import { test, expect } from "@playwright/test";
 import pg from "pg";
-import { loginAsDefault, createTestApi, preferManualCreateMode, reloadAppPage } from "./helpers";
+import { loginAsDefault, createTestApi, reloadAppPage } from "./helpers";
 import type { TestApiClient } from "./fixtures";
 
 const DATABASE_URL =
@@ -134,8 +134,6 @@ test.describe("Issues", () => {
   });
 
   test("can create a new issue", async ({ page }) => {
-    await preferManualCreateMode(page);
-
     const newIssueButton = page.getByRole("button", { name: "New Issue" });
     await expect(newIssueButton).toBeVisible();
     await newIssueButton.click();
@@ -186,8 +184,6 @@ test.describe("Issues", () => {
   });
 
   test("can dismiss issue creation", async ({ page }) => {
-    await preferManualCreateMode(page);
-
     await page.getByRole("button", { name: "New Issue" }).click();
 
     const titleInput = page.getByRole("textbox", { name: "Issue title" });

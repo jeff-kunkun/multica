@@ -55,8 +55,7 @@ const workspace = {
 
 const me = {
   id: fx.USER_ID, name: "Perf User", email: "perf@example.test", avatar_url: null,
-  language: null, onboarded_at: "2026-09-01T00:00:00Z",
-  onboarding_questionnaire: { source: "other" },
+  language: null,
   created_at: "2026-09-01T00:00:00Z", updated_at: "2026-09-01T00:00:00Z",
 };
 
@@ -88,7 +87,7 @@ function responseFor(pathname: string): unknown | undefined {
     case "/api/me": return me;
     case "/api/workspaces": return [workspace];
     case "/api/client-usage": return {};
-    case "/api/agents": case "/api/runtimes": case "/api/squads":
+    case "/api/agents": case "/api/runtimes":
     case "/api/agent-task-snapshot": case "/api/invitations": case "/api/inbox":
     case "/api/inbox/unread-summary": case "/api/pins": case "/api/chat/sessions":
       return [];
@@ -98,7 +97,6 @@ function responseFor(pathname: string): unknown | undefined {
     case "/api/issues": return { issues: [], total: 0 };
     case "/api/issue-statuses": return { statuses: [] };
     case "/api/properties": return { properties: [], total: 0 };
-    case "/api/quick-actions": return { quick_actions: [] };
     case "/api/assignee-frequency": return [];
     // Typing debounces a trigger preview. It is part of the cost being
     // measured, so it is answered rather than blocked.
@@ -110,7 +108,6 @@ function responseFor(pathname: string): unknown | undefined {
     case `/api/issues/${fx.ISSUE_ID}/timeline`: return fx.buildTimelineEntries();
     case `/api/issues/${fx.ISSUE_ID}/task-runs`: return fx.buildTaskRuns();
     case `/api/issues/${fx.ISSUE_ID}/subscribers`:
-    case `/api/issues/${fx.ISSUE_ID}/wakeups`:
     case `/api/issues/${fx.ISSUE_ID}/attachments`: return [];
     case `/api/issues/${fx.ISSUE_ID}/labels`: return { labels: [] };
     case `/api/issues/${fx.ISSUE_ID}/children`: return { issues: [] };

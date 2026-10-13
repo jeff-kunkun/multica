@@ -15,8 +15,8 @@ import (
 // TaskDiskUsage describes one task workdir's footprint on disk.
 //
 // ParentID is the id of the record that governs this directory's lifecycle,
-// discriminated by Kind (issue id, chat session id, autopilot run id, or task
-// id). ParentStatus is that record's current status; it stays empty until
+// discriminated by Kind (issue id or chat session id). ParentStatus is that
+// record's current status; it stays empty until
 // ResolveParentStatuses fills it in, because ScanDiskUsage itself is purely
 // local and .gc_meta.json does not persist a status.
 type TaskDiskUsage struct {
@@ -362,10 +362,6 @@ func parentIDForMeta(meta *execenv.GCMeta) string {
 		return strings.TrimSpace(meta.IssueID)
 	case execenv.GCKindChat:
 		return strings.TrimSpace(meta.ChatSessionID)
-	case execenv.GCKindAutopilotRun:
-		return strings.TrimSpace(meta.AutopilotRunID)
-	case execenv.GCKindQuickCreate:
-		return strings.TrimSpace(meta.TaskID)
 	default:
 		return ""
 	}
@@ -382,9 +378,8 @@ type ParentStatusFetcher func(ctx context.Context, workspaceID string, issueIDs 
 // second pass that turns the STATUS column into real data.
 //
 // Only issue-kind tasks are resolved: they are the overwhelming majority of
-// task dirs and the only kind with a batch reconciliation endpoint. Chat,
-// autopilot-run, and quick-create dirs keep an empty ParentStatus rather than
-// costing one request each.
+// task dirs and the only kind with a batch reconciliation endpoint. Chat dirs
+// keep an empty ParentStatus rather than costing one request each.
 //
 // Best-effort by design: a workspace whose fetch fails leaves its tasks
 // unresolved and the error is returned for the caller to surface, but every

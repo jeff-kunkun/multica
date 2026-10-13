@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { ArrowRight, Blocks, Loader2, Plus, Server } from "lucide-react";
+import { ArrowRight, Loader2, Plus, Server } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
@@ -18,8 +18,6 @@ import { Badge } from "@multica/ui/components/ui/badge";
 import { Button } from "@multica/ui/components/ui/button";
 import { useCurrentWorkspace } from "@multica/core/paths";
 import { useCurrentMember } from "@multica/core/permissions";
-import { useFeatureEnabled } from "@multica/core/config";
-import { PLUGINS_V1_FLAG } from "@multica/core/feature-flags";
 import { cn } from "@multica/ui/lib/utils";
 import { workspaceMcpServersOptions } from "@multica/core/workspace/queries";
 import {
@@ -365,7 +363,6 @@ function ToolSourcesOverview() {
     navigation
       ? settingsHref(navigation.pathname, navigation.searchParams, tab)
       : `?tab=${tab}`;
-  const pluginsEnabled = useFeatureEnabled(PLUGINS_V1_FLAG, false);
   const sources = [
     {
       key: "mcp",
@@ -374,17 +371,6 @@ function ToolSourcesOverview() {
       description: t(($) => $.mcp_sources.mcp),
       href: null,
     },
-    ...(pluginsEnabled
-      ? [
-          {
-            key: "plugins",
-            icon: Blocks,
-            title: t(($) => $.page.tabs.plugins),
-            description: t(($) => $.mcp_sources.plugins),
-            href: tabHref("plugins"),
-          },
-        ]
-      : []),
   ];
   // With nothing to compare against, the explainer would only restate the
   // page description.

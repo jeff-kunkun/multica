@@ -219,8 +219,7 @@ function renderPage(search: string, { strict = false } = {}) {
   };
   // A fresh element per render — reusing one element object lets React bail
   // out of re-rendering, which would make the rerender-based tests vacuous.
-  // ChatPage reads the client-only quick-actions pending marker via useQuery,
-  // so the page needs a QueryClient like it has in the real app shell.
+  // ChatPage needs a QueryClient like it has in the real app shell.
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const makeUi = () => {
     const page = (

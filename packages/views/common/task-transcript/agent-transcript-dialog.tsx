@@ -128,13 +128,6 @@ interface AgentTranscriptDialogProps {
   finalFocus?: boolean;
   /** Loading/error content while the caller retrieves the transcript. */
   contentState?: React.ReactNode;
-  /**
-   * Optional content rendered between the header chips and the event list.
-   * Used by autopilot run rows to surface the inbound webhook trigger
-   * payload so it's visible regardless of whether the agent echoes it.
-   * The dialog stays generic — slot content is the caller's concern.
-   */
-  headerSlot?: React.ReactNode;
 }
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
@@ -319,7 +312,6 @@ export function AgentTranscriptDialog({
   agentName,
   isLive = false,
   finalFocus = false,
-  headerSlot,
   contentState,
 }: AgentTranscriptDialogProps) {
   const { t } = useT("agents");
@@ -809,19 +801,13 @@ export function AgentTranscriptDialog({
   // up front than the runtime/provider diagnostics, which live in the ⓘ popover.
   const triggerLabel = task.parent_task_id
     ? t(($) => $.transcript.trigger_retry)
-    : task.wakeup_id
-      ? t(($) => $.transcript.trigger_wakeup)
-      : task.kind === "comment" || task.trigger_comment_id
+    : task.kind === "comment" || task.trigger_comment_id
       ? t(($) => $.transcript.trigger_comment)
-      : task.kind === "autopilot" || task.autopilot_run_id
-        ? t(($) => $.transcript.trigger_autopilot)
         : task.kind === "chat" || task.chat_session_id
           ? t(($) => $.transcript.trigger_chat)
-          : task.kind === "quick_create"
-            ? t(($) => $.transcript.trigger_quick_create)
-            : task.kind === "direct"
-              ? t(($) => $.transcript.trigger_direct)
-              : t(($) => $.transcript.trigger_initial);
+          : task.kind === "direct"
+            ? t(($) => $.transcript.trigger_direct)
+            : t(($) => $.transcript.trigger_initial);
 
   // Diagnostic detail for the ⓘ popover: everything a reader needs only when
   // debugging this specific run, kept off the always-visible surface.
@@ -1099,13 +1085,6 @@ export function AgentTranscriptDialog({
             selectedOffsetMs={selectedOffsetMs}
             onSeek={handleSeek}
           />
-        )}
-
-        {/* ── Optional header slot (e.g. webhook payload preview) ── */}
-        {headerSlot && (
-          <div className="border-b px-4 py-3 shrink-0 bg-muted/20">
-            {headerSlot}
-          </div>
         )}
 
         {/* ── List toolbar: search left, the two menus right ── */}

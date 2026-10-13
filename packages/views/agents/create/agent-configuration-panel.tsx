@@ -44,10 +44,6 @@ export function AgentConfigurationPanel({
   currentUserId,
   nameError,
   onNameChange,
-  compact = false,
-  onRuntimeSelect,
-  runtimeSwitchPending = false,
-  runtimeSwitchInFlight = false,
 }: {
   draft: AgentDraft;
   onChange: (draft: AgentDraft) => void;
@@ -57,15 +53,6 @@ export function AgentConfigurationPanel({
   currentUserId: string | null;
   nameError: string | null;
   onNameChange: (name: string) => void;
-  compact?: boolean;
-  /** Builder sessions rebind the server-side carrier instead of only editing
-   *  the draft. Absent for the plain create flows, where the draft is the only
-   *  state that exists. */
-  onRuntimeSelect?: (runtimeId: string) => void;
-  /** A builder reply is in flight, so the server would refuse the rebind. */
-  runtimeSwitchPending?: boolean;
-  /** A rebind request is in flight. */
-  runtimeSwitchInFlight?: boolean;
 }) {
   const { t } = useT("agents");
   const conversationStartersSupported = useConfigStore(
@@ -78,13 +65,8 @@ export function AgentConfigurationPanel({
   const otherMembers = members.filter(
     (member) => member.user_id !== currentUserId,
   );
-  const runtimeLocked = runtimeSwitchPending || runtimeSwitchInFlight;
   const handleRuntimeSelect = (id: string) => {
     if (id === draft.runtimeId) return;
-    if (onRuntimeSelect) {
-      onRuntimeSelect(id);
-      return;
-    }
     // Model is per-runtime; clear it — and the per-model thinking / speed
     // overrides — on runtime change so the new runtime resolves its own
     // defaults instead of stale values.
@@ -92,21 +74,20 @@ export function AgentConfigurationPanel({
   };
 
   return (
-    <div className={cn("space-y-8", compact && "space-y-6")}>
+    <div className="space-y-8">
       <SettingsSection
         title={t(($) => $.creation_studio.sections.identity)}
       >
         <SettingsCard>
           <DraftFieldRow
-            compact={compact}
             label={t(($) => $.create_dialog.avatar.change_aria)}
           >
-            <div className={cn(!compact && "sm:flex sm:justify-end")}>
+            <div className="sm:flex sm:justify-end">
               <AvatarUploadControl
                 variant="agent"
                 value={draft.avatarUrl}
                 name={draft.name}
-                size={compact ? 52 : 56}
+                size={56}
                 onUploaded={(url) => set("avatarUrl", url)}
                 onEmojiSelected={(value) => set("avatarUrl", value)}
                 onClear={() => set("avatarUrl", null)}
@@ -114,13 +95,11 @@ export function AgentConfigurationPanel({
             </div>
           </DraftFieldRow>
           <AgentNameField
-            compact={compact}
             name={draft.name}
             error={nameError}
             onChange={onNameChange}
           />
           <DraftFieldRow
-            compact={compact}
             align="start"
             label={t(($) => $.create_dialog.description_label)}
             htmlFor="agent-create-description"
@@ -134,7 +113,7 @@ export function AgentConfigurationPanel({
                 value={draft.description}
                 onChange={(event) => set("description", event.target.value)}
                 placeholder={t(($) => $.create_dialog.description_placeholder)}
-                rows={compact ? 3 : 4}
+                rows={4}
                 // The create API rejects >255 characters with a 400. Cap the
                 // input and show the counter so the limit is visible before
                 // submitting, matching the settings page.
@@ -169,7 +148,7 @@ export function AgentConfigurationPanel({
               placeholder={t(
                 ($) => $.create_dialog.instructions.editor_placeholder,
               )}
-              rows={compact ? 9 : 12}
+              rows={12}
               className="min-h-44 resize-y font-mono text-label leading-6"
             />
           </DraftFieldRow>
@@ -195,9 +174,7 @@ export function AgentConfigurationPanel({
         description={t(($) => $.creation_studio.sections.execution_hint)}
       >
         <SettingsCard>
-          <div
-            className={cn("grid gap-4 px-4 py-4", !compact && "sm:grid-cols-2")}
-          >
+          <div className="grid gap-4 px-4 py-4 sm:grid-cols-2">
             <div className="min-w-0">
               <RuntimePicker
                 runtimes={runtimes}
@@ -206,25 +183,14 @@ export function AgentConfigurationPanel({
                 currentUserId={currentUserId}
                 selectedRuntimeId={draft.runtimeId}
                 onSelect={handleRuntimeSelect}
-                disabled={runtimeLocked}
               />
-              {/* A silently greyed-out picker is the worst version of this: the
-                  user reaches for it exactly when the current runtime has gone
-                  wrong, so say what unblocks it instead of just refusing. */}
-              {runtimeSwitchPending && (
-                <p className="mt-1.5 text-caption text-muted-foreground">
-                  {t(($) => $.creation_studio.builder.switch_runtime_pending)}
-                </p>
-              )}
             </div>
             <ModelDropdown
               runtimeId={selectedRuntime?.id ?? null}
               runtimeOnline={selectedRuntime?.status === "online"}
               value={draft.model}
               onChange={(value) => onChange(applyDraftModelChange(draft, value))}
-              // A successful switch clears the model, so an edit made while the
-              // rebind is in flight would be silently discarded.
-              disabled={!selectedRuntime || runtimeSwitchInFlight}
+              disabled={!selectedRuntime}
             />
           </div>
           {/* Both fields fail closed: they render only when the exact selected
@@ -235,7 +201,6 @@ export function AgentConfigurationPanel({
           <AgentExecutionOverrides
             draft={draft}
             runtime={selectedRuntime}
-            disabled={runtimeLocked}
             onChange={onChange}
           />
         </SettingsCard>
@@ -331,12 +296,10 @@ export function AgentNameField({
   name,
   error,
   onChange,
-  compact = false,
 }: {
   name: string;
   error: string | null;
   onChange: (name: string) => void;
-  compact?: boolean;
 }) {
   const { t } = useT("agents");
   const errorId = "agent-create-name-error";
@@ -350,7 +313,6 @@ export function AgentNameField({
 
   return (
     <DraftFieldRow
-      compact={compact}
       label={t(($) => $.create_dialog.name_label)}
       htmlFor="agent-create-name"
     >
@@ -388,12 +350,10 @@ export function AgentNameField({
 export function AgentExecutionOverrides({
   draft,
   runtime,
-  disabled = false,
   onChange,
 }: {
   draft: AgentDraft;
   runtime: RuntimeDevice | null;
-  disabled?: boolean;
   onChange: (draft: AgentDraft) => void;
 }) {
   const { t } = useT("agents");
@@ -407,7 +367,7 @@ export function AgentExecutionOverrides({
         provider={runtime?.provider ?? ""}
         model={draft.model}
         value={draft.thinkingLevel}
-        canEdit={!disabled}
+        canEdit
         onChange={(thinkingLevel) => onChange({ ...draft, thinkingLevel })}
       />
       <ServiceTierSettingField
@@ -417,7 +377,7 @@ export function AgentExecutionOverrides({
         provider={runtime?.provider ?? ""}
         model={draft.model}
         value={draft.serviceTier}
-        canEdit={!disabled}
+        canEdit
         onChange={(serviceTier) => onChange({ ...draft, serviceTier })}
       />
     </>

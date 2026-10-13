@@ -45,7 +45,7 @@ const (
 	//
 	// Naming several domains is not the "content inventory" this rules out. The
 	// ban is on restating the BODY's section headings, which the agent reads for
-	// free once it opens the skill. Nouns like "squad" or "autopilot" are how
+	// free once it opens the skill. Nouns like "project" or "runtime" are how
 	// the task arrives — they are trigger wording, and after MUL-6986 one
 	// description has to do the recall work eight used to.
 	maxDescriptionChars = 300
@@ -104,7 +104,7 @@ func TestBuiltinSkillsConformToTemplate(t *testing.T) {
 			// allowed-tools is the union across everything the skill now covers.
 			// Merging eight skills merged their tool declarations too, so the
 			// router declares Bash(git *) / Bash(gh *) — which only issues.md
-			// needs — while an agent is reading, say, autopilots.md. The
+			// needs — while an agent is reading, say, projects.md. The
 			// alternative is dropping them and regressing the issue workflow
 			// that legitimately runs `gh pr`. Recorded rather than silently
 			// widened: allowed-tools is a pre-approval list, and today the
@@ -272,7 +272,7 @@ func TestLegacyRedirectsFollowTheDaemonsBrief(t *testing.T) {
 	const legacy = "multica-working-on-issues"
 	svc := &TaskService{}
 
-	current := svc.BuiltinSkills("", false)
+	current := svc.BuiltinSkills(false)
 	if named(current, legacy) {
 		t.Errorf("a current daemon still receives %q; the stub only exists for briefs that name it", legacy)
 	}
@@ -280,20 +280,12 @@ func TestLegacyRedirectsFollowTheDaemonsBrief(t *testing.T) {
 		t.Fatalf("a current daemon does not receive %q", PlatformSkillName)
 	}
 
-	old := svc.BuiltinSkills("", true)
+	old := svc.BuiltinSkills(true)
 	if !named(old, legacy) {
 		t.Errorf("a pre-merge daemon does not receive %q, so its brief points at a skill that is not installed", legacy)
 	}
 	if !named(old, PlatformSkillName) {
 		t.Errorf("a pre-merge daemon lost %q; the redirect adds to the set, it does not replace it", PlatformSkillName)
-	}
-
-	// Mika's scoping is orthogonal to the redirect: both dimensions compose.
-	if !named(svc.BuiltinSkills(MikaSystemKey, true), "multica-onboarding") {
-		t.Errorf("Mika on a pre-merge daemon lost multica-onboarding")
-	}
-	if named(svc.BuiltinSkills("", true), "multica-onboarding") {
-		t.Errorf("the redirect path leaked multica-onboarding to an ordinary agent")
 	}
 
 	var stub AgentSkillData
@@ -338,8 +330,8 @@ func TestLegacyRedirectsFollowTheDaemonsBrief(t *testing.T) {
 // nine-into-one merge (MUL-6986).
 //
 // Before the merge, each domain advertised its own description in the
-// always-loaded listing, so an agent looking for "how does squad routing work"
-// matched on the word "squad". Collapsing to one skill removes seven of those
+// always-loaded listing, so an agent looking for "how do runtimes work"
+// matched on the word "runtime". Collapsing to one skill removes seven of those
 // eight surfaces, and the remaining description is the only thing an agent sees
 // before deciding to open the skill. If a domain's trigger word is not in it,
 // that domain became strictly harder to find than it was before — which is the
@@ -349,15 +341,13 @@ func TestLegacyRedirectsFollowTheDaemonsBrief(t *testing.T) {
 // trigger word ships contracts that nothing advertises.
 func TestPlatformSkillDescriptionNamesEveryDomain(t *testing.T) {
 	// reference file -> the word an agent would use when the task arrives.
-	// These are task nouns, not section headings: a task arrives as "set up an
-	// autopilot", never as "Core model".
+	// These are task nouns, not section headings: a task arrives as "set up a
+	// project", never as "Core model".
 	triggerWords := map[string]string{
 		"references/issues.md":       "issue",
 		"references/mentions.md":     "mention",
 		"references/plans.md":        "plan",
 		"references/agents.md":       "agent",
-		"references/squads.md":       "squad",
-		"references/autopilots.md":   "autopilot",
 		"references/projects.md":     "project",
 		"references/runtimes.md":     "runtime",
 		"references/skill-import.md": "skill import",
@@ -417,7 +407,7 @@ func TestPlatformSkillCoversPlatformContracts(t *testing.T) {
 			file: "SKILL.md",
 			want: []string{
 				// Must-fix from review: "load on demand" is not "load exactly
-				// one". A task that creates a squad, assigns it an issue and
+				// one". A task that creates a project, assigns it an issue and
 				// writes a mention needs three references, and wording that
 				// implies one would have the agent act on contracts it never
 				// read — the recall loss the merge is not allowed to cause.
@@ -429,8 +419,6 @@ func TestPlatformSkillCoversPlatformContracts(t *testing.T) {
 				"references/mentions.md",
 				"references/plans.md",
 				"references/agents.md",
-				"references/squads.md",
-				"references/autopilots.md",
 				"references/projects.md",
 				"references/runtimes.md",
 				"references/skill-import.md",
@@ -487,7 +475,7 @@ func TestPlatformSkillCoversPlatformContracts(t *testing.T) {
 				// playbook — if they leave, the brief pointer dangles.
 				"todo starts work now, backlog parks it",
 				"`--stage <N>`",
-				"wakes the parent assignee when a stage",
+				"it does not wake anyone when a stage closes",
 				"multica issue status <child-id> todo",
 				// MUL-6966 phase 1 retired the metadata write discipline
 				// along with the brief section that pointed here. What the
@@ -538,7 +526,7 @@ func TestPlatformSkillCoversPlatformContracts(t *testing.T) {
 		{
 			file: "references/mentions.md",
 			want: []string{
-				"(member|agent|squad|issue|all)/([0-9a-fA-F-]+|all)",
+				"(member|agent|issue|all)/([0-9a-fA-F-]+|all)",
 				"multica workspace member list --output json",
 				"enqueues a run for that agent",
 				"enqueues NOTHING",
@@ -548,9 +536,6 @@ func TestPlatformSkillCoversPlatformContracts(t *testing.T) {
 				"runtime_offline",
 				"coalesced",
 				"deferred",
-				// The autopilot-creator fallback is authorization only; an
-				// agent reading it as attribution would mis-report who ran.
-				"It is authorization only",
 			},
 		},
 		{
@@ -585,33 +570,6 @@ func TestPlatformSkillCoversPlatformContracts(t *testing.T) {
 			},
 		},
 		{
-			file: "references/squads.md",
-			want: []string{
-				"A squad is not an agent",
-				"squad's `leader_id` agent",
-				"squad members are not automatically fanned out",
-				"multica squad member set-role",
-				"mention://squad/<squad-id>",
-				"recording squad activity",
-				// The debugging entry point must stay a bounded two-step read
-				// (MUL-5442): a roots-only scan alone never returns reply
-				// bodies, where mention triggers and failure reasons live.
-				"--roots-only --summary",
-				"--thread <thread-id> --tail 30",
-				"scan the roots first, then open the threads",
-				// MUL-5850: the reads carry --compact, matching the brief and
-				// the router's bounded-reads rule.
-				"--roots-only --summary --compact --output json",
-				"--thread <thread-id> --tail 30 --compact --output json",
-			},
-			notWant: []string{
-				// MUL-5696: no unbounded comment pull. Both shapes contradict
-				// the brief's "two bounded reads, never one bulk pull".
-				"multica issue comment list <issue-id> --output json",
-				"--recent 10",
-			},
-		},
-		{
 			file: "references/plans.md",
 			want: []string{
 				"Nothing in a plan starts until an approver approves it",
@@ -620,23 +578,6 @@ func TestPlatformSkillCoversPlatformContracts(t *testing.T) {
 				"an agent cannot approve\nits own plan",
 				"At most one agent run is active on an issue",
 				"multica plan approve <issue>",
-			},
-		},
-		{
-			file: "references/autopilots.md",
-			want: []string{
-				"An autopilot is not an agent",
-				"create_issue",
-				"run_only",
-				"multica autopilot trigger-add <autopilot-id> --kind schedule",
-				"multica autopilot trigger <autopilot-id> --output json",
-				"Do not run `trigger`",
-				"webhook tokens",
-				"{{date}}",
-				"squad's leader agent",
-				// A schedule with no --timezone silently runs in UTC, which is
-				// the one wrong assumption here that recurs daily.
-				"runs in **UTC**",
 			},
 		},
 		{
@@ -792,38 +733,6 @@ func TestPlatformSkillTeachesTheParserContract(t *testing.T) {
 				}
 			}
 		})
-	}
-}
-
-// TestOnboardingSkillIsScopedToMika pins the agent-scoping rule (MUL-6986).
-//
-// The onboarding walkthrough is one agent's procedure, not a platform contract.
-// Shipping it to every agent put its description in every agent's always-loaded
-// skill listing and its body in every task workdir, to be usable by one.
-func TestOnboardingSkillIsScopedToMika(t *testing.T) {
-	const onboarding = "multica-onboarding"
-
-	ordinary := loadBuiltinSkills("")
-	if named(ordinary, onboarding) {
-		t.Errorf("an ordinary agent still receives %q", onboarding)
-	}
-	if !named(ordinary, PlatformSkillName) {
-		t.Errorf("an ordinary agent does not receive %q, which every agent needs", PlatformSkillName)
-	}
-
-	mika := loadBuiltinSkills(MikaSystemKey)
-	if !named(mika, onboarding) {
-		t.Errorf("Mika does not receive %q, which only Mika can use", onboarding)
-	}
-	if !named(mika, PlatformSkillName) {
-		t.Errorf("Mika lost %q; scoping must add to the universal set, not replace it", PlatformSkillName)
-	}
-
-	// The resolve path deliberately serves any built-in by id — the claim is
-	// the gate, and re-deriving the scope there would cost an agent read to
-	// re-answer a question the claim already answered.
-	if !named(allBuiltinSkillsForTest(), onboarding) {
-		t.Errorf("the unscoped set is missing %q; bundle resolution would 404 for Mika's daemon", onboarding)
 	}
 }
 

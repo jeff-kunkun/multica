@@ -38,10 +38,10 @@ describe("PageHeader title alignment", () => {
     const header = renderHeader(
       <CollectionPageHeader
         icon={Zap}
-        title="Autopilot"
+        title="Projects"
         count={2}
         actions={
-          <CollectionPageHeaderAction icon={Plus} label="New autopilot" />
+          <CollectionPageHeaderAction icon={Plus} label="New project" />
         }
       />,
     );
@@ -49,7 +49,7 @@ describe("PageHeader title alignment", () => {
     expectTitleLeftOfFreeSpace(header);
 
     const heading = within(header).getByRole("heading");
-    expect(heading.textContent).toBe("Autopilot");
+    expect(heading.textContent).toBe("Projects");
     expect(heading.parentElement).toHaveClass("flex-1");
   });
 

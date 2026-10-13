@@ -73,7 +73,7 @@ function seed(qc: QueryClient) {
   ] as never);
   qc.setQueryData(inboxListOptions("ws1").queryKey, [
     { id: "n1", issue_id: "i9", title: "Assigned to you", type: "issue_assigned" },
-    { id: "n2", issue_id: null, title: "Quick create failed", type: "quick_create_failed" },
+    { id: "n2", issue_id: null, title: "Agent blocked", type: "agent_blocked" },
   ] as never);
   const archiveRow = {
     workspace_id: "ws1", recipient_type: "member" as const, recipient_id: "user",
@@ -84,11 +84,11 @@ function seed(qc: QueryClient) {
   qc.setQueryData(archivedInboxPagesOptions("ws1", EMPTY_INBOX_FILTERS).queryKey, {
     pages: [{ items: [
       { ...archiveRow, id: "a1", issue_id: "i1", title: "Old assignment", type: "issue_assigned" },
-      { ...archiveRow, id: "a2", issue_id: null, title: "Archived note", type: "quick_create_failed" },
+      { ...archiveRow, id: "a2", issue_id: null, title: "Archived note", type: "agent_blocked" },
     ], hasMore: false, nextCursor: null }], pageParams: [null],
   });
   qc.setQueryData(archivedInboxLookupOptions("ws1", "a3").queryKey, {
-    items: [{ ...archiveRow, id: "a3", issue_id: null, title: "Deep archived note", type: "quick_create_failed" }],
+    items: [{ ...archiveRow, id: "a3", issue_id: null, title: "Deep archived note", type: "agent_blocked" }],
     hasMore: false, nextCursor: null,
   });
   qc.setQueryData(agentListOptions("ws1").queryKey, [
@@ -202,7 +202,7 @@ describe("useTabPresentation — live from cache", () => {
   it("inbox container: selected non-issue shows its display title", () => {
     expect(presentationOf("/acme/inbox?issue=n2")).toEqual({
       visual: { kind: "icon", icon: "Inbox" },
-      title: "Quick create failed",
+      title: "Agent blocked",
     });
   });
 
@@ -255,11 +255,11 @@ describe("useTabPresentation — live from cache", () => {
     );
 
     const { result } = renderHook(
-      () => useTabPresentation("/acme/inbox?issue=n7", "Autopilot paused"),
+      () => useTabPresentation("/acme/inbox?issue=n7", "Issue updated"),
       { wrapper },
     );
 
-    expect(result.current.title).toBe("Autopilot paused");
+    expect(result.current.title).toBe("Issue updated");
   });
 
   it("uses the container label when nothing is selected, persisted title or not", () => {

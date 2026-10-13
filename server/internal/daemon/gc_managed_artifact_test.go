@@ -179,45 +179,6 @@ func TestManagedArtifact_NeverDowngradesStrongerActions(t *testing.T) {
 	}
 }
 
-// The same hole existed for the other non-issue kinds. These reach a terminal
-// state quickly in practice, so they are bounded either way — but a run that
-// sits non-terminal should not pin the cache.
-func TestManagedArtifact_NonTerminalAutopilotAndQuickCreate(t *testing.T) {
-	t.Parallel()
-	runID := "bbbbbbbb-0000-0000-0000-000000000001"
-	taskID := "bbbbbbbb-0000-0000-0000-000000000002"
-
-	mux := http.NewServeMux()
-	mux.HandleFunc(fmt.Sprintf("/api/daemon/autopilot-runs/%s/gc-check", runID), func(w http.ResponseWriter, r *http.Request) {
-		_ = json.NewEncoder(w).Encode(map[string]any{"status": "running"})
-	})
-	mux.HandleFunc(fmt.Sprintf("/api/daemon/tasks/%s/gc-check", taskID), func(w http.ResponseWriter, r *http.Request) {
-		_ = json.NewEncoder(w).Encode(map[string]any{"status": "running"})
-	})
-	d := newGCTestDaemon(t, mux)
-
-	cases := []struct {
-		name string
-		meta *execenv.GCMeta
-	}{
-		{"autopilot-run", &execenv.GCMeta{Kind: execenv.GCKindAutopilotRun, AutopilotRunID: runID, WorkspaceID: "ws"}},
-		{"quick_create", &execenv.GCMeta{Kind: execenv.GCKindQuickCreate, TaskID: taskID, WorkspaceID: "ws"}},
-	}
-	for _, tc := range cases {
-		tc.meta.CompletedAt = time.Now().Add(-24 * time.Hour)
-		taskDir := createTaskDir(t, d.cfg.WorkspacesRoot, "ws", tc.name, tc.meta)
-		writeFile(t, filepath.Join(taskDir, sandboxBinRel, "codex"), 4096)
-
-		action := d.shouldCleanTaskDir(context.Background(), taskDir)
-		if action != gcActionCleanManagedArtifacts {
-			t.Fatalf("%s: want gcActionCleanManagedArtifacts, got %d", tc.name, action)
-		}
-		d.applyGCAction(taskDir, action, &gcStats{byPattern: map[string]int{}})
-		assertGone(t, taskDir, sandboxBinRel)
-		assertKept(t, taskDir, ".gc_meta.json")
-	}
-}
-
 // A task actively running on the directory keeps its cache — the fallback sits
 // behind the isActiveEnvRoot short-circuit.
 func TestManagedArtifact_ActiveEnvRootKeepsSandboxBin(t *testing.T) {

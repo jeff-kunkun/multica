@@ -8,7 +8,6 @@ import {
   ArrowUp,
   Calendar,
   CalendarClock,
-  CircleEqual,
   ExternalLink,
   FolderOpen,
   Link2,
@@ -50,7 +49,6 @@ import {
 } from "@multica/ui/components/ui/context-menu";
 import { copyText } from "@multica/ui/lib/clipboard";
 import type { UseIssueActionsResult } from "./use-issue-actions";
-import { PluginHookMenuItems, PluginModalMenuItems } from "../../plugins";
 import { useT } from "../../i18n";
 
 // Both Dropdown and Context menu wrappers expose an API-compatible surface
@@ -120,7 +118,6 @@ export function IssueActionsMenuItems({
     openSetParent,
     removeParent,
     openAddChild,
-    openMarkDuplicate,
     openDeleteConfirm,
   } = actions;
 
@@ -235,7 +232,7 @@ export function IssueActionsMenuItems({
       </P.Sub>
 
       {/* Assignee — closes this menu and hands off to the shared
-          AssigneePicker (members + agents + squads, with search and
+          AssigneePicker (members + agents, with search and
           permission checks). Keeps a single source of truth for the
           assignee UX across detail sidebar, board cards, and right-click /
           3-dot menus. */}
@@ -331,7 +328,7 @@ export function IssueActionsMenuItems({
       {/* Relationship actions live under "Relations" — a semantically explicit
           label (unlike the old "More") so the first level tells you what the
           submenu does. Holds parent/sub-issue links today, and will grow
-          (blocks, duplicates, related) as we add more relation types. */}
+          (blocks, related) as we add more relation types. */}
       <P.Sub>
         <P.SubTrigger>
           <Network className="h-3.5 w-3.5" />
@@ -356,22 +353,9 @@ export function IssueActionsMenuItems({
             <ArrowDown className="h-3.5 w-3.5" />
             {t(($) => $.actions.add_sub_issue)}
           </P.Item>
-          <P.Item onClick={openMarkDuplicate}>
-            <CircleEqual className="h-3.5 w-3.5" />
-            {t(($) => $.actions.mark_duplicate)}
-          </P.Item>
         </P.SubContent>
       </P.Sub>
 
-      {/* Manual plugin hooks. Rendered by the host rather than by the plugin
-          because the trigger decides identity: a `manual` call acts as the
-          person who picked it, so the entry has to live where the host can
-          prove somebody did. Renders nothing when no plugin declares one. */}
-      <PluginHookMenuItems issueId={issue.id} Item={P.Item} Separator={P.Separator} />
-      {/* Modal surfaces open from here for the same reason: a modal is a third
-          party's UI taking over the screen, so it opens because a person chose
-          it, never on the plugin's own initiative. */}
-      <PluginModalMenuItems issueId={issue.id} Item={P.Item} />
 
       <P.Separator />
 

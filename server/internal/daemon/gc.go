@@ -400,8 +400,8 @@ const (
 )
 
 // shouldCleanTaskDir decides whether a task directory should be removed.
-// Dispatches on meta.Kind so chat / autopilot / quick-create tasks each
-// follow the parent record that actually governs their lifecycle.
+// Dispatches on meta.Kind so issue and chat tasks each follow the parent
+// record that actually governs their lifecycle.
 func (d *Daemon) shouldCleanTaskDir(ctx context.Context, taskDir string) gcAction {
 	// A task currently running on this env root must never be reclaimed —
 	// not even on the done/cancelled or orphan-404 paths. A re-dispatched or
@@ -517,10 +517,6 @@ func (d *Daemon) shouldCleanTaskDirForKind(ctx context.Context, taskDir string, 
 		return d.gcDecisionIssue(ctx, taskDir, meta)
 	case execenv.GCKindChat:
 		return d.gcDecisionChat(ctx, taskDir, meta)
-	case execenv.GCKindAutopilotRun:
-		return d.gcDecisionAutopilotRun(ctx, taskDir, meta)
-	case execenv.GCKindQuickCreate:
-		return d.gcDecisionQuickCreate(ctx, taskDir, meta)
 	default:
 		// Unknown kind: fall back to mtime-based orphan cleanup so a future
 		// daemon writing a kind we don't recognize doesn't get insta-wiped.
@@ -756,95 +752,6 @@ func (d *Daemon) gcDecisionChat(ctx context.Context, taskDir string, meta *exece
 			)
 			return gcActionClean
 		}
-	}
-	return gcActionSkip
-}
-
-func (d *Daemon) gcDecisionAutopilotRun(ctx context.Context, taskDir string, meta *execenv.GCMeta) gcAction {
-	if strings.TrimSpace(meta.AutopilotRunID) == "" {
-		return d.orphanByMTime(taskDir, "empty autopilot run id")
-	}
-
-	status, err := d.client.GetAutopilotRunGCCheck(ctx, meta.AutopilotRunID)
-	if err != nil {
-		if isAccessNotFound(err) {
-			return d.orphanByMTime(taskDir, "autopilot run not accessible")
-		}
-		return gcActionSkip
-	}
-
-	// Terminal states per the autopilot_run CHECK constraint:
-	//   completed, failed, skipped — the run finished its own work.
-	//   issue_created            — the run produced an issue task that owns
-	//                              its own workdir; this run's workdir is
-	//                              dead weight from here on.
-	// Non-terminal: pending, running. Skip until they reach a terminal state
-	// rather than trying to bound them by mtime — long autopilots are real.
-	//
-	// An autopilot run's workdir is never reused: unlike issue/chat tasks there
-	// is no PriorWorkDir path that hands a later run the same directory, so every
-	// run gets a fresh one. Whatever the run produced already lives server-side
-	// (and an issue_created run handed its work to an issue task that owns its own
-	// envRoot). So the moment the run reaches a terminal state the directory is
-	// dead weight and we reclaim it immediately, without waiting out GCTTL — the
-	// same reasoning gcDecisionQuickCreate applies to quick-create dirs. The
-	// active-env-root short-circuit in shouldCleanTaskDir still protects a run
-	// that is mid-flight, so this can't pull the rug from under live work.
-	if isAutopilotRunTerminal(status.Status) {
-		d.logger.Info("gc: eligible for cleanup",
-			"dir", filepath.Base(taskDir),
-			"kind", "autopilot_run",
-			"autopilot_run", meta.AutopilotRunID,
-			"status", status.Status,
-		)
-		return gcActionClean
-	}
-	return gcActionSkip
-}
-
-// isAutopilotRunTerminal mirrors the run.status CHECK in
-// migrations/042_autopilot.up.sql. Non-terminal states are pending/running;
-// every other value the schema allows is a final resting state from the
-// daemon's POV (the run is no longer producing work in this workdir).
-func isAutopilotRunTerminal(status string) bool {
-	switch status {
-	case "completed", "failed", "skipped", "issue_created":
-		return true
-	default:
-		return false
-	}
-}
-
-func (d *Daemon) gcDecisionQuickCreate(ctx context.Context, taskDir string, meta *execenv.GCMeta) gcAction {
-	if strings.TrimSpace(meta.TaskID) == "" {
-		return d.orphanByMTime(taskDir, "empty task id")
-	}
-
-	status, err := d.client.GetTaskGCCheck(ctx, meta.TaskID)
-	if err != nil {
-		if isAccessNotFound(err) {
-			// Task row was hard-deleted, or token can't see it. Either way,
-			// fall back to mtime-gated orphan to stay safe across scoped
-			// tokens — same reasoning as the issue path.
-			return d.orphanByMTime(taskDir, "task not accessible")
-		}
-		return gcActionSkip
-	}
-
-	// Quick-create workdirs are not reused by the issue task that
-	// LinkTaskToIssue eventually attaches — that issue gets its own
-	// envRoot. So as soon as the quick-create task itself reaches a
-	// terminal state we can reclaim the directory immediately, without
-	// waiting for GCTTL. If the user wants to revisit, the linked issue
-	// has the agent's output already.
-	if isAgentTaskTerminal(status.Status) {
-		d.logger.Info("gc: eligible for cleanup",
-			"dir", filepath.Base(taskDir),
-			"kind", "quick_create",
-			"task", meta.TaskID,
-			"status", status.Status,
-		)
-		return gcActionClean
 	}
 	return gcActionSkip
 }

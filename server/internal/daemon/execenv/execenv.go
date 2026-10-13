@@ -160,18 +160,10 @@ type TaskContextForEnv struct {
 	ProjectDescription            string                  // durable project-level context, rendered into the brief's Project Context section
 	ProjectResources              []ProjectResourceForEnv // resources attached to the project
 	ChatSessionID                 string                  // non-empty for chat tasks
-	AutopilotRunID                string                  // non-empty for autopilot run_only tasks
-	AutopilotID                   string
-	AutopilotTitle                string
-	AutopilotDescription          string
-	AutopilotSource               string
-	AutopilotTriggerPayload       string
-	QuickCreatePrompt             string // non-empty for quick-create tasks
-	IsSquadLeader                 bool   // true when THIS TASK runs the agent in the squad-leader role (may exit silently on no_action); derived from the claim's is_leader_task / squad_id, never sniffed from instructions text (MUL-5811)
 	// WorkspaceContext is the workspace-level system prompt (workspace.context
 	// in the DB). Rendered into the brief as `## Workspace Context` when
 	// non-empty so every agent in the workspace sees the same shared context,
-	// regardless of issue / chat / autopilot / quick-create.
+	// regardless of issue / chat.
 	WorkspaceContext string
 	// IssueStatuses is the workspace's active CUSTOM status catalog from the
 	// claim payload (MUL-6460), in catalog order. Rendered into the brief's
@@ -1042,35 +1034,31 @@ func hydrateCodexSkills(codexHome string, workspaceSkills []SkillContextForEnv, 
 }
 
 // GCMetaKind identifies which kind of parent record a task workdir belongs to.
-// The GC loop dispatches its decision tree on this value so chat / autopilot /
-// quick-create tasks are no longer forced through the issue-centric path.
+// The GC loop dispatches its decision tree on this value so chat tasks are
+// not forced through the issue-centric path.
 type GCMetaKind string
 
 const (
-	GCKindIssue        GCMetaKind = "issue"
-	GCKindChat         GCMetaKind = "chat"
-	GCKindAutopilotRun GCMetaKind = "autopilot_run"
-	GCKindQuickCreate  GCMetaKind = "quick_create"
+	GCKindIssue GCMetaKind = "issue"
+	GCKindChat  GCMetaKind = "chat"
 )
 
 // GCMeta is persisted to .gc_meta.json inside the env root so the GC loop
 // can decide whether the directory is reclaimable. It is a discriminated
 // union keyed on Kind: only the parent ID field matching Kind is meaningful.
 // TaskID is also persisted for every new task so local reports never need to
-// recover task identity from the directory name; for quick-create it doubles
-// as the parent ID used by the GC status endpoint.
+// recover task identity from the directory name.
 //
 // Older meta files (pre-v2) lack the Kind field; readers must default empty
 // Kind to GCKindIssue for backward compatibility — only IssueID was written
 // before, and only issue-centric tasks ever produced a meta file.
 type GCMeta struct {
-	Kind           GCMetaKind `json:"kind,omitempty"`
-	IssueID        string     `json:"issue_id,omitempty"`
-	ChatSessionID  string     `json:"chat_session_id,omitempty"`
-	AutopilotRunID string     `json:"autopilot_run_id,omitempty"`
-	TaskID         string     `json:"task_id,omitempty"`
-	WorkspaceID    string     `json:"workspace_id"`
-	CompletedAt    time.Time  `json:"completed_at"`
+	Kind          GCMetaKind `json:"kind,omitempty"`
+	IssueID       string     `json:"issue_id,omitempty"`
+	ChatSessionID string     `json:"chat_session_id,omitempty"`
+	TaskID        string     `json:"task_id,omitempty"`
+	WorkspaceID   string     `json:"workspace_id"`
+	CompletedAt   time.Time  `json:"completed_at"`
 	// LocalDirectory marks tasks whose WorkDir pointed at a user-owned
 	// path rather than the synthesised envRoot/workdir. The GC loop honours
 	// this by never falling into the gcActionClean branch (which would
@@ -1134,7 +1122,7 @@ const ManagedEnvProvenanceManagedBy = "multica-daemon-managed-env"
 // env root is a daemon-managed, non-local_directory resumable env owned by a
 // specific workspace, conversation scope, and agent.
 //
-// Its whole reason to exist is timing. A squad-leader follow-up on the same
+// Its whole reason to exist is timing. A follow-up task on the same
 // issue can be claimed the instant the prior task completes — the server's
 // task-complete handler reconciles the follow-up and wakes the runtime before
 // the prior task's daemon handler writes .gc_meta.json. Keying reuse

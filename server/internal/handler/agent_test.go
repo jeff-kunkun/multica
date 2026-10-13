@@ -189,9 +189,8 @@ func TestListWorkspaceWorkingAgents(t *testing.T) {
 	workingAgentID := createHandlerTestAgent(t, "working-agents-running", []byte(`{}`))
 	queuedAgentID := createHandlerTestAgent(t, "working-agents-queued", []byte(`{}`))
 
-	// An agent owned by someone else keeps the squad fixtures mutually
-	// exclusive: it can lead a squad without accidentally satisfying the
-	// "leader owned by me" branch.
+	// An agent owned by someone else authors the fixture issues so they do
+	// not accidentally satisfy the "created by me" relation.
 	var outsiderUserID string
 	if err := testPool.QueryRow(ctx, `
 		INSERT INTO "user" (name, email)
@@ -224,63 +223,10 @@ func TestListWorkspaceWorkingAgents(t *testing.T) {
 		testPool.Exec(ctx, `DELETE FROM agent WHERE id = $1`, outsiderAgentID)
 	})
 
-	insertedSquadIDs := make([]string, 0, 3)
-	insertSquad := func(name, leaderID string) string {
-		t.Helper()
-		var squadID string
-		if err := testPool.QueryRow(ctx, `
-			INSERT INTO squad (
-				workspace_id, name, description, leader_id, creator_id
-			)
-			VALUES ($1, $2, '', $3, $4)
-			RETURNING id
-		`,
-			testWorkspaceID,
-			name,
-			leaderID,
-			testUserID,
-		).Scan(&squadID); err != nil {
-			t.Fatalf("insert squad %q: %v", name, err)
-		}
-		insertedSquadIDs = append(insertedSquadIDs, squadID)
-		return squadID
-	}
-	directMemberSquadID := insertSquad(
-		"working-agents-direct-member-squad",
-		outsiderAgentID,
-	)
-	ownedLeaderSquadID := insertSquad(
-		"working-agents-owned-leader-squad",
-		workingAgentID,
-	)
-	ownedMemberSquadID := insertSquad(
-		"working-agents-owned-member-squad",
-		outsiderAgentID,
-	)
-	if _, err := testPool.Exec(ctx, `
-		INSERT INTO squad_member (squad_id, member_type, member_id)
-		VALUES
-			($1, 'member', $2),
-			($3, 'agent', $4)
-	`,
-		directMemberSquadID,
-		testUserID,
-		ownedMemberSquadID,
-		workingAgentID,
-	); err != nil {
-		t.Fatalf("insert squad involvement fixtures: %v", err)
-	}
-	t.Cleanup(func() {
-		for _, squadID := range insertedSquadIDs {
-			testPool.Exec(ctx, `DELETE FROM squad WHERE id = $1`, squadID)
-		}
-	})
-
 	// Insert source issues directly: this test is about the working-agent
 	// projection, so it must not inherit unrelated CreateIssue validation or
-	// side effects. The fixtures cover every direct My Issues relation plus
-	// all three squad-involvement branches.
-	insertedIssueIDs := make([]string, 0, 6)
+	// side effects. The fixtures cover every direct My Issues relation.
+	insertedIssueIDs := make([]string, 0, 3)
 	insertIssue := func(
 		title, creatorType, creatorID string,
 		assigneeType, assigneeID any,
@@ -317,15 +263,6 @@ func TestListWorkspaceWorkingAgents(t *testing.T) {
 		"member",
 		testUserID,
 	)
-	// An issue runs one task at a time, so the autopilot run gets its own
-	// issue with the same relations as assignedIssueID.
-	autopilotIssueID := insertIssue(
-		"working-agent-autopilot",
-		"member",
-		testUserID,
-		"member",
-		testUserID,
-	)
 	ownedAgentIssueID := insertIssue(
 		"working-agent-owned-agent",
 		"agent",
@@ -340,72 +277,36 @@ func TestListWorkspaceWorkingAgents(t *testing.T) {
 		nil,
 		nil,
 	)
-	directMemberSquadIssueID := insertIssue(
-		"working-agent-direct-member-squad",
-		"agent",
-		outsiderAgentID,
-		"squad",
-		directMemberSquadID,
-	)
-	ownedLeaderSquadIssueID := insertIssue(
-		"working-agent-owned-leader-squad",
-		"agent",
-		outsiderAgentID,
-		"squad",
-		ownedLeaderSquadID,
-	)
-	ownedMemberSquadIssueID := insertIssue(
-		"working-agent-owned-member-squad",
-		"agent",
-		outsiderAgentID,
-		"squad",
-		ownedMemberSquadID,
-	)
 	t.Cleanup(func() {
 		for _, issueID := range insertedIssueIDs {
 			testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issueID)
 		}
 	})
 	chatSessionID := createHandlerTestChatSession(t, workingAgentID)
-	autopilotID := insertListTestAutopilot(t, workingAgentID, "working-agent-source-filter")
-	var autopilotRunID string
-	if err := testPool.QueryRow(ctx, `
-		INSERT INTO autopilot_run (autopilot_id, source, status)
-		VALUES ($1, 'manual', 'running')
-		RETURNING id
-	`, autopilotID).Scan(&autopilotRunID); err != nil {
-		t.Fatalf("insert autopilot run: %v", err)
-	}
 
-	// Nine running tasks on one agent: six issue relations, chat, autopilot,
-	// and quick-create (no source FK). The autopilot task also carries issue_id
-	// to prove source precedence keeps it out of type=issue.
-	insertedTaskIDs := make([]string, 0, 10)
+	// Five running tasks on one agent: three issue relations, chat, and a
+	// task with no source FK.
+	insertedTaskIDs := make([]string, 0, 6)
 	for _, fixture := range []struct {
-		agentID        string
-		status         string
-		issueID        any
-		chatSessionID  any
-		autopilotRunID any
+		agentID       string
+		status        string
+		issueID       any
+		chatSessionID any
 	}{
-		{workingAgentID, "running", assignedIssueID, nil, nil},
-		{workingAgentID, "running", ownedAgentIssueID, nil, nil},
-		{workingAgentID, "running", outsideIssueID, nil, nil},
-		{workingAgentID, "running", directMemberSquadIssueID, nil, nil},
-		{workingAgentID, "running", ownedLeaderSquadIssueID, nil, nil},
-		{workingAgentID, "running", ownedMemberSquadIssueID, nil, nil},
-		{workingAgentID, "running", nil, chatSessionID, nil},
-		{workingAgentID, "running", autopilotIssueID, nil, autopilotRunID},
-		{workingAgentID, "running", nil, nil, nil},
-		{queuedAgentID, "queued", nil, nil, nil},
+		{workingAgentID, "running", assignedIssueID, nil},
+		{workingAgentID, "running", ownedAgentIssueID, nil},
+		{workingAgentID, "running", outsideIssueID, nil},
+		{workingAgentID, "running", nil, chatSessionID},
+		{workingAgentID, "running", nil, nil},
+		{queuedAgentID, "queued", nil, nil},
 	} {
 		var taskID string
 		if err := testPool.QueryRow(ctx, `
 			INSERT INTO agent_task_queue (
 				agent_id, runtime_id, status, priority, issue_id,
-				chat_session_id, autopilot_run_id, started_at
+				chat_session_id, started_at
 			)
-			VALUES ($1, $2, $3, 0, $4, $5, $6, now())
+			VALUES ($1, $2, $3, 0, $4, $5, now())
 			RETURNING id
 		`,
 			fixture.agentID,
@@ -413,7 +314,6 @@ func TestListWorkspaceWorkingAgents(t *testing.T) {
 			fixture.status,
 			fixture.issueID,
 			fixture.chatSessionID,
-			fixture.autopilotRunID,
 		).Scan(&taskID); err != nil {
 			t.Fatalf("insert %s task: %v", fixture.status, err)
 		}
@@ -433,60 +333,35 @@ func TestListWorkspaceWorkingAgents(t *testing.T) {
 	}{
 		{
 			name:      "all sources",
-			wantCount: 9,
+			wantCount: 5,
 			wantIssueIDs: []string{
 				assignedIssueID,
-				autopilotIssueID,
 				ownedAgentIssueID,
 				outsideIssueID,
-				directMemberSquadIssueID,
-				ownedLeaderSquadIssueID,
-				ownedMemberSquadIssueID,
 			},
 		},
 		{
 			name:      "issue",
 			query:     "?type=issue",
-			wantCount: 6,
+			wantCount: 3,
 			wantIssueIDs: []string{
 				assignedIssueID,
 				ownedAgentIssueID,
 				outsideIssueID,
-				directMemberSquadIssueID,
-				ownedLeaderSquadIssueID,
-				ownedMemberSquadIssueID,
 			},
-		},
-		{
-			name:         "autopilot",
-			query:        "?type=autopilot",
-			wantCount:    1,
-			wantIssueIDs: []string{autopilotIssueID},
 		},
 		{name: "chat", query: "?type=chat", wantCount: 1, wantIssueIDs: []string{}},
 		{
-			name:      "mine defaults to any",
-			query:     "?type=issue&scope=mine",
-			wantCount: 5,
-			wantIssueIDs: []string{
-				assignedIssueID,
-				ownedAgentIssueID,
-				directMemberSquadIssueID,
-				ownedLeaderSquadIssueID,
-				ownedMemberSquadIssueID,
-			},
+			name:         "mine defaults to any",
+			query:        "?type=issue&scope=mine",
+			wantCount:    2,
+			wantIssueIDs: []string{assignedIssueID, ownedAgentIssueID},
 		},
 		{
-			name:      "mine any",
-			query:     "?type=issue&scope=mine&relation=any",
-			wantCount: 5,
-			wantIssueIDs: []string{
-				assignedIssueID,
-				ownedAgentIssueID,
-				directMemberSquadIssueID,
-				ownedLeaderSquadIssueID,
-				ownedMemberSquadIssueID,
-			},
+			name:         "mine any",
+			query:        "?type=issue&scope=mine&relation=any",
+			wantCount:    2,
+			wantIssueIDs: []string{assignedIssueID, ownedAgentIssueID},
 		},
 		{
 			name:         "mine assigned",
@@ -501,15 +376,10 @@ func TestListWorkspaceWorkingAgents(t *testing.T) {
 			wantIssueIDs: []string{assignedIssueID},
 		},
 		{
-			name:      "mine involved",
-			query:     "?type=issue&scope=mine&relation=involved",
-			wantCount: 4,
-			wantIssueIDs: []string{
-				ownedAgentIssueID,
-				directMemberSquadIssueID,
-				ownedLeaderSquadIssueID,
-				ownedMemberSquadIssueID,
-			},
+			name:         "mine involved",
+			query:        "?type=issue&scope=mine&relation=involved",
+			wantCount:    1,
+			wantIssueIDs: []string{ownedAgentIssueID},
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

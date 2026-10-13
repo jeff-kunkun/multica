@@ -32,51 +32,6 @@ func (q *Queries) AbandonIssueSourceContext(ctx context.Context, arg AbandonIssu
 	return result.RowsAffected(), nil
 }
 
-const attachIssueSourceContext = `-- name: AttachIssueSourceContext :one
-UPDATE issue_source_context
-SET issue_id = $1,
-    state = 'attached',
-    attached_at = now()
-WHERE workspace_id = $2
-  AND id = $3
-  AND state = 'pending'
-  AND origin_task_id = $4
-RETURNING id, workspace_id, issue_id, origin_task_id, source_issue_id, anchor_comment_id, captured_by_user_id, snapshot_version, snapshot, capture_digest, state, captured_at, attached_at
-`
-
-type AttachIssueSourceContextParams struct {
-	IssueID      pgtype.UUID `json:"issue_id"`
-	WorkspaceID  pgtype.UUID `json:"workspace_id"`
-	ID           pgtype.UUID `json:"id"`
-	OriginTaskID pgtype.UUID `json:"origin_task_id"`
-}
-
-func (q *Queries) AttachIssueSourceContext(ctx context.Context, arg AttachIssueSourceContextParams) (IssueSourceContext, error) {
-	row := q.db.QueryRow(ctx, attachIssueSourceContext,
-		arg.IssueID,
-		arg.WorkspaceID,
-		arg.ID,
-		arg.OriginTaskID,
-	)
-	var i IssueSourceContext
-	err := row.Scan(
-		&i.ID,
-		&i.WorkspaceID,
-		&i.IssueID,
-		&i.OriginTaskID,
-		&i.SourceIssueID,
-		&i.AnchorCommentID,
-		&i.CapturedByUserID,
-		&i.SnapshotVersion,
-		&i.Snapshot,
-		&i.CaptureDigest,
-		&i.State,
-		&i.CapturedAt,
-		&i.AttachedAt,
-	)
-	return i, err
-}
-
 const claimSourceContextObjectIntentForCleanup = `-- name: ClaimSourceContextObjectIntentForCleanup :one
 UPDATE issue_source_context_object_intent AS intent
 SET state = 'deleting',
@@ -406,40 +361,6 @@ func (q *Queries) GetIssueSourceContextByIssue(ctx context.Context, arg GetIssue
 	return i, err
 }
 
-const getPendingIssueSourceContextByOriginTask = `-- name: GetPendingIssueSourceContextByOriginTask :one
-SELECT id, workspace_id, issue_id, origin_task_id, source_issue_id, anchor_comment_id, captured_by_user_id, snapshot_version, snapshot, capture_digest, state, captured_at, attached_at FROM issue_source_context
-WHERE workspace_id = $1
-  AND origin_task_id = $2
-  AND state = 'pending'
-FOR UPDATE
-`
-
-type GetPendingIssueSourceContextByOriginTaskParams struct {
-	WorkspaceID  pgtype.UUID `json:"workspace_id"`
-	OriginTaskID pgtype.UUID `json:"origin_task_id"`
-}
-
-func (q *Queries) GetPendingIssueSourceContextByOriginTask(ctx context.Context, arg GetPendingIssueSourceContextByOriginTaskParams) (IssueSourceContext, error) {
-	row := q.db.QueryRow(ctx, getPendingIssueSourceContextByOriginTask, arg.WorkspaceID, arg.OriginTaskID)
-	var i IssueSourceContext
-	err := row.Scan(
-		&i.ID,
-		&i.WorkspaceID,
-		&i.IssueID,
-		&i.OriginTaskID,
-		&i.SourceIssueID,
-		&i.AnchorCommentID,
-		&i.CapturedByUserID,
-		&i.SnapshotVersion,
-		&i.Snapshot,
-		&i.CaptureDigest,
-		&i.State,
-		&i.CapturedAt,
-		&i.AttachedAt,
-	)
-	return i, err
-}
-
 const listAbandonedSourceContextsForCleanup = `-- name: ListAbandonedSourceContextsForCleanup :many
 SELECT isc.id, isc.workspace_id, isc.issue_id, isc.origin_task_id, isc.source_issue_id, isc.anchor_comment_id, isc.captured_by_user_id, isc.snapshot_version, isc.snapshot, isc.capture_digest, isc.state, isc.captured_at, isc.attached_at
 FROM issue_source_context isc
@@ -745,47 +666,4 @@ func (q *Queries) SourceContextObjectIntentIsReferenced(ctx context.Context, arg
 	var referenced bool
 	err := row.Scan(&referenced)
 	return referenced, err
-}
-
-const transferPendingIssueSourceContextTask = `-- name: TransferPendingIssueSourceContextTask :one
-UPDATE issue_source_context
-SET origin_task_id = $1
-WHERE workspace_id = $2
-  AND id = $3
-  AND state = 'pending'
-  AND origin_task_id = $4
-RETURNING id, workspace_id, issue_id, origin_task_id, source_issue_id, anchor_comment_id, captured_by_user_id, snapshot_version, snapshot, capture_digest, state, captured_at, attached_at
-`
-
-type TransferPendingIssueSourceContextTaskParams struct {
-	NewTaskID   pgtype.UUID `json:"new_task_id"`
-	WorkspaceID pgtype.UUID `json:"workspace_id"`
-	ID          pgtype.UUID `json:"id"`
-	OldTaskID   pgtype.UUID `json:"old_task_id"`
-}
-
-func (q *Queries) TransferPendingIssueSourceContextTask(ctx context.Context, arg TransferPendingIssueSourceContextTaskParams) (IssueSourceContext, error) {
-	row := q.db.QueryRow(ctx, transferPendingIssueSourceContextTask,
-		arg.NewTaskID,
-		arg.WorkspaceID,
-		arg.ID,
-		arg.OldTaskID,
-	)
-	var i IssueSourceContext
-	err := row.Scan(
-		&i.ID,
-		&i.WorkspaceID,
-		&i.IssueID,
-		&i.OriginTaskID,
-		&i.SourceIssueID,
-		&i.AnchorCommentID,
-		&i.CapturedByUserID,
-		&i.SnapshotVersion,
-		&i.Snapshot,
-		&i.CaptureDigest,
-		&i.State,
-		&i.CapturedAt,
-		&i.AttachedAt,
-	)
-	return i, err
 }

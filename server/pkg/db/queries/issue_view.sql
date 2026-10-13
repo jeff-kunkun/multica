@@ -79,8 +79,8 @@ WHERE pinned_item.item_type = 'view'
 
 -- name: DeletePrivateIssueViewsByOwner :exec
 -- Member removal: a departed member's private views are unreachable by every
--- remaining member while still consuming their quota — same rule as private
--- quick actions. Shared views are workspace furniture and survive. Pins on
+-- remaining member while still consuming their quota. Shared views are
+-- workspace furniture and survive. Pins on
 -- the deleted views fall in the same statement (see DeleteIssueView).
 WITH deleted AS (
     DELETE FROM issue_view

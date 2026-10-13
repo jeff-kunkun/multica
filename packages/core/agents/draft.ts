@@ -19,7 +19,7 @@ export type { AgentPermissionScope };
 
 /**
  * The in-progress configuration of an agent being created. Shared by every
- * creation surface (manual, duplicate, AI builder) so the same field set is
+ * creation surface (manual, duplicate) so the same field set is
  * validated, seeded and submitted the same way regardless of entry point.
  */
 export interface AgentDraft {
@@ -90,8 +90,7 @@ export function applyDraftModelChange(
 
 /**
  * Mirrors the server's `utf8.RuneCountInString` check (agent.go:1013). The
- * textarea's `maxLength` covers typing and pasting, but a duplicated agent or
- * an AI-builder draft can seed a longer value programmatically — without this
+ * textarea's `maxLength` covers typing and pasting, but a duplicated agent can seed a longer value programmatically — without this
  * the create button would submit into a guaranteed 400.
  */
 export function isDraftDescriptionWithinLimit(description: string): boolean {

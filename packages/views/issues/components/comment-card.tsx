@@ -61,7 +61,6 @@ import { useCommentAnnotations } from "./use-comment-annotations";
 import { useAttachmentVersions } from "./deliverables/attachment-versions";
 import { VersionBadge } from "./deliverables/version-badge";
 import { useRunCommentMotion } from "./use-run-comment-motion";
-import { WakeupSourceChip } from "./wakeup-source-chip";
 
 const commentActionClassName =
   "text-muted-foreground aria-expanded:bg-transparent aria-expanded:hover:bg-muted dark:aria-expanded:hover:bg-muted/50";
@@ -733,9 +732,6 @@ function CommentRow({
         <SteerBadge issueId={issueId} entry={entry} />
         {runHeader}
 
-        {entry.actor_type === "agent" && entry.source_task_id && (
-          <WakeupSourceChip issueId={issueId} taskId={entry.source_task_id} />
-        )}
 
         {isResolution && (
           <span className="text-caption font-medium text-success">
@@ -1005,13 +1001,6 @@ export function AgentRunComment({ run, standalone = false, commentProps, enterin
 // CommentCard — One Card per thread (parent + all replies flat inside)
 // ---------------------------------------------------------------------------
 
-// A quick action posts an ordinary comment and is rendered as one (MUL-5465).
-// It briefly had a collapsed one-line header that expanded to reveal the
-// prompt, on the theory that repeated runs would bury the discussion. In
-// practice the prompts are short, the header restated what the body already
-// said, and the disclosure only added a click between the reader and the text.
-// Provenance still lives on `quick_action_id`; it is data, not decoration.
-
 function CommentCardImpl({
   issueId,
   runs = EMPTY_COMMENT_RUNS,
@@ -1235,9 +1224,6 @@ function CommentCardImpl({
 
                   <SteerBadge issueId={issueId} entry={entry} />
                   {renderRuns(entry.id, "header")}
-                  {entry.actor_type === "agent" && entry.source_task_id && (
-                    <WakeupSourceChip issueId={issueId} taskId={entry.source_task_id} />
-                  )}
                 </>
               )}
 

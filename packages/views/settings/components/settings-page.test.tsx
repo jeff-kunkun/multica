@@ -3,10 +3,6 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { SidebarProvider, useSidebar } from "@multica/ui/components/ui/sidebar";
 import { configStore } from "@multica/core/config";
-import {
-  BILLING_WORKSPACE_SUBSCRIPTIONS_FLAG,
-  PLUGINS_V1_FLAG,
-} from "@multica/core/feature-flags";
 import { renderWithI18n } from "../../test/i18n";
 
 // This file tests the settings SHELL — the chrome around the tabs — so every
@@ -24,11 +20,8 @@ vi.mock("./notifications-tab", stub("NotificationsTab"));
 vi.mock("./labels-tab", stub("LabelsTab"));
 vi.mock("./issue-statuses-tab", stub("IssueStatusesTab"));
 vi.mock("./properties-tab", stub("PropertiesTab"));
-vi.mock("./quick-actions-tab", stub("QuickActionsTab"));
 vi.mock("./keyboard-shortcuts-tab", stub("KeyboardShortcutsTab"));
-vi.mock("./plugins-tab", stub("PluginsTab"));
 vi.mock("./mcp-tab", stub("McpTab"));
-vi.mock("./billing-tab", stub("BillingTab"));
 
 const shell = vi.hoisted(() => ({
   role: "owner" as "owner" | "admin" | "member",
@@ -139,56 +132,6 @@ describe("SettingsPage nav trigger", () => {
       screen.queryByRole("button", { name: "Toggle left sidebar" }),
     ).not.toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Settings" })).toBeInTheDocument();
-  });
-});
-
-describe("SettingsPage Plugin feature flag", () => {
-  it("hides Plugins and falls back from a direct tab URL when disabled", () => {
-    navigationState.search = "tab=plugins";
-
-    renderWithI18n(<SettingsPage />);
-
-    expect(
-      screen.queryByRole("link", { name: "Plugins" }),
-    ).not.toBeInTheDocument();
-    expect(screen.queryByText("PluginsTab")).not.toBeInTheDocument();
-    expect(screen.getByText("AccountTab")).toBeInTheDocument();
-  });
-
-  it("shows and mounts Plugins when explicitly enabled", () => {
-    navigationState.search = "tab=plugins";
-    configStore.getState().setFeatureFlags({ [PLUGINS_V1_FLAG]: true });
-
-    renderWithI18n(<SettingsPage />);
-
-    expect(screen.getByRole("link", { name: "Plugins" })).toBeInTheDocument();
-    expect(screen.getByText("PluginsTab")).toBeInTheDocument();
-  });
-});
-
-describe("SettingsPage workspace subscription feature flag", () => {
-  it("hides Billing and falls back to Workspace General from a direct URL", () => {
-    navigationState.search = "tab=billing";
-
-    renderWithI18n(<SettingsPage />);
-
-    expect(
-      screen.queryByRole("link", { name: "Billing" }),
-    ).not.toBeInTheDocument();
-    expect(screen.queryByText("BillingTab")).not.toBeInTheDocument();
-    expect(screen.getByText("WorkspaceTab")).toBeInTheDocument();
-  });
-
-  it("shows and mounts Billing only when explicitly enabled", () => {
-    navigationState.search = "tab=billing";
-    configStore.getState().setFeatureFlags({
-      [BILLING_WORKSPACE_SUBSCRIPTIONS_FLAG]: true,
-    });
-
-    renderWithI18n(<SettingsPage />);
-
-    expect(screen.getByRole("link", { name: "Billing" })).toBeInTheDocument();
-    expect(screen.getByText("BillingTab")).toBeInTheDocument();
   });
 });
 
@@ -330,12 +273,4 @@ describe("SettingsPage search", () => {
     );
   });
 
-  it("does not offer pages hidden by feature flags", () => {
-    renderWithI18n(<SettingsPage />);
-    fireEvent.change(
-      screen.getByRole("searchbox", { name: "Search settings" }),
-      { target: { value: "plugins" } },
-    );
-    expect(screen.getByText("No matching settings")).toBeInTheDocument();
-  });
 });

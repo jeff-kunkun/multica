@@ -4,10 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const state = vi.hoisted(() => ({
-  user: {
-    id: "user-1",
-    onboarded_at: "2026-01-01T00:00:00Z",
-  } as { id: string; onboarded_at: string | null } | null,
+  user: { id: "user-1" } as { id: string } | null,
   isAuthLoading: false,
   workspace: null as { id: string; slug: string } | null,
   workspacesBySlug: {} as Record<string, { id: string; slug: string } | null>,
@@ -48,7 +45,6 @@ vi.mock("@multica/core/paths", () => ({
   ),
   paths: {
     login: () => "/login",
-    onboarding: () => "/onboarding",
   },
 }));
 
@@ -58,10 +54,6 @@ vi.mock("@multica/core/platform", () => ({
 
 vi.mock("@multica/views/workspace/no-access-page", () => ({
   NoAccessPage: () => <div data-testid="no-access" />,
-}));
-
-vi.mock("@multica/views/workspace/welcome-after-onboarding", () => ({
-  WelcomeAfterOnboarding: () => null,
 }));
 
 vi.mock("@multica/views/workspace/use-workspace-seen", () => ({
@@ -108,10 +100,7 @@ function renderLayout(slug = "acme") {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  state.user = {
-    id: "user-1",
-    onboarded_at: "2026-01-01T00:00:00Z",
-  };
+  state.user = { id: "user-1" };
   state.isAuthLoading = false;
   state.workspace = null;
   state.workspacesBySlug = {};

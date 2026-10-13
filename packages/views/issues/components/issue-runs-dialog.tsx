@@ -44,7 +44,6 @@ import {
 } from "./issue-run-timeline";
 import { canRetryRun, RetryRunButton } from "./retry-run-button";
 import { useStatusLabel, useTriggerText } from "./task-run-labels";
-import { WakeupRunLabel } from "./wakeup-source-chip";
 
 // The issue's runs laid out in time — the surface the execution log's header
 // and spend strip open.
@@ -567,24 +566,6 @@ function formatTick(v: number): string {
   return Number.isInteger(v) ? `$${v}` : formatUsd(v);
 }
 
-/**
- * A run's trigger, with a wakeup run naming its rule's condition ("Wakeup ·
- * When a linked PR's CI finishes") the way the execution log's rows do. The
- * rule lookup mounts only for wakeup runs.
- */
-export function RunTriggerLabel({
-  task,
-  fallback,
-  children,
-}: {
-  task: AgentTask;
-  fallback: string;
-  children: (label: string) => React.ReactNode;
-}) {
-  if (!task.wakeup_id) return <>{children(fallback)}</>;
-  return <WakeupRunLabel task={task} fallback={fallback} render={children} />;
-}
-
 function PeakLabel({
   run,
   className,
@@ -601,9 +582,7 @@ function PeakLabel({
       style={style}
     >
       <span className="font-medium text-foreground">+{formatUsd(run.usage?.cost ?? 0)}</span>
-      <RunTriggerLabel task={run.task} fallback={trigger}>
-        {(label) => <span className="truncate text-muted-foreground">{label}</span>}
-      </RunTriggerLabel>
+      <span className="truncate text-muted-foreground">{trigger}</span>
     </span>
   );
 }
@@ -629,9 +608,7 @@ function RunHoverCard({ run }: { run: TimelineRun }) {
   ];
   return (
     <div className="flex min-w-0 flex-col gap-1">
-      <RunTriggerLabel task={run.task} fallback={trigger}>
-        {(label) => <span className="truncate font-medium">{label}</span>}
-      </RunTriggerLabel>
+      <span className="truncate font-medium">{trigger}</span>
       <span className="flex min-w-0 items-center gap-1.5 text-micro text-muted-foreground">
         <ActorAvatar actorType="agent" actorId={run.task.agent_id} size="xs" />
         <span className="truncate">{[getActorName("agent", run.task.agent_id), ...facts].join(" · ")}</span>
@@ -779,9 +756,8 @@ function RunListRow({
     hour12: false,
   }).format(run.startMs);
   // Comment-triggered runs quote what the person said; structural triggers
-  // (assignment, autopilot, retry labels) read as plain labels, and so do
-  // wakeup runs, whose comment id points at the thread the rule lives in.
-  const quoted = !task.wakeup_id && !!task.trigger_summary && !!task.trigger_comment_id;
+  // (assignment, retry labels) read as plain labels.
+  const quoted = !!task.trigger_summary && !!task.trigger_comment_id;
   // Same localized reason the sidebar rows hover with — never the raw
   // `task.error`, which is operator-facing English (#7411).
   const reason =
@@ -803,19 +779,15 @@ function RunListRow({
       </span>
       {/* One line keeps the list scannable; the full text is in the native
           tooltip and, whole and wrapped, at the top of the transcript. */}
-      <RunTriggerLabel task={task} fallback={label}>
-        {(text) => (
-          <span
-            title={text}
-            className={cn(
-              "min-w-0 flex-1 truncate text-label",
-              run.usage || run.active ? "text-foreground" : "text-muted-foreground",
-            )}
-          >
-            {text}
-          </span>
+      <span
+        title={label}
+        className={cn(
+          "min-w-0 flex-1 truncate text-label",
+          run.usage || run.active ? "text-foreground" : "text-muted-foreground",
         )}
-      </RunTriggerLabel>
+      >
+        {label}
+      </span>
       <ArrowRight aria-hidden className="size-3 shrink-0 text-faint-foreground" />
       <span className="flex w-28 shrink-0 items-center gap-1.5">
         <ActorAvatar actorType="agent" actorId={task.agent_id} size="xs" enableHoverCard />

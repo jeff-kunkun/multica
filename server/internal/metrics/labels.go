@@ -66,47 +66,26 @@ var businessMetricLabels = map[string][]string{
 	"multica_issue_metadata_mutation_duration_seconds": {labelOp, labelResult},
 
 	// PR3 funnel / community / commercial.
-	"multica_signup_total":                             {labelSignupSource},
-	"multica_workspace_created_total":                  {labelSource},
-	"multica_team_invite_sent_total":                   {},
-	"multica_team_invite_accepted_total":               {},
-	"multica_onboarding_started_total":                 {labelPlatform},
-	"multica_onboarding_questionnaire_submitted_total": {},
-	"multica_onboarding_source_submitted_total":        {},
-	"multica_onboarding_completed_total":               {labelPath},
-	"multica_cloud_waitlist_joined_total":              {},
-	"multica_issue_created_total":                      {labelSource, labelPlatform},
-	"multica_chat_message_sent_total":                  {labelPlatform},
-	"multica_agent_created_total":                      {labelRuntimeMode, labelSource},
-	"multica_squad_created_total":                      {},
-	"multica_autopilot_created_total":                  {labelCadence},
-	"multica_issue_executed_total":                     {labelSource},
-	"multica_runtime_registered_total":                 {labelRuntimeMode, labelProvider},
-	"multica_runtime_ready_total":                      {labelRuntimeMode, labelProvider},
-	"multica_runtime_ready_seconds":                    {labelRuntimeMode, labelProvider},
-	"multica_runtime_failed_total":                     {labelRuntimeMode, labelProvider, labelFailureReason, labelRecoverable},
-	"multica_runtime_offline_total":                    {labelRuntimeMode, labelProvider},
-	"multica_runtime_gc_skipped_total":                 {labelReason},
-	"multica_daemon_ws_message_received_total":         {labelKind},
-	"multica_autopilot_run_started_total":              {labelCadence, labelTriggerKind},
-	"multica_autopilot_run_terminal_total":             {labelCadence, labelTriggerKind, labelTerminalStatus},
-	"multica_autopilot_run_skipped_total":              {labelCadence, labelReason},
-	"multica_webhook_delivery_total":                   {labelProvider, labelStatus},
-	"multica_webhook_rate_limited_total":               {labelGate},
-	"multica_email_rate_limited_total":                 {labelAction, labelGate},
-	"multica_github_event_received_total":              {labelEventKind, labelAction},
-	"multica_github_pr_review_total":                   {labelResult},
-	"multica_cloudruntime_request_total":               {labelOp, labelStatus},
-	"multica_cloudruntime_request_duration_seconds":    {labelOp},
-	"multica_feedback_submitted_total":                 {labelKind, labelPlatform},
-	"multica_contact_sales_submitted_total":            {labelSource},
-	"multica_chat_output_local_path_total":             {labelKind},
-	"multica_entitlement_cache_total":                  {labelOutcome},
-	"multica_entitlement_refresh_total":                {labelOutcome},
-	"multica_entitlement_refresh_duration_seconds":     {labelOutcome},
-	"multica_entitlement_decision_total":               {labelGate, labelAction, labelReason},
-	"multica_entitlement_version_regression_total":     {},
-	"multica_autopilot_quota_decision_total":           {labelAction, labelSource, labelResult},
+	"multica_signup_total":                     {labelSignupSource},
+	"multica_workspace_created_total":          {labelSource},
+	"multica_team_invite_sent_total":           {},
+	"multica_team_invite_accepted_total":       {},
+	"multica_issue_created_total":              {labelSource, labelPlatform},
+	"multica_chat_message_sent_total":          {labelPlatform},
+	"multica_agent_created_total":              {labelRuntimeMode, labelSource},
+	"multica_issue_executed_total":             {labelSource},
+	"multica_runtime_registered_total":         {labelRuntimeMode, labelProvider},
+	"multica_runtime_ready_total":              {labelRuntimeMode, labelProvider},
+	"multica_runtime_ready_seconds":            {labelRuntimeMode, labelProvider},
+	"multica_runtime_failed_total":             {labelRuntimeMode, labelProvider, labelFailureReason, labelRecoverable},
+	"multica_runtime_offline_total":            {labelRuntimeMode, labelProvider},
+	"multica_runtime_gc_skipped_total":         {labelReason},
+	"multica_daemon_ws_message_received_total": {labelKind},
+	"multica_email_rate_limited_total":         {labelAction, labelGate},
+	"multica_github_event_received_total":      {labelEventKind, labelAction},
+	"multica_github_pr_review_total":           {labelResult},
+	"multica_feedback_submitted_total":         {labelKind, labelPlatform},
+	"multica_chat_output_local_path_total":     {labelKind},
 }
 
 var forbiddenMetricLabels = map[string]struct{}{
@@ -128,14 +107,11 @@ var forbiddenMetricLabels = map[string]struct{}{
 
 var (
 	knownSources = map[string]string{
-		"issue":           "issue",
-		"chat":            "chat",
-		"autopilot":       "autopilot",
-		"autopilot_issue": "autopilot_issue",
-		"quick_create":    "quick_create",
-		"manual":          "manual",
-		"api":             "api",
-		"other":           "other",
+		"issue":  "issue",
+		"chat":   "chat",
+		"manual": "manual",
+		"api":    "api",
+		"other":  "other",
 	}
 	knownRuntimeModes = map[string]string{
 		"local":   "local",
@@ -257,7 +233,7 @@ const (
 	// RuntimeLookupSourceRuntimeAPI is every other runtime-scoped API call:
 	// reads, management, and the read-access gate itself.
 	RuntimeLookupSourceRuntimeAPI = "runtime_api"
-	// RuntimeLookupSourceIssue covers issue create / assign / quick-create and
+	// RuntimeLookupSourceIssue covers issue create / assign and
 	// the trigger-preview readiness checks.
 	RuntimeLookupSourceIssue = "issue"
 	// RuntimeLookupSourceComment covers mention and sub-issue readiness checks
@@ -265,11 +241,6 @@ const (
 	RuntimeLookupSourceComment = "comment"
 	// RuntimeLookupSourceChat covers the pre-send readiness check on chat.
 	RuntimeLookupSourceChat = "chat"
-	// RuntimeLookupSourceAutopilot covers autopilot admission and dispatch.
-	RuntimeLookupSourceAutopilot = "autopilot"
-	// RuntimeLookupSourceSourceContext covers the source-context quick-create
-	// capability gates, including the deliberate post-copy recheck.
-	RuntimeLookupSourceSourceContext = "source_context"
 	// RuntimeLookupSourceTask covers task analytics context and the usage
 	// provider backfill.
 	RuntimeLookupSourceTask = "task"
@@ -303,8 +274,6 @@ func AllRuntimeLookupSources() []string {
 		RuntimeLookupSourceIssue,
 		RuntimeLookupSourceComment,
 		RuntimeLookupSourceChat,
-		RuntimeLookupSourceAutopilot,
-		RuntimeLookupSourceSourceContext,
 		RuntimeLookupSourceTask,
 		RuntimeLookupSourceOther,
 	}

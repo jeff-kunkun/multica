@@ -9,11 +9,7 @@ import {
   workspaceKeys,
   workspaceListOptions,
 } from "@multica/core/workspace/queries";
-import {
-  paths,
-  resolvePostAuthDestination,
-  useHasOnboarded,
-} from "@multica/core/paths";
+import { paths, resolvePostAuthDestination } from "@multica/core/paths";
 import { api } from "@multica/core/api";
 import type { Workspace } from "@multica/core/types";
 import {
@@ -32,17 +28,16 @@ import { useT } from "@multica/views/i18n";
 
 /**
  * Pick where a logged-in user with no explicit `?next=` should land.
- * Un-onboarded users with pending invitations on their email get routed to
- * the batch /invitations page; everyone else falls through to the standard
- * resolver. A network blip on listMyInvitations is non-fatal — we fall
+ * Users without a workspace who have pending invitations on their email get
+ * routed to the batch /invitations page; everyone else falls through to the
+ * standard resolver. A network blip on listMyInvitations is non-fatal — we fall
  * through rather than trap the user on an error screen.
  */
 async function resolveLoggedInDestination(
   qc: QueryClient,
-  hasOnboarded: boolean,
   workspaces: Workspace[],
 ): Promise<string> {
-  if (!hasOnboarded) {
+  if (workspaces.length === 0) {
     try {
       const invites = await api.listMyInvitations();
       if (invites.length > 0) {
@@ -53,7 +48,7 @@ async function resolveLoggedInDestination(
       // fall through
     }
   }
-  return resolvePostAuthDestination(workspaces, hasOnboarded);
+  return resolvePostAuthDestination(workspaces);
 }
 
 function LoginPageContent() {
@@ -78,7 +73,6 @@ function LoginPageContent() {
 
   const [desktopToken, setDesktopToken] = useState<string | null>(null);
   const [desktopError, setDesktopError] = useState("");
-  const hasOnboarded = useHasOnboarded();
 
   // Latched once auth has been observed settled as logged-out on this page.
   // Any `user` that appears afterwards came from the login form in this
@@ -86,7 +80,7 @@ function LoginPageContent() {
   const settledLoggedOutRef = useRef(false);
 
   // Already authenticated ON ARRIVAL — honor ?next= or fall back to first
-  // workspace (or /onboarding if the user has none). Skip this entire path
+  // workspace (or workspace creation if the user has none). Skip this entire path
   // when the user arrived to authorize the CLI.
   useEffect(() => {
     if (isLoading) return;
@@ -132,21 +126,17 @@ function LoginPageContent() {
     void qc
       .ensureQueryData(workspaceListOptions())
       .catch(() => [] as Workspace[])
-      .then((list) => resolveLoggedInDestination(qc, hasOnboarded, list))
+      .then((list) => resolveLoggedInDestination(qc, list))
       .then((dest) => router.replace(dest));
-  }, [isLoading, user, router, nextUrl, cliCallbackRaw, isDesktopHandoff, hasOnboarded, qc]);
+  }, [isLoading, user, router, nextUrl, cliCallbackRaw, isDesktopHandoff, qc]);
 
   const handleSuccess = async () => {
-    // Read the latest user snapshot directly — the closure's `hasOnboarded`
-    // was captured before login completed and would be stale here.
-    const currentUser = useAuthStore.getState().user;
-    const onboarded = currentUser?.onboarded_at != null;
     if (nextUrl) {
       router.push(nextUrl);
       return;
     }
     const list = qc.getQueryData<Workspace[]>(workspaceKeys.list()) ?? [];
-    router.push(await resolveLoggedInDestination(qc, onboarded, list));
+    router.push(await resolveLoggedInDestination(qc, list));
   };
 
   // Build Google OAuth state: encode platform, next URL, and CLI callback

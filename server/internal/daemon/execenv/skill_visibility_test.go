@@ -89,11 +89,9 @@ func TestRenderedSkillListsHideDisableModelInvocationSkills(t *testing.T) {
 	t.Parallel()
 
 	ctx := TaskContextForEnv{
-		IssueID:           "issue-1",
-		QuickCreatePrompt: "create something",
-		AutopilotRunID:    "run-1",
-		AgentName:         "Eve",
-		AgentID:           "eve-1",
+		IssueID:   "issue-1",
+		AgentName: "Eve",
+		AgentID:   "eve-1",
 		AgentSkills: []SkillContextForEnv{
 			{
 				Name:        "Visible Skill",
@@ -120,8 +118,6 @@ Hidden body.`,
 	// The brief is now the only Multica-rendered skill listing, for every kind.
 	for _, kind := range []TaskContextForEnv{
 		{IssueID: ctx.IssueID, AgentName: ctx.AgentName, AgentID: ctx.AgentID, AgentSkills: ctx.AgentSkills},
-		{QuickCreatePrompt: ctx.QuickCreatePrompt, AgentName: ctx.AgentName, AgentID: ctx.AgentID, AgentSkills: ctx.AgentSkills},
-		{AutopilotRunID: ctx.AutopilotRunID, AgentName: ctx.AgentName, AgentID: ctx.AgentID, AgentSkills: ctx.AgentSkills},
 		{ChatSessionID: "c-1", AgentName: ctx.AgentName, AgentID: ctx.AgentID, AgentSkills: ctx.AgentSkills},
 	} {
 		out := buildMetaSkillContent("codex", kind)

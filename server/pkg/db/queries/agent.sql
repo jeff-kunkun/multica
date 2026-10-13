@@ -10,7 +10,8 @@ ORDER BY created_at ASC;
 
 -- name: ListAllAgentsAnyKind :many
 -- Every agent row in the workspace, INCLUDING `kind = 'system'` execution
--- carriers (agent builder sessions) that ListAllAgents deliberately hides.
+-- carriers (left over from the retired agent builder) that ListAllAgents
+-- deliberately hides.
 --
 -- Only for surfaces that aggregate over raw `agent_task_queue` / task_usage
 -- rows, which carry no kind filter of their own: a system carrier runs real
@@ -38,20 +39,6 @@ FOR UPDATE;
 SELECT * FROM agent
 WHERE id = $1 AND workspace_id = $2 AND kind = 'user';
 
--- name: LockAgentForAutopilotAssignment :one
--- Serializes creating, retargeting, or resuming an active Autopilot with
--- Runtime teardown. Teardown takes FOR UPDATE on this same Agent row before it
--- clears runtime_id and pauses matching Autopilots. FOR SHARE also stabilizes
--- runtime_id and archived_at against concurrent ordinary Agent updates. The
--- shared lock makes the
--- two outcomes exhaustive:
---   * assignment commits first, then teardown sees and pauses it; or
---   * teardown commits first, then assignment re-reads runtime_id=NULL and
---     rejects the active Autopilot.
-SELECT * FROM agent
-WHERE id = $1 AND workspace_id = $2 AND kind = 'user'
-FOR SHARE;
-
 -- name: CreateAgent :one
 INSERT INTO agent (
     workspace_id, name, description, avatar_url, runtime_mode,
@@ -67,53 +54,12 @@ INSERT INTO agent (
 )
 RETURNING *;
 
--- name: CreateAgentBuilder :one
--- One hidden builder agent per creation session. Keeping the execution carrier
--- session-scoped freezes its model/runtime configuration when multiple builder
--- flows are open concurrently, while `kind = 'system'` keeps it out of normal
--- agent lists and assignment surfaces.
-INSERT INTO agent (
-    workspace_id, name, description, runtime_mode, runtime_config, runtime_id,
-    visibility, permission_mode, max_concurrent_tasks, owner_id, instructions,
-    custom_env, custom_args, model, kind, system_key
-) VALUES (
-    @workspace_id, @name, '', @runtime_mode, '{}'::jsonb, @runtime_id,
-    'private', 'private', 1, @owner_id, @instructions,
-    '{}'::jsonb, '[]'::jsonb, sqlc.narg('model'), 'system', @system_key
-)
-RETURNING *;
-
 -- name: DeleteSystemAgentByID :exec
--- Builder sessions own their hidden execution agent. Deleting the session
--- removes that carrier and its task rows; the kind guard prevents this cleanup
--- path from ever deleting a user-authored agent.
+-- Chat sessions left over from the retired agent builder own a hidden carrier
+-- agent. Deleting the session removes that carrier; the kind guard prevents
+-- this cleanup path from ever deleting a user-authored agent.
 DELETE FROM agent
 WHERE id = $1 AND kind = 'system' AND system_key LIKE 'agent_builder:%';
-
--- name: RebindAgentBuilderRuntime :one
--- Re-points a builder carrier at another runtime mid-conversation. The carrier
--- is what SendDirectChatMessage reads to stamp a chat task's runtime_id, so this
--- UPDATE is the only thing that actually moves subsequent replies; the live-draft
--- picker alone never did. model is reset wholesale because model ids are
--- per-runtime — the new runtime resolves its own default instead of inheriting an
--- id it may not serve. The kind/system_key guard mirrors DeleteSystemAgentByID so
--- this path can never touch a user-authored agent.
---
--- Callers MUST hold LockChatSessionForRuntimeBind on the owning chat_session for
--- the whole transaction, otherwise a concurrent send can stamp a task with the
--- pre-switch runtime after the pending-task check has already passed (MUL-5163).
---
--- chat_session.runtime_id is deliberately left untouched: the daemon only resumes
--- a stored provider session when chat_session.runtime_id matches the claiming
--- task's runtime (see the chat claim path), so leaving the old pointer in place is
--- exactly what makes the new runtime start a fresh provider session.
-UPDATE agent
-SET runtime_id = @runtime_id,
-    runtime_mode = @runtime_mode,
-    model = sqlc.narg('model'),
-    updated_at = now()
-WHERE id = @id AND kind = 'system' AND system_key LIKE 'agent_builder:%'
-RETURNING *;
 
 -- name: UpdateAgent :one
 UPDATE agent SET
@@ -189,8 +135,8 @@ RETURNING *;
 --
 -- System agents are exempt: they belong to the workspace rather than to the
 -- member who happened to create them, and the workspace's entry point runs
--- through one. Archiving Mika because a colleague left would take the default
--- agent away from everyone. Its runtime does go offline with the departure, so
+-- through one. Archiving one because a colleague left would take it away from
+-- everyone. Its runtime does go offline with the departure, so
 -- it needs rebinding — but it stays visible and recoverable instead of
 -- vanishing.
 UPDATE agent
@@ -285,9 +231,7 @@ LIMIT @page_limit;
 -- reviewer-loop dedup (HasPendingTaskForIssueAndAgent) can tell a pending run
 -- against an OLD head apart from a fresh request against a NEW head (TEN-356).
 -- Empty/absent head_sha leaves context NULL, preserving pre-TEN-356 behavior for
--- issues with no linked PR. Issue-linked tasks never hit quick-create context
--- parsing (parseQuickCreateContext short-circuits on IssueID.Valid), so this
--- key rides harmlessly alongside.
+-- issues with no linked PR.
 -- id is minted by the application as a UUIDv7 (pkg/dbid) so consecutive
 -- enqueues cluster in a narrow contiguous primary-key range instead of
 -- scattering across the B-tree. On a table with existing v4 ids, that range
@@ -297,8 +241,8 @@ LIMIT @page_limit;
 -- The same pattern is used by every INSERT listed in pkg/dbid's write table.
 INSERT INTO agent_task_queue (
     agent_id, runtime_id, issue_id, status, priority, trigger_comment_id,
-    coalesced_comment_ids, trigger_summary, force_fresh_session, is_leader_task, handoff_note,
-    squad_id, context, originator_user_id, accountable_user_id,
+    coalesced_comment_ids, trigger_summary, force_fresh_session, handoff_note,
+    context, originator_user_id, accountable_user_id,
     originator_source, delegated_from_task_id, rule_version_id, rerun_of_task_id, trigger_evidence_kind, trigger_evidence_ref_id,
     id
 )
@@ -307,9 +251,7 @@ SELECT
     COALESCE(sqlc.narg(coalesced_comment_ids)::uuid[], '{}'),
     sqlc.narg(trigger_summary),
     COALESCE(sqlc.narg('force_fresh_session')::boolean, FALSE),
-    COALESCE(sqlc.narg('is_leader_task')::boolean, FALSE),
     sqlc.narg(handoff_note),
-    sqlc.narg(squad_id),
     CASE
         WHEN COALESCE(sqlc.narg('head_sha')::text, '') <> ''
         THEN jsonb_build_object('head_sha', sqlc.narg('head_sha')::text)
@@ -326,49 +268,6 @@ SELECT
     COALESCE(sqlc.narg('id')::uuid, gen_random_uuid())
 WHERE lock_task_owner_rows($1, $3, $2)
 RETURNING *;
-
--- name: CreateQuickCreateTask :one
--- Fenced against workspace teardown: lock_task_owner_rows (migration 284)
--- locks the owners' workspace rows in the writer's own transaction and returns
--- false once they are gone, so this statement writes no row instead of stranding
--- a task in a workspace that has just been deleted (MUL-5999).
--- Quick-create tasks have no issue / chat / autopilot link; the entire job
--- description (prompt, requester, workspace) lives in context JSONB. The
--- daemon detects this variant via context.type == "quick_create".
--- The requester who opened the quick-create modal is a direct_human originator
--- and accountable; attribution provenance is stamped so this path is not a
--- NULL-source enqueue bypass (MUL-4302 §2).
-INSERT INTO agent_task_queue (
-    agent_id, runtime_id, issue_id, status, priority, context, originator_user_id,
-    accountable_user_id,
-    originator_source, trigger_evidence_kind, trigger_evidence_ref_id,
-    id
-)
-SELECT
-    $1, $2, NULL, 'queued', $3, $4,
-    sqlc.narg(originator_user_id),
-    sqlc.narg(accountable_user_id),
-    sqlc.narg(originator_source),
-    sqlc.narg(trigger_evidence_kind),
-    sqlc.narg(trigger_evidence_ref_id),
-    COALESCE(sqlc.narg('id')::uuid, gen_random_uuid())
-WHERE lock_task_owner_rows($1, NULL, $2)
-RETURNING *;
-
--- name: LinkTaskToIssue :exec
--- Fenced against workspace teardown: lock_task_owner_rows (migration 284)
--- locks the owners' workspace rows in the writer's own transaction and returns
--- false once they are gone, so this statement writes no row instead of stranding
--- a task in a workspace that has just been deleted (MUL-5999).
--- Attaches the issue a quick-create task produced back to the task row, once
--- the agent has finished and the issue exists. Guarded by `issue_id IS NULL`
--- so this never overwrites an issue id that was set at task creation (only
--- quick-create tasks land here unset). Fixes the activity row staying on
--- "Creating issue" forever after completion.
-UPDATE agent_task_queue
-SET issue_id = $2
-WHERE id = $1 AND issue_id IS NULL
-  AND lock_task_owner_rows(NULL, $2, NULL);
 
 -- name: CreateRetryTask :one
 -- Fenced against workspace teardown: lock_task_owner_rows (migration 284)
@@ -400,10 +299,9 @@ WHERE id = $1 AND issue_id IS NULL
 -- handler offers that workdir to the fresh session (MUL-7034). Keep the CASE
 -- WHEN predicates in sync with resumeUnsafeFailureReason and the resume lookup
 -- blacklists. attempt is
--- incremented; max_attempts, trigger_comment_id, coalesced_comment_ids,
--- is_leader_task, and squad_id are inherited so the retried task receives the
--- parent's complete planned comment batch and keeps the same squad-role
--- provenance. delivered_comment_ids intentionally stays at its '{}' default:
+-- incremented; max_attempts, trigger_comment_id and coalesced_comment_ids
+-- are inherited so the retried task receives the parent's complete planned
+-- comment batch. delivered_comment_ids intentionally stays at its '{}' default:
 -- the child must earn its own delivery receipt at claim time.
 --
 -- originator_user_id is inherited for A2A/audit: the user behind the
@@ -445,18 +343,18 @@ WHERE id = $1 AND issue_id IS NULL
 -- task API (MUL-4910). The Go retryAttemptCeiling already refuses to raise a
 -- disabled (max_attempts<=1) task, so this only ever widens, never revives.
 INSERT INTO agent_task_queue (
-    agent_id, runtime_id, issue_id, chat_session_id, autopilot_run_id,
+    agent_id, runtime_id, issue_id, chat_session_id,
     status, priority, trigger_comment_id, coalesced_comment_ids, trigger_summary, context,
     session_id, work_dir,
-    attempt, max_attempts, parent_task_id, force_fresh_session, is_leader_task,
-    squad_id, originator_user_id, accountable_user_id,
+    attempt, max_attempts, parent_task_id, force_fresh_session,
+    originator_user_id, accountable_user_id,
     originator_source, delegated_from_task_id, rule_version_id,
     trigger_evidence_kind, trigger_evidence_ref_id, retry_of_task_id,
     chat_input_task_id, fire_at,
     handoff_note, id
 )
 SELECT
-    p.agent_id, p.runtime_id, p.issue_id, p.chat_session_id, p.autopilot_run_id,
+    p.agent_id, p.runtime_id, p.issue_id, p.chat_session_id,
     CASE WHEN sqlc.narg(fire_at)::timestamptz IS NOT NULL THEN 'deferred' ELSE 'queued' END,
     CASE WHEN p.chat_session_id IS NOT NULL THEN GREATEST(p.priority, 3) ELSE p.priority END,
     p.trigger_comment_id, p.coalesced_comment_ids, p.trigger_summary, p.context,
@@ -464,8 +362,6 @@ SELECT
     p.work_dir,
     p.attempt + 1, COALESCE(sqlc.narg(max_attempts)::int, p.max_attempts), p.id,
     p.failure_reason IS NOT DISTINCT FROM 'codex_semantic_inactivity',
-    p.is_leader_task,
-    p.squad_id,
     p.originator_user_id,
     p.accountable_user_id,
     p.originator_source, p.delegated_from_task_id, p.rule_version_id,
@@ -481,49 +377,6 @@ ON CONFLICT (issue_id, agent_id, (COALESCE(comment_thread_id, '00000000-0000-000
        OR (status = 'deferred' AND context->>'channel_issue_media_pending' = 'true')
 DO NOTHING
 RETURNING *;
-
--- name: CreateManualQuickCreateRetryTask :one
--- A human retry of an issue-less quick-create is a new direct_human run, not
--- an automatic retry. It preserves the immutable quick-create context JSON
--- (including source_context_id), but deliberately starts a fresh session and
--- records rerun_of_task_id so attribution/reporting can distinguish the human
--- action from CreateRetryTask's retry_of_task_id lineage.
---
--- The caller locks and transfers the pending issue_source_context in the same
--- transaction. lock_task_owner_rows provides the usual workspace-teardown
--- fence; a deleted workspace therefore yields pgx.ErrNoRows and no task.
-INSERT INTO agent_task_queue (
-    agent_id, runtime_id, status, priority, context,
-    force_fresh_session, is_leader_task, squad_id,
-    originator_user_id, accountable_user_id,
-    originator_source, rerun_of_task_id, id
-)
-SELECT
-    p.agent_id, p.runtime_id, 'queued', p.priority, p.context,
-    TRUE, p.is_leader_task, p.squad_id,
-    sqlc.arg(actor_user_id), sqlc.arg(actor_user_id),
-    'direct_human', p.id, sqlc.arg(new_task_id)
-FROM agent_task_queue p
-WHERE p.id = sqlc.arg(source_task_id)
-  AND p.status = 'failed'
-  AND p.issue_id IS NULL
-  AND p.chat_session_id IS NULL
-  AND p.autopilot_run_id IS NULL
-  AND lock_task_owner_rows(p.agent_id, p.issue_id, p.runtime_id)
-RETURNING *;
-
--- name: DeleteUnstartedQuickCreateRetryTask :execrows
--- FailTask creates an automatic retry in the same transaction as the parent
--- terminal write. An issue-less source-context retry has no pending-slot
--- unique key, so a competing retry or an already-attached context can make
--- the subsequent attach-authority transfer lose after this row was inserted.
--- Remove only that still-uncommitted child and let the parent's failure commit.
-DELETE FROM agent_task_queue
-WHERE id = sqlc.arg(task_id)
-  AND status IN ('queued', 'deferred')
-  AND issue_id IS NULL
-  AND chat_session_id IS NULL
-  AND autopilot_run_id IS NULL;
 
 -- name: CancelAgentTasksByIssue :many
 -- Cancels every active task on the issue and returns the affected rows so the
@@ -616,7 +469,7 @@ WHERE id = $1;
 -- name: GetAgentTaskStatus :one
 -- Hot-path status polling needs only the task status and the owning agent's
 -- workspace for authorization. Keep this independent of optional source links
--- (issue, chat session, autopilot run) so it needs no source-entity lookup.
+-- (issue, chat session) so it needs no source-entity lookup.
 SELECT atq.status, a.workspace_id
 FROM agent_task_queue atq
 JOIN agent a ON a.id = atq.agent_id
@@ -643,9 +496,8 @@ WHERE parent_task_id = $1
 -- agent_id is NOT NULL on every task row (and ON DELETE CASCADE, so the agent
 -- always exists), which makes this the universal tenant guard for
 -- user-initiated cancellation — independent of which optional source FK
--- (issue / chat_session / autopilot_run) happens to be set. It is what lets
--- run_only autopilot tasks and quick_create tasks (whose issue does not exist
--- yet) be cancelled at all, instead of 404-ing on a missing source FK.
+-- (issue / chat_session) happens to be set, so a task with no source link
+-- can still be cancelled instead of 404-ing on a missing source FK.
 SELECT atq.* FROM agent_task_queue atq
 JOIN agent a ON a.id = atq.agent_id
 WHERE atq.id = $1 AND a.workspace_id = $2;
@@ -657,10 +509,8 @@ WHERE atq.id = $1 AND a.workspace_id = $2;
 -- office rule; agent_task_queue_one_active_per_issue_idx settles races).
 -- Chat tasks (issue_id IS NULL) use chat_session_id for per-agent
 -- serialization instead.
--- Quick-create tasks have no issue / chat / autopilot link, so they serialize on
--- "any other quick-create-shaped task" (all four FKs NULL) for the same agent —
--- otherwise a user mashing the create button could fire concurrent quick-creates
--- whose completion lookup would race over "most recent issue by this agent".
+-- A task with no issue / chat / (legacy) autopilot link serializes on any other
+-- such unlinked task for the same agent.
 UPDATE agent_task_queue
 SET status = 'dispatched',
     dispatched_at = now(),
@@ -877,22 +727,6 @@ WHERE id = $1
   AND started_at IS NULL
 RETURNING *;
 
--- name: StartAgentTask :one
--- Legacy single-winner transition; generation-aware callers lock the claim first.
--- Transitions a task to running. Accepts either 'dispatched' (the normal
--- claim → run flow) or 'waiting_local_directory' (the daemon held the row in
--- a wait state while another task owned the local_directory path lock; once
--- the lock was acquired the daemon flips here). wait_reason is cleared on
--- the transition so a future read can't conflate "currently waiting" with
--- "previously waited".
-UPDATE agent_task_queue
-SET status = 'running',
-    started_at = now(),
-    wait_reason = NULL,
-    prepare_lease_expires_at = NULL
-WHERE agent_task_queue.id = $1 AND agent_task_queue.status IN ('dispatched', 'waiting_local_directory')
-RETURNING *;
-
 -- name: LockAgentTaskStartClaim :one
 -- Serialize start/replay with reclaim and cancellation. A stale delivery must
 -- never start or acknowledge a newer claim, even on the same runtime.
@@ -1036,14 +870,6 @@ RETURNING *;
 -- emptyContentRe and historyMessageLocatorRe in pkg/taskfailure/resume.go.
 -- Keep the three in sync.
 --
--- Triage runs are excluded from all three CTEs (MUL-7189 §5.6). A triage run
--- and the execution run that follows accept are the same (agent_id, issue_id)
--- pair, so without this the first execution run would resume the conversation
--- in which the agent was deciding whether the entry was worth keeping. From the
--- execution side an accepted issue is a new issue, and it starts cold. The
--- exclusion is symmetric: a triage run does not resume an execution session
--- either, which is what force_fresh_session on the triage task already ensures.
---
 -- retired_sessions is the explicit half of the same rule (GH #6066). The
 -- per-session latest state above can only judge sessions that some row still
 -- POINTS at, so it cannot see a session a run deliberately abandoned: a fresh
@@ -1056,13 +882,11 @@ WITH retired_sessions AS (
     SELECT DISTINCT r.retired_session_id AS session_id
     FROM agent_task_queue r
     WHERE r.agent_id = $1 AND r.issue_id = $2
-      AND COALESCE(r.context->>'type', '') <> 'triage'
       AND r.retired_session_id IS NOT NULL
 ), resume_overflow_at AS (
     SELECT MAX(COALESCE(t.completed_at, t.started_at, t.dispatched_at, t.created_at)) AS at
     FROM agent_task_queue t
     WHERE t.agent_id = $1 AND t.issue_id = $2
-      AND COALESCE(t.context->>'type', '') <> 'triage'
       AND t.status = 'failed'
       AND (
         COALESCE(t.failure_reason, '') = 'codex_resume_oversized'
@@ -1075,7 +899,6 @@ WITH retired_sessions AS (
         COALESCE(t.completed_at, t.started_at, t.dispatched_at, t.created_at) AS terminal_at
     FROM agent_task_queue t
     WHERE t.agent_id = $1 AND t.issue_id = $2
-      AND COALESCE(t.context->>'type', '') <> 'triage'
       AND t.session_id IS NOT NULL
       AND t.status IN ('completed', 'failed', 'cancelled')
     ORDER BY t.session_id, COALESCE(t.completed_at, t.started_at, t.dispatched_at, t.created_at) DESC
@@ -1137,15 +960,8 @@ LIMIT 1;
 -- disclose that the most recent turn's context could not be carried over. Any
 -- later task that records a real session resets this to FALSE by being the new
 -- most-recent row, so the disclosure fires once and then clears.
---
--- Triage runs are excluded for the same reason GetLastTaskSession excludes them
--- (MUL-7189 §5.6), and the two must agree: this query only reports whether THAT
--- one fell back. A triage run is invisible to it, so a triage run reported here
--- would tell the first execution run after accept that the previous turn's
--- context could not be carried over — about a turn it was never entitled to.
 SELECT COALESCE(session_rollout_missing, FALSE) FROM agent_task_queue
 WHERE agent_id = $1 AND issue_id = $2
-  AND COALESCE(context->>'type', '') <> 'triage'
   AND status IN ('completed', 'failed')
   AND started_at IS NOT NULL
 ORDER BY COALESCE(completed_at, started_at, dispatched_at, created_at) DESC
@@ -1690,11 +1506,6 @@ SELECT * FROM agent
 WHERE id = $1
 FOR UPDATE;
 
--- name: HasTaskForIssue :one
--- Returns true if the issue has any task in any status. Webhook recovery
--- treats even a terminal task as proof that ownership moved downstream.
-SELECT EXISTS (SELECT 1 FROM agent_task_queue WHERE issue_id = $1);
-
 -- name: HasActiveTaskForIssue :one
 -- Returns true if there is any queued, dispatched, waiting_local_directory,
 -- or running task for the issue.
@@ -2082,10 +1893,6 @@ WHERE recovery.author_type = 'system'
   -- for open work; parking belongs exclusively to the fixed Backlog status.
   -- Built-ins resolve without catalog rows; unknown custom states stay pending.
   AND source_issue.status <> 'backlog'
-  -- A coordinator waiting in Triage is the entry's proposed owner, not its
-  -- owner, so a worker failure must not wake it (MUL-7189 §2.3). Triage is not
-  -- a status, so it is a predicate of its own rather than a CASE arm.
-  AND source_issue.triage_state IS NULL
   AND CASE
       WHEN source_issue.status IN ('backlog', 'todo') THEN 'unstarted'
       WHEN source_issue.status IN ('in_progress', 'in_review', 'blocked') THEN 'started'
@@ -2148,16 +1955,6 @@ WHERE issue_id = $1 AND agent_id = $2
   )
   AND comment_thread_id IS NOT DISTINCT FROM comment_thread_root_id(sqlc.narg('thread_comment_id')::uuid);
 
--- name: GetLatestTaskRoleForIssueAndAgent :one
--- Returns the role markers from the agent's most recent task on this issue.
--- Used by the squad-leader self-trigger guard to tell apart leader tasks,
--- same-squad worker tasks, and generic agent tasks such as direct mentions or
--- thread-parent replies.
-SELECT is_leader_task, squad_id FROM agent_task_queue
-WHERE issue_id = $1 AND agent_id = $2
-ORDER BY created_at DESC
-LIMIT 1;
-
 -- name: ListPendingTasksByRuntime :many
 SELECT * FROM agent_task_queue
 WHERE runtime_id = $1 AND status IN ('queued', 'dispatched')
@@ -2206,7 +2003,7 @@ ORDER BY atq.priority DESC, atq.created_at ASC;
 --
 -- Scope is deliberately tight:
 --   * retry_of_task_id IS NOT NULL — only auto-retry clones, never a fresh run.
---   * issue_id IS NOT NULL — chat / quick-create tasks have no slot semantics.
+--   * issue_id IS NOT NULL — chat tasks have no slot semantics.
 --
 -- 'running' and 'waiting_local_directory' count as superseding: the duplicate
 -- fires precisely when the rerun has STARTED, which is when the row would
@@ -2242,7 +2039,7 @@ RETURNING *;
 -- promote at most ONE row per (issue, agent, thread) so a single statement cannot collide
 -- with itself. A skipped row stays deferred with fire_at in the past and is
 -- promoted by a later tick once the slot frees, so nothing is lost — the human's
--- rerun simply goes first. Chat / quick-create rows (issue_id NULL) are outside
+-- rerun simply goes first. Chat rows (issue_id NULL) are outside
 -- the index and bypass both fences.
 WITH due AS (
     SELECT t.id,
@@ -2495,7 +2292,7 @@ ORDER BY atq.agent_id, bucket;
 --   - All active tasks (queued / dispatched / running / waiting_local_directory)
 --     — the current workload: working signal + counts (see derive-presence.ts).
 --   - Each agent's most recent OUTCOME task (completed / failed) — NOT part of
---     presence since #1823; it is the "last activity" line the Squad hover card
+--     presence since #1823; it is the "last activity" line the agent hover card
 --     renders (agent-live-peek-card.tsx). Kept in this response because shipped
 --     desktop builds read it from here; see MUL-5436 for the plan to move it to
 --     a dedicated lazy endpoint.
@@ -2540,9 +2337,8 @@ WHERE a.workspace_id = $1;
 -- One row per visible, user-authored agent with at least one task that has
 -- actually started running. work_type is optional (empty = every source);
 -- source-specific reads use the same precedence as computeTaskKind:
--- chat > autopilot > issue. "issue" intentionally groups direct and
--- comment-triggered issue work. Quick-create work is present only in the
--- unfiltered projection because it has no source FK yet. mine_relation is
+-- chat > issue. "issue" intentionally groups direct and
+-- comment-triggered issue work. mine_relation is
 -- optional (empty = workspace); when set it narrows issue work to the
 -- authenticated member's My Issues relation. parent_issue_id is optional
 -- (NULL = workspace); when set it narrows issue work to the direct children
@@ -2568,14 +2364,8 @@ WHERE a.workspace_id = $1
     @work_type::text = ''
     OR (@work_type::text = 'chat' AND atq.chat_session_id IS NOT NULL)
     OR (
-      @work_type::text = 'autopilot'
-      AND atq.chat_session_id IS NULL
-      AND atq.autopilot_run_id IS NOT NULL
-    )
-    OR (
       @work_type::text = 'issue'
       AND atq.chat_session_id IS NULL
-      AND atq.autopilot_run_id IS NULL
       AND atq.issue_id IS NOT NULL
     )
   )
@@ -2608,40 +2398,6 @@ WHERE a.workspace_id = $1
                   WHERE owned_agent.id = i.assignee_id
                     AND owned_agent.workspace_id = a.workspace_id
                     AND owned_agent.owner_id = @member_id::uuid
-                )
-              )
-              OR (
-                i.assignee_type = 'squad'
-                AND EXISTS (
-                  SELECT 1
-                  FROM squad s
-                  WHERE s.id = i.assignee_id
-                    AND s.workspace_id = a.workspace_id
-                    AND (
-                      EXISTS (
-                        SELECT 1
-                        FROM squad_member sm
-                        WHERE sm.squad_id = s.id
-                          AND sm.member_type = 'member'
-                          AND sm.member_id = @member_id::uuid
-                      )
-                      OR EXISTS (
-                        SELECT 1
-                        FROM agent leader
-                        WHERE leader.id = s.leader_id
-                          AND leader.workspace_id = a.workspace_id
-                          AND leader.owner_id = @member_id::uuid
-                      )
-                      OR EXISTS (
-                        SELECT 1
-                        FROM squad_member sm
-                        JOIN agent owned_member ON owned_member.id = sm.member_id
-                        WHERE sm.squad_id = s.id
-                          AND sm.member_type = 'agent'
-                          AND owned_member.workspace_id = a.workspace_id
-                          AND owned_member.owner_id = @member_id::uuid
-                      )
-                    )
                 )
               )
             )
@@ -2690,39 +2446,6 @@ SET status = desired.status,
 FROM desired
 WHERE a.id = $1 AND a.status IS DISTINCT FROM desired.status
 RETURNING a.*;
-
--- name: GetAgentBySystemKey :one
--- Resolves a workspace's built-in agent by its stable system_key. This is the
--- identity lookup for system agents: their display name is owner-editable, so
--- nothing server-side may key off it.
-SELECT * FROM agent
-WHERE workspace_id = $1 AND system_key = $2 AND archived_at IS NULL
-ORDER BY created_at ASC, id ASC
-LIMIT 1;
-
--- name: CreateSystemUserAgent :one
--- Creates a product-defined agent that members can still see, chat with, and
--- assign issues to. Deliberately kind='user': kind='system' hides the row from
--- agent lists and assignment surfaces and hard deletes it with its runtime.
--- Every product-owned field is a server constant; instructions stays empty
--- because the system half ships with the binary and is layered in at claim
--- time, leaving this column free for the workspace's own notes.
---
--- CONTRACT: call only while holding the per-workspace mika advisory lock. The
--- one-per-workspace invariant rests on a check inside that lock, not on a
--- unique index — migration 172's index keys on (workspace_id, owner_id,
--- runtime_id, system_key), so two different owners or runtimes are distinct
--- tuples and would both insert.
-INSERT INTO agent (
-    workspace_id, name, description, avatar_url, runtime_mode, runtime_config,
-    runtime_id, model, visibility, permission_mode, max_concurrent_tasks,
-    owner_id, instructions, custom_env, custom_args, kind, system_key
-) VALUES (
-    @workspace_id, @name, @description, @avatar_url, @runtime_mode, '{}'::jsonb,
-    @runtime_id, @model, @visibility, @permission_mode, @max_concurrent_tasks,
-    @owner_id, '', '{}'::jsonb, '[]'::jsonb, 'user', @system_key
-)
-RETURNING *;
 
 -- name: GetCommentThreadRootID :one
 SELECT comment_thread_root_id(@comment_id::uuid)::uuid AS id;

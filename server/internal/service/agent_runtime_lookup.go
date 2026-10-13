@@ -112,14 +112,3 @@ func (s *IssueService) runtimeLookup(q *db.Queries) RuntimeLookup {
 func (s *TaskService) runtimeLookup() RuntimeLookup {
 	return RuntimeLookup{Queries: s.Queries, Metrics: s.Metrics, Source: obsmetrics.RuntimeLookupSourceTask}
 }
-
-// runtimeLookup returns the autopilot-sourced lookup. AutopilotService holds no
-// metrics collector of its own; it shares the task service's, which the router
-// wires from the same registry.
-func (s *AutopilotService) runtimeLookup() RuntimeLookup {
-	var m *obsmetrics.BusinessMetrics
-	if s.TaskSvc != nil {
-		m = s.TaskSvc.Metrics
-	}
-	return RuntimeLookup{Queries: s.Queries, Metrics: m, Source: obsmetrics.RuntimeLookupSourceAutopilot}
-}

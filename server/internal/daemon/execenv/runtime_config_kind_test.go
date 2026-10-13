@@ -5,8 +5,8 @@ import (
 	"testing"
 )
 
-// TestClassifyTask pins the precedence rule on classifyTask. All four
-// kinds plus tiebreak cases for safety.
+// TestClassifyTask pins the precedence rule on classifyTask. Both kinds
+// plus a tiebreak case for safety.
 func TestClassifyTask(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
@@ -15,14 +15,10 @@ func TestClassifyTask(t *testing.T) {
 		want taskKind
 	}{
 		{"chat", TaskContextForEnv{ChatSessionID: "c"}, kindChat},
-		{"quick-create", TaskContextForEnv{QuickCreatePrompt: "p"}, kindQuickCreate},
-		{"autopilot", TaskContextForEnv{AutopilotRunID: "r"}, kindAutopilotRunOnly},
 		{"issue-comment-triggered", TaskContextForEnv{IssueID: "i", TriggerCommentID: "c"}, kindIssue},
 		{"issue-assignment-triggered", TaskContextForEnv{IssueID: "i"}, kindIssue},
 		{"issue-bare", TaskContextForEnv{}, kindIssue},
-		{"tiebreak-chat-vs-quick", TaskContextForEnv{ChatSessionID: "c", QuickCreatePrompt: "p"}, kindChat},
-		{"tiebreak-quick-vs-autopilot", TaskContextForEnv{QuickCreatePrompt: "p", AutopilotRunID: "r"}, kindQuickCreate},
-		{"tiebreak-autopilot-vs-comment", TaskContextForEnv{AutopilotRunID: "r", IssueID: "i", TriggerCommentID: "c"}, kindAutopilotRunOnly},
+		{"tiebreak-chat-vs-issue", TaskContextForEnv{ChatSessionID: "c", IssueID: "i", TriggerCommentID: "c"}, kindChat},
 	}
 	for _, tc := range cases {
 		tc := tc
@@ -44,8 +40,6 @@ func TestTaskKindHasIssueContext(t *testing.T) {
 		want bool
 	}{
 		{kindIssue, true},
-		{kindAutopilotRunOnly, false},
-		{kindQuickCreate, false},
 		{kindChat, false},
 	}
 	for _, tc := range cases {
@@ -82,10 +76,8 @@ func TestBuildMetaSkillContentIssueBodyFormatting(t *testing.T) {
 	t.Parallel()
 
 	fixtures := map[string]TaskContextForEnv{
-		"issue":        {IssueID: "i-1"},
-		"autopilot":    {AutopilotRunID: "r-1"},
-		"quick-create": {QuickCreatePrompt: "create an issue"},
-		"chat":         {ChatSessionID: "c-1"},
+		"issue": {IssueID: "i-1"},
+		"chat":  {ChatSessionID: "c-1"},
 	}
 
 	for name, ctx := range fixtures {
@@ -125,10 +117,7 @@ func TestBuildMetaSkillContentSlimKindMatrix(t *testing.T) {
 		heading  string
 		mustHave map[taskKind]bool
 	}
-	allKinds := map[taskKind]bool{
-		kindIssue: true, kindAutopilotRunOnly: true,
-		kindQuickCreate: true, kindChat: true,
-	}
+	allKinds := map[taskKind]bool{kindIssue: true, kindChat: true}
 	issueKinds := map[taskKind]bool{kindIssue: true}
 	checks := []sectionCheck{
 		{"# Multica Agent Runtime", allKinds},
@@ -140,13 +129,9 @@ func TestBuildMetaSkillContentSlimKindMatrix(t *testing.T) {
 		{"## Important: Always Use the `multica` CLI", allKinds},
 		{"## Output", allKinds},
 		{"## Comment Formatting", issueKinds},
-		{"## Repositories", map[taskKind]bool{
-			kindIssue: true, kindAutopilotRunOnly: true, kindChat: true,
-		}},
+		{"## Repositories", allKinds},
 		{"## Instruction Precedence", issueKinds},
 		{"## Sub-issue Creation", issueKinds},
-		// Quick-create included: it used to be skipped here and carry its own
-		// copy in issue_context.md, which nothing read. One index, one place.
 		{"## Skills", allKinds},
 		{"## Mentions", issueKinds},
 		{"## Attachments", issueKinds},
@@ -154,10 +139,6 @@ func TestBuildMetaSkillContentSlimKindMatrix(t *testing.T) {
 
 	fixtures := map[taskKind]TaskContextForEnv{
 		kindChat: {ChatSessionID: "c-1", AgentName: "Eve", AgentID: "eve-1",
-			Repos: baseRepo, AgentSkills: baseSkill},
-		kindQuickCreate: {QuickCreatePrompt: "p", AgentName: "Eve", AgentID: "eve-1",
-			Repos: baseRepo, AgentSkills: baseSkill},
-		kindAutopilotRunOnly: {AutopilotRunID: "r-1", AgentName: "Eve", AgentID: "eve-1",
 			Repos: baseRepo, AgentSkills: baseSkill},
 		kindIssue: {IssueID: "i-1", AgentName: "Eve", AgentID: "eve-1",
 			Repos: baseRepo, AgentSkills: baseSkill},
@@ -188,8 +169,7 @@ func TestBuildMetaSkillContentSlimKindMatrix(t *testing.T) {
 // natural timestamp into 400s.
 func TestBriefDueDateTeachesCalendarDayFormat(t *testing.T) {
 	for name, ctx := range map[string]TaskContextForEnv{
-		"issue":        {IssueID: "issue-1"},
-		"quick-create": {QuickCreatePrompt: "create an issue"},
+		"issue": {IssueID: "issue-1"},
 	} {
 		out := buildMetaSkillContent("claude", ctx)
 		if !strings.Contains(out, "--due-date <YYYY-MM-DD>") {
@@ -197,112 +177,6 @@ func TestBriefDueDateTeachesCalendarDayFormat(t *testing.T) {
 		}
 		if strings.Contains(out, "--due-date <RFC3339>") {
 			t.Errorf("%s brief still teaches --due-date <RFC3339>, which the server rejects except at UTC midnight (MUL-5696)", name)
-		}
-	}
-}
-
-// TestBriefOwnsAutopilotIssueCommandsGuard pins the guard's single emission
-// point: the autopilot brief carries AutopilotIssueCommandsGuard, and the
-// per-turn prompt defers to it (daemon.TestBuildPromptAutopilotRunOnly pins
-// the deferral side). MUL-5696.
-func TestBriefOwnsAutopilotIssueCommandsGuard(t *testing.T) {
-	out := buildMetaSkillContent("claude", TaskContextForEnv{AutopilotRunID: "run-1"})
-	if !strings.Contains(out, AutopilotIssueCommandsGuard) {
-		t.Errorf("autopilot brief missing AutopilotIssueCommandsGuard — the per-turn prompt defers to this single emission point")
-	}
-}
-
-// TestQuickCreateBriefOwnsRunAndOutputRules pins the brief as the single
-// statement of how a quick-create run executes and what it prints (MUL-6984).
-//
-// The same five rules used to be written three times — the brief's Workflow
-// section, the brief's ## Output section, and the per-turn prompt's "Output
-// format" block — with two of the three copies in this very file. The brief is
-// the copy that survives, because its own contract is that these guardrails
-// hold "even if the user message is missing"; the per-turn message now renders
-// only the field VALUES the modal picked.
-func TestQuickCreateBriefOwnsRunAndOutputRules(t *testing.T) {
-	t.Parallel()
-
-	out := buildMetaSkillContent("claude", TaskContextForEnv{
-		QuickCreatePrompt: "create an issue about flaky tests",
-		AgentName:         "Eve", AgentID: "eve-1",
-	})
-
-	for _, want := range []string{
-		// exactly one create, no retry — a retry would duplicate the issue
-		"Run exactly one `multica issue create --output json` invocation",
-		"Do not retry for any reason",
-		// no issue to query, transition, or comment on
-		"Do NOT call `multica issue get`, `multica issue status`, or `multica issue comment add`",
-		// the success line, and the reason it must not be scraped or
-		// prefix-guessed: workspaces set their own issue prefix, so a
-		// successful create must not read as failed
-		"`identifier` (preferred) or `id` (fallback)",
-		"Created <identifier-or-id>: <title>",
-		"never assume a workspace issue prefix such as `MUL-`",
-		// failure path
-		"exit with that error as the only output",
-	} {
-		if !strings.Contains(out, want) {
-			t.Errorf("quick-create brief missing rule %q\n---\n%s", want, out)
-		}
-	}
-
-	// ## Output states where the output goes and how a FILE is delivered; the
-	// rules themselves are stated once, above. A second copy here is what this
-	// change removed.
-	outputIdx := strings.Index(out, "## Output")
-	if outputIdx < 0 {
-		t.Fatalf("quick-create brief has no ## Output section\n---\n%s", out)
-	}
-	outputSection := out[outputIdx:]
-	if !strings.Contains(outputSection, "**Delivering files here:**") {
-		t.Errorf("## Output lost the file-delivery channel\n---\n%s", outputSection)
-	}
-	for _, banned := range []string{
-		"Created <identifier-or-id>: <title>",
-		"Do NOT call `multica issue comment add`",
-	} {
-		if strings.Contains(outputSection, banned) {
-			t.Errorf("## Output restates workflow rule %q\n---\n%s", banned, outputSection)
-		}
-	}
-}
-
-// TestSlimQuickCreateAvailableCommands locks the minimal-variant content
-// for quick-create's Available Commands: `issue create` present, every
-// other Core command absent (the hard guardrails forbid the call).
-func TestSlimQuickCreateAvailableCommands(t *testing.T) {
-
-	out := buildMetaSkillContent("codex", TaskContextForEnv{
-		QuickCreatePrompt: "create an issue about flaky tests",
-		AgentName:         "Eve", AgentID: "eve-1",
-	})
-
-	for _, want := range []string{
-		"## Available Commands",
-		"multica issue create --title",
-		"`multica --help`",
-	} {
-		if !strings.Contains(out, want) {
-			t.Errorf("quick_create slim Available Commands missing %q", want)
-		}
-	}
-
-	for _, banned := range []string{
-		"multica issue get <id>",
-		"multica issue comment list <issue-id>",
-		"multica issue update <id>",
-		"multica issue status <id> <status>",
-		"multica issue comment add <issue-id>",
-		"multica issue children <id>",
-		"multica repo checkout <url>",
-		"### Squad maintenance",
-		"multica squad member set-role",
-	} {
-		if strings.Contains(out, banned) {
-			t.Errorf("quick_create slim Available Commands should NOT advertise %q (hard guardrails forbid the call)", banned)
 		}
 	}
 }

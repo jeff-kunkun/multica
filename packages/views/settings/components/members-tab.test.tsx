@@ -2,8 +2,6 @@ import { useSyncExternalStore, type ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { configStore } from "@multica/core/config";
-import { BILLING_WORKSPACE_SUBSCRIPTIONS_FLAG } from "@multica/core/feature-flags";
 import { renderWithI18n } from "../../test/i18n";
 
 const mockCreateMember = vi.hoisted(() => vi.fn());
@@ -27,7 +25,6 @@ const data = vi.hoisted(() => ({
   members: [] as Array<Record<string, unknown>>,
   invitations: [] as Array<Record<string, unknown>>,
   shareLinks: [] as Array<Record<string, unknown>>,
-  summary: null as Record<string, unknown> | null,
 }));
 
 vi.mock("@tanstack/react-query", () => ({
@@ -37,18 +34,11 @@ vi.mock("@tanstack/react-query", () => ({
     if (key.includes("invitations")) return { data: data.invitations };
     if (key.includes("share-links")) return { data: data.shareLinks };
     if (key.includes("members")) return { data: data.members };
-    return { data: data.summary };
+    return { data: undefined };
   },
   useQueryClient: () => ({
     invalidateQueries: vi.fn(),
     fetchQuery: vi.fn(),
-  }),
-}));
-vi.mock("@multica/core/billing", () => ({
-  usePreviewWorkspaceSeatPurchase: () => ({ mutateAsync: vi.fn() }),
-  usePurchaseWorkspaceSeats: () => ({ mutateAsync: vi.fn() }),
-  workspaceSubscriptionSummaryOptions: (wsId: string) => ({
-    queryKey: ["billing", wsId, "summary"],
   }),
 }));
 vi.mock("@multica/core/hooks", () => ({ useWorkspaceId: () => "ws-1" }));
@@ -123,8 +113,6 @@ beforeEach(() => {
     },
   ];
   data.shareLinks = [];
-  data.summary = null;
-  configStore.getState().setFeatureFlags({});
 });
 
 describe("MembersTab", () => {
@@ -227,20 +215,6 @@ describe("MembersTab", () => {
 
     await waitFor(() => expect(mockCreateMember).toHaveBeenCalled());
     expect(screen.getByRole("dialog", { name: "Invite member" })).toBeInTheDocument();
-  });
-
-  it("links seat usage to billing when subscriptions are on", () => {
-    configStore
-      .getState()
-      .setFeatureFlags({ [BILLING_WORKSPACE_SUBSCRIPTIONS_FLAG]: true });
-    data.summary = { seatCapacity: { used: 3, reserved: 1, purchased: 5 } };
-    renderWithI18n(<MembersTab />);
-
-    expect(screen.getByText(/4 of 5 seats used/)).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Manage seats" })).toHaveAttribute(
-      "href",
-      "/acme/settings?tab=billing",
-    );
   });
 
   it("gives members a read-only view without invite or share-link controls", () => {

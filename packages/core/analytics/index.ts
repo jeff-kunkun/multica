@@ -185,9 +185,8 @@ export function initAnalytics(config: AnalyticsConfig | null | undefined): boole
     pendingIdentify = null;
   }
   // Replay buffered events / person-property updates in their original
-  // order — funnel correctness depends on sequence (e.g. a user submits
-  // the questionnaire and then finishes onboarding within the same
-  // config-race window).
+  // order — funnel correctness depends on sequence (e.g. a user signs up
+  // and then creates a workspace within the same config-race window).
   while (pendingOps.length > 0) {
     const op = pendingOps.shift()!;
     if (op.kind === "event") {

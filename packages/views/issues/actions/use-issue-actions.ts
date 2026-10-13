@@ -33,7 +33,6 @@ export interface UseIssueActionsResult {
   openSetParent: () => void;
   removeParent: () => void;
   openAddChild: () => void;
-  openMarkDuplicate: () => void;
   openDeleteConfirm: (opts?: { onDeletedFallbackPath?: string }) => void;
 }
 
@@ -196,7 +195,7 @@ export function useIssueActions(issue: Issue | null): UseIssueActionsResult {
       parent_issue_id: issueId,
       parent_issue_identifier: issueIdentifier,
       ...(issueProjectId ? { project_id: issueProjectId } : {}),
-      // Inherit the parent's assignee (member/agent/squad) so a sub-issue
+      // Inherit the parent's assignee (member/agent) so a sub-issue
       // created from the "Add sub-issue" entry starts with the same owner
       // (discussion #1728). The modal keys off whether these fields are
       // present, not their value, so a seed overrides the sticky last-used
@@ -219,11 +218,6 @@ export function useIssueActions(issue: Issue | null): UseIssueActionsResult {
   const openSetParent = useCallback(() => {
     if (!issueId) return;
     openModal("issue-set-parent", { issueId });
-  }, [openModal, issueId]);
-
-  const openMarkDuplicate = useCallback(() => {
-    if (!issueId) return;
-    openModal("issue-mark-duplicate", { issueId });
   }, [openModal, issueId]);
 
   // Detach from the parent and promote to a standalone issue. Reversible
@@ -298,7 +292,6 @@ export function useIssueActions(issue: Issue | null): UseIssueActionsResult {
     openSetParent,
     removeParent,
     openAddChild,
-    openMarkDuplicate,
     openDeleteConfirm,
   };
 }

@@ -42,10 +42,8 @@ export type TabVisual =
 export type TabLabelKey =
   | "issue"
   | "project"
-  | "autopilot"
   | "agent"
   | "member"
-  | "squad"
   | "skill"
   | "machine"
   | "runtime"
@@ -80,7 +78,6 @@ export type InboxSelectionData =
 export interface TabEntityData {
   issue?: { identifier: string; title: string; status: IssueStatus };
   project?: { icon: string | null; title: string };
-  autopilot?: { title: string };
   /** Resolved display name for an actor subject. */
   actorName?: string;
   skill?: { name: string };
@@ -104,7 +101,6 @@ function textOr(text: string | undefined | null, tabKey: TabLabelKey): TabTitleS
 const ACTOR_LABEL: Record<TabActorType, TabLabelKey> = {
   agent: "agent",
   member: "member",
-  squad: "squad",
 };
 
 // Extension → file-type icon. The preview URL only carries the filename, so the
@@ -170,11 +166,6 @@ export function resolveTabPresentation(
       return {
         visual: { kind: "project-icon", icon: data.project?.icon ?? null },
         title: textOr(data.project?.title, "project"),
-      };
-    case "autopilot":
-      return {
-        visual: { kind: "icon", icon: "Zap" },
-        title: textOr(data.autopilot?.title, "autopilot"),
       };
     case "actor":
       return {

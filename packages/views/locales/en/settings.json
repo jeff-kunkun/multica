@@ -73,78 +73,13 @@
       "backlog": "Parked. Assigning an issue here never starts an agent run.",
       "todo": "Queued. Moving an issue here starts the assigned agent.",
       "in_progress": "Actively being worked on.",
-      "in_review": "Delivered, waiting on human review. Finalizes the autopilot run.",
+      "in_review": "Delivered, waiting on human review.",
       "blocked": "Stalled on an external dependency.",
       "done": "Completed.",
       "cancelled": "Decided not to do."
     },
     "pr_auto_complete_badge": "Set when PRs merge",
     "built_in_locked": "Built-in statuses drive system behavior, so they can't be edited or archived. You can still reorder them."
-  },
-  "wakeups": {
-    "description": "Platform rules that apply to every issue. Each issue can change them in its Wakeups section.",
-    "child_done_title": "When sub-issues finish",
-    "child_done_description": "Wakes the parent's assignee when a stage finishes and a later stage is waiting, and once more when every sub-issue is closed. A member assignee gets an inbox notification instead.",
-    "enabled": "On by default",
-    "instruction": "Default instruction",
-    "instruction_hint": "Sent to the woken agent. Leave empty to use the built-in instruction below.",
-    "instruction_placeholder": "Leave empty to use the built-in instruction",
-    "builtin": "Built-in instruction",
-    "instruction_invalid": "Keep the instruction within 4,000 bytes.",
-    "save": "Save",
-    "saving": "Saving…",
-    "save_error": "Could not save the default.",
-    "customized_one": "{{count}} open issue has its own setting and ignores this default.",
-    "customized_other": "{{count}} open issues have their own setting and ignore this default.",
-    "admin_only": "Only owners and admins can change these defaults.",
-    "load_error": "Could not load wakeup defaults."
-  },
-  "quick_actions": {
-    "title": "Quick Actions",
-    "description": "Run a preset agent and prompt from an issue's sidebar.",
-    "add": "New quick action",
-    "search_placeholder": "Search quick actions",
-    "loading": "Loading quick actions…",
-    "no_results": "No quick actions match your search",
-    "actions_open": "Open actions for {{name}}",
-    "columns": {
-      "name": "Name",
-      "target": "Runs as",
-      "visibility": "Who",
-      "usage": "Used",
-      "updated": "Updated"
-    },
-    "empty_title": "No quick actions yet",
-    "empty_hint": "For example, code review or writing tests.",
-    "archived": "Archived",
-    "visibility_public": "Team",
-    "visibility_private": "Just me",
-    "visibility_public_hint": "Everyone in the workspace",
-    "visibility_private_hint": "Only you",
-    "field_visibility": "Who can use it",
-    "public_target_hint": "Must be an agent everyone can trigger.",
-    "target_private": "private",
-    "target_missing": "Target unavailable",
-    "archive": "Archive",
-    "unarchive": "Restore",
-    "edit": "Edit",
-    "delete": "Delete",
-    "cancel": "Cancel",
-    "save": "Save",
-    "never_used": "Never used",
-    "used_count": "Used {{count}}×",
-    "create_title": "New quick action",
-    "edit_title": "Edit quick action",
-    "dialog_description": "Runs as a comment on the issue, like an @mention.",
-    "field_name": "Name",
-    "field_name_placeholder": "Code Review",
-    "field_target": "Runs as",
-    "field_prompt": "Prompt",
-    "field_prompt_placeholder": "Review the code linked to this issue. Focus on correctness and edge cases.",
-    "prompt_hint": "Sent as written. The agent already sees the issue.",
-    "template_not_supported": "Variables aren’t supported yet — remove {{token}}. The agent already reads this issue.",
-    "delete_title": "Delete this quick action?",
-    "delete_description": "It disappears from every issue sidebar. Past runs stay in the execution log. Archive instead if you may want it back."
   },
   "auto_save": {
     "saving": "Saving…",
@@ -286,17 +221,9 @@
         "label": "Go to Projects",
         "description": "Open the project list."
       },
-      "goAutopilots": {
-        "label": "Go to Autopilot",
-        "description": "Open workspace automations."
-      },
       "goAgents": {
         "label": "Go to Agents",
         "description": "Open the agent list."
-      },
-      "goSquads": {
-        "label": "Go to Squads",
-        "description": "Open the squad list."
       },
       "goUsage": {
         "label": "Go to Usage",
@@ -398,12 +325,8 @@
       "bots": "Bots",
       "labels": "Labels",
       "issue_statuses": "Issue Statuses",
-      "wakeups": "Wakeups",
       "properties": "Properties",
-      "quick_actions": "Quick Actions",
-      "plugins": "Plugins",
       "mcp": "MCP servers",
-      "billing": "Billing",
       "code": "Code"
     },
     "groups": {
@@ -420,97 +343,6 @@
     "search_results_one": "{{count}} result",
     "search_results_other": "{{count}} results",
     "admin_only": "Only owners and admins can change this"
-  },
-  "plugins": {
-    "title": "Plugins",
-    "loading": "Loading Plugins",
-    "load_failed": "Plugins couldn't be loaded",
-    "load_failed_description": "Try again. Installed Plugins are unaffected.",
-    "empty": "No Plugins are installed yet.",
-    "action_failed": "Plugin action failed",
-    "enabled": "Plugin enabled",
-    "disabled": "Plugin disabled",
-    "enabled_label": "Enable Plugin",
-    "uninstall": "Uninstall",
-    "uninstalled": "Plugin uninstalled. Its stored data and secrets were removed.",
-    "granted_scopes": "Granted access",
-    "contributes": "Contributes",
-    "version": "v{{version}}",
-    "byline": "{{author}} · v{{version}}",
-    "states": {
-      "disabled": "Disabled"
-    },
-    "installed": {
-      "title": "Installed"
-    },
-    "consent": {
-      "title": "This Plugin is asking for the following access",
-      "description": "Approval applies to this version only, within these scopes and the user's own permissions.",
-      "cancel": "Cancel",
-      "confirm": "Grant and install",
-      "confirm_upgrade": "Grant and upgrade",
-      "installed": "Plugin installed",
-      "upgrade_from": " · upgrading from v{{version}}",
-      "new_scope": "New"
-    },
-    "schedule": {
-      "title": "Automatic schedules",
-      "consent_title": "This Plugin will run hooks automatically",
-      "consent_description": "Installing or upgrading enables these schedules. If several times are missed, only the latest due run is delivered.",
-      "next_run": "Next: {{time}}",
-      "activity_title": "Recent deliveries",
-      "activity_last": "{{status}} · planned {{planned}} · sent {{actual}} · attempt {{attempt}}",
-      "activity_empty": "Not delivered yet",
-      "frequency_minutes_one": "Every minute",
-      "frequency_minutes_other": "Every {{count}} minutes",
-      "frequency_hourly": "Every hour at minute {{minute}}",
-      "frequency_daily": "Every day at {{hour}}:{{minute}}",
-      "frequency_custom": "Custom recurring schedule"
-    },
-    "config": {
-      "title": "Configuration",
-      "save": "Save",
-      "saved": "Configuration saved",
-      "secret_set": "Saved — enter a new value to replace it"
-    },
-    "scopes": {
-      "issues_read": "Read issues",
-      "issues_write": "Create and edit issues",
-      "comments_read": "Read comments",
-      "comments_write": "Post comments",
-      "tasks_read": "Read agent runs",
-      "tasks_write": "Start and update agent runs",
-      "agents_read": "Read the agent list",
-      "members_read": "Read the member list",
-      "storage_user": "Store data for each member individually",
-      "storage_workspace": "Store data shared by the workspace",
-      "net": "Send data to {{domain}}",
-      "unknown": "Unrecognized access — do not install"
-    },
-    "hook_circuit_open": "Hook delivery has stopped after repeated failures.",
-    "hook_recent_failures": "{{count}} recent hook calls failed.",
-    "mcp": {
-      "badge": "MCP",
-      "description": "Choose the tools agents may call. New tools need separate approval.",
-      "loading": "Loading tools",
-      "unreachable": "Could not reach the Plugin's MCP server.",
-      "empty": "This MCP server currently offers no tools.",
-      "drifted": "Schema changed",
-      "save": "Save approvals",
-      "approved": "Approved tools updated."
-    },
-    "publish": {
-      "title": "Publish a Plugin",
-      "hint": "A .zip holding multica.plugin.json and every file it names.",
-      "upload": "Upload package",
-      "published": "Published {{name}} {{version}}",
-      "empty": "Nothing has been published in this workspace yet.",
-      "delete": "Delete published Plugin",
-      "deleted": "Published Plugin deleted",
-      "installed_version": "In use",
-      "review_install": "Review and install",
-      "review_upgrade": "Review and upgrade"
-    }
   },
   "properties": {
     "title": "Properties",
@@ -661,7 +493,7 @@
       },
       "mentions": {
         "label": "Mentions",
-        "description": "When someone @mentions you, including @all and @squad"
+        "description": "When someone @mentions you, including @all"
       },
       "updates": {
         "label": "Priority & Due date",
@@ -1012,15 +844,6 @@
     "inviting": "Inviting...",
     "toast_invitation_sent": "Invitation sent",
     "toast_invitation_failed": "Failed to send invitation",
-    "toast_seat_capacity_unavailable": "Member capacity could not be verified. Please try again.",
-    "toast_seat_capacity_rate_limited": "Seat capacity is busy. Try again shortly.",
-    "seat_purchase_title": "Add a seat to send this invitation?",
-    "seat_purchase_description": "No purchased seat is available for {{email}}. Review Stripe's estimate, then approve the purchase and invitation together.",
-    "purchase_seat_and_invite": "Buy 1 seat and invite",
-    "retry_seat_purchase": "Retry purchase",
-    "seat_purchase_waiting": "Waiting for Stripe to confirm the new seat. Keep this page open so the invitation can be sent automatically; if you leave, the purchased seat remains and you can invite again later.",
-    "seat_purchase_timeout": "The seat purchase was submitted, but confirmation is taking longer than expected. No invitation was sent. Retry the invitation after Billing shows an available seat.",
-    "seat_purchase_capacity_taken": "The purchased seat is no longer available, so the invitation was not sent. Review current seats before trying again.",
     "no_members": "No members found.",
     "revoke_invitation_title": "Revoke invitation",
     "revoke_invitation_description": "Revoke the invitation to {{email}}? They will no longer be able to join this workspace.",
@@ -1084,9 +907,7 @@
     "joined": "Joined {{date}}",
     "member_actions": "Actions for {{name}}",
     "invitation_meta": "Sent {{sent}} · Expires {{expires}}",
-    "revoke_invitation_aria": "Revoke invitation for {{email}}",
-    "seats_used": "{{used}} of {{purchased}} seats used",
-    "manage_seats": "Manage seats"
+    "revoke_invitation_aria": "Revoke invitation for {{email}}"
   },
   "integrations": {
     "status_connected": "Connected",
@@ -1125,8 +946,7 @@
   "mcp_sources": {
     "title": "Ways to give agents tools",
     "current": "This page",
-    "mcp": "Added by admins and shared across the workspace, then assigned per agent.",
-    "plugins": "Installed packages that can add tools, scheduled hooks, and storage, each with its own permissions."
+    "mcp": "Added by admins and shared across the workspace, then assigned per agent."
   },
   "bots": {
     "title": "Bots",

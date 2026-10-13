@@ -8,8 +8,8 @@ import (
 
 // Unified execution-admission contract (MUL-4525).
 //
-// Every synchronous enqueue entry point (comment mention, autopilot manual
-// "run now", issue assign / promotion / batch, manual rerun, direct chat) needs
+// Every synchronous enqueue entry point (comment mention, issue assign /
+// promotion / batch, manual rerun, direct chat) needs
 // to answer the SAME question in the SAME shape: given a user who explicitly
 // named an execution target, did the run get `queued`, `coalesced` onto an
 // existing task, `deferred`, or `blocked`? A silent no-op is never acceptable.
@@ -67,7 +67,6 @@ const (
 	ReasonAttributionBlocked    = dispatch.ReasonAttributionBlocked
 	ReasonAlreadyActive         = dispatch.ReasonAlreadyActive
 	ReasonSelfTriggerSuppressed = dispatch.ReasonSelfTriggerSuppressed
-	ReasonIssueInTriage         = dispatch.ReasonIssueInTriage
 	ReasonInternalError         = dispatch.ReasonInternalError
 )
 
@@ -136,8 +135,6 @@ func dispatchBlockedFallbackMessage(code DispatchReasonCode) string {
 		return "the run couldn't be attributed to a responsible member"
 	case ReasonAlreadyActive:
 		return "a run is already active for this target"
-	case ReasonIssueInTriage:
-		return "the issue is in Triage and has no owner to run yet; accept it out of Triage first"
 	default:
 		return "the run was blocked"
 	}

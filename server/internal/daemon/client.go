@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
 	"runtime"
 	"strings"
 	"sync"
@@ -16,7 +15,6 @@ import (
 
 	"github.com/multica-ai/multica/server/pkg/agent"
 	"github.com/multica-ai/multica/server/pkg/protocol"
-	"github.com/multica-ai/multica/server/pkg/remotemcp"
 )
 
 // requestError is returned by postJSON/getJSON when the server responds with an error status.
@@ -207,13 +205,10 @@ func daemonCommonCapabilities() []string {
 		protocol.DaemonCapabilityCoalescedCommentsV1,
 		protocol.DaemonCapabilityExecutionManifestV1,
 		protocol.DaemonCapabilityAgentSkillV1,
-		protocol.DaemonCapabilityRemoteMCPV1,
 		protocol.DaemonCapabilityLocalWorktreeV1,
-		protocol.DaemonCapabilitySourceContextQuickCreateV1,
 		protocol.DaemonCapabilityRPCV1,
 		protocol.DaemonCapabilityPlatformSkillV1,
 		protocol.DaemonCapabilityCheckoutKeepsWorkV1,
-		protocol.DaemonCapabilityJoinedWakeupsV1,
 	}
 }
 
@@ -235,30 +230,6 @@ func (c *Client) ClaimTask(ctx context.Context, runtimeID string) (*Task, error)
 		return nil, err
 	}
 	return resp.Task, nil
-}
-
-func (c *Client) ResolveRemoteMCPCredential(ctx context.Context, daemonToken, taskID, contributionID string) (http.Header, error) {
-	var response struct {
-		CredentialHeader string `json:"credential_header"`
-		Credential       string `json:"credential"`
-	}
-	// A Plugin-contributed connection keeps its credential in the Plugin's own
-	// secret storage, which a different route serves. The marker travels on the
-	// contribution id because that is all the broker hands back at dial time.
-	route := "remote-mcp"
-	if strings.HasPrefix(contributionID, remotemcp.PluginContributionPrefix) {
-		route = "plugin-mcp"
-	}
-	path := fmt.Sprintf("/api/daemon/tasks/%s/%s/%s/credential",
-		url.PathEscape(taskID), route, url.PathEscape(contributionID))
-	if err := c.getJSONWithToken(ctx, path, daemonToken, &response); err != nil {
-		return nil, err
-	}
-	headers := make(http.Header)
-	if response.CredentialHeader != "" {
-		headers.Set(response.CredentialHeader, response.Credential)
-	}
-	return headers, nil
 }
 
 // batchClaimRequestTimeout is the short, request-scoped deadline for the
@@ -989,28 +960,8 @@ func (c *Client) GetChatSessionGCCheck(ctx context.Context, sessionID string) (*
 	return &resp, nil
 }
 
-// AutopilotRunGCStatus carries the status of an autopilot run. CompletedAt
-// is the run's terminal timestamp (zero for non-terminal runs). The GC loop
-// reclaims a terminal run's never-reused workdir as soon as it sees the
-// terminal status, so it no longer gates on CompletedAt; the field is kept for
-// the API response contract and diagnostics.
-type AutopilotRunGCStatus struct {
-	Status      string    `json:"status"`
-	CompletedAt time.Time `json:"completed_at"`
-}
-
-// GetAutopilotRunGCCheck returns the status of an autopilot run for GC decisions.
-func (c *Client) GetAutopilotRunGCCheck(ctx context.Context, runID string) (*AutopilotRunGCStatus, error) {
-	var resp AutopilotRunGCStatus
-	if err := c.getJSON(ctx, fmt.Sprintf("/api/daemon/autopilot-runs/%s/gc-check", runID), &resp); err != nil {
-		return nil, err
-	}
-	return &resp, nil
-}
-
-// TaskGCStatus carries the agent_task_queue status for quick-create cleanup.
-// Quick-create tasks have no separate parent record, so GC keys directly on
-// the task itself.
+// TaskGCStatus carries the agent_task_queue status for task-keyed GC (the
+// stable-root index prune), which keys directly on the task itself.
 type TaskGCStatus struct {
 	Status      string    `json:"status"`
 	CompletedAt time.Time `json:"completed_at"`
@@ -1320,9 +1271,7 @@ func (c *Client) getJSON(ctx context.Context, path string, respBody any) error {
 	return c.getJSONWithToken(ctx, path, c.token, respBody)
 }
 
-// getJSONWithToken performs one GET with an explicit credential. It is used by
-// the Remote MCP broker so its short-lived daemon token cannot replace or race
-// the client's long-lived PAT used by concurrent control-plane requests.
+// getJSONWithToken performs one GET with an explicit credential.
 func (c *Client) getJSONWithToken(ctx context.Context, path, token string, respBody any) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+path, nil)
 	if err != nil {
@@ -1348,70 +1297,4 @@ func (c *Client) getJSONWithToken(ctx context.Context, path, token string, respB
 		return nil
 	}
 	return json.NewDecoder(resp.Body).Decode(respBody)
-}
-
-// postJSONWithToken is getJSONWithToken's write counterpart, for the daemon's
-// task-scoped calls that carry a body.
-func (c *Client) postJSONWithToken(ctx context.Context, path, token string, reqBody, respBody any) error {
-	encoded, err := json.Marshal(reqBody)
-	if err != nil {
-		return err
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+path, bytes.NewReader(encoded))
-	if err != nil {
-		return err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	if token != "" {
-		req.Header.Set("Authorization", "Bearer "+token)
-	}
-	c.setIdentityHeaders(req)
-
-	resp, err := c.client.Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode >= 400 {
-		data, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return &requestError{Method: http.MethodPost, Path: path, StatusCode: resp.StatusCode, Body: strings.TrimSpace(string(data))}
-	}
-	if respBody == nil {
-		io.Copy(io.Discard, resp.Body)
-		return nil
-	}
-	return json.NewDecoder(resp.Body).Decode(respBody)
-}
-
-// InvokeAgentPluginHook asks the server to make one agent-triggered hook call.
-//
-// The daemon deliberately does not call the plugin itself: the signing secret
-// is derived from the deployment key and stays on the server, and routing
-// through it keeps the rate limit, circuit breaker, `net:` destination check
-// and invocation record on one code path for every trigger.
-func (c *Client) InvokeAgentPluginHook(ctx context.Context, daemonToken, taskID, installationID, hookKey string, input json.RawMessage) (json.RawMessage, error) {
-	var response struct {
-		Status string          `json:"status"`
-		Output json.RawMessage `json:"output,omitempty"`
-		Error  string          `json:"error,omitempty"`
-	}
-	path := fmt.Sprintf("/api/daemon/tasks/%s/plugin-hooks", url.PathEscape(taskID))
-	body := map[string]any{"installation_id": installationID, "hook_key": hookKey}
-	if len(input) > 0 {
-		body["input"] = input
-	}
-	if err := c.postJSONWithToken(ctx, path, daemonToken, body, &response); err != nil {
-		return nil, err
-	}
-	// A refused or failed hook comes back as a 200 with a status, so that the
-	// caller can render it as a TOOL error rather than a broken transport —
-	// an unreachable plugin endpoint must not fail the agent's task.
-	if response.Status != "ok" {
-		if response.Error != "" {
-			return nil, errors.New(response.Error)
-		}
-		return nil, errors.New("the plugin hook did not succeed")
-	}
-	return response.Output, nil
 }

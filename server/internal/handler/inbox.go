@@ -74,9 +74,8 @@ const inboxListBodyPreviewLimit = 200
 // comment it points at is found through `details.comment_id`, which is left
 // intact — on every client already installed, so none needs to change. Other
 // notification types are NOT shortened: issue-less notifications render their
-// body in the detail pane straight from the list cache, and Quick Create
-// failures refill the composer from `details` — cutting those would lose
-// content, not just bytes.
+// body in the detail pane straight from the list cache — cutting those would
+// lose content, not just bytes.
 //
 // Truncation is by code point, so a multi-byte character is never split into
 // invalid UTF-8. A grapheme cluster (an emoji sequence, a letter with a

@@ -524,38 +524,11 @@ func TestIssueWorkflowHonorsAgentIdentity(t *testing.T) {
 	}
 }
 
-// A squad leader's dispatch turn must not read as completion: the end-of-turn
-// fact is in_progress, and in_review waits for the re-trigger that confirms
-// the overall goal is met. Without this bullet the general rule's "delivered →
-// in_review" reading would let a leader close out the parent on the very turn
-// it hands work to members.
-func TestSquadLeaderIssueWorkflowKeepsParentInProgress(t *testing.T) {
-	t.Parallel()
-	const issueID = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
-	out := buildMetaSkillContent("claude", TaskContextForEnv{
-		IssueID:       issueID,
-		IsSquadLeader: true,
-	})
-
-	for _, want := range []string{
-		"dispatching members is not delivery",
-		"a dispatch turn leaves the parent `in_progress`",
-		"where you confirm the overall goal is met",
-		// The shared no-write default still governs leader conversation turns.
-		"questions, discussion, and acknowledgements never touch status",
-	} {
-		if !strings.Contains(out, want) {
-			t.Errorf("squad-leader issue brief missing %q\n---\n%s", want, out)
-		}
-	}
-}
-
-// TestProtocolHeadingInInstructionsGetsNoLeaderBrief is the brief-side half of
-// the MUL-5811 negative regression. IsSquadLeader now comes from the claim's
-// is_leader_task / squad_id, so an ordinary agent that documents a
-// "## Squad Operating Protocol" section in its own instructions must get the
-// ordinary brief — its instructions rendered verbatim under Agent Identity,
-// and not one leader-only branch.
+// TestProtocolHeadingInInstructionsGetsNoLeaderBrief is the MUL-5811 negative
+// regression: an agent that documents a "## Squad Operating Protocol" section
+// in its own instructions must get the ordinary brief — its instructions
+// rendered verbatim under Agent Identity, and no leader-only text sniffed from
+// them.
 func TestProtocolHeadingInInstructionsGetsNoLeaderBrief(t *testing.T) {
 	t.Parallel()
 
@@ -565,7 +538,6 @@ func TestProtocolHeadingInInstructionsGetsNoLeaderBrief(t *testing.T) {
 		TriggerCommentID:  "bbbbbbbb-cccc-dddd-eeee-ffffffffffff",
 		AgentName:         "Docs writer",
 		AgentInstructions: instructions,
-		IsSquadLeader:     false,
 	})
 
 	if !strings.Contains(out, instructions) {
@@ -604,8 +576,6 @@ func TestInstructionPrecedenceOnlyAppliesToIssueWorkflow(t *testing.T) {
 		ctx  TaskContextForEnv
 	}{
 		{"chat", TaskContextForEnv{ChatSessionID: "chat-1"}},
-		{"quick-create", TaskContextForEnv{QuickCreatePrompt: "create me an issue"}},
-		{"autopilot run-only", TaskContextForEnv{AutopilotRunID: "run-1"}},
 	}
 	for _, tc := range cases {
 		tc := tc
@@ -758,20 +728,6 @@ func TestWorkspaceContextRenderedAcrossTaskKinds(t *testing.T) {
 				WorkspaceContext: wsContext,
 			},
 		},
-		{
-			name: "quick-create",
-			ctx: TaskContextForEnv{
-				QuickCreatePrompt: "create me an issue",
-				WorkspaceContext:  wsContext,
-			},
-		},
-		{
-			name: "autopilot run-only",
-			ctx: TaskContextForEnv{
-				AutopilotRunID:   "run-1",
-				WorkspaceContext: wsContext,
-			},
-		},
 	}
 	for _, tc := range cases {
 		tc := tc
@@ -838,14 +794,6 @@ func TestSubIssueCreationSectionSkippedForNonIssueModes(t *testing.T) {
 		{
 			name: "chat",
 			ctx:  TaskContextForEnv{ChatSessionID: "chat-1"},
-		},
-		{
-			name: "quick-create",
-			ctx:  TaskContextForEnv{QuickCreatePrompt: "create me an issue"},
-		},
-		{
-			name: "autopilot run-only",
-			ctx:  TaskContextForEnv{AutopilotRunID: "run-1"},
 		},
 	}
 	for _, tc := range cases {
@@ -1693,7 +1641,7 @@ func TestMultiThreadReplyInstructionsFanOut(t *testing.T) {
 		{ThreadID: "c1", ParentID: "c1"},
 		{ThreadID: "c2", ParentID: "c2"},
 		{ThreadID: "c3", ParentID: "c3"},
-	}, false)
+	})
 
 	for _, want := range []string{
 		"3 DISTINCT threads",
@@ -1754,21 +1702,19 @@ func TestMultiThreadReplyInstructionsOSInvariant(t *testing.T) {
 		{ThreadID: "c1", ParentID: "c1"},
 		{ThreadID: "c2", ParentID: "c2"},
 	}
-	for _, leader := range []bool{false, true} {
-		runtimeGOOS = "linux"
-		linux := BuildMultiThreadCommentReplyInstructions("55555555-6666-7777-8888-999999999999", targets, leader)
-		runtimeGOOS = "windows"
-		windows := BuildMultiThreadCommentReplyInstructions("55555555-6666-7777-8888-999999999999", targets, leader)
-		if linux != windows {
-			t.Errorf("fan-out block (leader=%v) must be OS-invariant\nlinux:\n%s\nwindows:\n%s", leader, linux, windows)
-		}
+	runtimeGOOS = "linux"
+	linux := BuildMultiThreadCommentReplyInstructions("55555555-6666-7777-8888-999999999999", targets)
+	runtimeGOOS = "windows"
+	windows := BuildMultiThreadCommentReplyInstructions("55555555-6666-7777-8888-999999999999", targets)
+	if linux != windows {
+		t.Errorf("fan-out block must be OS-invariant\nlinux:\n%s\nwindows:\n%s", linux, windows)
 	}
 }
 
 // Single-thread reply cookbook moved to the per-turn prompt (MUL-5377).
 func TestSingleThreadReplyInstructionsKeepSingleParent(t *testing.T) {
 	t.Parallel()
-	out := BuildCommentReplyInstructions("claude", "55555555-6666-7777-8888-999999999999", "c3", false)
+	out := BuildCommentReplyInstructions("claude", "55555555-6666-7777-8888-999999999999", "c3")
 
 	if strings.Contains(out, "DISTINCT threads") {
 		t.Errorf("single/same-thread instructions must not emit the multi-thread fan-out block, got:\n%s", out)
@@ -1923,74 +1869,6 @@ func firstBriefDiff(want, got string) string {
 		"\n--- variant ---\n" + got[lo:hiG]
 }
 
-// TestAutopilotBriefByteIdenticalAcrossRunScopedFields is the invariant
-// MUL-6984 actually moved, and the one TestBriefByteIdenticalAcrossRunsForEveryKind
-// cannot see: its autopilot row pins run-1 / ap-1 and its variants only mutate
-// the generic resume / initiator / connected-app fields, so reinserting the
-// autopilot title, source, payload or description into the brief would leave
-// it green.
-//
-// Every field below identifies ONE run. The brief lands in messages[0], ahead
-// of the whole conversation, so a per-run value here throws away the prompt
-// cache for the entire history on resume (MUL-5377) — and it also gives a
-// second hand-maintained copy somewhere to drift from the per-turn one, which
-// is how MUL-5696 happened. Two runs of the same autopilot, and two runs of
-// different autopilots, must all produce the same bytes.
-func TestAutopilotBriefByteIdenticalAcrossRunScopedFields(t *testing.T) {
-	t.Parallel()
-
-	base := TaskContextForEnv{AgentID: "a-1", AgentName: "Eve", AutopilotRunID: "run-1", AutopilotID: "ap-1"}
-
-	runs := []struct {
-		name string
-		ctx  TaskContextForEnv
-	}{
-		{"baseline", base},
-		{"second run of the same autopilot", func() TaskContextForEnv {
-			c := base
-			c.AutopilotRunID = "run-2"
-			c.AutopilotTitle = "Nightly dependency sweep"
-			c.AutopilotSource = "schedule"
-			c.AutopilotDescription = "Check dependencies and report outdated packages."
-			c.AutopilotTriggerPayload = `{"schedule":"0 3 * * *"}`
-			return c
-		}()},
-		{"run of a different autopilot", func() TaskContextForEnv {
-			c := base
-			c.AutopilotRunID = "run-3"
-			c.AutopilotID = "ap-2"
-			c.AutopilotTitle = "Triage inbound issues"
-			c.AutopilotSource = "webhook"
-			c.AutopilotDescription = "Read the payload and file one issue per report."
-			c.AutopilotTriggerPayload = `{"action":"opened","issue":{"number":7,"title":"crash on start"}}`
-			return c
-		}()},
-	}
-
-	want := buildMetaSkillContent("claude", runs[0].ctx)
-	for _, r := range runs[1:] {
-		if got := buildMetaSkillContent("claude", r.ctx); got != want {
-			t.Errorf("autopilot brief changed for %q — a per-run value reached the cache prefix\n%s",
-				r.name, firstBriefDiff(want, got))
-		}
-	}
-
-	// Byte-identity alone would also hold if the brief rendered none of these
-	// AND the values never reached the agent at all. Pin the other half here:
-	// the brief must not carry them, and daemon.TestBuildPromptAutopilotRunOnly
-	// pins the per-turn message as the surface that does.
-	for _, banned := range []string{
-		"run-1", "ap-1", "Nightly dependency sweep", "Triage inbound issues",
-		"schedule", "webhook", "Check dependencies", "0 3 * * *", "crash on start",
-	} {
-		for _, r := range runs {
-			if strings.Contains(buildMetaSkillContent("claude", r.ctx), banned) {
-				t.Errorf("autopilot brief (%s) carries the run-scoped value %q; the per-turn message owns it", r.name, banned)
-			}
-		}
-	}
-}
-
 // TestBriefByteIdenticalAcrossRunsForEveryKind extends the MUL-5377 guarantee
 // past issue runs.
 //
@@ -1998,16 +1876,12 @@ func TestAutopilotBriefByteIdenticalAcrossRunScopedFields(t *testing.T) {
 // PriorSessionID from the chat_session row, with the same PriorWorkDir and
 // PriorSessionResumeUnavailable plumbing as an issue task. So a chat brief that
 // varied per turn would lose the prompt cache exactly the same way, and a long
-// chat is precisely where that hurts most. Autopilot and quick-create are
-// single-shot today, but the invariant is free to hold for them too and stops a
-// future resume path from silently reintroducing the bug.
+// chat is precisely where that hurts most.
 func TestBriefByteIdenticalAcrossRunsForEveryKind(t *testing.T) {
 	t.Parallel()
 
 	kinds := map[string]TaskContextForEnv{
-		"chat":         {ChatSessionID: "chat-1", AgentID: "a-1", AgentName: "Eve"},
-		"quick-create": {QuickCreatePrompt: "make an issue", AgentID: "a-1", AgentName: "Eve"},
-		"autopilot":    {AutopilotRunID: "run-1", AutopilotID: "ap-1", AgentID: "a-1", AgentName: "Eve"},
+		"chat": {ChatSessionID: "chat-1", AgentID: "a-1", AgentName: "Eve"},
 	}
 
 	// Per-run state that changes between turns of one resumed session.
@@ -2284,8 +2158,7 @@ func TestEveryBriefThatTeachesJSONOutputAlsoWarnsAgainstMergingStderr(t *testing
 		wantWhy = "a write that SUCCEEDED look like it failed"
 	)
 	briefs := map[string]string{
-		"full":         buildMetaSkillContent("claude", TaskContextForEnv{IssueID: "11111111-2222-3333-4444-555555555555"}),
-		"quick-create": buildMetaSkillContent("claude", TaskContextForEnv{QuickCreatePrompt: "make an issue"}),
+		"full": buildMetaSkillContent("claude", TaskContextForEnv{IssueID: "11111111-2222-3333-4444-555555555555"}),
 	}
 	for name, brief := range briefs {
 		if !strings.Contains(brief, wantFlag) {

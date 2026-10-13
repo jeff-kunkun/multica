@@ -29,7 +29,6 @@ vi.mock("@multica/core/paths", async () => {
     );
   return {
     ...actual,
-    useHasOnboarded: () => true,
   };
 });
 

@@ -114,16 +114,12 @@ func RuntimeBlockedNeedsNotice(code dispatch.ReasonCode) bool {
 // distinguishable in multica_agent_runtime_lookup_total.
 //
 // err is non-nil only on DB lookup failure for the runtime row. Callers that
-// treat a transient DB error as "do not skip" (the autopilot admission gate)
-// should swallow it; callers that need a hard yes/no (the squad-leader
-// pre-enqueue check in the handler) should fail closed.
+// need a hard yes/no should fail closed.
 //
-// This is the single source of truth shared by:
-//   - service.shouldSkipDispatch (autopilot admission gate)
-//   - service.dispatchRunOnly    (squad-leader runtime check, MUL-2429)
-//   - handler.isSquadLeaderReady (issue-assign / comment-trigger path)
-//   - the direct-agent trigger paths, which consult it for the BLOCKED verdict
-//     only: an offline machine still queues, because that wait ends by itself.
+// This is the single source of truth shared by the agent trigger paths
+// (issue assign, comment mention, chat), which consult it for the BLOCKED
+// verdict only: an offline machine still queues, because that wait ends by
+// itself.
 //
 // Keeping these aligned matters because the paths can otherwise drift — e.g.
 // one starts allowing "starting" runtimes while another doesn't, and the bug

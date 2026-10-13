@@ -36,7 +36,6 @@ vi.mock("@multica/core/paths", () => ({
   useWorkspacePaths: () => ({
     memberDetail: (id: string) => `/acme/members/${id}`,
     agentDetail: (id: string) => `/acme/agents/${id}`,
-    squadDetail: (id: string) => `/acme/squads/${id}`,
   }),
 }));
 
@@ -85,10 +84,6 @@ vi.mock("../../agents/components/agent-live-peek-card", () => ({
 
 vi.mock("../../members/member-profile-card", () => ({
   MemberProfileCard: () => null,
-}));
-
-vi.mock("../../squads/components/squad-profile-card", () => ({
-  SquadProfileCard: () => null,
 }));
 
 vi.mock("./issue-agent-activity-indicator", () => ({
@@ -143,7 +138,7 @@ function makeIssue(assigneeType: IssueAssigneeType): Issue {
 }
 
 describe("BoardCardContent assignee picker", () => {
-  it.each<IssueAssigneeType>(["member", "agent", "squad"])(
+  it.each<IssueAssigneeType>(["member", "agent"])(
     "opens the picker from an avatar-only %s assignee without navigating the card",
     (assigneeType) => {
       const issue = makeIssue(assigneeType);

@@ -45,12 +45,6 @@ const RESET_STATE = {
       labelIds: [],
       propertyValues: {},
     },
-    agent: {
-      prompt: "",
-      actorType: undefined,
-      actorId: undefined,
-    },
-    activeMode: "manual" as const,
   },
   lastAssigneeType: undefined,
   lastAssigneeId: undefined,
@@ -155,15 +149,6 @@ describe("issue draft store — last assignee", () => {
     expect(useIssueDraftStore.getState().draft.shared.projectId).toBeUndefined();
   });
 
-  it("clearDraft removes the persisted agent prompt", () => {
-    const { setAgent, clearDraft } = useIssueDraftStore.getState();
-
-    setAgent({ prompt: "Investigate the regression" });
-    clearDraft();
-
-    expect(useIssueDraftStore.getState().draft.agent.prompt).toBe("");
-  });
-
   it("setLastAssignee(undefined) lets the user opt back out of a default", () => {
     const { setLastAssignee, clearDraft } = useIssueDraftStore.getState();
 
@@ -175,30 +160,6 @@ describe("issue draft store — last assignee", () => {
     clearDraft();
     expect(useIssueDraftStore.getState().draft.manual.assigneeId).toBeUndefined();
     expect(useIssueDraftStore.getState().draft.manual.assigneeType).toBeUndefined();
-  });
-});
-
-describe("issue draft store — mode switch preserves both sides", () => {
-  beforeEach(() => {
-    useIssueDraftStore.setState(RESET_STATE);
-  });
-
-  it("keeps the manual slot untouched when the agent slot is filled and vice versa", () => {
-    const { setManual, setAgent, setShared } = useIssueDraftStore.getState();
-
-    setManual({ title: "Manual title", description: "Manual body" });
-    setShared({ projectId: "project-1", priority: "high" });
-    // Switching to agent seeds the agent slot but must not clear manual.
-    setAgent({ prompt: "Agent prompt", actorType: "agent", actorId: "agent-1" });
-
-    const { draft } = useIssueDraftStore.getState();
-    expect(draft.manual.title).toBe("Manual title");
-    expect(draft.manual.description).toBe("Manual body");
-    expect(draft.agent.prompt).toBe("Agent prompt");
-    expect(draft.agent.actorId).toBe("agent-1");
-    // Shared fields are visible to both sides.
-    expect(draft.shared.projectId).toBe("project-1");
-    expect(draft.shared.priority).toBe("high");
   });
 });
 
@@ -250,12 +211,9 @@ describe("issue draft store — legacy rehydrate", () => {
     expect(draft.shared.priority).toBe("high");
     expect(draft.shared.dueDate).toBe("2026-08-01");
     expect(draft.shared.attachments).toEqual([]);
-    // A legacy draft had no agent prompt (it lived in a separate store).
-    expect(draft.agent.prompt).toBe("");
-    expect(draft.activeMode).toBe("manual");
   });
 
-  it("backfills missing sub-fields on an already-nested persisted draft", async () => {
+  it("backfills missing sub-fields and drops the retired agent slot", async () => {
     localStorage.setItem(
       "multica_issue_draft:beta",
       JSON.stringify({
@@ -283,8 +241,8 @@ describe("issue draft store — legacy rehydrate", () => {
     expect(draft.shared.attachments).toEqual([]);
     expect(draft.manual.title).toBe("kept");
     expect(draft.manual.status).toBe("todo");
-    expect(draft.agent.prompt).toBe("keep me");
-    expect(draft.activeMode).toBe("agent");
+    expect(draft).not.toHaveProperty("agent");
+    expect(draft).not.toHaveProperty("activeMode");
   });
 
   it("normalizes pre-L2 shared attachments and drops stale uploading placeholders", async () => {
@@ -313,8 +271,6 @@ describe("issue draft store — legacy rehydrate", () => {
               ],
             },
             manual: {},
-            agent: {},
-            activeMode: "manual",
           },
         },
         version: 0,

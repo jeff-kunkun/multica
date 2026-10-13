@@ -1,8 +1,7 @@
 // Package llm is a thin, reusable wrapper around the official OpenAI Go SDK
 // (github.com/openai/openai-go). It exists so the rest of the server has a
 // single, well-typed entry point for "just call an LLM" needs that do NOT
-// require the full agent runtime — currently chat auto-titling and chat
-// follow-up questions (MUL-4238).
+// require the full agent runtime — currently chat auto-titling.
 //
 // # Scope: the assist layer, not every model call in the product
 //
@@ -39,11 +38,6 @@
 //   - Chat auto-titling — server/internal/handler/chat_title.go. Sends the
 //     first user message of a new chat session, verbatim and uncapped.
 //     Attachments are never included.
-//   - Chat follow-up questions, a.k.a. quick actions —
-//     server/internal/service/chat_quick_actions_generate.go.
-//     Sends the tail of the conversation: up to 6 messages, the reply being
-//     answered capped at 3000 runes (2000 head + 1000 tail) and each older
-//     message at 800.
 //
 // Request shape beyond the prompts is deployment-controlled and lives in
 // Config: MaxRetries (transport budget) and DisableThinking, which appends
@@ -53,15 +47,15 @@
 // reject unknown body fields, so the knob is opt-in per deployment and off by
 // default.
 //
-// Both consumers send private chat content, which is why an unconfigured
+// The consumer sends private chat content, which is why an unconfigured
 // deployment making zero upstream requests is a contract rather than a side
 // effect: New with no API key and no base URL returns a disabled client whose
 // every call fails with ErrNotConfigured before an HTTP request is ever built,
-// and both consumers check Enabled() before doing any work
+// and the consumer checks Enabled() before doing any work
 // (TestUnconfiguredClientMakesZeroUpstreamRequests). An operator who must not
 // let THIS layer send chat content leaves MULTICA_LLM_API_KEY and
 // MULTICA_LLM_BASE_URL empty; the product stays whole (client-derived chat
-// titles, no follow-up question buttons).
+// titles).
 //
 // The wrapper is intentionally small:
 //
@@ -362,7 +356,7 @@ func (c *Client) ChatStream(ctx context.Context, params openai.ChatCompletionNew
 }
 
 // GenerateText is a convenience for simple internal one-shot completions (chat
-// titles, quick-create drafts, ...). It sends an optional system prompt plus a
+// titles, ...). It sends an optional system prompt plus a
 // single user prompt and returns the assistant's text content. Model empty ->
 // the configured default.
 func (c *Client) GenerateText(ctx context.Context, model, systemPrompt, userPrompt string) (string, error) {
@@ -392,7 +386,7 @@ func (c *Client) GenerateText(ctx context.Context, model, systemPrompt, userProm
 }
 
 // GenerateJSON is GenerateText's structured sibling, for internal callers whose
-// reply has to be machine-readable (quick-action suggestions, ...). It requests
+// reply has to be machine-readable. It requests
 // response_format=json_object and returns the assistant's raw text unparsed.
 //
 // JSON-object mode only guarantees the reply is syntactically valid JSON, never

@@ -399,17 +399,3 @@ func (h *Handler) loadInvocationTargetsByAgent(ctx context.Context, agents []db.
 	}
 	return out, true
 }
-
-// canEnqueueSquadLeader returns true when the given actor is allowed to
-// trigger the squad's private leader. It loads the leader agent and delegates
-// to canInvokeAgent so the leader-trigger path honours invocation permission
-// exactly like a direct assignment/mention. Non-public leaders require owner /
-// allow-list; system-initiated triggers (e.g. github webhooks) are judged as
-// system principals (workspace target only).
-func (h *Handler) canEnqueueSquadLeader(ctx context.Context, leaderID pgtype.UUID, actorType, actorID, originatorUserID, workspaceID string) bool {
-	agent, err := h.Queries.GetAgent(ctx, leaderID)
-	if err != nil {
-		return false
-	}
-	return h.canInvokeAgent(ctx, agent, actorType, actorID, originatorUserID, workspaceID)
-}

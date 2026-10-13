@@ -135,12 +135,6 @@ export function useSettingsSearchIndex(
       { tab: "members", anchor: "invitations", title: t(($) => $.members.pending_label) },
       { tab: "members", anchor: "links", title: t(($) => $.members.share_links_label) },
       {
-        tab: "wakeups",
-        anchor: "child-done",
-        title: t(($) => $.wakeups.child_done_title),
-        description: t(($) => $.wakeups.child_done_description),
-      },
-      {
         tab: "labels",
         title: t(($) => $.page.tabs.labels),
         description: t(($) => $.labels.description),
@@ -149,11 +143,6 @@ export function useSettingsSearchIndex(
         tab: "properties",
         title: t(($) => $.page.tabs.properties),
         description: t(($) => $.properties.description),
-      },
-      {
-        tab: "quick-actions",
-        title: t(($) => $.page.tabs.quick_actions),
-        description: t(($) => $.quick_actions.description),
       },
       { tab: "code", anchor: "code-hosting", title: t(($) => $.code.hosting_title) },
       { tab: "code", anchor: "github", title: t(($) => $.page.tabs.github) },

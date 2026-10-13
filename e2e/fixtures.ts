@@ -158,33 +158,6 @@ export class TestApiClient {
     throw new Error(`Failed to ensure workspace ${slug}: ${res.status} ${res.statusText}`);
   }
 
-  async markUserOnboarded() {
-    if (!this.email) {
-      throw new Error("Cannot mark E2E user onboarded before login");
-    }
-
-    const client = new pg.Client(DATABASE_URL);
-    await client.connect();
-    try {
-      const result = await client.query(
-        `
-          UPDATE "user"
-          SET
-            onboarded_at = COALESCE(onboarded_at, now()),
-            onboarding_questionnaire = COALESCE(onboarding_questionnaire, '{}'::jsonb)
-              || '{"source":["friends_colleagues"],"source_other":null,"source_skipped":false}'::jsonb
-          WHERE email = $1
-        `,
-        [this.email],
-      );
-      if (result.rowCount !== 1) {
-        throw new Error(`Failed to mark E2E user onboarded: ${this.email}`);
-      }
-    } finally {
-      await client.end();
-    }
-  }
-
   /** Create a project and register it for cleanup. */
   async createProject(title: string, opts?: Record<string, unknown>) {
     const res = await this.authedFetch("/api/projects", {

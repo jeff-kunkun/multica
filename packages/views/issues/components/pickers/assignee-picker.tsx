@@ -9,7 +9,7 @@ import { isAgentRuntimeBound } from "@multica/core/agents";
 import { canAssignAgentToIssue } from "@multica/core/permissions";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { useWorkspaceId } from "@multica/core/hooks";
-import { memberListOptions, agentListOptions, squadListOptions, assigneeFrequencyOptions } from "@multica/core/workspace/queries";
+import { memberListOptions, agentListOptions, assigneeFrequencyOptions } from "@multica/core/workspace/queries";
 import { ActorAvatar } from "../../../common/actor-avatar";
 import { DeferredPopup } from "../../../common/deferred-popup";
 import {
@@ -59,7 +59,7 @@ interface AssigneePickerProps {
 }
 
 /**
- * Mounting the real picker subscribes to members/agents/squads/frequency
+ * Mounting the real picker subscribes to members/agents/frequency
  * queries — multiplied per board card / list row that cost froze tab
  * switches. Uncontrolled callers that bring their own trigger content get a
  * deferred lookalike trigger instead; the picker mounts on first interaction.
@@ -109,7 +109,6 @@ function AssigneePickerImpl({
   const wsId = useWorkspaceId();
   const { data: members = [] } = useQuery(memberListOptions(wsId));
   const { data: agents = [] } = useQuery(agentListOptions(wsId));
-  const { data: squads = [] } = useQuery(squadListOptions(wsId));
   const { data: frequency = [] } = useQuery(assigneeFrequencyOptions(wsId));
   const { getActorName } = useActorName();
 
@@ -134,15 +133,6 @@ function AssigneePickerImpl({
   const filteredAgents = agents
     .filter((a) => !a.archived_at && (a.name.toLowerCase().includes(query) || matchesPinyin(a.name, query)))
     .sort((a, b) => getFreq("agent", b.id) - getFreq("agent", a.id));
-  const filteredSquads = squads
-    .filter((s) => !s.archived_at && (s.name.toLowerCase().includes(query) || matchesPinyin(s.name, query)))
-    .sort((a, b) => getFreq("squad", b.id) - getFreq("squad", a.id));
-  const runnableAgentIds = new Set(
-    agents
-      .filter((agent) => !agent.archived_at && isAgentRuntimeBound(agent))
-      .map((agent) => agent.id),
-  );
-
   const isSelected = (type: string, id: string) =>
     assigneeType === type && assigneeId === id;
 
@@ -259,42 +249,8 @@ function AssigneePickerImpl({
         </PickerSection>
       )}
 
-      {/* Squads — group ownership; assigning to a squad routes the issue to
-          its leader agent on the backend. */}
-      {filteredSquads.length > 0 && (
-        <PickerSection label={t(($) => $.pickers.assignee.squads_group)}>
-          {filteredSquads.map((s) => {
-            const runtimeBound = runnableAgentIds.has(s.leader_id);
-            return (
-              <PickerItem
-                key={s.id}
-                selected={isSelected("squad", s.id)}
-                disabled={!runtimeBound}
-                tooltip={
-                  runtimeBound
-                    ? undefined
-                    : t(($) => $.pickers.assignee.squad_runtime_required)
-                }
-                onClick={() => {
-                  if (!runtimeBound) return;
-                  onUpdate({
-                    assignee_type: "squad",
-                    assignee_id: s.id,
-                  });
-                  setOpen(false);
-                }}
-              >
-                <ActorAvatar actorType="squad" actorId={s.id} size="sm" />
-                <span className="truncate">{s.name}</span>
-              </PickerItem>
-            );
-          })}
-        </PickerSection>
-      )}
-
       {filteredMembers.length === 0 &&
         filteredAgents.length === 0 &&
-        filteredSquads.length === 0 &&
         filter && <PickerEmpty />}
     </PropertyPicker>
   );

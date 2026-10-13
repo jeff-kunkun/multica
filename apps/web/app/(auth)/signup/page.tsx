@@ -3,7 +3,6 @@
 import { Suspense } from "react";
 import { useRouter } from "next/navigation";
 import { useQueryClient } from "@tanstack/react-query";
-import { useAuthStore } from "@multica/core/auth";
 import { workspaceKeys } from "@multica/core/workspace/queries";
 import { resolvePostAuthDestination } from "@multica/core/paths";
 import type { Workspace } from "@multica/core/types";
@@ -15,10 +14,8 @@ function SignupPageContent() {
   const qc = useQueryClient();
 
   const handleSuccess = async () => {
-    const currentUser = useAuthStore.getState().user;
-    const onboarded = currentUser?.onboarded_at != null;
     const list = qc.getQueryData<Workspace[]>(workspaceKeys.list()) ?? [];
-    router.push(resolvePostAuthDestination(list, onboarded));
+    router.push(resolvePostAuthDestination(list));
   };
 
   return (

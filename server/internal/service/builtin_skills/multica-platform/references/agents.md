@@ -129,7 +129,7 @@ multica agent copy <source-agent-id> --runtime-id <target> --model <model>  # cr
 | `runtime_config` | `runtime_config` (JSON) | JSON shape checked CLI-side; server stores as-is | runtime-specific config; defaults to `{}` |
 | `custom_env` | `custom_env` (JSON object) | — | daemon (process env); see Env and secrets |
 | `mcp_config` | `mcp_config` (raw JSON) | CLI checks it is a JSON object or `null`; server stores as-is. At create, literal `null` is dropped (no-op); at update, `null` clears the field | daemon → provider (provider-specific MCP handling); redacted on read |
-| `visibility` | `visibility` | — | access control; defaults to `private`; gates who can read/route a private agent (e.g. a private squad leader) — NOT the runtime prompt |
+| `visibility` | `visibility` | — | access control; defaults to `private`; gates who can read/route a private agent — NOT the runtime prompt |
 | `max_concurrent_tasks` | `max_concurrent_tasks` | integer from 1 through 50; out-of-range values return 400 | scheduler task cap; defaults to `6` |
 
 Defaults when omitted or explicitly `null`: `max_concurrent_tasks` → `6`.

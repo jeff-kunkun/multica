@@ -693,12 +693,6 @@ Do not retry immediately — repeated attempts lock the code. Wait ~40s and re-r
   fi
   [ -n "$ws" ] || die "Workspace creation failed: $ws_response"
 
-  # A fresh user has onboarded_at = NULL and a browser login is bounced to
-  # /onboarding, so the URL this script prints would not land in the app.
-  curl -sS -X POST "$server/api/me/onboarding/complete" \
-    -H "Authorization: Bearer $pat" -H "X-Workspace-ID: $ws" \
-    -H 'Content-Type: application/json' -d '{"exit":"existing"}' >/dev/null 2>&1 || true
-
   write_profile_config "$config" "$pat" "$ws"
   WORKSPACE_ID="$ws"
   ok "Logged in as $DEV_EMAIL and wrote profile $PROFILE"

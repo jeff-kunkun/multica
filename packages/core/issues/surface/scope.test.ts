@@ -41,7 +41,7 @@ describe("issue surface scope", () => {
       buildIssueSurfaceQueryPlan({ type: "workspace", actorKind: "agents" }),
     ).toEqual({
       scopeKey: "workspace:agents",
-      queryFilter: { assignee_types: ["agent", "squad"] },
+      queryFilter: { assignee_types: ["agent"] },
       createDefaults: {},
     });
     expect(
@@ -91,7 +91,7 @@ describe("issue surface scope", () => {
 describe("assigneeTypesForActorKind", () => {
   it("maps the three tabs to their API values", () => {
     expect(assigneeTypesForActorKind("members")).toEqual(["member"]);
-    expect(assigneeTypesForActorKind("agents")).toEqual(["agent", "squad"]);
+    expect(assigneeTypesForActorKind("agents")).toEqual(["agent"]);
     expect(assigneeTypesForActorKind("all")).toBeUndefined();
     expect(assigneeTypesForActorKind(undefined)).toBeUndefined();
   });

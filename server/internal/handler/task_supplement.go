@@ -301,8 +301,8 @@ func (h *Handler) CreateTaskSupplement(w http.ResponseWriter, r *http.Request) {
 		CreatedAt: created.CreatedAt, UpdatedAt: created.UpdatedAt, ParentID: created.ParentID,
 		WorkspaceID: created.WorkspaceID, ResolvedAt: created.ResolvedAt,
 		ResolvedByType: created.ResolvedByType, ResolvedByID: created.ResolvedByID,
-		SourceTaskID: created.SourceTaskID, QuickActionID: created.QuickActionID,
-		ViaPluginID: created.ViaPluginID, Revision: created.Revision,
+		SourceTaskID:      created.SourceTaskID,
+		Revision:          created.Revision,
 		RecoverySettledAt: created.RecoverySettledAt, DeletedAt: created.DeletedAt,
 	}
 	resp := commentToResponse(comment, nil, nil)

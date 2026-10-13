@@ -50,10 +50,6 @@ func TestIssueTableWorkingAgentsFacetCountsOnlyEligibleRuns(t *testing.T) {
 		"workspace_id": foreignWorkspaceID, "project_id": projectID,
 	})
 	chatID := dbfx.ChatSession(t, agentID)
-	autopilotID := insertListTestAutopilot(t, agentID, "working-facet-autopilot")
-	runID := dbfx.Insert(t, "autopilot_run", testutil.Cols{
-		"autopilot_id": autopilotID, "source": "manual", "status": "running",
-	})
 
 	// An issue runs one task at a time, so every running task below gets its
 	// own issue in the project.
@@ -71,10 +67,8 @@ func TestIssueTableWorkingAgentsFacetCountsOnlyEligibleRuns(t *testing.T) {
 	}
 	for _, cols := range []testutil.Cols{
 		{"issue_id": projectIssue(), "chat_session_id": chatID},
-		{"issue_id": projectIssue(), "autopilot_run_id": runID},
-		{"issue_id": projectIssue(), "chat_session_id": chatID, "autopilot_run_id": runID},
 		{"issue_id": foreignIssueID},
-		{}, // Quick-create work has no issue yet.
+		{}, // Sourceless work has no issue.
 	} {
 		cols["status"] = "running"
 		cols["runtime_id"] = testRuntimeID

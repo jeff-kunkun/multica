@@ -20,12 +20,6 @@ vi.mock("@multica/core/workspace/hooks", () => ({
   useActorName: () => ({ getActorName: () => "Lambda" }),
 }));
 
-// The real label loads the issue's wakeup rules; the row only needs to use it.
-vi.mock("./wakeup-source-chip", () => ({
-  WakeupRunLabel: ({ render }: { render: (label: string) => React.ReactNode }) =>
-    render("Wakeup · When CI finishes"),
-}));
-
 import { IssueRunsDialog } from "./issue-runs-dialog";
 
 function makeTask(overrides: Partial<AgentTask> = {}): AgentTask {
@@ -271,22 +265,6 @@ describe("IssueRunsDialog", () => {
     fireEvent.click(button);
     expect(screen.getByText("claude-opus-5")).toBeInTheDocument();
     expect(screen.getByText("1M")).toBeInTheDocument();
-  });
-
-  it("names a wakeup run by its rule, not as a quote", () => {
-    // A wakeup run carries the thread's comment id and the rule's instruction
-    // as its summary; neither is something a person said.
-    open([
-      makeTask({
-        wakeup_id: "wakeup-1",
-        trigger_comment_id: "comment-1",
-        trigger_summary: "Wakeup: check CI and fix it",
-        usage: [usage()],
-      }),
-    ]);
-
-    expect(screen.getByTitle("Wakeup · When CI finishes")).toHaveTextContent("Wakeup · When CI finishes");
-    expect(screen.queryByText(/“/)).not.toBeInTheDocument();
   });
 
   it("keeps the whole trigger reachable when one line truncates it", () => {

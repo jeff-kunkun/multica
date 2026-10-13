@@ -30,7 +30,7 @@ export function RetryRunButton({ task, issueId }: { task: AgentTask; issueId: st
       // Passing task.id targets this row's agent — without it, the rerun
       // endpoint would fall back to the issue's current assignee and the wrong
       // agent would fire on rows whose agent has since been displaced
-      // (reassignment, squad worker, or a one-off @-mention agent).
+      // (reassignment or a one-off @-mention agent).
       await api.rerunIssue(issueId, task.id);
     } catch (e) {
       // A rerun is re-gated on the operator's invoke permission (MUL-4525): a

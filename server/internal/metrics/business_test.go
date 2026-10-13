@@ -149,44 +149,23 @@ func TestBusinessMetricsRegistryExposesAllFamilies(t *testing.T) {
 	exerciseEvent(m, analytics.EventWorkspaceCreated, map[string]any{"source": "manual"})
 	exerciseEvent(m, analytics.EventTeamInviteSent, nil)
 	exerciseEvent(m, analytics.EventTeamInviteAccepted, nil)
-	exerciseEvent(m, analytics.EventOnboardingStarted, map[string]any{"platform": "web"})
-	exerciseEvent(m, analytics.EventOnboardingQuestionnaireSubmit, nil)
-	exerciseEvent(m, analytics.EventOnboardingSourceSubmit, nil)
-	exerciseEvent(m, analytics.EventOnboardingCompleted, map[string]any{"completion_path": "full"})
-	exerciseEvent(m, analytics.EventCloudWaitlistJoined, nil)
 	exerciseEvent(m, analytics.EventIssueCreated, map[string]any{"source": "manual", "platform": "web"})
 	exerciseEvent(m, analytics.EventChatMessageSent, map[string]any{"platform": "web"})
 	exerciseEvent(m, analytics.EventAgentCreated, map[string]any{"runtime_mode": "local", "source": "manual"})
-	exerciseEvent(m, analytics.EventSquadCreated, nil)
-	exerciseEvent(m, analytics.EventAutopilotCreated, map[string]any{"cadence": "manual"})
 	exerciseEvent(m, analytics.EventIssueExecuted, map[string]any{"source": "manual"})
 	exerciseEvent(m, analytics.EventRuntimeRegistered, map[string]any{"runtime_mode": "local", "provider": "claude"})
 	exerciseEvent(m, analytics.EventRuntimeReady, map[string]any{"runtime_mode": "local", "provider": "claude", "ready_duration_ms": int64(1000)})
 	exerciseEvent(m, analytics.EventRuntimeFailed, map[string]any{"runtime_mode": "local", "provider": "claude", "failure_reason": "timeout", "recoverable": true})
 	exerciseEvent(m, analytics.EventRuntimeOffline, map[string]any{"runtime_mode": "local", "provider": "claude"})
-	exerciseEvent(m, analytics.EventAutopilotRunStarted, map[string]any{"cadence": "manual", "trigger_kind": "manual"})
-	exerciseEvent(m, analytics.EventAutopilotRunCompleted, map[string]any{"cadence": "manual", "trigger_kind": "manual"})
-	exerciseEvent(m, analytics.EventAutopilotRunFailed, map[string]any{"cadence": "manual", "trigger_kind": "manual"})
 	exerciseEvent(m, analytics.EventFeedbackSubmitted, map[string]any{"kind": "general", "platform": "web"})
-	exerciseEvent(m, analytics.EventContactSalesSubmitted, map[string]any{"form_source": "page"})
 
 	// Direct Record* helpers (no PostHog event source).
-	m.RecordAutopilotRunSkipped("manual", "throttled")
-	m.RecordWebhookDelivery("github", "dispatched")
-	m.RecordWebhookRateLimited("absolute_ip")
 	m.RecordEmailRateLimited("workspace_invitation", "recipient")
 	m.RecordGithubEventReceived("pull_request", "opened")
 	m.RecordGithubPRReview("approved")
 	m.ObserveGithubPRMergeSeconds(120)
-	m.RecordCloudRuntimeRequest("provision", "ok", 0.5)
 	m.RecordDaemonWSMessageReceived("heartbeat")
 	m.RecordChatOutputLocalPath("file_url")
-	m.RecordEntitlementConfigError()
-	m.RecordEntitlementCache("hit")
-	m.RecordEntitlementRefresh("success", 0.01)
-	m.RecordEntitlementDecision("autopilot_runs", "observe", "cache_fresh")
-	m.RecordEntitlementVersionRegression()
-	m.RecordAutopilotQuotaDecision("observe", "manual", "admitted")
 	m.ObserveRuntimeSweepStage(RuntimeSweepStageLiveness, time.Second, 2, 1)
 
 	families, err := registry.Gather()
@@ -201,9 +180,6 @@ func TestBusinessMetricsRegistryExposesAllFamilies(t *testing.T) {
 		if !seen[metric] {
 			t.Fatalf("registry did not expose metric family %s", metric)
 		}
-	}
-	if !seen["multica_entitlement_config_error_total"] {
-		t.Fatal("registry did not expose metric family multica_entitlement_config_error_total")
 	}
 }
 

@@ -12,7 +12,7 @@ import { useWindowOverlayStore } from "@/stores/window-overlay-store";
  * stacking duplicates.
  *
  * No-ops when there is nothing to open into — logged out, zero workspaces, or
- * a pre-workspace overlay (onboarding, invite, create workspace) covering the
+ * a pre-workspace overlay (invite, create workspace) covering the
  * window, where a new tab would appear behind a full-window takeover.
  */
 export function openSettingsTab(): void {

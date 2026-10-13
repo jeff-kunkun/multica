@@ -16,13 +16,10 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/logger"
-	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/util"
-	agentpkg "github.com/multica-ai/multica/server/pkg/agent"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/dbid"
-	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
 type sourceContextStreamUploader interface {
@@ -428,10 +425,9 @@ func (h *Handler) PreviewCommentSubIssue(w http.ResponseWriter, r *http.Request)
 }
 
 type createCommentSubIssueRequest struct {
-	Mode         string                   `json:"mode"`
-	CaptureToken string                   `json:"capture_token"`
-	Issue        *CreateIssueRequest      `json:"issue,omitempty"`
-	QuickCreate  *QuickCreateIssueRequest `json:"quick_create,omitempty"`
+	Mode         string              `json:"mode"`
+	CaptureToken string              `json:"capture_token"`
+	Issue        *CreateIssueRequest `json:"issue,omitempty"`
 }
 
 func (h *Handler) CreateCommentSubIssue(w http.ResponseWriter, r *http.Request) {
@@ -479,46 +475,16 @@ func (h *Handler) CreateCommentSubIssue(w http.ResponseWriter, r *http.Request) 
 		h.writeSourceContextError(w, service.ErrSourceContextChanged, build.Limits)
 		return
 	}
-	var preparedAgent *preparedAgentCommentSubIssue
-	switch req.Mode {
-	case "manual":
-		if req.Issue == nil {
-			writeError(w, http.StatusBadRequest, "issue is required for manual mode")
-			return
-		}
-		if strings.TrimSpace(req.Issue.Title) == "" {
-			writeJSON(w, http.StatusBadRequest, map[string]any{"code": "invalid_request", "error": "title is required"})
-			return
-		}
-	case "agent":
-		if req.QuickCreate == nil {
-			writeError(w, http.StatusBadRequest, "quick_create is required for agent mode")
-			return
-		}
-		if err := service.ValidateSourceContextAgentInput(build, userUUID, strings.TrimSpace(req.QuickCreate.Prompt)); err != nil {
-			h.writeSourceContextError(w, err, build.Limits)
-			return
-		}
-		preparedAgent, err = h.prepareAgentCommentSubIssue(w, r, wsUUID, *req.QuickCreate)
-		if err != nil {
-			if !errors.Is(err, errSourceContextResponseWritten) {
-				h.writeSourceContextError(w, err, service.SourceContextLimitUsage{})
-			}
-			return
-		}
-	default:
-		writeError(w, http.StatusBadRequest, "mode must be manual or agent")
+	if req.Mode != "manual" {
+		writeError(w, http.StatusBadRequest, "mode must be manual")
 		return
 	}
-	// Reject a full workspace before cloning source attachments. This early
-	// check avoids expensive work; the TaskService enqueue preflight and final
-	// transactional issue admission remain necessary because this is not a
-	// capacity reservation.
-	if err := service.CheckIssueCreateCapacity(r.Context(), h.Queries, h.Entitlements, wsUUID); err != nil {
-		if !writeIssueLimitReached(w, err) {
-			slog.Warn("source context issue-capacity preflight failed", append(logger.RequestAttrs(r), "error", err)...)
-			writeError(w, http.StatusInternalServerError, "failed to check issue capacity")
-		}
+	if req.Issue == nil {
+		writeError(w, http.StatusBadRequest, "issue is required for manual mode")
+		return
+	}
+	if strings.TrimSpace(req.Issue.Title) == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"code": "invalid_request", "error": "title is required"})
 		return
 	}
 
@@ -549,22 +515,11 @@ func (h *Handler) CreateCommentSubIssue(w http.ResponseWriter, r *http.Request) 
 		}
 	}
 
-	switch req.Mode {
-	case "manual":
-		if err := h.createManualCommentSubIssue(w, r, wsUUID, userUUID, *req.Issue, capture, build.Limits); err != nil {
-			cleanupIfUnpersisted()
-			slog.Warn("source context capture failed", append(sourceContextAuditAttrs(r, capture.ID, capture.Snapshot.SourceIssue.ID, capture.Snapshot.AnchorCommentID, userUUID, req.Mode, build.Limits, "failed"), "error", err)...)
-			if !errors.Is(err, errSourceContextResponseWritten) {
-				h.writeSourceContextError(w, err, service.SourceContextLimitUsage{})
-			}
-		}
-	case "agent":
-		if err := h.createAgentCommentSubIssue(w, r, wsUUID, userUUID, *preparedAgent, capture, build.Limits); err != nil {
-			cleanupIfUnpersisted()
-			slog.Warn("source context capture failed", append(sourceContextAuditAttrs(r, capture.ID, capture.Snapshot.SourceIssue.ID, capture.Snapshot.AnchorCommentID, userUUID, req.Mode, build.Limits, "failed"), "error", err)...)
-			if !errors.Is(err, errSourceContextResponseWritten) {
-				h.writeSourceContextError(w, err, service.SourceContextLimitUsage{})
-			}
+	if err := h.createManualCommentSubIssue(w, r, wsUUID, userUUID, *req.Issue, capture, build.Limits); err != nil {
+		cleanupIfUnpersisted()
+		slog.Warn("source context capture failed", append(sourceContextAuditAttrs(r, capture.ID, capture.Snapshot.SourceIssue.ID, capture.Snapshot.AnchorCommentID, userUUID, req.Mode, build.Limits, "failed"), "error", err)...)
+		if !errors.Is(err, errSourceContextResponseWritten) {
+			h.writeSourceContextError(w, err, service.SourceContextLimitUsage{})
 		}
 	}
 }
@@ -747,128 +702,7 @@ func (h *Handler) createManualCommentSubIssue(w http.ResponseWriter, r *http.Req
 	return nil
 }
 
-type preparedAgentCommentSubIssue struct {
-	agentID, squadID, runtimeID pgtype.UUID
-	prompt, priority, dueDate   string
-	projectID                   pgtype.UUID
-	attachmentIDs               []pgtype.UUID
-}
-
-func (h *Handler) prepareAgentCommentSubIssue(w http.ResponseWriter, r *http.Request, workspaceID pgtype.UUID, input QuickCreateIssueRequest) (*preparedAgentCommentSubIssue, error) {
-	prompt := strings.TrimSpace(input.Prompt)
-	if prompt == "" {
-		return nil, sourceContextBadRequest("prompt is required")
-	}
-	hasAgent := strings.TrimSpace(input.AgentID) != ""
-	hasSquad := strings.TrimSpace(input.SquadID) != ""
-	if hasAgent == hasSquad {
-		return nil, sourceContextBadRequest("exactly one of agent_id or squad_id is required")
-	}
-	priority := strings.ToLower(strings.TrimSpace(input.Priority))
-	if priority != "" && priority != "urgent" && priority != "high" && priority != "medium" && priority != "low" {
-		return nil, sourceContextBadRequest("invalid priority")
-	}
-	var agentID, squadID pgtype.UUID
-	if hasSquad {
-		parsed, err := util.ParseUUID(strings.TrimSpace(input.SquadID))
-		if err != nil {
-			return nil, sourceContextBadRequest("invalid squad_id")
-		}
-		squadID = parsed
-		squad, err := h.Queries.GetSquadInWorkspace(r.Context(), db.GetSquadInWorkspaceParams{ID: squadID, WorkspaceID: workspaceID})
-		if err != nil || squad.ArchivedAt.Valid {
-			return nil, sourceContextBadRequest("squad not found or archived")
-		}
-		agentID = squad.LeaderID
-	} else {
-		parsed, err := util.ParseUUID(strings.TrimSpace(input.AgentID))
-		if err != nil {
-			return nil, sourceContextBadRequest("invalid agent_id")
-		}
-		agentID = parsed
-	}
-	if status, message := h.validateAssigneePair(r.Context(), r, util.UUIDToString(workspaceID), pgtype.Text{String: "agent", Valid: true}, agentID); status != 0 {
-		writeError(w, status, message)
-		return nil, errSourceContextResponseWritten
-	}
-	agent, err := h.Queries.GetAgentInWorkspace(r.Context(), db.GetAgentInWorkspaceParams{ID: agentID, WorkspaceID: workspaceID})
-	if err != nil {
-		return nil, sourceContextBadRequest("agent not found")
-	}
-	verdict, err := service.AgentReadiness(r.Context(), h.runtimeLookup(obsmetrics.RuntimeLookupSourceSourceContext), agent)
-	if err != nil {
-		return nil, err
-	}
-	if !verdict.Ready() {
-		writeAgentUnavailable(w, verdict.Detail, verdict.Reason)
-		return nil, errSourceContextResponseWritten
-	}
-	if status, payload := h.checkQuickCreateDaemonVersion(r.Context(), obsmetrics.RuntimeLookupSourceSourceContext, agent.RuntimeID); status != 0 {
-		writeJSON(w, status, payload)
-		return nil, errSourceContextResponseWritten
-	}
-	runtime, err := h.getAgentRuntime(r.Context(), obsmetrics.RuntimeLookupSourceSourceContext, agent.RuntimeID)
-	if err != nil || !runtimeHasCapability(runtime.Metadata, protocol.DaemonCapabilitySourceContextQuickCreateV1) {
-		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"code": "source_context_quick_create_unsupported", "error": "selected agent runtime must be updated before using captured context"})
-		return nil, errSourceContextResponseWritten
-	}
-	dueDate := strings.TrimSpace(input.DueDate)
-	if dueDate != "" {
-		parsed, err := util.ParseCalendarDate(dueDate)
-		if err != nil {
-			return nil, sourceContextBadRequest("invalid due_date")
-		}
-		dueDate = parsed.Time.Format("2006-01-02")
-	}
-	if priority != "" || dueDate != "" {
-		if status, payload := h.checkQuickCreateDaemonVersionAtLeast(r.Context(), obsmetrics.RuntimeLookupSourceSourceContext, agent.RuntimeID, agentpkg.MinQuickCreateFieldsCLIVersion); status != 0 {
-			writeJSON(w, status, payload)
-			return nil, errSourceContextResponseWritten
-		}
-	}
-	attachmentIDs, ok := parseUUIDSliceOrBadRequest(w, input.AttachmentIDs, "attachment_ids")
-	if !ok {
-		return nil, errSourceContextResponseWritten
-	}
-	var projectID pgtype.UUID
-	if strings.TrimSpace(input.ProjectID) != "" {
-		parsed, err := util.ParseUUID(strings.TrimSpace(input.ProjectID))
-		if err != nil {
-			return nil, sourceContextBadRequest("invalid project_id")
-		}
-		if _, err := h.Queries.GetProjectInWorkspace(r.Context(), db.GetProjectInWorkspaceParams{ID: parsed, WorkspaceID: workspaceID}); err != nil {
-			return nil, sourceContextBadRequest("project not found")
-		}
-		projectID = parsed
-	}
-	return &preparedAgentCommentSubIssue{
-		agentID: agentID, squadID: squadID, runtimeID: agent.RuntimeID,
-		prompt: prompt, priority: priority, dueDate: dueDate,
-		projectID: projectID, attachmentIDs: attachmentIDs,
-	}, nil
-}
-
-func (h *Handler) createAgentCommentSubIssue(w http.ResponseWriter, r *http.Request, workspaceID, userID pgtype.UUID, prepared preparedAgentCommentSubIssue, capture service.SourceContextCapture, limits service.SourceContextLimitUsage) error {
-	// Recheck the capability after potentially long streaming copies. A runtime
-	// can re-register during the copy; the final enqueue must still fail closed.
-	runtime, err := h.getAgentRuntime(r.Context(), obsmetrics.RuntimeLookupSourceSourceContext, prepared.runtimeID)
-	if err != nil || !runtimeHasCapability(runtime.Metadata, protocol.DaemonCapabilitySourceContextQuickCreateV1) {
-		writeJSON(w, http.StatusUnprocessableEntity, map[string]any{"code": "source_context_quick_create_unsupported", "error": "selected agent runtime must be updated before using captured context"})
-		return errSourceContextResponseWritten
-	}
-	task, err := h.TaskService.EnqueueQuickCreateTaskWithSourceContext(r.Context(), workspaceID, userID, prepared.agentID, prepared.squadID, prepared.prompt, prepared.priority, prepared.dueDate, prepared.projectID, capture.SourceIssueID, prepared.attachmentIDs, capture)
-	if err != nil {
-		return err
-	}
-	slog.Info("sub-issue quick-create enqueued from captured comment", append(sourceContextAuditAttrs(r, capture.ID, capture.Snapshot.SourceIssue.ID, capture.Snapshot.AnchorCommentID, userID, "agent", limits, "success"), "task_id", uuidToString(task.ID))...)
-	writeJSON(w, http.StatusAccepted, QuickCreateIssueResponse{TaskID: uuidToString(task.ID)})
-	return nil
-}
-
 func (h *Handler) writeSourceContextError(w http.ResponseWriter, err error, limits service.SourceContextLimitUsage) {
-	if writeIssueLimitReached(w, err) {
-		return
-	}
 	status := http.StatusInternalServerError
 	code := "source_context_capture_failed"
 	message := "failed to capture source context"

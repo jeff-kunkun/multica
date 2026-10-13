@@ -28,7 +28,6 @@ import (
 	"github.com/multica-ai/multica/server/pkg/agent"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
-	"github.com/multica-ai/multica/server/pkg/remotemcp"
 )
 
 // Mirrors AGENT_DESCRIPTION_MAX_LENGTH in packages/core/agents/constants.ts
@@ -68,26 +67,21 @@ type AgentResponse struct {
 	RuntimeAvailability string `json:"runtime_availability,omitempty"`
 	Name                string `json:"name"`
 	Description         string `json:"description"`
-	// Instructions is what this agent's owner wrote. For a system agent it
-	// holds only the workspace's own notes — the product half lives in
-	// SystemInstructions and is never stored on the row.
+	// Instructions is what this agent's owner wrote.
 	Instructions string `json:"instructions"`
 	// ConversationStarters are optional, agent-specific first-turn suggestions. An
 	// empty list tells clients to render their localized fallback prompts.
 	ConversationStarters []AgentConversationStarter `json:"conversation_starters"`
-	// SystemKey identifies a product-defined agent (e.g. "mika"). Empty for
+	// SystemKey identifies a product-defined agent. Empty for
 	// every user- or template-created agent. The UI keys "this is maintained
 	// by Multica" off this rather than off the display name, which owners may
 	// change.
-	SystemKey string `json:"system_key,omitempty"`
-	// SystemInstructions is the read-only product half of a system agent's
-	// prompt, filled from the server binary. Empty for ordinary agents.
-	SystemInstructions string          `json:"system_instructions,omitempty"`
-	AvatarURL          *string         `json:"avatar_url"`
-	RuntimeMode        string          `json:"runtime_mode"`
-	RuntimeConfig      any             `json:"runtime_config"`
-	CustomArgs         []string        `json:"custom_args"`
-	McpConfig          json.RawMessage `json:"mcp_config"`
+	SystemKey     string          `json:"system_key,omitempty"`
+	AvatarURL     *string         `json:"avatar_url"`
+	RuntimeMode   string          `json:"runtime_mode"`
+	RuntimeConfig any             `json:"runtime_config"`
+	CustomArgs    []string        `json:"custom_args"`
+	McpConfig     json.RawMessage `json:"mcp_config"`
 	// custom_env is intentionally NOT serialized on agent resources. The
 	// agent_list/get/create/update/archive/restore responses and WS events
 	// only expose coarse metadata (has_custom_env, custom_env_key_count) so
@@ -193,7 +187,6 @@ func (h *Handler) agentToResponse(a db.Agent) AgentResponse {
 		Instructions:          a.Instructions,
 		ConversationStarters:  conversationStarters,
 		SystemKey:             a.SystemKey.String,
-		SystemInstructions:    systemInstructionsFor(a),
 		AvatarURL:             h.resolveAvatarURLPtr(textToPtr(a.AvatarUrl)),
 		RuntimeMode:           a.RuntimeMode,
 		RuntimeConfig:         rc,
@@ -334,27 +327,17 @@ type AgentTaskResponse struct {
 	CancelledByCommentChange bool                   `json:"cancelled_by_comment_change,omitempty"`
 	CancelledBy              *TaskCancellationActor `json:"cancelled_by,omitempty"`
 
-	ID                   string                 `json:"id"`
-	AgentID              string                 `json:"agent_id"`
-	RuntimeID            string                 `json:"runtime_id"`
-	IssueID              string                 `json:"issue_id"`
-	WorkspaceID          string                 `json:"workspace_id"`
-	WorkspaceSlug        string                 `json:"workspace_slug,omitempty"`
-	IssueIdentifier      string                 `json:"issue_identifier,omitempty"`
-	RemoteMCPConnections []remotemcp.Connection `json:"remote_mcp_connections,omitempty"`
-	// PluginHookTools are the workspace's agent-trigger plugin hooks, which the
-	// daemon renders as MCP tools for this task. Resolved at claim time so
-	// disabling or uninstalling a plugin takes effect on the next task rather
-	// than whenever a daemon happens to restart.
-	PluginHookTools []service.PluginHookTool `json:"plugin_hook_tools,omitempty"`
-	// RemoteMCPDaemonToken is a short-lived, workspace-and-daemon scoped
-	// credential used only by the local daemon's write-only Remote MCP broker.
-	// It is never injected into the agent process.
-	RemoteMCPDaemonToken string `json:"remote_mcp_daemon_token,omitempty"`
+	ID              string `json:"id"`
+	AgentID         string `json:"agent_id"`
+	RuntimeID       string `json:"runtime_id"`
+	IssueID         string `json:"issue_id"`
+	WorkspaceID     string `json:"workspace_id"`
+	WorkspaceSlug   string `json:"workspace_slug,omitempty"`
+	IssueIdentifier string `json:"issue_identifier,omitempty"`
 	// WorkspaceContext is the workspace-level system prompt set in workspace
 	// settings (`workspace.context` DB column). Injected into the agent brief
 	// as `## Workspace Context` so every agent running in this workspace —
-	// regardless of issue / chat / autopilot / quick-create — sees the same
+	// regardless of issue or chat — sees the same
 	// shared context. Empty when the workspace owner hasn't set it.
 	WorkspaceContext string `json:"workspace_context,omitempty"`
 	// IssueStatuses is the workspace's ACTIVE CUSTOM status catalog (MUL-6460),
@@ -382,8 +365,6 @@ type AgentTaskResponse struct {
 	Attempt              int32                 `json:"attempt"`
 	MaxAttempts          int32                 `json:"max_attempts"`
 	ParentTaskID         *string               `json:"parent_task_id,omitempty"`
-	IsLeaderTask         bool                  `json:"is_leader_task,omitempty"`
-	LeaderRoleResolved   bool                  `json:"leader_role_resolved,omitempty"` // claim-only capability, always true here: IsLeaderTask/SquadID authoritatively answer "is this a leader run", so the daemon must not infer the role from briefing text. Servers predating it make no such promise — before #4951 they sent no is_leader_task at all, after it they sent the flag without guaranteeing a briefing — so a daemon seeing no capability keeps the legacy inference. Never rendered into a prompt; see daemon.taskIsSquadLeader (MUL-5811). Mirror field: internal/daemon/types.go, same JSON name
 	Agent                *TaskAgentData        `json:"agent,omitempty"`
 	Repos                []RepoData            `json:"repos,omitempty"`
 	ProjectID            string                `json:"project_id,omitempty"`          // issue's project, when present
@@ -458,34 +439,16 @@ type AgentTaskResponse struct {
 	// old server — and a daemon must then keep telling the agent to read the
 	// issue. An empty IssueChangedFields is only "unchanged" alongside this
 	// flag; on its own it is indistinguishable from "nobody looked" (MUL-7344).
-	IssueStateDeltaKnown     bool                 `json:"issue_state_delta_known,omitempty"`
-	IssueChangedFields       []string             `json:"issue_changed_fields,omitempty"`        // subset of title,description in that order; empty alongside IssueStateDeltaKnown means unchanged. Fields outside that set (status, assignee, priority, labels, parent, due date, stage, project, metadata) are NOT compared and must never be reported as checked. Status and assignee are out because IssueStatus / IssueAssigneeType / IssueAssigneeID ship their current values on every claim, so no comparison is needed to learn them; priority is out because it does not change what the agent does
-	IssueStatus              string               `json:"issue_status,omitempty"`                // the issue's status key at claim time. Sent whether or not the delta is known: the agent needs it to decide workflow step 3 ("already in progress?") without a read
-	IssueAssigneeType        string               `json:"issue_assignee_type,omitempty"`         // "agent", "member" or "squad" at claim time; empty when unassigned. With IssueAssigneeID, lets the agent tell "mine" from "someone else's" without a read
-	IssueAssigneeID          string               `json:"issue_assignee_id,omitempty"`           // assignee UUID at claim time; empty when unassigned
-	ChatSessionID            string               `json:"chat_session_id,omitempty"`             // non-empty for chat tasks
-	ChatMessage              string               `json:"chat_message,omitempty"`                // user message for chat tasks
-	ChatMessageAttachments   []ChatAttachmentMeta `json:"chat_message_attachments,omitempty"`    // attachments on the user message — agent calls `multica attachment download <id>` per entry
-	ChatIntro                bool                 `json:"chat_intro,omitempty"`                  // legacy compatibility for historical is_agent_intro sessions; new agent creation no longer creates these chats
-	AutopilotRunID           string               `json:"autopilot_run_id,omitempty"`            // non-empty for autopilot-spawned tasks
-	AutopilotID              string               `json:"autopilot_id,omitempty"`                // autopilot that spawned this task
-	AutopilotTitle           string               `json:"autopilot_title,omitempty"`             // autopilot title used as task context
-	AutopilotDescription     string               `json:"autopilot_description,omitempty"`       // autopilot description used as task prompt
-	AutopilotSource          string               `json:"autopilot_source,omitempty"`            // manual, schedule, webhook, or api
-	AutopilotTriggerPayload  json.RawMessage      `json:"autopilot_trigger_payload,omitempty"`   // optional trigger payload for webhook/api runs
-	QuickCreatePrompt        string               `json:"quick_create_prompt,omitempty"`         // user's natural-language input for quick-create tasks
-	QuickCreatePriority      string               `json:"quick_create_priority,omitempty"`       // explicit priority selected in quick-create
-	QuickCreateDueDate       string               `json:"quick_create_due_date,omitempty"`       // explicit calendar due date selected in quick-create
-	QuickCreateAttachmentIDs []string             `json:"quick_create_attachment_ids,omitempty"` // attachment ids uploaded in the quick-create prompt and bound on issue create
-	QuickCreateSourceContext json.RawMessage      `json:"quick_create_source_context,omitempty"` // immutable historical context for source-context quick-create
-	WakeupID                 string               `json:"wakeup_id,omitempty"`
-	WakeupSystemRule         string               `json:"wakeup_system_rule,omitempty"`      // set when a platform rule (e.g. child_done) started the run
-	WakeupJoined             string               `json:"wakeup_joined,omitempty"`           // wakeups that fired while this run waited to start and joined it instead of queuing their own
-	HandoffNote              string               `json:"handoff_note,omitempty"`            // legacy assignment handoff instruction retained for installed clients; rendered by the daemon only in the per-turn prompt
-	SquadID                  string               `json:"squad_id,omitempty"`                // for quick-create tasks where the picker was a squad; Agent is still the resolved leader
-	SquadName                string               `json:"squad_name,omitempty"`              // display name for the picker squad
-	ParentIssueID            string               `json:"parent_issue_id,omitempty"`         // for quick-create tasks opened from "Add sub issue" — UUID of the parent issue the new issue should be filed under
-	ParentIssueIdentifier    string               `json:"parent_issue_identifier,omitempty"` // human-readable identifier (e.g. MUL-123) of the quick-create parent issue, resolved on claim for prompt context
+	IssueStateDeltaKnown   bool                 `json:"issue_state_delta_known,omitempty"`
+	IssueChangedFields     []string             `json:"issue_changed_fields,omitempty"`     // subset of title,description in that order; empty alongside IssueStateDeltaKnown means unchanged. Fields outside that set (status, assignee, priority, labels, parent, due date, stage, project, metadata) are NOT compared and must never be reported as checked. Status and assignee are out because IssueStatus / IssueAssigneeType / IssueAssigneeID ship their current values on every claim, so no comparison is needed to learn them; priority is out because it does not change what the agent does
+	IssueStatus            string               `json:"issue_status,omitempty"`             // the issue's status key at claim time. Sent whether or not the delta is known: the agent needs it to decide workflow step 3 ("already in progress?") without a read
+	IssueAssigneeType      string               `json:"issue_assignee_type,omitempty"`      // "agent", "member" or "squad" at claim time; empty when unassigned. With IssueAssigneeID, lets the agent tell "mine" from "someone else's" without a read
+	IssueAssigneeID        string               `json:"issue_assignee_id,omitempty"`        // assignee UUID at claim time; empty when unassigned
+	ChatSessionID          string               `json:"chat_session_id,omitempty"`          // non-empty for chat tasks
+	ChatMessage            string               `json:"chat_message,omitempty"`             // user message for chat tasks
+	ChatMessageAttachments []ChatAttachmentMeta `json:"chat_message_attachments,omitempty"` // attachments on the user message — agent calls `multica attachment download <id>` per entry
+	ChatIntro              bool                 `json:"chat_intro,omitempty"`               // legacy compatibility for historical is_agent_intro sessions; new agent creation no longer creates these chats
+	HandoffNote            string               `json:"handoff_note,omitempty"`             // legacy assignment handoff instruction retained for installed clients; rendered by the daemon only in the per-turn prompt
 	// RequestingUserName + RequestingUserProfileDescription mirror the user
 	// the agent is acting on behalf of (see daemon/types.go). v1 sources them
 	// from the runtime owner so they're populated for daemon runtimes and
@@ -504,7 +467,7 @@ type AgentTaskResponse struct {
 	InitiatorID    string `json:"initiator_id,omitempty"`    // originator user UUID
 	InitiatorName  string `json:"initiator_name,omitempty"`  // originator display name
 	InitiatorEmail string `json:"initiator_email,omitempty"` // originator email
-	Kind           string `json:"kind"`                      // source discriminator: "comment" | "autopilot" | "chat" | "quick_create" | "direct" — quick-create remains stable after its result issue is linked
+	Kind           string `json:"kind"`                      // source discriminator: "comment" | "chat" | "direct"
 	// Attribution is the resolved accountable-human provenance for this run
 	// (MUL-4302 §9): the source label + precise flag, the initiator (accountable)
 	// and originator refs, the evidence pointer, and lineage. Always present (the
@@ -547,8 +510,9 @@ type TaskAttribution struct {
 	Precise bool `json:"precise"`
 	// Initiator is the accountable human (accountable_user_id). Nil when unattributed.
 	Initiator *AttributionUser `json:"initiator,omitempty"`
-	// Originator is the authorization human (originator_user_id); nil for autopilot
-	// (rule_owner / owner_fallback), where no human authorized the run.
+	// Originator is the authorization human (originator_user_id); nil for
+	// degraded sources (legacy rule_owner / owner_fallback), where no human
+	// authorized the run.
 	Originator *AttributionUser `json:"originator,omitempty"`
 	// Evidence points at the direct cause of the run so the UI can jump to it.
 	Evidence            *TaskEvidence `json:"evidence,omitempty"`
@@ -568,7 +532,7 @@ type AttributionUser struct {
 }
 
 // TaskEvidence is the kind-tagged handle to a run's direct cause (a comment,
-// autopilot run, rule version, source task, ...).
+// source task, legacy autopilot run or rule version, ...).
 type TaskEvidence struct {
 	Kind  string `json:"kind"`
 	RefID string `json:"ref_id"`
@@ -787,11 +751,6 @@ func taskToResponse(t db.AgentTaskQueue, workspaceID string) AgentTaskResponse {
 	if t.BranchName.Valid {
 		branchName = t.BranchName.String
 	}
-	var wakeupContext struct {
-		ID         string `json:"wakeup_id"`
-		SystemRule string `json:"wakeup_system"`
-	}
-	_ = json.Unmarshal(t.Context, &wakeupContext)
 	handoffNote := ""
 	if t.HandoffNote.Valid {
 		handoffNote = t.HandoffNote.String
@@ -818,25 +777,18 @@ func taskToResponse(t db.AgentTaskQueue, workspaceID string) AgentTaskResponse {
 		Attempt:                t.Attempt,
 		MaxAttempts:            t.MaxAttempts,
 		ParentTaskID:           uuidToPtr(t.ParentTaskID),
-		IsLeaderTask:           t.IsLeaderTask,
 		CreatedAt:              timestampToString(t.CreatedAt),
 		TriggerCommentID:       uuidToPtr(t.TriggerCommentID),
 		CoalescedCommentIDs:    uuidsToStrings(t.CoalescedCommentIds),
 		DeliveredCommentIDs:    uuidStringsOrEmpty(t.DeliveredCommentIds),
 		TriggerSummary:         textToPtr(t.TriggerSummary),
 		HandoffNote:            handoffNote,
-		WakeupID:               wakeupContext.ID,
-		WakeupSystemRule:       wakeupContext.SystemRule,
-		WakeupJoined:           service.JoinedWakeupNotes(t.Context),
 		WorkDir:                workDir,
 		RelativeWorkDir:        relativeWorkDir(workDir, workspaceID, uuidToString(t.ID)),
 		DurableWorkDir:         durableWorkDir,
 		RelativeDurableWorkDir: relativeWorkDir(durableWorkDir, "", ""),
-		// Surface the stable task source. A successful quick-create gains an
-		// issue link for navigation but retains its quick_create kind.
-		ChatSessionID:  uuidToString(t.ChatSessionID),
-		AutopilotRunID: uuidToString(t.AutopilotRunID),
-		Kind:           computeTaskKind(t),
+		ChatSessionID:          uuidToString(t.ChatSessionID),
+		Kind:                   computeTaskKind(t),
 		// Attribution labels + evidence + lineage + raw user ids (pure). Names are
 		// hydrated separately on user-facing surfaces (MUL-4302 §9).
 		Attribution: taskAttributionBase(t),
@@ -995,26 +947,11 @@ func basename(p string) string {
 }
 
 // computeTaskKind picks the stable source-discriminator string task UIs use.
-// Chat and autopilot have dedicated FKs; quick-create must inspect its context
-// because completion links the newly created issue back onto the task. The
-// remaining issue tasks split into comment-triggered and direct runs.
+// Chat has a dedicated FK; issue tasks split into comment-triggered and
+// direct runs.
 func computeTaskKind(t db.AgentTaskQueue) string {
 	if uuidToString(t.ChatSessionID) != "" {
 		return "chat"
-	}
-	if uuidToString(t.AutopilotRunID) != "" {
-		return "autopilot"
-	}
-	var contextKind struct {
-		Type string `json:"type"`
-	}
-	if json.Unmarshal(t.Context, &contextKind) == nil && contextKind.Type == service.QuickCreateContextType {
-		return "quick_create"
-	}
-	// Preserve the historical classification for issue-less rows from before
-	// quick-create stored a typed context.
-	if uuidToString(t.IssueID) == "" {
-		return "quick_create"
 	}
 	if uuidToString(t.TriggerCommentID) != "" {
 		return "comment"
@@ -1073,9 +1010,16 @@ func (h *Handler) loadAgentRuntimeAvailability(ctx context.Context, agents []db.
 	return result, nil
 }
 
+// deriveAgentRuntimeAvailability owns the three-state runtime reachability
+// policy: online, unstable (offline but seen within five minutes) or offline.
 func deriveAgentRuntimeAvailability(runtime db.AgentRuntime, now time.Time) string {
-	status := pgtype.Text{String: runtime.Status, Valid: runtime.Status != ""}
-	return deriveRuntimeAvailability(status, runtime.LastSeenAt, now)
+	if runtime.Status == "online" {
+		return "online"
+	}
+	if runtime.Status != "" && runtime.LastSeenAt.Valid && now.Sub(runtime.LastSeenAt.Time) < 5*time.Minute {
+		return "unstable"
+	}
+	return "offline"
 }
 
 func (h *Handler) ListAgents(w http.ResponseWriter, r *http.Request) {
@@ -1264,8 +1208,8 @@ type CreateAgentRequest struct {
 	ThinkingLevel      string                     `json:"thinking_level"`
 	ServiceTier        string                     `json:"service_tier"`
 	// Template records the creation-source attribution used by the
-	// `agent_created` analytics event (for example, "agent_builder"). Empty
-	// identifies a manually authored agent.
+	// `agent_created` analytics event. Empty identifies a manually authored
+	// agent.
 	Template string `json:"template"`
 	// SkillIDs are attached inside the same transaction as the agent row so a
 	// create never becomes visible in a partially configured state.
@@ -1434,8 +1378,7 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Probe workspace agent count BEFORE the insert so the funnel has a
-	// clean "first agent ever in this workspace" signal — Step 4 of
-	// onboarding always lands in this branch. A non-fatal read: if the
+	// clean "first agent ever in this workspace" signal. A non-fatal read: if the
 	// list fails we fall through with isFirstAgent=false rather than
 	// blocking creation, since the primary DB operation is the insert.
 	isFirstAgent := false
@@ -2341,11 +2284,8 @@ func (h *Handler) ArchiveAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// A system agent belongs to the product, not to the workspace, and the
-	// workspace's whole entry point runs through it. Archiving it would hide
-	// it from every list while leaving the row in place — which also strands
-	// the bootstrap endpoint, since its lookup skips archived rows but the
-	// unique index does not.
+	// A system agent belongs to the product, not to the workspace; the
+	// product owns its lifecycle.
 	if agent.SystemKey.Valid && agent.SystemKey.String != "" {
 		writeError(w, http.StatusBadRequest, "this agent is built into Multica and cannot be archived")
 		return
@@ -2588,7 +2528,7 @@ type WorkspaceWorkingAgent struct {
 
 // ListWorkspaceWorkingAgents returns currently working user-authored agents in
 // the workspace, independent of issue filters or Table pagination. The
-// optional type query selects issue, autopilot, or chat work; omitting it keeps
+// optional type query selects issue or chat work; omitting it keeps
 // the all-sources projection. scope=mine narrows issue work to the authenticated
 // member's selected My Issues relation. Access filtering mirrors the other
 // workspace-wide agent aggregations so a private/non-allow-listed agent is
@@ -2602,9 +2542,9 @@ func (h *Handler) ListWorkspaceWorkingAgents(w http.ResponseWriter, r *http.Requ
 
 	workType := strings.TrimSpace(r.URL.Query().Get("type"))
 	switch workType {
-	case "", "issue", "autopilot", "chat":
+	case "", "issue", "chat":
 	default:
-		writeError(w, http.StatusBadRequest, "invalid type: must be issue, autopilot, or chat")
+		writeError(w, http.StatusBadRequest, "invalid type: must be issue or chat")
 		return
 	}
 
@@ -2798,7 +2738,7 @@ func (h *Handler) GetWorkspaceAgentActivity30d(w http.ResponseWriter, r *http.Re
 // (queued/dispatched/running/waiting_local_directory), which is the current
 // workload presence derives from, plus each agent's most recent OUTCOME task
 // (completed/failed only), which is no longer part of presence since #1823 and
-// only feeds the Squad hover card's "last activity" line. Cancelled tasks are
+// only feeds the agent hover card's "last activity" line. Cancelled tasks are
 // excluded from the outcome half by design — cancel is a procedural signal
 // ("attempt aborted"), not an outcome, so it must not mask a prior failure.
 // Per-agent filtering happens in the front-end against this snapshot.

@@ -1,4 +1,3 @@
-import type { ChatSession } from "./chat";
 import type { Label } from "./label";
 
 export type AgentStatus = "idle" | "working" | "blocked" | "error" | "offline";
@@ -218,7 +217,7 @@ export interface WorkspaceWorkingAgent {
   issue_ids: string[];
 }
 
-export type WorkspaceWorkingAgentType = "issue" | "autopilot" | "chat";
+export type WorkspaceWorkingAgentType = "issue" | "chat";
 
 export type WorkspaceWorkingAgentMineRelation =
   | "assigned"
@@ -239,7 +238,7 @@ export interface AttributionUser {
   avatar_url?: string;
 }
 
-/** The kind-tagged handle to a run's direct cause (comment, autopilot run, ...). */
+/** The kind-tagged handle to a run's direct cause (comment, chat, ...). */
 export interface TaskEvidence {
   kind: string;
   ref_id: string;
@@ -260,7 +259,7 @@ export interface TaskAttribution {
   precise: boolean;
   /** The accountable human ("on behalf of"). Absent when unattributed. */
   initiator?: AttributionUser;
-  /** The authorization human; absent for autopilot runs (rule_owner / owner_fallback). */
+  /** The authorization human; absent for rule_owner / owner_fallback runs. */
   originator?: AttributionUser;
   /** The direct cause of the run, for a jump-to-evidence affordance. */
   evidence?: TaskEvidence;
@@ -279,13 +278,11 @@ export interface TaskCancellationActor {
 }
 
 export interface AgentTask {
-  wakeup_id?: string;
   id: string;
   agent_id: string;
   runtime_id: string;
-  // Empty string ("") when the task has no linked issue — either chat- or
-  // autopilot-spawned. Check chat_session_id / autopilot_run_id to tell
-  // which source produced it.
+  // Empty string ("") when the task has no linked issue (chat-spawned).
+  // Check chat_session_id to tell which source produced it.
   issue_id: string;
   // `waiting_local_directory` is the daemon-emitted hold state for the
   // local_directory flow: a task that has been dispatched but is parked
@@ -324,8 +321,6 @@ export interface AgentTask {
   created_at: string;
   /** Non-empty when the task was spawned from a chat session. */
   chat_session_id?: string;
-  /** Non-empty when the task was spawned by an autopilot run. */
-  autopilot_run_id?: string;
   /** Set when this task was created as an auto-retry of a parent task. */
   parent_task_id?: string;
   /** 1-based attempt counter; >1 means this is a retry. */
@@ -356,18 +351,13 @@ export interface AgentTask {
   /**
    * Canonical short description of what triggered this task — snapshot
    * taken at creation time. For comment-triggered tasks it's the
-   * comment text (truncated to ~200 chars); for autopilot it's the
-   * autopilot title; NULL for direct assignments and chat tasks.
-   * Persists even if the source comment / autopilot is later edited
+   * comment text (truncated to ~200 chars); NULL for direct assignments
+   * and chat tasks. Persists even if the source comment is later edited
    * or deleted.
    */
   trigger_summary?: string;
-  /**
-   * Server-computed source discriminator used by task surfaces. Quick-create
-   * remains quick_create after its result issue is linked, so consumers can
-   * distinguish creation work from later direct runs on that issue.
-   */
-  kind?: "comment" | "autopilot" | "chat" | "quick_create" | "direct";
+  /** Server-computed source discriminator used by task surfaces. */
+  kind?: "comment" | "chat" | "direct";
   /**
    * Local working directory pinned for this task by the daemon. Empty until
    * the daemon reports a work_dir (typically once execution starts). This is
@@ -457,17 +447,6 @@ export interface TaskUsage {
   cost_usd_ticks?: number;
 }
 
-/**
- * Response of the Mika bootstrap endpoint: the workspace's Mika plus the
- * caller's conversation with it, resolved together server-side so two clients
- * cannot each open their own onboarding session.
- */
-export interface MikaBootstrapResponse extends Agent {
-  /** Absent only when the server could not resolve the session; retry the
-   *  same call rather than creating one client-side. */
-  onboarding_session?: ChatSession;
-}
-
 export interface Agent {
   id: string;
   workspace_id: string;
@@ -490,7 +469,7 @@ export interface Agent {
   instructions: string;
   /** Up to three agent-authored first-turn suggestions. Older servers omit it. */
   conversation_starters?: AgentConversationStarter[];
-  /** Set for product-defined agents (e.g. "mika"). Absent for user- and
+  /** Set for product-defined agents. Absent for user- and
    *  template-created agents. Identity for "maintained by Multica" checks —
    *  never the display name, which owners may change. */
   system_key?: string;
@@ -657,12 +636,6 @@ export interface CreateAgentRequest {
   skill_ids?: string[];
 }
 
-export interface AgentBuilderSession {
-  session_id: string;
-  builder_agent_id: string;
-  runtime_id: string;
-}
-
 /** Who may invoke the agent being created, as the creation form models it. */
 export type AgentPermissionScope = "private" | "workspace" | "members";
 
@@ -690,33 +663,6 @@ export interface StoredAgentDraft {
   member_ids: string[];
   team_ids: string[];
   applied_message_id: string | null;
-}
-
-/** One unfinished agent-creation conversation, as listed by the studio. */
-export interface AgentBuilderSessionSummary {
-  session_id: string;
-  title: string;
-  /** The carrier's runtime — where this conversation actually executes. The
-   *  picker seeds from it so it can never disagree with what answers the next
-   *  message (MUL-5163). */
-  runtime_id: string;
-  created_at: string;
-  updated_at: string;
-  /** Still in the builder wire format; decode with the builder protocol helpers
-   *  before showing it to a human. */
-  last_message_content: string;
-  last_message_role: string;
-  last_message_at: string;
-  /** The stored configuration, or null when the conversation has never been
-   *  hand-edited — the client then replays the last `<agent_draft>` block. */
-  draft?: StoredAgentDraft | null;
-}
-
-/** Result of rebinding a live builder conversation to another runtime.
- *  `runtime_id` is the runtime the server actually bound — the caller must
- *  wait for it before showing the new runtime as selected. */
-export interface AgentBuilderRuntimeSwitch {
-  runtime_id: string;
 }
 
 export interface UpdateAgentRequest {

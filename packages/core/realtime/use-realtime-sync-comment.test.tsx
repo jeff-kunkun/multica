@@ -20,7 +20,6 @@ vi.mock("../platform/workspace-storage", () => ({
 }));
 
 vi.mock("../paths", () => ({
-  useHasOnboarded: () => true,
   resolvePostAuthDestination: () => "/",
 }));
 

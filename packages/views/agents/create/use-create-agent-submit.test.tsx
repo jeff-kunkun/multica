@@ -20,7 +20,6 @@ vi.mock("@multica/core/hooks", () => ({
 vi.mock("@multica/core/paths", () => ({
   useWorkspacePaths: () => ({
     agentDetail: (agentId: string) => `/acme/agents/${agentId}`,
-    squadDetail: (squadId: string) => `/acme/squads/${squadId}`,
   }),
 }));
 
@@ -39,7 +38,6 @@ vi.mock("@multica/core/api", () => {
   return {
     api: {
       createAgent: mockCreateAgent,
-      addSquadMember: vi.fn(),
     },
     ApiError,
   };
@@ -128,7 +126,6 @@ describe("useCreateAgentSubmit cache handoff", () => {
             runtimeId: CREATED_AGENT.runtime_id,
           },
           runtimeId: CREATED_AGENT.runtime_id,
-          squadId: null,
         }),
       { wrapper: wrapper(queryClient) },
     );

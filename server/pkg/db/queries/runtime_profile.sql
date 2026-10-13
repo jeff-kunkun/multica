@@ -98,9 +98,9 @@ RETURNING id, workspace_id, owner_id, daemon_id, provider;
 -- carrier through, whereupon TeardownRuntime would hard-delete that carrier.
 --
 -- system_key rides along because it, not kind, decides what the user can
--- actually do about a blocker. Mika is kind='user' with system_key='mika' and
--- can be neither archived nor moved; a builder carrier is kind='system' and is
--- released by its Builder session, not from the agent list.
+-- actually do about a blocker. A system-keyed agent may be kind='user' yet can
+-- be neither archived nor moved; a leftover builder carrier is kind='system'
+-- and is not managed from the agent list.
 --
 -- Bounded on purpose. The caller only needs to know that blockers exist, name a
 -- few, and report how many there are — it never needs every row. This runs
@@ -112,7 +112,7 @@ RETURNING id, workspace_id, owner_id, daemon_id, provider;
 -- The per-class counts are what let the refusal stay correct while bounded.
 -- Rows are ordered by machine and name, so which blockers land inside the LIMIT
 -- is arbitrary with respect to class: twenty ordinary agents can push the one
--- Mika to position 21. A message whose advice came from the visible rows would
+-- built-in agent to position 21. A message whose advice came from the visible rows would
 -- then tell the user to archive all of them — the unactionable instruction this
 -- whole change removes, just deferred. So the recovery paths are chosen from
 -- these counts and only the names come from the rows.
@@ -133,13 +133,6 @@ WITH blockers AS (
         ar.status AS runtime_status,
         CASE
             WHEN a.system_key IS NULL OR btrim(a.system_key) = '' THEN 'user'
-            WHEN btrim(a.system_key) = 'mika' THEN 'mika'
-            -- starts_with, not LIKE: '_' is a single-character wildcard in
-            -- LIKE, so 'agent_builder:%' also matches 'agent-builder:x' and
-            -- 'agentXbuilder:x'. Those would be classified here as carriers
-            -- and by the Go side as other_system, and the refusal would send
-            -- the user to an Agent Builder session that does not exist.
-            WHEN starts_with(btrim(a.system_key), 'agent_builder:') THEN 'agent_builder'
             ELSE 'other_system'
         END AS blocker_class
     FROM agent a
@@ -158,8 +151,6 @@ SELECT
     blocker_class,
     count(*) OVER () AS total_count,
     count(*) FILTER (WHERE blocker_class = 'user') OVER () AS user_count,
-    count(*) FILTER (WHERE blocker_class = 'mika') OVER () AS mika_count,
-    count(*) FILTER (WHERE blocker_class = 'agent_builder') OVER () AS agent_builder_count,
     count(*) FILTER (WHERE blocker_class = 'other_system') OVER () AS other_system_count
 FROM blockers
 ORDER BY runtime_name ASC, name ASC
@@ -167,8 +158,8 @@ LIMIT @max_rows::int;
 
 -- name: ListAgentRuntimeIDsByProfile :many
 -- Enumerates the runtime instance rows registered against a profile. The
--- profile-delete cascade walks these so it can run the same archived-agent /
--- archived-squad / autopilot teardown the runtime-delete path uses before
+-- profile-delete cascade walks these so it can run the same teardown the
+-- runtime-delete path uses before
 -- removing each runtime row — agent.runtime_id is ON DELETE RESTRICT, so a
 -- bare delete would 500 whenever an archived agent still references the row.
 SELECT id FROM agent_runtime

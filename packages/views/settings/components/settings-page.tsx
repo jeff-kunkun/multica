@@ -2,12 +2,9 @@
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
-  AlarmClock,
   Bell,
-  Blocks,
   Bot,
   CircleDot,
-  CreditCard,
   FolderGit2,
   Keyboard,
   KeyRound,
@@ -22,16 +19,10 @@ import {
   User,
   Users,
   X,
-  Zap,
 } from "lucide-react";
 import { useAuthStore } from "@multica/core/auth";
 import { useCurrentWorkspace } from "@multica/core/paths";
-import { useFeatureEnabled } from "@multica/core/config";
 import { useCurrentMember } from "@multica/core/permissions";
-import {
-  BILLING_WORKSPACE_SUBSCRIPTIONS_FLAG,
-  PLUGINS_V1_FLAG,
-} from "@multica/core/feature-flags";
 import { resolvePublicFileUrl } from "@multica/core/workspace/avatar-url";
 import { ActorAvatar } from "@multica/ui/components/common/actor-avatar";
 import { cn } from "@multica/ui/lib/utils";
@@ -49,16 +40,12 @@ import { NotificationsTab } from "./notifications-tab";
 import { LabelsTab } from "./labels-tab";
 import { IssueStatusesTab } from "./issue-statuses-tab";
 import { PropertiesTab } from "./properties-tab";
-import { QuickActionsTab } from "./quick-actions-tab";
 import { KeyboardShortcutsTab } from "./keyboard-shortcuts-tab";
-import { PluginsTab } from "./plugins-tab";
 import { McpTab } from "./mcp-tab";
-import { BillingTab } from "./billing-tab";
 import { SETTINGS_ANCHOR_ATTR } from "./settings-layout";
 import { searchSettings } from "./settings-search";
 import { HighlightText } from "../../search/highlight-text";
 import { useSettingsSearchIndex } from "./use-settings-search-index";
-import { WakeupsTab } from "./wakeups-tab";
 import { CollapsedNavTrigger } from "../../layout/page-header";
 import { useT } from "../../i18n";
 
@@ -107,11 +94,6 @@ export function SettingsPage({ extraDeviceTabs = [] }: SettingsPageProps = {}) {
   const { role } = useCurrentMember(workspace?.id ?? "");
   const isMember = role === "member";
   const navigation = useNavigation();
-  const pluginsEnabled = useFeatureEnabled(PLUGINS_V1_FLAG, false);
-  const billingEnabled = useFeatureEnabled(
-    BILLING_WORKSPACE_SUBSCRIPTIONS_FLAG,
-    false,
-  );
   const entry = (
     value: string,
     label: string,
@@ -186,16 +168,6 @@ export function SettingsPage({ extraDeviceTabs = [] }: SettingsPageProps = {}) {
             entry("bots", t(($) => $.page.tabs.bots), Bot, <BotsTab />, {
               adminOnly: true,
             }),
-            ...(billingEnabled
-              ? [
-                  entry(
-                    "billing",
-                    t(($) => $.page.tabs.billing),
-                    CreditCard,
-                    <BillingTab />,
-                  ),
-                ]
-              : []),
           ],
         },
         {
@@ -209,10 +181,6 @@ export function SettingsPage({ extraDeviceTabs = [] }: SettingsPageProps = {}) {
               <IssueStatusesTab />,
               { wide: true, adminOnly: true },
             ),
-            entry("wakeups", t(($) => $.page.tabs.wakeups), AlarmClock, <WakeupsTab />, {
-              wide: true,
-              adminOnly: true,
-            }),
             entry("labels", t(($) => $.page.tabs.labels), Tags, <LabelsTab />, {
               wide: true,
             }),
@@ -222,13 +190,6 @@ export function SettingsPage({ extraDeviceTabs = [] }: SettingsPageProps = {}) {
               ListPlus,
               <PropertiesTab />,
               { wide: true, adminOnly: true },
-            ),
-            entry(
-              "quick-actions",
-              t(($) => $.page.tabs.quick_actions),
-              Zap,
-              <QuickActionsTab />,
-              { wide: true },
             ),
           ],
         },
@@ -242,13 +203,6 @@ export function SettingsPage({ extraDeviceTabs = [] }: SettingsPageProps = {}) {
             entry("mcp", t(($) => $.page.tabs.mcp), Server, <McpTab />, {
               adminOnly: true,
             }),
-            ...(pluginsEnabled
-              ? [
-                  entry("plugins", t(($) => $.page.tabs.plugins), Blocks, <PluginsTab />, {
-                    adminOnly: true,
-                  }),
-                ]
-              : []),
           ],
         },
       ],
@@ -268,10 +222,8 @@ export function SettingsPage({ extraDeviceTabs = [] }: SettingsPageProps = {}) {
     group.subgroups.flatMap((subgroup) => subgroup.entries),
   );
   const location = resolveSettingsLocation(navigation.searchParams);
-  const candidate =
-    location.tab === "billing" && !billingEnabled ? "workspace" : location.tab;
   const active =
-    allEntries.find((item) => item.value === candidate) ?? allEntries[0]!;
+    allEntries.find((item) => item.value === location.tab) ?? allEntries[0]!;
   const href = (value: string) =>
     settingsHref(navigation.pathname, navigation.searchParams, value);
 

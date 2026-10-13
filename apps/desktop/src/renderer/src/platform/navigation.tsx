@@ -52,10 +52,6 @@ function tryRouteToOverlay(path: string): boolean {
     overlay.open({ type: "new-workspace" });
     return true;
   }
-  if (path === "/onboarding") {
-    overlay.open({ type: "onboarding" });
-    return true;
-  }
   if (path === "/invitations") {
     overlay.open({ type: "invitations" });
     return true;

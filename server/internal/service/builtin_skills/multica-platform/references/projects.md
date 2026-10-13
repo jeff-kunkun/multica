@@ -26,8 +26,8 @@ multica project resource list <project-id> --output json
 Project resources are mutated through project resource commands/endpoints. Issue
 comments do not create durable project resources.
 
-A project's `description` is also durable context: when an issue (or a
-quick-create task) is bound to a project, the project description is injected
+A project's `description` is also durable context: when an issue is bound
+to a project, the project description is injected
 into the agent's brief under `## Project Context` and written to
 `.multica/project/resources.json` as `project_description`. Use it for
 project-wide rules/context that should apply to every task in the project.
@@ -119,8 +119,8 @@ the mention-link form instead, with the project UUID from
 
 Every client makes it navigable, with different presentation: web and desktop
 render a chip carrying the project's icon and current title, while mobile
-renders an ordinary link that opens the project on tap. Unlike `@agent` /
-`@squad`, it is a pure link: the mention parser does not recognize `project` at
+renders an ordinary link that opens the project on tap. Unlike `@agent`, it
+is a pure link: the mention parser does not recognize `project` at
 all, so it enqueues nothing and notifies nobody — the same no-side-effect
 contract as an `issue` mention.
 

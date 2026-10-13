@@ -39,7 +39,7 @@ const {
     state: {
       sendCode: vi.fn(),
       verifyCode: vi.fn(),
-      user: null as null | { id: string; email: string; onboarded_at?: string | null },
+      user: null as null | { id: string; email: string },
       isLoading: false,
     },
   },
@@ -150,10 +150,9 @@ describe("LoginPage", () => {
   // interleaving the user could end up stuck on the create-workspace page
   // despite having workspaces.
   describe("post-login redirect ownership (#5009)", () => {
-    const onboardedUser = {
+    const existingUser = {
       id: "u1",
       email: "test@multica.ai",
-      onboarded_at: "2026-01-01T00:00:00Z",
     };
 
     it("does not redirect from the arrival effect when the user logs in via the form", async () => {
@@ -164,7 +163,7 @@ describe("LoginPage", () => {
       // verifyCode set the user; the workspace list fetch is still in flight
       // (cache cold). The arrival effect must stay silent — handleSuccess
       // owns this navigation.
-      authStateRef.state.user = onboardedUser;
+      authStateRef.state.user = existingUser;
       rerender(<LoginPage />);
 
       await act(async () => {});
@@ -176,7 +175,7 @@ describe("LoginPage", () => {
     it("fetches the workspace list before redirecting a visitor who arrived authenticated", async () => {
       // Cold Query cache on a fresh page load: reading it would say "no
       // workspaces" and misroute to /workspaces/new. The effect must fetch.
-      authStateRef.state.user = onboardedUser;
+      authStateRef.state.user = existingUser;
       mockListWorkspaces.mockResolvedValue([{ id: "ws-1", slug: "acme" }]);
 
       render(<LoginPage />, { wrapper: createWrapper() });
@@ -191,7 +190,7 @@ describe("LoginPage", () => {
       searchParamsState.params = new URLSearchParams({
         next: "/invite/abc",
       });
-      authStateRef.state.user = onboardedUser;
+      authStateRef.state.user = existingUser;
 
       render(<LoginPage />, { wrapper: createWrapper() });
 

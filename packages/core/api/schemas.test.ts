@@ -6,9 +6,6 @@ import {
   AgentTaskListSchema,
   AgentActivityBucketListSchema,
   TaskMessageListSchema,
-  AutopilotQuotaUsageSchema,
-  AutopilotRunSchema,
-  FALLBACK_AUTOPILOT_RUN,
   CommentTriggerPreviewSchema,
   DashboardAgentRunTimeListSchema,
   DashboardRunTimeDailyListSchema,
@@ -22,7 +19,6 @@ import {
   ChatSessionSchema,
   PrioritizeQueuedChatTaskResponseSchema,
   CreateFeedbackResponseSchema,
-  DuplicateIssueErrorBodySchema,
   EMPTY_CHAT_DRAFT_RESTORES,
   EMPTY_CHAT_PENDING_TASK,
   EMPTY_CHAT_SESSION,
@@ -45,17 +41,9 @@ import {
   RuntimeUsageByHourListSchema,
   RuntimeUsageListSchema,
   SendChatMessageResponseSchema,
-  SquadListSchema,
-  SquadSchema,
   SourceContextPreviewSchema,
   TimelineEntriesSchema,
   UserSchema,
-  PluginInstallationSchema,
-  PluginInstallationListResponseSchema,
-  PluginMCPToolListSchema,
-  PluginPreviewSchema,
-  EMPTY_PLUGIN_INSTALLATION_LIST,
-  EMPTY_PLUGIN_PREVIEW,
 } from "./schemas";
 import { IssueViewSchema, IssueViewListSchema } from "./schemas";
 import {
@@ -122,18 +110,18 @@ describe("ChatSessionSchema", () => {
       { ...baseSession, id: 42 },
       {
         ...baseSession,
-        id: "onboarding-chat",
+        id: "no-response-chat",
         last_message: {
           content: "Welcome",
           role: "assistant",
           created_at: "2026-08-18T00:00:00Z",
-          message_kind: "onboarding_opening",
+          message_kind: "no_response",
         },
       },
     ]);
 
-    expect(parsed.map((session) => session.id)).toEqual(["chat-1", "onboarding-chat"]);
-    expect(parsed[1]?.last_message?.message_kind).toBe("onboarding_opening");
+    expect(parsed.map((session) => session.id)).toEqual(["chat-1", "no-response-chat"]);
+    expect(parsed[1]?.last_message?.message_kind).toBe("no_response");
   });
 });
 describe("IssueSchema (via ListIssuesResponseSchema)", () => {
@@ -923,55 +911,6 @@ describe("CreateFeedbackResponseSchema", () => {
   });
 });
 
-// The duplicate-issue branch in create-issue.tsx feeds ApiError.body
-// (typed as `unknown`) through this schema. Any future server drift that
-// loses the contract MUST fail the parse so the UI falls back to a normal
-// error toast instead of rendering an empty / partial duplicate card.
-describe("DuplicateIssueErrorBodySchema", () => {
-  const valid = {
-    code: "active_duplicate_issue",
-    error: "An active issue with this title already exists: MUL-12 – Login bug",
-    issue: {
-      id: "11111111-1111-1111-1111-111111111111",
-      identifier: "MUL-12",
-      title: "Login bug",
-    },
-  };
-
-  it("accepts a well-formed body", () => {
-    expect(DuplicateIssueErrorBodySchema.safeParse(valid).success).toBe(true);
-  });
-
-  it("accepts unknown extra fields via .loose()", () => {
-    const forwardCompat = {
-      ...valid,
-      hint: "Try a different title",
-      issue: { ...valid.issue, workspace_id: "ws-1", status: "todo" },
-    };
-    expect(DuplicateIssueErrorBodySchema.safeParse(forwardCompat).success).toBe(true);
-  });
-
-  it("rejects a renamed code (so renames degrade to the generic toast)", () => {
-    const renamed = { ...valid, code: "duplicate_issue" };
-    expect(DuplicateIssueErrorBodySchema.safeParse(renamed).success).toBe(false);
-  });
-
-  it("rejects a missing issue object", () => {
-    const { issue: _omit, ...without } = valid;
-    expect(DuplicateIssueErrorBodySchema.safeParse(without).success).toBe(false);
-  });
-
-  it("rejects a non-string issue.id", () => {
-    const broken = { ...valid, issue: { ...valid.issue, id: 42 } };
-    expect(DuplicateIssueErrorBodySchema.safeParse(broken).success).toBe(false);
-  });
-
-  it("accepts a missing error field (it is optional)", () => {
-    const { error: _omit, ...without } = valid;
-    expect(DuplicateIssueErrorBodySchema.safeParse(without).success).toBe(true);
-  });
-});
-
 // `user.timezone` (Viewing tz) was added in the timezone-architecture RFC.
 // A desktop build older than the server — or a server predating the
 // `user.timezone` migration — will return a `/api/me` body with no
@@ -1012,51 +951,6 @@ describe("UserSchema timezone drift", () => {
       { endpoint: "GET /api/me" },
     );
     expect(parsed).toBe(EMPTY_USER);
-  });
-});
-
-describe("SquadListSchema member preview drift", () => {
-  const baseSquad = {
-    id: "squad-1",
-    workspace_id: "ws-1",
-    name: "Frontend Squad",
-    description: "",
-    instructions: "",
-    avatar_url: null,
-    leader_id: "agent-1",
-    creator_id: "user-1",
-    created_at: "2026-05-01T00:00:00Z",
-    updated_at: "2026-05-01T00:00:00Z",
-    archived_at: null,
-    archived_by: null,
-  };
-
-  it("defaults preview fields when an older backend omits them", () => {
-    const parsed = SquadListSchema.parse([baseSquad]);
-    expect(parsed[0]?.member_count).toBe(0);
-    expect(parsed[0]?.member_preview).toEqual([]);
-  });
-
-  it("defaults preview fields on a single squad response", () => {
-    const parsed = SquadSchema.parse(baseSquad);
-    expect(parsed.member_count).toBe(0);
-    expect(parsed.member_preview).toEqual([]);
-  });
-
-  it("preserves lightweight member preview rows", () => {
-    const parsed = SquadListSchema.parse([
-      {
-        ...baseSquad,
-        member_count: 2,
-        member_preview: [
-          { member_type: "agent", member_id: "agent-1", role: "leader" },
-          { member_type: "member", member_id: "user-2", role: "member" },
-        ],
-      },
-    ]);
-    expect(parsed[0]?.member_count).toBe(2);
-    expect(parsed[0]?.member_preview).toHaveLength(2);
-    expect(parsed[0]?.member_preview?.[0]?.role).toBe("leader");
   });
 });
 
@@ -1550,83 +1444,6 @@ describe("SearchProjectsResponseSchema date drift", () => {
   });
 });
 
-// The "run now" flow branches on run.status/reason_code to avoid a false-success
-// toast (MUL-4525), so the trigger response must survive backend drift.
-describe("AutopilotRunSchema", () => {
-  const ENDPOINT = { endpoint: "POST /api/autopilots/:id/trigger" };
-  const baseRun = {
-    id: "run-1",
-    autopilot_id: "ap-1",
-    trigger_id: null,
-    source: "manual",
-    status: "issue_created",
-    issue_id: "issue-1",
-    task_id: null,
-    triggered_at: "2026-07-14T00:00:00Z",
-    completed_at: null,
-    failure_reason: null,
-    trigger_payload: null,
-    result: null,
-    created_at: "2026-07-14T00:00:00Z",
-  };
-
-  it("preserves a blocked run's status and reason_code", () => {
-    const parsed = parseWithFallback(
-      { ...baseRun, status: "skipped", failure_reason: "you are not allowed to trigger this autopilot's assignee agent", reason_code: "invocation_not_allowed" },
-      AutopilotRunSchema,
-      FALLBACK_AUTOPILOT_RUN,
-      ENDPOINT,
-    );
-    expect(parsed.status).toBe("skipped");
-    expect(parsed.reason_code).toBe("invocation_not_allowed");
-  });
-
-  it("tolerates an older server omitting reason_code", () => {
-    const parsed = parseWithFallback(baseRun, AutopilotRunSchema, FALLBACK_AUTOPILOT_RUN, ENDPOINT);
-    expect(parsed.status).toBe("issue_created");
-    expect(parsed.reason_code).toBeUndefined();
-  });
-
-  it("degrades a malformed response to a non-success fallback (never a false success)", () => {
-    const parsed = parseWithFallback("not-an-object", AutopilotRunSchema, FALLBACK_AUTOPILOT_RUN, ENDPOINT);
-    expect(parsed).toBe(FALLBACK_AUTOPILOT_RUN);
-    expect(parsed.status).toBe("failed");
-  });
-});
-
-describe("AutopilotQuotaUsageSchema", () => {
-  const baseUsage = {
-    action: "enforce",
-    used: 12,
-    reserved: 2,
-    limit: 100,
-    period_start: "2026-08-01T00:00:00Z",
-    period_end: "2026-09-01T00:00:00Z",
-    reset_at: "2026-09-01T00:00:00Z",
-  };
-
-  it("preserves durable blocked counts by execution source", () => {
-    const parsed = AutopilotQuotaUsageSchema.parse({
-      ...baseUsage,
-      blocked_counts: { schedule: 3, webhook: 7 },
-    });
-    expect(parsed.blocked_counts).toEqual({ schedule: 3, webhook: 7 });
-  });
-
-  it("defaults blocked_counts to null for an older server", () => {
-    expect(AutopilotQuotaUsageSchema.parse(baseUsage).blocked_counts).toBeNull();
-  });
-
-  it("isolates a malformed blocked_counts field", () => {
-    const parsed = AutopilotQuotaUsageSchema.parse({
-      ...baseUsage,
-      blocked_counts: { webhook: "many" },
-    });
-    expect(parsed.used).toBe(12);
-    expect(parsed.blocked_counts).toBeNull();
-  });
-});
-
 // The comment composer branches on preview.blocked to warn before sending
 // (MUL-4525 §2), so the additive field must parse and degrade gracefully.
 describe("CommentTriggerPreviewSchema.blocked", () => {
@@ -1634,12 +1451,12 @@ describe("CommentTriggerPreviewSchema.blocked", () => {
     const parsed = CommentTriggerPreviewSchema.parse({
       agents: [{ id: "a1", source: "mention_agent", reason: "" }],
       blocked: [
-        { target_type: "squad", target_id: "s1", status: "blocked", reason_code: "invocation_not_allowed" },
+        { target_type: "agent", target_id: "s1", status: "blocked", reason_code: "invocation_not_allowed" },
       ],
     });
     expect(parsed.agents).toHaveLength(1);
     expect(parsed.blocked).toEqual([
-      { target_type: "squad", target_id: "s1", status: "blocked", reason_code: "invocation_not_allowed" },
+      { target_type: "agent", target_id: "s1", status: "blocked", reason_code: "invocation_not_allowed" },
     ]);
   });
 
@@ -1661,7 +1478,7 @@ describe("CommentTriggerPreviewSchema.blocked", () => {
     const parsed = CommentTriggerPreviewSchema.parse({
       agents: [],
       blocked: [
-        { target_type: "squad", target_id: "s1", status: "blocked", reason_code: "invocation_not_allowed" },
+        { target_type: "agent", target_id: "s1", status: "blocked", reason_code: "invocation_not_allowed" },
         { status: "blocked" }, // missing target_id → dropped individually
         { target_type: "agent", target_id: "a1", status: "blocked", reason_code: "runtime_offline" },
       ],
@@ -1913,116 +1730,6 @@ describe("IssueViewSchema", () => {
         endpoint: "GET /api/issue-views/{id}",
       }),
     ).toBeNull();
-  });
-});
-
-describe("Plugin schemas", () => {
-  it("defaults every missing installation field to an inert, disabled shape", () => {
-    const parsed = PluginInstallationSchema.parse({ id: "installation-1" });
-    expect(parsed.enabled).toBe(false);
-    expect(parsed.granted_scopes).toEqual([]);
-    expect(parsed.config_schema).toEqual([]);
-    expect(parsed.configured_secrets).toEqual([]);
-    expect(parsed.surfaces).toEqual([]);
-    expect(parsed.hooks).toEqual([]);
-    expect(parsed.resources).toEqual([]);
-  });
-
-  it("does not model a secret value even when the server sends one", () => {
-    // The API contract is that a secret is write-only. If a future response
-    // ever regressed and echoed one, the client must not carry it into typed
-    // state where a component could render it.
-    const parsed = PluginInstallationSchema.parse({
-      id: "installation-1",
-      config: { repo: "multica-ai/multica" },
-      configured_secrets: ["token"],
-    });
-    expect(parsed.config).toEqual({ repo: "multica-ai/multica" });
-    expect(parsed.configured_secrets).toEqual(["token"]);
-    expect(Object.keys(parsed)).not.toContain("secrets");
-  });
-
-  it("keeps config field declaration order so the generated form is stable", () => {
-    const parsed = PluginInstallationSchema.parse({
-      id: "installation-1",
-      config_schema: [
-        { key: "repo", type: "string", label: "Repo", required: true },
-        { key: "token", type: "secret", label: "Token" },
-      ],
-    });
-    expect(parsed.config_schema.map((field) => field.key)).toEqual(["repo", "token"]);
-    expect(parsed.config_schema[1]?.required).toBe(false);
-  });
-
-  it("degrades a malformed installation list to empty rather than a partial list", () => {
-    const parsed = parseWithFallback("not-json", PluginInstallationListResponseSchema, EMPTY_PLUGIN_INSTALLATION_LIST, {
-      endpoint: "GET /api/workspaces/{id}/plugins",
-    });
-    expect(parsed).toEqual(EMPTY_PLUGIN_INSTALLATION_LIST);
-  });
-
-  it("degrades a malformed preview so the consent screen cannot show a blank scope list as approval", () => {
-    const parsed = parseWithFallback({ scopes: "issues:read" }, PluginPreviewSchema, EMPTY_PLUGIN_PREVIEW, {
-      endpoint: "POST /api/workspaces/{id}/plugins/preview",
-    });
-    expect(parsed).toEqual(EMPTY_PLUGIN_PREVIEW);
-    expect(parsed.scopes).toEqual([]);
-  });
-
-  it("degrades a malformed MCP tool list to empty rather than showing tools as approved", () => {
-    const parsed = parseWithFallback({ tools: "search" }, PluginMCPToolListSchema, { tools: [] }, {
-      endpoint: "GET /api/workspaces/{id}/plugins/{installationId}/mcp/{hookKey}/tools",
-    });
-    expect(parsed.tools).toEqual([]);
-  });
-
-  // The dangerous direction is one-sided: a response missing `approved` must
-  // read as NOT approved. The opposite default would render an unpinned tool
-  // with a checked box, and the administrator's next save would pin it.
-  it("treats a tool with no approval field as unapproved", () => {
-    const parsed = PluginMCPToolListSchema.parse({ tools: [{ name: "search" }] });
-    expect(parsed.tools[0]?.approved).toBe(false);
-    expect(parsed.tools[0]?.drifted).toBe(false);
-  });
-
-  it("parses a preview that reports an upgrade adding new scopes", () => {
-    const parsed = PluginPreviewSchema.parse({
-      manifest: { key: "com.example.hello", name: "Hello", version: "2.0.0", author: { name: "example" } },
-      scopes: ["issues:read", "comments:write"],
-      installed: true,
-      installed_version: "1.0.0",
-      added_scopes: ["comments:write"],
-    });
-    expect(parsed.installed).toBe(true);
-    expect(parsed.installed_version).toBe("1.0.0");
-    expect(parsed.added_scopes).toEqual(["comments:write"]);
-  });
-
-  it("preserves automatic schedules on both consent and installed Plugin payloads", () => {
-    const schedule = { cron: "*/5 * * * *", timezone: "Asia/Shanghai" };
-    const preview = PluginPreviewSchema.parse({
-      manifest: {
-        key: "com.example.digest",
-        name: "Digest",
-        version: "1.0.0",
-        author: { name: "example" },
-        contributes: {
-          hooks: [{ key: "digest", name: "Digest", triggers: ["schedule"], schedule }],
-        },
-      },
-    });
-    expect(preview.manifest.contributes?.hooks?.[0]?.schedule).toEqual(schedule);
-
-    const installation = PluginInstallationSchema.parse({
-      id: "installation-1",
-      hooks: [{
-        key: "digest",
-        name: "Digest",
-        triggers: ["schedule"],
-        schedule: { ...schedule, next_run_at: "2026-08-23T10:15:00Z" },
-      }],
-    });
-    expect(installation.hooks[0]?.schedule?.next_run_at).toBe("2026-08-23T10:15:00Z");
   });
 });
 

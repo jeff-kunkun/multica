@@ -2,7 +2,6 @@ package handler
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -150,59 +149,6 @@ func TestClaimTask_IssueProjectInForeignWorkspace_DegradesToWorkspaceRepos(t *te
 	}
 }
 
-// The quick-create branch resolves its project from the task context JSONB
-// rather than an issue row, and used the same unscoped GetProject. It needs its
-// own assertion: a requester who edits the stored project_id must not be able to
-// pull another tenant's resources into the claim.
-func TestClaimTask_QuickCreateProjectInForeignWorkspace_DegradesToWorkspaceRepos(t *testing.T) {
-	if testHandler == nil {
-		t.Skip("database not available")
-	}
-
-	ctx := context.Background()
-	setHandlerTestWorkspaceRepos(t, []map[string]string{
-		{"url": localFallbackRepoURL, "description": "local"},
-	})
-	_, foreignProjectID := foreignWorkspaceWithProject(t, "foreign-qc-project-ws", "FQP")
-
-	agentID, runtimeID, daemonID := createRuntimeGuardAgent(t, ctx)
-	quickContext, _ := json.Marshal(map[string]any{
-		"type":         "quick_create",
-		"prompt":       "create a follow-up issue",
-		"requester_id": testUserID,
-		"workspace_id": testWorkspaceID,
-		"project_id":   foreignProjectID,
-	})
-	dbfx.Exec(t, `
-		INSERT INTO agent_task_queue (agent_id, runtime_id, status, priority, context)
-		VALUES ($1, $2, 'queued', 2, $3)
-	`, agentID, runtimeID, quickContext)
-
-	req := newDaemonTokenRequest("POST", "/api/daemon/runtimes/"+runtimeID+"/claim", nil,
-		testWorkspaceID, daemonID)
-	req = withURLParam(req, "runtimeId", runtimeID)
-	w := testutil.Call(t, testHandler.ClaimTaskByRuntime, req).Want(http.StatusOK)
-
-	var resp struct {
-		Task *claimProjectFields `json:"task"`
-	}
-	w.JSON(&resp)
-	if resp.Task == nil {
-		t.Fatal("expected task in response")
-	}
-	assertNoForeignContext(t, w.Text(), foreignProjectID)
-
-	if resp.Task.ProjectID != "" {
-		t.Errorf("quick-create project_id = %q, want empty for an out-of-workspace project", resp.Task.ProjectID)
-	}
-	if len(resp.Task.ProjectResources) != 0 {
-		t.Errorf("quick-create project_resources = %+v, want none", resp.Task.ProjectResources)
-	}
-	if len(resp.Task.Repos) != 1 || resp.Task.Repos[0].URL != localFallbackRepoURL {
-		t.Fatalf("quick-create repos = %+v, want only the local workspace fallback", resp.Task.Repos)
-	}
-}
-
 // A project_resource row carries its own workspace_id, so a resource can
 // disagree with the project it hangs off. Listing by project_id alone — which
 // every claim branch did before MUL-6547 — serialized that row anyway. The
@@ -280,64 +226,6 @@ func TestClaimTask_ProjectResourceFromForeignWorkspace_IsFilteredOut(t *testing.
 	}
 	if len(resp.Task.Repos) != 1 || resp.Task.Repos[0].URL != localRepoURL {
 		t.Fatalf("repos = %+v, want only the in-workspace project repo", resp.Task.Repos)
-	}
-}
-
-// A run_only autopilot owns its task's workspace. taskToResponse seeds
-// resp.WorkspaceID with the RUNTIME's workspace, and the branch used to widen it
-// only `if resp.WorkspaceID == ""` — a condition that never held, so the
-// isolation check compared the runtime workspace against itself and a
-// cross-workspace autopilot_run_id was dispatched instead of rejected.
-func TestClaimTask_AutopilotRunOnlyForeignWorkspace_CancelsTask(t *testing.T) {
-	if testHandler == nil {
-		t.Skip("database not available")
-	}
-
-	var localAgentID, localRuntimeID string
-	dbfx.QueryRow(t,
-		`SELECT id, runtime_id FROM agent WHERE workspace_id = $1 LIMIT 1`,
-		testWorkspaceID,
-	).Scan(&localAgentID, &localRuntimeID)
-
-	foreignWorkspaceID, foreignProjectID := foreignWorkspaceWithProject(t, "foreign-autopilot-ws", "FAW")
-
-	const foreignAutopilotTitle = "Foreign autopilot must not leak"
-	foreignAutopilotID := dbfx.Insert(t, "autopilot", testutil.Cols{
-		"workspace_id":    foreignWorkspaceID,
-		"project_id":      foreignProjectID,
-		"title":           foreignAutopilotTitle,
-		"assignee_id":     localAgentID,
-		"execution_mode":  "run_only",
-		"created_by_type": "member",
-		"created_by_id":   testUserID,
-	})
-	foreignRunID := dbfx.Insert(t, "autopilot_run", testutil.Cols{
-		"autopilot_id": foreignAutopilotID,
-		"source":       "manual",
-		"status":       "running",
-	})
-	taskID := dbfx.Task(t, localAgentID, testutil.Cols{
-		"runtime_id":       localRuntimeID,
-		"issue_id":         nil,
-		"autopilot_run_id": foreignRunID,
-	})
-
-	req := newDaemonTokenRequest("POST", "/api/daemon/runtimes/"+localRuntimeID+"/claim", nil,
-		testWorkspaceID, "test-claim-foreign-autopilot")
-	req = withURLParam(req, "runtimeId", localRuntimeID)
-	w := testutil.Call(t, testHandler.ClaimTaskByRuntime, req).Want(http.StatusInternalServerError)
-	if !strings.Contains(w.Text(), "task workspace isolation check failed") {
-		t.Fatalf("claim error = %q, want the workspace isolation failure", w.Text())
-	}
-	assertNoForeignContext(t, w.Text(), foreignProjectID)
-	if strings.Contains(w.Text(), foreignAutopilotTitle) {
-		t.Errorf("claim error leaked the foreign autopilot title: %s", w.Text())
-	}
-
-	var status string
-	dbfx.QueryRow(t, `SELECT status FROM agent_task_queue WHERE id = $1`, taskID).Scan(&status)
-	if status != "cancelled" {
-		t.Fatalf("cross-workspace autopilot task status = %q, want cancelled", status)
 	}
 }
 

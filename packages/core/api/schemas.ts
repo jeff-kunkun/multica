@@ -1,17 +1,7 @@
 import { z } from "zod";
 import { normalizeIssueStatusCategory } from "../issues/config/status";
 import type {
-  AgentBuilderRuntimeSwitch,
-  AgentBuilderSession,
-  AgentBuilderSessionSummary,
   Attachment,
-  AutopilotRun,
-  BillingBalance,
-  BillingBatchesPage,
-  BillingCheckoutSessionStatus,
-  BillingPriceTier,
-  BillingTopupsPage,
-  BillingTransactionsPage,
   CancelTaskResponse,
   ChatMessage,
   ChatDraftRestoresResponse,
@@ -19,21 +9,7 @@ import type {
   ChatSession,
   PrioritizeQueuedChatTaskResponse,
   SendChatMessageResponse,
-  StartMikaOnboardingResponse,
   Comment,
-  CreateBillingCheckoutSessionResponse,
-  CreateBillingPortalSessionResponse,
-  WorkspaceSubscriptionEntitlements,
-  WorkspaceSubscriptionSummary,
-  IssueLimitUsage,
-  WorkspaceSubscriptionPrice,
-  WorkspaceSubscriptionPrices,
-  CreateWorkspaceSubscriptionCheckoutResponse,
-  WorkspaceSubscriptionSeatReconcileResult,
-  WorkspaceSeatPurchasePreview,
-  PurchaseWorkspaceSeatsResponse,
-  CreateWorkspaceSubscriptionPortalResponse,
-  CronPreviewResponse,
   GroupedIssuesResponse,
   GitHubConnectResponse,
   IssuePullRequestsResponse,
@@ -43,8 +19,6 @@ import type {
   MemberWithUser,
   IssueProperty,
   ListPropertiesResponse,
-  QuickAction,
-  ListQuickActionsResponse,
   IssuePropertiesResponse,
   IssueTableGroupDescriptor,
   IssueTableFacetsResponse,
@@ -54,16 +28,9 @@ import type {
   ListGitHubInstallationsResponse,
   ListGitHubRepositoriesResponse,
   ListLabelsResponse,
-  ListWebhookDeliveriesResponse,
   IssueStatusEntry,
   ListIssueStatusesResponse,
   NotificationPreferenceResponse,
-  PluginInstallation,
-  PluginInstallationListResponse,
-  PluginPackage,
-  PluginPackageListResponse,
-  PluginPreview,
-  PluginSurfaceLaunch,
   ResourceLabelsResponse,
   RuntimeModelListRequest,
   SearchIssuesResponse,
@@ -73,259 +40,13 @@ import type {
   Skill,
   SkillImportResult,
   SkillSummary,
-  Squad,
   TimelineEntry,
   User,
-  WebhookDelivery,
   WorkspaceBot,
   WorkspaceBotWithSecrets,
   WorkspaceMcpServer,
 } from "../types";
-import type { CloudRuntimeNode } from "../runtimes/cloud-runtime";
 import type { CreateFeedbackResponse } from "../feedback/types";
-
-export const PluginConfigFieldSchema = z.object({
-  key: z.string(),
-  type: z.string().default("string"),
-  label: z.string().default(""),
-  description: z.string().optional(),
-  required: z.boolean().default(false),
-  options: z.array(z.string()).default([]),
-  placeholder: z.string().optional(),
-  multiline: z.boolean().default(false),
-}).loose();
-
-export const PluginSurfaceSchema = z.object({
-  key: z.string(),
-  type: z.string().default(""),
-  name: z.string().default(""),
-  entry: z.string().default(""),
-  platforms: z.array(z.string()).default([]),
-}).loose();
-
-export const PluginHookSchema = z.object({
-  key: z.string(),
-  name: z.string().default(""),
-  description: z.string().default(""),
-  triggers: z.array(z.string()).default([]),
-  events: z.array(z.string()).default([]),
-  schedule: z.object({
-    cron: z.string().default(""),
-    timezone: z.string().default(""),
-    next_run_at: z.string().optional(),
-  }).loose().optional(),
-  transport: z.string().default(""),
-}).loose();
-
-export const PluginResourceSchema = z.object({
-  type: z.string().default(""),
-  key: z.string(),
-  entry: z.string().default(""),
-}).loose();
-
-export const PluginInstallationSchema = z.object({
-  id: z.string(),
-  plugin_key: z.string().default(""),
-  name: z.string().default(""),
-  description: z.string().optional(),
-  version: z.string().default(""),
-  package_version_id: z.string().default(""),
-  enabled: z.boolean().default(false),
-  granted_scopes: z.array(z.string()).default([]),
-  config_schema: z.array(PluginConfigFieldSchema).default([]),
-  config: z.record(z.string(), z.unknown()).default({}),
-  configured_secrets: z.array(z.string()).default([]),
-  surfaces: z.array(PluginSurfaceSchema).default([]),
-  hooks: z.array(PluginHookSchema).default([]),
-  resources: z.array(PluginResourceSchema).default([]),
-  created_at: z.string().default(""),
-  updated_at: z.string().default(""),
-}).loose();
-
-export const EMPTY_PLUGIN_INSTALLATION: PluginInstallation = {
-  id: "",
-  plugin_key: "",
-  name: "",
-  version: "",
-  package_version_id: "",
-  enabled: false,
-  granted_scopes: [],
-  config_schema: [],
-  config: {},
-  configured_secrets: [],
-  surfaces: [],
-  hooks: [],
-  resources: [],
-  created_at: "",
-  updated_at: "",
-};
-
-export const PluginInstallationListResponseSchema = z.object({
-  plugins: z.array(PluginInstallationSchema).default([]),
-}).loose();
-
-export const EMPTY_PLUGIN_INSTALLATION_LIST: PluginInstallationListResponse = {
-  plugins: [],
-};
-
-/**
- * One completed hook call. `status` is the host's classification, not the
- * endpoint's: "refused" means we declined to make the call at all, which is a
- * different problem for the reader than an endpoint that answered badly.
- */
-export const PluginHookResultSchema = z.object({
-  status: z.string().default("ok"),
-  output: z.unknown().optional(),
-  error: z.string().optional(),
-  latency_ms: z.number().default(0),
-  hook_key: z.string().default(""),
-  trigger: z.string().default(""),
-  attempts: z.number().default(1),
-}).loose();
-
-export const PluginInvocationSchema = z.object({
-  id: z.string().default(""),
-  hook_key: z.string().default(""),
-  trigger: z.string().default(""),
-  status: z.string().default(""),
-  event_type: z.string().optional(),
-  attempt: z.number().default(1),
-  latency_ms: z.number().default(0),
-  error: z.string().optional(),
-  delivery_id: z.string().optional(),
-  planned_at: z.string().optional(),
-  created_at: z.string().default(""),
-}).loose();
-
-export const PluginInvocationListSchema = z.object({
-  invocations: z.array(PluginInvocationSchema).default([]),
-}).loose();
-
-/**
- * Returned once, by the request that minted it. There is no read endpoint for
- * either value, so a client that discards this cannot recover it.
- */
-export const PluginTokenIssueSchema = z.object({
-  token: z.string().default(""),
-  signing_secret: z.string().default(""),
-}).loose();
-
-/**
- * Discovered tools for one `mcp`-transport hook.
- *
- * Defaults matter here in the usual direction: an unparseable response yields
- * an EMPTY list and nothing approved, so a drifted backend cannot make the UI
- * render a tool as already-approved.
- */
-export const PluginMCPToolSchema = z.object({
-  name: z.string().default(""),
-  description: z.string().default(""),
-  schema_digest: z.string().default(""),
-  approved: z.boolean().default(false),
-  drifted: z.boolean().default(false),
-}).loose();
-
-export const PluginMCPToolListSchema = z.object({
-  tools: z.array(PluginMCPToolSchema).default([]),
-}).loose();
-
-export const PluginManifestSummarySchema = z.object({
-  key: z.string().default(""),
-  name: z.string().default(""),
-  description: z.string().optional(),
-  version: z.string().default(""),
-  author: z.object({
-    name: z.string().default(""),
-    url: z.string().optional(),
-  }).loose().default({ name: "" }),
-  contributes: z.object({
-    hooks: z.array(z.object({
-      key: z.string().default(""),
-      name: z.string().default(""),
-      triggers: z.array(z.string()).default([]),
-      schedule: z.object({
-        cron: z.string().default(""),
-        timezone: z.string().default(""),
-      }).loose().optional(),
-    }).loose()).default([]),
-  }).loose().optional(),
-}).loose();
-
-export const PluginPreviewSchema = z.object({
-  manifest: PluginManifestSummarySchema,
-  scopes: z.array(z.string()).default([]),
-  config_schema: z.array(PluginConfigFieldSchema).default([]),
-  version_id: z.string().default(""),
-  version: z.string().default(""),
-  digest: z.string().default(""),
-  installed: z.boolean().default(false),
-  installed_version: z.string().optional(),
-  added_scopes: z.array(z.string()).default([]),
-}).loose();
-
-export const EMPTY_PLUGIN_PREVIEW: PluginPreview = {
-  manifest: { key: "", name: "", version: "", author: { name: "" } },
-  scopes: [],
-  config_schema: [],
-  version_id: "",
-  version: "",
-  digest: "",
-  installed: false,
-  added_scopes: [],
-};
-
-/**
- * A published version. `installed` is the marker the settings page reads to
- * answer "which one am I on"; it defaults to false so a malformed response can
- * never claim a version is running that is not.
- */
-export const PluginPackageVersionSchema = z.object({
-  id: z.string().default(""),
-  version: z.string().default(""),
-  digest: z.string().default(""),
-  size_bytes: z.number().default(0),
-  published_at: z.string().default(""),
-  installed: z.boolean().default(false),
-}).loose();
-
-export const PluginPackageSchema = z.object({
-  id: z.string().default(""),
-  plugin_key: z.string().default(""),
-  name: z.string().default(""),
-  versions: z.array(PluginPackageVersionSchema).default([]),
-  created_at: z.string().default(""),
-}).loose();
-
-export const PluginPackageListResponseSchema = z.object({
-  packages: z.array(PluginPackageSchema).default([]),
-}).loose();
-
-export const EMPTY_PLUGIN_PACKAGE_LIST: PluginPackageListResponse = {
-  packages: [],
-};
-
-export const EMPTY_PLUGIN_PACKAGE: PluginPackage = {
-  id: "",
-  plugin_key: "",
-  name: "",
-  versions: [],
-  created_at: "",
-};
-
-/** A malformed launch becomes unavailable, never a partly trusted frame. */
-export const PluginSurfaceLaunchSchema = z.object({
-  url: z.string().default(""),
-  bridge_token: z.string().default(""),
-  version: z.string().default(""),
-  digest: z.string().default(""),
-}).loose();
-
-export const EMPTY_PLUGIN_SURFACE_LAUNCH: PluginSurfaceLaunch = {
-  url: "",
-  bridge_token: "",
-  version: "",
-  digest: "",
-};
 
 export const GitHubInstallationSchema = z.object({
   id: z.string(),
@@ -632,63 +353,6 @@ export const EMPTY_ISSUE_PROPERTY: IssueProperty = {
   updated_at: "",
 };
 
-// Quick actions (MUL-5465). `visibility` and `status` stay z.string() rather
-// than z.enum: they are server-driven, and a newer server adding a value must
-// degrade to the UI's default branch, not blank the whole list.
-export const QuickActionSchema = z.object({
-  id: z.string(),
-  workspace_id: z.string(),
-  name: z.string(),
-  description: z.string().optional().default(""),
-  assignee_type: z.string(),
-  assignee_id: z.string(),
-  prompt: z.string().optional().default(""),
-  visibility: z.string().optional().default("public"),
-  status: z.string().optional().default("active"),
-  last_used_at: z.string().nullable().optional().default(null),
-  use_count: z.number().optional().default(0),
-  created_by_id: z.string().optional().default(""),
-  created_at: z.string(),
-  updated_at: z.string(),
-  target_name: z.string().optional(),
-  // Both default to the pessimistic reading on an older server: "not known to
-  // be public" and "not known to be missing" keep the settings row honest
-  // rather than asserting a state the server never sent.
-  target_public: z.boolean().optional().default(false),
-  target_missing: z.boolean().optional().default(false),
-}).loose();
-
-export const EMPTY_QUICK_ACTION: QuickAction = {
-  id: "",
-  workspace_id: "",
-  name: "",
-  description: "",
-  assignee_type: "agent",
-  assignee_id: "",
-  prompt: "",
-  visibility: "public",
-  status: "active",
-  last_used_at: null,
-  use_count: 0,
-  created_by_id: "",
-  created_at: "",
-  updated_at: "",
-  target_public: false,
-  target_missing: true,
-};
-
-export const ListQuickActionsResponseSchema = z.object({
-  quick_actions: z.array(QuickActionSchema).default([]),
-}).loose();
-
-export const EMPTY_LIST_QUICK_ACTIONS_RESPONSE: ListQuickActionsResponse = {
-  quick_actions: [],
-};
-
-export const QuickActionRenderSchema = z.object({
-  content: z.string().default(""),
-}).loose();
-
 export const ListPropertiesResponseSchema = z.object({
   properties: z.array(IssuePropertySchema).default([]),
   total: z.number().default(0),
@@ -822,12 +486,6 @@ const AttachmentSchema = z.object({
   id: z.string(),
 }).loose();
 
-const ChatQuickActionSchema = z.object({
-  label: z.string(),
-  prompt: z.string(),
-  primary: z.boolean().optional(),
-}).loose();
-
 export const ChatMessageSchema = z.object({
   id: z.string(),
   chat_session_id: z.string(),
@@ -839,12 +497,9 @@ export const ChatMessageSchema = z.object({
   failure_reason: z.string().nullable().optional(),
   elapsed_ms: z.number().nullable().optional(),
   message_kind: z
-    .enum(["message", "no_response", "onboarding_kickoff", "onboarding_opening"])
+    .enum(["message", "no_response"])
     .catch("message")
     .optional(),
-  // Optional additive data degrades independently: a malformed suggestion
-  // must not hide the assistant reply that contains it.
-  quick_actions: z.array(ChatQuickActionSchema).catch([]).optional().default([]),
 }).loose();
 
 export const ChatMessageListSchema = z.array(ChatMessageSchema).default([]);
@@ -1107,8 +762,6 @@ export const CommentSchema = z.object({
   supplement_status: z.enum(["pending", "delivering", "delivered", "failed"]).optional().catch(undefined),
   supplement_failure_reason: z.string().optional().catch(undefined),
   supplement_delivered_at: z.string().optional().catch(undefined),
-  // Set only on comments a quick action produced (MUL-5465). Server-only.
-  quick_action_id: z.string().nullable().optional(),
   deleted_at: z.string().nullable().optional().catch(undefined),
 }).loose();
 
@@ -1142,7 +795,7 @@ const CommentTriggerPreviewAgentSchema = z.object({
   reason: z.string().default(""),
 }).loose();
 
-// Per-target outcome of an explicit @agent / @squad mention (MUL-4525 §2).
+// Per-target outcome of an explicit @agent mention (MUL-4525 §2).
 // target_id is required to correlate with the client's rendered mention; a
 // malformed entry (missing id) is dropped rather than failing the whole payload.
 export const CommentTriggerOutcomeSchema = z.object({
@@ -1290,10 +943,6 @@ const IssueSourceContextSchema = z.object({
   snapshot: SourceContextSnapshotSchema,
 }).loose();
 
-export const CommentSubIssueTaskResponseSchema = z.object({
-  task_id: z.string().min(1),
-}).loose();
-
 export const IssueSchema = z.object({
   id: z.string(),
   workspace_id: z.string(),
@@ -1326,13 +975,6 @@ export const IssueSchema = z.object({
   creator_type: z.string(),
   creator_id: z.string(),
   parent_issue_id: z.string().nullable(),
-  // Additive pointer (MUL-7349); same disproportionate-failure reasoning as
-  // status_name above, and older backends do not send it at all.
-  duplicate_of: z
-    .object({ id: z.string(), identifier: z.string(), title: z.string(), status: z.string() })
-    .nullable()
-    .optional()
-    .catch(undefined),
   project_id: z.string().nullable(),
   position: z.number(),
   // Older backends predate `stage`; default to null so a missing field parses
@@ -1626,11 +1268,6 @@ export const ChildIssuesResponseSchema = z.object({
   issues: z.array(IssueSchema).default([]),
 }).loose();
 
-export const IssueDuplicatesResponseSchema = z.object({
-  duplicate_of: IssueSchema.nullable().default(null),
-  duplicates: z.array(IssueSchema).default([]),
-}).loose();
-
 export const ChildIssueProgressResponseSchema = z.object({
   progress: z
     .array(
@@ -1644,42 +1281,6 @@ export const ChildIssueProgressResponseSchema = z.object({
     )
     .default([]),
 }).loose();
-
-export const CloudRuntimeNodeSchema = z.object({
-  id: z.string(),
-  owner_id: z.string(),
-  instance_id: z.string(),
-  region: z.string(),
-  instance_type: z.string(),
-  image_id: z.string(),
-  subnet_id: z.string(),
-  name: z.string(),
-  status: z.string(),
-  tags: z.record(z.string(), z.string()).default({}),
-  metadata: z.record(z.string(), z.unknown()).default({}),
-  created_at: z.string(),
-  updated_at: z.string(),
-}).loose();
-
-export const CloudRuntimeNodeListSchema = z.array(CloudRuntimeNodeSchema);
-
-export const EMPTY_CLOUD_RUNTIME_NODE_LIST: CloudRuntimeNode[] = [];
-
-export const EMPTY_CLOUD_RUNTIME_NODE: CloudRuntimeNode = {
-  id: "",
-  owner_id: "",
-  instance_id: "",
-  region: "",
-  instance_type: "",
-  image_id: "",
-  subnet_id: "",
-  name: "",
-  status: "",
-  tags: {},
-  metadata: {},
-  created_at: "",
-  updated_at: "",
-};
 
 // ---------------------------------------------------------------------------
 // Workspace dashboard schemas
@@ -1852,7 +1453,7 @@ export const RuntimeUsageByHourListSchema = z.array(RuntimeUsageByHourSchema);
 
 // Human attribution (MUL-4302 §9): who an agent run is accountable to, and how
 // that human was resolved. Every field is defensive so a departed member, an
-// autopilot run (no originator), or an older backend degrades to a partial
+// run without an originator, or an older backend degrades to a partial
 // object instead of a parse failure.
 const AttributionUserSchema = z.object({
   id: z.string().default(""),
@@ -1907,7 +1508,6 @@ const TaskUsageSchema = z.object({
 }).loose();
 
 export const AgentTaskSchema = z.object({
-  wakeup_id: z.string().optional().catch(undefined),
   cancelled_by_comment_change: z.boolean().optional().catch(undefined),
   cancelled_by: TaskCancellationActorSchema.optional().catch(undefined),
   id: z.string(),
@@ -1924,7 +1524,6 @@ export const AgentTaskSchema = z.object({
   failure_reason: z.string().optional(),
   created_at: z.string().default(""),
   chat_session_id: z.string().optional(),
-  autopilot_run_id: z.string().optional(),
   parent_task_id: z.string().optional(),
   attempt: z.number().optional(),
   trigger_comment_id: z.string().optional(),
@@ -2023,12 +1622,7 @@ const ChatLastMessageSchema = z.object({
   role: z.enum(["user", "assistant"]).catch("assistant"),
   created_at: z.string().default(""),
   failure_reason: z.string().nullable().optional(),
-  message_kind: z.enum([
-    "message",
-    "no_response",
-    "onboarding_kickoff",
-    "onboarding_opening",
-  ]).optional().catch(undefined),
+  message_kind: z.enum(["message", "no_response"]).optional().catch(undefined),
 }).loose();
 
 export const ChatSessionSchema: z.ZodType<ChatSession> = z.object({
@@ -2120,15 +1714,6 @@ export const SendChatMessageResponseSchema: z.ZodType<SendChatMessageResponse> =
   attachment_ids: z.array(z.string()).nullish().transform((ids) => ids ?? undefined),
 }).loose();
 
-// `started` is the only field the flow branches on, and a malformed response
-// must not be read as "the opening landed" — parseWithFallback's fallback says
-// it did not, which leaves the flow's own retry as the recovery path.
-export const StartMikaOnboardingResponseSchema: z.ZodType<StartMikaOnboardingResponse> = z.object({
-  started: z.boolean(),
-  message_id: z.string().nullish().transform((id) => id ?? undefined),
-  created_at: z.string().nullish().transform((at) => at ?? undefined),
-}).loose();
-
 export const PrioritizeQueuedChatTaskResponseSchema:
   z.ZodType<PrioritizeQueuedChatTaskResponse> = z.object({
     task_id: z.string(),
@@ -2157,393 +1742,6 @@ export const EMPTY_CANCEL_TASK_RESPONSE: CancelTaskResponse = {
   created_at: "",
 };
 
-export const AgentBuilderSessionSchema = z.object({
-  session_id: z.string(),
-  builder_agent_id: z.string(),
-  runtime_id: z.string(),
-}).loose();
-
-export const EMPTY_AGENT_BUILDER_SESSION: AgentBuilderSession = {
-  session_id: "",
-  builder_agent_id: "",
-  runtime_id: "",
-};
-
-/**
- * The stored configuration of a creation conversation. Every field falls back
- * to empty on its own: a draft written by a newer build (or truncated in
- * transit) must still restore the fields it does understand rather than
- * discarding the user's work wholesale.
- */
-export const StoredAgentDraftSchema = z.object({
-  name: z.string().catch(""),
-  description: z.string().catch(""),
-  instructions: z.string().catch(""),
-  conversation_starters: z
-    .array(
-      z.object({
-        label: z.string().catch(""),
-        prompt: z.string().catch(""),
-      }),
-    )
-    .catch([]),
-  avatar_url: z.string().nullable().catch(null),
-  model: z.string().catch(""),
-  thinking_level: z.string().catch(""),
-  service_tier: z.string().catch(""),
-  skill_ids: z.array(z.string()).catch([]),
-  permission_scope: z
-    .enum(["private", "workspace", "members"])
-    .catch("private"),
-  member_ids: z.array(z.string()).catch([]),
-  team_ids: z.array(z.string()).catch([]),
-  applied_message_id: z.string().nullable().catch(null),
-}).loose();
-
-/**
- * One unfinished creation draft. Every field except the id has a safe empty
- * default: an older server that omits `runtime_id` must degrade to "let the
- * user pick" rather than dropping the whole row and losing the conversation.
- */
-export const AgentBuilderSessionSummarySchema = z.object({
-  session_id: z.string(),
-  title: z.string().catch(""),
-  runtime_id: z.string().catch(""),
-  created_at: z.string().catch(""),
-  updated_at: z.string().catch(""),
-  last_message_content: z.string().catch(""),
-  last_message_role: z.string().catch(""),
-  last_message_at: z.string().catch(""),
-  // Absent for a conversation the user has never hand-edited; the client then
-  // replays the last <agent_draft> block instead of restoring a stored copy.
-  draft: StoredAgentDraftSchema.nullish().catch(null),
-}).loose();
-
-export const AgentBuilderSessionListSchema = z.object({
-  sessions: z.array(AgentBuilderSessionSummarySchema).catch([]),
-}).loose();
-
-export const EMPTY_AGENT_BUILDER_SESSION_LIST: {
-  sessions: AgentBuilderSessionSummary[];
-} = { sessions: [] };
-
-export const AgentBuilderRuntimeSwitchSchema = z.object({
-  runtime_id: z.string(),
-}).loose();
-
-// This endpoint returns 2xx only after the carrier has been bound to the
-// runtime the caller asked for; anything else is a thrown error and no commit.
-// So the safe fallback for an unparseable SUCCESS body is the requested id, not
-// an empty one: the rebind did happen, and reporting "unknown" would leave the
-// picker showing a runtime that is no longer executing — the exact split this
-// endpoint exists to close.
-export const agentBuilderRuntimeSwitchFallback = (
-  requestedRuntimeID: string,
-): AgentBuilderRuntimeSwitch => ({ runtime_id: requestedRuntimeID });
-
-// Squad list responses carry lightweight membership previews used by hover
-// cards. The preview fields are additive API fields, so older backends default
-// cleanly to no preview instead of breaking newer frontends.
-const SquadMemberPreviewSchema = z.object({
-  member_type: z.string(),
-  member_id: z.string(),
-  role: z.string().default(""),
-}).loose();
-
-export const SquadSchema = z.object({
-  id: z.string(),
-  workspace_id: z.string(),
-  name: z.string(),
-  description: z.string().default(""),
-  instructions: z.string().default(""),
-  system_key: z.string().optional(),
-  system_instructions: z.string().optional(),
-  avatar_url: z.string().nullable().optional().transform((v) => v ?? null),
-  leader_id: z.string(),
-  creator_id: z.string(),
-  created_at: z.string(),
-  updated_at: z.string(),
-  archived_at: z.string().nullable().optional().transform((v) => v ?? null),
-  archived_by: z.string().nullable().optional().transform((v) => v ?? null),
-  member_count: z.number().default(0),
-  member_preview: z.array(SquadMemberPreviewSchema).default([]),
-}).loose();
-
-export const SquadListSchema = z.array(SquadSchema);
-export const EMPTY_SQUAD_LIST: Squad[] = [];
-export const EMPTY_SQUAD: Squad = {
-  id: "",
-  workspace_id: "",
-  name: "",
-  description: "",
-  instructions: "",
-  avatar_url: null,
-  leader_id: "",
-  creator_id: "",
-  created_at: "",
-  updated_at: "",
-  archived_at: null,
-  archived_by: null,
-  member_count: 0,
-  member_preview: [],
-};
-
-// Squad member status — backs the Squad detail page's Members tab. status
-// is `string | null` (not the narrow `SquadMemberStatusValue` union) so a
-// new server-side status doesn't fail the parse; the UI defaults to a
-// neutral pill for unknown values.
-const SquadActiveIssueBriefSchema = z.object({
-  issue_id: z.string(),
-  identifier: z.string(),
-  title: z.string(),
-  issue_status: z.string(),
-}).loose();
-
-const SquadMemberStatusSchema = z.object({
-  member_type: z.string(),
-  member_id: z.string(),
-  status: z.string().nullable().optional().transform((v) => v ?? null),
-  active_issues: z.array(SquadActiveIssueBriefSchema).default([]),
-  last_active_at: z.string().nullable().optional().transform((v) => v ?? null),
-}).loose();
-
-export const SquadMemberStatusListResponseSchema = z.object({
-  members: z.array(SquadMemberStatusSchema).default([]),
-}).loose();
-
-export const EMPTY_SQUAD_MEMBER_STATUS_LIST = { members: [] };
-
-// ---------------------------------------------------------------------------
-// Structured error body — POST /api/workspaces/:wsId/issues 409 conflict.
-//
-// When the server detects an active issue with the same title in the same
-// workspace, it returns `{ code: "active_duplicate_issue", error, issue }`
-// instead of letting the create through. The UI uses the embedded issue ref
-// to offer "view existing" rather than dropping the user into a generic
-// "create failed" toast.
-//
-// Strict guarantees:
-//   - `code` is a literal so a future server rename (e.g. `duplicate_issue`)
-//     fails the parse and falls back to a normal error toast — drift never
-//     ships as a broken duplicate UI.
-//   - `issue` is required; without an id/identifier/title the "view existing"
-//     button has nothing to point at, so we'd rather fall back than guess.
-//   - `issue.status` is intentionally OMITTED: the duplicate toast doesn't
-//     render a StatusIcon (which has no fallback for unknown enum values),
-//     so a future server-side rename of `status` must not knock this branch
-//     out. `.loose()` lets the field pass through unchanged for any other
-//     consumer.
-// ---------------------------------------------------------------------------
-
-export const DuplicateIssueErrorBodySchema = z.object({
-  code: z.literal("active_duplicate_issue"),
-  error: z.string().optional(),
-  issue: z.object({
-    id: z.string(),
-    identifier: z.string(),
-    title: z.string(),
-  }).loose(),
-}).loose();
-
-export interface DuplicateIssueErrorBody {
-  code: "active_duplicate_issue";
-  error?: string;
-  issue: {
-    id: string;
-    identifier: string;
-    title: string;
-  };
-}
-
-// ---------------------------------------------------------------------------
-// Webhook delivery schemas — backing the Autopilot Deliveries section. Enums
-// (`status`, `signature_status`, `provider`) are kept as `z.string()` so a
-// future server-side value (e.g. a Stripe provider, a new dedupe state)
-// degrades to a generic UI fallback rather than collapsing the list into
-// the empty array. `.loose()` lets unknown fields pass through, matching
-// the rule used by every other endpoint here.
-// ---------------------------------------------------------------------------
-
-const WebhookDeliverySchema = z.object({
-  id: z.string(),
-  workspace_id: z.string(),
-  autopilot_id: z.string(),
-  trigger_id: z.string(),
-  provider: z.string(),
-  event: z.string(),
-  dedupe_key: z.string().nullable(),
-  dedupe_source: z.string().nullable(),
-  signature_status: z.string(),
-  status: z.string(),
-  attempt_count: z.number().default(0),
-  // Older servers predate the durable dispatch queue. Defaults preserve
-  // compatibility while the UI rolls out alongside the new worker.
-  dispatch_attempts: z.number().default(0),
-  available_at: z.string().default(""),
-  content_type: z.string().nullable(),
-  response_status: z.number().nullable(),
-  autopilot_run_id: z.string().nullable(),
-  replayed_from_delivery_id: z.string().nullable(),
-  error: z.string().nullable(),
-  reason_code: z.string().nullable().default(null),
-  replay_idempotency_key: z.string().nullable().default(null),
-  received_at: z.string(),
-  last_attempt_at: z.string(),
-  created_at: z.string(),
-  // Detail-only fields. The list endpoint omits them; the detail endpoint
-  // populates raw_body / selected_headers / response_body.
-  selected_headers: z.record(z.string(), z.unknown()).nullable().optional(),
-  raw_body: z.string().nullable().optional(),
-  response_body: z.string().nullable().optional(),
-}).loose();
-
-export const ListWebhookDeliveriesResponseSchema = z.object({
-  deliveries: z.array(WebhookDeliverySchema).default([]),
-  total: z.number().default(0),
-}).loose();
-
-export const WebhookDeliveryResponseSchema = WebhookDeliverySchema;
-
-export const EMPTY_LIST_WEBHOOK_DELIVERIES_RESPONSE: ListWebhookDeliveriesResponse = {
-  deliveries: [],
-  total: 0,
-};
-
-// ---------------------------------------------------------------------------
-// Autopilot list schema. Enums (`status`, `execution_mode`, `trigger_kinds`,
-// `last_run_status`) stay `z.string()` so future server-side values degrade
-// to a generic UI fallback. The three derived fields (trigger_kinds /
-// next_run_at / last_run_status) are list-endpoint-only and absent on older
-// servers — optional by contract, the list renders "—" without them.
-// ---------------------------------------------------------------------------
-
-const AutopilotListItemSchema = z.object({
-  id: z.string(),
-  workspace_id: z.string(),
-  title: z.string(),
-  description: z.string().nullable().optional(),
-  project_id: z.string().nullable().optional(),
-  // Older servers (pre-MUL-2429) omit assignee_type; "agent" is the
-  // documented default.
-  assignee_type: z.string().default("agent"),
-  assignee_id: z.string(),
-  status: z.string(),
-  execution_mode: z.string(),
-  issue_title_template: z.string().nullable().optional(),
-  created_by_type: z.string(),
-  created_by_id: z.string(),
-  last_run_at: z.string().nullable().optional(),
-  created_at: z.string(),
-  updated_at: z.string(),
-  trigger_kinds: z.array(z.string()).optional(),
-  next_run_at: z.string().nullable().optional(),
-  last_run_status: z.string().nullable().optional(),
-  // Per-caller write capability; absent on older servers (treated as unknown).
-  can_write: z.boolean().optional(),
-  // Narrower per-caller access-management capability (detail endpoint only).
-  can_manage_access: z.boolean().optional(),
-}).loose();
-
-export const ListAutopilotsResponseSchema = z.object({
-  autopilots: z.array(AutopilotListItemSchema).default([]),
-  total: z.number().default(0),
-}).loose();
-
-export const EMPTY_LIST_AUTOPILOTS_RESPONSE = {
-  autopilots: [],
-  total: 0,
-};
-
-// Autopilot run (POST /trigger, GET /runs). Consumed by the "run now" flow,
-// which branches on `status` to avoid a false-success toast (MUL-4525), so the
-// response must be schema-parsed. `reason_code` is an additive, stable
-// classification of a non-success run the UI localizes; older servers omit it.
-// Defaults are conservative: an unreadable run degrades to a non-success status
-// so the UI never shows success it cannot confirm. .loose() tolerates new fields.
-export const AutopilotRunSchema = z.object({
-  id: z.string().default(""),
-  autopilot_id: z.string().default(""),
-  trigger_id: z.string().nullable().default(null),
-  source: z.string().default("manual"),
-  status: z.string().default("failed"),
-  issue_id: z.string().nullable().default(null),
-  task_id: z.string().nullable().default(null),
-  triggered_at: z.string().default(""),
-  completed_at: z.string().nullable().default(null),
-  failure_reason: z.string().nullable().default(null),
-  reason_code: z.string().optional(),
-  trigger_payload: z.unknown().default(null),
-  result: z.unknown().default(null),
-  created_at: z.string().default(""),
-}).loose();
-
-export const AutopilotQuotaUsageSchema = z.object({
-  action: z.enum(["off", "observe", "enforce"]).default("off"),
-  used: z.number().nullable().default(null),
-  reserved: z.number().nullable().default(null),
-  total: z.number().nullable().default(null),
-  limit: z.number().nullable().default(null),
-  reached: z.boolean().nullable().default(null),
-  period_start: z.string().nullable().default(null),
-  period_end: z.string().nullable().default(null),
-  reset_at: z.string().nullable().default(null),
-  blocked_counts: z.record(z.string(), z.number().int().nonnegative()).nullable().catch(null).default(null),
-}).loose();
-
-export const FALLBACK_AUTOPILOT_RUN: AutopilotRun = {
-  id: "",
-  autopilot_id: "",
-  trigger_id: null,
-  source: "manual",
-  status: "failed",
-  issue_id: null,
-  task_id: null,
-  triggered_at: "",
-  completed_at: null,
-  failure_reason: null,
-  trigger_payload: null,
-  result: null,
-  created_at: "",
-};
-
-// Cron preview: the server is the authority on the next occurrences. No
-// `.default([])` here — a missing or reshaped field must fail validation so it
-// degrades to the `next_runs: null` fallback ("preview unreadable") instead of
-// masquerading as a valid empty list ("this expression never fires").
-export const CronPreviewResponseSchema = z.object({
-  next_runs: z.array(z.string()),
-}).loose();
-
-export const UNREADABLE_CRON_PREVIEW_RESPONSE: CronPreviewResponse = {
-  next_runs: null,
-};
-
-export const EMPTY_WEBHOOK_DELIVERY: WebhookDelivery = {
-  id: "",
-  workspace_id: "",
-  autopilot_id: "",
-  trigger_id: "",
-  provider: "",
-  event: "",
-  dedupe_key: null,
-  dedupe_source: null,
-  signature_status: "not_required",
-  status: "queued",
-  attempt_count: 0,
-  dispatch_attempts: 0,
-  available_at: "",
-  content_type: null,
-  response_status: null,
-  autopilot_run_id: null,
-  replayed_from_delivery_id: null,
-  error: null,
-  reason_code: null,
-  replay_idempotency_key: null,
-  received_at: "",
-  last_attempt_at: "",
-  created_at: "",
-};
-
 // ---------------------------------------------------------------------------
 // User (`/api/me` GET + PATCH). The auth store and Settings → Account both
 // trust this shape — a drift here would knock both surfaces out. Kept
@@ -2560,9 +1758,6 @@ export const UserSchema = z.object({
   name: z.string().default(""),
   email: z.string().default(""),
   avatar_url: z.string().nullable().default(null),
-  onboarded_at: z.string().nullable().default(null),
-  onboarding_questionnaire: z.record(z.string(), z.unknown()).default({}),
-  starter_content_state: z.string().nullable().default(null),
   language: z.string().nullable().default(null),
   profile_description: z.string().default(""),
   timezone: z.string().nullable().default(null),
@@ -2575,9 +1770,6 @@ export const EMPTY_USER: User = {
   name: "",
   email: "",
   avatar_url: null,
-  onboarded_at: null,
-  onboarding_questionnaire: {},
-  starter_content_state: null,
   language: null,
   profile_description: "",
   timezone: null,
@@ -2656,472 +1848,6 @@ export const ArchivedInboxFacetsSchema = z.object({
 }));
 
 export const EMPTY_INBOX_ITEMS: InboxItem[] = [];
-
-// ---------------------------------------------------------------------------
-// Billing schemas (cloud-billing proxy surface)
-//
-// All billing JSON we receive comes from multica-cloud verbatim — we proxy
-// the bytes without re-shaping. These schemas use `loose()` so a future
-// non-breaking field addition on the cloud side doesn't crash us; required
-// fields are still strictly enforced. EMPTY_* constants supply the
-// fallback parseWithFallback uses when the upstream response is malformed
-// or unparseable.
-
-export const BillingBalanceSchema = z.object({
-  owner_id: z.string(),
-  balance_micro: z.number(),
-  balance_credit: z.number(),
-  updated_at: z.string(),
-}).loose();
-
-export const EMPTY_BILLING_BALANCE: BillingBalance = {
-  owner_id: "",
-  balance_micro: 0,
-  balance_credit: 0,
-  updated_at: "",
-};
-
-// `tx_type` and `source` are kept as plain strings here; the cloud doc
-// enumerates the canonical values but the frontend display tolerates
-// unknown ones gracefully. Strict enums would crash the page on a future
-// addition (e.g. a new `topup` source kind).
-export const BillingTransactionSchema = z.object({
-  id: z.string(),
-  owner_id: z.string(),
-  idempotency_key: z.string().default(""),
-  tx_type: z.string(),
-  source: z.string(),
-  amount_micro: z.number(),
-  balance_after: z.number(),
-  reference_id: z.string().default(""),
-  description: z.string().default(""),
-  metadata: z.record(z.string(), z.unknown()).default({}),
-  created_at: z.string(),
-}).loose();
-
-export const BillingTransactionsPageSchema = z.object({
-  items: z.array(BillingTransactionSchema).default([]),
-  total: z.number().default(0),
-  page: z.number().default(1),
-  page_size: z.number().default(20),
-}).loose();
-
-export const EMPTY_BILLING_TRANSACTIONS_PAGE: BillingTransactionsPage = {
-  items: [],
-  total: 0,
-  page: 1,
-  page_size: 20,
-};
-
-export const BillingBatchSchema = z.object({
-  id: z.string(),
-  owner_id: z.string(),
-  source_tx_id: z.string().default(""),
-  source_type: z.string(),
-  total_micro: z.number(),
-  remaining_micro: z.number(),
-  // Cloud either omits the key (never expires) or sends a string
-  // timestamp. Null is also tolerated since some serializers emit
-  // explicit nulls for absent timestamps.
-  expires_at: z.string().nullable().optional(),
-  created_at: z.string(),
-  updated_at: z.string(),
-}).loose();
-
-export const BillingBatchesPageSchema = z.object({
-  items: z.array(BillingBatchSchema).default([]),
-  total: z.number().default(0),
-  page: z.number().default(1),
-  page_size: z.number().default(20),
-}).loose();
-
-export const EMPTY_BILLING_BATCHES_PAGE: BillingBatchesPage = {
-  items: [],
-  total: 0,
-  page: 1,
-  page_size: 20,
-};
-
-export const BillingTopupSchema = z.object({
-  id: z.string(),
-  owner_id: z.string(),
-  amount_cents: z.number(),
-  currency: z.string().default("usd"),
-  credits: z.number(),
-  bonus_credits: z.number().default(0),
-  status: z.string(),
-  tier_id: z.string().default(""),
-  stripe_checkout_id: z.string().default(""),
-  // Only set after status reaches `credited` — leave optional rather
-  // than coerce to "" so a UI can branch on existence.
-  purchase_batch_id: z.string().optional(),
-  created_at: z.string(),
-  updated_at: z.string(),
-}).loose();
-
-export const BillingTopupsPageSchema = z.object({
-  items: z.array(BillingTopupSchema).default([]),
-  total: z.number().default(0),
-  page: z.number().default(1),
-  page_size: z.number().default(20),
-}).loose();
-
-export const EMPTY_BILLING_TOPUPS_PAGE: BillingTopupsPage = {
-  items: [],
-  total: 0,
-  page: 1,
-  page_size: 20,
-};
-
-export const BillingPriceTierSchema = z.object({
-  id: z.string(),
-  // Cloud doc says display_name falls back to id; tolerate empty too.
-  display_name: z.string().default(""),
-  amount_cents: z.number(),
-  credits: z.number(),
-  bonus_credits: z.number().optional(),
-  bonus_expires_in: z.string().optional(),
-}).loose();
-
-export const BillingPriceTierListSchema = z.array(BillingPriceTierSchema);
-
-export const EMPTY_BILLING_PRICE_TIER_LIST: BillingPriceTier[] = [];
-
-export const CreateBillingCheckoutSessionResponseSchema = z.object({
-  order_id: z.string(),
-  session_id: z.string(),
-  url: z.string(),
-}).loose();
-
-export const EMPTY_CREATE_BILLING_CHECKOUT_SESSION_RESPONSE: CreateBillingCheckoutSessionResponse = {
-  order_id: "",
-  session_id: "",
-  url: "",
-};
-
-export const BillingCheckoutSessionStatusSchema = z.object({
-  order_id: z.string(),
-  status: z.string(),
-  amount_cents: z.number(),
-  credits: z.number(),
-  bonus_credits: z.number().default(0),
-  currency: z.string().default("usd"),
-  tier_id: z.string().default(""),
-}).loose();
-
-export const EMPTY_BILLING_CHECKOUT_SESSION_STATUS: BillingCheckoutSessionStatus = {
-  order_id: "",
-  status: "pending",
-  amount_cents: 0,
-  credits: 0,
-  bonus_credits: 0,
-  currency: "usd",
-  tier_id: "",
-};
-
-export const CreateBillingPortalSessionResponseSchema = z.object({
-  url: z.string(),
-}).loose();
-
-export const EMPTY_CREATE_BILLING_PORTAL_SESSION_RESPONSE: CreateBillingPortalSessionResponse = {
-  url: "",
-};
-
-// ---------------------------------------------------------------------------
-// Workspace subscriptions (`/api/cloud-subscriptions/*`)
-//
-// These schemas are the compatibility boundary with multica-cloud. Three rules
-// hold for all of them:
-//
-//  1. There is no fallback value. Callers get `null` on any parse failure and
-//     must render "unavailable" — never a synthetic Free plan, because that
-//     turns an upstream outage or an older cloud into a silent downgrade of a
-//     paying workspace.
-//  2. `.loose()` keeps unknown keys, so a cloud that adds fields does not break
-//     an older client.
-//  3. `plan` and `status` stay open strings. A new plan or Stripe status must
-//     surface as unknown rather than be coerced into a known one.
-
-const WorkspaceSubscriptionIntervalSchema = z.enum(["month", "year"]);
-
-// Stripe hosts Checkout and Portal, so those URLs leave the app. `z.string()
-// .url()` is not enough on its own — `new URL("javascript:...")` parses — and
-// the caller hands this value to location.assign, so the scheme is pinned here.
-const StripeHostedURLSchema = z.string().url().refine(
-  (value) => value.startsWith("https://"),
-  { message: "Stripe hosted URL must use HTTPS" },
-);
-
-const WorkspaceEntitlementLimitSchema = z
-  .discriminatedUnion("mode", [
-    z
-      .object({
-        mode: z.literal("limited"),
-        limit: z.number().int().positive(),
-      })
-      .loose(),
-    z.object({ mode: z.literal("unlimited") }).loose(),
-  ])
-  .transform(
-    (value): WorkspaceSubscriptionEntitlements["limits"]["issueCount"] =>
-      value.mode === "limited"
-        ? { mode: "limited", limit: value.limit }
-        : { mode: "unlimited", limit: null },
-  );
-
-export const WorkspaceSubscriptionEntitlementsSchema = z
-  .object({
-    workspace_id: z.string(),
-    plan: z.string(),
-    status: z.string(),
-    // Cloud documents seats as >= 1, but accepting 0 costs nothing and keeps a
-    // workspace that momentarily reports no human members readable instead of
-    // failing the whole snapshot.
-    seats: z.number().int().nonnegative(),
-    limits: z
-      .object({
-        issue_count: WorkspaceEntitlementLimitSchema,
-        autopilot_runs: WorkspaceEntitlementLimitSchema,
-      })
-      .loose(),
-    current_period_end: z.string().nullable().optional(),
-    snapshot_expires_at: z.string().nullable().optional(),
-    version: z.number().int().nonnegative(),
-  })
-  .loose()
-  .transform(
-    (value): WorkspaceSubscriptionEntitlements => ({
-      workspaceId: value.workspace_id,
-      plan: value.plan,
-      status: value.status,
-      seats: value.seats,
-      limits: {
-        issueCount: value.limits.issue_count,
-        autopilotRuns: value.limits.autopilot_runs,
-      },
-      currentPeriodEnd: value.current_period_end ?? null,
-      snapshotExpiresAt: value.snapshot_expires_at ?? null,
-      version: value.version,
-    }),
-  );
-
-export const WorkspaceSubscriptionSummarySchema = z
-  .object({
-    entitlement: WorkspaceSubscriptionEntitlementsSchema,
-    billing_interval: WorkspaceSubscriptionIntervalSchema.nullable(),
-    human_members: z.number().int().nonnegative(),
-    seat_capacity: z
-      .object({
-        purchased: z.number().int().positive(),
-        used: z.number().int().nonnegative(),
-        reserved: z.number().int().nonnegative(),
-        available: z.number().int().nonnegative(),
-        overcommitted: z.boolean(),
-        version: z.number().int().positive(),
-        pending_quantity: z.number().int().positive().nullable(),
-        active_purchase: z
-          .object({
-            request_id: z.string(),
-            target_seats: z.number().int().positive(),
-            status: z.enum(["pending", "processing", "submitted"]),
-            expires_at: z.string().min(1).optional(),
-          })
-          .loose()
-          .optional(),
-      })
-      .loose()
-      .nullable(),
-    cancel_at_period_end: z.boolean(),
-    grace_until: z.string().nullable(),
-    has_stripe_customer: z.boolean(),
-    available_actions: z.object({
-      checkout: z.boolean(),
-      portal: z.boolean(),
-      purchase_seats: z.boolean(),
-    }).loose(),
-  })
-  .loose()
-  .transform(
-    (value): WorkspaceSubscriptionSummary => ({
-      entitlement: value.entitlement,
-      billingInterval: value.billing_interval,
-      humanMembers: value.human_members,
-      seatCapacity: value.seat_capacity
-        ? {
-            purchased: value.seat_capacity.purchased,
-            used: value.seat_capacity.used,
-            reserved: value.seat_capacity.reserved,
-            available: value.seat_capacity.available,
-            overcommitted: value.seat_capacity.overcommitted,
-            version: value.seat_capacity.version,
-            pendingQuantity: value.seat_capacity.pending_quantity,
-            activePurchase: value.seat_capacity.active_purchase
-              ? {
-                  requestId:
-                    value.seat_capacity.active_purchase.request_id,
-                  targetSeats:
-                    value.seat_capacity.active_purchase.target_seats,
-                  status: value.seat_capacity.active_purchase.status,
-                  expiresAt:
-                    value.seat_capacity.active_purchase.expires_at ?? null,
-                }
-              : null,
-          }
-        : null,
-      cancelAtPeriodEnd: value.cancel_at_period_end,
-      graceUntil: value.grace_until,
-      hasStripeCustomer: value.has_stripe_customer,
-      availableActions: {
-        checkout: value.available_actions.checkout,
-        portal: value.available_actions.portal,
-        purchaseSeats: value.available_actions.purchase_seats,
-      },
-    }),
-  );
-
-export const IssueLimitUsageSchema = z
-  .object({
-    used: z.number().int().nonnegative(),
-    limit: z.number().int().positive(),
-  })
-  .loose()
-  .transform(
-    (value): IssueLimitUsage => ({
-      used: value.used,
-      limit: value.limit,
-    }),
-  );
-
-const WorkspaceSubscriptionPriceSchema = (
-  expected: "month" | "year",
-) =>
-  z
-    .object({
-      currency: z.string().min(1),
-      // Reject 0 and negatives: a free or malformed Price must read as
-      // "price unavailable", not as a real amount shown next to a purchase
-      // button.
-      unit_amount: z.number().int().positive(),
-      // Pinned to the slot it arrived in. Cloud validates this too, but a
-      // schema that accepted a yearly Price under `month` would let the UI
-      // quote a yearly amount as a monthly one — the schema is an independent
-      // boundary, so it checks the correspondence itself.
-      interval: z.literal(expected),
-      interval_count: z.literal(1),
-    })
-    .loose()
-    .transform(
-      (value): WorkspaceSubscriptionPrice => ({
-        currency: value.currency,
-        unitAmount: value.unit_amount,
-        interval: value.interval,
-        intervalCount: value.interval_count,
-      }),
-    );
-
-export const WorkspaceSubscriptionPricesSchema = z
-  .object({
-    month: WorkspaceSubscriptionPriceSchema("month"),
-    year: WorkspaceSubscriptionPriceSchema("year"),
-  })
-  .loose()
-  .transform(
-    (value): WorkspaceSubscriptionPrices => ({
-      month: value.month,
-      year: value.year,
-    }),
-  );
-
-export const CreateWorkspaceSubscriptionCheckoutResponseSchema = z
-  .object({
-    request_id: z.string(),
-    session_id: z.string(),
-    url: StripeHostedURLSchema,
-  })
-  .loose()
-  .transform(
-    (value): CreateWorkspaceSubscriptionCheckoutResponse => ({
-      requestId: value.request_id,
-      sessionId: value.session_id,
-      url: value.url,
-    }),
-  );
-
-export const WorkspaceSubscriptionSeatReconcileResultSchema = z
-  .object({
-    workspace_id: z.string(),
-    action: z.string(),
-    version: z.number().int().nonnegative(),
-  })
-  .loose()
-  .transform(
-    (value): WorkspaceSubscriptionSeatReconcileResult => ({
-      workspaceId: value.workspace_id,
-      action: value.action,
-      version: value.version,
-    }),
-  );
-
-export const WorkspaceSeatPurchasePreviewSchema = z
-  .object({
-    current_seats: z.number().int().positive(),
-    additional_seats: z.number().int().positive(),
-    resulting_seats: z.number().int().positive(),
-    purchase_version: z.number().int().positive(),
-    currency: z.string().regex(/^[a-z]{3}$/),
-    proration_amount: z.number().int().nonnegative(),
-    next_invoice_amount: z.number().int().nonnegative(),
-    quoted_at: z.string().min(1),
-  })
-  .loose()
-  .transform(
-    (value): WorkspaceSeatPurchasePreview => ({
-      currentSeats: value.current_seats,
-      additionalSeats: value.additional_seats,
-      resultingSeats: value.resulting_seats,
-      purchaseVersion: value.purchase_version,
-      currency: value.currency,
-      prorationAmount: value.proration_amount,
-      nextInvoiceAmount: value.next_invoice_amount,
-      quotedAt: value.quoted_at,
-    }),
-  );
-
-export const PurchaseWorkspaceSeatsResponseSchema = z
-  .object({
-    request_id: z.string(),
-    current_seats: z.number().int().positive(),
-    additional_seats: z.number().int().positive(),
-    resulting_seats: z.number().int().positive(),
-    currency: z.string().regex(/^[a-z]{3}$/),
-    proration_amount: z.number().int().nonnegative(),
-    next_invoice_amount: z.number().int().nonnegative(),
-    status: z.enum(["pending", "submitted", "confirmed"]),
-  })
-  .loose()
-  .transform(
-    (value): PurchaseWorkspaceSeatsResponse => ({
-      requestId: value.request_id,
-      currentSeats: value.current_seats,
-      additionalSeats: value.additional_seats,
-      resultingSeats: value.resulting_seats,
-      currency: value.currency,
-      prorationAmount: value.proration_amount,
-      nextInvoiceAmount: value.next_invoice_amount,
-      status: value.status,
-    }),
-  );
-
-export const CreateWorkspaceSubscriptionPortalResponseSchema = z
-  .object({
-    url: StripeHostedURLSchema,
-  })
-  .loose()
-  .transform(
-    (value): CreateWorkspaceSubscriptionPortalResponse => ({
-      url: value.url,
-    }),
-  );
 
 // ---------------------------------------------------------------------------
 // Runtime model discovery (`POST /api/runtimes/:id/models`,
@@ -3462,98 +2188,6 @@ export const EMPTY_JOIN_SHARE_LINK_RESPONSE: {
   workspace_id: "",
   workspace_slug: "",
 };
-
-export const WakeupConditionSchema = z.union([
-  z.object({ type: z.literal("issue_field"), field: z.literal("status"), value: z.string() }),
-  z.object({ type: z.literal("issue_field"), field: z.literal("assignee"), assignee_type: z.enum(["member", "agent", "squad"]), assignee_id: z.string() }),
-  z.object({ type: z.literal("issue_field"), field: z.literal("label"), label_id: z.string() }),
-  z.object({ type: z.literal("issue_field"), field: z.literal("property"), property_id: z.string(), value: z.unknown() }),
-  z.object({ type: z.literal("children_done"), stage: z.number().int().nullish() }),
-  z.object({ type: z.literal("pull_request"), event: z.enum(["checks_finished", "merged"]) }),
-  z.object({ type: z.literal("other_issue"), issue_id: z.string(), state: z.enum(["done", "ended", "in_review"]), identifier: z.string().optional() }),
-]);
-
-export const WakeupRunSchema = z.object({
-  id: z.string(), status: z.string(), created_at: z.string(),
-  started_at: z.string().nullable(), completed_at: z.string().nullable(),
-  checkin_note: z.string().default(""), triggers: z.array(z.string()).default([]),
-  commented: z.boolean().default(false),
-});
-
-export const PausedWakeupSchema = z.object({
-  issue_id: z.string(), id: z.string(), agent_id: z.string(),
-  paused_reason: z.enum(["max_fires", "loop", "rate"]).catch("rate"),
-});
-
-export const IssueWakeupSchema = z.object({
-  id: z.string(), issue_id: z.string(), agent_id: z.string(), agent_name: z.string().default(""),
-  instruction: z.string(), kind: z.enum(["event", "at", "every", "cron"]), mode: z.enum(["once", "continuous"]),
-  event_types: z.array(z.string()), filter_agent_id: z.string().nullable(), filter_task_id: z.string().nullable(),
-  interval_seconds: z.number().nullable(), cron_expression: z.string().nullable(), timezone: z.string(),
-  next_fire_at: z.string().nullable(), enabled: z.boolean(), disabled_at: z.string().nullable(),
-  last_task_id: z.string().nullable(), last_error: z.string().nullable(),
-  filter_actor_type: z.enum(["member", "agent"]).nullable().optional(),
-  filter_actor_id: z.string().nullable().optional(),
-  filter_actor_name: z.string().nullable().optional(),
-  revision: z.number().int().positive().optional(),
-  filter_agent_name: z.string().nullable().optional(), last_task_status: z.string().nullable().optional(),
-  expires_at: z.string().nullish(), expiry_seconds: z.number().nullish(),
-  on_timeout: z.enum(["wake", "end"]).nullish().catch(null), timed_out_at: z.string().nullish(),
-  created_by_agent: z.boolean().optional(), created_by_name: z.string().nullish(),
-  source_agent_id: z.string().nullish(), source_agent_name: z.string().nullish(),
-  // An unknown condition shape from a newer server reads as "no condition".
-  condition: WakeupConditionSchema.nullish().catch(null),
-  max_fires: z.number().int().nullish(), fire_count: z.number().int().nonnegative().optional().catch(undefined),
-  paused_reason: z.enum(["max_fires", "loop", "rate"]).nullish().catch(null),
-});
-
-export const SystemWakeupSchema = z.object({
-  id: z.string().default(""), revision: z.number().int().nonnegative().default(0),
-  rule: z.literal("child_done"), enabled: z.boolean(), instruction: z.string().default(""),
-  default_instruction: z.string().default(""), customized: z.boolean().default(false),
-  paused_reason: z.enum(["max_fires", "loop", "rate"]).nullish().catch(null).transform((v) => v ?? null),
-  staged: z.boolean(), stage: z.number().int().nullable(), total: z.number().int().nonnegative(),
-  remaining: z.number().int().nonnegative(), waiting: z.array(z.string()).default([]),
-  target: z.object({ type: z.enum(["agent", "squad", "member"]), id: z.string(), name: z.string() }).nullable().catch(null),
-  blocked: z.enum(["", "backlog", "member_assignee", "no_assignee"]).catch(""),
-  workspace_default: z.boolean().default(true),
-});
-
-export const WorkspaceSystemWakeupSchema = z.object({
-  rule: z.literal("child_done"), enabled: z.boolean().default(true), instruction: z.string().default(""),
-  builtin_instruction: z.string().default(""), customized: z.number().int().nonnegative().default(0),
-});
-
-export const IssueWakeupSummaryRowSchema = IssueWakeupSchema.pick({
-  id: true, issue_id: true, agent_id: true, agent_name: true, kind: true, mode: true,
-  event_types: true, filter_task_id: true, filter_agent_name: true, interval_seconds: true,
-  filter_actor_type: true, filter_actor_id: true, filter_actor_name: true,
-  cron_expression: true, timezone: true, next_fire_at: true, condition: true,
-}).extend({ active_count: z.number().int().positive(), event_count: z.number().int().nonnegative() });
-
-export const WorkspaceWakeupPageSchema = z.object({
-  items: z.array(IssueWakeupSchema.omit({ instruction: true }).extend({
-    issue_title: z.string(), issue_identifier: z.string(), issue_closed: z.boolean(),
-    can_manage: z.boolean(), active_runs: z.number().int().nonnegative(),
-    task: AgentTaskSchema.nullable(),
-    // System rule rows have no target when the issue has no agent assignee,
-    // and no revision.
-    agent_id: z.string().nullish().transform((v) => v ?? ""),
-    revision: z.number().int().positive().nullish().catch(undefined).transform((v) => v ?? undefined),
-    source: z.enum(["member", "agent", "system"]).catch("member").default("member"),
-    runs_7d: z.number().int().nonnegative().default(0),
-    rule: z.literal("child_done").nullish().catch(null),
-    system_stage: z.number().int().nullish(), system_remaining: z.number().int().nullish(),
-    target_type: z.string().nullish(),
-  })),
-  total: z.number().int().nonnegative(),
-  counts: z.object({
-    active: z.number().int().nonnegative(), all: z.number().int().nonnegative(),
-    paused: z.number().int().nonnegative().default(0),
-    disabled: z.number().int().nonnegative(), ended: z.number().int().nonnegative(),
-  }),
-  agents: z.array(z.object({ id: z.string(), name: z.string() })),
-});
 
 // Older servers omit runtime_type; the protocol remains their compatibility target.
 export const RuntimeProfileSchema = z

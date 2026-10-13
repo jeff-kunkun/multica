@@ -33,7 +33,6 @@ export function ManualCreateAgentPage() {
   const navigation = useNavigation();
   const backOrReplace = useBackOrReplace();
   const duplicateId = navigation.searchParams.get("duplicate");
-  const squadId = navigation.searchParams.get("squad");
 
   const form = useCreateAgentForm();
   const { data: agents = [] } = useQuery(agentListOptions(wsId));
@@ -81,7 +80,6 @@ export function ManualCreateAgentPage() {
   const submit = useCreateAgentSubmit({
     draft: form.draft,
     runtimeId: form.selectedRuntime?.id ?? null,
-    squadId,
     duplicateSource: duplicateAgent,
     // The work is committed; leaving it stored would hand the finished agent's
     // fields to whoever opens this form next. Only this flow's slot — another
@@ -99,16 +97,10 @@ export function ManualCreateAgentPage() {
           ? t(($) => $.creation_studio.duplicate_title, {
               name: duplicateAgent.name,
             })
-          : squadId
-            ? t(($) => $.creation_studio.squad_title)
-            : t(($) => $.creation_studio.title)
+          : t(($) => $.creation_studio.title)
       }
       step={t(($) => $.creation_studio.step_configure)}
-      // A duplicate arrives from the agents list, not from the chooser, so it
-      // returns to where it came from instead of offering a method to pick.
-      onBack={() =>
-        backOrReplace(duplicateId ? paths.agents() : paths.newAgent())
-      }
+      onBack={() => backOrReplace(paths.agents())}
       chips={
         <>
           <AgentCreateChip>
@@ -151,7 +143,6 @@ export function ManualCreateAgentPage() {
         <CreateAgentFooter
           canCreate={canCreate}
           creating={submit.creating}
-          squad={!!squadId}
           error={submit.formError}
           onCreate={() => void submit.create()}
         />

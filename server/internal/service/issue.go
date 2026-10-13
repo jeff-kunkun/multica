@@ -12,7 +12,6 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/analytics"
-	"github.com/multica-ai/multica/server/internal/entitlement"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/issueguard"
 	"github.com/multica-ai/multica/server/internal/issueposition"
@@ -27,7 +26,7 @@ import (
 
 // IssueService is the single service-layer entry point for creating issues.
 // The HTTP `POST /issues` handler and other create entries call into Create so that duplicate guard, issue numbering, attachment
-// linking, broadcast, analytics, and agent/squad enqueue stay aligned. The
+// linking, broadcast, analytics, and agent enqueue stay aligned. The
 // service deliberately does NOT depend on http.Request — callers parse
 // their own transport and pass a fully-resolved IssueCreateParams.
 type IssueService struct {
@@ -41,9 +40,6 @@ type IssueService struct {
 	// Metrics as "PostHog only", so leaving it unset is safe.
 	Metrics     *obsmetrics.BusinessMetrics
 	TaskService *TaskService
-	// Entitlements supplies Cloud's effective issue-count instruction. Nil is
-	// the self-hosted unlimited path.
-	Entitlements entitlement.Provider
 }
 
 func NewIssueService(q *db.Queries, tx TxStarter, bus *events.Bus, ac analytics.Client, ts *TaskService) *IssueService {
@@ -126,7 +122,7 @@ type IssueCreateOpts struct {
 
 	// Platform tags the IssueCreated analytics + business-metrics event
 	// with the client surface the request came in on (web / desktop /
-	// daemon / autopilot). Derived from middleware's client
+	// daemon). Derived from middleware's client
 	// metadata at the handler layer.
 	Platform string
 }
@@ -212,8 +208,8 @@ type IssueCreateResult struct {
 //  7. Link any pre-uploaded attachments (post-commit, idempotent).
 //  8. Publish EventIssueCreated to the bus (payload via opts.BroadcastPayload).
 //  9. Capture the IssueCreated analytics event.
-//  10. Enqueue the ordinary agent task or trigger the squad leader when the
-//     issue is assigned and not in `backlog`.
+//  10. Enqueue the agent task when the issue is assigned and not in
+//     `backlog`.
 //
 // Validation that lives in the service (parent existence, project
 // workspace membership, parent → project back-fill) is enforced here so
@@ -222,7 +218,6 @@ type IssueCreateResult struct {
 // Caller-owned validation is limited to transport-shaped checks: title
 // required, RFC3339 date format, assignee pair sanity.
 func (s *IssueService) Create(ctx context.Context, p IssueCreateParams, opts IssueCreateOpts) (IssueCreateResult, error) {
-	issueCountPolicy := ResolveIssueCountPolicy(ctx, s.Entitlements, p.WorkspaceID)
 	tx, err := s.TxStarter.Begin(ctx)
 	if err != nil {
 		return IssueCreateResult{}, fmt.Errorf("begin tx: %w", err)
@@ -330,7 +325,7 @@ func (s *IssueService) Create(ctx context.Context, p IssueCreateParams, opts Iss
 		return IssueCreateResult{DuplicateIssue: &dup}, ErrActiveDuplicate
 	}
 
-	issueNumber, err := AllocateIssueNumber(ctx, qtx, p.WorkspaceID, issueCountPolicy)
+	issueNumber, err := qtx.IncrementIssueCounter(ctx, p.WorkspaceID)
 	if err != nil {
 		return IssueCreateResult{}, fmt.Errorf("allocate issue number: %w", err)
 	}
@@ -406,57 +401,6 @@ func (s *IssueService) Create(ctx context.Context, p IssueCreateParams, opts Iss
 	if p.SourceContext != nil {
 		if _, err := PersistSourceContext(ctx, qtx, *p.SourceContext, issue.ID, pgtype.UUID{}); err != nil {
 			return IssueCreateResult{}, fmt.Errorf("persist source context: %w", err)
-		}
-	} else if p.OriginType.Valid && p.OriginType.String == "quick_create" && p.OriginID.Valid {
-		task, taskErr := qtx.GetAgentTaskInWorkspace(ctx, db.GetAgentTaskInWorkspaceParams{
-			ID: p.OriginID, WorkspaceID: p.WorkspaceID,
-		})
-		if taskErr != nil {
-			return IssueCreateResult{}, fmt.Errorf("load quick-create origin task: %w", taskErr)
-		}
-		if p.CreatorType != "agent" || !p.CreatorID.Valid || p.CreatorID != task.AgentID {
-			return IssueCreateResult{}, errors.New("quick-create origin task does not belong to the creating agent")
-		}
-		var quickCreate QuickCreateContext
-		if err := json.Unmarshal(task.Context, &quickCreate); err != nil {
-			return IssueCreateResult{}, fmt.Errorf("decode quick-create origin context: %w", err)
-		}
-		if quickCreate.Type != QuickCreateContextType {
-			return IssueCreateResult{}, errors.New("quick-create origin task has invalid context type")
-		}
-		contextWorkspaceID, parseErr := util.ParseUUID(quickCreate.WorkspaceID)
-		if parseErr != nil || contextWorkspaceID != p.WorkspaceID {
-			return IssueCreateResult{}, errors.New("quick-create origin context has invalid workspace")
-		}
-		if quickCreate.SourceContextID != "" {
-			contextID, parseErr := util.ParseUUID(quickCreate.SourceContextID)
-			if parseErr != nil {
-				return IssueCreateResult{}, fmt.Errorf("invalid quick-create source context id: %w", parseErr)
-			}
-			requesterID, parseErr := util.ParseUUID(quickCreate.RequesterID)
-			if parseErr != nil || !task.OriginatorUserID.Valid || requesterID != task.OriginatorUserID {
-				return IssueCreateResult{}, errors.New("quick-create source context has invalid requester")
-			}
-			pending, pendingErr := qtx.GetPendingIssueSourceContextByOriginTask(ctx, db.GetPendingIssueSourceContextByOriginTaskParams{
-				WorkspaceID: p.WorkspaceID, OriginTaskID: task.ID,
-			})
-			if pendingErr != nil {
-				if errors.Is(pendingErr, pgx.ErrNoRows) {
-					return IssueCreateResult{}, ErrSourceContextAlreadyAttached
-				}
-				return IssueCreateResult{}, fmt.Errorf("load pending quick-create source context: %w", pendingErr)
-			}
-			if pending.ID != contextID || pending.CapturedByUserID != requesterID {
-				return IssueCreateResult{}, errors.New("quick-create source context ownership mismatch")
-			}
-			if _, attachErr := qtx.AttachIssueSourceContext(ctx, db.AttachIssueSourceContextParams{
-				IssueID: issue.ID, WorkspaceID: p.WorkspaceID, ID: contextID, OriginTaskID: task.ID,
-			}); attachErr != nil {
-				if errors.Is(attachErr, pgx.ErrNoRows) {
-					return IssueCreateResult{}, ErrSourceContextAlreadyAttached
-				}
-				return IssueCreateResult{}, fmt.Errorf("attach quick-create source context: %w", attachErr)
-			}
 		}
 	}
 
@@ -667,7 +611,7 @@ func (s *IssueService) captureCreatedAnalytics(issue db.Issue, creatorType, acto
 	if s.Analytics == nil {
 		return
 	}
-	source, taskID, autopilotRunID := classifyOrigin(issue, opts)
+	source, taskID := classifyOrigin(issue)
 	analyticsActorID := actorID
 	if creatorType == "agent" {
 		analyticsActorID = "agent:" + actorID
@@ -678,7 +622,6 @@ func (s *IssueService) captureCreatedAnalytics(issue db.Issue, creatorType, acto
 		util.UUIDToString(issue.ID),
 		opts.AnalyticsAgentID,
 		taskID,
-		autopilotRunID,
 		source,
 		opts.Platform,
 	))
@@ -688,10 +631,10 @@ func (s *IssueService) captureCreatedAnalytics(issue db.Issue, creatorType, acto
 // analytics source labels. Unknown origin_type falls back to SourceManual
 // with the warning logged — analytics drift is preferable to dropping the
 // event entirely.
-func classifyOrigin(issue db.Issue, opts IssueCreateOpts) (source, taskID, autopilotRunID string) {
+func classifyOrigin(issue db.Issue) (source, taskID string) {
 	source = analytics.SourceManual
 	if !issue.OriginType.Valid {
-		return source, "", ""
+		return source, ""
 	}
 	originID := util.UUIDToString(issue.OriginID)
 	switch issue.OriginType.String {
@@ -699,15 +642,13 @@ func classifyOrigin(issue db.Issue, opts IssueCreateOpts) (source, taskID, autop
 		// Both link the issue back to the agent_task_queue row that created it
 		// (agent_create is the ordinary agent `issue create` path, MUL-4305);
 		// surface that task id and keep the manual source label.
-		return analytics.SourceManual, originID, ""
-	case "autopilot":
-		return analytics.SourceAutopilot, "", originID
+		return analytics.SourceManual, originID
 	default:
 		slog.Warn("analytics: unknown issue origin type",
 			"origin_type", issue.OriginType.String,
 			"issue_id", util.UUIDToString(issue.ID),
 		)
-		return analytics.SourceManual, "", ""
+		return analytics.SourceManual, ""
 	}
 }
 
@@ -717,10 +658,7 @@ func (s *IssueService) maybeEnqueueOnAssign(ctx context.Context, issue db.Issue,
 	}
 	// Backlog is the parking lot: nothing runs from it, so nothing here needs
 	// explaining either. Custom unstarted statuses do not inherit parking.
-	//
-	// Triage refuses for a different reason and so returns just as quietly: the
-	// entry is not yet work anyone agreed to do (MUL-7189 §2.3).
-	if issue.TriageState.Valid || issuestatus.Effective(ctx, s.Queries, issue.WorkspaceID, issue.Status) == "backlog" {
+	if issuestatus.Effective(ctx, s.Queries, issue.WorkspaceID, issue.Status) == "backlog" {
 		return pgtype.UUID{}
 	}
 	verdict, admitted := agentAssigneeVerdict(ctx, s.runtimeLookup(s.Queries), issue)
@@ -741,9 +679,6 @@ func (s *IssueService) maybeEnqueueOnAssign(ctx context.Context, issue db.Issue,
 		} else {
 			return task.ID
 		}
-	}
-	if s.shouldEnqueueSquadLeaderOnAssign(ctx, issue) {
-		s.enqueueSquadLeaderTask(ctx, issue, pgtype.UUID{}, creatorType, actorID)
 	}
 	return pgtype.UUID{}
 }
@@ -772,59 +707,4 @@ func agentAssigneeVerdict(ctx context.Context, lookup RuntimeLookup, issue db.Is
 		return AgentVerdict{}, false
 	}
 	return verdict, !verdict.Blocked()
-}
-
-func (s *IssueService) shouldEnqueueSquadLeaderOnAssign(ctx context.Context, issue db.Issue) bool {
-	if issue.TriageState.Valid || issuestatus.Effective(ctx, s.Queries, issue.WorkspaceID, issue.Status) == "backlog" {
-		return false
-	}
-	return s.isSquadLeaderReady(ctx, issue)
-}
-
-func (s *IssueService) isSquadLeaderReady(ctx context.Context, issue db.Issue) bool {
-	if !issue.AssigneeType.Valid || issue.AssigneeType.String != "squad" || !issue.AssigneeID.Valid {
-		return false
-	}
-	squad, err := s.Queries.GetSquadInWorkspace(ctx, db.GetSquadInWorkspaceParams{
-		ID:          issue.AssigneeID,
-		WorkspaceID: issue.WorkspaceID,
-	})
-	if err != nil {
-		return false
-	}
-	agent, err := s.Queries.GetAgent(ctx, squad.LeaderID)
-	if err != nil {
-		return false
-	}
-	verdict, err := AgentReadiness(ctx, s.runtimeLookup(s.Queries), agent)
-	if err != nil {
-		return false
-	}
-	return verdict.Ready()
-}
-
-func (s *IssueService) enqueueSquadLeaderTask(ctx context.Context, issue db.Issue, triggerCommentID pgtype.UUID, authorType, authorID string) {
-	squad, err := s.Queries.GetSquadInWorkspace(ctx, db.GetSquadInWorkspaceParams{
-		ID:          issue.AssigneeID,
-		WorkspaceID: issue.WorkspaceID,
-	})
-	if err != nil {
-		return
-	}
-	hasPending, err := s.Queries.HasPendingTaskForIssueAndAgent(ctx, db.HasPendingTaskForIssueAndAgentParams{
-		IssueID: issue.ID,
-		AgentID: squad.LeaderID,
-		// Key dedup on the reviewed head (TEN-356).
-		HeadSha: headShaText(s.TaskService.ResolveIssueReviewSHA(ctx, issue.ID)),
-	})
-	if err != nil || hasPending {
-		return
-	}
-	if _, err := s.TaskService.EnqueueTaskForSquadLeader(ctx, issue, squad.LeaderID, squad.ID, triggerCommentID, OriginDerived); err != nil {
-		slog.Warn("enqueue squad leader task on create failed",
-			"issue_id", util.UUIDToString(issue.ID),
-			"squad_id", util.UUIDToString(squad.ID),
-			"leader_id", util.UUIDToString(squad.LeaderID),
-			"error", err)
-	}
 }

@@ -17,7 +17,7 @@ import (
 // (owner_fallback) when the workspace permits the degrade (MUL-4302).
 func TestMergeCommentIntoPendingTask_FailClosedKeepsOriginalSnapshot(t *testing.T) {
 	ctx := context.Background()
-	agentID := createWebhookTestAgent(t, "MergeFailClosed Agent")
+	agentID := createMergeTestAgent(t, "MergeFailClosed Agent")
 
 	var runtimeID string
 	if err := testPool.QueryRow(ctx, `SELECT runtime_id FROM agent WHERE id = $1`, agentID).Scan(&runtimeID); err != nil {
@@ -136,4 +136,26 @@ func TestMergeCommentIntoPendingTask_FailClosedKeepsOriginalSnapshot(t *testing.
 	if orig2 != "" {
 		t.Errorf("fail-open owner_fallback: originator = %s, want NULL (authorization carries no human)", orig2)
 	}
+}
+
+// createMergeTestAgent inserts a private agent on the fixture runtime and
+// removes it when the test ends.
+func createMergeTestAgent(t *testing.T, name string) string {
+	t.Helper()
+	var agentID string
+	if err := testPool.QueryRow(context.Background(), `
+		INSERT INTO agent (
+			workspace_id, name, description, runtime_mode, runtime_config,
+			runtime_id, visibility, max_concurrent_tasks, owner_id,
+			instructions, custom_env, custom_args, mcp_config
+		)
+		VALUES ($1, $2, '', 'cloud', '{}'::jsonb, $3, 'private', 1, $4, '', '{}'::jsonb, '[]'::jsonb, '{}'::jsonb)
+		RETURNING id
+	`, testWorkspaceID, name, testRuntimeID, testUserID).Scan(&agentID); err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM agent WHERE id = $1`, agentID)
+	})
+	return agentID
 }

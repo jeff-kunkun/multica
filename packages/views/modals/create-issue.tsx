@@ -5,7 +5,6 @@ import { useState, useRef, useEffect, useLayoutEffect } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { AppLink, resolveClickIntent, useNavigation } from "../navigation";
 import {
-  AlertTriangle,
   ArrowDown,
   ArrowLeftRight,
   ArrowUp,
@@ -80,9 +79,6 @@ import { useAttachLabelToIssue } from "@multica/core/labels";
 import { propertyListOptions } from "@multica/core/properties";
 import {
   ApiError,
-  DuplicateIssueErrorBodySchema,
-  type DuplicateIssueErrorBody,
-  parseWithFallback,
 } from "@multica/core/api";
 import { FileUploadButton } from "@multica/ui/components/common/file-upload-button";
 import { BorderBeam } from "@multica/ui/components/common/border-beam";
@@ -96,7 +92,6 @@ import {
 import { IssuePickerModal } from "./issue-picker-modal";
 import { useT } from "../i18n";
 import { SourceContextPreviewCard, useSourceContextFailureMessage } from "./source-context-preview";
-import { useIssueLimitUpgradePrompt } from "./use-issue-limit-upgrade-prompt";
 
 // ---------------------------------------------------------------------------
 // ManualCreatePanel — manual-mode body of the create-issue dialog. Renders
@@ -127,7 +122,7 @@ function CreateRunHint({
 }) {
   const { t } = useT("modals");
   const { getActorName } = useActorName();
-  const isAgentLike = assigneeType === "agent" || assigneeType === "squad";
+  const isAgentLike = assigneeType === "agent";
   const preview = useIssueTriggerPreview({
     isCreate: true,
     assigneeType: assigneeType ?? null,
@@ -140,13 +135,10 @@ function CreateRunHint({
   // copy instead of flashing "parked" before the run preview lands.
   const ready = isAgentLike && !!assigneeId && !preview.isLoading;
   const willStart = preview.totalCount > 0;
-  const isSquad = assigneeType === "squad";
   const triggerAgentId = preview.triggers[0]?.agent_id ?? assigneeId;
 
-  // Avatar + copy mirror the flow. A squad doesn't "work" — its leader
-  // evaluates and delegates — so the squad path keeps the squad as the subject
-  // (avatar + name) and uses the leader-delegates copy. A single agent picks
-  // the issue up directly; a parked issue shows whoever it was assigned to.
+  // Avatar + copy mirror the flow: an agent picks the issue up directly; a
+  // parked issue shows whoever it was assigned to.
   let avatarType: string;
   let avatarId: string | undefined;
   let text: string;
@@ -154,12 +146,6 @@ function CreateRunHint({
     avatarType = assigneeType ?? "agent";
     avatarId = assigneeId;
     text = t(($) => $.run_confirm.create_parked);
-  } else if (isSquad) {
-    avatarType = "squad";
-    avatarId = assigneeId;
-    text = t(($) => $.run_confirm.create_will_start_squad, {
-      name: getActorName("squad", assigneeId ?? ""),
-    });
   } else {
     avatarType = "agent";
     avatarId = triggerAgentId;
@@ -231,7 +217,6 @@ export function ManualCreatePanel({
     : undefined;
   const onSourceContextExpandedChange = data?.source_context_on_expanded_change as ((expanded: boolean) => void) | undefined;
   const sourceContextFailureMessage = useSourceContextFailureMessage();
-  const showIssueLimitUpgradePrompt = useIssueLimitUpgradePrompt();
 
   const draft = useIssueDraftStore((s) => s.draft);
   const setManual = useIssueDraftStore((s) => s.setManual);
@@ -658,10 +643,6 @@ export function ManualCreatePanel({
         toast.error(sourceContextFailureMessage(err) ?? tIssues(($) => $.source_context.error_too_large));
         return false;
       }
-      if (sourceCode === "issue_limit_reached") {
-        showIssueLimitUpgradePrompt();
-        return false;
-      }
       if (sourceCode === "invalid_issue_property" && err instanceof ApiError) {
         const propertyId =
           err.body && typeof err.body === "object"
@@ -702,51 +683,6 @@ export function ManualCreatePanel({
         }
         toast.error(err.message || t(($) => $.create_issue.toast_failed));
         return false;
-      }
-      // Duplicate-issue is the only structured 409 the create endpoint
-      // returns. We schema-guard the body (ApiError.body is `unknown`) so a
-      // future server-side rename / drop of `code` / `issue` degrades to the
-      // normal error toast instead of throwing inside the toast renderer.
-      if (err instanceof ApiError && err.status === 409) {
-        const dup = parseWithFallback<DuplicateIssueErrorBody | null>(
-          err.body,
-          DuplicateIssueErrorBodySchema,
-          null,
-          { endpoint: "POST /api/workspaces/:wsId/issues (active_duplicate_issue)" },
-        );
-        if (dup) {
-          toast.custom(
-            (toastId) => (
-              <div className="bg-popover text-popover-foreground border rounded-lg shadow-lg p-4 w-[360px]">
-                <div className="flex items-center gap-2 mb-2">
-                  <div className="flex items-center justify-center size-5 rounded-full bg-amber-500/15 text-amber-500">
-                    <AlertTriangle className="size-3" />
-                  </div>
-                  <span className="text-body font-medium">
-                    {t(($) => $.create_issue.toast_duplicate_title)}
-                  </span>
-                </div>
-                <div className="flex items-center gap-2 text-body text-muted-foreground ml-7">
-                  <span className="truncate">{dup.issue.identifier} – {dup.issue.title}</span>
-                </div>
-                {/* See the created-issue toast above: toast content lives
-                    outside NavigationProvider, so this stays a button. */}
-                <button
-                  type="button"
-                  className="ml-7 mt-2 text-body text-primary hover:underline cursor-pointer"
-                  onClick={() => {
-                    router.push(p.issueDetail(dup.issue.id));
-                    toast.dismiss(toastId);
-                  }}
-                >
-                  {t(($) => $.create_issue.toast_duplicate_view)}
-                </button>
-              </div>
-            ),
-            { duration: 5000 },
-          );
-          return false;
-        }
       }
       toast.error(
         err instanceof Error && err.message
@@ -824,7 +760,7 @@ export function ManualCreatePanel({
     if (
       !draft.agent.actorId &&
       assigneeId &&
-      (assigneeType === "agent" || assigneeType === "squad")
+      assigneeType === "agent"
     ) {
       setAgent({ actorType: assigneeType, actorId: assigneeId });
     }

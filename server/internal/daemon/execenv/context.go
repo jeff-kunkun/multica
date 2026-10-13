@@ -124,7 +124,7 @@ func writeWorkspacesRootMarkerAtomic(path string, data []byte) error {
 //
 // It deliberately writes no per-task Markdown brief. There used to be an
 // .agent_context/issue_context.md carrying the issue id, trigger comment id,
-// handoff note, quick-create input, and autopilot run data — every one of
+// handoff note, and other per-task input — every one of
 // which the runtime brief and the per-turn user message already carry. No
 // provider read the file (nothing in either surface pointed at it), so it was
 // a third copy that had to be kept in sync with the two that agents actually

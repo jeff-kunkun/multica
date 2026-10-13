@@ -7,13 +7,13 @@ for (const scenario of [
     name: "different account language",
     language: "en",
     htmlLang: "en",
-    continueLabel: "Continue on web",
+    createLabel: "Create workspace",
   },
   {
     name: "same account language",
     language: "zh-Hans",
     htmlLang: "zh-CN",
-    continueLabel: "在 web 端继续",
+    createLabel: "创建工作区",
   },
 ]) {
   test(`Google callback keeps its single-use code while synchronizing ${scenario.name}`, async ({
@@ -32,8 +32,6 @@ for (const scenario of [
       email: "callback-locale@example.com",
       avatar_url: null,
       language: scenario.language,
-      onboarded_at: null,
-      onboarding_questionnaire: {},
       created_at: "2026-01-01T00:00:00Z",
       updated_at: "2026-01-01T00:00:00Z",
     };
@@ -143,10 +141,10 @@ for (const scenario of [
       ).toBe("zh-Hans");
       releaseWorkspaces();
 
-      await expect(page).toHaveURL(`${origin}/onboarding`, { timeout: 15000 });
+      await expect(page).toHaveURL(`${origin}/workspaces/new`, { timeout: 15000 });
       await expect(page.locator("html")).toHaveAttribute("lang", scenario.htmlLang);
       await expect(
-        page.getByRole("button", { name: scenario.continueLabel, exact: true }),
+        page.getByRole("button", { name: scenario.createLabel, exact: true }),
       ).toBeVisible();
       expect(
         (await context.cookies(origin)).find((cookie) => cookie.name === "multica-locale")?.value,

@@ -10,7 +10,6 @@ import (
 	"log/slog"
 	"math/rand"
 	"net"
-	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -2769,7 +2768,7 @@ probeLoop:
 // runtimeVersionProbeConcurrency.
 //
 // The previous implementation probed serially, so total latency was the SUM of
-// every CLI's `--version` call. On an onboarding host with several coding tools
+// every CLI's `--version` call. On a fresh host with several coding tools
 // installed that stacked into many seconds of dead time before the daemon could
 // register — long enough that the desktop runtime step timed out into its empty
 // "no runtime found" state while the probes were still running (MUL-5119).
@@ -5813,7 +5812,6 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, slot int) {
 		"agent_id", task.AgentID,
 		"repos", len(task.Repos),
 		"project_id", task.ProjectID,
-		"autopilot_run_id", task.AutopilotRunID,
 		"trigger_comment_id", task.TriggerCommentID,
 		"resume_session", task.PriorSessionID != "",
 		"reuse_workdir", task.PriorWorkDir != "",
@@ -5897,7 +5895,7 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, slot int) {
 	// whether the task completes, errors, or is cancelled mid-run by the poll
 	// goroutine. Both claude.go and codex.go populate result.Usage even when
 	// runCtx is cancelled, so dropping this on the cancelled path silently
-	// under-reports billing.
+	// under-reports usage.
 	if len(result.Usage) > 0 {
 		if usageErr := d.client.ReportTaskUsage(ctx, task.ID, result.Usage); usageErr != nil {
 			taskLog.Warn("report task usage failed", "error", usageErr)
@@ -5983,8 +5981,8 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, slot int) {
 	d.reportTaskResult(ctx, task.ID, result, taskLog)
 
 	// Write GC metadata after the task finishes so the periodic GC loop
-	// can look up the parent record (issue / chat session / autopilot run /
-	// task itself for quick-create) later. Written last so that a mid-task
+	// can look up the parent record (issue / chat session) later. Written
+	// last so that a mid-task
 	// crash leaves the directory as an orphan (cleaned up by GCOrphanTTL).
 	if result.EnvRoot != "" {
 		if meta, ok := gcMetaForTask(task); ok {
@@ -6475,19 +6473,9 @@ func gcMetaForTask(task Task) (execenv.GCMeta, bool) {
 	case task.ChatSessionID != "":
 		meta.Kind = execenv.GCKindChat
 		meta.ChatSessionID = task.ChatSessionID
-	case task.AutopilotRunID != "":
-		meta.Kind = execenv.GCKindAutopilotRun
-		meta.AutopilotRunID = task.AutopilotRunID
 	case task.IssueID != "":
 		meta.Kind = execenv.GCKindIssue
 		meta.IssueID = task.IssueID
-	case task.QuickCreatePrompt != "":
-		// Quick-create tasks reach WriteGCMeta before the server runs
-		// LinkTaskToIssue, so IssueID is always empty here. Persist the
-		// task ID instead and let the GC loop ask the server for terminal
-		// state via the task gc-check endpoint.
-		meta.Kind = execenv.GCKindQuickCreate
-		meta.TaskID = task.ID
 	default:
 		return execenv.GCMeta{}, false
 	}
@@ -7845,14 +7833,6 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		ProjectDescription:               task.ProjectDescription,
 		ProjectResources:                 convertProjectResourcesForEnv(task.ProjectResources),
 		ChatSessionID:                    task.ChatSessionID,
-		AutopilotRunID:                   task.AutopilotRunID,
-		AutopilotID:                      task.AutopilotID,
-		AutopilotTitle:                   task.AutopilotTitle,
-		AutopilotDescription:             task.AutopilotDescription,
-		AutopilotSource:                  task.AutopilotSource,
-		AutopilotTriggerPayload:          strings.TrimSpace(string(task.AutopilotTriggerPayload)),
-		QuickCreatePrompt:                task.QuickCreatePrompt,
-		IsSquadLeader:                    taskIsSquadLeader(task),
 		RequestingUserName:               task.RequestingUserName,
 		RequestingUserProfileDescription: task.RequestingUserProfileDescription,
 		InitiatorType:                    task.InitiatorType,
@@ -7967,49 +7947,6 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	var agentMcpConfig json.RawMessage
 	var effectiveMcpConfig json.RawMessage
 	var cursorMcpAuthSource string
-	remoteMCPConfig, remoteMCPDiagnostics, remoteMCPBrokers, remoteMCPErr := startTaskRemoteMCPBrokers(
-		prepareCtx, ctx, task.ID, provider, task.RemoteMCPConnections,
-		func(resolveCtx context.Context, contributionID string) (http.Header, error) {
-			return d.client.ResolveRemoteMCPCredential(resolveCtx, task.RemoteMCPDaemonToken, task.ID, contributionID)
-		},
-		taskLog,
-	)
-	if remoteMCPErr != nil {
-		return TaskResult{}, fmt.Errorf("prepare Remote MCP broker: %w", remoteMCPErr)
-	}
-	if remoteMCPBrokers != nil {
-		defer remoteMCPBrokers.Close()
-	}
-	for _, diagnostic := range remoteMCPDiagnostics {
-		taskLog.Warn("Remote MCP degraded", "reason", diagnostic)
-	}
-
-	// Agent-trigger plugin hooks, as a second local MCP server beside the
-	// broker. A failure to start it degrades to no plugin tools rather than
-	// failing the task: an agent that cannot reach a plugin should still work
-	// on the issue, which is the same rule that makes a failing tool call a
-	// tool error rather than a task error.
-	pluginHookConfig, pluginHookServer, pluginHookErr := startTaskPluginHookMCP(
-		ctx, task.ID, task.PluginHookTools,
-		func(callCtx context.Context, taskID, installationID, hookKey string, input json.RawMessage) (json.RawMessage, error) {
-			return d.client.InvokeAgentPluginHook(callCtx, task.RemoteMCPDaemonToken, taskID, installationID, hookKey, input)
-		},
-		taskLog,
-	)
-	if pluginHookErr != nil {
-		taskLog.Warn("plugin hook tools unavailable", "error", pluginHookErr)
-	}
-	if pluginHookServer != nil {
-		defer pluginHookServer.Close()
-	}
-	if len(pluginHookConfig) > 0 {
-		merged, mergeErr := mergeTaskRemoteMCPConfig(remoteMCPConfig, pluginHookConfig)
-		if mergeErr != nil {
-			taskLog.Warn("could not merge plugin hook MCP config", "error", mergeErr)
-		} else {
-			remoteMCPConfig = merged
-		}
-	}
 	if task.Agent != nil {
 		agentMcpConfig = task.Agent.McpConfig
 		effectiveMcpConfig = agentMcpConfig
@@ -8019,13 +7956,6 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 				"error", mergeErr,
 			)
 		} else {
-			effectiveMcpConfig = merged
-		}
-		if len(remoteMCPConfig) > 0 {
-			merged, mergeErr := mergeTaskRemoteMCPConfig(effectiveMcpConfig, remoteMCPConfig)
-			if mergeErr != nil {
-				return TaskResult{}, fmt.Errorf("merge Remote MCP broker configuration: %w", mergeErr)
-			}
 			effectiveMcpConfig = merged
 		}
 		if provider == "cursor" {
@@ -8478,26 +8408,6 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	if checkoutMode := repoCheckoutModeFor(provider, runtime.GOOS); checkoutMode != "" {
 		agentEnv[repoCheckoutModeEnv] = checkoutMode
 	}
-	if task.AutopilotRunID != "" {
-		agentEnv["MULTICA_AUTOPILOT_RUN_ID"] = task.AutopilotRunID
-	}
-	if task.AutopilotID != "" {
-		agentEnv["MULTICA_AUTOPILOT_ID"] = task.AutopilotID
-	}
-	// Quick-create marker — when set, the multica CLI's `issue create`
-	// command stamps the new issue with origin_type=quick_create +
-	// origin_id=<task_id> so the completion handler can find it
-	// deterministically (see GetIssueByOrigin).
-	if task.QuickCreatePrompt != "" {
-		agentEnv["MULTICA_QUICK_CREATE_TASK_ID"] = task.ID
-		if len(task.QuickCreateAttachmentIDs) > 0 {
-			if raw, err := json.Marshal(task.QuickCreateAttachmentIDs); err == nil {
-				agentEnv["MULTICA_QUICK_CREATE_ATTACHMENT_IDS"] = string(raw)
-			} else {
-				taskLog.Warn("quick-create attachment ids: marshal failed; skipping env injection", "error", err)
-			}
-		}
-	}
 	// Ensure the multica CLI is on PATH inside the agent's environment.
 	// Some runtimes (e.g. Codex) run in an isolated sandbox that may not
 	// inherit the daemon's PATH. Prepend the directory of the running
@@ -8695,21 +8605,6 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// context and bloats every turn.
 	if providerNeedsInlineSystemPrompt(provider) {
 		execOpts.SystemPrompt = runtimeBrief
-	}
-
-	// A quick-actions refresh task from a server that predates server-side
-	// generation (MUL-5573). This daemon no longer has a suggestion pass to run
-	// it with, and it must NOT fall through to the ordinary chat path below:
-	// the task carries no user message, so the agent would answer a prompt
-	// nobody wrote and that server would persist the result as a real assistant
-	// reply. Complete it empty instead — the same shape the retired pass
-	// produced on this task, which that server writes no row for. The user's
-	// refresh spinner resolves via the client's own timeout.
-	if task.RegenerateQuickActionsFor != "" {
-		taskLog.Warn("refusing quick-actions refresh task from an older server; complete the daemon upgrade by updating the server",
-			"target_task", task.RegenerateQuickActionsFor,
-		)
-		return TaskResult{Status: "completed", Comment: "", WorkDir: env.WorkDir, EnvRoot: env.RootDir}, nil
 	}
 
 	// Authenticate the localhost repo-checkout endpoint with the same
@@ -9197,7 +9092,7 @@ func shouldRetryWithFreshSession(result agent.Result, priorSessionID string, too
 //     id (were it attached) would be re-selected. We keep the unrecoverable
 //     first result and only merge usage.
 //
-// Usage is merged across both attempts in every branch so billing is complete.
+// Usage is merged across both attempts in every branch so usage is complete.
 func reconcileFreshRetryResult(first agent.Result, firstUsage map[string]agent.TokenUsage, firstTools int32, retry agent.Result, retryTools int32, retryErr error) (agent.Result, int32) {
 	switch {
 	case retryErr != nil:

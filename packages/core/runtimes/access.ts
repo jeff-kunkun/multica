@@ -15,7 +15,7 @@ import type { RuntimeDevice } from "../types";
  * re-checks server-side.
  *
  * This is the single source of truth for "can this runtime be picked": every
- * create / duplicate / builder / reassign surface must call it rather than
+ * create / duplicate / reassign surface must call it rather than
  * re-deriving the rule.
  */
 export function isRuntimeUsableForUser(

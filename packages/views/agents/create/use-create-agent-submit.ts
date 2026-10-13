@@ -36,14 +36,11 @@ export function classifyAgentCreateError(
  * Commits the draft and leaves the creation flow.
  *
  * Deliberately not optimistic: the flow navigates away on success, so the agent
- * has to exist before the destination renders. A failed squad join is reported
- * as a warning instead of failing the create — the agent is already committed
- * at that point and a retry would duplicate it.
+ * has to exist before the destination renders.
  */
 export function useCreateAgentSubmit(options: {
   draft: AgentDraft;
   runtimeId: string | null;
-  squadId: string | null;
   /** Creation-source attribution for the `agent_created` analytics event. */
   template?: string;
   duplicateSource?: Agent | null;
@@ -60,7 +57,7 @@ export function useCreateAgentSubmit(options: {
   const [nameError, setNameError] = useState<string | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
 
-  const { draft, runtimeId, squadId, template, duplicateSource, onCreated } =
+  const { draft, runtimeId, template, duplicateSource, onCreated } =
     options;
 
   const create = async () => {
@@ -79,30 +76,6 @@ export function useCreateAgentSubmit(options: {
       );
       if (!agent.id) throw new Error(t(($) => $.creation_studio.create_failed));
 
-      if (squadId) {
-        try {
-          await api.addSquadMember(squadId, {
-            member_type: "agent",
-            member_id: agent.id,
-          });
-          await Promise.all([
-            qc.invalidateQueries({
-              queryKey: [...workspaceKeys.squads(wsId), squadId, "members"],
-            }),
-            qc.invalidateQueries({
-              queryKey: [...workspaceKeys.squads(wsId), squadId],
-            }),
-          ]);
-        } catch (error) {
-          toast.warning(
-            t(($) => $.create_dialog.squad_join_failed_toast, {
-              name: agent.name || draft.name.trim(),
-              error: error instanceof Error ? error.message : "unknown error",
-            }),
-          );
-        }
-      }
-
       await onCreated?.(agent);
       cacheAgentResponse(qc, wsId, agent);
       // The create response is authoritative enough to open immediately.
@@ -114,9 +87,7 @@ export function useCreateAgentSubmit(options: {
           name: agent.name || draft.name.trim(),
         }),
       );
-      navigation.push(
-        squadId ? paths.squadDetail(squadId) : paths.agentDetail(agent.id),
-      );
+      navigation.push(paths.agentDetail(agent.id));
     } catch (error) {
       const nextErrors = classifyAgentCreateError(
         error,

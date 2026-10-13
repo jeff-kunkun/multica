@@ -122,7 +122,7 @@ describe("selectTabByShortcut", () => {
   });
 
   it("does not switch a hidden tab while a window overlay is active", () => {
-    useWindowOverlayStore.setState({ overlay: { type: "onboarding" } });
+    useWindowOverlayStore.setState({ overlay: { type: "new-workspace" } });
     selectTabByShortcut(5);
     expect(activeTabId()).toBe("t1");
   });

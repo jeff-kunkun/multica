@@ -96,7 +96,7 @@ func resolveTextFlag(cmd *cobra.Command, flagName string) (string, bool, error) 
 //
 // Agent task workdirs are isolated per profile and per task; machine-shared
 // scratch paths like /tmp are not. MUL-4252 traced a cross-environment context
-// leak to exactly this gap: a quick-create run wrote its description to a fixed
+// leak to exactly this gap: an agent run wrote its description to a fixed
 // /tmp/desc.md, the write silently failed because a *different* environment's
 // run had left a stale file there minutes earlier, and --description-file then
 // fed that stale content into the new issue. Requiring the file to live under
@@ -273,7 +273,7 @@ var issueUpdateCmd = &cobra.Command{
 
 var issueAssignCmd = &cobra.Command{
 	Use:   "assign <id>",
-	Short: "Assign an issue to a member, agent, or squad",
+	Short: "Assign an issue to a member or agent",
 	Args:  exactArgs(1),
 	RunE:  runIssueAssign,
 }
@@ -284,11 +284,7 @@ var issueStatusCmd = &cobra.Command{
 	Long: "Change an issue's status. The argument is a status KEY, not its display name.\n" +
 		"Built-in keys: backlog, todo, in_progress, in_review, done, blocked, cancelled.\n" +
 		"A workspace may define custom statuses on top of these; their keys are shown in\n" +
-		"Workspace Settings > Issue Statuses, and an unknown value errors with the full list.\n\n" +
-		"To cancel an issue because it duplicates another, mark it instead of only cancelling:\n" +
-		"  multica issue status <id> cancelled --duplicate-of <original>\n" +
-		"The original then lists it as a duplicate. Moving the issue to any status other\n" +
-		"than cancelled later removes the mark.",
+		"Workspace Settings > Issue Statuses, and an unknown value errors with the full list.",
 	Args: exactArgs(2),
 	RunE: runIssueStatus,
 }
@@ -506,7 +502,7 @@ var validIssueFields = []string{
 	"id", "workspace_id", "number", "identifier", "title", "description",
 	"status", "status_category", "status_name", "priority", "assignee_type",
 	"assignee_id", "creator_type", "creator_id", "parent_issue_id",
-	"duplicate_of", "project_id", "position", "stage", "start_date", "due_date", "created_at",
+	"project_id", "position", "stage", "start_date", "due_date", "created_at",
 	"updated_at", "revision", "last_activity_at", "metadata", "properties",
 	"labels",
 }
@@ -597,8 +593,8 @@ func init() {
 	issueListCmd.Flags().Bool("full-id", false, "Show full UUIDs in table output")
 	issueListCmd.Flags().String("status", "", "Filter by status")
 	issueListCmd.Flags().String("priority", "", "Filter by priority")
-	issueListCmd.Flags().String("assignee", "", "Filter by assignee name (member, agent, or squad; fuzzy match)")
-	issueListCmd.Flags().String("assignee-id", "", "Filter by assignee UUID — member, agent, or squad (mutually exclusive with --assignee)")
+	issueListCmd.Flags().String("assignee", "", "Filter by assignee name (member or agent; fuzzy match)")
+	issueListCmd.Flags().String("assignee-id", "", "Filter by assignee UUID — member or agent (mutually exclusive with --assignee)")
 	issueListCmd.Flags().String("project", "", "Filter by project ID")
 	issueListCmd.Flags().StringSlice("metadata", nil, "Filter by metadata key=value (repeatable; combined with AND). Value is JSON-parsed: 'true'/'false' → bool, numbers → number, otherwise string. Wrap as '\"42\"' to force a string when the value would otherwise sniff as a number.")
 	issueListCmd.Flags().StringArray("property", nil, `Filter by custom property, written as "Name=Value" (repeatable, one value per flag). Name is a property name (case-insensitive) or its UUID. Value depends on the type: an option name or id for select and multi_select, true or false for checkbox, a member name, email, or id for actor types, and the value itself for text, url, number, and date (YYYY-MM-DD). Use __none__ to match issues where the property is unset; it works for every type, so an option or member actually named __none__ has to be given by id, as does a property whose name contains "=" or ends in <, > or ! (the >=, <=, and != spellings are reserved for comparison filters). Repeating a property matches ANY of its values; different properties must ALL match.`)
@@ -627,14 +623,13 @@ func init() {
 	issueCreateCmd.Flags().Bool("allow-external-file", false, "Allow --description-file / --attachment to read a path outside the current working directory. Off by default so a stale file from another run/environment can't be picked up (MUL-4252).")
 	issueCreateCmd.Flags().String("status", "", "Issue status")
 	issueCreateCmd.Flags().String("priority", "", "Issue priority")
-	issueCreateCmd.Flags().String("assignee", "", "Assignee name (member, agent, or squad; fuzzy match)")
-	issueCreateCmd.Flags().String("assignee-id", "", "Assignee UUID — member, agent, or squad (mutually exclusive with --assignee)")
+	issueCreateCmd.Flags().String("assignee", "", "Assignee name (member or agent; fuzzy match)")
+	issueCreateCmd.Flags().String("assignee-id", "", "Assignee UUID — member or agent (mutually exclusive with --assignee)")
 	issueCreateCmd.Flags().String("parent", "", "Parent issue ID")
 	issueCreateCmd.Flags().Int("stage", 0, "Stage ordinal (>=1) grouping this sub-issue into an ordered barrier group under its parent; omit for unstaged. The parent assignee is woken only when every sub-issue in a stage finishes.")
 	issueCreateCmd.Flags().String("project", "", "Project ID")
 	issueCreateCmd.Flags().String("start-date", "", "Start date (calendar day, YYYY-MM-DD)")
 	issueCreateCmd.Flags().String("due-date", "", "Due date (calendar day, YYYY-MM-DD)")
-	issueCreateCmd.Flags().Bool("allow-duplicate", false, "Allow creating an issue even when an active duplicate exists")
 	issueCreateCmd.Flags().String("output", "json", "Output format: table or json")
 	issueCreateCmd.Flags().StringSlice("attachment", nil, "File path(s) to attach (can be specified multiple times). Each file is uploaded and its markdown reference is appended to the description, which is what makes it render on the issue page")
 	issueCreateCmd.Flags().StringSlice("attachment-id", nil, "Existing attachment UUID(s) to bind to the created issue (can be specified multiple times)")
@@ -649,8 +644,8 @@ func init() {
 	issueUpdateCmd.Flags().StringSlice("attachment", nil, "Local file path(s) to attach to the issue description (repeatable); references are appended to the end of the description")
 	issueUpdateCmd.Flags().String("status", "", "New status")
 	issueUpdateCmd.Flags().String("priority", "", "New priority")
-	issueUpdateCmd.Flags().String("assignee", "", "New assignee name (member, agent, or squad; fuzzy match)")
-	issueUpdateCmd.Flags().String("assignee-id", "", "New assignee UUID — member, agent, or squad (mutually exclusive with --assignee)")
+	issueUpdateCmd.Flags().String("assignee", "", "New assignee name (member or agent; fuzzy match)")
+	issueUpdateCmd.Flags().String("assignee-id", "", "New assignee UUID — member or agent (mutually exclusive with --assignee)")
 	issueUpdateCmd.Flags().String("project", "", "Project ID")
 	issueUpdateCmd.Flags().String("start-date", "", "New start date (calendar day, YYYY-MM-DD; pass empty string to clear)")
 	issueUpdateCmd.Flags().String("due-date", "", "New due date (calendar day, YYYY-MM-DD)")
@@ -658,20 +653,18 @@ func init() {
 	issueUpdateCmd.Flags().Int("stage", 0, "Stage ordinal (>=1) for this sub-issue; see `issue create --stage`")
 	issueUpdateCmd.Flags().Float64("position", 0, "Ordering position within the board column (lower sorts first); prefer `issue reorder` for relative moves")
 	issueUpdateCmd.Flags().Bool("no-start", false, "Apply the update without starting an agent run")
-	issueUpdateCmd.Flags().String("duplicate-of", "", "Mark the issue as a duplicate of this original issue (key like MUL-123, or full UUID) and cancel it; --status, if given, must be cancelled, and description/attachment changes must go in a separate update")
 	issueUpdateCmd.Flags().String("output", "json", "Output format: table or json")
 
 	// issue status
 	issueStatusCmd.Flags().Bool("no-start", false, "Change status without starting an agent run")
-	issueStatusCmd.Flags().String("duplicate-of", "", "Mark the issue as a duplicate of this original issue (key like MUL-123, or full UUID); the status must be cancelled")
 	issueStatusCmd.Flags().String("output", "table", "Output format: table or json")
 
 	// issue reorder
 	registerIssueReorderFlags(issueReorderCmd)
 
 	// issue assign
-	issueAssignCmd.Flags().String("to", "", "Assignee name (member, agent, or squad; fuzzy match)")
-	issueAssignCmd.Flags().String("to-id", "", "Assignee UUID — member, agent, or squad (mutually exclusive with --to)")
+	issueAssignCmd.Flags().String("to", "", "Assignee name (member or agent; fuzzy match)")
+	issueAssignCmd.Flags().String("to-id", "", "Assignee UUID — member or agent (mutually exclusive with --to)")
 	issueAssignCmd.Flags().Bool("unassign", false, "Remove current assignee")
 	issueAssignCmd.Flags().Bool("no-start", false, "Assign ownership without starting an agent run")
 	issueAssignCmd.Flags().String("output", "json", "Output format: table or json")
@@ -792,7 +785,7 @@ func runIssueList(cmd *cobra.Command, _ []string) error {
 	if offset > 0 {
 		params.Set("offset", fmt.Sprintf("%d", offset))
 	}
-	_, aID, hasAssignee, resolveErr := pickAssigneeFromFlags(ctx, client, cmd, "assignee", "assignee-id", issueAssigneeKinds)
+	_, aID, hasAssignee, resolveErr := pickAssigneeFromFlags(ctx, client, cmd, "assignee", "assignee-id", memberOrAgentKinds)
 	if resolveErr != nil {
 		return fmt.Errorf("resolve assignee: %w", resolveErr)
 	}
@@ -1355,7 +1348,7 @@ func collectLocalAttachments(cmd *cobra.Command, attachments []string) ([]pendin
 // instead of only existing as a stored row. Each snippet goes in its own
 // paragraph because file cards are block-level. An attachment the description
 // already references is skipped — a caller may have composed the markdown
-// itself (quick-create keeps the user's pasted image inline), and appending it
+// itself (e.g. keeping a pasted image inline), and appending it
 // again would render the same file twice.
 func appendAttachmentReferences(description string, attachments []cli.AttachmentResponse) string {
 	snippets := make([]string, 0, len(attachments))
@@ -1408,18 +1401,6 @@ func appendUniqueStrings(dst []string, values ...string) []string {
 		out = append(out, v)
 	}
 	return out
-}
-
-func quickCreateAttachmentIDsFromEnv() ([]string, error) {
-	raw := strings.TrimSpace(os.Getenv("MULTICA_QUICK_CREATE_ATTACHMENT_IDS"))
-	if raw == "" {
-		return nil, nil
-	}
-	var ids []string
-	if err := json.Unmarshal([]byte(raw), &ids); err != nil {
-		return nil, fmt.Errorf("parse MULTICA_QUICK_CREATE_ATTACHMENT_IDS: %w", err)
-	}
-	return appendUniqueStrings(nil, ids...), nil
 }
 
 func runIssueCreate(cmd *cobra.Command, _ []string) error {
@@ -1516,10 +1497,7 @@ func runIssueCreate(cmd *cobra.Command, _ []string) error {
 	if v, _ := cmd.Flags().GetString("due-date"); v != "" {
 		body["due_date"] = v
 	}
-	if v, _ := cmd.Flags().GetBool("allow-duplicate"); v {
-		body["allow_duplicate"] = true
-	}
-	aType, aID, hasAssignee, resolveErr := pickAssigneeFromFlags(ctx, client, cmd, "assignee", "assignee-id", issueAssigneeKinds)
+	aType, aID, hasAssignee, resolveErr := pickAssigneeFromFlags(ctx, client, cmd, "assignee", "assignee-id", memberOrAgentKinds)
 	if resolveErr != nil {
 		return fmt.Errorf("resolve assignee: %w", resolveErr)
 	}
@@ -1527,28 +1505,12 @@ func runIssueCreate(cmd *cobra.Command, _ []string) error {
 		body["assignee_type"] = aType
 		body["assignee_id"] = aID
 	}
-
-	// Quick-create stamp: when the daemon sets MULTICA_QUICK_CREATE_TASK_ID
-	// before invoking the agent, the agent's `multica issue create` call
-	// inherits the env var and tags the new issue with origin_type=
-	// quick_create + origin_id=<task_id>. The completion handler then
-	// locates the issue deterministically by origin instead of "most
-	// recent issue by this agent", which is racy when max_concurrent_tasks
-	// > 1 and the agent is creating other issues in parallel.
-	if taskID := os.Getenv("MULTICA_QUICK_CREATE_TASK_ID"); taskID != "" {
-		body["origin_type"] = "quick_create"
-		body["origin_id"] = taskID
-	}
 	attachmentIDs, _ := cmd.Flags().GetStringSlice("attachment-id")
-	envAttachmentIDs, err := quickCreateAttachmentIDsFromEnv()
-	if err != nil {
-		return err
-	}
-	attachmentIDs = appendUniqueStrings(attachmentIDs, envAttachmentIDs...)
+	attachmentIDs = appendUniqueStrings(attachmentIDs)
 
 	// Pre-validate attachments BEFORE creating the issue so a bad path can
 	// never produce a half-created issue (which would otherwise trigger
-	// callers — especially the agent doing quick-create — to retry the whole
+	// callers — especially agents — to retry the whole
 	// `issue create` and end up with duplicates). URLs are warned+skipped, the
 	// workdir guard is applied, and every local path is read upfront; a failure
 	// here surfaces pre-create so the issue never lands.
@@ -1586,9 +1548,6 @@ func runIssueCreate(cmd *cobra.Command, _ []string) error {
 
 	var result map[string]any
 	if err := client.PostJSON(ctx, "/api/issues", body, &result); err != nil {
-		if msg, ok := activeDuplicateIssueCreateMessage(err); ok {
-			return errors.New(msg)
-		}
 		return fmt.Errorf("create issue: %w", err)
 	}
 	if err := verifyIssueCreateProperties(createProperties, result); err != nil {
@@ -1635,24 +1594,6 @@ func verifyIssueCreateProperties(expected map[string]json.RawMessage, issue map[
 	return nil
 }
 
-func activeDuplicateIssueCreateMessage(err error) (string, bool) {
-	var httpErr *cli.HTTPError
-	if !errors.As(err, &httpErr) || httpErr.StatusCode != http.StatusConflict {
-		return "", false
-	}
-	var payload struct {
-		Code  string `json:"code"`
-		Error string `json:"error"`
-	}
-	if json.Unmarshal([]byte(httpErr.Body), &payload) != nil {
-		return "", false
-	}
-	if payload.Code != "active_duplicate_issue" || payload.Error == "" {
-		return "", false
-	}
-	return payload.Error, true
-}
-
 func runIssueUpdate(cmd *cobra.Command, args []string) error {
 	attachmentPaths, _ := cmd.Flags().GetStringSlice("attachment")
 	noStart, _ := cmd.Flags().GetBool("no-start")
@@ -1669,17 +1610,6 @@ func runIssueUpdate(cmd *cobra.Command, args []string) error {
 		if err := validateIssuePriority(priorityFlag); err != nil {
 			return err
 		}
-	}
-	duplicateOf, err := duplicateOfFlag(cmd, statusFlag, statusChanged)
-	if err != nil {
-		return err
-	}
-	// The server rejects a mark alongside description or attachment writes,
-	// and attachments upload before the update, so refuse the combination
-	// before anything is uploaded and left unbound.
-	if duplicateOf != "" && (len(attachmentPaths) > 0 || cmd.Flags().Changed("description") ||
-		cmd.Flags().Changed("description-stdin") || cmd.Flags().Changed("description-file")) {
-		return fmt.Errorf("--duplicate-of cannot be combined with --description, --description-stdin, --description-file or --attachment; mark the duplicate first, then change the description in a separate update")
 	}
 
 	client, err := newAPIClient(cmd)
@@ -1742,7 +1672,7 @@ func runIssueUpdate(cmd *cobra.Command, args []string) error {
 		body["due_date"] = v
 	}
 	if cmd.Flags().Changed("assignee") || cmd.Flags().Changed("assignee-id") {
-		aType, aID, hasAssignee, resolveErr := pickAssigneeFromFlags(ctx, client, cmd, "assignee", "assignee-id", issueAssigneeKinds)
+		aType, aID, hasAssignee, resolveErr := pickAssigneeFromFlags(ctx, client, cmd, "assignee", "assignee-id", memberOrAgentKinds)
 		if resolveErr != nil {
 			return fmt.Errorf("resolve assignee: %w", resolveErr)
 		}
@@ -1762,13 +1692,6 @@ func runIssueUpdate(cmd *cobra.Command, args []string) error {
 			}
 			body["parent_issue_id"] = parent.ID
 		}
-	}
-	if duplicateOf != "" {
-		original, err := resolveIssueRef(ctx, client, duplicateOf)
-		if err != nil {
-			return fmt.Errorf("resolve --duplicate-of issue: %w", err)
-		}
-		body["duplicate_of_issue_id"] = original.ID
 	}
 	if cmd.Flags().Changed("stage") {
 		stage, _ := cmd.Flags().GetInt("stage")
@@ -1832,11 +1755,6 @@ func runIssueUpdate(cmd *cobra.Command, args []string) error {
 		}
 		return fmt.Errorf("update issue: %w", err)
 	}
-	if duplicateOf != "" {
-		if _, err := recordedDuplicateOf(result, duplicateOf); err != nil {
-			return err
-		}
-	}
 
 	output, _ := cmd.Flags().GetString("output")
 	if output == "table" {
@@ -1890,7 +1808,7 @@ func runIssueAssign(cmd *cobra.Command, args []string) error {
 		body["assignee_type"] = nil
 		body["assignee_id"] = nil
 	} else {
-		aType, aID, _, resolveErr := pickAssigneeFromFlags(ctx, client, cmd, "to", "to-id", issueAssigneeKinds)
+		aType, aID, _, resolveErr := pickAssigneeFromFlags(ctx, client, cmd, "to", "to-id", memberOrAgentKinds)
 		if resolveErr != nil {
 			return fmt.Errorf("resolve assignee: %w", resolveErr)
 		}
@@ -1930,10 +1848,6 @@ func runIssueStatus(cmd *cobra.Command, args []string) error {
 	if err := validateIssueStatus(status); err != nil {
 		return err
 	}
-	duplicateOf, err := duplicateOfFlag(cmd, status, true)
-	if err != nil {
-		return err
-	}
 
 	client, err := newAPIClient(cmd)
 	if err != nil {
@@ -1949,13 +1863,6 @@ func runIssueStatus(cmd *cobra.Command, args []string) error {
 	}
 
 	body := map[string]any{"status": status}
-	if duplicateOf != "" {
-		original, err := resolveIssueRef(ctx, client, duplicateOf)
-		if err != nil {
-			return fmt.Errorf("resolve --duplicate-of issue: %w", err)
-		}
-		body["duplicate_of_issue_id"] = original.ID
-	}
 	if noStart {
 		body["suppress_run"] = true
 	}
@@ -1964,58 +1871,13 @@ func runIssueStatus(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("update status: %w", err)
 	}
 
-	if duplicateOf != "" {
-		original, err := recordedDuplicateOf(result, duplicateOf)
-		if err != nil {
-			return err
-		}
-		fmt.Fprintf(os.Stderr, "Issue %s status changed to %s as a duplicate of %s.\n", issueDisplayKey(result), status, original)
-	} else {
-		fmt.Fprintf(os.Stderr, "Issue %s status changed to %s.\n", issueDisplayKey(result), status)
-	}
+	fmt.Fprintf(os.Stderr, "Issue %s status changed to %s.\n", issueDisplayKey(result), status)
 
 	output, _ := cmd.Flags().GetString("output")
 	if output == "json" {
 		return cli.PrintJSON(os.Stdout, result)
 	}
 	return nil
-}
-
-// duplicateOfFlag returns the --duplicate-of reference, or "" when the flag is
-// unset. A duplicate is a cancelled issue that remembers its original
-// (MUL-7349): the server cancels the issue along with the mark and rejects
-// any other status, so that combination fails here before any request.
-func duplicateOfFlag(cmd *cobra.Command, status string, statusSet bool) (string, error) {
-	if !cmd.Flags().Changed("duplicate-of") {
-		return "", nil
-	}
-	ref, _ := cmd.Flags().GetString("duplicate-of")
-	ref = strings.TrimSpace(ref)
-	if ref == "" {
-		return "", fmt.Errorf("--duplicate-of requires the original issue's key (e.g. MUL-123) or full UUID")
-	}
-	if statusSet && status != "cancelled" {
-		return "", fmt.Errorf("--duplicate-of cancels the issue, so the status must be cancelled, not %q", status)
-	}
-	return ref, nil
-}
-
-// recordedDuplicateOf returns the original an update response names, failing
-// when the server applied the update without the mark. Servers before v0.5.2
-// ignore duplicate_of_issue_id and have no duplicate_of field, so the key's
-// absence is the signal; a null value only means the original could not be
-// read back, so the caller's own reference names it instead.
-func recordedDuplicateOf(result map[string]any, ref string) (string, error) {
-	raw, ok := result["duplicate_of"]
-	if !ok {
-		return "", fmt.Errorf("issue %s was updated, but the server did not record the duplicate mark; marking duplicates needs server v0.5.2 or later", issueDisplayKey(result))
-	}
-	if original, ok := raw.(map[string]any); ok {
-		if key := strVal(original, "identifier"); key != "" {
-			return key, nil
-		}
-	}
-	return ref, nil
 }
 
 // ---------------------------------------------------------------------------
@@ -3180,24 +3042,19 @@ func runIssueSubscriberMutation(cmd *cobra.Command, issueID, action string) erro
 // ---------------------------------------------------------------------------
 
 type assigneeMatch struct {
-	Type string // "member", "agent", or "squad"
-	ID   string // user_id for members, agent id for agents, squad id for squads
+	Type string // "member" or "agent"
+	ID   string // user_id for members, agent id for agents
 	Name string
 }
 
 // assigneeKinds is the set of entity types a given flag is allowed to resolve
-// to. Issue assignees accept all three (`issueAssigneeKinds`), while
-// project lead and issue subscribers are member-or-agent only
-// (`memberOrAgentKinds`) — the DB CHECK on `project.lead_type` and the
-// `isWorkspaceEntity` switch in the subscriber handler both reject `squad`,
-// so resolving to (squad, ...) for those callers would surface as a 500 /
-// 403 instead of a clean CLI-side resolution error (MUL-2165 follow-up).
+// to. Issue assignees, project leads and subscribers accept members or agents
+// (`memberOrAgentKinds`).
 type assigneeKinds struct {
-	member, agent, squad bool
+	member, agent bool
 }
 
 var (
-	issueAssigneeKinds = assigneeKinds{member: true, agent: true, squad: true}
 	memberOrAgentKinds = assigneeKinds{member: true, agent: true}
 	// Actor property values are members only (MUL-6286).
 	memberOnlyKinds = assigneeKinds{member: true}
@@ -3235,15 +3092,12 @@ func isRetryableAssigneeResolveError(err error) bool {
 }
 
 func (k assigneeKinds) describe() string {
-	parts := make([]string, 0, 3)
+	parts := make([]string, 0, 2)
 	if k.member {
 		parts = append(parts, "member")
 	}
 	if k.agent {
 		parts = append(parts, "agent")
-	}
-	if k.squad {
-		parts = append(parts, "squad")
 	}
 	switch len(parts) {
 	case 0:
@@ -3324,28 +3178,6 @@ func resolveAssignee(ctx context.Context, client *cli.APIClient, name string, ki
 		}
 	}
 
-	// Search squads. The platform allows issues to be assigned to a squad
-	// (the leader agent then coordinates delegation), so squad names must
-	// resolve here too for issue-assignee callers — otherwise a user saying
-	// "assign to <SquadName>" silently falls through and the autopilot
-	// prompt emits "Unrecognized assignee: <SquadName>" (MUL-2165). Callers
-	// whose target schema is member-or-agent only (project lead, subscriber)
-	// must opt out via `kinds.squad = false`.
-	if kinds.squad {
-		fetchAttempts++
-		var squads []map[string]any
-		if err := getAssigneeJSON(ctx, client, "/api/squads", &squads); err != nil {
-			errs = append(errs, fmt.Errorf("fetch squads: %w", err))
-		} else {
-			for _, s := range squads {
-				if strVal(s, "archived_at") != "" {
-					continue
-				}
-				candidates = append(candidates, assigneeCandidate{assigneeMatch: assigneeMatch{Type: "squad", ID: strVal(s, "id"), Name: strVal(s, "name")}})
-			}
-		}
-	}
-
 	// If every fetch failed, report the errors instead of a misleading "not found".
 	if fetchAttempts > 0 && len(errs) == fetchAttempts {
 		msgs := make([]string, len(errs))
@@ -3403,7 +3235,7 @@ func normalizeAssigneeLookupInput(raw string) string {
 	input := strings.TrimSpace(raw)
 	if m := util.MentionRe.FindStringSubmatch(input); len(m) == 4 && m[0] == input {
 		switch m[2] {
-		case "member", "agent", "squad":
+		case "member", "agent":
 			return m[3]
 		}
 	}
@@ -3422,8 +3254,8 @@ func ambiguousAssigneeError(input string, matches []assigneeMatch) error {
 }
 
 // resolveAssigneeByID strictly resolves a canonical UUID to (assignee_type,
-// assignee_id) by looking it up against the workspace's members, agents, and
-// (when allowed) squads. It is the deterministic counterpart to
+// assignee_id) by looking it up against the workspace's members and agents.
+// It is the deterministic counterpart to
 // resolveAssignee: callers that already hold a UUID (e.g. agents reading IDs
 // from `multica workspace member list --output json`) should use this instead of
 // round-tripping through name matching, which can be ambiguous in workspaces
@@ -3450,18 +3282,12 @@ func resolveAssigneeByID(ctx context.Context, client *cli.APIClient, id string, 
 		agentErr = getAssigneeJSON(ctx, client, agentPath, &agents)
 	}
 
-	var squads []map[string]any
-	var squadErr error
-	if kinds.squad {
-		squadErr = getAssigneeJSON(ctx, client, "/api/squads", &squads)
-	}
-
 	allFailed := true
 	hasFetch := false
 	for _, pair := range []struct {
 		enabled bool
 		err     error
-	}{{kinds.member, memberErr}, {kinds.agent, agentErr}, {kinds.squad, squadErr}} {
+	}{{kinds.member, memberErr}, {kinds.agent, agentErr}} {
 		if !pair.enabled {
 			continue
 		}
@@ -3471,7 +3297,7 @@ func resolveAssigneeByID(ctx context.Context, client *cli.APIClient, id string, 
 		}
 	}
 	if hasFetch && allFailed {
-		return "", "", fmt.Errorf("failed to resolve assignee: %v; %v; %v", memberErr, agentErr, squadErr)
+		return "", "", fmt.Errorf("failed to resolve assignee: %v; %v", memberErr, agentErr)
 	}
 
 	for _, m := range members {
@@ -3482,11 +3308,6 @@ func resolveAssigneeByID(ctx context.Context, client *cli.APIClient, id string, 
 	for _, a := range agents {
 		if strings.EqualFold(strVal(a, "id"), input) {
 			return "agent", strVal(a, "id"), nil
-		}
-	}
-	for _, s := range squads {
-		if strings.EqualFold(strVal(s, "id"), input) {
-			return "squad", strVal(s, "id"), nil
 		}
 	}
 

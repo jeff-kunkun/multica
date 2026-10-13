@@ -110,11 +110,6 @@ var delegatedAlwaysNotifTypes = map[string]bool{
 // in_progress synonym now notifies where it did not — an accepted cost, since a
 // missed handoff strands the issue while a spare inbox row costs one dismissal.
 //
-// Triage never reaches this predicate: it is not a status but a column of its
-// own (MUL-7213), so an entry waiting in Triage carries whatever status the
-// triager has proposed and is answered on that. Suppressing notifications for
-// Triage entries is a separate rule and belongs to MUL-7219.
-//
 // The error is preserved rather than swallowed so each caller can choose its
 // own failure direction; built-ins answer without touching the catalog, so only
 // custom statuses can fail here at all.
@@ -563,7 +558,6 @@ func notifyMentionedMembers(
 	recipientIDs := map[string]bool{}
 
 	hasAll := false
-	var squadIDs []string
 	for _, m := range mentions {
 		if m.Type == "all" {
 			hasAll = true
@@ -574,29 +568,6 @@ func notifyMentionedMembers(
 				continue
 			}
 			recipientIDs[m.ID] = true
-		}
-		if m.Type == "squad" {
-			squadIDs = append(squadIDs, m.ID)
-		}
-	}
-
-	// Expand each @squad mention to its human members. Agent members of a
-	// squad are reached via comment-trigger / assignment paths, not the
-	// mention-inbox path, so we only seed member-typed recipients here.
-	for _, sid := range squadIDs {
-		squadUUID, err := util.ParseUUID(sid)
-		if err != nil {
-			continue
-		}
-		members, err := queries.ListSquadMembers(context.Background(), squadUUID)
-		if err != nil {
-			slog.Error("failed to list squad members for @squad mention", "squad_id", sid, "error", err)
-			continue
-		}
-		for _, sm := range members {
-			if sm.MemberType == "member" {
-				recipientIDs[util.UUIDToString(sm.MemberID)] = true
-			}
 		}
 	}
 

@@ -56,7 +56,7 @@ function boldFenced(text: string): ReactNode {
 interface RunConfirmData {
   issueIds?: string[];
   // The two issue writes that hand work to an agent, and the only two that
-  // confirm. `assign` gives the issue an agent/squad owner; `promote` moves an
+  // confirm. `assign` gives the issue an agent owner; `promote` moves an
   // already-owned issue out of the backlog category, which starts the run on
   // its own (RunSourceStatus). Batch status changes still apply directly
   // (MUL-4155) — `promote` is the single-issue picker path only (MUL-6463).
@@ -129,11 +129,8 @@ export function RunConfirmModal({
     return { ...base, ...extra };
   };
 
-  // The copy names whoever the issue is handed to; for a squad that is the
-  // squad itself, since its leader deciding who works is an internal detail.
-  const assigneeName =
-    d.assigneeName ??
-    getActorName(d.assigneeType === "squad" ? "squad" : "agent", d.assigneeId ?? "");
+  // The copy names the agent the issue is handed to.
+  const assigneeName = d.assigneeName ?? getActorName("agent", d.assigneeId ?? "");
 
   const submit = async (suppressRun: boolean) => {
     if (issueIds.length === 0 || submitting) return;

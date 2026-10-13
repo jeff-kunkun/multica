@@ -3,11 +3,9 @@ import { useQueryClient } from "@tanstack/react-query";
 import { CoreProvider } from "@multica/core/platform";
 import { pickLocale, type SupportedLocale } from "@multica/core/i18n";
 import { useAuthStore } from "@multica/core/auth";
-import { useWelcomeStore } from "@multica/core/onboarding";
 import { workspaceKeys } from "@multica/core/workspace/queries";
 import { useWorkspaceList } from "@multica/core/workspace";
 import { api } from "@multica/core/api";
-import { useHasOnboarded } from "@multica/core/paths";
 import { setCurrentWorkspace } from "@multica/core/platform";
 import { ThemeProvider } from "@multica/ui/components/common/theme-provider";
 import { MulticaIcon } from "@multica/ui/components/common/multica-icon";
@@ -51,7 +49,7 @@ const HTML_LANG: Record<SupportedLocale, string> = {
  * (or no tabs/workspace exist — e.g. login page), close the window.
  *
  * Mounted at the App root so every renderer state — including login,
- * loading, onboarding, and runtime-config errors — has a working Cmd+W
+ * loading, workspace creation, and runtime-config errors — has a working Cmd+W
  * handler. Without this, states outside the tab shell would swallow the
  * shortcut and do nothing.
  */
@@ -198,7 +196,6 @@ function AppContent() {
     enabled: !!user,
   });
   const wsCount = workspaces.length;
-  const hasOnboarded = useHasOnboarded();
 
   // Bridge local daemon IPC status into the runtimes cache so this user's
   // own daemon flips to offline/online sub-second instead of waiting on the
@@ -210,64 +207,46 @@ function AppContent() {
     : undefined;
   useDaemonIPCBridge(activeWsId);
 
-  // Pre-workspace overlay routing for desktop. Mirrors the web layout
-  // hard gate via overlays (desktop has no URL bar, so we open the
-  // onboarding overlay instead of router.replace):
-  //   onboarded + has workspace      → no overlay, dashboard
-  //   un-onboarded (any wsCount):
+  // Pre-workspace overlay routing for desktop. Mirrors the web post-auth
+  // resolver via overlays (desktop has no URL bar):
+  //   has workspace                  → no overlay, dashboard
+  //   no workspace:
   //     pending invites on email     → /invitations overlay
-  //     no invites                   → /onboarding overlay
-  //   onboarded + no workspace       → /workspaces/new overlay
-  //
-  // V3 invariant: `onboarded_at != null` is the only path into the
-  // dashboard. CreateWorkspace does not mark onboarded; only Step 3's
-  // CompleteOnboarding (and AcceptInvitation) flip the flag. A user who
-  // somehow has a workspace but no onboarded mark must be sent back to
-  // /onboarding — we also clear the active workspace so the dashboard
-  // doesn't render under the overlay with stale workspace context.
+  //     no invites                   → /workspaces/new overlay
   useEffect(() => {
     if (!user || !workspaceListReady) return undefined;
-    const { overlay, open } = useWindowOverlayStore.getState();
-    if (overlay) return undefined;
-    if (hasOnboarded && wsCount > 0) return undefined;
-    if (!hasOnboarded) {
-      // Stale workspace context (if any) would leak X-Workspace-Slug
-      // headers into onboarding-time API calls. Clear it before opening
-      // the overlay.
-      setCurrentWorkspace(null, null);
-      // Look up pending invitations by email. Network blip is non-fatal —
-      // fall through to onboarding so the user isn't stuck on a blank
-      // window. The sidebar's pending-invitations dropdown will surface
-      // missed invites later once they're onboarded.
-      let cancelled = false;
-      void api
-        .listMyInvitations()
-        .then((invites) => {
-          if (cancelled) return;
-          const { overlay: latestOverlay, open: latestOpen } =
-            useWindowOverlayStore.getState();
-          if (latestOverlay) return;
-          if (invites.length > 0) {
-            qc.setQueryData(workspaceKeys.myInvitations(), invites);
-            latestOpen({ type: "invitations" });
-          } else {
-            latestOpen({ type: "onboarding" });
-          }
-        })
-        .catch(() => {
-          if (cancelled) return;
-          const { overlay: latestOverlay, open: latestOpen } =
-            useWindowOverlayStore.getState();
-          if (latestOverlay) return;
-          latestOpen({ type: "onboarding" });
-        });
-      return () => {
-        cancelled = true;
-      };
-    }
-    open({ type: "new-workspace" });
-    return undefined;
-  }, [user, workspaceListReady, wsCount, workspaces, hasOnboarded, qc]);
+    if (useWindowOverlayStore.getState().overlay) return undefined;
+    if (wsCount > 0) return undefined;
+    // Stale workspace context (if any) would leak X-Workspace-Slug headers
+    // into pre-workspace API calls. Clear it before opening the overlay.
+    setCurrentWorkspace(null, null);
+    // Look up pending invitations by email. A network blip is non-fatal —
+    // fall through to workspace creation so the user isn't stuck on a blank
+    // window.
+    let cancelled = false;
+    void api
+      .listMyInvitations()
+      .then((invites) => {
+        if (cancelled) return;
+        const { overlay, open } = useWindowOverlayStore.getState();
+        if (overlay) return;
+        if (invites.length > 0) {
+          qc.setQueryData(workspaceKeys.myInvitations(), invites);
+          open({ type: "invitations" });
+        } else {
+          open({ type: "new-workspace" });
+        }
+      })
+      .catch(() => {
+        if (cancelled) return;
+        const { overlay, open } = useWindowOverlayStore.getState();
+        if (overlay) return;
+        open({ type: "new-workspace" });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [user, workspaceListReady, wsCount, qc]);
 
 
   // Validate persisted tab state against the current user's workspace list,
@@ -360,7 +339,6 @@ const sessionTeardown: SessionTeardown = {
     window.desktopAPI.reportAuthSession?.(userId),
   resetTabs: () => useTabStore.getState().reset(),
   closeOverlay: () => useWindowOverlayStore.getState().close(),
-  resetWelcome: () => useWelcomeStore.getState().reset(),
   clearDaemonToken: () => window.daemonAPI.clearToken(),
   stopDaemon: () => window.daemonAPI.stop(),
 };

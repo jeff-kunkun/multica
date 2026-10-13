@@ -6,39 +6,27 @@ import type {
   IssueAssigneeType,
   IssuePropertyValues,
 } from "../../types";
-import type { CreateMode } from "./create-mode-store";
-import type { QuickCreateActorType } from "./quick-create-store";
 import { createWorkspaceAwareStorage, registerForWorkspaceRehydration } from "../../platform/workspace-storage";
 import { defaultStorage } from "../../platform/storage";
 import { registerDraftCleanup } from "../../drafts/cleanup-registry";
 import { normalizeStoredUploads, type DraftUpload } from "../../drafts/draft-upload";
 
-// One logical Issue-Create draft (MUL-5181), split so switching between the
-// manual form and the agent form never destroys the other side's content.
+// One logical Issue-Create draft (MUL-5181):
 //
-//   shared  — belongs to the issue no matter how it is filed: project,
-//             priority, due date, attachments.
-//   manual  — the manual form's own state: title, description, status, start
-//             date, assignee, labels, custom properties.
-//   agent   — the agent form's own state: the free-text prompt and the picked
-//             actor (agent or squad).
-//   activeMode — which form the draft is currently being edited in.
+//   shared  — project, priority, due date, attachments.
+//   manual  — title, description, status, start date, assignee, labels,
+//             custom properties.
 //
-// Before this split, `switchToAgent` concatenated title + description into the
-// prompt and then CLEARED the manual fields, and `switchToManual` copied the
-// prompt into the description but left the old prompt behind — so a round-trip
-// both lost manual content and resurfaced a stale prompt. With separate slots
-// a switch is a no-op on the other side's data; the only cross-write is a
-// one-time assist-init the panels perform when the target slot is still empty.
+// Drafts persisted by older builds may still carry an `agent` slot and an
+// `activeMode` from the retired agent-written create flow; `migrateDraft`
+// drops them on load.
 
 export interface IssueCreateShared {
   projectId?: string;
   priority: IssuePriority;
   dueDate: string | null;
   /** Uploads for the dialog (placeholders + completed), referenced by the
-   *  manual description OR the agent prompt markdown. A single pool so an
-   *  image survives a mode switch from either side; each submit path sends
-   *  only the ids its own content references. Coordinator-owned (MUL-5181 L2):
+   *  description markdown. Coordinator-owned (MUL-5181 L2):
    *  a placeholder written at pick time survives dialog close, and one still
    *  `uploading` at load time is dropped on rehydrate. */
   attachments: DraftUpload[];
@@ -58,17 +46,9 @@ export interface IssueCreateManual {
   propertyValues: IssuePropertyValues;
 }
 
-export interface IssueCreateAgent {
-  prompt: string;
-  actorType?: QuickCreateActorType;
-  actorId?: string;
-}
-
 export interface IssueCreateDraft {
   shared: IssueCreateShared;
   manual: IssueCreateManual;
-  agent: IssueCreateAgent;
-  activeMode: CreateMode;
 }
 
 const emptyShared = (): IssueCreateShared => ({
@@ -89,12 +69,6 @@ const emptyManual = (): IssueCreateManual => ({
   propertyValues: {},
 });
 
-const emptyAgent = (): IssueCreateAgent => ({
-  prompt: "",
-  actorType: undefined,
-  actorId: undefined,
-});
-
 interface IssueDraftStore {
   draft: IssueCreateDraft;
   /** In-memory only. While present, writes target an isolated source-context
@@ -108,8 +82,6 @@ interface IssueDraftStore {
   lastAssigneeId?: string;
   setShared: (patch: Partial<IssueCreateShared>) => void;
   setManual: (patch: Partial<IssueCreateManual>) => void;
-  setAgent: (patch: Partial<IssueCreateAgent>) => void;
-  setActiveMode: (mode: CreateMode) => void;
   clearDraft: () => void;
   beginIsolatedDraft: () => void;
   endIsolatedDraft: () => void;
@@ -128,8 +100,8 @@ function isLegacyFlatDraft(d: Record<string, unknown>): boolean {
 // Drafts persisted by older builds either predate a later-added sub-field or
 // use the pre-MUL-5181 flat shape. Backfill defaults so every read site can
 // rely on the declared IssueCreateDraft shape instead of re-defending, and lift
-// a legacy flat draft into the manual/shared slots (there was no agent prompt
-// in that store — it lived in `multica_quick_create` and is not carried over).
+// a legacy flat draft into the manual/shared slots. Fields from the retired
+// agent-written create flow (`agent`, `activeMode`) are dropped.
 function migrateDraft(raw: unknown): IssueCreateDraft {
   const d = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
 
@@ -158,8 +130,6 @@ function migrateDraft(raw: unknown): IssueCreateDraft {
             ? (d.propertyValues as IssuePropertyValues)
             : {},
       },
-      agent: emptyAgent(),
-      activeMode: "manual",
     };
   }
 
@@ -173,8 +143,6 @@ function migrateDraft(raw: unknown): IssueCreateDraft {
       attachments: normalizeStoredUploads(sharedRaw.attachments),
     },
     manual: { ...emptyManual(), ...((d.manual as Partial<IssueCreateManual>) ?? {}) },
-    agent: { ...emptyAgent(), ...((d.agent as Partial<IssueCreateAgent>) ?? {}) },
-    activeMode: d.activeMode === "agent" ? "agent" : "manual",
   };
 }
 
@@ -188,10 +156,6 @@ export const useIssueDraftStore = create<IssueDraftStore>()(
         set((s) => ({ draft: { ...s.draft, shared: { ...s.draft.shared, ...patch } } })),
       setManual: (patch) =>
         set((s) => ({ draft: { ...s.draft, manual: { ...s.draft.manual, ...patch } } })),
-      setAgent: (patch) =>
-        set((s) => ({ draft: { ...s.draft, agent: { ...s.draft.agent, ...patch } } })),
-      setActiveMode: (mode) =>
-        set((s) => ({ draft: { ...s.draft, activeMode: mode } })),
       clearDraft: () =>
         set((s) => ({
           draft: {
@@ -201,8 +165,6 @@ export const useIssueDraftStore = create<IssueDraftStore>()(
               assigneeType: s.lastAssigneeType,
               assigneeId: s.lastAssigneeId,
             },
-            agent: emptyAgent(),
-            activeMode: s.draft.activeMode,
           },
         })),
       beginIsolatedDraft: () =>
@@ -217,8 +179,6 @@ export const useIssueDraftStore = create<IssueDraftStore>()(
                 assigneeType: s.lastAssigneeType,
                 assigneeId: s.lastAssigneeId,
               },
-              agent: emptyAgent(),
-              activeMode: "agent",
             },
           };
         }),
@@ -229,11 +189,10 @@ export const useIssueDraftStore = create<IssueDraftStore>()(
       setLastAssignee: (type, id) =>
         set({ lastAssigneeType: type, lastAssigneeId: id }),
       hasDraft: () => {
-        const { manual, agent, shared } = get().draft;
+        const { manual, shared } = get().draft;
         return !!(
           manual.title ||
           manual.description ||
-          agent.prompt ||
           Object.keys(manual.propertyValues).length > 0 ||
           // Recoverable uploads only: a failed/interrupted remnant the user
           // never dismissed must not pin the sidebar's draft dot forever.

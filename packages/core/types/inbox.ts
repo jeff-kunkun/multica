@@ -19,16 +19,6 @@ export type InboxItemType =
   | "agent_blocked"
   | "agent_completed"
   | "reaction_added"
-  | "quick_create_done"
-  | "quick_create_failed"
-  // Quick create whose outcome could not be verified. Distinct from
-  // quick_create_failed because it must NOT be rendered with failure framing:
-  // the issue may actually have been created.
-  | "quick_create_unconfirmed"
-  // System notifications are intentionally issue-less. Keep them in the
-  // same Inbox model so read/archive/realtime behavior remains consistent.
-  | "autopilot_paused"
-  | "autopilot_quota_exceeded"
   // Sub-issues of an issue assigned to the recipient closed (the child_done
   // system rule notifies a member assignee instead of waking an agent).
   | "children_done";

@@ -11,7 +11,7 @@ import { stripMentionMarkdown } from "../utils/strip-mention-markdown";
  * Human label for what caused this run.
  *
  * Primary source: the canonical snapshot taken at task creation time
- * (comment text / autopilot title). Survives source edits/deletes and is
+ * (comment text). Survives source edits/deletes and is
  * information-dense — far better than a structural label.
  *
  * Retry tasks inherit the parent's trigger_summary on the DB side (so the
@@ -33,10 +33,6 @@ export function useTriggerText(task: AgentTask): string {
       ? t(($) => $.execution_log.trigger_retry_attempt_prefix, { attempt: task.attempt })
       : t(($) => $.execution_log.trigger_retry_prefix)
     : "";
-  // A wakeup run's stored summary is the rule's instruction; it reads as
-  // the wakeup instead. WakeupRunLabel adds the rule's condition.
-  if (task.wakeup_id) return retryPrefix + t(($) => $.wakeups.triggered_by_wakeup);
-
   if (task.trigger_summary) {
     return (
       retryPrefix +
@@ -48,7 +44,6 @@ export function useTriggerText(task: AgentTask): string {
       ? t(($) => $.execution_log.trigger_retry_attempt, { attempt: task.attempt })
       : t(($) => $.execution_log.trigger_retry);
   }
-  if (task.autopilot_run_id) return t(($) => $.execution_log.trigger_autopilot);
   if (task.trigger_comment_id) return t(($) => $.execution_log.trigger_comment);
   return t(($) => $.execution_log.trigger_initial);
 }

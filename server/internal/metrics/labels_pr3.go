@@ -64,69 +64,6 @@ var (
 		"other":        "other",
 	}
 
-	knownOnboardingPaths = map[string]string{
-		"full":            "full",
-		"runtime_skipped": "runtime_skipped",
-		"cloud_waitlist":  "cloud_waitlist",
-		"skip_existing":   "skip_existing",
-		"invite_accept":   "invite_accept",
-		"unknown":         "unknown",
-	}
-
-	knownAutopilotCadences = map[string]string{
-		"hourly":  "hourly",
-		"daily":   "daily",
-		"weekly":  "weekly",
-		"monthly": "monthly",
-		"manual":  "manual",
-		"webhook": "webhook",
-		"unknown": "unknown",
-	}
-
-	knownAutopilotTriggers = map[string]string{
-		"schedule": "schedule",
-		"webhook":  "webhook",
-		"manual":   "manual",
-		"unknown":  "unknown",
-	}
-
-	knownAutopilotSkipReasons = map[string]string{
-		"already_running":   "already_running",
-		"recent_run":        "recent_run",
-		"runtime_offline":   "runtime_offline",
-		"throttled":         "throttled",
-		"max_concurrency":   "max_concurrency",
-		"trigger_disabled":  "trigger_disabled",
-		"signature_invalid": "signature_invalid",
-		"unknown":           "unknown",
-		"other":             "other",
-	}
-
-	knownWebhookProviders = map[string]string{
-		"github":  "github",
-		"generic": "generic",
-		"gitlab":  "gitlab",
-		"stripe":  "stripe",
-		"other":   "other",
-	}
-
-	knownWebhookDeliveryStatuses = map[string]string{
-		"queued":     "queued",
-		"dispatched": "dispatched",
-		"failed":     "failed",
-		"rejected":   "rejected",
-		"ignored":    "ignored",
-		"duplicate":  "duplicate",
-		"other":      "other",
-	}
-
-	knownWebhookRateLimitGates = map[string]string{
-		"absolute_ip":       "absolute_ip",
-		"bad_credential_ip": "bad_credential_ip",
-		"worker_trigger":    "worker_trigger",
-		"other":             "other",
-	}
-
 	knownEmailRateLimitActions = map[string]string{
 		"workspace_invitation": "workspace_invitation",
 		"other":                "other",
@@ -181,24 +118,6 @@ var (
 		"other":             "other",
 	}
 
-	knownCloudRuntimeOps = map[string]string{
-		"provision": "provision",
-		"terminate": "terminate",
-		"status":    "status",
-		"gateway":   "gateway",
-		"billing":   "billing",
-		"fleet":     "fleet",
-		"other":     "other",
-	}
-
-	knownCloudRuntimeStatuses = map[string]string{
-		"ok":      "ok",
-		"4xx":     "4xx",
-		"5xx":     "5xx",
-		"timeout": "timeout",
-		"error":   "error",
-	}
-
 	knownDaemonWSKinds = map[string]string{
 		"heartbeat":     "heartbeat",
 		"task_claim":    "task_claim",
@@ -224,14 +143,6 @@ var (
 	knownChatOutputLocalPathKinds = map[string]string{
 		"file_url":     "file_url",
 		"workdir_path": "workdir_path",
-	}
-
-	knownContactSalesSources = map[string]string{
-		"page":        "page",
-		"onboarding":  "onboarding",
-		"agents_page": "agents_page",
-		"unknown":     "unknown",
-		"other":       "other",
 	}
 )
 
@@ -331,34 +242,6 @@ func canonicaliseSignupChannel(value string) string {
 	return value
 }
 
-func NormalizeOnboardingPath(value string) string {
-	return normalizeFromAllowList(value, knownOnboardingPaths, "unknown")
-}
-
-func NormalizeAutopilotCadence(value string) string {
-	return normalizeFromAllowList(value, knownAutopilotCadences, "unknown")
-}
-
-func NormalizeAutopilotTrigger(value string) string {
-	return normalizeFromAllowList(value, knownAutopilotTriggers, "unknown")
-}
-
-func NormalizeAutopilotSkipReason(value string) string {
-	return normalizeFromAllowList(value, knownAutopilotSkipReasons, "other")
-}
-
-func NormalizeWebhookProvider(value string) string {
-	return normalizeFromAllowList(value, knownWebhookProviders, "other")
-}
-
-func NormalizeWebhookDeliveryStatus(value string) string {
-	return normalizeFromAllowList(value, knownWebhookDeliveryStatuses, "other")
-}
-
-func NormalizeWebhookRateLimitGate(value string) string {
-	return normalizeFromAllowList(value, knownWebhookRateLimitGates, "other")
-}
-
 func NormalizeEmailRateLimitAction(value string) string {
 	return normalizeFromAllowList(value, knownEmailRateLimitActions, "other")
 }
@@ -382,56 +265,12 @@ func NormalizeGithubPRReviewResult(value string) string {
 	return normalizeFromAllowList(value, knownGithubPRReviewResults, "other")
 }
 
-func NormalizeCloudRuntimeOp(value string) string {
-	return normalizeFromAllowList(value, knownCloudRuntimeOps, "other")
-}
-
-// NormalizeCloudRuntimeStatus collapses an HTTP status code or symbolic
-// outcome string into the fixed bucket set {ok, 4xx, 5xx, timeout, error}.
-// Empty / unknown collapses to "error".
-func NormalizeCloudRuntimeStatus(value string) string {
-	value = strings.ToLower(strings.TrimSpace(value))
-	if normalized, ok := knownCloudRuntimeStatuses[value]; ok {
-		return normalized
-	}
-	if len(value) == 3 {
-		switch value[0] {
-		case '2':
-			return "ok"
-		case '4':
-			return "4xx"
-		case '5':
-			return "5xx"
-		}
-	}
-	return "error"
-}
-
-// CloudRuntimeStatusForCode maps an HTTP status code to its bucket label.
-// Used by cloudruntime client instrumentation.
-func CloudRuntimeStatusForCode(code int) string {
-	switch {
-	case code >= 200 && code < 400:
-		return "ok"
-	case code >= 400 && code < 500:
-		return "4xx"
-	case code >= 500 && code < 600:
-		return "5xx"
-	default:
-		return "error"
-	}
-}
-
 func NormalizeDaemonWSKind(value string) string {
 	return normalizeFromAllowList(value, knownDaemonWSKinds, "other")
 }
 
 func NormalizeFeedbackKind(value string) string {
 	return normalizeFromAllowList(value, knownFeedbackKinds, "other")
-}
-
-func NormalizeContactSalesSource(value string) string {
-	return normalizeFromAllowList(value, knownContactSalesSources, "other")
 }
 
 func NormalizeChatOutputLocalPathKind(value string) string {

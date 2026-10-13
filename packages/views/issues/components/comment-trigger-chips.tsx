@@ -43,7 +43,7 @@ const MAX_STACK_HEADS = 4;
 
 interface CommentTriggerChipsProps {
   recipients: RecipientEntry[];
-  // Explicit @agent / @squad mentions that will NOT trigger if posted as-is
+  // Explicit @agent mentions that will NOT trigger if posted as-is
   // (MUL-4525 §2). Each renders as a named warning chip so the user sees WHICH
   // target won't run and why, not a silent no-op after sending.
   blocked?: CommentTriggerOutcome[];
@@ -64,8 +64,6 @@ function sourceLabel(source: string, t: IssuesT): string {
       return t(($) => $.comment.trigger_source_issue_assignee);
     case "mention_agent":
       return t(($) => $.comment.trigger_source_mention_agent);
-    case "mention_squad_leader":
-      return t(($) => $.comment.trigger_source_mention_squad_leader);
     default:
       return t(($) => $.comment.trigger_source_unknown);
   }

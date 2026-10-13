@@ -63,7 +63,7 @@ func TestCommentReplyReceipt(t *testing.T) {
 				t.Setenv("MULTICA_TOKEN", "mat_test-token")
 				cmd := newIssueCommentAddTestCmd()
 				var flags []string
-				for _, line := range strings.Split(execenv.BuildCommentReplyInstructions("claude", issueID, parentID, false), "\n") {
+				for _, line := range strings.Split(execenv.BuildCommentReplyInstructions("claude", issueID, parentID), "\n") {
 					if strings.HasPrefix(strings.TrimSpace(line), "multica issue comment add "+issueID+" ") {
 						flags = strings.Fields(line)[5:]
 					}

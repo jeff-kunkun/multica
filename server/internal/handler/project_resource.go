@@ -161,8 +161,7 @@ type localDirectoryRef struct {
 // saved is not caught here; closing that needs a claim-time gate.
 //
 // Returns true to proceed; on false the 422 response has already been written,
-// using the same daemon_version_unsupported code as the quick-create gate so
-// clients can branch on it.
+// using the daemon_version_unsupported code so clients can branch on it.
 func (h *Handler) requireWorktreeCapableDaemon(w http.ResponseWriter, r *http.Request, workspaceID pgtype.UUID, resourceType string, normalizedRef json.RawMessage) bool {
 	if resourceType != "local_directory" {
 		return true
@@ -950,7 +949,7 @@ func (c claimProjectContext) applyTo(resp *AgentTaskResponse) {
 
 // resolveClaimProjectContext loads the project context for one daemon claim.
 //
-// Every claim path (issue, chat, autopilot, quick-create) resolves the same
+// Every claim path (issue, chat) resolves the same
 // thing from a soft project reference, so the tenant and failure rules live
 // here once rather than in a copy per path:
 //

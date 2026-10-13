@@ -7,7 +7,6 @@ import {
   CircleHelp,
   Hash,
   MessageSquare,
-  Workflow,
   X,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -594,36 +593,22 @@ function TaskRow({
     }
   };
 
-  const isTerminalStatus =
-    task.status === "completed" ||
-    task.status === "failed" ||
-    task.status === "cancelled";
   const sourceFallback = !hasIssue
-    ? task.kind === "quick_create"
-      ? isTerminalStatus
-        ? t(($) => $.tab_body.activity.source_quick_create)
-        : t(($) => $.tab_body.activity.source_creating_issue)
-      : task.chat_session_id
-        ? t(($) => $.tab_body.activity.source_chat_session)
-        : task.autopilot_run_id
-          ? t(($) => $.tab_body.activity.source_autopilot_run)
-          : t(($) => $.tab_body.activity.source_untracked)
+    ? task.chat_session_id
+      ? t(($) => $.tab_body.activity.source_chat_session)
+      : t(($) => $.tab_body.activity.source_untracked)
     : null;
 
   const SourceIcon = hasIssue
     ? Hash
     : task.chat_session_id
       ? MessageSquare
-      : task.autopilot_run_id
-        ? Workflow
-        : CircleHelp;
+      : CircleHelp;
   const sourceLabel = hasIssue
     ? t(($) => $.tab_body.activity.source_issue)
     : task.chat_session_id
       ? t(($) => $.tab_body.activity.source_chat)
-      : task.autopilot_run_id
-        ? t(($) => $.tab_body.activity.source_autopilot)
-        : t(($) => $.tab_body.activity.source_untracked);
+      : t(($) => $.tab_body.activity.source_untracked);
 
   const timeText =
     timeMode === "active"

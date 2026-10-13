@@ -21,16 +21,13 @@ func deliveryInvariantFixtures() map[string]TaskContextForEnv {
 	return map[string]TaskContextForEnv{
 		"comment":     {IssueID: "i-1", TriggerCommentID: "tc-1", AgentName: "Eve", AgentID: "eve-1"},
 		"assignment":  {IssueID: "i-1", AgentName: "Eve", AgentID: "eve-1"},
-		"autopilot":   {AutopilotRunID: "r-1", AgentName: "Eve", AgentID: "eve-1"},
-		"quickcreate": {QuickCreatePrompt: "p", AgentName: "Eve", AgentID: "eve-1"},
 		"chat_direct": {ChatSessionID: "c-1", AgentName: "Eve", AgentID: "eve-1"},
 	}
 }
 
 // inlineBlocksRule is the brief's one-line rule for charts and diagrams
 // (MUL-7649). Surfaces the web renders carry it; surfaces that deliver plain
-// text (autopilot results, quick-create stdout) must not, since
-// a fenced html/mermaid block does not render there.
+// text must not, since a fenced html/mermaid block does not render there.
 const inlineBlocksRule = "fenced `html` or `mermaid` code block"
 
 func TestBriefDeliveryInvariantIsAlwaysOn(t *testing.T) {
@@ -74,14 +71,6 @@ func TestBriefSurfaceDeliveryPolicy(t *testing.T) {
 		"chat_direct": {
 			mustHave: []string{"`multica attachment upload <local-path>`", inlineBlocksRule},
 			mustNot:  []string{"text-only", "separate message"},
-		},
-		"autopilot": {
-			mustHave: []string{"this surface is text-only"},
-			mustNot:  []string{"multica attachment upload", inlineBlocksRule},
-		},
-		"quickcreate": {
-			mustHave: []string{"your stdout is text-only", "`multica issue create` call itself via `--attachment <path>`"},
-			mustNot:  []string{"multica attachment upload", inlineBlocksRule},
 		},
 	}
 

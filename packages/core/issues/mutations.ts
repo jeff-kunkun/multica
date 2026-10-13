@@ -40,7 +40,7 @@ import { useRecentContextStore } from "../chat/recent-context-store";
 import { useRecentIssuesStore } from "./stores";
 import type { InboxItem, Issue, IssueReaction } from "../types";
 import type {
-  CreateCommentSubIssueManualRequest,
+  CreateCommentSubIssueRequest,
   CreateIssueRequest,
   ListIssuesCache,
   MoveIssueRequest,
@@ -183,7 +183,7 @@ export function useCreateCommentSubIssue() {
     data,
   }: {
     anchorCommentId: string;
-    data: CreateCommentSubIssueManualRequest;
+    data: CreateCommentSubIssueRequest;
   }) => api.createCommentSubIssue(anchorCommentId, data));
 }
 
@@ -204,7 +204,6 @@ export function useUpdateIssue() {
       // it. mutationFn still sends the full payload.
       const {
         suppress_run: _suppressRun,
-        duplicate_of_issue_id: _duplicateOfIssueId,
         description: _description,
         title_base: _titleBase,
         expected_revision: _expectedRevision,
@@ -315,7 +314,6 @@ export function useUpdateIssue() {
       // is the plain surgical patch it always was.
       const {
         suppress_run: _suppressRun,
-        duplicate_of_issue_id: _duplicateOfIssueId,
         move_intent: _moveIntent,
         id: _id,
         ...intent
@@ -374,14 +372,6 @@ export function useUpdateIssue() {
       // payload mutates the attachment join table.
       if (vars.attachment_ids?.length) {
         qc.invalidateQueries({ queryKey: issueKeys.attachments(vars.id) });
-      }
-      // A duplicate mark is not on Issue; refresh both sides now rather than
-      // waiting for the realtime echo.
-      if (vars.duplicate_of_issue_id) {
-        qc.invalidateQueries({ queryKey: issueKeys.duplicates(wsId, vars.id) });
-        qc.invalidateQueries({
-          queryKey: issueKeys.duplicates(wsId, vars.duplicate_of_issue_id),
-        });
       }
       // Invalidate old parent's children cache
       if (ctx?.parentId) {

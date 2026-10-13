@@ -46,7 +46,6 @@ const mockSetKeepOpen = vi.hoisted(() => vi.fn());
 const mockToastCustom = vi.hoisted(() => vi.fn());
 const mockToastDismiss = vi.hoisted(() => vi.fn());
 const mockToastError = vi.hoisted(() => vi.fn());
-const mockShowIssueLimitUpgradePrompt = vi.hoisted(() => vi.fn());
 // Uploads flow through the module-level coordinator, which calls
 // `api.uploadFile(file, ctx, signal)` (MUL-5181 L2). Tests drive uploads by
 // mocking that call; it resolves a plain server Attachment row.
@@ -129,14 +128,14 @@ const emptyIssueDraft = () => ({
     description: "",
     status: "todo" as const,
     startDate: null as string | null,
-    assigneeType: undefined as "agent" | "squad" | "member" | undefined,
+    assigneeType: undefined as "agent" | "member" | undefined,
     assigneeId: undefined as string | undefined,
     labelIds: [] as string[],
     propertyValues: {} as Record<string, string | number | boolean | string[]>,
   },
   agent: {
     prompt: "",
-    actorType: undefined as "agent" | "squad" | undefined,
+    actorType: undefined as "agent" | undefined,
     actorId: undefined as string | undefined,
   },
   activeMode: "manual" as "manual" | "agent",
@@ -144,7 +143,7 @@ const emptyIssueDraft = () => ({
 
 const mockDraftStore = {
   draft: emptyIssueDraft(),
-  lastAssigneeType: undefined as "agent" | "squad" | "member" | undefined,
+  lastAssigneeType: undefined as "agent" | "member" | undefined,
   lastAssigneeId: undefined as string | undefined,
   setShared: mockSetShared,
   setManual: mockSetManual,
@@ -204,9 +203,6 @@ vi.mock("@multica/core/hooks", () => ({
   useWorkspaceId: () => "ws-test",
 }));
 
-vi.mock("./use-issue-limit-upgrade-prompt", () => ({
-  useIssueLimitUpgradePrompt: () => mockShowIssueLimitUpgradePrompt,
-}));
 
 vi.mock("@multica/core/issues/queries", () => ({
   issueDetailOptions: (wsId: string, id: string) => ({
@@ -234,7 +230,7 @@ vi.mock("@multica/core/workspace/hooks", () => ({
   useActorName: () => ({ getActorName: () => "Agent" }),
 }));
 
-// CreateRunHint now renders an ActorAvatar for agent/squad assignees. This
+// CreateRunHint now renders an ActorAvatar for agent assignees. This
 // suite is about the create form, not the avatar (whose own workspace/presence/
 // navigation hook tree is exercised elsewhere), so stub it inert.
 vi.mock("../common/actor-avatar", () => ({
@@ -311,17 +307,12 @@ const { ApiError } = vi.hoisted(() => {
 });
 
 vi.mock("@multica/core/api", async () => {
-  // Pull real `parseWithFallback` + `DuplicateIssueErrorBodySchema` from the
-  // schema modules so the drift-fallback branch in create-issue.tsx runs the
-  // actual validation logic (not a stub). Only `ApiError` is local — the
+  // Pull the real `parseWithFallback`. Only `ApiError` is local — the
   // component imports it from this module and the cross-realm `instanceof`
   // check requires a single class identity.
   const { parseWithFallback } = await vi.importActual<typeof import("@multica/core/api/schema")>(
     "@multica/core/api/schema",
   );
-  const { DuplicateIssueErrorBodySchema } = await vi.importActual<
-    typeof import("@multica/core/api/schemas")
-  >("@multica/core/api/schemas");
   return {
     api: {
       createCommentSubIssue: mockCreateCommentSubIssue,
@@ -331,7 +322,6 @@ vi.mock("@multica/core/api", async () => {
     },
     ApiError,
     parseWithFallback,
-    DuplicateIssueErrorBodySchema,
   };
 });
 
@@ -1303,124 +1293,9 @@ describe("CreateIssueModal", () => {
     });
   });
 
-  // Manual → agent must seed the agent actor from the picked squad. Without
-  // this the agent panel silently falls back to the persisted actor / first
-  // visible agent and the user loses the squad they just chose in manual.
-  it("seeds the agent actor from the picked squad when switching to agent mode", async () => {
-    mockDraftStore.draft.manual.assigneeType = "squad";
-    mockDraftStore.draft.manual.assigneeId = "squad-1";
-    const user = userEvent.setup();
-    const onSwitchMode = vi.fn();
-
-    renderModal(
-      <ManualCreatePanel
-        onClose={vi.fn()}
-        onSwitchMode={onSwitchMode}
-        isExpanded={false}
-        setIsExpanded={vi.fn()}
-      />,
-    );
-
-    await user.type(screen.getByPlaceholderText("Issue title"), "Refactor auth");
-    await user.click(screen.getByRole("button", { name: /Switch to Agent/i }));
-
-    expect(onSwitchMode).toHaveBeenCalledTimes(1);
-    // Prompt assist-init + squad actor land in the unified agent draft.
-    expect(mockSetAgent).toHaveBeenCalledWith({ prompt: "Refactor auth" });
-    expect(mockSetAgent).toHaveBeenCalledWith({
-      actorType: "squad",
-      actorId: "squad-1",
-    });
-    // Actor rides the store, not the carry; no parent here → carry is null.
-    expect(onSwitchMode.mock.calls[0]?.[0]).toBeNull();
-  });
-
-  // Reporter scenario: backend rejects same-titled create with a 409 +
-  // structured duplicate body. The user should land on a duplicate toast
-  // pointing at the existing issue, not a generic "create failed" message.
-  it("shows duplicate-issue toast with a working view-existing link", async () => {
-    const user = userEvent.setup();
-    const onClose = vi.fn();
-    mockCreateIssue.mockRejectedValue(
-      new ApiError("An active issue with this title already exists: MUL-7 – Login bug", 409, "Conflict", {
-        code: "active_duplicate_issue",
-        error: "An active issue with this title already exists: MUL-7 – Login bug",
-        issue: {
-          id: "issue-dup",
-          identifier: "MUL-7",
-          title: "Login bug",
-        },
-      }),
-    );
-
-    renderModal(<CreateIssueModal onClose={onClose} />);
-    await user.type(screen.getByPlaceholderText("Issue title"), "Login bug");
-    await user.click(screen.getByRole("button", { name: "Create Issue" }));
-
-    await waitFor(() => expect(mockToastCustom).toHaveBeenCalledTimes(1));
-    expect(mockToastError).not.toHaveBeenCalled();
-    expect(onClose).not.toHaveBeenCalled();
-
-    const renderToast = mockToastCustom.mock.calls[0]?.[0];
-    expect(typeof renderToast).toBe("function");
-    render(renderToast("toast-dup"));
-
-    expect(screen.getByText("Duplicate issue")).toBeInTheDocument();
-    expect(screen.getByText(/MUL-7/)).toBeInTheDocument();
-    expect(screen.getByText(/Login bug/)).toBeInTheDocument();
-
-    await user.click(screen.getByRole("button", { name: "View existing issue" }));
-    expect(mockPush).toHaveBeenCalledWith("/ws-test/issues/issue-dup");
-    expect(mockToastDismiss).toHaveBeenCalledWith("toast-dup");
-  });
-
-  // Schema drift safety: server returns a 409 with a body that doesn't match
-  // the duplicate schema (renamed code, missing issue object, etc.). UI must
-  // not throw — it must fall back to a normal error toast carrying the
-  // backend message so the user still sees a useful reason.
-  it("falls back to a normal error toast when a 409 body does not match the duplicate schema", async () => {
-    const user = userEvent.setup();
-    mockCreateIssue.mockRejectedValue(
-      new ApiError("Backend says title is taken", 409, "Conflict", {
-        code: "renamed_duplicate_marker",
-      }),
-    );
-
-    renderModal(<CreateIssueModal onClose={vi.fn()} />);
-    await user.type(screen.getByPlaceholderText("Issue title"), "Login bug");
-    await user.click(screen.getByRole("button", { name: "Create Issue" }));
-
-    await waitFor(() => expect(mockToastError).toHaveBeenCalledTimes(1));
-    expect(mockToastError).toHaveBeenCalledWith("Backend says title is taken");
-    expect(mockToastCustom).not.toHaveBeenCalled();
-  });
-
-  it("offers the Cloud-authorized upgrade recovery when manual create reaches the issue limit", async () => {
-    const user = userEvent.setup();
-    const onClose = vi.fn();
-    mockCreateIssue.mockRejectedValue(
-      new ApiError("workspace has reached its issue limit", 402, "Payment Required", {
-        code: "issue_limit_reached",
-        limit: 1000,
-        policy_revision: 1,
-      }),
-    );
-
-    renderModal(<CreateIssueModal onClose={onClose} />);
-    await user.type(screen.getByPlaceholderText("Issue title"), "One more issue");
-    await user.click(screen.getByRole("button", { name: "Create Issue" }));
-
-    await waitFor(() => {
-      expect(mockShowIssueLimitUpgradePrompt).toHaveBeenCalledTimes(1);
-    });
-    expect(mockToastError).not.toHaveBeenCalled();
-    expect(mockClearDraft).not.toHaveBeenCalled();
-    expect(onClose).not.toHaveBeenCalled();
-  });
-
-  // Non-409 errors with a real message: surface the backend reason rather
-  // than the generic i18n fallback. This is the whole point of the issue.
-  it("surfaces err.message verbatim for non-duplicate errors", async () => {
+  // Errors with a real message: surface the backend reason rather than the
+  // generic i18n fallback.
+  it("surfaces err.message verbatim", async () => {
     const user = userEvent.setup();
     mockCreateIssue.mockRejectedValue(new Error("Server is overloaded, try again"));
 

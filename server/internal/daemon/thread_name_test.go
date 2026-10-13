@@ -21,9 +21,9 @@ func TestDeriveTaskThreadNamePrefersClaimedThreadName(t *testing.T) {
 func TestDeriveTaskThreadNameFallsBackToTaskContext(t *testing.T) {
 	t.Parallel()
 
-	got := deriveTaskThreadName(Task{QuickCreatePrompt: "create issue for billing sync"})
-	if got != "create issue for billing sync" {
-		t.Fatalf("thread name = %q, want quick-create prompt", got)
+	got := deriveTaskThreadName(Task{ChatMessage: "summarize the billing sync"})
+	if got != "summarize the billing sync" {
+		t.Fatalf("thread name = %q, want chat message", got)
 	}
 }
 

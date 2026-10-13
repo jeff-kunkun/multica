@@ -31,22 +31,8 @@ const (
 // symbol.
 const PlatformSkillName = "multica-platform"
 
-// builtinSkillSystemKey restricts a built-in skill to one product-defined
-// agent, keyed by that agent's system key. A skill absent from this map is
-// universal and every agent receives it.
-//
-// The scoping exists because a built-in skill costs every agent that receives
-// it: its description sits in the always-loaded skill listing, and its files
-// are written into every task's workdir. Mika's onboarding walkthrough is one
-// agent's procedure, not a platform contract, so shipping it workspace-wide
-// spent that budget on nine agents out of ten that can never use it.
-var builtinSkillSystemKey = map[string]string{
-	"multica-onboarding": MikaSystemKey,
-}
-
-// BuiltinSkills returns the platform's built-in skills for an agent with the
-// given system key (empty for an ordinary workspace agent), embedded at compile
-// time. Every agent receives the universal ones on top of its workspace-bound
+// BuiltinSkills returns the platform's built-in skills, embedded at compile
+// time. Every agent receives them on top of its workspace-bound
 // skills, so they teach platform-wide "how to" workflows that the runtime brief
 // intentionally leaves to skills.
 //
@@ -58,6 +44,7 @@ var builtinSkillSystemKey = map[string]string{
 // slug and take the bare directory. That is accepted, not handled — when it
 // becomes real, the fix is to reject the prefix at skill create/import rather
 // than to make every pointer defensive.
+//
 // legacyRedirects asks for redirect stubs under the names this server has
 // stopped shipping. The runtime brief is assembled by the daemon, not the
 // server, so a backend deploy cannot rewrite an installed daemon's copy of it:
@@ -65,8 +52,8 @@ var builtinSkillSystemKey = map[string]string{
 // `multica-working-on-issues`. Passing true for such a daemon keeps that
 // pointer resolvable; the stub carries no contracts of its own, only the new
 // location. Callers decide by capability, never by version string.
-func (s *TaskService) BuiltinSkills(agentSystemKey string, legacyRedirects bool) []AgentSkillData {
-	skills := loadBuiltinSkills(agentSystemKey)
+func (s *TaskService) BuiltinSkills(legacyRedirects bool) []AgentSkillData {
+	skills := loadBuiltinSkillDirs(func(string) bool { return true })
 	if legacyRedirects {
 		skills = append(skills, legacyRedirectSkills()...)
 	}
@@ -80,20 +67,11 @@ func legacyRedirectSkills() []AgentSkillData {
 	return loadSkillDirs(legacyBuiltinSkillsFS, legacyBuiltinSkillsRoot, func(string) bool { return true })
 }
 
-// AllBuiltinSkills returns every built-in skill regardless of agent scope. Only
-// the bundle-resolve path uses it: the claim already decided which built-ins an
-// agent was told about, and a daemon can only ask to resolve a ref it was
-// handed, so re-deriving the scope there would cost an agent read to re-answer
-// a question the claim answered.
+// AllBuiltinSkills returns every built-in skill plus the legacy redirect stubs.
+// Only the bundle-resolve path uses it: a daemon can only ask to resolve a ref
+// it was handed.
 func (s *TaskService) AllBuiltinSkills() []AgentSkillData {
 	return append(loadBuiltinSkillDirs(func(string) bool { return true }), legacyRedirectSkills()...)
-}
-
-func loadBuiltinSkills(agentSystemKey string) []AgentSkillData {
-	return loadBuiltinSkillDirs(func(name string) bool {
-		want, scoped := builtinSkillSystemKey[name]
-		return !scoped || want == agentSystemKey
-	})
 }
 
 func loadBuiltinSkillDirs(include func(name string) bool) []AgentSkillData {

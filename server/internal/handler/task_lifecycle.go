@@ -41,7 +41,7 @@ func (h *Handler) RecoverOrphanedTasks(w http.ResponseWriter, r *http.Request) {
 	// task:failed events, agent reconcile, issue rollback, and auto-retry
 	// behaviour as the runtime sweeper. This was previously a fast-path
 	// that bypassed those side effects, leaving the UI stale when no retry
-	// was created (max_attempts exhausted, autopilot, non-retryable reason).
+	// was created (max_attempts exhausted, non-retryable reason).
 	retried := h.TaskService.HandleFailedTasks(r.Context(), rows)
 
 	if len(rows) > 0 {
@@ -153,7 +153,7 @@ type RerunIssueRequest struct {
 }
 
 // RerunIssue manually re-enqueues an agent run for the issue. By default it
-// targets the issue's current assignee (agent or squad leader); if the
+// targets the issue's current agent assignee; if the
 // request body carries task_id, the rerun targets the agent that ran that
 // specific past task instead. The new task is flagged force_fresh_session=true:
 // the daemon claim handler skips the (agent_id, issue_id) session-resume
@@ -213,10 +213,6 @@ func (h *Handler) RerunIssue(w http.ResponseWriter, r *http.Request) {
 		h.writeDispatchBlocked(w, http.StatusForbidden, ReasonInvocationNotAllowed)
 		return
 	}
-	if errors.Is(err, service.ErrIssueInTriage) {
-		h.writeDispatchBlocked(w, http.StatusForbidden, ReasonIssueInTriage)
-		return
-	}
 	// Not a dispatch refusal: the issue may well be runnable, and only the named
 	// source is ineligible. It falls through to the 400 below with the
 	// sentinel's own sentence, like the sibling "does not belong to this issue".
@@ -226,55 +222,6 @@ func (h *Handler) RerunIssue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	resp := taskToResponse(*task, uuidToString(issue.WorkspaceID))
-	h.hydrateTaskAttributions(r.Context(), []*TaskAttribution{resp.Attribution})
-	writeJSON(w, http.StatusAccepted, resp)
-}
-
-// RetrySourceContextQuickCreate manually re-enqueues a failed issue-less
-// quick-create while atomically moving its pending immutable source context to
-// the new task. The workspace middleware supplies tenancy; the service also
-// requires the original requester and the normal private-agent invoke gate.
-func (h *Handler) RetrySourceContextQuickCreate(w http.ResponseWriter, r *http.Request) {
-	userID, ok := requireUserID(w, r)
-	if !ok {
-		return
-	}
-	workspaceID, ok := parseUUIDOrBadRequest(w, ctxWorkspaceID(r.Context()), "workspace id")
-	if !ok {
-		return
-	}
-	requesterID, ok := parseUUIDOrBadRequest(w, userID, "user id")
-	if !ok {
-		return
-	}
-	taskID, ok := parseUUIDOrBadRequest(w, chi.URLParam(r, "taskId"), "task id")
-	if !ok {
-		return
-	}
-	canInvoke := func(agent db.Agent) bool {
-		return h.canInvokeAgent(r.Context(), agent, "member", userID, userID, uuidToString(workspaceID))
-	}
-	task, err := h.TaskService.RetrySourceContextQuickCreate(r.Context(), workspaceID, requesterID, taskID, canInvoke)
-	if writeIssueLimitReached(w, err) {
-		return
-	}
-	if errors.Is(err, service.ErrRerunInvokeNotAllowed) {
-		h.writeDispatchBlocked(w, http.StatusForbidden, ReasonInvocationNotAllowed)
-		return
-	}
-	if errors.Is(err, service.ErrSourceContextRetryUnavailable) {
-		writeJSON(w, http.StatusConflict, map[string]any{
-			"code":  "source_context_retry_unavailable",
-			"error": "This context can no longer be retried. Start again from the branch point.",
-		})
-		return
-	}
-	if err != nil {
-		slog.Warn("source context quick-create retry failed", "task_id", uuidToString(taskID), "error", err)
-		writeError(w, http.StatusInternalServerError, "retry source context quick create")
-		return
-	}
-	resp := taskToResponse(*task, uuidToString(workspaceID))
 	h.hydrateTaskAttributions(r.Context(), []*TaskAttribution{resp.Attribution})
 	writeJSON(w, http.StatusAccepted, resp)
 }

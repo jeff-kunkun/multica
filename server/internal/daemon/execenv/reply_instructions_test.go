@@ -26,7 +26,7 @@ func TestBuildCommentReplyInstructionsCodexLinux(t *testing.T) {
 	issueID := "11111111-1111-1111-1111-111111111111"
 	triggerID := "22222222-2222-2222-2222-222222222222"
 
-	got := BuildCommentReplyInstructions("codex", issueID, triggerID, false)
+	got := BuildCommentReplyInstructions("codex", issueID, triggerID)
 
 	for _, want := range []string{
 		"multica issue comment add " + issueID + " --parent " + triggerID + " --content-file ./reply.md --output table && rm ./reply.md",
@@ -82,7 +82,7 @@ func TestBuildCommentReplyInstructionsNonCodexLinux(t *testing.T) {
 			name := provider + "/" + host
 			t.Run(name, func(t *testing.T) {
 				runtimeGOOS = host
-				got := BuildCommentReplyInstructions(provider, issueID, triggerID, false)
+				got := BuildCommentReplyInstructions(provider, issueID, triggerID)
 
 				for _, want := range []string{
 					"multica issue comment add " + issueID + " --parent " + triggerID + " --content-file ./reply.md --output table && rm ./reply.md",
@@ -138,7 +138,7 @@ func TestBuildCommentReplyInstructionsWindowsUsesContentFile(t *testing.T) {
 
 	for _, provider := range []string{"codex", "claude", "opencode", "openclaw", "hermes", "kimi", "reasonix", "kiro", "cursor"} {
 		t.Run(provider+"/windows", func(t *testing.T) {
-			got := BuildCommentReplyInstructions(provider, issueID, triggerID, false)
+			got := BuildCommentReplyInstructions(provider, issueID, triggerID)
 			for _, want := range []string{
 				"multica issue comment add " + issueID + " --parent " + triggerID + " --content-file ./reply.md --output table",
 				// MUL-5442 cross-channel dedup: the $OutputEncoding trap's
@@ -177,7 +177,7 @@ func TestBuildCommentReplyInstructionsEmptyWhenNoTrigger(t *testing.T) {
 	t.Parallel()
 
 	for _, provider := range []string{"codex", "claude", "opencode"} {
-		if got := BuildCommentReplyInstructions(provider, "issue-id", "", false); got != "" {
+		if got := BuildCommentReplyInstructions(provider, "issue-id", ""); got != "" {
 			t.Fatalf("expected empty string when triggerCommentID is empty for %s, got %q", provider, got)
 		}
 	}
@@ -247,7 +247,7 @@ func TestWindowsCommentReplyInstructionsHaveNoStdin(t *testing.T) {
 
 	for _, provider := range []string{"claude", "codex", "opencode"} {
 		t.Run(provider, func(t *testing.T) {
-			s := BuildCommentReplyInstructions(provider, issueID, triggerID, false)
+			s := BuildCommentReplyInstructions(provider, issueID, triggerID)
 			for _, want := range []string{
 				"multica issue comment add " + issueID + " --parent " + triggerID + " --content-file",
 				"--content-file",
@@ -331,30 +331,5 @@ func TestInjectRuntimeConfigWindowsAssignmentBriefStaysFileOnly(t *testing.T) {
 				}
 			}
 		})
-	}
-}
-
-// TestBuildCommentReplyInstructionsSquadLeaderCarveOut pins that the squad
-// leader variant scopes the reply imperative with the `no_action` exception
-// (MUL-5442 #6493 review): the leader's only silent path must not be
-// contradicted by a later unconditional "Post your reply" line, and the
-// ordinary variant must never carry the leader carve-out.
-func TestBuildCommentReplyInstructionsSquadLeaderCarveOut(t *testing.T) {
-	t.Parallel()
-
-	leader := BuildCommentReplyInstructions("claude", "issue-1", "comment-1", true)
-	if !strings.Contains(leader, "Unless your outcome is `no_action`, post your reply as a comment") {
-		t.Errorf("leader reply instructions missing the no_action carve-out\n---\n%s", leader)
-	}
-	if strings.Contains(leader, "Post your reply as a comment") {
-		t.Errorf("leader reply instructions still carry the unconditional imperative\n---\n%s", leader)
-	}
-
-	ordinary := BuildCommentReplyInstructions("claude", "issue-1", "comment-1", false)
-	if !strings.Contains(ordinary, "Post your reply as a comment") {
-		t.Errorf("ordinary reply instructions missing the imperative\n---\n%s", ordinary)
-	}
-	if strings.Contains(ordinary, "Unless your outcome is") {
-		t.Errorf("ordinary reply instructions leaked the leader carve-out\n---\n%s", ordinary)
 	}
 }

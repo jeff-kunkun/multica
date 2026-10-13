@@ -11,7 +11,6 @@ import {
 import { useDefaultLayout } from "react-resizable-panels";
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { useWorkspaceId } from "@multica/core/hooks";
-import { ApiError, errorCode } from "@multica/core/api";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { useModalStore } from "@multica/core/modals";
 import {
@@ -21,7 +20,6 @@ import {
   shortcutMatchesEvent,
 } from "@multica/core/shortcuts";
 import { isImeComposing } from "@multica/core/utils";
-import { useIssueDraftStore } from "@multica/core/issues/stores/draft-store";
 import {
   inboxListOptions,
   archivedInboxPagesOptions,
@@ -39,7 +37,6 @@ import {
   useArchiveAllInbox,
   useArchiveAllReadInbox,
   useArchiveCompletedInbox,
-  useRetrySourceContextQuickCreate,
 } from "@multica/core/inbox/mutations";
 import {
   filterInboxItems,
@@ -91,15 +88,8 @@ import { InboxFilterMenu } from "./inbox-filter-menu";
 import { InboxContextMenuProvider } from "./inbox-context-menu";
 import { ARCHIVED_VIEW_PARAM, type InboxView } from "./inbox-view";
 import { useTypeLabels } from "./inbox-detail-label";
-import {
-  getInboxDisplayTitle,
-  isAutopilotQuotaNotice,
-  isQuickCreateOutcome,
-  resolveDetailItem,
-} from "./inbox-display";
-import { AutopilotQuotaNotice } from "./autopilot-quota-notice";
+import { resolveDetailItem } from "./inbox-display";
 import { useT } from "../../i18n";
-import { useIssueLimitUpgradePrompt } from "../../modals/use-issue-limit-upgrade-prompt";
 
 const INBOX_LIST_DEFAULT_SIZE = 260;
 const INBOX_LIST_MIN_SIZE = 240;
@@ -107,10 +97,6 @@ const INBOX_LIST_MAX_SIZE = 400;
 
 export function InboxPage() {
   const { t } = useT("inbox");
-  const showIssueLimitUpgradePrompt = useIssueLimitUpgradePrompt();
-  const showAutopilotQuotaRecoveryPrompt = useIssueLimitUpgradePrompt(
-    "autopilot_quota",
-  );
   const { searchParams, replace } = useNavigation();
   const urlIssue = searchParams.get("issue") ?? "";
   const urlView: InboxView =
@@ -287,7 +273,6 @@ export function InboxPage() {
   const archiveAllMutation = useArchiveAllInbox();
   const archiveAllReadMutation = useArchiveAllReadInbox();
   const archiveCompletedMutation = useArchiveCompletedInbox();
-  const retrySourceContextMutation = useRetrySourceContextQuickCreate();
   const timeAgo = useTimeAgo();
   const typeLabels = useTypeLabels();
 
@@ -713,85 +698,17 @@ export function InboxPage() {
   ) : detailItem ? (
     <div className="p-6">
       <h2 className="text-title font-semibold">
-        {isAutopilotQuotaNotice(detailItem.type)
-          ? typeLabels[detailItem.type]
-          : getInboxDisplayTitle(detailItem)}
+        {detailItem.title}
       </h2>
       <p className="mt-1 text-body text-muted-foreground">
-        {typeLabels[detailItem.type]} · {timeAgo(detailItem.created_at)}
+        {typeLabels[detailItem.type] ?? detailItem.type} · {timeAgo(detailItem.created_at)}
       </p>
-      {isAutopilotQuotaNotice(detailItem.type) ? (
-        <AutopilotQuotaNotice
-          item={detailItem}
-          onOpenRecovery={showAutopilotQuotaRecoveryPrompt}
-        />
-      ) : detailItem.body ? (
+      {detailItem.body ? (
         <div className="mt-4 whitespace-pre-wrap text-body leading-relaxed text-foreground">
           {detailItem.body}
         </div>
       ) : null}
-      {isQuickCreateOutcome(detailItem.type) && detailItem.details?.original_prompt && (
-        <div className="mt-4 rounded-md border bg-muted/40 p-3">
-          <p className="text-caption font-medium text-muted-foreground">
-            {t(($) => $.detail.original_input)}
-          </p>
-          <p className="mt-1 whitespace-pre-wrap text-body">{detailItem.details.original_prompt}</p>
-        </div>
-      )}
       <div className="mt-4 flex gap-2">
-        {detailItem.type === "quick_create_failed" &&
-          detailItem.details?.source_context_id &&
-          detailItem.details?.task_id && (
-            <Button
-              size="sm"
-              data-testid="retry-source-context"
-              disabled={retrySourceContextMutation.isPending}
-              onClick={async () => {
-                try {
-                  await retrySourceContextMutation.mutateAsync(detailItem.details!.task_id!);
-                  toast.success(t(($) => $.toasts.source_context_retry_started));
-                } catch (error) {
-                  if (
-                    error instanceof ApiError &&
-                    errorCode(error) === "issue_limit_reached"
-                  ) {
-                    showIssueLimitUpgradePrompt();
-                    return;
-                  }
-                  toast.error(
-                    error instanceof ApiError &&
-                      errorCode(error) === "source_context_retry_unavailable"
-                      ? t(($) => $.errors.source_context_retry_unavailable)
-                      : t(($) => $.errors.source_context_retry_failed),
-                  );
-                }
-              }}
-            >
-              {t(($) => $.detail.retry_with_context)}
-            </Button>
-          )}
-        {isQuickCreateOutcome(detailItem.type) && (
-          <Button
-            size="sm"
-            onClick={() => {
-              // Seed the legacy advanced form with the original prompt so the
-              // user can recover their input in the full editor instead of
-              // retyping. The agent picker hint becomes the assignee
-              // candidate (still editable).
-              const prompt = detailItem.details?.original_prompt ?? "";
-              const agentId = detailItem.details?.agent_id;
-              useIssueDraftStore.getState().setManual({
-                description: prompt,
-                ...(agentId
-                  ? { assigneeType: "agent" as const, assigneeId: agentId }
-                  : {}),
-              });
-              useModalStore.getState().open("create-issue");
-            }}
-          >
-            {t(($) => $.detail.edit_advanced)}
-          </Button>
-        )}
         {/* Mirrors the row action: the button always reverses the view the
             item is being read in. */}
         {isArchivedView ? (
@@ -844,7 +761,7 @@ export function InboxPage() {
     // Compact: show detail full-screen when an item is selected. The two kinds
     // of selection get their chrome from different places, so they render
     // differently — `InboxItem.issue_id` is nullable and a null one is a plain
-    // notification (a failed quick-create, say), not an issue.
+    // notification, not an issue.
     if (detailItem?.issue_id) {
       // No scroll container and no back bar of our own: `IssueDetail` owns
       // both, and takes the way back through `leadingAction`. Wrapping it in

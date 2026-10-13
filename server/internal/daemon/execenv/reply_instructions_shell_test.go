@@ -149,7 +149,7 @@ func TestCommentReplySnippetPropagatesPostFailure(t *testing.T) {
 				t.Skipf("%s not available: %v", tc.shell, err)
 			}
 			runtimeGOOS = tc.goos
-			script := strings.Join(snippetBlock(t, BuildCommentReplyInstructions("claude", issueID, triggerID, false), tc.marker), "\n")
+			script := strings.Join(snippetBlock(t, BuildCommentReplyInstructions("claude", issueID, triggerID), tc.marker), "\n")
 
 			t.Run("failed post keeps the failure and the body", func(t *testing.T) {
 				code, bodyKept := runSnippet(t, tc.shell, tc.wrap(script), stubMultica(t, 3))

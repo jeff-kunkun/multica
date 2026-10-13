@@ -109,7 +109,6 @@ function CallbackContent() {
         .then(async (loggedInUser) => {
           const wsList = await api.listWorkspaces();
           qc.setQueryData(workspaceKeys.list(), wsList);
-          const onboarded = loggedInUser.onboarded_at != null;
 
           // 1. nextUrl wins: a `next=/invite/<id>` always survives the OAuth
           //    round-trip — the user clicked a specific link and we should
@@ -119,14 +118,13 @@ function CallbackContent() {
             return;
           }
 
-          // 2. Un-onboarded users may have pending invitations on their
-          //    email even when no `next=` was carried (came from a fresh
-          //    login on multica.ai instead of clicking the email link,
-          //    or `state` was lost across the round-trip). Look them up by
-          //    email and route to the batch /invitations page if any.
-          //    Already-onboarded users skip this lookup — their new invites
-          //    surface in the sidebar dropdown, not as a forced wall.
-          if (!onboarded) {
+          // 2. Users without a workspace may have pending invitations on
+          //    their email even when no `next=` was carried (fresh login
+          //    instead of clicking the email link, or `state` was lost
+          //    across the round-trip). Look them up by email and route to
+          //    the batch /invitations page if any. Users who already have a
+          //    workspace see new invites in the sidebar dropdown instead.
+          if (wsList.length === 0) {
             try {
               const invites = await api.listMyInvitations();
               if (invites.length > 0) {
@@ -138,17 +136,13 @@ function CallbackContent() {
               // Network blip on the invite lookup is non-fatal — fall through
               // to the normal post-auth destination so the user isn't stuck
               // on a blank callback screen. Worst case they land on
-              // /onboarding and the sidebar will surface invites later.
+              // workspace creation and the sidebar will surface invites later.
             }
           }
 
-          // 3. Default: hand off to the resolver (onboarding for first-timers,
-          //    first workspace for returning users, /workspaces/new for
-          //    onboarded users with zero workspaces). Source-attribution
-          //    backfill for onboarded users with no recorded source is
-          //    handled by `<SourceBackfillModal />` inside the dashboard
-          //    shell — not a route detour, so we route straight to dest.
-          router.push(resolvePostAuthDestination(wsList, onboarded));
+          // 3. Default: hand off to the resolver (first workspace, or
+          //    /workspaces/new for users with zero workspaces).
+          router.push(resolvePostAuthDestination(wsList));
         })
         .catch((err) => {
           authLogger.error("Web Google OAuth callback failed", err);

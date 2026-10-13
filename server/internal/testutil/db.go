@@ -204,7 +204,7 @@ func (f *Fixture) Comment(t TB, issueID, content string, over ...Cols) string {
 	}, over))
 }
 
-// Runtime inserts an online cloud runtime.
+// Runtime inserts an online daemon-less runtime row (runtime_mode "cloud").
 func (f *Fixture) Runtime(t TB, name string, over ...Cols) string {
 	t.Helper()
 	return f.Insert(t, "agent_runtime", merge(Cols{
@@ -250,28 +250,6 @@ func (f *Fixture) Task(t TB, agentID string, over ...Cols) string {
 		"agent_id": agentID,
 		"status":   "queued",
 		"priority": 0,
-	}, over))
-}
-
-// Squad inserts a squad led by leaderID.
-func (f *Fixture) Squad(t TB, name, leaderID string, over ...Cols) string {
-	t.Helper()
-	return f.Insert(t, "squad", merge(Cols{
-		"workspace_id": f.WorkspaceID,
-		"name":         name,
-		"description":  "",
-		"leader_id":    leaderID,
-		"creator_id":   f.UserID,
-	}, over))
-}
-
-// SquadMember adds an agent or member to a squad.
-func (f *Fixture) SquadMember(t TB, squadID, memberType, memberID string, over ...Cols) string {
-	t.Helper()
-	return f.Insert(t, "squad_member", merge(Cols{
-		"squad_id":    squadID,
-		"member_type": memberType,
-		"member_id":   memberID,
 	}, over))
 }
 
