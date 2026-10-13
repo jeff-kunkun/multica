@@ -437,28 +437,26 @@ func TestGetConfigExposesFrontendFeatureFlags(t *testing.T) {
 	if err := json.Unmarshal(w.Body.Bytes(), &cfg); err != nil {
 		t.Fatalf("decode default config: %v", err)
 	}
-	if cfg.FeatureFlags["composio_mcp_apps"] {
-		t.Fatalf("composio_mcp_apps: want false by default, got true")
+	if _, published := cfg.FeatureFlags["composio_mcp_apps"]; published {
+		t.Fatalf("composio_mcp_apps: retired with the connected-apps feature, must not be published")
 	}
-	if cfg.FeatureFlags["billing_workspace_subscriptions"] {
-		t.Fatalf("billing_workspace_subscriptions: want false by default, got true")
-	}
-	if cfg.FeatureFlags["plugins_v1"] {
-		t.Fatalf("plugins_v1: want false by default, got true")
-	}
-	for _, retired := range []string{"private_plugins_v1", "remote_mcp_plugins_v1"} {
+	// Billing, plugins, the agent builder and skills are gone from this build. Installed
+	// clients fail closed on these keys, so leaving them unpublished hides the
+	// entry points those clients would otherwise render.
+	for _, retired := range []string{
+		"billing_workspace_subscriptions",
+		"plugins_v1",
+		"private_plugins_v1",
+		"remote_mcp_plugins_v1",
+		"agents_agent_builder",
+		"agents_skill_toggles",
+	} {
 		if _, published := cfg.FeatureFlags[retired]; published {
-			t.Fatalf("retired Plugin sub-flag %q must not be published", retired)
+			t.Fatalf("retired flag %q must not be published", retired)
 		}
-	}
-	if !cfg.FeatureFlags["agents_skill_toggles"] {
-		t.Fatalf("agents_skill_toggles: want true for installed v0.4.0 clients, got false")
 	}
 	if !cfg.FeatureFlags["settings_resource_labels"] {
 		t.Fatalf("settings_resource_labels: want true for installed clients, got false")
-	}
-	if !cfg.FeatureFlags["agents_agent_builder"] {
-		t.Fatalf("agents_agent_builder: want true for installed clients, got false")
 	}
 	// MUL-5345: hang stack capture is gone from this build, but v0.4.13–v0.4.18 are
 	// installed and still hold a debugger channel open on every renderer whenever
@@ -473,38 +471,6 @@ func TestGetConfigExposesFrontendFeatureFlags(t *testing.T) {
 	// the v0.4.31 rendering fixes is kept from creating one.
 	if _, published := cfg.FeatureFlags["custom_issue_statuses"]; published {
 		t.Fatalf("custom_issue_statuses: want unpublished, got %v", cfg.FeatureFlags["custom_issue_statuses"])
-	}
-
-	withComposioMCPAppsFlag(t, h, true)
-	w = httptest.NewRecorder()
-	h.GetConfig(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("GetConfig enabled flags: expected 200, got %d: %s", w.Code, w.Body.String())
-	}
-	if err := json.Unmarshal(w.Body.Bytes(), &cfg); err != nil {
-		t.Fatalf("decode enabled config: %v", err)
-	}
-	if !cfg.FeatureFlags["composio_mcp_apps"] {
-		t.Fatalf("composio_mcp_apps: want true with flag enabled, got false")
-	}
-}
-
-func TestGetConfigExposesEnabledPluginsV1Flag(t *testing.T) {
-	h := &Handler{}
-	withPluginsV1Flag(t, h, true)
-
-	req := httptest.NewRequest(http.MethodGet, "/api/config", nil)
-	w := httptest.NewRecorder()
-	h.GetConfig(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("GetConfig enabled plugins_v1: expected 200, got %d: %s", w.Code, w.Body.String())
-	}
-	var cfg AppConfig
-	if err := json.Unmarshal(w.Body.Bytes(), &cfg); err != nil {
-		t.Fatalf("decode enabled config: %v", err)
-	}
-	if !cfg.FeatureFlags["plugins_v1"] {
-		t.Fatal("plugins_v1: want true with flag enabled, got false")
 	}
 }
 

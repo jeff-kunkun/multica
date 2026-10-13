@@ -140,15 +140,15 @@ func TestAuthorizeRepoCheckoutWorkDirExtendedLengthSpelling(t *testing.T) {
 
 func TestShouldReusePriorWorkdirThroughJunctionedRoot(t *testing.T) {
 	root, target := junctionedWorkspacesRoot(t)
-	workDir := filepath.Join(root, "ws-leader", "12345678", "workdir")
-	writeLeaderTaskMarker(t, workDir, "agent-leader", "issue-leader")
-	writeLeaderManagedEnvProvenance(t, workDir, "ws-leader", "issue-leader", "agent-leader")
-	want, err := filepath.EvalSymlinks(filepath.Join(target, "ws-leader", "12345678", "workdir"))
+	workDir := filepath.Join(root, "ws-reuse", "12345678", "workdir")
+	writeIssueTaskMarker(t, workDir, "agent-reuse", "issue-reuse")
+	writeIssueManagedEnvProvenance(t, workDir, "ws-reuse", "issue-reuse", "agent-reuse")
+	want, err := filepath.EvalSymlinks(filepath.Join(target, "ws-reuse", "12345678", "workdir"))
 	if err != nil {
 		t.Fatalf("resolve target workdir: %v", err)
 	}
 
-	task := leaderReuseTestTask("task-junction-root")
+	task := reuseTestTask("task-junction-root")
 	task.PriorWorkDir = workDir
 	got, ok := shouldReusePriorWorkdir(task, nil, root)
 	if !ok {

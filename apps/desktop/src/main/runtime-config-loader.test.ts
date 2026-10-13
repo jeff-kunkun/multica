@@ -3,6 +3,7 @@ import { mkdtemp, writeFile } from "fs/promises";
 import { join } from "path";
 import { tmpdir } from "os";
 import { describe, expect, it } from "vitest";
+import { DEFAULT_RUNTIME_CONFIG } from "../shared/runtime-config";
 import { loadRuntimeConfig } from "./runtime-config-loader";
 
 describe("loadRuntimeConfig", () => {
@@ -45,12 +46,7 @@ describe("loadRuntimeConfig", () => {
       }),
     ).resolves.toEqual({
       ok: true,
-      config: {
-        schemaVersion: 1,
-        apiUrl: "https://api.multica.ai",
-        wsUrl: "wss://api.multica.ai/ws",
-        appUrl: "https://multica.ai",
-      },
+      config: DEFAULT_RUNTIME_CONFIG,
     });
   });
 

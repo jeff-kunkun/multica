@@ -12,7 +12,6 @@ import { useState, useEffect, useCallback, useMemo, useRef, Fragment, type React
 import { Virtuoso, type VirtuosoHandle } from "react-virtuoso";
 import { useDefaultLayout, usePanelRef } from "react-resizable-panels";
 import { AppLink, useBackOrReplace } from "../../navigation";
-import { IssueDuplicateBanner, IssueDuplicatesSection, isDuplicateIssue } from "./issue-duplicates";
 import {
   Archive,
   Calendar,
@@ -40,13 +39,6 @@ import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from "@multica/u
 import { Sheet, SheetContent } from "@multica/ui/components/ui/sheet";
 import { useIsMobile } from "@multica/ui/hooks/use-mobile";
 import { ContentEditor, type ContentEditorRef, TitleEditor, type TitleEditorRef, useFileDropZone, FileDropOverlay, useLazyEditor, useEditorUpload, PreviewSequenceProvider, collectPreviewSequence } from "../../editor";
-import {
-  WAKEUP_ACTIVITY_ACTIONS,
-  WakeupActivityIcon,
-  formatWakeupActivity,
-  wakeupActivityChip,
-} from "./wakeup-activity";
-import { useWakeupText } from "./wakeup-presentation";
 import type { ImageSequenceBlock } from "@multica/core/attachments/image-sequence";
 import { FileUploadButton } from "@multica/ui/components/common/file-upload-button";
 import {
@@ -94,6 +86,7 @@ import { SubIssuesAgentWorkingChip } from "./sub-issues-agent-working-chip";
 import { ProjectPicker } from "../../projects/components/project-picker";
 import { IssuePropertyPills } from "./issue-property-pills";
 import { LocalDirectoryHint } from "../../projects/components/local-directory-hint";
+import { IssuePlanCard } from "../../plans/plan-card";
 import { useNewRunIds } from "./use-run-comment-motion";
 import { AgentRunComment, CommentCard } from "./comment-card";
 import { EMPTY_COMMENT_RUNS, buildCommentRunView, orderTimelineWithRuns, type CommentRun } from "./comment-runs";
@@ -107,11 +100,7 @@ import { ResolvedThreadBar } from "./resolved-thread-bar";
 import { ThreadMinimap, type ThreadMinimapThread } from "./thread-minimap";
 import { collectThreadParticipants, collectThreadReplies, deriveThreadResolution } from "./thread-utils";
 import { IssueAgentHeaderChip } from "./issue-agent-header-chip";
-import { IssueWakeupHeaderChip } from "./issue-wakeup-header-chip";
 import { ExecutionLogSection } from "./execution-log-section";
-import { WakeupsSection } from "./wakeups-section";
-import { QuickActionsSection } from "./quick-actions-section";
-import { PluginPanelSection } from "../../plugins";
 import { PullRequestsSection } from "./pull-requests-section";
 import { useGitHubSettings } from "@multica/core/github";
 import { DeliverablesSection } from "./deliverables/deliverables-section";
@@ -375,105 +364,15 @@ function formatActivity(
       });
     case "description_updated":
       return t(($) => $.activity.description_updated);
-    case "duplicate_marked":
-      return t(($) => $.activity.duplicate_marked, {
-        identifier: details.original_identifier || "?",
-      });
-    case "duplicate_unmarked": {
-      const identifier = details.original_identifier || "?";
-      if (details.reason === "original_deleted") {
-        return t(($) => $.activity.duplicate_unmarked_original_deleted, { identifier });
-      }
-      // The row stands in for the status row of the reopen, so it says where
-      // the status went.
-      if (details.to) {
-        return t(($) => $.activity.duplicate_unmarked_to, {
-          identifier,
-          status: statusLabel(details.to, t, resolveStatusLabel),
-        });
-      }
-      return t(($) => $.activity.duplicate_unmarked, { identifier });
-    }
-    case "duplicate_added":
-      return t(($) => $.activity.duplicate_added, {
-        identifier: details.duplicate_identifier || "?",
-      });
-    case "duplicate_removed":
-      return t(($) => $.activity.duplicate_removed, {
-        identifier: details.duplicate_identifier || "?",
-      });
     case "task_completed":
       return t(($) => $.activity.task_completed, { count: entry.coalesced_count ?? 1 });
     case "task_failed":
       return t(($) => $.activity.task_failed, { count: entry.coalesced_count ?? 1 });
-    case "squad_leader_evaluated": {
-      const reason = details.reason?.trim();
-      switch (details.outcome) {
-        case "action":
-          return reason
-            ? t(($) => $.activity.squad_leader_action_reason, { reason })
-            : t(($) => $.activity.squad_leader_action);
-        case "no_action":
-          return reason
-            ? t(($) => $.activity.squad_leader_no_action_reason, { reason })
-            : t(($) => $.activity.squad_leader_no_action);
-        case "failed":
-          return reason
-            ? t(($) => $.activity.squad_leader_failed_reason, { reason })
-            : t(($) => $.activity.squad_leader_failed);
-        default:
-          return t(($) => $.activity.squad_leader_evaluated);
-      }
-    }
     default:
       return entry.action ?? "";
   }
 }
 
-/**
- * The issue a duplicate-mark activity (MUL-7349) names, when it can still be
- * opened. A mark removed because its original was deleted has nowhere to
- * link, so it renders as plain text.
- */
-function duplicateActivityLink(entry: TimelineEntry): { id: string; identifier: string } | null {
-  const details = (entry.details ?? {}) as Record<string, string>;
-  switch (entry.action) {
-    case "duplicate_marked":
-    case "duplicate_unmarked":
-      if (details.reason === "original_deleted") return null;
-      return details.original_id && details.original_identifier
-        ? { id: details.original_id, identifier: details.original_identifier }
-        : null;
-    case "duplicate_added":
-    case "duplicate_removed":
-      return details.duplicate_id && details.duplicate_identifier
-        ? { id: details.duplicate_id, identifier: details.duplicate_identifier }
-        : null;
-    default:
-      return null;
-  }
-}
-
-/** Activity copy with the issue it names turned into a link. */
-function ActivityText({ entry, text }: { entry: TimelineEntry; text: string }) {
-  const paths = useWorkspacePaths();
-  const link = duplicateActivityLink(entry);
-  const at = link ? text.indexOf(link.identifier) : -1;
-  if (!link || at < 0) return <>{text}</>;
-  return (
-    <>
-      {text.slice(0, at)}
-      <AppLink
-        href={paths.issueDetail(link.id)}
-        newTabTitle={link.identifier}
-        className="font-medium text-foreground underline-offset-4 hover:underline"
-      >
-        {link.identifier}
-      </AppLink>
-      {text.slice(at + link.identifier.length)}
-    </>
-  );
-}
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -670,7 +569,6 @@ function ActivityBlock({
   timeAgo: (dateStr: string) => string;
   locale: string;
 }) {
-  const wakeupText = useWakeupText();
   if (!expanded) {
     const count = entries.length;
     return (
@@ -723,22 +621,14 @@ function ActivityBlock({
       )}
       {visibleEntries.map((entry) => {
         const details = (entry.details ?? {}) as Record<string, string>;
-        // Duplicate rows replace the status rows of the same write, so they
-        // carry the status glyph those rows would have had.
         const isStatusChange = entry.action === "status_changed";
-        const markedDuplicate = entry.action === "duplicate_marked";
-        const unmarkedDuplicate = entry.action === "duplicate_unmarked" && !!details.to;
         const isPriorityChange = entry.action === "priority_changed";
         const isStartDateChange = entry.action === "start_date_changed";
         const isDueDateChange = entry.action === "due_date_changed";
 
-        const isWakeup = WAKEUP_ACTIVITY_ACTIONS.has(entry.action ?? "");
-        const chip = isWakeup ? wakeupActivityChip(entry, t, wakeupText, getActorName) : null;
         let leadIcon: React.ReactNode;
-        if (isWakeup) {
-          leadIcon = <WakeupActivityIcon entry={entry} />;
-        } else if ((isStatusChange && details.to) || markedDuplicate || unmarkedDuplicate) {
-          const to = markedDuplicate ? "cancelled" : details.to;
+        if (isStatusChange && details.to) {
+          const to = details.to;
           leadIcon = (
             <StatusIcon
               status={to as IssueStatus}
@@ -773,27 +663,12 @@ function ActivityBlock({
               {leadIcon}
             </div>
             <div className="flex min-w-0 flex-1 items-center gap-1">
-              {/* The platform's own entries read as a sentence without an actor. */}
-              {!(isWakeup && entry.actor_type === "system") && (
-                <span className="shrink-0 font-medium">
-                  {entry.actor_name || getActorName(entry.actor_type, entry.actor_id)}
-                </span>
-              )}
-              <span className="truncate">
-                <ActivityText
-                  entry={entry}
-                  text={
-                    isWakeup
-                      ? formatWakeupActivity(entry, t, wakeupText, getActorName)
-                      : formatActivity(entry, t, locale, getActorName, resolveStatusLabel)
-                  }
-                />
+              <span className="shrink-0 font-medium">
+                {entry.actor_name || getActorName(entry.actor_type, entry.actor_id)}
               </span>
-              {chip && (
-                <span className="ml-auto inline-flex max-w-48 shrink-0 items-center gap-1 truncate rounded-xs bg-muted px-1.5 py-0.5 text-micro text-muted-foreground">
-                  {chip}
-                </span>
-              )}
+              <span className="truncate">
+                {formatActivity(entry, t, locale, getActorName, resolveStatusLabel)}
+              </span>
               {(entry.coalesced_count ?? 1) > 1 &&
                 entry.action !== "task_completed" &&
                 entry.action !== "task_failed" && (
@@ -804,7 +679,7 @@ function ActivityBlock({
               <Tooltip>
                 <TooltipTrigger
                   render={
-                    <span className={cn("shrink-0 cursor-default", !chip && "ml-auto")}>
+                    <span className="ml-auto shrink-0 cursor-default">
                       {timeAgo(entry.created_at)}
                     </span>
                   }
@@ -1321,7 +1196,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   const currentUserRole =
     members.find((m) => m.user_id === user?.id)?.role ?? null;
   const canModerateComments =
-    currentUserRole === "owner" || currentUserRole === "admin";
+    currentUserRole === "owner";
   const { data: allIssues = [] } = useQuery(issueListOptions(wsId));
   const { getActorName } = useActorName();
   const resolveStatusLabel = useStatusLabel(wsId);
@@ -1551,7 +1426,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   } : undefined, [canAnnotateDescription, t, descriptionAnnotations.addSelection]);
   const openCommentSubIssue = useCallback((commentId: string) => {
     if (!issue) return;
-    openModal("quick-create-issue", {
+    openModal("create-issue", {
       anchor_comment_id: commentId,
       parent_issue_id: issue.id,
       parent_issue_identifier: issue.identifier,
@@ -1683,21 +1558,8 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     // Coalesce consecutive activities from the same actor + action.
     // - task_completed / task_failed: no time limit (these repeat across runs)
     // - all other actions: within a 2-minute window
-    // - squad_leader_evaluated: never coalesce; outcome/reason are audit data
     const COALESCE_MS = 2 * 60 * 1000;
-    const NO_TIME_LIMIT_ACTIONS = new Set(["task_completed", "task_failed", "wakeup_checkin"]);
-    // Duplicate marks name a different issue on every row.
-    const NEVER_COALESCE_ACTIONS = new Set([
-      "squad_leader_evaluated",
-      "wakeup_created",
-      "wakeup_triggered",
-      "wakeup_timed_out",
-      "wakeup_paused",
-      "duplicate_marked",
-      "duplicate_unmarked",
-      "duplicate_added",
-      "duplicate_removed",
-    ]);
+    const NO_TIME_LIMIT_ACTIONS = new Set(["task_completed", "task_failed"]);
     // Unanchored runs keep their enqueue-time slot while working, then use
     // the published reply's time or the run's end time.
     const entryById = new Map(displayTimeline.map((entry) => [entry.id, entry]));
@@ -1711,7 +1573,6 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
       if (entry.type === "activity") {
         const prev = coalesced[coalesced.length - 1];
         if (
-          !NEVER_COALESCE_ACTIONS.has(entry.action!) &&
           prev && !("task" in prev) && prev.type === "activity" &&
           prev.action === entry.action &&
           prev.actor_type === entry.actor_type &&
@@ -2255,7 +2116,6 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   const descriptionSaveIssueIdRef = useRef(id);
   const pendingDescriptionSaveRef = useRef<{
     markdown: string;
-    baseMarkdown: string;
     attachmentIds: string[];
   } | null>(null);
   // Keep the description editor mounted from the start. Unlike the empty
@@ -2563,17 +2423,6 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     });
   }, [beginDesktopSidebarToggle, isMobile, sidebarRef]);
 
-  // The header's wakeup chip opens the sidebar and brings the Wakeups section
-  // into view with focus on its heading.
-  const openWakeups = useCallback(() => {
-    if (!sidebarOpen) handleToggleSidebar();
-    window.requestAnimationFrame(() => {
-      const heading = document.getElementById(`issue-wakeups-${id}`);
-      heading?.scrollIntoView({ block: "nearest" });
-      heading?.focus({ preventScroll: true });
-    });
-  }, [handleToggleSidebar, id, sidebarOpen]);
-
   useRightSidebarShortcut(rightSidebarShortcutTargetRef, handleToggleSidebar);
 
   useIssueDetailScrollRestore({
@@ -2615,31 +2464,23 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   }
 
   const persistDescriptionSave = (
-    draft: { markdown: string; baseMarkdown: string; attachmentIds: string[] },
+    draft: { markdown: string; attachmentIds: string[] },
   ) => {
     descriptionSaveInFlightRef.current = true;
     handleUpdateField(
       {
         description: draft.markdown,
-        description_base: draft.baseMarkdown,
         attachment_ids:
           draft.attachmentIds.length > 0 ? draft.attachmentIds : undefined,
       },
       {
-        onSuccess: (serverIssue) => {
+        onSuccess: () => {
           if (descriptionSaveIssueIdRef.current !== id) return;
           descriptionSaveInFlightRef.current = false;
           const pending = pendingDescriptionSaveRef.current;
           pendingDescriptionSaveRef.current = null;
           if (pending) {
-            // Usually the accepted document is exactly what we submitted. If
-            // the server appended late channel media, keep the submitted body
-            // as the next editor baseline: the server can recognize that the
-            // only delta is media the editor never saw and preserve it again.
-            const nextBase = serverIssue.description === draft.markdown
-              ? serverIssue.description
-              : draft.markdown;
-            persistDescriptionSave({ ...pending, baseMarkdown: nextBase });
+            persistDescriptionSave(pending);
           }
         },
         onError: () => {
@@ -2652,7 +2493,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   };
 
   const queueDescriptionSave = (
-    draft: { markdown: string; baseMarkdown: string; attachmentIds: string[] },
+    draft: { markdown: string; attachmentIds: string[] },
   ) => {
     if (descriptionSaveInFlightRef.current) {
       pendingDescriptionSaveRef.current = draft;
@@ -2680,8 +2521,6 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
               status={issue.status}
               onUpdate={handleUpdateField}
               align="start"
-              onMarkDuplicate={actions.openMarkDuplicate}
-              isDuplicate={isDuplicateIssue(issue)}
             />
           </PropRow>
           <PropRow label={t(($) => $.detail.prop_assignee)}>
@@ -2860,20 +2699,6 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
         </div>}
       </div>
 
-      {/* Quick actions — the sidebar's only "do something" block, so it sits
-          directly under Properties and above every read-only section. Renders
-          nothing when the workspace has no active action visible to this
-          member. It is NOT filtered by invoke permission: a member can see and
-          click an action they cannot run, and the refusal is explained at run
-          time rather than by a silently shorter list. */}
-      <QuickActionsSection issueId={issue.id} />
-      <WakeupsSection
-        issueId={issue.id}
-        closed={["done", "closed"].includes(resolveStatusCategory(issue.status))}
-        defaultAgentId={issue.assignee_type === "agent" ? (issue.assignee_id ?? undefined) : undefined}
-      />
-      <PluginPanelSection issueId={issue.id} />
-
       {/* Parent issue — standalone section, only when the issue has a
           parent. Setting a parent is reachable via the issue actions menu;
           this card surfaces an existing parent without occupying sidebar
@@ -2917,8 +2742,6 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
           </div>}
         </div>
       )}
-
-      <IssueDuplicatesSection issueId={issue.id} />
 
       {/* Pull requests — hidden when the workspace disables the PR sidebar
           (or the GitHub master switch is off). Backend data is kept either
@@ -3163,7 +2986,6 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                 it never overlaps the title (which truncates to make room).
                 It self-hides when no agent is active. */}
             <IssueAgentHeaderChip issueId={id} />
-            <IssueWakeupHeaderChip issueId={id} onOpen={openWakeups} />
             {onDone && !issueBehavesAsAny(issue, ["done", "closed"]) && (
               <Tooltip>
                 <TooltipTrigger
@@ -3274,15 +3096,6 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
             isPeek ? "px-6 py-5" : "max-w-4xl px-3 py-6 max-md:pb-chat-launcher md:px-8 md:py-8",
           )}
         >
-          <IssueDuplicateBanner
-            issue={issue}
-            onUnmark={() =>
-              handleUpdateField(
-                { status: "todo" },
-                { onSuccess: () => toast.success(t(($) => $.duplicates.unmark_toast)) },
-              )
-            }
-          />
           {titleLazy.active && (
             <div className={titleLazy.ready ? undefined : "hidden"}>
               <TitleEditor
@@ -3423,8 +3236,6 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
               <IssuePropertyPills
                 issue={issue}
                 onUpdate={handleUpdateField}
-                onMarkDuplicate={actions.openMarkDuplicate}
-                isDuplicate={isDuplicateIssue(issue)}
               />
             </div>
           )}
@@ -3469,7 +3280,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                 key={id}
                 value={issue.description ?? ""}
                 placeholder={t(($) => $.detail.desc_placeholder)}
-                onUpdate={(md, baseMarkdown) => {
+                onUpdate={(md) => {
                   // Bind any pending uploads still referenced in the markdown
                   // so they appear in `issueAttachments` after refresh and the
                   // editor's text/code preview keeps working past reload.
@@ -3492,7 +3303,6 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                     .map((a) => a.id);
                   queueDescriptionSave({
                     markdown: md,
-                    baseMarkdown,
                     attachmentIds: ids,
                   });
                 }}
@@ -3642,6 +3452,8 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
           })()}
 
           <div className="my-8 border-t" />
+
+          <IssuePlanCard issueId={id} />
 
           {/* Activity / Comments */}
           <div>

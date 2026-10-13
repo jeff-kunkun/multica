@@ -5,30 +5,19 @@ import "strings"
 // Event names. This file is the source-of-truth catalog; keep
 // packages/core/analytics in sync with it.
 const (
-	EventSignup                        = "signup"
-	EventWorkspaceCreated              = "workspace_created"
-	EventRuntimeRegistered             = "runtime_registered"
-	EventRuntimeReady                  = "runtime_ready"
-	EventRuntimeFailed                 = "runtime_failed"
-	EventRuntimeOffline                = "runtime_offline"
-	EventIssueExecuted                 = "issue_executed"
-	EventIssueCreated                  = "issue_created"
-	EventChatMessageSent               = "chat_message_sent"
-	EventAutopilotRunStarted           = "autopilot_run_started"
-	EventAutopilotRunCompleted         = "autopilot_run_completed"
-	EventAutopilotRunFailed            = "autopilot_run_failed"
-	EventTeamInviteSent                = "team_invite_sent"
-	EventTeamInviteAccepted            = "team_invite_accepted"
-	EventOnboardingStarted             = "onboarding_started"
-	EventOnboardingQuestionnaireSubmit = "onboarding_questionnaire_submitted"
-	EventOnboardingSourceSubmit        = "onboarding_source_submitted"
-	EventAgentCreated                  = "agent_created"
-	EventOnboardingCompleted           = "onboarding_completed"
-	EventCloudWaitlistJoined           = "cloud_waitlist_joined"
-	EventFeedbackSubmitted             = "feedback_submitted"
-	EventContactSalesSubmitted         = "contact_sales_submitted"
-	EventSquadCreated                  = "squad_created"
-	EventAutopilotCreated              = "autopilot_created"
+	EventSignup             = "signup"
+	EventWorkspaceCreated   = "workspace_created"
+	EventRuntimeRegistered  = "runtime_registered"
+	EventRuntimeReady       = "runtime_ready"
+	EventRuntimeFailed      = "runtime_failed"
+	EventRuntimeOffline     = "runtime_offline"
+	EventIssueExecuted      = "issue_executed"
+	EventIssueCreated       = "issue_created"
+	EventChatMessageSent    = "chat_message_sent"
+	EventTeamInviteSent     = "team_invite_sent"
+	EventTeamInviteAccepted = "team_invite_accepted"
+	EventAgentCreated       = "agent_created"
+	EventFeedbackSubmitted  = "feedback_submitted"
 )
 
 const EventSchemaVersion = 2
@@ -43,7 +32,7 @@ const EventSchemaVersion = 2
 // operational database and from these Grafana counters, so the redundant
 // PostHog copy of every product event was retired. That makes ALL server-side
 // events metrics-only — both the product-behaviour group and the original
-// high-volume runtime/autopilot telemetry are Prometheus-only. PostHog now only
+// high-volume runtime telemetry are Prometheus-only. PostHog now only
 // receives frontend error/crash telemetry ($exception, client_crash,
 // client_unresponsive); see packages/core/analytics.
 //
@@ -54,32 +43,21 @@ const EventSchemaVersion = 2
 var metricsOnlyEvents = map[string]struct{}{
 	// Product-behaviour events — DB + Grafana are the source of truth
 	// (MUL-4127); the PostHog copy was redundant.
-	EventSignup:                        {},
-	EventWorkspaceCreated:              {},
-	EventIssueCreated:                  {},
-	EventIssueExecuted:                 {},
-	EventChatMessageSent:               {},
-	EventTeamInviteSent:                {},
-	EventTeamInviteAccepted:            {},
-	EventOnboardingStarted:             {},
-	EventOnboardingQuestionnaireSubmit: {},
-	EventOnboardingSourceSubmit:        {},
-	EventAgentCreated:                  {},
-	EventOnboardingCompleted:           {},
-	EventCloudWaitlistJoined:           {},
-	EventFeedbackSubmitted:             {},
-	EventContactSalesSubmitted:         {},
-	EventSquadCreated:                  {},
-	EventAutopilotCreated:              {},
-	// High-volume runtime / autopilot execution-lifecycle telemetry — always
+	EventSignup:             {},
+	EventWorkspaceCreated:   {},
+	EventIssueCreated:       {},
+	EventIssueExecuted:      {},
+	EventChatMessageSent:    {},
+	EventTeamInviteSent:     {},
+	EventTeamInviteAccepted: {},
+	EventAgentCreated:       {},
+	EventFeedbackSubmitted:  {},
+	// High-volume runtime lifecycle telemetry — always
 	// Prometheus-only (Grafana already carries the equivalent counters).
-	EventRuntimeRegistered:     {},
-	EventRuntimeReady:          {},
-	EventRuntimeFailed:         {},
-	EventRuntimeOffline:        {},
-	EventAutopilotRunStarted:   {},
-	EventAutopilotRunCompleted: {},
-	EventAutopilotRunFailed:    {},
+	EventRuntimeRegistered: {},
+	EventRuntimeReady:      {},
+	EventRuntimeFailed:     {},
+	EventRuntimeOffline:    {},
 }
 
 // IsMetricsOnly reports whether an event name is recorded to Prometheus but must
@@ -91,11 +69,9 @@ func IsMetricsOnly(name string) bool {
 }
 
 const (
-	SourceOnboarding = "onboarding"
-	SourceManual     = "manual"
-	SourceChat       = "chat"
-	SourceAutopilot  = "autopilot"
-	SourceAPI        = "api"
+	SourceManual = "manual"
+	SourceChat   = "chat"
+	SourceAPI    = "api"
 )
 
 // CoreProperties are the shared join and segmentation fields used by the
@@ -103,30 +79,19 @@ const (
 // always stamped so dashboards can filter demo data without sparse-property
 // edge cases.
 type CoreProperties struct {
-	UserID         string
-	WorkspaceID    string
-	AgentID        string
-	TaskID         string
-	IssueID        string
-	ChatSessionID  string
-	AutopilotRunID string
-	Source         string
-	RuntimeMode    string
-	Provider       string
-	IsDemo         bool
+	UserID        string
+	WorkspaceID   string
+	AgentID       string
+	TaskID        string
+	IssueID       string
+	ChatSessionID string
+	Source        string
+	RuntimeMode   string
+	Provider      string
+	IsDemo        bool
 }
 
 type TaskContext = CoreProperties
-
-// Onboarding completion paths. Keep in sync with packages/core/analytics.
-const (
-	OnboardingPathFull           = "full"            // reached first_issue end of flow
-	OnboardingPathRuntimeSkipped = "runtime_skipped" // completed without connecting a runtime
-	OnboardingPathCloudWaitlist  = "cloud_waitlist"  // completed via cloud waitlist soft exit
-	OnboardingPathSkipExisting   = "skip_existing"   // "I've done this before" from welcome
-	OnboardingPathInviteAccept   = "invite_accept"   // accepted at least one invitation from /invitations
-	OnboardingPathUnknown        = "unknown"         // fallback when the server can't derive the path
-)
 
 // Platform is used as the "platform" event property so funnels can split by
 // web / desktop / cli. Request-path events use PlatformServer as a fallback
@@ -316,7 +281,7 @@ func IssueExecuted(actorID, workspaceID, issueID, taskID, agentID, source, runti
 	}
 }
 
-func IssueCreated(actorID, workspaceID, issueID, agentID, taskID, autopilotRunID, source, platform string) Event {
+func IssueCreated(actorID, workspaceID, issueID, agentID, taskID, source, platform string) Event {
 	props := map[string]any{}
 	if platform != "" {
 		props["platform"] = platform
@@ -326,13 +291,12 @@ func IssueCreated(actorID, workspaceID, issueID, agentID, taskID, autopilotRunID
 		DistinctID:  actorID,
 		WorkspaceID: workspaceID,
 		Properties: withCoreProperties(props, CoreProperties{
-			UserID:         nonAgentUserID(actorID),
-			WorkspaceID:    workspaceID,
-			AgentID:        agentID,
-			TaskID:         taskID,
-			IssueID:        issueID,
-			AutopilotRunID: autopilotRunID,
-			Source:         source,
+			UserID:      nonAgentUserID(actorID),
+			WorkspaceID: workspaceID,
+			AgentID:     agentID,
+			TaskID:      taskID,
+			IssueID:     issueID,
+			Source:      source,
 		}),
 	}
 }
@@ -357,36 +321,6 @@ func ChatMessageSent(userID, workspaceID, chatSessionID, taskID, agentID, runtim
 			Provider:      provider,
 		}),
 	}
-}
-
-// AutopilotAssignee describes the autopilot's configured target. agent_id is
-// always the agent that will actually execute the work (the squad leader for
-// squad autopilots) so funnels grouping by agent stay consistent. assignee_*
-// fields record the original configuration so reports can tell a solo-agent
-// autopilot apart from a squad one without joining back to the autopilot row.
-type AutopilotAssignee struct {
-	AgentID      string // executing agent — leader for squad autopilots
-	AssigneeType string // "agent" or "squad"
-	SquadID      string // empty when AssigneeType != "squad"
-}
-
-func AutopilotRunStarted(actorID, workspaceID, autopilotID, runID, cadence string, assignee AutopilotAssignee, triggerSource string) Event {
-	return autopilotRunEvent(EventAutopilotRunStarted, actorID, workspaceID, autopilotID, runID, cadence, assignee, triggerSource, nil)
-}
-
-func AutopilotRunCompleted(actorID, workspaceID, autopilotID, runID, cadence string, assignee AutopilotAssignee, triggerSource string, durationMS int64) Event {
-	return autopilotRunEvent(EventAutopilotRunCompleted, actorID, workspaceID, autopilotID, runID, cadence, assignee, triggerSource, map[string]any{
-		"duration_ms": durationMS,
-	})
-}
-
-func AutopilotRunFailed(actorID, workspaceID, autopilotID, runID, cadence string, assignee AutopilotAssignee, triggerSource, failureReason, errorType string, willRetry bool, durationMS int64) Event {
-	return autopilotRunEvent(EventAutopilotRunFailed, actorID, workspaceID, autopilotID, runID, cadence, assignee, triggerSource, map[string]any{
-		"duration_ms":    durationMS,
-		"failure_reason": failureReason,
-		"error_type":     errorType,
-		"will_retry":     willRetry,
-	})
 }
 
 // TeamInviteSent fires when a workspace admin creates an invitation.
@@ -418,137 +352,12 @@ func TeamInviteAccepted(inviteeID, workspaceID string, daysSinceInvite int64) Ev
 	}
 }
 
-// OnboardingQuestionnaireSubmitted fires the first time a user's
-// `user.onboarding_questionnaire` transitions from "at least one slot
-// unresolved" to "every slot has either an answer or a skip marker".
-// The handler drives this transition — we emit from PatchOnboarding so
-// the single emission site stays honest even if the frontend retries.
+// AgentCreated fires whenever a new agent is added to a workspace.
+// `isFirstAgentInWorkspace` lets the funnel isolate the first agent from
+// later agent additions.
 //
-// `useCase` is multi-select (users can pick several); `source` is
-// single-select (primary acquisition channel) but kept as a slice
-// for back-compat with v2 multi-select rows — single-element in
-// current data. `role` stays single-select. Empty slice = no answer
-// (skip is captured separately via the *Skipped booleans).
-//
-// The three answers are also mirrored into person properties via $set
-// so cohorting by source / role / use_case works across every event
-// on the same user without re-joining back to the DB. PostHog accepts
-// array property values; breakdowns on a multi-value property treat
-// each element as a separate group.
-//
-// `*Skipped` booleans capture per-question skip intent. `*HasOther`
-// are presence booleans for the free-text "other" override; the
-// free-text content is kept in the DB for product research but not
-// broadcast via analytics (PII risk + low cardinality ask).
-// OnboardingStarted fires from the server side the first time a user's
-// onboarding state transitions from untouched (no questionnaire payload
-// recorded) to any non-empty patch. Frontends emit their own
-// onboarding_started on first page open; the server emission is what
-// lights up the Prometheus counter so Grafana can be cross-checked
-// against the PostHog funnel without depending on the SDK roundtrip.
-//
-// platform is the X-Client-Platform header value at the time of the
-// first onboarding interaction, fed into the
-// `multica_onboarding_started_total{platform=...}` label via the fixed
-// allow-list in metrics.NormalizePlatform.
-func OnboardingStarted(userID, platform string) Event {
-	props := map[string]any{}
-	if platform != "" {
-		props["platform"] = platform
-	}
-	return Event{
-		Name:       EventOnboardingStarted,
-		DistinctID: userID,
-		Properties: withCoreProperties(props, CoreProperties{
-			UserID: userID,
-			Source: SourceOnboarding,
-		}),
-	}
-}
-
-func OnboardingQuestionnaireSubmitted(userID string, source []string, role string, useCase []string, sourceSkipped, roleSkipped, useCaseSkipped, sourceHasOther, roleHasOther, useCaseHasOther bool) Event {
-	// Normalize nil slices to [] so PostHog property values are stable
-	// (avoids null vs [] mixing in property type inference).
-	if source == nil {
-		source = []string{}
-	}
-	if useCase == nil {
-		useCase = []string{}
-	}
-	return Event{
-		Name:       EventOnboardingQuestionnaireSubmit,
-		DistinctID: userID,
-		Properties: withCoreProperties(map[string]any{
-			"source":             source,
-			"role":               role,
-			"use_case":           useCase,
-			"source_skipped":     sourceSkipped,
-			"role_skipped":       roleSkipped,
-			"use_case_skipped":   useCaseSkipped,
-			"source_has_other":   sourceHasOther,
-			"role_has_other":     roleHasOther,
-			"use_case_has_other": useCaseHasOther,
-		}, CoreProperties{
-			UserID: userID,
-			Source: SourceOnboarding,
-		}),
-		Set: map[string]any{
-			"source":   source,
-			"role":     role,
-			"use_case": useCase,
-		},
-	}
-}
-
-// OnboardingSourceSubmitted fires when the user's acquisition source
-// transitions from unresolved to resolved — answered or explicitly
-// declined. The source question is no longer part of the onboarding
-// flow (MUL-5159): it is asked by the workspace backfill prompt after
-// agents have completed work for the user, so this lands well after
-// `onboarding_questionnaire_submitted` (which now covers role +
-// use_case only). A dedicated event gives the backfill prompt its own
-// Grafana counter (answer/decline rate) without stalling the
-// questionnaire funnel step. Metrics-only like every server event
-// (MUL-4127); the per-user source value reaches analytics through the
-// client-side person-property mirror in saveQuestionnaire.
-//
-// `source` stays a slice for the same v2 back-compat reason as the
-// questionnaire event; the client commits a one-element array. $set
-// is only attached when the user actually answered — moot while the
-// event stays metrics-only, but kept accurate should it ever ship.
-func OnboardingSourceSubmitted(userID string, source []string, skipped, hasOther bool) Event {
-	if source == nil {
-		source = []string{}
-	}
-	// Property key is acquisition_source, not source — core properties
-	// stamp the event-source dimension into props["source"]
-	// (withCoreProperties), and the acquisition answer must not fight
-	// it for the slot. The $set person property below keeps the plain
-	// "source" name for cohort continuity with the client-side mirror.
-	ev := Event{
-		Name:       EventOnboardingSourceSubmit,
-		DistinctID: userID,
-		Properties: withCoreProperties(map[string]any{
-			"acquisition_source": source,
-			"source_skipped":     skipped,
-			"source_has_other":   hasOther,
-		}, CoreProperties{
-			UserID: userID,
-			Source: SourceOnboarding,
-		}),
-	}
-	if len(source) > 0 {
-		ev.Set = map[string]any{"source": source}
-	}
-	return ev
-}
-
-// AgentCreated fires whenever a new agent is added to a workspace — not
-// just inside onboarding. `isFirstAgentInWorkspace` lets the funnel
-// isolate the Step 4 signal from later agent additions.
-//
-// template is the creation-source attribution supplied by the caller (for
-// example, "agent_builder"); empty identifies a manually authored agent.
+// template is the creation-source attribution supplied by the caller; empty
+// identifies a manually authored agent.
 func AgentCreated(actorID, workspaceID, agentID, provider, runtimeMode, template string, isFirstAgentInWorkspace bool) Event {
 	return Event{
 		Name:        EventAgentCreated,
@@ -567,51 +376,6 @@ func AgentCreated(actorID, workspaceID, agentID, provider, runtimeMode, template
 			Source:      SourceManual,
 			RuntimeMode: runtimeMode,
 			Provider:    provider,
-		}),
-	}
-}
-
-// OnboardingCompleted fires from CompleteOnboarding. `completionPath`
-// is derived server-side from the state the user arrived in (see the
-// OnboardingPath* constants above). `joinedCloudWaitlist` is true when
-// the user submitted the waitlist form at any point during the flow —
-// it's orthogonal to `completion_path`; a user may submit the form and
-// still pick CLI, so we keep both signals.
-//
-// onboardedAt is an RFC3339 timestamp set $set_once on the person so
-// "onboarded before date X" cohorts are queryable directly from
-// person_properties without re-emitting per-event.
-func OnboardingCompleted(userID, workspaceID, completionPath, onboardedAt string, joinedCloudWaitlist bool) Event {
-	return Event{
-		Name:        EventOnboardingCompleted,
-		DistinctID:  userID,
-		WorkspaceID: workspaceID,
-		Properties: withCoreProperties(map[string]any{
-			"completion_path":       completionPath,
-			"joined_cloud_waitlist": joinedCloudWaitlist,
-		}, CoreProperties{
-			UserID:      userID,
-			WorkspaceID: workspaceID,
-			Source:      SourceOnboarding,
-		}),
-		SetOnce: map[string]any{
-			"onboarded_at": onboardedAt,
-		},
-	}
-}
-
-// CloudWaitlistJoined fires when a user submits the Step 3 cloud
-// waitlist form. `hasReason` is a presence bool — the free-text reason
-// stays in the DB for product research.
-func CloudWaitlistJoined(userID string, hasReason bool) Event {
-	return Event{
-		Name:       EventCloudWaitlistJoined,
-		DistinctID: userID,
-		Properties: withCoreProperties(map[string]any{
-			"has_reason": hasReason,
-		}, CoreProperties{
-			UserID: userID,
-			Source: SourceOnboarding,
 		}),
 	}
 }
@@ -647,109 +411,6 @@ func FeedbackSubmitted(userID, workspaceID, kind string, messageLen int, hasImag
 	}
 }
 
-// ContactSalesSubmitted fires after a contact-sales inquiry is recorded.
-// The form is public and unauthenticated, so DistinctID is empty (PostHog
-// will treat it as an anonymous event). We carry the coarse company size,
-// country, intended use case, and the form-location bucket (page /
-// onboarding / agents_page) so sales / marketing can split inbound volume
-// without having to query the operational DB.
-//
-// formSource is the page-context bucket; the CoreProperties Source stays
-// "marketing_contact_sales" so PostHog dashboards keep the funnel join
-// against other marketing events. The Prometheus side reads form_source
-// directly via the metrics.NormalizeContactSalesSource allow-list.
-func ContactSalesSubmitted(inquiryID, companySize, countryRegion, useCase, formSource string, hasGoals bool) Event {
-	props := map[string]any{
-		"inquiry_id":     inquiryID,
-		"company_size":   companySize,
-		"country_region": countryRegion,
-		"use_case":       useCase,
-		"has_goals":      hasGoals,
-	}
-	if formSource != "" {
-		props["form_source"] = formSource
-	}
-	return Event{
-		Name:       EventContactSalesSubmitted,
-		DistinctID: inquiryID,
-		Properties: withCoreProperties(props, CoreProperties{
-			Source: "marketing_contact_sales",
-		}),
-	}
-}
-
-// SquadCreated fires when a workspace member or admin creates a new squad.
-// `memberCount` is the number of members the squad was seeded with at
-// creation time (frontend can pre-populate via the picker).
-func SquadCreated(actorID, workspaceID, squadID string, memberCount int) Event {
-	return Event{
-		Name:        EventSquadCreated,
-		DistinctID:  actorID,
-		WorkspaceID: workspaceID,
-		Properties: withCoreProperties(map[string]any{
-			"squad_id":     squadID,
-			"member_count": int64(memberCount),
-		}, CoreProperties{
-			UserID:      nonAgentUserID(actorID),
-			WorkspaceID: workspaceID,
-			Source:      SourceManual,
-		}),
-	}
-}
-
-// AutopilotCreated fires when a workspace member creates a new autopilot.
-// `cadence` matches the autopilot.cadence enum (hourly/daily/weekly/...
-// /webhook). triggerKind is the initial trigger type (schedule / webhook /
-// manual) — when both schedule and webhook triggers are seeded, we report
-// the dominant one (schedule wins).
-func AutopilotCreated(actorID, workspaceID, autopilotID, cadence, triggerKind string) Event {
-	return Event{
-		Name:        EventAutopilotCreated,
-		DistinctID:  actorID,
-		WorkspaceID: workspaceID,
-		Properties: withCoreProperties(map[string]any{
-			"autopilot_id": autopilotID,
-			"cadence":      cadence,
-			"trigger_kind": triggerKind,
-		}, CoreProperties{
-			UserID:      nonAgentUserID(actorID),
-			WorkspaceID: workspaceID,
-			Source:      SourceManual,
-		}),
-	}
-}
-
-func autopilotRunEvent(name, actorID, workspaceID, autopilotID, runID, cadence string, assignee AutopilotAssignee, triggerSource string, extra map[string]any) Event {
-	if extra == nil {
-		extra = map[string]any{}
-	}
-	extra["trigger_source"] = triggerSource
-	extra["trigger_kind"] = triggerSource
-	if cadence != "" {
-		extra["cadence"] = cadence
-	}
-	props := withCoreProperties(extra, CoreProperties{
-		UserID:         nonAgentUserID(actorID),
-		WorkspaceID:    workspaceID,
-		AgentID:        assignee.AgentID,
-		AutopilotRunID: runID,
-		Source:         SourceAutopilot,
-	})
-	props["autopilot_id"] = autopilotID
-	if assignee.AssigneeType != "" {
-		props["assignee_type"] = assignee.AssigneeType
-	}
-	if assignee.SquadID != "" {
-		props["squad_id"] = assignee.SquadID
-	}
-	return Event{
-		Name:        name,
-		DistinctID:  actorID,
-		WorkspaceID: workspaceID,
-		Properties:  props,
-	}
-}
-
 func withCoreProperties(props map[string]any, core CoreProperties) map[string]any {
 	if props == nil {
 		props = map[string]any{}
@@ -768,9 +429,6 @@ func withCoreProperties(props map[string]any, core CoreProperties) map[string]an
 	}
 	if core.ChatSessionID != "" {
 		props["chat_session_id"] = core.ChatSessionID
-	}
-	if core.AutopilotRunID != "" {
-		props["autopilot_run_id"] = core.AutopilotRunID
 	}
 	if core.Source != "" {
 		props["source"] = core.Source

@@ -63,17 +63,12 @@ func (d *Daemon) gcLoop(ctx context.Context) {
 
 // gcStats accumulates byte counts and per-pattern hit counts for one GC cycle.
 type gcStats struct {
-	cleaned         int // whole task dirs removed by a parent-lifecycle or completed-task policy
-	orphaned        int // whole task dirs removed (no meta / unreachable issue)
-	skipped         int // task dirs left untouched
-	artifactDirs    int // task dirs that had at least one artifact reclaimed
-	artifactRemoved int // count of removed artifact subdirs
-	storesReclaimed int // per-conversation Codex session stores reclaimed past their TTL
-	// hermesMemoryStoresReclaimed is counted separately from storesReclaimed:
-	// the two stores hold different things on different TTLs, so folding them
-	// into one number would make either figure unreadable for an operator.
-	hermesMemoryStoresReclaimed   int            // per-agent Hermes memory stores reclaimed past their TTL
-	hermesSessionStoresReclaimed  int            // per-conversation Hermes session stores reclaimed past their TTL
+	cleaned                       int            // whole task dirs removed by a parent-lifecycle or completed-task policy
+	orphaned                      int            // whole task dirs removed (no meta / unreachable issue)
+	skipped                       int            // task dirs left untouched
+	artifactDirs                  int            // task dirs that had at least one artifact reclaimed
+	artifactRemoved               int            // count of removed artifact subdirs
+	storesReclaimed               int            // per-conversation Codex session stores reclaimed past their TTL
 	repoCachesReclaimed           int            // bare repo caches under .repos evicted past their TTL
 	taskTempDirsReclaimed         int            // per-task temp dirs under the temp base reclaimed after their owning execution ended
 	taskRootIndexEntriesReclaimed int            // abandoned stable-root records and unpublished entries reclaimed past the orphan TTL
@@ -142,23 +137,6 @@ func (d *Daemon) runGC(ctx context.Context) {
 		stats.bytesReclaimed += storeBytes
 	}
 
-	// Same for per-agent Hermes memory stores: they outlive the task by design
-	// (that is what fixes #6638), so a deleted agent's memory needs its own
-	// bounded lifecycle. Retention is much longer than the Codex one — these are
-	// a few markdown files, and reclaiming them is user-visible amnesia.
-	if storesRemoved, storeBytes := execenv.PruneHermesMemoryStores(d.cfg.Profile, d.cfg.GCHermesMemoryTTL, time.Now(), d.reserveStoreForDeletion, d.logger); storesRemoved > 0 {
-		stats.hermesMemoryStoresReclaimed += storesRemoved
-		stats.bytesReclaimed += storeBytes
-	}
-
-	// And per-conversation Hermes session stores, which outlive the task for the
-	// same reason (that is what fixes #6806) but hold transcripts rather than
-	// notes — so they get the shorter, Codex-like retention.
-	if storesRemoved, storeBytes := execenv.PruneHermesSessionStores(d.cfg.Profile, d.cfg.GCHermesSessionTTL, time.Now(), d.reserveStoreForDeletion, d.logger); storesRemoved > 0 {
-		stats.hermesSessionStoresReclaimed += storesRemoved
-		stats.bytesReclaimed += storeBytes
-	}
-
 	// Reclaim per-task temp dirs whose owning execution is gone. These are the
 	// agent process's TMPDIR and live under the system temp base, not under
 	// WorkspacesRoot, so the task walk above has never seen them and the only
@@ -174,7 +152,7 @@ func (d *Daemon) runGC(ctx context.Context) {
 		}
 	}
 
-	if stats.cleaned > 0 || stats.orphaned > 0 || stats.artifactDirs > 0 || stats.storesReclaimed > 0 || stats.hermesMemoryStoresReclaimed > 0 || stats.hermesSessionStoresReclaimed > 0 || stats.repoCachesReclaimed > 0 || stats.taskTempDirsReclaimed > 0 || stats.taskRootIndexEntriesReclaimed > 0 {
+	if stats.cleaned > 0 || stats.orphaned > 0 || stats.artifactDirs > 0 || stats.storesReclaimed > 0 || stats.repoCachesReclaimed > 0 || stats.taskTempDirsReclaimed > 0 || stats.taskRootIndexEntriesReclaimed > 0 {
 		d.logger.Info("gc: cycle complete",
 			"cleaned", stats.cleaned,
 			"orphaned", stats.orphaned,
@@ -182,8 +160,6 @@ func (d *Daemon) runGC(ctx context.Context) {
 			"artifact_dirs", stats.artifactDirs,
 			"artifact_removed", stats.artifactRemoved,
 			"codex_session_stores_reclaimed", stats.storesReclaimed,
-			"hermes_memory_stores_reclaimed", stats.hermesMemoryStoresReclaimed,
-			"hermes_session_stores_reclaimed", stats.hermesSessionStoresReclaimed,
 			"repo_caches_reclaimed", stats.repoCachesReclaimed,
 			"task_temp_dirs_reclaimed", stats.taskTempDirsReclaimed,
 			"task_root_index_entries_reclaimed", stats.taskRootIndexEntriesReclaimed,
@@ -400,8 +376,8 @@ const (
 )
 
 // shouldCleanTaskDir decides whether a task directory should be removed.
-// Dispatches on meta.Kind so chat / autopilot / quick-create tasks each
-// follow the parent record that actually governs their lifecycle.
+// Dispatches on meta.Kind so issue and chat tasks each follow the parent
+// record that actually governs their lifecycle.
 func (d *Daemon) shouldCleanTaskDir(ctx context.Context, taskDir string) gcAction {
 	// A task currently running on this env root must never be reclaimed —
 	// not even on the done/cancelled or orphan-404 paths. A re-dispatched or
@@ -517,10 +493,6 @@ func (d *Daemon) shouldCleanTaskDirForKind(ctx context.Context, taskDir string, 
 		return d.gcDecisionIssue(ctx, taskDir, meta)
 	case execenv.GCKindChat:
 		return d.gcDecisionChat(ctx, taskDir, meta)
-	case execenv.GCKindAutopilotRun:
-		return d.gcDecisionAutopilotRun(ctx, taskDir, meta)
-	case execenv.GCKindQuickCreate:
-		return d.gcDecisionQuickCreate(ctx, taskDir, meta)
 	default:
 		// Unknown kind: fall back to mtime-based orphan cleanup so a future
 		// daemon writing a kind we don't recognize doesn't get insta-wiped.
@@ -756,95 +728,6 @@ func (d *Daemon) gcDecisionChat(ctx context.Context, taskDir string, meta *exece
 			)
 			return gcActionClean
 		}
-	}
-	return gcActionSkip
-}
-
-func (d *Daemon) gcDecisionAutopilotRun(ctx context.Context, taskDir string, meta *execenv.GCMeta) gcAction {
-	if strings.TrimSpace(meta.AutopilotRunID) == "" {
-		return d.orphanByMTime(taskDir, "empty autopilot run id")
-	}
-
-	status, err := d.client.GetAutopilotRunGCCheck(ctx, meta.AutopilotRunID)
-	if err != nil {
-		if isAccessNotFound(err) {
-			return d.orphanByMTime(taskDir, "autopilot run not accessible")
-		}
-		return gcActionSkip
-	}
-
-	// Terminal states per the autopilot_run CHECK constraint:
-	//   completed, failed, skipped — the run finished its own work.
-	//   issue_created            — the run produced an issue task that owns
-	//                              its own workdir; this run's workdir is
-	//                              dead weight from here on.
-	// Non-terminal: pending, running. Skip until they reach a terminal state
-	// rather than trying to bound them by mtime — long autopilots are real.
-	//
-	// An autopilot run's workdir is never reused: unlike issue/chat tasks there
-	// is no PriorWorkDir path that hands a later run the same directory, so every
-	// run gets a fresh one. Whatever the run produced already lives server-side
-	// (and an issue_created run handed its work to an issue task that owns its own
-	// envRoot). So the moment the run reaches a terminal state the directory is
-	// dead weight and we reclaim it immediately, without waiting out GCTTL — the
-	// same reasoning gcDecisionQuickCreate applies to quick-create dirs. The
-	// active-env-root short-circuit in shouldCleanTaskDir still protects a run
-	// that is mid-flight, so this can't pull the rug from under live work.
-	if isAutopilotRunTerminal(status.Status) {
-		d.logger.Info("gc: eligible for cleanup",
-			"dir", filepath.Base(taskDir),
-			"kind", "autopilot_run",
-			"autopilot_run", meta.AutopilotRunID,
-			"status", status.Status,
-		)
-		return gcActionClean
-	}
-	return gcActionSkip
-}
-
-// isAutopilotRunTerminal mirrors the run.status CHECK in
-// migrations/042_autopilot.up.sql. Non-terminal states are pending/running;
-// every other value the schema allows is a final resting state from the
-// daemon's POV (the run is no longer producing work in this workdir).
-func isAutopilotRunTerminal(status string) bool {
-	switch status {
-	case "completed", "failed", "skipped", "issue_created":
-		return true
-	default:
-		return false
-	}
-}
-
-func (d *Daemon) gcDecisionQuickCreate(ctx context.Context, taskDir string, meta *execenv.GCMeta) gcAction {
-	if strings.TrimSpace(meta.TaskID) == "" {
-		return d.orphanByMTime(taskDir, "empty task id")
-	}
-
-	status, err := d.client.GetTaskGCCheck(ctx, meta.TaskID)
-	if err != nil {
-		if isAccessNotFound(err) {
-			// Task row was hard-deleted, or token can't see it. Either way,
-			// fall back to mtime-gated orphan to stay safe across scoped
-			// tokens — same reasoning as the issue path.
-			return d.orphanByMTime(taskDir, "task not accessible")
-		}
-		return gcActionSkip
-	}
-
-	// Quick-create workdirs are not reused by the issue task that
-	// LinkTaskToIssue eventually attaches — that issue gets its own
-	// envRoot. So as soon as the quick-create task itself reaches a
-	// terminal state we can reclaim the directory immediately, without
-	// waiting for GCTTL. If the user wants to revisit, the linked issue
-	// has the agent's output already.
-	if isAgentTaskTerminal(status.Status) {
-		d.logger.Info("gc: eligible for cleanup",
-			"dir", filepath.Base(taskDir),
-			"kind", "quick_create",
-			"task", meta.TaskID,
-			"status", status.Status,
-		)
-		return gcActionClean
 	}
 	return gcActionSkip
 }

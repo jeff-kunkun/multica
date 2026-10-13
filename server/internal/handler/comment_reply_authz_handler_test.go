@@ -7,7 +7,46 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/multica-ai/multica/server/internal/testutil"
 )
+
+// runningCommentTaskFixture is an agent run triggered by a member comment on
+// its own issue, still running.
+type runningCommentTaskFixture struct {
+	IssueID          string
+	AgentID          string
+	TaskID           string
+	TriggerCommentID string
+}
+
+func newRunningCommentTaskFixture(t *testing.T) runningCommentTaskFixture {
+	t.Helper()
+	runtimeID := dbfx.Runtime(t, "Reply authz runtime")
+	agentID := dbfx.Agent(t, "Reply authz agent", runtimeID)
+	issueID := dbfx.Issue(t, "Reply authz issue", testutil.Cols{
+		"status": "in_progress", "assignee_type": "agent", "assignee_id": agentID,
+	})
+	triggerCommentID := dbfx.Comment(t, issueID, "LGTM")
+	taskID := dbfx.Task(t, agentID, testutil.Cols{
+		"runtime_id":         runtimeID,
+		"issue_id":           issueID,
+		"trigger_comment_id": triggerCommentID,
+		"status":             "running",
+		"started_at":         testutil.Raw("now()"),
+	})
+	return runningCommentTaskFixture{
+		IssueID:          issueID,
+		AgentID:          agentID,
+		TaskID:           taskID,
+		TriggerCommentID: triggerCommentID,
+	}
+}
+
+func countAgentCommentsForIssue(t *testing.T, issueID, agentID string) int {
+	t.Helper()
+	return dbfx.Count(t, `SELECT count(*) FROM comment WHERE issue_id = $1 AND author_type = 'agent' AND author_id = $2`, issueID, agentID)
+}
 
 // TestCreateComment_TriggeredTaskRejectsTopLevelComment exercises the full
 // CreateComment handler path (not just taskCoversReplyParent) for the trap
@@ -21,21 +60,21 @@ func TestCreateComment_TriggeredTaskRejectsTopLevelComment(t *testing.T) {
 		t.Skip("database not available")
 	}
 
-	fx := newRunningSquadLeaderTaskFixture(t)
+	fx := newRunningCommentTaskFixture(t)
 
 	w := httptest.NewRecorder()
 	r := newRequest("POST", "/api/issues/"+fx.IssueID+"/comments", map[string]any{
-		"content": "dispatching a squad from this task",
+		"content": "posting a new thread from this task",
 	})
 	r = withURLParam(r, "id", fx.IssueID)
-	r.Header.Set("X-Agent-ID", fx.LeaderID)
+	r.Header.Set("X-Agent-ID", fx.AgentID)
 	r.Header.Set("X-Task-ID", fx.TaskID)
 
 	testHandler.CreateComment(w, r)
 	if w.Code != http.StatusConflict {
 		t.Fatalf("CreateComment top-level: expected 409, got %d: %s", w.Code, w.Body.String())
 	}
-	if got := countAgentCommentsForIssue(t, fx.IssueID, fx.LeaderID); got != 0 {
+	if got := countAgentCommentsForIssue(t, fx.IssueID, fx.AgentID); got != 0 {
 		t.Fatalf("expected rejected top-level comment not to be stored, got %d", got)
 	}
 
@@ -67,7 +106,7 @@ func TestCreateComment_TriggeredTaskAllowsReplyUnderTrigger(t *testing.T) {
 		t.Skip("database not available")
 	}
 
-	fx := newRunningSquadLeaderTaskFixture(t)
+	fx := newRunningCommentTaskFixture(t)
 
 	w := httptest.NewRecorder()
 	r := newRequest("POST", "/api/issues/"+fx.IssueID+"/comments", map[string]any{
@@ -75,7 +114,7 @@ func TestCreateComment_TriggeredTaskAllowsReplyUnderTrigger(t *testing.T) {
 		"parent_id": fx.TriggerCommentID,
 	})
 	r = withURLParam(r, "id", fx.IssueID)
-	r.Header.Set("X-Agent-ID", fx.LeaderID)
+	r.Header.Set("X-Agent-ID", fx.AgentID)
 	r.Header.Set("X-Task-ID", fx.TaskID)
 
 	testHandler.CreateComment(w, r)
@@ -95,7 +134,7 @@ func TestCreateComment_TriggeredTaskRejectsForeignParent(t *testing.T) {
 		t.Skip("database not available")
 	}
 
-	fx := newRunningSquadLeaderTaskFixture(t)
+	fx := newRunningCommentTaskFixture(t)
 
 	// Must be a real comment on the same issue: a nonexistent id, or one from
 	// another issue, is refused earlier with a 400 and never reaches this guard.
@@ -114,14 +153,14 @@ func TestCreateComment_TriggeredTaskRejectsForeignParent(t *testing.T) {
 		"parent_id": foreignParentID,
 	})
 	r = withURLParam(r, "id", fx.IssueID)
-	r.Header.Set("X-Agent-ID", fx.LeaderID)
+	r.Header.Set("X-Agent-ID", fx.AgentID)
 	r.Header.Set("X-Task-ID", fx.TaskID)
 
 	testHandler.CreateComment(w, r)
 	if w.Code != http.StatusConflict {
 		t.Fatalf("CreateComment foreign parent: expected 409, got %d: %s", w.Code, w.Body.String())
 	}
-	if got := countAgentCommentsForIssue(t, fx.IssueID, fx.LeaderID); got != 0 {
+	if got := countAgentCommentsForIssue(t, fx.IssueID, fx.AgentID); got != 0 {
 		t.Fatalf("expected rejected comment not to be stored, got %d", got)
 	}
 

@@ -118,7 +118,7 @@ use S3-compatible object storage instead.
 
 #### Avatars on a private bucket
 
-User / agent / squad / workspace avatars are stored as the raw storage object
+User / agent / workspace avatars are stored as the raw storage object
 URL. When the bucket is public — a public `CLOUDFRONT_DOMAIN`, or the default
 local-disk backend — that URL is served to clients unchanged.
 
@@ -242,30 +242,6 @@ Things to know:
   not cover the host name in the URL, is still rejected; fix the certificate
   itself.
 
-### WeCom frame tracing
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `MULTICA_WECOM_TRACE` | empty (off) | `1` records every WeCom frame the backend reads and writes, including the first 120 runes of each message body. Anything else is off. |
-
-Turn it on for a debugging session and unset it when the session ends. Before
-you do:
-
-- **It is read at boot, so changing it needs a backend restart** — `docker compose -f docker-compose.selfhost.yml up -d backend`. There is no runtime toggle. While it is on, the backend logs a warning on every startup saying so.
-- **Anyone who can read the backend's logs can read the traced message text.** That is a wider audience than the WeCom chat it came from: your `docker logs` / journald / log shipper, and whoever administers them. The smart-bot secret is never read, and `token=` / `access_token=` / `code=` parameters are redacted out of message text — but user message content is not, and **an attachment's `Content-Disposition` and the filename read out of it are written verbatim**, up to 2048 runes and past the redactor. That line exists to show exactly how the storage backend encoded a name, and a redacted or truncated copy of it answers nothing; it also means an attachment's filename reaches your logs as sent.
-- **Retention is your log stack's, not the application's.** The backend writes to stderr and keeps nothing itself, so how long the traced text survives is whatever your Docker logging driver or shipper is set to. If that is "forever", decide about it before enabling rather than after.
-
-Each outbound frame produces two lines that share a `seq`: `dir=out` when it is
-about to be written, and `dir=out.done` with `ok=true` / `ok=false` once the
-socket has answered. `seq` is the frame's position in the write order, so the
-pair tells you what this backend sent and in which order; an attempt with no
-matching outcome is a write that never returned.
-
-`ok=true` means the frame reached the socket, not that WeCom accepted it. For
-the platform's verdict, match the frame's `req_id` against the `dir=in` line
-answering it and read that line's `errcode` — a frame can be written
-successfully and still be rejected there.
-
 ### CLI / Daemon
 
 These are configured on each user's machine, not on the server:
@@ -311,32 +287,11 @@ declares a `vector` column or runs `CREATE EXTENSION vector`. The bundled image
 is named `pgvector/pgvector:pg17` for historical reasons only; a stock
 PostgreSQL 17 is sufficient.
 
-Migrations reference four extensions:
-
-| Extension | Migration | Required |
-| --- | --- | --- |
-| `pgcrypto` | `001_init` | **Yes** — a bare `CREATE EXTENSION`; the migration fails without it |
-| `pg_trgm` | `137_search_index_pg_trgm_extension` | **Yes** — same, and the search indexes depend on it |
-| `pg_bigm` | `032_issue_search_index` | No — wrapped in `DO ... EXCEPTION`, skipped with a `NOTICE` when unavailable |
-| `pg_cron` | `076_task_usage_pgcron_extension` | No — same; the usage rollup runs in-process instead, see [Usage Dashboard Rollup](#usage-dashboard-rollup) |
-
-`pgcrypto` and `pg_trgm` ship with every standard PostgreSQL 17 build
+The schema baseline (`001_baseline`) creates two extensions, both required:
+`pgcrypto` and `pg_trgm`. Both ship with every standard PostgreSQL 17 build
 (`postgresql-contrib` on Debian/Ubuntu, bundled in Homebrew's `postgresql@17`
-and in the official `postgres:17` image), so neither hard requirement needs a
-custom image.
-
-`pg_bigm` is optional and only affects **CJK search quality** — bigram indexes
-are far more selective than trigram ones for Chinese, Japanese, and Korean text.
-Search works without it: migrations 138–142 install portable `pg_trgm` fallback
-indexes covering every column the search handlers touch. Installing `pg_bigm`
-does require a custom image or a source build — the bundled
-`pgvector/pgvector:pg17` image does not ship it either.
-
-> Because `pg_bigm` and `pg_cron` are installed conditionally, a row in
-> `schema_migrations` proves the migration ran, not that its objects exist. Run
-> `SELECT extname FROM pg_extension` to see what a database actually has. To
-> recover a missing comment-content search index, follow
-> `server/cmd/migrate/README.md`.
+and in the official `postgres:17` image), so neither needs a custom image.
+Search uses `pg_trgm` indexes; `pg_bigm` and `pg_cron` are no longer used.
 
 ### Using Docker Compose (Recommended)
 
@@ -634,7 +589,7 @@ docker compose -f docker-compose.selfhost.yml up -d
 
 ### WebSocket for LAN / Non-localhost Access
 
-HTTP requests (Plugin API, issues, comments, uploads) work on LAN out of the box — Next.js rewrites proxy `/v1`, `/api`, `/auth`, and `/uploads` to the backend. **WebSockets do not**: Next.js rewrites only forward HTTP requests, not the `Upgrade` handshake a WebSocket needs. If you open the app on `http://<lan-ip>:3000`, real-time features (chat streaming, live issue updates, notifications) will fail to connect until you do one of the following:
+HTTP requests (API, issues, comments, uploads) work on LAN out of the box — Next.js rewrites proxy `/v1`, `/api`, `/auth`, and `/uploads` to the backend. **WebSockets do not**: Next.js rewrites only forward HTTP requests, not the `Upgrade` handshake a WebSocket needs. If you open the app on `http://<lan-ip>:3000`, real-time features (chat streaming, live issue updates, notifications) will fail to connect until you do one of the following:
 
 1. **Put a reverse proxy in front of the stack (recommended).** Nginx or Caddy terminates the WebSocket upgrade and forwards it to the backend on port 8080. See the [Reverse Proxy](#reverse-proxy) section above — the Nginx example already includes a `location /ws { ... }` block with the correct `Upgrade` / `Connection` headers. Once a proxy is in place the browser connects directly through it, so no frontend rebuild is needed.
 

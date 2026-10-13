@@ -377,7 +377,6 @@ func (h *Handler) groupChatMessageAttachments(ctx context.Context, workspaceID s
 // ---------------------------------------------------------------------------
 
 func (h *Handler) UploadFile(w http.ResponseWriter, r *http.Request) {
-	r = h.withWakeupActor(r)
 	if h.Storage == nil {
 		writeFeatureDisabled(w, "file_upload_not_configured", "file upload not configured")
 		return
@@ -472,7 +471,7 @@ func (h *Handler) UploadFile(w http.ResponseWriter, r *http.Request) {
 				ID:          issueUUID,
 				WorkspaceID: parseUUID(workspaceID),
 			})
-			if err != nil {
+			if err != nil || !h.requestCanSeeIssue(r, issue) {
 				writeError(w, http.StatusForbidden, "invalid issue_id")
 				return
 			}
@@ -581,9 +580,7 @@ func (h *Handler) UploadFile(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		} else {
-			att, err = wakeupWrite(h, r, func(q *db.Queries) (db.CreateAttachmentRow, error) {
-				return q.CreateAttachment(r.Context(), params)
-			})
+			att, err = h.Queries.CreateAttachment(r.Context(), params)
 		}
 		if err != nil {
 			slog.Error("failed to create attachment record", "error", err)
@@ -1428,7 +1425,6 @@ func isTextPreviewable(contentType, filename string) bool {
 // ---------------------------------------------------------------------------
 
 func (h *Handler) DeleteAttachment(w http.ResponseWriter, r *http.Request) {
-	r = h.withWakeupActor(r)
 	attachmentID := chi.URLParam(r, "id")
 	workspaceID := h.resolveWorkspaceID(r)
 	if workspaceID == "" {
@@ -1469,7 +1465,7 @@ func (h *Handler) DeleteAttachment(w http.ResponseWriter, r *http.Request) {
 	uploaderID := uuidToString(att.UploaderID)
 	isUploader := att.UploaderType == "member" && uploaderID == userID
 	member, hasMember := ctxMember(r.Context())
-	isAdmin := hasMember && (member.Role == "admin" || member.Role == "owner")
+	isAdmin := hasMember && member.Role == "owner"
 
 	if !isUploader && !isAdmin {
 		writeError(w, http.StatusForbidden, "not authorized to delete this attachment")
@@ -1571,7 +1567,7 @@ func (h *Handler) withAttachmentOwnerLock(ctx context.Context, att db.Attachment
 var errAttachmentOwnerChanged = errors.New("attachment owner changed")
 
 func (h *Handler) attachmentOwnerLockAttempt(ctx context.Context, att db.Attachment, write func(*db.Queries) error) (db.Attachment, error) {
-	tx, err := h.beginWakeupWrite(ctx)
+	tx, err := h.TxStarter.Begin(ctx)
 	if err != nil {
 		return db.Attachment{}, err
 	}

@@ -1,15 +1,12 @@
 import { describe, expect, it } from "vitest";
-import type { Agent, Comment, Member, RuntimeDevice, Skill } from "../types";
+import type { Agent, Comment, RuntimeDevice } from "../types";
 import {
   canAssignAgentToIssue,
-  canChangeMemberRole,
   canDeleteComment,
   canDeleteRuntime,
-  canDeleteSkill,
   canDeleteWorkspace,
   canEditAgent,
   canEditComment,
-  canEditSkill,
   canManageMembers,
   canUpdateWorkspaceSettings,
 } from "./rules";
@@ -36,27 +33,11 @@ function makeAgent(overrides: Partial<Agent> = {}): Agent {
     max_concurrent_tasks: 1,
     model: "default",
     owner_id: ALICE,
-    skills: [],
     created_at: "2026-04-01T00:00:00Z",
     updated_at: "2026-04-01T00:00:00Z",
     archived_at: null,
     archived_by: null,
     ...overrides,
-  };
-}
-
-function makeSkill(createdBy: string | null): Skill {
-  return {
-    id: "skl_1",
-    workspace_id: "ws_1",
-    name: "skill",
-    description: "",
-    content: "",
-    config: {},
-    files: [],
-    created_by: createdBy,
-    created_at: "2026-04-01T00:00:00Z",
-    updated_at: "2026-04-01T00:00:00Z",
   };
 }
 
@@ -113,8 +94,8 @@ describe("canEditAgent", () => {
       true,
     );
   });
-  it("allows workspace admin", () => {
-    expect(canEditAgent(agent, { userId: BOB, role: "admin" }).allowed).toBe(
+  it("allows workspace owner", () => {
+    expect(canEditAgent(agent, { userId: BOB, role: "owner" }).allowed).toBe(
       true,
     );
   });
@@ -134,9 +115,9 @@ describe("canEditAgent", () => {
       canEditAgent(orphan, { userId: ALICE, role: "member" }).allowed,
     ).toBe(false);
   });
-  it("admin can still edit an orphan (owner_id null) agent", () => {
+  it("workspace owner can still edit an orphan (owner_id null) agent", () => {
     const orphan = makeAgent({ owner_id: null });
-    expect(canEditAgent(orphan, { userId: BOB, role: "admin" }).allowed).toBe(
+    expect(canEditAgent(orphan, { userId: BOB, role: "owner" }).allowed).toBe(
       true,
     );
   });
@@ -183,14 +164,14 @@ describe("canAssignAgentToIssue", () => {
     ).toBe(true);
   });
 
-  it("denies a workspace admin from assigning someone else's private agent (MUL-3963: admins no longer bypass)", () => {
+  it("denies a workspace owner from assigning someone else's private agent (MUL-3963: no owner bypass)", () => {
     const a = makeAgent({
       visibility: "private",
       permission_mode: "private",
       invocation_targets: [],
       owner_id: ALICE,
     });
-    const d = canAssignAgentToIssue(a, { userId: BOB, role: "admin" });
+    const d = canAssignAgentToIssue(a, { userId: BOB, role: "owner" });
     expect(d.allowed).toBe(false);
     expect(d.reason).toBe("private_visibility");
   });
@@ -239,8 +220,8 @@ describe("canAssignAgentToIssue", () => {
       invocation_targets: [{ target_type: "team", target_id: "team-1" }],
       owner_id: ALICE,
     });
-    // Even an admin who belongs to the team gets no invocation grant.
-    const d = canAssignAgentToIssue(a, { userId: BOB, role: "admin" });
+    // Even the workspace owner, even if they belongs to the team gets no invocation grant.
+    const d = canAssignAgentToIssue(a, { userId: BOB, role: "owner" });
     expect(d.allowed).toBe(false);
     expect(d.reason).toBe("private_visibility");
     // The owner still passes (owner always may invoke).
@@ -285,34 +266,6 @@ describe("canAssignAgentToIssue", () => {
   });
 });
 
-describe("canEditSkill / canDeleteSkill", () => {
-  const skill = makeSkill(ALICE);
-  it("allows admins", () => {
-    expect(canEditSkill(skill, { userId: BOB, role: "admin" }).allowed).toBe(
-      true,
-    );
-  });
-  it("allows the creator", () => {
-    expect(canEditSkill(skill, { userId: ALICE, role: "member" }).allowed)
-      .toBe(true);
-  });
-  it("denies non-creator member", () => {
-    expect(canEditSkill(skill, { userId: BOB, role: "member" }).allowed)
-      .toBe(false);
-  });
-  it("denies when created_by is null and user is plain member", () => {
-    expect(
-      canEditSkill(makeSkill(null), { userId: ALICE, role: "member" }).allowed,
-    ).toBe(false);
-  });
-  it("canDeleteSkill mirrors canEditSkill", () => {
-    expect(canDeleteSkill(skill, { userId: ALICE, role: "member" }).allowed)
-      .toBe(true);
-    expect(canDeleteSkill(skill, { userId: BOB, role: "member" }).allowed)
-      .toBe(false);
-  });
-});
-
 describe("canEditComment / canDeleteComment", () => {
   it("allows the author to edit their own comment", () => {
     const c = makeComment({ author_id: ALICE });
@@ -320,13 +273,13 @@ describe("canEditComment / canDeleteComment", () => {
       true,
     );
   });
-  it("allows workspace admin to edit someone else's comment", () => {
+  it("allows workspace owner to edit someone else's comment", () => {
     const c = makeComment({ author_id: ALICE });
-    expect(canEditComment(c, { userId: BOB, role: "admin" }).allowed).toBe(
+    expect(canEditComment(c, { userId: BOB, role: "owner" }).allowed).toBe(
       true,
     );
   });
-  it("denies non-author non-admin", () => {
+  it("denies non-author non-owner", () => {
     const c = makeComment({ author_id: ALICE });
     expect(canEditComment(c, { userId: BOB, role: "member" }).allowed).toBe(
       false,
@@ -338,11 +291,11 @@ describe("canEditComment / canDeleteComment", () => {
     expect(d.allowed).toBe(false);
     expect(d.reason).toBe("not_resource_owner");
   });
-  it("admin CAN delete an agent-authored comment", () => {
-    // delete is broader than edit — admins moderate any comment regardless of
+  it("workspace owner CAN delete an agent-authored comment", () => {
+    // delete is broader than edit — the workspace owner moderates any comment regardless of
     // author type. Mirrors backend `comment.go:507-512`.
     const c = makeComment({ author_type: "agent", author_id: "agt_1" });
-    expect(canDeleteComment(c, { userId: BOB, role: "admin" }).allowed).toBe(
+    expect(canDeleteComment(c, { userId: BOB, role: "owner" }).allowed).toBe(
       true,
     );
   });
@@ -360,13 +313,13 @@ describe("canDeleteRuntime", () => {
     expect(canDeleteRuntime(r, { userId: ALICE, role: "member" }).allowed)
       .toBe(true);
   });
-  it("allows workspace admin", () => {
+  it("allows workspace owner", () => {
     const r = makeRuntime(ALICE);
-    expect(canDeleteRuntime(r, { userId: BOB, role: "admin" }).allowed).toBe(
+    expect(canDeleteRuntime(r, { userId: BOB, role: "owner" }).allowed).toBe(
       true,
     );
   });
-  it("denies non-owner non-admin", () => {
+  it("denies non-owner non-owner", () => {
     const r = makeRuntime(ALICE);
     expect(canDeleteRuntime(r, { userId: BOB, role: "member" }).allowed)
       .toBe(false);
@@ -378,60 +331,23 @@ describe("workspace-level rules", () => {
     expect(canDeleteWorkspace({ userId: ALICE, role: "owner" }).allowed).toBe(
       true,
     );
-    expect(canDeleteWorkspace({ userId: ALICE, role: "admin" }).allowed).toBe(
-      false,
-    );
     expect(canDeleteWorkspace({ userId: ALICE, role: "member" }).allowed)
       .toBe(false);
   });
-  it("owner+admin can update settings, member cannot", () => {
+  it("owner can update settings, member cannot", () => {
     expect(
       canUpdateWorkspaceSettings({ userId: ALICE, role: "owner" }).allowed,
-    ).toBe(true);
-    expect(
-      canUpdateWorkspaceSettings({ userId: ALICE, role: "admin" }).allowed,
     ).toBe(true);
     expect(
       canUpdateWorkspaceSettings({ userId: ALICE, role: "member" }).allowed,
     ).toBe(false);
   });
   it("manage members same gate as settings", () => {
-    expect(canManageMembers({ userId: ALICE, role: "admin" }).allowed).toBe(
+    expect(canManageMembers({ userId: ALICE, role: "owner" }).allowed).toBe(
       true,
     );
     expect(canManageMembers({ userId: ALICE, role: "member" }).allowed).toBe(
       false,
     );
-  });
-});
-
-describe("canChangeMemberRole", () => {
-  const ctxOwner = { userId: ALICE, role: "owner" as const };
-  const ctxAdmin = { userId: ALICE, role: "admin" as const };
-  const ctxMember = { userId: ALICE, role: "member" as const };
-
-  const targetOwner: Pick<Member, "role"> = { role: "owner" };
-  const targetAdmin: Pick<Member, "role"> = { role: "admin" };
-  const targetMember: Pick<Member, "role"> = { role: "member" };
-
-  it("non-managers cannot change roles", () => {
-    expect(canChangeMemberRole(targetMember, 2, ctxMember).allowed).toBe(false);
-  });
-  it("admin cannot change owner's role", () => {
-    const d = canChangeMemberRole(targetOwner, 2, ctxAdmin);
-    expect(d.allowed).toBe(false);
-    expect(d.reason).toBe("not_owner_role");
-  });
-  it("admin can change admin/member roles", () => {
-    expect(canChangeMemberRole(targetAdmin, 1, ctxAdmin).allowed).toBe(true);
-    expect(canChangeMemberRole(targetMember, 1, ctxAdmin).allowed).toBe(true);
-  });
-  it("owner cannot demote the last owner", () => {
-    const d = canChangeMemberRole(targetOwner, 1, ctxOwner);
-    expect(d.allowed).toBe(false);
-    expect(d.reason).toBe("last_owner");
-  });
-  it("owner can change owner role when 2+ owners exist", () => {
-    expect(canChangeMemberRole(targetOwner, 2, ctxOwner).allowed).toBe(true);
   });
 });

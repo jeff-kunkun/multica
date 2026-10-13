@@ -38,12 +38,9 @@ describe("bucketDiagnosticPath", () => {
   it("templates every workspace detail route", () => {
     expect(bucketDiagnosticPath("/acme/issues/MUL-5345")).toBe("/:slug/issues/:id");
     expect(bucketDiagnosticPath("/acme/projects/p1")).toBe("/:slug/projects/:id");
-    expect(bucketDiagnosticPath("/acme/autopilots/ap-7")).toBe("/:slug/autopilots/:id");
     expect(bucketDiagnosticPath("/acme/agents/agt_9")).toBe("/:slug/agents/:id");
     expect(bucketDiagnosticPath("/acme/members/m-3")).toBe("/:slug/members/:id");
-    expect(bucketDiagnosticPath("/acme/squads/sq.4")).toBe("/:slug/squads/:id");
     expect(bucketDiagnosticPath("/acme/runtimes/machine-1")).toBe("/:slug/runtimes/:id");
-    expect(bucketDiagnosticPath("/acme/skills/skl_123")).toBe("/:slug/skills/:id");
     expect(bucketDiagnosticPath("/acme/attachments/att-8/preview")).toBe(
       "/:slug/attachments/:id/preview",
     );
@@ -57,9 +54,7 @@ describe("bucketDiagnosticPath", () => {
   it("templates ids that look nothing like ids", () => {
     for (const [path, expected] of [
       ["/acme/projects/p1", "/:slug/projects/:id"],
-      ["/acme/skills/skl_123", "/:slug/skills/:id"],
       ["/acme/agents/my-favourite-agent", "/:slug/agents/:id"],
-      ["/acme/squads/Platform Team", "/:slug/squads/:id"],
       ["/acme/issues/new", "/:slug/issues/:id"],
     ] as const) {
       expect(bucketDiagnosticPath(path)).toBe(expected);
@@ -75,8 +70,8 @@ describe("bucketDiagnosticPath", () => {
     expect(
       bucketDiagnosticPath("/acme/runtimes/machine%2Fruntime/runtime/runtime%20one"),
     ).toBe("/:slug/runtimes/:id/runtime/:runtimeId");
-    expect(bucketDiagnosticPath("/my%20workspace/skills/a%2Fb")).toBe(
-      "/:slug/skills/:id",
+    expect(bucketDiagnosticPath("/my%20workspace/agents/a%2Fb")).toBe(
+      "/:slug/agents/:id",
     );
   });
 
@@ -136,7 +131,6 @@ describe("route coverage stays in step with paths.ts", () => {
       newWorkspace: paths.newWorkspace,
       invite: paths.invite,
       invitations: paths.invitations,
-      onboarding: paths.onboarding,
       authCallback: paths.authCallback,
       root: paths.root,
     } as Record<string, (...args: string[]) => string>;

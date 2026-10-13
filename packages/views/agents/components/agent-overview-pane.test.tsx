@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { Agent, AgentRuntime } from "@multica/core/types";
@@ -38,9 +38,6 @@ vi.mock("./agent-access-settings", () => ({
 vi.mock("./tabs/instructions-tab", () => ({
   InstructionsTab: () => <div>instructions-tab</div>,
 }));
-vi.mock("./tabs/skills-tab", () => ({
-  SkillsTab: () => <div>skills-tab</div>,
-}));
 vi.mock("./tabs/env-tab", () => ({
   EnvTab: () => <div>env-tab</div>,
 }));
@@ -50,48 +47,13 @@ vi.mock("./tabs/custom-args-tab", () => ({
 vi.mock("./tabs/mcp-config-tab", () => ({
   McpConfigTab: () => <div>mcp-config-tab</div>,
 }));
-vi.mock("./tabs/integrations-tab", () => ({
-  IntegrationsTab: () => <div>integrations-tab</div>,
-}));
 vi.mock("../../common/actor-issues-panel", () => ({
   ActorIssuesPanel: () => <div>actor-issues-panel</div>,
 }));
 
-// The pane now reads workspace context to decide whether the Integrations
-// tab is worth showing (it queries Lark installations to learn whether the
-// deployment has the feature configured). Provide a stable workspace id and
-// a listing query backed by a ref so each test can flip `configured`.
-const larkListingRef = vi.hoisted(() => ({
-  current: { installations: [] as unknown[], configured: false },
-}));
-const slackListingRef = vi.hoisted(() => ({
-  current: { installations: [] as unknown[], configured: false },
-}));
-const telegramListingRef = vi.hoisted(() => ({
-  current: { installations: [] as unknown[], configured: false },
-}));
 vi.mock("@multica/core/hooks", () => ({
   useWorkspaceId: () => "ws-1",
 }));
-vi.mock("@multica/core/lark", () => ({
-  larkInstallationsOptions: () => ({
-    queryKey: ["lark", "installations"],
-    queryFn: () => Promise.resolve(larkListingRef.current),
-  }),
-}));
-vi.mock("@multica/core/slack", () => ({
-  slackInstallationsOptions: () => ({
-    queryKey: ["slack", "installations"],
-    queryFn: () => Promise.resolve(slackListingRef.current),
-  }),
-}));
-vi.mock("@multica/core/telegram", () => ({
-  telegramInstallationsOptions: () => ({
-    queryKey: ["telegram", "installations"],
-    queryFn: () => Promise.resolve(telegramListingRef.current),
-  }),
-}));
-
 import { AgentOverviewPane } from "./agent-overview-pane";
 
 const baseAgent: Agent = {
@@ -112,7 +74,6 @@ const baseAgent: Agent = {
   max_concurrent_tasks: 1,
   model: "",
   owner_id: "user-1",
-  skills: [],
   created_at: "2026-05-28T00:00:00Z",
   updated_at: "2026-05-28T00:00:00Z",
   archived_at: null,
@@ -182,23 +143,11 @@ function openSettings() {
   fireEvent.click(screen.getByRole("tab", { name: /^Settings$/i }));
 }
 
-beforeEach(() => {
-  larkListingRef.current = { installations: [], configured: false };
-  slackListingRef.current = { installations: [], configured: false };
-  telegramListingRef.current = { installations: [], configured: false };
-});
-
 describe("AgentOverviewPane MCP tab visibility", () => {
   it.each([
     ["Claude", "claude"],
     ["Codex", "codex"],
-    ["Cursor", "cursor"],
-    ["Hermes", "hermes"],
-    ["Kimi", "kimi"],
-    ["Kiro", "kiro"],
     ["OpenCode", "opencode"],
-    ["OpenClaw", "openclaw"],
-    ["Oh My Pi", "omp"],
   ])("renders the MCP tab when the agent runs on the %s runtime", (_label, provider) => {
     renderPane([makeRuntime(provider)]);
     openCapabilities();
@@ -222,47 +171,6 @@ describe("AgentOverviewPane MCP tab visibility", () => {
     renderPane([]);
     openCapabilities();
     expect(screen.getByRole("tab", { name: /^MCP$/i })).toBeInTheDocument();
-  });
-});
-
-describe("AgentOverviewPane Integrations tab visibility", () => {
-  it("shows the Integrations tab once the deployment has Lark configured", async () => {
-    larkListingRef.current = { installations: [], configured: true };
-    renderPane([makeRuntime("claude")]);
-    openCapabilities();
-    expect(
-      await screen.findByRole("tab", { name: /^Integrations$/i }),
-    ).toBeInTheDocument();
-  });
-
-  it("shows the Integrations tab when only Slack is configured (Lark off)", async () => {
-    // Regression: the tab gate must consider Slack too, not just Lark —
-    // a Slack-only deployment was hiding the tab (and its bind entry).
-    slackListingRef.current = { installations: [], configured: true };
-    renderPane([makeRuntime("claude")]);
-    openCapabilities();
-    expect(
-      await screen.findByRole("tab", { name: /^Integrations$/i }),
-    ).toBeInTheDocument();
-  });
-
-  it("shows the Integrations tab when only Telegram is configured", async () => {
-    telegramListingRef.current = { installations: [], configured: true };
-    renderPane([makeRuntime("claude")]);
-    openCapabilities();
-    expect(
-      await screen.findByRole("tab", { name: /^Integrations$/i }),
-    ).toBeInTheDocument();
-  });
-
-  it("hides the Integrations tab when no channel integration is configured", () => {
-    // Default refs are configured:false; the tab must not appear on a
-    // deployment without any channel integration, the common case.
-    renderPane([makeRuntime("claude")]);
-    openCapabilities();
-    expect(
-      screen.queryByRole("tab", { name: /^Integrations$/i }),
-    ).not.toBeInTheDocument();
   });
 });
 

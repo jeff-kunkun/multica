@@ -23,51 +23,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/testutil"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
-	"github.com/multica-ai/multica/server/pkg/remotemcp"
 )
-
-// slowProbeLocalSkillListStore wraps a LocalSkillListStore but blocks inside
-// HasPending until the provided context is cancelled. PopPending delegates
-// to the underlying store. Used to verify that a stalled probe cannot wedge
-// the heartbeat — the bound context must cut it short — while the ack-safe
-// PopPending path is never reached because HasPending returns an error, not
-// true.
-type slowProbeLocalSkillListStore struct{ LocalSkillListStore }
-
-func (s slowProbeLocalSkillListStore) HasPending(ctx context.Context, _ string) (bool, error) {
-	<-ctx.Done()
-	return false, ctx.Err()
-}
-
-type slowProbeLocalSkillImportStore struct{ LocalSkillImportStore }
-
-func (s slowProbeLocalSkillImportStore) HasPending(ctx context.Context, _ string) (bool, error) {
-	<-ctx.Done()
-	return false, ctx.Err()
-}
-
-// popRecordingLocalSkillListStore counts PopPending calls so a test can assert
-// that the handler never reaches the ack-unsafe side-effecting claim path
-// when HasPending reports an empty queue.
-type popRecordingLocalSkillListStore struct {
-	LocalSkillListStore
-	popCalls int
-}
-
-func (s *popRecordingLocalSkillListStore) PopPending(ctx context.Context, runtimeID string) (*RuntimeLocalSkillListRequest, error) {
-	s.popCalls++
-	return s.LocalSkillListStore.PopPending(ctx, runtimeID)
-}
-
-type popRecordingLocalSkillImportStore struct {
-	LocalSkillImportStore
-	popCalls int
-}
-
-func (s *popRecordingLocalSkillImportStore) PopPending(ctx context.Context, runtimeID string) (*RuntimeLocalSkillImportRequest, error) {
-	s.popCalls++
-	return s.LocalSkillImportStore.PopPending(ctx, runtimeID)
-}
 
 func setHandlerTestWorkspaceRepos(t *testing.T, repos []map[string]string) {
 	t.Helper()
@@ -93,32 +49,6 @@ func newDaemonTokenRequest(method, path string, body any, workspaceID, daemonID 
 	// No X-User-ID — daemon tokens don't set it.
 	ctx := middleware.WithDaemonContext(req.Context(), workspaceID, daemonID)
 	return req.WithContext(ctx)
-}
-
-func TestRemoteMCPDaemonTokenForClaim(t *testing.T) {
-	runtime := db.AgentRuntime{
-		WorkspaceID: parseUUID(testWorkspaceID),
-		DaemonID:    strToText("daemon-remote-mcp"),
-	}
-	raw, params, err := remoteMCPDaemonTokenForClaim(AgentTaskResponse{
-		RemoteMCPConnections: []remotemcp.Connection{{ContributionKey: "mobbin"}},
-	}, runtime)
-	if err != nil {
-		t.Fatalf("remoteMCPDaemonTokenForClaim: %v", err)
-	}
-	if !strings.HasPrefix(raw, "mdt_") {
-		t.Fatalf("raw token has unexpected prefix")
-	}
-	if len(params) != 1 || params[0].TokenHash != auth.HashToken(raw) {
-		t.Fatalf("daemon token params do not contain the generated token hash")
-	}
-	if params[0].WorkspaceID != runtime.WorkspaceID || params[0].DaemonID != "daemon-remote-mcp" {
-		t.Fatalf("daemon token scope = (%v, %q)", params[0].WorkspaceID, params[0].DaemonID)
-	}
-	remaining := time.Until(params[0].ExpiresAt.Time)
-	if remaining < 23*time.Hour || remaining > 24*time.Hour {
-		t.Fatalf("daemon token lifetime = %s, want about 24h", remaining)
-	}
 }
 
 func TestListDaemonWorkspaces_UserScopedAndConditional(t *testing.T) {
@@ -512,97 +442,6 @@ func TestClaimTaskByRuntime_DoesNotReclaimDifferentRuntimeTask(t *testing.T) {
 	}
 }
 
-func TestClaimTaskByRuntime_SkillBundleRefsAndResolve(t *testing.T) {
-	if testHandler == nil || testPool == nil {
-		t.Skip("database not available")
-	}
-
-	ctx := context.Background()
-	runtimeID := createClaimReclaimRuntime(t, ctx, "Skill refs runtime")
-	agentID, issueID := createClaimReclaimAgentAndIssue(t, ctx, runtimeID, "Skill refs agent")
-
-	skillID := dbfx.Insert(t, "skill", testutil.Cols{
-		"workspace_id": testWorkspaceID,
-		"name":         "deploy-skill-ref-test",
-		"description":  "Deploy safely",
-		"content":      "main skill content",
-		"config":       testutil.Raw("'{}'::jsonb"),
-		"created_by":   testUserID,
-	})
-	t.Cleanup(func() {
-		testPool.Exec(ctx, `DELETE FROM agent_skill WHERE skill_id = $1`, skillID)
-		testPool.Exec(ctx, `DELETE FROM skill_file WHERE skill_id = $1`, skillID)
-		testPool.Exec(ctx, `DELETE FROM skill WHERE id = $1`, skillID)
-	})
-	dbfx.Exec(t, `INSERT INTO skill_file (skill_id, path, content) VALUES ($1, 'rules.md', 'rules content')`, skillID)
-	dbfx.Exec(t, `INSERT INTO agent_skill (agent_id, skill_id) VALUES ($1, $2)`, agentID, skillID)
-
-	taskID := dbfx.Task(t, agentID, testutil.Cols{
-		"runtime_id": runtimeID,
-		"issue_id":   issueID,
-	})
-
-	req := newDaemonTokenRequest("POST", "/api/daemon/runtimes/"+runtimeID+"/tasks/claim", nil, testWorkspaceID, "skill-refs-daemon")
-	req.Header.Set("X-Client-Capabilities", protocol.DaemonCapabilitySkillBundlesV1)
-	req = withURLParam(req, "runtimeId", runtimeID)
-	w := testutil.Call(t, testHandler.ClaimTaskByRuntime, req).Want(http.StatusOK)
-
-	var claimResp struct {
-		Task *AgentTaskResponse `json:"task"`
-	}
-	w.JSON(&claimResp)
-	if claimResp.Task == nil || claimResp.Task.Agent == nil {
-		t.Fatalf("missing task agent in response: %s", w.Body.String())
-	}
-	if len(claimResp.Task.Agent.Skills) != 0 {
-		t.Fatalf("slim claim returned full skills: %+v", claimResp.Task.Agent.Skills)
-	}
-	var ref service.AgentSkillRefData
-	for _, candidate := range claimResp.Task.Agent.SkillRefs {
-		if candidate.ID == skillID {
-			ref = candidate
-			break
-		}
-	}
-	if ref.ID == "" || ref.Hash == "" || ref.FileCount != 1 || len(ref.Files) != 1 || ref.Files[0].SHA256 == "" {
-		t.Fatalf("workspace skill ref missing manifest: %+v", ref)
-	}
-
-	staleHashBody := resolveSkillBundlesRequest{Skills: []resolveSkillBundleRef{{ID: ref.ID, Source: ref.Source, Hash: "sha256:stale"}}}
-	req = newDaemonTokenRequest("POST", "/api/daemon/runtimes/"+runtimeID+"/tasks/"+taskID+"/skill-bundles/resolve", staleHashBody, testWorkspaceID, "skill-refs-daemon")
-	req = withURLParams(req, "runtimeId", runtimeID, "taskId", taskID)
-	w = testutil.Call(t, testHandler.ResolveTaskSkillBundles, req).Want(http.StatusOK)
-	var staleHashResp struct {
-		Bundles []service.AgentSkillData `json:"bundles"`
-	}
-	w.JSON(&staleHashResp)
-	if len(staleHashResp.Bundles) != 1 || staleHashResp.Bundles[0].Hash != ref.Hash {
-		t.Fatalf("stale hash resolve did not return current bundle: %+v", staleHashResp.Bundles)
-	}
-
-	invalidRefBody := resolveSkillBundlesRequest{Skills: []resolveSkillBundleRef{{ID: ref.ID, Source: ref.Source}}}
-	req = newDaemonTokenRequest("POST", "/api/daemon/runtimes/"+runtimeID+"/tasks/"+taskID+"/skill-bundles/resolve", invalidRefBody, testWorkspaceID, "skill-refs-daemon")
-	req = withURLParams(req, "runtimeId", runtimeID, "taskId", taskID)
-	w = testutil.Call(t, testHandler.ResolveTaskSkillBundles, req).Want(http.StatusBadRequest)
-
-	resolveBody := resolveSkillBundlesRequest{Skills: []resolveSkillBundleRef{{ID: ref.ID, Source: ref.Source, Hash: ref.Hash}}}
-	req = newDaemonTokenRequest("POST", "/api/daemon/runtimes/"+runtimeID+"/tasks/"+taskID+"/skill-bundles/resolve", resolveBody, testWorkspaceID, "skill-refs-daemon")
-	req = withURLParams(req, "runtimeId", runtimeID, "taskId", taskID)
-	w = testutil.Call(t, testHandler.ResolveTaskSkillBundles, req).Want(http.StatusOK)
-	var resolveResp struct {
-		Bundles []service.AgentSkillData `json:"bundles"`
-	}
-	w.JSON(&resolveResp)
-	if len(resolveResp.Bundles) != 1 || resolveResp.Bundles[0].Content != "main skill content" || len(resolveResp.Bundles[0].Files) != 1 || resolveResp.Bundles[0].Files[0].Content != "rules content" {
-		t.Fatalf("unexpected resolved bundles: %+v", resolveResp.Bundles)
-	}
-
-	dbfx.Exec(t, `UPDATE agent_task_queue SET status = 'running', started_at = now() WHERE id = $1`, taskID)
-	req = newDaemonTokenRequest("POST", "/api/daemon/runtimes/"+runtimeID+"/tasks/"+taskID+"/skill-bundles/resolve", resolveBody, testWorkspaceID, "skill-refs-daemon")
-	req = withURLParams(req, "runtimeId", runtimeID, "taskId", taskID)
-	w = testutil.Call(t, testHandler.ResolveTaskSkillBundles, req).Want(http.StatusConflict)
-}
-
 // TestClaimTaskByRuntime_PopulatesWorkspaceContext verifies the claim
 // response carries workspace.context so the daemon can inject the
 // workspace-level system prompt into every agent brief. Regression coverage
@@ -908,7 +747,7 @@ func TestHandleDaemonWSHeartbeat_RuntimeGoneReturnsAckNotError(t *testing.T) {
 				missingRuntime: daemonws.NewRuntimeLease(testWorkspaceID, "online", time.Now().Add(-2*runtimeHeartbeatDBFlushInterval), true),
 			},
 		},
-		missingRuntime, false)
+		missingRuntime)
 	if err != nil {
 		t.Fatalf("HandleDaemonWSHeartbeat: unexpected error %v", err)
 	}
@@ -952,7 +791,7 @@ func TestHandleDaemonWSHeartbeat_AllowsAnyAuthorizedWorkspace(t *testing.T) {
 				runtimeID: daemonws.NewRuntimeLease(workspaceID, "online", time.Now(), true),
 			},
 		},
-		runtimeID, false)
+		runtimeID)
 	if err != nil {
 		t.Fatalf("HandleDaemonWSHeartbeat: unexpected error %v", err)
 	}
@@ -977,83 +816,6 @@ func TestDaemonHeartbeat_HTTPRuntimeGoneReturns404(t *testing.T) {
 	w := testutil.Call(t, testHandler.DaemonHeartbeat, req).Want(http.StatusNotFound)
 	if !strings.Contains(strings.ToLower(w.Body.String()), "runtime not found") {
 		t.Fatalf("expected 'runtime not found' body, got %s", w.Body.String())
-	}
-}
-
-// TestDaemonHeartbeat_SlowProbeDoesNotWedge pins the invariant that a stalled
-// HasPending probe cannot wedge the heartbeat endpoint past the per-probe
-// timeout. The probe is the only bounded call; PopPending is ack-safe-
-// critical and is intentionally left unbounded. Without the probe bound the
-// heartbeat would hang on a slow shared store.
-func TestDaemonHeartbeat_SlowProbeDoesNotWedge(t *testing.T) {
-	if testHandler == nil {
-		t.Skip("database not available")
-	}
-
-	runtimeID := createRuntimeLocalSkillTestRuntime(t, testUserID)
-	origProbeTimeout := heartbeatHasPendingTimeout
-	// Both stub probes wait this budget out in full.
-	heartbeatHasPendingTimeout = 10 * time.Millisecond
-	t.Cleanup(func() { heartbeatHasPendingTimeout = origProbeTimeout })
-
-	origList := testHandler.LocalSkillListStore
-	origImport := testHandler.LocalSkillImportStore
-	testHandler.LocalSkillListStore = slowProbeLocalSkillListStore{origList}
-	testHandler.LocalSkillImportStore = slowProbeLocalSkillImportStore{origImport}
-	t.Cleanup(func() {
-		testHandler.LocalSkillListStore = origList
-		testHandler.LocalSkillImportStore = origImport
-	})
-
-	w := httptest.NewRecorder()
-	req := newDaemonTokenRequest(http.MethodPost, "/api/daemon/heartbeat", map[string]any{
-		"runtime_id": runtimeID,
-	}, testWorkspaceID, "runtime-local-skills-daemon")
-
-	start := time.Now()
-	testHandler.DaemonHeartbeat(w, req)
-	elapsed := time.Since(start)
-
-	if w.Code != http.StatusOK {
-		t.Fatalf("DaemonHeartbeat with slow probes: expected 200, got %d: %s", w.Code, w.Body.String())
-	}
-	// Two bounded probes plus a small fixed slack.
-	if elapsed > time.Second {
-		t.Fatalf("DaemonHeartbeat took %s; expected fast return despite slow probes", elapsed)
-	}
-}
-
-// TestDaemonHeartbeat_EmptyQueueSkipsPopPending pins the ack-safety property:
-// when HasPending reports no work, the heartbeat must NOT invoke PopPending,
-// because PopPending's Redis implementation has non-atomic side effects that
-// a client-side cancel cannot cleanly un-run (see GH #1637 review).
-func TestDaemonHeartbeat_EmptyQueueSkipsPopPending(t *testing.T) {
-	if testHandler == nil {
-		t.Skip("database not available")
-	}
-
-	runtimeID := createRuntimeLocalSkillTestRuntime(t, testUserID)
-
-	origList := testHandler.LocalSkillListStore
-	origImport := testHandler.LocalSkillImportStore
-	listSpy := &popRecordingLocalSkillListStore{LocalSkillListStore: origList}
-	importSpy := &popRecordingLocalSkillImportStore{LocalSkillImportStore: origImport}
-	testHandler.LocalSkillListStore = listSpy
-	testHandler.LocalSkillImportStore = importSpy
-	t.Cleanup(func() {
-		testHandler.LocalSkillListStore = origList
-		testHandler.LocalSkillImportStore = origImport
-	})
-
-	req := newDaemonTokenRequest(http.MethodPost, "/api/daemon/heartbeat", map[string]any{
-		"runtime_id": runtimeID,
-	}, testWorkspaceID, "runtime-local-skills-daemon")
-	testutil.Call(t, testHandler.DaemonHeartbeat, req).Want(http.StatusOK)
-	if listSpy.popCalls != 0 {
-		t.Fatalf("expected 0 PopPending calls on empty list queue, got %d", listSpy.popCalls)
-	}
-	if importSpy.popCalls != 0 {
-		t.Fatalf("expected 0 PopPending calls on empty import queue, got %d", importSpy.popCalls)
 	}
 }
 
@@ -1958,84 +1720,6 @@ func TestDaemonRegister_LegacyIDNoMatchIsNoop(t *testing.T) {
 	}
 }
 
-// Regression test for #1224: tasks linked only via AutopilotRunID (run_only
-// autopilots) must resolve to the autopilot's workspace. Before the fix,
-// resolveTaskWorkspaceID fell through and every StartTask call returned 404.
-func TestStartTask_AutopilotRunOnlyTask_ResolvesWorkspace(t *testing.T) {
-	if testHandler == nil {
-		t.Skip("database not available")
-	}
-
-	ctx := context.Background()
-
-	var agentID, runtimeID string
-	dbfx.QueryRow(t, `
-		SELECT a.id, a.runtime_id FROM agent a WHERE a.workspace_id = $1 LIMIT 1
-	`, testWorkspaceID).Scan(&agentID, &runtimeID)
-
-	autopilotID := dbfx.Insert(t, "autopilot", testutil.Cols{
-		"workspace_id":    testWorkspaceID,
-		"title":           "run_only fixture",
-		"assignee_id":     agentID,
-		"execution_mode":  "run_only",
-		"created_by_type": "member",
-		"created_by_id":   testUserID,
-	})
-	defer testPool.Exec(ctx, `DELETE FROM autopilot WHERE id = $1`, autopilotID)
-
-	runID := dbfx.Insert(t, "autopilot_run", testutil.Cols{
-		"autopilot_id": autopilotID,
-		"source":       "manual",
-		"status":       "running",
-	})
-
-	// issue_id is explicitly NULL — the condition that used to trigger 404.
-	taskID := dbfx.Task(t, agentID, testutil.Cols{
-		"runtime_id":       runtimeID,
-		"issue_id":         nil,
-		"status":           "dispatched",
-		"autopilot_run_id": runID,
-	})
-	defer testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE id = $1`, taskID)
-
-	// Cross-workspace daemon token must still 404.
-	w := httptest.NewRecorder()
-	req := newDaemonTokenRequest("POST", "/api/daemon/tasks/"+taskID+"/start", nil,
-		"00000000-0000-0000-0000-000000000000", "attacker-daemon")
-	rctx := chi.NewRouteContext()
-	rctx.URLParams.Add("taskId", taskID)
-	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
-
-	testHandler.StartTask(w, req)
-	if w.Code != http.StatusNotFound {
-		t.Fatalf("StartTask with cross-workspace token: expected 404, got %d: %s", w.Code, w.Body.String())
-	}
-
-	// Same-workspace daemon token must succeed — this is the bug in #1224.
-	w = httptest.NewRecorder()
-	req = newDaemonTokenRequest("POST", "/api/daemon/tasks/"+taskID+"/start", map[string]any{
-		"capabilities": []string{protocol.DaemonCapabilityTaskSupplementV1},
-	},
-		testWorkspaceID, "legit-daemon")
-	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
-
-	testHandler.StartTask(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("StartTask for run_only autopilot task: expected 200, got %d: %s", w.Code, w.Body.String())
-	}
-
-	var status string
-	dbfx.QueryRow(t, `SELECT status FROM agent_task_queue WHERE id = $1`, taskID).Scan(&status)
-	if status != "running" {
-		t.Fatalf("expected task status 'running' after StartTask, got %q", status)
-	}
-	var capabilityRows int
-	dbfx.QueryRow(t, `SELECT count(*) FROM task_supplement_capability WHERE task_id = $1`, taskID).Scan(&capabilityRows)
-	if capabilityRows != 0 {
-		t.Fatalf("run-only autopilot persisted %d supplement capabilities, want 0", capabilityRows)
-	}
-}
-
 // ClaimTaskByRuntime must surface the issue's project github_repo resources
 // as resp.Repos and hide the workspace-bound repos. Without this the agent
 // would see two repo lists in the meta-skill and have no signal about which
@@ -2169,43 +1853,6 @@ func TestClaimTask_ProjectDescriptionInjected(t *testing.T) {
 	}
 }
 
-// The quick-create path resolves its project from the task context JSONB
-// (not an issue row), so its project_description wiring is a separate branch
-// in the claim handler and needs its own boundary assertion.
-func TestClaimTask_QuickCreateInjectsProjectDescription(t *testing.T) {
-	if testHandler == nil {
-		t.Skip("database not available")
-	}
-
-	ctx := context.Background()
-	agentID, runtimeID, daemonID := createRuntimeGuardAgent(t, ctx)
-
-	const projectDescription = "Use the design system tokens; never hardcode colors."
-	projectID := dbfx.Project(t, "Quick-create project description", testutil.Cols{
-		"description": projectDescription,
-	})
-
-	quickContext, _ := json.Marshal(map[string]any{
-		"type":         "quick_create",
-		"prompt":       "create a follow-up issue",
-		"requester_id": testUserID,
-		"workspace_id": testWorkspaceID,
-		"project_id":   projectID,
-	})
-	dbfx.Exec(t, `
-		INSERT INTO agent_task_queue (agent_id, runtime_id, status, priority, context)
-		VALUES ($1, $2, 'queued', 2, $3)
-	`, agentID, runtimeID, quickContext)
-
-	task := claimTaskForRuntimeGuard(t, runtimeID, daemonID)
-	if task.ProjectID != projectID {
-		t.Errorf("quick-create project_id = %q, want %q", task.ProjectID, projectID)
-	}
-	if task.ProjectDescription != projectDescription {
-		t.Errorf("quick-create project_description = %q, want %q", task.ProjectDescription, projectDescription)
-	}
-}
-
 // When the issue's project has no github_repo resources, the claim handler
 // must fall back to workspace repos (the pre-override behavior).
 func TestClaimTask_ProjectWithoutRepos_FallsBackToWorkspaceRepos(t *testing.T) {
@@ -2251,145 +1898,6 @@ func TestClaimTask_ProjectWithoutRepos_FallsBackToWorkspaceRepos(t *testing.T) {
 	}
 	if len(resp.Task.Repos) != 1 || !strings.HasSuffix(resp.Task.Repos[0].URL, "workspace-fallback") {
 		t.Fatalf("expected workspace fallback repo, got %+v", resp.Task.Repos)
-	}
-}
-
-// Regression test for #1276: ClaimTaskByRuntime must populate both
-// workspace and project context for run_only autopilot tasks. Project context
-// is what lets the daemon select a bound local_directory and materialize the
-// managed .multica/project/resources.json source manifest before launch.
-func TestClaimTask_AutopilotRunOnly_PopulatesWorkspaceAndProjectContext(t *testing.T) {
-	if testHandler == nil {
-		t.Skip("database not available")
-	}
-
-	ctx := context.Background()
-
-	var agentID, runtimeID string
-	dbfx.QueryRow(t, `
-		SELECT a.id, a.runtime_id FROM agent a WHERE a.workspace_id = $1 LIMIT 1
-	`, testWorkspaceID).Scan(&agentID, &runtimeID)
-
-	const projectDescription = "Use only the bound project resources."
-	projectID := dbfx.Project(t, "Run-only autopilot project", testutil.Cols{
-		"description": projectDescription,
-	})
-	const projectRepoURL = "https://github.com/example/run-only-project"
-	dbfx.Insert(t, "project_resource", testutil.Cols{
-		"project_id":    projectID,
-		"workspace_id":  testWorkspaceID,
-		"resource_type": "github_repo",
-		"resource_ref":  `{"url":"` + projectRepoURL + `"}`,
-		"position":      0,
-	})
-	dbfx.Insert(t, "project_resource", testutil.Cols{
-		"project_id":    projectID,
-		"workspace_id":  testWorkspaceID,
-		"resource_type": "local_directory",
-		"resource_ref":  `{"daemon_id":"test-daemon-claim","local_path":"/srv/run-only-project","execution_mode":"in_place"}`,
-		"position":      1,
-	})
-
-	autopilotID := dbfx.Insert(t, "autopilot", testutil.Cols{
-		"workspace_id":    testWorkspaceID,
-		"project_id":      projectID,
-		"title":           "claim workspace fixture",
-		"assignee_id":     agentID,
-		"execution_mode":  "run_only",
-		"created_by_type": "member",
-		"created_by_id":   testUserID,
-	})
-	defer testPool.Exec(ctx, `DELETE FROM autopilot WHERE id = $1`, autopilotID)
-
-	runID := dbfx.Insert(t, "autopilot_run", testutil.Cols{
-		"autopilot_id": autopilotID,
-		"source":       "manual",
-		"status":       "running",
-	})
-
-	// Create a queued task with only AutopilotRunID (no IssueID, no ChatSessionID).
-	taskID := dbfx.Task(t, agentID, testutil.Cols{
-		"runtime_id":       runtimeID,
-		"issue_id":         nil,
-		"autopilot_run_id": runID,
-	})
-	defer testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE id = $1`, taskID)
-
-	w := httptest.NewRecorder()
-	req := newDaemonTokenRequest("POST", "/api/daemon/runtimes/"+runtimeID+"/claim", nil,
-		testWorkspaceID, "test-daemon-claim")
-	rctx := chi.NewRouteContext()
-	rctx.URLParams.Add("runtimeId", runtimeID)
-	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
-
-	testHandler.ClaimTaskByRuntime(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("ClaimTaskByRuntime: expected 200, got %d: %s", w.Code, w.Body.String())
-	}
-
-	var resp struct {
-		Task *struct {
-			WorkspaceID        string                `json:"workspace_id"`
-			ThreadName         string                `json:"thread_name"`
-			Repos              []RepoData            `json:"repos"`
-			ProjectID          string                `json:"project_id"`
-			ProjectTitle       string                `json:"project_title"`
-			ProjectDescription string                `json:"project_description"`
-			ProjectResources   []ProjectResourceData `json:"project_resources"`
-		} `json:"task"`
-	}
-	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
-	if resp.Task == nil {
-		t.Fatal("expected a task in response, got nil")
-	}
-	if resp.Task.WorkspaceID == "" {
-		t.Fatal("ClaimTaskByRuntime for run_only autopilot: workspace_id is empty in response")
-	}
-	if resp.Task.WorkspaceID != testWorkspaceID {
-		t.Fatalf("expected workspace_id %q, got %q", testWorkspaceID, resp.Task.WorkspaceID)
-	}
-	if resp.Task.ThreadName != "claim workspace fixture" {
-		t.Fatalf("autopilot task thread_name = %q, want autopilot title", resp.Task.ThreadName)
-	}
-	if resp.Task.ProjectID != projectID {
-		t.Errorf("project_id = %q, want %q", resp.Task.ProjectID, projectID)
-	}
-	if resp.Task.ProjectTitle != "Run-only autopilot project" {
-		t.Errorf("project_title = %q, want run-only project title", resp.Task.ProjectTitle)
-	}
-	if resp.Task.ProjectDescription != projectDescription {
-		t.Errorf("project_description = %q, want %q", resp.Task.ProjectDescription, projectDescription)
-	}
-	if len(resp.Task.ProjectResources) != 2 {
-		t.Fatalf("project_resources count = %d, want 2", len(resp.Task.ProjectResources))
-	}
-	var localDirectory struct {
-		DaemonID      string `json:"daemon_id"`
-		LocalPath     string `json:"local_path"`
-		ExecutionMode string `json:"execution_mode"`
-	}
-	foundLocalDirectory := false
-	for _, resource := range resp.Task.ProjectResources {
-		if resource.ResourceType != "local_directory" {
-			continue
-		}
-		foundLocalDirectory = true
-		if err := json.Unmarshal(resource.ResourceRef, &localDirectory); err != nil {
-			t.Fatalf("decode local_directory resource: %v", err)
-		}
-	}
-	if !foundLocalDirectory {
-		t.Fatal("local_directory project resource missing from claim")
-	}
-	if localDirectory.DaemonID != "test-daemon-claim" ||
-		localDirectory.LocalPath != "/srv/run-only-project" ||
-		localDirectory.ExecutionMode != "in_place" {
-		t.Fatalf("local_directory = %+v, want bound daemon/path/in_place", localDirectory)
-	}
-	if len(resp.Task.Repos) != 1 || resp.Task.Repos[0].URL != projectRepoURL {
-		t.Fatalf("repos = %+v, want only project repo %q", resp.Task.Repos, projectRepoURL)
 	}
 }
 
@@ -3408,68 +2916,6 @@ func TestClaimTask_ChatPriorSessionRuntimeGuard(t *testing.T) {
 	}
 }
 
-// Different channel context generations have independent debounce timers. If
-// the newer generation finishes first, its Chat-wide pointer must not become
-// the resume source for a delayed task from the older generation.
-func TestClaimTask_ChannelContextRevisionScopesProviderResume(t *testing.T) {
-	if testHandler == nil {
-		t.Skip("database not available")
-	}
-
-	ctx := context.Background()
-	agentID, runtimeID, daemonID := createRuntimeGuardAgent(t, ctx)
-	chatSessionID := dbfx.ChatSession(t, agentID, testutil.Cols{
-		"title":      "channel generation resume scope",
-		"session_id": "new-generation-session",
-		"work_dir":   "/tmp/new-generation-workdir",
-		"runtime_id": runtimeID,
-	})
-
-	dbfx.Exec(t, `
-		INSERT INTO agent_task_queue (
-			agent_id, runtime_id, chat_session_id, status, priority,
-			started_at, completed_at, session_id, work_dir,
-			channel_context_revision
-		)
-		VALUES
-			($1, $2, $3, 'completed', 0, now() - interval '2 minutes', now() - interval '2 minutes',
-			 'old-generation-session', '/tmp/old-generation-workdir', 1),
-			($1, $2, $3, 'completed', 0, now() - interval '1 minute', now() - interval '1 minute',
-			 'new-generation-session', '/tmp/new-generation-workdir', 2)
-	`, agentID, runtimeID, chatSessionID)
-	dbfx.Exec(t, `
-		UPDATE agent_task_queue
-		SET session_rollout_missing = TRUE
-		WHERE chat_session_id = $1 AND channel_context_revision = 2
-	`, chatSessionID)
-
-	taskID := dbfx.Task(t, agentID, testutil.Cols{
-		"runtime_id":               runtimeID,
-		"chat_session_id":          chatSessionID,
-		"priority":                 1000,
-		"channel_context_revision": int64(1),
-	})
-	dbfx.Exec(t, `UPDATE agent_task_queue SET chat_input_task_id = id WHERE id = $1`, taskID)
-	dbfx.Insert(t, "chat_message", testutil.Cols{
-		"chat_session_id":          chatSessionID,
-		"role":                     "user",
-		"content":                  "delayed old-generation message",
-		"task_id":                  taskID,
-		"channel_context_revision": int64(1),
-	})
-
-	task := claimTaskForRuntimeGuard(t, runtimeID, daemonID)
-	if task.PriorSessionID != "old-generation-session" {
-		t.Fatalf("prior session = %q, want old-generation-session", task.PriorSessionID)
-	}
-	if task.PriorWorkDir != "/tmp/old-generation-workdir" {
-		t.Fatalf("prior workdir = %q, want /tmp/old-generation-workdir", task.PriorWorkDir)
-	}
-	if task.PriorSessionResumeUnavailable {
-		t.Fatal("new-generation continuity gap leaked into old-generation claim")
-	}
-}
-
 // TestClaimTask_ChatDeliversAllUnansweredUserMessages pins the fix for the
 // regression the MUL-2968 debounce exposed: when several user messages are
 // debounced into a single run, the agent must receive ALL of them, not just
@@ -3582,128 +3028,6 @@ func TestClaimTask_ChatPopulatesInitiator(t *testing.T) {
 		t.Errorf("chat initiator = {type:%q id:%q name:%q email:%q}, want {member %q %q %q}",
 			resp.Task.InitiatorType, resp.Task.InitiatorID, resp.Task.InitiatorName, resp.Task.InitiatorEmail,
 			testUserID, handlerTestName, handlerTestEmail)
-	}
-}
-
-func TestClaimTask_QuickCreatePopulatesThreadName(t *testing.T) {
-	if testHandler == nil {
-		t.Skip("database not available")
-	}
-
-	ctx := context.Background()
-	agentID, runtimeID, daemonID := createRuntimeGuardAgent(t, ctx)
-
-	quickPrompt := "create a follow-up issue for Codex session titles"
-	attachmentID := "019ec09d-6222-722b-bdfa-427b105d80be"
-	quickContext, _ := json.Marshal(map[string]any{
-		"type":           "quick_create",
-		"prompt":         quickPrompt,
-		"requester_id":   testUserID,
-		"workspace_id":   testWorkspaceID,
-		"priority":       "high",
-		"due_date":       "2026-08-01",
-		"attachment_ids": []string{attachmentID},
-	})
-
-	dbfx.Exec(t, `
-		INSERT INTO agent_task_queue (agent_id, runtime_id, status, priority, context)
-		VALUES ($1, $2, 'queued', 2, $3)
-	`, agentID, runtimeID, quickContext)
-
-	task := claimTaskForRuntimeGuard(t, runtimeID, daemonID)
-	if task.ThreadName != quickPrompt {
-		t.Fatalf("quick-create task thread_name = %q, want prompt", task.ThreadName)
-	}
-	if len(task.QuickCreateAttachmentIDs) != 1 || task.QuickCreateAttachmentIDs[0] != attachmentID {
-		t.Fatalf("quick-create attachment ids = %#v, want [%q]", task.QuickCreateAttachmentIDs, attachmentID)
-	}
-	if task.QuickCreatePriority != "high" || task.QuickCreateDueDate != "2026-08-01" {
-		t.Fatalf("quick-create fields = {%q, %q}, want {high, 2026-08-01}", task.QuickCreatePriority, task.QuickCreateDueDate)
-	}
-}
-
-func TestClaimTask_SourceContextQuickCreateBecomesTopLevelWhenSourceWasDeleted(t *testing.T) {
-	if testHandler == nil {
-		t.Skip("database not available")
-	}
-
-	ctx := context.Background()
-	agentID, runtimeID, daemonID := createRuntimeGuardAgent(t, ctx)
-	parentIssueID := dbfx.Issue(t, "deleted source for contextual quick-create")
-	contextID := uuid.NewString()
-	quickContext, err := json.Marshal(map[string]any{
-		"type":              "quick_create",
-		"prompt":            "create the surviving follow-up",
-		"requester_id":      testUserID,
-		"workspace_id":      testWorkspaceID,
-		"parent_issue_id":   parentIssueID,
-		"source_context_id": contextID,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	var taskID string
-	dbfx.QueryRow(t, `
-		INSERT INTO agent_task_queue (agent_id, runtime_id, status, priority, context)
-		VALUES ($1, $2, 'queued', 2, $3)
-		RETURNING id
-	`, agentID, runtimeID, quickContext).Scan(&taskID)
-	dbfx.Exec(t, `
-		INSERT INTO issue_source_context (
-			id, workspace_id, origin_task_id, source_issue_id, anchor_comment_id,
-			captured_by_user_id, snapshot_version, snapshot, capture_digest, state
-		) VALUES ($1, $2, $3, $4, $5, $6, 1, '{}'::jsonb, 'digest', 'pending')
-	`, contextID, testWorkspaceID, taskID, parentIssueID, uuid.NewString(), testUserID)
-	t.Cleanup(func() {
-		_, _ = testPool.Exec(context.Background(), `DELETE FROM issue_source_context WHERE id = $1`, contextID)
-		_, _ = testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE id = $1`, taskID)
-	})
-
-	// Direct deletion isolates the claim-time race: the immutable pending
-	// context intentionally has no FK to the live source and must survive.
-	dbfx.Exec(t, `DELETE FROM issue WHERE id = $1`, parentIssueID)
-
-	task := claimTaskForRuntimeGuard(t, runtimeID, daemonID)
-	if task.ParentIssueID != "" {
-		t.Fatalf("source-context quick-create parent = %q after source deletion, want top-level", task.ParentIssueID)
-	}
-	if len(task.QuickCreateSourceContext) == 0 {
-		t.Fatal("source-context quick-create lost its immutable snapshot")
-	}
-}
-
-func TestClaimTask_SourceContextQuickCreateChecksWorkspaceBeforeSnapshot(t *testing.T) {
-	if testHandler == nil {
-		t.Skip("database not available")
-	}
-
-	ctx := context.Background()
-	agentID, runtimeID, daemonID := createRuntimeGuardAgent(t, ctx)
-	quickContext, err := json.Marshal(map[string]any{
-		"type":              "quick_create",
-		"prompt":            "must not load foreign context",
-		"requester_id":      testUserID,
-		"workspace_id":      uuid.NewString(),
-		"source_context_id": "not-a-uuid",
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	taskID := dbfx.Task(t, agentID, testutil.Cols{
-		"runtime_id": runtimeID,
-		"context":    quickContext,
-	})
-
-	req := newDaemonTokenRequest("POST", "/api/daemon/runtimes/"+runtimeID+"/claim", nil,
-		testWorkspaceID, daemonID)
-	req = withURLParam(req, "runtimeId", runtimeID)
-	testutil.Call(t, testHandler.ClaimTaskByRuntime, req).Want(http.StatusInternalServerError)
-
-	var status string
-	dbfx.QueryRow(t, `SELECT status FROM agent_task_queue WHERE id = $1`, taskID).Scan(&status)
-	if status != "cancelled" {
-		t.Fatalf("foreign source-context quick-create status = %q, want cancelled before snapshot parsing", status)
 	}
 }
 
@@ -3843,59 +3167,6 @@ func TestGetChatSessionGCCheck(t *testing.T) {
 	w = testutil.Call(t, testHandler.GetChatSessionGCCheck, req).Want(http.StatusNotFound)
 }
 
-// TestGetAutopilotRunGCCheck verifies the autopilot-run gc-check endpoint:
-// 200 with status+completed_at on success, 404 on cross-workspace probe.
-func TestGetAutopilotRunGCCheck(t *testing.T) {
-	if testHandler == nil {
-		t.Skip("database not available")
-	}
-
-	ctx := context.Background()
-
-	var agentID string
-	dbfx.QueryRow(t, `SELECT id FROM agent WHERE workspace_id = $1 LIMIT 1`, testWorkspaceID).Scan(&agentID)
-
-	autopilotID := dbfx.Insert(t, "autopilot", testutil.Cols{
-		"workspace_id":    testWorkspaceID,
-		"title":           "gc-check autopilot",
-		"assignee_id":     agentID,
-		"execution_mode":  "run_only",
-		"created_by_type": "member",
-		"created_by_id":   testUserID,
-	})
-	defer testPool.Exec(ctx, `DELETE FROM autopilot WHERE id = $1`, autopilotID)
-
-	runID := dbfx.Insert(t, "autopilot_run", testutil.Cols{
-		"autopilot_id": autopilotID,
-		"source":       "manual",
-		"status":       "completed",
-		"completed_at": testutil.Raw("NOW() - INTERVAL '6 days'"),
-	})
-
-	// Cross-workspace probe.
-	req := newDaemonTokenRequest("GET", "/api/daemon/autopilot-runs/"+runID+"/gc-check", nil,
-		"00000000-0000-0000-0000-000000000000", "attacker-daemon")
-	req = withURLParam(req, "runId", runID)
-	w := testutil.Call(t, testHandler.GetAutopilotRunGCCheck, req).Want(http.StatusNotFound)
-
-	// Same-workspace probe.
-	req = newDaemonTokenRequest("GET", "/api/daemon/autopilot-runs/"+runID+"/gc-check", nil,
-		testWorkspaceID, "legit-daemon")
-	req = withURLParam(req, "runId", runID)
-	w = testutil.Call(t, testHandler.GetAutopilotRunGCCheck, req).Want(http.StatusOK)
-	var resp struct {
-		Status      string `json:"status"`
-		CompletedAt string `json:"completed_at"`
-	}
-	w.JSON(&resp)
-	if resp.Status != "completed" {
-		t.Fatalf("expected status %q, got %q", "completed", resp.Status)
-	}
-	if resp.CompletedAt == "" {
-		t.Fatal("expected completed_at to be set for terminal run")
-	}
-}
-
 // TestGetTaskGCCheck verifies the task gc-check endpoint that quick-create
 // workdirs key on. Same anti-enumeration shape via requireDaemonTaskAccess.
 func TestGetTaskGCCheck(t *testing.T) {
@@ -3910,19 +3181,11 @@ func TestGetTaskGCCheck(t *testing.T) {
 		SELECT a.id, a.runtime_id FROM agent a WHERE a.workspace_id = $1 LIMIT 1
 	`, testWorkspaceID).Scan(&agentID, &runtimeID)
 
-	// Quick-create-shaped task: no issue_id, no chat_session_id, no run id.
-	// context.type is set so ResolveTaskWorkspaceID can recover workspace.
-	quickContext, _ := json.Marshal(map[string]any{
-		"type":         "quick_create",
-		"prompt":       "fixture",
-		"requester_id": testUserID,
-		"workspace_id": testWorkspaceID,
-	})
-
+	issueID := dbfx.Issue(t, "gc-check fixture")
 	taskID := dbfx.Task(t, agentID, testutil.Cols{
+		"issue_id":     issueID,
 		"runtime_id":   runtimeID,
 		"status":       "completed",
-		"context":      quickContext,
 		"completed_at": testutil.Raw("NOW()"),
 	})
 	defer testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE id = $1`, taskID)
@@ -4072,7 +3335,7 @@ func TestMembershipCache_InvalidatedOnDeleteMember(t *testing.T) {
 	installFreshMembershipCache(t)
 	ctx := context.Background()
 
-	targetUserID, targetMemberID := createEphemeralMember(t, testWorkspaceID, "delete", "admin")
+	targetUserID, targetMemberID := createEphemeralMember(t, testWorkspaceID, "delete", "member")
 	testHandler.MembershipCache.Set(ctx, targetUserID, testWorkspaceID)
 	if !testHandler.MembershipCache.Get(ctx, targetUserID, testWorkspaceID) {
 		t.Fatal("setup: expected cache hit after Set")
@@ -4084,31 +3347,6 @@ func TestMembershipCache_InvalidatedOnDeleteMember(t *testing.T) {
 
 	if testHandler.MembershipCache.Get(ctx, targetUserID, testWorkspaceID) {
 		t.Fatal("DeleteMember handler did not invalidate membership cache for removed user")
-	}
-}
-
-// TestMembershipCache_InvalidatedOnUpdateMember drives a real UpdateMember
-// (role change) call and asserts the cache entry is invalidated. The cache
-// stores only the existence of membership, but UpdateMember still flushes
-// the entry so any downstream caller that did add role-aware caching later
-// would not silently see a stale role.
-func TestMembershipCache_InvalidatedOnUpdateMember(t *testing.T) {
-	if testHandler == nil {
-		t.Skip("database not available")
-	}
-	installFreshMembershipCache(t)
-	ctx := context.Background()
-
-	targetUserID, targetMemberID := createEphemeralMember(t, testWorkspaceID, "update", "admin")
-	testHandler.MembershipCache.Set(ctx, targetUserID, testWorkspaceID)
-
-	req := newRequest("PUT", "/api/workspaces/"+testWorkspaceID+"/members/"+targetMemberID,
-		map[string]any{"role": "member"})
-	req = withURLParams(req, "id", testWorkspaceID, "memberId", targetMemberID)
-	testutil.Call(t, testHandler.UpdateMember, req).Want(http.StatusOK)
-
-	if testHandler.MembershipCache.Get(ctx, targetUserID, testWorkspaceID) {
-		t.Fatal("UpdateMember handler did not invalidate membership cache for updated user")
 	}
 }
 
@@ -4124,7 +3362,7 @@ func TestMembershipCache_InvalidatedOnLeaveWorkspace(t *testing.T) {
 	installFreshMembershipCache(t)
 	ctx := context.Background()
 
-	targetUserID, _ := createEphemeralMember(t, testWorkspaceID, "leave", "admin")
+	targetUserID, _ := createEphemeralMember(t, testWorkspaceID, "leave", "member")
 	testHandler.MembershipCache.Set(ctx, targetUserID, testWorkspaceID)
 
 	req := newRequestAsUser(targetUserID, "DELETE", "/api/workspaces/"+testWorkspaceID+"/leave", nil)
@@ -4162,7 +3400,7 @@ func TestMembershipCache_InvalidatedOnDeleteWorkspace(t *testing.T) {
 		INSERT INTO member (workspace_id, user_id, role) VALUES ($1, $2, 'owner')
 	`, wsID, testUserID)
 
-	extraUserID, _ := createEphemeralMember(t, wsID, "ws-delete-extra", "admin")
+	extraUserID, _ := createEphemeralMember(t, wsID, "ws-delete-extra", "member")
 
 	testHandler.MembershipCache.Set(ctx, testUserID, wsID)
 	testHandler.MembershipCache.Set(ctx, extraUserID, wsID)
@@ -4881,27 +4119,5 @@ func TestBatchIssueGCCheckReadsNoCatalogForBuiltInStatuses(t *testing.T) {
 	if counter.entryReads != 0 || counter.keyReads != 0 {
 		t.Fatalf("built-in batch read the catalog (%d entry, %d key), want 0 — a built-in key IS its own category",
 			counter.entryReads, counter.keyReads)
-	}
-}
-
-func TestDaemonRegister_ProfileUsesStoredRuntimeIdentity(t *testing.T) {
-	if testHandler == nil {
-		t.Skip("database not available")
-	}
-	ctx := context.Background()
-	profileID := insertRuntimeProfileFixture(t, ctx, "Custom OMP", "pi", "wrapper")
-	if _, err := testPool.Exec(ctx, `UPDATE runtime_profile SET runtime_type = 'omp' WHERE id = $1`, profileID); err != nil {
-		t.Fatal(err)
-	}
-	req := newDaemonTokenRequest("POST", "/api/daemon/register", map[string]any{
-		"workspace_id": testWorkspaceID, "daemon_id": "test-omp-profile", "device_name": "test-device",
-		"runtimes": []map[string]any{{"name": "Custom OMP", "type": "pi", "profile_id": profileID, "status": "online"}},
-	}, testWorkspaceID, "test-omp-profile")
-	testutil.Call(t, testHandler.DaemonRegister, req).Want(http.StatusOK)
-	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM agent_runtime WHERE profile_id = $1`, profileID) })
-	var provider string
-	dbfx.QueryRow(t, `SELECT provider FROM agent_runtime WHERE profile_id = $1`, profileID).Scan(&provider)
-	if provider != "omp" {
-		t.Fatalf("provider = %q, want stored omp identity", provider)
 	}
 }

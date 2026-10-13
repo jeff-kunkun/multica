@@ -11,7 +11,6 @@ import {
   type ShortcutActionId,
 } from "@multica/core/shortcuts";
 import { useChatStore } from "@multica/core/chat";
-import { openCreateIssueWithPreference } from "@multica/core/issues/stores";
 import { useModalStore } from "@multica/core/modals";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { isImeComposing } from "@multica/core/utils";
@@ -31,12 +30,9 @@ const GLOBAL_ACTIONS: readonly ShortcutActionId[] = [
   "goMyIssues",
   "goIssues",
   "goProjects",
-  "goAutopilots",
   "goAgents",
-  "goSquads",
   "goUsage",
   "goRuntimes",
-  "goSkills",
   "goSettings",
 ];
 
@@ -62,12 +58,9 @@ export function GlobalShortcuts() {
       goMyIssues: workspacePaths.myIssues(),
       goIssues: workspacePaths.issues(),
       goProjects: workspacePaths.projects(),
-      goAutopilots: workspacePaths.autopilots(),
       goAgents: workspacePaths.agents(),
-      goSquads: workspacePaths.squads(),
       goUsage: workspacePaths.usage(),
       goRuntimes: workspacePaths.runtimes(),
-      goSkills: workspacePaths.skills(),
       goSettings: workspacePaths.settings(),
     };
 
@@ -127,7 +120,7 @@ export function GlobalShortcuts() {
         const data = projectMatch
           ? { project_id: projectMatch[1] }
           : undefined;
-        openCreateIssueWithPreference(data);
+        useModalStore.getState().open("create-issue", data ?? null);
         return;
       }
 

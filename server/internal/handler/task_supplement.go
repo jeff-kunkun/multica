@@ -130,15 +130,15 @@ func applyCommentSupplements(resp *CommentResponse, receipts []CommentSupplement
 	resp.SupplementDeliveredAt = receipts[0].DeliveredAt
 }
 
-// steerCommentAgentTriggers binds a member comment to the turn its author
-// chose for each recipient. A bound agent leaves the enqueue list: that turn
+// steerCommentAgentTriggers binds a member or agent comment to the chosen
+// turn of each recipient. A bound agent leaves the enqueue list: that turn
 // receives the comment instead of a follow-up run. A chosen turn that has
 // ended, has not started, or cannot take additional input is never swapped
 // for another turn of the same agent; that recipient keeps its normal
 // queued / coalesced / deferred handling, so losing a race never drops or
 // misdirects the comment.
 func (h *Handler) steerCommentAgentTriggers(ctx context.Context, issue db.Issue, comment db.Comment, actorType string, triggers []commentAgentTrigger, steerTaskIDs []pgtype.UUID) ([]commentAgentTrigger, map[string]commentEnqueueResult) {
-	if len(steerTaskIDs) == 0 || len(triggers) == 0 || actorType != "member" {
+	if len(steerTaskIDs) == 0 || len(triggers) == 0 || (actorType != "member" && actorType != "agent") {
 		return triggers, nil
 	}
 	// Each chosen turn names its agent; only a turn of this issue counts.
@@ -301,8 +301,8 @@ func (h *Handler) CreateTaskSupplement(w http.ResponseWriter, r *http.Request) {
 		CreatedAt: created.CreatedAt, UpdatedAt: created.UpdatedAt, ParentID: created.ParentID,
 		WorkspaceID: created.WorkspaceID, ResolvedAt: created.ResolvedAt,
 		ResolvedByType: created.ResolvedByType, ResolvedByID: created.ResolvedByID,
-		SourceTaskID: created.SourceTaskID, QuickActionID: created.QuickActionID,
-		ViaPluginID: created.ViaPluginID, Revision: created.Revision,
+		SourceTaskID:      created.SourceTaskID,
+		Revision:          created.Revision,
 		RecoverySettledAt: created.RecoverySettledAt, DeletedAt: created.DeletedAt,
 	}
 	resp := commentToResponse(comment, nil, nil)

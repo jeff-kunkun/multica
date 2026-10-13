@@ -43,9 +43,8 @@ type RuntimeTeardownOptions struct {
 // RuntimeTeardownResult reports committed business-object changes so callers
 // can publish events after their transaction commits.
 type RuntimeTeardownResult struct {
-	UnboundAgents    []db.Agent
-	CancelledTasks   []db.AgentTaskQueue
-	PausedAutopilots []db.Autopilot
+	UnboundAgents  []db.Agent
+	CancelledTasks []db.AgentTaskQueue
 }
 
 // ValidateRuntimeAgentWorkspaces refuses to mutate cross-workspace bindings.
@@ -121,16 +120,6 @@ func TeardownRuntime(ctx context.Context, qtx *db.Queries, runtimeID pgtype.UUID
 	}
 	out.UnboundAgents = unbound
 
-	unboundIDs := make([]pgtype.UUID, len(unbound))
-	for i, agent := range unbound {
-		unboundIDs[i] = agent.ID
-	}
-	paused, err := qtx.PauseAutopilotsByUnboundAgents(ctx, unboundIDs)
-	if err != nil {
-		return out, fmt.Errorf("pause autopilots: %w", err)
-	}
-	out.PausedAutopilots = paused
-
 	if _, err := qtx.UnbindTasksFromRuntime(ctx, runtimeID); err != nil {
 		return out, fmt.Errorf("unbind task history: %w", err)
 	}
@@ -146,9 +135,6 @@ func TeardownRuntime(ctx context.Context, qtx *db.Queries, runtimeID pgtype.UUID
 	// pruned before the system-agent rows disappear.
 	if err := qtx.DeleteAgentInvocationTargetsBySystemRuntimeAgents(ctx, runtimeID); err != nil {
 		return out, fmt.Errorf("clean up agent invocation targets: %w", err)
-	}
-	if err := qtx.DeleteChannelInstallationsBySystemRuntimeAgents(ctx, runtimeID); err != nil {
-		return out, fmt.Errorf("clean up channel installations: %w", err)
 	}
 	if err := qtx.DeleteChatPinnedAgentsBySystemRuntimeAgents(ctx, runtimeID); err != nil {
 		return out, fmt.Errorf("clean up chat pins: %w", err)
@@ -171,8 +157,5 @@ func pruneRuntimeSystemAgentChatDraftRestores(ctx context.Context, q *db.Queries
 	if _, err := q.LockChatSessionsBySystemRuntimeAgents(ctx, runtimeID); err != nil {
 		return err
 	}
-	if err := q.DeleteChatDraftRestoresBySystemRuntimeAgents(ctx, runtimeID); err != nil {
-		return err
-	}
-	return q.DeleteAgentBuilderDraftsBySystemRuntimeAgents(ctx, runtimeID)
+	return q.DeleteChatDraftRestoresBySystemRuntimeAgents(ctx, runtimeID)
 }

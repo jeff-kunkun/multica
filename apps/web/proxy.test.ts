@@ -60,12 +60,9 @@ describe("proxy legacy workspace route redirects", () => {
     ["issues", "/acme/issues"],
     ["projects", "/acme/projects"],
     ["agents", "/acme/agents"],
-    ["squads", "/acme/squads"],
     ["inbox", "/acme/inbox"],
     ["my-issues", "/acme/my-issues"],
-    ["autopilots", "/acme/autopilots"],
     ["runtimes", "/acme/runtimes"],
-    ["skills", "/acme/skills"],
     ["settings", "/acme/settings"],
     ["usage", "/acme/usage"],
   ])(
@@ -79,24 +76,22 @@ describe("proxy legacy workspace route redirects", () => {
 
   it("preserves nested legacy paths and query strings", () => {
     expect(
-      redirectLocation("/squads/squad-123?view=members", sessionCookies),
-    ).toBe("https://app.multica.test/acme/squads/squad-123?view=members");
+      redirectLocation("/projects/project-123?view=board", sessionCookies),
+    ).toBe("https://app.multica.test/acme/projects/project-123?view=board");
   });
 
   it("sends logged-out legacy URLs to login", () => {
-    expect(redirectLocation("/usage?tab=billing")).toBe(
-      "https://app.multica.test/login?tab=billing",
+    expect(redirectLocation("/usage?tab=all")).toBe(
+      "https://app.multica.test/login?tab=all",
     );
   });
 
   it("sends logged-in legacy URLs without a last workspace cookie to login", () => {
-    // Not root: the root-path rule below leaves "/" on the public site for the
-    // official marketing hosts even with a session, so bouncing there would
-    // dead-end on the landing page. /login resolves against the workspace list
-    // instead. The deep-link query is dropped because feeding a legacy path
-    // back through `next` would return here and loop.
+    // /login resolves against the workspace list. The deep-link query is
+    // dropped because feeding a legacy path back through `next` would return
+    // here and loop.
     expect(
-      redirectLocation("/squads?view=members", { multica_logged_in: "1" }),
+      redirectLocation("/projects?view=board", { multica_logged_in: "1" }),
     ).toBe("https://app.multica.test/login");
   });
 
@@ -110,7 +105,7 @@ describe("proxy legacy workspace route redirects", () => {
   );
 
   it("does not redirect workspace-scoped URLs whose first segment is already a slug", () => {
-    expect(redirectLocation("/acme/squads", sessionCookies)).toBeNull();
+    expect(redirectLocation("/acme/projects", sessionCookies)).toBeNull();
   });
 
   it("redirects app-host root URLs to the last workspace", () => {
@@ -120,11 +115,17 @@ describe("proxy legacy workspace route redirects", () => {
   });
 
   it.each(["multica.ai", "www.multica.ai"])(
-    "does not redirect public marketing root on %s",
+    "redirects root on %s to the last workspace",
     (host) => {
-      expect(redirectLocation("/", sessionCookies, host)).toBeNull();
+      expect(redirectLocation("/", sessionCookies, host)).toBe(
+        `https://${host}/acme/issues`,
+      );
     },
   );
+
+  it("sends a logged-out root visit to login", () => {
+    expect(redirectLocation("/")).toBe("https://app.multica.test/login");
+  });
 
   it("still redirects explicit legacy app routes on the public marketing host", () => {
     expect(redirectLocation("/issues/ABC-123", sessionCookies, "multica.ai")).toBe(
@@ -134,9 +135,6 @@ describe("proxy legacy workspace route redirects", () => {
 });
 
 describe("proxy runtime upstream rewrites", () => {
-  it("matches globally versioned Plugin API requests", () => {
-    expect(config.matcher).toContain("/v1/:path*");
-  });
 
   it("does not rewrite API requests when no runtime API origin is configured", () => {
     withoutRuntimeUpstreams(() => {
@@ -146,16 +144,7 @@ describe("proxy runtime upstream rewrites", () => {
       expect(res.headers.get("x-middleware-rewrite")).toBeNull();
       expect(
         res.headers.get(`x-middleware-request-${MULTICA_LOCALE_HEADER}`),
-      ).toBe("en");
-    });
-  });
-
-  it("does not rewrite Plugin API requests when no runtime API origin is configured", () => {
-    withoutRuntimeUpstreams(() => {
-      const res = proxy(makeRequest("/v1/context?x=1"));
-
-      expect(res.status).toBe(200);
-      expect(res.headers.get("x-middleware-rewrite")).toBeNull();
+      ).toBe("zh-Hans");
     });
   });
 
@@ -167,7 +156,7 @@ describe("proxy runtime upstream rewrites", () => {
       expect(res.headers.get("x-middleware-rewrite")).toBeNull();
       expect(
         res.headers.get(`x-middleware-request-${MULTICA_LOCALE_HEADER}`),
-      ).toBe("en");
+      ).toBe("zh-Hans");
     });
   });
 
@@ -195,21 +184,6 @@ describe("proxy runtime upstream rewrites", () => {
       expect(res.status).toBe(200);
       expect(res.headers.get("x-middleware-rewrite")).toBe(
         "http://backend:8080/health",
-      );
-    } finally {
-      restoreEnv("REMOTE_API_URL", previous);
-    }
-  });
-
-  it("rewrites Plugin API requests to the runtime API origin", () => {
-    const previous = process.env.REMOTE_API_URL;
-    process.env.REMOTE_API_URL = "http://backend:8080";
-    try {
-      const res = proxy(makeRequest("/v1/issues/MUL-6581?x=1"));
-
-      expect(res.status).toBe(200);
-      expect(res.headers.get("x-middleware-rewrite")).toBe(
-        "http://backend:8080/v1/issues/MUL-6581?x=1",
       );
     } finally {
       restoreEnv("REMOTE_API_URL", previous);
@@ -256,7 +230,7 @@ describe("proxy runtime upstream rewrites", () => {
       expect(res.headers.get("x-middleware-rewrite")).toBeNull();
       expect(
         res.headers.get(`x-middleware-request-${MULTICA_LOCALE_HEADER}`),
-      ).toBe("en");
+      ).toBe("zh-Hans");
     } finally {
       restoreEnv("REMOTE_API_URL", previous);
     }

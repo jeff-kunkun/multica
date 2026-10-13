@@ -99,13 +99,13 @@ describe("DiagnosticRouteReporter", () => {
   });
 
   it("reports an overlay, which is window state rather than a tab route", () => {
-    overlayState.overlay = { type: "onboarding" };
+    overlayState.overlay = { type: "new-workspace" };
 
     render(<DiagnosticRouteReporter />);
 
     expect(setRendererRouteContext).toHaveBeenCalledWith({
       surface: "overlay",
-      path: "/onboarding",
+      path: "/workspaces/new",
     });
   });
 

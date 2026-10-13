@@ -15,7 +15,7 @@
  */
 import { pageForSegment, type WorkspacePageKey } from "./route-icons";
 
-export type TabActorType = "agent" | "member" | "squad";
+export type TabActorType = "agent" | "member";
 
 export type TabSubject =
   /** A collection or tool page with no specific resource. */
@@ -24,12 +24,8 @@ export type TabSubject =
   | { kind: "issue"; id: string }
   /** A single project detail. */
   | { kind: "project"; id: string }
-  /** A single autopilot detail. */
-  | { kind: "autopilot"; id: string }
-  /** An agent / member / squad detail (has an avatar identity). */
+  /** An agent / member detail (has an avatar identity). */
   | { kind: "actor"; actorType: TabActorType; id: string }
-  /** A single skill detail. */
-  | { kind: "skill"; id: string }
   /** A runtime machine detail. */
   | { kind: "machine"; machineId: string }
   /** A runtime nested under a machine. */
@@ -82,8 +78,6 @@ export function parseTabSubject(url: string): TabSubject {
       return { kind: "page", page: "myIssues" };
     case "projects":
       return id ? { kind: "project", id } : { kind: "page", page: "projects" };
-    case "autopilots":
-      return id ? { kind: "autopilot", id } : { kind: "page", page: "autopilots" };
     case "agents":
       if (id === "new") return { kind: "flow", flow: "create-agent" };
       return id
@@ -92,10 +86,8 @@ export function parseTabSubject(url: string): TabSubject {
     case "members":
       // No members collection route exists; only `/members/:id`.
       return id ? { kind: "actor", actorType: "member", id } : { kind: "unknown" };
-    case "squads":
-      return id
-        ? { kind: "actor", actorType: "squad", id }
-        : { kind: "page", page: "squads" };
+    case "meetings":
+      return { kind: "page", page: "meetings" };
     case "usage":
       return { kind: "page", page: "usage" };
     case "inbox":
@@ -113,8 +105,6 @@ export function parseTabSubject(url: string): TabSubject {
         return { kind: "runtime", machineId: id, runtimeId: segments[4] };
       }
       return { kind: "machine", machineId: id };
-    case "skills":
-      return id ? { kind: "skill", id } : { kind: "page", page: "skills" };
     case "settings":
       return { kind: "page", page: "settings" };
     case "attachments":
@@ -145,12 +135,8 @@ export function tabSubjectKey(subject: TabSubject): string {
       return `issue:${subject.id}`;
     case "project":
       return `project:${subject.id}`;
-    case "autopilot":
-      return `autopilot:${subject.id}`;
     case "actor":
       return `actor:${subject.actorType}:${subject.id}`;
-    case "skill":
-      return `skill:${subject.id}`;
     case "machine":
       return `machine:${subject.machineId}`;
     case "runtime":

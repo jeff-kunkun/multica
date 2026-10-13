@@ -3,10 +3,6 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { SidebarProvider, useSidebar } from "@multica/ui/components/ui/sidebar";
 import { configStore } from "@multica/core/config";
-import {
-  BILLING_WORKSPACE_SUBSCRIPTIONS_FLAG,
-  PLUGINS_V1_FLAG,
-} from "@multica/core/feature-flags";
 import { renderWithI18n } from "../../test/i18n";
 
 // This file tests the settings SHELL — the chrome around the tabs — so every
@@ -20,24 +16,17 @@ vi.mock("./tokens-tab", stub("TokensTab"));
 vi.mock("./workspace-tab", stub("WorkspaceTab"));
 vi.mock("./members-tab", stub("MembersTab"));
 vi.mock("./code-tab", stub("CodeTab"));
-vi.mock("./channels-tab", stub("ChannelsTab"));
 vi.mock("./notifications-tab", stub("NotificationsTab"));
 vi.mock("./labels-tab", stub("LabelsTab"));
 vi.mock("./issue-statuses-tab", stub("IssueStatusesTab"));
 vi.mock("./properties-tab", stub("PropertiesTab"));
-vi.mock("./quick-actions-tab", stub("QuickActionsTab"));
 vi.mock("./keyboard-shortcuts-tab", stub("KeyboardShortcutsTab"));
-vi.mock("./plugins-tab", stub("PluginsTab"));
 vi.mock("./mcp-tab", stub("McpTab"));
-vi.mock("./billing-tab", stub("BillingTab"));
+vi.mock("./approvers-tab", stub("ApproversTab"));
+vi.mock("./local-run-tab", stub("LocalRunTab"));
 
 const shell = vi.hoisted(() => ({
-  appsAvailable: false,
-  role: "owner" as "owner" | "admin" | "member",
-}));
-vi.mock("./connected-apps-tab", () => ({
-  ConnectedAppsTab: () => <div>ConnectedAppsTab</div>,
-  useComposioAvailable: () => shell.appsAvailable,
+  role: "owner" as "owner" | "member",
 }));
 
 vi.mock("@multica/core/paths", () => ({
@@ -99,7 +88,6 @@ function nav() {
 beforeEach(() => {
   layout.compact = true;
   navigationState.search = "";
-  shell.appsAvailable = false;
   shell.role = "owner";
   configStore.getState().setFeatureFlags({});
   replace.mockClear();
@@ -149,61 +137,18 @@ describe("SettingsPage nav trigger", () => {
   });
 });
 
-describe("SettingsPage Plugin feature flag", () => {
-  it("hides Plugins and falls back from a direct tab URL when disabled", () => {
-    navigationState.search = "tab=plugins";
-
-    renderWithI18n(<SettingsPage />);
-
-    expect(
-      screen.queryByRole("link", { name: "Plugins" }),
-    ).not.toBeInTheDocument();
-    expect(screen.queryByText("PluginsTab")).not.toBeInTheDocument();
-    expect(screen.getByText("AccountTab")).toBeInTheDocument();
-  });
-
-  it("shows and mounts Plugins when explicitly enabled", () => {
-    navigationState.search = "tab=plugins";
-    configStore.getState().setFeatureFlags({ [PLUGINS_V1_FLAG]: true });
-
-    renderWithI18n(<SettingsPage />);
-
-    expect(screen.getByRole("link", { name: "Plugins" })).toBeInTheDocument();
-    expect(screen.getByText("PluginsTab")).toBeInTheDocument();
-  });
-});
-
-describe("SettingsPage workspace subscription feature flag", () => {
-  it("hides Billing and falls back to Workspace General from a direct URL", () => {
-    navigationState.search = "tab=billing";
-
-    renderWithI18n(<SettingsPage />);
-
-    expect(
-      screen.queryByRole("link", { name: "Billing" }),
-    ).not.toBeInTheDocument();
-    expect(screen.queryByText("BillingTab")).not.toBeInTheDocument();
-    expect(screen.getByText("WorkspaceTab")).toBeInTheDocument();
-  });
-
-  it("shows and mounts Billing only when explicitly enabled", () => {
-    navigationState.search = "tab=billing";
-    configStore.getState().setFeatureFlags({
-      [BILLING_WORKSPACE_SUBSCRIPTIONS_FLAG]: true,
-    });
-
-    renderWithI18n(<SettingsPage />);
-
-    expect(screen.getByRole("link", { name: "Billing" })).toBeInTheDocument();
-    expect(screen.getByText("BillingTab")).toBeInTheDocument();
-  });
-});
-
 describe("SettingsPage information architecture", () => {
   it("groups pages by who they affect, then by topic", () => {
     renderWithI18n(<SettingsPage />);
+    // The five everyday pages come first, in one group.
+    const everyday = within(nav()).getByRole("region", { name: /Everyday/ });
+    expect(
+      within(everyday)
+        .getAllByRole("link")
+        .map((link) => link.textContent),
+    ).toEqual(["Account", "Bot access", "Approval rights", "Local runs", "Appearance"]);
+
     const personal = within(nav()).getByRole("region", { name: /Personal/ });
-    expect(within(personal).getByRole("link", { name: "Preferences" })).toBeInTheDocument();
     expect(within(personal).getByRole("link", { name: "API Tokens" })).toBeInTheDocument();
 
     // The workspace group is named after the workspace it configures.
@@ -215,7 +160,7 @@ describe("SettingsPage information architecture", () => {
     const connections = within(workspace).getByRole("group", {
       name: "Connections & extensions",
     });
-    for (const name of ["Code", "Messaging", "MCP servers"]) {
+    for (const name of ["Code", "MCP servers"]) {
       expect(within(connections).getByRole("link", { name })).toBeInTheDocument();
     }
   });
@@ -233,7 +178,7 @@ describe("SettingsPage information architecture", () => {
     navigationState.search = "tab=issue";
     renderWithI18n(<SettingsPage />);
     expect(screen.getByText("PreferencesTab")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Preferences" })).toHaveAttribute(
+    expect(screen.getByRole("link", { name: "Appearance" })).toHaveAttribute(
       "aria-current",
       "page",
     );
@@ -249,27 +194,12 @@ describe("SettingsPage information architecture", () => {
     );
   });
 
-  it("lists Connected apps with the personal pages only when Composio is available", () => {
-    const first = renderWithI18n(<SettingsPage />);
-    expect(screen.queryByRole("link", { name: "Connected apps" })).toBeNull();
-    first.unmount();
-
-    shell.appsAvailable = true;
-    navigationState.search = "tab=integrations&connected=notion";
-    renderWithI18n(<SettingsPage />);
-    const personal = within(nav()).getByRole("region", { name: /Personal/ });
-    expect(
-      within(personal).getByRole("link", { name: "Connected apps" }),
-    ).toHaveAttribute("aria-current", "page");
-    expect(screen.getByText("ConnectedAppsTab")).toBeInTheDocument();
-  });
-
   it("marks pages a member can only view", () => {
     shell.role = "member";
     renderWithI18n(<SettingsPage />);
     const general = screen.getByRole("link", { name: /^General/ });
     expect(
-      within(general).getByLabelText("Only owners and admins can change this"),
+      within(general).getByLabelText("Only the workspace owner can change this"),
     ).toBeInTheDocument();
     // Labels stay editable for every member, so they carry no lock.
     const labels = screen.getByRole("link", { name: "Labels" });
@@ -296,7 +226,7 @@ describe("SettingsPage information architecture", () => {
   });
 
   it("navigates from the compact selector and clears the old detail", () => {
-    navigationState.search = "tab=channels&integration=slack&keep=1";
+    navigationState.search = "tab=code&section=repositories&keep=1";
     renderWithI18n(<SettingsPage />);
     fireEvent.change(
       screen.getByRole("combobox", { name: "Go to settings page" }),
@@ -315,7 +245,7 @@ describe("SettingsPage search", () => {
 
     const results = screen.getByRole("listbox", { name: "Search settings" });
     const option = within(results).getByRole("option", { name: /Time zone/ });
-    expect(option).toHaveTextContent("Personal › Preferences");
+    expect(option).toHaveTextContent("Everyday › Appearance");
 
     fireEvent.click(option);
     expect(push).toHaveBeenCalledWith(
@@ -327,10 +257,10 @@ describe("SettingsPage search", () => {
     renderWithI18n(<SettingsPage />);
     const input = screen.getByRole("searchbox", { name: "Search settings" });
 
-    fireEvent.change(input, { target: { value: "slack" } });
+    fireEvent.change(input, { target: { value: "time zone" } });
     fireEvent.keyDown(input, { key: "Enter" });
     expect(push).toHaveBeenCalledWith(
-      "/acme/settings?tab=channels&integration=slack",
+      "/acme/settings?tab=preferences&section=timezone",
     );
 
     fireEvent.keyDown(input, { key: "Escape" });
@@ -352,12 +282,4 @@ describe("SettingsPage search", () => {
     );
   });
 
-  it("does not offer pages hidden by feature flags", () => {
-    renderWithI18n(<SettingsPage />);
-    fireEvent.change(
-      screen.getByRole("searchbox", { name: "Search settings" }),
-      { target: { value: "plugins" } },
-    );
-    expect(screen.getByText("No matching settings")).toBeInTheDocument();
-  });
 });

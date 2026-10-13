@@ -272,13 +272,12 @@ func TestListComments_RootAndThreadViewsPreserveAttributionFields(t *testing.T) 
 	fx := newCommentListFixture(t)
 
 	sourceTaskID := "11111111-2222-3333-4444-555555555555"
-	quickActionID := "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
 	for _, commentID := range []string{fx.Root1, fx.R1a} {
 		if _, err := testPool.Exec(context.Background(), `
 			UPDATE comment
-			SET source_task_id = $1, quick_action_id = $2
-			WHERE id = $3
-		`, sourceTaskID, quickActionID, commentID); err != nil {
+			SET source_task_id = $1
+			WHERE id = $2
+		`, sourceTaskID, commentID); err != nil {
 			t.Fatalf("stamp attribution fields on %s: %v", commentID, err)
 		}
 	}
@@ -287,9 +286,6 @@ func TestListComments_RootAndThreadViewsPreserveAttributionFields(t *testing.T) 
 		t.Helper()
 		if row.SourceTaskID == nil || *row.SourceTaskID != sourceTaskID {
 			t.Errorf("%s source_task_id = %v, want %s", label, row.SourceTaskID, sourceTaskID)
-		}
-		if row.QuickActionID == nil || *row.QuickActionID != quickActionID {
-			t.Errorf("%s quick_action_id = %v, want %s", label, row.QuickActionID, quickActionID)
 		}
 	}
 

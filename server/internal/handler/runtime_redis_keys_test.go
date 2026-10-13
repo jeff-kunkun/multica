@@ -11,14 +11,6 @@ func TestRuntimePendingRedisKeysShareClusterHashTag(t *testing.T) {
 			modelListPendingKey("runtime-1"),
 			modelListKey("req-1"),
 		},
-		"local skill list claim": {
-			localSkillListPendingKey("runtime-1"),
-			localSkillListKey("req-1"),
-		},
-		"local skill import claim": {
-			localSkillImportPendingKey("runtime-1"),
-			localSkillImportKey("req-1"),
-		},
 		"update claim": {
 			updatePendingKey("runtime-1"),
 			updateKey("req-1"),

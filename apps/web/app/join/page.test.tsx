@@ -104,22 +104,6 @@ describe("JoinPage", () => {
     expect(mockJoinByShareLink).not.toHaveBeenCalled();
   });
 
-  it("shows an Administrator badge when the link grants admin access", async () => {
-    mockGetShareLinkInfo.mockResolvedValue({
-      ...TEST_INFO,
-      role: "admin",
-    });
-
-    render(<JoinPage />, { wrapper: createWrapper() });
-
-    await waitFor(() =>
-      expect(
-        screen.getByText("You'll join this workspace as"),
-      ).toBeInTheDocument(),
-    );
-    expect(screen.getByText("Administrator")).toBeInTheDocument();
-  });
-
   it("shows a Member badge when the link grants member access", async () => {
     mockGetShareLinkInfo.mockResolvedValue({
       ...TEST_INFO,
@@ -225,7 +209,7 @@ describe("JoinPage", () => {
   it.each([
     [
       "seat_capacity_full",
-      "All purchased member seats are in use. Ask a workspace admin to add a seat before trying again.",
+      "All purchased member seats are in use. Ask the workspace owner to add a seat before trying again.",
     ],
     [
       "seat_capacity_unavailable",

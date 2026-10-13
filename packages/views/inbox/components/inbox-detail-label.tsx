@@ -5,7 +5,6 @@ import { formatDateOnly } from "@multica/core/issues/date";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { StatusIcon, PriorityIcon } from "../../issues/components";
 import type { InboxItem, InboxItemType, IssueStatus, IssuePriority } from "@multica/core/types";
-import { getQuickCreateOutcomeDetail } from "./inbox-display";
 import { useLocale, useT } from "../../i18n";
 import { useStatusLabel } from "../../issues/utils/status-label";
 import { priorityLabel } from "../../issues/utils/priority-label";
@@ -32,11 +31,6 @@ export function useTypeLabels(): Record<InboxItemType, string> {
     agent_blocked: t(($) => $.types.agent_blocked),
     agent_completed: t(($) => $.types.agent_completed),
     reaction_added: t(($) => $.types.reaction_added),
-    quick_create_done: t(($) => $.types.quick_create_done),
-    quick_create_failed: t(($) => $.types.quick_create_failed),
-    quick_create_unconfirmed: t(($) => $.types.quick_create_unconfirmed),
-    autopilot_paused: t(($) => $.types.autopilot_paused),
-    autopilot_quota_exceeded: t(($) => $.types.autopilot_quota_exceeded),
     children_done: t(($) => $.types.children_done),
   };
 }
@@ -118,25 +112,6 @@ export function InboxDetailLabel({ item }: { item: InboxItem }) {
       if (emoji) return <span>{t(($) => $.labels.reacted_to_comment, { emoji })}</span>;
       return <span>{typeLabels[item.type]}</span>;
     }
-    case "quick_create_done": {
-      const identifier = details.identifier;
-      if (identifier) return <span>{t(($) => $.labels.created_with_agent, { identifier })}</span>;
-      return <span>{typeLabels[item.type]}</span>;
-    }
-    case "quick_create_failed": {
-      const detail = getQuickCreateOutcomeDetail(item);
-      if (detail) return <span>{t(($) => $.labels.failed_with_detail, { detail })}</span>;
-      return <span>{typeLabels[item.type]}</span>;
-    }
-    case "quick_create_unconfirmed": {
-      // Deliberately NOT the failed_with_detail label: the outcome is unknown,
-      // so the detail is shown as-is with no "Failed:" framing.
-      const detail = getQuickCreateOutcomeDetail(item);
-      if (detail) return <span>{detail}</span>;
-      return <span>{typeLabels[item.type]}</span>;
-    }
-    case "autopilot_quota_exceeded":
-      return <span>{t(($) => $.labels.autopilot_quota_blocked)}</span>;
     case "children_done": {
       // The stage arrives as a JSON number; details are typed as strings.
       const stage = details.stage != null ? String(details.stage) : "";

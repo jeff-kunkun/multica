@@ -82,7 +82,6 @@ const {
   mockGetShareableUrl,
   mockMembers,
   mockAgents,
-  mockSquads,
   mockWorkspaces,
   mockUnreadSummary,
   mockOpenModal,
@@ -108,7 +107,7 @@ const {
       id: string;
       workspace_id: string;
       user_id: string;
-      role: "owner" | "admin" | "member";
+      role: "owner" | "member";
       created_at: string;
       name: string;
       email: string;
@@ -116,13 +115,6 @@ const {
     }>,
   },
   mockAgents: {
-    current: [] as Array<{
-      id: string;
-      name: string;
-      avatar_url: string | null;
-    }>,
-  },
-  mockSquads: {
     current: [] as Array<{
       id: string;
       name: string;
@@ -172,9 +164,7 @@ vi.mock("../common/actor-avatar", () => ({
         ? mockMembers.current.find((m) => m.user_id === actorId)?.name
         : actorType === "agent"
           ? mockAgents.current.find((a) => a.id === actorId)?.name
-          : actorType === "squad"
-            ? mockSquads.current.find((s) => s.id === actorId)?.name
-            : undefined;
+          : undefined;
     return (
       <span
         data-testid="issue-assignee-avatar"
@@ -199,8 +189,6 @@ vi.mock("@multica/core/issues/stores", () => {
       (wsId: string | null) =>
       (state: { byWorkspace: Record<string, typeof mockRecentItems.current> }) =>
         wsId ? (state.byWorkspace[wsId] ?? EMPTY) : EMPTY,
-    openCreateIssueWithPreference: (data?: Record<string, unknown> | null) =>
-      mockOpenModal("quick-create-issue", data ?? null),
     useCommentCollapseStore: Object.assign(vi.fn(), {
       getState: () => ({
         collapseAll: mockCommentCollapseAll,
@@ -230,17 +218,14 @@ vi.mock("@multica/core/paths", async (importOriginal) => ({
     myIssues: () => "/ws-test/my-issues",
     issues: () => "/ws-test/issues",
     projects: () => "/ws-test/projects",
-    autopilots: () => "/ws-test/autopilots",
+    meetings: () => "/ws-test/meetings",
     agents: () => "/ws-test/agents",
-    squads: () => "/ws-test/squads",
     usage: () => "/ws-test/usage",
     runtimes: () => "/ws-test/runtimes",
-    skills: () => "/ws-test/skills",
     settings: () => "/ws-test/settings",
     issueDetail: (id: string) => `/ws-test/issues/${id}`,
     memberDetail: (id: string) => `/ws-test/members/${id}`,
     agentDetail: (id: string) => `/ws-test/agents/${id}`,
-    squadDetail: (id: string) => `/ws-test/squads/${id}`,
     projectDetail: (id: string) => `/ws-test/projects/${id}`,
   }),
 }));
@@ -257,7 +242,6 @@ vi.mock("@multica/core/issues/queries", () => ({
 vi.mock("@multica/core/workspace/queries", () => ({
   memberListOptions: () => ({ queryKey: ["workspaces", "ws-test", "members"] }),
   agentListOptions: () => ({ queryKey: ["workspaces", "ws-test", "agents"] }),
-  squadListOptions: () => ({ queryKey: ["workspaces", "ws-test", "squads"] }),
   workspaceListOptions: () => ({ queryKey: ["workspaces", "list"] }),
 }));
 
@@ -295,9 +279,6 @@ vi.mock("@tanstack/react-query", () => ({
     }
     if (key[0] === "workspaces" && key[2] === "agents") {
       return { data: mockAgents.current };
-    }
-    if (key[0] === "workspaces" && key[2] === "squads") {
-      return { data: mockSquads.current };
     }
     if (opts.enabled === false) return { data: undefined };
     return { data: resolveIssue(key) };
@@ -343,7 +324,6 @@ describe("SearchCommand", () => {
     mockRecentItems.current = [];
     mockAllIssues.current = [];
     mockAgents.current = [];
-    mockSquads.current = [];
     mockWorkspaces.current = [];
     mockUnreadSummary.current = [];
     mockSetTheme.mockReset();
@@ -560,7 +540,7 @@ describe("SearchCommand", () => {
         id: "member-2",
         workspace_id: "ws-test",
         user_id: "user-2",
-        role: "admin",
+        role: "owner",
         created_at: "2026-01-01T00:00:00Z",
         name: "Bob Liu",
         email: "bob@example.com",
@@ -721,7 +701,7 @@ describe("SearchCommand", () => {
     );
     await user.click(newIssue);
 
-    expect(mockOpenModal).toHaveBeenCalledWith("quick-create-issue", null);
+    expect(mockOpenModal).toHaveBeenCalledWith("create-issue");
     expect(useSearchStore.getState().open).toBe(false);
   });
 

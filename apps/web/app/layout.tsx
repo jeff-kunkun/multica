@@ -19,16 +19,15 @@ import "./globals.css";
 // plus a synthetic size-adjusted fallback face to prevent FOUT layout shift —
 // both are exposed under the `--font-inter` CSS variable.
 //
-// The full `--font-sans` stack (Inter + the per-locale CJK fallback chain) is
-// assembled in static CSS in ./globals.css, not here: it must be overridable per
-// `<html lang>` (Japanese Kanji are Han ideographs and need a Japanese-first CJK
-// stack), and a hashed family name can only be referenced from CSS via a variable.
-// Keeping the CJK chain in CSS also keeps it CSP-safe and in sync with the desktop
-// app, which defines the same chain in apps/desktop/src/renderer/src/globals.css.
+// The full `--font-sans` stack (Inter + the Chinese CJK fallback chain) is
+// assembled in static CSS in ./globals.css, not here: a hashed family name can
+// only be referenced from CSS via a variable. Keeping the CJK chain in CSS also
+// keeps it CSP-safe and in sync with the desktop app, which defines the same
+// chain in apps/desktop/src/renderer/src/globals.css.
 //
 // Italic is loaded explicitly: `style` defaults to `["normal"]`, and without a real
 // italic face the ~20 semantic italic labels (chat empty states, model-picker's
-// "Managed by runtime", dashboard/squad placeholders) plus every markdown <em> and
+// "Managed by runtime", dashboard placeholders) plus every markdown <em> and
 // blockquote rendered as browser-synthesized oblique. Keep in sync with desktop's
 // `@fontsource-variable/inter/wght-italic.css` import.
 const inter = Inter({
@@ -45,9 +44,8 @@ const geistMono = Geist_Mono({
   variable: "--font-mono",
   fallback: ["ui-monospace", "SFMono-Regular", "Menlo", "Consolas", "monospace"],
 });
-// Editorial serif used for onboarding headlines. Italic support for h1 em
-// accents (e.g. "...on one shared board."). Only loaded on routes that
-// render the font; layout-shift-prevention handled by next/font's synthetic
+// Editorial serif behind the shared `font-serif` token. Only loaded on routes
+// that render the font; layout-shift-prevention handled by next/font's synthetic
 // fallback metrics, same as Inter.
 const sourceSerif = Source_Serif_4({
   subsets: ["latin"],

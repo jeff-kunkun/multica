@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Bell } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { ActorAvatar as ActorAvatarBase } from "@multica/ui/components/common/actor-avatar";
 import { useActorName } from "@multica/core/workspace/hooks";
@@ -112,7 +111,6 @@ function AgentActivityTaskRow({
       <span className="flex-1 truncate font-medium">
         {getActorName("agent", task.agent_id)}
       </span>
-      {task.wakeup_id && <Bell className="size-3 shrink-0 text-muted-foreground" aria-label={t(($) => $.wakeups.triggered_by_wakeup)} />}
       <span className="flex shrink-0 items-center gap-1.5">
         <span className={`h-1.5 w-1.5 rounded-full ${dotClass}`} />
         <span className={labelClass}>
@@ -185,7 +183,7 @@ interface WorkspaceAgentActivityHoverContentProps {
  * that work lands on, and how many tasks it takes — and the rows group by
  * issue, mirroring what clicking the chip does to the list.
  *
- * It says nothing about work it excludes. Chat/autopilot runs have no
+ * It says nothing about work it excludes. Chat runs have no
  * linked issue and leave no trace anywhere on this page: no row, no head,
  * no indicator. A footnote about them would explain an absence the user
  * never perceived — inventing a discrepancy rather than resolving one.

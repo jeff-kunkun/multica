@@ -46,21 +46,13 @@ vi.mock("@multica/core/logger", async () => {
   };
 });
 
-const makeUser = (
-  overrides: Partial<{
-    onboarded_at: string | null;
-    onboarding_questionnaire: Record<string, unknown>;
-  }> = {},
-) => ({
+const makeUser = () => ({
   id: "user-1",
   name: "Test",
   email: "test@multica.ai",
   avatar_url: null,
-  onboarded_at: null,
-  onboarding_questionnaire: { source: ["search"] },
   created_at: "2026-01-01T00:00:00Z",
   updated_at: "2026-01-01T00:00:00Z",
-  ...overrides,
 });
 
 vi.mock("next/navigation", () => ({
@@ -212,13 +204,13 @@ describe("CallbackPage", () => {
     ).toBeInTheDocument();
 
     view.rerender(
-      <I18nProvider locale="ja" resources={RESOURCES}>
+      <I18nProvider locale="en" resources={RESOURCES}>
         <CallbackPage />
       </I18nProvider>,
     );
 
     expect(
-      await screen.findByText("Googleから今回のログインに必要なメールアドレスが提供されませんでした。"),
+      await screen.findByText("Google did not provide an email address for this sign-in."),
     ).toBeInTheDocument();
     expect(mockLoginWithGoogle).toHaveBeenCalledTimes(1);
     expect(mockPush).not.toHaveBeenCalled();
@@ -256,26 +248,26 @@ describe("CallbackPage", () => {
     expect(mockPush).not.toHaveBeenCalled();
   });
 
-  it("unonboarded user honors a safe next= (e.g. /invite/{id}) so invitees aren't trapped", async () => {
+  it("honors a safe next= (e.g. /invite/{id}) so invitees aren't trapped", async () => {
     mockSearchParams.set("state", "next:/invite/abc123");
     renderCallback();
     await waitFor(() => {
       expect(mockPush).toHaveBeenCalledWith("/invite/abc123");
     });
-    expect(mockPush).not.toHaveBeenCalledWith(paths.onboarding());
+    expect(mockPush).not.toHaveBeenCalledWith(paths.newWorkspace());
     // nextUrl is a fast path — listMyInvitations should not be queried.
     expect(mockListMyInvitations).not.toHaveBeenCalled();
   });
 
-  it("unonboarded user with no next= and no pending invitations lands on /onboarding", async () => {
+  it("user with no workspace, no next= and no pending invitations lands on workspace creation", async () => {
     renderCallback();
     await waitFor(() => {
-      expect(mockPush).toHaveBeenCalledWith(paths.onboarding());
+      expect(mockPush).toHaveBeenCalledWith(paths.newWorkspace());
     });
     expect(mockListMyInvitations).toHaveBeenCalled();
   });
 
-  it("unonboarded user with pending invitations lands on /invitations", async () => {
+  it("user with no workspace and pending invitations lands on /invitations", async () => {
     mockListMyInvitations.mockResolvedValue([
       {
         id: "inv-1",
@@ -289,13 +281,10 @@ describe("CallbackPage", () => {
     await waitFor(() => {
       expect(mockPush).toHaveBeenCalledWith(paths.invitations());
     });
-    expect(mockPush).not.toHaveBeenCalledWith(paths.onboarding());
+    expect(mockPush).not.toHaveBeenCalledWith(paths.newWorkspace());
   });
 
-  it("onboarded user with workspace lands in that workspace", async () => {
-    mockLoginWithGoogle.mockResolvedValue(
-      makeUser({ onboarded_at: "2026-01-01T00:00:00Z" }),
-    );
+  it("user with a workspace lands in that workspace", async () => {
     mockListWorkspaces.mockResolvedValue([
       {
         id: "ws-1",
@@ -315,15 +304,12 @@ describe("CallbackPage", () => {
     await waitFor(() => {
       expect(mockPush).toHaveBeenCalledWith(paths.workspace("acme").issues());
     });
-    // Already-onboarded users skip the listMyInvitations check; new invites
+    // Users with a workspace skip the listMyInvitations check; new invites
     // surface in the sidebar instead of the wall.
     expect(mockListMyInvitations).not.toHaveBeenCalled();
   });
 
-  it("onboarded user ignores unsafe next= targets and lands on the default destination", async () => {
-    mockLoginWithGoogle.mockResolvedValue(
-      makeUser({ onboarded_at: "2026-01-01T00:00:00Z" }),
-    );
+  it("ignores unsafe next= targets and lands on the default destination", async () => {
     mockSearchParams.set("state", "next:https://evil.example");
 
     renderCallback();
@@ -334,24 +320,11 @@ describe("CallbackPage", () => {
     expect(mockPush).not.toHaveBeenCalledWith("https://evil.example");
   });
 
-  it("onboarded user honors a safe next= target (e.g. /invite/{id})", async () => {
-    mockLoginWithGoogle.mockResolvedValue(
-      makeUser({ onboarded_at: "2026-01-01T00:00:00Z" }),
-    );
-    mockSearchParams.set("state", "next:/invite/abc123");
-
-    renderCallback();
-
-    await waitFor(() => {
-      expect(mockPush).toHaveBeenCalledWith("/invite/abc123");
-    });
-  });
-
-  it("falls through to /onboarding when listMyInvitations errors", async () => {
+  it("falls through to workspace creation when listMyInvitations errors", async () => {
     mockListMyInvitations.mockRejectedValue(new Error("network"));
     renderCallback();
     await waitFor(() => {
-      expect(mockPush).toHaveBeenCalledWith(paths.onboarding());
+      expect(mockPush).toHaveBeenCalledWith(paths.newWorkspace());
     });
   });
 
@@ -409,7 +382,7 @@ describe("CallbackPage", () => {
       expect(mockLoginWithGoogle).toHaveBeenCalled();
     });
     await waitFor(() => {
-      expect(mockPush).toHaveBeenCalledWith(paths.onboarding());
+      expect(mockPush).toHaveBeenCalledWith(paths.newWorkspace());
     });
   });
 
@@ -453,33 +426,4 @@ describe("CallbackPage", () => {
     }
   });
 
-  it("onboarded users with missing source land in the workspace; the source-backfill modal is mounted there", async () => {
-    // Source attribution backfill is now an in-workspace modal — see
-    // `<SourceBackfillModal />` mounted inside `DashboardLayout`. The
-    // callback page is intentionally agnostic about it.
-    mockLoginWithGoogle.mockResolvedValue(
-      makeUser({
-        onboarded_at: "2026-01-01T00:00:00Z",
-        onboarding_questionnaire: {},
-      }),
-    );
-    mockListWorkspaces.mockResolvedValue([
-      {
-        id: "ws-1",
-        name: "Acme",
-        slug: "acme",
-        description: null,
-        context: null,
-        settings: {},
-        repos: [],
-        issue_prefix: "ACME",
-        created_at: "",
-        updated_at: "",
-      },
-    ]);
-    renderCallback();
-    await waitFor(() => {
-      expect(mockPush).toHaveBeenCalledWith(paths.workspace("acme").issues());
-    });
-  });
 });

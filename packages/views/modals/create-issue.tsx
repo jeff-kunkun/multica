@@ -5,9 +5,7 @@ import { useState, useRef, useEffect, useLayoutEffect } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { AppLink, resolveClickIntent, useNavigation } from "../navigation";
 import {
-  AlertTriangle,
   ArrowDown,
-  ArrowLeftRight,
   ArrowUp,
   CalendarClock,
   CalendarDays,
@@ -64,8 +62,6 @@ import { useCurrentWorkspace, useWorkspacePaths } from "@multica/core/paths";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
 import { useIssueDraftStore, type IssueCreateDraft } from "@multica/core/issues/stores/draft-store";
-import { useCreateModeStore } from "@multica/core/issues/stores/create-mode-store";
-import { useQuickCreateStore } from "@multica/core/issues/stores/quick-create-store";
 import {
   useIssueCreateSettingsStore,
   type ManualCreateField,
@@ -80,12 +76,8 @@ import { useAttachLabelToIssue } from "@multica/core/labels";
 import { propertyListOptions } from "@multica/core/properties";
 import {
   ApiError,
-  DuplicateIssueErrorBodySchema,
-  type DuplicateIssueErrorBody,
-  parseWithFallback,
 } from "@multica/core/api";
 import { FileUploadButton } from "@multica/ui/components/common/file-upload-button";
-import { BorderBeam } from "@multica/ui/components/common/border-beam";
 import { ClearablePillButton, PillButton } from "../common/pill-button";
 import { ActorAvatar } from "../common/actor-avatar";
 import { PropertyIcon } from "../common/property-icon";
@@ -96,14 +88,11 @@ import {
 import { IssuePickerModal } from "./issue-picker-modal";
 import { useT } from "../i18n";
 import { SourceContextPreviewCard, useSourceContextFailureMessage } from "./source-context-preview";
-import { useIssueLimitUpgradePrompt } from "./use-issue-limit-upgrade-prompt";
 
 // ---------------------------------------------------------------------------
-// ManualCreatePanel — manual-mode body of the create-issue dialog. Renders
-// DialogContent + everything inside; the surrounding `<Dialog>` is owned by
-// CreateIssueDialog so mode switching swaps only the inner panel without
-// remounting the Dialog Root (no overlay flash). `onSwitchMode` flips the
-// shell's local mode state.
+// ManualCreatePanel — body of the create-issue dialog. Renders everything
+// inside DialogContent; the surrounding `<Dialog>` and `<DialogContent>` are
+// owned by CreateIssueDialog.
 // ---------------------------------------------------------------------------
 
 // CreateRunHint is the create modal's passive pre-trigger label (MUL-3375 §4):
@@ -127,7 +116,7 @@ function CreateRunHint({
 }) {
   const { t } = useT("modals");
   const { getActorName } = useActorName();
-  const isAgentLike = assigneeType === "agent" || assigneeType === "squad";
+  const isAgentLike = assigneeType === "agent";
   const preview = useIssueTriggerPreview({
     isCreate: true,
     assigneeType: assigneeType ?? null,
@@ -140,13 +129,10 @@ function CreateRunHint({
   // copy instead of flashing "parked" before the run preview lands.
   const ready = isAgentLike && !!assigneeId && !preview.isLoading;
   const willStart = preview.totalCount > 0;
-  const isSquad = assigneeType === "squad";
   const triggerAgentId = preview.triggers[0]?.agent_id ?? assigneeId;
 
-  // Avatar + copy mirror the flow. A squad doesn't "work" — its leader
-  // evaluates and delegates — so the squad path keeps the squad as the subject
-  // (avatar + name) and uses the leader-delegates copy. A single agent picks
-  // the issue up directly; a parked issue shows whoever it was assigned to.
+  // Avatar + copy mirror the flow: an agent picks the issue up directly; a
+  // parked issue shows whoever it was assigned to.
   let avatarType: string;
   let avatarId: string | undefined;
   let text: string;
@@ -154,12 +140,6 @@ function CreateRunHint({
     avatarType = assigneeType ?? "agent";
     avatarId = assigneeId;
     text = t(($) => $.run_confirm.create_parked);
-  } else if (isSquad) {
-    avatarType = "squad";
-    avatarId = assigneeId;
-    text = t(($) => $.run_confirm.create_will_start_squad, {
-      name: getActorName("squad", assigneeId ?? ""),
-    });
   } else {
     avatarType = "agent";
     avatarId = triggerAgentId;
@@ -198,18 +178,14 @@ function CreateRunHint({
 
 export function ManualCreatePanel({
   onClose,
-  onSwitchMode,
   data,
   isExpanded,
   setIsExpanded,
 }: {
   onClose: () => void;
-  /** Called with the carry payload to seed the agent panel after switch. */
-  onSwitchMode?: (carry?: Record<string, unknown> | null) => void;
   data?: Record<string, unknown> | null;
-  /** Lifted to the shell so DialogContent's mode-aware className can react
-   *  without the body itself having to live inside DialogContent (which would
-   *  re-mount the Portal on mode swap and replay the open animation). */
+  /** Lifted to the shell, which owns the DialogContent whose className
+   *  depends on it. */
   isExpanded: boolean;
   setIsExpanded: (v: boolean) => void;
 }) {
@@ -231,18 +207,14 @@ export function ManualCreatePanel({
     : undefined;
   const onSourceContextExpandedChange = data?.source_context_on_expanded_change as ((expanded: boolean) => void) | undefined;
   const sourceContextFailureMessage = useSourceContextFailureMessage();
-  const showIssueLimitUpgradePrompt = useIssueLimitUpgradePrompt();
 
   const draft = useIssueDraftStore((s) => s.draft);
   const setManual = useIssueDraftStore((s) => s.setManual);
   const setShared = useIssueDraftStore((s) => s.setShared);
-  const setAgent = useIssueDraftStore((s) => s.setAgent);
-  const setActiveMode = useIssueDraftStore((s) => s.setActiveMode);
   const clearDraft = useIssueDraftStore((s) => s.clearDraft);
   const setLastAssignee = useIssueDraftStore((s) => s.setLastAssignee);
-  const setLastMode = useCreateModeStore((s) => s.setLastMode);
-  const keepOpen = useQuickCreateStore((s) => s.keepOpen);
-  const setKeepOpen = useQuickCreateStore((s) => s.setKeepOpen);
+  const keepOpen = useIssueCreateSettingsStore((s) => s.keepOpen);
+  const setKeepOpen = useIssueCreateSettingsStore((s) => s.setKeepOpen);
   const manualFields = useIssueCreateSettingsStore((s) => s.manualCreateFields);
 
   const sendShortcut = useShortcut("send");
@@ -335,16 +307,10 @@ export function ManualCreatePanel({
     enabled: !!parentIssueId,
   });
 
-  // Set the persisted draft's active mode so a later reopen (and any reader of
-  // the unified draft) knows which form the user is editing in.
-  useEffect(() => {
-    setActiveMode("manual");
-  }, [setActiveMode]);
-
   // Prune completed uploads whose markdown reference was deleted in an
   // earlier editing session. Runs once on mount: at that point the persisted
-  // manual description / agent prompt ARE the draft bodies (no editor edits
-  // have happened yet), so dropping `uploaded` records referenced by neither
+  // description IS the draft body (no editor edits
+  // have happened yet), so dropping `uploaded` records it does not reference
   // is safe. Placeholders (uploading / failed / interrupted) are always kept —
   // they have no body reference yet and the status chips are their only UI.
   // Don't prune on description updates — an onUpdate flush can race a
@@ -356,16 +322,13 @@ export function ManualCreatePanel({
     const kept = uploads.filter(
       (u) =>
         u.status !== "uploaded" ||
-        contentReferencesAttachment(current.manual.description, u.attachment) ||
-        contentReferencesAttachment(current.agent.prompt, u.attachment),
+        contentReferencesAttachment(current.manual.description, u.attachment),
     );
     if (kept.length !== uploads.length) setShared({ attachments: kept });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Gate every action that fixes this draft: Create and the switch to agent
-  // mode (which assist-inits the agent prompt from the description and would
-  // carry a stripped body across).
+  // Gate Create while an upload is still in flight.
   const uploadGate = useUploadGate(descEditorRef);
   // Coordinator-owned uploads in the shared pool (MUL-5181, L2): a file picked
   // here survives dialog close, aborts on logout, and is dropped after a
@@ -374,7 +337,7 @@ export function ManualCreatePanel({
     attachments: draftAttachments,
     handleUpload,
     gate,
-  } = useIssueCreateUploads("manual", uploadGate, descEditorRef);
+  } = useIssueCreateUploads(uploadGate, descEditorRef);
 
   // Sync field changes to the draft store — manual-only fields to the manual
   // slot, project / priority / due date to the shared slot.
@@ -400,7 +363,7 @@ export function ManualCreatePanel({
 
   // Inline pill reveal per toolbar field: kept by Settings → Preferences → Issue creation, holding a
   // non-default value (a hidden field with a value must stay visible — the
-  // draft or a mode-switch carry may have set it), or just opened from the ⋯
+  // draft or the opener may have set it), or just opened from the ⋯
   // overflow (the picker popover needs the inline pill as its anchor).
   const showField = {
     status: manualFields.includes("status") || status !== "todo" || fieldPickerOpen === "status",
@@ -658,10 +621,6 @@ export function ManualCreatePanel({
         toast.error(sourceContextFailureMessage(err) ?? tIssues(($) => $.source_context.error_too_large));
         return false;
       }
-      if (sourceCode === "issue_limit_reached") {
-        showIssueLimitUpgradePrompt();
-        return false;
-      }
       if (sourceCode === "invalid_issue_property" && err instanceof ApiError) {
         const propertyId =
           err.body && typeof err.body === "object"
@@ -703,51 +662,6 @@ export function ManualCreatePanel({
         toast.error(err.message || t(($) => $.create_issue.toast_failed));
         return false;
       }
-      // Duplicate-issue is the only structured 409 the create endpoint
-      // returns. We schema-guard the body (ApiError.body is `unknown`) so a
-      // future server-side rename / drop of `code` / `issue` degrades to the
-      // normal error toast instead of throwing inside the toast renderer.
-      if (err instanceof ApiError && err.status === 409) {
-        const dup = parseWithFallback<DuplicateIssueErrorBody | null>(
-          err.body,
-          DuplicateIssueErrorBodySchema,
-          null,
-          { endpoint: "POST /api/workspaces/:wsId/issues (active_duplicate_issue)" },
-        );
-        if (dup) {
-          toast.custom(
-            (toastId) => (
-              <div className="bg-popover text-popover-foreground border rounded-lg shadow-lg p-4 w-[360px]">
-                <div className="flex items-center gap-2 mb-2">
-                  <div className="flex items-center justify-center size-5 rounded-full bg-amber-500/15 text-amber-500">
-                    <AlertTriangle className="size-3" />
-                  </div>
-                  <span className="text-body font-medium">
-                    {t(($) => $.create_issue.toast_duplicate_title)}
-                  </span>
-                </div>
-                <div className="flex items-center gap-2 text-body text-muted-foreground ml-7">
-                  <span className="truncate">{dup.issue.identifier} – {dup.issue.title}</span>
-                </div>
-                {/* See the created-issue toast above: toast content lives
-                    outside NavigationProvider, so this stays a button. */}
-                <button
-                  type="button"
-                  className="ml-7 mt-2 text-body text-primary hover:underline cursor-pointer"
-                  onClick={() => {
-                    router.push(p.issueDetail(dup.issue.id));
-                    toast.dismiss(toastId);
-                  }}
-                >
-                  {t(($) => $.create_issue.toast_duplicate_view)}
-                </button>
-              </div>
-            ),
-            { duration: 5000 },
-          );
-          return false;
-        }
-      }
       toast.error(
         err instanceof Error && err.message
           ? err.message
@@ -760,7 +674,6 @@ export function ManualCreatePanel({
       // These preferences derive from the SUBMITTED values, not the live
       // draft — an issue was created, so record them regardless of the guard.
       setLastAssignee(assigneeType, assigneeId);
-      setLastMode("manual");
       // Success may only consume the draft it submitted (MUL-5181 P0): any
       // edit after the submit snapshot — typing while the request is in
       // flight, or a reopened dialog — survives, and the dialog then stays
@@ -794,55 +707,6 @@ export function ManualCreatePanel({
     void composer.submit();
   };
   const submitting = composer.submitting;
-
-  // Switch to agent mode WITHOUT destroying the manual draft. The manual slot
-  // (title, description, …) is left untouched so a later agent→manual flip
-  // restores it verbatim. Project / priority / due date already live in the
-  // shared slot, so they carry across for free. Only two things are handed to
-  // the agent panel:
-  //   1. A one-time assist-init of the agent prompt / actor: when the agent
-  //      draft is still empty, seed the prompt from title + description and the
-  //      actor from the manual assignee (if agent-like). An existing agent
-  //      draft is preserved — no repeated concatenate-then-clobber.
-  //   2. The parent-issue context, which is not persisted in the draft (it is a
-  //      per-invocation intent from "Add sub issue"), so it rides the carry.
-  const switchToAgent = () => {
-    // Serializing mid-upload packs a description that has already lost the
-    // pending image into the agent prompt, so gate the switch too.
-    if (gate.isBlocked()) return;
-    // Commit the shared fields to the draft so the agent panel reads them from
-    // there. Local state can hold a value seeded from `data` (e.g. an opener's
-    // project) that was never written through a picker, so a plain flip would
-    // otherwise drop it.
-    setShared({ projectId, priority, dueDate });
-    const existingPrompt = draft.agent.prompt;
-    if (!existingPrompt.trim()) {
-      const desc = descEditorRef.current?.getMarkdown()?.trim() ?? "";
-      const seeded = [title.trim(), desc].filter(Boolean).join("\n\n");
-      if (seeded) setAgent({ prompt: seeded });
-    }
-    if (
-      !draft.agent.actorId &&
-      assigneeId &&
-      (assigneeType === "agent" || assigneeType === "squad")
-    ) {
-      setAgent({ actorType: assigneeType, actorId: assigneeId });
-    }
-    setLastMode("agent");
-    setActiveMode("agent");
-    // Prefer the hydrated identifier from `parentIssue`, but fall back to the
-    // identifier the modal opener seeded on `data`. Without the fallback, a
-    // flip that happens before the issue detail query resolves drops the
-    // identifier and the agent chip renders as "Sub-issue of " with an empty
-    // tail. The UUID alone still wires the sub-issue relationship correctly;
-    // this only affects the display affordance.
-    const carryParentIdentifier =
-      parentIssue?.identifier ?? (data?.parent_issue_identifier as string | undefined);
-    const carry: Record<string, unknown> = {};
-    if (parentIssueId) carry.parent_issue_id = parentIssueId;
-    if (carryParentIdentifier) carry.parent_issue_identifier = carryParentIdentifier;
-    onSwitchMode?.(Object.keys(carry).length > 0 ? carry : null);
-  };
 
   // One state for the button and the keyboard paths, so a rendered affordance
   // can never disagree with what `handleSubmit` will actually do.
@@ -1397,32 +1261,17 @@ export function ManualCreatePanel({
               }}
             />
 
-            {/* Footer — same 2x2-grid-on-phones / single-row-from-`sm` shape
-                as the agent panel; see the note on AgentCreatePanel's footer
-                for why (MUL-6236). TooltipProvider/Tooltip render no DOM and
-                TooltipContent is portaled, so the Create button stays a direct
-                grid child in both branches below. */}
-            <div className="grid grid-cols-[auto_1fr] items-center gap-x-2 gap-y-2.5 border-t px-4 py-3 shrink-0 sm:flex sm:flex-wrap">
-              <div className="flex min-h-7 items-center gap-2 sm:mr-auto">
+            {/* Footer — one row down to phone width. TooltipProvider/Tooltip
+                render no DOM and TooltipContent is portaled, so the Create
+                button stays a direct flex child in both branches below. */}
+            <div className="flex flex-wrap items-center gap-2 border-t px-4 py-3 shrink-0">
+              <div className="flex min-h-7 items-center gap-2 mr-auto">
                 <FileUploadButton
                   size="sm"
                   multiple
                   onSelect={(file) => descEditorRef.current?.uploadFile(file)}
                 />
               </div>
-              <button
-                type="button"
-                onClick={switchToAgent}
-                disabled={gate.uploading}
-                aria-disabled={gate.uploading || undefined}
-                aria-busy={gate.uploading || undefined}
-                title={t(($) => $.create_issue.switch_to_agent_tooltip)}
-                className="relative group flex shrink-0 items-center gap-1.5 justify-self-end text-caption px-2 py-1 rounded-sm text-muted-foreground bg-brand/5 hover:bg-brand/10 hover:text-foreground transition-colors cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                <ArrowLeftRight className="size-3.5 text-brand transition-transform duration-300 group-hover:rotate-180" />
-                {t(($) => $.create_issue.switch_to_agent)}
-                <BorderBeam />
-              </button>
               <label className="flex shrink-0 items-center gap-1.5 text-caption text-muted-foreground cursor-pointer select-none">
                 <Switch
                   size="sm"
@@ -1449,7 +1298,7 @@ export function ManualCreatePanel({
   );
 }
 
-/** className for DialogContent in manual mode — depends on isExpanded.
+/** className for the create-issue DialogContent — depends on isExpanded.
  *  Exported so the shell (which now owns the DialogContent) can apply the same
  *  visual treatment without duplicating it. */
 export function manualDialogContentClass(isExpanded: boolean) {

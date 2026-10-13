@@ -138,13 +138,6 @@ interface ChatInputProps {
    *  0 (the initial value) is inert, so a plain deep-link open never steals
    *  focus; only an explicit bump does. */
   focusRequest?: number;
-  /**
-   * Optional storage/identity isolation for embedded chat surfaces that use
-   * the shared composer without participating in the global chat selection
-   * store (for example Agent Builder).
-   */
-  draftKeyOverride?: string;
-  editorKeyOverride?: string;
 }
 
 export function ChatInput({
@@ -171,8 +164,6 @@ export function ChatInput({
   isProjectUpdating,
   projectContextUnsupported,
   focusRequest,
-  draftKeyOverride,
-  editorKeyOverride,
 }: ChatInputProps) {
   const { t } = useT("chat");
   const { t: tEditor } = useT("editor");
@@ -206,9 +197,7 @@ export function ChatInput({
   //     CDN URL — the user would watch the image flash on and vanish. Stable
   //     identity is what makes first-upload-creates-session behave like every
   //     later upload.
-  // Embedded surfaces (Agent Builder) still pass `editorKeyOverride` to isolate
-  // their own composer.
-  const draftKey = draftKeyOverride ?? activeSessionId ?? DRAFT_NEW_SESSION;
+  const draftKey = activeSessionId ?? DRAFT_NEW_SESSION;
   // Select a primitive — empty-string fallback keeps referential stability.
   const inputDraft = useChatStore((s) => s.inputDrafts[draftKey] ?? "");
   const storeUploads = useChatStore(
@@ -230,7 +219,7 @@ export function ChatInput({
   const hasNothingToSend = isEmpty && !inputDraft.trim();
   const appliedRestoreIdRef = useRef<string | null>(null);
   const appliedConversationStarterIdRef = useRef<number | null>(null);
-  const editorKey = editorKeyOverride ?? CHAT_COMPOSER_EDITOR_KEY;
+  const editorKey = CHAT_COMPOSER_EDITOR_KEY;
 
   // The draft whose document the editor instance is currently HOLDING.
   //
@@ -636,7 +625,7 @@ export function ChatInput({
         // The composer grows with the draft up to half the surface it sits on
         // — a fixed 160px cap made long drafts unreadable in a five-line
         // porthole (MUL-5196). `max-h-[50%]` resolves against the chat
-        // surface (floating window, chat tab, agent builder), all of which
+        // surface (floating window, chat tab), both of which
         // give this wrapper a definite height, so the cap scales when the
         // user resizes or expands the window. The wrapper must be a flex
         // column for the card below to shrink into that cap instead of
@@ -730,7 +719,6 @@ export function ChatInput({
             debounceMs={100}
             mentionMode={contextItems ? "context" : "default"}
             mentionContextItems={contextItems}
-            enableSlashCommands
             // The bubble menu carries the only affordance that can strip
             // formatting — "Normal text" (setParagraph) plus the mark/list
             // toggles. Once a `# ` input rule or a Markdown/HTML paste turns a

@@ -105,9 +105,7 @@ func (a *localDirectoryAssignment) ValidateExecutionMode() error {
 }
 
 // localDirectoryAssignmentForTask returns the local_directory assignment a task
-// should execute inside. Squad-leader tasks are coordinators: they may create
-// child issues or comments, but should not bind to the user's repo worktree or
-// hold the path mutex while downstream workers are ready to write.
+// should execute inside.
 //
 // This answers WHERE a task runs, and only that. Its result also drives the
 // agent's working directory (daemon.runTask plumbs AbsPath into
@@ -119,9 +117,6 @@ func (a *localDirectoryAssignment) ValidateExecutionMode() error {
 // assignment" there to free the lock would have silently moved chat out of the
 // user's directory as well.
 func localDirectoryAssignmentForTask(task Task, daemonID string) (*localDirectoryAssignment, error) {
-	if task.IsLeaderTask {
-		return nil, nil
-	}
 	return findLocalDirectoryAssignment(task.ProjectResources, daemonID)
 }
 
@@ -140,14 +135,10 @@ func localDirectoryAssignmentForTask(task Task, daemonID string) (*localDirector
 // A chat turn is not. It is a conversation that reads the tree to answer
 // questions and at most saves a file the way the user's own Cmd+S does — the
 // risk class the lock already declines to cover. Serialising it bought nothing
-// and muted the squad leader for the length of every build (issue #7344).
+// and muted chat for the length of every build (issue #7344).
 //
 // Keyed on ChatSessionID because that is the daemon's only chat discriminator
-// (see Task.ChatSessionID). IsLeaderTask cannot serve here even though the
-// comment above it describes chat's semantics exactly: the server never writes
-// that column on the chat-task insert path (service.EnqueueChatTask →
-// db.CreateChatTaskParams has no such field), so it is false on every chat
-// turn ever dispatched.
+// (see Task.ChatSessionID).
 func localDirectoryLockExempt(task Task) bool {
 	return task.ChatSessionID != ""
 }

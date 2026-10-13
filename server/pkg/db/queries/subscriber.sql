@@ -1,6 +1,6 @@
 -- name: AddIssueSubscriber :execrows
--- Auto-subscribe path (creator / assignee / commenter / mentioned / autopilot /
--- delegated).
+-- Auto-subscribe path (creator / assignee / commenter / mentioned / delegated;
+-- historical rows may also carry the retired autopilot reason).
 --
 -- Two behaviors are load-bearing here:
 --
@@ -130,7 +130,7 @@ FOR SHARE;
 -- as the member-row delete (MUL-5483 review round 7).
 --
 -- Same application-layer cleanup rule the surrounding revoke path already
--- applies to channel bindings and invocation grants: issue_subscriber carries
+-- applies to invocation grants: issue_subscriber carries
 -- no FK, so nothing removes these implicitly. Without it a revoked member keeps
 -- accruing inbox rows, and re-inviting them silently restores visibility of
 -- every issue they used to watch.
@@ -249,11 +249,11 @@ SELECT EXISTS(
 --
 -- WHY the second fact is needed. Attribution COPIES the originator across every
 -- agent hop instead of chaining it (MUL-4302 §3.2), so originator_user_id alone
--- cannot say why a chain has a human: a member's own comment and an autopilot
--- trigger somebody armed months ago leave an identical value on every
--- descendant run. Until MUL-6951 the difference did not have to be read —
+-- cannot say why a chain has a human: a member's own comment and a (now
+-- retired) autopilot trigger somebody armed months ago leave an identical value
+-- on every descendant run. Until MUL-6951 the difference did not have to be read —
 -- direct_human was the only root that left an originator at all, so "has an
--- originator" WAS "a human asked for this". An armed trigger now carries its
+-- originator" WAS "a human asked for this". An armed trigger then carried its
 -- creator's authorization too, and that equivalence is what silently turned the
 -- rule into "subscribe whoever armed the automation" (MUL-7051).
 --

@@ -162,7 +162,7 @@ export function ConnectRemoteDialog({ onClose }: { onClose: () => void }) {
 }
 
 // ---------------------------------------------------------------------------
-// Copy button + code row — mirrors onboarding/CliInstallInstructions
+// Copy button + code row
 // ---------------------------------------------------------------------------
 
 function CopyButton({ text, ariaLabel }: { text: string; ariaLabel: string }) {

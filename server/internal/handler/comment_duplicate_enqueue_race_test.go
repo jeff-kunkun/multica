@@ -10,7 +10,6 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
-	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/testutil"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -99,7 +98,7 @@ func TestCommentEnqueueRaceQueuedWinnerFoldsLoser(t *testing.T) {
 			issueNumber: 999311,
 			source:      commentTriggerSourceMentionAgent,
 			enqueueWinner: func(ctx context.Context, issue db.Issue, agentID, commentID pgtype.UUID) error {
-				_, err := testHandler.TaskService.EnqueueTaskForMention(ctx, issue, agentID, commentID, service.OriginNamed)
+				_, err := testHandler.TaskService.EnqueueTaskForMention(ctx, issue, agentID, commentID)
 				return err
 			},
 		},
@@ -438,7 +437,7 @@ func TestCommentEnqueueRaceQueuedWinnerReattributesOriginator(t *testing.T) {
 
 	// Winner: a queued task attributed to M1 (testUserID) via its own comment.
 	winnerCommentID := insertDupRaceComment(t, issueID, "M1 instruction", "6 minutes")
-	if _, err := testHandler.TaskService.EnqueueTaskForMention(ctx, issue, agentUUID, util.MustParseUUID(winnerCommentID), service.OriginNamed); err != nil {
+	if _, err := testHandler.TaskService.EnqueueTaskForMention(ctx, issue, agentUUID, util.MustParseUUID(winnerCommentID)); err != nil {
 		t.Fatalf("enqueue winning task: %v", err)
 	}
 	// Losing comment authored by M2 in the same thread.
@@ -696,80 +695,6 @@ func seedDupRacePR(t *testing.T, issueID string, prNumber int) {
 	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM github_pull_request WHERE id = $1`, prID) })
 	if _, err := testPool.Exec(ctx, `INSERT INTO issue_pull_request (issue_id, pull_request_id) VALUES ($1, $2)`, issueID, prID); err != nil {
 		t.Fatalf("link PR: %v", err)
-	}
-}
-
-// TestReconcileBlockedReplayPropagatesToClaimedBlocker is the regression for Elon
-// round-8 must-fix 2 (planned-registration path): a planned-id obligation must not
-// be consumed once. C is registered as a planned input on running task A; before A
-// completes, a NEWER different-head task B is claimed and holds the unique slot. A's
-// completion replay of C is therefore blocked — and must be HANDED to B rather than
-// discarded, so completing B finally covers C.
-func TestReconcileBlockedReplayPropagatesToClaimedBlocker(t *testing.T) {
-	if testHandler == nil {
-		t.Skip("database not available")
-	}
-	ctx := context.Background()
-	agentID, issueID, runtimeID := dupRaceFixture(t, "dup-race-propagate-claimed", 999319)
-	seedDupRacePR(t, issueID, 999319)
-
-	aTrigger := insertDupRaceComment(t, issueID, "A trigger", "11 minutes")
-	loserCommentID := insertDupRaceComment(t, issueID, "comment C needing coverage", "8 minutes")
-	bTrigger := insertDupRaceComment(t, issueID, "B trigger", "6 minutes")
-
-	// A: running (outside the unique index), head A, with C already registered as a
-	// planned-but-NOT-delivered input — the exact state the lost-race path leaves.
-	var taskA string
-	if err := testPool.QueryRow(ctx, `
-		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, trigger_comment_id, coalesced_comment_ids, delivered_comment_ids, status, priority, created_at, started_at, context)
-		VALUES ($1, $2, $3, $4, ARRAY[$5::uuid], ARRAY[$4::uuid], 'running', 0, now() - interval '10 minutes', now() - interval '9 minutes', jsonb_build_object('head_sha', $6::text))
-		RETURNING id
-	`, agentID, runtimeID, issueID, aTrigger, loserCommentID, dupRaceHeadA).Scan(&taskA); err != nil {
-		t.Fatalf("insert running task A: %v", err)
-	}
-	// B: a NEWER different-head task, already claimed (dispatched) — it holds the slot
-	// and its own reconcile can never see the older C.
-	var taskB string
-	if err := testPool.QueryRow(ctx, `
-		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, trigger_comment_id, delivered_comment_ids, status, priority, created_at, dispatched_at, context)
-		VALUES ($1, $2, $3, $4, ARRAY[$4::uuid], 'dispatched', 0, now() - interval '5 minutes', now() - interval '4 minutes', jsonb_build_object('head_sha', $5::text))
-		RETURNING id
-	`, agentID, runtimeID, issueID, bTrigger, dupRaceHeadA).Scan(&taskB); err != nil {
-		t.Fatalf("insert dispatched blocker B: %v", err)
-	}
-
-	// A completes: its replay of C collides with B and must be handed to B.
-	if w := completeTaskViaHandler(t, taskA, "done"); w.Code != 200 {
-		t.Fatalf("complete A: %d: %s", w.Code, w.Body.String())
-	}
-	var plannedOnB, deliveredOnB bool
-	if err := testPool.QueryRow(ctx, `
-		SELECT $2::uuid = ANY(coalesced_comment_ids), $2::uuid = ANY(delivered_comment_ids)
-		FROM agent_task_queue WHERE id = $1
-	`, taskB, loserCommentID).Scan(&plannedOnB, &deliveredOnB); err != nil {
-		t.Fatalf("read blocker B: %v", err)
-	}
-	if !plannedOnB {
-		t.Fatal("blocked replay was discarded — C was not handed to the blocker, so it is lost")
-	}
-	if deliveredOnB {
-		t.Fatal("C must not be faked as delivered on the already-claimed blocker")
-	}
-
-	// B completes: C is in its planned ids, so it is replayed and finally covered.
-	if _, err := testPool.Exec(ctx, `UPDATE agent_task_queue SET status = 'running', started_at = now() WHERE id = $1`, taskB); err != nil {
-		t.Fatalf("advance B to running: %v", err)
-	}
-	if w := completeTaskViaHandler(t, taskB, "done"); w.Code != 200 {
-		t.Fatalf("complete B: %d: %s", w.Code, w.Body.String())
-	}
-	if !commentCoveredByAnyActiveTask(t, issueID, agentID, loserCommentID) {
-		t.Fatal("after the blocker chain drained, no task covers C — the deferral was not durable")
-	}
-	// The hand-off never let an old-head run consume C: the follow-up that finally
-	// covers it is stamped for the CURRENT head (TEN-356).
-	if head := coveringTaskHead(t, issueID, agentID, loserCommentID); head != dupRaceHeadB {
-		t.Fatalf("covering task head_sha = %q, want the current head %q", head, dupRaceHeadB)
 	}
 }
 

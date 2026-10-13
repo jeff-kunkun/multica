@@ -34,8 +34,6 @@ interface IssuePickerModalProps {
   onSelect: (issue: Issue) => void;
   /** Shown while the query is empty; groups without issues are skipped. */
   suggestions?: IssuePickerSuggestionGroup[];
-  /** Drops issues from results and suggestions alike; excludeIds always applies. */
-  isSelectable?: (issue: Issue) => boolean;
 }
 
 export function IssuePickerModal({
@@ -46,7 +44,6 @@ export function IssuePickerModal({
   excludeIds,
   onSelect,
   suggestions,
-  isSelectable,
 }: IssuePickerModalProps) {
   const { t } = useT("modals");
   const { colorOf, iconOf } = useIssueStatuses(useWorkspaceId());
@@ -56,8 +53,8 @@ export function IssuePickerModal({
   const debounceRef = useRef<ReturnType<typeof setTimeout>>(undefined);
   const abortRef = useRef<AbortController>(undefined);
   const selectable = useCallback(
-    (issue: Issue) => !excludeIds.includes(issue.id) && (isSelectable?.(issue) ?? true),
-    [excludeIds, isSelectable],
+    (issue: Issue) => !excludeIds.includes(issue.id),
+    [excludeIds],
   );
   const suggestionGroups = (suggestions ?? [])
     .map((group) => ({ ...group, issues: group.issues.filter(selectable) }))

@@ -10,7 +10,6 @@ import {
 } from "@multica/core/workspace/queries";
 import { AgentNameField } from "./agent-configuration-panel";
 import { CreateAgentFooter } from "./create-agent-footer";
-import { draftPreview } from "./unfinished-drafts";
 import { classifyAgentCreateError } from "./use-create-agent-submit";
 
 vi.mock("../../i18n", () => ({
@@ -19,16 +18,10 @@ vi.mock("../../i18n", () => ({
       selector: (translations: {
         creation_studio: {
           eyebrow: string;
-          choose_title: string;
-          choose_description: string;
-          recommended: string;
-          continue: string;
           modes: {
             blank: { title: string; description: string };
-            ai: { title: string; description: string };
           };
           create_and_open: string;
-          create_and_add: string;
           creating: string;
           name_conflict: string;
         };
@@ -41,22 +34,13 @@ vi.mock("../../i18n", () => ({
       selector({
         creation_studio: {
           eyebrow: "Agent creation",
-          choose_title: "How would you like to start?",
-          choose_description: "Choose a creation mode.",
-          recommended: "Recommended",
-          continue: "Continue",
           modes: {
             blank: {
               title: "Start blank",
               description: "Configure every field yourself.",
             },
-            ai: {
-              title: "Build with AI",
-              description: "Describe the outcome you want.",
-            },
           },
           create_and_open: "Create and open",
-          create_and_add: "Create and add",
           creating: "Creating…",
           name_conflict: "An agent with this name already exists.",
         },
@@ -150,7 +134,6 @@ describe("Agent creation errors", () => {
       createElement(CreateAgentFooter, {
         canCreate: true,
         creating: false,
-        squad: false,
         error: "Network request failed",
         onCreate: vi.fn(),
       }),
@@ -183,7 +166,6 @@ const CREATED_AGENT: Agent = {
   max_concurrent_tasks: 1,
   model: "",
   owner_id: "user-1",
-  skills: [],
   created_at: "2026-08-15T00:00:00Z",
   updated_at: "2026-08-15T00:00:00Z",
   archived_at: null,
@@ -232,36 +214,5 @@ describe("Agent creation cache handoff", () => {
     expect(
       queryClient.getQueryData(workspaceKeys.agent("ws-1", CREATED_AGENT.id)),
     ).toEqual(CREATED_AGENT);
-  });
-});
-
-// The list endpoint returns the stored message untouched, still in the builder
-// wire format. Rendered raw it is a wall of JSON, which is what the user would
-// see on the one screen meant to help them recognise their own draft.
-describe("Unfinished draft preview", () => {
-  it("unwraps the encoded envelope on a user message", () => {
-    expect(
-      draftPreview({
-        last_message_role: "user",
-        last_message_content:
-          'MULTICA_AGENT_BUILDER_INPUT\n{"user_request":"Create a release manager","current_draft":{"name":"X"}}',
-      }),
-    ).toBe("Create a release manager");
-  });
-
-  it("hides the structured block on an assistant message", () => {
-    expect(
-      draftPreview({
-        last_message_role: "assistant",
-        last_message_content:
-          'Here is a first draft.\n<agent_draft>{"name":"Researcher"}</agent_draft>',
-      }),
-    ).toBe("Here is a first draft.");
-  });
-
-  it("returns an empty preview when the server sent no message", () => {
-    expect(
-      draftPreview({ last_message_role: "", last_message_content: "" }),
-    ).toBe("");
   });
 });

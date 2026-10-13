@@ -46,8 +46,7 @@ WHERE agent_id = $1
 `
 
 // Clears every target for an agent. Used before re-writing the allow-list so
-// the update is a wholesale replace, matching the composio_toolkit_allowlist
-// write model.
+// the update is a wholesale replace.
 func (q *Queries) DeleteAgentInvocationTargets(ctx context.Context, agentID pgtype.UUID) error {
 	_, err := q.db.Exec(ctx, deleteAgentInvocationTargets, agentID)
 	return err

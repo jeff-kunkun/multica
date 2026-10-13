@@ -1,14 +1,19 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
 	"strings"
 
+	"github.com/jackc/pgx/v5/pgtype"
+
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/handler"
 	"github.com/multica-ai/multica/server/internal/realtime"
+	"github.com/multica-ai/multica/server/internal/util"
+	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
@@ -76,7 +81,10 @@ func projectOutbound(eventType string, payload any) any {
 // for a Redis-backed relay or a feature-flagged dual-write implementation
 // without touching any of the event listeners below. This is Phase 0 of the
 // horizontal-scaling plan tracked in MUL-1138.
-func registerListeners(bus *events.Bus, b realtime.Broadcaster) {
+//
+// aud narrows events about an issue or project to the members who may see it
+// (project sharing, migration 582); nil keeps every event on workspace fanout.
+func registerListeners(bus *events.Bus, b realtime.Broadcaster, aud eventAudience) {
 	// Personal events should NOT be broadcast to the whole workspace.
 	personalEvents := map[string]bool{
 		protocol.EventInboxNew:           true,
@@ -87,7 +95,6 @@ func registerListeners(bus *events.Bus, b realtime.Broadcaster) {
 		protocol.EventInboxBatchArchived: true,
 		protocol.EventInvitationCreated:  true,
 		protocol.EventInvitationRevoked:  true,
-		protocol.EventChatSessionCreated: true,
 		protocol.EventChatSessionUpdated: true,
 	}
 
@@ -201,15 +208,13 @@ func registerListeners(bus *events.Bus, b realtime.Broadcaster) {
 		})
 	}
 
-	// A Chat session is creator-private. Its initial title may be derived from
-	// the creator's first message, so the list-invalidation event must not be
+	// A Chat session is creator-private. Its title may be derived from the
+	// creator's first message, so the list-invalidation event must not be
 	// broadcast to every workspace member. ActorID is the creator on every
 	// producer path for this event.
-	for _, eventType := range []string{protocol.EventChatSessionCreated, protocol.EventChatSessionUpdated} {
-		bus.Subscribe(eventType, func(e events.Event) {
-			sendToRecipient(b, e, e.ActorID)
-		})
-	}
+	bus.Subscribe(protocol.EventChatSessionUpdated, func(e events.Event) {
+		sendToRecipient(b, e, e.ActorID)
+	})
 
 	// member:added — also send to the invited user so they discover the new workspace.
 	// Pass excludeWorkspace so clients already in the target room (reached via
@@ -276,6 +281,12 @@ func registerListeners(bus *events.Bus, b realtime.Broadcaster) {
 
 		if e.WorkspaceID != "" {
 			realtime.M.RecordEvent(e.Type)
+			if members, ok := resolveEventAudience(aud, e.Type, e.WorkspaceID, data); ok {
+				for _, userID := range members {
+					b.BroadcastToScope(realtime.ScopeMember, realtime.MemberScopeID(e.WorkspaceID, userID), data)
+				}
+				return
+			}
 			b.BroadcastToWorkspace(e.WorkspaceID, data)
 		} else if strings.HasPrefix(e.Type, "daemon:") {
 			realtime.M.RecordEvent(e.Type)
@@ -283,4 +294,101 @@ func registerListeners(bus *events.Bus, b realtime.Broadcaster) {
 		}
 		// Otherwise drop — no global broadcast for non-daemon events without a workspace.
 	})
+}
+
+// workspaceFanoutEvents carry only a project id and must reach members who
+// just lost sight of the project, so their clients drop it.
+var workspaceFanoutEvents = map[string]bool{
+	protocol.EventProjectDeleted:        true,
+	protocol.EventProjectMembersChanged: true,
+}
+
+// eventAudience lists the workspace members who may see an issue or project.
+// *db.Queries implements it.
+type eventAudience interface {
+	ListIssueAudience(ctx context.Context, issueID pgtype.UUID) ([]pgtype.UUID, error)
+	ListProjectAudience(ctx context.Context, arg db.ListProjectAudienceParams) ([]pgtype.UUID, error)
+}
+
+// audienceKeys are the payload fields that tie an event to an issue or a
+// project, read from the serialized frame so every producer shape is covered.
+type audienceKeys struct {
+	Payload struct {
+		IssueID   string `json:"issue_id"`
+		ProjectID string `json:"project_id"`
+		Issue     struct {
+			ID string `json:"id"`
+		} `json:"issue"`
+		Project struct {
+			ID string `json:"id"`
+		} `json:"project"`
+		Comment struct {
+			IssueID string `json:"issue_id"`
+		} `json:"comment"`
+		Task struct {
+			IssueID string `json:"issue_id"`
+		} `json:"task"`
+	} `json:"payload"`
+}
+
+// resolveEventAudience returns the members an event about an issue or project
+// goes to. ok=false means the event is not about one (or its target is gone,
+// leaving nothing to hide) and stays on workspace fanout. The owner always
+// sees everything, so an empty audience means the target no longer exists.
+func resolveEventAudience(aud eventAudience, eventType, workspaceID string, frame []byte) ([]string, bool) {
+	if aud == nil || workspaceFanoutEvents[eventType] {
+		return nil, false
+	}
+	var keys audienceKeys
+	if err := json.Unmarshal(frame, &keys); err != nil {
+		return nil, false
+	}
+	p := keys.Payload
+	ctx := context.Background()
+	var (
+		rows []pgtype.UUID
+		err  error
+	)
+	switch issueID := firstNonEmpty(p.IssueID, p.Issue.ID, p.Comment.IssueID, p.Task.IssueID); {
+	case issueID != "":
+		id, perr := util.ParseUUID(issueID)
+		if perr != nil {
+			return nil, false
+		}
+		rows, err = aud.ListIssueAudience(ctx, id)
+	default:
+		projectID := firstNonEmpty(p.ProjectID, p.Project.ID)
+		if projectID == "" {
+			return nil, false
+		}
+		pid, perr := util.ParseUUID(projectID)
+		wid, werr := util.ParseUUID(workspaceID)
+		if perr != nil || werr != nil {
+			return nil, false
+		}
+		rows, err = aud.ListProjectAudience(ctx, db.ListProjectAudienceParams{WorkspaceID: wid, ProjectID: pid})
+	}
+	if err != nil {
+		// Fail closed: a missed live update heals on the next refetch, a
+		// leaked one cannot be taken back.
+		slog.Warn("realtime: resolve event audience failed", "workspace_id", workspaceID, "error", err)
+		return []string{}, true
+	}
+	if len(rows) == 0 {
+		return nil, false
+	}
+	members := make([]string, 0, len(rows))
+	for _, row := range rows {
+		members = append(members, util.UUIDToString(row))
+	}
+	return members, true
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, v := range values {
+		if v != "" {
+			return v
+		}
+	}
+	return ""
 }

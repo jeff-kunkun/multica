@@ -62,7 +62,7 @@ export function CodeTab() {
   const wsId = useWorkspaceId();
   const qc = useQueryClient();
   const { role, member } = useCurrentMember(wsId);
-  const isManager = role === "owner" || role === "admin";
+  const isManager = role === "owner";
   const vcsAvailable = useConfigStore((s) => s.vcsIntegrationAvailable);
 
   // Every member can see the installation list (MUL-2413); connect and

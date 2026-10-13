@@ -1,6 +1,5 @@
 import type { ChatMessage } from "@multica/core/types";
 import type { ChatTimelineItem } from "@multica/core/chat";
-import { stripChatQuickActionsProtocol } from "./quick-actions";
 
 /**
  * Split an assistant timeline into three regions for the conductor-style fold:
@@ -34,15 +33,14 @@ export function splitTimeline(items: ChatTimelineItem[]): {
 }
 
 /**
- * Canonical completed answer from the persisted chat message. Surface-specific
- * transforms still apply so hidden protocols stay out of the rendered and
- * copied answer.
+ * Canonical completed answer from the persisted chat message, with any
+ * surface-specific transform applied.
  */
 export function canonicalAnswerText(
   message: ChatMessage,
   transformContent?: (content: string) => string,
 ): string {
-  const content = stripChatQuickActionsProtocol(message.content ?? "");
+  const content = message.content ?? "";
   return transformContent ? transformContent(content) : content;
 }
 

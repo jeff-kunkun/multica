@@ -181,30 +181,6 @@ func TestRequestLogger_RedactsWebhookTokenInPath(t *testing.T) {
 	}
 }
 
-func TestRequestLogger_IncludesWebhookTriggerIDFromContext(t *testing.T) {
-	// Exercise the real production flow: the webhook handler resolves the
-	// trigger, then calls SetWebhookTriggerID(r, ...) which mutates *r in
-	// place. After the handler returns, the wrapping RequestLogger
-	// middleware reads the stashed ID off the (now-updated) request
-	// context. If SetWebhookTriggerID didn't mutate in place, the
-	// middleware would see the old context and the trigger ID would
-	// silently drop from the audit line.
-	logs := withCapturedLogs(t)
-	handler := RequestLogger(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		SetWebhookTriggerID(r, "trigger-abc")
-		w.WriteHeader(http.StatusOK)
-	}))
-	req := httptest.NewRequest(http.MethodPost, "/api/webhooks/autopilots/awt_supersecret", nil)
-	handler.ServeHTTP(httptest.NewRecorder(), req)
-	out := logs.String()
-	if !strings.Contains(out, "webhook_trigger_id=trigger-abc") {
-		t.Fatalf("expected webhook_trigger_id in logs, got:\n%s", out)
-	}
-	if strings.Contains(out, "awt_supersecret") {
-		t.Fatalf("token leaked into logs:\n%s", out)
-	}
-}
-
 func TestIsSoftNotFound(t *testing.T) {
 	t.Parallel()
 

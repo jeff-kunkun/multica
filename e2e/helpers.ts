@@ -41,7 +41,6 @@ export async function loginAsDefault(page: Page): Promise<string> {
     `E2E Workspace ${E2E_WORKER}`,
     DEFAULT_E2E_WORKSPACE,
   );
-  await api.markUserOnboarded();
 
   const token = api.getToken();
   if (!token) {
@@ -65,19 +64,7 @@ export async function createTestApi(): Promise<TestApiClient> {
   const api = new TestApiClient();
   await api.login(DEFAULT_E2E_EMAIL, DEFAULT_E2E_NAME);
   await api.ensureWorkspace(`E2E Workspace ${E2E_WORKER}`, DEFAULT_E2E_WORKSPACE);
-  await api.markUserOnboarded();
   return api;
-}
-
-export async function preferManualCreateMode(page: Page) {
-  await page.evaluate(() => {
-    localStorage.setItem(
-      "multica_create_mode",
-      JSON.stringify({ state: { lastMode: "manual" }, version: 0 }),
-    );
-  });
-  await reloadAppPage(page);
-  await waitForIssuesPage(page);
 }
 
 export async function openWorkspaceMenu(page: Page) {

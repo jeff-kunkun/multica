@@ -282,7 +282,7 @@ describe("RuntimeDetail visibility section", () => {
   // and the PATCH refuses an admin regardless of what this UI renders.
   it("keeps visibility read-only for a workspace admin who does not own the runtime", () => {
     mockQueryData.members = [
-      { user_id: "user-me", role: "admin" },
+      { user_id: "user-me", role: "owner" },
       { user_id: "someone-else", role: "member" },
     ];
     renderDetail(
@@ -294,7 +294,7 @@ describe("RuntimeDetail visibility section", () => {
 
   it("hides usage from a workspace admin viewing another member's private runtime", () => {
     mockQueryData.members = [
-      { user_id: "user-me", role: "admin" },
+      { user_id: "user-me", role: "owner" },
       { user_id: "someone-else", role: "member" },
     ];
 
@@ -310,7 +310,7 @@ describe("RuntimeDetail visibility section", () => {
 
   it("shows usage to a workspace admin viewing another member's public runtime", () => {
     mockQueryData.members = [
-      { user_id: "user-me", role: "admin" },
+      { user_id: "user-me", role: "owner" },
       { user_id: "someone-else", role: "member" },
     ];
 
@@ -325,7 +325,7 @@ describe("RuntimeDetail visibility section", () => {
   // canUseRuntimeForAgent, which is fail-closed without an owner), so the
   // page must not render a Usage section that can only 404.
   it("hides usage for an ownerless runtime even when it is public", () => {
-    mockQueryData.members = [{ user_id: "user-me", role: "admin" }];
+    mockQueryData.members = [{ user_id: "user-me", role: "owner" }];
 
     renderDetail(makeRuntime({ owner_id: null, visibility: "public" }));
 

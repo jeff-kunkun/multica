@@ -139,46 +139,6 @@ func (q *Queries) GetUsersByIDs(ctx context.Context, ids []pgtype.UUID) ([]GetUs
 	return items, nil
 }
 
-const joinCloudWaitlist = `-- name: JoinCloudWaitlist :one
-UPDATE "user" SET
-    cloud_waitlist_email = $2,
-    cloud_waitlist_reason = $3,
-    updated_at = now()
-WHERE id = $1
-RETURNING id, name, email, avatar_url, created_at, updated_at, onboarded_at, onboarding_questionnaire, cloud_waitlist_email, cloud_waitlist_reason, starter_content_state, language, profile_description, timezone
-`
-
-type JoinCloudWaitlistParams struct {
-	ID                  pgtype.UUID `json:"id"`
-	CloudWaitlistEmail  pgtype.Text `json:"cloud_waitlist_email"`
-	CloudWaitlistReason pgtype.Text `json:"cloud_waitlist_reason"`
-}
-
-// Records interest in cloud runtimes. Does NOT mark onboarding
-// complete — the user still has to pick a real path (CLI / Skip)
-// in Step 3. Repeating the call overwrites email + reason.
-func (q *Queries) JoinCloudWaitlist(ctx context.Context, arg JoinCloudWaitlistParams) (User, error) {
-	row := q.db.QueryRow(ctx, joinCloudWaitlist, arg.ID, arg.CloudWaitlistEmail, arg.CloudWaitlistReason)
-	var i User
-	err := row.Scan(
-		&i.ID,
-		&i.Name,
-		&i.Email,
-		&i.AvatarUrl,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-		&i.OnboardedAt,
-		&i.OnboardingQuestionnaire,
-		&i.CloudWaitlistEmail,
-		&i.CloudWaitlistReason,
-		&i.StarterContentState,
-		&i.Language,
-		&i.ProfileDescription,
-		&i.Timezone,
-	)
-	return i, err
-}
-
 const markUserOnboarded = `-- name: MarkUserOnboarded :one
 UPDATE "user" SET
     onboarded_at = COALESCE(onboarded_at, now()),
@@ -189,85 +149,6 @@ RETURNING id, name, email, avatar_url, created_at, updated_at, onboarded_at, onb
 
 func (q *Queries) MarkUserOnboarded(ctx context.Context, id pgtype.UUID) (User, error) {
 	row := q.db.QueryRow(ctx, markUserOnboarded, id)
-	var i User
-	err := row.Scan(
-		&i.ID,
-		&i.Name,
-		&i.Email,
-		&i.AvatarUrl,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-		&i.OnboardedAt,
-		&i.OnboardingQuestionnaire,
-		&i.CloudWaitlistEmail,
-		&i.CloudWaitlistReason,
-		&i.StarterContentState,
-		&i.Language,
-		&i.ProfileDescription,
-		&i.Timezone,
-	)
-	return i, err
-}
-
-const patchUserOnboarding = `-- name: PatchUserOnboarding :one
-UPDATE "user" SET
-    onboarding_questionnaire = COALESCE($1, onboarding_questionnaire),
-    updated_at = now()
-WHERE id = $2
-RETURNING id, name, email, avatar_url, created_at, updated_at, onboarded_at, onboarding_questionnaire, cloud_waitlist_email, cloud_waitlist_reason, starter_content_state, language, profile_description, timezone
-`
-
-type PatchUserOnboardingParams struct {
-	Questionnaire []byte      `json:"questionnaire"`
-	ID            pgtype.UUID `json:"id"`
-}
-
-// Partial update of the user's onboarding decision fields. Currently only the
-// questionnaire JSONB is patchable — the v2 attempt at persisting Step 3
-// runtime choice on the user row was reverted; that state now lives in a
-// frontend Zustand transient store.
-func (q *Queries) PatchUserOnboarding(ctx context.Context, arg PatchUserOnboardingParams) (User, error) {
-	row := q.db.QueryRow(ctx, patchUserOnboarding, arg.Questionnaire, arg.ID)
-	var i User
-	err := row.Scan(
-		&i.ID,
-		&i.Name,
-		&i.Email,
-		&i.AvatarUrl,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-		&i.OnboardedAt,
-		&i.OnboardingQuestionnaire,
-		&i.CloudWaitlistEmail,
-		&i.CloudWaitlistReason,
-		&i.StarterContentState,
-		&i.Language,
-		&i.ProfileDescription,
-		&i.Timezone,
-	)
-	return i, err
-}
-
-const setStarterContentState = `-- name: SetStarterContentState :one
-UPDATE "user" SET
-    starter_content_state = $2,
-    updated_at = now()
-WHERE id = $1
-RETURNING id, name, email, avatar_url, created_at, updated_at, onboarded_at, onboarding_questionnaire, cloud_waitlist_email, cloud_waitlist_reason, starter_content_state, language, profile_description, timezone
-`
-
-type SetStarterContentStateParams struct {
-	ID                  pgtype.UUID `json:"id"`
-	StarterContentState pgtype.Text `json:"starter_content_state"`
-}
-
-// Atomically transition starter_content_state. The handler is
-// responsible for checking the current value first (to decide between
-// "transition NULL -> imported and run the seeding" vs "already
-// decided, short-circuit"). Using COALESCE here would swallow the
-// transition, so this is a straight assignment.
-func (q *Queries) SetStarterContentState(ctx context.Context, arg SetStarterContentStateParams) (User, error) {
-	row := q.db.QueryRow(ctx, setStarterContentState, arg.ID, arg.StarterContentState)
 	var i User
 	err := row.Scan(
 		&i.ID,

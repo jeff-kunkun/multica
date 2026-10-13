@@ -48,11 +48,6 @@ interface TranscriptButtonProps {
    * somewhere else never sees the click that would tell it.
    */
   finalFocus?: boolean;
-  /**
-   * Optional content rendered above the transcript event list. Used to
-   * surface autopilot webhook payloads inline with the run history.
-   */
-  headerSlot?: React.ReactNode;
 }
 
 /**
@@ -80,7 +75,6 @@ export function TranscriptButton({
   open: controlledOpen,
   onOpenChange: controlledOnOpenChange,
   finalFocus,
-  headerSlot,
 }: TranscriptButtonProps) {
   const [uncontrolledOpen, setUncontrolledOpen] = useState(false);
   // A click carrying no detail count came from Enter/Space. Only that reader
@@ -196,7 +190,6 @@ export function TranscriptButton({
             isLive={isLive}
             onOpenChange={setOpen}
             finalFocus={returnFocus}
-            headerSlot={headerSlot}
           />
         ) : (
           <AgentTranscriptDialog
@@ -207,7 +200,6 @@ export function TranscriptButton({
             agentName={agentName}
             isLive={isLive}
             finalFocus={returnFocus}
-            headerSlot={headerSlot}
           />
         ))}
     </>
@@ -220,7 +212,6 @@ interface LiveTranscriptDialogProps {
   isLive: boolean;
   onOpenChange: (open: boolean) => void;
   finalFocus: boolean;
-  headerSlot?: React.ReactNode;
 }
 
 /**
@@ -240,7 +231,6 @@ function LiveTranscriptDialog({
   isLive,
   onOpenChange,
   finalFocus,
-  headerSlot,
 }: LiveTranscriptDialogProps) {
   const queryClient = useQueryClient();
   const { data } = useQuery({
@@ -285,7 +275,6 @@ function LiveTranscriptDialog({
       agentName={agentName}
       isLive={isLive}
       finalFocus={finalFocus}
-      headerSlot={headerSlot}
     />
   );
 }

@@ -36,7 +36,7 @@ import (
 // "unchanged" must be able to see that those were out of scope.
 //
 // Status and assignee ride along in both known renderings. They are what
-// workflow step 3 needs ("is it already in progress", "is it mine"), and a run
+// workflow step 2 needs ("is it already in progress", "is it mine"), and a run
 // that is not reading the issue would otherwise have to read it for them.
 //
 // Like every other per-turn helper, this must never reach the runtime brief:

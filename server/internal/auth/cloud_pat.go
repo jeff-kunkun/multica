@@ -65,9 +65,8 @@ const cloudPATVerifyResponseMaxBytes = 64 * 1024
 // cloudPATDefaultTimeout is the per-request HTTP timeout for verify
 // calls when the caller doesn't supply an *http.Client. Auth must
 // stay snappy: Fleet should answer in tens of milliseconds, and a
-// hung verify would block every incoming request behind it. Tighter
-// than cloudruntime's 35s because that one proxies arbitrary user
-// traffic; this one only ever sees a small JSON exchange.
+// hung verify would block every incoming request behind it; this
+// only ever sees a small JSON exchange.
 const cloudPATDefaultTimeout = 5 * time.Second
 
 // Verifier sentinel errors. Callers (the Auth / DaemonAuth middlewares)

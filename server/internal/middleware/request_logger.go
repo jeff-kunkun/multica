@@ -2,7 +2,6 @@ package middleware
 
 import (
 	"bytes"
-	"context"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -11,49 +10,19 @@ import (
 	chimw "github.com/go-chi/chi/v5/middleware"
 )
 
-// webhookTriggerIDKeyType is unexported so foreign packages cannot collide on
-// the context key — they go through SetWebhookTriggerID instead.
-type webhookTriggerIDKeyType struct{}
-
-var webhookTriggerIDKey = webhookTriggerIDKeyType{}
-
-// SetWebhookTriggerID stashes the resolved trigger ID on the request context
-// so the request logger can include it in the audit line without revealing
-// the bearer token in the URL path. Called by the webhook handler right after
-// the trigger row is looked up.
-//
-// Mutates `*r` in place so the wrapping middleware (which is still holding the
-// original `*http.Request`) reads the value back out of context after
-// ServeHTTP returns. Reassigning a local `r` variable would not propagate the
-// new context back up to the caller, which is the trap a previous version of
-// this helper fell into.
-func SetWebhookTriggerID(r *http.Request, triggerID string) {
-	if triggerID == "" {
-		return
-	}
-	*r = *r.WithContext(context.WithValue(r.Context(), webhookTriggerIDKey, triggerID))
-}
-
-// webhookTriggerIDFromContext returns the trigger ID stashed by
-// SetWebhookTriggerID, or "" when none was set.
-func webhookTriggerIDFromContext(ctx context.Context) string {
-	v, _ := ctx.Value(webhookTriggerIDKey).(string)
-	return v
-}
-
-// webhookIngressPathPrefix is the public webhook ingress path. The path
-// segment after this prefix IS a bearer credential, so the logger must
-// redact it — see redactWebhookPath.
+// webhookIngressPathPrefix is the retired autopilot webhook ingress path. The
+// route is gone, but external senders configured before its removal still
+// post here with the bearer token as the trailing segment, so the logger keeps
+// redacting it — see redactWebhookPath.
 const webhookIngressPathPrefix = "/api/webhooks/autopilots/"
 
 // redactWebhookPath returns a logger-safe version of a request path. For
 // the autopilot webhook ingress path the trailing token segment is replaced
 // with "[redacted]"; every other path passes through untouched.
 //
-// Why this exists: r.URL.Path for a successful webhook delivery is
-// "/api/webhooks/autopilots/awt_<32-byte-base64>", and the token is the
-// only credential gating the route. Without redaction, every successful
-// delivery prints a replayable URL into the structured log stream.
+// Why this exists: r.URL.Path for such a delivery is
+// "/api/webhooks/autopilots/awt_<32-byte-base64>", and the token is a
+// credential. Without redaction, every attempt prints it into the log stream.
 func redactWebhookPath(path string) string {
 	if !strings.HasPrefix(path, webhookIngressPathPrefix) {
 		return path
@@ -149,9 +118,6 @@ func RequestLogger(next http.Handler) http.Handler {
 		}
 		if uid := r.Header.Get("X-User-ID"); uid != "" {
 			attrs = append(attrs, "user_id", uid)
-		}
-		if tid := webhookTriggerIDFromContext(r.Context()); tid != "" {
-			attrs = append(attrs, "webhook_trigger_id", tid)
 		}
 		if platform, version, os := ClientMetadataFromContext(r.Context()); platform != "" || version != "" || os != "" {
 			if platform != "" {

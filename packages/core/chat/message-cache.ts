@@ -8,8 +8,7 @@ import type { ChatMessage, ChatMessagesPage } from "../types";
  *
  * Before this, every writer rolled its own: `chat:done` inline-inserted the
  * assistant reply, `chat:message` threw its payload away and only invalidated,
- * and the three send paths each appended by hand — two of them to both caches,
- * the Agent Builder to the flat one only. The gap that produced this bug was in
+ * and the send paths each appended by hand to different caches. The gap that produced this bug was in
  * that inconsistency, not in any single writer: a human's own message was the
  * one row no WebSocket handler ever wrote, so it reached the transcript solely
  * through a refetch, and a refetch that gets cancelled takes the message with
@@ -112,7 +111,7 @@ export interface UpsertChatMessageOptions {
  * Upsert one settled message into both message caches.
  *
  * Both are written because both are read: `chatKeys.messagesPage` backs the
- * chat surfaces, `chatKeys.messages` backs the Agent Builder. Writing one and
+ * chat surfaces, `chatKeys.messages` is the flat per-session list. Writing one and
  * not the other is how they drift.
  */
 export function upsertChatMessageToCaches(

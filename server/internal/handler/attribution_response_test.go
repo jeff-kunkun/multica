@@ -31,14 +31,8 @@ func TestTaskCommentChangeCancellation(t *testing.T) {
 	}
 }
 
-func TestComputeTaskKindPreservesLinkedQuickCreateOrigin(t *testing.T) {
+func TestComputeTaskKindLinkedTaskIsDirect(t *testing.T) {
 	issueID := parseUUID("11111111-1111-1111-1111-111111111111")
-	if got := computeTaskKind(db.AgentTaskQueue{
-		IssueID: issueID,
-		Context: []byte(`{"type":"quick_create","prompt":"Create an issue"}`),
-	}); got != "quick_create" {
-		t.Fatalf("linked quick-create kind = %q, want quick_create", got)
-	}
 	if got := computeTaskKind(db.AgentTaskQueue{
 		IssueID: issueID,
 		Context: []byte(`{"head_sha":"abc123"}`),

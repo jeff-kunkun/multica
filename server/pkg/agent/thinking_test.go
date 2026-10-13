@@ -844,37 +844,6 @@ func TestCodexAdvertisedLevelsArePersistable(t *testing.T) {
 // layer call this; if it gets default-model wrong, any agent without an
 // explicit model set would have its thinking_level dropped silently.
 
-func TestValidateThinkingLevel_PiRPCPerModelCatalog(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("fake pi binary is a /bin/sh script")
-	}
-	fakePi := writeFakePiRPCModelsBinary(t)
-	ctx := context.Background()
-
-	check := func(model, value string, want bool) {
-		t.Helper()
-		ok, err := ValidateThinkingLevel(ctx, "pi", Command{Path: fakePi}, model, value)
-		if err != nil {
-			t.Fatalf("ValidateThinkingLevel(pi, %q, Command{Path: %q}): %v", model, value, err)
-		}
-		if ok != want {
-			t.Errorf("ValidateThinkingLevel(pi, %q, Command{Path: %q}) = %v, want %v", model, value, ok, want)
-		}
-	}
-
-	check("openai-multi/gpt-5.6-sol", "high", true)
-	check("openai-multi/gpt-5.6-sol", "xhigh", false)
-	check("openai-multi/gpt-5.6-luna", "max", true)
-	check("openai-multi/gpt-5.6-luna", "medium", false)
-	check("openai-multi/plain-chat", "off", false)
-	check("", "max", true)     // current Pi model is Luna
-	check("", "medium", false) // Luna explicitly disables medium in the fixture
-	check("openai-multi/gpt-5.6-luna", "", true)
-}
-
-// claudeVerifiedCatalog has the shape live Claude discovery produces: each
-// model states its own effort levels and the CLI's default row is flagged
-// Default.
 func claudeVerifiedCatalog() (Catalog, error) {
 	levels := func(values ...string) *ModelThinking {
 		out := &ModelThinking{}

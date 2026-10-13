@@ -381,7 +381,7 @@ func TestCompleteTask_ReconcilesAgentAuthoredMentionToCompletedAgent(t *testing.
 // boundary of MUL-4304 on an agent-assigned issue: an agent-authored comment
 // with NO explicit @mention (a plain reply / acknowledgement) must never earn a
 // follow-up, even though reconcile now considers agent comments. Only explicit
-// @agent/@squad mentions are replayed.
+// @agent mentions are replayed.
 func TestCompleteTask_DoesNotReconcilePlainAgentReply(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
@@ -432,57 +432,6 @@ func TestCompleteTask_DoesNotReconcilePlainAgentReply(t *testing.T) {
 	}
 }
 
-// TestCompleteTask_DoesNotReconcilePlainWorkerReplyOnSquadIssue is the MUL-4304
-// review must-fix #2 regression test. On a SQUAD-assigned issue,
-// computeCommentAgentTriggers routes a plain worker-agent reply (no mention) to
-// the squad leader via routeAssignedSquadLeaderFallback (Source = issue
-// assignee) — that is the create-time leader→worker→leader coordination path.
-// This reply was never accepted into a run's input plan. Reconcile must NOT
-// turn a timestamp-only plain reply into a new conversation. Accepted worker
-// handoffs are covered separately by TestWorkerReplyDelivery.
-func TestCompleteTask_DoesNotReconcilePlainWorkerReplyOnSquadIssue(t *testing.T) {
-	if testHandler == nil || testPool == nil {
-		t.Skip("database not available")
-	}
-	fx := newSquadCommentTriggerFixture(t)
-	issueID := uuidToString(fx.Issue.ID)
-	t.Cleanup(func() {
-		testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE issue_id = $1`, issueID)
-		testPool.Exec(context.Background(), `DELETE FROM comment WHERE issue_id = $1`, issueID)
-	})
-
-	var leaderRuntimeID string
-	dbfx.QueryRow(t, `SELECT runtime_id FROM agent WHERE id = $1`, fx.LeaderID).Scan(&leaderRuntimeID)
-	// A running leader task whose completion drives reconcile.
-	leaderTaskID := dbfx.Task(t, fx.LeaderID, testutil.Cols{
-		"runtime_id":     leaderRuntimeID,
-		"issue_id":       issueID,
-		"status":         "running",
-		"is_leader_task": true,
-		"squad_id":       fx.SquadID,
-		"created_at":     testutil.Raw("now() - interval '10 minutes'"),
-		"started_at":     testutil.Raw("now() - interval '5 minutes'"),
-	})
-
-	// A plain worker-agent reply (no mention) posted during the leader's run.
-	// At create time this WOULD route to the leader via the squad-leader
-	// fallback; reconcile must not replay it.
-	dbfx.Exec(t, `
-		INSERT INTO comment (issue_id, workspace_id, author_type, author_id, content, type, created_at)
-		VALUES ($1, $2, 'agent', $3, 'done — pushed the change', 'comment', now() - interval '1 minute')
-	`, issueID, testWorkspaceID, fx.OtherID)
-
-	if w := completeTaskViaHandler(t, leaderTaskID, "done"); w.Code != http.StatusOK {
-		t.Fatalf("CompleteTask: expected 200, got %d: %s", w.Code, w.Body.String())
-	}
-
-	// The squad-leader fallback is a non-mention route, so reconcile must not
-	// enqueue any follow-up for the leader from a plain worker reply.
-	if n := pendingTaskCountForAgentIssue(t, issueID, fx.LeaderID); n != 0 {
-		t.Fatalf("plain worker reply must not reconcile-wake the squad leader, got %d leader task(s)", n)
-	}
-}
-
 // handlerWorkspaceMember inserts a fresh user + workspace member and returns
 // the user id (for a second distinct originator).
 func handlerWorkspaceMember(t *testing.T, slug string) string {
@@ -491,7 +440,7 @@ func handlerWorkspaceMember(t *testing.T, slug string) string {
 	email := slug + "-" + time.Now().Format("150405.000000") + "@example.test"
 	dbfx.QueryRow(t, `INSERT INTO "user" (name, email) VALUES ($1, $2) RETURNING id`,
 		"Reconcile Test "+slug, email).Scan(&userID)
-	dbfx.Exec(t, `INSERT INTO member (workspace_id, user_id, role) VALUES ($1, $2, 'admin')`,
+	dbfx.Exec(t, `INSERT INTO member (workspace_id, user_id, role) VALUES ($1, $2, 'member')`,
 		testWorkspaceID, userID)
 	t.Cleanup(func() {
 		testPool.Exec(context.Background(), `DELETE FROM member WHERE user_id = $1`, userID)

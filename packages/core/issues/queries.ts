@@ -132,10 +132,6 @@ export const issueKeys = {
   identifier: (wsId: string, identifier: string) =>
     [...issueKeys.all(wsId), "identifier", identifier] as const,
   /** Prefix for every per-issue duplicate-relation query in a workspace. */
-  duplicatesAll: (wsId: string) =>
-    [...issueKeys.all(wsId), "duplicates"] as const,
-  duplicates: (wsId: string, id: string) =>
-    [...issueKeys.duplicatesAll(wsId), id] as const,
   /** Prefix for every per-parent children query in a workspace. */
   childrenAll: (wsId: string) =>
     [...issueKeys.all(wsId), "children"] as const,
@@ -499,18 +495,6 @@ export function childIssueProgressOptions(wsId: string) {
       }
       return map;
     },
-  });
-}
-
-/** Both sides of an issue's duplicate relation: its original and its duplicates. */
-export function issueDuplicatesOptions(wsId: string, id: string) {
-  return queryOptions({
-    queryKey: issueKeys.duplicates(wsId, id),
-    queryFn: () => api.listIssueDuplicates(id),
-    // Same reason as childIssuesOptions: a mark written while this workspace
-    // is not the active realtime subscription would otherwise leave the
-    // Infinity-stale snapshot wrong when the issue is opened again.
-    refetchOnMount: "always",
   });
 }
 

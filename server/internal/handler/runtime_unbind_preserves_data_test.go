@@ -245,58 +245,6 @@ func TestCountUndrainedTasksByRuntimeOrAgent_IncludesCrossRuntimeTask(t *testing
 	}
 }
 
-// TestUnbindAgentsAndDeleteRuntime_KeepsAutopilotConfig pauses an automation
-// whose assignee cannot run after teardown. Leaving it active would append an
-// identical skipped run every schedule tick forever. Its assignee and config
-// remain intact, and pause_reason tells the user how to recover.
-func TestUnbindAgentsAndDeleteRuntime_KeepsAutopilotConfig(t *testing.T) {
-	if testHandler == nil {
-		t.Skip("database not available")
-	}
-	ctx := context.Background()
-
-	runtimeID := createCascadeFixtureRuntime(t, ctx, "Unbind Autopilot Runtime")
-	agentID := createCascadeFixtureAgent(t, ctx, runtimeID, "Unbind Autopilot Agent")
-
-	var autopilotID string
-	if err := testPool.QueryRow(ctx, `
-		INSERT INTO autopilot (
-			workspace_id, title, description, assignee_type, assignee_id,
-			created_by_type, created_by_id, status, execution_mode
-		)
-		VALUES ($1, 'unbind autopilot', 'do the thing', 'agent', $2, 'member', $3, 'active', 'run_only')
-		RETURNING id
-	`, testWorkspaceID, agentID, testUserID).Scan(&autopilotID); err != nil {
-		t.Fatalf("insert autopilot: %v", err)
-	}
-	t.Cleanup(func() {
-		_, _ = testPool.Exec(context.Background(), `DELETE FROM autopilot WHERE id = $1`, autopilotID)
-	})
-
-	unbindRuntime(t, ctx, runtimeID, agentID)
-
-	var status, pauseReason string
-	var assigneeRows int
-	if err := testPool.QueryRow(ctx,
-		`SELECT status, pause_reason FROM autopilot WHERE id = $1`, autopilotID).Scan(&status, &pauseReason); err != nil {
-		t.Fatalf("read autopilot status: %v", err)
-	}
-	if status != "paused" {
-		t.Fatalf("autopilot status = %q, want paused", status)
-	}
-	if pauseReason != string(ReasonAgentRuntimeRequired) {
-		t.Fatalf("autopilot pause_reason = %q, want agent_runtime_required", pauseReason)
-	}
-	if err := testPool.QueryRow(ctx,
-		`SELECT count(*) FROM autopilot WHERE id = $1 AND assignee_id = $2`,
-		autopilotID, agentID).Scan(&assigneeRows); err != nil {
-		t.Fatalf("read autopilot assignee: %v", err)
-	}
-	if assigneeRows != 1 {
-		t.Fatalf("autopilot must still point at the surviving agent")
-	}
-}
-
 func TestUnbindAgentsAndDeleteRuntime_RedactsAgentBroadcast(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
@@ -337,12 +285,6 @@ func TestUnbindAgentsAndDeleteRuntime_RedactsAgentBroadcast(t *testing.T) {
 	}
 	if !broadcast.McpConfigRedacted {
 		t.Fatal("broadcast must mark mcp_config as redacted")
-	}
-	if broadcast.ComposioToolkitAllowlist != nil {
-		t.Fatalf("broadcast leaked Composio allowlist: %v", broadcast.ComposioToolkitAllowlist)
-	}
-	if !broadcast.ComposioToolkitAllowlistRedacted {
-		t.Fatal("broadcast must mark Composio allowlist as redacted")
 	}
 }
 

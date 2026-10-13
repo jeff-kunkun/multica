@@ -17,18 +17,11 @@ export function isSupportedLocale(
 
 export function resolveLocaleFromSignals({
   cookieLocale,
-  acceptLanguage,
 }: {
   cookieLocale?: string | null;
   acceptLanguage?: string | null;
 }): SupportedLocale {
-  const candidates: string[] = [];
-  if (cookieLocale) candidates.push(cookieLocale);
-
-  for (const part of (acceptLanguage ?? "").split(",")) {
-    const tag = part.split(";")[0]?.trim();
-    if (tag) candidates.push(tag);
-  }
-
-  return matchLocale(candidates);
+  // Browser languages (acceptLanguage) are ignored on purpose: the office
+  // defaults to Chinese and only an explicit choice (the cookie) switches.
+  return matchLocale(cookieLocale ? [cookieLocale] : []);
 }

@@ -3,7 +3,6 @@
 import { useMemo } from "react";
 import { useT } from "../../i18n";
 import type { SettingsSearchEntry } from "./settings-search";
-import { CHANNEL_INTEGRATIONS } from "./settings-navigation";
 
 const NOTIFICATION_GROUPS = [
   "assignments",
@@ -116,11 +115,6 @@ export function useSettingsSearchIndex(
         title: t(($) => $.page.tabs.shortcuts),
         description: t(($) => $.shortcuts.description),
       },
-      {
-        tab: "apps",
-        title: t(($) => $.page.tabs.apps),
-        description: t(($) => $.composio.page_description),
-      },
       // Workspace
       { tab: "workspace", anchor: "name", title: t(($) => $.workspace.name_label) },
       { tab: "workspace", anchor: "description", title: t(($) => $.workspace.description_label) },
@@ -140,26 +134,11 @@ export function useSettingsSearchIndex(
       { tab: "workspace", anchor: "delete", title: t(($) => $.workspace.delete_title) },
       { tab: "members", anchor: "invitations", title: t(($) => $.members.pending_label) },
       { tab: "members", anchor: "links", title: t(($) => $.members.share_links_label) },
-      {
-        tab: "wakeups",
-        anchor: "child-done",
-        title: t(($) => $.wakeups.child_done_title),
-        description: t(($) => $.wakeups.child_done_description),
-      },
-      {
-        tab: "labels",
-        title: t(($) => $.page.tabs.labels),
-        description: t(($) => $.labels.description),
-      },
+      { tab: "labels", title: t(($) => $.page.tabs.labels) },
       {
         tab: "properties",
         title: t(($) => $.page.tabs.properties),
         description: t(($) => $.properties.description),
-      },
-      {
-        tab: "quick-actions",
-        title: t(($) => $.page.tabs.quick_actions),
-        description: t(($) => $.quick_actions.description),
       },
       { tab: "code", anchor: "code-hosting", title: t(($) => $.code.hosting_title) },
       { tab: "code", anchor: "github", title: t(($) => $.page.tabs.github) },
@@ -196,23 +175,22 @@ export function useSettingsSearchIndex(
         title: t(($) => $.pr_merge_status.label),
         description: t(($) => $.pr_merge_status.description),
       },
-      ...CHANNEL_INTEGRATIONS.map((channel) => ({
-        tab: "channels",
-        integration: channel,
-        title: t(($) => $[channel].section_title),
-        description: t(($) => $[channel].page_description),
-      })),
       {
         tab: "mcp",
         title: t(($) => $.page.tabs.mcp),
         description: t(($) => $.mcp.description),
+      },
+      {
+        tab: "bots",
+        title: t(($) => $.page.tabs.bots),
+        description: t(($) => $.bots.description),
       },
     ];
     // Rows without an anchor describe a whole page: fold their copy into the
     // page entry so each page is indexed once, with its description.
     const pageDescriptions = new Map(
       rows
-        .filter((row) => !row.anchor && !row.integration)
+        .filter((row) => !row.anchor)
         .map((row) => [row.tab, row.description]),
     );
     const pageEntries: SettingsSearchIndexEntry[] = pages.map((page) => ({
@@ -222,7 +200,7 @@ export function useSettingsSearchIndex(
     }));
     return [
       ...pageEntries,
-      ...rows.filter((row) => row.anchor || row.integration),
+      ...rows.filter((row) => row.anchor),
     ].filter((entry) => visible.has(entry.tab));
   }, [pages, t]);
 }

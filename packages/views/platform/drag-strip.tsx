@@ -6,7 +6,7 @@ import type { CSSProperties } from "react";
  * room for) the native traffic lights.
  *
  * Place as the first flex child of any full-window, non-dashboard view
- * (onboarding, new-workspace, invite, no-access, etc.). The strip has
+ * (new-workspace, invite, no-access, etc.). The strip has
  * no background of its own; the parent's bg fills through it so the
  * page reads as "edge-to-edge" while the top 48px remains draggable.
  *

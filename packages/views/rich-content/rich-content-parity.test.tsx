@@ -68,6 +68,12 @@ vi.mock("../issues/components/issue-mention-card", () => ({
   ),
 }));
 
+// Chat adds a live "who is working" cue after issue mentions; it reads the
+// workspace task snapshot, which this rendering-parity test does not provide.
+vi.mock("../issues/components/issue-agent-activity-indicator", () => ({
+  IssueAgentActivityIndicator: () => null,
+}));
+
 vi.mock("../projects/components/project-chip", () => ({
   ProjectChip: ({ projectId }: { projectId: string }) => (
     <span data-testid="project-chip">{projectId}</span>

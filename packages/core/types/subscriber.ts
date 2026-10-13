@@ -14,7 +14,6 @@ export type IssueSubscriberReason =
   | "commenter"
   | "mentioned"
   | "manual"
-  | "autopilot"
   | "delegated";
 
 export interface IssueSubscriber {

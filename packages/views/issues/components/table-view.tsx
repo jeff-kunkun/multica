@@ -95,7 +95,6 @@ import { buildActorNameResolver, useActorName } from "@multica/core/workspace/ho
 import {
   agentListOptions,
   memberListOptions,
-  squadListOptions,
 } from "@multica/core/workspace/queries";
 import type {
   Issue,
@@ -160,7 +159,6 @@ import {
 import type { ChildProgress } from "./list-row";
 import { ListLoadMoreFooter } from "./list-load-more-footer";
 import { IssueAgentActivityIndicator } from "./issue-agent-activity-indicator";
-import { IssueDuplicateOfMarker } from "./issue-duplicates";
 
 // Enough placeholder rows to cover a typical viewport; the virtualizer only
 // mounts what fits, so overshooting costs nothing.
@@ -758,7 +756,6 @@ export function InlineTitle({
           >
             {row.issue.title}
           </button>
-          <IssueDuplicateOfMarker issue={row.issue} />
           {/* Lifted out of the flex flow, the way SidebarMenuAction is. Laid
             * out inline these two reserved ~40px of the title column for
             * buttons that are invisible until hovered — and title is the
@@ -2347,9 +2344,8 @@ export function TableView({
           ? Promise.all([
               queryClient.fetchQuery(memberListOptions(wsId)),
               queryClient.fetchQuery(agentListOptions(wsId)),
-              queryClient.fetchQuery(squadListOptions(wsId)),
-            ]).then(([members, agents, squads]) =>
-              buildActorNameResolver({ members, agents, squads }),
+            ]).then(([members, agents]) =>
+              buildActorNameResolver({ members, agents }),
             )
           : Promise.resolve(getActorName),
       ]);

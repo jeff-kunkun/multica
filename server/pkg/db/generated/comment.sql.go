@@ -232,8 +232,8 @@ WITH touched_issue AS (
     WHERE issue.id = $1 AND issue.workspace_id = $2
     RETURNING issue.id, issue.workspace_id, issue.revision
 ), inserted_comment AS (
-    INSERT INTO comment (issue_id, workspace_id, author_type, author_id, content, type, parent_id, source_task_id, quick_action_id, via_plugin_id, suppressed_agent_ids, id)
-    SELECT ti.id, ti.workspace_id, $3, $4, $5, $6, $7, $8, $9, $10, $11::uuid[], COALESCE($12::uuid, gen_random_uuid())
+    INSERT INTO comment (issue_id, workspace_id, author_type, author_id, content, type, parent_id, source_task_id, suppressed_agent_ids, id)
+    SELECT ti.id, ti.workspace_id, $3, $4, $5, $6, $7, $8, $9::uuid[], COALESCE($10::uuid, gen_random_uuid())
     FROM touched_issue ti
     RETURNING id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, resolved_at, resolved_by_type, resolved_by_id, source_task_id, quick_action_id, via_plugin_id, revision, recovery_settled_at, deleted_at, suppressed_agent_ids
 )
@@ -251,8 +251,6 @@ type CreateCommentParams struct {
 	Type               string        `json:"type"`
 	ParentID           pgtype.UUID   `json:"parent_id"`
 	SourceTaskID       pgtype.UUID   `json:"source_task_id"`
-	QuickActionID      pgtype.UUID   `json:"quick_action_id"`
-	ViaPluginID        pgtype.UUID   `json:"via_plugin_id"`
 	SuppressedAgentIds []pgtype.UUID `json:"suppressed_agent_ids"`
 	ID                 pgtype.UUID   `json:"id"`
 }
@@ -307,8 +305,6 @@ func (q *Queries) CreateComment(ctx context.Context, arg CreateCommentParams) (C
 		arg.Type,
 		arg.ParentID,
 		arg.SourceTaskID,
-		arg.QuickActionID,
-		arg.ViaPluginID,
 		arg.SuppressedAgentIds,
 		arg.ID,
 	)
@@ -810,7 +806,7 @@ WITH RECURSIVE ancestor_path AS (
 )
 SELECT id, issue_id, author_type, author_id, content, type, created_at,
        updated_at, workspace_id, parent_id, resolved_at, resolved_by_type,
-       resolved_by_id, source_task_id, revision, quick_action_id, via_plugin_id,
+       resolved_by_id, source_task_id, revision,
        deleted_at, depth, cycle
 FROM ancestor_path
 ORDER BY depth DESC
@@ -838,8 +834,6 @@ type ListCommentAncestorPathRow struct {
 	ResolvedByID   pgtype.UUID        `json:"resolved_by_id"`
 	SourceTaskID   pgtype.UUID        `json:"source_task_id"`
 	Revision       int64              `json:"revision"`
-	QuickActionID  pgtype.UUID        `json:"quick_action_id"`
-	ViaPluginID    pgtype.UUID        `json:"via_plugin_id"`
 	DeletedAt      pgtype.Timestamptz `json:"deleted_at"`
 	Depth          int32              `json:"depth"`
 	Cycle          bool               `json:"cycle"`
@@ -870,8 +864,6 @@ func (q *Queries) ListCommentAncestorPath(ctx context.Context, arg ListCommentAn
 			&i.ResolvedByID,
 			&i.SourceTaskID,
 			&i.Revision,
-			&i.QuickActionID,
-			&i.ViaPluginID,
 			&i.DeletedAt,
 			&i.Depth,
 			&i.Cycle,
@@ -1234,7 +1226,7 @@ picked AS (
 SELECT c.id, c.issue_id, c.author_type, c.author_id, c.content, c.type,
        c.created_at, c.updated_at, c.parent_id, c.workspace_id,
        c.resolved_at, c.resolved_by_type, c.resolved_by_id,
-       c.source_task_id, c.quick_action_id, c.revision, c.deleted_at,
+       c.source_task_id, c.revision, c.deleted_at,
        p.root_id AS thread_root_id,
        p.last_activity_at AS thread_last_activity_at
 FROM picked p
@@ -1267,7 +1259,6 @@ type ListRecentThreadCommentsForIssueRow struct {
 	ResolvedByType       pgtype.Text        `json:"resolved_by_type"`
 	ResolvedByID         pgtype.UUID        `json:"resolved_by_id"`
 	SourceTaskID         pgtype.UUID        `json:"source_task_id"`
-	QuickActionID        pgtype.UUID        `json:"quick_action_id"`
 	Revision             int64              `json:"revision"`
 	DeletedAt            pgtype.Timestamptz `json:"deleted_at"`
 	ThreadRootID         pgtype.UUID        `json:"thread_root_id"`
@@ -1333,7 +1324,6 @@ func (q *Queries) ListRecentThreadCommentsForIssue(ctx context.Context, arg List
 			&i.ResolvedByType,
 			&i.ResolvedByID,
 			&i.SourceTaskID,
-			&i.QuickActionID,
 			&i.Revision,
 			&i.DeletedAt,
 			&i.ThreadRootID,
@@ -1494,7 +1484,7 @@ thread_stats AS (
 SELECT c.id, c.issue_id, c.author_type, c.author_id, c.content, c.type,
        c.created_at, c.updated_at, c.parent_id, c.workspace_id,
        c.resolved_at, c.resolved_by_type, c.resolved_by_id,
-       c.source_task_id, c.quick_action_id, c.revision, c.deleted_at,
+       c.source_task_id, c.revision, c.deleted_at,
        ts.reply_count AS reply_count,
        ts.last_activity_at AS last_activity_at
 FROM selected_roots sr
@@ -1524,7 +1514,6 @@ type ListRootCommentsForIssueRow struct {
 	ResolvedByType pgtype.Text        `json:"resolved_by_type"`
 	ResolvedByID   pgtype.UUID        `json:"resolved_by_id"`
 	SourceTaskID   pgtype.UUID        `json:"source_task_id"`
-	QuickActionID  pgtype.UUID        `json:"quick_action_id"`
 	Revision       int64              `json:"revision"`
 	DeletedAt      pgtype.Timestamptz `json:"deleted_at"`
 	ReplyCount     int32              `json:"reply_count"`
@@ -1567,7 +1556,6 @@ func (q *Queries) ListRootCommentsForIssue(ctx context.Context, arg ListRootComm
 			&i.ResolvedByType,
 			&i.ResolvedByID,
 			&i.SourceTaskID,
-			&i.QuickActionID,
 			&i.Revision,
 			&i.DeletedAt,
 			&i.ReplyCount,
@@ -1614,7 +1602,7 @@ thread_stats AS (
 SELECT c.id, c.issue_id, c.author_type, c.author_id, c.content, c.type,
        c.created_at, c.updated_at, c.parent_id, c.workspace_id,
        c.resolved_at, c.resolved_by_type, c.resolved_by_id,
-       c.source_task_id, c.quick_action_id, c.revision, c.deleted_at,
+       c.source_task_id, c.revision, c.deleted_at,
        ts.reply_count AS reply_count,
        ts.last_activity_at AS last_activity_at
 FROM selected_roots sr
@@ -1645,7 +1633,6 @@ type ListRootCommentsSinceForIssueRow struct {
 	ResolvedByType pgtype.Text        `json:"resolved_by_type"`
 	ResolvedByID   pgtype.UUID        `json:"resolved_by_id"`
 	SourceTaskID   pgtype.UUID        `json:"source_task_id"`
-	QuickActionID  pgtype.UUID        `json:"quick_action_id"`
 	Revision       int64              `json:"revision"`
 	DeletedAt      pgtype.Timestamptz `json:"deleted_at"`
 	ReplyCount     int32              `json:"reply_count"`
@@ -1688,7 +1675,6 @@ func (q *Queries) ListRootCommentsSinceForIssue(ctx context.Context, arg ListRoo
 			&i.ResolvedByType,
 			&i.ResolvedByID,
 			&i.SourceTaskID,
-			&i.QuickActionID,
 			&i.Revision,
 			&i.DeletedAt,
 			&i.ReplyCount,
@@ -1722,14 +1708,14 @@ descendants AS (
     SELECT c.id, c.issue_id, c.author_type, c.author_id, c.content, c.type,
            c.created_at, c.updated_at, c.parent_id, c.workspace_id,
            c.resolved_at, c.resolved_by_type, c.resolved_by_id,
-           c.source_task_id, c.quick_action_id, c.revision, c.deleted_at
+           c.source_task_id, c.revision, c.deleted_at
     FROM comment c
     JOIN thread_root tr ON c.id = tr.id
     UNION
     SELECT c.id, c.issue_id, c.author_type, c.author_id, c.content, c.type,
            c.created_at, c.updated_at, c.parent_id, c.workspace_id,
            c.resolved_at, c.resolved_by_type, c.resolved_by_id,
-           c.source_task_id, c.quick_action_id, c.revision, c.deleted_at
+           c.source_task_id, c.revision, c.deleted_at
     FROM comment c
     JOIN descendants d ON c.parent_id = d.id
     WHERE c.issue_id = $2 AND c.workspace_id = $3
@@ -1738,7 +1724,7 @@ reply_page AS (
     SELECT d.id, d.issue_id, d.author_type, d.author_id, d.content, d.type,
            d.created_at, d.updated_at, d.parent_id, d.workspace_id,
            d.resolved_at, d.resolved_by_type, d.resolved_by_id,
-           d.source_task_id, d.quick_action_id, d.revision, d.deleted_at
+           d.source_task_id, d.revision, d.deleted_at
     FROM descendants d
     WHERE d.id NOT IN (SELECT id FROM thread_root)
       AND (
@@ -1751,19 +1737,19 @@ reply_page AS (
 SELECT id, issue_id, author_type, author_id, content, type,
        created_at, updated_at, parent_id, workspace_id,
        resolved_at, resolved_by_type, resolved_by_id,
-       source_task_id, quick_action_id, revision, deleted_at
+       source_task_id, revision, deleted_at
 FROM (
     SELECT d.id, d.issue_id, d.author_type, d.author_id, d.content, d.type,
            d.created_at, d.updated_at, d.parent_id, d.workspace_id,
            d.resolved_at, d.resolved_by_type, d.resolved_by_id,
-           d.source_task_id, d.quick_action_id, d.revision, d.deleted_at
+           d.source_task_id, d.revision, d.deleted_at
     FROM descendants d
     JOIN thread_root tr ON d.id = tr.id
     UNION ALL
     SELECT id, issue_id, author_type, author_id, content, type,
            created_at, updated_at, parent_id, workspace_id,
            resolved_at, resolved_by_type, resolved_by_id,
-           source_task_id, quick_action_id, revision, deleted_at
+           source_task_id, revision, deleted_at
     FROM reply_page
 ) combined
 ORDER BY created_at ASC, id ASC
@@ -1794,7 +1780,6 @@ type ListThreadCommentsForIssuePagedRow struct {
 	ResolvedByType pgtype.Text        `json:"resolved_by_type"`
 	ResolvedByID   pgtype.UUID        `json:"resolved_by_id"`
 	SourceTaskID   pgtype.UUID        `json:"source_task_id"`
-	QuickActionID  pgtype.UUID        `json:"quick_action_id"`
 	Revision       int64              `json:"revision"`
 	DeletedAt      pgtype.Timestamptz `json:"deleted_at"`
 }
@@ -1846,7 +1831,6 @@ func (q *Queries) ListThreadCommentsForIssuePaged(ctx context.Context, arg ListT
 			&i.ResolvedByType,
 			&i.ResolvedByID,
 			&i.SourceTaskID,
-			&i.QuickActionID,
 			&i.Revision,
 			&i.DeletedAt,
 		); err != nil {
@@ -2253,7 +2237,7 @@ WITH locked_issue AS MATERIALIZED (
               comment.content, comment.type, comment.created_at, comment.updated_at,
               comment.parent_id, comment.workspace_id, comment.resolved_at,
               comment.resolved_by_type, comment.resolved_by_id, comment.source_task_id,
-              comment.quick_action_id, comment.via_plugin_id, comment.revision,
+              comment.revision,
               comment.deleted_at, target.did_change
 ), touched_issue AS (
     UPDATE issue
@@ -2270,8 +2254,7 @@ SELECT updated_comment.id, updated_comment.issue_id, updated_comment.author_type
        updated_comment.created_at, updated_comment.updated_at, updated_comment.parent_id,
        updated_comment.workspace_id, updated_comment.resolved_at,
        updated_comment.resolved_by_type, updated_comment.resolved_by_id,
-       updated_comment.source_task_id, updated_comment.quick_action_id,
-       updated_comment.via_plugin_id, updated_comment.revision,
+       updated_comment.source_task_id, updated_comment.revision,
        updated_comment.deleted_at,
        COALESCE((SELECT revision FROM touched_issue), 0)::bigint AS issue_revision
 FROM updated_comment
@@ -2301,8 +2284,6 @@ type UpdateCommentRow struct {
 	ResolvedByType pgtype.Text        `json:"resolved_by_type"`
 	ResolvedByID   pgtype.UUID        `json:"resolved_by_id"`
 	SourceTaskID   pgtype.UUID        `json:"source_task_id"`
-	QuickActionID  pgtype.UUID        `json:"quick_action_id"`
-	ViaPluginID    pgtype.UUID        `json:"via_plugin_id"`
 	Revision       int64              `json:"revision"`
 	DeletedAt      pgtype.Timestamptz `json:"deleted_at"`
 	IssueRevision  int64              `json:"issue_revision"`
@@ -2333,8 +2314,6 @@ func (q *Queries) UpdateComment(ctx context.Context, arg UpdateCommentParams) (U
 		&i.ResolvedByType,
 		&i.ResolvedByID,
 		&i.SourceTaskID,
-		&i.QuickActionID,
-		&i.ViaPluginID,
 		&i.Revision,
 		&i.DeletedAt,
 		&i.IssueRevision,

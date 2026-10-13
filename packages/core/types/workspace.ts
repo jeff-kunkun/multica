@@ -1,4 +1,8 @@
-export type MemberRole = "owner" | "admin" | "member";
+/**
+ * The workspace owner sees and edits everything; a member sees only the
+ * projects shared with them.
+ */
+export type MemberRole = "owner" | "member";
 
 export interface WorkspaceRepo {
   url: string;
@@ -58,22 +62,6 @@ export interface User {
   name: string;
   email: string;
   avatar_url: string | null;
-  onboarded_at: string | null;
-  /**
-   * JSONB payload from the server. Typed as `unknown` here so this module
-   * stays independent of the questionnaire shape — the onboarding views
-   * cast into `Partial<QuestionnaireAnswers>` when reading. Server always
-   * returns an object (defaults to `{}`), never null.
-   */
-  onboarding_questionnaire: Record<string, unknown>;
-  /**
-   * Legacy column from the removed starter-content dialog. The column is
-   * still written to (always 'imported' for new accounts after the
-   * mark-onboarded paths run) so older desktop builds — which still render
-   * the dialog on NULL — don't show it to anyone created on a newer server.
-   * Kept as `string | null` for forward compatibility.
-   */
-  starter_content_state: string | null;
   /** Preferred UI language. null means "follow client/system". */
   language: string | null;
   /**
@@ -136,4 +124,29 @@ export interface ShareLinkInfo {
   workspace_slug: string;
   creator_name?: string;
   role: MemberRole;
+}
+
+/**
+ * A project-manager Bot (Grok and the like). It is a workspace member backed
+ * by one long-lived token; `can_release` lets it approve plans for the owner.
+ * `token_prefix` is null once the token is revoked.
+ */
+export interface WorkspaceBot {
+  id: string;
+  workspace_id: string;
+  user_id: string;
+  name: string;
+  can_release: boolean;
+  webhook_url: string;
+  webhook_failures: number;
+  webhook_last_error: string;
+  token_prefix: string | null;
+  token_last_used_at: string | null;
+  created_at: string;
+}
+
+/** Create / rotate replies carry the secrets once. */
+export interface WorkspaceBotWithSecrets extends WorkspaceBot {
+  token?: string;
+  webhook_secret?: string;
 }

@@ -68,16 +68,6 @@ func TestWorkspaceScopeGuard(t *testing.T) {
 		assertRowExists(t, ctx, "project", id)
 	})
 
-	t.Run("DeleteSkill", func(t *testing.T) {
-		id := seedSkill(t, ctx)
-		t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM skill WHERE id = $1`, util.UUIDToString(id)) })
-
-		if err := queries.DeleteSkill(ctx, db.DeleteSkillParams{ID: id, WorkspaceID: wsB}); err != nil {
-			t.Fatalf("cross-workspace DeleteSkill: expected nil error (no-op), got %v", err)
-		}
-		assertRowExists(t, ctx, "skill", id)
-	})
-
 	t.Run("DeleteChatSession", func(t *testing.T) {
 		id := seedChatSession(t, ctx)
 		t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM chat_session WHERE id = $1`, util.UUIDToString(id)) })
@@ -171,22 +161,6 @@ func seedProject(t *testing.T, ctx context.Context) pgtype.UUID {
 		RETURNING id
 	`, testWorkspaceID).Scan(&s); err != nil {
 		t.Fatalf("seed project: %v", err)
-	}
-	return parseUUID(s)
-}
-
-func seedSkill(t *testing.T, ctx context.Context) pgtype.UUID {
-	t.Helper()
-	var s string
-	// skill name is UNIQUE per workspace; add a random suffix to avoid colliding
-	// with previous runs on the same DB.
-	name := uniqueName("scope-guard skill")
-	if err := testPool.QueryRow(ctx, `
-		INSERT INTO skill (workspace_id, name, description, content, config, created_by)
-		VALUES ($1, $2, '', '', '{}'::jsonb, $3)
-		RETURNING id
-	`, testWorkspaceID, name, testUserID).Scan(&s); err != nil {
-		t.Fatalf("seed skill: %v", err)
 	}
 	return parseUUID(s)
 }

@@ -65,17 +65,17 @@ rm -f "$importer" "$probe"
 
 # 4. Basename collision. 17 of the 59 guarded files share a name with some
 #    other file in the repo, so a check that matched relative imports by
-#    basename would pass this dead component. `option-card` is real:
-#    packages/views/onboarding/components/option-card.tsx is imported as
-#    `../components/option-card` and must not vouch for the packages/ui file.
-collide="$ui_dir/option-card.tsx"
+#    basename would pass this dead component. `char-counter` is real:
+#    packages/views/agents/components/char-counter.tsx is imported as
+#    `../components/char-counter` and must not vouch for the packages/ui file.
+collide="$ui_dir/char-counter.tsx"
 track "$collide"
 cat >"$collide" <<'EOF'
-export function OptionCard() {
+export function CharCounter() {
   return null
 }
 EOF
-expect_fail_naming "components/ui/option-card.tsx" \
+expect_fail_naming "components/ui/char-counter.tsx" \
   "a same-named file elsewhere must not mark a dead ui component as used"
 rm -f "$collide"
 

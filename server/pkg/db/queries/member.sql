@@ -3,11 +3,6 @@ SELECT * FROM member
 WHERE workspace_id = $1
 ORDER BY created_at ASC;
 
--- name: ListWorkspaceManagerUserIDs :many
-SELECT user_id FROM member
-WHERE workspace_id = $1 AND role IN ('owner', 'admin')
-ORDER BY created_at ASC;
-
 -- name: GetMember :one
 SELECT * FROM member
 WHERE id = $1;
@@ -19,11 +14,6 @@ WHERE user_id = $1 AND workspace_id = $2;
 -- name: CreateMember :one
 INSERT INTO member (workspace_id, user_id, role)
 VALUES ($1, $2, $3)
-RETURNING *;
-
--- name: UpdateMemberRole :one
-UPDATE member SET role = $2
-WHERE id = $1
 RETURNING *;
 
 -- name: DeleteMember :exec

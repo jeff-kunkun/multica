@@ -65,7 +65,7 @@ function item(overrides: Partial<InboxItem> = {}): InboxItem {
     type: "new_comment",
     severity: "info",
     issue_id: null,
-    title: "Quick create needs a check",
+    title: "Notification",
     body: null,
     issue_status: null,
     read: false,
@@ -76,42 +76,16 @@ function item(overrides: Partial<InboxItem> = {}): InboxItem {
   };
 }
 
-describe("InboxDetailLabel quick-create outcomes", () => {
-  const detail = "Couldn't confirm whether the issue was created.";
-
-  it("does not frame an unconfirmed outcome as a failure", () => {
-    // GH #5885 follow-up: reusing quick_create_failed rendered this row as
-    // "Failed: Couldn't confirm...", asserting a failure never observed.
-    const { container } = render(
-      <InboxDetailLabel item={item({ type: "quick_create_unconfirmed", details: { error: detail } })} />,
-    );
-
-    expect(container.textContent).toBe(detail);
-    expect(container.textContent).not.toMatch(/failed/i);
-  });
-
-  it("still frames a confirmed failure as a failure", () => {
+describe("InboxDetailLabel unknown types", () => {
+  it("renders a row whose type this client no longer knows", () => {
+    // Retired types (e.g. quick_create_failed) can still sit in old inboxes.
     const { container } = render(
       <InboxDetailLabel
-        item={item({
-          type: "quick_create_failed",
-          details: { error: "an active issue already exists: JKY-30 (blocked)" },
-        })}
+        item={item({ type: "quick_create_failed" as InboxItem["type"], details: { error: "x" } })}
       />,
     );
 
-    expect(container.textContent).toBe(
-      "Failed: an active issue already exists: JKY-30 (blocked)",
-    );
-  });
-
-  it("falls back to the neutral type label when an unconfirmed row has no detail", () => {
-    const { container } = render(
-      <InboxDetailLabel item={item({ type: "quick_create_unconfirmed" })} />,
-    );
-
-    expect(container.textContent).toBe(en.types.quick_create_unconfirmed);
-    expect(container.textContent).not.toMatch(/failed/i);
+    expect(container.textContent).toBe("quick_create_failed");
   });
 });
 

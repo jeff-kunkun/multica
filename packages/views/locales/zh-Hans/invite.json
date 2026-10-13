@@ -20,7 +20,6 @@
   "main": {
     "join_title": "加入 {{workspace_name}}",
     "fallback_workspace_name": "工作区",
-    "invited_role_admin": "邀请你以管理员身份加入。",
     "invited_role_member": "邀请你以成员身份加入。",
     "already_handled_accepted": "此邀请已被接受。",
     "already_handled_declined": "此邀请已被拒绝。",
@@ -47,7 +46,6 @@
     "error_generic": "处理邀请失败，请重试。",
     "row_workspace_fallback": "工作区",
     "row_inviter_fallback": "某人",
-    "row_invited_admin": "{{inviter}} 邀请你以管理员身份加入",
     "row_invited_member": "{{inviter}} 邀请你以成员身份加入"
   }
 }

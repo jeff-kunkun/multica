@@ -15,8 +15,8 @@ const entries: SettingsSearchEntry[] = [
     description: "Given to agents working for you on every run.",
   },
   { tab: "workspace", anchor: "context", title: "Agent context" },
-  { tab: "channels", integration: "slack", title: "Slack" },
-  { tab: "channels", integration: "lark", title: "Lark" },
+  { tab: "code", anchor: "repositories", title: "Repositories" },
+  { tab: "code", anchor: "co-author", title: "Co-author" },
 ];
 
 describe("searchSettings", () => {
@@ -33,12 +33,15 @@ describe("searchSettings", () => {
     ]);
   });
 
-  it("matches case-insensitively and keeps each detail page", () => {
-    expect(searchSettings(entries, "SLACK").map((r) => r.integration)).toEqual([
-      "slack",
+  it("matches case-insensitively and keeps each anchor on a shared page", () => {
+    expect(searchSettings(entries, "REPOSITORIES").map((r) => r.anchor)).toEqual([
+      "repositories",
     ]);
-    // Channels share a tab, so the detail page is part of the identity.
-    expect(searchSettings(entries, "a").map((r) => r.title)).toContain("Lark");
+    // Anchors share a tab, so the anchor is part of the identity.
+    expect(searchSettings(entries, "co").map((r) => r.title)).toEqual([
+      "Agent context",
+      "Co-author",
+    ]);
   });
 
   it("keeps the first entry for a duplicated location", () => {

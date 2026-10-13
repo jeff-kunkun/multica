@@ -161,8 +161,7 @@ type localDirectoryRef struct {
 // saved is not caught here; closing that needs a claim-time gate.
 //
 // Returns true to proceed; on false the 422 response has already been written,
-// using the same daemon_version_unsupported code as the quick-create gate so
-// clients can branch on it.
+// using the daemon_version_unsupported code so clients can branch on it.
 func (h *Handler) requireWorktreeCapableDaemon(w http.ResponseWriter, r *http.Request, workspaceID pgtype.UUID, resourceType string, normalizedRef json.RawMessage) bool {
 	if resourceType != "local_directory" {
 		return true
@@ -504,8 +503,9 @@ func isValidGitRepoURL(s string) bool {
 	return true
 }
 
-// loadProjectForResource resolves the project, enforces workspace ownership,
-// and returns its DB row. Used by all project_resource handlers.
+// loadProjectForResource resolves the project, enforces workspace ownership
+// and project visibility, and returns its DB row. Used by the project detail
+// and all project_resource handlers.
 func (h *Handler) loadProjectForResource(w http.ResponseWriter, r *http.Request, projectIDParam string) (db.Project, bool) {
 	projectUUID, ok := parseUUIDOrBadRequest(w, projectIDParam, "project id")
 	if !ok {
@@ -518,7 +518,7 @@ func (h *Handler) loadProjectForResource(w http.ResponseWriter, r *http.Request,
 	project, err := h.Queries.GetProjectInWorkspace(r.Context(), db.GetProjectInWorkspaceParams{
 		ID: projectUUID, WorkspaceID: wsUUID,
 	})
-	if err != nil {
+	if err != nil || !h.requestCanSeeProject(r, wsUUID, project.ID) {
 		writeError(w, http.StatusNotFound, "project not found")
 		return db.Project{}, false
 	}
@@ -950,7 +950,7 @@ func (c claimProjectContext) applyTo(resp *AgentTaskResponse) {
 
 // resolveClaimProjectContext loads the project context for one daemon claim.
 //
-// Every claim path (issue, chat, autopilot, quick-create) resolves the same
+// Every claim path (issue, chat) resolves the same
 // thing from a soft project reference, so the tenant and failure rules live
 // here once rather than in a copy per path:
 //

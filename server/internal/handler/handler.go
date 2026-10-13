@@ -20,24 +20,14 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/auth"
-	"github.com/multica-ai/multica/server/internal/cloudruntime"
 	"github.com/multica-ai/multica/server/internal/daemonws"
 	"github.com/multica-ai/multica/server/internal/dbreader"
-	"github.com/multica-ai/multica/server/internal/entitlement"
 	"github.com/multica-ai/multica/server/internal/events"
-	"github.com/multica-ai/multica/server/internal/integrations/channel/engine"
-	composio "github.com/multica-ai/multica/server/internal/integrations/composio"
-	"github.com/multica-ai/multica/server/internal/integrations/dingtalk"
 	"github.com/multica-ai/multica/server/internal/integrations/ghsnapshot"
-	"github.com/multica-ai/multica/server/internal/integrations/lark"
-	"github.com/multica-ai/multica/server/internal/integrations/slack"
-	"github.com/multica-ai/multica/server/internal/integrations/telegram"
-	"github.com/multica-ai/multica/server/internal/integrations/wecom"
 	"github.com/multica-ai/multica/server/internal/issuestatus"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/realtime"
-	"github.com/multica-ai/multica/server/internal/seatcapacity"
 	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/storage"
 	"github.com/multica-ai/multica/server/internal/util"
@@ -48,7 +38,7 @@ import (
 )
 
 // randomID returns a random 16-byte hex string used as a request ID for
-// in-memory stores (model list, local skills, CLI update, etc.).
+// in-memory stores (model list, runtime capabilities, CLI update, etc.).
 func randomID() string {
 	b := make([]byte, 16)
 	rand.Read(b)
@@ -88,13 +78,11 @@ type Config struct {
 	VCSIntegrationEnabled bool
 	// PublicURL is the absolute base URL the API is reachable at from the
 	// public internet, with no trailing slash (e.g. "https://multica.ai").
-	// Used to build webhook_url responses and the fixed Remote MCP OAuth
-	// callback URI — never to decide request identity, routing, or workspace
-	// scope. Empty when unset; webhook clients can fall back to their own origin,
-	// while OAuth Connect fails closed because providers require an exact URI.
+	// Advertised as the attachment public URL in /api/config — never used to
+	// decide request identity, routing, or workspace scope. Empty when unset.
 	// Reading the public host from request headers (Host / X-Forwarded-Host)
 	// is intentionally avoided so a misconfigured reverse proxy cannot trick
-	// the server into minting webhook URLs pointing at an attacker-controlled
+	// the server into advertising URLs pointing at an attacker-controlled
 	// host.
 	PublicURL string
 	// AppURL is the browser application's canonical origin, resolved from
@@ -106,14 +94,12 @@ type Config struct {
 	// limiter uses r.RemoteAddr exclusively. Populated via the
 	// MULTICA_TRUSTED_PROXIES env var (comma-separated CIDRs, e.g.
 	// "10.0.0.0/8,127.0.0.1/32"). This is specifically to keep the per-IP
-	// webhook limiter from being bypassed by a spoofed XFF on deployments
+	// rate limiters from being bypassed by a spoofed XFF on deployments
 	// without a header-stripping reverse proxy in front.
 	TrustedProxies []netip.Prefix
-	// CloudURL enables the SaaS-only multica-cloud connection when set. Empty
-	// keeps self-hosted deployments explicit: Cloud endpoints return 403 instead
-	// of attempting to dial a hard-coded private service.
+	// CloudURL is the multica-cloud base URL used to verify cloud-issued
+	// personal access tokens. Empty disables those tokens.
 	CloudURL                 string
-	CloudTimeout             time.Duration
 	AttachmentDownloadMode   string
 	AttachmentDownloadURLTTL time.Duration
 	// AttachmentFrameAncestors are trusted browser origins allowed to embed
@@ -121,10 +107,6 @@ type Config struct {
 	// frontend/CORS origin allowlist so split app/api self-hosted deployments
 	// can frame API-hosted PDFs without allowing arbitrary third-party frames.
 	AttachmentFrameAncestors []string
-	// PluginSurfaceOrigin is the dedicated, cookie-free browser origin that
-	// routes /plugin-surfaces/* back to this server. It must not be the app/API
-	// origin: the route serves stored third-party JavaScript as HTML.
-	PluginSurfaceOrigin string
 	// LLM* configure the basic LLM API layer (MUL-4238). They back the
 	// server-internal LLM helpers in pkg/llm (e.g. chat title generation).
 	// The generic OpenAI-compatible passthrough endpoints were removed in
@@ -157,11 +139,6 @@ type Config struct {
 	ServerVersion string
 }
 
-type cloudRuntimeProxy interface {
-	Enabled() bool
-	Do(ctx context.Context, req cloudruntime.Request) (*cloudruntime.Response, error)
-}
-
 type RuntimeProfileRefreshNotifier interface {
 	NotifyRuntimeProfilesChanged(workspaceID, profileID string)
 }
@@ -171,8 +148,8 @@ type WorkspaceSetRefreshNotifier interface {
 }
 
 // DaemonPendingWorkNotifier pushes a runtime-scoped "heartbeat now" hint to the
-// daemon so a queued heartbeat-carried request (model discovery, capability
-// discovery, or local-skill import) is picked up immediately instead of on the
+// daemon so a queued heartbeat-carried request (model or capability
+// discovery) is picked up immediately instead of on the
 // daemon's next scheduled tick (MUL-5444).
 // Satisfied by both *daemonws.Hub (single-node) and *daemonws.RelayNotifier
 // (multi-node, fans out through Redis).
@@ -212,23 +189,11 @@ type Handler struct {
 	DaemonRuntimeGone      RuntimeGoneNotifier
 	Bus                    *events.Bus
 	TaskService            *service.TaskService
-	PluginService          *service.PluginService
 	IssueService           *service.IssueService
-	AutopilotService       *service.AutopilotService
-	// Entitlements supplies workspace-scoped commercial gates. A nil provider
-	// preserves self-hosted behavior without extra reads.
-	Entitlements entitlement.Provider
-	// SeatCapacity executes Cloud's pre-purchased human-seat protocol. Nil or
-	// disabled preserves self-hosted behavior.
-	SeatCapacity          seatcapacity.Executor
-	SeatCapacityLocker    seatcapacity.WorkspaceLocker
-	SeatCapacityWorker    *seatcapacity.Worker
-	EmailService          *service.EmailService
-	UpdateStore           UpdateStore
-	ModelListStore        ModelListStore
-	LocalSkillListStore   LocalSkillListStore
-	LocalSkillImportStore LocalSkillImportStore
-	FeatureFlags          *featureflag.Service
+	EmailService           *service.EmailService
+	UpdateStore            UpdateStore
+	ModelListStore         ModelListStore
+	FeatureFlags           *featureflag.Service
 	// IssueStatusCatalog reads the workspace status catalog. Defaults to
 	// Queries; a test can substitute a counting wrapper to assert HOW MANY
 	// catalog reads a request performs, which is the only property that
@@ -255,143 +220,13 @@ type Handler struct {
 	// May be nil in tests / self-hosted with the metrics listener disabled;
 	// every Record* method is nil-safe and obsmetrics.RecordEvent treats a
 	// nil Metrics as "PostHog only".
-	Metrics                      *obsmetrics.BusinessMetrics
-	PATCache                     *auth.PATCache
-	DaemonTokenCache             *auth.DaemonTokenCache
-	MembershipCache              *auth.MembershipCache
-	WebhookRateLimiter           WebhookRateLimiter
-	WebhookIPRateLimiter         WebhookRateLimiter
-	WebhookAbsoluteIPRateLimiter WebhookRateLimiter
-	InvitationRateLimiters       InvitationRateLimiters
-	WebhookDeliveryWorker        *WebhookDeliveryWorker
-	CloudRuntime                 cloudRuntimeProxy
+	Metrics                *obsmetrics.BusinessMetrics
+	PATCache               *auth.PATCache
+	DaemonTokenCache       *auth.DaemonTokenCache
+	MembershipCache        *auth.MembershipCache
+	InvitationRateLimiters InvitationRateLimiters
 	// Test-only HTTP override; nil uses the default client in production.
 	googleOAuthHTTPClient *http.Client
-	// Lark integration. All three are nil when the Lark master key
-	// (MULTICA_LARK_SECRET_KEY) is unset; the corresponding HTTP
-	// handlers return 403 in that case so a misconfigured self-host
-	// deployment surfaces a clear error instead of silently using a
-	// zero key. Wired in cmd/server/router.go after handler.New.
-	LarkInstallations *lark.InstallationService
-	LarkBindingTokens *lark.BindingTokenService
-	// LarkRegistration owns the device-flow install lifecycle: begin
-	// a registration session against accounts.feishu.cn, poll, and
-	// on success write lark_installation + the installer's
-	// lark_user_binding in one DB transaction. Nil when the at-rest
-	// key is unset or the RegistrationService failed to construct at
-	// boot.
-	LarkRegistration *lark.RegistrationService
-	// LarkAPIClient is the live transport that backs SendInteractiveCard,
-	// PatchInteractiveCard, SendBindingPromptCard, GetBotInfo. The
-	// router wires the real Lark HTTP client whenever
-	// MULTICA_LARK_SECRET_KEY is set; tests that need a no-op
-	// behaviour can swap in `lark.NewStubAPIClient(...)` directly. The
-	// UI consults IsConfigured() to decide whether to surface install
-	// entry points.
-	LarkAPIClient lark.APIClient
-	// Composio integration (MUL-3720). Nil when COMPOSIO_API_KEY is unset;
-	// the composio HTTP handlers return 403 in that case. Wired in
-	// cmd/server/router.go after handler.New.
-	Composio *composio.Service
-	// ChannelSupervisor owns the per-installation supervisor goroutines
-	// that hold the §4.4 WS lease and drive each channel.Channel
-	// (MUL-3620 generalized the Feishu-only Hub into this channel-agnostic
-	// engine). The router constructs it independently of platform secrets — it
-	// drives any channel type, not just Feishu. It remains nil when lease
-	// configuration is unsafe or a selected Redis backend fails its startup
-	// readiness check; each platform registers its Factory only when configured
-	// (Feishu when MULTICA_LARK_SECRET_KEY is set). The router does NOT
-	// call Run; the process owner (main.go) starts it under a long-running
-	// context and joins via WaitWithTimeout (bounded, fenced by
-	// ShutdownTimeout) during graceful shutdown so the lease renewer yields
-	// cleanly when the DB is healthy without blocking process exit if the
-	// pool is frozen — at worst the next replica waits the full TTL.
-	ChannelSupervisor *engine.Supervisor
-	// ChannelRouter is the channel-agnostic inbound pipeline (the shared
-	// handler the Supervisor injects into every Channel). main.go calls
-	// Drain on it during shutdown, after the Supervisor has stopped
-	// delivering events, to flush debounced run triggers and join in-flight
-	// reply goroutines. Built unconditionally (even without Lark).
-	ChannelRouter *engine.Router
-	// ChannelMediaReconciler settles the channel-media intent ledger
-	// (uploaded-but-unbound object reclaim). Built in cmd/server/router.go
-	// where the storage backend exists; main.go starts it as an independent
-	// worker goroutine. Nil when no storage backend is configured.
-	ChannelMediaReconciler *service.ChannelMediaReconciler
-	// LarkTyping owns the durable reaction cleanup worker, started under sweepCtx.
-	LarkTyping *lark.TypingIndicatorManager
-	// SlackInstall owns the bring-your-own-app Slack install lifecycle (register
-	// pasted tokens / list / revoke) and the at-rest encryption of each app's bot
-	// + app tokens (MUL-3666). Nil unless MULTICA_SLACK_SECRET_KEY is set.
-	SlackInstall *slack.InstallService
-	// SlackBindingTokens mints/redeems the user-binding tokens behind the
-	// "link your Slack account" prompt (MUL-3666). Nil unless Slack is
-	// configured (MULTICA_SLACK_SECRET_KEY set).
-	SlackBindingTokens *slack.BindingTokenService
-	// DingTalkInstall owns the bring-your-own-app DingTalk lifecycle. It is nil
-	// unless MULTICA_DINGTALK_SECRET_KEY is configured.
-	DingTalkInstall *dingtalk.InstallService
-	// DingTalkBindingTokens mints and redeems the single-use account-link tokens.
-	DingTalkBindingTokens *dingtalk.BindingTokenService
-	// SlackHistory backs the agent-facing `multica chat history` command: it
-	// reads a chat session's bound Slack conversation on demand (MUL-3871). Nil
-	// unless Slack is configured; GetChatChannelHistory then reports "no channel
-	// integration". A future platform satisfies the same reader interface.
-	SlackHistory ChatChannelHistoryReader
-	// WecomStore is the read/write handle over channel_installation rows scoped
-	// to channel_type='wecom'. Nil disables the wecom Web-UI endpoints (they
-	// return 403) and prevents boot from wiring the smart-bot supervisor.
-	WecomStore *wecom.Store
-	// WecomCredentials unseals a wecom installation's smart-bot secret for the
-	// WebSocket subscribe frame. Nil disables the wecom integration.
-	WecomCredentials wecom.CredentialsResolver
-	// WecomBindingTokens mints/redeems the user-binding tokens behind the
-	// "link your Multica account" prompt sent to first-time WeCom users
-	// (their aibot userid is a "T"-prefixed anonymized id with no relation
-	// to their real userid or email, so an explicit binding is required —
-	// see wecom/binding.go). Nil disables the redeem endpoint (returns 403)
-	// and the OutboundReplier's binding-prompt path.
-	WecomBindingTokens WecomBindingRedeemer
-
-	// WecomCredentialProbe overrides the install-time control check. Nil in
-	// production, which gets the real handshake probe; tests inject a fake so
-	// the install path runs without a socket.
-	WecomCredentialProbe wecom.CredentialProbe
-
-	// TelegramInstall owns the Telegram bot install lifecycle (register a
-	// pasted BotFather token / list / revoke) and the at-rest encryption of
-	// each bot's token. Nil unless MULTICA_TELEGRAM_SECRET_KEY is set.
-	TelegramInstall *telegram.InstallService
-	// TelegramBindingTokens mints/redeems the user-binding tokens behind the
-	// "link your Telegram account" prompt. Nil unless Telegram is configured.
-	TelegramBindingTokens *telegram.BindingTokenService
-	// TelegramOutbound owns the asynchronous terminal-delivery worker pool.
-	// The process owner starts and joins it; the synchronous event bus only
-	// enqueues EventChatDone work.
-	TelegramOutbound *telegram.Outbound
-
-	// channelFileDelivery names the channel types that can, IN THIS
-	// DEPLOYMENT, carry a file the agent produced the last hop into the
-	// conversation. It answers the claim response's
-	// chat_channel_delivers_files, which the agent's PER-TURN prompt turns into
-	// either "run `multica attachment upload`" or "describe the file in words"
-	// (daemon/prompt.go). Not the brief: the brief is the prompt cache prefix and
-	// this is a per-turn verdict, so stating it there made one session render two
-	// briefs (MUL-5377).
-	//
-	// It is a deployment fact, not a property of the channel type, and that
-	// distinction is the whole reason it lives here. Whether the file arrives
-	// takes TWO things: an adapter that goes back for the bound attachment,
-	// and object storage for it to go back to. The first is a property of the
-	// code, the second of the configuration, and only the process that wired
-	// both knows the conjunction. A daemon that answers this from the channel
-	// type alone promises delivery a storage-less deployment cannot perform.
-	//
-	// Written once at boot by DeclareChannelFileDelivery (cmd/server/router.go,
-	// in the same branch that passes the storage to the adapter, so the two
-	// cannot drift), read-only from then on. Nil means no channel delivers
-	// files, which is what a deployment with no storage configured gets.
-	channelFileDelivery map[string]bool
 	// LLM is the basic LLM API layer (MUL-4238): a thin wrapper over the
 	// OpenAI Go SDK backing server-internal one-shot LLM helpers such as chat
 	// title generation. The generic passthrough endpoints were removed in
@@ -406,9 +241,6 @@ type Handler struct {
 	// error rather than silently storing plaintext. Wired in
 	// cmd/server/router.go after New.
 	VCSSecretBox *secretbox.Box
-	// PluginSurfaceTokens seal short-lived launch claims. Nil disables surface
-	// launches; wired from a domain-separated MULTICA_PLUGIN_SECRET_KEY at boot.
-	PluginSurfaceTokens *secretbox.Box
 	// PRRefresh drives the GitHub API snapshot pipeline for PR cards (MUL-5265):
 	// webhook / page-visit / TTL triggers → authenticated GraphQL fetch →
 	// head-SHA-guarded atomic snapshot write. Always non-nil, but inert (every
@@ -478,48 +310,32 @@ func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *event
 	taskSvc := service.NewTaskService(queries, txStarter, hub, bus, daemonHub)
 	taskSvc.Analytics = analyticsClient
 	taskSvc.SourceContextStorage = store
-	// Chat follow-up suggestions run through the same internal LLM layer that
-	// backs auto-titling. A deployment with no MULTICA_LLM_* configuration gets
-	// a disabled client, which turns the feature off rather than failing.
-	taskSvc.QuickActions = llmClient
 	h := &Handler{
-		Queries:                      queries,
-		ReadSelector:                 dbreader.NewPrimaryOnly(queries),
-		DB:                           executor,
-		TxStarter:                    txStarter,
-		Hub:                          hub,
-		DaemonHub:                    daemonHub,
-		DaemonProfileRefresh:         daemonProfileRefresh,
-		DaemonWorkspaceRefresh:       daemonWorkspaceRefresh,
-		DaemonRuntimeGone:            daemonRuntimeGone,
-		Bus:                          bus,
-		TaskService:                  taskSvc,
-		PluginService:                service.NewPluginService(queries, txStarter),
-		IssueService:                 service.NewIssueService(queries, txStarter, bus, analyticsClient, taskSvc),
-		AutopilotService:             service.NewAutopilotService(queries, txStarter, bus, taskSvc),
-		EmailService:                 emailService,
-		UpdateStore:                  NewInMemoryUpdateStore(),
-		ModelListStore:               NewInMemoryModelListStore(),
-		ModelCatalogCache:            NewInMemoryModelCatalogCache(),
-		LocalSkillListStore:          NewInMemoryLocalSkillListStore(),
-		LocalSkillImportStore:        NewInMemoryLocalSkillImportStore(),
-		LivenessStore:                NewNoopLivenessStore(),
-		HeartbeatScheduler:           NewPassthroughHeartbeatScheduler(queries),
-		Storage:                      store,
-		CFSigner:                     cfSigner,
-		Analytics:                    analyticsClient,
-		WebhookRateLimiter:           NewMemoryWebhookRateLimiter(DefaultWebhookRateLimit()),
-		WebhookIPRateLimiter:         NewMemoryWebhookIPRateLimiter(DefaultWebhookIPRateLimit()),
-		WebhookAbsoluteIPRateLimiter: NewMemoryWebhookAbsoluteIPRateLimiter(DefaultWebhookAbsoluteIPRateLimit()),
-		InvitationRateLimiters:       NewMemoryInvitationRateLimiters(DefaultInvitationRateLimits()),
-		CloudRuntime: cloudruntime.NewClient(cloudruntime.Config{
-			BaseURL: cfg.CloudURL,
-			Timeout: cfg.CloudTimeout,
-		}),
-		LLM: llmClient,
-		cfg: cfg,
+		Queries:                queries,
+		ReadSelector:           dbreader.NewPrimaryOnly(queries),
+		DB:                     executor,
+		TxStarter:              txStarter,
+		Hub:                    hub,
+		DaemonHub:              daemonHub,
+		DaemonProfileRefresh:   daemonProfileRefresh,
+		DaemonWorkspaceRefresh: daemonWorkspaceRefresh,
+		DaemonRuntimeGone:      daemonRuntimeGone,
+		Bus:                    bus,
+		TaskService:            taskSvc,
+		IssueService:           service.NewIssueService(queries, txStarter, bus, analyticsClient, taskSvc),
+		EmailService:           emailService,
+		UpdateStore:            NewInMemoryUpdateStore(),
+		ModelListStore:         NewInMemoryModelListStore(),
+		ModelCatalogCache:      NewInMemoryModelCatalogCache(),
+		LivenessStore:          NewNoopLivenessStore(),
+		HeartbeatScheduler:     NewPassthroughHeartbeatScheduler(queries),
+		Storage:                store,
+		CFSigner:               cfSigner,
+		Analytics:              analyticsClient,
+		InvitationRateLimiters: NewMemoryInvitationRateLimiters(DefaultInvitationRateLimits()),
+		LLM:                    llmClient,
+		cfg:                    cfg,
 	}
-	h.WebhookDeliveryWorker = NewWebhookDeliveryWorker(h)
 	// The default passthrough scheduler reports sweeper-race recoveries so the
 	// daemon:register refresh fires even without the production batched wiring.
 	if passthrough, ok := h.HeartbeatScheduler.(*PassthroughHeartbeatScheduler); ok {
@@ -706,45 +522,6 @@ func parseUUIDSliceOrBadRequest(w http.ResponseWriter, ids []string, fieldName s
 		uuids[i] = u
 	}
 	return uuids, true
-}
-
-// DeclareChannelFileDelivery records that this deployment can put a file the
-// agent produced into a channelType conversation. Call it at boot, from the
-// same branch that gives the adapter what it needs to perform the delivery —
-// the point is that one condition produces both the capability and the claim
-// it is announced under, so a deployment cannot end up promising a hop it does
-// not have.
-//
-// Not safe to call once the server is serving: the map it writes is read
-// without a lock by every task claim.
-func (h *Handler) DeclareChannelFileDelivery(channelType string) {
-	if channelType == "" {
-		return
-	}
-	if h.channelFileDelivery == nil {
-		h.channelFileDelivery = map[string]bool{}
-	}
-	h.channelFileDelivery[channelType] = true
-}
-
-// channelDeliversFiles answers chat_channel_delivers_files for one claim.
-//
-// The default is false in every direction that is not an explicit declaration:
-// a channel nobody declared, a deployment with no object storage, an adapter
-// that was never wired. False is the safe answer because of what the two
-// answers cost. False when the file could have travelled loses a delivery the
-// agent then describes in words. True when it cannot has the agent write "the
-// chart is attached" into a room where nothing is attached, and the reader is
-// left hunting for it.
-//
-// Web chat (empty channel type) is not answered here. It has no adapter and no
-// last hop to have — the browser renders the attachment card off the same bind
-// — and the prompt handles it in its own branch.
-func (h *Handler) channelDeliversFiles(channelType string) bool {
-	if channelType == "" {
-		return false
-	}
-	return h.channelFileDelivery[channelType]
 }
 
 // publish sends a domain event through the event bus.
@@ -963,16 +740,6 @@ func roleAllowed(role string, roles ...string) bool {
 	return false
 }
 
-func countOwners(members []db.Member) int {
-	owners := 0
-	for _, member := range members {
-		if member.Role == "owner" {
-			owners++
-		}
-	}
-	return owners
-}
-
 func (h *Handler) getWorkspaceMember(ctx context.Context, userID, workspaceID string) (db.Member, error) {
 	userUUID, err := util.ParseUUID(userID)
 	if err != nil {
@@ -1061,6 +828,10 @@ func (h *Handler) loadIssueForUser(w http.ResponseWriter, r *http.Request, issue
 	// silently returns false for non-identifier strings, falling through to
 	// the UUID path below.
 	if issue, ok := h.resolveIssueByIdentifier(r.Context(), issueID, workspaceID); ok {
+		if !h.requestCanSeeIssue(r, issue) {
+			writeError(w, http.StatusNotFound, "issue not found")
+			return db.Issue{}, false
+		}
 		return issue, true
 	}
 
@@ -1080,7 +851,7 @@ func (h *Handler) loadIssueForUser(w http.ResponseWriter, r *http.Request, issue
 		ID:          issueUUID,
 		WorkspaceID: wsUUID,
 	})
-	if err != nil {
+	if err != nil || !h.requestCanSeeIssue(r, issue) {
 		writeError(w, http.StatusNotFound, "issue not found")
 		return db.Issue{}, false
 	}

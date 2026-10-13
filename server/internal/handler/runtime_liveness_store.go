@@ -66,7 +66,7 @@ func (noopLivenessStore) Forget(_ context.Context, _ string) {}
 
 // runtimeLivenessKeyPrefix is the Redis key prefix for runtime liveness
 // records. Mirrors the namespacing used by the other runtime stores
-// (mul:update:*, mul:model_list:*, mul:local_skill_list:*).
+// (mul:update:*, mul:model_list:*).
 const runtimeLivenessKeyPrefix = "mul:runtime:hb:"
 
 func runtimeLivenessKey(runtimeID string) string {

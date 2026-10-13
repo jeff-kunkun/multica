@@ -15,10 +15,6 @@ import (
 // Most provider boots land in 5–60s; the long tail catches stuck pulls.
 var runtimeReadyBuckets = []float64{1, 2.5, 5, 10, 30, 60, 120, 300, 600}
 
-// cloudRuntimeRequestBuckets covers outbound Fleet/Gateway calls from sub-100ms
-// (status pings) to ~30s (provision). Aligns with cloudruntime.defaultTimeout.
-var cloudRuntimeRequestBuckets = []float64{0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 20, 30}
-
 // prMergeSecondsBuckets covers PR-open → PR-merged latency from minutes to weeks.
 var prMergeSecondsBuckets = []float64{
 	300, 900, 1800,
@@ -30,41 +26,26 @@ var prMergeSecondsBuckets = []float64{
 // so business.go (PR2 task lifecycle / LLM) stays focused; both are exposed
 // through the same BusinessMetrics receiver and the same Collectors() slice.
 type businessEventMetrics struct {
-	signup                          *prometheus.CounterVec
-	workspaceCreated                *prometheus.CounterVec
-	teamInviteSent                  *prometheus.CounterVec
-	teamInviteAccepted              *prometheus.CounterVec
-	onboardingStarted               *prometheus.CounterVec
-	onboardingQuestionnaireSubmit   *prometheus.CounterVec
-	onboardingSourceSubmit          *prometheus.CounterVec
-	onboardingCompleted             *prometheus.CounterVec
-	cloudWaitlistJoined             *prometheus.CounterVec
-	issueCreated                    *prometheus.CounterVec
-	chatMessageSent                 *prometheus.CounterVec
-	agentCreated                    *prometheus.CounterVec
-	squadCreated                    *prometheus.CounterVec
-	autopilotCreated                *prometheus.CounterVec
-	issueExecuted                   *prometheus.CounterVec
-	runtimeRegistered               *prometheus.CounterVec
-	runtimeReady                    *prometheus.CounterVec
-	runtimeReadySeconds             *prometheus.HistogramVec
-	runtimeFailed                   *prometheus.CounterVec
-	runtimeOffline                  *prometheus.CounterVec
-	daemonWSMessageReceived         *prometheus.CounterVec
-	autopilotRunStarted             *prometheus.CounterVec
-	autopilotRunTerminal            *prometheus.CounterVec
-	autopilotRunSkipped             *prometheus.CounterVec
-	webhookDelivery                 *prometheus.CounterVec
-	webhookRateLimited              *prometheus.CounterVec
-	emailRateLimited                *prometheus.CounterVec
-	githubEventReceived             *prometheus.CounterVec
-	githubPRReview                  *prometheus.CounterVec
-	githubPRMergeSeconds            prometheus.Histogram
-	cloudRuntimeRequest             *prometheus.CounterVec
-	cloudRuntimeRequestDurationSecs *prometheus.HistogramVec
-	feedbackSubmitted               *prometheus.CounterVec
-	contactSalesSubmitted           *prometheus.CounterVec
-	chatOutputLocalPath             *prometheus.CounterVec
+	signup                  *prometheus.CounterVec
+	workspaceCreated        *prometheus.CounterVec
+	teamInviteSent          *prometheus.CounterVec
+	teamInviteAccepted      *prometheus.CounterVec
+	issueCreated            *prometheus.CounterVec
+	chatMessageSent         *prometheus.CounterVec
+	agentCreated            *prometheus.CounterVec
+	issueExecuted           *prometheus.CounterVec
+	runtimeRegistered       *prometheus.CounterVec
+	runtimeReady            *prometheus.CounterVec
+	runtimeReadySeconds     *prometheus.HistogramVec
+	runtimeFailed           *prometheus.CounterVec
+	runtimeOffline          *prometheus.CounterVec
+	daemonWSMessageReceived *prometheus.CounterVec
+	emailRateLimited        *prometheus.CounterVec
+	githubEventReceived     *prometheus.CounterVec
+	githubPRReview          *prometheus.CounterVec
+	githubPRMergeSeconds    prometheus.Histogram
+	feedbackSubmitted       *prometheus.CounterVec
+	chatOutputLocalPath     *prometheus.CounterVec
 }
 
 func newBusinessEventMetrics() *businessEventMetrics {
@@ -85,26 +66,6 @@ func newBusinessEventMetrics() *businessEventMetrics {
 			Name: "multica_team_invite_accepted_total",
 			Help: "Total workspace invitations accepted.",
 		}, metricLabels("multica_team_invite_accepted_total")),
-		onboardingStarted: prometheus.NewCounterVec(prometheus.CounterOpts{
-			Name: "multica_onboarding_started_total",
-			Help: "Total onboarding flows started.",
-		}, metricLabels("multica_onboarding_started_total")),
-		onboardingQuestionnaireSubmit: prometheus.NewCounterVec(prometheus.CounterOpts{
-			Name: "multica_onboarding_questionnaire_submitted_total",
-			Help: "Total onboarding questionnaires submitted.",
-		}, metricLabels("multica_onboarding_questionnaire_submitted_total")),
-		onboardingSourceSubmit: prometheus.NewCounterVec(prometheus.CounterOpts{
-			Name: "multica_onboarding_source_submitted_total",
-			Help: "Total acquisition-source answers or declines recorded (workspace backfill prompt).",
-		}, metricLabels("multica_onboarding_source_submitted_total")),
-		onboardingCompleted: prometheus.NewCounterVec(prometheus.CounterOpts{
-			Name: "multica_onboarding_completed_total",
-			Help: "Total onboarding flows completed.",
-		}, metricLabels("multica_onboarding_completed_total")),
-		cloudWaitlistJoined: prometheus.NewCounterVec(prometheus.CounterOpts{
-			Name: "multica_cloud_waitlist_joined_total",
-			Help: "Total users that joined the cloud waitlist.",
-		}, metricLabels("multica_cloud_waitlist_joined_total")),
 		issueCreated: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "multica_issue_created_total",
 			Help: "Total issues created (any source).",
@@ -117,14 +78,6 @@ func newBusinessEventMetrics() *businessEventMetrics {
 			Name: "multica_agent_created_total",
 			Help: "Total agents created.",
 		}, metricLabels("multica_agent_created_total")),
-		squadCreated: prometheus.NewCounterVec(prometheus.CounterOpts{
-			Name: "multica_squad_created_total",
-			Help: "Total squads created.",
-		}, metricLabels("multica_squad_created_total")),
-		autopilotCreated: prometheus.NewCounterVec(prometheus.CounterOpts{
-			Name: "multica_autopilot_created_total",
-			Help: "Total autopilots created.",
-		}, metricLabels("multica_autopilot_created_total")),
 		issueExecuted: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "multica_issue_executed_total",
 			Help: "First task completion per issue (per-issue exactly-once activation keystone).",
@@ -154,26 +107,6 @@ func newBusinessEventMetrics() *businessEventMetrics {
 			Name: "multica_daemon_ws_message_received_total",
 			Help: "Total daemon WebSocket inbound messages by handler kind.",
 		}, metricLabels("multica_daemon_ws_message_received_total")),
-		autopilotRunStarted: prometheus.NewCounterVec(prometheus.CounterOpts{
-			Name: "multica_autopilot_run_started_total",
-			Help: "Total autopilot runs started.",
-		}, metricLabels("multica_autopilot_run_started_total")),
-		autopilotRunTerminal: prometheus.NewCounterVec(prometheus.CounterOpts{
-			Name: "multica_autopilot_run_terminal_total",
-			Help: "Total autopilot runs that reached a terminal status.",
-		}, metricLabels("multica_autopilot_run_terminal_total")),
-		autopilotRunSkipped: prometheus.NewCounterVec(prometheus.CounterOpts{
-			Name: "multica_autopilot_run_skipped_total",
-			Help: "Total autopilot runs that admission-skipped (concurrency / cooldown / other).",
-		}, metricLabels("multica_autopilot_run_skipped_total")),
-		webhookDelivery: prometheus.NewCounterVec(prometheus.CounterOpts{
-			Name: "multica_webhook_delivery_total",
-			Help: "Total inbound webhook deliveries by provider and outcome.",
-		}, metricLabels("multica_webhook_delivery_total")),
-		webhookRateLimited: prometheus.NewCounterVec(prometheus.CounterOpts{
-			Name: "multica_webhook_rate_limited_total",
-			Help: "Total webhook admissions or worker dispatches delayed by a bounded safety gate.",
-		}, metricLabels("multica_webhook_rate_limited_total")),
 		emailRateLimited: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "multica_email_rate_limited_total",
 			Help: "Total email-producing actions rejected by a bounded safety gate.",
@@ -191,23 +124,10 @@ func newBusinessEventMetrics() *businessEventMetrics {
 			Help:    "Time from PR opened to merged (seconds).",
 			Buckets: prMergeSecondsBuckets,
 		}),
-		cloudRuntimeRequest: prometheus.NewCounterVec(prometheus.CounterOpts{
-			Name: "multica_cloudruntime_request_total",
-			Help: "Total outbound cloud runtime requests by op and status bucket.",
-		}, metricLabels("multica_cloudruntime_request_total")),
-		cloudRuntimeRequestDurationSecs: prometheus.NewHistogramVec(prometheus.HistogramOpts{
-			Name:    "multica_cloudruntime_request_duration_seconds",
-			Help:    "Outbound cloud runtime request duration (seconds).",
-			Buckets: cloudRuntimeRequestBuckets,
-		}, metricLabels("multica_cloudruntime_request_duration_seconds")),
 		feedbackSubmitted: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "multica_feedback_submitted_total",
 			Help: "Total in-app feedback submissions.",
 		}, metricLabels("multica_feedback_submitted_total")),
-		contactSalesSubmitted: prometheus.NewCounterVec(prometheus.CounterOpts{
-			Name: "multica_contact_sales_submitted_total",
-			Help: "Total contact-sales inquiries submitted.",
-		}, metricLabels("multica_contact_sales_submitted_total")),
 		chatOutputLocalPath: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "multica_chat_output_local_path_total",
 			Help: "Total agent chat replies that referenced a runtime-local path, by evidence kind. Observation only — the reply is still delivered.",
@@ -224,16 +144,9 @@ func (e *businessEventMetrics) collectors() []prometheus.Collector {
 		e.workspaceCreated,
 		e.teamInviteSent,
 		e.teamInviteAccepted,
-		e.onboardingStarted,
-		e.onboardingQuestionnaireSubmit,
-		e.onboardingSourceSubmit,
-		e.onboardingCompleted,
-		e.cloudWaitlistJoined,
 		e.issueCreated,
 		e.chatMessageSent,
 		e.agentCreated,
-		e.squadCreated,
-		e.autopilotCreated,
 		e.issueExecuted,
 		e.runtimeRegistered,
 		e.runtimeReady,
@@ -241,19 +154,11 @@ func (e *businessEventMetrics) collectors() []prometheus.Collector {
 		e.runtimeFailed,
 		e.runtimeOffline,
 		e.daemonWSMessageReceived,
-		e.autopilotRunStarted,
-		e.autopilotRunTerminal,
-		e.autopilotRunSkipped,
-		e.webhookDelivery,
-		e.webhookRateLimited,
 		e.emailRateLimited,
 		e.githubEventReceived,
 		e.githubPRReview,
 		e.githubPRMergeSeconds,
-		e.cloudRuntimeRequest,
-		e.cloudRuntimeRequestDurationSecs,
 		e.feedbackSubmitted,
-		e.contactSalesSubmitted,
 		e.chatOutputLocalPath,
 	}
 }
@@ -264,7 +169,7 @@ func (e *businessEventMetrics) collectors() []prometheus.Collector {
 // safely; both sides are best-effort and never block the request path.
 //
 // As of MUL-4127 every server-side event is flagged by analytics.IsMetricsOnly
-// (all product events plus the runtime_* / autopilot_run_* lifecycle), so the
+// (all product events plus the runtime_* lifecycle), so the
 // client.Capture below is skipped for all of them — server analytics is served
 // from the DB and Grafana, not PostHog. The Capture path is retained only so a
 // future non-metrics-only event name would still ship.
@@ -298,16 +203,6 @@ func (m *BusinessMetrics) IncForEvent(ev analytics.Event) {
 		m.events.teamInviteSent.WithLabelValues().Inc()
 	case analytics.EventTeamInviteAccepted:
 		m.events.teamInviteAccepted.WithLabelValues().Inc()
-	case analytics.EventOnboardingStarted:
-		m.events.onboardingStarted.WithLabelValues(NormalizePlatform(stringProp(ev.Properties, "platform"))).Inc()
-	case analytics.EventOnboardingQuestionnaireSubmit:
-		m.events.onboardingQuestionnaireSubmit.WithLabelValues().Inc()
-	case analytics.EventOnboardingSourceSubmit:
-		m.events.onboardingSourceSubmit.WithLabelValues().Inc()
-	case analytics.EventOnboardingCompleted:
-		m.events.onboardingCompleted.WithLabelValues(NormalizeOnboardingPath(stringProp(ev.Properties, "completion_path"))).Inc()
-	case analytics.EventCloudWaitlistJoined:
-		m.events.cloudWaitlistJoined.WithLabelValues().Inc()
 	case analytics.EventIssueCreated:
 		m.events.issueCreated.WithLabelValues(
 			NormalizeTaskSource(stringProp(ev.Properties, "source")),
@@ -320,10 +215,6 @@ func (m *BusinessMetrics) IncForEvent(ev analytics.Event) {
 			NormalizeRuntimeMode(stringProp(ev.Properties, "runtime_mode")),
 			NormalizeTaskSource(stringProp(ev.Properties, "source")),
 		).Inc()
-	case analytics.EventSquadCreated:
-		m.events.squadCreated.WithLabelValues().Inc()
-	case analytics.EventAutopilotCreated:
-		m.events.autopilotCreated.WithLabelValues(NormalizeAutopilotCadence(stringProp(ev.Properties, "cadence"))).Inc()
 	case analytics.EventIssueExecuted:
 		m.events.issueExecuted.WithLabelValues(NormalizeTaskSource(stringProp(ev.Properties, "source"))).Inc()
 	case analytics.EventRuntimeRegistered:
@@ -350,30 +241,11 @@ func (m *BusinessMetrics) IncForEvent(ev analytics.Event) {
 			NormalizeRuntimeMode(stringProp(ev.Properties, "runtime_mode")),
 			NormalizeRuntimeProvider(stringProp(ev.Properties, "provider")),
 		).Inc()
-	case analytics.EventAutopilotRunStarted:
-		m.events.autopilotRunStarted.WithLabelValues(
-			NormalizeAutopilotCadence(stringProp(ev.Properties, "cadence")),
-			NormalizeAutopilotTrigger(stringProp(ev.Properties, "trigger_kind")),
-		).Inc()
-	case analytics.EventAutopilotRunCompleted:
-		m.events.autopilotRunTerminal.WithLabelValues(
-			NormalizeAutopilotCadence(stringProp(ev.Properties, "cadence")),
-			NormalizeAutopilotTrigger(stringProp(ev.Properties, "trigger_kind")),
-			"completed",
-		).Inc()
-	case analytics.EventAutopilotRunFailed:
-		m.events.autopilotRunTerminal.WithLabelValues(
-			NormalizeAutopilotCadence(stringProp(ev.Properties, "cadence")),
-			NormalizeAutopilotTrigger(stringProp(ev.Properties, "trigger_kind")),
-			"failed",
-		).Inc()
 	case analytics.EventFeedbackSubmitted:
 		m.events.feedbackSubmitted.WithLabelValues(
 			NormalizeFeedbackKind(stringProp(ev.Properties, "kind")),
 			NormalizePlatform(stringProp(ev.Properties, "platform")),
 		).Inc()
-	case analytics.EventContactSalesSubmitted:
-		m.events.contactSalesSubmitted.WithLabelValues(NormalizeContactSalesSource(stringProp(ev.Properties, "form_source"))).Inc()
 	default:
 		// agent_task_* lifecycle telemetry is recorded straight to Prometheus
 		// via the typed BusinessMetrics.RecordTask* methods (they take
@@ -384,35 +256,6 @@ func (m *BusinessMetrics) IncForEvent(ev analytics.Event) {
 }
 
 // ---- non-PostHog Record* helpers (typed; no analytics.Event source) -------
-
-// RecordAutopilotRunSkipped counts an autopilot admission-skip with reason.
-func (m *BusinessMetrics) RecordAutopilotRunSkipped(cadence, reason string) {
-	if m == nil || m.events == nil {
-		return
-	}
-	m.events.autopilotRunSkipped.WithLabelValues(
-		NormalizeAutopilotCadence(cadence),
-		NormalizeAutopilotSkipReason(reason),
-	).Inc()
-}
-
-// RecordWebhookDelivery counts an inbound webhook outcome.
-func (m *BusinessMetrics) RecordWebhookDelivery(provider, status string) {
-	if m == nil || m.events == nil {
-		return
-	}
-	m.events.webhookDelivery.WithLabelValues(
-		NormalizeWebhookProvider(provider),
-		NormalizeWebhookDeliveryStatus(status),
-	).Inc()
-}
-
-func (m *BusinessMetrics) RecordWebhookRateLimited(gate string) {
-	if m == nil || m.events == nil {
-		return
-	}
-	m.events.webhookRateLimited.WithLabelValues(NormalizeWebhookRateLimitGate(gate)).Inc()
-}
 
 func (m *BusinessMetrics) RecordEmailRateLimited(action, gate string) {
 	if m == nil || m.events == nil {
@@ -450,20 +293,6 @@ func (m *BusinessMetrics) ObserveGithubPRMergeSeconds(seconds float64) {
 		return
 	}
 	m.events.githubPRMergeSeconds.Observe(seconds)
-}
-
-// RecordCloudRuntimeRequest counts an outbound Fleet/Gateway call by op +
-// status bucket and observes its duration.
-func (m *BusinessMetrics) RecordCloudRuntimeRequest(op, status string, durationSeconds float64) {
-	if m == nil || m.events == nil {
-		return
-	}
-	op = NormalizeCloudRuntimeOp(op)
-	status = NormalizeCloudRuntimeStatus(status)
-	m.events.cloudRuntimeRequest.WithLabelValues(op, status).Inc()
-	if durationSeconds >= 0 {
-		m.events.cloudRuntimeRequestDurationSecs.WithLabelValues(op).Observe(durationSeconds)
-	}
 }
 
 // RecordChatOutputLocalPath counts a chat reply that referenced a runtime-local

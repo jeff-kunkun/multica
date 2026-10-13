@@ -165,8 +165,9 @@ func TestBuildSearchQuery_CandidateFirstParity(t *testing.T) {
 				tt.phrase, append([]string(nil), terms...), tt.queryNum, tt.hasNum, tt.includeClosed, tt.terminalKeys,
 			)
 			candidateArgs[3] = testWorkspaceID
-			candidateArgs[len(candidateArgs)-2] = tt.limit
-			candidateArgs[len(candidateArgs)-1] = tt.offset
+			candidateArgs[len(candidateArgs)-3] = tt.limit
+			candidateArgs[len(candidateArgs)-2] = tt.offset
+			candidateArgs[len(candidateArgs)-1] = testUserID
 
 			legacyRows := runLegacySearchForParity(t, legacyQuery, legacyArgs)
 			candidateRows := runCandidateSearchForParity(t, candidateQuery, candidateArgs)
@@ -258,8 +259,9 @@ func runBuiltSearchForParity(t *testing.T, phrase string, includeClosed bool, te
 	queryNum, hasNum := parseQueryNumber(phrase)
 	query, args := buildSearchQuery(phrase, terms, queryNum, hasNum, includeClosed, terminalKeys)
 	args[3] = testWorkspaceID
-	args[len(args)-2] = limit
-	args[len(args)-1] = offset
+	args[len(args)-3] = limit
+	args[len(args)-2] = offset
+	args[len(args)-1] = testUserID
 	return runCandidateSearchForParity(t, query, args)
 }
 
@@ -314,7 +316,6 @@ func runSearchForParity(t *testing.T, label, query string, args []any) []searchP
 			&sr.issue.Number,
 			&sr.issue.ProjectID,
 			&sr.issue.Revision,
-			&sr.issue.DuplicateOfIssueID,
 			&sr.matchSource,
 			&sr.matchedCommentContent,
 		); err != nil {
@@ -333,8 +334,7 @@ func runSearchForParity(t *testing.T, label, query string, args []any) []searchP
 }
 
 // buildLegacySearchQueryForParity is the parent commit's buildSearchQuery copied
-// verbatim except for its name and the duplicate_of_issue_id column, which both
-// queries project so one scanner reads them (MUL-7349). Keeping the original implementation here avoids
+// verbatim except for its name. Keeping the original implementation here avoids
 // proving parity against a re-derived oracle that could share the new query's
 // assumptions. This remains test-only; production has no legacy fallback path.
 func buildLegacySearchQueryForParity(phrase string, terms []string, queryNum int, hasNum bool, includeClosed bool, terminalStatusKeys []string) (string, []any) {
@@ -577,7 +577,7 @@ func buildLegacySearchQueryForParity(phrase string, terms []string, queryNum int
 		i.assignee_type, i.assignee_id, i.creator_type, i.creator_id,
 		i.parent_issue_id, i.acceptance_criteria, i.context_refs, i.position,
 		i.start_date, i.due_date, i.created_at, i.updated_at, i.last_activity_at, i.number, i.project_id,
-		i.revision, i.duplicate_of_issue_id,
+		i.revision,
 		%s AS match_source,
 		%s AS matched_comment_content
 	FROM issue i

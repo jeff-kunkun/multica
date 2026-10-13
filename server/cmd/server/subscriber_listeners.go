@@ -14,8 +14,8 @@ import (
 )
 
 // isAssignmentRecipientType reports whether an assignee can own a subscriber
-// or inbox row. Squads are routing objects whose work runs through the leader;
-// they are not user identities and have no inbox to consume.
+// or inbox row. Historical squad assignees are not user identities and have
+// no inbox to consume.
 func isAssignmentRecipientType(assigneeType string) bool {
 	return assigneeType == "member" || assigneeType == "agent"
 }
@@ -35,8 +35,8 @@ func registerSubscriberListeners(bus *events.Bus, pool *pgxpool.Pool) {
 		if !ok {
 			return
 		}
-		// Issues created via handler use IssueResponse; autopilot-created issues
-		// use map[string]any (see service/autopilot.go → IssueToMap).
+		// Issues created via handler use IssueResponse; channel /issue creates
+		// use map[string]any (see service.IssueToMap).
 		issue, ok := extractIssueFields(payload["issue"])
 		if !ok {
 			return
@@ -153,8 +153,8 @@ func registerSubscriberListeners(bus *events.Bus, pool *pgxpool.Pool) {
 // disagreeing about whose behalf an issue exists on.
 //
 // Attribution answers "whose authority does this run carry", which since MUL-6951
-// is a broader population than "who asked for this work" — an armed autopilot
-// trigger carries its creator's. Visibility follows the narrower one, so the read
+// is a broader population than "who asked for this work". Visibility follows
+// the narrower one, so the read
 // also walks the chain back to the run that resolved the human and hands the rule
 // that root's label (MUL-7051).
 //
@@ -259,7 +259,7 @@ func subscribeDelegatedHuman(bus *events.Bus, pool *pgxpool.Pool, queries *db.Qu
 
 // extractIssueFields normalizes an issue payload that may be either a
 // handler.IssueResponse struct (HTTP handler path) or a map[string]any
-// (autopilot service path) into a common shape.
+// (service / channel path) into a common shape.
 func extractIssueFields(v any) (handler.IssueResponse, bool) {
 	if issue, ok := v.(handler.IssueResponse); ok {
 		return issue, true

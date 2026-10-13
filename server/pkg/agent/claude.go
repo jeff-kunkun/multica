@@ -1116,22 +1116,8 @@ func buildClaudeArgs(opts ExecOptions, logger *slog.Logger) []string {
 	if opts.ResumeSessionID != "" {
 		args = append(args, "--resume", opts.ResumeSessionID)
 	}
-	blockedArgs := claudeBlockedArgs
-	if opts.ClaudeSettingsPath != "" {
-		// The daemon-owned --settings file is the enforcement layer for disabled
-		// inherited skills. Drop competing per-agent/default flags only while that
-		// policy is active, then append the managed file last.
-		blockedArgs = make(map[string]blockedArgMode, len(claudeBlockedArgs)+1)
-		for key, mode := range claudeBlockedArgs {
-			blockedArgs[key] = mode
-		}
-		blockedArgs["--settings"] = blockedWithValue
-	}
-	args = append(args, filterCustomArgs(opts.ExtraArgs, blockedArgs, logger)...)
-	args = append(args, filterCustomArgs(opts.CustomArgs, blockedArgs, logger)...)
-	if opts.ClaudeSettingsPath != "" {
-		args = append(args, "--settings", opts.ClaudeSettingsPath)
-	}
+	args = append(args, filterCustomArgs(opts.ExtraArgs, claudeBlockedArgs, logger)...)
+	args = append(args, filterCustomArgs(opts.CustomArgs, claudeBlockedArgs, logger)...)
 	return args
 }
 
@@ -1470,12 +1456,6 @@ var detectVersionTimeout = 10 * time.Second
 func detectCLIVersion(ctx context.Context, runtimeCmd Command) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, detectVersionTimeout)
 	defer cancel()
-	if runtime.GOOS == "windows" {
-		if native := resolveCodeArtsNativeFromShim(runtimeCmd.Path, os.Stat); native != "" {
-			runtimeCmd.Path = native
-		}
-	}
-
 	// outputOwned, not the collector in run_collect_quiet.go, and the difference
 	// is which signal means "the answer is in". A broken CLI (node/bun shim) can
 	// leave grandchildren that inherited and still hold our stdout pipe open, and

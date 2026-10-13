@@ -575,7 +575,7 @@ func (h *Handler) UpdateAgentRuntime(w http.ResponseWriter, r *http.Request) {
 			// owners/admins rename every runtime sharing the daemon_id. A NULL
 			// owner filter means "all runtimes on this machine".
 			var ownerFilter pgtype.UUID
-			if !roleAllowed(member.Role, "owner", "admin") {
+			if member.Role != "owner" {
 				ownerFilter = member.UserID
 			}
 			rows, err := h.Queries.UpdateAgentRuntimeCustomNameByDaemon(r.Context(), db.UpdateAgentRuntimeCustomNameByDaemonParams{
@@ -626,7 +626,7 @@ func (h *Handler) UpdateAgentRuntime(w http.ResponseWriter, r *http.Request) {
 }
 
 func canEditRuntime(member db.Member, rt db.AgentRuntime) bool {
-	if roleAllowed(member.Role, "owner", "admin") {
+	if member.Role == "owner" {
 		return true
 	}
 	return rt.OwnerID.Valid && uuidToString(rt.OwnerID) == uuidToString(member.UserID)
@@ -731,8 +731,8 @@ func (h *Handler) runtimeLiveProfile(ctx context.Context, rt db.AgentRuntime) (d
 // retention GC applies; known is false when that read failed. They decide two
 // things. Whether the promise of automatic cleanup is one this server can keep
 // at all — GC skips a runtime that still has a bound agent — and, when it is
-// not, which of those blockers the user can actually do anything about. Mika is
-// a user-kind agent that can be neither archived nor moved, so "reassign or
+// not, which of those blockers the user can actually do anything about. A
+// system-keyed agent can be neither archived nor moved, so "reassign or
 // archive them" is not a universal instruction here either.
 func profileInstanceDeleteRefusal(rt db.AgentRuntime, profile db.RuntimeProfile, blockers profileInstanceBlockers) map[string]any {
 	known := blockers.known
@@ -777,7 +777,7 @@ func profileInstanceDeleteRefusal(rt db.AgentRuntime, profile db.RuntimeProfile,
 			"It is offline, but %s, which holds it in place; Multica removes the runtime automatically after %d days offline once that is cleared.",
 			strings.Join(holds, " and "), ttlDays,
 		))
-		parts = append(parts, blockingAgentRemedies(blockingAgentClassesFromAgents(blockers.agents), blockingAgentScopeInstance)...)
+		parts = append(parts, blockingAgentRemedies(blockingAgentClassesFromAgents(blockers.agents))...)
 		if blockers.undrainedTasks > 0 {
 			parts = append(parts, "Let those tasks finish, or cancel them — one can be running on a different machine if its agent was moved there.")
 		}
@@ -918,7 +918,7 @@ func (h *Handler) ListAgentRuntimes(w http.ResponseWriter, r *http.Request) {
 			WorkspaceID: parseUUID(workspaceID),
 			OwnerID:     parseUUID(userID),
 		})
-	} else if roleAllowed(member.Role, "owner", "admin") {
+	} else if member.Role == "owner" {
 		// Governance visibility preserves the existing owner/admin contract:
 		// admins can find a private runtime to rename or delete it, but the
 		// per-runtime read gate still denies data and machine access.
@@ -967,11 +967,6 @@ func (h *Handler) PublishRuntimeTeardown(ctx context.Context, res service.Runtim
 		// runtime_bound=false. No agent:archived here — nothing was archived.
 		h.publish(protocol.EventAgentStatus, wsID, actorType, actorID, map[string]any{
 			"agent": broadcastAgentResponse(h.agentToResponse(a)),
-		})
-	}
-	for _, a := range res.PausedAutopilots {
-		h.publish(protocol.EventAutopilotUpdated, wsID, actorType, actorID, map[string]any{
-			"autopilot": autopilotToResponse(a, nil),
 		})
 	}
 	if publishRuntimeRefresh {
@@ -1123,7 +1118,6 @@ func (h *Handler) DeleteAgentRuntime(w http.ResponseWriter, r *http.Request) {
 		"deleted_by", userID,
 		"agents_unbound", len(teardown.UnboundAgents),
 		"tasks_cancelled", len(teardown.CancelledTasks),
-		"autopilots_paused", len(teardown.PausedAutopilots),
 	)
 
 	h.publishRuntimeTeardown(r.Context(), teardown, wsID, userID)
@@ -1172,7 +1166,7 @@ type unbindAgentsAndDeleteRuntimeRequest struct {
 }
 
 // UnbindAgentsAndDeleteRuntime is the confirmed delete entry point: unbind every
-// user agent bound to the runtime, pause affected Autopilots, cancel active
+// user agent bound to the runtime, cancel active
 // tasks, detach task history, hard-delete only the system agents, and finally
 // delete the runtime row — all inside a single transaction so a partial failure
 // never leaves a runtime half-torn-down.
@@ -1186,7 +1180,7 @@ type unbindAgentsAndDeleteRuntimeRequest struct {
 // revokeAndRemoveMember (workspace_revoke.go) so the two paths share the same
 // race-safety properties: the dispatcher can't claim a task whose runtime is
 // about to vanish, and post-commit publish events emit the same
-// task:cancelled → agent:status/autopilot:updated → daemon:register fan-out.
+// task:cancelled → agent:status → daemon:register fan-out.
 //
 // The expected_active_agent_ids check is the load-bearing piece for the UX:
 // the front-end snapshots the agent list when the dialog opens and presents
@@ -1337,14 +1331,12 @@ func (h *Handler) UnbindAgentsAndDeleteRuntime(w http.ResponseWriter, r *http.Re
 		"deleted_by", userID,
 		"agents_unbound", len(teardown.UnboundAgents),
 		"tasks_cancelled", len(teardown.CancelledTasks),
-		"autopilots_paused", len(teardown.PausedAutopilots),
 	)
 
 	writeJSON(w, http.StatusOK, map[string]any{
-		"status":            "ok",
-		"agents_unbound":    len(teardown.UnboundAgents),
-		"tasks_cancelled":   len(teardown.CancelledTasks),
-		"autopilots_paused": len(teardown.PausedAutopilots),
+		"status":          "ok",
+		"agents_unbound":  len(teardown.UnboundAgents),
+		"tasks_cancelled": len(teardown.CancelledTasks),
 		// Deprecated mirror of agents_unbound: installed clients built against
 		// the archive-and-delete contract read this key. The count is the same
 		// set of agents; they are no longer archived.

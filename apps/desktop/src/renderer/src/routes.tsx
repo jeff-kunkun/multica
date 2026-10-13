@@ -3,10 +3,7 @@ import { createMemoryRouter, Outlet, useMatches } from "react-router-dom";
 import type { RouteObject } from "react-router-dom";
 import { IssueDetailPage } from "./pages/issue-detail-page";
 import { ProjectDetailPage } from "./pages/project-detail-page";
-import { AutopilotDetailPage } from "./pages/autopilot-detail-page";
-import { SkillDetailPage } from "./pages/skill-detail-page";
 import { AgentDetailPage } from "./pages/agent-detail-page";
-import { AiBuilderSessionPage } from "./pages/ai-builder-session-page";
 import { MemberDetailPage } from "./pages/member-detail-page";
 import {
   RuntimeDetailPage,
@@ -16,17 +13,11 @@ import { AttachmentPreviewRoute } from "./pages/attachment-preview-page";
 import { IssuesPage } from "@multica/views/issues/components";
 import { ProjectsPage } from "@multica/views/projects/components";
 import { DashboardPage } from "@multica/views/dashboard";
-import { AutopilotsPage } from "@multica/views/autopilots/components";
+import { MeetingsPage } from "@multica/views/plans";
 import { MyIssuesPage } from "@multica/views/my-issues";
-import { SkillsPage } from "@multica/views/skills";
 import { DesktopRuntimesPage } from "./components/desktop-runtimes-page";
 import { DesktopAgentsPage } from "./components/desktop-agents-page";
-import {
-  AiCreateAgentPage,
-  ChooseCreateMethodPage,
-  ManualCreateAgentPage,
-} from "@multica/views/agents";
-import { SquadsPage, SquadDetailPage as SquadDetailPageView } from "@multica/views/squads/components";
+import { ManualCreateAgentPage } from "@multica/views/agents";
 import { InboxPage } from "@multica/views/inbox";
 import { ChatPage } from "@multica/views/chat";
 import { SettingsPage } from "@multica/views/settings";
@@ -148,16 +139,6 @@ export const appRoutes: RouteObject[] = [
             handle: { title: "Project" },
           },
           {
-            path: "autopilots",
-            element: <AutopilotsPage />,
-            handle: { title: "Autopilot" },
-          },
-          {
-            path: "autopilots/:id",
-            element: <AutopilotDetailPage />,
-            handle: { title: "Autopilot" },
-          },
-          {
             path: "my-issues",
             element: <MyIssuesPage />,
             handle: { title: "My Issues" },
@@ -177,31 +158,10 @@ export const appRoutes: RouteObject[] = [
             element: <RuntimeSettingsPage />,
             handle: { title: "Runtime" },
           },
-          { path: "skills", element: <SkillsPage />, handle: { title: "Skills" } },
-          {
-            path: "skills/:id",
-            element: <SkillDetailPage />,
-            handle: { title: "Skill" },
-          },
           { path: "agents", element: <DesktopAgentsPage />, handle: { title: "Agents" } },
           {
             path: "agents/new",
-            element: <ChooseCreateMethodPage />,
-            handle: { title: "Create Agent" },
-          },
-          {
-            path: "agents/new/manual",
             element: <ManualCreateAgentPage />,
-            handle: { title: "Create Agent" },
-          },
-          {
-            path: "agents/new/ai",
-            element: <AiCreateAgentPage />,
-            handle: { title: "Create Agent" },
-          },
-          {
-            path: "agents/new/ai/:sessionId",
-            element: <AiBuilderSessionPage />,
             handle: { title: "Create Agent" },
           },
           {
@@ -214,18 +174,17 @@ export const appRoutes: RouteObject[] = [
             element: <MemberDetailPage />,
             handle: { title: "Member" },
           },
-          { path: "squads", element: <SquadsPage />, handle: { title: "Squads" } },
-          {
-            path: "squads/:id",
-            element: <SquadDetailPageView />,
-            handle: { title: "Squad" },
-          },
           { path: "inbox", element: <InboxPage />, handle: { title: "Inbox" } },
           { path: "chat", element: <ChatPage />, handle: { title: "Chat" } },
           {
             path: "attachments/:id/preview",
             element: <AttachmentPreviewRoute />,
             handle: { title: "Attachment" },
+          },
+          {
+            path: "meetings",
+            element: <MeetingsPage />,
+            handle: { title: "Meetings" },
           },
           {
             path: "usage",

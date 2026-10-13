@@ -11,8 +11,8 @@ import (
 )
 
 // Redis-backed implementation of ModelListStore. The wire layout matches
-// runtime_local_skills_redis_store.go (which solves the same multi-node
-// dispatch problem for skill lists/imports) so the operational story is
+// runtime_capabilities_redis_store.go (which solves the same multi-node
+// dispatch problem for capability discovery) so the operational story is
 // identical: namespaced keys, ZSET-backed pending queue, atomic claim via
 // the shared Lua script.
 //
@@ -24,13 +24,13 @@ import (
 //                                                                  lazy sweep on PopPending)
 //
 // PopPending uses claimPendingScript (defined in
-// runtime_local_skills_redis_store.go) to atomically ZREM the pending entry
+// runtime_capabilities_redis_store.go) to atomically ZREM the pending entry
 // and SET the record to "running" — splitting those two writes would strand
 // requests on a transient Redis hiccup between them.
 
 const (
 	// Namespaced under mul:*:model_list:* so the key set doesn't collide with
-	// the realtime relay (ws:*) or the local-skill stores.
+	// the realtime relay (ws:*) or the capabilities store.
 	modelListKeyPrefix          = "mul:" + runtimePendingRedisHashTag + ":model_list:req:"
 	modelListPendingPrefix      = "mul:" + runtimePendingRedisHashTag + ":model_list:pending:"
 	modelListRedisPopMaxRetries = 5

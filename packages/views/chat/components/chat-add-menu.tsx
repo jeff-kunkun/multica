@@ -34,7 +34,7 @@ interface ChatAddMenuProps {
 /**
  * The "+" affordance at the bottom-left of the chat composer. Replaces the
  * standalone paperclip button: file upload now lives here as a submenu entry,
- * leaving room for future add-actions (agents, skills, tools) under one entry
+ * leaving room for future add-actions (agents, tools) under one entry
  * point without crowding the input bar.
  */
 export function ChatAddMenu({

@@ -13,7 +13,7 @@ const builtInStatusLine = "- `multica issue status <id> <status>` — flip statu
 
 // catalogBridgeBullet distinguishes workflow keys from lifecycle categories;
 // it must appear exactly when a catalog is present.
-const catalogBridgeBullet = "- The workflow rules above refer to exact built-in status keys, not categories. Custom statuses share lifecycle semantics only, not built-in automation behavior.\n"
+const catalogBridgeBullet = "The workflow rules above refer to exact built-in status keys, not categories. Custom statuses share lifecycle semantics only, not built-in automation behavior.\n"
 
 func TestBriefStatusCatalogAbsentUsesBuiltInLine(t *testing.T) {
 	t.Parallel()
@@ -30,21 +30,6 @@ func TestBriefStatusCatalogAbsentUsesBuiltInLine(t *testing.T) {
 	withEmpty.IssueStatuses = []IssueStatusForEnv{}
 	if got := buildMetaSkillContent("claude", withEmpty); got != out {
 		t.Errorf("empty catalog must render byte-identical to absent catalog:\n%s", firstBriefDiff(out, got))
-	}
-}
-
-// TestBriefTeachesDuplicateMark pins the duplicate-mark bullet with and
-// without a status catalog, so agents cancelling a duplicate record the mark.
-func TestBriefTeachesDuplicateMark(t *testing.T) {
-	t.Parallel()
-	base := TaskContextForEnv{IssueID: "issue-1", AgentID: "a-1", AgentName: "Eve"}
-	withCatalog := base
-	withCatalog.IssueStatuses = []IssueStatusForEnv{{Key: "later", Name: "Later", Category: "backlog"}}
-	for name, ctx := range map[string]TaskContextForEnv{"no catalog": base, "catalog": withCatalog} {
-		out := buildMetaSkillContent("claude", ctx)
-		if got := strings.Count(out, duplicateOfCommandLine); got != 1 {
-			t.Errorf("%s: duplicate-mark bullet appears %d times, want 1\n---\n%s", name, got, out)
-		}
 	}
 }
 

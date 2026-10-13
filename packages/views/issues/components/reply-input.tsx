@@ -20,7 +20,6 @@ import { useRecipientActions } from "../hooks/use-recipient-actions";
 import { SteerAttachmentNotice } from "./steer-attachment-notice";
 import { useStopRunsBeforeSend } from "./use-stop-runs-before-send";
 import { useCommentUploads } from "./use-comment-uploads";
-import { useQuickActionMenu } from "../hooks/use-quick-action-menu";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -77,10 +76,6 @@ function ReplyInput({
   const composerRef = useRef<HTMLDivElement>(null);
   // See CommentInput — replying mid-upload posts without the file.
   const uploadGate = useUploadGate(editorRef);
-  // Quick actions in the `/` menu — same catalog and same insert-don't-run
-  // behavior as the top-level composer. A reply posts to the same issue, so
-  // `/` has to offer the same thing here (MUL-5588).
-  const quickActionMenu = useQuickActionMenu(issueId);
   // If a draft key is provided, hydrate from store on mount (defaultValue is
   // the only injection point on ContentEditorRef) and flush on every onUpdate.
   const [initialDraft] = useState(() =>
@@ -199,7 +194,7 @@ function ReplyInput({
         content,
         activeIds.length > 0 ? activeIds : undefined,
         suppressAgentIds.length > 0 ? suppressAgentIds : undefined,
-        steerTaskIds.length > 0 ? steerTaskIds : undefined,
+        steerTaskIds,
       ).then((commentId) => {
         acceptedCommentIdRef.current = typeof commentId === "string" ? commentId : null;
         return !!commentId;
@@ -281,8 +276,6 @@ function ReplyInput({
             currentIssueId={issueId}
             attachments={pendingAttachments}
             enableSlashCommands
-            slashCommandMode="command"
-            quickActionMenu={quickActionMenu}
           />
         </div>
         )}

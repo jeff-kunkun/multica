@@ -90,7 +90,7 @@ describe("openSettingsTab", () => {
   });
 
   it("does nothing while a pre-workspace overlay covers the window", () => {
-    useWindowOverlayStore.setState({ overlay: { type: "onboarding" } });
+    useWindowOverlayStore.setState({ overlay: { type: "new-workspace" } });
 
     openSettingsTab();
 

@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"net/http"
 	"testing"
 
@@ -218,6 +219,11 @@ func triggerCommentOf(t *testing.T, taskID string) string {
 
 func runTo(t *testing.T, taskID string) {
 	t.Helper()
+	// An issue runs one task at a time, so the run that woke this one has ended.
+	dbfx.Exec(t, `
+		UPDATE agent_task_queue SET status = 'completed', completed_at = now()
+		WHERE issue_id = (SELECT issue_id FROM agent_task_queue WHERE id = $1)
+		  AND id <> $1 AND status IN ('dispatched', 'running', 'waiting_local_directory')`, taskID)
 	dbfx.Exec(t, `UPDATE agent_task_queue SET status = 'running' WHERE id = $1`, taskID)
 }
 
@@ -417,4 +423,19 @@ func TestCrossIssueDelegation_GateAndStampAgreeOnTheHuman(t *testing.T) {
 	if fromGate != bohan {
 		t.Fatalf("both resolvers agree on %q, want %q", fromGate, bohan)
 	}
+}
+
+// nextWorkspaceIssueNumber advances and returns the test workspace's issue
+// counter so a directly-inserted issue does not collide on uq_issue_workspace_number.
+func nextWorkspaceIssueNumber(t *testing.T) int {
+	t.Helper()
+	var number int
+	if err := testPool.QueryRow(context.Background(), `
+		UPDATE workspace
+		SET issue_counter = GREATEST(issue_counter, (SELECT COALESCE(MAX(number), 0) FROM issue WHERE workspace_id = $1)) + 1
+		WHERE id = $1 RETURNING issue_counter
+	`, testWorkspaceID).Scan(&number); err != nil {
+		t.Fatalf("next issue number: %v", err)
+	}
+	return number
 }

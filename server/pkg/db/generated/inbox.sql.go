@@ -189,7 +189,12 @@ func (q *Queries) ArchiveInboxItem(ctx context.Context, id pgtype.UUID) (InboxIt
 
 const countUnreadInbox = `-- name: CountUnreadInbox :one
 SELECT count(*) FROM inbox_item
-WHERE workspace_id = $1 AND recipient_type = $2 AND recipient_id = $3 AND read = false AND archived = false
+WHERE inbox_item.workspace_id = $1 AND inbox_item.recipient_type = $2 AND inbox_item.recipient_id = $3
+  AND inbox_item.read = false AND inbox_item.archived = false
+  AND (
+    NOT EXISTS (SELECT 1 FROM workspace_bot b WHERE b.workspace_id = inbox_item.workspace_id)
+    OR (inbox_item.type = 'mentioned' AND inbox_item.actor_type = 'member')
+  )
 `
 
 type CountUnreadInboxParams struct {
@@ -198,6 +203,9 @@ type CountUnreadInboxParams struct {
 	RecipientID   pgtype.UUID `json:"recipient_id"`
 }
 
+// Unread belongs to the Bot: in a workspace with a project-manager Bot, only
+// mentions written by a member (a human colleague or the Bot itself) count;
+// everything else is the Bot's to triage. Without a Bot every item counts.
 func (q *Queries) CountUnreadInbox(ctx context.Context, arg CountUnreadInboxParams) (int64, error) {
 	row := q.db.QueryRow(ctx, countUnreadInbox, arg.WorkspaceID, arg.RecipientType, arg.RecipientID)
 	var count int64
@@ -215,6 +223,10 @@ FROM (
     WHERE i.recipient_type = 'member'
       AND i.recipient_id = $1
       AND i.archived = false
+      AND (
+        NOT EXISTS (SELECT 1 FROM workspace_bot b WHERE b.workspace_id = i.workspace_id)
+        OR (i.type = 'mentioned' AND i.actor_type = 'member')
+      )
     ORDER BY i.workspace_id, COALESCE(i.issue_id, i.id), i.created_at DESC
 ) newest
 WHERE newest.read = false
@@ -235,7 +247,9 @@ type CountUnreadInboxByWorkspaceRow struct {
 // as empty (MUL-3695). Items without an issue group on their own id. The
 // member join keeps counts scoped to workspaces the user still belongs to,
 // so a stale item left behind in a workspace the user has since left cannot
-// light the dot.
+// light the dot. Unread belongs to the Bot: in a workspace with a
+// project-manager Bot only member-authored mentions qualify (same rule as
+// CountUnreadInbox), applied before dedup so only qualifying items count.
 func (q *Queries) CountUnreadInboxByWorkspace(ctx context.Context, recipientID pgtype.UUID) ([]CountUnreadInboxByWorkspaceRow, error) {
 	rows, err := q.db.Query(ctx, countUnreadInboxByWorkspace, recipientID)
 	if err != nil {
@@ -428,6 +442,7 @@ SELECT i.id, i.workspace_id, i.recipient_type, i.recipient_id, i.type, i.severit
 FROM inbox_item i
 JOIN selected_ids selected ON selected.id = i.id
 LEFT JOIN issue iss ON iss.id = i.issue_id
+WHERE iss.id IS NULL OR can_see_issue(i.recipient_id, iss)
 ORDER BY i.created_at DESC, i.id DESC
 `
 
@@ -523,6 +538,9 @@ SELECT i.id, i.workspace_id, i.recipient_type, i.recipient_id, i.type, i.severit
 FROM inbox_item i
 LEFT JOIN issue iss ON iss.id = i.issue_id
 WHERE i.workspace_id = $1 AND i.recipient_type = $2 AND i.recipient_id = $3 AND i.archived = false
+  -- Items about issues the recipient can no longer see (project unshared)
+  -- stay stored but drop out of the list.
+  AND (iss.id IS NULL OR can_see_issue(i.recipient_id, iss))
 ORDER BY i.created_at DESC
 `
 

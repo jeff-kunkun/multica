@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/analytics"
@@ -38,9 +37,9 @@ var issuePrefixPattern = regexp.MustCompile(`^[A-Z0-9]{1,10}$`)
 // same "WS" fallback. Slug is validated as `^[a-z0-9]+(-[a-z0-9]+)*$` and
 // required, so it always yields a non-empty, workspace-specific prefix.
 //
-// Kept byte-for-byte in sync with the client-side preview in
-// packages/views/onboarding/steps/step-workspace.tsx — what the user sees on
-// the create screen has to be what the server would derive.
+// Kept byte-for-byte in sync with the client-side preview on the workspace
+// create screen — what the user sees there has to be what the server would
+// derive.
 func defaultIssuePrefixFromSlug(slug string) string {
 	head := nonAlphanumeric.ReplaceAllString(slug, "")
 	if head == "" {
@@ -297,12 +296,8 @@ func (h *Handler) CreateWorkspace(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// NOTE: CreateWorkspace deliberately does NOT mark the user as
-	// onboarded. The `onboarded_at` flag is owned by CompleteOnboarding
-	// (Step 3 of the flow) and by AcceptInvitation (invitee joining an
-	// existing workspace). This decouples "the user has a workspace"
-	// from "the user has finished setup"; the workspace-layer route
-	// gate (web layout / desktop App.tsx overlay) redirects un-onboarded
-	// users back to /onboarding instead.
+	// onboarded. The `onboarded_at` flag is written by AcceptInvitation
+	// and share-link joins (a user joining an existing workspace).
 
 	if err := tx.Commit(r.Context()); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to create workspace")
@@ -565,91 +560,11 @@ func normalizeMemberRole(role string) (string, bool) {
 
 	role = strings.TrimSpace(role)
 	switch role {
-	case "owner", "admin", "member":
+	case "member":
 		return role, true
 	default:
 		return "", false
 	}
-}
-
-type UpdateMemberRequest struct {
-	Role string `json:"role"`
-}
-
-func (h *Handler) UpdateMember(w http.ResponseWriter, r *http.Request) {
-	workspaceID := workspaceIDFromURL(r, "id")
-	requester, ok := h.workspaceMember(w, r, workspaceID)
-	if !ok {
-		return
-	}
-
-	memberID := chi.URLParam(r, "memberId")
-	memberUUID, ok := parseUUIDOrBadRequest(w, memberID, "member id")
-	if !ok {
-		return
-	}
-	target, err := h.Queries.GetMember(r.Context(), memberUUID)
-	if err != nil || uuidToString(target.WorkspaceID) != uuidToString(requester.WorkspaceID) {
-		writeError(w, http.StatusNotFound, "member not found")
-		return
-	}
-
-	var req UpdateMemberRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid request body")
-		return
-	}
-	if strings.TrimSpace(req.Role) == "" {
-		writeError(w, http.StatusBadRequest, "role is required")
-		return
-	}
-
-	role, valid := normalizeMemberRole(req.Role)
-	if !valid {
-		writeError(w, http.StatusBadRequest, "invalid member role")
-		return
-	}
-
-	if (target.Role == "owner" || role == "owner") && requester.Role != "owner" {
-		writeError(w, http.StatusForbidden, "insufficient permissions")
-		return
-	}
-
-	if target.Role == "owner" && role != "owner" {
-		members, err := h.Queries.ListMembers(r.Context(), target.WorkspaceID)
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, "failed to update member")
-			return
-		}
-		if countOwners(members) <= 1 {
-			writeError(w, http.StatusBadRequest, "workspace must have at least one owner")
-			return
-		}
-	}
-
-	updatedMember, err := h.Queries.UpdateMemberRole(r.Context(), db.UpdateMemberRoleParams{
-		ID:   target.ID,
-		Role: role,
-	})
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to update member")
-		return
-	}
-
-	h.MembershipCache.Invalidate(r.Context(), uuidToString(target.UserID), workspaceID)
-
-	user, err := h.Queries.GetUser(r.Context(), updatedMember.UserID)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to load member")
-		return
-	}
-
-	userID := requestUserID(r)
-	h.publish(protocol.EventMemberUpdated, uuidToString(requester.WorkspaceID), "member", userID, map[string]any{
-		"member": h.memberWithUserResponse(updatedMember, user),
-	})
-
-	writeJSON(w, http.StatusOK, h.memberWithUserResponse(updatedMember, user))
 }
 
 func (h *Handler) DeleteMember(w http.ResponseWriter, r *http.Request) {
@@ -670,21 +585,10 @@ func (h *Handler) DeleteMember(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if target.Role == "owner" && requester.Role != "owner" {
-		writeError(w, http.StatusForbidden, "insufficient permissions")
-		return
-	}
-
+	// A workspace has exactly one owner, who cannot be removed.
 	if target.Role == "owner" {
-		members, err := h.Queries.ListMembers(r.Context(), target.WorkspaceID)
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, "failed to delete member")
-			return
-		}
-		if countOwners(members) <= 1 {
-			writeError(w, http.StatusBadRequest, "workspace must have at least one owner")
-			return
-		}
+		writeError(w, http.StatusBadRequest, "the workspace owner cannot be removed")
+		return
 	}
 
 	requesterUserID := requestUserID(r)
@@ -694,7 +598,6 @@ func (h *Handler) DeleteMember(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to delete member")
 		return
 	}
-	h.settleMemberCapacityRelease(r.Context(), uuid.UUID(target.WorkspaceID.Bytes), uuid.UUID(target.ID.Bytes))
 
 	h.MembershipCache.Invalidate(r.Context(), uuidToString(target.UserID), workspaceID)
 
@@ -721,15 +624,8 @@ func (h *Handler) LeaveWorkspace(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if member.Role == "owner" {
-		members, err := h.Queries.ListMembers(r.Context(), member.WorkspaceID)
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, "failed to leave workspace")
-			return
-		}
-		if countOwners(members) <= 1 {
-			writeError(w, http.StatusBadRequest, "workspace must have at least one owner")
-			return
-		}
+		writeError(w, http.StatusBadRequest, "the workspace owner cannot leave; delete the workspace instead")
+		return
 	}
 
 	result, err := h.revokeAndRemoveMember(r.Context(), member.WorkspaceID, member.UserID, member.ID, member.UserID)
@@ -738,7 +634,6 @@ func (h *Handler) LeaveWorkspace(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to leave workspace")
 		return
 	}
-	h.settleMemberCapacityRelease(r.Context(), uuid.UUID(member.WorkspaceID.Bytes), uuid.UUID(member.ID.Bytes))
 
 	h.MembershipCache.Invalidate(r.Context(), uuidToString(member.UserID), workspaceID)
 
@@ -1186,27 +1081,6 @@ func (h *Handler) DeleteWorkspace(w http.ResponseWriter, r *http.Request) {
 			run:  func() error { return qtx.PrepareWorkspaceDeletionLinks(ctx, requester.WorkspaceID) },
 		},
 		{
-			// These FK-free intents deliberately survive the transaction so the
-			// worker can release every invitation/member seat after local rows
-			// disappear. Skipped for self-hosted/unmanaged deployments.
-			name: "prepare seat capacity release",
-			run: func() error {
-				if !h.seatCapacityEnabled() {
-					return nil
-				}
-				if err := qtx.DeleteSeatCapacityConfirmIntentsForWorkspaceDeletion(ctx, requester.WorkspaceID); err != nil {
-					return err
-				}
-				if err := qtx.PrepareSeatCapacityOperationReleasesForWorkspaceDeletion(ctx, requester.WorkspaceID); err != nil {
-					return err
-				}
-				if err := qtx.PrepareSeatCapacityInvitationReleasesForWorkspaceDeletion(ctx, requester.WorkspaceID); err != nil {
-					return err
-				}
-				return qtx.PrepareSeatCapacityMemberReleasesForWorkspaceDeletion(ctx, requester.WorkspaceID)
-			},
-		},
-		{
 			name: "delete chat pins",
 			run:  func() error { return qtx.DeleteChatPinnedAgentsByWorkspace(ctx, requester.WorkspaceID) },
 		},
@@ -1308,8 +1182,8 @@ func (h *Handler) DeleteWorkspace(w http.ResponseWriter, r *http.Request) {
 			run:  func() error { return qtx.DeleteWorkspaceConnections(ctx, requester.WorkspaceID) },
 		},
 		{
-			name: "delete squads and skills",
-			run:  func() error { return qtx.DeleteWorkspaceSquadsAndSkills(ctx, requester.WorkspaceID) },
+			name: "delete squads",
+			run:  func() error { return qtx.DeleteWorkspaceSquads(ctx, requester.WorkspaceID) },
 		},
 		{
 			name: "delete plugin data",

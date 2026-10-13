@@ -38,7 +38,6 @@ vi.mock("../platform/workspace-storage", () => ({
 }));
 
 vi.mock("../paths", () => ({
-  useHasOnboarded: () => true,
   resolvePostAuthDestination: () => "/",
 }));
 
@@ -126,15 +125,15 @@ describe("useRealtimeSync — ws instance change", () => {
     rerender({ ws: ws2 });
 
     // Should have called invalidateQueries for all workspace-scoped keys
-    // (16 workspace-scoped [incl. property definitions] + 6 per-issue
+    // (13 workspace-scoped [incl. property definitions] + 6 per-issue
     // prefixes + the workspace working-agents projection + 5 per-chat
     // prefixes + 1 workspaceKeys.list() + 1 cross-workspace inbox unread
-    // summary = 31 calls).
+    // summary = 28 calls).
     //
     // Awaited rather than counted synchronously: the inbox unread summary
     // refresh cancels any in-flight request before invalidating (see
     // onInboxSummaryInvalidate), so that one lands after the synchronous ones.
-    await waitFor(() => expect(invalidateSpy).toHaveBeenCalledTimes(31));
+    await waitFor(() => expect(invalidateSpy).toHaveBeenCalledTimes(28));
   });
 
   it("does not re-invalidate when rerendered with the same ws instance", () => {
@@ -262,7 +261,7 @@ describe("useRealtimeSync — ws instance change", () => {
     expect(calls).toContainEqual(chatKeys.pendingTaskAll());
   });
 
-  it("invalidates one issue attachment cache after detached channel media binds", () => {
+  it("invalidates one issue attachment cache when its attachments change", () => {
     const ws = createMockWs();
     renderHook(() => useRealtimeSync(ws, stores), {
       wrapper: createWrapper(qc),
@@ -305,46 +304,6 @@ describe("useRealtimeSync — ws instance change", () => {
     expect(invalidateSpy).not.toHaveBeenCalledWith({
       queryKey: issueKeys.all("ws-1"),
     });
-  });
-
-  it("ignores removed DingTalk group-route events", () => {
-    const ws = createMockWs();
-    renderHook(() => useRealtimeSync(ws, stores), {
-      wrapper: createWrapper(qc),
-    });
-    const onAny = vi.mocked(ws.onAny).mock.calls[0]?.[0];
-    expect(onAny).toBeDefined();
-
-    onAny!({ type: "dingtalk_group_route:updated", payload: {} } as never);
-
-    expect(invalidateSpy).not.toHaveBeenCalled();
-  });
-
-  it("invalidates the current workspace chat list when a channel creates a session", () => {
-    const ws = createMockWs();
-    renderHook(() => useRealtimeSync(ws, stores), {
-      wrapper: createWrapper(qc),
-    });
-    const sessionCreated = vi
-      .mocked(ws.on)
-      .mock.calls.find(([event]) => event === "chat:session_created")?.[1];
-    expect(sessionCreated).toBeDefined();
-
-    (sessionCreated as (payload: unknown) => void)({
-      workspace_id: "ws-1",
-      chat_session_id: "channel-session-1",
-    });
-
-    expect(invalidateSpy).toHaveBeenCalledWith({
-      queryKey: chatKeys.sessions("ws-1"),
-    });
-
-		invalidateSpy.mockClear();
-		(sessionCreated as (payload: unknown) => void)({
-			workspace_id: "ws-2",
-			chat_session_id: "other-workspace-session",
-		});
-		expect(invalidateSpy).not.toHaveBeenCalled();
   });
 });
 

@@ -1,6 +1,7 @@
 -- name: ListProjects :many
 SELECT * FROM project
 WHERE workspace_id = $1
+  AND can_see_project(sqlc.arg('viewer')::uuid, workspace_id, id)
   AND (sqlc.narg('status')::text IS NULL OR status = sqlc.narg('status'))
   AND (sqlc.narg('priority')::text IS NULL OR priority = sqlc.narg('priority'))
 ORDER BY created_at DESC;

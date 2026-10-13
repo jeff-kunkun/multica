@@ -10,7 +10,6 @@ import (
 	"log/slog"
 	"math/rand"
 	"net"
-	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -30,13 +29,13 @@ import (
 	"github.com/multica-ai/multica/server/internal/cli"
 	"github.com/multica-ai/multica/server/internal/daemon/execenv"
 	"github.com/multica-ai/multica/server/internal/daemon/repocache"
+	"github.com/multica-ai/multica/server/internal/platformskill"
 	"github.com/multica-ai/multica/server/internal/selfexec"
 	"github.com/multica-ai/multica/server/internal/util"
 	"github.com/multica-ai/multica/server/pkg/agent"
 	"github.com/multica-ai/multica/server/pkg/awakeclock"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 	"github.com/multica-ai/multica/server/pkg/redact"
-	"github.com/multica-ai/multica/server/pkg/skillbundle"
 	"github.com/multica-ai/multica/server/pkg/taskfailure"
 )
 
@@ -72,14 +71,6 @@ var errNoWorkspaceRuntimesRegistered = errors.New("failed to register runtimes")
 // platform-side timeout failure reason so the server's existing retry path can
 // recover the task on a fresh attempt.
 var errTaskPrepareTimeout = errors.New("task preparation timed out")
-
-// errSkillBundleUnavailable marks a task that died in preparation because the
-// daemon could not download one of the agent's skill bundles. Carrying it as a
-// sentinel — rather than leaving handleTask to pattern-match the wrapped
-// transport error — is what lets the failure land on the platform-side
-// skill_bundle_unavailable reason instead of agent_error.unknown, which is not
-// on the server's retry allowlist. (MUL-5370)
-var errSkillBundleUnavailable = errors.New("skill bundle unavailable")
 
 const (
 	taskSlotWaitTimeout      = 2 * time.Second
@@ -412,11 +403,10 @@ type repoCacheBackend interface {
 
 // Daemon is the local agent runtime that polls for and executes tasks.
 type Daemon struct {
-	cfg        Config
-	client     *Client
-	repoCache  repoCacheBackend
-	skillCache *SkillBundleCache
-	logger     *slog.Logger
+	cfg       Config
+	client    *Client
+	repoCache repoCacheBackend
+	logger    *slog.Logger
 
 	// terminalReports is the durable outbox for complete/fail callbacks. The
 	// sender hook is production-wired through Client and overridable in focused
@@ -733,7 +723,6 @@ type profileLaunchSpec struct {
 // New creates a new Daemon instance.
 func New(cfg Config, logger *slog.Logger) *Daemon {
 	cacheRoot := filepath.Join(cfg.WorkspacesRoot, ".repos")
-	skillCacheRoot := filepath.Join(cfg.WorkspacesRoot, ".skill-cache", "v1")
 	client := NewClient(cfg.ServerBaseURL)
 	// Tag every daemon HTTP request with the daemon's CLI version so the
 	// server can split logs/metrics by client version (parallel to the CLI).
@@ -742,7 +731,6 @@ func New(cfg Config, logger *slog.Logger) *Daemon {
 		cfg:                         cfg,
 		client:                      client,
 		repoCache:                   repocache.New(cacheRoot, logger),
-		skillCache:                  NewSkillBundleCache(skillCacheRoot),
 		logger:                      logger,
 		terminalReports:             newTerminalReportStore(cfg),
 		terminalReportWakeup:        make(chan struct{}, 1),
@@ -2136,6 +2124,14 @@ func (d *Daemon) run(ctx context.Context, healthLn net.Listener) error {
 		logFields = append(logFields, "profile", d.cfg.Profile)
 	}
 	d.logger.Info("starting daemon", logFields...)
+	// The multica-platform skill is the only one Multica distributes; it lives
+	// in the user-level skill directories, so every CLI finds it without a
+	// per-task copy.
+	if home, err := os.UserHomeDir(); err != nil {
+		d.logger.Warn("platform skill: resolve home directory failed", "error", err)
+	} else if err := platformskill.Install(home); err != nil {
+		d.logger.Warn("platform skill: install incomplete", "error", err)
+	}
 	d.logger.Debug("daemon config resolved",
 		"daemon_id", d.cfg.DaemonID,
 		"device_name", d.cfg.DeviceName,
@@ -2769,7 +2765,7 @@ probeLoop:
 // runtimeVersionProbeConcurrency.
 //
 // The previous implementation probed serially, so total latency was the SUM of
-// every CLI's `--version` call. On an onboarding host with several coding tools
+// every CLI's `--version` call. On a fresh host with several coding tools
 // installed that stacked into many seconds of dead time before the daemon could
 // register — long enough that the desktop runtime step timed out into its empty
 // "no runtime found" state while the probes were still running (MUL-5119).
@@ -4610,13 +4606,11 @@ func (d *Daemon) handleHeartbeatActions(ctx context.Context, runtimeID string, r
 	if resp == nil {
 		return
 	}
-	if resp.PendingUpdate != nil || resp.PendingModelList != nil || resp.PendingLocalSkills != nil || resp.PendingLocalSkillImport != nil {
+	if resp.PendingUpdate != nil || resp.PendingModelList != nil {
 		d.logger.Debug("heartbeat: pending actions",
 			"runtime_id", runtimeID,
 			"update", resp.PendingUpdate != nil,
 			"model_list", resp.PendingModelList != nil,
-			"local_skills", resp.PendingLocalSkills != nil,
-			"local_skill_import", resp.PendingLocalSkillImport != nil,
 		)
 	}
 	if resp.PendingUpdate != nil {
@@ -4625,23 +4619,6 @@ func (d *Daemon) handleHeartbeatActions(ctx context.Context, runtimeID string, r
 	if resp.PendingModelList != nil {
 		if rt := d.findRuntime(runtimeID); rt != nil {
 			go d.handleModelList(ctx, *rt, resp.PendingModelList.ID)
-		}
-	}
-	if resp.PendingLocalSkills != nil {
-		if rt := d.findRuntime(runtimeID); rt != nil {
-			go d.handleLocalSkillList(ctx, *rt, resp.PendingLocalSkills.ID)
-		}
-	}
-	// Prefer the batch field (new backend); fall back to singular (old backend).
-	if len(resp.PendingLocalSkillImports) > 0 {
-		if rt := d.findRuntime(runtimeID); rt != nil {
-			for _, imp := range resp.PendingLocalSkillImports {
-				go d.handleLocalSkillImport(ctx, *rt, imp)
-			}
-		}
-	} else if resp.PendingLocalSkillImport != nil {
-		if rt := d.findRuntime(runtimeID); rt != nil {
-			go d.handleLocalSkillImport(ctx, *rt, *resp.PendingLocalSkillImport)
 		}
 	}
 }
@@ -4905,83 +4882,14 @@ func (d *Daemon) handleModelList(ctx context.Context, rt Runtime, requestID stri
 	})
 }
 
-func (d *Daemon) handleLocalSkillList(ctx context.Context, rt Runtime, requestID string) {
-	d.logger.Info("runtime local skills requested", "runtime_id", rt.ID, "request_id", requestID, "provider", rt.Provider)
-
-	skills, supported, err := listRuntimeLocalSkills(rt.Provider)
-	if err != nil {
-		d.reportLocalSkillListResult(ctx, rt, requestID, map[string]any{
-			"status": "failed",
-			"error":  err.Error(),
-		})
-		return
-	}
-	mcpServers, mcpSupported, err := listRuntimeLocalMcpServers(rt.Provider)
-	if err != nil {
-		d.logger.Warn("runtime local MCP discovery failed", "runtime_id", rt.ID, "provider", rt.Provider, "error", err)
-		mcpServers = []runtimeLocalMcpServerSummary{}
-		mcpSupported = false
-	}
-
-	d.reportLocalSkillListResult(ctx, rt, requestID, map[string]any{
-		"status":        "completed",
-		"skills":        skills,
-		"supported":     supported,
-		"mcp_servers":   mcpServers,
-		"mcp_supported": mcpSupported,
-	})
-}
-
-func (d *Daemon) handleLocalSkillImport(ctx context.Context, rt Runtime, pending PendingLocalSkillImport) {
-	d.logger.Info("runtime local skill import requested", "runtime_id", rt.ID, "request_id", pending.ID, "provider", rt.Provider, "skill_key", pending.SkillKey)
-
-	skill, supported, err := loadRuntimeLocalSkillBundle(rt.Provider, pending.SkillKey)
-	if err != nil {
-		d.reportLocalSkillImportResult(ctx, rt, pending.ID, map[string]any{
-			"status": "failed",
-			"error":  err.Error(),
-		})
-		return
-	}
-	if !supported {
-		d.reportLocalSkillImportResult(ctx, rt, pending.ID, map[string]any{
-			"status": "failed",
-			"error":  fmt.Sprintf("provider %q does not expose runtime local skills", rt.Provider),
-		})
-		return
-	}
-
-	d.reportLocalSkillImportResult(ctx, rt, pending.ID, map[string]any{
-		"status": "completed",
-		"skill":  skill,
-	})
-}
-
 // runtimeReportBackoffs defines the retry schedule for delivering any
-// daemon→server async result (model list, local-skill list, local-skill
-// import). First attempt runs immediately, then we back off. The sum
+// daemon→server async result (model list). First attempt runs immediately, then we back off. The sum
 // (≈6.5s) leaves most of the server-side running timeout (60s) available for
 // discovery and report attempts. Each HTTP attempt has its own client timeout,
 // so this schedule alone is not an end-to-end delivery deadline.
 //
 // Overridable for tests to avoid real sleeps.
 var runtimeReportBackoffs = []time.Duration{0, 500 * time.Millisecond, 2 * time.Second, 4 * time.Second}
-
-// reportLocalSkillListResult delivers a list-report to the server with retry
-// on transient failures. See reportRuntimeResultWithRetry for semantics.
-func (d *Daemon) reportLocalSkillListResult(ctx context.Context, rt Runtime, requestID string, payload map[string]any) {
-	d.reportRuntimeResultWithRetry(ctx, "local_skill_list", rt.ID, requestID, func(ctx context.Context) error {
-		return d.client.ReportLocalSkillListResult(ctx, rt.ID, requestID, payload)
-	})
-}
-
-// reportLocalSkillImportResult delivers an import-report to the server with
-// retry on transient failures.
-func (d *Daemon) reportLocalSkillImportResult(ctx context.Context, rt Runtime, requestID string, payload map[string]any) {
-	d.reportRuntimeResultWithRetry(ctx, "local_skill_import", rt.ID, requestID, func(ctx context.Context) error {
-		return d.client.ReportLocalSkillImportResult(ctx, rt.ID, requestID, payload)
-	})
-}
 
 // reportModelListResult delivers a model-list report to the server with retry
 // on transient failures. Without this the daemon used to fire once and
@@ -5813,7 +5721,6 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, slot int) {
 		"agent_id", task.AgentID,
 		"repos", len(task.Repos),
 		"project_id", task.ProjectID,
-		"autopilot_run_id", task.AutopilotRunID,
 		"trigger_comment_id", task.TriggerCommentID,
 		"resume_session", task.PriorSessionID != "",
 		"reuse_workdir", task.PriorWorkDir != "",
@@ -5897,7 +5804,7 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, slot int) {
 	// whether the task completes, errors, or is cancelled mid-run by the poll
 	// goroutine. Both claude.go and codex.go populate result.Usage even when
 	// runCtx is cancelled, so dropping this on the cancelled path silently
-	// under-reports billing.
+	// under-reports usage.
 	if len(result.Usage) > 0 {
 		if usageErr := d.client.ReportTaskUsage(ctx, task.ID, result.Usage); usageErr != nil {
 			taskLog.Warn("report task usage failed", "error", usageErr)
@@ -5983,8 +5890,8 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, slot int) {
 	d.reportTaskResult(ctx, task.ID, result, taskLog)
 
 	// Write GC metadata after the task finishes so the periodic GC loop
-	// can look up the parent record (issue / chat session / autopilot run /
-	// task itself for quick-create) later. Written last so that a mid-task
+	// can look up the parent record (issue / chat session) later. Written
+	// last so that a mid-task
 	// crash leaves the directory as an orphan (cleaned up by GCOrphanTTL).
 	if result.EnvRoot != "" {
 		if meta, ok := gcMetaForTask(task); ok {
@@ -6054,14 +5961,6 @@ func taskRunFailureReason(err error) string {
 	}
 	if errors.Is(err, errTaskPrepareTimeout) {
 		return taskfailure.ReasonTimeout.String()
-	}
-	// Checked after the prepare deadline: when the whole prepare budget ran
-	// out, runTask has already collapsed the error into errTaskPrepareTimeout
-	// and that classification is the more accurate one. This branch is for the
-	// per-skill download deadline firing inside a prepare budget that still had
-	// room (MUL-5370).
-	if errors.Is(err, errSkillBundleUnavailable) {
-		return taskfailure.ReasonSkillBundleUnavailable.String()
 	}
 	// Structural, not textual: the message ends in "context deadline exceeded",
 	// which Classify routes to agent_error.provider_network — "the connection to
@@ -6475,19 +6374,9 @@ func gcMetaForTask(task Task) (execenv.GCMeta, bool) {
 	case task.ChatSessionID != "":
 		meta.Kind = execenv.GCKindChat
 		meta.ChatSessionID = task.ChatSessionID
-	case task.AutopilotRunID != "":
-		meta.Kind = execenv.GCKindAutopilotRun
-		meta.AutopilotRunID = task.AutopilotRunID
 	case task.IssueID != "":
 		meta.Kind = execenv.GCKindIssue
 		meta.IssueID = task.IssueID
-	case task.QuickCreatePrompt != "":
-		// Quick-create tasks reach WriteGCMeta before the server runs
-		// LinkTaskToIssue, so IssueID is always empty here. Persist the
-		// task ID instead and let the GC loop ask the server for terminal
-		// state via the task gc-check endpoint.
-		meta.Kind = execenv.GCKindQuickCreate
-		meta.TaskID = task.ID
 	default:
 		return execenv.GCMeta{}, false
 	}
@@ -6586,12 +6475,6 @@ func providerNeedsInlineSystemPrompt(provider string) bool {
 // changes, so binding it to workdir reuse discards healthy conversation history
 // and forces the model to reconstruct it through `multica chat history`.
 //
-// Hermes is also independent of cwd: its transcript lives in HERMES_HOME's
-// state.db. sessionHomeReachable checks whether the conversation-scoped store
-// mounted by execenv holds history, or whether the task-local home was reused.
-// Requiring the prior cwd as well would discard reachable history whenever a
-// local_directory task gets a new worktree (#9062). An empty or unavailable
-// store must still drop the resume, even when the cwd matches (#6806).
 // Codex also has a conversation-scoped store for local_directory tasks. A
 // continued worktree may use a new cwd while retaining its branch and rollout.
 // Managed Codex tasks still require the same existing directory.
@@ -6621,21 +6504,19 @@ func codexWorktreeResumeEligible(env *execenv.Environment, store string) bool {
 	return env != nil && env.LocalWorktree != nil && env.LocalWorktree.Continued && env.CodexHome != "" && store != ""
 }
 
-func gateResumeToReachableSession(task *Task, taskCtx *execenv.TaskContextForEnv, provider, envWorkDir string, sessionHomeReachable, refusesMissingSessionCwd, codexWorktreeResumeEligible bool, taskLog *slog.Logger) bool {
+func gateResumeToReachableSession(task *Task, taskCtx *execenv.TaskContextForEnv, provider, envWorkDir string, refusesMissingSessionCwd, codexWorktreeResumeEligible bool, taskLog *slog.Logger) bool {
 	var reachable bool
 	if providerUsesPiSessionFile(provider) {
 		reachable = piSessionResumable(task.PriorSessionID, refusesMissingSessionCwd)
-	} else if provider == "hermes" {
-		reachable = sessionHomeReachable
 	} else if provider == "codex" && codexWorktreeResumeEligible {
-		reachable = sessionHomeReachable
+		reachable = true
 	} else {
 		// Compare the directories, not the spelling. Reuse runs in the canonical
 		// path it validated and locked, which need not be character-identical to
 		// the PriorWorkDir the server sent — a symlinked workspaces root is enough
 		// to make them differ. A string compare would then silently drop the prior
 		// session on every follow-up task in that installation.
-		reachable = task.PriorWorkDir != "" && sameExistingDir(envWorkDir, task.PriorWorkDir) && sessionHomeReachable
+		reachable = task.PriorWorkDir != "" && sameExistingDir(envWorkDir, task.PriorWorkDir)
 	}
 	if !reachable && task.PriorSessionID != "" {
 		taskLog.Info("dropping prior session: session store not reachable from this run",
@@ -6643,7 +6524,6 @@ func gateResumeToReachableSession(task *Task, taskCtx *execenv.TaskContextForEnv
 			"session_id", task.PriorSessionID,
 			"prior_workdir", task.PriorWorkDir,
 			"workdir", envWorkDir,
-			"session_home_reachable", sessionHomeReachable,
 		)
 		task.PriorSessionID = ""
 		taskCtx.PriorSessionResumed = false
@@ -6805,37 +6685,6 @@ func piSessionRecordedCwd(path string) (string, bool) {
 		}
 	}
 	return "", false
-}
-
-// sessionHomeReachable reports whether a session recorded by a prior task on
-// this conversation can still be found from THIS run's environment, for
-// providers that key their sessions somewhere other than the cwd.
-//
-// Only Hermes does today: its transcripts live in `<HERMES_HOME>/state.db`,
-// which is the per-task overlay under envRoot. Forwarding a session id into a
-// database that does not hold it is what produced a conversation restarting
-// from zero every turn (GH #6806), so the question has to be about the
-// database, not about the plumbing:
-//
-//   - With the conversation's session store mounted, the answer is whether that
-//     store actually holds a transcript. A mount onto an empty store is the
-//     normal shape of a first turn — and also of a store the GC reclaimed
-//     between turns, a switched Hermes profile, or a dangling link left by an
-//     older overlay. Reading "mounted" as "resumable" would forward a dead id
-//     into every one of those.
-//   - With no store, the transcript is the overlay's own task-local file, which
-//     survives exactly when this run reused the prior task's env root.
-//
-// Every other provider is keyed by cwd or handles its independently addressed
-// store in gateResumeToReachableSession, so this predicate returns true.
-func sessionHomeReachable(provider string, env *execenv.Environment, envReused bool) bool {
-	if provider != "hermes" {
-		return true
-	}
-	if env.HermesSessionStore != "" {
-		return env.HermesSessionHistoryPresent
-	}
-	return envReused
 }
 
 // shouldReusePriorWorkdir keeps the local_directory lock and cross-agent
@@ -7020,165 +6869,6 @@ func waitCodexRolloutPresent(ctx context.Context, codexHome, sessionID string) b
 	}
 }
 
-func (d *Daemon) ensureTaskSkillBundles(ctx context.Context, task *Task) error {
-	if task == nil || task.Agent == nil || len(task.Agent.SkillRefs) == 0 {
-		return nil
-	}
-	resolved := make(map[string]SkillData, len(task.Agent.SkillRefs))
-	misses := make([]SkillRefData, 0)
-	for _, ref := range task.Agent.SkillRefs {
-		ref := ref
-		var bundle SkillData
-		if err := d.skillCache.WithRefLock(task.WorkspaceID, ref, func() error {
-			if cached, ok := d.skillCache.Load(task.WorkspaceID, ref); ok {
-				bundle = cached
-				return nil
-			}
-			misses = append(misses, ref)
-			return nil
-		}); err != nil {
-			return fmt.Errorf("load skill bundle cache: %w", err)
-		}
-		if bundle.ID != "" {
-			resolved[skillRefKey(ref.Source, ref.ID)] = bundle
-		}
-	}
-
-	// Resolve each missing bundle in its own request, caching it the moment it
-	// arrives. The download is the slow part on jittery links, so fetching the
-	// whole set in one atomic body read meant a single timeout discarded all
-	// progress and the cache never converged — every dispatch re-downloaded
-	// everything and timed out again. Per-skill, each download fits its own
-	// size-scaled deadline and is persisted independently, so even a dispatch
-	// that ultimately fails leaves the skills it did fetch cached for the next
-	// one. (GitHub #4505 / MUL-3650)
-	for _, ref := range misses {
-		started := time.Now()
-		bundle, stats, err := d.resolveSkillBundle(ctx, task, ref)
-		if err != nil {
-			if isSkillBundleTransferFailure(err) {
-				// Only transport failures and incomplete 2xx bodies get the
-				// network diagnosis. HTTP error responses and invalid complete
-				// payloads retain their server semantics instead of being
-				// relabelled as connectivity problems (GitHub #7386).
-				return fmt.Errorf("%w: %s: %w",
-					errSkillBundleUnavailable,
-					describeSkillBundleFailure(ref, stats, time.Since(started)),
-					err)
-			}
-			return fmt.Errorf("%w: %w", errSkillBundleUnavailable, err)
-		}
-		resolved[skillRefKey(bundle.Source, bundle.ID)] = bundle
-	}
-
-	skills := make([]SkillData, 0, len(task.Agent.SkillRefs))
-	for _, ref := range task.Agent.SkillRefs {
-		bundle, ok := resolved[skillRefKey(ref.Source, ref.ID)]
-		if !ok {
-			return fmt.Errorf("skill bundle missing after resolve: skill_id=%s source=%s hash=%s", ref.ID, ref.Source, ref.Hash)
-		}
-		skills = append(skills, bundle)
-	}
-	task.Agent.Skills = skills
-	return nil
-}
-
-// resolveSkillBundle downloads one skill bundle and writes it to the on-disk
-// cache before returning. The request runs under its own deadline, scaled to
-// the bundle's declared size rather than the daemon's fixed 30s control-plane
-// timeout, so a large bundle on a slow link is given room to finish instead of
-// being cut off mid-body. Caching on success is what lets the resolve converge
-// across dispatches. (GitHub #4505 / MUL-3650)
-func (d *Daemon) resolveSkillBundle(ctx context.Context, task *Task, ref SkillRefData) (SkillData, TransferStats, error) {
-	reqCtx, cancel := context.WithTimeout(ctx, skillBundleResolveTimeout(ref.SizeBytes))
-	defer cancel()
-
-	bundle, stats, err := d.client.ResolveSkillBundle(reqCtx, task.RuntimeID, task.ID, ref)
-	if err != nil {
-		return SkillData{}, stats, err
-	}
-	// The resolve endpoint serves the agent's *current* bundle and hash, which
-	// may differ from the claim-time ref when the skill was edited between
-	// claim and prepare (see ResolveTaskSkillBundles). So confirm only that the
-	// server returned the skill we asked for (source/id), then validate the
-	// bundle for self-consistency against a ref derived from itself — pinning
-	// it to the possibly-stale requested hash would reject a legitimate update.
-	if bundle.Source != ref.Source || bundle.ID != ref.ID {
-		return SkillData{}, stats, fmt.Errorf("resolve skill bundle returned wrong skill: requested source=%s id=%s, got source=%s id=%s", ref.Source, ref.ID, bundle.Source, bundle.ID)
-	}
-	bundleRef := skillRefFromBundle(bundle)
-	validationRef := bundleRef
-	if ref.Source == skillbundle.SourcePlugin {
-		validationRef = ref
-	}
-	if !validateSkillBundle(validationRef, bundle) {
-		return SkillData{}, stats, fmt.Errorf("resolve skill bundle returned invalid bundle: skill_id=%s source=%s hash=%s", bundle.ID, bundle.Source, bundle.Hash)
-	}
-	if err := d.skillCache.WithRefLock(task.WorkspaceID, validationRef, func() error {
-		return d.skillCache.Store(task.WorkspaceID, bundle)
-	}); err != nil {
-		if d.logger != nil {
-			d.logger.Warn("skill bundle cache store failed; continuing with downloaded bundle",
-				"workspace_id", task.WorkspaceID,
-				"skill_id", bundle.ID,
-				"source", bundle.Source,
-				"hash", bundle.Hash,
-				"error", err,
-			)
-		}
-	}
-	return bundle, stats, nil
-}
-
-// isSkillBundleTransferFailure identifies errors for which byte-level network
-// diagnostics are meaningful. A requestError is an explicit server response;
-// malformed but complete JSON and bundle-validation errors are server payload
-// problems. Neither should be presented as a slow or dead network link. In
-// particular, json.Decoder can synthesize io.ErrUnexpectedEOF after its source
-// ended with a clean EOF, so that decoder error alone is not transport proof.
-func isSkillBundleTransferFailure(err error) bool {
-	var reqErr *requestError
-	if errors.As(err, &reqErr) {
-		return false
-	}
-	if errors.Is(err, context.DeadlineExceeded) {
-		return true
-	}
-	var netErr net.Error
-	return errors.As(err, &netErr)
-}
-
-// describeSkillBundleFailure renders the diagnostic half of a failed bundle
-// download: what was being fetched, how many HTTP response-body bytes arrived,
-// the separately declared decoded content size, and whether this host has a
-// proxy at all.
-//
-// The three facts answer the three wrong turns the old text invited. "network
-// error downloading skill X" instead of "skill X unavailable" stops the reader
-// blaming the skill. The response byte count distinguishes a dead link from a
-// partial response without pretending JSON wire bytes and decoded skill-content
-// bytes form one progress ratio. The proxy note catches the case behind GitHub
-// #7386, where a daemon that inherited no proxy on a cross-border link never got
-// a byte through while the same host succeeded through a local proxy.
-func describeSkillBundleFailure(ref SkillRefData, stats TransferStats, elapsed time.Duration) string {
-	elapsed = elapsed.Round(time.Millisecond)
-	var transfer string
-	switch {
-	case !stats.ResponseStarted:
-		transfer = fmt.Sprintf("no successful response from server after %s overall", elapsed)
-	case stats.BytesRead == 0:
-		transfer = fmt.Sprintf("a successful response started but delivered no body bytes before failing after %s overall", elapsed)
-	default:
-		// BytesRead is a single-attempt high-water mark, while elapsed covers
-		// the logical call including retries and backoff. State both scopes
-		// rather than deriving a rate from mismatched measurements.
-		transfer = fmt.Sprintf("received up to %s of response body data in one attempt; failed after %s overall",
-			formatBytes(stats.BytesRead), elapsed)
-	}
-	return fmt.Sprintf("network error downloading skill %q (id=%s): %s; declared skill content size %s; %s; the skill content is not at fault",
-		ref.Name, ref.ID, transfer, formatBytes(ref.SizeBytes), proxyEnvSummary())
-}
-
 // proxyEnvSummary reports whether the daemon inherited any proxy setting. It
 // names the variable but never its value: proxy URLs routinely embed
 // credentials, and this string lands in task failure text the whole workspace
@@ -7222,23 +6912,6 @@ const (
 	// to cover slow, jittery links rather than ideal bandwidth.
 	skillBundleResolveMinThroughput = 50 * 1024
 )
-
-// skillBundleResolveTimeout returns the deadline budget for downloading a
-// bundle of the given size: at least skillBundleResolveMinTimeout, scaled up at
-// skillBundleResolveMinThroughput, and capped at skillBundleResolveMaxTimeout.
-func skillBundleResolveTimeout(sizeBytes int64) time.Duration {
-	if sizeBytes <= 0 {
-		return skillBundleResolveMinTimeout
-	}
-	scaled := time.Duration(sizeBytes/skillBundleResolveMinThroughput) * time.Second
-	if scaled < skillBundleResolveMinTimeout {
-		return skillBundleResolveMinTimeout
-	}
-	if scaled > skillBundleResolveMaxTimeout {
-		return skillBundleResolveMaxTimeout
-	}
-	return scaled
-}
 
 func (d *Daemon) startTaskPrepareLeaseExtender(ctx context.Context, task Task, taskLog *slog.Logger) func() {
 	refresh := d.prepareLeaseRefresh
@@ -7514,37 +7187,6 @@ func (d *Daemon) effectiveTaskPrepareTimeout() time.Duration {
 	return defaultTaskPrepareTimeout
 }
 
-func skillRefKey(source, id string) string {
-	return source + "\x00" + id
-}
-
-func skillRefFromBundle(bundle SkillData) SkillRefData {
-	files := make([]skillbundle.File, 0, len(bundle.Files))
-	for _, file := range bundle.Files {
-		files = append(files, skillbundle.File{Path: file.Path, Content: file.Content})
-	}
-	manifest := skillbundle.BuildManifest(skillbundle.Skill{
-		ID:          bundle.ID,
-		Source:      bundle.Source,
-		Name:        bundle.Name,
-		Description: bundle.Description,
-		Content:     bundle.Content,
-		Files:       files,
-	})
-	fileRefs := make([]SkillFileRefData, 0, len(manifest.Files))
-	for _, file := range manifest.Files {
-		fileRefs = append(fileRefs, SkillFileRefData{Path: file.Path, SHA256: file.SHA256, SizeBytes: file.SizeBytes})
-	}
-	return SkillRefData{
-		ID:        bundle.ID,
-		Source:    bundle.Source,
-		Hash:      manifest.Hash,
-		SizeBytes: manifest.SizeBytes,
-		FileCount: manifest.FileCount,
-		Files:     fileRefs,
-	}
-}
-
 // taskModelSelection is what a task actually launches with: the model
 // selector plus the capability overrides that survived validation.
 type taskModelSelection struct {
@@ -7806,16 +7448,9 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	stopPrepareLease := d.startTaskPrepareLeaseExtender(prepareCtx, task, taskLog)
 	defer stopPrepareLease()
 
-	if err := d.ensureTaskSkillBundles(prepareCtx, &task); err != nil {
-		return TaskResult{}, err
-	}
-	phaseRecorder.Mark(taskPhaseSkillsReady)
-
 	agentName := "agent"
-	var skills []SkillData
 	var instructions string
 	agentName = task.Agent.Name
-	skills = task.Agent.Skills
 	instructions = task.Agent.Instructions
 
 	// Prepare isolated execution environment.
@@ -7837,24 +7472,12 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		AgentID:                          task.AgentID,
 		AgentName:                        agentName,
 		AgentInstructions:                instructions,
-		AgentSkills:                      convertSkillsForEnv(skills),
-		DisabledRuntimeSkills:            convertDisabledRuntimeSkillsForEnv(task.Agent, task.RuntimeID, provider),
 		Repos:                            convertReposForEnv(task.Repos),
 		ProjectID:                        task.ProjectID,
 		ProjectTitle:                     task.ProjectTitle,
 		ProjectDescription:               task.ProjectDescription,
 		ProjectResources:                 convertProjectResourcesForEnv(task.ProjectResources),
 		ChatSessionID:                    task.ChatSessionID,
-		ChatChannelType:                  task.ChatChannelType,
-		ChatChannelDeliversFiles:         task.ChatChannelDeliversFiles,
-		AutopilotRunID:                   task.AutopilotRunID,
-		AutopilotID:                      task.AutopilotID,
-		AutopilotTitle:                   task.AutopilotTitle,
-		AutopilotDescription:             task.AutopilotDescription,
-		AutopilotSource:                  task.AutopilotSource,
-		AutopilotTriggerPayload:          strings.TrimSpace(string(task.AutopilotTriggerPayload)),
-		QuickCreatePrompt:                task.QuickCreatePrompt,
-		IsSquadLeader:                    taskIsSquadLeader(task),
 		RequestingUserName:               task.RequestingUserName,
 		RequestingUserProfileDescription: task.RequestingUserProfileDescription,
 		InitiatorType:                    task.InitiatorType,
@@ -7864,7 +7487,6 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		WorkspaceContext:                 task.WorkspaceContext,
 		IssueStatuses:                    convertIssueStatusesForEnv(task.IssueStatuses),
 		IssueStatusesOmitted:             task.IssueStatusesOmitted,
-		ConnectedApps:                    task.ConnectedApps,
 	}
 
 	// A local_directory task gets a fresh CODEX_HOME but mounts the same
@@ -7970,49 +7592,6 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	var agentMcpConfig json.RawMessage
 	var effectiveMcpConfig json.RawMessage
 	var cursorMcpAuthSource string
-	remoteMCPConfig, remoteMCPDiagnostics, remoteMCPBrokers, remoteMCPErr := startTaskRemoteMCPBrokers(
-		prepareCtx, ctx, task.ID, provider, task.RemoteMCPConnections,
-		func(resolveCtx context.Context, contributionID string) (http.Header, error) {
-			return d.client.ResolveRemoteMCPCredential(resolveCtx, task.RemoteMCPDaemonToken, task.ID, contributionID)
-		},
-		taskLog,
-	)
-	if remoteMCPErr != nil {
-		return TaskResult{}, fmt.Errorf("prepare Remote MCP broker: %w", remoteMCPErr)
-	}
-	if remoteMCPBrokers != nil {
-		defer remoteMCPBrokers.Close()
-	}
-	for _, diagnostic := range remoteMCPDiagnostics {
-		taskLog.Warn("Remote MCP degraded", "reason", diagnostic)
-	}
-
-	// Agent-trigger plugin hooks, as a second local MCP server beside the
-	// broker. A failure to start it degrades to no plugin tools rather than
-	// failing the task: an agent that cannot reach a plugin should still work
-	// on the issue, which is the same rule that makes a failing tool call a
-	// tool error rather than a task error.
-	pluginHookConfig, pluginHookServer, pluginHookErr := startTaskPluginHookMCP(
-		ctx, task.ID, task.PluginHookTools,
-		func(callCtx context.Context, taskID, installationID, hookKey string, input json.RawMessage) (json.RawMessage, error) {
-			return d.client.InvokeAgentPluginHook(callCtx, task.RemoteMCPDaemonToken, taskID, installationID, hookKey, input)
-		},
-		taskLog,
-	)
-	if pluginHookErr != nil {
-		taskLog.Warn("plugin hook tools unavailable", "error", pluginHookErr)
-	}
-	if pluginHookServer != nil {
-		defer pluginHookServer.Close()
-	}
-	if len(pluginHookConfig) > 0 {
-		merged, mergeErr := mergeTaskRemoteMCPConfig(remoteMCPConfig, pluginHookConfig)
-		if mergeErr != nil {
-			taskLog.Warn("could not merge plugin hook MCP config", "error", mergeErr)
-		} else {
-			remoteMCPConfig = merged
-		}
-	}
 	if task.Agent != nil {
 		agentMcpConfig = task.Agent.McpConfig
 		effectiveMcpConfig = agentMcpConfig
@@ -8022,13 +7601,6 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 				"error", mergeErr,
 			)
 		} else {
-			effectiveMcpConfig = merged
-		}
-		if len(remoteMCPConfig) > 0 {
-			merged, mergeErr := mergeTaskRemoteMCPConfig(effectiveMcpConfig, remoteMCPConfig)
-			if mergeErr != nil {
-				return TaskResult{}, fmt.Errorf("merge Remote MCP broker configuration: %w", mergeErr)
-			}
 			effectiveMcpConfig = merged
 		}
 		if provider == "cursor" {
@@ -8044,10 +7616,8 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	if task.Agent != nil && provider == "openclaw" {
 		openclawMode, openclawGateway = decodeOpenclawRuntimeConfig(task.Agent.RuntimeConfig, d.logger)
 	}
-	var agentEnvOverrides map[string]string
 	var agentCustomArgs []string
 	if task.Agent != nil {
-		agentEnvOverrides = task.Agent.CustomEnv
 		agentCustomArgs = task.Agent.CustomArgs
 	}
 	// Effective Codex CLI args the task will launch with, normalized through the
@@ -8067,88 +7637,10 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		extraArgs := append(append([]string{}, profileFixedArgs...), defaultArgsForProvider(d.cfg, provider)...)
 		codexSandboxArgs = agent.NormalizeCodexLaunchArgs(extraArgs, agentCustomArgs, effectiveMcpConfig, d.logger)
 	}
-	// Hermes: resolve the overlay source home through one resolver contract —
-	// the selection parsed from custom_args (agent.ParseHermesProfileArgs) plus
-	// the agent's custom_env HERMES_HOME feed execenv.ResolveHermesProfile, which
-	// reproduces Hermes' own profile semantics (root derivation, explicit vs.
-	// sticky selection, reserved/invalid failure). A reserved/invalid selection
-	// fails the task closed, matching Hermes' sys.exit(1). The selected source
-	// home is exported to hermesEnv["HERMES_HOME"] so ${HERMES_HOME} in a
-	// profile's skills.external_dirs expands against the selected profile home,
-	// as native Hermes does before loading config.yaml. The parsed occurrence is
-	// stripped from the acp argv at launch (only when the overlay is built) so
-	// the flag can't re-point HERMES_HOME past the overlay.
-	var hermesSourceHome string
-	var hermesSourceMustExist bool
-	var hermesEnv map[string]string
-	var hermesMemoryStore string
-	var hermesSessionStore string
-	if provider == "hermes" {
-		// Resolve from the argv hermes will actually parse — launch prefix,
-		// the filtered custom args, then `acp` — which agent.HermesLaunchArgv
-		// assembles the same way the backend does. A custom runtime profile's
-		// fixed_args are the launch prefix now, so they are scanned before
-		// custom_args, and the backend's own `acp` token closes the argv and
-		// participates in the scan. Approximating that argv reads a different
-		// profile than the process does, and the overlay ends up seeded from
-		// the wrong home (GH #7046).
-		sel := agent.ParseHermesProfileArgs(agent.HermesLaunchArgv(profileFixedArgs, agentCustomArgs, d.logger))
-		res := execenv.ResolveHermesProfile(agentEnvOverrides["HERMES_HOME"], sel.Name, sel.Found, sel.Inline)
-		if res.Err != nil {
-			return TaskResult{}, fmt.Errorf("resolve hermes profile: %w", res.Err)
-		}
-		hermesSourceHome = res.SourceHome
-		hermesSourceMustExist = res.MustExist
-		// Which home the overlay is seeded from decides whether the task sees
-		// the user's provider config at all, and it is derived from the daemon
-		// PROCESS environment — invisible from the shell the user tests
-		// `hermes acp` in, which is why a mismatch reads as "works by hand,
-		// fails under Multica" (GH #6872). One line, at Info, so the answer is
-		// in the daemon log before anything fails rather than reconstructed
-		// afterwards.
-		taskLog.Info("hermes home resolved",
-			"source_home", hermesSourceHome,
-			"from_custom_env", strings.TrimSpace(agentEnvOverrides["HERMES_HOME"]) != "",
-			"must_exist", hermesSourceMustExist,
-		)
-		hermesEnv = sanitizeAgentEnv(agentEnvOverrides)
-		if hermesEnv == nil {
-			hermesEnv = map[string]string{}
-		}
-		hermesEnv["HERMES_HOME"] = res.SourceHome
-		// The overlay links memories/ here so the agent's long-term memory
-		// survives the task instead of being reset by every run (#6638). Keyed on
-		// the resolved source home so switching an agent's profile switches its
-		// memory line, matching Hermes' own "a profile is an isolated instance"
-		// model. Guarded from the GC for the whole task, as the Codex store below.
-		if store := execenv.HermesMemoryStorePath(d.cfg.Profile, task.AgentID, res.SourceHome); store != "" {
-			hermesMemoryStore = store
-			d.markActiveStore(store)
-			defer d.unmarkActiveStore(store)
-		}
-		// The overlay links state.db here so the conversation transcript
-		// survives the task and a follow-up turn can actually resume it
-		// (GH #6806). Keyed on (agent, resolved source home, conversation):
-		// tasks of one conversation are serial, so the shard has a single
-		// writer, while two issues never share a database. Guarded from the GC
-		// for the whole task, as the stores above and below.
-		if store := execenv.HermesSessionStorePath(d.cfg.Profile, task.AgentID, res.SourceHome, taskCtx); store != "" {
-			hermesSessionStore = store
-			d.markActiveStore(store)
-			defer d.unmarkActiveStore(store)
-		}
-	}
-	// Reasonix locates its user config from the environment (REASONIX_HOME, and
-	// the platform config dirs behind it), which an agent's custom_env may
-	// re-point or clear. The per-task reasonix.toml has to restate the
-	// permissions from whichever config the child ends up loading, so the deny
-	// rules the runtime owner set there survive the task-scoped config that
-	// overrides them — hence the same sanitized env the child is launched with.
+	// Reasonix and the other removed engines no longer resolve a task
+	// environment; the param stays zero so a stale runtime id cannot seed a
+	// config for a backend this daemon cannot launch.
 	var reasonixEnv map[string]string
-	if provider == "reasonix" {
-		reasonixEnv = sanitizeAgentEnv(agentEnvOverrides)
-	}
-	envReused := false
 	priorClaim, priorWorkDir, lockedPriorInfo, reusable, reuseErr := d.lockReusablePriorEnvRoot(ctx, task, localAssignment, envClaim.RootDir())
 	if reuseErr != nil {
 		// Cancelled while waiting for the previous run to let go of its
@@ -8172,22 +7664,17 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			// The canonical path the lock was taken on. Handing Reuse the raw
 			// PriorWorkDir instead would re-resolve it, so the directory we
 			// locked and the directory we use could differ.
-			WorkDir:               priorWorkDir,
-			Provider:              provider,
-			CodexVersion:          codexVersion,
-			ResumeSessionID:       task.PriorSessionID,
-			OpenclawBin:           openclawBin,
-			McpConfig:             effectiveMcpConfig,
-			CursorMcpAuthSource:   cursorMcpAuthSource,
-			OpenclawGateway:       openclawGateway,
-			HermesSourceHome:      hermesSourceHome,
-			HermesSourceMustExist: hermesSourceMustExist,
-			HermesEnv:             hermesEnv,
-			HermesMemoryStore:     hermesMemoryStore,
-			HermesSessionStore:    hermesSessionStore,
-			ReasonixEnv:           reasonixEnv,
-			CodexCustomArgs:       codexSandboxArgs,
-			Task:                  taskCtx,
+			WorkDir:             priorWorkDir,
+			Provider:            provider,
+			CodexVersion:        codexVersion,
+			ResumeSessionID:     task.PriorSessionID,
+			OpenclawBin:         openclawBin,
+			McpConfig:           effectiveMcpConfig,
+			CursorMcpAuthSource: cursorMcpAuthSource,
+			OpenclawGateway:     openclawGateway,
+			ReasonixEnv:         reasonixEnv,
+			CodexCustomArgs:     codexSandboxArgs,
+			Task:                taskCtx,
 		})
 		if err != nil {
 			return TaskResult{}, asEnvironmentSetupFailure(fmt.Errorf("reuse execution environment: %w", err))
@@ -8206,10 +7693,6 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 				env = nil
 			}
 		}
-		// Reuse can decline (nil) and fall through to a fresh Prepare below.
-		// Whether it did decides whether an env-root-scoped session store — the
-		// Hermes overlay's task-local state.db — carried over from the prior task.
-		envReused = env != nil
 	}
 	if env == nil {
 		var err error
@@ -8223,21 +7706,16 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			AgentName:       agentName,
 			// This run already holds the claim (envClaim above) and the reset
 			// it implies; preparation must not try to take it again.
-			EnvRootPreclaimed:     true,
-			Provider:              provider,
-			CodexVersion:          codexVersion,
-			OpenclawBin:           openclawBin,
-			McpConfig:             effectiveMcpConfig,
-			CursorMcpAuthSource:   cursorMcpAuthSource,
-			OpenclawGateway:       openclawGateway,
-			HermesSourceHome:      hermesSourceHome,
-			HermesSourceMustExist: hermesSourceMustExist,
-			HermesEnv:             hermesEnv,
-			HermesMemoryStore:     hermesMemoryStore,
-			HermesSessionStore:    hermesSessionStore,
-			ReasonixEnv:           reasonixEnv,
-			CodexCustomArgs:       codexSandboxArgs,
-			Task:                  taskCtx,
+			EnvRootPreclaimed:   true,
+			Provider:            provider,
+			CodexVersion:        codexVersion,
+			OpenclawBin:         openclawBin,
+			McpConfig:           effectiveMcpConfig,
+			CursorMcpAuthSource: cursorMcpAuthSource,
+			OpenclawGateway:     openclawGateway,
+			ReasonixEnv:         reasonixEnv,
+			CodexCustomArgs:     codexSandboxArgs,
+			Task:                taskCtx,
 		}
 		if localAssignment.UsesWorktree() {
 			prepParams.LocalWorktree = &execenv.LocalWorktreeParams{LocalPath: localAssignment.AbsPath}
@@ -8502,7 +7980,6 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// the gate and the backend cannot disagree about which one is running.
 	resumeReachable := gateResumeToReachableSession(
 		&task, &taskCtx, provider, env.WorkDir,
-		sessionHomeReachable(provider, env, envReused),
 		providerRefusesMissingSessionCwd(provider, !usesCustomProfileCommand),
 		provider == "codex" && codexWorktreeResumeEligible(env, execenv.CodexSessionStorePath(d.cfg.Profile, taskCtx)),
 		taskLog,
@@ -8555,26 +8032,6 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	if checkoutMode := repoCheckoutModeFor(provider, runtime.GOOS); checkoutMode != "" {
 		agentEnv[repoCheckoutModeEnv] = checkoutMode
 	}
-	if task.AutopilotRunID != "" {
-		agentEnv["MULTICA_AUTOPILOT_RUN_ID"] = task.AutopilotRunID
-	}
-	if task.AutopilotID != "" {
-		agentEnv["MULTICA_AUTOPILOT_ID"] = task.AutopilotID
-	}
-	// Quick-create marker — when set, the multica CLI's `issue create`
-	// command stamps the new issue with origin_type=quick_create +
-	// origin_id=<task_id> so the completion handler can find it
-	// deterministically (see GetIssueByOrigin).
-	if task.QuickCreatePrompt != "" {
-		agentEnv["MULTICA_QUICK_CREATE_TASK_ID"] = task.ID
-		if len(task.QuickCreateAttachmentIDs) > 0 {
-			if raw, err := json.Marshal(task.QuickCreateAttachmentIDs); err == nil {
-				agentEnv["MULTICA_QUICK_CREATE_ATTACHMENT_IDS"] = string(raw)
-			} else {
-				taskLog.Warn("quick-create attachment ids: marshal failed; skipping env injection", "error", err)
-			}
-		}
-	}
 	// Ensure the multica CLI is on PATH inside the agent's environment.
 	// Some runtimes (e.g. Codex) run in an isolated sandbox that may not
 	// inherit the daemon's PATH. Prepend the directory of the running
@@ -8593,9 +8050,6 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// user's existing state (MUL-5578). The Multica CLI is the exception:
 	// MULTICA_TASK_CONFIG_ROOT above redirects its implicit profile lookup to
 	// private task-local state and prevents Owner-profile fallback.
-	// (Hermes HERMES_HOME is applied after custom_env below so the per-task
-	// overlay can win over a user-set HERMES_HOME; see
-	// layerCustomEnvAndHermesHome.)
 	// Point Cursor at per-task project state when managed MCP is present.
 	// The workdir .cursor/mcp.json carries the managed server list, while
 	// CURSOR_DATA_DIR isolates the matching project approvals from the user's
@@ -8628,39 +8082,9 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	if task.Agent != nil {
 		agentCustomEnv = task.Agent.CustomEnv
 	}
-	layerCustomEnvAndHermesHome(agentEnv, agentCustomEnv, env.HermesHome, d.logger)
-	if provider == "reasonix" {
-		reasonixStateHome, err := prepareReasonixTaskStateHome(d.cfg.Profile, task.RuntimeID, task.AgentID)
-		if err != nil {
-			return TaskResult{}, fmt.Errorf("prepare reasonix state home: %w", err)
-		}
-		agentEnv["REASONIX_STATE_HOME"] = reasonixStateHome
-	}
-	if provider == "dsh" {
-		dshSessionRoot, err := prepareDshTaskSessionRoot(d.cfg.Profile, task.RuntimeID, task.AgentID)
-		if err != nil {
-			return TaskResult{}, fmt.Errorf("prepare dsh session root: %w", err)
-		}
-		agentEnv["MULTICA_DSH_SESSION_ROOT"] = dshSessionRoot
-		agentEnv["DSH_TELEMETRY_DISABLED"] = "1"
-	}
+	layerCustomEnv(agentEnv, agentCustomEnv, d.logger)
 	if err := configureCodexTaskShellEnvironment(provider, env.CodexHome, os.Environ(), agentEnv, agentCustomEnv, d.logger); err != nil {
 		return TaskResult{}, err
-	}
-	// The overlay is authoritative once built, so nothing on the command line
-	// may re-point HERMES_HOME out of it. Both argv regions are stripped
-	// together, against the same assembled argv the resolver read: a selection
-	// can straddle them (a prefix ending in a bare `-p` captures the first
-	// custom arg), which per-region stripping cannot see.
-	var hermesOverlayCustomArgs []string
-	hermesOverlayActive := provider == "hermes" && env != nil && env.HermesHome != ""
-	if hermesOverlayActive {
-		var rawCustomArgs []string
-		if task.Agent != nil {
-			rawCustomArgs = task.Agent.CustomArgs
-		}
-		profileFixedArgs, hermesOverlayCustomArgs = agent.StripHermesProfileSelectors(
-			profileFixedArgs, rawCustomArgs, d.logger)
 	}
 	// Resolve the backend through the unified runtime resolver: built-in
 	// runtime identities (e.g. "omp") dispatch through NewRuntime, protocol
@@ -8729,11 +8153,6 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		customArgs = task.Agent.CustomArgs
 		mcpConfig = effectiveMcpConfig
 	}
-	if hermesOverlayActive {
-		// Stripped above, alongside the launch prefix. A skill-less hermes task
-		// has no overlay to protect and keeps its flags untouched.
-		customArgs = hermesOverlayCustomArgs
-	}
 	thinkingLevel := ""
 	serviceTier := ""
 	if task.Agent != nil {
@@ -8780,8 +8199,6 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		ThinkingLevel:          thinkingLevel,
 		ServiceTier:            serviceTier,
 		OpenclawMode:           openclawMode,
-		ClaudeSettingsPath:     env.ClaudeSettingsPath,
-		QwenpawWorkspace:       env.QwenpawWorkspace,
 	}
 	// Some providers do not reliably load the per-task runtime config files we
 	// write into the task workdir:
@@ -8807,21 +8224,6 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// context and bloats every turn.
 	if providerNeedsInlineSystemPrompt(provider) {
 		execOpts.SystemPrompt = runtimeBrief
-	}
-
-	// A quick-actions refresh task from a server that predates server-side
-	// generation (MUL-5573). This daemon no longer has a suggestion pass to run
-	// it with, and it must NOT fall through to the ordinary chat path below:
-	// the task carries no user message, so the agent would answer a prompt
-	// nobody wrote and that server would persist the result as a real assistant
-	// reply. Complete it empty instead — the same shape the retired pass
-	// produced on this task, which that server writes no row for. The user's
-	// refresh spinner resolves via the client's own timeout.
-	if task.RegenerateQuickActionsFor != "" {
-		taskLog.Warn("refusing quick-actions refresh task from an older server; complete the daemon upgrade by updating the server",
-			"target_task", task.RegenerateQuickActionsFor,
-		)
-		return TaskResult{Status: "completed", Comment: "", WorkDir: env.WorkDir, EnvRoot: env.RootDir}, nil
 	}
 
 	// Authenticate the localhost repo-checkout endpoint with the same
@@ -9156,7 +8558,6 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		// annotations on the outside where a future edit is visibly a change
 		// to human-facing text rather than to classifier input. They are
 		// mutually exclusive by provider, so they cannot stack.
-		errMsg = annotateHermesProviderUnconfigured(errMsg, provider, env.HermesHome != "")
 		errMsg = annotateCodexRetiredCompaction(errMsg, provider)
 		return TaskResult{
 			Status:        "blocked",
@@ -9309,7 +8710,7 @@ func shouldRetryWithFreshSession(result agent.Result, priorSessionID string, too
 //     id (were it attached) would be re-selected. We keep the unrecoverable
 //     first result and only merge usage.
 //
-// Usage is merged across both attempts in every branch so billing is complete.
+// Usage is merged across both attempts in every branch so usage is complete.
 func reconcileFreshRetryResult(first agent.Result, firstUsage map[string]agent.TokenUsage, firstTools int32, retry agent.Result, retryTools int32, retryErr error) (agent.Result, int32) {
 	switch {
 	case retryErr != nil:
@@ -10300,46 +9701,6 @@ func truncateLog(s string, maxLen int) string {
 	return s[:maxLen] + "…"
 }
 
-func convertSkillsForEnv(skills []SkillData) []execenv.SkillContextForEnv {
-	if len(skills) == 0 {
-		return nil
-	}
-	result := make([]execenv.SkillContextForEnv, len(skills))
-	for i, s := range skills {
-		result[i] = execenv.SkillContextForEnv{
-			Name:        s.Name,
-			Description: s.Description,
-			Content:     s.Content,
-		}
-		for _, f := range s.Files {
-			result[i].Files = append(result[i].Files, execenv.SkillFileContextForEnv{
-				Path:    f.Path,
-				Content: f.Content,
-			})
-		}
-	}
-	return result
-}
-
-func convertDisabledRuntimeSkillsForEnv(agentData *AgentData, runtimeID, provider string) []execenv.RuntimeSkillRefForEnv {
-	if agentData == nil || len(agentData.DisabledRuntimeSkills) == 0 {
-		return nil
-	}
-	result := make([]execenv.RuntimeSkillRefForEnv, 0, len(agentData.DisabledRuntimeSkills))
-	for _, skill := range agentData.DisabledRuntimeSkills {
-		if skill.RuntimeID != runtimeID || skill.Provider != provider {
-			continue
-		}
-		result = append(result, execenv.RuntimeSkillRefForEnv{
-			Root:   skill.Root,
-			Key:    skill.Key,
-			Name:   skill.Name,
-			Plugin: skill.Plugin,
-		})
-	}
-	return result
-}
-
 // composeOpenclawIncludeRoots returns the value the daemon should set for
 // OPENCLAW_INCLUDE_ROOTS on the child openclaw process so its `$include`
 // loader will follow the wrapper's reference out of envRoot into the
@@ -10460,79 +9821,9 @@ func isBlockedEnvKey(key string) bool {
 	return false
 }
 
-// layerCustomEnvAndHermesHome applies the agent's custom_env onto the child env
-// (skipping daemon-internal blocklisted keys), then overrides HERMES_HOME with
-// the per-task overlay when one was built. HERMES_HOME is intentionally NOT
-// blocklisted: with skills bound the overlay is built FROM the user's
-// HERMES_HOME and must win here; with no skills bound (overlayHome empty) the
-// user's own HERMES_HOME passes through unchanged, so a skill-less Hermes task
-// keeps its original behavior.
-// sanitizeAgentEnv returns the agent custom_env with daemon-blocklisted keys
-// removed — the effective env the Hermes child actually sees, used to expand
-// ${VAR} in external_dirs consistently (blocked keys like HOME resolve to the
-// daemon process value, not the dropped custom one). Uses the same
-// isBlockedEnvKey rule as layerCustomEnvAndHermesHome so the two agree.
-func sanitizeAgentEnv(customEnv map[string]string) map[string]string {
-	if len(customEnv) == 0 {
-		return nil
-	}
-	out := make(map[string]string, len(customEnv))
-	for k, v := range customEnv {
-		if isBlockedEnvKey(k) {
-			continue
-		}
-		out[k] = v
-	}
-	return out
-}
-
-// hermesProviderUnconfiguredHint is appended verbatim to a "no LLM provider
-// configured" failure. It is a CONSTANT, and that is a correctness property,
-// not a style choice — see annotateHermesProviderUnconfigured.
-//
-// It must stay clear of every phrase the resume guards match, because this text
-// is persisted in agent_task_queue.error and re-scanned there indefinitely:
-// service.ResumeUnsafeFailure, taskfailure.Classify, and the ILIKE/regex guards
-// in pkg/db/queries/agent.sql (GetLastTaskSession / GetLastChatTaskSession).
-// TestAnnotationCannotChangeMachineDecisions pins that.
-const hermesProviderUnconfiguredHint = " [multica] hermes did not read the HERMES_HOME your shell uses: " +
-	"this task ran against a per-task overlay, seeded from the home the daemon process resolved. " +
-	"The daemon log line \"hermes home resolved\" for this task names that source home — if your hermes " +
-	"config lives somewhere else, set HERMES_HOME in the agent's custom_env to point at it."
-
-// annotateHermesProviderUnconfigured explains a "no LLM provider configured"
-// failure that Hermes itself cannot explain.
-//
-// Hermes reports it against whichever HERMES_HOME it was started with and tells
-// the user to run `hermes model` — but under Multica it was started with a
-// per-task overlay, seeded from a source home the daemon resolved from ITS OWN
-// process environment. When that disagrees with where the user keeps their
-// config, the remedy Hermes names edits a file the task will never read, and
-// every attempt fails identically. That is GH #6872: eight documented
-// workarounds, none of which could have worked.
-//
-// The two paths themselves are deliberately NOT interpolated here. They are
-// user-controlled (HERMES_HOME comes from the agent's custom_env, the overlay
-// root from MULTICA_WORKSPACES_ROOT), and this string is persisted as the
-// task's error text, which the resume guards keep matching against for the life
-// of the row. A source home under /srv/400-invalid_request_error/ would trip
-// ResumeUnsafeFailure and the SQL guard, dropping a healthy session pointer —
-// a directory name must never decide whether a session can be resumed. So the
-// hint is fixed prose and names the log line that does carry the paths.
-//
-// Text only: the caller has already classified the failure, and this changes no
-// reason, status, or control flow.
-func annotateHermesProviderUnconfigured(errMsg, provider string, overlayActive bool) string {
-	if provider != "hermes" || !overlayActive || !taskfailure.ProviderUnconfigured(errMsg) {
-		return errMsg
-	}
-	return errMsg + hermesProviderUnconfiguredHint
-}
-
 // codexRetiredCompactionHint is appended verbatim to a Codex compaction
-// failure against the retired route. Like hermesProviderUnconfiguredHint
-// above it is a CONSTANT, for the same correctness reason — see
-// annotateCodexRetiredCompaction — and is worded to stay clear of every
+// failure against the retired route. It is a CONSTANT for a correctness
+// reason — see annotateCodexRetiredCompaction — and is worded to stay clear of every
 // phrase the resume guards and taskfailure.Classify match, since it is
 // persisted in agent_task_queue.error and re-scanned there indefinitely.
 // TestCodexCompactionAnnotationCannotChangeMachineDecisions pins that.
@@ -10591,7 +9882,9 @@ func annotateCodexRetiredCompaction(errMsg, provider string) string {
 	return errMsg + codexRetiredCompactionHint
 }
 
-func layerCustomEnvAndHermesHome(agentEnv, customEnv map[string]string, overlayHome string, logger *slog.Logger) {
+// layerCustomEnv applies the agent's custom_env onto the child env, skipping
+// daemon-internal blocklisted keys.
+func layerCustomEnv(agentEnv, customEnv map[string]string, logger *slog.Logger) {
 	for k, v := range customEnv {
 		if isBlockedEnvKey(k) {
 			if logger != nil {
@@ -10600,9 +9893,6 @@ func layerCustomEnvAndHermesHome(agentEnv, customEnv map[string]string, overlayH
 			continue
 		}
 		agentEnv[k] = v
-	}
-	if overlayHome != "" {
-		agentEnv["HERMES_HOME"] = overlayHome
 	}
 }
 

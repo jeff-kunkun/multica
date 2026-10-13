@@ -24,13 +24,9 @@ import {
 export function IssuePropertyPills({
   issue,
   onUpdate,
-  onMarkDuplicate,
-  isDuplicate,
 }: {
   issue: Issue;
   onUpdate: (updates: Partial<UpdateIssueRequest>) => void;
-  onMarkDuplicate?: () => void;
-  isDuplicate?: boolean;
 }) {
   return (
     <div className="flex flex-wrap items-center gap-1.5">
@@ -39,8 +35,6 @@ export function IssuePropertyPills({
         onUpdate={onUpdate}
         triggerRender={<PillButton />}
         align="start"
-        onMarkDuplicate={onMarkDuplicate}
-        isDuplicate={isDuplicate}
       />
       <PriorityPicker
         priority={issue.priority}

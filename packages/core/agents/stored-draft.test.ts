@@ -18,7 +18,6 @@ const draft = (): AgentDraft => ({
   model: "gpt-5.6-sol",
   thinkingLevel: "high",
   serviceTier: "priority",
-  skillIds: new Set(["skill-1", "skill-2"]),
   permissionScope: "members",
   memberIds: new Set(["member-1"]),
   teamIds: new Set(["team-1"]),

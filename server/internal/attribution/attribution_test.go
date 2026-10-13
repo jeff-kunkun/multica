@@ -24,7 +24,6 @@ var (
 	srcTask  = uid(0x5A)
 	issue    = uid(0x15)
 	originTk = uid(0x0A)
-	ruleVer  = uid(0x4E)
 )
 
 func TestClassifyComment_MemberAuthoredIsDirectHuman(t *testing.T) {
@@ -335,10 +334,6 @@ func TestAccountableMirrorsOriginatorInvariant(t *testing.T) {
 		DirectHumanRun(human, EvidenceComment, comment),
 		DirectHumanRun(pgtype.UUID{}, "", pgtype.UUID{}),
 		Unattributed(EvidenceAutopilotRun, srcTask),
-		RuleOwner(human, ruleVer, EvidenceAutopilotRun, srcTask),         // divergent: accountable set, originator NULL
-		RuleOwner(pgtype.UUID{}, ruleVer, EvidenceAutopilotRun, srcTask), // no publisher → unattributed
-		TriggerOwner(human, EvidenceAutopilotRun, srcTask),               // originator = trigger owner (MUL-6951)
-		TriggerOwner(pgtype.UUID{}, EvidenceAutopilotRun, srcTask),       // no owner → unattributed
 	}
 	for i, r := range results {
 		// One-way invariant: a valid originator must equal accountable.
@@ -371,69 +366,6 @@ func TestDirectHumanRun(t *testing.T) {
 	}
 	if unresolved.UserID.Valid || unresolved.AccountableUserID.Valid {
 		t.Errorf("invalid user must not fabricate a human")
-	}
-}
-
-func TestRuleOwner(t *testing.T) {
-	// The divergent case, and deliberately so (MUL-6951, Elon review): the rule
-	// publisher never armed anything, so it is accountable for audit but carries no
-	// authorization. A run that lands here fails the invoke gate closed.
-	got := RuleOwner(human, ruleVer, EvidenceAutopilotRun, issue)
-	if got.Source != SourceRuleOwner {
-		t.Fatalf("source = %q, want rule_owner", got.Source)
-	}
-	if got.UserID.Valid {
-		t.Errorf("rule_owner must NOT set originator (authorization stays NULL), got %v", got.UserID)
-	}
-	if got.AccountableUserID != human {
-		t.Errorf("accountable should be the rule publisher, got %v", got.AccountableUserID)
-	}
-	if got.RuleVersionID != ruleVer {
-		t.Errorf("rule_version_id = %v, want %v", got.RuleVersionID, ruleVer)
-	}
-	if got.EvidenceKind != EvidenceAutopilotRun || got.EvidenceRefID != issue {
-		t.Errorf("evidence should be carried through")
-	}
-
-	// No publisher (system-published / unresolved) must not fabricate a human.
-	none := RuleOwner(pgtype.UUID{}, ruleVer, EvidenceAutopilotRun, issue)
-	if none.Source != SourceUnattributed {
-		t.Errorf("missing publisher must degrade to unattributed, got %q", none.Source)
-	}
-	if none.UserID.Valid || none.AccountableUserID.Valid {
-		t.Errorf("missing publisher must carry no human on either side")
-	}
-}
-
-func TestTriggerOwner(t *testing.T) {
-	// MUL-4302 (Bohan) resolves the trigger's human; MUL-6951 makes the trigger
-	// CREATOR the run's ORIGINATOR, so a scheduled fire carries the same
-	// authorization their manual "run now" would.
-	got := TriggerOwner(human, EvidenceAutopilotRun, issue)
-	if got.Source != SourceTriggerOwner {
-		t.Fatalf("source = %q, want trigger_owner", got.Source)
-	}
-	if !got.Source.Precise() {
-		t.Errorf("trigger_owner must be a precise source")
-	}
-	if got.UserID != human {
-		t.Errorf("originator should be the trigger creator, got %v", got.UserID)
-	}
-	if got.AccountableUserID != human {
-		t.Errorf("accountable should be the trigger creator, got %v", got.AccountableUserID)
-	}
-	if got.EvidenceKind != EvidenceAutopilotRun || got.EvidenceRefID != issue {
-		t.Errorf("evidence should be carried through")
-	}
-
-	// No creator (unrecoverable) must not fabricate a human — degrades to
-	// unattributed so the caller can fall back to rule_owner.
-	none := TriggerOwner(pgtype.UUID{}, EvidenceAutopilotRun, issue)
-	if none.Source != SourceUnattributed {
-		t.Errorf("missing creator must degrade to unattributed, got %q", none.Source)
-	}
-	if none.UserID.Valid || none.AccountableUserID.Valid {
-		t.Errorf("missing creator must carry no human on either side")
 	}
 }
 

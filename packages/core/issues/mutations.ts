@@ -40,7 +40,7 @@ import { useRecentContextStore } from "../chat/recent-context-store";
 import { useRecentIssuesStore } from "./stores";
 import type { InboxItem, Issue, IssueReaction } from "../types";
 import type {
-  CreateCommentSubIssueManualRequest,
+  CreateCommentSubIssueRequest,
   CreateIssueRequest,
   ListIssuesCache,
   MoveIssueRequest,
@@ -183,7 +183,7 @@ export function useCreateCommentSubIssue() {
     data,
   }: {
     anchorCommentId: string;
-    data: CreateCommentSubIssueManualRequest;
+    data: CreateCommentSubIssueRequest;
   }) => api.createCommentSubIssue(anchorCommentId, data));
 }
 
@@ -199,16 +199,12 @@ export function useUpdateIssue() {
     },
     onMutate: ({ id, move_intent: _moveIntent, ...data }) => {
       // suppress_run is a write-time control field, not an Issue column.
-      // description_base is merge metadata, while description itself
-      // is resolved against that base on the server and therefore is not safe
-      // to predict optimistically. Keep the authoritative raw description in
-      // cache so hidden channel-media markers remain available as the base for
-      // a rapid follow-up edit. mutationFn still sends the full payload.
+      // description is not patched optimistically: the cache keeps the
+      // authoritative raw description until the server response reconciles
+      // it. mutationFn still sends the full payload.
       const {
         suppress_run: _suppressRun,
-        duplicate_of_issue_id: _duplicateOfIssueId,
         description: _description,
-        description_base: _descriptionBase,
         title_base: _titleBase,
         expected_revision: _expectedRevision,
         ...patch
@@ -318,8 +314,6 @@ export function useUpdateIssue() {
       // is the plain surgical patch it always was.
       const {
         suppress_run: _suppressRun,
-        duplicate_of_issue_id: _duplicateOfIssueId,
-        description_base: _descriptionBase,
         move_intent: _moveIntent,
         id: _id,
         ...intent
@@ -378,14 +372,6 @@ export function useUpdateIssue() {
       // payload mutates the attachment join table.
       if (vars.attachment_ids?.length) {
         qc.invalidateQueries({ queryKey: issueKeys.attachments(vars.id) });
-      }
-      // A duplicate mark is not on Issue; refresh both sides now rather than
-      // waiting for the realtime echo.
-      if (vars.duplicate_of_issue_id) {
-        qc.invalidateQueries({ queryKey: issueKeys.duplicates(wsId, vars.id) });
-        qc.invalidateQueries({
-          queryKey: issueKeys.duplicates(wsId, vars.duplicate_of_issue_id),
-        });
       }
       // Invalidate old parent's children cache
       if (ctx?.parentId) {
@@ -516,14 +502,12 @@ export function useBatchUpdateIssues() {
       updates: UpdateIssueRequest;
     }) => api.batchUpdateIssues(ids, updates),
     onMutate: async ({ ids, updates }) => {
-      // Control and description-merge fields are not safe optimistic cache
-      // patches. The server resolves description against description_base, so
-      // preserve the authoritative raw description (including media markers)
-      // until a refetch returns the committed result.
+      // Control fields and description are not patched optimistically:
+      // preserve the authoritative raw description until a refetch returns
+      // the committed result.
       const {
         suppress_run: _suppressRun,
         description: _description,
-        description_base: _descriptionBase,
         ...patch
       } = updates;
       await qc.cancelQueries({ queryKey: issueKeys.list(wsId) });

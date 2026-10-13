@@ -80,10 +80,8 @@ type streamTerminalState struct {
 // reason. Empty is the platform's signal for "this turn produced no final text",
 // and every delivery surface already owns a decision keyed on it: an issue task
 // skips the synthesized fallback comment, a direct chat writes a localized
-// no_response outcome, and a Slack/Lark channel drops the turn rather than push
-// a placeholder outward. Returning prose here instead makes the output non-empty
-// and silently defeats all three at once — that is how an English sentinel
-// reached a Lark thread (GH #6462). Which words a user sees, and in which
+// no_response outcome. Returning prose here instead makes the output non-empty
+// and silently defeats both at once (GH #6462). Which words a user sees, and in which
 // language, belongs to each delivery surface; the stream parser only reports
 // whether text exists.
 func finalizeStreamResult(

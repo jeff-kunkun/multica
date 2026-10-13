@@ -232,10 +232,10 @@ func TestPrepareDshTaskSessionRoot(t *testing.T) {
 func TestLayerCustomEnvKeepsReasonixCredentialsHomeButBlocksStateHome(t *testing.T) {
 	t.Parallel()
 	agentEnv := map[string]string{}
-	layerCustomEnvAndHermesHome(agentEnv, map[string]string{
+	layerCustomEnv(agentEnv, map[string]string{
 		"REASONIX_HOME":       "/operator/reasonix-home",
 		"REASONIX_STATE_HOME": "/unsafe/shared-state",
-	}, "", nil)
+	}, nil)
 	if got := agentEnv["REASONIX_HOME"]; got != "/operator/reasonix-home" {
 		t.Fatalf("REASONIX_HOME = %q, want operator-owned home", got)
 	}
@@ -256,65 +256,23 @@ func TestValidateReasonixStateSegmentRejectsTraversal(t *testing.T) {
 	}
 }
 
-// TestLayerCustomEnvAndHermesHome exercises the daemon-assembled child env for
-// HERMES_HOME: no overlay passes the user's value through, an overlay overrides
-// it, and blocklisted keys are still dropped.
-func TestLayerCustomEnvAndHermesHome(t *testing.T) {
+// TestLayerCustomEnvDropsBlockedKeys checks that user custom env passes
+// through while daemon-owned keys stay out of the child env.
+func TestLayerCustomEnvDropsBlockedKeys(t *testing.T) {
 	t.Parallel()
-
-	tests := []struct {
-		name        string
-		customEnv   map[string]string
-		overlayHome string
-		wantHermes  string // "" means the key must be absent
-		wantAbsent  []string
-	}{
-		{
-			name:        "no skills: user HERMES_HOME passes through",
-			customEnv:   map[string]string{"HERMES_HOME": "/home/u/.hermes-research"},
-			overlayHome: "",
-			wantHermes:  "/home/u/.hermes-research",
-		},
-		{
-			name:        "skills bound: overlay overrides user HERMES_HOME",
-			customEnv:   map[string]string{"HERMES_HOME": "/home/u/.hermes-research"},
-			overlayHome: "/tmp/task/hermes-home",
-			wantHermes:  "/tmp/task/hermes-home",
-		},
-		{
-			name:        "no custom home, no overlay: key absent",
-			customEnv:   map[string]string{"ANTHROPIC_API_KEY": "sk"},
-			overlayHome: "",
-			wantHermes:  "",
-		},
-		{
-			name:        "blocklisted key dropped, overlay still applied",
-			customEnv:   map[string]string{"CODEX_HOME": "/evil", "MULTICA_TOKEN": "x"},
-			overlayHome: "/tmp/task/hermes-home",
-			wantHermes:  "/tmp/task/hermes-home",
-			wantAbsent:  []string{"CODEX_HOME", "MULTICA_TOKEN"},
-		},
+	agentEnv := map[string]string{}
+	layerCustomEnv(agentEnv, map[string]string{
+		"ANTHROPIC_API_KEY": "sk",
+		"CODEX_HOME":        "/evil",
+		"MULTICA_TOKEN":     "x",
+	}, nil)
+	if got := agentEnv["ANTHROPIC_API_KEY"]; got != "sk" {
+		t.Fatalf("ANTHROPIC_API_KEY = %q, want sk", got)
 	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			agentEnv := map[string]string{}
-			layerCustomEnvAndHermesHome(agentEnv, tt.customEnv, tt.overlayHome, nil)
-
-			if got, ok := agentEnv["HERMES_HOME"]; tt.wantHermes == "" {
-				if ok {
-					t.Errorf("HERMES_HOME should be absent, got %q", got)
-				}
-			} else if got != tt.wantHermes {
-				t.Errorf("HERMES_HOME = %q, want %q", got, tt.wantHermes)
-			}
-			for _, k := range tt.wantAbsent {
-				if _, ok := agentEnv[k]; ok {
-					t.Errorf("blocklisted key %q should not be applied", k)
-				}
-			}
-		})
+	for _, k := range []string{"CODEX_HOME", "MULTICA_TOKEN"} {
+		if _, ok := agentEnv[k]; ok {
+			t.Errorf("blocklisted key %q should not be applied", k)
+		}
 	}
 }
 
@@ -573,11 +531,11 @@ func TestTaskMulticaEnvironmentIncludesPrivateConfigRoot(t *testing.T) {
 		t.Fatalf("taskMulticaEnvironment() = %#v, want %#v", env, want)
 	}
 
-	layerCustomEnvAndHermesHome(env, map[string]string{
+	layerCustomEnv(env, map[string]string{
 		"MULTICA_TASK_CONFIG_ROOT":     "/owner/config",
 		"MULTICA_TASK_WORKSPACES_ROOT": "/owner/multica_workspaces",
 		"MULTICA_TOKEN":                "mul_owner_sentinel",
-	}, "", nil)
+	}, nil)
 	if env["MULTICA_TASK_CONFIG_ROOT"] != taskRoot {
 		t.Fatalf("custom env replaced task config root: %q", env["MULTICA_TASK_CONFIG_ROOT"])
 	}
@@ -632,7 +590,7 @@ func TestTaskMulticaEnvironmentRespectsClaudeTempOverride(t *testing.T) {
 		for _, value := range []string{"/custom/claude-temp", ""} {
 			custom := map[string]string{key: value}
 			env = taskMulticaEnvironment(Task{Agent: &AgentData{CustomEnv: custom}}, "claude", "", "", "", "", "", 0, 0, "/task/tmp")
-			layerCustomEnvAndHermesHome(env, custom, "", nil)
+			layerCustomEnv(env, custom, nil)
 			if env[key] != value {
 				t.Fatalf("custom %s = %q, want user's %q", key, env[key], value)
 			}
@@ -868,12 +826,7 @@ func TestBuildPromptContainsIssueID(t *testing.T) {
 	issueID := "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
 	prompt := BuildPrompt(Task{
 		IssueID: issueID,
-		Agent: &AgentData{
-			Name: "Local Codex",
-			Skills: []SkillData{
-				{Name: "Concise", Content: "Be concise."},
-			},
-		},
+		Agent:   &AgentData{Name: "Local Codex"},
 	}, "claude")
 
 	// Prompt should contain the issue ID and CLI hint.
@@ -886,23 +839,15 @@ func TestBuildPromptContainsIssueID(t *testing.T) {
 		}
 	}
 
-	// Skills should NOT be inlined in the prompt (they're in runtime config).
-	for _, absent := range []string{"## Agent Skills", "Be concise."} {
-		if strings.Contains(prompt, absent) {
-			t.Fatalf("prompt should NOT contain %q (skills are in runtime config)", absent)
-		}
-	}
 }
 
 // TestSessionContinuityNoticeMatchesSurface locks the MUL-5722 split. The same
 // event costs each surface something different, so it cannot be reported with
 // one sentence. The dividing question is whether the conversation can still be
-// READ, not whether it is a chat: an issue's comments, a Slack channel's
-// history, and a web chat's / Feishu's / WeCom's / DingTalk's stored
-// chat_message transcript all can; only a surface Multica stores no transcript
-// for cannot. Announcing a loss on the readable ones describes something that
-// did not happen — the user hears "the discussion is gone" when every word
-// survives.
+// READ, not whether it is a chat: an issue's comments and a chat's stored
+// chat_message transcript both can. Announcing a loss on the readable ones
+// describes something that did not happen — the user hears "the discussion is
+// gone" when every word survives.
 func TestSessionContinuityNoticeMatchesSurface(t *testing.T) {
 	t.Parallel()
 
@@ -919,44 +864,10 @@ func TestSessionContinuityNoticeMatchesSurface(t *testing.T) {
 			wantMentions: "comment history",
 		},
 		{
-			// Slack has a history reader, so the conversation is recoverable —
-			// just from the channel rather than from Multica. Telling the user it
-			// was lost contradicts the commands the same prompt hands the agent.
-			name:         "slack rebuilds from the channel",
-			task:         Task{ChatSessionID: "chat-1", ChatChannelType: execenv.ChannelTypeSlack},
-			tellUser:     false,
-			wantMentions: "multica chat history",
-		},
-		{
 			// Web chat history is persisted in chat_message, which `multica chat
 			// history` reads back — recoverable, just from Multica's store.
 			name:         "web chat rebuilds from the stored transcript",
 			task:         Task{ChatSessionID: "chat-1"},
-			tellUser:     false,
-			wantMentions: "multica chat history",
-		},
-		{
-			// Feishu's conversation is persisted to chat_message too, and the
-			// handler's non-Slack fallback reads it back via `multica chat history`.
-			name:         "feishu rebuilds from the stored transcript",
-			task:         Task{ChatSessionID: "chat-1", ChatChannelType: execenv.ChannelTypeFeishu},
-			tellUser:     false,
-			wantMentions: "multica chat history",
-		},
-		{
-			// WeCom is fully wired on main (persists chat_message, stamps
-			// ChatChannelType="wecom"), so its transcript is readable too — the
-			// handler's non-Slack fallback serves it just like Feishu's.
-			name:         "wecom rebuilds from the stored transcript",
-			task:         Task{ChatSessionID: "chat-1", ChatChannelType: execenv.ChannelTypeWecom},
-			tellUser:     false,
-			wantMentions: "multica chat history",
-		},
-		{
-			// DingTalk persists to chat_message through the same AppendUserMessage
-			// path as Feishu/WeCom, so its transcript is readable the same way.
-			name:         "dingtalk rebuilds from the stored transcript",
-			task:         Task{ChatSessionID: "chat-1", ChatChannelType: execenv.ChannelTypeDingtalk},
 			tellUser:     false,
 			wantMentions: "multica chat history",
 		},
@@ -1145,51 +1056,6 @@ func TestBuildPromptNoIssueDetails(t *testing.T) {
 	}
 }
 
-func TestBuildPromptAutopilotRunOnly(t *testing.T) {
-	t.Parallel()
-
-	prompt := BuildPrompt(Task{
-		AutopilotRunID:          "run-1",
-		AutopilotID:             "autopilot-1",
-		AutopilotTitle:          "Daily dependency check",
-		AutopilotDescription:    "Check dependencies and report outdated packages.",
-		AutopilotSource:         "manual",
-		AutopilotTriggerPayload: []byte(`{"action":"opened","number":7}`),
-	}, "claude")
-
-	// Every run-scoped autopilot value must appear HERE, and only here. The
-	// runtime brief used to render the same set, which both broke its own
-	// no-per-run-values contract and left two hand-maintained copies to drift
-	// (MUL-6984); execenv.TestAutopilotBriefByteIdenticalAcrossRunScopedFields
-	// pins the brief's side of that split. The payload is rendered whole:
-	// ingress already caps a webhook body at 256 KiB, and truncating at the
-	// only rendering would drop input no CLI can fetch back.
-	for _, want := range []string{
-		"run-only mode",
-		"Autopilot run ID: run-1",
-		"Daily dependency check",
-		"Trigger source: manual",
-		`{"action":"opened","number":7}`,
-		"Check dependencies and report outdated packages.",
-		"multica autopilot get autopilot-1 --output json",
-	} {
-		if !strings.Contains(prompt, want) {
-			t.Fatalf("autopilot prompt missing %q\n---\n%s", want, prompt)
-		}
-	}
-
-	// The issue-command boundary is emitted ONCE, by the brief's autopilot
-	// workflow section (execenv.AutopilotIssueCommandsGuard). MUL-5696 found
-	// that a second hand-maintained per-turn copy drifts, so the per-turn
-	// prompt must not restate it in any form.
-	if strings.Contains(prompt, "Do not run `multica issue get`") {
-		t.Fatalf("autopilot prompt restates the issue-command boundary the brief owns (MUL-5696)\n---\n%s", prompt)
-	}
-	if strings.Contains(prompt, "Your assigned issue ID is:") {
-		t.Fatalf("autopilot prompt should not use issue assignment template\n---\n%s", prompt)
-	}
-}
-
 func TestBuildPromptCommentTriggered(t *testing.T) {
 	t.Parallel()
 
@@ -1211,7 +1077,7 @@ func TestBuildPromptCommentTriggered(t *testing.T) {
 	for _, want := range []string{
 		issueID,
 		commentContent,
-		"Focus on THIS comment",
+		"Focus on THIS one",
 		commentID,
 		"multica issue comment add " + issueID + " --parent " + commentID,
 		"do NOT reuse --parent values from previous turns",
@@ -1980,17 +1846,12 @@ func TestGateResumeToReachableSession(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name      string
-		sessionID string
-		priorDir  string
-		envDir    string
-		// sessionHomeUnreachable models a provider whose session store this run
-		// cannot reach even though the workdir matches — the Hermes
-		// local_directory case (GH #6806). Zero value keeps the cwd-keyed
-		// providers' behaviour.
-		sessionHomeUnreachable bool
-		wantSession            string
-		wantReused             bool
+		name        string
+		sessionID   string
+		priorDir    string
+		envDir      string
+		wantSession string
+		wantReused  bool
 	}{
 		{
 			name:        "same workdir keeps session",
@@ -2024,19 +1885,6 @@ func TestGateResumeToReachableSession(t *testing.T) {
 			wantSession: "",
 			wantReused:  false,
 		},
-		{
-			// The local_directory flow: workdir is the user's own directory
-			// and therefore identical across tasks, but reuse is disabled so
-			// the session store is a fresh, empty one. Forwarding the id here
-			// is what made every turn silently restart the conversation.
-			name:                   "matching workdir but unreachable session store drops session",
-			sessionID:              "sess-1",
-			priorDir:               "/repo",
-			envDir:                 "/repo",
-			sessionHomeUnreachable: true,
-			wantSession:            "",
-			wantReused:             false,
-		},
 	}
 
 	for _, tt := range tests {
@@ -2061,7 +1909,7 @@ func TestGateResumeToReachableSession(t *testing.T) {
 			task := Task{PriorSessionID: tt.sessionID, PriorWorkDir: priorDir}
 			taskCtx := execenv.TaskContextForEnv{PriorSessionResumed: tt.sessionID != ""}
 
-			reachable := gateResumeToReachableSession(&task, &taskCtx, "claude", envDir, !tt.sessionHomeUnreachable, false, false, slog.Default())
+			reachable := gateResumeToReachableSession(&task, &taskCtx, "claude", envDir, false, false, slog.Default())
 
 			if reachable != tt.wantReused {
 				t.Fatalf("reachable = %v, want %v", reachable, tt.wantReused)
@@ -2127,7 +1975,7 @@ func TestGateCodexResumeAcrossLocalWorktrees(t *testing.T) {
 			}
 			store := execenv.CodexSessionStorePath("test", taskCtx)
 			eligible := codexWorktreeResumeEligible(env, store)
-			if got := gateResumeToReachableSession(&task, &taskCtx, tt.provider, env.WorkDir, true, false, eligible, slog.Default()); got {
+			if got := gateResumeToReachableSession(&task, &taskCtx, tt.provider, env.WorkDir, false, eligible, slog.Default()); got {
 				if tt.provider == "codex" && !tt.rolloutPresent {
 					gateCodexResumeToRolloutPresence(&task, &taskCtx, tt.provider, t.TempDir(), slog.Default())
 				} else {
@@ -2144,110 +1992,10 @@ func TestGateCodexResumeAcrossLocalWorktrees(t *testing.T) {
 	}
 }
 
-// Hermes resumes from HERMES_HOME, independently of the task's cwd (#9062).
-func TestGateHermesResumeToSessionHome(t *testing.T) {
-	t.Parallel()
-	for _, tt := range []struct {
-		name        string
-		sameWorkdir bool
-		history     bool
-		envReused   bool
-		noStore     bool
-		want        bool
-	}{
-		{name: "changed worktree with history", history: true, want: true},
-		{name: "in place with history", sameWorkdir: true, history: true, want: true},
-		{name: "changed worktree with unavailable history"},
-		{name: "in place with unavailable history", sameWorkdir: true},
-		{name: "empty store despite reused environment", sameWorkdir: true, envReused: true},
-		{name: "unmounted store in fresh environment", noStore: true},
-		{name: "task local history in reused environment", sameWorkdir: true, noStore: true, envReused: true, want: true},
-	} {
-		t.Run(tt.name, func(t *testing.T) {
-			priorDir, workDir := t.TempDir(), t.TempDir()
-			if tt.sameWorkdir {
-				workDir = priorDir
-			}
-			env := &execenv.Environment{HermesSessionStore: "conversation-store", HermesSessionHistoryPresent: tt.history}
-			if tt.noStore {
-				env.HermesSessionStore = ""
-			}
-			task := Task{PriorSessionID: "session-1", PriorWorkDir: priorDir}
-			taskCtx := execenv.TaskContextForEnv{PriorSessionResumed: true}
-			got := gateResumeToReachableSession(&task, &taskCtx, "hermes", workDir,
-				sessionHomeReachable("hermes", env, tt.envReused), false, false, slog.Default())
-			if got != tt.want || (task.PriorSessionID == "session-1") != tt.want || taskCtx.PriorSessionResumed != tt.want {
-				t.Fatalf("resume = %v, session = %q, resumed = %v; want %v", got, task.PriorSessionID, taskCtx.PriorSessionResumed, tt.want)
-			}
-			if task.PriorSessionResumeUnavailable != !tt.want || taskCtx.PriorSessionResumeUnavailable != !tt.want {
-				t.Fatal("session continuity notice does not match reachability")
-			}
-		})
-	}
-}
-
-func TestHermesPreparedSessionReachability(t *testing.T) {
-	// Keep profile/store resolution inside synthetic homes, never the user's.
-	t.Setenv("MULTICA_TASK_CONFIG_ROOT", "")
-	home := t.TempDir()
-	redirectTestHome(t, home)
-	t.Setenv("USERPROFILE", home)
-	sourceHome, root := t.TempDir(), t.TempDir()
-	taskNumber := 0
-	prepare := func(t *testing.T, agentID, issueID string) *execenv.Environment {
-		t.Helper()
-		taskCtx := execenv.TaskContextForEnv{AgentID: agentID, IssueID: issueID,
-			AgentSkills: []execenv.SkillContextForEnv{{Name: "fixture", Content: "synthetic skill"}},
-		}
-		taskNumber++
-		env, err := execenv.Prepare(execenv.PrepareParams{
-			WorkspacesRoot: root, WorkspaceID: "workspace-1", TaskID: fmt.Sprintf("task-%012d", taskNumber),
-			Provider: "hermes", HermesSourceHome: sourceHome, Task: taskCtx,
-			HermesSessionStore: execenv.HermesSessionStorePath("", agentID, sourceHome, taskCtx),
-		}, slog.Default())
-		if err != nil {
-			t.Fatal(err)
-		}
-		t.Cleanup(func() { _ = env.Cleanup(true) })
-		return env
-	}
-	first := prepare(t, "agent-1", "issue-1")
-	if first.HermesSessionStore == "" {
-		if runtime.GOOS == "windows" {
-			t.Skip("host cannot mount Hermes session stores")
-		}
-		t.Fatal("Hermes session store was not mounted")
-	}
-	if err := os.WriteFile(filepath.Join(first.HermesHome, "state.db"), []byte("synthetic transcript"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	for _, tt := range []struct {
-		name, agentID, issueID string
-		want                   bool
-	}{
-		{"same conversation in fresh workdir", "agent-1", "issue-1", true},
-		{"different issue", "agent-1", "issue-2", false},
-		{"different agent", "agent-2", "issue-1", false},
-	} {
-		t.Run(tt.name, func(t *testing.T) {
-			env := prepare(t, tt.agentID, tt.issueID)
-			if sameExistingDir(first.WorkDir, env.WorkDir) {
-				t.Fatal("fixture must prepare a different task workdir")
-			}
-			task := Task{PriorSessionID: "session-1", PriorWorkDir: first.WorkDir}
-			taskCtx := execenv.TaskContextForEnv{PriorSessionResumed: true}
-			if got := gateResumeToReachableSession(&task, &taskCtx, "hermes", env.WorkDir,
-				sessionHomeReachable("hermes", env, false), false, false, slog.Default()); got != tt.want {
-				t.Fatalf("reachable = %v, want %v", got, tt.want)
-			}
-		})
-	}
-}
-
 func TestGatePiResumeToSessionFile(t *testing.T) {
 	t.Parallel()
 
-	for _, provider := range []string{"pi", "omp"} {
+	for _, provider := range []string{"pi"} {
 		t.Run(provider, func(t *testing.T) {
 			t.Parallel()
 
@@ -2268,7 +2016,7 @@ func TestGatePiResumeToSessionFile(t *testing.T) {
 			task := Task{PriorSessionID: sessionFile, PriorWorkDir: priorDir}
 			taskCtx := execenv.TaskContextForEnv{PriorSessionResumed: true}
 
-			reachable := gateResumeToReachableSession(&task, &taskCtx, provider, envDir, true, providerRefusesMissingSessionCwd(provider, true), false, slog.Default())
+			reachable := gateResumeToReachableSession(&task, &taskCtx, provider, envDir, providerRefusesMissingSessionCwd(provider, true), false, slog.Default())
 
 			if !reachable {
 				t.Fatal("Pi-family session file should remain reachable across workdirs")
@@ -2328,7 +2076,7 @@ func TestGatePiResumeDropsUnusableSessionFile(t *testing.T) {
 			task := Task{PriorSessionID: sessionPath, PriorWorkDir: workDir}
 			taskCtx := execenv.TaskContextForEnv{PriorSessionResumed: true}
 
-			reachable := gateResumeToReachableSession(&task, &taskCtx, "pi", workDir, true, providerRefusesMissingSessionCwd("pi", true), false, slog.Default())
+			reachable := gateResumeToReachableSession(&task, &taskCtx, "pi", workDir, providerRefusesMissingSessionCwd("pi", true), false, slog.Default())
 
 			if reachable {
 				t.Fatalf("%s Pi session was treated as reachable", test.name)
@@ -2462,7 +2210,6 @@ func TestGatePiResumeChecksRecordedCwd(t *testing.T) {
 			refusesMissingCwd bool
 		}{
 			{name: "pi", provider: "pi", refusesMissingCwd: true},
-			{name: "omp", provider: "omp", refusesMissingCwd: false},
 			// A custom runtime profile registers its protocol family as the
 			// provider, so an arbitrary command configured as `protocol_family:
 			// pi` also arrives here as "pi". It is not the binary whose refusal
@@ -2499,7 +2246,7 @@ func TestGatePiResumeChecksRecordedCwd(t *testing.T) {
 				task := Task{PriorSessionID: sessionPath, PriorWorkDir: liveDir}
 				taskCtx := execenv.TaskContextForEnv{PriorSessionResumed: true}
 
-				reachable := gateResumeToReachableSession(&task, &taskCtx, provider, workDir, true, runtime.refusesMissingCwd, false, slog.Default())
+				reachable := gateResumeToReachableSession(&task, &taskCtx, provider, workDir, runtime.refusesMissingCwd, false, slog.Default())
 
 				if reachable != wantReachable {
 					t.Fatalf("reachable = %v, want %v", reachable, wantReachable)
@@ -2599,79 +2346,6 @@ func TestShouldRetryPiRefusedResume(t *testing.T) {
 	// A run that already used a tool is never replayed, poisoned or not.
 	if shouldRetryWithFreshSession(result, priorSession, 1, "pi") {
 		t.Fatal("a run that used tools was retried")
-	}
-}
-
-func TestSessionHomeReachable(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		name       string
-		provider   string
-		env        *execenv.Environment
-		envReused  bool
-		wantReturn bool
-	}{
-		{
-			// Every non-Hermes backend keys its sessions by cwd (or resolves
-			// its own store), so this predicate must not narrow their gate.
-			name:       "cwd-keyed provider is always reachable",
-			provider:   "claude",
-			env:        &execenv.Environment{},
-			wantReturn: true,
-		},
-		{
-			name:     "hermes with a mounted store holding history",
-			provider: "hermes",
-			env: &execenv.Environment{
-				HermesSessionStore:          "/profile/hermes-sessions/a/default/issue-1",
-				HermesSessionHistoryPresent: true,
-			},
-			wantReturn: true,
-		},
-		{
-			// Mounted onto nothing: a first turn, a store the GC reclaimed
-			// between turns, a switched profile, or a dangling link. Reading
-			// "mounted" as "resumable" here would forward a dead session id.
-			name:       "hermes with a mounted but empty session store",
-			provider:   "hermes",
-			env:        &execenv.Environment{HermesSessionStore: "/profile/hermes-sessions/a/default/issue-1"},
-			wantReturn: false,
-		},
-		{
-			// A store is mounted, so the env-reuse fallback must not override
-			// the store's own answer — the transcript lives in the store now.
-			name:       "hermes with an empty store is not rescued by env reuse",
-			provider:   "hermes",
-			env:        &execenv.Environment{HermesSessionStore: "/profile/hermes-sessions/a/default/issue-1"},
-			envReused:  true,
-			wantReturn: false,
-		},
-		{
-			// No store, but the prior task's env root — and therefore its
-			// overlay's task-local state.db — carried over.
-			name:       "hermes on a reused env root",
-			provider:   "hermes",
-			env:        &execenv.Environment{},
-			envReused:  true,
-			wantReturn: true,
-		},
-		{
-			// The GH #6806 shape: a fresh overlay with an empty state.db, so
-			// no session recorded by a prior task can be found here.
-			name:       "hermes on a fresh overlay with no store",
-			provider:   "hermes",
-			env:        &execenv.Environment{},
-			wantReturn: false,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := sessionHomeReachable(tt.provider, tt.env, tt.envReused); got != tt.wantReturn {
-				t.Fatalf("sessionHomeReachable() = %v, want %v", got, tt.wantReturn)
-			}
-		})
 	}
 }
 
@@ -3489,7 +3163,7 @@ func TestShouldRetryWithFreshSession(t *testing.T) {
 			name:           "undetectable backend with no session established retries",
 			result:         agent.Result{Status: "failed", Error: "agent exited before dispatching"},
 			priorSessionID: "stale-id",
-			provider:       "copilot",
+			provider:       "opencode",
 			want:           true,
 		},
 		{
@@ -3830,7 +3504,7 @@ func TestShouldRetryWithFreshSession_CompatPathIsBackendScoped(t *testing.T) {
 	// the compat path exists to catch.
 	result := agent.Result{Status: "failed", Error: "exit status 1"}
 
-	undetectable := []string{"antigravity", "codearts", "copilot", "cursor", "deveco", "opencode"}
+	undetectable := []string{"antigravity", "opencode"}
 	for _, provider := range undetectable {
 		t.Run(provider+" retries", func(t *testing.T) {
 			t.Parallel()
@@ -4173,283 +3847,6 @@ func TestExecuteAndDrain_IdleWatchdog_FiresOnInactivity(t *testing.T) {
 	// test from racing in slow CI.
 	if elapsed := time.Since(start); elapsed > 5*d.cfg.AgentIdleWatchdog {
 		t.Fatalf("watchdog took too long to fire: %s (window=%s)", elapsed, d.cfg.AgentIdleWatchdog)
-	}
-}
-
-// waitForAgentMessageBackend holds Execute until the wrapped backend has
-// processed a selected protocol message, then hands the full stream to the
-// daemon. It makes watchdog cancellation tests deterministic without changing
-// the production watchdog window or relying on child-process scheduling speed.
-type waitForAgentMessageBackend struct {
-	agent.Backend
-	match   func(agent.Message) bool
-	onMatch func()
-}
-
-func (b waitForAgentMessageBackend) Execute(ctx context.Context, prompt string, opts agent.ExecOptions) (*agent.Session, error) {
-	session, err := b.Backend.Execute(ctx, prompt, opts)
-	if err != nil {
-		return nil, err
-	}
-	messages := make(chan agent.Message, 256)
-	for {
-		select {
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		case msg, ok := <-session.Messages:
-			if !ok {
-				return nil, errors.New("wrapped backend closed before the expected message")
-			}
-			messages <- msg
-			if !b.match(msg) {
-				continue
-			}
-			if b.onMatch != nil {
-				b.onMatch()
-			}
-			go func() {
-				defer close(messages)
-				for msg := range session.Messages {
-					messages <- msg
-				}
-			}()
-			return &agent.Session{
-				ToolActivity:             session.ToolActivity,
-				InterruptBackgroundTools: session.InterruptBackgroundTools,
-				TerminalObserved:         session.TerminalObserved,
-				Messages:                 messages,
-				Result:                   session.Result,
-			}, nil
-		}
-	}
-}
-
-func TestExecuteAndDrain_PiTurnErrorOutranksIdleWatchdogCancellation(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("shell-script fixture is POSIX-only")
-	}
-
-	const providerError = "OpenAI API error (413): Failed to buffer the request body: length limit exceeded"
-	fakePath := filepath.Join(t.TempDir(), "pi")
-	script := "#!/bin/sh\n" +
-		"cat > /dev/null\n" +
-		`printf '%s\n' '{"type":"agent_start"}'` + "\n" +
-		`printf '%s\n' '{"type":"turn_start"}'` + "\n" +
-		`printf '%s\n' '{"type":"turn_end","message":{"role":"assistant","model":"test","stopReason":"error","errorMessage":"` + providerError + `"}}'` + "\n" +
-		`printf '%s\n' '{"type":"message_update","assistantMessageEvent":{"type":"thinking_delta","delta":"post-error activity"}}'` + "\n" +
-		`printf '%s\n' '{"type":"agent_end","messages":[],"willRetry":false}'` + "\n" +
-		"exec sleep 300\n"
-	writeTestExecutable(t, fakePath, []byte(script))
-
-	backend, err := agent.New("pi", agent.Config{ExecutablePath: fakePath, Logger: slog.Default()})
-	if err != nil {
-		t.Fatalf("new pi backend: %v", err)
-	}
-	backend = waitForAgentMessageBackend{
-		Backend: backend,
-		match: func(msg agent.Message) bool {
-			return msg.Type == agent.MessageThinking && msg.Content == "post-error activity"
-		},
-	}
-	d := newTestDaemon(t)
-	d.cfg.AgentIdleWatchdog = 50 * time.Millisecond
-
-	result, _, err := d.executeAndDrain(
-		context.Background(),
-		backend,
-		"prompt-ignored",
-		agent.ExecOptions{ResumeSessionID: filepath.Join(t.TempDir(), "session.jsonl")},
-		slog.Default(),
-		"t-pi-provider-error",
-		"",
-		new(atomic.Int32),
-	)
-	if err != nil {
-		t.Fatalf("executeAndDrain: %v", err)
-	}
-	if result.Status != "failed" {
-		t.Fatalf("status = %q, want provider failure rather than idle_watchdog (error=%q)", result.Status, result.Error)
-	}
-	if result.Error != providerError {
-		t.Fatalf("error = %q, want original provider error %q", result.Error, providerError)
-	}
-}
-
-func TestExecuteAndDrain_PiWithoutTurnErrorKeepsIdleWatchdogResult(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("shell-script fixture is POSIX-only")
-	}
-
-	fakePath := filepath.Join(t.TempDir(), "pi")
-	script := "#!/bin/sh\n" +
-		"cat > /dev/null\n" +
-		`printf '%s\n' '{"type":"agent_start"}'` + "\n" +
-		"exec sleep 300\n"
-	writeTestExecutable(t, fakePath, []byte(script))
-
-	backend, err := agent.New("pi", agent.Config{ExecutablePath: fakePath, Logger: slog.Default()})
-	if err != nil {
-		t.Fatalf("new pi backend: %v", err)
-	}
-	d := newTestDaemon(t)
-	d.cfg.AgentIdleWatchdog = 200 * time.Millisecond
-
-	result, _, err := d.executeAndDrain(
-		context.Background(),
-		backend,
-		"prompt-ignored",
-		agent.ExecOptions{ResumeSessionID: filepath.Join(t.TempDir(), "session.jsonl")},
-		slog.Default(),
-		"t-pi-no-provider-error",
-		"",
-		new(atomic.Int32),
-	)
-	if err != nil {
-		t.Fatalf("executeAndDrain: %v", err)
-	}
-	if result.Status != "idle_watchdog" {
-		t.Fatalf("result = %+v, want the existing idle_watchdog disposition", result)
-	}
-	if result.Error != "execution cancelled" {
-		t.Fatalf("error = %q, want the existing no-provider-error cancellation text", result.Error)
-	}
-}
-
-func TestExecuteAndDrain_PiTurnErrorOutranksUpstreamCancellation(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("shell-script fixture is POSIX-only")
-	}
-
-	const providerError = "OpenAI API error (413): Failed to buffer the request body: length limit exceeded"
-	fakePath := filepath.Join(t.TempDir(), "pi")
-	script := "#!/bin/sh\n" +
-		"cat > /dev/null\n" +
-		`printf '%s\n' '{"type":"agent_start"}'` + "\n" +
-		`printf '%s\n' '{"type":"turn_start"}'` + "\n" +
-		`printf '%s\n' '{"type":"turn_end","message":{"role":"assistant","model":"test","stopReason":"error","errorMessage":"` + providerError + `"}}'` + "\n" +
-		`printf '%s\n' '{"type":"message_update","assistantMessageEvent":{"type":"thinking_delta","delta":"cancel now"}}'` + "\n" +
-		"exec sleep 300\n"
-	writeTestExecutable(t, fakePath, []byte(script))
-
-	backend, err := agent.New("pi", agent.Config{ExecutablePath: fakePath, Logger: slog.Default()})
-	if err != nil {
-		t.Fatalf("new pi backend: %v", err)
-	}
-	matched := make(chan struct{})
-	backend = waitForAgentMessageBackend{
-		Backend: backend,
-		match: func(msg agent.Message) bool {
-			return msg.Type == agent.MessageThinking && msg.Content == "cancel now"
-		},
-		onMatch: func() { close(matched) },
-	}
-	d := newTestDaemon(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	t.Cleanup(cancel)
-	sessionPath := filepath.Join(t.TempDir(), "session.jsonl")
-
-	type outcome struct {
-		result agent.Result
-		err    error
-	}
-	done := make(chan outcome, 1)
-	go func() {
-		result, _, err := d.executeAndDrain(
-			ctx,
-			backend,
-			"prompt-ignored",
-			agent.ExecOptions{ResumeSessionID: sessionPath},
-			slog.Default(),
-			"t-pi-provider-error-upstream-cancel",
-			"",
-			new(atomic.Int32),
-		)
-		done <- outcome{result: result, err: err}
-	}()
-
-	select {
-	case <-matched:
-		cancel()
-	case <-time.After(5 * time.Second):
-		t.Fatal("Pi never emitted the post-error activity")
-	}
-
-	select {
-	case got := <-done:
-		if got.err != nil {
-			t.Fatalf("executeAndDrain: %v", got.err)
-		}
-		if got.result.Status != "failed" || got.result.Error != providerError {
-			t.Fatalf("result = %+v, want original provider failure", got.result)
-		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("executeAndDrain did not return after upstream cancellation")
-	}
-}
-
-func TestExecuteAndDrain_PiWithoutTurnErrorKeepsUpstreamCancellation(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("shell-script fixture is POSIX-only")
-	}
-
-	fakePath := filepath.Join(t.TempDir(), "pi")
-	script := "#!/bin/sh\n" +
-		"cat > /dev/null\n" +
-		`printf '%s\n' '{"type":"agent_start"}'` + "\n" +
-		"exec sleep 300\n"
-	writeTestExecutable(t, fakePath, []byte(script))
-
-	backend, err := agent.New("pi", agent.Config{ExecutablePath: fakePath, Logger: slog.Default()})
-	if err != nil {
-		t.Fatalf("new pi backend: %v", err)
-	}
-	matched := make(chan struct{})
-	backend = waitForAgentMessageBackend{
-		Backend: backend,
-		match:   func(msg agent.Message) bool { return msg.Type == agent.MessageStatus },
-		onMatch: func() { close(matched) },
-	}
-	d := newTestDaemon(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	t.Cleanup(cancel)
-	sessionPath := filepath.Join(t.TempDir(), "session.jsonl")
-
-	type outcome struct {
-		result agent.Result
-		err    error
-	}
-	done := make(chan outcome, 1)
-	go func() {
-		result, _, err := d.executeAndDrain(
-			ctx,
-			backend,
-			"prompt-ignored",
-			agent.ExecOptions{ResumeSessionID: sessionPath},
-			slog.Default(),
-			"t-pi-no-provider-error-upstream-cancel",
-			"",
-			new(atomic.Int32),
-		)
-		done <- outcome{result: result, err: err}
-	}()
-
-	select {
-	case <-matched:
-		cancel()
-	case <-time.After(5 * time.Second):
-		t.Fatal("Pi never started")
-	}
-
-	select {
-	case got := <-done:
-		if got.err != nil {
-			t.Fatalf("executeAndDrain: %v", got.err)
-		}
-		if got.result.Status != "cancelled" || !strings.Contains(got.result.Error, "task cancelled by upstream context") {
-			t.Fatalf("result = %+v, want existing upstream cancellation", got.result)
-		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("executeAndDrain did not return after upstream cancellation")
 	}
 }
 
@@ -6351,70 +5748,6 @@ func TestWatchTaskCancellation_ReconcileRunningKeepsTickerAlive(t *testing.T) {
 	}
 }
 
-// TestSanitizeAgentEnv asserts the effective env handed to the Hermes overlay
-// for ${VAR} expansion drops daemon-blocklisted keys (so a blocked HOME in
-// custom_env can't repoint external_dirs away from what the child sees) while
-// keeping ordinary vars.
-func TestSanitizeAgentEnv(t *testing.T) {
-	t.Parallel()
-	in := map[string]string{
-		"HOME":        "/evil",
-		"PATH":        "/evil/bin",
-		"MULTICA_X":   "1",
-		"TEAM_SKILLS": "/srv/team",
-		"HERMES_HOME": "/some/home",
-	}
-	got := sanitizeAgentEnv(in)
-	for _, blocked := range []string{"HOME", "PATH", "MULTICA_X"} {
-		if _, ok := got[blocked]; ok {
-			t.Errorf("blocklisted key %q must be dropped from the effective env", blocked)
-		}
-	}
-	if got["TEAM_SKILLS"] != "/srv/team" {
-		t.Errorf("ordinary var dropped: %v", got)
-	}
-	// HERMES_HOME is not blocklisted (it drives source-home resolution), so it
-	// survives here even though the child's value is the overlay.
-	if got["HERMES_HOME"] != "/some/home" {
-		t.Errorf("HERMES_HOME should survive sanitization, got %v", got)
-	}
-	if sanitizeAgentEnv(nil) != nil {
-		t.Error("nil in should yield nil out")
-	}
-}
-
-// TestHermesLaunchArgsAndEnvByScenario covers the profile chain end to end at
-// the decision level: the final launch args + the final HERMES_HOME the child
-// sees, for a skill-less vs. an overlay-active task that both set a profile.
-func TestHermesLaunchArgsAndEnvByScenario(t *testing.T) {
-	t.Parallel()
-	customArgs := []string{"-p", "research", "--yolo"}
-	customEnv := map[string]string{"HERMES_HOME": "/home/u/.hermes"}
-
-	// No overlay (skill-less): runTask never strips, so the profile flag passes
-	// through, and the user's HERMES_HOME passes through — behavior unchanged.
-	noOverlayArgs := customArgs
-	if len(noOverlayArgs) != 3 || noOverlayArgs[0] != "-p" || noOverlayArgs[1] != "research" {
-		t.Errorf("skill-less task must keep its profile flags, got %v", noOverlayArgs)
-	}
-	noOverlayEnv := map[string]string{}
-	layerCustomEnvAndHermesHome(noOverlayEnv, customEnv, "", nil)
-	if noOverlayEnv["HERMES_HOME"] != "/home/u/.hermes" {
-		t.Errorf("skill-less task must keep the user HERMES_HOME, got %q", noOverlayEnv["HERMES_HOME"])
-	}
-
-	// Overlay active: profile flag is stripped, and HERMES_HOME is the overlay.
-	_, overlayArgs := agent.StripHermesProfileSelectors(nil, customArgs, slog.Default())
-	if len(overlayArgs) != 1 || overlayArgs[0] != "--yolo" {
-		t.Errorf("overlay task must strip profile flags, got %v", overlayArgs)
-	}
-	overlayEnv := map[string]string{}
-	layerCustomEnvAndHermesHome(overlayEnv, customEnv, "/task/hermes-home", nil)
-	if overlayEnv["HERMES_HOME"] != "/task/hermes-home" {
-		t.Errorf("overlay task must redirect HERMES_HOME to the overlay, got %q", overlayEnv["HERMES_HOME"])
-	}
-}
-
 // TestHandleTask_AcksCancelAfterPollCancelled verifies the daemon posts
 // cancel-ack when the poll goroutine interrupts the run — by then
 // runner.run has returned, so the transcript flush is complete and the
@@ -6550,20 +5883,6 @@ func TestHandleTask_AcksCancelOnPostRunStatusCheck(t *testing.T) {
 	}
 }
 
-func TestConvertDisabledRuntimeSkillsForEnvScopesToClaimedRuntime(t *testing.T) {
-	t.Parallel()
-
-	agentData := &AgentData{DisabledRuntimeSkills: []DisabledRuntimeSkillData{
-		{RuntimeID: "runtime-1", Provider: "claude", Root: "provider", Key: "review", Name: "Review"},
-		{RuntimeID: "runtime-2", Provider: "claude", Root: "provider", Key: "other-runtime"},
-		{RuntimeID: "runtime-1", Provider: "codex", Root: "provider", Key: "other-provider"},
-	}}
-	got := convertDisabledRuntimeSkillsForEnv(agentData, "runtime-1", "claude")
-	if len(got) != 1 || got[0].Key != "review" || got[0].Name != "Review" {
-		t.Fatalf("unexpected scoped runtime skill policy: %+v", got)
-	}
-}
-
 // nestedPatchSecretBackend emits a Codex-shaped file-edit payload carrying a
 // credential nested inside changes[] — the legacy protocol reports a deletion
 // as the whole outgoing file, so deleting a .env puts its contents here.
@@ -6662,142 +5981,5 @@ func TestFreshSessionMayHelp(t *testing.T) {
 	const hermesAuth = "hermes provider error: \"Could not resolve authentication method. Expected either api_key or auth_token to be set. Or for one of the X-Api-Key or Authorization headers to be explicitly omitted\""
 	if !freshSessionMayHelp(hermesAuth) {
 		t.Fatalf("freshSessionMayHelp(auth-resolution error) = false; a fresh session cures this failure, it must report session-fixable")
-	}
-}
-
-// TestBuildPromptSquadLeaderReplyCommandCarvesOutNoAction renders the COMPLETE
-// leader prompt and pins the exception's scope relation (MUL-5442 #6493
-// review): the no_action rule and the reply imperative appear in the same
-// prompt, so the imperative must carry the carve-out itself — a bare
-// unconditional "Post your reply as a comment" anywhere in a leader prompt
-// re-opens the contradiction the carve-out exists to close.
-func TestBuildPromptSquadLeaderReplyCommandCarvesOutNoAction(t *testing.T) {
-	t.Parallel()
-
-	prompt := BuildPrompt(Task{
-		IssueID:               "issue-1",
-		TriggerCommentID:      "comment-1",
-		TriggerCommentContent: "team update posted",
-		TriggerAuthorType:     "member",
-		TriggerAuthorName:     "Bohan",
-		IsLeaderTask:          true,
-		LeaderRoleResolved:    true,
-		Agent: &AgentData{
-			Name:         "Lead",
-			Instructions: "Some instructions\n\n## Squad Operating Protocol\n\nYou are the LEADER...",
-		},
-	}, "claude")
-
-	if !strings.Contains(prompt, "Unless your outcome is `no_action`, post your reply as a comment") {
-		t.Fatalf("leader prompt missing the carve-out reply imperative\n---\n%s", prompt)
-	}
-	if strings.Contains(prompt, "Post your reply as a comment") {
-		t.Fatalf("leader prompt still carries the unconditional reply imperative\n---\n%s", prompt)
-	}
-}
-
-// TestBuildPromptSquadLeaderMultiThreadCarvesOutNoAction renders the complete
-// leader prompt on the cross-thread fan-out path (MUL-5442 #6493 review): the
-// fan-out imperative fires AFTER the no_action rule, so its scope sentence
-// must govern the ENTIRE block — assert it precedes every later obligation,
-// not just the first verb. The ordinary fan-out output keeps the
-// unconditional form byte-for-byte.
-func TestBuildPromptSquadLeaderMultiThreadCarvesOutNoAction(t *testing.T) {
-	t.Parallel()
-
-	leaderTask := Task{
-		IssueID:               "issue-1",
-		TriggerCommentID:      "comment-9",
-		TriggerThreadID:       "thread-B",
-		TriggerCommentContent: "second update",
-		TriggerAuthorType:     "agent",
-		TriggerAuthorName:     "Worker",
-		CoalescedComments: []CoalescedCommentData{
-			{ID: "comment-8", ThreadID: "thread-A", Content: "first update"},
-		},
-		IsLeaderTask:       true,
-		LeaderRoleResolved: true,
-		Agent: &AgentData{
-			Name:         "Lead",
-			Instructions: "Some instructions\n\n## Squad Operating Protocol\n\nYou are the LEADER...",
-		},
-	}
-	prompt := BuildPrompt(leaderTask, "claude")
-	scope := strings.Index(prompt, "skip this ENTIRE fan-out block")
-	if scope < 0 {
-		t.Fatalf("leader multi-thread prompt missing the whole-block scope sentence\n---\n%s", prompt)
-	}
-	// Obligation strings track the converged fan-out block (MUL-5825). Pin
-	// ledger: "Post the replies in the order listed below" → the order rule
-	// merged into the targets header ("OLDEST thread first"); "For EACH
-	// thread above" → the embedded cookbook collapsed to the
-	// `## Comment Formatting` pointer plus the per-thread file delta
-	// ("DISTINCT body file per thread"). The assertion shape is unchanged:
-	// every obligation must sit AFTER the no_action scope sentence.
-	for _, obligation := range []string{
-		"multiple replies are required and correct",
-		"OLDEST thread first",
-		"DISTINCT body file per thread",
-	} {
-		idx := strings.Index(prompt, obligation)
-		if idx < 0 {
-			t.Fatalf("leader multi-thread prompt missing obligation %q\n---\n%s", obligation, prompt)
-		}
-		if idx < scope {
-			t.Fatalf("obligation %q precedes the no_action scope sentence — it escapes the carve-out\n---\n%s", obligation, prompt)
-		}
-	}
-	if strings.Contains(prompt, ". Post ONE reply per thread") {
-		t.Fatalf("leader multi-thread prompt still carries the unconditional imperative\n---\n%s", prompt)
-	}
-
-	ordinaryTask := leaderTask
-	ordinaryTask.IsLeaderTask = false
-	ordinaryTask.Agent = &AgentData{Name: "Reg", Instructions: "You are a regular agent."}
-	ordinary := BuildPrompt(ordinaryTask, "claude")
-	if !strings.Contains(ordinary, ". Post ONE reply per thread") {
-		t.Fatalf("ordinary multi-thread prompt missing the unconditional imperative\n---\n%s", ordinary)
-	}
-	if strings.Contains(ordinary, "Unless your outcome is") || strings.Contains(ordinary, "skip this ENTIRE fan-out block") {
-		t.Fatalf("ordinary multi-thread prompt leaked the leader carve-out\n---\n%s", ordinary)
-	}
-}
-
-// TestHermesProfileChainCoversLaunchPrefix is the daemon half of GH #7046's
-// Hermes regression. A custom runtime profile's fixed_args are no longer folded
-// into custom_args — they become the launch prefix and reach hermes ahead of
-// custom_args, which in turn precede the backend's own `acp` token.
-//
-// Both halves of the profile chain therefore have to run against the argv the
-// backend really assembles. Resolving or stripping against a hand-built
-// approximation reads a different profile than the process does, and the
-// overlay gets seeded from the wrong home.
-func TestHermesProfileChainCoversLaunchPrefix(t *testing.T) {
-	t.Parallel()
-
-	// A prefix ending in a bare `-p`: the selection straddles the two regions,
-	// so only the assembled argv shows which profile hermes sees.
-	launchPrefix := []string{"-p"}
-	customArgs := []string{"research", "--yolo"}
-
-	sel := agent.ParseHermesProfileArgs(
-		agent.HermesLaunchArgv(launchPrefix, customArgs, slog.Default()))
-	if !sel.Found || sel.Name != "research" {
-		t.Fatalf("effective profile = %+v, want the `research` hermes actually selects", sel)
-	}
-
-	// Overlay active: both regions are stripped together, and the launched argv
-	// can no longer redirect HERMES_HOME out of the overlay.
-	strippedPrefix, strippedCustom := agent.StripHermesProfileSelectors(
-		launchPrefix, customArgs, slog.Default())
-	if sel := agent.ParseHermesProfileArgs(
-		agent.HermesLaunchArgv(strippedPrefix, strippedCustom, slog.Default())); sel.Found {
-		t.Fatalf("the launched argv can still redirect HERMES_HOME: %+v", sel)
-	}
-	if len(strippedPrefix) != 0 {
-		t.Errorf("prefix = %v, want the straddling `-p` removed", strippedPrefix)
-	}
-	if strings.Join(strippedCustom, "\x00") != "--yolo" {
-		t.Errorf("custom = %v, want only the selector's value removed", strippedCustom)
 	}
 }

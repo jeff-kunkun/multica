@@ -50,7 +50,7 @@ vi.mock("@tanstack/react-query", () => ({
             ...(runtimeWorktreeMetadata === "advertised"
               ? { capabilities: ["local-worktree-v1"] }
               : runtimeWorktreeMetadata === "daemon_cannot"
-                ? { capabilities: ["skill-bundles-v1"] }
+                ? { capabilities: ["other-feature-v1"] }
                 : {}),
           },
         },

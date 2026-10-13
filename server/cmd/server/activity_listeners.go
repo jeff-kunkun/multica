@@ -27,7 +27,7 @@ func registerActivityListeners(bus *events.Bus, queries *db.Queries) {
 		if !ok {
 			return
 		}
-		// HTTP creates carry IssueResponse; autopilot creates carry IssueToMapResolved.
+		// HTTP creates carry IssueResponse; channel /issue creates carry IssueToMap.
 		issue, ok := extractIssueFields(payload["issue"])
 		if !ok {
 			return

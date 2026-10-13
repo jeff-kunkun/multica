@@ -189,21 +189,21 @@ func TestRunLabelCreateWithResourceType(t *testing.T) {
 	cmd := newLabelCreateTestCmd()
 	_ = cmd.Flags().Set("name", "mattpocock")
 	_ = cmd.Flags().Set("color", "#3b82f6")
-	_ = cmd.Flags().Set("resource-type", "skill")
+	_ = cmd.Flags().Set("resource-type", "agent")
 
 	out, err := captureStdout(t, func() error { return runLabelCreate(cmd, nil) })
 	if err != nil {
 		t.Fatalf("runLabelCreate: %v", err)
 	}
-	if body["name"] != "mattpocock" || body["color"] != "#3b82f6" || body["resource_type"] != "skill" {
+	if body["name"] != "mattpocock" || body["color"] != "#3b82f6" || body["resource_type"] != "agent" {
 		t.Fatalf("body = %#v, want name/color/resource_type", body)
 	}
 	var got map[string]any
 	if err := json.Unmarshal([]byte(out), &got); err != nil {
 		t.Fatalf("decode stdout JSON: %v\n%s", err, out)
 	}
-	if got["resource_type"] != "skill" || got["name"] != "mattpocock" {
-		t.Fatalf("stdout = %#v, want created skill label", got)
+	if got["resource_type"] != "agent" || got["name"] != "mattpocock" {
+		t.Fatalf("stdout = %#v, want created agent label", got)
 	}
 }
 
@@ -232,20 +232,20 @@ func TestRunLabelListWithResourceType(t *testing.T) {
 	setCLITestServerEnv(t, srv.URL)
 
 	cmd := newLabelListTestCmd()
-	_ = cmd.Flags().Set("resource-type", "skill")
+	_ = cmd.Flags().Set("resource-type", "agent")
 
 	out, err := captureStdout(t, func() error { return runLabelList(cmd, nil) })
 	if err != nil {
 		t.Fatalf("runLabelList: %v", err)
 	}
-	if queryResource != "skill" {
-		t.Fatalf("queryResource = %q, want skill", queryResource)
+	if queryResource != "agent" {
+		t.Fatalf("queryResource = %q, want agent", queryResource)
 	}
 	var got []map[string]any
 	if err := json.Unmarshal([]byte(out), &got); err != nil {
 		t.Fatalf("decode stdout JSON: %v\n%s", err, out)
 	}
-	if len(got) != 1 || got[0]["resource_type"] != "skill" {
-		t.Fatalf("stdout = %#v, want skill label list", got)
+	if len(got) != 1 || got[0]["resource_type"] != "agent" {
+		t.Fatalf("stdout = %#v, want agent label list", got)
 	}
 }

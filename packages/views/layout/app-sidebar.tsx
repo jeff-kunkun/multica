@@ -34,7 +34,7 @@ import { Collapsible, CollapsibleTrigger, CollapsibleContent } from "@multica/ui
 import { CappedNumberFlow } from "@multica/ui/components/ui/number-flow";
 import { StatusIcon } from "../issues/components/status-icon";
 import { useIssueDraftStore } from "@multica/core/issues/stores/draft-store";
-import { openCreateIssueWithPreference } from "@multica/core/issues/stores/create-mode-store";
+import { useModalStore } from "@multica/core/modals";
 import {
   Sidebar,
   SidebarContent,
@@ -117,12 +117,10 @@ type NavKey =
   | "myIssues"
   | "issues"
   | "projects"
-  | "autopilots"
+  | "meetings"
   | "agents"
-  | "squads"
   | "usage"
   | "runtimes"
-  | "skills"
   | "settings";
 
 // Static schema (key only) — labels resolved at render via useT("layout"),
@@ -133,38 +131,34 @@ type NavLabelKey =
   | "my_issues"
   | "issues"
   | "projects"
-  | "autopilots"
+  | "meetings"
   | "agents"
-  | "squads"
   | "usage"
   | "runtimes"
-  | "skills"
   | "settings";
 
 // Nav icons are NOT declared here: they are derived from each item's
 // destination path at render time, so the sidebar and the desktop tab bar
 // always agree. See route-icon-components.tsx.
+// The office keeps a short nav: the two roots (board and chat), plus
+// meetings, projects, members and settings. Other pages stay reachable by URL
+// and from settings, not from here.
 const personalNav: { key: NavKey; labelKey: NavLabelKey }[] = [
   { key: "inbox", labelKey: "inbox" },
-  { key: "myIssues", labelKey: "my_issues" },
   { key: "chat", labelKey: "chat" },
 ];
 
 const workNav: { key: NavKey; labelKey: NavLabelKey }[] = [
   { key: "issues", labelKey: "issues" },
+  { key: "meetings", labelKey: "meetings" },
   { key: "projects", labelKey: "projects" },
-  { key: "autopilots", labelKey: "autopilots" },
 ];
 
 const aiTeamNav: { key: NavKey; labelKey: NavLabelKey }[] = [
   { key: "agents", labelKey: "agents" },
-  { key: "squads", labelKey: "squads" },
-  { key: "skills", labelKey: "skills" },
-  { key: "runtimes", labelKey: "runtimes" },
 ];
 
 const utilityNav: { key: NavKey; labelKey: NavLabelKey }[] = [
-  { key: "usage", labelKey: "usage" },
   { key: "settings", labelKey: "settings" },
 ];
 
@@ -753,7 +747,7 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
             <SidebarMenuItem>
               <SidebarMenuButton
                 className="text-muted-foreground"
-                onClick={() => openCreateIssueWithPreference()}
+                onClick={() => useModalStore.getState().open("create-issue")}
               >
                 <span className="relative">
                   <SquarePen />

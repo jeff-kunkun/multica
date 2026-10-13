@@ -341,18 +341,6 @@ func TestSourceContextThreadChangesTreatTombstonesAsAbsent(t *testing.T) {
 	}
 }
 
-func TestPublicPluginCommentExposesTombstone(t *testing.T) {
-	live := publicPluginComment(db.Comment{Content: "hello"})
-	if live.DeletedAt != "" {
-		t.Fatalf("live comment deleted_at = %q, want empty", live.DeletedAt)
-	}
-	deletedAt := time.Date(2026, time.September, 11, 8, 0, 0, 0, time.UTC)
-	tombstone := publicPluginComment(db.Comment{DeletedAt: pgtype.Timestamptz{Time: deletedAt, Valid: true}})
-	if tombstone.DeletedAt == "" || tombstone.Content != "" {
-		t.Fatalf("tombstone = %+v, want deleted_at set and empty content", tombstone)
-	}
-}
-
 // recordingStorage records which stored objects a handler cleaned up.
 type recordingStorage struct {
 	mockStorage

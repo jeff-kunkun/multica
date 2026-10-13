@@ -825,10 +825,10 @@ export function ProjectsPage() {
   });
   const openCreateProject = () => useModalStore.getState().open("create-project");
 
-  const isWorkspaceAdmin = useMemo(() => {
+  const isWorkspaceOwner = useMemo(() => {
     if (!currentUser) return false;
     const me = members.find((m: MemberWithUser) => m.user_id === currentUser.id);
-    return me?.role === "owner" || me?.role === "admin";
+    return me?.role === "owner";
   }, [members, currentUser]);
 
   const pinnedProjectIds = useMemo(() => {
@@ -1255,7 +1255,7 @@ export function ProjectsPage() {
                     key={project.id}
                     project={project}
                     pinned={pinnedProjectIds.has(project.id)}
-                    canDelete={isWorkspaceAdmin}
+                    canDelete={isWorkspaceOwner}
                     isColVisible={isColVisible}
                     selected={selectedIds.has(project.id)}
                     onToggleSelect={() => toggleSelected(project.id)}
@@ -1276,7 +1276,7 @@ export function ProjectsPage() {
                     key={project.id}
                     project={project}
                     pinned={pinnedProjectIds.has(project.id)}
-                    canDelete={isWorkspaceAdmin}
+                    canDelete={isWorkspaceOwner}
                   />
                 ))}
               </div>
@@ -1286,7 +1286,7 @@ export function ProjectsPage() {
           <ProjectBatchToolbar
             rows={selectedProjects}
             pinnedIds={pinnedProjectIds}
-            canDelete={isWorkspaceAdmin}
+            canDelete={isWorkspaceOwner}
             onClear={() => setSelectedIds(new Set())}
           />
         </>

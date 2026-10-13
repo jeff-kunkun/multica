@@ -61,7 +61,7 @@ func newIssueMetadataDeleteTestCmd() *cobra.Command {
 }
 
 // captureStdout used in this file is the (string, error) helper defined
-// in cmd_skill_test.go.
+// in stdout_capture_test.go.
 
 // metadataTestServer wires a minimal fake backend that answers the
 // resolveIssueRef GET on /api/issues/<id> and forwards every metadata

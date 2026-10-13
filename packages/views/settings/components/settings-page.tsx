@@ -2,37 +2,29 @@
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
-  AlarmClock,
   Bell,
-  Blocks,
+  Bot,
   CircleDot,
-  CreditCard,
   FolderGit2,
   Keyboard,
   KeyRound,
   Laptop,
   ListPlus,
+  Monitor,
   Lock,
-  MessagesSquare,
-  Plug,
   Search,
   Server,
   Settings,
   SlidersHorizontal,
+  Stamp,
   Tags,
   User,
   Users,
   X,
-  Zap,
 } from "lucide-react";
 import { useAuthStore } from "@multica/core/auth";
 import { useCurrentWorkspace } from "@multica/core/paths";
-import { useFeatureEnabled } from "@multica/core/config";
 import { useCurrentMember } from "@multica/core/permissions";
-import {
-  BILLING_WORKSPACE_SUBSCRIPTIONS_FLAG,
-  PLUGINS_V1_FLAG,
-} from "@multica/core/feature-flags";
 import { resolvePublicFileUrl } from "@multica/core/workspace/avatar-url";
 import { ActorAvatar } from "@multica/ui/components/common/actor-avatar";
 import { cn } from "@multica/ui/lib/utils";
@@ -42,25 +34,22 @@ import { WorkspaceAvatar } from "../../workspace/workspace-avatar";
 import { AccountTab } from "./account-tab";
 import { PreferencesTab } from "./preferences-tab";
 import { TokensTab } from "./tokens-tab";
+import { BotsTab } from "./bots-tab";
+import { ApproversTab } from "./approvers-tab";
+import { LocalRunTab } from "./local-run-tab";
 import { WorkspaceTab } from "./workspace-tab";
 import { MembersTab } from "./members-tab";
 import { CodeTab } from "./code-tab";
-import { ChannelsTab } from "./channels-tab";
-import { ConnectedAppsTab, useComposioAvailable } from "./connected-apps-tab";
 import { NotificationsTab } from "./notifications-tab";
 import { LabelsTab } from "./labels-tab";
 import { IssueStatusesTab } from "./issue-statuses-tab";
 import { PropertiesTab } from "./properties-tab";
-import { QuickActionsTab } from "./quick-actions-tab";
 import { KeyboardShortcutsTab } from "./keyboard-shortcuts-tab";
-import { PluginsTab } from "./plugins-tab";
 import { McpTab } from "./mcp-tab";
-import { BillingTab } from "./billing-tab";
 import { SETTINGS_ANCHOR_ATTR } from "./settings-layout";
 import { searchSettings } from "./settings-search";
 import { HighlightText } from "../../search/highlight-text";
 import { useSettingsSearchIndex } from "./use-settings-search-index";
-import { WakeupsTab } from "./wakeups-tab";
 import { CollapsedNavTrigger } from "../../layout/page-header";
 import { useT } from "../../i18n";
 
@@ -89,7 +78,7 @@ interface SettingsSubgroup {
 }
 
 interface SettingsScopeGroup {
-  key: "personal" | "workspace" | "device";
+  key: "office" | "personal" | "workspace" | "device";
   label: string;
   /** Leading mark: whose settings these are. */
   mark: React.ReactNode;
@@ -109,12 +98,6 @@ export function SettingsPage({ extraDeviceTabs = [] }: SettingsPageProps = {}) {
   const { role } = useCurrentMember(workspace?.id ?? "");
   const isMember = role === "member";
   const navigation = useNavigation();
-  const pluginsEnabled = useFeatureEnabled(PLUGINS_V1_FLAG, false);
-  const billingEnabled = useFeatureEnabled(
-    BILLING_WORKSPACE_SUBSCRIPTIONS_FLAG,
-    false,
-  );
-  const appsAvailable = useComposioAvailable();
   const entry = (
     value: string,
     label: string,
@@ -124,6 +107,31 @@ export function SettingsPage({ extraDeviceTabs = [] }: SettingsPageProps = {}) {
   ): SettingsEntry => ({ value, label, icon, content, ...options });
 
   const groups: SettingsScopeGroup[] = [
+    // The five settings the office uses day to day; the rest stay below.
+    {
+      key: "office",
+      label: t(($) => $.page.groups.office),
+      mark: <Settings aria-hidden="true" className="size-4 text-muted-foreground" />,
+      subgroups: [
+        {
+          key: "office",
+          entries: [
+            entry("profile", t(($) => $.page.tabs.profile), User, <AccountTab />),
+            entry("bots", t(($) => $.page.tabs.bots), Bot, <BotsTab />, {
+              adminOnly: true,
+            }),
+            entry("approvers", t(($) => $.page.tabs.approvers), Stamp, <ApproversTab />),
+            entry("local-run", t(($) => $.page.tabs.local_run), Monitor, <LocalRunTab />),
+            entry(
+              "preferences",
+              t(($) => $.page.tabs.preferences),
+              SlidersHorizontal,
+              <PreferencesTab />,
+            ),
+          ],
+        },
+      ],
+    },
     {
       key: "personal",
       label: t(($) => $.page.groups.personal),
@@ -140,13 +148,6 @@ export function SettingsPage({ extraDeviceTabs = [] }: SettingsPageProps = {}) {
         {
           key: "personal",
           entries: [
-            entry("profile", t(($) => $.page.tabs.profile), User, <AccountTab />),
-            entry(
-              "preferences",
-              t(($) => $.page.tabs.preferences),
-              SlidersHorizontal,
-              <PreferencesTab />,
-            ),
             entry(
               "notifications",
               t(($) => $.page.tabs.notifications),
@@ -159,9 +160,6 @@ export function SettingsPage({ extraDeviceTabs = [] }: SettingsPageProps = {}) {
               Keyboard,
               <KeyboardShortcutsTab />,
             ),
-            ...(appsAvailable
-              ? [entry("apps", t(($) => $.page.tabs.apps), Plug, <ConnectedAppsTab />)]
-              : []),
             entry("tokens", t(($) => $.page.tabs.tokens), KeyRound, <TokensTab />),
           ],
         },
@@ -189,16 +187,6 @@ export function SettingsPage({ extraDeviceTabs = [] }: SettingsPageProps = {}) {
             entry("members", t(($) => $.page.tabs.members), Users, <MembersTab />, {
               adminOnly: true,
             }),
-            ...(billingEnabled
-              ? [
-                  entry(
-                    "billing",
-                    t(($) => $.page.tabs.billing),
-                    CreditCard,
-                    <BillingTab />,
-                  ),
-                ]
-              : []),
           ],
         },
         {
@@ -212,10 +200,6 @@ export function SettingsPage({ extraDeviceTabs = [] }: SettingsPageProps = {}) {
               <IssueStatusesTab />,
               { wide: true, adminOnly: true },
             ),
-            entry("wakeups", t(($) => $.page.tabs.wakeups), AlarmClock, <WakeupsTab />, {
-              wide: true,
-              adminOnly: true,
-            }),
             entry("labels", t(($) => $.page.tabs.labels), Tags, <LabelsTab />, {
               wide: true,
             }),
@@ -226,13 +210,6 @@ export function SettingsPage({ extraDeviceTabs = [] }: SettingsPageProps = {}) {
               <PropertiesTab />,
               { wide: true, adminOnly: true },
             ),
-            entry(
-              "quick-actions",
-              t(($) => $.page.tabs.quick_actions),
-              Zap,
-              <QuickActionsTab />,
-              { wide: true },
-            ),
           ],
         },
         {
@@ -242,22 +219,9 @@ export function SettingsPage({ extraDeviceTabs = [] }: SettingsPageProps = {}) {
             entry("code", t(($) => $.page.tabs.code), FolderGit2, <CodeTab />, {
               adminOnly: true,
             }),
-            entry(
-              "channels",
-              t(($) => $.page.tabs.channels),
-              MessagesSquare,
-              <ChannelsTab />,
-            ),
             entry("mcp", t(($) => $.page.tabs.mcp), Server, <McpTab />, {
               adminOnly: true,
             }),
-            ...(pluginsEnabled
-              ? [
-                  entry("plugins", t(($) => $.page.tabs.plugins), Blocks, <PluginsTab />, {
-                    adminOnly: true,
-                  }),
-                ]
-              : []),
           ],
         },
       ],
@@ -277,10 +241,8 @@ export function SettingsPage({ extraDeviceTabs = [] }: SettingsPageProps = {}) {
     group.subgroups.flatMap((subgroup) => subgroup.entries),
   );
   const location = resolveSettingsLocation(navigation.searchParams);
-  const candidate =
-    location.tab === "billing" && !billingEnabled ? "workspace" : location.tab;
   const active =
-    allEntries.find((item) => item.value === candidate) ?? allEntries[0]!;
+    allEntries.find((item) => item.value === location.tab) ?? allEntries[0]!;
   const href = (value: string) =>
     settingsHref(navigation.pathname, navigation.searchParams, value);
 
@@ -309,7 +271,6 @@ export function SettingsPage({ extraDeviceTabs = [] }: SettingsPageProps = {}) {
     navigation.push(
       settingsHref(navigation.pathname, navigation.searchParams, result.tab, {
         section: result.anchor,
-        integration: result.integration,
       }),
     );
   };
@@ -388,11 +349,11 @@ export function SettingsPage({ extraDeviceTabs = [] }: SettingsPageProps = {}) {
         {results.map((result, position) => {
           const page = allEntries.find((item) => item.value === result.tab);
           const scope = scopeOf(result.tab);
-          const path = [scope?.label, result.anchor || result.integration ? page?.label : null]
+          const path = [scope?.label, result.anchor ? page?.label : null]
             .filter(Boolean)
             .join(" › ");
           return (
-            <li key={`${result.tab}#${result.anchor ?? ""}#${result.integration ?? ""}`}>
+            <li key={`${result.tab}#${result.anchor ?? ""}`}>
               <button
                 type="button"
                 role="option"
@@ -561,7 +522,7 @@ export function SettingsPage({ extraDeviceTabs = [] }: SettingsPageProps = {}) {
       </aside>
       <div
         ref={contentRef}
-        key={`${active.value}:${location.integration ?? ""}`}
+        key={active.value}
         className="min-w-0 flex-1 overflow-y-auto overscroll-contain"
       >
         <div

@@ -70,15 +70,15 @@ var workspaceMemberInviteCmd = &cobra.Command{
 		"UUID, a slug, or a short UUID prefix (≥4 hex chars) as shown in " +
 		"'workspace list'; if omitted the current default workspace is used " +
 		"(--workspace-id / MULTICA_WORKSPACE_ID / profile default).\n\n" +
-		"Role defaults to 'member'; pass '--role admin' to invite an admin. " +
-		"Owners cannot be invited.",
+		"Invitees join as members; the workspace has a single owner. Share " +
+		"projects with them via 'multica project share'.",
 	Args: cobra.RangeArgs(1, 2),
 	RunE: runWorkspaceMemberInvite,
 }
 
 var workspaceUpdateCmd = &cobra.Command{
 	Use:   "update [workspace-id|slug|prefix]",
-	Short: "Update workspace metadata (admin/owner only)",
+	Short: "Update workspace metadata (owner only)",
 	Args:  cobra.MaximumNArgs(1),
 	RunE:  runWorkspaceUpdate,
 }
@@ -105,7 +105,7 @@ var workspaceMcpCmd = &cobra.Command{
 	Long: "Manages the workspace's library of MCP servers. A server added here " +
 		"is given to NO agent: it reaches an agent only when someone assigns it " +
 		"to that agent ('multica agent mcp add'), which also carries a per-agent " +
-		"on/off toggle. Same shape as workspace skills.\n\n" +
+		"on/off toggle.\n\n" +
 		"The stored configuration is write-only: reads return the server names " +
 		"and transports, never the urls, commands, headers, or env.",
 }
@@ -123,7 +123,7 @@ var workspaceMcpListCmd = &cobra.Command{
 
 var workspaceMcpAddCmd = &cobra.Command{
 	Use:   "add <server-name> [workspace-id|slug|prefix]",
-	Short: "Add an MCP server to the workspace library (admin/owner only)",
+	Short: "Add an MCP server to the workspace library (owner only)",
 	Long: "Adds an MCP server to the workspace library. It is assigned to no " +
 		"agent — use 'multica agent mcp add <agent-id> <server-id>' to give it to " +
 		"one.\n\n" +
@@ -139,7 +139,7 @@ var workspaceMcpAddCmd = &cobra.Command{
 
 var workspaceMcpUpdateCmd = &cobra.Command{
 	Use:   "update <server-id> [workspace-id|slug|prefix]",
-	Short: "Rename or replace a workspace MCP server (admin/owner only)",
+	Short: "Rename or replace a workspace MCP server (owner only)",
 	Long: "Renames a server, replaces its configuration, or both. Agents keep " +
 		"their assignment across a rename because assignments key off the server " +
 		"id, not its name.",
@@ -149,7 +149,7 @@ var workspaceMcpUpdateCmd = &cobra.Command{
 
 var workspaceMcpRemoveCmd = &cobra.Command{
 	Use:   "remove <server-id> [workspace-id|slug|prefix]",
-	Short: "Remove an MCP server from the workspace library (admin/owner only)",
+	Short: "Remove an MCP server from the workspace library (owner only)",
 	Long: "Removes the server from the library and from every agent it was " +
 		"assigned to.",
 	Args: cobra.RangeArgs(1, 2),
@@ -183,7 +183,6 @@ func init() {
 	workspaceCreateCmd.Flags().String("output", "json", "Output format: table or json")
 	workspaceGetCmd.Flags().String("output", "json", "Output format: table or json")
 	workspaceMemberListCmd.Flags().String("output", "table", "Output format: table or json")
-	workspaceMemberInviteCmd.Flags().String("role", "member", "Member role to grant: member or admin (owner is not allowed)")
 	workspaceMemberInviteCmd.Flags().String("output", "table", "Output format: table or json")
 
 	workspaceUpdateCmd.Flags().String("name", "", "New workspace name")
@@ -830,22 +829,6 @@ func runWorkspaceMemberInvite(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("email is required")
 	}
 
-	// Validate the role client-side to fail fast with a clear message; the
-	// server enforces the same rule (normalizeMemberRole rejects unknown roles
-	// and CreateInvitation refuses owner). Keep the accepted set in sync.
-	role, _ := cmd.Flags().GetString("role")
-	role = strings.ToLower(strings.TrimSpace(role))
-	if role == "" {
-		role = "member"
-	}
-	switch role {
-	case "member", "admin":
-	case "owner":
-		return fmt.Errorf("cannot invite as owner; use --role member or --role admin")
-	default:
-		return fmt.Errorf("invalid --role %q; expected member or admin", role)
-	}
-
 	wsID, err := resolveWorkspaceArg(cmd, args[1:])
 	if err != nil {
 		return err
@@ -862,7 +845,7 @@ func runWorkspaceMemberInvite(cmd *cobra.Command, args []string) error {
 	ctx, cancel := cli.APIContext(context.Background())
 	defer cancel()
 
-	body := map[string]any{"email": email, "role": role}
+	body := map[string]any{"email": email}
 	var inv map[string]any
 	if err := client.PostJSON(ctx, "/api/workspaces/"+wsID+"/members", body, &inv); err != nil {
 		return fmt.Errorf("invite member: %w", err)

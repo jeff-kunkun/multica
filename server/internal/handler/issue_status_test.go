@@ -551,6 +551,7 @@ func TestCustomTerminalStatusCountsAsTerminalInSQL(t *testing.T) {
 		}))
 		rows, err := testHandler.Queries.ListOpenIssues(ctx, db.ListOpenIssuesParams{
 			WorkspaceID:        parseUUID(testWorkspaceID),
+			Viewer:             parseUUID(testUserID),
 			TerminalStatusKeys: terminalStatusKeys,
 		})
 		if err != nil {
@@ -622,6 +623,7 @@ func TestCustomTerminalStatusCountsAsTerminalInSQL(t *testing.T) {
 		rows, err := testHandler.Queries.ChildIssueProgress(ctx, db.ChildIssueProgressParams{
 			WorkspaceID:        parseUUID(testWorkspaceID),
 			TerminalStatusKeys: terminalStatusKeys,
+			Viewer:             parseUUID(testUserID),
 		})
 		if err != nil {
 			t.Fatalf("ChildIssueProgress: %v", err)
@@ -1048,37 +1050,6 @@ func mustCreateIssue(t *testing.T, title, status string) pgtype.UUID {
 	id := parseUUID(created.ID)
 	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1`, id) })
 	return id
-}
-
-// TestBatchCustomTerminalStatusEntersStageBarrier is the regression guard for
-// the batch stage barrier with a custom closed status (MUL-6243): moving the
-// last child onto a CUSTOM done status must close the parent's barrier like
-// the built-in done status.
-func TestBatchCustomTerminalStatusEntersStageBarrier(t *testing.T) {
-	ctx := context.Background()
-	createTestCustomStatus(t, "batch_done_s", issuestatus.Done)
-
-	parent := mustCreateIssue(t, "batch barrier parent", "in_progress")
-	child := mustCreateIssue(t, "batch barrier child", "todo")
-	if _, err := testPool.Exec(ctx, `UPDATE issue SET parent_issue_id = $1 WHERE id = $2`, parent, child); err != nil {
-		t.Fatalf("attach child: %v", err)
-	}
-
-	rec := httptest.NewRecorder()
-	testHandler.BatchUpdateIssues(rec, newRequest(http.MethodPatch, "/api/issues/batch", map[string]any{
-		"issue_ids": []string{uuidToString(child)},
-		"updates":   map[string]any{"status": "batch_done_s"},
-	}))
-	if rec.Code != http.StatusOK {
-		t.Fatalf("batch update: %d %s", rec.Code, rec.Body.String())
-	}
-
-	// The observable effect of closing the barrier is the rule's entry on the
-	// parent. Without the fix the batch is silent.
-	t.Cleanup(func() { cleanupChildDoneIssue(uuidToString(parent)) })
-	if entries := childDoneEntries(t, uuidToString(parent)); len(entries) != 1 {
-		t.Errorf("moving the last child to a custom done status did not close the stage barrier: %+v", entries)
-	}
 }
 
 // TestChildrenResponseCarriesStatusCategory pins the field the CLI's

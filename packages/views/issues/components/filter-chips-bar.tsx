@@ -18,7 +18,7 @@ import {
 import { useQuery } from "@tanstack/react-query";
 import { Button } from "@multica/ui/components/ui/button";
 import { useWorkspaceId } from "@multica/core/hooks";
-import { memberListOptions, agentListOptions, squadListOptions } from "@multica/core/workspace/queries";
+import { memberListOptions, agentListOptions } from "@multica/core/workspace/queries";
 import { projectListOptions } from "@multica/core/projects/queries";
 import { PROJECT_STATUS_CONFIG } from "@multica/core/projects/config";
 import { labelListOptions } from "@multica/core/labels/queries";
@@ -93,12 +93,10 @@ function IconStack({ children }: { children: ReactNode[] }) {
 export function buildChipActorNames(
   members: readonly { user_id: string; name: string }[],
   agents: readonly { id: string; name: string }[],
-  squads: readonly { id: string; name: string }[],
 ): (actor: ActorFilterValue) => string | undefined {
   const byKey = new Map<string, string>();
   for (const m of members) byKey.set(`member:${m.user_id}`, m.name);
   for (const a of agents) byKey.set(`agent:${a.id}`, a.name);
-  for (const s of squads) byKey.set(`squad:${s.id}`, s.name);
   return (actor: ActorFilterValue) => byKey.get(`${actor.type}:${actor.id}`);
 }
 
@@ -235,10 +233,6 @@ function useFilterChips(
     ...agentListOptions(wsId),
     enabled: enabled && (assigneeFilters.length > 0 || creatorFilters.length > 0),
   });
-  const { data: squads = [] } = useQuery({
-    ...squadListOptions(wsId),
-    enabled: enabled && assigneeFilters.some((f) => f.type === "squad"),
-  });
   const { data: projects = [] } = useQuery({
     ...projectListOptions(wsId),
     enabled: enabled && projectFilters.length > 0,
@@ -248,8 +242,8 @@ function useFilterChips(
     enabled: enabled && labelFilters.length > 0,
   });
   const actorName = useMemo(
-    () => buildChipActorNames(members, agents, squads),
-    [members, agents, squads],
+    () => buildChipActorNames(members, agents),
+    [members, agents],
   );
 
   // Inside a saved view chips show only the user's additions ON TOP of the

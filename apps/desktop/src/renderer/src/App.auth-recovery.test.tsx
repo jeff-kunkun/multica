@@ -40,10 +40,6 @@ vi.mock("@multica/core/auth", () => ({
     selector(state.auth),
 }));
 
-vi.mock("@multica/core/onboarding", () => ({
-  useWelcomeStore: { getState: () => ({ reset: vi.fn() }) },
-}));
-
 vi.mock("@multica/core/workspace/queries", () => ({
   workspaceKeys: { list: () => ["workspace-list"] },
 }));
@@ -63,10 +59,6 @@ vi.mock("@multica/core/api", () => ({
     listMyInvitations: vi.fn(),
     listWorkspaces: vi.fn(),
   },
-}));
-
-vi.mock("@multica/core/paths", () => ({
-  useHasOnboarded: () => true,
 }));
 
 vi.mock("@multica/core/analytics", () => ({ captureEvent: vi.fn() }));

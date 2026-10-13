@@ -12,8 +12,9 @@ import { defaultStorage } from "../platform/storage";
 import { getCurrentWsId, getCurrentSlug } from "../platform/workspace-storage";
 import { issueKeys } from "../issues/queries";
 import { projectKeys } from "../projects/queries";
+import { planKeys } from "../plans/queries";
+import { projectMemberKeys } from "../projects/member-queries";
 import { pinKeys } from "../pins/queries";
-import { autopilotKeys } from "../autopilots/queries";
 import { runtimeKeys } from "../runtimes/queries";
 import { labelKeys } from "../labels/queries";
 import { propertyKeys } from "../properties/queries";
@@ -26,15 +27,9 @@ import {
   agentTasksKeys,
 } from "../agents/queries";
 import { githubKeys } from "../github/queries";
-import { larkKeys } from "../lark/queries";
-import { slackKeys } from "../slack/queries";
-import { dingtalkKeys } from "../dingtalk/queries";
-import { wecomKeys } from "../wecom/queries";
-import { telegramKeys } from "../telegram/queries";
 import {
   onIssueCreated,
   onIssueUpdated,
-  onIssueDuplicateMarkChanged,
   onIssueDeleted,
   onIssueLabelsChanged,
   onIssuePropertiesChanged,
@@ -63,7 +58,6 @@ import {
   isTaskMessageTimelineHeld,
   mergeTaskMessagesBySeq,
   sortChatSessions,
-  QUICK_ACTIONS_PENDING_TIMEOUT_MS,
 } from "../chat/queries";
 import { useChatStore } from "../chat";
 import { upsertChatMessageToCaches } from "../chat/message-cache";
@@ -71,7 +65,7 @@ import {
   promotePendingChatTask,
   removePendingChatTask,
 } from "../chat/pending";
-import { resolvePostAuthDestination, useHasOnboarded } from "../paths";
+import { resolvePostAuthDestination } from "../paths";
 import type {
   IssueTableFacetsRequest,
   IssueTableQuerySpec,
@@ -79,6 +73,7 @@ import type {
   WorkspaceDeletedPayload,
   WorkspaceUpdatedPayload,
   MemberRemovedPayload,
+  ProjectMembersChangedPayload,
   IssueUpdatedPayload,
   IssueCreatedPayload,
   IssueDeletedPayload,
@@ -110,16 +105,12 @@ import type {
   TaskFailedPayload,
   TaskCancelledPayload,
   ChatDonePayload,
-  ChatQuickActionsPayload,
-  ChatQuickActionsPendingState,
-  ChatQuickActionsFailureState,
   ChatCancelFinalizedPayload,
   ChatMessage,
   ChatMessageEventPayload,
   ChatPendingTask,
   ChatMessagesPage,
   ChatSession,
-  ChatSessionCreatedPayload,
   InvitationCreatedPayload,
 } from "../types";
 
@@ -176,13 +167,13 @@ export function refetchPendingChatAggregate(
  * the one row that reached the transcript ONLY through the refetch below. Any
  * client that did not write it locally — a second window or device, a send
  * whose HTTP response failed after the server committed, a surface mounting
- * mid-flight — lost it whenever that refetch was dropped, most reliably to the
- * chat:quick_actions cancel. Both caches are staleTime: Infinity, so nothing
- * re-fetched afterwards and the prompt stayed missing until a remount.
+ * mid-flight — lost it whenever that refetch was dropped. Both caches are
+ * staleTime: Infinity, so nothing re-fetched afterwards and the prompt stayed
+ * missing until a remount.
  *
  * Only `role: "user"` is written. SendChatMessage is the event's one producer,
  * and an assistant row fabricated from this payload would carry no elapsed_ms /
- * message_kind / quick_actions while still claiming the id that
+ * message_kind while still claiming the id that
  * applyChatDoneToCache is about to write properly.
  *
  * The invalidate stays: this payload has no `attachments`, so the reconciling
@@ -215,7 +206,7 @@ export function applyChatDoneToCache(
   const taskId = payload.task_id;
   const messageId = payload.message_id;
   const content = payload.content;
-  if (messageId && (content !== undefined || (payload.quick_actions?.length ?? 0) > 0)) {
+  if (messageId && content !== undefined) {
     const assistant: ChatMessage = {
       id: messageId,
       chat_session_id: sessionId,
@@ -228,9 +219,6 @@ export function applyChatDoneToCache(
       // without waiting for the reconciling refetch (MUL-4351). Missing →
       // "message" for older servers.
       message_kind: payload.message_kind ?? "message",
-      ...(payload.quick_actions !== undefined
-        ? { quick_actions: payload.quick_actions }
-        : {}),
     };
     // Idempotent against reconnect replay and against a refetch that already
     // landed this row.
@@ -242,104 +230,10 @@ export function applyChatDoneToCache(
     chatKeys.pendingTask(sessionId),
     (old) => removePendingChatTask(old, taskId),
   );
-  // Raise/clear the quick-actions placeholder marker. Kept OUTSIDE the
-  // message caches deliberately: the authoritative refetch below replaces
-  // those, and a flag stored on the message would vanish with it. Explicit
-  // `=== true` — older servers omit the field entirely.
-  qc.setQueryData<ChatQuickActionsPendingState | null>(
-    chatKeys.quickActionsPending(sessionId),
-    payload.quick_actions_pending === true && messageId
-      ? {
-          message_id: messageId,
-          task_id: taskId,
-          expires_at: Date.now() + QUICK_ACTIONS_PENDING_TIMEOUT_MS,
-        }
-      : null,
-  );
   // Authoritative refetch reconciles redaction / migrations / clients
   // that took the fallback branch above.
   invalidateChatMessageQueries(qc, sessionId);
   qc.invalidateQueries({ queryKey: chatKeys.pendingTask(sessionId) });
-}
-
-/**
- * Apply a chat:quick_actions supplement: patch the identified assistant
- * message's quick_actions in both message caches and resolve the pending
- * placeholder. An empty/missing list is terminal ("no suggestions this
- * turn") — the placeholder still resolves.
- *
- * `payload.failed` marks a resolution whose regeneration failed: the carried
- * actions are the turn's UNCHANGED prior pills, so the patch is a no-op, but a
- * failure signal is raised for a view to toast — otherwise an explicit refresh
- * that failed would look identical to one that succeeded with the same
- * suggestions (MUL-5149 review).
- */
-export async function applyChatQuickActionsToCache(
-  qc: QueryClient,
-  payload: ChatQuickActionsPayload,
-) {
-  const sessionId = payload.chat_session_id;
-  const actions = payload.quick_actions ?? [];
-  const patch = (m: ChatMessage): ChatMessage =>
-    m.id === payload.message_id ? { ...m, quick_actions: actions } : m;
-  if (actions.length > 0) {
-    // chat:done's invalidate may still have a messages refetch in flight that
-    // read the assistant row BEFORE the daemon persisted these actions. Cancel
-    // it first so its actions-less response can't land after — and overwrite —
-    // the patch below. Both message caches are staleTime: Infinity, so such an
-    // overwrite would never self-heal (MUL-5149 stale-refetch race). Cancelling
-    // before setQueryData is required: cancelQueries reverts to the pre-fetch
-    // state, so patching first would be undone by the revert.
-    await Promise.all([
-      qc.cancelQueries({ queryKey: chatKeys.messages(sessionId) }),
-      qc.cancelQueries({ queryKey: chatKeys.messagesPage(sessionId) }),
-    ]);
-    qc.setQueryData<ChatMessage[] | undefined>(
-      chatKeys.messages(sessionId),
-      (old) => old?.map(patch),
-    );
-    qc.setQueryData<InfiniteData<ChatMessagesPage> | undefined>(
-      chatKeys.messagesPage(sessionId),
-      (old) =>
-        old
-          ? {
-              ...old,
-              pages: old.pages.map((page) => ({
-                ...page,
-                messages: page.messages.map(patch),
-              })),
-            }
-          : old,
-    );
-    // Settle the cancel (MUL-5711). cancelQueries defaults to `revert: true`,
-    // so the line above does more than ignore the in-flight response — it rolls
-    // the cache back to the snapshot taken when that fetch STARTED, dropping
-    // rows only that response carried (a peer's user message, anything that
-    // landed while this surface was unmounted). With staleTime: Infinity and no
-    // further trigger, the hole survived until a remount. Re-invalidating costs
-    // one request per supplement and cannot lose the pills: the server persists
-    // the actions BEFORE broadcasting this event (SupplementChatQuickActions),
-    // so the refetch this schedules reads them back.
-    invalidateChatMessageQueries(qc, sessionId);
-  }
-  // Resolve the marker only when it belongs to THIS message: a late
-  // supplement for turn N must not clear the marker turn N+1's chat:done
-  // just raised (near-unreachable — the daemon cancels stale passes — but
-  // the guard costs one comparison).
-  qc.setQueryData<ChatQuickActionsPendingState | null>(
-    chatKeys.quickActionsPending(sessionId),
-    (current) =>
-      current && current.message_id !== payload.message_id ? current : null,
-  );
-  // Raise a one-shot failure signal on an explicit refresh whose regeneration
-  // failed. A view consumes it to toast and clears it; the `at` nonce keeps a
-  // repeat failure on the same turn from being deduped away.
-  if (payload.failed === true) {
-    qc.setQueryData<ChatQuickActionsFailureState | null>(
-      chatKeys.quickActionsFailure(sessionId),
-      { message_id: payload.message_id, at: Date.now() },
-    );
-  }
 }
 
 type ChatSessionUpdatedPayload = {
@@ -651,12 +545,9 @@ function invalidateWorkspaceScopedQueries(qc: QueryClient): void {
     void onInboxInvalidate(qc, wsId);
     qc.invalidateQueries({ queryKey: workspaceKeys.agents(wsId) });
     qc.invalidateQueries({ queryKey: workspaceKeys.members(wsId) });
-    qc.invalidateQueries({ queryKey: workspaceKeys.squads(wsId) });
-    qc.invalidateQueries({ queryKey: workspaceKeys.skills(wsId) });
     qc.invalidateQueries({ queryKey: workspaceKeys.invitations(wsId) });
     qc.invalidateQueries({ queryKey: projectKeys.all(wsId) });
     qc.invalidateQueries({ queryKey: runtimeKeys.all(wsId) });
-    qc.invalidateQueries({ queryKey: autopilotKeys.all(wsId) });
     qc.invalidateQueries({ queryKey: agentTaskSnapshotKeys.all(wsId) });
     qc.invalidateQueries({ queryKey: workspaceWorkingAgentsKeys.all(wsId) });
     qc.invalidateQueries({ queryKey: agentActivityKeys.all(wsId) });
@@ -730,20 +621,6 @@ async function refreshWorkingAgentQueries(qc: QueryClient, wsId: string): Promis
   await Promise.all(filters.map((filter) => qc.invalidateQueries(filter)));
 }
 
-function invalidateSquadMemberStatusQueries(qc: QueryClient, wsId: string): void {
-  qc.invalidateQueries({
-    predicate: (query) => {
-      const key = query.queryKey;
-      return (
-        key[0] === "workspaces" &&
-        key[1] === wsId &&
-        key[2] === "squads" &&
-        key[4] === "members-status"
-      );
-    },
-  });
-}
-
 export interface RealtimeSyncStores {
   authStore: UseBoundStore<StoreApi<AuthState>>;
 }
@@ -773,13 +650,6 @@ export function useRealtimeSync(
   const { authStore } = stores;
   const qc = useQueryClient();
 
-  // Captured via ref so the (rare) hasOnboarded change doesn't re-subscribe
-  // every WS handler in this effect. The resolver reads `.current` at the
-  // moment workspace-loss fires, which is what we want.
-  const hasOnboarded = useHasOnboarded();
-  const hasOnboardedRef = useRef(hasOnboarded);
-  hasOnboardedRef.current = hasOnboarded;
-
   // Main sync: onAny -> refreshMap with debounce
   useEffect(() => {
     if (!ws) return;
@@ -798,14 +668,7 @@ export function useRealtimeSync(
       },
       agent: () => {
         const wsId = getCurrentWsId();
-        if (wsId) {
-          qc.invalidateQueries({ queryKey: workspaceKeys.agents(wsId) });
-          // Squad members status is derived per agent, so any agent
-          // change (status flip, archive, runtime swap) needs to refresh the
-          // per-squad members-status cache without refetching the static squad
-          // list summary.
-          invalidateSquadMemberStatusQueries(qc, wsId);
-        }
+        if (wsId) qc.invalidateQueries({ queryKey: workspaceKeys.agents(wsId) });
       },
       member: () => {
         const wsId = getCurrentWsId();
@@ -819,10 +682,6 @@ export function useRealtimeSync(
       workspace: () => {
         qc.invalidateQueries({ queryKey: workspaceKeys.list() });
       },
-      skill: () => {
-        const wsId = getCurrentWsId();
-        if (wsId) qc.invalidateQueries({ queryKey: workspaceKeys.skills(wsId) });
-      },
       project: () => {
         const wsId = getCurrentWsId();
         if (wsId) {
@@ -835,26 +694,17 @@ export function useRealtimeSync(
           qc.invalidateQueries({ queryKey: issueKeys.tableAll(wsId) });
         }
       },
-      squad: () => {
-        const wsId = getCurrentWsId();
-        if (wsId) {
-          qc.invalidateQueries({ queryKey: workspaceKeys.squads(wsId) });
-          // squad:deleted triggers assignee transfer — refresh issues too.
-          qc.invalidateQueries({ queryKey: issueKeys.all(wsId) });
-        }
-      },
       label: () => {
-        // Label catalogs are independently scoped to issues, agents, and
-        // skills. The generic event prefix does not carry the scope into this
-        // dispatcher, so refresh all three resource projections. Issue rows
-        // embed label snapshots; agent/skill label pickers use their resource
-        // cache plus the shared label query tree.
+        // Label catalogs are independently scoped to issues and agents. The
+        // generic event prefix does not carry the scope into this dispatcher,
+        // so refresh both resource projections. Issue rows embed label
+        // snapshots; agent label pickers use their resource cache plus the
+        // shared label query tree.
         const wsId = getCurrentWsId();
         if (wsId) {
           qc.invalidateQueries({ queryKey: ["labels", wsId] });
           qc.invalidateQueries({ queryKey: issueKeys.all(wsId) });
           qc.invalidateQueries({ queryKey: workspaceKeys.agents(wsId) });
-          qc.invalidateQueries({ queryKey: workspaceKeys.skills(wsId) });
         }
       },
       // The issue status catalog (MUL-6243). An admin edits it in the settings
@@ -895,43 +745,15 @@ export function useRealtimeSync(
           // refetch it when a daemon changes state even if its private runtime
           // is absent from this member's runtime list.
           qc.invalidateQueries({ queryKey: workspaceKeys.agents(wsId) });
-          // Runtime online/offline transitions move the derived status
-          // for every agent that hosts on this runtime, which shifts the
-          // working/idle/offline pill on the squad page.
-          invalidateSquadMemberStatusQueries(qc, wsId);
         }
-      },
-      autopilot: () => {
-        const wsId = getCurrentWsId();
-        if (wsId) qc.invalidateQueries({ queryKey: autopilotKeys.all(wsId) });
       },
       github_installation: () => {
         const wsId = getCurrentWsId();
         if (wsId) qc.invalidateQueries({ queryKey: githubKeys.installations(wsId) });
       },
-      lark_installation: () => {
-        const wsId = getCurrentWsId();
-        if (wsId) qc.invalidateQueries({ queryKey: larkKeys.installations(wsId) });
-      },
-      slack_installation: () => {
-        const wsId = getCurrentWsId();
-        if (wsId) qc.invalidateQueries({ queryKey: slackKeys.installations(wsId) });
-      },
-      dingtalk_installation: () => {
-        const wsId = getCurrentWsId();
-        if (wsId) qc.invalidateQueries({ queryKey: dingtalkKeys.installations(wsId) });
-      },
       vcs_connection: () => {
         const wsId = getCurrentWsId();
         if (wsId) qc.invalidateQueries({ queryKey: ["vcs", wsId] });
-      },
-      wecom_installation: () => {
-        const wsId = getCurrentWsId();
-        if (wsId) qc.invalidateQueries({ queryKey: wecomKeys.installations(wsId) });
-      },
-      telegram_installation: () => {
-        const wsId = getCurrentWsId();
-        if (wsId) qc.invalidateQueries({ queryKey: telegramKeys.installations(wsId) });
       },
       pull_request: () => {
         // PR list is keyed by issue id, not workspace, so we invalidate all
@@ -970,9 +792,6 @@ export function useRealtimeSync(
         // shape as the tasks invalidation above — any task lifecycle
         // event shifts the aggregated usage numbers.
         qc.invalidateQueries({ queryKey: ["issues", "usage"] });
-        // Squad members-status reads the same task lifecycle to flip
-        // working ↔ idle for each agent member.
-        invalidateSquadMemberStatusQueries(qc, wsId);
         // Comment trigger previews answer "who would a send wake right
         // now" — the pending-task dedup guard makes that answer
         // queue-dependent, so any task lifecycle change must refresh an
@@ -1043,13 +862,15 @@ export function useRealtimeSync(
       "subscriber:added", "subscriber:removed",
       "daemon:heartbeat",
       // Chat events are handled explicitly below; do not double-invalidate.
-      "chat:message", "chat:done", "chat:quick_actions", "chat:cancel_finalized", "chat:session_read",
-      "chat:session_created", "chat:session_deleted", "chat:session_updated",
+      "chat:message", "chat:done", "chat:cancel_finalized", "chat:session_read",
+      "chat:session_deleted", "chat:session_updated",
       // task:message stays out of the prefix path because it fires per
       // streamed message during a long run — invalidating the snapshot on
       // every message would flood the network. Specific chat handlers below
       // still receive it via ws.on() (a separate subscription channel).
       "task:message",
+      // Sharing changes are handled explicitly below.
+      "project:members_changed",
       // task:completed / task:failed deliberately NOT here. They go through
       // both the task-prefix invalidate (refreshes the agent-task-snapshot
       // cache) AND the chat-specific ws.on() handlers below. The two
@@ -1084,13 +905,6 @@ export function useRealtimeSync(
           statusChanged: payload.status_changed,
           projectChanged: payload.project_changed,
         });
-        onIssueDuplicateMarkChanged(
-          qc,
-          wsId,
-          issue.id,
-          payload.duplicate_of_issue_id,
-          payload.prev_duplicate_of_issue_id,
-        );
         if (issue.status) {
           onInboxIssueStatusChanged(qc, wsId, issue.id, issue.status);
         }
@@ -1205,6 +1019,8 @@ export function useRealtimeSync(
       if (wsId) {
         invalidateUpdatedAtSortedIssueLists(qc, wsId);
         invalidateLastActivitySortedIssueLists(qc, wsId);
+        // Proposing or approving a plan posts its card as a comment.
+        qc.invalidateQueries({ queryKey: planKeys.all(wsId) });
         // A comment carries only the aggregate owner revision, not a full
         // Issue snapshot. Mark stale projections for an authoritative fetch
         // without making a later full snapshot look older than the cache.
@@ -1315,10 +1131,7 @@ export function useRealtimeSync(
         staleTime: 0,
       });
       const remaining = wsList.filter((w) => w.id !== lostWsId);
-      const target = resolvePostAuthDestination(
-        remaining,
-        hasOnboardedRef.current,
-      );
+      const target = resolvePostAuthDestination(remaining);
       if (typeof window !== "undefined") {
         window.location.assign(target);
       }
@@ -1366,6 +1179,19 @@ export function useRealtimeSync(
           relocateAfterWorkspaceLoss(wsId);
         }
       }
+    });
+
+    // Sharing a project changes which projects and issues a member can see,
+    // so refresh the sharing list, the project list, and every issue view.
+    const unsubProjectMembersChanged = ws.on("project:members_changed", (p) => {
+      const wsId = getCurrentWsId();
+      if (!wsId) return;
+      const { project_id } = p as ProjectMembersChangedPayload;
+      if (project_id) {
+        qc.invalidateQueries({ queryKey: projectMemberKeys.list(wsId, project_id) });
+      }
+      qc.invalidateQueries({ queryKey: projectKeys.list(wsId) });
+      qc.invalidateQueries({ queryKey: issueKeys.all(wsId) });
     });
 
     const unsubMemberAdded = ws.on("member:added", (p) => {
@@ -1589,19 +1415,6 @@ export function useRealtimeSync(
       invalidateSessionLists();
     });
 
-    // Late quick-actions supplement from the daemon's background suggestion
-    // pass — patches the finished turn's message in place; no invalidate
-    // needed (the payload is authoritative and tiny).
-    const unsubChatQuickActions = ws.on("chat:quick_actions", (p) => {
-      const payload = p as ChatQuickActionsPayload;
-      chatWsLogger.info("chat:quick_actions (global)", {
-        task_id: payload.task_id,
-        chat_session_id: payload.chat_session_id,
-        count: payload.quick_actions?.length ?? 0,
-      });
-      void applyChatQuickActionsToCache(qc, payload);
-    });
-
     // Deferred cancellation outcome (#5219): the server settles the
     // empty/non-empty judgment only after the daemon's transcript flush, so
     // this event arrives seconds after the cancel HTTP response — nothing
@@ -1765,13 +1578,6 @@ export function useRealtimeSync(
       invalidateSessionLists();
     });
 
-    const unsubChatSessionCreated = ws.on("chat:session_created", (p) => {
-      const payload = p as ChatSessionCreatedPayload;
-      chatWsLogger.info("chat:session_created (global)", payload);
-      if (payload.workspace_id !== getCurrentWsId()) return;
-      invalidateSessionLists();
-    });
-
     // chat:session_updated fires after the creator renames, pins, or archives
     // a session in any tab/device. Patch the cached row inline so the dropdown
     // and badges reflect the change without a full sessions-list refetch — see
@@ -1835,6 +1641,7 @@ export function useRealtimeSync(
       unsubWsDeleted();
       unsubMemberRemoved();
       unsubMemberAdded();
+      unsubProjectMembersChanged();
       unsubInvitationCreated();
       unsubInvitationAccepted();
       unsubInvitationDeclined();
@@ -1842,7 +1649,6 @@ export function useRealtimeSync(
       unsubTaskMessage();
       unsubChatMessage();
       unsubChatDone();
-      unsubChatQuickActions();
       unsubChatCancelFinalized();
       unsubTaskQueued();
       unsubTaskDispatch();
@@ -1852,7 +1658,6 @@ export function useRealtimeSync(
       unsubTaskCompleted();
       unsubTaskFailed();
       unsubChatSessionRead();
-      unsubChatSessionCreated();
       unsubChatSessionDeleted();
       unsubChatSessionUpdated();
       if (taskMessageFlushTimer) clearTimeout(taskMessageFlushTimer);

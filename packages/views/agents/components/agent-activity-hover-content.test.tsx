@@ -211,7 +211,7 @@ describe("WorkspaceAgentActivityHoverContent", () => {
   });
 
   it("says nothing about work it excludes", () => {
-    // Chat/autopilot runs and out-of-scope tasks leave no trace on this page,
+    // Chat runs and out-of-scope tasks leave no trace on this page,
     // so a "not counted" footnote would explain an absence the user never
     // perceived. The card only ever describes what IS counted.
     renderWithI18n(

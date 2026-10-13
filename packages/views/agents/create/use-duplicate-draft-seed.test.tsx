@@ -35,7 +35,6 @@ const SOURCE = {
   model: "gpt-5.6-sol",
   thinking_level: "high",
   service_tier: "priority",
-  skills: [],
 } as unknown as Agent;
 
 function setup(initial: { runtimesSettled: boolean; runtimes: RuntimeDevice[] }) {

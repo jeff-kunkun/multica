@@ -21,12 +21,9 @@ export type ShortcutActionId =
   | "goMyIssues"
   | "goIssues"
   | "goProjects"
-  | "goAutopilots"
   | "goAgents"
-  | "goSquads"
   | "goUsage"
   | "goRuntimes"
-  | "goSkills"
   | "goSettings";
 
 export type ShortcutCategory = "general" | "navigation";
@@ -113,12 +110,9 @@ export const SHORTCUT_ACTIONS: readonly ShortcutActionDefinition[] = [
   { id: "goMyIssues", category: "navigation", defaultShortcut: null, allowInEditable: false },
   { id: "goIssues", category: "navigation", defaultShortcut: null, allowInEditable: false },
   { id: "goProjects", category: "navigation", defaultShortcut: null, allowInEditable: false },
-  { id: "goAutopilots", category: "navigation", defaultShortcut: null, allowInEditable: false },
   { id: "goAgents", category: "navigation", defaultShortcut: null, allowInEditable: false },
-  { id: "goSquads", category: "navigation", defaultShortcut: null, allowInEditable: false },
   { id: "goUsage", category: "navigation", defaultShortcut: null, allowInEditable: false },
   { id: "goRuntimes", category: "navigation", defaultShortcut: null, allowInEditable: false },
-  { id: "goSkills", category: "navigation", defaultShortcut: null, allowInEditable: false },
   { id: "goSettings", category: "navigation", defaultShortcut: null, allowInEditable: false },
 ] as const;
 

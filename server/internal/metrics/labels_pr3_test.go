@@ -30,13 +30,6 @@ func TestNormalizePR3LabelsCollapseUnknownValues(t *testing.T) {
 		{"signup_source_empty", metrics.NormalizeSignupSource, "", "direct", "direct"},
 		{"signup_source_json_utm", metrics.NormalizeSignupSource, `{"utm_source":"twitter","utm_medium":"social"}`, "twitter", "other"},
 		{"signup_source_url_host", metrics.NormalizeSignupSource, "https://news.ycombinator.com/item?id=42", "hacker_news", "other"},
-		{"onboarding_path_unknown", metrics.NormalizeOnboardingPath, "ab-experiment-123", "unknown", "unknown"},
-		{"autopilot_cadence_unknown", metrics.NormalizeAutopilotCadence, "every_5_min", "unknown", "unknown"},
-		{"autopilot_trigger_unknown", metrics.NormalizeAutopilotTrigger, "future_kind", "unknown", "unknown"},
-		{"autopilot_skip_reason_unknown", metrics.NormalizeAutopilotSkipReason, "lunar_phase", "other", "other"},
-		{"webhook_provider_unknown", metrics.NormalizeWebhookProvider, "internal-billing", "other", "other"},
-		{"webhook_status_unknown", metrics.NormalizeWebhookDeliveryStatus, "exotic", "other", "other"},
-		{"webhook_gate_unknown", metrics.NormalizeWebhookRateLimitGate, "exotic", "other", "other"},
 		{"email_rate_limit_action_known", metrics.NormalizeEmailRateLimitAction, "workspace_invitation", "workspace_invitation", "other"},
 		{"email_rate_limit_action_unknown", metrics.NormalizeEmailRateLimitAction, "password_reset", "other", "other"},
 		{"email_rate_limit_gate_unknown", metrics.NormalizeEmailRateLimitGate, "email_address", "other", "other"},
@@ -44,13 +37,8 @@ func TestNormalizePR3LabelsCollapseUnknownValues(t *testing.T) {
 		{"github_action_empty", metrics.NormalizeGithubAction, "", "none", "none"},
 		{"github_action_unknown", metrics.NormalizeGithubAction, "rerequested_by_user", "other", "other"},
 		{"github_pr_review_unknown", metrics.NormalizeGithubPRReviewResult, "skipped", "other", "other"},
-		{"cloudruntime_op_unknown", metrics.NormalizeCloudRuntimeOp, "lifecycle_audit", "other", "other"},
-		{"cloudruntime_status_2xx_string", metrics.NormalizeCloudRuntimeStatus, "200", "ok", "error"},
-		{"cloudruntime_status_5xx_string", metrics.NormalizeCloudRuntimeStatus, "503", "5xx", "error"},
-		{"cloudruntime_status_garbage", metrics.NormalizeCloudRuntimeStatus, "lol", "error", "error"},
 		{"daemon_ws_kind_unknown", metrics.NormalizeDaemonWSKind, "future_event", "other", "other"},
 		{"feedback_kind_unknown", metrics.NormalizeFeedbackKind, "rant", "other", "other"},
-		{"contact_sales_source_unknown", metrics.NormalizeContactSalesSource, "homepage_modal", "other", "other"},
 	}
 
 	for _, tt := range tests {
@@ -65,30 +53,30 @@ func TestNormalizePR3LabelsCollapseUnknownValues(t *testing.T) {
 	}
 }
 
-// TestOnboardingStartedUnknownPlatformCollapses pins the specific
+// TestChatMessageSentUnknownPlatformCollapses pins the specific
 // regression that motivated this test file: a misbehaving frontend that
 // sends an unrecognised X-Client-Platform header must NOT leak that raw
 // value into the metric label. The dispatcher in IncForEvent runs the
 // platform property through NormalizePlatform, so anything outside the
 // fixed allow-list collapses to "unknown". A future change that drops the
 // normalize wrapper will fail this test.
-func TestOnboardingStartedUnknownPlatformCollapses(t *testing.T) {
+func TestChatMessageSentUnknownPlatformCollapses(t *testing.T) {
 	t.Parallel()
 
 	m := metrics.NewBusinessMetrics()
 
 	// First fire: a known platform — sanity check the happy path.
-	metrics.RecordEvent(analytics.NoopClient{}, m, analytics.OnboardingStarted("user-1", "web"))
+	metrics.RecordEvent(analytics.NoopClient{}, m, analytics.ChatMessageSent("user-1", "ws-1", "chat-1", "task-1", "agent-1", "local", "claude", "web"))
 
 	// Second fire: an attacker-shaped unknown platform that, without
 	// NormalizePlatform, would inflate the label cardinality.
-	metrics.RecordEvent(analytics.NoopClient{}, m, analytics.OnboardingStarted("user-2", "iphone-build-1234567890-abcdef"))
+	metrics.RecordEvent(analytics.NoopClient{}, m, analytics.ChatMessageSent("user-2", "ws-1", "chat-2", "task-2", "agent-1", "local", "claude", "iphone-build-1234567890-abcdef"))
 
 	// Read /metrics-style output and assert exactly two label values are
 	// present: web and unknown. Anything else means the raw header
 	// leaked into the label.
 	families := metrics.GatherForTest(t, m)
-	famName := "multica_onboarding_started_total"
+	famName := "multica_chat_message_sent_total"
 	fam, ok := families[famName]
 	if !ok {
 		t.Fatalf("metric family %s not present in registry output", famName)

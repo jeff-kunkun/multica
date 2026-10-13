@@ -101,7 +101,7 @@
     /* UI body, the workhorse — was text-sm */
     --text-body: 14px;
     --text-body--line-height: 20px;
-    /* roomier body: dialog copy, onboarding prose */
+    /* roomier body: dialog copy, long-form prose */
     --text-body-lg: 15px;
     --text-body-lg--line-height: 22px;
     /* small headings — was text-base */

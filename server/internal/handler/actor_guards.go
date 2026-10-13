@@ -39,19 +39,11 @@ import (
 // scopes — those are bounded by workspace membership and by the
 // task or runtime binding.
 //
-// It is NOT correct for account-level scopes:
-//
-//   - Billing balance / transactions / batches / topups list
-//     are user-scoped. A running agent or a cloud node could read
-//     its owner's wallet state without the owner ever having
-//     approved a billing query.
-//
-//   - Checkout / portal session creation can move money. A machine
-//     credential that gets compromised — by a prompt injection, a
-//     bad MCP tool, an escaped quote in scratch data, or a node
-//     escape — could spin up a checkout for an attacker-controlled
-//     email or open a Billing Portal session that leaks subscription
-//     / payment-method state.
+// It is NOT correct for human-only scopes (owner-level management,
+// client-side sync feeds, ...). A machine credential that gets
+// compromised — by a prompt injection, a bad MCP tool, an escaped
+// quote in scratch data, or a node escape — must not be able to act
+// there as if the owner had.
 //
 // `X-Actor-Source` is server-set only. The Auth middleware deletes any
 // client-supplied value first (see auth.go: `r.Header.Del("X-Actor-Source")`),
@@ -67,11 +59,11 @@ import (
 //     author, etc.). It also has a fallback path that reads
 //     X-Agent-ID + X-Task-ID directly; since MUL-3428 both middlewares
 //     strip those headers, so that path is unreachable from the network
-//     and irrelevant here either way. Billing authorization needs the
+//     and irrelevant here either way. Human-only routes need the
 //     strict "machine credential → forbidden" gate, nothing else.
-//   - resolveActor takes a workspaceID parameter; billing routes have
-//     no workspace context, so threading one through just to call it
-//     would be misleading.
+//   - resolveActor takes a workspaceID parameter; some human-only
+//     routes have no workspace context, so threading one through just
+//     to call it would be misleading.
 //   - resolveActor doesn't currently classify mcn_ cloud-node PATs
 //     because cloud nodes don't act on workspace-scoped resources
 //     where author attribution matters. Bolting that classification

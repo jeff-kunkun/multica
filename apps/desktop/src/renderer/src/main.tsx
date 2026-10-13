@@ -9,7 +9,7 @@ import { AppCrashBoundary } from "./components/app-crash-boundary";
 import "@fontsource-variable/inter";
 import "@fontsource-variable/inter/wght-italic.css";
 // Editorial serif — matches web's next/font Source_Serif_4. Loaded app-wide so
-// onboarding headings and any future editorial surface can use `font-serif`
+// any editorial surface can use `font-serif`
 // (see tokens.css @theme inline). Variable font = one file covers all weights.
 import "@fontsource-variable/source-serif-4";
 import "@fontsource-variable/source-serif-4/wght-italic.css";

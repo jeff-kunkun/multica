@@ -22,5 +22,6 @@ export function matchLocale(candidates: string[]): SupportedLocale {
 export function pickLocale(adapter: LocaleAdapter): SupportedLocale {
   const choice = adapter.getUserChoice();
   if (choice) return matchLocale([choice]);
-  return matchLocale(adapter.getSystemPreferences());
+  // System languages are ignored on purpose: the office defaults to Chinese.
+  return DEFAULT_LOCALE;
 }

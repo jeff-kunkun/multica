@@ -4,37 +4,20 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ChevronRight,
   Cloud,
-  Loader2,
   Monitor,
   Plus,
   Server,
 } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { toast } from "sonner";
 import { useAuthStore } from "@multica/core/auth";
 import { useWorkspaceId } from "@multica/core/hooks";
-import { memberNeedsMikaSetup, useBootstrapMika } from "@multica/core/onboarding";
-import { MIKA_PLACEHOLDER_EMOJI } from "../../onboarding/components/mika-intro";
-import { useRequiredWorkspaceSlug, useWorkspacePaths } from "@multica/core/paths";
+import { useWorkspacePaths } from "@multica/core/paths";
 import { agentTaskSnapshotOptions } from "@multica/core/agents";
-import { chatSessionsOptions } from "@multica/core/chat/queries";
 import { runtimeProfileListOptions } from "@multica/core/runtimes";
 import { runtimeListOptions, runtimeKeys } from "@multica/core/runtimes/queries";
 import { useWSEvent } from "@multica/core/realtime";
 import { agentListOptions } from "@multica/core/workspace/queries";
-import type { AgentRuntime } from "@multica/core/types";
 import { Button } from "@multica/ui/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@multica/ui/components/ui/dialog";
-import {
-  MikaRuntimeChoice,
-  type MikaRuntimeSelection,
-} from "./mika-runtime-choice";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import {
   CollectionPageHeader,
@@ -43,13 +26,8 @@ import {
 } from "../../layout/collection-page";
 import { PAGE_GUTTER, PAGE_RAIL, PageHeader } from "../../layout/page-header";
 import { cn } from "@multica/ui/lib/utils";
-import { AppLink, useNavigation } from "../../navigation";
-import {
-  getMikaOnboarding,
-  pickContentLang,
-} from "../../onboarding/templates";
+import { AppLink } from "../../navigation";
 import { ConnectRemoteDialog } from "./connect-remote-dialog";
-import { CloudRuntimeDialog } from "./cloud-runtime-dialog";
 import { ProviderLogo } from "./provider-logo";
 import { buildWorkloadIndex, RuntimeList } from "./runtime-list";
 import { pendingRuntimeFromProfile } from "./pending-runtime";
@@ -67,8 +45,6 @@ export interface RuntimesPageProps {
   hasLocalMachine?: boolean;
   /** The bundled daemon is starting but has not registered yet. */
   bootstrapping?: boolean;
-  /** Web SaaS-only Cloud Runtime entrypoint. */
-  cloudRuntimeEnabled?: boolean;
 }
 
 function useNowTick(intervalMs = 30_000): number {
@@ -85,14 +61,12 @@ export function RuntimesPage({
   localMachineName,
   hasLocalMachine,
   bootstrapping,
-  cloudRuntimeEnabled = false,
 }: RuntimesPageProps = {}) {
   const isAuthLoading = useAuthStore((state) => state.isLoading);
   const currentUserId = useAuthStore((state) => state.user?.id);
   const wsId = useWorkspaceId();
   const qc = useQueryClient();
   const [showConnectDialog, setShowConnectDialog] = useState(false);
-  const [showCloudRuntimeDialog, setShowCloudRuntimeDialog] = useState(false);
 
   const { data: runtimes = [], isLoading: runtimesLoading } = useQuery(
     runtimeListOptions(wsId),
@@ -100,16 +74,10 @@ export function RuntimesPage({
   const { data: runtimeProfiles = [], isLoading: profilesLoading } = useQuery(
     runtimeProfileListOptions(wsId),
   );
-  const { data: agents = [], isLoading: agentsLoading } = useQuery(
+  const { data: agents = [] } = useQuery(
     agentListOptions(wsId),
   );
   const { data: snapshot = [] } = useQuery(agentTaskSnapshotOptions(wsId));
-  // The Mika entrypoint is per member, not per workspace: the agent alone does
-  // not say whether *this* member's conversation was ever opened and kicked
-  // off. See memberNeedsMikaSetup.
-  const { data: chatSessions = [], isLoading: chatSessionsLoading } = useQuery(
-    chatSessionsOptions(wsId),
-  );
 
   const handleDaemonEvent = useCallback(() => {
     qc.invalidateQueries({ queryKey: runtimeKeys.all(wsId) });
@@ -168,8 +136,6 @@ export function RuntimesPage({
       <PageHeaderBar
         totalCount={machines.length}
         onConnectRemote={() => setShowConnectDialog(true)}
-        cloudRuntimeEnabled={cloudRuntimeEnabled}
-        onOpenCloudRuntime={() => setShowCloudRuntimeDialog(true)}
       />
 
       {showEmpty ? (
@@ -179,17 +145,6 @@ export function RuntimesPage({
       ) : (
         <div className="min-h-0 flex-1 overflow-y-auto">
           <div className={cn(PAGE_RAIL, PAGE_GUTTER, "flex flex-col py-4 sm:py-6")}>
-            {!agentsLoading &&
-              !chatSessionsLoading &&
-              memberNeedsMikaSetup(agents, chatSessions) &&
-              runtimes.length > 0 && (
-              <MikaSetupCard
-                workspaceId={wsId}
-                runtimes={runtimes}
-                runtimesLoading={runtimesLoading}
-                currentUserId={currentUserId ?? null}
-              />
-            )}
             {(machines.length > 0 || bootstrapping) && (
               <MachineList
                 machines={machines}
@@ -210,135 +165,7 @@ export function RuntimesPage({
       {showConnectDialog && (
         <ConnectRemoteDialog onClose={() => setShowConnectDialog(false)} />
       )}
-      {cloudRuntimeEnabled && showCloudRuntimeDialog && (
-        <CloudRuntimeDialog onClose={() => setShowCloudRuntimeDialog(false)} />
-      )}
     </div>
-  );
-}
-
-/**
- * Entry point for creating Mika once a runtime exists.
- *
- * The action opens a picker rather than provisioning straight away. It used to
- * take `runtimes.find(online) ?? runtimes[0]` and create Mika on it silently —
- * but one machine commonly exposes every agent CLI it has installed (nine, on
- * the box this was reported from), so "the first online one" is arbitrary and
- * could well be a CLI the member never intended to run their Chief of Staff
- * on. Onboarding already makes this an explicit choice; this is the same
- * decision reached from a different entry point, so it asks the same way and
- * reuses the same two controls.
- */
-function MikaSetupCard({
-  workspaceId,
-  runtimes,
-  runtimesLoading,
-  currentUserId,
-}: {
-  workspaceId: string;
-  runtimes: AgentRuntime[];
-  runtimesLoading?: boolean;
-  currentUserId: string | null;
-}) {
-  const { t, i18n } = useT("runtimes");
-  const navigation = useNavigation();
-  const paths = useWorkspacePaths();
-  const wsSlug = useRequiredWorkspaceSlug();
-  const bootstrapMika = useBootstrapMika(workspaceId);
-
-  const [open, setOpen] = useState(false);
-  // Seeded with the old heuristic so the dialog opens on a sensible default;
-  // the point is that it is now visible and changeable, not that it is unset.
-  const defaultRuntimeId =
-    runtimes.find((runtime) => runtime.status === "online")?.id ??
-    runtimes[0]?.id ??
-    "";
-  const [choice, setChoice] = useState<MikaRuntimeSelection | null>(null);
-
-  const value: MikaRuntimeSelection = choice ?? {
-    runtimeId: defaultRuntimeId,
-    model: "",
-  };
-  const runtimeId = value.runtimeId;
-
-  const handleStart = async () => {
-    if (!runtimeId || bootstrapMika.isPending) return;
-    const lang = pickContentLang(i18n.language);
-    try {
-      const result = await bootstrapMika.mutateAsync({
-        workspaceSlug: wsSlug,
-        runtimeId,
-        model: value.model || undefined,
-        ...getMikaOnboarding(lang),
-      });
-      setOpen(false);
-      navigation.push(paths.chatSession(result.chatSession.id));
-    } catch (error) {
-      toast.error(
-        error instanceof Error ? error.message : t(($) => $.mika_setup.failed),
-      );
-    }
-  };
-
-  return (
-    <>
-      <div className="mb-6 flex flex-col gap-4 rounded-xl border bg-card p-5 sm:flex-row sm:items-center">
-        <span
-          role="img"
-          aria-label={t(($) => $.mika_setup.title)}
-          className="flex size-10 shrink-0 select-none items-center justify-center rounded-full bg-muted text-title-lg leading-none"
-        >
-          {MIKA_PLACEHOLDER_EMOJI}
-        </span>
-        <div className="min-w-0 flex-1">
-          <h2 className="text-body font-semibold">
-            {t(($) => $.mika_setup.title)}
-          </h2>
-          <p className="mt-1 text-body leading-relaxed text-muted-foreground">
-            {t(($) => $.mika_setup.description)}
-          </p>
-        </div>
-        <Button className="shrink-0" onClick={() => setOpen(true)}>
-          {t(($) => $.mika_setup.action)}
-        </Button>
-      </div>
-
-      <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="sm:max-w-[480px]">
-          <DialogHeader>
-            <DialogTitle>{t(($) => $.mika_setup.dialog_title)}</DialogTitle>
-          </DialogHeader>
-
-          <MikaRuntimeChoice
-            runtimes={runtimes}
-            runtimesLoading={runtimesLoading}
-            currentUserId={currentUserId}
-            value={value}
-            onChange={setChoice}
-            disabled={bootstrapMika.isPending}
-          />
-
-          <DialogFooter>
-            <Button
-              variant="ghost"
-              onClick={() => setOpen(false)}
-              disabled={bootstrapMika.isPending}
-            >
-              {t(($) => $.mika_setup.cancel)}
-            </Button>
-            <Button
-              onClick={handleStart}
-              disabled={!runtimeId || bootstrapMika.isPending}
-            >
-              {bootstrapMika.isPending && (
-                <Loader2 aria-hidden className="size-4 animate-spin" />
-              )}
-              {t(($) => $.mika_setup.action)}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-    </>
   );
 }
 
@@ -372,13 +199,9 @@ function OrphanRuntimeProfiles({
 function PageHeaderBar({
   totalCount,
   onConnectRemote,
-  cloudRuntimeEnabled,
-  onOpenCloudRuntime,
 }: {
   totalCount: number;
   onConnectRemote: () => void;
-  cloudRuntimeEnabled: boolean;
-  onOpenCloudRuntime: () => void;
 }) {
   const { t, i18n } = useT("runtimes");
   return (
@@ -392,20 +215,11 @@ function PageHeaderBar({
         label: t(($) => $.page.learn_more),
       }}
       actions={
-        <>
-          {cloudRuntimeEnabled && (
-            <CollectionPageHeaderAction
-              icon={Cloud}
-              label={t(($) => $.cloud_runtime.action)}
-              onClick={onOpenCloudRuntime}
-            />
-          )}
-          <CollectionPageHeaderAction
-            icon={Plus}
-            label={t(($) => $.page.connect_remote)}
-            onClick={onConnectRemote}
-          />
-        </>
+        <CollectionPageHeaderAction
+          icon={Plus}
+          label={t(($) => $.page.connect_remote)}
+          onClick={onConnectRemote}
+        />
       }
     />
   );

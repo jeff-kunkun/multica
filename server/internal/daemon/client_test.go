@@ -11,7 +11,6 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/multica-ai/multica/server/pkg/remotemcp"
 	"time"
 
 	"github.com/multica-ai/multica/server/pkg/protocol"
@@ -36,28 +35,16 @@ func TestClient_IdentityHeaders_PostJSON(t *testing.T) {
 			capabilities[strings.TrimSpace(capability)] = true
 		}
 		for _, want := range []string{
-			protocol.DaemonCapabilitySkillBundlesV1,
 			protocol.DaemonCapabilityCoalescedCommentsV1,
 			// The worktree gate is decided entirely from this header: if the
 			// daemon stops advertising it, every worktree task on this machine
 			// is cancelled with an upgrade prompt (MUL-5707). Pin it here so
 			// dropping it from the list can never be a silent change.
 			protocol.DaemonCapabilityLocalWorktreeV1,
-			// Same shape, opposite default: this daemon's brief names the
-			// merged multica-platform skill, and advertising that is what
-			// stops the server shipping it a redirect stub under the old name
-			// (MUL-6986). Dropping it would silently hand every task on this
-			// machine a skill it does not need; the failure is extra payload
-			// and a stale signpost, neither of which any other test would
-			// notice.
-			protocol.DaemonCapabilityPlatformSkillV1,
 			// Gates whether an automatic retry is handed its parent's workdir
 			// (MUL-7034). Dropping it silently sends those retries back to a
 			// fresh directory, losing the continuity nothing else would flag.
 			protocol.DaemonCapabilityCheckoutKeepsWorkV1,
-			// Without it the server never hands this daemon the wakeups that
-			// waited for its run; they start runs of their own instead.
-			protocol.DaemonCapabilityJoinedWakeupsV1,
 		} {
 			if !capabilities[want] {
 				t.Errorf("X-Client-Capabilities missing %q: %v", want, capabilities)
@@ -165,65 +152,6 @@ func TestStartTaskCapabilityNegotiationMixedVersions(t *testing.T) {
 					t.Errorf("requests = %d, want %d", got, wantCalls)
 				}
 			})
-		}
-	}
-}
-
-func TestClient_ResolveRemoteMCPCredentialUsesExplicitDaemonToken(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if got := r.Header.Get("Authorization"); got != "Bearer mdt_task_broker" {
-			t.Errorf("Authorization = %q, want short-lived daemon token", got)
-		}
-		if got := r.URL.Path; got != "/api/daemon/tasks/task-1/remote-mcp/contribution-1/credential" {
-			t.Errorf("path = %q", got)
-		}
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"credential_header":"Authorization","credential":"Bearer upstream"}`))
-	}))
-	defer srv.Close()
-
-	c := NewClient(srv.URL)
-	c.SetToken("mul_owner_pat")
-	headers, err := c.ResolveRemoteMCPCredential(context.Background(), "mdt_task_broker", "task-1", "contribution-1")
-	if err != nil {
-		t.Fatalf("ResolveRemoteMCPCredential: %v", err)
-	}
-	if got := headers.Get("Authorization"); got != "Bearer upstream" {
-		t.Fatalf("resolved credential = %q", got)
-	}
-	if got := c.Token(); got != "mul_owner_pat" {
-		t.Fatalf("client PAT was mutated to %q", got)
-	}
-}
-
-// A Plugin's mcp hook shares this resolver and this broker with a workspace's
-// own Remote MCP connections, but its credential lives in the Plugin's secret
-// storage and a different route serves it. The contribution id is all the
-// broker hands back at dial time, so the id carries the marker — and a
-// connection without it must keep going to the original route.
-func TestClient_ResolveRemoteMCPCredentialRoutesPluginContributions(t *testing.T) {
-	var seen []string
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		seen = append(seen, r.URL.Path)
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"credential_header":"Authorization","credential":"Bearer upstream"}`))
-	}))
-	defer srv.Close()
-
-	c := NewClient(srv.URL)
-	for _, contribution := range []string{"contribution-1", remotemcp.PluginContributionPrefix + "install-1:toolbox"} {
-		if _, err := c.ResolveRemoteMCPCredential(context.Background(), "mdt_task_broker", "task-1", contribution); err != nil {
-			t.Fatalf("resolve %q: %v", contribution, err)
-		}
-	}
-
-	want := []string{
-		"/api/daemon/tasks/task-1/remote-mcp/contribution-1/credential",
-		"/api/daemon/tasks/task-1/plugin-mcp/plugin:install-1:toolbox/credential",
-	}
-	for i, path := range want {
-		if seen[i] != path {
-			t.Fatalf("request %d went to %q, want %q", i, seen[i], path)
 		}
 	}
 }

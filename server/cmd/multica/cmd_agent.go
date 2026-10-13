@@ -77,13 +77,6 @@ var agentAvatarCmd = &cobra.Command{
 	RunE:  runAgentAvatar,
 }
 
-// Agent skills subcommands.
-
-var agentSkillsCmd = &cobra.Command{
-	Use:   "skills",
-	Short: "Manage agent skill assignments",
-}
-
 // Agent env subcommands. Live behind a dedicated `agent env` group because
 // they're the ONLY post-creation path for reading or writing
 // custom_env values — `multica agent list / get / update` no longer
@@ -97,37 +90,16 @@ var agentEnvCmd = &cobra.Command{
 
 var agentEnvGetCmd = &cobra.Command{
 	Use:   "get <agent-id>",
-	Short: "Print an agent's custom_env as a JSON map (agent owner or workspace owner/admin; every call is recorded)",
+	Short: "Print an agent's custom_env as a JSON map (agent owner or workspace owner; every call is recorded)",
 	Args:  exactArgs(1),
 	RunE:  runAgentEnvGet,
 }
 
 var agentEnvSetCmd = &cobra.Command{
 	Use:   "set <agent-id>",
-	Short: "Replace an agent's custom_env (agent owner or workspace owner/admin; values equal to **** preserve the existing entry)",
+	Short: "Replace an agent's custom_env (agent owner or workspace owner; values equal to **** preserve the existing entry)",
 	Args:  exactArgs(1),
 	RunE:  runAgentEnvSet,
-}
-
-var agentSkillsListCmd = &cobra.Command{
-	Use:   "list <agent-id>",
-	Short: "List skills assigned to an agent",
-	Args:  exactArgs(1),
-	RunE:  runAgentSkillsList,
-}
-
-var agentSkillsSetCmd = &cobra.Command{
-	Use:   "set <agent-id>",
-	Short: "Set skills for an agent (replaces all current assignments)",
-	Args:  exactArgs(1),
-	RunE:  runAgentSkillsSet,
-}
-
-var agentSkillsAddCmd = &cobra.Command{
-	Use:   "add <agent-id>",
-	Short: "Add skills to an agent without replacing existing assignments",
-	Args:  exactArgs(1),
-	RunE:  runAgentSkillsAdd,
 }
 
 func init() {
@@ -139,12 +111,7 @@ func init() {
 	agentCmd.AddCommand(agentRestoreCmd)
 	agentCmd.AddCommand(agentTasksCmd)
 	agentCmd.AddCommand(agentAvatarCmd)
-	agentCmd.AddCommand(agentSkillsCmd)
 	agentCmd.AddCommand(agentEnvCmd)
-
-	agentSkillsCmd.AddCommand(agentSkillsListCmd)
-	agentSkillsCmd.AddCommand(agentSkillsSetCmd)
-	agentSkillsCmd.AddCommand(agentSkillsAddCmd)
 
 	agentEnvCmd.AddCommand(agentEnvGetCmd)
 	agentEnvCmd.AddCommand(agentEnvSetCmd)
@@ -193,7 +160,7 @@ func init() {
 	agentUpdateCmd.Flags().String("custom-args", "", "New custom CLI arguments as JSON array. For model selection prefer --model; some providers (codex app-server, openclaw) reject --model in custom_args.")
 	// custom_env is intentionally NOT part of `agent update`. Use
 	// `multica agent env set <id>` — that path admits the agent owner or a
-	// workspace owner/admin, denies agent actors, and writes a persisted
+	// workspace owner, denies agent actors, and writes a persisted
 	// audit trail.
 	//
 	// mcp_config, unlike custom_env, IS updatable here: it is persisted
@@ -225,17 +192,6 @@ func init() {
 	// agent avatar
 	agentAvatarCmd.Flags().String("file", "", "Path to the avatar image file (required)")
 	agentAvatarCmd.Flags().String("output", "json", "Output format: table or json")
-
-	// agent skills list
-	agentSkillsListCmd.Flags().String("output", "table", "Output format: table or json")
-
-	// agent skills set
-	agentSkillsSetCmd.Flags().StringSlice("skill-ids", nil, "Skill IDs to assign (comma-separated)")
-	agentSkillsSetCmd.Flags().String("output", "json", "Output format: table or json")
-
-	// agent skills add
-	agentSkillsAddCmd.Flags().StringSlice("skill-ids", nil, "Skill IDs to add (comma-separated)")
-	agentSkillsAddCmd.Flags().String("output", "json", "Output format: table or json")
 
 	// agent env get
 	agentEnvGetCmd.Flags().String("output", "json", "Output format: json or table")
@@ -1008,136 +964,6 @@ func runAgentAvatar(cmd *cobra.Command, args []string) error {
 		args[0],
 		url,
 	}}
-	cli.PrintTable(os.Stdout, headers, rows)
-	return nil
-}
-
-// ---------------------------------------------------------------------------
-// Agent skills subcommands
-// ---------------------------------------------------------------------------
-
-func runAgentSkillsList(cmd *cobra.Command, args []string) error {
-	client, err := newAPIClient(cmd)
-	if err != nil {
-		return err
-	}
-
-	ctx, cancel := cli.APIContext(context.Background())
-	defer cancel()
-
-	var skills []map[string]any
-	if err := client.GetJSON(ctx, "/api/agents/"+args[0]+"/skills", &skills); err != nil {
-		return fmt.Errorf("list agent skills: %w", err)
-	}
-
-	output, _ := cmd.Flags().GetString("output")
-	if output == "json" {
-		return cli.PrintJSON(os.Stdout, skills)
-	}
-
-	headers := []string{"ID", "NAME", "DESCRIPTION"}
-	rows := make([][]string, 0, len(skills))
-	for _, s := range skills {
-		rows = append(rows, []string{
-			strVal(s, "id"),
-			strVal(s, "name"),
-			strVal(s, "description"),
-		})
-	}
-	cli.PrintTable(os.Stdout, headers, rows)
-	return nil
-}
-
-func runAgentSkillsSet(cmd *cobra.Command, args []string) error {
-	client, err := newAPIClient(cmd)
-	if err != nil {
-		return err
-	}
-
-	if !cmd.Flags().Changed("skill-ids") {
-		return fmt.Errorf("--skill-ids is required (comma-separated skill IDs; use --skill-ids '' to clear all)")
-	}
-	cleanIDs := cleanSkillIDsFlag(cmd)
-	body := map[string]any{
-		"skill_ids": cleanIDs,
-	}
-
-	ctx, cancel := cli.APIContext(context.Background())
-	defer cancel()
-
-	var result json.RawMessage
-	if err := client.PutJSON(ctx, "/api/agents/"+args[0]+"/skills", body, &result); err != nil {
-		return fmt.Errorf("set agent skills: %w", err)
-	}
-
-	return printAgentSkillsMutationResult(cmd, args[0], result)
-}
-
-func runAgentSkillsAdd(cmd *cobra.Command, args []string) error {
-	client, err := newAPIClient(cmd)
-	if err != nil {
-		return err
-	}
-
-	if !cmd.Flags().Changed("skill-ids") {
-		return fmt.Errorf("--skill-ids is required (comma-separated skill IDs)")
-	}
-	cleanIDs := cleanSkillIDsFlag(cmd)
-	if len(cleanIDs) == 0 {
-		return fmt.Errorf("--skill-ids must include at least one skill ID")
-	}
-	body := map[string]any{
-		"skill_ids": cleanIDs,
-	}
-
-	ctx, cancel := cli.APIContext(context.Background())
-	defer cancel()
-
-	var result json.RawMessage
-	if err := client.PostJSON(ctx, "/api/agents/"+args[0]+"/skills/add", body, &result); err != nil {
-		return fmt.Errorf("add agent skills: %w", err)
-	}
-
-	return printAgentSkillsMutationResult(cmd, args[0], result)
-}
-
-func cleanSkillIDsFlag(cmd *cobra.Command) []string {
-	skillIDs, _ := cmd.Flags().GetStringSlice("skill-ids")
-	cleanIDs := make([]string, 0, len(skillIDs))
-	for _, id := range skillIDs {
-		id = strings.TrimSpace(id)
-		if id != "" {
-			cleanIDs = append(cleanIDs, id)
-		}
-	}
-	return cleanIDs
-}
-
-func printAgentSkillsMutationResult(cmd *cobra.Command, agentID string, result json.RawMessage) error {
-	output, _ := cmd.Flags().GetString("output")
-	if output == "json" {
-		var pretty any
-		json.Unmarshal(result, &pretty)
-		return cli.PrintJSON(os.Stdout, pretty)
-	}
-
-	var skills []map[string]any
-	if err := json.Unmarshal(result, &skills); err != nil {
-		return fmt.Errorf("decode agent skills response: %w", err)
-	}
-	if len(skills) == 0 {
-		fmt.Printf("No skills assigned to agent %s\n", agentID)
-		return nil
-	}
-	headers := []string{"ID", "NAME", "DESCRIPTION"}
-	rows := make([][]string, 0, len(skills))
-	for _, s := range skills {
-		rows = append(rows, []string{
-			strVal(s, "id"),
-			strVal(s, "name"),
-			strVal(s, "description"),
-		})
-	}
 	cli.PrintTable(os.Stdout, headers, rows)
 	return nil
 }

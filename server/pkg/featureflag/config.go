@@ -70,7 +70,7 @@ func (rc ruleConfig) toRule() Rule {
 //
 // Schema (every field except `default` is optional):
 //
-//	billing_new_invoice_email:
+//	new_digest_email:
 //	  default: true
 //
 //	checkout_algo:

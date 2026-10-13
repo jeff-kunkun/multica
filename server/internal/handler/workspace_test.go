@@ -48,8 +48,8 @@ func TestCreateWorkspace_RejectsReservedSlug(t *testing.T) {
 // set onboarded_at inside CreateWorkspace; this test makes the new
 // invariant explicit and regression-protected.
 //
-// CompleteOnboarding (Step 3 exit) and AcceptInvitation are the only
-// remaining handlers that flip onboarded_at.
+// AcceptInvitation and share-link joins are the only handlers that flip
+// onboarded_at.
 func TestCreateWorkspace_DoesNotMarkOnboarded(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
@@ -133,7 +133,7 @@ func TestDeleteWorkspace_RequiresOwner(t *testing.T) {
 
 	dbfx.Exec(t, `
 INSERT INTO member (workspace_id, user_id, role)
-VALUES ($1, $2, 'admin')
+VALUES ($1, $2, 'member')
 `, wsID, testUserID)
 
 	req := newRequest("DELETE", "/api/workspaces/"+wsID, nil)
@@ -843,9 +843,9 @@ func setupRevocationFixture(t *testing.T, slug, daemonID string) revocationFixtu
 		"issue_prefix": "REV",
 	})
 
-	// Requester (= testUserID) is always an owner so DeleteMember authorization
-	// passes. Two owners total so LeaveWorkspace doesn't trip the "must keep
-	// at least one owner" guard.
+	// Requester (= testUserID) is the owner so DeleteMember authorization
+	// passes. The target is a plain member: owners can neither be removed nor
+	// leave.
 	dbfx.Exec(t, `
 INSERT INTO member (workspace_id, user_id, role) VALUES ($1, $2, 'owner')
 `, wsID, testUserID)
@@ -867,7 +867,7 @@ INSERT INTO member (workspace_id, user_id, role) VALUES ($1, $2, 'owner')
 	memberID := dbfx.Insert(t, "member", testutil.Cols{
 		"workspace_id": wsID,
 		"user_id":      targetUserID,
-		"role":         "owner",
+		"role":         "member",
 	})
 
 	runtimeID := dbfx.Runtime(t, "Target Runtime", testutil.Cols{
@@ -945,7 +945,7 @@ func assertRevoked(t *testing.T, fx revocationFixture) {
 	}
 }
 
-// TestDeleteMember_RevokesTargetRuntimes verifies that when an admin removes
+// TestDeleteMember_RevokesTargetRuntimes verifies that when the owner removes
 // another member from a workspace, every runtime owned by the removed member
 // has its agents archived, its in-flight tasks cancelled, its row flipped
 // offline, and its daemon_token rows deleted — all atomically with the member
@@ -959,166 +959,6 @@ func TestDeleteMember_RevokesTargetRuntimes(t *testing.T) {
 	testutil.Call(t, testHandler.DeleteMember, req).Want(http.StatusNoContent)
 
 	assertRevoked(t, fx)
-}
-
-// TestDeleteMember_PrunesChannelUserBindings verifies the application-layer
-// replacement for the channel_user_binding member-FK cascade (MUL-3515 §4):
-// removing a member prunes that member's channel bindings, in the same tx as
-// the member-row delete, while leaving a remaining member's binding intact.
-func TestDeleteMember_PrunesChannelUserBindings(t *testing.T) {
-	fx := setupRevocationFixture(t, "handler-tests-revoke-binding", "daemon-revoke-binding")
-
-	const appID = "cli_revoke_binding"
-	const removedOpenID = "ou_revoke_binding_removed"
-	const keepOpenID = "ou_revoke_binding_keep"
-
-	// channel_* rows have no FK to workspace (MUL-3515 §4), so the fixture's
-	// workspace-delete cleanup never reaches them; clear by deterministic key
-	// both before (in case a prior run was killed mid-test) and after.
-	cleanChannel := func() {
-		_, _ = testPool.Exec(context.Background(),
-			`DELETE FROM channel_user_binding WHERE channel_user_id = ANY($1)`,
-			[]string{removedOpenID, keepOpenID})
-		_, _ = testPool.Exec(context.Background(),
-			`DELETE FROM channel_installation WHERE channel_type = 'feishu' AND config->>'app_id' = $1`, appID)
-	}
-	cleanChannel()
-	t.Cleanup(cleanChannel)
-
-	var installID string
-	dbfx.QueryRow(t, `
-INSERT INTO channel_installation (workspace_id, agent_id, channel_type, config, installer_user_id)
-VALUES ($1, $2, 'feishu', jsonb_build_object('app_id', $3::text), $4)
-RETURNING id
-`, fx.WorkspaceID, fx.AgentID, appID, testUserID).Scan(&installID)
-
-	// Binding for the member being removed — must be pruned.
-	dbfx.Exec(t, `
-INSERT INTO channel_user_binding (workspace_id, multica_user_id, installation_id, channel_type, channel_user_id)
-VALUES ($1, $2, $3, 'feishu', $4)
-`, fx.WorkspaceID, fx.TargetUserID, installID, removedOpenID)
-
-	// Binding for the requester (an owner who stays) — must survive, proving
-	// the prune is scoped to the removed user, not the whole workspace.
-	dbfx.Exec(t, `
-INSERT INTO channel_user_binding (workspace_id, multica_user_id, installation_id, channel_type, channel_user_id)
-VALUES ($1, $2, $3, 'feishu', $4)
-`, fx.WorkspaceID, testUserID, installID, keepOpenID)
-
-	req := newRequest("DELETE", "/api/workspaces/"+fx.WorkspaceID+"/members/"+fx.MemberID, nil)
-	req.Header.Set("X-Workspace-ID", fx.WorkspaceID)
-	req = withURLParams(req, "id", fx.WorkspaceID, "memberId", fx.MemberID)
-	testutil.Call(t, testHandler.DeleteMember, req).Want(http.StatusNoContent)
-
-	var removedExists bool
-	dbfx.QueryRow(t,
-		`SELECT EXISTS (SELECT 1 FROM channel_user_binding WHERE channel_user_id = $1)`, removedOpenID).Scan(&removedExists)
-	if removedExists {
-		t.Fatal("removed member's channel_user_binding was not pruned")
-	}
-
-	var keepExists bool
-	dbfx.QueryRow(t,
-		`SELECT EXISTS (SELECT 1 FROM channel_user_binding WHERE channel_user_id = $1)`, keepOpenID).Scan(&keepExists)
-	if !keepExists {
-		t.Fatal("remaining member's channel_user_binding was wrongly pruned")
-	}
-}
-
-// TestDeleteMember_PrunesAutopilotSubscribers verifies the application-layer
-// cleanup for the FK-free autopilot_subscriber table. DeleteMember and
-// LeaveWorkspace both use revokeAndRemoveMember, so this pins their shared
-// transaction while also proving the delete is scoped to the departed user.
-func TestDeleteMember_PrunesAutopilotSubscribers(t *testing.T) {
-	fx := setupRevocationFixture(t, "handler-tests-revoke-autopilot-subscriber", "daemon-revoke-autopilot-subscriber")
-
-	autopilotID := dbfx.Insert(t, "autopilot", testutil.Cols{
-		"workspace_id":    fx.WorkspaceID,
-		"title":           "Revocation autopilot subscriber",
-		"assignee_type":   "agent",
-		"assignee_id":     fx.AgentID,
-		"status":          "active",
-		"execution_mode":  "run_only",
-		"created_by_type": "member",
-		"created_by_id":   testUserID,
-	})
-	dbfx.Exec(t, `
-INSERT INTO autopilot_subscriber (autopilot_id, user_type, user_id)
-VALUES ($1, 'member', $2), ($1, 'member', $3)
-`, autopilotID, fx.TargetUserID, testUserID)
-
-	// The same person belongs to another workspace and subscribes there too.
-	// Removing them from fx.WorkspaceID must not cross this tenant boundary.
-	otherWorkspaceID := dbfx.Insert(t, "workspace", testutil.Cols{
-		"name":         "Revocation subscriber other workspace",
-		"slug":         fmt.Sprintf("handler-tests-revoke-autopilot-subscriber-other-%d", time.Now().UnixNano()),
-		"description":  "tenant-scope regression fixture",
-		"issue_prefix": "RAO",
-	})
-	dbfx.Insert(t, "member", testutil.Cols{
-		"workspace_id": otherWorkspaceID,
-		"user_id":      fx.TargetUserID,
-		"role":         "owner",
-	})
-	otherRuntimeID := dbfx.Runtime(t, "Other workspace runtime", testutil.Cols{
-		"workspace_id": otherWorkspaceID,
-		"daemon_id":    "daemon-revoke-autopilot-subscriber-other",
-		"runtime_mode": "local",
-		"provider":     "multica_daemon",
-		"owner_id":     fx.TargetUserID,
-	})
-	otherAgentID := dbfx.Agent(t, "Other workspace agent", otherRuntimeID, testutil.Cols{
-		"workspace_id": otherWorkspaceID,
-		"runtime_mode": "local",
-		"visibility":   "workspace",
-		"owner_id":     fx.TargetUserID,
-	})
-	otherAutopilotID := dbfx.Insert(t, "autopilot", testutil.Cols{
-		"workspace_id":    otherWorkspaceID,
-		"title":           "Other workspace autopilot subscriber",
-		"assignee_type":   "agent",
-		"assignee_id":     otherAgentID,
-		"status":          "active",
-		"execution_mode":  "run_only",
-		"created_by_type": "member",
-		"created_by_id":   fx.TargetUserID,
-	})
-	dbfx.Exec(t, `
-INSERT INTO autopilot_subscriber (autopilot_id, user_type, user_id)
-VALUES ($1, 'member', $2)
-`, otherAutopilotID, fx.TargetUserID)
-
-	req := newRequest("DELETE", "/api/workspaces/"+fx.WorkspaceID+"/members/"+fx.MemberID, nil)
-	req.Header.Set("X-Workspace-ID", fx.WorkspaceID)
-	req = withURLParams(req, "id", fx.WorkspaceID, "memberId", fx.MemberID)
-	testutil.Call(t, testHandler.DeleteMember, req).Want(http.StatusNoContent)
-
-	var removedCount int
-	dbfx.QueryRow(t, `
-SELECT count(*) FROM autopilot_subscriber
-WHERE autopilot_id = $1 AND user_id = $2
-`, autopilotID, fx.TargetUserID).Scan(&removedCount)
-	if removedCount != 0 {
-		t.Fatalf("departed member autopilot subscribers = %d, want 0", removedCount)
-	}
-
-	var remainingCount int
-	dbfx.QueryRow(t, `
-SELECT count(*) FROM autopilot_subscriber
-WHERE autopilot_id = $1 AND user_id = $2
-`, autopilotID, testUserID).Scan(&remainingCount)
-	if remainingCount != 1 {
-		t.Fatalf("remaining member autopilot subscribers = %d, want 1", remainingCount)
-	}
-
-	var otherWorkspaceCount int
-	dbfx.QueryRow(t, `
-SELECT count(*) FROM autopilot_subscriber
-WHERE autopilot_id = $1 AND user_id = $2
-`, otherAutopilotID, fx.TargetUserID).Scan(&otherWorkspaceCount)
-	if otherWorkspaceCount != 1 {
-		t.Fatalf("other workspace autopilot subscribers = %d, want 1", otherWorkspaceCount)
-	}
 }
 
 // TestLeaveWorkspace_RevokesOwnRuntimes is the self-removal counterpart: when
@@ -1136,6 +976,61 @@ func TestLeaveWorkspace_RevokesOwnRuntimes(t *testing.T) {
 	testutil.Call(t, testHandler.LeaveWorkspace, req).Want(http.StatusNoContent)
 
 	assertRevoked(t, fx)
+}
+
+// TestDeleteMember_RefusesOwner and TestLeaveWorkspace_RefusesOwner pin the
+// single-owner model: the owner can neither be removed nor leave, and the
+// member row survives the refused request.
+func ownerOnlyWorkspace(t *testing.T, slug string) (wsID, ownerMemberID string) {
+	t.Helper()
+	_, _ = testPool.Exec(context.Background(), `DELETE FROM workspace WHERE slug = $1`, slug)
+	wsID = dbfx.Insert(t, "workspace", testutil.Cols{
+		"name":         "Owner Guard " + slug,
+		"slug":         slug,
+		"description":  "owner guard test",
+		"issue_prefix": "OWG",
+	})
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM member WHERE workspace_id = $1`, wsID)
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM workspace WHERE id = $1`, wsID)
+	})
+	ownerMemberID = dbfx.Insert(t, "member", testutil.Cols{
+		"workspace_id": wsID,
+		"user_id":      testUserID,
+		"role":         "owner",
+	})
+	return wsID, ownerMemberID
+}
+
+func assertMemberExists(t *testing.T, memberID string) {
+	t.Helper()
+	var exists bool
+	dbfx.QueryRow(t, `SELECT EXISTS (SELECT 1 FROM member WHERE id = $1)`, memberID).Scan(&exists)
+	if !exists {
+		t.Fatal("owner member row was removed")
+	}
+}
+
+func TestDeleteMember_RefusesOwner(t *testing.T) {
+	wsID, ownerMemberID := ownerOnlyWorkspace(t, "handler-tests-owner-remove")
+
+	req := newRequest("DELETE", "/api/workspaces/"+wsID+"/members/"+ownerMemberID, nil)
+	req.Header.Set("X-Workspace-ID", wsID)
+	req = withURLParams(req, "id", wsID, "memberId", ownerMemberID)
+	testutil.Call(t, testHandler.DeleteMember, req).Want(http.StatusBadRequest)
+
+	assertMemberExists(t, ownerMemberID)
+}
+
+func TestLeaveWorkspace_RefusesOwner(t *testing.T) {
+	wsID, ownerMemberID := ownerOnlyWorkspace(t, "handler-tests-owner-leave")
+
+	req := newRequest("DELETE", "/api/workspaces/"+wsID+"/leave", nil)
+	req.Header.Set("X-Workspace-ID", wsID)
+	req = withURLParam(req, "id", wsID)
+	testutil.Call(t, testHandler.LeaveWorkspace, req).Want(http.StatusBadRequest)
+
+	assertMemberExists(t, ownerMemberID)
 }
 
 // TestDeleteMember_CancelsTasksFromAgentReassignment covers a subtle
@@ -1254,7 +1149,7 @@ INSERT INTO member (workspace_id, user_id, role) VALUES ($1, $2, 'owner')
 	memberID := dbfx.Insert(t, "member", testutil.Cols{
 		"workspace_id": wsID,
 		"user_id":      targetUserID,
-		"role":         "admin",
+		"role":         "member",
 	})
 
 	req := newRequest("DELETE", "/api/workspaces/"+wsID+"/members/"+memberID, nil)

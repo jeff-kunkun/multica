@@ -2128,7 +2128,7 @@ func (c *blockingRepoCache) CreateWorktree(params repocache.WorktreeParams) (*re
 	return c.inner.CreateWorktree(params)
 }
 
-// TestShouldCleanTaskDir_KindDispatch covers the four GCMeta kinds across
+// TestShouldCleanTaskDir_KindDispatch covers the GCMeta kinds across
 // active / terminal / 404 / non-terminal axes. Each entry stands up a mock
 // server returning the expected payload (or 404) and asserts the action.
 func TestShouldCleanTaskDir_KindDispatch(t *testing.T) {
@@ -2137,8 +2137,6 @@ func TestShouldCleanTaskDir_KindDispatch(t *testing.T) {
 	const (
 		issueID    = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaa01"
 		chatID     = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbb01"
-		runID      = "cccccccc-cccc-cccc-cccc-cccccccccc01"
-		quickTask  = "dddddddd-dddd-dddd-dddd-dddddddddd01"
 		legacyMeta = "eeeeeeee-eeee-eeee-eeee-eeeeeeeeee01"
 	)
 
@@ -2196,104 +2194,6 @@ func TestShouldCleanTaskDir_KindDispatch(t *testing.T) {
 				status: http.StatusNotFound,
 			}},
 			want: gcActionClean,
-		},
-
-		// ---- autopilot run -----------------------------------------------
-		{
-			name: "autopilot completed over TTL — clean",
-			meta: &execenv.GCMeta{Kind: execenv.GCKindAutopilotRun, AutopilotRunID: runID, WorkspaceID: "ws"},
-			servers: []serverResp{{
-				path: "/api/daemon/autopilot-runs/" + runID + "/gc-check",
-				body: map[string]any{"status": "completed", "completed_at": overTTL},
-			}},
-			want: gcActionClean,
-		},
-		{
-			name: "autopilot issue_created counts as terminal",
-			meta: &execenv.GCMeta{Kind: execenv.GCKindAutopilotRun, AutopilotRunID: runID, WorkspaceID: "ws"},
-			servers: []serverResp{{
-				path: "/api/daemon/autopilot-runs/" + runID + "/gc-check",
-				body: map[string]any{"status": "issue_created", "completed_at": overTTL},
-			}},
-			want: gcActionClean,
-		},
-		{
-			name: "autopilot running — skip",
-			meta: &execenv.GCMeta{Kind: execenv.GCKindAutopilotRun, AutopilotRunID: runID, WorkspaceID: "ws"},
-			servers: []serverResp{{
-				path: "/api/daemon/autopilot-runs/" + runID + "/gc-check",
-				body: map[string]any{"status": "running"},
-			}},
-			want: gcActionSkip,
-		},
-		{
-			name: "autopilot pending — skip",
-			meta: &execenv.GCMeta{Kind: execenv.GCKindAutopilotRun, AutopilotRunID: runID, WorkspaceID: "ws"},
-			servers: []serverResp{{
-				path: "/api/daemon/autopilot-runs/" + runID + "/gc-check",
-				body: map[string]any{"status": "pending"},
-			}},
-			want: gcActionSkip,
-		},
-		{
-			// The directory is never reused, so a terminal run is reclaimed on
-			// sight — the recent completed_at no longer buys it a 24h reprieve.
-			name: "autopilot completed within TTL — clean immediately (no 24h gate)",
-			meta: &execenv.GCMeta{Kind: execenv.GCKindAutopilotRun, AutopilotRunID: runID, WorkspaceID: "ws"},
-			servers: []serverResp{{
-				path: "/api/daemon/autopilot-runs/" + runID + "/gc-check",
-				body: map[string]any{"status": "completed", "completed_at": withinTTL},
-			}},
-			want: gcActionClean,
-		},
-		{
-			// Terminal status with no completed_at stamp at all still cleans —
-			// GC keys purely on the terminal status, not on any timestamp.
-			name: "autopilot skipped with no completed_at — clean",
-			meta: &execenv.GCMeta{Kind: execenv.GCKindAutopilotRun, AutopilotRunID: runID, WorkspaceID: "ws"},
-			servers: []serverResp{{
-				path: "/api/daemon/autopilot-runs/" + runID + "/gc-check",
-				body: map[string]any{"status": "skipped"},
-			}},
-			want: gcActionClean,
-		},
-		{
-			name: "autopilot failed — clean",
-			meta: &execenv.GCMeta{Kind: execenv.GCKindAutopilotRun, AutopilotRunID: runID, WorkspaceID: "ws"},
-			servers: []serverResp{{
-				path: "/api/daemon/autopilot-runs/" + runID + "/gc-check",
-				body: map[string]any{"status": "failed"},
-			}},
-			want: gcActionClean,
-		},
-
-		// ---- quick-create -------------------------------------------------
-		{
-			name: "quick_create completed task — clean immediately",
-			meta: &execenv.GCMeta{Kind: execenv.GCKindQuickCreate, TaskID: quickTask, WorkspaceID: "ws"},
-			servers: []serverResp{{
-				path: "/api/daemon/tasks/" + quickTask + "/gc-check",
-				body: map[string]any{"status": "completed", "completed_at": withinTTL},
-			}},
-			want: gcActionClean,
-		},
-		{
-			name: "quick_create cancelled — clean",
-			meta: &execenv.GCMeta{Kind: execenv.GCKindQuickCreate, TaskID: quickTask, WorkspaceID: "ws"},
-			servers: []serverResp{{
-				path: "/api/daemon/tasks/" + quickTask + "/gc-check",
-				body: map[string]any{"status": "cancelled"},
-			}},
-			want: gcActionClean,
-		},
-		{
-			name: "quick_create still running — skip",
-			meta: &execenv.GCMeta{Kind: execenv.GCKindQuickCreate, TaskID: quickTask, WorkspaceID: "ws"},
-			servers: []serverResp{{
-				path: "/api/daemon/tasks/" + quickTask + "/gc-check",
-				body: map[string]any{"status": "running"},
-			}},
-			want: gcActionSkip,
 		},
 
 		// ---- legacy meta (no kind) → issue path ---------------------------
@@ -2355,14 +2255,6 @@ func TestShouldCleanTaskDir_EmptyParentIDFallsBackToOrphanMTime(t *testing.T) {
 		{
 			name: "chat meta",
 			meta: &execenv.GCMeta{Kind: execenv.GCKindChat, WorkspaceID: "ws"},
-		},
-		{
-			name: "autopilot run meta",
-			meta: &execenv.GCMeta{Kind: execenv.GCKindAutopilotRun, WorkspaceID: "ws"},
-		},
-		{
-			name: "quick create meta",
-			meta: &execenv.GCMeta{Kind: execenv.GCKindQuickCreate, WorkspaceID: "ws"},
 		},
 	}
 
@@ -2549,22 +2441,10 @@ func TestGCMetaForTask(t *testing.T) {
 			idOK: func(m execenv.GCMeta) bool { return m.ChatSessionID == "c1" },
 		},
 		{
-			name: "autopilot run task",
-			task: Task{ID: "t2", WorkspaceID: "ws", AutopilotRunID: "r1"},
-			want: execenv.GCKindAutopilotRun,
-			idOK: func(m execenv.GCMeta) bool { return m.AutopilotRunID == "r1" },
-		},
-		{
 			name: "issue task",
 			task: Task{ID: "t3", WorkspaceID: "ws", IssueID: "i1"},
 			want: execenv.GCKindIssue,
 			idOK: func(m execenv.GCMeta) bool { return m.IssueID == "i1" },
-		},
-		{
-			name: "quick-create task — issue_id always empty at WriteGCMeta time",
-			task: Task{ID: "t4", WorkspaceID: "ws", QuickCreatePrompt: "do the thing"},
-			want: execenv.GCKindQuickCreate,
-			idOK: func(m execenv.GCMeta) bool { return m.TaskID == "t4" },
 		},
 		{
 			name: "chat wins over issue when both set (defensive ordering)",

@@ -1,7 +1,6 @@
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { toast } from "sonner";
-import { ApiError } from "@multica/core/api";
 import type { InboxItem } from "@multica/core/types";
 import { useInboxFilterStore } from "@multica/core/inbox/filter-store";
 import { InboxPage } from "./inbox-page";
@@ -82,16 +81,6 @@ const markReadMutate = vi.fn();
 const markUnreadMutate = vi.fn();
 const archiveMutate = vi.fn();
 const unarchiveMutate = vi.fn();
-const retrySourceContextMutateAsync = vi.fn();
-const showIssueLimitUpgradePrompt = vi.hoisted(() => vi.fn());
-const showAutopilotQuotaRecoveryPrompt = vi.hoisted(() => vi.fn());
-
-vi.mock("../../modals/use-issue-limit-upgrade-prompt", () => ({
-  useIssueLimitUpgradePrompt: (reason?: string) =>
-    reason === "autopilot_quota"
-      ? showAutopilotQuotaRecoveryPrompt
-      : showIssueLimitUpgradePrompt,
-}));
 
 vi.mock("@multica/core/inbox/mutations", () => {
   const mutation = () => ({ mutate: vi.fn() });
@@ -104,10 +93,6 @@ vi.mock("@multica/core/inbox/mutations", () => {
     useArchiveAllInbox: mutation,
     useArchiveAllReadInbox: mutation,
     useArchiveCompletedInbox: mutation,
-    useRetrySourceContextQuickCreate: () => ({
-      mutateAsync: retrySourceContextMutateAsync,
-      isPending: false,
-    }),
   };
 });
 
@@ -227,21 +212,6 @@ vi.mock("./inbox-context-menu", () => ({
   },
 }));
 vi.mock("./inbox-detail-label", () => ({ useTypeLabels: () => ({}) }));
-vi.mock("./autopilot-quota-notice", () => ({
-  AutopilotQuotaNotice: ({
-    onOpenRecovery,
-  }: {
-    onOpenRecovery: () => void;
-  }) => (
-    <button
-      type="button"
-      data-testid="autopilot-quota-recovery"
-      onClick={onOpenRecovery}
-    >
-      Recover
-    </button>
-  ),
-}));
 vi.mock("../../i18n", () => ({ useT: () => ({ t: () => "Inbox" }) }));
 
 function item(overrides: Partial<InboxItem> = {}): InboxItem {
@@ -281,10 +251,6 @@ function reset() {
   markUnreadMutate.mockClear();
   archiveMutate.mockClear();
   unarchiveMutate.mockClear();
-  retrySourceContextMutateAsync.mockReset();
-  retrySourceContextMutateAsync.mockResolvedValue({});
-  showIssueLimitUpgradePrompt.mockClear();
-  showAutopilotQuotaRecoveryPrompt.mockClear();
   modalState.modal = null;
   vi.mocked(toast.success).mockClear();
   vi.mocked(toast.error).mockClear();
@@ -572,14 +538,14 @@ describe("InboxPage", () => {
     expect(replace).toHaveBeenCalledWith("/acme/inbox?issue=issue-3");
   });
 
-  // `InboxItem.issue_id` is nullable: a quick-create outcome is a notification,
+  // `InboxItem.issue_id` is nullable: such a row is a plain notification,
   // not an issue, so `IssueDetail` never renders for it — and `IssueDetail` is
   // what carries the way back in its own header on a phone. This branch has to
   // supply its own bar or opening one of these is a dead end.
   it("keeps a way back to the list for a notification with no issue", () => {
     reset();
     listData.active = [
-      item({ id: "inbox-note", issue_id: null, type: "quick_create_failed" }),
+      item({ id: "inbox-note", issue_id: null, type: "agent_blocked" }),
     ];
 
     render(<InboxPage />);
@@ -597,81 +563,6 @@ describe("InboxPage", () => {
     fireEvent.click(back!);
 
     expect(screen.getByTestId("row")).toBeInTheDocument();
-  });
-
-  it("retries a failed quick-create with its original source context", async () => {
-    reset();
-    listData.active = [
-      item({
-        id: "source-context-failure",
-        issue_id: null,
-        type: "quick_create_failed",
-        details: {
-          task_id: "task-1",
-          source_context_id: "context-1",
-          original_prompt: "make a child",
-        },
-      }),
-    ];
-
-    render(<InboxPage />);
-    fireEvent.click(screen.getByTestId("row"));
-    fireEvent.click(screen.getByTestId("retry-source-context"));
-
-    await act(async () => undefined);
-    expect(retrySourceContextMutateAsync).toHaveBeenCalledWith("task-1");
-    expect(toast.success).toHaveBeenCalledTimes(1);
-  });
-
-  it("opens quota-specific recovery from an autopilot quota notice", () => {
-    reset();
-    listData.active = [
-      item({
-        id: "autopilot-quota",
-        issue_id: null,
-        type: "autopilot_quota_exceeded",
-      }),
-    ];
-
-    render(<InboxPage />);
-    fireEvent.click(screen.getByTestId("row"));
-    fireEvent.click(screen.getByTestId("autopilot-quota-recovery"));
-
-    expect(showAutopilotQuotaRecoveryPrompt).toHaveBeenCalledTimes(1);
-    expect(showIssueLimitUpgradePrompt).not.toHaveBeenCalled();
-  });
-
-  it("shows issue-limit recovery when a source-context retry is rejected", async () => {
-    reset();
-    retrySourceContextMutateAsync.mockRejectedValue(
-      new ApiError(
-        "workspace has reached its issue limit",
-        402,
-        "Payment Required",
-        { code: "issue_limit_reached" },
-      ),
-    );
-    listData.active = [
-      item({
-        id: "source-context-limit",
-        issue_id: null,
-        type: "quick_create_failed",
-        details: {
-          task_id: "task-1",
-          source_context_id: "context-1",
-          original_prompt: "make a child",
-        },
-      }),
-    ];
-
-    render(<InboxPage />);
-    fireEvent.click(screen.getByTestId("row"));
-    fireEvent.click(screen.getByTestId("retry-source-context"));
-
-    await act(async () => undefined);
-    expect(showIssueLimitUpgradePrompt).toHaveBeenCalledTimes(1);
-    expect(showAutopilotQuotaRecoveryPrompt).not.toHaveBeenCalled();
-    expect(toast.error).not.toHaveBeenCalled();
   });
 
   it("marks the opened notification read", () => {

@@ -82,14 +82,10 @@ vi.mock("@multica/core/workspace/hooks", () => ({
 vi.mock("@multica/core/workspace/queries", () => ({
   memberListOptions: () => ({
     queryKey: ["workspaces", "ws-1", "members"],
-    queryFn: () => Promise.resolve([{ user_id: "user-1", name: "Test User", email: "test@test.com", role: "admin" }]),
+    queryFn: () => Promise.resolve([{ user_id: "user-1", name: "Test User", email: "test@test.com", role: "owner" }]),
   }),
   agentListOptions: () => ({
     queryKey: ["workspaces", "ws-1", "agents"],
-    queryFn: () => Promise.resolve([]),
-  }),
-  squadListOptions: () => ({
-    queryKey: ["workspaces", "ws-1", "squads"],
     queryFn: () => Promise.resolve([]),
   }),
   assigneeFrequencyOptions: () => ({
@@ -200,7 +196,6 @@ vi.mock("../../editor", async () => ({
     const initialValue = syncedValue ?? defaultValue ?? "";
     if (syncedValue !== undefined) descriptionSelectionAction.current = selectionAction;
     const valueRef = useRef(initialValue);
-    const baseRef = useRef(initialValue);
     const [editorValue, setEditorValue] = useState(initialValue);
     // Mirrors the real editor's dirty guard: once the user has typed, an
     // external `value` change is refused so it cannot clobber unsaved bytes.
@@ -214,7 +209,6 @@ vi.mock("../../editor", async () => ({
     useEffect(() => {
       if (syncedValue === undefined || dirtyRef.current) return;
       valueRef.current = syncedValue;
-      baseRef.current = syncedValue;
       setEditorValue(syncedValue);
     }, [syncedValue]);
     useImperativeHandle(ref, () => ({
@@ -228,7 +222,6 @@ vi.mock("../../editor", async () => ({
       // editor refuses external syncs) and does so without emitting an update.
       adoptContent: (markdown: string) => {
         valueRef.current = markdown;
-        baseRef.current = markdown;
         dirtyRef.current = false;
         setEditorValue(markdown);
       },
@@ -252,7 +245,7 @@ vi.mock("../../editor", async () => ({
           valueRef.current = e.target.value;
           dirtyRef.current = true;
           setEditorValue(e.target.value);
-          onUpdate?.(e.target.value, baseRef.current);
+          onUpdate?.(e.target.value);
         }}
         placeholder={placeholder}
         data-testid="rich-text-editor"
@@ -336,7 +329,7 @@ const mockApiObj = vi.hoisted(() => ({
   listAttachments: vi.fn().mockResolvedValue([]),
   addCommentReaction: vi.fn(),
   removeCommentReaction: vi.fn(),
-  listMembers: vi.fn().mockResolvedValue([{ user_id: "user-1", name: "Test User", email: "test@test.com", role: "admin" }]),
+  listMembers: vi.fn().mockResolvedValue([{ user_id: "user-1", name: "Test User", email: "test@test.com", role: "owner" }]),
   listAgents: vi.fn().mockResolvedValue([]),
   getAgent: vi.fn().mockResolvedValue(null),
   listRuntimes: vi.fn().mockResolvedValue([]),
@@ -730,7 +723,7 @@ describe("IssueDetail (shared)", () => {
     mockApiObj.listTaskMessages.mockResolvedValue([]);
     mockApiObj.rerunIssue.mockResolvedValue({ id: "task-rerun" });
     mockApiObj.listMembers.mockResolvedValue([
-      { user_id: "user-1", name: "Test User", email: "test@test.com", role: "admin" },
+      { user_id: "user-1", name: "Test User", email: "test@test.com", role: "owner" },
     ]);
     mockApiObj.listAgents.mockResolvedValue([]);
     // Reset project mock — individual tests override per case. Default fixture
@@ -795,14 +788,14 @@ describe("IssueDetail (shared)", () => {
     const branchAction = await screen.findByText("Create sub-issue from here");
     expect(branchAction.closest('[role="menuitem"]')?.querySelector(".lucide-message-square-plus")).toBeInTheDocument();
     fireEvent.click(branchAction);
-    expect(mockOpenModal).toHaveBeenLastCalledWith("quick-create-issue", expect.objectContaining({
+    expect(mockOpenModal).toHaveBeenLastCalledWith("create-issue", expect.objectContaining({
       anchor_comment_id: "source-root",
       parent_issue_id: "issue-1",
     }));
 
     fireEvent.click(menuButton("source-reply")!);
     fireEvent.click(await screen.findByText("Create sub-issue from here"));
-    expect(mockOpenModal).toHaveBeenLastCalledWith("quick-create-issue", expect.objectContaining({
+    expect(mockOpenModal).toHaveBeenLastCalledWith("create-issue", expect.objectContaining({
       anchor_comment_id: "source-reply",
       parent_issue_id: "issue-1",
     }));
@@ -1995,50 +1988,6 @@ describe("IssueDetail (shared)", () => {
     expect(screen.getByText(/changed priority/i)).toBeInTheDocument();
   });
 
-  // Duplicate marks (MUL-7349) name another issue; the identifier is a link
-  // to it, and a mark removed because its original was deleted is plain text.
-  it("links a duplicate mark to the issue it names", async () => {
-    mockApiObj.listTimeline.mockResolvedValue([
-      {
-        type: "activity",
-        id: "act-dup-marked",
-        actor_type: "member",
-        actor_id: "user-1",
-        action: "duplicate_marked",
-        details: { original_id: "issue-9", original_identifier: "MUL-9" },
-        created_at: "2026-01-16T00:00:00Z",
-      },
-      {
-        type: "activity",
-        id: "act-dup-unmarked",
-        actor_type: "member",
-        actor_id: "user-1",
-        action: "duplicate_unmarked",
-        details: { original_id: "issue-8", original_identifier: "MUL-8", reason: "original_deleted" },
-        created_at: "2026-01-16T00:00:30Z",
-      },
-      {
-        type: "activity",
-        id: "act-dup-reopened",
-        actor_type: "member",
-        actor_id: "user-1",
-        action: "duplicate_unmarked",
-        details: { original_id: "issue-9", original_identifier: "MUL-9", to: "todo" },
-        created_at: "2026-01-16T00:01:00Z",
-      },
-    ]);
-    renderIssueDetail();
-
-    const links = await screen.findAllByRole("link", { name: "MUL-9" });
-    expect(links[0]?.getAttribute("href")).toBe("/test/issues/issue-9");
-    expect(screen.getByText(/^marked this issue as a duplicate of/i)).toBeInTheDocument();
-    expect(screen.getByText(/removed the duplicate mark, MUL-8 was deleted/i)).toBeInTheDocument();
-    expect(screen.queryByRole("link", { name: "MUL-8" })).not.toBeInTheDocument();
-    // Reopening replaces the status row, so the unmarked row says where it went.
-    expect(screen.getByText(/and moved it to Todo/i)).toBeInTheDocument();
-    expect(screen.getAllByRole("link", { name: "MUL-9" })).toHaveLength(2);
-  });
-
   // MUL-7429: an automatic status change says why, and the per-issue switch
   // shows on the timeline.
   it("explains PR merge automation activity", async () => {
@@ -2727,15 +2676,13 @@ describe("IssueDetail (shared)", () => {
         "issue-1",
         expect.objectContaining({
           description: "",
-          description_base: "Add JWT auth to the backend",
         }),
       );
     });
   });
 
-  // Descriptions are last-write-wins (MUL-6971). The baseline still ships as
-  // channel-media merge metadata, but a rejected save no longer opens a compare
-  // panel — that panel fired on the editor's own autosave and wedged the
+  // Descriptions are last-write-wins (MUL-6971). A rejected save no longer
+  // opens a compare panel — that panel fired on the editor's own autosave and wedged the
   // session, and the title/comment editors keep the compare flow they can
   // actually satisfy.
   it("keeps editing after a failed description save without a compare panel", async () => {
@@ -2753,7 +2700,6 @@ describe("IssueDetail (shared)", () => {
         "issue-1",
         expect.objectContaining({
           description: "My local description",
-          description_base: "Add JWT auth to the backend",
         }),
       ),
     );
@@ -2777,7 +2723,7 @@ describe("IssueDetail (shared)", () => {
     );
   });
 
-  it("serializes description saves and rebases the queued draft on submitted content", async () => {
+  it("serializes description saves and sends the queued draft after the first settles", async () => {
     let resolveFirst!: (issue: Issue) => void;
     const firstSave = new Promise<Issue>((resolve) => {
       resolveFirst = resolve;
@@ -2809,7 +2755,6 @@ describe("IssueDetail (shared)", () => {
       "issue-1",
       expect.objectContaining({
         description: "Second local description",
-        description_base: "First local description",
       }),
     );
   });
@@ -2862,7 +2807,7 @@ describe("IssueDetail (shared)", () => {
     expect(mockApiObj.updateIssue).toHaveBeenNthCalledWith(
       2,
       "issue-2",
-      expect.objectContaining({ description_base: "Second issue description" }),
+      expect.objectContaining({ description: "Issue two draft" }),
     );
 
     await act(async () => {

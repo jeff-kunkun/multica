@@ -171,7 +171,7 @@ vi.mock("@tanstack/react-query", async (importOriginal) => {
       const key = options.queryKey ?? [];
       if (key.includes("agents")) return { data: h.agents };
       if (key.includes("members")) {
-        return { data: [{ user_id: "user-1", role: "admin" }] };
+        return { data: [{ user_id: "user-1", role: "owner" }] };
       }
       if (key.includes("runtimes")) return { data: [] };
       if (key.includes("sessions")) return { data: h.sessions, isSuccess: true };

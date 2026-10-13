@@ -315,9 +315,7 @@ func TestDeleteAgentRuntime_OfflineProfileInstanceWithBoundAgentsDoesNotPromiseC
 }
 
 // createSystemFixtureAgent inserts a product-owned agent. kind and system_key
-// are independent here on purpose: Mika is kind='user' with system_key='mika'
-// (it must stay visible and assignable), while a builder carrier is
-// kind='system'. The refusals key off system_key for exactly that reason.
+// are independent here on purpose: the refusals key off system_key, not kind.
 func createSystemFixtureAgent(t *testing.T, ctx context.Context, runtimeID, name, kind, systemKey string) string {
 	t.Helper()
 	var agentID string
@@ -337,86 +335,9 @@ func createSystemFixtureAgent(t *testing.T, ctx context.Context, runtimeID, name
 	return agentID
 }
 
-// Mika cannot be archived — the archive endpoint rejects any agent carrying a
-// system_key — but it CAN be rebound, so the generic "reassign or archive them"
-// clause is wrong for it in both directions: half of it is impossible and the
-// half that works needs a destination the generic wording never gives. The
-// refusal has to carry Mika's own path instead. Capability itself is asserted
-// against the real endpoints in TestMikaRemedyMatchesWhatMikaCanDo.
-func TestDeleteRuntimeProfile_MikaBlockerGetsItsOwnRemedy(t *testing.T) {
-	if testHandler == nil {
-		t.Skip("database not available")
-	}
-	ctx := context.Background()
-
-	profileID := insertRuntimeProfileFixture(t, ctx, "Mika Held Profile", "codex", "mika-held")
-	runtimeID := insertProfileRuntimeFixture(t, ctx, profileID, "MIKA-HOST", "codex")
-	createSystemFixtureAgent(t, ctx, runtimeID, "Mika (profile guard)", "user", "mika")
-
-	body := deleteProfileExpectingConflict(t, ctx, profileID)
-	msg := conflictMessage(t, body)
-
-	if strings.Contains(msg, "can be reassigned or archived") || strings.Contains(msg, "Reassign or archive them first.") {
-		t.Fatalf("the generic reassign-or-archive clause does not apply to Mika: %s", msg)
-	}
-	if !strings.Contains(msg, "cannot be archived") {
-		t.Fatalf("refusal must still say Mika cannot be archived, got: %s", msg)
-	}
-	// The other half: Mika IS movable, and saying otherwise tells an owner who
-	// could fix this in one edit to give up. Scoped for a profile delete —
-	// moving Mika to a sibling runtime of the same profile would not help.
-	if !strings.Contains(msg, "a runtime that this profile does not provide") {
-		t.Fatalf("refusal must point at the rebind that actually clears this, got: %s", msg)
-	}
-	if !strings.Contains(msg, "built into Multica)") {
-		t.Fatalf("the listed blocker should be marked as product-owned, got: %s", msg)
-	}
-
-	agents, _ := body["active_agents"].([]any)
-	if len(agents) != 1 {
-		t.Fatalf("expected 1 blocker, got %d", len(agents))
-	}
-	entry, _ := agents[0].(map[string]any)
-	if got, _ := entry["system_key"].(string); got != "mika" {
-		t.Fatalf("system_key = %q, want mika — clients need it to localize", got)
-	}
-	if got, _ := entry["kind"].(string); got != "user" {
-		t.Fatalf("kind = %q; Mika is deliberately kind=user, so kind must not be the discriminator", got)
-	}
-}
-
-// A builder carrier is hidden from the agent list entirely, so neither
-// "reassign" nor "archive" is reachable. The way out is its Builder session.
-func TestDeleteRuntimeProfile_BuilderCarrierBlockerPointsAtItsSession(t *testing.T) {
-	if testHandler == nil {
-		t.Skip("database not available")
-	}
-	ctx := context.Background()
-
-	profileID := insertRuntimeProfileFixture(t, ctx, "Builder Held Profile", "codex", "builder-held")
-	runtimeID := insertProfileRuntimeFixture(t, ctx, profileID, "BUILDER-HOST", "codex")
-	createSystemFixtureAgent(t, ctx, runtimeID,
-		".multica-agent-builder-flow1", "system", "agent_builder:flow1")
-
-	body := deleteProfileExpectingConflict(t, ctx, profileID)
-	msg := conflictMessage(t, body)
-
-	if strings.Contains(msg, "can be reassigned or archived") || strings.Contains(msg, "Reassign or archive them first.") {
-		t.Fatalf("a builder carrier is not in the agent list; refusal must not say so: %s", msg)
-	}
-	if !strings.Contains(msg, "Agent Builder session") {
-		t.Fatalf("refusal must point at the Builder session, got: %s", msg)
-	}
-
-	agents, _ := body["active_agents"].([]any)
-	entry, _ := agents[0].(map[string]any)
-	if got, _ := entry["system_key"].(string); got != "agent_builder:flow1" {
-		t.Fatalf("system_key = %q", got)
-	}
-}
-
 // With both kinds present each needs its own clause: the user agent is
-// actionable, the carrier is not, and collapsing them loses one or the other.
+// actionable, the product-owned one is not, and collapsing them loses one or
+// the other.
 func TestDeleteRuntimeProfile_MixedBlockersGiveEachItsOwnRemedy(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
@@ -426,24 +347,21 @@ func TestDeleteRuntimeProfile_MixedBlockersGiveEachItsOwnRemedy(t *testing.T) {
 	profileID := insertRuntimeProfileFixture(t, ctx, "Mixed Held Profile", "codex", "mixed-held")
 	runtimeID := insertProfileRuntimeFixture(t, ctx, profileID, "MIXED-HOST", "codex")
 	_ = createCascadeFixtureAgent(t, ctx, runtimeID, "Ordinary Agent")
-	createSystemFixtureAgent(t, ctx, runtimeID, "Mika (mixed guard)", "user", "mika")
-	createSystemFixtureAgent(t, ctx, runtimeID,
-		".multica-agent-builder-flow2", "system", "agent_builder:flow2")
+	createSystemFixtureAgent(t, ctx, runtimeID, "Product Agent (mixed guard)", "system", "some_future_facility")
 
 	body := deleteProfileExpectingConflict(t, ctx, profileID)
 	msg := conflictMessage(t, body)
 
 	for _, want := range []string{
 		"not marked as built into Multica can be reassigned or archived",
-		"Agent Builder session",
-		"Mika is built into Multica, so it cannot be archived",
+		"built into Multica and cannot be archived",
 	} {
 		if !strings.Contains(msg, want) {
 			t.Fatalf("mixed refusal missing %q, got: %s", want, msg)
 		}
 	}
-	if got, _ := body["active_agent_count"].(float64); int(got) != 3 {
-		t.Fatalf("active_agent_count = %v, want 3", got)
+	if got, _ := body["active_agent_count"].(float64); int(got) != 2 {
+		t.Fatalf("active_agent_count = %v, want 2", got)
 	}
 }
 
@@ -483,46 +401,6 @@ func TestDeleteRuntimeProfile_ActiveAgentResponseIsBounded(t *testing.T) {
 	}
 }
 
-// An offline instance held by Mika alone hits the same trap as the profile
-// refusal: the generic clause does not fit, and here the destination is any
-// other runtime rather than one outside the profile.
-func TestDeleteAgentRuntime_OfflineInstanceHeldByMikaGetsMikasOwnRemedy(t *testing.T) {
-	if testHandler == nil {
-		t.Skip("database not available")
-	}
-	ctx := context.Background()
-
-	runtimeID, _ := createProfileBackedRuntime(t, ctx, "Mika Held Machine")
-	if _, err := testPool.Exec(ctx,
-		`UPDATE agent_runtime SET status = 'offline' WHERE id = $1`, runtimeID); err != nil {
-		t.Fatalf("mark runtime offline: %v", err)
-	}
-	createSystemFixtureAgent(t, ctx, runtimeID, "Mika (instance guard)", "user", "mika")
-
-	w := httptest.NewRecorder()
-	req := newRequest("DELETE", "/api/runtimes/"+runtimeID, nil)
-	req = withURLParam(req, "runtimeId", runtimeID)
-	testHandler.DeleteAgentRuntime(w, req)
-
-	if w.Code != http.StatusConflict {
-		t.Fatalf("expected 409, got %d: %s", w.Code, w.Body.String())
-	}
-	msg := conflictMessage(t, decodeConflict(t, w))
-
-	if strings.Contains(msg, "can be reassigned or archived") || strings.Contains(msg, "Reassign or archive them first.") {
-		t.Fatalf("the generic reassign-or-archive clause does not apply to Mika: %s", msg)
-	}
-	if !strings.Contains(msg, "cannot be archived") {
-		t.Fatalf("instance refusal must still say Mika cannot be archived, got: %s", msg)
-	}
-	if !strings.Contains(msg, "bind it to another runtime") {
-		t.Fatalf("instance refusal must point at the rebind, got: %s", msg)
-	}
-	if strings.Contains(msg, "without any action from you") {
-		t.Fatalf("must not promise cleanup while Mika holds the runtime: %s", msg)
-	}
-}
-
 func deleteProfileExpectingConflict(t *testing.T, ctx context.Context, profileID string) map[string]any {
 	t.Helper()
 	w := httptest.NewRecorder()
@@ -539,8 +417,8 @@ func deleteProfileExpectingConflict(t *testing.T, ctx context.Context, profileID
 
 // The remedies must come from the whole blocker set, not the sample. Sorting
 // puts the sample's contents outside the caller's control, so a class can fall
-// entirely past the cap: twenty ordinary agents that sort first push Mika to
-// position 21, and a message built from the sample would then tell the user to
+// entirely past the cap: twenty ordinary agents that sort first push a
+// product-owned agent to position 21, and a message built from the sample would then tell the user to
 // archive all 21 — the exact unactionable instruction this change removes, just
 // deferred until they have worked through the first twenty.
 func TestDeleteRuntimeProfile_RemedyCoversBlockersBeyondTheSample(t *testing.T) {
@@ -551,49 +429,23 @@ func TestDeleteRuntimeProfile_RemedyCoversBlockersBeyondTheSample(t *testing.T) 
 
 	profileID := insertRuntimeProfileFixture(t, ctx, "Beyond Sample Profile", "codex", "beyond-sample")
 	runtimeID := insertProfileRuntimeFixture(t, ctx, profileID, "BEYOND-HOST", "codex")
-	// "Agent NNN" sorts before "Mika ...", filling the whole sample.
+	// "Agent NNN" sorts before "zzz-...", filling the whole sample.
 	for i := 0; i < maxReportedBlockingAgents; i++ {
 		_ = createCascadeFixtureAgent(t, ctx, runtimeID, fmt.Sprintf("Agent %03d", i))
 	}
-	createSystemFixtureAgent(t, ctx, runtimeID, "Mika (beyond sample)", "user", "mika")
+	createSystemFixtureAgent(t, ctx, runtimeID, "zzz-product-agent", "system", "some_future_facility")
 
 	body := deleteProfileExpectingConflict(t, ctx, profileID)
 	msg := conflictMessage(t, body)
 
-	if !strings.Contains(msg, "Mika is built into Multica") {
-		t.Fatalf("Mika is blocker #21 and must still be reported, got: %s", msg)
-	}
-	if !strings.Contains(msg, "a runtime that this profile does not provide") {
-		t.Fatalf("the out-of-sample Mika must still get its real remedy, got: %s", msg)
+	if !strings.Contains(msg, "built into Multica and cannot be archived") {
+		t.Fatalf("the product-owned agent is blocker #21 and must still be reported, got: %s", msg)
 	}
 	if strings.Contains(msg, "Reassign or archive them first.") {
-		t.Fatalf("the blanket remedy must not cover a Mika the sample never showed: %s", msg)
+		t.Fatalf("the blanket remedy must not cover a product-owned agent the sample never showed: %s", msg)
 	}
 	if got, _ := body["active_agent_count"].(float64); int(got) != maxReportedBlockingAgents+1 {
 		t.Fatalf("active_agent_count = %v", got)
-	}
-}
-
-// Same boundary for a builder carrier: its remedy is a different surface
-// entirely, so losing it past the cap strands the user just as badly.
-func TestDeleteRuntimeProfile_BuilderCarrierBeyondTheSampleStillReported(t *testing.T) {
-	if testHandler == nil {
-		t.Skip("database not available")
-	}
-	ctx := context.Background()
-
-	profileID := insertRuntimeProfileFixture(t, ctx, "Beyond Sample Builder", "codex", "beyond-builder")
-	runtimeID := insertProfileRuntimeFixture(t, ctx, profileID, "BEYOND-BUILD-HOST", "codex")
-	for i := 0; i < maxReportedBlockingAgents; i++ {
-		_ = createCascadeFixtureAgent(t, ctx, runtimeID, fmt.Sprintf("Agent %03d", i))
-	}
-	// "zzz-" sorts last, so the carrier lands past the cap.
-	createSystemFixtureAgent(t, ctx, runtimeID,
-		"zzz-multica-agent-builder-flow9", "system", "agent_builder:flow9")
-
-	msg := conflictMessage(t, deleteProfileExpectingConflict(t, ctx, profileID))
-	if !strings.Contains(msg, "Agent Builder session") {
-		t.Fatalf("builder carrier is blocker #21 and must still be reported, got: %s", msg)
 	}
 }
 
@@ -612,15 +464,10 @@ func TestBlockingAgentClassMatchesSQLClassification(t *testing.T) {
 	runtimeID := insertProfileRuntimeFixture(t, ctx, profileID, "CLASSIFIER-HOST", "codex")
 
 	_ = createCascadeFixtureAgent(t, ctx, runtimeID, "Pin Ordinary")
-	createSystemFixtureAgent(t, ctx, runtimeID, "Pin Mika", "user", "mika")
-	createSystemFixtureAgent(t, ctx, runtimeID, "Pin Builder", "system", "agent_builder:pinflow")
 	createSystemFixtureAgent(t, ctx, runtimeID, "Pin Future", "system", "some_future_facility")
-	// Near misses for the builder prefix. '_' is a single-character wildcard in
-	// SQL LIKE, so a LIKE-based CASE classifies both of these as carriers while
-	// Go's HasPrefix does not — and the refusal would then send the user to an
-	// Agent Builder session that does not exist.
-	createSystemFixtureAgent(t, ctx, runtimeID, "Pin Dash", "system", "agent-builder:not-a-carrier")
-	createSystemFixtureAgent(t, ctx, runtimeID, "Pin Wildcard", "system", "agentXbuilder:not-a-carrier")
+	// A product-owned agent with kind='user' is still classified by its
+	// system_key, never by kind.
+	createSystemFixtureAgent(t, ctx, runtimeID, "Pin Visible System", "user", "visible_facility")
 
 	rows, err := testHandler.Queries.ListActiveAgentsByProfile(ctx, db.ListActiveAgentsByProfileParams{
 		ProfileID:   parseUUID(profileID),
@@ -630,8 +477,8 @@ func TestBlockingAgentClassMatchesSQLClassification(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list blockers: %v", err)
 	}
-	if len(rows) != 6 {
-		t.Fatalf("expected 6 blockers, got %d", len(rows))
+	if len(rows) != 3 {
+		t.Fatalf("expected 3 blockers, got %d", len(rows))
 	}
 
 	for _, row := range rows {
@@ -651,8 +498,6 @@ func TestBlockingAgentClassMatchesSQLClassification(t *testing.T) {
 		class blockingAgentClass
 	}{
 		{"user", summary.UserCount, blockingAgentUser},
-		{"mika", summary.MikaCount, blockingAgentMika},
-		{"agent_builder", summary.AgentBuilderCount, blockingAgentBuilderCarrier},
 		{"other_system", summary.OtherSystemCount, blockingAgentOtherSystem},
 	} {
 		var want int64
@@ -726,56 +571,6 @@ func TestDeleteAgentRuntime_OfflineInstanceWithUnfinishedTaskDoesNotPromiseClean
 		if strings.Contains(msg, "without any action from you") {
 			t.Errorf("cascade=%v: GC excludes this 8-day-old runtime with a deferred task, but guidance promises cleanup: %s", cascade, msg)
 		}
-	}
-}
-
-// Builder sessions are creator-scoped reads, so an admin who is not the
-// creator gets 403 from list, switch and discard alike. Telling that admin to
-// reopen the session is another instruction they cannot carry out.
-// Regression contributed by review.
-func TestDeleteRuntimeProfile_BuilderRemedyAddressesTheSessionCreator(t *testing.T) {
-	if testHandler == nil {
-		t.Skip("database not available")
-	}
-	ctx := context.Background()
-	creatorID := dbfx.User(t, "Review Builder Owner", "review-builder-owner@multica.ai")
-	dbfx.Insert(t, "member", testutil.Cols{"workspace_id": testWorkspaceID, "user_id": creatorID, "role": "member"})
-	runtimeID, profileID := createProfileBackedRuntime(t, ctx, "Review Shared Builder Host")
-	dbfx.Exec(t, `UPDATE agent_runtime SET visibility='public' WHERE id=$1`, runtimeID)
-	w := httptest.NewRecorder()
-	testHandler.CreateAgentBuilderSession(w, newRequestAs(creatorID, "POST", "/api/agent-builder/sessions", map[string]any{"runtime_id": runtimeID}))
-	if w.Code != http.StatusCreated {
-		t.Fatalf("create builder: %d %s", w.Code, w.Body.String())
-	}
-	var session CreateAgentBuilderSessionResponse
-	if err := json.Unmarshal(w.Body.Bytes(), &session); err != nil {
-		t.Fatal(err)
-	}
-	dbfx.Exec(t, `INSERT INTO agent_builder_draft (chat_session_id, workspace_id, draft) VALUES ($1, $2, '{"name":"Saved draft"}'::jsonb)`, session.SessionID, testWorkspaceID)
-	t.Cleanup(func() {
-		testPool.Exec(context.Background(), `DELETE FROM agent_builder_draft WHERE chat_session_id=$1`, session.SessionID)
-	})
-	msg := conflictMessage(t, deleteProfileExpectingConflict(t, ctx, profileID))
-	w = httptest.NewRecorder()
-	testHandler.ListAgentBuilderSessions(w, newRequest("GET", "/api/agent-builder/sessions", nil))
-	if w.Code != http.StatusOK {
-		t.Fatalf("list: %d %s", w.Code, w.Body.String())
-	}
-	if strings.Contains(w.Body.String(), session.SessionID) {
-		t.Fatal("other member's private session unexpectedly visible")
-	}
-	w = switchBuilderRuntime(t, session.SessionID, runtimeID)
-	if w.Code != http.StatusForbidden {
-		t.Fatalf("switch: %d %s", w.Code, w.Body.String())
-	}
-	w = httptest.NewRecorder()
-	r := withURLParam(newRequest("DELETE", "/api/chat/sessions/"+session.SessionID, nil), "sessionId", session.SessionID)
-	testHandler.DeleteChatSession(w, withChatTestWorkspaceCtx(t, r))
-	if w.Code != http.StatusForbidden {
-		t.Fatalf("discard: %d %s", w.Code, w.Body.String())
-	}
-	if strings.Contains(msg, "reopen the session") && !strings.Contains(msg, "creator") && !strings.Contains(msg, "owner") {
-		t.Fatalf("admin cannot see, switch, or discard the member's Builder, but guidance tells the admin to reopen it: %s", msg)
 	}
 }
 
@@ -873,63 +668,22 @@ func TestDeleteAgentRuntime_OfflineInstanceMatchesTheRealGCDrainGate(t *testing.
 	}
 }
 
-// The Mika clause makes two claims about product capability, and an earlier
-// version of it had the second one backwards — it said Mika could not be moved,
-// which told an owner who could have fixed the block in one edit to give up.
-// Both halves are therefore asserted against the real endpoints rather than
-// against anyone's reading of them, so the message cannot drift from the
-// product again. Correction contributed by review.
-func TestMikaRemedyMatchesWhatMikaCanDo(t *testing.T) {
-	if testHandler == nil {
-		t.Skip("database not available")
+// newTestRuntime inserts an extra runtime in the fixture workspace so rebind
+// tests have somewhere to move to.
+func newTestRuntime(t *testing.T, name, status string) string {
+	t.Helper()
+	var runtimeID string
+	if err := testPool.QueryRow(context.Background(), `
+		INSERT INTO agent_runtime (
+			workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, owner_id, last_seen_at
+		)
+		VALUES ($1, NULL, $2, 'cloud', $3, $4, 'switch test runtime', '{}'::jsonb, $5, now())
+		RETURNING id
+	`, testWorkspaceID, name, strings.ToLower(strings.ReplaceAll(name, " ", "_")), status, testUserID).Scan(&runtimeID); err != nil {
+		t.Fatalf("create runtime %q: %v", name, err)
 	}
-	ctx := context.Background()
-
-	source, _ := createProfileBackedRuntime(t, ctx, "Mika Remedy Source")
-	target := newTestRuntime(t, "Mika Remedy Target", "online")
-	mikaID := createSystemFixtureAgent(t, ctx, source, "Mika", "user", "mika")
-
-	// Claim 1: Mika cannot be archived.
-	w := httptest.NewRecorder()
-	testHandler.ArchiveAgent(w, withURLParam(
-		newRequest("POST", "/api/agents/"+mikaID+"/archive", nil), "id", mikaID))
-	if w.Code == http.StatusOK {
-		t.Fatalf("Mika archived successfully; the refusal claims it cannot be: %s", w.Body.String())
-	}
-
-	// Claim 2: Mika can be rebound to another runtime.
-	w = httptest.NewRecorder()
-	testHandler.UpdateAgent(w, withURLParam(
-		newRequest("PATCH", "/api/agents/"+mikaID, map[string]any{"runtime_id": target}), "id", mikaID))
-	if w.Code != http.StatusOK {
-		t.Fatalf("rebinding Mika failed (%d), but the refusal tells the user to do it: %s",
-			w.Code, w.Body.String())
-	}
-	var bound string
-	if err := testPool.QueryRow(ctx,
-		`SELECT runtime_id::text FROM agent WHERE id = $1`, mikaID).Scan(&bound); err != nil {
-		t.Fatalf("read mika binding: %v", err)
-	}
-	if bound != target {
-		t.Fatalf("Mika still bound to %s, expected the move to %s to take effect", bound, target)
-	}
-
-	// And the move is what actually clears the instance refusal.
-	if _, err := testPool.Exec(ctx,
-		`UPDATE agent_runtime SET status = 'offline' WHERE id = $1`, source); err != nil {
-		t.Fatalf("mark source offline: %v", err)
-	}
-	w = httptest.NewRecorder()
-	testHandler.DeleteAgentRuntime(w, withURLParam(
-		newRequest("DELETE", "/api/runtimes/"+source, nil), "runtimeId", source))
-	if w.Code != http.StatusConflict {
-		t.Fatalf("expected 409, got %d: %s", w.Code, w.Body.String())
-	}
-	body := decodeConflict(t, w)
-	if got, _ := body["active_agent_count"].(float64); int(got) != 0 {
-		t.Fatalf("after the rebind the source should hold no agents, got %v", got)
-	}
-	if msg := conflictMessage(t, body); strings.Contains(msg, "Mika is built into Multica") {
-		t.Fatalf("Mika moved away but is still named as a blocker: %s", msg)
-	}
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM agent_runtime WHERE id = $1`, runtimeID)
+	})
+	return runtimeID
 }

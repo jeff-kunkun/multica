@@ -65,18 +65,9 @@ func TestConversationRootOwnersReadOnlyRoutingData(t *testing.T) {
 	otherIssueID := dbfx.Issue(t, "Other issue")
 	rootID := dbfx.Comment(t, issueID, "No explicit owner")
 	otherRootID := dbfx.Comment(t, issueID, "Another root")
-	oldSquad := dbfx.Squad(t, "Old root squad", agentA)
-	newSquad := dbfx.Squad(t, "New root squad", agentA)
 	for i := 0; i < 96; i++ {
-		squad := any(nil)
-		if i == 0 {
-			squad = oldSquad
-		}
-		if i == 1 {
-			squad = newSquad
-		}
 		dbfx.Task(t, agentA, testutil.Cols{
-			"issue_id": issueID, "trigger_comment_id": rootID, "runtime_id": handlerTestRuntimeID(t), "status": "completed", "squad_id": squad,
+			"issue_id": issueID, "trigger_comment_id": rootID, "runtime_id": handlerTestRuntimeID(t), "status": "completed",
 			"created_at": time.Date(2026, 1, 1, 0, 0, i, 0, time.UTC),
 			"context":    testutil.Raw(`jsonb_build_object('large',repeat('x',65536))`),
 			"result":     testutil.Raw(`jsonb_build_object('large',repeat('y',65536))`),
@@ -102,14 +93,7 @@ func TestConversationRootOwnersReadOnlyRoutingData(t *testing.T) {
 	}
 	for _, trigger := range triggers {
 		switch uuidToString(trigger.Agent.ID) {
-		case agentA:
-			if trigger.Squad == nil || uuidToString(trigger.Squad.ID) != newSquad {
-				t.Fatal("lost newest non-null squad")
-			}
-		case agentB:
-			if trigger.Squad != nil {
-				t.Fatal("invented squad")
-			}
+		case agentA, agentB:
 		default:
 			t.Fatal("routed unrelated task owner")
 		}

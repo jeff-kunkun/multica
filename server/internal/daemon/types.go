@@ -2,9 +2,6 @@ package daemon
 
 import (
 	"encoding/json"
-
-	"github.com/multica-ai/multica/server/internal/runtimeapps"
-	"github.com/multica-ai/multica/server/pkg/remotemcp"
 )
 
 // AgentEntry describes a single available agent CLI.
@@ -51,10 +48,6 @@ type ProjectResourceData struct {
 	Label        string          `json:"label,omitempty"`
 }
 
-// ConnectedAppData keeps the claim-response field local to daemon types while
-// sharing the canonical JSON shape with the runtime app metadata package.
-type ConnectedAppData = runtimeapps.ConnectedApp
-
 // IssueStatusData mirrors one active custom workspace status from the claim
 // payload (MUL-6460). Mirror field: internal/handler/agent.go
 // TaskIssueStatusData, same JSON names.
@@ -69,23 +62,15 @@ type IssueStatusData struct {
 // Agent data (name, skills) is populated by the claim endpoint.
 type Task struct {
 	// StartClaimSupported gates retries when talking to older servers.
-	StartClaimSupported  bool                   `json:"start_claim_supported,omitempty"`
-	DispatchedAt         string                 `json:"dispatched_at,omitempty"`
-	ID                   string                 `json:"id"`
-	AgentID              string                 `json:"agent_id"`
-	RuntimeID            string                 `json:"runtime_id"`
-	IssueID              string                 `json:"issue_id"`
-	WorkspaceID          string                 `json:"workspace_id"`
-	WorkspaceSlug        string                 `json:"workspace_slug,omitempty"`
-	IssueIdentifier      string                 `json:"issue_identifier,omitempty"`
-	RemoteMCPConnections []remotemcp.Connection `json:"remote_mcp_connections,omitempty"`
-	// RemoteMCPDaemonToken stays inside the daemon and authenticates the local
-	// broker's credential-resolution calls. It must never enter agent env/config.
-	RemoteMCPDaemonToken string `json:"remote_mcp_daemon_token,omitempty"`
-	// PluginHookTools are this workspace's agent-trigger plugin hooks, which
-	// the local MCP server presents to the agent as tools. Resolved by the
-	// server at claim time; the daemon never reads plugin state itself.
-	PluginHookTools []PluginHookTool `json:"plugin_hook_tools,omitempty"`
+	StartClaimSupported bool   `json:"start_claim_supported,omitempty"`
+	DispatchedAt        string `json:"dispatched_at,omitempty"`
+	ID                  string `json:"id"`
+	AgentID             string `json:"agent_id"`
+	RuntimeID           string `json:"runtime_id"`
+	IssueID             string `json:"issue_id"`
+	WorkspaceID         string `json:"workspace_id"`
+	WorkspaceSlug       string `json:"workspace_slug,omitempty"`
+	IssueIdentifier     string `json:"issue_identifier,omitempty"`
 	// WorkspaceContext mirrors workspace.context (the per-workspace system
 	// prompt set in Settings → General). Server populates this on every claim
 	// regardless of task kind so the daemon can inject `## Workspace Context`
@@ -100,14 +85,11 @@ type Task struct {
 	IssueStatusesOmitted          int                    `json:"issue_statuses_omitted,omitempty"`
 	ThreadName                    string                 `json:"thread_name,omitempty"` // semantic title for provider-native session/thread history
 	Agent                         *AgentData             `json:"agent,omitempty"`
-	ConnectedApps                 []ConnectedAppData     `json:"connected_apps,omitempty"` // per-run app capabilities mounted through runtime MCP overlays
 	Repos                         []RepoData             `json:"repos,omitempty"`
 	ProjectID                     string                 `json:"project_id,omitempty"`                       // active project for this task, when present
 	ProjectTitle                  string                 `json:"project_title,omitempty"`                    // human-readable project title for context injection
 	ProjectDescription            string                 `json:"project_description,omitempty"`              // durable project-level context injected into the brief
 	ProjectResources              []ProjectResourceData  `json:"project_resources,omitempty"`                // project-scoped resources to expose to the agent
-	IsLeaderTask                  bool                   `json:"is_leader_task,omitempty"`                   // true when executing in the squad-leader coordinator role
-	LeaderRoleResolved            bool                   `json:"leader_role_resolved,omitempty"`             // server capability: IsLeaderTask/SquadID authoritatively answer "is this a leader run". Absent on servers predating it — those before #4951 never sent is_leader_task at all, later ones send it without this guarantee — so taskIsSquadLeader falls back to the briefing marker for both (MUL-5811)
 	PriorSessionID                string                 `json:"prior_session_id,omitempty"`                 // Claude session ID from a previous task on this issue
 	PriorWorkDir                  string                 `json:"prior_work_dir,omitempty"`                   // work_dir from a previous task on this issue
 	PriorSessionResumeUnavailable bool                   `json:"prior_session_resume_unavailable,omitempty"` // MUL-5305: server signals a more recent Codex session was withheld (rollout missing) and PriorSessionID (if any) is an older fallback; the run must disclose the continuity gap even if that older session resumes cleanly. Absent/false on old servers.
@@ -127,34 +109,11 @@ type Task struct {
 	IssueAssigneeType             string                 `json:"issue_assignee_type,omitempty"`              // "agent", "member" or "squad" at claim time; empty when unassigned
 	IssueAssigneeID               string                 `json:"issue_assignee_id,omitempty"`                // assignee UUID at claim time; empty when unassigned
 	ChatSessionID                 string                 `json:"chat_session_id,omitempty"`                  // non-empty for chat tasks
-	ChatChannelType               string                 `json:"chat_channel_type,omitempty"`                // "slack" when the chat session is backed by an IM channel; empty for a web-only chat. Drives the channel-awareness block in the prompt
-	ChatChannelDeliversFiles      bool                   `json:"chat_channel_delivers_files,omitempty"`      // server capability: this deployment carries a file the agent produces the last hop into this conversation. Absent on a server predating it, which reads as false — the run is told to describe its file in words, and the worst case is a delivery that could have happened did not. Must never be re-derived from chat_channel_type: whether the hop exists depends on the SERVER's storage and adapter wiring, which no daemon can see (MUL-4899)
-	ChatType                      string                 `json:"chat_type,omitempty"`                        // "group" when the channel conversation is a shared room, "p2p" for a 1:1 with the bot. Empty for a web chat or an old server; the per-turn prompt then reports unknown rather than guessing 1:1
-	ChatInThread                  bool                   `json:"chat_in_thread,omitempty"`                   // true when the latest @mention was a thread reply; selects which read command the prompt tells the agent to start with
 	ChatMessage                   string                 `json:"chat_message,omitempty"`                     // user message content for chat tasks
 	ChatMessageAttachments        []ChatAttachmentMeta   `json:"chat_message_attachments,omitempty"`         // attachments linked to the chat message; agent uses these to `multica attachment download <id>`
 	ChatIntro                     bool                   `json:"chat_intro,omitempty"`                       // legacy compatibility for historical is_agent_intro sessions; new agent creation no longer creates these chats
-	RegenerateQuickActionsFor     string                 `json:"regenerate_quick_actions_for,omitempty"`     // set only by servers predating server-side quick-actions generation (MUL-5573). Read as a REFUSAL marker, never executed: see the guard in runTask
-	AutopilotRunID                string                 `json:"autopilot_run_id,omitempty"`                 // non-empty for autopilot run_only tasks
-	AutopilotID                   string                 `json:"autopilot_id,omitempty"`                     // autopilot that spawned this run
-	AutopilotTitle                string                 `json:"autopilot_title,omitempty"`                  // autopilot title used as task context
-	AutopilotDescription          string                 `json:"autopilot_description,omitempty"`            // autopilot description used as task prompt
-	AutopilotSource               string                 `json:"autopilot_source,omitempty"`                 // manual, schedule, webhook, or api
-	AutopilotTriggerPayload       json.RawMessage        `json:"autopilot_trigger_payload,omitempty"`        // optional trigger payload for webhook/api runs
-	QuickCreatePrompt             string                 `json:"quick_create_prompt,omitempty"`              // user's natural-language input for quick-create tasks
-	QuickCreatePriority           string                 `json:"quick_create_priority,omitempty"`            // explicit priority selected in quick-create
-	QuickCreateDueDate            string                 `json:"quick_create_due_date,omitempty"`            // explicit calendar due date selected in quick-create
-	QuickCreateAttachmentIDs      []string               `json:"quick_create_attachment_ids,omitempty"`      // attachments uploaded in the quick-create prompt and bound by issue create
-	QuickCreateSourceContext      json.RawMessage        `json:"quick_create_source_context,omitempty"`      // immutable historical context, separate from the new instruction
-	WakeupID                      string                 `json:"wakeup_id,omitempty"`
-	WakeupSystemRule              string                 `json:"wakeup_system_rule,omitempty"` // a platform rule (e.g. child_done) started the run
-	WakeupJoined                  string                 `json:"wakeup_joined,omitempty"`      // wakeups that joined this run instead of queuing their own
-	HandoffNote                   string                 `json:"handoff_note,omitempty"`       // legacy assignment handoff instruction; rendered only in the per-turn prompt
+	HandoffNote                   string                 `json:"handoff_note,omitempty"`                     // legacy assignment handoff instruction; rendered only in the per-turn prompt
 
-	SquadID               string `json:"squad_id,omitempty"`                // when the picker was a squad, the squad's UUID; Agent is still the resolved leader
-	SquadName             string `json:"squad_name,omitempty"`              // display name for the picker squad, used in prompt text
-	ParentIssueID         string `json:"parent_issue_id,omitempty"`         // for quick-create tasks opened from "Add sub issue" — UUID of the parent issue the new issue should be filed under
-	ParentIssueIdentifier string `json:"parent_issue_identifier,omitempty"` // human-readable identifier (e.g. MUL-123) of the quick-create parent issue, used in prompt context
 	// RequestingUserName + RequestingUserProfileDescription describe the human
 	// the agent is working on behalf of. v1 sources them from the runtime
 	// owner (the user who registered the daemon). Empty when the runtime has
@@ -206,71 +165,20 @@ type CoalescedCommentData struct {
 
 // AgentData holds agent details returned by the claim endpoint.
 type AgentData struct {
-	ID                    string                     `json:"id"`
-	Name                  string                     `json:"name"`
-	Instructions          string                     `json:"instructions"`
-	Skills                []SkillData                `json:"skills,omitempty"`
-	SkillRefs             []SkillRefData             `json:"skill_refs,omitempty"`
-	CustomEnv             map[string]string          `json:"custom_env,omitempty"`
-	CustomArgs            []string                   `json:"custom_args,omitempty"`
-	McpConfig             json.RawMessage            `json:"mcp_config,omitempty"`
-	Model                 string                     `json:"model,omitempty"`
-	ThinkingLevel         string                     `json:"thinking_level,omitempty"`
-	ServiceTier           string                     `json:"service_tier,omitempty"`
-	DisabledRuntimeSkills []DisabledRuntimeSkillData `json:"disabled_runtime_skills,omitempty"`
+	ID            string            `json:"id"`
+	Name          string            `json:"name"`
+	Instructions  string            `json:"instructions"`
+	CustomEnv     map[string]string `json:"custom_env,omitempty"`
+	CustomArgs    []string          `json:"custom_args,omitempty"`
+	McpConfig     json.RawMessage   `json:"mcp_config,omitempty"`
+	Model         string            `json:"model,omitempty"`
+	ThinkingLevel string            `json:"thinking_level,omitempty"`
+	ServiceTier   string            `json:"service_tier,omitempty"`
 	// RuntimeConfig is the per-provider runtime_config JSON as stored on
 	// the agent record, forwarded verbatim by the claim endpoint. The
 	// daemon decodes provider-specific fields (e.g. openclaw mode +
 	// gateway endpoint, see issue #3260); other backends ignore it.
 	RuntimeConfig json.RawMessage `json:"runtime_config,omitempty"`
-}
-
-// DisabledRuntimeSkillData is the task-wire identity of one runtime-local
-// skill that must be hidden from this agent's provider process.
-type DisabledRuntimeSkillData struct {
-	RuntimeID string `json:"runtime_id"`
-	Provider  string `json:"provider"`
-	Root      string `json:"root"`
-	Key       string `json:"key"`
-	Name      string `json:"name,omitempty"`
-	Plugin    string `json:"plugin,omitempty"`
-}
-
-// SkillData represents a structured skill for task execution.
-type SkillData struct {
-	ID          string          `json:"id"`
-	Source      string          `json:"source,omitempty"`
-	Name        string          `json:"name"`
-	Description string          `json:"description,omitempty"`
-	Hash        string          `json:"hash,omitempty"`
-	SizeBytes   int64           `json:"size_bytes,omitempty"`
-	Content     string          `json:"content"`
-	Files       []SkillFileData `json:"files,omitempty"`
-}
-
-// SkillFileData represents a supporting file within a skill.
-type SkillFileData struct {
-	Path      string `json:"path"`
-	Content   string `json:"content"`
-	SHA256    string `json:"sha256,omitempty"`
-	SizeBytes int64  `json:"size_bytes,omitempty"`
-}
-
-type SkillRefData struct {
-	ID          string             `json:"id"`
-	Source      string             `json:"source"`
-	Name        string             `json:"name"`
-	Description string             `json:"description,omitempty"`
-	Hash        string             `json:"hash"`
-	SizeBytes   int64              `json:"size_bytes"`
-	FileCount   int                `json:"file_count"`
-	Files       []SkillFileRefData `json:"files,omitempty"`
-}
-
-type SkillFileRefData struct {
-	Path      string `json:"path"`
-	SHA256    string `json:"sha256"`
-	SizeBytes int64  `json:"size_bytes"`
 }
 
 // TaskUsageEntry represents token usage for a single model during a task execution.
@@ -312,17 +220,4 @@ type TaskResult struct {
 	// precisely when the abandoned id would otherwise stay selectable.
 	RetiredSessionID string           `json:"-"`
 	Usage            []TaskUsageEntry `json:"usage,omitempty"` // per-model token usage
-}
-
-// PluginHookTool is one agent-trigger plugin hook, as the agent will see it.
-//
-// Mirrors service.PluginHookTool on the wire. Declared here rather than
-// imported so the daemon does not depend on the server's service package —
-// same reason Task itself is a daemon-side type.
-type PluginHookTool struct {
-	InstallationID string          `json:"installation_id"`
-	HookKey        string          `json:"hook_key"`
-	Name           string          `json:"name"`
-	Description    string          `json:"description"`
-	InputSchema    json.RawMessage `json:"input_schema,omitempty"`
 }

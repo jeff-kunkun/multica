@@ -41,15 +41,11 @@ vi.mock("@multica/core/workspace/queries", () => ({
     queryKey: ["workspaces", "ws-1", "members"],
     queryFn: () =>
       Promise.resolve([
-        { user_id: "user-1", name: "Test User", email: "t@t.com", role: "admin" },
+        { user_id: "user-1", name: "Test User", email: "t@t.com", role: "owner" },
       ]),
   }),
   agentListOptions: () => ({
     queryKey: ["workspaces", "ws-1", "agents"],
-    queryFn: () => Promise.resolve([]),
-  }),
-  squadListOptions: () => ({
-    queryKey: ["workspaces", "ws-1", "squads"],
     queryFn: () => Promise.resolve([]),
   }),
   assigneeFrequencyOptions: () => ({

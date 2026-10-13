@@ -23,33 +23,6 @@ SELECT * FROM issue_source_context
 WHERE workspace_id = sqlc.arg(workspace_id)
   AND id = sqlc.arg(id);
 
--- name: GetPendingIssueSourceContextByOriginTask :one
-SELECT * FROM issue_source_context
-WHERE workspace_id = sqlc.arg(workspace_id)
-  AND origin_task_id = sqlc.arg(origin_task_id)
-  AND state = 'pending'
-FOR UPDATE;
-
--- name: AttachIssueSourceContext :one
-UPDATE issue_source_context
-SET issue_id = sqlc.arg(issue_id),
-    state = 'attached',
-    attached_at = now()
-WHERE workspace_id = sqlc.arg(workspace_id)
-  AND id = sqlc.arg(id)
-  AND state = 'pending'
-  AND origin_task_id = sqlc.arg(origin_task_id)
-RETURNING *;
-
--- name: TransferPendingIssueSourceContextTask :one
-UPDATE issue_source_context
-SET origin_task_id = sqlc.arg(new_task_id)
-WHERE workspace_id = sqlc.arg(workspace_id)
-  AND id = sqlc.arg(id)
-  AND state = 'pending'
-  AND origin_task_id = sqlc.arg(old_task_id)
-RETURNING *;
-
 -- name: DeleteIssueSourceContextByIssue :one
 DELETE FROM issue_source_context
 WHERE workspace_id = sqlc.arg(workspace_id)

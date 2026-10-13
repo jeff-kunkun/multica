@@ -149,6 +149,7 @@ func (h *Handler) ListProjects(w http.ResponseWriter, r *http.Request) {
 	}
 	projects, err := h.Queries.ListProjects(r.Context(), db.ListProjectsParams{
 		WorkspaceID: wsUUID,
+		Viewer:      h.viewerID(r, uuidToString(wsUUID)),
 		Status:      statusFilter,
 		Priority:    priorityFilter,
 	})
@@ -197,25 +198,12 @@ func (h *Handler) ListProjects(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) GetProject(w http.ResponseWriter, r *http.Request) {
-	id := chi.URLParam(r, "id")
-	workspaceID := h.resolveWorkspaceID(r)
-	idUUID, ok := parseUUIDOrBadRequest(w, id, "project id")
+	project, ok := h.loadProjectForResource(w, r, chi.URLParam(r, "id"))
 	if !ok {
-		return
-	}
-	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace id")
-	if !ok {
-		return
-	}
-	project, err := h.Queries.GetProjectInWorkspace(r.Context(), db.GetProjectInWorkspaceParams{
-		ID: idUUID, WorkspaceID: wsUUID,
-	})
-	if err != nil {
-		writeError(w, http.StatusNotFound, "project not found")
 		return
 	}
 	resp := projectToResponse(project)
-	resp.IssueCount, resp.DoneCount = h.loadProjectIssueStats(r.Context(), wsUUID, project.ID)
+	resp.IssueCount, resp.DoneCount = h.loadProjectIssueStats(r.Context(), project.WorkspaceID, project.ID)
 	resp.ResourceCount = h.loadProjectResourceCount(r.Context(), project.ID)
 	writeJSON(w, http.StatusOK, resp)
 }
@@ -482,7 +470,7 @@ func (h *Handler) UpdateProject(w http.ResponseWriter, r *http.Request) {
 	prevProject, err := h.Queries.GetProjectInWorkspace(r.Context(), db.GetProjectInWorkspaceParams{
 		ID: idUUID, WorkspaceID: wsUUID,
 	})
-	if err != nil {
+	if err != nil || !h.requestCanSeeProject(r, wsUUID, prevProject.ID) {
 		writeError(w, http.StatusNotFound, "project not found")
 		return
 	}
@@ -613,7 +601,7 @@ func (h *Handler) DeleteProject(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "project not found")
 		return
 	}
-	requester, ok := h.requireWorkspaceRole(w, r, uuidToString(project.WorkspaceID), "project not found", "owner", "admin")
+	requester, ok := h.requireWorkspaceRole(w, r, uuidToString(project.WorkspaceID), "project not found", "owner")
 	if !ok {
 		return
 	}
@@ -651,6 +639,10 @@ func (h *Handler) DeleteProject(w http.ResponseWriter, r *http.Request) {
 		ScopeID:     project.ID,
 	}); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to delete project views")
+		return
+	}
+	if err := qtx.DeleteProjectMembersByProject(r.Context(), project.ID); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to delete project members")
 		return
 	}
 	if err := qtx.DeleteProject(r.Context(), db.DeleteProjectParams{
@@ -794,6 +786,7 @@ func buildProjectSearchQuery(phrase string, terms []string, includeClosed bool) 
 
 	limitParam := nextArg(nil)
 	offsetParam := nextArg(nil)
+	viewerParam := nextArg(nil)
 
 	query := fmt.Sprintf(`SELECT p.id, p.workspace_id, p.title, p.description, p.icon,
 		p.status, p.priority, p.lead_type, p.lead_id,
@@ -801,11 +794,12 @@ func buildProjectSearchQuery(phrase string, terms []string, includeClosed bool) 
 		p.created_at, p.updated_at,
 		%s AS match_source
 	FROM project p
-	WHERE p.workspace_id = %s AND %s
+	WHERE p.workspace_id = %s AND can_see_project(%s::uuid, p.workspace_id, p.id) AND %s
 	ORDER BY %s, %s, p.updated_at DESC
 	LIMIT %s OFFSET %s`,
 		matchSourceExpr,
 		wsParam,
+		viewerParam,
 		whereClause,
 		cancelledRank,
 		rankExpr,
@@ -852,8 +846,9 @@ func (h *Handler) SearchProjects(w http.ResponseWriter, r *http.Request) {
 
 	sqlQuery, args := buildProjectSearchQuery(q, terms, includeClosed)
 	args[1] = wsUUID
-	args[len(args)-2] = limit
-	args[len(args)-1] = offset
+	args[len(args)-3] = limit
+	args[len(args)-2] = offset
+	args[len(args)-1] = h.viewerID(r, workspaceID)
 
 	type projectSearchRow struct {
 		project     db.Project

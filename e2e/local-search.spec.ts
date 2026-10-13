@@ -114,7 +114,6 @@ test.describe("Local search index", () => {
     const owner = new TestApiClient();
     await owner.login(`e2e-owner-${run}@multica.ai`, "E2E Owner");
     const shared = await owner.ensureWorkspace(`E2E Shared ${run}`, `e2e-shared-${run}`);
-    await owner.markUserOnboarded();
     await owner.createIssue(`shared ${run} issue`);
     try {
       const memberId = await owner.addMemberByEmail(api.getEmail());

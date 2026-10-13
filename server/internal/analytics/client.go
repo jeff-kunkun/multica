@@ -47,7 +47,7 @@ type Event struct {
 
 	// Set properties attach to the person record and overwrite on every write.
 	// Use this for mutable cohort signals (role, use_case, platform_preference)
-	// that users can legitimately change during onboarding.
+	// that users can legitimately change over time.
 	Set map[string]any
 
 	// Timestamp is optional; when zero the client fills in time.Now().

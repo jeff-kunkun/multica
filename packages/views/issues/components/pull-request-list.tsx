@@ -244,8 +244,8 @@ const STATUS_SLOT = "\u2063status\u2063";
  * One line under the PR list saying what "every linked PR merged → move the
  * issue to the workspace's target status" will do for this issue, straight
  * from the server's decision. It speaks only when a merge would move the issue
- * or this issue opted out: a workspace that leaves status alone, a finished or
- * triaged issue, one already in the target, and unknown states render nothing.
+ * or this issue opted out: a workspace that leaves status alone, a finished
+ * issue, one already in the target, and unknown states render nothing.
  */
 function AutoCompleteLine({
   issueId,

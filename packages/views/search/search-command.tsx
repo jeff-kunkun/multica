@@ -32,7 +32,6 @@ import type {
 import { isLocalSearchReady, searchIssues, searchProjects } from "@multica/core/search-index";
 import { partitionAggregatedSearchResults } from "@multica/core/search/cancelled-rank";
 import {
-  openCreateIssueWithPreference,
   selectRecentIssues,
   useCommentCollapseStore,
   useRecentIssuesStore,
@@ -82,7 +81,7 @@ import { useSearchStore } from "./search-store";
 // The palette's Pages group is generated from WORKSPACE_PAGES, the same
 // registry the sidebar nav and the desktop tab bar read. It used to be a
 // hand-written list, which silently went stale every time a page was added:
-// Chat, Autopilot, Squads and Analytics shipped in the sidebar but were
+// Chat and Analytics shipped in the sidebar but were
 // unreachable from the palette (MUL-6272). Deriving the list means a new
 // workspace page is in the palette the moment it is in the registry.
 //
@@ -97,14 +96,12 @@ const PAGE_KEYWORDS: Record<WorkspacePageKey, string[]> = {
   inbox: ["inbox", "notifications", "收件箱", "通知"],
   chat: ["chat", "messages", "conversation", "聊天", "消息", "对话"],
   myIssues: ["my", "issues", "assigned", "mine", "我的", "任务"],
-  issues: ["issues", "tasks", "bugs", "任务"],
+  issues: ["issues", "tasks", "bugs", "board", "任务", "看板"],
+  meetings: ["meetings", "plans", "会议", "会议室", "方案"],
   projects: ["projects", "kanban", "项目"],
-  autopilots: ["autopilot", "autopilots", "automation", "schedule", "cron", "webhook", "自动化", "定时"],
-  agents: ["agents", "bots", "ai", "智能体"],
-  squads: ["squads", "teams", "小队", "团队"],
+  agents: ["agents", "bots", "ai", "members", "智能体", "成员"],
   usage: ["usage", "analytics", "stats", "metrics", "统计", "分析", "用量"],
   runtimes: ["runtimes", "environments", "machines", "运行时"],
-  skills: ["skills", "library", "技能"],
   settings: ["settings", "config", "preferences", "设置", "配置"],
 };
 
@@ -438,7 +435,7 @@ export function SearchCommand() {
         icon: Plus,
         keywords: ["new", "issue", "create", "add"],
         onSelect: () => {
-          openCreateIssueWithPreference();
+          useModalStore.getState().open("create-issue");
           setOpen(false);
         },
       },

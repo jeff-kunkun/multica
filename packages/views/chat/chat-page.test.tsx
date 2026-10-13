@@ -197,7 +197,6 @@ const agent: Agent = {
   max_concurrent_tasks: 1,
   model: "",
   owner_id: "user-2",
-  skills: [],
   created_at: "2026-05-28T00:00:00Z",
   updated_at: "2026-05-28T00:00:00Z",
   archived_at: null,
@@ -219,8 +218,7 @@ function renderPage(search: string, { strict = false } = {}) {
   };
   // A fresh element per render — reusing one element object lets React bail
   // out of re-rendering, which would make the rerender-based tests vacuous.
-  // ChatPage reads the client-only quick-actions pending marker via useQuery,
-  // so the page needs a QueryClient like it has in the real app shell.
+  // ChatPage needs a QueryClient like it has in the real app shell.
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const makeUi = () => {
     const page = (

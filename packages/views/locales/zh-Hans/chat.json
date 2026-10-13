@@ -60,7 +60,6 @@
       "runtime_access_denied": "该智能体无法在其私有运行时上运行，暂时无法回复。请将该运行时设为公开，或将智能体重新绑定/复制到其所有者可用的运行时。",
       "runtime_recovery": "智能体在完成前重启了。请重试。",
       "manual": "这次回复已取消。",
-      "skill_bundle_unavailable": "没能下载到智能体的 skill，这次回复没有启动。通常是网络连接问题，请重试。",
       "runtime_cli_timeout": "本机 OpenClaw CLI 没能在超时时间内响应，这次运行没有启动。这是本地启动超时，不是网络问题——除非 CLI 变快或调大超时（MULTICA_OPENCLAW_CLI_TIMEOUT），否则重试也不会成功。",
       "environment_prepare_failed": "运行智能体的那台机器没能把这次运行准备好，任务没有启动。下方的原始错误会说明是哪一步失败——常见的是磁盘空间、权限、目录仍被占用，或本地配置读不出来。与智能体和模型厂商无关。",
       "provider_network": "与模型服务的连接中断，回复没能完成。检查网络后重试。",
@@ -79,11 +78,7 @@
     "copy_action": "复制",
     "copied_toast": "已复制",
     "copy_failed_toast": "复制失败",
-    "loading_older": "正在加载更早的消息…",
-    "quick_actions_heading": "后续提问",
-    "quick_actions_aria": "后续提问建议",
-    "quick_actions_regenerate": "重新生成建议",
-    "quick_actions_regenerate_failed": "无法重新生成建议，请重试。"
+    "loading_older": "正在加载更早的消息…"
   },
   "session_history": {
     "untitled": "无标题",
@@ -142,7 +137,7 @@
   "empty_state": {
     "first_time_title": "和你的智能体对话",
     "first_time_intro": "✨ 它们了解你的工作区——",
-    "first_time_pillars": "任务、项目、skill",
+    "first_time_pillars": "任务、项目、智能体",
     "first_time_pillars_suffix": "。",
     "first_time_actions": "让它做一份总结、规划你的一天，或交给它一个小任务。",
     "returning_title_named": "你好，我是 {{name}}",
@@ -167,26 +162,6 @@
     "customize": "自定义开场建议",
     "uploading": "请等待附件上传完成后再使用开场建议。",
     "draft_in_progress": "请先发送或清空草稿，再使用开场建议。"
-  },
-  "onboarding_cards": {
-    "aria_label": "开始方式",
-    "cta": "开始",
-    "board": {
-      "title": "几分钟搭好任务看板",
-      "desc": "告诉我目标，我来建项目、拆任务、排好优先级。",
-      "prompt": "把我们的目标整理成一个项目看板"
-    },
-    "delegate": {
-      "title": "先交给我一件事",
-      "desc": "比如一次调研——结果会变成任务和报告交回来。",
-      "prompt": "先交给你一件事：帮我做一次调研，把结果整理成报告交回来"
-    },
-    "digest": {
-      "title": "让日报自己写好",
-      "desc": "每天自动汇总工作区进展，发到你的收件箱。",
-      "prompt": "帮我建一个每天早上自动汇总工作区进展的日报自动化"
-    },
-    "digest_badge": "每天 9:00"
   },
   "no_agent_banner": "需要先有一个智能体才能开始对话。",
   "archived_agent_banner": "{{name}} 已归档——此会话为只读。",

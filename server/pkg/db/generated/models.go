@@ -48,12 +48,11 @@ type Agent struct {
 	// Composio toolkit slugs this agent is allowed to mount as MCP. NULL or empty array = no MCP overlay. Mounted for any run that passes the agent invocation-permission gate (MUL-3963); the overlay uses the agent OWNER's active Composio connection, so sharing the agent (public_to) shares these apps with whoever may invoke it. No longer gated on originator == owner. Stored as TEXT[] so the dispatch path can intersect against the owner's active connections with a single SQL ANY() filter.
 	ComposioToolkitAllowlist []string `json:"composio_toolkit_allowlist"`
 	// Agent invocation permission mode (MUL-3963). private = owner only; public_to = allow-list in agent_invocation_target. Replaces visibility as the authorization source for triggering runs; visibility is now a derived legacy field. Default private = deny-by-default.
-	PermissionMode        string      `json:"permission_mode"`
-	Kind                  string      `json:"kind"`
-	SystemKey             pgtype.Text `json:"system_key"`
-	DisabledRuntimeSkills []byte      `json:"disabled_runtime_skills"`
-	ServiceTier           pgtype.Text `json:"service_tier"`
-	ConversationStarters  []byte      `json:"conversation_starters"`
+	PermissionMode       string      `json:"permission_mode"`
+	Kind                 string      `json:"kind"`
+	SystemKey            pgtype.Text `json:"system_key"`
+	ServiceTier          pgtype.Text `json:"service_tier"`
+	ConversationStarters []byte      `json:"conversation_starters"`
 }
 
 type AgentBuilderDraft struct {
@@ -98,13 +97,6 @@ type AgentRuntime struct {
 	Visibility     string             `json:"visibility"`
 	ProfileID      pgtype.UUID        `json:"profile_id"`
 	CustomName     pgtype.Text        `json:"custom_name"`
-}
-
-type AgentSkill struct {
-	AgentID   pgtype.UUID        `json:"agent_id"`
-	SkillID   pgtype.UUID        `json:"skill_id"`
-	CreatedAt pgtype.Timestamptz `json:"created_at"`
-	Enabled   bool               `json:"enabled"`
 }
 
 type AgentTaskQueue struct {
@@ -320,6 +312,16 @@ type AutopilotTrigger struct {
 	CreatedByType pgtype.Text `json:"created_by_type"`
 	// The member a schedule/webhook run fires AS: dispatch admission, the task's originator/accountable, and every delegated run all resolve to this one human (MUL-6951). For a trigger created since MUL-6951 it is the creator, written at creation. For a legacy trigger it is a best-effort principal inferred once by backfill and frozen (the last publisher, migration 449, else the autopilot's creator, migration 467), not proof of who created it. Ordinary edits never rewrite it, so editing the trigger cannot re-authorize its runs as the editor. NULL means no principal and the dispatch fails closed. No FK; workspace membership is re-validated on every dispatch.
 	CreatedByID pgtype.UUID `json:"created_by_id"`
+}
+
+type BotEvent struct {
+	ID          int64              `json:"id"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	Type        string             `json:"type"`
+	ActorType   string             `json:"actor_type"`
+	ActorID     string             `json:"actor_id"`
+	Payload     []byte             `json:"payload"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 }
 
 type ChannelBindingToken struct {
@@ -1188,6 +1190,15 @@ type Member struct {
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 }
 
+type MirrorLink struct {
+	Target          string             `json:"target"`
+	Kind            string             `json:"kind"`
+	LocalID         pgtype.UUID        `json:"local_id"`
+	RemoteID        string             `json:"remote_id"`
+	SourceUpdatedAt pgtype.Timestamptz `json:"source_updated_at"`
+	Inbound         bool               `json:"inbound"`
+}
+
 type NotificationPreference struct {
 	ID          pgtype.UUID        `json:"id"`
 	WorkspaceID pgtype.UUID        `json:"workspace_id"`
@@ -1215,6 +1226,31 @@ type PinnedItem struct {
 	ItemType    string             `json:"item_type"`
 	ItemID      pgtype.UUID        `json:"item_id"`
 	Position    float64            `json:"position"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+}
+
+type Plan struct {
+	ID          pgtype.UUID        `json:"id"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	IssueID     pgtype.UUID        `json:"issue_id"`
+	Version     int32              `json:"version"`
+	AuthorType  string             `json:"author_type"`
+	AuthorID    pgtype.UUID        `json:"author_id"`
+	Goal        string             `json:"goal"`
+	OutOfScope  string             `json:"out_of_scope"`
+	Steps       []byte             `json:"steps"`
+	DoneWhen    string             `json:"done_when"`
+	Status      string             `json:"status"`
+	CommentID   pgtype.UUID        `json:"comment_id"`
+	ApprovedBy  pgtype.UUID        `json:"approved_by"`
+	ApprovedAt  pgtype.Timestamptz `json:"approved_at"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+}
+
+type PlanApprover struct {
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	UserID      pgtype.UUID        `json:"user_id"`
+	GrantedBy   pgtype.UUID        `json:"granted_by"`
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 }
 
@@ -1335,6 +1371,14 @@ type Project struct {
 	DueDate     pgtype.Date        `json:"due_date"`
 }
 
+type ProjectMember struct {
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	ProjectID   pgtype.UUID        `json:"project_id"`
+	UserID      pgtype.UUID        `json:"user_id"`
+	CreatedBy   pgtype.UUID        `json:"created_by"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+}
+
 type ProjectResource struct {
 	ID           pgtype.UUID        `json:"id"`
 	ProjectID    pgtype.UUID        `json:"project_id"`
@@ -1418,34 +1462,6 @@ type SignupTotpUsedStep struct {
 	SecretFingerprint []byte             `json:"secret_fingerprint"`
 	Step              int64              `json:"step"`
 	ConsumedAt        pgtype.Timestamptz `json:"consumed_at"`
-}
-
-type Skill struct {
-	ID                   pgtype.UUID        `json:"id"`
-	WorkspaceID          pgtype.UUID        `json:"workspace_id"`
-	Name                 string             `json:"name"`
-	Description          string             `json:"description"`
-	Content              string             `json:"content"`
-	Config               []byte             `json:"config"`
-	CreatedBy            pgtype.UUID        `json:"created_by"`
-	CreatedAt            pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt            pgtype.Timestamptz `json:"updated_at"`
-	PluginInstallationID pgtype.UUID        `json:"plugin_installation_id"`
-}
-
-type SkillFile struct {
-	ID        pgtype.UUID        `json:"id"`
-	SkillID   pgtype.UUID        `json:"skill_id"`
-	Path      string             `json:"path"`
-	Content   string             `json:"content"`
-	CreatedAt pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
-}
-
-type SkillToLabel struct {
-	SkillID   pgtype.UUID        `json:"skill_id"`
-	LabelID   pgtype.UUID        `json:"label_id"`
-	CreatedAt pgtype.Timestamptz `json:"created_at"`
 }
 
 type Squad struct {
@@ -1749,6 +1765,22 @@ type Workspace struct {
 	AvatarUrl    pgtype.Text        `json:"avatar_url"`
 	// When TRUE, an agent run that resolves to no precise accountable human (would be owner_fallback) is refused at enqueue instead of degrading to the agent owner (MUL-4302 §3.5). Default FALSE = owner_fallback. Never affects authorization (originator_user_id).
 	AttributionFailClosed bool `json:"attribution_fail_closed"`
+}
+
+type WorkspaceBot struct {
+	ID                   pgtype.UUID        `json:"id"`
+	WorkspaceID          pgtype.UUID        `json:"workspace_id"`
+	UserID               pgtype.UUID        `json:"user_id"`
+	Name                 string             `json:"name"`
+	CanRelease           bool               `json:"can_release"`
+	WebhookUrl           string             `json:"webhook_url"`
+	WebhookSecret        string             `json:"webhook_secret"`
+	WebhookCursor        int64              `json:"webhook_cursor"`
+	WebhookFailures      int32              `json:"webhook_failures"`
+	WebhookNextAttemptAt pgtype.Timestamptz `json:"webhook_next_attempt_at"`
+	WebhookLastError     string             `json:"webhook_last_error"`
+	CreatedBy            pgtype.UUID        `json:"created_by"`
+	CreatedAt            pgtype.Timestamptz `json:"created_at"`
 }
 
 type WorkspaceInvitation struct {

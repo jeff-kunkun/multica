@@ -181,8 +181,8 @@ func Auth(queries *db.Queries, patCache *auth.PATCache, cloudPAT *auth.CloudPATV
 					return
 				}
 				r.Header.Set("X-User-ID", identity.OwnerID)
-				// Tag the auth path so account-level guards (e.g.
-				// handler.RequireHumanActor on /api/cloud-billing/*)
+				// Tag the auth path so human-only guards (e.g.
+				// handler.RequireHumanActor)
 				// can distinguish a cloud-node machine credential
 				// from a human PAT/JWT. Mirrors the mat_ branch's
 				// stamp of "task_token" — both are server-set,

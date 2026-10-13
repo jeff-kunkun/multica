@@ -39,7 +39,7 @@ import { CommentTriggerChips } from "./comment-trigger-chips";
 import { useCommentTriggerPreview } from "../hooks/use-comment-trigger-preview";
 import { useRecipientActions } from "../hooks/use-recipient-actions";
 import { SteerBadge, SteerReceipts } from "./steer-receipts";
-import type { AgentTask, TimelineEntry, Attachment } from "@multica/core/types";
+import type { TimelineEntry, Attachment } from "@multica/core/types";
 import { contentReferencesAttachment } from "@multica/core/types";
 import { isDeletedComment } from "@multica/core/issues/comment-deletion";
 import { commentSupplementReceipts, isSupplementInFlight } from "@multica/core/issues/run-steering";
@@ -61,7 +61,6 @@ import { useCommentAnnotations } from "./use-comment-annotations";
 import { useAttachmentVersions } from "./deliverables/attachment-versions";
 import { VersionBadge } from "./deliverables/version-badge";
 import { useRunCommentMotion } from "./use-run-comment-motion";
-import { WakeupSourceChip } from "./wakeup-source-chip";
 
 const commentActionClassName =
   "text-muted-foreground aria-expanded:bg-transparent aria-expanded:hover:bg-muted dark:aria-expanded:hover:bg-muted/50";
@@ -361,6 +360,8 @@ function TaskCommentRetryButton({
 // ---------------------------------------------------------------------------
 
 const NEVER_STEER = () => false;
+// A reply goes into a running turn by default; queueing it is a choice.
+const STEER_BY_DEFAULT = () => true;
 
 function useEditAttachmentState(
   issueId: string,
@@ -731,9 +732,6 @@ function CommentRow({
         <SteerBadge issueId={issueId} entry={entry} />
         {runHeader}
 
-        {entry.actor_type === "agent" && entry.source_task_id && (
-          <WakeupSourceChip issueId={issueId} taskId={entry.source_task_id} />
-        )}
 
         {isResolution && (
           <span className="text-caption font-medium text-success">
@@ -1003,13 +1001,6 @@ export function AgentRunComment({ run, standalone = false, commentProps, enterin
 // CommentCard — One Card per thread (parent + all replies flat inside)
 // ---------------------------------------------------------------------------
 
-// A quick action posts an ordinary comment and is rendered as one (MUL-5465).
-// It briefly had a collapsed one-line header that expanded to reveal the
-// prompt, on the theory that repeated runs would bury the discussion. In
-// practice the prompts are short, the header restated what the body already
-// said, and the disclosure only added a click between the reader and the text.
-// Provenance still lives on `quick_action_id`; it is data, not decoration.
-
 function CommentCardImpl({
   issueId,
   runs = EMPTY_COMMENT_RUNS,
@@ -1064,12 +1055,6 @@ function CommentCardImpl({
   const canEditEntry = receipts.length === 0 && (isOwn || (canModerate && entry.actor_type === "member"));
   const canDeleteEntry = !receipts.some(isSupplementInFlight) && (isOwn || canModerate);
   const [confirmDelete, setConfirmDelete] = useState(false);
-  // A reply here goes into the running turn of a run that belongs to this
-  // thread by default; another thread's turn is only reached by choice.
-  const steerThreadRunByDefault = useCallback(
-    (task: AgentTask) => runs.some((run) => run.task.id === task.id),
-    [runs],
-  );
 
   const allNestedReplies = replies;
   // What the thread shows. Tombstones are excluded from display and counts but
@@ -1239,9 +1224,6 @@ function CommentCardImpl({
 
                   <SteerBadge issueId={issueId} entry={entry} />
                   {renderRuns(entry.id, "header")}
-                  {entry.actor_type === "agent" && entry.source_task_id && (
-                    <WakeupSourceChip issueId={issueId} taskId={entry.source_task_id} />
-                  )}
                 </>
               )}
 
@@ -1520,7 +1502,7 @@ function CommentCardImpl({
                   avatarId={currentUserId ?? ""}
                   draftKey={`reply:${issueId}:${entry.id}`}
                   onEditAnnotation={(id) => annotation.editAnnotation(id, true)}
-                  steerByDefault={steerThreadRunByDefault}
+                  steerByDefault={STEER_BY_DEFAULT}
                   onSubmit={(content, attachmentIds, suppressAgentIds, steerTaskIds) => replyTargetMissing ? Promise.resolve(false) : onReply(replyTargetId, content, attachmentIds, suppressAgentIds, steerTaskIds)}
                   onAccepted={onReplyAccepted}
                 />

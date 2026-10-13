@@ -80,6 +80,7 @@ export const RESERVED_SLUGS: ReadonlySet<string> = new Set([
   // page; `teams` is reserved for future team management.
   "issues",
   "projects",
+  "meetings",
   "autopilots",
   "agents",
   "squads",
@@ -103,11 +104,6 @@ export const RESERVED_SLUGS: ReadonlySet<string> = new Set([
   "sdk",
   "tokens",
   "cli",
-
-  // DingTalk account-bind route
-  // `/dingtalk/bind` is a global pre-workspace route where a member links their
-  // DingTalk identity. Reserve the prefix so a workspace slug cannot shadow it.
-  "dingtalk",
 
   // Backend ops / observability
   // `/health`, `/readyz`, `/healthz`, and `/ws` exist on the backend host;

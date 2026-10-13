@@ -15,7 +15,6 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/issuestatus"
-	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/dbid"
@@ -36,10 +35,10 @@ import (
 //     that status, unless someone turned the automation off for that one issue.
 //
 // The decision is evaluated only when a PR event touches the issue: a linked PR
-// merges, a PR is linked, or a link is removed. Changing a setting, reopening an
-// issue, or accepting it from Triage is not a PR event, so it never moves an
-// issue by itself. That is what keeps a reopened issue open until new work
-// lands, without any hidden per-issue switch.
+// merges, a PR is linked, or a link is removed. Changing a setting or reopening
+// an issue is not a PR event, so it never moves an issue by itself. That is
+// what keeps a reopened issue open until new work lands, without any hidden
+// per-issue switch.
 
 // Decision states, shared with the issue page (see prAutoCompleteResponse).
 // The names predate the configurable target and stay for installed clients.
@@ -48,7 +47,6 @@ const (
 	prAutoCompleteWorkspaceDisabled = "workspace_disabled" // workspace leaves status alone
 	prAutoCompleteIssueDisabled     = "issue_disabled"     // turned off for this issue
 	prAutoCompleteTerminal          = "terminal"           // already done / cancelled
-	prAutoCompleteTriage            = "triage"             // not accepted yet
 	prAutoCompleteAtTarget          = "at_target"          // already in the target status
 	prAutoCompleteWaiting           = "waiting"            // some PRs still open / draft
 	prAutoCompleteNotMerged         = "not_merged"         // some PRs closed without merging
@@ -193,9 +191,6 @@ func (h *Handler) decidePRAutoComplete(ctx context.Context, ws db.Workspace, iss
 	case effective == issuestatus.Done || effective == issuestatus.Cancelled:
 		d.State = prAutoCompleteTerminal
 		return d, nil
-	case issue.TriageState.Valid:
-		d.State = prAutoCompleteTriage
-		return d, nil
 	case d.Target == "":
 		d.State = prAutoCompleteWorkspaceDisabled
 		return d, nil
@@ -271,23 +266,12 @@ func (h *Handler) maybeAutoCompleteIssue(ctx context.Context, workspaceID, issue
 		// Someone changed the status since the decision; their write wins.
 		return
 	}
-	var cancelledWakeups []db.AgentTaskQueue
-	if err == nil {
-		// A no-op unless the target closes the issue.
-		cancelledWakeups, err = service.StopClosedIssueWakeups(ctx, qtx, updated)
-	}
 	if err == nil {
 		err = tx.Commit(ctx)
 	}
 	if err != nil {
 		slog.Warn("pr auto-complete: status write failed", "err", err, "issue_id", uuidToString(issueID))
 		return
-	}
-	h.broadcastCancelledWakeups(ctx, updated.WorkspaceID, cancelledWakeups)
-	// A merged PR is the most common way a sub-issue reaches done; the parent
-	// hears about it on the same path as a manual status change.
-	if updated.ParentIssueID.Valid {
-		h.processChildEvents(ctx, updated.ParentIssueID)
 	}
 
 	prefix := h.getIssuePrefix(ctx, issue.WorkspaceID)
@@ -301,10 +285,6 @@ func (h *Handler) maybeAutoCompleteIssue(ctx context.Context, workspaceID, issue
 		"creator_id":     uuidToString(issue.CreatorID),
 		"source":         "pr_automation",
 		"pull_requests":  prNumberList(d.PRs),
-		// Moving out of cancelled clears a duplicate mark (MUL-7349); carry
-		// both ends so the activity log and clients see the mark go.
-		"duplicate_of_issue_id":      liveDuplicateMark(updated.Status, updated.DuplicateOfIssueID),
-		"prev_duplicate_of_issue_id": liveDuplicateMark(issue.Status, issue.DuplicateOfIssueID),
 	})
 }
 

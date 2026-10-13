@@ -5,7 +5,7 @@
  * projects group related work, labels are cross-cutting tags (bug, feature,
  * performance, …). Colors are normalized to lowercase `#RRGGBB`.
  */
-export type LabelResourceType = "issue" | "agent" | "skill";
+export type LabelResourceType = "issue" | "agent";
 
 export interface Label {
   id: string;

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/url"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -13,7 +14,9 @@ import (
 )
 
 const minShortIDPrefixLen = 4
-const resolverListPageLimit = 50
+
+// uuidRegexp matches a canonical UUID (8-4-4-4-12 hex).
+var uuidRegexp = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
 
 type resolvedID struct {
 	ID string
@@ -140,7 +143,7 @@ func ambiguousIDPrefixError(kind, input string, matches []idCandidate) error {
 // client-side to disambiguate, causing 14–35s timeouts (GH #4701). Since
 // `MUL-123` already covers every human use case for an issue reference, the
 // short-prefix path is removed instead of being moved server-side. Other
-// resources without a human-readable key (autopilots, projects, labels,
+// resources without a human-readable key (projects, labels,
 // task runs, workspaces, ...) continue to accept short UUID prefixes; see
 // resolveIDByPrefix.
 func resolveIssueRef(ctx context.Context, client *cli.APIClient, input string) (resolvedID, error) {
@@ -220,70 +223,6 @@ func parsePositiveInt(input string) (int, bool) {
 	return n, true
 }
 
-func resolveAutopilotID(ctx context.Context, client *cli.APIClient, input string) (resolvedID, error) {
-	return resolveIDByPrefix(ctx, client, "autopilot", input, fetchAutopilotCandidates)
-}
-
-func fetchAutopilotCandidates(ctx context.Context, client *cli.APIClient) ([]idCandidate, error) {
-	if client.WorkspaceID == "" {
-		return nil, fmt.Errorf("workspace_id is required to resolve autopilot id prefixes")
-	}
-	const limit = resolverListPageLimit
-	candidates := []idCandidate{}
-	seen := map[string]struct{}{}
-	for offset := 0; ; {
-		params := url.Values{}
-		params.Set("workspace_id", client.WorkspaceID)
-		params.Set("limit", strconv.Itoa(limit))
-		if offset > 0 {
-			params.Set("offset", strconv.Itoa(offset))
-		}
-		var resp struct {
-			Autopilots []map[string]any `json:"autopilots"`
-			Total      int              `json:"total"`
-			HasMore    bool             `json:"has_more"`
-		}
-		if err := client.GetJSON(ctx, "/api/autopilots?"+params.Encode(), &resp); err != nil {
-			return nil, err
-		}
-		added := 0
-		for _, a := range resp.Autopilots {
-			id := strVal(a, "id")
-			if id == "" {
-				continue
-			}
-			if _, ok := seen[id]; ok {
-				continue
-			}
-			seen[id] = struct{}{}
-			added++
-			candidates = append(candidates, idCandidate{
-				ID:      id,
-				Display: strVal(a, "title"),
-				Detail:  strVal(a, "status"),
-			})
-		}
-		pageLen := len(resp.Autopilots)
-		offset += pageLen
-		if pageLen == 0 || added == 0 {
-			break
-		}
-		if pageLen < limit {
-			break
-		}
-		if resp.HasMore {
-			continue
-		}
-		if resp.Total > 0 {
-			if offset >= resp.Total {
-				break
-			}
-			continue
-		}
-	}
-	return candidates, nil
-}
-
 func resolveTaskRunID(ctx context.Context, client *cli.APIClient, issueID, input string) (resolvedID, error) {
 	trimmed := strings.TrimSpace(input)
 	if uuidRegexp.MatchString(trimmed) {
@@ -315,38 +254,6 @@ func fetchTaskRunCandidatesForIssue(ctx context.Context, client *cli.APIClient, 
 		})
 	}
 	return candidates, nil
-}
-
-func resolveAutopilotTriggerID(ctx context.Context, client *cli.APIClient, autopilotID, input string) (resolvedID, error) {
-	trimmed := strings.TrimSpace(input)
-	if uuidRegexp.MatchString(trimmed) {
-		return resolvedID{ID: trimmed, Display: trimmed}, nil
-	}
-	fetch := func(ctx context.Context, client *cli.APIClient) ([]idCandidate, error) {
-		var resp map[string]any
-		if err := client.GetJSON(ctx, "/api/autopilots/"+url.PathEscape(autopilotID), &resp); err != nil {
-			return nil, err
-		}
-		triggersRaw, _ := resp["triggers"].([]any)
-		candidates := make([]idCandidate, 0, len(triggersRaw))
-		for _, raw := range triggersRaw {
-			t, ok := raw.(map[string]any)
-			if !ok {
-				continue
-			}
-			detail := strVal(t, "kind")
-			if label := strVal(t, "label"); label != "" {
-				detail = label
-			}
-			candidates = append(candidates, idCandidate{
-				ID:      strVal(t, "id"),
-				Display: strVal(t, "id"),
-				Detail:  detail,
-			})
-		}
-		return candidates, nil
-	}
-	return resolveIDByPrefix(ctx, client, "autopilot trigger", input, fetch)
 }
 
 func resolveProjectID(ctx context.Context, client *cli.APIClient, input string) (resolvedID, error) {
@@ -418,7 +325,7 @@ func fetchLabelCandidates(ctx context.Context, client *cli.APIClient, resourceTy
 	}
 	resourceTypes := []string{resourceType}
 	if resourceType == "" {
-		resourceTypes = []string{"issue", "skill"}
+		resourceTypes = []string{"issue", "agent"}
 	}
 	candidates := make([]idCandidate, 0)
 	for _, candidateType := range resourceTypes {
@@ -452,10 +359,8 @@ type actorDisplayLookup struct {
 type actorDisplayLookupState struct {
 	members       map[string]string
 	agents        map[string]string
-	squads        map[string]string
 	membersLoaded bool
 	agentsLoaded  bool
-	squadsLoaded  bool
 }
 
 func loadActorDisplayLookup(ctx context.Context, client *cli.APIClient) actorDisplayLookup {
@@ -505,25 +410,6 @@ func (l actorDisplayLookup) loadAgents() {
 	}
 }
 
-func (l actorDisplayLookup) loadSquads() {
-	if l.state == nil || l.state.squadsLoaded {
-		return
-	}
-	l.state.squadsLoaded = true
-	l.state.squads = map[string]string{}
-	if l.client == nil || l.client.WorkspaceID == "" {
-		return
-	}
-	var squads []map[string]any
-	if err := l.client.GetJSON(l.ctx, "/api/squads", &squads); err == nil {
-		for _, s := range squads {
-			if id := strVal(s, "id"); id != "" {
-				l.state.squads[id] = strVal(s, "name")
-			}
-		}
-	}
-}
-
 func (l actorDisplayLookup) actor(actorType, id string) string {
 	if actorType == "" || id == "" {
 		return ""
@@ -541,13 +427,6 @@ func (l actorDisplayLookup) actor(actorType, id string) string {
 		if l.state != nil && l.state.agents != nil {
 			if name := l.state.agents[id]; name != "" {
 				return "agent:" + name
-			}
-		}
-	case "squad":
-		l.loadSquads()
-		if l.state != nil && l.state.squads != nil {
-			if name := l.state.squads[id]; name != "" {
-				return "squad:" + name
 			}
 		}
 	}

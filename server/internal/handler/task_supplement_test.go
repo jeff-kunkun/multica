@@ -593,6 +593,10 @@ func TestTaskSupplementPermissionAndTenantIsolation(t *testing.T) {
 	fixture := newSupplementFixture(t, "codex", "running", true)
 	otherUser := dbfx.Insert(t, "user", testutil.Cols{"name": "No Invoke", "email": "no-invoke-supplement@example.test"})
 	dbfx.Member(t, testWorkspaceID, otherUser, "member")
+	// The member can see the issue (shared project) but may not invoke the agent.
+	projectID := sharedTestProject(t, "supplement permission project", otherUser)
+	dbfx.Exec(t, `UPDATE issue SET project_id = $1 WHERE id = $2`, projectID, fixture.issueID)
+	dbfx.Cleanup(t, `UPDATE issue SET project_id = NULL WHERE project_id = $1`, projectID)
 	req := newRequestAs(otherUser, http.MethodPost, "/supplements", map[string]any{
 		"client_request_id": "0199a4e8-22ce-7b01-bba5-555555555555", "content": "not allowed",
 	})

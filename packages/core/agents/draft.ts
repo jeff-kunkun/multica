@@ -19,7 +19,7 @@ export type { AgentPermissionScope };
 
 /**
  * The in-progress configuration of an agent being created. Shared by every
- * creation surface (manual, duplicate, AI builder) so the same field set is
+ * creation surface (manual, duplicate) so the same field set is
  * validated, seeded and submitted the same way regardless of entry point.
  */
 export interface AgentDraft {
@@ -34,7 +34,6 @@ export interface AgentDraft {
   thinkingLevel: string;
   /** Runtime-native execution tier (Codex Speed), scoped to `model`. */
   serviceTier: string;
-  skillIds: Set<string>;
   permissionScope: AgentPermissionScope;
   memberIds: Set<string>;
   /** Team grants are not editable in this form yet, but duplicates must preserve them. */
@@ -51,7 +50,6 @@ export const EMPTY_AGENT_DRAFT: AgentDraft = {
   model: "",
   thinkingLevel: "",
   serviceTier: "",
-  skillIds: new Set(),
   permissionScope: "private",
   memberIds: new Set(),
   teamIds: new Set(),
@@ -90,8 +88,7 @@ export function applyDraftModelChange(
 
 /**
  * Mirrors the server's `utf8.RuneCountInString` check (agent.go:1013). The
- * textarea's `maxLength` covers typing and pasting, but a duplicated agent or
- * an AI-builder draft can seed a longer value programmatically — without this
+ * textarea's `maxLength` covers typing and pasting, but a duplicated agent can seed a longer value programmatically — without this
  * the create button would submit into a guaranteed 400.
  */
 export function isDraftDescriptionWithinLimit(description: string): boolean {
@@ -197,7 +194,6 @@ export function buildDuplicateDraft(
     model: keepsRuntime ? source.model ?? "" : "",
     thinkingLevel: keepsRuntime ? source.thinking_level ?? "" : "",
     serviceTier: keepsRuntime ? source.service_tier ?? "" : "",
-    skillIds: new Set(source.skills.map((skill) => skill.id)),
     ...deriveDuplicateAccess(source),
   };
 }
@@ -236,7 +232,6 @@ export function buildCreateAgentRequest(options: {
     permission_mode:
       draft.permissionScope === "private" ? "private" : "public_to",
     invocation_targets: buildInvocationTargets(draft),
-    skill_ids: [...draft.skillIds],
     template,
   };
   if (duplicateSource) {

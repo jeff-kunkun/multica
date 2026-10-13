@@ -50,28 +50,25 @@ func TestIssueTableWorkingAgentsFacetCountsOnlyEligibleRuns(t *testing.T) {
 		"workspace_id": foreignWorkspaceID, "project_id": projectID,
 	})
 	chatID := dbfx.ChatSession(t, agentID)
-	autopilotID := insertListTestAutopilot(t, agentID, "working-facet-autopilot")
-	runID := dbfx.Insert(t, "autopilot_run", testutil.Cols{
-		"autopilot_id": autopilotID, "source": "manual", "status": "running",
-	})
 
-	// Two tasks on the same issue are two runs, not one distinct issue.
-	for range 2 {
-		dbfx.Task(t, agentID, testutil.Cols{"runtime_id": testRuntimeID, "issue_id": issueID, "status": "running"})
+	// An issue runs one task at a time, so every running task below gets its
+	// own issue in the project.
+	projectIssue := func() string {
+		return dbfx.Issue(t, "working facet run", testutil.Cols{"project_id": projectID})
 	}
+	dbfx.Task(t, agentID, testutil.Cols{"runtime_id": testRuntimeID, "issue_id": issueID, "status": "running"})
+	dbfx.Task(t, agentID, testutil.Cols{"runtime_id": testRuntimeID, "issue_id": projectIssue(), "status": "running"})
 	for _, excludedID := range []string{archivedID, systemID, foreignAgentID} {
-		dbfx.Task(t, excludedID, testutil.Cols{"runtime_id": testRuntimeID, "issue_id": issueID, "status": "running"})
+		dbfx.Task(t, excludedID, testutil.Cols{"runtime_id": testRuntimeID, "issue_id": projectIssue(), "status": "running"})
 	}
 	for _, status := range []string{"queued", "dispatched", "completed", "failed", "cancelled"} {
 		statusIssueID := dbfx.Issue(t, "working facet "+status, testutil.Cols{"project_id": projectID})
 		dbfx.Task(t, agentID, testutil.Cols{"runtime_id": testRuntimeID, "issue_id": statusIssueID, "status": status})
 	}
 	for _, cols := range []testutil.Cols{
-		{"issue_id": issueID, "chat_session_id": chatID},
-		{"issue_id": issueID, "autopilot_run_id": runID},
-		{"issue_id": issueID, "chat_session_id": chatID, "autopilot_run_id": runID},
+		{"issue_id": projectIssue(), "chat_session_id": chatID},
 		{"issue_id": foreignIssueID},
-		{}, // Quick-create work has no issue yet.
+		{}, // Sourceless work has no issue.
 	} {
 		cols["status"] = "running"
 		cols["runtime_id"] = testRuntimeID
@@ -99,7 +96,6 @@ func TestIssueTableWorkingAgentsFacetCountsOnlyEligibleRuns(t *testing.T) {
 func TestIssueTableWorkingAgentsFacetVisibility(t *testing.T) {
 	memberID := dbfx.User(t, "working facet member", "working-facet-member@multica.test")
 	dbfx.Member(t, testWorkspaceID, memberID, "member")
-	issueID := dbfx.Issue(t, "working facet visibility")
 	privateID := dbfx.Agent(t, "working facet private", "")
 	ownedID := dbfx.Agent(t, "working facet member-owned", "", testutil.Cols{"owner_id": memberID})
 	workspaceID := dbfx.Agent(t, "working facet workspace", "", testutil.Cols{"permission_mode": "public_to"})
@@ -114,8 +110,12 @@ func TestIssueTableWorkingAgentsFacetVisibility(t *testing.T) {
 			"agent_id": target.agentID, "target_type": target.kind, "target_id": target.id,
 		})
 	}
+	// The issues sit in a project shared with the member, so only agent
+	// visibility decides what the member's facet shows.
+	projectID := sharedTestProject(t, "working facet visibility", memberID)
 	all := map[string]int64{}
 	for _, id := range []string{privateID, ownedID, workspaceID, allowedID, deniedID} {
+		issueID := dbfx.Issue(t, "working facet visibility", testutil.Cols{"project_id": projectID})
 		dbfx.Task(t, id, testutil.Cols{"runtime_id": testRuntimeID, "issue_id": issueID, "status": "running"})
 		all[id] = 1
 	}
@@ -146,8 +146,12 @@ func TestIssueTableWorkingAgentsFacetVisibility(t *testing.T) {
 
 func TestIssueTableWorkingAgentsFacetMyRelations(t *testing.T) {
 	otherID := dbfx.User(t, "working facet other member", "working-facet-other@multica.test")
-	dbfx.Member(t, testWorkspaceID, otherID, "admin")
-	agentID := dbfx.Agent(t, "working facet my agent", "")
+	dbfx.Member(t, testWorkspaceID, otherID, "member")
+	// Workspace-visible agent, so the member's counts depend only on relation.
+	agentID := dbfx.Agent(t, "working facet my agent", "", testutil.Cols{"permission_mode": "public_to"})
+	dbfx.Insert(t, "agent_invocation_target", testutil.Cols{
+		"agent_id": agentID, "target_type": "workspace", "target_id": testWorkspaceID,
+	})
 	for _, cols := range []testutil.Cols{
 		{"creator_id": otherID, "assignee_type": "member", "assignee_id": testUserID},
 		{"creator_id": testUserID},
@@ -385,15 +389,17 @@ func TestIssueTableWorkingAgentsFacetHidesInaccessibleAgents(t *testing.T) {
 		t.Fatalf("reserve issue numbers: %v", err)
 	}
 
+	// Both members can see the issue's project, so only agent access decides.
+	projectID := sharedTestProject(t, "worked on by a private agent", ownerID, plainMemberID)
 	var issueID string
 	if err := testPool.QueryRow(ctx, `
 		INSERT INTO issue (
 			workspace_id, title, status, priority, creator_type, creator_id,
-			position, number
+			position, number, project_id
 		)
-		VALUES ($1, 'worked on by a private agent', 'todo', 'none', 'member', $2, $3, $4)
+		VALUES ($1, 'worked on by a private agent', 'todo', 'none', 'member', $2, $3, $4, $5)
 		RETURNING id
-	`, testWorkspaceID, testUserID, finalNumber, finalNumber).Scan(&issueID); err != nil {
+	`, testWorkspaceID, testUserID, finalNumber, finalNumber, projectID).Scan(&issueID); err != nil {
 		t.Fatalf("insert issue: %v", err)
 	}
 	t.Cleanup(func() {

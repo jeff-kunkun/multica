@@ -12,80 +12,15 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/middleware"
-	"github.com/multica-ai/multica/server/internal/seatcapacity"
 	"github.com/multica-ai/multica/server/internal/testutil"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
 var testSeq atomic.Int64
-
-type shareJoinCapacityStub struct {
-	mu              sync.Mutex
-	claimTokens     []uuid.UUID
-	releaseTokens   []uuid.UUID
-	claimGate       *sync.WaitGroup
-	claimDecision   *seatcapacity.Decision
-	releaseDecision *seatcapacity.Decision
-}
-
-func (*shareJoinCapacityStub) RecoveryAvailable() bool { return true }
-
-func (s *shareJoinCapacityStub) ReserveInvitation(context.Context, uuid.UUID, uuid.UUID, time.Time) (seatcapacity.Decision, error) {
-	return seatcapacity.Decision{Managed: true, Allowed: true}, nil
-}
-func (s *shareJoinCapacityStub) ClaimShareJoin(_ context.Context, _ uuid.UUID, token uuid.UUID) (seatcapacity.Decision, error) {
-	s.mu.Lock()
-	s.claimTokens = append(s.claimTokens, token)
-	s.mu.Unlock()
-	if s.claimGate != nil {
-		s.claimGate.Done()
-		s.claimGate.Wait()
-	}
-	decision := seatcapacity.Decision{Managed: true, Allowed: true}
-	if s.claimDecision != nil {
-		decision = *s.claimDecision
-	}
-	return decision, nil
-}
-func (s *shareJoinCapacityStub) Consume(context.Context, uuid.UUID, uuid.UUID) (seatcapacity.Decision, error) {
-	return seatcapacity.Decision{Managed: true, Allowed: true}, nil
-}
-func (s *shareJoinCapacityStub) Confirm(context.Context, uuid.UUID, uuid.UUID, uuid.UUID) (seatcapacity.Decision, error) {
-	return seatcapacity.Decision{Managed: true, Allowed: true}, nil
-}
-func (s *shareJoinCapacityStub) Release(_ context.Context, _ uuid.UUID, token uuid.UUID) (seatcapacity.Decision, error) {
-	s.mu.Lock()
-	s.releaseTokens = append(s.releaseTokens, token)
-	decision := seatcapacity.Decision{Managed: true, Allowed: true}
-	if s.releaseDecision != nil {
-		decision = *s.releaseDecision
-	}
-	s.mu.Unlock()
-	return decision, nil
-}
-func (s *shareJoinCapacityStub) ReleaseMember(context.Context, uuid.UUID, uuid.UUID) (seatcapacity.Decision, error) {
-	return seatcapacity.Decision{Managed: true, Allowed: true}, nil
-}
-func (s *shareJoinCapacityStub) GetOperation(context.Context, uuid.UUID, uuid.UUID) (seatcapacity.Decision, error) {
-	return seatcapacity.Decision{}, nil
-}
-
-func (s *shareJoinCapacityStub) tokens() []uuid.UUID {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return append([]uuid.UUID(nil), s.claimTokens...)
-}
-
-func (s *shareJoinCapacityStub) releases() []uuid.UUID {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return append([]uuid.UUID(nil), s.releaseTokens...)
-}
 
 func pgInt32(v int32) *int32 { return &v }
 
@@ -165,12 +100,12 @@ func createTestShareLink(t *testing.T, workspaceID, role string, maxUses int32, 
 
 // --- Tests ---
 
-func TestCreateShareLink_RequiresOwnerAdmin(t *testing.T) {
+func TestCreateShareLink_RequiresOwner(t *testing.T) {
 	clearShareLinksForTestWorkspace(t)
 
 	r := chi.NewRouter()
 	r.Route("/api/workspaces/{id}", func(r chi.Router) {
-		r.Use(middleware.RequireWorkspaceRoleFromURL(testHandler.Queries, "id", "owner", "admin"))
+		r.Use(middleware.RequireWorkspaceRoleFromURL(testHandler.Queries, "id", "owner"))
 		r.Post("/share-links", testHandler.CreateShareLink)
 	})
 
@@ -195,13 +130,13 @@ func TestCreateShareLink_RequiresOwnerAdmin(t *testing.T) {
 	}
 }
 
-func TestListShareLinks_RequiresOwnerAdmin(t *testing.T) {
+func TestListShareLinks_RequiresOwner(t *testing.T) {
 	clearShareLinksForTestWorkspace(t)
 	createTestShareLink(t, testWorkspaceID, "member", 0, 0)
 
 	r := chi.NewRouter()
 	r.Route("/api/workspaces/{id}", func(r chi.Router) {
-		r.Use(middleware.RequireWorkspaceRoleFromURL(testHandler.Queries, "id", "owner", "admin"))
+		r.Use(middleware.RequireWorkspaceRoleFromURL(testHandler.Queries, "id", "owner"))
 		r.Get("/share-links", testHandler.ListShareLinks)
 	})
 
@@ -246,6 +181,32 @@ func TestCreateShareLink_InvalidatesOldLink(t *testing.T) {
 	}
 	if active {
 		t.Fatal("old share link must be deactivated after creating a new one")
+	}
+}
+
+// Share links only ever grant the member role; the retired admin role and
+// owner are rejected before any link is written.
+func TestCreateShareLink_RejectsNonMemberRole(t *testing.T) {
+	clearShareLinksForTestWorkspace(t)
+
+	for _, role := range []string{"admin", "owner"} {
+		req := newRequest("POST", "/api/workspaces/"+testWorkspaceID+"/share-links", CreateShareLinkRequest{Role: role})
+		req = withURLParam(req, "id", testWorkspaceID)
+		w := httptest.NewRecorder()
+		testHandler.CreateShareLink(w, req)
+		if w.Code != http.StatusBadRequest {
+			t.Fatalf("role %q: expected 400, got %d: %s", role, w.Code, w.Body.String())
+		}
+	}
+
+	var links int
+	if err := testPool.QueryRow(context.Background(),
+		`SELECT count(*) FROM workspace_share_link WHERE workspace_id = $1`, parseUUID(testWorkspaceID),
+	).Scan(&links); err != nil {
+		t.Fatal(err)
+	}
+	if links != 0 {
+		t.Fatalf("share links written = %d, want 0", links)
 	}
 }
 
@@ -443,61 +404,10 @@ func TestJoinShareLink_DuplicateJoinDoesNotConsumeUse(t *testing.T) {
 	}
 }
 
-func TestJoinShareLink_ReactivatesDeadLetterWithSameCapacityToken(t *testing.T) {
+func TestJoinShareLink_ConcurrentSameUserCreatesOneMember(t *testing.T) {
 	clearShareLinksForTestWorkspace(t)
 	link := createTestShareLink(t, testWorkspaceID, "member", 5, 0)
 	userID := createTestUserAndMember(t, "")
-	stub := &shareJoinCapacityStub{}
-	useSeatCapacity(t, stub)
-
-	queries := db.New(testPool)
-	originalToken := uuid.New()
-	intent, err := queries.CreateOrReactivateShareJoinCapacityIntent(context.Background(), db.CreateOrReactivateShareJoinCapacityIntentParams{
-		WorkspaceID: link.WorkspaceID, OperationToken: uuidToPG(originalToken),
-		ShareLinkID: link.ID, UserID: parseUUID(userID),
-		NextAttemptAt: pgtype.Timestamptz{Time: time.Now(), Valid: true},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		_, _ = testPool.Exec(context.Background(), `DELETE FROM seat_capacity_outbox WHERE operation_token = $1`, intent.OperationToken)
-	})
-	if _, err := testPool.Exec(context.Background(), `
-		UPDATE seat_capacity_outbox
-		SET attempt_count = 10, dead_lettered_at = now(), last_error = 'stuck'
-		WHERE operation_token = $1
-	`, intent.OperationToken); err != nil {
-		t.Fatal(err)
-	}
-
-	req := newRequest("POST", "/api/share-links/join", JoinByShareLinkRequest{Code: link.Code})
-	req.Header.Set("X-User-ID", userID)
-	w := httptest.NewRecorder()
-	testHandler.JoinByShareLink(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("join: expected 200, got %d: %s", w.Code, w.Body.String())
-	}
-	tokens := stub.tokens()
-	if len(tokens) != 1 || tokens[0] != originalToken {
-		t.Fatalf("claim tokens=%v, want original %s", tokens, originalToken)
-	}
-}
-
-func TestJoinShareLink_ConcurrentSameUserUsesOneCapacityOperation(t *testing.T) {
-	clearShareLinksForTestWorkspace(t)
-	link := createTestShareLink(t, testWorkspaceID, "member", 5, 0)
-	userID := createTestUserAndMember(t, "")
-	gate := &sync.WaitGroup{}
-	gate.Add(2)
-	stub := &shareJoinCapacityStub{claimGate: gate}
-	useSeatCapacity(t, stub)
-	t.Cleanup(func() {
-		_, _ = testPool.Exec(context.Background(), `
-			DELETE FROM seat_capacity_outbox
-			WHERE workspace_id = $1 AND share_link_id = $2 AND user_id = $3
-		`, link.WorkspaceID, link.ID, parseUUID(userID))
-	})
 
 	start := make(chan struct{})
 	statuses := make(chan int, 2)
@@ -530,10 +440,6 @@ func TestJoinShareLink_ConcurrentSameUserUsesOneCapacityOperation(t *testing.T) 
 	}
 	if successes != 1 || conflicts != 1 {
 		t.Fatalf("successes=%d conflicts=%d, want 1/1", successes, conflicts)
-	}
-	tokens := stub.tokens()
-	if len(tokens) != 2 || tokens[0] != tokens[1] {
-		t.Fatalf("concurrent claim tokens=%v, want one logical operation", tokens)
 	}
 	var members int
 	if err := testPool.QueryRow(context.Background(), `
@@ -588,13 +494,13 @@ func invitationStatusOf(t *testing.T, invitationID string) (string, string) {
 // that pending invitation settled in the same transaction: otherwise the row
 // keeps holding its seat reservation, keeps showing in their pending list,
 // and a later Accept on it dies on the CreateMember 409. The link's role
-// wins — the user chose this entry point — and the invitation row keeps its
-// own role, only its status is settled.
+// wins — the user chose this entry point — and only the invitation's status
+// is settled.
 func TestJoinShareLink_SettlesPendingInvitation(t *testing.T) {
 	clearShareLinksForTestWorkspace(t)
 	link := createTestShareLink(t, testWorkspaceID, "member", 5, 0)
 	userID := createTestUserAndMember(t, "")
-	invitationID := pendingInvitationForShareJoiner(t, userID, shareJoinerEmail(t, userID), "admin")
+	invitationID := pendingInvitationForShareJoiner(t, userID, shareJoinerEmail(t, userID), "member")
 
 	req := newRequest("POST", "/api/share-links/join", JoinByShareLinkRequest{Code: link.Code})
 	req.Header.Set("X-User-ID", userID)
@@ -608,8 +514,8 @@ func TestJoinShareLink_SettlesPendingInvitation(t *testing.T) {
 	if status != "accepted" {
 		t.Fatalf("invitation status = %q, want accepted", status)
 	}
-	if role != "admin" {
-		t.Fatalf("invitation role = %q, want untouched admin", role)
+	if role != "member" {
+		t.Fatalf("invitation role = %q, want untouched member", role)
 	}
 	var memberRole string
 	if err := testPool.QueryRow(context.Background(),
@@ -624,7 +530,7 @@ func TestJoinShareLink_SettlesPendingInvitation(t *testing.T) {
 }
 
 // The settled invitation signals its conclusion on the same channel the
-// accept path uses, so workspace admins refresh their pending-invitation
+// accept path uses, so workspace owners refresh their pending-invitation
 // list instead of holding a row that is already over.
 func TestJoinShareLink_SettledInvitationPublishesAcceptedEvent(t *testing.T) {
 	clearShareLinksForTestWorkspace(t)
@@ -661,99 +567,11 @@ func TestJoinShareLink_SettledInvitationPublishesAcceptedEvent(t *testing.T) {
 	}
 }
 
-// In managed capacity mode the settled invitation was holding a seat
-// reservation keyed by the invitation id; the join's own confirmed claim now
-// covers the seat, so the reservation must be released — otherwise the same
-// user holds a member seat and an invitation reservation at once.
-func TestJoinShareLink_SettledInvitationReleasesSeatReservation(t *testing.T) {
-	clearShareLinksForTestWorkspace(t)
-	link := createTestShareLink(t, testWorkspaceID, "member", 5, 0)
-	userID := createTestUserAndMember(t, "")
-	email := shareJoinerEmail(t, userID)
-	invitationUUID := parseUUID(pendingInvitationForShareJoiner(t, userID, email, "member"))
-
-	stub := &shareJoinCapacityStub{}
-	useSeatCapacity(t, stub)
-	// Pre-create the reservation intent the way CreateInvitation does.
-	queries := db.New(testPool)
-	if _, err := queries.UpsertSeatCapacityIntent(context.Background(), db.UpsertSeatCapacityIntentParams{
-		WorkspaceID:    link.WorkspaceID,
-		OperationToken: invitationUUID,
-		Action:         seatcapacity.ActionReserveInvitation,
-		NextAttemptAt:  pgtype.Timestamptz{Time: time.Now(), Valid: true},
-		SubjectID:      invitationUUID,
-		InvitationID:   invitationUUID,
-		ExpiresAt:      pgtype.Timestamptz{Time: time.Now().Add(24 * time.Hour), Valid: true},
-	}); err != nil {
-		t.Fatalf("seed invitation reservation intent: %v", err)
-	}
-
-	req := newRequest("POST", "/api/share-links/join", JoinByShareLinkRequest{Code: link.Code})
-	req.Header.Set("X-User-ID", userID)
-	w := httptest.NewRecorder()
-	testHandler.JoinByShareLink(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("join: expected 200, got %d: %s", w.Code, w.Body.String())
-	}
-
-	released := stub.releases()
-	if len(released) != 1 || released[0] != uuid.UUID(invitationUUID.Bytes) {
-		t.Fatalf("release calls = %v, want the invitation reservation %s", released, invitationUUID)
-	}
-	var intents int
-	if err := testPool.QueryRow(context.Background(),
-		`SELECT count(*) FROM seat_capacity_outbox WHERE operation_token = $1`, invitationUUID,
-	).Scan(&intents); err != nil {
-		t.Fatal(err)
-	}
-	if intents != 0 {
-		t.Fatalf("seat_capacity_outbox rows for the invitation = %d, want 0 after release", intents)
-	}
-	if status, _ := invitationStatusOf(t, invitationUUID.String()); status != "accepted" {
-		t.Fatalf("invitation status = %q, want accepted", status)
-	}
-}
-
-// Unmanaged capacity keeps no durable reservation for an invitation, so the
-// settle must still succeed end to end and leave nothing stranded in the
-// outbox.
-func TestJoinShareLink_SettlesPendingInvitationUnmanagedCapacity(t *testing.T) {
-	clearShareLinksForTestWorkspace(t)
-	link := createTestShareLink(t, testWorkspaceID, "member", 5, 0)
-	userID := createTestUserAndMember(t, "")
-	invitationUUID := parseUUID(pendingInvitationForShareJoiner(t, userID, shareJoinerEmail(t, userID), "member"))
-
-	unmanaged := seatcapacity.Decision{Managed: false, Allowed: false}
-	stub := &shareJoinCapacityStub{claimDecision: &unmanaged, releaseDecision: &unmanaged}
-	useSeatCapacity(t, stub)
-
-	req := newRequest("POST", "/api/share-links/join", JoinByShareLinkRequest{Code: link.Code})
-	req.Header.Set("X-User-ID", userID)
-	w := httptest.NewRecorder()
-	testHandler.JoinByShareLink(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("join: expected 200, got %d: %s", w.Code, w.Body.String())
-	}
-
-	if status, _ := invitationStatusOf(t, invitationUUID.String()); status != "accepted" {
-		t.Fatalf("invitation status = %q, want accepted", status)
-	}
-	var intents int
-	if err := testPool.QueryRow(context.Background(),
-		`SELECT count(*) FROM seat_capacity_outbox WHERE operation_token = $1`, invitationUUID,
-	).Scan(&intents); err != nil {
-		t.Fatal(err)
-	}
-	if intents != 0 {
-		t.Fatalf("seat_capacity_outbox rows for the invitation = %d, want 0", intents)
-	}
-}
-
 // A share-link join for a user without a pending invitation proceeds as
 // before — the settle lookup misses and changes nothing.
 func TestJoinShareLink_NoPendingInvitationJoinsNormally(t *testing.T) {
 	clearShareLinksForTestWorkspace(t)
-	link := createTestShareLink(t, testWorkspaceID, "admin", 5, 0)
+	link := createTestShareLink(t, testWorkspaceID, "member", 5, 0)
 	userID := createTestUserAndMember(t, "")
 
 	req := newRequest("POST", "/api/share-links/join", JoinByShareLinkRequest{Code: link.Code})
@@ -777,7 +595,7 @@ func TestJoinShareLink_NoPendingInvitationJoinsNormally(t *testing.T) {
 
 func TestGetShareLinkInfo_PublicResponseSlim(t *testing.T) {
 	clearShareLinksForTestWorkspace(t)
-	link := createTestShareLink(t, testWorkspaceID, "admin", 0, 0)
+	link := createTestShareLink(t, testWorkspaceID, "member", 0, 0)
 
 	req := newRequest("GET", "/api/share-links/"+link.Code, nil)
 	req = withURLParam(req, "code", link.Code)
@@ -829,7 +647,7 @@ func TestShareLink_CrossWorkspaceDenied(t *testing.T) {
 
 	r := chi.NewRouter()
 	r.Route("/api/workspaces/{id}", func(r chi.Router) {
-		r.Use(middleware.RequireWorkspaceRoleFromURL(testHandler.Queries, "id", "owner", "admin"))
+		r.Use(middleware.RequireWorkspaceRoleFromURL(testHandler.Queries, "id", "owner"))
 		r.Post("/share-links", testHandler.CreateShareLink)
 	})
 

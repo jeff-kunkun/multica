@@ -138,20 +138,6 @@ func (h *Handler) consumeInvitationAdmission(r *http.Request, admission *invitat
 	h.consumeInvitationGates(r, admission.gates)
 }
 
-// consumeInvitationActorAdmission charges persistent capacity rejections to
-// the caller without spending the shared workspace or recipient email budgets.
-func (h *Handler) consumeInvitationActorAdmission(r *http.Request, admission *invitationAdmission) {
-	if admission == nil {
-		return
-	}
-	for _, gate := range admission.gates {
-		if gate.dimension == invitationRateLimitActor {
-			h.consumeInvitationGates(r, []invitationRateLimitGate{gate})
-			return
-		}
-	}
-}
-
 func (h *Handler) consumeInvitationGates(r *http.Request, gates []invitationRateLimitGate) {
 	for _, gate := range gates {
 		allowed, err := slidingWindowLimiterAllow(r.Context(), gate.limiter, gate.key)

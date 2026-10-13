@@ -15,12 +15,9 @@ import {
 } from "@multica/core/paths";
 import { issueDetailOptions } from "@multica/core/issues/queries";
 import { projectDetailOptions } from "@multica/core/projects/queries";
-import { autopilotDetailOptions } from "@multica/core/autopilots/queries";
 import {
-  skillDetailOptions,
   agentListOptions,
   memberListOptions,
-  squadListOptions,
 } from "@multica/core/workspace/queries";
 import { runtimeListOptions } from "@multica/core/runtimes/queries";
 import { runtimeDisplayName } from "@multica/core/runtimes";
@@ -35,7 +32,6 @@ import { cn } from "@multica/ui/lib/utils";
 import { StatusIcon } from "../issues/components";
 import { ProjectIcon } from "../projects/components/project-icon";
 import { ActorAvatar } from "../common/actor-avatar";
-import { getInboxDisplayTitle } from "../inbox/components/inbox-display";
 import { useT } from "../i18n";
 import { ROUTE_ICON_COMPONENTS } from "./route-icon-components";
 
@@ -53,7 +49,7 @@ import { ROUTE_ICON_COMPONENTS } from "./route-icon-components";
  *
  * The one exception is an actor tab's avatar: `ResourceLeadingVisual` renders
  * `ActorAvatar`, which loads the (workspace-global, sidebar-warmed) member /
- * agent / squad directories itself. That is intentional — it resolves the
+ * agent directories itself. That is intentional — it resolves the
  * avatar and, in turn, the name this hook reads from the same lists.
  */
 
@@ -66,11 +62,8 @@ const NONE = "__tab_presentation_none__";
 const PENDING_RESOURCE_KEYS: ReadonlySet<TabLabelKey> = new Set<TabLabelKey>([
   "issue",
   "project",
-  "autopilot",
   "agent",
   "member",
-  "squad",
-  "skill",
   "machine",
   "runtime",
 ]);
@@ -136,21 +129,9 @@ function useTabEntityData(subject: TabSubject, wsId: string): TabEntityData {
     ...projectDetailOptions(wsId, subject.kind === "project" ? subject.id : NONE),
     enabled: false,
   }).data;
-  const autopilot = useQuery({
-    ...autopilotDetailOptions(
-      wsId,
-      subject.kind === "autopilot" ? subject.id : NONE,
-    ),
-    enabled: false,
-  }).data;
-  const skill = useQuery({
-    ...skillDetailOptions(wsId, subject.kind === "skill" ? subject.id : NONE),
-    enabled: false,
-  }).data;
 
   const agents = useQuery({ ...agentListOptions(wsId), enabled: false }).data;
   const members = useQuery({ ...memberListOptions(wsId), enabled: false }).data;
-  const squads = useQuery({ ...squadListOptions(wsId), enabled: false }).data;
   const runtimes = useQuery({ ...runtimeListOptions(wsId), enabled: false }).data;
   const sessions = useQuery({ ...chatSessionsOptions(wsId), enabled: false }).data;
 
@@ -168,19 +149,11 @@ function useTabEntityData(subject: TabSubject, wsId: string): TabEntityData {
     case "project":
       if (project) data.project = { icon: project.icon, title: project.title };
       break;
-    case "autopilot":
-      if (autopilot) data.autopilot = { title: autopilot.autopilot.title };
-      break;
-    case "skill":
-      if (skill) data.skill = { name: skill.name };
-      break;
     case "actor": {
       const name =
         subject.actorType === "agent"
           ? agents?.find((a) => a.id === subject.id)?.name
-          : subject.actorType === "member"
-            ? members?.find((m) => m.user_id === subject.id)?.name
-            : squads?.find((s) => s.id === subject.id)?.name;
+          : members?.find((m) => m.user_id === subject.id)?.name;
       if (name) data.actorName = name;
       break;
     }
@@ -209,12 +182,12 @@ function useTabEntityData(subject: TabSubject, wsId: string): TabEntityData {
           title: issue.title,
         };
       } else if (inboxItem && !inboxItem.issue_id) {
-        // An issue-less notification (autopilot paused, quota exceeded, …)
+        // An issue-less notification
         // carries its title only on the inbox row, so this branch is the one
         // case that still needs the list cache.
         data.inboxSelection = {
           kind: "item",
-          title: getInboxDisplayTitle(inboxItem),
+          title: inboxItem.title,
         };
       }
       break;
@@ -291,12 +264,7 @@ export function useTabPresentation(
     visual.kind === "actor" && !wsId
       ? {
           kind: "icon",
-          icon:
-            visual.actorType === "squad"
-              ? "Users"
-              : visual.actorType === "member"
-                ? "CircleUser"
-                : "Bot",
+          icon: visual.actorType === "member" ? "CircleUser" : "Bot",
         }
       : visual;
 

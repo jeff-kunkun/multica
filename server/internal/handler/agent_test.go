@@ -189,9 +189,8 @@ func TestListWorkspaceWorkingAgents(t *testing.T) {
 	workingAgentID := createHandlerTestAgent(t, "working-agents-running", []byte(`{}`))
 	queuedAgentID := createHandlerTestAgent(t, "working-agents-queued", []byte(`{}`))
 
-	// An agent owned by someone else keeps the squad fixtures mutually
-	// exclusive: it can lead a squad without accidentally satisfying the
-	// "leader owned by me" branch.
+	// An agent owned by someone else authors the fixture issues so they do
+	// not accidentally satisfy the "created by me" relation.
 	var outsiderUserID string
 	if err := testPool.QueryRow(ctx, `
 		INSERT INTO "user" (name, email)
@@ -224,63 +223,10 @@ func TestListWorkspaceWorkingAgents(t *testing.T) {
 		testPool.Exec(ctx, `DELETE FROM agent WHERE id = $1`, outsiderAgentID)
 	})
 
-	insertedSquadIDs := make([]string, 0, 3)
-	insertSquad := func(name, leaderID string) string {
-		t.Helper()
-		var squadID string
-		if err := testPool.QueryRow(ctx, `
-			INSERT INTO squad (
-				workspace_id, name, description, leader_id, creator_id
-			)
-			VALUES ($1, $2, '', $3, $4)
-			RETURNING id
-		`,
-			testWorkspaceID,
-			name,
-			leaderID,
-			testUserID,
-		).Scan(&squadID); err != nil {
-			t.Fatalf("insert squad %q: %v", name, err)
-		}
-		insertedSquadIDs = append(insertedSquadIDs, squadID)
-		return squadID
-	}
-	directMemberSquadID := insertSquad(
-		"working-agents-direct-member-squad",
-		outsiderAgentID,
-	)
-	ownedLeaderSquadID := insertSquad(
-		"working-agents-owned-leader-squad",
-		workingAgentID,
-	)
-	ownedMemberSquadID := insertSquad(
-		"working-agents-owned-member-squad",
-		outsiderAgentID,
-	)
-	if _, err := testPool.Exec(ctx, `
-		INSERT INTO squad_member (squad_id, member_type, member_id)
-		VALUES
-			($1, 'member', $2),
-			($3, 'agent', $4)
-	`,
-		directMemberSquadID,
-		testUserID,
-		ownedMemberSquadID,
-		workingAgentID,
-	); err != nil {
-		t.Fatalf("insert squad involvement fixtures: %v", err)
-	}
-	t.Cleanup(func() {
-		for _, squadID := range insertedSquadIDs {
-			testPool.Exec(ctx, `DELETE FROM squad WHERE id = $1`, squadID)
-		}
-	})
-
 	// Insert source issues directly: this test is about the working-agent
 	// projection, so it must not inherit unrelated CreateIssue validation or
-	// side effects. The fixtures cover every direct My Issues relation plus
-	// all three squad-involvement branches.
-	insertedIssueIDs := make([]string, 0, 6)
+	// side effects. The fixtures cover every direct My Issues relation.
+	insertedIssueIDs := make([]string, 0, 3)
 	insertIssue := func(
 		title, creatorType, creatorID string,
 		assigneeType, assigneeID any,
@@ -331,72 +277,36 @@ func TestListWorkspaceWorkingAgents(t *testing.T) {
 		nil,
 		nil,
 	)
-	directMemberSquadIssueID := insertIssue(
-		"working-agent-direct-member-squad",
-		"agent",
-		outsiderAgentID,
-		"squad",
-		directMemberSquadID,
-	)
-	ownedLeaderSquadIssueID := insertIssue(
-		"working-agent-owned-leader-squad",
-		"agent",
-		outsiderAgentID,
-		"squad",
-		ownedLeaderSquadID,
-	)
-	ownedMemberSquadIssueID := insertIssue(
-		"working-agent-owned-member-squad",
-		"agent",
-		outsiderAgentID,
-		"squad",
-		ownedMemberSquadID,
-	)
 	t.Cleanup(func() {
 		for _, issueID := range insertedIssueIDs {
 			testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issueID)
 		}
 	})
 	chatSessionID := createHandlerTestChatSession(t, workingAgentID)
-	autopilotID := insertListTestAutopilot(t, workingAgentID, "working-agent-source-filter")
-	var autopilotRunID string
-	if err := testPool.QueryRow(ctx, `
-		INSERT INTO autopilot_run (autopilot_id, source, status)
-		VALUES ($1, 'manual', 'running')
-		RETURNING id
-	`, autopilotID).Scan(&autopilotRunID); err != nil {
-		t.Fatalf("insert autopilot run: %v", err)
-	}
 
-	// Nine running tasks on one agent: six issue relations, chat, autopilot,
-	// and quick-create (no source FK). The autopilot task also carries issue_id
-	// to prove source precedence keeps it out of type=issue.
-	insertedTaskIDs := make([]string, 0, 10)
+	// Five running tasks on one agent: three issue relations, chat, and a
+	// task with no source FK.
+	insertedTaskIDs := make([]string, 0, 6)
 	for _, fixture := range []struct {
-		agentID        string
-		status         string
-		issueID        any
-		chatSessionID  any
-		autopilotRunID any
+		agentID       string
+		status        string
+		issueID       any
+		chatSessionID any
 	}{
-		{workingAgentID, "running", assignedIssueID, nil, nil},
-		{workingAgentID, "running", ownedAgentIssueID, nil, nil},
-		{workingAgentID, "running", outsideIssueID, nil, nil},
-		{workingAgentID, "running", directMemberSquadIssueID, nil, nil},
-		{workingAgentID, "running", ownedLeaderSquadIssueID, nil, nil},
-		{workingAgentID, "running", ownedMemberSquadIssueID, nil, nil},
-		{workingAgentID, "running", nil, chatSessionID, nil},
-		{workingAgentID, "running", assignedIssueID, nil, autopilotRunID},
-		{workingAgentID, "running", nil, nil, nil},
-		{queuedAgentID, "queued", nil, nil, nil},
+		{workingAgentID, "running", assignedIssueID, nil},
+		{workingAgentID, "running", ownedAgentIssueID, nil},
+		{workingAgentID, "running", outsideIssueID, nil},
+		{workingAgentID, "running", nil, chatSessionID},
+		{workingAgentID, "running", nil, nil},
+		{queuedAgentID, "queued", nil, nil},
 	} {
 		var taskID string
 		if err := testPool.QueryRow(ctx, `
 			INSERT INTO agent_task_queue (
 				agent_id, runtime_id, status, priority, issue_id,
-				chat_session_id, autopilot_run_id, started_at
+				chat_session_id, started_at
 			)
-			VALUES ($1, $2, $3, 0, $4, $5, $6, now())
+			VALUES ($1, $2, $3, 0, $4, $5, now())
 			RETURNING id
 		`,
 			fixture.agentID,
@@ -404,7 +314,6 @@ func TestListWorkspaceWorkingAgents(t *testing.T) {
 			fixture.status,
 			fixture.issueID,
 			fixture.chatSessionID,
-			fixture.autopilotRunID,
 		).Scan(&taskID); err != nil {
 			t.Fatalf("insert %s task: %v", fixture.status, err)
 		}
@@ -424,59 +333,35 @@ func TestListWorkspaceWorkingAgents(t *testing.T) {
 	}{
 		{
 			name:      "all sources",
-			wantCount: 9,
+			wantCount: 5,
 			wantIssueIDs: []string{
 				assignedIssueID,
 				ownedAgentIssueID,
 				outsideIssueID,
-				directMemberSquadIssueID,
-				ownedLeaderSquadIssueID,
-				ownedMemberSquadIssueID,
 			},
 		},
 		{
 			name:      "issue",
 			query:     "?type=issue",
-			wantCount: 6,
+			wantCount: 3,
 			wantIssueIDs: []string{
 				assignedIssueID,
 				ownedAgentIssueID,
 				outsideIssueID,
-				directMemberSquadIssueID,
-				ownedLeaderSquadIssueID,
-				ownedMemberSquadIssueID,
 			},
-		},
-		{
-			name:         "autopilot",
-			query:        "?type=autopilot",
-			wantCount:    1,
-			wantIssueIDs: []string{assignedIssueID},
 		},
 		{name: "chat", query: "?type=chat", wantCount: 1, wantIssueIDs: []string{}},
 		{
-			name:      "mine defaults to any",
-			query:     "?type=issue&scope=mine",
-			wantCount: 5,
-			wantIssueIDs: []string{
-				assignedIssueID,
-				ownedAgentIssueID,
-				directMemberSquadIssueID,
-				ownedLeaderSquadIssueID,
-				ownedMemberSquadIssueID,
-			},
+			name:         "mine defaults to any",
+			query:        "?type=issue&scope=mine",
+			wantCount:    2,
+			wantIssueIDs: []string{assignedIssueID, ownedAgentIssueID},
 		},
 		{
-			name:      "mine any",
-			query:     "?type=issue&scope=mine&relation=any",
-			wantCount: 5,
-			wantIssueIDs: []string{
-				assignedIssueID,
-				ownedAgentIssueID,
-				directMemberSquadIssueID,
-				ownedLeaderSquadIssueID,
-				ownedMemberSquadIssueID,
-			},
+			name:         "mine any",
+			query:        "?type=issue&scope=mine&relation=any",
+			wantCount:    2,
+			wantIssueIDs: []string{assignedIssueID, ownedAgentIssueID},
 		},
 		{
 			name:         "mine assigned",
@@ -491,15 +376,10 @@ func TestListWorkspaceWorkingAgents(t *testing.T) {
 			wantIssueIDs: []string{assignedIssueID},
 		},
 		{
-			name:      "mine involved",
-			query:     "?type=issue&scope=mine&relation=involved",
-			wantCount: 4,
-			wantIssueIDs: []string{
-				ownedAgentIssueID,
-				directMemberSquadIssueID,
-				ownedLeaderSquadIssueID,
-				ownedMemberSquadIssueID,
-			},
+			name:         "mine involved",
+			query:        "?type=issue&scope=mine&relation=involved",
+			wantCount:    1,
+			wantIssueIDs: []string{ownedAgentIssueID},
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -1433,143 +1313,6 @@ func TestUpdateAgent_KeepsMcpConfigForMemberActor(t *testing.T) {
 	}
 	if resp.McpConfigRedacted {
 		t.Errorf("UpdateAgent response should NOT mark mcp_config redacted for member actor")
-	}
-}
-
-// TestUpdateAgent_PreservesSkillsInResponse is the regression for #3459:
-// updating only description/instructions used to return "skills": []
-// because the handler skipped the skill reload that GetAgent does. The
-// DB row was always preserved; the response just lied about it, which
-// scared users into manually re-running `agent skills set` and risked
-// scripted clients writing the empty set back. We assert (a) the
-// response carries the bound skills, (b) the DB row is unchanged, and
-// (c) GetAgent reports the same shape so the two endpoints don't drift.
-func TestUpdateAgent_PreservesSkillsInResponse(t *testing.T) {
-	if testHandler == nil {
-		t.Skip("database not available")
-	}
-	ctx := context.Background()
-
-	agentID := createHandlerTestAgent(t, "update-preserves-skills-agent", nil)
-	skillA := insertHandlerTestSkill(t, "update-preserve-a", "alpha body")
-	skillB := insertHandlerTestSkill(t, "update-preserve-b", "beta body")
-	for _, sid := range []string{skillA, skillB} {
-		if _, err := testPool.Exec(ctx,
-			`INSERT INTO agent_skill (agent_id, skill_id) VALUES ($1, $2)`,
-			agentID, sid,
-		); err != nil {
-			t.Fatalf("attach skill %s: %v", sid, err)
-		}
-	}
-
-	req := newRequest(http.MethodPut, "/api/agents/"+agentID, map[string]any{
-		"description": "metadata-only update",
-	})
-	req = withURLParam(req, "id", agentID)
-	w := httptest.NewRecorder()
-	testHandler.UpdateAgent(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("UpdateAgent: expected 200, got %d: %s", w.Code, w.Body.String())
-	}
-
-	var resp AgentResponse
-	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
-	gotIDs := map[string]bool{}
-	for _, s := range resp.Skills {
-		gotIDs[s.ID] = true
-	}
-	for _, want := range []string{skillA, skillB} {
-		if !gotIDs[want] {
-			t.Errorf("UpdateAgent response missing skill %s; got %+v", want, resp.Skills)
-		}
-	}
-
-	// Defence in depth: the junction table must be untouched too. Without
-	// this check a future regression that DOES wipe agent_skill rows but
-	// reloads them into the response would silently pass.
-	var rowCount int
-	if err := testPool.QueryRow(ctx,
-		`SELECT COUNT(*) FROM agent_skill WHERE agent_id = $1`,
-		agentID,
-	).Scan(&rowCount); err != nil {
-		t.Fatalf("count agent_skill: %v", err)
-	}
-	if rowCount != 2 {
-		t.Errorf("agent_skill row count: expected 2, got %d", rowCount)
-	}
-
-	// GetAgent must agree with UpdateAgent on the skill list — otherwise
-	// CLI users will see one shape from the mutation and a different one
-	// on the very next read.
-	getReq := newRequest(http.MethodGet, "/api/agents/"+agentID, nil)
-	getReq = withURLParam(getReq, "id", agentID)
-	getW := httptest.NewRecorder()
-	testHandler.GetAgent(getW, getReq)
-	if getW.Code != http.StatusOK {
-		t.Fatalf("GetAgent: expected 200, got %d: %s", getW.Code, getW.Body.String())
-	}
-	var getResp AgentResponse
-	if err := json.NewDecoder(getW.Body).Decode(&getResp); err != nil {
-		t.Fatalf("decode GetAgent: %v", err)
-	}
-	if len(getResp.Skills) != len(resp.Skills) {
-		t.Errorf("GetAgent skill count %d != UpdateAgent skill count %d",
-			len(getResp.Skills), len(resp.Skills))
-	}
-}
-
-// TestArchiveRestoreAgent_PreservesSkillsInResponse is the sister
-// regression for #3459: ArchiveAgent / RestoreAgent share the same
-// agentToResponse path as UpdateAgent and previously also returned
-// "skills": [] regardless of what was in the junction table. The
-// archive/restore broadcasts are the only place where mobile clients
-// learn about state flips, so an empty skills array there would propagate
-// to every connected client until the next refetch.
-func TestArchiveRestoreAgent_PreservesSkillsInResponse(t *testing.T) {
-	if testHandler == nil {
-		t.Skip("database not available")
-	}
-	ctx := context.Background()
-
-	agentID := createHandlerTestAgent(t, "archive-preserves-skills-agent", nil)
-	skillID := insertHandlerTestSkill(t, "archive-preserve", "body")
-	if _, err := testPool.Exec(ctx,
-		`INSERT INTO agent_skill (agent_id, skill_id) VALUES ($1, $2)`,
-		agentID, skillID,
-	); err != nil {
-		t.Fatalf("attach skill: %v", err)
-	}
-
-	archiveReq := newRequest(http.MethodPost, "/api/agents/"+agentID+"/archive", nil)
-	archiveReq = withURLParam(archiveReq, "id", agentID)
-	archiveW := httptest.NewRecorder()
-	testHandler.ArchiveAgent(archiveW, archiveReq)
-	if archiveW.Code != http.StatusOK {
-		t.Fatalf("ArchiveAgent: expected 200, got %d: %s", archiveW.Code, archiveW.Body.String())
-	}
-	var archived AgentResponse
-	if err := json.NewDecoder(archiveW.Body).Decode(&archived); err != nil {
-		t.Fatalf("decode archive: %v", err)
-	}
-	if len(archived.Skills) != 1 || archived.Skills[0].ID != skillID {
-		t.Errorf("ArchiveAgent: expected 1 skill %s, got %+v", skillID, archived.Skills)
-	}
-
-	restoreReq := newRequest(http.MethodPost, "/api/agents/"+agentID+"/restore", nil)
-	restoreReq = withURLParam(restoreReq, "id", agentID)
-	restoreW := httptest.NewRecorder()
-	testHandler.RestoreAgent(restoreW, restoreReq)
-	if restoreW.Code != http.StatusOK {
-		t.Fatalf("RestoreAgent: expected 200, got %d: %s", restoreW.Code, restoreW.Body.String())
-	}
-	var restored AgentResponse
-	if err := json.NewDecoder(restoreW.Body).Decode(&restored); err != nil {
-		t.Fatalf("decode restore: %v", err)
-	}
-	if len(restored.Skills) != 1 || restored.Skills[0].ID != skillID {
-		t.Errorf("RestoreAgent: expected 1 skill %s, got %+v", skillID, restored.Skills)
 	}
 }
 

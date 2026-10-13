@@ -18,8 +18,7 @@ import (
 //   - "can this actor TRIGGER a run for this agent"      -> canInvokeAgent
 //
 // The invoke gate is the security-critical one: a workspace admin must NOT be
-// able to invoke someone's private agent (and thereby use that owner's
-// Composio/OAuth connections) just because they are an admin. Admin retains
+// able to invoke someone's private agent just because they are an admin. Admin retains
 // management + inventory visibility, not the ability to run.
 //
 // permission_mode drives invoke:
@@ -153,7 +152,7 @@ func (h *Handler) canAccessPrivateAgent(ctx context.Context, agent db.Agent, act
 	if err != nil {
 		return false
 	}
-	if roleAllowed(member.Role, "owner", "admin") {
+	if member.Role == "owner" {
 		return true
 	}
 	if agent.PermissionMode != "public_to" {
@@ -190,7 +189,7 @@ func memberHitsInvocationTargets(targets []db.AgentInvocationTarget, userID stri
 // everything; a regular member sees a public_to agent only when on its
 // allow-list, and never sees other members' private agents.
 func memberAllowedToViewAgent(agent db.Agent, targets []db.AgentInvocationTarget, userID, role string) bool {
-	if roleAllowed(role, "owner", "admin") {
+	if role == "owner" {
 		return true
 	}
 	if uuidToString(agent.OwnerID) == userID {
@@ -356,7 +355,7 @@ func (h *Handler) restrictedAgentIDs(ctx context.Context, workspaceID, actorType
 	}
 
 	// Whether per-agent visibility can restrict anything for this actor at all.
-	judgeUserAgents := actorType == "member" && !roleAllowed(role, "owner", "admin")
+	judgeUserAgents := actorType == "member" && role != "owner"
 	var targetsByAgent map[string][]db.AgentInvocationTarget
 	if judgeUserAgents {
 		var ok bool
@@ -399,18 +398,4 @@ func (h *Handler) loadInvocationTargetsByAgent(ctx context.Context, agents []db.
 		out[aid] = append(out[aid], row)
 	}
 	return out, true
-}
-
-// canEnqueueSquadLeader returns true when the given actor is allowed to
-// trigger the squad's private leader. It loads the leader agent and delegates
-// to canInvokeAgent so the leader-trigger path honours invocation permission
-// exactly like a direct assignment/mention. Non-public leaders require owner /
-// allow-list; system-initiated triggers (e.g. github webhooks) are judged as
-// system principals (workspace target only).
-func (h *Handler) canEnqueueSquadLeader(ctx context.Context, leaderID pgtype.UUID, actorType, actorID, originatorUserID, workspaceID string) bool {
-	agent, err := h.Queries.GetAgent(ctx, leaderID)
-	if err != nil {
-		return false
-	}
-	return h.canInvokeAgent(ctx, agent, actorType, actorID, originatorUserID, workspaceID)
 }

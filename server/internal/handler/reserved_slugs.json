@@ -71,6 +71,7 @@
       "slugs": [
         "issues",
         "projects",
+        "meetings",
         "autopilots",
         "agents",
         "squads",
@@ -95,13 +96,6 @@
         "sdk",
         "tokens",
         "cli"
-      ]
-    },
-    {
-      "label": "DingTalk account-bind route",
-      "description": "`/dingtalk/bind` is a global pre-workspace route where a member links their DingTalk identity. Reserve the prefix so a workspace slug cannot shadow it.",
-      "slugs": [
-        "dingtalk"
       ]
     },
     {

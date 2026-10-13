@@ -19,41 +19,10 @@ type fakeBroadcaster struct {
 	broadcastCalled int
 }
 
-func TestRegisterListeners_ChatSessionCreatedGoesOnlyToCreator(t *testing.T) {
-	bus := events.New()
-	fb := &fakeBroadcaster{}
-	registerListeners(bus, fb)
-
-	bus.Publish(events.Event{
-		Type: protocol.EventChatSessionCreated, WorkspaceID: "ws-1",
-		ActorType: "member", ActorID: "creator-1", ChatSessionID: "chat-1",
-		Payload: protocol.ChatSessionCreatedPayload{
-			WorkspaceID: "ws-1", ChatSessionID: "chat-1", CreatorID: "creator-1",
-			Title: "private opening title",
-		},
-	})
-
-	if len(fb.workspaceCalls) != 0 {
-		t.Fatalf("private Chat create reached workspace fanout: %+v", fb.workspaceCalls)
-	}
-	if len(fb.userCalls) != 1 || fb.userCalls[0].userID != "creator-1" {
-		t.Fatalf("creator fanout = %+v, want creator-1 once", fb.userCalls)
-	}
-	var frame struct {
-		Payload protocol.ChatSessionCreatedPayload `json:"payload"`
-	}
-	if err := json.Unmarshal(fb.userCalls[0].msg, &frame); err != nil {
-		t.Fatalf("decode creator frame: %v", err)
-	}
-	if frame.Payload.WorkspaceID != "ws-1" || frame.Payload.ChatSessionID != "chat-1" {
-		t.Fatalf("creator payload = %+v", frame.Payload)
-	}
-}
-
 func TestRegisterListeners_ChatSessionTitleUpdateGoesOnlyToCreator(t *testing.T) {
 	bus := events.New()
 	fb := &fakeBroadcaster{}
-	registerListeners(bus, fb)
+	registerListeners(bus, fb, nil)
 
 	bus.Publish(events.Event{
 		Type: protocol.EventChatSessionUpdated, WorkspaceID: "ws-1",
@@ -129,7 +98,7 @@ func TestRegisterListeners_TaskChatGoToWorkspace(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			bus := events.New()
 			fb := &fakeBroadcaster{}
-			registerListeners(bus, fb)
+			registerListeners(bus, fb, nil)
 
 			bus.Publish(events.Event{
 				Type:          tc.eventType,
@@ -170,7 +139,7 @@ func TestRegisterListeners_InvitationConcludedReachesActorAndWorkspace(t *testin
 		t.Run(tc.name, func(t *testing.T) {
 			bus := events.New()
 			fb := &fakeBroadcaster{}
-			registerListeners(bus, fb)
+			registerListeners(bus, fb, nil)
 
 			bus.Publish(events.Event{
 				Type: tc.eventType, WorkspaceID: "ws-1",
@@ -213,7 +182,7 @@ func TestRegisterListeners_InvitationConcludedReachesActorAndWorkspace(t *testin
 func TestRegisterListeners_InvitationConcludedWithoutActorSkipsTargetedSend(t *testing.T) {
 	bus := events.New()
 	fb := &fakeBroadcaster{}
-	registerListeners(bus, fb)
+	registerListeners(bus, fb, nil)
 
 	bus.Publish(events.Event{
 		Type: protocol.EventInvitationDeclined, WorkspaceID: "ws-1",
@@ -234,7 +203,7 @@ func TestRegisterListeners_InvitationConcludedWithoutActorSkipsTargetedSend(t *t
 func TestRegisterListeners_InvitationRevokedStillTargetsInviteeNotActor(t *testing.T) {
 	bus := events.New()
 	fb := &fakeBroadcaster{}
-	registerListeners(bus, fb)
+	registerListeners(bus, fb, nil)
 
 	bus.Publish(events.Event{
 		Type: protocol.EventInvitationRevoked, WorkspaceID: "ws-1",

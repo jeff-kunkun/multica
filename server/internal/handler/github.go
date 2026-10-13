@@ -719,7 +719,7 @@ func (h *Handler) ListGitHubInstallations(w http.ResponseWriter, r *http.Request
 		return
 	}
 	member, _ := middleware.MemberFromContext(r.Context())
-	canManage := roleAllowed(member.Role, "owner", "admin")
+	canManage := member.Role == "owner"
 
 	rows, err := h.Queries.ListGitHubInstallationsByWorkspace(r.Context(), wsUUID)
 	if err != nil {

@@ -22,7 +22,7 @@ describe("useUserLocaleSyncEnabled", () => {
     rerender();
     expect(result.current).toBe(false);
 
-    route.pathname = "/onboarding";
+    route.pathname = "/workspaces/new";
     rerender();
     expect(result.current).toBe(true);
   });

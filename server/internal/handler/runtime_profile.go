@@ -386,7 +386,7 @@ const maxReportedBlockingAgents = 20
 //
 // The recovery paths come from those totals, never from the sample. Which rows
 // survive the LIMIT is arbitrary with respect to class — twenty ordinary agents
-// sorting first push the one Mika to position 21 — so advice derived from the
+// sorting first push the one system agent to position 21 — so advice derived from the
 // visible rows would tell the user to archive blockers that cannot be archived,
 // which is the defect this whole change set removes.
 func profileDeleteBlockedByAgents(profileName string, agents []db.ListActiveAgentsByProfileRow) map[string]any {
@@ -401,10 +401,8 @@ func profileDeleteBlockedByAgents(profileName string, agents []db.ListActiveAgen
 	total := summary.TotalCount
 
 	classes := map[blockingAgentClass]bool{
-		blockingAgentUser:           summary.UserCount > 0,
-		blockingAgentMika:           summary.MikaCount > 0,
-		blockingAgentBuilderCarrier: summary.AgentBuilderCount > 0,
-		blockingAgentOtherSystem:    summary.OtherSystemCount > 0,
+		blockingAgentUser:        summary.UserCount > 0,
+		blockingAgentOtherSystem: summary.OtherSystemCount > 0,
 	}
 
 	named := make([]string, 0, maxNamedBlockingAgents)
@@ -429,7 +427,7 @@ func profileDeleteBlockedByAgents(profileName string, agents []db.ListActiveAgen
 		subject = fmt.Sprintf("the custom runtime profile %q", profileName)
 	}
 
-	remedies := blockingAgentRemedies(classes, blockingAgentScopeProfile)
+	remedies := blockingAgentRemedies(classes)
 	if len(remedies) == 0 {
 		remedies = []string{"None of them can be released from here."}
 	}

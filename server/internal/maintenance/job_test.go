@@ -59,7 +59,7 @@ func fixture(t *testing.T) (*pgxpool.Pool, *Service) {
 	}
 	exec("CREATE TABLE schema_migrations(version text)")
 	for _, name := range []string{"332_issue_status", "333_issue_status_pkey_index", "478_issue_status_category_expand", "485_maintenance_job", "486_maintenance_job_id_index", "487_maintenance_job_idempotency_index", "488_maintenance_job_active_index"} {
-		body, err := os.ReadFile(filepath.Join("..", "..", "migrations", name+".up.sql"))
+		body, err := os.ReadFile(filepath.Join("testdata", "legacy_migrations", name+".up.sql"))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -472,7 +472,7 @@ func TestUnknownStoredDataCannotComplete(t *testing.T) {
  UPDATE issue_status SET category='unexpected' WHERE id='00000000-0000-0000-0000-000000000008'`); err != nil {
 		t.Fatal(err)
 	}
-	sql, err := os.ReadFile("../../migrations/478_issue_status_category_expand.up.sql")
+	sql, err := os.ReadFile("testdata/legacy_migrations/478_issue_status_category_expand.up.sql")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -562,7 +562,7 @@ func TestContractPreservesAuditAndRejectsCategoryProcessor(t *testing.T) {
 	completed := finish(t, s, create(t, s, false))
 	pending := create(t, s, false)
 	for _, name := range []string{"491_issue_status_category_backfill", "492_issue_status_category_contract", "493_issue_status_category_validate", "494_issue_status_category_read_contract"} {
-		body, err := os.ReadFile(filepath.Join("..", "..", "migrations", name+".up.sql"))
+		body, err := os.ReadFile(filepath.Join("testdata", "legacy_migrations", name+".up.sql"))
 		if err != nil {
 			t.Fatal(err)
 		}

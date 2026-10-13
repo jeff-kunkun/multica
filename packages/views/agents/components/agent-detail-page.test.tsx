@@ -177,7 +177,6 @@ const baseAgent: Agent = {
   max_concurrent_tasks: 1,
   model: "",
   owner_id: "user-2",
-  skills: [],
   created_at: "2026-05-28T00:00:00Z",
   updated_at: "2026-05-28T00:00:00Z",
   archived_at: null,
@@ -390,7 +389,7 @@ describe("AgentDetailPage DM button", () => {
     agentsRef.current = [
       { ...baseAgent, permission_mode: "private", invocation_targets: [] },
     ];
-    membersRef.current = [{ user_id: "user-1", role: "admin" }];
+    membersRef.current = [{ user_id: "user-1", role: "owner" }];
     const { push } = renderPage();
     fireEvent.click(await screen.findByRole("button", { name: "DM" }));
     expect(mockToastError).toHaveBeenCalledWith(
@@ -435,7 +434,7 @@ describe("AgentDetailPage DM button", () => {
     agentsRef.current = [
       { ...baseAgent, system_key: "mika" },
     ];
-    membersRef.current = [{ user_id: "user-1", role: "admin" }];
+    membersRef.current = [{ user_id: "user-1", role: "owner" }];
     renderPage();
 
     await screen.findByRole("button", { name: "Assign work" });

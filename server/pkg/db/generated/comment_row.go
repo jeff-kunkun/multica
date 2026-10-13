@@ -19,8 +19,6 @@ func (r CreateCommentRow) Comment() Comment {
 		ResolvedByType:     r.ResolvedByType,
 		ResolvedByID:       r.ResolvedByID,
 		SourceTaskID:       r.SourceTaskID,
-		QuickActionID:      r.QuickActionID,
-		ViaPluginID:        r.ViaPluginID,
 		Revision:           r.Revision,
 		DeletedAt:          r.DeletedAt,
 		SuppressedAgentIds: r.SuppressedAgentIds,
@@ -46,8 +44,6 @@ func (r UpdateCommentRow) Comment() Comment {
 		ResolvedByType: r.ResolvedByType,
 		ResolvedByID:   r.ResolvedByID,
 		SourceTaskID:   r.SourceTaskID,
-		QuickActionID:  r.QuickActionID,
-		ViaPluginID:    r.ViaPluginID,
 		Revision:       r.Revision,
 		DeletedAt:      r.DeletedAt,
 	}

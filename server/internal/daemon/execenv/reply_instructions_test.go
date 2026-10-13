@@ -26,15 +26,13 @@ func TestBuildCommentReplyInstructionsCodexLinux(t *testing.T) {
 	issueID := "11111111-1111-1111-1111-111111111111"
 	triggerID := "22222222-2222-2222-2222-222222222222"
 
-	got := BuildCommentReplyInstructions("codex", issueID, triggerID, false)
+	got := BuildCommentReplyInstructions("codex", issueID, triggerID)
 
 	for _, want := range []string{
 		"multica issue comment add " + issueID + " --parent " + triggerID + " --content-file ./reply.md --output table && rm ./reply.md",
 		"Write the body file first",
 		"--content-file ./reply.md",
-		"#4182",
-		"Keep the `&&`",
-		"Do NOT write literal `\\n` escapes to simulate line breaks",
+		"## Writing bodies",
 		"do NOT reuse --parent values from previous turns",
 	} {
 		if !strings.Contains(got, want) {
@@ -82,17 +80,15 @@ func TestBuildCommentReplyInstructionsNonCodexLinux(t *testing.T) {
 			name := provider + "/" + host
 			t.Run(name, func(t *testing.T) {
 				runtimeGOOS = host
-				got := BuildCommentReplyInstructions(provider, issueID, triggerID, false)
+				got := BuildCommentReplyInstructions(provider, issueID, triggerID)
 
 				for _, want := range []string{
 					"multica issue comment add " + issueID + " --parent " + triggerID + " --content-file ./reply.md --output table && rm ./reply.md",
 					// MUL-5442 cross-channel dedup: shell-hazard mechanics live in
-					// the brief's Comment Formatting; the cookbook keeps the
+					// the brief's Writing bodies; the cookbook keeps the
 					// file-first order, the command, and the pointer.
 					"Write the body file first",
-					"## Comment Formatting",
-					"#4182",
-					"Keep the `&&`",
+					"## Writing bodies",
 					"do NOT reuse --parent values from previous turns",
 					"Post your reply as a comment",
 				} {
@@ -138,7 +134,7 @@ func TestBuildCommentReplyInstructionsWindowsUsesContentFile(t *testing.T) {
 
 	for _, provider := range []string{"codex", "claude", "opencode", "openclaw", "hermes", "kimi", "reasonix", "kiro", "cursor"} {
 		t.Run(provider+"/windows", func(t *testing.T) {
-			got := BuildCommentReplyInstructions(provider, issueID, triggerID, false)
+			got := BuildCommentReplyInstructions(provider, issueID, triggerID)
 			for _, want := range []string{
 				"multica issue comment add " + issueID + " --parent " + triggerID + " --content-file ./reply.md --output table",
 				// MUL-5442 cross-channel dedup: the $OutputEncoding trap's
@@ -154,7 +150,7 @@ func TestBuildCommentReplyInstructionsWindowsUsesContentFile(t *testing.T) {
 				"Write the body file first",
 				"never pipe via `--content-stdin`",
 				"PowerShell drops non-ASCII",
-				"## Comment Formatting",
+				"## Writing bodies",
 			} {
 				if !strings.Contains(got, want) {
 					t.Errorf("%s reply instructions missing %q\n---\n%s", provider, want, got)
@@ -177,7 +173,7 @@ func TestBuildCommentReplyInstructionsEmptyWhenNoTrigger(t *testing.T) {
 	t.Parallel()
 
 	for _, provider := range []string{"codex", "claude", "opencode"} {
-		if got := BuildCommentReplyInstructions(provider, "issue-id", "", false); got != "" {
+		if got := BuildCommentReplyInstructions(provider, "issue-id", ""); got != "" {
 			t.Fatalf("expected empty string when triggerCommentID is empty for %s, got %q", provider, got)
 		}
 	}
@@ -211,16 +207,13 @@ func TestInjectRuntimeConfigKeepsTriggerCommentOutOfBrief(t *testing.T) {
 	}
 	for _, want := range []string{
 		// MUL-6417 retired the turn-mode router: one workflow, delivery
-		// routed on what the per-turn message carries. Pin the routing RULE
-		// halves — a compression that drops either delivery case must fail
-		// here.
-		"**Every issue turn runs the same workflow.**",
-		"with the `--parent` value it gives you for THIS turn",
-		"never one from an earlier turn",
-		"With no triggering comment, post a new top-level comment",
+		// routed on what the per-turn message carries. Pin both delivery
+		// cases — a compression that drops either must fail here.
+		"## Workflow",
+		"under this turn's `--parent` if given, else top-level",
 		// The no-write default that makes the un-routed workflow safe: a
 		// turn that moved nothing writes nothing (MUL-6300 → MUL-6417).
-		"questions, discussion, and acknowledgements never touch status",
+		"A turn that only answered a question writes no status.",
 	} {
 		if !strings.Contains(s, want) {
 			t.Errorf("CLAUDE.md missing %q\n---\n%s", want, s)
@@ -247,7 +240,7 @@ func TestWindowsCommentReplyInstructionsHaveNoStdin(t *testing.T) {
 
 	for _, provider := range []string{"claude", "codex", "opencode"} {
 		t.Run(provider, func(t *testing.T) {
-			s := BuildCommentReplyInstructions(provider, issueID, triggerID, false)
+			s := BuildCommentReplyInstructions(provider, issueID, triggerID)
 			for _, want := range []string{
 				"multica issue comment add " + issueID + " --parent " + triggerID + " --content-file",
 				"--content-file",
@@ -274,9 +267,8 @@ func TestWindowsCommentReplyInstructionsHaveNoStdin(t *testing.T) {
 // has no BuildCommentReplyInstructions override, so an agent that follows the
 // "post your final results" step literally would pipe its final comment through
 // PowerShell and drop non-ASCII bytes (#2198 / #2236 / #2376). The OS-aware
-// ## Comment Formatting section (file-only on Windows) is the single source of
-// truth; the Available Commands entry and step 5 must defer to it, not re-offer
-// stdin. The flag synopsis may still *list* `--content-stdin` as available.
+// ## Writing bodies section (file-only) is the single source of truth; the
+// Commands entry and the workflow must defer to it, not re-offer stdin.
 //
 // Not parallel: mutates the package-level runtimeGOOS.
 func TestInjectRuntimeConfigWindowsAssignmentBriefStaysFileOnly(t *testing.T) {
@@ -303,15 +295,14 @@ func TestInjectRuntimeConfigWindowsAssignmentBriefStaysFileOnly(t *testing.T) {
 			}
 			s := string(data)
 
-			// The Windows Comment Formatting section is file-only.
+			// The Writing bodies section is file-only.
 			for _, want := range []string{
-				"## Comment Formatting",
-				"On Windows, **always write the comment body to a UTF-8 file",
-				"do NOT pipe via `--content-stdin`",
-				"use `--output table` to confirm success without echoing the body",
-				"Use `--output json` instead when you need the returned comment ID, attachment details, or other response fields",
-				"Gate the cleanup on the post succeeding",
-				"empty stdout alone does not prove success",
+				"## Writing bodies",
+				"Write comment and issue bodies to a UTF-8 file",
+				"Never use inline `--content`, and never `--content-stdin`",
+				"Post with `--output table`",
+				"delete the file only after the post succeeded",
+				"in PowerShell check `$LASTEXITCODE` before `Remove-Item ./reply.md`",
 			} {
 				if !strings.Contains(s, want) {
 					t.Errorf("%s missing Windows file-only guidance %q\n---\n%s", fileName, want, s)
@@ -331,30 +322,5 @@ func TestInjectRuntimeConfigWindowsAssignmentBriefStaysFileOnly(t *testing.T) {
 				}
 			}
 		})
-	}
-}
-
-// TestBuildCommentReplyInstructionsSquadLeaderCarveOut pins that the squad
-// leader variant scopes the reply imperative with the `no_action` exception
-// (MUL-5442 #6493 review): the leader's only silent path must not be
-// contradicted by a later unconditional "Post your reply" line, and the
-// ordinary variant must never carry the leader carve-out.
-func TestBuildCommentReplyInstructionsSquadLeaderCarveOut(t *testing.T) {
-	t.Parallel()
-
-	leader := BuildCommentReplyInstructions("claude", "issue-1", "comment-1", true)
-	if !strings.Contains(leader, "Unless your outcome is `no_action`, post your reply as a comment") {
-		t.Errorf("leader reply instructions missing the no_action carve-out\n---\n%s", leader)
-	}
-	if strings.Contains(leader, "Post your reply as a comment") {
-		t.Errorf("leader reply instructions still carry the unconditional imperative\n---\n%s", leader)
-	}
-
-	ordinary := BuildCommentReplyInstructions("claude", "issue-1", "comment-1", false)
-	if !strings.Contains(ordinary, "Post your reply as a comment") {
-		t.Errorf("ordinary reply instructions missing the imperative\n---\n%s", ordinary)
-	}
-	if strings.Contains(ordinary, "Unless your outcome is") {
-		t.Errorf("ordinary reply instructions leaked the leader carve-out\n---\n%s", ordinary)
 	}
 }

@@ -1,7 +1,6 @@
 package agent
 
 import (
-	"errors"
 	"testing"
 )
 
@@ -12,7 +11,6 @@ func TestTaskSupplementVersionGate(t *testing.T) {
 	}{
 		{"codex", "codex-cli 0.100.0", true}, {"codex", "0.99.0", false},
 		{"claude", "2.1.110 (Claude Code)", true}, {"claude", "2.1.109", false},
-		{"grok", "1.0.14", true}, {"grok", "1.0.13", false}, {"grok", "0.2.120", false},
 		{"codex", "", false}, {"claude", "dev", false}, {"kimi", "9.0.0", false},
 	} {
 		if got := SupportsTaskSupplement(tc.provider, tc.version); got != tc.want {
@@ -65,45 +63,6 @@ func TestSemverLessThan(t *testing.T) {
 		if got != tt.want {
 			t.Errorf("%v.lessThan(%v) = %v, want %v", tt.a, tt.b, got, tt.want)
 		}
-	}
-}
-
-func TestCheckMinCLIVersion(t *testing.T) {
-	tests := []struct {
-		name    string
-		input   string
-		wantErr error
-	}{
-		{"tagged release at minimum", "v0.2.21", nil},
-		{"tagged release above minimum", "0.3.1", nil},
-		{"previous tagged release below minimum", "v0.2.20", ErrCLIVersionTooOld},
-		{"tagged release below minimum", "v0.2.15", ErrCLIVersionTooOld},
-		{"empty string", "", ErrCLIVersionMissing},
-		{"unparsable", "not-a-version", ErrCLIVersionMissing},
-		{"git-describe dev build past old tag", "v0.2.15-235-gdaf0e935", nil},
-		{"git-describe dirty dev build", "v0.2.15-235-gdaf0e935-dirty", nil},
-		{"git-describe dev build past current tag", "v0.2.21-3-gabc1234", nil},
-	}
-	for _, tt := range tests {
-		err := CheckMinCLIVersion(tt.input)
-		if tt.wantErr == nil && err != nil {
-			t.Errorf("%s: CheckMinCLIVersion(%q) = %v, want nil", tt.name, tt.input, err)
-		}
-		if tt.wantErr != nil && !errors.Is(err, tt.wantErr) {
-			t.Errorf("%s: CheckMinCLIVersion(%q) = %v, want %v", tt.name, tt.input, err, tt.wantErr)
-		}
-	}
-}
-
-func TestCheckMinCLIVersionForQuickCreateFields(t *testing.T) {
-	if err := CheckMinCLIVersionFor("0.4.2", MinQuickCreateFieldsCLIVersion); !errors.Is(err, ErrCLIVersionTooOld) {
-		t.Fatalf("0.4.2 error = %v, want ErrCLIVersionTooOld", err)
-	}
-	if err := CheckMinCLIVersionFor("0.4.3", MinQuickCreateFieldsCLIVersion); err != nil {
-		t.Fatalf("0.4.3 error = %v, want nil", err)
-	}
-	if err := CheckMinCLIVersionFor("v0.4.2-7-gabc1234", MinQuickCreateFieldsCLIVersion); err != nil {
-		t.Fatalf("dev build error = %v, want nil", err)
 	}
 }
 

@@ -20,7 +20,6 @@ vi.mock("@multica/core/hooks", () => ({
 vi.mock("@multica/core/paths", () => ({
   useWorkspacePaths: () => ({
     agentDetail: (agentId: string) => `/acme/agents/${agentId}`,
-    squadDetail: (squadId: string) => `/acme/squads/${squadId}`,
   }),
 }));
 
@@ -39,7 +38,6 @@ vi.mock("@multica/core/api", () => {
   return {
     api: {
       createAgent: mockCreateAgent,
-      addSquadMember: vi.fn(),
     },
     ApiError,
   };
@@ -69,7 +67,6 @@ const CREATED_AGENT: Agent = {
   max_concurrent_tasks: 1,
   model: "",
   owner_id: "user-1",
-  skills: [],
   created_at: "2026-08-15T00:00:00Z",
   updated_at: "2026-08-15T00:00:00Z",
   archived_at: null,
@@ -128,7 +125,6 @@ describe("useCreateAgentSubmit cache handoff", () => {
             runtimeId: CREATED_AGENT.runtime_id,
           },
           runtimeId: CREATED_AGENT.runtime_id,
-          squadId: null,
         }),
       { wrapper: wrapper(queryClient) },
     );

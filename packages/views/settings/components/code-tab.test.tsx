@@ -22,7 +22,7 @@ const workspaceRef = vi.hoisted(() => ({
   },
 }));
 const roleRef = vi.hoisted(() => ({
-  current: "owner" as "owner" | "admin" | "member",
+  current: "owner" as "owner" | "member",
 }));
 const installationsRef = vi.hoisted(() => ({
   current: {

@@ -3,17 +3,8 @@ package handler
 import (
 	"testing"
 
-	"github.com/multica-ai/multica/server/internal/featureflags"
 	"github.com/multica-ai/multica/server/pkg/featureflag"
 )
-
-func withComposioMCPAppsFlag(t *testing.T, h *Handler, enabled bool) {
-	withFeatureFlag(t, h, featureflags.ComposioMCPApps, enabled)
-}
-
-func withPluginsV1Flag(t *testing.T, h *Handler, enabled bool) {
-	withFeatureFlag(t, h, featureflags.PluginsV1, enabled)
-}
 
 func withFeatureFlag(t *testing.T, h *Handler, key string, enabled bool) {
 	t.Helper()

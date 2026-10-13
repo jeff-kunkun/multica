@@ -3,7 +3,6 @@ SELECT l.*,
     CASE l.resource_type
         WHEN 'issue' THEN (SELECT COUNT(*) FROM issue_to_label x WHERE x.label_id = l.id)
         WHEN 'agent' THEN (SELECT COUNT(*) FROM agent_to_label x WHERE x.label_id = l.id)
-        WHEN 'skill' THEN (SELECT COUNT(*) FROM skill_to_label x WHERE x.label_id = l.id)
         ELSE 0
     END::bigint AS usage_count
 FROM issue_label l
@@ -46,16 +45,10 @@ DELETE FROM issue_to_label WHERE label_id = $1;
 -- name: DeleteAgentLabelAssignmentsByLabel :exec
 DELETE FROM agent_to_label WHERE label_id = $1;
 
--- name: DeleteSkillLabelAssignmentsByLabel :exec
-DELETE FROM skill_to_label WHERE label_id = $1;
-
 -- name: DeleteAgentLabelAssignmentsByAgent :exec
 DELETE FROM agent_to_label WHERE agent_id = $1;
 
--- name: DeleteSkillLabelAssignmentsBySkill :exec
-DELETE FROM skill_to_label WHERE skill_id = $1;
-
--- The single-entity cleanups above cover one agent/skill at a time. The runtime
+-- The single-entity cleanups above cover one agent at a time. The runtime
 -- variant below covers runtime and runtime-profile bulk hard deletes, where the
 -- owning agents disappear without passing through a per-entity delete.
 -- Workspace-wide cleanup lives in DeleteWorkspace so it is atomic with that
@@ -213,46 +206,3 @@ WHERE agent_id = sqlc.arg('agent_id')::uuid
         AND a.workspace_id = sqlc.arg('workspace_id')::uuid
   );
 
--- name: ListLabelsBySkill :many
-SELECT l.*
-FROM issue_label l
-JOIN skill_to_label stl ON stl.label_id = l.id
-WHERE stl.skill_id = sqlc.arg('skill_id')::uuid
-  AND l.workspace_id = sqlc.arg('workspace_id')::uuid
-  AND l.resource_type = 'skill'
-ORDER BY LOWER(l.name) ASC;
-
--- name: ListLabelsForSkills :many
-SELECT stl.skill_id, l.*
-FROM issue_label l
-JOIN skill_to_label stl ON stl.label_id = l.id
-WHERE stl.skill_id = ANY(sqlc.arg('skill_ids')::uuid[])
-  AND l.workspace_id = sqlc.arg('workspace_id')::uuid
-  AND l.resource_type = 'skill'
-ORDER BY stl.skill_id, LOWER(l.name) ASC;
-
--- name: AttachLabelToSkill :exec
-INSERT INTO skill_to_label (skill_id, label_id)
-SELECT sqlc.arg('skill_id')::uuid, sqlc.arg('label_id')::uuid
-WHERE EXISTS (
-    SELECT 1 FROM skill s
-    WHERE s.id = sqlc.arg('skill_id')::uuid
-      AND s.workspace_id = sqlc.arg('workspace_id')::uuid
-)
-AND EXISTS (
-    SELECT 1 FROM issue_label l
-    WHERE l.id = sqlc.arg('label_id')::uuid
-      AND l.workspace_id = sqlc.arg('workspace_id')::uuid
-      AND l.resource_type = 'skill'
-)
-ON CONFLICT DO NOTHING;
-
--- name: DetachLabelFromSkill :exec
-DELETE FROM skill_to_label
-WHERE skill_id = sqlc.arg('skill_id')::uuid
-  AND label_id = sqlc.arg('label_id')::uuid
-  AND EXISTS (
-      SELECT 1 FROM skill s
-      WHERE s.id = sqlc.arg('skill_id')::uuid
-        AND s.workspace_id = sqlc.arg('workspace_id')::uuid
-  );

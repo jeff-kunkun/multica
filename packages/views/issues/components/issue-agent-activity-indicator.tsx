@@ -1,25 +1,23 @@
 "use client";
 
 import { memo, useCallback, useMemo, useState } from "react";
-import { Bell, Clock3, TriangleAlert } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
-import { ShimmerText } from "@multica/ui/components/common/shimmer-text";
+import { BorderBeam } from "@multica/ui/components/common/border-beam";
+import { cn } from "@multica/ui/lib/utils";
 import {
   HoverCard,
   HoverCardTrigger,
   HoverCardContent,
 } from "@multica/ui/components/ui/hover-card";
 import { useWorkspaceId } from "@multica/core/hooks";
+import { useActorName } from "@multica/core/workspace/hooks";
 import { agentTaskSnapshotOptions } from "@multica/core/agents";
-import type { AgentTask, IssueWakeupSummaryRow, PausedWakeup } from "@multica/core/types";
-import { pausedWakeupsOptions, workspaceWakeupSummariesOptions } from "@multica/core/issues/wakeups";
-import { cn } from "@multica/ui/lib/utils";
+import type { AgentTask } from "@multica/core/types";
 import type { AvatarSize } from "@multica/ui/lib/avatar-size";
 import { AgentAvatarStack } from "../../agents/components/agent-avatar-stack";
 import { AgentActivityHoverContent } from "../../agents/components/agent-activity-hover-content";
 import { selectIssueTasks, type IssueTaskGroups } from "../surface/activity";
 import { useT } from "../../i18n";
-import { useWakeupText } from "./wakeup-presentation";
 
 const EMPTY_GROUPS: IssueTaskGroups = { running: [], queued: [] };
 
@@ -58,10 +56,10 @@ interface IssueAgentActivityIndicatorProps {
  * in the top-right of board cards and right after the identifier in list
  * rows. Derives state from the workspace-wide agent task snapshot:
  *
- *   - has ≥1 running task  → tiny avatar stack + shimmering "Working"
- *   - 0 running, ≥1 queued → half-opacity stack + muted "Queued"
- *   - future wakeups only   → next time/event + remaining count
- *   - no tasks or wakeups   → return null (no chrome, no placeholder)
+ *   - has ≥1 running task  → avatar stack + "{name} is working" in a
+ *                            border-beam chip (the header chip's face)
+ *   - 0 running, ≥1 queued → half-opacity stack + muted "{name} is queued"
+ *   - no tasks             → return null (no chrome, no placeholder)
  *
  * The shimmer shares chat's ShimmerText component. Earlier iterations layered
  * a brand ring + opacity pulse around the avatars; both read as nervous on a
@@ -98,25 +96,8 @@ export const IssueAgentActivityIndicator = memo(
   }: IssueAgentActivityIndicatorProps) {
     const { t } = useT("issues");
     const wsId = useWorkspaceId();
-    const text = useWakeupText();
+    const { getActorName } = useActorName();
     const [open, setOpen] = useState(false);
-    const selectWakeups = useCallback(
-      (rows: IssueWakeupSummaryRow[]) =>
-        rows.filter((row) => row.issue_id === issueId),
-      [issueId],
-    );
-    const { data: wakeups = [] } = useQuery({
-      ...workspaceWakeupSummariesOptions(wsId),
-      select: selectWakeups,
-    });
-    const selectPaused = useCallback(
-      (rows: PausedWakeup[]) => rows.some((row) => row.issue_id === issueId),
-      [issueId],
-    );
-    const { data: paused = false } = useQuery({
-      ...pausedWakeupsOptions(wsId),
-      select: selectPaused,
-    });
     const select = useCallback(
       (snapshot: AgentTask[]) => selectIssueTasks(snapshot, issueId),
       [issueId],
@@ -141,26 +122,25 @@ export const IssueAgentActivityIndicator = memo(
       };
     }, [groups]);
 
-    const wakeupCount = wakeups[0]?.active_count ?? 0;
-    const hasTasks = agentIds.length > 0;
+    if (agentIds.length === 0) return null;
     const hoverTasks = [...groups.running, ...groups.queued];
-    const wakeupTriggered = hoverTasks.some((task) => !!task.wakeup_id);
-    if (!hasTasks && !wakeupCount && !paused) return null;
     const isRunning = opacity === "full";
-    // One sentence of what the issue waits for; a paused rule speaks up only
-    // when nothing else is waiting, because it needs someone to look.
-    const waitingLabel = wakeups[0]
-      ? text.waiting(wakeups[0])
-      : paused
-        ? t(($) => $.wakeups.wait.paused)
-        : "";
-    const label = hasTasks
-      ? isRunning
-        ? t(($) => $.agent_activity.status_running)
-        : t(($) => $.agent_activity.status_queued)
-      : waitingLabel;
+    // Same face as the issue header chip: who is on it, by name, with the
+    // brand beam while something is genuinely running.
+    const label =
+      agentIds.length === 1
+        ? t(($) => (isRunning ? $.agent_live.is_working : $.agent_live.is_queued), {
+            name: getActorName("agent", agentIds[0] ?? ""),
+          })
+        : t(
+            ($) =>
+              isRunning
+                ? $.agent_activity.hover_header
+                : $.agent_activity.hover_header_queued,
+            { count: agentIds.length },
+          );
 
-    const badge = hasTasks ? (
+    const badge = (
       <>
         <AgentAvatarStack
           agentIds={agentIds}
@@ -168,53 +148,25 @@ export const IssueAgentActivityIndicator = memo(
           opacity={opacity}
           max={3}
         />
-        <ShimmerText
-          active={isRunning}
-          className="text-micro text-muted-foreground"
+        <span
+          className={cn(
+            "min-w-0 truncate text-micro",
+            isRunning ? "text-info" : "text-muted-foreground",
+          )}
         >
-          {isRunning
-            ? t(($) => $.agent_activity.status_running)
-            : t(($) => $.agent_activity.status_queued)}
-        </ShimmerText>
-        {wakeupTriggered && (
-          <Bell
-            className="size-3 text-muted-foreground"
-            aria-label={t(($) => $.wakeups.triggered_by_wakeup)}
-          />
-        )}
-        {wakeupCount > 0 && (
-          <span
-            className="inline-flex items-center gap-1 text-micro tabular-nums text-muted-foreground"
-            title={t(($) => $.wakeups.upcoming, { count: wakeupCount })}
-          >
-            {!wakeupTriggered && <Bell className="size-3" aria-hidden="true" />}
-            +{wakeupCount}
-          </span>
-        )}
-      </>
-    ) : (
-      <>
-        {!wakeups[0] ? (
-          <TriangleAlert className="size-3 text-destructive" aria-hidden="true" />
-        ) : wakeups[0].kind === "event" ? (
-          <Bell className="size-3 text-muted-foreground" aria-hidden="true" />
-        ) : (
-          <Clock3 className="size-3 text-muted-foreground" aria-hidden="true" />
-        )}
-        <span className={cn("max-w-36 truncate text-micro", wakeups[0] ? "text-muted-foreground" : "text-destructive")}>
-          {waitingLabel}
+          {label}
         </span>
-        {wakeupCount > 1 && (
-          <span className="text-micro tabular-nums text-muted-foreground">
-            +{wakeupCount - 1}
-          </span>
-        )}
+        {isRunning && <BorderBeam />}
       </>
+    );
+    const chipClass = cn(
+      "inline-flex min-w-0 max-w-[10rem] shrink-0 items-center gap-1 rounded-md px-1 py-0.5",
+      isRunning && "relative bg-brand/5",
     );
 
     if (!hoverCard) {
       return (
-        <span className="inline-flex shrink-0 items-center gap-1">{badge}</span>
+        <span className={chipClass}>{badge}</span>
       );
     }
 
@@ -226,54 +178,20 @@ export const IssueAgentActivityIndicator = memo(
           render={
             <span
               tabIndex={0}
-              aria-label={`${label}${wakeupTriggered ? ` · ${t(($) => $.wakeups.triggered_by_wakeup)}` : ""}${wakeupCount ? ` · ${t(($) => $.wakeups.upcoming, { count: wakeupCount })}` : ""}`}
+              aria-label={label}
               onFocus={() => setOpen(true)}
               onBlur={() => setOpen(false)}
-              className="inline-flex shrink-0 items-center gap-1 rounded-sm focus-visible:outline-2 focus-visible:outline-ring"
+              className={cn(
+                chipClass,
+                "focus-visible:outline-2 focus-visible:outline-ring",
+              )}
             />
           }
         >
           {badge}
         </HoverCardTrigger>
         <HoverCardContent align="end" className="w-72">
-          {hasTasks && <AgentActivityHoverContent tasks={hoverTasks} />}
-          {paused && !wakeupCount && (
-            <p className={cn("text-caption text-destructive", hasTasks && "mt-2 border-t border-border pt-2")}>
-              {t(($) => $.wakeups.wait.paused)}
-            </p>
-          )}
-          {wakeupCount > 0 && (
-            <div
-              className={cn(
-                "space-y-2 text-caption",
-                hasTasks && "mt-2 border-t border-border pt-2",
-              )}
-            >
-              <p className="text-muted-foreground">
-                {t(($) => $.wakeups.upcoming, { count: wakeupCount })}
-              </p>
-              {wakeups.map((wakeup) => (
-                <div key={wakeup.id}>
-                  <p className="break-words font-medium">
-                    {text.trigger(wakeup)}
-                  </p>
-                  <p className="text-muted-foreground">
-                    {t(($) => $.wakeups.wake_agent, {
-                      agent: wakeup.agent_name,
-                    })}{" "}
-                    · {text.schedule(wakeup)}
-                  </p>
-                </div>
-              ))}
-              {wakeupCount > wakeups.length && (
-                <p className="text-muted-foreground">
-                  {t(($) => $.wakeups.more, {
-                    count: wakeupCount - wakeups.length,
-                  })}
-                </p>
-              )}
-            </div>
-          )}
+          <AgentActivityHoverContent tasks={hoverTasks} />
         </HoverCardContent>
       </HoverCard>
     );

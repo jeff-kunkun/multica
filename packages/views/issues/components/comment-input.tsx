@@ -6,7 +6,7 @@ import { ContentEditor, type ContentEditorRef, useFileDropZone, FileDropOverlay,
 import { FileUploadButton } from "@multica/ui/components/common/file-upload-button";
 import { SubmitButton } from "@multica/ui/components/common/submit-button";
 import { Button } from "@multica/ui/components/ui/button";
-import { contentReferencesAttachment, type AgentTask } from "@multica/core/types";
+import { contentReferencesAttachment } from "@multica/core/types";
 import { formatShortcut, useShortcut } from "@multica/core/shortcuts";
 import { useCommentDraftStore } from "@multica/core/issues/stores";
 import { composeAnnotatedReply, hasReplyIntent } from "@multica/core/drafts/reply-annotation";
@@ -18,7 +18,6 @@ import { useRecipientActions } from "../hooks/use-recipient-actions";
 import { SteerAttachmentNotice } from "./steer-attachment-notice";
 import { useStopRunsBeforeSend } from "./use-stop-runs-before-send";
 import { useCommentUploads } from "./use-comment-uploads";
-import { useQuickActionMenu } from "../hooks/use-quick-action-menu";
 import { useStickyComposer } from "../hooks/use-sticky-composer";
 
 interface CommentInputProps {
@@ -32,11 +31,8 @@ interface CommentInputProps {
   onEditAnnotation?: (id: string) => boolean;
 }
 
-// A top-level comment belongs to no thread, so it takes a running turn by
-// default only when that turn has no thread of its own (an assignment run).
-function steerTopLevelByDefault(task: AgentTask): boolean {
-  return !task.trigger_comment_id;
-}
+// A comment goes into a running turn by default; queueing it is a choice.
+const STEER_BY_DEFAULT = () => true;
 
 function CommentInput({ issueId, onSubmit, onAccepted, onEditAnnotation }: CommentInputProps) {
   const { t } = useT("issues");
@@ -48,9 +44,6 @@ function CommentInput({ issueId, onSubmit, onAccepted, onEditAnnotation }: Comme
   const uploadGate = useUploadGate(editorRef);
   // Subscribe to the persisted draft so text written into it from outside
   // this composer shows up even while it is mounted.
-  // Quick actions in the `/` menu: picking one inserts the server-rendered
-  // body so the user can edit before sending, instead of firing immediately.
-  const quickActionMenu = useQuickActionMenu(issueId);
   const draftKey = `new:${issueId}` as const;
   const [initialDraft] = useState(() =>
     useCommentDraftStore.getState().getDraft(draftKey),
@@ -81,7 +74,7 @@ function CommentInput({ issueId, onSubmit, onAccepted, onEditAnnotation }: Comme
     agents: triggerPreview.agents,
     allowSteer: true,
     hasAttachments,
-    steerByDefault: steerTopLevelByDefault,
+    steerByDefault: STEER_BY_DEFAULT,
     resetKey: issueId,
   });
   const stopRunsBeforeSend = useStopRunsBeforeSend(issueId);
@@ -190,7 +183,7 @@ function CommentInput({ issueId, onSubmit, onAccepted, onEditAnnotation }: Comme
         content,
         activeIds.length > 0 ? activeIds : undefined,
         suppressAgentIds.length > 0 ? suppressAgentIds : undefined,
-        steerTaskIds.length > 0 ? steerTaskIds : undefined,
+        steerTaskIds,
       ).then((commentId) => {
         acceptedCommentIdRef.current = typeof commentId === "string" ? commentId : null;
         return !!commentId;
@@ -268,8 +261,6 @@ function CommentInput({ issueId, onSubmit, onAccepted, onEditAnnotation }: Comme
           currentIssueId={issueId}
           attachments={pendingAttachments}
           enableSlashCommands
-          slashCommandMode="command"
-          quickActionMenu={quickActionMenu}
         />
       </div>
       )}

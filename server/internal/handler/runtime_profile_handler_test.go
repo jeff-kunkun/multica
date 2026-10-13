@@ -58,9 +58,7 @@ func insertProfileRuntimeFixture(t *testing.T, ctx context.Context, profileID, n
 // the handler would 500.
 //
 // Since MUL-5559 the teardown unbinds that agent instead of hard-deleting it, so
-// this test also pins what must NOT happen: the agent survives with its channel
-// installation intact. Sweeping the installation of a surviving agent would take
-// a working bot away from it — the mirror of the #4810 orphan problem.
+// this test also pins that the agent survives as an unbound agent.
 func TestDeleteRuntimeProfile_ArchivedAgentUnbindCascade(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
@@ -76,31 +74,6 @@ func TestDeleteRuntimeProfile_ArchivedAgentUnbindCascade(t *testing.T) {
 	if _, err := testPool.Exec(ctx, `UPDATE agent SET archived_at = now() WHERE id = $1`, agentID); err != nil {
 		t.Fatalf("archive agent: %v", err)
 	}
-
-	// Give the archived agent a channel installation (+ a dependent binding).
-	// The agent is no longer hard-deleted here, so the installation must be left
-	// alone: it belongs to an agent that still exists and whose bot must keep
-	// working once it is bound to a new runtime.
-	const rpApp = "cli_rp_cascade"
-	const rpChat = "cc000000-0000-4000-8000-0000000000f7"
-	_, _ = testPool.Exec(ctx, `DELETE FROM channel_installation WHERE config->>'app_id' = $1`, rpApp)
-	_, _ = testPool.Exec(ctx, `DELETE FROM channel_chat_session_binding WHERE chat_session_id = $1`, rpChat)
-	var rpInstallID string
-	if err := testPool.QueryRow(ctx, `
-INSERT INTO channel_installation (workspace_id, agent_id, channel_type, config, installer_user_id, status)
-VALUES ($1, $2, 'feishu', jsonb_build_object('app_id', $3::text), $4, 'active')
-RETURNING id`, testWorkspaceID, agentID, rpApp, testUserID).Scan(&rpInstallID); err != nil {
-		t.Fatalf("seed channel installation: %v", err)
-	}
-	if _, err := testPool.Exec(ctx, `
-INSERT INTO channel_chat_session_binding (chat_session_id, installation_id, channel_type, channel_chat_id, chat_type)
-VALUES ($1, $2, 'feishu', 'oc_rp', 'p2p')`, rpChat, rpInstallID); err != nil {
-		t.Fatalf("seed chat-session binding: %v", err)
-	}
-	t.Cleanup(func() {
-		_, _ = testPool.Exec(context.Background(), `DELETE FROM channel_installation WHERE config->>'app_id' = $1`, rpApp)
-		_, _ = testPool.Exec(context.Background(), `DELETE FROM channel_chat_session_binding WHERE chat_session_id = $1`, rpChat)
-	})
 
 	w := httptest.NewRecorder()
 	req := newRequest("DELETE", "/api/workspaces/"+testWorkspaceID+"/runtime-profiles/"+profileID, nil)
@@ -142,19 +115,6 @@ VALUES ($1, $2, 'feishu', 'oc_rp', 'p2p')`, rpChat, rpInstallID); err != nil {
 		t.Fatalf("surviving agent must be unbound (runtime_id IS NULL)")
 	}
 
-	var instRows, bindingRows int
-	if err := testPool.QueryRow(ctx, `SELECT count(*) FROM channel_installation WHERE id = $1`, rpInstallID).Scan(&instRows); err != nil {
-		t.Fatalf("count channel installation: %v", err)
-	}
-	if instRows != 1 {
-		t.Fatalf("surviving agent's channel installation was swept: %d rows (its bot would stop working)", instRows)
-	}
-	if err := testPool.QueryRow(ctx, `SELECT count(*) FROM channel_chat_session_binding WHERE installation_id = $1`, rpInstallID).Scan(&bindingRows); err != nil {
-		t.Fatalf("count channel chat-session binding: %v", err)
-	}
-	if bindingRows != 1 {
-		t.Fatalf("surviving installation's chat-session binding was swept: %d rows", bindingRows)
-	}
 	if len(notifier.runtimeIDs) != 1 || notifier.runtimeIDs[0] != runtimeID {
 		t.Fatalf("runtime-gone notifications = %v, want [%s]", notifier.runtimeIDs, runtimeID)
 	}
@@ -447,9 +407,10 @@ func TestCreateRuntimeProfile_RuntimeIdentity(t *testing.T) {
 		name, target, family string
 		status               int
 	}{
-		{"omp", "omp", "", http.StatusCreated},
-		{"legacy pi", "", "pi", http.StatusCreated},
-		{"mismatch", "omp", "codex", http.StatusBadRequest},
+		{"runtime type", "opencode", "", http.StatusCreated},
+		{"legacy family", "", "opencode", http.StatusCreated},
+		{"mismatch", "opencode", "codex", http.StatusBadRequest},
+		{"removed engine", "pi", "", http.StatusBadRequest},
 		{"unknown", "unknown", "", http.StatusBadRequest},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -474,7 +435,7 @@ func TestCreateRuntimeProfile_RuntimeIdentity(t *testing.T) {
 			if want == "" {
 				want = tc.family
 			}
-			if resp.RuntimeType != want || resp.ProtocolFamily != "pi" || resp.CommandName != "wrapper" || len(resp.FixedArgs) != 1 {
+			if resp.RuntimeType != want || resp.ProtocolFamily != "opencode" || resp.CommandName != "wrapper" || len(resp.FixedArgs) != 1 {
 				t.Fatalf("incorrect identity: %+v", resp)
 			}
 		})
@@ -485,13 +446,13 @@ func TestUpdateRuntimeProfile_RejectsIdentityChange(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
 	}
-	id := insertRuntimeProfileFixture(t, context.Background(), "Immutable Pi", "pi", "wrapper")
+	id := insertRuntimeProfileFixture(t, context.Background(), "Immutable OpenCode", "opencode", "wrapper")
 	for _, field := range []string{"runtime_type", "protocol_family"} {
 		// withURLParams, not two nested withURLParam calls: the singular helper
 		// installs a fresh chi route context each time, so the outer call would
 		// drop "id" and the handler would reject on workspace id before ever
 		// reaching the immutability check this test exists for.
-		req := withURLParams(newRequest("PATCH", "/", map[string]any{field: "omp"}), "id", testWorkspaceID, "profileId", id)
+		req := withURLParams(newRequest("PATCH", "/", map[string]any{field: "codex"}), "id", testWorkspaceID, "profileId", id)
 		w := httptest.NewRecorder()
 		testHandler.UpdateRuntimeProfile(w, req)
 		if w.Code != http.StatusBadRequest || !strings.Contains(w.Body.String(), "immutable") {

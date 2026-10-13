@@ -127,8 +127,7 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
 
   const [confirmArchive, setConfirmArchive] = useState(false);
 
-  // One-shot channel: the inspector's compact Lark status row asks the
-  // overview pane to focus a tab. The pane clears it after consuming.
+  // One-shot request from the header for the overview pane to focus a tab. The pane clears it after consuming.
   const [tabNavIntent, setTabNavIntent] = useState<DetailTab | null>(null);
 
   const handleUpdate = async (id: string, data: Record<string, unknown>) => {
@@ -336,7 +335,7 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
     }
     useModalStore
       .getState()
-      .open("quick-create-issue", { agent_id: agent.id });
+      .open("create-issue", { assignee_type: "agent", assignee_id: agent.id });
   };
 
   return (

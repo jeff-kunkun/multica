@@ -7,13 +7,11 @@ import (
 	"fmt"
 	"log/slog"
 	"sort"
-	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/analytics"
-	"github.com/multica-ai/multica/server/internal/entitlement"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/issueguard"
 	"github.com/multica-ai/multica/server/internal/issueposition"
@@ -27,9 +25,8 @@ import (
 )
 
 // IssueService is the single service-layer entry point for creating issues.
-// Both the HTTP `POST /issues` handler and the future Lark `/issue` command
-// call into Create so that duplicate guard, issue numbering, attachment
-// linking, broadcast, analytics, and agent/squad enqueue stay aligned. The
+// The HTTP `POST /issues` handler and other create entries call into Create so that duplicate guard, issue numbering, attachment
+// linking, broadcast, analytics, and agent enqueue stay aligned. The
 // service deliberately does NOT depend on http.Request — callers parse
 // their own transport and pass a fully-resolved IssueCreateParams.
 type IssueService struct {
@@ -43,9 +40,6 @@ type IssueService struct {
 	// Metrics as "PostHog only", so leaving it unset is safe.
 	Metrics     *obsmetrics.BusinessMetrics
 	TaskService *TaskService
-	// Entitlements supplies Cloud's effective issue-count instruction. Nil is
-	// the self-hosted unlimited path.
-	Entitlements entitlement.Provider
 }
 
 func NewIssueService(q *db.Queries, tx TxStarter, bus *events.Bus, ac analytics.Client, ts *TaskService) *IssueService {
@@ -128,33 +122,27 @@ type IssueCreateOpts struct {
 
 	// Platform tags the IssueCreated analytics + business-metrics event
 	// with the client surface the request came in on (web / desktop /
-	// daemon / lark / autopilot). Derived from middleware's client
+	// daemon). Derived from middleware's client
 	// metadata at the handler layer.
 	Platform string
-
-	// AssignedAgentRunFireAt creates the automatic assigned-agent task in a
-	// durable deferred state. Channel /issue uses this while detached media is
-	// still resolving, then promotes the returned task after attachment binding.
-	// Zero preserves the ordinary immediate enqueue path.
-	AssignedAgentRunFireAt time.Time
 }
 
 // ErrActiveDuplicate signals that the duplicate guard found an active
 // issue with the same (workspace, project, parent, title) tuple and
 // AllowDuplicate was false. The IssueCreateResult.DuplicateIssue field is
 // populated when this error is returned so callers can render the
-// conflict (HTTP 409, Lark card, etc.).
+// conflict (HTTP 409, etc.).
 var ErrActiveDuplicate = errors.New("active duplicate issue exists")
 
 // ErrParentIssueNotFound signals that the supplied ParentIssueID does
 // not exist in the issue's workspace. The service refuses to create
 // orphaned or cross-workspace child issues; callers translate this into
-// their transport's 400 / Lark card error.
+// their transport's 400.
 var ErrParentIssueNotFound = errors.New("parent issue not found in this workspace")
 
 // ErrProjectNotFound signals that the supplied ProjectID does not exist
 // in the issue's workspace. Cross-workspace project IDs are rejected
-// here so every create entry (HTTP `POST /issues`, Lark `/issue`, future
+// here so every create entry (HTTP `POST /issues`, future
 // MCP / API key callers) enforces the same workspace boundary without
 // having to remember it. Callers translate this into 400.
 var ErrProjectNotFound = errors.New("project not found in this workspace")
@@ -198,7 +186,7 @@ type IssueCreateResult struct {
 	Issue       db.Issue
 	Attachments []db.Attachment
 	// AssignedTaskID is populated when Create enqueues the automatic task for
-	// an agent assignee, including a task deferred by AssignedAgentRunFireAt.
+	// an agent assignee.
 	AssignedTaskID pgtype.UUID
 	// Labels is the authoritative set of labels attached to the new issue in
 	// the create transaction (empty when none were requested). Callers echo it
@@ -218,22 +206,18 @@ type IssueCreateResult struct {
 //  5. Insert the issue row (with optional origin stamping).
 //  6. Commit.
 //  7. Link any pre-uploaded attachments (post-commit, idempotent).
-//  8. For a media-gated channel issue, persist its deferred assigned-agent
-//     task in the issue transaction so both rows become visible atomically.
-//     Ordinary creates keep their existing event-before-enqueue ordering.
-//  9. Publish EventIssueCreated to the bus (payload via opts.BroadcastPayload).
-//  10. Capture the IssueCreated analytics event.
-//  11. Enqueue the ordinary agent task or trigger the squad leader when the
-//     issue is assigned and not in `backlog`.
+//  8. Publish EventIssueCreated to the bus (payload via opts.BroadcastPayload).
+//  9. Capture the IssueCreated analytics event.
+//  10. Enqueue the agent task when the issue is assigned and not in
+//     `backlog`.
 //
 // Validation that lives in the service (parent existence, project
 // workspace membership, parent → project back-fill) is enforced here so
-// every create entry — HTTP `POST /issues`, Lark `/issue`, future
+// every create entry — HTTP `POST /issues`, future
 // MCP/API-key callers — shares the same workspace boundary semantics.
 // Caller-owned validation is limited to transport-shaped checks: title
 // required, RFC3339 date format, assignee pair sanity.
 func (s *IssueService) Create(ctx context.Context, p IssueCreateParams, opts IssueCreateOpts) (IssueCreateResult, error) {
-	issueCountPolicy := ResolveIssueCountPolicy(ctx, s.Entitlements, p.WorkspaceID)
 	tx, err := s.TxStarter.Begin(ctx)
 	if err != nil {
 		return IssueCreateResult{}, fmt.Errorf("begin tx: %w", err)
@@ -341,7 +325,7 @@ func (s *IssueService) Create(ctx context.Context, p IssueCreateParams, opts Iss
 		return IssueCreateResult{DuplicateIssue: &dup}, ErrActiveDuplicate
 	}
 
-	issueNumber, err := AllocateIssueNumber(ctx, qtx, p.WorkspaceID, issueCountPolicy)
+	issueNumber, err := qtx.IncrementIssueCounter(ctx, p.WorkspaceID)
 	if err != nil {
 		return IssueCreateResult{}, fmt.Errorf("allocate issue number: %w", err)
 	}
@@ -361,7 +345,6 @@ func (s *IssueService) Create(ctx context.Context, p IssueCreateParams, opts Iss
 	}
 
 	var issue db.Issue
-	var assignedTask db.AgentTaskQueue
 	if p.OriginType.Valid {
 		issue, err = qtx.CreateIssueWithOrigin(ctx, db.CreateIssueWithOriginParams{
 			ID:            dbid.NewV7(),
@@ -419,57 +402,6 @@ func (s *IssueService) Create(ctx context.Context, p IssueCreateParams, opts Iss
 		if _, err := PersistSourceContext(ctx, qtx, *p.SourceContext, issue.ID, pgtype.UUID{}); err != nil {
 			return IssueCreateResult{}, fmt.Errorf("persist source context: %w", err)
 		}
-	} else if p.OriginType.Valid && p.OriginType.String == "quick_create" && p.OriginID.Valid {
-		task, taskErr := qtx.GetAgentTaskInWorkspace(ctx, db.GetAgentTaskInWorkspaceParams{
-			ID: p.OriginID, WorkspaceID: p.WorkspaceID,
-		})
-		if taskErr != nil {
-			return IssueCreateResult{}, fmt.Errorf("load quick-create origin task: %w", taskErr)
-		}
-		if p.CreatorType != "agent" || !p.CreatorID.Valid || p.CreatorID != task.AgentID {
-			return IssueCreateResult{}, errors.New("quick-create origin task does not belong to the creating agent")
-		}
-		var quickCreate QuickCreateContext
-		if err := json.Unmarshal(task.Context, &quickCreate); err != nil {
-			return IssueCreateResult{}, fmt.Errorf("decode quick-create origin context: %w", err)
-		}
-		if quickCreate.Type != QuickCreateContextType {
-			return IssueCreateResult{}, errors.New("quick-create origin task has invalid context type")
-		}
-		contextWorkspaceID, parseErr := util.ParseUUID(quickCreate.WorkspaceID)
-		if parseErr != nil || contextWorkspaceID != p.WorkspaceID {
-			return IssueCreateResult{}, errors.New("quick-create origin context has invalid workspace")
-		}
-		if quickCreate.SourceContextID != "" {
-			contextID, parseErr := util.ParseUUID(quickCreate.SourceContextID)
-			if parseErr != nil {
-				return IssueCreateResult{}, fmt.Errorf("invalid quick-create source context id: %w", parseErr)
-			}
-			requesterID, parseErr := util.ParseUUID(quickCreate.RequesterID)
-			if parseErr != nil || !task.OriginatorUserID.Valid || requesterID != task.OriginatorUserID {
-				return IssueCreateResult{}, errors.New("quick-create source context has invalid requester")
-			}
-			pending, pendingErr := qtx.GetPendingIssueSourceContextByOriginTask(ctx, db.GetPendingIssueSourceContextByOriginTaskParams{
-				WorkspaceID: p.WorkspaceID, OriginTaskID: task.ID,
-			})
-			if pendingErr != nil {
-				if errors.Is(pendingErr, pgx.ErrNoRows) {
-					return IssueCreateResult{}, ErrSourceContextAlreadyAttached
-				}
-				return IssueCreateResult{}, fmt.Errorf("load pending quick-create source context: %w", pendingErr)
-			}
-			if pending.ID != contextID || pending.CapturedByUserID != requesterID {
-				return IssueCreateResult{}, errors.New("quick-create source context ownership mismatch")
-			}
-			if _, attachErr := qtx.AttachIssueSourceContext(ctx, db.AttachIssueSourceContextParams{
-				IssueID: issue.ID, WorkspaceID: p.WorkspaceID, ID: contextID, OriginTaskID: task.ID,
-			}); attachErr != nil {
-				if errors.Is(attachErr, pgx.ErrNoRows) {
-					return IssueCreateResult{}, ErrSourceContextAlreadyAttached
-				}
-				return IssueCreateResult{}, fmt.Errorf("attach quick-create source context: %w", attachErr)
-			}
-		}
 	}
 
 	// Attach labels inside the create transaction so the issue and its
@@ -488,17 +420,6 @@ func (s *IssueService) Create(ctx context.Context, p IssueCreateParams, opts Iss
 		}
 	}
 
-	if !opts.AssignedAgentRunFireAt.IsZero() && s.shouldEnqueueAgentTaskWithQueries(ctx, qtx, issue) {
-		// The issue must never become visible without its media-gated assigned
-		// task. Inserting both rows through qtx makes the unique-index winner
-		// deterministic: any observer that can discover the committed issue also
-		// sees the inert deferred task and must merge into it.
-		assignedTask, err = s.TaskService.createDeferredChannelIssueTaskWithQueries(ctx, qtx, issue, opts.AssignedAgentRunFireAt)
-		if err != nil {
-			return IssueCreateResult{}, fmt.Errorf("create deferred channel issue task: %w", err)
-		}
-	}
-
 	if err := tx.Commit(ctx); err != nil {
 		return IssueCreateResult{}, fmt.Errorf("commit: %w", err)
 	}
@@ -510,35 +431,9 @@ func (s *IssueService) Create(ctx context.Context, p IssueCreateParams, opts Iss
 		actorID = util.UUIDToString(issue.CreatorID)
 	}
 
-	var assignedTaskID pgtype.UUID
-	if !opts.AssignedAgentRunFireAt.IsZero() {
-		assignedTaskID = assignedTask.ID
-		if assignedTaskID.Valid {
-			// The deferred task became durable with the issue at commit. Refresh the
-			// daemon's schedule only now so a wakeup can never race uncommitted data.
-			s.TaskService.notifyRuntimeMayHaveWork(assignedTask.RuntimeID, "")
-			if err := s.TaskService.hydrateDeferredChannelIssueTaskOverlay(ctx, assignedTask); err != nil {
-				// Runtime overlays are best-effort on every enqueue path. The task is
-				// already durable and safely deferred, so an optional integration
-				// failure must not turn a committed issue into a retry duplicate.
-				slog.Warn("hydrate deferred channel issue task overlay failed",
-					"issue_id", util.UUIDToString(issue.ID),
-					"task_id", util.UUIDToString(assignedTask.ID),
-					"error", err)
-			}
-		} else if s.shouldEnqueueSquadLeaderOnAssign(ctx, issue) {
-			// AssignedAgentRunFireAt currently belongs to channel /issue, which
-			// always resolves an agent assignee. Preserve the ordinary squad path
-			// for any future caller that supplies the option with a squad.
-			s.enqueueSquadLeaderTask(ctx, issue, pgtype.UUID{}, p.CreatorType, actorID)
-		}
-	}
-
 	s.publishIssueCreated(issue, attachments, labels, p.CreatorType, actorID, opts)
 	s.captureCreatedAnalytics(issue, p.CreatorType, actorID, opts)
-	if opts.AssignedAgentRunFireAt.IsZero() {
-		assignedTaskID = s.maybeEnqueueOnAssign(ctx, issue, p.CreatorType, actorID, opts.AssignedAgentRunFireAt)
-	}
+	assignedTaskID := s.maybeEnqueueOnAssign(ctx, issue, p.CreatorType, actorID)
 
 	return IssueCreateResult{Issue: issue, Attachments: attachments, Labels: labels, AssignedTaskID: assignedTaskID}, nil
 }
@@ -712,78 +607,11 @@ func (s *IssueService) publishIssueCreated(issue db.Issue, attachments []db.Atta
 	})
 }
 
-// PublishAttachmentsChanged refreshes attachments and the issue projection
-// after a detached channel media transaction. Issue creation is broadcast
-// before the remote download finishes, so the attachment event closes the
-// cache gap for current clients. The issue:updated event carries the newly
-// materialized description through a pre-existing protocol that installed
-// desktop clients already understand.
-func (s *IssueService) PublishAttachmentsChanged(ctx context.Context, issue db.Issue, actorID pgtype.UUID) {
-	if s.Bus == nil {
-		return
-	}
-	if s.Queries == nil {
-		s.publishIssueAttachmentsChanged(issue, actorID, 0)
-		return
-	}
-
-	current, err := s.Queries.GetIssueInWorkspace(ctx, db.GetIssueInWorkspaceParams{
-		ID:          issue.ID,
-		WorkspaceID: issue.WorkspaceID,
-	})
-	if err != nil {
-		slog.Warn("failed to load issue after channel media bind",
-			"issue_id", util.UUIDToString(issue.ID), "error", err)
-		s.publishIssueAttachmentsChanged(issue, actorID, 0)
-		return
-	}
-	workspace, err := s.Queries.GetWorkspace(ctx, issue.WorkspaceID)
-	if err != nil {
-		slog.Warn("failed to load workspace after channel media bind",
-			"workspace_id", util.UUIDToString(issue.WorkspaceID), "error", err)
-		// Without the workspace we cannot publish the matching owner snapshot.
-		// Keep this auxiliary event unversioned so clients invalidate instead of
-		// advancing the owner revision past a snapshot they never received.
-		s.publishIssueAttachmentsChanged(issue, actorID, 0)
-		return
-	}
-	s.Bus.Publish(events.Event{
-		Type:        protocol.EventIssueUpdated,
-		WorkspaceID: util.UUIDToString(issue.WorkspaceID),
-		ActorType:   "member",
-		ActorID:     util.UUIDToString(actorID),
-		Payload: map[string]any{
-			"issue":            IssueToMapResolved(ctx, s.Queries, current, workspace.IssuePrefix),
-			"assignee_changed": false,
-			"status_changed":   false,
-			"project_changed":  false,
-		},
-	})
-	// Publish the auxiliary projection only after the full owner snapshot at
-	// this revision. Reversing these two events makes revision-aware clients
-	// reject the issue:updated payload as an equal-revision duplicate.
-	s.publishIssueAttachmentsChanged(current, actorID, current.Revision)
-}
-
-func (s *IssueService) publishIssueAttachmentsChanged(issue db.Issue, actorID pgtype.UUID, revision int64) {
-	payload := map[string]any{"issue_id": util.UUIDToString(issue.ID)}
-	if revision > 0 {
-		payload["issue_revision"] = revision
-	}
-	s.Bus.Publish(events.Event{
-		Type:        protocol.EventIssueAttachmentsChanged,
-		WorkspaceID: util.UUIDToString(issue.WorkspaceID),
-		ActorType:   "member",
-		ActorID:     util.UUIDToString(actorID),
-		Payload:     payload,
-	})
-}
-
 func (s *IssueService) captureCreatedAnalytics(issue db.Issue, creatorType, actorID string, opts IssueCreateOpts) {
 	if s.Analytics == nil {
 		return
 	}
-	source, taskID, autopilotRunID := classifyOrigin(issue, opts)
+	source, taskID := classifyOrigin(issue)
 	analyticsActorID := actorID
 	if creatorType == "agent" {
 		analyticsActorID = "agent:" + actorID
@@ -794,7 +622,6 @@ func (s *IssueService) captureCreatedAnalytics(issue db.Issue, creatorType, acto
 		util.UUIDToString(issue.ID),
 		opts.AnalyticsAgentID,
 		taskID,
-		autopilotRunID,
 		source,
 		opts.Platform,
 	))
@@ -804,10 +631,10 @@ func (s *IssueService) captureCreatedAnalytics(issue db.Issue, creatorType, acto
 // analytics source labels. Unknown origin_type falls back to SourceManual
 // with the warning logged — analytics drift is preferable to dropping the
 // event entirely.
-func classifyOrigin(issue db.Issue, opts IssueCreateOpts) (source, taskID, autopilotRunID string) {
+func classifyOrigin(issue db.Issue) (source, taskID string) {
 	source = analytics.SourceManual
 	if !issue.OriginType.Valid {
-		return source, "", ""
+		return source, ""
 	}
 	originID := util.UUIDToString(issue.OriginID)
 	switch issue.OriginType.String {
@@ -815,28 +642,23 @@ func classifyOrigin(issue db.Issue, opts IssueCreateOpts) (source, taskID, autop
 		// Both link the issue back to the agent_task_queue row that created it
 		// (agent_create is the ordinary agent `issue create` path, MUL-4305);
 		// surface that task id and keep the manual source label.
-		return analytics.SourceManual, originID, ""
-	case "autopilot":
-		return analytics.SourceAutopilot, "", originID
+		return analytics.SourceManual, originID
 	default:
 		slog.Warn("analytics: unknown issue origin type",
 			"origin_type", issue.OriginType.String,
 			"issue_id", util.UUIDToString(issue.ID),
 		)
-		return analytics.SourceManual, "", ""
+		return analytics.SourceManual, ""
 	}
 }
 
-func (s *IssueService) maybeEnqueueOnAssign(ctx context.Context, issue db.Issue, creatorType, actorID string, agentRunFireAt time.Time) pgtype.UUID {
+func (s *IssueService) maybeEnqueueOnAssign(ctx context.Context, issue db.Issue, creatorType, actorID string) pgtype.UUID {
 	if !issue.AssigneeType.Valid || !issue.AssigneeID.Valid {
 		return pgtype.UUID{}
 	}
 	// Backlog is the parking lot: nothing runs from it, so nothing here needs
 	// explaining either. Custom unstarted statuses do not inherit parking.
-	//
-	// Triage refuses for a different reason and so returns just as quietly: the
-	// entry is not yet work anyone agreed to do (MUL-7189 §2.3).
-	if issue.TriageState.Valid || issuestatus.Effective(ctx, s.Queries, issue.WorkspaceID, issue.Status) == "backlog" {
+	if issuestatus.Effective(ctx, s.Queries, issue.WorkspaceID, issue.Status) == "backlog" {
 		return pgtype.UUID{}
 	}
 	verdict, admitted := agentAssigneeVerdict(ctx, s.runtimeLookup(s.Queries), issue)
@@ -849,13 +671,7 @@ func (s *IssueService) maybeEnqueueOnAssign(ctx context.Context, issue db.Issue,
 		s.noteRuntimeUnusable(ctx, issue, verdict)
 	}
 	if admitted {
-		var task db.AgentTaskQueue
-		var err error
-		if agentRunFireAt.IsZero() {
-			task, err = s.TaskService.EnqueueTaskForIssue(ctx, issue)
-		} else {
-			task, err = s.TaskService.EnqueueDeferredChannelIssueTask(ctx, issue, agentRunFireAt)
-		}
+		task, err := s.TaskService.EnqueueTaskForIssue(ctx, issue)
 		if err != nil {
 			slog.Warn("enqueue agent task on create failed",
 				"issue_id", util.UUIDToString(issue.ID),
@@ -864,30 +680,7 @@ func (s *IssueService) maybeEnqueueOnAssign(ctx context.Context, issue db.Issue,
 			return task.ID
 		}
 	}
-	if s.shouldEnqueueSquadLeaderOnAssign(ctx, issue) {
-		s.enqueueSquadLeaderTask(ctx, issue, pgtype.UUID{}, creatorType, actorID)
-	}
 	return pgtype.UUID{}
-}
-
-// shouldEnqueueAgentTaskWithQueries returns true when an issue create should
-// trigger the assigned agent. Backlog issues are skipped — backlog acts as a
-// parking lot for pre-assigning without immediate execution. The assignment
-// path does the same test through agentAssigneeVerdict, which also tells it
-// WHY a refusal happened; this one runs inside the create transaction, where
-// there is nothing to tell anyone yet.
-//
-// Mirrors handler.shouldEnqueueAgentTask; kept here to make the service
-// self-contained, since both code paths must move together.
-func (s *IssueService) shouldEnqueueAgentTaskWithQueries(ctx context.Context, q *db.Queries, issue db.Issue) bool {
-	// Resolved through q, not s.Queries: this runs inside the create
-	// transaction and must see the same snapshot as the rest of it. (MUL-6243)
-	// That snapshot is also the only place a just-created Triage issue is
-	// visible, which is why the Triage check belongs on the same read.
-	if issue.TriageState.Valid || issuestatus.Effective(ctx, q, issue.WorkspaceID, issue.Status) == "backlog" {
-		return false
-	}
-	return isAgentAssigneeReadyWithQueries(ctx, s.runtimeLookup(q), issue)
 }
 
 func isAgentAssigneeReadyWithQueries(ctx context.Context, lookup RuntimeLookup, issue db.Issue) bool {
@@ -914,59 +707,4 @@ func agentAssigneeVerdict(ctx context.Context, lookup RuntimeLookup, issue db.Is
 		return AgentVerdict{}, false
 	}
 	return verdict, !verdict.Blocked()
-}
-
-func (s *IssueService) shouldEnqueueSquadLeaderOnAssign(ctx context.Context, issue db.Issue) bool {
-	if issue.TriageState.Valid || issuestatus.Effective(ctx, s.Queries, issue.WorkspaceID, issue.Status) == "backlog" {
-		return false
-	}
-	return s.isSquadLeaderReady(ctx, issue)
-}
-
-func (s *IssueService) isSquadLeaderReady(ctx context.Context, issue db.Issue) bool {
-	if !issue.AssigneeType.Valid || issue.AssigneeType.String != "squad" || !issue.AssigneeID.Valid {
-		return false
-	}
-	squad, err := s.Queries.GetSquadInWorkspace(ctx, db.GetSquadInWorkspaceParams{
-		ID:          issue.AssigneeID,
-		WorkspaceID: issue.WorkspaceID,
-	})
-	if err != nil {
-		return false
-	}
-	agent, err := s.Queries.GetAgent(ctx, squad.LeaderID)
-	if err != nil {
-		return false
-	}
-	verdict, err := AgentReadiness(ctx, s.runtimeLookup(s.Queries), agent)
-	if err != nil {
-		return false
-	}
-	return verdict.Ready()
-}
-
-func (s *IssueService) enqueueSquadLeaderTask(ctx context.Context, issue db.Issue, triggerCommentID pgtype.UUID, authorType, authorID string) {
-	squad, err := s.Queries.GetSquadInWorkspace(ctx, db.GetSquadInWorkspaceParams{
-		ID:          issue.AssigneeID,
-		WorkspaceID: issue.WorkspaceID,
-	})
-	if err != nil {
-		return
-	}
-	hasPending, err := s.Queries.HasPendingTaskForIssueAndAgent(ctx, db.HasPendingTaskForIssueAndAgentParams{
-		IssueID: issue.ID,
-		AgentID: squad.LeaderID,
-		// Key dedup on the reviewed head (TEN-356).
-		HeadSha: headShaText(s.TaskService.ResolveIssueReviewSHA(ctx, issue.ID)),
-	})
-	if err != nil || hasPending {
-		return
-	}
-	if _, err := s.TaskService.EnqueueTaskForSquadLeader(ctx, issue, squad.LeaderID, squad.ID, triggerCommentID, OriginDerived); err != nil {
-		slog.Warn("enqueue squad leader task on create failed",
-			"issue_id", util.UUIDToString(issue.ID),
-			"squad_id", util.UUIDToString(squad.ID),
-			"leader_id", util.UUIDToString(squad.LeaderID),
-			"error", err)
-	}
 }

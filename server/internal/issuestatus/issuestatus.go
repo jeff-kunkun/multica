@@ -380,8 +380,8 @@ func Ensure(ctx context.Context, q Querier, workspaceID pgtype.UUID) error {
 //
 // On an unresolvable key it returns the key unchanged. That is the fail-safe
 // direction: an unrecognized status matches none of the canonical comparisons,
-// so the issue is left alone rather than being swept, auto-triggered, or having
-// its autopilot run finalized on a guess.
+// so the issue is left alone rather than being swept or auto-triggered on a
+// guess.
 func Effective(ctx context.Context, q Querier, workspaceID pgtype.UUID, status string) string {
 	if IsBuiltIn(status) {
 		return status

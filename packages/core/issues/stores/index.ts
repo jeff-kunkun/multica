@@ -1,9 +1,4 @@
 export { useIssueSelectionStore } from "./selection-store";
-export {
-  useCreateModeStore,
-  openCreateIssueWithPreference,
-  type CreateMode,
-} from "./create-mode-store";
 export { useIssueDraftStore } from "./draft-store";
 export {
   useRecentIssuesStore,

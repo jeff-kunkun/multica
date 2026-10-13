@@ -1,5 +1,5 @@
 // Package secretbox provides authenticated symmetric encryption for
-// secrets stored at rest — primarily Lark `app_secret` and any future
+// secrets stored at rest — VCS tokens, plugin secrets and any other
 // per-tenant secret column that must not appear in plaintext in a DB
 // dump (MUL-2671 §4.4).
 //

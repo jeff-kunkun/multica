@@ -7,7 +7,7 @@ import (
 )
 
 // Reuses the newRedisTestClient helper from
-// runtime_local_skills_redis_store_test.go: same Redis instance, same gating on
+// runtime_capabilities_redis_store_test.go: same Redis instance, same gating on
 // REDIS_TEST_URL, same FlushDB-per-test isolation. The in-memory twin of these
 // assertions lives in runtime_model_catalog_test.go — both backends must agree,
 // because a deployment silently swaps between them based on REDIS_URL.

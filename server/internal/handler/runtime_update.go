@@ -218,7 +218,7 @@ func (h *Handler) InitiateUpdate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !canEditRuntime(member, rt) {
-		writeError(w, http.StatusForbidden, "only runtime owners and workspace admins can update runtimes")
+		writeError(w, http.StatusForbidden, "only runtime owners and the workspace owner can update runtimes")
 		return
 	}
 
@@ -283,7 +283,7 @@ func (h *Handler) GetUpdate(w http.ResponseWriter, r *http.Request) {
 	// the update. This exception is scoped to the immutable request initiator;
 	// other plain members still cannot read another runtime's update status.
 	if !canEditRuntime(member, rt) && update.InitiatorUserID != uuidToString(member.UserID) {
-		writeError(w, http.StatusForbidden, "only runtime owners, workspace admins, and the update initiator can view this update")
+		writeError(w, http.StatusForbidden, "only runtime owners, the workspace owner, and the update initiator can view this update")
 		return
 	}
 

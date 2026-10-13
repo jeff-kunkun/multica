@@ -175,7 +175,7 @@ func TestRecordHeartbeatLeaseOfflineTransitionIsSynchronous(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
 	}
-	runtimeID := createRuntimeLocalSkillTestRuntime(t, testUserID)
+	runtimeID := createOnlineTestRuntime(t, testUserID)
 	setRuntimeStatus(t, runtimeID, "offline")
 	fake := &fakeLivenessStore{available: true, aliveOK: true}
 	scheduler := NewBatchedHeartbeatScheduler(testHandler.Queries, time.Hour, nil)
@@ -207,7 +207,7 @@ func TestRecordHeartbeat_NoopStoreAlwaysWritesDB(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
 	}
-	runtimeID := createRuntimeLocalSkillTestRuntime(t, testUserID)
+	runtimeID := createOnlineTestRuntime(t, testUserID)
 
 	orig := testHandler.LivenessStore
 	testHandler.LivenessStore = NewNoopLivenessStore()
@@ -238,7 +238,7 @@ func TestRecordHeartbeat_RedisAvailableSkipsDBWithinFlushWindow(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
 	}
-	runtimeID := createRuntimeLocalSkillTestRuntime(t, testUserID)
+	runtimeID := createOnlineTestRuntime(t, testUserID)
 
 	fake := &fakeLivenessStore{available: true, aliveOK: true}
 	orig := testHandler.LivenessStore
@@ -270,7 +270,7 @@ func TestRecordHeartbeat_DBFlushOnStaleRow(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
 	}
-	runtimeID := createRuntimeLocalSkillTestRuntime(t, testUserID)
+	runtimeID := createOnlineTestRuntime(t, testUserID)
 
 	fake := &fakeLivenessStore{available: true, aliveOK: true}
 	orig := testHandler.LivenessStore
@@ -299,7 +299,7 @@ func TestRecordHeartbeat_OfflineToOnlineForcesDBWrite(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
 	}
-	runtimeID := createRuntimeLocalSkillTestRuntime(t, testUserID)
+	runtimeID := createOnlineTestRuntime(t, testUserID)
 
 	fake := &fakeLivenessStore{available: true, aliveOK: true}
 	orig := testHandler.LivenessStore
@@ -332,7 +332,7 @@ func TestRecordHeartbeat_RecoveryPublishesOnce(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
 	}
-	runtimeID := createRuntimeLocalSkillTestRuntime(t, testUserID)
+	runtimeID := createOnlineTestRuntime(t, testUserID)
 	setRuntimeStatus(t, runtimeID, "offline")
 	setRuntimeLastSeenAt(t, runtimeID, time.Now())
 
@@ -393,7 +393,7 @@ func TestRecordHeartbeat_TouchErrorFallsBackToDB(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
 	}
-	runtimeID := createRuntimeLocalSkillTestRuntime(t, testUserID)
+	runtimeID := createOnlineTestRuntime(t, testUserID)
 
 	fake := &fakeLivenessStore{
 		available: true,
@@ -431,7 +431,7 @@ func TestRecordHeartbeat_SweeperRaceRecoversOnline(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
 	}
-	runtimeID := createRuntimeLocalSkillTestRuntime(t, testUserID)
+	runtimeID := createOnlineTestRuntime(t, testUserID)
 
 	// Force the noop store so recordHeartbeat takes the DB-write path
 	// without any Redis interference. The race is independent of the

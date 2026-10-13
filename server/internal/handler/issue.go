@@ -20,16 +20,12 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
-	"github.com/multica-ai/multica/server/internal/channelmedia"
-	"github.com/multica-ai/multica/server/internal/dispatch"
 	"github.com/multica-ai/multica/server/internal/issueguard"
 	"github.com/multica-ai/multica/server/internal/issuestatus"
 	"github.com/multica-ai/multica/server/internal/logger"
-	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/util"
-	agentpkg "github.com/multica-ai/multica/server/pkg/agent"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
@@ -67,16 +63,10 @@ type IssueResponse struct {
 	CreatorType   string  `json:"creator_type"`
 	CreatorID     string  `json:"creator_id"`
 	ParentIssueID *string `json:"parent_issue_id"`
-	// DuplicateOf is the original this issue duplicates (MUL-7349), set only
-	// while the mark counts: the issue is cancelled and the original still
-	// exists. newStatusCategoryFiller resolves it from duplicateOfIssueID;
-	// an endpoint that skips the filler emits null rather than a bare pointer.
-	DuplicateOf *IssueRefResponse `json:"duplicate_of"`
-	ProjectID   *string           `json:"project_id"`
-	Position    float64           `json:"position"`
+	ProjectID     *string `json:"project_id"`
+	Position      float64 `json:"position"`
 	// Stage groups sub-issues under the same parent into ordered barrier
-	// groups (null = unstaged). See service/issue_wakeup_system.go for how a
-	// closed stage wakes the parent's assignee.
+	// groups (null = unstaged).
 	Stage     *int32  `json:"stage"`
 	StartDate *string `json:"start_date"`
 	DueDate   *string `json:"due_date"`
@@ -105,8 +95,10 @@ type IssueResponse struct {
 	// SourceContext is detail-only. List, board, search, and children responses
 	// deliberately omit the potentially large immutable snapshot.
 	SourceContext *sourceContextDetailResponse `json:"source_context,omitempty"`
-	// duplicateOfIssueID is the raw mark, kept off the wire; see DuplicateOf.
-	duplicateOfIssueID pgtype.UUID
+	// OriginType says where the issue was opened from ("meeting" for the
+	// meeting room). Omitted when unknown or unset: list rows do not load it,
+	// and an absent key leaves the client's cached value untouched.
+	OriginType *string `json:"origin_type,omitempty"`
 }
 
 // IssueRefResponse names another issue inside a response: enough to render
@@ -257,14 +249,12 @@ func assertIssueStatusStillActive(ctx context.Context, qtx *db.Queries, workspac
 
 // runWithIssueStatusGuard runs an issue write that lands on a custom status
 // inside a transaction that re-verifies the status under the shared catalog
-// lock (see assertIssueStatusStillActive). Request writes also carry trusted
-// wakeup actor identity in transaction-local settings, including built-in targets.
+// lock (see assertIssueStatusStillActive).
 func (h *Handler) runWithIssueStatusGuard(ctx context.Context, workspaceID pgtype.UUID, statusKey string, fn func(q *db.Queries) error) error {
-	_, hasActor := ctx.Value(wakeupActorKey{}).(wakeupActor)
-	if !hasActor && (statusKey == "" || issuestatus.IsBuiltIn(statusKey)) {
+	if statusKey == "" || issuestatus.IsBuiltIn(statusKey) {
 		return fn(h.Queries)
 	}
-	tx, err := h.beginWakeupWrite(ctx)
+	tx, err := h.TxStarter.Begin(ctx)
 	if err != nil {
 		return err
 	}
@@ -283,44 +273,12 @@ func (h *Handler) runWithIssueStatusGuard(ctx context.Context, workspaceID pgtyp
 // updateIssueWithStatusGuard writes params under the status-archive guard.
 func (h *Handler) updateIssueWithStatusGuard(ctx context.Context, workspaceID pgtype.UUID, statusKey string, params db.UpdateIssueParams) (db.Issue, error) {
 	var issue db.Issue
-	var cancelledWakeups []db.AgentTaskQueue
 	err := h.runWithIssueStatusGuard(ctx, workspaceID, statusKey, func(q *db.Queries) error {
-		if params.DuplicateOfIssueID.Valid {
-			if err := lockAndCheckDuplicateMark(ctx, q, workspaceID, params.ID, params.DuplicateOfIssueID); err != nil {
-				return err
-			}
-		}
 		var innerErr error
-		issue, cancelledWakeups, innerErr = updateIssueStoppingWakeups(ctx, q, params)
+		issue, innerErr = q.UpdateIssue(ctx, params)
 		return innerErr
 	})
-	if err != nil {
-		return issue, err
-	}
-	h.broadcastCancelledWakeups(ctx, workspaceID, cancelledWakeups)
-	return issue, nil
-}
-
-// updateIssueStoppingWakeups writes params and, when the write moves the issue
-// into a done/closed status, ends its wakeups with the same queries. Callers
-// run it inside the status write's transaction and broadcast the returned runs
-// after commit.
-func updateIssueStoppingWakeups(ctx context.Context, q *db.Queries, params db.UpdateIssueParams) (db.Issue, []db.AgentTaskQueue, error) {
-	issue, err := q.UpdateIssue(ctx, params)
-	if err != nil || !params.Status.Valid {
-		return issue, nil, err
-	}
-	cancelled, err := service.StopClosedIssueWakeups(ctx, q, issue)
-	if err != nil {
-		return db.Issue{}, nil, fmt.Errorf("stop closed issue wakeups: %w", err)
-	}
-	return issue, cancelled, nil
-}
-
-func (h *Handler) broadcastCancelledWakeups(ctx context.Context, workspaceID pgtype.UUID, cancelled []db.AgentTaskQueue) {
-	if len(cancelled) > 0 {
-		h.TaskService.BroadcastCancelledTasks(ctx, uuidToString(workspaceID), cancelled)
-	}
+	return issue, err
 }
 
 // writeIssueStatusRaceError renders errIssueStatusArchivedRace as a 409 and
@@ -354,11 +312,7 @@ func validateIssueEnum(w http.ResponseWriter, field, value string, allowed []str
 // Resolver includes ARCHIVED statuses, because an issue left on an archived
 // status still belongs in its category's column. (MUL-6243)
 func (h *Handler) fillStatusCategories(ctx context.Context, wsID pgtype.UUID, resps []IssueResponse) {
-	var originals []pgtype.UUID
-	for i := range resps {
-		originals = appendDuplicateOriginal(originals, resps[i].Status, resps[i].duplicateOfIssueID)
-	}
-	fill := h.newStatusCategoryFiller(ctx, wsID, originals...)
+	fill := h.newStatusCategoryFiller(ctx, wsID)
 	for i := range resps {
 		fill(&resps[i])
 	}
@@ -369,23 +323,10 @@ func (h *Handler) fillStatusCategories(ctx context.Context, wsID pgtype.UUID, re
 // the catalog at most once, so a page of custom-status rows costs one query
 // rather than one per row. Creating a filler per row would reintroduce the N+1
 // this exists to avoid. (MUL-6243)
-//
-// originals are the duplicate originals the caller's rows point at, collected
-// with appendDuplicateOriginal. A page passes them so they resolve in one read
-// up front, the way labelsByIssue loads a page's labels; an original that was
-// not passed still resolves, one read per distinct original. (MUL-7349)
-func (h *Handler) newStatusCategoryFiller(ctx context.Context, wsID pgtype.UUID, originals ...pgtype.UUID) func(*IssueResponse) {
+func (h *Handler) newStatusCategoryFiller(ctx context.Context, wsID pgtype.UUID) func(*IssueResponse) {
 	resolver := issuestatus.NewResolver(wsID)
-	refs := duplicateOriginals{}
-	h.loadDuplicateOriginals(ctx, wsID, refs, originals)
 	return func(resp *IssueResponse) {
-		if resp == nil {
-			return
-		}
-		// Every response that resolves its status also resolves its duplicate
-		// mark, so the two never disagree about which endpoints carry them.
-		h.fillDuplicateOf(ctx, wsID, resp, refs)
-		if resp.StatusCategory != "" {
+		if resp == nil || resp.StatusCategory != "" {
 			return
 		}
 		resp.StatusCategory = issuestatus.WireCategory(resp.Status, resolver.Category(ctx, h.Queries, resp.Status))
@@ -401,80 +342,6 @@ func (h *Handler) fillStatusCategory(ctx context.Context, wsID pgtype.UUID, resp
 	h.newStatusCategoryFiller(ctx, wsID)(resp)
 }
 
-// duplicateOfPointer keeps a duplicate mark only while the issue is
-// cancelled. Whether the original still exists is checked when the response
-// is filled (fillDuplicateOf), so a pointer an older server left behind
-// never surfaces. Same rule as IssueHasDuplicates in issue.sql.
-func duplicateOfPointer(status string, id pgtype.UUID) pgtype.UUID {
-	if status != issuestatus.Cancelled {
-		return pgtype.UUID{}
-	}
-	return id
-}
-
-// duplicateOriginals memoises the originals a request's duplicates point at,
-// by id. A nil entry is an original that no longer exists (or could not be
-// read), so it is looked up once and then left off every response.
-type duplicateOriginals map[pgtype.UUID]*db.ListIssueRefsInWorkspaceRow
-
-// appendDuplicateOriginal adds the original a row points at, if the row
-// carries a live duplicate mark.
-func appendDuplicateOriginal(originals []pgtype.UUID, status string, id pgtype.UUID) []pgtype.UUID {
-	if pointer := duplicateOfPointer(status, id); pointer.Valid {
-		return append(originals, pointer)
-	}
-	return originals
-}
-
-// loadDuplicateOriginals reads every id not yet in refs in one query.
-func (h *Handler) loadDuplicateOriginals(ctx context.Context, wsID pgtype.UUID, refs duplicateOriginals, ids []pgtype.UUID) {
-	var missing []pgtype.UUID
-	for _, id := range ids {
-		if _, seen := refs[id]; !seen {
-			refs[id] = nil
-			missing = append(missing, id)
-		}
-	}
-	if len(missing) == 0 {
-		return
-	}
-	rows, err := h.Queries.ListIssueRefsInWorkspace(ctx, db.ListIssueRefsInWorkspaceParams{
-		WorkspaceID: wsID,
-		Ids:         missing,
-	})
-	if err != nil {
-		slog.Warn("resolve duplicate originals failed", "error", err, "count", len(missing))
-		return
-	}
-	for i := range rows {
-		refs[rows[i].ID] = &rows[i]
-	}
-}
-
-// fillDuplicateOf resolves a duplicate mark to its original (MUL-7349),
-// through refs so a page's originals cost one read (see
-// newStatusCategoryFiller). A missing original leaves DuplicateOf unset.
-func (h *Handler) fillDuplicateOf(ctx context.Context, wsID pgtype.UUID, resp *IssueResponse, refs duplicateOriginals) {
-	id := resp.duplicateOfIssueID
-	if !id.Valid {
-		return
-	}
-	h.loadDuplicateOriginals(ctx, wsID, refs, []pgtype.UUID{id})
-	row := refs[id]
-	if row == nil {
-		return
-	}
-	// The response already rendered its own identifier with the workspace
-	// prefix; the original shares it.
-	prefix := strings.TrimSuffix(resp.Identifier, "-"+strconv.Itoa(int(resp.Number)))
-	resp.DuplicateOf = &IssueRefResponse{
-		ID:         uuidToString(row.ID),
-		Identifier: prefix + "-" + strconv.Itoa(int(row.Number)),
-		Title:      row.Title,
-		Status:     row.Status,
-	}
-}
-
 func issueToResponse(i db.Issue, issuePrefix string) IssueResponse {
 	identifier := issuePrefix + "-" + strconv.Itoa(int(i.Number))
 	// Built-ins map to public categories without a catalog lookup. A custom
@@ -484,32 +351,32 @@ func issueToResponse(i db.Issue, issuePrefix string) IssueResponse {
 		statusCategory = i.Status
 	}
 	return IssueResponse{
-		ID:                 uuidToString(i.ID),
-		WorkspaceID:        uuidToString(i.WorkspaceID),
-		Number:             i.Number,
-		Identifier:         identifier,
-		Title:              i.Title,
-		Description:        textToPtr(i.Description),
-		Status:             i.Status,
-		StatusCategory:     statusCategory,
-		Priority:           i.Priority,
-		AssigneeType:       textToPtr(i.AssigneeType),
-		AssigneeID:         uuidToPtr(i.AssigneeID),
-		CreatorType:        i.CreatorType,
-		CreatorID:          uuidToString(i.CreatorID),
-		ParentIssueID:      uuidToPtr(i.ParentIssueID),
-		duplicateOfIssueID: duplicateOfPointer(i.Status, i.DuplicateOfIssueID),
-		ProjectID:          uuidToPtr(i.ProjectID),
-		Position:           i.Position,
-		Stage:              int4ToPtr(i.Stage),
-		StartDate:          dateToPtr(i.StartDate),
-		DueDate:            dateToPtr(i.DueDate),
-		CreatedAt:          timestampToString(i.CreatedAt),
-		UpdatedAt:          timestampToString(i.UpdatedAt),
-		Revision:           i.Revision,
-		LastActivityAt:     timestampToNanoPtr(i.LastActivityAt),
-		Metadata:           parseIssueMetadata(i.Metadata),
-		Properties:         parseIssueProperties(i.Properties),
+		ID:             uuidToString(i.ID),
+		WorkspaceID:    uuidToString(i.WorkspaceID),
+		Number:         i.Number,
+		Identifier:     identifier,
+		Title:          i.Title,
+		Description:    textToPtr(i.Description),
+		Status:         i.Status,
+		StatusCategory: statusCategory,
+		Priority:       i.Priority,
+		AssigneeType:   textToPtr(i.AssigneeType),
+		AssigneeID:     uuidToPtr(i.AssigneeID),
+		CreatorType:    i.CreatorType,
+		CreatorID:      uuidToString(i.CreatorID),
+		ParentIssueID:  uuidToPtr(i.ParentIssueID),
+		ProjectID:      uuidToPtr(i.ProjectID),
+		Position:       i.Position,
+		Stage:          int4ToPtr(i.Stage),
+		StartDate:      dateToPtr(i.StartDate),
+		DueDate:        dateToPtr(i.DueDate),
+		CreatedAt:      timestampToString(i.CreatedAt),
+		UpdatedAt:      timestampToString(i.UpdatedAt),
+		Revision:       i.Revision,
+		LastActivityAt: timestampToNanoPtr(i.LastActivityAt),
+		Metadata:       parseIssueMetadata(i.Metadata),
+		Properties:     parseIssueProperties(i.Properties),
+		OriginType:     textToPtr(i.OriginType),
 	}
 }
 
@@ -522,32 +389,31 @@ func issueListRowToResponse(i db.ListIssuesRow, issuePrefix string) IssueRespons
 	}
 	identifier := issuePrefix + "-" + strconv.Itoa(int(i.Number))
 	return IssueResponse{
-		ID:                 uuidToString(i.ID),
-		WorkspaceID:        uuidToString(i.WorkspaceID),
-		Number:             i.Number,
-		Identifier:         identifier,
-		Title:              i.Title,
-		Description:        textToPtr(i.Description),
-		Status:             i.Status,
-		StatusCategory:     statusCategory,
-		Priority:           i.Priority,
-		AssigneeType:       textToPtr(i.AssigneeType),
-		AssigneeID:         uuidToPtr(i.AssigneeID),
-		CreatorType:        i.CreatorType,
-		CreatorID:          uuidToString(i.CreatorID),
-		ParentIssueID:      uuidToPtr(i.ParentIssueID),
-		duplicateOfIssueID: duplicateOfPointer(i.Status, i.DuplicateOfIssueID),
-		ProjectID:          uuidToPtr(i.ProjectID),
-		Position:           i.Position,
-		Stage:              int4ToPtr(i.Stage),
-		StartDate:          dateToPtr(i.StartDate),
-		DueDate:            dateToPtr(i.DueDate),
-		CreatedAt:          timestampToString(i.CreatedAt),
-		UpdatedAt:          timestampToString(i.UpdatedAt),
-		Revision:           i.Revision,
-		LastActivityAt:     timestampToNanoPtr(i.LastActivityAt),
-		Metadata:           parseIssueMetadata(i.Metadata),
-		Properties:         parseIssueProperties(i.Properties),
+		ID:             uuidToString(i.ID),
+		WorkspaceID:    uuidToString(i.WorkspaceID),
+		Number:         i.Number,
+		Identifier:     identifier,
+		Title:          i.Title,
+		Description:    textToPtr(i.Description),
+		Status:         i.Status,
+		StatusCategory: statusCategory,
+		Priority:       i.Priority,
+		AssigneeType:   textToPtr(i.AssigneeType),
+		AssigneeID:     uuidToPtr(i.AssigneeID),
+		CreatorType:    i.CreatorType,
+		CreatorID:      uuidToString(i.CreatorID),
+		ParentIssueID:  uuidToPtr(i.ParentIssueID),
+		ProjectID:      uuidToPtr(i.ProjectID),
+		Position:       i.Position,
+		Stage:          int4ToPtr(i.Stage),
+		StartDate:      dateToPtr(i.StartDate),
+		DueDate:        dateToPtr(i.DueDate),
+		CreatedAt:      timestampToString(i.CreatedAt),
+		UpdatedAt:      timestampToString(i.UpdatedAt),
+		Revision:       i.Revision,
+		LastActivityAt: timestampToNanoPtr(i.LastActivityAt),
+		Metadata:       parseIssueMetadata(i.Metadata),
+		Properties:     parseIssueProperties(i.Properties),
 	}
 }
 
@@ -592,32 +458,31 @@ func openIssueRowToResponse(i db.ListOpenIssuesRow, issuePrefix string) IssueRes
 	}
 	identifier := issuePrefix + "-" + strconv.Itoa(int(i.Number))
 	return IssueResponse{
-		ID:                 uuidToString(i.ID),
-		WorkspaceID:        uuidToString(i.WorkspaceID),
-		Number:             i.Number,
-		Identifier:         identifier,
-		Title:              i.Title,
-		Description:        textToPtr(i.Description),
-		Status:             i.Status,
-		StatusCategory:     statusCategory,
-		Priority:           i.Priority,
-		AssigneeType:       textToPtr(i.AssigneeType),
-		AssigneeID:         uuidToPtr(i.AssigneeID),
-		CreatorType:        i.CreatorType,
-		CreatorID:          uuidToString(i.CreatorID),
-		ParentIssueID:      uuidToPtr(i.ParentIssueID),
-		duplicateOfIssueID: duplicateOfPointer(i.Status, i.DuplicateOfIssueID),
-		ProjectID:          uuidToPtr(i.ProjectID),
-		Position:           i.Position,
-		Stage:              int4ToPtr(i.Stage),
-		StartDate:          dateToPtr(i.StartDate),
-		DueDate:            dateToPtr(i.DueDate),
-		CreatedAt:          timestampToString(i.CreatedAt),
-		UpdatedAt:          timestampToString(i.UpdatedAt),
-		Revision:           i.Revision,
-		LastActivityAt:     timestampToNanoPtr(i.LastActivityAt),
-		Metadata:           parseIssueMetadata(i.Metadata),
-		Properties:         parseIssueProperties(i.Properties),
+		ID:             uuidToString(i.ID),
+		WorkspaceID:    uuidToString(i.WorkspaceID),
+		Number:         i.Number,
+		Identifier:     identifier,
+		Title:          i.Title,
+		Description:    textToPtr(i.Description),
+		Status:         i.Status,
+		StatusCategory: statusCategory,
+		Priority:       i.Priority,
+		AssigneeType:   textToPtr(i.AssigneeType),
+		AssigneeID:     uuidToPtr(i.AssigneeID),
+		CreatorType:    i.CreatorType,
+		CreatorID:      uuidToString(i.CreatorID),
+		ParentIssueID:  uuidToPtr(i.ParentIssueID),
+		ProjectID:      uuidToPtr(i.ProjectID),
+		Position:       i.Position,
+		Stage:          int4ToPtr(i.Stage),
+		StartDate:      dateToPtr(i.StartDate),
+		DueDate:        dateToPtr(i.DueDate),
+		CreatedAt:      timestampToString(i.CreatedAt),
+		UpdatedAt:      timestampToString(i.UpdatedAt),
+		Revision:       i.Revision,
+		LastActivityAt: timestampToNanoPtr(i.LastActivityAt),
+		Metadata:       parseIssueMetadata(i.Metadata),
+		Properties:     parseIssueProperties(i.Properties),
 	}
 }
 
@@ -846,6 +711,7 @@ func buildSearchQuery(phrase string, terms []string, queryNum int, hasNum bool, 
 
 	limitParam := nextArg(nil)
 	offsetParam := nextArg(nil)
+	viewerParam := nextArg(nil) // last: viewer for can_see_issue, filled by caller
 
 	// Stage one scans this workspace's issues once and retains only the narrow
 	// flags and sort fields needed to choose a page. Do not force this CTE to be
@@ -885,7 +751,7 @@ func buildSearchQuery(phrase string, terms []string, queryNum int, hasNum bool, 
 		)
 	}
 
-	issueWhere := "i.workspace_id = " + wsParam
+	issueWhere := fmt.Sprintf("i.workspace_id = %s AND can_see_issue(%s::uuid, i)", wsParam, viewerParam)
 	if terminalStatusesParam != "" {
 		issueWhere += fmt.Sprintf(" AND NOT (i.status = ANY(%s::text[]))", terminalStatusesParam)
 	}
@@ -1100,7 +966,7 @@ func buildSearchQuery(phrase string, terms []string, queryNum int, hasNum bool, 
 		i.assignee_type, i.assignee_id, i.creator_type, i.creator_id,
 		i.parent_issue_id, i.acceptance_criteria, i.context_refs, i.position,
 		i.start_date, i.due_date, i.created_at, i.updated_at, i.last_activity_at, i.number, i.project_id,
-		i.revision, i.duplicate_of_issue_id,
+		i.revision,
 		pc.match_source,
 		COALESCE(c.content, '') AS matched_comment_content
 	FROM page_candidates pc
@@ -1167,10 +1033,11 @@ func (h *Handler) SearchIssues(w http.ResponseWriter, r *http.Request) {
 	}
 
 	sqlQuery, args := buildSearchQuery(q, terms, queryNum, hasNum, includeClosed, terminalStatusKeys)
-	// Fill placeholder args: $4 = workspace_id, last two = limit, offset
+	// Fill placeholder args: $4 = workspace_id, last three = limit, offset, viewer
 	args[3] = wsUUID
-	args[len(args)-2] = limit
-	args[len(args)-1] = offset
+	args[len(args)-3] = limit
+	args[len(args)-2] = offset
+	args[len(args)-1] = h.viewerID(r, workspaceID)
 
 	var results []searchResult
 	err := runSearchQuery(ctx, h.TxStarter, sqlQuery, args, func(rows pgx.Rows) error {
@@ -1199,7 +1066,6 @@ func (h *Handler) SearchIssues(w http.ResponseWriter, r *http.Request) {
 				&sr.issue.Number,
 				&sr.issue.ProjectID,
 				&sr.issue.Revision,
-				&sr.issue.DuplicateOfIssueID,
 				&sr.matchSource,
 				&sr.matchedCommentContent,
 			); err != nil {
@@ -1235,11 +1101,7 @@ func (h *Handler) SearchIssues(w http.ResponseWriter, r *http.Request) {
 	}
 
 	prefix := h.getIssuePrefix(ctx, wsUUID)
-	var originals []pgtype.UUID
-	for _, sr := range results {
-		originals = appendDuplicateOriginal(originals, sr.issue.Status, sr.issue.DuplicateOfIssueID)
-	}
-	fillSearch := h.newStatusCategoryFiller(ctx, wsUUID, originals...)
+	fillSearch := h.newStatusCategoryFiller(ctx, wsUUID)
 	resp := make([]SearchIssueResponse, len(results))
 	for i, sr := range results {
 		sir := SearchIssueResponse{
@@ -1347,8 +1209,7 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 		projectFilter = id
 	}
 	// involves_user_id widens the assignee filter to surface issues where the
-	// user is the indirect assignee (their owned agent, or a squad they belong
-	// to / lead / have an agent inside). Direct member-assignment is excluded
+	// user is the indirect assignee (their owned agent). Direct member-assignment is excluded
 	// by design — that is the meaning of `assignee_id` (tab 1), and tab 3 must
 	// be disjoint from tab 1.
 	var involvesUserFilter pgtype.UUID
@@ -1393,6 +1254,7 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 		}
 		issues, err := h.Queries.ListOpenIssues(ctx, db.ListOpenIssuesParams{
 			WorkspaceID:        wsUUID,
+			Viewer:             h.viewerID(r, workspaceID),
 			TerminalStatusKeys: terminalStatusKeys,
 			Priority:           priorityFilter,
 			AssigneeID:         assigneeFilter,
@@ -1410,13 +1272,11 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 
 		prefix := h.getIssuePrefix(ctx, wsUUID)
 		ids := make([]pgtype.UUID, len(issues))
-		var originals []pgtype.UUID
 		for i, issue := range issues {
 			ids[i] = issue.ID
-			originals = appendDuplicateOriginal(originals, issue.Status, issue.DuplicateOfIssueID)
 		}
 		labelsMap := h.labelsByIssue(ctx, wsUUID, ids)
-		fillOpen := h.newStatusCategoryFiller(ctx, wsUUID, originals...)
+		fillOpen := h.newStatusCategoryFiller(ctx, wsUUID)
 		resp := make([]IssueResponse, len(issues))
 		for i, issue := range issues {
 			resp[i] = openIssueRowToResponse(issue, prefix)
@@ -1469,7 +1329,7 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// assignee_types narrows the list to issues assigned to the given actor
-	// kinds (member / agent / squad). Mirrors the same param on
+	// kinds (member / agent). Mirrors the same param on
 	// ListGroupedIssues so the workspace Members/Agents tabs can filter
 	// server-side instead of post-filtering loaded pages on the client.
 	assigneeTypesFilter := splitCommaParam(r.URL.Query().Get("assignee_types"))
@@ -1559,6 +1419,7 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 		args = append(args, v)
 		return "$" + strconv.Itoa(len(args))
 	}
+	where = append(where, fmt.Sprintf("can_see_issue(%s::uuid, i)", addArg(h.viewerID(r, workspaceID))))
 	if len(statusCategoriesFilter) > 0 {
 		// Expanded to concrete status keys rather than filtered through
 		// issue_effective_status(): wrapping the column in a function makes the
@@ -1695,30 +1556,6 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
         WHERE a.workspace_id = $1
           AND a.owner_id     = %[1]s::uuid
     ))
-    OR (i.assignee_type = 'squad' AND i.assignee_id IN (
-       SELECT sm.squad_id
-         FROM squad_member sm
-         JOIN squad s ON s.id = sm.squad_id
-        WHERE s.workspace_id = $1
-          AND sm.member_type = 'member'
-          AND sm.member_id   = %[1]s::uuid
-       UNION
-       SELECT s.id
-         FROM squad s
-         JOIN agent a ON a.id = s.leader_id
-        WHERE s.workspace_id = $1
-          AND a.workspace_id = $1
-          AND a.owner_id     = %[1]s::uuid
-       UNION
-       SELECT sm.squad_id
-         FROM squad_member sm
-         JOIN squad s ON s.id = sm.squad_id
-         JOIN agent a ON a.id = sm.member_id
-        WHERE s.workspace_id = $1
-          AND sm.member_type = 'agent'
-          AND a.workspace_id = $1
-          AND a.owner_id     = %[1]s::uuid
-    ))
 )`, ref))
 	}
 
@@ -1762,7 +1599,7 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 	query := fmt.Sprintf(`SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority,
        i.assignee_type, i.assignee_id, i.creator_type, i.creator_id,
        i.parent_issue_id, i.position, i.start_date, i.due_date, i.created_at, i.updated_at, i.last_activity_at, i.number, i.project_id, i.metadata, i.stage, i.properties,
-	   i.revision, i.duplicate_of_issue_id
+	   i.revision
 FROM issue i
 WHERE %s
 ORDER BY %s
@@ -1803,7 +1640,6 @@ LIMIT %s OFFSET %s`, whereSql, orderBy, limitRef, offsetRef)
 			&row.Stage,
 			&row.Properties,
 			&row.Revision,
-			&row.DuplicateOfIssueID,
 		); err != nil {
 			slog.Warn("ListIssues scan failed", "error", err)
 			writeError(w, http.StatusInternalServerError, "failed to list issues")
@@ -1962,6 +1798,9 @@ func splitCommaParam(raw string) []string {
 	return out
 }
 
+// isIssueActorType validates read-side assignee kinds (filters, group keys).
+// "squad" stays readable: historical issues keep that assignee and installed
+// clients still send it. Write paths reject it separately.
 func isIssueActorType(s string) bool {
 	return s == "member" || s == "agent" || s == "squad"
 }
@@ -2050,6 +1889,7 @@ func (h *Handler) ListGroupedIssues(w http.ResponseWriter, r *http.Request) {
 		args = append(args, v)
 		return "$" + strconv.Itoa(len(args))
 	}
+	where = append(where, fmt.Sprintf("can_see_issue(%s::uuid, i)", addArg(h.viewerID(r, workspaceID))))
 
 	statuses := splitCommaParam(r.URL.Query().Get("statuses"))
 	if len(statuses) == 0 {
@@ -2151,30 +1991,6 @@ func (h *Handler) ListGroupedIssues(w http.ResponseWriter, r *http.Request) {
     (i.assignee_type = 'agent' AND i.assignee_id IN (
        SELECT a.id FROM agent a
         WHERE a.workspace_id = $1
-          AND a.owner_id     = %[1]s::uuid
-    ))
-    OR (i.assignee_type = 'squad' AND i.assignee_id IN (
-       SELECT sm.squad_id
-         FROM squad_member sm
-         JOIN squad s ON s.id = sm.squad_id
-        WHERE s.workspace_id = $1
-          AND sm.member_type = 'member'
-          AND sm.member_id   = %[1]s::uuid
-       UNION
-       SELECT s.id
-         FROM squad s
-         JOIN agent a ON a.id = s.leader_id
-        WHERE s.workspace_id = $1
-          AND a.workspace_id = $1
-          AND a.owner_id     = %[1]s::uuid
-       UNION
-       SELECT sm.squad_id
-         FROM squad_member sm
-         JOIN squad s ON s.id = sm.squad_id
-         JOIN agent a ON a.id = sm.member_id
-        WHERE s.workspace_id = $1
-          AND sm.member_type = 'agent'
-          AND a.workspace_id = $1
           AND a.owner_id     = %[1]s::uuid
     ))
 )`, ref))
@@ -2362,7 +2178,7 @@ WITH ranked AS (
 		i.id, i.workspace_id, i.title, i.description, i.status, i.priority,
 		i.assignee_type, i.assignee_id, i.creator_type, i.creator_id,
 		i.parent_issue_id, i.position, i.start_date, i.due_date, i.created_at, i.updated_at, i.last_activity_at,
-		i.number, i.project_id, i.metadata, i.stage, i.properties, i.revision, i.duplicate_of_issue_id,
+		i.number, i.project_id, i.metadata, i.stage, i.properties, i.revision,
 		COUNT(*) OVER (PARTITION BY i.assignee_type, i.assignee_id) AS group_total,
 		ROW_NUMBER() OVER (
 			PARTITION BY i.assignee_type, i.assignee_id
@@ -2375,15 +2191,14 @@ SELECT
 	id, workspace_id, title, description, status, priority,
 	assignee_type, assignee_id, creator_type, creator_id,
 	parent_issue_id, position, start_date, due_date, created_at, updated_at, last_activity_at,
-	number, project_id, metadata, stage, properties, revision, duplicate_of_issue_id, group_total
+	number, project_id, metadata, stage, properties, revision, group_total
 FROM ranked
 WHERE rn > %s AND rn <= %s + %s
 ORDER BY
 	CASE assignee_type
 		WHEN 'member' THEN 0
 		WHEN 'agent' THEN 1
-		WHEN 'squad' THEN 2
-		ELSE 3
+		ELSE 2
 	END,
 	assignee_type NULLS LAST,
 	assignee_id NULLS LAST,
@@ -2424,7 +2239,6 @@ ORDER BY
 			&row.Stage,
 			&row.Properties,
 			&row.Revision,
-			&row.DuplicateOfIssueID,
 			&row.GroupTotal,
 		); err != nil {
 			slog.Warn("ListGroupedIssues scan failed", "error", err)
@@ -2440,16 +2254,14 @@ ORDER BY
 	}
 
 	ids := make([]pgtype.UUID, len(groupedRows))
-	var originals []pgtype.UUID
 	for i, row := range groupedRows {
 		ids[i] = row.ID
-		originals = appendDuplicateOriginal(originals, row.Status, row.DuplicateOfIssueID)
 	}
 	labelsMap := h.labelsByIssue(ctx, wsUUID, ids)
 	prefix := h.getIssuePrefix(ctx, wsUUID)
 	// One Resolver for the whole page — a per-row filler would query the
 	// catalog once per custom-status row. (MUL-6243)
-	fillGrouped := h.newStatusCategoryFiller(ctx, wsUUID, originals...)
+	fillGrouped := h.newStatusCategoryFiller(ctx, wsUUID)
 
 	groups := []IssueAssigneeGroupResponse{}
 	groupIndex := map[string]int{}
@@ -2538,7 +2350,10 @@ func (h *Handler) ListChildIssues(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	children, err := h.Queries.ListChildIssues(r.Context(), issue.ID)
+	children, err := h.Queries.ListChildIssues(r.Context(), db.ListChildIssuesParams{
+		ParentIssueID: issue.ID,
+		Viewer:        h.viewerID(r, uuidToString(issue.WorkspaceID)),
+	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list child issues")
 		return
@@ -2624,6 +2439,7 @@ func (h *Handler) ListChildrenByParents(w http.ResponseWriter, r *http.Request) 
 	children, err := h.Queries.ListChildrenByParents(r.Context(), db.ListChildrenByParentsParams{
 		WorkspaceID: wsUUID,
 		ParentIds:   parentIDs,
+		Viewer:      h.viewerID(r, uuidToString(wsUUID)),
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list child issues")
@@ -2671,6 +2487,7 @@ func (h *Handler) ChildIssueProgress(w http.ResponseWriter, r *http.Request) {
 	rows, err := h.Queries.ChildIssueProgress(r.Context(), db.ChildIssueProgressParams{
 		WorkspaceID:        wsUUID,
 		TerminalStatusKeys: terminalStatusKeys,
+		Viewer:             h.viewerID(r, uuidToString(wsUUID)),
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to get child issue progress")
@@ -2693,329 +2510,6 @@ func (h *Handler) ChildIssueProgress(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"progress": resp,
 	})
-}
-
-// QuickCreateIssueRequest is the body for POST /api/issues/quick-create. The
-// user picks an actor (agent or squad) in the modal and types one line of
-// natural language; the server validates the actor's reachability up front,
-// queues a quick-create task, and returns 202 immediately. The agent
-// translates the prompt into a `multica issue create` invocation in the
-// background; success and failure both surface as inbox notifications to
-// the requester.
-//
-// Exactly one of AgentID / SquadID is required. When SquadID is set, the
-// task is enqueued against the squad's leader agent and the leader receives
-// the same Operating Protocol briefing it would for an issue assigned to
-// the squad, so it can choose to delegate to a squad member as usual.
-//
-// ProjectID is optional and lets the modal target a specific project so
-// the agent's `multica issue create` invocation passes `--project <uuid>`
-// instead of letting it default. The frontend remembers the user's last
-// pick per workspace, so frequent users skip retyping "in project X".
-//
-// ParentIssueID is optional and is set by the "Add sub issue" entry point
-// when the modal is opened from an existing issue. The agent passes it
-// through as `--parent <uuid>` so the new issue is filed as a sub-issue,
-// keeping the sub-issue intent of the entry point regardless of whether
-// the user submits via manual or agent mode.
-type QuickCreateIssueRequest struct {
-	AgentID       string   `json:"agent_id,omitempty"`
-	SquadID       string   `json:"squad_id,omitempty"`
-	Prompt        string   `json:"prompt"`
-	Priority      string   `json:"priority,omitempty"`
-	DueDate       string   `json:"due_date,omitempty"`
-	ProjectID     string   `json:"project_id,omitempty"`
-	ParentIssueID string   `json:"parent_issue_id,omitempty"`
-	AttachmentIDs []string `json:"attachment_ids,omitempty"`
-}
-
-// QuickCreateIssueResponse echoes the queued task id so the frontend can
-// correlate the eventual inbox item, even though completion is fully async.
-type QuickCreateIssueResponse struct {
-	TaskID string `json:"task_id"`
-}
-
-func (h *Handler) QuickCreateIssue(w http.ResponseWriter, r *http.Request) {
-	var req QuickCreateIssueRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid request body")
-		return
-	}
-	prompt := strings.TrimSpace(req.Prompt)
-	if prompt == "" {
-		writeError(w, http.StatusBadRequest, "prompt is required")
-		return
-	}
-	priority := strings.ToLower(strings.TrimSpace(req.Priority))
-	if priority != "" && priority != "urgent" && priority != "high" && priority != "medium" && priority != "low" {
-		writeError(w, http.StatusBadRequest, "priority must be one of: urgent, high, medium, low")
-		return
-	}
-	dueDate := strings.TrimSpace(req.DueDate)
-	if dueDate != "" {
-		parsed, err := util.ParseCalendarDate(dueDate)
-		if err != nil {
-			writeError(w, http.StatusBadRequest, "invalid due_date format, expected YYYY-MM-DD")
-			return
-		}
-		dueDate = parsed.Time.Format("2006-01-02")
-	}
-
-	hasAgent := strings.TrimSpace(req.AgentID) != ""
-	hasSquad := strings.TrimSpace(req.SquadID) != ""
-	if hasAgent == hasSquad {
-		writeError(w, http.StatusBadRequest, "exactly one of agent_id or squad_id is required")
-		return
-	}
-
-	workspaceID := h.resolveWorkspaceID(r)
-	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace_id")
-	if !ok {
-		return
-	}
-
-	requesterID, ok := requireUserID(w, r)
-	if !ok {
-		return
-	}
-	requesterUUID, ok := parseUUIDOrBadRequest(w, requesterID, "requester_id")
-	if !ok {
-		return
-	}
-
-	// Resolve the actor to the agent that will actually run the task. For
-	// agent picks that's the agent itself; for squad picks it's the squad's
-	// leader agent. The leader receives a squad-leader briefing on dispatch
-	// (see daemon.go), matching the behavior of an issue assigned to the
-	// squad — picking a squad here is functionally "ask the squad leader to
-	// create this issue, on behalf of the squad".
-	var agentUUID pgtype.UUID
-	var squadUUID pgtype.UUID
-	if hasSquad {
-		var ok bool
-		squadUUID, ok = parseUUIDOrBadRequest(w, req.SquadID, "squad_id")
-		if !ok {
-			return
-		}
-		squad, err := h.Queries.GetSquadInWorkspace(r.Context(), db.GetSquadInWorkspaceParams{
-			ID:          squadUUID,
-			WorkspaceID: wsUUID,
-		})
-		if err != nil {
-			writeError(w, http.StatusNotFound, "squad not found")
-			return
-		}
-		if squad.ArchivedAt.Valid {
-			writeError(w, http.StatusBadRequest, "squad is archived")
-			return
-		}
-		agentUUID = squad.LeaderID
-	} else {
-		var ok bool
-		agentUUID, ok = parseUUIDOrBadRequest(w, req.AgentID, "agent_id")
-		if !ok {
-			return
-		}
-	}
-
-	// Reuse the same workspace-membership / archived / private-agent
-	// ownership rules as `validateAssigneePair` so a user can't POST a
-	// private agent_id they shouldn't be able to dispatch (the frontend
-	// filters them out, but the handler is the trust boundary). Squad
-	// picks reach this with the resolved leader agent; the same rules
-	// apply — a private leader behind a squad the user can't reach
-	// should still be rejected.
-	if status, msg := h.validateAssigneePair(
-		r.Context(), r, workspaceID,
-		pgtype.Text{String: "agent", Valid: true},
-		agentUUID,
-	); status != 0 {
-		writeError(w, status, msg)
-		return
-	}
-
-	// Re-load the agent for the runtime liveness check below. Safe by
-	// construction: validateAssigneePair just confirmed it exists in this
-	// workspace and the caller has visibility.
-	agent, err := h.Queries.GetAgentInWorkspace(r.Context(), db.GetAgentInWorkspaceParams{
-		ID:          agentUUID,
-		WorkspaceID: wsUUID,
-	})
-	if err != nil {
-		writeError(w, http.StatusNotFound, "agent not found")
-		return
-	}
-	// Quick-create needs the agent to run NOW, so any non-ready verdict refuses
-	// — but with the verdict's own code, so "CLI cannot run" no longer arrives
-	// as "runtime is offline" and sends the user to reconnect a machine that is
-	// already connected (MUL-6164).
-	if verdict, err := service.AgentReadiness(r.Context(), h.runtimeLookup(obsmetrics.RuntimeLookupSourceIssue), agent); err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to check agent runtime")
-		return
-	} else if !verdict.Ready() {
-		writeAgentUnavailable(w, verdict.Detail, verdict.Reason)
-		return
-	}
-
-	// Daemon CLI version gate. The agent-side prompt + create-flow rely on
-	// behaviors introduced in MinQuickCreateCLIVersion (URL attachment
-	// handling, quick-create attachment binding, no-retry on partial failure).
-	// Older daemons either double-create issues on partial CLI failures, drop
-	// attachment bindings, or mishandle pasted screenshot URLs; fail closed
-	// before enqueuing rather than surface the breakage as an inbox failure
-	// twenty seconds later. Dev-built
-	// daemons (git-describe shape) are exempted inside CheckMinCLIVersion
-	// so `make daemon` works without weakening staging or production.
-	if status, payload := h.checkQuickCreateDaemonVersion(r.Context(), obsmetrics.RuntimeLookupSourceIssue, agent.RuntimeID); status != 0 {
-		writeJSON(w, status, payload)
-		return
-	}
-	if priority != "" || dueDate != "" {
-		if status, payload := h.checkQuickCreateDaemonVersionAtLeast(
-			r.Context(), obsmetrics.RuntimeLookupSourceIssue, agent.RuntimeID, agentpkg.MinQuickCreateFieldsCLIVersion,
-		); status != 0 {
-			writeJSON(w, status, payload)
-			return
-		}
-	}
-
-	attachmentIDs, ok := parseUUIDSliceOrBadRequest(w, req.AttachmentIDs, "attachment_ids")
-	if !ok {
-		return
-	}
-
-	// Optional project_id — validate it belongs to the same workspace before
-	// pinning the task to it. The handler is the trust boundary; the frontend
-	// already only shows projects from the active workspace, but we re-check
-	// here so a forged request can't smuggle a foreign project ID through.
-	var projectUUID pgtype.UUID
-	if strings.TrimSpace(req.ProjectID) != "" {
-		pid, ok := parseUUIDOrBadRequest(w, req.ProjectID, "project_id")
-		if !ok {
-			return
-		}
-		if _, err := h.Queries.GetProjectInWorkspace(r.Context(), db.GetProjectInWorkspaceParams{
-			ID:          pid,
-			WorkspaceID: wsUUID,
-		}); err != nil {
-			writeError(w, http.StatusBadRequest, "project not found")
-			return
-		}
-		projectUUID = pid
-	}
-
-	// Optional parent_issue_id — validate same-workspace membership just like
-	// the regular CreateIssue path. Frontend seeds this from the "Add sub
-	// issue" entry, but the handler re-checks so a forged request can't
-	// smuggle a foreign parent UUID through.
-	var parentIssueUUID pgtype.UUID
-	if strings.TrimSpace(req.ParentIssueID) != "" {
-		pid, ok := parseUUIDOrBadRequest(w, req.ParentIssueID, "parent_issue_id")
-		if !ok {
-			return
-		}
-		parent, err := h.Queries.GetIssueInWorkspace(r.Context(), db.GetIssueInWorkspaceParams{
-			ID:          pid,
-			WorkspaceID: wsUUID,
-		})
-		if err != nil || !parent.ID.Valid {
-			writeError(w, http.StatusBadRequest, "parent issue not found in this workspace")
-			return
-		}
-		parentIssueUUID = pid
-	}
-
-	task, err := h.TaskService.EnqueueQuickCreateTask(r.Context(), wsUUID, requesterUUID, agentUUID, squadUUID, prompt, priority, dueDate, projectUUID, parentIssueUUID, attachmentIDs)
-	if err != nil {
-		if writeIssueLimitReached(w, err) {
-			return
-		}
-		slog.Warn("quick-create enqueue failed", append(logger.RequestAttrs(r), "error", err)...)
-		writeError(w, http.StatusInternalServerError, "failed to enqueue quick-create task")
-		return
-	}
-
-	writeJSON(w, http.StatusAccepted, QuickCreateIssueResponse{TaskID: uuidToString(task.ID)})
-}
-
-// writeAgentUnavailable returns 422 with a stable error code so the modal
-// can show a "switch agent" hint without parsing the human-readable reason.
-// writeAgentUnavailable refuses a trigger whose agent cannot run. `code` stays
-// agent_unavailable for installed clients; reason_code carries the machine-
-// readable distinction they need to phrase the fix — agent_runtime_required
-// ("bind a runtime") is not runtime_offline ("reconnect the machine").
-func writeAgentUnavailable(w http.ResponseWriter, reason string, reasonCode dispatch.ReasonCode) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusUnprocessableEntity)
-	json.NewEncoder(w).Encode(map[string]any{
-		"code":        "agent_unavailable",
-		"reason":      reason,
-		"reason_code": reasonCode,
-	})
-}
-
-// isRuntimeOnline returns true when the given runtime is currently
-// reachable (status == "online"). Quick-create rejects submissions whose
-// agent's runtime is offline so the user gets immediate feedback in the
-// modal instead of an inbox failure twenty seconds later.
-func (h *Handler) isRuntimeOnline(ctx context.Context, runtimeID pgtype.UUID) bool {
-	rt, err := h.getAgentRuntime(ctx, obsmetrics.RuntimeLookupSourceIssue, runtimeID)
-	if err != nil {
-		return false
-	}
-	return rt.Status == "online"
-}
-
-// checkQuickCreateDaemonVersion enforces MinQuickCreateCLIVersion against the
-// CLI version the daemon reported at registration time (stored on the runtime
-// row's metadata.cli_version). Returns (0, nil) when the version is
-// acceptable, otherwise (status, payload) ready to hand to writeJSON.
-//
-// Failure shape is stable so the modal can branch on the `code` field and
-// surface a "needs upgrade" hint that points at the specific runtime:
-//
-//	422 {
-//	  "code": "daemon_version_unsupported",
-//	  "current_version": "0.2.18" | "",
-//	  "min_version":     "0.2.21",
-//	  "runtime_id":      "<uuid>"
-//	}
-func (h *Handler) checkQuickCreateDaemonVersion(ctx context.Context, source string, runtimeID pgtype.UUID) (int, map[string]any) {
-	return h.checkQuickCreateDaemonVersionAtLeast(ctx, source, runtimeID, agentpkg.MinQuickCreateCLIVersion)
-}
-
-func (h *Handler) checkQuickCreateDaemonVersionAtLeast(ctx context.Context, source string, runtimeID pgtype.UUID, minimum string) (int, map[string]any) {
-	rt, err := h.getAgentRuntime(ctx, source, runtimeID)
-	if err != nil {
-		// Runtime row vanished between the online check and here — treat
-		// as unavailable rather than wedging the request on a 500.
-		return http.StatusUnprocessableEntity, map[string]any{
-			"code":   "agent_unavailable",
-			"reason": "agent's runtime is no longer registered",
-		}
-	}
-	current := readRuntimeCLIVersion(rt.Metadata)
-	switch err := agentpkg.CheckMinCLIVersionFor(current, minimum); {
-	case err == nil:
-		return 0, nil
-	case errors.Is(err, agentpkg.ErrCLIVersionMissing), errors.Is(err, agentpkg.ErrCLIVersionTooOld):
-		return http.StatusUnprocessableEntity, map[string]any{
-			"code":            "daemon_version_unsupported",
-			"current_version": current,
-			"min_version":     minimum,
-			"runtime_id":      uuidToString(runtimeID),
-		}
-	default:
-		// Defensive fall-through: unknown error from the version check is
-		// also fail-closed, since the gate exists precisely because we
-		// can't trust older daemons with this flow.
-		return http.StatusUnprocessableEntity, map[string]any{
-			"code":            "daemon_version_unsupported",
-			"current_version": current,
-			"min_version":     minimum,
-			"runtime_id":      uuidToString(runtimeID),
-		}
-	}
 }
 
 // readRuntimeCLIVersion pulls metadata.cli_version off a runtime row. The
@@ -3054,16 +2548,11 @@ type CreateIssueRequest struct {
 	LabelIDs []string `json:"label_ids,omitempty"`
 	// Properties is an ID-keyed bag whose values use the same typed wire shape
 	// as Issue.properties and the standalone property PUT endpoint.
-	Properties map[string]json.RawMessage `json:"properties,omitempty"`
-	// OriginType / OriginID stamp the new issue with its provenance so
-	// platform-internal flows can deterministically locate it later. Only
-	// trusted callers should set these — currently the daemon CLI passes
-	// them through for quick-create tasks (origin_type=quick_create,
-	// origin_id=agent_task_queue.id).
-	OriginType *string `json:"origin_type,omitempty"`
-	OriginID   *string `json:"origin_id,omitempty"`
-
-	AllowDuplicate bool `json:"allow_duplicate,omitempty"`
+	Properties     map[string]json.RawMessage `json:"properties,omitempty"`
+	AllowDuplicate bool                       `json:"allow_duplicate,omitempty"`
+	// Meeting opens the issue from the meeting room (origin_type "meeting").
+	// Honored only for member creators; agents keep their agent_create origin.
+	Meeting bool `json:"meeting,omitempty"`
 }
 
 // UnmarshalJSON rejects duplicate object members before Go's ordinary map
@@ -3191,7 +2680,6 @@ func duplicateIssueMessage(issue IssueResponse) string {
 }
 
 func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
-	r = h.withWakeupActor(r)
 	var req CreateIssueRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
@@ -3261,7 +2749,7 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 		// found" rather than a 403 that leaks nothing about which input was wrong.
 		// The row itself is no longer needed: the assignee gate keys on the actor's
 		// originator, not on a scope bound to the parent (MUL-6951).
-		if assigneeType.Valid && (assigneeType.String == "agent" || assigneeType.String == "squad") {
+		if assigneeType.Valid && assigneeType.String == "agent" {
 			parent, err := h.Queries.GetIssueInWorkspace(r.Context(), db.GetIssueInWorkspaceParams{
 				ID:          parentIssueID,
 				WorkspaceID: wsUUID,
@@ -3273,11 +2761,6 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	if status, msg := h.validateAssigneePair(r.Context(), r, workspaceID, assigneeType, assigneeID); status != 0 {
-		writeError(w, status, msg)
-		return
-	}
-
 	if req.ProjectID != nil {
 		id, ok := parseUUIDOrBadRequest(w, *req.ProjectID, "project_id")
 		if !ok {
@@ -3285,10 +2768,24 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 		}
 		projectID = id
 	}
+	// A caller files issues only into projects and under parents it can see;
+	// hidden ones answer exactly like missing ones.
+	if projectID.Valid && !h.requestCanSeeProject(r, wsUUID, projectID) {
+		writeError(w, http.StatusBadRequest, "project not found in this workspace")
+		return
+	}
+	if parentIssueID.Valid && !h.requestCanSeeIssueID(r, wsUUID, parentIssueID) {
+		writeError(w, http.StatusBadRequest, "parent issue not found in this workspace")
+		return
+	}
+
+	if status, msg := h.validateAssigneePair(r.Context(), r, workspaceID, assigneeType, assigneeID); status != 0 {
+		writeError(w, status, msg)
+		return
+	}
+
 	// Project existence and the final parent boundary check are enforced inside
-	// IssueService.Create atomically with the create. The handler preloads a
-	// supplied parent only because the assignee gate must bind any autopilot
-	// authority fallback to that server-verified issue before admission.
+	// IssueService.Create atomically with the create.
 
 	attachmentIDs, ok := parseUUIDSliceOrBadRequest(w, req.AttachmentIDs, "attachment_ids")
 	if !ok {
@@ -3327,35 +2824,16 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 	// Determine creator identity: agent (via X-Agent-ID header) or member.
 	creatorType, actualCreatorID := h.resolveActor(r, creatorID, workspaceID)
 
-	// Optional origin stamping (quick-create / autopilot). Only the
-	// allowed origin types are accepted; anything else is rejected so a
-	// rogue caller can't mint arbitrary origin labels. Both fields must
-	// be provided together.
 	var originType pgtype.Text
 	var originID pgtype.UUID
-	if req.OriginType != nil || req.OriginID != nil {
-		if req.OriginType == nil || req.OriginID == nil {
-			writeError(w, http.StatusBadRequest, "origin_type and origin_id must be provided together")
-			return
-		}
-		switch *req.OriginType {
-		case "quick_create":
-			// Allowed — daemon CLI passes this through from a quick-create task.
-		default:
-			writeError(w, http.StatusBadRequest, "unsupported origin_type")
-			return
-		}
-		oid, ok := parseUUIDOrBadRequest(w, *req.OriginID, "origin_id")
-		if !ok {
-			return
-		}
-		originType = pgtype.Text{String: *req.OriginType, Valid: true}
-		originID = oid
-	} else if creatorType == "agent" {
+	if creatorType == "member" && req.Meeting {
+		originType = pgtype.Text{String: "meeting", Valid: true}
+	}
+	if creatorType == "agent" {
 		// MUL-4305: an agent creating an issue via the ordinary create path
 		// carries no explicit origin, which historically left the new issue
-		// unattributed. Any run later derived from it (agent assignment,
-		// squad-leader trigger) then lost the top-of-chain human originator,
+		// unattributed. Any run later derived from it (agent assignment)
+		// then lost the top-of-chain human originator,
 		// so A2A @-mentions from those runs failed the canInvokeAgent gate
 		// against private agents. Stamp the acting task as the issue's origin
 		// so resolveOriginatorForIssueTask can inherit its originator — the
@@ -3485,9 +2963,6 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 	if writeIssueCreatePropertyError(w, err) {
 		return
 	}
-	if writeIssueLimitReached(w, err) {
-		return
-	}
 	if err != nil {
 		slog.Warn("create issue failed", append(logger.RequestAttrs(r), "error", err, "workspace_id", workspaceID)...)
 		writeError(w, http.StatusInternalServerError, "failed to create issue")
@@ -3513,24 +2988,18 @@ type UpdateIssueRequest struct {
 	Title            *string `json:"title"`
 	// TitleBase is the title adopted by the editor before producing Title. It
 	// protects title edits without coupling them to unrelated issue mutations.
-	TitleBase   *string `json:"title_base,omitempty"`
-	Description *string `json:"description"`
-	// DescriptionBase is the authoritative Markdown the editor had adopted
-	// before producing Description. It lets the server preserve channel media
-	// that landed asynchronously after that base without making media already
-	// present in the base impossible for the user to delete. Older clients omit
-	// it and receive conservative channel-media preservation.
-	DescriptionBase *string  `json:"description_base,omitempty"`
-	Status          *string  `json:"status"`
-	Priority        *string  `json:"priority"`
-	AssigneeType    *string  `json:"assignee_type"`
-	AssigneeID      *string  `json:"assignee_id"`
-	Position        *float64 `json:"position"`
-	StartDate       *string  `json:"start_date"`
-	DueDate         *string  `json:"due_date"`
-	ParentIssueID   *string  `json:"parent_issue_id"`
-	ProjectID       *string  `json:"project_id"`
-	Stage           *int32   `json:"stage"`
+	TitleBase     *string  `json:"title_base,omitempty"`
+	Description   *string  `json:"description"`
+	Status        *string  `json:"status"`
+	Priority      *string  `json:"priority"`
+	AssigneeType  *string  `json:"assignee_type"`
+	AssigneeID    *string  `json:"assignee_id"`
+	Position      *float64 `json:"position"`
+	StartDate     *string  `json:"start_date"`
+	DueDate       *string  `json:"due_date"`
+	ParentIssueID *string  `json:"parent_issue_id"`
+	ProjectID     *string  `json:"project_id"`
+	Stage         *int32   `json:"stage"`
 	// AttachmentIDs lets the description editor bind newly uploaded files to
 	// this issue so they surface in `GET /api/issues/:id/attachments` and the
 	// editor's preview Eye keeps working past a refresh. Existing bindings
@@ -3546,62 +3015,6 @@ type UpdateIssueRequest struct {
 	// predate the handoff UI removal. It is consumed only when this write starts
 	// a run and is never stored on the issue itself.
 	HandoffNote string `json:"handoff_note,omitempty"`
-	// DuplicateOfIssueID marks this issue as a duplicate of another issue in
-	// the same workspace (MUL-7349). A duplicate is an ordinary cancelled issue
-	// that remembers its original, so this also sets status to cancelled.
-	// Any later status change away from cancelled removes the mark; there is
-	// no explicit null. Write-only: read the relation back from
-	// GET /api/issues/{id}/duplicates. Not accepted by batch updates.
-	DuplicateOfIssueID *string `json:"duplicate_of_issue_id,omitempty"`
-}
-
-func mergeIssueChannelMediaDescription(current, incoming string, base *string, attachments []db.Attachment) string {
-	currentIDs := channelmedia.MarkedIDs(current)
-	if len(currentIDs) == 0 {
-		return incoming
-	}
-
-	baseIDs := map[string]bool{}
-	if base != nil {
-		for _, id := range channelmedia.MarkedIDs(*base) {
-			baseIDs[id] = true
-		}
-	}
-	attachmentsByID := make(map[string]db.Attachment, len(attachments))
-	for _, attachment := range attachments {
-		attachmentsByID[uuidToString(attachment.ID)] = attachment
-	}
-
-	merged := incoming
-	for _, id := range currentIDs {
-		attachment, exists := attachmentsByID[id]
-		if !exists {
-			// A deleted attachment must not be resurrected from stale Markdown.
-			continue
-		}
-		downloadPath := channelmedia.DownloadPath(id)
-		hasLink := strings.Contains(merged, downloadPath)
-		knownToEditor := base != nil && baseIDs[id]
-		if knownToEditor && !hasLink {
-			// The editor adopted this media and then removed its link: preserve
-			// the user's explicit deletion rather than treating it as a race.
-			continue
-		}
-		if !hasLink {
-			merged = channelmedia.Append(merged, channelmedia.Block(
-				id,
-				attachment.Filename,
-				strings.HasPrefix(attachment.ContentType, "image/"),
-			))
-			continue
-		}
-		// Tiptap may omit HTML comments when serializing an otherwise intact
-		// image. Restore provenance without duplicating the visible link.
-		if !channelmedia.HasMarker(merged, id) {
-			merged = channelmedia.Append(merged, channelmedia.Marker(id))
-		}
-	}
-	return merged
 }
 
 func refreshUntouchedNullableIssueParams(params *db.UpdateIssueParams, current db.Issue, rawFields map[string]json.RawMessage) {
@@ -3634,11 +3047,11 @@ func refreshUntouchedNullableIssueParams(params *db.UpdateIssueParams, current d
 
 var errIssueFieldConflict = errors.New("issue text field conflict")
 
-func (h *Handler) updateIssueAtomically(ctx context.Context, workspaceID pgtype.UUID, params db.UpdateIssueParams, rawFields map[string]json.RawMessage, titleBase, descriptionBase *string, attachmentIDs []pgtype.UUID, statusKey string) (db.Issue, db.Issue, bool, error) {
+func (h *Handler) updateIssueAtomically(ctx context.Context, workspaceID pgtype.UUID, params db.UpdateIssueParams, rawFields map[string]json.RawMessage, titleBase *string, attachmentIDs []pgtype.UUID, statusKey string) (db.Issue, db.Issue, bool, error) {
 	if h.TxStarter == nil {
 		return db.Issue{}, db.Issue{}, false, errors.New("atomic issue update requires transaction starter")
 	}
-	tx, err := h.beginWakeupWrite(ctx)
+	tx, err := h.TxStarter.Begin(ctx)
 	if err != nil {
 		return db.Issue{}, db.Issue{}, false, fmt.Errorf("begin atomic issue update: %w", err)
 	}
@@ -3671,42 +3084,9 @@ func (h *Handler) updateIssueAtomically(ctx context.Context, workspaceID pgtype.
 		return db.Issue{}, current, false, errIssueFieldConflict
 	}
 
-	if params.Description.Valid {
-		attachments, listErr := qtx.ListAttachmentsByIssue(ctx, db.ListAttachmentsByIssueParams{
-			IssueID:     current.ID,
-			WorkspaceID: current.WorkspaceID,
-		})
-		if listErr != nil {
-			return db.Issue{}, current, false, fmt.Errorf("list issue attachments for description merge: %w", listErr)
-		}
-		currentDescription := ""
-		if current.Description.Valid {
-			currentDescription = current.Description.String
-		}
-		incomingDescription := params.Description.String
-		// No baseline REJECTION here, deliberately: the description editor
-		// autosaves on a debounce, and its base could not be kept in step with
-		// what the server had already accepted — a save whose own echo landed
-		// while the editor was dirty, or any stored description that was not
-		// byte-identical to its own trimmed form, reported a conflict with no
-		// second writer present and then wedged the editor for the session
-		// (MUL-6971). The guard also never covered the writers most likely to
-		// race a human here — mobile and the CLI/agent path send no base at
-		// all — so it mostly rejected the user's own autosave.
-		//
-		// `descriptionBase` stays in the request: it is ALSO the merge metadata
-		// below, which is what lets a user delete channel media the editor had
-		// adopted instead of having it restored on every save. Description
-		// writes are last-write-wins; concurrent edits are recorded by the
-		// `description_updated` activity.
-		params.Description = pgtype.Text{
-			String: mergeIssueChannelMediaDescription(currentDescription, incomingDescription, descriptionBase, attachments),
-			Valid:  true,
-		}
-	}
 	refreshUntouchedNullableIssueParams(&params, current, rawFields)
 
-	issue, cancelledWakeups, err := updateIssueStoppingWakeups(ctx, qtx, params)
+	issue, err := qtx.UpdateIssue(ctx, params)
 	if err != nil {
 		return db.Issue{}, current, false, fmt.Errorf("update locked issue: %w", err)
 	}
@@ -3736,12 +3116,10 @@ func (h *Handler) updateIssueAtomically(ctx context.Context, workspaceID pgtype.
 	if err := tx.Commit(ctx); err != nil {
 		return db.Issue{}, current, false, fmt.Errorf("commit atomic issue update: %w", err)
 	}
-	h.broadcastCancelledWakeups(ctx, workspaceID, cancelledWakeups)
 	return issue, current, attachmentsChanged, nil
 }
 
 func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
-	r = h.withWakeupActor(r)
 	id := chi.URLParam(r, "id")
 	prevIssue, ok := h.loadIssueForUser(w, r, id)
 	if !ok {
@@ -3767,21 +3145,8 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 	var rawFields map[string]json.RawMessage
 	json.Unmarshal(bodyBytes, &rawFields)
 
-	if prevIssue.TriageState.Valid {
-		if field := triageLockedField(rawFields); field != "" {
-			writeIssueInTriage(w, field)
-			return
-		}
-	}
-
-	duplicateOfID, ok := parseDuplicateMark(w, &req, rawFields, prevIssue.ID)
-	if !ok {
-		return
-	}
-
 	// Pre-fill nullable fields (bare sqlc.narg) with current values
 	params := db.UpdateIssueParams{
-		SourceTaskID:  h.wakeupSourceTaskID(r),
 		ID:            prevIssue.ID,
 		AssigneeType:  prevIssue.AssigneeType,
 		AssigneeID:    prevIssue.AssigneeID,
@@ -3790,8 +3155,6 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		ParentIssueID: prevIssue.ParentIssueID,
 		ProjectID:     prevIssue.ProjectID,
 		Stage:         prevIssue.Stage,
-		// Checked against the locked rows in updateIssueWithStatusGuard.
-		DuplicateOfIssueID: duplicateOfID,
 	}
 	if req.ExpectedRevision != nil {
 		if *req.ExpectedRevision < 1 {
@@ -3893,7 +3256,7 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 			if _, err := h.Queries.GetIssueInWorkspace(r.Context(), db.GetIssueInWorkspaceParams{
 				ID:          newParentID,
 				WorkspaceID: prevIssue.WorkspaceID,
-			}); err != nil {
+			}); err != nil || !h.requestCanSeeIssueID(r, prevIssue.WorkspaceID, newParentID) {
 				writeError(w, http.StatusBadRequest, "parent issue not found in this workspace")
 				return
 			}
@@ -3924,7 +3287,10 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 			if _, err := h.Queries.GetProjectInWorkspace(r.Context(), db.GetProjectInWorkspaceParams{
 				ID:          projectUUID,
 				WorkspaceID: prevIssue.WorkspaceID,
-			}); err != nil {
+			}); err != nil || !h.requestCanSeeProject(r, prevIssue.WorkspaceID, projectUUID) {
+				if err == nil {
+					err = pgx.ErrNoRows
+				}
 				if !isNotFound(err) {
 					slog.Error("update issue: validate project scope",
 						append(logger.RequestAttrs(r), "project_id", uuidToString(projectUUID), "error", err)...)
@@ -3954,12 +3320,6 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 	// Validate the resulting (assignee_type, assignee_id) pair when the caller
 	// touches either field. Existing data on the issue is left alone if the
 	// caller is not changing it.
-	//
-	// The scope is THIS issue: an unattributed autopilot run that verifiably owns
-	// the work on it may point it at a private agent, exactly as it may when
-	// creating a child under it. Before MUL-6691 this passed nil, so the reported
-	// flow — create DRA-109 unassigned, then assign it — was refused even though
-	// the identical lineage was accepted on the create path.
 	_, touchedType := rawFields["assignee_type"]
 	_, touchedID := rawFields["assignee_id"]
 	if touchedType || touchedID {
@@ -3976,10 +3336,10 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 
 	var issue db.Issue
 	attachmentsChanged := false
-	if req.Description != nil || req.TitleBase != nil || req.DescriptionBase != nil || len(attachmentIDs) > 0 {
+	if req.Description != nil || req.TitleBase != nil || len(attachmentIDs) > 0 {
 		var lockedPrev db.Issue
 		issue, lockedPrev, attachmentsChanged, err = h.updateIssueAtomically(
-			r.Context(), prevIssue.WorkspaceID, params, rawFields, req.TitleBase, req.DescriptionBase, attachmentIDs, statusKeyForGuard,
+			r.Context(), prevIssue.WorkspaceID, params, rawFields, req.TitleBase, attachmentIDs, statusKeyForGuard,
 		)
 		if lockedPrev.ID.Valid {
 			prevIssue = lockedPrev
@@ -3989,9 +3349,6 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 	}
 	if err != nil {
 		if writeIssueStatusRaceError(w, err) {
-			return
-		}
-		if writeDuplicateMarkError(w, err) {
 			return
 		}
 		if errors.Is(err, errIssueFieldConflict) {
@@ -4056,10 +3413,6 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		"prev_description":    textToPtr(prevIssue.Description),
 		"creator_type":        prevIssue.CreatorType,
 		"creator_id":          uuidToString(prevIssue.CreatorID),
-		// Both ends of a mark change ride here: the activity log records it
-		// and clients refresh the two issues' relations from it.
-		"duplicate_of_issue_id":      liveDuplicateMark(issue.Status, issue.DuplicateOfIssueID),
-		"prev_duplicate_of_issue_id": liveDuplicateMark(prevIssue.Status, prevIssue.DuplicateOfIssueID),
 	})
 	if attachmentsChanged {
 		// The full owner snapshot must be admitted before an auxiliary event at
@@ -4072,14 +3425,14 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Reconcile the task queue. Whether this write starts an agent run — and
-	// for whom (agent assignee or squad leader) — is decided by the single
+	// for whom — is decided by the single
 	// WillEnqueueRun predicate, shared verbatim with the preview endpoint so
 	// the two never drift (MUL-3375).
 	//
 	// A reassignment intentionally does NOT cancel existing tasks on the issue
 	// (#4963 / MUL-4113). The previous "cancel every active task on the issue"
 	// was too coarse: it silently dropped unrelated in-flight work (a
-	// mention-triggered run for another agent, a squad task) with no requeue,
+	// mention-triggered run for another agent) with no requeue,
 	// and it self-cancelled a run that reassigned the issue from inside itself.
 	// Ownership handoff no longer implies interruption; the new assignee's run,
 	// if any, is enqueued by WillEnqueueRun below and runs alongside whatever
@@ -4100,27 +3453,17 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		h.dispatchIssueRun(r.Context(), issue, trigger, actorType, actorID, req.HandoffNote)
 	}
 
-	// Sub-issue rules on the parent (the child_done system rule and sub-issue
-	// conditions): the write recorded the change; process it now. A failure
-	// is retried by the scheduler sweep.
-	if statusChanged || prevIssue.ParentIssueID != issue.ParentIssueID || prevIssue.Stage != issue.Stage {
-		h.processChildEvents(r.Context(), issue.ParentIssueID, prevIssue.ParentIssueID)
-	}
-
 	writeJSON(w, http.StatusOK, resp)
 }
 
 // validateAssigneePair verifies the (assignee_type, assignee_id) pair refers
-// to an existing entity in the workspace. For agent and squad assignees it
+// to an existing entity in the workspace. For agent assignees it
 // also rejects archived targets and runs the INVOKE gate — canInvokeAgent, not
 // the softer canAccessPrivateAgent view gate: assigning an issue produces a
 // run, so it must clear the same predicate as chat / @-mention (MUL-3963).
 // That means owner-only for a private agent, with NO workspace-admin bypass
 // and NO unconditional agent-to-agent bypass — an agent caller (X-Agent-ID) is
 // judged by the top-of-chain human originator like everywhere else.
-// An autopilot run needs no special case here: since MUL-6951 a scheduled run
-// carries its trigger owner's originator, so it is judged by exactly the same
-// predicate as that human acting directly.
 //
 // Returns (statusCode, errorMessage). statusCode == 0 means the pair is valid;
 // callers should treat any non-zero status as a rejection and surface it back
@@ -4172,47 +3515,9 @@ func (h *Handler) validateAssigneePair(ctx context.Context, r *http.Request, wor
 			return http.StatusForbidden, "you do not have permission to assign work to this agent"
 		}
 		return 0, ""
-	case "squad":
-		squad, err := h.Queries.GetSquadInWorkspace(ctx, db.GetSquadInWorkspaceParams{
-			ID:          assigneeID,
-			WorkspaceID: wsUUID,
-		})
-		if err != nil {
-			return http.StatusBadRequest, "assignee_id does not refer to a squad in this workspace"
-		}
-		if squad.ArchivedAt.Valid {
-			return http.StatusBadRequest, "cannot assign to an archived squad"
-		}
-		leader, err := h.Queries.GetAgent(ctx, squad.LeaderID)
-		if err != nil || leader.ArchivedAt.Valid {
-			return http.StatusBadRequest, "squad leader is archived; cannot assign to this squad"
-		}
-		actorType, actorID := h.resolveActor(r, requestUserID(r), workspaceID)
-		effectiveInvoker := h.invokeOriginatorFromRequest(r, actorType, actorID)
-		if !h.canInvokeAgent(ctx, leader, actorType, actorID, effectiveInvoker, workspaceID) {
-			// Same wording rule as the agent branch above; "this squad"
-			// avoids disclosing the leader agent's permission mode.
-			return http.StatusForbidden, "you do not have permission to assign work to this squad"
-		}
-		return 0, ""
 	default:
-		return http.StatusBadRequest, "assignee_type must be 'member', 'agent', or 'squad'"
+		return http.StatusBadRequest, "assignee_type must be 'member' or 'agent'"
 	}
-}
-
-// shouldEnqueueAgentTask returns true when an issue creation or assignment
-// should trigger the assigned agent. Backlog issues are skipped — backlog
-// acts as a parking lot where issues can be pre-assigned without immediately
-// triggering execution. Moving out of backlog is handled separately in
-// UpdateIssue.
-func (h *Handler) shouldEnqueueAgentTask(ctx context.Context, issue db.Issue) bool {
-	// Only the fixed backlog key parks work; custom unstarted statuses do not.
-	// An issue in Triage is not parked but refused: it produces no run from any
-	// entry point until it is accepted (MUL-7189 §2.3).
-	if issue.TriageState.Valid || issuestatus.Effective(ctx, h.Queries, issue.WorkspaceID, issue.Status) == "backlog" {
-		return false
-	}
-	return h.isAgentAssigneeReady(ctx, issue)
 }
 
 // shouldEnqueueAssigneeFallback returns true when comment routing can fall back
@@ -4287,36 +3592,7 @@ func (h *Handler) isAgentRunningOnIssue(r *http.Request, actorType string, issue
 	return uuidToString(task.IssueID) == uuidToString(issue.ID)
 }
 
-// isAgentAssigneeReady checks if an issue is assigned to an active agent
-// with a valid runtime.
-func (h *Handler) isAgentAssigneeReady(ctx context.Context, issue db.Issue) bool {
-	if !issue.AssigneeType.Valid || issue.AssigneeType.String != "agent" || !issue.AssigneeID.Valid {
-		return false
-	}
-
-	agent, err := h.Queries.GetAgent(ctx, issue.AssigneeID)
-	if err != nil {
-		return false
-	}
-	// The shared verdict, not a local re-check (service.AgentReadiness). Only a
-	// BLOCKED verdict stops the enqueue: an offline machine still queues,
-	// because that work runs when the machine comes back.
-	verdict, err := service.AgentReadiness(ctx, h.runtimeLookup(obsmetrics.RuntimeLookupSourceIssue), agent)
-	if err != nil || !verdict.Blocked() {
-		return err == nil
-	}
-	// Assignment has no response the assigner reads for this outcome, so a
-	// refusal that needs human repair leaves the explanation on the issue
-	// (MUL-6164). An unbound agent keeps its silent skip: the agent list
-	// already shows it has no runtime, and nothing about it is new here.
-	if service.RuntimeBlockedNeedsNotice(verdict.Reason) {
-		h.noteRuntimeUnusable(ctx, issue, agent, verdict)
-	}
-	return false
-}
-
 func (h *Handler) DeleteIssue(w http.ResponseWriter, r *http.Request) {
-	r = h.withWakeupActor(r)
 	id := chi.URLParam(r, "id")
 	issue, ok := h.loadIssueForUser(w, r, id)
 	if !ok {
@@ -4324,8 +3600,6 @@ func (h *Handler) DeleteIssue(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.TaskService.CancelTasksForIssue(r.Context(), issue.ID)
-	// Fail any linked autopilot runs before delete (ON DELETE SET NULL clears issue_id).
-	_ = h.AutopilotService.FailAutopilotRunsByIssue(r.Context(), issue.ID)
 
 	deleteResult, err := h.deleteIssueAndCollectAttachmentURLs(r.Context(), issue, nil)
 	if err != nil {
@@ -4342,7 +3616,6 @@ func (h *Handler) DeleteIssue(w http.ResponseWriter, r *http.Request) {
 	resolvedID := uuidToString(issue.ID)
 	h.publish(protocol.EventIssueDeleted, uuidToString(issue.WorkspaceID), actorType, actorID, map[string]any{"issue_id": resolvedID})
 	h.publishIssueSnapshots(r.Context(), deleteResult.DetachedChildren, actorType, actorID)
-	h.publishClearedDuplicates(r.Context(), deleteResult.ClearedDuplicates, actorType, actorID)
 	slog.Info("issue deleted", append(logger.RequestAttrs(r), "issue_id", resolvedID, "workspace_id", uuidToString(issue.WorkspaceID))...)
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -4355,16 +3628,6 @@ func (h *Handler) DeleteIssue(w http.ResponseWriter, r *http.Request) {
 type issueDeleteResult struct {
 	AttachmentURLs   []string
 	DetachedChildren []db.Issue
-	// ClearedDuplicates lost their duplicate mark because their original was
-	// deleted. They stay cancelled.
-	ClearedDuplicates []clearedDuplicate
-}
-
-// clearedDuplicate pairs a duplicate whose mark a delete cleared with the
-// original that delete removed, so the broadcast can still name it.
-type clearedDuplicate struct {
-	Issue    db.Issue
-	Original db.Issue
 }
 
 func (h *Handler) deleteIssueAndCollectAttachmentURLs(ctx context.Context, issue db.Issue, excludedIssueIDs []pgtype.UUID) (issueDeleteResult, error) {
@@ -4375,7 +3638,7 @@ func (h *Handler) deleteIssuesAndCollectAttachmentURLs(ctx context.Context, issu
 	sort.Slice(issues, func(i, j int) bool {
 		return uuidToString(issues[i].ID) < uuidToString(issues[j].ID)
 	})
-	tx, err := h.beginWakeupWrite(ctx)
+	tx, err := h.TxStarter.Begin(ctx)
 	if err != nil {
 		return issueDeleteResult{}, fmt.Errorf("begin issue delete: %w", err)
 	}
@@ -4396,15 +3659,6 @@ func (h *Handler) deleteIssuesAndCollectAttachmentURLs(ctx context.Context, issu
 			return issueDeleteResult{}, fmt.Errorf("detach child issues: %w", err)
 		}
 		result.DetachedChildren = append(result.DetachedChildren, detached...)
-		cleared, err := qtx.ClearIssueDuplicatesOf(ctx, db.ClearIssueDuplicatesOfParams{
-			WorkspaceID: issue.WorkspaceID, IssueID: issue.ID, ExcludedIssueIds: excludedIssueIDs,
-		})
-		if err != nil {
-			return issueDeleteResult{}, fmt.Errorf("clear duplicate marks: %w", err)
-		}
-		for _, duplicate := range cleared {
-			result.ClearedDuplicates = append(result.ClearedDuplicates, clearedDuplicate{Issue: duplicate, Original: issue})
-		}
 		attachmentURLs, err := qtx.ListAttachmentURLsByIssueOrComments(ctx, issue.ID)
 		if err != nil {
 			return issueDeleteResult{}, fmt.Errorf("list issue attachment URLs: %w", err)
@@ -4457,31 +3711,13 @@ func (h *Handler) deleteIssuesAndCollectAttachmentURLs(ctx context.Context, issu
 	return result, nil
 }
 
-// publishIssueSnapshots broadcasts issue:updated for issues a delete rewrote:
-// detached children and duplicates whose original was deleted.
+// publishIssueSnapshots broadcasts issue:updated for children a delete
+// detached.
 func (h *Handler) publishIssueSnapshots(ctx context.Context, issues []db.Issue, actorType, actorID string) {
 	for _, issue := range issues {
 		response := issueToResponse(issue, h.getIssuePrefix(ctx, issue.WorkspaceID))
 		h.fillStatusCategory(ctx, issue.WorkspaceID, &response)
 		h.publish(protocol.EventIssueUpdated, uuidToString(issue.WorkspaceID), actorType, actorID, map[string]any{"issue": response})
-	}
-}
-
-// publishClearedDuplicates broadcasts issue:updated for duplicates whose
-// original a delete removed. The pointer went with the original, so the
-// payload names both ends the way UpdateIssue does, plus the identifier the
-// activity log can no longer look up (MUL-7349).
-func (h *Handler) publishClearedDuplicates(ctx context.Context, cleared []clearedDuplicate, actorType, actorID string) {
-	for _, c := range cleared {
-		prefix := h.getIssuePrefix(ctx, c.Issue.WorkspaceID)
-		response := issueToResponse(c.Issue, prefix)
-		h.fillStatusCategory(ctx, c.Issue.WorkspaceID, &response)
-		h.publish(protocol.EventIssueUpdated, uuidToString(c.Issue.WorkspaceID), actorType, actorID, map[string]any{
-			"issue":                        response,
-			"duplicate_of_issue_id":        liveDuplicateMark(c.Issue.Status, c.Issue.DuplicateOfIssueID),
-			"prev_duplicate_of_issue_id":   liveDuplicateMark(c.Issue.Status, c.Original.ID),
-			"prev_duplicate_of_identifier": prefix + "-" + strconv.Itoa(int(c.Original.Number)),
-		})
 	}
 }
 
@@ -4495,7 +3731,6 @@ type BatchUpdateIssuesRequest struct {
 }
 
 func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
-	r = h.withWakeupActor(r)
 	bodyBytes, err := io.ReadAll(r.Body)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "failed to read request body")
@@ -4524,10 +3759,6 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 	var rawUpdates map[string]json.RawMessage
 	if raw, exists := rawTop["updates"]; exists {
 		json.Unmarshal(raw, &rawUpdates)
-	}
-	if _, ok := rawUpdates["duplicate_of_issue_id"]; ok {
-		writeError(w, http.StatusBadRequest, "duplicate_of_issue_id is not supported in batch updates")
-		return
 	}
 
 	// Short-circuit when no mutation field is present in `updates`. Without
@@ -4577,9 +3808,6 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	if !h.validateBatchTriageLocks(w, r, wsUUID, req.IssueIDs, rawUpdates) {
-		return
-	}
 	// The batch shares one project_id, so it is checked once here rather than
 	// per issue, and rejected instead of skipped like the per-item guards in
 	// the loop: a foreign project invalidates the whole request.
@@ -4592,7 +3820,10 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 		if _, err := h.Queries.GetProjectInWorkspace(r.Context(), db.GetProjectInWorkspaceParams{
 			ID:          projectUUID,
 			WorkspaceID: wsUUID,
-		}); err != nil {
+		}); err != nil || !h.requestCanSeeProject(r, wsUUID, projectUUID) {
+			if err == nil {
+				err = pgx.ErrNoRows
+			}
 			if !isNotFound(err) {
 				slog.Error("batch update issues: validate project scope",
 					append(logger.RequestAttrs(r), "project_id", uuidToString(projectUUID), "error", err)...)
@@ -4612,7 +3843,6 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 	// Parents whose sub-issues changed this batch. Their rules are evaluated
 	// once after the loop against the final state (MUL-4155), not per child
 	// against a mid-batch snapshot.
-	var changedParents []pgtype.UUID
 	for _, issueID := range req.IssueIDs {
 		issueUUID, err := util.ParseUUID(issueID)
 		if err != nil {
@@ -4622,12 +3852,11 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 			ID:          issueUUID,
 			WorkspaceID: wsUUID,
 		})
-		if err != nil {
+		if err != nil || !h.requestCanSeeIssue(r, prevIssue) {
 			continue
 		}
 
 		params := db.UpdateIssueParams{
-			SourceTaskID:  h.wakeupSourceTaskID(r),
 			ID:            prevIssue.ID,
 			AssigneeType:  prevIssue.AssigneeType,
 			AssigneeID:    prevIssue.AssigneeID,
@@ -4708,7 +3937,7 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 				if _, err := h.Queries.GetIssueInWorkspace(r.Context(), db.GetIssueInWorkspaceParams{
 					ID:          newParentID,
 					WorkspaceID: prevIssue.WorkspaceID,
-				}); err != nil {
+				}); err != nil || !h.requestCanSeeIssueID(r, prevIssue.WorkspaceID, newParentID) {
 					continue
 				}
 				// Cycle detection: walk up from the new parent to ensure we don't reach this issue.
@@ -4767,12 +3996,9 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 
 		var issue db.Issue
 		if req.Updates.Description != nil {
-			// One batch-level base cannot describe multiple issue documents.
-			// Preserve every marked channel-media block conservatively, matching
-			// legacy single-update clients that omit description_base.
 			var lockedPrev db.Issue
 			issue, lockedPrev, _, err = h.updateIssueAtomically(
-				r.Context(), prevIssue.WorkspaceID, params, rawUpdates, nil, nil, nil, batchStatusKey,
+				r.Context(), prevIssue.WorkspaceID, params, rawUpdates, nil, nil, batchStatusKey,
 			)
 			if err == nil {
 				prevIssue = lockedPrev
@@ -4803,13 +4029,11 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 		projectChanged := req.Updates.ProjectID != nil && uuidToString(prevIssue.ProjectID) != uuidToString(issue.ProjectID)
 
 		h.publish(protocol.EventIssueUpdated, workspaceID, actorType, actorID, map[string]any{
-			"issue":                      resp,
-			"assignee_changed":           assigneeChanged,
-			"status_changed":             statusChanged,
-			"priority_changed":           priorityChanged,
-			"project_changed":            projectChanged,
-			"duplicate_of_issue_id":      liveDuplicateMark(issue.Status, issue.DuplicateOfIssueID),
-			"prev_duplicate_of_issue_id": liveDuplicateMark(prevIssue.Status, prevIssue.DuplicateOfIssueID),
+			"issue":            resp,
+			"assignee_changed": assigneeChanged,
+			"status_changed":   statusChanged,
+			"priority_changed": priorityChanged,
+			"project_changed":  projectChanged,
 		})
 
 		// Reassignment does not cancel existing tasks (#4963 / MUL-4113) —
@@ -4833,18 +4057,8 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 		// No status change — not even → cancelled — cancels active tasks here,
 		// mirroring UpdateIssue (MUL-4465). See that handler for the rationale.
 
-		if statusChanged || prevIssue.ParentIssueID != issue.ParentIssueID || prevIssue.Stage != issue.Stage {
-			changedParents = append(changedParents, issue.ParentIssueID, prevIssue.ParentIssueID)
-		}
-
 		updated++
 	}
-
-	// Each write recorded its sub-issue change; processing claims them per
-	// parent, so each parent is evaluated once against the batch's final
-	// state, independent of issue_ids order (MUL-4155). A failure is retried
-	// by the sweep.
-	h.processChildEvents(r.Context(), changedParents...)
 
 	slog.Info("batch update issues", append(logger.RequestAttrs(r), "count", updated)...)
 	writeJSON(w, http.StatusOK, map[string]any{"updated": updated})
@@ -4891,7 +4105,7 @@ func (h *Handler) BatchDeleteIssues(w http.ResponseWriter, r *http.Request) {
 			ID:          issueUUID,
 			WorkspaceID: wsUUID,
 		})
-		if err != nil {
+		if err != nil || !h.requestCanSeeIssue(r, issue) {
 			continue
 		}
 
@@ -4899,7 +4113,6 @@ func (h *Handler) BatchDeleteIssues(w http.ResponseWriter, r *http.Request) {
 		issues = append(issues, issue)
 		excludedIDs = append(excludedIDs, issue.ID)
 		h.TaskService.CancelTasksForIssue(r.Context(), issue.ID)
-		_ = h.AutopilotService.FailAutopilotRunsByIssue(r.Context(), issue.ID)
 	}
 	deleteResult, err := h.deleteIssuesAndCollectAttachmentURLs(r.Context(), issues, excludedIDs)
 	if err != nil {
@@ -4913,7 +4126,6 @@ func (h *Handler) BatchDeleteIssues(w http.ResponseWriter, r *http.Request) {
 		h.publish(protocol.EventIssueDeleted, workspaceID, actorType, actorID, map[string]any{"issue_id": uuidToString(issue.ID)})
 	}
 	h.publishIssueSnapshots(r.Context(), deleteResult.DetachedChildren, actorType, actorID)
-	h.publishClearedDuplicates(r.Context(), deleteResult.ClearedDuplicates, actorType, actorID)
 	deleted := len(issues)
 
 	slog.Info("batch delete issues", append(logger.RequestAttrs(r), "count", deleted)...)

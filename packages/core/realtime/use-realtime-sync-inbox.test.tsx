@@ -23,7 +23,6 @@ vi.mock("../platform/workspace-storage", () => ({
   registerForWorkspaceRehydration: () => {},
 }));
 vi.mock("../paths", () => ({
-  useHasOnboarded: () => true,
   resolvePostAuthDestination: () => "/",
 }));
 

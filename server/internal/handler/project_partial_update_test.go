@@ -28,6 +28,41 @@ func (d projectReadPauseDB) QueryRow(ctx context.Context, query string, args ...
 	return row
 }
 
+type contextLockPauseRow struct {
+	pgx.Row
+	paused  chan struct{}
+	release chan struct{}
+}
+
+func (row *contextLockPauseRow) Scan(dest ...any) error {
+	if err := row.Row.Scan(dest...); err != nil {
+		return err
+	}
+	close(row.paused)
+	<-row.release
+	return nil
+}
+
+func waitContextLockSignal(t *testing.T, signal <-chan struct{}, failure string) {
+	t.Helper()
+	select {
+	case <-signal:
+	case <-time.After(10 * time.Second):
+		t.Fatal(failure)
+	}
+}
+
+func waitContextLockResult(t *testing.T, result <-chan error, label string) error {
+	t.Helper()
+	select {
+	case err := <-result:
+		return err
+	case <-time.After(10 * time.Second):
+		t.Fatalf("%s did not complete", label)
+		return nil
+	}
+}
+
 func projectNullableValues(p ProjectResponse) map[string]*string {
 	return map[string]*string{
 		"description": p.Description, "icon": p.Icon,

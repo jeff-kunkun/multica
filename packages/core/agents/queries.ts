@@ -47,7 +47,7 @@ export const agentRunCountsKeys = {
 // this cache with zero additional network traffic.
 //
 // Presence itself is derived from the active tasks only (see derive-presence.ts
-// and #1823). The one terminal row per agent is used solely for the Squad hover
+// and #1823). The one terminal row per agent is used solely for a hover
 // card's "last activity" line; MUL-5436 tracks moving it to a dedicated lazy
 // endpoint so this hot query stops carrying history at all.
 //
@@ -135,25 +135,5 @@ export function agentTasksOptions(wsId: string, agentId: string) {
     staleTime: 30 * 1000,
     gcTime: 5 * 60 * 1000,
     refetchOnWindowFocus: true,
-  });
-}
-
-/** Unfinished agent-creation conversations, scoped to the caller. */
-export const agentBuilderSessionKeys = {
-  all: (wsId: string) => ["workspace", wsId, "agent-builder-sessions"] as const,
-  list: (wsId: string) => [...agentBuilderSessionKeys.all(wsId), "list"] as const,
-};
-
-export function agentBuilderSessionListOptions(wsId: string) {
-  return queryOptions({
-    queryKey: agentBuilderSessionKeys.list(wsId),
-    queryFn: () => api.listAgentBuilderSessions(),
-    enabled: wsId.length > 0,
-    // Overrides the client-wide `staleTime: Infinity`. This list changes
-    // through work done on another screen — starting a conversation, sending a
-    // turn, an agent finally being created — and the surfaces that render it
-    // mount on demand. Cached forever it would show the state of the first
-    // visit: a user who just held a conversation comes back to "no drafts".
-    staleTime: 0,
   });
 }

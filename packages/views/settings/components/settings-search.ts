@@ -9,8 +9,6 @@ export interface SettingsSearchEntry {
   tab: string;
   /** In-page anchor (`?section=`); omitted for page-level entries. */
   anchor?: string;
-  /** Detail page within Channels (`?integration=`). */
-  integration?: string;
   title: string;
   description?: string;
 }
@@ -53,7 +51,7 @@ export function searchSettings(
   const descriptionHits: SettingsSearchResult[] = [];
   const seen = new Set<string>();
   for (const entry of entries) {
-    const key = `${entry.tab}#${entry.anchor ?? ""}#${entry.integration ?? ""}`;
+    const key = `${entry.tab}#${entry.anchor ?? ""}`;
     if (seen.has(key)) continue;
     const inTitle = entry.title.toLocaleLowerCase().includes(needle);
     const inDescription =

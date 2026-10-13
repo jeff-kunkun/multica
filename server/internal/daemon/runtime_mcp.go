@@ -7,21 +7,10 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 
 	"github.com/pelletier/go-toml/v2"
 )
-
-// runtimeLocalMcpServerSummary is the intentionally non-secret inventory
-// shown in Agent capabilities. Never add command arguments, URLs, headers, or
-// environment values here: this payload leaves the user's machine.
-type runtimeLocalMcpServerSummary struct {
-	Name      string `json:"name"`
-	Transport string `json:"transport,omitempty"`
-	Source    string `json:"source,omitempty"`
-	Enabled   bool   `json:"enabled"`
-}
 
 // mergeRuntimeAndAgentMcpConfig builds the task-local MCP configuration used
 // when an agent has MCP servers managed by Multica. Runtime servers are the
@@ -389,162 +378,6 @@ func loadClaudePluginMcpServerConfigs(home string) map[string]any {
 	return out
 }
 
-func listRuntimeLocalMcpServers(provider string) ([]runtimeLocalMcpServerSummary, bool, error) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return nil, false, fmt.Errorf("resolve user home: %w", err)
-	}
-
-	var path, key, source string
-	var format string
-	switch provider {
-	case "claude":
-		path, key, source, format = filepath.Join(home, ".claude.json"), "mcpServers", "User config", "json"
-	case "codearts":
-		path, key, source, format = codeArtsUserConfigPath(home), "mcp", "User config", "jsonc"
-	case "codebuddy":
-		path, key, source, format = codebuddyUserMcpConfigPath(home), "mcpServers", "User config", "jsonc"
-	case "kimi":
-		// Inventory only — kimi is deliberately absent from
-		// loadRuntimeMcpServerConfigs. `kimi acp` merges this file with the
-		// ephemeral `mcpServers` we send in session/new, so merging it in
-		// again would spawn every user server twice.
-		kimiHome := strings.TrimSpace(os.Getenv("KIMI_CODE_HOME"))
-		if kimiHome == "" {
-			kimiHome = filepath.Join(home, ".kimi-code")
-		}
-		path, key, source, format = filepath.Join(kimiHome, "mcp.json"), "mcpServers", "User config", "json"
-	case "codex":
-		codexHome := strings.TrimSpace(os.Getenv("CODEX_HOME"))
-		if codexHome == "" {
-			codexHome = filepath.Join(home, ".codex")
-		}
-		path, key, source, format = filepath.Join(codexHome, "config.toml"), "mcp_servers", "User config", "toml"
-	case "cursor":
-		path, key, source, format = filepath.Join(home, ".cursor", "mcp.json"), "mcpServers", "User config", "json"
-	case "opencode":
-		configHome := strings.TrimSpace(os.Getenv("XDG_CONFIG_HOME"))
-		if configHome == "" {
-			configHome = filepath.Join(home, ".config")
-		}
-		path, key, source, format = filepath.Join(configHome, "opencode", "opencode.json"), "mcp", "User config", "json"
-	case "openclaw":
-		path = strings.TrimSpace(os.Getenv("CLAWDBOT_CONFIG_PATH"))
-		if path == "" {
-			stateDir := strings.TrimSpace(os.Getenv("OPENCLAW_STATE_DIR"))
-			if stateDir == "" {
-				stateDir = filepath.Join(home, ".openclaw")
-			}
-			path = filepath.Join(stateDir, "openclaw.json")
-		}
-		key, source, format = "mcp.servers", "User config", "json"
-	case "pi":
-		// Inventory only, same as omp. Pi already loads this file at startup,
-		// so loadRuntimeMcpServerConfigs must not merge it into the task.
-		path, key, source, format = filepath.Join(home, ".pi", "agent", "mcp.json"), "mcpServers", "User config", "json"
-	case "omp":
-		// Inventory scope: omp discovers servers from a multi-level precedence
-		// chain (.omp/mcp.json, .omp/.mcp.json, profile/user-level configs, and
-		// third-party tool configs such as .claude.json, .cursor/mcp.json,
-		// .vscode/mcp.json, and project-root mcp.json/.mcp.json). This inventory
-		// reads only ~/.omp/agent/mcp.json — the user-scope entry point — so a
-		// user who clears every server in the UI may still inherit servers from
-		// lower-precedence sources. This matches the simplification other
-		// providers already make and avoids sending full tool-chain state over
-		// the wire.
-		path, key, source, format = filepath.Join(home, ".omp", "agent", "mcp.json"), "mcpServers", "User config", "json"
-	default:
-		return []runtimeLocalMcpServerSummary{}, false, nil
-	}
-
-	out := make([]runtimeLocalMcpServerSummary, 0)
-	raw, err := os.ReadFile(path)
-	if err == nil {
-		cfg, err := unmarshalRuntimeMcpConfig(raw, format)
-		if err != nil {
-			return nil, true, err
-		}
-		if servers, ok := nestedRuntimeMcpMap(cfg, key); ok {
-			out = append(out, runtimeMcpSummaries(servers, source)...)
-		}
-	} else if !os.IsNotExist(err) {
-		return nil, true, fmt.Errorf("read runtime MCP config: %w", err)
-	}
-
-	if provider == "claude" {
-		out = append(out, listClaudePluginMcpServers(home)...)
-	}
-
-	// User configuration wins on a same-name collision. Plugin entries are
-	// appended afterwards and only fill names the user config did not define.
-	deduped := make([]runtimeLocalMcpServerSummary, 0, len(out))
-	seen := make(map[string]bool)
-	for _, server := range out {
-		if seen[server.Name] {
-			continue
-		}
-		seen[server.Name] = true
-		deduped = append(deduped, server)
-	}
-	out = deduped
-	sort.Slice(out, func(i, j int) bool {
-		return strings.ToLower(out[i].Name) < strings.ToLower(out[j].Name)
-	})
-	return out, true, nil
-}
-
-func runtimeMcpSummaries(servers map[string]any, source string) []runtimeLocalMcpServerSummary {
-	out := make([]runtimeLocalMcpServerSummary, 0, len(servers))
-	for name, value := range servers {
-		entry, ok := value.(map[string]any)
-		if !ok || strings.TrimSpace(name) == "" {
-			continue
-		}
-		enabled := true
-		if value, ok := entry["enabled"].(bool); ok {
-			enabled = value
-		}
-		if value, ok := entry["disabled"].(bool); ok && value {
-			enabled = false
-		}
-		out = append(out, runtimeLocalMcpServerSummary{
-			Name:      name,
-			Transport: runtimeMcpTransport(entry),
-			Source:    source,
-			Enabled:   enabled,
-		})
-	}
-	return out
-}
-
-func listClaudePluginMcpServers(home string) []runtimeLocalMcpServerSummary {
-	out := make([]runtimeLocalMcpServerSummary, 0)
-	for _, plugin := range listEnabledClaudePlugins(home) {
-		manifest, _ := readClaudePluginManifest(plugin.InstallPath)
-		paths := claudePluginComponentPaths(
-			plugin.InstallPath,
-			manifest.MCPServers,
-			filepath.Join(plugin.InstallPath, ".mcp.json"),
-		)
-		for _, path := range paths {
-			raw, err := os.ReadFile(path)
-			if err != nil {
-				continue
-			}
-			var cfg map[string]any
-			if json.Unmarshal(raw, &cfg) != nil {
-				continue
-			}
-			servers, ok := nestedRuntimeMcpMap(cfg, "mcpServers")
-			if !ok {
-				continue
-			}
-			out = append(out, runtimeMcpSummaries(servers, "Claude Plugin · "+plugin.Name)...)
-		}
-	}
-	return out
-}
-
 func nestedRuntimeMcpMap(cfg map[string]any, path string) (map[string]any, bool) {
 	current := cfg
 	parts := strings.Split(path, ".")
@@ -563,23 +396,4 @@ func nestedRuntimeMcpMap(cfg map[string]any, path string) (map[string]any, bool)
 		current = mapped
 	}
 	return nil, false
-}
-
-func runtimeMcpTransport(entry map[string]any) string {
-	kind, _ := entry["type"].(string)
-	switch strings.ToLower(kind) {
-	case "local", "stdio":
-		return "stdio"
-	case "remote", "http", "streamable-http":
-		return "http"
-	case "sse":
-		return "sse"
-	}
-	if _, ok := entry["command"]; ok {
-		return "stdio"
-	}
-	if _, ok := entry["url"]; ok {
-		return "http"
-	}
-	return "unknown"
 }

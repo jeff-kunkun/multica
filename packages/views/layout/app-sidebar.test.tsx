@@ -141,12 +141,10 @@ vi.mock("@multica/core/paths", async (importOriginal) => ({
     myIssues: () => "/acme/my-issues",
     issues: () => "/acme/issues",
     projects: () => "/acme/projects",
-    autopilots: () => "/acme/autopilots",
+    meetings: () => "/acme/meetings",
     agents: () => "/acme/agents",
-    squads: () => "/acme/squads",
     usage: () => "/acme/usage",
     runtimes: () => "/acme/runtimes",
-    skills: () => "/acme/skills",
     settings: () => "/acme/settings",
     issueDetail: (id: string) => `/acme/issues/${id}`,
     projectDetail: (id: string) => `/acme/projects/${id}`,
@@ -178,10 +176,6 @@ vi.mock("@multica/core/inbox/queries", () => ({
     new Set(entries.filter((s) => s.count > 0).map((s) => s.workspace_id)),
 }));
 vi.mock("@multica/core/issues/queries", () => ({ issueDetailOptions: () => ({ queryKey: ["issue"] }) }));
-vi.mock("@multica/core/issues/stores/create-mode-store", () => ({
-  useCreateModeStore: { getState: () => ({ lastMode: "agent" }) },
-  openCreateIssueWithPreference: vi.fn(),
-}));
 vi.mock("@multica/core/issues/stores/draft-store", () => ({ useIssueDraftStore: () => false }));
 vi.mock("@multica/core/modals", () => ({ useModalStore: { getState: () => ({ modal: null, open: vi.fn() }) } }));
 vi.mock("@multica/core/pins/mutations", () => ({ useDeletePin: () => ({ mutate: deletePin }), useReorderPins: () => ({ mutate: vi.fn() }) }));
@@ -390,7 +384,7 @@ describe("workspace-switcher dropdown per-workspace dot", () => {
 });
 
 describe("navigation item presentation", () => {
-  it("keeps Analytics and Settings styled like the other nav items", () => {
+  it("keeps Settings styled like the other nav items", () => {
     const { container } = render(<AppSidebar />);
     const referenceClassName = container.querySelector(
       'button[data-href="/acme/issues"]',
@@ -398,7 +392,7 @@ describe("navigation item presentation", () => {
 
     expect(referenceClassName).toBeTruthy();
 
-    for (const href of ["/acme/usage", "/acme/settings"]) {
+    for (const href of ["/acme/meetings", "/acme/settings"]) {
       expect(container.querySelector(`button[data-href="${href}"]`)?.className).toBe(
         referenceClassName,
       );

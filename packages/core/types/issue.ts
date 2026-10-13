@@ -32,7 +32,7 @@ export type IssueStatus = BuiltInIssueStatus | (string & {});
 
 export type IssuePriority = "urgent" | "high" | "medium" | "low" | "none";
 
-export type IssueAssigneeType = "member" | "agent" | "squad";
+export type IssueAssigneeType = "member" | "agent";
 
 export interface IssueReaction {
   id: string;
@@ -159,14 +159,6 @@ export interface IssueSourceContext {
   snapshot: SourceContextSnapshot;
 }
 
-/** The original a duplicate points at: enough to link it and show its status. */
-export interface IssueDuplicateOf {
-  id: string;
-  identifier: string;
-  title: string;
-  status: IssueStatus;
-}
-
 export interface Issue {
   id: string;
   workspace_id: string;
@@ -196,17 +188,9 @@ export interface Issue {
   creator_type: IssueAssigneeType;
   creator_id: string;
   parent_issue_id: string | null;
-  /**
-   * The original this issue duplicates (MUL-7349): present only while the
-   * issue is cancelled and the original still exists, resolved by the server.
-   * Absent when connected to an older backend.
-   */
-  duplicate_of?: IssueDuplicateOf | null;
   project_id: string | null;
   position: number;
-  // Ordered barrier group among sibling sub-issues (null = unstaged). The
-  // parent assignee is woken when a stage closes while a later one waits;
-  // see server/internal/service/issue_wakeup_system.go.
+  // Ordered barrier group among sibling sub-issues (null = unstaged).
   stage: number | null;
   // Calendar days as date-only "YYYY-MM-DD" (no time, no timezone). Use the
   // helpers in @multica/core/issues/date to format/compare — never `new Date()`

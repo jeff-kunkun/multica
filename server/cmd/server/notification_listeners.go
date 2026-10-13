@@ -110,11 +110,6 @@ var delegatedAlwaysNotifTypes = map[string]bool{
 // in_progress synonym now notifies where it did not — an accepted cost, since a
 // missed handoff strands the issue while a spare inbox row costs one dismissal.
 //
-// Triage never reaches this predicate: it is not a status but a column of its
-// own (MUL-7213), so an entry waiting in Triage carries whatever status the
-// triager has proposed and is answered on that. Suppressing notifications for
-// Triage entries is a separate rule and belongs to MUL-7219.
-//
 // The error is preserved rather than swallowed so each caller can choose its
 // own failure direction; built-ins answer without touching the catalog, so only
 // custom statuses can fail here at all.
@@ -447,6 +442,10 @@ func notifyIssueSubscribers(
 			continue
 		}
 
+		if !memberCanSeeIssue(ctx, queries, subID, targetIssueID) {
+			continue
+		}
+
 		item, err := queries.CreateInboxItem(ctx, db.CreateInboxItemParams{
 			ID:            dbid.NewV7(),
 			WorkspaceID:   parseUUID(workspaceID),
@@ -507,6 +506,9 @@ func notifyDirect(
 
 	// Check notification preferences for member recipients.
 	if recipientType == "member" {
+		if !memberCanSeeIssue(ctx, queries, recipientID, issueID) {
+			return
+		}
 		prefs := loadUserPrefs(ctx, queries, workspaceID, []string{recipientID})
 		if p, ok := prefs[recipientID]; ok && isNotifMuted(p, notifType) {
 			return
@@ -563,7 +565,6 @@ func notifyMentionedMembers(
 	recipientIDs := map[string]bool{}
 
 	hasAll := false
-	var squadIDs []string
 	for _, m := range mentions {
 		if m.Type == "all" {
 			hasAll = true
@@ -574,29 +575,6 @@ func notifyMentionedMembers(
 				continue
 			}
 			recipientIDs[m.ID] = true
-		}
-		if m.Type == "squad" {
-			squadIDs = append(squadIDs, m.ID)
-		}
-	}
-
-	// Expand each @squad mention to its human members. Agent members of a
-	// squad are reached via comment-trigger / assignment paths, not the
-	// mention-inbox path, so we only seed member-typed recipients here.
-	for _, sid := range squadIDs {
-		squadUUID, err := util.ParseUUID(sid)
-		if err != nil {
-			continue
-		}
-		members, err := queries.ListSquadMembers(context.Background(), squadUUID)
-		if err != nil {
-			slog.Error("failed to list squad members for @squad mention", "squad_id", sid, "error", err)
-			continue
-		}
-		for _, sm := range members {
-			if sm.MemberType == "member" {
-				recipientIDs[util.UUIDToString(sm.MemberID)] = true
-			}
 		}
 	}
 
@@ -629,6 +607,9 @@ func notifyMentionedMembers(
 		// different group from `comments`: muting comment volume must not
 		// silence someone asking for you by name.
 		if p, ok := mentionPrefs[id]; ok && isNotifMuted(p, "mentioned") {
+			continue
+		}
+		if !memberCanSeeIssue(context.Background(), queries, id, issueID) {
 			continue
 		}
 		item, err := queries.CreateInboxItem(context.Background(), db.CreateInboxItemParams{
@@ -1090,4 +1071,23 @@ func inboxItemToResponse(item db.InboxItem) map[string]any {
 		"actor_id":       util.UUIDToPtr(item.ActorID),
 		"details":        json.RawMessage(item.Details),
 	}
+}
+
+// memberCanSeeIssue keeps notifications about an issue away from members who
+// cannot see it (project sharing, migration 582). Notifications without an
+// issue always deliver; lookup errors deny.
+func memberCanSeeIssue(ctx context.Context, queries *db.Queries, userID, issueID string) bool {
+	if issueID == "" {
+		return true
+	}
+	issueUUID, err := util.ParseUUID(issueID)
+	if err != nil {
+		return true
+	}
+	userUUID, err := util.ParseUUID(userID)
+	if err != nil {
+		return false
+	}
+	ok, err := queries.CanSeeIssue(ctx, db.CanSeeIssueParams{Viewer: userUUID, IssueID: issueUUID})
+	return err == nil && ok
 }

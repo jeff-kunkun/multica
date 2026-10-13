@@ -90,10 +90,10 @@ func parseLabelResourceType(raw string) (string, error) {
 		return defaultLabelResourceType, nil
 	}
 	switch value {
-	case "issue", "agent", "skill":
+	case "issue", "agent":
 		return value, nil
 	default:
-		return "", errors.New("resource_type must be issue, agent, or skill")
+		return "", errors.New("resource_type must be issue or agent")
 	}
 }
 
@@ -307,7 +307,6 @@ func (h *Handler) UpdateLabel(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) DeleteLabel(w http.ResponseWriter, r *http.Request) {
-	r = h.withWakeupActor(r)
 	id := chi.URLParam(r, "id")
 	workspaceID := h.resolveWorkspaceID(r)
 	userID, ok := requireUserID(w, r)
@@ -322,7 +321,7 @@ func (h *Handler) DeleteLabel(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	tx, err := h.beginWakeupWrite(r.Context())
+	tx, err := h.TxStarter.Begin(r.Context())
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to start transaction")
 		return
@@ -336,7 +335,6 @@ func (h *Handler) DeleteLabel(w http.ResponseWriter, r *http.Request) {
 	for _, cleanup := range []func() error{
 		func() error { return qtx.DeleteIssueLabelAssignmentsByLabel(r.Context(), idUUID) },
 		func() error { return qtx.DeleteAgentLabelAssignmentsByLabel(r.Context(), idUUID) },
-		func() error { return qtx.DeleteSkillLabelAssignmentsByLabel(r.Context(), idUUID) },
 	} {
 		if err := cleanup(); err != nil {
 			writeError(w, http.StatusInternalServerError, "failed to remove label assignments")
@@ -417,7 +415,6 @@ func (h *Handler) ListLabelsForIssue(w http.ResponseWriter, r *http.Request) {
 
 // AttachLabel attaches a label to an issue.
 func (h *Handler) AttachLabel(w http.ResponseWriter, r *http.Request) {
-	r = h.withWakeupActor(r)
 	issueID := chi.URLParam(r, "id")
 	userID, ok := requireUserID(w, r)
 	if !ok {
@@ -460,12 +457,10 @@ func (h *Handler) AttachLabel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	attached, err := wakeupWrite(h, r, func(q *db.Queries) (db.AttachLabelToIssueRow, error) {
-		return q.AttachLabelToIssue(r.Context(), db.AttachLabelToIssueParams{
-			IssueID:     issue.ID,
-			LabelID:     labelID,
-			WorkspaceID: issue.WorkspaceID,
-		})
+	attached, err := h.Queries.AttachLabelToIssue(r.Context(), db.AttachLabelToIssueParams{
+		IssueID:     issue.ID,
+		LabelID:     labelID,
+		WorkspaceID: issue.WorkspaceID,
 	})
 	if err != nil {
 		slog.Warn("AttachLabelToIssue failed", append(logger.RequestAttrs(r), "error", err)...)
@@ -499,7 +494,6 @@ func (h *Handler) AttachLabel(w http.ResponseWriter, r *http.Request) {
 
 // DetachLabel removes a label from an issue.
 func (h *Handler) DetachLabel(w http.ResponseWriter, r *http.Request) {
-	r = h.withWakeupActor(r)
 	issueID := chi.URLParam(r, "id")
 	labelID := chi.URLParam(r, "labelId")
 	userID, ok := requireUserID(w, r)
@@ -536,12 +530,10 @@ func (h *Handler) DetachLabel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	detached, err := wakeupWrite(h, r, func(q *db.Queries) (db.DetachLabelFromIssueRow, error) {
-		return q.DetachLabelFromIssue(r.Context(), db.DetachLabelFromIssueParams{
-			IssueID:     issue.ID,
-			LabelID:     labelUUID,
-			WorkspaceID: issue.WorkspaceID,
-		})
+	detached, err := h.Queries.DetachLabelFromIssue(r.Context(), db.DetachLabelFromIssueParams{
+		IssueID:     issue.ID,
+		LabelID:     labelUUID,
+		WorkspaceID: issue.WorkspaceID,
 	})
 	if err != nil {
 		slog.Warn("DetachLabelFromIssue failed", append(logger.RequestAttrs(r), "error", err)...)
@@ -570,7 +562,7 @@ func (h *Handler) DetachLabel(w http.ResponseWriter, r *http.Request) {
 }
 
 // ---------------------------------------------------------------------------
-// Handlers — agent/skill↔label attach/detach
+// Handlers — agent↔label attach/detach
 // ---------------------------------------------------------------------------
 
 func (h *Handler) ListLabelsForAgent(w http.ResponseWriter, r *http.Request) {
@@ -634,67 +626,4 @@ func (h *Handler) DetachLabelFromAgent(w http.ResponseWriter, r *http.Request) {
 	}
 	h.publish(protocol.EventLabelUpdated, uuidToString(agent.WorkspaceID), "member", requestUserID(r), map[string]any{"label_id": uuidToString(labelID), "resource_type": "agent"})
 	h.ListLabelsForAgent(w, r)
-}
-
-func (h *Handler) ListLabelsForSkill(w http.ResponseWriter, r *http.Request) {
-	skill, ok := h.loadSkillForUser(w, r, chi.URLParam(r, "id"))
-	if !ok {
-		return
-	}
-	labels, err := h.Queries.ListLabelsBySkill(r.Context(), db.ListLabelsBySkillParams{
-		SkillID: skill.ID, WorkspaceID: skill.WorkspaceID,
-	})
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to list skill labels")
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"labels": labelsToResponse(labels)})
-}
-
-func (h *Handler) AttachLabelToSkill(w http.ResponseWriter, r *http.Request) {
-	skill, ok := h.loadSkillForUser(w, r, chi.URLParam(r, "id"))
-	if !ok || !h.canManageSkill(w, r, skill) {
-		return
-	}
-	var req AttachLabelRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.LabelID == "" {
-		writeError(w, http.StatusBadRequest, "label_id is required")
-		return
-	}
-	labelID, ok := parseUUIDOrBadRequest(w, req.LabelID, "label_id")
-	if !ok {
-		return
-	}
-	label, err := h.Queries.GetLabel(r.Context(), db.GetLabelParams{ID: labelID, WorkspaceID: skill.WorkspaceID})
-	if err != nil || label.ResourceType != "skill" {
-		writeError(w, http.StatusNotFound, "skill label not found")
-		return
-	}
-	if err := h.Queries.AttachLabelToSkill(r.Context(), db.AttachLabelToSkillParams{
-		SkillID: skill.ID, LabelID: labelID, WorkspaceID: skill.WorkspaceID,
-	}); err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to attach skill label")
-		return
-	}
-	h.publish(protocol.EventLabelUpdated, uuidToString(skill.WorkspaceID), "member", requestUserID(r), map[string]any{"label": labelToResponse(label)})
-	h.ListLabelsForSkill(w, r)
-}
-
-func (h *Handler) DetachLabelFromSkill(w http.ResponseWriter, r *http.Request) {
-	skill, ok := h.loadSkillForUser(w, r, chi.URLParam(r, "id"))
-	if !ok || !h.canManageSkill(w, r, skill) {
-		return
-	}
-	labelID, ok := parseUUIDOrBadRequest(w, chi.URLParam(r, "labelId"), "label id")
-	if !ok {
-		return
-	}
-	if err := h.Queries.DetachLabelFromSkill(r.Context(), db.DetachLabelFromSkillParams{
-		SkillID: skill.ID, LabelID: labelID, WorkspaceID: skill.WorkspaceID,
-	}); err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to detach skill label")
-		return
-	}
-	h.publish(protocol.EventLabelUpdated, uuidToString(skill.WorkspaceID), "member", requestUserID(r), map[string]any{"label_id": uuidToString(labelID), "resource_type": "skill"})
-	h.ListLabelsForSkill(w, r)
 }

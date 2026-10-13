@@ -1,30 +1,26 @@
 import { useQuery } from "@tanstack/react-query";
 import { InvitePage } from "@multica/views/invite";
 import { InvitationsPage } from "@multica/views/invitations";
-import { OnboardingFlow } from "@multica/views/onboarding";
+import { NewWorkspacePage } from "@multica/views/workspace/new-workspace-page";
 import { useNavigation } from "@multica/views/navigation";
 import { paths } from "@multica/core/paths";
 import { workspaceListOptions } from "@multica/core/workspace/queries";
 import { useWindowOverlayStore } from "@/stores/window-overlay-store";
-import { useLocalRuntimesPending } from "../platform/use-local-runtimes-pending";
 
 /**
  * Window-level transition overlay: renders above the tab system when the
- * user is in a pre-workspace flow (onboarding, create workspace, accept
- * invite).
+ * user is in a pre-workspace flow (create workspace, accept invite).
  *
  * This component is intentionally thin — just a fixed positioning shell
  * that covers the tab system. It does NOT hide traffic lights or provide
- * a drag strip: each contained view (OnboardingFlow, NewWorkspacePage,
- * InvitePage) renders its own `<DragStrip />` as a flex-child at top so
- * native macOS traffic lights stay visible and the page content can fill
- * the window edge-to-edge. This matches the Linear/Notion/Arc pattern for
- * pre-dashboard flows and keeps platform chrome consistent across every
- * "not-in-dashboard" surface.
+ * a drag strip: each contained view (NewWorkspacePage, InvitePage) renders
+ * its own `<DragStrip />` as a flex-child at top so native macOS traffic
+ * lights stay visible and the page content can fill the window
+ * edge-to-edge.
  *
- * All UX affordances (Back button, Log out button, welcome copy, invite
- * card) live inside the shared view components under `packages/views/`,
- * so web and desktop render identical content.
+ * All UX affordances (Back button, Log out button, invite card) live inside
+ * the shared view components under `packages/views/`, so web and desktop
+ * render identical content.
  */
 export function WindowOverlay() {
   const overlay = useWindowOverlayStore((s) => s.overlay);
@@ -37,9 +33,6 @@ function WindowOverlayInner() {
   const close = useWindowOverlayStore((s) => s.close);
   const { push } = useNavigation();
   const { data: wsList = [] } = useQuery(workspaceListOptions());
-  // Live local-daemon signal for the onboarding runtime step so it doesn't
-  // flash "no runtime found" while the daemon is still probing CLI versions.
-  const runtimesPending = useLocalRuntimesPending();
 
   if (!overlay) return null;
 
@@ -48,34 +41,14 @@ function WindowOverlayInner() {
   // complete the flow.
   const onBack = wsList.length > 0 ? close : undefined;
 
-  // The daemon's PATH probe runs once at boot, so a newly-installed CLI
-  // (Claude / Codex / Cursor) does not show up until the daemon is bounced.
-  // Both onboarding entries need this — creating a second workspace hits the
-  // same runtime step.
-  const restartDaemon = async () => {
-    await window.daemonAPI?.restart?.();
-  };
-
   return (
     <div className="fixed inset-0 z-50 flex flex-col overflow-auto bg-background">
-      {/* Creating a workspace is the onboarding flow entered at the
-          workspace step: a second workspace still needs its own runtime and
-          its own Mika, so running one flow keeps the two from drifting. */}
       {overlay.type === "new-workspace" && (
-        <OnboardingFlow
-          mode="new_workspace"
-          onCancel={onBack}
-          onRuntimeRefresh={restartDaemon}
-          runtimesPending={runtimesPending}
-          onComplete={(ws, destination) => {
+        <NewWorkspacePage
+          onBack={onBack}
+          onSuccess={(ws) => {
             close();
-            if (ws && destination?.kind === "chat") {
-              push(paths.workspace(ws.slug).chatSession(destination.sessionId));
-            } else if (ws && destination?.kind === "issue") {
-              push(paths.workspace(ws.slug).issueDetail(destination.issueId));
-            } else if (ws) {
-              push(paths.workspace(ws.slug).issues());
-            }
+            push(paths.workspace(ws.slug).issues());
           }}
         />
       )}
@@ -86,29 +59,6 @@ function WindowOverlayInner() {
         />
       )}
       {overlay.type === "invitations" && <InvitationsPage />}
-      {overlay.type === "onboarding" && (
-        <OnboardingFlow
-          onComplete={(ws, destination) => {
-            close();
-            if (ws && destination?.kind === "chat") {
-              push(
-                paths.workspace(ws.slug).chatSession(destination.sessionId),
-              );
-            } else if (ws && destination?.kind === "issue") {
-              push(
-                paths.workspace(ws.slug).issueDetail(destination.issueId),
-              );
-            } else if (ws) {
-              push(paths.workspace(ws.slug).issues());
-            } else {
-              push(paths.root());
-            }
-          }}
-          // Restart the bundled daemon when the user hits Refresh on
-          onRuntimeRefresh={restartDaemon}
-          runtimesPending={runtimesPending}
-        />
-      )}
     </div>
   );
 }

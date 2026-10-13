@@ -11,8 +11,8 @@ import {
 /**
  * The Multica CLI install commands, one per platform family.
  *
- * Three surfaces render install instructions — the runtimes "add computer"
- * dialog, onboarding's CLI card, and the landing download page. They read the
+ * Two surfaces render install instructions — the runtimes "add computer"
+ * dialog and the landing download page. They read the
  * commands from here instead of each hardcoding a string, which is how Windows
  * silently went missing from all of them while scripts/install.ps1 sat in the
  * repo. The scripts' own headers are the source of truth.

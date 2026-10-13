@@ -5,36 +5,21 @@ import { act, fireEvent, screen, waitFor } from "@testing-library/react";
 import type { UploadResult } from "@multica/core/hooks/use-file-upload";
 import type { Attachment } from "@multica/core/types";
 import { useCommentComposerStore, useCommentDraftStore } from "@multica/core/issues/stores";
-import { WorkspaceSlugProvider } from "@multica/core/paths";
 import { renderWithI18n } from "../../test/i18n";
 import { CommentInput } from "./comment-input";
 import { ReplyInput } from "./reply-input";
-
-/** Shape of ContentEditor's `quickActionMenu` prop, as the composers pass it. */
-type QuickActionMenuProp = {
-  getQuickActions?: () => { id: string; name: string; description?: string }[];
-  renderQuickAction?: (quickActionId: string) => Promise<string>;
-  onRenderError?: (error: unknown) => void;
-};
 
 // Uploads now flow through the module-level coordinator, which calls
 // `api.uploadFile(file, ctx, signal)` (MUL-5181). Tests drive uploads by
 // mocking that call directly rather than the old `uploadWithToast` hook.
 const apiUploadFile = vi.hoisted(() => vi.fn());
 const apiListWorkspaces = vi.hoisted(() => vi.fn());
-const apiListQuickActions = vi.hoisted(() => vi.fn());
-const apiRenderQuickAction = vi.hoisted(() => vi.fn());
 const apiPreviewCommentTriggers = vi.hoisted(() => vi.fn());
 const apiListTasksByIssue = vi.hoisted(() => vi.fn());
 const apiCancelTask = vi.hoisted(() => vi.fn());
 const uploadWithToast = vi.hoisted(() => vi.fn());
 const editorDefaultValues = vi.hoisted(() => ({
   values: [] as Array<string | undefined>,
-}));
-// The `/` quick-action menu is wired through a ContentEditor prop, so the mock
-// editor records it — that prop being absent is exactly the MUL-5588 bug.
-const editorQuickActionMenu = vi.hoisted(() => ({
-  last: undefined as QuickActionMenuProp | undefined,
 }));
 // Observability + failure control for the write-back insert path (MUL-5181):
 // `insertMarkdownAtEnd` returns false while the (simulated) Tiptap instance
@@ -60,8 +45,6 @@ vi.mock("@multica/core/api", () => ({
   api: {
     uploadFile: apiUploadFile,
     listWorkspaces: apiListWorkspaces,
-    listQuickActions: apiListQuickActions,
-    renderQuickAction: apiRenderQuickAction,
     previewCommentTriggers: apiPreviewCommentTriggers,
     listTasksByIssue: apiListTasksByIssue,
     cancelTask: apiCancelTask,
@@ -121,7 +104,6 @@ vi.mock("../../editor", async () => ({
       onUploadingChange,
       onSubmit,
       onReady,
-      quickActionMenu,
     }: {
       defaultValue?: string;
       value?: string;
@@ -131,12 +113,10 @@ vi.mock("../../editor", async () => ({
       onUploadingChange?: (uploading: boolean) => void;
       onSubmit?: () => void;
       onReady?: () => void;
-      quickActionMenu?: QuickActionMenuProp;
     },
     ref: Ref<unknown>,
   ) {
     editorDefaultValues.values.push(defaultValue);
-    editorQuickActionMenu.last = quickActionMenu;
     editorUploadSignal.notify = onUploadingChange;
     const initialValue = value ?? defaultValue ?? "";
     const valueRef = useRef(initialValue);
@@ -286,8 +266,6 @@ beforeEach(() => {
   uploadWithToast.mockReset();
   apiUploadFile.mockReset();
   apiListWorkspaces.mockReset();
-  apiListQuickActions.mockReset();
-  apiRenderQuickAction.mockReset();
   apiPreviewCommentTriggers.mockReset();
   apiListTasksByIssue.mockReset();
   apiCancelTask.mockReset();
@@ -304,86 +282,8 @@ beforeEach(() => {
   // path and hide the shell the next test expects.
   useCommentDraftStore.setState({ drafts: {} });
   editorDefaultValues.values = [];
-  editorQuickActionMenu.last = undefined;
   focusCalls.focused = 0;
   focusCalls.blurred = 0;
-});
-
-// ---------------------------------------------------------------------------
-// Quick action `/` menu (MUL-5588)
-// ---------------------------------------------------------------------------
-
-describe("quick action `/` menu", () => {
-  const workspace = { id: "ws-1", slug: "acme", name: "Acme" };
-
-  function renderInWorkspace(ui: ReactNode) {
-    apiListWorkspaces.mockResolvedValue([workspace]);
-    apiListQuickActions.mockResolvedValue({
-      quick_actions: [
-        { id: "qa-1", name: "review", description: "Ask for a review", status: "active" },
-        { id: "qa-2", name: "retired", description: "", status: "archived" },
-      ],
-    });
-    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-    return renderWithI18n(
-      <QueryClientProvider client={queryClient}>
-        {/* useQuickActionMenu resolves the workspace from the slug context; without
-            it the catalog query stays disabled and every menu reads as empty. */}
-        <WorkspaceSlugProvider slug="acme">{ui}</WorkspaceSlugProvider>
-      </QueryClientProvider>,
-    );
-  }
-
-  // Both composers post to the same issue, so `/` must offer the same catalog in
-  // both. The reply box shipped without the prop entirely (MUL-5588): its menu
-  // listed only the built-in `/note` while the top-level composer listed the
-  // workspace's quick actions.
-  const composers = [
-    {
-      name: "top-level comment composer",
-      shell: "comment-composer-shell" as const,
-      element: <CommentInput issueId="issue-1" onSubmit={vi.fn().mockResolvedValue(true)} />,
-    },
-    {
-      name: "thread reply composer",
-      shell: "reply-composer-shell" as const,
-      element: (
-        <ReplyInput
-          issueId="issue-1"
-          parentId="comment-1"
-          avatarType="member"
-          avatarId="user-1"
-          onSubmit={vi.fn().mockResolvedValue(true)}
-        />
-      ),
-    },
-  ];
-
-  for (const composer of composers) {
-    it(`offers the workspace's active quick actions in the ${composer.name}`, async () => {
-      renderInWorkspace(composer.element);
-      activateComposer(composer.shell);
-
-      await waitFor(() => {
-        expect(editorQuickActionMenu.last?.getQuickActions?.()).toEqual([
-          { id: "qa-1", name: "review", description: "Ask for a review" },
-        ]);
-      });
-    });
-
-    it(`binds quick action rendering to this issue in the ${composer.name}`, async () => {
-      apiRenderQuickAction.mockResolvedValue("rendered body");
-      renderInWorkspace(composer.element);
-      activateComposer(composer.shell);
-
-      await waitFor(() => {
-        expect(editorQuickActionMenu.last?.renderQuickAction).toBeTypeOf("function");
-      });
-      await editorQuickActionMenu.last?.renderQuickAction?.("qa-1");
-
-      expect(apiRenderQuickAction).toHaveBeenCalledWith("issue-1", "qa-1");
-    });
-  }
 });
 
 /**
@@ -431,6 +331,25 @@ describe("comment composers", () => {
     expect(shell.className).not.toContain("h-[60vh]");
   });
 
+  it("adds a top-level comment to a comment-started running turn by default", async () => {
+    const turn = {
+      id: "turn-1", agent_id: "agent-1", issue_id: "issue-1", status: "running", priority: 0,
+      created_at: "2026-09-23T00:00:00Z", dispatched_at: null, started_at: "2026-09-23T00:00:01Z",
+      completed_at: null, result: null, error: null, trigger_comment_id: "comment-1",
+      supplement_capability: "task-supplement-v1", can_supplement: true,
+    };
+    apiListTasksByIssue.mockResolvedValue([turn]);
+    apiPreviewCommentTriggers.mockResolvedValue({ agents: [{ id: "agent-1", name: "Lambda", source: "assignee", reason: "" }] });
+    const { container, onSubmit } = renderCommentInput();
+
+    activateComposer("comment-composer-shell");
+    fireEvent.change(screen.getByTestId("editor"), { target: { value: "requirement changed" } });
+    await screen.findByText("Add to current run", {}, { timeout: 5000 });
+    fireEvent.click(getSubmitButton(container));
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledWith("requirement changed", undefined, undefined,
+      ["turn-1"]), { timeout: 5000 });
+  }, 15_000);
+
   it("keeps main comment submission wired after removing expand", async () => {
     const { container, onSubmit } = renderCommentInput();
 
@@ -441,7 +360,7 @@ describe("comment composers", () => {
     fireEvent.click(getSubmitButton(container));
 
     await waitFor(() => {
-      expect(onSubmit).toHaveBeenCalledWith("hello from composer", undefined, undefined, undefined);
+      expect(onSubmit).toHaveBeenCalledWith("hello from composer", undefined, undefined, []);
     });
   });
 
@@ -474,7 +393,7 @@ describe("comment composers", () => {
     fireEvent.change(screen.getByTestId("editor"), { target: { value: "start over on web" } });
     await chooseRecipientAction("Lambda trigger: Add to current run", /Stop and start over/);
     fireEvent.click(await screen.findByRole("button", { name: "Stop and send" }, { timeout: 5000 }));
-    await waitFor(() => expect(onSubmit).toHaveBeenCalledWith("start over on web", undefined, undefined, undefined), { timeout: 5000 });
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledWith("start over on web", undefined, undefined, []), { timeout: 5000 });
     expect(apiCancelTask).toHaveBeenCalledWith("issue-1", "turn-1");
     expect(apiCancelTask.mock.invocationCallOrder[0]!).toBeLessThan(onSubmit.mock.invocationCallOrder[1]!);
   }, 15_000);
@@ -499,7 +418,7 @@ describe("comment composers", () => {
     fireEvent.change(screen.getByTestId("editor"), { target: { value: "only fix web" } });
     await screen.findByRole("button", { name: "Lambda trigger: Start after this run" }, { timeout: 5000 });
     fireEvent.click(getSubmitButton(container));
-    await waitFor(() => expect(onSubmit).toHaveBeenCalledWith("only fix web", undefined, undefined, undefined), { timeout: 5000 });
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledWith("only fix web", undefined, undefined, []), { timeout: 5000 });
 
     // One message can still go into the running turn.
     fireEvent.change(screen.getByTestId("editor"), { target: { value: "and keep desktop as is" } });
@@ -574,7 +493,7 @@ describe("comment composers", () => {
     fireEvent.click(getSubmitButton(container));
 
     await waitFor(() => {
-      expect(onSubmit).toHaveBeenCalledWith("thread reply", undefined, undefined, undefined);
+      expect(onSubmit).toHaveBeenCalledWith("thread reply", undefined, undefined, []);
     });
   });
 
@@ -624,7 +543,7 @@ describe("comment composers", () => {
         "true",
       ),
     );
-    expect(onSubmit).toHaveBeenCalledWith("sending", undefined, undefined, undefined);
+    expect(onSubmit).toHaveBeenCalledWith("sending", undefined, undefined, []);
 
     resolveSubmit(true);
 
@@ -1113,7 +1032,7 @@ describe("comment composers — upload submit gate", () => {
         expect.stringContaining("https://cdn.example/att-9.png"),
         ["att-9"],
         undefined,
-        undefined,
+        [],
       ),
     );
   });
@@ -1135,7 +1054,7 @@ describe("comment composers — upload submit gate", () => {
     fireEvent.keyDown(editor, { key: "Enter", metaKey: true });
 
     await waitFor(() => expect(onSubmit).toHaveBeenCalled());
-    expect(onSubmit).toHaveBeenCalledWith("keep this, dropped the image", undefined, undefined, undefined);
+    expect(onSubmit).toHaveBeenCalledWith("keep this, dropped the image", undefined, undefined, []);
   });
 
   it("writes the finished upload's link into the persisted draft after the composer unmounts", async () => {

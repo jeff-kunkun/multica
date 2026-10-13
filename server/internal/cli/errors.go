@@ -31,11 +31,6 @@ const (
 	KindNetworkRefused                  // connection refused
 	KindNetworkTLS                      // x509 / tls handshake failures
 	KindNetworkOffline                  // catch-all: host unreachable, reset, etc.
-	// KindNetworkStalled is a transfer that stopped producing bytes (see
-	// StallError). Distinct from KindNetworkTimeout because the remedy is
-	// different: a timeout says "this took too long", a stall says "this went
-	// quiet", and only the latter is unaffected by raising a time limit.
-	KindNetworkStalled
 	// KindNetworkTLSHandshakeTimeout is a TLS handshake that never completed
 	// after the TCP connection opened. Distinct from KindNetworkTimeout
 	// because the remedy is different: the request budget
@@ -76,7 +71,7 @@ const (
 // IsNetwork reports whether the kind is a transport-layer failure.
 func (k ErrorKind) IsNetwork() bool {
 	switch k {
-	case KindNetworkTimeout, KindNetworkDNS, KindNetworkRefused, KindNetworkTLS, KindNetworkOffline, KindNetworkStalled, KindNetworkTLSHandshakeTimeout:
+	case KindNetworkTimeout, KindNetworkDNS, KindNetworkRefused, KindNetworkTLS, KindNetworkOffline, KindNetworkTLSHandshakeTimeout:
 		return true
 	default:
 		return false
@@ -98,8 +93,6 @@ func (k ErrorKind) String() string {
 		return "network_tls"
 	case KindNetworkOffline:
 		return "network_offline"
-	case KindNetworkStalled:
-		return "network_stalled"
 	case KindNetworkTLSHandshakeTimeout:
 		return "network_tls_handshake_timeout"
 	case KindAuthRequired:
@@ -231,14 +224,6 @@ func classifyNetworkError(err error) ErrorKind {
 		return KindUnknown
 	}
 
-	// A stalled transfer is checked first: the guard implements it by
-	// canceling the request context, so the underlying error would otherwise
-	// read as a generic cancellation and lose the reason.
-	var stalled *StallError
-	if errors.As(err, &stalled) {
-		return KindNetworkStalled
-	}
-
 	// Timeouts (context deadline or socket i/o timeout).
 	if errors.Is(err, context.DeadlineExceeded) {
 		return KindNetworkTimeout
@@ -349,10 +334,6 @@ func wrapBodyRead(req *http.Request, err error) error {
 	if err == nil {
 		return nil
 	}
-	var stalled *StallError
-	if errors.As(err, &stalled) {
-		return wrapTransport(req, err)
-	}
 	var netErr net.Error
 	if errors.As(err, &netErr) ||
 		errors.Is(err, context.DeadlineExceeded) ||
@@ -399,10 +380,6 @@ var kindMessages = map[ErrorKind][2]string{
 	KindNetworkTLSHandshakeTimeout: {
 		"TLS handshake timed out: the connection to the Multica server opened, but the secure handshake never completed. Something on this network path (security software, a VPN, a router, or a firewall) is probably dropping large TLS handshakes; curl or a browser on the same machine may still work. Retry with the environment variable GODEBUG=tlsmlkem=0 set, and keep it set for the CLI and the daemon if that fixes it. MULTICA_HTTP_TIMEOUT does not affect the handshake.",
 		"TLS 握手超时：已连上 Multica 服务器，但安全握手一直没有完成。通常是网络路径上的安全软件、VPN、路由器或防火墙丢弃了较大的 TLS 握手包，同一台机器上的 curl 或浏览器可能仍然正常。请设置环境变量 GODEBUG=tlsmlkem=0 后重试；若因此恢复，请为 CLI 和守护进程长期保留该设置。MULTICA_HTTP_TIMEOUT 对握手无效。",
-	},
-	KindNetworkStalled: {
-		"Transfer stalled: the connection stopped sending data before the response was complete. Check your network connection or try again. You can raise the no-progress budget with MULTICA_HTTP_STALL_TIMEOUT.",
-		"传输中断：响应尚未接收完毕，连接就停止发送数据。请检查网络连接或重试。可通过 MULTICA_HTTP_STALL_TIMEOUT 调高无进展等待时间。",
 	},
 	KindNetworkDNS: {
 		"Could not resolve the Multica server address. Check your network connection or the --server-url setting.",
@@ -465,7 +442,7 @@ var kindMessages = map[ErrorKind][2]string{
 // 409 belongs here because the generic conflict copy is not merely vague, it
 // points the wrong way: it reads as a transient race ("re-fetch the latest
 // state and try again") while every conflict this API returns is a
-// deterministic refusal that names its own fix ("a skill with this name
+// deterministic refusal that names its own fix ("a label with that name
 // already exists", "set parent_id (--parent) to <id>"). Agents took the retry
 // hint literally and burned hours re-sending an unchanged request (GH #6264,
 // GH #5948), and the server-side wording added in MUL-4417 never reached them.

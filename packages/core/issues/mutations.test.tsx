@@ -315,7 +315,7 @@ describe("useUpdateIssue — optimistic move keeps every bucketed board in sync"
     expect(qc.getQueryState(detailKey)?.isInvalidated).toBe(true);
   });
 
-  it("keeps the authoritative description base while a description update is pending", async () => {
+  it("keeps the authoritative description while a description update is pending", async () => {
     let resolve!: (issue: Issue) => void;
     updateIssue.mockReturnValue(
       new Promise<Issue>((r) => {
@@ -332,19 +332,15 @@ describe("useUpdateIssue — optimistic move keeps every bucketed board in sync"
       result.current.mutate({
         id: "issue-1",
         description: "local edit",
-        description_base: "base",
       });
     });
 
     await waitFor(() => {
       expect(updateIssue).toHaveBeenCalledWith("issue-1", {
         description: "local edit",
-        description_base: "base",
       });
     });
-    const optimistic = qc.getQueryData<Issue & { description_base?: string }>(detailKey);
-    expect(optimistic?.description).toBe("base");
-    expect(optimistic).not.toHaveProperty("description_base");
+    expect(qc.getQueryData<Issue>(detailKey)?.description).toBe("base");
 
     await act(async () => {
       resolve(makeIssue(1, { description: "local edit" }));
@@ -692,7 +688,7 @@ describe("useBatchUpdateIssues — optimistic patch covers filtered boards too",
     }
   });
 
-  it("does not optimistically replace description merge bases", async () => {
+  it("does not optimistically replace the description", async () => {
     let resolve!: (r: { updated: number }) => void;
     batchUpdateIssues.mockReturnValue(
       new Promise<{ updated: number }>((r) => {
@@ -702,7 +698,7 @@ describe("useBatchUpdateIssues — optimistic patch covers filtered boards too",
     const detailKey = issueKeys.detail(WS_ID, "issue-1");
     qc.setQueryData<Issue>(
       detailKey,
-      makeIssue(1, { description: "base with marker" }),
+      makeIssue(1, { description: "authoritative base" }),
     );
 
     const { result } = renderHook(() => useBatchUpdateIssues(), {
@@ -714,7 +710,6 @@ describe("useBatchUpdateIssues — optimistic patch covers filtered boards too",
         ids: ["issue-1"],
         updates: {
           description: "local edit",
-          description_base: "base with marker",
         },
       });
     });
@@ -722,11 +717,10 @@ describe("useBatchUpdateIssues — optimistic patch covers filtered boards too",
     await waitFor(() => {
       expect(batchUpdateIssues).toHaveBeenCalledWith(["issue-1"], {
         description: "local edit",
-        description_base: "base with marker",
       });
     });
     expect(qc.getQueryData<Issue>(detailKey)?.description).toBe(
-      "base with marker",
+      "authoritative base",
     );
 
     await act(async () => {

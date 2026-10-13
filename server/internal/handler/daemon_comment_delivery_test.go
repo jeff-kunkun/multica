@@ -28,7 +28,7 @@ func TestRequestHasClientCapability(t *testing.T) {
 	}{
 		{name: "absent"},
 		{name: "exact", header: protocol.DaemonCapabilityCoalescedCommentsV1, want: true},
-		{name: "comma separated and trimmed", header: "skill-bundles-v1,  coalesced-comments-v1  ", want: true},
+		{name: "comma separated and trimmed", header: "execution-manifest-v1,  coalesced-comments-v1  ", want: true},
 		{name: "substring", header: "xcoalesced-comments-v1", want: false},
 		{name: "case sensitive", header: "Coalesced-Comments-V1", want: false},
 		{name: "unknown", header: "future-comments-v2", want: false},
@@ -262,7 +262,7 @@ func TestClaimTaskByRuntime_CoalescedDeliveryMatrix(t *testing.T) {
 
 	t.Run("legacy daemon receives one compatible bundle", func(t *testing.T) {
 		fixture := createCommentDeliveryFixture(t, "Legacy comment delivery")
-		task := claimCommentDeliveryFixture(t, fixture, protocol.DaemonCapabilitySkillBundlesV1)
+		task := claimCommentDeliveryFixture(t, fixture, protocol.DaemonCapabilityExecutionManifestV1)
 
 		// A v0.3.41-shaped decoder knows only this old comment field. All input
 		// must still be available through it; structured fields are deliberately
@@ -296,7 +296,7 @@ func TestClaimTaskByRuntime_CoalescedDeliveryMatrix(t *testing.T) {
 
 	t.Run("capable daemon receives ordered structured comments", func(t *testing.T) {
 		fixture := createCommentDeliveryFixture(t, "Structured comment delivery")
-		capabilities := protocol.DaemonCapabilitySkillBundlesV1 + "," + protocol.DaemonCapabilityCoalescedCommentsV1
+		capabilities := protocol.DaemonCapabilityExecutionManifestV1 + "," + protocol.DaemonCapabilityCoalescedCommentsV1
 		task := claimCommentDeliveryFixture(t, fixture, capabilities)
 
 		if task.TriggerCommentContent != fixture.content[2] {
@@ -995,7 +995,6 @@ func TestFinalizeTaskClaim_ReceiptCASFailureRollsBackInsertedToken(t *testing.T)
 		t.Fatalf("claim fixture task: task=%v err=%v", task, err)
 	}
 	tokenHash := "rolled-back-token-" + fixture.taskID
-	daemonTokenHash := "rolled-back-daemon-token-" + fixture.taskID
 	_, err = testHandler.TaskService.FinalizeTaskClaim(ctx, *task, db.CreateTaskTokenParams{
 		TokenHash:   tokenHash,
 		TaskID:      task.ID,
@@ -1003,12 +1002,7 @@ func TestFinalizeTaskClaim_ReceiptCASFailureRollsBackInsertedToken(t *testing.T)
 		WorkspaceID: parseUUID(testWorkspaceID),
 		UserID:      parseUUID(testUserID),
 		ExpiresAt:   pgtype.Timestamptz{Time: time.Now().Add(time.Hour), Valid: true},
-	}, []pgtype.UUID{parseUUID("00000000-0000-0000-0000-000000000099")}, true, nil, nil, db.CreateDaemonTokenParams{
-		TokenHash:   daemonTokenHash,
-		WorkspaceID: parseUUID(testWorkspaceID),
-		DaemonID:    "daemon-claim-rollback",
-		ExpiresAt:   pgtype.Timestamptz{Time: time.Now().Add(time.Hour), Valid: true},
-	})
+	}, []pgtype.UUID{parseUUID("00000000-0000-0000-0000-000000000099")}, true, nil, nil)
 	if err == nil {
 		t.Fatalf("FinalizeTaskClaim accepted an out-of-plan receipt")
 	}
@@ -1018,13 +1012,6 @@ func TestFinalizeTaskClaim_ReceiptCASFailureRollsBackInsertedToken(t *testing.T)
 	}
 	if tokenCount != 0 {
 		t.Fatalf("receipt CAS failure committed %d generated token(s)", tokenCount)
-	}
-	var daemonTokenCount int
-	if err := testPool.QueryRow(ctx, `SELECT count(*) FROM daemon_token WHERE token_hash = $1`, daemonTokenHash).Scan(&daemonTokenCount); err != nil {
-		t.Fatalf("count rolled-back daemon token: %v", err)
-	}
-	if daemonTokenCount != 0 {
-		t.Fatalf("receipt CAS failure committed %d daemon token(s)", daemonTokenCount)
 	}
 	if got := deliveredCommentIDsForTask(t, fixture.taskID); len(got) != 0 {
 		t.Fatalf("receipt CAS failure advanced receipt: %v", got)

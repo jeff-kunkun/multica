@@ -76,7 +76,7 @@ describe("TitleEditor send chord (real editor)", () => {
     render(<TitleEditor defaultValue="A title" onSubmit={onSubmit} />);
     await screen.findByText("A title");
 
-    // create-project / autopilot-dialog rely on plain Enter submitting and must
+    // create-project relies on plain Enter submitting and must
     // not gain a second trigger from this change.
     pressEnter({ metaKey: true });
     expect(onSubmit).not.toHaveBeenCalled();

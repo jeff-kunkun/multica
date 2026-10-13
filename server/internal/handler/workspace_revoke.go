@@ -4,7 +4,6 @@ import (
 	"context"
 	"log/slog"
 
-	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/service"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -130,22 +129,8 @@ func (h *Handler) revokeAndRemoveMember(ctx context.Context, workspaceID, userID
 		}
 	}
 
-	// channel_user_binding used to carry a member FK with ON DELETE CASCADE, so
-	// a removed member's IM bindings vanished automatically. MUL-3515 §4 dropped
-	// every channel_* foreign key, moving that integrity rule to the application
-	// layer: prune the bindings here, in the same tx as the member-row delete.
-	// The inbound path also re-checks membership (see ChannelStore.IsWorkspaceMember),
-	// but pruning stops a stale binding from lingering across a remove/re-add.
-	if err := qtx.DeleteChannelUserBindingsByWorkspaceMember(ctx, db.DeleteChannelUserBindingsByWorkspaceMemberParams{
-		WorkspaceID:   workspaceID,
-		MulticaUserID: userID,
-	}); err != nil {
-		return empty, err
-	}
-
 	// agent_invocation_target carries member-target grants with NO database FK
-	// (MUL-3963 keeps the new table FK-free, matching the MUL-3515 channel
-	// generalization). Prune this leaving member's grants in the same tx as the
+	// (MUL-3963 keeps the new table FK-free). Prune this leaving member's grants in the same tx as the
 	// member-row delete so a re-invited user does not silently reclaim old
 	// invocation permission on agents that had allow-listed them. SCOPED to
 	// this workspace: the same user may belong to other workspaces, and
@@ -157,22 +142,9 @@ func (h *Handler) revokeAndRemoveMember(ctx context.Context, workspaceID, userID
 		return empty, err
 	}
 
-	// A private quick action is visible and runnable ONLY by its creator
-	// (quick_action carries no FK, so nothing removes it implicitly). Once the
-	// creator is gone the row is unreachable by every remaining member while
-	// still consuming the workspace's active-action limit, so drop those in
-	// the same tx. Public actions are workspace furniture and survive.
-	if err := qtx.DeletePrivateQuickActionsByCreator(ctx, db.DeletePrivateQuickActionsByCreatorParams{
-		WorkspaceID: workspaceID,
-		CreatedByID: userID,
-	}); err != nil {
-		return empty, err
-	}
-
-	// Saved views follow the private-quick-action rule above: a departed
-	// member's PRIVATE views are invisible to everyone left yet still count
-	// against quota, and a re-invite must not resurrect them. Shared views
-	// stay — they are workspace furniture other members may rely on. The
+	// A departed member's PRIVATE saved views are invisible to everyone left
+	// yet still count against quota, and a re-invite must not resurrect them.
+	// Shared views stay — they are workspace furniture other members may rely on. The
 	// per-user view-bar preferences are meaningless without the member.
 	if err := qtx.DeletePrivateIssueViewsByOwner(ctx, db.DeletePrivateIssueViewsByOwnerParams{
 		WorkspaceID: workspaceID,
@@ -187,8 +159,8 @@ func (h *Handler) revokeAndRemoveMember(ctx context.Context, workspaceID, userID
 		return empty, err
 	}
 
-	// issue_subscriber carries no FK either (same MUL-3515 rule as the two
-	// prunes above), and MUL-5483 gave agents a path that writes member
+	// issue_subscriber carries no FK either (same MUL-3515 rule as the prunes
+	// above), and MUL-5483 gave agents a path that writes member
 	// subscriber rows on their own initiative. Dropping them in this tx is what
 	// stops a departed member from accruing inbox rows, and stops a re-invite
 	// from silently restoring visibility of everything they used to watch.
@@ -199,28 +171,16 @@ func (h *Handler) revokeAndRemoveMember(ctx context.Context, workspaceID, userID
 		return empty, err
 	}
 
-	// autopilot_subscriber is another FK-free subscription template. Leaving
-	// stale rows here made the detail API return a user the member picker could
-	// no longer render; the next full-replace PATCH then failed membership
-	// validation, blocking every edit to that autopilot. Prune only templates in
-	// this workspace so the same user's subscriptions elsewhere survive.
-	if err := qtx.DeleteAutopilotSubscribersByMember(ctx, db.DeleteAutopilotSubscribersByMemberParams{
-		WorkspaceID: workspaceID,
-		UserID:      userID,
-	}); err != nil {
-		return empty, err
-	}
-
 	// Member row deletion lives inside the same tx so a successful revoke is
 	// never followed by a failed member-delete (which would leave the user
 	// still a member with a dead runtime), and a failed revoke never leaves
 	// the user out of the workspace with a still-online runtime.
-	if h.seatCapacityEnabled() {
-		if err := enqueueMemberCapacityRelease(ctx, qtx, uuid.UUID(workspaceID.Bytes), uuid.UUID(memberID.Bytes)); err != nil {
-			return empty, err
-		}
-	}
 	if err := qtx.DeleteMember(ctx, memberID); err != nil {
+		return empty, err
+	}
+	// Project shares are membership-scoped; a member who rejoins starts with
+	// none.
+	if err := qtx.DeleteProjectMembersByUser(ctx, db.DeleteProjectMembersByUserParams{WorkspaceID: workspaceID, UserID: userID}); err != nil {
 		return empty, err
 	}
 

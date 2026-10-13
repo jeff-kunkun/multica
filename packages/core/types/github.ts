@@ -69,7 +69,6 @@ export type PRAutoCompleteState =
   | "workspace_disabled"
   | "issue_disabled"
   | "terminal"
-  | "triage"
   | "at_target"
   | "waiting"
   | "not_merged"

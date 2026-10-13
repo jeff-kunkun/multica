@@ -289,7 +289,7 @@ func createWorkspaceMember(t *testing.T, slug string) string {
 		"Merge Test "+slug, email).Scan(&userID); err != nil {
 		t.Fatalf("create user: %v", err)
 	}
-	if _, err := testPool.Exec(ctx, `INSERT INTO member (workspace_id, user_id, role) VALUES ($1, $2, 'admin')`,
+	if _, err := testPool.Exec(ctx, `INSERT INTO member (workspace_id, user_id, role) VALUES ($1, $2, 'member')`,
 		testWorkspaceID, userID); err != nil {
 		t.Fatalf("create member: %v", err)
 	}
