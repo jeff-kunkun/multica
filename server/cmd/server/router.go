@@ -36,6 +36,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/integrations/wecom"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/middleware"
+	"github.com/multica-ai/multica/server/internal/officemcp"
 	"github.com/multica-ai/multica/server/internal/realtime"
 	"github.com/multica-ai/multica/server/internal/seatcapacity"
 	"github.com/multica-ai/multica/server/internal/service"
@@ -1402,6 +1403,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	health := newServerHealth(pool)
 
 	r := chi.NewRouter()
+	// root is the top-level router; the MCP endpoint replays tool calls
+	// through it from inside a route group where `r` is shadowed.
+	root := r
 
 	// Global middleware
 	r.Use(chimw.RequestID)
@@ -1921,6 +1925,24 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		r.Post("/api/invitations/{id}/decline", h.DeclineInvitation)
 		r.Post("/api/share-links/join", h.JoinByShareLink)
 
+		// Project-manager Bot surface (DENE-2016). Both resolve the caller's
+		// Bot from its token and act in the Bot's own workspace, so the Bot
+		// sends no workspace header. The MCP tools call this router
+		// in-process with the same token.
+		r.Get("/api/bot/events", h.ListBotEvents)
+		r.Handle("/api/mcp", officemcp.New(root, func(ctx context.Context, userID string) (officemcp.Bot, bool) {
+			bot, ok := h.BotForUser(ctx, userID)
+			if !ok {
+				return officemcp.Bot{}, false
+			}
+			return officemcp.Bot{
+				ID:          util.UUIDToString(bot.ID),
+				Name:        bot.Name,
+				WorkspaceID: util.UUIDToString(bot.WorkspaceID),
+				CanRelease:  bot.CanRelease,
+			}, true
+		}, normalizeServerVersion(version)))
+
 		r.Route("/api/tokens", func(r chi.Router) {
 			r.Get("/", h.ListPersonalAccessTokens)
 			r.Post("/", h.CreatePersonalAccessToken)
@@ -2141,6 +2163,20 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Post("/resources", h.CreateProjectResource)
 					r.Put("/resources/{resourceId}", h.UpdateProjectResource)
 					r.Delete("/resources/{resourceId}", h.DeleteProjectResource)
+				})
+			})
+
+			// Project-manager Bots: owner-only management.
+			r.Route("/api/bots", func(r chi.Router) {
+				r.Use(handler.RequireHumanActor)
+				r.Use(middleware.RequireWorkspaceRole(queries, "owner"))
+				r.Get("/", h.ListBots)
+				r.Post("/", h.CreateBot)
+				r.Route("/{botId}", func(r chi.Router) {
+					r.Patch("/", h.UpdateBot)
+					r.Delete("/", h.DeleteBot)
+					r.Post("/token", h.RotateBotToken)
+					r.Delete("/token", h.RevokeBotToken)
 				})
 			})
 
