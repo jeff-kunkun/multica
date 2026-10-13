@@ -21,7 +21,6 @@ import { cn } from "@multica/ui/lib/utils";
 import { PAGE_GUTTER, PAGE_RAIL } from "../../layout/page-header";
 import { ActivityTab } from "./tabs/activity-tab";
 import { InstructionsTab } from "./tabs/instructions-tab";
-import { SkillsTab } from "./tabs/skills-tab";
 import { EnvTab } from "./tabs/env-tab";
 import { CustomArgsTab } from "./tabs/custom-args-tab";
 import { McpConfigTab } from "./tabs/mcp-config-tab";
@@ -39,7 +38,6 @@ export type DetailTab =
   | "overview"
   | "work"
   | "instructions"
-  | "skills"
   | "mcp_config"
   | "general"
   | "access"
@@ -51,7 +49,6 @@ type SecondaryTab = {
   id: DetailTab;
   labelKey:
     | "instructions"
-    | "skills"
     | "mcp_config"
     | "general"
     | "access"
@@ -62,7 +59,6 @@ type SecondaryTab = {
 
 const CAPABILITY_TABS: SecondaryTab[] = [
   { id: "instructions", labelKey: "instructions" },
-  { id: "skills", labelKey: "skills" },
   { id: "mcp_config", labelKey: "mcp_config" },
 ];
 
@@ -300,7 +296,7 @@ export function AgentOverviewPane({
 
           A detail page is a document about one entity, not a table. Genuine
           list surfaces — Issues, My Issues, member detail — stay full-bleed on
-          PAGE_GUTTER alone; `runtimes` and skill detail read the same rail.
+          PAGE_GUTTER alone; `runtimes` reads the same rail.
 
           Panels that own no inner gutter take PAGE_GUTTER on the rail element
           itself; Work and the secondary nav layout take a bare rail because
@@ -393,19 +389,9 @@ export function AgentOverviewPane({
                       onDirtyChange={setActiveDirty}
                     />
                   )}
-                  {effectiveView === "skills" && (
-                    <SkillsTab
-                      agent={agent}
-                      runtime={runtime}
-                      currentUserId={currentUserId}
-                      canEdit={canEdit}
-                    />
-                  )}
                   {effectiveView === "mcp_config" && (
                     <McpConfigTab
                       agent={agent}
-                      runtime={runtime}
-                      currentUserId={currentUserId}
                       canEdit={canEdit}
                       onSave={(updates) => onUpdate(agent.id, updates)}
                       onDirtyChange={setActiveDirty}

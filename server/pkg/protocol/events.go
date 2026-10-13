@@ -65,11 +65,6 @@ const (
 	// Activity events
 	EventActivityCreated = "activity:created"
 
-	// Skill events
-	EventSkillCreated = "skill:created"
-	EventSkillUpdated = "skill:updated"
-	EventSkillDeleted = "skill:deleted"
-
 	// Chat events
 	EventChatMessage = "chat:message"
 	EventChatDone    = "chat:done"
@@ -132,13 +127,12 @@ const (
 	EventDaemonRuntimeProfilesChanged  = "daemon:runtime_profiles_changed"
 	EventDaemonWorkspacesChanged       = "daemon:workspaces_changed"
 	// EventDaemonPendingWork is a runtime-scoped hint that a heartbeat-carried
-	// request (model discovery, capability discovery, or local-skill import) is
-	// queued for that runtime. Without it the daemon only learns about the
-	// request on its next scheduled heartbeat, adding up to one HeartbeatInterval
-	// (15s by default) of dead wait to an interactive UI flow (MUL-5444). The
-	// hint carries no work
-	// itself: the daemon still pulls the request through the normal heartbeat
-	// claim, so a lost or duplicated hint is harmless.
+	// request (model discovery) is queued for that runtime. Without it the
+	// daemon only learns about the request on its next scheduled heartbeat,
+	// adding up to one HeartbeatInterval (15s by default) of dead wait to an
+	// interactive UI flow (MUL-5444). The hint carries no work itself: the
+	// daemon still pulls the request through the normal heartbeat claim, so a
+	// lost or duplicated hint is harmless.
 	EventDaemonPendingWork = "daemon:pending_work"
 	// Generic daemon→server request/response over the WebSocket control
 	// connection (MUL-4257). The daemon sends EventDaemonRPCRequest with a

@@ -17,24 +17,14 @@ import (
 // that remains is the `--status todo` vs `--status backlog` rule for
 // creating sub-issues, which is unrelated to the notification path.
 
-// platformSkillFixture is the built-in every issue brief expects to be able to
-// point at. The pointer is resolved from the task's actual skills, so a brief
-// built without it deliberately carries no pointer at all.
-func platformSkillFixture() SkillContextForEnv {
-	return SkillContextForEnv{
-		Name:    "multica-platform",
-		Content: "---\nname: multica-platform\n---\n\nbody",
-	}
-}
-
 // Sub-issue creation is a Commands line, not a section (MUL-5442 moved the
 // playbook to the multica-platform skill). The line keeps the one fact an
 // agent cannot infer: an agent-assigned todo child starts a paid run at once.
 func TestSubIssueCreationLineInCommands(t *testing.T) {
 	t.Parallel()
 	for name, ctx := range map[string]TaskContextForEnv{
-		"assignment": {IssueID: "11111111-2222-3333-4444-555555555555", AgentSkills: []SkillContextForEnv{platformSkillFixture()}},
-		"comment":    {IssueID: "22222222-3333-4444-5555-666666666666", TriggerCommentID: "33333333-4444-5555-6666-777777777777", AgentSkills: []SkillContextForEnv{platformSkillFixture()}},
+		"assignment": {IssueID: "11111111-2222-3333-4444-555555555555"},
+		"comment":    {IssueID: "22222222-3333-4444-5555-666666666666", TriggerCommentID: "33333333-4444-5555-6666-777777777777"},
 	} {
 		out := buildMetaSkillContent("claude", ctx)
 		for _, want := range []string{
@@ -1841,172 +1831,38 @@ func TestBriefByteIdenticalAcrossRunsForEveryKind(t *testing.T) {
 	}
 }
 
-// TestBriefSkillsListIsNamesOnly pins the shape of the `## Skills` section: an
-// index of invocable names, with no descriptions and no per-provider branch.
-//
-// Descriptions were removed because every runtime CLI already builds its own
-// listing from the SKILL.md frontmatter the daemon writes, so the brief's copy
-// was the same routing signal paid for twice — ~3,100 tokens per brief on a
-// real task, 40% of the whole brief (MUL-5529).
-//
-// The provider branch was removed because its fallback was wrong: it told
-// providers outside a hardcoded list to look in `.agent_context/skills/`, but
-// the only providers that ever reached it — grok and traecli — have their files
-// written to `.grok/skills` and `.traecli/skills` and discover them natively.
-func TestBriefSkillsListIsNamesOnly(t *testing.T) {
-	t.Parallel()
-
-	ctx := TaskContextForEnv{
-		IssueID:   "issue-1",
-		AgentName: "Eve",
-		AgentID:   "eve-1",
-		AgentSkills: []SkillContextForEnv{
-			{
-				Name:        "PR Review",
-				Description: "Use when reviewing a pull request for the Multica project.",
-				Content:     "---\nname: pr-review\n---\n\nbody",
-			},
-		},
-	}
-
-	// grok and traecli are the providers that used to take the removed branch;
-	// the rest are a spread across the native-discovery list.
-	for _, provider := range []string{"claude", "codex", "opencode", "hermes", "grok", "traecli", "some-unknown-provider"} {
-		t.Run(provider, func(t *testing.T) {
-			t.Parallel()
-			out := buildMetaSkillContent(provider, ctx)
-
-			if !strings.Contains(out, "Installed (discovered automatically): pr-review.\n") {
-				t.Errorf("brief does not list the skill by slug:\n%s", out)
-			}
-			if strings.Contains(out, "Use when reviewing a pull request") {
-				t.Errorf("brief still carries the skill description; the CLI's own listing already has it:\n%s", out)
-			}
-			if strings.Contains(out, ".agent_context/skills/") {
-				t.Errorf("brief still points at the removed fallback path:\n%s", out)
-			}
-			if !strings.Contains(out, "discovered automatically") {
-				t.Errorf("brief lost the native-discovery framing:\n%s", out)
-			}
-		})
-	}
-}
-
-// TestBriefIssuePointerFollowsTheInstalledSkill ensures the skill pointer names
-// the platform skill only when installed. The retired legacy skill is no
-// longer a fallback, even when an older backend still supplies it.
-func TestBriefIssuePointerFollowsTheInstalledSkill(t *testing.T) {
-	t.Parallel()
-
-	skill := func(name string) SkillContextForEnv {
-		return SkillContextForEnv{Name: name, Content: "---\nname: " + name + "\n---\n\nbody"}
-	}
-
-	cases := []struct {
-		name   string
-		skills []SkillContextForEnv
-		want   bool
-	}{
-		{"current backend", []SkillContextForEnv{skill("multica-platform")}, true},
-		{"retired legacy skill alone has no pointer", []SkillContextForEnv{skill("multica-working-on-issues")}, false},
-		{"platform pointer ignores the retired legacy skill", []SkillContextForEnv{skill("multica-working-on-issues"), skill("multica-platform")}, true},
-		{"neither installed", []SkillContextForEnv{skill("pr-review")}, false},
-	}
-
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			out := buildMetaSkillContent("claude", TaskContextForEnv{
-				IssueID:     "issue-1",
-				AgentSkills: tc.skills,
-			})
-
-			// The flags themselves are unconditional: they stay discoverable
-			// with or without a skill to point at.
-			if !strings.Contains(out, "[--status todo|backlog] [--stage <N>]") {
-				t.Errorf("brief lost the unconditional sub-issue flags")
-			}
-			got := strings.Contains(out, "load the `multica-platform` skill")
-			if got != tc.want {
-				t.Errorf("platform pointer present=%v, want %v:\n%s", got, tc.want, out)
-			}
-			if strings.Contains(out, "multica-working-on-issues` skill") {
-				t.Errorf("brief points at the retired legacy skill:\n%s", out)
-			}
-		})
-	}
-}
-
-// TestBriefPointsAtThePlatformSkill pins the one recall hint the Skills section
-// carries (MUL-6986).
-//
-// Eight domain skills advertised eight descriptions in the always-loaded
-// listing; they are now one skill with one description, which is cheaper but
-// gives an agent one name to guess instead of eight. This line is what pays
-// that back, so it must appear whenever the skill does — an agent that cannot
-// find the platform contracts is strictly worse off than before the merge.
-//
-// Naming is by bare name, on the stated assumption that no workspace skill
-// shares a built-in's name (see builtinSlug).
+// TestBriefPointsAtThePlatformSkill pins the `## Skills` section: a fixed
+// pointer to the multica-platform skill, the one recall hint the brief carries
+// (MUL-6986). The daemon no longer distributes per-agent skills, so the section
+// lists no installed names; each runtime lists the user's and project's skills
+// itself.
 func TestBriefPointsAtThePlatformSkill(t *testing.T) {
 	t.Parallel()
 
-	skill := func(name string) SkillContextForEnv {
-		return SkillContextForEnv{Name: name, Content: "---\nname: " + name + "\n---\n\nbody"}
-	}
-
-	cases := []struct {
-		name   string
-		skills []SkillContextForEnv
-		want   string // the slug the pointer must name; "" = no pointer
-	}{
-		{
-			name:   "platform skill present",
-			skills: []SkillContextForEnv{skill("multica-platform")},
-			want:   "multica-platform",
-		},
-		{
-			name:   "alongside workspace skills",
-			skills: []SkillContextForEnv{skill("pr-review"), skill("multica-platform")},
-			want:   "multica-platform",
-		},
-		{
-			name:   "platform skill absent",
-			skills: []SkillContextForEnv{skill("pr-review")},
-			want:   "",
-		},
-	}
-
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			out := buildMetaSkillContent("claude", TaskContextForEnv{
-				IssueID:     "issue-1",
-				AgentName:   "Eve",
-				AgentID:     "eve-1",
-				AgentSkills: tc.skills,
-			})
-			if tc.want == "" {
-				if strings.Contains(out, "skill and open the reference") {
-					t.Errorf("brief emitted a platform pointer with no built-in platform skill present:\n%s", out)
-				}
-				return
+	for name, ctx := range map[string]TaskContextForEnv{
+		"issue": {IssueID: "issue-1", AgentName: "Eve", AgentID: "eve-1"},
+		"chat":  {ChatSessionID: "chat-1", AgentName: "Eve", AgentID: "eve-1"},
+	} {
+		for _, provider := range []string{"claude", "codex", "opencode", "grok", "traecli", "some-unknown-provider"} {
+			out := buildMetaSkillContent(provider, ctx)
+			if !strings.Contains(out, "\n## Skills\n") {
+				t.Errorf("[%s/%s] brief lost the Skills section:\n%s", name, provider, out)
 			}
-			want := "load the `" + tc.want + "` skill"
-			if !strings.Contains(out, want) {
-				t.Errorf("brief does not point at %q:\n%s", tc.want, out)
+			if !strings.Contains(out, "load the `multica-platform` skill") {
+				t.Errorf("[%s/%s] brief does not point at the platform skill:\n%s", name, provider, out)
 			}
 			// Pinned as "the domains your task touches", never a count: a task
-			// that spans squads + issues + mentions needs all three, and
-			// wording that implies one would make the agent act on contracts
-			// it has not read.
+			// that spans squads + issues + mentions needs all three.
 			if !strings.Contains(out, "for the domains your task touches") {
-				t.Errorf("pointer does not route by domain:\n%s", out)
+				t.Errorf("[%s/%s] pointer does not route by domain:\n%s", name, provider, out)
 			}
-			if strings.Contains(out, "the one reference") {
-				t.Errorf("pointer narrows on-demand reading to a single reference:\n%s", out)
+			if strings.Contains(out, "Installed (discovered automatically)") {
+				t.Errorf("[%s/%s] brief still lists installed skill names:\n%s", name, provider, out)
 			}
-		})
+			if strings.Contains(out, ".agent_context/skills/") {
+				t.Errorf("[%s/%s] brief still points at the removed fallback path:\n%s", name, provider, out)
+			}
+		}
 	}
 }
 

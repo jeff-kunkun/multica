@@ -44,7 +44,6 @@ export type TabLabelKey =
   | "project"
   | "agent"
   | "member"
-  | "skill"
   | "machine"
   | "runtime"
   | "attachment"
@@ -80,7 +79,6 @@ export interface TabEntityData {
   project?: { icon: string | null; title: string };
   /** Resolved display name for an actor subject. */
   actorName?: string;
-  skill?: { name: string };
   machine?: { name: string };
   runtime?: { name: string };
   /** Resolved chat session title (already includes the "New chat" fallback). */
@@ -171,11 +169,6 @@ export function resolveTabPresentation(
       return {
         visual: { kind: "actor", actorType: subject.actorType, id: subject.id },
         title: textOr(data.actorName, ACTOR_LABEL[subject.actorType]),
-      };
-    case "skill":
-      return {
-        visual: { kind: "icon", icon: "BookOpenText" },
-        title: textOr(data.skill?.name, "skill"),
       };
     case "machine":
       return {

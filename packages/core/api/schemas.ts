@@ -40,9 +40,6 @@ import type {
   SearchProjectsResponse,
   ShareLink,
   ShareLinkInfo,
-  Skill,
-  SkillImportResult,
-  SkillSummary,
   TimelineEntry,
   User,
   WorkspaceBot,
@@ -1944,93 +1941,6 @@ export const MALFORMED_RUNTIME_MODEL_LIST_REQUEST: RuntimeModelListRequest = {
   error: "invalid model discovery response",
   created_at: "",
   updated_at: "",
-};
-
-// Skills. Introduced for `POST /api/skills/:id/refresh` (update a skill from
-// its imported source). `config` stays a loose record: the server owns the
-// `origin` provenance shape and may extend it freely.
-export const SkillFileSchema = z.object({
-  id: z.string(),
-  skill_id: z.string(),
-  path: z.string(),
-  content: z.string().optional().default(""),
-  created_at: z.string().optional().default(""),
-  updated_at: z.string().optional().default(""),
-}).loose();
-
-// Workspace list shape (`GET /api/skills`). Intentionally no `content` /
-// `files`: those belong on the detail endpoint. Defaulting them here used
-// to invent empty bodies on every list row (GH #2174).
-export const SkillSummarySchema = z.object({
-  id: z.string(),
-  workspace_id: z.string(),
-  name: z.string(),
-  description: z.string().optional().default(""),
-  config: z.record(z.string(), z.unknown()).optional().default({}),
-  created_by: z.string().nullable().optional().default(null),
-  created_at: z.string().optional().default(""),
-  updated_at: z.string().optional().default(""),
-  enabled: z.boolean().optional(),
-  // Catch-to-empty so a missing/malformed labels field cannot fail the
-  // whole skill (or the list it lives in). Older backends omit it; the
-  // filter treats an empty array as "no labels".
-  labels: z.array(LabelSchema).catch([]),
-}).loose();
-
-export const EMPTY_SKILL_SUMMARY: SkillSummary = {
-  id: "",
-  workspace_id: "",
-  name: "",
-  description: "",
-  config: {},
-  created_by: null,
-  created_at: "",
-  updated_at: "",
-  labels: [],
-};
-
-export const SkillSchema = SkillSummarySchema.extend({
-  content: z.string().optional().default(""),
-  files: z.array(SkillFileSchema).optional().default([]),
-}).loose();
-
-export const EMPTY_SKILL: Skill = {
-  ...EMPTY_SKILL_SUMMARY,
-  content: "",
-  files: [],
-};
-
-export const SkillSummaryListSchema = z.array(SkillSummarySchema).default([]);
-
-export const EMPTY_SKILL_SUMMARY_LIST: SkillSummary[] = [];
-
-export const SkillImportExistingSkillSchema = z.object({
-  id: z.string(),
-  name: z.string(),
-  created_by: z.string().optional(),
-  can_overwrite: z.boolean().optional(),
-}).loose();
-
-/**
- * Envelope of POST /api/skills/import.
- *
- * `status` stays a plain string (not an enum) so a status added by a newer
- * backend still parses and its `reason` survives to the user. `z.enum` here
- * would fail the whole envelope on an unknown value, drop the server's reason
- * and leave only a generic "Import failed" — the server field is a bare
- * `string`, so it is free to grow. `skillFromImportResult` has the default
- * branch: anything outside created/updated is treated as a failure.
- */
-export const SkillImportResultSchema = z.object({
-  status: z.string().default("failed"),
-  reason: z.string().optional().default(""),
-  skill: SkillSchema.optional(),
-  existing_skill: SkillImportExistingSkillSchema.optional(),
-}).loose();
-
-export const EMPTY_SKILL_IMPORT_RESULT: SkillImportResult = {
-  status: "failed",
-  reason: "",
 };
 
 /**

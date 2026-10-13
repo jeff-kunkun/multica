@@ -878,10 +878,10 @@ func TestRuntimeHasCapability(t *testing.T) {
 		return raw
 	}
 
-	if !runtimeHasCapability(withCaps("skill-bundles-v1", "local-worktree-v1"), "local-worktree-v1") {
+	if !runtimeHasCapability(withCaps("execution-manifest-v1", "local-worktree-v1"), "local-worktree-v1") {
 		t.Error("advertised capability not detected")
 	}
-	if runtimeHasCapability(withCaps("skill-bundles-v1"), "local-worktree-v1") {
+	if runtimeHasCapability(withCaps("execution-manifest-v1"), "local-worktree-v1") {
 		t.Error("unadvertised capability reported as present")
 	}
 	for _, metadata := range [][]byte{
@@ -1031,7 +1031,7 @@ func TestDaemonRegisterPersistsCapabilities(t *testing.T) {
 	}
 
 	t.Run("advertised capability lands on the row", func(t *testing.T) {
-		id := register(t, protocol.DaemonCapabilitySkillBundlesV1+","+protocol.DaemonCapabilityLocalWorktreeV1)
+		id := register(t, protocol.DaemonCapabilityExecutionManifestV1+","+protocol.DaemonCapabilityLocalWorktreeV1)
 		assertCapable(t, id, true)
 	})
 
@@ -1039,7 +1039,7 @@ func TestDaemonRegisterPersistsCapabilities(t *testing.T) {
 	// row rather than leave a capable-looking one behind — that is precisely the
 	// downgrade the save gate has to notice.
 	t.Run("re-registering without the header clears it", func(t *testing.T) {
-		id := register(t, protocol.DaemonCapabilitySkillBundlesV1+","+protocol.DaemonCapabilityLocalWorktreeV1)
+		id := register(t, protocol.DaemonCapabilityExecutionManifestV1+","+protocol.DaemonCapabilityLocalWorktreeV1)
 		assertCapable(t, id, true)
 
 		again := register(t, "")

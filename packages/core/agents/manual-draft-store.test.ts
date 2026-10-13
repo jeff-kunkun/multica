@@ -93,7 +93,6 @@ describe("manual agent drafts", () => {
     ["thinking level", { thinkingLevel: "high" }],
     ["service tier", { serviceTier: "priority" }],
     ["access scope", { permissionScope: "workspace" as const }],
-    ["skills", { skillIds: new Set(["skill-1"]) }],
     ["members", { memberIds: new Set(["member-1"]) }],
     ["teams", { teamIds: new Set(["team-1"]) }],
   ])("keeps a draft whose only edit is the %s", (_label, overrides) => {

@@ -68,11 +68,7 @@ describe("resolveTabPresentation — direct resources", () => {
     });
   });
 
-  it("skill / machine / runtime use a type icon + name", () => {
-    expect(present("/acme/skills/s1", { skill: { name: "Deploy" } })).toEqual({
-      visual: { kind: "icon", icon: "BookOpenText" },
-      title: { kind: "text", text: "Deploy" },
-    });
+  it("machine / runtime use a type icon + name", () => {
     expect(present("/acme/runtimes/m1", { machine: { name: "Mac Studio" } })).toEqual({
       visual: { kind: "icon", icon: "Monitor" },
       title: { kind: "text", text: "Mac Studio" },

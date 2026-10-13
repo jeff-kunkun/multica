@@ -54,7 +54,7 @@ type PrepareParams struct {
 	// per-issue Codex session store so a second profile-daemon sharing the same
 	// ~/.codex cannot see or GC this daemon's stores (MUL-4424).
 	Profile      string
-	Provider     string // agent provider (determines runtime config and skill injection paths)
+	Provider     string // agent provider (determines runtime config paths)
 	CodexVersion string // detected Codex CLI version (only used when Provider == "codex")
 	OpenclawBin  string // resolved openclaw CLI path (only used when Provider == "openclaw"); empty = look up on PATH
 	// McpConfig is the agent's saved `mcp_config` JSON, forwarded to the
@@ -86,30 +86,6 @@ type PrepareParams struct {
 	// Mutually exclusive with LocalWorkDir — the daemon picks one based on the
 	// resource's execution_mode.
 	LocalWorktree *LocalWorktreeParams
-	// HermesSourceHome is the shared Hermes home the per-task overlay is seeded
-	// from — resolved by the daemon via execenv.ResolveHermesProfile so it honors
-	// the agent's custom_env HERMES_HOME and any -p/--profile or sticky selection.
-	// Only used for the hermes provider; empty falls back to the platform default.
-	HermesSourceHome string
-	// HermesSourceMustExist fails the overlay build closed when HermesSourceHome
-	// is absent — set when an explicit named profile was requested so a typo
-	// doesn't silently seed from an empty home and drop the user's auth/config.
-	HermesSourceMustExist bool
-	// HermesMemoryStore is the agent's persistent Hermes memory store
-	// (HermesMemoryStorePath) the overlay links memories/ to, so memory outlives
-	// the task. Empty keeps memories/ task-local — no agent to key on, or the
-	// Multica profile dir could not be resolved.
-	HermesMemoryStore string
-	// HermesSessionStore is the conversation's persistent Hermes session store
-	// (HermesSessionStorePath) the overlay links state.db to, so the transcript
-	// outlives the task and a follow-up turn can actually resume it. Empty keeps
-	// state.db task-local — no agent or conversation to key on, or the Multica
-	// profile dir could not be resolved.
-	HermesSessionStore string
-	// HermesEnv is the sanitized effective env (agent custom_env minus the daemon
-	// blocklisted keys) used to expand ${VAR} in Hermes external_dirs so it
-	// matches what the Hermes child process actually sees. Only used for hermes.
-	HermesEnv map[string]string
 	// ReasonixEnv is the sanitized agent custom_env, layered over the daemon's
 	// own environment exactly as the child's env is built. The per-task
 	// reasonix.toml restates the permissions from the user config that env
@@ -151,9 +127,7 @@ type TaskContextForEnv struct {
 	PriorSessionResumeUnavailable bool
 	AgentID                       string // unique ID of the dispatched agent
 	AgentName                     string
-	AgentInstructions             string // agent identity/persona instructions, injected into CLAUDE.md
-	AgentSkills                   []SkillContextForEnv
-	DisabledRuntimeSkills         []RuntimeSkillRefForEnv
+	AgentInstructions             string                  // agent identity/persona instructions, injected into CLAUDE.md
 	Repos                         []RepoContextForEnv     // workspace repos available for checkout
 	ProjectID                     string                  // active project for this task, when present
 	ProjectTitle                  string                  // human-readable project title
@@ -195,7 +169,6 @@ type TaskContextForEnv struct {
 	InitiatorEmail string
 }
 
-// SkillContextForEnv represents a skill to be written into the execution environment.
 // IssueStatusForEnv is one active custom workspace status rendered into the
 // brief (MUL-6460). Name and Description are user-authored text and MUST pass
 // through the brief sanitizers before rendering; Key is constrained by the
@@ -206,19 +179,6 @@ type IssueStatusForEnv struct {
 	Name        string
 	Category    string
 	Description string
-}
-
-type SkillContextForEnv struct {
-	Name        string
-	Description string
-	Content     string
-	Files       []SkillFileContextForEnv
-}
-
-// SkillFileContextForEnv represents a supporting file within a skill.
-type SkillFileContextForEnv struct {
-	Path    string
-	Content string
 }
 
 // Environment represents a prepared, isolated execution environment.
@@ -250,9 +210,6 @@ type Environment struct {
 	LocalWorktree *LocalWorktree
 	// CodexHome is the path to the per-task CODEX_HOME directory (set only for codex provider).
 	CodexHome string
-	// ClaudeSettingsPath is a task-local --settings JSON file that applies
-	// disabled runtime-skill policy without mutating the user's Claude config.
-	ClaudeSettingsPath string
 	// OpenclawConfigPath is the path to the per-task synthesized OpenClaw
 	// config (set only for openclaw provider). The daemon exports this as
 	// OPENCLAW_CONFIG_PATH on the openclaw subprocess so its native skill
@@ -271,36 +228,6 @@ type Environment struct {
 	// exports this as CURSOR_DATA_DIR so project-level MCP approvals are
 	// isolated from the user's persistent ~/.cursor/projects state.
 	CursorDataDir string
-	// HermesHome is the path to the per-task HERMES_HOME overlay (set only for
-	// the hermes provider, and only when the agent has skills bound — empty
-	// otherwise, leaving the user's real home in place). It mirrors ~/.hermes/
-	// via symlink, derives a config.yaml that references the user's real skills
-	// as an external root, and holds the bound skills in its skills/ subdir. The
-	// daemon exports it as HERMES_HOME so the hermes CLI discovers those skills
-	// natively — Hermes has no workspace-relative discovery, so the previous
-	// .agent_context/skills/ fallback was never read (issue #5242). See
-	// hermes_home.go.
-	HermesHome string
-	// HermesSessionStore is the conversation's session store this task's
-	// state.db is actually linked to, or "" when the session database stayed
-	// task-local (no store to key on, or a host that could not create the
-	// link).
-	HermesSessionStore string
-	// HermesSessionHistoryPresent reports that the mounted store actually holds
-	// a session database — a prior turn's transcript this task can resume.
-	// Mounting alone does not imply it: a conversation's first turn, a store the
-	// GC reclaimed between turns, a switched Hermes profile and an operator's
-	// `rm` all mount cleanly onto nothing. The daemon reads THIS, not the store
-	// path, as the answer to "can a prior session id still resolve here?" — see
-	// gateResumeToReachableSession.
-	HermesSessionHistoryPresent bool
-	// QwenpawWorkspace is the path to the per-task QwenPaw workspace directory
-	// (set only for the qwenpaw provider). It is populated with the bound skills
-	// and their skill.json manifest with enabled: true, so the skills are
-	// immediately effective. The daemon passes --workspace <dir> to
-	// `qwenpaw acp` so the QwenPaw agent discovers the skills natively.
-	// See qwenpaw_workspace.go.
-	QwenpawWorkspace string
 
 	logger *slog.Logger // for cleanup logging
 	// lockFile holds the env root's exclusive execution lock for as long as
@@ -520,7 +447,7 @@ func Prepare(params PrepareParams, logger *slog.Logger) (*Environment, error) {
 		lockFile:          lockFile,
 	}
 
-	// Write context files into workdir (skills go to provider-native paths).
+	// Write context files into workdir.
 	// Track every file/dir we create in a manifest so CleanupSidecars can
 	// roll a local_directory workdir back to its pre-Prepare state. Cloud
 	// tasks don't need the manifest (the GC loop wipes envRoot wholesale),
@@ -531,8 +458,7 @@ func Prepare(params PrepareParams, logger *slog.Logger) (*Environment, error) {
 
 	// Arm the rollback BEFORE the first write, not after writeContextFiles
 	// returns. writeContextFiles puts the daemon task marker down as its very
-	// first act and can then fail on any later step — .agent_context, skill
-	// files, project resources — so a defer registered after it returns would
+	// first act and can then fail on any later step — project resources — so a defer registered after it returns would
 	// miss exactly the failures that strand a marker with nothing else around
 	// it. Rolling back an empty manifest is a no-op, which is what makes it
 	// safe to arm this early.
@@ -586,56 +512,16 @@ func Prepare(params PrepareParams, logger *slog.Logger) (*Environment, error) {
 		}
 	}
 
-	// For Codex, set up a per-task CODEX_HOME seeded from ~/.codex/ with skills.
+	// For Codex, set up a per-task CODEX_HOME seeded from ~/.codex/ with the user's skills.
 	if params.Provider == "codex" {
 		codexHome := filepath.Join(envRoot, codexHomeDirName)
 		if err := prepareCodexHomeWithOpts(codexHome, CodexHomeOptions{CodexVersion: params.CodexVersion, IsLocalDirectory: params.LocalWorkDir != "" || params.LocalWorktree != nil, SessionStoreKey: codexSessionStoreKey(params.Profile, params.Task), CodexCustomArgs: params.CodexCustomArgs}, logger); err != nil {
 			return nil, fmt.Errorf("execenv: prepare codex-home: %w", err)
 		}
-		if err := hydrateCodexSkills(codexHome, params.Task.AgentSkills, params.Task.DisabledRuntimeSkills, logger); err != nil {
+		if err := hydrateCodexSkills(codexHome, logger); err != nil {
 			return nil, fmt.Errorf("execenv: hydrate codex skills: %w", err)
 		}
 		env.CodexHome = codexHome
-	}
-
-	if params.Provider == "claude" {
-		settingsPath, err := prepareClaudeSkillSettings(envRoot, params.Task.DisabledRuntimeSkills, params.Task.AgentSkills)
-		if err != nil {
-			return nil, fmt.Errorf("execenv: prepare claude skill settings: %w", err)
-		}
-		env.ClaudeSettingsPath = settingsPath
-	}
-
-	// For Hermes, redirect HERMES_HOME to a per-task compatibility overlay ONLY
-	// when the agent has skills bound. A skill-less Hermes task keeps the user's
-	// real home and its original behavior untouched. The overlay makes the bound
-	// skills visible — Hermes discovers skills only from its home, so the old
-	// .agent_context/skills/ fallback was never read (issue #5242). See
-	// hermes_home.go.
-	//
-	// Note this is a local contract, not an observable product behaviour: the
-	// server appends the platform's built-in skills to every agent's skill set
-	// (service.LoadAgentSkillBundles), so a claimed task's AgentSkills is never
-	// empty and the skill-less branch is effectively unreachable in production.
-	// Emptying an agent's own skill list is NOT a way to opt out of the overlay.
-	if params.Provider == "hermes" && len(params.Task.AgentSkills) > 0 {
-		hermesHome := filepath.Join(envRoot, "hermes-home")
-		sessions, err := prepareHermesHome(hermesHome, params.HermesSourceHome, params.HermesSourceMustExist, params.Task.AgentSkills, params.HermesEnv, params.HermesMemoryStore, params.HermesSessionStore, logger)
-		if err != nil {
-			return nil, fmt.Errorf("execenv: prepare hermes-home: %w", err)
-		}
-		env.HermesHome = hermesHome
-		if sessions.Mounted {
-			env.HermesSessionStore = params.HermesSessionStore
-			env.HermesSessionHistoryPresent = sessions.HistoryPresent
-		}
-	}
-	if params.Provider == "qwenpaw" {
-		qwenpawWorkspace := filepath.Join(envRoot, "qwenpaw-workspace")
-		if err := prepareQwenpawWorkspace(qwenpawWorkspace, params.Task.AgentSkills, logger); err != nil {
-			return nil, fmt.Errorf("execenv: prepare qwenpaw workspace: %w", err)
-		}
-		env.QwenpawWorkspace = qwenpawWorkspace
 	}
 
 	// For Reasonix, deny the `ask` tool for this task through a project-scoped
@@ -675,8 +561,7 @@ func Prepare(params PrepareParams, logger *slog.Logger) (*Environment, error) {
 	}
 
 	// For OpenClaw, synthesize a per-task config that pins workspace to
-	// workDir. The skill scanner then reads {workDir}/skills/ (written by
-	// writeContextFiles above). Fail closed on errors: a malformed user
+	// workDir. Fail closed on errors: a malformed user
 	// config that the openclaw CLI can't read is a real problem and
 	// silently degrading to a minimal config would mask it by booting
 	// OpenClaw without the agents / providers / API keys it expects.
@@ -741,15 +626,6 @@ type ReuseParams struct {
 	// loop) keep the "never delete the user's directory" invariant on
 	// reuse paths.
 	LocalDirectory bool
-	// HermesSourceHome, HermesEnv, HermesMemoryStore and HermesSessionStore
-	// mirror PrepareParams on reuse so the Hermes overlay re-derives against the
-	// agent's current source home / profile, external_dirs vars, memory store and
-	// conversation session store.
-	HermesSourceHome      string
-	HermesSourceMustExist bool
-	HermesEnv             map[string]string
-	HermesMemoryStore     string
-	HermesSessionStore    string
 	// ReasonixEnv mirrors PrepareParams.ReasonixEnv on reuse so the rewritten
 	// reasonix.toml keeps restating the owner's current permissions.
 	ReasonixEnv map[string]string
@@ -757,7 +633,7 @@ type ReuseParams struct {
 	// Windows sandbox decision honors a `-c windows.sandbox=...` override here
 	// too (MUL-4957).
 	CodexCustomArgs []string
-	Task            TaskContextForEnv // refreshed context files / skills
+	Task            TaskContextForEnv // refreshed context files
 }
 
 // Reuse wraps an existing workdir into an Environment and refreshes context files.
@@ -810,44 +686,17 @@ func Reuse(params ReuseParams, logger *slog.Logger) *Environment {
 		}
 	}
 
-	// Roll back the previous dispatch's sidecar writes before refreshing.
-	// On reuse the workdir still holds the prior run's skill directories (and,
-	// for a workdir prepared before MUL-6984, its issue_context.md); without
-	// clearing them first, writeSkillFiles sees
-	// its own earlier output occupying the canonical slug and falls back to
-	// a collision-free sibling (issue-review, issue-review-multica,
-	// issue-review-multica-2, …), accumulating a fresh duplicate on every
-	// re-dispatch to the same issue. allocateCollisionFreeSkillDir exists to
-	// dodge *user*-owned skill dirs (the local_directory flow), not our own
-	// prior writes, so we undo them via the prior manifest first and let the
-	// refresh below re-create each skill at its natural slug. This also brings
-	// the standard providers in line with the Codex path, where
-	// hydrateCodexSkills already wipes its skills dir before re-hydrating.
-	//
-	// Two steps, in order:
-	//   1. removeReusedManagedSkillDirs reclaims the platform's own skill
-	//      directories even when a prior-run agent left a file inside one.
-	//      CleanupSidecars alone can't do this — it preserves any recorded dir
-	//      the agent populated (correct on the local_directory teardown path),
-	//      which would otherwise keep the canonical slug occupied and push the
-	//      refresh back to issue-review-multica.
-	//   2. CleanupSidecars rolls back the remaining sidecar files (project
-	//      resources today, plus any issue_context.md recorded by a manifest
-	//      an older build wrote — legacy upgrade cleanup, not a live writer)
-	//      and the manifest itself.
-	//
-	// No-op when RootDir is empty (legacy local_directory reuse, which the
-	// daemon skips anyway) or when no prior manifest exists (older build).
+	// Roll back the previous dispatch's sidecar writes (project resources and
+	// the manifest itself) before refreshing, so the refresh below starts from
+	// a clean slate. No-op when RootDir is empty (legacy local_directory reuse,
+	// which the daemon skips anyway) or when no prior manifest exists.
 	if env.RootDir != "" {
-		if err := removeReusedManagedSkillDirs(env.RootDir, skillsDirPath(params.WorkDir, params.Provider)); err != nil {
-			logger.Warn("execenv: reclaim managed skill dirs on reuse failed", "error", err)
-		}
 		if err := CleanupSidecars(env.RootDir); err != nil {
 			logger.Warn("execenv: roll back prior sidecars on reuse failed", "error", err)
 		}
 	}
 
-	// Refresh context files (skills, project resources). Reuse tracks a
+	// Refresh context files (project resources). Reuse tracks a
 	// fresh manifest under env.RootDir so a later CleanupSidecars sees
 	// the up-to-date list of writes (an old manifest from a prior run
 	// would otherwise reference files this Reuse no longer creates). For
@@ -883,18 +732,9 @@ func Reuse(params ReuseParams, logger *slog.Logger) *Environment {
 			return nil
 		} else {
 			env.CodexHome = codexHome
-			if err := hydrateCodexSkills(codexHome, params.Task.AgentSkills, params.Task.DisabledRuntimeSkills, logger); err != nil {
+			if err := hydrateCodexSkills(codexHome, logger); err != nil {
 				logger.Warn("execenv: refresh codex skills failed", "error", err)
 			}
-		}
-	}
-
-	if params.Provider == "claude" && env.RootDir != "" {
-		settingsPath, err := prepareClaudeSkillSettings(env.RootDir, params.Task.DisabledRuntimeSkills, params.Task.AgentSkills)
-		if err != nil {
-			logger.Warn("execenv: refresh claude skill settings failed", "error", err)
-		} else {
-			env.ClaudeSettingsPath = settingsPath
 		}
 	}
 
@@ -904,52 +744,6 @@ func Reuse(params ReuseParams, logger *slog.Logger) *Environment {
 	if params.Provider == "reasonix" {
 		if err := writeReasonixProjectConfig(params.WorkDir, params.ReasonixEnv, manifest, logger); err != nil {
 			logger.Warn("execenv: refresh reasonix project config failed", "error", err)
-		}
-	}
-
-	// Refresh (or tear down) the per-task QwenPaw workspace on reuse.
-	// Rebuild the workspace so an added/removed/edited skill is reflected.
-	if params.Provider == "qwenpaw" && env.RootDir != "" {
-		qwenpawWorkspace := filepath.Join(env.RootDir, "qwenpaw-workspace")
-		if err := prepareQwenpawWorkspace(qwenpawWorkspace, params.Task.AgentSkills, logger); err != nil {
-			logger.Warn("execenv: refresh qwenpaw workspace failed; forcing fresh prepare", "error", err)
-			return nil
-		}
-		env.QwenpawWorkspace = qwenpawWorkspace
-	}
-
-	// Refresh (or tear down) the per-task HERMES_HOME on reuse. With skills
-	// bound, rebuild the overlay so an added/removed/edited skill and the
-	// mirrored home/config track the user's current ~/.hermes/ before the next
-	// hermes process starts. With no skills bound, drop the redirect entirely so
-	// the task reverts to the user's real home — matching a fresh Prepare for a
-	// skill-less agent.
-	if params.Provider == "hermes" && env.RootDir != "" {
-		hermesHome := filepath.Join(env.RootDir, "hermes-home")
-		if len(params.Task.AgentSkills) > 0 {
-			sessions, err := prepareHermesHome(hermesHome, params.HermesSourceHome, params.HermesSourceMustExist, params.Task.AgentSkills, params.HermesEnv, params.HermesMemoryStore, params.HermesSessionStore, logger)
-			if err != nil {
-				// Fail closed: a half-built overlay must not run. Returning nil
-				// makes the daemon fall back to a fresh Prepare, whose error
-				// then blocks dispatch rather than silently dropping the bound
-				// skill.
-				logger.Warn("execenv: refresh hermes-home failed; forcing fresh prepare", "error", err)
-				return nil
-			}
-			env.HermesHome = hermesHome
-			env.HermesSessionStore = ""
-			env.HermesSessionHistoryPresent = false
-			if sessions.Mounted {
-				env.HermesSessionStore = params.HermesSessionStore
-				env.HermesSessionHistoryPresent = sessions.HistoryPresent
-			}
-		} else {
-			env.HermesHome = ""
-			env.HermesSessionStore = ""
-			env.HermesSessionHistoryPresent = false
-			if err := os.RemoveAll(hermesHome); err != nil {
-				logger.Warn("execenv: remove stale hermes-home failed", "error", err)
-			}
 		}
 	}
 
@@ -997,40 +791,20 @@ func Reuse(params ReuseParams, logger *slog.Logger) *Environment {
 	return env
 }
 
-// hydrateCodexSkills populates the per-task CODEX_HOME/skills directory with
-// both user-installed skills (from the shared ~/.codex/skills/) and
-// workspace-assigned skills. Workspace skills win on name conflict — they are
-// written last and seedUserCodexSkills already pre-filters their names.
-//
-// The skills directory is wiped first so two stale-state classes that the
-// Reuse path would otherwise leak are gone:
-//
-//   - A name now claimed by a workspace skill that previously held only a
-//     user-seeded copy — support files from the user version would otherwise
-//     linger under the workspace skill's directory.
-//   - A user skill removed from the shared ~/.codex/skills/ since the last
-//     run — its old contents would otherwise remain visible to the codex
-//     CLI.
-//
-// Codex is the only runtime that needs this two-stage hydration because the
-// daemon sets CODEX_HOME to a per-task directory, isolating the CLI from the
-// user's real ~/.codex/. Other runtimes leave HOME untouched and discover
-// user-level skills natively (see context.go for the workdir-local paths
-// they use for workspace skills).
-func hydrateCodexSkills(codexHome string, workspaceSkills []SkillContextForEnv, disabledRuntimeSkills []RuntimeSkillRefForEnv, logger *slog.Logger) error {
-	skillsDir := filepath.Join(codexHome, "skills")
-	if err := os.RemoveAll(skillsDir); err != nil {
+// hydrateCodexSkills rebuilds the per-task CODEX_HOME/skills directory from
+// the user's shared ~/.codex/skills/. Codex is the only runtime whose home is
+// redirected to a per-task directory, so without this it would never see the
+// user-level skills (including the multica-platform guide the daemon installs
+// there). The directory is wiped first so a skill the user removed since the
+// last run does not linger on reuse.
+func hydrateCodexSkills(codexHome string, logger *slog.Logger) error {
+	if err := os.RemoveAll(filepath.Join(codexHome, "skills")); err != nil {
 		return fmt.Errorf("clear codex skills dir: %w", err)
 	}
-	if err := seedUserCodexSkills(codexHome, workspaceSkills, logger); err != nil {
+	if err := seedUserCodexSkills(codexHome, logger); err != nil {
 		logger.Warn("execenv: seed user codex skills failed", "error", err)
 	}
-	if len(workspaceSkills) > 0 {
-		if err := writeSkillFiles(skillsDir, workspaceSkills, nil); err != nil {
-			return err
-		}
-	}
-	return ensureCodexDisabledSkillsConfig(filepath.Join(codexHome, "config.toml"), codexHome, disabledRuntimeSkills, workspaceSkills)
+	return nil
 }
 
 // GCMetaKind identifies which kind of parent record a task workdir belongs to.

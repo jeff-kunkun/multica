@@ -63,17 +63,12 @@ func (d *Daemon) gcLoop(ctx context.Context) {
 
 // gcStats accumulates byte counts and per-pattern hit counts for one GC cycle.
 type gcStats struct {
-	cleaned         int // whole task dirs removed by a parent-lifecycle or completed-task policy
-	orphaned        int // whole task dirs removed (no meta / unreachable issue)
-	skipped         int // task dirs left untouched
-	artifactDirs    int // task dirs that had at least one artifact reclaimed
-	artifactRemoved int // count of removed artifact subdirs
-	storesReclaimed int // per-conversation Codex session stores reclaimed past their TTL
-	// hermesMemoryStoresReclaimed is counted separately from storesReclaimed:
-	// the two stores hold different things on different TTLs, so folding them
-	// into one number would make either figure unreadable for an operator.
-	hermesMemoryStoresReclaimed   int            // per-agent Hermes memory stores reclaimed past their TTL
-	hermesSessionStoresReclaimed  int            // per-conversation Hermes session stores reclaimed past their TTL
+	cleaned                       int            // whole task dirs removed by a parent-lifecycle or completed-task policy
+	orphaned                      int            // whole task dirs removed (no meta / unreachable issue)
+	skipped                       int            // task dirs left untouched
+	artifactDirs                  int            // task dirs that had at least one artifact reclaimed
+	artifactRemoved               int            // count of removed artifact subdirs
+	storesReclaimed               int            // per-conversation Codex session stores reclaimed past their TTL
 	repoCachesReclaimed           int            // bare repo caches under .repos evicted past their TTL
 	taskTempDirsReclaimed         int            // per-task temp dirs under the temp base reclaimed after their owning execution ended
 	taskRootIndexEntriesReclaimed int            // abandoned stable-root records and unpublished entries reclaimed past the orphan TTL
@@ -142,23 +137,6 @@ func (d *Daemon) runGC(ctx context.Context) {
 		stats.bytesReclaimed += storeBytes
 	}
 
-	// Same for per-agent Hermes memory stores: they outlive the task by design
-	// (that is what fixes #6638), so a deleted agent's memory needs its own
-	// bounded lifecycle. Retention is much longer than the Codex one — these are
-	// a few markdown files, and reclaiming them is user-visible amnesia.
-	if storesRemoved, storeBytes := execenv.PruneHermesMemoryStores(d.cfg.Profile, d.cfg.GCHermesMemoryTTL, time.Now(), d.reserveStoreForDeletion, d.logger); storesRemoved > 0 {
-		stats.hermesMemoryStoresReclaimed += storesRemoved
-		stats.bytesReclaimed += storeBytes
-	}
-
-	// And per-conversation Hermes session stores, which outlive the task for the
-	// same reason (that is what fixes #6806) but hold transcripts rather than
-	// notes — so they get the shorter, Codex-like retention.
-	if storesRemoved, storeBytes := execenv.PruneHermesSessionStores(d.cfg.Profile, d.cfg.GCHermesSessionTTL, time.Now(), d.reserveStoreForDeletion, d.logger); storesRemoved > 0 {
-		stats.hermesSessionStoresReclaimed += storesRemoved
-		stats.bytesReclaimed += storeBytes
-	}
-
 	// Reclaim per-task temp dirs whose owning execution is gone. These are the
 	// agent process's TMPDIR and live under the system temp base, not under
 	// WorkspacesRoot, so the task walk above has never seen them and the only
@@ -174,7 +152,7 @@ func (d *Daemon) runGC(ctx context.Context) {
 		}
 	}
 
-	if stats.cleaned > 0 || stats.orphaned > 0 || stats.artifactDirs > 0 || stats.storesReclaimed > 0 || stats.hermesMemoryStoresReclaimed > 0 || stats.hermesSessionStoresReclaimed > 0 || stats.repoCachesReclaimed > 0 || stats.taskTempDirsReclaimed > 0 || stats.taskRootIndexEntriesReclaimed > 0 {
+	if stats.cleaned > 0 || stats.orphaned > 0 || stats.artifactDirs > 0 || stats.storesReclaimed > 0 || stats.repoCachesReclaimed > 0 || stats.taskTempDirsReclaimed > 0 || stats.taskRootIndexEntriesReclaimed > 0 {
 		d.logger.Info("gc: cycle complete",
 			"cleaned", stats.cleaned,
 			"orphaned", stats.orphaned,
@@ -182,8 +160,6 @@ func (d *Daemon) runGC(ctx context.Context) {
 			"artifact_dirs", stats.artifactDirs,
 			"artifact_removed", stats.artifactRemoved,
 			"codex_session_stores_reclaimed", stats.storesReclaimed,
-			"hermes_memory_stores_reclaimed", stats.hermesMemoryStoresReclaimed,
-			"hermes_session_stores_reclaimed", stats.hermesSessionStoresReclaimed,
 			"repo_caches_reclaimed", stats.repoCachesReclaimed,
 			"task_temp_dirs_reclaimed", stats.taskTempDirsReclaimed,
 			"task_root_index_entries_reclaimed", stats.taskRootIndexEntriesReclaimed,

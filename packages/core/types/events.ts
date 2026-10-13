@@ -46,9 +46,6 @@ export type WSEventType =
   | "member:removed"
   | "daemon:heartbeat"
   | "daemon:register"
-  | "skill:created"
-  | "skill:updated"
-  | "skill:deleted"
   | "subscriber:added"
   | "subscriber:removed"
   | "activity:created"
@@ -588,9 +585,6 @@ export interface WSEventPayloadMap {
   // currently consume as opaque triggers (refetch on receipt).
   "daemon:heartbeat": unknown;
   "daemon:register": unknown;
-  "skill:created": unknown;
-  "skill:updated": unknown;
-  "skill:deleted": unknown;
   "label:created": unknown;
   "label:updated": unknown;
   "label:deleted": unknown;

@@ -105,7 +105,7 @@ var workspaceMcpCmd = &cobra.Command{
 	Long: "Manages the workspace's library of MCP servers. A server added here " +
 		"is given to NO agent: it reaches an agent only when someone assigns it " +
 		"to that agent ('multica agent mcp add'), which also carries a per-agent " +
-		"on/off toggle. Same shape as workspace skills.\n\n" +
+		"on/off toggle.\n\n" +
 		"The stored configuration is write-only: reads return the server names " +
 		"and transports, never the urls, commands, headers, or env.",
 }

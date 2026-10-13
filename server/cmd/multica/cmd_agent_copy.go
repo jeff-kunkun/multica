@@ -17,9 +17,7 @@ import (
 // agent, optionally on a different runtime, leaving the source untouched. It is
 // the CLI/headless equivalent of the web "Duplicate" action (MUL-5279). The
 // command is a thin composition over existing endpoints — GET the source, then
-// POST a create — so it needs no dedicated server API: `POST /api/agents`
-// already binds skill_ids in the same DB transaction as the agent row, so the
-// copy never becomes visible in a partially configured state.
+// POST a create — so it needs no dedicated server API.
 var agentCopyCmd = &cobra.Command{
 	Use:   "copy <source-agent-id>",
 	Short: "Copy an existing agent into a new one (optionally on a different runtime)",
@@ -32,8 +30,7 @@ Copied by default without a dedicated override flag: conversation starters.
 
 Copied by default, each overridable with the matching flag: name (suffixed
 " (copy)"), description, instructions, avatar, custom_args, max_concurrent_tasks,
-invocation permission (permission_mode + allow-list), assigned workspace skills,
-and — only when the target runtime is unchanged — model, thinking_level and
+invocation permission (permission_mode + allow-list), and — only when the target runtime is unchanged — model, thinking_level and
 service_tier.
 
 Secret and machine-local fields are never copied: custom_env, mcp_config and
@@ -69,7 +66,6 @@ func registerAgentCopyFlags(cmd *cobra.Command) {
 	cmd.Flags().String("permission-mode", "", "Override invocation permission mode: private or public_to. Authoritative over --visibility.")
 	cmd.Flags().Bool("public-to-workspace", false, "public_to: allow every workspace member to invoke the copy.")
 	cmd.Flags().StringSlice("public-to-member", nil, "public_to: allow the given member user id(s) to invoke the copy. Repeatable.")
-	cmd.Flags().Bool("no-skills", false, "Do not copy the source agent's workspace skill assignments.")
 	// Secret / machine-local fields are never copied from the source; these
 	// flags provide fresh values for the copy, mirroring 'agent create'.
 	cmd.Flags().String("custom-env", "", "Set custom_env on the copy as a JSON object (never copied from the source). Prefer --custom-env-stdin/--custom-env-file for secrets. Pass '{}' for an empty map.")
@@ -235,26 +231,6 @@ func runAgentCopy(cmd *cobra.Command, args []string) error {
 		}
 		if it, ok := src["invocation_targets"]; ok && it != nil {
 			body["invocation_targets"] = it
-		}
-	}
-
-	// Workspace skills: copy the source's bindings so they attach in the same
-	// create transaction, unless --no-skills.
-	if noSkills, _ := cmd.Flags().GetBool("no-skills"); !noSkills {
-		if skills, ok := src["skills"].([]any); ok {
-			ids := make([]string, 0, len(skills))
-			for _, s := range skills {
-				m, ok := s.(map[string]any)
-				if !ok {
-					continue
-				}
-				if id := strVal(m, "id"); id != "" {
-					ids = append(ids, id)
-				}
-			}
-			if len(ids) > 0 {
-				body["skill_ids"] = ids
-			}
 		}
 	}
 

@@ -23,7 +23,6 @@ import (
 	"github.com/multica-ai/multica/server/internal/attribution"
 	"github.com/multica-ai/multica/server/internal/logger"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
-	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/util"
 	"github.com/multica-ai/multica/server/pkg/agent"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -111,14 +110,12 @@ type AgentResponse struct {
 	ThinkingLevel string `json:"thinking_level"`
 	// ServiceTier is the runtime-native Codex execution tier persisted for
 	// this agent (empty = inherit local Codex configuration).
-	ServiceTier           string                 `json:"service_tier"`
-	OwnerID               *string                `json:"owner_id"`
-	Skills                []AgentSkillSummary    `json:"skills"`
-	DisabledRuntimeSkills []DisabledRuntimeSkill `json:"disabled_runtime_skills"`
-	CreatedAt             string                 `json:"created_at"`
-	UpdatedAt             string                 `json:"updated_at"`
-	ArchivedAt            *string                `json:"archived_at"`
-	ArchivedBy            *string                `json:"archived_by"`
+	ServiceTier string  `json:"service_tier"`
+	OwnerID     *string `json:"owner_id"`
+	CreatedAt   string  `json:"created_at"`
+	UpdatedAt   string  `json:"updated_at"`
+	ArchivedAt  *string `json:"archived_at"`
+	ArchivedBy  *string `json:"archived_by"`
 }
 
 // runtimeConfigGatewayTokenMask is the placeholder the API substitutes for
@@ -178,37 +175,35 @@ func (h *Handler) agentToResponse(a db.Agent) AgentResponse {
 	}
 
 	return AgentResponse{
-		ID:                    uuidToString(a.ID),
-		WorkspaceID:           uuidToString(a.WorkspaceID),
-		RuntimeID:             uuidToString(a.RuntimeID),
-		RuntimeBound:          a.RuntimeID.Valid,
-		Name:                  a.Name,
-		Description:           a.Description,
-		Instructions:          a.Instructions,
-		ConversationStarters:  conversationStarters,
-		SystemKey:             a.SystemKey.String,
-		AvatarURL:             h.resolveAvatarURLPtr(textToPtr(a.AvatarUrl)),
-		RuntimeMode:           a.RuntimeMode,
-		RuntimeConfig:         rc,
-		CustomArgs:            customArgs,
-		McpConfig:             mcpConfig,
-		HasCustomEnv:          envKeyCount > 0,
-		CustomEnvKeyCount:     envKeyCount,
-		Visibility:            a.Visibility,
-		PermissionMode:        a.PermissionMode,
-		InvocationTargets:     []AgentInvocationTargetDTO{},
-		Status:                a.Status,
-		MaxConcurrentTasks:    a.MaxConcurrentTasks,
-		Model:                 a.Model.String,
-		ThinkingLevel:         a.ThinkingLevel.String,
-		ServiceTier:           a.ServiceTier.String,
-		OwnerID:               uuidToPtr(a.OwnerID),
-		Skills:                []AgentSkillSummary{},
-		DisabledRuntimeSkills: decodeDisabledRuntimeSkills(a.DisabledRuntimeSkills),
-		CreatedAt:             timestampToString(a.CreatedAt),
-		UpdatedAt:             timestampToString(a.UpdatedAt),
-		ArchivedAt:            timestampToPtr(a.ArchivedAt),
-		ArchivedBy:            uuidToPtr(a.ArchivedBy),
+		ID:                   uuidToString(a.ID),
+		WorkspaceID:          uuidToString(a.WorkspaceID),
+		RuntimeID:            uuidToString(a.RuntimeID),
+		RuntimeBound:         a.RuntimeID.Valid,
+		Name:                 a.Name,
+		Description:          a.Description,
+		Instructions:         a.Instructions,
+		ConversationStarters: conversationStarters,
+		SystemKey:            a.SystemKey.String,
+		AvatarURL:            h.resolveAvatarURLPtr(textToPtr(a.AvatarUrl)),
+		RuntimeMode:          a.RuntimeMode,
+		RuntimeConfig:        rc,
+		CustomArgs:           customArgs,
+		McpConfig:            mcpConfig,
+		HasCustomEnv:         envKeyCount > 0,
+		CustomEnvKeyCount:    envKeyCount,
+		Visibility:           a.Visibility,
+		PermissionMode:       a.PermissionMode,
+		InvocationTargets:    []AgentInvocationTargetDTO{},
+		Status:               a.Status,
+		MaxConcurrentTasks:   a.MaxConcurrentTasks,
+		Model:                a.Model.String,
+		ThinkingLevel:        a.ThinkingLevel.String,
+		ServiceTier:          a.ServiceTier.String,
+		OwnerID:              uuidToPtr(a.OwnerID),
+		CreatedAt:            timestampToString(a.CreatedAt),
+		UpdatedAt:            timestampToString(a.UpdatedAt),
+		ArchivedAt:           timestampToPtr(a.ArchivedAt),
+		ArchivedBy:           uuidToPtr(a.ArchivedBy),
 	}
 }
 
@@ -685,20 +680,17 @@ type TaskUsageData struct {
 }
 
 // TaskAgentData holds agent info included in claim responses so the daemon
-// can set up the execution environment (branch naming, skill files, instructions).
+// can set up the execution environment (branch naming, instructions).
 type TaskAgentData struct {
-	ID                    string                      `json:"id"`
-	Name                  string                      `json:"name"`
-	Instructions          string                      `json:"instructions"`
-	Skills                []service.AgentSkillData    `json:"skills,omitempty"`
-	SkillRefs             []service.AgentSkillRefData `json:"skill_refs,omitempty"`
-	CustomEnv             map[string]string           `json:"custom_env,omitempty"`
-	CustomArgs            []string                    `json:"custom_args,omitempty"`
-	McpConfig             json.RawMessage             `json:"mcp_config,omitempty"`
-	Model                 string                      `json:"model,omitempty"`
-	ThinkingLevel         string                      `json:"thinking_level,omitempty"`
-	ServiceTier           string                      `json:"service_tier,omitempty"`
-	DisabledRuntimeSkills []DisabledRuntimeSkill      `json:"disabled_runtime_skills,omitempty"`
+	ID            string            `json:"id"`
+	Name          string            `json:"name"`
+	Instructions  string            `json:"instructions"`
+	CustomEnv     map[string]string `json:"custom_env,omitempty"`
+	CustomArgs    []string          `json:"custom_args,omitempty"`
+	McpConfig     json.RawMessage   `json:"mcp_config,omitempty"`
+	Model         string            `json:"model,omitempty"`
+	ThinkingLevel string            `json:"thinking_level,omitempty"`
+	ServiceTier   string            `json:"service_tier,omitempty"`
 	// RuntimeConfig is the agent's saved runtime_config JSON as-is. The
 	// daemon decodes it per-provider — e.g. the openclaw backend reads
 	// `mode` + `gateway.*` to choose between embedded and gateway routing
@@ -1047,23 +1039,6 @@ func (h *Handler) ListAgents(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Batch-load skills for all agents to avoid N+1.
-	skillRows, err := h.Queries.ListAgentSkillsByWorkspace(r.Context(), parseUUID(workspaceID))
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to load agent skills")
-		return
-	}
-	skillMap := map[string][]AgentSkillSummary{}
-	for _, row := range skillRows {
-		agentID := uuidToString(row.AgentID)
-		skillMap[agentID] = append(skillMap[agentID], AgentSkillSummary{
-			ID:          uuidToString(row.ID),
-			Name:        row.Name,
-			Description: row.Description,
-			Enabled:     row.Enabled,
-		})
-	}
-
 	// mcp_config still uses the workspace-level always-redact setting and
 	// the per-row owner/admin gate — secrets in MCP server configs follow
 	// the same exposure rules as custom_env used to. custom_env itself is
@@ -1104,9 +1079,6 @@ func (h *Handler) ListAgents(w http.ResponseWriter, r *http.Request) {
 			resp.RuntimeAvailability = availability
 		}
 		applyInvocationTargetsToResponse(&resp, targets)
-		if skills, ok := skillMap[resp.ID]; ok {
-			resp.Skills = skills
-		}
 		// Agent actors NEVER see mcp_config secrets, even when their host's
 		// PAT would normally satisfy the owner/admin role gate. Otherwise an
 		// agent running under an owner's daemon could read other agents'
@@ -1154,15 +1126,6 @@ func (h *Handler) GetAgent(w http.ResponseWriter, r *http.Request) {
 	if !h.enrichAgentResponseWithTargetsHTTP(w, r, &resp, agent.ID) {
 		return
 	}
-	// Use the summary query (no `content` column) — the embedded
-	// AgentSkillSummary only needs id/name/description, and reading large
-	// SKILL.md bodies just to discard them is the exact regression we fixed
-	// in #2174.
-	if err := h.attachAgentSkills(r.Context(), &resp, agent.ID); err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to load agent skills")
-		return
-	}
-
 	// mcp_config redaction (custom_env was removed from this response shape
 	// in MUL-2600; secrets are now fetched via GET /api/agents/{id}/env).
 	ws, err := h.Queries.GetWorkspace(r.Context(), agent.WorkspaceID)
@@ -1211,9 +1174,6 @@ type CreateAgentRequest struct {
 	// `agent_created` analytics event. Empty identifies a manually authored
 	// agent.
 	Template string `json:"template"`
-	// SkillIDs are attached inside the same transaction as the agent row so a
-	// create never becomes visible in a partially configured state.
-	SkillIDs []string `json:"skill_ids"`
 }
 
 func decodeJSONBodyWithRawFields(body io.Reader, dst any) (map[string]json.RawMessage, error) {
@@ -1412,20 +1372,6 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		mc = append([]byte(nil), rawMcpConfig...)
 	}
 
-	skillUUIDs, ok := parseUUIDSliceOrBadRequest(w, req.SkillIDs, "skill_ids")
-	if !ok {
-		return
-	}
-	for _, skillID := range skillUUIDs {
-		if _, err := h.Queries.GetSkillInWorkspace(r.Context(), db.GetSkillInWorkspaceParams{
-			ID:          skillID,
-			WorkspaceID: wsUUID,
-		}); err != nil {
-			writeError(w, http.StatusBadRequest, "skill does not belong to this workspace")
-			return
-		}
-	}
-
 	avatarURL, ok := h.newAgentAvatar(w, r, req.AvatarURL)
 	if !ok {
 		return
@@ -1476,15 +1422,6 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to save agent access")
 		return
 	}
-	for _, skillID := range skillUUIDs {
-		if err := qtx.AddAgentSkill(r.Context(), db.AddAgentSkillParams{
-			AgentID: created.ID,
-			SkillID: skillID,
-		}); err != nil {
-			writeError(w, http.StatusInternalServerError, "failed to attach agent skill")
-			return
-		}
-	}
 	if err := tx.Commit(r.Context()); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to commit agent create")
 		return
@@ -1497,9 +1434,6 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 	}
 
 	resp := h.agentToResponse(created)
-	if err := h.attachAgentSkills(r.Context(), &resp, created.ID); err != nil {
-		slog.Warn("create agent: load skills for response failed", append(logger.RequestAttrs(r), "error", err, "agent_id", uuidToString(created.ID))...)
-	}
 	if err := h.enrichAgentResponseWithTargets(r.Context(), &resp, created.ID); err != nil {
 		slog.Warn("create agent: load invocation targets for response failed", append(logger.RequestAttrs(r), "error", err, "agent_id", uuidToString(created.ID))...)
 	}
@@ -2044,47 +1978,12 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to load agent invocation targets")
 		return
 	}
-	// agentToResponse always initialises Skills as []; junction-table rows
-	// are untouched by the SQL update, so we reload them here to keep the
-	// response (and the broadcast that mirrors it) in sync with reality.
-	// Without this, callers see "skills": [] after every metadata-only
-	// update and assume their bindings were cleared — see #3459.
-	if err := h.attachAgentSkills(r.Context(), &resp, updated.ID); err != nil {
-		slog.Warn("load agent skills after update failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
-		writeError(w, http.StatusInternalServerError, "failed to load agent skills")
-		return
-	}
 	slog.Info("agent updated", append(logger.RequestAttrs(r), "agent_id", id, "workspace_id", uuidToString(updated.WorkspaceID))...)
 	userID := requestUserID(r)
 	actorType, actorID := h.resolveActor(r, userID, uuidToString(updated.WorkspaceID))
 	h.publish(protocol.EventAgentStatus, uuidToString(updated.WorkspaceID), actorType, actorID, map[string]any{"agent": broadcastAgentResponse(resp)})
 	redactAgentResponseForActor(&resp, actorType)
 	writeJSON(w, http.StatusOK, resp)
-}
-
-// attachAgentSkills populates resp.Skills from the agent_skill junction
-// table for the given agent. agentToResponse zeros the field; mutation
-// handlers that don't refresh it would otherwise serve a misleading
-// empty array on every successful response (#3459).
-func (h *Handler) attachAgentSkills(ctx context.Context, resp *AgentResponse, agentID pgtype.UUID) error {
-	skills, err := h.Queries.ListAgentSkillSummaries(ctx, agentID)
-	if err != nil {
-		return err
-	}
-	if len(skills) == 0 {
-		return nil
-	}
-	out := make([]AgentSkillSummary, len(skills))
-	for i, s := range skills {
-		out[i] = AgentSkillSummary{
-			ID:          uuidToString(s.ID),
-			Name:        s.Name,
-			Description: s.Description,
-			Enabled:     s.Enabled,
-		}
-	}
-	resp.Skills = out
-	return nil
 }
 
 // resolveAgentProvider returns the provider name for the runtime that
@@ -2314,11 +2213,6 @@ func (h *Handler) ArchiveAgent(w http.ResponseWriter, r *http.Request) {
 	wsID := uuidToString(archived.WorkspaceID)
 	slog.Info("agent archived", append(logger.RequestAttrs(r), "agent_id", id, "workspace_id", wsID)...)
 	resp := h.agentToResponse(archived)
-	if err := h.attachAgentSkills(r.Context(), &resp, archived.ID); err != nil {
-		slog.Warn("load agent skills after archive failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
-		writeError(w, http.StatusInternalServerError, "failed to load agent skills")
-		return
-	}
 	actorType, actorID := h.resolveActor(r, userID, wsID)
 	h.publish(protocol.EventAgentArchived, wsID, actorType, actorID, map[string]any{"agent": broadcastAgentResponse(resp)})
 	redactAgentResponseForActor(&resp, actorType)
@@ -2349,11 +2243,6 @@ func (h *Handler) RestoreAgent(w http.ResponseWriter, r *http.Request) {
 	wsID := uuidToString(restored.WorkspaceID)
 	slog.Info("agent restored", append(logger.RequestAttrs(r), "agent_id", id, "workspace_id", wsID)...)
 	resp := h.agentToResponse(restored)
-	if err := h.attachAgentSkills(r.Context(), &resp, restored.ID); err != nil {
-		slog.Warn("load agent skills after restore failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
-		writeError(w, http.StatusInternalServerError, "failed to load agent skills")
-		return
-	}
 	userID := requestUserID(r)
 	actorType, actorID := h.resolveActor(r, userID, wsID)
 	h.publish(protocol.EventAgentRestored, wsID, actorType, actorID, map[string]any{"agent": broadcastAgentResponse(resp)})

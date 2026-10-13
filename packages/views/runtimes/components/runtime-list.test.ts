@@ -21,7 +21,6 @@ function makeAgent(overrides: Partial<Agent> = {}): Agent {
     max_concurrent_tasks: 1,
     model: "gpt-5.4",
     owner_id: "user-1",
-    skills: [],
     created_at: "2026-01-01T00:00:00Z",
     updated_at: "2026-01-01T00:00:00Z",
     archived_at: null,

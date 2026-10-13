@@ -34,7 +34,6 @@ import (
 	"github.com/multica-ai/multica/server/pkg/dbid"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 	"github.com/multica-ai/multica/server/pkg/redact"
-	"github.com/multica-ai/multica/server/pkg/skillbundle"
 	"github.com/multica-ai/multica/server/pkg/taskfailure"
 )
 
@@ -1022,8 +1021,7 @@ func (h *Handler) DaemonDeregister(w http.ResponseWriter, r *http.Request) {
 }
 
 type DaemonHeartbeatRequest struct {
-	RuntimeID           string `json:"runtime_id"`
-	SupportsBatchImport bool   `json:"supports_batch_import,omitempty"`
+	RuntimeID string `json:"runtime_id"`
 }
 
 // heartbeatHasPendingTimeout bounds the cheap HasPending probe on the
@@ -1039,16 +1037,6 @@ type DaemonHeartbeatRequest struct {
 // Kept as a variable so the slow-probe test can preserve this relationship
 // without paying the production timeout; production never reassigns it.
 var heartbeatHasPendingTimeout = 1 * time.Second
-
-// maxLocalSkillImportBatch is how many pending import requests the heartbeat
-// handler pops per cycle. Higher values let the daemon process more imports
-// in parallel but increase per-heartbeat latency.
-//
-// Timeout invariant: IMPORT_CONCURRENCY (views/.../runtime-local-skill-import-panel.tsx)
-// × heartbeat period (~15s) must stay within runtimeLocalSkillPendingTimeout
-// (runtime_local_skills.go), and IMPORT_POLL_TIMEOUT_MS (core/runtimes/local-skills.ts)
-// must exceed pendingTimeout + runningTimeout.
-const maxLocalSkillImportBatch = 10
 
 // runtimeLivenessTTL is how long a Redis liveness record stays valid before
 // expiring. The daemon refreshes it every heartbeat (~15s), so this just
@@ -1091,14 +1079,14 @@ func (h *Handler) DaemonHeartbeat(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
 	authPath := middleware.DaemonAuthPathFromContext(r.Context())
 	var (
-		outcome                                                                                            = "unauth"
-		runtimeID                                                                                          string
-		decodeMs, runtimeLookupMs, workspaceCheckMs                                                        int64
-		authMs, updateMs, probeModelMs, popModelMs, probeSkillsMs, popSkillsMs, probeImportMs, popImportMs int64
-		probeModelTimedOut, probeSkillsTimedOut, probeImportTimedOut                                       bool
+		outcome                                     = "unauth"
+		runtimeID                                   string
+		decodeMs, runtimeLookupMs, workspaceCheckMs int64
+		authMs, updateMs, probeModelMs, popModelMs  int64
+		probeModelTimedOut                          bool
 	)
 	defer func() {
-		logHeartbeatEndpointSlow(runtimeID, outcome, authPath, start, decodeMs, runtimeLookupMs, workspaceCheckMs, authMs, updateMs, probeModelMs, popModelMs, probeSkillsMs, popSkillsMs, probeImportMs, popImportMs, probeModelTimedOut, probeSkillsTimedOut, probeImportTimedOut)
+		logHeartbeatEndpointSlow(runtimeID, outcome, authPath, start, decodeMs, runtimeLookupMs, workspaceCheckMs, authMs, updateMs, probeModelMs, popModelMs, probeModelTimedOut)
 	}()
 
 	decodeStart := time.Now()
@@ -1165,16 +1153,10 @@ func (h *Handler) DaemonHeartbeat(w http.ResponseWriter, r *http.Request) {
 	}
 	updateMs = time.Since(updateStart).Milliseconds()
 
-	ack, m, err := h.processHeartbeat(r.Context(), runtimeID, req.SupportsBatchImport)
+	ack, m, err := h.processHeartbeat(r.Context(), runtimeID)
 	probeModelMs = m.ProbeModelMs
 	popModelMs = m.PopModelMs
-	probeSkillsMs = m.ProbeSkillsMs
-	popSkillsMs = m.PopSkillsMs
-	probeImportMs = m.ProbeImportMs
-	popImportMs = m.PopImportMs
 	probeModelTimedOut = m.ProbeModelTimedOut
-	probeSkillsTimedOut = m.ProbeSkillsTimedOut
-	probeImportTimedOut = m.ProbeImportTimedOut
 	if err != nil {
 		outcome = "error_update"
 		writeError(w, http.StatusInternalServerError, "heartbeat failed")
@@ -1192,15 +1174,6 @@ func (h *Handler) DaemonHeartbeat(w http.ResponseWriter, r *http.Request) {
 	if ack.PendingModelList != nil {
 		resp["pending_model_list"] = ack.PendingModelList
 	}
-	if ack.PendingLocalSkills != nil {
-		resp["pending_local_skills"] = ack.PendingLocalSkills
-	}
-	if ack.PendingLocalSkillImport != nil {
-		resp["pending_local_skill_import"] = ack.PendingLocalSkillImport
-	}
-	if len(ack.PendingLocalSkillImports) > 0 {
-		resp["pending_local_skill_imports"] = ack.PendingLocalSkillImports
-	}
 	writeJSON(w, http.StatusOK, resp)
 }
 
@@ -1209,7 +1182,7 @@ func (h *Handler) DaemonHeartbeat(w http.ResponseWriter, r *http.Request) {
 // captured each runtime's liveness state in a connection lease, so the hot
 // path never reads agent_runtime. HTTP heartbeat remains the stateless lookup
 // fallback for a daemon that stops receiving WebSocket acknowledgements.
-func (h *Handler) HandleDaemonWSHeartbeat(ctx context.Context, identity daemonws.ClientIdentity, runtimeID string, supportsBatchImport bool) (*protocol.DaemonHeartbeatAckPayload, error) {
+func (h *Handler) HandleDaemonWSHeartbeat(ctx context.Context, identity daemonws.ClientIdentity, runtimeID string) (*protocol.DaemonHeartbeatAckPayload, error) {
 	lease := identity.RuntimeLeases[runtimeID]
 	if lease == nil {
 		return nil, fmt.Errorf("runtime not in connection lease")
@@ -1229,7 +1202,7 @@ func (h *Handler) HandleDaemonWSHeartbeat(ctx context.Context, identity daemonws
 		}
 		return nil, err
 	}
-	ack, _, err := h.processHeartbeat(ctx, runtimeID, supportsBatchImport)
+	ack, _, err := h.processHeartbeat(ctx, runtimeID)
 	return ack, err
 }
 
@@ -1361,15 +1334,15 @@ func (h *Handler) recordHeartbeatState(
 // heartbeatMetrics carries per-stage timings out of processHeartbeat so the
 // HTTP slow-log can stay structured. The WS path discards them.
 type heartbeatMetrics struct {
-	ProbeModelMs, PopModelMs, ProbeSkillsMs, PopSkillsMs, ProbeImportMs, PopImportMs int64
-	ProbeModelTimedOut, ProbeSkillsTimedOut, ProbeImportTimedOut                     bool
+	ProbeModelMs, PopModelMs int64
+	ProbeModelTimedOut       bool
 }
 
 // processHeartbeat pulls pending actions for both HTTP and WebSocket
 // heartbeats using only the runtime ID. Each transport records liveness first:
 // HTTP uses its stateless runtime row, while WebSocket uses the connection
 // lease. Auth and request decoding also remain transport-specific.
-func (h *Handler) processHeartbeat(ctx context.Context, runtimeID string, supportsBatchImport bool) (*protocol.DaemonHeartbeatAckPayload, heartbeatMetrics, error) {
+func (h *Handler) processHeartbeat(ctx context.Context, runtimeID string) (*protocol.DaemonHeartbeatAckPayload, heartbeatMetrics, error) {
 	var m heartbeatMetrics
 
 	slog.Debug("daemon heartbeat", "runtime_id", runtimeID)
@@ -1402,10 +1375,10 @@ func (h *Handler) processHeartbeat(ctx context.Context, runtimeID string, suppor
 		}
 	}
 
-	// Probe then claim the model list queue. Same pattern as the local-skill
-	// queues below — a slow shared store cannot stall the heartbeat on
-	// empty-queue ticks, but the claim itself runs unbounded because its
-	// Lua side effects cannot be safely aborted mid-script.
+	// Probe then claim the model list queue. The probe is bounded so a slow
+	// shared store cannot stall the heartbeat on empty-queue ticks, but the
+	// claim itself runs unbounded because its Lua side effects cannot be
+	// safely aborted mid-script.
 	probeModelStart := time.Now()
 	probeModelCtx, cancelProbeModel := context.WithTimeout(ctx, heartbeatHasPendingTimeout)
 	hasModel, probeModelErr := h.ModelListStore.HasPending(probeModelCtx, runtimeID)
@@ -1430,89 +1403,6 @@ func (h *Handler) processHeartbeat(ctx context.Context, runtimeID string, suppor
 		}
 	}
 
-	// Probe then claim the local-skill list queue. The probe is bounded so a
-	// slow shared store cannot stall the heartbeat on empty-queue ticks; the
-	// claim runs unbounded (it inherits only ctx) because its Lua side
-	// effects cannot be safely aborted mid-script.
-	probeSkillsStart := time.Now()
-	probeSkillsCtx, cancelProbeSkills := context.WithTimeout(ctx, heartbeatHasPendingTimeout)
-	hasSkills, probeErr := h.LocalSkillListStore.HasPending(probeSkillsCtx, runtimeID)
-	cancelProbeSkills()
-	m.ProbeSkillsMs = time.Since(probeSkillsStart).Milliseconds()
-	switch {
-	case probeErr == nil && hasSkills:
-		popStart := time.Now()
-		pendingSkills, popErr := h.LocalSkillListStore.PopPending(ctx, runtimeID)
-		m.PopSkillsMs = time.Since(popStart).Milliseconds()
-		if popErr != nil {
-			slog.Warn("local skill list PopPending failed", "error", popErr, "runtime_id", runtimeID)
-		} else if pendingSkills != nil {
-			ack.PendingLocalSkills = &protocol.DaemonHeartbeatPendingLocalSkills{ID: pendingSkills.ID}
-		}
-	case probeErr != nil:
-		if errors.Is(probeErr, context.DeadlineExceeded) || errors.Is(probeErr, context.Canceled) {
-			m.ProbeSkillsTimedOut = true
-			slog.Warn("local skill list HasPending timed out", "runtime_id", runtimeID, "elapsed_ms", m.ProbeSkillsMs)
-		} else {
-			slog.Warn("local skill list HasPending failed", "error", probeErr, "runtime_id", runtimeID)
-		}
-	}
-
-	probeImportStart := time.Now()
-	probeImportCtx, cancelProbeImport := context.WithTimeout(ctx, heartbeatHasPendingTimeout)
-	hasImport, probeErr := h.LocalSkillImportStore.HasPending(probeImportCtx, runtimeID)
-	cancelProbeImport()
-	m.ProbeImportMs = time.Since(probeImportStart).Milliseconds()
-	switch {
-	case probeErr == nil && hasImport:
-		popStart := time.Now()
-		if supportsBatchImport {
-			pendingImports, popErr := h.LocalSkillImportStore.PopPendingBatch(ctx, runtimeID, maxLocalSkillImportBatch)
-			m.PopImportMs = time.Since(popStart).Milliseconds()
-			if popErr != nil {
-				slog.Warn("local skill import PopPendingBatch failed", "error", popErr, "runtime_id", runtimeID, "claimed", len(pendingImports))
-			}
-			// Always dispatch whatever was claimed — even on partial
-			// failure the claimed requests have already transitioned to
-			// running in the store. Dropping them here would leave them
-			// stranded until the running timeout.
-			if len(pendingImports) > 0 {
-				// Backwards compat: singular field carries the first item so
-				// old daemons that don't know the plural field still get one.
-				ack.PendingLocalSkillImport = &protocol.DaemonHeartbeatPendingLocalSkillImport{
-					ID:       pendingImports[0].ID,
-					SkillKey: pendingImports[0].SkillKey,
-				}
-				batch := make([]protocol.DaemonHeartbeatPendingLocalSkillImport, 0, len(pendingImports))
-				for _, p := range pendingImports {
-					batch = append(batch, protocol.DaemonHeartbeatPendingLocalSkillImport{
-						ID:       p.ID,
-						SkillKey: p.SkillKey,
-					})
-				}
-				ack.PendingLocalSkillImports = batch
-			}
-		} else {
-			pendingImport, popErr := h.LocalSkillImportStore.PopPending(ctx, runtimeID)
-			m.PopImportMs = time.Since(popStart).Milliseconds()
-			if popErr != nil {
-				slog.Warn("local skill import PopPending failed", "error", popErr, "runtime_id", runtimeID)
-			} else if pendingImport != nil {
-				ack.PendingLocalSkillImport = &protocol.DaemonHeartbeatPendingLocalSkillImport{
-					ID:       pendingImport.ID,
-					SkillKey: pendingImport.SkillKey,
-				}
-			}
-		}
-	case probeErr != nil:
-		if errors.Is(probeErr, context.DeadlineExceeded) || errors.Is(probeErr, context.Canceled) {
-			m.ProbeImportTimedOut = true
-			slog.Warn("local skill import HasPending timed out", "runtime_id", runtimeID, "elapsed_ms", m.ProbeImportMs)
-		} else {
-			slog.Warn("local skill import HasPending failed", "error", probeErr, "runtime_id", runtimeID)
-		}
-	}
-
 	return ack, m, nil
 }
 
@@ -1522,9 +1412,9 @@ func (h *Handler) processHeartbeat(ctx context.Context, runtimeID string, suppor
 // auth_ms is further decomposed into decode_ms, runtime_lookup_ms, and
 // workspace_check_ms; auth_path labels which token kind authenticated the
 // request ("daemon_token", "pat", or "jwt"). Mirrors logClaimEndpointSlow.
-func logHeartbeatEndpointSlow(runtimeID, outcome, authPath string, start time.Time, decodeMs, runtimeLookupMs, workspaceCheckMs, authMs, updateMs, probeModelMs, popModelMs, probeSkillsMs, popSkillsMs, probeImportMs, popImportMs int64, probeModelTimedOut, probeSkillsTimedOut, probeImportTimedOut bool) {
+func logHeartbeatEndpointSlow(runtimeID, outcome, authPath string, start time.Time, decodeMs, runtimeLookupMs, workspaceCheckMs, authMs, updateMs, probeModelMs, popModelMs int64, probeModelTimedOut bool) {
 	totalMs := time.Since(start).Milliseconds()
-	if totalMs < 500 && !probeModelTimedOut && !probeSkillsTimedOut && !probeImportTimedOut {
+	if totalMs < 500 && !probeModelTimedOut {
 		return
 	}
 	slog.Info("heartbeat_endpoint slow",
@@ -1539,20 +1429,14 @@ func logHeartbeatEndpointSlow(runtimeID, outcome, authPath string, start time.Ti
 		"update_ms", updateMs,
 		"probe_model_ms", probeModelMs,
 		"pop_model_ms", popModelMs,
-		"probe_skills_ms", probeSkillsMs,
-		"pop_skills_ms", popSkillsMs,
-		"probe_import_ms", probeImportMs,
-		"pop_import_ms", popImportMs,
 		"probe_model_timed_out", probeModelTimedOut,
-		"probe_skills_timed_out", probeSkillsTimedOut,
-		"probe_import_timed_out", probeImportTimedOut,
 	)
 }
 
 // logClaimEndpointSlow emits one structured log when the /tasks/claim endpoint
 // exceeds 500ms, splitting auth / claim / response-build phases so the prod
 // tail can be diagnosed without flooding logs at normal poll rates.
-func logClaimEndpointSlow(runtimeID, outcome string, start time.Time, authMs, claimMs, buildMs int64, payloadBytes, agentSkillCount, builtinSkillCount, skillPayloadBytes int) {
+func logClaimEndpointSlow(runtimeID, outcome string, start time.Time, authMs, claimMs, buildMs int64, payloadBytes int) {
 	totalMs := time.Since(start).Milliseconds()
 	if totalMs < 500 {
 		return
@@ -1565,9 +1449,6 @@ func logClaimEndpointSlow(runtimeID, outcome string, start time.Time, authMs, cl
 		"claim_ms", claimMs,
 		"build_ms", buildMs,
 		"payload_bytes", payloadBytes,
-		"agent_skill_count", agentSkillCount,
-		"builtin_skill_count", builtinSkillCount,
-		"skill_payload_bytes", skillPayloadBytes,
 	)
 }
 
@@ -1834,7 +1715,7 @@ func (h *Handler) ClaimTasksByRuntime(w http.ResponseWriter, r *http.Request) {
 		if handled, _ := h.repairStaleCommentPlanIfNeeded(r.Context(), &task, rtWorkspaceID); handled {
 			continue
 		}
-		resp, deliveredCommentIDs, issueSnapshot, _, _, failure := h.buildClaimedTaskResponse(r, &task, rt, uuidToString(task.RuntimeID), rtWorkspaceID)
+		resp, deliveredCommentIDs, issueSnapshot, failure := h.buildClaimedTaskResponse(r, &task, rt, uuidToString(task.RuntimeID), rtWorkspaceID)
 		if failure != nil {
 			// Builder rejected this task (workspace isolation / chat-input);
 			// it has already settled the task where the failure requires it.
@@ -2121,28 +2002,6 @@ func (h *Handler) rejectClaimSourceLoad(ctx context.Context, task *db.AgentTaskQ
 	}
 }
 
-// rejectClaimSkillLoad settles a claim whose agent skills could not be read.
-// It mirrors rejectClaimSourceLoad's transient branch — preserve the
-// just-dispatched task so the stale-dispatched reclaim redelivers it — because
-// this is the same kind of failure: a transient read on the claim-build path.
-//
-// Dispatching with whatever loaded is not the safer half-measure it looks
-// like. LoadAgentSkills reads the whole skill set in two queries, so a failure
-// means every skill loses its supporting files or the agent loses every skill,
-// and the ref hashes sent to the daemon are computed over that same truncated
-// content — so the daemon validates the bundle, caches it, and the agent runs
-// with rules silently missing. There is no ErrNoRows branch to mirror: an
-// agent with no skills is a legitimate empty result, not a missing row.
-func (h *Handler) rejectClaimSkillLoad(task *db.AgentTaskQueue, err error) *claimBuildFailure {
-	slog.Error("task claim: agent skill load failed; preserving task for redelivery",
-		"task_id", uuidToString(task.ID), "agent_id", uuidToString(task.AgentID), "error", err)
-	return &claimBuildFailure{
-		outcome: "error_skill_load",
-		status:  http.StatusInternalServerError,
-		message: "failed to load agent skills",
-	}
-}
-
 // rejectClaimOnWorkspaceMismatch enforces the claim's tenant boundary against
 // the workspace that OWNS the task's context (issue / chat session), which is
 // the only authority for MULTICA_WORKSPACE_ID in the
@@ -2278,8 +2137,8 @@ func claimResponseAgentIdentityMatches(resp AgentTaskResponse) bool {
 // feed the same delivery receipt into FinalizeTaskClaim. A non-nil failure
 // means the task must not be dispatched; the builder has already cancelled it
 // where the failure semantics require it.
-func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQueue, runtime db.AgentRuntime, runtimeID, runtimeWorkspaceID string) (resp AgentTaskResponse, deliveredCommentIDs []pgtype.UUID, issueSnapshot []byte, agentSkillCount, builtinSkillCount int, failure *claimBuildFailure) {
-	// Build response with fresh agent data (name + skills + custom_env + custom_args).
+func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQueue, runtime db.AgentRuntime, runtimeID, runtimeWorkspaceID string) (resp AgentTaskResponse, deliveredCommentIDs []pgtype.UUID, issueSnapshot []byte, failure *claimBuildFailure) {
+	// Build response with fresh agent data (name + custom_env + custom_args).
 	resp = taskToResponse(*task, runtimeWorkspaceID)
 	// Preserve PostgreSQL's microseconds: second-resolution display timestamps
 	// cannot distinguish stale claims reclaimed within the same second.
@@ -2304,7 +2163,7 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 			// already disappeared, but no claim payload is dispatched either way.
 			slog.Error("daemon claim: task agent no longer exists; refusing dispatch",
 				"task_id", uuidToString(task.ID), "agent_id", uuidToString(task.AgentID))
-			return resp, deliveredCommentIDs, issueSnapshot, agentSkillCount, builtinSkillCount, h.failClaimedTaskBeforeLaunch(
+			return resp, deliveredCommentIDs, issueSnapshot, h.failClaimedTaskBeforeLaunch(
 				r.Context(), task,
 				"Task identity is invalid: the assigned agent no longer exists.",
 				taskfailure.ReasonInvalidTaskIdentity,
@@ -2317,7 +2176,7 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 			slog.Error("daemon claim: requeue after agent load failure failed; stale reclaim will recover it",
 				"task_id", uuidToString(task.ID), "error", requeueErr)
 		}
-		return resp, deliveredCommentIDs, issueSnapshot, agentSkillCount, builtinSkillCount, &claimBuildFailure{
+		return resp, deliveredCommentIDs, issueSnapshot, &claimBuildFailure{
 			outcome: "error_load_task_agent",
 			status:  http.StatusInternalServerError,
 			message: "failed to load task agent",
@@ -2334,7 +2193,7 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 			"task_runtime_id", uuidToString(task.RuntimeID),
 			"agent_runtime_id", uuidToString(agent.RuntimeID),
 		)
-		return resp, deliveredCommentIDs, issueSnapshot, agentSkillCount, builtinSkillCount, h.failClaimedTaskBeforeLaunch(
+		return resp, deliveredCommentIDs, issueSnapshot, h.failClaimedTaskBeforeLaunch(
 			r.Context(), task,
 			"The agent moved to another runtime before this task could start. Retry the task to run it on the agent's current runtime.",
 			taskfailure.ReasonInvalidTaskIdentity,
@@ -2353,21 +2212,13 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 			"runtime_id", runtimeID,
 			"agent_owner_valid", agent.OwnerID.Valid,
 		)
-		return resp, deliveredCommentIDs, issueSnapshot, agentSkillCount, builtinSkillCount, h.failClaimedTaskBeforeLaunch(
+		return resp, deliveredCommentIDs, issueSnapshot, h.failClaimedTaskBeforeLaunch(
 			r.Context(), task,
 			userMessage,
 			taskfailure.ReasonRuntimeAccessDenied,
 			"error_runtime_access_denied", http.StatusForbidden, "private runtime does not permit task agent",
 		)
 	}
-	useSkillRefs := requestHasClientCapability(r, protocol.DaemonCapabilitySkillBundlesV1)
-	// A daemon older than the multica-platform merge assembles a brief that
-	// still names the built-ins this server stopped shipping. It cannot be
-	// fixed from here — the brief lives in the daemon binary — so the missing
-	// capability buys that daemon a redirect stub under the old name instead of
-	// a dangling pointer. Capability, not version: the version string is only
-	// ever shown to humans.
-	legacySkillRedirects := !requestHasClientCapability(r, protocol.DaemonCapabilityPlatformSkillV1)
 	var customEnv map[string]string
 	if agent.CustomEnv != nil {
 		if err := json.Unmarshal(agent.CustomEnv, &customEnv); err != nil {
@@ -2415,35 +2266,16 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 		runtimeConfig = json.RawMessage(agent.RuntimeConfig)
 	}
 	resp.Agent = &TaskAgentData{
-		ID:                    uuidToString(agent.ID),
-		Name:                  agent.Name,
-		Instructions:          agent.Instructions,
-		CustomEnv:             customEnv,
-		CustomArgs:            customArgs,
-		McpConfig:             mcpConfig,
-		Model:                 agent.Model.String,
-		ThinkingLevel:         agent.ThinkingLevel.String,
-		ServiceTier:           agent.ServiceTier.String,
-		RuntimeConfig:         runtimeConfig,
-		DisabledRuntimeSkills: disabledRuntimeSkillsFor(agent.DisabledRuntimeSkills, runtimeID, runtime.Provider),
-	}
-	if useSkillRefs {
-		_, skillRefs, err := h.TaskService.LoadAgentSkillBundles(r.Context(), task.AgentID, legacySkillRedirects)
-		if err != nil {
-			return resp, deliveredCommentIDs, issueSnapshot, agentSkillCount, builtinSkillCount, h.rejectClaimSkillLoad(task, err)
-		}
-		agentSkillCount = len(skillRefs)
-		resp.Agent.SkillRefs = skillRefs
-	} else {
-		skills, err := h.TaskService.LoadAgentSkills(r.Context(), task.AgentID)
-		if err != nil {
-			return resp, deliveredCommentIDs, issueSnapshot, agentSkillCount, builtinSkillCount, h.rejectClaimSkillLoad(task, err)
-		}
-		agentSkillCount = len(skills)
-		builtinSkills := h.TaskService.BuiltinSkills(legacySkillRedirects)
-		builtinSkillCount = len(builtinSkills)
-		skills = append(skills, builtinSkills...)
-		resp.Agent.Skills = skills
+		ID:            uuidToString(agent.ID),
+		Name:          agent.Name,
+		Instructions:  agent.Instructions,
+		CustomEnv:     customEnv,
+		CustomArgs:    customArgs,
+		McpConfig:     mcpConfig,
+		Model:         agent.Model.String,
+		ThinkingLevel: agent.ThinkingLevel.String,
+		ServiceTier:   agent.ServiceTier.String,
+		RuntimeConfig: runtimeConfig,
 	}
 	if !claimResponseAgentIdentityMatches(resp) {
 		responseAgentID := ""
@@ -2452,7 +2284,7 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 		}
 		slog.Error("daemon claim: response agent identity mismatch; refusing dispatch",
 			"task_id", uuidToString(task.ID), "task_agent_id", resp.AgentID, "response_agent_id", responseAgentID)
-		return resp, deliveredCommentIDs, issueSnapshot, agentSkillCount, builtinSkillCount, h.failClaimedTaskBeforeLaunch(
+		return resp, deliveredCommentIDs, issueSnapshot, h.failClaimedTaskBeforeLaunch(
 			r.Context(), task,
 			"Task identity is invalid: the task and response agent disagree.",
 			taskfailure.ReasonInvalidTaskIdentity,
@@ -2484,12 +2316,12 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 	if task.IssueID.Valid {
 		issue, issueErr := h.Queries.GetIssue(r.Context(), task.IssueID)
 		if issueErr != nil {
-			return resp, deliveredCommentIDs, issueSnapshot, agentSkillCount, builtinSkillCount,
+			return resp, deliveredCommentIDs, issueSnapshot,
 				h.rejectClaimSourceLoad(r.Context(), task, issueErr, "issue", uuidToString(task.IssueID))
 		}
 		resp.WorkspaceID = uuidToString(issue.WorkspaceID)
 		if failure := h.rejectClaimOnWorkspaceMismatch(r.Context(), task, resp.WorkspaceID, runtimeID, runtimeWorkspaceID); failure != nil {
-			return resp, deliveredCommentIDs, issueSnapshot, agentSkillCount, builtinSkillCount, failure
+			return resp, deliveredCommentIDs, issueSnapshot, failure
 		}
 		resp.ThreadName = issue.Title
 		issueNumber = issue.Number
@@ -2535,7 +2367,7 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 				"task_id", uuidToString(task.ID),
 				"issue_id", uuidToString(issue.ID),
 				"error", projectErr)
-			return resp, deliveredCommentIDs, issueSnapshot, agentSkillCount, builtinSkillCount, &claimBuildFailure{
+			return resp, deliveredCommentIDs, issueSnapshot, &claimBuildFailure{
 				outcome: "error_project_context",
 				status:  http.StatusInternalServerError,
 				message: "failed to load project context",
@@ -2843,12 +2675,12 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 	if task.ChatSessionID.Valid {
 		cs, chatErr := h.Queries.GetChatSession(r.Context(), task.ChatSessionID)
 		if chatErr != nil {
-			return resp, deliveredCommentIDs, issueSnapshot, agentSkillCount, builtinSkillCount,
+			return resp, deliveredCommentIDs, issueSnapshot,
 				h.rejectClaimSourceLoad(r.Context(), task, chatErr, "chat session", uuidToString(task.ChatSessionID))
 		}
 		resp.WorkspaceID = uuidToString(cs.WorkspaceID)
 		if failure := h.rejectClaimOnWorkspaceMismatch(r.Context(), task, resp.WorkspaceID, runtimeID, runtimeWorkspaceID); failure != nil {
-			return resp, deliveredCommentIDs, issueSnapshot, agentSkillCount, builtinSkillCount, failure
+			return resp, deliveredCommentIDs, issueSnapshot, failure
 		}
 		resp.ChatSessionID = uuidToString(cs.ID)
 		resp.ThreadName = cs.Title
@@ -2876,7 +2708,7 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 				"task_id", uuidToString(task.ID),
 				"chat_session_id", uuidToString(cs.ID),
 				"error", projectErr)
-			return resp, deliveredCommentIDs, issueSnapshot, agentSkillCount, builtinSkillCount, &claimBuildFailure{
+			return resp, deliveredCommentIDs, issueSnapshot, &claimBuildFailure{
 				outcome: "error_project_context",
 				status:  http.StatusInternalServerError,
 				message: "failed to load project context",
@@ -2929,7 +2761,7 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 				"task_id", uuidToString(task.ID),
 				"chat_session_id", uuidToString(cs.ID),
 				"error", inputLoadErr)
-			return resp, deliveredCommentIDs, issueSnapshot, agentSkillCount, builtinSkillCount, &claimBuildFailure{
+			return resp, deliveredCommentIDs, issueSnapshot, &claimBuildFailure{
 				outcome: "error_chat_input_load",
 				status:  http.StatusInternalServerError,
 				message: "failed to load chat input",
@@ -3011,7 +2843,7 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 					"task_id", uuidToString(task.ID),
 					"chat_session_id", uuidToString(cs.ID),
 					"error", attErr)
-				return resp, deliveredCommentIDs, issueSnapshot, agentSkillCount, builtinSkillCount, &claimBuildFailure{
+				return resp, deliveredCommentIDs, issueSnapshot, &claimBuildFailure{
 					outcome: "error_chat_attachment_load",
 					status:  http.StatusInternalServerError,
 					message: "failed to load chat attachments",
@@ -3052,7 +2884,7 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 				slog.Error("chat claim: cancel after empty input failed",
 					"task_id", uuidToString(task.ID), "error", cerr)
 			}
-			return resp, deliveredCommentIDs, issueSnapshot, agentSkillCount, builtinSkillCount, &claimBuildFailure{
+			return resp, deliveredCommentIDs, issueSnapshot, &claimBuildFailure{
 				outcome: "error_empty_chat_input",
 				status:  http.StatusInternalServerError,
 				message: "chat task has no user input",
@@ -3070,7 +2902,7 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 	// discipline. This final call is the backstop for a task that reached here
 	// without any branch claiming it.
 	if failure := h.rejectClaimOnWorkspaceMismatch(r.Context(), task, resp.WorkspaceID, runtimeID, runtimeWorkspaceID); failure != nil {
-		return resp, deliveredCommentIDs, issueSnapshot, agentSkillCount, builtinSkillCount, failure
+		return resp, deliveredCommentIDs, issueSnapshot, failure
 	}
 
 	// Workspace-level Context (workspace.context DB column) — the per-workspace
@@ -3176,13 +3008,13 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 				slog.Error("task claim: requeue after worktree-gate cancel failure failed; stale reclaim will recover it",
 					"task_id", uuidToString(task.ID), "error", rerr)
 			}
-			return resp, deliveredCommentIDs, issueSnapshot, agentSkillCount, builtinSkillCount, &claimBuildFailure{
+			return resp, deliveredCommentIDs, issueSnapshot, &claimBuildFailure{
 				outcome: "error_worktree_gate_cancel",
 				status:  http.StatusInternalServerError,
 				message: "failed to cancel a worktree task blocked by daemon version; task requeued",
 			}
 		}
-		return resp, deliveredCommentIDs, issueSnapshot, agentSkillCount, builtinSkillCount, &claimBuildFailure{
+		return resp, deliveredCommentIDs, issueSnapshot, &claimBuildFailure{
 			outcome: "error_worktree_daemon_version",
 			status:  http.StatusUnprocessableEntity,
 			message: reason,
@@ -3203,7 +3035,7 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 		resp.InitiatorEmail = originator.Email
 	}
 
-	return resp, deliveredCommentIDs, issueSnapshot, agentSkillCount, builtinSkillCount, nil
+	return resp, deliveredCommentIDs, issueSnapshot, nil
 }
 
 // worktreeClaimBlockReason returns a user-facing reason when this runtime must
@@ -3248,7 +3080,7 @@ func worktreeClaimBlockReason(resources []ProjectResourceData, runtime db.AgentR
 }
 
 // ClaimTaskByRuntime atomically claims the next queued task for a runtime.
-// The response includes the agent's name and skills, fetched fresh from the DB.
+// The response includes the agent's name and config, fetched fresh from the DB.
 func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 	runtimeID := chi.URLParam(r, "runtimeId")
 	start := time.Now()
@@ -3257,9 +3089,6 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 		outcome                  = "unauth"
 		authMs, claimMs, buildMs int64
 		payloadBytes             int
-		agentSkillCount          int
-		builtinSkillCount        int
-		skillPayloadBytes        int
 		buildStart               time.Time
 	)
 	defer func() {
@@ -3269,7 +3098,7 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 		if !buildStart.IsZero() {
 			buildMs = time.Since(buildStart).Milliseconds()
 		}
-		logClaimEndpointSlow(runtimeID, outcome, start, authMs, claimMs, buildMs, payloadBytes, agentSkillCount, builtinSkillCount, skillPayloadBytes)
+		logClaimEndpointSlow(runtimeID, outcome, start, authMs, claimMs, buildMs, payloadBytes)
 	}()
 
 	// Verify the caller owns this runtime's workspace. The runtime's
@@ -3317,7 +3146,7 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 	outcome = "claimed"
 	buildStart = time.Now()
 
-	resp, deliveredCommentIDs, issueSnapshot, agentSkillCount, builtinSkillCount, failure := h.buildClaimedTaskResponse(r, task, runtime, runtimeID, runtimeWorkspaceID)
+	resp, deliveredCommentIDs, issueSnapshot, failure := h.buildClaimedTaskResponse(r, task, runtime, runtimeID, runtimeWorkspaceID)
 	if failure != nil {
 		outcome = failure.outcome
 		if failure.settled {
@@ -3411,108 +3240,7 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 	resp.DeliveredCommentIDs = uuidStringsOrEmpty(receipt)
 
 	slog.Info("task claimed by runtime", "task_id", uuidToString(task.ID), "runtime_id", runtimeID, "agent_id", uuidToString(task.AgentID), "prior_session", resp.PriorSessionID)
-	if resp.Agent != nil && len(resp.Agent.Skills) > 0 {
-		if skillPayload, err := json.Marshal(resp.Agent.Skills); err == nil {
-			skillPayloadBytes = len(skillPayload)
-		}
-	} else if resp.Agent != nil && len(resp.Agent.SkillRefs) > 0 {
-		if skillPayload, err := json.Marshal(resp.Agent.SkillRefs); err == nil {
-			skillPayloadBytes = len(skillPayload)
-		}
-	}
 	payloadBytes, _ = writeMeasuredJSON(w, http.StatusOK, map[string]any{"task": resp})
-}
-
-type resolveSkillBundlesRequest struct {
-	Skills []resolveSkillBundleRef `json:"skills"`
-}
-
-type resolveSkillBundleRef struct {
-	ID     string `json:"id"`
-	Source string `json:"source"`
-	Hash   string `json:"hash"`
-}
-
-// ResolveTaskSkillBundles returns full skill content for refs from a slim
-// claim. The daemon calls this after claim and before execenv.Prepare so
-// runtimes still see complete local skill files at startup.
-//
-// If a requested hash no longer matches the agent's current skill bundle, the
-// endpoint returns the current bundle and hash. Stage 1 does not snapshot skill
-// content at claim time; the daemon validates the returned bundle before
-// writing it to cache and materializing it.
-func (h *Handler) ResolveTaskSkillBundles(w http.ResponseWriter, r *http.Request) {
-	runtimeID := chi.URLParam(r, "runtimeId")
-	taskID := chi.URLParam(r, "taskId")
-
-	runtime, ok := h.requireDaemonRuntimeAccess(w, r, runtimeID)
-	if !ok {
-		return
-	}
-	task, taskWorkspaceID, ok := h.requireDaemonTaskAccessWithWorkspace(w, r, taskID)
-	if !ok {
-		return
-	}
-	if taskWorkspaceID != uuidToString(runtime.WorkspaceID) || uuidToString(task.RuntimeID) != runtimeID {
-		writeError(w, http.StatusNotFound, "task not found")
-		return
-	}
-	if task.Status != "dispatched" && task.Status != "waiting_local_directory" {
-		writeError(w, http.StatusConflict, "task is not preparing")
-		return
-	}
-
-	var req resolveSkillBundlesRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid request body")
-		return
-	}
-	if len(req.Skills) == 0 {
-		writeJSON(w, http.StatusOK, map[string]any{"bundles": []service.AgentSkillData{}})
-		return
-	}
-
-	// Validate before reading: a malformed ref is rejected the same way it
-	// always was, now without paying for a load first.
-	wanted := make([]service.AgentSkillBundleRef, 0, len(req.Skills))
-	for _, ref := range req.Skills {
-		if ref.ID == "" || ref.Source == "" || ref.Hash == "" {
-			writeError(w, http.StatusBadRequest, "invalid skill ref")
-			return
-		}
-		wanted = append(wanted, service.AgentSkillBundleRef{ID: ref.ID, Source: ref.Source})
-	}
-
-	// Load ONLY what was asked for. The daemon resolves one skill per request,
-	// so serving these out of the agent's full bundle set meant reading and
-	// hashing every skill the agent has, once per request, to return one of
-	// them — quadratic in skill count across a cold dispatch.
-	allowed, err := h.TaskService.LoadRequestedAgentSkillBundles(r.Context(), task.AgentID, wanted)
-	if err != nil {
-		// 5xx, not a partial answer: the daemon's resolve retry can recover a
-		// transient read, and a bundle assembled from a failed read would pass
-		// its client-side validation and be cached as if it were complete.
-		slog.Error("resolve skill bundles: load agent skills failed",
-			"task_id", uuidToString(task.ID), "agent_id", uuidToString(task.AgentID), "error", err)
-		writeError(w, http.StatusInternalServerError, "failed to load skill bundles")
-		return
-	}
-
-	resolved := make([]service.AgentSkillData, 0, len(req.Skills))
-	for _, ref := range req.Skills {
-		bundle, ok := allowed[service.AgentSkillBundleKey(ref.Source, ref.ID)]
-		if !ok {
-			writeError(w, http.StatusNotFound, "skill bundle not found")
-			return
-		}
-		if ref.Source == skillbundle.SourcePlugin && bundle.Hash != ref.Hash {
-			writeError(w, http.StatusConflict, "pinned plugin skill bundle hash mismatch")
-			return
-		}
-		resolved = append(resolved, bundle)
-	}
-
-	writeJSON(w, http.StatusOK, map[string]any{"bundles": resolved})
 }
 
 // trailingUserMessages returns the run of user messages after the last

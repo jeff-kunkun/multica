@@ -10,7 +10,7 @@ import { useT } from "../i18n";
  *
  * Left unclamped, a long description pushes the meta row and the tab strip
  * down the page, so how far the content starts depends on how much prose
- * someone wrote. Two lines is where the agent and skill headers already sit
+ * someone wrote. Two lines is where the agent header already sits
  * visually; the toggle is what makes clamping safe, since without it the rest
  * of the text has nowhere to be — this IS the detail page, so expanding in
  * place is the only move that does not send the reader somewhere else to read

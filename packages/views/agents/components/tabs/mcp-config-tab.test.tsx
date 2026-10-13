@@ -4,8 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import type { Agent, AgentRuntime } from "@multica/core/types";
-import { ApiError } from "@multica/core/api";
+import type { Agent } from "@multica/core/types";
 import { I18nProvider } from "@multica/core/i18n/react";
 import enCommon from "../../../locales/en/common.json";
 import enAgents from "../../../locales/en/agents.json";
@@ -13,7 +12,6 @@ import { McpConfigTab } from "./mcp-config-tab";
 
 const TEST_RESOURCES = { en: { common: enCommon, agents: enAgents } };
 
-const mockRuntimeCapabilities = vi.hoisted(() => vi.fn());
 const mockAddServer = vi.hoisted(() => vi.fn());
 const mockSetEnabled = vi.hoisted(() => vi.fn());
 const mockRemoveServer = vi.hoisted(() => vi.fn());
@@ -56,24 +54,6 @@ const wsServer = (over: Record<string, unknown>) => ({
   ...over,
 });
 
-// The tab reads discovery through runtimeCapabilitiesOptions; existing tests
-// render with runtime={null} so the query stays disabled and never fires.
-vi.mock("@multica/core/runtimes", async () => {
-  const actual =
-    await vi.importActual<typeof import("@multica/core/runtimes")>(
-      "@multica/core/runtimes",
-    );
-  return {
-    ...actual,
-    runtimeCapabilitiesOptions: (runtimeId: string | null) => ({
-      queryKey: ["runtime-capabilities", runtimeId],
-      queryFn: () => mockRuntimeCapabilities(runtimeId),
-      enabled: Boolean(runtimeId),
-      retry: false,
-    }),
-  };
-});
-
 vi.mock("sonner", () => ({
   toast: {
     error: vi.fn(),
@@ -99,7 +79,6 @@ const baseAgent: Agent = {
   max_concurrent_tasks: 1,
   model: "",
   owner_id: "user-1",
-  skills: [],
   created_at: "2026-05-28T00:00:00Z",
   updated_at: "2026-05-28T00:00:00Z",
   archived_at: null,
@@ -120,39 +99,17 @@ function TestShell({ children }: { children: React.ReactNode }) {
 function renderTab(
   overrides: Partial<Agent> = {},
   onSave = vi.fn().mockResolvedValue(undefined),
-  runtime: AgentRuntime | null = null,
-  currentUserId: string | null = "user-1",
 ) {
   const result = render(
     <TestShell>
       <McpConfigTab
         agent={{ ...baseAgent, ...overrides }}
-        runtime={runtime}
-        currentUserId={currentUserId}
         onSave={onSave}
       />
     </TestShell>,
   );
   return { ...result, onSave };
 }
-
-const onlineRuntime: AgentRuntime = {
-  id: "runtime-1",
-  workspace_id: "ws-1",
-  daemon_id: "daemon-1",
-  name: "Claude (Mac)",
-  runtime_mode: "local",
-  provider: "claude",
-  launch_header: "",
-  status: "online",
-  device_info: "Mac",
-  metadata: {},
-  owner_id: "user-1",
-  visibility: "private",
-  last_seen_at: null,
-  created_at: "2026-07-11T00:00:00Z",
-  updated_at: "2026-07-11T00:00:00Z",
-};
 
 describe("McpConfigTab", () => {
   beforeEach(() => {
@@ -193,7 +150,6 @@ describe("McpConfigTab", () => {
     expect(screen.getByText("STDIO")).toBeVisible();
     expect(screen.getByText("Streamable HTTP")).toBeVisible();
     expect(screen.getByRole("heading", { name: /managed by multica/i })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: /inherited from runtime/i })).toBeInTheDocument();
     expect(screen.queryByLabelText(/MCP config JSON editor/i)).not.toBeInTheDocument();
   });
 
@@ -256,8 +212,6 @@ describe("McpConfigTab", () => {
               },
             },
           }}
-          runtime={null}
-          currentUserId="user-1"
           onSave={onSave}
         />
       </TestShell>,
@@ -297,8 +251,6 @@ describe("McpConfigTab", () => {
       <TestShell>
         <McpConfigTab
           agent={{ ...baseAgent, mcp_config: { mcp: otherContainer } }}
-          runtime={null}
-          currentUserId="user-1"
           onSave={onSave}
         />
       </TestShell>,
@@ -693,60 +645,6 @@ describe("McpConfigTab", () => {
     expect(onSave).not.toHaveBeenCalled();
   });
 
-  it("lists inherited MCP servers discovered from the assigned runtime", async () => {
-    mockRuntimeCapabilities.mockResolvedValue({
-      skills: [],
-      supported: true,
-      mcpServers: [
-        { name: "linear", transport: "http", source: "User config", enabled: true },
-      ],
-      mcpSupported: true,
-    });
-
-    renderTab({}, undefined, onlineRuntime);
-
-    const row = (await screen.findByText("linear")).closest("li")!;
-    expect(within(row).getByText("Streamable HTTP")).toBeVisible();
-  });
-
-  it("shows a permission notice when capability discovery is forbidden", async () => {
-    mockRuntimeCapabilities.mockRejectedValue(
-      new ApiError("insufficient permissions", 403, "Forbidden"),
-    );
-
-    renderTab({}, undefined, onlineRuntime);
-
-    expect(
-      await screen.findByText(
-        "You don't have permission to view this runtime's MCP servers.",
-      ),
-    ).toBeInTheDocument();
-  });
-
-  it("does not discover MCP servers for another member's private runtime", async () => {
-    renderTab({}, undefined, { ...onlineRuntime, owner_id: "user-2" }, "admin-1");
-
-    expect(
-      await screen.findByText(
-        "You don't have permission to view this runtime's MCP servers.",
-      ),
-    ).toBeInTheDocument();
-    expect(mockRuntimeCapabilities).not.toHaveBeenCalled();
-  });
-
-  it("shows a retry notice when capability discovery fails", async () => {
-    mockRuntimeCapabilities.mockRejectedValue(
-      new Error("daemon did not respond within 3 minutes"),
-    );
-
-    renderTab({}, undefined, onlineRuntime);
-
-    expect(
-      await screen.findByText(
-        "Couldn't discover runtime MCP servers. Try again.",
-      ),
-    ).toBeInTheDocument();
-  });
 });
 
 // The workspace layer (GH #6062) reaches an agent only when someone assigns
@@ -848,7 +746,6 @@ describe("McpConfigTab workspace servers", () => {
               mcpServers: { fetch: { command: "uvx" } },
             },
           }}
-          runtime={null}
           canEdit={false}
           onSave={vi.fn()}
         />
@@ -875,41 +772,11 @@ describe("McpConfigTab workspace servers", () => {
   });
 });
 
-// The runtime section's Overridden badge has to reflect the REAL precedence:
-// runtime < (assigned workspace servers + the agent's own).
 describe("McpConfigTab effective set", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     workspaceMcp.assigned = [];
     workspaceMcp.library = [];
-  });
-
-  it("marks a runtime server shadowed by an assigned server as overridden", async () => {
-    workspaceMcp.assigned = [wsServer({ name: "fetch", enabled: true })];
-    mockRuntimeCapabilities.mockResolvedValue({
-      mcpSupported: true,
-      mcpServers: [{ name: "fetch", transport: "stdio", enabled: true, source: "runtime" }],
-    });
-    renderTab({ mcp_config: null }, vi.fn(), onlineRuntime);
-
-    expect(
-      await screen.findByText("Overridden by Multica"),
-    ).toBeInTheDocument();
-  });
-
-  // A switched-off assignment is not sent, so it shadows nothing.
-  it("does not mark a runtime server overridden by a disabled assignment", async () => {
-    workspaceMcp.assigned = [wsServer({ name: "fetch", enabled: false })];
-    mockRuntimeCapabilities.mockResolvedValue({
-      mcpSupported: true,
-      mcpServers: [{ name: "fetch", transport: "stdio", enabled: true, source: "runtime" }],
-    });
-    renderTab({ mcp_config: null }, vi.fn(), onlineRuntime);
-
-    // "fetch" renders twice — once as the (disabled) assignment, once as the
-    // runtime's own server — which is exactly the state under test.
-    await waitFor(() => expect(screen.getAllByText("fetch")).toHaveLength(2));
-    expect(screen.queryByText("Overridden by Multica")).toBeNull();
   });
 
   // Same transport hazard as before, reached through the SAVED config: the

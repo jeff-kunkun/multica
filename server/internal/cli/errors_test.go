@@ -145,7 +145,7 @@ func TestFormatErrorValidationUsesServerMessage(t *testing.T) {
 }
 
 // TestFormatErrorConflictUsesServerMessage pins GH #6264: a 409 body carries a
-// hand-written fix ("reply under this comment", "a skill with that name
+// hand-written fix ("reply under this comment", "a label with that name
 // exists"), and the generic conflict template actively misdirects by telling
 // the caller to retry. The server message must reach the user by default, with
 // no --debug required.
@@ -175,9 +175,9 @@ func TestFormatErrorConflictUsesServerMessage(t *testing.T) {
 
 func TestFormatErrorConflictChineseLocale(t *testing.T) {
 	withLang(t, "zh_CN.UTF-8")
-	httpErr := &HTTPError{StatusCode: 409, Body: `{"error":"a skill with this name already exists"}`}
+	httpErr := &HTTPError{StatusCode: 409, Body: `{"error":"a label with that name already exists"}`}
 	got := FormatError(httpErr, false)
-	if !strings.Contains(got, "请求冲突：") || !strings.Contains(got, "a skill with this name already exists") {
+	if !strings.Contains(got, "请求冲突：") || !strings.Contains(got, "a label with that name already exists") {
 		t.Errorf("expected Chinese conflict prefix with server message, got %q", got)
 	}
 }

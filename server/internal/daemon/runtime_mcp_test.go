@@ -8,135 +8,6 @@ import (
 	"testing"
 )
 
-func TestListRuntimeLocalMcpServersCodexRedactsDetails(t *testing.T) {
-	home := t.TempDir()
-	redirectTestHome(t, home)
-	t.Setenv("CODEX_HOME", "")
-	configDir := filepath.Join(home, ".codex")
-	if err := os.MkdirAll(configDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	config := `[mcp_servers.fetch]
-command = "uvx"
-args = ["mcp-server-fetch", "--token", "secret"]
-
-[mcp_servers.docs]
-url = "https://secret.example/mcp"
-enabled = false
-`
-	if err := os.WriteFile(filepath.Join(configDir, "config.toml"), []byte(config), 0o600); err != nil {
-		t.Fatal(err)
-	}
-
-	servers, supported, err := listRuntimeLocalMcpServers("codex")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !supported || len(servers) != 2 {
-		t.Fatalf("supported=%v servers=%#v", supported, servers)
-	}
-	if servers[0].Name != "docs" || servers[0].Transport != "http" || servers[0].Enabled {
-		t.Fatalf("docs summary = %#v", servers[0])
-	}
-	if servers[1].Name != "fetch" || servers[1].Transport != "stdio" || !servers[1].Enabled {
-		t.Fatalf("fetch summary = %#v", servers[1])
-	}
-}
-
-func TestListRuntimeLocalMcpServersClaudeMissingConfig(t *testing.T) {
-	redirectTestHome(t, t.TempDir())
-	servers, supported, err := listRuntimeLocalMcpServers("claude")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !supported || len(servers) != 0 {
-		t.Fatalf("supported=%v servers=%#v", supported, servers)
-	}
-}
-
-func TestListRuntimeLocalMcpServersOmpReadsNativeConfig(t *testing.T) {
-	home := t.TempDir()
-	redirectTestHome(t, home)
-	configDir := filepath.Join(home, ".omp", "agent")
-	if err := os.MkdirAll(configDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	config := `{"mcpServers":{"native":{"command":"native-server","enabled":false}}}`
-	if err := os.WriteFile(filepath.Join(configDir, "mcp.json"), []byte(config), 0o600); err != nil {
-		t.Fatal(err)
-	}
-
-	servers, supported, err := listRuntimeLocalMcpServers("omp")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !supported || len(servers) != 1 {
-		t.Fatalf("supported=%v servers=%#v", supported, servers)
-	}
-	if servers[0].Name != "native" || servers[0].Transport != "stdio" || servers[0].Enabled {
-		t.Fatalf("native summary = %#v", servers[0])
-	}
-}
-
-func TestListRuntimeLocalMcpServersClaudeEnabledPlugin(t *testing.T) {
-	home := t.TempDir()
-	redirectTestHome(t, home)
-	installPath := writeTestClaudePlugin(t, home, "paper-desktop@paper", "paper-desktop", true)
-	config := `{"mcpServers":{"paper":{"type":"http","url":"http://127.0.0.1:29979/mcp"}}}`
-	if err := os.WriteFile(filepath.Join(installPath, "mcp.json"), []byte(config), 0o600); err != nil {
-		t.Fatal(err)
-	}
-
-	servers, supported, err := listRuntimeLocalMcpServers("claude")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !supported || len(servers) != 1 {
-		t.Fatalf("supported=%v servers=%#v", supported, servers)
-	}
-	if servers[0].Name != "paper" || servers[0].Transport != "http" || !servers[0].Enabled {
-		t.Fatalf("plugin MCP summary = %#v", servers[0])
-	}
-	if servers[0].Source != "Claude Plugin · paper-desktop" {
-		t.Fatalf("plugin MCP source = %q", servers[0].Source)
-	}
-}
-
-func TestListRuntimeLocalMcpServersUnknownProvider(t *testing.T) {
-	redirectTestHome(t, t.TempDir())
-	servers, supported, err := listRuntimeLocalMcpServers("future-runtime")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if supported || len(servers) != 0 {
-		t.Fatalf("supported=%v servers=%#v", supported, servers)
-	}
-}
-
-func TestListRuntimeLocalMcpServersPi(t *testing.T) {
-	home := t.TempDir()
-	t.Setenv("HOME", home)
-	configDir := filepath.Join(home, ".pi", "agent")
-	if err := os.MkdirAll(configDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	config := `{"mcpServers":{"native":{"command":"native-server","enabled":false}}}`
-	if err := os.WriteFile(filepath.Join(configDir, "mcp.json"), []byte(config), 0o600); err != nil {
-		t.Fatal(err)
-	}
-
-	servers, supported, err := listRuntimeLocalMcpServers("pi")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !supported || len(servers) != 1 {
-		t.Fatalf("supported=%v servers=%#v", supported, servers)
-	}
-	if servers[0].Name != "native" || servers[0].Transport != "stdio" || servers[0].Enabled {
-		t.Fatalf("native summary = %#v", servers[0])
-	}
-}
-
 func TestMergeRuntimeAndAgentMcpConfigPiLeavesUserFileAlone(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -312,14 +183,6 @@ func TestCodeArtsMcpConfigLoadsJSONCAndAgentWins(t *testing.T) {
 	if got := document.McpServers["shared"]["command"]; got != "agent-shared" {
 		t.Fatalf("shared command = %#v, want agent-shared", got)
 	}
-
-	servers, supported, err := listRuntimeLocalMcpServers("codearts")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !supported || len(servers) != 2 {
-		t.Fatalf("supported=%v servers=%#v", supported, servers)
-	}
 }
 
 func TestCodeArtsMcpConfigPrefersJSONOverJSONC(t *testing.T) {
@@ -396,38 +259,6 @@ func TestCodebuddyUserMcpConfigPathHonorsConfigDirEnv(t *testing.T) {
 	}
 	if got := codebuddyUserMcpConfigPath(home); got != want {
 		t.Fatalf("got %q, want %q", got, want)
-	}
-}
-
-func TestListRuntimeLocalMcpServersCodebuddyReadsItsOwnConfig(t *testing.T) {
-	home := t.TempDir()
-	redirectTestHome(t, home)
-	t.Setenv("CODEBUDDY_CONFIG_DIR", "")
-	configDir := filepath.Join(home, ".codebuddy")
-	if err := os.MkdirAll(configDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(home, ".claude.json"), []byte(`{"mcpServers":{"claude-only":{"command":"claude-cmd"}}}`), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	// JSONC: a comment and a trailing comma must not lose the server.
-	jsonc := "{\n  // user scope\n  \"mcpServers\": {\n    \"buddy\": { \"command\": \"buddy-cmd\", },\n  },\n}\n"
-	if err := os.WriteFile(filepath.Join(configDir, ".mcp.json"), []byte(jsonc), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	// A Claude plugin server must not be attributed to CodeBuddy either:
-	// CodeBuddy plugins live under <configDir>/plugins, not ~/.claude/plugins.
-	installPath := writeTestClaudePlugin(t, home, "paper-desktop@paper", "paper-desktop", true)
-	if err := os.WriteFile(filepath.Join(installPath, "mcp.json"), []byte(`{"mcpServers":{"paper":{"type":"http","url":"http://127.0.0.1:29979/mcp"}}}`), 0o600); err != nil {
-		t.Fatal(err)
-	}
-
-	servers, supported, err := listRuntimeLocalMcpServers("codebuddy")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !supported || len(servers) != 1 || servers[0].Name != "buddy" {
-		t.Fatalf("supported=%v servers=%#v", supported, servers)
 	}
 }
 
@@ -561,47 +392,6 @@ func TestStripJSONCRejectsUnterminatedBlockComment(t *testing.T) {
 	}
 }
 
-// The same input must reach the caller as a parse error, so the inventory
-// surfaces the problem rather than silently reporting zero servers.
-func TestListRuntimeLocalMcpServersCodebuddyRejectsUnterminatedComment(t *testing.T) {
-	home := t.TempDir()
-	redirectTestHome(t, home)
-	t.Setenv("CODEBUDDY_CONFIG_DIR", "")
-	configDir := filepath.Join(home, ".codebuddy")
-	if err := os.MkdirAll(configDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	broken := `{"mcpServers":{"buddy":{"command":"buddy-cmd"}}} /* oops`
-	if err := os.WriteFile(filepath.Join(configDir, ".mcp.json"), []byte(broken), 0o600); err != nil {
-		t.Fatal(err)
-	}
-
-	if _, _, err := listRuntimeLocalMcpServers("codebuddy"); err == nil {
-		t.Fatal("expected a parse error for a config CodeBuddy itself rejects")
-	}
-}
-
-func TestListRuntimeLocalMcpServersKimi(t *testing.T) {
-	home := t.TempDir()
-	redirectTestHome(t, home)
-	t.Setenv("KIMI_CODE_HOME", "")
-	kimiHome := filepath.Join(home, ".kimi-code")
-	if err := os.MkdirAll(kimiHome, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(kimiHome, "mcp.json"), []byte(`{"mcpServers":{"paper":{"url":"https://paper.example/mcp"}}}`), 0o600); err != nil {
-		t.Fatal(err)
-	}
-
-	servers, supported, err := listRuntimeLocalMcpServers("kimi")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !supported || len(servers) != 1 || servers[0].Name != "paper" {
-		t.Fatalf("supported=%v servers=%#v", supported, servers)
-	}
-}
-
 // kimi merges <KIMI_CODE_HOME>/mcp.json with the ephemeral `mcpServers` array
 // the ACP backend sends in session/new, and a duplicate name spawns the server
 // twice. So kimi is inventory-only: the task-local merge must leave the agent's
@@ -626,4 +416,31 @@ func TestMergeRuntimeAndAgentMcpConfigKimiIsPassthrough(t *testing.T) {
 	if string(merged) != string(agentConfig) {
 		t.Fatalf("kimi merge must be a passthrough, got %s", merged)
 	}
+}
+
+func writeTestClaudePlugin(t *testing.T, home, id, name string, enabled bool) string {
+	t.Helper()
+	installPath := filepath.Join(home, ".claude", "plugins", "cache", name, "1.0.0")
+	if err := os.MkdirAll(filepath.Join(installPath, ".claude-plugin"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	manifest := `{"name":"` + name + `","skills":"./skills","mcpServers":"./mcp.json"}`
+	if err := os.WriteFile(filepath.Join(installPath, ".claude-plugin", "plugin.json"), []byte(manifest), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(home, ".claude", "plugins"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	installed := `{"version":2,"plugins":{"` + id + `":[{"scope":"user","installPath":"` + installPath + `"}]}}`
+	if err := os.WriteFile(filepath.Join(home, ".claude", "plugins", "installed_plugins.json"), []byte(installed), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(home, ".claude"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	settings := `{"enabledPlugins":{"` + id + `":` + map[bool]string{true: "true", false: "false"}[enabled] + `}}`
+	if err := os.WriteFile(filepath.Join(home, ".claude", "settings.json"), []byte(settings), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return installPath
 }

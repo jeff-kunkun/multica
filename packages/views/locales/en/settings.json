@@ -231,10 +231,6 @@
         "label": "Go to Runtimes",
         "description": "Open runtime configuration."
       },
-      "goSkills": {
-        "label": "Go to Skills",
-        "description": "Open the skill library."
-      },
       "goSettings": {
         "label": "Go to Settings",
         "description": "Open workspace settings."
@@ -417,10 +413,8 @@
   },
   "labels": {
     "title": "Labels",
-    "description": "Issue labels and skill labels are separate.",
     "scopes": {
-      "issue": "Issues",
-      "skill": "Skills"
+      "issue": "Issues"
     },
     "search_placeholder": "Filter by name or description...",
     "new_label": "New label",

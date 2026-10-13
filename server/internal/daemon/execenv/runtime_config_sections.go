@@ -6,6 +6,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/multica-ai/multica/server/internal/issuestatus"
+	"github.com/multica-ai/multica/server/internal/platformskill"
 )
 
 // This file assembles the runtime brief (CLAUDE.md / AGENTS.md). The brief and
@@ -385,41 +386,14 @@ func writeWorkflowIssue(b *strings.Builder, ctx TaskContextForEnv) {
 	b.WriteString("\n")
 }
 
-// platformSkillName is the built-in skill that holds Multica's platform
-// contracts. It mirrors service.PlatformSkillName, which the daemon must not
-// import; the brief's rendered-output tests pin the two together.
-const platformSkillName = "multica-platform"
-
-// builtinSlug finds a built-in by name. It assumes no workspace skill shares a
-// built-in's name; if one did, the pointer would name it instead.
-func builtinSlug(skills []SkillContextForEnv, name string) (string, bool) {
-	for _, skill := range skills {
-		if skill.Name == name {
-			return skill.Name, true
-		}
-	}
-	return "", false
-}
-
-// writeSkills emits the one skill index Multica controls: names only, since
-// every runtime builds its own listing from the SKILL.md frontmatter
-// (MUL-5529). The platform-skill pointer is the only recall hint, because that
+// writeSkills points at the multica-platform guide the daemon installs into
+// the user-level skill directories (platformskill.Install). Other skills are
+// the project's and the user's own; each runtime lists those itself, so the
+// brief does not repeat them. The pointer is the one recall hint, because that
 // skill's trigger is the platform itself rather than a task.
-func writeSkills(b *strings.Builder, ctx TaskContextForEnv) {
-	skills := modelVisibleSkills(ctx.AgentSkills)
-	if len(skills) == 0 {
-		return
-	}
-	names := make([]string, 0, len(skills))
-	for _, skill := range skills {
-		names = append(names, skill.Name)
-	}
+func writeSkills(b *strings.Builder) {
 	b.WriteString("## Skills\n\n")
-	b.WriteString("Installed (discovered automatically): " + strings.Join(names, ", ") + ".\n")
-	if slug, ok := builtinSlug(skills, platformSkillName); ok {
-		b.WriteString("For a Multica action this brief does not cover — issue and PR contracts, sub-issues and stages, mentions, agents, projects, runtimes — load the `" + slug + "` skill and open the references for the domains your task touches.\n")
-	}
-	b.WriteString("\n")
+	b.WriteString("For a Multica action this brief does not cover — issue and PR contracts, sub-issues and stages, mentions, agents, projects, runtimes — load the `" + platformskill.Name + "` skill and open the references for the domains your task touches.\n\n")
 }
 
 // writeMentions states that an @mention is an action, not a name. Every past
@@ -467,7 +441,7 @@ func buildMetaSkillContentSlim(provider string, ctx TaskContextForEnv) string {
 	default:
 		writeWorkflowIssue(&b, ctx)
 	}
-	writeSkills(&b, ctx)
+	writeSkills(&b)
 	if kind == kindIssue {
 		writeMentions(&b)
 	}

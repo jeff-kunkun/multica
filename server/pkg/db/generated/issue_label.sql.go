@@ -124,34 +124,6 @@ func (q *Queries) AttachLabelToIssueOnCreate(ctx context.Context, arg AttachLabe
 	return err
 }
 
-const attachLabelToSkill = `-- name: AttachLabelToSkill :exec
-INSERT INTO skill_to_label (skill_id, label_id)
-SELECT $1::uuid, $2::uuid
-WHERE EXISTS (
-    SELECT 1 FROM skill s
-    WHERE s.id = $1::uuid
-      AND s.workspace_id = $3::uuid
-)
-AND EXISTS (
-    SELECT 1 FROM issue_label l
-    WHERE l.id = $2::uuid
-      AND l.workspace_id = $3::uuid
-      AND l.resource_type = 'skill'
-)
-ON CONFLICT DO NOTHING
-`
-
-type AttachLabelToSkillParams struct {
-	SkillID     pgtype.UUID `json:"skill_id"`
-	LabelID     pgtype.UUID `json:"label_id"`
-	WorkspaceID pgtype.UUID `json:"workspace_id"`
-}
-
-func (q *Queries) AttachLabelToSkill(ctx context.Context, arg AttachLabelToSkillParams) error {
-	_, err := q.db.Exec(ctx, attachLabelToSkill, arg.SkillID, arg.LabelID, arg.WorkspaceID)
-	return err
-}
-
 const createLabel = `-- name: CreateLabel :one
 INSERT INTO issue_label (workspace_id, resource_type, name, description, color)
 VALUES ($1, $2, $3, $4, $5)
@@ -212,7 +184,7 @@ DELETE FROM agent_to_label
 WHERE agent_id IN (SELECT id FROM agent WHERE runtime_id = $1 AND kind = 'system')
 `
 
-// The single-entity cleanups above cover one agent/skill at a time. The runtime
+// The single-entity cleanups above cover one agent at a time. The runtime
 // variant below covers runtime and runtime-profile bulk hard deletes, where the
 // owning agents disappear without passing through a per-entity delete.
 // Workspace-wide cleanup lives in DeleteWorkspace so it is atomic with that
@@ -257,24 +229,6 @@ func (q *Queries) DeleteLabel(ctx context.Context, arg DeleteLabelParams) (pgtyp
 	var id pgtype.UUID
 	err := row.Scan(&id)
 	return id, err
-}
-
-const deleteSkillLabelAssignmentsByLabel = `-- name: DeleteSkillLabelAssignmentsByLabel :exec
-DELETE FROM skill_to_label WHERE label_id = $1
-`
-
-func (q *Queries) DeleteSkillLabelAssignmentsByLabel(ctx context.Context, labelID pgtype.UUID) error {
-	_, err := q.db.Exec(ctx, deleteSkillLabelAssignmentsByLabel, labelID)
-	return err
-}
-
-const deleteSkillLabelAssignmentsBySkill = `-- name: DeleteSkillLabelAssignmentsBySkill :exec
-DELETE FROM skill_to_label WHERE skill_id = $1
-`
-
-func (q *Queries) DeleteSkillLabelAssignmentsBySkill(ctx context.Context, skillID pgtype.UUID) error {
-	_, err := q.db.Exec(ctx, deleteSkillLabelAssignmentsBySkill, skillID)
-	return err
 }
 
 const detachLabelFromAgent = `-- name: DetachLabelFromAgent :exec
@@ -341,28 +295,6 @@ func (q *Queries) DetachLabelFromIssue(ctx context.Context, arg DetachLabelFromI
 	return i, err
 }
 
-const detachLabelFromSkill = `-- name: DetachLabelFromSkill :exec
-DELETE FROM skill_to_label
-WHERE skill_id = $1::uuid
-  AND label_id = $2::uuid
-  AND EXISTS (
-      SELECT 1 FROM skill s
-      WHERE s.id = $1::uuid
-        AND s.workspace_id = $3::uuid
-  )
-`
-
-type DetachLabelFromSkillParams struct {
-	SkillID     pgtype.UUID `json:"skill_id"`
-	LabelID     pgtype.UUID `json:"label_id"`
-	WorkspaceID pgtype.UUID `json:"workspace_id"`
-}
-
-func (q *Queries) DetachLabelFromSkill(ctx context.Context, arg DetachLabelFromSkillParams) error {
-	_, err := q.db.Exec(ctx, detachLabelFromSkill, arg.SkillID, arg.LabelID, arg.WorkspaceID)
-	return err
-}
-
 const getLabel = `-- name: GetLabel :one
 SELECT id, workspace_id, name, color, created_at, updated_at, resource_type, description FROM issue_label
 WHERE id = $1 AND workspace_id = $2
@@ -394,7 +326,6 @@ SELECT l.id, l.workspace_id, l.name, l.color, l.created_at, l.updated_at, l.reso
     CASE l.resource_type
         WHEN 'issue' THEN (SELECT COUNT(*) FROM issue_to_label x WHERE x.label_id = l.id)
         WHEN 'agent' THEN (SELECT COUNT(*) FROM agent_to_label x WHERE x.label_id = l.id)
-        WHEN 'skill' THEN (SELECT COUNT(*) FROM skill_to_label x WHERE x.label_id = l.id)
         ELSE 0
     END::bigint AS usage_count
 FROM issue_label l
@@ -540,50 +471,6 @@ func (q *Queries) ListLabelsByIssue(ctx context.Context, arg ListLabelsByIssuePa
 	return items, nil
 }
 
-const listLabelsBySkill = `-- name: ListLabelsBySkill :many
-SELECT l.id, l.workspace_id, l.name, l.color, l.created_at, l.updated_at, l.resource_type, l.description
-FROM issue_label l
-JOIN skill_to_label stl ON stl.label_id = l.id
-WHERE stl.skill_id = $1::uuid
-  AND l.workspace_id = $2::uuid
-  AND l.resource_type = 'skill'
-ORDER BY LOWER(l.name) ASC
-`
-
-type ListLabelsBySkillParams struct {
-	SkillID     pgtype.UUID `json:"skill_id"`
-	WorkspaceID pgtype.UUID `json:"workspace_id"`
-}
-
-func (q *Queries) ListLabelsBySkill(ctx context.Context, arg ListLabelsBySkillParams) ([]IssueLabel, error) {
-	rows, err := q.db.Query(ctx, listLabelsBySkill, arg.SkillID, arg.WorkspaceID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []IssueLabel{}
-	for rows.Next() {
-		var i IssueLabel
-		if err := rows.Scan(
-			&i.ID,
-			&i.WorkspaceID,
-			&i.Name,
-			&i.Color,
-			&i.CreatedAt,
-			&i.UpdatedAt,
-			&i.ResourceType,
-			&i.Description,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const listLabelsForAgents = `-- name: ListLabelsForAgents :many
 SELECT atl.agent_id, l.id, l.workspace_id, l.name, l.color, l.created_at, l.updated_at, l.resource_type, l.description
 FROM issue_label l
@@ -682,63 +569,6 @@ func (q *Queries) ListLabelsForIssues(ctx context.Context, arg ListLabelsForIssu
 		var i ListLabelsForIssuesRow
 		if err := rows.Scan(
 			&i.IssueID,
-			&i.ID,
-			&i.WorkspaceID,
-			&i.Name,
-			&i.Color,
-			&i.CreatedAt,
-			&i.UpdatedAt,
-			&i.ResourceType,
-			&i.Description,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const listLabelsForSkills = `-- name: ListLabelsForSkills :many
-SELECT stl.skill_id, l.id, l.workspace_id, l.name, l.color, l.created_at, l.updated_at, l.resource_type, l.description
-FROM issue_label l
-JOIN skill_to_label stl ON stl.label_id = l.id
-WHERE stl.skill_id = ANY($1::uuid[])
-  AND l.workspace_id = $2::uuid
-  AND l.resource_type = 'skill'
-ORDER BY stl.skill_id, LOWER(l.name) ASC
-`
-
-type ListLabelsForSkillsParams struct {
-	SkillIds    []pgtype.UUID `json:"skill_ids"`
-	WorkspaceID pgtype.UUID   `json:"workspace_id"`
-}
-
-type ListLabelsForSkillsRow struct {
-	SkillID      pgtype.UUID        `json:"skill_id"`
-	ID           pgtype.UUID        `json:"id"`
-	WorkspaceID  pgtype.UUID        `json:"workspace_id"`
-	Name         string             `json:"name"`
-	Color        string             `json:"color"`
-	CreatedAt    pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
-	ResourceType string             `json:"resource_type"`
-	Description  string             `json:"description"`
-}
-
-func (q *Queries) ListLabelsForSkills(ctx context.Context, arg ListLabelsForSkillsParams) ([]ListLabelsForSkillsRow, error) {
-	rows, err := q.db.Query(ctx, listLabelsForSkills, arg.SkillIds, arg.WorkspaceID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []ListLabelsForSkillsRow{}
-	for rows.Next() {
-		var i ListLabelsForSkillsRow
-		if err := rows.Scan(
-			&i.SkillID,
 			&i.ID,
 			&i.WorkspaceID,
 			&i.Name,

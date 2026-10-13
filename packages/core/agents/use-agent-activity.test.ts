@@ -50,7 +50,6 @@ const fullHistoryAgent: Agent = {
   max_concurrent_tasks: 1,
   model: "",
   owner_id: null,
-  skills: [],
   // Older than the window so daysSinceCreated saturates at DAYS.
   created_at: new Date(NOW - 100 * DAY).toISOString(),
   updated_at: new Date(NOW).toISOString(),

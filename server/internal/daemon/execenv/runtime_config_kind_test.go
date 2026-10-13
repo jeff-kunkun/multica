@@ -87,7 +87,6 @@ func TestBuildMetaSkillContentIssueBodyFormatting(t *testing.T) {
 func TestBuildMetaSkillContentSlimKindMatrix(t *testing.T) {
 
 	baseRepo := []RepoContextForEnv{{URL: "https://example.com/x.git", Description: "x"}}
-	baseSkill := []SkillContextForEnv{{Name: "skill-x", Description: "x"}}
 
 	type sectionCheck struct {
 		heading  string
@@ -110,9 +109,9 @@ func TestBuildMetaSkillContentSlimKindMatrix(t *testing.T) {
 
 	fixtures := map[taskKind]TaskContextForEnv{
 		kindChat: {ChatSessionID: "c-1", AgentName: "Eve", AgentID: "eve-1",
-			Repos: baseRepo, AgentSkills: baseSkill},
+			Repos: baseRepo},
 		kindIssue: {IssueID: "i-1", AgentName: "Eve", AgentID: "eve-1",
-			Repos: baseRepo, AgentSkills: baseSkill},
+			Repos: baseRepo},
 	}
 
 	for kind, ctx := range fixtures {

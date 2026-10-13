@@ -257,10 +257,6 @@ function RichLink({ href, children }: { href?: string; children?: ReactNode }) {
   // real background tab.
   const desktopTabs = !!useOptionalNavigation()?.openInNewTab;
 
-  if (href?.startsWith("slash://skill/")) {
-    return <span className="slash-command">{children}</span>;
-  }
-
   // An attachment download URL written as a plain link — the shape the
   // server persists into bodies via `buildMarkdownURL`, which in private-
   // storage deployments is ABSOLUTE and pinned to the API host

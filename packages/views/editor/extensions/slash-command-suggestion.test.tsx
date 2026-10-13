@@ -2,9 +2,6 @@ import { act, render } from "@testing-library/react";
 import { createRef, type ReactNode } from "react";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import { I18nProvider } from "@multica/core/i18n/react";
-import { workspaceKeys } from "@multica/core/workspace/queries";
-import type { Agent, MemberWithUser } from "@multica/core/types";
-import type { QueryClient } from "@tanstack/react-query";
 import enEditor from "../../locales/en/editor.json";
 
 const TEST_RESOURCES = {
@@ -23,325 +20,13 @@ beforeAll(() => {
   Element.prototype.scrollIntoView = vi.fn();
 });
 
-vi.mock("@multica/core/platform", () => ({
-  getCurrentWsId: () => "ws-1",
-}));
-
-const authState = { user: { id: "u1" } as { id: string } | null };
-vi.mock("@multica/core/auth", () => ({
-  useAuthStore: { getState: () => authState },
-}));
-
-const chatState = { selectedAgentId: "agent-1" as string | null };
-vi.mock("@multica/core/chat", () => ({
-  useChatStore: { getState: () => chatState },
-}));
-
 import {
   SlashCommandList,
   type SlashCommandListRef,
-  createSlashCommandSuggestion,
   type SlashCommandItem,
   buildBuiltinCommandItems,
   BUILTIN_COMMANDS,
 } from "./slash-command-suggestion";
-
-function agent(overrides: Partial<Agent>): Agent {
-  return {
-    id: "agent-1",
-    workspace_id: "ws-1",
-    runtime_id: "runtime-1",
-    name: "Agent",
-    description: "",
-    instructions: "",
-    avatar_url: null,
-    runtime_mode: "local",
-    runtime_config: {},
-    custom_args: [],
-    visibility: "workspace",
-    permission_mode: "public_to",
-    invocation_targets: [{ target_type: "workspace", target_id: null }],
-    status: "idle",
-    max_concurrent_tasks: 1,
-    model: "",
-    owner_id: null,
-    skills: [],
-    created_at: "",
-    updated_at: "",
-    archived_at: null,
-    archived_by: null,
-    ...overrides,
-  };
-}
-
-function fakeQc(data: {
-  members?: Array<Pick<MemberWithUser, "user_id" | "name" | "role">>;
-  agents?: Agent[];
-}): QueryClient {
-  const map = new Map<string, unknown>();
-  map.set(JSON.stringify(workspaceKeys.members("ws-1")), data.members ?? []);
-  map.set(JSON.stringify(workspaceKeys.agents("ws-1")), data.agents ?? []);
-  return {
-    getQueryData: (key: readonly unknown[]) => map.get(JSON.stringify(key)),
-  } as unknown as QueryClient;
-}
-
-function items(qc: QueryClient, query = ""): SlashCommandItem[] {
-  const config = createSlashCommandSuggestion(qc);
-  return config.items!({
-    query,
-    editor: {} as never,
-    signal: new AbortController().signal,
-  }) as SlashCommandItem[];
-}
-
-describe("slash command suggestion items", () => {
-  it("returns all active agent skills when query is empty", () => {
-    chatState.selectedAgentId = "agent-1";
-    const qc = fakeQc({
-      members: [{ user_id: "u1", name: "Alice", role: "member" }],
-      agents: [
-        agent({
-          id: "agent-1",
-          skills: [
-            { id: "s1", name: "deploy", description: "Ship changes" },
-            { id: "s2", name: "review", description: "Review code" },
-          ],
-        }),
-      ],
-    });
-
-    expect(items(qc).map((i) => i.label)).toEqual(["deploy", "review"]);
-  });
-
-  it("filters skills by name case-insensitively", () => {
-    chatState.selectedAgentId = "agent-1";
-    const qc = fakeQc({
-      members: [{ user_id: "u1", name: "Alice", role: "member" }],
-      agents: [
-        agent({
-          id: "agent-1",
-          skills: [
-            { id: "s1", name: "Deploy", description: "" },
-            { id: "s2", name: "Review", description: "" },
-          ],
-        }),
-      ],
-    });
-
-    expect(items(qc, "dep").map((i) => i.id)).toEqual(["s1"]);
-  });
-
-  it("filters skills by description", () => {
-    chatState.selectedAgentId = "agent-1";
-    const qc = fakeQc({
-      members: [{ user_id: "u1", name: "Alice", role: "member" }],
-      agents: [
-        agent({
-          id: "agent-1",
-          skills: [
-            { id: "s1", name: "deploy", description: "Ship changes" },
-            { id: "s2", name: "review", description: "Read a pull request" },
-          ],
-        }),
-      ],
-    });
-
-    expect(items(qc, "pull").map((i) => i.id)).toEqual(["s2"]);
-  });
-
-  it("ranks name prefix matches above description-only matches", () => {
-    chatState.selectedAgentId = "agent-1";
-    const qc = fakeQc({
-      members: [{ user_id: "u1", name: "Alice", role: "member" }],
-      agents: [
-        agent({
-          id: "agent-1",
-          skills: [
-            { id: "s1", name: "grilling", description: "Grill the user about a plan" },
-            { id: "s2", name: "prototype", description: "Build a throwaway prototype" },
-            { id: "s3", name: "wayfinder", description: "Plan a huge chunk of work" },
-          ],
-        }),
-      ],
-    });
-
-    expect(items(qc, "wa").map((i) => i.id)).toEqual(["s3", "s2"]);
-  });
-
-  it("ranks an exact name match ahead of a longer prefix match", () => {
-    chatState.selectedAgentId = "agent-1";
-    const qc = fakeQc({
-      members: [{ user_id: "u1", name: "Alice", role: "member" }],
-      agents: [
-        agent({
-          id: "agent-1",
-          skills: [
-            { id: "s1", name: "reviewer", description: "" },
-            { id: "s2", name: "review", description: "" },
-          ],
-        }),
-      ],
-    });
-
-    expect(items(qc, "review").map((i) => i.id)).toEqual(["s2", "s1"]);
-  });
-
-  it("ranks a name prefix above a mid-name match", () => {
-    chatState.selectedAgentId = "agent-1";
-    const qc = fakeQc({
-      members: [{ user_id: "u1", name: "Alice", role: "member" }],
-      agents: [
-        agent({
-          id: "agent-1",
-          skills: [
-            { id: "s1", name: "pr-review", description: "" },
-            { id: "s2", name: "review", description: "" },
-          ],
-        }),
-      ],
-    });
-
-    expect(items(qc, "rev").map((i) => i.id)).toEqual(["s2", "s1"]);
-  });
-
-  it("keeps the configured skill order within a match tier", () => {
-    chatState.selectedAgentId = "agent-1";
-    const qc = fakeQc({
-      members: [{ user_id: "u1", name: "Alice", role: "member" }],
-      agents: [
-        agent({
-          id: "agent-1",
-          skills: [
-            { id: "s1", name: "deploy-web", description: "" },
-            { id: "s2", name: "deploy-api", description: "" },
-          ],
-        }),
-      ],
-    });
-
-    expect(items(qc, "deploy").map((i) => i.id)).toEqual(["s1", "s2"]);
-  });
-
-  it("keeps a name match inside the 20-item cap when description hits fill it", () => {
-    chatState.selectedAgentId = "agent-1";
-    const qc = fakeQc({
-      members: [{ user_id: "u1", name: "Alice", role: "member" }],
-      agents: [
-        agent({
-          id: "agent-1",
-          skills: [
-            ...Array.from({ length: 25 }, (_, i) => ({
-              id: `d${i}`,
-              name: `skill-${i}`,
-              description: "Build a throwaway prototype",
-            })),
-            { id: "s-named", name: "wayfinder", description: "" },
-          ],
-        }),
-      ],
-    });
-
-    const result = items(qc, "wa");
-    expect(result).toHaveLength(20);
-    expect(result[0]?.id).toBe("s-named");
-  });
-
-  it("tolerates skills with missing descriptions from cached API data", () => {
-    chatState.selectedAgentId = "agent-1";
-    const qc = fakeQc({
-      members: [{ user_id: "u1", name: "Alice", role: "member" }],
-      agents: [
-        agent({
-          id: "agent-1",
-          skills: [
-            { id: "s1", name: "deploy" } as Agent["skills"][number],
-          ],
-        }),
-      ],
-    });
-
-    expect(() => items(qc, "dep")).not.toThrow();
-    expect(items(qc, "dep")).toEqual([
-      { id: "s1", label: "deploy", description: "" },
-    ]);
-  });
-
-  it("returns empty when the active agent has no skills", () => {
-    chatState.selectedAgentId = "agent-1";
-    const qc = fakeQc({
-      members: [{ user_id: "u1", name: "Alice", role: "member" }],
-      agents: [agent({ id: "agent-1", skills: [] })],
-    });
-
-    expect(items(qc)).toEqual([]);
-  });
-
-  it("caps results at 20", () => {
-    chatState.selectedAgentId = "agent-1";
-    const qc = fakeQc({
-      members: [{ user_id: "u1", name: "Alice", role: "member" }],
-      agents: [
-        agent({
-          id: "agent-1",
-          skills: Array.from({ length: 25 }, (_, i) => ({
-            id: `s${i}`,
-            name: `skill-${i}`,
-            description: "",
-          })),
-        }),
-      ],
-    });
-
-    expect(items(qc)).toHaveLength(20);
-  });
-
-  it("falls back to the first available agent when selectedAgentId is stale", () => {
-    chatState.selectedAgentId = "missing";
-    const qc = fakeQc({
-      members: [{ user_id: "u1", name: "Alice", role: "member" }],
-      agents: [
-        agent({
-          id: "agent-1",
-          skills: [{ id: "s1", name: "deploy", description: "" }],
-        }),
-      ],
-    });
-
-    expect(items(qc).map((i) => i.id)).toEqual(["s1"]);
-  });
-
-  it("returns empty when no agents exist", () => {
-    const qc = fakeQc({
-      members: [{ user_id: "u1", name: "Alice", role: "member" }],
-      agents: [],
-    });
-
-    expect(items(qc)).toEqual([]);
-  });
-
-  it("excludes skills from private agents the user cannot access", () => {
-    chatState.selectedAgentId = "private-agent";
-    const qc = fakeQc({
-      members: [
-        { user_id: "u1", name: "Alice", role: "member" },
-        { user_id: "u2", name: "Bob", role: "member" },
-      ],
-      agents: [
-        agent({
-          id: "private-agent",
-          visibility: "private",
-          permission_mode: "private",
-          invocation_targets: [],
-          owner_id: "u2",
-          skills: [{ id: "private-skill", name: "secret", description: "" }],
-        }),
-      ],
-    });
-
-    expect(items(qc)).toEqual([]);
-  });
-});
 
 describe("SlashCommandList keyboard handling", () => {
   it("lets Enter and arrow keys fall through when there are no selectable items", () => {
@@ -349,7 +34,7 @@ describe("SlashCommandList keyboard handling", () => {
 
     render(
       <I18nWrapper>
-        <SlashCommandList ref={ref} items={[]} query="" command={vi.fn()} />
+        <SlashCommandList ref={ref} items={[]} command={vi.fn()} />
       </I18nWrapper>,
     );
 
@@ -379,8 +64,8 @@ describe("SlashCommandList keyboard handling", () => {
     const ref = createRef<SlashCommandListRef>();
     const command = vi.fn();
     const selectableItems: SlashCommandItem[] = [
-      { id: "s1", label: "deploy", description: "Ship changes" },
-      { id: "s2", label: "review", description: "Review code" },
+      { id: "s1", label: "deploy", descriptionKey: "note" },
+      { id: "s2", label: "review", descriptionKey: "note" },
     ];
 
     render(
@@ -388,7 +73,6 @@ describe("SlashCommandList keyboard handling", () => {
         <SlashCommandList
           ref={ref}
           items={selectableItems}
-          query=""
           command={command}
         />
       </I18nWrapper>,
@@ -418,9 +102,9 @@ describe("SlashCommandList keyboard handling", () => {
     const ref = createRef<SlashCommandListRef>();
     const command = vi.fn();
     const selectableItems: SlashCommandItem[] = [
-      { id: "s1", label: "deploy", description: "Ship changes" },
-      { id: "s2", label: "review", description: "Review code" },
-      { id: "s3", label: "note", description: "Leave a note" },
+      { id: "s1", label: "deploy", descriptionKey: "note" },
+      { id: "s2", label: "review", descriptionKey: "note" },
+      { id: "s3", label: "note", descriptionKey: "note" },
     ];
 
     render(
@@ -428,7 +112,6 @@ describe("SlashCommandList keyboard handling", () => {
         <SlashCommandList
           ref={ref}
           items={selectableItems}
-          query=""
           command={command}
         />
       </I18nWrapper>,
@@ -472,8 +155,8 @@ describe("SlashCommandList keyboard handling", () => {
     const ref = createRef<SlashCommandListRef>();
     const command = vi.fn();
     const selectableItems: SlashCommandItem[] = [
-      { id: "s1", label: "deploy", description: "Ship changes" },
-      { id: "s2", label: "review", description: "Review code" },
+      { id: "s1", label: "deploy", descriptionKey: "note" },
+      { id: "s2", label: "review", descriptionKey: "note" },
     ];
 
     render(
@@ -481,7 +164,6 @@ describe("SlashCommandList keyboard handling", () => {
         <SlashCommandList
           ref={ref}
           items={selectableItems}
-          query=""
           command={command}
         />
       </I18nWrapper>,
@@ -503,7 +185,7 @@ describe("SlashCommandList keyboard handling", () => {
 
     render(
       <I18nWrapper>
-        <SlashCommandList ref={ref} items={[]} query="" command={vi.fn()} />
+        <SlashCommandList ref={ref} items={[]} command={vi.fn()} />
       </I18nWrapper>,
     );
 
@@ -515,31 +197,11 @@ describe("SlashCommandList keyboard handling", () => {
   });
 });
 
-describe("SlashCommandList empty states", () => {
-  it("shows a configured-skills empty state before search text is entered", () => {
-    const { getByText } = render(
-      <I18nWrapper>
-        <SlashCommandList items={[]} query="" command={vi.fn()} />
-      </I18nWrapper>,
-    );
-
-    expect(getByText("No skills configured")).toBeInTheDocument();
-  });
-
-  it("shows a no-results empty state when search text has no matches", () => {
-    const { getByText } = render(
-      <I18nWrapper>
-        <SlashCommandList items={[]} query="deploy" command={vi.fn()} />
-      </I18nWrapper>,
-    );
-
-    expect(getByText("No matching skills")).toBeInTheDocument();
-  });
-
-  it("renders nothing on empty items when hideOnEmpty is set (command menu)", () => {
+describe("SlashCommandList empty state", () => {
+  it("renders nothing on empty items", () => {
     const { container } = render(
       <I18nWrapper>
-        <SlashCommandList items={[]} query="6" command={vi.fn()} hideOnEmpty />
+        <SlashCommandList items={[]} command={vi.fn()} />
       </I18nWrapper>,
     );
 
@@ -576,9 +238,7 @@ describe("SlashCommandList built-in command rendering", () => {
       <I18nWrapper>
         <SlashCommandList
           items={buildBuiltinCommandItems("")}
-          query=""
           command={vi.fn()}
-          hideOnEmpty
         />
       </I18nWrapper>,
     );

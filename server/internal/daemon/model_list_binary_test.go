@@ -31,7 +31,7 @@ type modelListFixture struct {
 
 func newModelListFixture(t *testing.T) *modelListFixture {
 	t.Helper()
-	withFastLocalSkillReportBackoffs(t)
+	withFastRuntimeReportBackoffs(t)
 
 	fx := &modelListFixture{}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

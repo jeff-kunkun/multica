@@ -185,7 +185,7 @@ func TestBuildClaimedTaskResponseRejectsAgentOwnerChangedAfterClaim(t *testing.T
 	}
 	req := newDaemonTokenRequest(http.MethodPost, "/api/daemon/runtimes/"+runtimeID+"/tasks/claim", nil,
 		testWorkspaceID, "claim-then-owner-change")
-	_, _, _, _, _, failure := testHandler.buildClaimedTaskResponse(
+	_, _, _, failure := testHandler.buildClaimedTaskResponse(
 		req, task, runtime, runtimeID, testWorkspaceID,
 	)
 	if failure == nil || failure.status != http.StatusForbidden || failure.outcome != "error_runtime_access_denied" {
@@ -240,7 +240,7 @@ func TestBuildClaimedTaskResponseRejectsAgentReboundAfterClaim(t *testing.T) {
 	}
 	req := newDaemonTokenRequest(http.MethodPost, "/api/daemon/runtimes/"+oldRuntimeID+"/tasks/claim", nil,
 		testWorkspaceID, "claim-then-rebind")
-	_, _, _, _, _, failure := testHandler.buildClaimedTaskResponse(
+	_, _, _, failure := testHandler.buildClaimedTaskResponse(
 		req, task, runtime, oldRuntimeID, testWorkspaceID,
 	)
 	if failure == nil || failure.status != http.StatusConflict || failure.outcome != "error_agent_runtime_changed" {
@@ -279,33 +279,33 @@ func TestBuildClaimedTaskResponseRejectsAgentReboundAfterClaim(t *testing.T) {
 // re-registration would in production.
 func (h *Handler) finalizeClaimDeliveryForTest(
 	r *http.Request, task *db.AgentTaskQueue, runtimeID, runtimeWorkspaceID string,
-) (AgentTaskResponse, []pgtype.UUID, int, int, *claimBuildFailure, error) {
+) (AgentTaskResponse, []pgtype.UUID, *claimBuildFailure, error) {
 	runtime, err := h.Queries.GetAgentRuntimeForWorkspace(r.Context(), db.GetAgentRuntimeForWorkspaceParams{
 		ID:          parseUUID(runtimeID),
 		WorkspaceID: parseUUID(runtimeWorkspaceID),
 	})
 	if err != nil {
-		return AgentTaskResponse{}, nil, 0, 0, nil, fmt.Errorf("load runtime: %w", err)
+		return AgentTaskResponse{}, nil, nil, fmt.Errorf("load runtime: %w", err)
 	}
 	return h.finalizeClaimDeliveryForTestWithRuntime(r, task, runtime, runtimeID, runtimeWorkspaceID)
 }
 
 func (h *Handler) finalizeClaimDeliveryForTestWithRuntime(
 	r *http.Request, task *db.AgentTaskQueue, runtime db.AgentRuntime, runtimeID, runtimeWorkspaceID string,
-) (AgentTaskResponse, []pgtype.UUID, int, int, *claimBuildFailure, error) {
-	resp, deliveredCommentIDs, _, agentSkillCount, builtinSkillCount, buildFailure := h.buildClaimedTaskResponse(
+) (AgentTaskResponse, []pgtype.UUID, *claimBuildFailure, error) {
+	resp, deliveredCommentIDs, _, buildFailure := h.buildClaimedTaskResponse(
 		r, task, runtime, runtimeID, runtimeWorkspaceID,
 	)
 	if buildFailure != nil {
-		return resp, deliveredCommentIDs, agentSkillCount, builtinSkillCount, buildFailure, nil
+		return resp, deliveredCommentIDs, buildFailure, nil
 	}
 	if !runtime.OwnerID.Valid {
-		return resp, deliveredCommentIDs, agentSkillCount, builtinSkillCount,
+		return resp, deliveredCommentIDs,
 			&claimBuildFailure{outcome: "error_token", status: http.StatusInternalServerError, message: "runtime owner required"}, nil
 	}
 	tokenStr, terr := auth.GenerateAgentTaskToken()
 	if terr != nil {
-		return resp, deliveredCommentIDs, agentSkillCount, builtinSkillCount, nil, fmt.Errorf("generate token: %w", terr)
+		return resp, deliveredCommentIDs, nil, fmt.Errorf("generate token: %w", terr)
 	}
 	commentBackedTask := task.TriggerCommentID.Valid || len(task.CoalescedCommentIds) > 0
 	receipt, deliveryFailure, ferr := h.finalizeClaimDelivery(r.Context(), task, runtime, runtimeID, runtimeWorkspaceID, &resp, db.CreateTaskTokenParams{
@@ -318,14 +318,14 @@ func (h *Handler) finalizeClaimDeliveryForTestWithRuntime(
 		ExpiresAt:   pgtype.Timestamptz{Time: time.Now().Add(24 * time.Hour), Valid: true},
 	}, deliveredCommentIDs, commentBackedTask, nil)
 	if ferr != nil {
-		return resp, deliveredCommentIDs, agentSkillCount, builtinSkillCount, nil, ferr
+		return resp, deliveredCommentIDs, nil, ferr
 	}
 	if deliveryFailure != nil {
-		return AgentTaskResponse{}, deliveredCommentIDs, agentSkillCount, builtinSkillCount, deliveryFailure, nil
+		return AgentTaskResponse{}, deliveredCommentIDs, deliveryFailure, nil
 	}
 	resp.AuthToken = tokenStr
 	resp.DeliveredCommentIDs = uuidStringsOrEmpty(receipt)
-	return resp, deliveredCommentIDs, agentSkillCount, builtinSkillCount, nil, nil
+	return resp, deliveredCommentIDs, nil, nil
 }
 
 func TestClaimTaskByRuntime_RuntimeOwnerChangedAfterClaimNeverDelivered(t *testing.T) {
@@ -365,7 +365,7 @@ func TestClaimTaskByRuntime_RuntimeOwnerChangedAfterClaimNeverDelivered(t *testi
 
 	req := newDaemonTokenRequest(http.MethodPost, "/api/daemon/runtimes/"+runtimeID+"/tasks/claim", nil,
 		testWorkspaceID, "delivery-gate-owner-change")
-	resp, deliveredCommentIDs, _, _, settledFailure, finalizeErr := testHandler.finalizeClaimDeliveryForTestWithRuntime(
+	resp, deliveredCommentIDs, settledFailure, finalizeErr := testHandler.finalizeClaimDeliveryForTestWithRuntime(
 		req, task, runtimeSnapshot, runtimeID, testWorkspaceID,
 	)
 	if finalizeErr != nil {
@@ -454,7 +454,7 @@ func TestFinalizeClaimDelivery_UsesCurrentRuntimeOwnerForTaskToken(t *testing.T)
 
 	req := newDaemonTokenRequest(http.MethodPost, "/api/daemon/runtimes/"+runtimeID+"/tasks/claim", nil,
 		testWorkspaceID, "public-delivery-owner-change")
-	resp, _, _, _, failure, finalizeErr := testHandler.finalizeClaimDeliveryForTestWithRuntime(
+	resp, _, failure, finalizeErr := testHandler.finalizeClaimDeliveryForTestWithRuntime(
 		req, task, runtimeSnapshot, runtimeID, testWorkspaceID,
 	)
 	if finalizeErr != nil {
@@ -513,7 +513,7 @@ func TestFinalizeClaimDelivery_CurrentRuntimeOwnerMissingNeverMintsToken(t *test
 
 	req := newDaemonTokenRequest(http.MethodPost, "/api/daemon/runtimes/"+runtimeID+"/tasks/claim", nil,
 		testWorkspaceID, "ownerless-delivery")
-	resp, _, _, _, failure, finalizeErr := testHandler.finalizeClaimDeliveryForTestWithRuntime(
+	resp, _, failure, finalizeErr := testHandler.finalizeClaimDeliveryForTestWithRuntime(
 		req, task, runtimeSnapshot, runtimeID, testWorkspaceID,
 	)
 	if finalizeErr != nil {

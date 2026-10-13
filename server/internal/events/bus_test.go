@@ -66,12 +66,12 @@ func TestSubscribeAllReceivesAllEventTypes(t *testing.T) {
 
 	bus.Publish(Event{Type: "issue:created"})
 	bus.Publish(Event{Type: "comment:deleted"})
-	bus.Publish(Event{Type: "skill:updated"})
+	bus.Publish(Event{Type: "agent:status"})
 
 	if len(received) != 3 {
 		t.Fatalf("expected 3 events, got %d", len(received))
 	}
-	if received[0] != "issue:created" || received[1] != "comment:deleted" || received[2] != "skill:updated" {
+	if received[0] != "issue:created" || received[1] != "comment:deleted" || received[2] != "agent:status" {
 		t.Fatalf("unexpected events: %v", received)
 	}
 }

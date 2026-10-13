@@ -44,7 +44,7 @@ func TestSeedUserCodexSkillsLinksInsteadOfCopying(t *testing.T) {
 	writeUserSkill(t, userSkill, "alpha v1")
 
 	codexHome := t.TempDir()
-	if err := seedUserCodexSkills(codexHome, nil, testLogger()); err != nil {
+	if err := seedUserCodexSkills(codexHome, testLogger()); err != nil {
 		t.Fatalf("seedUserCodexSkills: %v", err)
 	}
 
@@ -87,7 +87,7 @@ func TestSeedUserCodexSkillsResolvesInstallerSymlink(t *testing.T) {
 	}
 
 	codexHome := t.TempDir()
-	if err := seedUserCodexSkills(codexHome, nil, testLogger()); err != nil {
+	if err := seedUserCodexSkills(codexHome, testLogger()); err != nil {
 		t.Fatalf("seedUserCodexSkills: %v", err)
 	}
 
@@ -118,26 +118,6 @@ func TestSeedUserCodexSkillsResolvesInstallerSymlink(t *testing.T) {
 	}
 }
 
-func TestSeedUserCodexSkillsYieldsToWorkspaceSkill(t *testing.T) {
-	sharedHome := t.TempDir()
-	t.Setenv("CODEX_HOME", sharedHome)
-	writeUserSkill(t, filepath.Join(sharedHome, "skills", "issue-review"), "user version")
-	writeUserSkill(t, filepath.Join(sharedHome, "skills", "keeper"), "keeper version")
-
-	codexHome := t.TempDir()
-	skills := []SkillContextForEnv{{Name: "Issue Review", Content: "workspace version"}}
-	if err := seedUserCodexSkills(codexHome, skills, testLogger()); err != nil {
-		t.Fatalf("seedUserCodexSkills: %v", err)
-	}
-
-	if _, err := os.Lstat(filepath.Join(codexHome, "skills", "issue-review")); !os.IsNotExist(err) {
-		t.Errorf("user skill claimed a workspace skill's slot (err = %v)", err)
-	}
-	if _, err := os.Lstat(filepath.Join(codexHome, "skills", "keeper")); err != nil {
-		t.Errorf("unrelated user skill was dropped: %v", err)
-	}
-}
-
 func TestSeedUserCodexSkillsWithNoEligibleSkillsCreatesNoDir(t *testing.T) {
 	sharedHome := t.TempDir()
 	t.Setenv("CODEX_HOME", sharedHome)
@@ -146,7 +126,7 @@ func TestSeedUserCodexSkillsWithNoEligibleSkillsCreatesNoDir(t *testing.T) {
 	}
 
 	codexHome := t.TempDir()
-	if err := seedUserCodexSkills(codexHome, nil, testLogger()); err != nil {
+	if err := seedUserCodexSkills(codexHome, testLogger()); err != nil {
 		t.Fatalf("seedUserCodexSkills: %v", err)
 	}
 	if _, err := os.Lstat(filepath.Join(codexHome, "skills")); !os.IsNotExist(err) {
@@ -167,11 +147,10 @@ func TestHydrateCodexSkillsWipeKeepsUserSkillContent(t *testing.T) {
 	}
 
 	codexHome := t.TempDir()
-	workspaceSkills := []SkillContextForEnv{{Name: "Beta", Description: "workspace skill", Content: "beta body"}}
 
 	// Twice: Prepare hydrates, then a follow-up task on the same env re-hydrates.
 	for i := 0; i < 2; i++ {
-		if err := hydrateCodexSkills(codexHome, workspaceSkills, nil, testLogger()); err != nil {
+		if err := hydrateCodexSkills(codexHome, testLogger()); err != nil {
 			t.Fatalf("hydrateCodexSkills run %d: %v", i+1, err)
 		}
 	}
@@ -182,39 +161,4 @@ func TestHydrateCodexSkillsWipeKeepsUserSkillContent(t *testing.T) {
 		}
 	}
 	assertIsLink(t, filepath.Join(codexHome, "skills", "alpha"))
-	if _, err := os.Stat(filepath.Join(codexHome, "skills", "beta", "SKILL.md")); err != nil {
-		t.Errorf("workspace skill missing after re-hydration: %v", err)
-	}
-}
-
-// A workspace skill whose name only collides after directory naming — the
-// sanitized-name pre-filter does not catch it — must land in a sibling
-// directory instead of being written through the user's link.
-func TestHydrateCodexSkillsNeverWritesThroughAUserSkillLink(t *testing.T) {
-	sharedHome := t.TempDir()
-	t.Setenv("CODEX_HOME", sharedHome)
-	userSkill := filepath.Join(sharedHome, "skills", "alpha")
-	writeUserSkill(t, userSkill, "user version")
-
-	codexHome := t.TempDir()
-	skillsDir := filepath.Join(codexHome, "skills")
-	if err := seedUserCodexSkills(codexHome, nil, testLogger()); err != nil {
-		t.Fatalf("seedUserCodexSkills: %v", err)
-	}
-	// writeSkillFiles runs without the pre-filter that hydrateCodexSkills
-	// applies, which is exactly the case allocateCollisionFreeSkillDir guards.
-	if err := writeSkillFiles(skillsDir, []SkillContextForEnv{{Name: "alpha", Content: "workspace version"}}, nil); err != nil {
-		t.Fatalf("writeSkillFiles: %v", err)
-	}
-
-	body, err := os.ReadFile(filepath.Join(userSkill, "SKILL.md"))
-	if err != nil {
-		t.Fatalf("read user skill: %v", err)
-	}
-	if string(body) != "user version" {
-		t.Fatalf("workspace skill was written through the link into the user's skill dir: %q", body)
-	}
-	if _, err := os.Stat(filepath.Join(skillsDir, "alpha-multica", "SKILL.md")); err != nil {
-		t.Errorf("colliding workspace skill did not land in a sibling dir: %v", err)
-	}
 }

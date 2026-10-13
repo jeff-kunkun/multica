@@ -598,8 +598,8 @@ describe("ChatMessageList failure copy (MUL-5370 regression)", () => {
   // The backend moved to the refined taxonomy (agent_error.*) in MUL-2946 but
   // the copy map stayed on the six coarse values, so an exact-key lookup
   // missed every refined reason and fell through to the generic fallback.
-  // A user whose skill bundle download stalled was told only "Something went
-  // wrong", and the maintainer debugging it had nothing better to go on.
+  // A user was told only "Something went wrong", and the maintainer debugging
+  // it had nothing better to go on.
   function renderFailure(reason: string) {
     return render(
       <I18nProvider locale="en" resources={TEST_RESOURCES}>
@@ -610,7 +610,7 @@ describe("ChatMessageList failure copy (MUL-5370 regression)", () => {
                 id: "m1",
                 chat_session_id: "s1",
                 role: "assistant",
-                content: "skill bundle unavailable: skill \"x\"",
+                content: "environment prepare failed",
                 task_id: null,
                 created_at: new Date(0).toISOString(),
                 failure_reason: reason,
@@ -625,14 +625,6 @@ describe("ChatMessageList failure copy (MUL-5370 regression)", () => {
   }
 
   const FALLBACK = enChat.message_list.failure.fallback;
-
-  it("renders dedicated copy for a stalled skill bundle download", async () => {
-    renderFailure("skill_bundle_unavailable");
-    expect(
-      await screen.findByText(enChat.message_list.failure.skill_bundle_unavailable),
-    ).toBeInTheDocument();
-    expect(screen.queryByText(FALLBACK)).not.toBeInTheDocument();
-  });
 
   it("renders dedicated copy for a failed environment preparation", async () => {
     // #7913. Without an entry of its own this reason has no agent_error

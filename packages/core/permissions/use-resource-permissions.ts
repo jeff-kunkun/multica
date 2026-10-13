@@ -1,12 +1,10 @@
 "use client";
 
-import type { Agent, Skill } from "../types";
+import type { Agent } from "../types";
 import { useCurrentMember } from "./use-current-member";
 import {
   canAssignAgentToIssue,
-  canDeleteSkill,
   canEditAgent,
-  canEditSkill,
 } from "./rules";
 import { deny, type Decision } from "./types";
 
@@ -49,23 +47,5 @@ export function useAgentPermissions(
     canEdit: canEditAgent(agent, ctx),
     canAssign: canAssignAgentToIssue(agent, ctx),
     isLoading,
-  };
-}
-
-export function useSkillPermissions(
-  skill: Skill | null,
-  wsId: string,
-): {
-  canEdit: Decision;
-  canDelete: Decision;
-} {
-  const { userId, role } = useCurrentMember(wsId);
-  const ctx = { userId, role };
-  if (skill === null) {
-    return { canEdit: PENDING, canDelete: PENDING };
-  }
-  return {
-    canEdit: canEditSkill(skill, ctx),
-    canDelete: canDeleteSkill(skill, ctx),
   };
 }

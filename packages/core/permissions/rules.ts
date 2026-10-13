@@ -3,7 +3,6 @@ import type {
   Comment,
   MemberRole,
   RuntimeDevice,
-  Skill,
 } from "../types";
 import { ALLOW, deny, type Decision, type PermissionContext } from "./types";
 
@@ -98,26 +97,6 @@ export function canAssignAgentToIssue(
     "private_visibility",
     "Restricted agent — you don't have access to assign work to it.",
   );
-}
-
-// ---- Skills ----------------------------------------------------------------
-
-export function canEditSkill(skill: Skill, ctx: PermissionContext): Decision {
-  if (ctx.userId === null) {
-    return deny("not_authenticated", "Sign in to edit this skill.");
-  }
-  if (isOwner(ctx.role)) return ALLOW;
-  if (skill.created_by !== null && skill.created_by === ctx.userId) {
-    return ALLOW;
-  }
-  return deny(
-    "not_resource_owner",
-    "Only the creator and the workspace owner can edit this skill.",
-  );
-}
-
-export function canDeleteSkill(skill: Skill, ctx: PermissionContext): Decision {
-  return canEditSkill(skill, ctx);
 }
 
 // ---- Comments --------------------------------------------------------------

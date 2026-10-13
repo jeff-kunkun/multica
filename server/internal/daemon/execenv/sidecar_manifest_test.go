@@ -185,21 +185,7 @@ func TestPrepareThenCleanupSidecarsRoundTripEmptyWorkdir(t *testing.T) {
 			before := snapshot(t, workDir)
 
 			ctx := TaskContextForEnv{
-				IssueID: "11111111-2222-3333-4444-555555555555",
-				AgentSkills: []SkillContextForEnv{
-					{
-						Name:        "Issue Review",
-						Description: "Review GH issues",
-						Content:     "Steps to review",
-						Files: []SkillFileContextForEnv{
-							{Path: "templates/checklist.md", Content: "- [ ] check"},
-						},
-					},
-					{
-						Name:    "PR Review",
-						Content: "Review PR diffs",
-					},
-				},
+				IssueID:      "11111111-2222-3333-4444-555555555555",
 				ProjectID:    "proj-1",
 				ProjectTitle: "Demo",
 			}
@@ -217,16 +203,11 @@ func TestPrepareThenCleanupSidecarsRoundTripEmptyWorkdir(t *testing.T) {
 // hand-authored skill under the same parent directory we use, Cleanup
 // must leave it bit-for-bit intact. The user-skill payload is laid down
 // BEFORE Prepare runs and snapshotted; after Cleanup the user's skill
-// must still exist and the Multica-written sibling must be gone.
+// must still exist unchanged.
 func TestPrepareThenCleanupSidecarsPreservesUserSkillSibling(t *testing.T) {
 	t.Parallel()
-	// One representative case per provider that writes into a
-	// provider-native skill directory. Hermes doesn't have a
-	// native discovery path; they fall back to .agent_context/skills/,
-	// which is also covered (a user-created sibling under there should
-	// also survive). Codex is intentionally excluded — its workspace
-	// skills don't live in workdir, so the "user skill sibling"
-	// scenario doesn't apply.
+	// One representative case per provider-native skill directory a
+	// user may keep in the workdir.
 	cases := []struct {
 		provider      string
 		userSkillRel  string // path under workDir
@@ -267,9 +248,6 @@ func TestPrepareThenCleanupSidecarsPreservesUserSkillSibling(t *testing.T) {
 
 			ctx := TaskContextForEnv{
 				IssueID: "11111111-2222-3333-4444-555555555555",
-				AgentSkills: []SkillContextForEnv{
-					{Name: "Issue Review", Content: "ours"},
-				},
 			}
 			runPrepareLikeCycle(t, workDir, envRoot, tc.provider, ctx)
 
@@ -333,9 +311,6 @@ func TestPrepareThenCleanupSidecarsPreservesUnrelatedUserFiles(t *testing.T) {
 
 			ctx := TaskContextForEnv{
 				IssueID: "11111111-2222-3333-4444-555555555555",
-				AgentSkills: []SkillContextForEnv{
-					{Name: "Issue Review", Content: "ours"},
-				},
 			}
 			runPrepareLikeCycle(t, workDir, envRoot, tc.provider, ctx)
 
@@ -363,9 +338,6 @@ func TestPrepareThenCleanupSidecarsRepeatedCycles(t *testing.T) {
 
 			ctx := TaskContextForEnv{
 				IssueID: "11111111-2222-3333-4444-555555555555",
-				AgentSkills: []SkillContextForEnv{
-					{Name: "Issue Review", Content: "ours"},
-				},
 			}
 			for i := 0; i < 3; i++ {
 				runPrepareLikeCycle(t, workDir, envRoot, provider, ctx)
@@ -613,116 +585,6 @@ func TestSidecarManifestRoundTripJSON(t *testing.T) {
 	}
 }
 
-// sameSlugSkillProviderCases lists every file-based provider that
-// writes per-skill subdirectories under workDir, paired with the
-// natural skill path (relative to workDir) that a user-installed
-// skill named "issue-review" would occupy. The same-slug collision
-// matrix below replays the user-skill-already-present scenario per
-// provider and asserts byte-exact round-trip — including that the
-// user's SKILL.md bytes survive the task untouched and our
-// collision-free sibling (which lives under .../issue-review-multica/)
-// is fully cleaned up.
-//
-// Codex skills live under codex-home (not workdir), so the per-skill
-// collision branch doesn't apply to it. Hermes falls back to
-// .agent_context/skills/ same as the default; Hermes goes there too.
-var sameSlugSkillProviderCases = []struct {
-	provider string
-	skillDir string // relative path under workDir for the colliding slug
-}{
-	{"claude", filepath.Join(".claude", "skills", "issue-review")},
-	{"codebuddy", filepath.Join(".codebuddy", "skills", "issue-review")},
-	{"copilot", filepath.Join(".github", "skills", "issue-review")},
-	{"opencode", filepath.Join(".opencode", "skills", "issue-review")},
-	{"codearts", filepath.Join(".codeartsdoer", "skills", "issue-review")},
-	{"openclaw", filepath.Join("skills", "issue-review")},
-	{"pi", filepath.Join(".pi", "skills", "issue-review")},
-	{"omp", filepath.Join(".omp", "skills", "issue-review")},
-	{"cursor", filepath.Join(".cursor", "skills", "issue-review")},
-	{"kimi", filepath.Join(".kimi", "skills", "issue-review")},
-	{"reasonix", filepath.Join(".reasonix", "skills", "issue-review")},
-	{"dsh", filepath.Join(".dsh", "skills", "issue-review")},
-	{"kiro", filepath.Join(".kiro", "skills", "issue-review")},
-	{"antigravity", filepath.Join(".agents", "skills", "issue-review")},
-	{"qwen", filepath.Join(".qwen", "skills", "issue-review")},
-	{"hermes", filepath.Join(".agent_context", "skills", "issue-review")},
-}
-
-// TestPrepareThenCleanupSidecarsSameSlugCollisionPerProvider is the
-// must-fix byte-exact matrix the PR #3444 review required: per
-// provider, seed a user skill at the exact slug Multica would use
-// (`.claude/skills/issue-review/SKILL.md` etc.), run the full
-// Prepare → Inject → Cleanup cycle with a Multica skill of the same
-// name, and assert the workdir snapshot is byte-identical to the
-// seed. The user's SKILL.md must not be touched, and the Multica
-// sibling (which lives at `<slug>-multica`) must be fully removed by
-// CleanupSidecars.
-func TestPrepareThenCleanupSidecarsSameSlugCollisionPerProvider(t *testing.T) {
-	t.Parallel()
-	for _, tc := range sameSlugSkillProviderCases {
-		tc := tc
-		t.Run(tc.provider, func(t *testing.T) {
-			t.Parallel()
-			workDir := t.TempDir()
-			envRoot := t.TempDir()
-
-			userSkillDir := filepath.Join(workDir, tc.skillDir)
-			if err := os.MkdirAll(userSkillDir, 0o755); err != nil {
-				t.Fatalf("seed user skill dir: %v", err)
-			}
-			userBody := "---\nname: issue-review\ndescription: user-authored\n---\n\nUser owns this slug.\n"
-			userSkillFile := filepath.Join(userSkillDir, "SKILL.md")
-			if err := os.WriteFile(userSkillFile, []byte(userBody), 0o644); err != nil {
-				t.Fatalf("seed user SKILL.md: %v", err)
-			}
-			// A second user-authored file under the same skill dir
-			// — exercises the case where the user has more than
-			// just SKILL.md in their skill (templates, scripts).
-			userExtra := filepath.Join(userSkillDir, "notes.md")
-			if err := os.WriteFile(userExtra, []byte("private notes"), 0o644); err != nil {
-				t.Fatalf("seed user extra file: %v", err)
-			}
-
-			before := snapshot(t, workDir)
-
-			ctx := TaskContextForEnv{
-				IssueID: "11111111-2222-3333-4444-555555555555",
-				AgentSkills: []SkillContextForEnv{
-					{
-						Name:        "Issue Review",
-						Description: "Multica's version",
-						Content:     "---\nname: issue-review\n---\n\nMultica skill content.\n",
-						Files: []SkillFileContextForEnv{
-							{Path: "templates/checklist.md", Content: "- [ ] check"},
-						},
-					},
-				},
-			}
-			runPrepareLikeCycle(t, workDir, envRoot, tc.provider, ctx)
-
-			after := snapshot(t, workDir)
-			assertSnapshotEqual(t, tc.provider, before, after)
-
-			// Defensive double-check: read the user's files
-			// directly to make sure their content survived.
-			gotBody, err := os.ReadFile(userSkillFile)
-			if err != nil {
-				t.Fatalf("user SKILL.md went missing: %v", err)
-			}
-			if string(gotBody) != userBody {
-				t.Errorf("user SKILL.md mutated\n want: %q\n  got: %q", userBody, string(gotBody))
-			}
-			gotExtra, err := os.ReadFile(userExtra)
-			if err != nil {
-				t.Fatalf("user extra file went missing: %v", err)
-			}
-			if string(gotExtra) != "private notes" {
-				t.Errorf("user extra file mutated\n want: %q\n  got: %q", "private notes", string(gotExtra))
-			}
-		})
-	}
-}
-
 // TestPrepareThenCleanupSidecarsIssueContextCollisionPerProvider is
 // the matching byte-exact matrix for `.agent_context/issue_context.md`
 // — a Multica-only namespace file. If the user already has a file at
@@ -820,125 +682,6 @@ func TestPrepareThenCleanupSidecarsProjectResourcesCollisionPerProvider(t *testi
 				t.Errorf("user resources.json mutated\n want: %q\n  got: %q", userBody, string(got))
 			}
 		})
-	}
-}
-
-// TestAllocateCollisionFreeSkillDir pins the slug-suffix policy:
-// first try the natural slug, then `-multica`, then `-multica-2`,
-// `-multica-3`, … The PR-review concern is "Multica skill must still
-// be discoverable" — this test demonstrates that we pick a sibling
-// path under the same skillsParent rather than dropping the skill or
-// nesting it under the user's directory.
-func TestAllocateCollisionFreeSkillDir(t *testing.T) {
-	t.Parallel()
-	parent := t.TempDir()
-
-	// 1) No collision → use the base slug as-is.
-	slug, dir, err := allocateCollisionFreeSkillDir(parent, "issue-review")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if slug != "issue-review" {
-		t.Errorf("first allocation should use base slug; got %q", slug)
-	}
-	if dir != filepath.Join(parent, "issue-review") {
-		t.Errorf("first allocation path = %q, want under parent", dir)
-	}
-
-	// 2) Pre-existing user dir at the base slug → bump to `-multica`.
-	if err := os.MkdirAll(filepath.Join(parent, "issue-review"), 0o755); err != nil {
-		t.Fatalf("seed user dir: %v", err)
-	}
-	slug, dir, err = allocateCollisionFreeSkillDir(parent, "issue-review")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if slug != "issue-review-multica" {
-		t.Errorf("second allocation should bump to `-multica`; got %q", slug)
-	}
-	if dir != filepath.Join(parent, "issue-review-multica") {
-		t.Errorf("second allocation path = %q, want under parent", dir)
-	}
-
-	// 3) Pre-existing collision at the bumped slug too → bump again.
-	if err := os.MkdirAll(filepath.Join(parent, "issue-review-multica"), 0o755); err != nil {
-		t.Fatalf("seed bumped dir: %v", err)
-	}
-	slug, dir, err = allocateCollisionFreeSkillDir(parent, "issue-review")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if slug != "issue-review-multica-2" {
-		t.Errorf("third allocation should be `-multica-2`; got %q", slug)
-	}
-	if dir != filepath.Join(parent, "issue-review-multica-2") {
-		t.Errorf("third allocation path = %q, want under parent", dir)
-	}
-}
-
-// TestPrepareThenCleanupSidecarsMultiSkillCollisionFreeAllocation is
-// the end-to-end coverage for the collision-free sibling: a user has
-// `.claude/skills/issue-review/SKILL.md`, the task ships an
-// `Issue Review` skill, the Multica sibling must land at a different
-// slug (so the agent still sees it), AND Cleanup must remove the
-// Multica sibling entirely without touching the user's.
-func TestPrepareThenCleanupSidecarsMultiSkillCollisionFreeAllocation(t *testing.T) {
-	t.Parallel()
-	workDir := t.TempDir()
-	envRoot := t.TempDir()
-
-	userDir := filepath.Join(workDir, ".claude", "skills", "issue-review")
-	if err := os.MkdirAll(userDir, 0o755); err != nil {
-		t.Fatalf("seed: %v", err)
-	}
-	userBody := "user-authored skill\n"
-	userFile := filepath.Join(userDir, "SKILL.md")
-	if err := os.WriteFile(userFile, []byte(userBody), 0o644); err != nil {
-		t.Fatalf("seed file: %v", err)
-	}
-
-	// Run only the inject side first — verify the Multica skill
-	// landed at a NEW path under the same parent, AND the user's
-	// path is untouched.
-	manifest := &sidecarManifest{}
-	if err := writeContextFiles(workDir, "claude", TaskContextForEnv{
-		IssueID: "11111111-2222-3333-4444-555555555555",
-		AgentSkills: []SkillContextForEnv{
-			{Name: "Issue Review", Content: "Multica's version\n"},
-		},
-	}, manifest); err != nil {
-		t.Fatalf("writeContextFiles: %v", err)
-	}
-
-	multicaDir := filepath.Join(workDir, ".claude", "skills", "issue-review-multica")
-	if _, err := os.Stat(filepath.Join(multicaDir, "SKILL.md")); err != nil {
-		t.Errorf("Multica sibling skill should exist at %s: %v", multicaDir, err)
-	}
-	got, err := os.ReadFile(userFile)
-	if err != nil {
-		t.Fatalf("user SKILL.md went missing during inject: %v", err)
-	}
-	if string(got) != userBody {
-		t.Errorf("user SKILL.md mutated during inject\n want: %q\n  got: %q", userBody, string(got))
-	}
-
-	// Now persist manifest + run cleanup. After cleanup the
-	// Multica sibling is gone; user's path survives.
-	if err := writeSidecarManifest(envRoot, manifest); err != nil {
-		t.Fatalf("write manifest: %v", err)
-	}
-	if err := CleanupSidecars(envRoot); err != nil {
-		t.Fatalf("CleanupSidecars: %v", err)
-	}
-	if _, err := os.Stat(multicaDir); !os.IsNotExist(err) {
-		t.Errorf("Multica sibling should be removed by Cleanup; stat err=%v", err)
-	}
-	got, err = os.ReadFile(userFile)
-	if err != nil {
-		t.Fatalf("user SKILL.md went missing after cleanup: %v", err)
-	}
-	if string(got) != userBody {
-		t.Errorf("user SKILL.md mutated after cleanup\n want: %q\n  got: %q", userBody, string(got))
 	}
 }
 

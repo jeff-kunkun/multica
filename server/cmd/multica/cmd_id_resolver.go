@@ -325,7 +325,7 @@ func fetchLabelCandidates(ctx context.Context, client *cli.APIClient, resourceTy
 	}
 	resourceTypes := []string{resourceType}
 	if resourceType == "" {
-		resourceTypes = []string{"issue", "skill"}
+		resourceTypes = []string{"issue", "agent"}
 	}
 	candidates := make([]idCandidate, 0)
 	for _, candidateType := range resourceTypes {

@@ -41,7 +41,6 @@ describe("bucketDiagnosticPath", () => {
     expect(bucketDiagnosticPath("/acme/agents/agt_9")).toBe("/:slug/agents/:id");
     expect(bucketDiagnosticPath("/acme/members/m-3")).toBe("/:slug/members/:id");
     expect(bucketDiagnosticPath("/acme/runtimes/machine-1")).toBe("/:slug/runtimes/:id");
-    expect(bucketDiagnosticPath("/acme/skills/skl_123")).toBe("/:slug/skills/:id");
     expect(bucketDiagnosticPath("/acme/attachments/att-8/preview")).toBe(
       "/:slug/attachments/:id/preview",
     );
@@ -55,7 +54,6 @@ describe("bucketDiagnosticPath", () => {
   it("templates ids that look nothing like ids", () => {
     for (const [path, expected] of [
       ["/acme/projects/p1", "/:slug/projects/:id"],
-      ["/acme/skills/skl_123", "/:slug/skills/:id"],
       ["/acme/agents/my-favourite-agent", "/:slug/agents/:id"],
       ["/acme/issues/new", "/:slug/issues/:id"],
     ] as const) {
@@ -72,8 +70,8 @@ describe("bucketDiagnosticPath", () => {
     expect(
       bucketDiagnosticPath("/acme/runtimes/machine%2Fruntime/runtime/runtime%20one"),
     ).toBe("/:slug/runtimes/:id/runtime/:runtimeId");
-    expect(bucketDiagnosticPath("/my%20workspace/skills/a%2Fb")).toBe(
-      "/:slug/skills/:id",
+    expect(bucketDiagnosticPath("/my%20workspace/agents/a%2Fb")).toBe(
+      "/:slug/agents/:id",
     );
   });
 

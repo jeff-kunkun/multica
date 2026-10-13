@@ -9,13 +9,6 @@ vi.mock("@tanstack/react-query", async (importOriginal) => ({
   useQuery: () => ({ data: undefined, isSuccess: false }),
 }));
 
-// The picker is the only way agent labels ever reached the agent settings
-// form. Mocking it means the assertion below fails loudly if the row is
-// re-added, instead of passing because a real picker rendered nothing.
-vi.mock("../../labels/resource-label-picker", () => ({
-  ResourceLabelPicker: () => <div data-testid="resource-label-picker" />,
-}));
-
 vi.mock("../../common/avatar-upload-control", () => ({
   AvatarUploadControl: () => <div data-testid="avatar-upload" />,
 }));

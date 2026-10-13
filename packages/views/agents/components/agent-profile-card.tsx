@@ -117,15 +117,12 @@ export function AgentProfileCard({ agentId }: AgentProfileCardProps) {
       )}
 
       {/* Meta rows — runtime (where it lives), model (what powers it),
-          skills (what it knows), owner (who manages it). Model + effort
+          owner (who manages it). Model + effort
           are surfaced here so a quick hover answers "which model is this
           agent running?" without opening the detail page. */}
       <div className="flex flex-col gap-1.5 text-caption">
         <RuntimeRow agent={agent} runtime={runtime} />
         <ModelRow model={agent.model} thinkingLevel={agent.thinking_level} />
-        {agent.skills.length > 0 && (
-          <SkillsRow skills={agent.skills.map((s) => s.name)} />
-        )}
         {owner && <MetaRow label={t(($) => $.profile_card.owner_label)} value={owner.name} />}
       </div>
     </div>
@@ -257,39 +254,6 @@ function MetaRow({
       <span className={`truncate ${mono ? "font-mono text-micro" : ""}`} title={value}>
         {value}
       </span>
-    </div>
-  );
-}
-
-function SkillsRow({ skills }: { skills: string[] }) {
-  const { t } = useT("agents");
-  const visible = skills.slice(0, 3);
-  const overflow = skills.length - visible.length;
-  return (
-    // `items-start` (not center): skill chips wrap to multiple lines, and a
-    // vertically-centred label would drift down next to the middle chip —
-    // making the first chip look like it belongs to the row above. Pin the
-    // label to the first chip row; `pt-0.5` lines its text up with the chip
-    // text (chips carry `py-0.5`). Each chip truncates so one long skill name
-    // can't blow out the card width.
-    <div className="flex items-start gap-1.5">
-      <span className="w-12 shrink-0 pt-0.5 text-muted-foreground">{t(($) => $.profile_card.skills_label)}</span>
-      <div className="flex min-w-0 flex-wrap gap-1">
-        {visible.map((s) => (
-          <span
-            key={s}
-            className="max-w-full truncate rounded-md bg-muted px-1.5 py-0.5 text-micro font-medium text-muted-foreground"
-            title={s}
-          >
-            {s}
-          </span>
-        ))}
-        {overflow > 0 && (
-          <span className="shrink-0 rounded-md bg-muted px-1.5 py-0.5 text-micro font-medium text-muted-foreground">
-            +{overflow}
-          </span>
-        )}
-      </div>
     </div>
   );
 }

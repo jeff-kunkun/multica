@@ -96,13 +96,6 @@ type Client struct {
 	token   string
 	client  *http.Client
 
-	// bundleClient downloads skill bundles. Unlike client it carries no fixed
-	// Timeout: bundles can be large and slow on jittery links, so the caller
-	// supplies a per-request, size-scaled deadline via context instead of
-	// being capped by the 30s control-plane timeout that fits heartbeat /
-	// claim but not a multi-megabyte body read. (GitHub #4505)
-	bundleClient *http.Client
-
 	// Identity headers sent on every request as X-Client-*. Populated by
 	// SetIdentity(); empty values are simply omitted.
 	platform string
@@ -121,11 +114,10 @@ type Client struct {
 // NewClient creates a new daemon API client.
 func NewClient(baseURL string) *Client {
 	return &Client{
-		baseURL:      baseURL,
-		client:       &http.Client{Timeout: 30 * time.Second, Transport: cloneDefaultTransport()},
-		bundleClient: &http.Client{},
-		platform:     "daemon",
-		os:           normalizeGOOS(runtime.GOOS),
+		baseURL:  baseURL,
+		client:   &http.Client{Timeout: 30 * time.Second, Transport: cloneDefaultTransport()},
+		platform: "daemon",
+		os:       normalizeGOOS(runtime.GOOS),
 	}
 }
 
@@ -201,13 +193,10 @@ func daemonHTTPClientCapabilities() string {
 
 func daemonCommonCapabilities() []string {
 	return []string{
-		protocol.DaemonCapabilitySkillBundlesV1,
 		protocol.DaemonCapabilityCoalescedCommentsV1,
 		protocol.DaemonCapabilityExecutionManifestV1,
-		protocol.DaemonCapabilityAgentSkillV1,
 		protocol.DaemonCapabilityLocalWorktreeV1,
 		protocol.DaemonCapabilityRPCV1,
-		protocol.DaemonCapabilityPlatformSkillV1,
 		protocol.DaemonCapabilityCheckoutKeepsWorkV1,
 	}
 }
@@ -324,84 +313,6 @@ func (c *Client) claimTasksLegacy(ctx context.Context, runtimeIDs []string, maxT
 		}
 	}
 	return out, nil
-}
-
-// TransferStats records successful HTTP response-body bytes read by a logical
-// call. For a skill-bundle download it separates "the link never produced a
-// successful response" from "a 2xx body arrived but did not finish" — a
-// distinction the failure text could not previously express, so a connectivity
-// fault read as a broken skill and sent reporters chasing the wrong thing
-// (GitHub #7386).
-//
-// Across retries the fields keep the high-water mark rather than the last
-// attempt: the question they answer is "did this link ever get anywhere", and
-// one attempt that reached the body says more than a later one that did not.
-// The zero value is usable, and every method is nil-safe so callers that do
-// not want the accounting can pass nil.
-type TransferStats struct {
-	// ResponseStarted reports whether 2xx response headers ever arrived. Error
-	// response bodies are deliberately excluded: their bytes describe a server
-	// business error, not progress downloading a skill bundle.
-	ResponseStarted bool
-	// BytesRead is the most response-body bytes any single attempt read.
-	BytesRead int64
-}
-
-func (t *TransferStats) observeResponseStarted() {
-	if t != nil {
-		t.ResponseStarted = true
-	}
-}
-
-// wrap returns r instrumented to feed this attempt's byte count back into t.
-func (t *TransferStats) wrap(r io.Reader) io.Reader {
-	if t == nil {
-		return r
-	}
-	return &countingReader{inner: r, stats: t}
-}
-
-// countingReader tallies one attempt and raises the parent high-water mark as
-// it goes, so a failure mid-body still reports how far that attempt got.
-type countingReader struct {
-	inner   io.Reader
-	stats   *TransferStats
-	attempt int64
-}
-
-func (c *countingReader) Read(p []byte) (int, error) {
-	n, err := c.inner.Read(p)
-	if n > 0 {
-		c.attempt += int64(n)
-		if c.attempt > c.stats.BytesRead {
-			c.stats.BytesRead = c.attempt
-		}
-	}
-	return n, err
-}
-
-// ResolveSkillBundle downloads a single skill bundle. It uses bundleClient (no
-// fixed timeout) so the deadline is governed entirely by ctx, which the daemon
-// scales to the bundle's size, and retries transient transport blips within
-// whatever budget ctx leaves. Resolving one skill per request — rather than the
-// agent's whole bundle in one atomic body read — lets each download fit its own
-// deadline and be cached independently, so a slow link makes incremental
-// progress instead of failing the entire set on every dispatch. (GitHub #4505)
-func (c *Client) ResolveSkillBundle(ctx context.Context, runtimeID, taskID string, ref SkillRefData) (SkillData, TransferStats, error) {
-	var resp struct {
-		Bundles []SkillData `json:"bundles"`
-	}
-	var stats TransferStats
-	path := fmt.Sprintf("/api/daemon/runtimes/%s/tasks/%s/skill-bundles/resolve", runtimeID, taskID)
-	if err := c.postJSONViaWithRetry(ctx, c.bundleClient, path, map[string]any{
-		"skills": []SkillRefData{ref},
-	}, &resp, skillBundleResolveRetrySchedule, &stats); err != nil {
-		return SkillData{}, stats, err
-	}
-	if len(resp.Bundles) != 1 {
-		return SkillData{}, stats, fmt.Errorf("resolve skill bundle: expected 1 bundle, got %d", len(resp.Bundles))
-	}
-	return resp.Bundles[0], stats, nil
 }
 
 func (c *Client) ExtendTaskPrepareLease(ctx context.Context, runtimeID, taskID string) error {
@@ -698,11 +609,9 @@ func (c *Client) GetTaskStatus(ctx context.Context, taskID string) (string, erro
 // heartbeat paths share a single type and a single decoder shape. Aliases
 // (rather than wrappers) keep call sites unchanged.
 type (
-	HeartbeatResponse       = protocol.DaemonHeartbeatAckPayload
-	PendingUpdate           = protocol.DaemonHeartbeatPendingUpdate
-	PendingModelList        = protocol.DaemonHeartbeatPendingModelList
-	PendingLocalSkills      = protocol.DaemonHeartbeatPendingLocalSkills
-	PendingLocalSkillImport = protocol.DaemonHeartbeatPendingLocalSkillImport
+	HeartbeatResponse = protocol.DaemonHeartbeatAckPayload
+	PendingUpdate     = protocol.DaemonHeartbeatPendingUpdate
+	PendingModelList  = protocol.DaemonHeartbeatPendingModelList
 )
 
 func (c *Client) SendHeartbeat(ctx context.Context, runtimeID string) (*HeartbeatResponse, error) {
@@ -724,16 +633,6 @@ func (c *Client) ReportUpdateResult(ctx context.Context, runtimeID, updateID str
 // ReportModelListResult sends the model-discovery result back to the server.
 func (c *Client) ReportModelListResult(ctx context.Context, runtimeID, requestID string, result map[string]any) error {
 	return c.postJSON(ctx, fmt.Sprintf("/api/daemon/runtimes/%s/models/%s/result", runtimeID, requestID), result, nil)
-}
-
-// ReportLocalSkillListResult sends the runtime-local-skill inventory back to the server.
-func (c *Client) ReportLocalSkillListResult(ctx context.Context, runtimeID, requestID string, result map[string]any) error {
-	return c.postJSON(ctx, fmt.Sprintf("/api/daemon/runtimes/%s/local-skills/%s/result", runtimeID, requestID), result, nil)
-}
-
-// ReportLocalSkillImportResult sends a runtime-local-skill bundle back to the server.
-func (c *Client) ReportLocalSkillImportResult(ctx context.Context, runtimeID, requestID string, result map[string]any) error {
-	return c.postJSON(ctx, fmt.Sprintf("/api/daemon/runtimes/%s/local-skills/import/%s/result", runtimeID, requestID), result, nil)
 }
 
 // WorkspaceInfo holds minimal workspace metadata returned by the API.
@@ -1106,16 +1005,6 @@ var defaultTerminalRetrySchedule = []time.Duration{
 	64 * time.Second,
 }
 
-// skillBundleResolveRetrySchedule rides out brief transport blips on a single
-// bundle download. Kept short on purpose: the real budget is the size-scaled
-// context deadline the daemon sets per skill, and a skill that still fails is
-// retried on the next dispatch once its siblings are cached. N entries → N+1
-// attempts. (GitHub #4505)
-var skillBundleResolveRetrySchedule = []time.Duration{
-	500 * time.Millisecond,
-	2 * time.Second,
-}
-
 // retrySleep is the sleep used between retry attempts. Pulled into a package
 // variable so tests can swap in an instant sleep without rewriting the
 // caller's schedule.
@@ -1174,13 +1063,6 @@ func isTransientError(err error) bool {
 // idempotent success (see service/task.go), so a duplicate replay from a
 // retry is safe even if the server's prior response was lost in transit.
 func (c *Client) postJSONWithRetry(ctx context.Context, path string, reqBody any, respBody any, schedule []time.Duration) error {
-	return c.postJSONViaWithRetry(ctx, c.client, path, reqBody, respBody, schedule, nil)
-}
-
-// postJSONViaWithRetry is postJSONWithRetry over an explicit http.Client, so
-// large-body endpoints can run on bundleClient (deadline from ctx) while the
-// control-plane keeps its fixed 30s client.
-func (c *Client) postJSONViaWithRetry(ctx context.Context, httpClient *http.Client, path string, reqBody any, respBody any, schedule []time.Duration, stats *TransferStats) error {
 	var lastErr error
 	for attempt := 0; ; attempt++ {
 		if err := ctx.Err(); err != nil {
@@ -1189,7 +1071,7 @@ func (c *Client) postJSONViaWithRetry(ctx context.Context, httpClient *http.Clie
 			}
 			return err
 		}
-		err := c.postJSONViaObserved(ctx, httpClient, path, reqBody, respBody, stats)
+		err := c.postJSON(ctx, path, reqBody, respBody)
 		if err == nil {
 			return nil
 		}
@@ -1206,27 +1088,13 @@ func (c *Client) postJSONViaWithRetry(ctx context.Context, httpClient *http.Clie
 	}
 }
 
-func (c *Client) postJSON(ctx context.Context, path string, reqBody any, respBody any) error {
-	return c.postJSONVia(ctx, c.client, path, reqBody, respBody)
-}
-
 // responseDecoder customizes successful-response decoding inside each attempt.
 type responseDecoder func(io.Reader) error
 
-// postJSONVia is postJSON over an explicit http.Client. Callers pick the client
-// to control the timeout regime: c.client (fixed 30s) for control-plane calls,
-// c.bundleClient (deadline from ctx) for large skill-bundle downloads.
-// respBody can be a JSON destination or a responseDecoder that decodes a
-// successful response inside each attempt, before retry decisions are made.
-func (c *Client) postJSONVia(ctx context.Context, httpClient *http.Client, path string, reqBody any, respBody any) error {
-	return c.postJSONViaObserved(ctx, httpClient, path, reqBody, respBody, nil)
-}
-
-// postJSONViaObserved is postJSONVia that additionally records what the attempt
-// moved into stats (nil to skip). Callers use it to tell "the link never
-// produced a response" apart from "the body arrived too slowly to finish" —
-// see TransferStats.
-func (c *Client) postJSONViaObserved(ctx context.Context, httpClient *http.Client, path string, reqBody any, respBody any, stats *TransferStats) error {
+// postJSON performs one POST on the control-plane client. respBody can be a
+// JSON destination or a responseDecoder that decodes a successful response
+// inside each attempt, before retry decisions are made.
+func (c *Client) postJSON(ctx context.Context, path string, reqBody any, respBody any) error {
 	var body io.Reader
 	if reqBody != nil {
 		data, err := json.Marshal(reqBody)
@@ -1246,7 +1114,7 @@ func (c *Client) postJSONViaObserved(ctx context.Context, httpClient *http.Clien
 	}
 	c.setIdentityHeaders(req)
 
-	resp, err := httpClient.Do(req)
+	resp, err := c.client.Do(req)
 	if err != nil {
 		return err
 	}
@@ -1255,8 +1123,7 @@ func (c *Client) postJSONViaObserved(ctx context.Context, httpClient *http.Clien
 		data, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 		return &requestError{Method: http.MethodPost, Path: path, StatusCode: resp.StatusCode, Body: strings.TrimSpace(string(data))}
 	}
-	stats.observeResponseStarted()
-	respReader := stats.wrap(resp.Body)
+	respReader := io.Reader(resp.Body)
 	if respBody == nil {
 		io.Copy(io.Discard, respReader)
 		return nil

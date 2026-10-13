@@ -37,7 +37,7 @@ export function BatchActionToolbar({
    * The universe of selectable issues at this call site (the same list the
    * rows are rendered from). The toolbar filters it by the active surface
    * selection to reflect the real common status / priority / assignee of the
-   * selected issues, mirroring how the skill list filters rows by `selectedIds`.
+   * selected issues.
    */
   issues: Issue[];
   /**

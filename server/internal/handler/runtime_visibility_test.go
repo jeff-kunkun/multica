@@ -296,10 +296,6 @@ func TestPrivateRuntimeReadEndpointsHideKnownRuntimeFromNonOwners(t *testing.T) 
 	if err != nil {
 		t.Fatalf("create model list request: %v", err)
 	}
-	localSkillRequest, err := testHandler.LocalSkillListStore.Create(context.Background(), runtimeID)
-	if err != nil {
-		t.Fatalf("create local skill list request: %v", err)
-	}
 
 	tests := []struct {
 		name   string
@@ -314,8 +310,6 @@ func TestPrivateRuntimeReadEndpointsHideKnownRuntimeFromNonOwners(t *testing.T) 
 		{"usage by hour", http.MethodGet, "/api/runtimes/" + runtimeID + "/usage/by-hour", testHandler.GetRuntimeUsageByHour, []string{"runtimeId", runtimeID}},
 		{"model discovery", http.MethodPost, "/api/runtimes/" + runtimeID + "/models", testHandler.InitiateListModels, []string{"runtimeId", runtimeID}},
 		{"model discovery poll", http.MethodGet, "/api/runtimes/" + runtimeID + "/models/" + modelRequest.ID, testHandler.GetModelListRequest, []string{"runtimeId", runtimeID, "requestId", modelRequest.ID}},
-		{"local skill discovery", http.MethodPost, "/api/runtimes/" + runtimeID + "/local-skills", testHandler.InitiateListLocalSkills, []string{"runtimeId", runtimeID}},
-		{"local skill discovery poll", http.MethodGet, "/api/runtimes/" + runtimeID + "/local-skills/" + localSkillRequest.ID, testHandler.GetLocalSkillListRequest, []string{"runtimeId", runtimeID, "requestId", localSkillRequest.ID}},
 	}
 
 	for _, tc := range tests {

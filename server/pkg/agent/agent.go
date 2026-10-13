@@ -96,10 +96,9 @@ type ExecOptions struct {
 	// rest ignore it. Deliberately not enumerated here — the previous list
 	// went stale as backends were added, which is how MULTICA_QWENPAW_ARGS
 	// shipped plumbed but dropped. Grep for ExtraArgs to see today's set.
-	ExtraArgs        []string        // daemon-wide default CLI arguments appended before CustomArgs
-	CustomArgs       []string        // per-agent CLI arguments appended after ExtraArgs
-	QwenpawWorkspace string          // per-task QwenPaw workspace directory (passed as --workspace to qwenpaw acp); empty when not applicable
-	McpConfig        json.RawMessage // if non-nil, MCP server config to pass via --mcp-config
+	ExtraArgs  []string        // daemon-wide default CLI arguments appended before CustomArgs
+	CustomArgs []string        // per-agent CLI arguments appended after ExtraArgs
+	McpConfig  json.RawMessage // if non-nil, MCP server config to pass via --mcp-config
 	// ThinkingLevel is the runtime-native reasoning/effort value (e.g.
 	// Claude's "low|medium|high|xhigh|max", Codex's "none|minimal|low|
 	// medium|high|xhigh", OpenCode's model variant names). Empty means
@@ -127,10 +126,6 @@ type ExecOptions struct {
 	// ignore this field, mirroring ThinkingLevel's renderer-side fall-through
 	// pattern. See issue #3260.
 	OpenclawMode string
-	// ClaudeSettingsPath is a daemon-owned, task-local settings file passed
-	// through Claude Code's --settings flag. It currently carries restrictive
-	// runtime-skill overrides only; other providers ignore it.
-	ClaudeSettingsPath string
 	// piMcpExtensionPath is set by piBackend.Execute after it writes the
 	// temporary MCP extension. The daemon does not fill it.
 	piMcpExtensionPath string

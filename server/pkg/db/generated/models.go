@@ -48,12 +48,11 @@ type Agent struct {
 	// Composio toolkit slugs this agent is allowed to mount as MCP. NULL or empty array = no MCP overlay. Mounted for any run that passes the agent invocation-permission gate (MUL-3963); the overlay uses the agent OWNER's active Composio connection, so sharing the agent (public_to) shares these apps with whoever may invoke it. No longer gated on originator == owner. Stored as TEXT[] so the dispatch path can intersect against the owner's active connections with a single SQL ANY() filter.
 	ComposioToolkitAllowlist []string `json:"composio_toolkit_allowlist"`
 	// Agent invocation permission mode (MUL-3963). private = owner only; public_to = allow-list in agent_invocation_target. Replaces visibility as the authorization source for triggering runs; visibility is now a derived legacy field. Default private = deny-by-default.
-	PermissionMode        string      `json:"permission_mode"`
-	Kind                  string      `json:"kind"`
-	SystemKey             pgtype.Text `json:"system_key"`
-	DisabledRuntimeSkills []byte      `json:"disabled_runtime_skills"`
-	ServiceTier           pgtype.Text `json:"service_tier"`
-	ConversationStarters  []byte      `json:"conversation_starters"`
+	PermissionMode       string      `json:"permission_mode"`
+	Kind                 string      `json:"kind"`
+	SystemKey            pgtype.Text `json:"system_key"`
+	ServiceTier          pgtype.Text `json:"service_tier"`
+	ConversationStarters []byte      `json:"conversation_starters"`
 }
 
 type AgentBuilderDraft struct {
@@ -98,13 +97,6 @@ type AgentRuntime struct {
 	Visibility     string             `json:"visibility"`
 	ProfileID      pgtype.UUID        `json:"profile_id"`
 	CustomName     pgtype.Text        `json:"custom_name"`
-}
-
-type AgentSkill struct {
-	AgentID   pgtype.UUID        `json:"agent_id"`
-	SkillID   pgtype.UUID        `json:"skill_id"`
-	CreatedAt pgtype.Timestamptz `json:"created_at"`
-	Enabled   bool               `json:"enabled"`
 }
 
 type AgentTaskQueue struct {
@@ -1470,34 +1462,6 @@ type SignupTotpUsedStep struct {
 	SecretFingerprint []byte             `json:"secret_fingerprint"`
 	Step              int64              `json:"step"`
 	ConsumedAt        pgtype.Timestamptz `json:"consumed_at"`
-}
-
-type Skill struct {
-	ID                   pgtype.UUID        `json:"id"`
-	WorkspaceID          pgtype.UUID        `json:"workspace_id"`
-	Name                 string             `json:"name"`
-	Description          string             `json:"description"`
-	Content              string             `json:"content"`
-	Config               []byte             `json:"config"`
-	CreatedBy            pgtype.UUID        `json:"created_by"`
-	CreatedAt            pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt            pgtype.Timestamptz `json:"updated_at"`
-	PluginInstallationID pgtype.UUID        `json:"plugin_installation_id"`
-}
-
-type SkillFile struct {
-	ID        pgtype.UUID        `json:"id"`
-	SkillID   pgtype.UUID        `json:"skill_id"`
-	Path      string             `json:"path"`
-	Content   string             `json:"content"`
-	CreatedAt pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
-}
-
-type SkillToLabel struct {
-	SkillID   pgtype.UUID        `json:"skill_id"`
-	LabelID   pgtype.UUID        `json:"label_id"`
-	CreatedAt pgtype.Timestamptz `json:"created_at"`
 }
 
 type Squad struct {

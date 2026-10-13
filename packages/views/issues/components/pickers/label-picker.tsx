@@ -84,8 +84,7 @@ function pickInlineColor(name: string): string {
  * label is a real workspace label in both modes; only the attach step differs.
  *
  * A "Manage labels" item at the bottom opens the workspace Labels settings
- * page, which is the single management surface for issue, agent, and skill
- * label catalogs.
+ * page, which is the single management surface for the label catalog.
  */
 export function LabelPicker({
   issueId,

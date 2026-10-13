@@ -34,7 +34,7 @@ describe("resolveFailureReasonKey", () => {
   });
 
   it("returns undefined when neither the reason nor its family is known", () => {
-    expect(resolveFailureReasonKey("skill_bundle_unavailable", COPY)).toBeUndefined();
+    expect(resolveFailureReasonKey("unknown_reason", COPY)).toBeUndefined();
     expect(resolveFailureReasonKey("brand_new.thing", COPY)).toBeUndefined();
   });
 

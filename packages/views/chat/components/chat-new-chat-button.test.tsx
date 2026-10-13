@@ -31,7 +31,6 @@ function makeAgent(overrides: Partial<Agent> & Pick<Agent, "id" | "name" | "owne
     status: "idle",
     max_concurrent_tasks: 1,
     model: "sonnet",
-    skills: [],
     created_at: new Date(0).toISOString(),
     updated_at: new Date(0).toISOString(),
     archived_at: null,

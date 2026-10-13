@@ -25,6 +25,13 @@ import (
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
+// sanitizeNullBytes makes a string safe for a PostgreSQL TEXT column. Thin
+// alias for util.SanitizeTextForPostgres, the single definition of what "safe
+// to persist" means for comment, label, property and task text.
+func sanitizeNullBytes(s string) string {
+	return util.SanitizeTextForPostgres(s)
+}
+
 type CommentResponse struct {
 	ID             string  `json:"id"`
 	IssueID        string  `json:"issue_id"`
@@ -1698,8 +1705,7 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 	// invalid UTF-8 as defense-in-depth. A stray such byte in agent-written
 	// content (notably via --content-file) otherwise fails the INSERT with an
 	// opaque 500 the CLI renders as "server unavailable" and retries forever —
-	// the plausible cause of GH #5388. Mirrors the skill-import sanitization;
-	// normalizing first means all-NUL content is correctly treated as empty.
+	// the plausible cause of GH #5388. Normalizing first means all-NUL content is correctly treated as empty.
 	req.Content = sanitizeNullBytes(req.Content)
 	if req.Content == "" {
 		writeError(w, http.StatusBadRequest, "content is required")

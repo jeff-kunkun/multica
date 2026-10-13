@@ -413,7 +413,7 @@ func main() {
 	// MUL-1138: when REDIS_URL is set, route fanout through a Redis relay so
 	// multiple API nodes can deliver each other's events. Without it the hub
 	// is the sole broadcaster and the server stays single-node (legacy).
-	// Runtime local-skill stores and realtime relay traffic use separate Redis
+	// Runtime pending-request stores and realtime relay traffic use separate Redis
 	// clients so blocking stream consumers cannot starve request-path Redis
 	// operations.
 	relayCtx, relayCancel := context.WithCancel(context.Background())

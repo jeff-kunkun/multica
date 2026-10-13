@@ -31,8 +31,8 @@ type WorkspaceMcpBinding struct {
 // The contract (GH #6062, MUL-5421):
 //
 //   - Only servers explicitly bound to this agent and left enabled are folded
-//     in. A workspace MCP server is a LIBRARY entry, exactly like a workspace
-//     skill: creating one gives it to nobody. Nothing about this layer reaches
+//     in. A workspace MCP server is a LIBRARY entry: creating one gives it to
+//     nobody. Nothing about this layer reaches
 //     an agent implicitly, which is what keeps shared credentials from
 //     spreading to agents no one opted in.
 //

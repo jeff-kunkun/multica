@@ -93,11 +93,6 @@ func TestTaskRunFailureReasonPrefersSpecificPreparationSentinels(t *testing.T) {
 				fmt.Errorf("openclaw config file: context deadline exceeded (process: signal: killed): %w", execenv.ErrOpenclawCLITimeout))),
 			want: taskfailure.ReasonRuntimeCLITimeout.String(),
 		},
-		"skill bundle unavailable": {
-			err: asEnvironmentSetupFailure(fmt.Errorf("prepare execution environment: %w",
-				fmt.Errorf("%w: download skill: connection refused", errSkillBundleUnavailable))),
-			want: taskfailure.ReasonSkillBundleUnavailable.String(),
-		},
 		"prepare budget exhausted": {
 			err:  fmt.Errorf("%w after 5m0s", errTaskPrepareTimeout),
 			want: taskfailure.ReasonTimeout.String(),

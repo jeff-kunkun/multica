@@ -1,14 +1,12 @@
 import { describe, expect, it } from "vitest";
-import type { Agent, Comment, RuntimeDevice, Skill } from "../types";
+import type { Agent, Comment, RuntimeDevice } from "../types";
 import {
   canAssignAgentToIssue,
   canDeleteComment,
   canDeleteRuntime,
-  canDeleteSkill,
   canDeleteWorkspace,
   canEditAgent,
   canEditComment,
-  canEditSkill,
   canManageMembers,
   canUpdateWorkspaceSettings,
 } from "./rules";
@@ -35,27 +33,11 @@ function makeAgent(overrides: Partial<Agent> = {}): Agent {
     max_concurrent_tasks: 1,
     model: "default",
     owner_id: ALICE,
-    skills: [],
     created_at: "2026-04-01T00:00:00Z",
     updated_at: "2026-04-01T00:00:00Z",
     archived_at: null,
     archived_by: null,
     ...overrides,
-  };
-}
-
-function makeSkill(createdBy: string | null): Skill {
-  return {
-    id: "skl_1",
-    workspace_id: "ws_1",
-    name: "skill",
-    description: "",
-    content: "",
-    config: {},
-    files: [],
-    created_by: createdBy,
-    created_at: "2026-04-01T00:00:00Z",
-    updated_at: "2026-04-01T00:00:00Z",
   };
 }
 
@@ -281,34 +263,6 @@ describe("canAssignAgentToIssue", () => {
     expect(
       canAssignAgentToIssue(a, { userId: ALICE, role: "member" }).allowed,
     ).toBe(true);
-  });
-});
-
-describe("canEditSkill / canDeleteSkill", () => {
-  const skill = makeSkill(ALICE);
-  it("allows the workspace owner", () => {
-    expect(canEditSkill(skill, { userId: BOB, role: "owner" }).allowed).toBe(
-      true,
-    );
-  });
-  it("allows the creator", () => {
-    expect(canEditSkill(skill, { userId: ALICE, role: "member" }).allowed)
-      .toBe(true);
-  });
-  it("denies non-creator member", () => {
-    expect(canEditSkill(skill, { userId: BOB, role: "member" }).allowed)
-      .toBe(false);
-  });
-  it("denies when created_by is null and user is plain member", () => {
-    expect(
-      canEditSkill(makeSkill(null), { userId: ALICE, role: "member" }).allowed,
-    ).toBe(false);
-  });
-  it("canDeleteSkill mirrors canEditSkill", () => {
-    expect(canDeleteSkill(skill, { userId: ALICE, role: "member" }).allowed)
-      .toBe(true);
-    expect(canDeleteSkill(skill, { userId: BOB, role: "member" }).allowed)
-      .toBe(false);
   });
 });
 

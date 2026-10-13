@@ -179,14 +179,6 @@ function createComponents(
         )
       }
 
-      if (href?.startsWith('slash://skill/')) {
-        return (
-          <span className="slash-command text-primary font-semibold mx-0.5">
-            {children}
-          </span>
-        )
-      }
-
       const handleClick = (e: React.MouseEvent): void => {
         e.preventDefault()
         if (href) {

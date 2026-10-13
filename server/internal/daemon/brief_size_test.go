@@ -21,29 +21,13 @@ var (
 	briefSizeInstructions       = "You are the default executor for this workspace. Implement, verify, and deliver one issue at a time; keep diffs small and reuse existing patterns."
 )
 
-func briefSizeSkills() []SkillData {
-	names := []string{
-		"anti-slop-frontend", "ask-skill", "billing-pdf", "code-review", "codebase-design",
-		"diagnosing-bugs", "domain-modeling", "end-work", "explain-html", "implement",
-		"improve-codebase-architecture", "interaction-graph", "iphone-use", "jev", "jev-ego",
-		"multica", "produce-assets", "project-prompt", "refresh-project", "team-roster",
-		"use-bitwarden", "use-cloudflare", "use-railway", "use-supabase", "use-vercel",
-		"worktree-local-state", "multica-platform",
-	}
-	skills := make([]SkillData, 0, len(names))
-	for _, n := range names {
-		skills = append(skills, SkillData{ID: "skill-" + n, Name: n, Description: "desc", Content: "---\nname: " + n + "\ndescription: desc\n---\nbody"})
-	}
-	return skills
-}
-
 func briefSizeTask() Task {
 	return Task{
 		ID:                               "6f1c2b9e-0d7a-4c55-9c43-7b1f0e2a9d11",
 		AgentID:                          "73f4e44b-2a52-43c4-b957-ea8b1f8b2aba",
 		IssueID:                          "0b4a5d6e-7f80-4912-a3b4-c5d6e7f80912",
 		WorkspaceID:                      "1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d",
-		Agent:                            &AgentData{ID: "73f4e44b-2a52-43c4-b957-ea8b1f8b2aba", Name: "孙悟空", Instructions: briefSizeInstructions, Skills: briefSizeSkills()},
+		Agent:                            &AgentData{ID: "73f4e44b-2a52-43c4-b957-ea8b1f8b2aba", Name: "孙悟空", Instructions: briefSizeInstructions},
 		ProjectID:                        "9e8d7c6b-5a49-4382-9170-6f5e4d3c2b1a",
 		ProjectTitle:                     "Multica 魔改",
 		ProjectDescription:               briefSizeProjectDescription,
@@ -64,7 +48,6 @@ func briefSizeCtx(task Task) execenv.TaskContextForEnv {
 		AgentID:                          task.AgentID,
 		AgentName:                        task.Agent.Name,
 		AgentInstructions:                task.Agent.Instructions,
-		AgentSkills:                      convertSkillsForEnv(task.Agent.Skills),
 		Repos:                            convertReposForEnv(task.Repos),
 		ProjectID:                        task.ProjectID,
 		ProjectTitle:                     task.ProjectTitle,

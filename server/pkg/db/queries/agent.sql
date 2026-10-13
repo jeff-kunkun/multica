@@ -29,8 +29,8 @@ SELECT * FROM agent
 WHERE id = $1;
 
 -- name: GetAgentForUpdate :one
--- Serializes read-modify-write updates to disabled_runtime_skills so two
--- concurrent per-skill toggles cannot overwrite each other.
+-- Locks the agent row so claim-time delivery authorization reads a stable
+-- runtime and owner.
 SELECT * FROM agent
 WHERE id = $1
 FOR UPDATE;
@@ -113,12 +113,6 @@ RETURNING *;
 -- handler's audit-log + **** sentinel guard.
 UPDATE agent
 SET custom_env = $2, updated_at = now()
-WHERE id = $1
-RETURNING *;
-
--- name: UpdateAgentDisabledRuntimeSkills :one
-UPDATE agent
-SET disabled_runtime_skills = $2, updated_at = now()
 WHERE id = $1
 RETURNING *;
 

@@ -307,6 +307,8 @@ You need at least one installed. The daemon registers each detected CLI as an av
 4. Heartbeats are sent periodically (default: 15s) so the server knows the daemon is alive
 5. On shutdown, all runtimes are deregistered
 
+Multica distributes one skill, `multica-platform` (its own issue, mention and runtime contracts). On start the daemon writes it to `~/.agents/skills/multica-platform` and links it from `~/.claude/skills` and `~/.codex/skills`; a same-named skill you installed yourself is left alone. Every other skill is yours to install: general skills at user level, project skills in the project folder.
+
 ### Configuration
 
 Daemon behavior is configured via flags or environment variables:
@@ -338,8 +340,6 @@ Daemon behavior is configured via flags or environment variables:
 | GC artifact patterns | — | `MULTICA_GC_ARTIFACT_PATTERNS` | `node_modules,.next,.turbo` |
 | GC repo cache TTL (`.repos`) | — | `MULTICA_GC_REPO_TTL` | `720h` (30d; set `0` to disable) |
 | GC repo maintenance | — | `MULTICA_GC_REPO_MAINTENANCE_ENABLED` | `true` (set `false`/`0` to disable heavy Git maintenance only) |
-| GC Hermes memory TTL (per-agent `memories/`) | — | `MULTICA_GC_HERMES_MEMORY_TTL` | `2160h` (90d; set `0` to disable) |
-| GC Hermes session TTL (per-conversation `state.db`) | — | `MULTICA_GC_HERMES_SESSION_TTL` | `336h` (14d; set `0` to disable) |
 | GC task temp legacy TTL (pre-lock `multica-task-*`) | — | `MULTICA_GC_TASK_TEMP_LEGACY_TTL` | `0` (disabled; set a duration to opt in) |
 
 #### Workspace garbage collection
@@ -358,8 +358,6 @@ The daemon periodically scans `MULTICA_WORKSPACES_ROOT` and applies several disk
 
   Short worktree cleanup and eligible cache eviction continue on every GC cycle, including while agents are active. Heavy repo maintenance (`reflog expire` and `git gc`) starts only while the daemon is otherwise idle. A checkout or newly claimed task cancels it and takes priority; interrupted work remains pending for a later idle GC cycle. Operators can disable only these heavy commands with `MULTICA_GC_REPO_MAINTENANCE_ENABLED=false` without disabling worktree cleanup or cache eviction.
 
-- **Hermes session store reclamation** — a conversation's Hermes transcript (`state.db`) lives at `<profile dir>/hermes-sessions/<agent-id>/<hermes-profile>/<conversation>/`, outside any task directory, so a follow-up turn can resume it (see [Hermes agent memory](#hermes-agent-memory)). A store untouched for `MULTICA_GC_HERMES_SESSION_TTL` is removed. The default matches the Codex session store rather than the memory store above: these hold full transcripts, and reclaiming an idle one costs a thread that starts fresh (with a continuity notice), not an agent that forgot what it learned. A store a running task holds is never reclaimed.
-- **Hermes memory store reclamation** — a Hermes agent's long-term memory (`memories/`) lives at `<profile dir>/hermes-state/<agent-id>/<hermes-profile>/`, outside any task directory, so it survives across tasks and issues (see [Hermes agent memory](#hermes-agent-memory)). A store untouched for `MULTICA_GC_HERMES_MEMORY_TTL` is removed, giving a deleted agent's memory an eventual-reclamation guarantee. The default is deliberately long: these are a handful of markdown files, and reclaiming one is user-visible amnesia rather than a cache miss. A store a running task holds is never reclaimed.
 - **Task temp dir reclamation** — every task gets a private temp directory (`multica-task-*`) under the system temp base (`/tmp`, or `MULTICA_AGENT_TEMP_BASE`), exported to the agent as `TMPDIR`/`TMP`/`TEMP`. On Windows, every task instead inherits the daemon user's `TMP`/`TEMP`: Git Bash's `/tmp` mount is shared by all of the user's live Git Bash processes, whichever runtime started them, so it must never point at a task directory that will be deleted. `TMPDIR` stays task-local, and for Claude Code `CLAUDE_CODE_TMPDIR` defaults to that directory unless the user overrides it. It is removed when the run ends, but that removal never happens when the daemon is killed and does not succeed while a file inside is still open — common on Windows, where an open handle makes the delete fail outright. These directories live outside `MULTICA_WORKSPACES_ROOT`, so nothing else reclaimed them and whatever the end-of-run removal missed accumulated forever. Every GC cycle now sweeps the temp base. Liveness is decided by the directory's `.task_lock` — the same OS advisory lock an env root uses, which the kernel releases when the holding process dies — not by age: a directory still in use is never removed however old it is, including one owned by a different daemon sharing the same temp base, and a directory whose owner is gone is removed on the next cycle however new it is. Directories left by a daemon predating that lock carry no lock file, so nothing can be proven about them and age is the only signal available. Reclaiming those is an operator's explicit decision: `MULTICA_GC_TASK_TEMP_LEGACY_TTL` defaults to `0`, which leaves them in place. Set it to a duration only once you know no pre-lock daemon is still running tasks on this machine — a task may legitimately run for weeks (there is no default agent timeout), a daemon on another profile can still be on the old binary, and every daemon on the machine shares one temp base, so a TTL here can delete a `TMPDIR` that is still in use. Each GC cycle logs how many such directories it left alone. Even with a TTL set, a directory holding no task content is never reclaimed on age — an old empty leftover, or a shell left by a daemon that died between creating the directory and publishing its lock — because holding no content is exactly what a directory currently being published looks like, and deleting one of those would take the `TMPDIR` of a task that is starting. Those shells are a few bytes each. Only entries carrying the `multica-task-` prefix are ever considered — the temp base itself is usually shared with other programs — and a directory this sweep cannot read is never touched.
 
 Configured patterns are basename-only — entries containing `/` or `\` are silently dropped — and `.git` subtrees are never descended into. The managed Codex cache is matched by its exact relative path, so a repository's own `.sandbox-bin` is not removed unless an operator explicitly adds that basename to `MULTICA_GC_ARTIFACT_PATTERNS`. The default list (`node_modules`, `.next`, `.turbo`) is intentionally narrow; extend it per deployment if your repos consistently produce other regenerable directories (for example, `MULTICA_GC_ARTIFACT_PATTERNS=node_modules,.next,.turbo,target,__pycache__`). To disable artifact cleanup entirely, including the managed Codex cache, set `MULTICA_GC_ARTIFACT_TTL=0`.
@@ -442,29 +440,9 @@ Two consequences are worth knowing before debugging a missing MCP tool:
 If a configured server produces no tools, check the daemon log for those warnings first, then confirm the runtime itself exposes the server's tools to the model — some ACP adapters apply their own tool-profile filtering after connecting.
 
 
-The daemon launches QwenPaw as `qwenpaw acp --workspace <per-task dir>`. It writes the task brief to `AGENTS.md`, and materialises the run's bound skills into `<per-task dir>/skills/` plus a `skill.json` manifest, so QwenPaw discovers them through its own workspace skill discovery. `acp` and `--workspace` are reserved: `custom_args` cannot override them. QwenPaw is the one runtime with no `MULTICA_QWENPAW_MODEL`: its `session/set_model` writes to a shared, persistent agent config rather than the session, so Multica never sends it a model and leaves that choice to QwenPaw's own configuration.
+The daemon launches QwenPaw as `qwenpaw acp --workspace <per-task dir>`. It writes the task brief to `AGENTS.md`. `acp` and `--workspace` are reserved: `custom_args` cannot override them. QwenPaw is the one runtime with no `MULTICA_QWENPAW_MODEL`: its `session/set_model` writes to a shared, persistent agent config rather than the session, so Multica never sends it a model and leaves that choice to QwenPaw's own configuration.
 
-The daemon launches MiniMax Code as `mcode acp`, writes the task brief to `AGENTS.md`, and injects bound skills under `.minimax/skills/`. MCode owns model selection and currently advertises `loadSession: false`; Multica therefore starts a fresh MCode session when a later run cannot load the saved session.
-
-#### Hermes agent memory
-
-Hermes discovers skills only from its own home, so binding Multica skills to a Hermes agent makes the daemon build a per-task `HERMES_HOME` overlay for that agent. The agent's long-term memory (`memories/`) does **not** live inside that task-scoped overlay: it is linked to a persistent store at
-
-```
-<profile dir>/hermes-state/<agent-id>/<hermes-profile>/
-```
-
-so the same agent keeps its memory across tasks and issues. `<hermes-profile>` is the profile the agent resolves to (`default`, a named profile from `-p/--profile` or `active_profile`, or a hash for an out-of-tree custom `HERMES_HOME`) — pointing an agent at a different profile gives it a different memory line, matching Hermes' own "a profile is an isolated instance" model.
-
-Consequences worth knowing:
-
-- **Memory is agent-scoped but runtime-local.** One agent's memory is never visible to another, and the user's own `~/.hermes/memories` is never read or written. The store lives in this runtime's Multica profile directory, so it does **not** follow the agent to another machine — an agent that runs on two runtimes has a separate memory line on each. Everything else in the home — auth, config, plugins — is still shared from the user's real home by symlink, so the agent does not need its own login.
-- **To carry existing local memory in**, copy it into the store once: `cp -R ~/.hermes/memories/. "<profile dir>/hermes-state/<agent-id>/default/"`. To wipe an agent's memory, delete that directory.
-- **Conversation history is covered too, in a separate store.** Hermes keeps every ACP session in `<HERMES_HOME>/state.db`, which the overlay links to a per-conversation store at `<profile dir>/hermes-sessions/<agent-id>/<hermes-profile>/<issue-id | chat_\<chat-session-id\>>/`, so a follow-up turn resumes the actual transcript. The shard is per conversation rather than per agent on purpose: tasks of one conversation run one after another, so a shard has a single writer at a time, while two issues never share a database. A host that cannot create the link (Windows without symlink privileges) keeps the database task-local instead, untouched — the link is proven creatable before anything is moved, and a copy is never used, because a copied SQLite database would absorb the turn's writes into a file the next task discards.
-- **Concurrent tasks of one agent are last-writer-wins.** Hermes rewrites its memory files whole, so two tasks writing memory at the same time can overwrite each other.
-- **Every Hermes agent gets the overlay in practice**, so every one of them gets a persistent memory store. The daemon builds the overlay only when a task carries skills, but the server appends Multica's built-in skills to every agent's skill set (`LoadAgentSkillBundles`), so that list is never empty — leaving an agent's own skill list empty does not opt out of the overlay, and is not a way to keep using the host's `~/.hermes/memories`.
-
-`MULTICA_CLAUDE_ARGS`, `MULTICA_CODEX_ARGS`, `MULTICA_CODEBUDDY_ARGS`, `MULTICA_QWEN_ARGS`, and `MULTICA_QWENPAW_ARGS` are parsed with POSIX shellword quoting, so values such as `--model "gpt-5.1 codex" --sandbox read-only` are split like a shell command line. Agent arguments are applied in this order: hardcoded Multica defaults, daemon-wide env defaults, then per-agent `custom_args` from the task.
+The daemon launches MiniMax Code as `mcode acp` and writes the task brief to `AGENTS.md`. MCode owns model selection and currently advertises `loadSession: false`; Multica therefore starts a fresh MCode session when a later run cannot load the saved session.
 
 ### Self-Hosted Server
 
@@ -1034,50 +1012,6 @@ always at least this value, so raising it takes effect across all commands.
 ```bash
 MULTICA_HTTP_TIMEOUT=60s multica issue list
 ```
-
-### Stall detection (skill commands)
-
-A total-elapsed timeout punishes the transfer that is working: a large skill
-arriving steadily over a slow link is cut off mid-body, while a dead connection
-is held open for the full budget. The `skill` commands therefore fail on a lack
-of *progress* instead:
-
-- A read that receives no bytes for **15 seconds** fails immediately, reported
-  as a stalled transfer rather than a timeout.
-- A transfer that keeps producing bytes runs to completion, however long it
-  takes, behind a loose **10 minute** whole-request ceiling.
-
-Override the no-progress budget with `MULTICA_HTTP_STALL_TIMEOUT` (same format
-as `MULTICA_HTTP_TIMEOUT`). If only `MULTICA_HTTP_TIMEOUT` is set it applies on
-this path too, as the no-progress budget — it keeps meaning "the longest I will
-wait for this server", not "the longest this download may take".
-
-```bash
-MULTICA_HTTP_STALL_TIMEOUT=45s multica skill get <id>
-```
-
-Every other command still uses the total-elapsed timeout above. Stall detection
-starts here because skill payloads are the largest responses the CLI reads; the
-mechanism itself is not skill-specific.
-
-### Skill payload size
-
-`multica skill get` and `multica skill files list` return **metadata only** by
-default — path, byte size and content hash for each file, plus the size and
-hash of the SKILL.md body. Sizes are what tell you which file makes a skill
-large, and they stay available no matter how large it gets.
-
-Pass `--with-content` when you actually need the bodies:
-
-```bash
-multica skill files list <id>                  # paths and sizes
-multica skill files list <id> --with-content   # bodies inlined
-```
-
-On the API, both endpoints accept `?include=content` and `?include=metadata`.
-A request that sends neither still gets `content`, on both endpoints, so a
-server upgrade never changes what an un-upgraded client receives — it is the
-CLI that asks for the smaller shape.
 
 ### Custom runtime compatibility targets
 

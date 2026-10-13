@@ -105,14 +105,8 @@ ws_sessions AS (
 ws_agents AS (
     SELECT id FROM agent WHERE workspace_id = $1
 ),
-ws_skills AS (
-    SELECT id FROM skill WHERE workspace_id = $1
-),
 cleared_agent_label_assignments AS (
     DELETE FROM agent_to_label WHERE agent_id IN (SELECT id FROM ws_agents)
-),
-cleared_skill_label_assignments AS (
-    DELETE FROM skill_to_label WHERE skill_id IN (SELECT id FROM ws_skills)
 ),
 cleared_channel_task_deliveries AS (
     DELETE FROM channel_task_delivery WHERE installation_id IN (SELECT id FROM ws_installations)

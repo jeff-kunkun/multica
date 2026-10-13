@@ -231,10 +231,6 @@
         "label": "前往运行时",
         "description": "打开运行时配置。"
       },
-      "goSkills": {
-        "label": "前往 Skills",
-        "description": "打开 skill 库。"
-      },
       "goSettings": {
         "label": "前往设置",
         "description": "打开工作区设置。"
@@ -415,10 +411,8 @@
   },
   "labels": {
     "title": "标签",
-    "description": "任务标签与 skill 标签互相独立。",
     "scopes": {
-      "issue": "任务",
-      "skill": "Skill"
+      "issue": "任务"
     },
     "search_placeholder": "按名称或描述筛选...",
     "new_label": "新建标签",
