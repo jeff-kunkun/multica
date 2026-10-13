@@ -115,7 +115,9 @@ func TestWakeupLoopBetweenRulesPausesTheRule(t *testing.T) {
 		t.Fatalf("run chain = %v", stored.Chain)
 	}
 	finishWakeupRuns(t, f, a.ID)
-	// The third pass through A without a person in between is a loop.
+	// The third pass through A without a person in between is a loop. An
+	// issue runs one task at a time, so the reviewer's first run has ended.
+	f.Exec(t, "UPDATE agent_task_queue SET status='completed', completed_at=now() WHERE id=$1", once)
 	again := run(`{"wakeup_id":"` + util.UUIDToString(b.ID) + `","wakeup_chain":` + chain(a.ID, b.ID, a.ID, b.ID) + `}`)
 	f.Comment(t, util.UUIDToString(issue), "round two", testutil.Cols{"author_type": "agent", "author_id": reviewer, "source_task_id": again})
 	got = wakeTick(t, f, s, a.ID)

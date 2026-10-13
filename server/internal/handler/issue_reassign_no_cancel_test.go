@@ -53,7 +53,8 @@ func TestUpdateIssueReassignDoesNotCancelActiveTasks(t *testing.T) {
 
 	issueID := insertAgentAssignedIssue(t, ownerAgent, 92110, "reassign-no-cancel")
 	ownerTask := insertRunningIssueTask(t, ownerAgent, issueID)
-	mentionTask := insertRunningIssueTask(t, mentionAgent, issueID)
+	// One run per issue: the other agent's run is queued behind the owner's.
+	mentionTask := insertIssueTaskWithStatus(t, mentionAgent, issueID, "queued")
 
 	// Reassign from ownerAgent to a member — a genuine assignee change that
 	// does not itself enqueue a new agent run.
@@ -71,7 +72,7 @@ func TestUpdateIssueReassignDoesNotCancelActiveTasks(t *testing.T) {
 	if got := taskStatus(t, ownerTask); got != "running" {
 		t.Fatalf("previous assignee's own task must survive reassignment, got status %q", got)
 	}
-	if got := taskStatus(t, mentionTask); got != "running" {
+	if got := taskStatus(t, mentionTask); got != "queued" {
 		t.Fatalf("unrelated agent's task must survive reassignment (no collateral cancel), got status %q", got)
 	}
 }
@@ -89,7 +90,8 @@ func TestBatchUpdateIssueReassignDoesNotCancelActiveTasks(t *testing.T) {
 
 	issueID := insertAgentAssignedIssue(t, ownerAgent, 92111, "batch-reassign-no-cancel")
 	ownerTask := insertRunningIssueTask(t, ownerAgent, issueID)
-	mentionTask := insertRunningIssueTask(t, mentionAgent, issueID)
+	// One run per issue: the other agent's run is queued behind the owner's.
+	mentionTask := insertIssueTaskWithStatus(t, mentionAgent, issueID, "queued")
 
 	w := httptest.NewRecorder()
 	req := newRequest("POST", "/api/issues/batch-update", map[string]any{
@@ -107,7 +109,7 @@ func TestBatchUpdateIssueReassignDoesNotCancelActiveTasks(t *testing.T) {
 	if got := taskStatus(t, ownerTask); got != "running" {
 		t.Fatalf("previous assignee's own task must survive batch reassignment, got status %q", got)
 	}
-	if got := taskStatus(t, mentionTask); got != "running" {
+	if got := taskStatus(t, mentionTask); got != "queued" {
 		t.Fatalf("unrelated agent's task must survive batch reassignment, got status %q", got)
 	}
 }

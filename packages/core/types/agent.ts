@@ -109,30 +109,9 @@ export type AgentRuntime = RuntimeDevice;
 // from the single source of truth.
 export const RUNTIME_PROFILE_PROTOCOL_FAMILIES = [
   "claude",
-  "codebuddy",
   "codex",
-  "copilot",
   "opencode",
-  "codearts",
-  "deveco",
-  "openclaw",
-  "hermes",
-  "pi",
-  "cursor",
-  "kimi",
-  "reasonix",
-  "dsh",
-  "dim",
-  "kiro",
   "antigravity",
-  "qoder",
-  "qoderclicn",
-  "traecli",
-  "grok",
-  "qwen",
-  "qwenpaw",
-  "mcode",
-  "zeroclaw",
 ] as const;
 
 export type RuntimeProtocolFamily =
@@ -140,7 +119,6 @@ export type RuntimeProtocolFamily =
 
 export const RUNTIME_PROFILE_RUNTIME_TYPES = [
   ...RUNTIME_PROFILE_PROTOCOL_FAMILIES,
-  "omp",
 ] as const;
 export type RuntimeProfileType = (typeof RUNTIME_PROFILE_RUNTIME_TYPES)[number];
 

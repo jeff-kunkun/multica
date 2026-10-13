@@ -77,6 +77,8 @@ import type {
   TimelineEntry,
   User,
   WebhookDelivery,
+  WorkspaceBot,
+  WorkspaceBotWithSecrets,
   WorkspaceMcpServer,
 } from "../types";
 import type { CloudRuntimeNode } from "../runtimes/cloud-runtime";
@@ -3335,6 +3337,50 @@ export const EMPTY_WORKSPACE_MCP_SERVER: WorkspaceMcpServer = {
   created_at: "",
   updated_at: "",
 };
+
+// Project-manager Bots. Secrets (token, webhook_secret) appear only on the
+// create / rotate replies; a malformed field falls back instead of failing
+// the whole list.
+export const WorkspaceBotSchema = z
+  .object({
+    id: z.string().default(""),
+    workspace_id: z.string().default(""),
+    user_id: z.string().default(""),
+    name: z.string().default(""),
+    can_release: z.boolean().catch(false).default(false),
+    webhook_url: z.string().catch("").default(""),
+    webhook_failures: z.number().int().nonnegative().catch(0).default(0),
+    webhook_last_error: z.string().catch("").default(""),
+    token_prefix: z.string().nullish().catch(null).transform((v) => v ?? null),
+    token_last_used_at: z.string().nullish().catch(null).transform((v) => v ?? null),
+    created_at: z.string().catch("").default(""),
+  })
+  .loose();
+
+export const WorkspaceBotListSchema = z.array(WorkspaceBotSchema);
+
+export const WorkspaceBotWithSecretsSchema = WorkspaceBotSchema.and(
+  z.object({
+    token: z.string().optional().catch(undefined),
+    webhook_secret: z.string().optional().catch(undefined),
+  }),
+);
+
+export const EMPTY_WORKSPACE_BOT: WorkspaceBotWithSecrets = {
+  id: "",
+  workspace_id: "",
+  user_id: "",
+  name: "",
+  can_release: false,
+  webhook_url: "",
+  webhook_failures: 0,
+  webhook_last_error: "",
+  token_prefix: null,
+  token_last_used_at: null,
+  created_at: "",
+};
+
+export const EMPTY_WORKSPACE_BOT_LIST: WorkspaceBot[] = [];
 
 // Share links. Introduced with the workspace share-link invite flow; schemas
 // mirror the API responses so malformed payloads fall back to safe defaults.

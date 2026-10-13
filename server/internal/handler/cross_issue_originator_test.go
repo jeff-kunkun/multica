@@ -218,6 +218,11 @@ func triggerCommentOf(t *testing.T, taskID string) string {
 
 func runTo(t *testing.T, taskID string) {
 	t.Helper()
+	// An issue runs one task at a time, so the run that woke this one has ended.
+	dbfx.Exec(t, `
+		UPDATE agent_task_queue SET status = 'completed', completed_at = now()
+		WHERE issue_id = (SELECT issue_id FROM agent_task_queue WHERE id = $1)
+		  AND id <> $1 AND status IN ('dispatched', 'running', 'waiting_local_directory')`, taskID)
 	dbfx.Exec(t, `UPDATE agent_task_queue SET status = 'running' WHERE id = $1`, taskID)
 }
 

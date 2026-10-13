@@ -151,13 +151,7 @@ describe("AgentOverviewPane MCP tab visibility", () => {
   it.each([
     ["Claude", "claude"],
     ["Codex", "codex"],
-    ["Cursor", "cursor"],
-    ["Hermes", "hermes"],
-    ["Kimi", "kimi"],
-    ["Kiro", "kiro"],
     ["OpenCode", "opencode"],
-    ["OpenClaw", "openclaw"],
-    ["Oh My Pi", "omp"],
   ])("renders the MCP tab when the agent runs on the %s runtime", (_label, provider) => {
     renderPane([makeRuntime(provider)]);
     openCapabilities();

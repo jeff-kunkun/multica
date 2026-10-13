@@ -34,9 +34,9 @@ func TestOpenCodeV2RefusesSynthesizedMCPWithoutAgentConfig(t *testing.T) {
 		t.Skip("fake CLI is a shell script")
 	}
 
-	// What a task with integration or plugin-hook tools contributes. The agent
+	// What a task with plugin-hook tools contributes. The agent
 	// itself has nothing configured: base is nil.
-	overlay := json.RawMessage(`{"mcpServers":{"composio-github":{"type":"remote","url":"https://example.invalid/mcp","headers":{"Authorization":"Bearer FAKE-WIRING-TOKEN"}}}}`)
+	overlay := json.RawMessage(`{"mcpServers":{"plugin-github":{"type":"remote","url":"https://example.invalid/mcp","headers":{"Authorization":"Bearer FAKE-WIRING-TOKEN"}}}}`)
 	composed, err := mergeTaskRemoteMCPConfig(nil, overlay)
 	if err != nil {
 		t.Fatalf("merge task remote MCP config: %v", err)

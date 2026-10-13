@@ -41,6 +41,73 @@ username/password/email in `/opt/multica-main/.env` turn on password login;
 reset behind the team's shared authenticator code. Secrets live only in that
 `.env` (mode 600).
 
+## Mirror to the kun-line instance
+
+People who stay on ai.ferryway.cc keep working with Kun there as before; the
+work itself happens here. The office backend (`server/internal/mirror`)
+keeps one workspace here and Kun's `kunkunya` workspace on ai.ferryway.cc in
+step through both servers' public APIs, every 20 seconds. Nothing is changed
+on the kun line.
+
+Out (here → there): projects; issues (title, description, status, priority,
+parent, project); comments. A person's comment starts with their name
+(`Kun：`), an agent's with its coding CLI (`Codex：`, `Claude Code：`).
+Mentions become plain text. A deleted issue or project becomes cancelled
+there; a deleted comment is removed.
+
+Back (there → here), when `MULTICA_MIRROR_LOCAL_TOKEN` is set:
+
+- comments on the copies, posted here as Kun and starting with the speaker's
+  name (`Allen：这里再看下`), threaded under the matching comment. They wake
+  the issue's assignee like any comment; an `@agent` mention there becomes a
+  mention of the agent with the same name here.
+- issues created there, or open ones held by Kun or an agent there. They are
+  created here with the same-named agent as assignee (else Kun), then the
+  original there is handed to Kun like every copy.
+- status changes on the copies, unless the issue also changed here since the
+  last pass; then this side wins.
+
+No echo: every copied or pulled object is a row in `mirror_link`, and
+nothing linked, and nothing Kun writes there, is pulled back. Deleting a
+pulled comment here leaves the original alone. The pull's position on the
+target is kept in the same table, so a restart resumes; the first pull only
+records where the target is now, so nothing older is pulled.
+
+No runs start there. Every copy is assigned to Kun as a member with the
+reviewer set to none, and issues are created in backlog before their real
+status is set. People can still `@` an agent or assign one there, so turn
+off work for every agent in `kunkunya` (agent settings → work, or
+`multica agent update <id> --work-enabled=false` against that server); a
+disabled agent refuses even a mention, and the pull brings the request here.
+
+Setup, once:
+
+1. On ai.ferryway.cc, create a personal access token as Kun. Note the
+   `kunkunya` workspace id and Kun's member user id there. Turn off work for
+   the `kunkunya` agents.
+2. Here, create a personal access token as Kun for the pull.
+3. Add to `/opt/multica-main/.env` and redeploy:
+
+```bash
+MULTICA_MIRROR_WORKSPACE=<office workspace slug>
+MULTICA_MIRROR_TARGET_URL=https://ai.ferryway.cc
+MULTICA_MIRROR_TARGET_TOKEN=mul_...
+MULTICA_MIRROR_TARGET_WORKSPACE=<kunkunya workspace id>
+MULTICA_MIRROR_TARGET_ASSIGNEE=<Kun's user id there>
+MULTICA_MIRROR_LOCAL_TOKEN=mul_...   # optional: turns on the pull back
+# MULTICA_MIRROR_LOCAL_URL defaults to http://127.0.0.1:$PORT
+```
+
+Any of the first five unset means off. The log shows `mirror enabled ...
+pull=true` at start, `mirror: copy failed` / `mirror: pull failed` for
+anything refused; failures retry on the next pass. Run only one office
+backend with the mirror on.
+
+Removing it: delete `server/internal/mirror`, its block in
+`server/cmd/server/main.go`, the `MULTICA_MIRROR_*` lines in
+`docker-compose.selfhost.yml`, and drop the `mirror_link` table. Nothing
+else refers to it.
+
 ## Operating
 
 ```bash

@@ -162,20 +162,10 @@ type acpDeliverableCase struct {
 	camelUpdates bool
 }
 
-// acpDeliverableCases covers every backend sharing acpDeliverableTracker.
-var acpDeliverableCases = []acpDeliverableCase{
-	{backend: "hermes", binary: "hermes", notification: "session/update"},
-	{backend: "kimi", binary: "kimi", notification: "session/update"},
-	{backend: "reasonix", binary: "reasonix", notification: "session/update"},
-	{backend: "dim", binary: "dim", notification: "session/update"},
-	{backend: "zeroclaw", binary: "zeroclaw", notification: "session/update"},
-	{backend: "traecli", binary: "traecli", notification: "session/update"},
-	{backend: "grok", binary: "grok", notification: "session/update"},
-	{backend: "mcode", binary: "mcode", notification: "session/update"},
-	{backend: "kiro", binary: "kiro-cli", notification: "session/notification", camelUpdates: true},
-	{backend: "qoder", binary: "qodercli", notification: "session/notification", camelUpdates: true},
-	{backend: "qoderclicn", binary: "qoderclicn", notification: "session/notification", camelUpdates: true},
-}
+// acpDeliverableCases is empty: the office build no longer ships the ACP
+// backends that shared acpDeliverableTracker. The loop stays so a future
+// engine that reuses the tracker can be added back as one row.
+var acpDeliverableCases = []acpDeliverableCase{}
 
 const (
 	acpDeliverableNarration  = "I will read the diagram first."

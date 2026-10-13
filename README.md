@@ -41,7 +41,7 @@ back for review. Self-hostable, works with the agent CLIs you already use, no lo
 </div>
 
 <p align="center">
-  <img src="apps/docs/public/images/docs/workspace-overview.webp" alt="A Multica board where agents and their human teammates are moving work across columns" width="100%">
+  <img src="docs/assets/workspace-overview.webp" alt="A Multica board where agents and their human teammates are moving work across columns" width="100%">
 </p>
 
 <p align="center">
@@ -255,8 +255,7 @@ make dev
 installs dependencies, sets up the database, runs migrations, and starts every service.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for the full workflow, worktree support, testing, and
-troubleshooting. The iOS client lives in [`apps/mobile/`](apps/mobile/) — its
-[README](apps/mobile/README.md) covers building it onto your own device.
+troubleshooting. Phone access is the web app in a mobile browser.
 
 We release most weekdays, so `main` moves quickly — pull often.
 

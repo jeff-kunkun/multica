@@ -454,14 +454,14 @@ func TestCreateComment_WorkerAgentCommentWakesPrivateSquadLeader_MUL4015(t *test
 			uuidToString(workerOriginator), workerOriginator.Valid, testUserID)
 	}
 
+	// Complete the leader task first: an issue runs one task at a time.
+	if _, err := testPool.Exec(ctx, `UPDATE agent_task_queue SET status = 'completed' WHERE id = $1`, leaderTaskID); err != nil {
+		t.Fatalf("complete leader task: %v", err)
+	}
 	// Flip the worker task to running so it can post a comment as an
 	// authenticated agent.
 	if _, err := testPool.Exec(ctx, `UPDATE agent_task_queue SET status = 'running' WHERE id = $1`, workerTaskID); err != nil {
 		t.Fatalf("advance worker task to running: %v", err)
-	}
-	// Complete the leader task so it stops showing as pending.
-	if _, err := testPool.Exec(ctx, `UPDATE agent_task_queue SET status = 'completed' WHERE id = $1`, leaderTaskID); err != nil {
-		t.Fatalf("complete leader task: %v", err)
 	}
 
 	// Now the worker posts a "done" comment. This must wake the private

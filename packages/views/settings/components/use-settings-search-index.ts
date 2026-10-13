@@ -195,6 +195,11 @@ export function useSettingsSearchIndex(
         title: t(($) => $.page.tabs.mcp),
         description: t(($) => $.mcp.description),
       },
+      {
+        tab: "bots",
+        title: t(($) => $.page.tabs.bots),
+        description: t(($) => $.bots.description),
+      },
     ];
     // Rows without an anchor describe a whole page: fold their copy into the
     // page entry so each page is indexed once, with its description.

@@ -7,9 +7,9 @@ describe("docsLocalePrefix", () => {
     ["en", ""],
     [undefined, ""],
     ["zh-Hans", "/zh"],
-    ["ja", "/ja"],
-    ["ko", "/ko"],
-    ["fr", "/fr"],
+    ["ja", ""],
+    ["ko", ""],
+    ["fr", ""],
   ])("maps %s to %j", (language, expected) => {
     expect(docsLocalePrefix(language)).toBe(expected);
   });

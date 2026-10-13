@@ -317,6 +317,15 @@ func TestListWorkspaceWorkingAgents(t *testing.T) {
 		"member",
 		testUserID,
 	)
+	// An issue runs one task at a time, so the autopilot run gets its own
+	// issue with the same relations as assignedIssueID.
+	autopilotIssueID := insertIssue(
+		"working-agent-autopilot",
+		"member",
+		testUserID,
+		"member",
+		testUserID,
+	)
 	ownedAgentIssueID := insertIssue(
 		"working-agent-owned-agent",
 		"agent",
@@ -386,7 +395,7 @@ func TestListWorkspaceWorkingAgents(t *testing.T) {
 		{workingAgentID, "running", ownedLeaderSquadIssueID, nil, nil},
 		{workingAgentID, "running", ownedMemberSquadIssueID, nil, nil},
 		{workingAgentID, "running", nil, chatSessionID, nil},
-		{workingAgentID, "running", assignedIssueID, nil, autopilotRunID},
+		{workingAgentID, "running", autopilotIssueID, nil, autopilotRunID},
 		{workingAgentID, "running", nil, nil, nil},
 		{queuedAgentID, "queued", nil, nil, nil},
 	} {
@@ -427,6 +436,7 @@ func TestListWorkspaceWorkingAgents(t *testing.T) {
 			wantCount: 9,
 			wantIssueIDs: []string{
 				assignedIssueID,
+				autopilotIssueID,
 				ownedAgentIssueID,
 				outsideIssueID,
 				directMemberSquadIssueID,
@@ -451,7 +461,7 @@ func TestListWorkspaceWorkingAgents(t *testing.T) {
 			name:         "autopilot",
 			query:        "?type=autopilot",
 			wantCount:    1,
-			wantIssueIDs: []string{assignedIssueID},
+			wantIssueIDs: []string{autopilotIssueID},
 		},
 		{name: "chat", query: "?type=chat", wantCount: 1, wantIssueIDs: []string{}},
 		{

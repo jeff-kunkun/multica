@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"os"
 	"sort"
@@ -486,9 +487,12 @@ func TestListTasksByIssueFamilyScopeReportsTruncation(t *testing.T) {
 	}
 	f := newFamilyFixture(t)
 
-	// Exactly at the cap: a full page is not a truncated one.
-	for i := 0; i < familyActiveRunCap; i++ {
-		f.task(t, f.childA, "running")
+	// Exactly at the cap: a full page is not a truncated one. An issue runs one
+	// task at a time, so the runs are spread over siblings in the family.
+	f.task(t, f.childA, "running")
+	for i := 1; i < familyActiveRunCap; i++ {
+		sibling := dbfx.Issue(t, fmt.Sprintf("family-child-%d", i), testutil.Cols{"parent_issue_id": f.parentID})
+		f.task(t, sibling, "running")
 	}
 	full := runsResponse(t, f.childA, "scope=family").Want(http.StatusOK)
 	if got := full.Header().Get(HeaderActiveRunsTruncated); got != "" {

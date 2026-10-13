@@ -13,10 +13,7 @@
   // reads as "unused" from inside its own workspace.
   "include": ["files", "dependencies", "unlisted"],
 
-  // Go, and a workspace with its own Expo toolchain, lint pipeline, and React
-  // version (see apps/mobile/CLAUDE.md). Neither is covered by this config.
-  "ignoreWorkspaces": ["apps/mobile"],
-
+  // Go lives outside the pnpm graph and is not covered by this config.
   "workspaces": {
     ".": {
       "entry": ["scripts/*.mjs"],
@@ -39,8 +36,6 @@
       // knip follows `extends` from the default tsconfig.json only.
       "ignoreDependencies": ["@multica/tsconfig"]
     },
-
-    "apps/docs": {},
 
     // The three shared packages export raw .ts/.tsx compiled by their
     // consumers (CLAUDE.md "Project Shape"), so `entry` names only the config

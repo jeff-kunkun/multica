@@ -55,21 +55,24 @@ func TestIssueTableWorkingAgentsFacetCountsOnlyEligibleRuns(t *testing.T) {
 		"autopilot_id": autopilotID, "source": "manual", "status": "running",
 	})
 
-	// Two tasks on the same issue are two runs, not one distinct issue.
-	for range 2 {
-		dbfx.Task(t, agentID, testutil.Cols{"runtime_id": testRuntimeID, "issue_id": issueID, "status": "running"})
+	// An issue runs one task at a time, so every running task below gets its
+	// own issue in the project.
+	projectIssue := func() string {
+		return dbfx.Issue(t, "working facet run", testutil.Cols{"project_id": projectID})
 	}
+	dbfx.Task(t, agentID, testutil.Cols{"runtime_id": testRuntimeID, "issue_id": issueID, "status": "running"})
+	dbfx.Task(t, agentID, testutil.Cols{"runtime_id": testRuntimeID, "issue_id": projectIssue(), "status": "running"})
 	for _, excludedID := range []string{archivedID, systemID, foreignAgentID} {
-		dbfx.Task(t, excludedID, testutil.Cols{"runtime_id": testRuntimeID, "issue_id": issueID, "status": "running"})
+		dbfx.Task(t, excludedID, testutil.Cols{"runtime_id": testRuntimeID, "issue_id": projectIssue(), "status": "running"})
 	}
 	for _, status := range []string{"queued", "dispatched", "completed", "failed", "cancelled"} {
 		statusIssueID := dbfx.Issue(t, "working facet "+status, testutil.Cols{"project_id": projectID})
 		dbfx.Task(t, agentID, testutil.Cols{"runtime_id": testRuntimeID, "issue_id": statusIssueID, "status": status})
 	}
 	for _, cols := range []testutil.Cols{
-		{"issue_id": issueID, "chat_session_id": chatID},
-		{"issue_id": issueID, "autopilot_run_id": runID},
-		{"issue_id": issueID, "chat_session_id": chatID, "autopilot_run_id": runID},
+		{"issue_id": projectIssue(), "chat_session_id": chatID},
+		{"issue_id": projectIssue(), "autopilot_run_id": runID},
+		{"issue_id": projectIssue(), "chat_session_id": chatID, "autopilot_run_id": runID},
 		{"issue_id": foreignIssueID},
 		{}, // Quick-create work has no issue yet.
 	} {
@@ -99,7 +102,6 @@ func TestIssueTableWorkingAgentsFacetCountsOnlyEligibleRuns(t *testing.T) {
 func TestIssueTableWorkingAgentsFacetVisibility(t *testing.T) {
 	memberID := dbfx.User(t, "working facet member", "working-facet-member@multica.test")
 	dbfx.Member(t, testWorkspaceID, memberID, "member")
-	issueID := dbfx.Issue(t, "working facet visibility")
 	privateID := dbfx.Agent(t, "working facet private", "")
 	ownedID := dbfx.Agent(t, "working facet member-owned", "", testutil.Cols{"owner_id": memberID})
 	workspaceID := dbfx.Agent(t, "working facet workspace", "", testutil.Cols{"permission_mode": "public_to"})
@@ -116,6 +118,7 @@ func TestIssueTableWorkingAgentsFacetVisibility(t *testing.T) {
 	}
 	all := map[string]int64{}
 	for _, id := range []string{privateID, ownedID, workspaceID, allowedID, deniedID} {
+		issueID := dbfx.Issue(t, "working facet visibility")
 		dbfx.Task(t, id, testutil.Cols{"runtime_id": testRuntimeID, "issue_id": issueID, "status": "running"})
 		all[id] = 1
 	}

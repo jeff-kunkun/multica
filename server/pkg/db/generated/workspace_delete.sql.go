@@ -247,6 +247,18 @@ deleted_issues AS (
 deleted_labels AS (
     DELETE FROM issue_label WHERE issue_label.workspace_id = $1
 ),
+deleted_plans AS (
+    DELETE FROM plan WHERE plan.workspace_id = $1
+),
+deleted_plan_approvers AS (
+    DELETE FROM plan_approver WHERE plan_approver.workspace_id = $1
+),
+deleted_workspace_bots AS (
+    DELETE FROM workspace_bot WHERE workspace_bot.workspace_id = $1
+),
+deleted_bot_events AS (
+    DELETE FROM bot_event WHERE bot_event.workspace_id = $1
+),
 deleted_properties AS (
     DELETE FROM issue_property WHERE issue_property.workspace_id = $1
 ),

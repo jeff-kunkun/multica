@@ -16,6 +16,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/auth"
+	"github.com/multica-ai/multica/server/internal/botevents"
 	"github.com/multica-ai/multica/server/internal/daemonws"
 	"github.com/multica-ai/multica/server/internal/database"
 	"github.com/multica-ai/multica/server/internal/dbreader"
@@ -25,6 +26,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/logger"
 	"github.com/multica-ai/multica/server/internal/maintenance"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
+	"github.com/multica-ai/multica/server/internal/mirror"
 	"github.com/multica-ai/multica/server/internal/profiling"
 	"github.com/multica-ai/multica/server/internal/realtime"
 	"github.com/multica-ai/multica/server/internal/scheduler"
@@ -538,6 +540,7 @@ func main() {
 	registerSubscriberListeners(bus, pool)
 	registerActivityListeners(bus, queries)
 	registerNotificationListeners(bus, queries)
+	botevents.Register(bus, queries)
 
 	metricsConfig := obsmetrics.ConfigFromEnv()
 	var metricsServer *http.Server
@@ -665,6 +668,20 @@ func main() {
 		go telemetryWorker.Run(sweepCtx)
 	}
 	go runDelegatedFailureRecoverySweeper(sweepCtx, taskSvc)
+	if cfg, ok := mirror.ConfigFromEnv(); ok {
+		src, err := mirror.NewPGSource(sweepCtx, pool, cfg.Workspace, cfg.TargetURL+"#"+cfg.TargetWorkspace)
+		if err != nil {
+			slog.Error("mirror disabled: workspace not found", "workspace", cfg.Workspace, "error", err)
+		} else {
+			remote := mirror.NewHTTPRemote(cfg.TargetURL, cfg.TargetToken, cfg.TargetWorkspace)
+			m := mirror.New(src, remote, cfg.TargetAssignee, cfg.Interval, slog.Default())
+			if cfg.LocalToken != "" {
+				m.EnablePull(mirror.NewHTTPRemote(cfg.LocalURL, cfg.LocalToken, src.WorkspaceID()), cfg.TargetWorkspace)
+			}
+			slog.Info("mirror enabled", "workspace", cfg.Workspace, "target", cfg.TargetURL, "pull", cfg.LocalToken != "")
+			go m.Run(sweepCtx)
+		}
+	}
 	// Seven-day runtime retention does not share the 30-second liveness tick:
 	// its bounded transactions run independently once per hour, so a slow GC
 	// round cannot delay offline detection or task recovery.
@@ -678,6 +695,7 @@ func main() {
 		go runAutopilotQuotaReconciler(autopilotCtx, autopilotSvc)
 	}
 	go runDBStatsLogger(sweepCtx, "primary", pool)
+	go botevents.NewDeliverer(queries).Run(sweepCtx)
 	if replicaPool != nil {
 		go runDBStatsLogger(sweepCtx, "replica", replicaPool)
 	}

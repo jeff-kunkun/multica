@@ -30,18 +30,10 @@ export interface RuntimeCatalogSections {
 // the catalog builder) share the single source of truth.
 export const RUNTIME_TYPES = RUNTIME_PROFILE_RUNTIME_TYPES;
 
-// A runtime id is its own label for every target whose product name is just
-// the id — `capitalize` at the render site turns "claude" into "Claude". Only
-// targets whose product name differs from the stored id need an entry here.
-const RUNTIME_TYPE_LABELS: Partial<Record<RuntimeProfileType, string>> = {
-  omp: "Oh-My-Pi",
-};
-
-// runtimeTypeLabel is what the user should read for a runtime target. Every
-// surface that shows one goes through it, so the picker and the profile it
-// creates cannot disagree about what the target is called.
+// runtimeTypeLabel is what the user should read for a runtime target. The
+// remaining engines use their stored id; the render site capitalizes it.
 export function runtimeTypeLabel(runtimeType: string): string {
-  return RUNTIME_TYPE_LABELS[runtimeType as RuntimeProfileType] ?? runtimeType;
+  return runtimeType;
 }
 
 // profileRuntimeType is the target a profile was created against. Profiles

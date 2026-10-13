@@ -2999,6 +2999,16 @@ func (s *TaskService) broadcastChatCancelFinalized(ctx context.Context, task db.
 	})
 }
 
+// errIssueBusyClaim reports a claim that lost the one-run-per-issue race.
+var errIssueBusyClaim = errors.New("issue already has an active task")
+
+const oneActiveTaskPerIssueIndex = "agent_task_queue_one_active_per_issue_idx"
+
+func isIssueBusyClaimConflict(err error) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && pgErr.Code == "23505" && pgErr.ConstraintName == oneActiveTaskPerIssueIndex
+}
+
 // ClaimTask atomically claims the next queued task for an agent on its current
 // runtime, respecting max_concurrent_tasks.
 func (s *TaskService) ClaimTask(ctx context.Context, agentID pgtype.UUID) (*db.AgentTaskQueue, error) {
@@ -3074,6 +3084,13 @@ func (s *TaskService) claimTask(ctx context.Context, agentID, runtimeID pgtype.U
 				outcome = "no_tasks"
 				return nil
 			}
+			if isIssueBusyClaimConflict(err) {
+				// Another runtime claimed a task for the same issue in parallel.
+				// The aborted transaction must roll back; the next poll sees the
+				// issue busy and skips it.
+				outcome = "issue_busy"
+				return errIssueBusyClaim
+			}
 			outcome = "error_claim"
 			return fmt.Errorf("claim task: %w", err)
 		}
@@ -3103,6 +3120,9 @@ func (s *TaskService) claimTask(ctx context.Context, agentID, runtimeID pgtype.U
 		claimed = &claimedTask
 		return nil
 	})
+	if errors.Is(err, errIssueBusyClaim) {
+		return nil, nil
+	}
 	if err != nil {
 		if outcome == "unknown" {
 			outcome = "error_transaction"

@@ -354,6 +354,7 @@ func TestPlatformSkillDescriptionNamesEveryDomain(t *testing.T) {
 	triggerWords := map[string]string{
 		"references/issues.md":       "issue",
 		"references/mentions.md":     "mention",
+		"references/plans.md":        "plan",
 		"references/agents.md":       "agent",
 		"references/squads.md":       "squad",
 		"references/autopilots.md":   "autopilot",
@@ -426,6 +427,7 @@ func TestPlatformSkillCoversPlatformContracts(t *testing.T) {
 				// The router's whole job: name every domain and its file.
 				"references/issues.md",
 				"references/mentions.md",
+				"references/plans.md",
 				"references/agents.md",
 				"references/squads.md",
 				"references/autopilots.md",
@@ -607,6 +609,17 @@ func TestPlatformSkillCoversPlatformContracts(t *testing.T) {
 				// the brief's "two bounded reads, never one bulk pull".
 				"multica issue comment list <issue-id> --output json",
 				"--recent 10",
+			},
+		},
+		{
+			file: "references/plans.md",
+			want: []string{
+				"Nothing in a plan starts until an approver approves it",
+				"--out-of-scope",
+				"@mention one member to say what can\nbe cut",
+				"an agent cannot approve\nits own plan",
+				"At most one agent run is active on an issue",
+				"multica plan approve <issue>",
 			},
 		},
 		{
