@@ -1,0 +1,9 @@
+[Unit]
+Description=Update the kun-main Multica instance to the tip of kun-main
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+EnvironmentFile=-/etc/multica-main/autoupdate.env
+ExecStart=/opt/multica-main/scripts/kun-main/autoupdate.sh

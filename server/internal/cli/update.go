@@ -33,6 +33,10 @@ const ChecksumManifestName = "checksums.txt"
 
 const defaultReleaseAPIBaseURL = "https://api.github.com"
 
+// ReleaseRepo is where kun-main publishes CLI builds. It is deliberately not
+// jeff-kunkun/multica: colleagues on the kun line update from there.
+const ReleaseRepo = "kkunkunya/multica-main-release"
+
 // MULTICA_RELEASE_API_BASE_URL points at a GitHub Releases API-compatible
 // mirror. MULTICA_RELEASE_DOWNLOAD_BASE_URL points at an artifact mirror
 // serving /<tag>/<asset-name>; when unset, the release-provided URLs win.
@@ -254,7 +258,7 @@ func verifyAssetSHA256(data []byte, expectedHex, assetName string) error {
 
 func fetchReleaseByTag(tag string) (*GitHubRelease, error) {
 	client := &http.Client{Timeout: 10 * time.Second}
-	req, err := http.NewRequest(http.MethodGet, releaseAPIBaseURL()+"/repos/multica-ai/multica/releases/tags/"+url.PathEscape(tag), nil)
+	req, err := http.NewRequest(http.MethodGet, releaseAPIBaseURL()+"/repos/"+ReleaseRepo+"/releases/tags/"+url.PathEscape(tag), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -280,7 +284,7 @@ func fetchReleaseByTag(tag string) (*GitHubRelease, error) {
 // FetchLatestRelease fetches the latest release tag from the multica GitHub repo.
 func FetchLatestRelease() (*GitHubRelease, error) {
 	client := &http.Client{Timeout: 10 * time.Second}
-	req, err := http.NewRequest(http.MethodGet, releaseAPIBaseURL()+"/repos/multica-ai/multica/releases/latest", nil)
+	req, err := http.NewRequest(http.MethodGet, releaseAPIBaseURL()+"/repos/"+ReleaseRepo+"/releases/latest", nil)
 	if err != nil {
 		return nil, err
 	}

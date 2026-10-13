@@ -125,3 +125,36 @@ Workspace-scoped queries filter by `workspace_id`; membership gates access and `
 - Do not add internal compatibility shims, dual writes, fallback paths, or legacy adapters unless requested. This does not relax API response compatibility above.
 - New global pre-workspace routes use a single word or `/{noun}/{verb}`, not hyphenated root names. Update `server/internal/handler/reserved_slugs.json`, run `pnpm generate:reserved-slugs`, and commit `packages/core/paths/reserved-slugs.ts` when changing reserved slugs.
 - Use atomic conventional commits and the repository PR template. For releases, follow [.github/RELEASING.md](.github/RELEASING.md); default to a patch bump unless specified otherwise.
+
+## 本线规矩（kun-main）
+
+This checkout is `kun-main`: the official multica-ai/multica main plus Kun's
+office changes. It is a separate line from `kun` (jeff-kunkun/multica's older
+custom line) and must stay that way.
+
+Branches
+- Cut task branches from `origin/kun-main`; open PRs against `kun-main`.
+- Never push to, merge into, or open PRs against `kun`, `release`, or `main`.
+- Never change the ai.ferryway.cc instance or anything under `/opt/multica`
+  on its host; that is the kun line.
+
+Releases
+- Server and web: merging to `kun-main` is the release. The
+  `build-kun-main.yml` job in `kkunkunya/multica-image-builder` builds
+  `ghcr.io/kkunkunya/multica-main-{backend,web}:sha-<sha>`, and the instance at
+  https://office.ferryway.cc deploys the tip on its own. See
+  `docs/kun-main/instance.md`.
+- CLI and Desktop: publish only to `kkunkunya/multica-main-release`. Never to
+  `jeff-kunkun/multica` Releases or image-builder Releases — colleagues'
+  clients update from those and would get kun-main builds.
+- Client defaults (CLI server URL, Desktop runtime config, update feeds) point
+  at office.ferryway.cc and multica-main-release; keep them there.
+
+Migrations
+- Keep upstream numbering: a new migration takes the next number after the
+  highest one on `origin/kun-main`, so upstream merges stay conflict-free.
+- Kun-main's own migrations: 573 (password login).
+- Compressing migrations into a baseline is DENE-2018's job; do not do it ad hoc.
+
+Fork changes stay small: prefer a minimal patch over porting kun-line code
+wholesale, and delete removed features outright instead of hiding them.

@@ -984,6 +984,38 @@ export class ApiClient {
     });
   }
 
+  async loginWithPassword(username: string, password: string): Promise<LoginResponse> {
+    return this.fetch("/auth/login", {
+      method: "POST",
+      body: JSON.stringify({ username, password }),
+    });
+  }
+
+  async signupWithPassword(
+    username: string,
+    password: string,
+    email?: string,
+    totp?: string,
+  ): Promise<LoginResponse> {
+    const trimmedEmail = email?.trim() ?? "";
+    return this.fetch("/auth/signup", {
+      method: "POST",
+      body: JSON.stringify({
+        username,
+        password,
+        ...(trimmedEmail ? { email: trimmedEmail } : {}),
+        ...(totp ? { totp } : {}),
+      }),
+    });
+  }
+
+  async resetPassword(username: string, totp: string, newPassword: string): Promise<void> {
+    await this.fetch("/auth/reset-password", {
+      method: "POST",
+      body: JSON.stringify({ username, totp, new_password: newPassword }),
+    });
+  }
+
   async googleLogin(code: string, redirectUri: string): Promise<LoginResponse> {
     return this.fetch("/auth/google", {
       method: "POST",

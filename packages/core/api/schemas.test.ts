@@ -1250,6 +1250,20 @@ describe("dashboard + runtime usage schema drift", () => {
   });
 });
 
+describe("AppConfigSchema signup_totp_required drift", () => {
+  it.each([
+    [undefined, false],
+    ["yes", false],
+    [true, true],
+  ])("%j parses as %s", (value, expected) => {
+    const parsed = AppConfigSchema.parse({
+      cdn_domain: "cdn.example.com",
+      signup_totp_required: value,
+    });
+    expect(parsed.signup_totp_required).toBe(expected);
+  });
+});
+
 // A server that never heard of worktree mode also never sends this flag, and
 // it does not reject the mode either — it drops execution_mode and answers 201,
 // leaving the task to run in the user's working copy (#7113). So the absent
