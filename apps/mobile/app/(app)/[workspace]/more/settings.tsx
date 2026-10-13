@@ -1,6 +1,8 @@
 /**
- * Settings page — account info, workspace switching, appearance, profile and
- * notifications subscreens, and sign out.
+ * Settings page — account info, workspace switching, appearance, profile
+ * subscreen, and sign out. Only what a person must set is listed (DENE-2009):
+ * notifications go to the group through the Bot, and linked workspaces show
+ * only while an offer waits for an answer. Both screens stay reachable by link.
  *
  * Inherits the responsibilities the old More tab carried (account row,
  * workspace list, sign-out button) now that the More tab is gone and global
@@ -8,7 +10,7 @@
  *
  * Subscreens push under more/settings/:
  *   - more/settings/profile        — edit name + avatar
- *   - more/settings/notifications  — per-group inbox + system toggles
+ *   - more/settings/notifications  — per-group inbox + system toggles (unlisted)
  *
  * Theme picker stays inline (3 fixed options, fits in one section).
  */
@@ -17,6 +19,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
 import { useQuery } from "@tanstack/react-query";
 import { runtimeListOptions } from "@/data/queries/runtimes";
+import { workspaceLinksOptions } from "@/data/queries/workspace-links";
 import { runtimeDisplayName } from "@multica/core/runtimes/display";
 import type { Workspace } from "@multica/core/types";
 import { Text } from "@/components/ui/text";
@@ -96,10 +99,11 @@ export default function SettingsPage() {
   };
 
   const goProfile = () => router.push(`/${currentSlug}/more/settings/profile`);
-  const goNotifications = () =>
-    router.push(`/${currentSlug}/more/settings/notifications`);
-
   const wsId = useWorkspaceStore((s) => s.currentWorkspaceId);
+  const linksQuery = useQuery(workspaceLinksOptions(wsId));
+  const pendingLinks = (linksQuery.data?.links ?? []).filter(
+    (link) => link.side === "viewer" && link.status === "pending",
+  ).length;
   const runtimesQuery = useQuery({ ...runtimeListOptions(wsId), refetchInterval: 5000 });
   const machines = new Map<string, NonNullable<typeof runtimesQuery.data>[number]>();
   for (const runtime of runtimesQuery.data ?? []) {
@@ -131,16 +135,11 @@ export default function SettingsPage() {
           title={user?.name ?? "—"}
           subtitle={user?.email}
         />
-        <Separator />
-        <NavRow
-          onPress={goNotifications}
-          chevronColor={mutedFg}
-          title={t("notifications.title")}
-          subtitle={t("account.notifications_subtitle")}
-        />
       </SectionGroup>
 
-      <SectionGroup title={tw("links.tab.title")}><NavRow title={tw("links.tab.title")} subtitle={tw("links.tab.description")} chevronColor={mutedFg} onPress={() => { if (currentSlug) router.push({ pathname: "/[workspace]/workspace-links", params: { workspace: currentSlug } }); }} /></SectionGroup>
+      {pendingLinks > 0 ? (
+        <SectionGroup title={tw("links.tab.title")}><NavRow title={tw("links.tab.title")} subtitle={tw("links.tab.description")} chevronColor={mutedFg} onPress={() => { if (currentSlug) router.push({ pathname: "/[workspace]/workspace-links", params: { workspace: currentSlug } }); }} /></SectionGroup>
+      ) : null}
 
       <SectionGroup title={t("account.workspaces")}>
         {isLoading ? (

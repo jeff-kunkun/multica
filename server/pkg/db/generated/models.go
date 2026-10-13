@@ -491,6 +491,22 @@ type BotActionConfirmation struct {
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 }
 
+type BotConnectRequest struct {
+	ID            pgtype.UUID        `json:"id"`
+	Code          string             `json:"code"`
+	ClaimHash     string             `json:"claim_hash"`
+	BotName       string             `json:"bot_name"`
+	BotType       string             `json:"bot_type"`
+	WebhookSecret []byte             `json:"webhook_secret"`
+	Status        string             `json:"status"`
+	WorkspaceID   pgtype.UUID        `json:"workspace_id"`
+	ApprovedBy    pgtype.UUID        `json:"approved_by"`
+	BotID         pgtype.UUID        `json:"bot_id"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+	DecidedAt     pgtype.Timestamptz `json:"decided_at"`
+	ExpiresAt     pgtype.Timestamptz `json:"expires_at"`
+}
+
 type BotWake struct {
 	BotID               pgtype.UUID        `json:"bot_id"`
 	WebhookSecret       []byte             `json:"webhook_secret"`

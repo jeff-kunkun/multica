@@ -437,7 +437,7 @@
       "project_sharing": "Permissions & sharing",
       "workspace_links": "Linked workspaces",
       "agent_permissions": "Agent permissions",
-      "bots": "External bots",
+      "bots": "Group chat & Bots",
       "overview": "Overview"
     },
     "groups": {
@@ -2268,10 +2268,9 @@
   },
   "bots": {
     "title": "External bots",
-    "description": "Give an external bot a key with your own access; it uses the multica CLI to read and update issues and chats.",
-    "add": "Add bot",
+    "description": "Once connected, a Bot uses the multica CLI to read and update tasks and chat in the group, with the power of the person who agreed.",
     "empty": "No bots yet",
-    "empty_hint": "Adding one gives you setup text to paste to the bot.",
+    "empty_hint": "Send the sentence above to your Bot. It sends back a link; agree once and it's connected.",
     "load_failed": "Couldn't load bots. Refresh the page to try again.",
     "type": {
       "grok": "Grok"
@@ -2291,19 +2290,6 @@
     "stop": "Stop",
     "delete": "Delete",
     "cancel": "Cancel",
-    "expiry": {
-      "never": "Never expires",
-      "365": "1 year"
-    },
-    "add_dialog": {
-      "title": "Add bot",
-      "name": "Name",
-      "name_placeholder": "e.g. Multica Steward",
-      "type": "Type",
-      "expiry": "Key expires",
-      "submit": "Create key",
-      "submitting": "Creating…"
-    },
     "key_dialog": {
       "title": "Setup text for {{name}}",
       "description": "Copy all of it to the bot. The key is shown only once; after closing you can only issue a new one.",
@@ -2476,6 +2462,13 @@
       "ack_over_limit": "Up to 100 at a time.",
       "toast_acked": "{{count}} marked as seen and removed from pending",
       "refresh": "Rescan"
+    },
+    "connect": {
+      "title": "Let a Bot connect itself",
+      "description": "Copy this sentence to your Bot. It sends back a link; agree once and it's connected — no key to handle.",
+      "copy": "Copy for the Bot",
+      "copied": "Copied — send it to your Bot",
+      "instruction": "Please run this on your machine: {{command}}\nThen send me the link it prints; once I agree, you're connected."
     }
   },
   "overview": {

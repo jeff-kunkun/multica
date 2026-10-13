@@ -1,15 +1,15 @@
 "use client";
 
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Check, ChevronRight, Copy, MoreHorizontal } from "lucide-react";
 import { toast } from "sonner";
 import type { ExternalBot, ExternalBotKeyResponse } from "@multica/core/types";
 import { useWorkspaceId } from "@multica/core/hooks";
+import { useConfigStore } from "@multica/core/config";
 import { useCurrentMember } from "@multica/core/permissions";
 import {
   externalBotListOptions,
-  useCreateExternalBot,
   useDeleteExternalBot,
   useExternalBotSetupText,
   useRotateExternalBotKey,
@@ -18,16 +18,7 @@ import {
 import { cn } from "@multica/ui/lib/utils";
 import { copyText } from "@multica/ui/lib/clipboard";
 import { Button, buttonVariants } from "@multica/ui/components/ui/button";
-import { Input } from "@multica/ui/components/ui/input";
-import { Label } from "@multica/ui/components/ui/label";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@multica/ui/components/ui/select";
 import {
   Dialog,
   DialogContent,
@@ -59,14 +50,15 @@ import { SettingsCard, SettingsRow, SettingsSection, SettingsTab } from "./setti
 import { resolveSettingsLocation, settingsHref } from "./settings-navigation";
 import { BotWakePage } from "./bot-wake-page";
 
-const EXPIRY_KEYS = ["never", "365"] as const;
-type Expiry = (typeof EXPIRY_KEYS)[number];
 type Confirm = { kind: "stop" | "rotate" | "delete"; bot: ExternalBot };
 
-// External bots (DENE-1788): a workspace admin adds a bot (Grok, ...) and
-// hands it a key with the admin's own power plus the setup text to paste.
+// External bots (DENE-1788): a Bot (Grok, ...) works with the power of the
+// admin who let it in. Since DENE-2009 the admin only copies one sentence to
+// the Bot; the Bot asks to connect, the admin agrees once, and the key goes
+// straight to the Bot — no key is ever shown here.
 // The nav entry is admin-only; the server enforces the same gate.
-export function BotsTab() {
+// `lead` renders above the list (settings puts "what goes to my Bot" there).
+export function BotsTab({ lead }: { lead?: ReactNode } = {}) {
   const { t } = useT("settings");
   const locale = useLocale();
   const wsId = useWorkspaceId();
@@ -79,7 +71,6 @@ export function BotsTab() {
   const href = (integration?: string) =>
     settingsHref(navigation.pathname, navigation.searchParams, "bots", { integration });
 
-  const create = useCreateExternalBot(wsId);
   const rotate = useRotateExternalBotKey(wsId);
   const stop = useStopExternalBot(wsId);
   const remove = useDeleteExternalBot(wsId);
@@ -100,9 +91,6 @@ export function BotsTab() {
     }
   };
 
-  const [adding, setAdding] = useState(false);
-  const [name, setName] = useState("");
-  const [expiry, setExpiry] = useState<Expiry>("never");
   const [issued, setIssued] = useState<ExternalBotKeyResponse | null>(null);
   const [copied, setCopied] = useState(false);
   const [confirm, setConfirm] = useState<Confirm | null>(null);
@@ -110,11 +98,18 @@ export function BotsTab() {
   const fail = (e: unknown) =>
     toast.error(e instanceof Error && e.message ? e.message : t(($) => $.bots.toast_failed));
 
-  const expiryItems = EXPIRY_KEYS.map((value) => ({
-    value,
-    label: t(($) => $.bots.expiry[value]),
-  }));
-  const typeItems = [{ value: "grok", label: t(($) => $.bots.type.grok) }];
+  const serverUrl =
+    useConfigStore((s) => s.daemonServerUrl) || (typeof window !== "undefined" ? window.location.origin : "");
+  const connectText = t(($) => $.bots.connect.instruction, {
+    command: `multica bot connect --server-url ${serverUrl} --name Grok`,
+  });
+  const copyConnect = async () => {
+    if (await copyText(connectText)) {
+      toast.success(t(($) => $.bots.connect.copied));
+    } else {
+      toast.error(t(($) => $.bots.toast_failed));
+    }
+  };
 
   const fmtDate = (iso: string) => {
     const d = new Date(iso);
@@ -131,31 +126,6 @@ export function BotsTab() {
       hour: "2-digit",
       minute: "2-digit",
     });
-
-  const closeAdd = () => {
-    setAdding(false);
-    setName("");
-    setExpiry("never");
-  };
-
-  const submitAdd = () => {
-    const trimmed = name.trim();
-    if (!trimmed || create.isPending) return;
-    create.mutate(
-      {
-        name: trimmed,
-        type: "grok",
-        expires_in_days: expiry === "365" ? 365 : undefined,
-      },
-      {
-        onSuccess: (res) => {
-          closeAdd();
-          setIssued(res);
-        },
-        onError: fail,
-      },
-    );
-  };
 
   const runConfirm = async () => {
     if (!confirm) return;
@@ -250,14 +220,24 @@ export function BotsTab() {
       title={t(($) => $.bots.title)}
       description={t(($) => $.bots.description)}
       scope="workspace"
-      actions={
-        bots.length > 0 ? (
-          <Button size="sm" onClick={() => setAdding(true)}>
-            {t(($) => $.bots.add)}
-          </Button>
-        ) : null
-      }
     >
+      {lead}
+      <SettingsSection>
+        <SettingsCard>
+          <SettingsRow label={t(($) => $.bots.connect.title)} description={t(($) => $.bots.connect.description)}>
+            <Button size="sm" className="min-h-11 sm:min-h-8" onClick={() => void copyConnect()}>
+              <Copy className="size-4" />
+              {t(($) => $.bots.connect.copy)}
+            </Button>
+          </SettingsRow>
+          <pre
+            data-testid="bot-connect-text"
+            className="mx-4 mb-3.5 min-w-0 overflow-auto rounded-md border bg-muted/50 px-3 py-2 font-mono text-caption leading-5 whitespace-pre-wrap break-all select-all"
+          >
+            {connectText}
+          </pre>
+        </SettingsCard>
+      </SettingsSection>
       <SettingsSection>
         {isLoading ? (
           <SettingsCard>
@@ -276,11 +256,7 @@ export function BotsTab() {
               label={isError ? t(($) => $.bots.load_failed) : t(($) => $.bots.empty)}
               description={isError ? undefined : t(($) => $.bots.empty_hint)}
             >
-              {isError ? null : (
-                <Button size="sm" onClick={() => setAdding(true)}>
-                  {t(($) => $.bots.add)}
-                </Button>
-              )}
+              {null}
             </SettingsRow>
           </SettingsCard>
         ) : (
@@ -371,80 +347,6 @@ export function BotsTab() {
           </SettingsCard>
         )}
       </SettingsSection>
-
-      <Dialog open={adding} onOpenChange={(v) => { if (!v) closeAdd(); }}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>{t(($) => $.bots.add_dialog.title)}</DialogTitle>
-          </DialogHeader>
-          <form
-            className="space-y-4"
-            onSubmit={(e) => {
-              e.preventDefault();
-              submitAdd();
-            }}
-          >
-            <div className="space-y-1.5">
-              <Label htmlFor="bot-name">{t(($) => $.bots.add_dialog.name)}</Label>
-              <Input
-                id="bot-name"
-                autoFocus
-                autoComplete="off"
-                maxLength={60}
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                placeholder={t(($) => $.bots.add_dialog.name_placeholder)}
-              />
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-1.5">
-                <Label>{t(($) => $.bots.add_dialog.type)}</Label>
-                <Select items={typeItems} value="grok">
-                  <SelectTrigger className="w-full" aria-label={t(($) => $.bots.add_dialog.type)}>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {typeItems.map((item) => (
-                      <SelectItem key={item.value} value={item.value}>
-                        {item.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-1.5">
-                <Label>{t(($) => $.bots.add_dialog.expiry)}</Label>
-                <Select
-                  items={expiryItems}
-                  value={expiry}
-                  onValueChange={(v) => { if (v) setExpiry(v as Expiry); }}
-                >
-                  <SelectTrigger className="w-full" aria-label={t(($) => $.bots.add_dialog.expiry)}>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {expiryItems.map((item) => (
-                      <SelectItem key={item.value} value={item.value}>
-                        {item.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-            <DialogFooter>
-              <Button type="button" variant="outline" onClick={closeAdd}>
-                {t(($) => $.bots.cancel)}
-              </Button>
-              <Button type="submit" disabled={!name.trim() || create.isPending}>
-                {create.isPending
-                  ? t(($) => $.bots.add_dialog.submitting)
-                  : t(($) => $.bots.add_dialog.submit)}
-              </Button>
-            </DialogFooter>
-          </form>
-        </DialogContent>
-      </Dialog>
 
       <Dialog open={!!issued} onOpenChange={(v) => { if (!v) closeIssued(); }}>
         <DialogContent className="sm:max-w-2xl">

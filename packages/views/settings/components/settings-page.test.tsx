@@ -175,13 +175,13 @@ describe("SettingsPage Plugin feature flag", () => {
     expect(screen.getByText("AccountTab")).toBeInTheDocument();
   });
 
-  it("shows and mounts Plugins when explicitly enabled", () => {
+  it("opens Plugins from a link when enabled, without listing it (DENE-2009)", () => {
     navigationState.search = "tab=plugins";
     configStore.getState().setFeatureFlags({ [PLUGINS_V1_FLAG]: true });
 
     renderWithI18n(<SettingsPage />);
 
-    expect(screen.getByRole("link", { name: "Plugins" })).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Plugins" })).not.toBeInTheDocument();
     expect(screen.getByText("PluginsTab")).toBeInTheDocument();
   });
 });
@@ -199,7 +199,7 @@ describe("SettingsPage workspace subscription feature flag", () => {
     expect(screen.getByText("WorkspaceTab")).toBeInTheDocument();
   });
 
-  it("shows and mounts Billing only when explicitly enabled", () => {
+  it("opens Billing from a link only when enabled, without listing it", () => {
     navigationState.search = "tab=billing";
     configStore.getState().setFeatureFlags({
       [BILLING_WORKSPACE_SUBSCRIPTIONS_FLAG]: true,
@@ -207,33 +207,45 @@ describe("SettingsPage workspace subscription feature flag", () => {
 
     renderWithI18n(<SettingsPage />);
 
-    expect(screen.getByRole("link", { name: "Billing" })).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Billing" })).not.toBeInTheDocument();
     expect(screen.getByText("BillingTab")).toBeInTheDocument();
   });
 });
 
 describe("SettingsPage information architecture", () => {
-  it("groups pages by who they affect, then by topic", () => {
+  it("lists only what a person must set: keep or delete, nothing in between (DENE-2009)", () => {
     renderWithI18n(<SettingsPage />);
     const personal = within(nav()).getByRole("region", { name: /Personal/ });
-    expect(within(personal).getByRole("link", { name: "Preferences" })).toBeInTheDocument();
-    expect(within(personal).getByRole("link", { name: "API Tokens" })).toBeInTheDocument();
+    expect(
+      within(personal)
+        .getAllByRole("link")
+        .map((link) => link.textContent?.trim()),
+    ).toEqual(["Profile", "Preferences"]);
 
     // The workspace group is named after the workspace it configures.
     const workspace = within(nav()).getByRole("region", { name: /Acme/ });
-    const issues = within(workspace).getByRole("group", { name: "Issues & workflow" });
     expect(
-      within(issues).getByRole("link", { name: "Issue Statuses" }),
-    ).toBeInTheDocument();
-    expect(
-      within(workspace).getByRole("link", { name: "Export & import" }),
-    ).toBeInTheDocument();
-    const connections = within(workspace).getByRole("group", {
-      name: "Connections & extensions",
-    });
-    for (const name of ["Code", "Messaging", "MCP servers"]) {
-      expect(within(connections).getByRole("link", { name })).toBeInTheDocument();
+      within(workspace)
+        .getAllByRole("link")
+        .map((link) => link.textContent?.trim()),
+    ).toEqual(["General", "Members", "Group chat & Bots", "Code"]);
+    for (const name of [
+      "API Tokens",
+      "Notifications",
+      "Labels",
+      "Issue Statuses",
+      "Export & import",
+      "Messaging",
+      "MCP servers",
+    ]) {
+      expect(within(nav()).queryByRole("link", { name })).not.toBeInTheDocument();
     }
+  });
+
+  it("still opens a deleted page from an old link", () => {
+    navigationState.search = "tab=labels";
+    renderWithI18n(<SettingsPage />);
+    expect(screen.getByText("LabelsTab")).toBeInTheDocument();
   });
 
   it("keeps retired pages out of navigation", () => {
@@ -271,18 +283,11 @@ describe("SettingsPage information architecture", () => {
     );
   });
 
-  it("lists Connected apps with the personal pages only when Composio is available", () => {
-    const first = renderWithI18n(<SettingsPage />);
-    expect(screen.queryByRole("link", { name: "Connected apps" })).toBeNull();
-    first.unmount();
-
+  it("still lands an app-connection return link on Connected apps", () => {
     shell.appsAvailable = true;
     navigationState.search = "tab=integrations&connected=notion";
     renderWithI18n(<SettingsPage />);
-    const personal = within(nav()).getByRole("region", { name: /Personal/ });
-    expect(
-      within(personal).getByRole("link", { name: "Connected apps" }),
-    ).toHaveAttribute("aria-current", "page");
+    expect(screen.queryByRole("link", { name: "Connected apps" })).toBeNull();
     expect(screen.getByText("ConnectedAppsTab")).toBeInTheDocument();
   });
 
@@ -293,12 +298,12 @@ describe("SettingsPage information architecture", () => {
     expect(
       within(general).getByLabelText("Only owners and admins can change this"),
     ).toBeInTheDocument();
-    // Labels stay editable for every member, so they carry no lock.
-    const labels = screen.getByRole("link", { name: "Labels" });
-    expect(within(labels).queryByLabelText(/Only owners/)).toBeNull();
+    // Personal pages are the member's own, so they carry no lock.
+    const preferences = screen.getByRole("link", { name: "Preferences" });
+    expect(within(preferences).queryByLabelText(/Only owners/)).toBeNull();
   });
 
-  it("places platform settings in a device group", () => {
+  it("lists device pages the system cannot decide, and only opens hidden ones from a link", () => {
     renderWithI18n(
       <SettingsPage
         extraDeviceTabs={[
@@ -308,6 +313,13 @@ describe("SettingsPage information architecture", () => {
             icon: () => null,
             content: <div>Device updates</div>,
           },
+          {
+            value: "server",
+            label: "Server",
+            icon: () => null,
+            content: <div>Device server</div>,
+            hidden: true,
+          },
         ]}
       />,
     );
@@ -315,6 +327,7 @@ describe("SettingsPage information architecture", () => {
     expect(
       within(device).getByRole("link", { name: "Updates" }),
     ).toBeInTheDocument();
+    expect(within(device).queryByRole("link", { name: "Server" })).toBeNull();
   });
 
   it("navigates from the compact selector and clears the old detail", () => {
@@ -378,10 +391,10 @@ describe("SettingsPage search", () => {
     renderWithI18n(<SettingsPage />);
     const input = screen.getByRole("searchbox", { name: "Search settings" });
 
-    fireEvent.change(input, { target: { value: "slack" } });
+    fireEvent.change(input, { target: { value: "time zone" } });
     fireEvent.keyDown(input, { key: "Enter" });
     expect(push).toHaveBeenCalledWith(
-      "/acme/settings?tab=channels&integration=slack",
+      "/acme/settings?tab=preferences&section=timezone",
     );
 
     fireEvent.keyDown(input, { key: "Escape" });

@@ -711,6 +711,20 @@ export interface ExternalBotKeyResponse {
   setup_text: string;
 }
 
+// A Bot asking to connect (DENE-2009): it starts without a key, a workspace
+// owner or admin agrees once, and the Bot collects its own key.
+export type BotConnectStatus = "pending" | "approved" | "claimed" | "denied" | "expired";
+
+export interface BotConnectInfo {
+  code: string;
+  bot_name: string;
+  bot_type: ExternalBotType;
+  status: BotConnectStatus;
+  receives_push: boolean;
+  expires_at: string;
+  workspace_id?: string;
+}
+
 // Decisions that need you go to your own Bot (DENE-1933). `state` is computed
 // by the server: none (no Bot), unverified (waiting for the Bot to confirm),
 // ok, or broken (Bot stopped / key invalid / webhook removed: decisions are

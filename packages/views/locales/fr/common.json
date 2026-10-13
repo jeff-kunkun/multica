@@ -246,5 +246,28 @@
     "cancel_keep": "Conserver la tâche",
     "cancel_confirm": "Annuler la tâche",
     "cancel_confirm_related": "Annuler et arrêter le travail associé"
+  },
+  "bot_connect": {
+    "page_title": "Connecter un bot",
+    "loading": "Chargement de la demande…",
+    "needs_auth": "Connectez-vous à Multica, puis acceptez.",
+    "sign_in": "Se connecter",
+    "ask": "« {{bot}} » souhaite se connecter à votre espace de travail.",
+    "explain": "Une fois accepté, il suit le groupe, répond pour vous et reçoit ce qui demande votre décision. Aucune clé à copier ; vous pouvez l'arrêter à tout moment dans « Discussion de groupe et bots ».",
+    "code_hint": "Code {{code}} : vérifiez qu'il correspond à celui affiché par le bot.",
+    "workspace_label": "Espace de travail à connecter",
+    "approve": "Accepter",
+    "deny": "Refuser",
+    "done_title": "« {{bot}} » est connecté à {{workspace}}",
+    "done_description": "Vous pouvez fermer cette page ; le bot termine le reste seul.",
+    "denied_title": "Vous avez refusé cette demande.",
+    "expired_title": "Cette demande a expiré. Demandez au bot de recommencer.",
+    "error_title": "Connexion impossible",
+    "error_missing_code": "Le lien ne contient pas de code. Demandez au bot de le renvoyer.",
+    "error_not_found": "Cette demande n'existe pas. Demandez au bot de recommencer.",
+    "error_not_admin": "Seul un propriétaire ou un administrateur de cet espace peut connecter un bot.",
+    "error_closed": "Cette demande a déjà été traitée ou a expiré.",
+    "error_unknown": "Une erreur s'est produite. Réessayez plus tard.",
+    "no_workspace": "Vous n'avez pas encore d'espace de travail. Créez-en un, puis revenez accepter."
   }
 }

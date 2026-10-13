@@ -436,7 +436,7 @@
       "project_sharing": "권한 및 공유",
       "workspace_links": "연결된 워크스페이스",
       "agent_permissions": "에이전트 권한",
-      "bots": "External bots",
+      "bots": "Group chat & Bots",
       "overview": "워크스페이스 개요"
     },
     "groups": {
@@ -2252,10 +2252,9 @@
   },
   "bots": {
     "title": "External bots",
-    "description": "Give an external bot a key with your own access; it uses the multica CLI to read and update issues and chats.",
-    "add": "Add bot",
+    "description": "연결되면 Bot은 multica CLI로 작업을 조회·수정하고 그룹에서 채팅하며, 권한은 허용한 사람과 같습니다.",
     "empty": "No bots yet",
-    "empty_hint": "Adding one gives you setup text to paste to the bot.",
+    "empty_hint": "위 문장을 Bot에게 보내세요. Bot이 링크를 보내면 한 번 허용하면 연결됩니다.",
     "load_failed": "Couldn't load bots. Refresh the page to try again.",
     "type": {
       "grok": "Grok"
@@ -2275,19 +2274,6 @@
     "stop": "Stop",
     "delete": "Delete",
     "cancel": "Cancel",
-    "expiry": {
-      "never": "Never expires",
-      "365": "1 year"
-    },
-    "add_dialog": {
-      "title": "Add bot",
-      "name": "Name",
-      "name_placeholder": "e.g. Multica Steward",
-      "type": "Type",
-      "expiry": "Key expires",
-      "submit": "Create key",
-      "submitting": "Creating…"
-    },
     "key_dialog": {
       "title": "Setup text for {{name}}",
       "description": "Copy all of it to the bot. The key is shown only once; after closing you can only issue a new one.",
@@ -2460,6 +2446,13 @@
       "ack_over_limit": "한 번에 최대 100개입니다.",
       "toast_acked": "{{count}}개를 확인하고 대기에서 뺐습니다",
       "refresh": "다시 스캔"
+    },
+    "connect": {
+      "title": "Bot이 직접 연결하게 하기",
+      "description": "이 문장을 복사해 Bot에게 보내세요. Bot이 링크를 보내면 한 번 \"허용\"으로 연결됩니다. 키를 다룰 필요가 없습니다.",
+      "copy": "Bot용으로 복사",
+      "copied": "복사했습니다. Bot에게 보내세요",
+      "instruction": "당신의 컴퓨터에서 다음을 실행하세요: {{command}}\n출력된 링크를 저에게 보내 주세요. 제가 허용하면 연결됩니다."
     }
   },
   "overview": {

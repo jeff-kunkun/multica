@@ -10,7 +10,6 @@ import { ApiError } from "@multica/core/api";
 
 const roleRef = vi.hoisted(() => ({ current: "owner" as string }));
 const botsRef = vi.hoisted(() => ({ current: [] as unknown[] }));
-const mockCreate = vi.hoisted(() => vi.fn());
 const mockStop = vi.hoisted(() => vi.fn());
 const mockSetupText = vi.hoisted(() => vi.fn());
 const mockCopy = vi.hoisted(() => vi.fn());
@@ -85,6 +84,9 @@ vi.mock("@multica/core/workspace/queries", async (importOriginal) => ({
   agentListOptions: () => ({ queryKey: ["agents"] }),
 }));
 vi.mock("@multica/core/hooks", () => ({ useWorkspaceId: () => "ws-1" }));
+vi.mock("@multica/core/config", () => ({
+  useConfigStore: (sel: (s: { daemonServerUrl: string }) => unknown) => sel({ daemonServerUrl: "https://ai.example.com" }),
+}));
 vi.mock("@multica/core/permissions", () => ({
   useCurrentMember: () => ({ role: roleRef.current }),
 }));
@@ -96,7 +98,6 @@ const mutation = (fn: (arg: unknown) => unknown) => ({
 });
 vi.mock("@multica/core/bots", () => ({
   externalBotListOptions: (_ws: string, enabled: boolean) => ({ queryKey: ["bots"], enabled }),
-  useCreateExternalBot: () => mutation(mockCreate),
   useRotateExternalBotKey: () => mutation(vi.fn()),
   useExternalBotSetupText: () => mutation(mockSetupText),
   useStopExternalBot: () => mutation(mockStop),
@@ -146,20 +147,16 @@ describe("BotsTab", () => {
     logRef.pendingSeen = [];
   });
 
-  it("adds a bot and shows the setup text once", async () => {
-    mockCreate.mockResolvedValue({
-      bot: bot(),
-      token: "mul_secret",
-      setup_text: "multica login --token mul_secret",
-    });
+  it("hands out a key-less connect sentence instead of a key (DENE-2009)", async () => {
+    mockCopy.mockResolvedValue(true);
     renderTab();
-    await userEvent.click(screen.getByRole("button", { name: "Add bot" }));
-    await userEvent.type(screen.getByLabelText("Name"), "Test Bot");
-    await userEvent.click(screen.getByRole("button", { name: "Create key" }));
-    await waitFor(() =>
-      expect(mockCreate).toHaveBeenCalledWith({ name: "Test Bot", type: "grok", expires_in_days: undefined }),
+    expect(screen.queryByRole("button", { name: "Add bot" })).toBeNull();
+    expect(screen.getByTestId("bot-connect-text")).toHaveTextContent(
+      "multica bot connect --server-url https://ai.example.com --name Grok",
     );
-    expect(await screen.findByTestId("bot-setup-text")).toHaveTextContent("multica login --token mul_secret");
+    await userEvent.click(screen.getByRole("button", { name: "Copy for the Bot" }));
+    await waitFor(() => expect(mockCopy).toHaveBeenCalledWith(expect.stringContaining("multica bot connect")));
+    expect(mockCopy.mock.calls[0]?.[0]).not.toContain("mul_");
   });
 
   it("copies the key-less setup text from a bot's menu (DENE-1804)", async () => {
