@@ -660,7 +660,7 @@ func main() {
 	}
 	go runDelegatedFailureRecoverySweeper(sweepCtx, taskSvc)
 	if cfg, ok := mirror.ConfigFromEnv(); ok {
-		src, err := mirror.NewPGSource(sweepCtx, pool, cfg.Workspace, cfg.TargetURL+"#"+cfg.TargetWorkspace)
+		src, err := mirror.NewPGSource(sweepCtx, pool, cfg.Workspace, mirror.TargetKey(cfg.TargetURL, cfg.TargetWorkspace))
 		if err != nil {
 			slog.Error("mirror disabled: workspace not found", "workspace", cfg.Workspace, "error", err)
 		} else {

@@ -129,6 +129,36 @@ sudo systemctl start multica-main-autoupdate.timer
 The password-login bootstrap recreates Kun's account from `.env`; workspaces,
 agents and tokens start over, so log the `office` CLI profile in again.
 
+## Moving the kunkunya workspace in
+
+`server/cmd/movein` copies Kun's `kunkunya` workspace on ai.ferryway.cc into
+the office workspace once: projects as they were (memory and resources),
+every issue done or cancelled with its comments, its old number where free
+and a footer naming the old number, holder and status, and every chat read.
+Nothing is assigned, notified or run; the inbox stays empty. Old agents and
+attachments do not move. It only reads the old server, writes this database
+directly, and running it again skips what already arrived.
+
+Run it on the fresh database, after the office workspace and its agents
+exist (chats go to the agent with the same name, else the same coding CLI)
+and before the `MULTICA_MIRROR_*` lines are set: every moved object is
+recorded as a mirror link to its original, so the mirror never copies them
+back or pushes their new status, and it reads those links only at start.
+`--from` must be the same URL as `MULTICA_MIRROR_TARGET_URL`.
+
+```bash
+# on a machine with Go, for the server's architecture
+cd server && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o movein ./cmd/movein
+# on the server
+docker compose -p multica-main cp movein backend:/tmp/movein
+docker compose -p multica-main exec -e MULTICA_MOVEIN_TOKEN=mul_... backend \
+  /tmp/movein --from https://ai.ferryway.cc --from-workspace kunkunya --to-workspace <office slug>
+```
+
+The token is Kun's personal access token on ai.ferryway.cc. It prints the
+counts as JSON; a run that stops halfway is finished by running it again.
+Once the move is done, delete `server/cmd/movein`.
+
 ## Operating
 
 ```bash

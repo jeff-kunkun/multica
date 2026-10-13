@@ -73,6 +73,12 @@ func ConfigFromEnv() (Config, bool) {
 	return c, ok
 }
 
+// TargetKey names one target in mirror_link: the target server's URL and
+// workspace id. Anything that writes links for a target uses it.
+func TargetKey(targetURL, targetWorkspace string) string {
+	return strings.TrimRight(targetURL, "/") + "#" + targetWorkspace
+}
+
 // Link is one mirror_link row. Inbound marks a local object pulled from the
 // target: the remote one is the original, so it is never written to.
 type Link struct {
