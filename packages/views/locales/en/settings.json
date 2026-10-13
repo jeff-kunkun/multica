@@ -126,9 +126,7 @@
     "issue_fields_title": "Fields shown when creating issues",
     "issue_fields": {
       "field": "Field",
-      "quick": "Create with agent",
-      "manual": "Manual create",
-      "unsupported": "Not available when creating with an agent"
+      "shown": "Shown"
     }
   },
   "shortcuts": {
@@ -942,11 +940,6 @@
     "agent_count_one": "Used by {{count}} agent",
     "agent_count_other": "Used by {{count}} agents",
     "none": "Not assigned to any agent"
-  },
-  "mcp_sources": {
-    "title": "Ways to give agents tools",
-    "current": "This page",
-    "mcp": "Added by admins and shared across the workspace, then assigned per agent."
   },
   "bots": {
     "title": "Bots",

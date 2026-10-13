@@ -71,7 +71,7 @@ const EMPTY_ATTACHMENTS: Attachment[] = [];
 export interface UploadDraftBinding {
   /**
    * Identity for the live-editor registry — unique per composer target
-   * (e.g. `comment:new:{issueId}`, `issue-create:manual`). A reopened
+   * (e.g. `comment:new:{issueId}`, `issue-create`). A reopened
    * composer for the same target registers its editor under the same key,
    * which is how a settle handler finds it.
    */

@@ -176,10 +176,6 @@ vi.mock("@multica/core/inbox/queries", () => ({
     new Set(entries.filter((s) => s.count > 0).map((s) => s.workspace_id)),
 }));
 vi.mock("@multica/core/issues/queries", () => ({ issueDetailOptions: () => ({ queryKey: ["issue"] }) }));
-vi.mock("@multica/core/issues/stores/create-mode-store", () => ({
-  useCreateModeStore: { getState: () => ({ lastMode: "agent" }) },
-  openCreateIssueWithPreference: vi.fn(),
-}));
 vi.mock("@multica/core/issues/stores/draft-store", () => ({ useIssueDraftStore: () => false }));
 vi.mock("@multica/core/modals", () => ({ useModalStore: { getState: () => ({ modal: null, open: vi.fn() }) } }));
 vi.mock("@multica/core/pins/mutations", () => ({ useDeletePin: () => ({ mutate: deletePin }), useReorderPins: () => ({ mutate: vi.fn() }) }));

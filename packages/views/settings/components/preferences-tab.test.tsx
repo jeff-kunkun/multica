@@ -108,7 +108,6 @@ import { useCommentComposerStore } from "@multica/core/issues/stores";
 import { useIssueOpeningStore } from "@multica/core/issues/stores/issue-opening-store";
 import {
   DEFAULT_MANUAL_CREATE_FIELDS,
-  DEFAULT_QUICK_CREATE_FIELDS,
   useIssueCreateSettingsStore,
 } from "@multica/core/issues/stores/issue-create-settings-store";
 
@@ -373,7 +372,6 @@ describe("PreferencesTab — Comments & chat", () => {
 describe("PreferencesTab — Create-issue fields", () => {
   function resetStore() {
     useIssueCreateSettingsStore.setState({
-      quickCreateFields: DEFAULT_QUICK_CREATE_FIELDS,
       manualCreateFields: DEFAULT_MANUAL_CREATE_FIELDS,
     });
   }
@@ -383,34 +381,24 @@ describe("PreferencesTab — Create-issue fields", () => {
     resetStore();
   });
 
-  it("shows one row per field with a column per create dialog", () => {
+  it("shows one checkbox per field", () => {
     render(<PreferencesTab />, { wrapper: I18nWrapper });
     const table = screen.getByRole("table");
-    // 7 fields; quick create supports 3 of them, manual create all 7.
-    expect(within(table).getAllByRole("checkbox")).toHaveLength(10);
+    expect(within(table).getAllByRole("checkbox")).toHaveLength(7);
     expect(
-      within(table).getByRole("checkbox", { name: "Project · Create with agent" }),
+      within(table).getByRole("checkbox", { name: "Status · Shown" }),
     ).toBeChecked();
     expect(
-      within(table).getByRole("checkbox", { name: "Due date · Manual create" }),
+      within(table).getByRole("checkbox", { name: "Due date · Shown" }),
     ).not.toBeChecked();
-    // Unsupported cells explain themselves instead of rendering a dead box.
-    expect(
-      within(table).getAllByLabelText(enSettings.preferences.issue_fields.unsupported),
-    ).toHaveLength(4);
   });
 
-  it("persists each dialog's fields independently", async () => {
+  it("persists the shown fields", async () => {
     const user = userEvent.setup();
     render(<PreferencesTab />, { wrapper: I18nWrapper });
 
-    await user.click(screen.getByRole("checkbox", { name: "Priority · Create with agent" }));
-    await user.click(screen.getByRole("checkbox", { name: "Labels · Manual create" }));
+    await user.click(screen.getByRole("checkbox", { name: "Labels · Shown" }));
 
-    expect(useIssueCreateSettingsStore.getState().quickCreateFields).toEqual([
-      "project",
-      "priority",
-    ]);
     expect(useIssueCreateSettingsStore.getState().manualCreateFields).toEqual([
       "status",
       "priority",

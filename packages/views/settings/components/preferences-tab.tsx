@@ -43,10 +43,8 @@ import {
 } from "@multica/core/issues/stores/issue-opening-store";
 import {
   MANUAL_CREATE_FIELDS,
-  QUICK_CREATE_FIELDS,
   useIssueCreateSettingsStore,
   type ManualCreateField,
-  type QuickCreateField,
 } from "@multica/core/issues/stores/issue-create-settings-store";
 import { api } from "@multica/core/api";
 import { browserTimezone, timezoneOptions } from "../../common/timezone-select";
@@ -349,23 +347,17 @@ function FloatingChatRow() {
 }
 
 /**
- * Which fields each create-issue dialog keeps on its toolbar, as one field ×
- * dialog grid. A field toggled off stays reachable from the dialog's ⋯
- * overflow and re-surfaces while it holds a value, so hiding is never
- * destructive. Quick create supports fewer fields; those cells show a dash.
+ * Which fields the create-issue dialog keeps on its toolbar. A field toggled
+ * off stays reachable from the dialog's ⋯ overflow and re-surfaces while it
+ * holds a value, so hiding is never destructive.
  */
 function IssueFieldsMatrix() {
   const { t } = useT("settings");
-  const quickFields = useIssueCreateSettingsStore((s) => s.quickCreateFields);
-  const setQuickVisible = useIssueCreateSettingsStore(
-    (s) => s.setQuickCreateFieldVisible,
-  );
   const manualFields = useIssueCreateSettingsStore((s) => s.manualCreateFields);
   const setManualVisible = useIssueCreateSettingsStore(
     (s) => s.setManualCreateFieldVisible,
   );
-  const quickLabel = t(($) => $.preferences.issue_fields.quick);
-  const manualLabel = t(($) => $.preferences.issue_fields.manual);
+  const shownLabel = t(($) => $.preferences.issue_fields.shown);
 
   return (
     <SettingsCard>
@@ -376,48 +368,25 @@ function IssueFieldsMatrix() {
               {t(($) => $.preferences.issue_fields.field)}
             </th>
             <th scope="col" className="w-32 px-4 py-2 text-center font-medium">
-              {quickLabel}
-            </th>
-            <th scope="col" className="w-32 px-4 py-2 text-center font-medium">
-              {manualLabel}
+              {shownLabel}
             </th>
           </tr>
         </thead>
         <tbody className="divide-y divide-surface-border">
           {MANUAL_CREATE_FIELDS.map((field: ManualCreateField) => {
             const fieldLabel = t(($) => $.issue.fields[field]);
-            const quickSupported = (QUICK_CREATE_FIELDS as readonly string[]).includes(field);
             return (
               <tr key={field}>
                 <th scope="row" className="px-4 py-2.5 text-left font-normal">
                   {fieldLabel}
                 </th>
                 <td className="px-4 py-2.5 text-center">
-                  {quickSupported ? (
-                    <Checkbox
-                      checked={quickFields.includes(field as QuickCreateField)}
-                      onCheckedChange={(checked) =>
-                        setQuickVisible(field as QuickCreateField, checked === true)
-                      }
-                      aria-label={`${fieldLabel} · ${quickLabel}`}
-                    />
-                  ) : (
-                    <span
-                      className="text-faint-foreground"
-                      aria-label={t(($) => $.preferences.issue_fields.unsupported)}
-                      title={t(($) => $.preferences.issue_fields.unsupported)}
-                    >
-                      —
-                    </span>
-                  )}
-                </td>
-                <td className="px-4 py-2.5 text-center">
                   <Checkbox
                     checked={manualFields.includes(field)}
                     onCheckedChange={(checked) =>
                       setManualVisible(field, checked === true)
                     }
-                    aria-label={`${fieldLabel} · ${manualLabel}`}
+                    aria-label={`${fieldLabel} · ${shownLabel}`}
                   />
                 </td>
               </tr>

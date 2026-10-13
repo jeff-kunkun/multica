@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { ArrowRight, Loader2, Plus, Server } from "lucide-react";
+import { Loader2, Plus, Server } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
@@ -18,7 +18,6 @@ import { Badge } from "@multica/ui/components/ui/badge";
 import { Button } from "@multica/ui/components/ui/button";
 import { useCurrentWorkspace } from "@multica/core/paths";
 import { useCurrentMember } from "@multica/core/permissions";
-import { cn } from "@multica/ui/lib/utils";
 import { workspaceMcpServersOptions } from "@multica/core/workspace/queries";
 import {
   useCreateWorkspaceMcpServer,
@@ -36,8 +35,6 @@ import {
   SettingsSection,
   SettingsTab,
 } from "./settings-layout";
-import { AppLink, useOptionalNavigation } from "../../navigation";
-import { settingsHref } from "./settings-navigation";
 
 /**
  * The workspace MCP server library (GH #6062).
@@ -208,7 +205,6 @@ export function McpTab() {
       {!canManage && !currentMember.isLoading ? (
         <SettingsReadOnlyNotice wsId={wsId} />
       ) : null}
-      <ToolSourcesOverview />
       <SettingsSection
         title={t(($) => $.mcp.servers_title)}
         description={t(($) => $.mcp.write_only_note)}
@@ -348,83 +344,5 @@ export function McpTab() {
         </AlertDialogContent>
       </AlertDialog>
     </SettingsTab>
-  );
-}
-
-/**
- * MCP servers and plugins both give agents outside tools, and they differ in
- * who owns the credential and who can use it. Name both here — the page people
- * look for when they think "MCP" — and link to plugins.
- */
-function ToolSourcesOverview() {
-  const { t } = useT("settings");
-  const navigation = useOptionalNavigation();
-  const tabHref = (tab: string) =>
-    navigation
-      ? settingsHref(navigation.pathname, navigation.searchParams, tab)
-      : `?tab=${tab}`;
-  const sources = [
-    {
-      key: "mcp",
-      icon: Server,
-      title: t(($) => $.page.tabs.mcp),
-      description: t(($) => $.mcp_sources.mcp),
-      href: null,
-    },
-  ];
-  // With nothing to compare against, the explainer would only restate the
-  // page description.
-  if (sources.length < 2) return null;
-  return (
-    <SettingsSection title={t(($) => $.mcp_sources.title)}>
-      <div
-        className="grid overflow-hidden rounded-xl border border-surface-border bg-surface sm:grid-cols-2"
-      >
-        {sources.map((source, index) => {
-          const Icon = source.icon;
-          const body = (
-            <>
-              <span className="flex items-center gap-2 text-body font-medium">
-                <Icon className="size-4 text-muted-foreground" aria-hidden="true" />
-                {source.title}
-                {source.href ? (
-                  <ArrowRight
-                    className="ml-auto size-3.5 text-muted-foreground"
-                    aria-hidden="true"
-                  />
-                ) : (
-                  <span className="ml-auto rounded-full bg-muted px-2 py-0.5 text-micro font-medium text-muted-foreground">
-                    {t(($) => $.mcp_sources.current)}
-                  </span>
-                )}
-              </span>
-              <span className="mt-1.5 block text-caption leading-5 text-muted-foreground">
-                {source.description}
-              </span>
-            </>
-          );
-          const className = cn(
-            "block px-4 py-3.5",
-            index > 0 && "border-t border-surface-border sm:border-l sm:border-t-0",
-          );
-          return source.href ? (
-            <AppLink
-              key={source.key}
-              href={source.href}
-              className={cn(
-                className,
-                "transition-colors hover:bg-surface-hover focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring",
-              )}
-            >
-              {body}
-            </AppLink>
-          ) : (
-            <div key={source.key} className={cn(className, "bg-muted/30")}>
-              {body}
-            </div>
-          );
-        })}
-      </div>
-    </SettingsSection>
   );
 }

@@ -335,7 +335,7 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
     }
     useModalStore
       .getState()
-      .open("quick-create-issue", { agent_id: agent.id });
+      .open("create-issue", { assignee_type: "agent", assignee_id: agent.id });
   };
 
   return (

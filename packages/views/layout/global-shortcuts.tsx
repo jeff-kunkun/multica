@@ -11,7 +11,6 @@ import {
   type ShortcutActionId,
 } from "@multica/core/shortcuts";
 import { useChatStore } from "@multica/core/chat";
-import { openCreateIssueWithPreference } from "@multica/core/issues/stores";
 import { useModalStore } from "@multica/core/modals";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { isImeComposing } from "@multica/core/utils";
@@ -123,7 +122,7 @@ export function GlobalShortcuts() {
         const data = projectMatch
           ? { project_id: projectMatch[1] }
           : undefined;
-        openCreateIssueWithPreference(data);
+        useModalStore.getState().open("create-issue", data ?? null);
         return;
       }
 

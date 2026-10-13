@@ -32,7 +32,6 @@ import type {
 import { isLocalSearchReady, searchIssues, searchProjects } from "@multica/core/search-index";
 import { partitionAggregatedSearchResults } from "@multica/core/search/cancelled-rank";
 import {
-  openCreateIssueWithPreference,
   selectRecentIssues,
   useCommentCollapseStore,
   useRecentIssuesStore,
@@ -436,7 +435,7 @@ export function SearchCommand() {
         icon: Plus,
         keywords: ["new", "issue", "create", "add"],
         onSelect: () => {
-          openCreateIssueWithPreference();
+          useModalStore.getState().open("create-issue");
           setOpen(false);
         },
       },

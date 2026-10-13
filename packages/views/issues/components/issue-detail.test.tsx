@@ -788,14 +788,14 @@ describe("IssueDetail (shared)", () => {
     const branchAction = await screen.findByText("Create sub-issue from here");
     expect(branchAction.closest('[role="menuitem"]')?.querySelector(".lucide-message-square-plus")).toBeInTheDocument();
     fireEvent.click(branchAction);
-    expect(mockOpenModal).toHaveBeenLastCalledWith("quick-create-issue", expect.objectContaining({
+    expect(mockOpenModal).toHaveBeenLastCalledWith("create-issue", expect.objectContaining({
       anchor_comment_id: "source-root",
       parent_issue_id: "issue-1",
     }));
 
     fireEvent.click(menuButton("source-reply")!);
     fireEvent.click(await screen.findByText("Create sub-issue from here"));
-    expect(mockOpenModal).toHaveBeenLastCalledWith("quick-create-issue", expect.objectContaining({
+    expect(mockOpenModal).toHaveBeenLastCalledWith("create-issue", expect.objectContaining({
       anchor_comment_id: "source-reply",
       parent_issue_id: "issue-1",
     }));

@@ -126,9 +126,7 @@
     "issue_fields_title": "创建任务时显示的字段",
     "issue_fields": {
       "field": "字段",
-      "quick": "智能体创建",
-      "manual": "手动创建",
-      "unsupported": "智能体创建时不支持此字段"
+      "shown": "显示"
     }
   },
   "shortcuts": {
@@ -935,11 +933,6 @@
   "mcp_usage": {
     "agent_count_other": "已分配给 {{count}} 个智能体",
     "none": "未分配给任何智能体"
-  },
-  "mcp_sources": {
-    "title": "为智能体接入工具的方式",
-    "current": "当前页面",
-    "mcp": "由管理员添加、在工作区内共享，再按智能体分配。"
   },
   "bots": {
     "title": "Bot",

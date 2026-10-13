@@ -1,7 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { render } from "@testing-library/react";
 import { configureShortcutPlatform } from "@multica/core/shortcuts";
-import { openCreateIssueWithPreference } from "@multica/core/issues/stores";
 import { useRef } from "react";
 import { useChatInputFocus } from "../chat/components/use-chat-input-focus";
 import { GlobalShortcuts } from "./global-shortcuts";
@@ -14,6 +13,7 @@ const h = vi.hoisted(() => ({
   navigation: { pathname: "/acme/issues", push: vi.fn() },
   toggleSidebar: vi.fn(),
   searchToggle: vi.fn(),
+  openModal: vi.fn(),
 }));
 
 vi.mock("@multica/core/chat", () => ({
@@ -22,11 +22,8 @@ vi.mock("@multica/core/chat", () => ({
     { getState: () => h.chat },
   ),
 }));
-vi.mock("@multica/core/issues/stores", () => ({
-  openCreateIssueWithPreference: vi.fn(),
-}));
 vi.mock("@multica/core/modals", () => ({
-  useModalStore: { getState: () => ({ modal: null }) },
+  useModalStore: { getState: () => ({ modal: null, open: h.openModal }) },
 }));
 vi.mock("@multica/core/paths", () => ({
   useWorkspacePaths: () => ({
@@ -91,13 +88,13 @@ describe("chat toggle shortcut", () => {
       key: "c", bubbles: true, cancelable: true,
     }));
     pressCreate();
-    expect(openCreateIssueWithPreference).not.toHaveBeenCalled();
+    expect(h.openModal).not.toHaveBeenCalled();
 
     rerender(<><GlobalShortcuts /><Composer isOpen={false} /></>);
     expect(document.activeElement).toBe(document.body);
     expect(getByTestId("composer").parentElement).toHaveAttribute("inert");
     pressCreate();
-    expect(openCreateIssueWithPreference).toHaveBeenCalledTimes(1);
+    expect(h.openModal).toHaveBeenCalledWith("create-issue", null);
   });
 
   it("toggles the floating window and consumes the chord", () => {

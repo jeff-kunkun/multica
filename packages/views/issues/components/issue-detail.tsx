@@ -1425,7 +1425,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   } : undefined, [canAnnotateDescription, t, descriptionAnnotations.addSelection]);
   const openCommentSubIssue = useCallback((commentId: string) => {
     if (!issue) return;
-    openModal("quick-create-issue", {
+    openModal("create-issue", {
       anchor_comment_id: commentId,
       parent_issue_id: issue.id,
       parent_issue_identifier: issue.identifier,

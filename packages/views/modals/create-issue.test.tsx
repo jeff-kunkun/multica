@@ -38,8 +38,6 @@ const mockListProperties = vi.hoisted(() => vi.fn());
 const mockSetIssueProperty = vi.hoisted(() => vi.fn());
 const mockSetShared = vi.hoisted(() => vi.fn());
 const mockSetManual = vi.hoisted(() => vi.fn());
-const mockSetAgent = vi.hoisted(() => vi.fn());
-const mockSetActiveMode = vi.hoisted(() => vi.fn());
 const mockClearDraft = vi.hoisted(() => vi.fn());
 const mockSetLastAssignee = vi.hoisted(() => vi.fn());
 const mockSetKeepOpen = vi.hoisted(() => vi.fn());
@@ -133,12 +131,6 @@ const emptyIssueDraft = () => ({
     labelIds: [] as string[],
     propertyValues: {} as Record<string, string | number | boolean | string[]>,
   },
-  agent: {
-    prompt: "",
-    actorType: undefined as "agent" | undefined,
-    actorId: undefined as string | undefined,
-  },
-  activeMode: "manual" as "manual" | "agent",
 });
 
 const mockDraftStore = {
@@ -147,16 +139,9 @@ const mockDraftStore = {
   lastAssigneeId: undefined as string | undefined,
   setShared: mockSetShared,
   setManual: mockSetManual,
-  setAgent: mockSetAgent,
-  setActiveMode: mockSetActiveMode,
   clearDraft: mockClearDraft,
   setLastAssignee: mockSetLastAssignee,
   hasDraft: () => false,
-};
-
-const mockQuickCreateStore = {
-  keepOpen: false,
-  setKeepOpen: mockSetKeepOpen,
 };
 
 type ManualCreateField =
@@ -178,6 +163,8 @@ const DEFAULT_MANUAL_FIELDS: ManualCreateField[] = [
 
 const mockCreateSettingsStore = {
   manualCreateFields: DEFAULT_MANUAL_FIELDS as ManualCreateField[],
+  keepOpen: false,
+  setKeepOpen: mockSetKeepOpen,
 };
 
 // The real handle mints an id when it inserts the placeholder and hands it to
@@ -243,11 +230,6 @@ vi.mock("@multica/core/issues/stores/draft-store", () => ({
       (selector ? selector(mockDraftStore) : mockDraftStore),
     { getState: () => mockDraftStore },
   ),
-}));
-
-vi.mock("@multica/core/issues/stores/quick-create-store", () => ({
-  useQuickCreateStore: (selector?: (state: typeof mockQuickCreateStore) => unknown) =>
-    (selector ? selector(mockQuickCreateStore) : mockQuickCreateStore),
 }));
 
 vi.mock("@multica/core/issues/stores/issue-create-settings-store", () => ({
@@ -616,10 +598,10 @@ function renderModal(element: React.ReactElement) {
 describe("CreateIssueModal", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockQuickCreateStore.keepOpen = false;
+    mockCreateSettingsStore.keepOpen = false;
     mockCreateSettingsStore.manualCreateFields = DEFAULT_MANUAL_FIELDS;
     mockSetKeepOpen.mockImplementation((v: boolean) => {
-      mockQuickCreateStore.keepOpen = v;
+      mockCreateSettingsStore.keepOpen = v;
     });
     // Reset the unified draft mock so per-test seeding (assignee, project, …)
     // doesn't leak into the next test in the suite.
@@ -629,9 +611,6 @@ describe("CreateIssueModal", () => {
     });
     mockSetManual.mockImplementation((patch: Partial<typeof mockDraftStore.draft.manual>) => {
       mockDraftStore.draft.manual = { ...mockDraftStore.draft.manual, ...patch };
-    });
-    mockSetAgent.mockImplementation((patch: Partial<typeof mockDraftStore.draft.agent>) => {
-      mockDraftStore.draft.agent = { ...mockDraftStore.draft.agent, ...patch };
     });
     mockClearDraft.mockImplementation(() => {
       const next = emptyIssueDraft();
@@ -820,7 +799,7 @@ describe("CreateIssueModal", () => {
   it("keeps manual mode open and clears content when create another is enabled", async () => {
     const user = userEvent.setup();
     const onClose = vi.fn();
-    mockQuickCreateStore.keepOpen = true;
+    mockCreateSettingsStore.keepOpen = true;
 
     renderModal(<CreateIssueModal onClose={onClose} />);
 
@@ -974,7 +953,6 @@ describe("CreateIssueModal", () => {
         <ManualCreatePanel
           data={path === "comment-source" ? sourceContextPanelData() : undefined}
           onClose={onClose}
-          onSwitchMode={vi.fn()}
           isExpanded={false}
           setIsExpanded={vi.fn()}
         />
@@ -1321,34 +1299,6 @@ describe("CreateIssueModal", () => {
     expect(mockToastError).toHaveBeenCalledWith("Failed to create issue");
   });
 
-  // Manual → agent must preserve the picked project. It now rides the shared
-  // draft slot rather than the carry: the switch commits the (data-seeded)
-  // project into `shared` so the agent panel reads it from there.
-  it("commits the picked project to the shared draft when switching to agent mode", async () => {
-    const user = userEvent.setup();
-    const onSwitchMode = vi.fn();
-
-    renderModal(
-      <ManualCreatePanel
-        onClose={vi.fn()}
-        onSwitchMode={onSwitchMode}
-        data={{ project_id: "proj-1" }}
-        isExpanded={false}
-        setIsExpanded={vi.fn()}
-      />,
-    );
-
-    await user.type(screen.getByPlaceholderText("Issue title"), "Refactor auth");
-
-    await user.click(screen.getByRole("button", { name: /Switch to Agent/i }));
-
-    expect(onSwitchMode).toHaveBeenCalledTimes(1);
-    expect(mockSetShared).toHaveBeenCalledWith(
-      expect.objectContaining({ projectId: "proj-1" }),
-    );
-    expect(mockSetAgent).toHaveBeenCalledWith({ prompt: "Refactor auth" });
-  });
-
   it("restores an unfinished project selection after manual create remounts", async () => {
     const user = userEvent.setup();
 
@@ -1364,53 +1314,10 @@ describe("CreateIssueModal", () => {
     expect(screen.getByTestId("project-picker")).toHaveAttribute("data-project-id", "proj-1");
   });
 
-  // Manual → agent must forward parent_issue_id when the modal was opened
-  // from "Add sub issue". Before this, the agent panel received no parent
-  // context and the new issue was filed as a standalone — silently dropping
-  // the sub-issue intent set by openCreateSubIssue. The parent_issue_identifier
-  // tags along so the agent panel can render a "Sub-issue of MUL-XX" chip
-  // without an extra round-trip.
-  //
-  // The identifier fallback matters here: the mocked issueDetailOptions
-  // resolves to null (parent query not hydrated), so without the
-  // `data.parent_issue_identifier` fallback the agent chip would render as
-  // "Sub-issue of " with an empty tail. The UUID alone still wires the
-  // sub-issue relationship correctly, but the visible affordance breaks.
-  it("forwards parent_issue_id and falls back to seeded identifier when switching to agent mode", async () => {
-    const user = userEvent.setup();
-    const onSwitchMode = vi.fn();
-
-    renderModal(
-      <ManualCreatePanel
-        onClose={vi.fn()}
-        onSwitchMode={onSwitchMode}
-        data={{
-          parent_issue_id: "parent-uuid-1",
-          parent_issue_identifier: "MUL-2534",
-        }}
-        isExpanded={false}
-        setIsExpanded={vi.fn()}
-      />,
-    );
-
-    await user.type(screen.getByPlaceholderText("Issue title"), "Refactor auth");
-    await user.click(screen.getByRole("button", { name: /Switch to Agent/i }));
-
-    expect(onSwitchMode).toHaveBeenCalledTimes(1);
-    // The parent context is not persisted (a per-invocation intent), so it
-    // still rides the carry channel. The prompt rides the store now.
-    expect(onSwitchMode.mock.calls[0]?.[0]).toEqual({
-      parent_issue_id: "parent-uuid-1",
-      parent_issue_identifier: "MUL-2534",
-    });
-    expect(mockSetAgent).toHaveBeenCalledWith({ prompt: "Refactor auth" });
-  });
-
   it("keeps captured context separate from the upstream description scroller", () => {
     renderModal(
       <ManualCreatePanel
         onClose={vi.fn()}
-        onSwitchMode={vi.fn()}
         data={sourceContextPanelData()}
         isExpanded={false}
         setIsExpanded={vi.fn()}
@@ -1439,7 +1346,6 @@ describe("CreateIssueModal", () => {
     const contextRender = renderModal(
       <ManualCreatePanel
         onClose={vi.fn()}
-        onSwitchMode={vi.fn()}
         data={{
           ...sourceContextPanelData(),
           parent_issue_id: "parent-uuid-1",
@@ -1459,7 +1365,6 @@ describe("CreateIssueModal", () => {
     renderModal(
       <ManualCreatePanel
         onClose={vi.fn()}
-        onSwitchMode={vi.fn()}
         data={{
           parent_issue_id: "parent-uuid-1",
           parent_issue_identifier: "MUL-2534",
@@ -1480,7 +1385,6 @@ describe("CreateIssueModal", () => {
     renderModal(
       <ManualCreatePanel
         onClose={vi.fn()}
-        onSwitchMode={vi.fn()}
         data={sourceContextPanelData()}
         isExpanded={false}
         setIsExpanded={vi.fn()}
@@ -1604,43 +1508,8 @@ describe("CreateIssueModal", () => {
     expect(mockPush).toHaveBeenCalledWith("/ws-test/settings?tab=preferences&section=issue");
   });
 
-  // MUL-5181: switching to agent must PRESERVE the manual draft. The agent
-  // prompt is assist-init'd from title + description (a one-time convenience
-  // when the agent slot is empty), but the manual title/description are left
-  // untouched so a later agent→manual switch restores them verbatim — no
-  // concatenate-then-clear, no duplication on round-trips.
-  it("assist-inits the agent prompt from title and description without clearing the manual draft", async () => {
-    const user = userEvent.setup();
-
-    renderModal(
-      <ManualCreatePanel
-        onClose={vi.fn()}
-        onSwitchMode={vi.fn()}
-        isExpanded={false}
-        setIsExpanded={vi.fn()}
-      />,
-    );
-
-    await user.type(screen.getByPlaceholderText("Issue title"), "Update");
-    await user.type(screen.getByPlaceholderText("Add description..."), "Some body");
-
-    mockSetManual.mockClear();
-    mockSetAgent.mockClear();
-    await user.click(screen.getByRole("button", { name: /Switch to Agent/i }));
-
-    // Agent prompt seeded from the manual content...
-    expect(mockSetAgent).toHaveBeenCalledWith({ prompt: "Update\n\nSome body" });
-    // ...and the manual slot is never cleared.
-    expect(mockSetManual).not.toHaveBeenCalledWith(
-      expect.objectContaining({ title: "" }),
-    );
-    expect(mockSetManual).not.toHaveBeenCalledWith(
-      expect.objectContaining({ description: "" }),
-    );
-  });
-
-  // MUL-4808 — manual create had no upload gate at all: Create, Enter on the
-  // title, and Switch to Agent would each fix the draft while an image was
+  // MUL-4808 — manual create had no upload gate at all: Create
+  // and Enter on the title would each fix the draft while an image was
   // still uploading, dropping it from the description with no warning.
   // MUL-5181 P0: the issue draft is a SINGLETON store. A submit that outlives
   // its dialog may only consume the draft it submitted — never one the user
@@ -1650,7 +1519,6 @@ describe("CreateIssueModal", () => {
       return renderModal(
         <ManualCreatePanel
           onClose={onClose}
-          onSwitchMode={vi.fn()}
           isExpanded={false}
           setIsExpanded={vi.fn()}
         />,
@@ -1748,16 +1616,15 @@ describe("CreateIssueModal", () => {
       return { release: (result: unknown) => release(result) };
     }
 
-    function renderManual(onSwitchMode = vi.fn()) {
+    function renderManual() {
       const view = renderModal(
         <ManualCreatePanel
           onClose={vi.fn()}
-          onSwitchMode={onSwitchMode}
           isExpanded={false}
           setIsExpanded={vi.fn()}
         />,
       );
-      return { ...view, onSwitchMode };
+      return view;
     }
 
     it("disables Create and shows Uploading… while an upload is in flight", async () => {
@@ -1813,32 +1680,14 @@ describe("CreateIssueModal", () => {
       await Promise.resolve();
       expect(mockCreateIssue).not.toHaveBeenCalled();
     });
-
-    it("blocks Switch to Agent while an upload is in flight", async () => {
-      const user = userEvent.setup();
-      const onSwitchMode = vi.fn();
-      renderManual(onSwitchMode);
-      await user.type(screen.getByPlaceholderText("Issue title"), "Has a screenshot");
-
-      startPendingUpload();
-
-      // The switch packs the description into an agent prompt and clears the
-      // manual draft — doing that mid-upload loses the image for good.
-      const switchButton = screen.getByRole("button", { name: /Switch to Agent/i });
-      await waitFor(() => expect(switchButton).toBeDisabled());
-      fireEvent.click(switchButton);
-      expect(onSwitchMode).not.toHaveBeenCalled();
-    });
   });
 
-  // MUL-4931 — manual create had no submit shortcut at all, while agent create
-  // has had one all along.
+  // MUL-4931 — manual create had no submit shortcut at all.
   describe("send shortcut", () => {
     function renderManual() {
       return renderModal(
         <ManualCreatePanel
           onClose={vi.fn()}
-          onSwitchMode={vi.fn()}
           isExpanded={false}
           setIsExpanded={vi.fn()}
         />,
@@ -1959,23 +1808,15 @@ describe("CreateIssueModal", () => {
     });
   });
 
-  // MUL-6236 — the manual panel shares the agent panel's phone treatment; it
-  // is one tap away behind "Switch to Manual", so it hit the same bugs.
+  // MUL-6236 — on a phone the footer must wrap instead of squeezing the
+  // Create button off-screen.
   describe("phone layout", () => {
-
-    it("keeps every footer control a direct child of the grid container", () => {
+    it("lets the footer wrap with Create as a direct child", () => {
       renderModal(<CreateIssueModal onClose={vi.fn()} />);
 
-      const switchToAgent = screen.getByRole("button", { name: /Switch to Agent/i });
       const create = screen.getByRole("button", { name: "Create Issue" });
-
-      // Grid placement only sees direct children — re-wrapping either control
-      // collapses the 2x2 phone footer back to one jammed row.
-      const footer = switchToAgent.parentElement;
-      expect(footer?.className).toContain("grid-cols-[auto_1fr]");
-      expect(footer?.className).toContain("sm:flex");
-      expect(create.parentElement).toBe(footer);
-      expect(create.className).toContain("justify-self-end");
+      const footer = create.parentElement;
+      expect(footer?.className).toContain("flex-wrap");
     });
   });
 });
