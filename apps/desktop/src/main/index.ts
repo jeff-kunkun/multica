@@ -121,7 +121,7 @@ if (process.platform !== "win32") {
   ]);
 }
 
-const PROTOCOL = "multica";
+const PROTOCOL = "multica-office";
 const devLog = is.dev ? createBestEffortDevLog() : undefined;
 
 // Where the main process parks a freeze/crash breadcrumb until the next
@@ -190,14 +190,14 @@ function handleDeepLink(url: string): void {
     const parsed = new URL(url);
     if (parsed.protocol !== `${PROTOCOL}:`) return;
 
-    // multica://auth/callback?token=<jwt>
+    // multica-office://auth/callback?token=<jwt>
     if (parsed.hostname === "auth" && parsed.pathname === "/callback") {
       const token = parsed.searchParams.get("token");
       if (token) dispatchToMainRenderer("auth:token", token);
       return;
     }
 
-    // multica://invite/<invitationId>
+    // multica-office://invite/<invitationId>
     // Dispatched from the web invite page when the user chooses "Open in
     // desktop app". The renderer opens the invite overlay — no tab, no
     // route persistence, so deep-linking the same invite twice stays safe.
@@ -571,7 +571,7 @@ if (is.dev) {
   // to "Multica", but anchoring it here makes WM_CLASS ↔ StartupWMClass
   // (declared in electron-builder.yml) survive a regression in
   // productName / the build pipeline. Must run before requestSingleInstanceLock().
-  app.setName("Multica");
+  app.setName("Multica Office");
 }
 
 // --- Protocol registration -----------------------------------------------
@@ -638,7 +638,7 @@ if (!gotTheLock) {
     });
 
     electronApp.setAppUserModelId(
-      is.dev ? "ai.multica.desktop.dev" : "ai.multica.desktop",
+      is.dev ? "ai.multica.office.dev" : "ai.multica.office",
     );
 
     // macOS: replace the default Electron dock icon with the bundled logo
@@ -717,7 +717,7 @@ if (!gotTheLock) {
     });
 
     // Sync IPC: preload exposes the validated runtime config before renderer
-    // boot. If desktop.json exists but is invalid, renderer receives the
+    // boot. If office-desktop.json exists but is invalid, renderer receives the
     // blocking error and must not silently fall back to the cloud defaults.
     ipcMain.on("runtime-config:get", (event) => {
       event.returnValue = runtimeConfigResult;

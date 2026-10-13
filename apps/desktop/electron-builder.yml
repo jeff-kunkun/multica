@@ -1,5 +1,7 @@
-appId: ai.multica.desktop
-productName: Multica
+# kun-main: its own app identity and URL scheme, so it installs beside the
+# kun-line Multica.app instead of replacing it and taking its login links.
+appId: ai.multica.office
+productName: Multica Office
 directories:
   buildResources: build
 files:
@@ -30,9 +32,9 @@ extraResources:
   - from: ../../NOTICE
     to: NOTICE
 protocols:
-  - name: Multica
+  - name: Multica Office
     schemes:
-      - multica
+      - multica-office
 asarUnpack:
   - resources/**
 mac:
@@ -96,7 +98,7 @@ linux:
   # window prints `Multica` for both fields.
   desktop:
     entry:
-      StartupWMClass: Multica
+      StartupWMClass: Multica Office
   # Point at pre-rendered hicolor sizes. electron-builder *can* generate
   # 16/24/32/48/64/128/256/512 from a single build/icon.png, but the
   # auto-generation silently shipped only the 1024×1024 source in our

@@ -29,6 +29,15 @@ own database, own upload volume, own ports, own images, own update timer.
    read from there. Never publish them to `jeff-kunkun/multica` Releases —
    colleagues' Desktop follows that feed.
 
+The office Desktop app is "Multica Office" (`ai.multica.office`, URL scheme
+`multica-office://`), so it installs beside the kun-line Multica.app and the
+browser login hands back to the right one. Its runtime override is
+`~/.multica/office-desktop.json` and its daemon auto-start/stop prefs are
+`~/.multica/office-desktop_prefs.json`; it never reads the kun-line
+`desktop.json` / `desktop_prefs.json`. App data lives under its own name too.
+The daemon it starts uses a profile named after the server host, separate from
+the kun-line app's.
+
 Client defaults point here: the CLI's default server
 (`server/cmd/multica/cmd_agent.go`) and Desktop's default runtime config
 (`apps/desktop/src/shared/runtime-config.ts`).
