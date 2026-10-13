@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/multica-ai/multica/server/internal/middleware"
@@ -58,6 +59,15 @@ func TestBotConnect_OneYesConnectsBot(t *testing.T) {
 		_, _ = testPool.Exec(context.Background(), `DELETE FROM "user" WHERE id = ANY($1)`, []string{adminID, memberID})
 	})
 
+	oldBox := testHandler.BotWakeSecrets
+	testHandler.BotWakeSecrets, _ = NewBotWakeSecretBox("bot connect fixture")
+	t.Cleanup(func() { testHandler.BotWakeSecrets = oldBox })
+	receiver := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(receiver.Close)
+	t.Setenv("MULTICA_PLUGIN_DEV_ORIGINS", receiver.URL)
+
 	router := botConnectTestRouter()
 	call := func(method, path, bearer string, body any) *httptest.ResponseRecorder {
 		t.Helper()
@@ -73,7 +83,9 @@ func TestBotConnect_OneYesConnectsBot(t *testing.T) {
 	}
 	start := func() BotConnectStartResponse {
 		t.Helper()
-		rec := call("POST", "/api/bot-connect", "", map[string]string{"name": "Grok"})
+		rec := call("POST", "/api/bot-connect", "", map[string]string{
+			"name": "Grok", "webhook_url": receiver.URL, "webhook_key": "fixture",
+		})
 		if rec.Code != http.StatusCreated {
 			t.Fatalf("start: %d %s", rec.Code, rec.Body)
 		}
@@ -93,6 +105,11 @@ func TestBotConnect_OneYesConnectsBot(t *testing.T) {
 		return rec.Code, out
 	}
 	approveBody := map[string]string{"workspace_id": wsID}
+
+	// The Bot brings its own address; without one nothing would reach it.
+	if rec := call("POST", "/api/bot-connect", "", map[string]string{"name": "Grok"}); rec.Code != http.StatusBadRequest {
+		t.Fatalf("start without webhook = %d, want 400", rec.Code)
+	}
 
 	s := start()
 	if code, out := claim(s, s.ClaimToken); code != http.StatusAccepted || out.Status != "pending" {
@@ -123,13 +140,50 @@ func TestBotConnect_OneYesConnectsBot(t *testing.T) {
 	if kind != "bot" || owner != adminID || ws != wsID {
 		t.Fatalf("bot key = kind %q owner %q ws %q; want bot key of the approver in the workspace", kind, owner, ws)
 	}
-	// The key works at once, and is handed out only once.
-	if rec := call("GET", "/api/bot-connect/"+s.Code, out.Token, nil); rec.Code != http.StatusForbidden {
+	// One yes leaves nothing to set up: the address is saved and decisions
+	// go to the Bot of the person who agreed.
+	var hooked bool
+	dbfx.QueryRow(t, `SELECT length(webhook_secret) > 0 FROM bot_wake WHERE bot_id = $1`, out.BotID).Scan(&hooked)
+	if !hooked {
+		t.Fatal("webhook not saved on the bot")
+	}
+	var boundBot string
+	dbfx.QueryRow(t, `SELECT bot_id::text FROM member_bot_binding WHERE workspace_id = $1 AND user_id = $2 AND revoked_at IS NULL`,
+		wsID, adminID).Scan(&boundBot)
+	if boundBot != out.BotID {
+		t.Fatalf("decisions bound to %q, want %q", boundBot, out.BotID)
+	}
+
+	// The answer got lost: a retry before the key is used hands out a fresh
+	// one for the same Bot, and the lost key stops working.
+	code, retry := claim(s, s.ClaimToken)
+	if code != http.StatusOK || retry.Status != "claimed" || retry.Token == "" || retry.Token == out.Token ||
+		retry.BotID != out.BotID || retry.WorkspaceID != wsID {
+		t.Fatalf("retry before use = %d %+v, want a fresh full key", code, retry)
+	}
+	if rec := call("GET", "/api/bot-connect/"+s.Code, out.Token, nil); rec.Code != http.StatusUnauthorized {
+		t.Fatalf("lost key still works: %d", rec.Code)
+	}
+	// The key works at once (a Bot may not read connect requests) ...
+	if rec := call("GET", "/api/bot-connect/"+s.Code, retry.Token, nil); rec.Code != http.StatusForbidden {
 		t.Fatalf("bot key reading a connect request = %d, want 403", rec.Code)
 	}
-	if code, again := claim(s, s.ClaimToken); code != http.StatusOK || again.Status != "claimed" || again.Token != "" {
-		t.Fatalf("second claim = %d %+v, want claimed without a key", code, again)
+	// ... and once used (recorded in the background) it is never handed out again.
+	for i := 0; ; i++ {
+		var used bool
+		dbfx.QueryRow(t, `SELECT last_used_at IS NOT NULL FROM personal_access_token WHERE id = $1`, retry.BotID).Scan(&used)
+		if used {
+			break
+		}
+		if i == 50 {
+			t.Fatal("key use never recorded")
+		}
+		time.Sleep(20 * time.Millisecond)
 	}
+	if code, again := claim(s, s.ClaimToken); code != http.StatusOK || again.Status != "claimed" || again.Token != "" {
+		t.Fatalf("claim after use = %d %+v, want claimed without a key", code, again)
+	}
+	out = retry
 
 	// A Bot cannot let another Bot in.
 	s2 := start()

@@ -1,4 +1,3 @@
-import { ProjectReferencesSetting } from "@/components/projects/project-references-setting";
 /**
  * Project detail screen. Single column, scrolling:
  *
@@ -33,7 +32,6 @@ import { IconButton } from "@/components/ui/icon-button";
 import { ProjectHeaderCard } from "@/components/project/project-header-card";
 import { ProjectPropertiesSection } from "@/components/project/project-properties-section";
 import { ProjectRelatedIssues } from "@/components/project/project-related-issues";
-import { ProjectResourcesSection } from "@/components/project/project-resources-section";
 import {
   projectDetailOptions,
   projectResourcesOptions,
@@ -218,13 +216,6 @@ export default function ProjectDetail() {
                   params: { workspace: wsSlug, id },
                 });
             }}
-            onPressPriority={() => {
-              if (wsSlug)
-                router.push({
-                  pathname: "/[workspace]/project/[id]/picker/priority",
-                  params: { workspace: wsSlug, id },
-                });
-            }}
             onPressLead={() => {
               if (wsSlug)
                 router.push({
@@ -232,32 +223,9 @@ export default function ProjectDetail() {
                   params: { workspace: wsSlug, id },
                 });
             }}
-            onPressDomain={() => {
-              if (wsSlug)
-                router.push({
-                  pathname: "/[workspace]/project/[id]/picker/domain",
-                  params: { workspace: wsSlug, id },
-                });
-            }}
-            onPressExecutors={() => {
-              if (wsSlug)
-                router.push({
-                  pathname: "/[workspace]/project/[id]/picker/executors",
-                  params: { workspace: wsSlug, id },
-                });
-            }}
           />
-          <View className="px-4 py-3"><ProjectReferencesSetting projectId={id} /></View>
-          <ProjectResourcesSection
-            projectId={id}
-            onAdd={() => {
-              if (wsSlug)
-                router.push({
-                  pathname: "/[workspace]/project/[id]/add-resource",
-                  params: { workspace: wsSlug, id },
-                });
-            }}
-          />
+          {/* DENE-2009: like web, priority, directions, executors, referenced
+              projects and resources run on defaults; `multica project` edits them. */}
           <View className="h-3" />
           <ProjectRelatedIssues projectId={id} />
         </ScrollView>

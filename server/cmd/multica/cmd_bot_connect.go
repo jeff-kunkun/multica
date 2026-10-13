@@ -22,11 +22,15 @@ var botConnectCmd = &cobra.Command{
 	Short: "Run by a Bot: ask to connect, wait for one yes, then log in by itself",
 	Long: `Run on the Bot's own machine, without a key. Prints a link; a workspace
 owner or admin opens it and agrees once. The Bot then receives its key, saves
-it to this profile and switches to the workspace. With --webhook-url and
---webhook-key the Bot is also woken at that address for every event, and what
-needs the approver's decision goes to it — nothing to set up afterwards.`,
-	Example: `  multica bot connect --server-url https://ai.ferryway.cc --name Grok
-  multica bot connect --server-url https://ai.ferryway.cc --name Grok \
+it to this profile and switches to the workspace. --webhook-url and
+--webhook-key are the Bot's own HTTPS address and key: every event and what
+needs the approver's decision is pushed there — nothing to set up afterwards.
+
+If the answer to the final step is lost, run the same command again: as long
+as the key has not been used yet, the retry hands out a fresh one and the
+lost key stops working. Once the key is in use, nothing is saved and the
+command says so.`,
+	Example: `  multica bot connect --server-url https://ai.ferryway.cc --name Grok \
     --webhook-url https://bot.example.com/multica --webhook-key s3cret`,
 	Args: exactArgs(0),
 	RunE: runBotConnect,
@@ -36,8 +40,8 @@ func init() {
 	botCmd.AddCommand(botConnectCmd)
 	botConnectCmd.Flags().String("name", "Grok", "Bot name shown to the person who agrees")
 	botConnectCmd.Flags().String("type", "grok", "Bot type: grok")
-	botConnectCmd.Flags().String("webhook-url", "", "Address the Bot is woken at (optional)")
-	botConnectCmd.Flags().String("webhook-key", "", "Shared key for that address (required with --webhook-url)")
+	botConnectCmd.Flags().String("webhook-url", "", "The Bot's own HTTPS address for messages and decisions (required)")
+	botConnectCmd.Flags().String("webhook-key", "", "Shared key for that address (required)")
 	botConnectCmd.Flags().Duration("wait", 15*time.Minute, "How long to wait for the yes")
 	botConnectCmd.Flags().String("output", "text", "Output format: text or json")
 }
@@ -72,8 +76,8 @@ func runBotConnect(cmd *cobra.Command, _ []string) error {
 	hookKey, _ := cmd.Flags().GetString("webhook-key")
 	wait, _ := cmd.Flags().GetDuration("wait")
 	output, _ := cmd.Flags().GetString("output")
-	if (hookURL == "") != (hookKey == "") {
-		return fmt.Errorf("--webhook-url and --webhook-key go together")
+	if hookURL == "" || hookKey == "" {
+		return fmt.Errorf("需要 --webhook-url 和 --webhook-key：这是 Bot 自己收消息和待决定事项的 HTTPS 地址和密钥，由 Bot 自己填")
 	}
 
 	client := cli.NewAPIClient(serverURL, "", "")
@@ -112,14 +116,8 @@ func runBotConnect(cmd *cobra.Command, _ []string) error {
 		}
 		time.Sleep(interval)
 	}
-	switch claim.Status {
-	case "claimed":
-	case "denied":
-		return fmt.Errorf("管理员拒绝了这次接入")
-	case "expired":
-		return fmt.Errorf("接入码已过期；重新运行 multica bot connect")
-	default:
-		return fmt.Errorf("接入没有完成（%s）；重新运行 multica bot connect", claim.Status)
+	if err := claim.usable(); err != nil {
+		return err
 	}
 
 	profile := resolveProfile(cmd)
@@ -141,12 +139,31 @@ func runBotConnect(cmd *cobra.Command, _ []string) error {
 		return cli.PrintJSON(os.Stdout, map[string]any{
 			"status": "connected", "bot_id": claim.BotID,
 			"workspace_id": claim.WorkspaceID, "workspace_name": claim.WorkspaceName,
-			"receives_push": hookURL != "",
+			"receives_push": true,
 		})
 	}
 	fmt.Fprintf(os.Stderr, "已接入工作区「%s」，钥匙已存进本机配置。\n", claim.WorkspaceName)
 	if guide := strings.TrimSpace(claim.Guide); guide != "" {
 		fmt.Fprintln(os.Stdout, guide)
+	}
+	return nil
+}
+
+// usable says whether a claim answer can be saved. "claimed" without a key
+// means the key was already handed out and is in use (DENE-2009): saving it
+// would wipe this profile's login and still report success.
+func (c botConnectClaim) usable() error {
+	switch c.Status {
+	case "claimed":
+	case "denied":
+		return fmt.Errorf("管理员拒绝了这次接入")
+	case "expired":
+		return fmt.Errorf("接入码已过期；重新运行 multica bot connect")
+	default:
+		return fmt.Errorf("接入没有完成（%s）；重新运行 multica bot connect", c.Status)
+	}
+	if c.Token == "" || c.BotID == "" || c.WorkspaceID == "" {
+		return fmt.Errorf("这次接入的钥匙已经领走并在使用，本机配置没有改动；如需重新接入，重新运行 multica bot connect")
 	}
 	return nil
 }

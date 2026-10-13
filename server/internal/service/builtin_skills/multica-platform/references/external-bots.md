@@ -8,23 +8,31 @@ copy a managed task token, or strip task identity from an active agent run.
 Install a current `multica` binary for the computer's OS and architecture.
 
 **Connect without a key (DENE-2009, preferred).** The Bot runs
-`multica bot connect --server-url <url> --name <Bot name>` itself, on its own
-machine (refused inside an agent task). It prints a link
+`multica bot connect --server-url <url> --name <Bot name> --webhook-url
+<public https> --webhook-key <secret>` itself, on its own machine (refused
+inside an agent task). The address and key are required: they are the Bot's
+own receiving end, so group events and the approver's decisions reach it
+with nothing to set up later. It prints a link
 (`<app>/bot-connect?code=XXXX-XXXX`); send that link to the person. When a
 workspace owner or admin opens it and agrees once, the command receives the
 Bot key, saves it with the server and workspace into the CLI profile, and
-prints the onboarding steps — no key is ever shown to a person. Add
-`--webhook-url <public https> --webhook-key <secret>` to be woken at that
-address and to become the approver's decisions channel in the same yes (a
-verify event follows; answer it with the usual `woken` receipt). `--wait`
-(default 15m) bounds the wait; `--output json` returns `status`, `bot_id`,
-`workspace_id`, `workspace_name` and `receives_push`. Outcomes: refused →
-"管理员拒绝了这次接入"; expired or lost → run it again. The server side is
-`POST /api/bot-connect` (start, public, rate limited), `GET
-/api/bot-connect/{code}`, `POST /api/bot-connect/{code}/approve|deny`
-(signed-in owner/admin of the chosen workspace, never a Bot key or task
-token) and `POST /api/bot-connect/claim` (public, needs the claim token, hands
-the key out once).
+prints the onboarding steps — no key is ever shown to a person. The same yes
+saves the webhook and makes the Bot the approver's decisions channel with
+every activity flowing to it (a verify event follows; answer it with the
+usual `woken` receipt). `--wait` (default 15m) bounds the wait; `--output
+json` returns `status`, `bot_id`, `workspace_id`, `workspace_name` and
+`receives_push`. Outcomes: refused → "管理员拒绝了这次接入"; expired or lost
+→ run it again. If the answer to the claim is lost, polling again is safe:
+while the key has never been used the server hands out a fresh one for the
+same Bot and the lost one stops working; once the key is in use the answer
+is `claimed` with no key and the command saves nothing and says so. The
+server side is `POST /api/bot-connect` (start, public, rate limited, 400
+without `webhook_url`/`webhook_key`), `GET /api/bot-connect/{code}`, `POST
+/api/bot-connect/{code}/approve|deny` (signed-in owner/admin of the chosen
+workspace, never a Bot key or task token) and `POST /api/bot-connect/claim`
+(public, needs the claim token). Settings → Bots only lists connected Bots
+to stop or remove; wake rules, keys and endpoints are changed with `multica
+bot wake` / `multica bot` commands, not in the app.
 
 The older path below still works when a Bot cannot run the command itself.
 Provision a separate personal token through the authorized account's token UI

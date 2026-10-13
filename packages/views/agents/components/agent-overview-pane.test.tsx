@@ -219,40 +219,23 @@ beforeEach(() => {
   telegramListingRef.current = { installations: [], configured: false };
 });
 
-describe("AgentOverviewPane MCP tab visibility", () => {
-  it.each([
-    ["Claude", "claude"],
-    ["Codex", "codex"],
-    ["Cursor", "cursor"],
-    ["Hermes", "hermes"],
-    ["Kimi", "kimi"],
-    ["Kiro", "kiro"],
-    ["OpenCode", "opencode"],
-    ["OpenClaw", "openclaw"],
-    ["Oh My Pi", "omp"],
-  ])("renders the MCP tab when the agent runs on the %s runtime", (_label, provider) => {
+// DENE-2009: MCP, environment, custom args and runtime config run on what is
+// saved and are changed through `multica agent update / env / mcp`.
+describe("AgentOverviewPane settings kept to what a person decides", () => {
+  it.each([["claude"], ["openclaw"]])("offers no MCP or execution-config tabs on %s", (provider) => {
     renderPane([makeRuntime(provider)]);
     openCapabilities();
-    expect(screen.getByRole("tab", { name: /^MCP$/i })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: /^Skills$/i })).toBeInTheDocument();
+    expect(screen.queryByRole("tab", { name: /MCP/i })).not.toBeInTheDocument();
+    openSettings();
+    for (const name of [/^Environment$/i, /^Custom args$/i, /^Routing$/i]) {
+      expect(screen.queryByRole("tab", { name })).not.toBeInTheDocument();
+    }
   });
 
-  it("hides the MCP tab for providers whose backend does not read mcp_config", () => {
-    // Saving an MCP config on e.g. Gemini would be a silent no-op at run
-    // time — that's the bug this hiding logic is meant to prevent.
-    renderPane([makeRuntime("gemini")]);
-    openCapabilities();
-    expect(
-      screen.queryByRole("tab", { name: /^MCP$/i }),
-    ).not.toBeInTheDocument();
-  });
-
-  it("keeps the MCP tab visible when the runtime row hasn't loaded yet", () => {
-    // Empty runtimes[] mimics the brief window between the page mounting and
-    // the runtimes query resolving. Hiding the tab would flicker it off and
-    // then back on, which reads as a bug.
-    renderPane([]);
-    openCapabilities();
-    expect(screen.getByRole("tab", { name: /^MCP$/i })).toBeInTheDocument();
+  it("falls back to Overview for a stale link to a hidden tab", () => {
+    renderPane([makeRuntime("claude")], { view: "env" });
+    expect(screen.queryByText("env-tab")).toBeNull();
   });
 });
 
@@ -424,27 +407,6 @@ describe("AgentOverviewPane accounts quota warning", () => {
   });
 });
 
-describe("AgentOverviewPane Environment tab visibility", () => {
-  it("shows the Environment tab to someone who can manage the agent", () => {
-    renderPane([makeRuntime("claude")]);
-    openSettings();
-    expect(
-      screen.getByRole("tab", { name: /^Environment$/i }),
-    ).toBeInTheDocument();
-  });
-
-  it("hides the Environment tab from users who cannot manage the agent", () => {
-    // The env endpoints admit the agent owner or a workspace owner/admin
-    // (MUL-5438) — the rule `canEdit` already encodes. Anyone else who opens
-    // the tab hits a guaranteed 403 on "Reveal & edit".
-    renderPane([makeRuntime("claude")], { canEdit: false });
-    openSettings();
-    expect(
-      screen.queryByRole("tab", { name: /^Environment$/i }),
-    ).not.toBeInTheDocument();
-  });
-});
-
 // MUL-7107: the header, the tab bar and every panel share one leading edge.
 // The regression these guard against is a centred width cap: `mx-auto` plus a
 // `max-w-*` moves an element's edge as the viewport grows, so chrome on a
@@ -498,37 +460,5 @@ describe("AgentOverviewPane horizontal alignment", () => {
     // and that aside, not the form behind it, is what meets the tabs above.
     expect(panelFor(container as HTMLElement)).toHaveClass(RAIL_SENTINEL);
     expect(container.querySelector("aside")).toHaveClass(GUTTER_SENTINEL);
-  });
-});
-
-describe("AgentOverviewPane execution config inherited from the base role", () => {
-  const baseRole: Agent = { ...baseAgent, id: "base-1", name: "Goku" };
-  const follower: Agent = {
-    ...baseAgent,
-    parent_agent_id: "base-1",
-    runtime_inherited: true,
-  };
-
-  it.each([
-    ["env", "env-tab"],
-    ["custom_args", "custom-args-tab"],
-  ])("renders the %s editor read-only while following", (view, editor) => {
-    renderPane([makeRuntime("codex")], {
-      view,
-      agent: follower,
-      agents: [baseRole, follower],
-    });
-    expect(screen.getByText(/Follows the base role "Goku"/)).toBeTruthy();
-    expect(screen.getByText(editor).closest("fieldset")?.disabled).toBe(true);
-  });
-
-  it("keeps the editor live for a base role owned by someone else", () => {
-    renderPane([makeRuntime("codex")], {
-      view: "env",
-      agent: follower,
-      agents: [{ ...baseRole, owner_id: "user-2" }, follower],
-    });
-    expect(screen.queryByText(/follows the base role/)).toBeNull();
-    expect(screen.getByText("env-tab").closest("fieldset")).toBeNull();
   });
 });

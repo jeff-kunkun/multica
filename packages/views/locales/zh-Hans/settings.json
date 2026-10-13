@@ -721,7 +721,7 @@
       "label": "交给我的 Bot",
       "none": "不用 Bot（只在站内）",
       "no_bots": "你还没有 Bot，先到「Bot」里添加。",
-      "state_none": "选你自己的 Bot，要你决定的事会推给它。",
+      "state_none": "你同意一个 Bot 接入后，要你决定的事会自动推给它，不用再选。",
       "state_ok": "要你决定的事先推给 {{name}}。",
       "state_unverified": "等 {{name}} 确认能收到。",
       "state_broken": "{{name}} 连不上，要你决定的事暂时回到站内。",
@@ -2452,7 +2452,7 @@
       "description": "复制这句话发给 Bot。它会发回一个链接，你点一次「同意」就接好了，不用碰任何钥匙。",
       "copy": "复制给 Bot",
       "copied": "已复制，发给你的 Bot 吧",
-      "instruction": "请在你的机器上运行：{{command}}\n然后把它给出的链接发给我，我点同意后你就接入了。"
+      "instruction": "请在你的机器上运行下面这条命令，把 <URL> 和 <KEY> 换成你自己收消息的 HTTPS 地址和密钥：{{command}}\n然后把它给出的链接发给我，我点同意后你就接入了，群消息和要我拍板的事都会直接送到你那里。"
     }
   },
   "overview": {

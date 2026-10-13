@@ -1,6 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, screen } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
 import type { Agent } from "@multica/core/types";
 import { renderWithI18n } from "../../test/i18n";
 import { AgentDetailInspector } from "./agent-detail-inspector";
@@ -91,84 +90,23 @@ describe("AgentDetailInspector runtime inheritance", () => {
     cleanup();
   });
 
-  it("offers the switch, checked, while the specialisation follows", () => {
+  // DENE-2009: following the base role is a system default, changed through
+  // `multica agent update --runtime-inherited`; the form only says so.
+  it("offers no switch, and says the runtime follows the base role", () => {
     renderInspector(
       agentFixture({ parent_agent_id: "base-1", runtime_inherited: true }),
     );
 
-    expect(screen.getByRole("switch", { name: SWITCH_NAME })).toBeChecked();
-    expect(
-      screen.getByText(/speed follow the base role/),
-    ).toBeInTheDocument();
-  });
-
-  it("offers the switch, unchecked, when the specialisation is independent", () => {
-    renderInspector(
-      agentFixture({ parent_agent_id: "base-1", runtime_inherited: false }),
-    );
-
-    expect(screen.getByRole("switch", { name: SWITCH_NAME })).not.toBeChecked();
-    expect(
-      screen.getByText(/own runtime settings/),
-    ).toBeInTheDocument();
-  });
-
-  it("offers no switch to a base role", () => {
-    renderInspector(agentFixture({ runtime_inherited: false }));
-
-    expect(
-      screen.queryByRole("switch", { name: SWITCH_NAME }),
-    ).not.toBeInTheDocument();
-  });
-
-  it("offers no switch for a specialisation on a backend without the flag", () => {
-    renderInspector(agentFixture({ parent_agent_id: "base-1" }));
-
-    expect(
-      screen.queryByRole("switch", { name: SWITCH_NAME }),
-    ).not.toBeInTheDocument();
-  });
-
-  it("submits runtime_inherited:false when the switch is turned off", async () => {
-    const onUpdate = renderInspector(
-      agentFixture({ parent_agent_id: "base-1", runtime_inherited: true }),
-    );
-    const user = userEvent.setup();
-
-    await user.click(screen.getByRole("switch", { name: SWITCH_NAME }));
-
-    expect(onUpdate).toHaveBeenCalledWith("agent-1", {
-      runtime_inherited: false,
-    });
-  });
-
-  it("submits runtime_inherited:true when the switch is turned on", async () => {
-    const onUpdate = renderInspector(
-      agentFixture({ parent_agent_id: "base-1", runtime_inherited: false }),
-    );
-    const user = userEvent.setup();
-
-    await user.click(screen.getByRole("switch", { name: SWITCH_NAME }));
-
-    expect(onUpdate).toHaveBeenCalledWith("agent-1", {
-      runtime_inherited: true,
-    });
+    expect(screen.queryByRole("switch", { name: SWITCH_NAME })).not.toBeInTheDocument();
+    expect(screen.getByText(/speed follow the base role/)).toBeInTheDocument();
   });
 
   it("locks the runtime profile controls while following, and only then", () => {
     renderInspector(
       agentFixture({ parent_agent_id: "base-1", runtime_inherited: true }),
     );
-    for (const testId of [
-      "runtime-picker",
-      "model-picker",
-      "thinking-field",
-      "service-tier-field",
-    ]) {
-      expect(screen.getByTestId(testId)).toHaveAttribute(
-        "data-can-edit",
-        "false",
-      );
+    for (const testId of ["runtime-picker", "model-picker"]) {
+      expect(screen.getByTestId(testId)).toHaveAttribute("data-can-edit", "false");
     }
   });
 
@@ -176,16 +114,8 @@ describe("AgentDetailInspector runtime inheritance", () => {
     renderInspector(
       agentFixture({ parent_agent_id: "base-1", runtime_inherited: false }),
     );
-    for (const testId of [
-      "runtime-picker",
-      "model-picker",
-      "thinking-field",
-      "service-tier-field",
-    ]) {
-      expect(screen.getByTestId(testId)).toHaveAttribute(
-        "data-can-edit",
-        "true",
-      );
+    for (const testId of ["runtime-picker", "model-picker"]) {
+      expect(screen.getByTestId(testId)).toHaveAttribute("data-can-edit", "true");
     }
   });
 
@@ -195,13 +125,25 @@ describe("AgentDetailInspector runtime inheritance", () => {
       { canEdit: false },
     );
 
-    expect(screen.getByTestId("runtime-picker")).toHaveAttribute(
-      "data-can-edit",
-      "false",
-    );
-    expect(screen.getByRole("switch", { name: SWITCH_NAME })).toHaveAttribute(
-      "aria-disabled",
-      "true",
-    );
+    expect(screen.getByTestId("runtime-picker")).toHaveAttribute("data-can-edit", "false");
+  });
+
+  it("shows only what a person must decide (DENE-2009)", () => {
+    renderInspector(agentFixture({}));
+    expect(screen.getByText("Model")).toBeInTheDocument();
+    for (const gone of [
+      "Series",
+      "Standby runtime",
+      "Concurrency",
+      "Auto retry",
+      "Routing",
+      "Tier",
+      "Dispatch",
+      "Usage",
+    ]) {
+      expect(screen.queryByText(gone)).not.toBeInTheDocument();
+    }
+    expect(screen.queryByTestId("thinking-field")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("service-tier-field")).not.toBeInTheDocument();
   });
 });

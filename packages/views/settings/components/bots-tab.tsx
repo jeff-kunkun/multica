@@ -2,31 +2,21 @@
 
 import { useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Check, ChevronRight, Copy, MoreHorizontal } from "lucide-react";
+import { Copy, MoreHorizontal } from "lucide-react";
 import { toast } from "sonner";
-import type { ExternalBot, ExternalBotKeyResponse } from "@multica/core/types";
+import type { ExternalBot } from "@multica/core/types";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useConfigStore } from "@multica/core/config";
 import { useCurrentMember } from "@multica/core/permissions";
 import {
   externalBotListOptions,
   useDeleteExternalBot,
-  useExternalBotSetupText,
-  useRotateExternalBotKey,
   useStopExternalBot,
 } from "@multica/core/bots";
 import { cn } from "@multica/ui/lib/utils";
 import { copyText } from "@multica/ui/lib/clipboard";
-import { Button, buttonVariants } from "@multica/ui/components/ui/button";
+import { Button } from "@multica/ui/components/ui/button";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@multica/ui/components/ui/dialog";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -41,21 +31,19 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@multica/ui/components/ui/dropdown-menu";
-import { AppLink, useNavigation } from "../../navigation";
 import { useLocale, useT } from "../../i18n";
 import { SettingsCard, SettingsRow, SettingsSection, SettingsTab } from "./settings-layout";
-import { resolveSettingsLocation, settingsHref } from "./settings-navigation";
-import { BotWakePage } from "./bot-wake-page";
 
-type Confirm = { kind: "stop" | "rotate" | "delete"; bot: ExternalBot };
+type Confirm = { kind: "stop" | "delete"; bot: ExternalBot };
 
 // External bots (DENE-1788): a Bot (Grok, ...) works with the power of the
 // admin who let it in. Since DENE-2009 the admin only copies one sentence to
 // the Bot; the Bot asks to connect, the admin agrees once, and the key goes
-// straight to the Bot — no key is ever shown here.
+// straight to the Bot — no key is ever shown here. The Bot brings its own
+// address with the request, so messages and decisions reach it without any
+// further setting: a listed bot can only be stopped or removed.
 // The nav entry is admin-only; the server enforces the same gate.
 // `lead` renders above the list (settings puts "what goes to my Bot" there).
 export function BotsTab({ lead }: { lead?: ReactNode } = {}) {
@@ -65,34 +53,9 @@ export function BotsTab({ lead }: { lead?: ReactNode } = {}) {
   const { role } = useCurrentMember(wsId);
   const canManage = role === "owner" || role === "admin";
   const { data: bots = [], isLoading, isError } = useQuery(externalBotListOptions(wsId, canManage));
-  const navigation = useNavigation();
-  const requested = resolveSettingsLocation(navigation.searchParams).integration;
-  const selected = bots.find((bot) => bot.id === requested);
-  const href = (integration?: string) =>
-    settingsHref(navigation.pathname, navigation.searchParams, "bots", { integration });
-
-  const rotate = useRotateExternalBotKey(wsId);
   const stop = useStopExternalBot(wsId);
   const remove = useDeleteExternalBot(wsId);
-  const setupText = useExternalBotSetupText(wsId);
 
-  // Same text the key came with, key swapped for a placeholder, so a bot that
-  // lost its instructions gets them again without a new key.
-  const copySetupFor = async (bot: ExternalBot) => {
-    try {
-      const res = await setupText.mutateAsync(bot.id);
-      if (await copyText(res.setup_text)) {
-        toast.success(t(($) => $.bots.toast_setup_copied, { name: bot.name }));
-      } else {
-        toast.error(t(($) => $.bots.toast_failed));
-      }
-    } catch (e) {
-      fail(e);
-    }
-  };
-
-  const [issued, setIssued] = useState<ExternalBotKeyResponse | null>(null);
-  const [copied, setCopied] = useState(false);
   const [confirm, setConfirm] = useState<Confirm | null>(null);
 
   const fail = (e: unknown) =>
@@ -101,7 +64,7 @@ export function BotsTab({ lead }: { lead?: ReactNode } = {}) {
   const serverUrl =
     useConfigStore((s) => s.daemonServerUrl) || (typeof window !== "undefined" ? window.location.origin : "");
   const connectText = t(($) => $.bots.connect.instruction, {
-    command: `multica bot connect --server-url ${serverUrl} --name Grok`,
+    command: `multica bot connect --server-url ${serverUrl} --name Grok --webhook-url <URL> --webhook-key <KEY>`,
   });
   const copyConnect = async () => {
     if (await copyText(connectText)) {
@@ -134,10 +97,8 @@ export function BotsTab({ lead }: { lead?: ReactNode } = {}) {
       if (kind === "stop") {
         await stop.mutateAsync(bot.id);
         toast.success(t(($) => $.bots.toast_stopped, { name: bot.name }));
-      } else if (kind === "delete") {
-        await remove.mutateAsync(bot.id);
       } else {
-        setIssued(await rotate.mutateAsync(bot.id));
+        await remove.mutateAsync(bot.id);
       }
       setConfirm(null);
     } catch (e) {
@@ -145,20 +106,7 @@ export function BotsTab({ lead }: { lead?: ReactNode } = {}) {
     }
   };
 
-  const copySetup = async () => {
-    if (!issued) return;
-    if (await copyText(issued.setup_text)) {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    }
-  };
-
-  const closeIssued = () => {
-    setIssued(null);
-    setCopied(false);
-  };
-
-  const busy = stop.isPending || rotate.isPending || remove.isPending;
+  const busy = stop.isPending || remove.isPending;
 
   const confirmText = (c: Confirm) => {
     const name = c.bot.name;
@@ -169,12 +117,6 @@ export function BotsTab({ lead }: { lead?: ReactNode } = {}) {
           description: t(($) => $.bots.stop_dialog.description),
           confirm: t(($) => $.bots.stop),
         };
-      case "rotate":
-        return {
-          title: t(($) => $.bots.rotate_dialog.title, { name }),
-          description: t(($) => $.bots.rotate_dialog.description),
-          confirm: t(($) => $.bots.new_key),
-        };
       case "delete":
         return {
           title: t(($) => $.bots.delete_dialog.title, { name }),
@@ -184,36 +126,6 @@ export function BotsTab({ lead }: { lead?: ReactNode } = {}) {
     }
   };
   const confirmCopy = confirm ? confirmText(confirm) : null;
-
-  // ?tab=bots&integration=<botId> opens that bot's wake settings.
-  if (selected) {
-    return (
-      <SettingsTab
-        title={selected.name}
-        description={t(($) => $.bots.wake.description)}
-        scope="workspace"
-        breadcrumb={
-          <nav
-            aria-label={t(($) => $.bots.wake.breadcrumb)}
-            className="flex items-center gap-1.5 text-caption text-muted-foreground"
-          >
-            <AppLink
-              href={href()}
-              className="rounded-sm hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring"
-            >
-              {t(($) => $.bots.title)}
-            </AppLink>
-            <ChevronRight aria-hidden="true" className="size-3" />
-            <span aria-current="page" className="truncate text-foreground">
-              {selected.name}
-            </span>
-          </nav>
-        }
-      >
-        <BotWakePage bot={selected} />
-      </SettingsTab>
-    );
-  }
 
   return (
     <SettingsTab
@@ -296,13 +208,6 @@ export function BotsTab({ lead }: { lead?: ReactNode } = {}) {
                   .filter(Boolean)
                   .join(" · ")}
               >
-                <div className="flex items-center gap-1">
-                <AppLink
-                  href={href(bot.id)}
-                  className={cn(buttonVariants({ variant: "outline", size: "sm" }), "h-11 sm:h-8")}
-                >
-                  {t(($) => $.bots.wake.open)}
-                </AppLink>
                 <DropdownMenu>
                   <DropdownMenuTrigger
                     render={
@@ -317,13 +222,6 @@ export function BotsTab({ lead }: { lead?: ReactNode } = {}) {
                     }
                   />
                   <DropdownMenuContent align="end" className="w-auto">
-                    <DropdownMenuItem onClick={() => void copySetupFor(bot)}>
-                      {t(($) => $.bots.copy_setup)}
-                    </DropdownMenuItem>
-                    <DropdownMenuItem onClick={() => setConfirm({ kind: "rotate", bot })}>
-                      {t(($) => $.bots.new_key)}
-                    </DropdownMenuItem>
-                    <DropdownMenuSeparator />
                     {bot.status === "stopped" ? (
                       <DropdownMenuItem
                         variant="destructive"
@@ -341,36 +239,11 @@ export function BotsTab({ lead }: { lead?: ReactNode } = {}) {
                     )}
                   </DropdownMenuContent>
                 </DropdownMenu>
-                </div>
               </SettingsRow>
             ))}
           </SettingsCard>
         )}
       </SettingsSection>
-
-      <Dialog open={!!issued} onOpenChange={(v) => { if (!v) closeIssued(); }}>
-        <DialogContent className="sm:max-w-2xl">
-          <DialogHeader>
-            <DialogTitle>
-              {t(($) => $.bots.key_dialog.title, { name: issued?.bot.name ?? "" })}
-            </DialogTitle>
-            <DialogDescription>{t(($) => $.bots.key_dialog.description)}</DialogDescription>
-          </DialogHeader>
-          <pre
-            data-testid="bot-setup-text"
-            className="max-h-[50vh] min-w-0 overflow-auto rounded-md border bg-muted/50 px-3 py-2 font-mono text-caption leading-5 whitespace-pre-wrap break-all select-all"
-          >
-            {issued?.setup_text}
-          </pre>
-          <DialogFooter>
-            <Button variant="outline" onClick={copySetup}>
-              {copied ? <Check className="size-4" /> : <Copy className="size-4" />}
-              {copied ? t(($) => $.bots.key_dialog.copied) : t(($) => $.bots.key_dialog.copy)}
-            </Button>
-            <Button onClick={closeIssued}>{t(($) => $.bots.key_dialog.done)}</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
 
       <AlertDialog open={!!confirm} onOpenChange={(v) => { if (!v && !busy) setConfirm(null); }}>
         <AlertDialogContent>
@@ -387,7 +260,7 @@ export function BotsTab({ lead }: { lead?: ReactNode } = {}) {
               <AlertDialogFooter>
                 <AlertDialogCancel disabled={busy}>{t(($) => $.bots.cancel)}</AlertDialogCancel>
                 <AlertDialogAction
-                  variant={confirm.kind === "rotate" ? "default" : "destructive"}
+                  variant="destructive"
                   disabled={busy}
                   onClick={(e) => {
                     e.preventDefault();

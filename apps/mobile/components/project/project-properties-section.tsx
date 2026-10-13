@@ -1,6 +1,6 @@
 /**
- * Project properties section. Tappable rows for Status / Priority / Lead /
- * Domain / Executors.
+ * Project properties section. Tappable rows for Status / Lead. Since
+ * DENE-2009 priority, direction and executors run on defaults, as on web.
  * Each row opens a picker sheet via the corresponding `onPress*` callback.
  *
  * Layout mirrors iOS Settings rows: label on left, current value on right
@@ -16,16 +16,8 @@ import type { Project } from "@multica/core/types";
 import { Text } from "@/components/ui/text";
 import { ActorAvatar } from "@/components/ui/actor-avatar";
 import { ProjectStatusIcon } from "@/components/ui/project-status-icon";
-import { ProjectPriorityIcon } from "@/components/ui/project-priority-icon";
-import {
-  projectPriorityLabel,
-  projectStatusLabel,
-} from "@/lib/project-status";
-import { useQuery } from "@tanstack/react-query";
+import { projectStatusLabel } from "@/lib/project-status";
 import { useActorLookup } from "@/data/use-actor-name";
-import { domainListOptions } from "@/data/queries/domains";
-import { agentListOptions } from "@/data/queries/agents";
-import { useWorkspaceStore } from "@/data/workspace-store";
 import { useColorScheme } from "@/lib/use-color-scheme";
 import { THEME } from "@/lib/theme";
 import { useT } from "@/lib/i18n";
@@ -33,31 +25,16 @@ import { useT } from "@/lib/i18n";
 interface Props {
   project: Project;
   onPressStatus: () => void;
-  onPressPriority: () => void;
   onPressLead: () => void;
-  onPressDomain: () => void;
-  onPressExecutors: () => void;
 }
 
 export function ProjectPropertiesSection({
   project,
   onPressStatus,
-  onPressPriority,
   onPressLead,
-  onPressDomain,
-  onPressExecutors,
 }: Props) {
   const { getName } = useActorLookup();
   const { t } = useT("projects");
-  const wsId = useWorkspaceStore((s) => s.currentWorkspaceId);
-  const { data: domains = [] } = useQuery(domainListOptions(wsId));
-  const domainNames = domains
-    .filter((d) => (project.domain_ids ?? []).includes(d.id))
-    .map((d) => d.name);
-  const { data: agents = [] } = useQuery(agentListOptions(wsId));
-  const executorNames = (project.executor_agent_ids ?? [])
-    .map((id) => agents.find((a) => a.id === id)?.name)
-    .filter((n): n is string => Boolean(n));
   const leadName =
     project.lead_type && project.lead_id
       ? getName(project.lead_type, project.lead_id)
@@ -72,17 +49,6 @@ export function ProjectPropertiesSection({
         right={
           <Text className="text-sm text-foreground">
             {projectStatusLabel(project.status)}
-          </Text>
-        }
-      />
-      <Separator />
-      <Row
-        label={t("properties.priority")}
-        onPress={onPressPriority}
-        left={<ProjectPriorityIcon priority={project.priority} size={16} />}
-        right={
-          <Text className="text-sm text-foreground">
-            {projectPriorityLabel(project.priority)}
           </Text>
         }
       />
@@ -111,46 +77,6 @@ export function ProjectPropertiesSection({
             }
           >
             {leadName ?? t("properties.unassigned")}
-          </Text>
-        }
-      />
-      <Separator />
-      <Row
-        label={t("common:domain.label")}
-        onPress={onPressDomain}
-        left={null}
-        right={
-          <Text
-            numberOfLines={1}
-            className={
-              domainNames.length > 0
-                ? "flex-1 text-sm text-foreground"
-                : "flex-1 text-sm text-muted-foreground"
-            }
-          >
-            {domainNames.length > 0
-              ? domainNames.join("、")
-              : t("common:domain.generic")}
-          </Text>
-        }
-      />
-      <Separator />
-      <Row
-        label={t("properties.executors")}
-        onPress={onPressExecutors}
-        left={null}
-        right={
-          <Text
-            numberOfLines={1}
-            className={
-              executorNames.length > 0
-                ? "flex-1 text-sm text-foreground"
-                : "flex-1 text-sm text-muted-foreground"
-            }
-          >
-            {executorNames.length > 0
-              ? executorNames.join("、")
-              : t("properties.executors_any")}
           </Text>
         }
       />

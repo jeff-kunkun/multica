@@ -1,5 +1,4 @@
 "use client";
-import { ReferenceProjectsSetting } from "./reference-projects-setting";
 
 import { useMemo, useState, useCallback, useRef, useEffect } from "react";
 import { useDefaultLayout, usePanelRef } from "react-resizable-panels";
@@ -8,32 +7,27 @@ import { useQuery } from "@tanstack/react-query";
 import { cn } from "@multica/ui/lib/utils";
 import { copyText } from "@multica/ui/lib/clipboard";
 import { toast } from "sonner";
-import type { ProjectStatus, ProjectPriority } from "@multica/core/types";
+import type { ProjectStatus } from "@multica/core/types";
 import { useAuthStore } from "@multica/core/auth";
 import { projectDetailOptions } from "@multica/core/projects/queries";
 import { useUpdateProject, useDeleteProject } from "@multica/core/projects/mutations";
 import { pinListOptions } from "@multica/core/pins";
 import { useCreatePin, useDeletePin } from "@multica/core/pins";
 import { memberListOptions, agentListOptions } from "@multica/core/workspace/queries";
-import { ProjectExecutorSelect } from "./project-executor-select";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useModalStore } from "@multica/core/modals";
 import { useIssuesScope } from "@multica/core/issues/stores";
 import { chatDirectoryOptions, useRecentContextStore } from "@multica/core/chat";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { useActorName } from "@multica/core/workspace/hooks";
-import { PROJECT_STATUS_ORDER, PROJECT_STATUS_CONFIG, PROJECT_PRIORITY_ORDER } from "@multica/core/projects/config";
+import { PROJECT_STATUS_ORDER, PROJECT_STATUS_CONFIG } from "@multica/core/projects/config";
 import { getProjectIssueMetrics } from "./project-issue-metrics";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { AppLink, currentPath, useNavigation } from "../../navigation";
 import { TitleEditor, ContentEditor, ReadonlyContent, type ContentEditorRef } from "../../editor";
-import { PriorityIcon } from "../../issues/components/priority-icon";
-import { ProjectResourcesSection } from "./project-resources-section";
 import { ProjectCodeSection } from "./project-code-section";
 import { ProjectMemoryCard } from "./project-memory-card";
 import { ProjectMembersSection } from "./project-members-section";
-import { ProjectStartDatePicker } from "./project-start-date-picker";
-import { ProjectDueDatePicker } from "./project-due-date-picker";
 import { IssueSurface } from "../../issues/surface/issue-surface";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { Button } from "@multica/ui/components/ui/button";
@@ -78,9 +72,7 @@ import {
   AlertDialogTitle,
 } from "@multica/ui/components/ui/alert-dialog";
 import { useT } from "../../i18n";
-import { DomainSelect } from "../../domains/domain-select";
-import { domainListOptions } from "@multica/core/domains";
-import { useProjectStatusLabels, useProjectPriorityLabels } from "./labels";
+import { useProjectStatusLabels } from "./labels";
 import { matchesPinyin } from "../../editor/extensions/pinyin-match";
 import { ShareScopeDialog, ShareScopeTrigger } from "../../common/share-scope-dialog";
 
@@ -114,7 +106,6 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
   const { t: tChat } = useT("chat");
   const { isGuest } = useGuestReadOnly();
   const statusLabels = useProjectStatusLabels();
-  const priorityLabels = useProjectPriorityLabels();
   const wsId = useWorkspaceId();
   const wsPaths = useWorkspacePaths();
   const router = useNavigation();
@@ -143,8 +134,6 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
   );
   const { data: members = [] } = useQuery(memberListOptions(wsId));
   const { data: agents = [] } = useQuery(agentListOptions(wsId));
-  const { data: domains = [] } = useQuery(domainListOptions(wsId));
-  const { t: tCommon } = useT("common");
   const { getActorName } = useActorName();
   const updateProject = useUpdateProject();
   const deleteProject = useDeleteProject();
@@ -341,27 +330,9 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
               </DropdownMenuContent>
             </DropdownMenu>
           </PropRow>
-          <PropRow label={t(($) => $.table.priority)}>
-            <DropdownMenu>
-              <DropdownMenuTrigger
-                render={
-                  <button type="button" className="inline-flex items-center gap-1.5 text-caption hover:text-foreground transition-colors">
-                    <PriorityIcon priority={project.priority} />
-                    <span>{priorityLabels[project.priority]}</span>
-                  </button>
-                }
-              />
-              <DropdownMenuContent align="start" className="w-44">
-                {PROJECT_PRIORITY_ORDER.map((p) => (
-                  <DropdownMenuItem key={p} onClick={() => handleUpdateField({ priority: p as ProjectPriority })}>
-                    <PriorityIcon priority={p} />
-                    <span>{priorityLabels[p]}</span>
-                    {p === project.priority && <Check className="ml-auto h-3.5 w-3.5" />}
-                  </DropdownMenuItem>
-                ))}
-              </DropdownMenuContent>
-            </DropdownMenu>
-          </PropRow>
+          {/* DENE-2009: priority, dates, directions and executors run on
+              system defaults (routing picks seats on its own) and stay
+              changeable through `multica project update`. */}
           <PropRow label={t(($) => $.table.lead)}>
             <Popover open={leadOpen} onOpenChange={(v) => { setLeadOpen(v); if (!v) setLeadFilter(""); }}>
               <PopoverTrigger
@@ -436,29 +407,6 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
               </PopoverContent>
             </Popover>
           </PropRow>
-          <PropRow label={t(($) => $.detail.prop_start_date)}>
-            <ProjectStartDatePicker startDate={project.start_date} onUpdate={handleUpdateField} />
-          </PropRow>
-          <PropRow label={t(($) => $.detail.prop_due_date)}>
-            <ProjectDueDatePicker dueDate={project.due_date} onUpdate={handleUpdateField} />
-          </PropRow>
-          <PropRow label={tCommon(($) => $.domain.label)}>
-            <DomainSelect
-              multiple
-              header={tCommon(($) => $.domain.project_header)}
-              options={domains.map((d) => ({ id: d.id, name: d.name }))}
-              selected={project.domain_ids ?? []}
-              onChange={(ids) => handleUpdateField({ domain_ids: ids })}
-            />
-          </PropRow>
-          <PropRow label={t(($) => $.detail.prop_executors)}>
-            <ProjectExecutorSelect
-              agents={agents}
-              selected={project.executor_agent_ids ?? []}
-              canEdit={isWorkspaceAdmin}
-              onChange={(ids) => handleUpdateField({ executor_agent_ids: ids })}
-            />
-          </PropRow>
         </div>}
       </div>
 
@@ -522,10 +470,8 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
       </div>
 
       {/* Resources */}
-      <ReferenceProjectsSetting kind="projects" id={projectId} canWrite={!isGuest} />
       <ProjectMemoryCard projectId={projectId} />
       <ProjectCodeSection projectId={projectId} />
-      <ProjectResourcesSection projectId={projectId} />
 
       <div id="project-members-section">
         <ProjectMembersSection

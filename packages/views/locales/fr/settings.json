@@ -725,7 +725,7 @@
       "label": "Les envoyer à mon Bot",
       "none": "Aucun Bot (dans l'app seulement)",
       "no_bots": "Vous n'avez pas encore de Bot. Ajoutez-en un dans Bots.",
-      "state_none": "Choisissez votre propre Bot ; ce qui attend votre décision lui est envoyé.",
+      "state_none": "Dès que tu acceptes la demande de connexion d'un Bot, ce qui attend ta décision lui est envoyé automatiquement.",
       "state_ok": "Ce qui attend votre décision va d'abord à {{name}}.",
       "state_unverified": "En attente de la confirmation de {{name}}.",
       "state_broken": "{{name}} est injoignable ; les décisions reviennent dans l'app.",
@@ -2468,7 +2468,7 @@
       "description": "Copiez cette phrase pour votre bot. Il renvoie un lien ; acceptez une fois et c'est connecté, sans aucune clé à manipuler.",
       "copy": "Copier pour le bot",
       "copied": "Copié, envoyez-le à votre bot",
-      "instruction": "Exécute ceci sur ta machine : {{command}}\nPuis envoie-moi le lien affiché ; dès que j'accepte, tu es connecté."
+      "instruction": "Exécute ceci sur ta machine, en remplaçant <URL> et <KEY> par ta propre adresse HTTPS de réception des messages et sa clé : {{command}}\nEnvoie-moi ensuite le lien affiché ; dès que j'accepte, tu es connecté et les messages du groupe comme mes décisions te parviennent."
     }
   },
   "overview": {

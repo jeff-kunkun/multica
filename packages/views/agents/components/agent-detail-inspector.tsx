@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import type {
   Agent,
@@ -9,16 +9,12 @@ import type {
 } from "@multica/core/types";
 import {
   AGENT_DESCRIPTION_MAX_LENGTH,
-  AGENT_MAX_CONCURRENT_TASKS_MAX,
-  AGENT_MAX_CONCURRENT_TASKS_MIN,
-  isAgentAutoRetryEnabled,
   isAgentWorkEnabled,
 } from "@multica/core/agents";
 import {
   isRuntimeUsableForUser,
   runtimeModelsOptions,
 } from "@multica/core/runtimes";
-import { isImeComposing } from "@multica/core/utils";
 import { Input } from "@multica/ui/components/ui/input";
 import { Switch } from "@multica/ui/components/ui/switch";
 import { Textarea } from "@multica/ui/components/ui/textarea";
@@ -38,15 +34,6 @@ import {
   type ModelCatalog,
 } from "./inspector/model-change-cleanup";
 import { RuntimePicker } from "./inspector/runtime-picker";
-import { FallbackRuntimePicker } from "./inspector/fallback-runtime-field";
-import { DispatchProjectsField } from "./inspector/dispatch-projects-field";
-import { ThinkingSettingField } from "./inspector/thinking-prop-row";
-import { ServiceTierSettingField } from "./inspector/service-tier-setting-field";
-import {
-  DispatchModeSegmented,
-  RoutingTierSegmented,
-  RoutingUsageSegmented,
-} from "./inspector/routing-seat-fields";
 import {
   canEditRuntimeProfile,
   runtimeInheritanceState,
@@ -75,6 +62,11 @@ function profileDraftsEqual(left: ProfileDraft, right: ProfileDraft) {
  * Full-width General settings form. Every editable value is presented as an
  * explicit field; compact inspector chips are used only through their
  * settings-field variants, where the whole control is a visible click target.
+ *
+ * DENE-2009: only what a person must decide is shown. Series, following the
+ * base role, fallback runtime, thinking, speed, concurrency, auto-retry and
+ * the routing seat run on system defaults (or the saved value) and stay
+ * changeable through `multica agent update`.
  */
 export function AgentDetailInspector({
   agent,
@@ -91,25 +83,6 @@ export function AgentDetailInspector({
     (data: Record<string, unknown>) => onUpdate(agent.id, data),
     [agent.id, onUpdate],
   );
-
-  const [series, setSeries] = useState(agent.series_override ?? "");
-  const previousSeries = useRef({ id: agent.id, value: agent.series_override ?? "" });
-  useEffect(() => {
-    const previous = previousSeries.current;
-    const next = agent.series_override ?? "";
-    setSeries((draft) => previous.id !== agent.id || draft === previous.value ? next : draft);
-    previousSeries.current = { id: agent.id, value: next };
-  }, [agent.id, agent.series_override]);
-  const saveSeries = useCallback(async (value: string) => {
-    await update({ series: value });
-  }, [update]);
-  const seriesAutoSave = useAutoSave({
-    value: series.trim(),
-    savedValue: agent.series_override ?? "",
-    onSave: saveSeries,
-    enabled: canEdit,
-    isEqual: (left, right) => left === right,
-  });
 
   const [name, setName] = useState(agent.name);
   const [description, setDescription] = useState(agent.description ?? "");
@@ -156,33 +129,10 @@ export function AgentDetailInspector({
   const canDiscoverRuntimeModels = isOnline && canReadRuntime;
   const nameInvalid = name.trim().length === 0;
 
-  // Runtime inheritance (DENE-505). `unknown` covers both a base role — which
-  // cannot follow anything — and a backend that predates the flag; neither may
-  // be offered a switch. While following, the runtime-profile controls below
-  // stay visible (they are the values this agent actually runs with) but
-  // read-only: the server 400s a runtime field sent alongside
-  // `runtime_inherited: true`, so the toggle is the only honest way out.
-  const runtimeInheritance = runtimeInheritanceState(agent);
-  const runtimeInherited = runtimeInheritance === "inherited";
+  // Runtime inheritance (DENE-505): while a specialisation follows its base
+  // role the runtime and model stay visible but read-only.
+  const runtimeInherited = runtimeInheritanceState(agent) === "inherited";
   const canEditRuntime = canEditRuntimeProfile(agent, canEdit);
-  const [inheritanceSaving, setInheritanceSaving] = useState(false);
-  const setRuntimeInheritance = useCallback(
-    async (inherited: boolean) => {
-      setInheritanceSaving(true);
-      try {
-        // The switch is driven by server state and the page patches the cache
-        // optimistically, then rolls it back and toasts on failure — so a
-        // refused write (a base role, a private base runtime) simply leaves the
-        // switch where it was. Not re-thrown: nothing here can recover.
-        await update({ runtime_inherited: inherited });
-      } catch {
-        // Handled by the page (`handleUpdate`).
-      } finally {
-        setInheritanceSaving(false);
-      }
-    },
-    [update],
-  );
 
   // Same query the Thinking / Speed fields already use, so switching model
   // costs no extra request. `null` = not authoritative (offline runtime, still
@@ -296,36 +246,6 @@ export function AgentDetailInspector({
               />
             </div>
           </SettingsRow>
-          <SettingsRow
-            label={t(($) => $.inspector.prop_series)}
-            description={canEdit
-              ? t(($) => $.inspector.prop_series_hint)
-              : t(($) => $.inspector.series_readonly)}
-          >
-            <div className="w-full min-w-0 space-y-1 sm:max-w-64">
-              <Input
-                aria-label={t(($) => $.inspector.prop_series)}
-                value={series}
-                placeholder={agent.automatic_series || agent.series || t(($) => $.inspector.series_unknown)}
-                disabled={!canEdit}
-                maxLength={64}
-                className="min-h-11"
-                onChange={(event) => setSeries(event.target.value)}
-                onBlur={seriesAutoSave.flush}
-              />
-              <div className="flex flex-wrap items-center justify-between gap-2 text-caption text-muted-foreground">
-                <span>{agent.series_source === "manual"
-                  ? t(($) => $.inspector.series_manual)
-                  : t(($) => $.inspector.series_auto)}</span>
-                <SettingsSaveState
-                  status={seriesAutoSave.status}
-                  savingLabel={ts(($) => $.auto_save.saving)}
-                  savedLabel={ts(($) => $.auto_save.saved)}
-                  errorLabel={ts(($) => $.auto_save.failed)}
-                />
-              </div>
-            </div>
-          </SettingsRow>
         </SettingsCard>
       </SettingsSection>
 
@@ -333,27 +253,11 @@ export function AgentDetailInspector({
         title={t(($) => $.inspector.section_execution)}
       >
         <SettingsCard>
-          {runtimeInheritance !== "unknown" && (
-            <SettingsRow
-              label={t(($) => $.inspector.prop_runtime_inherit)}
-              description={
-                runtimeInherited
-                  ? t(($) => $.inspector.prop_runtime_inherit_hint_on)
-                  : t(($) => $.inspector.prop_runtime_inherit_hint_off)
-              }
-            >
-              <Switch
-                checked={runtimeInherited}
-                disabled={!canEdit || inheritanceSaving}
-                onCheckedChange={(checked) => {
-                  void setRuntimeInheritance(checked);
-                }}
-                aria-label={t(($) => $.inspector.prop_runtime_inherit)}
-              />
-            </SettingsRow>
-          )}
           <SettingsRow
             label={t(($) => $.inspector.prop_runtime)}
+            description={
+              runtimeInherited ? t(($) => $.inspector.prop_runtime_inherit_hint_on) : undefined
+            }
             size="select-wide"
           >
             <RuntimePicker
@@ -378,20 +282,6 @@ export function AgentDetailInspector({
             />
           </SettingsRow>
           <SettingsRow
-            label={t(($) => $.inspector.prop_fallback_runtime)}
-            description={t(($) => $.inspector.prop_fallback_runtime_hint)}
-            size="select-wide"
-          >
-            <FallbackRuntimePicker
-              value={agent.fallback_runtime_id ?? ""}
-              primaryRuntimeId={agent.runtime_id ?? ""}
-              runtimes={runtimes}
-              currentUserId={currentUserId ?? ""}
-              canEdit={canEditRuntime}
-              onChange={(id) => update({ fallback_runtime_id: id })}
-            />
-          </SettingsRow>
-          <SettingsRow
             label={t(($) => $.inspector.prop_model)}
             size="select-wide"
           >
@@ -404,40 +294,6 @@ export function AgentDetailInspector({
               value={agent.model ?? ""}
               canEdit={canEditRuntime}
               onChange={handleModelChange}
-            />
-          </SettingsRow>
-          <ThinkingSettingField
-            label={t(($) => $.inspector.prop_thinking)}
-            runtimeId={agent.runtime_id}
-            runtimeOnline={canDiscoverRuntimeModels}
-            agentId={agent.id}
-            provider={runtime?.provider ?? ""}
-            model={agent.model ?? ""}
-            value={agent.thinking_level ?? ""}
-            canEdit={canEditRuntime}
-            onChange={(thinkingLevel) =>
-              update({ thinking_level: thinkingLevel })
-            }
-          />
-          <ServiceTierSettingField
-            label={t(($) => $.inspector.prop_speed)}
-            runtimeId={agent.runtime_id}
-            runtimeOnline={canDiscoverRuntimeModels}
-            agentId={agent.id}
-            provider={runtime?.provider ?? ""}
-            model={agent.model ?? ""}
-            value={agent.service_tier ?? ""}
-            canEdit={canEditRuntime}
-            onChange={(serviceTier) => update({ service_tier: serviceTier })}
-          />
-          <SettingsRow
-            label={t(($) => $.inspector.prop_concurrency)}
-            size="select-wide"
-          >
-            <ConcurrencyField
-              value={agent.max_concurrent_tasks}
-              canEdit={canEdit}
-              onSave={(next) => update({ max_concurrent_tasks: next })}
             />
           </SettingsRow>
           <SettingsRow
@@ -461,140 +317,9 @@ export function AgentDetailInspector({
               aria-label={t(($) => $.inspector.prop_work_enabled)}
             />
           </SettingsRow>
-          <SettingsRow
-            label={t(($) => $.inspector.prop_auto_retry)}
-            description={t(($) => $.inspector.prop_auto_retry_hint)}
-          >
-            <Switch
-              checked={isAgentAutoRetryEnabled(agent)}
-              disabled={!canEdit}
-              onCheckedChange={(checked) => {
-                void update({ auto_retry_enabled: checked });
-              }}
-              aria-label={t(($) => $.inspector.prop_auto_retry)}
-            />
-          </SettingsRow>
         </SettingsCard>
       </SettingsSection>
 
-      {/* Tier, dispatch mode and usage travel with the base role while the
-          agent follows it; the server refuses them until following is off. */}
-      <SettingsSection
-        title={t(($) => $.inspector.section_routing)}
-        description={
-          runtimeInherited ? t(($) => $.inspector.routing_inherited_hint) : undefined
-        }
-      >
-        <SettingsCard>
-          <SettingsRow
-            label={t(($) => $.inspector.prop_routing_tier)}
-            description={t(($) => $.inspector.prop_routing_tier_hint)}
-            size="none"
-          >
-            <RoutingTierSegmented
-              value={agent.routing_tier}
-              canEdit={canEditRuntime}
-              onChange={(routingTier) => update({ routing_tier: routingTier })}
-            />
-          </SettingsRow>
-          <SettingsRow
-            label={t(($) => $.inspector.prop_dispatch_mode)}
-            description={t(($) => $.inspector.prop_dispatch_mode_hint)}
-            size="none"
-          >
-            <DispatchModeSegmented
-              value={agent.dispatch_mode}
-              canEdit={canEditRuntime}
-              onChange={(dispatchMode) => update({ dispatch_mode: dispatchMode })}
-            />
-          </SettingsRow>
-          <SettingsRow
-            label={t(($) => $.inspector.prop_dispatch_projects)}
-            description={t(($) => $.inspector.prop_dispatch_projects_hint)}
-            size="none"
-          >
-            {/* The seat's own setting: a following specialisation keeps it. */}
-            <DispatchProjectsField
-              wsId={agent.workspace_id}
-              value={agent.dispatch_projects}
-              canEdit={canEdit}
-              onChange={(dispatchProjects) => update({ dispatch_projects: dispatchProjects })}
-            />
-          </SettingsRow>
-          <SettingsRow
-            label={t(($) => $.inspector.prop_routing_usage)}
-            description={t(($) => $.inspector.prop_routing_usage_hint)}
-            size="none"
-          >
-            <RoutingUsageSegmented
-              value={agent.routing_usage}
-              canEdit={canEditRuntime}
-              onChange={(routingUsage) => update({ routing_usage: routingUsage })}
-            />
-          </SettingsRow>
-        </SettingsCard>
-      </SettingsSection>
-    </div>
-  );
-}
-
-function ConcurrencyField({
-  value,
-  canEdit,
-  onSave,
-}: {
-  value: number;
-  canEdit: boolean;
-  onSave: (next: number) => Promise<void>;
-}) {
-  const { t } = useT("agents");
-  const [draft, setDraft] = useState(String(value));
-
-  useEffect(() => setDraft(String(value)), [value]);
-
-  const commit = () => {
-    const next = Number(draft);
-    if (
-      !Number.isInteger(next) ||
-      next < AGENT_MAX_CONCURRENT_TASKS_MIN ||
-      next > AGENT_MAX_CONCURRENT_TASKS_MAX
-    ) {
-      setDraft(String(value));
-      return;
-    }
-    if (next !== value) void onSave(next);
-  };
-
-  return (
-    <div>
-      <Input
-        id="agent-concurrency"
-        type="number"
-        name="agent-concurrency"
-        autoComplete="off"
-        inputMode="numeric"
-        min={AGENT_MAX_CONCURRENT_TASKS_MIN}
-        max={AGENT_MAX_CONCURRENT_TASKS_MAX}
-        value={draft}
-        onChange={(event) => setDraft(event.target.value)}
-        onBlur={commit}
-        onKeyDown={(event) => {
-          if (isImeComposing(event)) return;
-          if (event.key === "Enter") {
-            event.preventDefault();
-            commit();
-          }
-        }}
-        disabled={!canEdit}
-        aria-label={t(($) => $.inspector.prop_concurrency)}
-        className="font-mono tabular-nums"
-      />
-      <p className="mt-1 text-caption text-muted-foreground">
-        {t(($) => $.pickers.concurrency_range, {
-          min: AGENT_MAX_CONCURRENT_TASKS_MIN,
-          max: AGENT_MAX_CONCURRENT_TASKS_MAX,
-        })}
-      </p>
     </div>
   );
 }

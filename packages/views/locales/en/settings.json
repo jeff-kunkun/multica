@@ -725,7 +725,7 @@
       "label": "Send them to my Bot",
       "none": "No Bot (in-app only)",
       "no_bots": "You have no Bot yet. Add one under Bots first.",
-      "state_none": "Pick your own Bot; what needs your decision is sent to it.",
+      "state_none": "When you agree to a Bot's connect request, what needs your decision goes to it automatically.",
       "state_ok": "What needs your decision goes to {{name}} first.",
       "state_unverified": "Waiting for {{name}} to confirm it can receive.",
       "state_broken": "{{name}} is not reachable; decisions are back in the app.",
@@ -2468,7 +2468,7 @@
       "description": "Copy this sentence to your Bot. It sends back a link; agree once and it's connected — no key to handle.",
       "copy": "Copy for the Bot",
       "copied": "Copied — send it to your Bot",
-      "instruction": "Please run this on your machine: {{command}}\nThen send me the link it prints; once I agree, you're connected."
+      "instruction": "Please run this on your machine, with <URL> and <KEY> replaced by your own HTTPS address for receiving messages and its key: {{command}}\nThen send me the link it prints; once I agree, you're connected and group messages and my decisions reach you."
     }
   },
   "overview": {

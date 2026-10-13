@@ -132,12 +132,14 @@ func (h *Handler) StartBotConnect(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "type must be grok")
 		return
 	}
-	sealed := []byte{}
-	if req.WebhookURL != "" || req.WebhookKey != "" {
-		if req.WebhookURL == "" || req.WebhookKey == "" {
-			writeError(w, http.StatusBadRequest, "write webhook_url and webhook_key together")
-			return
-		}
+	// The Bot brings its own address: that is how group messages and the
+	// approver's decisions reach it, so one yes leaves nothing to set up.
+	if req.WebhookURL == "" || req.WebhookKey == "" {
+		writeError(w, http.StatusBadRequest, "webhook_url and webhook_key are required: the Bot's own address for messages and decisions")
+		return
+	}
+	var sealed []byte
+	{
 		if h.BotWakeSecrets == nil {
 			writeError(w, http.StatusServiceUnavailable, "webhook encryption unavailable")
 			return
@@ -353,6 +355,9 @@ func (h *Handler) ClaimBotConnect(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusAccepted, BotConnectClaimResponse{Status: "pending"})
 		return
 	case "approved":
+	case "claimed":
+		h.reclaimBotConnect(w, r, tx, row, now)
+		return
 	default:
 		writeJSON(w, http.StatusOK, BotConnectClaimResponse{Status: status})
 		return
@@ -388,17 +393,53 @@ func (h *Handler) ClaimBotConnect(w http.ResponseWriter, r *http.Request) {
 	if len(row.WebhookSecret) > 0 {
 		h.bindConnectedBot(r, row.WorkspaceID, row.ApprovedBy, bot.ID)
 	}
+	h.writeBotConnectClaimed(w, r, row, bot.ID, raw)
+}
+
+func (h *Handler) writeBotConnectClaimed(w http.ResponseWriter, r *http.Request, row db.BotConnectRequest, botID pgtype.UUID, raw string) {
 	wsName := ""
-	if ws, err := h.Queries.GetWorkspace(ctx, row.WorkspaceID); err == nil {
+	if ws, err := h.Queries.GetWorkspace(r.Context(), row.WorkspaceID); err == nil {
 		wsName = ws.Name
 	}
 	serverURL, appURL := daemonSetupURLsFromEnv()
 	writeJSON(w, http.StatusOK, BotConnectClaimResponse{
-		Status: "claimed", Token: raw, BotID: uuidToString(bot.ID),
+		Status: "claimed", Token: raw, BotID: uuidToString(botID),
 		WorkspaceID: uuidToString(row.WorkspaceID), WorkspaceName: wsName,
 		ServerURL: serverURL, AppURL: appURL,
 		Guide: botonboarding.Render(),
 	})
+}
+
+// reclaimBotConnect answers a repeat claim. The first answer may never have
+// reached the Bot (a dropped connection after the commit), so while the
+// request is still open and the key has never been used, the Bot gets a fresh
+// key for the same Bot; the unseen one stops working. A key already in use is
+// never handed out again: the answer is "claimed" without a key.
+func (h *Handler) reclaimBotConnect(w http.ResponseWriter, r *http.Request, tx pgx.Tx, row db.BotConnectRequest, now time.Time) {
+	ctx := r.Context()
+	q := h.Queries.WithTx(tx)
+	if row.BotID.Valid && row.ExpiresAt.Time.After(now) {
+		bot, err := q.GetBotAccessToken(ctx, db.GetBotAccessTokenParams{ID: row.BotID, WorkspaceID: row.WorkspaceID, UserID: row.ApprovedBy})
+		if err == nil && !bot.Revoked && !bot.LastUsedAt.Valid {
+			raw, hash, prefix, err := mintBotToken()
+			if err == nil {
+				_, err = q.RotateBotAccessToken(ctx, db.RotateBotAccessTokenParams{
+					ID: bot.ID, WorkspaceID: row.WorkspaceID, UserID: row.ApprovedBy,
+					TokenHash: hash, TokenPrefix: prefix, ExpiresAt: bot.ExpiresAt,
+				})
+			}
+			if err == nil {
+				err = tx.Commit(ctx)
+			}
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, "failed to claim")
+				return
+			}
+			h.writeBotConnectClaimed(w, r, row, bot.ID, raw)
+			return
+		}
+	}
+	writeJSON(w, http.StatusOK, BotConnectClaimResponse{Status: "claimed"})
 }
 
 // bindConnectedBot makes the newly connected Bot the approver's channel: what
