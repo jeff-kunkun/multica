@@ -9,7 +9,8 @@ OAuth-only connector UIs cannot complete this flow automatically.
 
 The approved implementation scope is remote MCP access, office-event catch-up
 and receipts, project notification routing with a fallback, Web/Desktop and
-CLI controls, then deployment to an explicitly identified **test** environment.
+CLI controls. The 2026-10-13 human follow-up changes immediate delivery to
+building and packaging a test version, without waiting for a deployment target.
 Production, existing keys, logins and webhook routines must remain unchanged.
 A successful local run is not evidence of a test deployment or a real external
 Bot forwarding to a group.
