@@ -354,6 +354,9 @@ var concurrentIndexCleanups = map[string]string{
 	"482_agent_task_queue_telemetry_started_index":              "idx_agent_task_queue_telemetry_started",
 	"484_issue_triage_state_index":                              "idx_issue_triage_state",
 	"537_issue_duplicate_of_index":                              "idx_issue_duplicate_of",
+	"579_plan_issue_version_idx":                                "plan_issue_version_idx",
+	"580_plan_approver_member_idx":                              "plan_approver_member_idx",
+	"581_task_one_active_per_issue":                             "agent_task_queue_one_active_per_issue_idx",
 }
 
 // concurrentDownIndexCleanups covers every migration whose down direction

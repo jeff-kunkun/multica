@@ -153,7 +153,7 @@ Releases
 Migrations
 - Keep upstream numbering: a new migration takes the next number after the
   highest one on `origin/kun-main`, so upstream merges stay conflict-free.
-- Kun-main's own migrations: 573 (password login).
+- Kun-main's own migrations: 573 (password login), 578-581 (plans, one run per issue).
 - Compressing migrations into a baseline is DENE-2018's job; do not do it ad hoc.
 
 Fork changes stay small: prefer a minimal patch over porting kun-line code

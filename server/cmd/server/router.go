@@ -2034,6 +2034,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Post("/comments", h.CreateComment)
 					r.Get("/comments", h.ListComments)
 					r.Get("/timeline", h.ListTimeline)
+					r.Get("/plans", h.ListPlans)
+					r.Post("/plans", h.ProposePlan)
+					r.Post("/plans/{version}/approve", h.ApprovePlan)
 					r.Get("/subscribers", h.ListIssueSubscribers)
 					r.Post("/subscribe", h.SubscribeToIssue)
 					r.Post("/unsubscribe", h.UnsubscribeFromIssue)
@@ -2102,6 +2105,13 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Get("/", h.GetProperty)
 					r.Patch("/", h.UpdateProperty)
 				})
+			})
+
+			// Plan approvers: members besides owners who may approve plans.
+			r.Route("/api/plan-approvers", func(r chi.Router) {
+				r.Get("/", h.ListPlanApprovers)
+				r.Post("/", h.AddPlanApprover)
+				r.Delete("/{userId}", h.RemovePlanApprover)
 			})
 
 			// Labels

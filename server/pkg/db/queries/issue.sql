@@ -496,6 +496,9 @@ cleared_task_supplement_capabilities AS (
 cleared_vcs_pr_links AS (
     DELETE FROM issue_vcs_pull_request WHERE issue_id IN (SELECT target.id FROM target)
 ),
+cleared_plans AS (
+    DELETE FROM plan WHERE issue_id IN (SELECT target.id FROM target)
+),
 cleared_pr_automation AS (
     DELETE FROM issue_pr_automation WHERE issue_id IN (SELECT target.id FROM target)
 ),

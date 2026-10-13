@@ -59,7 +59,8 @@ func TestUpdateIssueCancelStatusDoesNotCancelActiveTasks(t *testing.T) {
 		t.Run(status, func(t *testing.T) {
 			issueID := insertAgentAssignedIssue(t, ownerAgent, 92130+i, "cancel-status-no-cancel-"+status)
 			ownerTask := insertIssueTaskWithStatus(t, ownerAgent, issueID, status)
-			mentionTask := insertRunningIssueTask(t, mentionAgent, issueID)
+			// One run per issue: the other agent's run is queued behind the owner's.
+			mentionTask := insertIssueTaskWithStatus(t, mentionAgent, issueID, "queued")
 
 			w := httptest.NewRecorder()
 			req := newRequest("PUT", "/api/issues/"+issueID, map[string]any{
@@ -74,7 +75,7 @@ func TestUpdateIssueCancelStatusDoesNotCancelActiveTasks(t *testing.T) {
 			if got := taskStatus(t, ownerTask); got != status {
 				t.Fatalf("assignee's %s task must survive issue → cancelled, got status %q", status, got)
 			}
-			if got := taskStatus(t, mentionTask); got != "running" {
+			if got := taskStatus(t, mentionTask); got != "queued" {
 				t.Fatalf("unrelated agent's task must survive issue → cancelled, got status %q", got)
 			}
 		})
