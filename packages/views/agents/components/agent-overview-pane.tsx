@@ -392,8 +392,6 @@ export function AgentOverviewPane({
                   {effectiveView === "mcp_config" && (
                     <McpConfigTab
                       agent={agent}
-                      runtime={runtime}
-                      currentUserId={currentUserId}
                       canEdit={canEdit}
                       onSave={(updates) => onUpdate(agent.id, updates)}
                       onDirtyChange={setActiveDirty}

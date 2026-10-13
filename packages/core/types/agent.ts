@@ -1034,34 +1034,3 @@ export interface RuntimeModelsResult {
   /** Capture time of the served snapshot, when the answer was cached. */
   cachedAt?: string;
 }
-
-export type RuntimeCapabilitiesStatus =
-  | "pending"
-  | "running"
-  | "completed"
-  | "failed"
-  | "timeout";
-
-export interface RuntimeLocalMcpServerSummary {
-	name: string;
-	transport?: "stdio" | "http" | "sse" | "unknown";
-	source?: string;
-	enabled: boolean;
-}
-
-/** Daemon discovery round trip that reports the runtime's local MCP inventory. */
-export interface RuntimeCapabilitiesRequest {
-  id: string;
-  runtime_id: string;
-  status: RuntimeCapabilitiesStatus;
-	mcp_servers?: RuntimeLocalMcpServerSummary[];
-	mcp_supported?: boolean;
-  error?: string;
-  created_at: string;
-  updated_at: string;
-}
-
-export interface RuntimeCapabilitiesResult {
-	mcpServers: RuntimeLocalMcpServerSummary[];
-	mcpSupported: boolean;
-}

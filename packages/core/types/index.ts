@@ -63,10 +63,6 @@ export type {
   RuntimeModelListRequest,
   RuntimeModelListStatus,
   RuntimeModelsResult,
-  RuntimeCapabilitiesStatus,
-	RuntimeLocalMcpServerSummary,
-  RuntimeCapabilitiesRequest,
-  RuntimeCapabilitiesResult,
   IssueUsageSummary,
 } from "./agent";
 export { RUNTIME_PROFILE_PROTOCOL_FAMILIES, RUNTIME_PROFILE_RUNTIME_TYPES } from "./agent";

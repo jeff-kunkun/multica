@@ -5,17 +5,10 @@ import {
   Loader2,
   Lock,
   Plus,
-  RefreshCw,
   Server,
 } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
-import type { Agent, AgentRuntime, WorkspaceMcpServer } from "@multica/core/types";
-import { ApiError } from "@multica/core/api";
-import {
-  isRuntimeUsableForUser,
-  runtimeCapabilitiesOptions,
-  runtimeDisplayLabel,
-} from "@multica/core/runtimes";
+import type { Agent, WorkspaceMcpServer } from "@multica/core/types";
 import {
   agentMcpServersOptions,
   workspaceMcpServersOptions,
@@ -62,15 +55,11 @@ import { McpServerDialog } from "./mcp-server-dialog";
 
 export function McpConfigTab({
   agent,
-  runtime,
-  currentUserId,
   canEdit = true,
   onSave,
   onDirtyChange,
 }: {
   agent: Agent;
-  runtime: AgentRuntime | null;
-  currentUserId?: string | null;
   /**
    * Whether this viewer may change the agent. A member without it can still
    * read the inventory — it carries no credential material — but every write
@@ -81,15 +70,6 @@ export function McpConfigTab({
   onDirtyChange?: (dirty: boolean) => void;
 }) {
   const { t } = useT("agents");
-  const canReadRuntime =
-    runtime != null && isRuntimeUsableForUser(runtime, currentUserId ?? null);
-  const runtimeId =
-    runtime?.runtime_mode === "local" &&
-    runtime.status === "online" &&
-    canReadRuntime
-      ? runtime.id
-      : null;
-  const runtimeQuery = useQuery(runtimeCapabilitiesOptions(runtimeId));
   // The workspace MCP servers ASSIGNED to this agent, plus the library to pick
   // from (GH #6062). A library entry does nothing until it is added here, and
   // each assignment carries its own toggle. The API returns names and
@@ -120,17 +100,6 @@ export function McpConfigTab({
   const availableServers = (libraryQuery.data ?? []).filter(
     (server) => !assignedIds.has(server.id),
   );
-  // Names that shadow a runtime server in the effective set. The daemon merges
-  // runtime < (assigned workspace servers + the agent's own), so an assigned
-  // server hides a same-named runtime one too — marking only the agent's own
-  // names would under-report it. A disabled assignment shadows nothing.
-  const effectiveNames = useMemo(() => {
-    const names = new Set(managedNames);
-    for (const server of assignedServers) {
-      if (server.enabled !== false) names.add(server.name);
-    }
-    return names;
-  }, [managedNames, assignedServers]);
 
   const [editorOpen, setEditorOpen] = useState(false);
   const [editingServer, setEditingServer] = useState<ManagedMcpServer | null>(
@@ -309,7 +278,7 @@ export function McpConfigTab({
   };
 
   return (
-    // Three sources, one heading each. The prose that used to sit under every
+    // Two sources, one heading each. The prose that used to sit under every
     // heading is gone: precedence is already shown where it applies (the
     // Overridden badges) and nobody reads a paragraph to press a button.
     <div className="space-y-6">
@@ -444,76 +413,6 @@ export function McpConfigTab({
         )}
       </section>
 
-      <section className="space-y-3">
-        <div className="flex items-center justify-between gap-4">
-          {/* The machine name moves into the heading — it is the only part of
-              the old description that told the reader anything. */}
-          <h3 className="min-w-0 truncate text-body font-medium">
-            {runtime
-              ? t(($) => $.tab_body.mcp_config.runtime_title_named, {
-                  runtime: runtimeDisplayLabel(runtime),
-                })
-              : t(($) => $.tab_body.mcp_config.runtime_title)}
-          </h3>
-          {runtimeId && (
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => runtimeQuery.refetch()}
-              disabled={runtimeQuery.isFetching}
-            >
-              <RefreshCw
-                className={
-                  runtimeQuery.isFetching
-                    ? "h-3.5 w-3.5 animate-spin motion-reduce:animate-none"
-                    : "h-3.5 w-3.5"
-                }
-                aria-hidden="true"
-              />
-              {t(($) => $.tab_body.mcp_config.refresh_action)}
-            </Button>
-          )}
-        </div>
-        {!runtime ? (
-          <McpNotice text={t(($) => $.tab_body.mcp_config.runtime_missing)} />
-        ) : !canReadRuntime ? (
-          <McpNotice text={t(($) => $.tab_body.mcp_config.runtime_forbidden)} />
-        ) : runtime.status !== "online" ? (
-          <McpNotice text={t(($) => $.tab_body.mcp_config.runtime_offline)} />
-        ) : runtimeQuery.isLoading ? (
-          <McpNotice
-            loading
-            text={t(($) => $.tab_body.mcp_config.runtime_discovering)}
-          />
-        ) : runtimeQuery.isError ? (
-          <McpNotice
-            text={
-              runtimeQuery.error instanceof ApiError &&
-              runtimeQuery.error.status === 403
-                ? t(($) => $.tab_body.mcp_config.runtime_forbidden)
-                : t(($) => $.tab_body.mcp_config.runtime_failed)
-            }
-          />
-        ) : runtimeQuery.data?.mcpSupported !== true ? (
-          <McpNotice
-            text={t(($) => $.tab_body.mcp_config.runtime_unsupported)}
-          />
-        ) : runtimeQuery.data.mcpServers.length === 0 ? (
-          <McpNotice text={t(($) => $.tab_body.mcp_config.runtime_empty)} />
-        ) : (
-          <McpServerList
-            servers={runtimeQuery.data.mcpServers.map((server) => ({
-              name: server.name,
-              transport: server.transport || "unknown",
-              enabled: server.enabled,
-              source: server.source,
-              overridden: effectiveNames.has(server.name),
-            }))}
-            disabledLabel={t(($) => $.tab_body.mcp_config.runtime_disabled_badge)}
-            overriddenLabel={t(($) => $.tab_body.mcp_config.runtime_overridden_badge)}
-          />
-        )}
-      </section>
 
       {!redacted && (
         <McpServerDialog
@@ -564,14 +463,6 @@ export function McpConfigTab({
     </div>
   );
 }
-
-type McpServerView = {
-  name: string;
-  transport: string;
-  enabled: boolean;
-  source?: string;
-  overridden?: boolean;
-};
 
 /**
  * One workspace server assigned to this agent: the per-agent toggle plus the
@@ -683,45 +574,6 @@ function McpWorkspaceServerPicker({
         ))}
       </DropdownMenuContent>
     </DropdownMenu>
-  );
-}
-
-function McpServerList({
-  servers,
-  disabledLabel,
-  overriddenLabel,
-}: {
-  servers: McpServerView[];
-  disabledLabel: string;
-  overriddenLabel?: string;
-}) {
-  return (
-    <ul className="divide-y rounded-lg border bg-surface-raised/40">
-      {servers.map((server) => (
-        <li
-          key={server.name}
-          className="group flex min-h-16 items-center gap-3 px-4 py-3 transition-colors hover:bg-muted/30"
-        >
-          <McpTransportIcon transport={server.transport} />
-          <div className="min-w-0 flex-1">
-            <p className="truncate text-body font-medium">{server.name}</p>
-            <p className="text-caption text-muted-foreground">
-              {mcpTransportLabel(server.transport)}
-            </p>
-            {server.source ? (
-              <p className="text-caption text-muted-foreground">
-                {server.source}
-              </p>
-            ) : null}
-          </div>
-          {server.overridden && overriddenLabel ? (
-            <Badge variant="outline">{overriddenLabel}</Badge>
-          ) : !server.enabled ? (
-            <Badge variant="outline">{disabledLabel}</Badge>
-          ) : null}
-        </li>
-      ))}
-    </ul>
   );
 }
 

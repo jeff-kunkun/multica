@@ -75,7 +75,6 @@ import type {
   DashboardFailureByAgent,
   RuntimeUpdate,
   RuntimeModelListRequest,
-  RuntimeCapabilitiesRequest,
   TimelineEntry,
   AssigneeFrequencyEntry,
   TaskMessagePayload,
@@ -1882,21 +1881,6 @@ export class ApiClient {
       },
       { endpoint: "GET /api/runtimes/{id}/models/{requestId}" },
     );
-  }
-
-  async initiateRuntimeCapabilities(
-    runtimeId: string,
-  ): Promise<RuntimeCapabilitiesRequest> {
-    return this.fetch(`/api/runtimes/${runtimeId}/local-skills`, {
-      method: "POST",
-    });
-  }
-
-  async getRuntimeCapabilitiesResult(
-    runtimeId: string,
-    requestId: string,
-  ): Promise<RuntimeCapabilitiesRequest> {
-    return this.fetch(`/api/runtimes/${runtimeId}/local-skills/${requestId}`);
   }
 
   async listAgentTasksPage(

@@ -3,7 +3,6 @@ export * from "./queries";
 export * from "./profiles";
 export * from "./mutations";
 export * from "./models";
-export * from "./capabilities";
 export * from "./types";
 export * from "./derive-health";
 export * from "./display";
