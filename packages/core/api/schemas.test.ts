@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   AppConfigSchema,
+  WorkspaceBotListSchema,
+  WorkspaceBotWithSecretsSchema,
   WecomInstallationSchema,
   ListWecomInstallationsResponseSchema,
   RedeemWecomBindingTokenResponseSchema,
@@ -2367,5 +2369,22 @@ describe("AgentActivityBucketListSchema duration", () => {
     expect(parsed[0]?.task_count).toBe(201);
     expect(parsed[0]?.duration_ms).toBeUndefined();
     expect(parsed[0]?.duration_count).toBeUndefined();
+  });
+});
+
+describe("WorkspaceBotSchema", () => {
+  const bot = { id: "b1", workspace_id: "w", user_id: "u", name: "Grok", can_release: true,
+    webhook_url: "https://x/hook", webhook_failures: 0, webhook_last_error: "",
+    token_prefix: "mul_ab12", token_last_used_at: null, created_at: "2026-10-13T00:00:00Z" };
+  it("keeps a bot whose optional fields are malformed or missing", () => {
+    const parsed = WorkspaceBotListSchema.parse([{ id: "b1", name: "Grok", can_release: "yes", webhook_failures: -3, token_prefix: 7 }]);
+    expect(parsed[0]).toMatchObject({ name: "Grok", can_release: false, webhook_failures: 0, token_prefix: null, webhook_url: "" });
+  });
+  it("carries secrets only when the server sends them", () => {
+    expect(WorkspaceBotWithSecretsSchema.parse(bot).token).toBeUndefined();
+    expect(WorkspaceBotWithSecretsSchema.parse({ ...bot, token: "mul_x", webhook_secret: "s" })).toMatchObject({ token: "mul_x", webhook_secret: "s" });
+  });
+  it("falls back to an empty list for a non-array reply", () => {
+    expect(parseWithFallback({ bots: [] }, WorkspaceBotListSchema, [], { endpoint: "GET /api/bots" })).toEqual([]);
   });
 });

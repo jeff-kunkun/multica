@@ -148,7 +148,7 @@ Migrations
 - Keep upstream numbering: a new migration takes the next number after the
   highest one on `origin/kun-main`, so upstream merges stay conflict-free.
 - Kun-main's own migrations: 573 (password login), 574 (office runtime families),
-  575 (mirror links).
+  575 (mirror links), 576–577 (project-manager Bots).
 - Compressing migrations into a baseline is DENE-2018's job; do not do it ad hoc.
 
 Fork changes stay small: prefer a minimal patch over porting kun-line code

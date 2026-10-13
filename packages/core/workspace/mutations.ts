@@ -168,3 +168,59 @@ export function useRemoveAgentMcpServer(agentId: string) {
   return useAgentMcpMutation(agentId, (serverId: string) =>
     api.removeAgentMcpServer(agentId, serverId));
 }
+
+function useInvalidateBots(wsId: string) {
+  const queryClient = useQueryClient();
+  return () =>
+    Promise.all([
+      queryClient.invalidateQueries({ queryKey: workspaceKeys.bots(wsId) }),
+      // A Bot is also a workspace member.
+      queryClient.invalidateQueries({ queryKey: workspaceKeys.members(wsId) }),
+    ]);
+}
+
+export function useCreateBot(wsId: string) {
+  const invalidate = useInvalidateBots(wsId);
+  return useMutation({
+    mutationFn: (data: { name: string; can_release: boolean; webhook_url: string }) =>
+      api.createBot(data),
+    onSettled: invalidate,
+  });
+}
+
+export function useUpdateBot(wsId: string) {
+  const invalidate = useInvalidateBots(wsId);
+  return useMutation({
+    mutationFn: ({ botId, ...update }: {
+      botId: string;
+      name?: string;
+      can_release?: boolean;
+      webhook_url?: string;
+    }) => api.updateBot(botId, update),
+    onSettled: invalidate,
+  });
+}
+
+export function useRotateBotToken(wsId: string) {
+  const invalidate = useInvalidateBots(wsId);
+  return useMutation({
+    mutationFn: (botId: string) => api.rotateBotToken(botId),
+    onSettled: invalidate,
+  });
+}
+
+export function useRevokeBotToken(wsId: string) {
+  const invalidate = useInvalidateBots(wsId);
+  return useMutation({
+    mutationFn: (botId: string) => api.revokeBotToken(botId),
+    onSettled: invalidate,
+  });
+}
+
+export function useDeleteBot(wsId: string) {
+  const invalidate = useInvalidateBots(wsId);
+  return useMutation({
+    mutationFn: (botId: string) => api.deleteBot(botId),
+    onSettled: invalidate,
+  });
+}
