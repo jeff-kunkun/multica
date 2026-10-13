@@ -897,12 +897,10 @@ func TestBuildPromptContainsIssueID(t *testing.T) {
 // TestSessionContinuityNoticeMatchesSurface locks the MUL-5722 split. The same
 // event costs each surface something different, so it cannot be reported with
 // one sentence. The dividing question is whether the conversation can still be
-// READ, not whether it is a chat: an issue's comments, a Slack channel's
-// history, and a web chat's / Feishu's / WeCom's / DingTalk's stored
-// chat_message transcript all can; only a surface Multica stores no transcript
-// for cannot. Announcing a loss on the readable ones describes something that
-// did not happen — the user hears "the discussion is gone" when every word
-// survives.
+// READ, not whether it is a chat: an issue's comments and a chat's stored
+// chat_message transcript both can. Announcing a loss on the readable ones
+// describes something that did not happen — the user hears "the discussion is
+// gone" when every word survives.
 func TestSessionContinuityNoticeMatchesSurface(t *testing.T) {
 	t.Parallel()
 
@@ -919,44 +917,10 @@ func TestSessionContinuityNoticeMatchesSurface(t *testing.T) {
 			wantMentions: "comment history",
 		},
 		{
-			// Slack has a history reader, so the conversation is recoverable —
-			// just from the channel rather than from Multica. Telling the user it
-			// was lost contradicts the commands the same prompt hands the agent.
-			name:         "slack rebuilds from the channel",
-			task:         Task{ChatSessionID: "chat-1", ChatChannelType: execenv.ChannelTypeSlack},
-			tellUser:     false,
-			wantMentions: "multica chat history",
-		},
-		{
 			// Web chat history is persisted in chat_message, which `multica chat
 			// history` reads back — recoverable, just from Multica's store.
 			name:         "web chat rebuilds from the stored transcript",
 			task:         Task{ChatSessionID: "chat-1"},
-			tellUser:     false,
-			wantMentions: "multica chat history",
-		},
-		{
-			// Feishu's conversation is persisted to chat_message too, and the
-			// handler's non-Slack fallback reads it back via `multica chat history`.
-			name:         "feishu rebuilds from the stored transcript",
-			task:         Task{ChatSessionID: "chat-1", ChatChannelType: execenv.ChannelTypeFeishu},
-			tellUser:     false,
-			wantMentions: "multica chat history",
-		},
-		{
-			// WeCom is fully wired on main (persists chat_message, stamps
-			// ChatChannelType="wecom"), so its transcript is readable too — the
-			// handler's non-Slack fallback serves it just like Feishu's.
-			name:         "wecom rebuilds from the stored transcript",
-			task:         Task{ChatSessionID: "chat-1", ChatChannelType: execenv.ChannelTypeWecom},
-			tellUser:     false,
-			wantMentions: "multica chat history",
-		},
-		{
-			// DingTalk persists to chat_message through the same AppendUserMessage
-			// path as Feishu/WeCom, so its transcript is readable the same way.
-			name:         "dingtalk rebuilds from the stored transcript",
-			task:         Task{ChatSessionID: "chat-1", ChatChannelType: execenv.ChannelTypeDingtalk},
 			tellUser:     false,
 			wantMentions: "multica chat history",
 		},

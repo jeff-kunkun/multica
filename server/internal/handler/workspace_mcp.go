@@ -23,11 +23,10 @@ type WorkspaceMcpBinding struct {
 }
 
 // ResolveAgentMcpConfig folds the workspace MCP servers BOUND to an agent into
-// that agent's own mcp_config and returns what the claim should carry. It runs
-// before the per-task overlay (mergeMCPOverlay), so the full precedence chain
-// on a claim is:
+// that agent's own mcp_config and returns what the claim should carry, so the
+// precedence chain on a claim is:
 //
-//	bound workspace servers  <  agent's own servers  <  per-task overlay
+//	bound workspace servers  <  agent's own servers
 //
 // The contract (GH #6062, MUL-5421):
 //
@@ -190,4 +189,52 @@ func validateWorkspaceMcpServerName(name string) error {
 		}
 	}
 	return nil
+}
+
+// hasManagedJSON reports whether a raw JSON column carries an actual managed
+// payload (non-empty and not the literal `null`). Matches the convention
+// hasManagedCursorMcpConfig uses on the daemon side so the merge respects
+// the same "absent" semantics every consumer already agrees on.
+func hasManagedJSON(raw json.RawMessage) bool {
+	trimmed := bytes.TrimSpace(raw)
+	return len(trimmed) > 0 && !bytes.Equal(trimmed, []byte("null"))
+}
+
+// passthroughAgentMcpConfig returns the agent config unchanged, or nil when
+// it is absent. Used on the early-return paths so a caller assigning the
+// return value into a wire field gets the same nil/non-nil split as today.
+func passthroughAgentMcpConfig(agentMcpConfig json.RawMessage) json.RawMessage {
+	if !hasManagedJSON(agentMcpConfig) {
+		return nil
+	}
+	return agentMcpConfig
+}
+
+// unmarshalServerMap decodes the `mcpServers` sub-object into a map keyed by
+// server name. A nil/absent value returns an empty map (not an error) so the
+// caller can compose without an extra nil-check.
+func unmarshalServerMap(raw json.RawMessage) (map[string]json.RawMessage, error) {
+	if !hasManagedJSON(raw) {
+		return map[string]json.RawMessage{}, nil
+	}
+	var m map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &m); err != nil {
+		return nil, err
+	}
+	if m == nil {
+		return map[string]json.RawMessage{}, nil
+	}
+	// Reject non-object server entries early — every runtime expects the
+	// inner value to be an object and would 500 in the sidecar generator
+	// otherwise. Mirrors parseCursorManagedMcpServers' guard.
+	for name, server := range m {
+		if name == "" {
+			return nil, errors.New("mcp server name must not be empty")
+		}
+		trimmed := bytes.TrimSpace(server)
+		if len(trimmed) == 0 || trimmed[0] != '{' {
+			return nil, fmt.Errorf("mcpServers.%s must be a JSON object", name)
+		}
+	}
+	return m, nil
 }

@@ -31,10 +31,8 @@ func newPoisonTestChatSession(t *testing.T, agentID, runtimeID, title string) st
 	return chatSessionID
 }
 
-func lastChatTaskSessionParams(chatSessionID string) db.GetLastChatTaskSessionParams {
-	return db.GetLastChatTaskSessionParams{
-		ChatSessionID: pgtype.UUID{Bytes: parseUUIDBytes(chatSessionID), Valid: true},
-	}
+func lastChatTaskSessionParams(chatSessionID string) pgtype.UUID {
+	return pgtype.UUID{Bytes: parseUUIDBytes(chatSessionID), Valid: true}
 }
 
 // TestGetLastChatTaskSessionDoesNotResurrectFromOlderCompletedRow is the Chat

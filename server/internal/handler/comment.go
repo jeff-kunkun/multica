@@ -2200,7 +2200,7 @@ func (h *Handler) resolveCommentTriggerEnqueue(ctx context.Context, issue db.Iss
 		if pending {
 			// (a) Fold into a same-head QUEUED task. This is the ONLY path that
 			// ATOMICALLY re-attributes the run (trigger / originator / accountable
-			// / overlay / connected apps) to the folded comment, so a queued
+			// ) to the folded comment, so a queued
 			// winner must always come through here, never a bare planned append
 			// (MUL-4302). HEAD-scoped so a DIFFERENT-head task is never folded
 			// (TEN-356) — the merge misses and this falls through. The merge
@@ -2450,11 +2450,10 @@ func commentMergeTerminalOutcome(result commentMergeResult) (status DispatchStat
 // re-attribution / merge bookkeeping is declined, and that is surfaced honestly.
 //
 // Recompute-on-merge (MUL-4195 review must-fix #1): on success the run's
-// originator_user_id, runtime_mcp_overlay and runtime_connected_apps are
-// re-stamped to the NEW trigger comment's originator, and trigger_summary is
-// refreshed — so a different member's comment safely folds into a task another
-// member created, the coalescing run carrying the latest instruction's
-// originator and matching connected-app overlay.
+// originator_user_id is re-stamped to the NEW trigger comment's originator, and
+// trigger_summary is refreshed — so a different member's comment safely folds
+// into a task another member created, the coalescing run carrying the latest
+// instruction's originator.
 func (h *Handler) mergeCommentIntoPendingTask(ctx context.Context, issue db.Issue, trigger commentAgentTrigger, newTriggerCommentID pgtype.UUID, headSha pgtype.Text) commentMergeResult {
 	// Re-attribute the coalescing run to the new comment's human atomically: the
 	// whole attribution snapshot moves, not just the person columns (MUL-4302). An
@@ -2478,7 +2477,6 @@ func (h *Handler) mergeCommentIntoPendingTask(ctx context.Context, issue db.Issu
 		}
 		return commentMergeError
 	}
-	overlay, connectedApps := h.TaskService.BuildRuntimeMCPOverlayForMerge(ctx, attr.UserID, trigger.Agent)
 	row, err := h.Queries.MergeCommentIntoPendingTask(ctx, db.MergeCommentIntoPendingTaskParams{
 		IssueID:                 issue.ID,
 		AgentID:                 trigger.Agent.ID,
@@ -2491,8 +2489,6 @@ func (h *Handler) mergeCommentIntoPendingTask(ctx context.Context, issue db.Issu
 		NewTriggerEvidenceKind:  pgtype.Text{String: string(attr.EvidenceKind), Valid: attr.EvidenceKind != ""},
 		NewTriggerEvidenceRefID: attr.EvidenceRefID,
 		NewTriggerSummary:       h.TaskService.BuildCommentTriggerSummary(ctx, issue.WorkspaceID, newTriggerCommentID),
-		NewRuntimeMcpOverlay:    overlay,
-		NewRuntimeConnectedApps: connectedApps,
 		HeadSha:                 headSha,
 	})
 	if err != nil {
@@ -2571,7 +2567,7 @@ func (h *Handler) registerPlannedCommentForActiveTask(ctx context.Context, issue
 //     the comment under the wrong head — it purely schedules the comment for that
 //     task's own completion reconcile, which re-enqueues at the head current then;
 //  2. a SAME-HEAD queued task: the atomic merge, which re-stamps trigger /
-//     originator / overlay (MUL-4302). This is HEAD-SCOPED on purpose: merging
+//     originator (MUL-4302). This is HEAD-SCOPED on purpose: merging
 //     into a different-head queued task would make the comment that run's trigger
 //     and mark it delivered at claim time, so an old-head run would consume a
 //     new-head request and no new-head follow-up would ever be created — the
@@ -3953,7 +3949,7 @@ func (h *Handler) deleteComment(ctx context.Context, commentID, workspaceID pgty
 // the one-pending-task constraint; every other comment is replayed through the
 // normal authorization/routing path, scoped to the agent whose task carried
 // it. Chronological replay makes those survivors coalesce back into one batch
-// and lets the latest real comment restamp originator + connected-app context.
+// and lets the latest real comment restamp originator context.
 func (h *Handler) retriggerCancelledTaskSurvivors(ctx context.Context, issue db.Issue, cancelled []db.AgentTaskQueue, excludedCommentID pgtype.UUID) {
 	if len(cancelled) == 0 {
 		return

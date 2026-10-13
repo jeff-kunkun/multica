@@ -338,12 +338,6 @@ func TestUnbindAgentsAndDeleteRuntime_RedactsAgentBroadcast(t *testing.T) {
 	if !broadcast.McpConfigRedacted {
 		t.Fatal("broadcast must mark mcp_config as redacted")
 	}
-	if broadcast.ComposioToolkitAllowlist != nil {
-		t.Fatalf("broadcast leaked Composio allowlist: %v", broadcast.ComposioToolkitAllowlist)
-	}
-	if !broadcast.ComposioToolkitAllowlistRedacted {
-		t.Fatal("broadcast must mark Composio allowlist as redacted")
-	}
 }
 
 // TestUnbindAgentsAndDeleteRuntime_DeletesSystemAgents: system agents are

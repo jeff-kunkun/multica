@@ -99,7 +99,6 @@ diff，全都挂在同一个任务下——没人需要重新捋一遍上下文�
 - **[工作区](https://multica.ai/docs/zh/workspaces) →** 按团队隔离智能体、任务和设置。
 - **[角色](https://multica.ai/docs/zh/members-roles)与[使用权限](https://multica.ai/docs/zh/agents#权限与-access) →** `owner`、`admin`、`member`，再精确到谁能跑哪些智能体。
 - **[安全模型](https://multica.ai/docs/zh/security-model) →** 智能体碰得到什么，碰不到什么。
-- **[Slack、飞书/Lark、钉钉、企业微信、Telegram](https://multica.ai/docs/zh/channels) →** 在团队本来就在聊天的地方，触发和跟进智能体的工作。飞书/Lark 目前只开放中国大陆飞书的新连接；钉钉、企业微信和 Telegram 由[社区维护](https://multica.ai/docs/zh/community-maintained)。
 - **Web、[桌面端](https://multica.ai/docs/zh/desktop-app)、[移动端](https://multica.ai/docs/zh/mobile-app) →** macOS、Windows、Linux、iPhone、iPad，打开都是同一个工作区——iOS App 现在要自己从源码编译安装，还没上 App Store。
 - **[CLI 与 API](https://multica.ai/docs/zh/cli) →** 界面上能点的，CLI 和 API 里都能调。智能体操作 Multica，用的就是你那套 CLI。
 
@@ -187,7 +186,7 @@ Multica 不自带模型。它驱动的是你本来就装好、登录好的那些
 | 创建和配置智能体 | [智能体](https://multica.ai/docs/zh/agents) · [创建智能体](https://multica.ai/docs/zh/agents-create) · [Skills](https://multica.ai/docs/zh/skills) |
 | 把活交到智能体手上 | [触发智能体](https://multica.ai/docs/zh/triggering-agents) · [分配任务](https://multica.ai/docs/zh/assigning-issues) · [提及](https://multica.ai/docs/zh/mentioning-agents) |
 | 把我的机器接进来 | [守护进程与运行时](https://multica.ai/docs/zh/daemon-runtimes) · [安装智能体运行时](https://multica.ai/docs/zh/install-agent-runtime) |
-| 接上 Git 和聊天工具 | [GitHub](https://multica.ai/docs/zh/github-integration) · [自建 Git](https://multica.ai/docs/zh/vcs-integration) · [消息渠道](https://multica.ai/docs/zh/channels) |
+| 接上 Git | [GitHub](https://multica.ai/docs/zh/github-integration) · [自建 Git](https://multica.ai/docs/zh/vcs-integration) |
 | 部署在自己的基础设施上 | [自托管快速上手](https://multica.ai/docs/zh/self-host-quickstart) · [安全模型](https://multica.ai/docs/zh/security-model) · [环境变量](https://multica.ai/docs/zh/environment-variables) · [完整自托管指南（英文）](SELF_HOSTING.md) |
 | 用脚本驱动它 | [CLI 参考](https://multica.ai/docs/zh/cli) · [CLI 与守护进程指南](CLI_AND_DAEMON.md) · [认证令牌](https://multica.ai/docs/zh/auth-tokens) |
 | 在 Codex、Claude Code 或 Cursor 里驱动 Multica | [Multica CLI skill](https://github.com/multica-ai/multica-cli) |

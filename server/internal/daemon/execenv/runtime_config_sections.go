@@ -5,7 +5,6 @@ import (
 	"strings"
 
 	"github.com/multica-ai/multica/server/internal/issuestatus"
-	"github.com/multica-ai/multica/server/internal/runtimeapps"
 )
 
 // This file holds the runtime brief assembler — the post-MUL-3560 path
@@ -185,41 +184,6 @@ func writeWorkspaceContext(b *strings.Builder, ctx TaskContextForEnv) {
 	b.WriteString("## Workspace Context\n\n")
 	b.WriteString(ctxText)
 	b.WriteString("\n\n")
-}
-
-// BuildConnectedAppsBlock renders the Connected Apps block for the per-turn
-// user message. The app set is per-run state (runtime MCP overlays are
-// resolved at enqueue time), so it cannot live in the runtime brief without
-// breaking prompt-cache prefix stability across resumes (MUL-5377).
-// Returns "" when no app resolves.
-func BuildConnectedAppsBlock(apps []runtimeapps.ConnectedApp) string {
-	if len(apps) == 0 {
-		return ""
-	}
-	var b strings.Builder
-	var lines strings.Builder
-	for _, app := range apps {
-		serverName := sanitizeBriefCodeToken(app.ServerName)
-		toolkitSlug := sanitizeBriefCodeToken(app.ToolkitSlug)
-		if serverName == "" || toolkitSlug == "" {
-			continue
-		}
-		name := sanitizeNameForBriefMarkdown(app.ToolkitName)
-		if name == "" {
-			name = sanitizeNameForBriefMarkdown(runtimeapps.DisplayNameForToolkitSlug(toolkitSlug))
-		}
-		if name == "" {
-			name = toolkitSlug
-		}
-		fmt.Fprintf(&lines, "- %s (`%s`) via MCP server `%s`\n", name, toolkitSlug, serverName)
-	}
-	if lines.Len() == 0 {
-		return ""
-	}
-	b.WriteString("## Connected Apps\n\n")
-	b.WriteString(lines.String())
-	b.WriteString("\nUse the listed MCP server when the task asks to read or act in one of these apps.\n\n")
-	return b.String()
 }
 
 func sanitizeBriefCodeToken(s string) string {
@@ -535,30 +499,18 @@ func writeInstructionPrecedence(b *strings.Builder) {
 // flags, so without this the run would silently reappear as a brand-new
 // conversation (MUL-4424).
 //
-// There are three because the surfaces lose different things, and saying so
-// accurately matters more than saying it loudly. The question that separates
-// them is not "is this a chat?" but "can this conversation still be read?":
+// There are two because the surfaces keep the conversation in different places:
 //
 //   - Issue: the conversation IS the issue body and its comments. Untouched,
 //     and the workflow already makes the agent read them every turn.
-//   - Slack: the conversation lives in the channel and `multica chat history` /
-//     `multica chat thread` can fetch it — see buildChatPrompt, which hands the
-//     agent exactly those commands. Recoverable, just from a different place.
-//   - Web chat, Feishu, WeCom and DingTalk: the conversation is persisted in
-//     Multica's chat_message table and `multica chat history` reads it back —
-//     see handler/chat_history.go's chat_message fallback for non-Slack
-//     sessions. Recoverable, just from a different place. The readable set is
-//     decided in one place, SurfacePersistsTranscript.
+//   - Chat: the conversation is persisted in Multica's chat_message table and
+//     `multica chat history` reads it back (handler/chat_history.go).
 //
-// Only a surface whose conversation Multica never stored (so there is nothing
-// to read back) warrants telling the user; no current surface is in that
-// group, so SessionContinuityNoticeUnrecoverable is a defensive fallback. On
-// the readable ones the discussion survives, so announcing "the previous
-// context was lost" describes a loss that did not happen — the user reasonably
-// hears "the discussion is gone" when not a word of it is. There the notice
-// informs the agent and leaves mentioning it to the agent's judgement. What is
-// actually gone on every surface is the agent's own unrecorded working memory,
-// and each variant says so.
+// On both the discussion survives, so announcing "the previous context was
+// lost" describes a loss that did not happen — the user reasonably hears "the
+// discussion is gone" when not a word of it is. The notice informs the agent
+// and leaves mentioning it to the agent's judgement. What is actually gone is
+// the agent's own unrecorded working memory, and each variant says so.
 //
 // Emitted into the per-turn user message rather than the runtime brief: it is
 // true of one run and false of the next on the same issue, so rendering it into
@@ -574,22 +526,8 @@ func writeInstructionPrecedence(b *strings.Builder) {
 const SessionContinuityNoticeIssue = "## Session Continuity Notice\n\n" +
 	"This run was meant to continue an earlier conversation, but that provider session could not be restored, and this run does not continue it. The issue and its full comment history are unaffected — that record is the authoritative version of this conversation, and reading it (which your workflow already requires) reconstructs it. What is gone is your own working memory from the turns that did not come back: what you already tried, what you ruled out, and how far you had got. Re-derive what you need instead of assuming it, and do not claim continuity the record cannot back up. Do not open your reply by announcing this — raise it only where it actually matters, such as when the user refers to reasoning you never wrote down.\n\n"
 
-const SessionContinuityNoticeChannelHistory = "## Session Continuity Notice\n\n" +
-	"This run was meant to continue an earlier conversation, but that provider session could not be restored, and this run does not continue it. The channel conversation itself is unaffected — read it back with `multica chat history` / `multica chat thread` before acting, and treat what you find there as the authoritative version. What is gone is your own working memory from the turns that did not come back: what you already tried, what you ruled out, and how far you had got. Re-derive what you need instead of assuming it. Do not open your reply by announcing this — raise it only where it actually matters.\n\n"
-
 const SessionContinuityNoticeChatTranscript = "## Session Continuity Notice\n\n" +
 	"This run was meant to continue an earlier conversation, but that provider session could not be restored, and this run does not continue it. The conversation itself is unaffected — Multica stored it, and you can read it back with `multica chat history` before acting; treat what you find there as the authoritative version. What is gone is your own working memory from the turns that did not come back: what you already tried, what you ruled out, and how far you had got. Re-derive what you need instead of assuming it. Do not open your reply by announcing this — raise it only where it actually matters.\n\n"
-
-// SessionContinuityNoticeUnrecoverable is the defensive fallback for a surface
-// whose conversation Multica never stored and cannot read back. Every current
-// chat surface (web chat, Feishu, WeCom, DingTalk, Slack) persists a transcript
-// that `multica chat history` can fetch, so no surface routes here today — it
-// exists so a future channel that stores no transcript degrades to an honest
-// "this is a new session" instead of silently pretending continuity. Unlike the
-// readable variants it scripts the user-facing disclosure, because here the
-// loss is real and the user must hear it.
-const SessionContinuityNoticeUnrecoverable = "## Session Continuity Notice\n\n" +
-	"This run was meant to continue an earlier conversation, but that session's context could NOT be restored — you are starting fresh with no memory of the previous turns. That history is not readable from anywhere now: there is no command that fetches it, and only the context already in this message survives. **When you reply, tell the user up front (one short sentence) that the previous conversation context was unavailable and this is a new session**, so they understand why the thread did not carry over.\n\n"
 
 // writeWorkflowHeader emits the unconditional `### Workflow` heading.
 func writeWorkflowHeader(b *strings.Builder) {
@@ -977,32 +915,8 @@ func writeOutput(b *strings.Builder, kind taskKind, ctx TaskContextForEnv) {
 		b.WriteString("**Delivering files here:** your stdout is text-only. A file that belongs to the new issue goes on the `multica issue create` call itself via `--attachment <path>`; never put its path in the description or in your stdout line.\n")
 	case kindChat:
 		b.WriteString("This is a chat session. Your reply is delivered directly to the chat window the user is reading.\n\n")
-		// Two-layer channel policy (MUL-4899). This is the DELIVERY layer, and
-		// the brief answers only the half that is stable for the whole session.
-		//
-		// `attachment upload` binds a file to the Multica chat reply whatever
-		// the surface; whether anything carries it the last hop is a property
-		// of the deployment — its object storage, and whether the server is new
-		// enough to report the hop at all. Both change under a session that
-		// resumes across the change, and this file is the prompt-cache prefix
-		// (MUL-5377), so rendering the verdict here made one resumed chat
-		// produce two different briefs. The verdict therefore lives in the
-		// per-turn chat prompt, which carries both branches
-		// (daemon.buildChatPrompt), and the copy below points at it.
-		// ctx.ChatChannelDeliversFiles must NOT be read from this file.
-		//
-		// Web/mobile chat keeps its own copy: it has no channel and no last hop
-		// to be uncertain about — the browser renders the bound file as a card.
-		//
-		// The orthogonal HISTORY layer (which read commands exist) is
-		// Slack-only and also lives in the per-turn chat prompt — do not
-		// collapse the two.
-		if ctx.ChatChannelType != "" {
-			fmt.Fprintf(b, "**Delivering files here:** whether Multica can push a file you produce into this %s conversation depends on how this deployment is configured, so it is stated per turn rather than here: the per-turn user message tells you, every turn. Follow what it says about files, and never report a file as delivered unless it told you how to deliver one.\n", ChannelDisplayName(ctx.ChatChannelType))
-		} else {
-			b.WriteString("**Delivering files here:** run `multica attachment upload <local-path>` — it binds the file to your reply and it renders as an attachment card. That command is the ONLY way a file reaches the user; a path written into your reply text is not.\n")
-			writeInlineBlocksPolicy(b)
-		}
+		b.WriteString("**Delivering files here:** run `multica attachment upload <local-path>` — it binds the file to your reply and it renders as an attachment card. That command is the ONLY way a file reaches the user; a path written into your reply text is not.\n")
+		writeInlineBlocksPolicy(b)
 	default:
 		if ctx.IsSquadLeader {
 			b.WriteString("⚠️ **Final results MUST be delivered via `multica issue comment add`** — unless your outcome is `no_action`, which your Squad Operating Protocol states in full. For every other outcome (`action`, `failed`) a comment is mandatory. The user does NOT see your terminal output or run logs — only comments on the issue.\n\n")
@@ -1039,15 +953,15 @@ func writeOutput(b *strings.Builder, kind taskKind, ctx TaskContextForEnv) {
 //	Attachments           |    ✓    |   ✓    |     —     |      —       |  —
 //
 // Always-on rows — Header, Background Task Safety, Agent Identity,
-// Requesting User, Workspace Context, Connected Apps,
+// Requesting User, Workspace Context,
 // Workflow, Always Use CLI, Output — are shared by every kind and emitted
 // unconditionally (or gated by their own data preconditions).
 func buildMetaSkillContentSlim(provider string, ctx TaskContextForEnv) string {
 	var b strings.Builder
 	kind := classifyTask(ctx)
 
-	// Session Continuity Notice, Task Initiator (now On Behalf Of) and
-	// Connected Apps used to be rendered here. They are per-run values, so
+	// Session Continuity Notice and Task Initiator (now On Behalf Of) used
+	// to be rendered here. They are per-run values, so
 	// emitting them into this file broke prompt-cache prefix stability on
 	// every resume; they now travel in the per-turn user message
 	// (daemon.BuildPrompt) instead. See MUL-5377.

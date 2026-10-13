@@ -120,13 +120,7 @@ function hasUploadingNode(editor: Editor): boolean {
 // ---------------------------------------------------------------------------
 
 interface ContentEditorBaseProps {
-  /**
-   * `baseMarkdown` is the last authoritative controlled value this editor
-   * actually adopted before producing `markdown`. A dirty-editor realtime
-   * guard may intentionally skip newer server content, so callers must not
-   * substitute the latest prop value for this base.
-   */
-  onUpdate?: (markdown: string, baseMarkdown: string) => void;
+  onUpdate?: (markdown: string) => void;
   placeholder?: string;
   className?: string;
   debounceMs?: number;
@@ -391,7 +385,6 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
     // unmount flush emits this cached copy — it runs mid-teardown and can't
     // assume the editor instance is still readable.
     const pendingFlushRef = useRef<string | null>(null);
-    const pendingBaseRef = useRef<string | null>(null);
     const onUpdateRef = useRef(onUpdate);
     const onSubmitRef = useRef(onSubmit);
     const onBlurRef = useRef(onBlur);
@@ -414,11 +407,6 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
     // mounts. Track later changes separately so the sync effect does not parse
     // the initial document twice when Markdown serialization canonicalizes it.
     const lastSyncedValueRef = useRef(value);
-    // Authoritative Markdown behind the document the user is editing. Keep the
-    // raw controlled value rather than the editor serialization: Tiptap may
-    // omit invisible channel-media provenance comments while retaining the
-    // visible image, and the server needs those comments in the merge base.
-    const documentBaseRef = useRef(normalizeMarkdown(value ?? defaultValue ?? ""));
     // Live placeholder text. Passed into the Placeholder extension as a getter
     // (not a static string) so the plugin re-reads it on every decoration pass —
     // the sync effect below updates this ref and nudges a repaint. Tiptap
@@ -623,7 +611,6 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
       }),
       onUpdate: ({ editor: ed }) => {
         if (!onUpdateRef.current) return;
-        pendingBaseRef.current = documentBaseRef.current;
         if (flushPendingOnUnmountRef.current) {
           pendingFlushRef.current = normalizeEditorMarkdown(ed);
         }
@@ -631,12 +618,10 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
         debounceRef.current = setTimeout(() => {
           debounceRef.current = undefined;
           pendingFlushRef.current = null;
-          const base = pendingBaseRef.current ?? documentBaseRef.current;
-          pendingBaseRef.current = null;
           const md = normalizeEditorMarkdown(ed);
           if (md === lastEmittedRef.current) return;
           lastEmittedRef.current = md;
-          onUpdateRef.current?.(md, base);
+          onUpdateRef.current?.(md);
         }, debounceMs);
       },
       onBlur: () => {
@@ -746,12 +731,10 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
         debounceRef.current = undefined;
         if (!flushPendingOnUnmountRef.current) return;
         const pending = pendingFlushRef.current;
-        const base = pendingBaseRef.current ?? documentBaseRef.current;
         pendingFlushRef.current = null;
-        pendingBaseRef.current = null;
         if (pending === null || pending === lastEmittedRef.current) return;
         lastEmittedRef.current = pending;
-        onUpdateRef.current?.(pending, base);
+        onUpdateRef.current?.(pending);
       };
     }, []);
 
@@ -763,7 +746,6 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
     const applyExternalContent = useCallback(
       (markdown: string) => {
         if (!editor || editor.isDestroyed) return;
-        documentBaseRef.current = normalizeMarkdown(markdown);
         const before = normalizeEditorMarkdown(editor);
 
         // A controlled host commonly echoes the exact Markdown this editor
@@ -967,7 +949,6 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
         clearTimeout(debounceRef.current);
         debounceRef.current = undefined;
         pendingFlushRef.current = null;
-        pendingBaseRef.current = null;
         if (!editor || editor.isDestroyed) return null;
         // Read the live document: unlike the unmount flush, the instance is
         // still alive here, so this is the freshest possible copy.

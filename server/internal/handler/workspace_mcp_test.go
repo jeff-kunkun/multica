@@ -203,32 +203,6 @@ func TestResolveAgentMcpConfig_MalformedAgentConfigIsReturnedUnchanged(t *testin
 	}
 }
 
-// The claim path applies the bindings before the per-task overlay, so the two
-// merges have to compose into bound < agent < overlay.
-func TestResolveAgentMcpConfig_ComposesWithTaskOverlay(t *testing.T) {
-	const agentCfg = `{"mcpServers":{"private":{"url":"https://private.example"}}}`
-	const overlay = `{"mcpServers":{"composio":{"url":"https://session-composio.example"}}}`
-
-	resolved, err := ResolveAgentMcpConfig(
-		bindings("shared", `{"url":"https://shared.example"}`, "composio", `{"url":"https://ws-composio.example"}`),
-		json.RawMessage(agentCfg))
-	if err != nil {
-		t.Fatalf("ResolveAgentMcpConfig: unexpected error: %v", err)
-	}
-	merged, err := mergeMCPOverlay(resolved, json.RawMessage(overlay))
-	if err != nil {
-		t.Fatalf("mergeMCPOverlay: unexpected error: %v", err)
-	}
-	servers := decodeServers(t, merged)
-	if len(servers) != 3 {
-		t.Fatalf("server set = %v, want shared/composio/private", serverNames(servers))
-	}
-	composio, _ := servers["composio"].(map[string]any)
-	if composio["url"] != "https://session-composio.example" {
-		t.Errorf("overlay must win over the bound entry, got %v", composio["url"])
-	}
-}
-
 func TestValidateWorkspaceMcpServerEntry(t *testing.T) {
 	tests := []struct {
 		name    string

@@ -93,7 +93,7 @@ router → middleware → handler → service → sqlc query → PostgreSQL
 - `internal/service/` 负责跨查询的业务流程和事务；
 - `pkg/db/queries/` 保存手写 SQL；
 - `pkg/db/generated/` 由 sqlc 生成，不能直接编辑；
-- `internal/integrations/` 处理 GitHub、Slack、飞书等外部事件；
+- `internal/integrations/` 处理 GitHub 和自托管 Git 服务的外部事件；
 - `internal/storage/` 处理本地或 S3 附件。
 
 PostgreSQL 是业务数据的权威来源。Redis 是可选组件，用于跨实例实时事件、缓存或临时协调；没有配置时，单实例开发环境使用进程内实现。

@@ -437,8 +437,8 @@ func TestGetConfigExposesFrontendFeatureFlags(t *testing.T) {
 	if err := json.Unmarshal(w.Body.Bytes(), &cfg); err != nil {
 		t.Fatalf("decode default config: %v", err)
 	}
-	if cfg.FeatureFlags["composio_mcp_apps"] {
-		t.Fatalf("composio_mcp_apps: want false by default, got true")
+	if _, published := cfg.FeatureFlags["composio_mcp_apps"]; published {
+		t.Fatalf("composio_mcp_apps: retired with the connected-apps feature, must not be published")
 	}
 	if cfg.FeatureFlags["billing_workspace_subscriptions"] {
 		t.Fatalf("billing_workspace_subscriptions: want false by default, got true")
@@ -473,19 +473,6 @@ func TestGetConfigExposesFrontendFeatureFlags(t *testing.T) {
 	// the v0.4.31 rendering fixes is kept from creating one.
 	if _, published := cfg.FeatureFlags["custom_issue_statuses"]; published {
 		t.Fatalf("custom_issue_statuses: want unpublished, got %v", cfg.FeatureFlags["custom_issue_statuses"])
-	}
-
-	withComposioMCPAppsFlag(t, h, true)
-	w = httptest.NewRecorder()
-	h.GetConfig(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("GetConfig enabled flags: expected 200, got %d: %s", w.Code, w.Body.String())
-	}
-	if err := json.Unmarshal(w.Body.Bytes(), &cfg); err != nil {
-		t.Fatalf("decode enabled config: %v", err)
-	}
-	if !cfg.FeatureFlags["composio_mcp_apps"] {
-		t.Fatalf("composio_mcp_apps: want true with flag enabled, got false")
 	}
 }
 

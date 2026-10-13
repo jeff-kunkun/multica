@@ -20,7 +20,6 @@ vi.mock("./tokens-tab", stub("TokensTab"));
 vi.mock("./workspace-tab", stub("WorkspaceTab"));
 vi.mock("./members-tab", stub("MembersTab"));
 vi.mock("./code-tab", stub("CodeTab"));
-vi.mock("./channels-tab", stub("ChannelsTab"));
 vi.mock("./notifications-tab", stub("NotificationsTab"));
 vi.mock("./labels-tab", stub("LabelsTab"));
 vi.mock("./issue-statuses-tab", stub("IssueStatusesTab"));
@@ -32,12 +31,7 @@ vi.mock("./mcp-tab", stub("McpTab"));
 vi.mock("./billing-tab", stub("BillingTab"));
 
 const shell = vi.hoisted(() => ({
-  appsAvailable: false,
   role: "owner" as "owner" | "admin" | "member",
-}));
-vi.mock("./connected-apps-tab", () => ({
-  ConnectedAppsTab: () => <div>ConnectedAppsTab</div>,
-  useComposioAvailable: () => shell.appsAvailable,
 }));
 
 vi.mock("@multica/core/paths", () => ({
@@ -99,7 +93,6 @@ function nav() {
 beforeEach(() => {
   layout.compact = true;
   navigationState.search = "";
-  shell.appsAvailable = false;
   shell.role = "owner";
   configStore.getState().setFeatureFlags({});
   replace.mockClear();
@@ -215,7 +208,7 @@ describe("SettingsPage information architecture", () => {
     const connections = within(workspace).getByRole("group", {
       name: "Connections & extensions",
     });
-    for (const name of ["Code", "Messaging", "MCP servers"]) {
+    for (const name of ["Code", "MCP servers"]) {
       expect(within(connections).getByRole("link", { name })).toBeInTheDocument();
     }
   });
@@ -247,21 +240,6 @@ describe("SettingsPage information architecture", () => {
       "aria-current",
       "page",
     );
-  });
-
-  it("lists Connected apps with the personal pages only when Composio is available", () => {
-    const first = renderWithI18n(<SettingsPage />);
-    expect(screen.queryByRole("link", { name: "Connected apps" })).toBeNull();
-    first.unmount();
-
-    shell.appsAvailable = true;
-    navigationState.search = "tab=integrations&connected=notion";
-    renderWithI18n(<SettingsPage />);
-    const personal = within(nav()).getByRole("region", { name: /Personal/ });
-    expect(
-      within(personal).getByRole("link", { name: "Connected apps" }),
-    ).toHaveAttribute("aria-current", "page");
-    expect(screen.getByText("ConnectedAppsTab")).toBeInTheDocument();
   });
 
   it("marks pages a member can only view", () => {
@@ -296,7 +274,7 @@ describe("SettingsPage information architecture", () => {
   });
 
   it("navigates from the compact selector and clears the old detail", () => {
-    navigationState.search = "tab=channels&integration=slack&keep=1";
+    navigationState.search = "tab=code&section=repositories&keep=1";
     renderWithI18n(<SettingsPage />);
     fireEvent.change(
       screen.getByRole("combobox", { name: "Go to settings page" }),
@@ -327,10 +305,10 @@ describe("SettingsPage search", () => {
     renderWithI18n(<SettingsPage />);
     const input = screen.getByRole("searchbox", { name: "Search settings" });
 
-    fireEvent.change(input, { target: { value: "slack" } });
+    fireEvent.change(input, { target: { value: "time zone" } });
     fireEvent.keyDown(input, { key: "Enter" });
     expect(push).toHaveBeenCalledWith(
-      "/acme/settings?tab=channels&integration=slack",
+      "/acme/settings?tab=preferences&section=timezone",
     );
 
     fireEvent.keyDown(input, { key: "Escape" });

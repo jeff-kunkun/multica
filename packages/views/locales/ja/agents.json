@@ -159,7 +159,6 @@
     "section_details": "詳細",
     "section_details_hint": "所有者とライフサイクルに関する読み取り専用情報です。",
     "section_skills": "スキル",
-    "section_integrations": "連携",
     "prop_runtime": "ランタイム",
     "prop_model": "モデル",
     "prop_thinking": "思考",
@@ -258,8 +257,6 @@
     "environment": "環境",
     "custom_args": "カスタム引数",
     "mcp_config": "MCP",
-    "composio_mcp": "MCP アプリ",
-    "integrations": "連携",
     "runtime_config": "ルーティング",
     "discard_dialog_title": "保存していない変更を破棄しますか？",
     "discard_dialog_description": "このタブに保存していない変更があります。今移動すると変更は破棄されます。",
@@ -275,17 +272,6 @@
     "description_label": "説明",
     "description_placeholder": "このエージェントは何をしますか？",
     "visibility_label": "公開範囲",
-    "access": {
-      "label": "アクセス",
-      "private_title": "プライベート",
-      "private_desc": "このエージェントを実行できるのはあなただけです",
-      "public_title": "公開",
-      "public_desc": "このエージェントを実行できる人を選択します",
-      "public_workspace_option": "ワークスペース全員",
-      "public_members_group": "特定のメンバー",
-      "public_members_empty": "選択できるワークスペースメンバーがいません",
-      "public_targets_empty_hint": "以下から少なくとも1つを選択してください。そうでないとエージェントはプライベートのままになります。"
-    },
     "runtime_label": "ランタイム",
     "runtime_filter_mine": "自分のもの",
     "runtime_filter_all": "すべて",
@@ -509,21 +495,6 @@
       "redacted_hint": "この config を読み取れるのは、エージェントのオーナーまたはワークスペースの admin のみです。",
       "dialog_json_help": "サーバー設定全体を JSON で編集します。"
     },
-    "composio_mcp": {
-      "subtitle": "ツールキットにチェックを入れると、あなた（この agent の作成者）が直接または下位 agent のチェーン経由でこの agent をトリガーしたときに限り、MCP サーバーとしてマウントされます。",
-      "loading": "接続を読み込み中…",
-      "load_failed": "接続済みアプリを読み込めませんでした。しばらくしてから再試行してください。",
-      "empty_title": "接続済みのアプリがありません",
-      "empty_link_to_settings": "設定 → 連携 で接続する",
-      "connected": "接続済み",
-      "toggle_aria": "この agent に {{toolkit}} を許可",
-      "saving": "保存中…",
-      "save_failed_toast": "保存できませんでした。もう一度お試しください",
-      "redacted_title": "設定済み — あなたには非表示",
-      "redacted_hint": "この agent が使用できるアプリを閲覧・変更できるのは作成者のみです。",
-      "shared_warning": "このエージェントは共有されています。このエージェントを実行できる人は、ここで有効化した Composio アプリを利用できます。これらのアプリが機微なデータを扱う場合は、Private にするかアクセス範囲を絞ってください。",
-      "workspace_warning": "ワークスペースに公開：ワークスペースの全メンバーがこのエージェントを通じてこれらの Composio アプリを利用できます。"
-    },
     "runtime_config": {
       "mode_label": "ルーティングモード",
       "mode_local": "Local",
@@ -584,9 +555,6 @@
       "add_dialog_confirm_other": "スキル {{count}} 件を追加",
       "add_dialog_cancel": "キャンセル",
       "add_failed_toast": "スキルを追加できませんでした"
-    },
-    "integrations": {
-      "members_note": "この接続を管理できるのはワークスペースのオーナーと管理者のみです。接続済みの Bot は「設定 → 連携」で確認できます。"
     },
     "activity": {
       "status": {
@@ -687,8 +655,7 @@
     "members_group": "メンバー",
     "public_group": "公開アクセス",
     "owner_only_readonly": "このエージェントを実行できる相手は、オーナーのみが変更できます。",
-    "members_empty": "選択できるワークスペースメンバーがいません",
-    "composio_switch_hint": "ご注意 — このエージェントは Composio アプリが有効です。共有すると、アクセス権を持つ全員がこのエージェントを通じてこれらのアプリを利用できます。"
+    "members_empty": "選択できるワークスペースメンバーがいません"
   },
   "profile_card": {
     "unavailable": "エージェントを利用できません",

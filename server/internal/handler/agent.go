@@ -23,7 +23,6 @@ import (
 	"github.com/multica-ai/multica/server/internal/attribution"
 	"github.com/multica-ai/multica/server/internal/logger"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
-	"github.com/multica-ai/multica/server/internal/runtimeapps"
 	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/util"
 	"github.com/multica-ai/multica/server/pkg/agent"
@@ -118,27 +117,14 @@ type AgentResponse struct {
 	ThinkingLevel string `json:"thinking_level"`
 	// ServiceTier is the runtime-native Codex execution tier persisted for
 	// this agent (empty = inherit local Codex configuration).
-	ServiceTier string `json:"service_tier"`
-	// ComposioToolkitAllowlist is the subset of Composio toolkit slugs this
-	// agent is allowed to mount as MCP at task dispatch — for ANY run that
-	// passes the agent's invocation permission, using the agent OWNER's
-	// Composio connection (MUL-3963; no longer gated on originator == owner).
-	// NULL or empty = no overlay. Like mcp_config, this is
-	// owner-only data: the slugs themselves are not secret, but the
-	// "this is what {agent owner} is willing to surface" view is — surfacing
-	// it cross-account is privacy-confusing UX and would let workspace
-	// members infer another member's integration footprint. Redacted to
-	// `nil` + `composio_toolkit_allowlist_redacted=true` for non-owners,
-	// mirroring the existing mcp_config redaction contract.
-	ComposioToolkitAllowlist         []string               `json:"composio_toolkit_allowlist,omitempty"`
-	ComposioToolkitAllowlistRedacted bool                   `json:"composio_toolkit_allowlist_redacted,omitempty"`
-	OwnerID                          *string                `json:"owner_id"`
-	Skills                           []AgentSkillSummary    `json:"skills"`
-	DisabledRuntimeSkills            []DisabledRuntimeSkill `json:"disabled_runtime_skills"`
-	CreatedAt                        string                 `json:"created_at"`
-	UpdatedAt                        string                 `json:"updated_at"`
-	ArchivedAt                       *string                `json:"archived_at"`
-	ArchivedBy                       *string                `json:"archived_by"`
+	ServiceTier           string                 `json:"service_tier"`
+	OwnerID               *string                `json:"owner_id"`
+	Skills                []AgentSkillSummary    `json:"skills"`
+	DisabledRuntimeSkills []DisabledRuntimeSkill `json:"disabled_runtime_skills"`
+	CreatedAt             string                 `json:"created_at"`
+	UpdatedAt             string                 `json:"updated_at"`
+	ArchivedAt            *string                `json:"archived_at"`
+	ArchivedBy            *string                `json:"archived_by"`
 }
 
 // runtimeConfigGatewayTokenMask is the placeholder the API substitutes for
@@ -197,49 +183,39 @@ func (h *Handler) agentToResponse(a db.Agent) AgentResponse {
 		}
 	}
 
-	// composio_toolkit_allowlist: the column is stored as TEXT[] and arrives
-	// here as a []string (sqlc). NULL and `{}` both serialize as nil through
-	// the postgres driver — both correctly mean "no toolkits", but the API
-	// surface keeps them distinguishable from "owner has not opened the
-	// integration yet" only via the trio (slice nil / slice empty / slice
-	// non-empty). We hand the slice through verbatim so the redaction +
-	// owner-only gate below can decide.
-	composioAllowlist := a.ComposioToolkitAllowlist
-
 	return AgentResponse{
-		ID:                       uuidToString(a.ID),
-		WorkspaceID:              uuidToString(a.WorkspaceID),
-		RuntimeID:                uuidToString(a.RuntimeID),
-		RuntimeBound:             a.RuntimeID.Valid,
-		Name:                     a.Name,
-		Description:              a.Description,
-		Instructions:             a.Instructions,
-		ConversationStarters:     conversationStarters,
-		SystemKey:                a.SystemKey.String,
-		SystemInstructions:       systemInstructionsFor(a),
-		AvatarURL:                h.resolveAvatarURLPtr(textToPtr(a.AvatarUrl)),
-		RuntimeMode:              a.RuntimeMode,
-		RuntimeConfig:            rc,
-		CustomArgs:               customArgs,
-		McpConfig:                mcpConfig,
-		HasCustomEnv:             envKeyCount > 0,
-		CustomEnvKeyCount:        envKeyCount,
-		Visibility:               a.Visibility,
-		PermissionMode:           a.PermissionMode,
-		InvocationTargets:        []AgentInvocationTargetDTO{},
-		Status:                   a.Status,
-		MaxConcurrentTasks:       a.MaxConcurrentTasks,
-		Model:                    a.Model.String,
-		ThinkingLevel:            a.ThinkingLevel.String,
-		ServiceTier:              a.ServiceTier.String,
-		ComposioToolkitAllowlist: composioAllowlist,
-		OwnerID:                  uuidToPtr(a.OwnerID),
-		Skills:                   []AgentSkillSummary{},
-		DisabledRuntimeSkills:    decodeDisabledRuntimeSkills(a.DisabledRuntimeSkills),
-		CreatedAt:                timestampToString(a.CreatedAt),
-		UpdatedAt:                timestampToString(a.UpdatedAt),
-		ArchivedAt:               timestampToPtr(a.ArchivedAt),
-		ArchivedBy:               uuidToPtr(a.ArchivedBy),
+		ID:                    uuidToString(a.ID),
+		WorkspaceID:           uuidToString(a.WorkspaceID),
+		RuntimeID:             uuidToString(a.RuntimeID),
+		RuntimeBound:          a.RuntimeID.Valid,
+		Name:                  a.Name,
+		Description:           a.Description,
+		Instructions:          a.Instructions,
+		ConversationStarters:  conversationStarters,
+		SystemKey:             a.SystemKey.String,
+		SystemInstructions:    systemInstructionsFor(a),
+		AvatarURL:             h.resolveAvatarURLPtr(textToPtr(a.AvatarUrl)),
+		RuntimeMode:           a.RuntimeMode,
+		RuntimeConfig:         rc,
+		CustomArgs:            customArgs,
+		McpConfig:             mcpConfig,
+		HasCustomEnv:          envKeyCount > 0,
+		CustomEnvKeyCount:     envKeyCount,
+		Visibility:            a.Visibility,
+		PermissionMode:        a.PermissionMode,
+		InvocationTargets:     []AgentInvocationTargetDTO{},
+		Status:                a.Status,
+		MaxConcurrentTasks:    a.MaxConcurrentTasks,
+		Model:                 a.Model.String,
+		ThinkingLevel:         a.ThinkingLevel.String,
+		ServiceTier:           a.ServiceTier.String,
+		OwnerID:               uuidToPtr(a.OwnerID),
+		Skills:                []AgentSkillSummary{},
+		DisabledRuntimeSkills: decodeDisabledRuntimeSkills(a.DisabledRuntimeSkills),
+		CreatedAt:             timestampToString(a.CreatedAt),
+		UpdatedAt:             timestampToString(a.UpdatedAt),
+		ArchivedAt:            timestampToPtr(a.ArchivedAt),
+		ArchivedBy:            uuidToPtr(a.ArchivedBy),
 	}
 }
 
@@ -320,10 +296,6 @@ type ProjectResourceData struct {
 	ResourceRef  json.RawMessage `json:"resource_ref"`
 	Label        string          `json:"label,omitempty"`
 }
-
-// ConnectedAppData keeps the daemon-claim wire field local to handler types
-// while sharing the canonical JSON shape with the runtime app metadata package.
-type ConnectedAppData = runtimeapps.ConnectedApp
 
 // taskIssueStatusCap bounds the custom statuses a claim payload carries. A
 // defensive ceiling, not a product limit: a real catalog holds a handful of
@@ -413,7 +385,6 @@ type AgentTaskResponse struct {
 	IsLeaderTask         bool                  `json:"is_leader_task,omitempty"`
 	LeaderRoleResolved   bool                  `json:"leader_role_resolved,omitempty"` // claim-only capability, always true here: IsLeaderTask/SquadID authoritatively answer "is this a leader run", so the daemon must not infer the role from briefing text. Servers predating it make no such promise — before #4951 they sent no is_leader_task at all, after it they sent the flag without guaranteeing a briefing — so a daemon seeing no capability keeps the legacy inference. Never rendered into a prompt; see daemon.taskIsSquadLeader (MUL-5811). Mirror field: internal/daemon/types.go, same JSON name
 	Agent                *TaskAgentData        `json:"agent,omitempty"`
-	ConnectedApps        []ConnectedAppData    `json:"connected_apps,omitempty"` // daemon-claim only: per-run app capabilities mounted through runtime MCP overlays
 	Repos                []RepoData            `json:"repos,omitempty"`
 	ProjectID            string                `json:"project_id,omitempty"`          // issue's project, when present
 	ProjectTitle         string                `json:"project_title,omitempty"`       // for surfacing in agent context
@@ -493,10 +464,6 @@ type AgentTaskResponse struct {
 	IssueAssigneeType        string               `json:"issue_assignee_type,omitempty"`         // "agent", "member" or "squad" at claim time; empty when unassigned. With IssueAssigneeID, lets the agent tell "mine" from "someone else's" without a read
 	IssueAssigneeID          string               `json:"issue_assignee_id,omitempty"`           // assignee UUID at claim time; empty when unassigned
 	ChatSessionID            string               `json:"chat_session_id,omitempty"`             // non-empty for chat tasks
-	ChatChannelType          string               `json:"chat_channel_type,omitempty"`           // "slack" when the chat session is backed by an IM channel; empty for a web-only chat. Makes the agent channel-aware (read history from the channel, not Multica)
-	ChatChannelDeliversFiles bool                 `json:"chat_channel_delivers_files,omitempty"` // server capability: THIS deployment can put a file the agent produced into THIS conversation — the adapter goes back for the bound attachment AND object storage exists to go back to. Absent/false on a server predating it, which is the safe reading: the agent is told to describe its file in words. Never inferred daemon-side from chat_channel_type; see handler.Handler.channelDeliversFiles
-	ChatType                 string               `json:"chat_type,omitempty"`                   // channel_chat_session_binding.chat_type — "group" for a shared room, "p2p" for a 1:1 with the bot. Lets the per-turn prompt tell the agent who else can read its replies; empty for a web-only chat
-	ChatInThread             bool                 `json:"chat_in_thread,omitempty"`              // true when the latest @mention was a thread reply; tells the agent to start with `multica chat thread` vs `multica chat history`
 	ChatMessage              string               `json:"chat_message,omitempty"`                // user message for chat tasks
 	ChatMessageAttachments   []ChatAttachmentMeta `json:"chat_message_attachments,omitempty"`    // attachments on the user message — agent calls `multica attachment download <id>` per entry
 	ChatIntro                bool                 `json:"chat_intro,omitempty"`                  // legacy compatibility for historical is_agent_intro sessions; new agent creation no longer creates these chats
@@ -1204,20 +1171,6 @@ func (h *Handler) ListAgents(w http.ResponseWriter, r *http.Request) {
 		if actorType == "agent" || alwaysRedact || !canViewAgentSecrets(a, userID, member.Role) {
 			redactMcpConfig(&resp)
 		}
-		// composio_toolkit_allowlist is owner-only — not because the slugs
-		// are secret but because surfacing "what {owner} has opted into"
-		// across the workspace leaks the owner's integration footprint and
-		// confuses non-owners who cannot actually edit it. Workspace
-		// owner/admin do NOT bypass this gate (unlike mcp_config): the overlay
-		// uses the OWNER's connection and follows invocation permission
-		// (MUL-3963), so surfacing the slugs to admins gives them nothing
-		// actionable. Agent actors are also redacted (same A2A
-		// lateral-movement reasoning as mcp_config).
-		if !h.composioMCPAppsEnabled(r.Context()) {
-			suppressComposioToolkitAllowlist(&resp)
-		} else if actorType == "agent" || uuidToString(a.OwnerID) != userID {
-			redactComposioToolkitAllowlist(&resp)
-		}
 		visible = append(visible, resp)
 	}
 
@@ -1283,13 +1236,6 @@ func (h *Handler) GetAgent(w http.ResponseWriter, r *http.Request) {
 			redactMcpConfig(&resp)
 		}
 	}
-	// composio_toolkit_allowlist visibility is strictly owner-only (see
-	// ListAgents for the rationale). No workspace owner/admin bypass.
-	if !h.composioMCPAppsEnabled(r.Context()) {
-		suppressComposioToolkitAllowlist(&resp)
-	} else if actorType == "agent" || uuidToString(agent.OwnerID) != userID {
-		redactComposioToolkitAllowlist(&resp)
-	}
 
 	writeJSON(w, http.StatusOK, resp)
 }
@@ -1317,13 +1263,6 @@ type CreateAgentRequest struct {
 	Model              string                     `json:"model"`
 	ThinkingLevel      string                     `json:"thinking_level"`
 	ServiceTier        string                     `json:"service_tier"`
-	// ComposioToolkitAllowlist seeds the per-task overlay gate (MUL-3869). On
-	// create only the calling user can be the owner, so we accept the field
-	// unconditionally here; the cross-owner permission gate lives on PUT.
-	// Nil = leave column NULL (no overlay). Empty slice = explicit `{}` (no
-	// overlay either, but the column reads as "configured" — distinct from
-	// "owner has never opened the integration").
-	ComposioToolkitAllowlist []string `json:"composio_toolkit_allowlist"`
 	// Template records the creation-source attribution used by the
 	// `agent_created` analytics event (for example, "agent_builder"). Empty
 	// identifies a manually authored agent.
@@ -1530,17 +1469,6 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		mc = append([]byte(nil), rawMcpConfig...)
 	}
 
-	// composio_toolkit_allowlist: the JSON field is a list-of-slugs that gets
-	// stored as TEXT[]. We normalise here (lowercase + trim + dedupe) so the
-	// dispatch path can compare against per-user connection rows with a
-	// straight equality. A nil slice (or absent JSON key) maps to a NULL
-	// column on insert. An explicitly empty list (`[]`) is preserved as an
-	// empty TEXT[] (the dispatch path treats NULL and `{}` identically).
-	allowlist := normaliseComposioToolkitAllowlist(req.ComposioToolkitAllowlist)
-	if !h.composioMCPAppsEnabled(r.Context()) {
-		allowlist = nil
-	}
-
 	skillUUIDs, ok := parseUUIDSliceOrBadRequest(w, req.SkillIDs, "skill_ids")
 	if !ok {
 		return
@@ -1569,26 +1497,25 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 	qtx := h.Queries.WithTx(tx)
 
 	created, err := qtx.CreateAgent(r.Context(), db.CreateAgentParams{
-		WorkspaceID:              wsUUID,
-		Name:                     req.Name,
-		Description:              req.Description,
-		Instructions:             req.Instructions,
-		AvatarUrl:                avatarURL,
-		RuntimeMode:              runtime.RuntimeMode,
-		RuntimeConfig:            rc,
-		RuntimeID:                runtime.ID,
-		Visibility:               perm.legacyVisibility(),
-		PermissionMode:           perm.mode,
-		MaxConcurrentTasks:       req.MaxConcurrentTasks,
-		OwnerID:                  parseUUID(ownerID),
-		CustomEnv:                ce,
-		CustomArgs:               ca,
-		McpConfig:                mc,
-		Model:                    pgtype.Text{String: req.Model, Valid: req.Model != ""},
-		ThinkingLevel:            pgtype.Text{String: req.ThinkingLevel, Valid: req.ThinkingLevel != ""},
-		ServiceTier:              pgtype.Text{String: req.ServiceTier, Valid: req.ServiceTier != ""},
-		ConversationStarters:     sp,
-		ComposioToolkitAllowlist: allowlist,
+		WorkspaceID:          wsUUID,
+		Name:                 req.Name,
+		Description:          req.Description,
+		Instructions:         req.Instructions,
+		AvatarUrl:            avatarURL,
+		RuntimeMode:          runtime.RuntimeMode,
+		RuntimeConfig:        rc,
+		RuntimeID:            runtime.ID,
+		Visibility:           perm.legacyVisibility(),
+		PermissionMode:       perm.mode,
+		MaxConcurrentTasks:   req.MaxConcurrentTasks,
+		OwnerID:              parseUUID(ownerID),
+		CustomEnv:            ce,
+		CustomArgs:           ca,
+		McpConfig:            mc,
+		Model:                pgtype.Text{String: req.Model, Valid: req.Model != ""},
+		ThinkingLevel:        pgtype.Text{String: req.ThinkingLevel, Valid: req.ThinkingLevel != ""},
+		ServiceTier:          pgtype.Text{String: req.ServiceTier, Valid: req.ServiceTier != ""},
+		ConversationStarters: sp,
 	})
 	if err != nil {
 		// Unique constraint on (workspace_id, name) — return a clear conflict error
@@ -1647,9 +1574,6 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 	))
 
 	redactAgentResponseForActor(&resp, actorType)
-	if !h.composioMCPAppsEnabled(r.Context()) {
-		suppressComposioToolkitAllowlist(&resp)
-	}
 	writeJSON(w, http.StatusCreated, resp)
 }
 
@@ -1675,7 +1599,7 @@ type UpdateAgentRequest struct {
 	McpConfig  *json.RawMessage `json:"mcp_config"`
 	Visibility *string          `json:"visibility"`
 	// PermissionMode + InvocationTargets are the invocation-permission inputs
-	// (MUL-3963). Owner-only writes (like composio_toolkit_allowlist): a
+	// (MUL-3963). Owner-only writes: a
 	// non-owner admin passing them is silently ignored, because the invoke
 	// gate is owner/allow-list based and an admin-authored allow-list would
 	// confuse the owner about who can run their agent. permission_mode is
@@ -1695,16 +1619,6 @@ type UpdateAgentRequest struct {
 	// ServiceTier follows the same tri-state contract as ThinkingLevel:
 	// omitted preserves, empty clears, and non-empty sets a Codex catalog ID.
 	ServiceTier *string `json:"service_tier"`
-	// ComposioToolkitAllowlist is a tri-state, same pattern as
-	// thinking_level, mcp_config:
-	//   - field omitted → no change (column preserved as-is)
-	//   - field present with null → explicit clear (ClearAgent... query)
-	//   - field present with [] → store empty TEXT[] (configured, no toolkits)
-	//   - field present with non-empty → store deduped lowercase slugs
-	// The decode-time raw fields map disambiguates "omitted" from "explicit
-	// null" (a *[]string can't, because a nil pointer is the same wire
-	// representation as both). MUL-3869.
-	ComposioToolkitAllowlist *[]string `json:"composio_toolkit_allowlist"`
 }
 
 // workspaceAlwaysRedactSecrets reports whether the workspace has opted
@@ -1752,17 +1666,9 @@ func canViewAgentSecrets(agent db.Agent, userID string, memberRole string) bool 
 // redaction in ListAgents / GetAgent. The caller still receives the
 // canonical form in the HTTP response; only the broadcast copy is
 // redacted.
-//
-// composio_toolkit_allowlist follows the same fan-out rule: every
-// workspace member subscribes to agent:created/updated/archived, so
-// a non-redacted broadcast would leak the agent owner's per-toolkit
-// allowlist to every member regardless of whether they would have
-// been allowed to read it via GET. Redact unconditionally on the
-// broadcast copy.
 func broadcastAgentResponse(resp AgentResponse) AgentResponse {
 	out := resp
 	redactMcpConfig(&out)
-	redactComposioToolkitAllowlist(&out)
 	// Belt-and-suspenders: agentToResponse already masks gateway.token on
 	// every read, so by the time a response reaches this broadcast helper
 	// the field is already "***". Re-mask anyway so a future refactor that
@@ -1783,66 +1689,6 @@ func redactMcpConfig(resp *AgentResponse) {
 	}
 }
 
-// redactComposioToolkitAllowlist removes the composio_toolkit_allowlist
-// value from the response when the caller is not the agent owner. The slug
-// list itself is not secret, but the "what {agent owner} has opted into"
-// view leaks the owner's integration footprint across the workspace, which
-// is the same privacy concern that gates mcp_config visibility behind
-// owner-only canViewAgentSecrets. We surface a coarse `_redacted` flag so
-// the front-end can render "Configured" without the contents (parity with
-// mcp_config_redacted). The clearing matters: the JSON `omitempty` only
-// drops nil slices, so reset to nil rather than `[]string{}`.
-func redactComposioToolkitAllowlist(resp *AgentResponse) {
-	if resp.ComposioToolkitAllowlist != nil {
-		resp.ComposioToolkitAllowlist = nil
-		resp.ComposioToolkitAllowlistRedacted = true
-	}
-}
-
-func suppressComposioToolkitAllowlist(resp *AgentResponse) {
-	resp.ComposioToolkitAllowlist = nil
-	resp.ComposioToolkitAllowlistRedacted = false
-}
-
-// normaliseComposioToolkitAllowlist canonicalises an incoming allowlist
-// payload before persisting. Each slug is trimmed + lowercased so the
-// dispatch path (which compares against user_composio_connection.toolkit_slug,
-// stored lowercased by the Composio service) does a flat string match
-// without needing a CITEXT or per-query LOWER(). Empty / whitespace-only
-// strings are dropped and duplicates collapsed so a sloppy UI payload
-// can't waste DB row-length or surface twice in the response.
-//
-// Contract:
-//   - nil in → nil out: "field absent / explicit null" preserved. Combined
-//     with sqlc.narg('composio_toolkit_allowlist')::text[] in UpdateAgent,
-//     this is what makes "omit field" mean "leave column alone".
-//   - empty slice in → empty slice out: "owner cleared all toolkits".
-//     Distinct from nil only at the column-NULL level; the dispatch path
-//     treats both identically as "no overlay".
-//   - non-empty in → trimmed, lowercased, deduped, stable order.
-func normaliseComposioToolkitAllowlist(in []string) []string {
-	if in == nil {
-		return nil
-	}
-	if len(in) == 0 {
-		return []string{}
-	}
-	seen := make(map[string]struct{}, len(in))
-	out := make([]string, 0, len(in))
-	for _, raw := range in {
-		s := strings.ToLower(strings.TrimSpace(raw))
-		if s == "" {
-			continue
-		}
-		if _, dup := seen[s]; dup {
-			continue
-		}
-		seen[s] = struct{}{}
-		out = append(out, s)
-	}
-	return out
-}
-
 // redactAgentResponseForActor strips secret-bearing fields from an agent
 // resource HTTP response when the request actor is an agent. Read
 // handlers already gate on actorType — mutation handlers
@@ -1850,14 +1696,9 @@ func normaliseComposioToolkitAllowlist(in []string) []string {
 // an agent with a host owner/admin token can do an unrelated mutation
 // (e.g. flip max_concurrent_tasks) on a target agent and harvest the
 // target's mcp_config from the mutation response. MUL-2600.
-//
-// composio_toolkit_allowlist is redacted under the same logic: an agent
-// runs with its host owner's PAT, so a mutation against a sibling agent
-// could otherwise return the sibling owner's allowlist in the response.
 func redactAgentResponseForActor(resp *AgentResponse, actorType string) {
 	if actorType == "agent" {
 		redactMcpConfig(resp)
-		redactComposioToolkitAllowlist(resp)
 	}
 }
 
@@ -1997,8 +1838,7 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 	}
 	// Invocation permission (MUL-3963). OWNER-ONLY write: access is the one
 	// agent property a workspace admin may NOT change (only the owner decides
-	// who can run their agent — the overlay uses the owner's own Composio
-	// connection, so admin-authored access would be confusing and unsafe).
+	// who can run their agent, so admin-authored access would be confusing).
 	//
 	// Non-owner behaviour: a *real* change is rejected with 403 so the contract
 	// is explicit and matches the owner-only UI (the picker is read-only for
@@ -2195,43 +2035,6 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// composio_toolkit_allowlist handling (MUL-3869). Tri-state semantics
-	// mirror thinking_level (see above): omitted → no change, null →
-	// ClearAgentComposioToolkitAllowlist, slice → wholesale replace.
-	//
-	// Owner-only WRITE. The caller is already past canManageAgent, which lets
-	// workspace owner/admins through alongside the agent owner — but the
-	// Composio overlay uses the agent OWNER's connection (MUL-3963), so an
-	// admin editing someone else's allowlist would silently reshape what the
-	// OWNER exposes through their own connected apps, confusing the owner
-	// about what their agent surfaces. Keep it owner-only.
-	// Drop the field with a debug log instead of erroring so an over-eager
-	// UI that sends the whole agent payload back on every save (PATCH-as-PUT)
-	// keeps working — same "silent ignore" stance the issue calls out, and
-	// the same one mcp_config takes for the broader admin pattern.
-	shouldClearComposioAllowlist := false
-	if _, hasAllowlist := rawFields["composio_toolkit_allowlist"]; hasAllowlist {
-		isAgentOwner := uuidToString(existing.OwnerID) == requestUserID(r)
-		if !h.composioMCPAppsEnabled(r.Context()) {
-			slog.Debug("update agent: composio_toolkit_allowlist write dropped because feature flag is disabled",
-				append(logger.RequestAttrs(r), "agent_id", id)...)
-		} else if !isAgentOwner {
-			slog.Debug("update agent: composio_toolkit_allowlist write by non-owner silently dropped",
-				append(logger.RequestAttrs(r), "agent_id", id)...)
-		} else if req.ComposioToolkitAllowlist == nil {
-			// JSON null → explicit clear via the dedicated query.
-			shouldClearComposioAllowlist = true
-		} else {
-			// Normalise (trim/lowercase/dedupe). Empty slice is preserved as
-			// an empty TEXT[] so the persisted value distinguishes "owner
-			// cleared every toolkit" from "owner has never opened the
-			// integration" (the dispatch path treats both as "no overlay"
-			// either way, but the column tells UX whether to show a primed
-			// vs empty picker).
-			params.ComposioToolkitAllowlist = normaliseComposioToolkitAllowlist(*req.ComposioToolkitAllowlist)
-		}
-	}
-
 	updated, err := h.Queries.UpdateAgent(r.Context(), params)
 	if err != nil {
 		// Unique constraint on (workspace_id, name) — mirror CreateAgent and
@@ -2281,15 +2084,6 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	if shouldClearComposioAllowlist {
-		updated, err = h.Queries.ClearAgentComposioToolkitAllowlist(r.Context(), updated.ID)
-		if err != nil {
-			slog.Warn("clear agent composio_toolkit_allowlist failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
-			writeError(w, http.StatusInternalServerError, "failed to clear composio_toolkit_allowlist")
-			return
-		}
-	}
-
 	// Invocation targets (MUL-3963): replace wholesale when the owner touched
 	// permission. Done after the row update so a permission_mode flip and its
 	// targets land together.
@@ -2322,15 +2116,6 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 	actorType, actorID := h.resolveActor(r, userID, uuidToString(updated.WorkspaceID))
 	h.publish(protocol.EventAgentStatus, uuidToString(updated.WorkspaceID), actorType, actorID, map[string]any{"agent": broadcastAgentResponse(resp)})
 	redactAgentResponseForActor(&resp, actorType)
-	// Workspace admins / non-owner members pass canManageAgent for legitimate
-	// admin actions (e.g. bulk reassigning agents off a leaving member's
-	// runtime), but they must not learn the agent owner's composio allowlist
-	// from the mutation response. See ListAgents/GetAgent for the same gate.
-	if !h.composioMCPAppsEnabled(r.Context()) {
-		suppressComposioToolkitAllowlist(&resp)
-	} else if uuidToString(updated.OwnerID) != userID {
-		redactComposioToolkitAllowlist(&resp)
-	}
 	writeJSON(w, http.StatusOK, resp)
 }
 

@@ -25,14 +25,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/dbreader"
 	"github.com/multica-ai/multica/server/internal/entitlement"
 	"github.com/multica-ai/multica/server/internal/events"
-	"github.com/multica-ai/multica/server/internal/integrations/channel/engine"
-	composio "github.com/multica-ai/multica/server/internal/integrations/composio"
-	"github.com/multica-ai/multica/server/internal/integrations/dingtalk"
 	"github.com/multica-ai/multica/server/internal/integrations/ghsnapshot"
-	"github.com/multica-ai/multica/server/internal/integrations/lark"
-	"github.com/multica-ai/multica/server/internal/integrations/slack"
-	"github.com/multica-ai/multica/server/internal/integrations/telegram"
-	"github.com/multica-ai/multica/server/internal/integrations/wecom"
 	"github.com/multica-ai/multica/server/internal/issuestatus"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/middleware"
@@ -267,131 +260,6 @@ type Handler struct {
 	CloudRuntime                 cloudRuntimeProxy
 	// Test-only HTTP override; nil uses the default client in production.
 	googleOAuthHTTPClient *http.Client
-	// Lark integration. All three are nil when the Lark master key
-	// (MULTICA_LARK_SECRET_KEY) is unset; the corresponding HTTP
-	// handlers return 403 in that case so a misconfigured self-host
-	// deployment surfaces a clear error instead of silently using a
-	// zero key. Wired in cmd/server/router.go after handler.New.
-	LarkInstallations *lark.InstallationService
-	LarkBindingTokens *lark.BindingTokenService
-	// LarkRegistration owns the device-flow install lifecycle: begin
-	// a registration session against accounts.feishu.cn, poll, and
-	// on success write lark_installation + the installer's
-	// lark_user_binding in one DB transaction. Nil when the at-rest
-	// key is unset or the RegistrationService failed to construct at
-	// boot.
-	LarkRegistration *lark.RegistrationService
-	// LarkAPIClient is the live transport that backs SendInteractiveCard,
-	// PatchInteractiveCard, SendBindingPromptCard, GetBotInfo. The
-	// router wires the real Lark HTTP client whenever
-	// MULTICA_LARK_SECRET_KEY is set; tests that need a no-op
-	// behaviour can swap in `lark.NewStubAPIClient(...)` directly. The
-	// UI consults IsConfigured() to decide whether to surface install
-	// entry points.
-	LarkAPIClient lark.APIClient
-	// Composio integration (MUL-3720). Nil when COMPOSIO_API_KEY is unset;
-	// the composio HTTP handlers return 403 in that case. Wired in
-	// cmd/server/router.go after handler.New.
-	Composio *composio.Service
-	// ChannelSupervisor owns the per-installation supervisor goroutines
-	// that hold the §4.4 WS lease and drive each channel.Channel
-	// (MUL-3620 generalized the Feishu-only Hub into this channel-agnostic
-	// engine). The router constructs it independently of platform secrets — it
-	// drives any channel type, not just Feishu. It remains nil when lease
-	// configuration is unsafe or a selected Redis backend fails its startup
-	// readiness check; each platform registers its Factory only when configured
-	// (Feishu when MULTICA_LARK_SECRET_KEY is set). The router does NOT
-	// call Run; the process owner (main.go) starts it under a long-running
-	// context and joins via WaitWithTimeout (bounded, fenced by
-	// ShutdownTimeout) during graceful shutdown so the lease renewer yields
-	// cleanly when the DB is healthy without blocking process exit if the
-	// pool is frozen — at worst the next replica waits the full TTL.
-	ChannelSupervisor *engine.Supervisor
-	// ChannelRouter is the channel-agnostic inbound pipeline (the shared
-	// handler the Supervisor injects into every Channel). main.go calls
-	// Drain on it during shutdown, after the Supervisor has stopped
-	// delivering events, to flush debounced run triggers and join in-flight
-	// reply goroutines. Built unconditionally (even without Lark).
-	ChannelRouter *engine.Router
-	// ChannelMediaReconciler settles the channel-media intent ledger
-	// (uploaded-but-unbound object reclaim). Built in cmd/server/router.go
-	// where the storage backend exists; main.go starts it as an independent
-	// worker goroutine. Nil when no storage backend is configured.
-	ChannelMediaReconciler *service.ChannelMediaReconciler
-	// LarkTyping owns the durable reaction cleanup worker, started under sweepCtx.
-	LarkTyping *lark.TypingIndicatorManager
-	// SlackInstall owns the bring-your-own-app Slack install lifecycle (register
-	// pasted tokens / list / revoke) and the at-rest encryption of each app's bot
-	// + app tokens (MUL-3666). Nil unless MULTICA_SLACK_SECRET_KEY is set.
-	SlackInstall *slack.InstallService
-	// SlackBindingTokens mints/redeems the user-binding tokens behind the
-	// "link your Slack account" prompt (MUL-3666). Nil unless Slack is
-	// configured (MULTICA_SLACK_SECRET_KEY set).
-	SlackBindingTokens *slack.BindingTokenService
-	// DingTalkInstall owns the bring-your-own-app DingTalk lifecycle. It is nil
-	// unless MULTICA_DINGTALK_SECRET_KEY is configured.
-	DingTalkInstall *dingtalk.InstallService
-	// DingTalkBindingTokens mints and redeems the single-use account-link tokens.
-	DingTalkBindingTokens *dingtalk.BindingTokenService
-	// SlackHistory backs the agent-facing `multica chat history` command: it
-	// reads a chat session's bound Slack conversation on demand (MUL-3871). Nil
-	// unless Slack is configured; GetChatChannelHistory then reports "no channel
-	// integration". A future platform satisfies the same reader interface.
-	SlackHistory ChatChannelHistoryReader
-	// WecomStore is the read/write handle over channel_installation rows scoped
-	// to channel_type='wecom'. Nil disables the wecom Web-UI endpoints (they
-	// return 403) and prevents boot from wiring the smart-bot supervisor.
-	WecomStore *wecom.Store
-	// WecomCredentials unseals a wecom installation's smart-bot secret for the
-	// WebSocket subscribe frame. Nil disables the wecom integration.
-	WecomCredentials wecom.CredentialsResolver
-	// WecomBindingTokens mints/redeems the user-binding tokens behind the
-	// "link your Multica account" prompt sent to first-time WeCom users
-	// (their aibot userid is a "T"-prefixed anonymized id with no relation
-	// to their real userid or email, so an explicit binding is required —
-	// see wecom/binding.go). Nil disables the redeem endpoint (returns 403)
-	// and the OutboundReplier's binding-prompt path.
-	WecomBindingTokens WecomBindingRedeemer
-
-	// WecomCredentialProbe overrides the install-time control check. Nil in
-	// production, which gets the real handshake probe; tests inject a fake so
-	// the install path runs without a socket.
-	WecomCredentialProbe wecom.CredentialProbe
-
-	// TelegramInstall owns the Telegram bot install lifecycle (register a
-	// pasted BotFather token / list / revoke) and the at-rest encryption of
-	// each bot's token. Nil unless MULTICA_TELEGRAM_SECRET_KEY is set.
-	TelegramInstall *telegram.InstallService
-	// TelegramBindingTokens mints/redeems the user-binding tokens behind the
-	// "link your Telegram account" prompt. Nil unless Telegram is configured.
-	TelegramBindingTokens *telegram.BindingTokenService
-	// TelegramOutbound owns the asynchronous terminal-delivery worker pool.
-	// The process owner starts and joins it; the synchronous event bus only
-	// enqueues EventChatDone work.
-	TelegramOutbound *telegram.Outbound
-
-	// channelFileDelivery names the channel types that can, IN THIS
-	// DEPLOYMENT, carry a file the agent produced the last hop into the
-	// conversation. It answers the claim response's
-	// chat_channel_delivers_files, which the agent's PER-TURN prompt turns into
-	// either "run `multica attachment upload`" or "describe the file in words"
-	// (daemon/prompt.go). Not the brief: the brief is the prompt cache prefix and
-	// this is a per-turn verdict, so stating it there made one session render two
-	// briefs (MUL-5377).
-	//
-	// It is a deployment fact, not a property of the channel type, and that
-	// distinction is the whole reason it lives here. Whether the file arrives
-	// takes TWO things: an adapter that goes back for the bound attachment,
-	// and object storage for it to go back to. The first is a property of the
-	// code, the second of the configuration, and only the process that wired
-	// both knows the conjunction. A daemon that answers this from the channel
-	// type alone promises delivery a storage-less deployment cannot perform.
-	//
-	// Written once at boot by DeclareChannelFileDelivery (cmd/server/router.go,
-	// in the same branch that passes the storage to the adapter, so the two
-	// cannot drift), read-only from then on. Nil means no channel delivers
-	// files, which is what a deployment with no storage configured gets.
-	channelFileDelivery map[string]bool
 	// LLM is the basic LLM API layer (MUL-4238): a thin wrapper over the
 	// OpenAI Go SDK backing server-internal one-shot LLM helpers such as chat
 	// title generation. The generic passthrough endpoints were removed in
@@ -706,45 +574,6 @@ func parseUUIDSliceOrBadRequest(w http.ResponseWriter, ids []string, fieldName s
 		uuids[i] = u
 	}
 	return uuids, true
-}
-
-// DeclareChannelFileDelivery records that this deployment can put a file the
-// agent produced into a channelType conversation. Call it at boot, from the
-// same branch that gives the adapter what it needs to perform the delivery —
-// the point is that one condition produces both the capability and the claim
-// it is announced under, so a deployment cannot end up promising a hop it does
-// not have.
-//
-// Not safe to call once the server is serving: the map it writes is read
-// without a lock by every task claim.
-func (h *Handler) DeclareChannelFileDelivery(channelType string) {
-	if channelType == "" {
-		return
-	}
-	if h.channelFileDelivery == nil {
-		h.channelFileDelivery = map[string]bool{}
-	}
-	h.channelFileDelivery[channelType] = true
-}
-
-// channelDeliversFiles answers chat_channel_delivers_files for one claim.
-//
-// The default is false in every direction that is not an explicit declaration:
-// a channel nobody declared, a deployment with no object storage, an adapter
-// that was never wired. False is the safe answer because of what the two
-// answers cost. False when the file could have travelled loses a delivery the
-// agent then describes in words. True when it cannot has the agent write "the
-// chart is attached" into a room where nothing is attached, and the reader is
-// left hunting for it.
-//
-// Web chat (empty channel type) is not answered here. It has no adapter and no
-// last hop to have — the browser renders the attachment card off the same bind
-// — and the prompt handles it in its own branch.
-func (h *Handler) channelDeliversFiles(channelType string) bool {
-	if channelType == "" {
-		return false
-	}
-	return h.channelFileDelivery[channelType]
 }
 
 // publish sends a domain event through the event bus.

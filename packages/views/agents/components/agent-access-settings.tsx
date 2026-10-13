@@ -37,9 +37,6 @@ export function AgentAccessSettings({
           canEdit={
             currentUserId !== null && agent.owner_id === currentUserId
           }
-          hasComposioAllowlist={
-            (agent.composio_toolkit_allowlist ?? []).length > 0
-          }
           onDirtyChange={onDirtyChange}
           onChange={(next) => onUpdate(agent.id, next)}
         />

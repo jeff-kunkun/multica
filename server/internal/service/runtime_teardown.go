@@ -147,9 +147,6 @@ func TeardownRuntime(ctx context.Context, qtx *db.Queries, runtimeID pgtype.UUID
 	if err := qtx.DeleteAgentInvocationTargetsBySystemRuntimeAgents(ctx, runtimeID); err != nil {
 		return out, fmt.Errorf("clean up agent invocation targets: %w", err)
 	}
-	if err := qtx.DeleteChannelInstallationsBySystemRuntimeAgents(ctx, runtimeID); err != nil {
-		return out, fmt.Errorf("clean up channel installations: %w", err)
-	}
 	if err := qtx.DeleteChatPinnedAgentsBySystemRuntimeAgents(ctx, runtimeID); err != nil {
 		return out, fmt.Errorf("clean up chat pins: %w", err)
 	}

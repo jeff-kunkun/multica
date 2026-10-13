@@ -15,8 +15,8 @@ import (
 // WorkspaceMcpServerResponse is the intentionally non-secret shape of one
 // workspace MCP server. Never add `url`, `command`, `args`, `headers`, or
 // `env`: upstream #6062 asks for shared secrets to be write-only, and every
-// one of those fields routinely carries a token (a Composio-style session URL
-// is a bearer credential on its own). Mirrors the daemon's own
+// one of those fields routinely carries a token (a session URL is often a
+// bearer credential on its own). Mirrors the daemon's own
 // runtimeLocalMcpServerSummary, which draws the same line for the same reason.
 //
 // `Enabled` is only meaningful on the agent-scoped list, where it reflects the

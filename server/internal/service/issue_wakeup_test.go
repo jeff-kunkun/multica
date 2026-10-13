@@ -8,11 +8,19 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/testutil"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
+
+// isLockTimeout reports the "I was blocked" answer: SQLSTATE 55P03,
+// lock_not_available.
+func isLockTimeout(err error) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && pgErr.Code == "55P03"
+}
 
 func wakeFixture(t *testing.T) (principalFixture, *IssueWakeupService, pgtype.UUID, string) {
 	t.Helper()

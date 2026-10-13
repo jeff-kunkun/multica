@@ -7845,8 +7845,6 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		ProjectDescription:               task.ProjectDescription,
 		ProjectResources:                 convertProjectResourcesForEnv(task.ProjectResources),
 		ChatSessionID:                    task.ChatSessionID,
-		ChatChannelType:                  task.ChatChannelType,
-		ChatChannelDeliversFiles:         task.ChatChannelDeliversFiles,
 		AutopilotRunID:                   task.AutopilotRunID,
 		AutopilotID:                      task.AutopilotID,
 		AutopilotTitle:                   task.AutopilotTitle,
@@ -7864,7 +7862,6 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		WorkspaceContext:                 task.WorkspaceContext,
 		IssueStatuses:                    convertIssueStatusesForEnv(task.IssueStatuses),
 		IssueStatusesOmitted:             task.IssueStatusesOmitted,
-		ConnectedApps:                    task.ConnectedApps,
 	}
 
 	// A local_directory task gets a fresh CODEX_HOME but mounts the same

@@ -87,8 +87,8 @@ import (
 const avatarURLPathPrefix = "/api/avatars/"
 
 // workspaceUploadNamespace is the storage prefix under which workspace-scoped
-// content lives — issue/comment/chat attachments, avatars, and channel media
-// ingest alike (see UploadFile and lark's mediaObjectKey). It is the only
+// content lives — issue/comment/chat attachments and avatars alike (see
+// UploadFile). It is the only
 // namespace where an object can belong to somebody other than whoever is
 // setting the avatar, so it is the only one that has to prove itself.
 const workspaceUploadNamespace = "workspaces/"
@@ -131,7 +131,7 @@ var (
 
 // avatarURLSigningKey derives an avatar-specific HMAC key from JWT_SECRET via
 // SHA-256, so this signing domain never shares an identical key with session
-// tokens. Mirrors composioStateSecret in the router.
+// tokens.
 func avatarURLSigningKey() []byte {
 	avatarSigningKeyOnce.Do(func() {
 		sum := sha256.Sum256(append([]byte("avatar-url:"), auth.JWTSecret()...))
@@ -291,9 +291,7 @@ func (h *Handler) avatarKeyIsPublishable(ctx context.Context, key string) bool {
 	}
 	attID, ok := attachmentIDFromStorageKey(key)
 	if !ok {
-		// Inside the workspace namespace but not an upload row — channel
-		// media ingest writes `workspaces/<ws>/lark/…` keys here too. Fail
-		// closed.
+		// Inside the workspace namespace but not an upload row. Fail closed.
 		return false
 	}
 	att, err := h.Queries.GetAttachmentByIDOnly(ctx, attID)

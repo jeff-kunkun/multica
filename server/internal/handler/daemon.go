@@ -23,12 +23,10 @@ import (
 	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/auth"
 	"github.com/multica-ai/multica/server/internal/daemonws"
-	"github.com/multica-ai/multica/server/internal/integrations/slack"
 	"github.com/multica-ai/multica/server/internal/issuestatus"
 	"github.com/multica-ai/multica/server/internal/logger"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/middleware"
-	"github.com/multica-ai/multica/server/internal/runtimeapps"
 	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/util"
 	"github.com/multica-ai/multica/server/pkg/agent"
@@ -1622,30 +1620,14 @@ func requestHasClientCapability(r *http.Request, capability string) bool {
 	return false
 }
 
-func parseRuntimeConnectedAppsForClaim(raw []byte, taskID pgtype.UUID) []runtimeapps.ConnectedApp {
-	raw = bytes.TrimSpace(raw)
-	if len(raw) == 0 || bytes.Equal(raw, []byte("null")) {
-		return nil
-	}
-	var apps []runtimeapps.ConnectedApp
-	if err := json.Unmarshal(raw, &apps); err != nil {
-		slog.Warn("daemon claim: unmarshal runtime_connected_apps failed",
-			"task_id", uuidToString(taskID),
-			"error", err,
-		)
-		return nil
-	}
-	return apps
-}
-
 // repairStaleCommentPlanIfNeeded handles the edit/delete race where a claimed
 // task's trigger was deleted (trigger_comment_id cleared, or pointing at a
 // tombstone) but coalesced_comment_ids survive: such a task must never be
-// dispatched as a generic assignment — its user-scoped MCP overlay still
-// belongs to the deleted author, and the prompt would read issue history
-// exposing that stale user's capabilities. When it applies, the task is
+// dispatched as a generic assignment — its originator still belongs to the
+// deleted author, and the prompt would read issue history on that stale
+// user's behalf. When it applies, the task is
 // cancelled and its surviving comments are replayed through normal routing
-// (which recomputes originator + connected-app context).
+// (which recomputes originator context).
 //
 // Returns handled=true when the task must NOT be dispatched — either a clean
 // repair (failure==nil) or a hard failure (failure!=nil, carrying the
@@ -2391,10 +2373,6 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 	// comment input. Comment tasks replace this with the ids actually embedded
 	// in the capability-aware response built below.
 	deliveredCommentIDs = []pgtype.UUID{}
-	composioMCPEnabled := h.composioMCPAppsEnabled(r.Context())
-	if composioMCPEnabled {
-		resp.ConnectedApps = parseRuntimeConnectedAppsForClaim(task.RuntimeConnectedApps, task.ID)
-	}
 	agent, err := h.Queries.GetAgent(r.Context(), task.AgentID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -2505,19 +2483,6 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 				"task_id", uuidToString(task.ID), "agent_id", uuidToString(agent.ID), "error", err)
 		} else {
 			mcpConfig = resolved
-		}
-	}
-	// Layer the per-task overlay (set at enqueue from the initiator
-	// user's active integrations — currently Composio) on top of the
-	// agent's saved mcp_config. Overlay wins on server-name collisions
-	// because it carries the live user-scoped session URL. Errors are
-	// logged but never fail the claim: a broken overlay must not prevent
-	// the agent from running with its base config.
-	if composioMCPEnabled && len(task.RuntimeMcpOverlay) > 0 {
-		if merged, err := mergeMCPOverlay(mcpConfig, json.RawMessage(task.RuntimeMcpOverlay)); err != nil {
-			slog.Warn("daemon claim: merge runtime_mcp_overlay failed; falling back to agent mcp_config", "task_id", uuidToString(task.ID), "error", err)
-		} else {
-			mcpConfig = merged
 		}
 	}
 	// runtime_config is stored as JSONB and may legitimately be the
@@ -3081,24 +3046,6 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 				resp.ChatIntro = !hasUser
 			}
 		}
-		// A task-level delivery snapshot, not the Chat's historical binding,
-		// decides whether this run is operating for an external audience.
-		// Web/Desktop/Mobile turns in an old channel-originated Chat have no
-		// snapshot and remain private to Multica after /new rotates the route.
-		delivery, deliveryErr := h.Queries.GetChannelTaskDelivery(r.Context(), task.ID)
-		if deliveryErr == nil {
-			resp.ChatChannelType = delivery.ChannelType
-			resp.ChatType = delivery.ChatType
-			resp.ChatChannelDeliversFiles = h.channelDeliversFiles(delivery.ChannelType)
-			if delivery.ChannelType == string(slack.TypeSlack) {
-				resp.ChatInThread = delivery.ChannelThreadID.Valid &&
-					delivery.ChannelThreadID.String != "" &&
-					delivery.ChannelThreadID.String != delivery.ChannelMessageID.String
-			}
-		} else if !errors.Is(deliveryErr, pgx.ErrNoRows) {
-			return resp, deliveredCommentIDs, issueSnapshot, agentSkillCount, builtinSkillCount,
-				h.rejectClaimSourceLoad(r.Context(), task, deliveryErr, "channel task delivery", uuidToString(task.ID))
-		}
 		// A web chat can opt into the same durable project context as an
 		// issue-bound task.
 		projectCtx, projectErr := h.resolveClaimProjectContext(r.Context(), cs.ProjectID, cs.WorkspaceID)
@@ -3114,7 +3061,7 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 			}
 		}
 		projectCtx.applyTo(&resp)
-		if !task.ForceFreshSession && !task.ChannelContextRevision.Valid {
+		if !task.ForceFreshSession {
 			// Resume chat sessions only when the stored pointer was produced
 			// by the same runtime as the claiming task. When the chat_session
 			// pointer is missing (legacy NULL runtime_id), stale (last task
@@ -3134,9 +3081,7 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 		// task (chat_input_task_id set) reads exactly the user messages
 		// tagged with its own input owner, so a message that arrived after
 		// this turn was sealed can never be absorbed here. Direct-chat
-		// tasks have owned their single message since MUL-4351; channel
-		// (Slack/Lark) tasks now seal their trailing batch at enqueue too.
-		// Only legacy tasks created before that deploy carry a NULL owner
+		// tasks have owned their single message since MUL-4351. Only legacy tasks created before that deploy carry a NULL owner
 		// and keep the trailing-message selector — the run of user messages
 		// after the last assistant row, which also covers a debounced burst
 		// (MUL-2968: "看上海天气" then "还有青岛" must both be delivered) —
@@ -3173,23 +3118,13 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 		// reads belong after it: a task that cannot load its input is preserved
 		// for redelivery and must not spend two more queries before returning.
 		if !task.ForceFreshSession {
-			contextRevision := pgtype.Int8{}
-			if task.ChannelContextRevision.Valid {
-				contextRevision = task.ChannelContextRevision
-			}
 			// GetLastChatTaskSession currently has exactly two consumers: the
 			// prior session and prior workdir fields. Keep this guard coupled to
 			// both so adding a third consumer cannot silently skip its fallback.
-			// Context-scoped channel tasks always resolve both fields from task
-			// rows in their own generation; the Chat-wide pointer may belong to a
-			// different generation when independent debounce timers race.
-			if task.ChannelContextRevision.Valid || chatSessionResumeFallbackNeeded(resp.PriorSessionID, resp.PriorWorkDir) {
+			if chatSessionResumeFallbackNeeded(resp.PriorSessionID, resp.PriorWorkDir) {
 				h.Metrics.RecordChatClaimSessionFallbackNeeded()
 				started := time.Now()
-				prior, err := h.Queries.GetLastChatTaskSession(r.Context(), db.GetLastChatTaskSessionParams{
-					ChatSessionID:          cs.ID,
-					ChannelContextRevision: contextRevision,
-				})
+				prior, err := h.Queries.GetLastChatTaskSession(r.Context(), cs.ID)
 				h.Metrics.ObserveChatClaimLastSessionQuery(time.Since(started).Seconds())
 				switch {
 				case err == nil && prior.SessionID.Valid:
@@ -3215,18 +3150,14 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 			// either pointer field needed fallback, so this query stays
 			// unconditional for non-force-fresh chat claims.
 			started := time.Now()
-			missing, err := h.Queries.GetLatestChatTaskRolloutMissing(r.Context(), db.GetLatestChatTaskRolloutMissingParams{
-				ChatSessionID:          cs.ID,
-				ChannelContextRevision: contextRevision,
-			})
+			missing, err := h.Queries.GetLatestChatTaskRolloutMissing(r.Context(), cs.ID)
 			h.Metrics.ObserveChatClaimRolloutMissingQuery(time.Since(started).Seconds())
 			if err == nil && missing {
 				resp.PriorSessionResumeUnavailable = true
 			}
 		} else if task.RetryOfTaskID.Valid {
 			// Same as the issue branch. The retry lineage is what separates this
-			// from a user-requested fresh start (the Lark fresh-session command),
-			// which still inherits nothing.
+			// from a user-requested fresh start, which still inherits nothing.
 			applyFreshSessionRetryWorkdir(*task, &resp, requestHasClientCapability(r, protocol.DaemonCapabilityCheckoutKeepsWorkV1))
 		}
 
@@ -3999,9 +3930,6 @@ func (h *Handler) ResolveTaskSkillBundles(w http.ResponseWriter, r *http.Request
 // these, not just the latest. Every completed or failed run writes an
 // assistant row, so the anchor advances one turn at a time; the result is the
 // whole slice on the first turn and exactly the new message(s) thereafter.
-// Legacy channel tasks also stop at the first unexpired media marker so an old
-// run cannot consume a placeholder that has not been bound yet. New channel
-// tasks use task-owned input batches and do not depend on this fallback.
 func trailingUserMessages(msgs []db.ChatMessage) []db.ChatMessage {
 	start := 0
 	for i := len(msgs) - 1; i >= 0; i-- {
@@ -4010,15 +3938,7 @@ func trailingUserMessages(msgs []db.ChatMessage) []db.ChatMessage {
 			break
 		}
 	}
-	msgs = msgs[start:]
-	now := time.Now()
-	for i := range msgs {
-		pending := msgs[i].ChannelMediaPendingUntil
-		if pending.Valid && pending.Time.After(now) {
-			return msgs[:i]
-		}
-	}
-	return msgs
+	return msgs[start:]
 }
 
 // ListPendingTasksByRuntime returns queued/dispatched tasks for a runtime.

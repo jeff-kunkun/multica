@@ -382,17 +382,14 @@ func TestSanitizeChatTitle(t *testing.T) {
 	}
 }
 
-func TestShouldGenerateFirstMessageTitlePreservesChannelManualRename(t *testing.T) {
-	if shouldGenerateFirstMessageTitle(false, "manual name", "", true, true) {
-		t.Fatal("channel manual rename was treated as an auto-generated title")
+func TestShouldGenerateFirstMessageTitle(t *testing.T) {
+	if !shouldGenerateFirstMessageTitle(false, "first-party seed") {
+		t.Fatal("first message with a seed title should be refined")
 	}
-	if !shouldGenerateFirstMessageTitle(false, "derived title", "derived title", true, true) {
-		t.Fatal("title initialized by the channel send should be eligible for refinement")
+	if shouldGenerateFirstMessageTitle(true, "later turn") {
+		t.Fatal("a session that already had a user message must keep its title")
 	}
-	if shouldGenerateFirstMessageTitle(false, "unknown source", "", false, false) {
-		t.Fatal("source lookup failure must skip optional title generation")
-	}
-	if !shouldGenerateFirstMessageTitle(false, "first-party seed", "", false, true) {
-		t.Fatal("first-party Chat should retain the existing title refinement flow")
+	if shouldGenerateFirstMessageTitle(false, "") {
+		t.Fatal("an empty title has nothing to refine")
 	}
 }

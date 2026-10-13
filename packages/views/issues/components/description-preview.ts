@@ -1,5 +1,3 @@
-import { stripChannelMediaMarkers } from "@multica/core/types";
-
 // A preview surface shows one or two clamped lines, but the clamp is CSS:
 // the full description still mounts into the DOM and the accessibility
 // tree of every card on the board. This ceiling is a DOM-weight bound, not
@@ -10,15 +8,10 @@ const PREVIEW_MAX_LENGTH = 300;
 /**
  * Flatten description Markdown into a one-line plain-text preview. Shared by
  * every surface that shows a description snippet next to an issue.
- *
- * Channel-media provenance is server-owned merge metadata, not authored
- * content, so it is stripped first: the image Markdown it annotates is removed
- * a line below, and without this the bare HTML comment survives every
- * remaining pass and becomes visible preview text.
  */
 export function descriptionPreview(markdown: string): string {
   const preview = (
-    stripChannelMediaMarkers(markdown)
+    markdown
       // Backslash-escaped punctuation is unescaped first, and the order is
       // load-bearing. The editor serializes a link as `\[label\](url)`, so the
       // link rule below sees `\[label\]` and its `[^\]]+` capture swallows the

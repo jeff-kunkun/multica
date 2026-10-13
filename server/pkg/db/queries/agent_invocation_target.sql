@@ -25,8 +25,7 @@ ON CONFLICT (agent_id, target_type, target_id) DO UPDATE SET
 
 -- name: DeleteAgentInvocationTargets :exec
 -- Clears every target for an agent. Used before re-writing the allow-list so
--- the update is a wholesale replace, matching the composio_toolkit_allowlist
--- write model.
+-- the update is a wholesale replace.
 DELETE FROM agent_invocation_target
 WHERE agent_id = $1;
 

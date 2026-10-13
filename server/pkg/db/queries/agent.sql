@@ -57,14 +57,12 @@ INSERT INTO agent (
     workspace_id, name, description, avatar_url, runtime_mode,
     runtime_config, runtime_id, visibility, max_concurrent_tasks, owner_id,
     instructions, custom_env, custom_args, mcp_config, model, thinking_level,
-    service_tier, conversation_starters,
-    composio_toolkit_allowlist, permission_mode
+    service_tier, conversation_starters, permission_mode
 ) VALUES (
     $1, $2, $3, $4, $5,
     $6, $7, $8, $9, $10,
     $11, $12, $13, $14, $15, $16,
     $17, COALESCE(sqlc.narg('conversation_starters')::jsonb, '[]'::jsonb),
-    sqlc.narg('composio_toolkit_allowlist')::text[],
     COALESCE(sqlc.narg('permission_mode'), 'private')
 )
 RETURNING *;
@@ -118,12 +116,6 @@ WHERE id = @id AND kind = 'system' AND system_key LIKE 'agent_builder:%'
 RETURNING *;
 
 -- name: UpdateAgent :one
--- composio_toolkit_allowlist is set wholesale: the API layer is responsible
--- for normalising the request payload to either (a) the new slug list — sent
--- here verbatim — or (b) an empty array to explicitly disable Composio.
--- Distinguish "field omitted" (preserve) from "explicit clear" via
--- ClearAgentComposioToolkitAllowlist below, mirroring the
--- thinking_level / mcp_config two-query pattern: COALESCE can't restore NULL.
 UPDATE agent SET
     name = COALESCE(sqlc.narg('name'), name),
     description = COALESCE(sqlc.narg('description'), description),
@@ -143,19 +135,7 @@ UPDATE agent SET
     thinking_level = COALESCE(sqlc.narg('thinking_level'), thinking_level),
     service_tier = COALESCE(sqlc.narg('service_tier'), service_tier),
     conversation_starters = COALESCE(sqlc.narg('conversation_starters'), conversation_starters),
-    composio_toolkit_allowlist = COALESCE(sqlc.narg('composio_toolkit_allowlist')::text[], composio_toolkit_allowlist),
     updated_at = now()
-WHERE id = $1
-RETURNING *;
-
--- name: ClearAgentComposioToolkitAllowlist :one
--- Explicit NULL-clear for composio_toolkit_allowlist. The COALESCE-based
--- UpdateAgent cannot set the column back to NULL — sending an empty array
--- through there would persist `{}` (still a non-NULL, equivalent to "no
--- toolkits" but distinct from "field never configured"). The API uses this
--- dedicated query when the agent owner removes every toolkit; subsequent
--- dispatch decisions treat NULL identically to `{}` (both -> no overlay).
-UPDATE agent SET composio_toolkit_allowlist = NULL, updated_at = now()
 WHERE id = $1
 RETURNING *;
 
@@ -318,7 +298,7 @@ LIMIT @page_limit;
 INSERT INTO agent_task_queue (
     agent_id, runtime_id, issue_id, status, priority, trigger_comment_id,
     coalesced_comment_ids, trigger_summary, force_fresh_session, is_leader_task, handoff_note,
-    squad_id, context, originator_user_id, accountable_user_id, runtime_mcp_overlay, runtime_connected_apps,
+    squad_id, context, originator_user_id, accountable_user_id,
     originator_source, delegated_from_task_id, rule_version_id, rerun_of_task_id, trigger_evidence_kind, trigger_evidence_ref_id,
     id
 )
@@ -337,8 +317,6 @@ SELECT
     END,
     sqlc.narg(originator_user_id),
     sqlc.narg(accountable_user_id),
-    sqlc.narg(runtime_mcp_overlay),
-    sqlc.narg(runtime_connected_apps),
     sqlc.narg(originator_source),
     sqlc.narg(delegated_from_task_id),
     sqlc.narg(rule_version_id),
@@ -348,70 +326,6 @@ SELECT
     COALESCE(sqlc.narg('id')::uuid, gen_random_uuid())
 WHERE lock_task_owner_rows($1, $3, $2)
 RETURNING *;
-
--- name: CreateDeferredChannelIssueTask :one
--- Fenced against workspace teardown: lock_task_owner_rows (migration 284)
--- locks the owners' workspace rows in the writer's own transaction and returns
--- false once they are gone, so this statement writes no row instead of stranding
--- a task in a workspace that has just been deleted (MUL-5999).
--- Channel /issue media resolves after issue creation. Persist the assigned
--- issue task up front for crash safety, but keep it inert until attachment
--- binding settles or the fire_at fallback is promoted by the normal sweeper.
-INSERT INTO agent_task_queue (
-    agent_id, runtime_id, issue_id, status, priority, trigger_comment_id,
-    coalesced_comment_ids, trigger_summary, force_fresh_session, is_leader_task, handoff_note,
-    squad_id, context, originator_user_id, accountable_user_id, runtime_mcp_overlay, runtime_connected_apps,
-    originator_source, delegated_from_task_id, rule_version_id, rerun_of_task_id,
-    trigger_evidence_kind, trigger_evidence_ref_id, fire_at,
-    id
-)
-SELECT
-    $1, $2, $3, 'deferred', $4, sqlc.narg(trigger_comment_id),
-    COALESCE(sqlc.narg(coalesced_comment_ids)::uuid[], '{}'),
-    sqlc.narg(trigger_summary),
-    COALESCE(sqlc.narg('force_fresh_session')::boolean, FALSE),
-    COALESCE(sqlc.narg('is_leader_task')::boolean, FALSE),
-    sqlc.narg(handoff_note),
-    sqlc.narg(squad_id),
-    jsonb_strip_nulls(jsonb_build_object(
-        'head_sha', NULLIF(COALESCE(sqlc.narg('head_sha')::text, ''), ''),
-        'channel_issue_media_pending', TRUE
-    )),
-    sqlc.narg(originator_user_id),
-    sqlc.narg(accountable_user_id),
-    sqlc.narg(runtime_mcp_overlay),
-    sqlc.narg(runtime_connected_apps),
-    sqlc.narg(originator_source),
-    sqlc.narg(delegated_from_task_id),
-    sqlc.narg(rule_version_id),
-    sqlc.narg(rerun_of_task_id),
-    sqlc.narg(trigger_evidence_kind),
-    sqlc.narg(trigger_evidence_ref_id),
-    @fire_at,
-    COALESCE(sqlc.narg('id')::uuid, gen_random_uuid())
-WHERE lock_task_owner_rows($1, $3, $2)
-RETURNING *;
-
--- name: PromoteDeferredChannelIssueTask :one
--- Early promotion is idempotent at the service layer: a task already promoted
--- by the fire_at sweeper no longer matches and is treated as settled.
-UPDATE agent_task_queue
-SET status = 'queued', fire_at = NULL
-WHERE id = $1 AND issue_id IS NOT NULL AND status = 'deferred'
-RETURNING *;
-
--- name: SetDeferredChannelIssueTaskRuntimeOverlay :execrows
--- The issue and its inert media-gated task commit atomically before the optional
--- external overlay is built. Only hydrate the untouched original plan: a comment
--- merge may already have replaced the trigger, attribution, and matching overlay.
-UPDATE agent_task_queue
-SET runtime_mcp_overlay = sqlc.narg(runtime_mcp_overlay),
-    runtime_connected_apps = sqlc.narg(runtime_connected_apps)
-WHERE id = @id
-  AND status = 'deferred'
-  AND context->>'channel_issue_media_pending' = 'true'
-  AND trigger_comment_id IS NULL
-  AND originator_user_id IS NOT DISTINCT FROM sqlc.narg(expected_originator_user_id)::uuid;
 
 -- name: CreateQuickCreateTask :one
 -- Fenced against workspace teardown: lock_task_owner_rows (migration 284)
@@ -426,7 +340,7 @@ WHERE id = @id
 -- NULL-source enqueue bypass (MUL-4302 §2).
 INSERT INTO agent_task_queue (
     agent_id, runtime_id, issue_id, status, priority, context, originator_user_id,
-    accountable_user_id, runtime_mcp_overlay, runtime_connected_apps,
+    accountable_user_id,
     originator_source, trigger_evidence_kind, trigger_evidence_ref_id,
     id
 )
@@ -434,8 +348,6 @@ SELECT
     $1, $2, NULL, 'queued', $3, $4,
     sqlc.narg(originator_user_id),
     sqlc.narg(accountable_user_id),
-    sqlc.narg(runtime_mcp_overlay),
-    sqlc.narg(runtime_connected_apps),
     sqlc.narg(originator_source),
     sqlc.narg(trigger_evidence_kind),
     sqlc.narg(trigger_evidence_ref_id),
@@ -494,11 +406,8 @@ WHERE id = $1 AND issue_id IS NULL
 -- provenance. delivered_comment_ids intentionally stays at its '{}' default:
 -- the child must earn its own delivery receipt at claim time.
 --
--- originator_user_id is inherited so the Composio overlay decision sees the
--- same top-of-chain human across the retry: the user behind the original
--- run has not changed. The Composio overlay follows the agent's invocation
--- permission and uses the agent owner's connection (MUL-3963); originator is
--- carried for A2A/audit, not as an originator == agent.owner_id gate.
+-- originator_user_id is inherited for A2A/audit: the user behind the
+-- original run has not changed.
 -- A system retry is NOT a new attribution event (MUL-4302 §5): it inherits the
 -- parent's accountable human, source label, delegation lineage, rule version,
 -- and trigger evidence UNCHANGED, and records retry_of_task_id = p.id so retry
@@ -510,7 +419,7 @@ WHERE id = $1 AND issue_id IS NULL
 -- chain keeps consuming the ORIGINAL root input batch (MUL-4351): the root
 -- direct task set it to its own id, every descendant copies that value, and a
 -- claim always reads the same user messages. A plain copy (not
--- COALESCE(parent.chat_input_task_id, parent.id)) is deliberate: legacy/channel
+-- COALESCE(parent.chat_input_task_id, parent.id)) is deliberate: legacy
 -- parents carry NULL and must stay NULL so their retries keep the trailing
 -- selector — promoting a pre-migration NULL row to the task-owned path on retry
 -- would risk replaying untagged history during a rolling deploy.
@@ -540,11 +449,11 @@ INSERT INTO agent_task_queue (
     status, priority, trigger_comment_id, coalesced_comment_ids, trigger_summary, context,
     session_id, work_dir,
     attempt, max_attempts, parent_task_id, force_fresh_session, is_leader_task,
-    squad_id, originator_user_id, accountable_user_id, runtime_mcp_overlay, runtime_connected_apps,
+    squad_id, originator_user_id, accountable_user_id,
     originator_source, delegated_from_task_id, rule_version_id,
     trigger_evidence_kind, trigger_evidence_ref_id, retry_of_task_id,
     chat_input_task_id, fire_at,
-    channel_context_revision, handoff_note, id
+    handoff_note, id
 )
 SELECT
     p.agent_id, p.runtime_id, p.issue_id, p.chat_session_id, p.autopilot_run_id,
@@ -559,12 +468,9 @@ SELECT
     p.squad_id,
     p.originator_user_id,
     p.accountable_user_id,
-    sqlc.narg(runtime_mcp_overlay),
-    sqlc.narg(runtime_connected_apps),
     p.originator_source, p.delegated_from_task_id, p.rule_version_id,
     p.trigger_evidence_kind, p.trigger_evidence_ref_id, p.id,
     p.chat_input_task_id, sqlc.narg(fire_at),
-    p.channel_context_revision,
     CASE WHEN p.context->>'wakeup_id' IS NOT NULL THEN p.handoff_note END,
     -- Named new_task_id, not id: $1 above is the PARENT task's id.
     COALESCE(sqlc.narg('new_task_id')::uuid, gen_random_uuid())
@@ -590,14 +496,12 @@ INSERT INTO agent_task_queue (
     agent_id, runtime_id, status, priority, context,
     force_fresh_session, is_leader_task, squad_id,
     originator_user_id, accountable_user_id,
-    runtime_mcp_overlay, runtime_connected_apps,
     originator_source, rerun_of_task_id, id
 )
 SELECT
     p.agent_id, p.runtime_id, 'queued', p.priority, p.context,
     TRUE, p.is_leader_task, p.squad_id,
     sqlc.arg(actor_user_id), sqlc.arg(actor_user_id),
-    sqlc.narg(runtime_mcp_overlay), sqlc.narg(runtime_connected_apps),
     'direct_human', p.id, sqlc.arg(new_task_id)
 FROM agent_task_queue p
 WHERE p.id = sqlc.arg(source_task_id)
@@ -1254,10 +1158,6 @@ LIMIT 1;
 -- an older session (or none), so it must disclose the continuity gap.
 SELECT COALESCE(session_rollout_missing, FALSE) FROM agent_task_queue
 WHERE chat_session_id = sqlc.arg('chat_session_id')
-  AND (
-    sqlc.narg('channel_context_revision')::bigint IS NULL
-    OR COALESCE(channel_context_revision, 1) = sqlc.narg('channel_context_revision')::bigint
-  )
   AND status IN ('completed', 'failed')
   AND started_at IS NOT NULL
 ORDER BY COALESCE(completed_at, started_at, dispatched_at, created_at) DESC
@@ -1811,8 +1711,7 @@ WHERE context->>'wakeup_id' IS NULL AND issue_id = $1 AND status IN ('queued', '
 
 -- name: HasPendingTaskForIssueAndAgent :one
 -- Returns true if a specific agent already has a queued or dispatched task
--- for the given issue, or the explicitly-marked deferred task whose channel
--- media must bind before the issue agent runs. Used by @mention trigger dedup.
+-- for the given issue. Used by @mention trigger dedup.
 --
 -- head_sha keys the dedup on the commit under review (TEN-356): when a caller
 -- passes a non-empty head_sha, a pending task only dedups if it was stamped
@@ -1825,7 +1724,6 @@ SELECT count(*) > 0 AS has_pending FROM agent_task_queue
 WHERE context->>'wakeup_id' IS NULL AND issue_id = $1 AND agent_id = $2
   AND (
     status IN ('queued', 'dispatched')
-    OR (status = 'deferred' AND context->>'channel_issue_media_pending' = 'true')
   )
   AND (
     COALESCE(sqlc.narg('head_sha')::text, '') = ''
@@ -1839,7 +1737,6 @@ SELECT count(*) > 0 AS has_pending FROM agent_task_queue
 WHERE context->>'wakeup_id' IS NULL AND issue_id = $1 AND agent_id = $2
   AND (
     status IN ('queued', 'dispatched')
-    OR (status = 'deferred' AND context->>'channel_issue_media_pending' = 'true')
   )
   AND (
     COALESCE(sqlc.narg('head_sha')::text, '') = ''
@@ -1857,7 +1754,6 @@ WHERE context->>'wakeup_id' IS NULL AND issue_id = @issue_id
   AND agent_id = @agent_id
   AND (
     status IN ('queued', 'dispatched')
-    OR (status = 'deferred' AND context->>'channel_issue_media_pending' = 'true')
   )
   AND trigger_comment_id IS DISTINCT FROM @exclude_trigger_comment_id::uuid
   AND (
@@ -1872,7 +1768,6 @@ WHERE context->>'wakeup_id' IS NULL AND issue_id = @issue_id
   AND agent_id = @agent_id
   AND (
     status IN ('queued', 'dispatched')
-    OR (status = 'deferred' AND context->>'channel_issue_media_pending' = 'true')
   )
   AND trigger_comment_id IS DISTINCT FROM @exclude_trigger_comment_id::uuid
   AND (
@@ -1892,28 +1787,20 @@ WHERE context->>'wakeup_id' IS NULL AND issue_id = @issue_id
 --
 -- Target is restricted to a pre-claim task on purpose (MUL-4195 review rounds
 -- 2–4). This merge is reached when HasPendingTaskForIssueAndAgent matched a
--- 'queued'/'dispatched' task, or the channel-media deferred task described
--- below. 'dispatched' is deliberately NOT a
+-- 'queued'/'dispatched' task. 'dispatched' is deliberately NOT a
 -- target: a dispatched / waiting_local_directory / running task has already had
 -- its claim response built. Folding afterward would add a planned id that is
 -- absent from that response's delivered_comment_ids receipt; completion
 -- reconciliation handles it instead. Ordinary 'deferred' rows remain excluded:
 -- assignee-fallback escalations have their own fire_at lifecycle and may coexist
--- with a queued primary. The one exception is a task explicitly marked
--- channel_issue_media_pending. It is the issue's sole assigned-agent task and
--- has not been claimable yet, so a new comment must merge into it instead of
--- creating a competing queued task. coalesced_comment_ids remains the pre-claim
+-- with a queued primary. coalesced_comment_ids remains the pre-claim
 -- plan; the claim path records the actual embedded subset in
 -- delivered_comment_ids.
 --
--- Recompute-on-merge (MUL-4195 review must-fix #1): originator_user_id,
--- runtime_mcp_overlay and runtime_connected_apps are re-stamped to the NEW
--- trigger comment's originator (computed by the caller). Earlier this only
--- repointed the trigger and kept the old originator's overlay/attribution, so a
--- run answering user B's comment could execute under user A's connected-app
--- capabilities and audit identity. Re-stamping means the single coalescing run
--- carries the latest deliberate instruction's originator and the matching
--- overlay — no cross-user capability bleed, no stale attribution. This also
+-- Recompute-on-merge (MUL-4195 review must-fix #1): originator_user_id is
+-- re-stamped to the NEW trigger comment's originator (computed by the caller),
+-- so the single coalescing run carries the latest deliberate instruction's
+-- originator — no stale attribution. This also
 -- removes the previous originator gate + fresh-enqueue fallback, which could not
 -- create a second task anyway (the idx_one_pending_task_per_issue_agent unique
 -- index allows only one queued/dispatched task per (issue, agent)) and therefore
@@ -1945,9 +1832,7 @@ SET coalesced_comment_ids = (
     delegated_from_task_id = sqlc.narg('new_delegated_from_task_id')::uuid,
     rule_version_id = sqlc.narg('new_rule_version_id')::uuid,
     trigger_evidence_kind = sqlc.narg('new_trigger_evidence_kind'),
-    trigger_evidence_ref_id = sqlc.narg('new_trigger_evidence_ref_id')::uuid,
-    runtime_mcp_overlay = sqlc.narg('new_runtime_mcp_overlay'),
-    runtime_connected_apps = sqlc.narg('new_runtime_connected_apps')
+    trigger_evidence_ref_id = sqlc.narg('new_trigger_evidence_ref_id')::uuid
 WHERE id = (
     SELECT t.id FROM agent_task_queue t
     WHERE t.context->>'wakeup_id' IS NULL AND t.issue_id = @issue_id
@@ -1955,7 +1840,6 @@ WHERE id = (
       AND t.comment_thread_id IS NOT DISTINCT FROM comment_thread_root_id(@new_trigger_comment_id::uuid)
       AND (
           t.status = 'queued'
-          OR (t.status = 'deferred' AND t.context->>'channel_issue_media_pending' = 'true')
       )
       -- Head-scoped (TEN-356, #5914): never fold across HEADs. The physical
       -- unique index is per (issue_id, agent_id, thread), so an insert-race loser can
@@ -2042,7 +1926,6 @@ WHERE id = (
       AND t.comment_thread_id IS NOT DISTINCT FROM comment_thread_root_id(@comment_id::uuid)
       AND (
           t.status = 'queued'
-          OR (t.status = 'deferred' AND t.context->>'channel_issue_media_pending' = 'true')
       )
       AND t.trigger_comment_id IS DISTINCT FROM @comment_id::uuid
       AND NOT (@comment_id::uuid = ANY(t.coalesced_comment_ids))
@@ -2068,7 +1951,6 @@ WHERE issue_id = @issue_id
           id IS DISTINCT FROM sqlc.narg('exclude_task_id')::uuid
           AND (
               status IN ('queued', 'dispatched', 'running', 'waiting_local_directory')
-              OR (status = 'deferred' AND context->>'channel_issue_media_pending' = 'true')
           )
           AND (trigger_comment_id = @comment_id::uuid OR @comment_id::uuid = ANY(coalesced_comment_ids))
       )
@@ -2230,10 +2112,6 @@ WHERE recovery.author_type = 'system'
             OR (
                 (
                     covering.status IN ('queued', 'dispatched', 'running', 'waiting_local_directory')
-                    OR (
-                        covering.status = 'deferred'
-                        AND covering.context->>'channel_issue_media_pending' = 'true'
-                    )
                 )
                 AND (
                     covering.trigger_comment_id = recovery.id
@@ -2248,8 +2126,7 @@ LIMIT @max_per_tick;
 -- name: HasActiveTaskForIssueAndAgent :one
 -- MUL-4195: true when the (issue, agent) pair has any non-terminal task in a
 -- state whose completion will run completion reconciliation — queued,
--- dispatched, running, waiting_local_directory, or the explicitly-marked
--- channel-media deferred state. Used by the comment enqueue
+-- dispatched, running, or waiting_local_directory. Used by the comment enqueue
 -- path: when a merge into a pre-claim task fails (the task is already
 -- dispatched/running, or a mismatched pre-claim task exists), a fresh queued
 -- INSERT would collide with idx_one_pending_task_per_issue_agent AND would risk
@@ -2260,7 +2137,6 @@ SELECT count(*) > 0 AS has_active FROM agent_task_queue
 WHERE issue_id = $1 AND agent_id = $2
   AND (
     status IN ('queued', 'dispatched', 'running', 'waiting_local_directory')
-    OR (status = 'deferred' AND context->>'channel_issue_media_pending' = 'true')
   );
 
 -- name: HasActiveTaskForIssueAndAgentInThread :one
@@ -2269,7 +2145,6 @@ SELECT count(*) > 0 AS has_active FROM agent_task_queue
 WHERE issue_id = $1 AND agent_id = $2
   AND (
     status IN ('queued', 'dispatched', 'running', 'waiting_local_directory')
-    OR (status = 'deferred' AND context->>'channel_issue_media_pending' = 'true')
   )
   AND comment_thread_id IS NOT DISTINCT FROM comment_thread_root_id(sqlc.narg('thread_comment_id')::uuid);
 
@@ -2331,8 +2206,6 @@ ORDER BY atq.priority DESC, atq.created_at ASC;
 --
 -- Scope is deliberately tight:
 --   * retry_of_task_id IS NOT NULL — only auto-retry clones, never a fresh run.
---   * channel-media pending rows are excluded for the same reason: that deferred
---     row is the issue's own task waiting on media, not a superseded retry.
 --   * issue_id IS NOT NULL — chat / quick-create tasks have no slot semantics.
 --
 -- 'running' and 'waiting_local_directory' count as superseding: the duplicate
@@ -2345,7 +2218,6 @@ WHERE r.runtime_id = ANY(@runtime_ids::uuid[])
   AND r.status = 'deferred'
   AND r.issue_id IS NOT NULL
   AND r.retry_of_task_id IS NOT NULL
-  AND COALESCE(r.context->>'channel_issue_media_pending', '') <> 'true'
   AND EXISTS (
     SELECT 1 FROM agent_task_queue successor
     WHERE successor.issue_id = r.issue_id
@@ -2398,7 +2270,6 @@ WITH due AS (
           AND occupant.id <> t.id
           AND (
             occupant.status IN ('queued', 'dispatched')
-            OR (occupant.status = 'deferred' AND occupant.context->>'channel_issue_media_pending' = 'true')
           )
       )
 )
@@ -2466,7 +2337,6 @@ WHERE t.runtime_id = ANY(@runtime_ids::uuid[])
         AND occupant.id <> t.id
         AND (
           occupant.status IN ('queued', 'dispatched')
-          OR (occupant.status = 'deferred' AND occupant.context->>'channel_issue_media_pending' = 'true')
         )
     )
   );
@@ -2501,7 +2371,6 @@ WITH due AS (
           AND occupant.id <> t.id
           AND (
             occupant.status IN ('queued', 'dispatched')
-            OR (occupant.status = 'deferred' AND occupant.context->>'channel_issue_media_pending' = 'true')
           )
       )
 )

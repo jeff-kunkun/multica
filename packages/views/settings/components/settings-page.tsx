@@ -13,8 +13,6 @@ import {
   Laptop,
   ListPlus,
   Lock,
-  MessagesSquare,
-  Plug,
   Search,
   Server,
   Settings,
@@ -45,8 +43,6 @@ import { TokensTab } from "./tokens-tab";
 import { WorkspaceTab } from "./workspace-tab";
 import { MembersTab } from "./members-tab";
 import { CodeTab } from "./code-tab";
-import { ChannelsTab } from "./channels-tab";
-import { ConnectedAppsTab, useComposioAvailable } from "./connected-apps-tab";
 import { NotificationsTab } from "./notifications-tab";
 import { LabelsTab } from "./labels-tab";
 import { IssueStatusesTab } from "./issue-statuses-tab";
@@ -114,7 +110,6 @@ export function SettingsPage({ extraDeviceTabs = [] }: SettingsPageProps = {}) {
     BILLING_WORKSPACE_SUBSCRIPTIONS_FLAG,
     false,
   );
-  const appsAvailable = useComposioAvailable();
   const entry = (
     value: string,
     label: string,
@@ -159,9 +154,6 @@ export function SettingsPage({ extraDeviceTabs = [] }: SettingsPageProps = {}) {
               Keyboard,
               <KeyboardShortcutsTab />,
             ),
-            ...(appsAvailable
-              ? [entry("apps", t(($) => $.page.tabs.apps), Plug, <ConnectedAppsTab />)]
-              : []),
             entry("tokens", t(($) => $.page.tabs.tokens), KeyRound, <TokensTab />),
           ],
         },
@@ -242,12 +234,6 @@ export function SettingsPage({ extraDeviceTabs = [] }: SettingsPageProps = {}) {
             entry("code", t(($) => $.page.tabs.code), FolderGit2, <CodeTab />, {
               adminOnly: true,
             }),
-            entry(
-              "channels",
-              t(($) => $.page.tabs.channels),
-              MessagesSquare,
-              <ChannelsTab />,
-            ),
             entry("mcp", t(($) => $.page.tabs.mcp), Server, <McpTab />, {
               adminOnly: true,
             }),
@@ -309,7 +295,6 @@ export function SettingsPage({ extraDeviceTabs = [] }: SettingsPageProps = {}) {
     navigation.push(
       settingsHref(navigation.pathname, navigation.searchParams, result.tab, {
         section: result.anchor,
-        integration: result.integration,
       }),
     );
   };
@@ -388,11 +373,11 @@ export function SettingsPage({ extraDeviceTabs = [] }: SettingsPageProps = {}) {
         {results.map((result, position) => {
           const page = allEntries.find((item) => item.value === result.tab);
           const scope = scopeOf(result.tab);
-          const path = [scope?.label, result.anchor || result.integration ? page?.label : null]
+          const path = [scope?.label, result.anchor ? page?.label : null]
             .filter(Boolean)
             .join(" › ");
           return (
-            <li key={`${result.tab}#${result.anchor ?? ""}#${result.integration ?? ""}`}>
+            <li key={`${result.tab}#${result.anchor ?? ""}`}>
               <button
                 type="button"
                 role="option"
@@ -561,7 +546,7 @@ export function SettingsPage({ extraDeviceTabs = [] }: SettingsPageProps = {}) {
       </aside>
       <div
         ref={contentRef}
-        key={`${active.value}:${location.integration ?? ""}`}
+        key={active.value}
         className="min-w-0 flex-1 overflow-y-auto overscroll-contain"
       >
         <div

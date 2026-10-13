@@ -22,11 +22,6 @@
 // — but it does mean a change to TriggerOwner is an AUTHORIZATION change, not a
 // labelling one. Every other constructor here only mirrors a human the caller
 // computed.
-//
-// It does NOT decide Composio access: since MUL-3963 the connected-apps overlay is
-// built from the AGENT OWNER's connections and allow-list and ignores the
-// originator entirely (integrations/composio/dispatch.go). Naming the originator
-// here therefore hands out no third-party credentials.
 package attribution
 
 import "github.com/jackc/pgx/v5/pgtype"
@@ -149,8 +144,7 @@ const (
 //
 //   - UserID is the AUTHORIZATION human the caller writes into
 //     originator_user_id. It is the value canInvokeAgent reads; it is legitimately
-//     invalid (NULL) when no human authorized the run. It does NOT select Composio
-//     connections — those follow the agent owner (MUL-3963).
+//     invalid (NULL) when no human authorized the run.
 //   - AccountableUserID is the AUDIT human written into accountable_user_id. The
 //     one-way invariant (enforced by finalizeAttribution): when UserID is valid,
 //     AccountableUserID equals it. When UserID is NULL (no human authorized the
@@ -343,7 +337,7 @@ func ClassifyDirect(f DirectFacts) Result {
 // a path that carries no issue and no trigger comment — a chat message or a
 // quick-create request. userID is the member who acted (the chat sender / the
 // quick-create requester) and becomes both originator and accountable. An invalid
-// userID (e.g. a Lark group message whose sender could not be resolved) yields an
+// userID yields an
 // explicit unattributed result rather than a NULL-source bypass.
 func DirectHumanRun(userID pgtype.UUID, evidenceKind EvidenceKind, evidenceRefID pgtype.UUID) Result {
 	if !userID.Valid {

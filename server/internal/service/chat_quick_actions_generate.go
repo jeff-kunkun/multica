@@ -78,7 +78,7 @@ const (
 // suggestions, satisfied by *llm.Client. It is an interface (not the concrete
 // client) so tests can drive the whole path — prompt rendering, parsing,
 // persistence, broadcast — without an HTTP upstream, mirroring how
-// ComposioOverlayBuilder and TaskWakeupNotifier are injected.
+// TaskWakeupNotifier is injected.
 //
 // A nil ChatQuickActionsLLM, or one whose Enabled() is false, disables the
 // feature entirely: no pending marker is raised and no pills are generated.

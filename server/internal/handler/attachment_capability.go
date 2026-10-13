@@ -76,8 +76,8 @@ var (
 )
 
 // attachmentCapabilitySigningKey derives the capability key from the
-// deployment's JWT secret via SHA-256, mirroring composioStateSecret in
-// server/cmd/server/router.go. Deriving rather than reusing means a
+// deployment's JWT secret via SHA-256, mirroring avatarURLSigningKey.
+// Deriving rather than reusing means a
 // capability signature can never collide with a JWT signature; rotating
 // JWT_SECRET additionally invalidates outstanding capabilities, which is the
 // behaviour an operator would expect from a rotation.

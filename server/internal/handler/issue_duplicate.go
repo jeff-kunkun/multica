@@ -64,7 +64,7 @@ func parseDuplicateMark(w http.ResponseWriter, req *UpdateIssueRequest, rawField
 	// The description/attachment path locks attachments before the issue row,
 	// while a mark locks two issue rows first. Keeping them apart keeps each
 	// path's lock order fixed.
-	if req.Description != nil || req.TitleBase != nil || req.DescriptionBase != nil || len(req.AttachmentIDs) > 0 {
+	if req.Description != nil || req.TitleBase != nil || len(req.AttachmentIDs) > 0 {
 		writeError(w, http.StatusBadRequest, "duplicate_of_issue_id cannot be combined with description or attachment changes")
 		return pgtype.UUID{}, false
 	}

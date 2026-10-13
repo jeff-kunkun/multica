@@ -130,7 +130,7 @@ FOR SHARE;
 -- as the member-row delete (MUL-5483 review round 7).
 --
 -- Same application-layer cleanup rule the surrounding revoke path already
--- applies to channel bindings and invocation grants: issue_subscriber carries
+-- applies to invocation grants: issue_subscriber carries
 -- no FK, so nothing removes these implicitly. Without it a revoked member keeps
 -- accruing inbox rows, and re-inviting them silently restores visibility of
 -- every issue they used to watch.

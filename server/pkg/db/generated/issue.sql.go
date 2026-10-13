@@ -1786,27 +1786,6 @@ func (q *Queries) LockIssueForAttachmentWrite(ctx context.Context, arg LockIssue
 	return id, err
 }
 
-const lockIssueForChannelMediaBind = `-- name: LockIssueForChannelMediaBind :one
-SELECT id FROM issue
-WHERE id = $1 AND workspace_id = $2
-FOR KEY SHARE
-`
-
-type LockIssueForChannelMediaBindParams struct {
-	ID          pgtype.UUID `json:"id"`
-	WorkspaceID pgtype.UUID `json:"workspace_id"`
-}
-
-// Channel media resolves after /issue creation. Hold a key-share lock while
-// the attachment row is written so a concurrent issue delete cannot land
-// between the workspace-scoped validation and the attachment insert.
-func (q *Queries) LockIssueForChannelMediaBind(ctx context.Context, arg LockIssueForChannelMediaBindParams) (pgtype.UUID, error) {
-	row := q.db.QueryRow(ctx, lockIssueForChannelMediaBind, arg.ID, arg.WorkspaceID)
-	var id pgtype.UUID
-	err := row.Scan(&id)
-	return id, err
-}
-
 const lockIssueForDelete = `-- name: LockIssueForDelete :one
 SELECT id FROM issue
 WHERE id = $1 AND workspace_id = $2
@@ -1819,7 +1798,7 @@ type LockIssueForDeleteParams struct {
 }
 
 // Issue deletion must collect every attachment URL after it has won the same
-// row-lock race used by channel media binding. FOR UPDATE conflicts with the
+// row-lock race used by attachment binding. FOR UPDATE conflicts with the
 // binder's FOR KEY SHARE: either bind commits first and its URL is collected,
 // or delete commits first and the binder leaves its durable intent for cleanup.
 func (q *Queries) LockIssueForDelete(ctx context.Context, arg LockIssueForDeleteParams) (pgtype.UUID, error) {
@@ -1841,9 +1820,8 @@ type LockIssueForDescriptionUpdateParams struct {
 }
 
 // Serialize field-baseline checks and combined attachment binding on the
-// owner row. The handler merges channel media that landed after the editor's
-// submitted base, updates the issue, and binds this request's attachments in
-// the same transaction while holding this lock.
+// owner row. The handler updates the issue and binds this request's
+// attachments in the same transaction while holding this lock.
 func (q *Queries) LockIssueForDescriptionUpdate(ctx context.Context, arg LockIssueForDescriptionUpdateParams) (Issue, error) {
 	row := q.db.QueryRow(ctx, lockIssueForDescriptionUpdate, arg.ID, arg.WorkspaceID)
 	var i Issue
@@ -1959,81 +1937,6 @@ func (q *Queries) MarkIssueFirstExecuted(ctx context.Context, id pgtype.UUID) (M
 		&i.CreatorType,
 		&i.CreatorID,
 		&i.FirstExecutedAt,
-	)
-	return i, err
-}
-
-const materializeIssueChannelMediaMarkdown = `-- name: MaterializeIssueChannelMediaMarkdown :one
-UPDATE issue
-SET description = CASE
-        WHEN $1::text IS NOT NULL
-             AND COALESCE(description, '') = $1::text
-            THEN $2::text
-        WHEN description IS NULL OR description = '' THEN $3
-        ELSE description || E'\n\n' || $3
-    END,
-    revision = revision + 1,
-    updated_at = now()
-WHERE id = $4
-  AND workspace_id = $5
-RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, triage_state, duplicate_of_issue_id
-`
-
-type MaterializeIssueChannelMediaMarkdownParams struct {
-	BaseDescription pgtype.Text `json:"base_description"`
-	Description     string      `json:"description"`
-	Markdown        pgtype.Text `json:"markdown"`
-	ID              pgtype.UUID `json:"id"`
-	WorkspaceID     pgtype.UUID `json:"workspace_id"`
-}
-
-// Detached channel media resolves after /issue creation. When the description
-// still equals the exact creation-time base, replace its inline placeholders
-// with the fully composed Markdown so rich-text ordering survives. If a user
-// edited concurrently (or the adapter has no inline layout), append instead;
-// preserving user-authored bytes takes precedence over layout fidelity.
-// This is asynchronous system materialization, not a new user action, so it
-// intentionally preserves last_activity_at while still advancing revision.
-func (q *Queries) MaterializeIssueChannelMediaMarkdown(ctx context.Context, arg MaterializeIssueChannelMediaMarkdownParams) (Issue, error) {
-	row := q.db.QueryRow(ctx, materializeIssueChannelMediaMarkdown,
-		arg.BaseDescription,
-		arg.Description,
-		arg.Markdown,
-		arg.ID,
-		arg.WorkspaceID,
-	)
-	var i Issue
-	err := row.Scan(
-		&i.ID,
-		&i.WorkspaceID,
-		&i.Title,
-		&i.Description,
-		&i.Status,
-		&i.Priority,
-		&i.AssigneeType,
-		&i.AssigneeID,
-		&i.CreatorType,
-		&i.CreatorID,
-		&i.ParentIssueID,
-		&i.AcceptanceCriteria,
-		&i.ContextRefs,
-		&i.Position,
-		&i.DueDate,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-		&i.Number,
-		&i.ProjectID,
-		&i.OriginType,
-		&i.OriginID,
-		&i.FirstExecutedAt,
-		&i.StartDate,
-		&i.Metadata,
-		&i.Stage,
-		&i.Properties,
-		&i.Revision,
-		&i.LastActivityAt,
-		&i.TriageState,
-		&i.DuplicateOfIssueID,
 	)
 	return i, err
 }

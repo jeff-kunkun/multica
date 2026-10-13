@@ -90,9 +90,9 @@ done < <(grep -oE '^MULTICA_LLM_[A-Z_]+' .env.example)
 
 # The same drift for integration encryption keys, keyed on the server rather
 # than on .env.example: each secretbox.LoadKey() gates an integration that
-# stays silently disabled when its key never reaches the container. Telegram's
-# key was once missing from both files, so a check that trusted the
-# documentation alone would not have caught it.
+# stays silently disabled when its key never reaches the container. A key
+# missing from both files would slip past a check that trusted the
+# documentation alone.
 secret_keys="$(
   grep -rhoE --include='*.go' --exclude='*_test.go' 'secretbox\.LoadKey\("[A-Z0-9_]+"\)' server |
     sed -E 's/.*"([A-Z0-9_]+)".*/\1/' | sort -u

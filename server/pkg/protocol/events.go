@@ -82,10 +82,8 @@ const (
 	// EventChatCancelFinalized carries the deferred outcome of a cancelled
 	// chat task once the daemon has flushed its transcript (or the sweeper
 	// grace period expired): either a late "Stopped." assistant message or a
-	// draft restore (#5219). Channel outbounds (Slack/Lark) deliberately do
-	// not subscribe to it — cancellation stays silent on external channels.
+	// draft restore (#5219).
 	EventChatCancelFinalized = "chat:cancel_finalized"
-	EventChatSessionCreated  = "chat:session_created"
 	EventChatSessionRead     = "chat:session_read"
 	EventChatSessionDeleted  = "chat:session_deleted"
 	EventChatSessionUpdated  = "chat:session_updated"
@@ -177,43 +175,4 @@ const (
 	// VCS integration events (Forgejo / Gitea / GitLab)
 	EventVCSConnectionCreated = "vcs_connection:created"
 	EventVCSConnectionDeleted = "vcs_connection:deleted"
-
-	// Lark integration events. `created` covers both first-install
-	// (UNIQUE on (workspace_id, agent_id) means at most one row per
-	// agent) and re-install via UpsertLarkInstallation — front-ends
-	// treat both as a single "installation appeared / refreshed"
-	// notification. `revoked` flips status to 'revoked' without
-	// deleting the row; the audit trail is preserved.
-	EventLarkInstallationCreated = "lark_installation:created"
-	EventLarkInstallationRevoked = "lark_installation:revoked"
-
-	// Slack installation lifecycle (MUL-3666). Same semantics as the Lark
-	// events: `created` covers both first install and OAuth re-install (the
-	// UNIQUE on (workspace_id, agent_id, channel_type) means at most one row
-	// per agent), `revoked` flips status without deleting the row. Front-ends
-	// invalidate the Slack installations query on either.
-	EventSlackInstallationCreated = "slack_installation:created"
-	EventSlackInstallationRevoked = "slack_installation:revoked"
-
-	// DingTalk installation lifecycle follows the same create/revoke semantics
-	// as Slack's BYO channel installation. BindingUpdated shares the
-	// dingtalk_installation prefix because it changes the member-scoped account
-	// identifiers returned by the installation listing.
-	EventDingTalkInstallationCreated   = "dingtalk_installation:created"
-	EventDingTalkInstallationRevoked   = "dingtalk_installation:revoked"
-	EventDingTalkAccountBindingUpdated = "dingtalk_installation:binding_updated"
-
-	// WeCom smart-bot installation lifecycle. Same semantics as Lark /
-	// Slack: `created` covers both first install and re-install via
-	// UpsertChannelInstallation (the UNIQUE on (workspace_id, agent_id,
-	// channel_type) means at most one row per agent); `revoked` flips
-	// status without deleting the row. Front-ends invalidate the wecom
-	// installations query on either.
-	EventWecomInstallationCreated = "wecom_installation:created"
-	EventWecomInstallationRevoked = "wecom_installation:revoked"
-
-	// Telegram installation lifecycle. Same contract as the Slack pair:
-	// front-ends invalidate the Telegram installations query on either.
-	EventTelegramInstallationCreated = "telegram_installation:created"
-	EventTelegramInstallationRevoked = "telegram_installation:revoked"
 )

@@ -963,14 +963,9 @@ func (s *IssueWakeupService) dispatch(ctx context.Context, prev db.IssueWakeup) 
 	// batch budget, leaving time to dispatch unrelated issues.
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
-	// Resolve optional connected-app credentials before taking database locks.
 	candidate, readErr := s.Tasks.Queries.GetAgentInWorkspace(ctx, db.GetAgentInWorkspaceParams{ID: prev.AgentID, WorkspaceID: prev.WorkspaceID})
 	if readErr != nil && !errors.Is(readErr, pgx.ErrNoRows) {
 		return readErr
-	}
-	var overlay runtimeMCPOverlayData
-	if candidate.ID.Valid && s.authorize(ctx, s.Tasks.Queries, prev.WorkspaceID, prev.CreatedBy, candidate) == nil {
-		overlay = s.Tasks.buildRuntimeMCPOverlay(ctx, prev.CreatedBy, candidate)
 	}
 	tx, err := s.Tasks.TxStarter.Begin(ctx)
 	if err != nil {
@@ -1324,7 +1319,7 @@ func (s *IssueWakeupService) dispatch(ctx context.Context, prev db.IssueWakeup) 
 			return err
 		}
 		contextJSON, _ := json.Marshal(map[string]any{"wakeup_id": util.UUIDToString(w.ID), "wakeup_revision": w.Revision, "wakeup_evidence": evidence, "wakeup_chain": chain})
-		task, err = q.CreateWakeupTask(ctx, db.CreateWakeupTaskParams{ID: dbid.NewV7(), AgentID: w.AgentID, RuntimeID: agent.RuntimeID, IssueID: w.IssueID, Priority: priorityToInt(issue.Priority), TriggerCommentID: w.ParentCommentID, TriggerSummary: pgtype.Text{String: "Wakeup: " + truncateForSummary(w.Instruction, 160), Valid: true}, HandoffNote: pgtype.Text{String: noteText, Valid: true}, OriginatorUserID: w.CreatedBy, AccountableUserID: w.CreatedBy, OriginatorSource: pgtype.Text{String: "trigger_owner", Valid: true}, TriggerEvidenceKind: pgtype.Text{String: "issue_wakeup", Valid: true}, TriggerEvidenceRefID: w.ID, DelegatedFromTaskID: w.SourceTaskID, WakeupContext: contextJSON, RuntimeMcpOverlay: overlay.Overlay, RuntimeConnectedApps: overlay.ConnectedApps})
+		task, err = q.CreateWakeupTask(ctx, db.CreateWakeupTaskParams{ID: dbid.NewV7(), AgentID: w.AgentID, RuntimeID: agent.RuntimeID, IssueID: w.IssueID, Priority: priorityToInt(issue.Priority), TriggerCommentID: w.ParentCommentID, TriggerSummary: pgtype.Text{String: "Wakeup: " + truncateForSummary(w.Instruction, 160), Valid: true}, HandoffNote: pgtype.Text{String: noteText, Valid: true}, OriginatorUserID: w.CreatedBy, AccountableUserID: w.CreatedBy, OriginatorSource: pgtype.Text{String: "trigger_owner", Valid: true}, TriggerEvidenceKind: pgtype.Text{String: "issue_wakeup", Valid: true}, TriggerEvidenceRefID: w.ID, DelegatedFromTaskID: w.SourceTaskID, WakeupContext: contextJSON})
 	}
 	if err != nil {
 		return err
@@ -1435,8 +1430,8 @@ func (s *IssueWakeupService) Disable(ctx context.Context, issueID, id, member pg
 	return out, nil
 }
 
-// CheckClaim revalidates stored human authority after an offline wait. The
-// enqueue-time MCP overlay does not grant permission to execute forever.
+// CheckClaim revalidates stored human authority after an offline wait. An
+// enqueue-time authorization does not grant permission to execute forever.
 func (s *IssueWakeupService) CheckClaim(ctx context.Context, task db.AgentTaskQueue) error {
 	var source struct {
 		ID       string `json:"wakeup_id"`

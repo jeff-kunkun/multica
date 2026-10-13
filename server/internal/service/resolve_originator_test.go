@@ -2,20 +2,13 @@ package service
 
 import (
 	"context"
-	"encoding/json"
-	"fmt"
 	"testing"
-	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/multica-ai/multica/server/internal/attribution"
-	"github.com/multica-ai/multica/server/internal/events"
-	"github.com/multica-ai/multica/server/internal/featureflags"
-	"github.com/multica-ai/multica/server/internal/runtimeapps"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
-	"github.com/multica-ai/multica/server/pkg/featureflag"
 )
 
 // newResolveOriginatorPool returns the package's shared test pool; see
@@ -23,64 +16,6 @@ import (
 func newResolveOriginatorPool(t *testing.T) *pgxpool.Pool {
 	t.Helper()
 	return sharedTestPool(t)
-}
-
-type stubOverlayBuilder struct {
-	calls     int
-	lastUser  pgtype.UUID
-	lastAgent db.Agent
-	resp      json.RawMessage
-	apps      []runtimeapps.ConnectedApp
-	err       error
-	respIsNil bool
-}
-
-func (s *stubOverlayBuilder) BuildTaskOverlay(_ context.Context, originatorUserID pgtype.UUID, agent db.Agent) (runtimeapps.MCPOverlayResult, error) {
-	s.calls++
-	s.lastUser = originatorUserID
-	s.lastAgent = agent
-	if s.err != nil {
-		return runtimeapps.MCPOverlayResult{}, s.err
-	}
-	if s.respIsNil {
-		return runtimeapps.MCPOverlayResult{}, nil
-	}
-	return runtimeapps.MCPOverlayResult{MCPOverlay: s.resp, ConnectedApps: s.apps}, nil
-}
-
-func composioMCPAppsTestFlags(enabled bool) *featureflag.Service {
-	provider := featureflag.NewStaticProvider()
-	provider.Set(featureflags.ComposioMCPApps, featureflag.Rule{Default: enabled})
-	return featureflag.NewService(provider)
-}
-
-func TestBuildRuntimeMCPOverlaySkipsBuilderWhenComposioFlagDisabled(t *testing.T) {
-	builder := &stubOverlayBuilder{
-		resp: json.RawMessage(`{"mcpServers":{"composio":{"type":"http","url":"https://mcp.example/session"}}}`),
-		apps: []runtimeapps.ConnectedApp{{
-			Provider:    "composio",
-			ServerName:  "composio",
-			ToolkitSlug: "notion",
-			ToolkitName: "Notion",
-		}},
-	}
-	svc := &TaskService{
-		Composio:     builder,
-		FeatureFlags: composioMCPAppsTestFlags(false),
-	}
-	var userBytes [16]byte
-	userBytes[15] = 1
-	var agentBytes [16]byte
-	agentBytes[15] = 2
-	got := svc.buildRuntimeMCPOverlay(context.Background(), pgtype.UUID{Bytes: userBytes, Valid: true}, db.Agent{
-		ID: pgtype.UUID{Bytes: agentBytes, Valid: true},
-	})
-	if builder.calls != 0 {
-		t.Fatalf("BuildTaskOverlay calls = %d, want 0", builder.calls)
-	}
-	if len(got.Overlay) != 0 || len(got.ConnectedApps) != 0 {
-		t.Fatalf("flag-off overlay = %+v; want empty", got)
-	}
 }
 
 // seedOriginatorFanout builds the minimal fixture for an agent→agent
@@ -310,7 +245,7 @@ func TestAttributionForIssueTask_SystemCommentFallsThroughToIssueProvenance(t *t
 
 // TestResolveOriginatorForIssueTask_MemberCreatedNoComment covers direct issue
 // assignment/creation: there is no trigger comment to inspect, but the issue's
-// human creator is still the run originator for Composio overlay gating.
+// human creator is still the run originator.
 func TestResolveOriginatorForIssueTask_MemberCreatedNoComment(t *testing.T) {
 	userID := util.MustParseUUID("11111111-1111-1111-1111-111111111111")
 	svc := &TaskService{}
@@ -378,129 +313,6 @@ func TestOriginatorForIssueTask_MatchesResolverForAgentCreate(t *testing.T) {
 	}
 	if !gate.Valid || gate.Bytes != userID.Bytes {
 		t.Errorf("gate originator = %s, want %s", util.UUIDToString(gate), util.UUIDToString(userID))
-	}
-}
-
-// TestEnqueueTaskForIssueStoresRuntimeMCPOverlayInQueuedRow guards the race
-// where the daemon could poll-claim a newly inserted queued task while the old
-// post-insert overlay updater was still making the outbound Composio session
-// call. The overlay must be computed before INSERT and returned on the queued
-// row.
-func TestEnqueueTaskForIssueStoresRuntimeMCPOverlayInQueuedRow(t *testing.T) {
-	pool := newResolveOriginatorPool(t)
-	ctx := context.Background()
-	q := db.New(pool)
-	suffix := time.Now().UnixNano()
-	email := fmt.Sprintf("runtime-overlay-insert-%d@multica.test", suffix)
-	workspaceSlug := fmt.Sprintf("runtime-overlay-insert-%d", suffix)
-
-	var userIDStr, workspaceIDStr, runtimeIDStr, agentIDStr, issueIDStr string
-	if err := pool.QueryRow(ctx, `
-		INSERT INTO "user" (name, email)
-		VALUES ('Runtime Overlay Insert User', $1)
-		RETURNING id
-	`, email).Scan(&userIDStr); err != nil {
-		t.Fatalf("seed user: %v", err)
-	}
-	t.Cleanup(func() {
-		pool.Exec(context.Background(), `DELETE FROM "user" WHERE id = $1`, userIDStr)
-	})
-	if err := pool.QueryRow(ctx, `
-		INSERT INTO workspace (name, slug)
-		VALUES ('runtime overlay insert ws', $1)
-		RETURNING id
-	`, workspaceSlug).Scan(&workspaceIDStr); err != nil {
-		t.Fatalf("seed workspace: %v", err)
-	}
-	t.Cleanup(func() {
-		pool.Exec(context.Background(), `DELETE FROM workspace WHERE id = $1`, workspaceIDStr)
-	})
-	if _, err := pool.Exec(ctx, `
-		INSERT INTO member (workspace_id, user_id, role)
-		VALUES ($1, $2, 'owner')
-	`, workspaceIDStr, userIDStr); err != nil {
-		t.Fatalf("seed member: %v", err)
-	}
-	if err := pool.QueryRow(ctx, `
-		INSERT INTO agent_runtime (
-			workspace_id, name, runtime_mode, provider, status, device_info, metadata, owner_id
-		) VALUES ($1, 'runtime-overlay-r', 'cloud', 'codex', 'online', '', '{}'::jsonb, $2)
-		RETURNING id
-	`, workspaceIDStr, userIDStr).Scan(&runtimeIDStr); err != nil {
-		t.Fatalf("seed runtime: %v", err)
-	}
-	if err := pool.QueryRow(ctx, `
-		INSERT INTO agent (
-			workspace_id, name, runtime_mode, runtime_config,
-			runtime_id, visibility, max_concurrent_tasks, owner_id,
-			instructions, custom_env, custom_args, composio_toolkit_allowlist
-		)
-		VALUES ($1, 'runtime-overlay-agent', 'cloud', '{}'::jsonb,
-		        $2, 'workspace', 1, $3, '', '{}'::jsonb, '[]'::jsonb, ARRAY['notion'])
-		RETURNING id
-	`, workspaceIDStr, runtimeIDStr, userIDStr).Scan(&agentIDStr); err != nil {
-		t.Fatalf("seed agent: %v", err)
-	}
-	if err := pool.QueryRow(ctx, `
-		INSERT INTO issue (
-			workspace_id, title, creator_type, creator_id, assignee_type, assignee_id, priority
-		)
-		VALUES ($1, 'runtime overlay issue', 'member', $2, 'agent', $3, 'medium')
-		RETURNING id
-	`, workspaceIDStr, userIDStr, agentIDStr).Scan(&issueIDStr); err != nil {
-		t.Fatalf("seed issue: %v", err)
-	}
-
-	overlay := json.RawMessage(`{"mcpServers":{"composio":{"type":"http","url":"https://mcp.example/session"}}}`)
-	builder := &stubOverlayBuilder{
-		resp: overlay,
-		apps: []runtimeapps.ConnectedApp{{
-			Provider:    "composio",
-			ServerName:  "composio",
-			ToolkitSlug: "notion",
-			ToolkitName: "Notion",
-		}},
-	}
-	svc := &TaskService{Queries: q, TxStarter: pool, Bus: events.New(), Composio: builder, FeatureFlags: composioMCPAppsTestFlags(true)}
-	userID := util.MustParseUUID(userIDStr)
-	task, err := svc.EnqueueTaskForIssue(ctx, db.Issue{
-		ID:           util.MustParseUUID(issueIDStr),
-		AssigneeID:   util.MustParseUUID(agentIDStr),
-		Priority:     "medium",
-		CreatorType:  "member",
-		CreatorID:    userID,
-		WorkspaceID:  util.MustParseUUID(workspaceIDStr),
-		AssigneeType: pgtype.Text{String: "agent", Valid: true},
-	})
-	if err != nil {
-		t.Fatalf("EnqueueTaskForIssue: %v", err)
-	}
-	if builder.calls != 1 {
-		t.Fatalf("BuildTaskOverlay calls = %d, want 1", builder.calls)
-	}
-	if len(task.RuntimeMcpOverlay) == 0 {
-		t.Fatalf("returned queued task has empty runtime_mcp_overlay")
-	}
-	if len(task.RuntimeConnectedApps) == 0 {
-		t.Fatalf("returned queued task has empty runtime_connected_apps")
-	}
-	var storedOverlay []byte
-	var storedApps []byte
-	if err := pool.QueryRow(ctx, `SELECT runtime_mcp_overlay, runtime_connected_apps FROM agent_task_queue WHERE id = $1`, task.ID).Scan(&storedOverlay, &storedApps); err != nil {
-		t.Fatalf("read stored overlay: %v", err)
-	}
-	if len(storedOverlay) == 0 {
-		t.Fatal("stored queued task has empty runtime_mcp_overlay")
-	}
-	if len(storedApps) == 0 {
-		t.Fatal("stored queued task has empty runtime_connected_apps")
-	}
-	var apps []runtimeapps.ConnectedApp
-	if err := json.Unmarshal(storedApps, &apps); err != nil {
-		t.Fatalf("unmarshal stored connected apps: %v", err)
-	}
-	if len(apps) != 1 || apps[0].ToolkitSlug != "notion" {
-		t.Fatalf("stored connected apps = %+v; want notion", apps)
 	}
 }
 

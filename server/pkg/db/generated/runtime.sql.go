@@ -1361,7 +1361,7 @@ RETURNING id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visi
 
 // MUL-5559: the runtime-delete replacement for archive-then-hard-delete. Every
 // user agent bound to this runtime becomes unbound (runtime_id IS NULL) and
-// keeps its row, chats, labels, channel installations and autopilot config.
+// keeps its row, chats, labels and autopilot config.
 //
 // Deliberately NOT filtered on archived_at: an agent archived earlier is just
 // as much the user's data as an active one, and hard-deleting it was the same

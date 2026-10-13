@@ -214,16 +214,6 @@ func (s *TaskService) chatQuickActionsEligible(ctx context.Context, task db.Agen
 	if strings.TrimSpace(msg.Content) == "" {
 		return false
 	}
-	// Channel-backed sessions (Slack / Lark) have no pill surface. Same
-	// discriminator writeChatCompletionOutcome uses: the immutable
-	// channel_ingested stamp on the turn's owned input batch. A NULL owner is
-	// an agent-initiated intro turn, which does render in Chat.
-	if task.ChatInputTaskID.Valid {
-		channelIngested, err := s.Queries.TaskHasChannelIngestedMessages(ctx, task.ChatInputTaskID)
-		if err != nil || channelIngested {
-			return false
-		}
-	}
 	return true
 }
 
@@ -231,7 +221,7 @@ func (s *TaskService) chatQuickActionsEligible(ctx context.Context, task db.Agen
 // completed turn's assistant message and broadcasts chat:quick_actions.
 // Best-effort semantics: an unparseable or empty result still broadcasts the
 // row's current (usually empty) actions so pending placeholders resolve. A
-// turn that never wrote an assistant row (no_response, channel empty-drop)
+// turn that never wrote an assistant row (no_response, legacy empty-drop)
 // returns silently — no client is waiting in that case, because the pending
 // flag is only ever raised for a written ordinary message.
 //

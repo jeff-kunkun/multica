@@ -93,7 +93,7 @@ router → middleware → handler → service → sqlc query → PostgreSQL
 - `internal/service/`는 여러 query에 걸친 비즈니스 흐름과 transaction을 담당합니다.
 - `pkg/db/queries/`에는 직접 작성한 SQL이 있습니다.
 - `pkg/db/generated/`는 sqlc가 생성하므로 직접 수정하면 안 됩니다.
-- `internal/integrations/`는 GitHub, Slack, Feishu 같은 외부 이벤트를 처리합니다.
+- `internal/integrations/`는 GitHub와 자체 호스팅 Git 서비스의 외부 이벤트를 처리합니다.
 - `internal/storage/`는 로컬 또는 S3 첨부 파일을 처리합니다.
 
 PostgreSQL은 비즈니스 데이터의 신뢰할 수 있는 원본입니다. Redis는 선택 컴포넌트이며 여러 인스턴스 간 실시간 이벤트, cache, 임시 조율에 사용합니다. 설정하지 않으면 단일 인스턴스 개발 환경이 프로세스 내부 구현을 사용합니다.

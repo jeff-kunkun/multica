@@ -522,8 +522,8 @@ function statusCategoryPatch(status: IssueStatus | undefined): Partial<Issue> {
 /**
  * Update an issue's editable fields (status / priority / assignee / due_date /
  * project_id / etc). Predictable fields merge optimistically into the detail
- * cache; description stays authoritative because the server resolves it
- * against description_base and hidden channel-media markers. Settle invalidates
+ * cache; description stays authoritative until the server response lands.
+ * Settle invalidates
  * the my-issues list so a status change re-buckets the SectionList in
  * (tabs)/my-issues.tsx automatically.
  *
@@ -545,7 +545,6 @@ export function useUpdateIssue(issueId: string) {
       if (prev) {
         const {
           description: _description,
-          description_base: _descriptionBase,
           title_base: _titleBase,
           expected_revision: _expectedRevision,
           ...optimisticPatch

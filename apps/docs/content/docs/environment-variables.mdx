@@ -179,12 +179,6 @@ The auth rate limits require `REDIS_URL`; without it, the startup log notes that
 | GitHub | `GITHUB_WEBHOOK_SECRET` | Webhook HMAC and connect-state signing secret |
 | GitHub | `GITHUB_APP_ID` | Needed for CI status and mergeability on PR cards and the "pick from GitHub" repository picker |
 | GitHub | `GITHUB_APP_PRIVATE_KEY` | Full PEM private key paired with the App ID; same uses as above |
-| Lark | `MULTICA_LARK_SECRET_KEY` | Base64-encoded 32-byte credential encryption key |
-| Slack | `MULTICA_SLACK_SECRET_KEY` | Base64-encoded 32-byte token encryption key |
-| Telegram | `MULTICA_TELEGRAM_SECRET_KEY` | Base64-encoded 32-byte Bot token encryption key |
-| Composio | `COMPOSIO_API_KEY` | Enables Composio tool connections |
-| Composio | `COMPOSIO_CALLBACK_BASE_URL` | Callback API URL; can fall back to `MULTICA_PUBLIC_URL` |
-| Composio | `COMPOSIO_STATE_SECRET` | OAuth state signing secret; can be derived from `JWT_SECRET` |
 | Self-hosted Git | `MULTICA_VCS_INTEGRATION_ENABLED` | Forgejo/Gitea/GitLab integration switch; enabled by default in compose |
 | Self-hosted Git | `MULTICA_VCS_SECRET_KEY` | Base64-encoded 32-byte encryption key (`openssl rand -base64 32`); the feature is entirely unavailable without it |
 | Plugins | `MULTICA_PLUGIN_SECRET_KEY` | Base64-encoded 32-byte key for stored secrets and encrypted surface launch URLs |
@@ -194,7 +188,7 @@ The auth rate limits require `REDIS_URL`; without it, the startup log notes that
 
 Without `GITHUB_APP_ID` and the private key, PRs still link, mirror, and move issues on merge normally, but cards show no CI or mergeability status, and the "pick from GitHub" repository entry is disabled.
 
-For setup steps, see [GitHub integration](/github-integration#self-hosting-setup), [Lark bot](/lark-bot-integration#self-hosting-setup), [Slack bot](/slack-bot-integration#self-hosting-setup), and [Telegram bot](/telegram-bot-integration#self-hosting-setup).
+For setup steps, see [GitHub integration](/github-integration#self-hosting-setup).
 
 ## Server-side LLM
 

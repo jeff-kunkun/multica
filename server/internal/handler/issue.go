@@ -20,7 +20,6 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
-	"github.com/multica-ai/multica/server/internal/channelmedia"
 	"github.com/multica-ai/multica/server/internal/dispatch"
 	"github.com/multica-ai/multica/server/internal/issueguard"
 	"github.com/multica-ai/multica/server/internal/issuestatus"
@@ -3513,24 +3512,18 @@ type UpdateIssueRequest struct {
 	Title            *string `json:"title"`
 	// TitleBase is the title adopted by the editor before producing Title. It
 	// protects title edits without coupling them to unrelated issue mutations.
-	TitleBase   *string `json:"title_base,omitempty"`
-	Description *string `json:"description"`
-	// DescriptionBase is the authoritative Markdown the editor had adopted
-	// before producing Description. It lets the server preserve channel media
-	// that landed asynchronously after that base without making media already
-	// present in the base impossible for the user to delete. Older clients omit
-	// it and receive conservative channel-media preservation.
-	DescriptionBase *string  `json:"description_base,omitempty"`
-	Status          *string  `json:"status"`
-	Priority        *string  `json:"priority"`
-	AssigneeType    *string  `json:"assignee_type"`
-	AssigneeID      *string  `json:"assignee_id"`
-	Position        *float64 `json:"position"`
-	StartDate       *string  `json:"start_date"`
-	DueDate         *string  `json:"due_date"`
-	ParentIssueID   *string  `json:"parent_issue_id"`
-	ProjectID       *string  `json:"project_id"`
-	Stage           *int32   `json:"stage"`
+	TitleBase     *string  `json:"title_base,omitempty"`
+	Description   *string  `json:"description"`
+	Status        *string  `json:"status"`
+	Priority      *string  `json:"priority"`
+	AssigneeType  *string  `json:"assignee_type"`
+	AssigneeID    *string  `json:"assignee_id"`
+	Position      *float64 `json:"position"`
+	StartDate     *string  `json:"start_date"`
+	DueDate       *string  `json:"due_date"`
+	ParentIssueID *string  `json:"parent_issue_id"`
+	ProjectID     *string  `json:"project_id"`
+	Stage         *int32   `json:"stage"`
 	// AttachmentIDs lets the description editor bind newly uploaded files to
 	// this issue so they surface in `GET /api/issues/:id/attachments` and the
 	// editor's preview Eye keeps working past a refresh. Existing bindings
@@ -3553,55 +3546,6 @@ type UpdateIssueRequest struct {
 	// no explicit null. Write-only: read the relation back from
 	// GET /api/issues/{id}/duplicates. Not accepted by batch updates.
 	DuplicateOfIssueID *string `json:"duplicate_of_issue_id,omitempty"`
-}
-
-func mergeIssueChannelMediaDescription(current, incoming string, base *string, attachments []db.Attachment) string {
-	currentIDs := channelmedia.MarkedIDs(current)
-	if len(currentIDs) == 0 {
-		return incoming
-	}
-
-	baseIDs := map[string]bool{}
-	if base != nil {
-		for _, id := range channelmedia.MarkedIDs(*base) {
-			baseIDs[id] = true
-		}
-	}
-	attachmentsByID := make(map[string]db.Attachment, len(attachments))
-	for _, attachment := range attachments {
-		attachmentsByID[uuidToString(attachment.ID)] = attachment
-	}
-
-	merged := incoming
-	for _, id := range currentIDs {
-		attachment, exists := attachmentsByID[id]
-		if !exists {
-			// A deleted attachment must not be resurrected from stale Markdown.
-			continue
-		}
-		downloadPath := channelmedia.DownloadPath(id)
-		hasLink := strings.Contains(merged, downloadPath)
-		knownToEditor := base != nil && baseIDs[id]
-		if knownToEditor && !hasLink {
-			// The editor adopted this media and then removed its link: preserve
-			// the user's explicit deletion rather than treating it as a race.
-			continue
-		}
-		if !hasLink {
-			merged = channelmedia.Append(merged, channelmedia.Block(
-				id,
-				attachment.Filename,
-				strings.HasPrefix(attachment.ContentType, "image/"),
-			))
-			continue
-		}
-		// Tiptap may omit HTML comments when serializing an otherwise intact
-		// image. Restore provenance without duplicating the visible link.
-		if !channelmedia.HasMarker(merged, id) {
-			merged = channelmedia.Append(merged, channelmedia.Marker(id))
-		}
-	}
-	return merged
 }
 
 func refreshUntouchedNullableIssueParams(params *db.UpdateIssueParams, current db.Issue, rawFields map[string]json.RawMessage) {
@@ -3634,7 +3578,7 @@ func refreshUntouchedNullableIssueParams(params *db.UpdateIssueParams, current d
 
 var errIssueFieldConflict = errors.New("issue text field conflict")
 
-func (h *Handler) updateIssueAtomically(ctx context.Context, workspaceID pgtype.UUID, params db.UpdateIssueParams, rawFields map[string]json.RawMessage, titleBase, descriptionBase *string, attachmentIDs []pgtype.UUID, statusKey string) (db.Issue, db.Issue, bool, error) {
+func (h *Handler) updateIssueAtomically(ctx context.Context, workspaceID pgtype.UUID, params db.UpdateIssueParams, rawFields map[string]json.RawMessage, titleBase *string, attachmentIDs []pgtype.UUID, statusKey string) (db.Issue, db.Issue, bool, error) {
 	if h.TxStarter == nil {
 		return db.Issue{}, db.Issue{}, false, errors.New("atomic issue update requires transaction starter")
 	}
@@ -3671,39 +3615,6 @@ func (h *Handler) updateIssueAtomically(ctx context.Context, workspaceID pgtype.
 		return db.Issue{}, current, false, errIssueFieldConflict
 	}
 
-	if params.Description.Valid {
-		attachments, listErr := qtx.ListAttachmentsByIssue(ctx, db.ListAttachmentsByIssueParams{
-			IssueID:     current.ID,
-			WorkspaceID: current.WorkspaceID,
-		})
-		if listErr != nil {
-			return db.Issue{}, current, false, fmt.Errorf("list issue attachments for description merge: %w", listErr)
-		}
-		currentDescription := ""
-		if current.Description.Valid {
-			currentDescription = current.Description.String
-		}
-		incomingDescription := params.Description.String
-		// No baseline REJECTION here, deliberately: the description editor
-		// autosaves on a debounce, and its base could not be kept in step with
-		// what the server had already accepted — a save whose own echo landed
-		// while the editor was dirty, or any stored description that was not
-		// byte-identical to its own trimmed form, reported a conflict with no
-		// second writer present and then wedged the editor for the session
-		// (MUL-6971). The guard also never covered the writers most likely to
-		// race a human here — mobile and the CLI/agent path send no base at
-		// all — so it mostly rejected the user's own autosave.
-		//
-		// `descriptionBase` stays in the request: it is ALSO the merge metadata
-		// below, which is what lets a user delete channel media the editor had
-		// adopted instead of having it restored on every save. Description
-		// writes are last-write-wins; concurrent edits are recorded by the
-		// `description_updated` activity.
-		params.Description = pgtype.Text{
-			String: mergeIssueChannelMediaDescription(currentDescription, incomingDescription, descriptionBase, attachments),
-			Valid:  true,
-		}
-	}
 	refreshUntouchedNullableIssueParams(&params, current, rawFields)
 
 	issue, cancelledWakeups, err := updateIssueStoppingWakeups(ctx, qtx, params)
@@ -3976,10 +3887,10 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 
 	var issue db.Issue
 	attachmentsChanged := false
-	if req.Description != nil || req.TitleBase != nil || req.DescriptionBase != nil || len(attachmentIDs) > 0 {
+	if req.Description != nil || req.TitleBase != nil || len(attachmentIDs) > 0 {
 		var lockedPrev db.Issue
 		issue, lockedPrev, attachmentsChanged, err = h.updateIssueAtomically(
-			r.Context(), prevIssue.WorkspaceID, params, rawFields, req.TitleBase, req.DescriptionBase, attachmentIDs, statusKeyForGuard,
+			r.Context(), prevIssue.WorkspaceID, params, rawFields, req.TitleBase, attachmentIDs, statusKeyForGuard,
 		)
 		if lockedPrev.ID.Valid {
 			prevIssue = lockedPrev
@@ -4767,12 +4678,9 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 
 		var issue db.Issue
 		if req.Updates.Description != nil {
-			// One batch-level base cannot describe multiple issue documents.
-			// Preserve every marked channel-media block conservatively, matching
-			// legacy single-update clients that omit description_base.
 			var lockedPrev db.Issue
 			issue, lockedPrev, _, err = h.updateIssueAtomically(
-				r.Context(), prevIssue.WorkspaceID, params, rawUpdates, nil, nil, nil, batchStatusKey,
+				r.Context(), prevIssue.WorkspaceID, params, rawUpdates, nil, nil, batchStatusKey,
 			)
 			if err == nil {
 				prevIssue = lockedPrev

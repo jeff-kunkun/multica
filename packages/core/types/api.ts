@@ -58,9 +58,6 @@ export interface UpdateIssueRequest {
   /** Authoritative title the editor adopted before producing this update. */
   title_base?: string;
   description?: string;
-  /** Authoritative description the editor had adopted before producing this
-   * update. The server uses it to merge channel media that landed meanwhile. */
-  description_base?: string;
   status?: IssueStatus;
   priority?: IssuePriority;
   assignee_type?: IssueAssigneeType | null;

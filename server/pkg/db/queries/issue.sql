@@ -101,14 +101,6 @@ WHERE id = $1 AND workspace_id = $2;
 SELECT metadata, revision FROM issue
 WHERE id = $1 AND workspace_id = $2;
 
--- name: LockIssueForChannelMediaBind :one
--- Channel media resolves after /issue creation. Hold a key-share lock while
--- the attachment row is written so a concurrent issue delete cannot land
--- between the workspace-scoped validation and the attachment insert.
-SELECT id FROM issue
-WHERE id = $1 AND workspace_id = $2
-FOR KEY SHARE;
-
 -- name: LockIssueForAttachmentWrite :one
 -- Owner-first guard for a write to one of an issue's attachments: take the
 -- issue before the attachment row, so a writer that reaches the same row
@@ -127,38 +119,15 @@ FOR NO KEY UPDATE;
 
 -- name: LockIssueForDescriptionUpdate :one
 -- Serialize field-baseline checks and combined attachment binding on the
--- owner row. The handler merges channel media that landed after the editor's
--- submitted base, updates the issue, and binds this request's attachments in
--- the same transaction while holding this lock.
+-- owner row. The handler updates the issue and binds this request's
+-- attachments in the same transaction while holding this lock.
 SELECT * FROM issue
 WHERE id = $1 AND workspace_id = $2
 FOR UPDATE;
 
--- name: MaterializeIssueChannelMediaMarkdown :one
--- Detached channel media resolves after /issue creation. When the description
--- still equals the exact creation-time base, replace its inline placeholders
--- with the fully composed Markdown so rich-text ordering survives. If a user
--- edited concurrently (or the adapter has no inline layout), append instead;
--- preserving user-authored bytes takes precedence over layout fidelity.
--- This is asynchronous system materialization, not a new user action, so it
--- intentionally preserves last_activity_at while still advancing revision.
-UPDATE issue
-SET description = CASE
-        WHEN sqlc.narg('base_description')::text IS NOT NULL
-             AND COALESCE(description, '') = sqlc.narg('base_description')::text
-            THEN sqlc.arg('description')::text
-        WHEN description IS NULL OR description = '' THEN sqlc.arg(markdown)
-        ELSE description || E'\n\n' || sqlc.arg(markdown)
-    END,
-    revision = revision + 1,
-    updated_at = now()
-WHERE id = sqlc.arg(id)
-  AND workspace_id = sqlc.arg(workspace_id)
-RETURNING *;
-
 -- name: LockIssueForDelete :one
 -- Issue deletion must collect every attachment URL after it has won the same
--- row-lock race used by channel media binding. FOR UPDATE conflicts with the
+-- row-lock race used by attachment binding. FOR UPDATE conflicts with the
 -- binder's FOR KEY SHARE: either bind commits first and its URL is collected,
 -- or delete commits first and the binder leaves its durable intent for cleanup.
 SELECT id FROM issue

@@ -3,7 +3,6 @@ import {
   attachmentDownloadPath,
   attachmentIdFromDownloadURL,
   contentReferencesAttachment,
-  stripChannelMediaMarkers,
 } from "./attachment-url";
 
 const ID = "11111111-2222-3333-4444-555555555555";
@@ -11,21 +10,6 @@ const ID = "11111111-2222-3333-4444-555555555555";
 describe("attachmentDownloadPath", () => {
   it("returns the stable per-attachment download path", () => {
     expect(attachmentDownloadPath(ID)).toBe(`/api/attachments/${ID}/download`);
-  });
-});
-
-describe("stripChannelMediaMarkers", () => {
-  it("removes provenance while retaining the visible channel image", () => {
-    const image = `![](${attachmentDownloadPath(ID)})`;
-    const marker = `<!-- multica:channel-media:${ID} -->`;
-
-    expect(stripChannelMediaMarkers(`${image}\n\n${marker}`)).toBe(`${image}\n\n`);
-  });
-
-  it("leaves unrelated HTML comments untouched", () => {
-    expect(stripChannelMediaMarkers("before <!-- user note --> after")).toBe(
-      "before <!-- user note --> after",
-    );
   });
 });
 

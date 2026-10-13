@@ -34,16 +34,6 @@ import type {
   PurchaseWorkspaceSeatsResponse,
   CreateWorkspaceSubscriptionPortalResponse,
   CronPreviewResponse,
-  DingTalkInstallation,
-  ListDingTalkInstallationsResponse,
-  ListDingTalkGroupsResponse,
-  RedeemDingTalkBindingTokenResponse,
-  WecomInstallation,
-  ListWecomInstallationsResponse,
-  RedeemWecomBindingTokenResponse,
-  TelegramInstallation,
-  ListTelegramInstallationsResponse,
-  RedeemTelegramBindingTokenResponse,
   GroupedIssuesResponse,
   GitHubConnectResponse,
   IssuePullRequestsResponse,
@@ -2039,12 +2029,6 @@ const ChatLastMessageSchema = z.object({
   ]).optional().catch(undefined),
 }).loose();
 
-const ChatChannelSourceSchema = z.object({
-  channel_type: z.string().default(""),
-  installation_id: z.string().default(""),
-  route_revision: z.number().default(0),
-}).loose();
-
 export const ChatSessionSchema: z.ZodType<ChatSession> = z.object({
   id: z.string(),
   workspace_id: z.string().default(""),
@@ -2057,8 +2041,6 @@ export const ChatSessionSchema: z.ZodType<ChatSession> = z.object({
   unread_count: z.number().optional(),
   last_message: ChatLastMessageSchema.nullable().optional().catch(undefined),
   pinned: z.boolean().optional(),
-  channel_source: ChatChannelSourceSchema.optional().catch(undefined),
-  is_current_channel_route: z.boolean().optional().catch(undefined),
   created_at: z.string().default(""),
   updated_at: z.string().default(""),
 }).loose();
@@ -3228,179 +3210,6 @@ export const MALFORMED_RUNTIME_MODEL_LIST_REQUEST: RuntimeModelListRequest = {
   error: "invalid model discovery response",
   created_at: "",
   updated_at: "",
-};
-
-export const DingTalkInstallationSchema = z.object({
-  id: z.string(),
-  workspace_id: z.string().default(""),
-  agent_id: z.string().default(""),
-  installer_user_id: z.string().default(""),
-  status: z.string().default("revoked"),
-  installed_at: z.string().default(""),
-  created_at: z.string().default(""),
-  updated_at: z.string().default(""),
-  agent_available: z.boolean().optional(),
-  bound_dingtalk_user_ids: z.array(z.string()).catch([]).default([]),
-}).loose();
-
-export const EMPTY_DINGTALK_INSTALLATION: DingTalkInstallation = {
-  id: "",
-  workspace_id: "",
-  agent_id: "",
-  installer_user_id: "",
-  status: "revoked",
-  installed_at: "",
-  created_at: "",
-  updated_at: "",
-  bound_dingtalk_user_ids: [],
-};
-
-export const ListDingTalkInstallationsResponseSchema = z.object({
-  installations: z.array(DingTalkInstallationSchema).default([]),
-  configured: z.boolean().default(false),
-  install_supported: z.boolean().optional(),
-}).loose();
-
-export const EMPTY_LIST_DINGTALK_INSTALLATIONS_RESPONSE: ListDingTalkInstallationsResponse = {
-  installations: [],
-  configured: false,
-};
-
-export const DingTalkGroupBotSchema = z.object({
-  installation_id: z.string().default(""),
-  agent_id: z.string().default(""),
-  bot_name: z.string().default(""),
-  bot_identity_issue: z.string().default(""),
-  last_active_at: z.string().optional(),
-  mention_count: z.number().int().nonnegative().optional(),
-}).loose();
-
-export const DingTalkGroupSchema = z.object({
-  conversation_id: z.string(),
-  conversation_title: z.string().default(""),
-  bots: z.array(DingTalkGroupBotSchema).catch([]).default([]),
-}).loose();
-
-export const ListDingTalkGroupsResponseSchema = z.object({
-  groups: z.array(DingTalkGroupSchema).default([]),
-  group_discovery_supported: z.boolean().default(false),
-  inactive_group_counts: z.record(z.string(), z.number().int().nonnegative()).optional(),
-  bot_identities: z.record(z.string(), DingTalkGroupBotSchema).optional(),
-  next_offset: z.number().int().nonnegative().optional(),
-}).loose();
-
-export const EMPTY_LIST_DINGTALK_GROUPS_RESPONSE: ListDingTalkGroupsResponse = {
-  groups: [],
-  group_discovery_supported: false,
-};
-
-export const RedeemDingTalkBindingTokenResponseSchema = z.object({
-  workspace_id: z.string().default(""),
-  installation_id: z.string().default(""),
-  dingtalk_user_id: z.string().default(""),
-}).loose();
-
-export const EMPTY_REDEEM_DINGTALK_BINDING_TOKEN_RESPONSE: RedeemDingTalkBindingTokenResponse = {
-  workspace_id: "",
-  installation_id: "",
-  dingtalk_user_id: "",
-};
-
-// WeCom smart-bot ("智能机器人" / aibot) installation responses. `.loose()` so a
-// newer backend field never fails the parse on an older desktop build (see
-// CLAUDE.md → API Compatibility). Defaults are chosen so a malformed response
-// degrades safely: `configured` defaults false (renders the "ask your operator"
-// state rather than a Connect dialog whose submit is guaranteed to fail), and a
-// missing `status` defaults to "revoked" rather than "active" so a broken read
-// never shows a bot as connected when it may not be.
-export const WecomInstallationSchema = z.object({
-  id: z.string(),
-  workspace_id: z.string().default(""),
-  agent_id: z.string().default(""),
-  bot_id: z.string().default(""),
-  installer_user_id: z.string().default(""),
-  status: z.string().default("revoked"),
-}).loose();
-
-export const EMPTY_WECOM_INSTALLATION: WecomInstallation = {
-  id: "",
-  workspace_id: "",
-  agent_id: "",
-  bot_id: "",
-  installer_user_id: "",
-  status: "revoked",
-};
-
-export const ListWecomInstallationsResponseSchema = z.object({
-  installations: z.array(WecomInstallationSchema).default([]),
-  configured: z.boolean().default(false),
-  install_supported: z.boolean().optional(),
-}).loose();
-
-export const EMPTY_LIST_WECOM_INSTALLATIONS_RESPONSE: ListWecomInstallationsResponse = {
-  installations: [],
-  configured: false,
-};
-
-export const RedeemWecomBindingTokenResponseSchema = z.object({
-  workspace_id: z.string().default(""),
-  installation_id: z.string().default(""),
-  wecom_user_id: z.string().default(""),
-}).loose();
-
-export const EMPTY_REDEEM_WECOM_BINDING_TOKEN_RESPONSE: RedeemWecomBindingTokenResponse = {
-  workspace_id: "",
-  installation_id: "",
-  wecom_user_id: "",
-};
-
-export const TelegramInstallationSchema = z.object({
-  id: z.string(),
-  workspace_id: z.string().default(""),
-  agent_id: z.string().default(""),
-  bot_id: z.string().default(""),
-  bot_username: z.string().default(""),
-  installer_user_id: z.string().default(""),
-  status: z.string().default("revoked"),
-  installed_at: z.string().default(""),
-  created_at: z.string().default(""),
-  updated_at: z.string().default(""),
-}).loose();
-
-export const EMPTY_TELEGRAM_INSTALLATION: TelegramInstallation = {
-  id: "",
-  workspace_id: "",
-  agent_id: "",
-  bot_id: "",
-  bot_username: "",
-  installer_user_id: "",
-  status: "revoked",
-  installed_at: "",
-  created_at: "",
-  updated_at: "",
-};
-
-export const ListTelegramInstallationsResponseSchema = z.object({
-  installations: z.array(TelegramInstallationSchema).default([]),
-  configured: z.boolean().default(false),
-  install_supported: z.boolean().optional(),
-}).loose();
-
-export const EMPTY_LIST_TELEGRAM_INSTALLATIONS_RESPONSE: ListTelegramInstallationsResponse = {
-  installations: [],
-  configured: false,
-};
-
-export const RedeemTelegramBindingTokenResponseSchema = z.object({
-  workspace_id: z.string().default(""),
-  installation_id: z.string().default(""),
-  telegram_user_id: z.string().default(""),
-}).loose();
-
-export const EMPTY_REDEEM_TELEGRAM_BINDING_TOKEN_RESPONSE: RedeemTelegramBindingTokenResponse = {
-  workspace_id: "",
-  installation_id: "",
-  telegram_user_id: "",
 };
 
 // Skills. Introduced for `POST /api/skills/:id/refresh` (update a skill from

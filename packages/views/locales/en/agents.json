@@ -176,7 +176,6 @@
     "section_details": "Details",
     "section_details_hint": "Read-only ownership and lifecycle information.",
     "section_skills": "Skills",
-    "section_integrations": "Integrations",
     "prop_runtime": "Runtime",
     "prop_model": "Model",
     "prop_thinking": "Thinking",
@@ -276,8 +275,6 @@
     "environment": "Environment",
     "custom_args": "Custom Args",
     "mcp_config": "MCP",
-    "composio_mcp": "MCP Apps",
-    "integrations": "Integrations",
     "runtime_config": "Routing",
     "discard_dialog_title": "Discard unsaved changes?",
     "discard_dialog_description": "You have unsaved changes in this tab. Leaving now will discard them.",
@@ -387,17 +384,6 @@
     "description_label": "Description",
     "description_placeholder": "What does this agent do?",
     "visibility_label": "Visibility",
-    "access": {
-      "label": "Access",
-      "private_title": "Private",
-      "private_desc": "Only you can run this agent",
-      "public_title": "Public",
-      "public_desc": "Choose who can run this agent",
-      "public_workspace_option": "Everyone in this workspace",
-      "public_members_group": "Specific people",
-      "public_members_empty": "No workspace members to choose from",
-      "public_targets_empty_hint": "Pick at least one option below — otherwise the agent stays private."
-    },
     "runtime_label": "Runtime",
     "runtime_filter_mine": "Mine",
     "runtime_filter_all": "All",
@@ -623,21 +609,6 @@
       "redacted_hint": "Only the agent owner or a workspace admin can read this config.",
       "dialog_json_help": "Edit the full server configuration as JSON."
     },
-    "composio_mcp": {
-      "subtitle": "Check a toolkit to let this agent mount it as an MCP server — but only when you (its creator) are the one who triggered the run, directly or down a sub-agent chain.",
-      "loading": "Loading your connections…",
-      "load_failed": "Couldn't load your connected apps. Try again shortly.",
-      "empty_title": "No connected apps yet",
-      "empty_link_to_settings": "Connect one in Settings → Integrations",
-      "connected": "Connected",
-      "toggle_aria": "Allow {{toolkit}} for this agent",
-      "saving": "Saving…",
-      "save_failed_toast": "Couldn't save — please try again",
-      "redacted_title": "Configured — hidden from your view",
-      "redacted_hint": "Only the agent's creator can view or change which apps it may use.",
-      "shared_warning": "This agent is shared. People who can run this agent may use the Composio apps you enable here. Use Private or narrow the access list if these apps expose sensitive data.",
-      "workspace_warning": "Public to workspace: any workspace member may use these Composio apps through this agent."
-    },
     "runtime_config": {
       "mode_label": "Routing mode",
       "mode_local": "Local",
@@ -699,9 +670,6 @@
       "add_dialog_confirm_other": "Add {{count}} skills",
       "add_dialog_cancel": "Cancel",
       "add_failed_toast": "Failed to add skill"
-    },
-    "integrations": {
-      "members_note": "Only workspace owners and admins can manage this connection. You can view connected bots in Settings → Integrations."
     },
     "activity": {
       "status": {
@@ -804,8 +772,7 @@
     "members_group": "People",
     "public_group": "Public access",
     "owner_only_readonly": "Only the agent owner can change who can run this agent.",
-    "members_empty": "No workspace members to choose from",
-    "composio_switch_hint": "Heads up — this agent has Composio apps enabled. Sharing it lets everyone with access use those apps through this agent."
+    "members_empty": "No workspace members to choose from"
   },
   "profile_card": {
     "unavailable": "Agent unavailable",

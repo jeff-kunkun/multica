@@ -93,7 +93,7 @@ router → middleware → handler → service → sqlc query → PostgreSQL
 - `internal/service/` porte les workflows métier qui couvrent plusieurs queries, ainsi que les transactions.
 - `pkg/db/queries/` contient le SQL écrit à la main.
 - `pkg/db/generated/` est généré par sqlc et ne doit pas être modifié directement.
-- `internal/integrations/` gère les événements externes provenant de GitHub, Slack, Feishu et d'autres services.
+- `internal/integrations/` gère les événements externes provenant de GitHub et des services Git auto-hébergés.
 - `internal/storage/` gère les pièces jointes locales et S3.
 
 PostgreSQL est la source de vérité pour les données métier. Redis est facultatif et sert aux événements temps réel entre instances, au cache ou à la coordination temporaire. Sans Redis, un environnement de développement à instance unique utilise des implémentations en processus.

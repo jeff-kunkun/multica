@@ -82,11 +82,9 @@ func TestTaskEventCarriesPayloadAndScopeHints(t *testing.T) {
 	}
 }
 
-// TestFailTaskPublishesDeliverableChannelFailure walks the real persistence
-// path that previously emitted only the base task fields. The DingTalk
-// subscriber needs the redacted error and chat scope on this exact event to
-// replace its initial acknowledgement with a terminal failure notice.
-func TestFailTaskPublishesDeliverableChannelFailure(t *testing.T) {
+// TestFailTaskPublishesChatFailureDetails walks the real persistence path and
+// checks that the task:failed event carries the error and chat scope.
+func TestFailTaskPublishesChatFailureDetails(t *testing.T) {
 	pool := newResolveOriginatorPool(t)
 	ctx := context.Background()
 	q := db.New(pool)

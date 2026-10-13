@@ -110,9 +110,7 @@ export function sortChatSessions(sessions: ChatSession[]): ChatSession[] {
  * list can render an Archived view, but archived sessions must NOT contribute
  * to the badge: they are read-only and hidden from the default history list, so
  * a badge sourced from one is uncleared-able — the user can't open it to mark it
- * read. Archiving now also drops the external-channel binding server-side, so no
- * new unread should land on an archived session; this filter is the front-end
- * half of that guarantee (MUL-4372).
+ * read (MUL-4372).
  */
 export function countUnreadChatSessions(sessions: ChatSession[]): number {
   return sessions.filter((s) => s.has_unread && s.status !== "archived").length;

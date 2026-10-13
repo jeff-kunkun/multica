@@ -2255,7 +2255,6 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   const descriptionSaveIssueIdRef = useRef(id);
   const pendingDescriptionSaveRef = useRef<{
     markdown: string;
-    baseMarkdown: string;
     attachmentIds: string[];
   } | null>(null);
   // Keep the description editor mounted from the start. Unlike the empty
@@ -2615,31 +2614,23 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   }
 
   const persistDescriptionSave = (
-    draft: { markdown: string; baseMarkdown: string; attachmentIds: string[] },
+    draft: { markdown: string; attachmentIds: string[] },
   ) => {
     descriptionSaveInFlightRef.current = true;
     handleUpdateField(
       {
         description: draft.markdown,
-        description_base: draft.baseMarkdown,
         attachment_ids:
           draft.attachmentIds.length > 0 ? draft.attachmentIds : undefined,
       },
       {
-        onSuccess: (serverIssue) => {
+        onSuccess: () => {
           if (descriptionSaveIssueIdRef.current !== id) return;
           descriptionSaveInFlightRef.current = false;
           const pending = pendingDescriptionSaveRef.current;
           pendingDescriptionSaveRef.current = null;
           if (pending) {
-            // Usually the accepted document is exactly what we submitted. If
-            // the server appended late channel media, keep the submitted body
-            // as the next editor baseline: the server can recognize that the
-            // only delta is media the editor never saw and preserve it again.
-            const nextBase = serverIssue.description === draft.markdown
-              ? serverIssue.description
-              : draft.markdown;
-            persistDescriptionSave({ ...pending, baseMarkdown: nextBase });
+            persistDescriptionSave(pending);
           }
         },
         onError: () => {
@@ -2652,7 +2643,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   };
 
   const queueDescriptionSave = (
-    draft: { markdown: string; baseMarkdown: string; attachmentIds: string[] },
+    draft: { markdown: string; attachmentIds: string[] },
   ) => {
     if (descriptionSaveInFlightRef.current) {
       pendingDescriptionSaveRef.current = draft;
@@ -3469,7 +3460,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                 key={id}
                 value={issue.description ?? ""}
                 placeholder={t(($) => $.detail.desc_placeholder)}
-                onUpdate={(md, baseMarkdown) => {
+                onUpdate={(md) => {
                   // Bind any pending uploads still referenced in the markdown
                   // so they appear in `issueAttachments` after refresh and the
                   // editor's text/code preview keeps working past reload.
@@ -3492,7 +3483,6 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                     .map((a) => a.id);
                   queueDescriptionSave({
                     markdown: md,
-                    baseMarkdown,
                     attachmentIds: ids,
                   });
                 }}

@@ -56,7 +56,7 @@ polling that specific in-flight request if their admin role changes.
 bound, it refuses unless the user explicitly passes `--cascade`, which unbinds
 those agents and cancels their queued/running tasks before deleting the runtime.
 Unbinding keeps the agents and everything they own — instructions, skills,
-chats, labels, channel installations, autopilots and task history — and only
+chats, labels, autopilots and task history — and only
 clears the agent's runtime binding; an unbound agent cannot run until it is
 bound again (`multica agent update <id> --runtime-id <runtime-id>`), and every
 trigger path refuses it with `agent_runtime_required`.

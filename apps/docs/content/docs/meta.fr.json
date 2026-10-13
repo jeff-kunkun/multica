@@ -35,11 +35,6 @@
     "---Automatisation---",
     "autopilots",
     "---Intégrations---",
-    "channels",
-    "lark-bot-integration",
-    "slack-bot-integration",
-    "dingtalk-bot-integration",
-    "telegram-bot-integration",
     "github-integration",
     "vcs-integration",
     "---Applications---",
@@ -53,8 +48,6 @@
     "---Référence---",
     "cli",
     "auth-tokens",
-    "---Communauté---",
-    "community-maintained",
     "---Développement---",
     "developers"
   ]

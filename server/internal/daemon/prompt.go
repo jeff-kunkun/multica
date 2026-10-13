@@ -8,25 +8,13 @@ import (
 )
 
 // sessionContinuityNoticeFor picks the notice matching what this surface
-// actually lost. See the constants in execenv for the full reasoning; the
-// question is whether the conversation is still READABLE, not whether it is a
-// chat — an issue's comments, a Slack channel's history, and a web chat's /
-// Feishu's / WeCom's / DingTalk's chat_message transcript all are (MUL-5722).
+// actually lost. An issue's comments and a chat's chat_message transcript are
+// both still readable (MUL-5722).
 func sessionContinuityNoticeFor(task Task) string {
 	if task.ChatSessionID == "" {
 		return execenv.SessionContinuityNoticeIssue
 	}
-	if task.ChatChannelType == execenv.ChannelTypeSlack {
-		return execenv.SessionContinuityNoticeChannelHistory
-	}
-	// Every other chat session that persists a transcript (web chat, Feishu,
-	// WeCom, DingTalk) reads it back via `multica chat history`; Slack alone
-	// reads the live channel. Only a surface that never stored a transcript
-	// falls through to Unrecoverable — see SurfacePersistsTranscript.
-	if execenv.SurfacePersistsTranscript(task.ChatChannelType) {
-		return execenv.SessionContinuityNoticeChatTranscript
-	}
-	return execenv.SessionContinuityNoticeUnrecoverable
+	return execenv.SessionContinuityNoticeChatTranscript
 }
 
 // backendResumeContinuityNotice returns the notice the BACKEND should inject if
@@ -52,8 +40,7 @@ func backendResumeContinuityNotice(task Task) string {
 //
 // Every value here changes from one run to the next on the same issue — the
 // authorization human differs between runs, the continuity notice is
-// true of one run and false of the next, and the connected-app set is resolved
-// per run from the runtime MCP overlay. Claude Code loads the brief into
+// true of one run and false of the next. Claude Code loads the brief into
 // messages[0], ahead of the entire conversation, so rendering these there threw
 // away the prompt cache for the whole history on every resume. Appending them
 // to the per-turn user message puts them after the cached prefix instead, where
@@ -68,7 +55,6 @@ func perTurnContextBlocks(task Task, opts promptOpts) string {
 		b.WriteString(sessionContinuityNoticeFor(task))
 	}
 	b.WriteString(execenv.BuildOnBehalfOfBlock(task.InitiatorName, task.InitiatorEmail))
-	b.WriteString(execenv.BuildConnectedAppsBlock(task.ConnectedApps))
 	b.WriteString(buildJoinedWakeupsBlock(task.WakeupJoined))
 	return b.String()
 }
@@ -612,69 +598,7 @@ func buildChatPrompt(task Task) string {
 
 	var b strings.Builder
 	b.WriteString("You are running as a chat assistant for a Multica workspace.\n")
-	// Audience is per-session context, so keep it out of the cached runtime
-	// brief. The compact anchors here preserve the non-inferable boundaries: a
-	// group reply is not private to its sender and people not otherwise present
-	// in the run context may read it. Unknown never defaults to private.
-	switch execenv.AudienceOf(task.ChatChannelType, task.ChatType) {
-	case execenv.ChatAudienceGroup:
-		b.WriteString("Audience: group room; not private; unseen members may read replies.\n\n")
-	case execenv.ChatAudienceUnknown:
-		b.WriteString("Audience: unknown.\n\n")
-	default:
-		b.WriteString("Audience: direct room.\n\n")
-	}
-	// Channel awareness (MUL-3871). When the session is backed by an IM channel,
-	// the agent must KNOW it is operating inside that channel — otherwise an ask
-	// like "what did you just talk about" sends it to read Multica instead of the
-	// channel conversation. A web-only chat session gets no such block — its
-	// history is the Multica chat_session the agent already resumes.
-	//
-	// The history half: `multica chat history` is served by handler/chat_history.go,
-	// which reads the live channel for Slack and falls back to the stored
-	// chat_message transcript for every other surface — so Slack, Feishu, WeCom
-	// and DingTalk can all read the conversation back. Slack additionally has
-	// `multica chat thread` (thread expansion); the transcript surfaces have no
-	// thread reader, so they get the transcript command without the thread
-	// drill-down (MUL-4899).
-	//
-	// WHERE the conversation lives is therefore per-branch, not shared: only the
-	// unconditional "don't go looking in issues/comments" survives up top. Saying
-	// "its history lives in the channel, NOT in Multica" for every channel type
-	// contradicted the very next line on a transcript surface, which tells the
-	// agent Multica stored it and hands it the command to read it back. An agent
-	// given both reasonably believes the read cannot work and skips it.
-	//
-	// The no-narration rule is a THIRD axis and belongs to neither half: it is a
-	// property of delivering to an IM channel at all, so it is emitted for every
-	// channel type. #4776 introduced it that way; the MUL-4899 split moved it into
-	// the Slack branch along with the read commands it happened to mention, which
-	// silently dropped it for Feishu/Lark (GH #6006).
-	if task.ChatChannelType != "" {
-		platform := channelDisplayName(task.ChatChannelType)
-		fmt.Fprintf(&b, "You are operating inside a %s conversation — not the Multica web app. Never look in Multica issues or comments for this conversation.\n", platform)
-		if task.ChatChannelType == execenv.ChannelTypeSlack {
-			fmt.Fprintf(&b, "This conversation and its history live in %s, NOT in Multica. The message below may be only what triggered you. Read the conversation with:\n", platform)
-			b.WriteString("- `multica chat history --output json` — the channel overview: recent top-level messages, each thread tagged with a `thread_id` and `reply_count`. It does NOT expand thread contents.\n")
-			b.WriteString("- `multica chat thread [<thread_id>] --output json` — read one thread's messages; omit the id to read the thread you are in, or pass a `thread_id` from the overview to read a specific thread.\n")
-			if task.ChatInThread {
-				b.WriteString("You were @mentioned inside a thread: start with `multica chat thread` to read it; if you need the wider channel, run `multica chat history` and open a specific thread with `multica chat thread <thread_id>`.\n")
-			} else {
-				b.WriteString("You were @mentioned at the channel top level: start with `multica chat history` to see the channel, then read a specific thread's contents with `multica chat thread <thread_id>`.\n")
-			}
-			// These reads are the agent's private context-gathering; narrating them
-			// into a chat reply reads as noise (the user reported every reply being
-			// prefixed with "我先读取…"). Tell the agent to keep them out of its answer.
-			b.WriteString("Do these reads SILENTLY as an internal step — they are how you gather context, not part of your answer.\n")
-		} else if execenv.SurfacePersistsTranscript(task.ChatChannelType) {
-			fmt.Fprintf(&b, "The conversation happens in %s, and Multica stores a transcript of it. The message below may be only what triggered you — read it back with `multica chat history` when you need earlier context that is not below.\n", platform)
-		} else {
-			fmt.Fprintf(&b, "This conversation and its history live in %s, NOT in Multica, and Multica has no history reader for it. Work from the context already provided to you below — no command can fetch more of this conversation. If you genuinely need earlier context that is not here, ask the user for it rather than guessing.\n", platform)
-		}
-		// Scoped to process, not results — a completion confirmation IS the deliverable.
-		fmt.Fprintf(&b, "Reply to %s with the final outcome only. Do NOT narrate planned or in-progress steps (\"我先读取…\"); completed actions are part of the outcome.\n", platform)
-		b.WriteString("\n")
-	}
+	b.WriteString("Audience: direct room.\n\n")
 	if task.Agent != nil && len(task.Agent.Skills) > 0 {
 		refs := ExtractSlashSkills(task.ChatMessage)
 		if len(refs) > 0 {
@@ -725,40 +649,8 @@ func buildChatPrompt(task Task) string {
 		b.WriteString("Use `multica attachment download <id>` to fetch each file locally before referring to it.\n")
 		b.WriteString("When creating an issue that should preserve one of these attachments, pass `--attachment-id <id>` to `multica issue create` in addition to keeping the attachment markdown inline.\n")
 	}
-	// Outbound attachments: how the agent puts an image/file INTO its reply.
-	// This is the DELIVERY layer of the channel policy, and it has three
-	// answers, not two (MUL-4899). `attachment upload` binds a file to the
-	// Multica chat reply on every surface; what differs is whether anything
-	// goes back for it. Web/mobile renders it as a card in the browser. A
-	// channel-backed chat gets the upload guidance only where the server said
-	// this deployment performs the last hop, and otherwise the upload reaches
-	// nobody and the agent must say so in words. The answer arrives on the
-	// claim; do not re-derive it from the channel type, do not collapse it back
-	// into "is there a channel at all", and do not collapse it into the HISTORY
-	// layer above, which is Slack-only and asks a different question.
-	//
-	// This is the ONLY place the verdict is stated. The brief's `## Output`
-	// section carries the web/mobile answer, which is fixed, and for a
-	// channel-backed chat points here instead of answering — the verdict flips
-	// under a resumed session, and the brief is the prompt-cache prefix
-	// (MUL-5377). So a channel chat learns how to deliver a file only from the
-	// line below, which means one must be emitted on every turn.
-	switch {
-	case task.ChatChannelType == "":
-		b.WriteString("\nTo include a file or image you produced in your reply, run `multica attachment upload <local-path>`. The file binds to your reply automatically and appears as an attachment card below it even if you paste nothing. The command also returns a `markdown` snippet you may paste on its own line to place the item where you want it (files render as a card, images inline).\n")
-	case execenv.ChannelCarriesFiles(task.ChatChannelType, task.ChatChannelDeliversFiles):
-		fmt.Fprintf(&b, "\nTo include a file or image you produced in your reply, run `multica attachment upload <local-path>`. It binds to your reply and Multica sends it into the %s conversation as a separate message right after your text — there is no way to place it inline, so write your reply to read correctly with the file arriving after it.\n", channelDisplayName(task.ChatChannelType))
-	default:
-		fmt.Fprintf(&b, "\nThis reply is delivered to %s as text. You cannot attach a file to it: `multica attachment upload` binds to a Multica chat reply, which this is not. If you produce a file, describe it in words — never write its local path as a link, and never upload it and then write as though it arrived.\n", channelDisplayName(task.ChatChannelType))
-	}
+	b.WriteString("\nTo include a file or image you produced in your reply, run `multica attachment upload <local-path>`. The file binds to your reply automatically and appears as an attachment card below it even if you paste nothing. The command also returns a `markdown` snippet you may paste on its own line to place the item where you want it (files render as a card, images inline).\n")
 	return b.String()
-}
-
-// channelDisplayName renders a chat_channel_type for prompt copy. The mapping
-// itself lives in execenv so the per-turn prompt (here) and the runtime brief
-// (execenv.writeOutput) cannot drift into naming the same platform differently.
-func channelDisplayName(channelType string) string {
-	return execenv.ChannelDisplayName(channelType)
 }
 
 // buildAutopilotPrompt constructs a prompt for run_only autopilot tasks.

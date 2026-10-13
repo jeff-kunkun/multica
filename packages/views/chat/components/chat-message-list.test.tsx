@@ -660,19 +660,19 @@ describe("ChatMessageList onboarding kickoff", () => {
   });
 });
 
-describe("ChatMessageList channel quote presentation", () => {
-  it("renders channel quote content semantically without exposing protocol metadata", async () => {
+describe("ChatMessageList quote presentation", () => {
+  it("renders quoted content as a blockquote", async () => {
     const content =
       "> The image contains a celebration emoji.\n\n" +
       "Can you still see this image?";
 
-    const { container } = render(
+    render(
       <I18nProvider locale="en" resources={TEST_RESOURCES}>
         <QueryClientProvider client={new QueryClient()}>
           <ChatMessageList
             messages={[
               {
-                id: "channel-user-message",
+                id: "quote-message",
                 chat_session_id: "s1",
                 role: "user",
                 content,
@@ -690,12 +690,9 @@ describe("ChatMessageList channel quote presentation", () => {
     const quote = await screen.findByText("The image contains a celebration emoji.");
     expect(quote.closest("blockquote")).not.toBeNull();
     expect(screen.getByText("Can you still see this image?")).toBeInTheDocument();
-    expect(container).not.toHaveTextContent("quoted_message");
-    expect(container).not.toHaveTextContent("private-message-id");
-    expect(container).not.toHaveTextContent("private-platform-id");
   });
 
-  it("renders a structured channel quote as a semantic list", async () => {
+  it("renders a structured quote as a semantic list", async () => {
     const content =
       "> Any heading:\n>\n" +
       "> - Plain text item\n" +
@@ -709,7 +706,7 @@ describe("ChatMessageList channel quote presentation", () => {
           <ChatMessageList
             messages={[
               {
-                id: "channel-source-list",
+                id: "quote-list",
                 chat_session_id: "s1",
                 role: "user",
                 content,
@@ -734,7 +731,7 @@ describe("ChatMessageList channel quote presentation", () => {
     expect(screen.getByText("Verify this information")).toBeInTheDocument();
   });
 
-  it("keeps text around quoted RichText media and separates current RichText", async () => {
+  it("keeps text around quoted media and separates the current message", async () => {
     const content =
       "> Quoted rich text before\n>\n" +
       "> ![Quoted image](https://example.com/quoted.png)\n>\n" +
@@ -748,7 +745,7 @@ describe("ChatMessageList channel quote presentation", () => {
           <ChatMessageList
             messages={[
               {
-                id: "channel-rich-text",
+                id: "quote-rich-text",
                 chat_session_id: "s1",
                 role: "user",
                 content,

@@ -4,7 +4,6 @@ import {
   preprocessFileCards,
   preprocessIssueIdentifiers,
 } from "@multica/ui/markdown";
-import { stripChannelMediaMarkers } from "@multica/core/types";
 
 /**
  * Preprocess a markdown string before loading into Tiptap via contentType: 'markdown'.
@@ -44,12 +43,7 @@ export function preprocessMarkdown(
 ): string {
   if (!markdown) return "";
   const { cdnDomain } = opts;
-  // Channel-media provenance is persisted for optimistic merge safety, not
-  // authored content. Remove only this namespaced comment before either the
-  // editable Tiptap parser or readonly renderer sees it; the ContentEditor
-  // separately retains the raw controlled value as its server merge base.
-  const visibleMarkdown = stripChannelMediaMarkers(markdown);
-  const step1 = preprocessMentionShortcodes(visibleMarkdown);
+  const step1 = preprocessMentionShortcodes(markdown);
   const step2 = opts?.autolinkIssueIdentifiers
     ? preprocessIssueIdentifiers(step1)
     : step1;

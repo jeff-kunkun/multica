@@ -87,7 +87,6 @@ func registerListeners(bus *events.Bus, b realtime.Broadcaster) {
 		protocol.EventInboxBatchArchived: true,
 		protocol.EventInvitationCreated:  true,
 		protocol.EventInvitationRevoked:  true,
-		protocol.EventChatSessionCreated: true,
 		protocol.EventChatSessionUpdated: true,
 	}
 
@@ -201,15 +200,13 @@ func registerListeners(bus *events.Bus, b realtime.Broadcaster) {
 		})
 	}
 
-	// A Chat session is creator-private. Its initial title may be derived from
-	// the creator's first message, so the list-invalidation event must not be
+	// A Chat session is creator-private. Its title may be derived from the
+	// creator's first message, so the list-invalidation event must not be
 	// broadcast to every workspace member. ActorID is the creator on every
 	// producer path for this event.
-	for _, eventType := range []string{protocol.EventChatSessionCreated, protocol.EventChatSessionUpdated} {
-		bus.Subscribe(eventType, func(e events.Event) {
-			sendToRecipient(b, e, e.ActorID)
-		})
-	}
+	bus.Subscribe(protocol.EventChatSessionUpdated, func(e events.Event) {
+		sendToRecipient(b, e, e.ActorID)
+	})
 
 	// member:added — also send to the invited user so they discover the new workspace.
 	// Pass excludeWorkspace so clients already in the target room (reached via

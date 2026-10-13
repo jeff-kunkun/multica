@@ -167,7 +167,6 @@
     "section_details": "详情",
     "section_details_hint": "只读的所有权和生命周期信息。",
     "section_skills": "Skills",
-    "section_integrations": "集成",
     "prop_runtime": "运行时",
     "prop_model": "模型",
     "prop_thinking": "思考",
@@ -266,8 +265,6 @@
     "environment": "环境变量",
     "custom_args": "自定义参数",
     "mcp_config": "MCP",
-    "composio_mcp": "MCP 应用",
-    "integrations": "集成",
     "runtime_config": "路由",
     "discard_dialog_title": "放弃未保存的修改？",
     "discard_dialog_description": "当前 tab 有未保存的修改，离开会丢弃这些修改。",
@@ -377,17 +374,6 @@
     "description_label": "描述",
     "description_placeholder": "这个智能体做什么？",
     "visibility_label": "可见性",
-    "access": {
-      "label": "访问权限",
-      "private_title": "私有",
-      "private_desc": "只有你可以运行该智能体",
-      "public_title": "公开",
-      "public_desc": "选择谁可以运行该智能体",
-      "public_workspace_option": "工作区内所有人",
-      "public_members_group": "指定成员",
-      "public_members_empty": "没有可选择的工作区成员",
-      "public_targets_empty_hint": "至少勾选下方一项——否则该智能体仍为私有。"
-    },
     "runtime_label": "运行时",
     "runtime_filter_mine": "我的",
     "runtime_filter_all": "全部",
@@ -611,21 +597,6 @@
       "redacted_hint": "只有智能体 owner 或工作区 admin 可以查看此配置。",
       "dialog_json_help": "以 JSON 编辑完整的服务器配置。"
     },
-    "composio_mcp": {
-      "subtitle": "勾选 toolkit，只在你自己（这个智能体的创建者）直接或通过下级智能体链路触发这个智能体时，才把它挂载为 MCP server。",
-      "loading": "正在加载你的连接…",
-      "load_failed": "无法加载你已连接的应用，请稍后重试。",
-      "empty_title": "还没有已连接的应用",
-      "empty_link_to_settings": "去 \"设置 → 集成\" 连一个",
-      "connected": "已连接",
-      "toggle_aria": "允许该智能体使用 {{toolkit}}",
-      "saving": "正在保存…",
-      "save_failed_toast": "保存失败，请重试",
-      "redacted_title": "已配置——对你隐藏",
-      "redacted_hint": "只有该智能体的创建者才能查看或修改它可使用的应用。",
-      "shared_warning": "该智能体已共享。能够运行该智能体的人可以通过它使用你在此启用的 Composio 应用。如果这些应用涉及敏感数据，请改用\"私有\"或缩小访问范围。",
-      "workspace_warning": "公开给工作区：工作区内任何成员都可以通过该智能体使用这些 Composio 应用。"
-    },
     "runtime_config": {
       "mode_label": "路由模式",
       "mode_local": "Local",
@@ -686,9 +657,6 @@
       "add_dialog_confirm_other": "添加 {{count}} 个 skill",
       "add_dialog_cancel": "取消",
       "add_failed_toast": "添加 skill 失败"
-    },
-    "integrations": {
-      "members_note": "只有工作区的所有者和管理员可以管理此连接。你可以在\"设置 → 集成\"中查看已连接的 Bot。"
     },
     "activity": {
       "status": {
@@ -789,8 +757,7 @@
     "members_group": "成员",
     "public_group": "公开访问",
     "owner_only_readonly": "只有该智能体的所有者可以更改谁能调用它。",
-    "members_empty": "没有可选择的工作区成员",
-    "composio_switch_hint": "提示——该智能体已启用 Composio 应用。共享后，所有获得访问权限的人都可以通过该智能体使用这些应用。"
+    "members_empty": "没有可选择的工作区成员"
   },
   "profile_card": {
     "unavailable": "智能体不可用",

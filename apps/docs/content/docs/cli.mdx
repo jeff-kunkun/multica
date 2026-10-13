@@ -193,8 +193,6 @@ See [Daemon and runtimes](/daemon-runtimes) for how it works and for custom prof
 | `config` | View or edit the current CLI profile's local configuration |
 | `update`, `version` | Update the CLI or print the version |
 
-`multica chat` reads **the external chat session an agent is currently handling**; it is mainly for agents in chat integrations, not a general command for browsing arbitrary workspace conversations.
-
 ## IDs and output formats
 
 Issues use keys like `MUL-123` or full UUIDs; short UUID prefixes are not accepted.
@@ -297,7 +295,7 @@ The tables below cover every current top-level command, grouped the way the CLI 
 | `squad` | `list/get/create/update/delete` | Manage squads (`delete` archives) | |
 | | `member list/add/set-role/remove` | Manage squad members | |
 | | `activity <issue-id> <outcome>` | Record a leader evaluation | |
-| `chat` | `history`, `thread [id]` | Read the external chat session an agent is currently handling | `--limit`, `--before` |
+| `chat` | `history` | Read the transcript of the chat an agent is answering | `--limit`, `--before` |
 
 ### Runtime
 

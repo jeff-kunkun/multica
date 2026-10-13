@@ -26,11 +26,6 @@ import {
   agentTasksKeys,
 } from "../agents/queries";
 import { githubKeys } from "../github/queries";
-import { larkKeys } from "../lark/queries";
-import { slackKeys } from "../slack/queries";
-import { dingtalkKeys } from "../dingtalk/queries";
-import { wecomKeys } from "../wecom/queries";
-import { telegramKeys } from "../telegram/queries";
 import {
   onIssueCreated,
   onIssueUpdated,
@@ -119,7 +114,6 @@ import type {
   ChatPendingTask,
   ChatMessagesPage,
   ChatSession,
-  ChatSessionCreatedPayload,
   InvitationCreatedPayload,
 } from "../types";
 
@@ -909,29 +903,9 @@ export function useRealtimeSync(
         const wsId = getCurrentWsId();
         if (wsId) qc.invalidateQueries({ queryKey: githubKeys.installations(wsId) });
       },
-      lark_installation: () => {
-        const wsId = getCurrentWsId();
-        if (wsId) qc.invalidateQueries({ queryKey: larkKeys.installations(wsId) });
-      },
-      slack_installation: () => {
-        const wsId = getCurrentWsId();
-        if (wsId) qc.invalidateQueries({ queryKey: slackKeys.installations(wsId) });
-      },
-      dingtalk_installation: () => {
-        const wsId = getCurrentWsId();
-        if (wsId) qc.invalidateQueries({ queryKey: dingtalkKeys.installations(wsId) });
-      },
       vcs_connection: () => {
         const wsId = getCurrentWsId();
         if (wsId) qc.invalidateQueries({ queryKey: ["vcs", wsId] });
-      },
-      wecom_installation: () => {
-        const wsId = getCurrentWsId();
-        if (wsId) qc.invalidateQueries({ queryKey: wecomKeys.installations(wsId) });
-      },
-      telegram_installation: () => {
-        const wsId = getCurrentWsId();
-        if (wsId) qc.invalidateQueries({ queryKey: telegramKeys.installations(wsId) });
       },
       pull_request: () => {
         // PR list is keyed by issue id, not workspace, so we invalidate all
@@ -1044,7 +1018,7 @@ export function useRealtimeSync(
       "daemon:heartbeat",
       // Chat events are handled explicitly below; do not double-invalidate.
       "chat:message", "chat:done", "chat:quick_actions", "chat:cancel_finalized", "chat:session_read",
-      "chat:session_created", "chat:session_deleted", "chat:session_updated",
+      "chat:session_deleted", "chat:session_updated",
       // task:message stays out of the prefix path because it fires per
       // streamed message during a long run — invalidating the snapshot on
       // every message would flood the network. Specific chat handlers below
@@ -1765,13 +1739,6 @@ export function useRealtimeSync(
       invalidateSessionLists();
     });
 
-    const unsubChatSessionCreated = ws.on("chat:session_created", (p) => {
-      const payload = p as ChatSessionCreatedPayload;
-      chatWsLogger.info("chat:session_created (global)", payload);
-      if (payload.workspace_id !== getCurrentWsId()) return;
-      invalidateSessionLists();
-    });
-
     // chat:session_updated fires after the creator renames, pins, or archives
     // a session in any tab/device. Patch the cached row inline so the dropdown
     // and badges reflect the change without a full sessions-list refetch — see
@@ -1852,7 +1819,6 @@ export function useRealtimeSync(
       unsubTaskCompleted();
       unsubTaskFailed();
       unsubChatSessionRead();
-      unsubChatSessionCreated();
       unsubChatSessionDeleted();
       unsubChatSessionUpdated();
       if (taskMessageFlushTimer) clearTimeout(taskMessageFlushTimer);

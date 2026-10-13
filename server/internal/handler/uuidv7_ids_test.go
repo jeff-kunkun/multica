@@ -156,24 +156,6 @@ func TestHotTableInsertsPersistUUIDv7(t *testing.T) {
 		assertV7(t, "task_token.id", token.ID)
 	})
 
-	t.Run("channel_inbound_audit", func(t *testing.T) {
-		const eventID = "uuidv7-audit-event"
-		dbfx.Cleanup(t, `DELETE FROM channel_inbound_audit WHERE channel_event_id = $1`, eventID)
-
-		if err := q.RecordChannelInboundDrop(ctx, db.RecordChannelInboundDropParams{
-			ID:             dbid.NewV7(),
-			ChannelType:    "slack",
-			EventType:      "message",
-			DropReason:     "uuidv7_test",
-			ChannelEventID: pgtype.Text{String: eventID, Valid: true},
-		}); err != nil {
-			t.Fatalf("RecordChannelInboundDrop: %v", err)
-		}
-
-		var got pgtype.UUID
-		dbfx.QueryRow(t, `SELECT id FROM channel_inbound_audit WHERE channel_event_id = $1`, eventID).Scan(&got)
-		assertV7(t, "channel_inbound_audit.id", got)
-	})
 }
 
 // TestUnsetIDFallsBackToTheDatabaseDefault covers the safety net: a caller that

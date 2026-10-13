@@ -178,8 +178,6 @@ multica runtime activity <runtime-id>
 | `config` | 現在の CLI プロファイルのローカル設定を表示・編集 |
 | `update`、`version` | CLI の更新とバージョンの表示 |
 
-`multica chat` が読み取るのは、**エージェントが現在処理している外部チャットセッション**です。主にチャット統合の中のエージェントが使うもので、任意のワークスペースの会話を閲覧するための汎用コマンドではありません。
-
 ## ID と出力形式
 
 タスクには `MUL-123` のようなキーまたは完全な UUID を使います。UUID の短いプレフィックスは受け付けません。
@@ -274,7 +272,7 @@ CLI の設定ファイルには、あなたとして Multica にアクセスで�
 | `squad` | `list/get/create/update/delete` | スクワッドを管理（`delete` はアーカイブ） | |
 | | `member list/add/set-role/remove` | スクワッドのメンバーを管理 | |
 | | `activity <issue-id> <outcome>` | リーダーの評価を記録 | |
-| `chat` | `history`、`thread [id]` | エージェントが現在処理している外部チャットセッションを読み取り | `--limit`、`--before` |
+| `chat` | `history` | エージェントが応答中のチャットの履歴を読み取り | `--limit`、`--before` |
 
 ### Runtime
 

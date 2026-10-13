@@ -30,7 +30,6 @@ import {
 } from "react-native";
 import { Stack, router, useLocalSearchParams } from "expo-router";
 import { useQuery } from "@tanstack/react-query";
-import { stripChannelMediaMarkers } from "@multica/core/types";
 import { Text } from "@/components/ui/text";
 import { DescriptionField } from "@/components/issue/description-field";
 import { MentionSuggestionBar } from "@/components/issue/mention-suggestion-bar";
@@ -66,7 +65,7 @@ export default function EditIssue() {
     setTitle(detail.data.title);
     setInitialTitle(detail.data.title);
     const initial = detail.data.description ?? "";
-    setDescriptionText(stripChannelMediaMarkers(initial));
+    setDescriptionText(initial);
     setInitialDescription(initial);
     setSeeded(true);
   }, [detail.data, seeded, setDescriptionText]);
@@ -77,8 +76,7 @@ export default function EditIssue() {
     if (!detail.data || !seeded) return false;
     return (
       title.trim() !== initialTitle ||
-      currentDescription.trim() !==
-        stripChannelMediaMarkers(initialDescription).trim()
+      currentDescription.trim() !== initialDescription.trim()
     );
   }, [detail.data, seeded, title, initialTitle, currentDescription, initialDescription]);
 
