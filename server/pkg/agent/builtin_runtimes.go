@@ -83,21 +83,7 @@ type ModelDiscoveryFunc func(ctx context.Context, runtimeCmd Command) ([]Model, 
 // A runtime identity appears here when it needs its own probe/display/skills
 // but reuses an existing backend's protocol. The first entry is omp (oh-my-pi):
 // a separate CLI that speaks the pi JSON event protocol.
-var BuiltinRuntimes = []BuiltinRuntime{
-	{
-		ID:                "omp",
-		ProtocolFamily:    "pi",
-		DefaultCommand:    "omp",
-		EnvPrefix:         "MULTICA_OMP",
-		DisplayName:       "Oh-My-Pi",
-		SkillsDir:         ".omp/skills",
-		UserSkillsDir:     ".omp/agent/skills",
-		LaunchHeader:      "omp (json mode)",
-		DefaultExecutable: "omp",
-		ProviderLabel:     "omp",
-		ModelDiscovery:    discoverOmpModels,
-	},
-}
+var BuiltinRuntimes = []BuiltinRuntime{}
 
 // BuiltinRuntimeByID returns the descriptor for the given runtime identity,
 // or false if no such built-in runtime exists.
@@ -134,14 +120,6 @@ func BuiltinRuntimeCommands() []string {
 // with the overrides silently dropped.
 type backendOverrideApplicator interface {
 	applyBuiltinRuntimeOverrides(desc BuiltinRuntime)
-}
-
-// piBackend already implements this via its defaultExecutable and
-// providerLabel fields. The method is defined here (not in pi.go) to keep
-// the descriptor→backend contract in one file.
-func (b *piBackend) applyBuiltinRuntimeOverrides(desc BuiltinRuntime) {
-	b.defaultExecutable = desc.DefaultExecutable
-	b.providerLabel = desc.ProviderLabel
 }
 
 // ResolveBackend is the single production entry point the daemon uses to

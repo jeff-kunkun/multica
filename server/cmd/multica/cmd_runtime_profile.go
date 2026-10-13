@@ -90,8 +90,8 @@ func init() {
 	runtimeProfileListCmd.Flags().String("output", "table", "Output format: table or json")
 
 	// create
-	runtimeProfileCreateCmd.Flags().String("runtime-type", "", "Base runtime compatibility target (e.g. pi or omp)")
-	runtimeProfileCreateCmd.Flags().String("protocol-family", "", "Legacy base protocol family (use --runtime-type for Oh-My-Pi)")
+	runtimeProfileCreateCmd.Flags().String("runtime-type", "", "Base runtime compatibility target (claude, codex, opencode, or antigravity)")
+	runtimeProfileCreateCmd.Flags().String("protocol-family", "", "Legacy base protocol family; prefer --runtime-type")
 	runtimeProfileCreateCmd.Flags().String("command-name", "", "Executable the daemon resolves on PATH (required)")
 	runtimeProfileCreateCmd.Flags().String("display-name", "", "Human-readable profile name (required)")
 	runtimeProfileCreateCmd.Flags().String("description", "", "Optional description")

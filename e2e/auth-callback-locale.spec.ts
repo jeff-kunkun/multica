@@ -5,9 +5,9 @@ test.use({ locale: "zh-CN" });
 for (const scenario of [
   {
     name: "different account language",
-    language: "ja",
-    htmlLang: "ja-JP",
-    continueLabel: "ウェブで続ける",
+    language: "en",
+    htmlLang: "en",
+    continueLabel: "Continue on web",
   },
   {
     name: "same account language",

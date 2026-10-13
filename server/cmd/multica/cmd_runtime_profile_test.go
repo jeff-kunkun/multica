@@ -375,30 +375,3 @@ func TestRuntimeProfilePathMutationFailsClosedInTaskContext(t *testing.T) {
 		t.Fatalf("owner config content changed: got %q", after)
 	}
 }
-
-func TestRunRuntimeProfileCreateOmpTarget(t *testing.T) {
-	redirectTestHome(t, t.TempDir())
-	t.Setenv("MULTICA_TOKEN", "test-token")
-	t.Setenv("MULTICA_WORKSPACE_ID", "ws-123")
-	var body map[string]any
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_ = json.NewDecoder(r.Body).Decode(&body)
-		w.WriteHeader(http.StatusCreated)
-		_ = json.NewEncoder(w).Encode(map[string]any{"id": "prof-1"})
-	}))
-	defer srv.Close()
-	t.Setenv("MULTICA_SERVER_URL", srv.URL)
-	cmd := newProfileCreateTestCmd()
-	_ = cmd.Flags().Set("runtime-type", "omp")
-	_ = cmd.Flags().Set("command-name", "wrapper")
-	_ = cmd.Flags().Set("display-name", "Custom OMP")
-	if err := runRuntimeProfileCreate(cmd, nil); err != nil {
-		t.Fatal(err)
-	}
-	if body["runtime_type"] != "omp" || body["command_name"] != "wrapper" {
-		t.Fatalf("incorrect target: %+v", body)
-	}
-	if _, ok := body["protocol_family"]; ok {
-		t.Fatal("server must derive the protocol family")
-	}
-}

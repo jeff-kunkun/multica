@@ -17,7 +17,7 @@ import { fileURLToPath } from "node:url";
 import ts from "typescript";
 
 const repoRoot = resolve(import.meta.dirname, "..");
-const roots = ["apps/web", "apps/desktop", "apps/mobile", "packages/ui", "packages/views"];
+const roots = ["apps/web", "apps/desktop", "packages/ui", "packages/views"];
 const extensions = new Set([".ts", ".tsx", ".js", ".jsx", ".mjs", ".mdx"]);
 const skippedDirectories = new Set(["node_modules", ".next", ".turbo", "dist", "build", "out"]);
 const radiusNames = ["xs", "sm", "md", "lg", "xl", "2xl", "3xl", "4xl"];
@@ -25,7 +25,6 @@ const directionalRadius = "(?:t|r|b|l|s|e|x|y|tl|tr|br|bl|ss|se|es|ee)";
 const fixedCssLength = /^(?:\d+(?:\.\d+)?|\.\d+)(?:px|rem|em|%|cm|mm|in|pt|pc|q|vh|vw|vmin|vmax|ch|ex|lh|rlh|cap|ic)$/;
 
 const microGeometryAllowlist = new Set([
-  "apps/web/features/landing/components/features-section.tsx:rounded-[2px]",
   "packages/ui/components/ui/chart.tsx:rounded-[2px]",
   "packages/views/common/task-transcript/run-timeline.tsx:rounded-[3px]",
   "packages/views/dashboard/components/errors-tab.tsx:rounded-[2px]",
@@ -131,16 +130,6 @@ function main() {
     radiusViolations(readFileSync(file, "utf8"), file),
   );
 
-  const scaleViolations = radiusScaleViolations(
-    readFileSync(join(repoRoot, "packages/ui/styles/tokens.css"), "utf8"),
-    JSON.parse(readFileSync(join(repoRoot, "apps/mobile/lib/radius-tokens.json"), "utf8")),
-  );
-
-  if (scaleViolations.length > 0) {
-    console.error(`Web/mobile radius scale drift (${scaleViolations.length})`);
-    for (const violation of scaleViolations) console.error(`  ${violation}`);
-  }
-
   if (violations.length > 0) {
     console.error(`Un-tokenized product radius utilities (${violations.length})`);
     for (const violation of violations) {
@@ -153,7 +142,7 @@ function main() {
     );
   }
 
-  if (scaleViolations.length > 0 || violations.length > 0) process.exit(1);
+  if (violations.length > 0) process.exit(1);
 
   console.log(`UI radius tokens clean (${files.length} source files checked).`);
 }

@@ -450,11 +450,11 @@ func probeDshMulticaProfile(ctx context.Context, executablePath string) dshProbe
 	// run helper reports a lifecycle error for a tree that outlived its leader,
 	// which says nothing about the protocol.
 	//
-	// agent.DshProtocolVersion, not a local copy: this decides whether the
-	// daemon may drive the profile, and the code that drives it is the only
-	// honest source for that number.
+	// Protocol 1 is the only DSH stdio version this probe ever accepted.
+	// The launch backend is gone; the probe remains so an installed profile
+	// is still classified instead of looking like a missing CLI.
 	if frame, ok := parseDshProbeFrame(string(output)); ok {
-		if frame.Version == 1 && frame.Runtime == "dsh" && frame.ProtocolVersion == agent.DshProtocolVersion {
+		if frame.Version == 1 && frame.Runtime == "dsh" && frame.ProtocolVersion == 1 {
 			return dshProbeOK
 		}
 		return dshProbeIncompatible

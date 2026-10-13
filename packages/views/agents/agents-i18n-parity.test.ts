@@ -2,15 +2,13 @@
 import { describe, expect, it } from "vitest";
 import en from "../locales/en/agents.json";
 import zhHans from "../locales/zh-Hans/agents.json";
-import ja from "../locales/ja/agents.json";
-import ko from "../locales/ko/agents.json";
 import { FAILURE_REASON_I18N_KEYS } from "./components/tabs/task-failure";
 import { taskStatusConfig } from "./config";
 import { availabilityConfig, workloadConfig } from "./presence";
 
-const LOCALES = { en, "zh-Hans": zhHans, ja, ko } as const;
+const LOCALES = { en, "zh-Hans": zhHans } as const;
 
-describe("task failure reason i18n parity across all 4 locales", () => {
+describe("task failure reason i18n parity across supported locales", () => {
   const expectedKeys = Object.values(FAILURE_REASON_I18N_KEYS).toSorted();
 
   it("covers every mapped reason with the exact same key set", () => {

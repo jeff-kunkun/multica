@@ -4,9 +4,6 @@ import { createI18n } from "@multica/core/i18n/react";
 import type { SupportedLocale } from "@multica/core/i18n";
 import { describe, expect, it } from "vitest";
 import enAgents from "../../../locales/en/agents.json";
-import frAgents from "../../../locales/fr/agents.json";
-import jaAgents from "../../../locales/ja/agents.json";
-import koAgents from "../../../locales/ko/agents.json";
 import zhHansAgents from "../../../locales/zh-Hans/agents.json";
 
 import {
@@ -22,19 +19,13 @@ import {
 const AGENT_RESOURCES = {
   en: enAgents,
   "zh-Hans": zhHansAgents,
-  ja: jaAgents,
-  ko: koAgents,
-  fr: frAgents,
 } as const;
 
 function fixedT(locale: SupportedLocale): TFunction<"agents"> {
-  const resources =
-    locale === "en"
-      ? { en: { agents: enAgents } }
-      : {
-          en: { agents: enAgents },
-          [locale]: { agents: AGENT_RESOURCES[locale] },
-        };
+  const resources = {
+    en: { agents: enAgents },
+    "zh-Hans": { agents: zhHansAgents },
+  };
   const i18n = createI18n(locale, resources);
   return i18n.getFixedT(locale, "agents") as TFunction<"agents">;
 }
@@ -108,9 +99,6 @@ describe("cancelReasonLabel", () => {
     const expected: Record<SupportedLocale, string> = {
       en: "Cancelled by the system",
       "zh-Hans": "已由系统取消",
-      ja: "システムによってキャンセルされました",
-      ko: "시스템에서 취소함",
-      fr: "Annulée par le système",
     };
 
     for (const locale of Object.keys(expected) as SupportedLocale[]) {
@@ -191,12 +179,6 @@ describe("failureReasonLabel", () => {
         fixedT("zh-Hans"),
       ),
     ).toBe("提供商配额已用尽");
-    expect(
-      failureReasonLabel("agent_error.context_overflow", fixedT("ja")),
-    ).toBe("コンテキストウィンドウを超過しました");
-    expect(
-      failureReasonLabel("agent_error.missing_config", fixedT("ko")),
-    ).toBe("API 키 또는 설정 누락");
   });
 
   it("still falls back to the raw wire value for unknown reasons", () => {

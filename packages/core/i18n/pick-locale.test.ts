@@ -20,19 +20,15 @@ describe("matchLocale", () => {
 
   it("matches a clean supported tag", () => {
     expect(matchLocale(["zh-Hans"])).toBe("zh-Hans");
-    expect(matchLocale(["ko"])).toBe("ko");
-    expect(matchLocale(["ja"])).toBe("ja");
     expect(matchLocale(["en"])).toBe("en");
-    expect(matchLocale(["fr"])).toBe("fr");
   });
 
   it("collapses region-tagged BCP-47 to the supported base", () => {
     expect(matchLocale(["en-US"])).toBe("en");
     expect(matchLocale(["zh-Hans-CN"])).toBe("zh-Hans");
-    expect(matchLocale(["ko-KR"])).toBe("ko");
-    expect(matchLocale(["ja-JP"])).toBe("ja");
-    expect(matchLocale(["fr-FR"])).toBe("fr");
-    expect(matchLocale(["fr-CA"])).toBe("fr");
+    expect(matchLocale(["ko-KR"])).toBe("en");
+    expect(matchLocale(["ja-JP"])).toBe("en");
+    expect(matchLocale(["fr-FR"])).toBe("en");
   });
 
   it("falls back to DEFAULT_LOCALE when no candidate matches", () => {
@@ -45,8 +41,7 @@ describe("matchLocale", () => {
 
   it("uses the first supported candidate when multiple appear", () => {
     expect(matchLocale(["es", "zh-Hans", "en"])).toBe("zh-Hans");
-    expect(matchLocale(["es", "ko-KR", "en"])).toBe("ko");
-    expect(matchLocale(["es", "ja-JP", "en"])).toBe("ja");
+    expect(matchLocale(["es", "ko-KR", "en"])).toBe("en");
   });
 
   it("returns DEFAULT_LOCALE for malformed BCP-47 tags rather than throwing", () => {

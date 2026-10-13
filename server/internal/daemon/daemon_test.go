@@ -2247,7 +2247,7 @@ func TestHermesPreparedSessionReachability(t *testing.T) {
 func TestGatePiResumeToSessionFile(t *testing.T) {
 	t.Parallel()
 
-	for _, provider := range []string{"pi", "omp"} {
+	for _, provider := range []string{"pi"} {
 		t.Run(provider, func(t *testing.T) {
 			t.Parallel()
 
@@ -2462,7 +2462,6 @@ func TestGatePiResumeChecksRecordedCwd(t *testing.T) {
 			refusesMissingCwd bool
 		}{
 			{name: "pi", provider: "pi", refusesMissingCwd: true},
-			{name: "omp", provider: "omp", refusesMissingCwd: false},
 			// A custom runtime profile registers its protocol family as the
 			// provider, so an arbitrary command configured as `protocol_family:
 			// pi` also arrives here as "pi". It is not the binary whose refusal
@@ -3489,7 +3488,7 @@ func TestShouldRetryWithFreshSession(t *testing.T) {
 			name:           "undetectable backend with no session established retries",
 			result:         agent.Result{Status: "failed", Error: "agent exited before dispatching"},
 			priorSessionID: "stale-id",
-			provider:       "copilot",
+			provider:       "opencode",
 			want:           true,
 		},
 		{
@@ -3830,7 +3829,7 @@ func TestShouldRetryWithFreshSession_CompatPathIsBackendScoped(t *testing.T) {
 	// the compat path exists to catch.
 	result := agent.Result{Status: "failed", Error: "exit status 1"}
 
-	undetectable := []string{"antigravity", "codearts", "copilot", "cursor", "deveco", "opencode"}
+	undetectable := []string{"antigravity", "opencode"}
 	for _, provider := range undetectable {
 		t.Run(provider+" retries", func(t *testing.T) {
 			t.Parallel()
@@ -4173,283 +4172,6 @@ func TestExecuteAndDrain_IdleWatchdog_FiresOnInactivity(t *testing.T) {
 	// test from racing in slow CI.
 	if elapsed := time.Since(start); elapsed > 5*d.cfg.AgentIdleWatchdog {
 		t.Fatalf("watchdog took too long to fire: %s (window=%s)", elapsed, d.cfg.AgentIdleWatchdog)
-	}
-}
-
-// waitForAgentMessageBackend holds Execute until the wrapped backend has
-// processed a selected protocol message, then hands the full stream to the
-// daemon. It makes watchdog cancellation tests deterministic without changing
-// the production watchdog window or relying on child-process scheduling speed.
-type waitForAgentMessageBackend struct {
-	agent.Backend
-	match   func(agent.Message) bool
-	onMatch func()
-}
-
-func (b waitForAgentMessageBackend) Execute(ctx context.Context, prompt string, opts agent.ExecOptions) (*agent.Session, error) {
-	session, err := b.Backend.Execute(ctx, prompt, opts)
-	if err != nil {
-		return nil, err
-	}
-	messages := make(chan agent.Message, 256)
-	for {
-		select {
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		case msg, ok := <-session.Messages:
-			if !ok {
-				return nil, errors.New("wrapped backend closed before the expected message")
-			}
-			messages <- msg
-			if !b.match(msg) {
-				continue
-			}
-			if b.onMatch != nil {
-				b.onMatch()
-			}
-			go func() {
-				defer close(messages)
-				for msg := range session.Messages {
-					messages <- msg
-				}
-			}()
-			return &agent.Session{
-				ToolActivity:             session.ToolActivity,
-				InterruptBackgroundTools: session.InterruptBackgroundTools,
-				TerminalObserved:         session.TerminalObserved,
-				Messages:                 messages,
-				Result:                   session.Result,
-			}, nil
-		}
-	}
-}
-
-func TestExecuteAndDrain_PiTurnErrorOutranksIdleWatchdogCancellation(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("shell-script fixture is POSIX-only")
-	}
-
-	const providerError = "OpenAI API error (413): Failed to buffer the request body: length limit exceeded"
-	fakePath := filepath.Join(t.TempDir(), "pi")
-	script := "#!/bin/sh\n" +
-		"cat > /dev/null\n" +
-		`printf '%s\n' '{"type":"agent_start"}'` + "\n" +
-		`printf '%s\n' '{"type":"turn_start"}'` + "\n" +
-		`printf '%s\n' '{"type":"turn_end","message":{"role":"assistant","model":"test","stopReason":"error","errorMessage":"` + providerError + `"}}'` + "\n" +
-		`printf '%s\n' '{"type":"message_update","assistantMessageEvent":{"type":"thinking_delta","delta":"post-error activity"}}'` + "\n" +
-		`printf '%s\n' '{"type":"agent_end","messages":[],"willRetry":false}'` + "\n" +
-		"exec sleep 300\n"
-	writeTestExecutable(t, fakePath, []byte(script))
-
-	backend, err := agent.New("pi", agent.Config{ExecutablePath: fakePath, Logger: slog.Default()})
-	if err != nil {
-		t.Fatalf("new pi backend: %v", err)
-	}
-	backend = waitForAgentMessageBackend{
-		Backend: backend,
-		match: func(msg agent.Message) bool {
-			return msg.Type == agent.MessageThinking && msg.Content == "post-error activity"
-		},
-	}
-	d := newTestDaemon(t)
-	d.cfg.AgentIdleWatchdog = 50 * time.Millisecond
-
-	result, _, err := d.executeAndDrain(
-		context.Background(),
-		backend,
-		"prompt-ignored",
-		agent.ExecOptions{ResumeSessionID: filepath.Join(t.TempDir(), "session.jsonl")},
-		slog.Default(),
-		"t-pi-provider-error",
-		"",
-		new(atomic.Int32),
-	)
-	if err != nil {
-		t.Fatalf("executeAndDrain: %v", err)
-	}
-	if result.Status != "failed" {
-		t.Fatalf("status = %q, want provider failure rather than idle_watchdog (error=%q)", result.Status, result.Error)
-	}
-	if result.Error != providerError {
-		t.Fatalf("error = %q, want original provider error %q", result.Error, providerError)
-	}
-}
-
-func TestExecuteAndDrain_PiWithoutTurnErrorKeepsIdleWatchdogResult(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("shell-script fixture is POSIX-only")
-	}
-
-	fakePath := filepath.Join(t.TempDir(), "pi")
-	script := "#!/bin/sh\n" +
-		"cat > /dev/null\n" +
-		`printf '%s\n' '{"type":"agent_start"}'` + "\n" +
-		"exec sleep 300\n"
-	writeTestExecutable(t, fakePath, []byte(script))
-
-	backend, err := agent.New("pi", agent.Config{ExecutablePath: fakePath, Logger: slog.Default()})
-	if err != nil {
-		t.Fatalf("new pi backend: %v", err)
-	}
-	d := newTestDaemon(t)
-	d.cfg.AgentIdleWatchdog = 200 * time.Millisecond
-
-	result, _, err := d.executeAndDrain(
-		context.Background(),
-		backend,
-		"prompt-ignored",
-		agent.ExecOptions{ResumeSessionID: filepath.Join(t.TempDir(), "session.jsonl")},
-		slog.Default(),
-		"t-pi-no-provider-error",
-		"",
-		new(atomic.Int32),
-	)
-	if err != nil {
-		t.Fatalf("executeAndDrain: %v", err)
-	}
-	if result.Status != "idle_watchdog" {
-		t.Fatalf("result = %+v, want the existing idle_watchdog disposition", result)
-	}
-	if result.Error != "execution cancelled" {
-		t.Fatalf("error = %q, want the existing no-provider-error cancellation text", result.Error)
-	}
-}
-
-func TestExecuteAndDrain_PiTurnErrorOutranksUpstreamCancellation(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("shell-script fixture is POSIX-only")
-	}
-
-	const providerError = "OpenAI API error (413): Failed to buffer the request body: length limit exceeded"
-	fakePath := filepath.Join(t.TempDir(), "pi")
-	script := "#!/bin/sh\n" +
-		"cat > /dev/null\n" +
-		`printf '%s\n' '{"type":"agent_start"}'` + "\n" +
-		`printf '%s\n' '{"type":"turn_start"}'` + "\n" +
-		`printf '%s\n' '{"type":"turn_end","message":{"role":"assistant","model":"test","stopReason":"error","errorMessage":"` + providerError + `"}}'` + "\n" +
-		`printf '%s\n' '{"type":"message_update","assistantMessageEvent":{"type":"thinking_delta","delta":"cancel now"}}'` + "\n" +
-		"exec sleep 300\n"
-	writeTestExecutable(t, fakePath, []byte(script))
-
-	backend, err := agent.New("pi", agent.Config{ExecutablePath: fakePath, Logger: slog.Default()})
-	if err != nil {
-		t.Fatalf("new pi backend: %v", err)
-	}
-	matched := make(chan struct{})
-	backend = waitForAgentMessageBackend{
-		Backend: backend,
-		match: func(msg agent.Message) bool {
-			return msg.Type == agent.MessageThinking && msg.Content == "cancel now"
-		},
-		onMatch: func() { close(matched) },
-	}
-	d := newTestDaemon(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	t.Cleanup(cancel)
-	sessionPath := filepath.Join(t.TempDir(), "session.jsonl")
-
-	type outcome struct {
-		result agent.Result
-		err    error
-	}
-	done := make(chan outcome, 1)
-	go func() {
-		result, _, err := d.executeAndDrain(
-			ctx,
-			backend,
-			"prompt-ignored",
-			agent.ExecOptions{ResumeSessionID: sessionPath},
-			slog.Default(),
-			"t-pi-provider-error-upstream-cancel",
-			"",
-			new(atomic.Int32),
-		)
-		done <- outcome{result: result, err: err}
-	}()
-
-	select {
-	case <-matched:
-		cancel()
-	case <-time.After(5 * time.Second):
-		t.Fatal("Pi never emitted the post-error activity")
-	}
-
-	select {
-	case got := <-done:
-		if got.err != nil {
-			t.Fatalf("executeAndDrain: %v", got.err)
-		}
-		if got.result.Status != "failed" || got.result.Error != providerError {
-			t.Fatalf("result = %+v, want original provider failure", got.result)
-		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("executeAndDrain did not return after upstream cancellation")
-	}
-}
-
-func TestExecuteAndDrain_PiWithoutTurnErrorKeepsUpstreamCancellation(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("shell-script fixture is POSIX-only")
-	}
-
-	fakePath := filepath.Join(t.TempDir(), "pi")
-	script := "#!/bin/sh\n" +
-		"cat > /dev/null\n" +
-		`printf '%s\n' '{"type":"agent_start"}'` + "\n" +
-		"exec sleep 300\n"
-	writeTestExecutable(t, fakePath, []byte(script))
-
-	backend, err := agent.New("pi", agent.Config{ExecutablePath: fakePath, Logger: slog.Default()})
-	if err != nil {
-		t.Fatalf("new pi backend: %v", err)
-	}
-	matched := make(chan struct{})
-	backend = waitForAgentMessageBackend{
-		Backend: backend,
-		match:   func(msg agent.Message) bool { return msg.Type == agent.MessageStatus },
-		onMatch: func() { close(matched) },
-	}
-	d := newTestDaemon(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	t.Cleanup(cancel)
-	sessionPath := filepath.Join(t.TempDir(), "session.jsonl")
-
-	type outcome struct {
-		result agent.Result
-		err    error
-	}
-	done := make(chan outcome, 1)
-	go func() {
-		result, _, err := d.executeAndDrain(
-			ctx,
-			backend,
-			"prompt-ignored",
-			agent.ExecOptions{ResumeSessionID: sessionPath},
-			slog.Default(),
-			"t-pi-no-provider-error-upstream-cancel",
-			"",
-			new(atomic.Int32),
-		)
-		done <- outcome{result: result, err: err}
-	}()
-
-	select {
-	case <-matched:
-		cancel()
-	case <-time.After(5 * time.Second):
-		t.Fatal("Pi never started")
-	}
-
-	select {
-	case got := <-done:
-		if got.err != nil {
-			t.Fatalf("executeAndDrain: %v", got.err)
-		}
-		if got.result.Status != "cancelled" || !strings.Contains(got.result.Error, "task cancelled by upstream context") {
-			t.Fatalf("result = %+v, want existing upstream cancellation", got.result)
-		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("executeAndDrain did not return after upstream cancellation")
 	}
 }
 
@@ -6383,38 +6105,6 @@ func TestSanitizeAgentEnv(t *testing.T) {
 	}
 }
 
-// TestHermesLaunchArgsAndEnvByScenario covers the profile chain end to end at
-// the decision level: the final launch args + the final HERMES_HOME the child
-// sees, for a skill-less vs. an overlay-active task that both set a profile.
-func TestHermesLaunchArgsAndEnvByScenario(t *testing.T) {
-	t.Parallel()
-	customArgs := []string{"-p", "research", "--yolo"}
-	customEnv := map[string]string{"HERMES_HOME": "/home/u/.hermes"}
-
-	// No overlay (skill-less): runTask never strips, so the profile flag passes
-	// through, and the user's HERMES_HOME passes through — behavior unchanged.
-	noOverlayArgs := customArgs
-	if len(noOverlayArgs) != 3 || noOverlayArgs[0] != "-p" || noOverlayArgs[1] != "research" {
-		t.Errorf("skill-less task must keep its profile flags, got %v", noOverlayArgs)
-	}
-	noOverlayEnv := map[string]string{}
-	layerCustomEnvAndHermesHome(noOverlayEnv, customEnv, "", nil)
-	if noOverlayEnv["HERMES_HOME"] != "/home/u/.hermes" {
-		t.Errorf("skill-less task must keep the user HERMES_HOME, got %q", noOverlayEnv["HERMES_HOME"])
-	}
-
-	// Overlay active: profile flag is stripped, and HERMES_HOME is the overlay.
-	_, overlayArgs := agent.StripHermesProfileSelectors(nil, customArgs, slog.Default())
-	if len(overlayArgs) != 1 || overlayArgs[0] != "--yolo" {
-		t.Errorf("overlay task must strip profile flags, got %v", overlayArgs)
-	}
-	overlayEnv := map[string]string{}
-	layerCustomEnvAndHermesHome(overlayEnv, customEnv, "/task/hermes-home", nil)
-	if overlayEnv["HERMES_HOME"] != "/task/hermes-home" {
-		t.Errorf("overlay task must redirect HERMES_HOME to the overlay, got %q", overlayEnv["HERMES_HOME"])
-	}
-}
-
 // TestHandleTask_AcksCancelAfterPollCancelled verifies the daemon posts
 // cancel-ack when the poll goroutine interrupts the run — by then
 // runner.run has returned, so the transcript flush is complete and the
@@ -6760,44 +6450,5 @@ func TestBuildPromptSquadLeaderMultiThreadCarvesOutNoAction(t *testing.T) {
 	}
 	if strings.Contains(ordinary, "Unless your outcome is") || strings.Contains(ordinary, "skip this ENTIRE fan-out block") {
 		t.Fatalf("ordinary multi-thread prompt leaked the leader carve-out\n---\n%s", ordinary)
-	}
-}
-
-// TestHermesProfileChainCoversLaunchPrefix is the daemon half of GH #7046's
-// Hermes regression. A custom runtime profile's fixed_args are no longer folded
-// into custom_args — they become the launch prefix and reach hermes ahead of
-// custom_args, which in turn precede the backend's own `acp` token.
-//
-// Both halves of the profile chain therefore have to run against the argv the
-// backend really assembles. Resolving or stripping against a hand-built
-// approximation reads a different profile than the process does, and the
-// overlay gets seeded from the wrong home.
-func TestHermesProfileChainCoversLaunchPrefix(t *testing.T) {
-	t.Parallel()
-
-	// A prefix ending in a bare `-p`: the selection straddles the two regions,
-	// so only the assembled argv shows which profile hermes sees.
-	launchPrefix := []string{"-p"}
-	customArgs := []string{"research", "--yolo"}
-
-	sel := agent.ParseHermesProfileArgs(
-		agent.HermesLaunchArgv(launchPrefix, customArgs, slog.Default()))
-	if !sel.Found || sel.Name != "research" {
-		t.Fatalf("effective profile = %+v, want the `research` hermes actually selects", sel)
-	}
-
-	// Overlay active: both regions are stripped together, and the launched argv
-	// can no longer redirect HERMES_HOME out of the overlay.
-	strippedPrefix, strippedCustom := agent.StripHermesProfileSelectors(
-		launchPrefix, customArgs, slog.Default())
-	if sel := agent.ParseHermesProfileArgs(
-		agent.HermesLaunchArgv(strippedPrefix, strippedCustom, slog.Default())); sel.Found {
-		t.Fatalf("the launched argv can still redirect HERMES_HOME: %+v", sel)
-	}
-	if len(strippedPrefix) != 0 {
-		t.Errorf("prefix = %v, want the straddling `-p` removed", strippedPrefix)
-	}
-	if strings.Join(strippedCustom, "\x00") != "--yolo" {
-		t.Errorf("custom = %v, want only the selector's value removed", strippedCustom)
 	}
 }

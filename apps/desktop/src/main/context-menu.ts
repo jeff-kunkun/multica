@@ -117,7 +117,7 @@ export function installContextMenu(webContents: WebContents): void {
 // with English as the fallback. Kept inline because the main process has
 // no shared i18n loader (the renderer's i18next is per-window and not
 // reachable from here), and pulling one in for three strings would be
-// more rope than payload. Matches the four locales the renderer ships.
+// more rope than payload. Matches the locales the renderer ships.
 type ContextMenuLabels = {
   openLink: string;
   copyLinkAddress: string;
@@ -135,20 +135,10 @@ const labelsByLocale: Record<string, ContextMenuLabels> = {
     copyLinkAddress: "复制链接地址",
     copyImage: "复制图片",
   },
-  ja: {
-    openLink: "ブラウザでリンクを開く",
-    copyLinkAddress: "リンクのアドレスをコピー",
-    copyImage: "画像をコピー",
-  },
-  ko: {
-    openLink: "브라우저에서 링크 열기",
-    copyLinkAddress: "링크 주소 복사",
-    copyImage: "이미지 복사",
-  },
 };
 
-// pickLabels resolves the OS-preferred language to one of the four
-// locales we ship copy for. We say "Open Link in Browser" rather than
+// pickLabels resolves the OS-preferred language to a locale we ship copy
+// for. We say "Open Link in Browser" rather than
 // "Open Link in New Window" because the link is opened via
 // shell.openExternal — it lands in the user's default browser, not in
 // another Multica window — so the wording matches what actually
@@ -161,7 +151,5 @@ function pickLabels(): ContextMenuLabels {
     // worse than reading Simplified Chinese.
     return labelsByLocale["zh-Hans"];
   }
-  if (preferred.startsWith("ja")) return labelsByLocale.ja;
-  if (preferred.startsWith("ko")) return labelsByLocale.ko;
   return labelsByLocale.en;
 }
