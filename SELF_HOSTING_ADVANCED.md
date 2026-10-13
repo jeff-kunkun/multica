@@ -287,32 +287,11 @@ declares a `vector` column or runs `CREATE EXTENSION vector`. The bundled image
 is named `pgvector/pgvector:pg17` for historical reasons only; a stock
 PostgreSQL 17 is sufficient.
 
-Migrations reference four extensions:
-
-| Extension | Migration | Required |
-| --- | --- | --- |
-| `pgcrypto` | `001_init` | **Yes** — a bare `CREATE EXTENSION`; the migration fails without it |
-| `pg_trgm` | `137_search_index_pg_trgm_extension` | **Yes** — same, and the search indexes depend on it |
-| `pg_bigm` | `032_issue_search_index` | No — wrapped in `DO ... EXCEPTION`, skipped with a `NOTICE` when unavailable |
-| `pg_cron` | `076_task_usage_pgcron_extension` | No — same; the usage rollup runs in-process instead, see [Usage Dashboard Rollup](#usage-dashboard-rollup) |
-
-`pgcrypto` and `pg_trgm` ship with every standard PostgreSQL 17 build
+The schema baseline (`001_baseline`) creates two extensions, both required:
+`pgcrypto` and `pg_trgm`. Both ship with every standard PostgreSQL 17 build
 (`postgresql-contrib` on Debian/Ubuntu, bundled in Homebrew's `postgresql@17`
-and in the official `postgres:17` image), so neither hard requirement needs a
-custom image.
-
-`pg_bigm` is optional and only affects **CJK search quality** — bigram indexes
-are far more selective than trigram ones for Chinese, Japanese, and Korean text.
-Search works without it: migrations 138–142 install portable `pg_trgm` fallback
-indexes covering every column the search handlers touch. Installing `pg_bigm`
-does require a custom image or a source build — the bundled
-`pgvector/pgvector:pg17` image does not ship it either.
-
-> Because `pg_bigm` and `pg_cron` are installed conditionally, a row in
-> `schema_migrations` proves the migration ran, not that its objects exist. Run
-> `SELECT extname FROM pg_extension` to see what a database actually has. To
-> recover a missing comment-content search index, follow
-> `server/cmd/migrate/README.md`.
+and in the official `postgres:17` image), so neither needs a custom image.
+Search uses `pg_trgm` indexes; `pg_bigm` and `pg_cron` are no longer used.
 
 ### Using Docker Compose (Recommended)
 
