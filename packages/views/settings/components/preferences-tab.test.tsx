@@ -176,8 +176,7 @@ describe("PreferencesTab — Language switcher", () => {
   });
 
   it.each([
-    { name: "한국어", locale: "ko" },
-    { name: "日本語", locale: "ja" },
+    { name: "中文", locale: "zh-Hans" },
   ])("when not logged in: persists $locale and reloads, no PATCH", async ({ name, locale }) => {
     const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
     render(<PreferencesTab />, { wrapper: I18nWrapper });
@@ -194,7 +193,6 @@ describe("PreferencesTab — Language switcher", () => {
 
   it.each([
     { name: "中文", locale: "zh-Hans" },
-    { name: "Français", locale: "fr" },
   ])("when logged in: saves $locale before reloading", async ({ name, locale }) => {
     userRef.current = { id: "user-1" };
     mockUpdateMe.mockResolvedValueOnce({});

@@ -8,12 +8,12 @@ import type { SupportedLocale } from "./types";
 
 vi.mock("../auth", () => ({
   useAuthStore: (selector: (state: { user: { language: string } }) => unknown) =>
-    selector({ user: { language: "fr" } }),
+    selector({ user: { language: "zh-Hans" } }),
 }));
 
 afterEach(cleanup);
 
-it("restores saved French on another device and stops reloading once it matches", () => {
+it("restores a saved language on another device and stops reloading once it matches", () => {
   const reload = vi.fn();
   const location = window.location;
   Object.defineProperty(window, "location", {
@@ -27,7 +27,7 @@ it("restores saved French on another device and stops reloading once it matches"
   };
   const resources = {
     en: { common: { save: "Save" } },
-    fr: { common: { save: "Enregistrer" } },
+    "zh-Hans": { common: { save: "保存" } },
   };
   const tree = (locale: SupportedLocale) => (
     <I18nProvider locale={locale} resources={resources}>
@@ -39,13 +39,13 @@ it("restores saved French on another device and stops reloading once it matches"
 
   try {
     const first = render(tree("en"));
-    expect(adapter.persist).toHaveBeenCalledExactlyOnceWith("fr");
+    expect(adapter.persist).toHaveBeenCalledExactlyOnceWith("zh-Hans");
     expect(reload).toHaveBeenCalledTimes(1);
     first.unmount();
 
     adapter.persist.mockClear();
     reload.mockClear();
-    render(tree("fr"));
+    render(tree("zh-Hans"));
     expect(adapter.persist).not.toHaveBeenCalled();
     expect(reload).not.toHaveBeenCalled();
   } finally {

@@ -3,7 +3,6 @@
     ".github/actions/frontend-quality/**",
     "apps/web/**",
     "apps/desktop/**",
-    "apps/ui-lab/**",
     "packages/**",
     "package.json",
     ".npmrc",
@@ -69,7 +68,6 @@
     "knip.jsonc",
     "scripts/*.mjs",
     "scripts/check-ui-wildcard-exports.test.sh",
-    ".github/workflows/mobile-verify.yml",
     ".github/workflows/ci.yml",
     ".github/ci-paths.json"
   ],

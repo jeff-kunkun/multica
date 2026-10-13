@@ -781,7 +781,7 @@ var errUnverifiedCatalog = errors.New("model discovery did not return the runtim
 // into "pass the level through".
 func ThinkingRequiresExplicitModel(providerType string) bool {
 	switch providerType {
-	case "codex", "omp":
+	case "codex":
 		return true
 	}
 	return false
@@ -799,7 +799,8 @@ func ThinkingRequiresExplicitModel(providerType string) bool {
 // impossible before MUL-7412 — so it is strict from the start and the invalid
 // combination never reaches storage.
 func ThinkingLevelRejectedWithoutModel(providerType string) bool {
-	return providerType == "omp"
+	// No remaining runtime rejects a stored effort that has no pinned model.
+	return false
 }
 
 // ValidateServiceTier reports whether value is advertised by the current
