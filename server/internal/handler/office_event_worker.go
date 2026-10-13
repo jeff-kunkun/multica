@@ -181,7 +181,7 @@ func officeFallbackBusinessKey(ev db.OfficeEvent) string {
 func (w *OfficeEventWorker) facts(ctx context.Context, ev db.OfficeEvent) service.OfficeFacts {
 	f := service.OfficeFacts{
 		Family: ev.Family, EventType: ev.EventType, Changes: service.ParseOfficeChanges(ev.Changes),
-		ActorType: ev.ActorType, ActorSource: ev.ActorSource,
+		ActorType: ev.ActorType, ActorSource: ev.ActorSource, ViaBot: ev.ViaBotID.Valid,
 	}
 	if ev.IssueID.Valid {
 		if issue, err := w.h.Queries.GetIssue(ctx, ev.IssueID); err == nil {
@@ -313,9 +313,11 @@ func (w *OfficeEventWorker) ownAction(ev db.OfficeEvent, user pgtype.UUID) bool 
 // creator, its assignee, and the opener of the chat it came from. A ticket
 // that names nobody (an agent split it off and ran it) belongs to whoever owns
 // the nearest ticket above it: an agent's sub-ticket is still the person's
-// work. Up the chain only people who can open this event's ticket count, so a
-// private sub-ticket never reaches a parent owner it is hidden from; the walk
-// stops at a missing parent, another workspace, a loop or officeOwnerDepth. A
+// work. The walk stops at the first ticket that names anyone; of its people
+// only those who can open this event's ticket count, so a private sub-ticket
+// never reaches a parent owner it is hidden from, nor skips past them to a
+// higher one. It also stops at a missing parent, another workspace, a loop or
+// officeOwnerDepth. A
 // row that no longer exists names nobody; any other failure is returned.
 func (w *OfficeEventWorker) owners(ctx context.Context, ev db.OfficeEvent) ([]pgtype.UUID, error) {
 	var out []pgtype.UUID
@@ -379,8 +381,9 @@ func (w *OfficeEventWorker) owners(ctx context.Context, ev db.OfficeEvent) ([]pg
 			}
 			out = append(out, u)
 		}
-		level = nil
-		if len(out) > 0 {
+		// The nearest ticket that names anyone owns the result, even when none
+		// of them may open it: a grandparent's owner never takes it over.
+		if len(level) > 0 {
 			return out, nil
 		}
 		next = issue.ParentIssueID

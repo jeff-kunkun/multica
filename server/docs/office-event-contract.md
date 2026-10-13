@@ -75,13 +75,17 @@ delivered, pending releases. It always comes
 with `bypass_semantic_dedupe: true`: do not fold it into a similar earlier
 message.
 
-### Release work finished by routing
+### Release work finished without a person
 
-When routing (not a person) moves a ticket whose title or description is about
+When anyone but a person by their own hand (routing, an agent, a reviewer's
+`verdict: pass` closing it, or a Bot acting for its owner) moves a ticket whose
+title or description is about
 a production or formal release to `done`, the event is
 `meaning: release_pending_approval`, `pending_approval: true`, `must_relay:
 true`, and carries `notice: "系统改成完成，正式发布仍待批准。这不是发布许可。"`.
-It grants nothing: do not deploy on it.
+It grants nothing: do not deploy on it. A passed code review is not a release
+approval; there is no structured approval record yet, so only a person closing
+the ticket themselves clears the flag.
 
 ### Files
 
@@ -103,7 +107,9 @@ Each entry in `artifacts`: `id`, `filename`, `content_type`, `size`, `sha256`,
 - A ticket that names no person (an agent created and runs it) belongs to the
   owners of the nearest parent ticket that names one, up to 10 levels; only
   those who can open this ticket count, so a private sub-ticket stays a gap.
-  A ticket with its own owner is never handed to the parent's. A missing
+  The walk stops at that nearest ticket even when none of its people can open
+  this one: a higher ticket's owner never takes it over. A ticket with its own
+  owner is never handed to the parent's. A missing
   parent, another workspace or a loop ends the walk.
 - People who stream everything (`multica bot bind --activity everything`) also
   get every event they can see.

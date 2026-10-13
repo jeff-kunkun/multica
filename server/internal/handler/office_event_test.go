@@ -285,6 +285,14 @@ func TestOfficeEventRoutingDoneOnReleaseWorkStillWaitsForApproval(t *testing.T) 
 		t.Fatalf("push %v", pushed)
 	}
 
+	// A reviewer agent's verdict closing it is not the release approval.
+	reviewed := ownedIssue(t, "正式发布 v2.0.1")
+	asActor(t, dbactor.Actor{Type: "agent", ID: dbfx.Agent(t, "reviewer", testRuntimeID)}, `UPDATE issue SET status='done' WHERE id=$1`, reviewed)
+	f.seal(t)
+	if ev := latestOfficeEvent(t, `issue_id=$1`, reviewed); !ev.pendingApproval || !ev.mustRelay || ev.meaning != service.OfficeMeaningPendingRel {
+		t.Fatalf("an agent's close of release work sealed as %+v", ev)
+	}
+
 	// A person marking the same kind of ticket done is a plain completion.
 	other := ownedIssue(t, "正式发布 v2.1")
 	asActor(t, dbactor.Actor{Type: "member", ID: summonSecondMember(t)}, `UPDATE issue SET status='done' WHERE id=$1`, other)
@@ -829,7 +837,9 @@ func TestOfficeEventDisconnectedOwnerIsRemindedAndCaughtUpOnReconnect(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _, _ = testPool.Exec(context.Background(), `DELETE FROM personal_access_token WHERE id=$1`, bot2.ID) })
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM personal_access_token WHERE id=$1`, bot2.ID)
+	})
 	b2 := dbfx.Insert(t, "member_bot_binding", testutil.Cols{"workspace_id": testWorkspaceID, "user_id": testUserID, "bot_id": uuidToString(bot2.ID)})
 	dbfx.Exec(t, `UPDATE member_bot_binding SET verified_at=now() WHERE id=$1`, b2)
 	f.worker.Restore(context.Background())
@@ -881,7 +891,9 @@ func TestOfficeEventCatchUpHasNoAgeLimitButStillChecksAccess(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _, _ = testPool.Exec(context.Background(), `DELETE FROM personal_access_token WHERE id=$1`, bot2.ID) })
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM personal_access_token WHERE id=$1`, bot2.ID)
+	})
 	b2 := dbfx.Insert(t, "member_bot_binding", testutil.Cols{"workspace_id": testWorkspaceID, "user_id": testUserID, "bot_id": uuidToString(bot2.ID)})
 	dbfx.Exec(t, `UPDATE member_bot_binding SET verified_at=now() WHERE id=$1`, b2)
 	f.worker.Restore(context.Background())
@@ -934,12 +946,26 @@ func TestOfficeEventAgentSubTicketBelongsToTheParentOwner(t *testing.T) {
 		"workspace_id": testWorkspaceID, "title": "Peer's own child", "status": "in_progress", "priority": "none",
 		"creator_type": "member", "creator_id": peer, "number": nextTestIssueNumber(t), "parent_issue_id": parent,
 	})
+	// The nearest owner cannot open the sub-ticket; a higher owner who can
+	// must not take it over.
+	peerUnderOwner := dbfx.Insert(t, "issue", testutil.Cols{
+		"workspace_id": testWorkspaceID, "title": "Peer's slice", "status": "in_progress", "priority": "none",
+		"creator_type": "member", "creator_id": peer, "number": nextTestIssueNumber(t), "parent_issue_id": parent,
+	})
+	skipped := child("Skip attempt", peerUnderOwner, "private")
+	// Two owners on the nearest ticket, one can open the sub-ticket.
+	shared := dbfx.Insert(t, "issue", testutil.Cols{
+		"workspace_id": testWorkspaceID, "title": "Shared plan", "status": "in_progress", "priority": "none",
+		"creator_type": "member", "creator_id": peer, "assignee_type": "member", "assignee_id": testUserID,
+		"number": nextTestIssueNumber(t),
+	})
+	partial := child("Partly visible", shared, "private")
 	loopA := child("Loop A", "", "workspace")
 	loopB := child("Loop B", loopA, "workspace")
 	dbfx.Exec(t, `UPDATE issue SET parent_issue_id=$1 WHERE id=$2`, loopB, loopA)
 
 	asActor(t, dbactor.Actor{Type: "agent", ID: agent}, `UPDATE issue SET status='done' WHERE id = ANY($1::uuid[])`,
-		[]string{grandchild, open, hidden, ownOwner, loopA})
+		[]string{grandchild, open, hidden, ownOwner, loopA, skipped, partial})
 	f.seal(t)
 
 	done := func(issue string) (officeRow, string) {
@@ -979,6 +1005,23 @@ func TestOfficeEventAgentSubTicketBelongsToTheParentOwner(t *testing.T) {
 	}
 	if n := dbfx.Count(t, `SELECT count(*) FROM office_event_delivery WHERE event_id=$1 AND bot_id=$2 AND reason='owner'`, ev.eventID, bot); n != 0 {
 		t.Fatal("the parent's owner took over a ticket that has its own owner")
+	}
+	ev, gap = done(skipped)
+	if gap != officeGapNoOwner {
+		t.Fatalf("a hidden nearest owner let a grandparent owner take over: gap=%q", gap)
+	}
+	if n := dbfx.Count(t, `SELECT count(*) FROM office_event_delivery WHERE event_id=$1 AND reason='owner'`, ev.eventID); n != 0 {
+		t.Fatal("the grandparent's owner got a sub-ticket whose nearest owner cannot open it")
+	}
+	ev, gap = done(partial)
+	if gap != "" {
+		t.Fatalf("partly visible nearest owners: gap=%q", gap)
+	}
+	if status, reason, _, _ := deliveryStatus(t, ev.eventID, bot); status != "pending" || reason != "owner" {
+		t.Fatalf("the owner who can open it was not reached: %q/%q", status, reason)
+	}
+	if n := dbfx.Count(t, `SELECT count(*) FROM office_event_gap WHERE event_id=$1 AND user_id=$2`, ev.eventID, peer); n != 0 {
+		t.Fatal("the owner who cannot open it was counted as a recipient")
 	}
 	if _, gap := done(loopA); gap != officeGapNoOwner {
 		t.Fatalf("looping chain: gap=%q", gap)

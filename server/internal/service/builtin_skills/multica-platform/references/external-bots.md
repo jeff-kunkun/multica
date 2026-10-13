@@ -349,8 +349,9 @@ multica events download <attachment-id>
 
 `must_relay: true` means tell the person, even if a similar message went out
 (`bypass_semantic_dedupe`). `pending_approval: true` with the notice
-「系统改成完成，正式发布仍待批准」 means routing closed a release ticket: it is not
-a deploy permission. A must-relay result you do not relay reaches the person's
+「系统改成完成，正式发布仍待批准」 means routing, an agent, a review verdict or a
+Bot (not the person by hand) closed a release ticket: it is not a deploy
+permission. A must-relay result you do not relay reaches the person's
 inbox instead.
 
 Receiver rules the server holds you to:

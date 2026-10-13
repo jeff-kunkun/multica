@@ -36,6 +36,8 @@ type OfficeFacts struct {
 	Changes     []OfficeChange
 	ActorType   string
 	ActorSource string
+	// ViaBot: a person's identity used by their Bot, not the person's own hand.
+	ViaBot bool
 	// The ticket's own words, for spotting release work. Empty for chats.
 	IssueTitle       string
 	IssueDescription string
@@ -93,6 +95,10 @@ func IsReleaseWork(title, description string) bool {
 	return releaseWords.MatchString(title) || releaseWords.MatchString(description)
 }
 
+func (f OfficeFacts) personsOwnHand() bool {
+	return f.ActorType == "member" && !f.ViaBot
+}
+
 // ClassifyOffice applies the rules. Pure: tests drive it directly.
 func ClassifyOffice(f OfficeFacts) OfficeClass {
 	label := f.IssueKey
@@ -120,7 +126,11 @@ func ClassifyOffice(f OfficeFacts) OfficeClass {
 		from, to, _ := f.change("status")
 		switch to {
 		case "done":
-			if f.ActorType == "system" && f.ActorSource == "routing" && IsReleaseWork(f.IssueTitle, f.IssueDescription) {
+			// Only a person's own hand closing release work stands in for the
+			// approval (no structured approval record exists). Routing, an
+			// agent, a reviewer's verdict closing it, or a Bot do not: a passed
+			// code review is not a release approval.
+			if !f.personsOwnHand() && IsReleaseWork(f.IssueTitle, f.IssueDescription) {
 				return OfficeClass{
 					Meaning: OfficeMeaningPendingRel, MustRelay: true, PendingApproval: true,
 					Summary: joinSummary("系统改成完成，正式发布仍待批准", label),
