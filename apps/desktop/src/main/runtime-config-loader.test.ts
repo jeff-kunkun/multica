@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { mkdtemp, writeFile } from "fs/promises";
+import { mkdir, mkdtemp, readFile, writeFile } from "fs/promises";
 import { join } from "path";
 import { tmpdir } from "os";
 import { describe, expect, it } from "vitest";
@@ -83,5 +83,43 @@ describe("loadRuntimeConfig", () => {
       expect(result.error.message).toContain(configPath);
       expect(result.error.message).toContain("Invalid desktop runtime config JSON");
     }
+  });
+
+  async function homeWithLegacyConfig() {
+    const home = await mkdtemp(join(tmpdir(), "multica-desktop-home-"));
+    await mkdir(join(home, ".multica"));
+    const legacyPath = join(home, ".multica", "desktop.json");
+    const legacy = JSON.stringify({ schemaVersion: 1, apiUrl: "https://origin.ai.ferryway.cc" });
+    await writeFile(legacyPath, legacy);
+    return { home, legacyPath, legacy };
+  }
+
+  it("connects to the office when only the kun-line desktop.json exists", async () => {
+    const { home } = await homeWithLegacyConfig();
+    await expect(
+      loadRuntimeConfig({ isDev: false, homeDir: home, env: {} }),
+    ).resolves.toEqual({ ok: true, config: DEFAULT_RUNTIME_CONFIG });
+  });
+
+  it("applies the office's own office-desktop.json override", async () => {
+    const { home } = await homeWithLegacyConfig();
+    await writeFile(
+      join(home, ".multica", "office-desktop.json"),
+      JSON.stringify({ schemaVersion: 1, apiUrl: "https://office.example.com" }),
+    );
+    const result = await loadRuntimeConfig({ isDev: false, homeDir: home, env: {} });
+    expect(result.ok && result.config.apiUrl).toBe("https://office.example.com");
+  });
+
+  it("keeps the two apps' config files independent", async () => {
+    const { home, legacyPath, legacy } = await homeWithLegacyConfig();
+    const officePath = join(home, ".multica", "office-desktop.json");
+    await writeFile(officePath, "{ not json");
+
+    // A broken office file is reported against the office path, and the
+    // kun-line file is neither read nor rewritten.
+    const result = await loadRuntimeConfig({ isDev: false, homeDir: home, env: {} });
+    expect(!result.ok && result.error.message).toContain(officePath);
+    await expect(readFile(legacyPath, "utf-8")).resolves.toBe(legacy);
   });
 });

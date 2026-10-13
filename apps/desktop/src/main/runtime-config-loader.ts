@@ -14,6 +14,7 @@ export async function loadRuntimeConfig(options: {
   isDev: boolean;
   env: RuntimeConfigEnv;
   configPath?: string;
+  homeDir?: string;
 }): Promise<RuntimeConfigResult> {
   if (options.isDev) {
     try {
@@ -23,7 +24,7 @@ export async function loadRuntimeConfig(options: {
     }
   }
 
-  const configPath = options.configPath ?? desktopConfigPath();
+  const configPath = options.configPath ?? desktopConfigPath(options.homeDir);
   try {
     const raw = await readFile(configPath, "utf-8");
     return { ok: true, config: parseRuntimeConfig(raw) };
@@ -40,8 +41,11 @@ export async function loadRuntimeConfig(options: {
   }
 }
 
-export function desktopConfigPath(): string {
-  return join(app.getPath("home"), ".multica", "desktop.json");
+// kun-main: Multica Office reads its own file, never the kun-line app's
+// ~/.multica/desktop.json, so an override pointing at the old server there
+// cannot send Office back to it.
+export function desktopConfigPath(homeDir: string = app.getPath("home")): string {
+  return join(homeDir, ".multica", "office-desktop.json");
 }
 
 function isMissingFileError(err: unknown): boolean {

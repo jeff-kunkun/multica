@@ -717,7 +717,7 @@ if (!gotTheLock) {
     });
 
     // Sync IPC: preload exposes the validated runtime config before renderer
-    // boot. If desktop.json exists but is invalid, renderer receives the
+    // boot. If office-desktop.json exists but is invalid, renderer receives the
     // blocking error and must not silently fall back to the cloud defaults.
     ipcMain.on("runtime-config:get", (event) => {
       event.returnValue = runtimeConfigResult;
