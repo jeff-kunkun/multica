@@ -44,9 +44,13 @@ func (f *fakeSource) Versions(context.Context) (map[string]map[string]time.Time,
 	}
 	return out, nil
 }
-func (f *fakeSource) Project(_ context.Context, id string) (Project, error) { return f.projects[id], nil }
-func (f *fakeSource) Issue(_ context.Context, id string) (Issue, error)     { return f.issues[id], nil }
-func (f *fakeSource) Comment(_ context.Context, id string) (Comment, error) { return f.comments[id], nil }
+func (f *fakeSource) Project(_ context.Context, id string) (Project, error) {
+	return f.projects[id], nil
+}
+func (f *fakeSource) Issue(_ context.Context, id string) (Issue, error) { return f.issues[id], nil }
+func (f *fakeSource) Comment(_ context.Context, id string) (Comment, error) {
+	return f.comments[id], nil
+}
 func (f *fakeSource) Links(context.Context) ([]Link, error) {
 	var out []Link
 	for _, l := range f.links {
@@ -115,7 +119,7 @@ func setup(t *testing.T) (*fakeSource, *fakeTarget, *Mirror) {
 	target := &fakeTarget{gone: map[string]bool{}}
 	srv := httptest.NewServer(target)
 	t.Cleanup(srv.Close)
-	m := New(src, NewHTTPRemote(srv.URL, "tok", "ws-old"), time.Second, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	m := New(src, NewHTTPRemote(srv.URL, "tok", "ws-old"), "kun-old", time.Second, slog.New(slog.NewTextHandler(io.Discard, nil)))
 
 	src.projects["p1"] = Project{ID: "p1", Title: "魔改", Status: "in_progress", Priority: "high"}
 	src.versions[KindProject]["p1"] = t0
@@ -139,26 +143,36 @@ func TestSyncCopiesTreeOnce(t *testing.T) {
 		t.Fatal(err)
 	}
 	calls := target.take()
-	if len(calls) != 5 {
-		t.Fatalf("want 5 creates, got %d: %+v", len(calls), calls)
+	if len(calls) != 7 {
+		t.Fatalf("want 5 creates and 2 issue updates, got %d: %+v", len(calls), calls)
 	}
 	remote := map[string]string{}
 	for _, l := range src.links {
 		remote[l.LocalID] = l.RemoteID
 	}
 	byPath := map[string][]call{}
-	for _, c := range calls {
-		if c.Method != http.MethodPost {
-			t.Fatalf("unexpected %s %s", c.Method, c.Path)
+	for i, c := range calls {
+		if c.Method == http.MethodPut {
+			// Each issue is created in backlog and set right after.
+			prev := calls[i-1]
+			if prev.Method != http.MethodPost || prev.Path != "/api/issues" || prev.Body["status"] != "backlog" {
+				t.Fatalf("update not right after a backlog create: %+v then %+v", prev, c)
+			}
+			if prev.Body["allow_duplicate"] != true {
+				t.Fatalf("issue create must allow duplicates: %v", prev.Body)
+			}
 		}
-		byPath[c.Path] = append(byPath[c.Path], c)
+		byPath[c.Method+" "+c.Path] = append(byPath[c.Method+" "+c.Path], c)
 	}
 	var parent, child map[string]any
-	for _, c := range byPath["/api/issues"] {
-		switch c.Body["title"] {
-		case "父票":
+	for _, c := range calls {
+		if c.Method != http.MethodPut {
+			continue
+		}
+		switch c.Path {
+		case "/api/issues/" + remote["i1"]:
 			parent = c.Body
-		case "子票":
+		case "/api/issues/" + remote["i2"]:
 			child = c.Body
 		}
 	}
@@ -168,16 +182,24 @@ func TestSyncCopiesTreeOnce(t *testing.T) {
 	if parent["parent_issue_id"] != nil || child["project_id"] != nil {
 		t.Fatalf("empty relations must be explicit null: parent=%v child=%v", parent, child)
 	}
-	if child["allow_duplicate"] != true {
-		t.Fatalf("issue create must allow duplicates: %v", child)
+	for _, b := range []map[string]any{parent, child} {
+		if b["assignee_type"] != "member" || b["assignee_id"] != "kun-old" || b["reviewer_type"] != "none" || b["reviewer_id"] != nil {
+			t.Fatalf("copy must be held by the target member with no reviewer: %v", b)
+		}
+		if _, ok := b["reviewer_id"]; !ok {
+			t.Fatalf("reviewer_id must be sent as null: %v", b)
+		}
 	}
-	if d := child["description"]; d != "新办公室 DENE-2 · 执行人：孙悟空" {
+	if parent["status"] != "in_progress" || child["status"] != "todo" {
+		t.Fatalf("real status not set: parent=%v child=%v", parent["status"], child["status"])
+	}
+	if d := child["description"]; d != "" {
 		t.Fatalf("child description = %q", d)
 	}
-	if d := parent["description"].(string); !strings.HasPrefix(d, "看 @孙悟饭\n\n---\n新办公室 DENE-1 · 执行人：无") {
+	if d := parent["description"]; d != "看 @孙悟饭" {
 		t.Fatalf("parent description = %q", d)
 	}
-	comments := byPath["/api/issues/"+remote["i1"]+"/comments"]
+	comments := byPath["POST /api/issues/"+remote["i1"]+"/comments"]
 	if len(comments) != 2 {
 		t.Fatalf("want 2 comments on the parent copy, got %+v", byPath)
 	}
@@ -190,7 +212,7 @@ func TestSyncCopiesTreeOnce(t *testing.T) {
 			if c.Body["parent_id"] != remote["c1"] {
 				t.Fatalf("reply not threaded: %v", c.Body)
 			}
-		} else if content != "**kunkunya** · 10-13 16:00\n\n交给 @孙悟空 看 DENE-2" {
+		} else if content != "**kunkunya**：交给 @孙悟空 看 DENE-2" {
 			t.Fatalf("comment content = %q", content)
 		}
 	}
@@ -203,7 +225,7 @@ func TestSyncCopiesTreeOnce(t *testing.T) {
 	}
 
 	// A restart reads the links back and still writes nothing.
-	m2 := New(src, m.remote, time.Second, m.log)
+	m2 := New(src, m.remote, m.assignee, time.Second, m.log)
 	if err := m2.Sync(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -309,7 +331,7 @@ func TestSyncRetriesFailedWriteNextPass(t *testing.T) {
 }
 
 func TestConfigFromEnv(t *testing.T) {
-	for _, k := range []string{"MULTICA_MIRROR_WORKSPACE", "MULTICA_MIRROR_TARGET_URL", "MULTICA_MIRROR_TARGET_TOKEN", "MULTICA_MIRROR_TARGET_WORKSPACE"} {
+	for _, k := range []string{"MULTICA_MIRROR_WORKSPACE", "MULTICA_MIRROR_TARGET_URL", "MULTICA_MIRROR_TARGET_TOKEN", "MULTICA_MIRROR_TARGET_WORKSPACE", "MULTICA_MIRROR_TARGET_ASSIGNEE"} {
 		t.Setenv(k, "")
 	}
 	if _, ok := ConfigFromEnv(); ok {
@@ -322,8 +344,12 @@ func TestConfigFromEnv(t *testing.T) {
 		t.Fatal("missing target workspace must leave the mirror off")
 	}
 	t.Setenv("MULTICA_MIRROR_TARGET_WORKSPACE", "ws")
+	if _, ok := ConfigFromEnv(); ok {
+		t.Fatal("missing target assignee must leave the mirror off")
+	}
+	t.Setenv("MULTICA_MIRROR_TARGET_ASSIGNEE", "kun-old")
 	c, ok := ConfigFromEnv()
-	if !ok || c.TargetURL != "https://ai.example" || c.Interval != defaultInterval {
+	if !ok || c.TargetAssignee != "kun-old" || c.TargetURL != "https://ai.example" || c.Interval != defaultInterval {
 		t.Fatalf("config = %+v ok=%v", c, ok)
 	}
 }

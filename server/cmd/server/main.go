@@ -761,7 +761,7 @@ func main() {
 		} else {
 			remote := mirror.NewHTTPRemote(cfg.TargetURL, cfg.TargetToken, cfg.TargetWorkspace)
 			slog.Info("mirror enabled", "workspace", cfg.Workspace, "target", cfg.TargetURL)
-			go mirror.New(src, remote, cfg.Interval, slog.Default()).Run(sweepCtx)
+			go mirror.New(src, remote, cfg.TargetAssignee, cfg.Interval, slog.Default()).Run(sweepCtx)
 		}
 	}
 	// Seven-day runtime retention does not share the 30-second liveness tick:

@@ -29,13 +29,14 @@ const (
 
 const defaultInterval = 20 * time.Second
 
-// Config is read from the environment. All four values are required; with any
+// Config is read from the environment. All five values are required; with any
 // of them missing the mirror is off.
 type Config struct {
 	Workspace       string // local workspace slug or id
 	TargetURL       string // e.g. https://ai.ferryway.cc
 	TargetToken     string // personal access token of a target member
 	TargetWorkspace string // target workspace id
+	TargetAssignee  string // target member id that holds every copied issue
 	Interval        time.Duration
 }
 
@@ -45,12 +46,13 @@ func ConfigFromEnv() (Config, bool) {
 		TargetURL:       strings.TrimRight(strings.TrimSpace(os.Getenv("MULTICA_MIRROR_TARGET_URL")), "/"),
 		TargetToken:     strings.TrimSpace(os.Getenv("MULTICA_MIRROR_TARGET_TOKEN")),
 		TargetWorkspace: strings.TrimSpace(os.Getenv("MULTICA_MIRROR_TARGET_WORKSPACE")),
+		TargetAssignee:  strings.TrimSpace(os.Getenv("MULTICA_MIRROR_TARGET_ASSIGNEE")),
 		Interval:        defaultInterval,
 	}
 	if d, err := time.ParseDuration(os.Getenv("MULTICA_MIRROR_INTERVAL")); err == nil && d > 0 {
 		c.Interval = d
 	}
-	ok := c.Workspace != "" && c.TargetURL != "" && c.TargetToken != "" && c.TargetWorkspace != ""
+	ok := c.Workspace != "" && c.TargetURL != "" && c.TargetToken != "" && c.TargetWorkspace != "" && c.TargetAssignee != ""
 	return c, ok
 }
 
@@ -118,17 +120,20 @@ type Remote interface {
 type Mirror struct {
 	src      Source
 	remote   Remote
+	assignee string
 	interval time.Duration
 	log      *slog.Logger
 
 	links map[string]map[string]Link // kind -> local id -> link
 }
 
-func New(src Source, remote Remote, interval time.Duration, log *slog.Logger) *Mirror {
+// New copies into the target as assignee, a target member id. Copies held by
+// a member stay out of the target's routing, so they never start a run there.
+func New(src Source, remote Remote, assignee string, interval time.Duration, log *slog.Logger) *Mirror {
 	if interval <= 0 {
 		interval = defaultInterval
 	}
-	return &Mirror{src: src, remote: remote, interval: interval, log: log}
+	return &Mirror{src: src, remote: remote, assignee: assignee, interval: interval, log: log}
 }
 
 func (m *Mirror) Run(ctx context.Context) {
@@ -258,7 +263,7 @@ func (p *pass) copy(ctx context.Context, kind, id string, link Link, linked bool
 		if err != nil {
 			return "", fmt.Errorf("project: %w", err)
 		}
-		create, body = "/api/issues", issueBody(is, parent, project)
+		create, body = "/api/issues", issueBody(is, m.assignee, parent, project)
 		update = "/api/issues/" + link.RemoteID
 	case KindComment:
 		c, err := m.src.Comment(ctx, id)
@@ -300,15 +305,26 @@ func (p *pass) copy(ctx context.Context, kind, id string, link Link, linked bool
 			// A comment's parent and type are fixed at creation.
 			body["type"] = "comment"
 		}
+		payload := body
 		if kind == KindIssue {
-			// Mirrored titles repeat often; the target must not refuse them.
-			body["allow_duplicate"] = true
+			// Create parked in backlog, which the target never routes, and
+			// set the real status and reviewer with the update right after.
+			payload = map[string]any{"allow_duplicate": true}
+			for k, v := range body {
+				payload[k] = v
+			}
+			payload["status"] = "backlog"
 		}
-		created, err := m.remote.Create(ctx, create, body)
+		created, err := m.remote.Create(ctx, create, payload)
 		if err != nil {
 			return "", err
 		}
 		remoteID = created
+		if kind == KindIssue {
+			if err := m.remote.Update(ctx, "/api/issues/"+created, body); err != nil {
+				return "", err
+			}
+		}
 	}
 	l := Link{Kind: kind, LocalID: id, RemoteID: remoteID, SourceUpdatedAt: version}
 	if err := m.src.SaveLink(ctx, l); err != nil {
@@ -353,37 +369,30 @@ func projectBody(p Project) map[string]any {
 	return b
 }
 
-func issueBody(is Issue, parentRemote, projectRemote string) map[string]any {
-	assignee := is.Assignee
-	if assignee == "" {
-		assignee = "无"
-	}
-	desc := plainMentions(is.Description)
-	footer := fmt.Sprintf("新办公室 %s · 执行人：%s", is.Identifier, assignee)
-	if strings.TrimSpace(desc) != "" {
-		desc = strings.TrimRight(desc, "\n") + "\n\n---\n" + footer
-	} else {
-		desc = footer
-	}
+// issueBody gives every copy to the target assignee with no reviewer: the
+// target routes a member-held issue only when it waits in review with the
+// reviewer undecided, and "none" decides it.
+func issueBody(is Issue, assignee, parentRemote, projectRemote string) map[string]any {
 	return map[string]any{
 		"title":           is.Title,
-		"description":     desc,
+		"description":     plainMentions(is.Description),
 		"status":          is.Status,
 		"priority":        is.Priority,
+		"assignee_type":   "member",
+		"assignee_id":     assignee,
+		"reviewer_type":   "none",
+		"reviewer_id":     nil,
 		"parent_issue_id": nullable(parentRemote),
 		"project_id":      nullable(projectRemote),
 	}
 }
-
-var shanghai = time.FixedZone("CST", 8*3600)
 
 func commentBody(c Comment) map[string]any {
 	author := c.Author
 	if author == "" {
 		author = "系统"
 	}
-	head := fmt.Sprintf("**%s** · %s", author, c.CreatedAt.In(shanghai).Format("01-02 15:04"))
-	return map[string]any{"content": head + "\n\n" + plainMentions(c.Content)}
+	return map[string]any{"content": "**" + author + "**：" + plainMentions(c.Content)}
 }
 
 // mentionLink matches [label](mention://kind/id). Local ids mean nothing on
