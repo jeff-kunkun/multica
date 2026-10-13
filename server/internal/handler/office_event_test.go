@@ -901,3 +901,86 @@ func TestOfficeEventCatchUpHasNoAgeLimitButStillChecksAccess(t *testing.T) {
 		t.Fatal("invisible gap left open: it would be rescanned forever")
 	}
 }
+
+// An agent's sub-ticket belongs to whoever owns the ticket above it (DENE-1963
+// drill DENE-1993): a must-relay result there reaches the parent's owner, a
+// ticket with its own owner keeps it, a private sub-ticket the parent owner
+// cannot open stays a gap, and a broken or looping chain ends in a gap.
+func TestOfficeEventAgentSubTicketBelongsToTheParentOwner(t *testing.T) {
+	f := newOfficeFixture(t)
+	agent := dbfx.Agent(t, "split agent", testRuntimeID)
+	child := func(title, parent, visibility string) string {
+		cols := testutil.Cols{
+			"workspace_id": testWorkspaceID, "title": title, "status": "in_progress", "priority": "none",
+			"creator_type": "agent", "creator_id": agent, "number": nextTestIssueNumber(t), "visibility": visibility,
+		}
+		if parent != "" {
+			cols["parent_issue_id"] = parent
+		}
+		return dbfx.Insert(t, "issue", cols)
+	}
+	parent := ownedIssue(t, "Ship the release")
+	middle := child("Split the release", parent, "private")
+	grandchild := child("Build the installer", middle, "private")
+
+	peer := summonSecondMember(t)
+	peerParent := dbfx.Insert(t, "issue", testutil.Cols{
+		"workspace_id": testWorkspaceID, "title": "Peer's plan", "status": "in_progress", "priority": "none",
+		"creator_type": "member", "creator_id": peer, "number": nextTestIssueNumber(t),
+	})
+	open := child("Open part", peerParent, "workspace")
+	hidden := child("Hidden part", peerParent, "private")
+	ownOwner := dbfx.Insert(t, "issue", testutil.Cols{
+		"workspace_id": testWorkspaceID, "title": "Peer's own child", "status": "in_progress", "priority": "none",
+		"creator_type": "member", "creator_id": peer, "number": nextTestIssueNumber(t), "parent_issue_id": parent,
+	})
+	loopA := child("Loop A", "", "workspace")
+	loopB := child("Loop B", loopA, "workspace")
+	dbfx.Exec(t, `UPDATE issue SET parent_issue_id=$1 WHERE id=$2`, loopB, loopA)
+
+	asActor(t, dbactor.Actor{Type: "agent", ID: agent}, `UPDATE issue SET status='done' WHERE id = ANY($1::uuid[])`,
+		[]string{grandchild, open, hidden, ownOwner, loopA})
+	f.seal(t)
+
+	done := func(issue string) (officeRow, string) {
+		ev := latestOfficeEvent(t, `issue_id=$1 AND event_type='issue.status_changed'`, issue)
+		var gap string
+		dbfx.QueryRow(t, `SELECT recipient_gap FROM office_event WHERE event_id=$1`, ev.eventID).Scan(&gap)
+		return ev, gap
+	}
+	bot := uuidToString(f.bot.ID)
+
+	ev, gap := done(grandchild)
+	if !ev.mustRelay || gap != "" {
+		t.Fatalf("grandchild: must_relay=%v gap=%q", ev.mustRelay, gap)
+	}
+	if status, reason, _, _ := deliveryStatus(t, ev.eventID, bot); status != "pending" || reason != "owner" {
+		t.Fatalf("the parent's owner was not reached two levels up: %q/%q", status, reason)
+	}
+	var mustRelay bool
+	dbfx.QueryRow(t, `SELECT must_relay FROM office_event_delivery WHERE event_id=$1 AND bot_id=$2`, ev.eventID, bot).Scan(&mustRelay)
+	if !mustRelay {
+		t.Fatal("the owner delivery does not carry must_relay")
+	}
+
+	if _, gap := done(open); gap != officeGapNoBot {
+		t.Fatalf("visible child of a Bot-less owner: gap=%q", gap)
+	}
+	ev, _ = done(open)
+	if n := dbfx.Count(t, `SELECT count(*) FROM office_event_gap WHERE event_id=$1 AND user_id=$2`, ev.eventID, peer); n != 1 {
+		t.Fatalf("the parent owner without a Bot has %d gap rows", n)
+	}
+	if _, gap := done(hidden); gap != officeGapNoOwner {
+		t.Fatalf("a private child reached a parent owner who cannot open it: gap=%q", gap)
+	}
+	ev, gap = done(ownOwner)
+	if gap != officeGapNoBot {
+		t.Fatalf("a ticket with its own owner: gap=%q", gap)
+	}
+	if n := dbfx.Count(t, `SELECT count(*) FROM office_event_delivery WHERE event_id=$1 AND bot_id=$2 AND reason='owner'`, ev.eventID, bot); n != 0 {
+		t.Fatal("the parent's owner took over a ticket that has its own owner")
+	}
+	if _, gap := done(loopA); gap != officeGapNoOwner {
+		t.Fatalf("looping chain: gap=%q", gap)
+	}
+}

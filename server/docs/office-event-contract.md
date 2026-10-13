@@ -100,6 +100,11 @@ Each entry in `artifacts`: `id`, `filename`, `content_type`, `size`, `sha256`,
 
 - A ticket's or chat's owners (creator, assignee, the chat it came from) get
   its results and run endings through their own verified Bot.
+- A ticket that names no person (an agent created and runs it) belongs to the
+  owners of the nearest parent ticket that names one, up to 10 levels; only
+  those who can open this ticket count, so a private sub-ticket stays a gap.
+  A ticket with its own owner is never handed to the parent's. A missing
+  parent, another workspace or a loop ends the walk.
 - People who stream everything (`multica bot bind --activity everything`) also
   get every event they can see.
 - Settings and members: owners and admins only. A ticket: whoever can open it.

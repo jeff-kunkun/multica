@@ -44,6 +44,8 @@ const (
 	officeSealBatch     = 200
 	officeDeliverBatch  = 20
 	officeFallbackGrace = 5 * time.Minute
+	// officeOwnerDepth bounds the walk up parent tickets for an owner.
+	officeOwnerDepth = 10
 )
 
 func NewOfficeEventWorker(h *Handler, wake *BotWakeWorker) *OfficeEventWorker {
@@ -308,15 +310,21 @@ func (w *OfficeEventWorker) ownAction(ev db.OfficeEvent, user pgtype.UUID) bool 
 }
 
 // owners are the people a result belongs to: the chat's opener; the ticket's
-// creator, its assignee, and the opener of the chat it came from. A row that
-// no longer exists names nobody; any other failure is returned.
+// creator, its assignee, and the opener of the chat it came from. A ticket
+// that names nobody (an agent split it off and ran it) belongs to whoever owns
+// the nearest ticket above it: an agent's sub-ticket is still the person's
+// work. Up the chain only people who can open this event's ticket count, so a
+// private sub-ticket never reaches a parent owner it is hidden from; the walk
+// stops at a missing parent, another workspace, a loop or officeOwnerDepth. A
+// row that no longer exists names nobody; any other failure is returned.
 func (w *OfficeEventWorker) owners(ctx context.Context, ev db.OfficeEvent) ([]pgtype.UUID, error) {
 	var out []pgtype.UUID
 	seen := map[pgtype.UUID]bool{}
+	var level []pgtype.UUID
 	push := func(u pgtype.UUID) {
 		if u.Valid && !seen[u] {
 			seen[u] = true
-			out = append(out, u)
+			level = append(level, u)
 		}
 	}
 	chatOpener := func(id pgtype.UUID) error {
@@ -334,13 +342,19 @@ func (w *OfficeEventWorker) owners(ctx context.Context, ev db.OfficeEvent) ([]pg
 			return nil, err
 		}
 	}
-	if ev.IssueID.Valid {
-		issue, err := w.h.Queries.GetIssue(ctx, ev.IssueID)
+	visited := map[pgtype.UUID]bool{}
+	next := ev.IssueID
+	for depth := 0; next.Valid && !visited[next] && depth <= officeOwnerDepth; depth++ {
+		visited[next] = true
+		issue, err := w.h.Queries.GetIssue(ctx, next)
 		if errors.Is(err, pgx.ErrNoRows) {
-			return out, nil
+			break
 		}
 		if err != nil {
 			return nil, err
+		}
+		if issue.WorkspaceID != ev.WorkspaceID {
+			break
 		}
 		if issue.CreatorType == "member" {
 			push(issue.CreatorID)
@@ -353,8 +367,25 @@ func (w *OfficeEventWorker) owners(ctx context.Context, ev db.OfficeEvent) ([]pg
 				return nil, err
 			}
 		}
+		for _, u := range level {
+			if depth > 0 {
+				visible, err := w.h.officeEventVisibleErr(ctx, ev, u)
+				if err != nil {
+					return nil, err
+				}
+				if !visible {
+					continue
+				}
+			}
+			out = append(out, u)
+		}
+		level = nil
+		if len(out) > 0 {
+			return out, nil
+		}
+		next = issue.ParentIssueID
 	}
-	return out, nil
+	return append(out, level...), nil
 }
 
 // canSee is the one access rule for push and pull: settings and members are
