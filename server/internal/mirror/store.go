@@ -27,6 +27,9 @@ func NewPGSource(ctx context.Context, pool *pgxpool.Pool, workspace, target stri
 	return &PGSource{pool: pool, workspaceID: id, target: target}, nil
 }
 
+// WorkspaceID is the resolved local workspace id.
+func (s *PGSource) WorkspaceID() string { return s.workspaceID }
+
 func (s *PGSource) Versions(ctx context.Context) (map[string]map[string]time.Time, error) {
 	queries := map[string]string{
 		KindProject: `SELECT id::text, updated_at FROM project WHERE workspace_id = $1`,
@@ -92,16 +95,20 @@ func (s *PGSource) Comment(ctx context.Context, id string) (Comment, error) {
 		       COALESCE(CASE c.author_type
 		           WHEN 'member' THEN (SELECT name FROM "user" WHERE id = c.author_id)
 		           WHEN 'agent' THEN (SELECT name FROM agent WHERE id = c.author_id)
+		       END, ''),
+		       COALESCE(CASE c.author_type
+		           WHEN 'agent' THEN (SELECT r.provider FROM agent a JOIN agent_runtime r ON r.id = a.runtime_id
+		                              WHERE a.id = c.author_id)
 		       END, '')
 		FROM comment c
 		WHERE c.id = $1 AND c.workspace_id = $2 AND c.deleted_at IS NULL`, id, s.workspaceID,
-	).Scan(&c.IssueID, &c.ParentID, &c.Content, &c.CreatedAt, &c.Author)
+	).Scan(&c.IssueID, &c.ParentID, &c.Content, &c.CreatedAt, &c.Author, &c.Engine)
 	return c, err
 }
 
 func (s *PGSource) Links(ctx context.Context) ([]Link, error) {
 	rows, err := s.pool.Query(ctx, `
-		SELECT kind, local_id::text, remote_id, source_updated_at
+		SELECT kind, local_id::text, remote_id, source_updated_at, inbound
 		FROM mirror_link WHERE target = $1`, s.target)
 	if err != nil {
 		return nil, err
@@ -110,7 +117,7 @@ func (s *PGSource) Links(ctx context.Context) ([]Link, error) {
 	var out []Link
 	for rows.Next() {
 		var l Link
-		if err := rows.Scan(&l.Kind, &l.LocalID, &l.RemoteID, &l.SourceUpdatedAt); err != nil {
+		if err := rows.Scan(&l.Kind, &l.LocalID, &l.RemoteID, &l.SourceUpdatedAt, &l.Inbound); err != nil {
 			return nil, err
 		}
 		out = append(out, l)
@@ -120,11 +127,12 @@ func (s *PGSource) Links(ctx context.Context) ([]Link, error) {
 
 func (s *PGSource) SaveLink(ctx context.Context, l Link) error {
 	_, err := s.pool.Exec(ctx, `
-		INSERT INTO mirror_link (target, kind, local_id, remote_id, source_updated_at)
-		VALUES ($1, $2, $3, $4, $5)
+		INSERT INTO mirror_link (target, kind, local_id, remote_id, source_updated_at, inbound)
+		VALUES ($1, $2, $3, $4, $5, $6)
 		ON CONFLICT (target, kind, local_id)
-		DO UPDATE SET remote_id = EXCLUDED.remote_id, source_updated_at = EXCLUDED.source_updated_at`,
-		s.target, l.Kind, l.LocalID, l.RemoteID, l.SourceUpdatedAt)
+		DO UPDATE SET remote_id = EXCLUDED.remote_id, source_updated_at = EXCLUDED.source_updated_at,
+		              inbound = EXCLUDED.inbound`,
+		s.target, l.Kind, l.LocalID, l.RemoteID, l.SourceUpdatedAt, l.Inbound)
 	return err
 }
 

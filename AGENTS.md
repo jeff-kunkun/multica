@@ -154,3 +154,7 @@ Migrations
 
 Fork changes stay small: prefer a minimal patch over porting kun-line code
 wholesale, and delete removed features outright instead of hiding them.
+
+The two-way sync with the kun-line instance (`server/internal/mirror`, see
+`docs/kun-main/instance.md`) can be deleted as a whole; other changes need
+not accommodate it, and nothing outside it may depend on it.

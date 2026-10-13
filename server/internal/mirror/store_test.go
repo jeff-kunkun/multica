@@ -63,7 +63,7 @@ func TestPGSourceReadsWorkspace(t *testing.T) {
 		t.Fatalf("child = %+v, %v", child, err)
 	}
 	c, err := src.Comment(ctx, commentID)
-	if err != nil || c.Author != "孙悟空" || c.IssueID != parentID || c.Content != "hi" {
+	if err != nil || c.Author != "孙悟空" || c.Engine != "handler_test_runtime" || c.IssueID != parentID || c.Content != "hi" {
 		t.Fatalf("comment = %+v, %v", c, err)
 	}
 
@@ -71,17 +71,23 @@ func TestPGSourceReadsWorkspace(t *testing.T) {
 	if err := src.SaveLink(ctx, Link{Kind: KindIssue, LocalID: parentID, RemoteID: "r1", SourceUpdatedAt: at}); err != nil {
 		t.Fatal(err)
 	}
-	if err := src.SaveLink(ctx, Link{Kind: KindIssue, LocalID: parentID, RemoteID: "r2", SourceUpdatedAt: at}); err != nil {
+	if err := src.SaveLink(ctx, Link{Kind: KindIssue, LocalID: parentID, RemoteID: "r2", SourceUpdatedAt: at, Inbound: true}); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _, _ = pool.Exec(ctx, `DELETE FROM mirror_link WHERE target = 't1'`) })
 	links, err := src.Links(ctx)
-	if err != nil || len(links) != 1 || links[0].RemoteID != "r2" || !links[0].SourceUpdatedAt.Equal(at) {
+	if err != nil || len(links) != 1 || links[0].RemoteID != "r2" || !links[0].SourceUpdatedAt.Equal(at) || !links[0].Inbound {
 		t.Fatalf("links = %+v, %v", links, err)
 	}
 	other, _ := NewPGSource(ctx, pool, wsID, "t2")
 	if l, _ := other.Links(ctx); len(l) != 0 {
 		t.Fatalf("links leaked across targets: %+v", l)
+	}
+	if err := src.SaveLink(ctx, Link{Kind: kindCursor, LocalID: cursorID, SourceUpdatedAt: at}); err != nil {
+		t.Fatalf("cursor row: %v", err)
+	}
+	if err := src.DeleteLink(ctx, kindCursor, cursorID); err != nil {
+		t.Fatal(err)
 	}
 	if err := src.DeleteLink(ctx, KindIssue, parentID); err != nil {
 		t.Fatal(err)

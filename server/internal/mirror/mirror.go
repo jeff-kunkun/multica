@@ -1,12 +1,17 @@
-// Package mirror copies one workspace's projects, issues and comments, one
-// way, into a workspace on another Multica server through that server's
-// public API. The target is read-only by convention: nothing flows back.
+// Package mirror keeps one workspace and a workspace on another Multica
+// server in step through both servers' public APIs. Out: projects, issues and
+// comments are copied to the target. Back (pull.go, when enabled): what
+// people do on the target — comments on the copies, issues they create or
+// hand to Kun there, status changes — lands in the local workspace.
 //
 // It is a single reconcile loop. Every tick it lists the local objects with
 // their updated_at, compares them with what was last copied (mirror_link), and
-// creates, updates or retires the remote copies that differ. Startup is the
-// same tick with nothing in memory, so a missed change is caught on the next
-// pass and a restart does not re-copy what is already there.
+// creates, updates or retires the remote copies that differ, then pulls what
+// changed on the target since the last pass. Startup is the same tick with
+// nothing in memory, so a missed change is caught on the next pass and a
+// restart does not re-copy what is already there.
+//
+// Nothing outside this package and its wiring in cmd/server refers to it.
 package mirror
 
 import (
@@ -29,14 +34,17 @@ const (
 
 const defaultInterval = 20 * time.Second
 
-// Config is read from the environment. All five values are required; with any
-// of them missing the mirror is off.
+// Config is read from the environment. The first five values are required;
+// with any of them missing the mirror is off. LocalToken turns on the pull
+// back from the target.
 type Config struct {
 	Workspace       string // local workspace slug or id
 	TargetURL       string // e.g. https://ai.ferryway.cc
 	TargetToken     string // personal access token of a target member
 	TargetWorkspace string // target workspace id
 	TargetAssignee  string // target member id that holds every copied issue
+	LocalURL        string // this server's API, default http://127.0.0.1:$PORT
+	LocalToken      string // personal access token of the local member pulls post as
 	Interval        time.Duration
 }
 
@@ -47,7 +55,16 @@ func ConfigFromEnv() (Config, bool) {
 		TargetToken:     strings.TrimSpace(os.Getenv("MULTICA_MIRROR_TARGET_TOKEN")),
 		TargetWorkspace: strings.TrimSpace(os.Getenv("MULTICA_MIRROR_TARGET_WORKSPACE")),
 		TargetAssignee:  strings.TrimSpace(os.Getenv("MULTICA_MIRROR_TARGET_ASSIGNEE")),
+		LocalURL:        strings.TrimRight(strings.TrimSpace(os.Getenv("MULTICA_MIRROR_LOCAL_URL")), "/"),
+		LocalToken:      strings.TrimSpace(os.Getenv("MULTICA_MIRROR_LOCAL_TOKEN")),
 		Interval:        defaultInterval,
+	}
+	if c.LocalURL == "" {
+		port := strings.TrimSpace(os.Getenv("PORT"))
+		if port == "" {
+			port = "8080"
+		}
+		c.LocalURL = "http://127.0.0.1:" + port
 	}
 	if d, err := time.ParseDuration(os.Getenv("MULTICA_MIRROR_INTERVAL")); err == nil && d > 0 {
 		c.Interval = d
@@ -56,12 +73,14 @@ func ConfigFromEnv() (Config, bool) {
 	return c, ok
 }
 
-// Link is one mirror_link row.
+// Link is one mirror_link row. Inbound marks a local object pulled from the
+// target: the remote one is the original, so it is never written to.
 type Link struct {
 	Kind            string
 	LocalID         string
 	RemoteID        string
 	SourceUpdatedAt time.Time
+	Inbound         bool
 }
 
 type Project struct {
@@ -89,7 +108,8 @@ type Comment struct {
 	ID        string
 	IssueID   string
 	ParentID  string
-	Author    string
+	Author    string // display name
+	Engine    string // runtime provider when the author is an agent
 	Content   string
 	CreatedAt time.Time
 }
@@ -110,8 +130,10 @@ type Source interface {
 // ErrRemoteNotFound means the remote copy is gone; the mirror recreates it.
 var ErrRemoteNotFound = errors.New("remote object not found")
 
-// Remote is the target server's API, reduced to what the mirror writes.
+// Remote is a Multica server's API, reduced to what the mirror reads and
+// writes.
 type Remote interface {
+	Get(ctx context.Context, path string, out any) error
 	Create(ctx context.Context, path string, body map[string]any) (string, error)
 	Update(ctx context.Context, path string, body map[string]any) error
 	Delete(ctx context.Context, path string) error
@@ -124,7 +146,12 @@ type Mirror struct {
 	interval time.Duration
 	log      *slog.Logger
 
-	links map[string]map[string]Link // kind -> local id -> link
+	// Set by EnablePull.
+	local           Remote
+	targetWorkspace string
+
+	links  map[string]map[string]Link // kind -> local id -> link
+	cursor *Link                      // pull position on the target, nil before the first pull
 }
 
 // New copies into the target as assignee, a target member id. Copies held by
@@ -161,7 +188,10 @@ func (m *Mirror) Sync(ctx context.Context) error {
 		}
 		m.links = map[string]map[string]Link{KindProject: {}, KindIssue: {}, KindComment: {}}
 		for _, l := range links {
-			if m.links[l.Kind] != nil {
+			if l.Kind == kindCursor {
+				c := l
+				m.cursor = &c
+			} else if m.links[l.Kind] != nil {
 				m.links[l.Kind][l.LocalID] = l
 			}
 		}
@@ -196,6 +226,11 @@ func (m *Mirror) Sync(ctx context.Context) error {
 			}
 		}
 	}
+	if m.local != nil {
+		if err := m.pull(ctx, &p); err != nil {
+			m.log.Warn("mirror: pull failed", "error", err)
+		}
+	}
 	return nil
 }
 
@@ -217,7 +252,7 @@ func (p *pass) ensure(ctx context.Context, kind, id string) (string, error) {
 	if !live {
 		return "", nil
 	}
-	if linked && link.SourceUpdatedAt.Equal(version) {
+	if linked && (link.Inbound || link.SourceUpdatedAt.Equal(version)) {
 		return link.RemoteID, nil
 	}
 	key := kind + "/" + id
@@ -337,6 +372,11 @@ func (p *pass) copy(ctx context.Context, kind, id string, link Link, linked bool
 // retire handles a local object that no longer exists. Removed issues and
 // projects stay visible on the target as cancelled; removed comments go.
 func (m *Mirror) retire(ctx context.Context, l Link) error {
+	if l.Inbound {
+		// The original belongs to someone on the target: leave it, and keep
+		// the link so the pull does not bring it back.
+		return nil
+	}
 	var err error
 	switch l.Kind {
 	case KindComment:
@@ -387,12 +427,31 @@ func issueBody(is Issue, assignee, parentRemote, projectRemote string) map[strin
 	}
 }
 
+// commentBody posts as the token's member, so the content names the speaker:
+// a person by name, an agent by its coding CLI.
 func commentBody(c Comment) map[string]any {
 	author := c.Author
+	if c.Engine != "" {
+		author = cliName(c.Engine)
+	}
 	if author == "" {
 		author = "系统"
 	}
-	return map[string]any{"content": "**" + author + "**：" + plainMentions(c.Content)}
+	return map[string]any{"content": author + "：" + plainMentions(c.Content)}
+}
+
+func cliName(provider string) string {
+	switch provider {
+	case "claude":
+		return "Claude Code"
+	case "codex":
+		return "Codex"
+	case "opencode":
+		return "OpenCode"
+	case "antigravity":
+		return "Antigravity"
+	}
+	return provider
 }
 
 // mentionLink matches [label](mention://kind/id). Local ids mean nothing on
