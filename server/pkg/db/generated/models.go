@@ -1198,6 +1198,14 @@ type Member struct {
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 }
 
+type MirrorLink struct {
+	Target          string             `json:"target"`
+	Kind            string             `json:"kind"`
+	LocalID         pgtype.UUID        `json:"local_id"`
+	RemoteID        string             `json:"remote_id"`
+	SourceUpdatedAt pgtype.Timestamptz `json:"source_updated_at"`
+}
+
 type NotificationPreference struct {
 	ID          pgtype.UUID        `json:"id"`
 	WorkspaceID pgtype.UUID        `json:"workspace_id"`

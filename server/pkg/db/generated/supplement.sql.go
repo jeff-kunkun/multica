@@ -206,10 +206,11 @@ WITH next AS MATERIALIZED (
     RETURNING s.task_id, s.workspace_id, s.issue_id, s.comment_id, s.author_id, s.client_request_id, s.status, s.failure_reason, s.attempt_count, s.created_at, s.updated_at, s.delivered_at
 )
 SELECT claimed.comment_id, claimed.attempt_count, c.content,
-       COALESCE(NULLIF(btrim(u.name), ''), 'a user')::text AS author_name
+       COALESCE(NULLIF(btrim(u.name), ''), NULLIF(btrim(a.name), ''), 'a user')::text AS author_name
 FROM claimed
 JOIN comment c ON c.id = claimed.comment_id
 LEFT JOIN "user" u ON u.id = claimed.author_id
+LEFT JOIN agent a ON a.id = claimed.author_id
 `
 
 type ClaimNextTaskSupplementRow struct {
@@ -483,6 +484,40 @@ func (q *Queries) GetTaskSupplementForRun(ctx context.Context, arg GetTaskSupple
 		&i.DeliveredAt,
 	)
 	return i, err
+}
+
+const listIssueSteerableTaskIDs = `-- name: ListIssueSteerableTaskIDs :many
+SELECT t.id
+FROM agent_task_queue t
+JOIN agent_runtime r ON r.id = t.runtime_id
+JOIN task_supplement_capability cap ON cap.task_id = t.id
+WHERE t.issue_id = $1
+  AND t.status = 'running'
+  AND cap.capability = 'task-supplement-v1'
+  AND r.provider IN ('codex', 'claude')
+ORDER BY t.started_at DESC NULLS LAST, t.id DESC
+`
+
+// The running turns on an issue that can read a comment mid-reply. A new
+// comment defaults to these instead of queueing a follow-up run.
+func (q *Queries) ListIssueSteerableTaskIDs(ctx context.Context, issueID pgtype.UUID) ([]pgtype.UUID, error) {
+	rows, err := q.db.Query(ctx, listIssueSteerableTaskIDs, issueID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []pgtype.UUID{}
+	for rows.Next() {
+		var id pgtype.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listTaskSupplementMetadata = `-- name: ListTaskSupplementMetadata :many

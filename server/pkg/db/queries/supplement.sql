@@ -198,10 +198,11 @@ WITH next AS MATERIALIZED (
     RETURNING s.*
 )
 SELECT claimed.comment_id, claimed.attempt_count, c.content,
-       COALESCE(NULLIF(btrim(u.name), ''), 'a user')::text AS author_name
+       COALESCE(NULLIF(btrim(u.name), ''), NULLIF(btrim(a.name), ''), 'a user')::text AS author_name
 FROM claimed
 JOIN comment c ON c.id = claimed.comment_id
-LEFT JOIN "user" u ON u.id = claimed.author_id;
+LEFT JOIN "user" u ON u.id = claimed.author_id
+LEFT JOIN agent a ON a.id = claimed.author_id;
 
 -- name: AckTaskSupplementDelivered :one
 -- The provider can accept input before completion while its HTTP acknowledgement
@@ -268,3 +269,16 @@ FOR UPDATE;
 -- name: DeleteTaskSupplementByComment :exec
 DELETE FROM task_supplement
 WHERE comment_id = @comment_id AND workspace_id = @workspace_id;
+
+-- name: ListIssueSteerableTaskIDs :many
+-- The running turns on an issue that can read a comment mid-reply. A new
+-- comment defaults to these instead of queueing a follow-up run.
+SELECT t.id
+FROM agent_task_queue t
+JOIN agent_runtime r ON r.id = t.runtime_id
+JOIN task_supplement_capability cap ON cap.task_id = t.id
+WHERE t.issue_id = @issue_id
+  AND t.status = 'running'
+  AND cap.capability = 'task-supplement-v1'
+  AND r.provider IN ('codex', 'claude')
+ORDER BY t.started_at DESC NULLS LAST, t.id DESC;
