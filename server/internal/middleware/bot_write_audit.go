@@ -66,7 +66,11 @@ var (
 func BotWriteAudit(queries *db.Queries, observe WriteObserver, confirmer service.OwnerConfirmer) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if isReadMethod(r.Method) {
+			// MCP is an RPC envelope, not a business write. Inner tool calls
+			// re-enter this middleware and audit their actual REST operation.
+			if isReadMethod(r.Method) || r.URL.Path == "/api/fast-access/v1/read" ||
+				(r.Header.Get("X-Actor-Source") == "mcp_connection" &&
+					r.URL.Path == "/api/workspaces/"+r.Header.Get("X-Workspace-ID")+"/mcp") {
 				next.ServeHTTP(w, r)
 				return
 			}

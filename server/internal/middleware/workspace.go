@@ -73,7 +73,7 @@ func ResolveWorkspaceIDFromRequest(r *http.Request, queries *db.Queries) string 
 	// workspace identifier on the request (slug header/query, ID
 	// query, URL param) is the agent trying to widen its blast
 	// radius — ignore it.
-	if r.Header.Get("X-Actor-Source") == "task_token" {
+	if r.Header.Get("X-Actor-Source") == "task_token" || r.Header.Get("X-Actor-Source") == "mcp_connection" {
 		return r.Header.Get("X-Workspace-ID")
 	}
 	if id := WorkspaceIDFromContext(r.Context()); id != "" {
@@ -117,7 +117,7 @@ func resolveWorkspaceUUID(queries *db.Queries) workspaceResolver {
 		// token's bound workspace. The auth middleware wrote that ID
 		// into X-Workspace-ID; nothing the agent can put on the wire
 		// (slug header/query, id query, URL param) can override it.
-		if r.Header.Get("X-Actor-Source") == "task_token" {
+		if r.Header.Get("X-Actor-Source") == "task_token" || r.Header.Get("X-Actor-Source") == "mcp_connection" {
 			id := r.Header.Get("X-Workspace-ID")
 			if id == "" {
 				return "", errWorkspaceNotFound
@@ -215,7 +215,7 @@ func buildMiddleware(queries *db.Queries, resolve workspaceResolver, roles []str
 			// The one exception, a managed link (DENE-1663), never
 			// reaches here as a task token: workspacelink.Managed has
 			// already turned it into its originator's request.
-			if r.Header.Get("X-Actor-Source") == "task_token" {
+			if r.Header.Get("X-Actor-Source") == "task_token" || r.Header.Get("X-Actor-Source") == "mcp_connection" {
 				bound := r.Header.Get("X-Workspace-ID")
 				if bound == "" || workspaceID != bound {
 					writeError(w, http.StatusForbidden, "task token is bound to a different workspace")

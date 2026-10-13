@@ -51,6 +51,7 @@ func (h *Handler) officeEventView(ctx context.Context, ev db.OfficeEvent, viewer
 		"meaning":                ev.Meaning,
 		"summary":                ev.Summary,
 		"must_relay":             ev.MustRelay,
+		"needs_kun":              ev.MustRelay,
 		"bypass_semantic_dedupe": ev.MustRelay,
 		"pending_approval":       ev.PendingApproval,
 		"business_key":           ev.BusinessKey,
@@ -183,6 +184,10 @@ func (h *Handler) officeActor(ctx context.Context, ev db.OfficeEvent, viewer pgt
 // officeEventPush wraps the view for one Bot: where to send the receipt, and
 // whether this is a repeat of something already sent.
 func (h *Handler) officeEventPush(view map[string]any, d db.OfficeEventDelivery) map[string]any {
+	view["needs_kun"] = d.MustRelay
+	if d.Reason == "owner" {
+		view["owner_bot"] = uuidToString(d.BotID)
+	}
 	base := strings.TrimRight(h.cfg.PublicURL, "/")
 	view["delivery"] = map[string]any{
 		"attempt":    d.Attempts + 1,
@@ -190,11 +195,13 @@ func (h *Handler) officeEventPush(view map[string]any, d db.OfficeEventDelivery)
 		// Anything sent before may be in the Bot's inbox already (its 200,
 		// receipt or the claim itself may have been lost): look the event_id
 		// up, resend that receipt, act only on steps not yet done.
-		"reconcile":   d.SentAt.Valid || d.UncertainAt.Valid,
-		"bot_id":      uuidToString(d.BotID),
-		"reason":      d.Reason,
-		"must_relay":  d.MustRelay,
-		"target_user": uuidToString(d.TargetUserID),
+		"reconcile":    d.SentAt.Valid || d.UncertainAt.Valid,
+		"bot_id":       uuidToString(d.BotID),
+		"owner_bot":    uuidToString(d.BotID),
+		"reason":       d.Reason,
+		"relay_target": d.RelayTarget,
+		"must_relay":   d.MustRelay,
+		"target_user":  uuidToString(d.TargetUserID),
 		"receipt_url": base + "/api/workspaces/" + uuidToString(d.WorkspaceID) + "/bots/" + uuidToString(d.BotID) +
 			"/office-events/" + uuidToString(d.EventID) + "/receipt",
 	}
@@ -215,8 +222,10 @@ func (h *Handler) officeDeliveryView(d db.OfficeEventDelivery) map[string]any {
 	return map[string]any{
 		"event_id":        uuidToString(d.EventID),
 		"bot_id":          uuidToString(d.BotID),
+		"owner_bot":       uuidToString(d.BotID),
 		"target_user_id":  uuidToString(d.TargetUserID),
 		"reason":          d.Reason,
+		"relay_target":    d.RelayTarget,
 		"must_relay":      d.MustRelay,
 		"status":          d.Status,
 		"attempts":        d.Attempts,
@@ -251,7 +260,7 @@ func (h *Handler) officeMember(w http.ResponseWriter, r *http.Request) (pgtype.U
 		return pgtype.UUID{}, pgtype.UUID{}, false
 	}
 	actor, _ := h.resolveActor(r, user, uuidToString(ws))
-	if actor != "member" || isMachineCredentialActor(r) {
+	if actor != "member" || (isMachineCredentialActor(r) && r.Header.Get("X-Actor-Source") != "mcp_connection") {
 		writeError(w, http.StatusForbidden, "the office event stream is read by members and their Bots")
 		return pgtype.UUID{}, pgtype.UUID{}, false
 	}
@@ -361,6 +370,7 @@ func (h *Handler) GetOfficeEvent(w http.ResponseWriter, r *http.Request) {
 type officeReceiptRequest struct {
 	// received | relayed | handled | relay_failed
 	Stage      string `json:"stage"`
+	Target     string `json:"target"`
 	Channel    string `json:"channel"`
 	MessageRef string `json:"message_ref"`
 	Reason     string `json:"reason"`
@@ -416,6 +426,10 @@ func (h *Handler) OfficeEventReceipt(w http.ResponseWriter, r *http.Request) {
 	if req.Stage == "relayed" && (strings.TrimSpace(req.Channel) == "" || strings.TrimSpace(req.MessageRef) == "") {
 		writeErrorCode(w, http.StatusBadRequest, "relay_proof_required",
 			"stage relayed needs channel and message_ref: where you told the person, and the message id there")
+		return
+	}
+	if req.Stage == "relayed" && d.RelayTarget != "" && strings.TrimSpace(req.Target) != d.RelayTarget {
+		writeErrorCode(w, http.StatusBadRequest, "relay_target_mismatch", "stage relayed must name the delivery relay_target as target")
 		return
 	}
 	if req.Stage == "relay_failed" && strings.TrimSpace(req.Error) == "" {

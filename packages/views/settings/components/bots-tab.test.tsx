@@ -8,6 +8,9 @@ import enCommon from "../../locales/en/common.json";
 import enSettings from "../../locales/en/settings.json";
 import { ApiError } from "@multica/core/api";
 
+vi.mock("./office-bot-routes-section", () => ({ OfficeBotRoutesSection: () => null }));
+vi.mock("./mcp-connections-section", () => ({ McpConnectionsSection: () => null }));
+
 const roleRef = vi.hoisted(() => ({ current: "owner" as string }));
 const botsRef = vi.hoisted(() => ({ current: [] as unknown[] }));
 const mockCreate = vi.hoisted(() => vi.fn());

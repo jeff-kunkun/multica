@@ -160,7 +160,7 @@ func (w *OfficeEventWorker) Seal(ctx context.Context) (int, error) {
 			if err := q.CreateOfficeEventDelivery(ctx, db.CreateOfficeEventDeliveryParams{
 				EventID: ev.EventID, WorkspaceID: ev.WorkspaceID, BotID: r.binding.BotID,
 				BindingID: r.binding.ID, TargetUserID: r.binding.UserID, Reason: r.reason,
-				MustRelay: class.MustRelay && r.reason == "owner", Status: status, BlockedReason: r.blocked,
+				MustRelay: class.MustRelay && r.reason == "owner", Status: status, BlockedReason: r.blocked, RelayTarget: r.relayTarget,
 			}); err != nil {
 				return 0, err
 			}
@@ -203,9 +203,10 @@ func (w *OfficeEventWorker) facts(ctx context.Context, ev db.OfficeEvent) servic
 }
 
 type officeRecipient struct {
-	binding db.MemberBotBinding
-	reason  string // owner | stream
-	blocked string // set when the owner's Bot cannot take it yet
+	binding     db.MemberBotBinding
+	relayTarget string
+	reason      string // owner | stream
+	blocked     string // set when the owner's Bot cannot take it yet
 }
 
 // Recipient gaps, recorded on the event when a result that must reach
@@ -232,6 +233,7 @@ const (
 func (w *OfficeEventWorker) recipients(ctx context.Context, ev db.OfficeEvent, class service.OfficeClass) ([]officeRecipient, string, []pgtype.UUID, error) {
 	var unreached []pgtype.UUID
 	seen := map[string]bool{}
+	routedOwners := map[pgtype.UUID]bool{}
 	var out []officeRecipient
 	add := func(r officeRecipient) error {
 		key := uuidToString(r.binding.BotID)
@@ -253,9 +255,26 @@ func (w *OfficeEventWorker) recipients(ctx context.Context, ev db.OfficeEvent, c
 		if err != nil {
 			return nil, "", nil, err
 		}
+		project, err := w.h.officeRouteProject(ctx, ev)
+		if err != nil {
+			return nil, "", nil, err
+		}
 		for _, user := range owners {
 			if w.ownAction(ev, user) {
 				continue // they did it; nobody is missing
+			}
+			route, err := w.h.Queries.ResolveOfficeBotRoute(ctx, db.ResolveOfficeBotRouteParams{WorkspaceID: ev.WorkspaceID, UserID: user, ProjectID: project})
+			if err == nil {
+				// The ledger freezes the Bot and group, independent of the
+				// person's legacy single-Bot binding. Route ID is not a binding.
+				if err := add(officeRecipient{binding: db.MemberBotBinding{WorkspaceID: ev.WorkspaceID, UserID: user, BotID: route.BotID}, reason: "owner", relayTarget: route.ChannelRef}); err != nil {
+					return nil, "", nil, err
+				}
+				routedOwners[user] = true
+				continue
+			}
+			if !errors.Is(err, pgx.ErrNoRows) {
+				return nil, "", nil, err
 			}
 			b, err := w.h.Queries.GetOfficeBindingForUser(ctx, db.GetOfficeBindingForUserParams{WorkspaceID: ev.WorkspaceID, UserID: user})
 			if errors.Is(err, pgx.ErrNoRows) {
@@ -296,6 +315,11 @@ func (w *OfficeEventWorker) recipients(ctx context.Context, ev db.OfficeEvent, c
 		return nil, "", nil, err
 	}
 	for _, b := range stream {
+		// The owner route already owes this result; streaming it to their
+		// legacy fallback too would give two Bots the same human relay.
+		if routedOwners[b.UserID] {
+			continue
+		}
 		if err := add(officeRecipient{binding: b, reason: "stream"}); err != nil {
 			return nil, "", nil, err
 		}
@@ -424,6 +448,7 @@ func (w *OfficeEventWorker) DeliverDue(ctx context.Context) int {
 
 // Blocked reasons: a short sentence for the person, then what fixes it.
 const (
+	officeBlockedRoute      = "负责转告的 Bot 或群聊已改变；核实旧投递回执后再恢复此路线并重试"
 	officeBlockedChannel    = "Bot 连接已断开或未通过验证；重新连接并验证 Bot 后点重试"
 	officeBlockedBotKey     = "Bot 的密钥已停用或删除；换一把新密钥重新连接后点重试"
 	officeBlockedAccess     = "收件人已经看不到这条内容，按规矩不再发送"
@@ -440,24 +465,36 @@ func (w *OfficeEventWorker) push(ctx context.Context, d db.OfficeEventDelivery) 
 		w.retry(d, "event lookup failed")
 		return
 	}
-	channel, err := w.h.Queries.GetHumanChannel(ctx, db.GetHumanChannelParams{WorkspaceID: d.WorkspaceID, UserID: d.TargetUserID})
-	switch {
-	case errors.Is(err, pgx.ErrNoRows) || (err == nil && (channel.BotID != d.BotID || !channel.VerifiedAt.Valid)):
-		w.block(d, officeBlockedChannel, "", false)
-		return
-	case err != nil:
-		w.retry(d, "channel lookup failed")
-		return
-	case !channel.BotActive:
-		w.block(d, officeBlockedBotKey, "", false)
-		return
+	if d.RelayTarget != "" {
+		active, err := w.h.Queries.OfficeBotRouteStillActive(ctx, db.OfficeBotRouteStillActiveParams{WorkspaceID: d.WorkspaceID, UserID: d.TargetUserID, BotID: d.BotID, ChannelRef: d.RelayTarget})
+		if err != nil {
+			w.retry(d, "route lookup failed")
+			return
+		}
+		if !active {
+			w.block(d, officeBlockedRoute, "", false)
+			return
+		}
+	} else {
+		channel, err := w.h.Queries.GetHumanChannel(ctx, db.GetHumanChannelParams{WorkspaceID: d.WorkspaceID, UserID: d.TargetUserID})
+		switch {
+		case errors.Is(err, pgx.ErrNoRows) || (err == nil && (channel.BotID != d.BotID || !channel.VerifiedAt.Valid)):
+			w.block(d, officeBlockedChannel, "", false)
+			return
+		case err != nil:
+			w.retry(d, "channel lookup failed")
+			return
+		case !channel.BotActive:
+			w.block(d, officeBlockedBotKey, "", false)
+			return
+		}
+		if d.Reason == "stream" && !slices.Contains(channel.ActivityScope, "owner_visible_all") {
+			w.block(d, officeBlockedStreamOff, "", false)
+			return
+		}
 	}
 	if !w.canSee(ctx, ev, d.TargetUserID) {
 		w.block(d, officeBlockedAccess, "", false)
-		return
-	}
-	if d.Reason == "stream" && !slices.Contains(channel.ActivityScope, "owner_visible_all") {
-		w.block(d, officeBlockedStreamOff, "", false)
 		return
 	}
 	endpoint, key, reason := w.endpoint(ctx, d.BotID)
@@ -649,7 +686,34 @@ func (w *OfficeEventWorker) remind(ctx context.Context, ev db.OfficeEvent, user 
 // Whatever its age, and only what the person can still see; one that is no
 // longer visible is closed without sending. Each sweep takes a bounded batch.
 func (w *OfficeEventWorker) Restore(ctx context.Context) int {
-	n := 0
+	// Route and legacy recovery must choose one responsibility together. A
+	// second replica cannot see an unresolved gap between delivery creation
+	// and gap resolution, even when the preferred Bot changes concurrently.
+	tx, err := w.h.TxStarter.Begin(ctx)
+	if err != nil {
+		slog.Warn("office events: restore begin failed", "error", err)
+		return 0
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	q := w.h.Queries.WithTx(tx)
+	if err := q.LockOfficeEventSealer(ctx); err != nil {
+		slog.Warn("office events: restore lock failed", "error", err)
+		return 0
+	}
+	handler := *w.h
+	handler.Queries, handler.DB = q, tx
+	worker := *w
+	worker.h = &handler
+	n := worker.restoreLocked(ctx)
+	if err := tx.Commit(ctx); err != nil {
+		slog.Warn("office events: restore commit failed", "error", err)
+		return 0
+	}
+	return n
+}
+
+func (w *OfficeEventWorker) restoreLocked(ctx context.Context) int {
+	n := w.restoreOfficeRoutes(ctx)
 	gaps, err := w.h.Queries.ListOfficeGapsRestorable(ctx, 100)
 	if err != nil {
 		slog.Warn("office events: gap restore scan failed", "error", err)

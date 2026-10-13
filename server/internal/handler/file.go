@@ -1159,7 +1159,7 @@ func (h *Handler) loadAttachmentForDownload(w http.ResponseWriter, r *http.Reque
 	// the token's owner membership in a second workspace would let a running
 	// agent pull that workspace's files (DENE-896). Same 404 shape as the
 	// non-member deny so the route stays a non-oracle.
-	if r.Header.Get("X-Actor-Source") == "task_token" && r.Header.Get("X-Workspace-ID") != workspaceID {
+	if (r.Header.Get("X-Actor-Source") == "task_token" || r.Header.Get("X-Actor-Source") == "mcp_connection") && r.Header.Get("X-Workspace-ID") != workspaceID {
 		writeError(w, http.StatusNotFound, "attachment not found")
 		return db.Attachment{}, false
 	}

@@ -1599,6 +1599,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	contactSalesRL := middleware.RateLimit(rdb, envPositiveInt("RATE_LIMIT_CONTACT_SALES", 5), time.Hour, trustedProxies)
 	r.With(authRL).Post("/auth/send-code", h.SendCode)
 	r.With(authVerifyRL).Post("/auth/verify-code", h.VerifyCode)
+	r.With(authVerifyRL).Post("/api/mcp/exchange", h.ExchangeMCPConnection)
 	r.With(authRL).Post("/auth/login", h.PasswordLogin)
 	r.With(authRL).Post("/auth/signup", h.PasswordSignup)
 	r.With(authRL).Post("/auth/reset-password", h.PasswordReset)
@@ -1732,6 +1733,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		})
 	})
 
+	rRoot := r
 	// One instance for both authenticated trees (DENE-1936): see the comment on
 	// the main authenticated group below.
 	botWriteAudit := middleware.BotWriteAudit(queries, func(ctx context.Context, w service.WorkspaceWrite) {
@@ -2082,6 +2084,12 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Group(func(r chi.Router) {
 					r.Use(middleware.RequireWorkspaceMemberFromURL(queries, "id"))
 					r.Get("/bots/mentions", h.ListBotMentionDirectory)
+					r.Get("/office-bot-routes", h.ListOfficeBotRoutes)
+					r.Put("/office-bot-routes", h.PutOfficeBotRoute)
+					r.Delete("/office-bot-routes", h.DeleteOfficeBotRoute)
+					r.Get("/mcp-connections", h.ListMCPConnections)
+					r.Post("/mcp-connections", h.CreateMCPConnection)
+					r.Delete("/mcp-connections/{connectionId}", h.RevokeMCPConnection)
 					r.Get("/bots/{botId}/wake", h.GetBotWake)
 					r.Put("/bots/{botId}/wake", h.PutBotWake)
 					r.Get("/bots/{botId}/wake/events", h.ListBotWakeEvents)
@@ -2107,6 +2115,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Get("/bots/{botId}/office-deliveries", h.ListBotOfficeDeliveries)
 					r.Post("/bots/{botId}/office-deliveries/retry", h.RetryBotOfficeDeliveries)
 					// Pull by cursor; a Bot key reads as its owner.
+					r.Handle("/mcp", h.RemoteMCP(rRoot))
 					r.Get("/office-events", h.ListOfficeEvents)
 					r.Get("/office-events/{eventId}", h.GetOfficeEvent)
 				})

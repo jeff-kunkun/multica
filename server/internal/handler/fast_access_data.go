@@ -34,6 +34,7 @@ func (h *Handler) fastScopes(r *http.Request, user string, req fastRequest) ([]f
 	ctx := r.Context()
 	home := ctxWorkspaceID(ctx)
 	task := r.Header.Get("X-Actor-Source") == "task_token"
+	mcpBound := r.Header.Get("X-Actor-Source") == "mcp_connection"
 	members, err := h.Queries.ListDaemonWorkspaces(ctx, parseUUID(user))
 	if err != nil {
 		return nil, err
@@ -41,6 +42,9 @@ func (h *Handler) fastScopes(r *http.Request, user string, req fastRequest) ([]f
 	scopes := map[string]fastWorkspace{}
 	for _, m := range members {
 		id := uuidToString(m.ID)
+		if mcpBound && id != r.Header.Get("X-Workspace-ID") {
+			continue
+		}
 		managed := false
 		if task && id != home {
 			_, err := h.workspaceLinks().AuthorizeManaged(ctx, workspacelink.ManagedCall{ViewerWS: parseUUID(home), AgentID: parseUUID(r.Header.Get("X-Agent-ID")), TaskID: parseUUID(r.Header.Get("X-Task-ID")), Source: id})
@@ -74,6 +78,9 @@ func (h *Handler) fastScopes(r *http.Request, user string, req fastRequest) ([]f
 	// Non-managed links grant project status only, never chats or agent identity.
 	// Use the same source/project predicates and the central decision table.
 	for _, m := range members {
+		if mcpBound {
+			continue
+		}
 		viewerWS := uuidToString(m.ID)
 		if task && viewerWS != home {
 			continue

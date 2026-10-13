@@ -1,3 +1,4 @@
+import { parseMcpConnections, parseMcpConnectionGrant, parseOfficeBotRoutes, parseOfficeBotRoute } from "./mcp-connections";
 import { parseFastAccess, type FastAccessRequest } from "./fast-access";
 import { LinkedProjectSettingsSchema } from "./schemas";
 import type { LinkedProjectSettings } from "../types/workspace-link";
@@ -4872,6 +4873,35 @@ export class ApiClient {
 
   async revokePersonalAccessToken(id: string): Promise<void> {
     await this.fetch(`/api/tokens/${id}`, { method: "DELETE" });
+  }
+
+  async listOfficeBotRoutes(workspaceId: string) {
+    return parseOfficeBotRoutes(await this.fetch(`/api/workspaces/${workspaceId}/office-bot-routes`));
+  }
+
+  async saveOfficeBotRoute(workspaceId: string, data: { projectId: string | null; botId: string; channelRef: string }) {
+    return parseOfficeBotRoute(await this.fetch(`/api/workspaces/${workspaceId}/office-bot-routes`, {
+      method: "PUT", body: JSON.stringify({ project_id: data.projectId, bot_id: data.botId, channel_ref: data.channelRef }),
+    }));
+  }
+
+  async deleteOfficeBotRoute(workspaceId: string, projectId: string | null): Promise<void> {
+    const query = projectId ? `?project_id=${encodeURIComponent(projectId)}` : "";
+    await this.fetch(`/api/workspaces/${workspaceId}/office-bot-routes${query}`, { method: "DELETE" });
+  }
+
+  async listMcpConnections(workspaceId: string) {
+    return parseMcpConnections(await this.fetch(`/api/workspaces/${workspaceId}/mcp-connections`));
+  }
+
+  async createMcpConnection(workspaceId: string, data: { name: string; botId: string }) {
+    return parseMcpConnectionGrant(await this.fetch(`/api/workspaces/${workspaceId}/mcp-connections`, {
+      method: "POST", body: JSON.stringify({ name: data.name, bot_id: data.botId }),
+    }));
+  }
+
+  async revokeMcpConnection(workspaceId: string, connectionId: string): Promise<void> {
+    await this.fetch(`/api/workspaces/${workspaceId}/mcp-connections/${connectionId}`, { method: "DELETE" });
   }
 
   // External bots (DENE-1788) — workspace admin only.

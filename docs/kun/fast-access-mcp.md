@@ -18,14 +18,14 @@ Web/Desktop: Settings → MCP supports the existing stdio command/arguments fiel
 Add the entry to the workspace library, then assign it in the agent's MCP tab.
 A library entry alone reaches no agent. CLI configuration uses the existing
 `workspace mcp add` and `agent mcp add` commands (`--help` describes their flags).
-There is no new key screen or authentication flow. Existing task/runtime access
+This stdio path requires no new key screen or authentication flow. Existing task/runtime access
 restrictions remain authoritative, including read-only credentials that cannot
 POST to the fast-access read endpoint.
 
 The native mobile app has no matching local MCP process/configuration entry; it
 cannot launch a host stdio executable. Its existing Activity screen still uses
 the same fast-access service. This change adds no visible UI or navigation, so
-there is no new responsive screen to verify. Remote MCP serving is out of scope.
+there is no new responsive screen to verify. For the separately authorized remote endpoint, see [Remote MCP connections](remote-mcp.md).
 
 ## Tools and bounds
 
@@ -39,6 +39,7 @@ there is no new responsive screen to verify. Remote MCP serving is out of scope.
 | `chat_history` | Session UUID, before, limit 1–50 (20 default), optional full. Summary and one message page with next_cursor. |
 | `comment_create` | Issue UUID, content, optional parent UUID. Accepted comment ID; existing server rules can notify/wake agents. |
 | `chat_send` | Session UUID, content, explicit steer/queue/restart. Accepted message ID, actual mode and queue state. |
+| `events_list`, `event_get`, `events_deliveries`, `events_receipt` | Office event cursor reads and receipts; see [remote MCP contract](remote-mcp.md). |
 | `attachment_download` | Attachment UUID, optional workspace. Verified private local path, size and SHA256. |
 
 Single-object tools default to the configured workspace. Scope mode is
@@ -94,7 +95,7 @@ Uses the official [Go SDK](https://github.com/modelcontextprotocol/go-sdk), v1.8
 The current [2026-07-28 revision](https://modelcontextprotocol.io/specification/2026-07-28)
 uses discovery and per-request metadata; the SDK also supports the legacy
 [2025-11-25 initialization](https://modelcontextprotocol.io/specification/2025-11-25/basic/lifecycle).
-Stdio stdout contains only protocol messages. There is no HTTP listener, OAuth
+Stdio stdout contains only protocol messages. The stdio path has no HTTP listener or OAuth
 implementation or confusion between application SSE and MCP transports.
 
 `go test ./internal/fastmcp -run TestMCPStdioAcceptance -v` launches a real SDK

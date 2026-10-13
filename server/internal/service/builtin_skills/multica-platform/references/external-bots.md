@@ -1,4 +1,35 @@
-# External Bots using a personal login
+# External Bot connections
+
+## Remote MCP: one-time authorization
+
+For a new remote MCP connection use Settings → Bots → MCP connections, or
+`multica mcp connections create --bot <owned-bot-id> --name <name> --output json`.
+Only the human owner/admin can authorize it; do not substitute a broader
+identity when a task is refused. Exchange the five-minute code with
+`multica mcp connect --exchange-url <returned-exchange-url> --code-stdin`.
+Keep the output private: it is client configuration with a new connection
+credential, not a replacement login. Never post codes or credentials in a
+comment. This is a one-time-code flow, not OAuth; OAuth-only clients need a
+compatible connector helper. Existing Bot keys/logins remain untouched.
+
+`mcp connections list/revoke` manage only these new grants. `mcp routes
+list/set/remove` manage project notification Bot + actual group reference;
+omit `--project` for fallback. Read real IDs with `project list` and `bot list`.
+Route writes save intended recipients, not proof of external group delivery.
+
+Remote tools include events_list/event_get/events_deliveries/events_receipt.
+Use attachment_read for bounded base64 file chunks: follow next_offset, assemble
+in order, and verify whole-file size/SHA256 before forwarding.
+Persist event_id before acknowledging, resume the stream cursor on reconnect,
+reconcile ambiguous writes, and never turn a receipt into an issue comment.
+When delivery.relay_target is present, send to that group and pass receipt
+`target` equal to it (CLI: `events receipt --target <group-reference>`), keeping `channel` as the transport and `message_ref` as the
+real sent-message reference. `needs_kun`/`must_relay` is per delivery; an observer
+must not duplicate the responsible Bot.
+MCP is the tool channel; existing office webhooks remain the outbound wake
+channel until receiver comparison is verified. More: docs/kun/remote-mcp.md.
+
+## Legacy personal login
 
 Use this path when a workspace owner explicitly authorizes a Bot to operate
 with the owner's personal token on an external computer. This is a normal

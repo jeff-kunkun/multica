@@ -104,6 +104,8 @@
 
 ## Compact cross-workspace reads
 
+- DENE-2002：通用 MCP 一次性授权、通知负责人和断线补处理；[本地验证与未完成项](DENE-2002/README.md)、[真实手机/桌面截图附件](https://ai.ferryway.cc/api/attachments/01a13360-7c97-7120-ab18-dc4904306325/download)。尚未部署 test，等待其地址和部署入口；生产、旧钥匙及登录未动，实际外部 Bot 群聊联调仍待 test。
+
 - DENE-1885：合入手机主线 f3d1892613，保留快速访问与连通工作区两套入口；[手机截图与结论](https://ai.ferryway.cc/api/attachments/01a12cb5-2cd3-7c87-bb7c-921d7e03e431/download)、[合并核对、测试日志与回滚材料](https://ai.ferryway.cc/api/attachments/01a12cb5-2df5-7e3a-b97b-3445c162b830/download)。手机类型/lint/261 项测试与 fast-access/SSE/CLI/MCP 回归通过；原生及生产一次响应性能未复测。
 
 - DENE-1882：快速访问与主线集成；[迁移、真实公开客户端联调及兼容性边界](DENE-1882/integration.md)。[脱敏原始输出与回滚材料](https://ai.ferryway.cc/api/attachments/01a12c73-1f09-78cb-b484-91aa56d04c1c/download)。本地三页读齐200条任务/17活动运行，30次p95为62.476ms、最大单页41,303字节；公开MCP文档参数差异已交父单，生产实测仍未完成。

@@ -23,6 +23,7 @@
 - [新能力的智能体可读契约与收尾检查清单](kun/agent-readable-capabilities.md)
 - [Compact cross-workspace read and durable replay protocol](kun/fast-access.md)
 - [Local MCP adapter and client configuration](kun/fast-access-mcp.md)
+- [Remote MCP authorization and office notification routes](kun/remote-mcp.md)
 
 - [CLI project names, temp files, key status and compact reads](kun/cli-convenience.md)
 

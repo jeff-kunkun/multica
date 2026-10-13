@@ -94,6 +94,9 @@ receipt arrives the same event_id is pushed again with backoff.
   handled       looked, nothing to tell (--reason); refused for must_relay events
   relay_failed  could not tell the person (--error, required); the app shows it to them
 
+When delivery.relay_target is present, relayed also requires --target with
+that exact group reference. --channel still names the transport.
+
 Per file: --file <attachment-id>=sent:<ref> (where it went), =failed:<error> or
 =skipped. Only files of this event; a file once sent stays sent.
 
@@ -270,7 +273,7 @@ func runEventsReceipt(cmd *cobra.Command, args []string) error {
 	}
 	stage, _ := cmd.Flags().GetString("stage")
 	body := map[string]any{"stage": stage}
-	for flag, key := range map[string]string{"channel": "channel", "ref": "message_ref", "reason": "reason", "error": "error"} {
+	for flag, key := range map[string]string{"target": "target", "channel": "channel", "ref": "message_ref", "reason": "reason", "error": "error"} {
 		if v, _ := cmd.Flags().GetString(flag); v != "" {
 			body[key] = v
 		}
@@ -398,6 +401,7 @@ func init() {
 	_ = eventsDownloadCmd.Flags().MarkHidden("output-file")
 
 	eventsReceiptCmd.Flags().String("bot", "", "Bot id (delivery.bot_id in the push)")
+	eventsReceiptCmd.Flags().String("target", "", "Exact delivery.relay_target group reference; required for routed relayed receipts")
 	eventsReceiptCmd.Flags().String("stage", "", "received, relayed, handled or relay_failed")
 	eventsReceiptCmd.Flags().String("channel", "", "Where the person was told (telegram, lark, ...)")
 	eventsReceiptCmd.Flags().String("ref", "", "Message id on that channel")

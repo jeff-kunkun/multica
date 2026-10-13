@@ -13,6 +13,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/auth"
 	"github.com/multica-ai/multica/server/internal/botsource"
 	"github.com/multica-ai/multica/server/internal/dbactor"
+	"github.com/multica-ai/multica/server/internal/mcpaccess"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
@@ -110,6 +111,37 @@ func Auth(queries *db.Queries, patCache *auth.PATCache, cloudPAT *auth.CloudPATV
 			if fromCookie && !auth.ValidateCSRF(r) {
 				slog.Debug("auth: CSRF validation failed", "path", r.URL.Path)
 				http.Error(w, `{"error":"CSRF validation failed"}`, http.StatusForbidden)
+				return
+			}
+
+			// Remote MCP credentials are audience-bound and never accepted by
+			// the network REST API. Tools dispatch internally through all the
+			// same membership, visibility, audit and mutation guards.
+			if strings.HasPrefix(tokenString, "mmc_") {
+				if queries == nil {
+					http.Error(w, "unauthorized", 401)
+					return
+				}
+				grant, err := queries.GetMCPConnectionByTokenHash(r.Context(), pgtype.Text{String: auth.HashToken(tokenString), Valid: true})
+				if err != nil {
+					http.Error(w, "unauthorized", 401)
+					return
+				}
+				ws, bot := uuidToString(grant.WorkspaceID), uuidToString(grant.BotID)
+				if !mcpaccess.Allowed(r.Method, r.URL.Path, ws, bot, mcpaccess.Internal(r.Context())) {
+					http.Error(w, "MCP connection does not authorize this resource", 403)
+					return
+				}
+				user := uuidToString(grant.UserID)
+				if rejectTemporarilyDisabledUser(w, r, user, "", "mcp") {
+					return
+				}
+				r.Header.Set("X-User-ID", user)
+				r.Header.Set("X-Workspace-ID", ws)
+				r.Header.Set("X-Actor-Source", "mcp_connection")
+				r = r.WithContext(botsource.WithContext(r.Context(), botsource.Source{ID: grant.BotID, Name: grant.BotName}))
+				_ = queries.TouchMCPConnection(r.Context(), grant.ID)
+				serveAuthenticated(next, w, r)
 				return
 			}
 

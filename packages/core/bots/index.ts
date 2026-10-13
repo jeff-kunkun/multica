@@ -21,3 +21,7 @@ export {
   useUpdateBotWake,
   useAckBotWakePending,
 } from "./queries";
+export { mcpConnectionsOptions, useCreateMcpConnection, useRevokeMcpConnection } from "./mcp-connections";
+export type { McpConnection, McpConnectionGrant } from "./mcp-connections";
+export { officeBotRoutesOptions, useSaveOfficeBotRoute, useDeleteOfficeBotRoute } from "./mcp-connections";
+export type { OfficeBotRoute } from "./mcp-connections";

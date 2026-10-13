@@ -32,7 +32,7 @@ func TestBotWriteAuditCoversEveryWriteRoute(t *testing.T) {
 	unauthenticated := []string{
 		"/auth/", "/api/auth/", "/api/webhooks/", "/webhooks/", "/api/daemon/", "/daemon/",
 		"/api/public/", "/api/callbacks/", "/api/oauth/", "/api/links/",
-		"/api/contact-sales", "/v1/",
+		"/api/contact-sales", "/v1/", "/api/mcp/exchange",
 	}
 
 	isAudit := func(fn func(http.Handler) http.Handler) bool {

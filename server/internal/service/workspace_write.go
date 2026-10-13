@@ -72,6 +72,11 @@ func coveredByTicketStream(w WorkspaceWrite, family string) bool {
 // A write the owner's own Bot was stopped on (Blocked) is not echoed to that
 // owner as an activity row: they hear it once through the approval card.
 func RouteWorkspaceWrite(ctx context.Context, q *db.Queries, w WorkspaceWrite, visible TargetVisibility) (int, error) {
+	// Delivery acknowledgements are bookkeeping, never new news to relay.
+	// Keep their audit rows, but do not create a receipt -> alert loop.
+	if strings.Contains(w.Route, "/office-events/") && strings.HasSuffix(w.Route, "/receipt") {
+		return 0, nil
+	}
 	if !w.WorkspaceID.Valid {
 		return 0, nil
 	}

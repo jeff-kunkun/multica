@@ -57,6 +57,8 @@ import { AppLink, useNavigation } from "../../navigation";
 import { useLocale, useT } from "../../i18n";
 import { SettingsCard, SettingsRow, SettingsSection, SettingsTab } from "./settings-layout";
 import { resolveSettingsLocation, settingsHref } from "./settings-navigation";
+import { OfficeBotRoutesSection } from "./office-bot-routes-section";
+import { McpConnectionsSection } from "./mcp-connections-section";
 import { BotWakePage } from "./bot-wake-page";
 
 const EXPIRY_KEYS = ["never", "365"] as const;
@@ -371,6 +373,9 @@ export function BotsTab() {
           </SettingsCard>
         )}
       </SettingsSection>
+
+      <OfficeBotRoutesSection key={`routes-${wsId}`} wsId={wsId} canManage={canManage} bots={bots} />
+      <McpConnectionsSection key={wsId} wsId={wsId} canManage={canManage} bots={bots} />
 
       <Dialog open={adding} onOpenChange={(v) => { if (!v) closeAdd(); }}>
         <DialogContent className="sm:max-w-md">

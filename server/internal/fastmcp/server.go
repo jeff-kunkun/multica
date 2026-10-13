@@ -91,6 +91,14 @@ type adapter struct {
 }
 
 func NewServer(client *cli.APIClient, downloadDir string) *mcp.Server {
+	return newServer(client, downloadDir, false)
+}
+
+func NewRemoteServer(client *cli.APIClient) *mcp.Server {
+	return newServer(client, "", true)
+}
+
+func newServer(client *cli.APIClient, downloadDir string, remote bool) *mcp.Server {
 	a := &adapter{client: client, downloadDir: downloadDir}
 	s := mcp.NewServer(&mcp.Implementation{Name: "multica", Version: "1"}, &mcp.ServerOptions{
 		Capabilities: &mcp.ServerCapabilities{},
@@ -104,7 +112,12 @@ func NewServer(client *cli.APIClient, downloadDir string) *mcp.Server {
 	register(s, "chat_history", "Read one authorized chat history page; full text is opt-in.", true, a.history)
 	register(s, "comment_create", "Create a comment/reply. May wake agents. No retry; ambiguous_write includes a reconciliation read, not proof of absence.", false, a.comment)
 	register(s, "chat_send", "Send a chat message with an explicit running-agent mode. No retry; ambiguous_write requires checking history.", false, a.send)
-	register(s, "attachment_download", "Download an authorized attachment to a private local directory after size and SHA256 verification. No arbitrary output path.", false, a.attachment)
+	if !remote {
+		register(s, "attachment_download", "Download an authorized attachment to a private local directory after size and SHA256 verification. No arbitrary output path.", false, a.attachment)
+	} else {
+		registerAttachmentRead(s, a)
+	}
+	registerEvents(s, a)
 	return s
 }
 
@@ -127,6 +140,14 @@ func register[I any](s *mcp.Server, name, description string, read bool, fn func
 		low := float64(0)
 		p.Minimum = &low
 	}
+	if name == "attachment_read" {
+		if p := schema.Properties["length"]; p != nil {
+			low, high := float64(1), float64(attachmentChunkMax)
+			p.Minimum = &low
+			p.Maximum = &high
+		}
+	}
+	constrainEventSchema(name, schema)
 	mcp.AddTool(s, &mcp.Tool{Name: name, Description: description, InputSchema: schema, Annotations: &mcp.ToolAnnotations{ReadOnlyHint: read}}, func(ctx context.Context, _ *mcp.CallToolRequest, in I) (*mcp.CallToolResult, map[string]any, error) {
 		out, err := fn(ctx, in)
 		if err != nil {

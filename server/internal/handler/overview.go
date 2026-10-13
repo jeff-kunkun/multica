@@ -163,6 +163,28 @@ func (h *Handler) GetOverview(w http.ResponseWriter, r *http.Request) {
 	} else {
 		omitted = append(omitted, "external_connections")
 	}
+	// Connection inventory never contains codes or credential hashes.
+	for _, entry := range []struct {
+		name, fields string
+		read         http.HandlerFunc
+	}{
+		{"mcp_connections", "id name bot_id expires_at last_used_at revoked", h.ListMCPConnections},
+		{"office_bot_routes", "project_id bot_id channel_ref", h.ListOfficeBotRoutes},
+	} {
+		rows, denied, err := overviewRead(overviewRequest(r, map[string]string{"id": ws}), entry.read, "")
+		if err != nil {
+			writeError(w, 500, "failed to load overview "+entry.name)
+			return
+		}
+		sections[entry.name] = []overviewRow{}
+		if denied {
+			omitted = append(omitted, entry.name)
+			continue
+		}
+		for _, row := range rows {
+			sections[entry.name] = append(sections[entry.name], overviewProject(row, entry.fields))
+		}
+	}
 	if err := h.enrichOverview(request, ws, sections); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to load overview relationships")
 		return

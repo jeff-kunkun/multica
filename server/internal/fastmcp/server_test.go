@@ -156,7 +156,7 @@ func TestMCPStdioAcceptance(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if len(list.Tools) != 9 {
+			if len(list.Tools) != 13 {
 				t.Fatalf("tools=%d", len(list.Tools))
 			}
 			for _, tool := range list.Tools {
@@ -253,7 +253,7 @@ func TestMCPStdioAcceptance(t *testing.T) {
 				t.Fatal(bad)
 			}
 			status.Store(0)
-			t.Log("9 tools; schema; summary/full; cursors; reads/writes; 403/429; timeout reconciliation without retry; attachment integrity; credential-free output")
+			t.Log("13 tools; schema; summary/full; cursors; reads/writes; 403/429; timeout reconciliation without retry; attachment integrity; credential-free output")
 		})
 	}
 }

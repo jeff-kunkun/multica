@@ -7,7 +7,7 @@ import (
 )
 
 func newMCPCommand() *cobra.Command {
-	cmd := &cobra.Command{Use: "mcp", Short: "Expose Multica tools to a local MCP client", Annotations: map[string]string{annotationAccess: "local"}}
+	cmd := &cobra.Command{Use: "mcp", Short: "Connect MCP clients locally or through remote authorization", Annotations: map[string]string{annotationAccess: "local"}}
 	serve := &cobra.Command{
 		Use: "serve", Short: "Serve permission-checked activity, history, messaging and attachments over stdio",
 		Args:        cobra.NoArgs,
@@ -40,6 +40,6 @@ under --download-dir; the tool cannot choose arbitrary output paths.`,
 		},
 	}
 	serve.Flags().String("download-dir", "./attachments", "Local parent directory for verified downloads (not a tool argument)")
-	cmd.AddCommand(serve)
+	cmd.AddCommand(serve, newMCPConnectionsCommand(), newMCPConnectCommand(), newMCPRoutesCommand())
 	return cmd
 }

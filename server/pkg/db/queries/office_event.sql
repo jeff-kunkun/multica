@@ -32,8 +32,8 @@ WHERE id = @id AND stream_seq IS NULL;
 -- connected but cannot take it yet: the row is the durable record of the gap,
 -- raises the in-app fallback, and comes back with a retry once fixed.
 INSERT INTO office_event_delivery (
-    event_id, workspace_id, bot_id, binding_id, target_user_id, reason, must_relay, status, blocked_reason
-) VALUES (@event_id, @workspace_id, @bot_id, @binding_id, @target_user_id, @reason, @must_relay, @status, @blocked_reason)
+    event_id, workspace_id, bot_id, binding_id, target_user_id, reason, must_relay, status, blocked_reason, relay_target
+) VALUES (@event_id, @workspace_id, @bot_id, @binding_id, @target_user_id, @reason, @must_relay, @status, @blocked_reason, @relay_target)
 ON CONFLICT (event_id, bot_id) DO UPDATE SET
     must_relay = office_event_delivery.must_relay OR EXCLUDED.must_relay,
     reason = CASE WHEN EXCLUDED.reason = 'owner' THEN 'owner' ELSE office_event_delivery.reason END;
@@ -278,7 +278,7 @@ SELECT sqlc.embed(d), sqlc.embed(b)
 FROM office_event_delivery d
 JOIN member_bot_binding b ON b.workspace_id = d.workspace_id AND b.user_id = d.target_user_id
     AND b.revoked_at IS NULL AND b.verified_at IS NOT NULL
-WHERE d.status = 'blocked' AND d.reason = 'owner' AND d.blocked_reason = @channel_reason::text
+WHERE d.relay_target = '' AND d.status = 'blocked' AND d.reason = 'owner' AND d.blocked_reason = @channel_reason::text
 ORDER BY d.id
 LIMIT @lim;
 

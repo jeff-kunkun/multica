@@ -36,7 +36,7 @@ UPDATE office_event_delivery SET
            OR e.value ->> 'status' = 'sent'),
     updated_at = now()
 WHERE id = $7
-RETURNING id, event_id, workspace_id, bot_id, binding_id, target_user_id, reason, must_relay, status, attempts, last_error, next_attempt_at, last_attempt_at, sent_at, received_at, relayed_at, relay_channel, relay_ref, relay_error, handled_reason, blocked_reason, fallback_at, uncertain_at, artifacts, created_at, updated_at
+RETURNING id, event_id, workspace_id, bot_id, binding_id, target_user_id, reason, must_relay, status, attempts, last_error, next_attempt_at, last_attempt_at, sent_at, received_at, relayed_at, relay_channel, relay_ref, relay_error, handled_reason, blocked_reason, fallback_at, uncertain_at, artifacts, created_at, updated_at, relay_target
 `
 
 type AckOfficeDeliveryParams struct {
@@ -90,6 +90,7 @@ func (q *Queries) AckOfficeDelivery(ctx context.Context, arg AckOfficeDeliveryPa
 		&i.Artifacts,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.RelayTarget,
 	)
 	return i, err
 }
@@ -131,7 +132,7 @@ WHERE d.id IN (
     LIMIT $1
     FOR UPDATE SKIP LOCKED
 )
-RETURNING d.id, d.event_id, d.workspace_id, d.bot_id, d.binding_id, d.target_user_id, d.reason, d.must_relay, d.status, d.attempts, d.last_error, d.next_attempt_at, d.last_attempt_at, d.sent_at, d.received_at, d.relayed_at, d.relay_channel, d.relay_ref, d.relay_error, d.handled_reason, d.blocked_reason, d.fallback_at, d.uncertain_at, d.artifacts, d.created_at, d.updated_at
+RETURNING d.id, d.event_id, d.workspace_id, d.bot_id, d.binding_id, d.target_user_id, d.reason, d.must_relay, d.status, d.attempts, d.last_error, d.next_attempt_at, d.last_attempt_at, d.sent_at, d.received_at, d.relayed_at, d.relay_channel, d.relay_ref, d.relay_error, d.handled_reason, d.blocked_reason, d.fallback_at, d.uncertain_at, d.artifacts, d.created_at, d.updated_at, d.relay_target
 `
 
 // Pending rows that are due, and sent rows whose receipt never came (resent
@@ -173,6 +174,7 @@ func (q *Queries) ClaimDueOfficeDeliveries(ctx context.Context, limit int32) ([]
 			&i.Artifacts,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.RelayTarget,
 		); err != nil {
 			return nil, err
 		}
@@ -186,8 +188,8 @@ func (q *Queries) ClaimDueOfficeDeliveries(ctx context.Context, limit int32) ([]
 
 const createOfficeEventDelivery = `-- name: CreateOfficeEventDelivery :exec
 INSERT INTO office_event_delivery (
-    event_id, workspace_id, bot_id, binding_id, target_user_id, reason, must_relay, status, blocked_reason
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+    event_id, workspace_id, bot_id, binding_id, target_user_id, reason, must_relay, status, blocked_reason, relay_target
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
 ON CONFLICT (event_id, bot_id) DO UPDATE SET
     must_relay = office_event_delivery.must_relay OR EXCLUDED.must_relay,
     reason = CASE WHEN EXCLUDED.reason = 'owner' THEN 'owner' ELSE office_event_delivery.reason END
@@ -203,6 +205,7 @@ type CreateOfficeEventDeliveryParams struct {
 	MustRelay     bool        `json:"must_relay"`
 	Status        string      `json:"status"`
 	BlockedReason string      `json:"blocked_reason"`
+	RelayTarget   string      `json:"relay_target"`
 }
 
 // status is pending, or blocked (with its reason) when the owner's Bot is
@@ -219,6 +222,7 @@ func (q *Queries) CreateOfficeEventDelivery(ctx context.Context, arg CreateOffic
 		arg.MustRelay,
 		arg.Status,
 		arg.BlockedReason,
+		arg.RelayTarget,
 	)
 	return err
 }
@@ -282,7 +286,7 @@ func (q *Queries) GetOfficeBindingForUser(ctx context.Context, arg GetOfficeBind
 }
 
 const getOfficeDeliveryForBot = `-- name: GetOfficeDeliveryForBot :one
-SELECT id, event_id, workspace_id, bot_id, binding_id, target_user_id, reason, must_relay, status, attempts, last_error, next_attempt_at, last_attempt_at, sent_at, received_at, relayed_at, relay_channel, relay_ref, relay_error, handled_reason, blocked_reason, fallback_at, uncertain_at, artifacts, created_at, updated_at FROM office_event_delivery WHERE event_id = $1 AND bot_id = $2
+SELECT id, event_id, workspace_id, bot_id, binding_id, target_user_id, reason, must_relay, status, attempts, last_error, next_attempt_at, last_attempt_at, sent_at, received_at, relayed_at, relay_channel, relay_ref, relay_error, handled_reason, blocked_reason, fallback_at, uncertain_at, artifacts, created_at, updated_at, relay_target FROM office_event_delivery WHERE event_id = $1 AND bot_id = $2
 `
 
 type GetOfficeDeliveryForBotParams struct {
@@ -320,6 +324,7 @@ func (q *Queries) GetOfficeDeliveryForBot(ctx context.Context, arg GetOfficeDeli
 		&i.Artifacts,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.RelayTarget,
 	)
 	return i, err
 }
@@ -440,7 +445,7 @@ func (q *Queries) ListAttachmentsForOfficeEvent(ctx context.Context, arg ListAtt
 }
 
 const listOfficeDeliveries = `-- name: ListOfficeDeliveries :many
-SELECT d.id, d.event_id, d.workspace_id, d.bot_id, d.binding_id, d.target_user_id, d.reason, d.must_relay, d.status, d.attempts, d.last_error, d.next_attempt_at, d.last_attempt_at, d.sent_at, d.received_at, d.relayed_at, d.relay_channel, d.relay_ref, d.relay_error, d.handled_reason, d.blocked_reason, d.fallback_at, d.uncertain_at, d.artifacts, d.created_at, d.updated_at, e.id, e.event_id, e.workspace_id, e.family, e.event_type, e.object_type, e.object_id, e.issue_id, e.chat_session_id, e.chat_message_id, e.comment_id, e.task_id, e.attachment_id, e.changes, e.actor_type, e.actor_id, e.via_bot_id, e.on_behalf_of_user_id, e.actor_task_id, e.actor_source, e.occurred_at, e.stream_seq, e.sealed_at, e.meaning, e.summary, e.must_relay, e.pending_approval, e.business_key, e.recipient_gap
+SELECT d.id, d.event_id, d.workspace_id, d.bot_id, d.binding_id, d.target_user_id, d.reason, d.must_relay, d.status, d.attempts, d.last_error, d.next_attempt_at, d.last_attempt_at, d.sent_at, d.received_at, d.relayed_at, d.relay_channel, d.relay_ref, d.relay_error, d.handled_reason, d.blocked_reason, d.fallback_at, d.uncertain_at, d.artifacts, d.created_at, d.updated_at, d.relay_target, e.id, e.event_id, e.workspace_id, e.family, e.event_type, e.object_type, e.object_id, e.issue_id, e.chat_session_id, e.chat_message_id, e.comment_id, e.task_id, e.attachment_id, e.changes, e.actor_type, e.actor_id, e.via_bot_id, e.on_behalf_of_user_id, e.actor_task_id, e.actor_source, e.occurred_at, e.stream_seq, e.sealed_at, e.meaning, e.summary, e.must_relay, e.pending_approval, e.business_key, e.recipient_gap
 FROM office_event_delivery d
 JOIN office_event e ON e.event_id = d.event_id
 WHERE d.bot_id = $1
@@ -504,6 +509,7 @@ func (q *Queries) ListOfficeDeliveries(ctx context.Context, arg ListOfficeDelive
 			&i.OfficeEventDelivery.Artifacts,
 			&i.OfficeEventDelivery.CreatedAt,
 			&i.OfficeEventDelivery.UpdatedAt,
+			&i.OfficeEventDelivery.RelayTarget,
 			&i.OfficeEvent.ID,
 			&i.OfficeEvent.EventID,
 			&i.OfficeEvent.WorkspaceID,
@@ -545,7 +551,7 @@ func (q *Queries) ListOfficeDeliveries(ctx context.Context, arg ListOfficeDelive
 }
 
 const listOfficeDeliveriesForEvent = `-- name: ListOfficeDeliveriesForEvent :many
-SELECT id, event_id, workspace_id, bot_id, binding_id, target_user_id, reason, must_relay, status, attempts, last_error, next_attempt_at, last_attempt_at, sent_at, received_at, relayed_at, relay_channel, relay_ref, relay_error, handled_reason, blocked_reason, fallback_at, uncertain_at, artifacts, created_at, updated_at FROM office_event_delivery WHERE event_id = $1 ORDER BY id
+SELECT id, event_id, workspace_id, bot_id, binding_id, target_user_id, reason, must_relay, status, attempts, last_error, next_attempt_at, last_attempt_at, sent_at, received_at, relayed_at, relay_channel, relay_ref, relay_error, handled_reason, blocked_reason, fallback_at, uncertain_at, artifacts, created_at, updated_at, relay_target FROM office_event_delivery WHERE event_id = $1 ORDER BY id
 `
 
 func (q *Queries) ListOfficeDeliveriesForEvent(ctx context.Context, eventID pgtype.UUID) ([]OfficeEventDelivery, error) {
@@ -584,6 +590,7 @@ func (q *Queries) ListOfficeDeliveriesForEvent(ctx context.Context, eventID pgty
 			&i.Artifacts,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.RelayTarget,
 		); err != nil {
 			return nil, err
 		}
@@ -596,11 +603,11 @@ func (q *Queries) ListOfficeDeliveriesForEvent(ctx context.Context, eventID pgty
 }
 
 const listOfficeDeliveriesRestorable = `-- name: ListOfficeDeliveriesRestorable :many
-SELECT d.id, d.event_id, d.workspace_id, d.bot_id, d.binding_id, d.target_user_id, d.reason, d.must_relay, d.status, d.attempts, d.last_error, d.next_attempt_at, d.last_attempt_at, d.sent_at, d.received_at, d.relayed_at, d.relay_channel, d.relay_ref, d.relay_error, d.handled_reason, d.blocked_reason, d.fallback_at, d.uncertain_at, d.artifacts, d.created_at, d.updated_at, b.id, b.workspace_id, b.user_id, b.bot_id, b.mode, b.resend_after_seconds, b.escalate_after_seconds, b.created_at, b.updated_at, b.verified_at, b.revoked_at, b.broken_notified_at, b.activity_scope
+SELECT d.id, d.event_id, d.workspace_id, d.bot_id, d.binding_id, d.target_user_id, d.reason, d.must_relay, d.status, d.attempts, d.last_error, d.next_attempt_at, d.last_attempt_at, d.sent_at, d.received_at, d.relayed_at, d.relay_channel, d.relay_ref, d.relay_error, d.handled_reason, d.blocked_reason, d.fallback_at, d.uncertain_at, d.artifacts, d.created_at, d.updated_at, d.relay_target, b.id, b.workspace_id, b.user_id, b.bot_id, b.mode, b.resend_after_seconds, b.escalate_after_seconds, b.created_at, b.updated_at, b.verified_at, b.revoked_at, b.broken_notified_at, b.activity_scope
 FROM office_event_delivery d
 JOIN member_bot_binding b ON b.workspace_id = d.workspace_id AND b.user_id = d.target_user_id
     AND b.revoked_at IS NULL AND b.verified_at IS NOT NULL
-WHERE d.status = 'blocked' AND d.reason = 'owner' AND d.blocked_reason = $1::text
+WHERE d.relay_target = '' AND d.status = 'blocked' AND d.reason = 'owner' AND d.blocked_reason = $1::text
 ORDER BY d.id
 LIMIT $2
 `
@@ -653,6 +660,7 @@ func (q *Queries) ListOfficeDeliveriesRestorable(ctx context.Context, arg ListOf
 			&i.OfficeEventDelivery.Artifacts,
 			&i.OfficeEventDelivery.CreatedAt,
 			&i.OfficeEventDelivery.UpdatedAt,
+			&i.OfficeEventDelivery.RelayTarget,
 			&i.MemberBotBinding.ID,
 			&i.MemberBotBinding.WorkspaceID,
 			&i.MemberBotBinding.UserID,
@@ -792,7 +800,7 @@ func (q *Queries) ListOfficeEvents(ctx context.Context, arg ListOfficeEventsPara
 }
 
 const listOfficeFallbackDue = `-- name: ListOfficeFallbackDue :many
-SELECT d.id, d.event_id, d.workspace_id, d.bot_id, d.binding_id, d.target_user_id, d.reason, d.must_relay, d.status, d.attempts, d.last_error, d.next_attempt_at, d.last_attempt_at, d.sent_at, d.received_at, d.relayed_at, d.relay_channel, d.relay_ref, d.relay_error, d.handled_reason, d.blocked_reason, d.fallback_at, d.uncertain_at, d.artifacts, d.created_at, d.updated_at, e.id, e.event_id, e.workspace_id, e.family, e.event_type, e.object_type, e.object_id, e.issue_id, e.chat_session_id, e.chat_message_id, e.comment_id, e.task_id, e.attachment_id, e.changes, e.actor_type, e.actor_id, e.via_bot_id, e.on_behalf_of_user_id, e.actor_task_id, e.actor_source, e.occurred_at, e.stream_seq, e.sealed_at, e.meaning, e.summary, e.must_relay, e.pending_approval, e.business_key, e.recipient_gap
+SELECT d.id, d.event_id, d.workspace_id, d.bot_id, d.binding_id, d.target_user_id, d.reason, d.must_relay, d.status, d.attempts, d.last_error, d.next_attempt_at, d.last_attempt_at, d.sent_at, d.received_at, d.relayed_at, d.relay_channel, d.relay_ref, d.relay_error, d.handled_reason, d.blocked_reason, d.fallback_at, d.uncertain_at, d.artifacts, d.created_at, d.updated_at, d.relay_target, e.id, e.event_id, e.workspace_id, e.family, e.event_type, e.object_type, e.object_id, e.issue_id, e.chat_session_id, e.chat_message_id, e.comment_id, e.task_id, e.attachment_id, e.changes, e.actor_type, e.actor_id, e.via_bot_id, e.on_behalf_of_user_id, e.actor_task_id, e.actor_source, e.occurred_at, e.stream_seq, e.sealed_at, e.meaning, e.summary, e.must_relay, e.pending_approval, e.business_key, e.recipient_gap
 FROM office_event_delivery d
 JOIN office_event e ON e.event_id = d.event_id
 WHERE d.must_relay AND d.fallback_at IS NULL
@@ -851,6 +859,7 @@ func (q *Queries) ListOfficeFallbackDue(ctx context.Context, arg ListOfficeFallb
 			&i.OfficeEventDelivery.Artifacts,
 			&i.OfficeEventDelivery.CreatedAt,
 			&i.OfficeEventDelivery.UpdatedAt,
+			&i.OfficeEventDelivery.RelayTarget,
 			&i.OfficeEvent.ID,
 			&i.OfficeEvent.EventID,
 			&i.OfficeEvent.WorkspaceID,
