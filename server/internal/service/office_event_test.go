@@ -47,6 +47,19 @@ func TestClassifyOfficeRoutingDoneOnReleaseWorkIsNotAPermission(t *testing.T) {
 		!strings.Contains(got.Summary, "系统改成完成，正式发布仍待批准") {
 		t.Fatalf("%+v", got)
 	}
+	// An agent's close, a reviewer's verdict (an agent) and a Bot acting for
+	// its owner are not the person's approval either.
+	viaBot := statusFacts("in_review", "done", "member", "", "正式发布 v2")
+	viaBot.ViaBot = true
+	for _, f := range []OfficeFacts{
+		statusFacts("in_review", "done", "agent", "", "正式发布 v2"),
+		statusFacts("in_review", "done", "system", "", "正式发布 v2"),
+		viaBot,
+	} {
+		if got := ClassifyOffice(f); !got.PendingApproval || got.Meaning != OfficeMeaningPendingRel || !got.MustRelay {
+			t.Errorf("%+v sealed as %+v", f, got)
+		}
+	}
 	for _, f := range []OfficeFacts{
 		statusFacts("in_review", "done", "member", "", "正式发布 v2"),     // a person decided
 		statusFacts("in_review", "done", "system", "routing", "整理文档"), // not release work
