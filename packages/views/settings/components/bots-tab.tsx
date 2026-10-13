@@ -337,6 +337,7 @@ function BotFormDialog({
               id="bot-name"
               autoComplete="off"
               value={name}
+              // eslint-disable-next-line no-restricted-syntax -- product name example, not translated
               placeholder="Grok"
               onChange={(e) => setName(e.target.value)}
             />
