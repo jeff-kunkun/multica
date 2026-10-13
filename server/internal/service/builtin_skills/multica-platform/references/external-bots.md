@@ -19,7 +19,8 @@ Bot key, saves it with the server and workspace into the CLI profile, and
 prints the onboarding steps — no key is ever shown to a person. The same yes
 saves the webhook and makes the Bot the approver's decisions channel with
 every activity flowing to it (a verify event follows; answer it with the
-usual `woken` receipt). `--wait` (default 15m) bounds the wait; `--output
+usual `woken` receipt). Key, address and binding are saved together: if any
+part fails the claim fails and the CLI's retry starts it over. `--wait` (default 15m) bounds the wait; `--output
 json` returns `status`, `bot_id`, `workspace_id`, `workspace_name` and
 `receives_push`. Outcomes: refused → "管理员拒绝了这次接入"; expired or lost
 → run it again. If the answer to the claim is lost, polling again is safe:

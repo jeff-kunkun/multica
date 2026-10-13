@@ -207,4 +207,70 @@ func TestBotConnect_OneYesConnectsBot(t *testing.T) {
 	if code, out := claim(s3, s3.ClaimToken); code != http.StatusOK || out.Status != "expired" {
 		t.Fatalf("claim expired = %d %+v", code, out)
 	}
+
+	// The binding is part of the connect: when it cannot be written nothing is
+	// kept — no key, no claimed request, and the person's current Bot stays —
+	// so the Bot's retry starts over and ends with decisions reaching it.
+	activeBot := func() string {
+		t.Helper()
+		var bot string
+		dbfx.QueryRow(t, `SELECT coalesce((SELECT bot_id::text FROM member_bot_binding
+			WHERE workspace_id = $1 AND user_id = $2 AND revoked_at IS NULL), '')`, wsID, adminID).Scan(&bot)
+		return bot
+	}
+	before := activeBot()
+	if before != out.BotID {
+		t.Fatalf("bound bot = %q, want %q", before, out.BotID)
+	}
+	s4 := start()
+	if rec := call("POST", "/api/bot-connect/"+s4.Code+"/approve", adminKey, approveBody); rec.Code != http.StatusOK {
+		t.Fatalf("approve s4: %d %s", rec.Code, rec.Body)
+	}
+	dbfx.Exec(t, fmt.Sprintf(`CREATE OR REPLACE FUNCTION bot_connect_test_fail_binding() RETURNS trigger AS $$
+		BEGIN IF NEW.user_id = '%s' THEN RAISE EXCEPTION 'binding unavailable'; END IF; RETURN NEW; END $$ LANGUAGE plpgsql`, adminID))
+	dbfx.Exec(t, `CREATE TRIGGER bot_connect_test_fail_binding BEFORE INSERT ON member_bot_binding
+		FOR EACH ROW EXECUTE FUNCTION bot_connect_test_fail_binding()`)
+	dropTrigger := func() {
+		_, _ = testPool.Exec(context.Background(), `DROP TRIGGER IF EXISTS bot_connect_test_fail_binding ON member_bot_binding`)
+		_, _ = testPool.Exec(context.Background(), `DROP FUNCTION IF EXISTS bot_connect_test_fail_binding()`)
+	}
+	t.Cleanup(dropTrigger)
+	if code, failed := claim(s4, s4.ClaimToken); code != http.StatusInternalServerError || failed.Token != "" {
+		t.Fatalf("claim with binding down = %d %+v, want 500 without a key", code, failed)
+	}
+	var status string
+	var botSet bool
+	dbfx.QueryRow(t, `SELECT status, bot_id IS NOT NULL FROM bot_connect_request WHERE code = $1`, s4.Code).Scan(&status, &botSet)
+	if status != "approved" || botSet {
+		t.Fatalf("after failed claim request = %s bot set %v, want approved and no bot", status, botSet)
+	}
+	if got := activeBot(); got != before {
+		t.Fatalf("after failed claim bound bot = %q, want the earlier %q kept", got, before)
+	}
+	dropTrigger()
+	code, fixed := claim(s4, s4.ClaimToken)
+	if code != http.StatusOK || fixed.Token == "" {
+		t.Fatalf("retry after binding is back = %d %+v", code, fixed)
+	}
+	if got := activeBot(); got != fixed.BotID {
+		t.Fatalf("after retry bound bot = %q, want %q", got, fixed.BotID)
+	}
+
+	// A connect claimed without its binding (before the binding joined the
+	// claim) is repaired by the Bot's retry while its key is still unused.
+	dbfx.Exec(t, `UPDATE member_bot_binding SET revoked_at = now() WHERE workspace_id = $1 AND user_id = $2 AND revoked_at IS NULL`, wsID, adminID)
+	code, healed := claim(s4, s4.ClaimToken)
+	if code != http.StatusOK || healed.Token == "" || healed.BotID != fixed.BotID {
+		t.Fatalf("retry to repair = %d %+v", code, healed)
+	}
+	if got := activeBot(); got != fixed.BotID {
+		t.Fatalf("after repair bound bot = %q, want %q", got, fixed.BotID)
+	}
+	var scope []string
+	var verify int
+	dbfx.QueryRow(t, `SELECT b.activity_scope, (SELECT count(*) FROM human_needed_event e WHERE e.binding_id = b.id AND e.kind = 'verify')
+		FROM member_bot_binding b WHERE b.workspace_id = $1 AND b.user_id = $2 AND b.revoked_at IS NULL`, wsID, adminID).Scan(&scope, &verify)
+	if len(scope) != 1 || scope[0] != "owner_visible_all" || verify != 1 {
+		t.Fatalf("repaired binding scope %v verify events %d", scope, verify)
+	}
 }

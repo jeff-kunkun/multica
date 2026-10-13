@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/subtle"
 	"encoding/hex"
@@ -382,6 +383,14 @@ func (h *Handler) ClaimBotConnect(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	var replaced []db.HumanNeededEvent
+	if len(row.WebhookSecret) > 0 {
+		if replaced, err = bindConnectedBot(ctx, q, row.WorkspaceID, row.ApprovedBy, bot.ID); err != nil {
+			slog.Warn("bot connect: binding failed", "error", err)
+			writeError(w, http.StatusInternalServerError, "failed to claim")
+			return
+		}
+	}
 	if err := q.MarkBotConnectRequestClaimed(ctx, db.MarkBotConnectRequestClaimedParams{ID: row.ID, BotID: bot.ID}); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to claim")
 		return
@@ -390,9 +399,7 @@ func (h *Handler) ClaimBotConnect(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to claim")
 		return
 	}
-	if len(row.WebhookSecret) > 0 {
-		h.bindConnectedBot(r, row.WorkspaceID, row.ApprovedBy, bot.ID)
-	}
+	h.fallBackReplaced(context.WithoutCancel(ctx), replaced)
 	h.writeBotConnectClaimed(w, r, row, bot.ID, raw)
 }
 
@@ -428,6 +435,11 @@ func (h *Handler) reclaimBotConnect(w http.ResponseWriter, r *http.Request, tx p
 					TokenHash: hash, TokenPrefix: prefix, ExpiresAt: bot.ExpiresAt,
 				})
 			}
+			// The connect is not finished until decisions reach this Bot: a
+			// claim committed without its binding gets it back here.
+			if err == nil && len(row.WebhookSecret) > 0 {
+				err = ensureConnectedBotBound(ctx, q, row.WorkspaceID, row.ApprovedBy, bot.ID)
+			}
 			if err == nil {
 				err = tx.Commit(ctx)
 			}
@@ -444,27 +456,63 @@ func (h *Handler) reclaimBotConnect(w http.ResponseWriter, r *http.Request, tx p
 
 // bindConnectedBot makes the newly connected Bot the approver's channel: what
 // needs their decision and everything they can see goes to it. It replaces an
-// earlier Bot, since reconnecting means the old one is gone. Best effort — the
-// Bot is connected either way, and the binding can still be changed later.
-func (h *Handler) bindConnectedBot(r *http.Request, ws, user, botID pgtype.UUID) {
-	ctx := r.Context()
-	if _, err := h.Queries.GetMemberBotBinding(ctx, db.GetMemberBotBindingParams{WorkspaceID: ws, UserID: user}); err == nil {
-		h.dropBotBinding(ctx, ws, user)
+// earlier Bot, since reconnecting means the old one is gone. It runs inside the
+// claim transaction, so the key, the address and the binding land together or
+// not at all; the earlier binding's open questions are returned so the caller
+// can hand them back to the person once the change is committed.
+func bindConnectedBot(ctx context.Context, q *db.Queries, ws, user, botID pgtype.UUID) ([]db.HumanNeededEvent, error) {
+	var replaced []db.HumanNeededEvent
+	old, err := q.RevokeMemberBotBinding(ctx, db.RevokeMemberBotBindingParams{WorkspaceID: ws, UserID: user})
+	switch {
+	case err == nil:
+		if replaced, err = q.ListOpenHumanNeededForBinding(ctx, old.ID); err != nil {
+			return nil, err
+		}
+		for _, ev := range replaced {
+			if err := q.CancelHumanNeededEvent(ctx, db.CancelHumanNeededEventParams{EventID: ev.EventID, Reason: "binding removed"}); err != nil {
+				return nil, err
+			}
+		}
+	case !errors.Is(err, pgx.ErrNoRows):
+		return nil, err
 	}
-	binding, err := h.Queries.CreateMemberBotBinding(ctx, db.CreateMemberBotBindingParams{
+	binding, err := q.CreateMemberBotBinding(ctx, db.CreateMemberBotBindingParams{
 		WorkspaceID: ws, UserID: user, BotID: botID, Mode: service.HumanBindBotFirst,
 		ResendAfterSeconds: 180, EscalateAfterSeconds: 300,
 	})
 	if err != nil {
-		slog.Warn("bot connect: binding failed", "error", err)
-		return
+		return nil, err
 	}
-	if _, err := h.Queries.SetMemberBotBindingActivityScope(ctx, db.SetMemberBotBindingActivityScopeParams{
+	if _, err := q.SetMemberBotBindingActivityScope(ctx, db.SetMemberBotBindingActivityScopeParams{
 		ID: binding.ID, ActivityScope: []string{service.ActivityScopeAll},
 	}); err != nil {
-		slog.Warn("bot connect: activity scope failed", "error", err)
+		return nil, err
 	}
-	if _, err := service.CreateHumanChannelVerify(ctx, h.Queries, binding); err != nil {
-		slog.Warn("bot connect: verify event failed", "error", err)
+	if _, err := service.CreateHumanChannelVerify(ctx, q, binding); err != nil {
+		return nil, err
+	}
+	return replaced, nil
+}
+
+// ensureConnectedBotBound repairs a connect whose binding never landed (one
+// claimed before the binding joined the claim transaction). It binds only when
+// the person has no channel at all, so a Bot they have since chosen stays.
+func ensureConnectedBotBound(ctx context.Context, q *db.Queries, ws, user, botID pgtype.UUID) error {
+	_, err := q.GetMemberBotBinding(ctx, db.GetMemberBotBindingParams{WorkspaceID: ws, UserID: user})
+	if err == nil {
+		return nil
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return err
+	}
+	_, err = bindConnectedBot(ctx, q, ws, user, botID)
+	return err
+}
+
+// fallBackReplaced puts the replaced binding's open questions back in the
+// person's inbox. Their events are already cancelled with the claim.
+func (h *Handler) fallBackReplaced(ctx context.Context, events []db.HumanNeededEvent) {
+	for _, ev := range events {
+		service.FallbackHumanNeededInApp(ctx, h.Queries, h.Bus, ev)
 	}
 }
