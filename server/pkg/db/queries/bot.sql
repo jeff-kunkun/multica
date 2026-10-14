@@ -64,10 +64,21 @@ SELECT sqlc.arg('workspace_id'), sqlc.arg('type'), sqlc.arg('actor_type'), sqlc.
 WHERE EXISTS (SELECT 1 FROM workspace_bot WHERE workspace_id = sqlc.arg('workspace_id'));
 
 -- name: ListBotEventsAfter :many
+-- An event addressed to one person (payload.for_user_id: their inbox item or
+-- chat reply) goes only to Bots that are that person or stand in for them.
 SELECT * FROM bot_event
-WHERE workspace_id = $1 AND id > $2
+WHERE workspace_id = sqlc.arg('workspace_id') AND id > sqlc.arg('after')
+  AND (payload->>'for_user_id' IS NULL
+       OR payload->>'for_user_id' IN (sqlc.arg('bot_user_id')::uuid::text, sqlc.arg('bot_creator_id')::uuid::text))
 ORDER BY id ASC
-LIMIT $3;
+LIMIT sqlc.arg('limit_count');
+
+-- name: IsBotOrBotCreator :one
+-- Whether userID is a Bot in the workspace or the person a Bot there stands in for.
+SELECT EXISTS (
+    SELECT 1 FROM workspace_bot
+    WHERE workspace_id = $1 AND (user_id = $2 OR created_by = $2)
+);
 
 -- name: PruneBotEvents :exec
 DELETE FROM bot_event WHERE created_at < $1;
@@ -79,7 +90,9 @@ DELETE FROM bot_event WHERE created_at < $1;
 UPDATE workspace_bot b SET webhook_next_attempt_at = now() + interval '1 minute'
 WHERE b.webhook_url <> ''
   AND (b.webhook_next_attempt_at IS NULL OR b.webhook_next_attempt_at <= now())
-  AND EXISTS (SELECT 1 FROM bot_event e WHERE e.workspace_id = b.workspace_id AND e.id > b.webhook_cursor)
+  AND EXISTS (SELECT 1 FROM bot_event e WHERE e.workspace_id = b.workspace_id AND e.id > b.webhook_cursor
+              AND (e.payload->>'for_user_id' IS NULL
+                   OR e.payload->>'for_user_id' IN (b.user_id::text, b.created_by::text)))
 RETURNING b.*;
 
 -- name: MarkBotWebhookDelivered :exec

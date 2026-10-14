@@ -18,6 +18,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/auth"
 	"github.com/multica-ai/multica/server/internal/logger"
+	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
@@ -552,6 +553,40 @@ func (h *Handler) SetBotWebhook(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+type actingBotKey struct{}
+
+// actingBotName is the name of the Bot standing in for the caller, if any.
+func actingBotName(ctx context.Context) string {
+	name, _ := ctx.Value(actingBotKey{}).(string)
+	return name
+}
+
+// ActAsBotCreator lets a Bot stand in for the person who created it: on the
+// routes it wraps (chats and inbox) the creator is the caller, so the Bot reads
+// and answers what would otherwise wait for that person. It runs after the
+// workspace membership check, so a Bot reaches them only in its own workspace.
+func (h *Handler) ActAsBotCreator(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		bot, ok := h.BotForUser(r.Context(), requestUserID(r))
+		if !ok {
+			next.ServeHTTP(w, r)
+			return
+		}
+		workspaceID := ctxWorkspaceID(r.Context())
+		member, err := h.Queries.GetMemberByUserAndWorkspace(r.Context(), db.GetMemberByUserAndWorkspaceParams{
+			UserID: bot.CreatedBy, WorkspaceID: parseUUID(workspaceID),
+		})
+		if workspaceID != uuidToString(bot.WorkspaceID) || err != nil {
+			writeError(w, http.StatusForbidden, "the person this Bot stands in for is not in this workspace")
+			return
+		}
+		r.Header.Set("X-User-ID", uuidToString(bot.CreatedBy))
+		ctx := middleware.SetMemberContext(r.Context(), workspaceID, member)
+		ctx = context.WithValue(ctx, actingBotKey{}, bot.Name)
+		next.ServeHTTP(w, r.WithContext(ctx))
+	})
+}
+
 // BotForUser returns the Bot record when userID belongs to a Bot.
 func (h *Handler) BotForUser(ctx context.Context, userID string) (db.WorkspaceBot, bool) {
 	uid, err := util.ParseUUID(userID)
@@ -591,7 +626,7 @@ func (h *Handler) ListBotEvents(w http.ResponseWriter, r *http.Request) {
 	if limit <= 0 || limit > botEventPageMax {
 		limit = botEventPageMax
 	}
-	resp, err := h.BotEventsAfter(r.Context(), bot.WorkspaceID, after, limit)
+	resp, err := h.BotEventsAfter(r.Context(), bot, after, limit)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list events")
 		return
@@ -599,11 +634,13 @@ func (h *Handler) ListBotEvents(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, resp)
 }
 
-func (h *Handler) BotEventsAfter(ctx context.Context, workspaceID pgtype.UUID, after int64, limit int) (BotEventsResponse, error) {
+func (h *Handler) BotEventsAfter(ctx context.Context, bot db.WorkspaceBot, after int64, limit int) (BotEventsResponse, error) {
 	rows, err := h.Queries.ListBotEventsAfter(ctx, db.ListBotEventsAfterParams{
-		WorkspaceID: workspaceID,
-		ID:          after,
-		Limit:       int32(limit + 1),
+		WorkspaceID:  bot.WorkspaceID,
+		After:        after,
+		BotUserID:    bot.UserID,
+		BotCreatorID: bot.CreatedBy,
+		LimitCount:   int32(limit + 1),
 	})
 	if err != nil {
 		return BotEventsResponse{}, err

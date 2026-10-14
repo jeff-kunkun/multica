@@ -7,13 +7,16 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"slices"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
+	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
 func TestShouldRecord(t *testing.T) {
@@ -158,5 +161,82 @@ func TestDeliverer(t *testing.T) {
 	}
 	if b := reload(); b.WebhookCursor != got[1].NextCursor || b.WebhookFailures != 0 || b.WebhookLastError != "" {
 		t.Fatalf("after success: cursor=%d failures=%d", b.WebhookCursor, b.WebhookFailures)
+	}
+}
+
+// TestRecordsWhatAPersonWouldRead checks that an inbox item is recorded only
+// for a person a Bot is or stands in for, and reaches only that Bot.
+func TestRecordsWhatAPersonWouldRead(t *testing.T) {
+	dbURL := os.Getenv("DATABASE_URL")
+	if dbURL == "" {
+		t.Skip("DATABASE_URL not set")
+	}
+	ctx := context.Background()
+	pool, err := pgxpool.New(ctx, dbURL)
+	if err != nil || pool.Ping(ctx) != nil {
+		t.Skip("database not reachable")
+	}
+	defer pool.Close()
+	q := db.New(pool)
+
+	ids := make([]string, 6)
+	for i := range ids {
+		if err := pool.QueryRow(ctx, `SELECT gen_random_uuid()::text`).Scan(&ids[i]); err != nil {
+			t.Fatal(err)
+		}
+	}
+	wsID, botA, kun, botB, colleague, stranger := ids[0], ids[1], ids[2], ids[3], ids[4], ids[5]
+	ws := util.MustParseUUID(wsID)
+	t.Cleanup(func() {
+		pool.Exec(context.Background(), `DELETE FROM bot_event WHERE workspace_id = $1`, wsID)
+		pool.Exec(context.Background(), `DELETE FROM workspace_bot WHERE workspace_id = $1`, wsID)
+	})
+	bots := map[string]db.WorkspaceBot{}
+	for user, creator := range map[string]string{botA: kun, botB: colleague} {
+		b, err := q.CreateWorkspaceBot(ctx, db.CreateWorkspaceBotParams{
+			WorkspaceID: ws, UserID: util.MustParseUUID(user), Name: "pm",
+			CreatedBy: util.MustParseUUID(creator),
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		bots[user] = b
+	}
+
+	bus := events.New()
+	Register(bus, q)
+	inbox := func(recipient string) {
+		bus.Publish(events.Event{Type: protocol.EventInboxNew, WorkspaceID: wsID, Payload: map[string]any{
+			"item": map[string]any{"recipient_id": recipient, "title": "for " + recipient},
+		}})
+	}
+	inbox(kun)
+	inbox(botB)
+	inbox(stranger)
+	bus.Publish(events.Event{Type: "issue:created", WorkspaceID: wsID, Payload: map[string]any{}})
+
+	seen := func(user string) []string {
+		b := bots[user]
+		rows, err := q.ListBotEventsAfter(ctx, db.ListBotEventsAfterParams{
+			WorkspaceID: ws, After: 0, BotUserID: b.UserID, BotCreatorID: b.CreatedBy, LimitCount: 50,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var out []string
+		for _, r := range rows {
+			var p struct {
+				For string `json:"for_user_id"`
+			}
+			_ = json.Unmarshal(r.Payload, &p)
+			out = append(out, r.Type+"/"+p.For)
+		}
+		return out
+	}
+	if got, want := seen(botA), []string{"inbox:new/" + kun, "issue:created/"}; !slices.Equal(got, want) {
+		t.Fatalf("Kun's Bot sees %v, want %v", got, want)
+	}
+	if got, want := seen(botB), []string{"inbox:new/" + botB, "issue:created/"}; !slices.Equal(got, want) {
+		t.Fatalf("colleague's Bot sees %v, want %v", got, want)
 	}
 }

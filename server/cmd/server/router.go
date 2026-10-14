@@ -955,7 +955,10 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			// Workspace-wide 30-day run counts per agent for the Agents-list RUNS column.
 			r.Get("/api/agent-run-counts", h.GetWorkspaceAgentRunCounts)
 
+			// A Bot stands in for its creator in chats and the inbox
+			// (ActAsBotCreator); everyone else is unaffected.
 			r.Route("/api/chat/sessions", func(r chi.Router) {
+				r.Use(h.ActAsBotCreator)
 				r.Post("/", h.CreateChatSession)
 				r.Get("/", h.ListChatSessions)
 				r.Route("/{sessionId}", func(r chi.Router) {
@@ -977,8 +980,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Delete("/draft-restores/{restoreId}", h.ConsumeChatDraftRestore)
 				})
 			})
-			r.Get("/api/chat/pending-tasks", h.ListPendingChatTasks)
-			r.Get("/api/chat/pending-tasks/has-any", h.HasPendingChatTasks)
+			r.With(h.ActAsBotCreator).Get("/api/chat/pending-tasks", h.ListPendingChatTasks)
+			r.With(h.ActAsBotCreator).Get("/api/chat/pending-tasks/has-any", h.HasPendingChatTasks)
 
 			// Quick-agent bar: per-user pinned agents for one-tap new chats.
 			r.Get("/api/chat/pinned-agents", h.ListChatPinnedAgents)
@@ -992,25 +995,29 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 
 			// Inbox
 			r.Route("/api/inbox", func(r chi.Router) {
-				r.Get("/", h.ListInbox)
-				// Archived notifications, for the inbox's "Archived" sub-view.
-				// Separate from "/" so the main list keeps its contract and
-				// never carries the unbounded archive.
-				r.Get("/archived", h.ListArchivedInbox)
-				r.Get("/archived/page", h.ListArchivedInboxPage)
-				r.Get("/archived/facets", h.GetArchivedInboxFacets)
-				r.Get("/unread-count", h.CountUnreadInbox)
 				// Cross-workspace unread summary: account-level, keyed on the
 				// user. Backs the workspace-switcher dot for OTHER workspaces.
+				// Outside ActAsBotCreator: a Bot sees only its own workspace.
 				r.Get("/unread-summary", h.UnreadInboxSummary)
-				r.Post("/mark-all-read", h.MarkAllInboxRead)
-				r.Post("/archive-all", h.ArchiveAllInbox)
-				r.Post("/archive-all-read", h.ArchiveAllReadInbox)
-				r.Post("/archive-completed", h.ArchiveCompletedInbox)
-				r.Post("/{id}/read", h.MarkInboxRead)
-				r.Post("/{id}/unread", h.MarkInboxUnread)
-				r.Post("/{id}/archive", h.ArchiveInboxItem)
-				r.Post("/{id}/unarchive", h.UnarchiveInboxItem)
+				r.Group(func(r chi.Router) {
+					r.Use(h.ActAsBotCreator)
+					r.Get("/", h.ListInbox)
+					// Archived notifications, for the inbox's "Archived" sub-view.
+					// Separate from "/" so the main list keeps its contract and
+					// never carries the unbounded archive.
+					r.Get("/archived", h.ListArchivedInbox)
+					r.Get("/archived/page", h.ListArchivedInboxPage)
+					r.Get("/archived/facets", h.GetArchivedInboxFacets)
+					r.Get("/unread-count", h.CountUnreadInbox)
+					r.Post("/mark-all-read", h.MarkAllInboxRead)
+					r.Post("/archive-all", h.ArchiveAllInbox)
+					r.Post("/archive-all-read", h.ArchiveAllReadInbox)
+					r.Post("/archive-completed", h.ArchiveCompletedInbox)
+					r.Post("/{id}/read", h.MarkInboxRead)
+					r.Post("/{id}/unread", h.MarkInboxUnread)
+					r.Post("/{id}/archive", h.ArchiveInboxItem)
+					r.Post("/{id}/unarchive", h.UnarchiveInboxItem)
+				})
 			})
 
 			// Notification preferences

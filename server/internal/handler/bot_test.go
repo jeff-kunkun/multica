@@ -257,7 +257,7 @@ func TestBotEventFeed(t *testing.T) {
 	ws := util.MustParseUUID(testWorkspaceID)
 
 	// Without a Bot in the workspace nothing is recorded.
-	before, _ := testHandler.BotEventsAfter(ctx, ws, 0, 200)
+	before, _ := testHandler.BotEventsAfter(ctx, db.WorkspaceBot{WorkspaceID: ws}, 0, 200)
 	insert := func(typ string) {
 		if err := testHandler.Queries.InsertBotEvent(ctx, db.InsertBotEventParams{
 			WorkspaceID: ws, Type: typ, ActorType: "member", ActorID: testUserID, Payload: []byte(`{"n":1}`),
@@ -267,7 +267,7 @@ func TestBotEventFeed(t *testing.T) {
 	}
 	dbfx.Exec(t, `DELETE FROM workspace_bot WHERE workspace_id = $1`, testWorkspaceID)
 	insert("issue:created")
-	after, _ := testHandler.BotEventsAfter(ctx, ws, before.NextCursor, 200)
+	after, _ := testHandler.BotEventsAfter(ctx, db.WorkspaceBot{WorkspaceID: ws}, before.NextCursor, 200)
 	if len(after.Events) != 0 {
 		t.Fatalf("recorded without a bot: %+v", after.Events)
 	}
@@ -289,7 +289,11 @@ func TestBotEventFeed(t *testing.T) {
 	if w.Code != http.StatusOK || len(page.Events) != 2 || !page.HasMore || page.Events[0].Type != "issue:created" {
 		t.Fatalf("page 1: %d %s", w.Code, w.Body.String())
 	}
-	rest, _ := testHandler.BotEventsAfter(ctx, ws, page.NextCursor, 200)
+	record, err := testHandler.Queries.GetWorkspaceBotByUser(ctx, util.MustParseUUID(bot.UserID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	rest, _ := testHandler.BotEventsAfter(ctx, record, page.NextCursor, 200)
 	if len(rest.Events) != 1 || rest.Events[0].Type != "issue:updated" || rest.HasMore {
 		t.Fatalf("page 2: %+v", rest)
 	}
@@ -305,4 +309,72 @@ func TestBotEventFeed(t *testing.T) {
 func itoa64(v int64) string {
 	b, _ := json.Marshal(v)
 	return string(b)
+}
+
+// TestBotStandsInForItsCreator: on chat and inbox routes a Bot is its creator,
+// so it reads the creator's chats and answers in them under its own name.
+func TestBotStandsInForItsCreator(t *testing.T) {
+	agentID := createHandlerTestAgent(t, "StandInAgent", []byte("[]"))
+	sessionID := createHandlerTestChatSession(t, agentID)
+	bot := createTestBot(t, map[string]any{"name": "Stand-in"})
+
+	asBot := func(method, path string, body any, h http.HandlerFunc) *httptest.ResponseRecorder {
+		req := newRequestAs(bot.UserID, method, path, body)
+		req = withURLParam(req, "sessionId", sessionID)
+		req = chatPendingCtxAs(t, req, bot.UserID)
+		w := httptest.NewRecorder()
+		testHandler.ActAsBotCreator(h).ServeHTTP(w, req)
+		return w
+	}
+
+	w := asBot("GET", "/api/chat/sessions", nil, testHandler.ListChatSessions)
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), sessionID) {
+		t.Fatalf("Bot lists its creator's chats: %d %s", w.Code, w.Body.String())
+	}
+
+	w = asBot("POST", "/api/chat/sessions/"+sessionID+"/messages", map[string]any{"content": "收到，按方案做"}, testHandler.SendChatMessage)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("Bot answers in its creator's chat: %d %s", w.Code, w.Body.String())
+	}
+	var content string
+	dbfx.QueryRow(t, `SELECT content FROM chat_message WHERE chat_session_id = $1 AND role = 'user' ORDER BY created_at DESC LIMIT 1`, sessionID).Scan(&content)
+	if content != "[Stand-in] 收到，按方案做" {
+		t.Fatalf("message = %q, want it signed by the Bot", content)
+	}
+
+	w = asBot("GET", "/api/inbox", nil, testHandler.ListInbox)
+	if w.Code != http.StatusOK {
+		t.Fatalf("Bot reads its creator's inbox: %d %s", w.Code, w.Body.String())
+	}
+}
+
+// TestBotEventFeedKeepsPersonalEventsPrivate: an event addressed to one person
+// reaches only the Bot that is or stands in for that person.
+func TestBotEventFeedKeepsPersonalEventsPrivate(t *testing.T) {
+	ctx := context.Background()
+	ws := util.MustParseUUID(testWorkspaceID)
+	bot := createTestBot(t, map[string]any{"name": "Private"})
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM bot_event WHERE workspace_id = $1`, testWorkspaceID)
+	})
+	record, err := testHandler.Queries.GetWorkspaceBotByUser(ctx, util.MustParseUUID(bot.UserID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	start, _ := testHandler.BotEventsAfter(ctx, record, 0, 200)
+	for _, forUser := range []string{testUserID, bot.UserID, "00000000-0000-0000-0000-000000000001", ""} {
+		payload := `{}`
+		if forUser != "" {
+			payload = `{"for_user_id":"` + forUser + `"}`
+		}
+		if err := testHandler.Queries.InsertBotEvent(ctx, db.InsertBotEventParams{
+			WorkspaceID: ws, Type: "inbox:new", Payload: []byte(payload),
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, _ := testHandler.BotEventsAfter(ctx, record, start.NextCursor, 200)
+	if len(got.Events) != 3 || strings.Contains(string(got.Events[0].Payload)+string(got.Events[1].Payload)+string(got.Events[2].Payload), "000000000001") {
+		t.Fatalf("events = %+v", got.Events)
+	}
 }

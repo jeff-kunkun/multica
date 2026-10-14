@@ -54,48 +54,73 @@ func ShouldRecord(eventType string) bool {
 	return false
 }
 
-// Register subscribes the recorder to the bus. inbox:new is recorded only
-// when it is addressed to a Bot, so an @mention of the Bot reaches it.
+// Register subscribes the recorder to the bus. Events addressed to one person
+// (a new inbox item, an agent's chat reply) are recorded only when that person
+// is a Bot or has a Bot standing in for them, and carry for_user_id so only
+// those Bots receive them: an @mention of a Bot reaches it, and so does
+// everything its creator would otherwise have to read.
 func Register(bus *events.Bus, q *db.Queries) {
 	bus.SubscribeAll(func(e events.Event) {
 		if e.WorkspaceID == "" {
 			return
 		}
-		if e.Type == protocol.EventInboxNew {
-			if !inboxForBot(q, e) {
-				return
+		if e.Type == protocol.EventInboxNew || e.Type == protocol.EventChatDone {
+			if userID := addressee(q, e); userID != "" {
+				record(q, e, userID)
 			}
-		} else if !ShouldRecord(e.Type) {
 			return
 		}
-		record(q, e)
+		if ShouldRecord(e.Type) {
+			record(q, e, "")
+		}
 	})
 }
 
-func inboxForBot(q *db.Queries, e events.Event) bool {
-	raw, err := json.Marshal(e.Payload)
-	if err != nil {
-		return false
-	}
-	var p struct {
-		Item struct {
-			RecipientID string `json:"recipient_id"`
-		} `json:"item"`
-	}
-	if json.Unmarshal(raw, &p) != nil || p.Item.RecipientID == "" {
-		return false
-	}
-	uid, err := util.ParseUUID(p.Item.RecipientID)
-	if err != nil {
-		return false
-	}
+// addressee returns the user an inbox item or chat reply is for, when a Bot
+// in the workspace is that user or stands in for them.
+func addressee(q *db.Queries, e events.Event) string {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	_, err = q.GetWorkspaceBotByUser(ctx, uid)
-	return err == nil
+	wsID, err := util.ParseUUID(e.WorkspaceID)
+	if err != nil {
+		return ""
+	}
+	var userID pgtype.UUID
+	if e.Type == protocol.EventChatDone {
+		sessionID, err := util.ParseUUID(e.ChatSessionID)
+		if err != nil {
+			return ""
+		}
+		session, err := q.GetChatSession(ctx, sessionID)
+		if err != nil {
+			return ""
+		}
+		userID = session.CreatorID
+	} else {
+		raw, err := json.Marshal(e.Payload)
+		if err != nil {
+			return ""
+		}
+		var p struct {
+			Item struct {
+				RecipientID string `json:"recipient_id"`
+			} `json:"item"`
+		}
+		if json.Unmarshal(raw, &p) != nil {
+			return ""
+		}
+		if userID, err = util.ParseUUID(p.Item.RecipientID); err != nil {
+			return ""
+		}
+	}
+	ok, err := q.IsBotOrBotCreator(ctx, db.IsBotOrBotCreatorParams{WorkspaceID: wsID, UserID: userID})
+	if err != nil || !ok {
+		return ""
+	}
+	return util.UUIDToString(userID)
 }
 
-func record(q *db.Queries, e events.Event) {
+func record(q *db.Queries, e events.Event, forUserID string) {
 	wsID, err := util.ParseUUID(e.WorkspaceID)
 	if err != nil {
 		return
@@ -103,6 +128,14 @@ func record(q *db.Queries, e events.Event) {
 	payload, err := json.Marshal(e.Payload)
 	if err != nil || string(payload) == "null" {
 		payload = []byte("{}")
+	}
+	if forUserID != "" {
+		var obj map[string]json.RawMessage
+		if json.Unmarshal(payload, &obj) != nil || obj == nil {
+			obj = map[string]json.RawMessage{}
+		}
+		obj["for_user_id"], _ = json.Marshal(forUserID)
+		payload, _ = json.Marshal(obj)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
@@ -197,7 +230,8 @@ func (d *Deliverer) DeliverDue(ctx context.Context) {
 
 func (d *Deliverer) deliver(ctx context.Context, b db.WorkspaceBot) {
 	rows, err := d.Queries.ListBotEventsAfter(ctx, db.ListBotEventsAfterParams{
-		WorkspaceID: b.WorkspaceID, ID: b.WebhookCursor, Limit: d.BatchSize,
+		WorkspaceID: b.WorkspaceID, After: b.WebhookCursor,
+		BotUserID: b.UserID, BotCreatorID: b.CreatedBy, LimitCount: d.BatchSize,
 	})
 	if err != nil || len(rows) == 0 {
 		// Release the lease so the next tick retries.

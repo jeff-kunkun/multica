@@ -18,7 +18,12 @@ follow progress with get_events (or register a push address once with
 set_webhook) -> close_issue when done. Issues accept a
 UUID or a key like ABC-12. Agents start working when an issue is assigned to
 them or when a comment @mentions them as [@Name](mention://agent/<id>); every
-run costs money, so mention only to start real work.`
+run costs money, so mention only to start real work.
+
+You stand in for the person who created you: their chats with agents
+(/api/chat/sessions) and their inbox (/api/inbox) are yours to read and act on,
+and their new inbox items and agents' chat replies arrive as events. The api
+tool reaches every office endpoint the Multica CLI uses.`
 
 type args map[string]any
 
@@ -453,7 +458,8 @@ func officeTools() []tool {
 		{
 			Name: "get_events",
 			Description: "Read office events after a cursor (oldest first): issue, comment, project, plan, " +
-				"member and run results, plus @mentions of this Bot. Store next_cursor and pass it back next time.",
+				"member and run results, @mentions of this Bot, new items in your creator's inbox (inbox:new) and agents' replies " +
+				"in their chats (chat:done). Store next_cursor and pass it back next time.",
 			Schema: schema(nil, map[string]any{
 				"after": map[string]any{"type": "integer", "description": "Cursor from the previous call (0 = oldest kept)."},
 				"limit": map[string]any{"type": "integer", "description": "Max events (default and cap 200)."},
@@ -489,6 +495,34 @@ func officeTools() []tool {
 					body["headers"] = h
 				}
 				return c.do("PUT", "/api/bot/webhook", body)
+			},
+		},
+		{
+			Name: "api",
+			Description: "Call any office REST endpoint as this Bot, the same API the Multica CLI uses: read and change issues, " +
+				"comments, projects, agents, skills, runtimes, settings, the inbox (/api/inbox) and chats with agents " +
+				"(GET /api/chat/sessions, GET|POST /api/chat/sessions/<id>/messages with {\"content\": ...}, " +
+				"POST /api/chat/sessions with {\"agent_id\": ...} to start one). Use the dedicated tools when one fits.",
+			Schema: schema([]string{"method", "path"}, map[string]any{
+				"method": enumProp("HTTP method.", "GET", "POST", "PUT", "PATCH", "DELETE"),
+				"path":   strProp("Path with query string, starting with /api/, e.g. /api/issues?status=todo."),
+				"body":   map[string]any{"type": "object", "description": "JSON body for POST, PUT and PATCH."},
+			}),
+			Call: func(c *caller, a args) (any, error) {
+				method := strings.ToUpper(a.str("method"))
+				switch method {
+				case "GET", "POST", "PUT", "PATCH", "DELETE":
+				default:
+					return nil, errors.New("method must be GET, POST, PUT, PATCH or DELETE")
+				}
+				path, err := a.required("path")
+				if err != nil {
+					return nil, err
+				}
+				if !strings.HasPrefix(path, "/api/") || strings.HasPrefix(path, "/api/mcp") {
+					return nil, errors.New("path must start with /api/ and cannot be /api/mcp")
+				}
+				return c.do(method, path, a["body"])
 			},
 		},
 	}
