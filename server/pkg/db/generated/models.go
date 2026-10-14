@@ -324,6 +324,19 @@ type BotEvent struct {
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 }
 
+type BotWebhookReceiver struct {
+	ID            pgtype.UUID        `json:"id"`
+	BotID         pgtype.UUID        `json:"bot_id"`
+	Name          string             `json:"name"`
+	Url           string             `json:"url"`
+	Headers       []byte             `json:"headers"`
+	Cursor        int64              `json:"cursor"`
+	Failures      int32              `json:"failures"`
+	NextAttemptAt pgtype.Timestamptz `json:"next_attempt_at"`
+	LastError     string             `json:"last_error"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+}
+
 type ChannelBindingToken struct {
 	TokenHash      string             `json:"token_hash"`
 	WorkspaceID    pgtype.UUID        `json:"workspace_id"`

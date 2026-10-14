@@ -253,6 +253,10 @@ deleted_plans AS (
 deleted_plan_approvers AS (
     DELETE FROM plan_approver WHERE plan_approver.workspace_id = $1
 ),
+deleted_bot_webhook_receivers AS (
+    DELETE FROM bot_webhook_receiver
+    WHERE bot_webhook_receiver.bot_id IN (SELECT workspace_bot.id FROM workspace_bot WHERE workspace_bot.workspace_id = $1)
+),
 deleted_workspace_bots AS (
     DELETE FROM workspace_bot WHERE workspace_bot.workspace_id = $1
 ),

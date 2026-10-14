@@ -11,6 +11,66 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const claimDueBotWebhookReceivers = `-- name: ClaimDueBotWebhookReceivers :many
+UPDATE bot_webhook_receiver r SET next_attempt_at = now() + interval '1 minute'
+FROM workspace_bot b
+WHERE r.bot_id = b.id
+  AND (r.next_attempt_at IS NULL OR r.next_attempt_at <= now())
+  AND EXISTS (SELECT 1 FROM bot_event e WHERE e.workspace_id = b.workspace_id AND e.id > r.cursor
+              AND (e.payload->>'for_user_id' IS NULL
+                   OR e.payload->>'for_user_id' IN (b.user_id::text, b.created_by::text)))
+RETURNING r.id, r.bot_id, r.name, r.url, r.headers, r.cursor, r.failures,
+    b.workspace_id, b.user_id, b.created_by, b.webhook_secret
+`
+
+type ClaimDueBotWebhookReceiversRow struct {
+	ID            pgtype.UUID `json:"id"`
+	BotID         pgtype.UUID `json:"bot_id"`
+	Name          string      `json:"name"`
+	Url           string      `json:"url"`
+	Headers       []byte      `json:"headers"`
+	Cursor        int64       `json:"cursor"`
+	Failures      int32       `json:"failures"`
+	WorkspaceID   pgtype.UUID `json:"workspace_id"`
+	UserID        pgtype.UUID `json:"user_id"`
+	CreatedBy     pgtype.UUID `json:"created_by"`
+	WebhookSecret string      `json:"webhook_secret"`
+}
+
+// Same lease as ClaimDueBotWebhooks, for the extra receivers. A receiver gets
+// exactly the events its Bot would.
+func (q *Queries) ClaimDueBotWebhookReceivers(ctx context.Context) ([]ClaimDueBotWebhookReceiversRow, error) {
+	rows, err := q.db.Query(ctx, claimDueBotWebhookReceivers)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ClaimDueBotWebhookReceiversRow{}
+	for rows.Next() {
+		var i ClaimDueBotWebhookReceiversRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.BotID,
+			&i.Name,
+			&i.Url,
+			&i.Headers,
+			&i.Cursor,
+			&i.Failures,
+			&i.WorkspaceID,
+			&i.UserID,
+			&i.CreatedBy,
+			&i.WebhookSecret,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const claimDueBotWebhooks = `-- name: ClaimDueBotWebhooks :many
 UPDATE workspace_bot b SET webhook_next_attempt_at = now() + interval '1 minute'
 WHERE b.webhook_url <> ''
@@ -108,6 +168,29 @@ func (q *Queries) CreateWorkspaceBot(ctx context.Context, arg CreateWorkspaceBot
 		&i.WebhookHeaders,
 	)
 	return i, err
+}
+
+const deleteBotWebhookReceiver = `-- name: DeleteBotWebhookReceiver :exec
+DELETE FROM bot_webhook_receiver WHERE bot_id = $1 AND name = $2
+`
+
+type DeleteBotWebhookReceiverParams struct {
+	BotID pgtype.UUID `json:"bot_id"`
+	Name  string      `json:"name"`
+}
+
+func (q *Queries) DeleteBotWebhookReceiver(ctx context.Context, arg DeleteBotWebhookReceiverParams) error {
+	_, err := q.db.Exec(ctx, deleteBotWebhookReceiver, arg.BotID, arg.Name)
+	return err
+}
+
+const deleteBotWebhookReceiversByBot = `-- name: DeleteBotWebhookReceiversByBot :exec
+DELETE FROM bot_webhook_receiver WHERE bot_id = $1
+`
+
+func (q *Queries) DeleteBotWebhookReceiversByBot(ctx context.Context, botID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, deleteBotWebhookReceiversByBot, botID)
+	return err
 }
 
 const deleteWorkspaceBot = `-- name: DeleteWorkspaceBot :exec
@@ -332,6 +415,43 @@ func (q *Queries) ListBotEventsAfter(ctx context.Context, arg ListBotEventsAfter
 	return items, nil
 }
 
+const listBotWebhookReceivers = `-- name: ListBotWebhookReceivers :many
+SELECT id, bot_id, name, url, headers, cursor, failures, next_attempt_at, last_error, created_at FROM bot_webhook_receiver
+WHERE bot_id = $1
+ORDER BY created_at ASC
+`
+
+func (q *Queries) ListBotWebhookReceivers(ctx context.Context, botID pgtype.UUID) ([]BotWebhookReceiver, error) {
+	rows, err := q.db.Query(ctx, listBotWebhookReceivers, botID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []BotWebhookReceiver{}
+	for rows.Next() {
+		var i BotWebhookReceiver
+		if err := rows.Scan(
+			&i.ID,
+			&i.BotID,
+			&i.Name,
+			&i.Url,
+			&i.Headers,
+			&i.Cursor,
+			&i.Failures,
+			&i.NextAttemptAt,
+			&i.LastError,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listWorkspaceBots = `-- name: ListWorkspaceBots :many
 SELECT id, workspace_id, user_id, name, can_release, webhook_url, webhook_secret, webhook_cursor, webhook_failures, webhook_next_attempt_at, webhook_last_error, created_by, created_at, webhook_headers FROM workspace_bot
 WHERE workspace_id = $1
@@ -411,6 +531,44 @@ func (q *Queries) MarkBotWebhookFailed(ctx context.Context, arg MarkBotWebhookFa
 	return err
 }
 
+const markBotWebhookReceiverDelivered = `-- name: MarkBotWebhookReceiverDelivered :exec
+UPDATE bot_webhook_receiver SET
+    cursor = GREATEST(cursor, $1),
+    failures = 0,
+    next_attempt_at = NULL,
+    last_error = ''
+WHERE id = $2
+`
+
+type MarkBotWebhookReceiverDeliveredParams struct {
+	Cursor int64       `json:"cursor"`
+	ID     pgtype.UUID `json:"id"`
+}
+
+func (q *Queries) MarkBotWebhookReceiverDelivered(ctx context.Context, arg MarkBotWebhookReceiverDeliveredParams) error {
+	_, err := q.db.Exec(ctx, markBotWebhookReceiverDelivered, arg.Cursor, arg.ID)
+	return err
+}
+
+const markBotWebhookReceiverFailed = `-- name: MarkBotWebhookReceiverFailed :exec
+UPDATE bot_webhook_receiver SET
+    failures = failures + 1,
+    next_attempt_at = $1,
+    last_error = $2
+WHERE id = $3
+`
+
+type MarkBotWebhookReceiverFailedParams struct {
+	NextAttemptAt pgtype.Timestamptz `json:"next_attempt_at"`
+	LastError     string             `json:"last_error"`
+	ID            pgtype.UUID        `json:"id"`
+}
+
+func (q *Queries) MarkBotWebhookReceiverFailed(ctx context.Context, arg MarkBotWebhookReceiverFailedParams) error {
+	_, err := q.db.Exec(ctx, markBotWebhookReceiverFailed, arg.NextAttemptAt, arg.LastError, arg.ID)
+	return err
+}
+
 const pruneBotEvents = `-- name: PruneBotEvents :exec
 DELETE FROM bot_event WHERE created_at < $1
 `
@@ -483,6 +641,53 @@ func (q *Queries) UpdateWorkspaceBot(ctx context.Context, arg UpdateWorkspaceBot
 		&i.CreatedBy,
 		&i.CreatedAt,
 		&i.WebhookHeaders,
+	)
+	return i, err
+}
+
+const upsertBotWebhookReceiver = `-- name: UpsertBotWebhookReceiver :one
+INSERT INTO bot_webhook_receiver (bot_id, name, url, headers, cursor)
+VALUES ($1, $2, $3, $4,
+        (SELECT COALESCE(MAX(e.id), 0) FROM bot_event e))
+ON CONFLICT (bot_id, name) DO UPDATE SET
+    cursor = CASE WHEN EXCLUDED.url <> bot_webhook_receiver.url
+        THEN EXCLUDED.cursor ELSE bot_webhook_receiver.cursor END,
+    url = EXCLUDED.url,
+    headers = EXCLUDED.headers,
+    failures = 0,
+    next_attempt_at = NULL,
+    last_error = ''
+RETURNING id, bot_id, name, url, headers, cursor, failures, next_attempt_at, last_error, created_at
+`
+
+type UpsertBotWebhookReceiverParams struct {
+	BotID   pgtype.UUID `json:"bot_id"`
+	Name    string      `json:"name"`
+	Url     string      `json:"url"`
+	Headers []byte      `json:"headers"`
+}
+
+// A new receiver, or one whose URL changed, starts at the newest event so it
+// does not replay the backlog; every call clears the failure state.
+func (q *Queries) UpsertBotWebhookReceiver(ctx context.Context, arg UpsertBotWebhookReceiverParams) (BotWebhookReceiver, error) {
+	row := q.db.QueryRow(ctx, upsertBotWebhookReceiver,
+		arg.BotID,
+		arg.Name,
+		arg.Url,
+		arg.Headers,
+	)
+	var i BotWebhookReceiver
+	err := row.Scan(
+		&i.ID,
+		&i.BotID,
+		&i.Name,
+		&i.Url,
+		&i.Headers,
+		&i.Cursor,
+		&i.Failures,
+		&i.NextAttemptAt,
+		&i.LastError,
+		&i.CreatedAt,
 	)
 	return i, err
 }

@@ -139,7 +139,7 @@ func TestDeliverer(t *testing.T) {
 	}
 
 	// A failing endpoint keeps the cursor and schedules a retry.
-	d.deliver(ctx, reload())
+	d.deliver(ctx, d.botTarget(reload()))
 	if b := reload(); b.WebhookCursor != bot.WebhookCursor || b.WebhookFailures != 1 || b.WebhookLastError == "" {
 		t.Fatalf("after failure: cursor=%d failures=%d err=%q", b.WebhookCursor, b.WebhookFailures, b.WebhookLastError)
 	}
@@ -148,9 +148,9 @@ func TestDeliverer(t *testing.T) {
 	mu.Lock()
 	fail = false
 	mu.Unlock()
-	d.deliver(ctx, reload())
-	d.deliver(ctx, reload())
-	d.deliver(ctx, reload())
+	d.deliver(ctx, d.botTarget(reload()))
+	d.deliver(ctx, d.botTarget(reload()))
+	d.deliver(ctx, d.botTarget(reload()))
 	mu.Lock()
 	defer mu.Unlock()
 	if len(got) != 2 || len(got[0].Events) != 2 || len(got[1].Events) != 1 {
@@ -238,5 +238,111 @@ func TestRecordsWhatAPersonWouldRead(t *testing.T) {
 	}
 	if got, want := seen(botB), []string{"inbox:new/" + botB, "issue:created/"}; !slices.Equal(got, want) {
 		t.Fatalf("colleague's Bot sees %v, want %v", got, want)
+	}
+}
+
+// TestDeliversToEachReceiver checks that a Bot's extra receivers get the same
+// feed as its main webhook, signed with the Bot's secret and tagged with their
+// name, and that one failing address does not hold back another.
+func TestDeliversToEachReceiver(t *testing.T) {
+	dbURL := os.Getenv("DATABASE_URL")
+	if dbURL == "" {
+		t.Skip("DATABASE_URL not set")
+	}
+	ctx := context.Background()
+	pool, err := pgxpool.New(ctx, dbURL)
+	if err != nil || pool.Ping(ctx) != nil {
+		t.Skip("database not reachable")
+	}
+	defer pool.Close()
+	q := db.New(pool)
+
+	primary := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "down", http.StatusServiceUnavailable)
+	}))
+	defer primary.Close()
+	var mu sync.Mutex
+	var got []WebhookBody
+	media := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		raw, _ := io.ReadAll(r.Body)
+		if r.Header.Get(SignatureHeader) != Sign("s3cret", raw) || r.Header.Get("Authorization") != "Bearer media-key" {
+			http.Error(w, "bad request", http.StatusUnauthorized)
+			return
+		}
+		var body WebhookBody
+		_ = json.Unmarshal(raw, &body)
+		mu.Lock()
+		got = append(got, body)
+		mu.Unlock()
+	}))
+	defer media.Close()
+
+	var wsID, userID string
+	if err := pool.QueryRow(ctx, `SELECT gen_random_uuid()::text, gen_random_uuid()::text`).Scan(&wsID, &userID); err != nil {
+		t.Fatal(err)
+	}
+	ws := util.MustParseUUID(wsID)
+	bot, err := q.CreateWorkspaceBot(ctx, db.CreateWorkspaceBotParams{
+		WorkspaceID: ws, UserID: util.MustParseUUID(userID), Name: "shared",
+		WebhookUrl: primary.URL, WebhookSecret: "s3cret", CreatedBy: util.MustParseUUID(userID),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		pool.Exec(context.Background(), `DELETE FROM bot_event WHERE workspace_id = $1`, wsID)
+		pool.Exec(context.Background(), `DELETE FROM bot_webhook_receiver WHERE bot_id = $1`, bot.ID)
+		pool.Exec(context.Background(), `DELETE FROM workspace_bot WHERE workspace_id = $1`, wsID)
+	})
+	insert := func(typ string) {
+		if err := q.InsertBotEvent(ctx, db.InsertBotEventParams{
+			WorkspaceID: ws, Type: typ, ActorType: "member", ActorID: userID, Payload: []byte(`{}`),
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// A receiver starts at the newest event: it does not replay the backlog.
+	insert("issue:created")
+	rcv, err := q.UpsertBotWebhookReceiver(ctx, db.UpsertBotWebhookReceiverParams{
+		BotID: bot.ID, Name: "media", Url: media.URL, Headers: []byte(`{"Authorization": "Bearer media-key"}`),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	insert("comment:created")
+
+	d := NewDeliverer(q)
+	d.DeliverDue(ctx)
+	d.DeliverDueReceivers(ctx)
+
+	mu.Lock()
+	if len(got) != 1 || got[0].Receiver != "media" || len(got[0].Events) != 1 || got[0].Events[0].Type != "comment:created" {
+		mu.Unlock()
+		t.Fatalf("media deliveries = %+v", got)
+	}
+	mu.Unlock()
+	receivers, err := q.ListBotWebhookReceivers(ctx, bot.ID)
+	if err != nil || len(receivers) != 1 || receivers[0].Cursor != got[0].NextCursor || receivers[0].Failures != 0 {
+		t.Fatalf("receiver after delivery = %+v, %v", receivers, err)
+	}
+	b, err := q.GetWorkspaceBot(ctx, db.GetWorkspaceBotParams{ID: bot.ID, WorkspaceID: ws})
+	if err != nil || b.WebhookCursor != bot.WebhookCursor || b.WebhookFailures != 1 {
+		t.Fatalf("main webhook after failure: cursor=%d failures=%d, %v", b.WebhookCursor, b.WebhookFailures, err)
+	}
+
+	// Re-registering the same URL keeps the cursor; a new URL skips ahead.
+	insert("issue:updated")
+	same, err := q.UpsertBotWebhookReceiver(ctx, db.UpsertBotWebhookReceiverParams{
+		BotID: bot.ID, Name: "media", Url: media.URL, Headers: []byte(`{}`),
+	})
+	if err != nil || same.ID != rcv.ID || same.Cursor != receivers[0].Cursor {
+		t.Fatalf("same URL upsert = %+v, %v", same, err)
+	}
+	moved, err := q.UpsertBotWebhookReceiver(ctx, db.UpsertBotWebhookReceiverParams{
+		BotID: bot.ID, Name: "media", Url: media.URL + "/v2", Headers: []byte(`{}`),
+	})
+	if err != nil || moved.Cursor <= same.Cursor {
+		t.Fatalf("new URL upsert = %+v, %v", moved, err)
 	}
 }

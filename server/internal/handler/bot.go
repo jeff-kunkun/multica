@@ -464,6 +464,10 @@ func (h *Handler) DeleteBot(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if err := h.Queries.DeleteBotWebhookReceiversByBot(ctx, bot.ID); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to delete bot")
+		return
+	}
 	if err := h.Queries.DeleteWorkspaceBot(ctx, db.DeleteWorkspaceBotParams{ID: bot.ID, WorkspaceID: bot.WorkspaceID}); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to delete bot")
 		return
@@ -551,6 +555,132 @@ func (h *Handler) SetBotWebhook(w http.ResponseWriter, r *http.Request) {
 		WebhookURL:    updated.WebhookUrl,
 		WebhookSecret: updated.WebhookSecret,
 	})
+}
+
+// A Bot's token is often shared by several managers. Each registers its own
+// push address under a name, next to the Bot's main webhook, so one manager
+// never has to overwrite another's.
+
+type SetBotWebhookReceiverRequest struct {
+	Name    string            `json:"name"`
+	URL     string            `json:"url"`
+	Headers map[string]string `json:"headers"`
+}
+
+type BotWebhookReceiverResponse struct {
+	Name          string `json:"name"`
+	WebhookURL    string `json:"webhook_url"`
+	WebhookSecret string `json:"webhook_secret,omitempty"`
+	Failures      int32  `json:"failures"`
+	LastError     string `json:"last_error"`
+	CreatedAt     string `json:"created_at"`
+}
+
+const maxBotWebhookReceivers = 20
+
+func validBotWebhookReceiverName(name string) bool {
+	if name == "" || len([]rune(name)) > 64 {
+		return false
+	}
+	for _, c := range name {
+		if c < 0x20 || c == 0x7f {
+			return false
+		}
+	}
+	return true
+}
+
+func botWebhookReceiverResponse(rcv db.BotWebhookReceiver) BotWebhookReceiverResponse {
+	return BotWebhookReceiverResponse{
+		Name:       rcv.Name,
+		WebhookURL: rcv.Url,
+		Failures:   rcv.Failures,
+		LastError:  rcv.LastError,
+		CreatedAt:  timestampToString(rcv.CreatedAt),
+	}
+}
+
+// SetBotWebhookReceiver registers, replaces or (with an empty url) removes
+// the caller's named receiver. The Bot's main webhook is left alone.
+func (h *Handler) SetBotWebhookReceiver(w http.ResponseWriter, r *http.Request) {
+	bot, ok := h.requestBot(w, r)
+	if !ok {
+		return
+	}
+	var req SetBotWebhookReceiverRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	name := strings.TrimSpace(req.Name)
+	if !validBotWebhookReceiverName(name) {
+		writeError(w, http.StatusBadRequest, "name is required, single line, at most 64 characters")
+		return
+	}
+	webhookURL, err := normalizeBotWebhookURL(req.URL)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "url must be an http(s) URL")
+		return
+	}
+	ctx := r.Context()
+	if webhookURL == "" {
+		if err := h.Queries.DeleteBotWebhookReceiver(ctx, db.DeleteBotWebhookReceiverParams{BotID: bot.ID, Name: name}); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to remove receiver")
+			return
+		}
+		writeJSON(w, http.StatusOK, BotWebhookReceiverResponse{Name: name})
+		return
+	}
+	if !validBotWebhookHeaders(req.Headers) {
+		writeError(w, http.StatusBadRequest, "headers must be at most 10 name/value pairs with plain header names")
+		return
+	}
+	existing, err := h.Queries.ListBotWebhookReceivers(ctx, bot.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to set receiver")
+		return
+	}
+	known := false
+	for _, rcv := range existing {
+		known = known || rcv.Name == name
+	}
+	if !known && len(existing) >= maxBotWebhookReceivers {
+		writeError(w, http.StatusBadRequest, "too many receivers; remove one first")
+		return
+	}
+	if req.Headers == nil {
+		req.Headers = map[string]string{}
+	}
+	headers, _ := json.Marshal(req.Headers)
+	rcv, err := h.Queries.UpsertBotWebhookReceiver(ctx, db.UpsertBotWebhookReceiverParams{
+		BotID: bot.ID, Name: name, Url: webhookURL, Headers: headers,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to set receiver")
+		return
+	}
+	resp := botWebhookReceiverResponse(rcv)
+	resp.WebhookSecret = bot.WebhookSecret
+	writeJSON(w, http.StatusOK, resp)
+}
+
+// ListBotWebhookReceivers shows the caller's Bot's named receivers and how
+// their deliveries are going. Headers are never echoed.
+func (h *Handler) ListBotWebhookReceivers(w http.ResponseWriter, r *http.Request) {
+	bot, ok := h.requestBot(w, r)
+	if !ok {
+		return
+	}
+	rows, err := h.Queries.ListBotWebhookReceivers(r.Context(), bot.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list receivers")
+		return
+	}
+	out := make([]BotWebhookReceiverResponse, 0, len(rows))
+	for _, rcv := range rows {
+		out = append(out, botWebhookReceiverResponse(rcv))
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"receivers": out})
 }
 
 type actingBotKey struct{}

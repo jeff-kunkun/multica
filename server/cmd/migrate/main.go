@@ -36,7 +36,9 @@ type preMigrationHook func(ctx context.Context, pool *pgxpool.Pool) error
 // would otherwise skip an INVALID leftover and record the migration as applied.
 // TestEveryConcurrentUpBuildHasCleanup fails the build when a migration that
 // builds an index concurrently is missing here.
-var concurrentIndexCleanups = map[string]string{}
+var concurrentIndexCleanups = map[string]string{
+	"591_bot_webhook_receiver_name_index": "bot_webhook_receiver_bot_name",
+}
 
 // concurrentDownIndexCleanups is the rollback counterpart: every down migration
 // that rebuilds an index concurrently.

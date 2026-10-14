@@ -55,7 +55,7 @@ tokens are accepted: a person's token gets 403.
 | Ask the owner to approve | `request_approval` |
 | Approve the version you read (Bots with `--can-release` only) | `approve_plan` |
 | Add work outside the plan | `create_issue`, `assign_issue` |
-| Track progress | `set_status`, `add_comment`, `get_events`, `set_webhook` |
+| Track progress | `set_status`, `add_comment`, `get_events`, `set_webhook`, `set_manager_webhook` |
 | Close | `close_issue` |
 | Anything else the CLI can do | `api` (`method`, `path`, optional `body`) |
 
@@ -115,6 +115,23 @@ The office POSTs batches of up to 50 events, in order:
   "next_cursor": 12
 }
 ```
+
+### One Bot, several managers
+
+When several managers share one Bot's token, each registers its own receiver
+under a name instead of calling `set_webhook`, which would replace the Bot's
+main address:
+
+- MCP: `set_manager_webhook` with `{"name": "media", "url": "https://…"}`
+  (optional `headers` as above; an empty `url` removes that name)
+- HTTP: `PUT /api/bot/webhooks` with the same body and the Bot token;
+  `GET /api/bot/webhooks` lists them with their delivery state
+
+Every receiver gets every event the Bot gets, from the moment it is
+registered, with its own cursor and retries, so a broken receiver holds up
+nobody else. The body is the same as below plus `"receiver": "<name>"`, signed
+with the same webhook secret. Filtering is up to the receiver. A Bot holds at
+most 20 receivers; deleting the Bot removes them.
 
 Verify every request. `X-Multica-Signature` is `sha256=` followed by the hex
 HMAC-SHA256 of the raw body, keyed with the webhook secret:

@@ -480,7 +480,8 @@ func officeTools() []tool {
 			Description: "Register the HTTPS address the office should POST events to, so you are woken instead of polling. " +
 				"Returns webhook_secret: verify each delivery's X-Multica-Signature (\"sha256=\" + hex HMAC-SHA256 of the raw body). " +
 				"If your receiver requires its own key, pass it in headers (e.g. {\"Authorization\": \"Bearer <key>\"}); they are sent with every delivery, and each call replaces them. " +
-				"An empty url stops pushing. Deliveries carry next_cursor; after an outage catch up with get_events.",
+				"An empty url stops pushing. Deliveries carry next_cursor; after an outage catch up with get_events. " +
+				"This is the Bot's one main address: if you share this Bot with other managers, use set_manager_webhook instead so you never replace theirs.",
 			Schema: schema([]string{"url"}, map[string]any{
 				"url": strProp("Receiving address reachable from the office; empty string to stop."),
 				"headers": map[string]any{
@@ -495,6 +496,29 @@ func officeTools() []tool {
 					body["headers"] = h
 				}
 				return c.do("PUT", "/api/bot/webhook", body)
+			},
+		},
+		{
+			Name: "set_manager_webhook",
+			Description: "Register your own push address under your manager name when several managers share this Bot. " +
+				"Each name gets every office event the Bot gets, in its own order and retries, and never touches the Bot's main address (set_webhook). " +
+				"Deliveries have the same body and X-Multica-Signature as set_webhook's, plus \"receiver\": <name>; filter what you care about on your side. " +
+				"Calling again with the same name replaces it; an empty url removes it. List them with api GET /api/bot/webhooks.",
+			Schema: schema([]string{"name", "url"}, map[string]any{
+				"name": strProp("Your manager name, e.g. media; unique within this Bot."),
+				"url":  strProp("Receiving address reachable from the office; empty string to remove."),
+				"headers": map[string]any{
+					"type":                 "object",
+					"description":          "Optional extra request headers, name to value.",
+					"additionalProperties": map[string]any{"type": "string"},
+				},
+			}),
+			Call: func(c *caller, a args) (any, error) {
+				body := map[string]any{"name": a.str("name"), "url": a.str("url")}
+				if h, ok := a["headers"].(map[string]any); ok {
+					body["headers"] = h
+				}
+				return c.do("PUT", "/api/bot/webhooks", body)
 			},
 		},
 		{

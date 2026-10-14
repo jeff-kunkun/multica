@@ -109,3 +109,58 @@ UPDATE workspace_bot SET
     webhook_next_attempt_at = sqlc.arg('next_attempt_at'),
     webhook_last_error = sqlc.arg('last_error')
 WHERE id = sqlc.arg('id');
+
+-- name: UpsertBotWebhookReceiver :one
+-- A new receiver, or one whose URL changed, starts at the newest event so it
+-- does not replay the backlog; every call clears the failure state.
+INSERT INTO bot_webhook_receiver (bot_id, name, url, headers, cursor)
+VALUES (sqlc.arg('bot_id'), sqlc.arg('name'), sqlc.arg('url'), sqlc.arg('headers'),
+        (SELECT COALESCE(MAX(e.id), 0) FROM bot_event e))
+ON CONFLICT (bot_id, name) DO UPDATE SET
+    cursor = CASE WHEN EXCLUDED.url <> bot_webhook_receiver.url
+        THEN EXCLUDED.cursor ELSE bot_webhook_receiver.cursor END,
+    url = EXCLUDED.url,
+    headers = EXCLUDED.headers,
+    failures = 0,
+    next_attempt_at = NULL,
+    last_error = ''
+RETURNING *;
+
+-- name: ListBotWebhookReceivers :many
+SELECT * FROM bot_webhook_receiver
+WHERE bot_id = $1
+ORDER BY created_at ASC;
+
+-- name: DeleteBotWebhookReceiver :exec
+DELETE FROM bot_webhook_receiver WHERE bot_id = $1 AND name = $2;
+
+-- name: DeleteBotWebhookReceiversByBot :exec
+DELETE FROM bot_webhook_receiver WHERE bot_id = $1;
+
+-- name: ClaimDueBotWebhookReceivers :many
+-- Same lease as ClaimDueBotWebhooks, for the extra receivers. A receiver gets
+-- exactly the events its Bot would.
+UPDATE bot_webhook_receiver r SET next_attempt_at = now() + interval '1 minute'
+FROM workspace_bot b
+WHERE r.bot_id = b.id
+  AND (r.next_attempt_at IS NULL OR r.next_attempt_at <= now())
+  AND EXISTS (SELECT 1 FROM bot_event e WHERE e.workspace_id = b.workspace_id AND e.id > r.cursor
+              AND (e.payload->>'for_user_id' IS NULL
+                   OR e.payload->>'for_user_id' IN (b.user_id::text, b.created_by::text)))
+RETURNING r.id, r.bot_id, r.name, r.url, r.headers, r.cursor, r.failures,
+    b.workspace_id, b.user_id, b.created_by, b.webhook_secret;
+
+-- name: MarkBotWebhookReceiverDelivered :exec
+UPDATE bot_webhook_receiver SET
+    cursor = GREATEST(cursor, sqlc.arg('cursor')),
+    failures = 0,
+    next_attempt_at = NULL,
+    last_error = ''
+WHERE id = sqlc.arg('id');
+
+-- name: MarkBotWebhookReceiverFailed :exec
+UPDATE bot_webhook_receiver SET
+    failures = failures + 1,
+    next_attempt_at = sqlc.arg('next_attempt_at'),
+    last_error = sqlc.arg('last_error')
+WHERE id = sqlc.arg('id');
