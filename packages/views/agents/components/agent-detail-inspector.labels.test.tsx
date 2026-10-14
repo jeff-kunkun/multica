@@ -4,29 +4,12 @@ import type { Agent } from "@multica/core/types";
 import { renderWithI18n } from "../../test/i18n";
 import { AgentDetailInspector } from "./agent-detail-inspector";
 
-vi.mock("@tanstack/react-query", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@tanstack/react-query")>()),
-  useQuery: () => ({ data: undefined, isSuccess: false }),
-}));
-
 vi.mock("../../common/avatar-upload-control", () => ({
   AvatarUploadControl: () => <div data-testid="avatar-upload" />,
 }));
 
-vi.mock("./inspector/model-picker", () => ({
-  ModelPicker: () => <div data-testid="model-picker" />,
-}));
-
 vi.mock("./inspector/runtime-picker", () => ({
   RuntimePicker: () => <div data-testid="runtime-picker" />,
-}));
-
-vi.mock("./inspector/thinking-prop-row", () => ({
-  ThinkingSettingField: () => <div data-testid="thinking-field" />,
-}));
-
-vi.mock("./inspector/service-tier-setting-field", () => ({
-  ServiceTierSettingField: () => <div data-testid="service-tier-field" />,
 }));
 
 const agent = {
@@ -49,7 +32,6 @@ describe("AgentDetailInspector labels", () => {
     renderWithI18n(
       <AgentDetailInspector
         agent={agent}
-        runtime={null}
         runtimes={[]}
         members={[]}
         currentUserId="user-1"

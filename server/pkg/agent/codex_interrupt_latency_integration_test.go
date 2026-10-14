@@ -23,7 +23,6 @@ const (
 	codexInterruptSamplesEnv     = "MULTICA_CODEX_INTERRUPT_SAMPLES"
 	codexInterruptWarmupsEnv     = "MULTICA_CODEX_INTERRUPT_WARMUPS"
 	codexInterruptSettleDelayEnv = "MULTICA_CODEX_INTERRUPT_SETTLE_DELAY"
-	codexInterruptModelEnv       = "MULTICA_CODEX_INTERRUPT_MODEL"
 )
 
 type codexInterruptScenario struct {
@@ -71,8 +70,8 @@ func (b *synchronizedBuffer) String() string {
 //	  -run TestCodexRealTurnInterruptLatency -count=1 -v
 //
 // MULTICA_CODEX_INTERRUPT_SAMPLES and MULTICA_CODEX_INTERRUPT_WARMUPS control
-// the measured and discarded sample counts. MULTICA_CODEX_INTERRUPT_MODEL can
-// pin a model; empty preserves the authenticated CLI's configured default.
+// the measured and discarded sample counts; the CLI's configured default model
+// is always used.
 // MULTICA_CODEX_INTERRUPT_SETTLE_DELAY controls how long generation continues
 // after its first observed agent-message delta before cancellation.
 func TestCodexRealTurnInterruptLatency(t *testing.T) {
@@ -92,10 +91,9 @@ func TestCodexRealTurnInterruptLatency(t *testing.T) {
 	samples := positiveEnvInt(t, codexInterruptSamplesEnv, 10, true)
 	warmups := positiveEnvInt(t, codexInterruptWarmupsEnv, 1, false)
 	settleDelay := durationEnv(t, codexInterruptSettleDelayEnv, 100*time.Millisecond)
-	model := strings.TrimSpace(os.Getenv(codexInterruptModelEnv))
 
-	t.Logf("environment: os=%s arch=%s codex=%q model=%q samples=%d warmups=%d settle_delay=%s",
-		runtime.GOOS, runtime.GOARCH, version, model, samples, warmups, settleDelay)
+	t.Logf("environment: os=%s arch=%s codex=%q samples=%d warmups=%d settle_delay=%s",
+		runtime.GOOS, runtime.GOARCH, version, samples, warmups, settleDelay)
 
 	scenarios := []codexInterruptScenario{
 		{
@@ -121,7 +119,7 @@ func TestCodexRealTurnInterruptLatency(t *testing.T) {
 		t.Run(scenario.name, func(t *testing.T) {
 			measured := make([]codexInterruptSample, 0, samples)
 			for i := 0; i < warmups+samples; i++ {
-				sample := runCodexInterruptSample(t, path, model, scenario)
+				sample := runCodexInterruptSample(t, path, scenario)
 				if i < warmups {
 					t.Logf("warmup %d: interrupt=%s result=%s status=%s input_tokens=%d output_tokens=%d",
 						i+1, sample.interruptLatency, sample.resultLatency, sample.status, sample.inputTokens, sample.outputTokens)
@@ -144,7 +142,7 @@ func TestCodexRealTurnInterruptLatency(t *testing.T) {
 	}
 }
 
-func runCodexInterruptSample(t *testing.T, path, model string, scenario codexInterruptScenario) codexInterruptSample {
+func runCodexInterruptSample(t *testing.T, path string, scenario codexInterruptScenario) codexInterruptSample {
 	t.Helper()
 
 	var logs synchronizedBuffer
@@ -168,10 +166,8 @@ func runCodexInterruptSample(t *testing.T, path, model string, scenario codexInt
 	runCtx, cancelRun := context.WithCancel(parentCtx)
 	session, err := backend.executeOnce(runCtx, scenario.prompt, ExecOptions{
 		Cwd:                  t.TempDir(),
-		Model:                model,
 		Timeout:              scenario.sampleTimeout,
 		TurnInterruptTimeout: 10 * time.Second,
-		ThinkingLevel:        "low",
 	}, 1)
 	if err != nil {
 		t.Fatalf("start Codex sample: %v", err)

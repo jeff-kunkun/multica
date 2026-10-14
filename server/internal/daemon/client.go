@@ -611,7 +611,6 @@ func (c *Client) GetTaskStatus(ctx context.Context, taskID string) (string, erro
 type (
 	HeartbeatResponse = protocol.DaemonHeartbeatAckPayload
 	PendingUpdate     = protocol.DaemonHeartbeatPendingUpdate
-	PendingModelList  = protocol.DaemonHeartbeatPendingModelList
 )
 
 func (c *Client) SendHeartbeat(ctx context.Context, runtimeID string) (*HeartbeatResponse, error) {
@@ -628,11 +627,6 @@ func (c *Client) SendHeartbeat(ctx context.Context, runtimeID string) (*Heartbea
 // ReportUpdateResult sends the CLI update result back to the server.
 func (c *Client) ReportUpdateResult(ctx context.Context, runtimeID, updateID string, result map[string]any) error {
 	return c.postJSON(ctx, fmt.Sprintf("/api/daemon/runtimes/%s/update/%s/result", runtimeID, updateID), result, nil)
-}
-
-// ReportModelListResult sends the model-discovery result back to the server.
-func (c *Client) ReportModelListResult(ctx context.Context, runtimeID, requestID string, result map[string]any) error {
-	return c.postJSON(ctx, fmt.Sprintf("/api/daemon/runtimes/%s/models/%s/result", runtimeID, requestID), result, nil)
 }
 
 // WorkspaceInfo holds minimal workspace metadata returned by the API.

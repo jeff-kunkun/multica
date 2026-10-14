@@ -29,18 +29,13 @@ runtime as the source; pass --runtime-id to fork it onto a different runtime.
 Copied by default without a dedicated override flag: conversation starters.
 
 Copied by default, each overridable with the matching flag: name (suffixed
-" (copy)"), description, instructions, avatar, custom_args, max_concurrent_tasks,
-invocation permission (permission_mode + allow-list), and — only when the target runtime is unchanged — model, thinking_level and
-service_tier.
+" (copy)"), description, instructions, avatar, custom_args, max_concurrent_tasks
+and invocation permission (permission_mode + allow-list).
 
 Secret and machine-local fields are never copied: custom_env, mcp_config and
 runtime_config. Supply fresh values for the copy with the same secret-safe flags
 as 'agent create' when the target machine needs them.
-
-Runtime-specific fields do not travel across a runtime change: when --runtime-id
-selects a different runtime, --model is required (pass --model "" to accept the
-target runtime's default), and thinking_level / service_tier are dropped unless
-set explicitly.`,
+`,
 	Args: exactArgs(1),
 	RunE: runAgentCopy,
 }
@@ -57,9 +52,6 @@ func registerAgentCopyFlags(cmd *cobra.Command) {
 	cmd.Flags().String("runtime-id", "", "Target runtime ID (default: the source agent's runtime). A different value forks the agent onto that runtime.")
 	cmd.Flags().String("description", "", "Override the copied description")
 	cmd.Flags().String("instructions", "", "Override the copied instructions")
-	cmd.Flags().String("model", "", "Model identifier for the copy. Required when --runtime-id selects a different runtime (pass \"\" to accept the target runtime default). Empty otherwise = runtime default.")
-	cmd.Flags().String("thinking-level", "", "Override thinking level. Not carried across a runtime change unless set here.")
-	cmd.Flags().String("service-tier", "", "Override Codex service tier. Not carried across a runtime change unless set here.")
 	cmd.Flags().String("custom-args", "", "Override custom CLI arguments as a JSON array.")
 	cmd.Flags().Int32("max-concurrent-tasks", 6, "Override maximum concurrent tasks")
 	cmd.Flags().String("visibility", "", "Override visibility: private or workspace (legacy; mapped to --permission-mode)")
@@ -120,7 +112,6 @@ func runAgentCopy(cmd *cobra.Command, args []string) error {
 	if targetRuntimeID == "" {
 		return fmt.Errorf("source agent has no runtime; pass --runtime-id to choose a target runtime")
 	}
-	sameRuntime := targetRuntimeID == srcRuntimeID
 
 	// Name: default "<source name> (copy)", override with --name.
 	name := strVal(src, "name") + " (copy)"
@@ -179,37 +170,6 @@ func runAgentCopy(cmd *cobra.Command, args []string) error {
 		body["max_concurrent_tasks"] = *maxConcurrentTasksOverride
 	} else if v, ok := copiedAgentMaxConcurrentTasks(src["max_concurrent_tasks"]); ok {
 		body["max_concurrent_tasks"] = v
-	}
-
-	// Runtime-specific fields (model / thinking_level / service_tier) only make
-	// sense on the runtime they were chosen for. Copy them when staying on the
-	// same runtime; when forking to a different runtime, drop them and require
-	// an explicit --model (pass --model "" to accept the target default) —
-	// mirroring the web Duplicate clearing model on a runtime switch.
-	if sameRuntime {
-		if v := strVal(src, "model"); v != "" {
-			body["model"] = v
-		}
-		if v := strVal(src, "thinking_level"); v != "" {
-			body["thinking_level"] = v
-		}
-		if v := strVal(src, "service_tier"); v != "" {
-			body["service_tier"] = v
-		}
-	} else if !cmd.Flags().Changed("model") {
-		return fmt.Errorf("copying to a different runtime (--runtime-id) requires --model, because the source model may not exist on the target runtime; pass --model \"\" to accept the target runtime default")
-	}
-	if cmd.Flags().Changed("model") {
-		v, _ := cmd.Flags().GetString("model")
-		body["model"] = v
-	}
-	if cmd.Flags().Changed("thinking-level") {
-		v, _ := cmd.Flags().GetString("thinking-level")
-		body["thinking_level"] = v
-	}
-	if cmd.Flags().Changed("service-tier") {
-		v, _ := cmd.Flags().GetString("service-tier")
-		body["service_tier"] = v
 	}
 
 	// Invocation permission: copy the source's permission_mode + allow-list by

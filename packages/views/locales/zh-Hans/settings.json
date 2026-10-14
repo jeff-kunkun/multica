@@ -323,7 +323,7 @@
       "mcp": "MCP 服务器",
       "code": "代码",
       "approvers": "批准权",
-      "local_run": "本机运行"
+      "local_run": "运行时"
     },
     "groups": {
       "office": "常用",

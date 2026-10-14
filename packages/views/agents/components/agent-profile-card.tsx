@@ -116,13 +116,10 @@ export function AgentProfileCard({ agentId }: AgentProfileCardProps) {
         </p>
       )}
 
-      {/* Meta rows — runtime (where it lives), model (what powers it),
-          owner (who manages it). Model + effort
-          are surfaced here so a quick hover answers "which model is this
-          agent running?" without opening the detail page. */}
+      {/* Meta rows — runtime (the CLI and where it lives) and owner (who
+          manages it). The model is picked per run, so it has no row. */}
       <div className="flex flex-col gap-1.5 text-caption">
         <RuntimeRow agent={agent} runtime={runtime} />
-        <ModelRow model={agent.model} thinkingLevel={agent.thinking_level} />
         {owner && <MetaRow label={t(($) => $.profile_card.owner_label)} value={owner.name} />}
       </div>
     </div>
@@ -192,49 +189,6 @@ function RuntimeRow({
       <span className="min-w-0 truncate" title={label}>
         {label}
       </span>
-    </div>
-  );
-}
-
-// Model row — the runtime-native model id the agent runs (`agent.model`),
-// with the reasoning/effort token appended as a small badge whenever the
-// agent pins one. An empty model means "no override": the runtime CLI's own
-// default decides at run time, so we render a "Runtime default" placeholder
-// rather than a bare dash. The model id is mono so provider-slug ids like
-// `claude-opus-4-8` stay legible. The effort badge is gated on `effort`
-// alone (NOT on `hasModel`): a `Runtime default` agent can still persist a
-// `thinking_level` override that applies at run time against the runtime's
-// default model, and the whole point of this row is to surface that runtime
-// info at a glance — hiding it would misreport the agent's real config.
-function ModelRow({
-  model,
-  thinkingLevel,
-}: {
-  model: string;
-  thinkingLevel?: string;
-}) {
-  const { t } = useT("agents");
-  const hasModel = model.trim().length > 0;
-  const effort = thinkingLevel?.trim();
-  return (
-    <div className="flex items-center gap-1.5">
-      <span className="w-12 shrink-0 text-muted-foreground">
-        {t(($) => $.profile_card.model_label)}
-      </span>
-      {hasModel ? (
-        <span className="min-w-0 truncate font-mono text-micro" title={model}>
-          {model}
-        </span>
-      ) : (
-        <span className="min-w-0 truncate text-muted-foreground">
-          {t(($) => $.profile_card.model_unset)}
-        </span>
-      )}
-      {effort && (
-        <span className="shrink-0 rounded-md bg-muted px-1.5 py-0.5 text-micro font-medium text-muted-foreground">
-          {effort}
-        </span>
-      )}
     </div>
   );
 }

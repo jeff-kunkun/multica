@@ -134,16 +134,9 @@ func TestCodexLaunchArgsCanSelectTheRetiredCompactionRoute(t *testing.T) {
 				}
 			}
 
-			// The one place this package does strip a --disable is the
-			// fast_mode conflict removal under an explicit service tier.
-			// It is scoped to that feature, and the effective argv is where
-			// that has to hold.
-			effective := buildCodexArgs(ExecOptions{
-				CustomArgs:  tc.args,
-				ServiceTier: codexFastServiceTier,
-			}, nil)
+			effective := buildCodexArgs(ExecOptions{CustomArgs: tc.args}, nil)
 			if !mentionsRemoteCompactionV2(effective) {
-				t.Errorf("priority tier stripped an unrelated setting: %q", effective)
+				t.Errorf("effective argv stripped the setting: %q", effective)
 			}
 
 			// The third argv region the hint names: a custom runtime profile's
@@ -157,9 +150,6 @@ func TestCodexLaunchArgsCanSelectTheRetiredCompactionRoute(t *testing.T) {
 			}
 			if got := filterCodexCustomConfigOverrides(prefix, nil); !mentionsRemoteCompactionV2(got) {
 				t.Errorf("managed mcp_config prefix filter dropped the setting: %q", got)
-			}
-			if got := stripCodexFastModeConflicts(prefix, nil); !mentionsRemoteCompactionV2(got) {
-				t.Errorf("priority tier prefix filter dropped the setting: %q", got)
 			}
 		})
 	}

@@ -24,7 +24,6 @@ import (
 	"github.com/multica-ai/multica/server/internal/logger"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/util"
-	"github.com/multica-ai/multica/server/pkg/agent"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
@@ -103,19 +102,11 @@ type AgentResponse struct {
 	InvocationTargets  []AgentInvocationTargetDTO `json:"invocation_targets"`
 	Status             string                     `json:"status"`
 	MaxConcurrentTasks int32                      `json:"max_concurrent_tasks"`
-	Model              string                     `json:"model"`
-	// ThinkingLevel is the runtime-native reasoning/effort token persisted
-	// for this agent (empty = use runtime default). The picker is per-runtime
-	// per-model; the API never normalizes across providers. See MUL-2339.
-	ThinkingLevel string `json:"thinking_level"`
-	// ServiceTier is the runtime-native Codex execution tier persisted for
-	// this agent (empty = inherit local Codex configuration).
-	ServiceTier string  `json:"service_tier"`
-	OwnerID     *string `json:"owner_id"`
-	CreatedAt   string  `json:"created_at"`
-	UpdatedAt   string  `json:"updated_at"`
-	ArchivedAt  *string `json:"archived_at"`
-	ArchivedBy  *string `json:"archived_by"`
+	OwnerID            *string                    `json:"owner_id"`
+	CreatedAt          string                     `json:"created_at"`
+	UpdatedAt          string                     `json:"updated_at"`
+	ArchivedAt         *string                    `json:"archived_at"`
+	ArchivedBy         *string                    `json:"archived_by"`
 }
 
 // runtimeConfigGatewayTokenMask is the placeholder the API substitutes for
@@ -196,9 +187,6 @@ func (h *Handler) agentToResponse(a db.Agent) AgentResponse {
 		InvocationTargets:    []AgentInvocationTargetDTO{},
 		Status:               a.Status,
 		MaxConcurrentTasks:   a.MaxConcurrentTasks,
-		Model:                a.Model.String,
-		ThinkingLevel:        a.ThinkingLevel.String,
-		ServiceTier:          a.ServiceTier.String,
 		OwnerID:              uuidToPtr(a.OwnerID),
 		CreatedAt:            timestampToString(a.CreatedAt),
 		UpdatedAt:            timestampToString(a.UpdatedAt),
@@ -682,15 +670,12 @@ type TaskUsageData struct {
 // TaskAgentData holds agent info included in claim responses so the daemon
 // can set up the execution environment (branch naming, instructions).
 type TaskAgentData struct {
-	ID            string            `json:"id"`
-	Name          string            `json:"name"`
-	Instructions  string            `json:"instructions"`
-	CustomEnv     map[string]string `json:"custom_env,omitempty"`
-	CustomArgs    []string          `json:"custom_args,omitempty"`
-	McpConfig     json.RawMessage   `json:"mcp_config,omitempty"`
-	Model         string            `json:"model,omitempty"`
-	ThinkingLevel string            `json:"thinking_level,omitempty"`
-	ServiceTier   string            `json:"service_tier,omitempty"`
+	ID           string            `json:"id"`
+	Name         string            `json:"name"`
+	Instructions string            `json:"instructions"`
+	CustomEnv    map[string]string `json:"custom_env,omitempty"`
+	CustomArgs   []string          `json:"custom_args,omitempty"`
+	McpConfig    json.RawMessage   `json:"mcp_config,omitempty"`
 	// RuntimeConfig is the agent's saved runtime_config JSON as-is. The
 	// daemon decodes it per-provider — e.g. the openclaw backend reads
 	// `mode` + `gateway.*` to choose between embedded and gateway routing
@@ -1167,9 +1152,6 @@ type CreateAgentRequest struct {
 	PermissionMode     *string                    `json:"permission_mode"`
 	InvocationTargets  []AgentInvocationTargetDTO `json:"invocation_targets"`
 	MaxConcurrentTasks int32                      `json:"max_concurrent_tasks"`
-	Model              string                     `json:"model"`
-	ThinkingLevel      string                     `json:"thinking_level"`
-	ServiceTier        string                     `json:"service_tier"`
 	// Template records the creation-source attribution used by the
 	// `agent_created` analytics event. Empty identifies a manually authored
 	// agent.
@@ -1301,42 +1283,6 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// thinking_level validation: fixed-enum providers reject unknown literals;
-	// dynamic-catalog providers (Codex/OpenCode) reject malformed tokens here.
-	// Pi has a fixed token universe and a daemon-discovered per-model subset.
-	// Per-model gaps are enforced by the daemon at execution time (MUL-2339):
-	// combination-invalid values are logged and omitted from the invocation.
-	if !agent.IsKnownThinkingValue(runtime.Provider, req.ThinkingLevel) {
-		writeError(w, http.StatusBadRequest, thinkingLevelRejection(runtime.Provider, req.ThinkingLevel))
-		return
-	}
-	// For ACP-catalog providers the provider name is not the capability answer
-	// — this runtime's own discovered catalog is. Keeps a Hermes Agent user's
-	// clear 400 instead of accepting a level the daemon would later drop.
-	if req.ThinkingLevel != "" {
-		switch h.acpThinkingDecision(r.Context(), runtime.Provider, runtime.ID) {
-		case acpEffortAbsent:
-			writeError(w, http.StatusBadRequest, thinkingCapabilityRejection(runtime.Provider))
-			return
-		case acpEffortUnknown:
-			writeError(w, http.StatusBadRequest, thinkingCapabilityUnknownRejection(runtime.Provider))
-			return
-		}
-	}
-	// An effort with no pinned model is not storable for runtimes that resolve
-	// their own default model out of sight — it would save cleanly, show as set,
-	// and then run at a different level. Reject it here instead of letting the
-	// daemon drop it silently at launch (MUL-7412).
-	if agent.ThinkingLevelRejectedWithoutModel(runtime.Provider) &&
-		req.ThinkingLevel != "" && strings.TrimSpace(req.Model) == "" {
-		writeError(w, http.StatusBadRequest, thinkingNeedsExplicitModelRejection(runtime.Provider))
-		return
-	}
-	if !agent.IsKnownServiceTier(runtime.Provider, req.ServiceTier) {
-		writeError(w, http.StatusBadRequest, fmt.Sprintf("service_tier %q is not a recognised value for runtime %q", req.ServiceTier, runtime.Provider))
-		return
-	}
-
 	// Probe workspace agent count BEFORE the insert so the funnel has a
 	// clean "first agent ever in this workspace" signal. A non-fatal read: if the
 	// list fails we fall through with isFirstAgent=false rather than
@@ -1401,9 +1347,6 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		CustomEnv:            ce,
 		CustomArgs:           ca,
 		McpConfig:            mc,
-		Model:                pgtype.Text{String: req.Model, Valid: req.Model != ""},
-		ThinkingLevel:        pgtype.Text{String: req.ThinkingLevel, Valid: req.ThinkingLevel != ""},
-		ServiceTier:          pgtype.Text{String: req.ServiceTier, Valid: req.ServiceTier != ""},
 		ConversationStarters: sp,
 	})
 	if err != nil {
@@ -1485,17 +1428,6 @@ type UpdateAgentRequest struct {
 	InvocationTargets  *[]AgentInvocationTargetDTO `json:"invocation_targets"`
 	Status             *string                     `json:"status"`
 	MaxConcurrentTasks *int32                      `json:"max_concurrent_tasks"`
-	Model              *string                     `json:"model"`
-	// ThinkingLevel is treated as a tri-state per-MUL-2339:
-	//   - field omitted → no change (leave existing value alone)
-	//   - field present with "" → explicit clear (use runtime default)
-	//   - field present with non-empty value → set (validated server-side)
-	// Distinguishing those modes is why this is a pointer; the raw-fields
-	// map captured at decode time tells us whether the key was sent.
-	ThinkingLevel *string `json:"thinking_level"`
-	// ServiceTier follows the same tri-state contract as ThinkingLevel:
-	// omitted preserves, empty clears, and non-empty sets a Codex catalog ID.
-	ServiceTier *string `json:"service_tier"`
 }
 
 // workspaceAlwaysRedactSecrets reports whether the workspace has opted
@@ -1678,12 +1610,6 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 		params.McpConfig = append([]byte(nil), rawMcpConfig...)
 	}
 
-	// Resolve the runtime that will be in force after this update so the
-	// thinking_level validation hits the right provider enum. When the
-	// request doesn't move the agent, we still need to load the *current*
-	// runtime to validate a thinking_level change. Resolve once and reuse.
-	targetRuntimeID := existing.RuntimeID
-	targetProvider := ""
 	if req.RuntimeID != nil {
 		runtimeUUID, ok := parseUUIDOrBadRequest(w, *req.RuntimeID, "runtime_id")
 		if !ok {
@@ -1710,8 +1636,6 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 		}
 		params.RuntimeID = runtime.ID
 		params.RuntimeMode = pgtype.Text{String: runtime.RuntimeMode, Valid: true}
-		targetRuntimeID = runtime.ID
-		targetProvider = runtime.Provider
 	}
 	// Invocation permission (MUL-3963). OWNER-ONLY write: access is the one
 	// agent property a workspace admin may NOT change (only the owner decides
@@ -1767,151 +1691,6 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 		}
 		params.MaxConcurrentTasks = pgtype.Int4{Int32: *req.MaxConcurrentTasks, Valid: true}
 	}
-	if req.Model != nil {
-		params.Model = pgtype.Text{String: *req.Model, Valid: true}
-	} else if req.RuntimeID != nil && existing.Model.Valid && agent.ModelKnownIncompatibleWithProvider(targetProvider, existing.Model.String) {
-		// Model is runtime-native. When moving an agent across known provider
-		// families and the caller did not choose a replacement model, clear the
-		// old value so the new runtime falls back to its own default instead of
-		// receiving an obvious foreign model ID (e.g. Claude Code -> Codex).
-		// Unknown/custom model strings are preserved by the helper.
-		params.Model = pgtype.Text{String: "", Valid: true}
-	}
-
-	// thinking_level handling (MUL-2339). Tri-state semantics:
-	//   - field omitted  → leave column alone (COALESCE narg), but if a
-	//     runtime change in this same request would make the *existing*
-	//     value invalid for the new provider's fixed enum or token syntax,
-	//     reject 400. Exact dynamic-catalog compatibility is daemon-owned.
-	//   - field set to "" → explicit clear (run ClearAgentThinkingLevel post-update)
-	//   - field set to value → validate against the target runtime's fixed enum
-	//     or dynamic-token syntax; reject literal-invalid with 400. Per-model
-	//     combination checks run in the daemon at execution time, not here.
-	shouldClearThinkingLevel := false
-	if req.ThinkingLevel != nil {
-		value := *req.ThinkingLevel
-		if value == "" {
-			shouldClearThinkingLevel = true
-		} else {
-			// Need the target runtime's provider to validate. Re-fetch only when
-			// we haven't already loaded it above (i.e. the request didn't change
-			// runtime_id), to keep the no-change path one DB roundtrip.
-			provider := targetProvider
-			if provider == "" {
-				var ok bool
-				provider, ok = h.resolveAgentProvider(r, existing.WorkspaceID, targetRuntimeID)
-				if !ok {
-					writeError(w, http.StatusInternalServerError, "failed to resolve runtime for thinking_level validation")
-					return
-				}
-			}
-			if !agent.IsKnownThinkingValue(provider, value) {
-				writeError(w, http.StatusBadRequest, thinkingLevelRejection(provider, value))
-				return
-			}
-			switch h.acpThinkingDecision(r.Context(), provider, targetRuntimeID) {
-			case acpEffortAbsent:
-				writeError(w, http.StatusBadRequest, thinkingCapabilityRejection(provider))
-				return
-			case acpEffortUnknown:
-				writeError(w, http.StatusBadRequest, thinkingCapabilityUnknownRejection(provider))
-				return
-			}
-			params.ThinkingLevel = pgtype.Text{String: value, Valid: true}
-		}
-	} else if req.RuntimeID != nil && existing.ThinkingLevel.Valid && existing.ThinkingLevel.String != "" {
-		// Runtime is changing but the caller didn't touch thinking_level.
-		// If the existing value is not in the new provider's enum at all,
-		// preserving it would smuggle a literal-invalid token to the daemon.
-		// Hold the same line as the explicit-set path: always 400 on
-		// literal-invalid, never silently coerce. The caller can either
-		// pass `thinking_level: ""` to clear or pick a value valid for the
-		// new runtime.
-		provider := targetProvider
-		if provider == "" {
-			var ok bool
-			provider, ok = h.resolveAgentProvider(r, existing.WorkspaceID, targetRuntimeID)
-			if !ok {
-				writeError(w, http.StatusInternalServerError, "failed to resolve runtime for thinking_level validation")
-				return
-			}
-		}
-		if !agent.IsKnownThinkingValue(provider, existing.ThinkingLevel.String) {
-			writeError(w, http.StatusBadRequest, existingThinkingLevelRejection(provider, existing.ThinkingLevel.String))
-			return
-		}
-		switch h.acpThinkingDecision(r.Context(), provider, targetRuntimeID) {
-		case acpEffortAbsent:
-			writeError(w, http.StatusBadRequest, existingThinkingCapabilityRejection(provider, existing.ThinkingLevel.String))
-			return
-		case acpEffortUnknown:
-			writeError(w, http.StatusBadRequest, existingThinkingCapabilityUnknownRejection(provider, existing.ThinkingLevel.String))
-			return
-		}
-	}
-
-	// Same combination check as CreateAgent, but against the state the request
-	// actually lands on: a cleared model with a carried-over effort, or a new
-	// effort on an agent that never had a model, are both the invalid pair. The
-	// caller can always recover by pinning a model or clearing the level, so
-	// this cannot lock an agent out of editing (MUL-7412).
-	if effectiveThinking := effectiveThinkingLevel(params, existing, shouldClearThinkingLevel); effectiveThinking != "" &&
-		strings.TrimSpace(effectiveModelValue(params, existing)) == "" {
-		provider := targetProvider
-		if provider == "" {
-			var ok bool
-			provider, ok = h.resolveAgentProvider(r, existing.WorkspaceID, targetRuntimeID)
-			if !ok {
-				writeError(w, http.StatusInternalServerError, "failed to resolve runtime for thinking_level validation")
-				return
-			}
-		}
-		if agent.ThinkingLevelRejectedWithoutModel(provider) {
-			writeError(w, http.StatusBadRequest, thinkingNeedsExplicitModelRejection(provider))
-			return
-		}
-	}
-
-	shouldClearServiceTier := false
-	if req.ServiceTier != nil {
-		value := *req.ServiceTier
-		if value == "" {
-			shouldClearServiceTier = true
-		} else {
-			provider := targetProvider
-			if provider == "" {
-				var ok bool
-				provider, ok = h.resolveAgentProvider(r, existing.WorkspaceID, targetRuntimeID)
-				if !ok {
-					writeError(w, http.StatusInternalServerError, "failed to resolve runtime for service_tier validation")
-					return
-				}
-			}
-			if !agent.IsKnownServiceTier(provider, value) {
-				writeError(w, http.StatusBadRequest, fmt.Sprintf("service_tier %q is not a recognised value for runtime %q", value, provider))
-				return
-			}
-			params.ServiceTier = pgtype.Text{String: value, Valid: true}
-		}
-	} else if req.RuntimeID != nil && existing.ServiceTier.Valid && existing.ServiceTier.String != "" {
-		provider := targetProvider
-		if provider == "" {
-			var ok bool
-			provider, ok = h.resolveAgentProvider(r, existing.WorkspaceID, targetRuntimeID)
-			if !ok {
-				writeError(w, http.StatusInternalServerError, "failed to resolve runtime for service_tier validation")
-				return
-			}
-		}
-		if !agent.IsKnownServiceTier(provider, existing.ServiceTier.String) {
-			writeError(w, http.StatusBadRequest, fmt.Sprintf(
-				"existing service_tier %q is not valid for runtime %q; pass service_tier=\"\" to clear or set a value valid for the new runtime",
-				existing.ServiceTier.String, provider,
-			))
-			return
-		}
-	}
-
 	updated, err := h.Queries.UpdateAgent(r.Context(), params)
 	if err != nil {
 		// Unique constraint on (workspace_id, name) — mirror CreateAgent and
@@ -1936,28 +1715,12 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 
 	// Nullable runtime overrides: null/empty in the request means explicitly
 	// clear the field. COALESCE in UpdateAgent cannot set a column to NULL, so
-	// mcp_config, thinking_level, and service_tier use dedicated clear queries.
+	// mcp_config uses a dedicated clear query.
 	if shouldClearMcpConfig {
 		updated, err = h.Queries.ClearAgentMcpConfig(r.Context(), updated.ID)
 		if err != nil {
 			slog.Warn("clear agent mcp_config failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
 			writeError(w, http.StatusInternalServerError, "failed to clear mcp_config")
-			return
-		}
-	}
-	if shouldClearThinkingLevel {
-		updated, err = h.Queries.ClearAgentThinkingLevel(r.Context(), updated.ID)
-		if err != nil {
-			slog.Warn("clear agent thinking_level failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
-			writeError(w, http.StatusInternalServerError, "failed to clear thinking_level")
-			return
-		}
-	}
-	if shouldClearServiceTier {
-		updated, err = h.Queries.ClearAgentServiceTier(r.Context(), updated.ID)
-		if err != nil {
-			slog.Warn("clear agent service_tier failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
-			writeError(w, http.StatusInternalServerError, "failed to clear service_tier")
 			return
 		}
 	}
@@ -1984,189 +1747,6 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 	h.publish(protocol.EventAgentStatus, uuidToString(updated.WorkspaceID), actorType, actorID, map[string]any{"agent": broadcastAgentResponse(resp)})
 	redactAgentResponseForActor(&resp, actorType)
 	writeJSON(w, http.StatusOK, resp)
-}
-
-// resolveAgentProvider returns the provider name for the runtime that
-// will own this agent after the in-flight update applies. Used by the
-// thinking_level validator so a runtime/model swap and a level swap
-// validated in the same request both consult the same provider.
-func (h *Handler) resolveAgentProvider(r *http.Request, workspaceID pgtype.UUID, runtimeID pgtype.UUID) (string, bool) {
-	rt, err := h.Queries.GetAgentRuntimeForWorkspace(r.Context(), db.GetAgentRuntimeForWorkspaceParams{
-		ID:          runtimeID,
-		WorkspaceID: workspaceID,
-	})
-	if err != nil {
-		return "", false
-	}
-	return rt.Provider, true
-}
-
-// thinkingNeedsExplicitModelRejection is the copy for a level that is valid for
-// the runtime but cannot be stored without a model. It names both ways out so
-// the caller does not have to guess that clearing is allowed.
-func thinkingNeedsExplicitModelRejection(provider string) string {
-	return fmt.Sprintf(
-		"runtime %q resolves its own default model, so a reasoning effort needs an explicit model; set model or pass thinking_level=\"\" to clear",
-		provider,
-	)
-}
-
-// effectiveModelValue is the model the update lands on: the requested value
-// when this request sets one (including an explicit clear), otherwise what the
-// agent already holds.
-func effectiveModelValue(params db.UpdateAgentParams, existing db.Agent) string {
-	if params.Model.Valid {
-		return params.Model.String
-	}
-	return existing.Model.String
-}
-
-// effectiveThinkingLevel is the effort the update lands on. An explicit clear
-// wins over everything; otherwise a value set by this request wins over the
-// stored one, which is carried when the field was omitted.
-func effectiveThinkingLevel(params db.UpdateAgentParams, existing db.Agent, cleared bool) string {
-	if cleared {
-		return ""
-	}
-	if params.ThinkingLevel.Valid {
-		return params.ThinkingLevel.String
-	}
-	if existing.ThinkingLevel.Valid {
-		return existing.ThinkingLevel.String
-	}
-	return ""
-}
-
-// thinkingLevelRejection explains why the target runtime will not take this
-// thinking_level. Two different failures used to share one sentence: a token
-// the runtime's catalog doesn't list, and a runtime with no reasoning control
-// at all. The second one made "high" look like a spelling mistake and sent
-// users hunting for a value that does not exist for that runtime (MUL-5770),
-// so it now names the capability gap instead.
-func thinkingLevelRejection(provider, value string) string {
-	if !agent.ThinkingControlSupported(provider) {
-		return thinkingCapabilityRejection(provider)
-	}
-	return fmt.Sprintf("thinking_level %q is not a recognised value for runtime %q", value, provider)
-}
-
-// existingThinkingCapabilityRejection is the carry-over path's capability
-// sentence — same answer as thinkingCapabilityRejection, but it names the value
-// already on the agent and the escape hatch that clears it.
-func existingThinkingCapabilityRejection(provider, value string) string {
-	return fmt.Sprintf(
-		"runtime %q does not support a per-agent reasoning effort; pass thinking_level=\"\" to clear the existing %q",
-		provider, value,
-	)
-}
-
-// thinkingCapabilityUnknownRejection covers the ambiguous case: the provider
-// name does not say which binary is installed and no catalog has been reported
-// yet, so we can neither confirm nor deny the capability.
-//
-// It deliberately does NOT reuse the "does not support" sentence. That claim
-// would be actively wrong for a jcode runtime — sending its owner off to look
-// for a limitation that does not exist — whereas naming the missing evidence
-// points at the thing that resolves it.
-func thinkingCapabilityUnknownRejection(provider string) string {
-	return fmt.Sprintf(
-		"cannot confirm whether runtime %q supports a per-agent reasoning effort: it has not reported a model catalog yet. Open the model picker for this runtime to trigger discovery and retry, or leave thinking_level empty to use the runtime default",
-		provider,
-	)
-}
-
-// existingThinkingCapabilityUnknownRejection is the carry-over path's version of
-// the same answer: it names the value already on the agent and the escape hatch.
-func existingThinkingCapabilityUnknownRejection(provider, value string) string {
-	return fmt.Sprintf(
-		"cannot confirm whether runtime %q supports a per-agent reasoning effort: it has not reported a model catalog yet. Pass thinking_level=\"\" to clear the existing %q, or retry once the runtime has reported its models",
-		provider, value,
-	)
-}
-
-// thinkingCapabilityRejection is the "this runtime has no reasoning dial"
-// sentence. Split out because the same answer can now be reached two ways: from
-// the provider name alone, or — for ACP-catalog providers, where the provider
-// name is not decisive — from a discovered catalog that advertises no effort.
-func thinkingCapabilityRejection(provider string) string {
-	return fmt.Sprintf(
-		"runtime %q does not support a per-agent reasoning effort; leave thinking_level empty to use the runtime default",
-		provider,
-	)
-}
-
-// acpEffortEvidence is what the discovered model catalog says about a runtime's
-// reasoning-effort support.
-type acpEffortEvidence int
-
-const (
-	// acpEffortUnknown — no catalog has been discovered for this runtime.
-	//
-	// This is NOT a transient cold-start state. The catalog is written only by
-	// ReportModelListResult, i.e. only after a client explicitly asks for a
-	// model list, so a caller who never opens a model picker (pure CLI use) can
-	// sit here indefinitely. Treating unknown as "supported" is therefore not a
-	// brief window — it is a permanent hole for anyone who works this way.
-	acpEffortUnknown acpEffortEvidence = iota
-	// acpEffortAbsent — a catalog exists and no model in it advertises an effort.
-	acpEffortAbsent
-	// acpEffortPresent — a catalog exists and at least one model advertises one.
-	acpEffortPresent
-)
-
-// ambiguousACPEffortProviders are providers whose name does not determine which
-// binary is actually installed, so "not discovered yet" cannot be read as
-// "supported".
-//
-// `hermes` is the only one: it covers jcode (advertises an effort and applies
-// it) and Hermes Agent (advertises none). reasonix is deliberately absent — that
-// provider means one binary, which does support an effort, so an undiscovered
-// reasonix runtime is safely allowed rather than blocked before its first
-// discovery.
-var ambiguousACPEffortProviders = map[string]bool{
-	"hermes": true,
-}
-
-// acpThinkingDecision answers whether this runtime may carry a thinking level,
-// consulting the model catalog its daemon reported.
-//
-// acpEffortPresent means "allow". Providers outside the ACP-catalog set, and
-// unambiguous ACP providers with no catalog yet, are reported as present — their
-// capability is already settled by the provider name. Only an ambiguous provider
-// turns an undiscovered catalog into a refusal, because for those the name
-// genuinely does not answer the question and guessing "yes" is what let a Hermes
-// Agent user persist a level the daemon would later drop.
-func (h *Handler) acpThinkingDecision(ctx context.Context, provider string, runtimeID pgtype.UUID) acpEffortEvidence {
-	if !agent.UsesACPCatalogThinking(provider) {
-		return acpEffortPresent
-	}
-	snapshot := h.cachedModelCatalog(ctx, uuidToString(runtimeID))
-	if snapshot == nil || len(snapshot.Models) == 0 {
-		if ambiguousACPEffortProviders[provider] {
-			return acpEffortUnknown
-		}
-		return acpEffortPresent
-	}
-	for _, m := range snapshot.Models {
-		if m.Thinking != nil && len(m.Thinking.SupportedLevels) > 0 {
-			return acpEffortPresent
-		}
-	}
-	return acpEffortAbsent
-}
-
-// existingThinkingLevelRejection is thinkingLevelRejection for the carry-over
-// path, where the caller changed runtime without touching a level the new
-// runtime cannot take. Both branches point at the same escape hatch, so the
-// user does not have to guess that clearing is allowed.
-func existingThinkingLevelRejection(provider, value string) string {
-	if !agent.ThinkingControlSupported(provider) {
-		return existingThinkingCapabilityRejection(provider, value)
-	}
-	return fmt.Sprintf(
-		"existing thinking_level %q is not valid for runtime %q; pass thinking_level=\"\" to clear or set a value valid for the new runtime",
-		value, provider,
-	)
 }
 
 func (h *Handler) ArchiveAgent(w http.ResponseWriter, r *http.Request) {

@@ -291,11 +291,6 @@ var (
 	detectAgentVersion   = agent.DetectVersion
 	checkAgentMinVersion = agent.CheckMinVersion
 
-	// listModels is an indirection over agent.ListModels so model-discovery
-	// tests can assert which executable path the daemon enumerates without
-	// shelling out to a real CLI. Mirrors the detectAgentVersion hook above.
-	listModels = agent.ListModels
-
 	// lookPath is an indirection over exec.LookPath so registration tests can
 	// resolve custom runtime-profile commands without manipulating the
 	// process PATH. Mirrors the detectAgentVersion hook above.
@@ -4606,20 +4601,12 @@ func (d *Daemon) handleHeartbeatActions(ctx context.Context, runtimeID string, r
 	if resp == nil {
 		return
 	}
-	if resp.PendingUpdate != nil || resp.PendingModelList != nil {
+	if resp.PendingUpdate != nil {
 		d.logger.Debug("heartbeat: pending actions",
 			"runtime_id", runtimeID,
-			"update", resp.PendingUpdate != nil,
-			"model_list", resp.PendingModelList != nil,
+			"update", true,
 		)
-	}
-	if resp.PendingUpdate != nil {
 		go d.handleUpdate(ctx, runtimeID, resp.PendingUpdate)
-	}
-	if resp.PendingModelList != nil {
-		if rt := d.findRuntime(runtimeID); rt != nil {
-			go d.handleModelList(ctx, *rt, resp.PendingModelList.ID)
-		}
 	}
 }
 
@@ -4716,242 +4703,6 @@ func (d *Daemon) handlePendingWorkHint(runtimeID, kind string) {
 	}
 	d.logger.Debug("pending work hint served", "runtime_id", runtimeID, "kind", kind)
 	d.handleHeartbeatActions(ctx, runtimeID, resp)
-}
-
-// handleModelList resolves the provider's supported models (via static
-// catalog or by shelling out to the agent CLI) and reports the result
-// back to the server.
-//
-// How a discovery failure is reported is the provider's decision, not this
-// function's. Providers with a safe static catalog swallow the error and return
-// the stand-in (marked Fallback); providers without one — hermes — return the
-// error, and it is forwarded as status=failed so the picker can show the reason
-// and keep manual entry (MUL-6606). Both outcomes leave the creatable dropdown
-// usable; only the second one tells the user why it is empty.
-func (d *Daemon) handleModelList(ctx context.Context, rt Runtime, requestID string) {
-	d.logger.Info("model list requested", "runtime_id", rt.ID, "request_id", requestID, "provider", rt.Provider)
-
-	// Discovery must enumerate the binary this runtime will actually execute,
-	// otherwise the picker advertises a catalog the launched CLI never agreed
-	// to (MUL-5789). Mirror runTask's resolution order: a custom runtime
-	// profile (MUL-3284) owns the executable path, and such a runtime can live
-	// on a host with NO built-in agent of the same protocol family installed —
-	// so a custom runtime must never fail on the built-in lookup. A custom
-	// path is also never re-resolved: like runTask, we don't second-guess a
-	// path the profile pinned.
-	var execPath string
-	// fixedArgs mirrors the launch prefix runTask would use. Discovery has to
-	// enumerate the CLI the profile actually runs, so a subcommand wrapper is
-	// probed as `ccms start q36 models`, not `ccms models` (GH #7046).
-	var fixedArgs []string
-	if customSpec, isCustom := d.customProfileLaunchForRuntime(rt.ID); isCustom {
-		execPath = customSpec.path
-		fixedArgs = agent.FilterLaunchPrefix(rt.Provider, customSpec.fixedArgs, d.logger)
-		d.logger.Info("model list uses custom runtime profile command",
-			"runtime_id", rt.ID, "provider", rt.Provider, "command_path", execPath,
-			"fixed_args", len(fixedArgs))
-	} else if entry, ok := d.agents()[rt.Provider]; ok {
-		// Built-in provider: self-heal a pinned executable path an in-place
-		// upgrade deleted (MUL-4486).
-		entry, _ = d.resolveAgentEntry(ctx, rt.Provider, entry)
-		execPath = entry.Path
-	} else {
-		d.reportModelListResult(ctx, rt, requestID, map[string]any{
-			"status": "failed",
-			"error":  fmt.Sprintf("no agent configured for provider %q", rt.Provider),
-		})
-		return
-	}
-
-	catalog, err := listModels(ctx, rt.Provider, agent.NewCommand(execPath, fixedArgs))
-	if err != nil {
-		d.reportModelListResult(ctx, rt, requestID, map[string]any{
-			"status": "failed",
-			"error":  err.Error(),
-		})
-		return
-	}
-	models := catalog.Models
-	if catalog.Fallback {
-		d.logger.Warn("model discovery fell back to a static catalog; reporting it as non-authoritative",
-			"runtime_id", rt.ID, "provider", rt.Provider, "path", execPath, "count", len(models))
-	}
-	if rt.Provider == "codearts" && len(models) == 0 {
-		if home, homeErr := os.UserHomeDir(); homeErr == nil {
-			configuredModels, configErr := loadCodeArtsConfiguredModels(home)
-			if configErr != nil {
-				d.logger.Warn("CodeArts custom model discovery failed",
-					"runtime_id", rt.ID, "path", codeArtsUserConfigPath(home), "error", configErr)
-			} else if len(configuredModels) > 0 {
-				models = configuredModels
-				d.logger.Info("CodeArts model discovery used user-configured providers",
-					"runtime_id", rt.ID, "path", codeArtsUserConfigPath(home), "count", len(models))
-			}
-		}
-	}
-
-	// Wire format matches handler.ModelEntry. Use a struct (not
-	// map[string]string) so the Default bool and the per-model
-	// Thinking catalog round-trip — without it the UI loses its
-	// "default" badge on the advertised pick and the thinking-level
-	// picker for claude/codex (MUL-2339).
-	type thinkingLevelWire struct {
-		Value       string `json:"value"`
-		Label       string `json:"label"`
-		Description string `json:"description,omitempty"`
-	}
-	type modelThinkingWire struct {
-		SupportedLevels []thinkingLevelWire `json:"supported_levels"`
-		DefaultLevel    string              `json:"default_level,omitempty"`
-	}
-	type modelServiceTierWire struct {
-		ID          string `json:"id"`
-		Name        string `json:"name"`
-		Description string `json:"description,omitempty"`
-	}
-	type modelWire struct {
-		ID                                  string                 `json:"id"`
-		Label                               string                 `json:"label"`
-		Provider                            string                 `json:"provider,omitempty"`
-		Default                             bool                   `json:"default,omitempty"`
-		Thinking                            *modelThinkingWire     `json:"thinking,omitempty"`
-		ServiceTiers                        []modelServiceTierWire `json:"service_tiers,omitempty"`
-		SupportsExplicitStandardServiceTier bool                   `json:"supports_explicit_standard_service_tier,omitempty"`
-	}
-	// Models the runtime named but will not run here (Claude Code reporting one
-	// that needs a newer CLI). Reported in their own list, never inside
-	// `models`: a client that does not know this field — an installed desktop
-	// build predating it — then cannot offer one as a real model, which a flag
-	// on the model itself could not guarantee (MUL-6961).
-	type unavailableModelWire struct {
-		ID     string `json:"id"`
-		Label  string `json:"label"`
-		Reason string `json:"reason,omitempty"`
-	}
-	wire := make([]modelWire, 0, len(models))
-	for _, m := range models {
-		entry := modelWire{
-			ID:                                  m.ID,
-			Label:                               m.Label,
-			Provider:                            m.Provider,
-			Default:                             m.Default,
-			SupportsExplicitStandardServiceTier: m.SupportsExplicitStandardServiceTier,
-		}
-		if m.Thinking != nil {
-			levels := make([]thinkingLevelWire, 0, len(m.Thinking.SupportedLevels))
-			for _, lvl := range m.Thinking.SupportedLevels {
-				levels = append(levels, thinkingLevelWire{
-					Value:       lvl.Value,
-					Label:       lvl.Label,
-					Description: lvl.Description,
-				})
-			}
-			entry.Thinking = &modelThinkingWire{
-				SupportedLevels: levels,
-				DefaultLevel:    m.Thinking.DefaultLevel,
-			}
-		}
-		for _, tier := range m.ServiceTiers {
-			entry.ServiceTiers = append(entry.ServiceTiers, modelServiceTierWire{
-				ID:          tier.ID,
-				Name:        tier.Name,
-				Description: tier.Description,
-			})
-		}
-		wire = append(wire, entry)
-	}
-	unavailableWire := make([]unavailableModelWire, 0, len(catalog.Unavailable))
-	for _, m := range catalog.Unavailable {
-		unavailableWire = append(unavailableWire, unavailableModelWire{
-			ID:     m.ID,
-			Label:  m.Label,
-			Reason: m.Reason,
-		})
-	}
-	d.reportModelListResult(ctx, rt, requestID, map[string]any{
-		"status":    "completed",
-		"models":    wire,
-		"supported": agent.ModelSelectionSupported(rt.Provider),
-		// Additive: an older server drops the key and the picker simply shows
-		// no unavailable section, which is the pre-MUL-6961 behaviour.
-		"unavailable_models": unavailableWire,
-		// Additive field: the models are still worth rendering, but the server
-		// must not persist them as this runtime's real catalog (MUL-5549).
-		// Older servers ignore it and keep the previous behaviour.
-		"fallback": catalog.Fallback,
-	})
-}
-
-// runtimeReportBackoffs defines the retry schedule for delivering any
-// daemon→server async result (model list). First attempt runs immediately, then we back off. The sum
-// (≈6.5s) leaves most of the server-side running timeout (60s) available for
-// discovery and report attempts. Each HTTP attempt has its own client timeout,
-// so this schedule alone is not an end-to-end delivery deadline.
-//
-// Overridable for tests to avoid real sleeps.
-var runtimeReportBackoffs = []time.Duration{0, 500 * time.Millisecond, 2 * time.Second, 4 * time.Second}
-
-// reportModelListResult delivers a model-list report to the server with retry
-// on transient failures. Without this the daemon used to fire once and
-// swallow any 5xx, leaving the request stranded in "running" on the server
-// until its 60s timeout — defeating the multi-node store fix.
-func (d *Daemon) reportModelListResult(ctx context.Context, rt Runtime, requestID string, payload map[string]any) {
-	d.reportRuntimeResultWithRetry(ctx, "model_list", rt.ID, requestID, func(ctx context.Context) error {
-		return d.client.ReportModelListResult(ctx, rt.ID, requestID, payload)
-	})
-}
-
-// reportRuntimeResultWithRetry retries `fn` on 5xx / network errors and
-// stops on success, 4xx, or after exhausting runtimeReportBackoffs.
-//
-// Why this exists: the server persists the report through a Redis / DB
-// write; on a transient store failure it correctly returns 500. Without a
-// client-side retry the daemon would fire once, swallow the error, and the
-// pending request stays in "running" on the server until its timeout — which
-// is exactly the "daemon did not respond" failure mode the multi-node store
-// fix was meant to eliminate. 4xx is treated as permanent (request-not-found,
-// cross-workspace token rejected, bad body) — retrying those just wastes
-// heartbeat cycles.
-func (d *Daemon) reportRuntimeResultWithRetry(ctx context.Context, kind, runtimeID, requestID string, fn func(context.Context) error) {
-	var lastErr error
-	for attempt, wait := range runtimeReportBackoffs {
-		if wait > 0 {
-			select {
-			case <-ctx.Done():
-				d.logger.Error("runtime async report cancelled",
-					"kind", kind, "runtime_id", runtimeID, "request_id", requestID,
-					"attempt", attempt, "error", ctx.Err())
-				return
-			case <-time.After(wait):
-			}
-		}
-		err := fn(ctx)
-		if err == nil {
-			if attempt > 0 {
-				d.logger.Info("runtime async report succeeded after retry",
-					"kind", kind, "runtime_id", runtimeID, "request_id", requestID,
-					"attempt", attempt+1)
-			}
-			return
-		}
-		lastErr = err
-
-		// 4xx is permanent (request expired, workspace mismatch, malformed
-		// body). No amount of retrying will make it succeed.
-		var reqErr *requestError
-		if errors.As(err, &reqErr) && reqErr.StatusCode >= 400 && reqErr.StatusCode < 500 {
-			d.logger.Error("runtime async report rejected — not retrying",
-				"kind", kind, "runtime_id", runtimeID, "request_id", requestID,
-				"status", reqErr.StatusCode, "error", err)
-			return
-		}
-
-		d.logger.Warn("runtime async report failed — will retry",
-			"kind", kind, "runtime_id", runtimeID, "request_id", requestID,
-			"attempt", attempt+1, "error", err)
-	}
-	d.logger.Error("runtime async report exhausted retries",
-		"kind", kind, "runtime_id", runtimeID, "request_id", requestID, "error", lastErr)
 }
 
 // handleUpdate performs the CLI update when triggered by the server via heartbeat.
@@ -7187,173 +6938,6 @@ func (d *Daemon) effectiveTaskPrepareTimeout() time.Duration {
 	return defaultTaskPrepareTimeout
 }
 
-// taskModelSelection is what a task actually launches with: the model
-// selector plus the capability overrides that survived validation.
-type taskModelSelection struct {
-	Model         string
-	ThinkingLevel string
-	ServiceTier   string
-}
-
-// resolveTaskModelSelection settles the model selector and its capability
-// overrides against the runtime's own model catalog, reading that catalog at
-// most once per task — and not at all when nothing needs it.
-//
-// The single read is the point. Discovery is a CLI subprocess with a 15-30s
-// ceiling, and cachedDiscovery deliberately does not memoize a result that
-// came back empty or as a fallback (#3729, MUL-5549) so a transient failure
-// can retry immediately. A logged-out or timing-out runtime therefore pays
-// that ceiling in full on every read, and a task that read the catalog once to
-// qualify its model and again to validate thinking_level would pay it twice
-// before the agent even starts (MUL-6471 review).
-//
-// Who asks for the catalog:
-//   - opencode and its DevEco fork cannot execute an unqualified selector, so
-//     a pinned model has to be resolved against the catalog before launch.
-//   - thinking_level / service_tier are catalog-owned and keyed on the
-//     catalog's own model id, so they need it whenever they are set.
-//
-// A pi task with no capability override asks for neither: pi's own resolver
-// accepts the persisted id in every shape it can take, so the daemon has
-// nothing to add and skips discovery entirely. Same for claude, codex, and any
-// task that pins no model.
-//
-// Qualification runs first because both checks below match on the catalog's
-// canonical id: an unqualified id silently fails every lookup and drops a
-// perfectly valid level (GH #7300).
-func resolveTaskModelSelection(
-	ctx context.Context,
-	provider string,
-	runtimeCmd agent.Command,
-	sel taskModelSelection,
-	taskLog *slog.Logger,
-) taskModelSelection {
-	capabilityChecksPending := sel.ThinkingLevel != "" || sel.ServiceTier != ""
-
-	read := false
-	var (
-		catalog    agent.Catalog
-		catalogErr error
-	)
-	loadCatalog := func() (agent.Catalog, error) {
-		if !read {
-			read = true
-			catalog, catalogErr = listModels(ctx, provider, runtimeCmd)
-		}
-		return catalog, catalogErr
-	}
-
-	sel.Model = qualifyTaskModel(provider, sel.Model, capabilityChecksPending, loadCatalog, taskLog)
-
-	// service_tier is catalog-owned and currently Codex-only. As with
-	// thinking_level, stale or incompatible persisted values degrade to the
-	// runtime default instead of failing the task. A catalog that cannot
-	// validate — a lookup error, or a fallback catalog standing in for a
-	// failed discovery — passes the value through, so a discovery failure does
-	// not silently disable a previously valid user choice (MUL-7691).
-	if sel.ServiceTier != "" {
-		ok, err := agent.ValidateServiceTierWith(loadCatalog, provider, sel.Model, sel.ServiceTier)
-		if err != nil {
-			taskLog.Warn("service_tier: catalog cannot validate; passing through",
-				"provider", provider,
-				"model", sel.Model,
-				"service_tier", sel.ServiceTier,
-				"error", err,
-			)
-		} else if !ok {
-			taskLog.Warn("service_tier: not valid for this (provider, model); skipping injection",
-				"provider", provider,
-				"model", sel.Model,
-				"service_tier", sel.ServiceTier,
-			)
-			sel.ServiceTier = ""
-		}
-	}
-	// Per-model guard: the server validates the literal token against the
-	// provider's enum, but per-model gaps (Codex's per-model
-	// `supported_reasoning_levels`, Claude's per-model `supportedEffortLevels`)
-	// only resolve here, against the daemon's local CLI catalog. Invalid
-	// combinations log a warning and drop the level rather than failing the
-	// task, so a stale persisted value never blocks execution. An empty model
-	// is resolved by ValidateThinkingLevelWith to the provider's default model
-	// so default-model tasks aren't misjudged — except for codex, whose empty
-	// model follows config.toml (any model) and so fails closed, dropping the
-	// level here without a catalog read at all. Only a verified catalog can
-	// drop a level: on a lookup error or a fallback/empty catalog we keep the
-	// persisted level and let the CLI object, unless the binary itself has no
-	// such effort flag (MUL-7691).
-	if sel.ThinkingLevel != "" {
-		ok, err := agent.ValidateThinkingLevelWith(loadCatalog, provider, sel.Model, sel.ThinkingLevel)
-		if err != nil {
-			taskLog.Warn("thinking_level: catalog cannot validate; passing through",
-				"provider", provider,
-				"model", sel.Model,
-				"thinking_level", sel.ThinkingLevel,
-				"error", err,
-			)
-		} else if !ok {
-			taskLog.Warn("thinking_level: not valid for this (provider, model); skipping injection",
-				"provider", provider,
-				"model", sel.Model,
-				"thinking_level", sel.ThinkingLevel,
-			)
-			sel.ThinkingLevel = ""
-		}
-	}
-
-	return sel
-}
-
-// qualifyTaskModel promotes a persisted model id to the canonical
-// `<provider>/<id>` selector its runtime catalog advertises, and returns the
-// model to actually launch with.
-//
-// agent.model holds whatever was persisted, and for gateway-style providers a
-// bare model id is itself slash-shaped (`claude/claude-opus-5` under provider
-// `multica-anthropic`), so the delimiter cannot tell a missing provider from a
-// present one — only the catalog knows (GH #7300).
-//
-// It reads the catalog for two distinct reasons, and neither is "because we
-// can": either the runtime refuses to launch without a qualified selector, or
-// a capability check is about to read the catalog anyway and will match
-// nothing unless the id is canonical first. When neither holds, the persisted
-// value goes to the CLI untouched and no subprocess is spawned.
-func qualifyTaskModel(
-	provider, model string,
-	capabilityChecksPending bool,
-	loadCatalog func() (agent.Catalog, error),
-	taskLog *slog.Logger,
-) string {
-	if model == "" {
-		return model
-	}
-	if !agent.ModelSelectorMustBeProviderQualified(provider) && !capabilityChecksPending {
-		return model
-	}
-	catalog, err := loadCatalog()
-	if err != nil {
-		// Same fail-open posture as the capability checks: an unreachable
-		// catalog must not stop a task whose model may well be exactly what
-		// the CLI expects.
-		taskLog.Warn("model: catalog lookup failed; using the configured model as-is",
-			"provider", provider,
-			"model", model,
-			"error", err,
-		)
-		return model
-	}
-	qualified, rewritten := agent.QualifyModelID(catalog, model)
-	if !rewritten {
-		return model
-	}
-	taskLog.Info("model: qualified against the runtime catalog",
-		"provider", provider,
-		"configured_model", model,
-		"model", qualified,
-	)
-	return qualified
-}
-
 func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot int, taskLog *slog.Logger) (taskResult TaskResult, returnErr error) {
 	phaseRecorder := taskPhaseRecorderFromContext(ctx)
 	phaseRecorder.Mark(taskPhasePrepareStarted)
@@ -8107,32 +7691,9 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		return TaskResult{}, fmt.Errorf("create agent backend: %w", err)
 	}
 
-	// Two-tier model resolution: an explicit agent.model wins,
-	// then the daemon-wide MULTICA_<PROVIDER>_MODEL env var. If
-	// both are empty we deliberately pass "" through — each
-	// backend omits `--model` from the CLI invocation, so the
-	// provider picks its own default (Claude Code's shipped
-	// default, codex app-server's account-scoped default, etc.).
-	// Baking a Go-side "recommended default" here is how the
-	// cursor regression happened — static guesses drift from
-	// whatever the upstream CLI actually accepts.
-	//
-	// Resolved before the start log rather than at first use: logging
-	// entry.Model there reported the env-var tier alone, so every task whose
-	// model came from agent.model — the common case — announced itself with an
-	// empty model and looked like the selection had been dropped (GH #7300).
-	model := ""
-	if task.Agent != nil && task.Agent.Model != "" {
-		model = task.Agent.Model
-	}
-	if model == "" {
-		model = entry.Model
-	}
-
 	taskLog.Info("starting agent",
 		"provider", provider,
 		"workdir", env.WorkDir,
-		"model", model,
 		"resume_reachable", resumeReachable,
 	)
 	if task.PriorSessionID != "" {
@@ -8153,15 +7714,8 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		customArgs = task.Agent.CustomArgs
 		mcpConfig = effectiveMcpConfig
 	}
-	thinkingLevel := ""
-	serviceTier := ""
-	if task.Agent != nil {
-		thinkingLevel = task.Agent.ThinkingLevel
-		serviceTier = task.Agent.ServiceTier
-	}
-	selection := resolveTaskModelSelection(ctx, provider, agent.NewCommand(entry.Path, profileFixedArgs),
-		taskModelSelection{Model: model, ThinkingLevel: thinkingLevel, ServiceTier: serviceTier}, taskLog)
-	model, thinkingLevel, serviceTier = selection.Model, selection.ThinkingLevel, selection.ServiceTier
+	// No model / thinking / service-tier selection: every CLI launches with
+	// its own configured default.
 
 	var idleWatchdogTimeout time.Duration
 	if provider == "opencode" || provider == "codearts" {
@@ -8170,7 +7724,6 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	execOpts := agent.ExecOptions{
 		EnableTaskSupplement:       taskSupplementNegotiated,
 		Cwd:                        env.WorkDir,
-		Model:                      model,
 		ThreadName:                 deriveTaskThreadName(task),
 		Timeout:                    d.cfg.AgentTimeout,
 		SemanticInactivityTimeout:  d.cfg.CodexSemanticInactivityTimeout,
@@ -8196,8 +7749,6 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		ExtraArgs:              extraArgs,
 		CustomArgs:             customArgs,
 		McpConfig:              mcpConfig,
-		ThinkingLevel:          thinkingLevel,
-		ServiceTier:            serviceTier,
 		OpenclawMode:           openclawMode,
 	}
 	// Some providers do not reliably load the per-task runtime config files we
@@ -8242,7 +7793,6 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 
 	taskLog.Debug("invoking backend",
 		"provider", provider,
-		"model", model,
 		"prompt_bytes", len(prompt),
 		"custom_args", len(customArgs),
 		"extra_args", len(extraArgs),
@@ -9833,8 +9383,7 @@ func isBlockedEnvKey(key string) bool {
 // the only one the upstream reports mention, but the launch arguments reach
 // the same state: nothing strips `--disable remote_compaction_v2` or
 // `-c features.remote_compaction_v2=false` out of an agent's custom args, a
-// daemon's extra args, or a custom runtime profile's launch prefix — only
-// fast_mode gets that treatment, and only when a service tier is selected.
+// daemon's extra args, or a custom runtime profile's launch prefix.
 // Naming just the file would send anyone in that case to edit a line that is
 // not there, which is the failure mode this hint exists to prevent.
 //

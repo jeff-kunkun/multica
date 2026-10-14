@@ -29,11 +29,6 @@ export interface AgentDraft {
   conversationStarters: AgentConversationStarter[];
   avatarUrl: string | null;
   runtimeId: string;
-  model: string;
-  /** Runtime-native reasoning/effort token, scoped to `model`. */
-  thinkingLevel: string;
-  /** Runtime-native execution tier (Codex Speed), scoped to `model`. */
-  serviceTier: string;
   permissionScope: AgentPermissionScope;
   memberIds: Set<string>;
   /** Team grants are not editable in this form yet, but duplicates must preserve them. */
@@ -47,43 +42,17 @@ export const EMPTY_AGENT_DRAFT: AgentDraft = {
   conversationStarters: [],
   avatarUrl: null,
   runtimeId: "",
-  model: "",
-  thinkingLevel: "",
-  serviceTier: "",
   permissionScope: "private",
   memberIds: new Set(),
   teamIds: new Set(),
 };
 
-/**
- * Draft fields whose only meaning comes from the currently selected
- * runtime + model pair. A runtime change invalidates all three; a model
- * change invalidates the two that hang off the exact model catalog. Keeping
- * them together is what stops an orphan `thinking_level` / `service_tier`
- * from being persisted for a model that never advertised it — the daemon
- * would silently fall back at execution time and the settings page would
- * disagree with what actually ran (MUL-5390).
- */
+/** Runtime change: the only execution choice the platform owns. */
 export function applyDraftRuntimeChange(
   draft: AgentDraft,
   runtimeId: string,
 ): AgentDraft {
-  return {
-    ...draft,
-    runtimeId,
-    model: "",
-    thinkingLevel: "",
-    serviceTier: "",
-  };
-}
-
-/** Model change: drop the per-model capability overrides, keep the runtime. */
-export function applyDraftModelChange(
-  draft: AgentDraft,
-  model: string,
-): AgentDraft {
-  if (model === draft.model) return draft;
-  return { ...draft, model, thinkingLevel: "", serviceTier: "" };
+  return { ...draft, runtimeId };
 }
 
 /**
@@ -157,13 +126,8 @@ export function deriveDuplicateAccess(
 /**
  * Seeds the create draft from the agent being duplicated.
  *
- * `model` / `thinkingLevel` / `serviceTier` only mean something on the runtime
- * they were chosen for, so they ride along only when the copy stays on that
- * exact runtime. When the source runtime is gone, private to somebody else or
- * offline, the draft falls back to another runtime and the three are cleared
- * for the user to pick again — the same rule `multica agent copy` already
- * enforces server-side (cmd_agent_copy.go). Before MUL-5390 the fallback kept
- * the source `model` and silently persisted a cross-provider value.
+ * The copy keeps the source runtime only when this user can still use it;
+ * otherwise it falls back to `fallbackRuntimeId`.
  */
 export function buildDuplicateDraft(
   source: Agent,
@@ -191,17 +155,12 @@ export function buildDuplicateDraft(
     runtimeId: keepsRuntime
       ? (source.runtime_id as string)
       : options.fallbackRuntimeId,
-    model: keepsRuntime ? source.model ?? "" : "",
-    thinkingLevel: keepsRuntime ? source.thinking_level ?? "" : "",
-    serviceTier: keepsRuntime ? source.service_tier ?? "" : "",
     ...deriveDuplicateAccess(source),
   };
 }
 
 /**
- * Assembles the `POST /api/agents` body. Empty execution overrides are omitted
- * rather than sent as `""` so the runtime resolves its own default, and the
- * duplicate-only fields are the runtime-independent ones (`custom_args`,
+ * Assembles the `POST /api/agents` body. The duplicate-only fields are the runtime-independent ones (`custom_args`,
  * concurrency) — mirroring `multica agent copy`.
  */
 export function buildCreateAgentRequest(options: {
@@ -226,9 +185,6 @@ export function buildCreateAgentRequest(options: {
       : {}),
     avatar_url: draft.avatarUrl ?? undefined,
     runtime_id: runtimeId,
-    model: draft.model.trim() || undefined,
-    thinking_level: draft.thinkingLevel.trim() || undefined,
-    service_tier: draft.serviceTier.trim() || undefined,
     permission_mode:
       draft.permissionScope === "private" ? "private" : "public_to",
     invocation_targets: buildInvocationTargets(draft),

@@ -49,8 +49,6 @@ export interface AgentListFilters {
    *  toggleFilter. So owner-as-filter and Mine never coexist, which keeps
    *  the axis orthogonal (no "mine + owner=someone-else = empty" state). */
   owners: string[];
-  /** Runtime-native model identifiers (e.g. claude / codex / gpt-…). */
-  models: string[];
   /** Effective access-scope values (MUL-3963): workspace | specific-people | owner-only. */
   access: AccessScope[];
 }
@@ -59,7 +57,6 @@ export const EMPTY_AGENT_FILTERS: AgentListFilters = {
   availability: [],
   runtimes: [],
   owners: [],
-  models: [],
   access: [],
 };
 
@@ -72,15 +69,48 @@ export type AgentColumnKey =
   | "runtime"
   | "lastActive"
   | "runs"
-  | "model"
   | "created";
 
-/** Model and created are opt-in: hidden until the user enables them. Owner
- *  is shown by default (the user wants to see who owns each agent). */
-export const AGENT_DEFAULT_HIDDEN_COLUMNS: AgentColumnKey[] = [
-  "model",
+const AGENT_COLUMN_KEYS: readonly AgentColumnKey[] = [
+  "status",
+  "owner",
+  "access",
+  "runtime",
+  "lastActive",
+  "runs",
   "created",
 ];
+
+/** Created is opt-in: hidden until the user enables it. Owner is shown by
+ *  default (the user wants to see who owns each agent). */
+export const AGENT_DEFAULT_HIDDEN_COLUMNS: AgentColumnKey[] = ["created"];
+
+/**
+ * Reads a persisted payload, dropping keys this client no longer has. An older
+ * client could persist a `model` column and a `models` filter; a leftover
+ * `models` value would otherwise count as an active filter nobody can see or
+ * clear.
+ */
+export function sanitizePersistedAgentsView(
+  persisted: Partial<AgentsViewState>,
+): Partial<AgentsViewState> {
+  const filters: Partial<AgentListFilters> = {};
+  const rawFilters = (persisted.filters ?? {}) as Record<string, unknown>;
+  for (const key of Object.keys(EMPTY_AGENT_FILTERS) as (keyof AgentListFilters)[]) {
+    const value = rawFilters[key];
+    if (Array.isArray(value)) (filters as Record<string, unknown>)[key] = value;
+  }
+  const result: Partial<AgentsViewState> = {
+    ...persisted,
+    filters: { ...EMPTY_AGENT_FILTERS, ...filters },
+  };
+  if (Array.isArray(persisted.hiddenColumns)) {
+    result.hiddenColumns = persisted.hiddenColumns.filter((key) =>
+      AGENT_COLUMN_KEYS.includes(key),
+    );
+  }
+  return result;
+}
 
 export interface AgentsViewState {
   scope: AgentsScope;
@@ -178,14 +208,13 @@ export const useAgentsViewStore = create<AgentsViewState>()(
       // persisted is undefined, which would leak state across workspaces.
       merge: (persisted, current) => {
         if (!persisted) return { ...current, ...DEFAULTS };
-        const p = persisted as Partial<AgentsViewState>;
         // Deep-merge filters so a payload persisted before a new filter
         // dimension existed (e.g. `owners`) still gets that key's default
-        // instead of dropping it to `undefined` and crashing `.length`.
+        // instead of dropping it to `undefined` and crashing `.length`, and
+        // drop dimensions/columns this client no longer has.
         return {
           ...current,
-          ...p,
-          filters: { ...EMPTY_AGENT_FILTERS, ...(p.filters ?? {}) },
+          ...sanitizePersistedAgentsView(persisted as Partial<AgentsViewState>),
         };
       },
     },

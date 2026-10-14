@@ -26,7 +26,6 @@ type ExecOptions struct {
 	// capability handshake enabled additional messages.
 	EnableTaskSupplement bool
 	Cwd                  string
-	Model                string
 	// SystemPrompt carries the Multica runtime brief for the few providers
 	// that cannot pick it up from disk. The daemon leaves it empty for every
 	// other provider (see daemon.providerNeedsInlineSystemPrompt), because the
@@ -99,22 +98,6 @@ type ExecOptions struct {
 	ExtraArgs  []string        // daemon-wide default CLI arguments appended before CustomArgs
 	CustomArgs []string        // per-agent CLI arguments appended after ExtraArgs
 	McpConfig  json.RawMessage // if non-nil, MCP server config to pass via --mcp-config
-	// ThinkingLevel is the runtime-native reasoning/effort value (e.g.
-	// Claude's "low|medium|high|xhigh|max", Codex's "none|minimal|low|
-	// medium|high|xhigh", OpenCode's model variant names). Empty means
-	// "use the runtime/model default" —
-	// every backend that consumes this skips its --effort / reasoning_effort
-	// injection so the upstream CLI's own default applies. Currently honoured
-	// by the claude, codex, opencode, codebuddy, dsh, and grok (ACP
-	// `--effort` on `grok agent`) backends; other backends ignore
-	// the field rather than fail (so MUL-2339 can grow runtime support
-	// incrementally without breaking unrelated agents).
-	ThinkingLevel string
-	// ServiceTier is a runtime-native Codex execution tier (for example
-	// "priority", displayed as Fast). "default" explicitly selects standard
-	// routing; empty means inherit local Codex config.
-	// Other providers ignore this field.
-	ServiceTier string
 	// OpenclawMode chooses between local (embedded) and gateway routing for
 	// the openclaw backend. "" or "local" keeps the historical behaviour —
 	// the daemon spawns `openclaw agent --local …` and the agent loop runs
@@ -123,8 +106,7 @@ type ExecOptions struct {
 	// user's globally-configured one, or an endpoint pinned in the per-task
 	// config wrapper that the daemon writes from execenv.OpenclawGatewayPin —
 	// see server/internal/daemon/execenv/openclaw_config.go). Other backends
-	// ignore this field, mirroring ThinkingLevel's renderer-side fall-through
-	// pattern. See issue #3260.
+	// ignore this field. See issue #3260.
 	OpenclawMode string
 	// piMcpExtensionPath is set by piBackend.Execute after it writes the
 	// temporary MCP extension. The daemon does not fill it.

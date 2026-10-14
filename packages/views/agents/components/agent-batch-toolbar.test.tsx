@@ -57,7 +57,6 @@ function makeAgent(
     visibility: "private" as const,
     permission_mode: "private" as const,
     invocation_targets: [] as unknown[],
-    model: "claude",
     created_at: "2026-01-01T00:00:00Z",
     updated_at: "2026-01-01T00:00:00Z",
     status: "idle" as const,

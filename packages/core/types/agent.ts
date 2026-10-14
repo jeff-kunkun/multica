@@ -533,24 +533,6 @@ export interface Agent {
   invocation_targets: AgentInvocationTarget[];
   status: AgentStatus;
   max_concurrent_tasks: number;
-  model: string;
-  /**
-   * Runtime-native reasoning/effort token (e.g. Claude's
-   * `low|medium|high|xhigh|max`, Codex's
-   * `none|minimal|low|medium|high|xhigh|max|ultra`). Empty string means "no
-   * override": the backend omits the effort flag and the upstream CLI
-   * config / built-in default decides at run time. The picker is
-   * per-runtime per-model — the API never normalises across providers.
-   * Older backends omit this field entirely; treat undefined as ""
-   * (MUL-2339).
-   */
-  thinking_level?: string;
-  /**
-   * Runtime-native Codex service tier (for example `priority`, displayed as
-   * Fast). Empty/undefined means no override: local Codex configuration and
-   * account defaults remain authoritative.
-   */
-  service_tier?: string;
   owner_id: string | null;
   created_at: string;
   updated_at: string;
@@ -587,11 +569,6 @@ export interface CreateAgentRequest {
   /** Invocation grants — see `AgentInvocationTargetInput`. */
   invocation_targets?: AgentInvocationTargetInput[];
   max_concurrent_tasks?: number;
-  model?: string;
-  /** Optional runtime-native reasoning/effort token. See `Agent.thinking_level`. */
-  thinking_level?: string;
-  /** Optional Codex service-tier catalog ID. See `Agent.service_tier`. */
-  service_tier?: string;
   /** Optional creation-source attribution. Surfaced as the `template`
    *  property on the `agent_created` PostHog event. */
   template?: string;
@@ -616,9 +593,6 @@ export interface StoredAgentDraft {
   instructions: string;
   conversation_starters: AgentConversationStarter[];
   avatar_url: string | null;
-  model: string;
-  thinking_level: string;
-  service_tier: string;
   permission_scope: AgentPermissionScope;
   member_ids: string[];
   team_ids: string[];
@@ -666,21 +640,6 @@ export interface UpdateAgentRequest {
   invocation_targets?: AgentInvocationTargetInput[];
   status?: AgentStatus;
   max_concurrent_tasks?: number;
-  model?: string;
-  /**
-   * Runtime-native reasoning/effort token. Tri-state semantics (MUL-2339):
-   *   - field omitted → no change
-   *   - "" → clear the override; backend omits the effort flag and the
-   *     local CLI config / built-in default decides what the model runs at
-   *   - non-empty → set; validated server-side against the target
-   *     runtime's provider enum, rejected with 400 if not recognised
-   */
-  thinking_level?: string;
-  /**
-   * Codex service-tier override. Omitted preserves the saved value, `""`
-   * clears it, and a non-empty value stores a runtime-catalog ID.
-   */
-  service_tier?: string;
 }
 
 /**
@@ -912,125 +871,4 @@ export interface RuntimeUpdate {
   error?: string;
   created_at: string;
   updated_at: string;
-}
-
-export interface RuntimeModel {
-  id: string;
-  label: string;
-  provider?: string;
-  default?: boolean;
-  /**
-   * Per-model reasoning/effort catalog discovered by the daemon. Currently
-   * populated for claude, codex, and opencode runtimes; omitted (or undefined)
-   * for every other provider, which the UI treats as "no thinking-level
-   * picker for this model". See MUL-2339.
-   */
-  thinking?: RuntimeModelThinking;
-  /** Runtime-native execution tiers advertised for this exact model. */
-  service_tiers?: RuntimeModelServiceTier[];
-  /**
-   * Whether this runtime's installed Codex CLI accepts the request-only
-   * `default` sentinel for explicit standard routing. Missing means false so
-   * a new client stays safe when connected to an older daemon.
-   */
-  supports_explicit_standard_service_tier?: boolean;
-}
-
-/**
- * A model the runtime named but will not run on that host — today only Claude
- * Code, reporting one that needs a newer CLI than the installed one.
- *
- * These arrive in their own list and never inside `models`, which is what keeps
- * an older client from offering one: it reads `models`, and they are not there.
- * The picker shows them greyed out with `reason` so the gap reads as "your CLI
- * is behind" rather than "Multica does not support this model" (MUL-6961).
- */
-export interface RuntimeUnavailableModel {
-  id: string;
-  label: string;
-  /** The runtime's own remedy, e.g. "Update to 2.1.255+ to use Fable 5.1". */
-  reason?: string;
-}
-
-export interface RuntimeModelServiceTier {
-  /** Catalog ID sent to the provider protocol unchanged. */
-  id: string;
-  /** Provider-owned display name, for example `Fast`. */
-  name: string;
-  /** Optional provider-owned helper copy. */
-  description?: string;
-}
-
-export interface RuntimeModelThinking {
-  /** Levels the user is allowed to pick for this model. */
-  supported_levels: RuntimeModelThinkingLevel[];
-  /** Informational: the level the upstream CLI documents as its built-in
-   *  default when no `--effort` flag is passed. Surfaced by the daemon
-   *  but not actively rendered today — Multica's empty `thinking_level`
-   *  means "no override; let the local CLI config decide", which may
-   *  itself differ from this value. */
-  default_level?: string;
-}
-
-export interface RuntimeModelThinkingLevel {
-  /** Runtime-native token passed to the CLI; never normalised. */
-  value: string;
-  /** Display label matching each CLI's own UI (`Low`, `Extra high`, …). */
-  label: string;
-  /** Optional helper copy lifted from upstream catalog
-   *  (`codex debug models` emits one per level). */
-  description?: string;
-}
-
-export type RuntimeModelListStatus =
-  | "pending"
-  | "running"
-  | "completed"
-  | "failed"
-  | "timeout";
-
-export interface RuntimeModelListRequest {
-  id: string;
-  runtime_id: string;
-  status: RuntimeModelListStatus;
-  models?: RuntimeModel[];
-  /** Advisory rows the runtime cannot run; never selectable. */
-  unavailable_models?: RuntimeUnavailableModel[];
-  supported: boolean;
-  error?: string;
-  created_at: string;
-  updated_at: string;
-  /**
-   * True when the server answered from its own catalog cache instead of a live
-   * daemon round trip (MUL-5444). Informational only: such a response already
-   * arrives with `status: "completed"` and a populated `models`, so callers
-   * that ignore this field behave exactly as before. `cached_at` is the
-   * snapshot's capture time.
-   */
-  cached?: boolean;
-  cached_at?: string;
-}
-
-// Result shape returned by resolveRuntimeModels — includes the
-// "supported" bit so the UI can distinguish "no models discovered"
-// from "provider does not honour per-agent model selection".
-export interface RuntimeModelsResult {
-  models: RuntimeModel[];
-  /**
-   * Rows the runtime named but cannot run. Kept out of `models` on purpose —
-   * see RuntimeUnavailableModel. Optional like `cached` beside it: the resolver
-   * always sets it, but a backend older than the field contributes nothing, so
-   * consumers read it defensively.
-   */
-  unavailableModels?: RuntimeUnavailableModel[];
-  supported: boolean;
-  /**
-   * True when the server answered from its catalog cache rather than a live
-   * daemon round trip (MUL-5444). Drives the query's freshness policy: a
-   * cached answer is immediately revalidatable so the client never extends the
-   * server's staleness window.
-   */
-  cached?: boolean;
-  /** Capture time of the served snapshot, when the answer was cached. */
-  cachedAt?: string;
 }

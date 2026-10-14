@@ -323,7 +323,7 @@
       "mcp": "MCP servers",
       "code": "Code",
       "approvers": "Approval rights",
-      "local_run": "Local runs"
+      "local_run": "Runtimes"
     },
     "groups": {
       "office": "Everyday",

@@ -33,7 +33,6 @@ func TestProbeAgentCLIsDiscoversCodeArtsDefaultInstallPath(t *testing.T) {
 	t.Setenv("USERPROFILE", home)
 	t.Setenv("PATH", t.TempDir())
 	t.Setenv("MULTICA_CODEARTS_PATH", "")
-	t.Setenv("MULTICA_CODEARTS_MODEL", "mimo/mimo-v2.5")
 
 	entry, ok := probeAgentCLIs()["codearts"]
 	if !ok {
@@ -42,7 +41,7 @@ func TestProbeAgentCLIsDiscoversCodeArtsDefaultInstallPath(t *testing.T) {
 	if filepath.Clean(entry.Path) != filepath.Clean(executable) {
 		t.Fatalf("CodeArts path = %q, want %q", entry.Path, executable)
 	}
-	if entry.Command != "codearts" || entry.Model != "mimo/mimo-v2.5" {
+	if entry.Command != "codearts" {
 		t.Fatalf("unexpected CodeArts entry: %+v", entry)
 	}
 	if got := providerDisplayName("codearts"); got != "CodeArts" {

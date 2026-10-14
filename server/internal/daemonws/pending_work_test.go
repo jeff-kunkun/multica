@@ -12,8 +12,11 @@ import (
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
+// testPendingWorkKind is an arbitrary hint kind; the hub forwards kinds verbatim.
+const testPendingWorkKind = "test"
+
 // TestNotifyPendingWork pins the hint that removes the up-to-one-heartbeat
-// wait before a queued model-list request is picked up (MUL-5444): daemons
+// wait before a queued heartbeat-carried request is picked up (MUL-5444): daemons
 // watching the runtime must receive a runtime-scoped daemon:pending_work frame.
 func TestNotifyPendingWork(t *testing.T) {
 	M.Reset()
@@ -28,14 +31,14 @@ func TestNotifyPendingWork(t *testing.T) {
 	conn := dialPendingWorkClient(t, hub, server.URL, "runtime-1")
 	defer conn.Close()
 
-	hub.NotifyPendingWork("runtime-1", protocol.PendingWorkKindModelList)
+	hub.NotifyPendingWork("runtime-1", testPendingWorkKind)
 
 	payload := readPendingWorkFrame(t, conn)
 	if payload.RuntimeID != "runtime-1" {
 		t.Fatalf("payload.RuntimeID = %q, want runtime-1", payload.RuntimeID)
 	}
-	if payload.Kind != protocol.PendingWorkKindModelList {
-		t.Fatalf("payload.Kind = %q, want %q", payload.Kind, protocol.PendingWorkKindModelList)
+	if payload.Kind != testPendingWorkKind {
+		t.Fatalf("payload.Kind = %q, want %q", payload.Kind, testPendingWorkKind)
 	}
 }
 
@@ -55,7 +58,7 @@ func TestDeliverDaemonRuntime_PendingWork(t *testing.T) {
 	conn := dialPendingWorkClient(t, hub, server.URL, "runtime-1")
 	defer conn.Close()
 
-	frame, err := pendingWorkFrame("runtime-1", protocol.PendingWorkKindModelList)
+	frame, err := pendingWorkFrame("runtime-1", testPendingWorkKind)
 	if err != nil {
 		t.Fatalf("pendingWorkFrame: %v", err)
 	}
@@ -92,7 +95,7 @@ func TestNotifyPendingWork_IgnoresEmptyRuntime(t *testing.T) {
 	conn := dialPendingWorkClient(t, hub, server.URL, "runtime-1")
 	defer conn.Close()
 
-	hub.NotifyPendingWork("", protocol.PendingWorkKindModelList)
+	hub.NotifyPendingWork("", testPendingWorkKind)
 
 	if err := conn.SetReadDeadline(time.Now().Add(150 * time.Millisecond)); err != nil {
 		t.Fatalf("SetReadDeadline: %v", err)

@@ -87,7 +87,7 @@ import { matchesPinyin } from "../../editor/extensions/pinyin-match";
 // the documented exception to the single-line management-list rule.
 const GRID_COLS =
   "grid-cols-[0.75rem_minmax(120px,1fr)_var(--agc-status-mobile)_1.75rem_0.75rem] " +
-  "@2xl:grid-cols-[0.75rem_1rem_minmax(200px,1fr)_var(--agc-status-desktop)_var(--agc-owner)_var(--agc-access)_var(--agc-runtime)_var(--agc-lastactive)_var(--agc-runs)_var(--agc-model)_var(--agc-created)_1.75rem_0.75rem]";
+  "@2xl:grid-cols-[0.75rem_1rem_minmax(200px,1fr)_var(--agc-status-desktop)_var(--agc-owner)_var(--agc-access)_var(--agc-runtime)_var(--agc-lastactive)_var(--agc-runs)_var(--agc-created)_1.75rem_0.75rem]";
 
 // Two-line rows; the virtualizer's fixed-size contract.
 const ROW_HEIGHT = 64;
@@ -104,14 +104,13 @@ const COLUMN_WIDTHS: Record<AgentColumnKey, number> = {
   runtime: 144,
   lastActive: 120,
   runs: 88,
-  model: 120,
   created: 104,
 };
 
 // Fixed tracks (edges 12+12, checkbox 16, name min 200, kebab 28) plus the
-// 11 gap-x-3 gaps between the wide template's 12 tracks (zero-width tracks
+// 10 gap-x-3 gaps between the wide template's 11 tracks (zero-width tracks
 // still carry gaps).
-const FIXED_TRACKS_WIDTH = 268 + 11 * 12;
+const FIXED_TRACKS_WIDTH = 268 + 10 * 12;
 
 function columnTrackVars(
   isVisible: (key: AgentColumnKey) => boolean,
@@ -132,7 +131,6 @@ function columnTrackVars(
     "--agc-runtime": width("runtime"),
     "--agc-lastactive": width("lastActive"),
     "--agc-runs": width("runs"),
-    "--agc-model": width("model"),
     "--agc-created": width("created"),
     "--agc-minw": `${minWidth}px`,
   } as React.CSSProperties;
@@ -202,12 +200,6 @@ export function rowMatchesFilters(
   if (
     filters.owners.length > 0 &&
     (!row.agent.owner_id || !filters.owners.includes(row.agent.owner_id))
-  ) {
-    return false;
-  }
-  if (
-    filters.models.length > 0 &&
-    !filters.models.includes(row.agent.model)
   ) {
     return false;
   }
@@ -661,13 +653,6 @@ function AgentListHeader({
           onSort={() => onSort("runs")}
         >
           {t(($) => $.columns.runs)}
-        </ListGridHeaderCell>
-      ) : (
-        <ListGridHeaderCell className="hidden px-0 @2xl:flex" />
-      )}
-      {isColVisible("model") ? (
-        <ListGridHeaderCell className="hidden @2xl:flex">
-          {t(($) => $.columns.model)}
         </ListGridHeaderCell>
       ) : (
         <ListGridHeaderCell className="hidden px-0 @2xl:flex" />
@@ -1141,15 +1126,6 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
                       {isColVisible("runs") ? (
                         <ListGridCell className="hidden justify-end font-mono text-caption tabular-nums text-muted-foreground @2xl:flex">
                           {row.runCount.toLocaleString(locale)}
-                        </ListGridCell>
-                      ) : (
-                        <ListGridCell className="hidden px-0 @2xl:flex" />
-                      )}
-                      {isColVisible("model") ? (
-                        <ListGridCell className="hidden @2xl:flex">
-                          <span className="min-w-0 truncate text-caption text-muted-foreground">
-                            {row.agent.model || "—"}
-                          </span>
                         </ListGridCell>
                       ) : (
                         <ListGridCell className="hidden px-0 @2xl:flex" />

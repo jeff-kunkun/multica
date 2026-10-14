@@ -460,14 +460,13 @@ function AgentPlanTable({
 
   return (
     <div className="mt-3 overflow-hidden rounded-md border">
-      <div className="grid grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)_minmax(0,1.2fr)_minmax(0,0.8fr)_minmax(0,1fr)] gap-3 border-b bg-muted/40 px-3 py-2 text-micro uppercase tracking-wide text-muted-foreground">
+      <div className="grid grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)_minmax(0,1.2fr)_minmax(0,0.8fr)] gap-3 border-b bg-muted/40 px-3 py-2 text-micro uppercase tracking-wide text-muted-foreground">
         <span>{t(($) => $.detail.delete_dialog.cascade.table.header_agent)}</span>
         <span>{t(($) => $.detail.delete_dialog.cascade.table.header_owner)}</span>
         <span>{t(($) => $.detail.delete_dialog.cascade.table.header_status)}</span>
         <span>
           {t(($) => $.detail.delete_dialog.cascade.table.header_visibility)}
         </span>
-        <span>{t(($) => $.detail.delete_dialog.cascade.table.header_model)}</span>
       </div>
       <div className="max-h-[240px] overflow-y-auto divide-y">
         {agents.map((agent) => {
@@ -483,7 +482,7 @@ function AgentPlanTable({
           return (
             <div
               key={agent.id}
-              className="grid grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)_minmax(0,1.2fr)_minmax(0,0.8fr)_minmax(0,1fr)] items-center gap-3 px-3 py-2 text-caption"
+              className="grid grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)_minmax(0,1.2fr)_minmax(0,0.8fr)] items-center gap-3 px-3 py-2 text-caption"
             >
               <span className="inline-flex min-w-0 items-center gap-2">
                 <ActorAvatar
@@ -510,10 +509,6 @@ function AgentPlanTable({
               </span>
               <PresenceCell presence={presence} />
               <VisibilityCell visibility={agent.visibility} />
-              <span className="truncate text-muted-foreground">
-                {agent.model ||
-                  t(($) => $.detail.delete_dialog.cascade.table.model_unset)}
-              </span>
             </div>
           );
         })}

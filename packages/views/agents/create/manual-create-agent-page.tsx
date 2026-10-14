@@ -40,8 +40,8 @@ export function ManualCreateAgentPage() {
     ? agents.find((agent) => agent.id === duplicateId) ?? null
     : null;
 
-  // True when a duplicate had to fall back to another runtime, which drops the
-  // source's model / thinking / speed. The notice explains the empty fields.
+  // True when a duplicate had to fall back to another runtime. The notice
+  // explains why the copy runs somewhere else.
   const [duplicateRuntimeReset, setDuplicateRuntimeReset] = useState(false);
   // A duplicate seeds asynchronously (it waits for the runtime query). Saving
   // before that lands would persist the empty form the seed is about to

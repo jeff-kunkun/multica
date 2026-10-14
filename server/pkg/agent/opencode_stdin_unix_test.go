@@ -43,7 +43,6 @@ func opencodeStdinProbe(t *testing.T, prompt string) ([]string, string, Result) 
 	}
 	session, err := backend.Execute(t.Context(), prompt, ExecOptions{
 		Timeout: 30 * time.Second,
-		Model:   "lanz/Lanz-Medium",
 	})
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
@@ -94,7 +93,7 @@ func TestOpencodeExecuteSendsPromptOnStdinNotArgv(t *testing.T) {
 		}
 	}
 	joined := strings.Join(argv, " ")
-	for _, want := range []string{"run", "--format json", "--dangerously-skip-permissions", "--model lanz/Lanz-Medium"} {
+	for _, want := range []string{"run", "--format json", "--dangerously-skip-permissions"} {
 		if !strings.Contains(joined, want) {
 			t.Errorf("expected %q in argv, got %v", want, argv)
 		}

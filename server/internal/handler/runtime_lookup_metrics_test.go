@@ -51,19 +51,19 @@ func TestAgentRuntimeLookupWSHotPathIsZeroRead(t *testing.T) {
 		map[string]any{"runtime_id": runtimeID}, testWorkspaceID, "lookup-source-daemon")
 	testutil.Call(t, h.DaemonHeartbeat, httpBeat).Want(http.StatusOK)
 
-	// A model poll for a runtime that no longer exists: the read-access gate
+	// An update poll for a runtime that no longer exists: the read-access gate
 	// runs the lookup before any auth check, so this exercises the poll's
 	// source and the not_found classification in one request.
 	poll := withURLParam(httptest.NewRequest(http.MethodGet,
-		"/api/runtimes/"+uuid.NewString()+"/models/req-1", nil), "runtimeId", uuid.NewString())
-	testutil.Call(t, testHandler.GetModelListRequest, poll).Want(http.StatusNotFound)
+		"/api/runtimes/"+uuid.NewString()+"/update/upd-1", nil), "runtimeId", uuid.NewString())
+	testutil.Call(t, testHandler.GetUpdate, poll).Want(http.StatusNotFound)
 
 	after := lookupSnapshot(t, m)
 	for _, want := range []struct {
 		source, result string
 	}{
 		{obsmetrics.RuntimeLookupSourceHeartbeatHTTP, obsmetrics.RuntimeLookupResultOK},
-		{obsmetrics.RuntimeLookupSourceRuntimeModelPoll, obsmetrics.RuntimeLookupResultNotFound},
+		{obsmetrics.RuntimeLookupSourceRuntimeUpdatePoll, obsmetrics.RuntimeLookupResultNotFound},
 	} {
 		key := want.source + "/" + want.result
 		if got := after[key] - before[key]; got != 1 {
@@ -76,7 +76,7 @@ func TestAgentRuntimeLookupWSHotPathIsZeroRead(t *testing.T) {
 		obsmetrics.RuntimeLookupSourceHeartbeatWS + "/" + obsmetrics.RuntimeLookupResultOK,
 		obsmetrics.RuntimeLookupSourceHeartbeatWS + "/" + obsmetrics.RuntimeLookupResultNotFound,
 		obsmetrics.RuntimeLookupSourceHeartbeatHTTP + "/" + obsmetrics.RuntimeLookupResultNotFound,
-		obsmetrics.RuntimeLookupSourceRuntimeModelPoll + "/" + obsmetrics.RuntimeLookupResultOK,
+		obsmetrics.RuntimeLookupSourceRuntimeUpdatePoll + "/" + obsmetrics.RuntimeLookupResultOK,
 		obsmetrics.RuntimeLookupSourceOther + "/" + obsmetrics.RuntimeLookupResultOK,
 	} {
 		if got := after[key] - before[key]; got != 0 {

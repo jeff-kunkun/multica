@@ -48,7 +48,6 @@ const fullHistoryAgent: Agent = {
   invocation_targets: [{ target_type: "workspace", target_id: null }],
   status: "idle",
   max_concurrent_tasks: 1,
-  model: "",
   owner_id: null,
   // Older than the window so daysSinceCreated saturates at DAYS.
   created_at: new Date(NOW - 100 * DAY).toISOString(),

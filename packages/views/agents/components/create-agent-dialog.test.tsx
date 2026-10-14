@@ -26,12 +26,6 @@ vi.mock("@multica/core/hooks", () => ({
   useWorkspaceId: () => "ws-1",
 }));
 
-// ModelDropdown talks to the api; the create dialog only needs it as a
-// stand-in here, so swap it out.
-vi.mock("./model-dropdown", () => ({
-  ModelDropdown: () => null,
-}));
-
 // Provider logos don't matter for these assertions but they pull in SVGs.
 vi.mock("../../runtimes/components/provider-logo", () => ({
   ProviderLogo: () => null,
@@ -112,7 +106,6 @@ function makeDuplicateSource(runtimeId: string): Agent {
     invocation_targets: [],
     status: "idle",
     max_concurrent_tasks: 1,
-    model: "",
     owner_id: ME,
     created_at: "2026-04-01T00:00:00Z",
     updated_at: "2026-04-01T00:00:00Z",

@@ -159,7 +159,7 @@ func TestRegisterRuntimes_IncludesBuiltInQwen(t *testing.T) {
 	fx := newProfileRegisterFixture(t, nil, http.StatusOK)
 	d := fx.daemon
 	d.cfg.Agents = map[string]AgentEntry{
-		"qwen": {Path: "/usr/bin/true", Command: "qwen", Model: "qwen3.8-max-preview"},
+		"qwen": {Path: "/usr/bin/true", Command: "qwen"},
 	}
 
 	resp, _, _, err := d.registerRuntimesForWorkspaceLocked(context.Background(), "ws-1")

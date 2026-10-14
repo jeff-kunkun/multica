@@ -284,7 +284,7 @@ var antigravitySelectedModelRe = regexp.MustCompile(
 	`Propagating selected model override to backend:\s*label="([^"\r\n]+)"`,
 )
 
-func readAntigravitySelectedModel(logPath, streamModel, configuredModel string) string {
+func readAntigravitySelectedModel(logPath, streamModel string) string {
 	if model := strings.TrimSpace(streamModel); model != "" {
 		return model
 	}
@@ -296,9 +296,6 @@ func readAntigravitySelectedModel(logPath, streamModel, configuredModel string) 
 			}
 		}
 	}
-	if model := strings.TrimSpace(configuredModel); model != "" {
-		return model
-	}
 	return "unknown"
 }
 
@@ -309,23 +306,6 @@ func (b *antigravityBackend) Execute(ctx context.Context, prompt string, opts Ex
 	}
 	if _, err := exec.LookPath(execPath); err != nil {
 		return nil, fmt.Errorf("agy executable not found at %q: %w", execPath, err)
-	}
-
-	// Guard against agy's silent no-op on an unrecognised --model: it exits 0
-	// with empty output, which would otherwise surface as a "completed" but
-	// empty task. opts.Model is the single funnel for both agent.model and the
-	// daemon-wide MULTICA_ANTIGRAVITY_MODEL default (resolved in daemon.go), so
-	// validating it here covers every source — UI free-text, API, a persisted
-	// value, and the env default alike. Reject a non-empty model the installed
-	// CLI definitively does not advertise, with an actionable error. Validation
-	// is fail-OPEN: if the `agy models` catalog can't be discovered we let agy
-	// resolve the value itself rather than blocking the run on a discovery
-	// hiccup (see antigravityModelError).
-	if opts.Model != "" {
-		catalog, _ := ListModels(ctx, "antigravity", b.cfg.commandAt(execPath))
-		if err := antigravityModelError(opts.Model, catalog.Models); err != nil {
-			return nil, err
-		}
 	}
 
 	timeout := opts.Timeout
@@ -365,7 +345,7 @@ func (b *antigravityBackend) Execute(ctx context.Context, prompt string, opts Ex
 		return nil, fmt.Errorf("start agy: %w", err)
 	}
 
-	b.cfg.Logger.Info("agy started", "pid", cmd.Process.Pid, "cwd", opts.Cwd, "model", opts.Model)
+	b.cfg.Logger.Info("agy started", "pid", cmd.Process.Pid, "cwd", opts.Cwd)
 
 	msgCh := make(chan Message, 256)
 	resCh := make(chan Result, 1)
@@ -575,7 +555,7 @@ func (b *antigravityBackend) Execute(ctx context.Context, prompt string, opts Ex
 		}
 		usageByModel := map[string]TokenUsage{}
 		if usage != (TokenUsage{}) {
-			model := readAntigravitySelectedModel(logPath, streamModel, opts.Model)
+			model := readAntigravitySelectedModel(logPath, streamModel)
 			usageByModel[model] = usage
 		}
 
@@ -792,7 +772,6 @@ var antigravityBlockedArgs = map[string]blockedArgMode{
 	"-c":                             blockedStandalone, // resume via --conversation, not --continue
 	"--continue":                     blockedStandalone,
 	"--conversation":                 blockedWithValue, // managed via ExecOptions.ResumeSessionID
-	"--model":                        blockedWithValue, // managed via ExecOptions.Model / agent.model
 	"--output-format":                blockedWithValue, // stream-json is required for token accounting
 	"--print-timeout":                blockedWithValue,
 	"--dangerously-skip-permissions": blockedStandalone, // always-on in daemon mode
@@ -803,31 +782,18 @@ var antigravityBlockedArgs = map[string]blockedArgMode{
 // buildAntigravityArgs assembles the argv for a daemon-compatible one-shot agy
 // invocation.
 //
-//	agy -p <prompt> --dangerously-skip-permissions [--model <catalog id>]
+//	agy -p <prompt> --dangerously-skip-permissions
 //	    --print-timeout <duration> --log-file <tmp>
 //	    [--conversation <id>] [--add-dir <cwd>]
 //
-// agy 1.0.6 added a `--model` flag (MUL-3125), so opts.Model is now wired
-// through when set. The value is the catalog identifier parseAntigravityModels
-// read out of `agy models`: a slug (e.g. "gemini-3.6-flash-high") on agy
-// 1.1.11+, or the verbatim single-column value (e.g. "Claude Opus 4.6
-// (Thinking)") on older output. Either shape ships as one exec arg, so spaces
-// and parens need no shell quoting. agy still exposes no --system-prompt;
-// runtime instructions are delivered via AGENTS.md in the task workdir.
-//
-// agy silently no-ops on a model string it doesn't recognise (empty output,
-// exit 0), so Execute validates opts.Model against the `agy models` catalog
-// and rejects an unrecognised value up front (see antigravityModelError) —
-// by the time we build argv the value is either empty or known-good. When
-// opts.Model is empty we omit the flag and agy resolves its own default.
+// No --model flag is passed: agy resolves its own configured default. agy
+// exposes no --system-prompt; runtime instructions are delivered via
+// AGENTS.md in the task workdir.
 func buildAntigravityArgs(prompt, logPath string, timeout time.Duration, opts ExecOptions, logger *slog.Logger) []string {
 	args := []string{
 		"-p", prompt,
 		"--dangerously-skip-permissions",
 		"--output-format", "stream-json",
-	}
-	if opts.Model != "" {
-		args = append(args, "--model", opts.Model)
 	}
 	// agy's --print-timeout has NO "disabled" value and DEFAULTS TO 5m when the
 	// flag is omitted, so "no cap" cannot be expressed by dropping it — that
@@ -847,31 +813,6 @@ func buildAntigravityArgs(prompt, logPath string, timeout time.Duration, opts Ex
 	args = append(args, filterCustomArgs(opts.ExtraArgs, antigravityBlockedArgs, logger)...)
 	args = append(args, filterCustomArgs(opts.CustomArgs, antigravityBlockedArgs, logger)...)
 	return args
-}
-
-// antigravityModelError returns an actionable error when `model` is non-empty
-// and definitively absent from `available` (the `agy models` catalog); it
-// returns nil otherwise. An empty `available` means discovery couldn't produce
-// a catalog (agy missing, transient failure) — we fail OPEN there and let agy
-// resolve the value, so a discovery hiccup never blocks a run. The match is
-// exact because agy's --model wants the precise catalog identifier; a near-miss
-// (extra space, dropped suffix) is correctly rejected since agy would silently
-// no-op on it anyway.
-func antigravityModelError(model string, available []Model) error {
-	if model == "" || len(available) == 0 {
-		return nil
-	}
-	ids := make([]string, 0, len(available))
-	for _, m := range available {
-		if m.ID == model {
-			return nil
-		}
-		ids = append(ids, m.ID)
-	}
-	return fmt.Errorf(
-		"antigravity model %q is not available from `agy models`; pick one of: %s",
-		model, strings.Join(ids, ", "),
-	)
 }
 
 // antigravityNoCapPrintTimeout is the --print-timeout value used when the daemon
