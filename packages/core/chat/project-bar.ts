@@ -14,10 +14,11 @@ function activityTime(s: ChatSession): number {
 }
 
 /**
- * The chips above the chat list: projects the person pinned (in pin order),
- * then every other project with an active chat, most recent chat first.
- * Archived chats neither count nor surface a project. Ids that are not in
- * `projectIds` (deleted, or not loaded) are dropped.
+ * The chips above the chat list: every project with an active chat, the
+ * person's pinned ones first, each group ordered by most recent chat.
+ * Archived chats neither count nor surface a project, so a pinned project
+ * without active chats stays off the bar. Ids that are not in `projectIds`
+ * (deleted, or not loaded) are dropped.
  */
 export function rankChatProjects(
   projectIds: readonly string[],
@@ -36,21 +37,11 @@ export function rankChatProjects(
     stats.set(id, row);
   }
 
-  const pinned = new Set<string>();
-  const chips: ChatProjectChip[] = [];
-  for (const id of pinnedIds) {
-    if (!known.has(id) || pinned.has(id)) continue;
-    pinned.add(id);
-    const row = stats.get(id);
-    chips.push({ id, chatCount: row?.chatCount ?? 0, hasUnread: row?.hasUnread ?? false, pinned: true });
-  }
-  const rest = [...stats.entries()]
-    .filter(([id]) => !pinned.has(id))
-    .sort((a, b) => b[1].lastAt - a[1].lastAt);
-  for (const [id, row] of rest) {
-    chips.push({ id, chatCount: row.chatCount, hasUnread: row.hasUnread, pinned: false });
-  }
-  return chips;
+  const pinned = new Set(pinnedIds);
+  return [...stats.entries()]
+    .map(([id, row]) => ({ id, ...row, pinned: pinned.has(id) }))
+    .sort((a, b) => Number(b.pinned) - Number(a.pinned) || b.lastAt - a.lastAt)
+    .map(({ id, chatCount, hasUnread, pinned }) => ({ id, chatCount, hasUnread, pinned }));
 }
 
 /** Sessions shown under a project filter; null keeps every session. */
