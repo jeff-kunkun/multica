@@ -4,7 +4,6 @@ import { useState } from "react";
 import {
   AlertCircle,
   ArrowLeft,
-  Bot,
   Clock3,
   Lock,
   MessageSquare,
@@ -37,7 +36,7 @@ import {
   memberListOptions,
   workspaceKeys,
 } from "@multica/core/workspace/queries";
-import { runtimeDisplayLabel, runtimeListOptions } from "@multica/core/runtimes";
+import { runtimeListOptions } from "@multica/core/runtimes";
 import { useAgentPermissions } from "@multica/core/permissions";
 import { Button } from "@multica/ui/components/ui/button";
 import { CapabilityBanner } from "@multica/ui/components/common/capability-banner";
@@ -60,6 +59,7 @@ import { cn } from "@multica/ui/lib/utils";
 import { AppLink, useNavigation } from "../../navigation";
 import { PAGE_GUTTER, PAGE_RAIL, PageHeader } from "../../layout/page-header";
 import { ActorAvatar } from "../../common/actor-avatar";
+import { runtimeCliLabel } from "../../runtimes/components/runtime-machines";
 import { AgentPresenceIndicator } from "./agent-presence-indicator";
 import { VisibilityBadge } from "./visibility-badge";
 import { AgentOverviewPane, type DetailTab } from "./agent-overview-pane";
@@ -541,14 +541,10 @@ function DetailHeader({
               </ExpandableDescription>
               <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2 text-caption text-muted-foreground">
                 <span className="inline-flex min-w-0 items-center gap-1.5">
-                  <Bot className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
-                  <span className="truncate">{agent.model || t(($) => $.pickers.model_default)}</span>
-                </span>
-                <span className="inline-flex min-w-0 items-center gap-1.5">
                   <Server className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
                   <span className="truncate">
                     {runtime
-                      ? runtimeDisplayLabel(runtime)
+                      ? runtimeCliLabel(runtime)
                       : t(($) => $.pickers.runtime_none)}
                   </span>
                 </span>

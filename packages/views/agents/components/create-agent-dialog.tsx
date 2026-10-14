@@ -2,7 +2,6 @@
 
 import { useState } from "react";
 import { Globe, Lock } from "lucide-react";
-import { ModelDropdown } from "./model-dropdown";
 import { RuntimePicker } from "./runtime-picker";
 import { isRuntimeUsableForUser } from "@multica/core/runtimes";
 import { InstructionsEditor } from "./instructions-editor";
@@ -48,7 +47,7 @@ export function CreateAgentDialog({
   members: MemberWithUser[];
   currentUserId: string | null;
   // When provided, the dialog opens in "Duplicate" mode: the visible
-  // fields (name / description / runtime / visibility / model) are
+  // fields (name / description / runtime / visibility) are
   // pre-populated from this agent, and the hidden fields
   // (instructions / custom_args / custom_env / max_concurrent_tasks)
   // are forwarded to the create call so the new agent is a true clone.
@@ -68,7 +67,6 @@ export function CreateAgentDialog({
     template?.visibility ?? "workspace",
   );
 
-  const [model, setModel] = useState(template?.model ?? "");
   const [instructions, setInstructions] = useState(template?.instructions ?? "");
   const [avatarUrl, setAvatarUrl] = useState<string | null>(template?.avatar_url ?? null);
   const [creating, setCreating] = useState(false);
@@ -107,7 +105,6 @@ export function CreateAgentDialog({
         name: name.trim(),
         description: description.trim(),
         runtime_id: selectedRuntime.id,
-        model: model.trim() || undefined,
         instructions: trimmedInstructions || undefined,
         avatar_url: avatarUrl ?? undefined,
         visibility,
@@ -252,20 +249,7 @@ export function CreateAgentDialog({
               members={members}
               currentUserId={currentUserId}
               selectedRuntimeId={selectedRuntimeId}
-              onSelect={(id) => {
-                // Models are per-runtime; a value picked for the old runtime
-                // may not exist on the new one, so drop it on runtime change.
-                if (id !== selectedRuntimeId) setModel("");
-                setSelectedRuntimeId(id);
-              }}
-            />
-
-            <ModelDropdown
-              runtimeId={selectedRuntime?.id ?? null}
-              runtimeOnline={selectedRuntime?.status === "online"}
-              value={model}
-              onChange={setModel}
-              disabled={!selectedRuntime}
+              onSelect={setSelectedRuntimeId}
             />
 
             {/* --- Optional section (instructions) ---

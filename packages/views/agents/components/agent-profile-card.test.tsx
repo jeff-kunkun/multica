@@ -101,8 +101,7 @@ function makeAgent(overrides: Record<string, unknown> = {}) {
     description: "A coding agent.",
     instructions: "",
     avatar_url: null,
-    // cloud so RuntimeRow reads "online" without a runtime fixture — the
-    // Model row is what these tests exercise.
+    // cloud so RuntimeRow reads "online" without a runtime fixture.
     runtime_mode: "cloud" as const,
     runtime_config: {},
     custom_args: [],
@@ -160,35 +159,14 @@ describe("AgentProfileCard — Runtime row", () => {
   );
 });
 
-describe("AgentProfileCard — Model row", () => {
-  it("shows the pinned model id and the effort badge", () => {
+describe("AgentProfileCard — no model row", () => {
+  // The model is picked per run, not per member (DENE-2037), so a stored
+  // value is never shown as if it decided anything.
+  it("does not show a stored model or effort", () => {
     mockAgents.current = [makeAgent({ model: "claude-opus-4-8", thinking_level: "high" })];
     renderCard();
 
-    expect(screen.getByText("claude-opus-4-8")).toBeInTheDocument();
-    expect(screen.getByText("high")).toBeInTheDocument();
-    expect(screen.queryByText(enAgents.profile_card.model_unset)).toBeNull();
-  });
-
-  // Regression (Emacs code review): an agent with no pinned model but a
-  // persisted thinking_level runs WITH that effort at run time. The badge
-  // must render even though the model cell reads "Runtime default" — gating
-  // it on `hasModel` hid legitimate runtime config.
-  it("shows the effort badge even when the model is unset (Runtime default)", () => {
-    mockAgents.current = [makeAgent({ model: "", thinking_level: "high" })];
-    renderCard();
-
-    expect(screen.getByText(enAgents.profile_card.model_unset)).toBeInTheDocument();
-    expect(screen.getByText("high")).toBeInTheDocument();
-  });
-
-  it("renders no effort badge when thinking_level is empty", () => {
-    mockAgents.current = [makeAgent({ model: "", thinking_level: "" })];
-    renderCard();
-
-    expect(screen.getByText(enAgents.profile_card.model_unset)).toBeInTheDocument();
-    // No effort token anywhere on the card.
+    expect(screen.queryByText("claude-opus-4-8")).toBeNull();
     expect(screen.queryByText("high")).toBeNull();
-    expect(screen.queryByText("medium")).toBeNull();
   });
 });

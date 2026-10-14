@@ -26,12 +26,6 @@ vi.mock("@multica/core/hooks", () => ({
   useWorkspaceId: () => "ws-1",
 }));
 
-// ModelDropdown talks to the api; the create dialog only needs it as a
-// stand-in here, so swap it out.
-vi.mock("./model-dropdown", () => ({
-  ModelDropdown: () => null,
-}));
-
 // Provider logos don't matter for these assertions but they pull in SVGs.
 vi.mock("../../runtimes/components/provider-logo", () => ({
   ProviderLogo: () => null,

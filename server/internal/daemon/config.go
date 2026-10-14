@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/url"
 	"os"
 	"os/exec"
@@ -514,7 +515,7 @@ func LoadConfig(overrides Overrides) (Config, error) {
 	// canonical id was itself promoted from a pre-change profile file).
 	legacyDaemonIDs = filterLegacyIDs(legacyDaemonIDs, daemonID)
 
-	deviceName := envOrDefault("MULTICA_DAEMON_DEVICE_NAME", host)
+	deviceName := envOrDefault("MULTICA_DAEMON_DEVICE_NAME", friendlyDeviceName(host, macComputerName))
 	if overrides.DeviceName != "" {
 		deviceName = overrides.DeviceName
 	}
@@ -1495,4 +1496,33 @@ func applyOpenclawOverride(oc *cli.OpenClawOverride) {
 			_ = os.Setenv(execenv.OpenclawCLITimeoutEnv, oc.CLITimeout)
 		}
 	}
+}
+
+// friendlyDeviceName is the machine label shown next to every runtime. Some
+// networks hand macOS a hostname that is just the DHCP address
+// ("192.168.0.104"), which reads as an IP everywhere the runtime appears, so
+// an address-shaped hostname falls back to the computer name the user set.
+// Only the label changes: the daemon id and legacy-id migration keep using
+// the raw hostname.
+func friendlyDeviceName(host string, computerName func() string) string {
+	if net.ParseIP(strings.TrimSpace(host)) == nil {
+		return host
+	}
+	if name := strings.TrimSpace(computerName()); name != "" {
+		return name
+	}
+	return host
+}
+
+func macComputerName() string {
+	if runtime.GOOS != "darwin" {
+		return ""
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, "scutil", "--get", "ComputerName").Output()
+	if err != nil {
+		return ""
+	}
+	return string(out)
 }

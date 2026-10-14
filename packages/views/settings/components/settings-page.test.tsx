@@ -146,7 +146,7 @@ describe("SettingsPage information architecture", () => {
       within(everyday)
         .getAllByRole("link")
         .map((link) => link.textContent),
-    ).toEqual(["Account", "Bot access", "Approval rights", "Local runs", "Appearance"]);
+    ).toEqual(["Account", "Bot access", "Approval rights", "Runtimes", "Appearance"]);
 
     const personal = within(nav()).getByRole("region", { name: /Personal/ });
     expect(within(personal).getByRole("link", { name: "API Tokens" })).toBeInTheDocument();

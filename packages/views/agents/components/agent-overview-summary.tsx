@@ -1,12 +1,12 @@
 "use client";
 
-import { Bot, Server } from "lucide-react";
+import { Server } from "lucide-react";
 import type {
   Agent,
   AgentRuntime,
   MemberWithUser,
 } from "@multica/core/types";
-import { runtimeDisplayLabel } from "@multica/core/runtimes";
+import { runtimeCliLabel } from "../../runtimes/components/runtime-machines";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { useT } from "../../i18n";
 import { VisibilityBadge } from "./visibility-badge";
@@ -53,7 +53,7 @@ export function AgentOverviewSummary({
           <SummaryRow label={t(($) => $.overview.access)}>
             <VisibilityBadge value={agent.visibility} />
           </SummaryRow>
-          <SummaryRow label={t(($) => $.inspector.prop_runtime)}>
+          <SummaryRow label={t(($) => $.inspector.prop_cli)}>
             <span className="flex min-w-0 items-center gap-1.5 text-foreground">
               <span
                 className={`h-1.5 w-1.5 shrink-0 rounded-full ${
@@ -64,16 +64,8 @@ export function AgentOverviewSummary({
               <Server className="h-3 w-3 shrink-0 text-muted-foreground" aria-hidden="true" />
               <span className="truncate">
                 {runtime
-                  ? runtimeDisplayLabel(runtime)
+                  ? runtimeCliLabel(runtime)
                   : t(($) => $.pickers.runtime_none)}
-              </span>
-            </span>
-          </SummaryRow>
-          <SummaryRow label={t(($) => $.inspector.prop_model)}>
-            <span className="flex min-w-0 items-center gap-1.5 text-foreground">
-              <Bot className="h-3 w-3 shrink-0 text-muted-foreground" aria-hidden="true" />
-              <span className="truncate">
-                {agent.model || t(($) => $.pickers.model_default)}
               </span>
             </span>
           </SummaryRow>

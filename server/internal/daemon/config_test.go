@@ -1924,3 +1924,23 @@ func TestApplyOpenclawOverride_CLITimeout(t *testing.T) {
 		}
 	})
 }
+
+func TestFriendlyDeviceName(t *testing.T) {
+	named := func() string { return "Kun's MacBook Pro\n" }
+	empty := func() string { return "" }
+	cases := []struct {
+		host string
+		fn   func() string
+		want string
+	}{
+		{"192.168.0.104", named, "Kun's MacBook Pro"},
+		{"fe80::1", named, "Kun's MacBook Pro"},
+		{"192.168.0.104", empty, "192.168.0.104"},
+		{"kun-mbp.local", named, "kun-mbp.local"},
+	}
+	for _, c := range cases {
+		if got := friendlyDeviceName(c.host, c.fn); got != c.want {
+			t.Errorf("friendlyDeviceName(%q) = %q, want %q", c.host, got, c.want)
+		}
+	}
+}
