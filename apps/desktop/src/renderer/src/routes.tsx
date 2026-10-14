@@ -15,8 +15,7 @@ import { ProjectsPage } from "@multica/views/projects/components";
 import { DashboardPage } from "@multica/views/dashboard";
 import { MyIssuesPage } from "@multica/views/my-issues";
 import { DesktopRuntimesPage } from "./components/desktop-runtimes-page";
-import { DesktopAgentsPage } from "./components/desktop-agents-page";
-import { ManualCreateAgentPage } from "@multica/views/agents";
+import { AgentsPage, ManualCreateAgentPage } from "@multica/views/agents";
 import { InboxPage } from "@multica/views/inbox";
 import { ChatPage } from "@multica/views/chat";
 import { SettingsPage } from "@multica/views/settings";
@@ -157,7 +156,7 @@ export const appRoutes: RouteObject[] = [
             element: <RuntimeSettingsPage />,
             handle: { title: "Runtime" },
           },
-          { path: "agents", element: <DesktopAgentsPage />, handle: { title: "Agents" } },
+          { path: "agents", element: <AgentsPage />, handle: { title: "Agents" } },
           {
             path: "agents/new",
             element: <ManualCreateAgentPage />,

@@ -1,54 +1,17 @@
-import React from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { screen } from "@testing-library/react";
-import type { Agent } from "@multica/core/types";
-import type { AgentActivity } from "@multica/core/agents";
-import type { SupportedLocale } from "@multica/core/i18n";
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
+import type { Agent, AgentRuntime } from "@multica/core/types";
 import { renderWithI18n } from "../../test/i18n";
 import { NavigationProvider, type NavigationAdapter } from "../../navigation";
 import { AgentsPage } from "./agents-page";
 
-// These tests pin the `listReady` render gate (MUL-4511): the Agents list must
-// not paint real rows until the auxiliary queries the active sort field /
-// filter depends on have landed, or it sorts on placeholder values
-// (lastActiveDays null→Infinity, runCount 0) and visibly re-orders when each
-// query resolves. The gate waits per need — nothing for name/created,
-// run-counts for runs, activity + run-counts for the default lastActive,
-// presence when an availability filter is active — and never blocks the empty
-// state on those queries.
-
 const mocks = vi.hoisted(() => ({
   agents: [] as Agent[],
-  agentsLoading: false,
-  runCounts: [] as Array<{ agent_id: string; run_count: number }>,
-  runCountsPending: false,
-  activity: {
-    byAgent: new Map<string, AgentActivity>(),
-    loading: false,
-  },
-  presence: {
-    byAgent: new Map<string, unknown>(),
-    loading: false,
-  },
-  viewState: {
-    scope: "all",
-    sortField: "lastActive" as string,
-    sortDirection: "desc" as string,
-    hiddenColumns: ["created"] as string[],
-    filters: {
-      availability: [] as string[],
-      runtimes: [] as string[],
-      owners: [] as string[],
-      access: [] as string[],
-    },
-    setScope: vi.fn(),
-    toggleSort: vi.fn(),
-    setSortField: vi.fn(),
-    setSortDirection: vi.fn(),
-    toggleColumn: vi.fn(),
-    toggleFilter: vi.fn(),
-    clearFilters: vi.fn(),
-  },
+  runtimes: [] as Partial<AgentRuntime>[],
+  presence: new Map<string, unknown>(),
+  archiveAgent: vi.fn(),
+  restoreAgent: vi.fn(),
+  push: vi.fn(),
 }));
 
 vi.mock("@tanstack/react-query", () => ({
@@ -57,32 +20,15 @@ vi.mock("@tanstack/react-query", () => ({
     if (key === "agents") {
       return {
         data: mocks.agents,
-        isLoading: mocks.agentsLoading,
+        isLoading: false,
         error: null,
         refetch: vi.fn(),
       };
     }
-    if (key === "agent-run-counts") {
-      return { data: mocks.runCounts, isPending: mocks.runCountsPending };
-    }
-    return { data: [], isLoading: false, isPending: false };
+    if (key === "runtimes") return { data: mocks.runtimes };
+    return { data: [] };
   },
   useQueryClient: () => ({ invalidateQueries: vi.fn() }),
-}));
-
-// The list virtualizes; render every row so DOM order reflects sort order.
-vi.mock("@tanstack/react-virtual", () => ({
-  useVirtualizer: ({ count }: { count: number }) => ({
-    getVirtualItems: () =>
-      Array.from({ length: count }, (_, index) => ({
-        index,
-        key: index,
-        start: index * 64,
-        end: (index + 1) * 64,
-        size: 64,
-      })),
-    getTotalSize: () => count * 64,
-  }),
 }));
 
 vi.mock("sonner", () => ({
@@ -90,29 +36,17 @@ vi.mock("sonner", () => ({
 }));
 
 vi.mock("@multica/core/agents", () => ({
-  isAgentRuntimeBound: (agent: { runtime_id: string; runtime_bound?: boolean }) =>
-    agent.runtime_bound !== false && agent.runtime_id.length > 0,
-  agentRunCounts30dOptions: () => ({ queryKey: ["agent-run-counts"] }),
-  useWorkspaceActivityMap: () => mocks.activity,
-  useWorkspacePresenceMap: () => mocks.presence,
-  VISIBILITY_TOOLTIP: { private: "Private", workspace: "Workspace" },
-  effectiveAccessScope: (pm: unknown, it: unknown) => {
-    if (pm !== "public_to") return "owner-only";
-    if ((Array.isArray(it) ? it : []).some((t) => (t as {target_type?: string})?.target_type === "workspace")) return "workspace";
-    return "specific-people";
-  },
-  ALL_ACCESS_SCOPES: ["workspace", "specific-people", "owner-only"],
-}));
-
-vi.mock("@multica/core/agents/stores", () => ({
-  useAgentsViewStore: (selector: (state: unknown) => unknown) =>
-    selector(mocks.viewState),
-  AGENT_DEFAULT_HIDDEN_COLUMNS: ["created"],
-  AGENT_SCOPES: ["mine", "all", "archived"],
+  isAgentRuntimeBound: (agent: { runtime_id: string }) =>
+    agent.runtime_id.length > 0,
+  useWorkspaceActivityMap: () => ({ byAgent: new Map() }),
+  useWorkspacePresenceMap: () => ({ byAgent: mocks.presence }),
 }));
 
 vi.mock("@multica/core/api", () => ({
-  api: { archiveAgent: vi.fn(), restoreAgent: vi.fn() },
+  api: {
+    archiveAgent: mocks.archiveAgent,
+    restoreAgent: mocks.restoreAgent,
+  },
 }));
 
 vi.mock("@multica/core/auth", () => ({
@@ -126,8 +60,8 @@ vi.mock("@multica/core/hooks", () => ({
 
 vi.mock("@multica/core/paths", () => ({
   useWorkspacePaths: () => ({
-    newAgent: () => "/test-workspace/agents/new",
-    agentDetail: (id: string) => `/test-workspace/agents/${id}`,
+    newAgent: () => "/ws/agents/new",
+    agentDetail: (id: string) => `/ws/agents/${id}`,
   }),
 }));
 
@@ -137,41 +71,20 @@ vi.mock("@multica/core/workspace/queries", () => ({
   workspaceKeys: { agents: (wsId: string) => ["agents", wsId] },
 }));
 
-vi.mock("@multica/core/runtimes", () => ({
+vi.mock("@multica/core/runtimes", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@multica/core/runtimes")>()),
   runtimeListOptions: () => ({ queryKey: ["runtimes"] }),
-}));
-
-// View-layer children with heavy / portal deps — stub to keep the test focused
-// on the gate, not on avatars, row menus, the toolbar, or tooltip portals.
-vi.mock("../../common/actor-avatar", () => ({ ActorAvatar: () => null }));
-vi.mock("./agent-row-actions", () => ({ AgentRowActions: () => null }));
-vi.mock("./agent-list-toolbar", () => ({
-  AgentListToolbar: () => <div data-testid="agent-list-toolbar" />,
-  countActiveFilterDimensions: () => 0,
-}));
-vi.mock("../presence", () => ({ availabilityConfig: {} }));
-vi.mock("@multica/ui/components/ui/skeleton", () => ({
-  Skeleton: (props: Record<string, unknown>) => (
-    <div data-testid="skeleton" {...props} />
-  ),
-}));
-vi.mock("@multica/ui/components/ui/tooltip", () => ({
-  Tooltip: ({ children }: { children: React.ReactNode }) => <>{children}</>,
-  TooltipTrigger: ({ render }: { render: React.ReactNode }) => <>{render}</>,
-  TooltipContent: ({ children }: { children: React.ReactNode }) => (
-    <div role="tooltip">{children}</div>
-  ),
 }));
 
 const BASE_AGENT: Agent = {
   id: "agent-base",
   workspace_id: "workspace-1",
-  runtime_id: "runtime-1",
+  runtime_id: "runtime-routed",
   name: "Base Agent",
   description: "",
   instructions: "",
   avatar_url: null,
-  runtime_mode: "cloud",
+  runtime_mode: "local",
   runtime_config: {},
   custom_args: [],
   visibility: "workspace",
@@ -190,156 +103,158 @@ function makeAgent(over: Partial<Agent>): Agent {
   return { ...BASE_AGENT, ...over };
 }
 
-// Build a 30-bucket activity series whose most-recent bucket with runs is
-// `daysAgo` days back — `lastActiveDaysAgo` reads exactly this.
-function activityLastActive(daysAgo: number): AgentActivity {
-  const buckets = Array.from({ length: 30 }, () => ({ total: 0, failed: 0, completed: 0, cancelled: 0 }));
-  buckets[29 - daysAgo] = { total: 1, failed: 0, completed: 1, cancelled: 0 };
-  return { buckets, daysSinceCreated: 30 };
-}
-
-const ALPHA = makeAgent({ id: "a-alpha", name: "Alpha Agent" });
-const BETA = makeAgent({ id: "a-beta", name: "Beta Agent" });
-
-function makeAdapter(
-  overrides: Partial<NavigationAdapter> = {},
-): NavigationAdapter {
+function makeAdapter(): NavigationAdapter {
   return {
-    push: vi.fn(),
+    push: mocks.push,
     replace: vi.fn(),
     back: vi.fn(),
-    pathname: "/test-workspace/agents",
+    pathname: "/ws/agents",
     searchParams: new URLSearchParams(),
     hash: "",
     getShareableUrl: (p) => p,
-    ...overrides,
   };
 }
 
-function renderPage(locale?: SupportedLocale) {
+function renderPage() {
   renderWithI18n(
     <NavigationProvider value={makeAdapter()}>
       <AgentsPage />
     </NavigationProvider>,
-    { locale },
   );
 }
 
-/** Beta before Alpha in document order? */
-function betaPrecedesAlpha(): boolean {
-  const alpha = screen.getByText("Alpha Agent");
-  const beta = screen.getByText("Beta Agent");
-  return Boolean(
-    beta.compareDocumentPosition(alpha) & Node.DOCUMENT_POSITION_FOLLOWING,
-  );
+function row(name: string): HTMLElement {
+  return screen.getByRole("link", { name }).closest("[data-agent-row]") as HTMLElement;
 }
 
 beforeEach(() => {
-  mocks.agents = [ALPHA, BETA];
-  mocks.agentsLoading = false;
-  mocks.runCounts = [];
-  mocks.runCountsPending = false;
-  mocks.activity = { byAgent: new Map(), loading: false };
-  mocks.presence = { byAgent: new Map(), loading: false };
-  mocks.viewState.scope = "all";
-  mocks.viewState.sortField = "lastActive";
-  mocks.viewState.sortDirection = "desc";
-  mocks.viewState.hiddenColumns = ["created"];
-  mocks.viewState.filters = {
-    availability: [],
-    runtimes: [],
-    owners: [],
-    access: [],
-  };
+  mocks.agents = [];
+  mocks.runtimes = [
+    {
+      id: "runtime-routed",
+      name: "Claude (studio)",
+      provider: "claude",
+      metadata: {
+        magpie: {
+          group: "office-claude",
+          models: [
+            { id: "claude/claude-opus-5-5", name: "Opus 5.5" },
+            { id: "claude/claude-sonnet-5-5", name: "Sonnet 5.5" },
+          ],
+        },
+      },
+    },
+    {
+      id: "runtime-unrouted",
+      name: "Codex (studio)",
+      provider: "codex",
+      metadata: { magpie: { group: "", models: [] } },
+    },
+    {
+      id: "runtime-plain",
+      name: "Gemini (studio)",
+      provider: "gemini",
+      metadata: {},
+    },
+  ];
+  mocks.presence = new Map();
+  mocks.archiveAgent.mockReset().mockResolvedValue(undefined);
+  mocks.restoreAgent.mockReset().mockResolvedValue(undefined);
+  mocks.push.mockReset();
 });
 
-describe("AgentsPage listReady gate", () => {
-  it("shows only a skeleton (no real rows) while lastActive deps are pending", () => {
-    // Default lastActive sort depends on activity + run-counts.
-    mocks.activity = { byAgent: new Map(), loading: true };
-    mocks.runCountsPending = true;
-
-    renderPage();
-
-    expect(screen.queryByText("Alpha Agent")).not.toBeInTheDocument();
-    expect(screen.queryByText("Beta Agent")).not.toBeInTheDocument();
-    expect(screen.getAllByTestId("skeleton").length).toBeGreaterThan(0);
-  });
-
-  it("renders rows in the resolved lastActive order once deps land", () => {
-    // Alpha active 5d ago, Beta active today → lastActive desc puts Beta first,
-    // the opposite of the name-order fallback the ungated list would show.
-    mocks.activity = {
-      byAgent: new Map<string, AgentActivity>([
-        [ALPHA.id, activityLastActive(5)],
-        [BETA.id, activityLastActive(0)],
-      ]),
-      loading: false,
-    };
-    mocks.runCounts = [
-      { agent_id: ALPHA.id, run_count: 0 },
-      { agent_id: BETA.id, run_count: 0 },
+describe("AgentsPage", () => {
+  it("shows each agent's magpie route, or says it is not routed", () => {
+    mocks.agents = [
+      makeAgent({ id: "a-routed", name: "Routed" }),
+      makeAgent({ id: "a-unrouted", name: "Unrouted", runtime_id: "runtime-unrouted" }),
+      makeAgent({ id: "a-plain", name: "Plain", runtime_id: "runtime-plain" }),
     ];
-    mocks.runCountsPending = false;
-
     renderPage();
 
-    expect(screen.getByText("Alpha Agent")).toBeInTheDocument();
-    expect(screen.getByText("Beta Agent")).toBeInTheDocument();
-    expect(betaPrecedesAlpha()).toBe(true);
+    const routed = row("Routed");
+    expect(within(routed).getByText("office-claude")).toBeInTheDocument();
+    expect(within(routed).getByText("Opus 5.5")).toBeInTheDocument();
+    expect(within(routed).getByText("Sonnet 5.5")).toBeInTheDocument();
+
+    const unrouted = row("Unrouted");
+    expect(within(unrouted).getByText("Not on magpie")).toBeInTheDocument();
+    expect(within(unrouted).getByText("CLI's own models")).toBeInTheDocument();
+
+    // No magpie on that machine: no route line at all.
+    const plain = row("Plain");
+    expect(within(plain).queryByText("Not on magpie")).not.toBeInTheDocument();
+    expect(within(plain).queryByText("CLI's own models")).not.toBeInTheDocument();
   });
 
-  it("renders rows immediately for name sort without waiting on activity/run-counts", () => {
-    mocks.viewState.sortField = "name";
-    mocks.viewState.sortDirection = "asc";
-    // Auxiliary queries are still in flight — name sort must not wait on them.
-    mocks.activity = { byAgent: new Map(), loading: true };
-    mocks.runCountsPending = true;
-    mocks.presence = { byAgent: new Map(), loading: true };
-
+  it("lists archived agents last and counts only active ones", () => {
+    mocks.agents = [
+      makeAgent({ id: "a-old", name: "Old", archived_at: "2026-07-01T00:00:00Z" }),
+      makeAgent({ id: "a-new", name: "New" }),
+    ];
     renderPage();
 
-    expect(screen.getByText("Alpha Agent")).toBeInTheDocument();
-    expect(screen.getByText("Beta Agent")).toBeInTheDocument();
-    // name asc → Alpha before Beta.
-    expect(betaPrecedesAlpha()).toBe(false);
+    const rows = document.querySelectorAll("[data-agent-row]");
+    expect([...rows].map((el) => el.textContent?.slice(0, 3))).toEqual(["New", "Old"]);
+    expect(within(row("Old")).getByRole("switch")).not.toBeChecked();
+    expect(within(row("Old")).queryByText("office-claude")).not.toBeInTheDocument();
   });
 
-  it("shows a skeleton (not a false empty/false result) while an availability filter waits on presence", () => {
-    // Availability filter needs presence; sort by name so ONLY presence gates.
-    // Ungated, presence-null rows would all be filtered out → a false "no
-    // matches" state. Gated, we hold on a skeleton instead.
-    mocks.viewState.sortField = "name";
-    mocks.viewState.filters.availability = ["online"];
-    mocks.presence = { byAgent: new Map(), loading: true };
-
+  it("opens the agent when the row is clicked, but not when the switch is", () => {
+    mocks.agents = [makeAgent({ id: "a-one", name: "One" })];
     renderPage();
 
-    expect(screen.queryByText("Alpha Agent")).not.toBeInTheDocument();
-    expect(screen.queryByText("Beta Agent")).not.toBeInTheDocument();
-    expect(screen.getAllByTestId("skeleton").length).toBeGreaterThan(0);
+    fireEvent.click(within(row("One")).getByRole("switch"));
+    expect(mocks.push).not.toHaveBeenCalled();
+
+    fireEvent.click(within(row("One")).getByText("No activity (30d)", { exact: false }));
+    expect(mocks.push).toHaveBeenCalledWith("/ws/agents/a-one");
   });
 
-  it("shows the empty state without blocking on auxiliary queries when there are no agents", () => {
-    mocks.agents = [];
-    // All auxiliary queries pending — the empty state must not wait on them.
-    mocks.activity = { byAgent: new Map(), loading: true };
-    mocks.runCountsPending = true;
-    mocks.presence = { byAgent: new Map(), loading: true };
-
+  it("archives an idle agent straight away", async () => {
+    mocks.agents = [makeAgent({ id: "a-idle", name: "Idle" })];
     renderPage();
 
+    fireEvent.click(within(row("Idle")).getByRole("switch"));
+    await waitFor(() => expect(mocks.archiveAgent).toHaveBeenCalledWith("a-idle"));
+  });
+
+  it("asks before archiving an agent with active tasks", async () => {
+    mocks.agents = [makeAgent({ id: "a-busy", name: "Busy" })];
+    mocks.presence = new Map([
+      ["a-busy", { availability: "online", runningCount: 1, queuedCount: 1 }],
+    ]);
+    renderPage();
+
+    fireEvent.click(within(row("Busy")).getByRole("switch"));
+    const dialog = await screen.findByRole("alertdialog");
+    expect(within(dialog).getByText(/2 active tasks will be cancelled/)).toBeInTheDocument();
+    expect(mocks.archiveAgent).not.toHaveBeenCalled();
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "Archive" }));
+    await waitFor(() => expect(mocks.archiveAgent).toHaveBeenCalledWith("a-busy"));
+    expect(mocks.push).not.toHaveBeenCalled();
+  });
+
+  it("restores an archived agent", async () => {
+    mocks.agents = [
+      makeAgent({ id: "a-back", name: "Back", archived_at: "2026-07-01T00:00:00Z" }),
+    ];
+    renderPage();
+
+    fireEvent.click(within(row("Back")).getByRole("switch"));
+    await waitFor(() => expect(mocks.restoreAgent).toHaveBeenCalledWith("a-back"));
+  });
+
+  it("does not let a non-owner flip someone else's agent", () => {
+    mocks.agents = [makeAgent({ id: "a-theirs", name: "Theirs", owner_id: "user-2" })];
+    renderPage();
+
+    expect(within(row("Theirs")).getByRole("switch")).toHaveAttribute("aria-disabled", "true");
+  });
+
+  it("shows the empty state when there are no agents", () => {
+    renderPage();
     expect(screen.getByText("No agents yet")).toBeInTheDocument();
-    expect(screen.queryByTestId("skeleton")).not.toBeInTheDocument();
-  });
-});
-
-describe("AgentsPage docs link", () => {
-  it("points Learn more at the viewer's docs locale", () => {
-    renderPage("zh-Hans");
-
-    expect(
-      screen.getByRole("link", { name: "了解更多 →" }),
-    ).toHaveAttribute("href", "https://multica.ai/docs/zh/agents");
   });
 });

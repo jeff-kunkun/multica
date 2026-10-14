@@ -1,9 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { AgentInvocationTarget } from "../types";
-import {
-  effectiveAccessScope,
-  isAccessChangeReady,
-} from "./effective-access";
+import { effectiveAccessScope } from "./effective-access";
 
 function ws(): AgentInvocationTarget {
   return { target_type: "workspace", target_id: null };
@@ -48,41 +45,5 @@ describe("effectiveAccessScope", () => {
 
   it("prefers workspace when a workspace target sits alongside member targets", () => {
     expect(effectiveAccessScope("public_to", [member("u-1"), ws()])).toBe("workspace");
-  });
-});
-
-describe("isAccessChangeReady", () => {
-  it("null is not ready (no scope picked yet)", () => {
-    expect(isAccessChangeReady(null)).toBe(false);
-  });
-
-  it("private with no targets is ready (clears targets)", () => {
-    expect(
-      isAccessChangeReady({ permission_mode: "private", invocation_targets: [] }),
-    ).toBe(true);
-  });
-
-  it("public_to with workspace target only is ready", () => {
-    expect(
-      isAccessChangeReady({
-        permission_mode: "public_to",
-        invocation_targets: [ws()],
-      }),
-    ).toBe(true);
-  });
-
-  it("public_to with member target is ready", () => {
-    expect(
-      isAccessChangeReady({
-        permission_mode: "public_to",
-        invocation_targets: [member("u-1")],
-      }),
-    ).toBe(true);
-  });
-
-  it("public_to with zero targets is NOT ready", () => {
-    expect(
-      isAccessChangeReady({ permission_mode: "public_to", invocation_targets: [] }),
-    ).toBe(false);
   });
 });

@@ -5,11 +5,13 @@ import {
   AlertCircle,
   ArrowLeft,
   Clock3,
+  Copy,
   Lock,
   MessageSquare,
   MoreHorizontal,
   Plus,
   Server,
+  Square,
   Trash2,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -38,6 +40,16 @@ import {
 } from "@multica/core/workspace/queries";
 import { runtimeListOptions } from "@multica/core/runtimes";
 import { useAgentPermissions } from "@multica/core/permissions";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@multica/ui/components/ui/alert-dialog";
 import { Button } from "@multica/ui/components/ui/button";
 import { CapabilityBanner } from "@multica/ui/components/common/capability-banner";
 import {
@@ -126,6 +138,7 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
   } = useAgentPermissions(agent, wsId);
 
   const [confirmArchive, setConfirmArchive] = useState(false);
+  const [confirmCancel, setConfirmCancel] = useState(false);
 
   // One-shot request from the header for the overview pane to focus a tab. The pane clears it after consuming.
   const [tabNavIntent, setTabNavIntent] = useState<DetailTab | null>(null);
@@ -220,6 +233,22 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
     }
   };
 
+  const handleCancelTasks = async (id: string) => {
+    try {
+      const { cancelled } = await api.cancelAgentTasks(id);
+      qc.invalidateQueries({ queryKey: workspaceKeys.agents(wsId) });
+      toast.success(
+        cancelled === 0
+          ? t(($) => $.detail.no_tasks_to_cancel_toast)
+          : t(($) => $.detail.cancelled_tasks_toast, { count: cancelled }),
+      );
+    } catch (e) {
+      toast.error(
+        e instanceof Error ? e.message : t(($) => $.detail.cancel_failed_toast),
+      );
+    }
+  };
+
   // --- Loading ---
   if (!agent && (agentsLoading || detailQuery.isPending)) {
     return <DetailLoadingSkeleton />;
@@ -304,6 +333,8 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
   const owner = agent.owner_id
     ? members.find((m) => m.user_id === agent.owner_id) ?? null
     : null;
+  const runningCount = presence?.runningCount ?? 0;
+  const queuedCount = presence?.queuedCount ?? 0;
 
   // Chat shares the invocation gate with assignment (MUL-3963): starting a
   // chat triggers agent runs. The button stays visible either way — a denied
@@ -351,9 +382,13 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
         dmHref={`${paths.chat()}?agent=${agent.id}`}
         onDm={handleDm}
         onAssign={handleAssign}
-        onArchive={
-          agent.system_key ? undefined : () => setConfirmArchive(true)
+        duplicateHref={`${paths.newAgent()}?duplicate=${encodeURIComponent(agent.id)}`}
+        onCancelTasks={
+          runningCount + queuedCount > 0
+            ? () => setConfirmCancel(true)
+            : undefined
         }
+        onArchive={agent.system_key ? undefined : () => setConfirmArchive(true)}
       />
 
       {!canEdit.allowed && (
@@ -423,6 +458,43 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
         />
       </div>
 
+      {confirmCancel && (
+        <AlertDialog
+          open
+          onOpenChange={(v) => {
+            if (!v) setConfirmCancel(false);
+          }}
+        >
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>
+                {t(($) => $.detail.cancel_dialog_title, { name: agent.name })}
+              </AlertDialogTitle>
+              <AlertDialogDescription>
+                {describeCancelImpact(runningCount, queuedCount, t)}
+                {runningCount > 0 &&
+                  t(($) => $.detail.cancel_dialog_running_note)}
+                {t(($) => $.detail.cancel_dialog_irreversible)}
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>
+                {t(($) => $.detail.cancel_dialog_keep)}
+              </AlertDialogCancel>
+              <AlertDialogAction
+                variant="destructive"
+                onClick={() => {
+                  setConfirmCancel(false);
+                  void handleCancelTasks(agent.id);
+                }}
+              >
+                {t(($) => $.detail.cancel_dialog_confirm)}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+      )}
+
       {confirmArchive && (
         <Dialog
           open
@@ -480,6 +552,8 @@ function DetailHeader({
   dmHref,
   onDm,
   onAssign,
+  duplicateHref,
+  onCancelTasks,
   onArchive,
 }: {
   agent: Agent;
@@ -494,6 +568,10 @@ function DetailHeader({
    *  the chat, which is what stops AppLink from pushing. */
   onDm: (e: React.MouseEvent<HTMLAnchorElement>) => void;
   onAssign: () => void;
+  /** The create form, prefilled from this agent. */
+  duplicateHref: string;
+  /** Absent when the agent has no active tasks. */
+  onCancelTasks?: () => void;
   /** Absent for Multica's built-in agents, which the server refuses to
    *  archive — the menu hides the action rather than offering a failure. */
   onArchive?: () => void;
@@ -501,7 +579,9 @@ function DetailHeader({
   const { t } = useT("agents");
   const timeAgo = useTimeAgo();
   const isArchived = !!agent.archived_at;
-  const hasMoreActions = !!onArchive;
+  // Cancelling tasks and archiving are edits; anyone may duplicate.
+  const showCancelTasks = canArchive && !!onCancelTasks;
+  const showArchive = canArchive && !!onArchive;
 
   return (
     <header
@@ -580,7 +660,7 @@ function DetailHeader({
                 {t(($) => $.detail.assign_work)}
               </Button>
             )}
-            {!isArchived && canArchive && hasMoreActions ? (
+            {!isArchived ? (
               <DropdownMenu>
                 <DropdownMenuTrigger
                   render={<Button variant="ghost" size="icon-sm" />}
@@ -592,7 +672,17 @@ function DetailHeader({
                   />
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end" className="w-auto">
-                  {onArchive && (
+                  <DropdownMenuItem render={<AppLink href={duplicateHref} />}>
+                    <Copy className="h-3.5 w-3.5" aria-hidden="true" />
+                    {t(($) => $.detail.more_duplicate)}
+                  </DropdownMenuItem>
+                  {showCancelTasks && (
+                    <DropdownMenuItem onClick={onCancelTasks}>
+                      <Square className="h-3.5 w-3.5" aria-hidden="true" />
+                      {t(($) => $.detail.more_cancel_tasks)}
+                    </DropdownMenuItem>
+                  )}
+                  {showArchive && (
                     <DropdownMenuItem variant="destructive" onClick={onArchive}>
                       <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
                       {t(($) => $.detail.more_archive)}
@@ -606,6 +696,27 @@ function DetailHeader({
       </div>
     </header>
   );
+}
+
+type AgentsT = ReturnType<typeof useT<"agents">>["t"];
+
+function describeCancelImpact(
+  running: number,
+  queued: number,
+  t: AgentsT,
+): string {
+  if (running === 0 && queued === 0) {
+    return t(($) => $.detail.cancel_dialog_no_tasks);
+  }
+  const parts: string[] = [];
+  if (running > 0)
+    parts.push(t(($) => $.detail.cancel_dialog_running, { count: running }));
+  if (queued > 0)
+    parts.push(t(($) => $.detail.cancel_dialog_queued, { count: queued }));
+  return t(($) => $.detail.cancel_dialog_impact, {
+    summary: parts.join(" + "),
+    count: running + queued,
+  });
 }
 
 function BackHeader({ paths, title }: { paths: string; title: string }) {

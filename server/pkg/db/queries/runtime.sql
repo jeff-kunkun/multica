@@ -86,7 +86,10 @@ DO UPDATE SET
     runtime_mode = EXCLUDED.runtime_mode,
     status = EXCLUDED.status,
     device_info = EXCLUDED.device_info,
-    metadata = EXCLUDED.metadata,
+    -- The daemon reports metadata.magpie on its own loop
+    -- (SetAgentRuntimeMagpie); keep it so re-registering does not blank the
+    -- route until the next report.
+    metadata = EXCLUDED.metadata || jsonb_strip_nulls(jsonb_build_object('magpie', agent_runtime.metadata->'magpie')),
     owner_id = COALESCE(EXCLUDED.owner_id, agent_runtime.owner_id),
     last_seen_at = now(),
     updated_at = now()
@@ -245,6 +248,23 @@ SET status = 'offline',
     metadata = metadata || jsonb_build_object('offline_reason', @offline_reason::jsonb),
     updated_at = now()
 WHERE id = $1;
+
+-- name: SetAgentRuntimeMagpie :execrows
+-- Stores the magpie route the daemon read for a built-in runtime. Touches the
+-- row only when the route changed, so the daemon's once-a-minute report is a
+-- no-op until magpie's routing actually moves; the affected row count tells
+-- the handler whether to notify clients.
+UPDATE agent_runtime
+SET metadata = metadata || jsonb_build_object('magpie', @magpie::jsonb)
+WHERE id = $1
+  AND metadata->'magpie' IS DISTINCT FROM @magpie::jsonb;
+
+-- name: ClearAgentRuntimeMagpie :execrows
+-- Drops the magpie route once magpie is gone from the runtime's machine.
+UPDATE agent_runtime
+SET metadata = metadata - 'magpie'
+WHERE id = $1
+  AND metadata->'magpie' IS NOT NULL;
 
 -- name: SelectStaleOnlineRuntimes :many
 -- Lists online runtimes whose last_seen_at exceeds the stale window. The
