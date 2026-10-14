@@ -314,6 +314,7 @@ func TestDeliversToEachReceiver(t *testing.T) {
 
 	d := NewDeliverer(q)
 	d.DeliverDue(ctx)
+	d.DeliverDueReceivers(ctx)
 
 	mu.Lock()
 	if len(got) != 1 || got[0].Receiver != "media" || len(got[0].Events) != 1 || got[0].Events[0].Type != "comment:created" {

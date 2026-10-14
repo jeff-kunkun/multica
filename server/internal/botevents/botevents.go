@@ -20,6 +20,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
@@ -198,8 +199,21 @@ func NewDeliverer(q *db.Queries) *Deliverer {
 	}
 }
 
-// Run delivers until ctx ends, pruning the log once an hour.
+// Run delivers until ctx ends, pruning the log once an hour. Extra receivers
+// run on their own loop so a slow one never delays the Bots' main webhooks.
 func (d *Deliverer) Run(ctx context.Context) {
+	go func() {
+		tick := time.NewTicker(d.Interval)
+		defer tick.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-tick.C:
+				d.DeliverDueReceivers(ctx)
+			}
+		}
+	}()
 	tick := time.NewTicker(d.Interval)
 	defer tick.Stop()
 	var lastPrune time.Time
@@ -219,23 +233,35 @@ func (d *Deliverer) Run(ctx context.Context) {
 	}
 }
 
-// DeliverDue sends one batch to every Bot webhook and extra receiver that has
-// pending events.
+// DeliverDue sends one batch to every Bot whose webhook has pending events.
 func (d *Deliverer) DeliverDue(ctx context.Context) {
 	bots, err := d.Queries.ClaimDueBotWebhooks(ctx)
 	if err != nil {
 		slog.Warn("bot webhook claim failed", "error", err)
+		return
 	}
 	for _, b := range bots {
 		d.deliver(ctx, d.botTarget(b))
 	}
+}
+
+// DeliverDueReceivers sends one batch to every extra receiver with pending
+// events, all at once, so one unreachable receiver delays no other.
+func (d *Deliverer) DeliverDueReceivers(ctx context.Context) {
 	receivers, err := d.Queries.ClaimDueBotWebhookReceivers(ctx)
 	if err != nil {
 		slog.Warn("bot webhook receiver claim failed", "error", err)
+		return
 	}
+	var wg sync.WaitGroup
 	for _, r := range receivers {
-		d.deliver(ctx, d.receiverTarget(r))
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			d.deliver(ctx, d.receiverTarget(r))
+		}()
 	}
+	wg.Wait()
 }
 
 // target is one push address: a Bot's main webhook or one of its named
