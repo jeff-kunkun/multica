@@ -131,8 +131,10 @@ Branches
   tips are the `archive/main` and `archive/release` tags.
 - Cut task branches from `origin/kun-main`; open PRs against `kun-main`.
 - Never push to, merge into, or open PRs against `kun`.
-- Upstream sync pulls `multica-ai/multica` `main` directly (the `upstream`
-  remote) into a sync branch cut from `kun-main`, then a PR to `kun-main`.
+- Upstream is picked, not merged: fetch `multica-ai/multica` directly (the
+  `upstream` remote), cherry-pick only the fixes this line needs onto a branch
+  cut from `kun-main`, and open a PR to `kun-main`. Never merge
+  `upstream/main` wholesale.
 - Never change the ai.ferryway.cc instance or anything under `/opt/multica`
   on its host; that is the kun line.
 
