@@ -660,7 +660,7 @@ func main() {
 	}
 	go runDelegatedFailureRecoverySweeper(sweepCtx, taskSvc)
 	if cfg, ok := mirror.ConfigFromEnv(); ok {
-		src, err := mirror.NewPGSource(sweepCtx, pool, cfg.Workspace, mirror.TargetKey(cfg.TargetURL, cfg.TargetWorkspace))
+		src, err := mirror.NewPGSource(sweepCtx, pool, cfg.Workspace, mirror.TargetKey(cfg.TargetURL, cfg.TargetWorkspace), cfg.Projects)
 		if err != nil {
 			slog.Error("mirror disabled: workspace not found", "workspace", cfg.Workspace, "error", err)
 		} else {
@@ -669,7 +669,7 @@ func main() {
 			if cfg.LocalToken != "" {
 				m.EnablePull(mirror.NewHTTPRemote(cfg.LocalURL, cfg.LocalToken, src.WorkspaceID()), cfg.TargetWorkspace)
 			}
-			slog.Info("mirror enabled", "workspace", cfg.Workspace, "target", cfg.TargetURL, "pull", cfg.LocalToken != "")
+			slog.Info("mirror enabled", "workspace", cfg.Workspace, "target", cfg.TargetURL, "pull", cfg.LocalToken != "", "projects", len(cfg.Projects))
 			go m.Run(sweepCtx)
 		}
 	}

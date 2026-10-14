@@ -13,18 +13,21 @@ type PGSource struct {
 	pool        *pgxpool.Pool
 	workspaceID string
 	target      string
+	projects    []string // project ids to copy; empty means all
 }
 
 // NewPGSource resolves workspace (slug or id) and returns a source for it.
 // target names the destination, so links for another target never mix in.
-func NewPGSource(ctx context.Context, pool *pgxpool.Pool, workspace, target string) (*PGSource, error) {
+// With projects set, only those projects, their issues and the issues'
+// comments are copied; anything else counts as gone.
+func NewPGSource(ctx context.Context, pool *pgxpool.Pool, workspace, target string, projects []string) (*PGSource, error) {
 	var id string
 	err := pool.QueryRow(ctx,
 		`SELECT id::text FROM workspace WHERE slug = $1 OR id::text = $1`, workspace).Scan(&id)
 	if err != nil {
 		return nil, err
 	}
-	return &PGSource{pool: pool, workspaceID: id, target: target}, nil
+	return &PGSource{pool: pool, workspaceID: id, target: target, projects: projects}, nil
 }
 
 // WorkspaceID is the resolved local workspace id.
@@ -36,9 +39,16 @@ func (s *PGSource) Versions(ctx context.Context) (map[string]map[string]time.Tim
 		KindIssue:   `SELECT id::text, updated_at FROM issue WHERE workspace_id = $1`,
 		KindComment: `SELECT id::text, updated_at FROM comment WHERE workspace_id = $1 AND deleted_at IS NULL`,
 	}
+	args := []any{s.workspaceID}
+	if len(s.projects) > 0 {
+		queries[KindProject] += ` AND id::text = ANY($2)`
+		queries[KindIssue] += ` AND project_id::text = ANY($2)`
+		queries[KindComment] += ` AND issue_id IN (SELECT id FROM issue WHERE workspace_id = $1 AND project_id::text = ANY($2))`
+		args = append(args, s.projects)
+	}
 	out := map[string]map[string]time.Time{}
 	for kind, q := range queries {
-		rows, err := s.pool.Query(ctx, q, s.workspaceID)
+		rows, err := s.pool.Query(ctx, q, args...)
 		if err != nil {
 			return nil, err
 		}
