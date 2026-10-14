@@ -14,6 +14,10 @@ export {
   type LocalDaemonStatus,
 } from "./use-local-daemon-status";
 export {
+  useFullDiskAccess,
+  type FullDiskAccess,
+} from "./full-disk-access";
+export {
   ScrollRestorationProvider,
   useScrollRestorationAdapter,
   useRestoredScrollEntry,

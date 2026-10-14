@@ -12,6 +12,7 @@ import {
   parsePackageArgs,
   resolveBuildMatrix,
   stripLeadingSeparator,
+  useLocalMacSigning,
 } from "./package.mjs";
 
 describe("normalizeGitVersion", () => {
@@ -372,6 +373,28 @@ describe("builderArgsForTarget", () => {
     ]);
   });
 
+  it("adds the local sign hook only to macOS targets", () => {
+    const parsed = {
+      allPlatforms: false,
+      sharedArgs: [],
+      platformTargets: { mac: [], win: [], linux: [] },
+      requestedPlatforms: ["mac", "win"],
+      requestedArchs: ["arm64"],
+    };
+    expect(
+      builderArgsForTarget({ platform: "mac", arch: "arm64" }, parsed, null, {
+        hostPlatform: "darwin",
+        localMacSigning: true,
+      }),
+    ).toContain("-c.mac.sign=./scripts/mac-local-sign.mjs");
+    expect(
+      builderArgsForTarget({ platform: "win", arch: "arm64" }, parsed, null, {
+        hostPlatform: "darwin",
+        localMacSigning: true,
+      }).some((arg) => arg.startsWith("-c.mac.sign")),
+    ).toBe(false);
+  });
+
   it("defaults linux cross-builds to AppImage on non-Linux hosts", () => {
     expect(
       builderArgsForTarget(
@@ -472,5 +495,21 @@ describe("electron-builder.yml packaging config", () => {
     const entries = readFilesBlock(readFileSync(configPath, "utf-8"));
     expect(entries.length).toBeGreaterThan(0);
     expect(entries).toContain("!dist/**");
+  });
+});
+
+describe("useLocalMacSigning", () => {
+  it("signs local macOS builds with the fixed identity", () => {
+    expect(useLocalMacSigning({}, "darwin")).toBe(true);
+  });
+
+  it("leaves Developer ID builds, opt-outs and other hosts alone", () => {
+    expect(useLocalMacSigning({ APPLE_TEAM_ID: "T" }, "darwin")).toBe(false);
+    expect(useLocalMacSigning({ CSC_LINK: "x.p12" }, "darwin")).toBe(false);
+    expect(useLocalMacSigning({ CSC_NAME: "Dev" }, "darwin")).toBe(false);
+    expect(useLocalMacSigning({ MULTICA_MAC_LOCAL_SIGN: "0" }, "darwin")).toBe(
+      false,
+    );
+    expect(useLocalMacSigning({}, "linux")).toBe(false);
   });
 });

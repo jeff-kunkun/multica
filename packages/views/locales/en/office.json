@@ -59,6 +59,9 @@
     "description": "Computers that run your agents.",
     "runtimes": "Runtimes",
     "runtimes_description": "Connected computers and the agents on them.",
-    "open": "Open"
+    "open": "Open",
+    "disk_access": "Full Disk Access is off",
+    "disk_access_description": "Agents need it for protected folders. In System Settings, click + and choose {{app}}.",
+    "disk_access_open": "Open Settings"
   }
 }

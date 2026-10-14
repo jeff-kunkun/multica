@@ -38,6 +38,33 @@ browser login hands back to the right one. Its runtime override is
 The daemon it starts uses a profile named after the server host, separate from
 the kun-line app's.
 
+### Signing and Full Disk Access
+
+Agents started by Office need Full Disk Access. macOS never asks for it: the
+app has to be added with "+" in System Settings → Privacy & Security → Full
+Disk Access. Without it, OpenCode and Codex's plugin loader hang on their first
+protected file read. Office checks at startup and on window focus. When the
+permission is missing, the first row of Settings → 本机运行 links to that page.
+
+macOS keys the grant to the app's signature. Ad-hoc signatures change with
+every build, which drops the grant on each upgrade. So `pnpm package` on a Mac
+without Developer ID credentials (`CSC_LINK` / `CSC_NAME` / `APPLE_TEAM_ID`)
+signs with one fixed local identity, "Multica Office Local Signing":
+
+- `apps/desktop/scripts/mac-local-signing.sh` creates it the first time: a
+  self-signed certificate in its own keychain under
+  `~/.multica/office-signing/`, with a random password beside it (0600).
+  Nothing is committed.
+- `apps/desktop/scripts/mac-local-sign.mjs` is electron-builder's `mac.sign`
+  hook. electron-builder ignores untrusted identities on its own.
+- Check: `codesign -dr - "Multica Office.app"` should show
+  `certificate leaf = H"…"` with the same hash on every build.
+
+Build releases on the same Mac. Deleting that folder or switching Macs mints a
+new certificate, and Full Disk Access must be granted once more. So does the
+first build after switching away from ad-hoc. `MULTICA_MAC_LOCAL_SIGN=0`
+restores ad-hoc.
+
 Client defaults point here: the CLI's default server
 (`server/cmd/multica/cmd_agent.go`) and Desktop's default runtime config
 (`apps/desktop/src/shared/runtime-config.ts`).
