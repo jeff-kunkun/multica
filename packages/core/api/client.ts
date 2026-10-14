@@ -2180,6 +2180,7 @@ export class ApiClient {
     name: string;
     can_release: boolean;
     webhook_url: string;
+    webhook_key: string;
   }): Promise<WorkspaceBotWithSecrets> {
     const raw = await this.fetch<unknown>("/api/bots", {
       method: "POST",
@@ -2192,7 +2193,7 @@ export class ApiClient {
 
   async updateBot(
     botId: string,
-    update: { name?: string; can_release?: boolean; webhook_url?: string },
+    update: { name?: string; can_release?: boolean; webhook_url?: string; webhook_key?: string },
   ): Promise<WorkspaceBotWithSecrets> {
     const raw = await this.fetch<unknown>(`/api/bots/${encodeURIComponent(botId)}`, {
       method: "PATCH",

@@ -43,7 +43,7 @@ func botTokenWorks(t *testing.T, token string) bool {
 }
 
 func TestBotLifecycle(t *testing.T) {
-	bot := createTestBot(t, map[string]any{"name": "Grok", "can_release": true, "webhook_url": "https://example.com/hook"})
+	bot := createTestBot(t, map[string]any{"name": "Grok", "can_release": true, "webhook_url": "https://example.com/hook", "webhook_key": "Bearer gk_1"})
 	if !strings.HasPrefix(bot.Token, "mul_") || bot.WebhookSecret == "" {
 		t.Fatalf("secrets not returned once: token=%q secret=%q", bot.Token, bot.WebhookSecret)
 	}
@@ -53,7 +53,15 @@ func TestBotLifecycle(t *testing.T) {
 	if !botTokenWorks(t, bot.Token) {
 		t.Fatal("new bot token does not resolve")
 	}
-	for _, want := range []string{"/api/mcp", "Bearer " + bot.Token, bot.WebhookSecret, "approve_plan"} {
+	if bot.WebhookKey != "gk_1" || !bot.WebhookKeySet {
+		t.Fatalf("webhook key = %q set=%v", bot.WebhookKey, bot.WebhookKeySet)
+	}
+	var headers string
+	dbfx.QueryRow(t, `SELECT webhook_headers::text FROM workspace_bot WHERE id = $1`, bot.ID).Scan(&headers)
+	if headers != `{"Authorization": "Bearer gk_1"}` {
+		t.Fatalf("stored headers = %s", headers)
+	}
+	for _, want := range []string{"/api/mcp", "Bearer " + bot.Token, "https://example.com/hook", "Webhook key：gk_1", "approve_plan"} {
 		if !strings.Contains(bot.SetupPrompt, want) {
 			t.Fatalf("setup_prompt missing %q:\n%s", want, bot.SetupPrompt)
 		}
@@ -69,7 +77,7 @@ func TestBotLifecycle(t *testing.T) {
 	// List never carries secrets.
 	w := httptest.NewRecorder()
 	testHandler.ListBots(w, newRequest("GET", "/api/bots", nil))
-	if w.Code != http.StatusOK || strings.Contains(w.Body.String(), bot.Token) || strings.Contains(w.Body.String(), "webhook_secret") || strings.Contains(w.Body.String(), "setup_prompt") {
+	if w.Code != http.StatusOK || strings.Contains(w.Body.String(), bot.Token) || strings.Contains(w.Body.String(), "webhook_secret") || strings.Contains(w.Body.String(), "setup_prompt") || strings.Contains(w.Body.String(), "gk_1") {
 		t.Fatalf("ListBots: %d %s", w.Code, w.Body.String())
 	}
 
@@ -86,6 +94,19 @@ func TestBotLifecycle(t *testing.T) {
 	}
 	if !strings.Contains(rotated.SetupPrompt, "Bearer "+rotated.Token) || strings.Contains(rotated.SetupPrompt, bot.Token) {
 		t.Fatalf("rotated setup_prompt does not carry the new token:\n%s", rotated.SetupPrompt)
+	}
+	if !strings.Contains(rotated.SetupPrompt, "Webhook key：gk_1") {
+		t.Fatalf("rotated setup_prompt lost the webhook key:\n%s", rotated.SetupPrompt)
+	}
+
+	// Editing the key replaces it; an empty key clears it.
+	for _, c := range []struct{ key, want string }{{"gk_2", `{"Authorization": "Bearer gk_2"}`}, {"", `{}`}} {
+		w = httptest.NewRecorder()
+		testHandler.UpdateBot(w, withURLParam(newRequest("PATCH", "/api/bots/"+bot.ID, map[string]any{"webhook_key": c.key}), "botId", bot.ID))
+		dbfx.QueryRow(t, `SELECT webhook_headers::text FROM workspace_bot WHERE id = $1`, bot.ID).Scan(&headers)
+		if w.Code != http.StatusOK || headers != c.want || strings.Contains(w.Body.String(), "gk_2") {
+			t.Fatalf("UpdateBot key %q: %d %s headers=%s", c.key, w.Code, w.Body.String(), headers)
+		}
 	}
 
 	// Revoke leaves the Bot but no working token.
