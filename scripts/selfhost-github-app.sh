@@ -19,7 +19,7 @@
 #
 # Usage: scripts/selfhost-github-app.sh <manifest-code>
 # Env:   SSH_HOST (default ai-multica), REMOTE_DIR (default /opt/multica),
-#        PUBLIC_URL (default https://ai.ferryway.cc)
+#        PUBLIC_URL (default: the kun-line instance, see public_url below)
 # See docs/kun/github-app-onboarding.md for where the code comes from.
 set -euo pipefail
 

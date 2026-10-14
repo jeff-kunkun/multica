@@ -34,7 +34,7 @@ bash scripts/test-db.sh --quiet -- sh -c 'cd server && go test ./internal/servic
 - 设置实际路由：`http://localhost:13319/dene-1808-source/settings?tab=workspace-links`。390px 观察默认开，选择本地共享项目与测试目标，关闭后提交成功；另一条保留默认开提交成功。数据库只读核对 `dene-1808-viewer-off` 为 `managed=false`、`dene-1808-viewer-on` 为 `managed=true`。仅创建本地测试连通。
 - 聊天实际路由：`http://localhost:13319/dene-1808-source/chat/3e5e5f73-ecb5-4409-9539-2822e8958c78`。本地数据库 `linked_delivery` 夹具经实际服务/组件读取显示；长发起人、工作区和智能体来源完整换行，四档消息 scrollWidth 与 clientWidth 相等（334、348、702、650），页面无横向溢出。
 - 390px 从设置打开侧栏、选择聊天，页面跳转且侧栏关闭；聊天详情点击“返回”回到聊天列表。响应式断点切换会重新导航，因此各档重新打开同一实际聊天路由，未以切换中的空白状态充当截图。
-- [真实界面 HTML 附件](https://ai.ferryway.cc/api/attachments/01a12b2f-6353-7ad6-a715-6a406036246e/download) 包含原始四档截图、关闭提交截图、返回截图、路由、候选 SHA、数据库结果及截图哈希。附件自身已在离线 375/1280 下打开，展开/收起和键盘操作有效、图片完整，无外部资源；原始元数据见本目录 `actual-ui-manifest.json`。
+- [真实界面 HTML 附件](https://ai.example.com/api/attachments/01a12b2f-6353-7ad6-a715-6a406036246e/download) 包含原始四档截图、关闭提交截图、返回截图、路由、候选 SHA、数据库结果及截图哈希。附件自身已在离线 375/1280 下打开，展开/收起和键盘操作有效、图片完整，无外部资源；原始元数据见本目录 `actual-ui-manifest.json`。
 - 原生缺口：`xcrun simctl list devices booted` 退出 72：`unable to find utility "simctl", not a developer tool or in PATH`。未进行 iOS/Android 真机或模拟器、主题/键盘/跨客户端重连验证。Electron 壳未单独启动；这里是共享 Web/Desktop 组件的真实 Web 路由证据。
 - 本轮无生产代码变化，未重复已通过的后端/前端测试，`git diff --check` 针对交付文件验证。浏览器空间已关闭；本地服务通过 `make down` 收尾。
 

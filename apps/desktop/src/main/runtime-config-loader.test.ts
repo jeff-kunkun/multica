@@ -12,6 +12,7 @@ vi.mock("electron", () => ({
 }));
 
 import { loadRuntimeConfig, switchRuntimeConfig } from "./runtime-config-loader";
+import { runtimeConfigFromServerUrl, SELF_HOSTED_PRESET_URL } from "../shared/runtime-config";
 
 describe("loadRuntimeConfig", () => {
   it("uses dev env and ignores desktop.json during electron-vite dev", async () => {
@@ -53,12 +54,7 @@ describe("loadRuntimeConfig", () => {
       }),
     ).resolves.toEqual({
       ok: true,
-      config: {
-        schemaVersion: 1,
-        apiUrl: "https://ai.ferryway.cc",
-        wsUrl: "wss://ai.ferryway.cc/ws",
-        appUrl: "https://ai.ferryway.cc",
-      },
+      config: runtimeConfigFromServerUrl(SELF_HOSTED_PRESET_URL),
     });
   });
 
@@ -108,23 +104,23 @@ describe("switchRuntimeConfig", () => {
     const path = await configPath();
     const switched = await switchRuntimeConfig({
       configPath: path,
-      target: { type: "url", url: "https://ai.ferryway.cc" },
+      target: { type: "url", url: "https://ai.example.com" },
     });
 
     expect(switched).toEqual({
       ok: true,
       config: {
         schemaVersion: 1,
-        apiUrl: "https://ai.ferryway.cc",
-        wsUrl: "wss://ai.ferryway.cc/ws",
-        appUrl: "https://ai.ferryway.cc",
+        apiUrl: "https://ai.example.com",
+        wsUrl: "wss://ai.example.com/ws",
+        appUrl: "https://ai.example.com",
       },
     });
     expect(JSON.parse(await readFile(path, "utf-8"))).toEqual({
       schemaVersion: 1,
-      apiUrl: "https://ai.ferryway.cc",
-      wsUrl: "wss://ai.ferryway.cc/ws",
-      appUrl: "https://ai.ferryway.cc",
+      apiUrl: "https://ai.example.com",
+      wsUrl: "wss://ai.example.com/ws",
+      appUrl: "https://ai.example.com",
     });
     await expect(
       loadRuntimeConfig({ isDev: false, configPath: path, env: {} }),
@@ -135,9 +131,9 @@ describe("switchRuntimeConfig", () => {
     const path = await configPath();
     const original = JSON.stringify({
       schemaVersion: 1,
-      apiUrl: "https://ai.ferryway.cc",
-      wsUrl: "wss://ai.ferryway.cc/ws",
-      appUrl: "https://ai.ferryway.cc",
+      apiUrl: "https://ai.example.com",
+      wsUrl: "wss://ai.example.com/ws",
+      appUrl: "https://ai.example.com",
     });
     await writeFile(path, original);
 
@@ -170,7 +166,7 @@ describe("switchRuntimeConfig", () => {
     const path = await configPath();
     await writeFile(
       path,
-      JSON.stringify({ schemaVersion: 1, apiUrl: "https://ai.ferryway.cc" }),
+      JSON.stringify({ schemaVersion: 1, apiUrl: "https://ai.example.com" }),
     );
 
     const switched = await switchRuntimeConfig({

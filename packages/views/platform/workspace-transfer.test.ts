@@ -79,8 +79,8 @@ describe("transferExportSourceHost", () => {
     expect(transferExportSourceHost("https://api.multica.ai")).toBe(
       "api.multica.ai",
     );
-    expect(transferExportSourceHost("https://ai.ferryway.cc/")).toBe(
-      "ai.ferryway.cc",
+    expect(transferExportSourceHost("https://ai.example.com/")).toBe(
+      "ai.example.com",
     );
     expect(transferExportSourceHost("http://localhost:8080")).toBe(
       "localhost:8080",

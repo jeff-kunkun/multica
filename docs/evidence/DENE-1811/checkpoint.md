@@ -10,8 +10,8 @@ Web/Desktop 复用共享页面。阅读页展示描述、资源、项目记忆�
 
 ## 真实运行证据
 
-- [四档实页 HTML 预览，含手机](https://ai.ferryway.cc/api/attachments/01a12b28-d999-7c01-83c9-d62126515601/download)
-- [截图、CLI 读回、测试日志与权限回滚验证](https://ai.ferryway.cc/api/attachments/01a12b28-db43-7118-bed3-9c246e5d3039/download)
+- [四档实页 HTML 预览，含手机](https://ai.example.com/api/attachments/01a12b28-d999-7c01-83c9-d62126515601/download)
+- [截图、CLI 读回、测试日志与权限回滚验证](https://ai.example.com/api/attachments/01a12b28-db43-7118-bed3-9c246e5d3039/download)
 
 2026-10-11 在本 worktree 的隔离环境新建测试源方、看方和连通。CLI 改项目为「发布计划」、开启托管后，设置页同一 document 自动变化（timeOrigin 未变）；390px 网页改回「路线图」、关闭托管后 CLI 读回一致。断开确认框打开后取消成功。375 / 390 / 768 / 1280 下设置与阅读页实际截图均已打开检查，document scrollWidth 等于 innerWidth；移动任务状态、描述、资源和项目记忆可见。
 

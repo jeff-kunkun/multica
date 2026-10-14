@@ -711,7 +711,7 @@ CLI（`server/cmd/multica/`）：
 
 跨环境验收（真机）：
 
-- 从官方云工作区导出（带 `--include issues`）→ 导入 `ai.ferryway.cc` 的**新建空工作区**，核对：
+- 从官方云工作区导出（带 `--include issues`）→ 导入 `ai.example.com` 的**新建空工作区**，核对：
   - 任务数与 `manifest.stats.issues` 一致，`DENE-xxx` 编号与源端逐一相同；
   - 「我的任务」立刻有内容（这是 kk zi 反馈的验收点）；
   - 随机抽 3 张有线程的票，评论顺序、作者、父子缩进正确；

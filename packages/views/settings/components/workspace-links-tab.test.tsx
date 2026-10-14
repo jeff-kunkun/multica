@@ -92,7 +92,7 @@ describe("WorkspaceLinksTab", () => {
     const user = userEvent.setup();
     renderTab();
     expect(await screen.findByText("Pick the workspace to share with first.")).toBeInTheDocument();
-    const pasted = "https://ai.ferryway.cc/partner";
+    const pasted = "https://ai.example.com/partner";
     await user.click(screen.getByLabelText("Workspace URL to share with"));
     await user.paste(pasted);
     expect(await screen.findByText("Partner Co")).toBeInTheDocument();

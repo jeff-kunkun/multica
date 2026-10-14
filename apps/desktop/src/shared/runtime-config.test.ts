@@ -19,14 +19,14 @@ describe("runtime config", () => {
       parseRuntimeConfig(
         JSON.stringify({
           schemaVersion: 1,
-          apiUrl: "https://congvc-x99.taila6fa8a.ts.net:18443",
+          apiUrl: "https://host.example.com:18443",
         }),
       ),
     ).toEqual({
       schemaVersion: 1,
-      apiUrl: "https://congvc-x99.taila6fa8a.ts.net:18443",
-      wsUrl: "wss://congvc-x99.taila6fa8a.ts.net:18443/ws",
-      appUrl: "https://congvc-x99.taila6fa8a.ts.net:18443",
+      apiUrl: "https://host.example.com:18443",
+      wsUrl: "wss://host.example.com:18443/ws",
+      appUrl: "https://host.example.com:18443",
     });
   });
 
@@ -145,17 +145,18 @@ describe("runtime config", () => {
   });
 
   it("derives ws and app URLs from a self-hosted origin", () => {
+    const presetHost = new URL(SELF_HOSTED_PRESET_URL).host;
     expect(runtimeConfigFromServerUrl(SELF_HOSTED_PRESET_URL)).toEqual({
       schemaVersion: 1,
-      apiUrl: "https://ai.ferryway.cc",
-      wsUrl: "wss://ai.ferryway.cc/ws",
-      appUrl: "https://ai.ferryway.cc",
+      apiUrl: `https://${presetHost}`,
+      wsUrl: `wss://${presetHost}/ws`,
+      appUrl: `https://${presetHost}`,
     });
-    expect(runtimeConfigFromServerUrl("https://user:secret@ai.ferryway.cc/path?x=1")).toEqual({
+    expect(runtimeConfigFromServerUrl("https://user:secret@ai.example.com/path?x=1")).toEqual({
       schemaVersion: 1,
-      apiUrl: "https://ai.ferryway.cc",
-      wsUrl: "wss://ai.ferryway.cc/ws",
-      appUrl: "https://ai.ferryway.cc",
+      apiUrl: "https://ai.example.com",
+      wsUrl: "wss://ai.example.com/ws",
+      appUrl: "https://ai.example.com",
     });
   });
 
@@ -170,13 +171,13 @@ describe("runtime config", () => {
     expect(() => runtimeConfigFromServerUrl("")).toThrow(/required/);
     expect(() => runtimeConfigFromServerUrl("   ")).toThrow(/required/);
     expect(() => runtimeConfigFromServerUrl("not a url")).toThrow(/valid http or https URL/);
-    expect(() => runtimeConfigFromServerUrl("ftp://ai.ferryway.cc")).toThrow(/http or https/);
+    expect(() => runtimeConfigFromServerUrl("ftp://ai.example.com")).toThrow(/http or https/);
     expect(() => runtimeConfigFromServerUrl("file:///tmp/multica")).toThrow(/http or https/);
   });
 
   it("names the desktop profile after the API host", () => {
     expect(desktopProfileName("https://api.multica.ai")).toBe("desktop-api.multica.ai");
-    expect(desktopProfileName("https://ai.ferryway.cc")).toBe("desktop-ai.ferryway.cc");
+    expect(desktopProfileName("https://ai.example.com")).toBe("desktop-ai.example.com");
     expect(desktopProfileName("http://localhost:8080")).toBe("desktop-localhost-8080");
     expect(runtimeConfigHost(DEFAULT_RUNTIME_CONFIG)).toBe("multica.ai");
   });

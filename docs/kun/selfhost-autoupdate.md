@@ -1,8 +1,8 @@
 # 自建实例自动跟随上游分支
 
-自建实例（`ai.ferryway.cc`）跑的是本机 checkout 构建出来的镜像。2026-09-17 那次迁移失败就是因为它停在 9 月 15 日的 `a5d3d808`，落后 `kun` 70 个提交：目标端版本太旧，读不了带任务的迁移包。手工 ssh 升级后问题消失，但升级完 4 小时，`origin/kun` 又往前走了 —— 靠人记着 pull 修不了这件事。
+自建实例（`ai.example.com`）跑的是本机 checkout 构建出来的镜像。2026-09-17 那次迁移失败就是因为它停在 9 月 15 日的 `a5d3d808`，落后 `kun` 70 个提交：目标端版本太旧，读不了带任务的迁移包。手工 ssh 升级后问题消失，但升级完 4 小时，`origin/kun` 又往前走了 —— 靠人记着 pull 修不了这件事。
 
-`scripts/selfhost-autoupdate.sh` + systemd timer 就是那台机器上的「记性」：每 5 分钟比一次「正在服务的后端自报的 commit」和「`origin/kun` 的 tip」，不一样就上新版本、失败就回滚，并把结果写进一个能被机器读的状态文件。`ai.ferryway.cc` 用零停机切换（见下文），更新时不断派单、领单，nginx 不出 502。
+`scripts/selfhost-autoupdate.sh` + systemd timer 就是那台机器上的「记性」：每 5 分钟比一次「正在服务的后端自报的 commit」和「`origin/kun` 的 tip」，不一样就上新版本、失败就回滚，并把结果写进一个能被机器读的状态文件。`ai.example.com` 用零停机切换（见下文），更新时不断派单、领单，nginx 不出 502。
 
 ## 装
 
@@ -39,7 +39,7 @@ sudo scripts/install-selfhost-autoupdate.sh --no-enable        # 只写 unit，�
 - `build`（默认）—— 在本机 `docker compose build`。2 核机器上一次要 10 分钟以上，期间访问明显变慢（DENE-1182）。
 - `registry` —— `.github/workflows/selfhost-images.yml` 在 `kun` 每次 push 后用 GitHub Actions 编好 amd64 镜像，推到 `ghcr.io/jeff-kunkun/multica-{backend,web}:sha-<完整 commit>`（另带一个 `:kun` 指向最新）。脚本只 `docker pull` 这两个 tag，再改名成本地的 `multica-backend:dev` / `multica-web:dev`，所以 compose 文件、`:prev` 回滚和 `/health` 校验都和编译模式一样。部署成功后会删掉拉下来的 `sha-*` 标签并清理悬空镜像。
 
-`ai.ferryway.cc` 用的是 `registry`：
+`ai.example.com` 用的是 `registry`：
 
 ```bash
 # /etc/multica/autoupdate.env
@@ -88,7 +88,7 @@ upstream 文件里当前一色在前，另一色挂 `backup`：nginx 只在主�
 
 `MULTICA_AUTOUPDATE_QUIET_SECONDS`（默认 0 = 关）：`kun` tip 比这个新就先记 `pending`，等安静了再上，连着合并几次只切一次；但最老的那个未部署 commit 超过 `MULTICA_AUTOUPDATE_MAX_DELAY_SECONDS`（默认 1800）就不再等。`registry` 模式下镜像本来就要 push 后 10 分钟左右才编完，所以单次合并几乎不会被这条拖慢。
 
-### `ai.ferryway.cc` 的配置
+### `ai.example.com` 的配置
 
 ```bash
 # /etc/multica/autoupdate.env

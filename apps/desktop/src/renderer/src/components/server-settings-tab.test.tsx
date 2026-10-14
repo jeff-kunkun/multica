@@ -126,9 +126,9 @@ describe("ServerSettingsTab", () => {
       ok: true,
       config: {
         schemaVersion: 1,
-        apiUrl: "https://ai.ferryway.cc",
-        wsUrl: "wss://ai.ferryway.cc/ws",
-        appUrl: "https://ai.ferryway.cc",
+        apiUrl: "https://ai.example.com",
+        wsUrl: "wss://ai.example.com/ws",
+        appUrl: "https://ai.example.com",
       },
     });
     render(<ServerSettingsTab />);
@@ -161,8 +161,8 @@ describe("ServerSettingsTab", () => {
       await screen.findByText("Fully quit and reopen"),
     ).toBeInTheDocument();
     expect(screen.getByText("Quit with ⌘Q and reopen Multica Desktop.")).toBeInTheDocument();
-    expect(screen.getAllByText("ai.ferryway.cc").length).toBeGreaterThan(0);
-    expect(screen.getByText("desktop-ai.ferryway.cc")).toBeInTheDocument();
+    expect(screen.getAllByText("ai.example.com").length).toBeGreaterThan(0);
+    expect(screen.getByText("desktop-ai.example.com")).toBeInTheDocument();
   });
 
   it("switches back to official cloud with null", async () => {
@@ -175,9 +175,9 @@ describe("ServerSettingsTab", () => {
           ok: true,
           config: {
             schemaVersion: 1,
-            apiUrl: "https://ai.ferryway.cc",
-            wsUrl: "wss://ai.ferryway.cc/ws",
-            appUrl: "https://ai.ferryway.cc",
+            apiUrl: "https://ai.example.com",
+            wsUrl: "wss://ai.example.com/ws",
+            appUrl: "https://ai.example.com",
           },
         },
         switchServer: mocks.switchServer,
