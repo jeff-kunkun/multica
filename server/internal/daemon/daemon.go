@@ -410,6 +410,7 @@ type Daemon struct {
 	mu           sync.Mutex
 	workspaces   map[string]*workspaceState
 	runtimeIndex map[string]Runtime // runtimeID -> Runtime for provider lookups
+	magpieRoutes magpieRouteProber
 	// profileLaunchSpecs maps a custom runtime profile_id -> the absolute
 	// executable path plus fixed launch args resolved for that profile
 	// (MUL-3284). Populated in registerRuntimesForWorkspace when a profile's
@@ -2181,6 +2182,7 @@ func (d *Daemon) run(ctx context.Context, healthLn net.Listener) error {
 	// workspace sync loop because that one runs on a thirty-minute consistency
 	// interval — far too slow for "install a CLI, see it under Runtimes".
 	go d.agentDiscoveryLoop(ctx)
+	go d.magpieRouteLoop(ctx)
 
 	taskWakeups := make(chan taskWakeup, 256)
 	go d.taskWakeupLoop(ctx, taskWakeups)
