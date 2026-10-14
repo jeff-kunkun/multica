@@ -1096,7 +1096,8 @@ func TestLocalDirectoriesBlock(t *testing.T) {
 			}
 			// Isolation is the agent's job now: its own worktree and branch,
 			// never a branch switch under everyone else's feet.
-			if !strings.Contains(out, "git worktree add") || !strings.Contains(out, "Do not switch branches") {
+			// Only for git repos: a plain folder has no branches to protect.
+			if !strings.Contains(out, "If it is a git repository") || !strings.Contains(out, "git worktree add") || !strings.Contains(out, "Do not switch branches") {
 				t.Fatalf("notice does not point code changes at a worktree of its own:\n%s", out)
 			}
 			// A single folder is the working directory itself; listing it

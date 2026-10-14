@@ -90,7 +90,7 @@ func buildLocalDirectoriesBlock(dirs []localDirectoryAssignment) string {
 	var b strings.Builder
 	b.WriteString("## Shared working directory\n\n")
 	b.WriteString("Your working directory is the user's own folder, and other tasks on this machine may be running in it at the same time.\n\n")
-	b.WriteString("To change code, create your own branch in a separate git worktree (`git worktree add <path> -b <branch>`) and work there. Do not switch branches, reset, or stash in the original checkout.\n\n")
+	b.WriteString("If it is a git repository and you need to change code, create your own branch in a separate git worktree (`git worktree add <path> -b <branch>`) and work there. Do not switch branches, reset, or stash in the original checkout.\n\n")
 	if len(dirs) > 1 {
 		b.WriteString("This project has these folders on this machine; you start in the first. To use another, cd into it yourself:\n\n")
 		for _, dir := range dirs {

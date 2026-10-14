@@ -1122,6 +1122,21 @@ func TestProjectResourceLocalDirectoryFolderConflict(t *testing.T) {
 		t.Errorf("same daemon same path create: expected 409, got %d: %s", w.Code, w.Body.String())
 	}
 
+	// A trailing separator names the same folder.
+	w = httptest.NewRecorder()
+	req = newRequest("POST", "/api/projects/"+project.ID+"/resources", map[string]any{
+		"resource_type": "local_directory",
+		"resource_ref": map[string]any{
+			"local_path": localPath + "/",
+			"daemon_id":  daemonID,
+		},
+	})
+	req = withURLParam(req, "id", project.ID)
+	testHandler.CreateProjectResource(w, req)
+	if w.Code != http.StatusConflict {
+		t.Errorf("same path with trailing slash: expected 409, got %d: %s", w.Code, w.Body.String())
+	}
+
 	// A second folder on the same daemon is allowed: the daemon starts in
 	// the first and lists the rest to the agent.
 	w = httptest.NewRecorder()

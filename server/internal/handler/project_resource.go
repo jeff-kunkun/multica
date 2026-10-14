@@ -134,7 +134,7 @@ func validateLocalDirectoryRef(ref json.RawMessage) (json.RawMessage, error) {
 	if err := json.Unmarshal(ref, &payload); err != nil {
 		return nil, fmt.Errorf("invalid local_directory payload: %w", err)
 	}
-	payload.LocalPath = strings.TrimSpace(payload.LocalPath)
+	payload.LocalPath = trimTrailingPathSeparators(strings.TrimSpace(payload.LocalPath))
 	if payload.LocalPath == "" {
 		return nil, errors.New("local_directory: local_path is required")
 	}
@@ -251,6 +251,19 @@ func isAbsoluteLocalPath(s string) bool {
 		return true
 	}
 	return false
+}
+
+// trimTrailingPathSeparators drops trailing "/" or "\" so "/a/b/" and "/a/b"
+// count as the same folder in the duplicate check. Roots ("/", "C:\") keep
+// their separator.
+func trimTrailingPathSeparators(s string) string {
+	for len(s) > 1 && (s[len(s)-1] == '/' || s[len(s)-1] == '\\') {
+		if len(s) == 3 && isDriveLetter(s[0]) && s[1] == ':' {
+			break
+		}
+		s = s[:len(s)-1]
+	}
+	return s
 }
 
 func isDriveLetter(b byte) bool {
