@@ -274,3 +274,102 @@ func TestBotConnect_OneYesConnectsBot(t *testing.T) {
 		t.Fatalf("repaired binding scope %v verify events %d", scope, verify)
 	}
 }
+
+// DENE-2041: the key a Bot collects never expires unless it asked for a
+// lifetime; 0 asks for never explicitly.
+func TestBotConnect_KeyLifetime(t *testing.T) {
+	ctx := context.Background()
+	const slug = "bot-connect-expiry"
+	_, _ = testPool.Exec(ctx, `DELETE FROM workspace WHERE slug = $1`, slug)
+	_, _ = testPool.Exec(ctx, `DELETE FROM "user" WHERE email LIKE $1`, slug+"-%")
+
+	wsID := dbfx.Insert(t, "workspace", testutil.Cols{
+		"name":         "Bot Connect Expiry",
+		"slug":         slug,
+		"description":  "bot connect expiry",
+		"issue_prefix": "BCE",
+	})
+	var adminID string
+	dbfx.QueryRow(t, `INSERT INTO "user" (name, email) VALUES ($1, $2) RETURNING id`,
+		"BCE admin", slug+"-admin@multica.ai").Scan(&adminID)
+	dbfx.Exec(t, `INSERT INTO member (workspace_id, user_id, role) VALUES ($1, $2, 'admin')`, wsID, adminID)
+	adminKey := insertTestPATFor(t, adminID)
+	var codes []string
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM bot_connect_request WHERE code = ANY($1)`, codes)
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM workspace WHERE id = $1`, wsID)
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM "user" WHERE id = $1`, adminID)
+	})
+
+	oldBox := testHandler.BotWakeSecrets
+	testHandler.BotWakeSecrets, _ = NewBotWakeSecretBox("bot connect expiry fixture")
+	t.Cleanup(func() { testHandler.BotWakeSecrets = oldBox })
+	receiver := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(receiver.Close)
+	t.Setenv("MULTICA_PLUGIN_DEV_ORIGINS", receiver.URL)
+
+	router := botConnectTestRouter()
+	call := func(method, path, bearer string, body any) *httptest.ResponseRecorder {
+		t.Helper()
+		req := newRequest(method, path, body)
+		req.Header.Del("X-Workspace-ID")
+		req.Header.Del("X-User-ID")
+		if bearer != "" {
+			req.Header.Set("Authorization", "Bearer "+bearer)
+		}
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+		return rec
+	}
+	// connect runs one whole connect and returns the key's expires_at.
+	connect := func(days any) (valid bool, at time.Time) {
+		t.Helper()
+		body := map[string]any{"name": "Grok", "webhook_url": receiver.URL, "webhook_key": "fixture"}
+		if days != nil {
+			body["expires_in_days"] = days
+		}
+		rec := call("POST", "/api/bot-connect", "", body)
+		if rec.Code != http.StatusCreated {
+			t.Fatalf("start %v: %d %s", days, rec.Code, rec.Body)
+		}
+		var s BotConnectStartResponse
+		json.Unmarshal(rec.Body.Bytes(), &s)
+		codes = append(codes, s.Code)
+		if rec := call("POST", "/api/bot-connect/"+s.Code+"/approve", adminKey, map[string]string{"workspace_id": wsID}); rec.Code != http.StatusOK {
+			t.Fatalf("approve %v: %d %s", days, rec.Code, rec.Body)
+		}
+		rec = call("POST", "/api/bot-connect/claim", "", map[string]string{"code": s.Code, "claim_token": s.ClaimToken})
+		var out BotConnectClaimResponse
+		json.Unmarshal(rec.Body.Bytes(), &out)
+		if rec.Code != http.StatusOK || out.Token == "" {
+			t.Fatalf("claim %v: %d %+v", days, rec.Code, out)
+		}
+		var exp *time.Time
+		dbfx.QueryRow(t, `SELECT expires_at FROM personal_access_token WHERE id = $1`, out.BotID).Scan(&exp)
+		if exp == nil {
+			return false, time.Time{}
+		}
+		return true, *exp
+	}
+
+	if valid, _ := connect(nil); valid {
+		t.Fatal("default connect: key expires, want never")
+	}
+	if valid, _ := connect(0); valid {
+		t.Fatal("expires_in_days 0: key expires, want never")
+	}
+	valid, at := connect(30)
+	if want := time.Now().Add(30 * 24 * time.Hour); !valid || at.Before(want.Add(-time.Hour)) || at.After(want.Add(time.Hour)) {
+		t.Fatalf("expires_in_days 30: expires %v at %v, want about %v", valid, at, want)
+	}
+	for _, bad := range []any{-1, 3651} {
+		rec := call("POST", "/api/bot-connect", "", map[string]any{
+			"name": "Grok", "webhook_url": receiver.URL, "webhook_key": "fixture", "expires_in_days": bad,
+		})
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("expires_in_days %v = %d, want 400", bad, rec.Code)
+		}
+	}
+}

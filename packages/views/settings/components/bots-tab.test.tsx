@@ -76,7 +76,7 @@ describe("BotsTab", () => {
     renderTab();
     expect(screen.queryByRole("button", { name: "Add bot" })).toBeNull();
     expect(screen.getByTestId("bot-connect-text")).toHaveTextContent(
-      "multica bot connect --server-url https://ai.example.com --name Grok --webhook-url <URL> --webhook-key <KEY>",
+      "multica bot connect --server-url https://ai.example.com --name Grok --webhook-url <URL> --webhook-key <KEY> --expires-in-days 0",
     );
     await userEvent.click(screen.getByRole("button", { name: "Copy for the Bot" }));
     await waitFor(() => expect(mockCopy).toHaveBeenCalledWith(expect.stringContaining("multica bot connect")));

@@ -32,6 +32,8 @@ import (
 const (
 	botConnectTTL          = 15 * time.Minute
 	botConnectPollInterval = 3
+	// Upper bound for a key lifetime the Bot asks for: ten years.
+	botConnectMaxKeyDays = 3650
 	// Unambiguous upper-case letters and digits: read aloud or typed from a
 	// phone without 0/O or 1/I mix-ups.
 	botConnectAlphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
@@ -42,6 +44,9 @@ type createBotConnectRequest struct {
 	Type       string `json:"type"`
 	WebhookURL string `json:"webhook_url"`
 	WebhookKey string `json:"webhook_key"`
+	// ExpiresInDays is how long the collected key lasts; nil or 0 means it
+	// never expires (DENE-2041).
+	ExpiresInDays *int `json:"expires_in_days"`
 }
 
 // BotConnectStartResponse goes back to the Bot that asked.
@@ -62,6 +67,8 @@ type BotConnectInfo struct {
 	ReceivesPush bool   `json:"receives_push"`
 	ExpiresAt    string `json:"expires_at"`
 	WorkspaceID  string `json:"workspace_id,omitempty"`
+	// KeyExpiresInDays is the key lifetime the Bot asked for; 0 = never.
+	KeyExpiresInDays int `json:"key_expires_in_days"`
 }
 
 // BotConnectClaimResponse carries the key, once, to the Bot.
@@ -89,6 +96,16 @@ func newBotConnectCode() (string, error) {
 		out = append(out, botConnectAlphabet[int(b)%len(botConnectAlphabet)])
 	}
 	return string(out), nil
+}
+
+// botConnectKeyExpiry is when the collected key lapses: never unless the Bot
+// asked for a lifetime, the same rule as a key added by hand.
+func botConnectKeyExpiry(req db.BotConnectRequest, now time.Time) pgtype.Timestamptz {
+	if !req.KeyExpiresInDays.Valid {
+		return pgtype.Timestamptz{}
+	}
+	days := int(req.KeyExpiresInDays.Int32)
+	return botExpiry(&days, now)
 }
 
 func normalizeBotConnectCode(raw string) string {
@@ -139,6 +156,14 @@ func (h *Handler) StartBotConnect(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "webhook_url and webhook_key are required: the Bot's own address for messages and decisions")
 		return
 	}
+	var keyDays pgtype.Int4
+	if req.ExpiresInDays != nil {
+		if *req.ExpiresInDays < 0 || *req.ExpiresInDays > botConnectMaxKeyDays {
+			writeError(w, http.StatusBadRequest, "expires_in_days must be between 0 (never expires) and 3650")
+			return
+		}
+		keyDays = pgtype.Int4{Int32: int32(*req.ExpiresInDays), Valid: true}
+	}
 	var sealed []byte
 	{
 		if h.BotWakeSecrets == nil {
@@ -179,6 +204,7 @@ func (h *Handler) StartBotConnect(w http.ResponseWriter, r *http.Request) {
 		row, err = h.Queries.CreateBotConnectRequest(r.Context(), db.CreateBotConnectRequestParams{
 			Code: code, ClaimHash: auth.HashToken(claim), BotName: name, BotType: botType,
 			WebhookSecret: sealed, ExpiresAt: pgtype.Timestamptz{Time: expires, Valid: true},
+			KeyExpiresInDays: keyDays,
 		})
 		if err == nil {
 			break
@@ -239,7 +265,7 @@ func botConnectInfo(row db.BotConnectRequest, now time.Time) BotConnectInfo {
 	info := BotConnectInfo{
 		Code: row.Code, BotName: row.BotName, BotType: row.BotType,
 		Status: botConnectStatus(row, now), ReceivesPush: len(row.WebhookSecret) > 0,
-		ExpiresAt: timestampToString(row.ExpiresAt),
+		ExpiresAt: timestampToString(row.ExpiresAt), KeyExpiresInDays: int(row.KeyExpiresInDays.Int32),
 	}
 	if row.WorkspaceID.Valid {
 		info.WorkspaceID = uuidToString(row.WorkspaceID)
@@ -372,6 +398,7 @@ func (h *Handler) ClaimBotConnect(w http.ResponseWriter, r *http.Request) {
 	bot, err := q.CreateBotAccessToken(ctx, db.CreateBotAccessTokenParams{
 		UserID: row.ApprovedBy, Name: row.BotName, TokenHash: hash, TokenPrefix: prefix,
 		BotType: pgtype.Text{String: row.BotType, Valid: true}, WorkspaceID: row.WorkspaceID,
+		ExpiresAt: botConnectKeyExpiry(row, now),
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to add bot")

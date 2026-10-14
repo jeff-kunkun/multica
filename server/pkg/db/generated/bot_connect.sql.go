@@ -15,7 +15,7 @@ const approveBotConnectRequest = `-- name: ApproveBotConnectRequest :one
 UPDATE bot_connect_request
 SET status = 'approved', workspace_id = $2, approved_by = $3, decided_at = now()
 WHERE code = $1 AND status = 'pending' AND expires_at > now()
-RETURNING id, code, claim_hash, bot_name, bot_type, webhook_secret, status, workspace_id, approved_by, bot_id, created_at, decided_at, expires_at
+RETURNING id, code, claim_hash, bot_name, bot_type, webhook_secret, status, workspace_id, approved_by, bot_id, created_at, decided_at, expires_at, key_expires_in_days
 `
 
 type ApproveBotConnectRequestParams struct {
@@ -41,23 +41,25 @@ func (q *Queries) ApproveBotConnectRequest(ctx context.Context, arg ApproveBotCo
 		&i.CreatedAt,
 		&i.DecidedAt,
 		&i.ExpiresAt,
+		&i.KeyExpiresInDays,
 	)
 	return i, err
 }
 
 const createBotConnectRequest = `-- name: CreateBotConnectRequest :one
-INSERT INTO bot_connect_request (code, claim_hash, bot_name, bot_type, webhook_secret, expires_at)
-VALUES ($1, $2, $3, $4, $5, $6)
-RETURNING id, code, claim_hash, bot_name, bot_type, webhook_secret, status, workspace_id, approved_by, bot_id, created_at, decided_at, expires_at
+INSERT INTO bot_connect_request (code, claim_hash, bot_name, bot_type, webhook_secret, expires_at, key_expires_in_days)
+VALUES ($1, $2, $3, $4, $5, $6, $7)
+RETURNING id, code, claim_hash, bot_name, bot_type, webhook_secret, status, workspace_id, approved_by, bot_id, created_at, decided_at, expires_at, key_expires_in_days
 `
 
 type CreateBotConnectRequestParams struct {
-	Code          string             `json:"code"`
-	ClaimHash     string             `json:"claim_hash"`
-	BotName       string             `json:"bot_name"`
-	BotType       string             `json:"bot_type"`
-	WebhookSecret []byte             `json:"webhook_secret"`
-	ExpiresAt     pgtype.Timestamptz `json:"expires_at"`
+	Code             string             `json:"code"`
+	ClaimHash        string             `json:"claim_hash"`
+	BotName          string             `json:"bot_name"`
+	BotType          string             `json:"bot_type"`
+	WebhookSecret    []byte             `json:"webhook_secret"`
+	ExpiresAt        pgtype.Timestamptz `json:"expires_at"`
+	KeyExpiresInDays pgtype.Int4        `json:"key_expires_in_days"`
 }
 
 func (q *Queries) CreateBotConnectRequest(ctx context.Context, arg CreateBotConnectRequestParams) (BotConnectRequest, error) {
@@ -68,6 +70,7 @@ func (q *Queries) CreateBotConnectRequest(ctx context.Context, arg CreateBotConn
 		arg.BotType,
 		arg.WebhookSecret,
 		arg.ExpiresAt,
+		arg.KeyExpiresInDays,
 	)
 	var i BotConnectRequest
 	err := row.Scan(
@@ -84,6 +87,7 @@ func (q *Queries) CreateBotConnectRequest(ctx context.Context, arg CreateBotConn
 		&i.CreatedAt,
 		&i.DecidedAt,
 		&i.ExpiresAt,
+		&i.KeyExpiresInDays,
 	)
 	return i, err
 }
@@ -101,7 +105,7 @@ const denyBotConnectRequest = `-- name: DenyBotConnectRequest :one
 UPDATE bot_connect_request
 SET status = 'denied', approved_by = $2, decided_at = now()
 WHERE code = $1 AND status = 'pending'
-RETURNING id, code, claim_hash, bot_name, bot_type, webhook_secret, status, workspace_id, approved_by, bot_id, created_at, decided_at, expires_at
+RETURNING id, code, claim_hash, bot_name, bot_type, webhook_secret, status, workspace_id, approved_by, bot_id, created_at, decided_at, expires_at, key_expires_in_days
 `
 
 type DenyBotConnectRequestParams struct {
@@ -126,12 +130,13 @@ func (q *Queries) DenyBotConnectRequest(ctx context.Context, arg DenyBotConnectR
 		&i.CreatedAt,
 		&i.DecidedAt,
 		&i.ExpiresAt,
+		&i.KeyExpiresInDays,
 	)
 	return i, err
 }
 
 const getBotConnectRequestByCode = `-- name: GetBotConnectRequestByCode :one
-SELECT id, code, claim_hash, bot_name, bot_type, webhook_secret, status, workspace_id, approved_by, bot_id, created_at, decided_at, expires_at FROM bot_connect_request WHERE code = $1
+SELECT id, code, claim_hash, bot_name, bot_type, webhook_secret, status, workspace_id, approved_by, bot_id, created_at, decided_at, expires_at, key_expires_in_days FROM bot_connect_request WHERE code = $1
 `
 
 func (q *Queries) GetBotConnectRequestByCode(ctx context.Context, code string) (BotConnectRequest, error) {
@@ -151,12 +156,13 @@ func (q *Queries) GetBotConnectRequestByCode(ctx context.Context, code string) (
 		&i.CreatedAt,
 		&i.DecidedAt,
 		&i.ExpiresAt,
+		&i.KeyExpiresInDays,
 	)
 	return i, err
 }
 
 const lockBotConnectRequestForClaim = `-- name: LockBotConnectRequestForClaim :one
-SELECT id, code, claim_hash, bot_name, bot_type, webhook_secret, status, workspace_id, approved_by, bot_id, created_at, decided_at, expires_at FROM bot_connect_request WHERE code = $1 FOR UPDATE
+SELECT id, code, claim_hash, bot_name, bot_type, webhook_secret, status, workspace_id, approved_by, bot_id, created_at, decided_at, expires_at, key_expires_in_days FROM bot_connect_request WHERE code = $1 FOR UPDATE
 `
 
 func (q *Queries) LockBotConnectRequestForClaim(ctx context.Context, code string) (BotConnectRequest, error) {
@@ -176,6 +182,7 @@ func (q *Queries) LockBotConnectRequestForClaim(ctx context.Context, code string
 		&i.CreatedAt,
 		&i.DecidedAt,
 		&i.ExpiresAt,
+		&i.KeyExpiresInDays,
 	)
 	return i, err
 }

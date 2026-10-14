@@ -10,7 +10,9 @@ Install a current `multica` binary for the computer's OS and architecture.
 **Connect without a key (DENE-2009, preferred).** The Bot runs
 `multica bot connect --server-url <url> --name <Bot name> --webhook-url
 <public https> --webhook-key <secret>` itself, on its own machine (refused
-inside an agent task). The address and key are required: they are the Bot's
+inside an agent task). `--expires-in-days N` sets how long the collected
+key lasts; omitted or `0` means it never expires (DENE-2041), and the
+settings-page sentence passes `0` explicitly. The address and key are required: they are the Bot's
 own receiving end, so group events and the approver's decisions reach it
 with nothing to set up later. It prints a link
 (`<app>/bot-connect?code=XXXX-XXXX`); send that link to the person. When a

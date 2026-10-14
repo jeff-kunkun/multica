@@ -723,6 +723,8 @@ export interface BotConnectInfo {
   receives_push: boolean;
   expires_at: string;
   workspace_id?: string;
+  /** Lifetime of the key the Bot asked for, in days; 0 = never expires (DENE-2041). */
+  key_expires_in_days: number;
 }
 
 // Decisions that need you go to your own Bot (DENE-1933). `state` is computed

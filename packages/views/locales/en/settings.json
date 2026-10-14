@@ -2468,7 +2468,7 @@
       "description": "Copy this sentence to your Bot. It sends back a link; agree once and it's connected — no key to handle.",
       "copy": "Copy for the Bot",
       "copied": "Copied — send it to your Bot",
-      "instruction": "Please run this on your machine, with <URL> and <KEY> replaced by your own HTTPS address for receiving messages and its key: {{command}}\nThen send me the link it prints; once I agree, you're connected and group messages and my decisions reach you."
+      "instruction": "Please run this on your machine, with <URL> and <KEY> replaced by your own HTTPS address for receiving messages and its key: {{command}}\nThen send me the link it prints; once I agree, you're connected and group messages and my decisions reach you. --expires-in-days 0 keeps your key from ever expiring; to have it lapse, use a number of days instead."
     }
   },
   "overview": {
