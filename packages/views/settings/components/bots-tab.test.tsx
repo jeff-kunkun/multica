@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { I18nProvider } from "@multica/core/i18n/react";
 import enCommon from "../../locales/en/common.json";
@@ -93,24 +93,26 @@ describe("BotsTab — setup prompt", () => {
     expect(screen.queryByRole("button", { name: "Copy prompt" })).not.toBeInTheDocument();
   });
 
-  it("shows the office token, webhook URL and webhook key together", async () => {
-    createdRef.current = {
-      ...bot,
-      webhook_url: "https://grok.example/hook",
-      webhook_key: "gk_1",
-      webhook_key_set: true,
-    };
+  it("shows the office token but no HMAC signing secret", async () => {
+    createdRef.current = { ...bot };
     await createGrok();
 
-    for (const [label, value] of [
-      ["Multica office token (starts with mul_)", "mul_abcdefgh123"],
-      ["Webhook URL", "https://grok.example/hook"],
-      ["Webhook key", "gk_1"],
-    ] as const) {
-      expect(screen.getByText(label)).toBeInTheDocument();
-      expect(screen.getByText(value)).toBeInTheDocument();
-    }
+    expect(screen.getByText("Multica office token (starts with mul_)")).toBeInTheDocument();
+    expect(screen.getByText("mul_abcdefgh123")).toBeInTheDocument();
     // The HMAC signing secret is not something the Bot can use.
     expect(screen.queryByText("secret")).not.toBeInTheDocument();
+  });
+});
+
+describe("BotsTab — new Bot form", () => {
+  it("asks only for the name", async () => {
+    const user = userEvent.setup();
+    render(<BotsTab />, { wrapper: Wrapper });
+    await user.click(screen.getByRole("button", { name: "New Bot" }));
+
+    const dialog = screen.getByRole("dialog");
+    expect(within(dialog).getAllByRole("textbox")).toHaveLength(1);
+    expect(within(dialog).getByLabelText("Name")).toBeInTheDocument();
+    expect(within(dialog).queryByRole("switch")).not.toBeInTheDocument();
   });
 });
