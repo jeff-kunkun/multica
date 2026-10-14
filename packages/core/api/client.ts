@@ -2180,12 +2180,7 @@ export class ApiClient {
   }
 
   /** Creates a Bot; the reply carries its token and webhook secret once. */
-  async createBot(data: {
-    name: string;
-    can_release: boolean;
-    webhook_url: string;
-    webhook_key: string;
-  }): Promise<WorkspaceBotWithSecrets> {
+  async createBot(data: { name: string }): Promise<WorkspaceBotWithSecrets> {
     const raw = await this.fetch<unknown>("/api/bots", {
       method: "POST",
       body: JSON.stringify(data),
@@ -2197,7 +2192,7 @@ export class ApiClient {
 
   async updateBot(
     botId: string,
-    update: { name?: string; can_release?: boolean; webhook_url?: string; webhook_key?: string },
+    update: { name?: string; can_release?: boolean },
   ): Promise<WorkspaceBotWithSecrets> {
     const raw = await this.fetch<unknown>(`/api/bots/${encodeURIComponent(botId)}`, {
       method: "PATCH",
