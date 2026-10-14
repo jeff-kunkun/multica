@@ -120,11 +120,11 @@ Squirrel 在安装更新前会用当前应用的 designated requirement 校验�
 | 通道 | 从哪条分支打 tag | tag 形状 | 更新清单文件 | 谁装 |
 | --- | --- | --- | --- | --- |
 | 测试版（test） | `kun` tip | `v0.5.5-test.1`、`v0.5.5-test.2` | `test*.yml` | kun 本机；愿意先吃 bug 的人 |
-| 正式版（stable） | `release` tip | `v0.5.5` | `latest*.yml` | kk、zi 与默认用户 |
+| 正式版（stable） | `kun` tip（须已发过测试版） | `v0.5.5` | `latest*.yml` | kk、zi 与默认用户 |
 
 纪律：
 
-1. **正式版的每一行代码都必须先在测试通道上出现过。** 发正式版的动作只有一个——把 `kun` 快进合进 `release`，然后在 `release` 上打 `vX.Y.Z`。不在 `release` 上开发、不 cherry-pick、不 force-push。
+1. **正式版的每一行代码都必须先在测试通道上出现过。** 正式 tag `vX.Y.Z` 打在已经发过测试版的那个 `kun` 提交上；不另开发布分支、不 cherry-pick。原来的 `release` 分支已删，最后位置在 `archive/release` 标签。
 2. **测试 tag 只从 `kun` tip 打。** 形状固定为 `vX.Y.Z-test.N`：`X.Y.Z` 是**下一个**正式版号，`N` 从 1 递增。semver 里 `0.5.5-test.3 < 0.5.5`，所以测试用户后来装到正式版 `0.5.5` 时是一次正常升级，不需要降级放行。
 3. **通道名不要手改。** `apps/desktop/scripts/package.mjs` 按 tag 的 prerelease 段推导通道前缀（`latest` / `test`），再按平台与架构补后缀；`apps/desktop/src/main/updater.ts` 在运行时按用户选择的通道 + 本机架构拼出同一个名字。两边必须同源，改一边就是断更新。测试前缀必须与 tag 的 prerelease 段（`test`）逐字相同：electron-updater 的 GitHub provider 只按这个段找清单，写成 `beta` 会 404。测试 tag 在 GitHub 上必须标成 prerelease（CI 已自动加 `--prerelease`），否则正式版客户端查 `/releases/latest` 会被指到测试 tag。
 4. **通道由用户在「设置 → 更新」里自己选，默认正式版。** 选择持久化在 `updater-preferences`，切换后立即重新查一次。从测试版切回正式版是一次**降级**（`0.5.5-test.3` → `0.5.4`），必须临时打开 `allowDowngrade`，否则用户会永远卡在测试通道上。
@@ -133,9 +133,7 @@ Squirrel 在安装更新前会用当前应用的 designated requirement 校验�
 发一版正式版：
 
 ```bash
-git fetch origin --prune
-git checkout release && git merge --ff-only origin/kun && git push origin release
-git tag v0.5.5 && git push origin v0.5.5
+scripts/desktop-release.sh cut --channel stable --confirm-stable
 ```
 
 发一版测试版：

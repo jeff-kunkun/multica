@@ -4,12 +4,11 @@
 # Workflow:
 #   1. Fetch upstream and origin remotes.
 #   2. Check if upstream/main has new commits ahead of kun.
-#   3. Fast-forward local main mirror to upstream/main and push to origin/main.
-#   4. Create sync branch sync/upstream-<date> from kun.
-#   5. Merge main into sync branch. If conflicts occur, stop, list conflicted files,
-#      and abort the merge without naive resolution.
-#   6. Check migration numbering with 'make migration-lint'.
-#   7. Push sync branch to origin and open a PR targeting kun.
+#   3. Create sync branch sync/upstream-<date> from kun.
+#   4. Merge upstream/main into sync branch. If conflicts occur, stop, list
+#      conflicted files, and abort the merge without naive resolution.
+#   5. Check migration numbering with 'make migration-lint'.
+#   6. Push sync branch to origin and open a PR targeting kun.
 #
 # Usage:
 #   bash scripts/sync-upstream.sh [options]
@@ -20,7 +19,6 @@ set -euo pipefail
 UPSTREAM_REMOTE="${MULTICA_UPSTREAM_REMOTE:-upstream}"
 ORIGIN_REMOTE="${MULTICA_ORIGIN_REMOTE:-origin}"
 UPSTREAM_BRANCH="${MULTICA_UPSTREAM_BRANCH:-main}"
-MIRROR_BRANCH="${MULTICA_MIRROR_BRANCH:-main}"
 TARGET_BRANCH="${MULTICA_TARGET_BRANCH:-kun}"
 CUSTOM_DATE=""
 CUSTOM_BRANCH=""
@@ -53,12 +51,11 @@ Sync upstream repository changes into the kun fork branch.
 Workflow:
   1. Fetch upstream and origin remotes.
   2. Check if upstream/main has new commits ahead of kun.
-  3. Fast-forward local main mirror to upstream/main and push to origin/main.
-  4. Create sync branch sync/upstream-<date> from kun.
-  5. Merge main into sync branch. If conflicts occur, stop, list conflicted files,
-     and abort the merge without attempting naive auto-resolution.
-  6. Run 'make migration-lint' to verify migration numbering.
-  7. Push sync branch to origin and open a PR targeting kun.
+  3. Create sync branch sync/upstream-<date> from kun.
+  4. Merge upstream/main into sync branch. If conflicts occur, stop, list
+     conflicted files, and abort the merge without attempting naive auto-resolution.
+  5. Run 'make migration-lint' to verify migration numbering.
+  6. Push sync branch to origin and open a PR targeting kun.
 
 Options:
   --dry-run                 Simulate the workflow without pushing to remotes or opening PR
@@ -68,7 +65,6 @@ Options:
   --upstream-remote REMOTE  Upstream remote name (default: upstream)
   --origin-remote REMOTE    Fork remote name (default: origin)
   --upstream-branch BRANCH  Upstream branch name (default: main)
-  --mirror-branch BRANCH    Mirror branch name (default: main)
   --target-branch BRANCH    Base branch to sync into (default: kun)
   --date YYYYMMDD           Date string used in branch name (default: today's date)
   --branch-name NAME        Explicit branch name (default: sync/upstream-<date>)
@@ -78,7 +74,6 @@ Environment:
   MULTICA_UPSTREAM_REMOTE   Default for --upstream-remote (upstream)
   MULTICA_ORIGIN_REMOTE     Default for --origin-remote (origin)
   MULTICA_UPSTREAM_BRANCH   Default for --upstream-branch (main)
-  MULTICA_MIRROR_BRANCH     Default for --mirror-branch (main)
   MULTICA_TARGET_BRANCH     Default for --target-branch (kun)
 EOF
 }
@@ -135,11 +130,6 @@ while [ $# -gt 0 ]; do
     --upstream-branch)
       [ $# -ge 2 ] || fail "Missing value for --upstream-branch"
       UPSTREAM_BRANCH="$2"
-      shift 2
-      ;;
-    --mirror-branch)
-      [ $# -ge 2 ] || fail "Missing value for --mirror-branch"
-      MIRROR_BRANCH="$2"
       shift 2
       ;;
     --target-branch)
@@ -234,18 +224,7 @@ if [ "$commit_count" -gt 10 ]; then
   printf "  ... and %d more commit(s)\n" "$((commit_count - 10))"
 fi
 
-# 6. Verify main mirror fast-forwardability
-if git show-ref --verify --quiet "refs/heads/$MIRROR_BRANCH"; then
-  if ! git merge-base --is-ancestor "$MIRROR_BRANCH" "$UPSTREAM_REMOTE/$UPSTREAM_BRANCH"; then
-    fail "Mirror branch '$MIRROR_BRANCH' has diverged from '$UPSTREAM_REMOTE/$UPSTREAM_BRANCH' and cannot be fast-forwarded. '$MIRROR_BRANCH' must strictly mirror upstream."
-  fi
-elif git show-ref --verify --quiet "refs/remotes/$ORIGIN_REMOTE/$MIRROR_BRANCH"; then
-  if ! git merge-base --is-ancestor "$ORIGIN_REMOTE/$MIRROR_BRANCH" "$UPSTREAM_REMOTE/$UPSTREAM_BRANCH"; then
-    fail "Remote mirror branch '$ORIGIN_REMOTE/$MIRROR_BRANCH' has diverged from '$UPSTREAM_REMOTE/$UPSTREAM_BRANCH' and cannot be fast-forwarded."
-  fi
-fi
-
-# 7. Determine sync branch name
+# 6. Determine sync branch name
 if [ -n "$CUSTOM_BRANCH" ]; then
   SYNC_BRANCH="$CUSTOM_BRANCH"
 else
@@ -258,10 +237,8 @@ else
   done
 fi
 
-# 8. Dry-run simulation
+# 7. Dry-run simulation
 if [ "$DRY_RUN" -eq 1 ]; then
-  info "[dry-run] Mirror branch '$MIRROR_BRANCH' can be fast-forwarded to '$UPSTREAM_REMOTE/$UPSTREAM_BRANCH'."
-  info "[dry-run] Would run: git push $ORIGIN_REMOTE $MIRROR_BRANCH"
   info "[dry-run] Simulating 3-way merge between '$TARGET_BRANCH' and '$UPSTREAM_REMOTE/$UPSTREAM_BRANCH'..."
 
   set +e
@@ -283,7 +260,7 @@ if [ "$DRY_RUN" -eq 1 ]; then
 
   ok "[dry-run] Pre-merge check: CLEAN (no conflicts)."
   ok "[dry-run] Would create branch: '$SYNC_BRANCH' from '$TARGET_BRANCH'"
-  ok "[dry-run] Would merge: '$MIRROR_BRANCH'"
+  ok "[dry-run] Would merge: '$UPSTREAM_REMOTE/$UPSTREAM_BRANCH'"
   if [ "$SKIP_MIGRATION_LINT" -eq 0 ]; then
     ok "[dry-run] Would run: make migration-lint"
   fi
@@ -292,28 +269,14 @@ if [ "$DRY_RUN" -eq 1 ]; then
   exit 0
 fi
 
-# 9. Real run: Update mirror branch
-info "Updating mirror branch '$MIRROR_BRANCH' to '$UPSTREAM_REMOTE/$UPSTREAM_BRANCH'..."
-if [ "$ORIG_BRANCH" = "$MIRROR_BRANCH" ]; then
-  git merge --ff-only "$UPSTREAM_REMOTE/$UPSTREAM_BRANCH"
-elif git show-ref --verify --quiet "refs/heads/$MIRROR_BRANCH"; then
-  git fetch . "$UPSTREAM_REMOTE/$UPSTREAM_BRANCH:$MIRROR_BRANCH"
-else
-  git branch "$MIRROR_BRANCH" "$UPSTREAM_REMOTE/$UPSTREAM_BRANCH"
-fi
-
-info "Pushing mirror branch '$MIRROR_BRANCH' to '$ORIGIN_REMOTE'..."
-git push "$ORIGIN_REMOTE" "$MIRROR_BRANCH"
-ok "Mirror branch '$MIRROR_BRANCH' updated and pushed."
-
-# 10. Create sync branch
+# 8. Create sync branch
 info "Creating sync branch '$SYNC_BRANCH' from '$TARGET_BRANCH'..."
 git checkout -b "$SYNC_BRANCH" "$TARGET_BRANCH"
 
-# 11. Merge mirror branch
-info "Merging '$MIRROR_BRANCH' into '$SYNC_BRANCH'..."
+# 9. Merge upstream
+info "Merging '$UPSTREAM_REMOTE/$UPSTREAM_BRANCH' into '$SYNC_BRANCH'..."
 set +e
-merge_output="$(git merge --no-ff "$MIRROR_BRANCH" -m "sync: merge upstream $UPSTREAM_BRANCH ($SYNC_DATE) into $TARGET_BRANCH" 2>&1)"
+merge_output="$(git merge --no-ff "$UPSTREAM_REMOTE/$UPSTREAM_BRANCH" -m "sync: merge upstream $UPSTREAM_BRANCH ($SYNC_DATE) into $TARGET_BRANCH" 2>&1)"
 merge_status=$?
 set -e
 
@@ -340,7 +303,7 @@ fi
 
 ok "Merge succeeded without conflicts."
 
-# 12. Run migration lint
+# 10. Run migration lint
 if [ "$SKIP_MIGRATION_LINT" -eq 0 ]; then
   info "Running migration lint ('make migration-lint')..."
   if ! make migration-lint; then
@@ -351,12 +314,12 @@ if [ "$SKIP_MIGRATION_LINT" -eq 0 ]; then
   ok "Migration lint passed."
 fi
 
-# 13. Push sync branch
+# 11. Push sync branch
 info "Pushing '$SYNC_BRANCH' to '$ORIGIN_REMOTE'..."
 git push -u "$ORIGIN_REMOTE" "$SYNC_BRANCH"
 ok "Branch '$SYNC_BRANCH' pushed to '$ORIGIN_REMOTE'."
 
-# 14. Create PR targeting kun
+# 12. Create PR targeting kun
 if command -v gh >/dev/null 2>&1; then
   info "Creating PR targeting '$TARGET_BRANCH'..."
   pr_title="sync: upstream main ${SYNC_DATE}"

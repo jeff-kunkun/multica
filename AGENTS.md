@@ -67,7 +67,7 @@ Root frontend commands and `make check` do not verify mobile. Docs-only changes 
 
 工作单住 Multica Issues，用 `multica` CLI。代码 PR 走 GitHub（`jeff-kunkun/multica`）：标题带 identifier，关单写 `Closes DENE-N`。不要再开 GitHub issue。
 
-`main` 只做官方镜像，`kun` 是魔改主线兼**测试线**：功能分支从 `kun` 切出、PR 打回 `kun`。`release` 是**发布线**，只接受从 `kun` 快进合入，不直接开发。Desktop 双通道发版（`vX.Y.Z-test.N` 走测试通道、`vX.Y.Z` 走正式通道）与上游同步流程见 `KUN-FORK.md`。
+仓库只留两条长期分支：`kun`（团队魔改主线兼**测试线**，功能分支从 `kun` 切出、PR 打回 `kun`）和 `kun-main`（Kun 的主力线，另有自己的规矩，两条线互不合并）。原 `main` 镜像和 `release` 发布线已删，留底在 `archive/main`、`archive/release` 标签；上游同步直接拉官方仓库，正式版从已发过测试版的 `kun` 提交打 tag。Desktop 双通道发版（`vX.Y.Z-test.N` 走测试通道、`vX.Y.Z` 走正式通道）与上游同步流程见 `KUN-FORK.md`。
 
 发版（Actions 停用期间，细则见 `docs/kun/desktop-release.md`）：backend/web 镜像由 `kkunkunya/multica-image-builder` 出到 ghcr.io/kkunkunya（生产服自动跟），Desktop 走本机兜底，两边不要同时手工打；Linux CLI 包（守护进程同一个二进制）由发版人从 tag 本机交叉编译 linux amd64/arm64，两种命名加 `checksums.txt`，等 Desktop 上传开始后追加到同一个 Release；测试版 CLI 包 `multica update` 不会自动拿到（只看正式版 latest），服务器按版本号直链下载替换。
 

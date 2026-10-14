@@ -11,21 +11,16 @@
 
 ## 分支约定
 
-三条分支，各自一个职责，不要互换：
+jeff-kunkun/multica 只留两条长期分支：
 
 | 分支 | 职责 | 谁往里写 |
 | --- | --- | --- |
-| `main` | 官方镜像。永远不直接提交，只 fast-forward 到 `upstream/main`。 | 只有上游同步 |
-| `kun` | 魔改主线 = **测试线**。所有功能分支从这里切出、PR 打回这里。也是 GitHub 默认分支。 | 所有开发 |
-| `release` | **发布线**。只接受从 `kun` 合进来的快进合并，不直接开发、不 cherry-pick。 | 只有发版 |
+| `kun` | 团队魔改主线（旧办公室 ai.ferryway.cc 跟它）。功能分支从这里切出、PR 打回这里。也是 GitHub 默认分支。 | 所有开发 |
+| `kun-main` | Kun 自己的主力线（新办公室 office.ferryway.cc 跟它），以官方原版为底座做减法，规矩在它自己的 `AGENTS.md`。 | 只走 `kun-main` 的 PR |
 
-- 永远不要 rebase `kun`，不要 force-push `kun`、`main` 或 `release`。
+- 原来的 `main`（官方镜像）和 `release`（发布线）已删，最后的位置留在 `archive/main`、`archive/release` 两个标签上。
+- 永远不要 rebase `kun`，不要 force-push `kun` 或 `kun-main`；两条线互不合并。
 - 魔改增量随时可查：`git log --oneline upstream/main..kun`。
-- 发布线落后多少：`git log --oneline release..kun`。
-
-### 为什么发布线不叫 `main`
-
-`main` 在这个 fork 里已经被官方镜像占住了，它永远只 fast-forward 到 `upstream/main`，不能放我们的代码。把发布线塞进 `main` 会连带改默认分支、CI 判断、自建实例自动升级脚本（盯的是 `origin/kun`）以及所有「PR 打回 kun」的约定。所以发布线单独叫 `release`，语义和「main = 正式版」完全一样。
 
 ## 上游同步流程
 
@@ -35,7 +30,7 @@
 # 预检 / 模拟运行（不写远端、不开 PR，检查是否有更新与冲突）
 bash scripts/sync-upstream.sh --dry-run
 
-# 执行同步（自动更新 main 镜像、切分支合并、检查迁移编号、推分支开 PR）
+# 执行同步（切分支合并官方、检查迁移编号、推分支开 PR）
 bash scripts/sync-upstream.sh
 ```
 
@@ -43,11 +38,10 @@ bash scripts/sync-upstream.sh
 
 1. `git fetch upstream --prune && git fetch origin --prune`
 2. 检查更新：`git log --oneline kun..upstream/main`。为空则提示「上游无更新」并退出。
-3. 镜像更新：将 `main` 快进（`--ff-only`）到 `upstream/main` 并推送到 `origin main`。
-4. 冲突预检与合并：从 `kun` 切出 `sync/upstream-<日期>` 分支并执行 `git merge --no-ff main`。
+3. 冲突预检与合并：从 `kun` 切出 `sync/upstream-<日期>` 分支并直接执行 `git merge --no-ff upstream/main`（不再经过本仓库的 `main` 镜像）。
    - 有冲突：脚本自动停下并列出所有冲突文件，执行 `git merge --abort` 保持工作区干净，不自行乱解，等待人工或专门决策介入。
    - 无冲突：自动执行 `make migration-lint` 检查迁移编号是否重复冲突。
-5. 推送与开 PR：推送 `sync/upstream-<日期>` 到 `origin`，并调用 `gh pr create --base kun --title "sync: upstream main <日期>"`。Reviewer 通过后直接合并；没有 Reviewer 结论时，Agent 完成按风险自检并认为可接受也可合并，不等待本人再次确认。
+4. 推送与开 PR：推送 `sync/upstream-<日期>` 到 `origin`，并调用 `gh pr create --base kun --title "sync: upstream main <日期>"`。Reviewer 通过后直接合并；没有 Reviewer 结论时，Agent 完成按风险自检并认为可接受也可合并，不等待本人再次确认。
 
 ### 已提前照搬到 `kun`、上游还没合并的 PR
 
@@ -80,11 +74,9 @@ node scripts/dsh-vision-probe.mjs --apply
 | 通道 | 从哪个分支打 tag | tag 形状 | 谁装 |
 | --- | --- | --- | --- |
 | 测试版（test） | `kun` tip | `v0.5.5-test.1` | kun 本机；愿意先吃 bug 的用户 |
-| 正式版（stable） | `release` tip | `v0.5.5` | kk、zi 以及默认用户 |
+| 正式版（stable） | `kun` tip（须已发过测试版） | `v0.5.5` | kk、zi 以及默认用户 |
 
-测试版在 `kun` 上跑稳之后，把 `kun` 快进合进 `release` 再打正式 tag——正式版的每一行代码都必须先在测试通道上出现过。用户在「设置 → 更新」里自己选通道，切换立即生效。
-
-开任务时要写清这活进哪条线：默认都是进 `kun`（测试线），只有发版动作才碰 `release`。
+测试版在 `kun` 上跑稳之后，在同一个 `kun` 提交上打正式 tag——正式版的每一行代码都必须先在测试通道上出现过。用户在「设置 → 更新」里自己选通道，切换立即生效。
 
 ## Desktop 默认入口 = 自建实例
 
