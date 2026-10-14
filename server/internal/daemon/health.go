@@ -54,11 +54,10 @@ type HealthResponse struct {
 	// of leaving the user to guess why a daemon they never started is running.
 	LaunchedBy string `json:"launched_by,omitempty"`
 	// ActiveTaskCount remains the compatibility/safety count of every claimed
-	// handleTask lifecycle. The additive counters split actual provider
-	// execution from local-directory parking for throughput and diagnostics.
-	ActiveTaskCount       int64 `json:"active_task_count"`
-	RunningTaskCount      int64 `json:"running_task_count"`
-	ResourceWaitTaskCount int64 `json:"resource_wait_task_count"`
+	// handleTask lifecycle. RunningTaskCount splits out actual provider
+	// execution for throughput and diagnostics.
+	ActiveTaskCount  int64 `json:"active_task_count"`
+	RunningTaskCount int64 `json:"running_task_count"`
 	// Repo maintenance stays a liveness-safe background activity, so health
 	// remains HTTP 200/running. These additive counters explain degraded repo
 	// checkout capacity to operators without exposing local cache paths.
@@ -345,22 +344,21 @@ func (d *Daemon) healthHandler(startedAt time.Time) http.HandlerFunc {
 		}
 
 		resp := HealthResponse{
-			Status:                status,
-			PID:                   os.Getpid(),
-			OS:                    runtime.GOOS,
-			Uptime:                time.Since(startedAt).Truncate(time.Second).String(),
-			Profile:               d.cfg.Profile,
-			LaunchedBy:            d.cfg.LaunchedBy,
-			DaemonID:              d.cfg.DaemonID,
-			DeviceName:            d.cfg.DeviceName,
-			ServerURL:             d.cfg.ServerBaseURL,
-			CLIVersion:            d.cfg.CLIVersion,
-			CLICommit:             d.cfg.CLICommit,
-			ActiveTaskCount:       d.activeTasks.Load(),
-			RunningTaskCount:      d.runningTasks.Load(),
-			ResourceWaitTaskCount: d.resourceWaitTasks.Load(),
-			Agents:                agents,
-			SkippedAgents:         d.skippedAgentsSnapshot(),
+			Status:           status,
+			PID:              os.Getpid(),
+			OS:               runtime.GOOS,
+			Uptime:           time.Since(startedAt).Truncate(time.Second).String(),
+			Profile:          d.cfg.Profile,
+			LaunchedBy:       d.cfg.LaunchedBy,
+			DaemonID:         d.cfg.DaemonID,
+			DeviceName:       d.cfg.DeviceName,
+			ServerURL:        d.cfg.ServerBaseURL,
+			CLIVersion:       d.cfg.CLIVersion,
+			CLICommit:        d.cfg.CLICommit,
+			ActiveTaskCount:  d.activeTasks.Load(),
+			RunningTaskCount: d.runningTasks.Load(),
+			Agents:           agents,
+			SkippedAgents:    d.skippedAgentsSnapshot(),
 
 			ReloadPendingReason: d.reloadPending(),
 			Workspaces:          wsList,

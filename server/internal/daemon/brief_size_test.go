@@ -31,7 +31,7 @@ func briefSizeTask() Task {
 		ProjectID:                        "9e8d7c6b-5a49-4382-9170-6f5e4d3c2b1a",
 		ProjectTitle:                     "Multica 魔改",
 		ProjectDescription:               briefSizeProjectDescription,
-		ProjectResources:                 []ProjectResourceData{{ID: "r1", ResourceType: "local_directory", ResourceRef: json.RawMessage(`{"repo_key":"github.com/acme/multica","daemon_id":"01a095c6-3636-7079-a5c5-6ec659c21e53","local_path":"/Users/someone/src/multica","is_git_repo":true,"execution_mode":"worktree"}`), Label: "multica"}},
+		ProjectResources:                 []ProjectResourceData{{ID: "r1", ResourceType: "local_directory", ResourceRef: json.RawMessage(`{"repo_key":"github.com/acme/multica","daemon_id":"01a095c6-3636-7079-a5c5-6ec659c21e53","local_path":"/Users/someone/src/multica","is_git_repo":true}`), Label: "multica"}},
 		Repos:                            []RepoData{{URL: "https://github.com/acme/ai100.git"}, {URL: "https://github.com/acme/online-tarot"}, {URL: "https://github.com/acme/agent-mono"}, {URL: "https://gitlab.example.com/coin/coin-project"}, {URL: "https://github.com/acme/image-builder"}},
 		RequestingUserName:               "kunkunya",
 		RequestingUserProfileDescription: briefSizePersona,

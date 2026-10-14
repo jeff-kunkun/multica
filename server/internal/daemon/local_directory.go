@@ -10,7 +10,6 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
-	"sync"
 )
 
 // localDirectoryResourceType is the project_resource discriminator the daemon
@@ -19,128 +18,32 @@ import (
 // constant — keep in sync if the type string is ever renamed.
 const localDirectoryResourceType = "local_directory"
 
-// Execution modes for local_directory resources. Mirrors the server-side
-// constants in handler/project_resource.go — keep in sync. An absent or empty
-// value means in_place, so resources created before worktree mode existed keep
-// their original behavior.
-const (
-	localDirectoryModeInPlace  = "in_place"
-	localDirectoryModeWorktree = "worktree"
-)
-
 // localDirectoryRef mirrors the server-side ref shape for local_directory
 // project resources. Defined locally so the daemon does not have to import
-// the server handler package.
+// the server handler package. Older refs may still carry an execution_mode;
+// it is ignored — every task runs directly in the directory.
 type localDirectoryRef struct {
-	LocalPath     string `json:"local_path"`
-	DaemonID      string `json:"daemon_id"`
-	Label         string `json:"label,omitempty"`
-	ExecutionMode string `json:"execution_mode,omitempty"`
+	LocalPath string `json:"local_path"`
+	DaemonID  string `json:"daemon_id"`
+	Label     string `json:"label,omitempty"`
 }
 
 // localDirectoryAssignment is the resolved view of a task's local_directory
 // resource: the absolute path the daemon will use as the agent's workdir,
 // plus the underlying ref for callers that still need the raw label / daemon
-// id (validation log messages, mostly). RealPath is the symlink-resolved
-// absolute path; the path mutex keys on it so two different routes to the
-// same directory are serialised.
+// id (validation log messages, mostly).
 type localDirectoryAssignment struct {
-	Ref      localDirectoryRef
-	AbsPath  string // user-provided path, cleaned but not symlink-resolved
-	RealPath string // canonical key for the path mutex
-}
-
-// UsesWorktree reports whether this assignment runs each task in its own git
-// worktree instead of in the user's directory. Worktree tasks skip the per-path
-// mutex entirely — that is the whole point of the mode — so every caller that
-// serialises, cleans up sidecars, or exempts the env root from GC must branch
-// on this rather than on "is there a local_directory assignment at all".
-func (a *localDirectoryAssignment) UsesWorktree() bool {
-	return a != nil && strings.TrimSpace(a.Ref.ExecutionMode) == localDirectoryModeWorktree
-}
-
-// DisplayName is the human-facing name for this directory, safe to render in
-// UI. It is deliberately NOT the absolute path: the wait reason built from it
-// is stored server-side and pushed to every client on the session, and a chip
-// in a chat transcript ends up in screen shares and screenshots. Absolute
-// paths carry the account name, which is why handler.relativeWorkDir exists
-// for the sibling work_dir chip; this is the same contract for the same reason.
-//
-// The resource's own label wins when the user set one — that is the name they
-// chose for this directory. Otherwise the basename, which is what distinguishes
-// sibling checkouts ("NuvioTV" vs "multica") without naming their parent.
-func (a *localDirectoryAssignment) DisplayName() string {
-	if a == nil {
-		return ""
-	}
-	if label := strings.TrimSpace(a.Ref.Label); label != "" {
-		return label
-	}
-	return filepath.Base(a.AbsPath)
-}
-
-// ValidateExecutionMode rejects a mode this daemon does not implement.
-//
-// Falling back to in_place would be the wrong direction, even though it is the
-// older and more conservative code path. execution_mode is how a user asks for
-// ISOLATION, not merely for concurrency: silently running in_place instead
-// would let the agent edit the working copy the user explicitly asked it to
-// stay out of. Losing concurrency is a nuisance; ignoring a request to not
-// touch someone's files is a broken promise. So an unrecognised mode fails the
-// task with a message naming the version skew.
-func (a *localDirectoryAssignment) ValidateExecutionMode() error {
-	if a == nil {
-		return nil
-	}
-	switch strings.TrimSpace(a.Ref.ExecutionMode) {
-	case "", localDirectoryModeInPlace, localDirectoryModeWorktree:
-		return nil
-	default:
-		return fmt.Errorf(
-			"local_directory: this daemon does not support execution_mode %q for %q "+
-				"(update the daemon, or set the resource's execution mode to %q or %q); "+
-				"refusing to run in place, since that would modify a directory the resource asked to isolate",
-			a.Ref.ExecutionMode, a.AbsPath, localDirectoryModeInPlace, localDirectoryModeWorktree)
-	}
+	Ref     localDirectoryRef
+	AbsPath string // user-provided path, cleaned but not symlink-resolved
 }
 
 // localDirectoryAssignmentForTask returns the local_directory assignment a task
-// should execute inside.
-//
-// This answers WHERE a task runs, and only that. Its result also drives the
-// agent's working directory (daemon.runTask plumbs AbsPath into
-// execenv.PrepareParams.LocalWorkDir) and the GC-meta stamp that exempts a
-// user-owned path from env-root cleanup. Whether the task additionally takes
-// the per-path mutex is a SEPARATE question, answered by
-// localDirectoryLockExempt — collapsing the two is what made a read-only chat
-// turn queue behind a 20-minute build (issue #7344), and answering "no
-// assignment" there to free the lock would have silently moved chat out of the
-// user's directory as well.
+// should execute inside. Its result drives the agent's working directory
+// (daemon.runTask plumbs AbsPath into execenv.PrepareParams.LocalWorkDir) and
+// the GC-meta stamp that exempts a user-owned path from env-root cleanup.
+// Tasks sharing a directory are not serialised; each runs in it directly.
 func localDirectoryAssignmentForTask(task Task, daemonID string) (*localDirectoryAssignment, error) {
 	return findLocalDirectoryAssignment(task.ProjectResources, daemonID)
-}
-
-// localDirectoryLockExempt reports whether a task may run inside an in_place
-// local_directory WITHOUT serialising on the per-path mutex. It is asked only
-// after an assignment has been resolved and validated, so an exempt task still
-// runs in the user's directory — it just doesn't queue for it.
-//
-// What the mutex actually protects: two long coding runs interleaving two sets
-// of edits into one working tree. It was never a general write barrier and
-// cannot become one — the user's own editor, their terminal, and any external
-// script write to that same tree unsynchronised, and always have. So the
-// question a task must answer to earn the lock is not "could it ever write?"
-// (everything could) but "is it a second heavyweight writer?".
-//
-// A chat turn is not. It is a conversation that reads the tree to answer
-// questions and at most saves a file the way the user's own Cmd+S does — the
-// risk class the lock already declines to cover. Serialising it bought nothing
-// and muted chat for the length of every build (issue #7344).
-//
-// Keyed on ChatSessionID because that is the daemon's only chat discriminator
-// (see Task.ChatSessionID).
-func localDirectoryLockExempt(task Task) bool {
-	return task.ChatSessionID != ""
 }
 
 // findLocalDirectoryAssignment scans the task's project resources for one of
@@ -191,14 +94,9 @@ func findLocalDirectoryAssignment(resources []ProjectResourceData, daemonID stri
 		if err != nil {
 			return nil, err
 		}
-		realPath, err := resolveRealPath(absPath)
-		if err != nil {
-			return nil, err
-		}
 		match = &localDirectoryAssignment{
-			Ref:      ref,
-			AbsPath:  absPath,
-			RealPath: realPath,
+			Ref:     ref,
+			AbsPath: absPath,
 		}
 	}
 	return match, nil
@@ -216,23 +114,6 @@ func normalizeLocalPath(p string) (string, error) {
 		return "", fmt.Errorf("local_directory: local_path must be absolute, got %q", trimmed)
 	}
 	return filepath.Clean(trimmed), nil
-}
-
-// resolveRealPath returns the symlink-resolved absolute form of path. The
-// path mutex keys on this value so a task on `/Users/u/proj` and another on
-// `/private/var/folders/.../proj-symlink → /Users/u/proj` collapse to one
-// lock. When EvalSymlinks fails (path is missing or not yet a real link),
-// fall back to the cleaned absolute form so callers can still proceed to
-// the existence-check stage which surfaces a clearer error.
-func resolveRealPath(absPath string) (string, error) {
-	real, err := filepath.EvalSymlinks(absPath)
-	if err != nil {
-		// validateLocalPath will surface the underlying error with better
-		// context; for the mutex key the cleaned absolute path is a safe
-		// fallback (it just slightly weakens the dedup on broken symlinks).
-		return absPath, nil
-	}
-	return real, nil
 }
 
 // validateLocalPath enforces the daemon-side preconditions for running an
@@ -441,145 +322,4 @@ func isGitWorkTree(ctx context.Context, path string) bool {
 		return false
 	}
 	return strings.TrimSpace(string(out)) == "true"
-}
-
-// LocalPathLocker serialises agent tasks that share the same on-disk path.
-// The lock is owned for the entire lifetime of a task (claim → context
-// write → agent execution → result report), not just the agent execution
-// window, because the context files and skill scratch directories the
-// daemon writes at task-prepare time can race with a sibling task on the
-// same path.
-//
-// Implementation: per-key sync.Mutex inside a map guarded by mu. When a
-// task can't take the lock immediately, the waiter blocks on the per-key
-// Mutex itself — that gives FIFO-ish behaviour from the Go scheduler
-// (sufficient for our load; the issue body asks for a wait queue, not a
-// strict-priority queue). Holder bookkeeping (current holder task id) is
-// surfaced via Holder so callers can build a UI-friendly wait_reason.
-type LocalPathLocker struct {
-	mu    sync.Mutex
-	locks map[string]*pathLockEntry
-}
-
-type pathLockEntry struct {
-	mu       sync.Mutex // serialises holders for this key
-	mu2      sync.Mutex // guards holderID under contention
-	holderID string     // current owner, for UI hints; empty when free
-}
-
-// NewLocalPathLocker returns an empty locker. Safe for concurrent use.
-func NewLocalPathLocker() *LocalPathLocker {
-	return &LocalPathLocker{locks: make(map[string]*pathLockEntry)}
-}
-
-// Holder returns the task id currently holding the lock for realPath, or
-// "" if no task holds it. Used to populate the wait_reason hint the daemon
-// posts to the server when it parks a task — the UI then shows "waiting for
-// <path> (held by task <short id>)".
-func (l *LocalPathLocker) Holder(realPath string) string {
-	l.mu.Lock()
-	entry, ok := l.locks[realPath]
-	l.mu.Unlock()
-	if !ok {
-		return ""
-	}
-	entry.mu2.Lock()
-	defer entry.mu2.Unlock()
-	return entry.holderID
-}
-
-// Acquire takes the lock for realPath on behalf of taskID. If the lock is
-// already held, onWait is invoked (synchronously, before this goroutine
-// blocks) with the current holder id so callers can flip the task into the
-// server-side waiting_local_directory state. onWait may be nil for callers
-// that don't need the side effect.
-//
-// Returns a release func that the caller must invoke (typically deferred)
-// to free the lock. The release is idempotent.
-//
-// Acquire is cancellable via ctx. When ctx is cancelled while the goroutine
-// is blocked on the lock, Acquire returns ctx.Err() and the lock is NOT
-// taken. This is the same contract as sync.Mutex.Lock paired with
-// context-aware cancellation — a daemon shutdown won't wedge inside the
-// per-path wait queue.
-func (l *LocalPathLocker) Acquire(ctx context.Context, realPath, taskID string, onWait func(holder string)) (func(), error) {
-	if realPath == "" {
-		return nil, errors.New("local_directory: realpath required for lock")
-	}
-	if taskID == "" {
-		return nil, errors.New("local_directory: taskID required for lock")
-	}
-
-	l.mu.Lock()
-	entry, ok := l.locks[realPath]
-	if !ok {
-		entry = &pathLockEntry{}
-		l.locks[realPath] = entry
-	}
-	l.mu.Unlock()
-
-	// Try the fast path first — no allocation, no waiter goroutine.
-	if entry.mu.TryLock() {
-		entry.mu2.Lock()
-		entry.holderID = taskID
-		entry.mu2.Unlock()
-		return l.releaser(realPath, entry), nil
-	}
-
-	// Slow path: somebody else holds the lock. Fire onWait once with the
-	// current holder so the daemon can stamp the server-side wait state,
-	// then block until either we win the lock or ctx is cancelled.
-	if onWait != nil {
-		entry.mu2.Lock()
-		holder := entry.holderID
-		entry.mu2.Unlock()
-		onWait(holder)
-	}
-
-	acquired := make(chan struct{})
-	go func() {
-		entry.mu.Lock()
-		close(acquired)
-	}()
-
-	select {
-	case <-acquired:
-		entry.mu2.Lock()
-		entry.holderID = taskID
-		entry.mu2.Unlock()
-		return l.releaser(realPath, entry), nil
-	case <-ctx.Done():
-		// We lost the wait — the goroutine above will still complete and
-		// take the lock. Spin off a clean-up goroutine that releases it
-		// the moment the acquire returns so a future caller isn't stuck
-		// behind a phantom holder. The bookkeeping is best-effort: no
-		// holder id is set, since this task never owned the lock.
-		go func() {
-			<-acquired
-			entry.mu.Unlock()
-		}()
-		return nil, ctx.Err()
-	}
-}
-
-// releaser returns the unlock callback. Idempotent via a once flag so a
-// deferred release is safe even when the caller has already explicitly
-// released after task completion.
-func (l *LocalPathLocker) releaser(realPath string, entry *pathLockEntry) func() {
-	var once sync.Once
-	return func() {
-		once.Do(func() {
-			entry.mu2.Lock()
-			entry.holderID = ""
-			entry.mu2.Unlock()
-			entry.mu.Unlock()
-			// We deliberately keep the entry in the map even when nothing
-			// is queued. The cost is one *pathLockEntry per distinct path
-			// the daemon has ever served, which is bounded by the number
-			// of local_directory project resources a workspace has — tiny
-			// in practice. Pruning would race with a sibling caller that
-			// just looked up the same entry and is about to TryLock.
-			_ = realPath
-		})
-	}
 }

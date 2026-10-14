@@ -29,10 +29,8 @@ func TestTerminalReportStoreRoundTripAndPermissions(t *testing.T) {
 		kind:                  terminalTaskReportComplete,
 		taskID:                "task-private",
 		output:                "private final answer",
-		branchName:            "agent/private",
 		sessionID:             "session-private",
 		workDir:               "/private/workdir",
-		durableWorkDir:        "/private/project",
 		sessionRolloutMissing: true,
 		retiredSessionID:      "retired-private",
 	}
@@ -160,13 +158,11 @@ func TestTerminalReportReplaysAfterClientRetryWindow(t *testing.T) {
 		DaemonID:       "daemon-retry",
 	}, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	report := terminalTaskReport{
-		kind:           terminalTaskReportComplete,
-		taskID:         "task-retry-window",
-		output:         "the original answer",
-		branchName:     "agent/recovered",
-		sessionID:      "session-1",
-		workDir:        "/tmp/work",
-		durableWorkDir: "/tmp/project",
+		kind:      terminalTaskReportComplete,
+		taskID:    "task-retry-window",
+		output:    "the original answer",
+		sessionID: "session-1",
+		workDir:   "/tmp/work",
 	}
 	if err := d.reportTerminalTask(context.Background(), report); err == nil {
 		t.Fatal("terminal report unexpectedly succeeded while server was offline")
@@ -189,7 +185,7 @@ func TestTerminalReportReplaysAfterClientRetryWindow(t *testing.T) {
 	mu.Lock()
 	defer mu.Unlock()
 	for i, body := range bodies {
-		if body["output"] != report.output || body["branch_name"] != report.branchName || body["durable_work_dir"] != report.durableWorkDir {
+		if body["output"] != report.output || body["session_id"] != report.sessionID || body["work_dir"] != report.workDir {
 			t.Fatalf("attempt %d payload = %#v, want original report", i+1, body)
 		}
 	}
@@ -207,7 +203,6 @@ func TestTerminalReportReplaysAfterDaemonRestart(t *testing.T) {
 		kind:          terminalTaskReportFail,
 		taskID:        "task-restart",
 		errorMessage:  "provider failed after doing useful work",
-		branchName:    "agent/partial-work",
 		failureReason: "agent_error.process_failure",
 	}
 
@@ -283,7 +278,7 @@ func TestTerminalReportPermanentRejectionQuarantinesOriginalAndStopsReplay(t *te
 	d.terminalReportNow = func() time.Time { return now }
 	report := terminalTaskReport{
 		kind: terminalTaskReportComplete, taskID: "task-rejected", output: "original successful answer",
-		branchName: "agent/original", sessionID: "session-original",
+		sessionID: "session-original",
 	}
 	var completeCalls, fallbackCalls atomic.Int32
 	d.terminalReportSend = func(_ context.Context, got terminalTaskReport, _ []time.Duration) error {

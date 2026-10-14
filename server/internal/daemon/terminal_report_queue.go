@@ -48,11 +48,9 @@ type persistedTerminalTaskReport struct {
 	Kind                  string    `json:"kind"`
 	TaskID                string    `json:"task_id"`
 	Output                string    `json:"output,omitempty"`
-	BranchName            string    `json:"branch_name,omitempty"`
 	ErrorMessage          string    `json:"error,omitempty"`
 	SessionID             string    `json:"session_id,omitempty"`
 	WorkDir               string    `json:"work_dir,omitempty"`
-	DurableWorkDir        string    `json:"durable_work_dir,omitempty"`
 	FailureReason         string    `json:"failure_reason,omitempty"`
 	SessionRolloutMissing bool      `json:"session_rollout_missing,omitempty"`
 	RetiredSessionID      string    `json:"retired_session_id,omitempty"`
@@ -138,11 +136,9 @@ func persistedTerminalReport(report terminalTaskReport, createdAt time.Time) (pe
 		Kind:                  kind,
 		TaskID:                report.taskID,
 		Output:                report.output,
-		BranchName:            report.branchName,
 		ErrorMessage:          report.errorMessage,
 		SessionID:             report.sessionID,
 		WorkDir:               report.workDir,
-		DurableWorkDir:        report.durableWorkDir,
 		FailureReason:         report.failureReason,
 		SessionRolloutMissing: report.sessionRolloutMissing,
 		RetiredSessionID:      report.retiredSessionID,
@@ -169,11 +165,9 @@ func (record persistedTerminalTaskReport) terminalReport() (terminalTaskReport, 
 		kind:                  kind,
 		taskID:                record.TaskID,
 		output:                record.Output,
-		branchName:            record.BranchName,
 		errorMessage:          record.ErrorMessage,
 		sessionID:             record.SessionID,
 		workDir:               record.WorkDir,
-		durableWorkDir:        record.DurableWorkDir,
 		failureReason:         record.FailureReason,
 		sessionRolloutMissing: record.SessionRolloutMissing,
 		retiredSessionID:      record.RetiredSessionID,
@@ -672,10 +666,8 @@ func (d *Daemon) handleTerminalReportDeliveryError(ctx context.Context, item pen
 			kind:                  terminalTaskReportFail,
 			taskID:                item.report.taskID,
 			errorMessage:          fmt.Sprintf("successful terminal result was rejected by the server with HTTP %d; the original completion is preserved in the daemon failed terminal-report queue", status),
-			branchName:            item.report.branchName,
 			sessionID:             item.report.sessionID,
 			workDir:               item.report.workDir,
-			durableWorkDir:        item.report.durableWorkDir,
 			failureReason:         "agent_error.unknown",
 			sessionRolloutMissing: item.report.sessionRolloutMissing,
 			retiredSessionID:      item.report.retiredSessionID,
