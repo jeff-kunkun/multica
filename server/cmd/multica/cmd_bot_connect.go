@@ -25,6 +25,7 @@ owner or admin opens it and agrees once. The Bot then receives its key, saves
 it to this profile and switches to the workspace. --webhook-url and
 --webhook-key are the Bot's own HTTPS address and key: every event and what
 needs the approver's decision is pushed there — nothing to set up afterwards.
+The key never expires unless --expires-in-days asks for a lifetime (0 = never).
 
 If the answer to the final step is lost, run the same command again: as long
 as the key has not been used yet, the retry hands out a fresh one and the
@@ -42,6 +43,7 @@ func init() {
 	botConnectCmd.Flags().String("type", "grok", "Bot type: grok")
 	botConnectCmd.Flags().String("webhook-url", "", "The Bot's own HTTPS address for messages and decisions (required)")
 	botConnectCmd.Flags().String("webhook-key", "", "Shared key for that address (required)")
+	botConnectCmd.Flags().Int("expires-in-days", 0, "Days until the Bot's key expires; 0 = never expires (default)")
 	botConnectCmd.Flags().Duration("wait", 15*time.Minute, "How long to wait for the yes")
 	botConnectCmd.Flags().String("output", "text", "Output format: text or json")
 }
@@ -79,13 +81,15 @@ func runBotConnect(cmd *cobra.Command, _ []string) error {
 	if hookURL == "" || hookKey == "" {
 		return fmt.Errorf("需要 --webhook-url 和 --webhook-key：这是 Bot 自己收消息和待决定事项的 HTTPS 地址和密钥，由 Bot 自己填")
 	}
+	body, err := botConnectStartBody(cmd, name, botType, hookURL, hookKey)
+	if err != nil {
+		return err
+	}
 
 	client := cli.NewAPIClient(serverURL, "", "")
 	ctx, cancel := cli.APIContext(context.Background())
 	var start botConnectStart
-	err := client.PostJSON(ctx, "/api/bot-connect", map[string]string{
-		"name": name, "type": botType, "webhook_url": hookURL, "webhook_key": hookKey,
-	}, &start)
+	err = client.PostJSON(ctx, "/api/bot-connect", body, &start)
 	cancel()
 	if err != nil {
 		return fmt.Errorf("ask to connect: %w", err)
@@ -147,6 +151,21 @@ func runBotConnect(cmd *cobra.Command, _ []string) error {
 		fmt.Fprintln(os.Stdout, guide)
 	}
 	return nil
+}
+
+// botConnectStartBody builds the ask. expires_in_days is sent only when the
+// flag is given, so an older server that does not know it still accepts the
+// default ask (it rejects unknown fields).
+func botConnectStartBody(cmd *cobra.Command, name, botType, hookURL, hookKey string) (map[string]any, error) {
+	body := map[string]any{"name": name, "type": botType, "webhook_url": hookURL, "webhook_key": hookKey}
+	if cmd.Flags().Changed("expires-in-days") {
+		days, _ := cmd.Flags().GetInt("expires-in-days")
+		if days < 0 {
+			return nil, fmt.Errorf("--expires-in-days 不能是负数；0 表示永不过期")
+		}
+		body["expires_in_days"] = days
+	}
+	return body, nil
 }
 
 // usable says whether a claim answer can be saved. "claimed" without a key

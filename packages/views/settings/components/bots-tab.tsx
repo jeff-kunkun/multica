@@ -64,7 +64,7 @@ export function BotsTab({ lead }: { lead?: ReactNode } = {}) {
   const serverUrl =
     useConfigStore((s) => s.daemonServerUrl) || (typeof window !== "undefined" ? window.location.origin : "");
   const connectText = t(($) => $.bots.connect.instruction, {
-    command: `multica bot connect --server-url ${serverUrl} --name Grok --webhook-url <URL> --webhook-key <KEY>`,
+    command: `multica bot connect --server-url ${serverUrl} --name Grok --webhook-url <URL> --webhook-key <KEY> --expires-in-days 0`,
   });
   const copyConnect = async () => {
     if (await copyText(connectText)) {

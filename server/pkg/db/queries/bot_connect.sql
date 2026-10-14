@@ -1,6 +1,6 @@
 -- name: CreateBotConnectRequest :one
-INSERT INTO bot_connect_request (code, claim_hash, bot_name, bot_type, webhook_secret, expires_at)
-VALUES ($1, $2, $3, $4, $5, $6)
+INSERT INTO bot_connect_request (code, claim_hash, bot_name, bot_type, webhook_secret, expires_at, key_expires_in_days)
+VALUES ($1, $2, $3, $4, $5, $6, $7)
 RETURNING *;
 
 -- name: GetBotConnectRequestByCode :one

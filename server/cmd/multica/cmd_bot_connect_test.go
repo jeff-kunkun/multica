@@ -3,6 +3,8 @@ package main
 import (
 	"strings"
 	"testing"
+
+	"github.com/spf13/cobra"
 )
 
 func TestBotConnectClaimUsable(t *testing.T) {
@@ -26,5 +28,34 @@ func TestBotConnectClaimUsable(t *testing.T) {
 		if err := (botConnectClaim{Status: status, Token: "t", BotID: "b", WorkspaceID: "w"}).usable(); err == nil {
 			t.Fatalf("status %s accepted", status)
 		}
+	}
+}
+
+// DENE-2041: without the flag the ask carries no lifetime (an older server
+// still accepts it and the key never expires); with it, 0 is sent as never.
+func TestBotConnectStartBodyExpiry(t *testing.T) {
+	newCmd := func(args ...string) *cobra.Command {
+		cmd := &cobra.Command{}
+		cmd.Flags().Int("expires-in-days", 0, "")
+		if err := cmd.Flags().Parse(args); err != nil {
+			t.Fatal(err)
+		}
+		return cmd
+	}
+	body, err := botConnectStartBody(newCmd(), "Grok", "grok", "https://bot", "k")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := body["expires_in_days"]; ok {
+		t.Fatalf("default ask carries a lifetime: %v", body)
+	}
+	for args, want := range map[string]int{"0": 0, "30": 30} {
+		body, err := botConnectStartBody(newCmd("--expires-in-days", args), "Grok", "grok", "https://bot", "k")
+		if err != nil || body["expires_in_days"] != want {
+			t.Fatalf("--expires-in-days %s = %v %v, want %d", args, body["expires_in_days"], err, want)
+		}
+	}
+	if _, err := botConnectStartBody(newCmd("--expires-in-days", "-1"), "Grok", "grok", "https://bot", "k"); err == nil {
+		t.Fatal("negative lifetime accepted")
 	}
 }
