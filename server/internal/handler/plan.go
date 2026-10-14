@@ -276,8 +276,10 @@ func (h *Handler) ListPlans(w http.ResponseWriter, r *http.Request) {
 
 // ApprovePlan approves one plan version and creates a child issue per step,
 // each assigned to its owner, which starts the work. Only the newest version
-// can be approved. Re-approving an approved version creates any step issue a
-// failed earlier attempt left out, and nothing else.
+// can be approved, and only by someone who can see the project it files work
+// under. Approval and filing the plan's own issue under that project commit
+// together. Re-approving an approved version creates any step issue a failed
+// earlier attempt left out, and nothing else.
 func (h *Handler) ApprovePlan(w http.ResponseWriter, r *http.Request) {
 	issue, ok := h.loadIssueForUser(w, r, chi.URLParam(r, "id"))
 	if !ok {
@@ -302,6 +304,15 @@ func (h *Handler) ApprovePlan(w http.ResponseWriter, r *http.Request) {
 	}
 	defer tx.Rollback(r.Context())
 	qtx := h.Queries.WithTx(tx)
+	// Issue before plan, the order ProposePlan locks in.
+	if _, err := qtx.LockIssueForPlan(r.Context(), db.LockIssueForPlanParams{IssueID: issue.ID, WorkspaceID: issue.WorkspaceID}); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			writeError(w, http.StatusNotFound, "issue not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "failed to approve plan")
+		return
+	}
 	plan, err := qtx.GetPlanVersionForUpdate(r.Context(), db.GetPlanVersionForUpdateParams{IssueID: issue.ID, WorkspaceID: issue.WorkspaceID, Version: int32(version)})
 	if errors.Is(err, pgx.ErrNoRows) {
 		writeError(w, http.StatusNotFound, "plan version not found")
@@ -311,22 +322,27 @@ func (h *Handler) ApprovePlan(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to approve plan")
 		return
 	}
-	newlyApproved := false
-	switch plan.Status {
-	case "superseded":
+	if plan.Status == "superseded" {
 		writeError(w, http.StatusConflict, fmt.Sprintf("plan v%d was replaced by a newer version", version))
 		return
-	case "proposed":
-		if plan.ProjectID.Valid {
-			if _, err := qtx.GetProjectInWorkspace(r.Context(), db.GetProjectInWorkspaceParams{ID: plan.ProjectID, WorkspaceID: plan.WorkspaceID}); err != nil {
-				if !isNotFound(err) {
-					writeError(w, http.StatusInternalServerError, "failed to approve plan")
-					return
-				}
-				writeError(w, http.StatusConflict, fmt.Sprintf("the project plan v%d names no longer exists; propose a new version with a project or general", version))
+	}
+	if plan.ProjectID.Valid {
+		if _, err := qtx.GetProjectInWorkspace(r.Context(), db.GetProjectInWorkspaceParams{ID: plan.ProjectID, WorkspaceID: plan.WorkspaceID}); err != nil {
+			if !isNotFound(err) {
+				writeError(w, http.StatusInternalServerError, "failed to approve plan")
 				return
 			}
+			writeError(w, http.StatusConflict, fmt.Sprintf("the project plan v%d names no longer exists; propose a new version with a project or general", version))
+			return
 		}
+		if !h.requestCanSeeProject(r, issue.WorkspaceID, plan.ProjectID) {
+			writeError(w, http.StatusForbidden, fmt.Sprintf("plan v%d files its work under a project you cannot see; ask someone in that project to approve it", version))
+			return
+		}
+	}
+	newlyApproved := false
+	var moved *db.Issue
+	if plan.Status == "proposed" {
 		latest, err := qtx.GetLatestPlanVersion(r.Context(), db.GetLatestPlanVersionParams{IssueID: issue.ID, WorkspaceID: issue.WorkspaceID})
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "failed to approve plan")
@@ -334,6 +350,12 @@ func (h *Handler) ApprovePlan(w http.ResponseWriter, r *http.Request) {
 		}
 		if latest != plan.Version {
 			writeError(w, http.StatusConflict, fmt.Sprintf("plan v%d is not the newest version (v%d)", version, latest))
+			return
+		}
+		moved, err = movePlanIssueToProject(r.Context(), qtx, issue, plan)
+		if err != nil {
+			slog.Warn("move plan issue to project failed", append(logger.RequestAttrs(r), "error", err, "issue_id", uuidToString(issue.ID))...)
+			writeError(w, http.StatusInternalServerError, "failed to approve plan: could not file the issue under the plan's project")
 			return
 		}
 		plan, err = qtx.ApprovePlan(r.Context(), db.ApprovePlanParams{ID: plan.ID, WorkspaceID: plan.WorkspaceID, ApprovedBy: parseUUID(approverID)})
@@ -356,8 +378,15 @@ func (h *Handler) ApprovePlan(w http.ResponseWriter, r *http.Request) {
 	prefix := h.getIssuePrefix(r.Context(), issue.WorkspaceID)
 	issueKey := prefix + "-" + strconv.Itoa(int(issue.Number))
 	fill := h.newStatusCategoryFiller(r.Context(), issue.WorkspaceID)
-	if newlyApproved {
-		h.movePlanIssueToProject(r, issue, plan, approverID, prefix, fill)
+	if moved != nil {
+		resp := issueToResponse(*moved, prefix)
+		fill(&resp)
+		h.publish(protocol.EventIssueUpdated, workspaceID, "member", approverID, map[string]any{
+			"issue":           resp,
+			"project_changed": true,
+			"creator_type":    moved.CreatorType,
+			"creator_id":      uuidToString(moved.CreatorID),
+		})
 	}
 	created := make([]IssueResponse, 0, len(steps))
 	var createErr error
@@ -410,6 +439,7 @@ func (h *Handler) createPlanStepIssue(r *http.Request, parent db.Issue, plan db.
 		CreatorID:     parseUUID(approverID),
 		ParentIssueID: parent.ID,
 		ProjectID:     plan.ProjectID,
+		NoProject:     !plan.ProjectID.Valid,
 	}, service.IssueCreateOpts{
 		ActorID:  approverID,
 		Platform: func() string { p, _, _ := middleware.ClientMetadataFromContext(r.Context()); return p }(),
@@ -431,35 +461,34 @@ func (h *Handler) createPlanStepIssue(r *http.Request, parent db.Issue, plan db.
 	return res.Issue, nil
 }
 
-// movePlanIssueToProject files the plan's own issue under the project the
-// approved plan names (or takes it out of any project for general work), so
-// the parent sits with its step issues. Best effort: approval stands either way.
-func (h *Handler) movePlanIssueToProject(r *http.Request, issue db.Issue, plan db.Plan, approverID, prefix string, fill func(*IssueResponse)) {
-	if uuidToString(issue.ProjectID) == uuidToString(plan.ProjectID) {
-		return
+// movePlanIssueToProject files the plan's own issue under the project the plan
+// names (or takes it out of any project for general work), so the parent sits
+// with its step issues. It runs in the approval transaction with the issue
+// locked and changes only the project: every other field is written back as it
+// is now, not as the request first read it. Returns nil when nothing moved.
+func movePlanIssueToProject(ctx context.Context, qtx *db.Queries, issue db.Issue, plan db.Plan) (*db.Issue, error) {
+	current, err := qtx.GetIssueInWorkspace(ctx, db.GetIssueInWorkspaceParams{ID: issue.ID, WorkspaceID: issue.WorkspaceID})
+	if err != nil {
+		return nil, err
 	}
-	updated, err := h.Queries.UpdateIssue(r.Context(), db.UpdateIssueParams{
-		ID:            issue.ID,
-		AssigneeType:  issue.AssigneeType,
-		AssigneeID:    issue.AssigneeID,
-		StartDate:     issue.StartDate,
-		DueDate:       issue.DueDate,
-		ParentIssueID: issue.ParentIssueID,
-		ProjectID:     plan.ProjectID,
-		Stage:         issue.Stage,
+	if uuidToString(current.ProjectID) == uuidToString(plan.ProjectID) {
+		return nil, nil
+	}
+	updated, err := qtx.UpdateIssue(ctx, db.UpdateIssueParams{
+		ID:               current.ID,
+		ExpectedRevision: pgtype.Int8{Int64: current.Revision, Valid: true},
+		AssigneeType:     current.AssigneeType,
+		AssigneeID:       current.AssigneeID,
+		StartDate:        current.StartDate,
+		DueDate:          current.DueDate,
+		ParentIssueID:    current.ParentIssueID,
+		ProjectID:        plan.ProjectID,
+		Stage:            current.Stage,
 	})
 	if err != nil {
-		slog.Warn("move plan issue to project failed", append(logger.RequestAttrs(r), "error", err, "issue_id", uuidToString(issue.ID))...)
-		return
+		return nil, err
 	}
-	resp := issueToResponse(updated, prefix)
-	fill(&resp)
-	h.publish(protocol.EventIssueUpdated, uuidToString(issue.WorkspaceID), "member", approverID, map[string]any{
-		"issue":           resp,
-		"project_changed": true,
-		"creator_type":    issue.CreatorType,
-		"creator_id":      uuidToString(issue.CreatorID),
-	})
+	return &updated, nil
 }
 
 // canApprovePlan: a workspace owner, a member the owner granted approval, or

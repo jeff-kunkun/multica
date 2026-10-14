@@ -67,6 +67,9 @@ type IssueCreateParams struct {
 	CreatorID     pgtype.UUID
 	ParentIssueID pgtype.UUID
 	ProjectID     pgtype.UUID
+	// NoProject means an unset ProjectID is deliberate: a sub-issue does not
+	// inherit its parent's project.
+	NoProject     bool
 	StartDate     pgtype.Date
 	DueDate       pgtype.Date
 	OriginType    pgtype.Text
@@ -294,7 +297,7 @@ func (s *IssueService) Create(ctx context.Context, p IssueCreateParams, opts Iss
 		// Back-fill project from parent when the caller did not pin
 		// one explicitly. Matches the long-standing HTTP behavior: a
 		// sub-issue inherits its parent's project unless overridden.
-		if !projectID.Valid {
+		if !projectID.Valid && !p.NoProject {
 			projectID = parent.ProjectID
 		}
 	}
