@@ -126,8 +126,13 @@ office changes. It is a separate line from `kun` (jeff-kunkun/multica's older
 custom line) and must stay that way.
 
 Branches
+- jeff-kunkun/multica keeps two long-lived branches: `kun-main` (this line)
+  and `kun`. The old `main` mirror and `release` line are gone; their last
+  tips are the `archive/main` and `archive/release` tags.
 - Cut task branches from `origin/kun-main`; open PRs against `kun-main`.
-- Never push to, merge into, or open PRs against `kun`, `release`, or `main`.
+- Never push to, merge into, or open PRs against `kun`.
+- Upstream sync pulls `multica-ai/multica` `main` directly (the `upstream`
+  remote) into a sync branch cut from `kun-main`, then a PR to `kun-main`.
 - Never change the ai.ferryway.cc instance or anything under `/opt/multica`
   on its host; that is the kun line.
 
