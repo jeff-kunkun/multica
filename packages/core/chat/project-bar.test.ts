@@ -37,9 +37,12 @@ describe("rankChatProjects", () => {
     ]);
   });
 
-  it("puts pins first in pin order, even without active chats", () => {
-    expect(rankChatProjects(["p1", "p2", "p3"], ["p3", "p1", "gone"], sessions)).toEqual([
-      { id: "p3", chatCount: 0, hasUnread: false, pinned: true },
+  it("puts pinned projects with chats first, each group by most recent chat", () => {
+    expect(rankChatProjects(["p1", "p2", "p3", "p4"], ["p1", "p3", "p4", "gone"], [
+      ...sessions,
+      session("s7", { project_id: "p4", updated_at: "2026-10-04T00:00:00Z" }),
+    ])).toEqual([
+      { id: "p4", chatCount: 1, hasUnread: false, pinned: true },
       { id: "p1", chatCount: 2, hasUnread: false, pinned: true },
       { id: "p2", chatCount: 1, hasUnread: true, pinned: false },
     ]);
