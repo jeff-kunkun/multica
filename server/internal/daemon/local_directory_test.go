@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"strconv"
 	"strings"
@@ -15,7 +16,7 @@ import (
 	"testing"
 )
 
-func TestFindLocalDirectoryAssignment(t *testing.T) {
+func TestFindLocalDirectoryAssignments(t *testing.T) {
 	const thisDaemon = "d-mine"
 	otherDaemon := "d-other"
 
@@ -31,14 +32,14 @@ func TestFindLocalDirectoryAssignment(t *testing.T) {
 	tmp := t.TempDir()
 
 	t.Run("no resources returns nil", func(t *testing.T) {
-		got, err := findLocalDirectoryAssignment(nil, thisDaemon)
+		got, err := findLocalDirectoryAssignments(nil, thisDaemon)
 		if err != nil || got != nil {
 			t.Fatalf("expected (nil, nil), got (%+v, %v)", got, err)
 		}
 	})
 
 	t.Run("other daemon is skipped", func(t *testing.T) {
-		got, err := findLocalDirectoryAssignment([]ProjectResourceData{
+		got, err := findLocalDirectoryAssignments([]ProjectResourceData{
 			{ID: "r1", ResourceType: localDirectoryResourceType, ResourceRef: mkRef(t, localDirectoryRef{LocalPath: tmp, DaemonID: otherDaemon})},
 		}, thisDaemon)
 		if err != nil || got != nil {
@@ -47,7 +48,7 @@ func TestFindLocalDirectoryAssignment(t *testing.T) {
 	})
 
 	t.Run("non-matching type is skipped", func(t *testing.T) {
-		got, err := findLocalDirectoryAssignment([]ProjectResourceData{
+		got, err := findLocalDirectoryAssignments([]ProjectResourceData{
 			{ID: "r1", ResourceType: "github_repo", ResourceRef: json.RawMessage(`{"url":"https://x"}`)},
 		}, thisDaemon)
 		if err != nil || got != nil {
@@ -56,17 +57,17 @@ func TestFindLocalDirectoryAssignment(t *testing.T) {
 	})
 
 	t.Run("matching daemon returns assignment", func(t *testing.T) {
-		got, err := findLocalDirectoryAssignment([]ProjectResourceData{
+		got, err := findLocalDirectoryAssignments([]ProjectResourceData{
 			{ID: "r1", ResourceType: localDirectoryResourceType, ResourceRef: mkRef(t, localDirectoryRef{LocalPath: tmp, DaemonID: thisDaemon})},
 		}, thisDaemon)
 		if err != nil {
 			t.Fatalf("err: %v", err)
 		}
-		if got == nil {
-			t.Fatalf("expected assignment, got nil")
+		if len(got) != 1 {
+			t.Fatalf("expected one assignment, got %+v", got)
 		}
-		if got.AbsPath != filepath.Clean(tmp) {
-			t.Errorf("AbsPath = %q, want %q", got.AbsPath, filepath.Clean(tmp))
+		if got[0].AbsPath != filepath.Clean(tmp) {
+			t.Errorf("AbsPath = %q, want %q", got[0].AbsPath, filepath.Clean(tmp))
 		}
 	})
 
@@ -75,20 +76,20 @@ func TestFindLocalDirectoryAssignment(t *testing.T) {
 		// runs directly in the directory now.
 		for _, mode := range []string{"in_place", "worktree", "shared", "snapshot"} {
 			raw := json.RawMessage(`{"local_path":` + strconv.Quote(tmp) + `,"daemon_id":"` + thisDaemon + `","execution_mode":"` + mode + `"}`)
-			got, err := findLocalDirectoryAssignment([]ProjectResourceData{
+			got, err := findLocalDirectoryAssignments([]ProjectResourceData{
 				{ID: "r1", ResourceType: localDirectoryResourceType, ResourceRef: raw},
 			}, thisDaemon)
 			if err != nil {
 				t.Fatalf("mode %q: err: %v", mode, err)
 			}
-			if got == nil || got.AbsPath != filepath.Clean(tmp) {
+			if len(got) != 1 || got[0].AbsPath != filepath.Clean(tmp) {
 				t.Fatalf("mode %q: assignment = %+v, want the directory itself", mode, got)
 			}
 		}
 	})
 
 	t.Run("missing daemon_id is rejected", func(t *testing.T) {
-		_, err := findLocalDirectoryAssignment([]ProjectResourceData{
+		_, err := findLocalDirectoryAssignments([]ProjectResourceData{
 			{ID: "r1", ResourceType: localDirectoryResourceType, ResourceRef: mkRef(t, localDirectoryRef{LocalPath: tmp})},
 		}, thisDaemon)
 		if err == nil {
@@ -97,7 +98,7 @@ func TestFindLocalDirectoryAssignment(t *testing.T) {
 	})
 
 	t.Run("relative path is rejected", func(t *testing.T) {
-		_, err := findLocalDirectoryAssignment([]ProjectResourceData{
+		_, err := findLocalDirectoryAssignments([]ProjectResourceData{
 			{ID: "r1", ResourceType: localDirectoryResourceType, ResourceRef: mkRef(t, localDirectoryRef{LocalPath: "relative/path", DaemonID: thisDaemon})},
 		}, thisDaemon)
 		if err == nil {
@@ -106,7 +107,7 @@ func TestFindLocalDirectoryAssignment(t *testing.T) {
 	})
 
 	t.Run("malformed ref json fails", func(t *testing.T) {
-		_, err := findLocalDirectoryAssignment([]ProjectResourceData{
+		_, err := findLocalDirectoryAssignments([]ProjectResourceData{
 			{ID: "r1", ResourceType: localDirectoryResourceType, ResourceRef: json.RawMessage(`{not json`)},
 		}, thisDaemon)
 		if err == nil {
@@ -114,21 +115,31 @@ func TestFindLocalDirectoryAssignment(t *testing.T) {
 		}
 	})
 
-	t.Run("two local_directory rows on this daemon fail fast", func(t *testing.T) {
-		// Server-side findLocalDirectoryConflict enforces one
-		// local_directory per (project, daemon). If two rows are
-		// somehow present (older API client, direct DB writes), the
-		// daemon must refuse to guess which directory to execute in.
+	t.Run("every folder on this daemon is returned in resource order", func(t *testing.T) {
+		// A project may carry several folders on one machine. The first is
+		// the working directory; the rest are listed to the agent. The
+		// top-level label names the folder over the copy inside the ref.
 		tmp2 := t.TempDir()
-		_, err := findLocalDirectoryAssignment([]ProjectResourceData{
+		tmp3 := t.TempDir()
+		got, err := findLocalDirectoryAssignments([]ProjectResourceData{
 			{ID: "r1", ResourceType: localDirectoryResourceType, ResourceRef: mkRef(t, localDirectoryRef{LocalPath: tmp, DaemonID: thisDaemon})},
-			{ID: "r2", ResourceType: localDirectoryResourceType, ResourceRef: mkRef(t, localDirectoryRef{LocalPath: tmp2, DaemonID: thisDaemon})},
+			{ID: "r2", ResourceType: localDirectoryResourceType, ResourceRef: mkRef(t, localDirectoryRef{LocalPath: tmp2, DaemonID: otherDaemon})},
+			{ID: "r3", ResourceType: localDirectoryResourceType, ResourceRef: mkRef(t, localDirectoryRef{LocalPath: tmp2, DaemonID: thisDaemon, Label: "old"}), Label: "notes"},
+			{ID: "r4", ResourceType: localDirectoryResourceType, ResourceRef: mkRef(t, localDirectoryRef{LocalPath: tmp3, DaemonID: thisDaemon})},
 		}, thisDaemon)
-		if err == nil {
-			t.Fatalf("expected error for two local_directory rows pinned to this daemon")
+		if err != nil {
+			t.Fatalf("err: %v", err)
 		}
-		if !strings.Contains(err.Error(), "multiple local_directory") {
-			t.Errorf("error %q did not mention multiple local_directory", err)
+		var paths []string
+		for _, dir := range got {
+			paths = append(paths, dir.AbsPath)
+		}
+		want := []string{filepath.Clean(tmp), filepath.Clean(tmp2), filepath.Clean(tmp3)}
+		if !reflect.DeepEqual(paths, want) {
+			t.Fatalf("paths = %v, want %v", paths, want)
+		}
+		if got[1].Ref.Label != "notes" {
+			t.Errorf("label = %q, want the top-level label %q", got[1].Ref.Label, "notes")
 		}
 	})
 
@@ -137,15 +148,15 @@ func TestFindLocalDirectoryAssignment(t *testing.T) {
 		// different machines is allowed; this daemon only resolves
 		// its own row regardless of how many other-daemon rows are
 		// in the list.
-		got, err := findLocalDirectoryAssignment([]ProjectResourceData{
+		got, err := findLocalDirectoryAssignments([]ProjectResourceData{
 			{ID: "r1", ResourceType: localDirectoryResourceType, ResourceRef: mkRef(t, localDirectoryRef{LocalPath: tmp, DaemonID: thisDaemon})},
 			{ID: "r2", ResourceType: localDirectoryResourceType, ResourceRef: mkRef(t, localDirectoryRef{LocalPath: tmp, DaemonID: otherDaemon})},
 		}, thisDaemon)
 		if err != nil {
 			t.Fatalf("err: %v", err)
 		}
-		if got == nil {
-			t.Fatalf("expected assignment, got nil")
+		if len(got) != 1 {
+			t.Fatalf("expected one assignment, got %+v", got)
 		}
 	})
 }
@@ -397,21 +408,28 @@ func TestLocalDirectoryUnusableReportsFailure(t *testing.T) {
 	if err != nil {
 		t.Fatalf("marshal ref: %v", err)
 	}
+	usableRef, err := json.Marshal(localDirectoryRef{LocalPath: t.TempDir(), DaemonID: daemonID})
+	if err != nil {
+		t.Fatalf("marshal ref: %v", err)
+	}
 	tests := []struct {
 		name string
-		ref  json.RawMessage
+		refs []json.RawMessage
 	}{
-		{name: "resource resolution", ref: json.RawMessage(`{not-json`)},
-		{name: "path validation", ref: missingPathRef},
+		{name: "resource resolution", refs: []json.RawMessage{json.RawMessage(`{not-json`)}},
+		{name: "path validation", refs: []json.RawMessage{missingPathRef}},
+		// Every folder is validated, not just the working directory: the
+		// agent is pointed at the others too.
+		{name: "second folder validation", refs: []json.RawMessage{usableRef, missingPathRef}},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			task := Task{
-				ID: "task-invalid-local-directory",
-				ProjectResources: []ProjectResourceData{
-					{ID: "r1", ResourceType: localDirectoryResourceType, ResourceRef: tc.ref},
-				},
+			task := Task{ID: "task-invalid-local-directory"}
+			for i, ref := range tc.refs {
+				task.ProjectResources = append(task.ProjectResources, ProjectResourceData{
+					ID: "r" + strconv.Itoa(i), ResourceType: localDirectoryResourceType, ResourceRef: ref,
+				})
 			}
 			// A cancelled parent must not swallow the failure report.
 			ctx, cancel := context.WithCancel(context.Background())

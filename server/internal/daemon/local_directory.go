@@ -28,39 +28,31 @@ type localDirectoryRef struct {
 	Label     string `json:"label,omitempty"`
 }
 
-// localDirectoryAssignment is the resolved view of a task's local_directory
-// resource: the absolute path the daemon will use as the agent's workdir,
-// plus the underlying ref for callers that still need the raw label / daemon
-// id (validation log messages, mostly).
+// localDirectoryAssignment is the resolved view of one local_directory
+// resource: its absolute path plus the underlying ref, whose label names the
+// folder in the agent's brief.
 type localDirectoryAssignment struct {
 	Ref     localDirectoryRef
 	AbsPath string // user-provided path, cleaned but not symlink-resolved
 }
 
-// localDirectoryAssignmentForTask returns the local_directory assignment a task
-// should execute inside. Its result drives the agent's working directory
-// (daemon.runTask plumbs AbsPath into execenv.PrepareParams.LocalWorkDir) and
-// the GC-meta stamp that exempts a user-owned path from env-root cleanup.
-// Tasks sharing a directory are not serialised; each runs in it directly.
-func localDirectoryAssignmentForTask(task Task, daemonID string) (*localDirectoryAssignment, error) {
-	return findLocalDirectoryAssignment(task.ProjectResources, daemonID)
+// localDirectoriesForTask returns every local_directory this daemon holds for
+// the task's project, in resource order. The first one is the agent's working
+// directory (daemon.runTask plumbs its AbsPath into
+// execenv.PrepareParams.LocalWorkDir); the rest are listed to the agent, which
+// cd's into them itself when it needs them. Tasks sharing a directory are not
+// serialised; each runs in it directly.
+func localDirectoriesForTask(task Task, daemonID string) ([]localDirectoryAssignment, error) {
+	return findLocalDirectoryAssignments(task.ProjectResources, daemonID)
 }
 
-// findLocalDirectoryAssignment scans the task's project resources for one of
-// type local_directory whose daemon_id matches this daemon. Returns nil
-// (without error) when no such resource exists — the task takes the regular
-// github_repo / worktree code path. Returns an error only when the matching
-// resource is structurally broken (bad JSON, missing fields) OR when more
-// than one resource is pinned to this daemon — that's a server-side
-// invariant violation, and silently picking the first match would let the
-// agent write into an arbitrary directory the user didn't intend.
-//
-// Server-side `findLocalDirectoryConflict` enforces a single local_directory
-// per (project, daemon), so two matches here means either the constraint
-// was bypassed (older API client) or the data was corrupted. Either way,
-// fail fast rather than guess.
-func findLocalDirectoryAssignment(resources []ProjectResourceData, daemonID string) (*localDirectoryAssignment, error) {
-	var match *localDirectoryAssignment
+// findLocalDirectoryAssignments scans the task's project resources for those
+// of type local_directory whose daemon_id matches this daemon. Returns nil
+// (without error) when there are none — the task takes the regular
+// github_repo code path. Returns an error when a matching resource is
+// structurally broken (bad JSON, missing fields).
+func findLocalDirectoryAssignments(resources []ProjectResourceData, daemonID string) ([]localDirectoryAssignment, error) {
+	var dirs []localDirectoryAssignment
 	for _, r := range resources {
 		if r.ResourceType != localDirectoryResourceType {
 			continue
@@ -74,32 +66,19 @@ func findLocalDirectoryAssignment(resources []ProjectResourceData, daemonID stri
 			return nil, errors.New("local_directory: resource_ref missing daemon_id")
 		}
 		if ref.DaemonID != daemonID {
-			// A different daemon owns this resource. Skip silently; the
-			// project may have multiple local_directory resources, one
-			// per daemon, and other daemons will resolve their own row.
+			// A different daemon owns this resource; it resolves its own rows.
 			continue
-		}
-		if match != nil {
-			// Server-side invariant: at most one local_directory per
-			// (project, daemon). Two matches here means the constraint
-			// was bypassed by an older API client or by direct DB writes.
-			// Either way, refuse to guess which directory the user meant.
-			return nil, fmt.Errorf(
-				"local_directory: project has multiple local_directory resources for this daemon (%q and %q); remove the extra in project settings",
-				match.AbsPath,
-				strings.TrimSpace(ref.LocalPath),
-			)
 		}
 		absPath, err := normalizeLocalPath(ref.LocalPath)
 		if err != nil {
 			return nil, err
 		}
-		match = &localDirectoryAssignment{
-			Ref:     ref,
-			AbsPath: absPath,
+		if r.Label != "" {
+			ref.Label = r.Label
 		}
+		dirs = append(dirs, localDirectoryAssignment{Ref: ref, AbsPath: absPath})
 	}
-	return match, nil
+	return dirs, nil
 }
 
 // normalizeLocalPath strips whitespace and resolves the path to an absolute

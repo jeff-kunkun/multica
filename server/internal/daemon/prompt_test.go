@@ -1065,15 +1065,16 @@ func TestBriefCarriesNoModeRouter(t *testing.T) {
 	}
 }
 
-// TestSharedLocalDirectoryBlock covers the notice a local_directory turn gets.
-// It is opt-in per run rather than derived from the Task, because whether the
-// directory is shared depends on the daemon's own resolution of the resource —
+// TestLocalDirectoriesBlock covers the notice a local_directory turn gets.
+// It is opt-in per run rather than derived from the Task, because which folders
+// this machine holds depends on the daemon's own resolution of the resources —
 // something the claimed Task does not carry.
-func TestSharedLocalDirectoryBlock(t *testing.T) {
+func TestLocalDirectoriesBlock(t *testing.T) {
 	t.Parallel()
 
 	chat := Task{ChatSessionID: "sess-1", ChatMessage: "how does the parser work?"}
 	issue := Task{IssueID: "issue-1", IssueIdentifier: "DENE-2046"}
+	one := []localDirectoryAssignment{{AbsPath: "/work/site"}}
 
 	t.Run("absent by default", func(t *testing.T) {
 		out := BuildPrompt(chat, "claude")
@@ -1084,7 +1085,7 @@ func TestSharedLocalDirectoryBlock(t *testing.T) {
 
 	t.Run("present for chat and issue turns in a shared directory", func(t *testing.T) {
 		for _, task := range []Task{chat, issue} {
-			out := BuildPrompt(task, "claude", WithSharedLocalDirectory())
+			out := BuildPrompt(task, "claude", WithLocalDirectories(one))
 			if !strings.Contains(out, "Shared working directory") {
 				t.Fatalf("notice missing:\n%s", out)
 			}
@@ -1098,13 +1099,37 @@ func TestSharedLocalDirectoryBlock(t *testing.T) {
 			if !strings.Contains(out, "git worktree add") || !strings.Contains(out, "Do not switch branches") {
 				t.Fatalf("notice does not point code changes at a worktree of its own:\n%s", out)
 			}
+			// A single folder is the working directory itself; listing it
+			// would say nothing.
+			if strings.Contains(out, "cd into it yourself") {
+				t.Fatalf("single-folder notice lists folders:\n%s", out)
+			}
+		}
+	})
+
+	t.Run("lists every folder when the project has several", func(t *testing.T) {
+		dirs := []localDirectoryAssignment{
+			{AbsPath: "/work/site", Ref: localDirectoryRef{Label: "Site"}},
+			{AbsPath: "/work/drafts"},
+			{AbsPath: "/work/assets", Ref: localDirectoryRef{Label: "Assets"}},
+		}
+		out := BuildPrompt(issue, "claude", WithLocalDirectories(dirs))
+		for _, want := range []string{
+			"cd into it yourself",
+			"- Site: `/work/site`",
+			"- drafts: `/work/drafts`",
+			"- Assets: `/work/assets`",
+		} {
+			if !strings.Contains(out, want) {
+				t.Errorf("notice missing %q:\n%s", want, out)
+			}
 		}
 	})
 
 	t.Run("appended after the cacheable prefix", func(t *testing.T) {
 		// Run-scoped blocks go at the end so a resumed session's cached prefix
 		// is unchanged by them (MUL-5377).
-		out := BuildPrompt(chat, "claude", WithSharedLocalDirectory())
+		out := BuildPrompt(chat, "claude", WithLocalDirectories(one))
 		body := buildChatPrompt(chat)
 		if !strings.HasPrefix(out, body) {
 			t.Fatalf("notice was not appended after the chat body:\n%s", out)

@@ -41,6 +41,9 @@ type codexSandboxPolicy struct {
 	// NetworkAccess controls `[sandbox_workspace_write] network_access`.
 	// Only meaningful when Mode is "workspace-write".
 	NetworkAccess bool
+	// WritableRoots controls `[sandbox_workspace_write] writable_roots`.
+	// Only meaningful when Mode is "workspace-write".
+	WritableRoots []string
 	// Reason is a short human-readable label used in warn-level logs.
 	Reason string
 	// Hint is an optional, actionable remediation surfaced in warn-level logs
@@ -356,6 +359,13 @@ func renderMulticaManagedBlock(policy codexSandboxPolicy) string {
 	b.WriteString(fmt.Sprintf("sandbox_mode = %q\n", policy.Mode))
 	if policy.Mode == "workspace-write" {
 		b.WriteString(fmt.Sprintf("sandbox_workspace_write.network_access = %t\n", policy.NetworkAccess))
+		if len(policy.WritableRoots) > 0 {
+			quoted := make([]string, len(policy.WritableRoots))
+			for i, root := range policy.WritableRoots {
+				quoted[i] = strconv.Quote(root)
+			}
+			b.WriteString("sandbox_workspace_write.writable_roots = [" + strings.Join(quoted, ", ") + "]\n")
+		}
 	}
 	b.WriteString(multicaManagedEndMarker)
 	b.WriteString("\n")

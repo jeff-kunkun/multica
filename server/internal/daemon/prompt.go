@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"fmt"
+	"path/filepath"
 	"strings"
 
 	"github.com/multica-ai/multica/server/internal/daemon/execenv"
@@ -49,7 +50,7 @@ func backendResumeContinuityNotice(task Task) string {
 // Returns "" when none of the blocks apply.
 func perTurnContextBlocks(task Task, opts promptOpts) string {
 	var b strings.Builder
-	b.WriteString(buildSharedLocalDirectoryBlock(opts.sharedLocalDirectory))
+	b.WriteString(buildLocalDirectoriesBlock(opts.localDirectories))
 	if task.PriorSessionResumeUnavailable {
 		b.WriteString(sessionContinuityNoticeFor(task))
 	}
@@ -61,32 +62,46 @@ func perTurnContextBlocks(task Task, opts promptOpts) string {
 // daemon's own execution context can answer. Kept behind PromptOption so the
 // common BuildPrompt(task, provider) call sites stay unchanged.
 type promptOpts struct {
-	sharedLocalDirectory bool
+	localDirectories []localDirectoryAssignment
 }
 
 // PromptOption tunes per-turn prompt copy with run-scoped context.
 type PromptOption func(*promptOpts)
 
-// WithSharedLocalDirectory marks a turn that runs inside the user's own
-// directory through a local_directory resource. Nothing queues tasks on that
-// directory, so a sibling task may be working in the same tree, and the agent
-// has to be told to isolate its own code changes.
-func WithSharedLocalDirectory() PromptOption {
-	return func(o *promptOpts) { o.sharedLocalDirectory = true }
+// WithLocalDirectories marks a turn that runs inside the user's own folders
+// through local_directory resources: dirs[0] is the working directory, the
+// rest are the project's other folders on this machine. Nothing queues tasks
+// on these folders, so a sibling task may be working in the same tree, and
+// the agent has to be told to isolate its own code changes.
+func WithLocalDirectories(dirs []localDirectoryAssignment) PromptOption {
+	return func(o *promptOpts) { o.localDirectories = dirs }
 }
 
-// buildSharedLocalDirectoryBlock warns a local_directory turn that its working
+// buildLocalDirectoriesBlock warns a local_directory turn that its working
 // directory is shared live, and points code changes at a worktree of its own:
 // switching branches in the shared checkout would yank the tree out from under
-// every other task (and the user) working in it.
-func buildSharedLocalDirectoryBlock(shared bool) string {
-	if !shared {
+// every other task (and the user) working in it. When the project has more
+// than one folder on this machine it lists them all, since the agent only
+// starts in the first.
+func buildLocalDirectoriesBlock(dirs []localDirectoryAssignment) string {
+	if len(dirs) == 0 {
 		return ""
 	}
 	var b strings.Builder
 	b.WriteString("## Shared working directory\n\n")
 	b.WriteString("Your working directory is the user's own folder, and other tasks on this machine may be running in it at the same time.\n\n")
 	b.WriteString("To change code, create your own branch in a separate git worktree (`git worktree add <path> -b <branch>`) and work there. Do not switch branches, reset, or stash in the original checkout.\n\n")
+	if len(dirs) > 1 {
+		b.WriteString("This project has these folders on this machine; you start in the first. To use another, cd into it yourself:\n\n")
+		for _, dir := range dirs {
+			name := dir.Ref.Label
+			if name == "" {
+				name = filepath.Base(dir.AbsPath)
+			}
+			fmt.Fprintf(&b, "- %s: `%s`\n", name, dir.AbsPath)
+		}
+		b.WriteString("\n")
+	}
 	return b.String()
 }
 

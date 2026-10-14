@@ -5610,7 +5610,7 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, slot int) {
 			// sibling workdir (which is the user's path) or the envRoot
 			// itself (we want output/ and logs/ to linger for forensic
 			// access).
-			if assignment, _ := localDirectoryAssignmentForTask(task, d.cfg.DaemonID); assignment != nil {
+			if dirs, _ := localDirectoriesForTask(task, d.cfg.DaemonID); len(dirs) > 0 {
 				meta.LocalDirectory = true
 			}
 			if err := execenv.WriteGCMeta(result.EnvRoot, meta, taskLog); err != nil {
@@ -5689,9 +5689,12 @@ func (d *Daemon) localDirectoryUnusable(ctx context.Context, task Task, taskLog 
 	if len(task.ProjectResources) == 0 || d.cfg.DaemonID == "" {
 		return false
 	}
-	assignment, err := localDirectoryAssignmentForTask(task, d.cfg.DaemonID)
-	if err == nil && assignment != nil {
-		err = validateLocalPath(assignment.AbsPath)
+	dirs, err := localDirectoriesForTask(task, d.cfg.DaemonID)
+	for _, dir := range dirs {
+		if err != nil {
+			break
+		}
+		err = validateLocalPath(dir.AbsPath)
 	}
 	if err == nil {
 		return false
@@ -6912,10 +6915,18 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	if provider == "openclaw" {
 		openclawBin = entry.Path
 	}
-	// Resolve any local_directory assignment again here so runTask can plumb
-	// LocalWorkDir into execenv. handleTask already validated + locked the
-	// path for worker tasks; leader tasks intentionally skip the assignment.
-	localAssignment, _ := localDirectoryAssignmentForTask(task, d.cfg.DaemonID)
+	// Resolve the local_directory folders again here so runTask can plumb the
+	// first one into execenv as LocalWorkDir. handleTask already validated
+	// every one of them.
+	localDirs, _ := localDirectoriesForTask(task, d.cfg.DaemonID)
+	var localAssignment *localDirectoryAssignment
+	var extraLocalDirs []string
+	if len(localDirs) > 0 {
+		localAssignment = &localDirs[0]
+		for _, dir := range localDirs[1:] {
+			extraLocalDirs = append(extraLocalDirs, dir.AbsPath)
+		}
+	}
 	// Reuse intentionally skipped for local_directory tasks: the prior
 	// WorkDir is the user's own path (always present) but the reuse path
 	// loses the envRoot association the GC loop needs, and re-running
@@ -7054,6 +7065,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		}
 		if localAssignment != nil {
 			prepParams.LocalWorkDir = localAssignment.AbsPath
+			prepParams.ExtraLocalDirs = extraLocalDirs
 		}
 		env, err = d.prepareExecutionEnvironment(prepareCtx, prepParams)
 		if err != nil {
@@ -7179,11 +7191,12 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		d.logger.Warn("execenv: inject runtime config failed (non-fatal)", "error", err)
 	}
 	// A local_directory task runs in the user's own checkout with no queue in
-	// front of it, so a sibling task may be working in the same tree right now.
-	// That is the one thing it cannot work out from its own context — tell it.
+	// front of it, so a sibling task may be working in the same tree right now,
+	// and the project's other folders on this machine are not visible from its
+	// working directory. Neither can be worked out from its own context — tell it.
 	var promptOptions []PromptOption
 	if localAssignment != nil {
-		promptOptions = append(promptOptions, WithSharedLocalDirectory())
+		promptOptions = append(promptOptions, WithLocalDirectories(localDirs))
 	}
 	prompt := BuildPrompt(task, provider, promptOptions...)
 
@@ -7338,6 +7351,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		CustomArgs:             customArgs,
 		McpConfig:              mcpConfig,
 		OpenclawMode:           openclawMode,
+		ExtraDirs:              extraLocalDirs,
 	}
 	// Some providers do not reliably load the per-task runtime config files we
 	// write into the task workdir:

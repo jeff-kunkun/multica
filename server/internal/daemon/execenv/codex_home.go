@@ -90,6 +90,10 @@ type CodexHomeOptions struct {
 	// override that never lands in config.toml. See resolveWindowsSandboxState
 	// and MUL-4957.
 	CodexCustomArgs []string
+	// WritableRoots are extra directories the workspace-write sandbox lets
+	// Codex write to besides its cwd: a project's other local_directory
+	// folders. danger-full-access already writes anywhere and ignores them.
+	WritableRoots []string
 }
 
 // prepareCodexHome is a thin wrapper around prepareCodexHomeWithOpts kept for
@@ -286,6 +290,7 @@ func prepareCodexHomeWithOpts(codexHome string, opts CodexHomeOptions, logger *s
 		winState = resolveWindowsSandboxState(configFile, configSyncErr, statSharedCodexConfig(sharedHome), opts.CodexCustomArgs, logger)
 	}
 	policy := codexSandboxPolicyForConfig(opts.GOOS, opts.CodexVersion, winState)
+	policy.WritableRoots = opts.WritableRoots
 	if err := ensureCodexSandboxConfig(configFile, policy, opts.CodexVersion, logger); err != nil {
 		// The managed block is the authoritative on-disk sandbox policy. If it
 		// can't be written, config.toml keeps whatever it already had — on a

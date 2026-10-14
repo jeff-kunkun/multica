@@ -78,4 +78,13 @@ describe("ProjectResourcesSection — local directory row", () => {
     expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
     expect(screen.queryByText(/\b(parallel|direct|worktree)\b/i)).not.toBeInTheDocument();
   });
+
+  // A project may hold several folders on one machine, so a folder already
+  // attached on this daemon must not lock the add button.
+  it("keeps adding folders available when this machine already has one", () => {
+    renderWithI18n(<ProjectResourcesSection projectId="p1" />);
+    expect(
+      screen.getByRole("button", { name: strings.add_local_directory_button }),
+    ).toBeEnabled();
+  });
 });

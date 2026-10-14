@@ -784,7 +784,7 @@ var antigravityBlockedArgs = map[string]blockedArgMode{
 //
 //	agy -p <prompt> --dangerously-skip-permissions
 //	    --print-timeout <duration> --log-file <tmp>
-//	    [--conversation <id>] [--add-dir <cwd>]
+//	    [--conversation <id>] [--add-dir <cwd>] [--add-dir <extra>...]
 //
 // No --model flag is passed: agy resolves its own configured default. agy
 // exposes no --system-prompt; runtime instructions are delivered via
@@ -809,6 +809,9 @@ func buildAntigravityArgs(prompt, logPath string, timeout time.Duration, opts Ex
 	}
 	if opts.Cwd != "" {
 		args = append(args, "--add-dir", filepath.Clean(opts.Cwd))
+	}
+	for _, dir := range opts.ExtraDirs {
+		args = append(args, "--add-dir", filepath.Clean(dir))
 	}
 	args = append(args, filterCustomArgs(opts.ExtraArgs, antigravityBlockedArgs, logger)...)
 	args = append(args, filterCustomArgs(opts.CustomArgs, antigravityBlockedArgs, logger)...)

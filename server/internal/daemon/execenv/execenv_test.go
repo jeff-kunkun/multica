@@ -8,11 +8,14 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"strings"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/pelletier/go-toml/v2"
 )
 
 func testLogger() *slog.Logger {
@@ -2570,6 +2573,42 @@ func TestEnsureCodexSandboxConfigWindowsRespectsUserSandbox(t *testing.T) {
 			// The user's explicit opt-in must survive verbatim.
 			if !strings.Contains(s, `sandbox = "`+mode+`"`) {
 				t.Errorf("user windows.sandbox = %q must be preserved, got:\n%s", mode, s)
+			}
+		})
+	}
+}
+
+// A project's other local_directory folders become writable roots, so a
+// workspace-write sandbox lets Codex write outside its cwd into them.
+func TestEnsureCodexSandboxConfigWritableRoots(t *testing.T) {
+	t.Parallel()
+	roots := []string{"/work/drafts", `C:\work\assets`}
+	for _, policy := range []codexSandboxPolicy{
+		{Mode: "workspace-write", NetworkAccess: true, WritableRoots: roots},
+		{Mode: "danger-full-access", WritableRoots: roots},
+	} {
+		t.Run(policy.Mode, func(t *testing.T) {
+			t.Parallel()
+			configPath := filepath.Join(t.TempDir(), "config.toml")
+			if err := ensureCodexSandboxConfig(configPath, policy, "0.144.5", testLogger()); err != nil {
+				t.Fatalf("ensureCodexSandboxConfig failed: %v", err)
+			}
+			data, _ := os.ReadFile(configPath)
+			var parsed struct {
+				SandboxWorkspaceWrite struct {
+					WritableRoots []string `toml:"writable_roots"`
+				} `toml:"sandbox_workspace_write"`
+			}
+			if err := toml.Unmarshal(data, &parsed); err != nil {
+				t.Fatalf("config.toml does not parse: %v\n%s", err, data)
+			}
+			got := parsed.SandboxWorkspaceWrite.WritableRoots
+			if policy.Mode == "workspace-write" && !reflect.DeepEqual(got, roots) {
+				t.Errorf("writable_roots = %v, want %v\n%s", got, roots, data)
+			}
+			// danger-full-access writes anywhere; the key would be noise.
+			if policy.Mode == "danger-full-access" && got != nil {
+				t.Errorf("writable_roots written under danger-full-access:\n%s", data)
 			}
 		})
 	}

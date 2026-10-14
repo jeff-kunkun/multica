@@ -77,6 +77,10 @@ own branch in a separate git worktree (`git worktree add <path> -b <branch>`)
 and work there; do not switch branches, reset, or stash in the original
 checkout. An `execution_mode` left on older resources is ignored.
 
+A project may hold several folders on one machine. The task starts in the
+first one (resource order); the brief lists the rest, and you `cd` into them
+yourself when you need them. The same folder cannot be attached twice.
+
 ## Referring to a project in a comment
 
 A project has no `MUL-123`-style identifier, so writing its title as prose
