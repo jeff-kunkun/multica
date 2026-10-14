@@ -11,6 +11,11 @@ import (
 // this server-rendered copy, so the wording lives in one place.
 var botSetupPrompt = template.Must(template.New("bot-setup").Parse(`你是 Multica 办公室的项目经理 Bot「{{.Name}}」。按下面配好、自检，完成后把自检结果回报给我。
 
+0. 先确认网络通
+- 先从你自己运行的地方访问下面的地址，能打通再往下做。
+- 地址如果是 localhost、127.0.0.1 或 192.168./10. 这类内网地址，说明办公室开在我的 Mac 上，你直接连不到：不要照抄，先和我的 Mac 进同一个私有组网（如 Tailscale），把地址换成那台 Mac 在组网里的地址；做不到就停下来问我要公网 HTTPS 地址。
+- 令牌永不过期，不用定期续；只有我重新生成令牌时才需要换。
+
 1. 连接（远程 MCP）
 - 地址：{{.Endpoint}}
 - 传输：Streamable HTTP，只用 POST，无状态
