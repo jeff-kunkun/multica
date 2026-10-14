@@ -15,8 +15,8 @@ jeff-kunkun/multica 只留两条长期分支：
 
 | 分支 | 职责 | 谁往里写 |
 | --- | --- | --- |
-| `kun` | 团队魔改主线（旧办公室 ai.ferryway.cc 跟它）。功能分支从这里切出、PR 打回这里。也是 GitHub 默认分支。 | 所有开发 |
-| `kun-main` | Kun 自己的主力线（新办公室 office.ferryway.cc 跟它），以官方原版为底座做减法，规矩在它自己的 `AGENTS.md`。 | 只走 `kun-main` 的 PR |
+| `kun` | 团队魔改主线（旧办公室 ai.example.com 跟它）。功能分支从这里切出、PR 打回这里。也是 GitHub 默认分支。 | 所有开发 |
+| `kun-main` | Kun 自己的主力线（新办公室 office.example.com 跟它），以官方原版为底座做减法，规矩在它自己的 `AGENTS.md`。 | 只走 `kun-main` 的 PR |
 
 - 原来的 `main`（官方镜像）和 `release`（发布线）已删，最后的位置留在 `archive/main`、`archive/release` 两个标签上。
 - 永远不要 rebase `kun`，不要 force-push `kun` 或 `kun-main`；两条线互不合并。
@@ -80,11 +80,11 @@ node scripts/dsh-vision-probe.mjs --apply
 
 ## Desktop 默认入口 = 自建实例
 
-本 fork 的 Desktop **入口默认连自建实例**：`~/.multica/desktop.json` 不存在时用 `DEFAULT_ENTRY_RUNTIME_CONFIG`（`apps/desktop/src/shared/runtime-config.ts`，即 `https://ai.ferryway.cc`），不再回落官方云。官方云仍然可达——设置 → 服务器里切到「官方云」会**显式写一份** `desktop.json`，而不是删文件（删文件已经等于自建）。想改默认入口只改这一个常量。
+本 fork 的 Desktop **入口默认连自建实例**：`~/.multica/desktop.json` 不存在时用 `DEFAULT_ENTRY_RUNTIME_CONFIG`（`apps/desktop/src/shared/runtime-config.ts`，即 `https://ai.example.com`），不再回落官方云。官方云仍然可达——设置 → 服务器里切到「官方云」会**显式写一份** `desktop.json`，而不是删文件（删文件已经等于自建）。想改默认入口只改这一个常量。
 
 ## 自建实例自动跟随 `kun`
 
-自建实例（`ai.ferryway.cc`）曾经落后 `kun` 70 个提交才被发现。现在用 systemd timer 每 5 分钟比一次 `/health` 自报的 commit 和 `origin/kun`，有漂移就在旁边起新版本、就绪后切 nginx 再停旧版本（DENE-1617），失败就回滚：
+自建实例（`ai.example.com`）曾经落后 `kun` 70 个提交才被发现。现在用 systemd timer 每 5 分钟比一次 `/health` 自报的 commit 和 `origin/kun`，有漂移就在旁边起新版本、就绪后切 nginx 再停旧版本（DENE-1617），失败就回滚：
 
 ```bash
 sudo scripts/install-selfhost-autoupdate.sh

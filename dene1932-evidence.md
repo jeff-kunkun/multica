@@ -19,6 +19,6 @@
 <details><summary>工程师看</summary>
 
 PR: https://github.com/jeff-kunkun/multica/pull/666 （目标 kun，迁移 682 `chat_message.superseded_at/superseded_by_message_id`，`make migration-lint` 通过）
-手机/多尺寸截图页：https://ai.ferryway.cc/api/attachments/01a12fad-fcb5-7c97-acbb-ee37d2036093/download
+手机/多尺寸截图页：https://ai.example.com/api/attachments/01a12fad-fcb5-7c97-acbb-ee37d2036093/download
 测试：handler 4 个 replace 用例 + 既有 restart/clear-queue 用例通过；views 668、core 600、mobile 262 通过；views/mobile typecheck 通过；core typecheck 有基线既有的 routing-settings.test.ts 一处报错，与本改动无关。
 </details>

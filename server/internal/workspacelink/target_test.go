@@ -11,19 +11,19 @@ func TestTargetSlug(t *testing.T) {
 	cases := map[string]string{
 		"zongyoudiaominxianghaizhen": "zongyoudiaominxianghaizhen",
 		"  Team-A  ":                 "team-a",
-		"https://ai.ferryway.cc/zongyoudiaominxianghaizhen":   "zongyoudiaominxianghaizhen",
-		"https://ai.ferryway.cc/zongyoudiaominxianghaizhen/":  "zongyoudiaominxianghaizhen",
-		"https://ai.ferryway.cc/team-a/issues/DENE-1?tab=1#c": "team-a",
+		"https://ai.example.com/zongyoudiaominxianghaizhen":   "zongyoudiaominxianghaizhen",
+		"https://ai.example.com/zongyoudiaominxianghaizhen/":  "zongyoudiaominxianghaizhen",
+		"https://ai.example.com/team-a/issues/DENE-1?tab=1#c": "team-a",
 		"http://localhost:3000/team-a/settings":               "team-a",
-		"ai.ferryway.cc/team-a/projects":                      "team-a",
+		"ai.example.com/team-a/projects":                      "team-a",
 		"localhost:3000/team-a":                               "team-a",
 		"/team-a/issues":                                      "team-a",
 		"team-a/":                                             "team-a",
 		"team-a?x=1":                                          "team-a",
 		"":                                                    "",
 		"   ":                                                 "",
-		"https://ai.ferryway.cc":                              "",
-		"https://ai.ferryway.cc/":                             "",
+		"https://ai.example.com":                              "",
+		"https://ai.example.com/":                             "",
 	}
 	for in, want := range cases {
 		if got := TargetSlug(in); got != want {

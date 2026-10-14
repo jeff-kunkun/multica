@@ -1,6 +1,6 @@
 name: Self-host images
 
-# Builds the images the self-hosted instance (ai.ferryway.cc) runs, one pair
+# Builds the images the self-hosted instance (ai.example.com) runs, one pair
 # per commit on kun, so the 2-core box only pulls and recreates instead of
 # compiling next to the containers it serves (DENE-1186 / DENE-1205).
 #

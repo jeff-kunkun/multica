@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Keep a self-hosted Multica checkout on the tip of an upstream branch.
 #
-# Why this exists: the box behind ai.ferryway.cc drifted 70 commits behind
+# Why this exists: the box behind ai.example.com drifted 70 commits behind
 # origin/kun and nobody noticed until an import failed with a confusing
 # "unsupported transfer schema_version". Nothing on the machine compared what
 # was answering requests against what was published, so the manual fix drifted

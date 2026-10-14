@@ -33,6 +33,6 @@
 
 ## 证据与范围
 
-[原始核验附件（需工作区权限）](https://ai.ferryway.cc/api/attachments/01a12c3b-7694-71e6-9dd0-fcc12052c34f/download)，SHA256：`b06083eb02d7deb58f1e5a3cfcfd2e73dff4d51fef51c73b31ee601cc36a3b40`。原始材料保留在附件，不复制入本证据目录。
+[原始核验附件（需工作区权限）](https://ai.example.com/api/attachments/01a12c3b-7694-71e6-9dd0-fcc12052c34f/download)，SHA256：`b06083eb02d7deb58f1e5a3cfcfd2e73dff4d51fef51c73b31ee601cc36a3b40`。原始材料保留在附件，不复制入本证据目录。
 
 本次 Multica 交付仅增加本记录与证据索引，不修改应用、画像来源或运行时技能。文档检查为相对链接检查、脱敏检查和 `git diff --check`；未运行应用代码测试。

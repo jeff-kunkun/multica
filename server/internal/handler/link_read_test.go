@@ -336,7 +336,7 @@ func TestLinkRead_SameWorkspaceLinkIsOrdinaryRead(t *testing.T) {
 func TestLinkRead_ParseIssueLink(t *testing.T) {
 	cases := map[string]issueLink{
 		"https://app.multica.ai/dene/issues/DENE-897":         {Slug: "dene", Ref: "DENE-897"},
-		"https://ai.ferryway.cc/dene/issues/DENE-897?tab=x#c": {Slug: "dene", Ref: "DENE-897"},
+		"https://ai.example.com/dene/issues/DENE-897?tab=x#c": {Slug: "dene", Ref: "DENE-897"},
 		"/dene/issues/01a0dced-d2f0-7769-8b2f-5b3524b469ad":   {Slug: "dene", Ref: "01a0dced-d2f0-7769-8b2f-5b3524b469ad"},
 		"dene/issues/DENE-1":                                  {Slug: "dene", Ref: "DENE-1"},
 		"https://app.multica.ai/zh/dene/issues/DENE-897":      {Slug: "dene", Ref: "DENE-897"},

@@ -31,7 +31,7 @@ If the answer to the final step is lost, run the same command again: as long
 as the key has not been used yet, the retry hands out a fresh one and the
 lost key stops working. Once the key is in use, nothing is saved and the
 command says so.`,
-	Example: `  multica bot connect --server-url https://ai.ferryway.cc --name Grok \
+	Example: `  multica bot connect --server-url https://ai.example.com --name Grok \
     --webhook-url https://bot.example.com/multica --webhook-key s3cret`,
 	Args: exactArgs(0),
 	RunE: runBotConnect,

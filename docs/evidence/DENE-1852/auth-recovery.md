@@ -6,7 +6,7 @@
 
 ## 现场与根因
 
-现场为 Desktop `0.6.3-test.5`，构建提交 `9b1a6d72f6`，活动 profile 为 `desktop-origin.ai.ferryway.cc`。实际执行的是应用内捆绑 CLI；PATH 中另一个旧 CLI 不能代表 Desktop 的行为。源码候选基于 `kun` 的 `de44a71f3f609b82ce4b46153449b44ccc4302c0`。
+现场为 Desktop `0.6.3-test.5`，构建提交 `9b1a6d72f6`，活动 profile 为 `desktop-origin.ai.example.com`。实际执行的是应用内捆绑 CLI；PATH 中另一个旧 CLI 不能代表 Desktop 的行为。源码候选基于 `kun` 的 `de44a71f3f609b82ce4b46153449b44ccc4302c0`。
 
 | 时间 | 证据 |
 | --- | --- |
