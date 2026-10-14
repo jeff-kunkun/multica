@@ -33,7 +33,13 @@ var botListCmd = &cobra.Command{
 var botCreateCmd = &cobra.Command{
 	Use:   "create",
 	Short: "Create a Bot and print its token (shown once)",
-	RunE:  runBotCreate,
+	Long: `Create a Bot and print its token and webhook secret, shown once.
+
+The reply also carries setup_prompt: a ready-to-forward text with the MCP
+URL, the token, a self-check and the work loop. Hand it to the Bot (Grok or
+any MCP client) and it connects itself. ` + "`multica bot token`" + ` returns a
+fresh setup_prompt with the new token.`,
+	RunE: runBotCreate,
 }
 
 var botUpdateCmd = &cobra.Command{
@@ -154,6 +160,9 @@ func printBots(cmd *cobra.Command, bots []map[string]any) error {
 		fmt.Fprintf(os.Stdout, "\nToken (shown once): %s\n", t)
 		if s := strVal(bots[0], "webhook_secret"); s != "" {
 			fmt.Fprintf(os.Stdout, "Webhook secret (shown once): %s\n", s)
+		}
+		if p := strVal(bots[0], "setup_prompt"); p != "" {
+			fmt.Fprintf(os.Stdout, "\nSetup prompt (forward it to the Bot as is):\n\n%s", p)
 		}
 	}
 	return nil

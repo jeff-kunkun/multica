@@ -53,6 +53,11 @@ func TestBotLifecycle(t *testing.T) {
 	if !botTokenWorks(t, bot.Token) {
 		t.Fatal("new bot token does not resolve")
 	}
+	for _, want := range []string{"/api/mcp", "Bearer " + bot.Token, bot.WebhookSecret, "approve_plan"} {
+		if !strings.Contains(bot.SetupPrompt, want) {
+			t.Fatalf("setup_prompt missing %q:\n%s", want, bot.SetupPrompt)
+		}
+	}
 
 	// The Bot is an ordinary workspace member.
 	var role string
@@ -64,7 +69,7 @@ func TestBotLifecycle(t *testing.T) {
 	// List never carries secrets.
 	w := httptest.NewRecorder()
 	testHandler.ListBots(w, newRequest("GET", "/api/bots", nil))
-	if w.Code != http.StatusOK || strings.Contains(w.Body.String(), bot.Token) || strings.Contains(w.Body.String(), "webhook_secret") {
+	if w.Code != http.StatusOK || strings.Contains(w.Body.String(), bot.Token) || strings.Contains(w.Body.String(), "webhook_secret") || strings.Contains(w.Body.String(), "setup_prompt") {
 		t.Fatalf("ListBots: %d %s", w.Code, w.Body.String())
 	}
 
@@ -78,6 +83,9 @@ func TestBotLifecycle(t *testing.T) {
 	}
 	if botTokenWorks(t, bot.Token) || !botTokenWorks(t, rotated.Token) {
 		t.Fatal("rotation did not swap tokens")
+	}
+	if !strings.Contains(rotated.SetupPrompt, "Bearer "+rotated.Token) || strings.Contains(rotated.SetupPrompt, bot.Token) {
+		t.Fatalf("rotated setup_prompt does not carry the new token:\n%s", rotated.SetupPrompt)
 	}
 
 	// Revoke leaves the Bot but no working token.

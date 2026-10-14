@@ -13,7 +13,13 @@ multica bot create --name Grok --can-release --webhook-url https://grok.example.
 ```
 
 The reply shows the token (`mul_…`) and the webhook secret **once**. Store
-both. `multica bot token <bot>` rotates the token, `multica bot revoke <bot>`
+both. It also carries a setup prompt (`setup_prompt` in JSON, **Copy prompt**
+in Settings): the MCP URL, the token, a `whoami` / `list_members` /
+`list_projects` self-check, how to receive events and the work loop. Forward
+it to the Bot as is and it configures itself. The server renders it in
+`server/internal/handler/bot_prompt.go`; the URL comes from
+`MULTICA_PUBLIC_URL`, then `MULTICA_APP_URL`, then the request's own origin.
+`multica bot token` returns a fresh prompt with the new token. `multica bot token <bot>` rotates the token, `multica bot revoke <bot>`
 cuts it off, and `multica bot delete <bot>` removes the Bot and its membership.
 
 `--can-release` lets the Bot approve plans on the owner's behalf. Without it,

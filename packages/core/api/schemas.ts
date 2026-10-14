@@ -2005,6 +2005,7 @@ export const WorkspaceBotWithSecretsSchema = WorkspaceBotSchema.and(
   z.object({
     token: z.string().optional().catch(undefined),
     webhook_secret: z.string().optional().catch(undefined),
+    setup_prompt: z.string().optional().catch(undefined),
   }),
 );
 

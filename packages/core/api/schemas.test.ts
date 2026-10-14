@@ -1940,7 +1940,7 @@ describe("WorkspaceBotSchema", () => {
   });
   it("carries secrets only when the server sends them", () => {
     expect(WorkspaceBotWithSecretsSchema.parse(bot).token).toBeUndefined();
-    expect(WorkspaceBotWithSecretsSchema.parse({ ...bot, token: "mul_x", webhook_secret: "s" })).toMatchObject({ token: "mul_x", webhook_secret: "s" });
+    expect(WorkspaceBotWithSecretsSchema.parse({ ...bot, token: "mul_x", webhook_secret: "s", setup_prompt: "p" })).toMatchObject({ token: "mul_x", webhook_secret: "s", setup_prompt: "p" });
   });
   it("falls back to an empty list for a non-array reply", () => {
     expect(parseWithFallback({ bots: [] }, WorkspaceBotListSchema, [], { endpoint: "GET /api/bots" })).toEqual([]);

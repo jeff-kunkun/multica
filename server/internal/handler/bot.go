@@ -47,6 +47,9 @@ type BotSecretsResponse struct {
 	BotResponse
 	Token         string `json:"token,omitempty"`
 	WebhookSecret string `json:"webhook_secret,omitempty"`
+	// SetupPrompt is the text the owner forwards to the Bot; it embeds the
+	// token, so it is only returned alongside it.
+	SetupPrompt string `json:"setup_prompt,omitempty"`
 }
 
 type CreateBotRequest struct {
@@ -239,6 +242,14 @@ func (h *Handler) CreateBot(w http.ResponseWriter, r *http.Request) {
 		BotResponse:   h.botResponse(ctx, bot),
 		Token:         token,
 		WebhookSecret: secret,
+		SetupPrompt: renderBotSetupPrompt(botSetupPromptData{
+			Name:          bot.Name,
+			Endpoint:      h.botMCPEndpoint(r),
+			Token:         token,
+			WebhookURL:    bot.WebhookUrl,
+			WebhookSecret: secret,
+			CanRelease:    bot.CanRelease,
+		}),
 	})
 }
 
@@ -315,7 +326,17 @@ func (h *Handler) RotateBotToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.invalidatePATHashes(ctx, oldHashes)
-	writeJSON(w, http.StatusOK, BotSecretsResponse{BotResponse: h.botResponse(ctx, bot), Token: token})
+	writeJSON(w, http.StatusOK, BotSecretsResponse{
+		BotResponse: h.botResponse(ctx, bot),
+		Token:       token,
+		SetupPrompt: renderBotSetupPrompt(botSetupPromptData{
+			Name:       bot.Name,
+			Endpoint:   h.botMCPEndpoint(r),
+			Token:      token,
+			WebhookURL: bot.WebhookUrl,
+			CanRelease: bot.CanRelease,
+		}),
+	})
 }
 
 // RevokeBotToken cuts the Bot off without deleting it.
