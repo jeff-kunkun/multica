@@ -226,5 +226,13 @@
     "archive": "Archive chat",
     "unarchive": "Unarchive chat",
     "delete": "Delete chat"
+  },
+  "project_bar": {
+    "label": "Filter chats by project",
+    "all": "All",
+    "unread": "Has unread chats",
+    "pin": "Pin {{name}}",
+    "unpin": "Unpin {{name}}",
+    "pin_failed": "Couldn't update the pin"
   }
 }

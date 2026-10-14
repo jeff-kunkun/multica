@@ -700,15 +700,15 @@ export function useChatController(opts?: { isActive?: boolean }) {
     });
   }, [pendingTaskId, activeSessionId, cancelChatTask]);
 
-  const handleNewChat = useCallback(() => {
+  const handleNewChat = useCallback((projectId: string | null = null) => {
     uiLogger.info("newChat", {
       previousSessionId: activeSessionId,
       previousPendingTask: pendingTaskId,
     });
-    // A fresh chat has no project unless the user explicitly chooses one.
-    // The open session's project is server-owned history, not a default for
-    // the next session.
-    setSelectedProjectId(null);
+    // A fresh chat has no project unless the caller names one (the chat
+    // page passes its project filter). The open session's project is
+    // server-owned history, not a default for the next session.
+    setSelectedProjectId(projectId);
     setActiveSession(null);
     requestInputFocus();
   }, [
@@ -724,13 +724,13 @@ export function useChatController(opts?: { isActive?: boolean }) {
   // active session so the user lands on an empty compose for that agent. The
   // session row is created lazily on the first send (see ensureSession).
   const handleStartNewChat = useCallback(
-    (agent: Agent) => {
+    (agent: Agent, projectId: string | null = null) => {
       uiLogger.info("startNewChat", {
         agentId: agent.id,
         previousSessionId: activeSessionId,
       });
       setSelectedAgentId(agent.id);
-      setSelectedProjectId(null);
+      setSelectedProjectId(projectId);
       setActiveSession(null);
       requestInputFocus();
     },
