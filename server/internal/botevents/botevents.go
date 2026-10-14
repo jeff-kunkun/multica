@@ -238,6 +238,12 @@ func (d *Deliverer) post(ctx context.Context, b db.WorkspaceBot, raw []byte) err
 	if err != nil {
 		return err
 	}
+	// The Bot's own headers go first so they cannot replace ours.
+	var extra map[string]string
+	_ = json.Unmarshal(b.WebhookHeaders, &extra)
+	for name, value := range extra {
+		req.Header.Set(name, value)
+	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set(SignatureHeader, Sign(b.WebhookSecret, raw))
 	resp, err := d.Client.Do(req)

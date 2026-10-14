@@ -78,6 +78,11 @@ configure one per Bot:
 Both return `webhook_url` and `webhook_secret`. An address set by the owner
 (`--webhook-url` or the Settings page) works the same way.
 
+If the receiver requires its own key, pass `headers` too, for example
+`{"url": "…", "headers": {"Authorization": "Bearer …"}}`. They are sent with
+every delivery and replaced on every call; they never override
+`Content-Type` or `X-Multica-Signature`, and no response echoes them.
+
 The office POSTs batches of up to 50 events, in order:
 
 ```json

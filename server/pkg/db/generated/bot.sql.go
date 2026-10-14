@@ -16,7 +16,7 @@ UPDATE workspace_bot b SET webhook_next_attempt_at = now() + interval '1 minute'
 WHERE b.webhook_url <> ''
   AND (b.webhook_next_attempt_at IS NULL OR b.webhook_next_attempt_at <= now())
   AND EXISTS (SELECT 1 FROM bot_event e WHERE e.workspace_id = b.workspace_id AND e.id > b.webhook_cursor)
-RETURNING b.id, b.workspace_id, b.user_id, b.name, b.can_release, b.webhook_url, b.webhook_secret, b.webhook_cursor, b.webhook_failures, b.webhook_next_attempt_at, b.webhook_last_error, b.created_by, b.created_at
+RETURNING b.id, b.workspace_id, b.user_id, b.name, b.can_release, b.webhook_url, b.webhook_secret, b.webhook_cursor, b.webhook_failures, b.webhook_next_attempt_at, b.webhook_last_error, b.created_by, b.created_at, b.webhook_headers
 `
 
 // Leases every Bot with a webhook and pending events for one delivery
@@ -45,6 +45,7 @@ func (q *Queries) ClaimDueBotWebhooks(ctx context.Context) ([]WorkspaceBot, erro
 			&i.WebhookLastError,
 			&i.CreatedBy,
 			&i.CreatedAt,
+			&i.WebhookHeaders,
 		); err != nil {
 			return nil, err
 		}
@@ -64,7 +65,7 @@ VALUES (
     (SELECT COALESCE(MAX(e.id), 0) FROM bot_event e),
     $7
 )
-RETURNING id, workspace_id, user_id, name, can_release, webhook_url, webhook_secret, webhook_cursor, webhook_failures, webhook_next_attempt_at, webhook_last_error, created_by, created_at
+RETURNING id, workspace_id, user_id, name, can_release, webhook_url, webhook_secret, webhook_cursor, webhook_failures, webhook_next_attempt_at, webhook_last_error, created_by, created_at, webhook_headers
 `
 
 type CreateWorkspaceBotParams struct {
@@ -102,6 +103,7 @@ func (q *Queries) CreateWorkspaceBot(ctx context.Context, arg CreateWorkspaceBot
 		&i.WebhookLastError,
 		&i.CreatedBy,
 		&i.CreatedAt,
+		&i.WebhookHeaders,
 	)
 	return i, err
 }
@@ -145,7 +147,7 @@ func (q *Queries) GetActivePersonalAccessTokenForUser(ctx context.Context, userI
 }
 
 const getWorkspaceBot = `-- name: GetWorkspaceBot :one
-SELECT id, workspace_id, user_id, name, can_release, webhook_url, webhook_secret, webhook_cursor, webhook_failures, webhook_next_attempt_at, webhook_last_error, created_by, created_at FROM workspace_bot
+SELECT id, workspace_id, user_id, name, can_release, webhook_url, webhook_secret, webhook_cursor, webhook_failures, webhook_next_attempt_at, webhook_last_error, created_by, created_at, webhook_headers FROM workspace_bot
 WHERE id = $1 AND workspace_id = $2
 `
 
@@ -171,12 +173,13 @@ func (q *Queries) GetWorkspaceBot(ctx context.Context, arg GetWorkspaceBotParams
 		&i.WebhookLastError,
 		&i.CreatedBy,
 		&i.CreatedAt,
+		&i.WebhookHeaders,
 	)
 	return i, err
 }
 
 const getWorkspaceBotByUser = `-- name: GetWorkspaceBotByUser :one
-SELECT id, workspace_id, user_id, name, can_release, webhook_url, webhook_secret, webhook_cursor, webhook_failures, webhook_next_attempt_at, webhook_last_error, created_by, created_at FROM workspace_bot
+SELECT id, workspace_id, user_id, name, can_release, webhook_url, webhook_secret, webhook_cursor, webhook_failures, webhook_next_attempt_at, webhook_last_error, created_by, created_at, webhook_headers FROM workspace_bot
 WHERE user_id = $1
 `
 
@@ -197,6 +200,7 @@ func (q *Queries) GetWorkspaceBotByUser(ctx context.Context, userID pgtype.UUID)
 		&i.WebhookLastError,
 		&i.CreatedBy,
 		&i.CreatedAt,
+		&i.WebhookHeaders,
 	)
 	return i, err
 }
@@ -295,7 +299,7 @@ func (q *Queries) ListBotEventsAfter(ctx context.Context, arg ListBotEventsAfter
 }
 
 const listWorkspaceBots = `-- name: ListWorkspaceBots :many
-SELECT id, workspace_id, user_id, name, can_release, webhook_url, webhook_secret, webhook_cursor, webhook_failures, webhook_next_attempt_at, webhook_last_error, created_by, created_at FROM workspace_bot
+SELECT id, workspace_id, user_id, name, can_release, webhook_url, webhook_secret, webhook_cursor, webhook_failures, webhook_next_attempt_at, webhook_last_error, created_by, created_at, webhook_headers FROM workspace_bot
 WHERE workspace_id = $1
 ORDER BY created_at ASC
 `
@@ -323,6 +327,7 @@ func (q *Queries) ListWorkspaceBots(ctx context.Context, workspaceID pgtype.UUID
 			&i.WebhookLastError,
 			&i.CreatedBy,
 			&i.CreatedAt,
+			&i.WebhookHeaders,
 		); err != nil {
 			return nil, err
 		}
@@ -402,17 +407,19 @@ UPDATE workspace_bot SET
     webhook_failures = CASE WHEN $3::text IS NOT NULL THEN 0 ELSE webhook_failures END,
     webhook_next_attempt_at = CASE WHEN $3::text IS NOT NULL THEN NULL ELSE webhook_next_attempt_at END,
     webhook_last_error = CASE WHEN $3::text IS NOT NULL THEN '' ELSE webhook_last_error END,
-    webhook_url = COALESCE($3, webhook_url)
-WHERE workspace_bot.id = $4 AND workspace_bot.workspace_id = $5
-RETURNING id, workspace_id, user_id, name, can_release, webhook_url, webhook_secret, webhook_cursor, webhook_failures, webhook_next_attempt_at, webhook_last_error, created_by, created_at
+    webhook_url = COALESCE($3, webhook_url),
+    webhook_headers = COALESCE($4::jsonb, webhook_headers)
+WHERE workspace_bot.id = $5 AND workspace_bot.workspace_id = $6
+RETURNING id, workspace_id, user_id, name, can_release, webhook_url, webhook_secret, webhook_cursor, webhook_failures, webhook_next_attempt_at, webhook_last_error, created_by, created_at, webhook_headers
 `
 
 type UpdateWorkspaceBotParams struct {
-	Name        pgtype.Text `json:"name"`
-	CanRelease  pgtype.Bool `json:"can_release"`
-	WebhookUrl  pgtype.Text `json:"webhook_url"`
-	ID          pgtype.UUID `json:"id"`
-	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	Name           pgtype.Text `json:"name"`
+	CanRelease     pgtype.Bool `json:"can_release"`
+	WebhookUrl     pgtype.Text `json:"webhook_url"`
+	WebhookHeaders []byte      `json:"webhook_headers"`
+	ID             pgtype.UUID `json:"id"`
+	WorkspaceID    pgtype.UUID `json:"workspace_id"`
 }
 
 // Changing the webhook URL resets delivery state so a fixed endpoint is
@@ -422,6 +429,7 @@ func (q *Queries) UpdateWorkspaceBot(ctx context.Context, arg UpdateWorkspaceBot
 		arg.Name,
 		arg.CanRelease,
 		arg.WebhookUrl,
+		arg.WebhookHeaders,
 		arg.ID,
 		arg.WorkspaceID,
 	)
@@ -440,6 +448,7 @@ func (q *Queries) UpdateWorkspaceBot(ctx context.Context, arg UpdateWorkspaceBot
 		&i.WebhookLastError,
 		&i.CreatedBy,
 		&i.CreatedAt,
+		&i.WebhookHeaders,
 	)
 	return i, err
 }

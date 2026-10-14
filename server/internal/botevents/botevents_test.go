@@ -79,6 +79,11 @@ func TestDeliverer(t *testing.T) {
 			http.Error(w, "bad signature", http.StatusUnauthorized)
 			return
 		}
+		// The receiver's own key, registered by the Bot.
+		if r.Header.Get("Authorization") != "Bearer recv-key" {
+			http.Error(w, "missing key", http.StatusUnauthorized)
+			return
+		}
 		mu.Lock()
 		defer mu.Unlock()
 		if fail {
@@ -105,6 +110,11 @@ func TestDeliverer(t *testing.T) {
 		WebhookUrl: srv.URL, WebhookSecret: "s3cret", CreatedBy: util.MustParseUUID(userID),
 	})
 	if err != nil {
+		t.Fatal(err)
+	}
+	// Bot headers are sent but cannot replace the signature.
+	if _, err := pool.Exec(ctx, `UPDATE workspace_bot SET webhook_headers = $2 WHERE id = $1`, bot.ID,
+		`{"Authorization": "Bearer recv-key", "X-Multica-Signature": "forged"}`); err != nil {
 		t.Fatal(err)
 	}
 	for _, typ := range []string{"issue:created", "comment:created", "issue:updated"} {

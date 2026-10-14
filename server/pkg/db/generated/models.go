@@ -1781,6 +1781,7 @@ type WorkspaceBot struct {
 	WebhookLastError     string             `json:"webhook_last_error"`
 	CreatedBy            pgtype.UUID        `json:"created_by"`
 	CreatedAt            pgtype.Timestamptz `json:"created_at"`
+	WebhookHeaders       []byte             `json:"webhook_headers"`
 }
 
 type WorkspaceInvitation struct {
