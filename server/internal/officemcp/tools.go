@@ -473,12 +473,22 @@ func officeTools() []tool {
 			Name: "set_webhook",
 			Description: "Register the HTTPS address the office should POST events to, so you are woken instead of polling. " +
 				"Returns webhook_secret: verify each delivery's X-Multica-Signature (\"sha256=\" + hex HMAC-SHA256 of the raw body). " +
+				"If your receiver requires its own key, pass it in headers (e.g. {\"Authorization\": \"Bearer <key>\"}); they are sent with every delivery, and each call replaces them. " +
 				"An empty url stops pushing. Deliveries carry next_cursor; after an outage catch up with get_events.",
 			Schema: schema([]string{"url"}, map[string]any{
 				"url": strProp("Receiving address reachable from the office; empty string to stop."),
+				"headers": map[string]any{
+					"type":                 "object",
+					"description":          "Optional extra request headers, name to value.",
+					"additionalProperties": map[string]any{"type": "string"},
+				},
 			}),
 			Call: func(c *caller, a args) (any, error) {
-				return c.do("PUT", "/api/bot/webhook", map[string]any{"url": a.str("url")})
+				body := map[string]any{"url": a.str("url")}
+				if h, ok := a["headers"].(map[string]any); ok {
+					body["headers"] = h
+				}
+				return c.do("PUT", "/api/bot/webhook", body)
 			},
 		},
 	}

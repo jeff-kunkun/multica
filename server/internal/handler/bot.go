@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -425,6 +426,23 @@ func (h *Handler) requestBot(w http.ResponseWriter, r *http.Request) (db.Workspa
 
 type SetBotWebhookRequest struct {
 	URL string `json:"url"`
+	// Headers are sent as-is with every delivery, for receivers that require
+	// their own key (e.g. Authorization: Bearer ...). Replaced on every call.
+	Headers map[string]string `json:"headers"`
+}
+
+var botWebhookHeaderName = regexp.MustCompile(`^[A-Za-z0-9-]{1,64}$`)
+
+func validBotWebhookHeaders(headers map[string]string) bool {
+	if len(headers) > 10 {
+		return false
+	}
+	for name, value := range headers {
+		if !botWebhookHeaderName.MatchString(name) || strings.ContainsAny(value, "\r\n") || len(value) > 4096 {
+			return false
+		}
+	}
+	return true
 }
 
 type BotWebhookResponse struct {
@@ -450,10 +468,19 @@ func (h *Handler) SetBotWebhook(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "url must be an http(s) URL")
 		return
 	}
+	if !validBotWebhookHeaders(req.Headers) {
+		writeError(w, http.StatusBadRequest, "headers must be at most 10 name/value pairs with plain header names")
+		return
+	}
+	if req.Headers == nil {
+		req.Headers = map[string]string{}
+	}
+	headers, _ := json.Marshal(req.Headers)
 	updated, err := h.Queries.UpdateWorkspaceBot(r.Context(), db.UpdateWorkspaceBotParams{
-		ID:          bot.ID,
-		WorkspaceID: bot.WorkspaceID,
-		WebhookUrl:  pgtype.Text{String: webhookURL, Valid: true},
+		ID:             bot.ID,
+		WorkspaceID:    bot.WorkspaceID,
+		WebhookUrl:     pgtype.Text{String: webhookURL, Valid: true},
+		WebhookHeaders: headers,
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to set webhook")

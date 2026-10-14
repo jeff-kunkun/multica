@@ -141,9 +141,13 @@ func TestBotSetsOwnWebhook(t *testing.T) {
 	bot := createTestBot(t, map[string]any{"name": "Self"})
 	dbfx.Exec(t, `UPDATE workspace_bot SET webhook_failures = 3 WHERE id = $1`, bot.ID)
 
-	set := func(userID, url string) (int, BotWebhookResponse) {
+	set := func(userID, url string, headers ...map[string]string) (int, BotWebhookResponse) {
+		body := map[string]any{"url": url}
+		if len(headers) > 0 {
+			body["headers"] = headers[0]
+		}
 		w := httptest.NewRecorder()
-		testHandler.SetBotWebhook(w, newRequestAs(userID, "PUT", "/api/bot/webhook", map[string]any{"url": url}))
+		testHandler.SetBotWebhook(w, newRequestAs(userID, "PUT", "/api/bot/webhook", body))
 		var out BotWebhookResponse
 		json.Unmarshal(w.Body.Bytes(), &out)
 		return w.Code, out
@@ -160,6 +164,28 @@ func TestBotSetsOwnWebhook(t *testing.T) {
 
 	if code, _ := set(bot.UserID, "ftp://grok.example"); code != http.StatusBadRequest {
 		t.Fatalf("ftp accepted: %d", code)
+	}
+
+	// The receiver's own key rides along as a header; the response never echoes it.
+	code, out = set(bot.UserID, "https://grok.example/hook", map[string]string{"Authorization": "Bearer recv-key"})
+	if code != http.StatusOK {
+		t.Fatalf("set headers: %d", code)
+	}
+	stored, _ = testHandler.BotForUser(context.Background(), bot.UserID)
+	if string(stored.WebhookHeaders) != `{"Authorization": "Bearer recv-key"}` {
+		t.Fatalf("stored headers = %s", stored.WebhookHeaders)
+	}
+	if code, _ := set(bot.UserID, "https://grok.example/hook", map[string]string{"Bad Name": "x"}); code != http.StatusBadRequest {
+		t.Fatalf("bad header name accepted: %d", code)
+	}
+	if code, _ := set(bot.UserID, "https://grok.example/hook", map[string]string{"X-Key": "a\r\nb"}); code != http.StatusBadRequest {
+		t.Fatalf("CRLF header value accepted: %d", code)
+	}
+	// Re-registering without headers drops them.
+	set(bot.UserID, "https://grok.example/hook")
+	stored, _ = testHandler.BotForUser(context.Background(), bot.UserID)
+	if string(stored.WebhookHeaders) != `{}` {
+		t.Fatalf("headers not cleared: %s", stored.WebhookHeaders)
 	}
 	if code, out := set(bot.UserID, ""); code != http.StatusOK || out.WebhookURL != "" {
 		t.Fatalf("clear: %d %+v", code, out)

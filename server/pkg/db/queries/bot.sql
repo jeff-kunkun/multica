@@ -34,7 +34,8 @@ UPDATE workspace_bot SET
     webhook_failures = CASE WHEN sqlc.narg('webhook_url')::text IS NOT NULL THEN 0 ELSE webhook_failures END,
     webhook_next_attempt_at = CASE WHEN sqlc.narg('webhook_url')::text IS NOT NULL THEN NULL ELSE webhook_next_attempt_at END,
     webhook_last_error = CASE WHEN sqlc.narg('webhook_url')::text IS NOT NULL THEN '' ELSE webhook_last_error END,
-    webhook_url = COALESCE(sqlc.narg('webhook_url'), webhook_url)
+    webhook_url = COALESCE(sqlc.narg('webhook_url'), webhook_url),
+    webhook_headers = COALESCE(sqlc.narg('webhook_headers')::jsonb, webhook_headers)
 WHERE workspace_bot.id = sqlc.arg('id') AND workspace_bot.workspace_id = sqlc.arg('workspace_id')
 RETURNING *;
 
