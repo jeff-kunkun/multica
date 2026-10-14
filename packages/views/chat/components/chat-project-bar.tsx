@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useRef, type WheelEvent } from "react";
 import { Pin } from "lucide-react";
 import { cn } from "@multica/ui/lib/utils";
 import type { ChatProjectChip } from "@multica/core/chat/project-bar";
@@ -22,6 +23,9 @@ const chipTone = (active: boolean) =>
  * The pin toggle sits at the chip's end. It always shows on a pinned chip;
  * otherwise it appears on hover and on the selected chip, so touch screens
  * reach it by tapping the chip first.
+ *
+ * A mouse wheel scrolls the row sideways, and the selected chip is kept in
+ * view, so a narrow list column still reaches every project.
  */
 export function ChatProjectBar({
   chips,
@@ -37,14 +41,26 @@ export function ChatProjectBar({
   onTogglePin: (projectId: string) => void;
 }) {
   const { t } = useT("chat");
+  const rowRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (!selectedId) return;
+    const chip = rowRef.current?.querySelector(`[data-project-chip="${CSS.escape(selectedId)}"]`);
+    chip?.scrollIntoView?.({ block: "nearest", inline: "nearest" });
+  }, [selectedId]);
+  const scrollSideways = (event: WheelEvent<HTMLDivElement>) => {
+    if (Math.abs(event.deltaX) >= Math.abs(event.deltaY)) return;
+    event.currentTarget.scrollLeft += event.deltaY;
+  };
   if (chips.length === 0) return null;
   const projectById = new Map(projects.map((project) => [project.id, project]));
 
   return (
     <div
+      ref={rowRef}
       role="toolbar"
       aria-label={t(($) => $.project_bar.label)}
       data-slot="chat-project-bar"
+      onWheel={scrollSideways}
       className="flex shrink-0 items-center gap-1.5 overflow-x-auto border-b px-2 py-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
     >
       <button
