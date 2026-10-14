@@ -215,6 +215,9 @@ import {
   TaskMessageListSchema,
   TimelineEntriesSchema,
   UserSchema,
+  DeleteAgentResponseSchema,
+  EMPTY_DELETE_AGENT_RESPONSE,
+  type DeleteAgentResponse,
   EMPTY_CANCEL_TASK_RESPONSE,
   EMPTY_CHAT_DRAFT_RESTORES,
   CreateFeedbackResponseSchema,
@@ -1456,6 +1459,13 @@ export class ApiClient {
     return this.fetch(`/api/agents/${id}`, {
       method: "PUT",
       body: JSON.stringify(data),
+    });
+  }
+
+  async deleteAgent(id: string): Promise<DeleteAgentResponse> {
+    const raw = await this.fetch<unknown>(`/api/agents/${id}`, { method: "DELETE" });
+    return parseWithFallback(raw, DeleteAgentResponseSchema, EMPTY_DELETE_AGENT_RESPONSE, {
+      endpoint: "DELETE /api/agents/{id}",
     });
   }
 

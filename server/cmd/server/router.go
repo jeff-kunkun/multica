@@ -865,6 +865,12 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Delete("/reactions", h.RemoveReaction)
 			})
 
+			// Backups written by agent deletes; restoring one re-creates the agent.
+			r.Route("/api/agent-backups", func(r chi.Router) {
+				r.Get("/", h.ListAgentBackups)
+				r.With(handler.RequireHumanActor).Post("/{backupId}/restore", h.RestoreAgentBackup)
+			})
+
 			// Agents
 			r.Route("/api/agents", func(r chi.Router) {
 				r.Get("/", h.ListAgents)
@@ -876,6 +882,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Route("/{id}", func(r chi.Router) {
 					r.Get("/", h.GetAgent)
 					r.Put("/", h.UpdateAgent)
+					r.With(handler.RequireHumanActor).Delete("/", h.DeleteAgent)
 					r.Post("/archive", h.ArchiveAgent)
 					r.Post("/restore", h.RestoreAgent)
 					r.Post("/cancel-tasks", h.CancelAgentTasks)
