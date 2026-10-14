@@ -20,7 +20,6 @@ func TestRunTerminologyInCLIHelp(t *testing.T) {
 		{name: "cancel scope", got: flagHelp(t, issueCancelTaskCmd, "issue"), want: "short run ID", notWant: "short task ID"},
 		{name: "run messages scope", got: flagHelp(t, issueRunMessagesCmd, "issue"), want: "short run ID", notWant: "short task ID"},
 		{name: "comment parent", got: flagHelp(t, issueCommentAddCmd, "parent"), want: "agent run", notWant: "agent task"},
-		{name: "project execution mode", got: flagHelp(t, projectResourceAddCmd, "execution-mode"), want: "how runs share", notWant: "how tasks share"},
 		{name: "daemon start", got: daemonStartCmd.Long, want: "polls for runs", notWant: "polls for tasks"},
 		{name: "daemon disk usage", got: daemonDiskUsageCmd.Long, want: "per-run", notWant: "per-task"},
 		{name: "user profile", got: userProfileCmd.Long, want: "start a run", notWant: "pick up a task"},

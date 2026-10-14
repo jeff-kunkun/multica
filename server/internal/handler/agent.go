@@ -385,7 +385,7 @@ type AgentTaskResponse struct {
 	// value is retained for explicit clipboard actions only.
 	RelativeDurableWorkDir string `json:"relative_durable_work_dir,omitempty"`
 	// BranchName is the git branch this run delivered its work on, set only by
-	// worktree-mode local_directory tasks. Unlike WorkDir it is safe to show
+	// older daemons' (since removed) worktree mode. Unlike WorkDir it is safe to show
 	// verbatim: it is a ref inside the user's own repo, not a filesystem path.
 	// Populated on both terminal paths — a failed run can still have committed
 	// partial work, and that is when the pointer matters most.

@@ -478,9 +478,7 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 			status = "offline"
 		}
 		// Persist what this daemon advertised, so surfaces that cannot see the
-		// live request — the resource-save gate and the UI — decide from the
-		// same signal the claim path uses, instead of re-deriving it from a
-		// version string (MUL-5707).
+		// live request can read it from the runtime row.
 		metadata, _ := json.Marshal(map[string]any{
 			"version":      runtime.Version,
 			"cli_version":  req.CLIVersion,
@@ -685,10 +683,9 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 				}
 				// Capabilities belong on this row too. It is written AFTER the
 				// successful runtimes in the same request, so its last_seen_at is
-				// the newest for this daemon until the first heartbeat — and the
-				// worktree gates read the newest row. Omitting them made a failed
-				// profile look, for that window, like a daemon that advertises
-				// nothing (and now like a capability-blind server).
+				// the newest for this daemon until the first heartbeat. Omitting
+				// them made a failed profile look, for that window, like a daemon
+				// that advertises nothing.
 				metadata, _ := json.Marshal(map[string]any{
 					"version":                            "",
 					"cli_version":                        req.CLIVersion,
@@ -1423,27 +1420,6 @@ func requestClientCapabilities(r *http.Request) []string {
 		return nil
 	}
 	return out
-}
-
-// runtimeHasCapability reports whether a stored runtime row advertised the
-// capability at registration. Absent metadata means an older daemon that never
-// sent the header, so this fails closed.
-func runtimeHasCapability(metadata []byte, capability string) bool {
-	if len(metadata) == 0 {
-		return false
-	}
-	var m struct {
-		Capabilities []string `json:"capabilities"`
-	}
-	if err := json.Unmarshal(metadata, &m); err != nil {
-		return false
-	}
-	for _, c := range m.Capabilities {
-		if c == capability {
-			return true
-		}
-	}
-	return false
 }
 
 func requestHasClientCapability(r *http.Request, capability string) bool {
@@ -2910,68 +2886,6 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 		}
 	}
 
-	// Last gate before dispatch: refuse to hand a worktree-mode local_directory
-	// task to a daemon that cannot implement the mode.
-	//
-	// The save-time gate in project_resource.go cannot cover this. It checks the
-	// version at the moment the resource is written; a machine downgraded
-	// afterwards still claims tasks, and an old daemon json-skips execution_mode
-	// entirely — it would run the task IN PLACE, editing the working copy the
-	// user asked to isolate. That is the exact outcome worktree mode exists to
-	// prevent, so it fails closed here, against the version of the runtime that
-	// is actually claiming.
-	if reason := worktreeClaimBlockReason(
-		resp.ProjectResources,
-		runtime,
-		requestHasClientCapability(r, protocol.DaemonCapabilityLocalWorktreeV1),
-	); reason != "" {
-		slog.Error("task claim: runtime too old for worktree mode; cancelling rather than running in place",
-			"task_id", uuidToString(task.ID),
-			"runtime_id", runtimeID,
-			"daemon_id", runtime.DaemonID.String,
-			"reason", reason,
-		)
-		// Cancel rather than leave it dispatched: the resource is pinned to this
-		// daemon, so redelivery would hand it straight back to the same too-old
-		// runtime forever.
-		//
-		// Cancel WITH the reason persisted on the row. The 4xx below only
-		// reaches the daemon's log, and the batch-claim path drops the task from
-		// its response entirely — so without this the user is left with a task
-		// that says "cancelled" and nothing else, for a condition only they can
-		// fix (update the app on that machine).
-		//
-		// Through the TaskService, not a raw query: cancellation has side
-		// effects beyond the row — audit capture, chat settle, agent status
-		// reconcile, the task:cancelled broadcast that clears live cards, and
-		// NotifyTaskFinished waking capacity/serial waiters. A direct query
-		// leaves all of those stale.
-		if _, cerr := h.TaskService.CancelTaskWithReason(r.Context(), task.ID, reason, "local_directory_error"); cerr != nil {
-			// The cancel did not commit, so the row is still claimed. The
-			// daemon is about to be refused, so left alone the task would
-			// strand in dispatched until stale reclaim, with no visible
-			// reason. Requeue it instead — the next claim re-runs this gate
-			// and retries the cancel — and report a 5xx so the daemon reads
-			// this as a transient server problem, not a claim refusal.
-			slog.Error("task claim: cancel after worktree version gate failed; requeueing so the gate can run again",
-				"task_id", uuidToString(task.ID), "error", cerr)
-			if _, rerr := h.TaskService.RequeueTaskAfterClaimFailure(r.Context(), *task); rerr != nil {
-				slog.Error("task claim: requeue after worktree-gate cancel failure failed; stale reclaim will recover it",
-					"task_id", uuidToString(task.ID), "error", rerr)
-			}
-			return resp, deliveredCommentIDs, issueSnapshot, &claimBuildFailure{
-				outcome: "error_worktree_gate_cancel",
-				status:  http.StatusInternalServerError,
-				message: "failed to cancel a worktree task blocked by daemon version; task requeued",
-			}
-		}
-		return resp, deliveredCommentIDs, issueSnapshot, &claimBuildFailure{
-			outcome: "error_worktree_daemon_version",
-			status:  http.StatusUnprocessableEntity,
-			message: reason,
-		}
-	}
-
 	// Hydrate attribution only after every source/workspace/version gate has
 	// passed so a rejected claim cannot receive another user's profile data.
 	// The existing flat initiator fields carry the run's authorization human to
@@ -2987,47 +2901,6 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 	}
 
 	return resp, deliveredCommentIDs, issueSnapshot, nil
-}
-
-// worktreeClaimBlockReason returns a user-facing reason when this runtime must
-// not run the task, or "" when it may proceed.
-//
-// The decision is made on the CAPABILITY the daemon advertised on this very
-// request, not on its version string. A daemon without the implementation does
-// not merely lose concurrency — it json-skips execution_mode and runs the task
-// in place, editing the working copy the user asked to isolate. Version strings
-// could not answer that reliably: the git-describe dev-build exemption that
-// keeps `make daemon` unblocked let a v0.4.23-era daemon straight through, and
-// two tasks silently ran in the user's own directory (MUL-5707).
-//
-// Only resources bound to the claiming runtime's own daemon are considered: a
-// project may carry one local_directory per machine, and another machine's
-// worktree resource says nothing about this one's ability to run the task.
-func worktreeClaimBlockReason(resources []ProjectResourceData, runtime db.AgentRuntime, hasWorktreeCapability bool) string {
-	if !runtime.DaemonID.Valid || runtime.DaemonID.String == "" {
-		return ""
-	}
-	if hasWorktreeCapability {
-		return ""
-	}
-	for _, res := range resources {
-		if res.ResourceType != "local_directory" {
-			continue
-		}
-		var ref localDirectoryRef
-		if err := json.Unmarshal(res.ResourceRef, &ref); err != nil {
-			continue
-		}
-		if ref.ExecutionMode != localDirectoryModeWorktree || ref.DaemonID != runtime.DaemonID.String {
-			continue
-		}
-		return fmt.Sprintf(
-			"This machine's Multica runtime does not support parallel (worktree) mode, which %q is set to use. "+
-				"Update the Multica app on that machine to the latest version, then re-run this task. "+
-				"Refusing to run rather than falling back to editing the directory directly, which is what this mode exists to prevent.",
-			ref.LocalPath)
-	}
-	return ""
 }
 
 // ClaimTaskByRuntime atomically claims the next queued task for a runtime.
@@ -4177,9 +4050,8 @@ type TaskFailRequest struct {
 	WorkDir        string `json:"work_dir,omitempty"`
 	DurableWorkDir string `json:"durable_work_dir,omitempty"`
 	FailureReason  string `json:"failure_reason,omitempty"`
-	// BranchName: a failed run can still have produced a branch — worktree mode
-	// commits whatever the agent left before tearing the worktree down. Report
-	// it so a partially-successful run is still findable.
+	// BranchName: older daemons' worktree mode can report a branch even for a
+	// failed run, holding whatever the agent left behind.
 	BranchName string `json:"branch_name,omitempty"`
 	// SessionRolloutMissing: the daemon withheld this task's Codex session
 	// because its rollout was missing (MUL-5305). Clear the resume pointer and

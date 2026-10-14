@@ -52,7 +52,7 @@ func foreignWorkspaceWithProject(t *testing.T, slug, prefix string) (string, str
 		"project_id":    foreignProjectID,
 		"workspace_id":  foreignWorkspaceID,
 		"resource_type": "local_directory",
-		"resource_ref":  `{"daemon_id":"foreign-daemon","local_path":"` + foreignLocalPath + `","execution_mode":"in_place"}`,
+		"resource_ref":  `{"daemon_id":"foreign-daemon","local_path":"` + foreignLocalPath + `"}`,
 		"position":      1,
 	})
 	return foreignWorkspaceID, foreignProjectID
@@ -183,7 +183,7 @@ func TestClaimTask_ProjectResourceFromForeignWorkspace_IsFilteredOut(t *testing.
 		"project_id":    projectID,
 		"workspace_id":  foreignWorkspaceID,
 		"resource_type": "local_directory",
-		"resource_ref":  `{"daemon_id":"foreign-daemon","local_path":"` + foreignLocalPath + `","execution_mode":"in_place"}`,
+		"resource_ref":  `{"daemon_id":"foreign-daemon","local_path":"` + foreignLocalPath + `"}`,
 		"position":      2,
 	})
 
