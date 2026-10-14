@@ -1,43 +1,27 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 import { AlertCircle, Bot, Plus } from "lucide-react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { toast } from "sonner";
+import { useQuery } from "@tanstack/react-query";
 import type { Agent, AgentRuntime } from "@multica/core/types";
 import {
   type AgentActivity,
   type AgentPresenceDetail,
+  agentTaskSnapshotOptions,
   isAgentRuntimeBound,
   useWorkspaceActivityMap,
   useWorkspacePresenceMap,
 } from "@multica/core/agents";
-import { api } from "@multica/core/api";
-import { useAuthStore } from "@multica/core/auth";
 import { useWorkspaceId } from "@multica/core/hooks";
+import { issueDetailOptions } from "@multica/core/issues";
 import { useWorkspacePaths } from "@multica/core/paths";
 import {
   readRuntimeMagpieRoute,
   runtimeListOptions,
 } from "@multica/core/runtimes";
-import {
-  agentListOptions,
-  memberListOptions,
-  workspaceKeys,
-} from "@multica/core/workspace/queries";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@multica/ui/components/ui/alert-dialog";
+import { agentListOptions } from "@multica/core/workspace/queries";
 import { Button } from "@multica/ui/components/ui/button";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
-import { Switch } from "@multica/ui/components/ui/switch";
 import { cn } from "@multica/ui/lib/utils";
 import { AppLink, useNavigation, useRowLink } from "../../navigation";
 import { ProviderLogo } from "../../runtimes/components/provider-logo";
@@ -96,6 +80,33 @@ function PageHeaderBar({
   );
 }
 
+/** The issue the agent is running right now, linked; nothing while idle. */
+function CurrentWork({ issueId }: { issueId: string }) {
+  const { t } = useT("agents");
+  const wsId = useWorkspaceId();
+  const paths = useWorkspacePaths();
+  const { data: issue } = useQuery(issueDetailOptions(wsId, issueId));
+  if (!issue) return null;
+  return (
+    <div className="mt-1 flex min-w-0 items-center gap-1.5 text-caption">
+      <span className="shrink-0 text-muted-foreground">
+        {t(($) => $.list.current_work)}
+      </span>
+      <AppLink
+        href={paths.issueDetail(issueId)}
+        onClick={(e) => e.stopPropagation()}
+        className="min-w-0 truncate hover:underline"
+        title={`${issue.identifier} ${issue.title}`}
+      >
+        <span className="mr-1 font-mono text-micro text-muted-foreground">
+          {issue.identifier}
+        </span>
+        {issue.title}
+      </AppLink>
+    </div>
+  );
+}
+
 /** Status in a word or two: the chip on wide screens, a prefix on narrow. */
 function StatusLabel({
   agent,
@@ -141,26 +152,19 @@ function AgentRow({
   runtime,
   presence,
   lastActiveDays,
-  canManage,
+  currentIssueId,
 }: {
   agent: Agent;
   runtime: AgentRuntime | null;
   presence: AgentPresenceDetail | null;
   lastActiveDays: number | null;
-  canManage: boolean;
+  currentIssueId: string | null;
 }) {
   const { t } = useT("agents");
-  const wsId = useWorkspaceId();
   const paths = useWorkspacePaths();
   const rowLink = useRowLink();
-  const qc = useQueryClient();
-  const [pending, setPending] = useState(false);
-  const [confirmArchive, setConfirmArchive] = useState(false);
 
   const isArchived = !!agent.archived_at;
-  const activeTasks = presence
-    ? presence.runningCount + presence.queuedCount
-    : 0;
   const route = isArchived ? null : readRuntimeMagpieRoute(runtime?.metadata);
   const detailHref = paths.agentDetail(agent.id);
   const hasStatus =
@@ -179,42 +183,6 @@ function AgentRow({
               : t(($) => $.last_active.days_ago, { count: lastActiveDays }),
         }),
   ].filter(Boolean);
-
-  const setActive = async (active: boolean) => {
-    setPending(true);
-    try {
-      if (active) {
-        await api.restoreAgent(agent.id);
-      } else {
-        await api.archiveAgent(agent.id);
-      }
-      await qc.invalidateQueries({ queryKey: workspaceKeys.agents(wsId) });
-      toast.success(
-        active
-          ? t(($) => $.list.restored_toast, { name: agent.name })
-          : t(($) => $.list.archived_toast, { name: agent.name }),
-      );
-    } catch (e) {
-      toast.error(
-        e instanceof Error
-          ? e.message
-          : active
-            ? t(($) => $.list.restore_failed_toast)
-            : t(($) => $.list.archive_failed_toast),
-      );
-    } finally {
-      setPending(false);
-    }
-  };
-
-  const onToggle = (active: boolean) => {
-    // Archiving cancels the agent's tasks, so that needs a yes first.
-    if (!active && activeTasks > 0) {
-      setConfirmArchive(true);
-      return;
-    }
-    void setActive(active);
-  };
 
   return (
     <div
@@ -251,6 +219,9 @@ function AgentRow({
           )}
           <span className="truncate">{subParts.join(" · ")}</span>
         </div>
+        {!isArchived && currentIssueId && (
+          <CurrentWork issueId={currentIssueId} />
+        )}
         {route && (
           <MagpieRouteLine
             route={route}
@@ -264,61 +235,6 @@ function AgentRow({
           <StatusLabel agent={agent} presence={presence} />
         </span>
       )}
-      <AppLink
-        href={detailHref}
-        onClick={(e) => e.stopPropagation()}
-        className="hidden shrink-0 rounded-md px-1.5 py-1 text-caption hover:bg-accent @xl:inline"
-      >
-        {t(($) => $.list.edit)}
-      </AppLink>
-      {/* The row navigates on click; the switch and its dialog (portaled,
-          but still bubbling through React) must not. */}
-      <span
-        className="mt-1 flex shrink-0 @xl:mt-0"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <Switch
-          checked={!isArchived}
-          disabled={pending || !canManage || !!agent.system_key}
-          onCheckedChange={onToggle}
-          aria-label={t(($) => $.list.active_aria, { name: agent.name })}
-        />
-        {confirmArchive && (
-          <AlertDialog
-            open
-            onOpenChange={(open) => {
-              if (!open) setConfirmArchive(false);
-            }}
-          >
-            <AlertDialogContent>
-              <AlertDialogHeader>
-                <AlertDialogTitle>
-                  {t(($) => $.list.archive_confirm_title, { name: agent.name })}
-                </AlertDialogTitle>
-                <AlertDialogDescription>
-                  {t(($) => $.list.archive_confirm_description, {
-                    count: activeTasks,
-                  })}
-                </AlertDialogDescription>
-              </AlertDialogHeader>
-              <AlertDialogFooter>
-                <AlertDialogCancel>
-                  {t(($) => $.list.archive_confirm_cancel)}
-                </AlertDialogCancel>
-                <AlertDialogAction
-                  variant="destructive"
-                  onClick={() => {
-                    setConfirmArchive(false);
-                    void setActive(false);
-                  }}
-                >
-                  {t(($) => $.list.archive_confirm)}
-                </AlertDialogAction>
-              </AlertDialogFooter>
-            </AlertDialogContent>
-          </AlertDialog>
-        )}
-      </span>
     </div>
   );
 }
@@ -337,7 +253,6 @@ function LoadingSkeleton() {
             <Skeleton className="h-3 w-56 max-w-full" />
             <Skeleton className="h-3 w-44 max-w-full" />
           </div>
-          <Skeleton className="h-5 w-9 rounded-full" />
         </div>
       ))}
     </div>
@@ -349,7 +264,6 @@ export function AgentsPage() {
   const wsId = useWorkspaceId();
   const paths = useWorkspacePaths();
   const navigation = useNavigation();
-  const currentUser = useAuthStore((s) => s.user);
 
   const {
     data: agents = [],
@@ -358,7 +272,7 @@ export function AgentsPage() {
     refetch: refetchList,
   } = useQuery(agentListOptions(wsId));
   const { data: runtimes = [] } = useQuery(runtimeListOptions(wsId));
-  const { data: members = [] } = useQuery(memberListOptions(wsId));
+  const { data: snapshot = [] } = useQuery(agentTaskSnapshotOptions(wsId));
   const { byAgent: presenceMap } = useWorkspacePresenceMap(wsId);
   const { byAgent: activityMap } = useWorkspaceActivityMap(wsId);
 
@@ -366,9 +280,16 @@ export function AgentsPage() {
     () => new Map(runtimes.map((r) => [r.id, r])),
     [runtimes],
   );
-  const isWorkspaceOwner =
-    !!currentUser &&
-    members.some((m) => m.user_id === currentUser.id && m.role === "owner");
+  // The issue each agent is running now; chat runs have no issue to show.
+  const currentIssueByAgent = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const task of snapshot) {
+      if (task.status === "running" && task.issue_id && !map.has(task.agent_id)) {
+        map.set(task.agent_id, task.issue_id);
+      }
+    }
+    return map;
+  }, [snapshot]);
 
   // Active agents first, archived ones at the bottom; otherwise list order.
   const sorted = useMemo(
@@ -441,22 +362,18 @@ export function AgentsPage() {
             <LoadingSkeleton />
           ) : (
             <div className="overflow-hidden rounded-xl border bg-card">
-              {sorted.map((agent) => {
-                const isOwner =
-                  !!currentUser && agent.owner_id === currentUser.id;
-                return (
-                  <AgentRow
-                    key={agent.id}
-                    agent={agent}
-                    runtime={runtimesById.get(agent.runtime_id) ?? null}
-                    presence={presenceMap.get(agent.id) ?? null}
-                    lastActiveDays={lastActiveDaysAgo(
-                      activityMap.get(agent.id) ?? null,
-                    )}
-                    canManage={isWorkspaceOwner || isOwner}
-                  />
-                );
-              })}
+              {sorted.map((agent) => (
+                <AgentRow
+                  key={agent.id}
+                  agent={agent}
+                  runtime={runtimesById.get(agent.runtime_id) ?? null}
+                  presence={presenceMap.get(agent.id) ?? null}
+                  lastActiveDays={lastActiveDaysAgo(
+                    activityMap.get(agent.id) ?? null,
+                  )}
+                  currentIssueId={currentIssueByAgent.get(agent.id) ?? null}
+                />
+              ))}
             </div>
           )}
         </div>

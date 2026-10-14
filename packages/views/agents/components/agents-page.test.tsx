@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, screen, within } from "@testing-library/react";
 import type { Agent, AgentRuntime } from "@multica/core/types";
 import { renderWithI18n } from "../../test/i18n";
 import { NavigationProvider, type NavigationAdapter } from "../../navigation";
@@ -9,8 +9,7 @@ const mocks = vi.hoisted(() => ({
   agents: [] as Agent[],
   runtimes: [] as Partial<AgentRuntime>[],
   presence: new Map<string, unknown>(),
-  archiveAgent: vi.fn(),
-  restoreAgent: vi.fn(),
+  tasks: [] as { agent_id: string; issue_id: string; status: string }[],
   push: vi.fn(),
 }));
 
@@ -26,32 +25,28 @@ vi.mock("@tanstack/react-query", () => ({
       };
     }
     if (key === "runtimes") return { data: mocks.runtimes };
+    if (key === "tasks") return { data: mocks.tasks };
+    if (key === "issue") {
+      return {
+        data: { identifier: "DENE-7", title: `Issue ${options.queryKey?.[1]}` },
+      };
+    }
     return { data: [] };
   },
-  useQueryClient: () => ({ invalidateQueries: vi.fn() }),
-}));
-
-vi.mock("sonner", () => ({
-  toast: { success: vi.fn(), error: vi.fn() },
 }));
 
 vi.mock("@multica/core/agents", () => ({
+  agentTaskSnapshotOptions: () => ({ queryKey: ["tasks"] }),
   isAgentRuntimeBound: (agent: { runtime_id: string }) =>
     agent.runtime_id.length > 0,
   useWorkspaceActivityMap: () => ({ byAgent: new Map() }),
   useWorkspacePresenceMap: () => ({ byAgent: mocks.presence }),
 }));
 
-vi.mock("@multica/core/api", () => ({
-  api: {
-    archiveAgent: mocks.archiveAgent,
-    restoreAgent: mocks.restoreAgent,
-  },
-}));
-
-vi.mock("@multica/core/auth", () => ({
-  useAuthStore: (selector: (state: unknown) => unknown) =>
-    selector({ user: { id: "user-1" } }),
+vi.mock("@multica/core/issues", () => ({
+  issueDetailOptions: (_wsId: string, id: string) => ({
+    queryKey: ["issue", id],
+  }),
 }));
 
 vi.mock("@multica/core/hooks", () => ({
@@ -62,13 +57,12 @@ vi.mock("@multica/core/paths", () => ({
   useWorkspacePaths: () => ({
     newAgent: () => "/ws/agents/new",
     agentDetail: (id: string) => `/ws/agents/${id}`,
+    issueDetail: (id: string) => `/ws/issues/${id}`,
   }),
 }));
 
 vi.mock("@multica/core/workspace/queries", () => ({
   agentListOptions: () => ({ queryKey: ["agents"] }),
-  memberListOptions: () => ({ queryKey: ["members"] }),
-  workspaceKeys: { agents: (wsId: string) => ["agents", wsId] },
 }));
 
 vi.mock("@multica/core/runtimes", async (importOriginal) => ({
@@ -158,8 +152,7 @@ beforeEach(() => {
     },
   ];
   mocks.presence = new Map();
-  mocks.archiveAgent.mockReset().mockResolvedValue(undefined);
-  mocks.restoreAgent.mockReset().mockResolvedValue(undefined);
+  mocks.tasks = [];
   mocks.push.mockReset();
 });
 
@@ -187,7 +180,7 @@ describe("AgentsPage", () => {
     expect(within(plain).queryByText("CLI's own models")).not.toBeInTheDocument();
   });
 
-  it("lists archived agents last and counts only active ones", () => {
+  it("lists archived agents last, with nothing to switch or edit", () => {
     mocks.agents = [
       makeAgent({ id: "a-old", name: "Old", archived_at: "2026-07-01T00:00:00Z" }),
       makeAgent({ id: "a-new", name: "New" }),
@@ -196,61 +189,34 @@ describe("AgentsPage", () => {
 
     const rows = document.querySelectorAll("[data-agent-row]");
     expect([...rows].map((el) => el.textContent?.slice(0, 3))).toEqual(["New", "Old"]);
-    expect(within(row("Old")).getByRole("switch")).not.toBeChecked();
     expect(within(row("Old")).queryByText("office-claude")).not.toBeInTheDocument();
+    expect(screen.queryByRole("switch")).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Edit" })).not.toBeInTheDocument();
   });
 
-  it("opens the agent when the row is clicked, but not when the switch is", () => {
+  it("opens the agent when the row is clicked", () => {
     mocks.agents = [makeAgent({ id: "a-one", name: "One" })];
     renderPage();
-
-    fireEvent.click(within(row("One")).getByRole("switch"));
-    expect(mocks.push).not.toHaveBeenCalled();
 
     fireEvent.click(within(row("One")).getByText("No activity (30d)", { exact: false }));
     expect(mocks.push).toHaveBeenCalledWith("/ws/agents/a-one");
   });
 
-  it("archives an idle agent straight away", async () => {
-    mocks.agents = [makeAgent({ id: "a-idle", name: "Idle" })];
-    renderPage();
-
-    fireEvent.click(within(row("Idle")).getByRole("switch"));
-    await waitFor(() => expect(mocks.archiveAgent).toHaveBeenCalledWith("a-idle"));
-  });
-
-  it("asks before archiving an agent with active tasks", async () => {
-    mocks.agents = [makeAgent({ id: "a-busy", name: "Busy" })];
-    mocks.presence = new Map([
-      ["a-busy", { availability: "online", runningCount: 1, queuedCount: 1 }],
-    ]);
-    renderPage();
-
-    fireEvent.click(within(row("Busy")).getByRole("switch"));
-    const dialog = await screen.findByRole("alertdialog");
-    expect(within(dialog).getByText(/2 active tasks will be cancelled/)).toBeInTheDocument();
-    expect(mocks.archiveAgent).not.toHaveBeenCalled();
-
-    fireEvent.click(within(dialog).getByRole("button", { name: "Archive" }));
-    await waitFor(() => expect(mocks.archiveAgent).toHaveBeenCalledWith("a-busy"));
-    expect(mocks.push).not.toHaveBeenCalled();
-  });
-
-  it("restores an archived agent", async () => {
+  it("shows the issue a working agent is running, linked", () => {
     mocks.agents = [
-      makeAgent({ id: "a-back", name: "Back", archived_at: "2026-07-01T00:00:00Z" }),
+      makeAgent({ id: "a-busy", name: "Busy" }),
+      makeAgent({ id: "a-idle", name: "Idle" }),
+    ];
+    mocks.tasks = [
+      { agent_id: "a-busy", issue_id: "issue-1", status: "running" },
+      { agent_id: "a-idle", issue_id: "issue-2", status: "completed" },
     ];
     renderPage();
 
-    fireEvent.click(within(row("Back")).getByRole("switch"));
-    await waitFor(() => expect(mocks.restoreAgent).toHaveBeenCalledWith("a-back"));
-  });
-
-  it("does not let a non-owner flip someone else's agent", () => {
-    mocks.agents = [makeAgent({ id: "a-theirs", name: "Theirs", owner_id: "user-2" })];
-    renderPage();
-
-    expect(within(row("Theirs")).getByRole("switch")).toHaveAttribute("aria-disabled", "true");
+    const link = within(row("Busy")).getByRole("link", { name: /Issue issue-1/ });
+    expect(link).toHaveAttribute("href", "/ws/issues/issue-1");
+    expect(within(row("Busy")).getByText("Working on")).toBeInTheDocument();
+    expect(within(row("Idle")).queryByText("Working on")).not.toBeInTheDocument();
   });
 
   it("shows the empty state when there are no agents", () => {
