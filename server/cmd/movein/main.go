@@ -9,7 +9,7 @@
 // on (see docs/kun-main/instance.md); afterwards this whole directory can go.
 //
 //	MULTICA_MOVEIN_TOKEN=mul_... DATABASE_URL=postgres://... \
-//	  go run ./cmd/movein --from https://ai.ferryway.cc --from-workspace kunkunya --to-workspace <slug>
+//	  go run ./cmd/movein --from https://ai.example.com --from-workspace kunkunya --to-workspace <slug>
 package main
 
 import (

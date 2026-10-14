@@ -38,7 +38,7 @@ the Bot asks for approval and the owner, or a releasing Bot, approves.
 | Setting | Value |
 | --- | --- |
 | Transport | Streamable HTTP (stateless, POST only) |
-| URL | `https://office.ferryway.cc/api/mcp` |
+| URL | `https://office.example.com/api/mcp` |
 | Header | `Authorization: Bearer <bot token>` |
 
 The workspace comes from the token, so no workspace header is needed. Only Bot
