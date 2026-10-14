@@ -26,8 +26,8 @@ var botSetupPrompt = template.Must(template.New("bot-setup").Parse(`你是 Multi
 3. 连接（远程 MCP）
 - 地址：{{.Endpoint}}
 - 传输：Streamable HTTP，只用 POST，无状态
-- 验证方式选自定义请求头 / Bearer 令牌，不要选 OAuth（办公室没有 OAuth）。
-- 请求头：Authorization: Bearer {{.Token}}
+- 能填请求头就选自定义请求头 / Bearer 令牌，请求头：Authorization: Bearer {{.Token}}
+- 只支持 OAuth 的客户端：只填地址，跳出办公室页面后让我登录、选「{{.Name}}」点允许。授权会换掉上面的令牌，以客户端拿到的为准。
 - 不需要工作区请求头，令牌已绑定办公室。
 
 4. 自检（依次调用，三步都成功才算接通）
@@ -75,10 +75,15 @@ func renderBotSetupPrompt(d botSetupPromptData) string {
 	return b.String()
 }
 
-// botMCPEndpoint is the MCP URL a Bot dials. The configured public API URL
-// wins, then the app origin (it proxies /api), then the origin this request
-// arrived on — the prompt only goes back to the owner who sent it.
+// botMCPEndpoint is the MCP URL a Bot dials.
 func (h *Handler) botMCPEndpoint(r *http.Request) string {
+	return h.botAPIBase(r) + "/api/mcp"
+}
+
+// botAPIBase is the origin Bots reach the API on. The configured public API
+// URL wins, then the app origin (it proxies /api), then the origin this
+// request arrived on.
+func (h *Handler) botAPIBase(r *http.Request) string {
 	base := normalizePublicURL(h.cfg.PublicURL)
 	if base == "" {
 		base = normalizePublicURL(h.cfg.AppURL)
@@ -93,5 +98,5 @@ func (h *Handler) botMCPEndpoint(r *http.Request) string {
 		}
 		base = scheme + "://" + r.Host
 	}
-	return base + "/api/mcp"
+	return base
 }

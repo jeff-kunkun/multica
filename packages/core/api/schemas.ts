@@ -1935,6 +1935,24 @@ export const EMPTY_WORKSPACE_BOT: WorkspaceBotWithSecrets = {
 
 export const EMPTY_WORKSPACE_BOT_LIST: WorkspaceBot[] = [];
 
+// OAuth consent page: owned workspaces and their Bots. A malformed Bot entry
+// is dropped rather than offered as a blank choice.
+export const OAuthBotWorkspaceListSchema = z.array(
+  z
+    .object({
+      id: z.string(),
+      name: z.string().catch("").default(""),
+      bots: z
+        .array(z.object({ id: z.string(), name: z.string().catch("").default("") }).nullable().catch(null))
+        .catch([])
+        .default([])
+        .transform((bots) => bots.filter((b): b is { id: string; name: string } => b !== null)),
+    })
+    .loose(),
+);
+
+export const ApproveOAuthResponseSchema = z.object({ redirect_to: z.string().catch("").default("") }).loose();
+
 // Workspace roles collapsed to owner / member. Anything else a server sends
 // (a legacy "admin", a future role) reads as "member": the narrower grant.
 export const MemberRoleSchema = z

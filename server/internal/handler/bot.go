@@ -213,81 +213,13 @@ func (h *Handler) CreateBot(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	secret, err := randomHex(24)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to create bot")
-		return
-	}
-	emailTag, err := randomHex(8)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to create bot")
-		return
-	}
-
 	ctx := r.Context()
-	tx, err := h.TxStarter.Begin(ctx)
+	bot, token, secret, err := h.createBot(ctx, workspaceID, userID, name, req.CanRelease, webhookURL, webhookHeaders)
 	if err != nil {
+		slog.Warn("create bot failed", append(logger.RequestAttrs(r), "error", err)...)
 		writeError(w, http.StatusInternalServerError, "failed to create bot")
 		return
 	}
-	defer tx.Rollback(ctx)
-	qtx := h.Queries.WithTx(tx)
-
-	// The .invalid address can never receive a login code and the user has
-	// no password, so the token is the Bot's only way in.
-	user, err := qtx.CreateUser(ctx, db.CreateUserParams{
-		Name:  name,
-		Email: "bot-" + emailTag + "@bots.invalid",
-	})
-	if err != nil {
-		slog.Warn("create bot user failed", append(logger.RequestAttrs(r), "error", err)...)
-		writeError(w, http.StatusInternalServerError, "failed to create bot")
-		return
-	}
-	member, err := qtx.CreateMember(ctx, db.CreateMemberParams{
-		WorkspaceID: parseUUID(workspaceID),
-		UserID:      user.ID,
-		Role:        "member",
-	})
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to create bot")
-		return
-	}
-	bot, err := qtx.CreateWorkspaceBot(ctx, db.CreateWorkspaceBotParams{
-		WorkspaceID:   parseUUID(workspaceID),
-		UserID:        user.ID,
-		Name:          name,
-		CanRelease:    req.CanRelease,
-		WebhookUrl:    webhookURL,
-		WebhookSecret: secret,
-		CreatedBy:     parseUUID(userID),
-	})
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to create bot")
-		return
-	}
-	bot, err = qtx.UpdateWorkspaceBot(ctx, db.UpdateWorkspaceBotParams{
-		ID:             bot.ID,
-		WorkspaceID:    bot.WorkspaceID,
-		WebhookHeaders: webhookHeaders,
-	})
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to create bot")
-		return
-	}
-	token, _, err := h.mintBotToken(ctx, qtx, user.ID, name)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to create bot")
-		return
-	}
-	if err := tx.Commit(ctx); err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to create bot")
-		return
-	}
-
-	h.publish(protocol.EventMemberAdded, workspaceID, "member", userID, map[string]any{
-		"member": h.memberWithUserResponse(member, user),
-	})
 	writeJSON(w, http.StatusCreated, BotSecretsResponse{
 		BotResponse:   h.botResponse(ctx, bot),
 		Token:         token,
@@ -302,6 +234,74 @@ func (h *Handler) CreateBot(w http.ResponseWriter, r *http.Request) {
 			CanRelease: bot.CanRelease,
 		}),
 	})
+}
+
+// createBot adds the Bot's user, membership and record and mints its token
+// in one transaction, returning the token and webhook secret.
+func (h *Handler) createBot(ctx context.Context, workspaceID, creatorID, name string, canRelease bool, webhookURL string, webhookHeaders []byte) (db.WorkspaceBot, string, string, error) {
+	secret, err := randomHex(24)
+	if err != nil {
+		return db.WorkspaceBot{}, "", "", err
+	}
+	emailTag, err := randomHex(8)
+	if err != nil {
+		return db.WorkspaceBot{}, "", "", err
+	}
+	tx, err := h.TxStarter.Begin(ctx)
+	if err != nil {
+		return db.WorkspaceBot{}, "", "", err
+	}
+	defer tx.Rollback(ctx)
+	qtx := h.Queries.WithTx(tx)
+
+	// The .invalid address can never receive a login code and the user has
+	// no password, so the token is the Bot's only way in.
+	user, err := qtx.CreateUser(ctx, db.CreateUserParams{
+		Name:  name,
+		Email: "bot-" + emailTag + "@bots.invalid",
+	})
+	if err != nil {
+		return db.WorkspaceBot{}, "", "", err
+	}
+	member, err := qtx.CreateMember(ctx, db.CreateMemberParams{
+		WorkspaceID: parseUUID(workspaceID),
+		UserID:      user.ID,
+		Role:        "member",
+	})
+	if err != nil {
+		return db.WorkspaceBot{}, "", "", err
+	}
+	bot, err := qtx.CreateWorkspaceBot(ctx, db.CreateWorkspaceBotParams{
+		WorkspaceID:   parseUUID(workspaceID),
+		UserID:        user.ID,
+		Name:          name,
+		CanRelease:    canRelease,
+		WebhookUrl:    webhookURL,
+		WebhookSecret: secret,
+		CreatedBy:     parseUUID(creatorID),
+	})
+	if err != nil {
+		return db.WorkspaceBot{}, "", "", err
+	}
+	bot, err = qtx.UpdateWorkspaceBot(ctx, db.UpdateWorkspaceBotParams{
+		ID:             bot.ID,
+		WorkspaceID:    bot.WorkspaceID,
+		WebhookHeaders: webhookHeaders,
+	})
+	if err != nil {
+		return db.WorkspaceBot{}, "", "", err
+	}
+	token, _, err := h.mintBotToken(ctx, qtx, user.ID, name)
+	if err != nil {
+		return db.WorkspaceBot{}, "", "", err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return db.WorkspaceBot{}, "", "", err
+	}
+	h.publish(protocol.EventMemberAdded, workspaceID, "member", creatorID, map[string]any{
+		"member": h.memberWithUserResponse(member, user),
+	})
+	return bot, token, secret, nil
 }
 
 func (h *Handler) loadBotFromURL(w http.ResponseWriter, r *http.Request) (db.WorkspaceBot, bool) {

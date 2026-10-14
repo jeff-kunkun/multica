@@ -56,6 +56,8 @@ import type {
   WorkspaceMcpServer,
   WorkspaceBot,
   WorkspaceBotWithSecrets,
+  OAuthBotWorkspace,
+  ApproveOAuthRequest,
   MemberWithUser,
   User,
   PersonalAccessToken,
@@ -265,6 +267,8 @@ import {
   WorkspaceBotWithSecretsSchema,
   EMPTY_WORKSPACE_BOT,
   EMPTY_WORKSPACE_BOT_LIST,
+  OAuthBotWorkspaceListSchema,
+  ApproveOAuthResponseSchema,
   WorkspaceMcpServerSchema,
   ShareLinkSchema,
   ShareLinkListResponseSchema,
@@ -2222,6 +2226,25 @@ export class ApiClient {
 
   async deleteBot(botId: string): Promise<void> {
     await this.fetch<unknown>(`/api/bots/${encodeURIComponent(botId)}`, { method: "DELETE" });
+  }
+
+  /** Workspaces the caller owns and their Bots, for the OAuth consent page. */
+  async listOAuthBots(): Promise<OAuthBotWorkspace[]> {
+    const raw = await this.fetch<unknown>("/api/oauth/bots");
+    return parseWithFallback(raw, OAuthBotWorkspaceListSchema, [], {
+      endpoint: "GET /api/oauth/bots",
+    });
+  }
+
+  /** Approves an OAuth client for a Bot; returns where to send the browser. */
+  async approveOAuth(data: ApproveOAuthRequest): Promise<string> {
+    const raw = await this.fetch<unknown>("/api/oauth/approve", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+    return parseWithFallback(raw, ApproveOAuthResponseSchema, { redirect_to: "" }, {
+      endpoint: "POST /api/oauth/approve",
+    }).redirect_to;
   }
 
   /** Every plan version on an issue (newest first) and whether the caller may approve. */
