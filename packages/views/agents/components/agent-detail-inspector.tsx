@@ -11,6 +11,7 @@ import {
   AGENT_MAX_CONCURRENT_TASKS_MAX,
   AGENT_MAX_CONCURRENT_TASKS_MIN,
 } from "@multica/core/agents";
+import { readRuntimeMagpieRoute } from "@multica/core/runtimes";
 import { isImeComposing } from "@multica/core/utils";
 import { Input } from "@multica/ui/components/ui/input";
 import { Textarea } from "@multica/ui/components/ui/textarea";
@@ -24,6 +25,7 @@ import {
 import { useAutoSave } from "../../settings/components/use-auto-save";
 import { useT } from "../../i18n";
 import { CharCounter } from "./char-counter";
+import { MagpieRouteLine } from "./magpie-route-line";
 import { RuntimePicker } from "./inspector/runtime-picker";
 
 interface InspectorProps {
@@ -59,6 +61,9 @@ export function AgentDetailInspector({
 }: InspectorProps) {
   const { t } = useT("agents");
   const { t: ts } = useT("settings");
+  const magpieRoute = readRuntimeMagpieRoute(
+    runtimes.find((r) => r.id === agent.runtime_id)?.metadata,
+  );
   const update = useCallback(
     (data: Record<string, unknown>) => onUpdate(agent.id, data),
     [agent.id, onUpdate],
@@ -207,13 +212,13 @@ export function AgentDetailInspector({
               onChange={(id) => update({ runtime_id: id })}
             />
           </SettingsRow>
-          {/* The model is picked per run (magpie), not per member; until that
-              is wired the CLI's own configuration decides. Nothing to edit. */}
-          <SettingsRow label={t(($) => $.inspector.prop_model)}>
-            <span className="text-body text-muted-foreground">
-              {t(($) => $.inspector.model_auto)}
-            </span>
-          </SettingsRow>
+          {/* Models are routed by magpie on the runtime's machine and edited
+              there; this only shows the route the daemon reported. */}
+          {magpieRoute && (
+            <SettingsRow label={t(($) => $.inspector.prop_model)}>
+              <MagpieRouteLine route={magpieRoute} />
+            </SettingsRow>
+          )}
           <SettingsRow
             label={t(($) => $.inspector.prop_concurrency)}
             size="select-wide"

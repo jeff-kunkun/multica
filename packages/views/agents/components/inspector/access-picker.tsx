@@ -47,9 +47,7 @@ export function AccessPicker({
   ownerId,
   canEdit = true,
   onDirtyChange,
-  onReadyChange,
   onChange,
-  hideFooter = false,
 }: {
   permissionMode: AgentPermissionMode;
   invocationTargets: AgentInvocationTarget[] | undefined;
@@ -58,15 +56,7 @@ export function AccessPicker({
   ownerId?: string | null;
   canEdit?: boolean;
   onDirtyChange?: (dirty: boolean) => void;
-  /** Notified when the draft becomes committable / non-committable.
-   *  The optional second argument is the current AccessChange when the draft
-   *  is ready, so the parent can store it for immediate use (e.g. the bulk
-   *  dialog's Apply button). */
-  onReadyChange?: (ready: boolean, change?: AccessChange) => void;
   onChange?: (next: AccessChange) => Promise<void> | void;
-  /** When true, suppress the bottom Save footer — the parent dialog owns
-   *  the apply trigger (e.g. the bulk "Set access scope" dialog). */
-  hideFooter?: boolean;
 }) {
   const { t } = useT("agents");
   const { t: tc } = useT("common");
@@ -92,18 +82,6 @@ export function AccessPicker({
   const [draftScope, setDraftScope] = useState<AccessScope>(persistedScope);
   const [draftMembers, setDraftMembers] = useState(persistedMembers);
   const [saving, setSaving] = useState(false);
-  /** Tracks whether the user has explicitly selected a scope (clicked any
-   *  radio). Once true, the picker considers the draft "ready" even if the
-   *  selection matches the persisted default — applying the default to a
-   *  bulk selection is still a valid action. */
-  const [hasInteracted, setHasInteracted] = useState(false);
-
-  /** Wrapper that marks the picker as interacted and updates the draft scope. */
-  const selectDraftScope = (scope: AccessScope) => {
-    setHasInteracted(true);
-    setDraftScope(scope);
-  };
-
   // Only reset the draft when the PERSISTED values actually change by value,
   // not by reference. A prop like invocationTargets={[]} creates a new array
   // on every parent render, which would otherwise cause this effect to fire
@@ -143,9 +121,7 @@ export function AccessPicker({
   }, [dirty, onDirtyChange]);
 
   /** The change the current draft would commit, or null when the draft is not
-   *  committable (specific-people with zero targets). Memoized by draft value:
-   *  a parent that stores this in state re-renders the picker with an identical
-   *  reference, so the notify effect below stays quiet. */
+   *  committable (specific-people with zero targets). */
   const draftChange = useMemo<AccessChange | null>(() => {
     if (draftScope === "private") {
       return { permission_mode: "private", invocation_targets: [] };
@@ -165,21 +141,6 @@ export function AccessPicker({
     }
     return { permission_mode: "public_to", invocation_targets: targets };
   }, [draftScope, draftMembers, teamIds]);
-
-  /** Ready once the user has explicitly selected a scope (hasInteracted) AND
-   *  the draft is committable. Does NOT require the draft to differ from the
-   *  persisted state — applying the default scope to a bulk selection is a
-   *  valid action. */
-  const readyChange = hasInteracted ? draftChange : null;
-
-  // Notify on value change, never on render. `onReadyChange` must be stable in
-  // the caller; combined with the memoized `readyChange` that keeps a parent
-  // storing the change in state from re-triggering this effect. Deliberately no
-  // cleanup: clearing the parent whenever a dependency changes is what turned
-  // this into an update loop. The parent owns resetting its own state.
-  useEffect(() => {
-    onReadyChange?.(readyChange !== null, readyChange ?? undefined);
-  }, [readyChange, onReadyChange]);
 
   const toggleMember = (userId: string, checked: boolean) => {
     setDraftMembers((current) => {
@@ -242,7 +203,7 @@ export function AccessPicker({
           title={t(($) => $.access.private_title)}
           description={t(($) => $.access.private_desc)}
           selected={draftScope === "private"}
-          onSelect={() => selectDraftScope("private")}
+          onSelect={() => setDraftScope("private")}
         />
         <AccessChoice
           name="agent-access-mode"
@@ -251,7 +212,7 @@ export function AccessPicker({
           title={t(($) => $.access.workspace_title)}
           description={t(($) => $.access.workspace_desc)}
           selected={draftScope === "workspace"}
-          onSelect={() => selectDraftScope("workspace")}
+          onSelect={() => setDraftScope("workspace")}
         />
         <AccessChoice
           name="agent-access-mode"
@@ -260,7 +221,7 @@ export function AccessPicker({
           title={t(($) => $.access.members_title)}
           description={t(($) => $.access.members_desc)}
           selected={draftScope === "members"}
-          onSelect={() => selectDraftScope("members")}
+          onSelect={() => setDraftScope("members")}
         />
       </div>
 
@@ -315,25 +276,26 @@ export function AccessPicker({
         </div>
       ) : null}
 
-      {hideFooter ? null : (
-        <div className="flex justify-end border-t border-surface-border px-4 py-3.5">
-          <Button
-            type="button"
-            onClick={() => void save()}
-            disabled={
-              !onChange || !dirty || saving || (draftScope === "members" && !hasMemberTarget)
-            }
-          >
-            {saving ? (
-              <Loader2
-                className="size-4 animate-spin motion-reduce:animate-none"
-                aria-hidden="true"
-              />
-            ) : null}
-            {tc(($) => $.save)}
-          </Button>
-        </div>
-      )}
+      <div className="flex justify-end border-t border-surface-border px-4 py-3.5">
+        <Button
+          type="button"
+          onClick={() => void save()}
+          disabled={
+            !onChange ||
+            !dirty ||
+            saving ||
+            (draftScope === "members" && !hasMemberTarget)
+          }
+        >
+          {saving ? (
+            <Loader2
+              className="size-4 animate-spin motion-reduce:animate-none"
+              aria-hidden="true"
+            />
+          ) : null}
+          {tc(($) => $.save)}
+        </Button>
+      </div>
     </fieldset>
   );
 }

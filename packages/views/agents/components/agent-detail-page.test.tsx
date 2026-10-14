@@ -138,6 +138,7 @@ vi.mock("@multica/core/paths", () => ({
   useWorkspacePaths: () => ({
     agents: () => "/acme/agents",
     chat: () => "/acme/chat",
+    newAgent: () => "/acme/agents/new",
   }),
 }));
 vi.mock("@multica/core/api", () => {
@@ -423,13 +424,9 @@ describe("AgentDetailPage DM button", () => {
     expect(screen.queryByRole("button", { name: "DM" })).not.toBeInTheDocument();
   });
 
-  it("hides the more-actions trigger when no menu actions are available", async () => {
-    // The gate must survive a caller who genuinely CAN archive: an admin
-    // passes `canEditAgent`, so `canArchive` is true. The only thing keeping
-    // the menu empty is the system agent's undefined `onArchive`. Assert the
-    // real aria label (locale `detail.more_actions_aria` = "Agent actions"),
-    // so removing the `hasMoreActions` gate would render the empty shell and
-    // fail this test.
+  it("offers a system agent's admin Duplicate but never Archive", async () => {
+    // An admin passes `canEditAgent`, so `canArchive` is true; only the system
+    // agent's undefined `onArchive` keeps Archive out of the menu.
     agentsRef.current = [
       { ...baseAgent, system_key: "mika" },
     ];
@@ -437,9 +434,9 @@ describe("AgentDetailPage DM button", () => {
     renderPage();
 
     await screen.findByRole("button", { name: "Assign work" });
-    expect(
-      screen.queryByLabelText("Agent actions"),
-    ).not.toBeInTheDocument();
+    fireEvent.click(screen.getByLabelText("Agent actions"));
+    expect(await screen.findByText("Duplicate")).toBeInTheDocument();
+    expect(screen.queryByText("Archive")).not.toBeInTheDocument();
   });
 
   it("keeps the more-actions trigger for an editable non-system agent", async () => {

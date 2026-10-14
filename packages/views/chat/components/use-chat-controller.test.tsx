@@ -159,6 +159,7 @@ vi.mock("@multica/core/realtime", () => ({
 }));
 vi.mock("@multica/core/logger", () => ({
   createLogger: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() }),
+  noopLogger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
 }));
 vi.mock("../../i18n", () => ({ useT: () => ({ t: () => "x" }) }));
 vi.mock("sonner", () => ({ toast: { error: vi.fn(), success: vi.fn() } }));

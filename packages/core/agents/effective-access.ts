@@ -41,16 +41,3 @@ export const ALL_ACCESS_SCOPES: readonly AccessScope[] = [
   "specific-people",
   "owner-only",
 ];
-
-/**
- * Whether the bulk-access dialog's Apply button should be enabled given the
- * picker's current onChange payload. `null` (no selection yet) and
- * `public_to` with zero invocation targets are not ready.
- */
-export function isAccessChangeReady(
-  change: { permission_mode: AgentPermissionMode; invocation_targets: readonly { target_type: string }[] } | null,
-): boolean {
-  if (!change) return false;
-  if (change.permission_mode === "private") return true;
-  return change.invocation_targets.length > 0;
-}
