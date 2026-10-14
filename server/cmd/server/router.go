@@ -639,6 +639,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		// in-process with the same token.
 		r.Get("/api/bot/events", h.ListBotEvents)
 		r.Put("/api/bot/webhook", h.SetBotWebhook)
+		r.Get("/api/bot/webhooks", h.ListBotWebhookReceivers)
+		r.Put("/api/bot/webhooks", h.SetBotWebhookReceiver)
 		r.With(handler.RequireHumanActor).Get("/api/oauth/bots", h.ListOAuthBots)
 		r.With(handler.RequireHumanActor).Post("/api/oauth/approve", h.ApproveOAuth)
 		r.Handle("/api/mcp", officemcp.New(root, func(ctx context.Context, userID string) (officemcp.Bot, bool) {

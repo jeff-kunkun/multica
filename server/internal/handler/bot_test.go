@@ -118,7 +118,8 @@ func TestBotLifecycle(t *testing.T) {
 		t.Fatalf("RevokeBotToken: %d %s", w.Code, w.Body.String())
 	}
 
-	// Delete removes membership and the Bot record.
+	// Delete removes membership, the Bot record and its receivers.
+	dbfx.Exec(t, `INSERT INTO bot_webhook_receiver (bot_id, name, url) VALUES ($1, 'media', 'https://media.example')`, bot.ID)
 	w = httptest.NewRecorder()
 	testHandler.DeleteBot(w, withURLParam(newRequest("DELETE", "/api/bots/"+bot.ID, nil), "botId", bot.ID))
 	if w.Code != http.StatusNoContent {
@@ -131,6 +132,10 @@ func TestBotLifecycle(t *testing.T) {
 	}
 	if _, ok := testHandler.BotForUser(context.Background(), bot.UserID); ok {
 		t.Fatal("bot record survived delete")
+	}
+	dbfx.QueryRow(t, `SELECT count(*) FROM bot_webhook_receiver WHERE bot_id = $1`, bot.ID).Scan(&n)
+	if n != 0 {
+		t.Fatalf("receivers survived delete: %d", n)
 	}
 }
 
@@ -214,6 +219,70 @@ func TestBotSetsOwnWebhook(t *testing.T) {
 	// A human token cannot set a Bot webhook.
 	if code, _ := set(testUserID, "https://x.example"); code != http.StatusForbidden {
 		t.Fatalf("human set webhook: %d", code)
+	}
+}
+
+func TestBotSetsManagerWebhooks(t *testing.T) {
+	bot := createTestBot(t, map[string]any{"name": "Shared", "webhook_url": "https://grok.example/hook"})
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM bot_webhook_receiver WHERE bot_id = $1`, bot.ID)
+	})
+
+	set := func(userID string, body map[string]any) (int, BotWebhookReceiverResponse) {
+		w := httptest.NewRecorder()
+		testHandler.SetBotWebhookReceiver(w, newRequestAs(userID, "PUT", "/api/bot/webhooks", body))
+		var out BotWebhookReceiverResponse
+		json.Unmarshal(w.Body.Bytes(), &out)
+		return w.Code, out
+	}
+	list := func() []BotWebhookReceiverResponse {
+		w := httptest.NewRecorder()
+		testHandler.ListBotWebhookReceivers(w, newRequestAs(bot.UserID, "GET", "/api/bot/webhooks", nil))
+		var out struct {
+			Receivers []BotWebhookReceiverResponse `json:"receivers"`
+		}
+		json.Unmarshal(w.Body.Bytes(), &out)
+		return out.Receivers
+	}
+
+	code, out := set(bot.UserID, map[string]any{
+		"name": "自媒体经理", "url": "https://media.example/hook", "headers": map[string]string{"Authorization": "Bearer k"},
+	})
+	if code != http.StatusOK || out.Name != "自媒体经理" || out.WebhookURL != "https://media.example/hook" || out.WebhookSecret != bot.WebhookSecret {
+		t.Fatalf("set: %d %+v", code, out)
+	}
+	set(bot.UserID, map[string]any{"name": "ops", "url": "https://ops.example/hook"})
+	// Replacing one receiver keeps the other and the Bot's main webhook.
+	set(bot.UserID, map[string]any{"name": "ops", "url": "https://ops.example/v2"})
+	if got := list(); len(got) != 2 || got[0].Name != "自媒体经理" || got[1].WebhookURL != "https://ops.example/v2" || got[0].WebhookSecret != "" {
+		t.Fatalf("list = %+v", got)
+	}
+	stored, _ := testHandler.BotForUser(context.Background(), bot.UserID)
+	if stored.WebhookUrl != "https://grok.example/hook" {
+		t.Fatalf("main webhook changed to %q", stored.WebhookUrl)
+	}
+
+	for _, bad := range []map[string]any{
+		{"name": "", "url": "https://x.example"},
+		{"name": "a\nb", "url": "https://x.example"},
+		{"name": "x", "url": "ftp://x.example"},
+		{"name": "x", "url": "https://x.example", "headers": map[string]string{"Bad Name": "v"}},
+	} {
+		if code, _ := set(bot.UserID, bad); code != http.StatusBadRequest {
+			t.Fatalf("%v accepted: %d", bad, code)
+		}
+	}
+
+	// An empty url removes only that receiver.
+	if code, _ := set(bot.UserID, map[string]any{"name": "ops", "url": ""}); code != http.StatusOK {
+		t.Fatalf("remove: %d", code)
+	}
+	if got := list(); len(got) != 1 || got[0].Name != "自媒体经理" {
+		t.Fatalf("after remove = %+v", got)
+	}
+	// A human token cannot register a receiver.
+	if code, _ := set(testUserID, map[string]any{"name": "x", "url": "https://x.example"}); code != http.StatusForbidden {
+		t.Fatalf("human set receiver: %d", code)
 	}
 }
 

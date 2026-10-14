@@ -47,6 +47,7 @@ func fakeAPI(t *testing.T, calls *[]recorded) http.Handler {
 	r.Post("/api/issues/{id}/plans/{version}/approve", record(200, `{"plan":{"version":2,"status":"approved"},"issues":[]}`))
 	r.Get("/api/bot/events", record(200, `{"events":[],"next_cursor":7,"has_more":false}`))
 	r.Put("/api/bot/webhook", record(200, `{"webhook_url":"https://grok.example/hook","webhook_secret":"s3cret"}`))
+	r.Put("/api/bot/webhooks", record(200, `{"name":"media","webhook_url":"https://media.example/hook","webhook_secret":"s3cret"}`))
 	r.Post("/api/chat/sessions/{id}/messages", record(201, `{"message_id":"m1"}`))
 	r.Get("/api/projects", record(200, `[{"id":"p1","title":"Site","status":"planned","secret":"x"}]`))
 	lookup := func(_ context.Context, userID string) (Bot, bool) {
@@ -136,7 +137,7 @@ func TestToolsListCoversTheLoop(t *testing.T) {
 	}
 	for _, want := range []string{
 		"create_project", "open_topic", "read_plan", "request_approval", "approve_plan",
-		"create_issue", "assign_issue", "set_status", "close_issue", "get_events", "set_webhook", "api",
+		"create_issue", "assign_issue", "set_status", "close_issue", "get_events", "set_webhook", "set_manager_webhook", "api",
 	} {
 		if !names[want] {
 			t.Errorf("tools/list is missing %s", want)
@@ -265,6 +266,20 @@ func TestSetWebhookForwardsTheURL(t *testing.T) {
 		t.Fatalf("set_webhook = %q (isError=%v)", text, isErr)
 	}
 	if len(calls) != 1 || calls[0].Method != "PUT" || calls[0].Path != "/api/bot/webhook" || calls[0].Body["url"] != "https://grok.example/hook" {
+		t.Fatalf("calls = %+v", calls)
+	}
+}
+
+func TestSetManagerWebhookLeavesTheMainAddressAlone(t *testing.T) {
+	var calls []recorded
+	_, resp := rpc(t, fakeAPI(t, &calls), "bot-user",
+		`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"set_manager_webhook","arguments":{"name":"media","url":"https://media.example/hook","headers":{"Authorization":"Bearer k"}}}}`)
+	text, isErr := toolText(t, resp)
+	if isErr || !strings.Contains(text, "s3cret") {
+		t.Fatalf("set_manager_webhook = %q (isError=%v)", text, isErr)
+	}
+	if len(calls) != 1 || calls[0].Method != "PUT" || calls[0].Path != "/api/bot/webhooks" ||
+		calls[0].Body["name"] != "media" || calls[0].Body["url"] != "https://media.example/hook" {
 		t.Fatalf("calls = %+v", calls)
 	}
 }

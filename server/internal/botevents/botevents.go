@@ -1,5 +1,6 @@
 // Package botevents keeps the workspace event log project-manager Bots read
-// after a disconnect, and pushes that log to each Bot's webhook.
+// after a disconnect, and pushes that log to each Bot's webhook and to the
+// extra receivers registered under the Bot (one per manager sharing it).
 //
 // The log is the source of truth: the webhook only delivers what is in it, in
 // id order, and a Bot that missed pushes pulls the same events from
@@ -170,10 +171,12 @@ type WebhookEvent struct {
 	CreatedAt time.Time       `json:"created_at"`
 }
 
-// WebhookBody is what a Bot's webhook receives.
+// WebhookBody is what a Bot's webhook receives. Receiver names the extra
+// receiver the batch is for; it is empty for the Bot's main webhook.
 type WebhookBody struct {
 	BotID       string         `json:"bot_id"`
 	WorkspaceID string         `json:"workspace_id"`
+	Receiver    string         `json:"receiver,omitempty"`
 	Events      []WebhookEvent `json:"events"`
 	NextCursor  int64          `json:"next_cursor"`
 }
@@ -216,31 +219,84 @@ func (d *Deliverer) Run(ctx context.Context) {
 	}
 }
 
-// DeliverDue sends one batch to every Bot whose webhook has pending events.
+// DeliverDue sends one batch to every Bot webhook and extra receiver that has
+// pending events.
 func (d *Deliverer) DeliverDue(ctx context.Context) {
 	bots, err := d.Queries.ClaimDueBotWebhooks(ctx)
 	if err != nil {
 		slog.Warn("bot webhook claim failed", "error", err)
-		return
 	}
 	for _, b := range bots {
-		d.deliver(ctx, b)
+		d.deliver(ctx, d.botTarget(b))
+	}
+	receivers, err := d.Queries.ClaimDueBotWebhookReceivers(ctx)
+	if err != nil {
+		slog.Warn("bot webhook receiver claim failed", "error", err)
+	}
+	for _, r := range receivers {
+		d.deliver(ctx, d.receiverTarget(r))
 	}
 }
 
-func (d *Deliverer) deliver(ctx context.Context, b db.WorkspaceBot) {
+// target is one push address: a Bot's main webhook or one of its named
+// receivers. Each reads the Bot's feed from its own cursor.
+type target struct {
+	bot       db.WorkspaceBot // ID, WorkspaceID, UserID, CreatedBy and WebhookSecret are set
+	receiver  string
+	url       string
+	headers   []byte
+	cursor    int64
+	failures  int32
+	delivered func(ctx context.Context, cursor int64) error
+	failed    func(ctx context.Context, next time.Time, msg string) error
+}
+
+func (d *Deliverer) botTarget(b db.WorkspaceBot) target {
+	return target{
+		bot: b, url: b.WebhookUrl, headers: b.WebhookHeaders, cursor: b.WebhookCursor, failures: b.WebhookFailures,
+		delivered: func(ctx context.Context, cursor int64) error {
+			return d.Queries.MarkBotWebhookDelivered(ctx, db.MarkBotWebhookDeliveredParams{ID: b.ID, Cursor: cursor})
+		},
+		failed: func(ctx context.Context, next time.Time, msg string) error {
+			return d.Queries.MarkBotWebhookFailed(ctx, db.MarkBotWebhookFailedParams{
+				ID: b.ID, NextAttemptAt: pgtype.Timestamptz{Time: next, Valid: true}, LastError: msg,
+			})
+		},
+	}
+}
+
+func (d *Deliverer) receiverTarget(r db.ClaimDueBotWebhookReceiversRow) target {
+	return target{
+		bot: db.WorkspaceBot{
+			ID: r.BotID, WorkspaceID: r.WorkspaceID, UserID: r.UserID, CreatedBy: r.CreatedBy, WebhookSecret: r.WebhookSecret,
+		},
+		receiver: r.Name, url: r.Url, headers: r.Headers, cursor: r.Cursor, failures: r.Failures,
+		delivered: func(ctx context.Context, cursor int64) error {
+			return d.Queries.MarkBotWebhookReceiverDelivered(ctx, db.MarkBotWebhookReceiverDeliveredParams{ID: r.ID, Cursor: cursor})
+		},
+		failed: func(ctx context.Context, next time.Time, msg string) error {
+			return d.Queries.MarkBotWebhookReceiverFailed(ctx, db.MarkBotWebhookReceiverFailedParams{
+				ID: r.ID, NextAttemptAt: pgtype.Timestamptz{Time: next, Valid: true}, LastError: msg,
+			})
+		},
+	}
+}
+
+func (d *Deliverer) deliver(ctx context.Context, t target) {
+	b := t.bot
 	rows, err := d.Queries.ListBotEventsAfter(ctx, db.ListBotEventsAfterParams{
-		WorkspaceID: b.WorkspaceID, After: b.WebhookCursor,
+		WorkspaceID: b.WorkspaceID, After: t.cursor,
 		BotUserID: b.UserID, BotCreatorID: b.CreatedBy, LimitCount: d.BatchSize,
 	})
 	if err != nil || len(rows) == 0 {
 		// Release the lease so the next tick retries.
-		_ = d.Queries.MarkBotWebhookDelivered(ctx, db.MarkBotWebhookDeliveredParams{ID: b.ID, Cursor: b.WebhookCursor})
+		_ = t.delivered(ctx, t.cursor)
 		return
 	}
 	body := WebhookBody{
 		BotID:       util.UUIDToString(b.ID),
 		WorkspaceID: util.UUIDToString(b.WorkspaceID),
+		Receiver:    t.receiver,
 		Events:      make([]WebhookEvent, 0, len(rows)),
 	}
 	for _, e := range rows {
@@ -251,35 +307,30 @@ func (d *Deliverer) deliver(ctx context.Context, b db.WorkspaceBot) {
 		body.NextCursor = e.ID
 	}
 	raw, _ := json.Marshal(body)
-	if err := d.post(ctx, b, raw); err != nil {
-		delay := backoff(b.WebhookFailures + 1)
+	if err := d.post(ctx, t, raw); err != nil {
 		msg := err.Error()
 		if len(msg) > 300 {
 			msg = msg[:300]
 		}
-		_ = d.Queries.MarkBotWebhookFailed(ctx, db.MarkBotWebhookFailedParams{
-			ID:            b.ID,
-			NextAttemptAt: pgtype.Timestamptz{Time: time.Now().Add(delay), Valid: true},
-			LastError:     msg,
-		})
+		_ = t.failed(ctx, time.Now().Add(backoff(t.failures+1)), msg)
 		return
 	}
-	_ = d.Queries.MarkBotWebhookDelivered(ctx, db.MarkBotWebhookDeliveredParams{ID: b.ID, Cursor: body.NextCursor})
+	_ = t.delivered(ctx, body.NextCursor)
 }
 
-func (d *Deliverer) post(ctx context.Context, b db.WorkspaceBot, raw []byte) error {
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, b.WebhookUrl, bytes.NewReader(raw))
+func (d *Deliverer) post(ctx context.Context, t target, raw []byte) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, t.url, bytes.NewReader(raw))
 	if err != nil {
 		return err
 	}
 	// The Bot's own headers go first so they cannot replace ours.
 	var extra map[string]string
-	_ = json.Unmarshal(b.WebhookHeaders, &extra)
+	_ = json.Unmarshal(t.headers, &extra)
 	for name, value := range extra {
 		req.Header.Set(name, value)
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set(SignatureHeader, Sign(b.WebhookSecret, raw))
+	req.Header.Set(SignatureHeader, Sign(t.bot.WebhookSecret, raw))
 	resp, err := d.Client.Do(req)
 	if err != nil {
 		return err
