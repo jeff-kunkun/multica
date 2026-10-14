@@ -92,8 +92,8 @@ git -C "$seed" branch -M main
 git -C "$seed" remote add upstream "$upstream_bare"
 git -C "$seed" push -q upstream main
 
+# The fork keeps no mirror of upstream main; only kun lives on origin.
 git -C "$seed" remote add origin "$origin_bare"
-git -C "$seed" push -q origin main
 
 # Fork branches out kun on origin
 git -C "$seed" checkout -qb kun
@@ -155,7 +155,8 @@ clean_real_out="$work/clean_real.txt"
   export PATH="$stub_bin:$PATH"
   cd "$clone" && bash "$SYNC_SCRIPT" --skip-fetch --date 20260924 >"$clean_real_out" 2>&1
 )
-require_contains "$clean_real_out" "Mirror branch 'main' updated and pushed." "mirror update check"
+require_contains "$clean_real_out" "Merging 'upstream/main' into 'sync/upstream-20260924'" "direct upstream merge check"
+[ -z "$(git --git-dir="$origin_bare" for-each-ref refs/heads/main)" ] || fail "sync must not push a main mirror to origin"
 require_contains "$clean_real_out" "Merge succeeded without conflicts." "merge success check"
 require_contains "$clean_real_out" "Migration lint passed." "migration lint execution check"
 require_contains "$clean_real_out" "Branch 'sync/upstream-20260924' pushed" "push check"

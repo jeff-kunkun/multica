@@ -1,15 +1,14 @@
 name: CI
 
-# `kun` is this fork's mainline and its default branch; `main` is the upstream
-# mirror. Both are listed so a PR opened against either one is gated, and so a
-# push to either publishes the build caches the next run restores from.
+# `kun` is this fork's mainline and its default branch. A push to it publishes
+# the build caches the next run restores from.
 # The scheduled / manual run is upstream's: it is what selects the `full`
 # scope that gates macos-runtime.
 on:
   push:
-    branches: [main, kun]
+    branches: [kun]
   pull_request:
-    branches: [main, kun]
+    branches: [kun]
   schedule:
     - cron: "23 3 * * *"
   workflow_dispatch:
