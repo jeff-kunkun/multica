@@ -40,7 +40,8 @@ var botSetupPrompt = template.Must(template.New("bot-setup").Parse(`你是 Multi
 - 推送办公室已经登记好了，不用调用 set_webhook：有事件就 POST 到上面的 Webhook URL{{if .WebhookKey}}，请求头带 Authorization: Bearer <Webhook key>{{end}}，每批最多 50 条，按顺序。
 - 推送只当提醒：每次都用 get_events 从保存的 next_cursor 往后读（第一次填 0），has_more 为 true 就接着读，以读到的为准。
 {{- else}}
-- 你如果有办公室能访问到的接收地址，调用 set_webhook 登记它（只做一次，以后一直有效）。接收端要求带自己的密钥时，放进 headers 参数，例如 {"Authorization": "Bearer <密钥>"}，每次推送都会带上。之后办公室有事件就 POST 给你，每批最多 50 条，按顺序。
+- 你需要一个办公室能 POST 到的接收地址。没有就自己建一个（例如能被外部请求触发的 Routine / Automation / Webhook 触发器），建好后把地址和密钥（如有）一次性发给我，我会填进办公室；不要等我来问，也不要因为没有就停下。
+- 拿到地址后调用 set_webhook 登记它（只做一次，以后一直有效）。接收端要求带自己的密钥时，放进 headers 参数，例如 {"Authorization": "Bearer <密钥>"}，每次推送都会带上。之后办公室有事件就 POST 给你，每批最多 50 条，按顺序。
 - 把返回的 webhook_secret 存进密钥配置。能拿到原始请求体就用它校验 X-Multica-Signature（"sha256=" 加上对原始请求体做 HMAC-SHA256 的十六进制）；拿不到就把推送只当提醒，以 get_events 读到的为准。
 - 没有接收地址，或推送断过，都靠 get_events 补读：参数 after 填上次的 next_cursor（第一次填 0），has_more 为 true 就接着读。
 {{- end}}
