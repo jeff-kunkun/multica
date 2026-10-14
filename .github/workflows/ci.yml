@@ -2,9 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [kun-main]
   pull_request:
-    branches: [main]
+    branches: [kun-main]
   schedule:
     - cron: "23 3 * * *"
   workflow_dispatch:
