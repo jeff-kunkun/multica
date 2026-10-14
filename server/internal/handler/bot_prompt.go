@@ -20,7 +20,7 @@ var botSetupPrompt = template.Must(template.New("bot-setup").Parse(`你是 Multi
 
 2. 先确认网络通
 - 先从你自己运行的地方访问下面的地址，能打通再往下做。
-- 地址如果是 localhost、127.0.0.1 或 192.168./10. 这类内网地址，说明办公室开在我的 Mac 上，你直接连不到：不要照抄，先和我的 Mac 进同一个私有组网（如 Tailscale），把地址换成那台 Mac 在组网里的地址；做不到就停下来问我要公网 HTTPS 地址。
+- 地址如果是 localhost、127.0.0.1 或 192.168.x.x、10.x.x.x 这类内网地址，说明办公室开在我的 Mac 上，你直接连不到：不要照抄，先和我的 Mac 进同一个私有组网（如 Tailscale），把地址换成那台 Mac 在组网里的地址；做不到就停下来问我要公网 HTTPS 地址。
 - 令牌永不过期，不用定期续；只有我重新生成令牌时才需要换。
 
 3. 连接（远程 MCP）
@@ -52,7 +52,13 @@ var botSetupPrompt = template.Must(template.New("bot-setup").Parse(`你是 Multi
 - 只有方案之外新增的工作才用 create_issue / assign_issue。
 - 指派或 @ 智能体都会启动一次付费运行，只在要真干活时做。
 
-7. 令牌保密
+7. 替我看收件箱和聊天
+- 我的收件箱和我跟智能体的聊天都交给你看，我自己不看。新收件箱条目（inbox:new）和智能体的聊天回复（chat:done，正文在 payload.content）都会作为事件推给你。
+- api 工具能调办公室的任何接口，和我在 Multica CLI 里能做的一样：GET /api/inbox 看收件箱，POST /api/inbox/<id>/read 标已读；GET /api/chat/sessions 看聊天列表，GET /api/chat/sessions/<id>/messages 看全文。
+- 智能体在聊天里提问或等确认，你能答就在原会话直接回：POST /api/chat/sessions/<id>/messages，body {"content": "..."}，消息会自动标上你的名字。要找某个智能体办事，先 POST /api/chat/sessions，body {"agent_id": "..."}，再往新会话发消息。
+- 只有要我拍板、要验收或有风险的事，用大白话带上选项和你的推荐来找我；其余你自己推进，只记进度。
+
+8. 令牌保密
 - 令牌{{if .WebhookURL}}和 Webhook key{{end}}就是你的凭据，只存进你的密钥配置。
 - 不要写进聊天、评论、工单、日志或代码，也不要转给任何人。
 - 怀疑泄露就立刻告诉主人，主人会换新的。

@@ -721,6 +721,11 @@ func (h *Handler) SendChatMessage(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "content is required")
 		return
 	}
+	// A Bot writes in its creator's chat; say so, so neither the agent nor
+	// the creator mistakes it for the creator's own words.
+	if name := actingBotName(r.Context()); name != "" {
+		req.Content = "[" + name + "] " + req.Content
+	}
 
 	// Pre-validate attachment ids early so invalid input returns 400 before
 	// any state mutation. The actual link runs after CreateChatMessage so we

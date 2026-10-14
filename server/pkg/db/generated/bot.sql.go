@@ -15,7 +15,9 @@ const claimDueBotWebhooks = `-- name: ClaimDueBotWebhooks :many
 UPDATE workspace_bot b SET webhook_next_attempt_at = now() + interval '1 minute'
 WHERE b.webhook_url <> ''
   AND (b.webhook_next_attempt_at IS NULL OR b.webhook_next_attempt_at <= now())
-  AND EXISTS (SELECT 1 FROM bot_event e WHERE e.workspace_id = b.workspace_id AND e.id > b.webhook_cursor)
+  AND EXISTS (SELECT 1 FROM bot_event e WHERE e.workspace_id = b.workspace_id AND e.id > b.webhook_cursor
+              AND (e.payload->>'for_user_id' IS NULL
+                   OR e.payload->>'for_user_id' IN (b.user_id::text, b.created_by::text)))
 RETURNING b.id, b.workspace_id, b.user_id, b.name, b.can_release, b.webhook_url, b.webhook_secret, b.webhook_cursor, b.webhook_failures, b.webhook_next_attempt_at, b.webhook_last_error, b.created_by, b.created_at, b.webhook_headers
 `
 
@@ -232,6 +234,26 @@ func (q *Queries) InsertBotEvent(ctx context.Context, arg InsertBotEventParams) 
 	return err
 }
 
+const isBotOrBotCreator = `-- name: IsBotOrBotCreator :one
+SELECT EXISTS (
+    SELECT 1 FROM workspace_bot
+    WHERE workspace_id = $1 AND (user_id = $2 OR created_by = $2)
+)
+`
+
+type IsBotOrBotCreatorParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	UserID      pgtype.UUID `json:"user_id"`
+}
+
+// Whether userID is a Bot in the workspace or the person a Bot there stands in for.
+func (q *Queries) IsBotOrBotCreator(ctx context.Context, arg IsBotOrBotCreatorParams) (bool, error) {
+	row := q.db.QueryRow(ctx, isBotOrBotCreator, arg.WorkspaceID, arg.UserID)
+	var exists bool
+	err := row.Scan(&exists)
+	return exists, err
+}
+
 const listActivePersonalAccessTokenHashesByUser = `-- name: ListActivePersonalAccessTokenHashesByUser :many
 SELECT token_hash FROM personal_access_token
 WHERE user_id = $1 AND revoked = FALSE
@@ -260,18 +282,30 @@ func (q *Queries) ListActivePersonalAccessTokenHashesByUser(ctx context.Context,
 const listBotEventsAfter = `-- name: ListBotEventsAfter :many
 SELECT id, workspace_id, type, actor_type, actor_id, payload, created_at FROM bot_event
 WHERE workspace_id = $1 AND id > $2
+  AND (payload->>'for_user_id' IS NULL
+       OR payload->>'for_user_id' IN ($3::uuid::text, $4::uuid::text))
 ORDER BY id ASC
-LIMIT $3
+LIMIT $5
 `
 
 type ListBotEventsAfterParams struct {
-	WorkspaceID pgtype.UUID `json:"workspace_id"`
-	ID          int64       `json:"id"`
-	Limit       int32       `json:"limit"`
+	WorkspaceID  pgtype.UUID `json:"workspace_id"`
+	After        int64       `json:"after"`
+	BotUserID    pgtype.UUID `json:"bot_user_id"`
+	BotCreatorID pgtype.UUID `json:"bot_creator_id"`
+	LimitCount   int32       `json:"limit_count"`
 }
 
+// An event addressed to one person (payload.for_user_id: their inbox item or
+// chat reply) goes only to Bots that are that person or stand in for them.
 func (q *Queries) ListBotEventsAfter(ctx context.Context, arg ListBotEventsAfterParams) ([]BotEvent, error) {
-	rows, err := q.db.Query(ctx, listBotEventsAfter, arg.WorkspaceID, arg.ID, arg.Limit)
+	rows, err := q.db.Query(ctx, listBotEventsAfter,
+		arg.WorkspaceID,
+		arg.After,
+		arg.BotUserID,
+		arg.BotCreatorID,
+		arg.LimitCount,
+	)
 	if err != nil {
 		return nil, err
 	}

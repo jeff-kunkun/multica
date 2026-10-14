@@ -57,6 +57,7 @@ tokens are accepted: a person's token gets 403.
 | Add work outside the plan | `create_issue`, `assign_issue` |
 | Track progress | `set_status`, `add_comment`, `get_events`, `set_webhook` |
 | Close | `close_issue` |
+| Anything else the CLI can do | `api` (`method`, `path`, optional `body`) |
 
 A typical loop:
 
@@ -72,6 +73,16 @@ A typical loop:
 
 API errors come back as tool errors with the HTTP status, for example
 `HTTP 403: ...`. A Bot can do anything a regular member can do, and no more.
+
+### Standing in for its creator
+
+A Bot reads and answers what its creator would otherwise have to: on the chat
+(`/api/chat/sessions…`, `/api/chat/pending-tasks…`) and inbox (`/api/inbox…`)
+routes the office treats the Bot as the person who created it
+(`ActAsBotCreator`). It lists and reads their chats with agents, replies in
+them or starts new ones, and reads and clears their inbox, all through `api`.
+Its chat messages are prefixed with `[<Bot name>]`. This works only in the
+Bot's own workspace and only while the creator is still a member.
 
 ## 4. Events
 
@@ -132,4 +143,10 @@ Event types:
 
 - `issue:*`, `comment:*`, `project:*`, `plan:*`, `member:*`
 - `task:completed`, `task:failed`, `task:cancelled`
-- `inbox:new`, only for items addressed to the Bot (for example an @mention)
+- `inbox:new` for items addressed to the Bot (for example an @mention) or to
+  its creator
+- `chat:done` when an agent replies in the creator's chats; the reply is in
+  `payload.content`
+
+Events addressed to one person carry `payload.for_user_id` and reach only the
+Bots that are, or stand in for, that person.

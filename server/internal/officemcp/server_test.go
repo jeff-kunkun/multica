@@ -47,6 +47,7 @@ func fakeAPI(t *testing.T, calls *[]recorded) http.Handler {
 	r.Post("/api/issues/{id}/plans/{version}/approve", record(200, `{"plan":{"version":2,"status":"approved"},"issues":[]}`))
 	r.Get("/api/bot/events", record(200, `{"events":[],"next_cursor":7,"has_more":false}`))
 	r.Put("/api/bot/webhook", record(200, `{"webhook_url":"https://grok.example/hook","webhook_secret":"s3cret"}`))
+	r.Post("/api/chat/sessions/{id}/messages", record(201, `{"message_id":"m1"}`))
 	r.Get("/api/projects", record(200, `[{"id":"p1","title":"Site","status":"planned","secret":"x"}]`))
 	lookup := func(_ context.Context, userID string) (Bot, bool) {
 		if userID != "bot-user" {
@@ -135,7 +136,7 @@ func TestToolsListCoversTheLoop(t *testing.T) {
 	}
 	for _, want := range []string{
 		"create_project", "open_topic", "read_plan", "request_approval", "approve_plan",
-		"create_issue", "assign_issue", "set_status", "close_issue", "get_events", "set_webhook",
+		"create_issue", "assign_issue", "set_status", "close_issue", "get_events", "set_webhook", "api",
 	} {
 		if !names[want] {
 			t.Errorf("tools/list is missing %s", want)
@@ -265,5 +266,38 @@ func TestSetWebhookForwardsTheURL(t *testing.T) {
 	}
 	if len(calls) != 1 || calls[0].Method != "PUT" || calls[0].Path != "/api/bot/webhook" || calls[0].Body["url"] != "https://grok.example/hook" {
 		t.Fatalf("calls = %+v", calls)
+	}
+}
+
+func TestAPIToolCallsAnyEndpointAsTheBot(t *testing.T) {
+	var calls []recorded
+	h := fakeAPI(t, &calls)
+	_, resp := rpc(t, h, "bot-user",
+		`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"api","arguments":{"method":"post","path":"/api/chat/sessions/s1/messages","body":{"content":"hi"}}}}`)
+	text, isErr := toolText(t, resp)
+	if isErr || text != `{"message_id":"m1"}` || len(calls) != 1 {
+		t.Fatalf("result = %q (isError=%v), calls = %+v", text, isErr, calls)
+	}
+	if c := calls[0]; c.Method != "POST" || c.Path != "/api/chat/sessions/s1/messages" || c.Body["content"] != "hi" ||
+		c.Auth != "Bearer mul_test" || c.Workspace != "ws-1" {
+		t.Fatalf("forwarded = %+v", c)
+	}
+
+	_, resp = rpc(t, h, "bot-user",
+		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"api","arguments":{"method":"GET","path":"/api/projects?status=planned"}}}`)
+	if _, isErr := toolText(t, resp); isErr || calls[1].Query != "status=planned" || calls[1].Body != nil {
+		t.Fatalf("GET forwarded = %+v", calls[1])
+	}
+
+	for _, bad := range []string{
+		`{"method":"GET","path":"/health"}`,
+		`{"method":"POST","path":"/api/mcp"}`,
+		`{"method":"TRACE","path":"/api/projects"}`,
+	} {
+		_, resp := rpc(t, h, "bot-user",
+			`{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"api","arguments":`+bad+`}}`)
+		if _, isErr := toolText(t, resp); !isErr || len(calls) != 2 {
+			t.Fatalf("%s: want a tool error and no API call", bad)
+		}
 	}
 }
