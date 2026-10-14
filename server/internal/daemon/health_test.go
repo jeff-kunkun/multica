@@ -360,6 +360,60 @@ func TestShutdownHandlerPostCancelsDaemonContext(t *testing.T) {
 	}
 }
 
+func TestDrainHandlerPausesClaimsUntilLeaseExpires(t *testing.T) {
+	t.Parallel()
+
+	d := &Daemon{
+		cfg:        Config{CLIVersion: "v1.0.0"},
+		workspaces: map[string]*workspaceState{},
+		logger:     slog.Default(),
+	}
+	if !d.tryEnterClaim() {
+		t.Fatal("claims must be open before any drain")
+	}
+	d.exitClaim()
+
+	rec := httptest.NewRecorder()
+	d.drainHandler().ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/drain", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+	if d.tryEnterClaim() {
+		t.Fatal("a draining daemon must not claim new tasks")
+	}
+	var resp HealthResponse
+	health := httptest.NewRecorder()
+	d.healthHandler(time.Now()).ServeHTTP(health, httptest.NewRequest(http.MethodGet, "/health", nil))
+	if err := json.Unmarshal(health.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+	if !resp.Draining {
+		t.Error("/health must report draining while the lease holds")
+	}
+
+	// An expired lease reopens claiming on its own, so a caller that vanishes
+	// can never leave the daemon paused.
+	d.drainUntil.Store(time.Now().Add(-time.Second).UnixNano())
+	if !d.tryEnterClaim() {
+		t.Fatal("claims must reopen once the drain lease expires")
+	}
+	d.exitClaim()
+}
+
+func TestDrainHandlerRejectsNonPost(t *testing.T) {
+	t.Parallel()
+
+	d := &Daemon{}
+	rec := httptest.NewRecorder()
+	d.drainHandler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/drain", nil))
+	if rec.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("expected 405, got %d", rec.Code)
+	}
+	if d.draining() {
+		t.Fatal("GET must not start a drain")
+	}
+}
+
 func TestShutdownHandlerRejectsNonPost(t *testing.T) {
 	t.Parallel()
 

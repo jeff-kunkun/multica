@@ -637,6 +637,9 @@ type Daemon struct {
 	claimMu        sync.Mutex
 	pauseClaims    bool // when true, the batch poller skips claiming
 	claimsInFlight int  // pollers that have decided to claim but haven't yet handed the task off to handleTask
+	// drainUntil (unix nanos) pauses claiming until that time; set by POST
+	// /drain. Independent of pauseClaims so the update barriers never see it.
+	drainUntil atomic.Int64
 
 	activeEnvRootsMu   sync.Mutex
 	activeEnvRootsCond *sync.Cond      // signalled when an in-flight env-root GC mutation finishes
@@ -4897,11 +4900,28 @@ func (d *Daemon) reportUpdateResultWithRetry(ctx context.Context, runtimeID, upd
 func (d *Daemon) tryEnterClaim() bool {
 	d.claimMu.Lock()
 	defer d.claimMu.Unlock()
-	if d.pauseClaims {
+	if d.pauseClaims || d.draining() {
 		return false
 	}
 	d.claimsInFlight++
 	return true
+}
+
+// drainLease is how long one POST /drain keeps the daemon from claiming. The
+// Desktop app renews it on every status poll while it waits to restart the
+// daemon into a new bundled CLI, so a busy daemon actually reaches idle
+// instead of picking up new work forever. A short lease means a caller that
+// goes away (app quit or crashed) can never leave claiming paused for long.
+var drainLease = 90 * time.Second
+
+// startDrain pauses new claims until the lease expires. Running tasks are
+// untouched; the caller restarts the daemon once active_task_count reaches 0.
+func (d *Daemon) startDrain() {
+	d.drainUntil.Store(time.Now().Add(drainLease).UnixNano())
+}
+
+func (d *Daemon) draining() bool {
+	return time.Now().UnixNano() < d.drainUntil.Load()
 }
 
 // exitClaim releases the in-flight claim recorded by tryEnterClaim.
