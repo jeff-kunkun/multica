@@ -1879,18 +1879,28 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 		var usageMap map[string]TokenUsage
 		c.usageMu.Lock()
 		u := c.usage
+		reportedModel := c.threadModel
 		c.usageMu.Unlock()
 
-		// Fallback: if no usage from JSON-RPC, scan Codex session JSONL logs.
-		// Codex writes token_count events to $CODEX_HOME/sessions/YYYY/MM/DD/*.jsonl;
-		// scan this backend's per-task CODEX_HOME, since sessions are isolated
-		// there rather than in the shared ~/.codex/sessions (MUL-4424).
-		reportedModel := ""
-		if u.InputTokens == 0 && u.OutputTokens == 0 {
-			taskCodexHome := strings.TrimSpace(b.cfg.Env["CODEX_HOME"])
+		// The session log is the fallback for both usage and the model.
+		// Codex writes token_count and turn_context events to
+		// $CODEX_HOME/sessions/YYYY/MM/DD/*.jsonl; scan this backend's per-task
+		// CODEX_HOME, since sessions are isolated there rather than in the
+		// shared ~/.codex/sessions (MUL-4424). RPC usage, when present, stays
+		// authoritative; the log then only supplies a missing model name, and
+		// only from the per-task home (thread/start and thread/resume always
+		// name the model, so this is a narrow fallback, not a scan of the
+		// user's shared session history).
+		rpcUsage := u.InputTokens != 0 || u.OutputTokens != 0
+		taskCodexHome := strings.TrimSpace(b.cfg.Env["CODEX_HOME"])
+		if !rpcUsage || (reportedModel == "" && taskCodexHome != "") {
 			if scanned := scanCodexSessionUsage(startTime, taskCodexHome, threadID, resumed); scanned != nil {
-				u = scanned.usage
-				reportedModel = scanned.model
+				if !rpcUsage {
+					u = scanned.usage
+				}
+				if reportedModel == "" {
+					reportedModel = scanned.model
+				}
 			}
 		}
 
@@ -2017,6 +2027,7 @@ func (c *codexClient) startOrResumeThread(ctx context.Context, opts ExecOptions,
 		resumeResult, err := c.request(ctx, "thread/resume", resumeParams)
 		if err == nil {
 			if threadID := extractThreadID(resumeResult); threadID != "" {
+				c.setThreadModel(extractThreadModel(resumeResult))
 				logger.Info("codex lifecycle",
 					"phase", "thread_resume_response",
 					"task_id", c.cfg.TaskID,
@@ -2080,6 +2091,7 @@ func (c *codexClient) startOrResumeThread(ctx context.Context, opts ExecOptions,
 	if threadID == "" {
 		return "", false, fmt.Errorf("codex thread/start returned no thread ID")
 	}
+	c.setThreadModel(extractThreadModel(startResult))
 	logger.Info("codex lifecycle",
 		"phase", "thread_start_response",
 		"task_id", c.cfg.TaskID,
@@ -2354,6 +2366,10 @@ type codexClient struct {
 
 	usageMu sync.Mutex
 	usage   TokenUsage // accumulated from turn events
+	// threadModel is the model Codex reported for the thread in its
+	// thread/start or thread/resume response. Multica never chooses it; it is
+	// only read back so usage is attributed to the model that actually ran.
+	threadModel string
 	// usageTotal is the last accepted cumulative v2 usage snapshot for the
 	// active turn. Comparing later snapshots against it makes replay and
 	// duplicate delivery idempotent while retaining multi-response turns.
@@ -4217,6 +4233,24 @@ func bytesContainsStr(b []byte, s string) bool {
 }
 
 // ── Helpers ──
+
+// extractThreadModel reads the model Codex resolved for the thread from a
+// thread/start or thread/resume response.
+func extractThreadModel(result json.RawMessage) string {
+	var r struct {
+		Model string `json:"model"`
+	}
+	if err := json.Unmarshal(result, &r); err != nil {
+		return ""
+	}
+	return strings.TrimSpace(r.Model)
+}
+
+func (c *codexClient) setThreadModel(model string) {
+	c.usageMu.Lock()
+	c.threadModel = model
+	c.usageMu.Unlock()
+}
 
 func extractThreadID(result json.RawMessage) string {
 	var r struct {

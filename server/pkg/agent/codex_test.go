@@ -6228,3 +6228,118 @@ func TestCodexResumeOverflowError(t *testing.T) {
 		})
 	}
 }
+
+// Multica never picks the Codex model, but usage must still be credited to the
+// model that actually ran, even when the RPC reports the token counts.
+func TestCodexUsageCreditsReportedModelWhenRPCReportsTokens(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+
+	cases := []struct {
+		name          string
+		startResult   string
+		sessionModel  string
+		wantModel     string
+		wantInput     int64
+		wantCacheRead int64
+		wantOutput    int64
+	}{
+		{
+			name:          "thread/start response names the model",
+			startResult:   `{"thread":{"id":"thr-usage-model"},"model":"gpt-6-astra"}`,
+			wantModel:     "gpt-6-astra",
+			wantInput:     70,
+			wantCacheRead: 30,
+			wantOutput:    10,
+		},
+		{
+			name:          "session log names the model",
+			startResult:   `{"thread":{"id":"thr-usage-model"}}`,
+			sessionModel:  "gpt-5.6-sol",
+			wantModel:     "gpt-5.6-sol",
+			wantInput:     70,
+			wantCacheRead: 30,
+			wantOutput:    10,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			codexHome := t.TempDir()
+			if tc.sessionModel != "" {
+				// Timestamps and mtime sit in the future so they fall after the
+				// run's start time. The log's token counts differ from the RPC's
+				// so the test proves RPC usage stays authoritative.
+				future := time.Now().Add(time.Minute)
+				dateDir := filepath.Join(codexHome, "sessions",
+					fmt.Sprintf("%04d", future.Year()),
+					fmt.Sprintf("%02d", int(future.Month())),
+					fmt.Sprintf("%02d", future.Day()),
+				)
+				if err := os.MkdirAll(dateDir, 0o755); err != nil {
+					t.Fatalf("mkdir date dir: %v", err)
+				}
+				content := strings.Join([]string{
+					fmt.Sprintf(`{"timestamp":%q,"type":"turn_context","payload":{"model":%q}}`, future.UTC().Format(time.RFC3339Nano), tc.sessionModel),
+					fmt.Sprintf(`{"timestamp":%q,"type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":500,"output_tokens":20}}}}`, future.Add(time.Second).UTC().Format(time.RFC3339Nano)),
+					"",
+				}, "\n")
+				path := filepath.Join(dateDir, "rollout-2026-10-13T00-00-00-thr-usage-model.jsonl")
+				if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+					t.Fatalf("write session file: %v", err)
+				}
+				if err := os.Chtimes(path, future, future); err != nil {
+					t.Fatalf("chtimes session file: %v", err)
+				}
+			}
+
+			fakePath := writeFakeCodexAppServer(t, ""+
+				`read line`+"\n"+
+				`echo '{"jsonrpc":"2.0","id":1,"result":{}}'`+"\n"+
+				`read line`+"\n"+
+				`read line`+"\n"+
+				`echo '{"jsonrpc":"2.0","id":2,"result":`+tc.startResult+`}'`+"\n"+
+				`read line`+"\n"+
+				`echo '{"jsonrpc":"2.0","id":3,"result":{}}'`+"\n"+
+				`echo '{"jsonrpc":"2.0","method":"turn/started","params":{"threadId":"thr-usage-model","turn":{"id":"turn-usage-model"}}}'`+"\n"+
+				`echo '{"jsonrpc":"2.0","method":"item/agentMessage/delta","params":{"threadId":"thr-usage-model","turnId":"turn-usage-model","itemId":"msg","delta":"done"}}'`+"\n"+
+				`echo '{"jsonrpc":"2.0","method":"thread/tokenUsage/updated","params":{"threadId":"thr-usage-model","turnId":"turn-usage-model","tokenUsage":{"total":{"inputTokens":100,"cachedInputTokens":30,"outputTokens":10,"reasoningOutputTokens":0,"totalTokens":110},"last":{"inputTokens":100,"cachedInputTokens":30,"outputTokens":10,"reasoningOutputTokens":0,"totalTokens":110},"modelContextWindow":200000}}}'`+"\n"+
+				`echo '{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"thr-usage-model","turn":{"id":"turn-usage-model","status":"completed"}}}'`+"\n")
+
+			backend, err := New("codex", Config{
+				ExecutablePath: fakePath,
+				Env:            map[string]string{"CODEX_HOME": codexHome},
+				Logger:         slog.Default(),
+			})
+			if err != nil {
+				t.Fatalf("new codex backend: %v", err)
+			}
+			session, err := backend.Execute(context.Background(), "prompt", ExecOptions{
+				SemanticInactivityTimeout: 5 * time.Second,
+			})
+			if err != nil {
+				t.Fatalf("execute: %v", err)
+			}
+			go func() {
+				for range session.Messages {
+				}
+			}()
+
+			select {
+			case result := <-session.Result:
+				usage, ok := result.Usage[tc.wantModel]
+				if !ok {
+					t.Fatalf("usage = %+v, want an entry for %q", result.Usage, tc.wantModel)
+				}
+				if usage.InputTokens != tc.wantInput || usage.CacheReadTokens != tc.wantCacheRead || usage.OutputTokens != tc.wantOutput {
+					t.Fatalf("usage = %+v, want input=%d cache_read=%d output=%d", usage, tc.wantInput, tc.wantCacheRead, tc.wantOutput)
+				}
+				if len(result.Usage) != 1 {
+					t.Fatalf("usage = %+v, want a single model entry", result.Usage)
+				}
+			case <-time.After(10 * time.Second):
+				t.Fatal("timeout waiting for Codex result")
+			}
+		})
+	}
+}
