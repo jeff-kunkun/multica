@@ -46,6 +46,7 @@ func fakeAPI(t *testing.T, calls *[]recorded) http.Handler {
 	r.Get("/api/issues/{id}/plans", record(404, `{"error":"no plan yet"}`))
 	r.Post("/api/issues/{id}/plans/{version}/approve", record(200, `{"plan":{"version":2,"status":"approved"},"issues":[]}`))
 	r.Get("/api/bot/events", record(200, `{"events":[],"next_cursor":7,"has_more":false}`))
+	r.Put("/api/bot/webhook", record(200, `{"webhook_url":"https://grok.example/hook","webhook_secret":"s3cret"}`))
 	r.Get("/api/projects", record(200, `[{"id":"p1","title":"Site","status":"planned","secret":"x"}]`))
 	lookup := func(_ context.Context, userID string) (Bot, bool) {
 		if userID != "bot-user" {
@@ -134,7 +135,7 @@ func TestToolsListCoversTheLoop(t *testing.T) {
 	}
 	for _, want := range []string{
 		"create_project", "open_topic", "read_plan", "request_approval", "approve_plan",
-		"create_issue", "assign_issue", "set_status", "close_issue", "get_events",
+		"create_issue", "assign_issue", "set_status", "close_issue", "get_events", "set_webhook",
 	} {
 		if !names[want] {
 			t.Errorf("tools/list is missing %s", want)
@@ -251,5 +252,18 @@ func TestApprovePlanNamesTheVersion(t *testing.T) {
 		if _, isErr := toolText(t, resp); !isErr || len(calls) != 0 {
 			t.Fatalf("%s: want a tool error and no API call, got %v / %d calls", bad, resp, len(calls))
 		}
+	}
+}
+
+func TestSetWebhookForwardsTheURL(t *testing.T) {
+	var calls []recorded
+	_, resp := rpc(t, fakeAPI(t, &calls), "bot-user",
+		`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"set_webhook","arguments":{"url":"https://grok.example/hook"}}}`)
+	text, isErr := toolText(t, resp)
+	if isErr || !strings.Contains(text, "s3cret") {
+		t.Fatalf("set_webhook = %q (isError=%v)", text, isErr)
+	}
+	if len(calls) != 1 || calls[0].Method != "PUT" || calls[0].Path != "/api/bot/webhook" || calls[0].Body["url"] != "https://grok.example/hook" {
+		t.Fatalf("calls = %+v", calls)
 	}
 }

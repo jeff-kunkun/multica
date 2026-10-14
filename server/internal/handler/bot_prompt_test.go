@@ -14,7 +14,7 @@ func TestRenderBotSetupPrompt(t *testing.T) {
 	for _, want := range []string{
 		"https://office.example/api/mcp", "Authorization: Bearer mul_abc",
 		"whoami", "list_members", "list_projects",
-		"get_events", "持久化", "create_project", "request_approval", "close_issue",
+		"get_events", "持久化", "set_webhook", "create_project", "request_approval", "close_issue",
 		"你没有放行权", "令牌保密", "自动建好工单", "不要再建或再指派", "方案之外",
 	} {
 		if !strings.Contains(pull, want) {
@@ -26,8 +26,8 @@ func TestRenderBotSetupPrompt(t *testing.T) {
 	if strings.Contains(pull, "批准后按方案建工单") {
 		t.Errorf("pull prompt asks the Bot to recreate plan tickets:\n%s", pull)
 	}
-	if strings.Contains(pull, "X-Multica-Signature") || strings.Contains(pull, "approve_plan") {
-		t.Errorf("pull prompt mentions webhook or release it does not have:\n%s", pull)
+	if strings.Contains(pull, "approve_plan") {
+		t.Errorf("pull prompt mentions release it does not have:\n%s", pull)
 	}
 
 	push := renderBotSetupPrompt(botSetupPromptData{

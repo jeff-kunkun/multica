@@ -38,7 +38,8 @@ var botSetupPrompt = template.Must(template.New("bot-setup").Parse(`你是 Multi
 {{- end}}
 - 推送断过就用 get_events 从最后处理的 next_cursor 补读。
 {{- else}}
-- 没有配推送地址，靠 get_events 补读：参数 after 填上次的 next_cursor（第一次填 0），has_more 为 true 就接着读。
+- 你如果有办公室能访问到的接收地址，调用 set_webhook 登记它（只做一次，以后一直有效）。把返回的 webhook_secret 存进密钥配置，用它校验每个请求的 X-Multica-Signature："sha256=" 加上对原始请求体做 HMAC-SHA256 的十六进制。之后办公室有事件就 POST 给你，每批最多 50 条，按顺序。
+- 没有接收地址，或推送断过，都靠 get_events 补读：参数 after 填上次的 next_cursor（第一次填 0），has_more 为 true 就接着读。
 - 把 next_cursor 持久化保存，重启后从它接着读，不要回到 0。事件保留 7 天。
 {{- end}}
 

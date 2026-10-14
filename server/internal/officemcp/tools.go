@@ -14,7 +14,8 @@ member agents do the work. Typical loop: create_project -> open_topic (one
 member agent drafts a plan on that issue) -> read_plan -> request_approval
 (asks the boss) -> approve_plan (only if you were granted release authority,
 otherwise the boss approves) -> the approved plan creates the work tickets ->
-follow progress with get_events -> close_issue when done. Issues accept a
+follow progress with get_events (or register a push address once with
+set_webhook) -> close_issue when done. Issues accept a
 UUID or a key like ABC-12. Agents start working when an issue is assigned to
 them or when a comment @mentions them as [@Name](mention://agent/<id>); every
 run costs money, so mention only to start real work.`
@@ -61,7 +62,9 @@ func schema(required []string, props map[string]any) map[string]any {
 	return s
 }
 
-func strProp(desc string) map[string]any { return map[string]any{"type": "string", "description": desc} }
+func strProp(desc string) map[string]any {
+	return map[string]any{"type": "string", "description": desc}
+}
 
 func enumProp(desc string, values ...string) map[string]any {
 	return map[string]any{"type": "string", "description": desc, "enum": values}
@@ -333,7 +336,7 @@ func officeTools() []tool {
 			},
 		},
 		{
-			Name:        "approve_plan",
+			Name: "approve_plan",
 			Description: "Approve one plan version on an issue, which creates its work tickets and starts them. " +
 				"Only the newest version can be approved. Only allowed when this Bot was granted release authority (see whoami).",
 			Schema: schema([]string{"issue", "version"}, map[string]any{
@@ -464,6 +467,18 @@ func officeTools() []tool {
 					q.Set("limit", v)
 				}
 				return c.do("GET", "/api/bot/events?"+q.Encode(), nil)
+			},
+		},
+		{
+			Name: "set_webhook",
+			Description: "Register the HTTPS address the office should POST events to, so you are woken instead of polling. " +
+				"Returns webhook_secret: verify each delivery's X-Multica-Signature (\"sha256=\" + hex HMAC-SHA256 of the raw body). " +
+				"An empty url stops pushing. Deliveries carry next_cursor; after an outage catch up with get_events.",
+			Schema: schema([]string{"url"}, map[string]any{
+				"url": strProp("Receiving address reachable from the office; empty string to stop."),
+			}),
+			Call: func(c *caller, a args) (any, error) {
+				return c.do("PUT", "/api/bot/webhook", map[string]any{"url": a.str("url")})
 			},
 		},
 	}
