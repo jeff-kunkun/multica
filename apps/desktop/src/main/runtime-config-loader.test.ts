@@ -89,7 +89,7 @@ describe("loadRuntimeConfig", () => {
     const home = await mkdtemp(join(tmpdir(), "multica-desktop-home-"));
     await mkdir(join(home, ".multica"));
     const legacyPath = join(home, ".multica", "desktop.json");
-    const legacy = JSON.stringify({ schemaVersion: 1, apiUrl: "https://origin.ai.ferryway.cc" });
+    const legacy = JSON.stringify({ schemaVersion: 1, apiUrl: "https://origin.ai.example.com" });
     await writeFile(legacyPath, legacy);
     return { home, legacyPath, legacy };
   }

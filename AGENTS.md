@@ -135,20 +135,20 @@ Branches
   `upstream` remote), cherry-pick only the fixes this line needs onto a branch
   cut from `kun-main`, and open a PR to `kun-main`. Never merge
   `upstream/main` wholesale.
-- Never change the ai.ferryway.cc instance or anything under `/opt/multica`
-  on its host; that is the kun line.
+- Never change the kun-line instance or anything under `/opt/multica` on its
+  host; that is the kun line.
 
 Releases
 - Server and web: merging to `kun-main` is the release. The
   `build-kun-main.yml` job in `kkunkunya/multica-image-builder` builds
-  `ghcr.io/kkunkunya/multica-main-{backend,web}:sha-<sha>`, and the instance at
-  https://office.ferryway.cc deploys the tip on its own. See
+  `ghcr.io/kkunkunya/multica-main-{backend,web}:sha-<sha>`, and the office instance
+  deploys the tip on its own. See
   `docs/kun-main/instance.md`.
 - CLI and Desktop: publish only to `kkunkunya/multica-main-release`. Never to
   `jeff-kunkun/multica` Releases or image-builder Releases — colleagues'
   clients update from those and would get kun-main builds.
 - Client defaults (CLI server URL, Desktop runtime config, update feeds) point
-  at office.ferryway.cc and multica-main-release; keep them there.
+  at the office instance and multica-main-release; keep them there.
 
 Migrations
 - Keep upstream numbering: a new migration takes the next number after the

@@ -1,7 +1,7 @@
 # kun-main instance
 
-The kun-main line runs its own instance at **https://office.ferryway.cc**. It
-shares a host with the kun-line instance (ai.ferryway.cc) and nothing else:
+The kun-main line runs its own instance at **https://office.example.com**. It
+shares a host with the kun-line instance (ai.example.com) and nothing else:
 own database, own upload volume, own ports, own images, own update timer.
 
 | | kun-main (office) | kun line (ai) — do not touch |
@@ -79,9 +79,9 @@ reset behind the team's shared authenticator code. Secrets live only in that
 
 ## Mirror to the kun-line instance
 
-People who stay on ai.ferryway.cc keep working with Kun there as before; the
+People who stay on ai.example.com keep working with Kun there as before; the
 work itself happens here. The office backend (`server/internal/mirror`)
-keeps one workspace here and Kun's `kunkunya` workspace on ai.ferryway.cc in
+keeps one workspace here and Kun's `kunkunya` workspace on ai.example.com in
 step through both servers' public APIs, every 20 seconds. Nothing is changed
 on the kun line.
 
@@ -118,7 +118,7 @@ disabled agent refuses even a mention, and the pull brings the request here.
 
 Setup, once:
 
-1. On ai.ferryway.cc, create a personal access token as Kun. Note the
+1. On ai.example.com, create a personal access token as Kun. Note the
    `kunkunya` workspace id and Kun's member user id there. Turn off work for
    the `kunkunya` agents.
 2. Here, create a personal access token as Kun for the pull.
@@ -126,7 +126,7 @@ Setup, once:
 
 ```bash
 MULTICA_MIRROR_WORKSPACE=<office workspace slug>
-MULTICA_MIRROR_TARGET_URL=https://ai.ferryway.cc
+MULTICA_MIRROR_TARGET_URL=https://ai.example.com
 MULTICA_MIRROR_TARGET_TOKEN=mul_...
 MULTICA_MIRROR_TARGET_WORKSPACE=<kunkunya workspace id>
 MULTICA_MIRROR_TARGET_ASSIGNEE=<Kun's user id there>
@@ -170,7 +170,7 @@ agents and tokens start over, so log the `office` CLI profile in again.
 
 ## Moving the kunkunya workspace in
 
-`server/cmd/movein` copies Kun's `kunkunya` workspace on ai.ferryway.cc into
+`server/cmd/movein` copies Kun's `kunkunya` workspace on ai.example.com into
 the office workspace once: projects as they were (memory and resources),
 every issue done or cancelled with its comments, its old number where free
 and a footer naming the old number, holder and status, and every chat read.
@@ -191,10 +191,10 @@ cd server && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o movein ./cmd/move
 # on the server
 docker compose -p multica-main cp movein backend:/tmp/movein
 docker compose -p multica-main exec -e MULTICA_MOVEIN_TOKEN=mul_... backend \
-  /tmp/movein --from https://ai.ferryway.cc --from-workspace kunkunya --to-workspace <office slug>
+  /tmp/movein --from https://ai.example.com --from-workspace kunkunya --to-workspace <office slug>
 ```
 
-The token is Kun's personal access token on ai.ferryway.cc. It prints the
+The token is Kun's personal access token on ai.example.com. It prints the
 counts as JSON; a run that stops halfway is finished by running it again.
 Once the move is done, delete `server/cmd/movein`.
 
@@ -211,6 +211,6 @@ docker compose -p multica-main ps
 Connect a local daemon with a separate profile:
 
 ```bash
-multica login --profile office --server-url https://office.ferryway.cc
+multica login --profile office --server-url https://office.example.com
 multica daemon start --profile office
 ```

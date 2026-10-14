@@ -12,14 +12,14 @@ describe("runtime config", () => {
       parseRuntimeConfig(
         JSON.stringify({
           schemaVersion: 1,
-          apiUrl: "https://congvc-x99.taila6fa8a.ts.net:18443",
+          apiUrl: "https://host.example.com:18443",
         }),
       ),
     ).toEqual({
       schemaVersion: 1,
-      apiUrl: "https://congvc-x99.taila6fa8a.ts.net:18443",
-      wsUrl: "wss://congvc-x99.taila6fa8a.ts.net:18443/ws",
-      appUrl: "https://congvc-x99.taila6fa8a.ts.net:18443",
+      apiUrl: "https://host.example.com:18443",
+      wsUrl: "wss://host.example.com:18443/ws",
+      appUrl: "https://host.example.com:18443",
     });
   });
 

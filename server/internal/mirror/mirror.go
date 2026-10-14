@@ -39,7 +39,7 @@ const defaultInterval = 20 * time.Second
 // back from the target.
 type Config struct {
 	Workspace       string   // local workspace slug or id
-	TargetURL       string   // e.g. https://ai.ferryway.cc
+	TargetURL       string   // e.g. https://ai.example.com
 	TargetToken     string   // personal access token of a target member
 	TargetWorkspace string   // target workspace id
 	TargetAssignee  string   // target member id that holds every copied issue
