@@ -689,16 +689,7 @@
     "working_other": "处理中 · {{count}}",
     "needs_runtime": "缺运行时",
     "last_active": "最近活跃 {{when}}",
-    "edit": "编辑",
-    "active_aria": "{{name}} 在岗",
-    "archive_confirm_title": "归档 {{name}}？",
-    "archive_confirm_description_other": "它手上的 {{count}} 个任务会被取消。历史会保留，打开开关即可恢复。",
-    "archive_confirm": "归档",
-    "archive_confirm_cancel": "取消",
-    "archived_toast": "{{name}} 已归档",
-    "restored_toast": "{{name}} 已恢复",
-    "archive_failed_toast": "归档智能体失败",
-    "restore_failed_toast": "恢复智能体失败"
+    "current_work": "在做"
   },
   "magpie": {
     "unrouted": "未接 magpie",

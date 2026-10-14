@@ -1,135 +1,42 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type {
   Agent,
   AgentRuntime,
   MemberWithUser,
 } from "@multica/core/types";
-import { providerSupportsMcpConfig } from "@multica/core/agents";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@multica/ui/components/ui/alert-dialog";
 import { cn } from "@multica/ui/lib/utils";
 import { PAGE_GUTTER, PAGE_RAIL } from "../../layout/page-header";
 import { ActivityTab } from "./tabs/activity-tab";
-import { InstructionsTab } from "./tabs/instructions-tab";
-import { EnvTab } from "./tabs/env-tab";
-import { CustomArgsTab } from "./tabs/custom-args-tab";
-import { McpConfigTab } from "./tabs/mcp-config-tab";
-import { RuntimeConfigTab } from "./tabs/runtime-config-tab";
 import { AgentDetailInspector } from "./agent-detail-inspector";
-import { AgentAccessSettings } from "./agent-access-settings";
 import { AgentOverviewSummary } from "./agent-overview-summary";
 import { ActorIssuesPanel } from "../../common/actor-issues-panel";
 import { useT } from "../../i18n";
 import { useNavigation } from "../../navigation";
 
-type DetailSection = "overview" | "work" | "capabilities" | "settings";
+export type DetailTab = "overview" | "work" | "settings";
 
-export type DetailTab =
-  | "overview"
-  | "work"
-  | "instructions"
-  | "mcp_config"
-  | "general"
-  | "access"
-  | "env"
-  | "custom_args"
-  | "runtime_config";
-
-type SecondaryTab = {
-  id: DetailTab;
-  labelKey:
-    | "instructions"
-    | "mcp_config"
-    | "general"
-    | "access"
-    | "environment"
-    | "custom_args"
-    | "runtime_config";
-};
-
-const CAPABILITY_TABS: SecondaryTab[] = [
-  { id: "instructions", labelKey: "instructions" },
-  { id: "mcp_config", labelKey: "mcp_config" },
-];
-
-const SETTINGS_TABS: SecondaryTab[] = [
-  { id: "general", labelKey: "general" },
-  { id: "access", labelKey: "access" },
-  { id: "env", labelKey: "environment" },
-  { id: "custom_args", labelKey: "custom_args" },
-  { id: "runtime_config", labelKey: "runtime_config" },
-];
-
-const TOP_TABS: { id: DetailSection; labelKey: DetailSection }[] = [
-  { id: "overview", labelKey: "overview" },
-  { id: "work", labelKey: "work" },
-  { id: "capabilities", labelKey: "capabilities" },
-  { id: "settings", labelKey: "settings" },
-];
-
-const CAPABILITY_IDS = new Set<DetailTab>(
-  CAPABILITY_TABS.map((tab) => tab.id),
-);
-const SETTINGS_IDS = new Set<DetailTab>(SETTINGS_TABS.map((tab) => tab.id));
-const DETAIL_VIEWS = new Set<DetailTab>([
-  "overview",
-  "work",
-  ...CAPABILITY_TABS.map((tab) => tab.id),
-  ...SETTINGS_TABS.map((tab) => tab.id),
-]);
+const TABS: DetailTab[] = ["overview", "work", "settings"];
 
 function isDetailTab(value: string | null): value is DetailTab {
-  return value !== null && DETAIL_VIEWS.has(value as DetailTab);
-}
-
-function sectionForView(view: DetailTab): DetailSection {
-  if (view === "overview") return "overview";
-  if (view === "work") return "work";
-  if (CAPABILITY_IDS.has(view)) return "capabilities";
-  return "settings";
+  return value !== null && (TABS as string[]).includes(value);
 }
 
 interface AgentOverviewPaneProps {
   agent: Agent;
   runtime: AgentRuntime | null;
   owner: MemberWithUser | null;
-  runtimes: AgentRuntime[];
-  members: MemberWithUser[];
-  onUpdate: (id: string, data: Record<string, unknown>) => Promise<void>;
-  currentUserId?: string | null;
-  canEdit: boolean;
-  navIntent?: DetailTab | null;
-  onNavIntentHandled?: () => void;
 }
 
 /**
- * Agent workbench organised around user intent instead of backend fields.
- * Overview answers "what is happening now?", Work owns the issue surface,
- * Capabilities describes what the agent can do, and Settings describes how
- * it runs. The lower-level editors stay intact so the reorganisation does not
- * alter persistence or permission semantics.
+ * The office mirrors magpie: Overview shows what is happening now, Work the
+ * agent's issues, and Settings a read-only copy of how magpie runs it.
  */
 export function AgentOverviewPane({
   agent,
   runtime,
   owner,
-  runtimes,
-  members,
-  onUpdate,
-  currentUserId,
-  canEdit,
-  navIntent,
-  onNavIntentHandled,
 }: AgentOverviewPaneProps) {
   const { t } = useT("agents");
   const navigation = useNavigation();
@@ -137,127 +44,23 @@ export function AgentOverviewPane({
   const [activeView, setActiveView] = useState<DetailTab>(() =>
     isDetailTab(urlView) ? urlView : "overview",
   );
-  const [activeDirty, setActiveDirty] = useState(false);
-  const [pendingView, setPendingView] = useState<DetailTab | null>(null);
   const lastUrlViewRef = useRef(urlView);
 
-  const visibleCapabilityTabs = useMemo(() => {
-    const showMcp = runtime
-      ? providerSupportsMcpConfig(runtime.provider)
-      : true;
-
-    return CAPABILITY_TABS.filter((tab) => {
-      if (tab.id === "mcp_config") return showMcp;
-      return true;
-    });
-  }, [runtime]);
-
-  const visibleSettingsTabs = useMemo(
-    () =>
-      SETTINGS_TABS.filter((tab) => {
-        // Env is the only settings tab backed by a secret-bearing endpoint.
-        // GET/PUT /api/agents/{id}/env admits the agent owner or a workspace
-        // owner/admin (MUL-5438) — the same rule `canEdit` encodes — so
-        // showing the tab to anyone else guarantees a 403 on "Reveal & edit".
-        // The server stays the boundary; this only removes a dead entry point.
-        if (tab.id === "env") return canEdit;
-        if (tab.id === "runtime_config") return runtime?.provider === "openclaw";
-        return true;
-      }),
-    [canEdit, runtime?.provider],
-  );
-
-  const visibleViews = useMemo(
-    () =>
-      new Set<DetailTab>([
-        "overview",
-        "work",
-        ...visibleCapabilityTabs.map((tab) => tab.id),
-        ...visibleSettingsTabs.map((tab) => tab.id),
-      ]),
-    [visibleCapabilityTabs, visibleSettingsTabs],
-  );
-
-  const effectiveView = visibleViews.has(activeView) ? activeView : "overview";
-  const activeSection = sectionForView(effectiveView);
-
-  const commitView = useCallback(
-    (next: DetailTab) => {
-      setActiveView(next);
-      const params = new URLSearchParams(navigation.searchParams);
-      if (next === "overview") params.delete("view");
-      else params.set("view", next);
-      const query = params.toString();
-      navigation.replace(`${navigation.pathname}${query ? `?${query}` : ""}`);
-    },
-    [navigation],
-  );
-
-  const requestView = useCallback(
-    (next: DetailTab) => {
-      if (next === effectiveView) return;
-      if (activeDirty) {
-        setPendingView(next);
-        return;
-      }
-      commitView(next);
-    },
-    [activeDirty, commitView, effectiveView],
-  );
-
-  const requestSection = (section: DetailSection) => {
-    if (section === "overview" || section === "work") {
-      requestView(section);
-      return;
-    }
-    if (section === "capabilities") {
-      const current = CAPABILITY_IDS.has(effectiveView)
-        ? effectiveView
-        : visibleCapabilityTabs[0]?.id;
-      if (current) requestView(current);
-      return;
-    }
-    const current = SETTINGS_IDS.has(effectiveView)
-      ? effectiveView
-      : visibleSettingsTabs[0]?.id;
-    if (current) requestView(current);
-  };
-
-  const commitViewChange = () => {
-    if (!pendingView) return;
-    commitView(pendingView);
-    setActiveDirty(false);
-    setPendingView(null);
+  const selectView = (next: DetailTab) => {
+    if (next === activeView) return;
+    setActiveView(next);
+    const params = new URLSearchParams(navigation.searchParams);
+    if (next === "overview") params.delete("view");
+    else params.set("view", next);
+    const query = params.toString();
+    navigation.replace(`${navigation.pathname}${query ? `?${query}` : ""}`);
   };
 
   useEffect(() => {
     if (urlView === lastUrlViewRef.current) return;
     lastUrlViewRef.current = urlView;
-    if (urlView === null) {
-      setActiveView("overview");
-      return;
-    }
-    if (isDetailTab(urlView) && visibleViews.has(urlView)) {
-      setActiveView(urlView);
-    }
-  }, [urlView, visibleViews]);
-
-  useEffect(() => {
-    if (navIntent == null) return;
-    if (visibleViews.has(navIntent)) requestView(navIntent);
-    onNavIntentHandled?.();
-  }, [navIntent, onNavIntentHandled, requestView, visibleViews]);
-
-  const secondaryTabs =
-    activeSection === "capabilities"
-      ? visibleCapabilityTabs
-      : activeSection === "settings"
-        ? visibleSettingsTabs
-        : [];
-  const activeSecondaryTab = secondaryTabs.find(
-    (tab) => tab.id === effectiveView,
-  );
-  const isSecondaryLayout = secondaryTabs.length > 0 && activeSecondaryTab != null;
+    setActiveView(isDetailTab(urlView) ? urlView : "overview");
+  }, [urlView]);
 
   return (
     <div className="flex min-h-0 flex-1 flex-col bg-background">
@@ -267,56 +70,31 @@ export function AgentOverviewPane({
         aria-label={t(($) => $.tabs.page_navigation_aria)}
       >
         <div className={cn(PAGE_RAIL, PAGE_GUTTER, "flex items-center gap-6")}>
-          {TOP_TABS.map((tab) => (
+          {TABS.map((tab) => (
             <button
-              key={tab.id}
+              key={tab}
               type="button"
               role="tab"
-              aria-selected={activeSection === tab.id}
-              onClick={() => requestSection(tab.id)}
+              aria-selected={activeView === tab}
+              onClick={() => selectView(tab)}
               className={cn(
                 "relative shrink-0 py-3 text-body font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
-                activeSection === tab.id
+                activeView === tab
                   ? "text-foreground after:absolute after:inset-x-0 after:bottom-0 after:h-0.5 after:bg-foreground"
                   : "text-muted-foreground hover:text-foreground",
               )}
             >
-              {t(($) => $.tabs[tab.labelKey])}
+              {t(($) => $.tabs[tab])}
             </button>
           ))}
         </div>
       </div>
 
-      {/* Header, tab bar, banners and every panel read PAGE_RAIL, so the page
-          is one centred column at every width (MUL-7107). The first pass put
-          the chrome on the rail and left the panels off it, which is the bug;
-          the second put everything full-bleed, which aligned the leading edge
-          and then stretched this two-column layout to 2200px and stranded the
-          summary card 1200px from the list it summarises.
-
-          A detail page is a document about one entity, not a table. Genuine
-          list surfaces — Issues, My Issues, member detail — stay full-bleed on
-          PAGE_GUTTER alone; `runtimes` reads the same rail.
-
-          Panels that own no inner gutter take PAGE_GUTTER on the rail element
-          itself; Work and the secondary nav layout take a bare rail because
-          their toolbar and nav rail already carry it. Below ~1730px the rail
-          is wider than the viewport, so it costs small and medium screens
-          nothing.
-
-          Overview/Work scroll as one page. Sidebar views split scrolling on
-          md+ (nav rail pinned, content pane scrolls) like settings-page.tsx;
-          below md the rail is a horizontal strip and the page scrolls whole. */}
-      <div
-        className={cn(
-          "min-h-0 flex-1 overflow-y-auto",
-          isSecondaryLayout && "md:overflow-hidden",
-        )}
-      >
-        {effectiveView === "overview" && (
-          <div
-            className={cn(PAGE_RAIL, PAGE_GUTTER, "py-4 sm:py-6")}
-          >
+      {/* Header, tab bar and every panel read PAGE_RAIL, so the page is one
+          centred column at every width (MUL-7107). */}
+      <div className="min-h-0 flex-1 overflow-y-auto">
+        {activeView === "overview" && (
+          <div className={cn(PAGE_RAIL, PAGE_GUTTER, "py-4 sm:py-6")}>
             <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_320px]">
               <ActivityTab agent={agent} showPerformance={false} />
               <AgentOverviewSummary
@@ -328,149 +106,20 @@ export function AgentOverviewPane({
           </div>
         )}
 
-        {effectiveView === "work" && (
+        {activeView === "work" && (
           <div className={cn(PAGE_RAIL, "flex min-h-[620px] flex-col")}>
             <ActorIssuesPanel actorType="agent" actorId={agent.id} />
           </div>
         )}
 
-        {secondaryTabs.length > 0 && activeSecondaryTab && (
-          <div className={cn(PAGE_RAIL, "flex min-h-full flex-col md:h-full md:flex-row")}>
-            {/* Content-surface color, no shell tint — same rule as the settings
-                nav: in-card panels must not break the desktop tab merge (MUL-4439). */}
-            <aside
-              className={cn(
-                "shrink-0 overflow-x-auto border-b border-surface-border py-2 md:w-52 md:overflow-y-auto md:border-b-0 md:border-r md:py-4",
-                PAGE_GUTTER,
-              )}
-            >
-              <div
-                className="flex w-max min-w-full items-center gap-1 md:w-full md:flex-col md:items-stretch"
-                role="tablist"
-                aria-orientation="vertical"
-                aria-label={t(($) => $.tabs.section_navigation_aria)}
-              >
-                {secondaryTabs.map((tab) => {
-                  const active = effectiveView === tab.id;
-                  return (
-                    <button
-                      key={tab.id}
-                      type="button"
-                      role="tab"
-                      aria-selected={active}
-                      onClick={() => requestView(tab.id)}
-                      className={cn(
-                        "flex h-8 shrink-0 items-center rounded-md px-2.5 text-left text-caption transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring md:w-full",
-                        active
-                          ? "bg-surface-selected font-medium text-surface-selected-foreground hover:bg-surface-selected"
-                          : "text-muted-foreground hover:bg-surface-hover hover:text-foreground",
-                      )}
-                    >
-                      {t(($) => $.tabs[tab.labelKey])}
-                    </button>
-                  );
-                })}
-              </div>
-            </aside>
-
-            <section className="min-w-0 flex-1 md:overflow-y-auto">
-              <div className="w-full max-w-3xl p-4 sm:p-6 md:p-8">
-                <header>
-                  <h2 className="text-title-sm font-medium text-balance">
-                    {t(($) => $.tabs[activeSecondaryTab.labelKey])}
-                  </h2>
-                </header>
-
-                <div className="mt-6">
-                  {effectiveView === "instructions" && (
-                    <InstructionsTab
-                      agent={agent}
-                      onSave={(updates) => onUpdate(agent.id, updates)}
-                      onDirtyChange={setActiveDirty}
-                    />
-                  )}
-                  {effectiveView === "mcp_config" && (
-                    <McpConfigTab
-                      agent={agent}
-                      canEdit={canEdit}
-                      onSave={(updates) => onUpdate(agent.id, updates)}
-                      onDirtyChange={setActiveDirty}
-                    />
-                  )}
-                  {effectiveView === "general" && (
-                    <AgentDetailInspector
-                      agent={agent}
-                      runtimes={runtimes}
-                      members={members}
-                      currentUserId={currentUserId ?? null}
-                      canEdit={canEdit}
-                      onUpdate={onUpdate}
-                    />
-                  )}
-                  {effectiveView === "access" && (
-                    <AgentAccessSettings
-                      agent={agent}
-                      members={members}
-                      currentUserId={currentUserId ?? null}
-                      onDirtyChange={setActiveDirty}
-                      onUpdate={onUpdate}
-                    />
-                  )}
-                  {effectiveView === "env" && (
-                    <EnvTab agent={agent} onDirtyChange={setActiveDirty} />
-                  )}
-                  {effectiveView === "custom_args" && (
-                    <CustomArgsTab
-                      agent={agent}
-                      runtimeDevice={runtime ?? undefined}
-                      onSave={(updates) => onUpdate(agent.id, updates)}
-                      onDirtyChange={setActiveDirty}
-                    />
-                  )}
-                  {effectiveView === "runtime_config" && (
-                    <RuntimeConfigTab
-                      agent={agent}
-                      onSave={(updates) => onUpdate(agent.id, updates)}
-                      onDirtyChange={setActiveDirty}
-                    />
-                  )}
-                </div>
-              </div>
-            </section>
+        {activeView === "settings" && (
+          <div className={cn(PAGE_RAIL, PAGE_GUTTER, "py-4 sm:py-6")}>
+            <div className="max-w-3xl">
+              <AgentDetailInspector runtime={runtime} />
+            </div>
           </div>
         )}
       </div>
-
-      {pendingView !== null && (
-        <AlertDialog
-          open
-          onOpenChange={(open) => {
-            if (!open) setPendingView(null);
-          }}
-        >
-          <AlertDialogContent>
-            <AlertDialogHeader>
-              <AlertDialogTitle>
-                {t(($) => $.tabs.discard_dialog_title)}
-              </AlertDialogTitle>
-              <AlertDialogDescription>
-                {t(($) => $.tabs.discard_dialog_description)}
-              </AlertDialogDescription>
-            </AlertDialogHeader>
-            <AlertDialogFooter>
-              <AlertDialogCancel>
-                {t(($) => $.tabs.discard_keep)}
-              </AlertDialogCancel>
-              <AlertDialogAction
-                variant="destructive"
-                onClick={commitViewChange}
-              >
-                {t(($) => $.tabs.discard_confirm)}
-              </AlertDialogAction>
-            </AlertDialogFooter>
-          </AlertDialogContent>
-        </AlertDialog>
-      )}
     </div>
   );
 }

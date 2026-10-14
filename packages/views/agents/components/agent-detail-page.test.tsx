@@ -25,20 +25,7 @@ const TEST_RESOURCES = { en: { common: enCommon, agents: enAgents } };
 // rules (via auth + member fixtures); the tabbed body and avatar/presence
 // widgets are irrelevant weight, so they're stubbed.
 vi.mock("./agent-overview-pane", () => ({
-  AgentOverviewPane: ({
-    agent,
-    onUpdate,
-  }: {
-    agent: Agent;
-    onUpdate: (id: string, data: Record<string, unknown>) => Promise<void>;
-  }) => (
-    <button
-      type="button"
-      onClick={() => void onUpdate(agent.id, { description: "new-description" })}
-    >
-      update description
-    </button>
-  ),
+  AgentOverviewPane: () => null,
 }));
 vi.mock("../../common/actor-avatar", () => ({
   ActorAvatar: () => <div>actor-avatar</div>,
@@ -58,7 +45,6 @@ const currentUserRef = vi.hoisted(() => ({
 const mockToastError = vi.hoisted(() => vi.fn());
 const mockModalOpen = vi.hoisted(() => vi.fn());
 const mockGetAgent = vi.hoisted(() => vi.fn());
-const mockUpdateAgent = vi.hoisted(() => vi.fn());
 
 vi.mock("@multica/core/hooks", () => ({
   useWorkspaceId: () => "ws-1",
@@ -79,23 +65,6 @@ vi.mock("@multica/core/workspace/queries", () => ({
     enabled: !!wsId && !!agentId,
     retry: false,
   }),
-  cacheAgentResponse: (
-    queryClient: QueryClient,
-    wsId: string,
-    agent: Agent,
-    options: { insertIntoList?: boolean } = {},
-  ) => {
-    queryClient.setQueryData(["agents", wsId, "detail", agent.id], agent);
-    queryClient.setQueryData<Agent[]>(["agents", wsId], (current) =>
-      current?.some((item) => item.id === agent.id)
-        ? current.map((item) => (item.id === agent.id ? agent : item))
-        : current
-          ? options.insertIntoList === false
-            ? current
-            : [...current, agent]
-          : current,
-    );
-  },
   memberListOptions: (wsId: string) => ({
     queryKey: ["members", wsId],
     queryFn: () =>
@@ -103,15 +72,6 @@ vi.mock("@multica/core/workspace/queries", () => ({
         ? new Promise(() => {})
         : Promise.resolve(membersRef.current),
   }),
-  workspaceKeys: {
-    agents: (wsId: string) => ["agents", wsId],
-    agent: (wsId: string, agentId: string) => [
-      "agents",
-      wsId,
-      "detail",
-      agentId,
-    ],
-  },
 }));
 vi.mock("@multica/core/runtimes", () => ({
   runtimeListOptions: (wsId: string) => ({
@@ -150,7 +110,7 @@ vi.mock("@multica/core/api", () => {
     }
   }
   return {
-    api: { getAgent: mockGetAgent, updateAgent: mockUpdateAgent },
+    api: { getAgent: mockGetAgent },
     ApiError,
   };
 });
@@ -216,7 +176,6 @@ beforeEach(() => {
   membersPendingRef.current = false;
   agentsRef.current = [baseAgent];
   mockGetAgent.mockRejectedValue(new ApiError("not found", 404, "Not Found"));
-  mockUpdateAgent.mockResolvedValue({ ...baseAgent, description: "new-description" });
 });
 
 describe("AgentDetailPage direct-detail fallback", () => {
@@ -352,26 +311,6 @@ describe("AgentDetailPage direct-detail fallback", () => {
       screen.queryByText("Couldn't load this agent"),
     ).not.toBeInTheDocument();
   });
-
-  it("optimistically updates a detail-only cache entry", async () => {
-    agentsRef.current = [];
-    mockGetAgent.mockResolvedValue(baseAgent);
-    mockUpdateAgent.mockImplementation(() => new Promise(() => {}));
-    const { queryClient } = renderPage();
-    await screen.findByRole("button", { name: "Assign work" });
-
-    fireEvent.click(screen.getByRole("button", { name: "update description" }));
-
-    expect(await screen.findByText("new-description")).toBeInTheDocument();
-    expect(
-      queryClient.getQueryData<Agent>([
-        "agents",
-        "ws-1",
-        "detail",
-        "agent-1",
-      ]),
-    ).toMatchObject({ description: "new-description" });
-  });
 });
 
 describe("AgentDetailPage DM button", () => {
@@ -424,36 +363,20 @@ describe("AgentDetailPage DM button", () => {
     expect(screen.queryByRole("button", { name: "DM" })).not.toBeInTheDocument();
   });
 
-  it("offers a system agent's admin Duplicate but never Archive", async () => {
-    // An admin passes `canEditAgent`, so `canArchive` is true; only the system
-    // agent's undefined `onArchive` keeps Archive out of the menu.
-    agentsRef.current = [
-      { ...baseAgent, system_key: "mika" },
-    ];
+  // The office mirrors magpie: nobody, not even the owner, edits, archives
+  // or duplicates an agent here.
+  it("offers no edit, archive or duplicate actions, even to the owner", async () => {
+    agentsRef.current = [{ ...baseAgent, owner_id: "user-1" }];
     membersRef.current = [{ user_id: "user-1", role: "owner" }];
     renderPage();
 
     await screen.findByRole("button", { name: "Assign work" });
-    fireEvent.click(screen.getByLabelText("Agent actions"));
-    expect(await screen.findByText("Duplicate")).toBeInTheDocument();
+    expect(screen.queryByLabelText("Agent actions")).not.toBeInTheDocument();
+    expect(screen.queryByText("Duplicate")).not.toBeInTheDocument();
     expect(screen.queryByText("Archive")).not.toBeInTheDocument();
   });
 
-  it("keeps the more-actions trigger for an editable non-system agent", async () => {
-    // Positive counterpart: an owner of a normal agent has a real archive
-    // action, so the menu trigger must still render. Guards the gate against
-    // over-hiding.
-    agentsRef.current = [{ ...baseAgent, owner_id: "user-1" }];
-    membersRef.current = [{ user_id: "user-1", role: "member" }];
-    renderPage();
-
-    await screen.findByRole("button", { name: "Assign work" });
-    expect(
-      screen.getByLabelText("Agent actions"),
-    ).toBeInTheDocument();
-  });
-
-  it("explains an unbound agent and blocks run actions without losing the profile", async () => {
+  it("explains an unbound agent and blocks run actions", async () => {
     agentsRef.current = [
       {
         ...baseAgent,
@@ -468,8 +391,8 @@ describe("AgentDetailPage DM button", () => {
       await screen.findByText(/needs a runtime before it can run/i),
     ).toBeInTheDocument();
     expect(
-      screen.getByRole("button", { name: "Bind runtime" }),
-    ).toBeInTheDocument();
+      screen.queryByRole("button", { name: "Bind runtime" }),
+    ).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "DM" }));
     expect(mockToastError).toHaveBeenCalledWith(

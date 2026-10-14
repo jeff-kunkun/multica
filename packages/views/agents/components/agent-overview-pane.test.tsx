@@ -32,21 +32,6 @@ vi.mock("./tabs/activity-tab", () => ({
 vi.mock("./agent-overview-summary", () => ({
   AgentOverviewSummary: () => <div>agent-overview-summary</div>,
 }));
-vi.mock("./agent-access-settings", () => ({
-  AgentAccessSettings: () => <div>agent-access-settings</div>,
-}));
-vi.mock("./tabs/instructions-tab", () => ({
-  InstructionsTab: () => <div>instructions-tab</div>,
-}));
-vi.mock("./tabs/env-tab", () => ({
-  EnvTab: () => <div>env-tab</div>,
-}));
-vi.mock("./tabs/custom-args-tab", () => ({
-  CustomArgsTab: () => <div>custom-args-tab</div>,
-}));
-vi.mock("./tabs/mcp-config-tab", () => ({
-  McpConfigTab: () => <div>mcp-config-tab</div>,
-}));
 vi.mock("../../common/actor-issues-panel", () => ({
   ActorIssuesPanel: () => <div>actor-issues-panel</div>,
 }));
@@ -99,10 +84,7 @@ function makeRuntime(provider: string): AgentRuntime {
   };
 }
 
-function renderPane(
-  runtimes: AgentRuntime[],
-  { canEdit = true }: { canEdit?: boolean } = {},
-) {
+function renderPane(runtimes: AgentRuntime[]) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
@@ -123,10 +105,6 @@ function renderPane(
             agent={baseAgent}
             runtime={runtimes[0] ?? null}
             owner={null}
-            runtimes={runtimes}
-            members={[]}
-            onUpdate={vi.fn().mockResolvedValue(undefined)}
-            canEdit={canEdit}
           />
         </QueryClientProvider>
       </NavigationProvider>
@@ -134,63 +112,26 @@ function renderPane(
   );
 }
 
-function openCapabilities() {
-  fireEvent.click(screen.getByRole("tab", { name: /^Capabilities$/i }));
-}
-
 function openSettings() {
   fireEvent.click(screen.getByRole("tab", { name: /^Settings$/i }));
 }
 
-describe("AgentOverviewPane MCP tab visibility", () => {
-  it.each([
-    ["Claude", "claude"],
-    ["Codex", "codex"],
-    ["OpenCode", "opencode"],
-  ])("renders the MCP tab when the agent runs on the %s runtime", (_label, provider) => {
-    renderPane([makeRuntime(provider)]);
-    openCapabilities();
-    expect(screen.getByRole("tab", { name: /^MCP$/i })).toBeInTheDocument();
-  });
-
-  it("hides the MCP tab for providers whose backend does not read mcp_config", () => {
-    // Saving an MCP config on e.g. Gemini would be a silent no-op at run
-    // time — that's the bug this hiding logic is meant to prevent.
-    renderPane([makeRuntime("gemini")]);
-    openCapabilities();
+// The office mirrors magpie: no capability tab, and Settings is one read-only
+// card with no sub-navigation or editors.
+describe("AgentOverviewPane tabs", () => {
+  it("offers Overview, Work and Settings only", () => {
+    renderPane([makeRuntime("claude")]);
     expect(
-      screen.queryByRole("tab", { name: /^MCP$/i }),
-    ).not.toBeInTheDocument();
+      screen.getAllByRole("tab").map((tab) => tab.textContent),
+    ).toEqual(["Overview", "Work", "Settings"]);
   });
 
-  it("keeps the MCP tab visible when the runtime row hasn't loaded yet", () => {
-    // Empty runtimes[] mimics the brief window between the page mounting and
-    // the runtimes query resolving. Hiding the tab would flicker it off and
-    // then back on, which reads as a bug.
-    renderPane([]);
-    openCapabilities();
-    expect(screen.getByRole("tab", { name: /^MCP$/i })).toBeInTheDocument();
-  });
-});
-
-describe("AgentOverviewPane Environment tab visibility", () => {
-  it("shows the Environment tab to someone who can manage the agent", () => {
+  it("shows Settings read-only", () => {
     renderPane([makeRuntime("claude")]);
     openSettings();
-    expect(
-      screen.getByRole("tab", { name: /^Environment$/i }),
-    ).toBeInTheDocument();
-  });
-
-  it("hides the Environment tab from users who cannot manage the agent", () => {
-    // The env endpoints admit the agent owner or a workspace owner/admin
-    // (MUL-5438) — the rule `canEdit` already encodes. Anyone else who opens
-    // the tab hits a guaranteed 403 on "Reveal & edit".
-    renderPane([makeRuntime("claude")], { canEdit: false });
-    openSettings();
-    expect(
-      screen.queryByRole("tab", { name: /^Environment$/i }),
-    ).not.toBeInTheDocument();
+    expect(screen.getByText("CLI")).toBeInTheDocument();
+    expect(screen.queryByRole("textbox")).toBeNull();
+    expect(screen.queryByRole("button")).toBeNull();
   });
 });
 
@@ -236,16 +177,11 @@ describe("AgentOverviewPane horizontal alignment", () => {
     expect(panelFor(container as HTMLElement)).toHaveClass(RAIL_SENTINEL);
   });
 
-  it.each([
-    ["Capabilities", openCapabilities],
-    ["Settings", openSettings],
-  ])("puts the %s nav-and-content row on the same rail", (_name, open) => {
+  it("puts the Settings panel on the same rail", () => {
     const { container } = renderPane([makeRuntime("claude")]);
-    open();
+    openSettings();
 
-    // Bare rail for the same reason as Work — the nav aside carries the gutter,
-    // and that aside, not the form behind it, is what meets the tabs above.
     expect(panelFor(container as HTMLElement)).toHaveClass(RAIL_SENTINEL);
-    expect(container.querySelector("aside")).toHaveClass(GUTTER_SENTINEL);
+    expect(panelFor(container as HTMLElement)).toHaveClass(GUTTER_SENTINEL);
   });
 });

@@ -1,80 +1,43 @@
 "use client";
 
-import { useState } from "react";
 import {
   AlertCircle,
   ArrowLeft,
   Clock3,
-  Copy,
   Lock,
   MessageSquare,
-  MoreHorizontal,
   Plus,
   Server,
-  Square,
-  Trash2,
 } from "lucide-react";
 import { toast } from "sonner";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
-import type {
-  Agent,
-  AgentRuntime,
-  UpdateAgentRequest,
-} from "@multica/core/types";
+import { useQuery } from "@tanstack/react-query";
+import type { Agent, AgentRuntime } from "@multica/core/types";
 import {
   type AgentPresenceDetail,
   isAgentRuntimeBound,
   useWorkspacePresenceMap,
 } from "@multica/core/agents";
-import { api, ApiError } from "@multica/core/api";
-import { useAuthStore } from "@multica/core/auth";
+import { ApiError } from "@multica/core/api";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useModalStore } from "@multica/core/modals";
 import { useWorkspacePaths } from "@multica/core/paths";
 import {
   agentDetailOptions,
   agentListOptions,
-  cacheAgentResponse,
   memberListOptions,
-  workspaceKeys,
 } from "@multica/core/workspace/queries";
 import { runtimeListOptions } from "@multica/core/runtimes";
 import { useAgentPermissions } from "@multica/core/permissions";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@multica/ui/components/ui/alert-dialog";
 import { Button } from "@multica/ui/components/ui/button";
-import { CapabilityBanner } from "@multica/ui/components/common/capability-banner";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@multica/ui/components/ui/dialog";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@multica/ui/components/ui/dropdown-menu";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { cn } from "@multica/ui/lib/utils";
-import { AppLink, useNavigation } from "../../navigation";
+import { AppLink } from "../../navigation";
 import { PAGE_GUTTER, PAGE_RAIL, PageHeader } from "../../layout/page-header";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { runtimeCliLabel } from "../../runtimes/components/runtime-machines";
 import { AgentPresenceIndicator } from "./agent-presence-indicator";
 import { VisibilityBadge } from "./visibility-badge";
-import { AgentOverviewPane, type DetailTab } from "./agent-overview-pane";
+import { AgentOverviewPane } from "./agent-overview-pane";
 import { ExpandableDescription } from "../../common/expandable-description";
 import { useT, useTimeAgo } from "../../i18n";
 
@@ -86,9 +49,6 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
   const { t } = useT("agents");
   const wsId = useWorkspaceId();
   const paths = useWorkspacePaths();
-  const navigation = useNavigation();
-  const qc = useQueryClient();
-  const currentUser = useAuthStore((s) => s.user);
 
   const {
     data: agents = [],
@@ -129,125 +89,11 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
 
   // Permission hook MUST be called unconditionally — its `agent | null`
   // signature handles the not-found / loading case internally so the early
-  // returns below don't violate the rules of hooks. Backend gates archive
-  // and restore identically to edit, so a single `canEdit` covers them all.
-  const {
-    canAssign,
-    canEdit,
-    isLoading: permissionsLoading,
-  } = useAgentPermissions(agent, wsId);
-
-  const [confirmArchive, setConfirmArchive] = useState(false);
-  const [confirmCancel, setConfirmCancel] = useState(false);
-
-  // One-shot request from the header for the overview pane to focus a tab. The pane clears it after consuming.
-  const [tabNavIntent, setTabNavIntent] = useState<DetailTab | null>(null);
-
-  const handleUpdate = async (id: string, data: Record<string, unknown>) => {
-    // Optimistic update: patch the matching agent in the cached list
-    // BEFORE the network round-trip so the inspector picker chips flip to
-    // the new value immediately on click. Without this, every inspector
-    // picker (thinking / visibility / concurrency / model / runtime) waits
-    // 0.5-2s for the API response + invalidate + refetch before the trigger
-    // updates — readable as obvious lag in the UI.
-    //
-    // On error we rollback only the fields THIS call wrote, leaving any
-    // other concurrently-mutated fields untouched, then invalidate so the
-    // cache converges with the server. A whole-list snapshot rollback
-    // would clobber a concurrent successful mutation if the failing call
-    // resolves last (e.g. flipping visibility then runtime simultaneously
-    // and only the visibility PATCH fails).
-    const optimisticData =
-      typeof data.runtime_id === "string"
-        ? { ...data, runtime_bound: data.runtime_id.trim().length > 0 }
-        : data;
-    const queryKey = workspaceKeys.agents(wsId);
-    const detailQueryKey = workspaceKeys.agent(wsId, id);
-    const prevAgents = qc.getQueryData<Agent[]>(queryKey);
-    const prevListAgent = prevAgents?.find((a) => a.id === id);
-    const prevDetailAgent = qc.getQueryData<Agent>(detailQueryKey);
-    const previousFields = (previousAgent: Agent | undefined) => {
-      const fields: Record<string, unknown> = {};
-      if (!previousAgent) return fields;
-      for (const key of Object.keys(optimisticData)) {
-        fields[key] = (
-          previousAgent as unknown as Record<string, unknown>
-        )[key];
-      }
-      return fields;
-    };
-    const prevListFields = previousFields(prevListAgent);
-    const prevDetailFields = previousFields(prevDetailAgent);
-    qc.setQueryData<Agent[]>(queryKey, (old) =>
-      old?.map((a) =>
-        a.id === id ? ({ ...a, ...optimisticData } as Agent) : a,
-      ),
-    );
-    qc.setQueryData<Agent>(detailQueryKey, (old) =>
-      old ? ({ ...old, ...optimisticData } as Agent) : old,
-    );
-    try {
-      const updatedAgent = await api.updateAgent(
-        id,
-        data as UpdateAgentRequest,
-      );
-      cacheAgentResponse(qc, wsId, updatedAgent, { insertIntoList: false });
-      void qc.invalidateQueries({ queryKey });
-      toast.success(t(($) => $.detail.agent_updated_toast));
-    } catch (e) {
-      if (prevListAgent) {
-        qc.setQueryData<Agent[]>(queryKey, (old) =>
-          old?.map((a) =>
-            a.id === id ? ({ ...a, ...prevListFields } as Agent) : a,
-          ),
-        );
-      }
-      if (prevDetailAgent) {
-        qc.setQueryData<Agent>(detailQueryKey, (old) =>
-          old ? ({ ...old, ...prevDetailFields } as Agent) : old,
-        );
-      }
-      void qc.invalidateQueries({ queryKey });
-      toast.error(e instanceof Error ? e.message : t(($) => $.detail.update_failed_toast));
-      throw e;
-    }
-  };
-
-  const handleArchive = async (id: string) => {
-    try {
-      await api.archiveAgent(id);
-      qc.invalidateQueries({ queryKey: workspaceKeys.agents(wsId) });
-      toast.success(t(($) => $.detail.agent_archived_toast));
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : t(($) => $.detail.archive_failed_toast));
-    }
-  };
-
-  const handleRestore = async (id: string) => {
-    try {
-      await api.restoreAgent(id);
-      qc.invalidateQueries({ queryKey: workspaceKeys.agents(wsId) });
-      toast.success(t(($) => $.detail.agent_restored_toast));
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : t(($) => $.detail.restore_failed_toast));
-    }
-  };
-
-  const handleCancelTasks = async (id: string) => {
-    try {
-      const { cancelled } = await api.cancelAgentTasks(id);
-      qc.invalidateQueries({ queryKey: workspaceKeys.agents(wsId) });
-      toast.success(
-        cancelled === 0
-          ? t(($) => $.detail.no_tasks_to_cancel_toast)
-          : t(($) => $.detail.cancelled_tasks_toast, { count: cancelled }),
-      );
-    } catch (e) {
-      toast.error(
-        e instanceof Error ? e.message : t(($) => $.detail.cancel_failed_toast),
-      );
-    }
-  };
+  // returns below don't violate the rules of hooks.
+  const { canAssign, isLoading: permissionsLoading } = useAgentPermissions(
+    agent,
+    wsId,
+  );
 
   // --- Loading ---
   if (!agent && (agentsLoading || detailQuery.isPending)) {
@@ -333,8 +179,6 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
   const owner = agent.owner_id
     ? members.find((m) => m.user_id === agent.owner_id) ?? null
     : null;
-  const runningCount = presence?.runningCount ?? 0;
-  const queuedCount = presence?.queuedCount ?? 0;
 
   // Chat shares the invocation gate with assignment (MUL-3963): starting a
   // chat triggers agent runs. The button stays visible either way — a denied
@@ -377,29 +221,11 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
         presence={presence}
         backHref={paths.agents()}
         canAssign={canAssign.allowed}
-        canArchive={canEdit.allowed}
         dmPending={permissionsLoading}
         dmHref={`${paths.chat()}?agent=${agent.id}`}
         onDm={handleDm}
         onAssign={handleAssign}
-        duplicateHref={`${paths.newAgent()}?duplicate=${encodeURIComponent(agent.id)}`}
-        onCancelTasks={
-          runningCount + queuedCount > 0
-            ? () => setConfirmCancel(true)
-            : undefined
-        }
-        onArchive={agent.system_key ? undefined : () => setConfirmArchive(true)}
       />
-
-      {!canEdit.allowed && (
-        <div className={cn(PAGE_RAIL, PAGE_GUTTER, "pt-3")}>
-          <CapabilityBanner
-            reason={canEdit.reason}
-            resource="agent"
-            ownerName={owner?.name}
-          />
-        </div>
-      )}
 
       {isArchived && (
         <div className="shrink-0 border-b bg-muted/50 py-2 text-caption text-muted-foreground">
@@ -408,16 +234,6 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
             <span className="flex-1">
               {t(($) => $.detail.archived_banner)}
             </span>
-            {canEdit.allowed && (
-              <Button
-                variant="outline"
-                size="sm"
-                className="h-6 text-caption"
-                onClick={() => handleRestore(agent.id)}
-              >
-                {t(($) => $.detail.restore)}
-              </Button>
-            )}
           </div>
         </div>
       )}
@@ -429,114 +245,13 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
             <span className="flex-1">
               {t(($) => $.detail.runtime_required_banner)}
             </span>
-            {canEdit.allowed && (
-              <Button
-                variant="outline"
-                size="sm"
-                className="h-6 border-amber-500/40 bg-background/70 text-caption"
-                onClick={() => setTabNavIntent("general")}
-              >
-                {t(($) => $.detail.bind_runtime)}
-              </Button>
-            )}
           </div>
         </div>
       )}
 
       <div className="flex flex-1 min-h-0 flex-col overflow-hidden">
-        <AgentOverviewPane
-          agent={agent}
-          runtime={runtime}
-          owner={owner}
-          runtimes={runtimes}
-          members={members}
-          onUpdate={handleUpdate}
-          currentUserId={currentUser?.id ?? null}
-          canEdit={canEdit.allowed}
-          navIntent={tabNavIntent}
-          onNavIntentHandled={() => setTabNavIntent(null)}
-        />
+        <AgentOverviewPane agent={agent} runtime={runtime} owner={owner} />
       </div>
-
-      {confirmCancel && (
-        <AlertDialog
-          open
-          onOpenChange={(v) => {
-            if (!v) setConfirmCancel(false);
-          }}
-        >
-          <AlertDialogContent>
-            <AlertDialogHeader>
-              <AlertDialogTitle>
-                {t(($) => $.detail.cancel_dialog_title, { name: agent.name })}
-              </AlertDialogTitle>
-              <AlertDialogDescription>
-                {describeCancelImpact(runningCount, queuedCount, t)}
-                {runningCount > 0 &&
-                  t(($) => $.detail.cancel_dialog_running_note)}
-                {t(($) => $.detail.cancel_dialog_irreversible)}
-              </AlertDialogDescription>
-            </AlertDialogHeader>
-            <AlertDialogFooter>
-              <AlertDialogCancel>
-                {t(($) => $.detail.cancel_dialog_keep)}
-              </AlertDialogCancel>
-              <AlertDialogAction
-                variant="destructive"
-                onClick={() => {
-                  setConfirmCancel(false);
-                  void handleCancelTasks(agent.id);
-                }}
-              >
-                {t(($) => $.detail.cancel_dialog_confirm)}
-              </AlertDialogAction>
-            </AlertDialogFooter>
-          </AlertDialogContent>
-        </AlertDialog>
-      )}
-
-      {confirmArchive && (
-        <Dialog
-          open
-          onOpenChange={(v) => {
-            if (!v) setConfirmArchive(false);
-          }}
-        >
-          <DialogContent className="max-w-sm" showCloseButton={false}>
-            <div className="flex items-center gap-3">
-              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-destructive/10">
-                <AlertCircle className="h-5 w-5 text-destructive" />
-              </div>
-              <DialogHeader className="flex-1 gap-1">
-                <DialogTitle className="text-body font-semibold">
-                  {t(($) => $.detail.archive_dialog_title)}
-                </DialogTitle>
-                <DialogDescription className="text-caption">
-                  {t(($) => $.detail.archive_dialog_description, { name: agent.name })}
-                </DialogDescription>
-              </DialogHeader>
-            </div>
-            <DialogFooter>
-              <Button
-                variant="ghost"
-                onClick={() => setConfirmArchive(false)}
-              >
-                {t(($) => $.detail.archive_dialog_cancel)}
-              </Button>
-              <Button
-                variant="destructive"
-                onClick={() => {
-                  setConfirmArchive(false);
-                  handleArchive(agent.id);
-                  navigation.push(paths.agents());
-                }}
-              >
-                {t(($) => $.detail.archive_dialog_confirm)}
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
-      )}
     </div>
   );
 }
@@ -547,41 +262,26 @@ function DetailHeader({
   presence,
   backHref,
   canAssign,
-  canArchive,
   dmPending,
   dmHref,
   onDm,
   onAssign,
-  duplicateHref,
-  onCancelTasks,
-  onArchive,
 }: {
   agent: Agent;
   runtime: AgentRuntime | null;
   presence: AgentPresenceDetail | null;
   backHref: string;
   canAssign: boolean;
-  canArchive: boolean;
   dmPending: boolean;
   dmHref: string;
   /** Runs before the link navigates; calls preventDefault when a gate denies
    *  the chat, which is what stops AppLink from pushing. */
   onDm: (e: React.MouseEvent<HTMLAnchorElement>) => void;
   onAssign: () => void;
-  /** The create form, prefilled from this agent. */
-  duplicateHref: string;
-  /** Absent when the agent has no active tasks. */
-  onCancelTasks?: () => void;
-  /** Absent for Multica's built-in agents, which the server refuses to
-   *  archive — the menu hides the action rather than offering a failure. */
-  onArchive?: () => void;
 }) {
   const { t } = useT("agents");
   const timeAgo = useTimeAgo();
   const isArchived = !!agent.archived_at;
-  // Cancelling tasks and archiving are edits; anyone may duplicate.
-  const showCancelTasks = canArchive && !!onCancelTasks;
-  const showArchive = canArchive && !!onArchive;
 
   return (
     <header
@@ -660,63 +360,11 @@ function DetailHeader({
                 {t(($) => $.detail.assign_work)}
               </Button>
             )}
-            {!isArchived ? (
-              <DropdownMenu>
-                <DropdownMenuTrigger
-                  render={<Button variant="ghost" size="icon-sm" />}
-                  aria-label={t(($) => $.detail.more_actions_aria)}
-                >
-                  <MoreHorizontal
-                    className="h-4 w-4 text-muted-foreground"
-                    aria-hidden="true"
-                  />
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" className="w-auto">
-                  <DropdownMenuItem render={<AppLink href={duplicateHref} />}>
-                    <Copy className="h-3.5 w-3.5" aria-hidden="true" />
-                    {t(($) => $.detail.more_duplicate)}
-                  </DropdownMenuItem>
-                  {showCancelTasks && (
-                    <DropdownMenuItem onClick={onCancelTasks}>
-                      <Square className="h-3.5 w-3.5" aria-hidden="true" />
-                      {t(($) => $.detail.more_cancel_tasks)}
-                    </DropdownMenuItem>
-                  )}
-                  {showArchive && (
-                    <DropdownMenuItem variant="destructive" onClick={onArchive}>
-                      <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
-                      {t(($) => $.detail.more_archive)}
-                    </DropdownMenuItem>
-                  )}
-                </DropdownMenuContent>
-              </DropdownMenu>
-            ) : null}
           </div>
         </div>
       </div>
     </header>
   );
-}
-
-type AgentsT = ReturnType<typeof useT<"agents">>["t"];
-
-function describeCancelImpact(
-  running: number,
-  queued: number,
-  t: AgentsT,
-): string {
-  if (running === 0 && queued === 0) {
-    return t(($) => $.detail.cancel_dialog_no_tasks);
-  }
-  const parts: string[] = [];
-  if (running > 0)
-    parts.push(t(($) => $.detail.cancel_dialog_running, { count: running }));
-  if (queued > 0)
-    parts.push(t(($) => $.detail.cancel_dialog_queued, { count: queued }));
-  return t(($) => $.detail.cancel_dialog_impact, {
-    summary: parts.join(" + "),
-    count: running + queued,
-  });
 }
 
 function BackHeader({ paths, title }: { paths: string; title: string }) {

@@ -705,17 +705,7 @@
     "working_other": "Working · {{count}}",
     "needs_runtime": "No runtime",
     "last_active": "Last active: {{when}}",
-    "edit": "Edit",
-    "active_aria": "{{name}} on duty",
-    "archive_confirm_title": "Archive {{name}}?",
-    "archive_confirm_description_one": "Its {{count}} active task will be cancelled. History is kept; turn the switch back on to restore it.",
-    "archive_confirm_description_other": "Its {{count}} active tasks will be cancelled. History is kept; turn the switch back on to restore it.",
-    "archive_confirm": "Archive",
-    "archive_confirm_cancel": "Cancel",
-    "archived_toast": "{{name}} archived",
-    "restored_toast": "{{name}} restored",
-    "archive_failed_toast": "Failed to archive agent",
-    "restore_failed_toast": "Failed to restore agent"
+    "current_work": "Working on"
   },
   "magpie": {
     "unrouted": "Not on magpie",
