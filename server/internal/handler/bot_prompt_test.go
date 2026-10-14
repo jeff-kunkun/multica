@@ -34,6 +34,11 @@ func TestRenderBotSetupPrompt(t *testing.T) {
 		Name: "Grok", Endpoint: "https://office.example/api/mcp", Token: "mul_abc",
 		WebhookURL: "https://grok.example/hook", WebhookSecret: "s3cret", CanRelease: true,
 	})
+	for _, want := range []string{"先确认网络通", "Tailscale", "令牌永不过期"} {
+		if !strings.Contains(push, want) {
+			t.Errorf("prompt missing network/expiry line %q", want)
+		}
+	}
 	for _, want := range []string{"https://grok.example/hook", "X-Multica-Signature", "推送密钥：s3cret", "approve_plan"} {
 		if !strings.Contains(push, want) {
 			t.Errorf("push prompt missing %q", want)
