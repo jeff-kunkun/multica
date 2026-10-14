@@ -423,6 +423,48 @@ func (h *Handler) requestBot(w http.ResponseWriter, r *http.Request) (db.Workspa
 	return bot, true
 }
 
+type SetBotWebhookRequest struct {
+	URL string `json:"url"`
+}
+
+type BotWebhookResponse struct {
+	WebhookURL    string `json:"webhook_url"`
+	WebhookSecret string `json:"webhook_secret"`
+}
+
+// SetBotWebhook lets a Bot register (or clear, with an empty url) its own
+// push address, so the owner never pastes one per Bot. The secret is the
+// Bot's own signing key and is returned so it can verify deliveries.
+func (h *Handler) SetBotWebhook(w http.ResponseWriter, r *http.Request) {
+	bot, ok := h.requestBot(w, r)
+	if !ok {
+		return
+	}
+	var req SetBotWebhookRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	webhookURL, err := normalizeBotWebhookURL(req.URL)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "url must be an http(s) URL")
+		return
+	}
+	updated, err := h.Queries.UpdateWorkspaceBot(r.Context(), db.UpdateWorkspaceBotParams{
+		ID:          bot.ID,
+		WorkspaceID: bot.WorkspaceID,
+		WebhookUrl:  pgtype.Text{String: webhookURL, Valid: true},
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to set webhook")
+		return
+	}
+	writeJSON(w, http.StatusOK, BotWebhookResponse{
+		WebhookURL:    updated.WebhookUrl,
+		WebhookSecret: updated.WebhookSecret,
+	})
+}
+
 // BotForUser returns the Bot record when userID belongs to a Bot.
 func (h *Handler) BotForUser(ctx context.Context, userID string) (db.WorkspaceBot, bool) {
 	uid, err := util.ParseUUID(userID)

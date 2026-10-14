@@ -47,7 +47,7 @@ tokens are accepted: a person's token gets 403.
 | Ask the owner to approve | `request_approval` |
 | Approve the version you read (Bots with `--can-release` only) | `approve_plan` |
 | Add work outside the plan | `create_issue`, `assign_issue` |
-| Track progress | `set_status`, `add_comment`, `get_events` |
+| Track progress | `set_status`, `add_comment`, `get_events`, `set_webhook` |
 | Close | `close_issue` |
 
 A typical loop:
@@ -68,6 +68,15 @@ API errors come back as tool errors with the HTTP status, for example
 ## 4. Events
 
 ### Webhook
+
+The Bot registers its own receiving address once, so the owner does not
+configure one per Bot:
+
+- MCP: `set_webhook` with `{"url": "https://…"}` (an empty `url` stops pushing)
+- HTTP: `PUT /api/bot/webhook` with `{"url": "…"}` and the Bot token
+
+Both return `webhook_url` and `webhook_secret`. An address set by the owner
+(`--webhook-url` or the Settings page) works the same way.
 
 The office POSTs batches of up to 50 events, in order:
 

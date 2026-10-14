@@ -626,6 +626,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		// sends no workspace header. The MCP tools call this router
 		// in-process with the same token.
 		r.Get("/api/bot/events", h.ListBotEvents)
+		r.Put("/api/bot/webhook", h.SetBotWebhook)
 		r.Handle("/api/mcp", officemcp.New(root, func(ctx context.Context, userID string) (officemcp.Bot, bool) {
 			bot, ok := h.BotForUser(ctx, userID)
 			if !ok {

@@ -136,6 +136,40 @@ func TestUpdateBotWebhookResetsDelivery(t *testing.T) {
 	}
 }
 
+// A Bot registers its own push address once; the owner pastes nothing.
+func TestBotSetsOwnWebhook(t *testing.T) {
+	bot := createTestBot(t, map[string]any{"name": "Self"})
+	dbfx.Exec(t, `UPDATE workspace_bot SET webhook_failures = 3 WHERE id = $1`, bot.ID)
+
+	set := func(userID, url string) (int, BotWebhookResponse) {
+		w := httptest.NewRecorder()
+		testHandler.SetBotWebhook(w, newRequestAs(userID, "PUT", "/api/bot/webhook", map[string]any{"url": url}))
+		var out BotWebhookResponse
+		json.Unmarshal(w.Body.Bytes(), &out)
+		return w.Code, out
+	}
+
+	code, out := set(bot.UserID, "https://grok.example/hook")
+	if code != http.StatusOK || out.WebhookURL != "https://grok.example/hook" || out.WebhookSecret != bot.WebhookSecret {
+		t.Fatalf("set: %d %+v", code, out)
+	}
+	stored, _ := testHandler.BotForUser(context.Background(), bot.UserID)
+	if stored.WebhookUrl != "https://grok.example/hook" || stored.WebhookFailures != 0 {
+		t.Fatalf("stored = %q failures=%d", stored.WebhookUrl, stored.WebhookFailures)
+	}
+
+	if code, _ := set(bot.UserID, "ftp://grok.example"); code != http.StatusBadRequest {
+		t.Fatalf("ftp accepted: %d", code)
+	}
+	if code, out := set(bot.UserID, ""); code != http.StatusOK || out.WebhookURL != "" {
+		t.Fatalf("clear: %d %+v", code, out)
+	}
+	// A human token cannot set a Bot webhook.
+	if code, _ := set(testUserID, "https://x.example"); code != http.StatusForbidden {
+		t.Fatalf("human set webhook: %d", code)
+	}
+}
+
 func TestCanRelease(t *testing.T) {
 	ctx := context.Background()
 	ws := util.MustParseUUID(testWorkspaceID)
