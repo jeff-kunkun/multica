@@ -40,7 +40,7 @@ const approvePlan = `-- name: ApprovePlan :one
 UPDATE plan
 SET status = 'approved', approved_by = $1, approved_at = now()
 WHERE id = $2 AND workspace_id = $3 AND status = 'proposed'
-RETURNING id, workspace_id, issue_id, version, author_type, author_id, goal, out_of_scope, steps, done_when, status, comment_id, approved_by, approved_at, created_at
+RETURNING id, workspace_id, issue_id, version, author_type, author_id, goal, out_of_scope, steps, done_when, status, comment_id, approved_by, approved_at, created_at, project_id
 `
 
 type ApprovePlanParams struct {
@@ -68,6 +68,7 @@ func (q *Queries) ApprovePlan(ctx context.Context, arg ApprovePlanParams) (Plan,
 		&i.ApprovedBy,
 		&i.ApprovedAt,
 		&i.CreatedAt,
+		&i.ProjectID,
 	)
 	return i, err
 }
@@ -75,13 +76,13 @@ func (q *Queries) ApprovePlan(ctx context.Context, arg ApprovePlanParams) (Plan,
 const createPlan = `-- name: CreatePlan :one
 INSERT INTO plan (
     workspace_id, issue_id, version, author_type, author_id,
-    goal, out_of_scope, steps, done_when
+    goal, out_of_scope, steps, done_when, project_id
 )
 SELECT $1, $2, COALESCE(MAX(version), 0) + 1, $3, $4,
-       $5, $6, $7, $8
+       $5, $6, $7, $8, $9::uuid
 FROM plan
 WHERE issue_id = $2 AND workspace_id = $1
-RETURNING id, workspace_id, issue_id, version, author_type, author_id, goal, out_of_scope, steps, done_when, status, comment_id, approved_by, approved_at, created_at
+RETURNING id, workspace_id, issue_id, version, author_type, author_id, goal, out_of_scope, steps, done_when, status, comment_id, approved_by, approved_at, created_at, project_id
 `
 
 type CreatePlanParams struct {
@@ -93,6 +94,7 @@ type CreatePlanParams struct {
 	OutOfScope  string      `json:"out_of_scope"`
 	Steps       []byte      `json:"steps"`
 	DoneWhen    string      `json:"done_when"`
+	ProjectID   pgtype.UUID `json:"project_id"`
 }
 
 func (q *Queries) CreatePlan(ctx context.Context, arg CreatePlanParams) (Plan, error) {
@@ -105,6 +107,7 @@ func (q *Queries) CreatePlan(ctx context.Context, arg CreatePlanParams) (Plan, e
 		arg.OutOfScope,
 		arg.Steps,
 		arg.DoneWhen,
+		arg.ProjectID,
 	)
 	var i Plan
 	err := row.Scan(
@@ -123,6 +126,7 @@ func (q *Queries) CreatePlan(ctx context.Context, arg CreatePlanParams) (Plan, e
 		&i.ApprovedBy,
 		&i.ApprovedAt,
 		&i.CreatedAt,
+		&i.ProjectID,
 	)
 	return i, err
 }
@@ -145,7 +149,7 @@ func (q *Queries) GetLatestPlanVersion(ctx context.Context, arg GetLatestPlanVer
 }
 
 const getPlanVersionForUpdate = `-- name: GetPlanVersionForUpdate :one
-SELECT id, workspace_id, issue_id, version, author_type, author_id, goal, out_of_scope, steps, done_when, status, comment_id, approved_by, approved_at, created_at FROM plan
+SELECT id, workspace_id, issue_id, version, author_type, author_id, goal, out_of_scope, steps, done_when, status, comment_id, approved_by, approved_at, created_at, project_id FROM plan
 WHERE issue_id = $1 AND workspace_id = $2 AND version = $3
 FOR UPDATE
 `
@@ -175,6 +179,7 @@ func (q *Queries) GetPlanVersionForUpdate(ctx context.Context, arg GetPlanVersio
 		&i.ApprovedBy,
 		&i.ApprovedAt,
 		&i.CreatedAt,
+		&i.ProjectID,
 	)
 	return i, err
 }
@@ -196,103 +201,6 @@ func (q *Queries) IsPlanApprover(ctx context.Context, arg IsPlanApproverParams) 
 	var ok bool
 	err := row.Scan(&ok)
 	return ok, err
-}
-
-const listMeetings = `-- name: ListMeetings :many
-SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority, i.assignee_type, i.assignee_id, i.creator_type, i.creator_id, i.parent_issue_id, i.acceptance_criteria, i.context_refs, i.position, i.due_date, i.created_at, i.updated_at, i.number, i.project_id, i.origin_type, i.origin_id, i.first_executed_at, i.start_date, i.metadata, i.stage, i.properties, i.revision, i.last_activity_at, i.triage_state, i.duplicate_of_issue_id,
-       lp.id AS latest_plan_id,
-       COALESCE(ap.steps_total, 0)::int AS steps_total,
-       COALESCE(ap.steps_done, 0)::int AS steps_done
-FROM issue i
-LEFT JOIN LATERAL (
-    SELECT p.id, p.created_at FROM plan p
-    WHERE p.issue_id = i.id AND p.workspace_id = i.workspace_id
-    ORDER BY p.version DESC
-    LIMIT 1
-) lp ON true
-LEFT JOIN LATERAL (
-    SELECT jsonb_array_length(p.steps) AS steps_total,
-           (SELECT count(*) FROM jsonb_array_elements(p.steps) st
-              JOIN issue si ON si.id = (st->>'issue_id')::uuid AND si.workspace_id = p.workspace_id
-             WHERE issue_effective_status(si.workspace_id, si.status) IN ('done', 'cancelled')) AS steps_done
-    FROM plan p
-    WHERE p.issue_id = i.id AND p.workspace_id = i.workspace_id AND p.status = 'approved'
-    ORDER BY p.version DESC
-    LIMIT 1
-) ap ON true
-WHERE i.workspace_id = $1
-  AND i.id IN (
-      SELECT mi.id FROM issue mi WHERE mi.workspace_id = $1 AND mi.origin_type = 'meeting'
-      UNION
-      SELECT pl.issue_id FROM plan pl WHERE pl.workspace_id = $1
-  )
-ORDER BY GREATEST(i.updated_at, COALESCE(lp.created_at, i.updated_at)) DESC, i.id DESC
-LIMIT 100
-`
-
-type ListMeetingsRow struct {
-	Issue        Issue       `json:"issue"`
-	LatestPlanID pgtype.UUID `json:"latest_plan_id"`
-	StepsTotal   int32       `json:"steps_total"`
-	StepsDone    int32       `json:"steps_done"`
-}
-
-// Meeting room list: issues opened from the meeting room plus any issue that
-// carries a plan. Deleted issues drop out by the join (issues are hard
-// deleted). Step progress reads the newest APPROVED plan: a step is done when
-// its child issue resolves to done or cancelled. Newest activity first.
-func (q *Queries) ListMeetings(ctx context.Context, workspaceID pgtype.UUID) ([]ListMeetingsRow, error) {
-	rows, err := q.db.Query(ctx, listMeetings, workspaceID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []ListMeetingsRow{}
-	for rows.Next() {
-		var i ListMeetingsRow
-		if err := rows.Scan(
-			&i.Issue.ID,
-			&i.Issue.WorkspaceID,
-			&i.Issue.Title,
-			&i.Issue.Description,
-			&i.Issue.Status,
-			&i.Issue.Priority,
-			&i.Issue.AssigneeType,
-			&i.Issue.AssigneeID,
-			&i.Issue.CreatorType,
-			&i.Issue.CreatorID,
-			&i.Issue.ParentIssueID,
-			&i.Issue.AcceptanceCriteria,
-			&i.Issue.ContextRefs,
-			&i.Issue.Position,
-			&i.Issue.DueDate,
-			&i.Issue.CreatedAt,
-			&i.Issue.UpdatedAt,
-			&i.Issue.Number,
-			&i.Issue.ProjectID,
-			&i.Issue.OriginType,
-			&i.Issue.OriginID,
-			&i.Issue.FirstExecutedAt,
-			&i.Issue.StartDate,
-			&i.Issue.Metadata,
-			&i.Issue.Stage,
-			&i.Issue.Properties,
-			&i.Issue.Revision,
-			&i.Issue.LastActivityAt,
-			&i.Issue.TriageState,
-			&i.Issue.DuplicateOfIssueID,
-			&i.LatestPlanID,
-			&i.StepsTotal,
-			&i.StepsDone,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
 }
 
 const listPlanApprovers = `-- name: ListPlanApprovers :many
@@ -326,54 +234,8 @@ func (q *Queries) ListPlanApprovers(ctx context.Context, workspaceID pgtype.UUID
 	return items, nil
 }
 
-const listPlansByIDs = `-- name: ListPlansByIDs :many
-SELECT id, workspace_id, issue_id, version, author_type, author_id, goal, out_of_scope, steps, done_when, status, comment_id, approved_by, approved_at, created_at FROM plan
-WHERE workspace_id = $1 AND id = ANY($2::uuid[])
-`
-
-type ListPlansByIDsParams struct {
-	WorkspaceID pgtype.UUID   `json:"workspace_id"`
-	Ids         []pgtype.UUID `json:"ids"`
-}
-
-func (q *Queries) ListPlansByIDs(ctx context.Context, arg ListPlansByIDsParams) ([]Plan, error) {
-	rows, err := q.db.Query(ctx, listPlansByIDs, arg.WorkspaceID, arg.Ids)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []Plan{}
-	for rows.Next() {
-		var i Plan
-		if err := rows.Scan(
-			&i.ID,
-			&i.WorkspaceID,
-			&i.IssueID,
-			&i.Version,
-			&i.AuthorType,
-			&i.AuthorID,
-			&i.Goal,
-			&i.OutOfScope,
-			&i.Steps,
-			&i.DoneWhen,
-			&i.Status,
-			&i.CommentID,
-			&i.ApprovedBy,
-			&i.ApprovedAt,
-			&i.CreatedAt,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const listPlansByIssue = `-- name: ListPlansByIssue :many
-SELECT id, workspace_id, issue_id, version, author_type, author_id, goal, out_of_scope, steps, done_when, status, comment_id, approved_by, approved_at, created_at FROM plan
+SELECT id, workspace_id, issue_id, version, author_type, author_id, goal, out_of_scope, steps, done_when, status, comment_id, approved_by, approved_at, created_at, project_id FROM plan
 WHERE issue_id = $1 AND workspace_id = $2
 ORDER BY version DESC
 `
@@ -408,6 +270,7 @@ func (q *Queries) ListPlansByIssue(ctx context.Context, arg ListPlansByIssuePara
 			&i.ApprovedBy,
 			&i.ApprovedAt,
 			&i.CreatedAt,
+			&i.ProjectID,
 		); err != nil {
 			return nil, err
 		}
@@ -475,7 +338,7 @@ func (q *Queries) SetPlanComment(ctx context.Context, arg SetPlanCommentParams) 
 const setPlanSteps = `-- name: SetPlanSteps :one
 UPDATE plan SET steps = $1
 WHERE id = $2 AND workspace_id = $3
-RETURNING id, workspace_id, issue_id, version, author_type, author_id, goal, out_of_scope, steps, done_when, status, comment_id, approved_by, approved_at, created_at
+RETURNING id, workspace_id, issue_id, version, author_type, author_id, goal, out_of_scope, steps, done_when, status, comment_id, approved_by, approved_at, created_at, project_id
 `
 
 type SetPlanStepsParams struct {
@@ -503,6 +366,7 @@ func (q *Queries) SetPlanSteps(ctx context.Context, arg SetPlanStepsParams) (Pla
 		&i.ApprovedBy,
 		&i.ApprovedAt,
 		&i.CreatedAt,
+		&i.ProjectID,
 	)
 	return i, err
 }

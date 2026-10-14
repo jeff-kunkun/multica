@@ -26,9 +26,10 @@ var planCmd = &cobra.Command{
 var planProposeCmd = &cobra.Command{
 	Use:   "propose <issue>",
 	Short: "Post a new plan version on an issue (starts nothing)",
-	Long: "Post a plan card: what to do, what not to do, 1-5 steps with one owner each, and when it is done.\n" +
+	Long: "Post a plan card: which project it belongs to, what to do, what not to do, 1-5 steps with one owner each, and when it is done.\n" +
+		"Name the project with --project, or pass --general for work outside any project; approval files the step issues (and moves this issue) there.\n" +
 		"Each call adds a new version and replaces any unapproved one. Nothing starts until an approver runs `multica plan approve`.\n\n" +
-		"Example:\n  multica plan propose DENE-1 --goal \"...\" --out-of-scope \"...\" --done-when \"...\" \\\n" +
+		"Example:\n  multica plan propose DENE-1 --project 3f2a9c1e --goal \"...\" --out-of-scope \"...\" --done-when \"...\" \\\n" +
 		"    --step \"孙悟空=Write the server API\" --step \"孙悟饭=Review the API\"",
 	Args: exactArgs(1),
 	RunE: runPlanPropose,
@@ -94,6 +95,8 @@ func init() {
 		planProposeCmd.Flags().String(f.name+"-file", "", "Read --"+f.name+" from a UTF-8 file inside the working directory")
 	}
 	planProposeCmd.Flags().Bool("allow-external-file", false, "Allow --*-file paths outside the current working directory")
+	planProposeCmd.Flags().String("project", "", "Project the work belongs to (id or unique id prefix, see `multica project list`); this or --general is required")
+	planProposeCmd.Flags().Bool("general", false, "The work belongs to no project; this or --project is required")
 	planProposeCmd.Flags().StringArray("step", nil, "A step as \"<owner>=<what this step does>\"; owner is an agent or member name; repeat 1-5 times")
 	planProposeCmd.Flags().String("output", "table", "Output format: table or json")
 
@@ -125,6 +128,7 @@ type planJSON struct {
 	OutOfScope string         `json:"out_of_scope"`
 	Steps      []planStepJSON `json:"steps"`
 	DoneWhen   string         `json:"done_when"`
+	ProjectID  *string        `json:"project_id"`
 	ApprovedBy *string        `json:"approved_by"`
 	ApprovedAt *string        `json:"approved_at"`
 	CreatedAt  string         `json:"created_at"`
@@ -155,6 +159,15 @@ func runPlanPropose(cmd *cobra.Command, args []string) error {
 	rawSteps, _ := cmd.Flags().GetStringArray("step")
 	if len(rawSteps) == 0 || len(rawSteps) > 5 {
 		return fmt.Errorf("give 1 to 5 --step flags")
+	}
+	project, _ := cmd.Flags().GetString("project")
+	project = strings.TrimSpace(project)
+	general, _ := cmd.Flags().GetBool("general")
+	if project == "" && !general {
+		return fmt.Errorf("say which project this plan belongs to: --project <project id>, or --general for work outside any project")
+	}
+	if project != "" && general {
+		return fmt.Errorf("--project and --general cannot be used together")
 	}
 
 	client, err := newAPIClient(cmd)
@@ -187,6 +200,15 @@ func runPlanPropose(cmd *cobra.Command, args []string) error {
 		"out_of_scope": fields["out-of-scope"],
 		"done_when":    fields["done-when"],
 		"steps":        steps,
+	}
+	if general {
+		body["general"] = true
+	} else {
+		ref, err := resolveProjectID(ctx, client, project)
+		if err != nil {
+			return fmt.Errorf("resolve project: %w", err)
+		}
+		body["project_id"] = ref.ID
 	}
 	if err := client.PostJSON(ctx, "/api/issues/"+issueRef.ID+"/plans", body, &plan); err != nil {
 		return fmt.Errorf("propose plan: %w", err)
@@ -309,6 +331,7 @@ func runPlanApprove(cmd *cobra.Command, args []string) error {
 func printPlan(ctx context.Context, client *cli.APIClient, p planJSON) {
 	lookup := loadActorDisplayLookup(ctx, client)
 	fmt.Printf("Plan v%d (%s) by %s\n", p.Version, p.Status, lookup.actor(p.AuthorType, p.AuthorID))
+	fmt.Printf("\nProject:\n  %s\n", planProjectLabel(ctx, client, p.ProjectID))
 	fmt.Printf("\nDo:\n  %s\n", p.Goal)
 	fmt.Printf("\nNot doing:\n  %s\n", p.OutOfScope)
 	fmt.Println("\nSteps:")
@@ -320,6 +343,19 @@ func printPlan(ctx context.Context, client *cli.APIClient, p planJSON) {
 		fmt.Println(line)
 	}
 	fmt.Printf("\nDone when:\n  %s\n", p.DoneWhen)
+}
+
+func planProjectLabel(ctx context.Context, client *cli.APIClient, projectID *string) string {
+	if projectID == nil {
+		return "General (no project)"
+	}
+	var project struct {
+		Title string `json:"title"`
+	}
+	if err := client.GetJSON(ctx, "/api/projects/"+url.PathEscape(*projectID), &project); err == nil && project.Title != "" {
+		return project.Title + " (" + *projectID + ")"
+	}
+	return *projectID
 }
 
 type planApproverJSON struct {

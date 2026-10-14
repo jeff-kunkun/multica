@@ -182,7 +182,7 @@ func officeTools() []tool {
 		{
 			Name: "open_topic",
 			Description: "Open a topic: an issue handed to one member agent, who works out a plan " +
-				"(what to do, what not to do, steps, done-when) for approval. Nothing is built before approval.",
+				"(which project or general, what to do, what not to do, steps, done-when) for approval. Nothing is built before approval.",
 			Schema: schema([]string{"title", "description", "agent_id"}, map[string]any{
 				"title":       strProp("Topic title."),
 				"description": strProp("What the boss wants and any constraints."),
@@ -285,8 +285,8 @@ func officeTools() []tool {
 		},
 		{
 			Name: "read_plan",
-			Description: "Read the plans on an issue, newest version first: what to do, what not to do, steps with owners, " +
-				"done-when, version and approval state, plus can_approve for this Bot.",
+			Description: "Read the plans on an issue, newest version first: project_id (null = general, no project), what to do, " +
+				"what not to do, steps with owners, done-when, version and approval state, plus can_approve for this Bot.",
 			Schema: schema([]string{"issue"}, map[string]any{"issue": strProp(issueDesc)}),
 			Call: func(c *caller, a args) (any, error) {
 				path, err := issuePath(a, "/plans")
@@ -337,7 +337,7 @@ func officeTools() []tool {
 		},
 		{
 			Name: "approve_plan",
-			Description: "Approve one plan version on an issue, which creates its work tickets and starts them. " +
+			Description: "Approve one plan version on an issue, which creates its work tickets in the plan's project (none for a general plan) and starts them. " +
 				"Only the newest version can be approved. Only allowed when this Bot was granted release authority (see whoami).",
 			Schema: schema([]string{"issue", "version"}, map[string]any{
 				"issue":   strProp(issueDesc),

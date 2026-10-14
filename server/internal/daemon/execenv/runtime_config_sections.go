@@ -174,7 +174,7 @@ func writeCommands(b *strings.Builder, ctx TaskContextForEnv) {
 	b.WriteString("- `multica issue create --title \"...\" [--description-file <path>] [--parent <issue-id>] [--assignee X] [--status todo|backlog] [--stage <N>]` / `issue update <id> ...` — an agent-assigned `todo` issue starts its run at once; `backlog` parks it.\n")
 	b.WriteString("- `multica issue assign <id> (--to X | --unassign)` — assigning an agent starts its run.\n")
 	writeIssueStatusCommand(b, ctx)
-	b.WriteString("- `multica plan propose <issue>` — propose a plan when the issue asks for one; nothing starts until it is approved.\n")
+	b.WriteString("- `multica plan propose <issue>` — propose a plan when the issue asks for one, naming its project (`--project <id>`) or `--general`; nothing starts until it is approved.\n")
 	b.WriteString("- `multica repo checkout <url> [--ref <branch-or-sha>] [--fresh]` — `--fresh` discards uncommitted work.\n")
 	b.WriteString("- `multica attachment download <id>` — never open Multica resource URLs directly.\n\n")
 	b.WriteString("Keep the user's Git identity; override via `git config --worktree`, never global.\n\n")

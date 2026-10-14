@@ -1245,6 +1245,7 @@ type Plan struct {
 	ApprovedBy  pgtype.UUID        `json:"approved_by"`
 	ApprovedAt  pgtype.Timestamptz `json:"approved_at"`
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	ProjectID   pgtype.UUID        `json:"project_id"`
 }
 
 type PlanApprover struct {

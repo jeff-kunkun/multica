@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -38,6 +39,7 @@ func (s planTestSetup) proposeBody() map[string]any {
 		"goal":         "Ship the plan card",
 		"out_of_scope": "No UI in this round",
 		"done_when":    "The CLI walks propose to approve",
+		"general":      true,
 		"steps": []map[string]any{
 			{"title": "Write the API", "assignee_type": "agent", "assignee_id": s.agentID},
 			{"title": "Read the result", "assignee_type": "member", "assignee_id": testUserID},
@@ -69,20 +71,27 @@ func childTaskCount(t *testing.T, parentID string) int {
 	return dbfx.Count(t, `SELECT count(*) FROM agent_task_queue WHERE issue_id IN (SELECT id FROM issue WHERE parent_issue_id = $1)`, parentID)
 }
 
-// A second workspace member with the plain "member" role.
 // planTestMember adds a plain member who can see the plan's issue: the
 // issue is moved into a project shared with them, so the approval checks
-// under test are what decide, not project visibility.
-func planTestMember(t *testing.T, s planTestSetup) string {
+// under test are what decide, not project visibility. Plans that should keep
+// the issue there name that project.
+func planTestMember(t *testing.T, s planTestSetup) (userID, projectID string) {
 	t.Helper()
 	suffix := time.Now().UnixNano()
-	userID := dbfx.User(t, "Plan Member", fmt.Sprintf("plan-member-%d@multica.ai", suffix))
+	userID = dbfx.User(t, "Plan Member", fmt.Sprintf("plan-member-%d@multica.ai", suffix))
 	dbfx.Member(t, testWorkspaceID, userID, "member")
 	dbfx.Cleanup(t, `DELETE FROM plan_approver WHERE user_id = $1`, userID)
-	projectID := sharedTestProject(t, "plan project "+t.Name(), userID)
+	projectID = sharedTestProject(t, "plan project "+t.Name(), userID)
 	dbfx.Exec(t, `UPDATE issue SET project_id = $1 WHERE id = $2`, projectID, s.issueID)
 	dbfx.Cleanup(t, `UPDATE issue SET project_id = NULL WHERE project_id = $1`, projectID)
-	return userID
+	return userID, projectID
+}
+
+// inProject names a project in a propose body instead of general.
+func inProject(body map[string]any, projectID string) map[string]any {
+	delete(body, "general")
+	body["project_id"] = projectID
+	return body
 }
 
 func TestProposePlanStartsNothing(t *testing.T) {
@@ -109,9 +118,15 @@ func TestProposePlanStartsNothing(t *testing.T) {
 func TestProposePlanValidation(t *testing.T) {
 	s := newPlanTestSetup(t)
 	for name, mutate := range map[string]func(map[string]any){
-		"missing out_of_scope": func(b map[string]any) { b["out_of_scope"] = "  " },
-		"missing done_when":    func(b map[string]any) { delete(b, "done_when") },
-		"no steps":             func(b map[string]any) { b["steps"] = []map[string]any{} },
+		"missing out_of_scope":    func(b map[string]any) { b["out_of_scope"] = "  " },
+		"missing done_when":       func(b map[string]any) { delete(b, "done_when") },
+		"no project, not general": func(b map[string]any) { delete(b, "general") },
+		"project and general":     func(b map[string]any) { b["project_id"] = dbfx.Project(t, "plan both "+t.Name()) },
+		"unknown project": func(b map[string]any) {
+			delete(b, "general")
+			b["project_id"] = "00000000-0000-0000-0000-0000000000aa"
+		},
+		"no steps": func(b map[string]any) { b["steps"] = []map[string]any{} },
 		"six steps": func(b map[string]any) {
 			steps := []map[string]any{}
 			for i := range 6 {
@@ -146,7 +161,8 @@ func TestApprovePlanRejectsUnauthorizedCallers(t *testing.T) {
 
 	t.Run("plain member", func(t *testing.T) {
 		req := approveRequest(s.issueID, 1)
-		req.Header.Set("X-User-ID", planTestMember(t, s))
+		memberID, _ := planTestMember(t, s)
+		req.Header.Set("X-User-ID", memberID)
 		testutil.Call(t, testHandler.ApprovePlan, req).Want(http.StatusForbidden)
 	})
 	t.Run("agent task token", func(t *testing.T) {
@@ -236,8 +252,8 @@ func TestApprovePlanCreatesStepIssuesAndStartsThem(t *testing.T) {
 
 func TestPlanApproverGrant(t *testing.T) {
 	s := newPlanTestSetup(t)
-	proposePlan(t, s.issueID, s.proposeBody(), http.StatusCreated)
-	memberID := planTestMember(t, s)
+	memberID, projectID := planTestMember(t, s)
+	proposePlan(t, s.issueID, inProject(s.proposeBody(), projectID), http.StatusCreated)
 
 	// A plain member cannot grant themselves approval.
 	selfGrant := newRequest(http.MethodPost, "/api/plan-approvers", map[string]any{"user_id": memberID})
@@ -268,7 +284,7 @@ func TestPlanApproverGrant(t *testing.T) {
 	// Revoked approvers lose the right on the next plan.
 	revoke := testutil.WithURLParams(newRequest(http.MethodDelete, "/api/plan-approvers/"+memberID, nil), "userId", memberID)
 	testutil.Call(t, testHandler.RemovePlanApprover, revoke).Want(http.StatusNoContent)
-	proposePlan(t, s.issueID, s.proposeBody(), http.StatusCreated)
+	proposePlan(t, s.issueID, inProject(s.proposeBody(), projectID), http.StatusCreated)
 	req = approveRequest(s.issueID, 2)
 	req.Header.Set("X-User-ID", memberID)
 	testutil.Call(t, testHandler.ApprovePlan, req).Want(http.StatusForbidden)
@@ -283,7 +299,7 @@ func TestBotReleaseFlagGovernsPlanApproval(t *testing.T) {
 	projectID := sharedTestProject(t, "bot plan project "+t.Name(), releaser.UserID, helper.UserID)
 	dbfx.Exec(t, `UPDATE issue SET project_id = $1 WHERE id = $2`, projectID, s.issueID)
 	dbfx.Cleanup(t, `UPDATE issue SET project_id = NULL WHERE project_id = $1`, projectID)
-	proposePlan(t, s.issueID, s.proposeBody(), http.StatusCreated)
+	proposePlan(t, s.issueID, inProject(s.proposeBody(), projectID), http.StatusCreated)
 
 	asBot := func(userID string, version int) *http.Request {
 		req := approveRequest(s.issueID, version)
@@ -302,11 +318,73 @@ func TestBotReleaseFlagGovernsPlanApproval(t *testing.T) {
 
 	revoke := withURLParam(newRequest(http.MethodPatch, "/api/bots/"+releaser.ID, map[string]any{"can_release": false}), "botId", releaser.ID)
 	testutil.Call(t, testHandler.UpdateBot, revoke).Want(http.StatusOK)
-	proposePlan(t, s.issueID, s.proposeBody(), http.StatusCreated)
+	proposePlan(t, s.issueID, inProject(s.proposeBody(), projectID), http.StatusCreated)
 	testutil.Call(t, testHandler.ApprovePlan, asBot(releaser.UserID, 2)).Want(http.StatusForbidden)
 
 	// An approver grant on the Bot's user does not bypass its own flag.
 	dbfx.Exec(t, `INSERT INTO plan_approver (workspace_id, user_id, granted_by) VALUES ($1, $2, $3)`, testWorkspaceID, releaser.UserID, testUserID)
 	dbfx.Cleanup(t, `DELETE FROM plan_approver WHERE user_id = $1`, releaser.UserID)
 	testutil.Call(t, testHandler.ApprovePlan, asBot(releaser.UserID, 2)).Want(http.StatusForbidden)
+}
+
+func TestProposePlanWithoutProjectSaysHowToFix(t *testing.T) {
+	s := newPlanTestSetup(t)
+	body := s.proposeBody()
+	delete(body, "general")
+	req := withURLParam(newRequest(http.MethodPost, "/api/issues/"+s.issueID+"/plans", body), "id", s.issueID)
+	var out struct {
+		Error string `json:"error"`
+	}
+	testutil.Call(t, testHandler.ProposePlan, req).Want(http.StatusBadRequest).JSON(&out)
+	if !strings.Contains(out.Error, "--project") || !strings.Contains(out.Error, "--general") {
+		t.Fatalf("error = %q, want it to name --project and --general", out.Error)
+	}
+}
+
+func TestApprovePlanFilesWorkInPlanProject(t *testing.T) {
+	s := newPlanTestSetup(t)
+	projectID := dbfx.Project(t, "plan target "+t.Name())
+	dbfx.Cleanup(t, `UPDATE issue SET project_id = NULL WHERE project_id = $1`, projectID)
+
+	plan := proposePlan(t, s.issueID, inProject(s.proposeBody(), projectID), http.StatusCreated)
+	if plan.ProjectID == nil || *plan.ProjectID != projectID {
+		t.Fatalf("plan project_id = %v, want %s", plan.ProjectID, projectID)
+	}
+	testutil.Call(t, testHandler.ApprovePlan, approveRequest(s.issueID, 1)).Want(http.StatusOK)
+	if n := dbfx.Count(t, `SELECT count(*) FROM issue WHERE parent_issue_id = $1 AND project_id = $2`, s.issueID, projectID); n != 2 {
+		t.Fatalf("step issues in the plan's project = %d, want 2", n)
+	}
+	if n := dbfx.Count(t, `SELECT count(*) FROM issue WHERE id = $1 AND project_id = $2`, s.issueID, projectID); n != 1 {
+		t.Fatalf("parent issue did not move into the plan's project")
+	}
+
+	// A general plan takes the next round out of any project.
+	body := s.proposeBody()
+	body["steps"] = []map[string]any{{"title": "General follow-up", "assignee_type": "member", "assignee_id": testUserID}}
+	general := proposePlan(t, s.issueID, body, http.StatusCreated)
+	if general.ProjectID != nil {
+		t.Fatalf("general plan project_id = %v, want null", *general.ProjectID)
+	}
+	testutil.Call(t, testHandler.ApprovePlan, approveRequest(s.issueID, 2)).Want(http.StatusOK)
+	if n := dbfx.Count(t, `SELECT count(*) FROM issue WHERE parent_issue_id = $1 AND title = 'General follow-up' AND project_id IS NULL`, s.issueID); n != 1 {
+		t.Fatalf("general step issues outside any project = %d, want 1", n)
+	}
+	if n := dbfx.Count(t, `SELECT count(*) FROM issue WHERE id = $1 AND project_id IS NULL`, s.issueID); n != 1 {
+		t.Fatalf("parent issue still in a project after a general plan")
+	}
+}
+
+func TestApprovePlanRefusesDeletedProject(t *testing.T) {
+	s := newPlanTestSetup(t)
+	projectID := dbfx.Project(t, "plan gone "+t.Name())
+	proposePlan(t, s.issueID, inProject(s.proposeBody(), projectID), http.StatusCreated)
+	dbfx.Exec(t, `DELETE FROM project WHERE id = $1`, projectID)
+
+	testutil.Call(t, testHandler.ApprovePlan, approveRequest(s.issueID, 1)).Want(http.StatusConflict)
+	if n := childIssueCount(t, s.issueID); n != 0 {
+		t.Fatalf("approval of a plan whose project is gone created %d issues", n)
+	}
+	if n := dbfx.Count(t, `SELECT count(*) FROM plan WHERE issue_id = $1 AND status = 'proposed'`, s.issueID); n != 1 {
+		t.Fatalf("plan left proposed = %d, want 1", n)
+	}
 }
