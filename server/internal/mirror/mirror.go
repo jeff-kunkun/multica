@@ -38,13 +38,14 @@ const defaultInterval = 20 * time.Second
 // with any of them missing the mirror is off. LocalToken turns on the pull
 // back from the target.
 type Config struct {
-	Workspace       string // local workspace slug or id
-	TargetURL       string // e.g. https://ai.ferryway.cc
-	TargetToken     string // personal access token of a target member
-	TargetWorkspace string // target workspace id
-	TargetAssignee  string // target member id that holds every copied issue
-	LocalURL        string // this server's API, default http://127.0.0.1:$PORT
-	LocalToken      string // personal access token of the local member pulls post as
+	Workspace       string   // local workspace slug or id
+	TargetURL       string   // e.g. https://ai.ferryway.cc
+	TargetToken     string   // personal access token of a target member
+	TargetWorkspace string   // target workspace id
+	TargetAssignee  string   // target member id that holds every copied issue
+	LocalURL        string   // this server's API, default http://127.0.0.1:$PORT
+	LocalToken      string   // personal access token of the local member pulls post as
+	Projects        []string // local project ids to copy; empty means all
 	Interval        time.Duration
 }
 
@@ -65,6 +66,11 @@ func ConfigFromEnv() (Config, bool) {
 			port = "8080"
 		}
 		c.LocalURL = "http://127.0.0.1:" + port
+	}
+	for _, id := range strings.Split(os.Getenv("MULTICA_MIRROR_PROJECTS"), ",") {
+		if id = strings.TrimSpace(id); id != "" {
+			c.Projects = append(c.Projects, id)
+		}
 	}
 	if d, err := time.ParseDuration(os.Getenv("MULTICA_MIRROR_INTERVAL")); err == nil && d > 0 {
 		c.Interval = d

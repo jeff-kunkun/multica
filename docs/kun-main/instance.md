@@ -131,10 +131,13 @@ MULTICA_MIRROR_TARGET_TOKEN=mul_...
 MULTICA_MIRROR_TARGET_WORKSPACE=<kunkunya workspace id>
 MULTICA_MIRROR_TARGET_ASSIGNEE=<Kun's user id there>
 MULTICA_MIRROR_LOCAL_TOKEN=mul_...   # optional: turns on the pull back
+MULTICA_MIRROR_PROJECTS=<id>,<id>    # optional: copy only these projects
 # MULTICA_MIRROR_LOCAL_URL defaults to http://127.0.0.1:$PORT
 ```
 
-Any of the first five unset means off. The log shows `mirror enabled ...
+Any of the first five unset means off. With `MULTICA_MIRROR_PROJECTS` set,
+only those projects, their issues and those issues' comments go out; moving
+an issue out of them counts as deleting it. The pull back is not limited. The log shows `mirror enabled ...
 pull=true` at start, `mirror: copy failed` / `mirror: pull failed` for
 anything refused; failures retry on the next pass. Run only one office
 backend with the mirror on.

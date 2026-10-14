@@ -36,7 +36,7 @@ func TestPGSourceReadsWorkspace(t *testing.T) {
 	commentID := f.Comment(t, parentID, "hi", testutil.Cols{"author_type": "agent", "author_id": agentID})
 	goneID := f.Comment(t, parentID, "gone", testutil.Cols{"deleted_at": time.Now()})
 
-	src, err := NewPGSource(ctx, pool, "mirror-test", "t1")
+	src, err := NewPGSource(ctx, pool, "mirror-test", "t1", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -50,6 +50,24 @@ func TestPGSourceReadsWorkspace(t *testing.T) {
 	if _, ok := v[KindComment][goneID]; ok {
 		t.Fatal("soft-deleted comment listed")
 	}
+	// Limited to the project: the child issue has none, so it and nothing
+	// of it is listed.
+	scoped, err := NewPGSource(ctx, pool, wsID, "t1", []string{projectID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sv, err := scoped.Versions(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := sv[KindIssue][childID]; ok || len(sv[KindProject]) != 1 || len(sv[KindIssue]) != 1 || len(sv[KindComment]) != 1 {
+		t.Fatalf("scoped versions = %v", sv)
+	}
+	none, _ := NewPGSource(ctx, pool, wsID, "t1", []string{"00000000-0000-0000-0000-000000000000"})
+	if nv, err := none.Versions(ctx); err != nil || len(nv[KindProject])+len(nv[KindIssue])+len(nv[KindComment]) != 0 {
+		t.Fatalf("other project versions = %v, %v", nv, err)
+	}
+
 	p, err := src.Project(ctx, projectID)
 	if err != nil || p.Title != "魔改" || p.Description != "d" {
 		t.Fatalf("project = %+v, %v", p, err)
@@ -79,7 +97,7 @@ func TestPGSourceReadsWorkspace(t *testing.T) {
 	if err != nil || len(links) != 1 || links[0].RemoteID != "r2" || !links[0].SourceUpdatedAt.Equal(at) || !links[0].Inbound {
 		t.Fatalf("links = %+v, %v", links, err)
 	}
-	other, _ := NewPGSource(ctx, pool, wsID, "t2")
+	other, _ := NewPGSource(ctx, pool, wsID, "t2", nil)
 	if l, _ := other.Links(ctx); len(l) != 0 {
 		t.Fatalf("links leaked across targets: %+v", l)
 	}
