@@ -211,6 +211,21 @@ describe("browser runtime URLs", () => {
 });
 
 describe("runtimeRewriteDestination", () => {
+  it("sends OAuth discovery to the backend and leaves other well-known paths alone", () => {
+    const env = { REMOTE_API_URL: "http://backend:8080" };
+    expect(runtimeRewriteDestination("/.well-known/oauth-protected-resource/api/mcp", env)).toBe(
+      "http://backend:8080/.well-known/oauth-protected-resource/api/mcp",
+    );
+    expect(runtimeRewriteDestination("/.well-known/oauth-authorization-server", env)).toBe(
+      "http://backend:8080/.well-known/oauth-authorization-server",
+    );
+    expect(runtimeRewriteDestination("/.well-known/openid-configuration", env)).toBe(
+      "http://backend:8080/.well-known/openid-configuration",
+    );
+    expect(runtimeRewriteDestination("/.well-known/apple-app-site-association", env)).toBeUndefined();
+    expect(runtimeRewriteDestination("/.well-known/oauth-authorization-server-x", env)).toBeUndefined();
+  });
+
   it("keeps same-origin fallback when no runtime upstreams are configured", () => {
     expect(runtimeRewriteDestination("/api/config", {})).toBeUndefined();
     expect(runtimeRewriteDestination("/auth/send-code", {})).toBeUndefined();

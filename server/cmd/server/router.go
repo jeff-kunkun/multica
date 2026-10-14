@@ -347,6 +347,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	}
 	r.Use(chimw.Recoverer)
 	r.Use(middleware.ContentSecurityPolicy)
+	r.Use(h.MCPAuthChallenge)
 
 	// Share allowed origins with WebSocket origin checker.
 	realtime.SetAllowedOrigins(origins)
@@ -442,6 +443,16 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 
 	// Public API
 	r.Get("/api/config", h.GetConfig)
+
+	// OAuth for Bot clients that only speak OAuth (bot_oauth.go). The web
+	// app proxies /.well-known here; the consent page itself is a web route.
+	r.Get("/.well-known/oauth-protected-resource", h.OAuthProtectedResource)
+	r.Get("/.well-known/oauth-protected-resource/*", h.OAuthProtectedResource)
+	r.Get("/.well-known/oauth-authorization-server", h.OAuthAuthorizationServer)
+	r.Get("/.well-known/oauth-authorization-server/*", h.OAuthAuthorizationServer)
+	r.Get("/.well-known/openid-configuration", h.OAuthAuthorizationServer)
+	r.With(authRL).Post("/api/oauth/register", h.OAuthRegister)
+	r.With(authVerifyRL).Post("/api/oauth/token", h.OAuthToken)
 	// Public share-link preview — no auth: shows the workspace name/slug and
 	// inviter so a not-yet-logged-in visitor can see what they're joining.
 	r.Get("/api/share-links/{code}", h.GetShareLinkInfo)
@@ -627,6 +638,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		// in-process with the same token.
 		r.Get("/api/bot/events", h.ListBotEvents)
 		r.Put("/api/bot/webhook", h.SetBotWebhook)
+		r.With(handler.RequireHumanActor).Get("/api/oauth/bots", h.ListOAuthBots)
+		r.With(handler.RequireHumanActor).Post("/api/oauth/approve", h.ApproveOAuth)
 		r.Handle("/api/mcp", officemcp.New(root, func(ctx context.Context, userID string) (officemcp.Bot, bool) {
 			bot, ok := h.BotForUser(ctx, userID)
 			if !ok {

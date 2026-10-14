@@ -155,3 +155,22 @@ export interface WorkspaceBotWithSecrets extends WorkspaceBot {
   /** Ready-to-forward connection instructions; embeds the token. */
   setup_prompt?: string;
 }
+
+/** A workspace the caller owns and its Bots, as offered on the OAuth consent page. */
+export interface OAuthBotWorkspace {
+  id: string;
+  name: string;
+  bots: { id: string; name: string }[];
+}
+
+/** The consent page's Allow: an existing Bot by id, or a new one by name. */
+export interface ApproveOAuthRequest {
+  workspace_id: string;
+  bot_id?: string;
+  bot_name?: string;
+  client_id: string;
+  redirect_uri: string;
+  code_challenge: string;
+  code_challenge_method: string;
+  state: string;
+}

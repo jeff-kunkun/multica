@@ -142,9 +142,17 @@ export function runtimeRewriteDestination(
   if (isBackendAuthPath(pathname)) {
     return appendPath(remoteApiUrl, pathname);
   }
+  // OAuth discovery for Bot clients (server/internal/handler/bot_oauth.go).
+  // Clients look for it at the origin root, which the web app owns.
+  if (OAUTH_METADATA_PATH.test(pathname)) {
+    return appendPath(remoteApiUrl, pathname);
+  }
 
   return undefined;
 }
+
+const OAUTH_METADATA_PATH =
+  /^\/\.well-known\/(oauth-protected-resource|oauth-authorization-server|openid-configuration)(\/|$)/;
 
 function isBackendAuthPath(pathname: string): boolean {
   if (pathname === "/auth/callback") return false;

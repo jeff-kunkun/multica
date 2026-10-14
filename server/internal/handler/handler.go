@@ -228,6 +228,8 @@ type Handler struct {
 	// Wired in cmd/server/router.go after New.
 	PRRefresh *ghsnapshot.Manager
 	cfg       Config
+	// oauthCodes holds authorization codes issued to OAuth-connecting Bots.
+	oauthCodes *oauthCodeStore
 }
 
 func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *events.Bus, emailService *service.EmailService, store storage.Storage, cfSigner *auth.CloudFrontSigner, analyticsClient analytics.Client, cfg Config, daemonHubs ...*daemonws.Hub) *Handler {
@@ -290,6 +292,7 @@ func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *event
 	taskSvc.Analytics = analyticsClient
 	taskSvc.SourceContextStorage = store
 	h := &Handler{
+		oauthCodes:             &oauthCodeStore{},
 		Queries:                queries,
 		ReadSelector:           dbreader.NewPrimaryOnly(queries),
 		DB:                     executor,

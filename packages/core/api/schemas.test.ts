@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   AppConfigSchema,
   WorkspaceBotListSchema,
+  OAuthBotWorkspaceListSchema,
+  ApproveOAuthResponseSchema,
   WorkspaceBotWithSecretsSchema,
   AgentTaskListSchema,
   AgentActivityBucketListSchema,
@@ -1751,6 +1753,20 @@ describe("WorkspaceBotSchema", () => {
   });
   it("falls back to an empty list for a non-array reply", () => {
     expect(parseWithFallback({ bots: [] }, WorkspaceBotListSchema, [], { endpoint: "GET /api/bots" })).toEqual([]);
+  });
+});
+
+describe("OAuthBotWorkspaceListSchema", () => {
+  it("drops malformed bots and keeps the workspace", () => {
+    const parsed = OAuthBotWorkspaceListSchema.parse([{ id: "w1", name: "Office", bots: [{ id: "b1", name: "Grok" }, { name: "no id" }, null] }]);
+    expect(parsed).toEqual([{ id: "w1", name: "Office", bots: [{ id: "b1", name: "Grok" }] }]);
+    expect(OAuthBotWorkspaceListSchema.parse([{ id: "w1", bots: "nope" }])[0]?.bots).toEqual([]);
+  });
+  it("falls back to an empty list for a non-array reply", () => {
+    expect(parseWithFallback({ workspaces: [] }, OAuthBotWorkspaceListSchema, [], { endpoint: "GET /api/oauth/bots" })).toEqual([]);
+  });
+  it("reads a missing redirect as empty", () => {
+    expect(ApproveOAuthResponseSchema.parse({}).redirect_to).toBe("");
   });
 });
 
