@@ -32,9 +32,6 @@ const SOURCE = {
   permission_mode: "private",
   invocation_targets: [],
   max_concurrent_tasks: 6,
-  model: "gpt-5.6-sol",
-  thinking_level: "high",
-  service_tier: "priority",
 } as unknown as Agent;
 
 function setup(initial: { runtimesSettled: boolean; runtimes: RuntimeDevice[] }) {
@@ -58,7 +55,7 @@ function setup(initial: { runtimesSettled: boolean; runtimes: RuntimeDevice[] })
 // Regression for the cold-start ordering bug: the agent list and the runtime
 // list are independent queries, so on a direct ?duplicate=<id> link the agent
 // can arrive while runtimes are still pending. Seeding then judged the source
-// runtime "unavailable" and permanently cleared model / thinking / speed.
+// runtime "unavailable" and permanently moved the copy to another runtime.
 describe("useDuplicateDraftSeed", () => {
   afterEach(cleanup);
 
@@ -74,9 +71,6 @@ describe("useDuplicateDraftSeed", () => {
     const [draft, runtimeReset] = onSeed.mock.calls[0]!;
     expect(draft).toMatchObject({
       runtimeId: "runtime-1",
-      model: "gpt-5.6-sol",
-      thinkingLevel: "high",
-      serviceTier: "priority",
     });
     expect(runtimeReset).toBe(false);
   });
@@ -106,9 +100,6 @@ describe("useDuplicateDraftSeed", () => {
     const [draft, runtimeReset] = onSeed.mock.calls[0]!;
     expect(draft).toMatchObject({
       runtimeId: "runtime-2",
-      model: "",
-      thinkingLevel: "",
-      serviceTier: "",
     });
     expect(runtimeReset).toBe(true);
   });

@@ -1082,11 +1082,10 @@ func (h *Handler) DaemonHeartbeat(w http.ResponseWriter, r *http.Request) {
 		outcome                                     = "unauth"
 		runtimeID                                   string
 		decodeMs, runtimeLookupMs, workspaceCheckMs int64
-		authMs, updateMs, probeModelMs, popModelMs  int64
-		probeModelTimedOut                          bool
+		authMs, updateMs                            int64
 	)
 	defer func() {
-		logHeartbeatEndpointSlow(runtimeID, outcome, authPath, start, decodeMs, runtimeLookupMs, workspaceCheckMs, authMs, updateMs, probeModelMs, popModelMs, probeModelTimedOut)
+		logHeartbeatEndpointSlow(runtimeID, outcome, authPath, start, decodeMs, runtimeLookupMs, workspaceCheckMs, authMs, updateMs)
 	}()
 
 	decodeStart := time.Now()
@@ -1153,10 +1152,7 @@ func (h *Handler) DaemonHeartbeat(w http.ResponseWriter, r *http.Request) {
 	}
 	updateMs = time.Since(updateStart).Milliseconds()
 
-	ack, m, err := h.processHeartbeat(r.Context(), runtimeID)
-	probeModelMs = m.ProbeModelMs
-	popModelMs = m.PopModelMs
-	probeModelTimedOut = m.ProbeModelTimedOut
+	ack, err := h.processHeartbeat(r.Context(), runtimeID)
 	if err != nil {
 		outcome = "error_update"
 		writeError(w, http.StatusInternalServerError, "heartbeat failed")
@@ -1170,9 +1166,6 @@ func (h *Handler) DaemonHeartbeat(w http.ResponseWriter, r *http.Request) {
 	resp := map[string]any{"status": ack.Status}
 	if ack.PendingUpdate != nil {
 		resp["pending_update"] = ack.PendingUpdate
-	}
-	if ack.PendingModelList != nil {
-		resp["pending_model_list"] = ack.PendingModelList
 	}
 	writeJSON(w, http.StatusOK, resp)
 }
@@ -1202,7 +1195,7 @@ func (h *Handler) HandleDaemonWSHeartbeat(ctx context.Context, identity daemonws
 		}
 		return nil, err
 	}
-	ack, _, err := h.processHeartbeat(ctx, runtimeID)
+	ack, err := h.processHeartbeat(ctx, runtimeID)
 	return ack, err
 }
 
@@ -1331,19 +1324,11 @@ func (h *Handler) recordHeartbeatState(
 	return nil
 }
 
-// heartbeatMetrics carries per-stage timings out of processHeartbeat so the
-// HTTP slow-log can stay structured. The WS path discards them.
-type heartbeatMetrics struct {
-	ProbeModelMs, PopModelMs int64
-	ProbeModelTimedOut       bool
-}
-
 // processHeartbeat pulls pending actions for both HTTP and WebSocket
 // heartbeats using only the runtime ID. Each transport records liveness first:
 // HTTP uses its stateless runtime row, while WebSocket uses the connection
 // lease. Auth and request decoding also remain transport-specific.
-func (h *Handler) processHeartbeat(ctx context.Context, runtimeID string) (*protocol.DaemonHeartbeatAckPayload, heartbeatMetrics, error) {
-	var m heartbeatMetrics
+func (h *Handler) processHeartbeat(ctx context.Context, runtimeID string) (*protocol.DaemonHeartbeatAckPayload, error) {
 
 	slog.Debug("daemon heartbeat", "runtime_id", runtimeID)
 
@@ -1375,46 +1360,18 @@ func (h *Handler) processHeartbeat(ctx context.Context, runtimeID string) (*prot
 		}
 	}
 
-	// Probe then claim the model list queue. The probe is bounded so a slow
-	// shared store cannot stall the heartbeat on empty-queue ticks, but the
-	// claim itself runs unbounded because its Lua side effects cannot be
-	// safely aborted mid-script.
-	probeModelStart := time.Now()
-	probeModelCtx, cancelProbeModel := context.WithTimeout(ctx, heartbeatHasPendingTimeout)
-	hasModel, probeModelErr := h.ModelListStore.HasPending(probeModelCtx, runtimeID)
-	cancelProbeModel()
-	m.ProbeModelMs = time.Since(probeModelStart).Milliseconds()
-	switch {
-	case probeModelErr == nil && hasModel:
-		popStart := time.Now()
-		pendingModel, popErr := h.ModelListStore.PopPending(ctx, runtimeID)
-		m.PopModelMs = time.Since(popStart).Milliseconds()
-		if popErr != nil {
-			slog.Warn("model list PopPending failed", "error", popErr, "runtime_id", runtimeID)
-		} else if pendingModel != nil {
-			ack.PendingModelList = &protocol.DaemonHeartbeatPendingModelList{ID: pendingModel.ID}
-		}
-	case probeModelErr != nil:
-		if errors.Is(probeModelErr, context.DeadlineExceeded) || errors.Is(probeModelErr, context.Canceled) {
-			m.ProbeModelTimedOut = true
-			slog.Warn("model list HasPending timed out", "runtime_id", runtimeID, "elapsed_ms", m.ProbeModelMs)
-		} else {
-			slog.Warn("model list HasPending failed", "error", probeModelErr, "runtime_id", runtimeID)
-		}
-	}
-
-	return ack, m, nil
+	return ack, nil
 }
 
 // logHeartbeatEndpointSlow emits one structured log when /api/daemon/heartbeat
-// exceeds 500ms, splitting auth / update / probe / pop phases for both queues
+// exceeds 500ms, splitting auth / update phases
 // so the prod tail can be attributed without flooding logs at normal rates.
 // auth_ms is further decomposed into decode_ms, runtime_lookup_ms, and
 // workspace_check_ms; auth_path labels which token kind authenticated the
 // request ("daemon_token", "pat", or "jwt"). Mirrors logClaimEndpointSlow.
-func logHeartbeatEndpointSlow(runtimeID, outcome, authPath string, start time.Time, decodeMs, runtimeLookupMs, workspaceCheckMs, authMs, updateMs, probeModelMs, popModelMs int64, probeModelTimedOut bool) {
+func logHeartbeatEndpointSlow(runtimeID, outcome, authPath string, start time.Time, decodeMs, runtimeLookupMs, workspaceCheckMs, authMs, updateMs int64) {
 	totalMs := time.Since(start).Milliseconds()
-	if totalMs < 500 && !probeModelTimedOut {
+	if totalMs < 500 {
 		return
 	}
 	slog.Info("heartbeat_endpoint slow",
@@ -1427,9 +1384,6 @@ func logHeartbeatEndpointSlow(runtimeID, outcome, authPath string, start time.Ti
 		"runtime_lookup_ms", runtimeLookupMs,
 		"workspace_check_ms", workspaceCheckMs,
 		"update_ms", updateMs,
-		"probe_model_ms", probeModelMs,
-		"pop_model_ms", popModelMs,
-		"probe_model_timed_out", probeModelTimedOut,
 	)
 }
 
@@ -2272,9 +2226,6 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 		CustomEnv:     customEnv,
 		CustomArgs:    customArgs,
 		McpConfig:     mcpConfig,
-		Model:         agent.Model.String,
-		ThinkingLevel: agent.ThinkingLevel.String,
-		ServiceTier:   agent.ServiceTier.String,
 		RuntimeConfig: runtimeConfig,
 	}
 	if !claimResponseAgentIdentityMatches(resp) {

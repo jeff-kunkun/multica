@@ -1780,95 +1780,6 @@ func (q *Queries) ClearAgentMcpConfig(ctx context.Context, id pgtype.UUID) (Agen
 	return i, err
 }
 
-const clearAgentServiceTier = `-- name: ClearAgentServiceTier :one
-UPDATE agent SET service_tier = NULL, updated_at = now()
-WHERE id = $1
-RETURNING id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, thinking_level, composio_toolkit_allowlist, permission_mode, kind, system_key, service_tier, conversation_starters
-`
-
-// Explicit NULL-clear for service_tier. COALESCE-based UpdateAgent cannot
-// set the column back to NULL, so the API routes "Runtime default" here.
-func (q *Queries) ClearAgentServiceTier(ctx context.Context, id pgtype.UUID) (Agent, error) {
-	row := q.db.QueryRow(ctx, clearAgentServiceTier, id)
-	var i Agent
-	err := row.Scan(
-		&i.ID,
-		&i.WorkspaceID,
-		&i.Name,
-		&i.AvatarUrl,
-		&i.RuntimeMode,
-		&i.RuntimeConfig,
-		&i.Visibility,
-		&i.Status,
-		&i.MaxConcurrentTasks,
-		&i.OwnerID,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-		&i.Description,
-		&i.RuntimeID,
-		&i.Instructions,
-		&i.ArchivedAt,
-		&i.ArchivedBy,
-		&i.CustomEnv,
-		&i.CustomArgs,
-		&i.McpConfig,
-		&i.Model,
-		&i.ThinkingLevel,
-		&i.ComposioToolkitAllowlist,
-		&i.PermissionMode,
-		&i.Kind,
-		&i.SystemKey,
-		&i.ServiceTier,
-		&i.ConversationStarters,
-	)
-	return i, err
-}
-
-const clearAgentThinkingLevel = `-- name: ClearAgentThinkingLevel :one
-UPDATE agent SET thinking_level = NULL, updated_at = now()
-WHERE id = $1
-RETURNING id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, thinking_level, composio_toolkit_allowlist, permission_mode, kind, system_key, service_tier, conversation_starters
-`
-
-// Explicit NULL-clear for thinking_level. COALESCE-based UpdateAgent cannot
-// set the column back to NULL, so the API layer routes "user picked Default"
-// through this dedicated query.
-func (q *Queries) ClearAgentThinkingLevel(ctx context.Context, id pgtype.UUID) (Agent, error) {
-	row := q.db.QueryRow(ctx, clearAgentThinkingLevel, id)
-	var i Agent
-	err := row.Scan(
-		&i.ID,
-		&i.WorkspaceID,
-		&i.Name,
-		&i.AvatarUrl,
-		&i.RuntimeMode,
-		&i.RuntimeConfig,
-		&i.Visibility,
-		&i.Status,
-		&i.MaxConcurrentTasks,
-		&i.OwnerID,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-		&i.Description,
-		&i.RuntimeID,
-		&i.Instructions,
-		&i.ArchivedAt,
-		&i.ArchivedBy,
-		&i.CustomEnv,
-		&i.CustomArgs,
-		&i.McpConfig,
-		&i.Model,
-		&i.ThinkingLevel,
-		&i.ComposioToolkitAllowlist,
-		&i.PermissionMode,
-		&i.Kind,
-		&i.SystemKey,
-		&i.ServiceTier,
-		&i.ConversationStarters,
-	)
-	return i, err
-}
-
 const completeAgentTask = `-- name: CompleteAgentTask :one
 UPDATE agent_task_queue
 SET status = 'completed', completed_at = now(), result = $2,
@@ -2018,14 +1929,14 @@ const createAgent = `-- name: CreateAgent :one
 INSERT INTO agent (
     workspace_id, name, description, avatar_url, runtime_mode,
     runtime_config, runtime_id, visibility, max_concurrent_tasks, owner_id,
-    instructions, custom_env, custom_args, mcp_config, model, thinking_level,
-    service_tier, conversation_starters, permission_mode
+    instructions, custom_env, custom_args, mcp_config,
+    conversation_starters, permission_mode
 ) VALUES (
     $1, $2, $3, $4, $5,
     $6, $7, $8, $9, $10,
-    $11, $12, $13, $14, $15, $16,
-    $17, COALESCE($18::jsonb, '[]'::jsonb),
-    COALESCE($19, 'private')
+    $11, $12, $13, $14,
+    COALESCE($15::jsonb, '[]'::jsonb),
+    COALESCE($16, 'private')
 )
 RETURNING id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, thinking_level, composio_toolkit_allowlist, permission_mode, kind, system_key, service_tier, conversation_starters
 `
@@ -2045,9 +1956,6 @@ type CreateAgentParams struct {
 	CustomEnv            []byte      `json:"custom_env"`
 	CustomArgs           []byte      `json:"custom_args"`
 	McpConfig            []byte      `json:"mcp_config"`
-	Model                pgtype.Text `json:"model"`
-	ThinkingLevel        pgtype.Text `json:"thinking_level"`
-	ServiceTier          pgtype.Text `json:"service_tier"`
 	ConversationStarters []byte      `json:"conversation_starters"`
 	PermissionMode       interface{} `json:"permission_mode"`
 }
@@ -2068,9 +1976,6 @@ func (q *Queries) CreateAgent(ctx context.Context, arg CreateAgentParams) (Agent
 		arg.CustomEnv,
 		arg.CustomArgs,
 		arg.McpConfig,
-		arg.Model,
-		arg.ThinkingLevel,
-		arg.ServiceTier,
 		arg.ConversationStarters,
 		arg.PermissionMode,
 	)
@@ -7485,10 +7390,7 @@ UPDATE agent SET
     custom_env = COALESCE($13, custom_env),
     custom_args = COALESCE($14, custom_args),
     mcp_config = COALESCE($15, mcp_config),
-    model = COALESCE($16, model),
-    thinking_level = COALESCE($17, thinking_level),
-    service_tier = COALESCE($18, service_tier),
-    conversation_starters = COALESCE($19, conversation_starters),
+    conversation_starters = COALESCE($16, conversation_starters),
     updated_at = now()
 WHERE id = $1
 RETURNING id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, thinking_level, composio_toolkit_allowlist, permission_mode, kind, system_key, service_tier, conversation_starters
@@ -7510,9 +7412,6 @@ type UpdateAgentParams struct {
 	CustomEnv            []byte      `json:"custom_env"`
 	CustomArgs           []byte      `json:"custom_args"`
 	McpConfig            []byte      `json:"mcp_config"`
-	Model                pgtype.Text `json:"model"`
-	ThinkingLevel        pgtype.Text `json:"thinking_level"`
-	ServiceTier          pgtype.Text `json:"service_tier"`
 	ConversationStarters []byte      `json:"conversation_starters"`
 }
 
@@ -7533,9 +7432,6 @@ func (q *Queries) UpdateAgent(ctx context.Context, arg UpdateAgentParams) (Agent
 		arg.CustomEnv,
 		arg.CustomArgs,
 		arg.McpConfig,
-		arg.Model,
-		arg.ThinkingLevel,
-		arg.ServiceTier,
 		arg.ConversationStarters,
 	)
 	var i Agent

@@ -36,7 +36,6 @@ func opencodeTerminateGrace() time.Duration {
 var opencodeBlockedArgs = map[string]blockedArgMode{
 	"--format":                       blockedWithValue,  // json output format for daemon communication
 	"--dir":                          blockedWithValue,  // task workdir anchor for skill / AGENTS.md discovery
-	"--variant":                      blockedWithValue,  // owned by agent.thinking_level
 	"--dangerously-skip-permissions": blockedStandalone, // daemon manages non-interactive permission prompts
 }
 
@@ -110,22 +109,7 @@ func (b *opencodeBackend) Execute(ctx context.Context, prompt string, opts ExecO
 	if opts.Cwd != "" && !usesV2 {
 		args = append(args, "--dir", opts.Cwd)
 	}
-	model := opts.Model
-	if usesV2 {
-		// 2.x dropped `--variant` and reads the variant off the model string.
-		folded, ok := opencodeModelArg(model, opts.ThinkingLevel)
-		if !ok {
-			b.cfg.Logger.Warn("opencode: thinking level needs an explicit model on OpenCode 2.x; ignoring",
-				"thinkingLevel", opts.ThinkingLevel)
-		}
-		model = folded
-	}
-	if model != "" {
-		args = append(args, "--model", model)
-	}
-	if opts.ThinkingLevel != "" && !usesV2 {
-		args = append(args, "--variant", opts.ThinkingLevel)
-	}
+	// No --model / --variant: OpenCode uses its own configured default.
 	// OpenCode's `run` subcommand has no --prompt flag — passing one makes the
 	// CLI exit 1 with a usage dump before sending anything (checked against
 	// OpenCode 1.17.7). SystemPrompt is therefore never forwarded; the runtime
@@ -257,7 +241,7 @@ func (b *opencodeBackend) Execute(ctx context.Context, prompt string, opts ExecO
 		return nil, fmt.Errorf("start opencode: %w", err)
 	}
 
-	b.cfg.Logger.Info("opencode started", "pid", cmd.Process.Pid, "cwd", opts.Cwd, "model", opts.Model)
+	b.cfg.Logger.Info("opencode started", "pid", cmd.Process.Pid, "cwd", opts.Cwd)
 
 	msgCh := make(chan Message, 256)
 	resCh := make(chan Result, 1)
@@ -374,16 +358,12 @@ func (b *opencodeBackend) Execute(ctx context.Context, prompt string, opts ExecO
 
 		b.cfg.Logger.Info("opencode finished", "pid", cmd.Process.Pid, "status", scanResult.status, "duration", duration.Round(time.Millisecond).String())
 
-		// Build usage map. OpenCode doesn't report model per-step, so we
-		// attribute all usage to the configured model (or "unknown").
+		// Build usage map. OpenCode doesn't report model per-step, and the
+		// daemon never picks one, so usage is attributed to "unknown".
 		var usage map[string]TokenUsage
 		u := scanResult.usage
 		if u.InputTokens > 0 || u.OutputTokens > 0 || u.CacheReadTokens > 0 || u.CacheWriteTokens > 0 {
-			model := opts.Model
-			if model == "" {
-				model = "unknown"
-			}
-			usage = map[string]TokenUsage{model: u}
+			usage = map[string]TokenUsage{"unknown": u}
 		}
 
 		resCh <- Result{

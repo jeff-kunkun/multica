@@ -51,12 +51,6 @@ func TestRuntimeHandlersRejectMalformedRuntimeID(t *testing.T) {
 			handle: testHandler.UnbindAgentsAndDeleteRuntime,
 		},
 		{
-			name:   "models",
-			method: "POST",
-			path:   "/api/runtimes/not-a-uuid/models",
-			handle: testHandler.InitiateListModels,
-		},
-		{
 			name:   "update",
 			method: "POST",
 			path:   "/api/runtimes/not-a-uuid/update",

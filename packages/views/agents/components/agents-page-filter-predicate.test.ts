@@ -31,7 +31,6 @@ function makeRow(
       visibility: "private",
       permission_mode: "private",
       invocation_targets: [],
-      model: "claude",
       created_at: "2026-01-01T00:00:00Z",
       updated_at: "2026-01-01T00:00:00Z",
       status: "idle",

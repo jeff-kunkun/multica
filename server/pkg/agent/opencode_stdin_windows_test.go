@@ -68,7 +68,6 @@ func TestOpencodeExecuteOversizedPromptStartsOnWindows(t *testing.T) {
 
 	session, err := backend.Execute(t.Context(), prompt, ExecOptions{
 		Timeout: 60 * time.Second,
-		Model:   "lanz/Lanz-Medium",
 	})
 	// Before the fix this is exactly where the run died, with
 	// "start opencode: fork/exec ...: The filename or extension is too long".
@@ -102,7 +101,7 @@ func TestOpencodeExecuteOversizedPromptStartsOnWindows(t *testing.T) {
 	if len(gotArgv) > 32767 {
 		t.Errorf("argv is %d chars, still past the CreateProcess ceiling", len(gotArgv))
 	}
-	for _, want := range []string{"run", "--format", "json", "--dangerously-skip-permissions", "--model", "lanz/Lanz-Medium"} {
+	for _, want := range []string{"run", "--format", "json", "--dangerously-skip-permissions"} {
 		if !strings.Contains(gotArgv, want) {
 			t.Errorf("expected %q to reach the native child; argv=%q", want, gotArgv)
 		}

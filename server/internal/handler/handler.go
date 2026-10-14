@@ -147,16 +147,6 @@ type WorkspaceSetRefreshNotifier interface {
 	NotifyWorkspacesChanged(userID string)
 }
 
-// DaemonPendingWorkNotifier pushes a runtime-scoped "heartbeat now" hint to the
-// daemon so a queued heartbeat-carried request (model or capability
-// discovery) is picked up immediately instead of on the
-// daemon's next scheduled tick (MUL-5444).
-// Satisfied by both *daemonws.Hub (single-node) and *daemonws.RelayNotifier
-// (multi-node, fans out through Redis).
-type DaemonPendingWorkNotifier interface {
-	NotifyPendingWork(runtimeID, kind string)
-}
-
 // DaemonTaskSupplementNotifier sends a content-free wakeup for one exact run.
 // The daemon still pulls and authenticates the durable supplement over HTTP.
 type DaemonTaskSupplementNotifier interface {
@@ -192,30 +182,19 @@ type Handler struct {
 	IssueService           *service.IssueService
 	EmailService           *service.EmailService
 	UpdateStore            UpdateStore
-	ModelListStore         ModelListStore
 	FeatureFlags           *featureflag.Service
 	// IssueStatusCatalog reads the workspace status catalog. Defaults to
 	// Queries; a test can substitute a counting wrapper to assert HOW MANY
 	// catalog reads a request performs, which is the only property that
 	// distinguishes the current one-read derivation from the N+1 it replaced.
 	// (MUL-6243)
-	IssueStatusCatalog issuestatus.Querier
-	LivenessStore      LivenessStore
-	HeartbeatScheduler HeartbeatScheduler
-	Storage            storage.Storage
-	CFSigner           *auth.CloudFrontSigner
-	Analytics          analytics.Client
-	// DaemonPendingWork pushes "heartbeat now" hints for queued
-	// heartbeat-carried requests (MUL-5444). Optional: when nil,
-	// requestDaemonPendingWork falls back to the local DaemonHub, which is the
-	// correct delivery scope for a single-node deployment.
-	DaemonPendingWork    DaemonPendingWorkNotifier
+	IssueStatusCatalog   issuestatus.Querier
+	LivenessStore        LivenessStore
+	HeartbeatScheduler   HeartbeatScheduler
+	Storage              storage.Storage
+	CFSigner             *auth.CloudFrontSigner
+	Analytics            analytics.Client
 	DaemonTaskSupplement DaemonTaskSupplementNotifier
-	// ModelCatalogCache serves the last known good model list for a runtime so
-	// the picker can render without waiting for a daemon round trip
-	// (stale-while-revalidate, MUL-5444). Nil-safe: every call site treats a nil
-	// cache as a permanent miss and falls back to the full discovery flow.
-	ModelCatalogCache ModelCatalogCache
 	// Metrics is the shared business-metrics collector built by main.go.
 	// May be nil in tests / self-hosted with the metrics listener disabled;
 	// every Record* method is nil-safe and obsmetrics.RecordEvent treats a
@@ -325,8 +304,6 @@ func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *event
 		IssueService:           service.NewIssueService(queries, txStarter, bus, analyticsClient, taskSvc),
 		EmailService:           emailService,
 		UpdateStore:            NewInMemoryUpdateStore(),
-		ModelListStore:         NewInMemoryModelListStore(),
-		ModelCatalogCache:      NewInMemoryModelCatalogCache(),
 		LivenessStore:          NewNoopLivenessStore(),
 		HeartbeatScheduler:     NewPassthroughHeartbeatScheduler(queries),
 		Storage:                store,

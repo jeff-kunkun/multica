@@ -486,7 +486,6 @@ func TestLoadConfig_DiscoversQwenCode(t *testing.T) {
 	// Avoid consulting an inherited interactive shell for all deliberately
 	// absent providers; this test is about ordinary PATH discovery.
 	t.Setenv("SHELL", "/usr/bin/fish")
-	t.Setenv("MULTICA_QWEN_MODEL", "qwen3.8-max-preview")
 	t.Setenv("MULTICA_QWEN_ARGS", "--verbose --foo=bar")
 
 	cfg, err := LoadConfig(Overrides{
@@ -504,8 +503,8 @@ func TestLoadConfig_DiscoversQwenCode(t *testing.T) {
 	if err != nil {
 		t.Fatalf("eval symlinks for qwen: %v", err)
 	}
-	if entry.Path != wantPath || entry.Command != "qwen" || entry.Model != "qwen3.8-max-preview" {
-		t.Fatalf("qwen entry = %+v, want path=%q command=qwen model=qwen3.8-max-preview", entry, wantPath)
+	if entry.Path != wantPath || entry.Command != "qwen" {
+		t.Fatalf("qwen entry = %+v, want path=%q command=qwen", entry, wantPath)
 	}
 	if got, want := strings.Join(cfg.QwenArgs, " "), "--verbose --foo=bar"; got != want {
 		t.Fatalf("QwenArgs = %q, want %q", got, want)
@@ -1371,7 +1370,6 @@ func TestLoadConfig_UsesCodexDesktopAppBundleFallback(t *testing.T) {
 	t.Setenv("PATH", t.TempDir())
 	t.Setenv("SHELL", filepath.Join(t.TempDir(), "fish"))
 	t.Setenv("MULTICA_DAEMON_ID", "11111111-1111-1111-1111-111111111111")
-	t.Setenv("MULTICA_CODEX_MODEL", "gpt-5")
 	pinNonCodexAgentsToMissingPaths(t)
 
 	cfg, err := LoadConfig(Overrides{
@@ -1387,9 +1385,6 @@ func TestLoadConfig_UsesCodexDesktopAppBundleFallback(t *testing.T) {
 	}
 	if got.Path != fakeCodex {
 		t.Fatalf("codex path = %q, want %q", got.Path, fakeCodex)
-	}
-	if got.Model != "gpt-5" {
-		t.Fatalf("codex model = %q, want gpt-5", got.Model)
 	}
 }
 

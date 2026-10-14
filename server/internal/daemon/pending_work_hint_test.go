@@ -9,9 +9,11 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
-
-	"github.com/multica-ai/multica/server/pkg/protocol"
 )
+
+// testPendingWorkKind is an arbitrary hint kind; the daemon treats every kind
+// the same (heartbeat now).
+const testPendingWorkKind = "test"
 
 // pendingWorkHintDaemon builds a Daemon that knows exactly one runtime and
 // talks to an httptest server, so the hint path is exercised against the real
@@ -46,7 +48,7 @@ func withPendingWorkHintMinInterval(t *testing.T, d time.Duration) {
 
 // TestHandlePendingWorkHint_SendsImmediateHeartbeat is the core of MUL-5444:
 // a server-pushed hint must produce a heartbeat right now instead of leaving the
-// queued model-list request to wait for the next scheduled tick (up to a full
+// queued heartbeat-carried request to wait for the next scheduled tick (up to a full
 // HeartbeatInterval, 15s by default).
 func TestHandlePendingWorkHint_SendsImmediateHeartbeat(t *testing.T) {
 	var gotPath, gotRuntime string
@@ -61,7 +63,7 @@ func TestHandlePendingWorkHint_SendsImmediateHeartbeat(t *testing.T) {
 		w.Write([]byte(`{"runtime_id":"rt-1","status":"ok"}`))
 	})
 
-	d.handlePendingWorkHint("rt-1", protocol.PendingWorkKindModelList)
+	d.handlePendingWorkHint("rt-1", testPendingWorkKind)
 
 	if got := atomic.LoadInt32(calls); got != 1 {
 		t.Fatalf("expected exactly 1 heartbeat, got %d", got)
@@ -83,8 +85,8 @@ func TestHandlePendingWorkHint_IgnoresUnknownRuntime(t *testing.T) {
 		w.Write([]byte(`{"runtime_id":"other","status":"ok"}`))
 	})
 
-	d.handlePendingWorkHint("not-mine", protocol.PendingWorkKindModelList)
-	d.handlePendingWorkHint("", protocol.PendingWorkKindModelList)
+	d.handlePendingWorkHint("not-mine", testPendingWorkKind)
+	d.handlePendingWorkHint("", testPendingWorkKind)
 
 	if got := atomic.LoadInt32(calls); got != 0 {
 		t.Fatalf("expected no heartbeat for an unknown runtime, got %d", got)
@@ -92,9 +94,8 @@ func TestHandlePendingWorkHint_IgnoresUnknownRuntime(t *testing.T) {
 }
 
 // TestHandlePendingWorkHint_CoalescesConcurrentHints pins the stampede guard:
-// several UI surfaces (model picker, thinking level, service tier) each request
-// the catalog for the same runtime within milliseconds, and one heartbeat
-// already claims whatever is queued.
+// several hints for the same runtime can arrive within milliseconds, and one
+// heartbeat already claims whatever is queued.
 func TestHandlePendingWorkHint_CoalescesConcurrentHints(t *testing.T) {
 	release := make(chan struct{})
 	arrived := make(chan struct{}, 1)
@@ -112,7 +113,7 @@ func TestHandlePendingWorkHint_CoalescesConcurrentHints(t *testing.T) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		d.handlePendingWorkHint("rt-1", protocol.PendingWorkKindModelList)
+		d.handlePendingWorkHint("rt-1", testPendingWorkKind)
 	}()
 
 	// Wait until the first hint is actually inside the HTTP call, then fire the
@@ -125,7 +126,7 @@ func TestHandlePendingWorkHint_CoalescesConcurrentHints(t *testing.T) {
 		t.Fatal("first hint never reached the server")
 	}
 	for i := 0; i < 3; i++ {
-		d.handlePendingWorkHint("rt-1", protocol.PendingWorkKindModelList)
+		d.handlePendingWorkHint("rt-1", testPendingWorkKind)
 	}
 	close(release)
 	wg.Wait()
@@ -136,15 +137,14 @@ func TestHandlePendingWorkHint_CoalescesConcurrentHints(t *testing.T) {
 
 	// The guard must release afterwards, otherwise the runtime would ignore
 	// every later hint for the lifetime of the process.
-	d.handlePendingWorkHint("rt-1", protocol.PendingWorkKindModelList)
+	d.handlePendingWorkHint("rt-1", testPendingWorkKind)
 	if got := atomic.LoadInt32(calls); got != 2 {
 		t.Fatalf("expected a later hint to heartbeat again, got %d total", got)
 	}
 }
 
 // TestHandlePendingWorkHint_ThrottlesRepeatHints pins the amplification guard:
-// the hint is triggered by any workspace member hitting the list-models
-// endpoint, so back-to-back requests must not turn into back-to-back heartbeats.
+// back-to-back hints must not turn into back-to-back heartbeats.
 func TestHandlePendingWorkHint_ThrottlesRepeatHints(t *testing.T) {
 	d, calls := pendingWorkHintDaemon(t, func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -153,7 +153,7 @@ func TestHandlePendingWorkHint_ThrottlesRepeatHints(t *testing.T) {
 	withPendingWorkHintMinInterval(t, time.Minute)
 
 	for i := 0; i < 5; i++ {
-		d.handlePendingWorkHint("rt-1", protocol.PendingWorkKindModelList)
+		d.handlePendingWorkHint("rt-1", testPendingWorkKind)
 	}
 
 	if got := atomic.LoadInt32(calls); got != 1 {
@@ -164,7 +164,7 @@ func TestHandlePendingWorkHint_ThrottlesRepeatHints(t *testing.T) {
 	// one-shot latch.
 	withPendingWorkHintMinInterval(t, time.Nanosecond)
 	time.Sleep(2 * time.Millisecond)
-	d.handlePendingWorkHint("rt-1", protocol.PendingWorkKindModelList)
+	d.handlePendingWorkHint("rt-1", testPendingWorkKind)
 	if got := atomic.LoadInt32(calls); got != 2 {
 		t.Fatalf("expected a hint past the floor to heartbeat, got %d total", got)
 	}
@@ -178,7 +178,7 @@ func TestHandlePendingWorkHint_SurvivesHeartbeatFailure(t *testing.T) {
 		http.Error(w, `{"error":"boom"}`, http.StatusInternalServerError)
 	})
 
-	d.handlePendingWorkHint("rt-1", protocol.PendingWorkKindModelList)
+	d.handlePendingWorkHint("rt-1", testPendingWorkKind)
 
 	if got := atomic.LoadInt32(calls); got != 1 {
 		t.Fatalf("expected exactly 1 attempt, got %d", got)

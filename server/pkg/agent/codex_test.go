@@ -2153,17 +2153,6 @@ func TestExtractNestedStringMissingKey(t *testing.T) {
 	}
 }
 
-func TestNilIfEmpty(t *testing.T) {
-	t.Parallel()
-
-	if nilIfEmpty("") != nil {
-		t.Fatal("expected nil for empty string")
-	}
-	if nilIfEmpty("hello") != "hello" {
-		t.Fatal("expected 'hello'")
-	}
-}
-
 // runRPCScript feeds JSON-RPC responses back to the codexClient by matching
 // each method call written to stdin against the script, and emitting the
 // scripted response via c.handleLine. It returns once all scripted calls have
@@ -3209,7 +3198,6 @@ func TestCodexExecuteFirstTurnNoProgressSurfacesDiagnostics(t *testing.T) {
 		CodexFirstTurnNoProgressMarker,
 		"thr-stuck",
 		"turn-stuck",
-		`model="default(empty)"`,
 		`codex_version="codex-cli 0.0.0-test"`,
 		"Codex could not load its model catalog",
 		"codex stderr:",
@@ -3713,7 +3701,6 @@ func TestCodexExecuteCancellationInterruptsTurnAndPreservesUsage(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	session, err := backend.Execute(ctx, "prompt", ExecOptions{
-		Model:                     "gpt-test",
 		SemanticInactivityTimeout: 5 * time.Second,
 	})
 	if err != nil {
@@ -3751,7 +3738,7 @@ func TestCodexExecuteCancellationInterruptsTurnAndPreservesUsage(t *testing.T) {
 		if result.Status != "aborted" {
 			t.Fatalf("status = %q, want aborted (error=%q)", result.Status, result.Error)
 		}
-		usage, ok := result.Usage["gpt-test"]
+		usage, ok := result.Usage["unknown"]
 		if !ok {
 			t.Fatalf("cancelled turn usage missing: %+v", result.Usage)
 		}
@@ -4030,7 +4017,6 @@ func TestCodexInterruptCompletesNearConfiguredDeadline(t *testing.T) {
 		`echo '{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"thr-near-deadline","turn":{"id":"turn-near-deadline","status":"interrupted"}}}'`+"\n")
 
 	result, elapsed := cancelFakeCodexAfterMarker(t, fakePath, marker, ExecOptions{
-		Model:                "gpt-test",
 		TurnInterruptTimeout: 250 * time.Millisecond,
 	})
 	if result.Status != "aborted" {
@@ -4039,7 +4025,7 @@ func TestCodexInterruptCompletesNearConfiguredDeadline(t *testing.T) {
 	if elapsed < 100*time.Millisecond || elapsed >= 250*time.Millisecond {
 		t.Fatalf("interrupt completed in %s, want a near-deadline success below 250ms", elapsed)
 	}
-	if got := result.Usage["gpt-test"]; got.InputTokens != 10 || got.CacheReadTokens != 2 || got.OutputTokens != 3 {
+	if got := result.Usage["unknown"]; got.InputTokens != 10 || got.CacheReadTokens != 2 || got.OutputTokens != 3 {
 		t.Fatalf("near-deadline usage = %+v", got)
 	}
 }
@@ -4743,50 +4729,6 @@ func TestBuildCodexArgsExtraArgsBeforeCustomArgsAndFiltersBoth(t *testing.T) {
 	}
 	if extraIdx == -1 || customIdx == -1 || extraIdx > customIdx {
 		t.Fatalf("expected extra args before custom args, got %v", args)
-	}
-}
-
-func TestBuildCodexArgsExplicitFastOverridesLowerPriorityDisable(t *testing.T) {
-	t.Parallel()
-
-	args := buildCodexArgs(ExecOptions{
-		ServiceTier: codexFastServiceTier,
-		ExtraArgs: []string{
-			"--disable", codexFastModeFeature,
-			"--disable", "memory_tool",
-			"-c", "features.fast_mode=false",
-			"-c", "features.memory_tool=false",
-		},
-		CustomArgs: []string{
-			"'--disable=fast_mode'",
-			`--config=features.fast_mode="false"`,
-			"--enable", "multi_agent",
-		},
-	}, slog.Default())
-
-	want := []string{
-		"app-server", "--listen", "stdio://",
-		"--disable", "memory_tool",
-		"-c", "features.memory_tool=false",
-		"--enable", "multi_agent",
-		"--enable", codexFastModeFeature,
-	}
-	if !reflect.DeepEqual(args, want) {
-		t.Fatalf("buildCodexArgs explicit Fast = %v, want %v", args, want)
-	}
-}
-
-func TestBuildCodexArgsFutureServiceTierDoesNotForceFastMode(t *testing.T) {
-	t.Parallel()
-
-	args := buildCodexArgs(ExecOptions{
-		ServiceTier: "future-tier",
-		CustomArgs:  []string{"--disable", codexFastModeFeature},
-	}, slog.Default())
-
-	want := []string{"app-server", "--listen", "stdio://", "--disable", codexFastModeFeature}
-	if !reflect.DeepEqual(args, want) {
-		t.Fatalf("buildCodexArgs future tier = %v, want %v", args, want)
 	}
 }
 

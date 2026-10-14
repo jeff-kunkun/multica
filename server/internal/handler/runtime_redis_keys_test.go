@@ -7,10 +7,6 @@ import (
 
 func TestRuntimePendingRedisKeysShareClusterHashTag(t *testing.T) {
 	for name, keys := range map[string][]string{
-		"model list claim": {
-			modelListPendingKey("runtime-1"),
-			modelListKey("req-1"),
-		},
 		"update claim": {
 			updatePendingKey("runtime-1"),
 			updateKey("req-1"),

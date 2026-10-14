@@ -12,8 +12,8 @@ import type { Agent, RuntimeDevice } from "@multica/core/types";
  * queries, so on a cold start (a direct `?duplicate=<id>` link, or a refresh)
  * the agent can arrive while runtimes are still pending. Seeding then would run
  * `buildDuplicateDraft` against `[]`, read the source runtime as unavailable,
- * and clear the model / thinking / speed that a same-runtime copy must keep —
- * permanently, because seeding happens once. Re-running on every runtime change
+ * and move the copy off a runtime it could have kept — permanently, because
+ * seeding happens once. Re-running on every runtime change
  * instead would overwrite edits the user already made, so the gate is on the
  * query being decidable rather than on the data changing.
  */

@@ -140,7 +140,7 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		return nil, fmt.Errorf("start claude: %w", err)
 	}
 
-	b.cfg.Logger.Info("claude started", "pid", cmd.Process.Pid, "cwd", opts.Cwd, "model", opts.Model)
+	b.cfg.Logger.Info("claude started", "pid", cmd.Process.Pid, "cwd", opts.Cwd)
 
 	// The process started — transfer temp file ownership to the goroutine.
 	mcpFileCleanup = nil
@@ -286,7 +286,7 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 				if usageSnapshot != nil {
 					baseline = usageSnapshot.baseline
 				}
-				if resultUsage, authoritative := claudeResultUsageSince(msg, opts.Model, baseline); authoritative {
+				if resultUsage, authoritative := claudeResultUsageSince(msg, "", baseline); authoritative {
 					usage = resultUsage
 					usageMsg := msg
 					lastUsageResult = &usageMsg
@@ -405,7 +405,6 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		logStreamProtocolObservation(b.cfg.Logger, streamProtocolObservation{
 			provider:                   "claude",
 			cliVersion:                 b.cfg.CLIVersion,
-			model:                      opts.Model,
 			exitCode:                   streamProcessExitCode(exitErr),
 			eventCount:                 eventCount,
 			invalidEventCount:          invalidEventCount,
@@ -430,7 +429,7 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 			// A rejected resume may emit usage for a newly-created session. Its
 			// totals do not share the requested session's baseline.
 			if lastUsageResult != nil {
-				if resultUsage, authoritative := claudeResultUsageSince(*lastUsageResult, opts.Model, nil); authoritative {
+				if resultUsage, authoritative := claudeResultUsageSince(*lastUsageResult, "", nil); authoritative {
 					usage = resultUsage
 				}
 			}
@@ -1066,13 +1065,6 @@ var claudeBlockedArgs = map[string]blockedArgMode{
 	"--input-format":    blockedWithValue,  // stream-json protocol
 	"--permission-mode": blockedWithValue,  // bypassPermissions for autonomous operation
 	"--mcp-config":      blockedWithValue,  // set by daemon from agent.mcp_config
-	// `--effort` is owned by the per-agent thinking_level picker so a
-	// user-supplied custom_arg cannot silently outvote it. The daemon
-	// injects --effort only when opts.ThinkingLevel is set; if a user
-	// nevertheless writes it in custom_args we drop the duplicate and
-	// log a warning rather than letting the CLI receive two conflicting
-	// --effort values.
-	"--effort": blockedWithValue,
 }
 
 func buildClaudeArgs(opts ExecOptions, logger *slog.Logger) []string {
@@ -1096,16 +1088,7 @@ func buildClaudeArgs(opts ExecOptions, logger *slog.Logger) []string {
 		// inherit the user's local runtime MCP servers.
 		args = append(args, "--strict-mcp-config")
 	}
-	if opts.Model != "" {
-		args = append(args, "--model", opts.Model)
-	}
-	if opts.ThinkingLevel != "" {
-		// Slotted right after --model so the per-session effort runs
-		// against the same model selection the args advertise; the CLI
-		// itself accepts the flag in any order but this ordering makes
-		// the launch line readable in `agent command` logs.
-		args = append(args, "--effort", opts.ThinkingLevel)
-	}
+	// No --model / --effort: Claude Code uses its own configured default.
 	if opts.MaxTurns > 0 {
 		args = append(args, "--max-turns", fmt.Sprintf("%d", opts.MaxTurns))
 	}

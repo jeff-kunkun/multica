@@ -15,9 +15,6 @@ const draft = (): AgentDraft => ({
   ],
   avatarUrl: "🚀",
   runtimeId: "runtime-1",
-  model: "gpt-5.6-sol",
-  thinkingLevel: "high",
-  serviceTier: "priority",
   permissionScope: "members",
   memberIds: new Set(["member-1"]),
   teamIds: new Set(["team-1"]),
@@ -69,5 +66,23 @@ describe("stored agent draft", () => {
         toStoredAgentDraft({ ...draft(), name: "Other" }, "msg-1"),
       ),
     ).toBe(false);
+  });
+
+  // Drafts saved before the platform stopped owning model / thinking / speed
+  // still carry those keys. They must be ignored on restore and must not make
+  // an untouched draft look edited.
+  it("ignores model keys left by an older client", () => {
+    const legacy = {
+      ...toStoredAgentDraft(draft(), "msg-1"),
+      model: "gpt-5.6-sol",
+      thinking_level: "high",
+      service_tier: "priority",
+    };
+    const restored = fromStoredAgentDraft(legacy, "runtime-1");
+    expect(restored).toEqual(draft());
+    expect(restored).not.toHaveProperty("model");
+    expect(
+      storedAgentDraftsEqual(legacy, toStoredAgentDraft(draft(), "msg-1")),
+    ).toBe(true);
   });
 });

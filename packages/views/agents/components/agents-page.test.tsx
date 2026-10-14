@@ -34,12 +34,11 @@ const mocks = vi.hoisted(() => ({
     scope: "all",
     sortField: "lastActive" as string,
     sortDirection: "desc" as string,
-    hiddenColumns: ["model", "created"] as string[],
+    hiddenColumns: ["created"] as string[],
     filters: {
       availability: [] as string[],
       runtimes: [] as string[],
       owners: [] as string[],
-      models: [] as string[],
       access: [] as string[],
     },
     setScope: vi.fn(),
@@ -108,7 +107,7 @@ vi.mock("@multica/core/agents", () => ({
 vi.mock("@multica/core/agents/stores", () => ({
   useAgentsViewStore: (selector: (state: unknown) => unknown) =>
     selector(mocks.viewState),
-  AGENT_DEFAULT_HIDDEN_COLUMNS: ["model", "created"],
+  AGENT_DEFAULT_HIDDEN_COLUMNS: ["created"],
   AGENT_SCOPES: ["mine", "all", "archived"],
 }));
 
@@ -180,7 +179,6 @@ const BASE_AGENT: Agent = {
   invocation_targets: [],
   status: "idle",
   max_concurrent_tasks: 1,
-  model: "claude",
   owner_id: "user-1",
   created_at: "2026-06-01T00:00:00Z",
   updated_at: "2026-06-01T00:00:00Z",
@@ -246,12 +244,11 @@ beforeEach(() => {
   mocks.viewState.scope = "all";
   mocks.viewState.sortField = "lastActive";
   mocks.viewState.sortDirection = "desc";
-  mocks.viewState.hiddenColumns = ["model", "created"];
+  mocks.viewState.hiddenColumns = ["created"];
   mocks.viewState.filters = {
     availability: [],
     runtimes: [],
     owners: [],
-    models: [],
     access: [],
   };
 });

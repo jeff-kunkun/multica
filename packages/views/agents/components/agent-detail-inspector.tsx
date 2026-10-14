@@ -204,17 +204,7 @@ export function AgentDetailInspector({
               members={members}
               currentUserId={currentUserId}
               canEdit={canEdit}
-              // Model, thinking level, and service tier are runtime/model
-              // native. Clear them together so the new runtime resolves its
-              // own defaults instead of inheriting incompatible tokens.
-              onChange={(id) =>
-                update({
-                  runtime_id: id,
-                  model: "",
-                  thinking_level: "",
-                  service_tier: "",
-                })
-              }
+              onChange={(id) => update({ runtime_id: id })}
             />
           </SettingsRow>
           {/* The model is picked per run (magpie), not per member; until that

@@ -33,12 +33,6 @@ var codexBlockedArgs = map[string]blockedArgMode{
 	"--listen": blockedWithValue, // stdio:// transport for daemon communication
 }
 
-const (
-	codexFastServiceTier     = "priority"
-	codexStandardServiceTier = "default"
-	codexFastModeFeature     = "fast_mode"
-)
-
 // codexStderrTailBytes bounds the stderr tail captured for inclusion in
 // error messages when codex exits before the JSON-RPC handshake (e.g. the
 // user supplied a custom_args flag that the `app-server` subcommand
@@ -360,7 +354,6 @@ type codexTimeoutDiagnostic struct {
 	LastActivity string
 	ThreadID     string
 	TurnID       string
-	Model        string
 	CodexVersion string
 }
 
@@ -416,9 +409,6 @@ type codexBackend struct {
 func buildCodexArgs(opts ExecOptions, logger *slog.Logger) []string {
 	args := []string{"app-server", "--listen", "stdio://"}
 	launchArgs := NormalizeCodexLaunchArgs(opts.ExtraArgs, opts.CustomArgs, opts.McpConfig, logger)
-	if opts.ServiceTier == codexFastServiceTier {
-		launchArgs = enforceCodexFastMode(launchArgs, logger)
-	}
 	return append(args, launchArgs...)
 }
 
@@ -427,9 +417,7 @@ func buildCodexArgs(opts ExecOptions, logger *slog.Logger) []string {
 // protocol-critical flags removed, and — when a managed
 // mcp_config owns the mcp_servers namespace — stray `-c mcp_servers.*`
 // overrides dropped. buildCodexArgs prepends the fixed
-// `app-server --listen stdio://` transport flags and may append an
-// agent-owned runtime override (currently `--enable fast_mode`) after this
-// result.
+// `app-server --listen stdio://` transport flags.
 //
 // It is exported so the daemon can reconstruct the *effective* launch args when
 // deciding the Windows sandbox mode. A `-c windows.sandbox=…` opt-in may arrive
@@ -458,71 +446,6 @@ func NormalizeCodexLaunchArgs(extraArgs, customArgs []string, mcpConfig json.Raw
 	return out
 }
 
-// enforceCodexFastMode makes the explicit agent service-tier selection
-// authoritative over daemon ExtraArgs, per-agent CustomArgs, and inherited
-// config.toml. Codex's `--disable fast_mode` wins over `--enable fast_mode`
-// regardless of argv order, so conflicting lower-priority disable flags must
-// be removed before the managed enable is appended. Conflicting `-c` /
-// `--config features.fast_mode=...` overrides are removed for the same
-// precedence reason, even though current Codex versions let `--enable` win:
-// the final argv should encode one unambiguous owner for this setting.
-//
-// Other disabled features are preserved, and this helper is used only for the
-// catalog-owned `priority` tier. Future service tiers must not accidentally
-// inherit Fast mode semantics.
-func enforceCodexFastMode(args []string, logger *slog.Logger) []string {
-	return append(stripCodexFastModeConflicts(args, logger), "--enable", codexFastModeFeature)
-}
-
-// stripCodexFastModeConflicts removes the lower-priority overrides that would
-// defeat an explicit priority tier, without appending the managed enable.
-//
-// Split out of enforceCodexFastMode because the enable belongs exactly once, on
-// the final managed args, while the removal has to reach every argv region the
-// user can write into — including a custom runtime profile's launch prefix.
-// Prefix-first does not protect this setting: `--disable fast_mode` beats
-// `--enable fast_mode` regardless of argv order, and a `-c
-// features.fast_mode=false` beats config.toml from any position. Leaving the
-// prefix unfiltered would let a profile override the tier the agent explicitly
-// selected, inverting the precedence this package promises (GH #7046).
-func stripCodexFastModeConflicts(args []string, logger *slog.Logger) []string {
-	args = filterCodexConfigOverrides(
-		args,
-		codexManagedFastModeConfigKeyRe,
-		"features.fast_mode",
-		logger,
-	)
-	filtered := make([]string, 0, len(args)+2)
-	for i := 0; i < len(args); i++ {
-		arg := args[i]
-		flag := arg
-		value := ""
-		hasInlineValue := false
-		if idx := strings.Index(arg, "="); idx > 0 {
-			flag = arg[:idx]
-			value = arg[idx+1:]
-			hasInlineValue = true
-		}
-		if flag == "--disable" {
-			if !hasInlineValue && i+1 < len(args) {
-				value = args[i+1]
-			}
-			if value == codexFastModeFeature {
-				if logger != nil {
-					logger.Warn("codex: ignored lower-priority feature disable",
-						"feature", codexFastModeFeature)
-				}
-				if !hasInlineValue {
-					i++
-				}
-				continue
-			}
-		}
-		filtered = append(filtered, arg)
-	}
-	return filtered
-}
-
 // hasManagedCodexMcpConfig reports whether the agent's mcp_config field is
 // "present" in the API three-state sense: a non-null JSON value. Both
 // `{}` and `{"mcpServers":{}}` count as present (the admin saved an empty
@@ -538,9 +461,6 @@ func hasManagedCodexMcpConfig(raw json.RawMessage) bool {
 // overrides that would otherwise shadow what the MCP Tab writes into
 // `$CODEX_HOME/config.toml`.
 var codexManagedMcpConfigKeyRe = regexp.MustCompile(`^\s*mcp_servers(?:\s*\.|\s*=|\s*$)`)
-
-var codexManagedFastModeConfigKeyRe = regexp.MustCompile(
-	`^\s*features\s*\.\s*fast_mode\s*(?:=|$)`)
 
 // A daemon-managed shell_environment_policy must also win over profile and
 // custom-arg overrides. Match root and profile policy keys without catching an
@@ -1181,14 +1101,6 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 			return filterCodexCustomConfigOverrides(prefix, b.cfg.Logger)
 		})
 	}
-	if opts.ServiceTier == codexFastServiceTier {
-		// Mirrors enforceCodexFastMode, which buildCodexArgs applies to the
-		// managed args. The enable itself is appended there, once; the prefix
-		// only needs the conflicting disable/config overrides removed.
-		runtimeCmd = runtimeCmd.withFilteredPrefix(func(prefix []string) []string {
-			return stripCodexFastModeConflicts(prefix, b.cfg.Logger)
-		})
-	}
 	codexArgs := buildCodexArgs(opts, b.cfg.Logger)
 	// Keep the app-server alive long enough to handle turn/interrupt when the
 	// task context is cancelled. The lifecycle goroutine remains governed by
@@ -1688,13 +1600,6 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 			"threadId": threadID,
 			"input":    codexTurnInput(prompt, opts.ResumeExpected, resumed, opts.ResumeContinuityNotice),
 		}
-		// Per-turn reasoning override. Mirrors the per-thread injection in
-		// startOrResumeThread; keeping both in sync is enforced by the
-		// shared `codexReasoningInjection` fixture in codex_test.go (see
-		// MUL-2339 — Trump's constraint that the three injection points
-		// must not drift independently).
-		applyCodexReasoningEffort(turnParams, opts.ThinkingLevel)
-		applyCodexServiceTier(turnParams, opts.ServiceTier)
 		waitingForTurn := true
 		var timeoutDiagnostic codexTimeoutDiagnostic
 		var processExitErr error
@@ -1820,7 +1725,6 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 					LastActivity: lastSemanticActivityDescription,
 					ThreadID:     threadID,
 					TurnID:       turnID,
-					Model:        opts.Model,
 				}
 				b.cfg.Logger.Warn(CodexFirstTurnNoProgressMarker,
 					"pid", cmd.Process.Pid,
@@ -1840,7 +1744,6 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 					LastActivity: lastSemanticActivityDescription,
 					ThreadID:     threadID,
 					TurnID:       turnID,
-					Model:        opts.Model,
 				}
 				b.cfg.Logger.Warn(CodexSemanticInactivityMarker,
 					"pid", cmd.Process.Pid,
@@ -1982,18 +1885,17 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 		// Codex writes token_count events to $CODEX_HOME/sessions/YYYY/MM/DD/*.jsonl;
 		// scan this backend's per-task CODEX_HOME, since sessions are isolated
 		// there rather than in the shared ~/.codex/sessions (MUL-4424).
+		reportedModel := ""
 		if u.InputTokens == 0 && u.OutputTokens == 0 {
 			taskCodexHome := strings.TrimSpace(b.cfg.Env["CODEX_HOME"])
 			if scanned := scanCodexSessionUsage(startTime, taskCodexHome, threadID, resumed); scanned != nil {
 				u = scanned.usage
-				if scanned.model != "" && opts.Model == "" {
-					opts.Model = scanned.model
-				}
+				reportedModel = scanned.model
 			}
 		}
 
 		if u.InputTokens > 0 || u.OutputTokens > 0 || u.CacheReadTokens > 0 || u.CacheWriteTokens > 0 {
-			model := opts.Model
+			model := reportedModel
 			if model == "" {
 				model = "unknown"
 			}
@@ -2088,26 +1990,19 @@ func codexTurnInput(prompt string, resumeExpected, resumed bool, notice string) 
 // thread was picked up (only useful for logging).
 func (c *codexClient) startOrResumeThread(ctx context.Context, opts ExecOptions, logger *slog.Logger) (string, bool, error) {
 	if priorThreadID := opts.ResumeSessionID; priorThreadID != "" {
-		// thread/resume reuses the thread's persisted model and reasoning
-		// effort; only override fields the daemon actually cares about.
+		// thread/resume reuses the thread's persisted settings; only override
+		// fields the daemon actually cares about. Model, reasoning effort and
+		// service tier are never sent — Codex's own config decides them.
 		// developerInstructions stays nil for the reason given on thread/start
 		// below.
 		resumeParams := map[string]any{
 			"threadId":              priorThreadID,
 			"cwd":                   opts.Cwd,
-			"model":                 nilIfEmpty(opts.Model),
 			"developerInstructions": nil,
 			// Only omit history from the response, not the resumed model context.
 			// We need the thread ID, not an unbounded single-line turns payload.
 			"excludeTurns": true,
 		}
-		// Explicit override of the persisted reasoning effort: without
-		// this, a Codex resume silently reuses whatever level the prior
-		// session was created with, even when the user has flipped the
-		// agent's thinking_level since. See MUL-2339 — Elon flagged that
-		// resume must honour the live config, not the stored one.
-		applyCodexReasoningEffort(resumeParams, opts.ThinkingLevel)
-		applyCodexServiceTier(resumeParams, opts.ServiceTier)
 		c.threadSetupMethod = "thread/resume"
 		c.threadSetupStarted = time.Now()
 		logger.Info("codex lifecycle",
@@ -2152,7 +2047,7 @@ func (c *codexClient) startOrResumeThread(ctx context.Context, opts ExecOptions,
 	// app-server (thread/start -> turn/start) with developerInstructions unset
 	// (MUL-5392).
 	startParams := map[string]any{
-		"model":                  nilIfEmpty(opts.Model),
+		"model":                  nil,
 		"modelProvider":          nil,
 		"profile":                nil,
 		"cwd":                    opts.Cwd,
@@ -2166,8 +2061,6 @@ func (c *codexClient) startOrResumeThread(ctx context.Context, opts ExecOptions,
 		"experimentalRawEvents":  false,
 		"persistExtendedHistory": true,
 	}
-	applyCodexReasoningEffort(startParams, opts.ThinkingLevel)
-	applyCodexServiceTier(startParams, opts.ServiceTier)
 	c.threadSetupMethod = "thread/start"
 	c.threadSetupStarted = time.Now()
 	logger.Info("codex lifecycle",
@@ -2219,49 +2112,6 @@ func (c *codexClient) setThreadName(ctx context.Context, threadID, name string) 
 		"name":     name,
 	})
 	return err
-}
-
-// applyCodexReasoningEffort writes the per-agent thinking_level into a
-// Codex app-server request. The three points — thread/start.config,
-// thread/resume.config, turn/start.effort — all flow through this helper
-// so any future protocol/key change touches one site rather than three
-// (per Trump's MUL-2339 review constraint).
-//
-// The shape is detected from the params keys:
-//   - turn/start always carries `input`, and the schema exposes the
-//     reasoning override as the top-level `effort` field.
-//   - thread/start and thread/resume nest it under
-//     `config.model_reasoning_effort`.
-//
-// Empty `level` is a no-op: we deliberately do NOT emit a key when the
-// caller didn't request an override, so the upstream defaults (config
-// file, account-scoped model preference) stay in charge. This also
-// guarantees `effort: ""` never reaches the CLI — Codex rejects empty
-// strings on this field.
-func applyCodexReasoningEffort(params map[string]any, level string) {
-	if params == nil || level == "" {
-		return
-	}
-	if _, isTurnStart := params["input"]; isTurnStart {
-		params["effort"] = level
-		return
-	}
-	cfg, _ := params["config"].(map[string]any)
-	if cfg == nil {
-		cfg = map[string]any{}
-	}
-	cfg["model_reasoning_effort"] = level
-	params["config"] = cfg
-}
-
-// applyCodexServiceTier writes the catalog-owned service tier to the
-// app-server's top-level serviceTier field. All three execution requests
-// accept the same shape. Empty is a no-op so config.toml remains authoritative.
-func applyCodexServiceTier(params map[string]any, tier string) {
-	if params == nil || tier == "" {
-		return
-	}
-	params["serviceTier"] = tier
 }
 
 func resetTimer(timer *time.Timer, d time.Duration) {
@@ -2349,11 +2199,10 @@ func buildCodexTimeoutDiagnosticError(diag codexTimeoutDiagnostic, stderrTail st
 }
 
 func formatCodexDiagnosticFields(diag codexTimeoutDiagnostic) string {
-	return fmt.Sprintf("codex_version=%q thread_id=%q turn_id=%q model=%q",
+	return fmt.Sprintf("codex_version=%q thread_id=%q turn_id=%q",
 		nonEmptyCodexDiagnosticValue(diag.CodexVersion),
 		nonEmptyCodexDiagnosticValue(diag.ThreadID),
 		nonEmptyCodexDiagnosticValue(diag.TurnID),
-		formatCodexDiagnosticModel(diag.Model),
 	)
 }
 
@@ -2362,13 +2211,6 @@ func nonEmptyCodexDiagnosticValue(value string) string {
 		return "unknown"
 	}
 	return value
-}
-
-func formatCodexDiagnosticModel(model string) string {
-	if strings.TrimSpace(model) == "" {
-		return "default(empty)"
-	}
-	return model
 }
 
 func appendCodexKnownStderrHint(msg, stderrTail string) string {
@@ -4398,12 +4240,5 @@ func extractNestedString(m map[string]any, keys ...string) string {
 		current = obj[key]
 	}
 	s, _ := current.(string)
-	return s
-}
-
-func nilIfEmpty(s string) any {
-	if s == "" {
-		return nil
-	}
 	return s
 }

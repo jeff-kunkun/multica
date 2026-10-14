@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, cleanup } from "@testing-library/react";
+import { render, cleanup } from "@testing-library/react";
 import { I18nProvider } from "@multica/core/i18n/react";
 import enCommon from "../../locales/en/common.json";
 import enAgents from "../../locales/en/agents.json";
@@ -110,8 +110,6 @@ function makeAgent(overrides: Record<string, unknown> = {}) {
     invocation_targets: [],
     status: "idle" as const,
     max_concurrent_tasks: 1,
-    model: "claude-opus-4-8",
-    thinking_level: "high",
     owner_id: null,
     created_at: "2026-04-01T00:00:00Z",
     updated_at: "2026-04-01T00:00:00Z",
@@ -157,16 +155,4 @@ describe("AgentProfileCard — Runtime row", () => {
       expect(container.querySelector(iconSelector)).toBeInTheDocument();
     },
   );
-});
-
-describe("AgentProfileCard — no model row", () => {
-  // The model is picked per run, not per member (DENE-2037), so a stored
-  // value is never shown as if it decided anything.
-  it("does not show a stored model or effort", () => {
-    mockAgents.current = [makeAgent({ model: "claude-opus-4-8", thinking_level: "high" })];
-    renderCard();
-
-    expect(screen.queryByText("claude-opus-4-8")).toBeNull();
-    expect(screen.queryByText("high")).toBeNull();
-  });
 });

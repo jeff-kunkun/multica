@@ -1099,11 +1099,10 @@ func (c *client) handleHeartbeatFrame(raw json.RawMessage) {
 	}
 
 	// Intentionally do NOT wrap this ctx with WithTimeout. The handler
-	// reaches ModelListStore.PopPending, whose Redis Lua
-	// claim script has side effects (ZREM + SET-running) that cannot be
-	// safely un-run if the client cancels mid-script — the same invariant
-	// that keeps the HTTP heartbeat from putting a per-call timeout on
-	// PopPending. The natural bound is the read pump's lifetime (the conn
+	// reaches UpdateStore.PopPending, whose Redis claim has side effects
+	// (ZREM + mark running) that cannot be safely un-run if the client
+	// cancels midway — the same invariant that keeps the HTTP heartbeat
+	// from putting a per-call timeout on PopPending. The natural bound is the read pump's lifetime (the conn
 	// closes if the daemon goes away) plus Redis's own server-side limits.
 	ack, err := handler(context.Background(), c.identity, payload.RuntimeID)
 	if err != nil {

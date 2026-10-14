@@ -474,7 +474,7 @@ func TestPlatformSkillCoversPlatformContracts(t *testing.T) {
 				"`conversation_starters`",
 				"`avatar_url` → a random `emoji:<glyph>`",
 				"multica agent create --name <name> --runtime-id <runtime-id>",
-				"`model` is a first-class persisted column",
+				"The model is not set per agent",
 				"custom_env",
 				"Never put credentials or other secrets in `custom_args`",
 				"--custom-env-stdin",
@@ -490,6 +490,11 @@ func TestPlatformSkillCoversPlatformContracts(t *testing.T) {
 				"/api/agent-templates",
 				"template_slug",
 				"curated template",
+				// The model is not set per agent (DENE-2037).
+				"thinking_level",
+				"service_tier",
+				"--thinking-level",
+				"--service-tier",
 				// De-coaching: this states contracts, it does not teach a
 				// generic how-to methodology.
 				"Define the job first",

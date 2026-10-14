@@ -6,13 +6,8 @@ import { cleanup, screen } from "@testing-library/react";
 import type { Agent } from "@multica/core/types";
 import { renderWithI18n } from "../../test/i18n";
 
-const mockInitiateListModels = vi.hoisted(() => vi.fn());
-
 vi.mock("@multica/core/api", () => ({
-  api: {
-    initiateListModels: (...args: unknown[]) =>
-      mockInitiateListModels(...args),
-  },
+  api: {},
 }));
 
 vi.mock("../../common/avatar-upload-control", () => ({
@@ -31,9 +26,6 @@ const agent = {
   name: "Lambda",
   description: "Test agent",
   runtime_id: "runtime-1",
-  model: "gpt-6-astra",
-  thinking_level: "high",
-  service_tier: "priority",
 } as Agent;
 
 describe("AgentDetailInspector execution settings", () => {
@@ -62,9 +54,7 @@ describe("AgentDetailInspector execution settings", () => {
     expect(
       screen.getByText("Picked by magpie; until then the CLI config decides"),
     ).toBeInTheDocument();
-    expect(screen.queryByText("gpt-6-astra")).toBeNull();
     expect(screen.queryByText("Thinking")).toBeNull();
     expect(screen.queryByText("Speed")).toBeNull();
-    expect(mockInitiateListModels).not.toHaveBeenCalled();
   });
 });

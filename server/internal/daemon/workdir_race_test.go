@@ -131,7 +131,7 @@ func TestRunTask_StartTaskCalledAfterWorkdirOnDisk(t *testing.T) {
 		cfg: Config{
 			WorkspacesRoot: workspacesRoot,
 			Agents: map[string]AgentEntry{
-				"claude": {Path: missingBin, Model: ""},
+				"claude": {Path: missingBin},
 			},
 		},
 	}
@@ -204,7 +204,7 @@ printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"session_id
 			AgentTimeout:   5 * time.Second,
 			ServerBaseURL:  srv.URL,
 			Agents: map[string]AgentEntry{
-				"claude": {Path: fakeBin, Model: ""},
+				"claude": {Path: fakeBin},
 			},
 		},
 	}
@@ -438,7 +438,7 @@ printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"session_id
 			AgentTimeout:   5 * time.Second,
 			ServerBaseURL:  srv.URL,
 			Agents: map[string]AgentEntry{
-				"claude": {Path: fakeBin, Model: ""},
+				"claude": {Path: fakeBin},
 			},
 		},
 	}
@@ -536,7 +536,7 @@ printf 'ran\n' > "$CAPTURE_FILE"
 			AgentTimeout:   5 * time.Second,
 			ServerBaseURL:  srv.URL,
 			Agents: map[string]AgentEntry{
-				"claude": {Path: fakeBin, Model: ""},
+				"claude": {Path: fakeBin},
 			},
 		},
 	}
@@ -619,7 +619,7 @@ func TestRunTask_ExtendsPrepareLeaseDuringStartTask(t *testing.T) {
 		cfg: Config{
 			WorkspacesRoot: workspacesRoot,
 			Agents: map[string]AgentEntry{
-				"claude": {Path: missingBin, Model: ""},
+				"claude": {Path: missingBin},
 			},
 		},
 	}

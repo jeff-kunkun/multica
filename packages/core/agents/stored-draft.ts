@@ -13,9 +13,6 @@ export function toStoredAgentDraft(
     instructions: draft.instructions,
     conversation_starters: draft.conversationStarters,
     avatar_url: draft.avatarUrl,
-    model: draft.model,
-    thinking_level: draft.thinkingLevel,
-    service_tier: draft.serviceTier,
     permission_scope: draft.permissionScope,
     member_ids: [...draft.memberIds],
     team_ids: [...draft.teamIds],
@@ -25,7 +22,9 @@ export function toStoredAgentDraft(
 
 /**
  * Rebuilds the editable draft. `runtimeId` comes from the caller because the
- * server owns it — see the note on {@link StoredAgentDraft}.
+ * server owns it — see the note on {@link StoredAgentDraft}. Fields are picked
+ * by name, so keys an older client stored (`model`, `thinking_level`,
+ * `service_tier`) are ignored.
  */
 export function fromStoredAgentDraft(
   stored: StoredAgentDraft,
@@ -39,12 +38,29 @@ export function fromStoredAgentDraft(
     conversationStarters: stored.conversation_starters ?? [],
     avatarUrl: stored.avatar_url,
     runtimeId,
-    model: stored.model,
-    thinkingLevel: stored.thinking_level,
-    serviceTier: stored.service_tier,
     permissionScope: stored.permission_scope,
     memberIds: new Set(stored.member_ids),
     teamIds: new Set(stored.team_ids),
+  };
+}
+
+/**
+ * The stored form reduced to the fields this client knows. A draft saved by an
+ * older client can still carry `model` / `thinking_level` / `service_tier`;
+ * without this, those leftover keys would make an untouched draft compare as
+ * edited and keep a dead slot alive.
+ */
+function knownStoredFields(stored: StoredAgentDraft): StoredAgentDraft {
+  return {
+    name: stored.name,
+    description: stored.description,
+    instructions: stored.instructions,
+    conversation_starters: stored.conversation_starters,
+    avatar_url: stored.avatar_url,
+    permission_scope: stored.permission_scope,
+    member_ids: stored.member_ids,
+    team_ids: stored.team_ids,
+    applied_message_id: stored.applied_message_id,
   };
 }
 
@@ -57,5 +73,8 @@ export function storedAgentDraftsEqual(
   a: StoredAgentDraft,
   b: StoredAgentDraft,
 ): boolean {
-  return JSON.stringify(a) === JSON.stringify(b);
+  return (
+    JSON.stringify(knownStoredFields(a)) ===
+    JSON.stringify(knownStoredFields(b))
+  );
 }

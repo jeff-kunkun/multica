@@ -98,7 +98,7 @@ func TestOpencodeExecuteRetainsReasoningOnlyUsage(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	session, err := backend.Execute(ctx, "test prompt", ExecOptions{Cwd: t.TempDir(), Model: "test/model"})
+	session, err := backend.Execute(ctx, "test prompt", ExecOptions{Cwd: t.TempDir()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -113,7 +113,7 @@ func TestOpencodeExecuteRetainsReasoningOnlyUsage(t *testing.T) {
 		if result.Status != "completed" || result.Error != "" {
 			t.Fatalf("status=%q error=%q", result.Status, result.Error)
 		}
-		if got, want := result.Usage["test/model"], (TokenUsage{OutputTokens: 20}); got != want {
+		if got, want := result.Usage["unknown"], (TokenUsage{OutputTokens: 20}); got != want {
 			t.Fatalf("reported usage=%+v want=%+v", got, want)
 		}
 	case <-ctx.Done():
