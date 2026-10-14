@@ -332,7 +332,7 @@ func TestResolveAgentEntry_NoCommandNoHeal(t *testing.T) {
 // detected for it. But a re-probe only wrote agentVersions, so once the healed
 // binary was itself replaced in place, the daemon reported the new version to
 // the server while every task kept launching under the version captured at heal
-// time (runTask's Codex sandbox policy reads exactly this value).
+// time (runTask hands exactly this value to the Codex backend).
 func TestRefreshHealedVersion_KeepsHealedPairCurrentAfterInPlaceUpgrade(t *testing.T) {
 	d := newSelfHealTestDaemon()
 	healed := filepath.Join(t.TempDir(), "codex")

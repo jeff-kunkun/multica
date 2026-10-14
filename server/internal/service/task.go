@@ -1658,11 +1658,10 @@ type CancelTaskOptions struct {
 	ExpectedChatSession pgtype.UUID
 	QueueAction         string
 	// ErrorMessage / FailureReason, when set, are persisted onto the cancelled
-	// row. Only for cancellations the USER did not ask for (e.g. the worktree
-	// claim gate refusing a too-old daemon): a user-initiated cancel needs no
-	// explanation, but a server-initiated one without a persisted reason
-	// surfaces as an unexplained "cancelled" whose only trace is a 4xx in a
-	// daemon log the user never sees.
+	// row. Only for cancellations the USER did not ask for: a user-initiated
+	// cancel needs no explanation, but a server-initiated one without a
+	// persisted reason surfaces as an unexplained "cancelled" whose only trace
+	// is a 4xx in a daemon log the user never sees.
 	ErrorMessage  string
 	FailureReason string
 	CancelledBy   TaskCancellationActor
@@ -3607,10 +3606,8 @@ func (s *TaskService) FailTaskWithTransition(ctx context.Context, taskID pgtype.
 			SessionID:      pgtype.Text{String: sessionID, Valid: sessionID != ""},
 			WorkDir:        pgtype.Text{String: workDir, Valid: workDir != ""},
 			DurableWorkDir: pgtype.Text{String: durableWorkDir, Valid: durableWorkDir != ""},
-			// A failed run can still have produced a branch: worktree mode
-			// commits whatever the agent left before tearing the worktree down,
-			// precisely so partial work survives. Dropping the name here would
-			// leave that commit with no pointer to it.
+			// Older daemons' worktree mode can report a branch for a failed
+			// run; keep the pointer to that partial work.
 			BranchName:            pgtype.Text{String: branchName, Valid: branchName != ""},
 			SessionRolloutMissing: sessionRolloutMissing,
 			RetiredSessionID:      pgtype.Text{String: retiredSessionID, Valid: retiredSessionID != ""},

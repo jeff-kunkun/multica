@@ -2,7 +2,6 @@ package execenv
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -2455,13 +2454,12 @@ env_key = "OLD_API_KEY"
 	}
 }
 
-func TestEnsureCodexSandboxConfigCreatesDefaultLinux(t *testing.T) {
+func TestEnsureCodexSandboxConfigCreatesDefault(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	configPath := filepath.Join(dir, "config.toml")
 
-	policy := codexSandboxPolicyFor("linux", "0.121.0")
-	if err := ensureCodexSandboxConfig(configPath, policy, "0.121.0", testLogger()); err != nil {
+	if err := ensureCodexSandboxConfig(configPath); err != nil {
 		t.Fatalf("ensureCodexSandboxConfig failed: %v", err)
 	}
 
@@ -2476,102 +2474,9 @@ func TestEnsureCodexSandboxConfigCreatesDefaultLinux(t *testing.T) {
 	if !strings.Contains(s, `sandbox_mode = "danger-full-access"`) {
 		t.Error("missing sandbox_mode")
 	}
-	// Linux tasks run unsandboxed on the daemon user's real HOME, so nothing
-	// under sandbox_workspace_write applies — neither the table header nor the
-	// dotted-key form should be emitted (MUL-5578).
+	// Tasks run unsandboxed, so nothing under sandbox_workspace_write applies.
 	if strings.Contains(s, "sandbox_workspace_write") {
 		t.Errorf("must not emit any sandbox_workspace_write key under danger-full-access, got:\n%s", s)
-	}
-}
-
-func TestEnsureCodexSandboxConfigDarwinFallsBack(t *testing.T) {
-	t.Parallel()
-	dir := t.TempDir()
-	configPath := filepath.Join(dir, "config.toml")
-
-	policy := codexSandboxPolicyFor("darwin", "0.121.0")
-	if err := ensureCodexSandboxConfig(configPath, policy, "0.121.0", testLogger()); err != nil {
-		t.Fatalf("ensureCodexSandboxConfig failed: %v", err)
-	}
-
-	s, _ := os.ReadFile(configPath)
-	if !strings.Contains(string(s), `sandbox_mode = "danger-full-access"`) {
-		t.Errorf("expected danger-full-access fallback on macOS, got:\n%s", s)
-	}
-	if strings.Contains(string(s), "[sandbox_workspace_write]") {
-		t.Errorf("should not emit workspace-write section on macOS fallback, got:\n%s", s)
-	}
-}
-
-// TestEnsureCodexSandboxConfigWindowsFallsBack pins MUL-4957: when a Windows
-// user has not opted into a native Codex sandbox, Codex cannot enforce
-// workspace-write and rejects mutation commands (e.g. `multica issue create`)
-// "by policy". The daemon therefore defaults Windows to danger-full-access and
-// emits no workspace-write keys.
-func TestEnsureCodexSandboxConfigWindowsFallsBack(t *testing.T) {
-	t.Parallel()
-	dir := t.TempDir()
-	configPath := filepath.Join(dir, "config.toml")
-
-	// No native sandbox configured → danger-full-access.
-	policy := codexSandboxPolicyForConfig("windows", "0.144.5", windowsSandboxAbsent)
-	if err := ensureCodexSandboxConfig(configPath, policy, "0.144.5", testLogger()); err != nil {
-		t.Fatalf("ensureCodexSandboxConfig failed: %v", err)
-	}
-
-	s, _ := os.ReadFile(configPath)
-	if !strings.Contains(string(s), `sandbox_mode = "danger-full-access"`) {
-		t.Errorf("expected danger-full-access fallback on windows, got:\n%s", s)
-	}
-	if strings.Contains(string(s), "sandbox_workspace_write") {
-		t.Errorf("should not emit any workspace-write keys on windows fallback, got:\n%s", s)
-	}
-}
-
-// TestEnsureCodexSandboxConfigWindowsRespectsUserSandbox pins the MUL-4957
-// must-fix: a Windows user who explicitly opted into a native Codex sandbox
-// (windows.sandbox = "unelevated"|"elevated") must NOT be silently downgraded
-// to danger-full-access. The daemon keeps workspace-write so Codex enforces
-// task isolation with the user's chosen backend, and preserves their
-// windows.sandbox line verbatim.
-func TestEnsureCodexSandboxConfigWindowsRespectsUserSandbox(t *testing.T) {
-	t.Parallel()
-	for _, mode := range []string{"unelevated", "elevated"} {
-		t.Run(mode, func(t *testing.T) {
-			t.Parallel()
-			dir := t.TempDir()
-			configPath := filepath.Join(dir, "config.toml")
-
-			userConfig := "model = \"o3\"\n\n[windows]\nsandbox = \"" + mode + "\"\n"
-			if err := os.WriteFile(configPath, []byte(userConfig), 0o644); err != nil {
-				t.Fatalf("write config: %v", err)
-			}
-
-			winState := resolveWindowsSandboxState(configPath, nil, sharedConfigPresent, nil, testLogger())
-			if winState != windowsSandboxNative {
-				t.Fatalf("resolveWindowsSandboxState = %v, want native", winState)
-			}
-			policy := codexSandboxPolicyForConfig("windows", "0.144.5", winState)
-			if err := ensureCodexSandboxConfig(configPath, policy, "0.144.5", testLogger()); err != nil {
-				t.Fatalf("ensureCodexSandboxConfig failed: %v", err)
-			}
-
-			data, _ := os.ReadFile(configPath)
-			s := string(data)
-			if !strings.Contains(s, `sandbox_mode = "workspace-write"`) {
-				t.Errorf("expected workspace-write kept for user-configured windows.sandbox, got:\n%s", s)
-			}
-			if strings.Contains(s, "danger-full-access") {
-				t.Errorf("must not downgrade a user-configured windows.sandbox to danger-full-access, got:\n%s", s)
-			}
-			if !strings.Contains(s, "network_access = true") {
-				t.Errorf("expected network_access = true under workspace-write, got:\n%s", s)
-			}
-			// The user's explicit opt-in must survive verbatim.
-			if !strings.Contains(s, `sandbox = "`+mode+`"`) {
-				t.Errorf("user windows.sandbox = %q must be preserved, got:\n%s", mode, s)
-			}
-		})
 	}
 }
 
@@ -2580,9 +2485,8 @@ func TestEnsureCodexSandboxConfigIsIdempotent(t *testing.T) {
 	dir := t.TempDir()
 	configPath := filepath.Join(dir, "config.toml")
 
-	policy := codexSandboxPolicyFor("linux", "0.121.0")
 	for i := 0; i < 3; i++ {
-		if err := ensureCodexSandboxConfig(configPath, policy, "0.121.0", testLogger()); err != nil {
+		if err := ensureCodexSandboxConfig(configPath); err != nil {
 			t.Fatalf("pass %d: %v", i, err)
 		}
 	}
@@ -2603,8 +2507,7 @@ approval_policy = "on-failure"
 `
 	os.WriteFile(configPath, []byte(existing), 0o644)
 
-	policy := codexSandboxPolicyFor("linux", "0.121.0")
-	if err := ensureCodexSandboxConfig(configPath, policy, "0.121.0", testLogger()); err != nil {
+	if err := ensureCodexSandboxConfig(configPath); err != nil {
 		t.Fatalf("ensureCodexSandboxConfig failed: %v", err)
 	}
 
@@ -2638,8 +2541,7 @@ network_access = true
 `
 	os.WriteFile(configPath, []byte(existing), 0o644)
 
-	policy := codexSandboxPolicyFor("darwin", "0.121.0")
-	if err := ensureCodexSandboxConfig(configPath, policy, "0.121.0", testLogger()); err != nil {
+	if err := ensureCodexSandboxConfig(configPath); err != nil {
 		t.Fatalf("ensureCodexSandboxConfig failed: %v", err)
 	}
 
@@ -2653,10 +2555,10 @@ network_access = true
 		t.Errorf("expected exactly one sandbox_mode line (inside managed block), got:\n%s", s)
 	}
 	if strings.Contains(s, "[sandbox_workspace_write]") {
-		t.Errorf("darwin fallback should not retain workspace-write section:\n%s", s)
+		t.Errorf("should not retain workspace-write section:\n%s", s)
 	}
 	if !strings.Contains(s, `sandbox_mode = "danger-full-access"`) {
-		t.Errorf("expected danger-full-access on macOS, got:\n%s", s)
+		t.Errorf("expected danger-full-access, got:\n%s", s)
 	}
 }
 
@@ -2677,8 +2579,7 @@ trust = "always"
 `
 	os.WriteFile(configPath, []byte(existing), 0o644)
 
-	policy := codexSandboxPolicyFor("linux", "0.121.0")
-	if err := ensureCodexSandboxConfig(configPath, policy, "0.121.0", testLogger()); err != nil {
+	if err := ensureCodexSandboxConfig(configPath); err != nil {
 		t.Fatalf("ensureCodexSandboxConfig failed: %v", err)
 	}
 
@@ -2692,8 +2593,7 @@ trust = "always"
 		t.Fatalf("expected managed block and user table to both be present, got:\n%s", s)
 	}
 	// The entire managed block must sit before the user's table header so
-	// that sandbox_mode and sandbox_workspace_write.network_access are
-	// parsed at the TOML root.
+	// that sandbox_mode is parsed at the TOML root.
 	if !(beginIdx < endIdx && endIdx < tableIdx) {
 		t.Errorf("managed block must be hoisted above [permissions.multica]; got begin=%d end=%d table=%d:\n%s", beginIdx, endIdx, tableIdx, s)
 	}
@@ -2707,7 +2607,7 @@ trust = "always"
 
 	// Running again must be idempotent even when the preceding content ends
 	// inside a table.
-	if err := ensureCodexSandboxConfig(configPath, policy, "0.121.0", testLogger()); err != nil {
+	if err := ensureCodexSandboxConfig(configPath); err != nil {
 		t.Fatalf("second pass: %v", err)
 	}
 	data2, _ := os.ReadFile(configPath)
@@ -2742,8 +2642,7 @@ network_access = true
 `
 	os.WriteFile(configPath, []byte(legacy), 0o644)
 
-	policy := codexSandboxPolicyFor("linux", "0.121.0")
-	if err := ensureCodexSandboxConfig(configPath, policy, "0.121.0", testLogger()); err != nil {
+	if err := ensureCodexSandboxConfig(configPath); err != nil {
 		t.Fatalf("ensureCodexSandboxConfig failed: %v", err)
 	}
 	data, _ := os.ReadFile(configPath)
@@ -2764,324 +2663,8 @@ network_access = true
 	}
 }
 
-func TestCodexSandboxPolicyFor(t *testing.T) {
-	t.Parallel()
-	cases := []struct {
-		name     string
-		goos     string
-		version  string
-		wantMode string
-		wantNet  bool
-		// wantHint is whether the policy carries an actionable remediation hint.
-		// macOS points at a Codex upgrade and Linux at running the daemon inside
-		// an outer boundary; the Windows compatibility fallback has no generic
-		// action, so it must not surface a misleading macOS hint.
-		wantHint bool
-	}{
-		// Linux runs unsandboxed by product decision, on any Codex version
-		// (MUL-5578) — there is no version-dependent branch to exercise here.
-		{"linux any version", "linux", "0.100.0", "danger-full-access", false, true},
-		{"linux unknown version", "linux", "", "danger-full-access", false, true},
-		{"windows any version", "windows", "0.144.5", "danger-full-access", false, false},
-		{"windows unknown version", "windows", "", "danger-full-access", false, false},
-		{"darwin old version", "darwin", "0.121.0", "danger-full-access", false, true},
-		{"darwin unknown version", "darwin", "", "danger-full-access", false, true},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			p := codexSandboxPolicyFor(tc.goos, tc.version)
-			if p.Mode != tc.wantMode {
-				t.Errorf("mode = %q, want %q", p.Mode, tc.wantMode)
-			}
-			if p.NetworkAccess != tc.wantNet {
-				t.Errorf("network_access = %v, want %v", p.NetworkAccess, tc.wantNet)
-			}
-			if p.Reason == "" {
-				t.Error("expected non-empty Reason")
-			}
-			if (p.Hint != "") != tc.wantHint {
-				t.Errorf("hint present = %v, want %v (hint=%q)", p.Hint != "", tc.wantHint, p.Hint)
-			}
-		})
-	}
-}
-
-// TestCodexSandboxPolicyForConfig maps resolved Windows sandbox states to
-// policies: native and undecidable both keep workspace-write (undecidable fails
-// closed), only absent gets danger-full-access. Linux/darwin ignore winState.
-func TestCodexSandboxPolicyForConfig(t *testing.T) {
-	t.Parallel()
-	cases := []struct {
-		name     string
-		goos     string
-		winState windowsSandboxConfig
-		wantMode string
-		wantNet  bool
-	}{
-		{"windows native keeps workspace-write", "windows", windowsSandboxNative, "workspace-write", true},
-		{"windows undecidable fails closed", "windows", windowsSandboxUndecidable, "workspace-write", true},
-		{"windows absent falls back", "windows", windowsSandboxAbsent, "danger-full-access", false},
-		// Non-Windows platforms ignore winState entirely.
-		{"linux ignores winState", "linux", windowsSandboxNative, "danger-full-access", false},
-		{"darwin ignores winState", "darwin", windowsSandboxNative, "danger-full-access", false},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			p := codexSandboxPolicyForConfig(tc.goos, "0.144.5", tc.winState)
-			if p.Mode != tc.wantMode {
-				t.Errorf("mode = %q, want %q", p.Mode, tc.wantMode)
-			}
-			if p.NetworkAccess != tc.wantNet {
-				t.Errorf("network_access = %v, want %v", p.NetworkAccess, tc.wantNet)
-			}
-			if p.Reason == "" {
-				t.Error("expected non-empty Reason")
-			}
-		})
-	}
-}
-
-// TestWindowsSandboxFromConfig verifies config.toml classification: only the
-// exact-lowercase variants Codex accepts are native; any other present value or
-// unparseable TOML is undecidable (fail closed); an absent key is absent.
-func TestWindowsSandboxFromConfig(t *testing.T) {
-	t.Parallel()
-	cases := []struct {
-		name   string
-		config string
-		want   windowsSandboxConfig
-	}{
-		{"unelevated dotted", `windows.sandbox = "unelevated"`, windowsSandboxNative},
-		{"elevated table", "[windows]\nsandbox = \"elevated\"\n", windowsSandboxNative},
-		{"absent key", `model = "o3"`, windowsSandboxAbsent},
-		{"empty config", "", windowsSandboxAbsent},
-		{"mixed case is invalid to codex", `windows.sandbox = "Unelevated"`, windowsSandboxUndecidable},
-		{"disabled is invalid to codex", `windows.sandbox = "disabled"`, windowsSandboxUndecidable},
-		{"unparseable toml", "this is not = valid toml [[", windowsSandboxUndecidable},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			if got := windowsSandboxFromConfig(tc.config); got != tc.want {
-				t.Errorf("windowsSandboxFromConfig(%q) = %v, want %v", tc.config, got, tc.want)
-			}
-		})
-	}
-}
-
-// TestWindowsSandboxFromCustomArgs verifies detection of a native sandbox opted
-// into via `-c windows.sandbox=...` args — the second MUL-4957 must-fix, since
-// such args never land in config.toml.
-func TestWindowsSandboxFromCustomArgs(t *testing.T) {
-	t.Parallel()
-	cases := []struct {
-		name string
-		args []string
-		want windowsSandboxConfig
-	}{
-		{"two-token bare", []string{"-c", "windows.sandbox=unelevated"}, windowsSandboxNative},
-		{"two-token quoted", []string{"-c", `windows.sandbox="unelevated"`}, windowsSandboxNative},
-		{"two-token spaced", []string{"-c", `windows.sandbox = "elevated"`}, windowsSandboxNative},
-		{"inline -c=", []string{"-c=windows.sandbox=unelevated"}, windowsSandboxNative},
-		{"--config long form", []string{"--config", "windows.sandbox=elevated"}, windowsSandboxNative},
-		{"last occurrence wins", []string{"-c", "windows.sandbox=unelevated", "-c", "windows.sandbox=elevated"}, windowsSandboxNative},
-		{"invalid value undecidable", []string{"-c", "windows.sandbox=disabled"}, windowsSandboxUndecidable},
-		{"unrelated override ignored", []string{"-c", "model=o3"}, windowsSandboxAbsent},
-		{"no args", nil, windowsSandboxAbsent},
-		{"dangling -c ignored", []string{"-c"}, windowsSandboxAbsent},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			if got := windowsSandboxFromCustomArgs(tc.args); got != tc.want {
-				t.Errorf("windowsSandboxFromCustomArgs(%v) = %v, want %v", tc.args, got, tc.want)
-			}
-		})
-	}
-}
-
-// TestResolveWindowsSandbox verifies the fold precedence: undecidable > native
-// > absent.
-func TestResolveWindowsSandbox(t *testing.T) {
-	t.Parallel()
-	cases := []struct {
-		name   string
-		states []windowsSandboxConfig
-		want   windowsSandboxConfig
-	}{
-		{"all absent", []windowsSandboxConfig{windowsSandboxAbsent, windowsSandboxAbsent}, windowsSandboxAbsent},
-		{"native in args", []windowsSandboxConfig{windowsSandboxAbsent, windowsSandboxNative}, windowsSandboxNative},
-		{"undecidable beats native", []windowsSandboxConfig{windowsSandboxNative, windowsSandboxUndecidable}, windowsSandboxUndecidable},
-		{"undecidable beats absent", []windowsSandboxConfig{windowsSandboxUndecidable, windowsSandboxAbsent}, windowsSandboxUndecidable},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			if got := resolveWindowsSandbox(tc.states...); got != tc.want {
-				t.Errorf("resolveWindowsSandbox(%v) = %v, want %v", tc.states, got, tc.want)
-			}
-		})
-	}
-}
-
-// TestStatSharedCodexConfig verifies the shared-config tri-state used to tell a
-// genuinely config-less user from one whose config could not be stat'd.
-func TestStatSharedCodexConfig(t *testing.T) {
-	t.Parallel()
-
-	t.Run("present", func(t *testing.T) {
-		t.Parallel()
-		dir := t.TempDir()
-		if err := os.WriteFile(filepath.Join(dir, "config.toml"), []byte(`model = "o3"`), 0o644); err != nil {
-			t.Fatal(err)
-		}
-		if got := statSharedCodexConfig(dir); got != sharedConfigPresent {
-			t.Errorf("got %v, want present", got)
-		}
-	})
-
-	t.Run("absent", func(t *testing.T) {
-		t.Parallel()
-		if got := statSharedCodexConfig(t.TempDir()); got != sharedConfigAbsent {
-			t.Errorf("got %v, want absent", got)
-		}
-	})
-
-	t.Run("empty home is absent", func(t *testing.T) {
-		t.Parallel()
-		if got := statSharedCodexConfig(""); got != sharedConfigAbsent {
-			t.Errorf("got %v, want absent", got)
-		}
-	})
-}
-
-// TestResolveWindowsSandboxStateFailsClosed pins the MUL-4957 fail-closed
-// invariant across every path where the daemon cannot confidently confirm the
-// user configured no native sandbox: a missing per-task copy of an existing (or
-// un-stat'able) shared config, and a failed config sync that leaves a stale
-// copy behind, all keep the restrictive workspace-write policy. Only a
-// genuinely config-less user with no custom-arg opt-in resolves to absent (the
-// one state that earns the danger-full-access compatibility fallback).
-func TestResolveWindowsSandboxStateFailsClosed(t *testing.T) {
-	t.Parallel()
-
-	t.Run("shared config present but per-task copy missing -> undecidable", func(t *testing.T) {
-		t.Parallel()
-		missing := filepath.Join(t.TempDir(), "config.toml")
-		if got := resolveWindowsSandboxState(missing, nil, sharedConfigPresent, nil, testLogger()); got != windowsSandboxUndecidable {
-			t.Errorf("got %v, want undecidable (fail closed)", got)
-		}
-	})
-
-	t.Run("shared config stat undecidable -> undecidable", func(t *testing.T) {
-		t.Parallel()
-		// The shared source could not be stat'd (permission/IO), so an absent
-		// per-task copy cannot be trusted as "the user has no config".
-		missing := filepath.Join(t.TempDir(), "config.toml")
-		if got := resolveWindowsSandboxState(missing, nil, sharedConfigUndecidable, nil, testLogger()); got != windowsSandboxUndecidable {
-			t.Errorf("got %v, want undecidable (fail closed)", got)
-		}
-	})
-
-	t.Run("config sync error with stale absent-looking copy -> undecidable", func(t *testing.T) {
-		t.Parallel()
-		// A leftover per-task config that reads as "no sandbox" must NOT be
-		// trusted when the sync that should have refreshed it failed — the
-		// reuse-path fail-open Elon's round-3 must-fix 1 called out.
-		dir := t.TempDir()
-		stale := filepath.Join(dir, "config.toml")
-		if err := os.WriteFile(stale, []byte(`model = "o3"`), 0o644); err != nil {
-			t.Fatal(err)
-		}
-		syncErr := errors.New("copy failed")
-		if got := resolveWindowsSandboxState(stale, syncErr, sharedConfigPresent, nil, testLogger()); got != windowsSandboxUndecidable {
-			t.Errorf("got %v, want undecidable (fail closed on sync error)", got)
-		}
-	})
-
-	t.Run("no shared config and successful sync -> absent", func(t *testing.T) {
-		t.Parallel()
-		missing := filepath.Join(t.TempDir(), "config.toml")
-		if got := resolveWindowsSandboxState(missing, nil, sharedConfigAbsent, nil, testLogger()); got != windowsSandboxAbsent {
-			t.Errorf("got %v, want absent", got)
-		}
-	})
-
-	t.Run("custom-arg opt-in detected even with no config file", func(t *testing.T) {
-		t.Parallel()
-		missing := filepath.Join(t.TempDir(), "config.toml")
-		args := []string{"-c", "windows.sandbox=unelevated"}
-		if got := resolveWindowsSandboxState(missing, nil, sharedConfigAbsent, args, testLogger()); got != windowsSandboxNative {
-			t.Errorf("got %v, want native", got)
-		}
-	})
-}
-
-// TestPrepareCodexHomeFailsClosedWhenSandboxWriteFails pins the MUL-4957
-// round-4 must-fix: the computed fail-closed policy must not stay only in
-// memory. It reproduces the reuse scenario where (1) the per-task config.toml
-// still holds last run's managed danger-full-access, (2) the shared config has
-// since opted into a native windows.sandbox but the sync cannot refresh the
-// copy, and (3) the managed block cannot be rewritten. Previously prepare
-// warned and returned success, so the task launched with the stale
-// danger-full-access — the decision failed closed while the effective config
-// failed open. prepareCodexHomeWithOpts must now return an error, which blocks
-// startup on both paths (fresh Prepare fails the task; Reuse declines the
-// reuse and falls back to Prepare, which re-runs this check on a fresh home).
-func TestPrepareCodexHomeFailsClosedWhenSandboxWriteFails(t *testing.T) {
-	if os.Geteuid() == 0 {
-		t.Skip("running as root bypasses the read-only permissions this test relies on")
-	}
-	// Cannot use t.Parallel() with t.Setenv.
-
-	// Shared home the user has since pointed at a native Windows sandbox.
-	sharedHome := t.TempDir()
-	if err := os.WriteFile(filepath.Join(sharedHome, "config.toml"), []byte("windows.sandbox = \"unelevated\"\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("CODEX_HOME", sharedHome)
-
-	// Reused per-task home still holding the prior run's danger-full-access.
-	codexHome := t.TempDir()
-	configPath := filepath.Join(codexHome, "config.toml")
-	stale := multicaManagedBeginMarker + "\nsandbox_mode = \"danger-full-access\"\n" + multicaManagedEndMarker + "\n"
-	if err := os.WriteFile(configPath, []byte(stale), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	// Read-only file + directory: the sync cannot replace the stale copy and
-	// the managed block cannot be rewritten.
-	if err := os.Chmod(configPath, 0o444); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Chmod(codexHome, 0o500); err != nil {
-		t.Fatal(err)
-	}
-	// Restore before t.TempDir's own cleanup so removal succeeds (LIFO).
-	t.Cleanup(func() {
-		_ = os.Chmod(codexHome, 0o755)
-		_ = os.Chmod(configPath, 0o644)
-	})
-
-	err := prepareCodexHomeWithOpts(codexHome, CodexHomeOptions{GOOS: "windows", CodexVersion: "0.144.5"}, testLogger())
-	if err == nil {
-		t.Fatal("expected prepareCodexHomeWithOpts to fail closed when the sandbox block cannot be written, got nil")
-	}
-	if !strings.Contains(err.Error(), "sandbox config") {
-		t.Errorf("expected a sandbox-config error, got: %v", err)
-	}
-	// The stale danger-full-access is still on disk — proving the task would
-	// have launched unsandboxed had prepare reported success.
-	data, readErr := os.ReadFile(configPath)
-	if readErr != nil {
-		t.Fatalf("read config: %v", readErr)
-	}
-	if !strings.Contains(string(data), `sandbox_mode = "danger-full-access"`) {
-		t.Fatalf("expected the stale danger-full-access to remain (write failed), got:\n%s", data)
-	}
-}
-
 // TestPrepareCodexHomeWritesManagedSandboxBlock checks that preparing a codex
-// home wires the resolved policy all the way into config.toml. With an empty
-// shared home the resolved mode is danger-full-access on every platform — Linux
-// and macOS by their own defaults, Windows because no native windows.sandbox is
-// configured — so the expectation is host-independent.
+// home writes danger-full-access into config.toml on every platform.
 func TestPrepareCodexHomeWritesManagedSandboxBlock(t *testing.T) {
 	// Cannot use t.Parallel() with t.Setenv.
 
@@ -3155,8 +2738,7 @@ func TestReuseRestoresCodexHome(t *testing.T) {
 		t.Fatalf("restored MulticaConfigRoot mode = %o, want 700", got)
 	}
 
-	// Verify config.toml has a managed block (exact mode depends on host
-	// platform; either workspace-write or danger-full-access is valid).
+	// Verify config.toml has a managed block.
 	data, err := os.ReadFile(filepath.Join(reused.CodexHome, "config.toml"))
 	if err != nil {
 		t.Fatalf("config.toml not found in reused CodexHome: %v", err)
@@ -4637,18 +4219,6 @@ func TestPredictRootDirDistinctForSharedUUIDv7Prefix(t *testing.T) {
 			t.Fatalf("tasks %s and %s share env root %q — a truncated task id is back", prev, id, root)
 		}
 		seen[root] = id
-	}
-}
-
-// TestLocalWorktreeBranchDistinctForSharedUUIDv7Prefix covers the same
-// truncation in the branch name: two concurrent tasks for one agent would
-// otherwise both ask git for agent/<name>/<same-prefix>.
-func TestLocalWorktreeBranchDistinctForSharedUUIDv7Prefix(t *testing.T) {
-	t.Parallel()
-	a := fmt.Sprintf("agent/%s/%s", sanitizeName("Reviewer"), taskKey("01a01ec0-e69d-7000-8000-000000000001"))
-	b := fmt.Sprintf("agent/%s/%s", sanitizeName("Reviewer"), taskKey("01a01ec0-f014-7000-8000-000000000002"))
-	if a == b {
-		t.Fatalf("both tasks resolved to branch %q", a)
 	}
 }
 

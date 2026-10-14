@@ -53,10 +53,9 @@ type PrepareParams struct {
 	// Profile is the daemon's profile name (empty = default). It namespaces the
 	// per-issue Codex session store so a second profile-daemon sharing the same
 	// ~/.codex cannot see or GC this daemon's stores (MUL-4424).
-	Profile      string
-	Provider     string // agent provider (determines runtime config paths)
-	CodexVersion string // detected Codex CLI version (only used when Provider == "codex")
-	OpenclawBin  string // resolved openclaw CLI path (only used when Provider == "openclaw"); empty = look up on PATH
+	Profile     string
+	Provider    string // agent provider (determines runtime config paths)
+	OpenclawBin string // resolved openclaw CLI path (only used when Provider == "openclaw"); empty = look up on PATH
 	// McpConfig is the agent's saved `mcp_config` JSON, forwarded to the
 	// provider-specific config preparer when that provider materialises MCP
 	// via a per-task config file. Cursor, OpenClaw, and OMP consume it here;
@@ -79,25 +78,13 @@ type PrepareParams struct {
 	// substituted. Used by the local_directory project_resource flow
 	// (MUL-2663). When set, the envRoot/workdir directory is not created.
 	LocalWorkDir string
-	// LocalWorktree, when non-nil, is the worktree-mode counterpart of
-	// LocalWorkDir: instead of running in the user's directory, the task gets
-	// its own git worktree of that repo inside envRoot and delivers its work
-	// as a branch. Tasks sharing the directory then run concurrently.
-	// Mutually exclusive with LocalWorkDir — the daemon picks one based on the
-	// resource's execution_mode.
-	LocalWorktree *LocalWorktreeParams
 	// ReasonixEnv is the sanitized agent custom_env, layered over the daemon's
 	// own environment exactly as the child's env is built. The per-task
 	// reasonix.toml restates the permissions from the user config that env
 	// resolves to, so an agent that re-points (or clears) REASONIX_HOME moves the
 	// daemon's read with it. Only used for reasonix.
 	ReasonixEnv map[string]string
-	// CodexCustomArgs are the effective Codex CLI args this task launches with
-	// (daemon defaults + profile-fixed + per-agent custom_args). Only the
-	// Windows sandbox decision reads them, to honor a `-c windows.sandbox=...`
-	// override that never lands in config.toml (MUL-4957).
-	CodexCustomArgs []string
-	Task            TaskContextForEnv // context data for writing files
+	Task        TaskContextForEnv // context data for writing files
 }
 
 // TaskContextForEnv is the subset of task context used for writing context files.
@@ -193,21 +180,11 @@ type Environment struct {
 	// outside RootDir (the local_directory flow). Callers that key behavior
 	// on "may I remove WorkDir as scratch?" must check this — for example
 	// the GC loop never deletes the user's directory.
-	//
-	// Deliberately FALSE in worktree mode: there the workdir is a disposable
-	// git worktree inside RootDir, so the env root is ordinary daemon-owned
-	// scratch that the GC should reclaim on the normal schedule, and the
-	// sidecar rollback that protects a user's directory is unnecessary.
 	LocalDirectory bool
 	// MulticaConfigRoot is the private per-task config directory exported to
 	// child CLI invocations. It prevents implicit discovery of the daemon
 	// owner's ~/.multica profile without changing the provider-facing HOME.
 	MulticaConfigRoot string
-	// LocalWorktree is set when the task runs in worktree mode against a
-	// local_directory resource. The daemon calls Finalize on it after the
-	// agent exits to commit leftovers, drop the worktree, and learn the
-	// branch name to report as the task's result.
-	LocalWorktree *LocalWorktree
 	// CodexHome is the path to the per-task CODEX_HOME directory (set only for codex provider).
 	CodexHome string
 	// OpenclawConfigPath is the path to the per-task synthesized OpenClaw
@@ -378,9 +355,9 @@ func Prepare(params PrepareParams, logger *slog.Logger) (*Environment, error) {
 	// envRoot.
 	workDir := filepath.Join(envRoot, "workdir")
 	scratchDirs := []string{filepath.Join(envRoot, "output"), filepath.Join(envRoot, "logs")}
-	if params.LocalWorkDir == "" && params.LocalWorktree == nil {
+	if params.LocalWorkDir == "" {
 		scratchDirs = append(scratchDirs, workDir)
-	} else if params.LocalWorkDir != "" {
+	} else {
 		workDir = params.LocalWorkDir
 	}
 	for _, dir := range scratchDirs {
@@ -396,52 +373,14 @@ func Prepare(params PrepareParams, logger *slog.Logger) (*Environment, error) {
 		return nil, fmt.Errorf("execenv: restrict task-local Multica config directory: %w", err)
 	}
 
-	// Worktree mode: build the task's own checkout of the user's repo inside
-	// envRoot and use it as the workdir. Done before any context file is
-	// written so the sidecars land inside the disposable worktree instead of
-	// the user's directory.
-	var localWorktree *LocalWorktree
-	// Tracks whether Prepare reached its successful return. Everything after
-	// worktree creation can still fail — context files, provider homes, MCP
-	// config — and on those paths the caller never receives an Environment, so
-	// nothing downstream knows a worktree exists to clean up. Without the
-	// rollback below, each such failure would leave a registration in the
-	// user's repo and a branch that no task ever ran in.
+	// Tracks whether Prepare reached its successful return, so the
+	// local_directory sidecar rollback below knows when to stand down.
 	prepareSucceeded := false
-	if params.LocalWorktree != nil {
-		wtParams := *params.LocalWorktree
-		wtParams.EnvRoot = envRoot
-		wtParams.AgentName = params.AgentName
-		wtParams.TaskID = params.TaskID
-		wtParams.ConversationKey, wtParams.ConversationID = localWorktreeConversation(params)
-		wtParams.WorkspaceID = params.WorkspaceID
-		wtParams.AgentID = params.Task.AgentID
-		var err error
-		localWorktree, err = PrepareLocalWorktree(wtParams, logger)
-		if err != nil {
-			return nil, err
-		}
-		defer func() {
-			if prepareSucceeded {
-				return
-			}
-			// Safe to discard unconditionally: no agent has run yet, so the
-			// worktree holds only what Prepare itself put there.
-			localWorktree.Discard(logger)
-		}()
-		workDir = localWorktree.WorkDir
-		// The resource may point at a subdirectory that holds only ignored
-		// files, in which case git doesn't materialise it in the worktree.
-		if err := os.MkdirAll(workDir, 0o755); err != nil {
-			return nil, fmt.Errorf("execenv: create worktree workdir %s: %w", workDir, err)
-		}
-	}
 
 	env := &Environment{
 		RootDir:           envRoot,
 		WorkDir:           workDir,
 		LocalDirectory:    params.LocalWorkDir != "",
-		LocalWorktree:     localWorktree,
 		MulticaConfigRoot: multicaConfigRoot,
 		logger:            logger,
 		lockFile:          lockFile,
@@ -469,9 +408,8 @@ func Prepare(params PrepareParams, logger *slog.Logger) (*Environment, error) {
 	// registered. Without this rollback the files stay on disk with no record
 	// of what to remove (MUL-6132).
 	//
-	// In place only. Worktree mode discards the whole worktree on failure just
-	// above, and a cloud envRoot is wiped wholesale by the GC — only the
-	// local_directory flow writes into a directory that outlives the task and
+	// Local directory only. A cloud envRoot is wiped wholesale by the GC — only
+	// the local_directory flow writes into a directory that outlives the task and
 	// belongs to the user, where a leftover marker disables every multica
 	// command in that directory tree until someone removes it by hand.
 	if params.LocalWorkDir != "" {
@@ -515,7 +453,7 @@ func Prepare(params PrepareParams, logger *slog.Logger) (*Environment, error) {
 	// For Codex, set up a per-task CODEX_HOME seeded from ~/.codex/ with the user's skills.
 	if params.Provider == "codex" {
 		codexHome := filepath.Join(envRoot, codexHomeDirName)
-		if err := prepareCodexHomeWithOpts(codexHome, CodexHomeOptions{CodexVersion: params.CodexVersion, IsLocalDirectory: params.LocalWorkDir != "" || params.LocalWorktree != nil, SessionStoreKey: codexSessionStoreKey(params.Profile, params.Task), CodexCustomArgs: params.CodexCustomArgs}, logger); err != nil {
+		if err := prepareCodexHomeWithOpts(codexHome, CodexHomeOptions{IsLocalDirectory: params.LocalWorkDir != "", SessionStoreKey: codexSessionStoreKey(params.Profile, params.Task)}, logger); err != nil {
 			return nil, fmt.Errorf("execenv: prepare codex-home: %w", err)
 		}
 		if err := hydrateCodexSkills(codexHome, logger); err != nil {
@@ -587,7 +525,7 @@ func Prepare(params PrepareParams, logger *slog.Logger) (*Environment, error) {
 }
 
 // ReuseParams describes the inputs to Reuse. It mirrors PrepareParams for
-// the per-provider knobs (CodexVersion, OpenclawBin) so callers can pass
+// the per-provider knobs (OpenclawBin) so callers can pass
 // the same resolved binary path on both first-run and reuse paths.
 type ReuseParams struct {
 	// WorkspacesRoot is the daemon-owned root under which all task envs live.
@@ -597,7 +535,6 @@ type ReuseParams struct {
 	WorkspacesRoot string
 	WorkDir        string
 	Provider       string
-	CodexVersion   string // only used when Provider == "codex"
 	// ResumeSessionID is the prior Codex thread/session ID this reused task
 	// intends to resume, when any. Only consulted when Provider == "codex" and
 	// only used while migrating a legacy per-task home whose sessions/ still
@@ -629,11 +566,7 @@ type ReuseParams struct {
 	// ReasonixEnv mirrors PrepareParams.ReasonixEnv on reuse so the rewritten
 	// reasonix.toml keeps restating the owner's current permissions.
 	ReasonixEnv map[string]string
-	// CodexCustomArgs mirrors PrepareParams.CodexCustomArgs on reuse so the
-	// Windows sandbox decision honors a `-c windows.sandbox=...` override here
-	// too (MUL-4957).
-	CodexCustomArgs []string
-	Task            TaskContextForEnv // refreshed context files
+	Task        TaskContextForEnv // refreshed context files
 }
 
 // Reuse wraps an existing workdir into an Environment and refreshes context files.
@@ -720,7 +653,7 @@ func Reuse(params ReuseParams, logger *slog.Logger) *Environment {
 	// config (especially sandbox/network access) is up to date.
 	if params.Provider == "codex" {
 		codexHome := filepath.Join(env.RootDir, codexHomeDirName)
-		if err := prepareCodexHomeWithOpts(codexHome, CodexHomeOptions{CodexVersion: params.CodexVersion, ResumeSessionID: params.ResumeSessionID, IsLocalDirectory: params.LocalDirectory, SessionStoreKey: codexSessionStoreKey(params.Profile, params.Task), CodexCustomArgs: params.CodexCustomArgs}, logger); err != nil {
+		if err := prepareCodexHomeWithOpts(codexHome, CodexHomeOptions{ResumeSessionID: params.ResumeSessionID, IsLocalDirectory: params.LocalDirectory, SessionStoreKey: codexSessionStoreKey(params.Profile, params.Task)}, logger); err != nil {
 			// Leaving env.CodexHome empty does not launch Codex against an
 			// ambient home: configureCodexTaskShellEnvironment rejects the empty
 			// value ("task CODEX_HOME is missing") and the run fails before

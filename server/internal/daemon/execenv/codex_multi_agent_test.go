@@ -502,8 +502,7 @@ features.multi_agent = true
 		t.Fatalf("write fixture: %v", err)
 	}
 
-	policy := codexSandboxPolicy{Mode: "workspace-write", NetworkAccess: true, Reason: "test"}
-	if err := ensureCodexSandboxConfig(configPath, policy, "0.121.0", nil); err != nil {
+	if err := ensureCodexSandboxConfig(configPath); err != nil {
 		t.Fatalf("ensureCodexSandboxConfig failed: %v", err)
 	}
 	if err := ensureCodexMultiAgentConfig(configPath, nil); err != nil {
@@ -526,7 +525,7 @@ features.multi_agent = true
 	requireMultiAgentDisabled(t, parseTOML(t, got))
 
 	// Re-running both should be idempotent.
-	if err := ensureCodexSandboxConfig(configPath, policy, "0.121.0", nil); err != nil {
+	if err := ensureCodexSandboxConfig(configPath); err != nil {
 		t.Fatalf("ensureCodexSandboxConfig (rerun) failed: %v", err)
 	}
 	if err := ensureCodexMultiAgentConfig(configPath, nil); err != nil {

@@ -4770,21 +4770,19 @@ func TestBuildCodexArgsDoesNotLeakMcpToArgv(t *testing.T) {
 	}
 }
 
-// TestNormalizeCodexLaunchArgsStripsShellQuotes locks the normalization the
-// daemon reuses for the Windows sandbox decision (MUL-4957): a shell-quoted
-// `-c windows.sandbox=...` opt-in must come out as clean tokens, and
-// buildCodexArgs must be exactly the transport prefix followed by this result,
-// so the sandbox decision and the launch argv can never diverge.
+// TestNormalizeCodexLaunchArgsStripsShellQuotes locks shell-quote stripping: a
+// shell-quoted `-c key=value` override must come out as clean tokens, and
+// buildCodexArgs must be exactly the transport prefix followed by this result.
 func TestNormalizeCodexLaunchArgsStripsShellQuotes(t *testing.T) {
 	t.Parallel()
 
-	got := NormalizeCodexLaunchArgs(nil, []string{"'-c'", "'windows.sandbox=unelevated'"}, nil, slog.Default())
-	want := []string{"-c", "windows.sandbox=unelevated"}
+	got := normalizeCodexLaunchArgs(nil, []string{"'-c'", "'model_reasoning_effort=high'"}, nil, slog.Default())
+	want := []string{"-c", "model_reasoning_effort=high"}
 	if !reflect.DeepEqual(got, want) {
-		t.Fatalf("NormalizeCodexLaunchArgs = %v, want %v", got, want)
+		t.Fatalf("normalizeCodexLaunchArgs = %v, want %v", got, want)
 	}
 
-	launch := buildCodexArgs(ExecOptions{CustomArgs: []string{"'-c'", "'windows.sandbox=unelevated'"}}, slog.Default())
+	launch := buildCodexArgs(ExecOptions{CustomArgs: []string{"'-c'", "'model_reasoning_effort=high'"}}, slog.Default())
 	wantLaunch := append([]string{"app-server", "--listen", "stdio://"}, want...)
 	if !reflect.DeepEqual(launch, wantLaunch) {
 		t.Fatalf("buildCodexArgs = %v, want %v", launch, wantLaunch)

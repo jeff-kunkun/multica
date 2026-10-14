@@ -49,7 +49,6 @@ func TestHealthHandlerReportsCLICommitAndSameIdentitySnapshot(t *testing.T) {
 			d.ready.Store(true)
 			d.activeTasks.Store(2)
 			d.runningTasks.Store(1)
-			d.resourceWaitTasks.Store(1)
 			rec := httptest.NewRecorder()
 			d.healthHandler(time.Now()).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/health", nil))
 			if rec.Code != http.StatusOK {
@@ -64,7 +63,6 @@ func TestHealthHandlerReportsCLICommitAndSameIdentitySnapshot(t *testing.T) {
 				"daemon_id": "daemon-test", "server_url": "https://api.example.test",
 				"device_name": "device-test", "status": "running", "os": runtime.GOOS,
 				"active_task_count": float64(2), "running_task_count": float64(1),
-				"resource_wait_task_count": float64(1),
 			} {
 				if got, present := raw[key]; !present || got != want {
 					t.Errorf("%s: got %v, present %v; want %v", key, got, present, want)
@@ -125,7 +123,6 @@ func TestHealthHandlerReportsCLIVersionAndTaskCounts(t *testing.T) {
 	}
 	d.activeTasks.Store(2)
 	d.runningTasks.Store(1)
-	d.resourceWaitTasks.Store(1)
 	d.ready.Store(true) // preflight done -> status should be "running"
 
 	req := httptest.NewRequest(http.MethodGet, "/health", nil)
@@ -139,7 +136,7 @@ func TestHealthHandlerReportsCLIVersionAndTaskCounts(t *testing.T) {
 	// Decode into a raw map so the test locks in the exact wire-level JSON
 	// keys — the desktop TS client depends on snake_case (cli_version,
 	// active_task_count), so a silent struct-tag rename must fail here. The
-	// execution/wait split is additive: active_task_count keeps its ownership
+	// running split is additive: active_task_count keeps its ownership
 	// semantics for old clients and restart barriers.
 	var raw map[string]any
 	if err := json.Unmarshal(rec.Body.Bytes(), &raw); err != nil {
@@ -154,9 +151,6 @@ func TestHealthHandlerReportsCLIVersionAndTaskCounts(t *testing.T) {
 	}
 	if got, want := raw["running_task_count"], float64(1); got != want {
 		t.Errorf("running_task_count key: got %v, want %v", got, want)
-	}
-	if got, want := raw["resource_wait_task_count"], float64(1); got != want {
-		t.Errorf("resource_wait_task_count key: got %v, want %v", got, want)
 	}
 	if got, want := raw["status"], "running"; got != want {
 		t.Errorf("status key: got %v, want %q", got, want)
@@ -182,9 +176,6 @@ func TestHealthHandlerReportsCLIVersionAndTaskCounts(t *testing.T) {
 	}
 	if resp.RunningTaskCount != 1 {
 		t.Errorf("RunningTaskCount: got %d, want 1", resp.RunningTaskCount)
-	}
-	if resp.ResourceWaitTaskCount != 1 {
-		t.Errorf("ResourceWaitTaskCount: got %d, want 1", resp.ResourceWaitTaskCount)
 	}
 }
 

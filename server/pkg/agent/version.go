@@ -33,22 +33,6 @@ var MinVersions = map[string]string{
 	"opencode": "1.1.54",
 }
 
-// MinLocalWorktreeCLIVersion is the release that first shipped
-// execution_mode=worktree for local_directory resources (MUL-5707).
-//
-// NOTHING GATES ON THIS. It is a display value: the number shown in the 422
-// payload and the UI hint so a user knows roughly which release to update to.
-// The gates themselves read protocol.DaemonCapabilityLocalWorktreeV1, which
-// the daemon advertises only when it actually implements the mode.
-//
-// It stopped being a gate because it could not be one. A daemon without the
-// implementation does not lose a field — it runs the task IN PLACE, editing the
-// working copy the user asked to isolate. Version strings cannot answer that:
-// version floors exempted git-describe dev builds so `make daemon` stayed
-// unblocked, and a v0.4.23-era daemon reporting "v0.4.21-24-gcd3c0bb89" sailed
-// through the floor and ran two tasks in the user's own directory.
-const MinLocalWorktreeCLIVersion = "0.4.24"
-
 // semver holds a parsed semantic version (major.minor.patch).
 type semver struct {
 	Major, Minor, Patch int

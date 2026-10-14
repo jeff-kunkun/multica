@@ -69,14 +69,6 @@ vi.mock("@multica/core/projects", () => ({
   useDeleteProjectResource: () => ({ mutateAsync: vi.fn() }),
 }));
 
-vi.mock("@multica/core/config", () => ({
-  useConfigStore: (selector: (state: { localWorktreeSupported: boolean }) => unknown) =>
-    selector({ localWorktreeSupported: true }),
-}));
-vi.mock("@multica/core/runtimes", () => ({
-  runtimeListOptions: () => ({ queryKey: ["runtimes"], queryFn: vi.fn() }),
-  runtimeAdvertisesLocalWorktree: () => true,
-}));
 vi.mock("@multica/core/hooks", () => ({ useWorkspaceId: () => "workspace-1" }));
 vi.mock("@multica/core/paths", () => ({
   useCurrentWorkspace: () => ({

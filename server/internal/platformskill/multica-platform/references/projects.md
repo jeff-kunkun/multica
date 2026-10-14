@@ -6,7 +6,7 @@ display metadata; it is context later injected into task briefs and
 
 - [Core model](#core-model)
 - [CLI](#cli)
-- [local_directory execution modes](#local_directory-execution-modes)
+- [Running in a local_directory](#running-in-a-local_directory)
 - [Referring to a project in a comment](#referring-to-a-project-in-a-comment)
 - [When to add a resource](#when-to-add-a-resource)
 - [Debugging wrong context](#debugging-wrong-context)
@@ -37,8 +37,7 @@ Common resource types:
 - `github_repo` — durable GitHub repo context, with `resource_ref.url`, optional
   checkout `ref`, and optional prompt-only `default_branch_hint`;
 - `local_directory` — daemon-local path context, with `resource_ref.local_path`,
-  `daemon_id`, optional label, and optional `execution_mode` (`in_place`, the
-  default, or `worktree`).
+  `daemon_id`, and optional label.
 
 ## CLI
 
@@ -55,8 +54,6 @@ multica project resource list <project-id> --output json
 multica project resource add <project-id> --type github_repo --url <github-url> --output json
 multica project resource add <project-id> --type github_repo --url <github-url> --ref <branch-or-sha> --output json
 multica project resource add <project-id> --type local_directory --local-path <abs-path> --daemon-id <daemon-id> --output json
-multica project resource add <project-id> --type local_directory --local-path <abs-path> --daemon-id <daemon-id> --execution-mode worktree --output json
-multica project resource update <project-id> <resource-id> --execution-mode in_place --output json
 multica project resource update <project-id> <resource-id> --url <new-github-url> --output json
 multica project resource update <project-id> <resource-id> --ref <branch-or-sha> --output json
 multica project resource remove <project-id> <resource-id> --output json
@@ -72,41 +69,18 @@ shortcuts. `project resource update` merges shortcut edits with the existing
 issue dates). On `project update`, pass an empty string (`--start-date ""`) to
 clear a date; an unset flag leaves it untouched.
 
-## local_directory execution modes
+## Running in a local_directory
 
-`--execution-mode` decides how tasks share a `local_directory`.
+A task bound to a `local_directory` runs in that folder, and several tasks may
+run in it at the same time; nothing queues them. To change code, create your
+own branch in a separate git worktree (`git worktree add <path> -b <branch>`)
+and work there; do not switch branches, reset, or stash in the original
+checkout. An `execution_mode` left on older resources is ignored.
 
-`in_place` (default) runs the agent in the user's directory, one task at a time;
-a second task waits in `waiting_local_directory`.
-
-`worktree` gives each task its own git worktree of that repo, so tasks run
-concurrently and each delivers its work as a branch in the user's repo instead
-of editing the working copy. Every task of one conversation shares that branch —
-`agent/<agent>/<issue>` for an issue, `agent/<agent>/chat-<session>` for a chat
-— and each turn's worktree starts from the previous turn's work rather than from
-`HEAD`; a task with no conversation behind it gets `agent/<agent>/<task>`.
-
-Continuation is decided by an ownership record
-(`refs/multica/local-state/<branch>`, which holds the owning conversation, the
-snapshot of the user's directory the branch already carries, and the branch tip
-it was recorded at), never by the branch name. A same-named branch the user
-created — or one that no longer contains the recorded commit, i.e. deleted and
-recreated or force-moved — is left alone and the task falls back to
-`agent/<agent>/<issue>-<id>`.
-
-A turn replays only what the user changed since that snapshot; when those edits
-conflict with the branch's own work the worktree is handed to the agent
-mid-merge and the run delivers nothing until the agent resolves it.
-
-`worktree` requires the path to be a git repository with at least one commit;
-tasks fail with an explicit error otherwise. The gate is the `local-worktree-v1`
-capability the daemon advertises — not its version string — and it is checked
-twice: at save time, and again against the daemon that claims each task, so a
-machine whose runtime cannot do worktrees gets its tasks cancelled rather than
-run in place. Saving `worktree` is refused (HTTP 422, code
-`daemon_version_unsupported`) while the daemon on that machine does not
-advertise the capability — the fix is updating the Multica app there, then
-retrying. Pass an empty value to clear it back to the default.
+A project may hold several folders on one machine. The task starts in the
+first one (resource order); the brief lists the rest, and you `cd` into them
+yourself when you need them. The same folder cannot be attached twice.
+Codex and AGY run without a sandbox, so any of those folders is writable.
 
 ## Referring to a project in a comment
 

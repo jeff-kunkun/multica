@@ -23,7 +23,7 @@ Read the invariants below, then open the reference(s) your task actually needs
 | `references/mentions.md` | Writing a `mention://` link: which types enqueue a run, which are inert, why one silently did nothing |
 | `references/plans.md` | Plans: proposing a plan card, asking one member to cut scope, who may approve, what approval starts, one run per issue |
 | `references/agents.md` | Creating, copying or debugging an agent definition: fields, secrets, MCP config |
-| `references/projects.md` | Projects and their durable resources (`github_repo`, `local_directory`, worktree mode) |
+| `references/projects.md` | Projects and their durable resources (`github_repo`, `local_directory`) |
 | `references/runtimes.md` | Runtimes, daemons, `repo checkout`, and the task CLI boundary |
 
 Open what the task needs. A single-domain task usually needs one; a task that

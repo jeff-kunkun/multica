@@ -46,15 +46,6 @@ var codexModelsCacheConfigFiles = []string{
 // CodexHomeOptions carries optional inputs for prepareCodexHomeWithOpts that
 // affect the generated per-task config.toml.
 type CodexHomeOptions struct {
-	// CodexVersion is the detected Codex CLI version (e.g. "0.121.0"). Empty
-	// means unknown; on macOS, unknown is treated as "probably broken" so the
-	// daemon falls back to danger-full-access for network access. See
-	// codex_sandbox.go for details.
-	CodexVersion string
-	// GOOS overrides the target platform when deciding the sandbox policy.
-	// Empty means use runtime.GOOS. Primarily exists so tests can exercise
-	// both macOS and Linux paths deterministically.
-	GOOS string
 	// ResumeSessionID is the Codex thread/session ID this run intends to
 	// resume, when any. It is consulted when populating the per-issue session
 	// store (local_directory tasks) or migrating a legacy per-task home whose
@@ -64,12 +55,8 @@ type CodexHomeOptions struct {
 	// expose). See prepareCodexSessionsDir (MUL-4424).
 	ResumeSessionID string
 	// IsLocalDirectory marks a task whose env root is never reused across task
-	// IDs — every local_directory task, in_place or worktree. Worktree tasks
-	// get a fresh env root per task just like in-place ones do
-	// (shouldReusePriorWorkdir refuses any local assignment), so they need the
-	// same per-issue session store; keying this on "runs in the user's
-	// directory" instead would silently drop a Codex agent's conversation
-	// history between turns on the same issue.
+	// IDs — every local_directory task (shouldReusePriorWorkdir refuses any
+	// local assignment).
 	//
 	// These tasks get a fresh codex-home per task ID (the
 	// daemon never reuses their workdir), so their sessions/ is pointed at the
@@ -84,117 +71,18 @@ type CodexHomeOptions struct {
 	// task with no issue), in which case sessions/ stays task-local. See
 	// codexSessionStoreDir and prepareCodexSessionsDir (MUL-4424).
 	SessionStoreKey string
-	// CodexCustomArgs are the effective Codex CLI args this task will launch
-	// with (daemon defaults + profile-fixed + per-agent custom_args). Only the
-	// Windows sandbox decision reads them, to honor a `-c windows.sandbox=...`
-	// override that never lands in config.toml. See resolveWindowsSandboxState
-	// and MUL-4957.
-	CodexCustomArgs []string
 }
 
-// prepareCodexHome is a thin wrapper around prepareCodexHomeWithOpts kept for
-// tests that don't care about platform-aware sandbox configuration. It pins
-// GOOS to linux, which resolves to the danger-full-access default (MUL-5578),
-// so the sandbox block it writes is stable regardless of the host running the
-// test.
+// prepareCodexHome is a thin wrapper around prepareCodexHomeWithOpts for tests
+// that need no options.
 func prepareCodexHome(codexHome string, logger *slog.Logger) error {
-	return prepareCodexHomeWithOpts(codexHome, CodexHomeOptions{GOOS: "linux"}, logger)
-}
-
-// sharedConfigPresence is the tri-state existence of the shared
-// ~/.codex/config.toml copy source. It is three-valued so a stat that fails for
-// a reason other than "not found" (permission/IO) never masquerades as a
-// confident "the user has no config" — which would let the daemon loosen to
-// danger-full-access on doubt. See resolveWindowsSandboxState (MUL-4957).
-type sharedConfigPresence int
-
-const (
-	// sharedConfigAbsent: the shared config.toml is confidently not present
-	// (os.IsNotExist), so an absent per-task copy is a genuine "unconfigured".
-	sharedConfigAbsent sharedConfigPresence = iota
-	// sharedConfigPresent: the shared config.toml exists.
-	sharedConfigPresent
-	// sharedConfigUndecidable: the stat failed for a reason other than
-	// not-found; the daemon cannot tell whether the user has a config.
-	sharedConfigUndecidable
-)
-
-// statSharedCodexConfig classifies the shared ~/.codex/config.toml (the copy
-// source) into the tri-state above, distinguishing a genuine absence from a
-// stat that could not complete.
-func statSharedCodexConfig(sharedHome string) sharedConfigPresence {
-	if sharedHome == "" {
-		return sharedConfigAbsent
-	}
-	_, err := os.Stat(filepath.Join(sharedHome, "config.toml"))
-	switch {
-	case err == nil:
-		return sharedConfigPresent
-	case os.IsNotExist(err):
-		return sharedConfigAbsent
-	default:
-		return sharedConfigUndecidable
-	}
-}
-
-// resolveWindowsSandboxState determines, for a Windows task, whether a native
-// Codex sandbox is configured — across the per-task config.toml and the
-// effective custom args — failing closed (Undecidable) when it cannot tell.
-//
-// Two signals it does NOT gather itself (the caller does) keep the fail-closed
-// logic unit-testable without faulting the filesystem, and close MUL-4957's
-// round-3 must-fix where a failed sync could be misread as "unconfigured":
-//
-//   - configSyncErr: the error (if any) from syncing the shared config.toml
-//     into this per-task home. Non-nil means the per-task config.toml is
-//     unreliable — stale from a prior run, or never (re)written — so neither its
-//     contents nor its absence reflect the user's intent. Fail closed.
-//   - sharedPresence: whether the shared config.toml source exists. Only a
-//     confident absence lets an absent per-task copy count as genuinely
-//     unconfigured; a present-or-undecidable source whose per-task copy is
-//     missing means the copy silently did not land, so fail closed.
-func resolveWindowsSandboxState(configFile string, configSyncErr error, sharedPresence sharedConfigPresence, customArgs []string, logger *slog.Logger) windowsSandboxConfig {
-	configState := classifyPerTaskWindowsSandbox(configFile, configSyncErr, sharedPresence)
-	state := resolveWindowsSandbox(configState, windowsSandboxFromCustomArgs(customArgs))
-	if state == windowsSandboxUndecidable && logger != nil {
-		logger.Error("codex sandbox: cannot determine Windows native sandbox config; keeping workspace-write and refusing to loosen to danger-full-access",
-			"config_file", configFile)
-	}
-	return state
-}
-
-// classifyPerTaskWindowsSandbox inspects the per-task config.toml given the
-// outcome of syncing it from the shared source, failing closed whenever the
-// file cannot be trusted or read.
-func classifyPerTaskWindowsSandbox(configFile string, configSyncErr error, sharedPresence sharedConfigPresence) windowsSandboxConfig {
-	// A failed shared→per-task sync leaves config.toml stale or missing; neither
-	// its contents nor its absence reflect the user's intent. Fail closed.
-	if configSyncErr != nil {
-		return windowsSandboxUndecidable
-	}
-	data, err := os.ReadFile(configFile)
-	switch {
-	case err == nil:
-		return windowsSandboxFromConfig(string(data))
-	case os.IsNotExist(err):
-		// Sync succeeded and the per-task config is absent. That is a genuine
-		// "no config" only when the shared source is confidently absent too; a
-		// present or undecidable source whose copy is missing means the copy
-		// did not land → fail closed rather than loosen.
-		if sharedPresence == sharedConfigAbsent {
-			return windowsSandboxAbsent
-		}
-		return windowsSandboxUndecidable
-	default:
-		// A read error (permission/IO) on a file the daemon just wrote.
-		return windowsSandboxUndecidable
-	}
+	return prepareCodexHomeWithOpts(codexHome, CodexHomeOptions{}, logger)
 }
 
 // prepareCodexHomeWithOpts creates a per-task CODEX_HOME directory and seeds
 // it with config from the shared ~/.codex/ home. Auth is symlinked (shared),
 // config files are copied (isolated). The per-task config.toml gets a
-// daemon-managed sandbox block picked by codexSandboxPolicyFor.
+// daemon-managed sandbox block (see codex_sandbox.go).
 func prepareCodexHomeWithOpts(codexHome string, opts CodexHomeOptions, logger *slog.Logger) error {
 	sharedHome := resolveSharedCodexHome()
 	freshHome := false
@@ -228,19 +116,12 @@ func prepareCodexHomeWithOpts(codexHome string, opts CodexHomeOptions, logger *s
 	// into a stale local copy.
 	logCodexAuthState(filepath.Join(codexHome, "auth.json"), logger)
 
-	// Sync isolated files from the shared source. Track the config.toml sync
-	// outcome specifically: on Windows a failed sync makes the per-task config
-	// untrustworthy, so the sandbox decision must fail closed rather than read a
-	// stale or absent copy as "unconfigured" and loosen (MUL-4957).
-	var configSyncErr error
+	// Sync isolated files from the shared source.
 	for _, name := range codexCopiedFiles {
 		src := filepath.Join(sharedHome, name)
 		dst := filepath.Join(codexHome, name)
 		if err := syncCopiedFile(src, dst); err != nil {
 			logger.Warn("execenv: codex-home sync failed", "file", name, "error", err)
-			if name == "config.toml" {
-				configSyncErr = err
-			}
 		}
 	}
 	// Drop `[[skills.config]]` entries inherited from the user's
@@ -273,29 +154,9 @@ func prepareCodexHomeWithOpts(codexHome string, opts CodexHomeOptions, logger *s
 		logger.Warn("execenv: codex-home plugin cache exposure failed", "error", err)
 	}
 
-	// Write a daemon-managed sandbox block into config.toml. On macOS we may
-	// need to fall back to danger-full-access because of openai/codex#10390,
-	// and on Windows the daemon defaults to danger-full-access unless the user
-	// opted into a native windows.sandbox; see codex_sandbox.go for the full
-	// rationale. On Windows, resolve the native-sandbox state across the copied
-	// config and the effective custom args so an explicit user opt-in is honored
-	// and an undecidable config fails closed instead of loosening.
-	configFile := filepath.Join(codexHome, "config.toml")
-	winState := windowsSandboxAbsent
-	if resolveGOOS(opts.GOOS) == "windows" {
-		winState = resolveWindowsSandboxState(configFile, configSyncErr, statSharedCodexConfig(sharedHome), opts.CodexCustomArgs, logger)
-	}
-	policy := codexSandboxPolicyForConfig(opts.GOOS, opts.CodexVersion, winState)
-	if err := ensureCodexSandboxConfig(configFile, policy, opts.CodexVersion, logger); err != nil {
-		// The managed block is the authoritative on-disk sandbox policy. If it
-		// can't be written, config.toml keeps whatever it already had — on a
-		// reused home that may be a stale danger-full-access from a prior run —
-		// so the fail-closed policy just computed above would only exist in
-		// memory while the effective config silently stays loose. Abort rather
-		// than launch Codex with an unenforced sandbox: on fresh Prepare this
-		// fails the task; on Reuse the caller declines the reuse and falls back
-		// to Prepare, which re-runs this check against a fresh home and fails
-		// the task if the managed block still cannot be written (MUL-4957).
+	// Pin sandbox_mode = "danger-full-access" in a daemon-managed block; see
+	// codex_sandbox.go.
+	if err := ensureCodexSandboxConfig(filepath.Join(codexHome, "config.toml")); err != nil {
 		return fmt.Errorf("ensure codex sandbox config: %w", err)
 	}
 

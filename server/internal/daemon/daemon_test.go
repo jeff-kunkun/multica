@@ -1909,7 +1909,7 @@ func TestGateResumeToReachableSession(t *testing.T) {
 			task := Task{PriorSessionID: tt.sessionID, PriorWorkDir: priorDir}
 			taskCtx := execenv.TaskContextForEnv{PriorSessionResumed: tt.sessionID != ""}
 
-			reachable := gateResumeToReachableSession(&task, &taskCtx, "claude", envDir, false, false, slog.Default())
+			reachable := gateResumeToReachableSession(&task, &taskCtx, "claude", envDir, false, slog.Default())
 
 			if reachable != tt.wantReused {
 				t.Fatalf("reachable = %v, want %v", reachable, tt.wantReused)
@@ -1925,68 +1925,6 @@ func TestGateResumeToReachableSession(t *testing.T) {
 			wantUnavailable := tt.sessionID != "" && tt.wantSession == ""
 			if taskCtx.PriorSessionResumeUnavailable != wantUnavailable {
 				t.Fatalf("PriorSessionResumeUnavailable = %v, want %v", taskCtx.PriorSessionResumeUnavailable, wantUnavailable)
-			}
-		})
-	}
-}
-
-func TestGateCodexResumeAcrossLocalWorktrees(t *testing.T) {
-	priorDir, workDir, codexHome := t.TempDir(), t.TempDir(), t.TempDir()
-	rollout := filepath.Join(codexHome, "sessions", "2026", "10", "13", "rollout-2026-10-13T00-00-00-session-1.jsonl")
-	if err := os.MkdirAll(filepath.Dir(rollout), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(rollout, []byte("{}"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	for _, tt := range []struct {
-		name           string
-		provider       string
-		localWorktree  *execenv.LocalWorktree
-		localDirectory bool
-		stableStore    bool
-		codexHome      bool
-		sameWorkdir    bool
-		rolloutPresent bool
-		wantResume     bool
-	}{
-		{name: "continued branch and rollout", provider: "codex", localWorktree: &execenv.LocalWorktree{Continued: true}, stableStore: true, codexHome: true, rolloutPresent: true, wantResume: true},
-		{name: "new branch", provider: "codex", localWorktree: &execenv.LocalWorktree{}, stableStore: true, codexHome: true, rolloutPresent: true},
-		{name: "missing conversation key", provider: "codex", localWorktree: &execenv.LocalWorktree{Continued: true}, codexHome: true, rolloutPresent: true},
-		{name: "missing Codex home", provider: "codex", localWorktree: &execenv.LocalWorktree{Continued: true}, stableStore: true, rolloutPresent: true},
-		{name: "missing rollout", provider: "codex", localWorktree: &execenv.LocalWorktree{Continued: true}, stableStore: true, codexHome: true},
-		{name: "managed workdir", provider: "codex", stableStore: true, codexHome: true, rolloutPresent: true},
-		{name: "in-place changed workdir", provider: "codex", localDirectory: true, stableStore: true, codexHome: true, rolloutPresent: true},
-		{name: "in-place same workdir", provider: "codex", localDirectory: true, stableStore: true, codexHome: true, sameWorkdir: true, rolloutPresent: true, wantResume: true},
-		{name: "other provider", provider: "claude", localWorktree: &execenv.LocalWorktree{Continued: true}, stableStore: true, codexHome: true, rolloutPresent: true},
-	} {
-		t.Run(tt.name, func(t *testing.T) {
-			task := Task{PriorSessionID: "session-1", PriorWorkDir: priorDir}
-			taskCtx := execenv.TaskContextForEnv{AgentID: "agent-1", PriorSessionResumed: true}
-			if tt.stableStore {
-				taskCtx.IssueID = "issue-1"
-			}
-			env := &execenv.Environment{WorkDir: workDir, LocalDirectory: tt.localDirectory, LocalWorktree: tt.localWorktree}
-			if tt.codexHome {
-				env.CodexHome = codexHome
-			}
-			if tt.sameWorkdir {
-				env.WorkDir = priorDir
-			}
-			store := execenv.CodexSessionStorePath("test", taskCtx)
-			eligible := codexWorktreeResumeEligible(env, store)
-			if got := gateResumeToReachableSession(&task, &taskCtx, tt.provider, env.WorkDir, false, eligible, slog.Default()); got {
-				if tt.provider == "codex" && !tt.rolloutPresent {
-					gateCodexResumeToRolloutPresence(&task, &taskCtx, tt.provider, t.TempDir(), slog.Default())
-				} else {
-					gateCodexResumeToRolloutPresence(&task, &taskCtx, tt.provider, env.CodexHome, slog.Default())
-				}
-			}
-			if got := task.PriorSessionID != ""; got != tt.wantResume {
-				t.Fatalf("resume=%v, want %v", got, tt.wantResume)
-			}
-			if taskCtx.PriorSessionResumed != tt.wantResume || task.PriorSessionResumeUnavailable == tt.wantResume || taskCtx.PriorSessionResumeUnavailable == tt.wantResume {
-				t.Fatalf("inconsistent resume state: task=%+v taskCtx=%+v", task, taskCtx)
 			}
 		})
 	}
@@ -2016,7 +1954,7 @@ func TestGatePiResumeToSessionFile(t *testing.T) {
 			task := Task{PriorSessionID: sessionFile, PriorWorkDir: priorDir}
 			taskCtx := execenv.TaskContextForEnv{PriorSessionResumed: true}
 
-			reachable := gateResumeToReachableSession(&task, &taskCtx, provider, envDir, providerRefusesMissingSessionCwd(provider, true), false, slog.Default())
+			reachable := gateResumeToReachableSession(&task, &taskCtx, provider, envDir, providerRefusesMissingSessionCwd(provider, true), slog.Default())
 
 			if !reachable {
 				t.Fatal("Pi-family session file should remain reachable across workdirs")
@@ -2076,7 +2014,7 @@ func TestGatePiResumeDropsUnusableSessionFile(t *testing.T) {
 			task := Task{PriorSessionID: sessionPath, PriorWorkDir: workDir}
 			taskCtx := execenv.TaskContextForEnv{PriorSessionResumed: true}
 
-			reachable := gateResumeToReachableSession(&task, &taskCtx, "pi", workDir, providerRefusesMissingSessionCwd("pi", true), false, slog.Default())
+			reachable := gateResumeToReachableSession(&task, &taskCtx, "pi", workDir, providerRefusesMissingSessionCwd("pi", true), slog.Default())
 
 			if reachable {
 				t.Fatalf("%s Pi session was treated as reachable", test.name)
@@ -2246,7 +2184,7 @@ func TestGatePiResumeChecksRecordedCwd(t *testing.T) {
 				task := Task{PriorSessionID: sessionPath, PriorWorkDir: liveDir}
 				taskCtx := execenv.TaskContextForEnv{PriorSessionResumed: true}
 
-				reachable := gateResumeToReachableSession(&task, &taskCtx, provider, workDir, runtime.refusesMissingCwd, false, slog.Default())
+				reachable := gateResumeToReachableSession(&task, &taskCtx, provider, workDir, runtime.refusesMissingCwd, slog.Default())
 
 				if reachable != wantReachable {
 					t.Fatalf("reachable = %v, want %v", reachable, wantReachable)
@@ -4645,11 +4583,10 @@ func TestReportTaskResult_CompletedHitsCompleteEndpoint(t *testing.T) {
 
 	d := &Daemon{client: NewClient(srv.URL), logger: slog.Default()}
 	d.reportTaskResult(context.Background(), "task-1", TaskResult{
-		Status:     "completed",
-		Comment:    "all good",
-		BranchName: "agent/foo",
-		SessionID:  "ses-1",
-		WorkDir:    "/tmp/foo",
+		Status:    "completed",
+		Comment:   "all good",
+		SessionID: "ses-1",
+		WorkDir:   "/tmp/foo",
 	}, slog.Default())
 
 	rec.mu.Lock()
@@ -4659,9 +4596,6 @@ func TestReportTaskResult_CompletedHitsCompleteEndpoint(t *testing.T) {
 	}
 	if rec.payload["output"] != "all good" {
 		t.Errorf("output: got %v", rec.payload["output"])
-	}
-	if rec.payload["branch_name"] != "agent/foo" {
-		t.Errorf("branch_name: got %v", rec.payload["branch_name"])
 	}
 	if rec.payload["session_id"] != "ses-1" {
 		t.Errorf("session_id: got %v", rec.payload["session_id"])
@@ -4679,11 +4613,10 @@ func TestReportTaskResult_CancelledParentStillReportsTerminalState(t *testing.T)
 		{
 			name: "complete",
 			result: TaskResult{
-				Status:     "completed",
-				Comment:    "all good",
-				BranchName: "agent/foo",
-				SessionID:  "ses-complete",
-				WorkDir:    "/tmp/complete",
+				Status:    "completed",
+				Comment:   "all good",
+				SessionID: "ses-complete",
+				WorkDir:   "/tmp/complete",
 			},
 			wantSuffix: "/complete",
 		},

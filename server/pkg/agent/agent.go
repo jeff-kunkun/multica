@@ -108,6 +108,11 @@ type ExecOptions struct {
 	// see server/internal/daemon/execenv/openclaw_config.go). Other backends
 	// ignore this field. See issue #3260.
 	OpenclawMode string
+	// ExtraDirs are directories besides Cwd the agent may work in: a
+	// project's other local_directory folders. Backends whose CLI confines
+	// file access to the workspace grant them (agy via --add-dir); the rest
+	// ignore it.
+	ExtraDirs []string
 	// piMcpExtensionPath is set by piBackend.Execute after it writes the
 	// temporary MCP extension. The daemon does not fill it.
 	piMcpExtensionPath string

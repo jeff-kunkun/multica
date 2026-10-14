@@ -186,6 +186,25 @@ func TestBuildAntigravityArgsResume(t *testing.T) {
 	}
 }
 
+// A project's other local_directory folders are granted alongside the cwd so
+// agy can write there when the agent cd's into them.
+func TestBuildAntigravityArgsAddsExtraDirs(t *testing.T) {
+	t.Parallel()
+
+	args := buildAntigravityArgs(
+		"hi",
+		"/tmp/agy.log",
+		20*time.Minute,
+		ExecOptions{Cwd: "/work/site", ExtraDirs: []string{"/work/drafts", "/work/assets/"}},
+		quietAntigravityLogger(),
+	)
+
+	joined := strings.Join(args, " ")
+	if !strings.Contains(joined, "--add-dir /work/site --add-dir /work/drafts --add-dir /work/assets") {
+		t.Fatalf("expected --add-dir for the cwd and each extra folder; got %v", args)
+	}
+}
+
 func TestBuildAntigravityArgsFiltersBlockedCustomArgs(t *testing.T) {
 	t.Parallel()
 
@@ -211,6 +230,7 @@ func TestBuildAntigravityArgsFiltersBlockedCustomArgs(t *testing.T) {
 				"--model", "user-model", // user config: passes through untouched
 				"--output-format", "text",
 				"--dangerously-skip-permissions",
+				"--sandbox",
 				"--print-timeout", "1h",
 				"--log-file", "/elsewhere.log",
 				"--settings=/tmp/agent-settings.json",
@@ -240,6 +260,9 @@ func TestBuildAntigravityArgsFiltersBlockedCustomArgs(t *testing.T) {
 	}
 	if strings.Contains(joined, "bad-id") {
 		t.Errorf("custom --conversation value leaked through filter: %v", args)
+	}
+	if strings.Contains(joined, "--sandbox") {
+		t.Errorf("custom --sandbox leaked through filter: %v", args)
 	}
 	if !strings.Contains(joined, "--model user-model") {
 		t.Errorf("user custom --model should pass through: %v", args)

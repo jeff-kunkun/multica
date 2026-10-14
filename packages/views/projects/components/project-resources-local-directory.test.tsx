@@ -40,15 +40,6 @@ vi.mock("@multica/core/projects", () => ({
   useDeleteProjectResource: () => ({ mutateAsync: vi.fn() }),
 }));
 
-vi.mock("@multica/core/config", () => ({
-  useConfigStore: (selector: (state: { localWorktreeSupported: boolean }) => unknown) =>
-    selector({ localWorktreeSupported: true }),
-}));
-
-vi.mock("@multica/core/runtimes", () => ({
-  runtimeListOptions: () => ({ queryKey: ["runtimes"], queryFn: vi.fn() }),
-  runtimeAdvertisesLocalWorktree: () => true,
-}));
 vi.mock("@multica/core/hooks", () => ({ useWorkspaceId: () => "workspace-1" }));
 vi.mock("@multica/core/paths", () => ({
   useCurrentWorkspace: () => ({ id: "workspace-1", slug: "ws", repos: [] }),
@@ -78,14 +69,22 @@ describe("ProjectResourcesSection — local directory row", () => {
 
   // The row used to carry a pencil that turned the name into a text box. A
   // folder is identified by its path, so the only thing that "edit" changed
-  // was the row's title, and beside the branch and remove controls it read as
-  // a broken edit action (MUL-7525). What remains are the two settings that
-  // change how tasks run on the folder.
-  it("offers the execution mode and remove actions, and no rename", () => {
+  // was the row's title (MUL-7525). The fixture's ref still carries a legacy
+  // execution_mode, which must not bring back a mode label or action.
+  it("offers only the remove action: no rename and no mode", () => {
     renderWithI18n(<ProjectResourcesSection projectId="p1" />);
-    expect(screen.getByTitle(strings.mode_edit_tooltip)).toBeInTheDocument();
     expect(screen.getByTitle(strings.remove_tooltip)).toBeInTheDocument();
     expect(screen.queryByTitle(/rename/i)).not.toBeInTheDocument();
     expect(screen.queryByRole("textbox")).not.toBeInTheDocument();
+    expect(screen.queryByText(/\b(parallel|direct|worktree)\b/i)).not.toBeInTheDocument();
+  });
+
+  // A project may hold several folders on one machine, so a folder already
+  // attached on this daemon must not lock the add button.
+  it("keeps adding folders available when this machine already has one", () => {
+    renderWithI18n(<ProjectResourcesSection projectId="p1" />);
+    expect(
+      screen.getByRole("button", { name: strings.add_local_directory_button }),
+    ).toBeEnabled();
   });
 });

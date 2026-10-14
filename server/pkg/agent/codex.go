@@ -408,25 +408,17 @@ type codexBackend struct {
 
 func buildCodexArgs(opts ExecOptions, logger *slog.Logger) []string {
 	args := []string{"app-server", "--listen", "stdio://"}
-	launchArgs := NormalizeCodexLaunchArgs(opts.ExtraArgs, opts.CustomArgs, opts.McpConfig, logger)
+	launchArgs := normalizeCodexLaunchArgs(opts.ExtraArgs, opts.CustomArgs, opts.McpConfig, logger)
 	return append(args, launchArgs...)
 }
 
-// NormalizeCodexLaunchArgs returns the user-supplied Codex args (extra then
+// normalizeCodexLaunchArgs returns the user-supplied Codex args (extra then
 // custom) after lower-priority normalization: shell quoting stripped,
 // protocol-critical flags removed, and — when a managed
 // mcp_config owns the mcp_servers namespace — stray `-c mcp_servers.*`
 // overrides dropped. buildCodexArgs prepends the fixed
 // `app-server --listen stdio://` transport flags.
-//
-// It is exported so the daemon can reconstruct the *effective* launch args when
-// deciding the Windows sandbox mode. A `-c windows.sandbox=…` opt-in may arrive
-// shell-quoted (users commonly type custom_args with shell syntax, e.g.
-// `'-c' 'windows.sandbox=unelevated'`), and only after this same normalization
-// does it match the `-c windows.sandbox=…` shape the sandbox detector looks
-// for. Reconstructing the args any other way lets the two drift, silently
-// downgrading a user's isolation opt-in (MUL-4957).
-func NormalizeCodexLaunchArgs(extraArgs, customArgs []string, mcpConfig json.RawMessage, logger *slog.Logger) []string {
+func normalizeCodexLaunchArgs(extraArgs, customArgs []string, mcpConfig json.RawMessage, logger *slog.Logger) []string {
 	extra := filterCustomArgs(extraArgs, codexBlockedArgs, logger)
 	custom := filterCustomArgs(customArgs, codexBlockedArgs, logger)
 	// Only claim ownership of the `mcp_servers` namespace when the agent
@@ -1095,7 +1087,7 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 		})
 	}
 	if hasManagedCodexMcpConfig(opts.McpConfig) {
-		// Mirrors NormalizeCodexLaunchArgs, which applies this to ExtraArgs and
+		// Mirrors normalizeCodexLaunchArgs, which applies this to ExtraArgs and
 		// CustomArgs once an agent has a managed mcp_config.
 		runtimeCmd = runtimeCmd.withFilteredPrefix(func(prefix []string) []string {
 			return filterCodexCustomConfigOverrides(prefix, b.cfg.Logger)
