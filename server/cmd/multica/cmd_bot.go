@@ -84,11 +84,13 @@ func init() {
 	botCreateCmd.Flags().String("name", "", "Bot name (required)")
 	botCreateCmd.Flags().Bool("can-release", false, "Allow this Bot to approve plans for the owner")
 	botCreateCmd.Flags().String("webhook-url", "", "URL that receives workspace events")
+	botCreateCmd.Flags().String("webhook-key", "", "Receiver's key, sent as Authorization: Bearer with every push")
 	botCreateCmd.Flags().String("output", "json", "Output format: table or json")
 
 	botUpdateCmd.Flags().String("name", "", "New name")
 	botUpdateCmd.Flags().String("can-release", "", "true or false")
 	botUpdateCmd.Flags().String("webhook-url", "", "New webhook URL; pass \"none\" to stop pushing")
+	botUpdateCmd.Flags().String("webhook-key", "", "New receiver key; pass \"none\" to clear it")
 	botUpdateCmd.Flags().String("output", "json", "Output format: table or json")
 
 	botTokenCmd.Flags().String("output", "json", "Output format: table or json")
@@ -161,6 +163,9 @@ func printBots(cmd *cobra.Command, bots []map[string]any) error {
 		if s := strVal(bots[0], "webhook_secret"); s != "" {
 			fmt.Fprintf(os.Stdout, "Webhook secret (shown once): %s\n", s)
 		}
+		if k := strVal(bots[0], "webhook_key"); k != "" {
+			fmt.Fprintf(os.Stdout, "Webhook key: %s\n", k)
+		}
 		if p := strVal(bots[0], "setup_prompt"); p != "" {
 			fmt.Fprintf(os.Stdout, "\nSetup prompt (forward it to the Bot as is):\n\n%s", p)
 		}
@@ -197,6 +202,7 @@ func runBotCreate(cmd *cobra.Command, _ []string) error {
 	}
 	canRelease, _ := cmd.Flags().GetBool("can-release")
 	webhookURL, _ := cmd.Flags().GetString("webhook-url")
+	webhookKey, _ := cmd.Flags().GetString("webhook-key")
 
 	client, err := newAPIClient(cmd)
 	if err != nil {
@@ -206,7 +212,7 @@ func runBotCreate(cmd *cobra.Command, _ []string) error {
 	defer cancel()
 	var bot map[string]any
 	if err := client.PostJSON(ctx, "/api/bots", map[string]any{
-		"name": name, "can_release": canRelease, "webhook_url": webhookURL,
+		"name": name, "can_release": canRelease, "webhook_url": webhookURL, "webhook_key": webhookKey,
 	}, &bot); err != nil {
 		return fmt.Errorf("create bot: %w", err)
 	}
@@ -234,8 +240,15 @@ func runBotUpdate(cmd *cobra.Command, args []string) error {
 		}
 		body["webhook_url"] = v
 	}
+	if cmd.Flags().Changed("webhook-key") {
+		v, _ := cmd.Flags().GetString("webhook-key")
+		if v == "none" {
+			v = ""
+		}
+		body["webhook_key"] = v
+	}
 	if len(body) == 0 {
-		return fmt.Errorf("nothing to update: pass --name, --can-release or --webhook-url")
+		return fmt.Errorf("nothing to update: pass --name, --can-release, --webhook-url or --webhook-key")
 	}
 	client, err := newAPIClient(cmd)
 	if err != nil {

@@ -1743,11 +1743,11 @@ describe("WorkspaceBotSchema", () => {
     token_prefix: "mul_ab12", token_last_used_at: null, created_at: "2026-10-13T00:00:00Z" };
   it("keeps a bot whose optional fields are malformed or missing", () => {
     const parsed = WorkspaceBotListSchema.parse([{ id: "b1", name: "Grok", can_release: "yes", webhook_failures: -3, token_prefix: 7 }]);
-    expect(parsed[0]).toMatchObject({ name: "Grok", can_release: false, webhook_failures: 0, token_prefix: null, webhook_url: "" });
+    expect(parsed[0]).toMatchObject({ name: "Grok", can_release: false, webhook_failures: 0, token_prefix: null, webhook_url: "", webhook_key_set: false });
   });
   it("carries secrets only when the server sends them", () => {
     expect(WorkspaceBotWithSecretsSchema.parse(bot).token).toBeUndefined();
-    expect(WorkspaceBotWithSecretsSchema.parse({ ...bot, token: "mul_x", webhook_secret: "s", setup_prompt: "p" })).toMatchObject({ token: "mul_x", webhook_secret: "s", setup_prompt: "p" });
+    expect(WorkspaceBotWithSecretsSchema.parse({ ...bot, token: "mul_x", webhook_secret: "s", webhook_key: "k", setup_prompt: "p" })).toMatchObject({ token: "mul_x", webhook_secret: "s", webhook_key: "k", setup_prompt: "p" });
   });
   it("falls back to an empty list for a non-array reply", () => {
     expect(parseWithFallback({ bots: [] }, WorkspaceBotListSchema, [], { endpoint: "GET /api/bots" })).toEqual([]);

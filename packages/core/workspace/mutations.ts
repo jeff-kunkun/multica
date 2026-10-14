@@ -182,7 +182,7 @@ function useInvalidateBots(wsId: string) {
 export function useCreateBot(wsId: string) {
   const invalidate = useInvalidateBots(wsId);
   return useMutation({
-    mutationFn: (data: { name: string; can_release: boolean; webhook_url: string }) =>
+    mutationFn: (data: { name: string; can_release: boolean; webhook_url: string; webhook_key: string }) =>
       api.createBot(data),
     onSettled: invalidate,
   });
@@ -196,6 +196,7 @@ export function useUpdateBot(wsId: string) {
       name?: string;
       can_release?: boolean;
       webhook_url?: string;
+      webhook_key?: string;
     }) => api.updateBot(botId, update),
     onSettled: invalidate,
   });

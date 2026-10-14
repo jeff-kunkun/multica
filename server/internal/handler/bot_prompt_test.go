@@ -32,25 +32,24 @@ func TestRenderBotSetupPrompt(t *testing.T) {
 
 	push := renderBotSetupPrompt(botSetupPromptData{
 		Name: "Grok", Endpoint: "https://office.example/api/mcp", Token: "mul_abc",
-		WebhookURL: "https://grok.example/hook", WebhookSecret: "s3cret", CanRelease: true,
+		WebhookURL: "https://grok.example/hook", WebhookKey: "gk_1", CanRelease: true,
 	})
-	for _, want := range []string{"先确认网络通", "Tailscale", "令牌永不过期"} {
+	for _, want := range []string{"先确认网络通", "Tailscale", "令牌永不过期", "不要选 OAuth"} {
 		if !strings.Contains(push, want) {
 			t.Errorf("prompt missing network/expiry line %q", want)
 		}
 	}
-	for _, want := range []string{"https://grok.example/hook", "X-Multica-Signature", "推送密钥：s3cret", "approve_plan"} {
+	// All three credentials sit in one block so the Bot never asks for them.
+	for _, want := range []string{"办公室令牌（mul_ 开头）：mul_abc", "Webhook URL：https://grok.example/hook", "Webhook key：gk_1", "不用调用 set_webhook", "approve_plan"} {
 		if !strings.Contains(push, want) {
 			t.Errorf("push prompt missing %q", want)
 		}
 	}
-
-	rotated := renderBotSetupPrompt(botSetupPromptData{
-		Name: "Grok", Endpoint: "https://office.example/api/mcp", Token: "mul_new",
-		WebhookURL: "https://grok.example/hook",
-	})
-	if !strings.Contains(rotated, "沿用之前保存") {
-		t.Errorf("rotated prompt should keep the saved webhook secret:\n%s", rotated)
+	if strings.Contains(push, "X-Multica-Signature") {
+		t.Errorf("push prompt asks for signature checks the Bot cannot do:\n%s", push)
+	}
+	if strings.Contains(pull, "Webhook URL") {
+		t.Errorf("pull prompt lists a webhook it does not have:\n%s", pull)
 	}
 }
 

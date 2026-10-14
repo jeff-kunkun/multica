@@ -38,6 +38,7 @@ type BotResponse struct {
 	WebhookURL       string  `json:"webhook_url"`
 	WebhookFailures  int32   `json:"webhook_failures"`
 	WebhookLastError string  `json:"webhook_last_error"`
+	WebhookKeySet    bool    `json:"webhook_key_set"`
 	TokenPrefix      *string `json:"token_prefix"`
 	TokenLastUsedAt  *string `json:"token_last_used_at"`
 	CreatedAt        string  `json:"created_at"`
@@ -48,6 +49,7 @@ type BotSecretsResponse struct {
 	BotResponse
 	Token         string `json:"token,omitempty"`
 	WebhookSecret string `json:"webhook_secret,omitempty"`
+	WebhookKey    string `json:"webhook_key,omitempty"`
 	// SetupPrompt is the text the owner forwards to the Bot; it embeds the
 	// token, so it is only returned alongside it.
 	SetupPrompt string `json:"setup_prompt,omitempty"`
@@ -57,12 +59,16 @@ type CreateBotRequest struct {
 	Name       string `json:"name"`
 	CanRelease bool   `json:"can_release"`
 	WebhookURL string `json:"webhook_url"`
+	// WebhookKey is the receiver's own key, sent as Authorization: Bearer
+	// with every push.
+	WebhookKey string `json:"webhook_key"`
 }
 
 type UpdateBotRequest struct {
 	Name       *string `json:"name"`
 	CanRelease *bool   `json:"can_release"`
 	WebhookURL *string `json:"webhook_url"`
+	WebhookKey *string `json:"webhook_key"`
 }
 
 func (h *Handler) botResponse(ctx context.Context, b db.WorkspaceBot) BotResponse {
@@ -75,6 +81,7 @@ func (h *Handler) botResponse(ctx context.Context, b db.WorkspaceBot) BotRespons
 		WebhookURL:       b.WebhookUrl,
 		WebhookFailures:  b.WebhookFailures,
 		WebhookLastError: b.WebhookLastError,
+		WebhookKeySet:    botWebhookKey(b) != "",
 		CreatedAt:        timestampToString(b.CreatedAt),
 	}
 	if pat, err := h.Queries.GetActivePersonalAccessTokenForUser(ctx, b.UserID); err == nil {
@@ -94,6 +101,34 @@ func normalizeBotWebhookURL(raw string) (string, error) {
 		return "", errors.New("webhook_url must be an http(s) URL")
 	}
 	return u.String(), nil
+}
+
+// botWebhookKeyHeaders turns the receiver's key into the headers sent with
+// every push; an empty key clears them.
+func botWebhookKeyHeaders(raw string) ([]byte, error) {
+	key := strings.TrimSpace(raw)
+	if len(key) > 7 && strings.EqualFold(key[:7], "bearer ") {
+		key = strings.TrimSpace(key[7:])
+	}
+	headers := map[string]string{}
+	if key != "" {
+		headers["Authorization"] = "Bearer " + key
+	}
+	if !validBotWebhookHeaders(headers) {
+		return nil, errors.New("webhook_key must be a single line under 4 KB")
+	}
+	return json.Marshal(headers)
+}
+
+// botWebhookKey reads back the key botWebhookKeyHeaders stored.
+func botWebhookKey(b db.WorkspaceBot) string {
+	var headers map[string]string
+	_ = json.Unmarshal(b.WebhookHeaders, &headers)
+	auth := headers["Authorization"]
+	if len(auth) > 7 && strings.EqualFold(auth[:7], "bearer ") {
+		return auth[7:]
+	}
+	return auth
 }
 
 func randomHex(n int) (string, error) {
@@ -173,6 +208,11 @@ func (h *Handler) CreateBot(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	webhookHeaders, err := botWebhookKeyHeaders(req.WebhookKey)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 	secret, err := randomHex(24)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to create bot")
@@ -226,6 +266,15 @@ func (h *Handler) CreateBot(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to create bot")
 		return
 	}
+	bot, err = qtx.UpdateWorkspaceBot(ctx, db.UpdateWorkspaceBotParams{
+		ID:             bot.ID,
+		WorkspaceID:    bot.WorkspaceID,
+		WebhookHeaders: webhookHeaders,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to create bot")
+		return
+	}
 	token, _, err := h.mintBotToken(ctx, qtx, user.ID, name)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to create bot")
@@ -243,13 +292,14 @@ func (h *Handler) CreateBot(w http.ResponseWriter, r *http.Request) {
 		BotResponse:   h.botResponse(ctx, bot),
 		Token:         token,
 		WebhookSecret: secret,
+		WebhookKey:    botWebhookKey(bot),
 		SetupPrompt: renderBotSetupPrompt(botSetupPromptData{
-			Name:          bot.Name,
-			Endpoint:      h.botMCPEndpoint(r),
-			Token:         token,
-			WebhookURL:    bot.WebhookUrl,
-			WebhookSecret: secret,
-			CanRelease:    bot.CanRelease,
+			Name:       bot.Name,
+			Endpoint:   h.botMCPEndpoint(r),
+			Token:      token,
+			WebhookURL: bot.WebhookUrl,
+			WebhookKey: botWebhookKey(bot),
+			CanRelease: bot.CanRelease,
 		}),
 	})
 }
@@ -300,6 +350,14 @@ func (h *Handler) UpdateBot(w http.ResponseWriter, r *http.Request) {
 		}
 		params.WebhookUrl = pgtype.Text{String: webhookURL, Valid: true}
 	}
+	if req.WebhookKey != nil {
+		headers, err := botWebhookKeyHeaders(*req.WebhookKey)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		params.WebhookHeaders = headers
+	}
 	updated, err := h.Queries.UpdateWorkspaceBot(r.Context(), params)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to update bot")
@@ -330,11 +388,13 @@ func (h *Handler) RotateBotToken(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, BotSecretsResponse{
 		BotResponse: h.botResponse(ctx, bot),
 		Token:       token,
+		WebhookKey:  botWebhookKey(bot),
 		SetupPrompt: renderBotSetupPrompt(botSetupPromptData{
 			Name:       bot.Name,
 			Endpoint:   h.botMCPEndpoint(r),
 			Token:      token,
 			WebhookURL: bot.WebhookUrl,
+			WebhookKey: botWebhookKey(bot),
 			CanRelease: bot.CanRelease,
 		}),
 	})

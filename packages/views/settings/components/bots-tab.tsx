@@ -240,7 +240,13 @@ export function BotsTab() {
         onSubmit={(values) =>
           editing &&
           updateBot.mutate(
-            { botId: editing.id, name: values.name, webhook_url: values.webhook_url },
+            {
+              botId: editing.id,
+              name: values.name,
+              webhook_url: values.webhook_url,
+              // A blank key field keeps the stored key.
+              ...(values.webhook_key ? { webhook_key: values.webhook_key } : {}),
+            },
             {
               onSuccess: () => setEditing(null),
               onError: fail,
@@ -302,18 +308,20 @@ function BotFormDialog({
   showRelease?: boolean;
   pending: boolean;
   onClose: () => void;
-  onSubmit: (values: { name: string; can_release: boolean; webhook_url: string }) => void;
+  onSubmit: (values: { name: string; can_release: boolean; webhook_url: string; webhook_key: string }) => void;
 }) {
   const { t } = useT("settings");
   const [name, setName] = useState(initial?.name ?? "");
   const [canRelease, setCanRelease] = useState(initial?.can_release ?? false);
   const [webhookUrl, setWebhookUrl] = useState(initial?.webhook_url ?? "");
+  const [webhookKey, setWebhookKey] = useState("");
 
   const close = () => {
     if (!initial) {
       setName("");
       setCanRelease(false);
       setWebhookUrl("");
+      setWebhookKey("");
     }
     onClose();
   };
@@ -328,7 +336,12 @@ function BotFormDialog({
           className="space-y-4"
           onSubmit={(e) => {
             e.preventDefault();
-            onSubmit({ name: name.trim(), can_release: canRelease, webhook_url: webhookUrl.trim() });
+            onSubmit({
+              name: name.trim(),
+              can_release: canRelease,
+              webhook_url: webhookUrl.trim(),
+              webhook_key: webhookKey.trim(),
+            });
           }}
         >
           <div className="space-y-1.5">
@@ -351,6 +364,17 @@ function BotFormDialog({
               value={webhookUrl}
               placeholder="https://"
               onChange={(e) => setWebhookUrl(e.target.value)}
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="bot-webhook-key">{t(($) => $.bots.webhook_key_label)}</Label>
+            <Input
+              id="bot-webhook-key"
+              type="password"
+              autoComplete="off"
+              value={webhookKey}
+              placeholder={initial?.webhook_key_set ? t(($) => $.bots.webhook_key_keep) : undefined}
+              onChange={(e) => setWebhookKey(e.target.value)}
             />
             <p className="text-caption text-muted-foreground">{t(($) => $.bots.webhook_hint)}</p>
           </div>
@@ -405,8 +429,9 @@ function SecretsDialog({
         <div className="min-w-0 space-y-3">
           <SecretLine label={t(($) => $.bots.endpoint_label)} value={endpoint} />
           {bot?.token ? <SecretLine label={t(($) => $.bots.token_label)} value={bot.token} /> : null}
-          {bot?.webhook_secret ? (
-            <SecretLine label={t(($) => $.bots.webhook_secret_label)} value={bot.webhook_secret} />
+          {bot?.webhook_url ? <SecretLine label={t(($) => $.bots.webhook_label)} value={bot.webhook_url} /> : null}
+          {bot?.webhook_key ? (
+            <SecretLine label={t(($) => $.bots.webhook_key_label)} value={bot.webhook_key} />
           ) : null}
         </div>
         <DialogFooter className="items-center sm:justify-between">

@@ -53,6 +53,7 @@ const bot = {
   webhook_url: "",
   webhook_failures: 0,
   webhook_last_error: "",
+  webhook_key_set: false,
   token_prefix: "mul_abcdefgh",
   token_last_used_at: null,
   created_at: "2026-10-14T00:00:00Z",
@@ -90,5 +91,26 @@ describe("BotsTab — setup prompt", () => {
 
     expect(screen.getByText("Grok is ready")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Copy prompt" })).not.toBeInTheDocument();
+  });
+
+  it("shows the office token, webhook URL and webhook key together", async () => {
+    createdRef.current = {
+      ...bot,
+      webhook_url: "https://grok.example/hook",
+      webhook_key: "gk_1",
+      webhook_key_set: true,
+    };
+    await createGrok();
+
+    for (const [label, value] of [
+      ["Multica office token (starts with mul_)", "mul_abcdefgh123"],
+      ["Webhook URL", "https://grok.example/hook"],
+      ["Webhook key", "gk_1"],
+    ] as const) {
+      expect(screen.getByText(label)).toBeInTheDocument();
+      expect(screen.getByText(value)).toBeInTheDocument();
+    }
+    // The HMAC signing secret is not something the Bot can use.
+    expect(screen.queryByText("secret")).not.toBeInTheDocument();
   });
 });

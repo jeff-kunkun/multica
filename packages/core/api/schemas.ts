@@ -1900,6 +1900,7 @@ export const WorkspaceBotSchema = z
     webhook_url: z.string().catch("").default(""),
     webhook_failures: z.number().int().nonnegative().catch(0).default(0),
     webhook_last_error: z.string().catch("").default(""),
+    webhook_key_set: z.boolean().catch(false).default(false),
     token_prefix: z.string().nullish().catch(null).transform((v) => v ?? null),
     token_last_used_at: z.string().nullish().catch(null).transform((v) => v ?? null),
     created_at: z.string().catch("").default(""),
@@ -1912,6 +1913,7 @@ export const WorkspaceBotWithSecretsSchema = WorkspaceBotSchema.and(
   z.object({
     token: z.string().optional().catch(undefined),
     webhook_secret: z.string().optional().catch(undefined),
+    webhook_key: z.string().optional().catch(undefined),
     setup_prompt: z.string().optional().catch(undefined),
   }),
 );
@@ -1925,6 +1927,7 @@ export const EMPTY_WORKSPACE_BOT: WorkspaceBotWithSecrets = {
   webhook_url: "",
   webhook_failures: 0,
   webhook_last_error: "",
+  webhook_key_set: false,
   token_prefix: null,
   token_last_used_at: null,
   created_at: "",

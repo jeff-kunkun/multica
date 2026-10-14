@@ -140,6 +140,8 @@ export interface WorkspaceBot {
   webhook_url: string;
   webhook_failures: number;
   webhook_last_error: string;
+  /** A receiver key is stored; the key itself is only on create / rotate replies. */
+  webhook_key_set: boolean;
   token_prefix: string | null;
   token_last_used_at: string | null;
   created_at: string;
@@ -149,6 +151,7 @@ export interface WorkspaceBot {
 export interface WorkspaceBotWithSecrets extends WorkspaceBot {
   token?: string;
   webhook_secret?: string;
+  webhook_key?: string;
   /** Ready-to-forward connection instructions; embeds the token. */
   setup_prompt?: string;
 }
