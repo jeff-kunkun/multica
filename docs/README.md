@@ -18,6 +18,7 @@
 - [办公室事件流、逐条回执与成果送达契约](../server/docs/office-event-contract.md)
 - [每台机器同时运行上限](kun/machine-run-capacity.md)
 - [Qwen Code 思考档位按模型声明（含 Nexus 客户端说明）](kun/qwen-thinking-levels.md)
+- [新办公室成员的模型交给 magpie 网关](kun/magpie-office-routing.md)
 - [工作区全景命令与筛选范围](../server/internal/service/builtin_skills/multica-platform/references/overview.md)
 - [运行合并、连带停止与聊天转单](../server/internal/service/builtin_skills/multica-platform/references/run-control.md)
 - [新能力的智能体可读契约与收尾检查清单](kun/agent-readable-capabilities.md)
