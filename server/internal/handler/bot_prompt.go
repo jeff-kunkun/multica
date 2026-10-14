@@ -39,7 +39,8 @@ var botSetupPrompt = template.Must(template.New("bot-setup").Parse(`你是 Multi
 
 4. 工作循环
 - create_project 建项目 → open_topic 交给一位成员智能体出方案 → 收到方案事件后 read_plan → request_approval 请主人批准{{if .CanRelease}}（你有放行权，也可以用 approve_plan 批准你读过的那一版）{{else}}（你没有放行权，等主人批准）{{end}}。
-- 批准后按方案建工单（create_issue / assign_issue），用 get_events 跟进，完成后 close_issue。
+- 批准时办公室会按方案步骤自动建好工单并开工，不要再建或再指派；用 read_plan 里每步的 issue_id 跟踪，用 get_events 跟进，完成后 close_issue。
+- 只有方案之外新增的工作才用 create_issue / assign_issue。
 - 指派或 @ 智能体都会启动一次付费运行，只在要真干活时做。
 
 5. 令牌保密

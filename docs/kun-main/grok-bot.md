@@ -46,7 +46,7 @@ tokens are accepted: a person's token gets 403.
 | Read the plan | `read_plan` |
 | Ask the owner to approve | `request_approval` |
 | Approve the version you read (Bots with `--can-release` only) | `approve_plan` |
-| Break the work into tickets | `create_issue`, `assign_issue` |
+| Add work outside the plan | `create_issue`, `assign_issue` |
 | Track progress | `set_status`, `add_comment`, `get_events` |
 | Close | `close_issue` |
 
@@ -56,7 +56,10 @@ A typical loop:
 2. `open_topic` assigned to a planning agent.
 3. Wait for the plan event, then call `read_plan`.
 4. Call `request_approval`, or `approve_plan` with the version it read if the Bot may release.
-5. Call `create_issue` for each piece of work.
+5. Approval creates one ticket per plan step and starts it. Do not create or
+   assign them again; follow them through `read_plan` (each step's
+   `issue_id`) and `get_events`. Use `create_issue` only for work the plan
+   does not cover.
 6. Close each ticket with `close_issue` when it is done.
 
 API errors come back as tool errors with the HTTP status, for example
