@@ -17,7 +17,6 @@ import { useQuery } from "@tanstack/react-query";
 import { archivedInboxFacetsOptions } from "@multica/core/inbox/queries";
 import { useActorName } from "@multica/core/workspace/hooks";
 import type { InboxItem } from "@multica/core/types";
-import { ActorAvatar } from "@multica/ui/components/common/actor-avatar";
 import { Button } from "@multica/ui/components/ui/button";
 import {
   DropdownMenu,
@@ -31,6 +30,7 @@ import {
   DropdownMenuTrigger,
 } from "@multica/ui/components/ui/dropdown-menu";
 import { cn } from "@multica/ui/lib/utils";
+import { AgentCliAvatar } from "../../agents/components/agent-cli-avatar";
 import { PriorityIcon } from "../../issues/components/priority-icon";
 import { StatusIcon } from "../../issues/components/status-icon";
 import { useStatusOptions } from "../../issues/utils/status-options";
@@ -259,7 +259,8 @@ export function InboxFilterMenu({
                     checked={checked}
                     onCheckedChange={() => toggleActor(wsId, option.key)}
                   >
-                    <ActorAvatar
+                    <AgentCliAvatar
+                      agentId={option.type === "agent" ? option.id : ""}
                       size="xs"
                       name={option.name}
                       initials={getActorInitials(option.type, option.id)}

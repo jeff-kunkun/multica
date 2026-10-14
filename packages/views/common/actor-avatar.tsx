@@ -14,6 +14,8 @@ import { useAgentPresenceDetail } from "@multica/core/agents";
 import { useCurrentWorkspace, useWorkspacePaths } from "@multica/core/paths";
 import { AgentProfileCard } from "../agents/components/agent-profile-card";
 import { AgentLivePeekCard } from "../agents/components/agent-live-peek-card";
+import { useAgentCliProvider } from "../agents/components/agent-cli-avatar";
+import { ProviderLogo } from "../runtimes/components/provider-logo";
 import { MemberProfileCard } from "../members/member-profile-card";
 import { availabilityConfig } from "../agents/presence";
 import { useT } from "../i18n";
@@ -102,6 +104,7 @@ export function ActorAvatar({
     hasActor,
   } = useActorName();
   const paths = useWorkspacePaths();
+  const cliProvider = useAgentCliProvider(actorType === "agent" ? actorId : "");
   const resolvedName = name ?? getActorName(actorType, actorId);
   const resolvedAvatarUrl =
     avatarUrl === undefined
@@ -116,6 +119,11 @@ export function ActorAvatar({
       avatarUrl={resolvedAvatarUrl}
       isAgent={actorType === "agent"}
       isSystem={actorType === "system"}
+      icon={
+        cliProvider ? (
+          <ProviderLogo provider={cliProvider} className="h-full w-full" />
+        ) : undefined
+      }
       size={size}
       className={className}
     />

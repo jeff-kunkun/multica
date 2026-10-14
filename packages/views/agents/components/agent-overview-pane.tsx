@@ -9,15 +9,14 @@ import type {
 import { cn } from "@multica/ui/lib/utils";
 import { PAGE_GUTTER, PAGE_RAIL } from "../../layout/page-header";
 import { ActivityTab } from "./tabs/activity-tab";
-import { AgentDetailInspector } from "./agent-detail-inspector";
 import { AgentOverviewSummary } from "./agent-overview-summary";
 import { ActorIssuesPanel } from "../../common/actor-issues-panel";
 import { useT } from "../../i18n";
 import { useNavigation } from "../../navigation";
 
-export type DetailTab = "overview" | "work" | "settings";
+export type DetailTab = "overview" | "work";
 
-const TABS: DetailTab[] = ["overview", "work", "settings"];
+const TABS: DetailTab[] = ["overview", "work"];
 
 function isDetailTab(value: string | null): value is DetailTab {
   return value !== null && (TABS as string[]).includes(value);
@@ -30,8 +29,8 @@ interface AgentOverviewPaneProps {
 }
 
 /**
- * The office mirrors magpie: Overview shows what is happening now, Work the
- * agent's issues, and Settings a read-only copy of how magpie runs it.
+ * The office mirrors magpie: Overview shows what is happening now and Work the
+ * agent's issues. How magpie runs the agent is configured in magpie itself.
  */
 export function AgentOverviewPane({
   agent,
@@ -109,14 +108,6 @@ export function AgentOverviewPane({
         {activeView === "work" && (
           <div className={cn(PAGE_RAIL, "flex min-h-[620px] flex-col")}>
             <ActorIssuesPanel actorType="agent" actorId={agent.id} />
-          </div>
-        )}
-
-        {activeView === "settings" && (
-          <div className={cn(PAGE_RAIL, PAGE_GUTTER, "py-4 sm:py-6")}>
-            <div className="max-w-3xl">
-              <AgentDetailInspector runtime={runtime} />
-            </div>
           </div>
         )}
       </div>

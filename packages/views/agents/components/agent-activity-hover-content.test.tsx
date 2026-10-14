@@ -69,6 +69,13 @@ import {
   WorkspaceAgentActivityHoverContent,
 } from "./agent-activity-hover-content";
 
+// The CLI logo needs the workspace's agent and runtime lists; not under test.
+vi.mock("./agent-cli-avatar", () => ({
+  AgentCliAvatar: ({ name }: { name: string }) => (
+    <span data-testid="actor-avatar">{name}</span>
+  ),
+}));
+
 function makeIssue(id: string, identifier: string, title: string): Issue {
   return {
     id,

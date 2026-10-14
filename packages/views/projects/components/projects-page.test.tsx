@@ -70,6 +70,12 @@ vi.mock("@multica/core/hooks", () => ({
   useWorkspaceId: () => "workspace-1",
 }));
 
+// The CLI logo needs the workspace's agent and runtime lists; not under test.
+vi.mock("../../agents/components/agent-cli-avatar", () => ({
+  useAgentCliProvider: () => null,
+  AgentCliAvatar: () => null,
+}));
+
 vi.mock("@multica/core/paths", () => ({
   useWorkspacePaths: () => ({
     projectDetail: (id: string) => `/test-workspace/projects/${id}`,

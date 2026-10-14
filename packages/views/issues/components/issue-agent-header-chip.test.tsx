@@ -75,6 +75,11 @@ vi.mock("@multica/ui/components/ui/popover", async () => {
   };
 });
 
+// The CLI logo needs the workspace's agent and runtime lists; not under test.
+vi.mock("../../agents/components/agent-cli-avatar", () => ({
+  AgentCliAvatar: () => <span data-slot="avatar" />,
+}));
+
 vi.mock("./execution-log-section", () => ({
   ActiveTaskRow: ({
     task,

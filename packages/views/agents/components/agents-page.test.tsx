@@ -180,7 +180,8 @@ describe("AgentsPage", () => {
     expect(within(plain).queryByText("CLI's own models")).not.toBeInTheDocument();
   });
 
-  it("lists archived agents last, with nothing to switch or edit", () => {
+  // Deleting archives an agent; the office never shows archived ones.
+  it("hides deleted agents, with nothing to switch or edit", () => {
     mocks.agents = [
       makeAgent({ id: "a-old", name: "Old", archived_at: "2026-07-01T00:00:00Z" }),
       makeAgent({ id: "a-new", name: "New" }),
@@ -188,8 +189,7 @@ describe("AgentsPage", () => {
     renderPage();
 
     const rows = document.querySelectorAll("[data-agent-row]");
-    expect([...rows].map((el) => el.textContent?.slice(0, 3))).toEqual(["New", "Old"]);
-    expect(within(row("Old")).queryByText("office-claude")).not.toBeInTheDocument();
+    expect([...rows].map((el) => el.textContent?.slice(0, 3))).toEqual(["New"]);
     expect(screen.queryByRole("switch")).not.toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "Edit" })).not.toBeInTheDocument();
   });

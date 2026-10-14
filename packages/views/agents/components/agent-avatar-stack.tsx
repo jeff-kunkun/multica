@@ -1,6 +1,6 @@
 "use client";
 
-import { ActorAvatar as ActorAvatarBase } from "@multica/ui/components/common/actor-avatar";
+import { AgentCliAvatar } from "./agent-cli-avatar";
 import { AVATAR_SIZE_PX, type AvatarSize } from "@multica/ui/lib/avatar-size";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { cn } from "@multica/ui/lib/utils";
@@ -68,7 +68,8 @@ export function AgentAvatarStack({
           style={{ marginLeft: i === 0 ? 0 : -overlap }}
           className="ring-2 ring-background rounded-full inline-flex"
         >
-          <ActorAvatarBase
+          <AgentCliAvatar
+            agentId={id}
             name={getActorName("agent", id)}
             initials={getActorInitials("agent", id)}
             avatarUrl={getActorAvatarUrl("agent", id)}
