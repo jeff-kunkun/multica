@@ -12,6 +12,7 @@ vi.mock("@tanstack/react-query", async (importOriginal) => ({
     const key = String(opts.queryKey[0]);
     if (key === "plans") return { data: queryData.plans };
     if (key === "agents") return { data: [{ id: "a-1", name: "Goku", archived_at: null }] };
+    if (key === "projects") return { data: [{ id: "proj-1", title: "Office revamp", icon: "🏢" }] };
     return { data: [] };
   },
 }));
@@ -22,6 +23,9 @@ vi.mock("@multica/core/plans", () => ({
 }));
 vi.mock("@multica/core/issues/queries", () => ({
   childIssuesOptions: () => ({ queryKey: ["children"] }),
+}));
+vi.mock("@multica/core/projects/queries", () => ({
+  projectListOptions: () => ({ queryKey: ["projects"] }),
 }));
 vi.mock("@multica/core/issues/mutations", () => ({
   useCreateComment: () => ({ mutate: commentMutate, isPending: false }),
@@ -48,10 +52,11 @@ const plan = {
   status: "proposed",
   author_type: "agent",
   author_id: "a-1",
-  goal: "Ship the meeting room",
+  goal: "Ship the plan card",
   out_of_scope: "",
   steps: [{ title: "Build it", assignee_type: "agent", assignee_id: "a-1", issue_id: null }],
   done_when: "",
+  project_id: "proj-1",
   comment_id: "c-plan",
   approved_by: null,
   approved_at: null,
@@ -68,6 +73,20 @@ describe("IssuePlanCard", () => {
     queryData.plans = { plans: [], can_approve: true };
     const { container } = renderWithI18n(<IssuePlanCard issueId="issue-1" />);
     expect(container).toBeEmptyDOMElement();
+  });
+
+  it("shows the project the plan files its work in", () => {
+    queryData.plans = { plans: [plan], can_approve: true };
+    renderWithI18n(<IssuePlanCard issueId="issue-1" />);
+    expect(screen.getByText("Project")).toBeInTheDocument();
+    expect(screen.getByText("Office revamp")).toBeInTheDocument();
+  });
+
+  it("says general when the plan names no project", () => {
+    queryData.plans = { plans: [{ ...plan, project_id: null }], can_approve: true };
+    renderWithI18n(<IssuePlanCard issueId="issue-1" />);
+    expect(screen.getByText("General (no project)")).toBeInTheDocument();
+    expect(screen.queryByText("Office revamp")).toBeNull();
   });
 
   it("approves the shown version when allowed", () => {

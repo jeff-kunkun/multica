@@ -106,7 +106,7 @@ func planIssueSharedWith(t *testing.T, userIDs ...string) string {
 	})
 	for range 2 {
 		resp := authRequest(t, http.MethodPost, "/api/issues/"+issue.ID+"/plans", map[string]any{
-			"goal": "Ship it", "out_of_scope": "Nothing else", "done_when": "It ships",
+			"goal": "Ship it", "out_of_scope": "Nothing else", "done_when": "It ships", "project_id": projectID,
 			"steps": []map[string]any{
 				{"title": "Build", "assignee_type": "member", "assignee_id": testUserID},
 				{"title": "Check", "assignee_type": "member", "assignee_id": testUserID},

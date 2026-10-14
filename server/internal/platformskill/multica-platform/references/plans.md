@@ -8,6 +8,9 @@ Nothing in a plan starts until an approver approves it.
 
 `multica plan propose` posts a versioned card on the issue thread:
 
+- **Project**: required. `--project <project id>` names the project the work
+  belongs to; `--general` says it belongs to none. Without either the server
+  refuses the plan.
 - **Do** (`--goal`) and **Done when** (`--done-when`).
 - **Not doing** (`--out-of-scope`): required. Name what this work deliberately
   leaves out.
@@ -29,15 +32,10 @@ a run.
 Only a workspace owner, or a member granted approval, may approve. Agents,
 task tokens and daemon tokens are always refused, so an agent cannot approve
 its own plan. Approval creates one sub-issue per step (status `todo`, assigned
-to the step owner) and agent-owned steps start. Approving the same version
-again only finishes steps whose issue is missing; it never duplicates them.
-
-## Meetings
-
-A meeting is an issue a member opens from the meeting room
-(`multica issue create --meeting`) so one member drafts a plan on it.
-`multica meeting list [--output json]` lists meetings and every issue carrying a
-plan: newest plan status/version and approved-plan steps done/total.
+to the step owner) and agent-owned steps start. The sub-issues go into the
+plan's project, and the plan's own issue moves there too; a general plan files
+them outside any project. Approving the same version again only finishes steps
+whose issue is missing; it never duplicates them.
 
 ## One run per issue
 
@@ -48,7 +46,8 @@ parallel work into sub-issues, which is what plan steps become.
 ## CLI
 
 ```bash
-multica plan propose <issue> --goal "..." --out-of-scope "..." --done-when "..." \
+multica plan propose <issue> (--project <project id> | --general) \
+  --goal "..." --out-of-scope "..." --done-when "..." \
   --step "<owner>=<step>" [--step ...]
 multica plan show <issue> [--version N] [--all] --output json
 multica plan approve <issue> [--version N]   # defaults to the newest version

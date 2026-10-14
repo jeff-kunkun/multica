@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { issuePlansOptions, useApprovePlan } from "@multica/core/plans";
 import { childIssuesOptions } from "@multica/core/issues/queries";
+import { projectListOptions } from "@multica/core/projects/queries";
 import { issueStatusCategory } from "@multica/core/issues";
 import { useCreateComment } from "@multica/core/issues/mutations";
 import { useActorName } from "@multica/core/workspace/hooks";
@@ -23,6 +24,7 @@ import {
 } from "@multica/ui/components/ui/dialog";
 import { ActorAvatar } from "../common/actor-avatar";
 import { IssueMentionCard } from "../issues/components/issue-mention-card";
+import { ProjectIcon } from "../projects/components/project-icon";
 import { useT } from "../i18n";
 import {
   ActorOptionList,
@@ -32,9 +34,10 @@ import {
 } from "./actor-options";
 
 /**
- * The newest plan on an issue, shown above the timeline: what it is for, what
- * it leaves out, who does each step, and the two decisions a reader makes —
- * approve it, or ask someone to cut it down. Renders nothing without a plan.
+ * The newest plan on an issue, shown above the timeline: which project it
+ * files the work in, what it is for, what it leaves out, who does each step,
+ * and the two decisions a reader makes — approve it, or ask someone to cut it
+ * down. Renders nothing without a plan.
  */
 export function IssuePlanCard({ issueId }: { issueId: string }) {
   const wsId = useWorkspaceId();
@@ -93,6 +96,7 @@ function PlanCard({ plan, canApprove }: { plan: Plan; canApprove: boolean }) {
       </header>
 
       <dl className="mt-3 flex flex-col gap-3 text-body">
+        <PlanProject projectId={plan.project_id} />
         <PlanField label={t(($) => $.plan.goal)} value={plan.goal} />
         {plan.out_of_scope && (
           <PlanField label={t(($) => $.plan.out_of_scope)} value={plan.out_of_scope} />
@@ -154,6 +158,32 @@ function PlanCard({ plan, canApprove }: { plan: Plan; canApprove: boolean }) {
   );
 }
 
+/** Where approval files the work: a project, or general (no project). */
+function PlanProject({ projectId }: { projectId: string | null }) {
+  const { t } = useT("office");
+  const wsId = useWorkspaceId();
+  const { data: projects = [] } = useQuery({
+    ...projectListOptions(wsId),
+    enabled: projectId !== null,
+  });
+  const project = projectId ? projects.find((p) => p.id === projectId) : undefined;
+  return (
+    <div>
+      <dt className="text-caption text-muted-foreground">{t(($) => $.plan.project)}</dt>
+      <dd className="mt-0.5 flex min-w-0 items-center gap-1.5">
+        {projectId === null ? (
+          <span className="text-muted-foreground">{t(($) => $.plan.general)}</span>
+        ) : (
+          <>
+            <ProjectIcon project={project} size="sm" />
+            <span className="min-w-0 truncate">{project?.title ?? "—"}</span>
+          </>
+        )}
+      </dd>
+    </div>
+  );
+}
+
 function PlanField({ label, value }: { label: string; value: string }) {
   return (
     <div>
@@ -206,7 +236,7 @@ function CutDialog({ plan }: { plan: Plan }) {
         />
         <DialogFooter>
           <DialogClose render={<Button variant="outline" />}>
-            {t(($) => $.meetings.cancel)}
+            {t(($) => $.plan.cancel)}
           </DialogClose>
           <Button onClick={send} disabled={!picked || createComment.isPending}>
             {t(($) => $.plan.cut_send)}

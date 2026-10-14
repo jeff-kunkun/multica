@@ -141,7 +141,6 @@ vi.mock("@multica/core/paths", async (importOriginal) => ({
     myIssues: () => "/acme/my-issues",
     issues: () => "/acme/issues",
     projects: () => "/acme/projects",
-    meetings: () => "/acme/meetings",
     agents: () => "/acme/agents",
     usage: () => "/acme/usage",
     runtimes: () => "/acme/runtimes",
@@ -392,11 +391,16 @@ describe("navigation item presentation", () => {
 
     expect(referenceClassName).toBeTruthy();
 
-    for (const href of ["/acme/meetings", "/acme/settings"]) {
+    for (const href of ["/acme/projects", "/acme/settings"]) {
       expect(container.querySelector(`button[data-href="${href}"]`)?.className).toBe(
         referenceClassName,
       );
     }
+  });
+
+  it("has no meeting room entry", () => {
+    const { container } = render(<AppSidebar />);
+    expect(container.querySelector('button[data-href$="/meetings"]')).toBeNull();
   });
 });
 

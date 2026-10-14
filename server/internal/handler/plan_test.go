@@ -1,9 +1,12 @@
 package handler
 
 import (
+	"context"
 	"fmt"
 	"net/http"
+	"net/http/httptest"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -38,6 +41,7 @@ func (s planTestSetup) proposeBody() map[string]any {
 		"goal":         "Ship the plan card",
 		"out_of_scope": "No UI in this round",
 		"done_when":    "The CLI walks propose to approve",
+		"general":      true,
 		"steps": []map[string]any{
 			{"title": "Write the API", "assignee_type": "agent", "assignee_id": s.agentID},
 			{"title": "Read the result", "assignee_type": "member", "assignee_id": testUserID},
@@ -69,20 +73,27 @@ func childTaskCount(t *testing.T, parentID string) int {
 	return dbfx.Count(t, `SELECT count(*) FROM agent_task_queue WHERE issue_id IN (SELECT id FROM issue WHERE parent_issue_id = $1)`, parentID)
 }
 
-// A second workspace member with the plain "member" role.
 // planTestMember adds a plain member who can see the plan's issue: the
 // issue is moved into a project shared with them, so the approval checks
-// under test are what decide, not project visibility.
-func planTestMember(t *testing.T, s planTestSetup) string {
+// under test are what decide, not project visibility. Plans that should keep
+// the issue there name that project.
+func planTestMember(t *testing.T, s planTestSetup) (userID, projectID string) {
 	t.Helper()
 	suffix := time.Now().UnixNano()
-	userID := dbfx.User(t, "Plan Member", fmt.Sprintf("plan-member-%d@multica.ai", suffix))
+	userID = dbfx.User(t, "Plan Member", fmt.Sprintf("plan-member-%d@multica.ai", suffix))
 	dbfx.Member(t, testWorkspaceID, userID, "member")
 	dbfx.Cleanup(t, `DELETE FROM plan_approver WHERE user_id = $1`, userID)
-	projectID := sharedTestProject(t, "plan project "+t.Name(), userID)
+	projectID = sharedTestProject(t, "plan project "+t.Name(), userID)
 	dbfx.Exec(t, `UPDATE issue SET project_id = $1 WHERE id = $2`, projectID, s.issueID)
 	dbfx.Cleanup(t, `UPDATE issue SET project_id = NULL WHERE project_id = $1`, projectID)
-	return userID
+	return userID, projectID
+}
+
+// inProject names a project in a propose body instead of general.
+func inProject(body map[string]any, projectID string) map[string]any {
+	delete(body, "general")
+	body["project_id"] = projectID
+	return body
 }
 
 func TestProposePlanStartsNothing(t *testing.T) {
@@ -109,9 +120,15 @@ func TestProposePlanStartsNothing(t *testing.T) {
 func TestProposePlanValidation(t *testing.T) {
 	s := newPlanTestSetup(t)
 	for name, mutate := range map[string]func(map[string]any){
-		"missing out_of_scope": func(b map[string]any) { b["out_of_scope"] = "  " },
-		"missing done_when":    func(b map[string]any) { delete(b, "done_when") },
-		"no steps":             func(b map[string]any) { b["steps"] = []map[string]any{} },
+		"missing out_of_scope":    func(b map[string]any) { b["out_of_scope"] = "  " },
+		"missing done_when":       func(b map[string]any) { delete(b, "done_when") },
+		"no project, not general": func(b map[string]any) { delete(b, "general") },
+		"project and general":     func(b map[string]any) { b["project_id"] = dbfx.Project(t, "plan both "+t.Name()) },
+		"unknown project": func(b map[string]any) {
+			delete(b, "general")
+			b["project_id"] = "00000000-0000-0000-0000-0000000000aa"
+		},
+		"no steps": func(b map[string]any) { b["steps"] = []map[string]any{} },
 		"six steps": func(b map[string]any) {
 			steps := []map[string]any{}
 			for i := range 6 {
@@ -146,7 +163,8 @@ func TestApprovePlanRejectsUnauthorizedCallers(t *testing.T) {
 
 	t.Run("plain member", func(t *testing.T) {
 		req := approveRequest(s.issueID, 1)
-		req.Header.Set("X-User-ID", planTestMember(t, s))
+		memberID, _ := planTestMember(t, s)
+		req.Header.Set("X-User-ID", memberID)
 		testutil.Call(t, testHandler.ApprovePlan, req).Want(http.StatusForbidden)
 	})
 	t.Run("agent task token", func(t *testing.T) {
@@ -236,8 +254,8 @@ func TestApprovePlanCreatesStepIssuesAndStartsThem(t *testing.T) {
 
 func TestPlanApproverGrant(t *testing.T) {
 	s := newPlanTestSetup(t)
-	proposePlan(t, s.issueID, s.proposeBody(), http.StatusCreated)
-	memberID := planTestMember(t, s)
+	memberID, projectID := planTestMember(t, s)
+	proposePlan(t, s.issueID, inProject(s.proposeBody(), projectID), http.StatusCreated)
 
 	// A plain member cannot grant themselves approval.
 	selfGrant := newRequest(http.MethodPost, "/api/plan-approvers", map[string]any{"user_id": memberID})
@@ -268,7 +286,7 @@ func TestPlanApproverGrant(t *testing.T) {
 	// Revoked approvers lose the right on the next plan.
 	revoke := testutil.WithURLParams(newRequest(http.MethodDelete, "/api/plan-approvers/"+memberID, nil), "userId", memberID)
 	testutil.Call(t, testHandler.RemovePlanApprover, revoke).Want(http.StatusNoContent)
-	proposePlan(t, s.issueID, s.proposeBody(), http.StatusCreated)
+	proposePlan(t, s.issueID, inProject(s.proposeBody(), projectID), http.StatusCreated)
 	req = approveRequest(s.issueID, 2)
 	req.Header.Set("X-User-ID", memberID)
 	testutil.Call(t, testHandler.ApprovePlan, req).Want(http.StatusForbidden)
@@ -283,7 +301,7 @@ func TestBotReleaseFlagGovernsPlanApproval(t *testing.T) {
 	projectID := sharedTestProject(t, "bot plan project "+t.Name(), releaser.UserID, helper.UserID)
 	dbfx.Exec(t, `UPDATE issue SET project_id = $1 WHERE id = $2`, projectID, s.issueID)
 	dbfx.Cleanup(t, `UPDATE issue SET project_id = NULL WHERE project_id = $1`, projectID)
-	proposePlan(t, s.issueID, s.proposeBody(), http.StatusCreated)
+	proposePlan(t, s.issueID, inProject(s.proposeBody(), projectID), http.StatusCreated)
 
 	asBot := func(userID string, version int) *http.Request {
 		req := approveRequest(s.issueID, version)
@@ -302,11 +320,216 @@ func TestBotReleaseFlagGovernsPlanApproval(t *testing.T) {
 
 	revoke := withURLParam(newRequest(http.MethodPatch, "/api/bots/"+releaser.ID, map[string]any{"can_release": false}), "botId", releaser.ID)
 	testutil.Call(t, testHandler.UpdateBot, revoke).Want(http.StatusOK)
-	proposePlan(t, s.issueID, s.proposeBody(), http.StatusCreated)
+	proposePlan(t, s.issueID, inProject(s.proposeBody(), projectID), http.StatusCreated)
 	testutil.Call(t, testHandler.ApprovePlan, asBot(releaser.UserID, 2)).Want(http.StatusForbidden)
 
 	// An approver grant on the Bot's user does not bypass its own flag.
 	dbfx.Exec(t, `INSERT INTO plan_approver (workspace_id, user_id, granted_by) VALUES ($1, $2, $3)`, testWorkspaceID, releaser.UserID, testUserID)
 	dbfx.Cleanup(t, `DELETE FROM plan_approver WHERE user_id = $1`, releaser.UserID)
 	testutil.Call(t, testHandler.ApprovePlan, asBot(releaser.UserID, 2)).Want(http.StatusForbidden)
+}
+
+func TestProposePlanWithoutProjectSaysHowToFix(t *testing.T) {
+	s := newPlanTestSetup(t)
+	body := s.proposeBody()
+	delete(body, "general")
+	req := withURLParam(newRequest(http.MethodPost, "/api/issues/"+s.issueID+"/plans", body), "id", s.issueID)
+	var out struct {
+		Error string `json:"error"`
+	}
+	testutil.Call(t, testHandler.ProposePlan, req).Want(http.StatusBadRequest).JSON(&out)
+	if !strings.Contains(out.Error, "--project") || !strings.Contains(out.Error, "--general") {
+		t.Fatalf("error = %q, want it to name --project and --general", out.Error)
+	}
+}
+
+func TestApprovePlanFilesWorkInPlanProject(t *testing.T) {
+	s := newPlanTestSetup(t)
+	projectID := dbfx.Project(t, "plan target "+t.Name())
+	dbfx.Cleanup(t, `UPDATE issue SET project_id = NULL WHERE project_id = $1`, projectID)
+
+	plan := proposePlan(t, s.issueID, inProject(s.proposeBody(), projectID), http.StatusCreated)
+	if plan.ProjectID == nil || *plan.ProjectID != projectID {
+		t.Fatalf("plan project_id = %v, want %s", plan.ProjectID, projectID)
+	}
+	testutil.Call(t, testHandler.ApprovePlan, approveRequest(s.issueID, 1)).Want(http.StatusOK)
+	if n := dbfx.Count(t, `SELECT count(*) FROM issue WHERE parent_issue_id = $1 AND project_id = $2`, s.issueID, projectID); n != 2 {
+		t.Fatalf("step issues in the plan's project = %d, want 2", n)
+	}
+	if n := dbfx.Count(t, `SELECT count(*) FROM issue WHERE id = $1 AND project_id = $2`, s.issueID, projectID); n != 1 {
+		t.Fatalf("parent issue did not move into the plan's project")
+	}
+
+	// A general plan takes the next round out of any project.
+	body := s.proposeBody()
+	body["steps"] = []map[string]any{{"title": "General follow-up", "assignee_type": "member", "assignee_id": testUserID}}
+	general := proposePlan(t, s.issueID, body, http.StatusCreated)
+	if general.ProjectID != nil {
+		t.Fatalf("general plan project_id = %v, want null", *general.ProjectID)
+	}
+	testutil.Call(t, testHandler.ApprovePlan, approveRequest(s.issueID, 2)).Want(http.StatusOK)
+	if n := dbfx.Count(t, `SELECT count(*) FROM issue WHERE parent_issue_id = $1 AND title = 'General follow-up' AND project_id IS NULL`, s.issueID); n != 1 {
+		t.Fatalf("general step issues outside any project = %d, want 1", n)
+	}
+	if n := dbfx.Count(t, `SELECT count(*) FROM issue WHERE id = $1 AND project_id IS NULL`, s.issueID); n != 1 {
+		t.Fatalf("parent issue still in a project after a general plan")
+	}
+}
+
+func TestApprovePlanRefusesDeletedProject(t *testing.T) {
+	s := newPlanTestSetup(t)
+	projectID := dbfx.Project(t, "plan gone "+t.Name())
+	proposePlan(t, s.issueID, inProject(s.proposeBody(), projectID), http.StatusCreated)
+	dbfx.Exec(t, `DELETE FROM project WHERE id = $1`, projectID)
+
+	testutil.Call(t, testHandler.ApprovePlan, approveRequest(s.issueID, 1)).Want(http.StatusConflict)
+	if n := childIssueCount(t, s.issueID); n != 0 {
+		t.Fatalf("approval of a plan whose project is gone created %d issues", n)
+	}
+	if n := dbfx.Count(t, `SELECT count(*) FROM plan WHERE issue_id = $1 AND status = 'proposed'`, s.issueID); n != 1 {
+		t.Fatalf("plan left proposed = %d, want 1", n)
+	}
+}
+
+// forgetStepIssues makes an approved plan look like an earlier approval
+// stopped before creating its step issues, so the next approval retries them.
+func forgetStepIssues(t *testing.T, issueID string) {
+	t.Helper()
+	dbfx.Exec(t, `DELETE FROM agent_task_queue WHERE issue_id IN (SELECT id FROM issue WHERE parent_issue_id = $1)`, issueID)
+	dbfx.Exec(t, `DELETE FROM issue WHERE parent_issue_id = $1`, issueID)
+	dbfx.Exec(t, `UPDATE plan SET steps = (SELECT jsonb_agg(s - 'issue_id' ORDER BY n) FROM jsonb_array_elements(steps) WITH ORDINALITY AS e(s, n)) WHERE issue_id = $1`, issueID)
+}
+
+// An approver who sees the plan's issue but not the project it names cannot
+// write work into that project, on first approval or on a retry.
+func TestApprovePlanNeedsAccessToTargetProject(t *testing.T) {
+	s := newPlanTestSetup(t)
+	memberID, sharedProjectID := planTestMember(t, s)
+	dbfx.Exec(t, `INSERT INTO plan_approver (workspace_id, user_id, granted_by) VALUES ($1, $2, $3)`, testWorkspaceID, memberID, testUserID)
+	privateProjectID := dbfx.Project(t, "private plan target "+t.Name())
+	dbfx.Cleanup(t, `UPDATE issue SET project_id = NULL WHERE project_id = $1`, privateProjectID)
+	proposePlan(t, s.issueID, inProject(s.proposeBody(), privateProjectID), http.StatusCreated)
+
+	asMember := func() *http.Request {
+		req := approveRequest(s.issueID, 1)
+		req.Header.Set("X-User-ID", memberID)
+		return req
+	}
+	testutil.Call(t, testHandler.ApprovePlan, asMember()).Want(http.StatusForbidden)
+	if n := childIssueCount(t, s.issueID); n != 0 {
+		t.Fatalf("approver without project access created %d issues", n)
+	}
+	if n := dbfx.Count(t, `SELECT count(*) FROM plan WHERE issue_id = $1 AND status = 'proposed'`, s.issueID); n != 1 {
+		t.Fatalf("plan left proposed = %d, want 1", n)
+	}
+	if n := dbfx.Count(t, `SELECT count(*) FROM issue WHERE id = $1 AND project_id = $2`, s.issueID, sharedProjectID); n != 1 {
+		t.Fatalf("refused approval moved the parent issue")
+	}
+
+	// The owner approves; the parent is later moved back where the member sees it.
+	testutil.Call(t, testHandler.ApprovePlan, approveRequest(s.issueID, 1)).Want(http.StatusOK)
+	dbfx.Exec(t, `UPDATE issue SET project_id = $1 WHERE id = $2`, sharedProjectID, s.issueID)
+	forgetStepIssues(t, s.issueID)
+	testutil.Call(t, testHandler.ApprovePlan, asMember()).Want(http.StatusForbidden)
+	if n := childIssueCount(t, s.issueID); n != 0 {
+		t.Fatalf("retry by an approver without project access created %d issues", n)
+	}
+}
+
+// Approval and filing the plan's issue under its project commit together: when
+// the move fails nothing is approved, and approving again finishes the job.
+func TestApprovePlanRollsBackWhenIssueCannotMove(t *testing.T) {
+	s := newPlanTestSetup(t)
+	projectID := dbfx.Project(t, "plan move "+t.Name())
+	dbfx.Cleanup(t, `UPDATE issue SET project_id = NULL WHERE project_id = $1`, projectID)
+	proposePlan(t, s.issueID, inProject(s.proposeBody(), projectID), http.StatusCreated)
+
+	fn := fmt.Sprintf("plan_test_block_move_%d", time.Now().UnixNano())
+	dbfx.Exec(t, fmt.Sprintf(`CREATE FUNCTION %s() RETURNS trigger LANGUAGE plpgsql AS $f$
+BEGIN
+	IF NEW.id = '%s' AND NEW.project_id IS DISTINCT FROM OLD.project_id THEN
+		RAISE EXCEPTION 'move blocked by test';
+	END IF;
+	RETURN NEW;
+END $f$`, fn, s.issueID))
+	dbfx.Cleanup(t, fmt.Sprintf(`DROP FUNCTION IF EXISTS %s()`, fn))
+	dbfx.Exec(t, fmt.Sprintf(`CREATE TRIGGER %s BEFORE UPDATE ON issue FOR EACH ROW EXECUTE FUNCTION %s()`, fn, fn))
+	dropTrigger := fmt.Sprintf(`DROP TRIGGER IF EXISTS %s ON issue`, fn)
+	dbfx.Cleanup(t, dropTrigger)
+
+	testutil.Call(t, testHandler.ApprovePlan, approveRequest(s.issueID, 1)).Want(http.StatusInternalServerError)
+	if n := dbfx.Count(t, `SELECT count(*) FROM plan WHERE issue_id = $1 AND status = 'proposed'`, s.issueID); n != 1 {
+		t.Fatalf("plan left proposed after a failed move = %d, want 1", n)
+	}
+	if n := childIssueCount(t, s.issueID); n != 0 {
+		t.Fatalf("failed move still created %d issues", n)
+	}
+
+	dbfx.Exec(t, dropTrigger)
+	testutil.Call(t, testHandler.ApprovePlan, approveRequest(s.issueID, 1)).Want(http.StatusOK)
+	if n := dbfx.Count(t, `SELECT count(*) FROM issue WHERE id = $1 AND project_id = $2`, s.issueID, projectID); n != 1 {
+		t.Fatalf("retried approval did not move the parent into the plan's project")
+	}
+	if n := dbfx.Count(t, `SELECT count(*) FROM issue WHERE parent_issue_id = $1 AND project_id = $2`, s.issueID, projectID); n != 2 {
+		t.Fatalf("step issues in the plan's project after retry = %d, want 2", n)
+	}
+}
+
+// A general plan's step issues stay outside any project even when the parent
+// sits in one by the time a retry creates them.
+func TestGeneralPlanStepIssuesNeverInheritProject(t *testing.T) {
+	s := newPlanTestSetup(t)
+	proposePlan(t, s.issueID, s.proposeBody(), http.StatusCreated)
+	testutil.Call(t, testHandler.ApprovePlan, approveRequest(s.issueID, 1)).Want(http.StatusOK)
+
+	projectID := dbfx.Project(t, "later home "+t.Name())
+	dbfx.Cleanup(t, `UPDATE issue SET project_id = NULL WHERE project_id = $1`, projectID)
+	dbfx.Exec(t, `UPDATE issue SET project_id = $1 WHERE id = $2`, projectID, s.issueID)
+	forgetStepIssues(t, s.issueID)
+
+	testutil.Call(t, testHandler.ApprovePlan, approveRequest(s.issueID, 1)).Want(http.StatusOK)
+	if n := dbfx.Count(t, `SELECT count(*) FROM issue WHERE parent_issue_id = $1 AND project_id IS NULL`, s.issueID); n != 2 {
+		t.Fatalf("general step issues outside any project = %d, want 2", n)
+	}
+}
+
+// An edit that lands while approval is under way survives it: the move writes
+// back the issue as it is when the move runs, not as the request first read it.
+func TestApprovePlanKeepsConcurrentIssueEdits(t *testing.T) {
+	s := newPlanTestSetup(t)
+	projectID := dbfx.Project(t, "plan concurrent "+t.Name())
+	dbfx.Cleanup(t, `UPDATE issue SET project_id = NULL WHERE project_id = $1`, projectID)
+	proposePlan(t, s.issueID, inProject(s.proposeBody(), projectID), http.StatusCreated)
+
+	ctx := context.Background()
+	tx, err := testPool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin editor tx: %v", err)
+	}
+	defer tx.Rollback(ctx)
+	if _, err := tx.Exec(ctx, `UPDATE issue SET due_date = '2031-01-02', assignee_type = 'agent', assignee_id = $2 WHERE id = $1`, s.issueID, s.agentID); err != nil {
+		t.Fatalf("edit issue: %v", err)
+	}
+
+	code := make(chan int, 1)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		w := httptest.NewRecorder()
+		testHandler.ApprovePlan(w, approveRequest(s.issueID, 1))
+		code <- w.Code
+	}()
+	if !waitForBlockedBackend(t, done) {
+		t.Fatal("approval finished while another edit held the issue row")
+	}
+	if err := tx.Commit(ctx); err != nil {
+		t.Fatalf("commit edit: %v", err)
+	}
+	<-done
+	if c := <-code; c != http.StatusOK {
+		t.Fatalf("approval status = %d, want 200", c)
+	}
+	if n := dbfx.Count(t, `SELECT count(*) FROM issue WHERE id = $1 AND project_id = $2 AND due_date = '2031-01-02' AND assignee_type = 'agent' AND assignee_id = $3`, s.issueID, projectID, s.agentID); n != 1 {
+		t.Fatalf("approval overwrote the concurrent edit or did not move the issue")
+	}
 }

@@ -45,7 +45,6 @@ import type {
   WorkspaceBotWithSecrets,
   WorkspaceMcpServer,
   IssuePlans,
-  Meeting,
   PlanApprover,
 } from "../types";
 import type { CreateFeedbackResponse } from "../feedback/types";
@@ -2076,7 +2075,7 @@ export const RuntimeProfileSchema = z
   }));
 export const RuntimeProfileListSchema = z.array(RuntimeProfileSchema);
 
-// Plans and meetings (kun-main office). Unknown statuses pass through as
+// Plans (kun-main office). Unknown statuses pass through as
 // strings; malformed fields fall back so one bad row never hides the card.
 const nullableString = z.string().nullish().catch(null).transform((v) => v ?? null);
 
@@ -2101,6 +2100,8 @@ export const PlanSchema = z
     out_of_scope: z.string().catch("").default(""),
     steps: z.array(PlanStepSchema).catch([]).default([]),
     done_when: z.string().catch("").default(""),
+    // null = general work outside any project.
+    project_id: nullableString,
     comment_id: nullableString,
     approved_by: nullableString,
     approved_at: nullableString,
@@ -2140,30 +2141,3 @@ export const EMPTY_PLAN_APPROVER: PlanApprover = {
   granted_by: "",
   created_at: "",
 };
-
-export const MeetingSchema = z
-  .object({
-    issue: z
-      .object({
-        id: z.string().default(""),
-        identifier: z.string().catch("").default(""),
-        title: z.string().catch("").default(""),
-        status: z.string().catch("").default(""),
-        assignee_type: nullableString,
-        assignee_id: nullableString,
-        project_id: nullableString,
-        created_at: z.string().catch("").default(""),
-        updated_at: z.string().catch("").default(""),
-      })
-      .loose(),
-    plan: PlanSchema.nullish().catch(null).transform((v) => v ?? null),
-    steps_total: z.number().int().nonnegative().catch(0).default(0),
-    steps_done: z.number().int().nonnegative().catch(0).default(0),
-  })
-  .loose();
-
-export const MeetingListSchema = z
-  .object({ meetings: z.array(MeetingSchema).catch([]).default([]) })
-  .loose();
-
-export const EMPTY_MEETINGS: Meeting[] = [];

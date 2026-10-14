@@ -117,7 +117,6 @@ type NavKey =
   | "myIssues"
   | "issues"
   | "projects"
-  | "meetings"
   | "agents"
   | "usage"
   | "runtimes"
@@ -131,7 +130,6 @@ type NavLabelKey =
   | "my_issues"
   | "issues"
   | "projects"
-  | "meetings"
   | "agents"
   | "usage"
   | "runtimes"
@@ -141,7 +139,7 @@ type NavLabelKey =
 // destination path at render time, so the sidebar and the desktop tab bar
 // always agree. See route-icon-components.tsx.
 // The office keeps a short nav: the two roots (board and chat), plus
-// meetings, projects, members and settings. Other pages stay reachable by URL
+// projects, members and settings. Other pages stay reachable by URL
 // and from settings, not from here.
 const personalNav: { key: NavKey; labelKey: NavLabelKey }[] = [
   { key: "inbox", labelKey: "inbox" },
@@ -150,7 +148,6 @@ const personalNav: { key: NavKey; labelKey: NavLabelKey }[] = [
 
 const workNav: { key: NavKey; labelKey: NavLabelKey }[] = [
   { key: "issues", labelKey: "issues" },
-  { key: "meetings", labelKey: "meetings" },
   { key: "projects", labelKey: "projects" },
 ];
 

@@ -743,9 +743,6 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Delete("/{userId}", h.RemovePlanApprover)
 			})
 
-			// Meeting room: meeting-origin issues and issues carrying a plan.
-			r.Get("/api/meetings", h.ListMeetings)
-
 			// Labels
 			r.Route("/api/labels", func(r chi.Router) {
 				r.Get("/", h.ListLabels)

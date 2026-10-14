@@ -26,7 +26,8 @@ import (
 // anyone unsure @mentions another member under it to cut scope (plain
 // comments); only a workspace owner or an approver the owner granted can
 // approve, and approval is the only thing that turns the steps into child
-// issues and starts them.
+// issues and starts them. Every plan names the project its work belongs to,
+// or says it is general work outside any project.
 
 const maxPlanSteps = 5
 
@@ -48,10 +49,13 @@ type PlanResponse struct {
 	OutOfScope string     `json:"out_of_scope"`
 	Steps      []PlanStep `json:"steps"`
 	DoneWhen   string     `json:"done_when"`
-	CommentID  *string    `json:"comment_id"`
-	ApprovedBy *string    `json:"approved_by"`
-	ApprovedAt *string    `json:"approved_at"`
-	CreatedAt  string     `json:"created_at"`
+	// ProjectID is where approval files the work; null means general work
+	// outside any project.
+	ProjectID  *string `json:"project_id"`
+	CommentID  *string `json:"comment_id"`
+	ApprovedBy *string `json:"approved_by"`
+	ApprovedAt *string `json:"approved_at"`
+	CreatedAt  string  `json:"created_at"`
 }
 
 func planToResponse(p db.Plan) PlanResponse {
@@ -71,6 +75,7 @@ func planToResponse(p db.Plan) PlanResponse {
 		OutOfScope: p.OutOfScope,
 		Steps:      steps,
 		DoneWhen:   p.DoneWhen,
+		ProjectID:  uuidToPtr(p.ProjectID),
 		CommentID:  uuidToPtr(p.CommentID),
 		ApprovedBy: uuidToPtr(p.ApprovedBy),
 		ApprovedAt: timestampToPtr(p.ApprovedAt),
@@ -83,7 +88,13 @@ type ProposePlanRequest struct {
 	OutOfScope string     `json:"out_of_scope"`
 	Steps      []PlanStep `json:"steps"`
 	DoneWhen   string     `json:"done_when"`
+	// A plan states exactly one of these: the project its work belongs to,
+	// or general (no project).
+	ProjectID *string `json:"project_id"`
+	General   bool    `json:"general"`
 }
+
+const planProjectRequired = "say where this work belongs: project_id for a project, or general: true for work outside any project (CLI: --project <project id> or --general)"
 
 // ProposePlan writes a new plan version on the issue and posts its card as a
 // comment. The card never triggers anyone; it is approval that starts work.
@@ -113,6 +124,33 @@ func (h *Handler) ProposePlan(w http.ResponseWriter, r *http.Request) {
 	case len(req.Steps) == 0 || len(req.Steps) > maxPlanSteps:
 		writeError(w, http.StatusBadRequest, fmt.Sprintf("a plan has 1 to %d steps", maxPlanSteps))
 		return
+	}
+	if req.ProjectID != nil && strings.TrimSpace(*req.ProjectID) == "" {
+		req.ProjectID = nil
+	}
+	switch {
+	case req.ProjectID == nil && !req.General:
+		writeError(w, http.StatusBadRequest, planProjectRequired)
+		return
+	case req.ProjectID != nil && req.General:
+		writeError(w, http.StatusBadRequest, "a plan names one project or is general, not both")
+		return
+	}
+	var projectID pgtype.UUID
+	if req.ProjectID != nil {
+		id, ok := parseUUIDOrBadRequest(w, strings.TrimSpace(*req.ProjectID), "project_id")
+		if !ok {
+			return
+		}
+		if _, err := h.Queries.GetProjectInWorkspace(r.Context(), db.GetProjectInWorkspaceParams{ID: id, WorkspaceID: issue.WorkspaceID}); err != nil || !h.requestCanSeeProject(r, issue.WorkspaceID, id) {
+			if err != nil && !isNotFound(err) {
+				writeError(w, http.StatusInternalServerError, "failed to validate project")
+				return
+			}
+			writeError(w, http.StatusBadRequest, "project not found in this workspace")
+			return
+		}
+		projectID = id
 	}
 
 	workspaceID := uuidToString(issue.WorkspaceID)
@@ -183,6 +221,7 @@ func (h *Handler) ProposePlan(w http.ResponseWriter, r *http.Request) {
 		OutOfScope:  req.OutOfScope,
 		Steps:       stepsJSON,
 		DoneWhen:    req.DoneWhen,
+		ProjectID:   projectID,
 	})
 	if err != nil {
 		slog.Warn("create plan failed", append(logger.RequestAttrs(r), "error", err, "issue_id", uuidToString(issue.ID))...)
@@ -237,8 +276,10 @@ func (h *Handler) ListPlans(w http.ResponseWriter, r *http.Request) {
 
 // ApprovePlan approves one plan version and creates a child issue per step,
 // each assigned to its owner, which starts the work. Only the newest version
-// can be approved. Re-approving an approved version creates any step issue a
-// failed earlier attempt left out, and nothing else.
+// can be approved, and only by someone who can see the project it files work
+// under. Approval and filing the plan's own issue under that project commit
+// together. Re-approving an approved version creates any step issue a failed
+// earlier attempt left out, and nothing else.
 func (h *Handler) ApprovePlan(w http.ResponseWriter, r *http.Request) {
 	issue, ok := h.loadIssueForUser(w, r, chi.URLParam(r, "id"))
 	if !ok {
@@ -263,6 +304,15 @@ func (h *Handler) ApprovePlan(w http.ResponseWriter, r *http.Request) {
 	}
 	defer tx.Rollback(r.Context())
 	qtx := h.Queries.WithTx(tx)
+	// Issue before plan, the order ProposePlan locks in.
+	if _, err := qtx.LockIssueForPlan(r.Context(), db.LockIssueForPlanParams{IssueID: issue.ID, WorkspaceID: issue.WorkspaceID}); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			writeError(w, http.StatusNotFound, "issue not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "failed to approve plan")
+		return
+	}
 	plan, err := qtx.GetPlanVersionForUpdate(r.Context(), db.GetPlanVersionForUpdateParams{IssueID: issue.ID, WorkspaceID: issue.WorkspaceID, Version: int32(version)})
 	if errors.Is(err, pgx.ErrNoRows) {
 		writeError(w, http.StatusNotFound, "plan version not found")
@@ -272,12 +322,27 @@ func (h *Handler) ApprovePlan(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to approve plan")
 		return
 	}
-	newlyApproved := false
-	switch plan.Status {
-	case "superseded":
+	if plan.Status == "superseded" {
 		writeError(w, http.StatusConflict, fmt.Sprintf("plan v%d was replaced by a newer version", version))
 		return
-	case "proposed":
+	}
+	if plan.ProjectID.Valid {
+		if _, err := qtx.GetProjectInWorkspace(r.Context(), db.GetProjectInWorkspaceParams{ID: plan.ProjectID, WorkspaceID: plan.WorkspaceID}); err != nil {
+			if !isNotFound(err) {
+				writeError(w, http.StatusInternalServerError, "failed to approve plan")
+				return
+			}
+			writeError(w, http.StatusConflict, fmt.Sprintf("the project plan v%d names no longer exists; propose a new version with a project or general", version))
+			return
+		}
+		if !h.requestCanSeeProject(r, issue.WorkspaceID, plan.ProjectID) {
+			writeError(w, http.StatusForbidden, fmt.Sprintf("plan v%d files its work under a project you cannot see; ask someone in that project to approve it", version))
+			return
+		}
+	}
+	newlyApproved := false
+	var moved *db.Issue
+	if plan.Status == "proposed" {
 		latest, err := qtx.GetLatestPlanVersion(r.Context(), db.GetLatestPlanVersionParams{IssueID: issue.ID, WorkspaceID: issue.WorkspaceID})
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "failed to approve plan")
@@ -285,6 +350,12 @@ func (h *Handler) ApprovePlan(w http.ResponseWriter, r *http.Request) {
 		}
 		if latest != plan.Version {
 			writeError(w, http.StatusConflict, fmt.Sprintf("plan v%d is not the newest version (v%d)", version, latest))
+			return
+		}
+		moved, err = movePlanIssueToProject(r.Context(), qtx, issue, plan)
+		if err != nil {
+			slog.Warn("move plan issue to project failed", append(logger.RequestAttrs(r), "error", err, "issue_id", uuidToString(issue.ID))...)
+			writeError(w, http.StatusInternalServerError, "failed to approve plan: could not file the issue under the plan's project")
 			return
 		}
 		plan, err = qtx.ApprovePlan(r.Context(), db.ApprovePlanParams{ID: plan.ID, WorkspaceID: plan.WorkspaceID, ApprovedBy: parseUUID(approverID)})
@@ -307,6 +378,16 @@ func (h *Handler) ApprovePlan(w http.ResponseWriter, r *http.Request) {
 	prefix := h.getIssuePrefix(r.Context(), issue.WorkspaceID)
 	issueKey := prefix + "-" + strconv.Itoa(int(issue.Number))
 	fill := h.newStatusCategoryFiller(r.Context(), issue.WorkspaceID)
+	if moved != nil {
+		resp := issueToResponse(*moved, prefix)
+		fill(&resp)
+		h.publish(protocol.EventIssueUpdated, workspaceID, "member", approverID, map[string]any{
+			"issue":           resp,
+			"project_changed": true,
+			"creator_type":    moved.CreatorType,
+			"creator_id":      uuidToString(moved.CreatorID),
+		})
+	}
 	created := make([]IssueResponse, 0, len(steps))
 	var createErr error
 	for i := range steps {
@@ -357,7 +438,8 @@ func (h *Handler) createPlanStepIssue(r *http.Request, parent db.Issue, plan db.
 		CreatorType:   "member",
 		CreatorID:     parseUUID(approverID),
 		ParentIssueID: parent.ID,
-		ProjectID:     parent.ProjectID,
+		ProjectID:     plan.ProjectID,
+		NoProject:     !plan.ProjectID.Valid,
 	}, service.IssueCreateOpts{
 		ActorID:  approverID,
 		Platform: func() string { p, _, _ := middleware.ClientMetadataFromContext(r.Context()); return p }(),
@@ -377,6 +459,36 @@ func (h *Handler) createPlanStepIssue(r *http.Request, parent db.Issue, plan db.
 		return db.Issue{}, err
 	}
 	return res.Issue, nil
+}
+
+// movePlanIssueToProject files the plan's own issue under the project the plan
+// names (or takes it out of any project for general work), so the parent sits
+// with its step issues. It runs in the approval transaction with the issue
+// locked and changes only the project: every other field is written back as it
+// is now, not as the request first read it. Returns nil when nothing moved.
+func movePlanIssueToProject(ctx context.Context, qtx *db.Queries, issue db.Issue, plan db.Plan) (*db.Issue, error) {
+	current, err := qtx.GetIssueInWorkspace(ctx, db.GetIssueInWorkspaceParams{ID: issue.ID, WorkspaceID: issue.WorkspaceID})
+	if err != nil {
+		return nil, err
+	}
+	if uuidToString(current.ProjectID) == uuidToString(plan.ProjectID) {
+		return nil, nil
+	}
+	updated, err := qtx.UpdateIssue(ctx, db.UpdateIssueParams{
+		ID:               current.ID,
+		ExpectedRevision: pgtype.Int8{Int64: current.Revision, Valid: true},
+		AssigneeType:     current.AssigneeType,
+		AssigneeID:       current.AssigneeID,
+		StartDate:        current.StartDate,
+		DueDate:          current.DueDate,
+		ParentIssueID:    current.ParentIssueID,
+		ProjectID:        plan.ProjectID,
+		Stage:            current.Stage,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &updated, nil
 }
 
 // canApprovePlan: a workspace owner, a member the owner granted approval, or
@@ -423,6 +535,7 @@ func (h *Handler) actorDisplayName(ctx context.Context, workspaceID pgtype.UUID,
 func (h *Handler) planCardMarkdown(ctx context.Context, workspaceID pgtype.UUID, plan db.Plan, steps []PlanStep, issueKey string) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "**Plan v%d** — waiting for approval\n\n", plan.Version)
+	fmt.Fprintf(&b, "**Project**\n%s\n\n", h.planProjectName(ctx, plan))
 	fmt.Fprintf(&b, "**Do**\n%s\n\n**Not doing**\n%s\n\n**Steps**\n", plan.Goal, plan.OutOfScope)
 	for i, step := range steps {
 		fmt.Fprintf(&b, "%d. %s — %s\n", i+1, step.Title, h.actorDisplayName(ctx, workspaceID, step.AssigneeType, step.AssigneeID))
@@ -430,6 +543,16 @@ func (h *Handler) planCardMarkdown(ctx context.Context, workspaceID pgtype.UUID,
 	fmt.Fprintf(&b, "\n**Done when**\n%s\n\n", plan.DoneWhen)
 	fmt.Fprintf(&b, "Unsure? Reply here and @mention one member to say what can be cut. Approve: `multica plan approve %s --version %d`", issueKey, plan.Version)
 	return b.String()
+}
+
+func (h *Handler) planProjectName(ctx context.Context, plan db.Plan) string {
+	if !plan.ProjectID.Valid {
+		return "General (no project)"
+	}
+	if project, err := h.Queries.GetProjectInWorkspace(ctx, db.GetProjectInWorkspaceParams{ID: plan.ProjectID, WorkspaceID: plan.WorkspaceID}); err == nil {
+		return project.Title
+	}
+	return uuidToString(plan.ProjectID)
 }
 
 func (h *Handler) postPlanApprovedComment(ctx context.Context, issue db.Issue, plan db.Plan, steps []PlanStep, prefix, approverID string) {

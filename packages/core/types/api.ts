@@ -23,8 +23,6 @@ export interface CreateIssueRequest {
   /** ID-keyed custom-property values validated and persisted atomically with
    * the issue. */
   properties?: IssuePropertyValues;
-  /** Opened from the meeting room: the assignee drafts a plan first. */
-  meeting?: boolean;
 }
 
 export interface CreateCommentSubIssueRequest {
