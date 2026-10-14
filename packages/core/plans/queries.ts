@@ -4,7 +4,6 @@ import { api } from "../api";
 export const planKeys = {
   all: (wsId: string) => ["plans", wsId] as const,
   issue: (wsId: string, issueId: string) => ["plans", wsId, "issue", issueId] as const,
-  meetings: (wsId: string) => ["plans", wsId, "meetings"] as const,
   approvers: (wsId: string) => ["plans", wsId, "approvers"] as const,
 };
 
@@ -13,14 +12,6 @@ export function issuePlansOptions(wsId: string, issueId: string) {
   return queryOptions({
     queryKey: planKeys.issue(wsId, issueId),
     queryFn: () => api.listIssuePlans(issueId),
-    staleTime: 30_000,
-  });
-}
-
-export function meetingListOptions(wsId: string) {
-  return queryOptions({
-    queryKey: planKeys.meetings(wsId),
-    queryFn: () => api.listMeetings(),
     staleTime: 30_000,
   });
 }

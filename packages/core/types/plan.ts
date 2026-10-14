@@ -18,6 +18,8 @@ export interface Plan {
   out_of_scope: string;
   steps: PlanStep[];
   done_when: string;
+  /** Project approval files the work in; null = general (no project). */
+  project_id: string | null;
   comment_id: string | null;
   approved_by: string | null;
   approved_at: string | null;
@@ -35,24 +37,4 @@ export interface PlanApprover {
   name: string;
   granted_by: string;
   created_at: string;
-}
-
-export interface MeetingIssue {
-  id: string;
-  identifier: string;
-  title: string;
-  status: string;
-  assignee_type: string | null;
-  assignee_id: string | null;
-  project_id: string | null;
-  created_at: string;
-  updated_at: string;
-}
-
-/** An issue opened in the meeting room, or any issue carrying a plan. */
-export interface Meeting {
-  issue: MeetingIssue;
-  plan: Plan | null;
-  steps_total: number;
-  steps_done: number;
 }

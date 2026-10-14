@@ -13,7 +13,6 @@ import { AttachmentPreviewRoute } from "./pages/attachment-preview-page";
 import { IssuesPage } from "@multica/views/issues/components";
 import { ProjectsPage } from "@multica/views/projects/components";
 import { DashboardPage } from "@multica/views/dashboard";
-import { MeetingsPage } from "@multica/views/plans";
 import { MyIssuesPage } from "@multica/views/my-issues";
 import { DesktopRuntimesPage } from "./components/desktop-runtimes-page";
 import { DesktopAgentsPage } from "./components/desktop-agents-page";
@@ -180,11 +179,6 @@ export const appRoutes: RouteObject[] = [
             path: "attachments/:id/preview",
             element: <AttachmentPreviewRoute />,
             handle: { title: "Attachment" },
-          },
-          {
-            path: "meetings",
-            element: <MeetingsPage />,
-            handle: { title: "Meetings" },
           },
           {
             path: "usage",

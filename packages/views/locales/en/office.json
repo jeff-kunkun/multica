@@ -1,31 +1,11 @@
 {
-  "meetings": {
-    "title": "Meetings",
-    "new": "Start a meeting",
-    "empty": "No meetings yet",
-    "empty_hint": "Ask a question and an agent drafts a plan for you to approve.",
-    "status_awaiting": "Awaiting approval",
-    "status_discussing": "Discussing",
-    "status_approved": "Approved · {{done}}/{{total}} done",
-    "status_closed": "Closed",
-    "dialog_title": "Start a meeting",
-    "question_label": "Question",
-    "question_placeholder": "What should we figure out?",
-    "members_label": "Who joins",
-    "members_hint": "The first one writes the plan. Up to 3.",
-    "lead": "Writes the plan",
-    "start": "Start",
-    "starting": "Starting…",
-    "cancel": "Cancel",
-    "create_failed": "Couldn't start the meeting",
-    "brief_intro": "This is a meeting. Before doing any work, propose a plan with `multica plan propose` and wait for approval.",
-    "brief_others": "Also ask {{names}} for their view before proposing."
-  },
   "plan": {
     "title": "Plan v{{version}}",
     "status_proposed": "Awaiting approval",
     "status_approved": "Approved",
     "status_superseded": "Superseded",
+    "project": "Project",
+    "general": "General (no project)",
     "goal": "Goal",
     "out_of_scope": "Not doing",
     "steps": "Steps",
@@ -42,7 +22,8 @@
     "cut_message": "Please look at this plan and say what else can be dropped. Cut only, don't add.",
     "cut_send": "Ask",
     "cut_failed": "Couldn't send the request",
-    "cut_sent": "Request sent"
+    "cut_sent": "Request sent",
+    "cancel": "Cancel"
   },
   "approvers": {
     "title": "Approval rights",

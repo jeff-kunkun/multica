@@ -52,9 +52,7 @@ import {
 } from "./schemas";
 import {
   EMPTY_ISSUE_PLANS,
-  EMPTY_MEETINGS,
   IssuePlansSchema,
-  MeetingListSchema,
   PlanApproverListSchema,
 } from "./schemas";
 import { parseWithFallback } from "./schema";
@@ -1756,7 +1754,7 @@ describe("WorkspaceBotSchema", () => {
   });
 });
 
-describe("plan and meeting schemas", () => {
+describe("plan schemas", () => {
   const plan = {
     id: "plan-1",
     issue_id: "issue-1",
@@ -1772,6 +1770,12 @@ describe("plan and meeting schemas", () => {
     expect(parsed.can_approve).toBe(false);
     expect(parsed.plans[0]?.steps[0]?.title).toBe("Build");
     expect(parsed.plans[0]?.approved_by).toBeNull();
+    expect(parsed.plans[0]?.project_id).toBeNull();
+  });
+
+  it("keeps the plan's project and treats a bad one as general", () => {
+    expect(IssuePlansSchema.parse({ plans: [{ ...plan, project_id: "p-1" }] }).plans[0]?.project_id).toBe("p-1");
+    expect(IssuePlansSchema.parse({ plans: [{ ...plan, project_id: 7 }] }).plans[0]?.project_id).toBeNull();
   });
 
   it("falls back on malformed plan payloads without hiding the card", () => {
@@ -1787,22 +1791,6 @@ describe("plan and meeting schemas", () => {
         endpoint: "GET /api/issues/{id}/plans",
       }),
     ).toEqual(EMPTY_ISSUE_PLANS);
-  });
-
-  it("parses meetings with a missing plan and bad counters", () => {
-    const parsed = MeetingListSchema.parse({
-      meetings: [
-        { issue: { id: "i-1", title: "Q" }, plan: "bad", steps_total: -1, steps_done: "2" },
-      ],
-    });
-    expect(parsed.meetings[0]?.plan).toBeNull();
-    expect(parsed.meetings[0]?.steps_total).toBe(0);
-    expect(parsed.meetings[0]?.steps_done).toBe(0);
-    expect(
-      parseWithFallback(42, MeetingListSchema, { meetings: EMPTY_MEETINGS }, {
-        endpoint: "GET /api/meetings",
-      }).meetings,
-    ).toEqual([]);
   });
 
   it("defaults approver fields and survives a non-object reply", () => {

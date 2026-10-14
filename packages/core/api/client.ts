@@ -5,7 +5,6 @@ import { configStore } from "../config";
 import type {
   Issue,
   IssuePlans,
-  Meeting,
   Plan,
   PlanApprover,
   CreateIssueRequest,
@@ -263,8 +262,6 @@ import {
   PlanApproverListSchema,
   PlanApproverSchema,
   EMPTY_PLAN_APPROVER,
-  MeetingListSchema,
-  EMPTY_MEETINGS,
   WorkspaceBotWithSecretsSchema,
   EMPTY_WORKSPACE_BOT,
   EMPTY_WORKSPACE_BOT_LIST,
@@ -2266,14 +2263,6 @@ export class ApiClient {
     await this.fetch<unknown>(`/api/plan-approvers/${encodeURIComponent(userId)}`, {
       method: "DELETE",
     });
-  }
-
-  /** Meeting-room list: meeting issues and issues carrying a plan. */
-  async listMeetings(): Promise<Meeting[]> {
-    const raw = await this.fetch<unknown>("/api/meetings");
-    return parseWithFallback(raw, MeetingListSchema, { meetings: EMPTY_MEETINGS }, {
-      endpoint: "GET /api/meetings",
-    }).meetings;
   }
 
   /** Removes a library entry and every assignment to it. */

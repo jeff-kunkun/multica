@@ -147,6 +147,4 @@ export type {
   PlanStep,
   IssuePlans,
   PlanApprover,
-  Meeting,
-  MeetingIssue,
 } from "./plan";

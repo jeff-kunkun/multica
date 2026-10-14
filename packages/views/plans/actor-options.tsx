@@ -34,7 +34,7 @@ export function useActorOptions(): ActorRef[] {
   );
 }
 
-export function actorKey(actor: Pick<ActorRef, "type" | "id">) {
+function actorKey(actor: Pick<ActorRef, "type" | "id">) {
   return `${actor.type}:${actor.id}`;
 }
 
@@ -47,20 +47,16 @@ export function ActorOptionList({
   options,
   selected,
   onToggle,
-  badge,
 }: {
   options: ActorRef[];
   selected: ActorRef[];
   onToggle: (actor: ActorRef) => void;
-  badge?: (actor: ActorRef, index: number) => string | null;
 }) {
-  const picked = new Map(selected.map((a, i) => [actorKey(a), i]));
+  const picked = new Set(selected.map(actorKey));
   return (
     <div className="flex max-h-64 flex-col gap-0.5 overflow-y-auto">
       {options.map((actor) => {
-        const index = picked.get(actorKey(actor));
-        const isPicked = index !== undefined;
-        const note = isPicked && badge ? badge(actor, index) : null;
+        const isPicked = picked.has(actorKey(actor));
         return (
           <button
             key={actorKey(actor)}
@@ -74,7 +70,6 @@ export function ActorOptionList({
           >
             <ActorAvatar actorType={actor.type} actorId={actor.id} size="sm" profileLink={false} />
             <span className="min-w-0 flex-1 truncate">{actor.name}</span>
-            {note && <span className="text-caption text-muted-foreground">{note}</span>}
             {isPicked && <Check className="size-4 text-muted-foreground" aria-hidden="true" />}
           </button>
         );
