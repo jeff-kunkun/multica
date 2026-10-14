@@ -2,6 +2,7 @@ import { contextBridge, ipcRenderer } from "electron";
 import { electronAPI } from "@electron-toolkit/preload";
 import type { RuntimeConfigResult } from "../shared/runtime-config";
 import type { FreezeBreadcrumb } from "../shared/freeze-breadcrumb";
+import type { FullDiskAccessState } from "../shared/full-disk-access";
 import type {
   ManualUpdateCheckResult,
   UpdaterPreferences,
@@ -209,6 +210,10 @@ const desktopAPI = {
   pickDirectory: (defaultPath?: string) =>
     ipcRenderer.invoke("local-directory:pick", defaultPath),
   /** Validate that a path is an existing readable+writable directory. */
+  getFullDiskAccess: (): Promise<FullDiskAccessState> =>
+    ipcRenderer.invoke("system:full-disk-access"),
+  openFullDiskAccessSettings: (): Promise<void> =>
+    ipcRenderer.invoke("system:open-full-disk-access-settings"),
   validateLocalDirectory: (path: string) =>
     ipcRenderer.invoke("local-directory:validate", path),
   /** Listen for Cmd/Ctrl+W tab-close requests from the main process.

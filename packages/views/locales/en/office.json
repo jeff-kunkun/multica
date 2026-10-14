@@ -59,6 +59,9 @@
     "description": "Connected computers and the CLIs on them.",
     "runtimes": "All runtimes",
     "runtimes_description": "Which computers are online and which CLIs they have.",
-    "open": "Open"
+    "open": "Open",
+    "disk_access": "Full Disk Access is off",
+    "disk_access_description": "Agents need it for protected folders. In System Settings, click + and choose {{app}}.",
+    "disk_access_open": "Open Settings"
   }
 }

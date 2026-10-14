@@ -59,6 +59,9 @@
     "description": "连上的电脑和上面的 CLI。",
     "runtimes": "全部运行时",
     "runtimes_description": "每台电脑是否在线、装了哪些 CLI。",
-    "open": "打开"
+    "open": "打开",
+    "disk_access": "完全磁盘访问权限未开启",
+    "disk_access_description": "Agent 读受保护的文件夹要用它。在系统设置里点 +，选 {{app}}。",
+    "disk_access_open": "去打开"
   }
 }

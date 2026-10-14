@@ -3,6 +3,7 @@ import type { RuntimeConfigResult } from "../shared/runtime-config";
 import type { NavigationGesture } from "../shared/navigation-gestures";
 import type { RendererRouteContextInput } from "../shared/renderer-route-context";
 import type { FreezeBreadcrumb } from "../shared/freeze-breadcrumb";
+import type { FullDiskAccessState } from "../shared/full-disk-access";
 import type {
   DesktopWindowContext,
   IssueWindowRequest,
@@ -85,6 +86,10 @@ interface DesktopAPI {
     reason?: "cancelled" | "no_window" | "error";
     error?: string;
   }>;
+  /** Whether macOS has given this app Full Disk Access. */
+  getFullDiskAccess: () => Promise<FullDiskAccessState>;
+  /** Open System Settings at Privacy & Security → Full Disk Access. */
+  openFullDiskAccessSettings: () => Promise<void>;
   /** Validate that a path is an existing readable+writable directory.
    *  Mirrors the daemon's runtime check so the user sees errors before submit. */
   validateLocalDirectory: (
