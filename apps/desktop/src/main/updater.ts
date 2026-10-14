@@ -51,6 +51,16 @@ export function configureMacX64UpdateChannel(
 // arm64 feed and runtime path remain unchanged.
 configureMacX64UpdateChannel(autoUpdater);
 
+// Set when the user clicks "Restart now" on a downloaded update. The app is
+// back within seconds, so before-quit leaves the daemon (and its running
+// tasks) alone even with autoStop on; the relaunched app swaps the daemon to
+// the new CLI once it drains.
+let quittingToInstallUpdate = false;
+
+export function isQuittingToInstallUpdate(): boolean {
+  return quittingToInstallUpdate;
+}
+
 const STARTUP_CHECK_DELAY_MS = 5_000;
 const PERIODIC_CHECK_INTERVAL_MS = 60 * 60 * 1000; // 1 hour
 
@@ -202,6 +212,7 @@ export function setupAutoUpdater(getMainWindow: () => BrowserWindow | null): voi
   });
 
   ipcMain.handle("updater:install", () => {
+    quittingToInstallUpdate = true;
     autoUpdater.quitAndInstall(false, true);
   });
 

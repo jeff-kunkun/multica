@@ -84,8 +84,11 @@ type HealthResponse struct {
 	// version change on disk but hasn't restarted into it yet — it was busy at
 	// the last barrier check and will retry when idle. Omitted when empty, so
 	// older consumers see no change. Diagnostic only: nothing keys off it.
-	ReloadPendingReason string            `json:"reload_pending_reason,omitempty"`
-	Workspaces          []healthWorkspace `json:"workspaces"`
+	ReloadPendingReason string `json:"reload_pending_reason,omitempty"`
+	// Draining is true while a POST /drain lease keeps the daemon from
+	// claiming new tasks ahead of a restart.
+	Draining   bool              `json:"draining,omitempty"`
+	Workspaces []healthWorkspace `json:"workspaces"`
 }
 
 type healthWorkspace struct {
@@ -361,6 +364,7 @@ func (d *Daemon) healthHandler(startedAt time.Time) http.HandlerFunc {
 			SkippedAgents:    d.skippedAgentsSnapshot(),
 
 			ReloadPendingReason: d.reloadPending(),
+			Draining:            d.draining(),
 			Workspaces:          wsList,
 		}
 		if reporter, ok := d.repoCache.(interface{ Activity() repocache.Activity }); ok {
@@ -404,12 +408,31 @@ func (d *Daemon) shutdownHandler() http.HandlerFunc {
 	}
 }
 
+// drainHandler stops the daemon from claiming new tasks for drainLease, so the
+// Desktop app can restart it into a new CLI as soon as running tasks finish.
+// Callers renew it while they wait. Localhost-only, like /shutdown.
+func (d *Daemon) drainHandler() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		d.startDrain()
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"draining":          true,
+			"active_task_count": d.activeTasks.Load(),
+		})
+	}
+}
+
 // serveHealth runs the health HTTP server on the given listener.
 // Blocks until ctx is cancelled.
 func (d *Daemon) serveHealth(ctx context.Context, ln net.Listener, startedAt time.Time) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", d.healthHandler(startedAt))
 	mux.HandleFunc("/shutdown", d.shutdownHandler())
+	mux.HandleFunc("/drain", d.drainHandler())
 	mux.HandleFunc("/repo/checkout", d.repoCheckoutHandler())
 
 	srv := &http.Server{Handler: mux}

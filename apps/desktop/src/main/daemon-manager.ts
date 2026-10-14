@@ -24,6 +24,7 @@ import type {
 import { daemonStatusAlive } from "../shared/daemon-types";
 import { ensureManagedCli, managedCliPath } from "./cli-bootstrap";
 import { decideVersionAction } from "./version-decision";
+import { isQuittingToInstallUpdate } from "./updater";
 import {
   deriveProfileName,
   profileArgs,
@@ -182,6 +183,25 @@ interface HealthPayload {
   active_task_count?: number;
   agents?: string[];
   workspaces?: unknown[];
+  /** Local annotation: the port this payload was fetched from. */
+  port?: number;
+}
+
+/**
+ * Asks the daemon to stop claiming new tasks for a short lease so a pending
+ * version restart can actually happen once running tasks finish. Renewed on
+ * every poll tick while the restart is deferred. Daemons older than /drain
+ * answer 404; they simply keep the old wait-for-idle behavior.
+ */
+async function requestDaemonDrain(port: number): Promise<void> {
+  try {
+    await fetch(`http://127.0.0.1:${port}/drain`, {
+      method: "POST",
+      signal: AbortSignal.timeout(HEALTH_PROBE_TIMEOUT_MS),
+    });
+  } catch {
+    // Best-effort: the next poll tick retries.
+  }
 }
 
 async function fetchHealthAtPort(
@@ -195,7 +215,7 @@ async function fetchHealthAtPort(
       signal: controller.signal,
     });
     if (!res.ok) return null;
-    return (await res.json()) as HealthPayload;
+    return { ...((await res.json()) as HealthPayload), port };
   } catch {
     return null;
   } finally {
@@ -634,10 +654,12 @@ async function ensureRunningDaemonVersionMatches(): Promise<
       if (!pendingVersionRestart) {
         const activeTasks = running?.active_task_count ?? 0;
         console.log(
-          `[daemon] CLI version mismatch (bundled=${bundled} running=${running?.cli_version}); deferring restart until ${activeTasks} active task(s) finish`,
+          `[daemon] CLI version mismatch (bundled=${bundled} running=${running?.cli_version}); draining — restart once ${activeTasks} active task(s) finish`,
         );
       }
       pendingVersionRestart = true;
+      // A busy daemon keeps claiming new work and would never reach idle.
+      if (running?.port) await requestDaemonDrain(running.port);
       return "deferred";
     }
     case "restart":
@@ -1492,7 +1514,7 @@ export function setupDaemonManager(
     stopLogTail();
 
     loadPrefs().then(async (prefs) => {
-      if (prefs.autoStop) {
+      if (prefs.autoStop && !isQuittingToInstallUpdate()) {
         isQuitting = true;
         event.preventDefault();
         try {
