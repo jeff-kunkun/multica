@@ -222,5 +222,13 @@
     "delete": "删除会话",
     "archive": "归档会话",
     "unarchive": "取消归档"
+  },
+  "project_bar": {
+    "label": "按项目筛选聊天",
+    "all": "全部",
+    "unread": "有未读聊天",
+    "pin": "置顶 {{name}}",
+    "unpin": "取消置顶 {{name}}",
+    "pin_failed": "置顶没改成，请重试"
   }
 }
