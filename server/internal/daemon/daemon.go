@@ -118,12 +118,8 @@ var pendingWorkHintMinInterval = time.Second
 // multica-ai/multica#2925, Codex's native Windows sandbox in
 // multica-ai/multica#6449.
 //
-// Both platforms now default to danger-full-access (execenv's
-// codexSandboxPolicyFor), so in practice only a user who opted into
-// windows.sandbox still trips the Windows case. The layout stays a per-platform
-// choice rather than a per-policy one: it is decided before a task's resolved
-// sandbox config is known, one workdir is reused across tasks whose policies
-// can differ, and task-local metadata is correct under either policy.
+// Codex/AGY now run without a sandbox, so only a user who re-enables one via
+// custom_args still hits this; task-local metadata is correct either way.
 func repoCheckoutModeFor(provider, goos string) string {
 	if provider != "codex" {
 		return ""
@@ -766,7 +762,7 @@ func New(cfg Config, logger *slog.Logger) *Daemon {
 }
 
 // setAgentVersion records the detected CLI version for an agent provider so
-// later task-dispatch code (e.g. Codex sandbox policy) can read it.
+// later task-dispatch code (e.g. the Codex backend) can read it.
 //
 // A blank detection never replaces a version we already know. checkAgentMinVersion
 // returns nil for any provider with no MinVersions entry, so a CLI whose
@@ -6902,7 +6898,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// Try to reuse the workdir from a previous task on the same (agent, issue) pair.
 	var env *execenv.Environment
 	// For a built-in codex task, use the version paired with the resolved path
-	// so an in-place upgrade can't leave the sandbox policy on the old version
+	// so an in-place upgrade can't leave tasks reporting the old version
 	// (MUL-4486). A custom codex runtime skips the self-heal, so resolvedVersion
 	// is empty and it keeps the existing cached-version fallback — its binary is
 	// the profile's own command, which the daemon never pins or version-detects.
@@ -6962,27 +6958,6 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	if task.Agent != nil && provider == "openclaw" {
 		openclawMode, openclawGateway = decodeOpenclawRuntimeConfig(task.Agent.RuntimeConfig, d.logger)
 	}
-	var agentCustomArgs []string
-	if task.Agent != nil {
-		agentCustomArgs = task.Agent.CustomArgs
-	}
-	// Effective Codex CLI args the task will launch with, normalized through the
-	// same agent.NormalizeCodexLaunchArgs pipeline buildCodexArgs uses (shell
-	// unquoting + blocked-flag filtering), preserving its ExtraArgs
-	// (profile-fixed + daemon defaults) vs CustomArgs (per-agent custom_args)
-	// split so the filtering matches launch exactly. Threaded into execenv so
-	// the Windows sandbox decision can honor a `-c windows.sandbox=...` override
-	// that never lands in config.toml — even when it arrives shell-quoted —
-	// instead of silently downgrading a user's isolation opt-in (MUL-4957).
-	var codexSandboxArgs []string
-	if provider == "codex" {
-		// profileFixedArgs still belongs in this reconstruction even though it
-		// no longer travels via ExtraArgs: it is a launch prefix now, so it is
-		// still on codex's argv, and a `-c windows.sandbox=...` written there
-		// must still be visible to the sandbox decision.
-		extraArgs := append(append([]string{}, profileFixedArgs...), defaultArgsForProvider(d.cfg, provider)...)
-		codexSandboxArgs = agent.NormalizeCodexLaunchArgs(extraArgs, agentCustomArgs, effectiveMcpConfig, d.logger)
-	}
 	// Reasonix and the other removed engines no longer resolve a task
 	// environment; the param stays zero so a stale runtime id cannot seed a
 	// config for a backend this daemon cannot launch.
@@ -7012,14 +6987,12 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			// locked and the directory we use could differ.
 			WorkDir:             priorWorkDir,
 			Provider:            provider,
-			CodexVersion:        codexVersion,
 			ResumeSessionID:     task.PriorSessionID,
 			OpenclawBin:         openclawBin,
 			McpConfig:           effectiveMcpConfig,
 			CursorMcpAuthSource: cursorMcpAuthSource,
 			OpenclawGateway:     openclawGateway,
 			ReasonixEnv:         reasonixEnv,
-			CodexCustomArgs:     codexSandboxArgs,
 			Task:                taskCtx,
 		})
 		if err != nil {
@@ -7054,18 +7027,15 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			// it implies; preparation must not try to take it again.
 			EnvRootPreclaimed:   true,
 			Provider:            provider,
-			CodexVersion:        codexVersion,
 			OpenclawBin:         openclawBin,
 			McpConfig:           effectiveMcpConfig,
 			CursorMcpAuthSource: cursorMcpAuthSource,
 			OpenclawGateway:     openclawGateway,
 			ReasonixEnv:         reasonixEnv,
-			CodexCustomArgs:     codexSandboxArgs,
 			Task:                taskCtx,
 		}
 		if localAssignment != nil {
 			prepParams.LocalWorkDir = localAssignment.AbsPath
-			prepParams.ExtraLocalDirs = extraLocalDirs
 		}
 		env, err = d.prepareExecutionEnvironment(prepareCtx, prepParams)
 		if err != nil {

@@ -126,7 +126,7 @@ func TestCodexLaunchArgsCanSelectTheRetiredCompactionRoute(t *testing.T) {
 				} else {
 					custom = args
 				}
-				got := NormalizeCodexLaunchArgs(extra, custom, nil, nil)
+				got := normalizeCodexLaunchArgs(extra, custom, nil, nil)
 				if !slices.Contains(got, "remote_compaction_v2") &&
 					!slices.Contains(got, "--disable=remote_compaction_v2") &&
 					!slices.Contains(got, "features.remote_compaction_v2=false") {
@@ -141,7 +141,7 @@ func TestCodexLaunchArgsCanSelectTheRetiredCompactionRoute(t *testing.T) {
 
 			// The third argv region the hint names: a custom runtime profile's
 			// fixed args. It reaches the child through the launch prefix, not
-			// through NormalizeCodexLaunchArgs, so it has its own filters —
+			// through normalizeCodexLaunchArgs, so it has its own filters —
 			// all three of which the setting has to survive for the hint to be
 			// telling the truth about where to look.
 			prefix := FilterLaunchPrefix("codex", tc.args, nil)

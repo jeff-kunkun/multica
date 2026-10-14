@@ -123,8 +123,8 @@ func TestRefreshAgentVersions_UpdatesTheVersionTasksActuallyRead(t *testing.T) {
 	d.refreshAgentVersions(context.Background())
 
 	if _, version := d.resolveAgentEntry(context.Background(), "codex", entry); version != "10.0.0" {
-		t.Errorf("resolveAgentEntry version = %q, want 10.0.0 — this is the value runTask keys the Codex "+
-			"sandbox policy off, so tasks would still run under the old version's rules", version)
+		t.Errorf("resolveAgentEntry version = %q, want 10.0.0 — this is the value runTask hands the Codex "+
+			"backend, so tasks would still report the old version", version)
 	}
 	if got := fx.registeredVersionFor("ws-1", "codex"); got != "10.0.0" {
 		t.Errorf("ws-1 registered codex version = %q, want 10.0.0", got)

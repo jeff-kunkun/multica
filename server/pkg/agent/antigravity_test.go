@@ -230,6 +230,7 @@ func TestBuildAntigravityArgsFiltersBlockedCustomArgs(t *testing.T) {
 				"--model", "user-model", // user config: passes through untouched
 				"--output-format", "text",
 				"--dangerously-skip-permissions",
+				"--sandbox",
 				"--print-timeout", "1h",
 				"--log-file", "/elsewhere.log",
 				"--settings=/tmp/agent-settings.json",
@@ -259,6 +260,9 @@ func TestBuildAntigravityArgsFiltersBlockedCustomArgs(t *testing.T) {
 	}
 	if strings.Contains(joined, "bad-id") {
 		t.Errorf("custom --conversation value leaked through filter: %v", args)
+	}
+	if strings.Contains(joined, "--sandbox") {
+		t.Errorf("custom --sandbox leaked through filter: %v", args)
 	}
 	if !strings.Contains(joined, "--model user-model") {
 		t.Errorf("user custom --model should pass through: %v", args)

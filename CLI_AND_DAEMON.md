@@ -299,6 +299,8 @@ The daemon auto-detects these AI CLIs on your PATH:
 
 You need at least one installed. The daemon registers each detected CLI as an available runtime.
 
+Codex and AGY run without a sandbox: a task can do whatever the user the daemon runs as can do.
+
 ### How It Works
 
 1. On start, the daemon detects installed agent CLIs and registers a runtime for each agent in each watched workspace

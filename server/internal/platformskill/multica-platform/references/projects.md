@@ -80,6 +80,7 @@ checkout. An `execution_mode` left on older resources is ignored.
 A project may hold several folders on one machine. The task starts in the
 first one (resource order); the brief lists the rest, and you `cd` into them
 yourself when you need them. The same folder cannot be attached twice.
+Codex and AGY run without a sandbox, so any of those folders is writable.
 
 ## Referring to a project in a comment
 

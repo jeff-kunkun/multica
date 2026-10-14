@@ -775,6 +775,7 @@ var antigravityBlockedArgs = map[string]blockedArgMode{
 	"--output-format":                blockedWithValue, // stream-json is required for token accounting
 	"--print-timeout":                blockedWithValue,
 	"--dangerously-skip-permissions": blockedStandalone, // always-on in daemon mode
+	"--sandbox":                      blockedStandalone, // Codex/AGY run without a sandbox
 	"--log-file":                     blockedWithValue,  // daemon needs it for session capture
 	"--settings":                     blockedWithValue,  // Claude Code-only flag; agy rejects it
 }

@@ -53,10 +53,9 @@ type PrepareParams struct {
 	// Profile is the daemon's profile name (empty = default). It namespaces the
 	// per-issue Codex session store so a second profile-daemon sharing the same
 	// ~/.codex cannot see or GC this daemon's stores (MUL-4424).
-	Profile      string
-	Provider     string // agent provider (determines runtime config paths)
-	CodexVersion string // detected Codex CLI version (only used when Provider == "codex")
-	OpenclawBin  string // resolved openclaw CLI path (only used when Provider == "openclaw"); empty = look up on PATH
+	Profile     string
+	Provider    string // agent provider (determines runtime config paths)
+	OpenclawBin string // resolved openclaw CLI path (only used when Provider == "openclaw"); empty = look up on PATH
 	// McpConfig is the agent's saved `mcp_config` JSON, forwarded to the
 	// provider-specific config preparer when that provider materialises MCP
 	// via a per-task config file. Cursor, OpenClaw, and OMP consume it here;
@@ -79,22 +78,13 @@ type PrepareParams struct {
 	// substituted. Used by the local_directory project_resource flow
 	// (MUL-2663). When set, the envRoot/workdir directory is not created.
 	LocalWorkDir string
-	// ExtraLocalDirs are the project's other local_directory folders on this
-	// daemon, beyond LocalWorkDir. The agent cd's into them itself; Codex
-	// needs them as writable roots so its sandbox lets it write there.
-	ExtraLocalDirs []string
 	// ReasonixEnv is the sanitized agent custom_env, layered over the daemon's
 	// own environment exactly as the child's env is built. The per-task
 	// reasonix.toml restates the permissions from the user config that env
 	// resolves to, so an agent that re-points (or clears) REASONIX_HOME moves the
 	// daemon's read with it. Only used for reasonix.
 	ReasonixEnv map[string]string
-	// CodexCustomArgs are the effective Codex CLI args this task launches with
-	// (daemon defaults + profile-fixed + per-agent custom_args). Only the
-	// Windows sandbox decision reads them, to honor a `-c windows.sandbox=...`
-	// override that never lands in config.toml (MUL-4957).
-	CodexCustomArgs []string
-	Task            TaskContextForEnv // context data for writing files
+	Task        TaskContextForEnv // context data for writing files
 }
 
 // TaskContextForEnv is the subset of task context used for writing context files.
@@ -463,7 +453,7 @@ func Prepare(params PrepareParams, logger *slog.Logger) (*Environment, error) {
 	// For Codex, set up a per-task CODEX_HOME seeded from ~/.codex/ with the user's skills.
 	if params.Provider == "codex" {
 		codexHome := filepath.Join(envRoot, codexHomeDirName)
-		if err := prepareCodexHomeWithOpts(codexHome, CodexHomeOptions{CodexVersion: params.CodexVersion, IsLocalDirectory: params.LocalWorkDir != "", SessionStoreKey: codexSessionStoreKey(params.Profile, params.Task), CodexCustomArgs: params.CodexCustomArgs, WritableRoots: params.ExtraLocalDirs}, logger); err != nil {
+		if err := prepareCodexHomeWithOpts(codexHome, CodexHomeOptions{IsLocalDirectory: params.LocalWorkDir != "", SessionStoreKey: codexSessionStoreKey(params.Profile, params.Task)}, logger); err != nil {
 			return nil, fmt.Errorf("execenv: prepare codex-home: %w", err)
 		}
 		if err := hydrateCodexSkills(codexHome, logger); err != nil {
@@ -535,7 +525,7 @@ func Prepare(params PrepareParams, logger *slog.Logger) (*Environment, error) {
 }
 
 // ReuseParams describes the inputs to Reuse. It mirrors PrepareParams for
-// the per-provider knobs (CodexVersion, OpenclawBin) so callers can pass
+// the per-provider knobs (OpenclawBin) so callers can pass
 // the same resolved binary path on both first-run and reuse paths.
 type ReuseParams struct {
 	// WorkspacesRoot is the daemon-owned root under which all task envs live.
@@ -545,7 +535,6 @@ type ReuseParams struct {
 	WorkspacesRoot string
 	WorkDir        string
 	Provider       string
-	CodexVersion   string // only used when Provider == "codex"
 	// ResumeSessionID is the prior Codex thread/session ID this reused task
 	// intends to resume, when any. Only consulted when Provider == "codex" and
 	// only used while migrating a legacy per-task home whose sessions/ still
@@ -577,11 +566,7 @@ type ReuseParams struct {
 	// ReasonixEnv mirrors PrepareParams.ReasonixEnv on reuse so the rewritten
 	// reasonix.toml keeps restating the owner's current permissions.
 	ReasonixEnv map[string]string
-	// CodexCustomArgs mirrors PrepareParams.CodexCustomArgs on reuse so the
-	// Windows sandbox decision honors a `-c windows.sandbox=...` override here
-	// too (MUL-4957).
-	CodexCustomArgs []string
-	Task            TaskContextForEnv // refreshed context files
+	Task        TaskContextForEnv // refreshed context files
 }
 
 // Reuse wraps an existing workdir into an Environment and refreshes context files.
@@ -668,7 +653,7 @@ func Reuse(params ReuseParams, logger *slog.Logger) *Environment {
 	// config (especially sandbox/network access) is up to date.
 	if params.Provider == "codex" {
 		codexHome := filepath.Join(env.RootDir, codexHomeDirName)
-		if err := prepareCodexHomeWithOpts(codexHome, CodexHomeOptions{CodexVersion: params.CodexVersion, ResumeSessionID: params.ResumeSessionID, IsLocalDirectory: params.LocalDirectory, SessionStoreKey: codexSessionStoreKey(params.Profile, params.Task), CodexCustomArgs: params.CodexCustomArgs}, logger); err != nil {
+		if err := prepareCodexHomeWithOpts(codexHome, CodexHomeOptions{ResumeSessionID: params.ResumeSessionID, IsLocalDirectory: params.LocalDirectory, SessionStoreKey: codexSessionStoreKey(params.Profile, params.Task)}, logger); err != nil {
 			// Leaving env.CodexHome empty does not launch Codex against an
 			// ambient home: configureCodexTaskShellEnvironment rejects the empty
 			// value ("task CODEX_HOME is missing") and the run fails before
