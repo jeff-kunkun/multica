@@ -55,6 +55,16 @@ type Agent struct {
 	ConversationStarters []byte      `json:"conversation_starters"`
 }
 
+type AgentBackup struct {
+	ID          pgtype.UUID        `json:"id"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	AgentID     pgtype.UUID        `json:"agent_id"`
+	AgentName   string             `json:"agent_name"`
+	DeletedBy   pgtype.UUID        `json:"deleted_by"`
+	Snapshot    []byte             `json:"snapshot"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+}
+
 type AgentBuilderDraft struct {
 	ChatSessionID pgtype.UUID        `json:"chat_session_id"`
 	WorkspaceID   pgtype.UUID        `json:"workspace_id"`

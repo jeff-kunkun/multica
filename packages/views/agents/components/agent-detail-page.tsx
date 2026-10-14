@@ -379,7 +379,7 @@ function DetailHeader({
                 {t(($) => $.detail.assign_work)}
               </Button>
             )}
-            {!isArchived && canDelete && (
+            {canDelete && (
               <DeleteAgentButton
                 agent={agent}
                 activeRuns={
@@ -396,8 +396,9 @@ function DetailHeader({
 }
 
 /**
- * Deleting archives the agent server-side (which also cancels its runs); the
- * office never shows archived agents, so to everyone here it is gone.
+ * Deletes the agent for good. The server backs its full configuration up
+ * first and refuses to delete when the backup fails, so the reason it gives
+ * is shown as-is.
  */
 function DeleteAgentButton({
   agent,
@@ -414,17 +415,21 @@ function DeleteAgentButton({
   const navigation = useNavigation();
   const [open, setOpen] = useState(false);
   const remove = useMutation({
-    mutationFn: () => api.archiveAgent(agent.id),
-    onSuccess: async () => {
-      await queryClient.invalidateQueries({
-        queryKey: workspaceKeys.agents(wsId),
-      });
+    mutationFn: () => api.deleteAgent(agent.id),
+    onSuccess: () => {
+      // Leave first: refetching the list while this page is mounted would
+      // flash its not-found state for the agent that is now gone.
       setOpen(false);
       toast.success(t(($) => $.detail.agent_deleted_toast));
       navigation.push(backHref);
+      void queryClient.invalidateQueries({
+        queryKey: workspaceKeys.agents(wsId),
+      });
     },
-    onError: () => {
-      toast.error(t(($) => $.detail.delete_failed_toast));
+    onError: (err) => {
+      toast.error(t(($) => $.detail.delete_failed_toast), {
+        description: err instanceof Error ? err.message : undefined,
+      });
     },
   });
 

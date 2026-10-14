@@ -21,6 +21,8 @@ import {
   ChatSessionSchema,
   PrioritizeQueuedChatTaskResponseSchema,
   CreateFeedbackResponseSchema,
+  DeleteAgentResponseSchema,
+  EMPTY_DELETE_AGENT_RESPONSE,
   EMPTY_CHAT_DRAFT_RESTORES,
   EMPTY_CHAT_PENDING_TASK,
   EMPTY_CHAT_SESSION,
@@ -1796,5 +1798,31 @@ describe("plan schemas", () => {
     const parsed = PlanApproverListSchema.parse({ approvers: [{ user_id: "u-1" }] });
     expect(parsed.approvers[0]).toEqual({ user_id: "u-1", name: "", granted_by: "", created_at: "" });
     expect(PlanApproverListSchema.parse({ approvers: "x" }).approvers).toEqual([]);
+  });
+});
+
+describe("DeleteAgentResponseSchema", () => {
+  const ENDPOINT = { endpoint: "DELETE /api/agents/{id}" };
+
+  it("parses the backup the server wrote before deleting", () => {
+    const parsed = parseWithFallback(
+      { agent_id: "a-1", backup: { id: "b-1", agent_name: "Gemini", env_key_count: 2 } },
+      DeleteAgentResponseSchema,
+      EMPTY_DELETE_AGENT_RESPONSE,
+      ENDPOINT,
+    );
+    expect(parsed).toEqual({
+      agent_id: "a-1",
+      backup: { id: "b-1", agent_name: "Gemini", created_at: "", env_key_count: 2 },
+    });
+  });
+
+  it("falls back to an empty response when the backup is missing", () => {
+    expect(
+      parseWithFallback({ agent_id: "a-1" }, DeleteAgentResponseSchema, EMPTY_DELETE_AGENT_RESPONSE, ENDPOINT),
+    ).toBe(EMPTY_DELETE_AGENT_RESPONSE);
+    expect(
+      parseWithFallback(null, DeleteAgentResponseSchema, EMPTY_DELETE_AGENT_RESPONSE, ENDPOINT),
+    ).toBe(EMPTY_DELETE_AGENT_RESPONSE);
   });
 });

@@ -732,6 +732,25 @@ export const EMPTY_CREATE_FEEDBACK_RESPONSE: CreateFeedbackResponse = {
   created_at: "",
 };
 
+// `DELETE /api/agents/{id}`: the server backs the agent's full configuration
+// up before deleting it, and only returns once both happened.
+export const DeleteAgentResponseSchema = z.object({
+  agent_id: z.string(),
+  backup: z.object({
+    id: z.string(),
+    agent_name: z.string().default(""),
+    created_at: z.string().default(""),
+    env_key_count: z.number().default(0),
+  }).loose(),
+}).loose();
+
+export type DeleteAgentResponse = z.infer<typeof DeleteAgentResponseSchema>;
+
+export const EMPTY_DELETE_AGENT_RESPONSE: DeleteAgentResponse = {
+  agent_id: "",
+  backup: { id: "", agent_name: "", created_at: "", env_key_count: 0 },
+};
+
 export const CommentSchema = z.object({
   id: z.string(),
   issue_id: z.string(),

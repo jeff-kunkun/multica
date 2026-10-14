@@ -285,7 +285,7 @@ export function AgentsPage() {
     return map;
   }, [snapshot]);
 
-  // Deleting an agent archives it; the office never shows archived agents.
+  // Archived agents predate permanent delete; the office does not show them.
   const visible = useMemo(
     () => agents.filter((a) => !a.archived_at),
     [agents],

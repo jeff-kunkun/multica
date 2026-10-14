@@ -63,6 +63,31 @@ var agentRestoreCmd = &cobra.Command{
 	RunE:  runAgentRestore,
 }
 
+var agentDeleteCmd = &cobra.Command{
+	Use:   "delete <id>",
+	Short: "Delete an agent for good, after backing up its full configuration (agent owner or workspace owner)",
+	Args:  exactArgs(1),
+	RunE:  runAgentDelete,
+}
+
+var agentBackupCmd = &cobra.Command{
+	Use:   "backup",
+	Short: "Backups written when agents are deleted",
+}
+
+var agentBackupListCmd = &cobra.Command{
+	Use:   "list",
+	Short: "List agent backups in the workspace",
+	RunE:  runAgentBackupList,
+}
+
+var agentBackupRestoreCmd = &cobra.Command{
+	Use:   "restore <backup-id>",
+	Short: "Re-create a deleted agent from its backup (agent owner or workspace owner)",
+	Args:  exactArgs(1),
+	RunE:  runAgentBackupRestore,
+}
+
 var agentTasksCmd = &cobra.Command{
 	Use:   "tasks <id>",
 	Short: "List runs for an agent",
@@ -109,6 +134,10 @@ func init() {
 	agentCmd.AddCommand(agentUpdateCmd)
 	agentCmd.AddCommand(agentArchiveCmd)
 	agentCmd.AddCommand(agentRestoreCmd)
+	agentCmd.AddCommand(agentDeleteCmd)
+	agentCmd.AddCommand(agentBackupCmd)
+	agentBackupCmd.AddCommand(agentBackupListCmd)
+	agentBackupCmd.AddCommand(agentBackupRestoreCmd)
 	agentCmd.AddCommand(agentTasksCmd)
 	agentCmd.AddCommand(agentAvatarCmd)
 	agentCmd.AddCommand(agentEnvCmd)
@@ -177,6 +206,11 @@ func init() {
 
 	// agent restore
 	agentRestoreCmd.Flags().String("output", "json", "Output format: table or json")
+
+	// agent delete / backup
+	agentDeleteCmd.Flags().String("output", "table", "Output format: table or json")
+	agentBackupListCmd.Flags().String("output", "table", "Output format: table or json")
+	agentBackupRestoreCmd.Flags().String("output", "json", "Output format: table or json")
 
 	// agent tasks
 	agentTasksCmd.Flags().String("output", "table", "Output format: table or json")
@@ -788,6 +822,88 @@ func runAgentRestore(cmd *cobra.Command, args []string) error {
 	var result map[string]any
 	if err := client.PostJSON(ctx, "/api/agents/"+args[0]+"/restore", nil, &result); err != nil {
 		return fmt.Errorf("restore agent: %w", err)
+	}
+
+	output, _ := cmd.Flags().GetString("output")
+	if output == "json" {
+		return cli.PrintJSON(os.Stdout, result)
+	}
+
+	fmt.Printf("Agent restored: %s (%s)\n", strVal(result, "name"), strVal(result, "id"))
+	return nil
+}
+
+func runAgentDelete(cmd *cobra.Command, args []string) error {
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+
+	ctx, cancel := cli.APIContext(context.Background())
+	defer cancel()
+
+	var result map[string]any
+	if err := client.DeleteJSONResponse(ctx, "/api/agents/"+args[0], &result); err != nil {
+		return fmt.Errorf("delete agent: %w", err)
+	}
+
+	output, _ := cmd.Flags().GetString("output")
+	if output == "json" {
+		return cli.PrintJSON(os.Stdout, result)
+	}
+
+	backup, _ := result["backup"].(map[string]any)
+	fmt.Printf("Agent deleted: %s (%s)\n", strVal(backup, "agent_name"), strVal(result, "agent_id"))
+	fmt.Printf("Backup: %s — restore with: multica agent backup restore %s\n", strVal(backup, "id"), strVal(backup, "id"))
+	return nil
+}
+
+func runAgentBackupList(cmd *cobra.Command, _ []string) error {
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+
+	ctx, cancel := cli.APIContext(context.Background())
+	defer cancel()
+
+	var backups []map[string]any
+	if err := client.GetJSON(ctx, "/api/agent-backups", &backups); err != nil {
+		return fmt.Errorf("list agent backups: %w", err)
+	}
+
+	output, _ := cmd.Flags().GetString("output")
+	if output == "json" {
+		return cli.PrintJSON(os.Stdout, backups)
+	}
+
+	headers := []string{"BACKUP ID", "AGENT", "AGENT ID", "ENV KEYS", "DELETED AT"}
+	rows := make([][]string, 0, len(backups))
+	for _, b := range backups {
+		rows = append(rows, []string{
+			strVal(b, "id"),
+			strVal(b, "agent_name"),
+			strVal(b, "agent_id"),
+			strVal(b, "env_key_count"),
+			strVal(b, "created_at"),
+		})
+	}
+	cli.PrintTable(os.Stdout, headers, rows)
+	return nil
+}
+
+func runAgentBackupRestore(cmd *cobra.Command, args []string) error {
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+
+	ctx, cancel := cli.APIContext(context.Background())
+	defer cancel()
+
+	var result map[string]any
+	if err := client.PostJSON(ctx, "/api/agent-backups/"+args[0]+"/restore", nil, &result); err != nil {
+		return fmt.Errorf("restore agent backup: %w", err)
 	}
 
 	output, _ := cmd.Flags().GetString("output")

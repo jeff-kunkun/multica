@@ -46,7 +46,7 @@ const currentUserRef = vi.hoisted(() => ({
 const mockToastError = vi.hoisted(() => vi.fn());
 const mockModalOpen = vi.hoisted(() => vi.fn());
 const mockGetAgent = vi.hoisted(() => vi.fn());
-const mockArchiveAgent = vi.hoisted(() => vi.fn());
+const mockDeleteAgent = vi.hoisted(() => vi.fn());
 const presenceRef = vi.hoisted(() => ({ current: new Map<string, unknown>() }));
 
 vi.mock("@multica/core/hooks", () => ({
@@ -114,7 +114,7 @@ vi.mock("@multica/core/api", () => {
     }
   }
   return {
-    api: { getAgent: mockGetAgent, archiveAgent: mockArchiveAgent },
+    api: { getAgent: mockGetAgent, deleteAgent: mockDeleteAgent },
     ApiError,
   };
 });
@@ -180,7 +180,7 @@ beforeEach(() => {
   membersPendingRef.current = false;
   agentsRef.current = [baseAgent];
   presenceRef.current = new Map();
-  mockArchiveAgent.mockResolvedValue({ ...baseAgent, archived_at: "2026-10-14T00:00:00Z" });
+  mockDeleteAgent.mockResolvedValue({ agent_id: "agent-1", backup: { id: "backup-1", agent_name: "Agent", created_at: "", env_key_count: 0 } });
   mockGetAgent.mockRejectedValue(new ApiError("not found", 404, "Not Found"));
 });
 
@@ -365,7 +365,7 @@ describe("AgentDetailPage DM button", () => {
     ];
     renderPage();
     // The archived banner is the signal the page has settled past loading.
-    await screen.findByText(/This agent has been deleted/);
+    await screen.findByText(/This agent is no longer in the office/);
     expect(screen.queryByRole("button", { name: "DM" })).not.toBeInTheDocument();
   });
 
@@ -420,12 +420,12 @@ describe("AgentDetailPage delete", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: "Delete" }));
     const dialog = await screen.findByRole("alertdialog");
-    expect(within(dialog).getByText(/can no longer be assigned/)).toBeInTheDocument();
-    expect(mockArchiveAgent).not.toHaveBeenCalled();
+    expect(within(dialog).getByText(/backed up first, and nothing is deleted if the backup fails/)).toBeInTheDocument();
+    expect(mockDeleteAgent).not.toHaveBeenCalled();
 
     fireEvent.click(within(dialog).getByRole("button", { name: "Delete" }));
     await waitFor(() => expect(push).toHaveBeenCalledWith("/acme/agents"));
-    expect(mockArchiveAgent).toHaveBeenCalledWith("agent-1");
+    expect(mockDeleteAgent).toHaveBeenCalledWith("agent-1");
   });
 
   it("warns that deleting cancels the agent's runs", async () => {
@@ -439,5 +439,21 @@ describe("AgentDetailPage delete", () => {
     expect(
       await screen.findByText(/It has 2 runs in progress or queued; deleting cancels them/),
     ).toBeInTheDocument();
+  });
+
+  it("stays on the page and says why when the server refuses", async () => {
+    agentsRef.current = [{ ...baseAgent, owner_id: "user-1" }];
+    mockDeleteAgent.mockRejectedValue(new Error("backing up the agent failed, so it was not deleted"));
+    const { push } = renderPage();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Delete" }));
+    const dialog = await screen.findByRole("alertdialog");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Delete" }));
+    await waitFor(() =>
+      expect(mockToastError).toHaveBeenCalledWith("The agent was not deleted", {
+        description: "backing up the agent failed, so it was not deleted",
+      }),
+    );
+    expect(push).not.toHaveBeenCalled();
   });
 });
