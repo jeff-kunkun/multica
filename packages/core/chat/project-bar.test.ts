@@ -1,3 +1,5 @@
+// @vitest-environment node
+
 import { describe, expect, it } from "vitest";
 import type { ChatSession } from "../types";
 import { filterChatSessionsByProject, rankChatProjects } from "./project-bar";
