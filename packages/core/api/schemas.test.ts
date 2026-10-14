@@ -1129,10 +1129,6 @@ describe("AppConfigSchema signup_totp_required drift", () => {
   });
 });
 
-// A server that never heard of worktree mode also never sends this flag, and
-// it does not reject the mode either — it drops execution_mode and answers 201,
-// leaving the task to run in the user's working copy (#7113). So the absent
-// case has to parse as false, not as "unknown, probably fine".
 // An older server deletes a comment's replies with it and omits this field,
 // so absent or malformed must parse as false: the client then promises nothing
 // about replies and keeps the legacy delete route (#8296).
@@ -1150,27 +1146,14 @@ describe("AppConfigSchema comment_delete_keep_replies_supported drift", () => {
   });
 });
 
-describe("AppConfigSchema local_worktree_supported drift", () => {
-  it("defaults to false when the server predates the signal", () => {
-    const parsed = AppConfigSchema.parse({ cdn_domain: "cdn.example.com" });
-    expect(parsed.local_worktree_supported).toBe(false);
+// Older servers still send the retired local_worktree_supported flag; it must
+// not break parsing.
+it("AppConfigSchema ignores the retired local_worktree_supported flag", () => {
+  const parsed = AppConfigSchema.parse({
+    cdn_domain: "cdn.example.com",
+    local_worktree_supported: true,
   });
-
-  it("coerces a malformed value to false rather than trusting it", () => {
-    const parsed = AppConfigSchema.parse({
-      cdn_domain: "cdn.example.com",
-      local_worktree_supported: "yes",
-    });
-    expect(parsed.local_worktree_supported).toBe(false);
-  });
-
-  it("carries a genuine true through", () => {
-    const parsed = AppConfigSchema.parse({
-      cdn_domain: "cdn.example.com",
-      local_worktree_supported: true,
-    });
-    expect(parsed.local_worktree_supported).toBe(true);
-  });
+  expect(parsed.cdn_domain).toBe("cdn.example.com");
 });
 
 describe("AppConfigSchema agent_conversation_starters_supported drift", () => {

@@ -84,11 +84,6 @@ export function AuthInitializer({
         });
         configStore.getState().setFeatureFlags(cfg.feature_flags);
         configStore.getState().setServerVersion(cfg.server_version);
-        // Absent on every server that predates the worktree save gate, which
-        // is exactly when the client must not offer the mode (#7113).
-        configStore
-          .getState()
-          .setLocalWorktreeSupported(cfg.local_worktree_supported === true);
         // Older agent handlers returned success while silently dropping this
         // additive field, so writes stay disabled unless the server declares
         // the persistence contract explicitly.

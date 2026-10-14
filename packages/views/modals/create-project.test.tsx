@@ -12,9 +12,6 @@ const webRepoUrl = "https://github.com/multica-ai/web";
 
 vi.mock("@tanstack/react-query", () => ({
   useQuery: () => ({ data: [] }),
-  // The modal now reads the runtime list to gate worktree mode, and
-  // runtimeListOptions builds its descriptor with queryOptions.
-  queryOptions: (options: unknown) => options,
 }));
 
 const createProjectMock = vi.hoisted(() => vi.fn().mockResolvedValue({ id: "p1" }));
