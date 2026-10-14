@@ -102,6 +102,11 @@ vi.mock("@multica/core/agents", async () => {
 
 import { AgentLivePeekCard } from "./agent-live-peek-card";
 
+// The CLI logo needs the workspace's agent and runtime lists; not under test.
+vi.mock("./agent-cli-avatar", () => ({
+  AgentCliAvatar: () => null,
+}));
+
 function makeAgent(overrides: Record<string, unknown> = {}) {
   return {
     id: "agent-1",

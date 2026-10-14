@@ -8,16 +8,18 @@ import {
   MessageSquare,
   Plus,
   Server,
+  Trash2,
 } from "lucide-react";
+import { useState } from "react";
 import { toast } from "sonner";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { Agent, AgentRuntime } from "@multica/core/types";
 import {
   type AgentPresenceDetail,
   isAgentRuntimeBound,
   useWorkspacePresenceMap,
 } from "@multica/core/agents";
-import { ApiError } from "@multica/core/api";
+import { api, ApiError } from "@multica/core/api";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useModalStore } from "@multica/core/modals";
 import { useWorkspacePaths } from "@multica/core/paths";
@@ -25,13 +27,23 @@ import {
   agentDetailOptions,
   agentListOptions,
   memberListOptions,
+  workspaceKeys,
 } from "@multica/core/workspace/queries";
 import { runtimeListOptions } from "@multica/core/runtimes";
 import { useAgentPermissions } from "@multica/core/permissions";
+import {
+  AlertDialog,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@multica/ui/components/ui/alert-dialog";
 import { Button } from "@multica/ui/components/ui/button";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { cn } from "@multica/ui/lib/utils";
-import { AppLink } from "../../navigation";
+import { AppLink, useNavigation } from "../../navigation";
 import { PAGE_GUTTER, PAGE_RAIL, PageHeader } from "../../layout/page-header";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { runtimeCliLabel } from "../../runtimes/components/runtime-machines";
@@ -90,7 +102,11 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
   // Permission hook MUST be called unconditionally — its `agent | null`
   // signature handles the not-found / loading case internally so the early
   // returns below don't violate the rules of hooks.
-  const { canAssign, isLoading: permissionsLoading } = useAgentPermissions(
+  const {
+    canEdit,
+    canAssign,
+    isLoading: permissionsLoading,
+  } = useAgentPermissions(
     agent,
     wsId,
   );
@@ -221,6 +237,7 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
         presence={presence}
         backHref={paths.agents()}
         canAssign={canAssign.allowed}
+        canDelete={canEdit.allowed && !agent.system_key}
         dmPending={permissionsLoading}
         dmHref={`${paths.chat()}?agent=${agent.id}`}
         onDm={handleDm}
@@ -262,6 +279,7 @@ function DetailHeader({
   presence,
   backHref,
   canAssign,
+  canDelete,
   dmPending,
   dmHref,
   onDm,
@@ -272,6 +290,7 @@ function DetailHeader({
   presence: AgentPresenceDetail | null;
   backHref: string;
   canAssign: boolean;
+  canDelete: boolean;
   dmPending: boolean;
   dmHref: string;
   /** Runs before the link navigates; calls preventDefault when a gate denies
@@ -360,10 +379,94 @@ function DetailHeader({
                 {t(($) => $.detail.assign_work)}
               </Button>
             )}
+            {!isArchived && canDelete && (
+              <DeleteAgentButton
+                agent={agent}
+                activeRuns={
+                  (presence?.runningCount ?? 0) + (presence?.queuedCount ?? 0)
+                }
+                backHref={backHref}
+              />
+            )}
           </div>
         </div>
       </div>
     </header>
+  );
+}
+
+/**
+ * Deleting archives the agent server-side (which also cancels its runs); the
+ * office never shows archived agents, so to everyone here it is gone.
+ */
+function DeleteAgentButton({
+  agent,
+  activeRuns,
+  backHref,
+}: {
+  agent: Agent;
+  activeRuns: number;
+  backHref: string;
+}) {
+  const { t } = useT("agents");
+  const wsId = useWorkspaceId();
+  const queryClient = useQueryClient();
+  const navigation = useNavigation();
+  const [open, setOpen] = useState(false);
+  const remove = useMutation({
+    mutationFn: () => api.archiveAgent(agent.id),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({
+        queryKey: workspaceKeys.agents(wsId),
+      });
+      setOpen(false);
+      toast.success(t(($) => $.detail.agent_deleted_toast));
+      navigation.push(backHref);
+    },
+    onError: () => {
+      toast.error(t(($) => $.detail.delete_failed_toast));
+    },
+  });
+
+  return (
+    <AlertDialog open={open} onOpenChange={setOpen}>
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        onClick={() => setOpen(true)}
+      >
+        <Trash2 className="h-4 w-4" aria-hidden="true" />
+        {t(($) => $.detail.delete)}
+      </Button>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>
+            {t(($) => $.detail.delete_dialog_title, { name: agent.name })}
+          </AlertDialogTitle>
+          <AlertDialogDescription>
+            {activeRuns > 0
+              ? t(($) => $.detail.delete_dialog_active_runs, {
+                  count: activeRuns,
+                })
+              : t(($) => $.detail.delete_dialog_description)}
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel disabled={remove.isPending}>
+            {t(($) => $.detail.delete_dialog_cancel)}
+          </AlertDialogCancel>
+          <Button
+            type="button"
+            variant="destructive"
+            disabled={remove.isPending}
+            onClick={() => remove.mutate()}
+          >
+            {t(($) => $.detail.delete_dialog_confirm)}
+          </Button>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
   );
 }
 

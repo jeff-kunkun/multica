@@ -32,7 +32,7 @@
     "description": "Create an agent, then assign it issues."
   },
   "row": {
-    "archived": "Archived",
+    "archived": "Deleted",
     "fallback_runtime_cloud": "Cloud",
     "fallback_runtime_local": "Local",
     "task_count_one": "{{count}} run",
@@ -48,7 +48,7 @@
     "no_access_title": "You don't have access to this agent",
     "no_access_hint": "Only the agent owner or the workspace owner can view this private agent.",
     "try_again": "Try again",
-    "archived_banner": "This agent is archived. It cannot be assigned or mentioned.",
+    "archived_banner": "This agent has been deleted.",
     "runtime_required_banner": "This agent kept its configuration and history, but needs a runtime before it can run.",
     "bind_runtime": "Bind runtime",
     "restore": "Restore",
@@ -86,7 +86,16 @@
     "cancel_dialog_running_note": " Runs in progress may take up to 5 seconds to fully halt.",
     "cancel_dialog_irreversible": " Cancelled runs cannot be resumed.",
     "cancel_dialog_keep": "Keep them",
-    "cancel_dialog_confirm": "Cancel all runs"
+    "cancel_dialog_confirm": "Cancel all runs",
+    "delete": "Delete",
+    "delete_dialog_title": "Delete \"{{name}}\"?",
+    "delete_dialog_description": "It disappears from the office and can no longer be assigned or messaged.",
+    "delete_dialog_active_runs_one": "It has {{count}} run in progress or queued; deleting cancels it. It disappears from the office and can no longer be assigned or messaged.",
+    "delete_dialog_active_runs_other": "It has {{count}} runs in progress or queued; deleting cancels them. It disappears from the office and can no longer be assigned or messaged.",
+    "delete_dialog_cancel": "Cancel",
+    "delete_dialog_confirm": "Delete",
+    "agent_deleted_toast": "Agent deleted",
+    "delete_failed_toast": "Failed to delete agent"
   },
   "inspector": {
     "section_profile": "Profile",
@@ -142,7 +151,6 @@
     "overview": "Overview",
     "work": "Work",
     "capabilities": "Capabilities",
-    "settings": "Settings",
     "general": "General",
     "access": "Access",
     "page_navigation_aria": "Agent page",

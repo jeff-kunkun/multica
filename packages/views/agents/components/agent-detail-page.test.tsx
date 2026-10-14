@@ -7,6 +7,7 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ApiError } from "@multica/core/api";
@@ -45,6 +46,8 @@ const currentUserRef = vi.hoisted(() => ({
 const mockToastError = vi.hoisted(() => vi.fn());
 const mockModalOpen = vi.hoisted(() => vi.fn());
 const mockGetAgent = vi.hoisted(() => vi.fn());
+const mockArchiveAgent = vi.hoisted(() => vi.fn());
+const presenceRef = vi.hoisted(() => ({ current: new Map<string, unknown>() }));
 
 vi.mock("@multica/core/hooks", () => ({
   useWorkspaceId: () => "ws-1",
@@ -52,9 +55,10 @@ vi.mock("@multica/core/hooks", () => ({
 vi.mock("@multica/core/agents", () => ({
   isAgentRuntimeBound: (agent: { runtime_id: string; runtime_bound?: boolean }) =>
     agent.runtime_bound !== false && agent.runtime_id.length > 0,
-  useWorkspacePresenceMap: () => ({ byAgent: new Map() }),
+  useWorkspacePresenceMap: () => ({ byAgent: presenceRef.current }),
 }));
 vi.mock("@multica/core/workspace/queries", () => ({
+  workspaceKeys: { agents: (wsId: string) => ["agents", wsId] },
   agentListOptions: (wsId: string) => ({
     queryKey: ["agents", wsId],
     queryFn: () => Promise.resolve(agentsRef.current),
@@ -110,7 +114,7 @@ vi.mock("@multica/core/api", () => {
     }
   }
   return {
-    api: { getAgent: mockGetAgent },
+    api: { getAgent: mockGetAgent, archiveAgent: mockArchiveAgent },
     ApiError,
   };
 });
@@ -175,6 +179,8 @@ beforeEach(() => {
   membersRef.current = [{ user_id: "user-1", role: "member" }];
   membersPendingRef.current = false;
   agentsRef.current = [baseAgent];
+  presenceRef.current = new Map();
+  mockArchiveAgent.mockResolvedValue({ ...baseAgent, archived_at: "2026-10-14T00:00:00Z" });
   mockGetAgent.mockRejectedValue(new ApiError("not found", 404, "Not Found"));
 });
 
@@ -359,13 +365,13 @@ describe("AgentDetailPage DM button", () => {
     ];
     renderPage();
     // The archived banner is the signal the page has settled past loading.
-    await screen.findByText(/This agent is archived/);
+    await screen.findByText(/This agent has been deleted/);
     expect(screen.queryByRole("button", { name: "DM" })).not.toBeInTheDocument();
   });
 
-  // The office mirrors magpie: nobody, not even the owner, edits, archives
-  // or duplicates an agent here.
-  it("offers no edit, archive or duplicate actions, even to the owner", async () => {
+  // The office mirrors magpie: nobody edits or duplicates an agent here; the
+  // owner can only delete it.
+  it("offers no edit or duplicate actions, even to the owner", async () => {
     agentsRef.current = [{ ...baseAgent, owner_id: "user-1" }];
     membersRef.current = [{ user_id: "user-1", role: "owner" }];
     renderPage();
@@ -373,7 +379,6 @@ describe("AgentDetailPage DM button", () => {
     await screen.findByRole("button", { name: "Assign work" });
     expect(screen.queryByLabelText("Agent actions")).not.toBeInTheDocument();
     expect(screen.queryByText("Duplicate")).not.toBeInTheDocument();
-    expect(screen.queryByText("Archive")).not.toBeInTheDocument();
   });
 
   it("explains an unbound agent and blocks run actions", async () => {
@@ -399,5 +404,40 @@ describe("AgentDetailPage DM button", () => {
       "Bind a runtime before running this agent.",
     );
     expect(mockModalOpen).not.toHaveBeenCalled();
+  });
+});
+
+describe("AgentDetailPage delete", () => {
+  it("is offered to the agent's owner only", async () => {
+    renderPage();
+    await screen.findByRole("button", { name: "Assign work" });
+    expect(screen.queryByRole("button", { name: "Delete" })).not.toBeInTheDocument();
+  });
+
+  it("confirms, deletes and goes back to the list", async () => {
+    agentsRef.current = [{ ...baseAgent, owner_id: "user-1" }];
+    const { push } = renderPage();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Delete" }));
+    const dialog = await screen.findByRole("alertdialog");
+    expect(within(dialog).getByText(/can no longer be assigned/)).toBeInTheDocument();
+    expect(mockArchiveAgent).not.toHaveBeenCalled();
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "Delete" }));
+    await waitFor(() => expect(push).toHaveBeenCalledWith("/acme/agents"));
+    expect(mockArchiveAgent).toHaveBeenCalledWith("agent-1");
+  });
+
+  it("warns that deleting cancels the agent's runs", async () => {
+    agentsRef.current = [{ ...baseAgent, owner_id: "user-1" }];
+    presenceRef.current = new Map([
+      ["agent-1", { runningCount: 1, queuedCount: 1 }],
+    ]);
+    renderPage();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Delete" }));
+    expect(
+      await screen.findByText(/It has 2 runs in progress or queued; deleting cancels them/),
+    ).toBeInTheDocument();
   });
 });

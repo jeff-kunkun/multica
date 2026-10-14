@@ -44,6 +44,9 @@ vi.mock("../agents/components/agent-profile-card", () => ({
 vi.mock("../agents/components/agent-live-peek-card", () => ({
   AgentLivePeekCard: () => null,
 }));
+vi.mock("../agents/components/agent-cli-avatar", () => ({
+  useAgentCliProvider: () => null,
+}));
 vi.mock("../members/member-profile-card", () => ({
   MemberProfileCard: () => null,
 }));

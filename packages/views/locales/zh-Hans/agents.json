@@ -31,7 +31,7 @@
     "description": "创建智能体后，即可把任务分配给它。"
   },
   "row": {
-    "archived": "已归档",
+    "archived": "已删除",
     "fallback_runtime_cloud": "云端",
     "fallback_runtime_local": "本地",
     "task_count_other": "{{count}} 次运行"
@@ -46,7 +46,7 @@
     "no_access_title": "你没有访问该智能体的权限",
     "no_access_hint": "只有该私密智能体的拥有者或工作区所有者可以查看。",
     "try_again": "重试",
-    "archived_banner": "该智能体已归档，无法被分配或提及。",
+    "archived_banner": "这个智能体已删除。",
     "runtime_required_banner": "该智能体的配置和历史记录已保留，但需要绑定运行时后才能运行。",
     "bind_runtime": "绑定运行时",
     "restore": "恢复",
@@ -80,7 +80,15 @@
     "cancel_dialog_running_note": " 进行中的运行最多需要 5 秒才能完全停止。",
     "cancel_dialog_irreversible": " 已取消的运行无法恢复。",
     "cancel_dialog_keep": "保留",
-    "cancel_dialog_confirm": "取消全部运行"
+    "cancel_dialog_confirm": "取消全部运行",
+    "delete": "删除",
+    "delete_dialog_title": "删除「{{name}}」？",
+    "delete_dialog_description": "删除后它会从办公室消失，不能再派活或私信。",
+    "delete_dialog_active_runs_other": "它还有 {{count}} 个任务在跑或排队，删除会把它们取消。删除后它会从办公室消失，不能再派活或私信。",
+    "delete_dialog_cancel": "取消",
+    "delete_dialog_confirm": "删除",
+    "agent_deleted_toast": "智能体已删除",
+    "delete_failed_toast": "删除智能体失败"
   },
   "inspector": {
     "section_profile": "资料",
@@ -135,7 +143,6 @@
     "overview": "概览",
     "work": "工作",
     "capabilities": "能力",
-    "settings": "设置",
     "general": "通用",
     "access": "访问权限",
     "page_navigation_aria": "智能体页面",

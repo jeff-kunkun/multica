@@ -112,26 +112,14 @@ function renderPane(runtimes: AgentRuntime[]) {
   );
 }
 
-function openSettings() {
-  fireEvent.click(screen.getByRole("tab", { name: /^Settings$/i }));
-}
-
 // The office mirrors magpie: no capability tab, and Settings is one read-only
 // card with no sub-navigation or editors.
 describe("AgentOverviewPane tabs", () => {
-  it("offers Overview, Work and Settings only", () => {
+  it("offers Overview and Work only", () => {
     renderPane([makeRuntime("claude")]);
     expect(
       screen.getAllByRole("tab").map((tab) => tab.textContent),
-    ).toEqual(["Overview", "Work", "Settings"]);
-  });
-
-  it("shows Settings read-only", () => {
-    renderPane([makeRuntime("claude")]);
-    openSettings();
-    expect(screen.getByText("CLI")).toBeInTheDocument();
-    expect(screen.queryByRole("textbox")).toBeNull();
-    expect(screen.queryByRole("button")).toBeNull();
+    ).toEqual(["Overview", "Work"]);
   });
 });
 
@@ -175,13 +163,5 @@ describe("AgentOverviewPane horizontal alignment", () => {
     // Work takes a bare rail: the issues toolbar inside it carries the gutter
     // already, so adding one here would inset it past the tabs.
     expect(panelFor(container as HTMLElement)).toHaveClass(RAIL_SENTINEL);
-  });
-
-  it("puts the Settings panel on the same rail", () => {
-    const { container } = renderPane([makeRuntime("claude")]);
-    openSettings();
-
-    expect(panelFor(container as HTMLElement)).toHaveClass(RAIL_SENTINEL);
-    expect(panelFor(container as HTMLElement)).toHaveClass(GUTTER_SENTINEL);
   });
 });

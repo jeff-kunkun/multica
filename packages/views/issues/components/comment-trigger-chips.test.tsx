@@ -19,6 +19,10 @@ vi.mock("@multica/core/paths", () => ({
   useCurrentWorkspace: () => ({ id: "ws-1" }),
 }));
 
+vi.mock("../../agents/components/agent-cli-avatar", () => ({
+  AgentCliAvatar: () => <span data-slot="avatar" />,
+}));
+
 vi.mock("../../common/actor-avatar", () => ({
   AgentStatusDot: () => <span data-testid="status-dot" />,
 }));

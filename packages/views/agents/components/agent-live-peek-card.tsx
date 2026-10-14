@@ -1,7 +1,7 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { ActorAvatar as ActorAvatarBase } from "@multica/ui/components/common/actor-avatar";
+import { AgentCliAvatar } from "./agent-cli-avatar";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useWorkspacePaths } from "@multica/core/paths";
@@ -86,7 +86,8 @@ export function AgentLivePeekCard({ agentId }: AgentLivePeekCardProps) {
     <div className="flex flex-col gap-3 text-left">
       {/* Header — avatar + name. */}
       <div className="flex items-start gap-3">
-        <ActorAvatarBase
+        <AgentCliAvatar
+          agentId={agent.id}
           name={agent.name}
           initials={initials}
           avatarUrl={resolvePublicFileUrl(agent.avatar_url)}

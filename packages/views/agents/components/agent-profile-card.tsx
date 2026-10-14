@@ -13,7 +13,7 @@ import { agentListOptions, memberListOptions } from "@multica/core/workspace/que
 import { resolvePublicFileUrl } from "@multica/core/workspace/avatar-url";
 import { runtimeListOptions } from "@multica/core/runtimes/queries";
 import { useWorkspacePaths } from "@multica/core/paths";
-import { ActorAvatar as ActorAvatarBase } from "@multica/ui/components/common/actor-avatar";
+import { AgentCliAvatar } from "./agent-cli-avatar";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { AppLink } from "../../navigation";
 import { HealthIcon } from "../../runtimes/components/shared";
@@ -78,7 +78,8 @@ export function AgentProfileCard({ agentId }: AgentProfileCardProps) {
         {/* Base avatar rather than the ActorAvatar wrapper: this card IS a
             hover-card payload, so it must not nest another hover card or
             profile link inside itself. */}
-        <ActorAvatarBase
+        <AgentCliAvatar
+          agentId={agent.id}
           name={agent.name}
           initials={initials}
           avatarUrl={resolvePublicFileUrl(agent.avatar_url)}

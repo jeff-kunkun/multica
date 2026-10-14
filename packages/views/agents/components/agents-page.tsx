@@ -164,14 +164,11 @@ function AgentRow({
   const paths = useWorkspacePaths();
   const rowLink = useRowLink();
 
-  const isArchived = !!agent.archived_at;
-  const route = isArchived ? null : readRuntimeMagpieRoute(runtime?.metadata);
+  const route = readRuntimeMagpieRoute(runtime?.metadata);
   const detailHref = paths.agentDetail(agent.id);
-  const hasStatus =
-    !isArchived && (!isAgentRuntimeBound(agent) || presence !== null);
+  const hasStatus = !isAgentRuntimeBound(agent) || presence !== null;
 
   const subParts = [
-    isArchived ? t(($) => $.row.archived) : null,
     agent.description || null,
     runtimeMachine(runtime),
     lastActiveDays === null
@@ -186,10 +183,7 @@ function AgentRow({
 
   return (
     <div
-      className={cn(
-        "flex cursor-pointer items-start gap-2.5 border-t px-3 py-3 first:border-t-0 hover:bg-accent/40 @xl:items-center @xl:gap-3.5 @xl:px-4",
-        isArchived && "opacity-50",
-      )}
+      className="flex cursor-pointer items-start gap-2.5 border-t px-3 py-3 first:border-t-0 hover:bg-accent/40 @xl:items-center @xl:gap-3.5 @xl:px-4"
       data-agent-row=""
       {...rowLink(detailHref, agent.name)}
     >
@@ -219,7 +213,7 @@ function AgentRow({
           )}
           <span className="truncate">{subParts.join(" · ")}</span>
         </div>
-        {!isArchived && currentIssueId && (
+        {currentIssueId && (
           <CurrentWork issueId={currentIssueId} />
         )}
         {route && (
@@ -291,16 +285,11 @@ export function AgentsPage() {
     return map;
   }, [snapshot]);
 
-  // Active agents first, archived ones at the bottom; otherwise list order.
-  const sorted = useMemo(
-    () => [
-      ...agents.filter((a) => !a.archived_at),
-      ...agents.filter((a) => a.archived_at),
-    ],
+  // Deleting an agent archives it; the office never shows archived agents.
+  const visible = useMemo(
+    () => agents.filter((a) => !a.archived_at),
     [agents],
   );
-  const activeCount =
-    agents.length - agents.filter((a) => a.archived_at).length;
   const onCreate = () => navigation.push(paths.newAgent());
 
   if (listError) {
@@ -332,7 +321,7 @@ export function AgentsPage() {
     );
   }
 
-  if (!isLoading && agents.length === 0) {
+  if (!isLoading && visible.length === 0) {
     return (
       <div className="flex flex-1 min-h-0 flex-col">
         <PageHeaderBar count={0} onCreate={onCreate} />
@@ -355,14 +344,14 @@ export function AgentsPage() {
 
   return (
     <div className="flex flex-1 min-h-0 flex-col">
-      <PageHeaderBar count={activeCount} onCreate={onCreate} />
+      <PageHeaderBar count={visible.length} onCreate={onCreate} />
       <div className="min-h-0 flex-1 overflow-y-auto @container">
         <div className="mx-auto w-full max-w-4xl p-3 @xl:p-6">
           {isLoading ? (
             <LoadingSkeleton />
           ) : (
             <div className="overflow-hidden rounded-xl border bg-card">
-              {sorted.map((agent) => (
+              {visible.map((agent) => (
                 <AgentRow
                   key={agent.id}
                   agent={agent}

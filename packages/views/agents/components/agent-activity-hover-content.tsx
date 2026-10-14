@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { ActorAvatar as ActorAvatarBase } from "@multica/ui/components/common/actor-avatar";
+import { AgentCliAvatar } from "./agent-cli-avatar";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { runtimeListOptions } from "@multica/core/runtimes/queries";
@@ -101,7 +101,8 @@ function AgentActivityTaskRow({
 
   return (
     <div className="flex items-center gap-2 text-caption">
-      <ActorAvatarBase
+      <AgentCliAvatar
+        agentId={task.agent_id}
         name={getActorName("agent", task.agent_id)}
         initials={getActorInitials("agent", task.agent_id)}
         avatarUrl={getActorAvatarUrl("agent", task.agent_id)}

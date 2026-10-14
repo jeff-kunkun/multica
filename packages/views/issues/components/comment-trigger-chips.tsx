@@ -7,7 +7,7 @@ import type { AgentRunState, RecipientAction } from "@multica/core/issues/run-st
 import { useAgentPresenceDetail } from "@multica/core/agents";
 import { mentionLabelsByTarget } from "@multica/core/issues/comment-trigger-outcomes";
 import { useCurrentWorkspace } from "@multica/core/paths";
-import { ActorAvatar as ActorAvatarBase } from "@multica/ui/components/common/actor-avatar";
+import { AgentCliAvatar } from "../../agents/components/agent-cli-avatar";
 import { AVATAR_SIZE_PX } from "@multica/ui/lib/avatar-size";
 import {
   DropdownMenu,
@@ -443,7 +443,8 @@ function TriggerAgentAvatar({
         suppressed && "opacity-40 grayscale",
       )}
     >
-      <ActorAvatarBase
+      <AgentCliAvatar
+        agentId={agent.id}
         name={agent.name}
         initials=""
         avatarUrl={agent.avatar_url}
