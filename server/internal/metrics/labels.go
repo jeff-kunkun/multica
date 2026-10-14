@@ -218,9 +218,6 @@ const (
 	// RuntimeLookupSourceDaemonAPI covers daemon-authenticated endpoints other
 	// than the heartbeat: WS upgrade, result reports, deregister, task calls.
 	RuntimeLookupSourceDaemonAPI = "daemon_api"
-	// RuntimeLookupSourceRuntimeModelPoll is the browser polling a model
-	// discovery request (every 500ms while the picker waits).
-	RuntimeLookupSourceRuntimeModelPoll = "runtime_model_poll"
 	// RuntimeLookupSourceRuntimeUpdatePoll is the browser polling CLI update
 	// progress.
 	RuntimeLookupSourceRuntimeUpdatePoll = "runtime_update_poll"
@@ -260,7 +257,6 @@ func AllRuntimeLookupSources() []string {
 		RuntimeLookupSourceHeartbeatWS,
 		RuntimeLookupSourceHeartbeatHTTP,
 		RuntimeLookupSourceDaemonAPI,
-		RuntimeLookupSourceRuntimeModelPoll,
 		RuntimeLookupSourceRuntimeUpdatePoll,
 		RuntimeLookupSourceRuntimeAPI,
 		RuntimeLookupSourceIssue,

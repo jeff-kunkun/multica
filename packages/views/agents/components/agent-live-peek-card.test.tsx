@@ -117,7 +117,6 @@ function makeAgent(overrides: Record<string, unknown> = {}) {
     visibility: "private" as const,
     status: "idle" as const,
     max_concurrent_tasks: 1,
-    model: "",
     owner_id: "user-me",
     created_at: "2026-04-01T00:00:00Z",
     updated_at: "2026-04-01T00:00:00Z",

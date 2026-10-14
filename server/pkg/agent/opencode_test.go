@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -1496,7 +1497,7 @@ func TestOpencodeBackendNeverEmitsPromptFlag(t *testing.T) {
 	}
 }
 
-func TestOpencodeBackendInjectsThinkingVariant(t *testing.T) {
+func TestOpencodeBackendNeverInjectsModelOrVariant(t *testing.T) {
 	t.Parallel()
 
 	tempDir := t.TempDir()
@@ -1519,10 +1520,8 @@ func TestOpencodeBackendInjectsThinkingVariant(t *testing.T) {
 	defer cancel()
 
 	session, err := backend.Execute(ctx, "prompt-ignored", ExecOptions{
-		Model:         "opencode/deepseek-v4",
-		ThinkingLevel: "max",
-		CustomArgs:    []string{"--variant", "low", "--keep-me"},
-		Timeout:       5 * time.Second,
+		CustomArgs: []string{"--variant", "low", "--keep-me"},
+		Timeout:    5 * time.Second,
 	})
 	if err != nil {
 		t.Fatalf("execute: %v", err)
@@ -1537,29 +1536,15 @@ func TestOpencodeBackendInjectsThinkingVariant(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read args file: %v", err)
 	}
-	args := splitNonEmptyLines(string(raw))
-	if !containsAdjacent(args, "--model", "opencode/deepseek-v4") {
-		t.Fatalf("expected --model opencode/deepseek-v4 in args: %v", args)
+	args := strings.Fields(string(raw))
+	if slices.Contains(args, "--model") {
+		t.Fatalf("daemon must not inject --model: %v", args)
 	}
-	if !containsAdjacent(args, "--variant", "max") {
-		t.Fatalf("expected daemon-injected --variant max in args: %v", args)
+	// A user's own --variant in custom_args is user config and passes through.
+	if strings.Count(" "+strings.Join(args, " ")+" ", " --variant low ") != 1 {
+		t.Fatalf("expected exactly the user's --variant low: %v", args)
 	}
-	if argIndexOf(args, "--model") > argIndexOf(args, "--variant") {
-		t.Errorf("expected --variant after --model for readability: %v", args)
-	}
-	count := 0
-	for _, arg := range args {
-		if arg == "--variant" {
-			count++
-		}
-	}
-	if count != 1 {
-		t.Fatalf("expected exactly one --variant, got %d: %v", count, args)
-	}
-	if argIndexOf(args, "low") >= 0 {
-		t.Errorf("filtered user --variant value still appears: %v", args)
-	}
-	if argIndexOf(args, "--keep-me") < 0 {
+	if !slices.Contains(args, "--keep-me") {
 		t.Errorf("non-blocked custom arg was dropped: %v", args)
 	}
 }

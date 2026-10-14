@@ -443,6 +443,20 @@ describe("useChatController project context", () => {
     expect(h.store.setActiveSession).toHaveBeenCalledWith(null);
   });
 
+  it("starts a new chat in the project the caller names", () => {
+    h.agents = [agentA, agentB];
+    h.projects = [project];
+
+    const { result } = renderHook(() => useChatController());
+    h.store.setSelectedProjectId.mockClear();
+
+    act(() => result.current.handleStartNewChat(agentB, project.id));
+    expect(h.store.setSelectedProjectId).toHaveBeenLastCalledWith(project.id);
+
+    act(() => result.current.handleNewChat(project.id));
+    expect(h.store.setSelectedProjectId).toHaveBeenLastCalledWith(project.id);
+  });
+
   it("keeps a historical session project out of the next-chat draft state", () => {
     const projectSession = makeSession({
       id: "project-session",

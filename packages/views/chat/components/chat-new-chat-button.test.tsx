@@ -30,7 +30,6 @@ function makeAgent(overrides: Partial<Agent> & Pick<Agent, "id" | "name" | "owne
     invocation_targets: [{ target_type: "workspace", target_id: null }],
     status: "idle",
     max_concurrent_tasks: 1,
-    model: "sonnet",
     created_at: new Date(0).toISOString(),
     updated_at: new Date(0).toISOString(),
     archived_at: null,

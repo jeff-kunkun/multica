@@ -114,6 +114,28 @@ describe("useAgentsViewStore", () => {
     expect(filters.availability).toEqual(["online"]);
   });
 
+  it("drops the removed model column and models filter from an older payload", async () => {
+    localStorage.setItem(
+      "multica_agents_view:acme",
+      JSON.stringify({
+        state: {
+          hiddenColumns: ["model", "created", "owner"],
+          filters: { availability: ["online"], models: ["claude-opus-5"] },
+        },
+        version: 0,
+      }),
+    );
+
+    setCurrentWorkspace("acme", "ws_a");
+    await flush();
+    await flush();
+
+    const state = useAgentsViewStore.getState();
+    expect(state.hiddenColumns).toEqual(["created", "owner"]);
+    expect(state.filters).not.toHaveProperty("models");
+    expect(state.filters.availability).toEqual(["online"]);
+  });
+
   describe("access filter dimension", () => {
     it("toggleFilter('access', value) adds and removes the value", () => {
       const { toggleFilter } = useAgentsViewStore.getState();

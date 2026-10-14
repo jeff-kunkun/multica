@@ -1366,102 +1366,6 @@ func extractACPAuthMethods(result json.RawMessage) []string {
 	return ids
 }
 
-// splitACPModelID splits an ACP model id into its optional `provider:` prefix
-// and the bare model name. Ids without a colon (or with a leading colon) carry
-// no provider and return ("", id). Mirrors the prefix convention acpModelEntry
-// derives dropdown grouping from.
-//
-// Bare model names can themselves contain colons in theory, so only the FIRST
-// colon is treated as the provider separator — the remainder is the model.
-func splitACPModelID(modelID string) (provider, model string) {
-	id := strings.TrimSpace(modelID)
-	if idx := strings.Index(id, ":"); idx > 0 {
-		return id[:idx], id[idx+1:]
-	}
-	return "", id
-}
-
-// acpModelIDsEquivalent reports whether a configured model id and the id the
-// runtime reports as current denote the same selection.
-//
-// Normalisation is needed because two id namespaces meet here: agent.model is
-// persisted verbatim (handler/agent.go CreateAgent/UpdateAgent) and the CLI
-// documents the bare spelling as valid, while an ACP runtime commonly answers
-// session/new with a provider-encoded `provider:model` id. A raw == across
-// those two spellings misses, which is why the MUL-5029 skip-gate added in
-// #5690 never fired for bare-configured agents and set_model was replayed
-// every turn.
-//
-// The rules are deliberately asymmetric, because the risk is:
-//   - Either side empty → not equivalent (caller handles the empty-model case).
-//   - Bare configured id → equivalent on the model name alone. It expresses no
-//     provider preference, so the session's own provider is authoritative.
-//     This is the case the gate exists for.
-//   - Explicit configured provider → equivalent only when the session reports
-//     that same provider. A session reporting a bare id cannot confirm the
-//     match, so fall through and send set_model rather than silently swallow a
-//     provider switch the caller explicitly asked for. Bare current ids are
-//     not hypothetical: acp_effort_test.go captures an unprefixed
-//     `gpt-5.6-sol` from jcode, which routes through this same backend.
-//     Hermes Agent's encoder has a bare branch too — acp_adapter
-//     `_encode_model_choice` returns the model alone when the provider is
-//     empty — but a normally-configured install always resolves one, and a
-//     live `hermes acp` v0.20.0 session reports the prefixed form.
-//
-// Provider and model are compared case-insensitively: Hermes lowercases the
-// provider when encoding the id, so a config written as `Custom:...` would
-// otherwise miss.
-//
-// splitACPModelID cannot distinguish a provider prefix from a colon inside a
-// bare model name (Ollama-style `llama3:8b`). That degradation is safe in the
-// only direction that matters: `llama3:8b` vs `custom:llama3:8b` compares
-// unequal and falls back to sending set_model, never to a false skip.
-func acpModelIDsEquivalent(configured, current string) bool {
-	configured = strings.TrimSpace(configured)
-	current = strings.TrimSpace(current)
-	if configured == "" || current == "" {
-		return false
-	}
-	cfgProvider, cfgModel := splitACPModelID(configured)
-	curProvider, curModel := splitACPModelID(current)
-	if !strings.EqualFold(cfgModel, curModel) {
-		return false
-	}
-	if cfgProvider == "" {
-		return true
-	}
-	return strings.EqualFold(cfgProvider, curProvider)
-}
-
-// extractACPCurrentModelID pulls the model selected by the ACP runtime out of
-// a session/new or session/resume response. Hermes returns this when it uses
-// its own default model, so token usage can still be attributed to a real model
-// even when Multica did not pass an explicit agent.model override.
-func extractACPCurrentModelID(result json.RawMessage) string {
-	var r struct {
-		Models struct {
-			CurrentModelID      string `json:"currentModelId"`
-			CurrentModelIDSnake string `json:"current_model_id"`
-		} `json:"models"`
-		CurrentModelID      string `json:"currentModelId"`
-		CurrentModelIDSnake string `json:"current_model_id"`
-	}
-	if err := json.Unmarshal(result, &r); err != nil {
-		return ""
-	}
-	for _, candidate := range []string{
-		r.Models.CurrentModelID,
-		r.Models.CurrentModelIDSnake,
-		r.CurrentModelID,
-		r.CurrentModelIDSnake,
-	} {
-		if model := strings.TrimSpace(candidate); model != "" {
-			return model
-		}
-	}
-	return ""
-}
-
 // resolveResumedSessionID picks which session id we should treat as live
 // after a `session/resume` round-trip. Hermes (and other ACP servers)
 // return the canonical sessionId in the response — when the local
@@ -1547,27 +1451,6 @@ func hermesTurnText(prompt string, resumeExpected, resumeLanded bool, notice str
 		return notice + prompt
 	}
 	return prompt
-}
-
-// buildHermesSessionParams constructs the params map for the ACP `session/new`
-// request. The `model` field is only included when non-empty so Hermes falls
-// back to its default only when no explicit model was configured.
-//
-// mcpServers should be the ACP-shaped array produced by buildACPMcpServers
-// from the agent's mcp_config; a nil slice is normalised to an empty array
-// so the wire request always carries the field (ACP requires it).
-func buildHermesSessionParams(cwd, model string, mcpServers []any) map[string]any {
-	if mcpServers == nil {
-		mcpServers = []any{}
-	}
-	params := map[string]any{
-		"cwd":        cwd,
-		"mcpServers": mcpServers,
-	}
-	if model != "" {
-		params["model"] = model
-	}
-	return params
 }
 
 // buildACPMcpServers translates an agent's Claude-style mcp_config

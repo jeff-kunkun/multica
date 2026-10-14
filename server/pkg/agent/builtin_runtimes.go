@@ -1,7 +1,6 @@
 package agent
 
 import (
-	"context"
 	"fmt"
 )
 
@@ -12,7 +11,7 @@ import (
 //
 // The descriptor is the single declaration site for a runtime identity:
 // agents_probe.go, config.go, daemon.go display-name overrides, execenv
-// skill/config paths, local_skills.go, ListModels, and the frontend display
+// skill/config paths, local_skills.go, and the frontend display
 // maps all derive from this. Adding a new compatible fork of an existing
 // runtime is a descriptor entry, not a cross-stack change.
 type BuiltinRuntime struct {
@@ -31,8 +30,8 @@ type BuiltinRuntime struct {
 	// when MULTICA_<ID>_PATH is not set (e.g. "omp").
 	DefaultCommand string
 
-	// EnvPrefix is the MULTICA_ prefix for *_PATH and *_MODEL env overrides
-	// (e.g. "MULTICA_OMP" → MULTICA_OMP_PATH / MULTICA_OMP_MODEL).
+	// EnvPrefix is the MULTICA_ prefix for the *_PATH env override
+	// (e.g. "MULTICA_OMP" → MULTICA_OMP_PATH).
 	EnvPrefix string
 
 	// DisplayName is the human-facing runtime name. The daemon and frontend
@@ -58,22 +57,7 @@ type BuiltinRuntime struct {
 	// ProviderLabel is the label used in log/error messages (passed to
 	// piBackend.providerLabel).
 	ProviderLabel string
-
-	// ModelDiscovery is the strategy for discovering available models.
-	// When set, it replaces the protocol family's discovery entirely — omp
-	// uses `omp models --json`, a different command and output shape from
-	// pi's `--list-models`. When nil, ListModels returns an empty catalog
-	// rather than falling back to the family's command: running a
-	// semantically incompatible one (omp exits non-zero on `--list-models`)
-	// is worse than degrading to manual entry.
-	ModelDiscovery ModelDiscoveryFunc
 }
-
-// ModelDiscoveryFunc discovers available models for a runtime identity.
-// It receives the context and the resolved command — executable plus the
-// runtime's launch prefix — and returns a model catalog. Discovery failures
-// propagate to the picker, which shows the reason and supports manual entry.
-type ModelDiscoveryFunc func(ctx context.Context, runtimeCmd Command) ([]Model, error)
 
 // BuiltinRuntimes is the registry of built-in runtime identities that are
 // NOT in SupportedTypes (they are protocol-family derivatives, not families
@@ -172,7 +156,7 @@ func ProfileRuntimeType(runtimeType, protocolFamily string) string {
 }
 
 // RuntimeProtocolFamily resolves the compatibility target using the same registry
-// as backend construction and model discovery.
+// as backend construction.
 func RuntimeProtocolFamily(runtimeType string) (string, bool) {
 	if desc, ok := BuiltinRuntimeByID(runtimeType); ok {
 		return desc.ProtocolFamily, true

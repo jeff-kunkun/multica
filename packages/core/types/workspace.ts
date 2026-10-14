@@ -149,4 +149,6 @@ export interface WorkspaceBot {
 export interface WorkspaceBotWithSecrets extends WorkspaceBot {
   token?: string;
   webhook_secret?: string;
+  /** Ready-to-forward connection instructions; embeds the token. */
+  setup_prompt?: string;
 }

@@ -401,6 +401,7 @@ function SecretsDialog({
           <DialogTitle>{t(($) => $.bots.secrets_title, { name: bot?.name ?? "" })}</DialogTitle>
         </DialogHeader>
         <p className="text-body text-muted-foreground">{t(($) => $.bots.secrets_warning)}</p>
+        {bot?.setup_prompt ? <SetupPromptRow prompt={bot.setup_prompt} /> : null}
         <div className="min-w-0 space-y-3">
           <SecretLine label={t(($) => $.bots.endpoint_label)} value={endpoint} />
           {bot?.token ? <SecretLine label={t(($) => $.bots.token_label)} value={bot.token} /> : null}
@@ -419,6 +420,33 @@ function SecretsDialog({
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  );
+}
+
+/** The server-rendered prompt embeds the token, so it is only offered here, next to it. */
+function SetupPromptRow({ prompt }: { prompt: string }) {
+  const { t } = useT("settings");
+  const [copied, setCopied] = useState(false);
+  return (
+    <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
+      <div className="min-w-0">
+        <div className="text-body font-medium">{t(($) => $.bots.setup_prompt_label)}</div>
+        <div className="text-caption text-muted-foreground">{t(($) => $.bots.setup_prompt_hint)}</div>
+      </div>
+      <Button
+        variant="outline"
+        className="shrink-0"
+        onClick={async () => {
+          if (await copyText(prompt)) {
+            setCopied(true);
+            setTimeout(() => setCopied(false), 2000);
+          }
+        }}
+      >
+        {copied ? <Check /> : <Copy />}
+        {copied ? t(($) => $.bots.copied) : t(($) => $.bots.copy_prompt)}
+      </Button>
+    </div>
   );
 }
 

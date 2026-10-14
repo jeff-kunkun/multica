@@ -37,11 +37,13 @@ func fullSourceAgent() map[string]any {
 		"avatar_url":           "https://img.example/a.png",
 		"custom_args":          []any{"--foo", "--bar"},
 		"max_concurrent_tasks": 9,
-		"model":                "claude-sonnet-4-6",
-		"thinking_level":       "high",
-		"service_tier":         "priority",
-		"permission_mode":      "public_to",
-		"invocation_targets":   []any{map[string]any{"target_type": "workspace"}},
+		// Legacy per-agent model fields an older server may still return;
+		// the copy must never forward them.
+		"model":              "claude-sonnet-4-6",
+		"thinking_level":     "high",
+		"service_tier":       "priority",
+		"permission_mode":    "public_to",
+		"invocation_targets": []any{map[string]any{"target_type": "workspace"}},
 		// Secret metadata the copy must never turn into real values.
 		"has_custom_env":       true,
 		"custom_env_key_count": 2,
@@ -123,15 +125,11 @@ func TestAgentCopySameRuntimeCopiesPortableFields(t *testing.T) {
 	if gotBody["max_concurrent_tasks"] != float64(9) {
 		t.Errorf("max_concurrent_tasks = %v, want 9", gotBody["max_concurrent_tasks"])
 	}
-	// Same runtime: runtime-specific fields are carried over.
-	if gotBody["model"] != "claude-sonnet-4-6" {
-		t.Errorf("model = %v", gotBody["model"])
-	}
-	if gotBody["thinking_level"] != "high" {
-		t.Errorf("thinking_level = %v", gotBody["thinking_level"])
-	}
-	if gotBody["service_tier"] != "priority" {
-		t.Errorf("service_tier = %v", gotBody["service_tier"])
+	// The model is not a per-agent setting: legacy fields are never forwarded.
+	for _, key := range []string{"model", "thinking_level", "service_tier"} {
+		if v, ok := gotBody[key]; ok {
+			t.Errorf("%s must not be copied, got %v", key, v)
+		}
 	}
 	// Invocation permission is copied verbatim.
 	if gotBody["permission_mode"] != "public_to" {
@@ -203,35 +201,9 @@ func TestAgentCopyRejectsInvalidConcurrencyOverrideBeforeRequest(t *testing.T) {
 	}
 }
 
-func TestAgentCopyCrossRuntimeRequiresModel(t *testing.T) {
-	postCalled := false
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == http.MethodGet {
-			_ = json.NewEncoder(w).Encode(fullSourceAgent())
-			return
-		}
-		postCalled = true
-		_ = json.NewEncoder(w).Encode(map[string]any{"id": "agent-new"})
-	}))
-	defer srv.Close()
-	setCopyTestEnv(t, srv.URL)
-
-	cmd := newAgentCopyTestCmd()
-	_ = cmd.Flags().Set("runtime-id", "runtime-2")
-
-	err := runAgentCopy(cmd, []string{"agent-src"})
-	if err == nil {
-		t.Fatal("expected error when copying across runtimes without --model")
-	}
-	if !strings.Contains(err.Error(), "--model") {
-		t.Errorf("error = %q, want it to mention --model", err.Error())
-	}
-	if postCalled {
-		t.Error("create must not be called when validation fails")
-	}
-}
-
-func TestAgentCopyCrossRuntimeDropsRuntimeSpecificFields(t *testing.T) {
+// Copying onto a different runtime needs no model choice: the target CLI's
+// own configuration decides the model.
+func TestAgentCopyCrossRuntimeNeedsNoModel(t *testing.T) {
 	var gotBody map[string]any
 	srv := copyMockServer(t, fullSourceAgent(), &gotBody)
 	defer srv.Close()
@@ -239,7 +211,6 @@ func TestAgentCopyCrossRuntimeDropsRuntimeSpecificFields(t *testing.T) {
 
 	cmd := newAgentCopyTestCmd()
 	_ = cmd.Flags().Set("runtime-id", "runtime-2")
-	_ = cmd.Flags().Set("model", "openai/gpt-4o")
 
 	if err := runAgentCopy(cmd, []string{"agent-src"}); err != nil {
 		t.Fatalf("runAgentCopy: %v", err)
@@ -247,36 +218,10 @@ func TestAgentCopyCrossRuntimeDropsRuntimeSpecificFields(t *testing.T) {
 	if gotBody["runtime_id"] != "runtime-2" {
 		t.Errorf("runtime_id = %v, want runtime-2", gotBody["runtime_id"])
 	}
-	if gotBody["model"] != "openai/gpt-4o" {
-		t.Errorf("model = %v, want openai/gpt-4o", gotBody["model"])
-	}
-	// thinking_level / service_tier are runtime-specific and must NOT ride
-	// across a runtime change unless set explicitly.
-	if _, ok := gotBody["thinking_level"]; ok {
-		t.Errorf("thinking_level must be dropped on a runtime change, got %v", gotBody["thinking_level"])
-	}
-	if _, ok := gotBody["service_tier"]; ok {
-		t.Errorf("service_tier must be dropped on a runtime change, got %v", gotBody["service_tier"])
-	}
-}
-
-// Passing --model "" across a runtime change is an explicit "accept the target
-// runtime default" and must satisfy the required-model gate.
-func TestAgentCopyCrossRuntimeEmptyModelIsAllowed(t *testing.T) {
-	var gotBody map[string]any
-	srv := copyMockServer(t, fullSourceAgent(), &gotBody)
-	defer srv.Close()
-	setCopyTestEnv(t, srv.URL)
-
-	cmd := newAgentCopyTestCmd()
-	_ = cmd.Flags().Set("runtime-id", "runtime-2")
-	_ = cmd.Flags().Set("model", "")
-
-	if err := runAgentCopy(cmd, []string{"agent-src"}); err != nil {
-		t.Fatalf("runAgentCopy: %v", err)
-	}
-	if gotBody["model"] != "" {
-		t.Errorf("model = %v, want empty string", gotBody["model"])
+	for _, key := range []string{"model", "thinking_level", "service_tier"} {
+		if v, ok := gotBody[key]; ok {
+			t.Errorf("%s must not be sent, got %v", key, v)
+		}
 	}
 }
 

@@ -262,9 +262,6 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		if notifier, ok := opts.DaemonWakeup.(handler.WorkspaceSetRefreshNotifier); ok {
 			h.DaemonWorkspaceRefresh = notifier
 		}
-		if notifier, ok := opts.DaemonWakeup.(handler.DaemonPendingWorkNotifier); ok {
-			h.DaemonPendingWork = notifier
-		}
 		if notifier, ok := opts.DaemonWakeup.(handler.DaemonTaskSupplementNotifier); ok {
 			h.DaemonTaskSupplement = notifier
 		}
@@ -274,8 +271,6 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	}
 	if rdb != nil {
 		h.UpdateStore = handler.NewRedisUpdateStore(rdb)
-		h.ModelListStore = handler.NewRedisModelListStore(rdb)
-		h.ModelCatalogCache = handler.NewRedisModelCatalogCache(rdb)
 		h.LivenessStore = handler.NewRedisLivenessStore(rdb)
 		h.InvitationRateLimiters = handler.NewRedisInvitationRateLimiters(rdb, invitationRateLimits)
 	}
@@ -482,7 +477,6 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		r.Post("/runtimes/{runtimeId}/tasks/{taskId}/prepare-lease", h.ExtendTaskPrepareLease)
 		r.Get("/runtimes/{runtimeId}/tasks/pending", h.ListPendingTasksByRuntime)
 		r.Post("/runtimes/{runtimeId}/update/{updateId}/result", h.ReportUpdateResult)
-		r.Post("/runtimes/{runtimeId}/models/{requestId}/result", h.ReportModelListResult)
 
 		r.Get("/tasks/{taskId}/status", h.GetTaskStatus)
 		r.Post("/tasks/{taskId}/start", h.StartTask)
@@ -915,8 +909,6 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Get("/activity", h.GetRuntimeTaskActivity)
 					r.Post("/update", h.InitiateUpdate)
 					r.Get("/update/{updateId}", h.GetUpdate)
-					r.Post("/models", h.InitiateListModels)
-					r.Get("/models/{requestId}", h.GetModelListRequest)
 					r.Delete("/", h.DeleteAgentRuntime)
 					// Confirmed variant of DELETE: unbind every agent bound to
 					// this runtime (they keep their configuration and chats and

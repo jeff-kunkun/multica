@@ -400,7 +400,6 @@ export function AgentOverviewPane({
                   {effectiveView === "general" && (
                     <AgentDetailInspector
                       agent={agent}
-                      runtime={runtime}
                       runtimes={runtimes}
                       members={members}
                       currentUserId={currentUserId ?? null}

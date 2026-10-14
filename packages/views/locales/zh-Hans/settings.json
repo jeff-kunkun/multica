@@ -323,7 +323,7 @@
       "mcp": "MCP 服务器",
       "code": "代码",
       "approvers": "批准权",
-      "local_run": "本机运行"
+      "local_run": "运行时"
     },
     "groups": {
       "office": "常用",
@@ -953,6 +953,10 @@
     "secrets_title": "{{name}} 已就绪",
     "secrets_warning": "现在复制保存。令牌和密钥不会再显示。",
     "token_label": "令牌",
+    "setup_prompt_label": "接入提示词",
+    "setup_prompt_hint": "转给 Bot，它会自己连上并自检。",
+    "copy_prompt": "复制提示词",
+    "copied": "已复制",
     "webhook_secret_label": "推送签名密钥",
     "confirm_stored": "我已保存",
     "done": "完成",

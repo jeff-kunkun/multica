@@ -51,41 +51,6 @@ func TestOpencodeUsesV2Contract(t *testing.T) {
 	}
 }
 
-// TestOpencodeModelArg covers folding the thinking level into the model string,
-// which is how 2.x expresses what 1.x passed as `--variant`.
-func TestOpencodeModelArg(t *testing.T) {
-	t.Parallel()
-
-	cases := []struct {
-		name          string
-		model         string
-		thinkingLevel string
-		wantModel     string
-		wantOK        bool
-	}{
-		{"no thinking level leaves the model alone", "anthropic/claude-sonnet-4-5", "", "anthropic/claude-sonnet-4-5", true},
-		{"level folds onto the model", "anthropic/claude-sonnet-4-5", "high", "anthropic/claude-sonnet-4-5#high", true},
-		{"neither set", "", "", "", true},
-		// 2.x resolves the default model server-side, so there is no model
-		// string to attach the variant to and the level cannot be expressed.
-		{"level without a model is not representable", "", "high", "", false},
-		// An explicitly pinned variant wins rather than growing a second '#',
-		// which OpenCode would reject.
-		{"explicit variant on the model wins", "anthropic/claude-sonnet-4-5#max", "high", "anthropic/claude-sonnet-4-5#max", true},
-	}
-
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			gotModel, gotOK := opencodeModelArg(tc.model, tc.thinkingLevel)
-			if gotModel != tc.wantModel || gotOK != tc.wantOK {
-				t.Fatalf("opencodeModelArg(%q, %q) = (%q, %v), want (%q, %v)",
-					tc.model, tc.thinkingLevel, gotModel, gotOK, tc.wantModel, tc.wantOK)
-			}
-		})
-	}
-}
-
 const testMCPConfig = `{"mcpServers":{"probe":{"command":"node","args":["probe.js"]}}}`
 
 // TestOpencodeCheckMCPSupport pins the refusal. 2.x has no channel that can
@@ -218,11 +183,11 @@ func TestOpencodeV1StillDeliversMCPConfig(t *testing.T) {
 	}
 }
 
-// TestOpencodeV2ArgvOmitsDirAndFoldsVariant is the end-to-end regression for
+// TestOpencodeV2ArgvOmitsDirAndModel is the end-to-end regression for
 // GH #8586: on a 2.x runtime the daemon must not pass `--dir` (the CLI rejects
-// the unknown flag and the run dies before it starts) and must express the
-// thinking level through the model string instead of `--variant`.
-func TestOpencodeV2ArgvOmitsDirAndFoldsVariant(t *testing.T) {
+// the unknown flag and the run dies before it starts), and never passes a
+// model: the CLI's own config decides it.
+func TestOpencodeV2ArgvOmitsDirAndModel(t *testing.T) {
 	t.Parallel()
 
 	tempDir := t.TempDir()
@@ -251,10 +216,8 @@ func TestOpencodeV2ArgvOmitsDirAndFoldsVariant(t *testing.T) {
 	defer cancel()
 
 	session, err := backend.Execute(ctx, "prompt-ignored", ExecOptions{
-		Cwd:           workDir,
-		Model:         "anthropic/claude-sonnet-4-5",
-		ThinkingLevel: "high",
-		Timeout:       5 * time.Second,
+		Cwd:     workDir,
+		Timeout: 5 * time.Second,
 	})
 	if err != nil {
 		t.Fatalf("execute: %v", err)
@@ -277,8 +240,8 @@ func TestOpencodeV2ArgvOmitsDirAndFoldsVariant(t *testing.T) {
 	if containsString(args, "--variant") {
 		t.Fatalf("2.x argv must not carry --variant, got %q", args)
 	}
-	if !containsString(args, "anthropic/claude-sonnet-4-5#high") {
-		t.Fatalf("expected the thinking level folded into the model string, got %q", args)
+	if containsString(args, "--model") {
+		t.Fatalf("argv must not carry --model, got %q", args)
 	}
 
 	// Dropping --dir is only safe because cwd still anchors discovery, so the
@@ -292,9 +255,9 @@ func TestOpencodeV2ArgvOmitsDirAndFoldsVariant(t *testing.T) {
 	}
 }
 
-// TestOpencodeV1ArgvKeepsDirAndVariant is the other half of the contract: the
+// TestOpencodeV1ArgvKeepsDirOmitsModel is the other half of the contract: the
 // 1.x path is what every existing runtime uses and must not shift.
-func TestOpencodeV1ArgvKeepsDirAndVariant(t *testing.T) {
+func TestOpencodeV1ArgvKeepsDirOmitsModel(t *testing.T) {
 	t.Parallel()
 
 	tempDir := t.TempDir()
@@ -319,10 +282,8 @@ func TestOpencodeV1ArgvKeepsDirAndVariant(t *testing.T) {
 	defer cancel()
 
 	session, err := backend.Execute(ctx, "prompt-ignored", ExecOptions{
-		Cwd:           workDir,
-		Model:         "anthropic/claude-sonnet-4-5",
-		ThinkingLevel: "high",
-		Timeout:       5 * time.Second,
+		Cwd:     workDir,
+		Timeout: 5 * time.Second,
 	})
 	if err != nil {
 		t.Fatalf("execute: %v", err)
@@ -342,11 +303,8 @@ func TestOpencodeV1ArgvKeepsDirAndVariant(t *testing.T) {
 	if !containsString(args, "--dir") {
 		t.Fatalf("1.x argv must still carry --dir, got %q", args)
 	}
-	if !containsString(args, "--variant") {
-		t.Fatalf("1.x argv must still carry --variant, got %q", args)
-	}
-	if containsString(args, "anthropic/claude-sonnet-4-5#high") {
-		t.Fatalf("1.x must not fold the variant into the model, got %q", args)
+	if containsString(args, "--variant") || containsString(args, "--model") {
+		t.Fatalf("argv must not carry --variant or --model, got %q", args)
 	}
 }
 

@@ -33,8 +33,6 @@ import {
   IssueTriggerPreviewSchema,
   ListIssuesResponseSchema,
   ListPropertiesResponseSchema,
-  MALFORMED_RUNTIME_MODEL_LIST_REQUEST,
-  RuntimeModelListRequestSchema,
   SearchProjectsResponseSchema,
   RuntimeHourlyActivityListSchema,
   RuntimeUsageByAgentListSchema,
@@ -1494,195 +1492,6 @@ describe("CommentTriggerPreviewSchema.blocked", () => {
   });
 });
 
-describe("RuntimeModelListRequestSchema", () => {
-  const completed = {
-    id: "req-1",
-    runtime_id: "rt-1",
-    status: "completed",
-    supported: true,
-    created_at: "2026-07-29T00:00:00Z",
-    updated_at: "2026-07-29T00:00:01Z",
-    models: [
-      {
-        id: "gpt-5.6-sol",
-        label: "GPT-5.6-Sol",
-        provider: "openai",
-        default: true,
-        thinking: {
-          supported_levels: [{ value: "high", label: "High" }],
-          default_level: "low",
-        },
-        service_tiers: [{ id: "fast", name: "Fast" }],
-        supports_explicit_standard_service_tier: true,
-      },
-    ],
-  };
-
-  it("parses a live completed discovery, keeping the fields the UI branches on", () => {
-    const parsed = parseWithFallback(
-      completed,
-      RuntimeModelListRequestSchema,
-      MALFORMED_RUNTIME_MODEL_LIST_REQUEST,
-      { endpoint: "test" },
-    );
-    expect(parsed.status).toBe("completed");
-    expect(parsed.supported).toBe(true);
-    expect(parsed.models?.[0]?.default).toBe(true);
-    expect(parsed.models?.[0]?.thinking?.supported_levels).toEqual([
-      { value: "high", label: "High" },
-    ]);
-    expect(parsed.models?.[0]?.service_tiers).toEqual([{ id: "fast", name: "Fast" }]);
-    expect(
-      parsed.models?.[0]?.supports_explicit_standard_service_tier,
-    ).toBe(true);
-    expect(parsed.cached).toBeUndefined();
-  });
-
-  it("keeps the additive cache markers when the server serves a snapshot", () => {
-    const parsed = parseWithFallback(
-      { ...completed, cached: true, cached_at: "2026-07-29T00:00:00Z" },
-      RuntimeModelListRequestSchema,
-      MALFORMED_RUNTIME_MODEL_LIST_REQUEST,
-      { endpoint: "test" },
-    );
-    expect(parsed.cached).toBe(true);
-    expect(parsed.cached_at).toBe("2026-07-29T00:00:00Z");
-  });
-
-  // A backend that predates MUL-5444 sends neither marker; an even older one
-  // may omit `supported`. Both must stay usable rather than reading as
-  // "runtime manages the model itself" off an undefined.
-  it("defaults supported to true on an older backend that omits it", () => {
-    const { supported: _omitted, ...withoutSupported } = completed;
-    const parsed = parseWithFallback(
-      withoutSupported,
-      RuntimeModelListRequestSchema,
-      MALFORMED_RUNTIME_MODEL_LIST_REQUEST,
-      { endpoint: "test" },
-    );
-    expect(parsed.supported).toBe(true);
-    expect(parsed.cached).toBeUndefined();
-  });
-
-  // MUL-6961: models the runtime cannot run arrive in their OWN list. The
-  // separation is the compatibility contract — a client that never learned the
-  // field reads `models` and therefore cannot offer one — so the schema must
-  // keep them apart rather than folding them together.
-  it("parses unavailable models without letting them into the selectable list", () => {
-    const parsed = parseWithFallback(
-      {
-        ...completed,
-        unavailable_models: [
-          {
-            id: "cc-update-required-1",
-            label: "Fable 5.1 (disabled)",
-            reason: "Update to 2.1.255+ to use Fable 5.1",
-          },
-        ],
-      },
-      RuntimeModelListRequestSchema,
-      MALFORMED_RUNTIME_MODEL_LIST_REQUEST,
-      { endpoint: "test" },
-    );
-    expect(parsed.unavailable_models?.[0]?.id).toBe("cc-update-required-1");
-    expect(parsed.unavailable_models?.[0]?.reason).toBe(
-      "Update to 2.1.255+ to use Fable 5.1",
-    );
-    expect(parsed.models?.map((m) => m.id)).not.toContain(
-      "cc-update-required-1",
-    );
-  });
-
-  // An older daemon or server sends no such key. The picker then shows no
-  // unavailable section, which is exactly the pre-MUL-6961 behaviour.
-  it("tolerates a backend that omits unavailable models entirely", () => {
-    const parsed = parseWithFallback(
-      completed,
-      RuntimeModelListRequestSchema,
-      MALFORMED_RUNTIME_MODEL_LIST_REQUEST,
-      { endpoint: "test" },
-    );
-    expect(parsed.unavailable_models).toBeUndefined();
-    expect(parsed.models?.length).toBe(1);
-  });
-
-  it("treats an older daemon that omits explicit-standard support as unsupported", () => {
-    const model = completed.models[0]!;
-    const {
-      supports_explicit_standard_service_tier: _omitted,
-      ...oldDaemonModel
-    } = model;
-    const parsed = parseWithFallback(
-      { ...completed, models: [oldDaemonModel] },
-      RuntimeModelListRequestSchema,
-      MALFORMED_RUNTIME_MODEL_LIST_REQUEST,
-      { endpoint: "test" },
-    );
-
-    expect(
-      parsed.models?.[0]?.supports_explicit_standard_service_tier,
-    ).toBeUndefined();
-  });
-
-  it("passes an unknown status through instead of failing the whole response", () => {
-    const parsed = parseWithFallback(
-      { ...completed, status: "superseded" },
-      RuntimeModelListRequestSchema,
-      MALFORMED_RUNTIME_MODEL_LIST_REQUEST,
-      { endpoint: "test" },
-    );
-    expect(parsed.status).toBe("superseded");
-  });
-
-  // Malformed bodies must land on the "failed" fallback: `completed` would
-  // fabricate an empty catalog and `pending` would spin the picker until the
-  // client-side poll timeout.
-  it("falls back to an explicit failure on a malformed body", () => {
-    for (const malformed of [
-      null,
-      "nope",
-      42,
-      {},
-      { status: 7 },
-      { ...completed, status: undefined },
-      { ...completed, supported: "yes" },
-      { ...completed, models: "nope" },
-      { ...completed, models: [{ label: "no id" }] },
-      {
-        ...completed,
-        models: [
-          {
-            ...completed.models[0],
-            supports_explicit_standard_service_tier: "yes",
-          },
-        ],
-      },
-    ]) {
-      const parsed = parseWithFallback(
-        malformed,
-        RuntimeModelListRequestSchema,
-        MALFORMED_RUNTIME_MODEL_LIST_REQUEST,
-        { endpoint: "test" },
-      );
-      expect(parsed.status).toBe("failed");
-      expect(parsed.supported).toBe(true);
-      expect(parsed.error).toBe("invalid model discovery response");
-    }
-  });
-
-  it("keeps unknown server fields instead of stripping them", () => {
-    const parsed = parseWithFallback(
-      { ...completed, future_field: "keep me" },
-      RuntimeModelListRequestSchema,
-      MALFORMED_RUNTIME_MODEL_LIST_REQUEST,
-      { endpoint: "test" },
-    );
-    expect((parsed as unknown as { future_field?: string }).future_field).toBe(
-      "keep me",
-    );
-  });
-});
-
 describe("IssueViewSchema", () => {
   const valid = {
     id: "v1",
@@ -1940,7 +1749,7 @@ describe("WorkspaceBotSchema", () => {
   });
   it("carries secrets only when the server sends them", () => {
     expect(WorkspaceBotWithSecretsSchema.parse(bot).token).toBeUndefined();
-    expect(WorkspaceBotWithSecretsSchema.parse({ ...bot, token: "mul_x", webhook_secret: "s" })).toMatchObject({ token: "mul_x", webhook_secret: "s" });
+    expect(WorkspaceBotWithSecretsSchema.parse({ ...bot, token: "mul_x", webhook_secret: "s", setup_prompt: "p" })).toMatchObject({ token: "mul_x", webhook_secret: "s", setup_prompt: "p" });
   });
   it("falls back to an empty list for a non-array reply", () => {
     expect(parseWithFallback({ bots: [] }, WorkspaceBotListSchema, [], { endpoint: "GET /api/bots" })).toEqual([]);

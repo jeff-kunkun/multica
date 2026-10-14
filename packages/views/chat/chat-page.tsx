@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { useDefaultLayout } from "react-resizable-panels";
 import { ArrowLeft, MessageSquare } from "lucide-react";
 import { toast } from "sonner";
@@ -14,6 +15,8 @@ import { useIsCompact } from "@multica/ui/hooks/use-mobile";
 import { useRequiredWorkspaceSlug, useWorkspacePaths } from "@multica/core/paths";
 import { getCurrentSlug } from "@multica/core/platform";
 import { useChatStore } from "@multica/core/chat";
+import { filterChatSessionsByProject, rankChatProjects } from "@multica/core/chat/project-bar";
+import { pinListOptions, useCreatePin, useDeletePin } from "@multica/core/pins";
 import type { Agent, ChatSession } from "@multica/core/types";
 import { PageHeader } from "../layout/page-header";
 import { useNavigation } from "../navigation";
@@ -22,6 +25,7 @@ import { ChatMessageList, ChatMessageSkeleton } from "./components/chat-message-
 import { ChatInput } from "./components/chat-input";
 import { ChatQueue } from "./components/chat-queue";
 import { ChatThreadList } from "./components/chat-thread-list";
+import { ChatProjectBar } from "./components/chat-project-bar";
 import { ChatSessionHeader } from "./components/chat-session-header";
 import { EmptyState } from "./components/chat-empty-state";
 import { NewChatButton } from "./components/new-chat-button";
@@ -67,6 +71,42 @@ export function ChatPage() {
     isActive: isCurrentChatRoute && getCurrentSlug() === workspaceSlug,
   });
   const urlSession = searchParams.get("session") || null;
+
+  // Project filter over the thread list. Page-local: it narrows what the
+  // list shows and seeds the project of a chat started from here.
+  const [projectFilter, setProjectFilter] = useState<string | null>(null);
+  const pinUserId = c.user?.id ?? "";
+  const { data: pins } = useQuery({
+    ...pinListOptions(c.wsId, pinUserId),
+    enabled: !!c.wsId && !!pinUserId,
+  });
+  const createPin = useCreatePin();
+  const deletePin = useDeletePin();
+  const pinnedProjectIds = useMemo(
+    () => (pins ?? []).filter((pin) => pin.item_type === "project").map((pin) => pin.item_id),
+    [pins],
+  );
+  const projectChips = useMemo(
+    () => rankChatProjects(c.projects.map((p) => p.id), pinnedProjectIds, c.sessions),
+    [c.projects, pinnedProjectIds, c.sessions],
+  );
+  // A filter whose project lost its chip (deleted, last chat archived,
+  // another workspace) falls back to All instead of showing an empty list.
+  const activeFilter = projectChips.some((chip) => chip.id === projectFilter)
+    ? projectFilter
+    : null;
+  const visibleSessions = useMemo(
+    () => filterChatSessionsByProject(c.sessions, activeFilter),
+    [c.sessions, activeFilter],
+  );
+  const toggleProjectPin = (projectId: string) => {
+    const onError = () => toast.error(t(($) => $.project_bar.pin_failed));
+    if (pinnedProjectIds.includes(projectId)) {
+      deletePin.mutate({ itemType: "project", itemId: projectId }, { onError });
+    } else {
+      createPin.mutate({ item_type: "project", item_id: projectId }, { onError });
+    }
+  };
   const urlAgent = searchParams.get("agent") || null;
 
   // "Composing a brand-new chat" — the user hit ⊕ but hasn't sent yet, so no
@@ -158,8 +198,8 @@ export function ChatPage() {
     // A manual ⊕ pick outranks a pending deep link; when called FROM the
     // intent effect the ref is already set to this param, so this is a no-op.
     supersedeAgentIntent();
-    if (agent) c.handleStartNewChat(agent);
-    else c.handleNewChat();
+    if (agent) c.handleStartNewChat(agent, activeFilter);
+    else c.handleNewChat(activeFilter);
     setComposingNew(true);
   };
 
@@ -221,10 +261,20 @@ export function ChatPage() {
     </PageHeader>
   );
 
+  const projectBar = (
+    <ChatProjectBar
+      chips={projectChips}
+      projects={c.projects}
+      selectedId={activeFilter}
+      onSelect={setProjectFilter}
+      onTogglePin={toggleProjectPin}
+    />
+  );
+
   const listBody = (
     <div className="px-2 py-1">
       <ChatThreadList
-        sessions={c.sessions}
+        sessions={visibleSessions}
         agents={c.agents}
         activeSessionId={c.activeSessionId}
         onSelectSession={handleSelect}
@@ -353,6 +403,7 @@ export function ChatPage() {
     return (
       <div className="flex flex-1 flex-col min-h-0">
         {listHeader}
+        {projectBar}
         <div className="flex-1 min-h-0 overflow-y-auto">{listBody}</div>
       </div>
     );
@@ -379,6 +430,7 @@ export function ChatPage() {
       >
         <div className="flex flex-col border-r h-full">
           {listHeader}
+          {projectBar}
           <div className="flex-1 min-h-0 overflow-y-auto">{listBody}</div>
         </div>
       </ResizablePanel>

@@ -55,10 +55,10 @@
     "failed": "Couldn't update approval rights"
   },
   "local_run": {
-    "title": "Local runs",
-    "description": "Computers that run your agents.",
-    "runtimes": "Runtimes",
-    "runtimes_description": "Connected computers and the agents on them.",
+    "title": "Runtimes",
+    "description": "Connected computers and the CLIs on them.",
+    "runtimes": "All runtimes",
+    "runtimes_description": "Which computers are online and which CLIs they have.",
     "open": "Open",
     "disk_access": "Full Disk Access is off",
     "disk_access_description": "Agents need it for protected folders. In System Settings, click + and choose {{app}}.",

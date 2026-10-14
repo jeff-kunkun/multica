@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, cleanup } from "@testing-library/react";
+import { render, cleanup } from "@testing-library/react";
 import { I18nProvider } from "@multica/core/i18n/react";
 import enCommon from "../../locales/en/common.json";
 import enAgents from "../../locales/en/agents.json";
@@ -101,8 +101,7 @@ function makeAgent(overrides: Record<string, unknown> = {}) {
     description: "A coding agent.",
     instructions: "",
     avatar_url: null,
-    // cloud so RuntimeRow reads "online" without a runtime fixture — the
-    // Model row is what these tests exercise.
+    // cloud so RuntimeRow reads "online" without a runtime fixture.
     runtime_mode: "cloud" as const,
     runtime_config: {},
     custom_args: [],
@@ -111,8 +110,6 @@ function makeAgent(overrides: Record<string, unknown> = {}) {
     invocation_targets: [],
     status: "idle" as const,
     max_concurrent_tasks: 1,
-    model: "claude-opus-4-8",
-    thinking_level: "high",
     owner_id: null,
     created_at: "2026-04-01T00:00:00Z",
     updated_at: "2026-04-01T00:00:00Z",
@@ -158,37 +155,4 @@ describe("AgentProfileCard — Runtime row", () => {
       expect(container.querySelector(iconSelector)).toBeInTheDocument();
     },
   );
-});
-
-describe("AgentProfileCard — Model row", () => {
-  it("shows the pinned model id and the effort badge", () => {
-    mockAgents.current = [makeAgent({ model: "claude-opus-4-8", thinking_level: "high" })];
-    renderCard();
-
-    expect(screen.getByText("claude-opus-4-8")).toBeInTheDocument();
-    expect(screen.getByText("high")).toBeInTheDocument();
-    expect(screen.queryByText(enAgents.profile_card.model_unset)).toBeNull();
-  });
-
-  // Regression (Emacs code review): an agent with no pinned model but a
-  // persisted thinking_level runs WITH that effort at run time. The badge
-  // must render even though the model cell reads "Runtime default" — gating
-  // it on `hasModel` hid legitimate runtime config.
-  it("shows the effort badge even when the model is unset (Runtime default)", () => {
-    mockAgents.current = [makeAgent({ model: "", thinking_level: "high" })];
-    renderCard();
-
-    expect(screen.getByText(enAgents.profile_card.model_unset)).toBeInTheDocument();
-    expect(screen.getByText("high")).toBeInTheDocument();
-  });
-
-  it("renders no effort badge when thinking_level is empty", () => {
-    mockAgents.current = [makeAgent({ model: "", thinking_level: "" })];
-    renderCard();
-
-    expect(screen.getByText(enAgents.profile_card.model_unset)).toBeInTheDocument();
-    // No effort token anywhere on the card.
-    expect(screen.queryByText("high")).toBeNull();
-    expect(screen.queryByText("medium")).toBeNull();
-  });
 });

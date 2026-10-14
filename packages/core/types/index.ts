@@ -55,14 +55,6 @@ export type {
   DashboardFailureByAgent,
   RuntimeUpdate,
   RuntimeUpdateStatus,
-  RuntimeModel,
-  RuntimeModelServiceTier,
-  RuntimeModelThinking,
-  RuntimeUnavailableModel,
-  RuntimeModelThinkingLevel,
-  RuntimeModelListRequest,
-  RuntimeModelListStatus,
-  RuntimeModelsResult,
   IssueUsageSummary,
 } from "./agent";
 export { RUNTIME_PROFILE_PROTOCOL_FAMILIES, RUNTIME_PROFILE_RUNTIME_TYPES } from "./agent";

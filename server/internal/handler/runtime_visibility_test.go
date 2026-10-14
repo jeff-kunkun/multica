@@ -290,12 +290,7 @@ func TestPrivateRuntimeReadEndpointsHideKnownRuntimeFromNonOwners(t *testing.T) 
 		t.Skip("database not available")
 	}
 
-	runtimeID, runtimeOwnerID, plainMemberID := runtimeVisibilityFixture(t)
-
-	modelRequest, err := testHandler.ModelListStore.Create(context.Background(), runtimeID)
-	if err != nil {
-		t.Fatalf("create model list request: %v", err)
-	}
+	runtimeID, _, plainMemberID := runtimeVisibilityFixture(t)
 
 	tests := []struct {
 		name   string
@@ -308,8 +303,6 @@ func TestPrivateRuntimeReadEndpointsHideKnownRuntimeFromNonOwners(t *testing.T) 
 		{"activity", http.MethodGet, "/api/runtimes/" + runtimeID + "/activity", testHandler.GetRuntimeTaskActivity, []string{"runtimeId", runtimeID}},
 		{"usage by agent", http.MethodGet, "/api/runtimes/" + runtimeID + "/usage/by-agent", testHandler.GetRuntimeUsageByAgent, []string{"runtimeId", runtimeID}},
 		{"usage by hour", http.MethodGet, "/api/runtimes/" + runtimeID + "/usage/by-hour", testHandler.GetRuntimeUsageByHour, []string{"runtimeId", runtimeID}},
-		{"model discovery", http.MethodPost, "/api/runtimes/" + runtimeID + "/models", testHandler.InitiateListModels, []string{"runtimeId", runtimeID}},
-		{"model discovery poll", http.MethodGet, "/api/runtimes/" + runtimeID + "/models/" + modelRequest.ID, testHandler.GetModelListRequest, []string{"runtimeId", runtimeID, "requestId", modelRequest.ID}},
 	}
 
 	for _, tc := range tests {
@@ -333,24 +326,6 @@ func TestPrivateRuntimeReadEndpointsHideKnownRuntimeFromNonOwners(t *testing.T) 
 				t.Fatalf("expected 404, got %d: %s", w.Code, w.Body.String())
 			}
 		})
-	}
-
-	// The owner remains allowed to start discovery on their own private machine.
-	w := httptest.NewRecorder()
-	req := withURLParam(newRequestAs(runtimeOwnerID, http.MethodPost, "/api/runtimes/"+runtimeID+"/models", nil), "runtimeId", runtimeID)
-	testHandler.InitiateListModels(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("owner model discovery: expected 200, got %d: %s", w.Code, w.Body.String())
-	}
-
-	if _, err := testPool.Exec(context.Background(), `UPDATE agent_runtime SET visibility = 'public' WHERE id = $1`, runtimeID); err != nil {
-		t.Fatalf("make runtime public: %v", err)
-	}
-	w = httptest.NewRecorder()
-	req = withURLParam(newRequestAs(plainMemberID, http.MethodPost, "/api/runtimes/"+runtimeID+"/models", nil), "runtimeId", runtimeID)
-	testHandler.InitiateListModels(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("public runtime model discovery: expected 200, got %d: %s", w.Code, w.Body.String())
 	}
 }
 

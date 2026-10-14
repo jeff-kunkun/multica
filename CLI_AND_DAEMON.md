@@ -369,57 +369,35 @@ Agent-specific overrides:
 | Variable | Description |
 |----------|-------------|
 | `MULTICA_CLAUDE_PATH` | Custom path to the `claude` binary |
-| `MULTICA_CLAUDE_MODEL` | Override the Claude model used |
 | `MULTICA_CLAUDE_ARGS` | Default extra arguments for Claude Code runs |
 | `MULTICA_ANTIGRAVITY_PATH` | Custom path to the `agy` binary |
-| `MULTICA_ANTIGRAVITY_MODEL` | Override the Antigravity model used |
 | `MULTICA_CODEBUDDY_PATH` | Custom path to the `codebuddy` binary |
-| `MULTICA_CODEBUDDY_MODEL` | Override the CodeBuddy model used |
 | `MULTICA_CODEBUDDY_ARGS` | Default extra arguments for CodeBuddy runs |
 | `MULTICA_CODEARTS_PATH` | Custom path to the `codearts` launcher or binary |
-| `MULTICA_CODEARTS_MODEL` | Override the CodeArts model used |
 | `MULTICA_DEVECO_PATH` | Custom path to the `deveco` binary |
-| `MULTICA_DEVECO_MODEL` | Override the DevEco Code model used |
 | `MULTICA_CODEX_PATH` | Custom path to the `codex` binary |
-| `MULTICA_CODEX_MODEL` | Override the Codex model used |
 | `MULTICA_CODEX_ARGS` | Default extra arguments for Codex runs |
 | `MULTICA_COPILOT_PATH` | Custom path to the `copilot` binary |
-| `MULTICA_COPILOT_MODEL` | Override the Copilot model used (note: GitHub Copilot routes models through your account entitlement, so this may not be honoured) |
 | `MULTICA_OPENCODE_PATH` | Custom path to the `opencode` binary |
-| `MULTICA_OPENCODE_MODEL` | Override the OpenCode model used |
 | `MULTICA_OPENCLAW_PATH` | Custom path to the `openclaw` binary |
-| `MULTICA_OPENCLAW_MODEL` | Override the OpenClaw model used |
 | `MULTICA_OPENCLAW_CLI_TIMEOUT` | Deadline for each `openclaw config ...` call during task preparation (default 30s; accepts `45s` or `45`). Raise it when the local CLI is slow to start; the daemon also reads it from `backends.openclaw.cli_timeout` in the CLI config |
 | `MULTICA_HERMES_PATH` | Custom path to the `hermes` binary |
-| `MULTICA_HERMES_MODEL` | Override the Hermes model used |
 | `MULTICA_PI_PATH` | Custom path to the `pi` binary |
-| `MULTICA_PI_MODEL` | Override the Pi model used |
 | `MULTICA_CURSOR_PATH` | Custom path to the `cursor-agent` binary |
-| `MULTICA_CURSOR_MODEL` | Override the Cursor Agent model used |
 | `MULTICA_KIMI_PATH` | Custom path to the `kimi` binary |
-| `MULTICA_KIMI_MODEL` | Override the Kimi model used |
 | `MULTICA_REASONIX_PATH` | Custom path to the `reasonix` binary |
-| `MULTICA_REASONIX_MODEL` | Override the Reasonix model used |
 | `MULTICA_DIM_PATH` | Custom path to the `dim` binary |
-| `MULTICA_DIM_MODEL` | Override the Dim model used |
 | `MULTICA_KIRO_PATH` | Custom path to the `kiro-cli` binary |
-| `MULTICA_KIRO_MODEL` | Override the Kiro model used |
 | `MULTICA_QODER_PATH` | Custom path to the `qodercli` binary |
-| `MULTICA_QODER_MODEL` | Override the Qoder model used |
 | `MULTICA_QODERCLICN_PATH` | Custom path to the `qoderclicn` binary |
-| `MULTICA_QODERCLICN_MODEL` | Override the Qoder CN model used |
 | `MULTICA_TRAECLI_PATH` | Custom path to the `traecli` binary |
-| `MULTICA_TRAECLI_MODEL` | Override the Trae model used (a model id from your logged-in traecli catalog, e.g. `Doubao-Seed-2.1-Pro`) |
 | `MULTICA_GROK_PATH` | Custom path to the `grok` binary (defaults to `grok` on PATH; often `~/.grok/bin/grok`) |
-| `MULTICA_GROK_MODEL` | Override the Grok model used (e.g. `grok-4.5`) |
 | `MULTICA_QWEN_PATH` | Custom path to the `qwen` binary |
-| `MULTICA_QWEN_MODEL` | Override the Qwen Code model used |
 | `MULTICA_QWEN_ARGS` | Daemon-wide extra Qwen arguments (POSIX shellword parsing; managed protocol flags are filtered) |
 | `MULTICA_QWENPAW_PATH` | Custom path to the `qwenpaw` binary |
 | `MULTICA_QWENPAW_ARGS` | Daemon-wide extra QwenPaw arguments (POSIX shellword parsing; managed protocol flags are filtered) |
 | `MULTICA_MCODE_PATH` | Custom path to the `mcode` binary |
 | `MULTICA_DSH_PATH` | Custom path to the `dsh` binary |
-| `MULTICA_DSH_MODEL` | Override the DeepSeek Harness model used (a model id from the dsh catalog, e.g. `deepseek-official/deepseek-chat`) |
 
 If a previously generated `~/.multica/hooks` wrapper is first on `PATH` and calls the same command name again, the daemon skips that hooks directory during built-in agent discovery and records the real binary path behind it. If your interactive shell still recurses when you run `claude`, `codex`, or `hermes` manually, remove the hooks entry from your shell startup file or replace the wrapper body with an absolute `exec /path/to/real-binary "$@"`.
 
@@ -440,7 +418,7 @@ Two consequences are worth knowing before debugging a missing MCP tool:
 If a configured server produces no tools, check the daemon log for those warnings first, then confirm the runtime itself exposes the server's tools to the model — some ACP adapters apply their own tool-profile filtering after connecting.
 
 
-The daemon launches QwenPaw as `qwenpaw acp --workspace <per-task dir>`. It writes the task brief to `AGENTS.md`. `acp` and `--workspace` are reserved: `custom_args` cannot override them. QwenPaw is the one runtime with no `MULTICA_QWENPAW_MODEL`: its `session/set_model` writes to a shared, persistent agent config rather than the session, so Multica never sends it a model and leaves that choice to QwenPaw's own configuration.
+The daemon launches QwenPaw as `qwenpaw acp --workspace <per-task dir>`. It writes the task brief to `AGENTS.md`. `acp` and `--workspace` are reserved: `custom_args` cannot override them. Multica never sends any runtime a model: each CLI uses its own configured default.
 
 The daemon launches MiniMax Code as `mcode acp` and writes the task brief to `AGENTS.md`. MCode owns model selection and currently advertises `loadSession: false`; Multica therefore starts a fresh MCode session when a later run cannot load the saved session.
 

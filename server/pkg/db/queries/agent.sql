@@ -43,13 +43,13 @@ WHERE id = $1 AND workspace_id = $2 AND kind = 'user';
 INSERT INTO agent (
     workspace_id, name, description, avatar_url, runtime_mode,
     runtime_config, runtime_id, visibility, max_concurrent_tasks, owner_id,
-    instructions, custom_env, custom_args, mcp_config, model, thinking_level,
-    service_tier, conversation_starters, permission_mode
+    instructions, custom_env, custom_args, mcp_config,
+    conversation_starters, permission_mode
 ) VALUES (
     $1, $2, $3, $4, $5,
     $6, $7, $8, $9, $10,
-    $11, $12, $13, $14, $15, $16,
-    $17, COALESCE(sqlc.narg('conversation_starters')::jsonb, '[]'::jsonb),
+    $11, $12, $13, $14,
+    COALESCE(sqlc.narg('conversation_starters')::jsonb, '[]'::jsonb),
     COALESCE(sqlc.narg('permission_mode'), 'private')
 )
 RETURNING *;
@@ -77,26 +77,8 @@ UPDATE agent SET
     custom_env = COALESCE(sqlc.narg('custom_env'), custom_env),
     custom_args = COALESCE(sqlc.narg('custom_args'), custom_args),
     mcp_config = COALESCE(sqlc.narg('mcp_config'), mcp_config),
-    model = COALESCE(sqlc.narg('model'), model),
-    thinking_level = COALESCE(sqlc.narg('thinking_level'), thinking_level),
-    service_tier = COALESCE(sqlc.narg('service_tier'), service_tier),
     conversation_starters = COALESCE(sqlc.narg('conversation_starters'), conversation_starters),
     updated_at = now()
-WHERE id = $1
-RETURNING *;
-
--- name: ClearAgentThinkingLevel :one
--- Explicit NULL-clear for thinking_level. COALESCE-based UpdateAgent cannot
--- set the column back to NULL, so the API layer routes "user picked Default"
--- through this dedicated query.
-UPDATE agent SET thinking_level = NULL, updated_at = now()
-WHERE id = $1
-RETURNING *;
-
--- name: ClearAgentServiceTier :one
--- Explicit NULL-clear for service_tier. COALESCE-based UpdateAgent cannot
--- set the column back to NULL, so the API routes "Runtime default" here.
-UPDATE agent SET service_tier = NULL, updated_at = now()
 WHERE id = $1
 RETURNING *;
 

@@ -3,7 +3,6 @@
 import { useEffect, useRef, type ReactNode } from "react";
 import {
   AGENT_DESCRIPTION_MAX_LENGTH,
-  applyDraftModelChange,
   applyDraftRuntimeChange,
   type AgentDraft,
   type AgentPermissionScope,
@@ -22,9 +21,6 @@ import {
   SettingsSection,
 } from "../../settings/components/settings-layout";
 import { CharCounter } from "../components/char-counter";
-import { ServiceTierSettingField } from "../components/inspector/service-tier-setting-field";
-import { ThinkingSettingField } from "../components/inspector/thinking-prop-row";
-import { ModelDropdown } from "../components/model-dropdown";
 import { RuntimePicker } from "../components/runtime-picker";
 import { ConversationStartersEditor } from "../components/conversation-starters-editor";
 
@@ -57,8 +53,6 @@ export function AgentConfigurationPanel({
   const conversationStartersSupported = useConfigStore(
     (state) => state.agentConversationStartersSupported,
   );
-  const selectedRuntime =
-    runtimes.find((runtime) => runtime.id === draft.runtimeId) ?? null;
   const set = <K extends keyof AgentDraft>(key: K, value: AgentDraft[K]) =>
     onChange({ ...draft, [key]: value });
   const otherMembers = members.filter(
@@ -164,38 +158,18 @@ export function AgentConfigurationPanel({
 
       <SettingsSection
         title={t(($) => $.creation_studio.sections.execution)}
-        description={t(($) => $.creation_studio.sections.execution_hint)}
       >
         <SettingsCard>
-          <div className="grid gap-4 px-4 py-4 sm:grid-cols-2">
-            <div className="min-w-0">
-              <RuntimePicker
-                runtimes={runtimes}
-                runtimesLoading={runtimesLoading}
-                members={members}
-                currentUserId={currentUserId}
-                selectedRuntimeId={draft.runtimeId}
-                onSelect={handleRuntimeSelect}
-              />
-            </div>
-            <ModelDropdown
-              runtimeId={selectedRuntime?.id ?? null}
-              runtimeOnline={selectedRuntime?.status === "online"}
-              value={draft.model}
-              onChange={(value) => onChange(applyDraftModelChange(draft, value))}
-              disabled={!selectedRuntime}
+          <div className="px-4 py-4">
+            <RuntimePicker
+              runtimes={runtimes}
+              runtimesLoading={runtimesLoading}
+              members={members}
+              currentUserId={currentUserId}
+              selectedRuntimeId={draft.runtimeId}
+              onSelect={handleRuntimeSelect}
             />
           </div>
-          {/* Both fields fail closed: they render only when the exact selected
-              model's live catalog advertises the capability (or a value is
-              already set and needs clearing), so an offline runtime, a failed
-              discovery or an empty model shows nothing instead of an input
-              that cannot be honoured. */}
-          <AgentExecutionOverrides
-            draft={draft}
-            runtime={selectedRuntime}
-            onChange={onChange}
-          />
         </SettingsCard>
       </SettingsSection>
 
@@ -329,51 +303,6 @@ export function AgentNameField({
         ) : null}
       </div>
     </DraftFieldRow>
-  );
-}
-
-/**
- * Per-model execution overrides (thinking level + Codex speed) for the create
- * flow. Capability comes from the exact selected model's live catalog on the
- * selected runtime, so nothing renders while that cannot be resolved — an
- * offline runtime, failed discovery, or an empty "use the runtime default"
- * model. That is the same fail-closed rule the settings page follows, and it is
- * why no value can be sent that the daemon would refuse to honour.
- */
-export function AgentExecutionOverrides({
-  draft,
-  runtime,
-  onChange,
-}: {
-  draft: AgentDraft;
-  runtime: RuntimeDevice | null;
-  onChange: (draft: AgentDraft) => void;
-}) {
-  const { t } = useT("agents");
-  const runtimeOnline = runtime?.status === "online";
-  return (
-    <>
-      <ThinkingSettingField
-        label={t(($) => $.creation_studio.thinking_label)}
-        runtimeId={runtime?.id ?? null}
-        runtimeOnline={runtimeOnline}
-        provider={runtime?.provider ?? ""}
-        model={draft.model}
-        value={draft.thinkingLevel}
-        canEdit
-        onChange={(thinkingLevel) => onChange({ ...draft, thinkingLevel })}
-      />
-      <ServiceTierSettingField
-        label={t(($) => $.creation_studio.speed_label)}
-        runtimeId={runtime?.id ?? null}
-        runtimeOnline={runtimeOnline}
-        provider={runtime?.provider ?? ""}
-        model={draft.model}
-        value={draft.serviceTier}
-        canEdit
-        onChange={(serviceTier) => onChange({ ...draft, serviceTier })}
-      />
-    </>
   );
 }
 

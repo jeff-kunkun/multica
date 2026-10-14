@@ -68,6 +68,7 @@
     "./chat/pending": "./chat/pending.ts",
     "./chat/message-cache": "./chat/message-cache.ts",
     "./chat/unread": "./chat/unread.ts",
+    "./chat/project-bar": "./chat/project-bar.ts",
     "./runtimes": "./runtimes/index.ts",
     "./runtimes/queries": "./runtimes/queries.ts",
     "./runtimes/mutations": "./runtimes/mutations.ts",

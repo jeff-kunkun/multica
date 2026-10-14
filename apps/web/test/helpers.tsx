@@ -63,7 +63,6 @@ export const mockAgents: Agent[] = [
     permission_mode: "public_to",
     invocation_targets: [{ target_type: "workspace", target_id: null }],
     max_concurrent_tasks: 3,
-    model: "",
     owner_id: null,
     created_at: "2026-01-01T00:00:00Z",
     updated_at: "2026-01-01T00:00:00Z",

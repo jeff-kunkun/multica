@@ -126,14 +126,6 @@ type RuntimeProfilesChangedPayload struct {
 // no workspace data is embedded in the event.
 type WorkspacesChangedPayload struct{}
 
-// PendingWorkKind values carried by PendingWorkPayload.Kind. The kind is
-// advisory only — the daemon reacts identically to every kind (one immediate
-// heartbeat, which claims whatever is queued) — so an unknown value from a
-// newer server stays safe on an older daemon.
-const (
-	PendingWorkKindModelList = "model_list"
-)
-
 // PendingWorkPayload is sent from server to daemon as a wakeup hint when a
 // heartbeat-carried request is enqueued for a runtime. The daemon responds by
 // sending one immediate heartbeat for RuntimeID instead of waiting for its next
@@ -338,12 +330,11 @@ type DaemonHeartbeatRequestPayload struct {
 // and re-registers; without it the dead UUID would keep heartbeating until the
 // daemon process restarts.
 type DaemonHeartbeatAckPayload struct {
-	RuntimeID          string                           `json:"runtime_id"`
-	Status             string                           `json:"status"`
-	ServerCapabilities []string                         `json:"server_capabilities,omitempty"`
-	RuntimeGone        bool                             `json:"runtime_gone,omitempty"`
-	PendingUpdate      *DaemonHeartbeatPendingUpdate    `json:"pending_update,omitempty"`
-	PendingModelList   *DaemonHeartbeatPendingModelList `json:"pending_model_list,omitempty"`
+	RuntimeID          string                        `json:"runtime_id"`
+	Status             string                        `json:"status"`
+	ServerCapabilities []string                      `json:"server_capabilities,omitempty"`
+	RuntimeGone        bool                          `json:"runtime_gone,omitempty"`
+	PendingUpdate      *DaemonHeartbeatPendingUpdate `json:"pending_update,omitempty"`
 }
 
 // HeartbeatStatusRuntimeGone is the ack Status used when the runtime row no
@@ -355,10 +346,4 @@ const HeartbeatStatusRuntimeGone = "runtime_gone"
 type DaemonHeartbeatPendingUpdate struct {
 	ID            string `json:"id"`
 	TargetVersion string `json:"target_version"`
-}
-
-// DaemonHeartbeatPendingModelList describes a request for the daemon to
-// enumerate the runtime's supported models.
-type DaemonHeartbeatPendingModelList struct {
-	ID string `json:"id"`
 }

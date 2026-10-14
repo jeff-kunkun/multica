@@ -69,31 +69,6 @@ func opencodeUsesV2Contract(cfg Config) bool {
 	return version.Major >= 2
 }
 
-// opencodeModelArg folds a thinking level into the model string for the 2.x
-// contract, which has no `--variant` flag and instead reads the variant off the
-// model as `provider/model#variant`.
-//
-// The second return reports whether the thinking level was representable. It is
-// false only when there is a level but no model to attach it to: 2.x resolves
-// the default model server-side, so there is no model string to append to and
-// the level cannot be expressed at all. Callers warn rather than fail, because
-// losing the reasoning effort is not worth failing an otherwise valid task.
-func opencodeModelArg(model, thinkingLevel string) (string, bool) {
-	if thinkingLevel == "" {
-		return model, true
-	}
-	if model == "" {
-		return model, false
-	}
-	// A model that already carries a variant was pinned deliberately (by
-	// agent.model or custom_args); it wins over the agent-level thinking level
-	// rather than growing a second `#` that OpenCode would reject.
-	if strings.Contains(model, "#") {
-		return model, true
-	}
-	return model + "#" + thinkingLevel, true
-}
-
 // ErrOpenCodeV2MCPUnsupported reports that the MCP servers Multica manages for
 // a task cannot be delivered to an OpenCode 2.x runtime yet.
 //

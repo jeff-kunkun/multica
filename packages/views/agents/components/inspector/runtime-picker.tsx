@@ -19,6 +19,7 @@ import {
 import { ProviderLogo } from "../../../runtimes/components/provider-logo";
 import {
   buildRuntimeMachines,
+  isAddressLikeName,
   runtimeRowLabel,
   type RuntimeMachine,
 } from "../../../runtimes/components/runtime-machines";
@@ -101,13 +102,25 @@ export function RuntimePicker({
   const selectedLabel = selected
     ? runtimeRowLabel(selected, selectedMachine?.title ?? "")
     : null;
+  // The computer the CLI runs on. A hostname that is just a network address
+  // says nothing to a person, so it reads as the owner's computer instead.
+  const selectedOwner = selected?.owner_id
+    ? members.find((m) => m.user_id === selected.owner_id) ?? null
+    : null;
+  const machineLabel = !selectedMachine
+    ? null
+    : !isAddressLikeName(selectedMachine.title)
+      ? selectedMachine.title
+      : selectedOwner
+        ? t(($) => $.pickers.runtime_machine_of, { name: selectedOwner.name })
+        : null;
   // Combined "Claude · Jiayuan's MacBook Pro" string for compact surfaces
   // (chip, read-only field, tooltips). The dedupe guard covers runtimes
   // whose whole label already is the machine title (single unnamed cloud
   // workers and the like).
   const combinedLabel = selected
-    ? selectedMachine && selectedMachine.title !== selectedLabel
-      ? `${selectedLabel} · ${selectedMachine.title}`
+    ? machineLabel && machineLabel !== selectedLabel
+      ? `${selectedLabel} · ${machineLabel}`
       : (selectedLabel ?? "")
     : t(($) => $.pickers.runtime_none);
 
@@ -140,7 +153,7 @@ export function RuntimePicker({
       if (!showLabel) return control;
       return (
         <div className="flex min-w-0 flex-col">
-          <Label>{t(($) => $.inspector.prop_runtime)}</Label>
+          <Label>{t(($) => $.inspector.prop_cli)}</Label>
           <div className="mt-1.5">{control}</div>
         </div>
       );
@@ -279,10 +292,10 @@ export function RuntimePicker({
           {variant === "field" && selected ? (
             <span className="min-w-0 flex-1 truncate">
               {selectedLabel}
-              {selectedMachine && selectedMachine.title !== selectedLabel && (
+              {machineLabel && machineLabel !== selectedLabel && (
                 <span className="text-muted-foreground">
                   {" · "}
-                  {selectedMachine.title}
+                  {machineLabel}
                 </span>
               )}
             </span>

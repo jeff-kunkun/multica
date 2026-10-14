@@ -323,7 +323,7 @@
       "mcp": "MCP servers",
       "code": "Code",
       "approvers": "Approval rights",
-      "local_run": "Local runs"
+      "local_run": "Runtimes"
     },
     "groups": {
       "office": "Everyday",
@@ -960,6 +960,10 @@
     "secrets_title": "{{name}} is ready",
     "secrets_warning": "Copy these now. The token and secret won't be shown again.",
     "token_label": "Token",
+    "setup_prompt_label": "Setup prompt",
+    "setup_prompt_hint": "Forward it to the Bot. It connects and checks itself.",
+    "copy_prompt": "Copy prompt",
+    "copied": "Copied",
     "webhook_secret_label": "Webhook signing secret",
     "confirm_stored": "I've saved them",
     "done": "Done",

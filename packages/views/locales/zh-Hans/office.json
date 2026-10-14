@@ -55,10 +55,10 @@
     "failed": "没能更新批准权"
   },
   "local_run": {
-    "title": "本机运行",
-    "description": "替你跑 Agent 的电脑。",
-    "runtimes": "运行设备",
-    "runtimes_description": "连上的电脑和上面的 Agent。",
+    "title": "运行时",
+    "description": "连上的电脑和上面的 CLI。",
+    "runtimes": "全部运行时",
+    "runtimes_description": "每台电脑是否在线、装了哪些 CLI。",
     "open": "打开",
     "disk_access": "完全磁盘访问权限未开启",
     "disk_access_description": "Agent 读受保护的文件夹要用它。在系统设置里点 +，选 {{app}}。",

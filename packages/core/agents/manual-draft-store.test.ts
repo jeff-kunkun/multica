@@ -82,16 +82,13 @@ describe("manual agent drafts", () => {
   });
 
   // Every field the form can change, one at a time. An earlier version listed
-  // six of them by hand and silently dropped the rest: picking a model before
+  // six of them by hand and silently dropped the rest: setting an avatar before
   // typing a name, or setting access first, deleted the slot on the next save.
   it.each([
     ["name", { name: "Release" }],
     ["description", { description: "Ships carefully" }],
     ["instructions", { instructions: "Be careful" }],
     ["avatar", { avatarUrl: "🚀" }],
-    ["model", { model: "gpt-5.6-sol" }],
-    ["thinking level", { thinkingLevel: "high" }],
-    ["service tier", { serviceTier: "priority" }],
     ["access scope", { permissionScope: "workspace" as const }],
     ["members", { memberIds: new Set(["member-1"]) }],
     ["teams", { teamIds: new Set(["team-1"]) }],

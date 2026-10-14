@@ -61,28 +61,6 @@ func TestLaunchPrefixPlacesFlagStyleWrappersFirst(t *testing.T) {
 	}
 }
 
-// TestLaunchPrefixLosesToExplicitAgentModel pins the precedence flip this
-// change makes deliberately. Before GH #7046 the prefix sat last and won every
-// last-wins parse, so a runtime pinned to `--model composer-2.5` silently
-// overrode the model the member picked in the UI. Prefix-first inverts that:
-// the more specific per-agent choice is the later token and wins.
-func TestLaunchPrefixLosesToExplicitAgentModel(t *testing.T) {
-	t.Parallel()
-
-	cfg := Config{ExecutablePath: "agent", LaunchPrefix: []string{"--model", "composer-2.5"}, Logger: slog.Default()}
-	argv := cfg.commandAt("agent").Argv(buildClaudeArgs(ExecOptions{Model: "claude-opus-4-7"}, slog.Default())...)
-
-	runtimeModel := prefixIndex(argv, []string{"--model", "composer-2.5"})
-	agentModel := prefixIndex(argv, []string{"--model", "claude-opus-4-7"})
-	if runtimeModel < 0 || agentModel < 0 {
-		t.Fatalf("expected both --model occurrences: %v", argv)
-	}
-	if agentModel <= runtimeModel {
-		t.Fatalf("the agent's explicit model must be the later --model (runtime at %d, agent at %d): %v",
-			runtimeModel, agentModel, argv)
-	}
-}
-
 // TestFilterLaunchPrefixKeepsSubcommandsDropsProtocolFlags covers the
 // blocklist split: positional tokens are the command's identity and pass
 // through, flag tokens compete with the daemon's own protocol arguments and do
@@ -117,23 +95,6 @@ func TestNewFiltersLaunchPrefixOnce(t *testing.T) {
 	want := []string{"start", "q36"}
 	if strings.Join(got, "\x00") != strings.Join(want, "\x00") {
 		t.Fatalf("New did not filter the launch prefix: got %v, want %v", got, want)
-	}
-}
-
-// TestDiscoveryCacheKeySeparatesLaunchPrefixes: one binary behind two
-// different prefixes is two different catalogs.
-func TestDiscoveryCacheKeySeparatesLaunchPrefixes(t *testing.T) {
-	t.Parallel()
-
-	q36 := discoveryCacheKey("claude", Command{Path: "/usr/local/bin/ccms", Prefix: []string{"start", "q36"}})
-	opus := discoveryCacheKey("claude", Command{Path: "/usr/local/bin/ccms", Prefix: []string{"start", "opus"}})
-	bare := discoveryCacheKey("claude", Command{Path: "/usr/local/bin/ccms"})
-
-	if q36 == opus {
-		t.Fatalf("two prefixes on one binary share a cache key: %q", q36)
-	}
-	if q36 == bare || opus == bare {
-		t.Fatalf("a prefixed command must not share the bare binary's key: %q / %q / %q", q36, opus, bare)
 	}
 }
 
@@ -412,40 +373,5 @@ func TestFilterLaunchPrefixConsumesBlockedFlagValue(t *testing.T) {
 	want := []string{"start", "q36"}
 	if strings.Join(got, "\x00") != strings.Join(want, "\x00") {
 		t.Fatalf("filterLaunchPrefix = %v, want %v", got, want)
-	}
-}
-
-func TestCodexLaunchPrefixCannotOverrideExplicitFastMode(t *testing.T) {
-	t.Parallel()
-
-	for _, prefix := range [][]string{
-		{"proxy", "run", "--disable", "fast_mode"},
-		{"proxy", "run", "--disable=fast_mode"},
-		{"proxy", "run", "-c", "features.fast_mode=false"},
-	} {
-		t.Run(strings.Join(prefix, "_"), func(t *testing.T) {
-			t.Parallel()
-			got := stripCodexFastModeConflicts(prefix, slog.Default())
-			want := []string{"proxy", "run"}
-			if strings.Join(got, "\x00") != strings.Join(want, "\x00") {
-				t.Fatalf("stripCodexFastModeConflicts(%v) = %v, want %v", prefix, got, want)
-			}
-			// The managed enable is appended once, by buildCodexArgs, not here.
-			if prefixIndex(got, []string{"--enable"}) >= 0 {
-				t.Fatalf("the strip helper must not append the managed enable: %v", got)
-			}
-		})
-	}
-}
-
-// TestEnforceCodexFastModeStillAppendsEnableOnce guards the split: pulling the
-// removal out of enforceCodexFastMode must not change what it produces.
-func TestEnforceCodexFastModeStillAppendsEnableOnce(t *testing.T) {
-	t.Parallel()
-
-	got := enforceCodexFastMode([]string{"--disable", "fast_mode", "--model", "gpt-5"}, slog.Default())
-	want := []string{"--model", "gpt-5", "--enable", "fast_mode"}
-	if strings.Join(got, "\x00") != strings.Join(want, "\x00") {
-		t.Fatalf("enforceCodexFastMode = %v, want %v", got, want)
 	}
 }

@@ -34,9 +34,9 @@ vi.mock("./agent-overview-pane", () => ({
   }) => (
     <button
       type="button"
-      onClick={() => void onUpdate(agent.id, { model: "new-model" })}
+      onClick={() => void onUpdate(agent.id, { description: "new-description" })}
     >
-      update model
+      update description
     </button>
   ),
 }));
@@ -175,7 +175,6 @@ const baseAgent: Agent = {
   invocation_targets: [{ target_type: "workspace", target_id: null }],
   status: "idle",
   max_concurrent_tasks: 1,
-  model: "",
   owner_id: "user-2",
   created_at: "2026-05-28T00:00:00Z",
   updated_at: "2026-05-28T00:00:00Z",
@@ -216,7 +215,7 @@ beforeEach(() => {
   membersPendingRef.current = false;
   agentsRef.current = [baseAgent];
   mockGetAgent.mockRejectedValue(new ApiError("not found", 404, "Not Found"));
-  mockUpdateAgent.mockResolvedValue({ ...baseAgent, model: "new-model" });
+  mockUpdateAgent.mockResolvedValue({ ...baseAgent, description: "new-description" });
 });
 
 describe("AgentDetailPage direct-detail fallback", () => {
@@ -360,9 +359,9 @@ describe("AgentDetailPage direct-detail fallback", () => {
     const { queryClient } = renderPage();
     await screen.findByRole("button", { name: "Assign work" });
 
-    fireEvent.click(screen.getByRole("button", { name: "update model" }));
+    fireEvent.click(screen.getByRole("button", { name: "update description" }));
 
-    expect(await screen.findByText("new-model")).toBeInTheDocument();
+    expect(await screen.findByText("new-description")).toBeInTheDocument();
     expect(
       queryClient.getQueryData<Agent>([
         "agents",
@@ -370,7 +369,7 @@ describe("AgentDetailPage direct-detail fallback", () => {
         "detail",
         "agent-1",
       ]),
-    ).toMatchObject({ model: "new-model" });
+    ).toMatchObject({ description: "new-description" });
   });
 });
 

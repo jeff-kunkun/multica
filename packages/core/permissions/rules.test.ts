@@ -31,7 +31,6 @@ function makeAgent(overrides: Partial<Agent> = {}): Agent {
     invocation_targets: [{ target_type: "workspace", target_id: null }],
     status: "idle",
     max_concurrent_tasks: 1,
-    model: "default",
     owner_id: ALICE,
     created_at: "2026-04-01T00:00:00Z",
     updated_at: "2026-04-01T00:00:00Z",

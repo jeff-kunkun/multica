@@ -63,7 +63,6 @@ const COLUMN_KEYS: AgentColumnKey[] = [
   "runtime",
   "lastActive",
   "runs",
-  "model",
   "created",
 ];
 
@@ -87,7 +86,6 @@ export function countActiveFilterDimensions(
   if (filters.availability.length > 0) count++;
   if (filters.runtimes.length > 0) count++;
   if (filters.owners.length > 0) count++;
-  if (filters.models.length > 0) count++;
   if (filters.access.length > 0) count++;
   return count;
 }
@@ -166,12 +164,9 @@ export function AgentListToolbar({
   // Owner options: members who own at least one agent in the current scope.
   const memberById = new Map(members.map((m) => [m.user_id, m]));
   const ownerCounts = new Map<string, number>();
-  const modelCounts = new Map<string, number>();
   for (const row of allRows) {
     const oid = row.agent.owner_id;
     if (oid) ownerCounts.set(oid, (ownerCounts.get(oid) ?? 0) + 1);
-    const model = row.agent.model;
-    if (model) modelCounts.set(model, (modelCounts.get(model) ?? 0) + 1);
   }
 
   const SCOPE_LABELS: Record<AgentsScope, string> = {
@@ -194,7 +189,6 @@ export function AgentListToolbar({
     runtime: t(($) => $.columns.runtime),
     lastActive: t(($) => $.columns.last_active),
     runs: t(($) => $.columns.runs),
-    model: t(($) => $.columns.model),
     created: t(($) => $.columns.created),
   };
   const sortLabel = SORT_LABELS[sortField];
@@ -477,36 +471,6 @@ export function AgentListToolbar({
                 })}
               </DropdownMenuSubContent>
             </DropdownMenuSub>
-
-            {/* Model — runtime-native model id (categorical column → filter) */}
-            {modelCounts.size > 0 && (
-              <DropdownMenuSub>
-                <DropdownMenuSubTrigger>
-                  <span className="flex-1">
-                    {t(($) => $.toolbar.section_model)}
-                  </span>
-                  {filters.models.length > 0 && (
-                    <span className="text-caption font-medium text-primary">
-                      {filters.models.length}
-                    </span>
-                  )}
-                </DropdownMenuSubTrigger>
-                <DropdownMenuSubContent className="max-h-72 w-auto min-w-44 overflow-y-auto">
-                  {[...modelCounts.entries()].map(([model, count]) => (
-                    <DropdownMenuCheckboxItem
-                      key={model}
-                      checked={filters.models.includes(model)}
-                      onCheckedChange={() => onToggleFilter("models", model)}
-                      className={FILTER_ITEM_CLASS}
-                    >
-                      <HoverCheck checked={filters.models.includes(model)} />
-                      <span className="min-w-0 truncate">{model}</span>
-                      {countBadge(count)}
-                    </DropdownMenuCheckboxItem>
-                  ))}
-                </DropdownMenuSubContent>
-              </DropdownMenuSub>
-            )}
           </DropdownMenuContent>
         </DropdownMenu>
 

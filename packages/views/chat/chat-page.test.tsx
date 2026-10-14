@@ -4,7 +4,7 @@ import { StrictMode } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { act, fireEvent, render, screen } from "@testing-library/react";
-import type { Agent } from "@multica/core/types";
+import type { Agent, ChatSession, PinnedItem, Project } from "@multica/core/types";
 import { I18nProvider } from "@multica/core/i18n/react";
 import enCommon from "../locales/en/common.json";
 import enChat from "../locales/en/chat.json";
@@ -29,16 +29,25 @@ vi.mock("./components/chat-input", () => ({
 }));
 vi.mock("./components/chat-thread-list", () => ({
   ChatThreadList: ({
+    sessions,
     onSelectSession,
   }: {
+    sessions: { id: string }[];
     onSelectSession: (s: { id: string; agent_id: string }) => void;
   }) => (
-    <button
-      type="button"
-      onClick={() => onSelectSession({ id: "session-9", agent_id: "agent-9" })}
-    >
-      select-thread
-    </button>
+    <>
+      <button
+        type="button"
+        onClick={() => onSelectSession({ id: "session-9", agent_id: "agent-9" })}
+      >
+        select-thread
+      </button>
+      <ul aria-label="threads">
+        {sessions.map((s) => (
+          <li key={s.id}>{s.id}</li>
+        ))}
+      </ul>
+    </>
   ),
 }));
 vi.mock("./components/chat-session-header", () => ({
@@ -48,7 +57,11 @@ vi.mock("./components/chat-empty-state", () => ({
   EmptyState: () => <div>chat-empty-state</div>,
 }));
 vi.mock("./components/new-chat-button", () => ({
-  NewChatButton: () => <div>new-chat-button</div>,
+  NewChatButton: ({ agents, onStart }: { agents: Agent[]; onStart: (a: Agent | null) => void }) => (
+    <button type="button" onClick={() => onStart(agents[0] ?? null)}>
+      new-chat-button
+    </button>
+  ),
 }));
 vi.mock("./components/offline-banner", () => ({
   OfflineBanner: () => null,
@@ -105,6 +118,11 @@ const storeListeners = vi.hoisted(() => new Set<() => void>());
 const availableAgentsRef = vi.hoisted(() => ({ current: [] as Agent[] }));
 const agentsSettledRef = vi.hoisted(() => ({ current: true }));
 const mockStartNewChat = vi.hoisted(() => vi.fn());
+const sessionsRef = vi.hoisted(() => ({ current: [] as ChatSession[] }));
+const projectsRef = vi.hoisted(() => ({ current: [] as Project[] }));
+const pinsRef = vi.hoisted(() => ({ current: [] as PinnedItem[] }));
+const mockCreatePin = vi.hoisted(() => vi.fn());
+const mockDeletePin = vi.hoisted(() => vi.fn());
 const mockToastError = vi.hoisted(() => vi.fn());
 const mockSetActiveSession = vi.hoisted(() =>
   vi.fn((id: string | null) => {
@@ -129,6 +147,15 @@ vi.mock("@multica/core/chat", () => ({
   ),
 }));
 
+vi.mock("@multica/core/pins", () => ({
+  pinListOptions: () => ({
+    queryKey: ["pins"],
+    queryFn: () => pinsRef.current,
+  }),
+  useCreatePin: () => ({ mutate: mockCreatePin }),
+  useDeletePin: () => ({ mutate: mockDeletePin }),
+}));
+
 vi.mock("./components/use-chat-controller", async () => {
   const { useSyncExternalStore } = await import("react");
   return {
@@ -138,7 +165,8 @@ vi.mock("./components/use-chat-controller", async () => {
       agents: availableAgentsRef.current,
       availableAgents: availableAgentsRef.current,
       agentsSettled: agentsSettledRef.current,
-      sessions: [],
+      sessions: sessionsRef.current,
+      projects: projectsRef.current,
       activeSessionId: useSyncExternalStore(
         subscribeToStore,
         () => storeRef.current,
@@ -195,7 +223,6 @@ const agent: Agent = {
   invocation_targets: [{ target_type: "workspace", target_id: null }],
   status: "idle",
   max_concurrent_tasks: 1,
-  model: "",
   owner_id: "user-2",
   created_at: "2026-05-28T00:00:00Z",
   updated_at: "2026-05-28T00:00:00Z",
@@ -257,6 +284,9 @@ beforeEach(() => {
   agentsSettledRef.current = true;
   platformWorkspace.slug = "acme";
   layout.width = DESKTOP;
+  sessionsRef.current = [];
+  projectsRef.current = [];
+  pinsRef.current = [];
 });
 
 describe("ChatPage URL synchronization", () => {
@@ -368,7 +398,7 @@ describe("ChatPage ?agent= deep link", () => {
   it("starts a new chat with the linked agent and strips the param", () => {
     const { replace } = renderPage("agent=agent-1");
     expect(mockStartNewChat).toHaveBeenCalledTimes(1);
-    expect(mockStartNewChat).toHaveBeenCalledWith(agent);
+    expect(mockStartNewChat).toHaveBeenCalledWith(agent, null);
     expect(replace).toHaveBeenCalledWith("/acme/chat");
     // composingNew opened the conversation pane instead of the neutral prompt.
     expect(screen.getByText("chat-input")).toBeInTheDocument();
@@ -402,7 +432,7 @@ describe("ChatPage ?agent= deep link", () => {
     availableAgentsRef.current = [agent];
     agentsSettledRef.current = true;
     rerender();
-    expect(mockStartNewChat).toHaveBeenCalledWith(agent);
+    expect(mockStartNewChat).toHaveBeenCalledWith(agent, null);
     expect(replace).toHaveBeenCalledWith("/acme/chat");
   });
 
@@ -492,5 +522,81 @@ describe("ChatPage responsive layout", () => {
       screen.getByRole("button", { name: "select-thread" }),
     ).toBeInTheDocument();
     expect(screen.getByText("chat-input")).toBeInTheDocument();
+  });
+});
+
+describe("ChatPage project bar", () => {
+  const session = (id: string, projectId: string | null, over: Partial<ChatSession> = {}) =>
+    ({
+      id,
+      workspace_id: "ws-1",
+      agent_id: "agent-1",
+      creator_id: "user-1",
+      project_id: projectId,
+      title: id,
+      status: "active",
+      has_unread: false,
+      created_at: "2026-10-01T00:00:00Z",
+      updated_at: "2026-10-01T00:00:00Z",
+      ...over,
+    }) as ChatSession;
+  const project = (id: string, title: string) => ({ id, title, icon: null }) as unknown as Project;
+
+  beforeEach(() => {
+    projectsRef.current = [project("p-game", "game"), project("p-media", "Media")];
+    sessionsRef.current = [
+      session("s-game", "p-game", { updated_at: "2026-10-03T00:00:00Z", has_unread: true }),
+      session("s-media", "p-media", { updated_at: "2026-10-02T00:00:00Z" }),
+      session("s-plain", null),
+    ];
+  });
+
+  const threads = () =>
+    Array.from(screen.getByRole("list", { name: "threads" }).querySelectorAll("li")).map(
+      (li) => li.textContent,
+    );
+
+  it("narrows the list to the picked project and back to All", () => {
+    renderPage("");
+    expect(threads()).toEqual(["s-game", "s-media", "s-plain"]);
+
+    fireEvent.click(screen.getByRole("button", { name: /Media\s*1$/ }));
+    expect(threads()).toEqual(["s-media"]);
+
+    fireEvent.click(screen.getByRole("button", { name: "All" }));
+    expect(threads()).toEqual(["s-game", "s-media", "s-plain"]);
+  });
+
+  it("marks unread projects and starts new chats in the picked project", () => {
+    renderPage("");
+    const game = screen.getByRole("button", { name: /game\s*1$/ });
+    expect(game.querySelector('[aria-label="Has unread chats"]')).not.toBeNull();
+
+    fireEvent.click(game);
+    fireEvent.click(screen.getByRole("button", { name: "new-chat-button" }));
+    expect(mockStartNewChat).toHaveBeenCalledWith(agent, "p-game");
+  });
+
+  it("puts pinned projects first and toggles the pin", async () => {
+    pinsRef.current = [
+      { id: "pin-1", item_type: "project", item_id: "p-media" } as PinnedItem,
+    ];
+    renderPage("");
+    await screen.findByRole("button", { name: "Unpin Media" });
+    const chips = Array.from(document.querySelectorAll("[data-project-chip]")).map((el) =>
+      el.getAttribute("data-project-chip"),
+    );
+    expect(chips).toEqual(["p-media", "p-game"]);
+
+    fireEvent.click(screen.getByRole("button", { name: "Unpin Media" }));
+    expect(mockDeletePin).toHaveBeenCalledWith(
+      { itemType: "project", itemId: "p-media" },
+      expect.anything(),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Pin game" }));
+    expect(mockCreatePin).toHaveBeenCalledWith(
+      { item_type: "project", item_id: "p-game" },
+      expect.anything(),
+    );
   });
 });

@@ -340,7 +340,6 @@ func dshDesktopBundleFixture(t *testing.T, mode os.FileMode) string {
 
 	t.Setenv("PATH", t.TempDir())
 	t.Setenv("MULTICA_DSH_PATH", "")
-	t.Setenv("MULTICA_DSH_MODEL", "deepseek-official/deepseek-chat")
 	return bundle
 }
 
@@ -359,9 +358,6 @@ func TestProbeAgentCLIsUsesDshDesktopAppBundleFallback(t *testing.T) {
 	}
 	if entry.Command != "dsh" {
 		t.Fatalf("dsh command = %q, want dsh", entry.Command)
-	}
-	if entry.Model != "deepseek-official/deepseek-chat" {
-		t.Fatalf("dsh model = %q, want the MULTICA_DSH_MODEL override", entry.Model)
 	}
 }
 
