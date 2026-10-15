@@ -2301,6 +2301,7 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 				message: "failed to load project context",
 			}
 		}
+		projectCtx.Resources = append(projectCtx.Resources, h.crossProjectReadonlyResources(r.Context(), issue)...)
 		projectCtx.applyTo(&resp)
 
 		// Load every planned input as one chronological, de-duplicated set.
