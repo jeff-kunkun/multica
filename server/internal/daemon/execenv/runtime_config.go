@@ -142,6 +142,16 @@ func formatProjectResource(r ProjectResourceForEnv) string {
 			out += " — " + label
 		}
 		return out
+	case "readonly_directory":
+		var payload struct {
+			LocalPath string `json:"local_path"`
+		}
+		_ = json.Unmarshal(r.ResourceRef, &payload)
+		out := fmt.Sprintf("**Read-only directory**: `%s` (read it freely; do not write there)", payload.LocalPath)
+		if label != "" {
+			out += " — " + label
+		}
+		return out
 	default:
 		ref := string(r.ResourceRef)
 		if ref == "" {

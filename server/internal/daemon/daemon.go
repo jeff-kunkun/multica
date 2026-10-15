@@ -14,6 +14,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -7302,6 +7303,9 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// the ones that do — so a wrapper's subcommand was either dropped on the
 	// floor or spliced in behind `-p` (GH #7046).
 	extraArgs := defaultArgsForProvider(d.cfg, provider)
+	if provider == "claude" {
+		extraArgs = append(slices.Clone(extraArgs), readonlyDirArgs(task.ProjectResources, d.cfg.DaemonID)...)
+	}
 	var mcpConfig json.RawMessage
 	if task.Agent != nil {
 		customArgs = task.Agent.CustomArgs
@@ -9168,4 +9172,26 @@ func defaultArgsForProvider(cfg Config, provider string) []string {
 		return nil
 	}
 	return append([]string(nil), args...)
+}
+
+// readonlyDirArgs turns the task's readonly_directory resources for this
+// daemon into Claude Code --add-dir flags. Codex and OpenCode already read the
+// whole disk under their sandbox/permission settings, so they get the paths
+// from the runtime brief only.
+func readonlyDirArgs(resources []ProjectResourceData, daemonID string) []string {
+	var args []string
+	for _, r := range resources {
+		if r.ResourceType != "readonly_directory" {
+			continue
+		}
+		var ref struct {
+			DaemonID  string `json:"daemon_id"`
+			LocalPath string `json:"local_path"`
+		}
+		if json.Unmarshal(r.ResourceRef, &ref) != nil || ref.LocalPath == "" || ref.DaemonID != daemonID {
+			continue
+		}
+		args = append(args, "--add-dir", ref.LocalPath)
+	}
+	return args
 }
