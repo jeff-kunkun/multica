@@ -1029,7 +1029,6 @@ type AgentTaskResponse struct {
 	ConsultPrompt            string               `json:"consult_prompt,omitempty"`              // DENE-1721: the advisor's whole prompt for a consult run
 	QuickCreatePriority      string               `json:"quick_create_priority,omitempty"`       // explicit priority selected in quick-create
 	QuickCreateDueDate       string               `json:"quick_create_due_date,omitempty"`       // explicit calendar due date selected in quick-create
-	QuickCreateGoalMode      bool                 `json:"quick_create_goal_mode,omitempty"`
 	QuickCreateAttachmentIDs []string             `json:"quick_create_attachment_ids,omitempty"` // attachment ids uploaded in the quick-create prompt and bound on issue create
 	QuickCreateSourceContext json.RawMessage      `json:"quick_create_source_context,omitempty"` // immutable historical context for source-context quick-create
 	WakeupID                 string               `json:"wakeup_id,omitempty"`

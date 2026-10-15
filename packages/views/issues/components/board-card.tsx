@@ -38,7 +38,6 @@ import {
 import { ParentIssueBadge } from "./parent-issue-badge";
 import { IssueProgressLine, useIssueHasProgressLine } from "./issue-progress-line";
 import { BlockWaitProbeBadge } from "./block-wait-probe-badge";
-import { GoalProgressBadge } from "./goal-progress-badge";
 import {
   PEEK_TARGET_ATTR,
   useIsIssuePeeked,
@@ -234,7 +233,6 @@ export const BoardCardContent = memo(function BoardCardContent({
       {/* Row 2: Title */}
       <p className="mt-1 text-body font-medium leading-snug line-clamp-2">
         <span className="inline-flex max-w-full items-center gap-1.5">
-          <GoalProgressBadge issue={issue} />
           <span className="truncate">{issue.title}</span>
         </span>
       </p>

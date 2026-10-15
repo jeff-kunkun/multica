@@ -884,7 +884,6 @@ func init() {
 	issueListCmd.Flags().String("direction", "", "Sort direction (asc or desc); requires --sort to be a non-position column or a property sort (position is always ascending)")
 	issueListCmd.Flags().String("fields", "", "JSON output only: comma-separated list of issue fields to include (e.g. id,title,status,priority). Filtering happens client-side after the full response is fetched, so this shrinks CLI output size and agent context cost, not network/server-side cost. Omit for the full issue object (default, unchanged). Valid fields: "+strings.Join(validIssueFields, ", "))
 	issueListCmd.Flags().Bool("resolve-properties", false, resolvePropertiesHelp)
-	issueListCmd.Flags().Bool("goal", false, "Only list issues with a completion-line goal")
 
 	// issue get
 	issueGetCmd.Flags().String("output", "json", "Output format: table or json")
@@ -916,7 +915,6 @@ func init() {
 	issueCreateCmd.Flags().String("due-date", "", "Due date (calendar day, YYYY-MM-DD)")
 	issueCreateCmd.Flags().String("waiting-for", "", "What this backlog issue is waiting for, one line (80 chars max). Required when an agent puts an issue in backlog; nothing to wait for means use todo")
 	issueCreateCmd.Flags().Bool("allow-duplicate", false, "Allow creating an issue even when an active duplicate exists")
-	issueCreateCmd.Flags().Bool("goal", false, "Create a draft completion-line goal for this issue")
 	issueCreateCmd.Flags().String("routing-facts", "", `Routing facts as JSON, so routing skips the analysis call: {"scope":"small|module|cross_module","clarity":"clear|vague","risk":"low|medium|high","needs_human":false,"summary":"..."}`)
 	issueCreateCmd.Flags().Bool("routing-wait", true, "Wait for routing to pick the executor and print it as \"routing\" (who, why, tier). Default on for people and bot keys, off inside an agent run; =false returns at once and routing fills the slot in the background")
 	issueCreateCmd.Flags().String("output", "json", "Output format: table or json")
@@ -1100,9 +1098,6 @@ func runIssueList(cmd *cobra.Command, _ []string) error {
 	}
 	if v, _ := cmd.Flags().GetString("priority"); v != "" {
 		params.Set("priority", v)
-	}
-	if goal, _ := cmd.Flags().GetBool("goal"); goal {
-		params.Set("goal", "true")
 	}
 	params.Set("limit", fmt.Sprintf("%d", limit))
 	if offset > 0 {
@@ -1948,9 +1943,6 @@ func runIssueCreate(cmd *cobra.Command, _ []string) error {
 	}
 	if v, _ := cmd.Flags().GetBool("allow-duplicate"); v {
 		body["allow_duplicate"] = true
-	}
-	if v, _ := cmd.Flags().GetBool("goal"); v {
-		body["goal_mode"] = true
 	}
 	if v, _ := cmd.Flags().GetString("routing-facts"); strings.TrimSpace(v) != "" {
 		var facts map[string]any

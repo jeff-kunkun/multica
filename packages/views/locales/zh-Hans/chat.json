@@ -94,7 +94,6 @@
     "linked_project_chip": "来自 {{source}} 的只读项目",
     "linked_project_stale": "失效",
     "linked_project_stale_hint": "已不再共享，智能体不再收到它",
-    "to_goal": "转成目标任务",
     "mode_menu": "发送方式",
     "mode_steer": "插话",
     "mode_steer_desc": "这一步做完就读到",

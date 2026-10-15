@@ -17,11 +17,11 @@ import (
 
 var issueContextCmd = &cobra.Command{
 	Use:   "context <id>",
-	Short: "Read the issue's state card: goal, decisions, where it stands, last baton, what changed",
+	Short: "Read the issue's state card: title, decisions, where it stands, last baton, what changed",
 	Long: `Print the issue's state card, derived by the server from what the issue
 already records:
 
-  目标              the title, and the goal's finish line when it has one
+  目标              the title
   已拍板            decisions written by close/handoff --decision or by people
   现在在哪          status, the latest close conclusion and what it waits on
   上一棒交代        the summary of the latest handoff or close

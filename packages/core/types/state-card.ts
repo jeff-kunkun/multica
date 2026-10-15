@@ -1,13 +1,9 @@
 /**
  * The issue state card (DENE-1328): a few hundred characters the server
  * derives from what the issue already records. Only `decisions` is stored on
- * its own; everything else is read from the close record, handoff, goal and
+ * its own; everything else is read from the close record, handoff and
  * comments.
  */
-export interface StateCardCheck {
-  description: string;
-  status: string;
-}
 
 export interface StateCardDecision {
   id: string;
@@ -89,7 +85,7 @@ export interface StateCardChildReceipt {
 export interface IssueStateCard {
   issue_id: string;
   identifier: string;
-  goal: { title: string; goal_status?: string; finish_line?: StateCardCheck[] };
+  goal: { title: string };
   decisions: StateCardDecision[];
   now: StateCardNow;
   baton?: StateCardBaton | null;

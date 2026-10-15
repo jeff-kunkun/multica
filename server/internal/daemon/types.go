@@ -283,9 +283,8 @@ type Task struct {
 	ConsultPrompt             string                `json:"consult_prompt,omitempty"`               // DENE-1721: the whole prompt of a consult (advisor) run
 	QuickCreatePriority       string                `json:"quick_create_priority,omitempty"`        // explicit priority selected in quick-create
 	QuickCreateDueDate        string                `json:"quick_create_due_date,omitempty"`        // explicit calendar due date selected in quick-create
-	QuickCreateGoalMode       bool                  `json:"quick_create_goal_mode,omitempty"`
-	QuickCreateAttachmentIDs  []string              `json:"quick_create_attachment_ids,omitempty"` // attachments uploaded in the quick-create prompt and bound by issue create
-	QuickCreateSourceContext  json.RawMessage       `json:"quick_create_source_context,omitempty"` // immutable historical context, separate from the new instruction
+	QuickCreateAttachmentIDs  []string              `json:"quick_create_attachment_ids,omitempty"`  // attachments uploaded in the quick-create prompt and bound by issue create
+	QuickCreateSourceContext  json.RawMessage       `json:"quick_create_source_context,omitempty"`  // immutable historical context, separate from the new instruction
 	WakeupID                  string                `json:"wakeup_id,omitempty"`
 	WakeupSystemRule          string                `json:"wakeup_system_rule,omitempty"` // a platform rule (e.g. child_done) started the run
 	WakeupJoined              string                `json:"wakeup_joined,omitempty"`      // wakeups that joined this run instead of queuing their own

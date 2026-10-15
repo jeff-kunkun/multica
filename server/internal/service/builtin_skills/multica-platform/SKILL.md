@@ -1,6 +1,6 @@
 ---
 name: multica-platform
-description: "Overview, ask, open a chat, consult, goal, inbox, project board/report, sub-issue, wakeup, routing, close protocol, stall, driver, halt, mention, agent, specialisation, squad, autopilot, project, runtime, progress, state card, skill import, transfer, linked workspace, bot, GitHub App, status, env."
+description: "Overview, ask, open a chat, consult, inbox, project board/report, sub-issue, wakeup, routing, close protocol, stall, driver, halt, mention, agent, specialisation, squad, autopilot, project, runtime, progress, state card, skill import, transfer, linked workspace, bot, GitHub App, status, env."
 user-invocable: false
 allowed-tools: Bash(multica *), Bash(git *), Bash(gh *)
 ---
@@ -35,7 +35,6 @@ See `references/overview.md` for filter semantics and examples.
 | `references/run-control.md` | Stopping issue/chat work with optional related targets, halt / resume, default wakeup merging, the chain budget, the run time limit, and explicit steer / queue / restart |
 | `references/wakeups.md` | Issue wakeups: events, conditions (`--until-*`), timers, check-ins, runaway protection |
 | `references/stall-actions.md` | Automatic stall actions: 24-hour keep announcements, parent auto-close, 7-day undo, and CLI/API commands |
-| `references/goals.md` | Task goals: draft a completion line, confirm the human lock, track budget, and finish a goal |
 | `references/sub-issues.md` | Sub-issues: todo vs backlog at create time, stages as barrier groups, promoting parked children |
 | `references/routing.md` | Automatic routing: which slots it fills at which status, the 验收席 field, who may pick an executor (`--per-quote`, `issue escalate`), domains (`multica domain`, project/issue `--domain`), what an `issue route` result means, why dispatch stopped |
 | `references/state-card.md` | Picking up an issue: `multica issue context` (goal, decisions, where it stands, last baton, what changed since you), and writing decisions with `--decision` |
@@ -54,7 +53,7 @@ See `references/overview.md` for filter semantics and examples.
 | `references/project-report.md` | The user asks to hear a project's report (听汇报, 有什么新进展, 上次以来): `multica project report --mark-heard`, the fixed spoken shape with a Mermaid chart, and acting on its buttons |
 | `references/project-board.md` | The user asks for the full open-ticket panorama by project: `multica project board` (one or more projects, or the whole workspace) |
 | `references/consult.md` | Asking a strong-tier seat one question while you keep the ticket (`multica issue consult`): when to ask, the per-issue limit, cost, refusal codes |
-| `references/chats.md` | The chat directory and transcripts (`chat list` / `search` / `history`), messaging a running chat (`chat send` modes, `--urgent`), `chat handoff`, `chat to-goal` |
+| `references/chats.md` | The chat directory and transcripts (`chat list` / `search` / `history`), messaging a running chat (`chat send` modes, `--urgent`), `chat handoff` |
 | `references/chat-spawn.md` | Opening a chat with another agent from a chat (`multica chat open`): task-or-chat table, limits, refusal codes |
 | `references/workspace-links.md` | Reading another workspace's shared projects through a link: `multica workspace link list` / `view`, pending link requests (`list --pending`), what the view contains, why it says link not found; on a managed link, working on the source's issues, autopilots and initiator-owned chats (`chat list/send`) with `--linked <source-slug>`; new links default to managed, opt out with `create --managed=false` |
 | `references/transfer.md` | `multica transfer export` / `import` / `bind-runtimes`, and the kun `/transfer/*` endpoints |

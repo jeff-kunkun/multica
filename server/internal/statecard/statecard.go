@@ -3,8 +3,7 @@
 // stand, what did the last owner say, and what changed since I was last
 // here". It replaces the cold-start scan of every comment.
 //
-// The card is derived, not stored. The goal is the title plus the goal's
-// finish line; "现在在哪" is the close.* record; "上一棒交代" is the newer of
+// The card is derived, not stored. The goal is the title; "现在在哪" is the close.* record; "上一棒交代" is the newer of
 // the close summary and the handoff note; "你上次之后的变化" is computed from
 // the caller's own previous run. Only the decisions list ("已拍板") has rows
 // of its own, because people edit them one at a time.
@@ -153,18 +152,9 @@ func ThreadTitle(body string) string {
 	return ""
 }
 
-// Check is one item of a goal's finish line.
-type Check struct {
-	Description string `json:"description"`
-	Status      string `json:"status"`
-}
-
-// Goal is "目标": the ticket title, and the finish line when the ticket has
-// a goal.
+// Goal is "目标": the ticket title.
 type Goal struct {
-	Title      string  `json:"title"`
-	GoalStatus string  `json:"goal_status,omitempty"`
-	FinishLine []Check `json:"finish_line"`
+	Title string `json:"title"`
 }
 
 // Decision is one "已拍板" row.
@@ -410,13 +400,6 @@ func Render(c Card) string {
 	fmt.Fprintf(&b, "## 状态卡 %s\n\n", head)
 
 	fmt.Fprintf(&b, "目标：%s\n", c.Goal.Title)
-	for _, ch := range c.Goal.FinishLine {
-		mark := "[ ]"
-		if ch.Status == "passed" {
-			mark = "[x]"
-		}
-		fmt.Fprintf(&b, "  %s %s\n", mark, ch.Description)
-	}
 	if c.Source != nil {
 		title := c.Source.ChatTitle
 		if title == "" {

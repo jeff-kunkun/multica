@@ -30,11 +30,6 @@ moves to another agent with `multica chat handoff --to <agent>`. What each mode 
 and what happens when the running CLI cannot steer, is in
 `references/run-control.md`.
 
-To promote the current conversation into a goal task, use
-`multica chat to-goal --session <id-or-url>`. The server creates the issue with
-the chat's agent as executor; confirm the completion line with `multica goal`.
-Add `--output json` when another tool needs the new issue id.
-
 To talk to another agent without creating work, open a chat from your chat:
 `multica chat open --agent <name> --brief-file ./brief.md`. Work with an owner
 and a deliverable is still an issue. Limits and refusal codes:

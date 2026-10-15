@@ -282,9 +282,10 @@ func TestEnqueueQuickCreateTaskWithSourceContextIsAtomic(t *testing.T) {
 	}
 }
 
-// A quick-create request carries every fork option as a field, so goal mode
-// and a source context land on one task together (DENE-1183).
-func TestEnqueueQuickCreateCarriesGoalModeWithSourceContext(t *testing.T) {
+// A quick-create request carries every fork option as a field, so a parent,
+// an explicit empty project and a source context land on one task together
+// (DENE-1183).
+func TestEnqueueQuickCreateCarriesForkOptionsWithSourceContext(t *testing.T) {
 	pool := newResolveOriginatorPool(t)
 	ctx := context.Background()
 	q := db.New(pool)
@@ -292,7 +293,7 @@ func TestEnqueueQuickCreateCarriesGoalModeWithSourceContext(t *testing.T) {
 	var sourceCommentID string
 	if err := pool.QueryRow(ctx, `
 		INSERT INTO comment (issue_id, workspace_id, author_type, author_id, content)
-		VALUES ($1, $2, 'member', $3, 'goal history') RETURNING id
+		VALUES ($1, $2, 'member', $3, 'source history') RETURNING id
 	`, sourceIssueID, workspaceID, userID).Scan(&sourceCommentID); err != nil {
 		t.Fatalf("insert source comment: %v", err)
 	}
@@ -308,9 +309,9 @@ func TestEnqueueQuickCreateCarriesGoalModeWithSourceContext(t *testing.T) {
 	svc := &TaskService{Queries: q, TxStarter: pool, Bus: events.New()}
 	task, err := svc.EnqueueQuickCreate(ctx, QuickCreateRequest{
 		WorkspaceID: util.MustParseUUID(workspaceID), RequesterID: util.MustParseUUID(userID), AgentID: util.MustParseUUID(agentID),
-		Prompt: "goal from context", Priority: "medium",
+		Prompt: "issue from context", Priority: "medium",
 		ParentIssueID: util.MustParseUUID(sourceIssueID), ProjectExplicitNone: true,
-		GoalMode: true, SourceContext: &capture,
+		SourceContext: &capture,
 	})
 	if err != nil {
 		t.Fatalf("enqueue: %v", err)
@@ -319,7 +320,7 @@ func TestEnqueueQuickCreateCarriesGoalModeWithSourceContext(t *testing.T) {
 	if err := json.Unmarshal(task.Context, &payload); err != nil {
 		t.Fatalf("decode context: %v", err)
 	}
-	if !payload.GoalMode || payload.SourceContextID != util.UUIDToString(capture.ID) || !payload.ProjectExplicitNone || payload.ParentIssueID != sourceIssueID {
+	if payload.SourceContextID != util.UUIDToString(capture.ID) || !payload.ProjectExplicitNone || payload.ParentIssueID != sourceIssueID {
 		t.Fatalf("payload = %+v", payload)
 	}
 }

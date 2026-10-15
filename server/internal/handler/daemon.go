@@ -4088,7 +4088,6 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 			resp.QuickCreatePrompt = qc.Prompt
 			resp.QuickCreatePriority = qc.Priority
 			resp.QuickCreateDueDate = qc.DueDate
-			resp.QuickCreateGoalMode = qc.GoalMode
 			resp.QuickCreateAttachmentIDs = append([]string(nil), qc.AttachmentIDs...)
 			resp.ThreadName = qc.Prompt
 			resp.WorkspaceID = qc.WorkspaceID
@@ -5084,10 +5083,6 @@ type TaskCompleteRequest struct {
 	// SessionResumeDropped: the claim pointed this run at a session and the
 	// daemon started a fresh one instead (DENE-1345). Older daemons omit it.
 	SessionResumeDropped bool `json:"session_resume_dropped,omitempty"`
-	// GoalChecks lets newer daemons report which locked completion-line checks
-	// they verified during this run. Older daemons omit it; the server keeps the
-	// existing check state and still owns continuation decisions.
-	GoalChecks []map[string]any `json:"goal_checks,omitempty"`
 }
 
 // sanitizeTaskCompleteRequest / sanitizeTaskFailRequest scrub every

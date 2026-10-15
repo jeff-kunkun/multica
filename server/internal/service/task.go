@@ -753,10 +753,6 @@ var ErrAgentChainBudgetExceeded = errors.New("agent delegation chain budget exce
 // upper-layer log or response can leak the constraint name (#5914, Elon review).
 var ErrDuplicatePendingTask = errors.New("a pending task for this issue and agent already exists")
 
-// ErrGoalDraftNotConfirmed is returned when an issue's completion line is
-// still editable. Callers may safely retry after a human confirms the goal.
-var ErrGoalDraftNotConfirmed = errors.New("goal is still a draft and has not been confirmed")
-
 const (
 	agentHaltedMetadataKey      = "agent_halted"
 	agentChainBudgetNotifiedKey = "agent_chain_budget_notified"
@@ -1442,9 +1438,6 @@ func (s *TaskService) enqueueIssueTask(ctx context.Context, issue db.Issue, trig
 }
 
 func (s *TaskService) enqueueIssueTaskWithCommentPlan(ctx context.Context, issue db.Issue, triggerCommentID pgtype.UUID, coalescedCommentIDs []pgtype.UUID, forceFreshSession bool, handoffNote string, actorUserID pgtype.UUID, rerunOfTaskID pgtype.UUID, fireAt pgtype.Timestamptz, origin RunOrigin) (db.AgentTaskQueue, error) {
-	if err := s.guardGoalExecution(ctx, issue); err != nil {
-		return db.AgentTaskQueue{}, err
-	}
 	if !issue.AssigneeID.Valid {
 		slog.Error("task enqueue failed", "issue_id", util.UUIDToString(issue.ID), "error", "issue has no assignee")
 		return db.AgentTaskQueue{}, fmt.Errorf("issue has no assignee")
@@ -1600,20 +1593,6 @@ func (s *TaskService) enqueueIssueTaskWithCommentPlan(ctx context.Context, issue
 	return task, nil
 }
 
-// guardGoalExecution is shared by assignment and mention/delegation enqueue
-// paths. A goal draft is still a human-editable proposal, so neither path may
-// bypass the confirmation gate by naming an agent directly.
-func (s *TaskService) guardGoalExecution(ctx context.Context, issue db.Issue) error {
-	issueGoal, err := s.Queries.GetIssueGoal(ctx, db.GetIssueGoalParams{IssueID: issue.ID, WorkspaceID: issue.WorkspaceID})
-	if err == nil && issueGoal.Status == "draft" {
-		return ErrGoalDraftNotConfirmed
-	}
-	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-		return fmt.Errorf("check goal state: %w", err)
-	}
-	return nil
-}
-
 // EnqueueTaskForMention creates a queued task for a mentioned agent on an issue.
 // Unlike EnqueueTaskForIssue, this takes an explicit agent ID rather than
 // deriving it from the issue assignee.
@@ -1662,9 +1641,6 @@ func (s *TaskService) enqueueMentionTask(ctx context.Context, issue db.Issue, ag
 }
 
 func (s *TaskService) enqueueMentionTaskWithCommentPlan(ctx context.Context, issue db.Issue, agentID pgtype.UUID, triggerCommentID pgtype.UUID, coalescedCommentIDs []pgtype.UUID, isLeader bool, squadID pgtype.UUID, forceFreshSession bool, handoffNote string, actorUserID pgtype.UUID, rerunOfTaskID pgtype.UUID, origin RunOrigin) (db.AgentTaskQueue, error) {
-	if err := s.guardGoalExecution(ctx, issue); err != nil {
-		return db.AgentTaskQueue{}, err
-	}
 	if err := guardIssueNotInTriage(ctx, s.Queries, issue.ID, origin); err != nil {
 		return db.AgentTaskQueue{}, err
 	}
@@ -1806,7 +1782,6 @@ type QuickCreateContext struct {
 	// sub-issue. The prompt then requires `--project ""` so create does not
 	// treat the omitted flag as "inherit the parent".
 	ProjectExplicitNone bool `json:"project_explicit_none,omitempty"`
-	GoalMode            bool `json:"goal_mode,omitempty"`
 	// SourceContextID identifies the immutable pending capture that must attach
 	// to the one issue this quick-create chain produces.
 	SourceContextID string `json:"source_context_id,omitempty"`
@@ -1853,9 +1828,9 @@ func (s *TaskService) EnqueueQuickCreateTaskWithSourceContext(ctx context.Contex
 
 // QuickCreateRequest is one quick-create run. It replaces the fork's
 // ChoosingProject / WithGoal / WithSourceContextChoosingProject variants
-// (DENE-1183): each fork option is a field, so any combination — goal mode
-// with a source context included — is one call rather than one more
-// function name.
+// (DENE-1183): each fork option is a field, so any combination — a
+// project choice with a source context included — is one call rather than
+// one more function name.
 type QuickCreateRequest struct {
 	WorkspaceID, RequesterID pgtype.UUID
 	AgentID, SquadID         pgtype.UUID
@@ -1866,8 +1841,6 @@ type QuickCreateRequest struct {
 	// ProjectExplicitNone tells the agent to pass an empty --project so a
 	// sub-issue does not inherit its parent's project.
 	ProjectExplicitNone bool
-	// GoalMode asks the agent to create the issue as a goal.
-	GoalMode bool
 	// SourceContext, when set, captures the anchor comment thread in the same
 	// transaction as the task.
 	SourceContext *SourceContextCapture
@@ -1912,7 +1885,6 @@ func (s *TaskService) EnqueueQuickCreate(ctx context.Context, req QuickCreateReq
 		payload.ParentIssueID = util.UUIDToString(req.ParentIssueID)
 	}
 	payload.ProjectExplicitNone = req.ProjectExplicitNone
-	payload.GoalMode = req.GoalMode
 	if capture != nil {
 		payload.SourceContextID = util.UUIDToString(capture.ID)
 	}
@@ -2148,6 +2120,10 @@ var ErrChatQuickActionsBusy = errors.New("chat quick actions: session busy")
 // ErrChatSessionArchived signals that a send or a debounced channel flush lost
 // a race with archiving the session and therefore must not persist a new turn.
 var ErrChatSessionArchived = errors.New("chat task: session archived")
+
+// ErrChatSessionConverted signals that the session's execution was moved to an
+// issue; the chat stays readable but accepts no new turns.
+var ErrChatSessionConverted = errors.New("chat execution has moved to an issue")
 
 // PreparedChatTaskEnqueue is an opaque, side-effect-free input snapshot built
 // before a caller opens a task-enqueue transaction.
@@ -5407,10 +5383,6 @@ func (s *TaskService) CompleteTaskWithTransition(ctx context.Context, taskID pgt
 	s.captureTaskCompleted(ctx, task)
 	s.postDeliveryNotice(ctx, task, deliveryNotice)
 	s.remindSummonAnswerClose(ctx, task)
-	// Goal continuation is server-owned. Run it after the terminal task
-	// transaction commits so a queued successor can never be rolled back with
-	// the completed row and the same budget is shared across relay seats.
-	s.reconcileGoalAfterCompletion(ctx, task, result)
 
 	// Invariant: every completed issue task must have at least one agent
 	// comment on the issue, so the user always sees something when a run

@@ -25,7 +25,7 @@ import (
 // question and waits for the advice. The advisor gets a short issue-less run
 // whose context names the consult; the ticket, its executor and its status
 // never change. The run's tokens land on the advisor's own usage (so its
-// quota sees them) and, when the ticket has a goal, on the goal budget.
+// quota sees them).
 const (
 	ConsultContextType = "consult"
 	// MaxConsultQuestionRunes bounds what an asker may send; paste the code
@@ -196,8 +196,8 @@ func RenderConsultPrompt(identifier, title, description, stateCard, question str
 	return b.String()
 }
 
-// finishConsult records the advisor run's outcome on the consult, charges
-// the ticket's goal budget and writes the timeline entry. It runs once per
+// finishConsult records the advisor run's outcome on the consult and writes
+// the timeline entry. It runs once per
 // consult: FinishIssueConsult only moves a pending row.
 func (s *TaskService) finishConsult(ctx context.Context, task db.AgentTaskQueue, cc ConsultContext, answer, failure string) {
 	consultID, err := util.ParseUUID(cc.ConsultID)
@@ -236,15 +236,6 @@ func (s *TaskService) finishConsult(ctx context.Context, task db.AgentTaskQueue,
 	}
 	if consult.WorkspaceID != workspaceID {
 		return
-	}
-	// A consult spends the ticket's goal budget like any run of it, but it is
-	// not a round: only tokens and time count, runs_used stays.
-	if tokens > 0 || duration > 0 {
-		if _, err := s.Queries.UpdateIssueGoalUsage(ctx, db.UpdateIssueGoalUsageParams{
-			IssueID: consult.IssueID, WorkspaceID: consult.WorkspaceID, TokensUsed: tokens, DurationSecondsUsed: duration,
-		}); err != nil && !errors.Is(err, pgx.ErrNoRows) {
-			slog.Warn("consult: goal usage update failed", "consult_id", cc.ConsultID, "error", err)
-		}
 	}
 	s.recordConsultActivity(ctx, consult)
 }

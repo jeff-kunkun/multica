@@ -18,8 +18,7 @@ import { StatusIcon } from "./status-icon";
  * Sidebar state card (DENE-1328): what was settled, the last baton, and the
  * threads new since the viewer was last here. The card is derived by the
  * server — the same one `multica issue context` prints for agents. Its goal
- * and "where it stands" parts are already on this page (title, goal section,
- * close record), so only the parts that are not render here — plus each
+ * and "where it stands" parts are already on this page (title, close record), so only the parts that are not render here — plus each
  * sub-task's receipt (DENE-1679).
  */
 export function IssueStateCardSection({

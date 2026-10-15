@@ -94,7 +94,6 @@
     "linked_project_chip": "{{source}}의 읽기 전용 프로젝트",
     "linked_project_stale": "무효",
     "linked_project_stale_hint": "더 이상 공유되지 않아 에이전트가 받지 않습니다",
-    "to_goal": "转成目标任务",
     "mode_menu": "보내기 방식",
     "mode_steer": "끼어들기",
     "mode_steer_desc": "이 단계가 끝나면 읽습니다",

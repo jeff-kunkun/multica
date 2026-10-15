@@ -2234,7 +2234,6 @@
     "description": "Ce que les agents peuvent créer pendant une exécution, et combien de temps. Seuls les admins peuvent modifier.",
     "create_title": "Créer",
     "chat_issue_label": "Créer des tâches dans un chat",
-    "chat_issue_description": "Y compris convertir en objectif.",
     "issue_issue_label": "Créer des tâches dans une tâche",
     "issue_issue_description": "Y compris sous-tâches et plans.",
     "chat_chat_label": "Créer des chats dans un chat",

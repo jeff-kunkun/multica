@@ -93,21 +93,8 @@ func (h *Handler) buildStateCard(ctx context.Context, issue db.Issue, caller sta
 	card := statecard.Card{
 		IssueID:    uuidToString(issue.ID),
 		Identifier: issueToResponse(issue, prefix).Identifier,
-		Goal:       statecard.Goal{Title: issue.Title, FinishLine: []statecard.Check{}},
+		Goal:       statecard.Goal{Title: issue.Title},
 		Decisions:  []statecard.Decision{},
-	}
-
-	if goal, err := h.Queries.GetIssueGoal(ctx, db.GetIssueGoalParams{IssueID: issue.ID, WorkspaceID: issue.WorkspaceID}); err == nil {
-		card.Goal.GoalStatus = goal.Status
-		checks, err := h.Queries.ListIssueGoalChecks(ctx, goal.ID)
-		if err != nil {
-			return card, err
-		}
-		for _, c := range checks {
-			card.Goal.FinishLine = append(card.Goal.FinishLine, statecard.Check{Description: c.Description, Status: c.Status})
-		}
-	} else if !errors.Is(err, pgx.ErrNoRows) {
-		return card, err
 	}
 
 	card.Source = h.stateCardSource(ctx, issue, viewer)

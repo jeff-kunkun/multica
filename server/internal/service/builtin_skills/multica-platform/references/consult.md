@@ -29,8 +29,7 @@ a fallback. Never you. The seat's daemon must be online and new enough to run co
 
 ## Cost
 
-The advisor's tokens and time are added to the issue's goal budget (no run is
-counted) and to the advisor seat's own usage. Each consult leaves one line on
+The advisor's tokens and time are added to the advisor seat's own usage. Each consult leaves one line on
 the issue timeline — advisor, cost, and on expand the question and the answer.
 
 ## Refusals

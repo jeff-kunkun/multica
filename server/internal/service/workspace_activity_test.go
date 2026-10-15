@@ -39,7 +39,6 @@ func TestDangerousBotActionCoversTheFourConfirmFirstActions(t *testing.T) {
 		{"POST", "/api/workspaces/" + ws + "/bots/abc/rotate-key", DangerResetKeys},
 		{"POST", "/api/cloud-billing/checkout", DangerChangeBilling},
 		{"POST", "/api/cloud-subscriptions/abc/cancel", DangerChangeBilling},
-		{"PUT", "/api/workspaces/" + ws + "/goal/budget", DangerChangeBilling},
 		{"GET", "/api/workspaces/" + ws + "/members", ""},
 		{"POST", "/api/workspaces/" + ws + "/issues", ""},
 	}

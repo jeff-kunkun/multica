@@ -14,7 +14,6 @@ type ModalType =
   | "issue-delete-confirm"
   | "issue-close"
   | "issue-run-confirm"
-  | "goal-completion"
   | "private-link"
   | null;
 

@@ -2384,14 +2384,6 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Get("/system-wakeups", h.ListIssueSystemWakeups)
 					r.Put("/system-wakeups/{rule}", h.UpdateIssueSystemWakeup)
 					r.Get("/active-task", h.GetActiveTaskForIssue)
-					// DENE-1051 goal completion line. One issue owns one goal;
-					// confirmation locks the checks and budget for agent actors.
-					r.Get("/goal", h.GetIssueGoal)
-					r.Post("/goal", h.CreateIssueGoal)
-					r.Post("/goal/confirm", h.ConfirmIssueGoal)
-					r.Post("/goal/budget", h.AppendIssueGoalBudget)
-					r.Post("/goal/finish", h.FinishIssueGoal)
-					r.Post("/goal/check/{check}", h.UpdateIssueGoalCheck)
 					r.Post("/tasks/{taskId}/cancel", h.CancelTask)
 					r.Post("/halt", h.HaltIssue)
 					r.Post("/resume", h.ResumeIssue)
@@ -2943,7 +2935,6 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Get("/search", h.SearchChatMessages)
 				r.Route("/{sessionId}", func(r chi.Router) {
 					r.Get("/", h.GetChatSession)
-					r.Post("/to-goal", h.ConvertChatSessionToGoal)
 					r.Post("/stop", h.StopChatSession)
 					r.Get("/tickets", h.ListChatSessionTickets)
 					// Pin / take down by hand (DENE-1719) — `multica chat tickets add|remove`.

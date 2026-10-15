@@ -29,7 +29,6 @@ is refused there; keep using `chat open`.
 | Work with an owner, a deliverable and a close | `multica issue create` (sub-issues for parallel parts) |
 | A conversation with another agent: ask, explore, compare options | `multica chat open` |
 | Discussion inside a task | an issue comment; split parallel exploration into sub-issues |
-| Turn the current chat into tracked work | `multica chat to-goal` |
 | See the issues this chat opened or follows, their source, status, latest move and phase (waiting_you / in_progress / done) | `multica chat tickets [--session <id>] --output json` |
 | Pin an existing issue to this chat's tickets, or take one off | `multica chat tickets add <DENE-N>` / `multica chat tickets remove <DENE-N>` |
 
@@ -81,7 +80,7 @@ or from a task.
 ## Receipts from the issues a chat opened
 
 An IM `/issue` command and an alignment also record their chat, like a chat
-run's `issue create` / `plan apply` and `chat to-goal`. `multica issue context`
+run's `issue create` / `plan apply`. `multica issue context`
 opens with a 来源 line quoting the message the issue answered.
 
 When such an issue enters 待验收, done, blocked or cancelled, the server posts a

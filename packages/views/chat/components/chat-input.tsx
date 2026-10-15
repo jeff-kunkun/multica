@@ -44,7 +44,6 @@ import { api } from "@multica/core/api";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { StopWorkDialog } from "../../common/stop-work-dialog";
-import { Target } from "lucide-react";
 
 const logger = createLogger("chat.ui");
 const EMPTY_UPLOADS: DraftUpload[] = [];
@@ -186,8 +185,6 @@ interface ChatInputProps {
    */
   draftKeyOverride?: string;
   editorKeyOverride?: string;
-  /** Converts this conversation into an issue and opens the shared goal panel. */
-  onConvertToGoal?: () => void | Promise<void>;
 }
 
 export function ChatInput({
@@ -226,7 +223,6 @@ export function ChatInput({
   focusRequest,
   draftKeyOverride,
   editorKeyOverride,
-  onConvertToGoal,
 }: ChatInputProps) {
   const { t } = useT("chat");
   const { t: tEditor } = useT("editor");
@@ -733,17 +729,6 @@ export function ChatInput({
       )}
     >
       {stopSessionId && <ChatStopDialog key={stopSessionId} sessionId={stopSessionId} open={stopDialogOpen} onOpenChange={setStopDialogOpen} />}
-      {onConvertToGoal && (
-        <button
-          type="button"
-          className="mb-1 inline-flex w-fit items-center gap-1.5 rounded-full border border-brand/30 bg-brand/5 px-2.5 py-1 text-caption text-brand hover:bg-brand/10"
-          onClick={() => void onConvertToGoal()}
-          disabled={disabled || noAgent}
-        >
-          <Target className="size-3.5" aria-hidden="true" />
-          {t(($) => $.input.to_goal)}
-        </button>
-      )}
       <div
         data-slot="chat-input-surface"
         {...(uploadEnabled ? dropZoneProps : {})}

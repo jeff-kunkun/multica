@@ -87,8 +87,6 @@ import { AgentSceneProvider } from "../agents/components/agent-scene-context";
 import { matchesPinyin } from "../editor/extensions/pinyin-match";
 import { SourceContextPreviewCard, useSourceContextFailureMessage } from "./source-context-preview";
 import { useIssueLimitUpgradePrompt } from "./use-issue-limit-upgrade-prompt";
-import { GoalToggle } from "./goal-toggle";
-import { GoalFlowSteps } from "../issues/draft/goal-flow-steps";
 
 type ActorSelection =
   | { type: "agent"; id: string }
@@ -471,7 +469,6 @@ export function AgentCreatePanel({
             ...(priority !== "none" ? { priority } : {}),
             ...(dueDate ? { due_date: dueDate } : {}),
             parent_issue_id: parentIssueId,
-            ...(draft.shared.goalMode ? { goal_mode: true } : {}),
             ...(activeAttachmentIds.length > 0 ? { attachment_ids: activeAttachmentIds } : {}),
           });
         }
@@ -662,8 +659,6 @@ export function AgentCreatePanel({
           </div>
         </div>
 
-        <GoalFlowSteps active="issue" className="px-5 pb-1" />
-
         {/* Actor picker — agents and squads in one searchable list. Squads
             route to their leader agent on the backend; the leader runs the
             quick-create flow with the squad's Operating Protocol layered
@@ -773,7 +768,6 @@ export function AgentCreatePanel({
               onOpenChange={(open) => setFieldPickerOpen(open ? "project" : null)}
             />
           )}
-          <GoalToggle checked={!!draft.shared.goalMode} onCheckedChange={(value) => setShared({ goalMode: value })} disabled={submitting} />
           {(visibleFields.includes("priority") ||
             priority !== "none" ||
             fieldPickerOpen === "priority") && (

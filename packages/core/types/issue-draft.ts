@@ -54,8 +54,6 @@ export interface IssueDraftChild {
  * node, which is exactly what a lone issue always was.
  */
 export interface IssueDraftPayload {
-  /** Entry intent: this alignment should continue into a completion line. */
-  goal_mode?: boolean;
   title: string;
   description: string;
   status: string;

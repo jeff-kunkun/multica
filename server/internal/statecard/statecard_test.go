@@ -149,14 +149,14 @@ func TestThreadTitleAndFirstParagraph(t *testing.T) {
 func TestRenderCoversEverySection(t *testing.T) {
 	card := Card{
 		Identifier: "DENE-1",
-		Goal:       Goal{Title: "做状态卡", FinishLine: []Check{{Description: "Go 测试", Status: "passed"}}},
+		Goal:       Goal{Title: "做状态卡"},
 		Decisions:  []Decision{{Text: "用新表存拍板"}},
 		Now:        Now{Status: "in_review", Closed: true, Conclusion: "awaiting_review", ClosedAt: "2026-10-04T10:00:00Z"},
 		Baton:      &Baton{Kind: "handoff", To: "孙悟天", Summary: "剩 CLI", At: "2026-10-04T11:00:00Z"},
 		Changes:    Changes{Anchor: AnchorLastRun, Since: "2026-10-04T09:00:00Z", Threads: []Thread{{ThreadID: "t-1", Title: "能不能先做手机", NewCount: 2}}},
 	}
 	text := Render(card)
-	for _, want := range []string{"DENE-1", "[x] Go 测试", "用新表存拍板", "awaiting_review", "交棒给 孙悟天", "剩 CLI", "能不能先做手机", "--thread t-1"} {
+	for _, want := range []string{"DENE-1", "做状态卡", "用新表存拍板", "awaiting_review", "交棒给 孙悟天", "剩 CLI", "能不能先做手机", "--thread t-1"} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("render misses %q:\n%s", want, text)
 		}

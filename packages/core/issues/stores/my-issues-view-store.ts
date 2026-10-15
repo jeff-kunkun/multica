@@ -25,8 +25,6 @@ export function myIssuesRelationFromScope(
 export interface MyIssuesViewState extends IssueViewState {
   scope: MyIssuesScope;
   setScope: (scope: MyIssuesScope) => void;
-  goalOnly: boolean;
-  setGoalOnly: (goalOnly: boolean) => void;
 }
 
 const basePersist = viewStorePersistOptions("multica_my_issues_view");
@@ -37,8 +35,6 @@ const _myIssuesViewStore = createStore<MyIssuesViewState>()(
       ...viewStoreSlice(set as unknown as StoreApi<IssueViewState>["setState"]),
       scope: "assigned" as MyIssuesScope,
       setScope: (scope: MyIssuesScope) => set({ scope }),
-      goalOnly: false,
-      setGoalOnly: (goalOnly: boolean) => set({ goalOnly }),
     }),
     {
       name: basePersist.name,
@@ -46,7 +42,6 @@ const _myIssuesViewStore = createStore<MyIssuesViewState>()(
       partialize: (state: MyIssuesViewState) => ({
         ...basePersist.partialize(state),
         scope: state.scope,
-        goalOnly: state.goalOnly,
       }),
       // Reuse the same deep-merge as the base view store so newly added
       // cardProperties toggles inherit defaults for existing users. Without

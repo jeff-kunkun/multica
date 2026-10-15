@@ -6,4 +6,3 @@ export {
   issueDraftTitle,
 } from "./unfinished-issue-drafts";
 export { useIssueDraftSession } from "./use-issue-draft-session";
-export { GoalFlowSteps, type GoalFlowStep } from "./goal-flow-steps";

@@ -16,7 +16,7 @@ import type { WorkThreadSnapshot } from "../types/work_thread";
 import type { Ask, CreateAskRequest, AnswerAskRequest } from "../types/ask";
 import type { LinkedView, LinkedViewParams, ListWorkspaceLinksResponse, WorkspaceLink, WorkspaceLinkAuditEntry, WorkspaceLinkDirection, WorkspaceLinkLookup } from "../types/workspace-link";
 import { configStore } from "../config";
-import { IssueGoalSchema, type CommentSendMode, type CreateIssueGoalInput } from "../types";
+import type { CommentSendMode } from "../types";
 import type {
   Issue,
   IssuePriority,
@@ -115,7 +115,6 @@ import type {
   BotMentionSource,
   RuntimeUsage,
   IssueUsageSummary,
-  IssueGoal,
   RuntimeHourlyActivity,
   RuntimeUsageByAgent,
   RuntimeUsageByHour,
@@ -1418,7 +1417,6 @@ export class ApiClient {
     if (params?.include_no_project) search.set("include_no_project", "true");
     if (params?.label_ids?.length) search.set("label_ids", params.label_ids.join(","));
     if (params?.top_level_only) search.set("top_level_only", "true");
-    if (params?.goal_only) search.set("goal", "true");
     // No `.length` guard on purpose: an empty ids array must still send
     // `ids=` — the server treats a PRESENT-but-empty list as an empty window
     // (nothing running), while an absent param means no restriction.
@@ -1762,7 +1760,6 @@ export class ApiClient {
     project_id?: string | null;
     parent_issue_id?: string | null;
     attachment_ids?: string[];
-    goal_mode?: boolean;
   }): Promise<{ task_id: string }> {
     return this.fetch("/api/issues/quick-create", {
       method: "POST",
@@ -3631,46 +3628,6 @@ export class ApiClient {
     }, { endpoint: "GET /api/issues/:id/usage" });
   }
 
-  async getIssueGoal(issueId: string): Promise<IssueGoal | null> {
-    let raw: unknown;
-    try {
-      raw = await this.fetch<unknown>(`/api/issues/${encodeURIComponent(issueId)}/goal`);
-    } catch (error) {
-      if (error instanceof ApiError && error.status === 404) return null;
-      throw error;
-    }
-    if (raw == null) return null;
-    return parseWithFallback<IssueGoal | null>(raw, IssueGoalSchema.nullable(), null, {
-      endpoint: "GET /api/issues/:id/goal",
-    });
-  }
-
-  async createIssueGoal(issueId: string, data: CreateIssueGoalInput): Promise<IssueGoal> {
-    const raw = await this.fetch<unknown>(`/api/issues/${encodeURIComponent(issueId)}/goal`, {
-      method: "POST",
-      body: JSON.stringify({
-        checks: data.checks,
-        budget: {
-          token_limit: data.budget?.token_limit ?? 0,
-          run_limit: data.budget?.run_limit ?? 0,
-          duration_seconds: data.budget?.duration_seconds ?? 0,
-        },
-      }),
-    });
-    return parseWithFallback(raw, IssueGoalSchema, null, {
-      endpoint: "POST /api/issues/:id/goal",
-    }) as unknown as IssueGoal;
-  }
-
-  async confirmIssueGoal(issueId: string): Promise<IssueGoal> {
-    const raw = await this.fetch<unknown>(`/api/issues/${encodeURIComponent(issueId)}/goal/confirm`, {
-      method: "POST",
-    });
-    return parseWithFallback(raw, IssueGoalSchema, null, {
-      endpoint: "POST /api/issues/:id/goal/confirm",
-    }) as unknown as IssueGoal;
-  }
-
   async cancelTask(issueId: string, taskId: string): Promise<AgentTask> {
     const raw = await this.fetch<unknown>(`/api/issues/${issueId}/tasks/${taskId}/cancel`, {
       method: "POST",
@@ -5331,10 +5288,6 @@ export class ApiClient {
     return parseWithFallback(raw, ChatSessionSchema, EMPTY_CHAT_SESSION, {
       endpoint: "GET /api/chat/sessions/:id",
     });
-  }
-
-  async convertChatSessionToGoal(sessionId: string): Promise<{ issue: import("../types").Issue; chat_session_id: string }> {
-    return this.fetch(`/api/chat/sessions/${sessionId}/to-goal`, { method: "POST" });
   }
 
   async createChatSession(

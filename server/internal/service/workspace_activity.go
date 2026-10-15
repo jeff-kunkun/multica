@@ -96,7 +96,7 @@ var familyLabels = map[string]string{
 // workspaceFamilyRules classify a write by its route pattern (chi's pattern,
 // with {placeholders}, so no id or token ever shows up). First match wins.
 var workspaceFamilyRules = []struct{ sub, family string }{
-	{"/cloud-billing", FamilyBilling}, {"/cloud-subscriptions", FamilyBilling}, {"/goal/budget", FamilyBilling},
+	{"/cloud-billing", FamilyBilling}, {"/cloud-subscriptions", FamilyBilling},
 	{"/pull-requests", FamilyPR}, {"/pull_requests", FamilyPR}, {"/github", FamilyPR},
 	{"/vcs", FamilyIntegration}, {"/lark", FamilyIntegration}, {"/slack", FamilyIntegration},
 	{"/telegram", FamilyIntegration}, {"/dingtalk", FamilyIntegration}, {"/wecom", FamilyIntegration},
@@ -172,7 +172,7 @@ var (
 	dangerWorkspacePath = regexp.MustCompile(`^/api/workspaces/[^/]+/?$`)
 	dangerMembersPath   = regexp.MustCompile(`^/api/workspaces/[^/]+/(members|invitations|share-links|leave)(/|$)`)
 	dangerKeysPath      = regexp.MustCompile(`(^/api/tokens(/|$))|(^/api/cli-token)|(/rotate([-/]|$))|(/plugins/[^/]+/token/?$)|(/reset-password/?$)`)
-	dangerBillingPath   = regexp.MustCompile(`(^/api/cloud-billing(/|$))|(^/api/cloud-subscriptions(/|$))|(/goal/budget/?$)`)
+	dangerBillingPath   = regexp.MustCompile(`(^/api/cloud-billing(/|$))|(^/api/cloud-subscriptions(/|$))`)
 )
 
 // DangerousBotAction names which of the four confirm-first actions a request

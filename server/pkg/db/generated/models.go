@@ -1463,48 +1463,6 @@ type IssueDraft struct {
 	CapabilityVersion string             `json:"capability_version"`
 }
 
-type IssueGoal struct {
-	ID                     pgtype.UUID        `json:"id"`
-	IssueID                pgtype.UUID        `json:"issue_id"`
-	WorkspaceID            pgtype.UUID        `json:"workspace_id"`
-	Status                 string             `json:"status"`
-	Round                  int32              `json:"round"`
-	TokenLimit             int64              `json:"token_limit"`
-	RunLimit               int32              `json:"run_limit"`
-	DurationSeconds        int64              `json:"duration_seconds"`
-	TokensUsed             int64              `json:"tokens_used"`
-	RunsUsed               int32              `json:"runs_used"`
-	DurationSecondsUsed    int64              `json:"duration_seconds_used"`
-	Evidence               []byte             `json:"evidence"`
-	CreatedByType          string             `json:"created_by_type"`
-	CreatedByID            pgtype.UUID        `json:"created_by_id"`
-	LockedAt               pgtype.Timestamptz `json:"locked_at"`
-	StoppedAt              pgtype.Timestamptz `json:"stopped_at"`
-	AchievedAt             pgtype.Timestamptz `json:"achieved_at"`
-	CreatedAt              pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt              pgtype.Timestamptz `json:"updated_at"`
-	NoProgressRounds       int32              `json:"no_progress_rounds"`
-	MaxNoProgressRounds    int32              `json:"max_no_progress_rounds"`
-	BudgetWarningAt        pgtype.Timestamptz `json:"budget_warning_at"`
-	LastContinuationTaskID pgtype.UUID        `json:"last_continuation_task_id"`
-	StoppedByType          pgtype.Text        `json:"stopped_by_type"`
-	StoppedByID            pgtype.UUID        `json:"stopped_by_id"`
-	StoppedOnBehalfOf      pgtype.UUID        `json:"stopped_on_behalf_of"`
-	StopReason             string             `json:"stop_reason"`
-}
-
-type IssueGoalCheck struct {
-	ID          pgtype.UUID        `json:"id"`
-	GoalID      pgtype.UUID        `json:"goal_id"`
-	Position    int32              `json:"position"`
-	Description string             `json:"description"`
-	Method      string             `json:"method"`
-	Status      string             `json:"status"`
-	Evidence    []byte             `json:"evidence"`
-	CreatedAt   pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
-}
-
 type IssueLabel struct {
 	ID           pgtype.UUID        `json:"id"`
 	WorkspaceID  pgtype.UUID        `json:"workspace_id"`

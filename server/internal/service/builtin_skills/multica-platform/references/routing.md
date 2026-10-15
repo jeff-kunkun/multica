@@ -203,7 +203,7 @@ series a weighted bonus (0–100, default 1; 0 disables it), never a
 filter. All candidates remain. The old mode retains category tier caps; reasoning
 reads those as reference. When no preferred family can take the selected tier, routing picks across series by tier and the
 「自动选派」 comment says 「Claude 系列没人能接（…），换系列按档位选」. The same
-facts print on the routing receipt of `issue create` / `chat new` / chat → goal
+facts print on the routing receipt of `issue create` / `chat new`
 (`category`, `rule`, `series`, `series_fallback` in `--output json`). Changing
 the rule list re-asks the category on the next route; the rest of a fresh
 analysis is reused as before.

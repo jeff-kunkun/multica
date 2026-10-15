@@ -14,8 +14,8 @@ import (
 
 // DENE-1721 acceptance on the server: a medium seat working a ticket consults
 // a strong seat; the 4th ask on the ticket is refused with a reason; an
-// answered consult lands its answer, a timeline line and the goal budget.
-func TestIssueConsult_LimitAnswerActivityAndBudget(t *testing.T) {
+// answered consult lands its answer and a timeline line.
+func TestIssueConsult_LimitAnswerAndActivity(t *testing.T) {
 	if testPool == nil {
 		t.Skip("test database not available")
 	}
@@ -38,7 +38,6 @@ func TestIssueConsult_LimitAnswerActivityAndBudget(t *testing.T) {
 		"workspace_id": testWorkspaceID, "title": "consult ticket", "status": "in_progress", "priority": "none",
 		"creator_type": "member", "creator_id": testUserID, "number": nextTestIssueNumber(t),
 	})
-	dbfx.Insert(t, "issue_goal", testutil.Cols{"issue_id": issue, "workspace_id": testWorkspaceID, "status": "active"})
 	askerTask := dbfx.Task(t, asker, testutil.Cols{
 		"runtime_id": runtime, "status": "running", "issue_id": issue,
 		"originator_user_id": testUserID, "accountable_user_id": testUserID, "originator_source": "direct_human",
@@ -107,13 +106,5 @@ func TestIssueConsult_LimitAnswerActivityAndBudget(t *testing.T) {
 	_ = json.Unmarshal(details, &d)
 	if d["answer"] != "Use the composite index." || d["advisor_id"] != advisor || d["question"] == "" {
 		t.Fatalf("activity details = %v", d)
-	}
-	var tokens int64
-	var runs int
-	if err := testPool.QueryRow(ctx, `SELECT tokens_used, runs_used FROM issue_goal WHERE issue_id = $1`, issue).Scan(&tokens, &runs); err != nil {
-		t.Fatal(err)
-	}
-	if tokens != 1200 || runs != 0 {
-		t.Fatalf("goal usage tokens=%d runs=%d, want 1200 tokens and no extra round", tokens, runs)
 	}
 }

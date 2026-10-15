@@ -4,14 +4,11 @@ export type {
   IssueStateCard,
   StateCardBaton,
   StateCardChanges,
-  StateCardCheck,
   StateCardChildReceipt,
   StateCardDecision,
   StateCardNow,
   StateCardThread,
 } from "./state-card";
-export type { IssueGoal, IssueGoalStatus, IssueGoalCheck, IssueGoalBudget, IssueGoalEvidence, CreateIssueGoalInput, IssueGoalCheckInput } from "./goal";
-export { IssueGoalSchema } from "./goal";
 export type { IssueDraft, IssueDraftStatus, IssueDraftPayload, IssueDraftChild, IssueDraftProjectProposal, IssueDraftProjectChoice, IssueDraftCreatedIssue, IssueDraftAssignmentWarning, IssueDraftPolicy, IssueDraftCapabilities, IssueDraftSession, IssueDraftSummary, IssueDraftFinalizeResult, IssueDraftRuntimeSwitch } from "./issue-draft";
 export type { CloseIssueRequest, CloseIssueResponse, CloseOutcome, KnowledgeAudit, KnowledgeAuditChange } from "./close";
 export type {

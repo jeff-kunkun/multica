@@ -2218,7 +2218,6 @@
     "description": "에이전트가 실행 중 만들 수 있는 것과 실행 시간. 관리자만 변경할 수 있습니다.",
     "create_title": "만들기",
     "chat_issue_label": "채팅에서 작업 만들기",
-    "chat_issue_description": "목표로 전환 포함.",
     "issue_issue_label": "작업에서 작업 만들기",
     "issue_issue_description": "하위 작업과 계획 포함.",
     "chat_chat_label": "채팅에서 채팅 만들기",

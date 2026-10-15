@@ -78,11 +78,10 @@ export function AgentPermissionsTab() {
       },
     );
 
-  const spawnRows: { key: Exclude<SpawnKey, "consult">; label: string; description: string; perChat: boolean }[] = [
+  const spawnRows: { key: Exclude<SpawnKey, "consult">; label: string; description?: string; perChat: boolean }[] = [
     {
       key: "chat_issue",
       label: t(($) => $.agent_permissions.chat_issue_label),
-      description: t(($) => $.agent_permissions.chat_issue_description),
       perChat: false,
     },
     {
@@ -200,7 +199,7 @@ function SpawnRow({
 }: {
   anchor: string;
   label: string;
-  description: string;
+  description?: string;
   cell: AgentSpawnCell | undefined;
   showPerChat: boolean;
   disabled: boolean;

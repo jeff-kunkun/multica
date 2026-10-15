@@ -1496,10 +1496,6 @@ export const IssueStateCardSchema = z.object({
   goal: z
     .object({
       title: z.string().default(""),
-      goal_status: z.string().optional(),
-      finish_line: z
-        .array(z.object({ description: z.string(), status: z.string().default("") }))
-        .optional(),
     })
     .default({ title: "" }),
   decisions: z.array(StateCardDecisionSchema).nullable().default([]).transform((v) => v ?? []),

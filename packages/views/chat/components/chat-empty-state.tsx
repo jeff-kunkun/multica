@@ -6,7 +6,6 @@ import { selectConversationStarters } from "@multica/core/agents";
 import type { Agent } from "@multica/core/types";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { useT } from "../../i18n";
-import { GoalFlowSteps } from "../../issues/draft/goal-flow-steps";
 import { AppLink } from "../../navigation";
 import {
   ConversationStarterList,
@@ -97,8 +96,7 @@ export function EmptyState({
       ) : null}
       {agent && onStartAlignment ? (
         <div className="w-full max-w-sm rounded-lg border border-border/80 bg-muted/20 px-3 py-3 text-left">
-          <GoalFlowSteps active="chat" />
-          <div className="mt-2 flex items-center justify-between gap-3">
+          <div className="flex items-center justify-between gap-3">
             <p className="text-caption text-muted-foreground">
               {t(($) => $.goal_flow.hint)}
             </p>

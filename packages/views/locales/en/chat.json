@@ -96,7 +96,6 @@
     "linked_project_chip": "Read-only project from {{source}}",
     "linked_project_stale": "Stale",
     "linked_project_stale_hint": "No longer shared — the agent no longer gets it",
-    "to_goal": "Turn into a goal task",
     "mode_menu": "Send mode",
     "mode_steer": "Steer",
     "mode_steer_desc": "Read after this step",

@@ -7,3 +7,7 @@
 DROP TABLE IF EXISTS agent_access_pass;
 DROP TABLE IF EXISTS agent_access_request;
 ALTER TABLE agent DROP COLUMN IF EXISTS doorbell_enabled;
+
+-- Goal mode (DENE-1051).
+DROP TABLE IF EXISTS issue_goal_check;
+DROP TABLE IF EXISTS issue_goal;

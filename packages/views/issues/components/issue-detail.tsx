@@ -40,7 +40,6 @@ import {
   Plus,
   SlidersHorizontal,
   Tag,
-  Target,
   Unlink,
   Users,
   X,
@@ -159,7 +158,7 @@ import { useActorName } from "@multica/core/workspace/hooks";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useRecentContextStore } from "@multica/core/chat";
 import { useModalStore } from "@multica/core/modals";
-import { issueListOptions, issueDetailOptions, childIssuesOptions, childIssueProgressOptions, issueAttachmentsOptions, issueGoalOptions, issueKeys } from "@multica/core/issues/queries";
+import { issueListOptions, issueDetailOptions, childIssuesOptions, childIssueProgressOptions, issueAttachmentsOptions, issueKeys } from "@multica/core/issues/queries";
 import { issueAlignmentDraftId, issueAlignmentHeldByAnother } from "@multica/core/issues";
 import { projectDetailOptions } from "@multica/core/projects/queries";
 import { ProjectIcon } from "../../projects/components/project-icon";
@@ -199,9 +198,7 @@ import { AskPromptList } from "../../common/ask-prompt";
 import { PAGE_GUTTER, PageHeader } from "../../layout/page-header";
 import { ShareScopeDialog, ShareScopeTrigger } from "../../common/share-scope-dialog";
 import { WorkThreadPanel } from "../../common/work-thread-panel";
-import { GoalSection } from "./goal-section";
 import { IssueUndrivenRow, UndrivenRowMark } from "./issue-driver";
-import { openGoalCompletion } from "@multica/core/modals";
 
 import { ProgressRing } from "./progress-ring";
 import { matchesPinyin } from "../../editor/extensions/pinyin-match";
@@ -1468,7 +1465,6 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   const canModerateComments =
     currentUserRole === "owner" || currentUserRole === "admin";
   const { data: allIssues = [] } = useQuery(issueListOptions(wsId));
-  const { data: issueGoal } = useQuery(issueGoalOptions(wsId, id));
   const { getActorName } = useActorName();
   const resolveStatusLabel = useStatusLabel(wsId);
   // Activity and issue visuals share the catalog's custom geometry and color;
@@ -3053,23 +3049,6 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
               />
             </PropRow>
           )}
-          <PropRow label={t(($) => $.detail.goal.title)}>
-            {issueGoal ? (
-              <button
-                type="button"
-                className="inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-caption text-brand hover:bg-brand/10"
-                onClick={() => openGoalCompletion({ issueId: issue.id, title: issue.title, initialChecks: issueGoal.checks.map((check) => check.description ?? check.title ?? "").filter(Boolean) })}
-              >
-                <Target className="size-3.5" aria-hidden="true" />
-                {issueGoal.checks.filter((check) => check.passed === true || check.status === "passed" || check.status === "done" || check.status === "achieved").length}/{issueGoal.checks.length} {t(($) => $.detail.goal.progress_word)}
-              </button>
-            ) : (
-              <button type="button" className="text-caption text-muted-foreground hover:text-brand" onClick={() => openGoalCompletion({ issueId: issue.id, title: issue.title })}>
-                {t(($) => $.detail.goal.unset)} · {t(($) => $.detail.goal.set_as_goal)}
-              </button>
-            )}
-          </PropRow>
-
           {/* Optional props — rendered only when set on the issue OR added
               via "+ Add property" in this session. Row order follows the
               order of `OPTIONAL_PROP_KEYS`. */}
@@ -3906,22 +3885,6 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
           <IssueProgressBar issue={issue} className="mt-2" />
           <IssueUndrivenRow issue={issue} readOnly={isGuest} />
           <div className="mt-3 flex flex-wrap items-center gap-2">
-            {!isGuest && !issueGoal && (
-              <Button
-                size="sm"
-                className="gap-1.5 bg-brand text-brand-foreground hover:bg-brand/90"
-                onClick={() => openGoalCompletion({ issueId: issue.id, title: issue.title })}
-              >
-                <Target className="size-3.5" aria-hidden="true" />
-                {t(($) => $.detail.goal.set_as_goal)}
-              </Button>
-            )}
-            {issueGoal && (
-              <span className="inline-flex items-center gap-1.5 rounded-full border border-brand/30 bg-brand/5 px-2.5 py-1 text-caption font-medium text-brand">
-                <Target className="size-3.5" aria-hidden="true" />
-                {issueGoal.checks.filter((check) => check.passed === true || check.status === "passed" || check.status === "done" || check.status === "achieved").length}/{issueGoal.checks.length} {t(($) => $.detail.goal.progress_word)}
-              </span>
-            )}
             <IssueAlignmentEntry
               draftId={alignmentDraftId}
               groupIssues={alignmentGroupIssues}
@@ -3931,7 +3894,6 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
               startedByAnother={alignmentHeldByAnother}
             />
           </div>
-          <GoalSection wsId={wsId} issueId={issue.id} />
           {titleConflictDraft !== null ? (
             <RevisionConflictCompare
               className="mt-2"
