@@ -42,6 +42,7 @@ func TestParseMagpieGroups(t *testing.T) {
 		{name: "office-claude", id: "office-claude", models: []string{"claude/claude-opus-5-5", "claude/claude-sonnet-5-5"}, users: []string{"Claude Code"}},
 		{name: "office-codex", id: "office-codex", models: []string{"codex/gpt-6.1-sol", "codex/gpt-6-luna"}, users: []string{"Codex"}},
 		{name: "office-opencode", id: "office-opencode", models: []string{"opencode-go/mimo-v2.6-pro", "zhipu/glm-5.3", "opencode-go/kimi-k3"}, users: []string{"Antigravity CLI", "OpenCode"}},
+		{name: "office-router", id: "office-router", models: []string{"zhipu/glm-5.3-flash", "opencode-go/deepseek-v4.1-flash"}},
 	}
 	if !reflect.DeepEqual(groups, want) {
 		t.Fatalf("groups = %#v\nwant %#v", groups, want)
@@ -117,7 +118,7 @@ func TestMagpieProbeReadsNamesOnlyWhenListingChanges(t *testing.T) {
 		want := MagpieRoute{Group: "office-claude", Models: []MagpieModel{
 			{ID: "claude/claude-opus-5-5", Name: "Claude Opus 5.5"},
 			{ID: "claude/claude-sonnet-5-5", Name: "Claude Sonnet 5.5"},
-		}}
+		}, Groups: routes.groups}
 		if got := magpieRouteFor(routes, "claude"); !reflect.DeepEqual(got, want) {
 			t.Fatalf("claude route = %#v", got)
 		}
@@ -128,8 +129,12 @@ func TestMagpieProbeReadsNamesOnlyWhenListingChanges(t *testing.T) {
 		if got := magpieRouteFor(routes, "antigravity"); got.Group != "office-opencode" {
 			t.Fatalf("antigravity route = %#v", got)
 		}
-		if got := magpieRouteFor(routes, "kiro"); got.Group != "" || got.Models == nil {
+		if got := magpieRouteFor(routes, "kiro"); got.Group != "" || got.Models == nil || len(got.Groups) != 4 {
 			t.Fatalf("kiro route = %#v", got)
+		}
+		// Every group is a choice, the one serving no agent too.
+		if g := routes.groups[3]; g.Name != "office-router" || len(g.Models) != 2 {
+			t.Fatalf("router group = %#v", g)
 		}
 	}
 	// Names that could not all be read are read again next round.
@@ -143,6 +148,7 @@ func TestMagpieProbeReadsNamesOnlyWhenListingChanges(t *testing.T) {
 		"group office-claude":   magpieGroupClaudeOutput,
 		"group office-codex":    "",
 		"group office-opencode": "",
+		"group office-router":   "",
 	})
 	var q magpieRouteProber
 	q.probe(context.Background())
@@ -210,7 +216,7 @@ func TestReportMagpieRoutes(t *testing.T) {
 	if b := decode("/api/daemon/runtimes/rt-claude/magpie"); !strings.Contains(string(b["magpie"]), `"group":"office-claude"`) {
 		t.Fatalf("claude report = %s", b["magpie"])
 	}
-	if b := decode("/api/daemon/runtimes/rt-kiro/magpie"); string(b["magpie"]) != `{"group":"","models":[]}` {
+	if b := decode("/api/daemon/runtimes/rt-kiro/magpie"); !strings.HasPrefix(string(b["magpie"]), `{"group":"","models":[],"groups":[{"name":"office-claude"`) {
 		t.Fatalf("kiro report = %s", b["magpie"])
 	}
 	mu.Lock()

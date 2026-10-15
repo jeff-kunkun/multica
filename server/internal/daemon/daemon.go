@@ -7306,6 +7306,11 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	if task.Agent != nil {
 		customArgs = task.Agent.CustomArgs
 		mcpConfig = effectiveMcpConfig
+		var magpieGroup string
+		customArgs, magpieGroup = resolveMagpieGroupArgs(provider, customArgs, task.Agent.RuntimeConfig, task.MagpieGroup)
+		if magpieGroup != "" {
+			taskLog.Info("magpie group", "group", magpieGroup, "issue_choice", task.MagpieGroup)
+		}
 	}
 	// No model / thinking / service-tier selection: every CLI launches with
 	// its own configured default.

@@ -180,6 +180,77 @@ describe("AgentsPage", () => {
     expect(within(plain).queryByText("CLI's own models")).not.toBeInTheDocument();
   });
 
+  // DENE-2078: an OpenCode agent pinned to office-pojia showed its CLI's group.
+  it("shows the group an agent is pinned to, not its CLI's", () => {
+    mocks.runtimes = [
+      {
+        id: "runtime-opencode",
+        name: "Opencode (studio)",
+        provider: "opencode",
+        metadata: {
+          magpie: {
+            group: "office-opencode",
+            models: [{ id: "opencode-go/mimo-v2.6-pro", name: "MiMo-V2.6-Pro" }],
+            groups: [
+              { name: "office-opencode", models: [{ id: "opencode-go/mimo-v2.6-pro", name: "MiMo-V2.6-Pro" }] },
+              { name: "office-pojia", models: [{ id: "nexus-gpu/nexus-coder", name: "nexus-coder" }] },
+            ],
+          },
+        },
+      },
+    ];
+    mocks.agents = [
+      makeAgent({ id: "a-default", name: "Default", runtime_id: "runtime-opencode" }),
+      makeAgent({
+        id: "a-pinned",
+        name: "Pinned",
+        runtime_id: "runtime-opencode",
+        custom_args: ["--model", "magpie/group/office-pojia"],
+      }),
+    ];
+    renderPage();
+
+    expect(within(row("Default")).getByText("office-opencode")).toBeInTheDocument();
+    const pinned = row("Pinned");
+    expect(within(pinned).getByText("office-pojia")).toBeInTheDocument();
+    expect(within(pinned).getByText("nexus-coder")).toBeInTheDocument();
+    expect(within(pinned).queryByText("office-opencode")).not.toBeInTheDocument();
+  });
+
+  it("shows every group an agent can run on, default first", () => {
+    mocks.runtimes = [
+      {
+        id: "runtime-opencode",
+        name: "Opencode (studio)",
+        provider: "opencode",
+        metadata: {
+          magpie: {
+            group: "office-opencode",
+            models: [{ id: "opencode-go/mimo-v2.6-pro", name: "MiMo-V2.6-Pro" }],
+            groups: [
+              { name: "office-opencode", models: [{ id: "opencode-go/mimo-v2.6-pro", name: "MiMo-V2.6-Pro" }] },
+              { name: "office-pojia", models: [{ id: "nexus-gpu/nexus-coder", name: "nexus-coder" }] },
+            ],
+          },
+        },
+      },
+    ];
+    mocks.agents = [
+      makeAgent({
+        id: "a-both",
+        name: "Both",
+        runtime_id: "runtime-opencode",
+        runtime_config: { magpie_groups: ["office-pojia", "office-opencode"] },
+      }),
+    ];
+    renderPage();
+
+    const chips = within(row("Both")).getAllByText(/^office-/).map((el) => el.textContent);
+    expect(chips).toEqual(["office-pojia", "office-opencode"]);
+    expect(within(row("Both")).getByText("nexus-coder")).toBeInTheDocument();
+    expect(within(row("Both")).getByText("MiMo-V2.6-Pro")).toBeInTheDocument();
+  });
+
   // Deleting archives an agent; the office never shows archived ones.
   it("hides deleted agents, with nothing to switch or edit", () => {
     mocks.agents = [

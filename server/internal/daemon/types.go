@@ -82,7 +82,8 @@ type Task struct {
 	// the built-in-only form. IssueStatusesOmitted is the cap overflow count.
 	IssueStatuses                 []IssueStatusData      `json:"issue_statuses,omitempty"`
 	IssueStatusesOmitted          int                    `json:"issue_statuses_omitted,omitempty"`
-	ThreadName                    string                 `json:"thread_name,omitempty"` // semantic title for provider-native session/thread history
+	ThreadName                    string                 `json:"thread_name,omitempty"`  // semantic title for provider-native session/thread history
+	MagpieGroup                   string                 `json:"magpie_group,omitempty"` // magpie group the issue asks for; see resolveMagpieGroupArgs
 	Agent                         *AgentData             `json:"agent,omitempty"`
 	Repos                         []RepoData             `json:"repos,omitempty"`
 	ProjectID                     string                 `json:"project_id,omitempty"`                       // active project for this task, when present

@@ -6,11 +6,13 @@ import type {
   AgentRuntime,
   MemberWithUser,
 } from "@multica/core/types";
+import { canPinMagpieGroup, readRuntimeMagpieRoute } from "@multica/core/runtimes";
 import { runtimeCliLabel } from "../../runtimes/components/runtime-machines";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { useT } from "../../i18n";
 import { VisibilityBadge } from "./visibility-badge";
 import { AgentPerformanceSummary } from "./tabs/activity-tab";
+import { MagpieGroupPicker } from "./magpie-group-picker";
 
 interface AgentOverviewSummaryProps {
   agent: Agent;
@@ -19,9 +21,8 @@ interface AgentOverviewSummaryProps {
 }
 
 /**
- * Read-only context for the workbench Overview. Editing lives under Settings;
- * keeping this surface non-interactive lets users scan identity, execution,
- * and capability context without mistaking every value for a control.
+ * Context for the workbench Overview. The magpie group is its one control:
+ * with no settings page, this is where an agent is pinned to a group.
  */
 export function AgentOverviewSummary({
   agent,
@@ -30,6 +31,7 @@ export function AgentOverviewSummary({
 }: AgentOverviewSummaryProps) {
   const { t } = useT("agents");
   const runtimeOnline = runtime?.status === "online";
+  const magpieRoute = readRuntimeMagpieRoute(runtime?.metadata);
 
   return (
     <aside className="self-start rounded-xl border border-surface-border bg-surface p-5 shadow-[var(--surface-shadow)] xl:sticky xl:top-6">
@@ -69,6 +71,14 @@ export function AgentOverviewSummary({
               </span>
             </span>
           </SummaryRow>
+          {runtime &&
+            magpieRoute &&
+            magpieRoute.groups.length > 0 &&
+            canPinMagpieGroup(runtime.provider) && (
+              <SummaryRow label={t(($) => $.magpie.group_label)} alignTop>
+                <MagpieGroupPicker agent={agent} route={magpieRoute} />
+              </SummaryRow>
+            )}
           <SummaryRow label={t(($) => $.inspector.prop_concurrency)}>
             <span className="font-mono tabular-nums text-foreground">
               {agent.max_concurrent_tasks}
@@ -84,13 +94,17 @@ export function AgentOverviewSummary({
 
 function SummaryRow({
   label,
+  alignTop,
   children,
 }: {
   label: string;
+  alignTop?: boolean;
   children: React.ReactNode;
 }) {
   return (
-    <div className="grid grid-cols-[88px_minmax(0,1fr)] items-center gap-3">
+    <div
+      className={`grid grid-cols-[88px_minmax(0,1fr)] gap-3 ${alignTop ? "items-start" : "items-center"}`}
+    >
       <dt className="text-muted-foreground">{label}</dt>
       <dd className="min-w-0">{children}</dd>
     </div>
