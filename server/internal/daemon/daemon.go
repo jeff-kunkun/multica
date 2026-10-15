@@ -7104,6 +7104,15 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			if cerr := execenv.CleanupSidecars(env.RootDir); cerr != nil {
 				d.logger.Warn("execenv: cleanup sidecars failed", "error", cerr)
 			}
+			// The task context marker must not outlive the task that owns
+			// it, even when the manifest-based pass above could not remove
+			// it (a corrupt or missing manifest aborts the rollback while
+			// the marker itself is fine to unlink — it is a daemon-reserved
+			// path we wrote). A leftover marker keeps every `multica`
+			// command in the user's tree failing closed (DENE-2142).
+			if rerr := os.Remove(filepath.Join(env.WorkDir, execenv.TaskContextMarkerRelPath)); rerr != nil && !os.IsNotExist(rerr) {
+				d.logger.Warn("execenv: remove task context marker failed", "work_dir", env.WorkDir, "error", rerr)
+			}
 		}()
 	}
 	taskTempDir, taskTempLock, err := ensureTaskTempDir(env.RootDir, task.WorkspaceID, task.ID)
