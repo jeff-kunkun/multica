@@ -147,8 +147,27 @@ func writeContextFiles(workDir, provider string, ctx TaskContextForEnv, manifest
 	return nil
 }
 
+// writeTaskContextMarker writes the per-workdir daemon-task marker, deciding
+// what to do with a pre-existing file at the reserved path:
+//
+//   - No file: write atomically.
+//   - Parseable and daemon-owned: overwrite atomically, whatever its old
+//     agent/issue. Every overlap the caller worries about — same-issue retry,
+//     reassignment to another agent, a stale marker whose run is long gone,
+//     the same agent taking the directory back — reduces to "a daemon-owned
+//     marker is occupying a daemon-reserved path", and the newer task's
+//     identity is the correct content for every one of them. The write is
+//     recorded in the manifest so cleanup removes it at task end (DENE-2142).
+//   - Parseable but foreign: refuse, naming what occupies the path so the
+//     operator can decide; the bytes are never touched.
+//   - Unparseable: reclaim. Almost certainly a torn write of our own marker
+//     (a daemon killed mid-write, or a prepare that observed the pre-atomic
+//     truncate-then-write of a sibling task on a shared directory); the same
+//     rule EnsureWorkspacesRootMarker applies, so a crash can never brick a
+//     directory the way the old refuse-on-any-pre-existing-file behavior did.
 func writeTaskContextMarker(workDir string, ctx TaskContextForEnv, manifest *sidecarManifest) error {
-	dir := filepath.Dir(filepath.Join(workDir, TaskContextMarkerRelPath))
+	path := filepath.Join(workDir, TaskContextMarkerRelPath)
+	dir := filepath.Dir(path)
 	if err := recordMkdirAll(dir, 0o755, manifest); err != nil {
 		return fmt.Errorf("create .multica dir: %w", err)
 	}
@@ -165,18 +184,20 @@ func writeTaskContextMarker(workDir string, ctx TaskContextForEnv, manifest *sid
 	if err != nil {
 		return fmt.Errorf("marshal task context marker: %w", err)
 	}
-	if err := recordWriteFile(filepath.Join(workDir, TaskContextMarkerRelPath), data, 0o644, manifest); err != nil {
+	if err := recordWriteFileAtomic(path, data, manifest); err != nil {
 		if errors.Is(err, errPathPreExists) {
-			path := filepath.Join(workDir, TaskContextMarkerRelPath)
 			existing, readErr := os.ReadFile(path)
 			if readErr != nil {
 				return fmt.Errorf("read existing task context marker: %w", readErr)
 			}
 			var marker taskContextMarkerFile
-			if json.Unmarshal(existing, &marker) != nil || marker.ManagedBy != TaskContextMarkerManagedBy {
-				return fmt.Errorf("write task context marker: %w", err)
+			if parseErr := json.Unmarshal(existing, &marker); parseErr == nil && marker.ManagedBy != TaskContextMarkerManagedBy {
+				return fmt.Errorf(
+					"write task context marker: foreign file at %s (managed_by=%q, agent_id=%q, issue_id=%q); refusing to overwrite — remove it by hand if it is stale",
+					path, marker.ManagedBy, marker.AgentID, marker.IssueID)
 			}
-			if writeErr := os.WriteFile(path, data, 0o644); writeErr != nil {
+			// Daemon-owned (or unparseable torn bytes): take the path over.
+			if writeErr := writeWorkspacesRootMarkerAtomic(path, data); writeErr != nil {
 				return fmt.Errorf("refresh task context marker: %w", writeErr)
 			}
 			if manifest != nil {

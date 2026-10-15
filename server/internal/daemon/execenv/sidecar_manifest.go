@@ -147,6 +147,39 @@ func recordWriteFile(path string, data []byte, perm os.FileMode, m *sidecarManif
 	return nil
 }
 
+// recordWriteFileAtomic is recordWriteFile with an atomic payload: the bytes
+// land via a same-directory temp file plus a rename (see
+// writeWorkspacesRootMarkerAtomic, whose 0644 perm this shares), so a
+// concurrent reader either sees no file at all or the complete new one —
+// never a truncated half-file.
+//
+// Use it for sidecars another task's Prepare may read concurrently. The task
+// context marker is that case: two tasks bound to the same local_directory
+// can prepare within seconds of each other (reassignment, or two daemons on
+// one machine), and a plain os.WriteFile truncates before it writes, so the
+// reader's parse of the in-flight bytes failed and refused the whole prepare
+// (DENE-2142).
+func recordWriteFileAtomic(path string, data []byte, m *sidecarManifest) error {
+	// Unlike recordWriteFile, the collision check applies in the nil-manifest
+	// mode too: the only current caller is the task context marker, whose
+	// foreign-file refusal must not depend on whether the caller keeps a
+	// manifest (Reuse passes nil).
+	_, statErr := os.Lstat(path)
+	if statErr == nil {
+		return fmt.Errorf("%w: %s", errPathPreExists, path)
+	}
+	if !errors.Is(statErr, fs.ErrNotExist) {
+		return fmt.Errorf("stat target %s: %w", path, statErr)
+	}
+	if err := writeWorkspacesRootMarkerAtomic(path, data); err != nil {
+		return err
+	}
+	if m != nil {
+		m.Files = append(m.Files, path)
+	}
+	return nil
+}
+
 // writeSidecarManifest persists m to {envRoot}/{sidecarManifestFile}.
 // Empty manifests are still written so a later Cleanup that finds the
 // file knows tracking was attempted (vs. an old build that predates this

@@ -818,6 +818,51 @@ func ReadGCMeta(envRoot string) (*GCMeta, error) {
 	return &meta, nil
 }
 
+// crashedSidecarRollbackGrace is how young a leftover sidecar manifest may be
+// before the GC treats it as crash debris. A task that completes normally has
+// its sidecars rolled back by its own run and its .gc_meta.json written right
+// after; the manifest file is gone by then. The grace only has to cover that
+// gap, so a value small against the GC interval is plenty.
+const crashedSidecarRollbackGrace = 10 * time.Minute
+
+// CleanupCrashedTaskSidecars rolls back the sidecar writes of a task whose
+// daemon died before the run's own cleanup pass could: a leftover sidecar
+// manifest with no recorded completion (DENE-2142). The manifest records the
+// task context marker by absolute path, so for a local_directory task this
+// also removes the marker from the user's tree — the file that otherwise keeps
+// every `multica` command there failing closed until someone deletes it by
+// hand.
+//
+// A task that DID complete is left alone: a managed env root deliberately
+// keeps its marker between runs so the next dispatch can prove reuse
+// eligibility (shouldReusePriorWorkdir), and a local_directory run already
+// rolled its manifest back on the way out, leaving nothing to find.
+//
+// Safe to call on every non-active env root in every GC cycle: no manifest
+// means one stat and out, a too-young manifest waits for a later cycle, and a
+// completed task's env root has no manifest to begin with.
+func CleanupCrashedTaskSidecars(envRoot string, logger *slog.Logger) {
+	if envRoot == "" {
+		return
+	}
+	info, err := os.Stat(filepath.Join(envRoot, sidecarManifestFile))
+	if err != nil || time.Since(info.ModTime()) < crashedSidecarRollbackGrace {
+		return
+	}
+	if meta, metaErr := ReadGCMeta(envRoot); metaErr == nil && !meta.CompletedAt.IsZero() {
+		return
+	}
+	if err := CleanupSidecars(envRoot); err != nil {
+		if logger != nil {
+			logger.Warn("execenv: rollback sidecars of crashed task failed", "dir", filepath.Base(envRoot), "error", err)
+		}
+		return
+	}
+	if logger != nil {
+		logger.Info("execenv: rolled back sidecars of a task that never completed", "dir", filepath.Base(envRoot))
+	}
+}
+
 const managedEnvProvenanceFile = ".managed_env.json"
 
 // ManagedEnvProvenanceManagedBy discriminates a managed-env provenance file

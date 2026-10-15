@@ -1,6 +1,7 @@
 package execenv
 
 import (
+	"encoding/json"
 	"errors"
 	"io/fs"
 	"os"
@@ -9,6 +10,7 @@ import (
 	"sort"
 	"strings"
 	"testing"
+	"time"
 )
 
 // walkRelative returns every relative path inside root (files and directories),
@@ -887,4 +889,80 @@ func TestDirHasEntries(t *testing.T) {
 	if has, ok := dirHasEntries(regular); ok || has {
 		t.Errorf("dirHasEntries(regular file) = (%v, %v), want (false, false) — ENOTDIR must NOT be laundered as ENOTEMPTY", has, ok)
 	}
+}
+
+// TestCleanupCrashedTaskSidecars covers the GC-side recovery for a task whose
+// daemon died before its run's own cleanup pass: a leftover sidecar manifest
+// with no recorded completion is rolled back (removing the task context
+// marker a local_directory run stranded in the user's tree), a manifest too
+// young to have outlived the completion write waits, and a task that DID
+// complete keeps its sidecars — a managed env root's marker is load-bearing
+// for the next dispatch's reuse check (DENE-2142).
+func TestCleanupCrashedTaskSidecars(t *testing.T) {
+	seedCrashed := func(t *testing.T) (envRoot, userDir, markerPath string) {
+		t.Helper()
+		envRoot = t.TempDir()
+		userDir = t.TempDir()
+		markerPath = filepath.Join(userDir, TaskContextMarkerRelPath)
+		if err := os.MkdirAll(filepath.Dir(markerPath), 0o755); err != nil {
+			t.Fatalf("mkdir: %v", err)
+		}
+		if err := os.WriteFile(markerPath, []byte(`{"managed_by":"multica-daemon-task"}`), 0o644); err != nil {
+			t.Fatalf("seed marker: %v", err)
+		}
+		manifest := sidecarManifest{Files: []string{markerPath}, Dirs: []string{filepath.Dir(markerPath)}}
+		data, err := json.Marshal(manifest)
+		if err != nil {
+			t.Fatalf("marshal manifest: %v", err)
+		}
+		if err := os.WriteFile(filepath.Join(envRoot, sidecarManifestFile), data, 0o644); err != nil {
+			t.Fatalf("seed manifest: %v", err)
+		}
+		old := time.Now().Add(-crashedSidecarRollbackGrace - time.Minute)
+		if err := os.Chtimes(filepath.Join(envRoot, sidecarManifestFile), old, old); err != nil {
+			t.Fatalf("age manifest: %v", err)
+		}
+		return envRoot, userDir, markerPath
+	}
+
+	t.Run("no manifest is a no-op", func(t *testing.T) {
+		envRoot := t.TempDir()
+		CleanupCrashedTaskSidecars(envRoot, testLogger())
+	})
+
+	t.Run("young manifest waits for a later cycle", func(t *testing.T) {
+		envRoot, userDir, markerPath := seedCrashed(t)
+		now := time.Now()
+		if err := os.Chtimes(filepath.Join(envRoot, sidecarManifestFile), now, now); err != nil {
+			t.Fatalf("un-age manifest: %v", err)
+		}
+		CleanupCrashedTaskSidecars(envRoot, testLogger())
+		if _, err := os.Stat(markerPath); err != nil {
+			t.Fatalf("young manifest was rolled back early: %v", err)
+		}
+		_ = userDir
+	})
+
+	t.Run("old manifest without a completion is rolled back", func(t *testing.T) {
+		envRoot, _, markerPath := seedCrashed(t)
+		CleanupCrashedTaskSidecars(envRoot, testLogger())
+		if _, err := os.Stat(markerPath); !os.IsNotExist(err) {
+			t.Fatalf("crashed task's marker survived: %v", err)
+		}
+		if _, err := os.Stat(filepath.Join(envRoot, sidecarManifestFile)); !os.IsNotExist(err) {
+			t.Fatalf("manifest survived the rollback: %v", err)
+		}
+	})
+
+	t.Run("a task that completed keeps its sidecars", func(t *testing.T) {
+		envRoot, userDir, markerPath := seedCrashed(t)
+		if err := WriteGCMeta(envRoot, GCMeta{Kind: GCKindIssue, WorkspaceID: "ws"}, testLogger()); err != nil {
+			t.Fatalf("write gc meta: %v", err)
+		}
+		CleanupCrashedTaskSidecars(envRoot, testLogger())
+		if _, err := os.Stat(markerPath); err != nil {
+			t.Fatalf("completed task's marker was removed: %v", err)
+		}
+		_ = userDir
+	})
 }
