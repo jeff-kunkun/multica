@@ -141,6 +141,71 @@ func (q *Queries) ListChatSessionTicketIssues(ctx context.Context, arg ListChatS
 	return items, nil
 }
 
+const listChatTicketProgress = `-- name: ListChatTicketProgress :many
+SELECT i.id,
+       COALESCE(m.from_status, '')::text AS from_status,
+       m.changed_at::timestamptz AS changed_at,
+       EXISTS (
+           SELECT 1 FROM inbox_item n
+           WHERE n.workspace_id = i.workspace_id
+             AND n.recipient_type = 'member'
+             AND n.recipient_id = $1::uuid
+             AND n.issue_id = i.id
+             AND n.severity = 'action_required'
+             AND n.read = false AND n.archived = false
+       )::boolean AS has_open_call
+FROM issue i
+LEFT JOIN LATERAL (
+    SELECT a.details->>'from' AS from_status, a.created_at AS changed_at
+    FROM activity_log a
+    WHERE a.issue_id = i.id AND a.action = 'status_changed'
+    ORDER BY a.created_at DESC, a.id DESC
+    LIMIT 1
+) m ON true
+WHERE i.workspace_id = $2::uuid
+  AND i.id = ANY($3::uuid[])
+`
+
+type ListChatTicketProgressParams struct {
+	UserID      pgtype.UUID   `json:"user_id"`
+	WorkspaceID pgtype.UUID   `json:"workspace_id"`
+	IssueIds    []pgtype.UUID `json:"issue_ids"`
+}
+
+type ListChatTicketProgressRow struct {
+	ID          pgtype.UUID        `json:"id"`
+	FromStatus  string             `json:"from_status"`
+	ChangedAt   pgtype.Timestamptz `json:"changed_at"`
+	HasOpenCall bool               `json:"has_open_call"`
+}
+
+// The chat's progress bar (DENE-1667): for each ticket the chat opened, its
+// latest status move and whether an unread call to the person hangs on it.
+func (q *Queries) ListChatTicketProgress(ctx context.Context, arg ListChatTicketProgressParams) ([]ListChatTicketProgressRow, error) {
+	rows, err := q.db.Query(ctx, listChatTicketProgress, arg.UserID, arg.WorkspaceID, arg.IssueIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListChatTicketProgressRow{}
+	for rows.Next() {
+		var i ListChatTicketProgressRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.FromStatus,
+			&i.ChangedAt,
+			&i.HasOpenCall,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const setChatFollowedIssue = `-- name: SetChatFollowedIssue :exec
 INSERT INTO chat_followed_issue (chat_session_id, issue_id, workspace_id, source, hidden)
 VALUES ($1, $2, $3, 'manual', $4)

@@ -371,8 +371,6 @@ func TestPlatformSkillDescriptionNamesEveryDomain(t *testing.T) {
 		"references/skill-import.md":    "skill import",
 		"references/transfer.md":        "transfer",
 		"references/inbox.md":           "inbox",
-		"references/project-board.md":   "project board",
-		"references/project-report.md":  "report",
 		"references/asks.md":            "ask",
 		"references/goals.md":           "goal",
 		"references/progress.md":        "progress",

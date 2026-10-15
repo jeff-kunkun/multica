@@ -1,7 +1,6 @@
 import { parseFastAccess, type FastAccessRequest } from "./fast-access";
 import { LinkedProjectSettingsSchema } from "./schemas";
 import type { LinkedProjectSettings } from "../types/workspace-link";
-import { parseOverview, type OverviewFilters } from "./overview";
 import type { AgentSpawnPolicy, AgentSpawnPolicyPatch } from "../workspace/agent-spawn";
 import type { ZodType } from "zod";
 import type { IssueWakeup, IssueWakeupInput, IssueWakeupSummaryRow, PausedWakeup, SystemWakeup, WakeupRun, WorkspaceSystemWakeup } from "../types/issue-wakeup";
@@ -161,7 +160,6 @@ import type {
   ProjectMemoryStatus,
   ProjectMemoryMonitor,
   ProjectMemoryChecklistItem,
-  ProjectReport,
   CloseIssueRequest,
   CloseIssueResponse,
   ProjectMember,
@@ -3976,15 +3974,6 @@ export class ApiClient {
     return page;
   }
 
-  async getOverview(filters: OverviewFilters = {}) {
-    const params = new URLSearchParams();
-    if (filters.project) params.set("project", filters.project);
-    if (filters.agent) params.set("agent", filters.agent);
-    if (filters.compact) params.set("compact", "true");
-    const suffix = params.size ? `?${params}` : "";
-    return parseOverview(await this.fetch<unknown>(`/api/overview${suffix}`));
-  }
-
   // Workspaces
   async listWorkspaces(): Promise<Workspace[]> {
     return this.fetch("/api/workspaces");
@@ -5821,10 +5810,6 @@ export class ApiClient {
   }
 
   /** The project's news since the caller last heard it; reading moves nothing. */
-  async getProjectReport(id: string): Promise<ProjectReport> {
-    return this.fetch(`/api/projects/${id}/report`);
-  }
-
   async listProjectMemoryLocations(): Promise<{
     locations: ProjectMemoryChecklistItem[];
     builtin_sediment_instruction?: string;

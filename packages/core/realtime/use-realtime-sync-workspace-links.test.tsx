@@ -28,7 +28,7 @@ afterEach(() => {
 });
 
 
-it("refreshes link lists, views, audit and overview after CLI changes and reconnect", async () => {
+it("refreshes link lists, views and audit after CLI changes and reconnect", async () => {
  const qc=createQueryClient();
  let revision=0;
  const listWorkspaceLinks=vi.fn(async()=>({links:[{id:String(revision)}],can:{}}));
@@ -40,14 +40,14 @@ it("refreshes link lists, views, audit and overview after CLI changes and reconn
  function Wrapper({children}:{children:ReactNode}) {return <QueryClientProvider client={qc}>{children}</QueryClientProvider>}
  const page=renderHook(()=>useQuery(workspaceLinksOptions("ws-1")),{wrapper:Wrapper});
  renderHook(()=>useRealtimeSync(ws,stores),{wrapper:Wrapper});
- const keys=[workspaceLinkKeys.view("ws-1","l1",null),workspaceLinkKeys.audit("ws-1"),["workspaces","ws-1","overview"],workspaceLinkKeys.list("other")];
+ const keys=[workspaceLinkKeys.view("ws-1","l1",null),workspaceLinkKeys.audit("ws-1"),workspaceLinkKeys.list("other")];
  keys.forEach(key=>qc.setQueryData(key,{}));
  await waitFor(()=>expect(listWorkspaceLinks).toHaveBeenCalledTimes(1));
  revision=1;
  await act(async()=>handlers["workspace_link:changed"]!({workspace_id:"ws-1"}));
  await waitFor(()=>expect(page.result.current.data?.links[0]?.id).toBe("1"));
- keys.slice(0,3).forEach(key=>expect(qc.getQueryState(key)?.isInvalidated).toBe(true));
- expect(qc.getQueryState(keys[3]!)?.isInvalidated).toBe(false);
+ keys.slice(0,2).forEach(key=>expect(qc.getQueryState(key)?.isInvalidated).toBe(true));
+ expect(qc.getQueryState(keys[2]!)?.isInvalidated).toBe(false);
  revision=2;
  await act(async()=>{await reconnect()});
  await waitFor(()=>expect(page.result.current.data?.links[0]?.id).toBe("2"));

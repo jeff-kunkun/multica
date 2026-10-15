@@ -57,8 +57,8 @@ const (
 
 // KeyLatestSummary is the --summary of the latest close or handoff, word for
 // word, rewritten by every one of them — empty when that one carried none.
-// The project report reads it as latest_summary (DENE-1691); write order is
-// the order, so no timestamp comparison can let an older line through.
+// Write order is the order, so no timestamp comparison can let an older line
+// through.
 const KeyLatestSummary = "summary.latest"
 
 // HandoffKeys lists every handoff key, for writers that replace the record.

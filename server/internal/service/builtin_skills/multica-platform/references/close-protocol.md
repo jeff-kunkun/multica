@@ -32,7 +32,7 @@ multica issue close <id> --outcome done --verdict pass --evidence-file ./close.m
   link, test conclusion, or blocker it rests on. `--summary` goes above it:
   one conclusion line — what got done, or where it is stuck and who must do
   what. Proof stays in the evidence. Engineering words are fine; the line is
-  what `project report` hands on as `latest_summary`.
+  what the state card hands on as 上一棒交代.
   Keep `--parent` when this turn has a trigger; a comment-triggered run on the
   same issue defaults to that thread. Headings inside the evidence, in this
   order: `## 结论` / `## 状态` / `## 证据` / `## 下一责任人` / `## 唤醒动作`.

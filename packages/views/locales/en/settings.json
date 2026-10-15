@@ -437,8 +437,7 @@
       "project_sharing": "Permissions & sharing",
       "workspace_links": "Linked workspaces",
       "agent_permissions": "Agent permissions",
-      "bots": "Group chat & Bots",
-      "overview": "Overview"
+      "bots": "Group chat & Bots"
     },
     "groups": {
       "personal": "Personal",
@@ -2472,25 +2471,5 @@
       "copied": "Copied — send it to your Bot",
       "instruction": "Please run this on your machine, with <URL> and <KEY> replaced by your own HTTPS address for receiving messages and its key: {{command}}\nThen send me the link it prints; once I agree, you're connected and group messages and my decisions reach you. --expires-in-days 0 keeps your key from ever expiring; to have it lapse, use a number of days instead."
     }
-  },
-  "overview": {
-    "agents": "Agents",
-    "projects": "Projects",
-    "chats": "Active chats",
-    "automations": "Automations",
-    "skills": "Skills",
-    "squads": "Squads",
-    "runtimes": "Runtimes",
-    "workspace_links": "Linked workspaces",
-    "external_connections": "External connections",
-    "refresh": "Refresh",
-    "loading": "Loading overview...",
-    "load_error": "Could not load overview. Try refreshing.",
-    "restricted": "You do not have access to this section.",
-    "empty": "No matching items.",
-    "accepting_work": "Accepting work",
-    "paused": "Not accepting work",
-    "all_projects": "All projects",
-    "all_agents": "All agents"
   }
 }

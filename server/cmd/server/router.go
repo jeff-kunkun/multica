@@ -2577,7 +2577,6 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			r.Route("/api/projects", func(r chi.Router) {
 				r.Use(h.RequireModule(permission.ModuleProjects))
 				r.Get("/search", h.SearchProjects)
-				r.Get("/board", h.GetProjectBoard)
 				r.Get("/", h.ListProjects)
 				r.Post("/", h.CreateProject)
 				r.Route("/{id}", func(r chi.Router) {
@@ -2610,10 +2609,6 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Delete("/resources/{resourceId}", h.DeleteProjectResource)
 					r.Get("/members", h.ListProjectMembers)
 					r.Post("/members", h.AddProjectMember)
-					// What is new since the caller last heard this project
-					// (DENE-1667); /heard records it as heard.
-					r.Get("/report", h.GetProjectReport)
-					r.Post("/report/heard", h.MarkProjectReportHeard)
 					r.Delete("/members/{memberId}", h.RemoveProjectMember)
 				})
 			})

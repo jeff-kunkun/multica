@@ -437,8 +437,7 @@
       "project_sharing": "Autorisations et partage",
       "workspace_links": "Espaces liés",
       "agent_permissions": "Permissions des agents",
-      "bots": "Group chat & Bots",
-      "overview": "Vue d’ensemble"
+      "bots": "Group chat & Bots"
     },
     "groups": {
       "personal": "Personnel",
@@ -2472,25 +2471,5 @@
       "copied": "Copié, envoyez-le à votre bot",
       "instruction": "Exécute ceci sur ta machine, en remplaçant <URL> et <KEY> par ta propre adresse HTTPS de réception des messages et sa clé : {{command}}\nEnvoie-moi ensuite le lien affiché ; dès que j'accepte, tu es connecté et les messages du groupe comme mes décisions te parviennent. --expires-in-days 0 garde ta clé sans expiration ; pour qu'elle expire, indique plutôt un nombre de jours."
     }
-  },
-  "overview": {
-    "agents": "Agents",
-    "projects": "Projets",
-    "chats": "Discussions actives",
-    "automations": "Automatisations",
-    "skills": "Skills",
-    "squads": "Équipes",
-    "runtimes": "Environnements d’exécution",
-    "workspace_links": "Espaces liés",
-    "external_connections": "Connexions externes",
-    "refresh": "Actualiser",
-    "loading": "Chargement de la vue d’ensemble...",
-    "load_error": "Impossible de charger la vue d’ensemble. Actualisez pour réessayer.",
-    "restricted": "Vous n’avez pas accès à cette section.",
-    "empty": "Aucun élément correspondant.",
-    "accepting_work": "Accepte des tâches",
-    "paused": "N’accepte pas de tâches",
-    "all_projects": "Tous les projets",
-    "all_agents": "Tous les agents"
   }
 }

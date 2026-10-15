@@ -446,7 +446,7 @@ func issueCloseLong() string {
 		"state card's 已拍板 list that `multica issue context <id>` shows the next owner.\n" +
 		"--summary is the round's conclusion (结论) — what got done, or where it is\n" +
 		"stuck and who must do what; proof goes in --evidence. It becomes the card's\n" +
-		"上一棒交代 and the ticket's latest_summary in `multica project report`.\n\n" +
+		"上一棒交代.\n\n" +
 		"Acceptance seat: pass with --outcome done --verdict pass when the checks this\n" +
 		"change owns are green and no named person still owes a decision\n" +
 		"(close.conclusion=awaiting_human). A check already red on the base branch is\n" +
@@ -487,7 +487,7 @@ var issueHandoffCmd = &cobra.Command{
 		"A close already hands over what it closes: `issue close --outcome in_review`\n" +
 		"routes the acceptance seat itself. --summary is the conclusion (结论): what got\n" +
 		"done, or where it is stuck and who must do what next. It is the state card's\n" +
-		"上一棒交代 and the latest_summary in `multica project report`; repeat --decision\n" +
+		"上一棒交代; repeat --decision\n" +
 		"for each settled decision.\n" +
 		"Both are read back with `multica issue context <id>`. The response reports target_name,\n" +
 		"run_created and duplicate — quote them, do not restate them from memory.",
@@ -2603,7 +2603,7 @@ func registerIssueCloseFlags(cmd *cobra.Command) {
 	cmd.Flags().String("evidence-file", "", "Read the evidence body from a UTF-8 file inside the working directory")
 	cmd.Flags().Bool("allow-external-file", false, "Allow --evidence-file to read a path outside the current working directory")
 	cmd.Flags().String("waiting-for", "", "With --outcome backlog: what the issue waits for, one line (80 chars max; required for agents)")
-	cmd.Flags().String("summary", "", "One-line conclusion (结论): what got done, or where it is stuck and who must do what. Placed above the evidence; proof goes in --evidence. Shown in project report as latest_summary; for blocked it is the close.block_action (80 chars max)")
+	cmd.Flags().String("summary", "", "One-line conclusion (结论): what got done, or where it is stuck and who must do what. Placed above the evidence; proof goes in --evidence. Shown as the state card's 上一棒交代; for blocked it is the close.block_action (80 chars max)")
 	cmd.Flags().String("parent", "", "Comment ID to reply under; a comment-triggered run defaults to its trigger comment")
 	cmd.Flags().String("blocked-by", "", "Comma-separated issue identifiers this blocked issue is waiting on; on --outcome in_progress it says who continues")
 	cmd.Flags().String("wake-at", "", "RFC3339 time to wake a blocked issue for another look; on --outcome in_progress the patrol wakes the executor then")
@@ -2623,7 +2623,7 @@ func registerIssueCloseFlags(cmd *cobra.Command) {
 // registerIssueHandoffFlags wires `issue handoff`; shared with its tests.
 func registerIssueHandoffFlags(cmd *cobra.Command) {
 	cmd.Flags().String("to", "", "reviewer, dispatcher, or an agent name/id (required)")
-	cmd.Flags().String("summary", "", "One-line conclusion (结论): what got done, or where it is stuck and who must do what next. Shown as the state card's 上一棒交代 and in project report as latest_summary; details go in a comment (300 chars max)")
+	cmd.Flags().String("summary", "", "One-line conclusion (结论): what got done, or where it is stuck and who must do what next. Shown as the state card's 上一棒交代; details go in a comment (300 chars max)")
 	cmd.Flags().StringArray("decision", nil, "A decision settled this round, added to the state card's 已拍板 list (repeat for each)")
 	cmd.Flags().String("output", "table", "Output format: table or json")
 }
