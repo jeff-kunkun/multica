@@ -2014,7 +2014,7 @@ func TestDashboardMismatchedRequestTimezoneHidesTheRun(t *testing.T) {
 }
 
 // TestDashboardUsageByIssueIsTheCostEntryPoint pins what the workspace usage
-// page needs to link into one issue's Token cost view: a row per
+// page needs to link each cost row to its issue: a row per
 // (issue, model) carrying the issue's human identifier and title, bounded to
 // the same window and project scope as the cards beside it.
 //

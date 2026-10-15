@@ -15,6 +15,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/auth"
 	"github.com/multica-ai/multica/server/internal/daemonws"
 	"github.com/multica-ai/multica/server/internal/issuestatus"
@@ -1892,83 +1893,11 @@ func TestListTasksByIssue_CrossWorkspace_Returns404(t *testing.T) {
 	testutil.Call(t, testHandler.ListTasksByIssue, req).Want(http.StatusNotFound)
 }
 
-// TestGetIssueUsage_CrossWorkspace_Returns404 verifies that per-issue token
-// usage is not readable across workspaces via a bare issue UUID.
-func TestGetIssueUsage_CrossWorkspace_Returns404(t *testing.T) {
-	if testHandler == nil {
-		t.Skip("database not available")
-	}
-
-	foreignIssueID, _ := setupForeignWorkspaceFixture(t)
-
-	req := newRequest("GET", "/api/issues/"+foreignIssueID+"/usage", nil)
-	req = withURLParam(req, "id", foreignIssueID)
-	testutil.Call(t, testHandler.GetIssueUsage, req).Want(http.StatusNotFound)
-}
-
-func TestGetIssueUsageReportsUsageCoverage(t *testing.T) {
-	if testHandler == nil {
-		t.Skip("database not available")
-	}
-
-	var agentID, runtimeID string
-	dbfx.QueryRow(t, `
-		SELECT id, runtime_id FROM agent
-		WHERE workspace_id = $1 AND runtime_id IS NOT NULL
-		LIMIT 1
-	`, testWorkspaceID).Scan(&agentID, &runtimeID)
-	issueID := dbfx.Issue(t, "issue usage coverage")
-	finished := testutil.Cols{
-		"issue_id":     issueID,
-		"runtime_id":   runtimeID,
-		"started_at":   testutil.Raw("now() - interval '2 minutes'"),
-		"completed_at": testutil.Raw("now() - interval '1 minute'"),
-	}
-	meteredTaskID := dbfx.Task(t, agentID, finished, testutil.Cols{"status": "completed"})
-	dbfx.Task(t, agentID, finished, testutil.Cols{"status": "failed"})
-	// A cancelled task that never started and a queued task are not runs, so
-	// neither belongs in terminal_task_count or unreported_task_count.
-	dbfx.Task(t, agentID, testutil.Cols{
-		"issue_id":     issueID,
-		"runtime_id":   runtimeID,
-		"status":       "cancelled",
-		"completed_at": testutil.Raw("now() - interval '1 minute'"),
-	})
-	dbfx.Task(t, agentID, testutil.Cols{"issue_id": issueID, "runtime_id": runtimeID})
-	dbfx.Insert(t, "task_usage", testutil.Cols{
-		"task_id":       meteredTaskID,
-		"provider":      "qoderclicn",
-		"model":         "bailian/tp/qwen3.8-max",
-		"input_tokens":  120,
-		"output_tokens": 30,
-	})
-
-	req := newRequest("GET", "/api/issues/"+issueID+"/usage", nil)
-	req = withURLParam(req, "id", issueID)
-	var got struct {
-		TotalInputTokens    int64 `json:"total_input_tokens"`
-		TotalOutputTokens   int64 `json:"total_output_tokens"`
-		TaskCount           int32 `json:"task_count"`
-		TerminalTaskCount   int32 `json:"terminal_task_count"`
-		MeteredTaskCount    int32 `json:"metered_task_count"`
-		UnreportedTaskCount int32 `json:"unreported_task_count"`
-	}
-	testutil.Call(t, testHandler.GetIssueUsage, req).Want(http.StatusOK).JSON(&got)
-
-	if got.TotalInputTokens != 120 || got.TotalOutputTokens != 30 {
-		t.Errorf("token totals = %d/%d, want 120/30", got.TotalInputTokens, got.TotalOutputTokens)
-	}
-	if got.TaskCount != 1 || got.TerminalTaskCount != 2 || got.MeteredTaskCount != 1 || got.UnreportedTaskCount != 1 {
-		t.Errorf("coverage = legacy:%d terminal:%d metered:%d unreported:%d, want 1/2/1/1",
-			got.TaskCount, got.TerminalTaskCount, got.MeteredTaskCount, got.UnreportedTaskCount)
-	}
-}
-
 // DENE-666: the run-metadata columns exist so the cost baseline can split
 // resumed runs from cold starts and read where a run spent its wall clock.
-// This pins the whole wire path — daemon report -> task_usage -> GetIssueUsage
-// runs[] + attribution grouping — because every field is new on both ends and
-// a silent NULL here reads as "no data" rather than as a bug.
+// This pins the whole wire path — daemon report -> task_usage -> the execution
+// log's per-run usage rows — because every field is new on both ends and a
+// silent NULL here reads as "no data" rather than as a bug.
 func TestReportTaskUsageRoundTripsRunMetadata(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
@@ -2009,71 +1938,42 @@ func TestReportTaskUsageRoundTripsRunMetadata(t *testing.T) {
 	report = withURLParam(report, "taskId", taskID)
 	testutil.Call(t, testHandler.ReportTaskUsage, report).Want(http.StatusOK)
 
-	read := newRequest("GET", "/api/issues/"+issueID+"/usage", nil)
-	read = withURLParam(read, "id", issueID)
-	var got struct {
-		Runs []struct {
-			TaskID               string  `json:"task_id"`
-			NumTurns             int32   `json:"num_turns"`
-			Resumed              bool    `json:"resumed"`
-			SessionID            *string `json:"session_id"`
-			LastContextTokens    *int64  `json:"last_context_tokens"`
-			QueueToClaimMS       *int64  `json:"queue_to_claim_ms"`
-			PrepareMS            *int64  `json:"prepare_ms"`
-			SpawnToFirstOutputMS *int64  `json:"spawn_to_first_output_ms"`
-			TotalMS              *int64  `json:"total_ms"`
-			AttributionSource    string  `json:"attribution_source"`
-		} `json:"runs"`
-		AttributionSourceCounts map[string]int `json:"attribution_source_counts"`
+	rows, err := testHandler.Queries.ListIssueTaskUsage(context.Background(), parseUUID(issueID))
+	if err != nil {
+		t.Fatalf("list issue task usage: %v", err)
 	}
-	testutil.Call(t, testHandler.GetIssueUsage, read).Want(http.StatusOK).JSON(&got)
-
-	var run *struct {
-		TaskID               string  `json:"task_id"`
-		NumTurns             int32   `json:"num_turns"`
-		Resumed              bool    `json:"resumed"`
-		SessionID            *string `json:"session_id"`
-		LastContextTokens    *int64  `json:"last_context_tokens"`
-		QueueToClaimMS       *int64  `json:"queue_to_claim_ms"`
-		PrepareMS            *int64  `json:"prepare_ms"`
-		SpawnToFirstOutputMS *int64  `json:"spawn_to_first_output_ms"`
-		TotalMS              *int64  `json:"total_ms"`
-		AttributionSource    string  `json:"attribution_source"`
-	}
-	for i := range got.Runs {
-		if got.Runs[i].TaskID == taskID {
-			run = &got.Runs[i]
+	var run *db.ListIssueTaskUsageRow
+	for i := range rows {
+		if uuidToString(rows[i].TaskID) == taskID {
+			run = &rows[i]
 		}
 	}
 	if run == nil {
-		t.Fatalf("task %s missing from runs (%d returned) — the execution log cannot answer per-run cost", taskID, len(got.Runs))
+		t.Fatalf("task %s missing from usage rows (%d returned) — the execution log cannot answer per-run cost", taskID, len(rows))
 	}
 	if run.NumTurns != 7 || !run.Resumed {
 		t.Errorf("num_turns/resumed = %d/%t, want 7/true", run.NumTurns, run.Resumed)
 	}
-	if run.SessionID == nil || *run.SessionID != "session-dene-666" {
+	if !run.SessionID.Valid || run.SessionID.String != "session-dene-666" {
 		t.Errorf("session_id = %v, want session-dene-666", run.SessionID)
 	}
 	for _, field := range []struct {
 		name string
-		got  *int64
+		got  pgtype.Int8
 		want int64
 	}{
 		{"last_context_tokens", run.LastContextTokens, 4096},
-		{"queue_to_claim_ms", run.QueueToClaimMS, 11},
-		{"prepare_ms", run.PrepareMS, 22},
-		{"spawn_to_first_output_ms", run.SpawnToFirstOutputMS, 33},
-		{"total_ms", run.TotalMS, 44},
+		{"queue_to_claim_ms", run.QueueToClaimMs, 11},
+		{"prepare_ms", run.PrepareMs, 22},
+		{"spawn_to_first_output_ms", run.SpawnToFirstOutputMs, 33},
+		{"total_ms", run.TotalMs, 44},
 	} {
-		if field.got == nil || *field.got != field.want {
+		if !field.got.Valid || field.got.Int64 != field.want {
 			t.Errorf("%s = %v, want %d", field.name, field.got, field.want)
 		}
 	}
 	if run.AttributionSource != "direct_human" {
 		t.Errorf("attribution_source = %q, want direct_human", run.AttributionSource)
-	}
-	if got.AttributionSourceCounts["direct_human"] < 1 {
-		t.Errorf("attribution_source_counts = %v, want direct_human counted", got.AttributionSourceCounts)
 	}
 }
 

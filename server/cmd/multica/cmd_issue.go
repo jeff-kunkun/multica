@@ -670,16 +670,6 @@ var issueRunMessagesCmd = &cobra.Command{
 	RunE:  runIssueRunMessages,
 }
 
-var issueUsageCmd = &cobra.Command{
-	Use:   "usage <issue-id>",
-	Short: "Show aggregated token usage for an issue",
-	Long: "Show aggregated token usage for an issue.\n\n" +
-		"In table output, RUNS counts terminal runs. Token totals prefixed with >= " +
-		"are lower bounds because one or more terminal runs did not report usage.",
-	Args: exactArgs(1),
-	RunE: runIssueUsage,
-}
-
 var issueRerunCmd = &cobra.Command{
 	Use:   "rerun <id>",
 	Short: "Re-enqueue an issue's current agent assignment as a fresh run",
@@ -845,7 +835,6 @@ func init() {
 	issueCmd.AddCommand(issueSubscriberCmd)
 	issueCmd.AddCommand(issueRunsCmd)
 	issueCmd.AddCommand(issueRunMessagesCmd)
-	issueCmd.AddCommand(issueUsageCmd)
 	issueCmd.AddCommand(issueRerunCmd)
 	issueCmd.AddCommand(issueCancelTaskCmd)
 	issueCmd.AddCommand(issueHaltCmd)
@@ -999,9 +988,6 @@ func init() {
 	issueRunsCmd.Flags().Bool("full-id", false, "Show full run UUIDs in table output")
 	issueRunsCmd.Flags().Bool("active", false, "Only in-flight runs (queued, dispatched, running, waiting_local_directory) instead of the full execution history. Answers \"is an agent working on this right now\" without pulling every past run.")
 	issueRunsCmd.Flags().Bool("siblings", false, "Widen to this issue's sub-issue family — its parent (or itself, when it has no parent) plus every child of that parent — so you can see whether another run is already working alongside you before starting overlapping code or PR work. Implies --active. Returns a compact per-run row (run, issue, agent, status, started) rather than the full execution-log record. Ordered running-first, newest-first within a status, and capped at 20 rows; when the cap truncates the answer the CLI says so on stderr, so a short list is never mistaken for a complete one. Advisory only: it reports work in flight, it does not reserve or serialise anything.")
-
-	// issue usage
-	issueUsageCmd.Flags().String("output", "table", "Output format: table or json")
 
 	// issue rerun
 	issueRerunCmd.Flags().String("output", "json", "Output format: table or json")
@@ -3787,96 +3773,6 @@ func runRelayLabel(r map[string]any) string {
 		return "→ " + name
 	}
 	return strVal(relay, "outcome")
-}
-
-func runIssueUsage(cmd *cobra.Command, args []string) error {
-	client, err := newAPIClient(cmd)
-	if err != nil {
-		return err
-	}
-
-	ctx, cancel := cli.APIContext(context.Background())
-	defer cancel()
-
-	issueRef, err := resolveIssueRef(ctx, client, args[0])
-	if err != nil {
-		return fmt.Errorf("resolve issue: %w", err)
-	}
-
-	var result map[string]any
-	if err := client.GetJSON(ctx, "/api/issues/"+url.PathEscape(issueRef.ID)+"/usage", &result); err != nil {
-		return fmt.Errorf("get issue usage: %w", err)
-	}
-
-	output, _ := cmd.Flags().GetString("output")
-	if output == "json" {
-		return cli.PrintJSON(os.Stdout, result)
-	}
-
-	terminal, hasTerminal := result["terminal_task_count"]
-	metered, hasMetered := result["metered_task_count"]
-	unreported, hasUnreported := result["unreported_task_count"]
-	if !hasTerminal {
-		terminal = result["task_count"]
-	}
-	if !hasMetered {
-		metered = result["task_count"]
-	}
-	if !hasUnreported {
-		unreported = "—"
-	}
-	usageRows := result["task_count"]
-
-	// JSON numbers decode to float64; formatIssueUsageTokens and
-	// formatMetadataValue render them as clean integers (no scientific
-	// notation for large cache-token counts).
-	headers := []string{"INPUT_TOKENS", "OUTPUT_TOKENS", "CACHE_READ", "CACHE_WRITE", "RUNS", "METERED_RUNS", "UNREPORTED", "ATTRIBUTION_SOURCE", "TRIGGER_EVIDENCE"}
-	rows := [][]string{{
-		formatIssueUsageTokens(result["total_input_tokens"], terminal, metered, usageRows, hasTerminal && hasMetered),
-		formatIssueUsageTokens(result["total_output_tokens"], terminal, metered, usageRows, hasTerminal && hasMetered),
-		formatIssueUsageTokens(result["total_cache_read_tokens"], terminal, metered, usageRows, hasTerminal && hasMetered),
-		formatIssueUsageTokens(result["total_cache_write_tokens"], terminal, metered, usageRows, hasTerminal && hasMetered),
-		formatMetadataValue(terminal),
-		formatMetadataValue(metered),
-		formatMetadataValue(unreported),
-		formatUsageGroups(result["attribution_source_counts"]),
-		formatUsageGroups(result["trigger_evidence_kind_counts"]),
-	}}
-	cli.PrintTable(os.Stdout, headers, rows)
-	return nil
-}
-
-func formatUsageGroups(value any) string {
-	groups, ok := value.(map[string]any)
-	if !ok || len(groups) == 0 {
-		return "—"
-	}
-	keys := make([]string, 0, len(groups))
-	for key := range groups {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-	parts := make([]string, 0, len(keys))
-	for _, key := range keys {
-		parts = append(parts, key+"="+formatMetadataValue(groups[key]))
-	}
-	return strings.Join(parts, ", ")
-}
-
-func formatIssueUsageTokens(value, terminal, metered, usageRows any, coverageKnown bool) string {
-	if !coverageKnown {
-		return formatMetadataValue(value)
-	}
-	terminalCount, terminalOK := terminal.(float64)
-	meteredCount, meteredOK := metered.(float64)
-	if !terminalOK || !meteredOK || terminalCount <= meteredCount {
-		return formatMetadataValue(value)
-	}
-	usageRowCount, usageRowsOK := usageRows.(float64)
-	if meteredCount == 0 && usageRowsOK && usageRowCount == 0 {
-		return "—"
-	}
-	return ">=" + formatMetadataValue(value)
 }
 
 func runIssueRunMessages(cmd *cobra.Command, args []string) error {

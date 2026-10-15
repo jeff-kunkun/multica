@@ -9,8 +9,8 @@ import (
 )
 
 // TestListTasksByIssueHydratesUsage guards the per-run token figure on the
-// execution log: the sidebar row, its header total, and the usage dialog all
-// read `usage` off this endpoint, so a task that recorded usage must come back
+// execution log: the sidebar row and its header total read `usage` off this
+// endpoint, so a task that recorded usage must come back
 // carrying it — at the (provider, model) grain, because cost is priced
 // per-model on the client and a collapsed row cannot be priced at all.
 //

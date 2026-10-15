@@ -114,7 +114,6 @@ import type {
   BotMentionTarget,
   BotMentionSource,
   RuntimeUsage,
-  IssueUsageSummary,
   RuntimeHourlyActivity,
   RuntimeUsageByAgent,
   RuntimeUsageByHour,
@@ -469,7 +468,6 @@ import {
   CreateIssueResponseSchema,
   IssueSchema,
   AgentTaskSchema,
-  IssueUsageSummarySchema,
   SourceContextPreviewSchema,
   CommentSubIssueTaskResponseSchema,
   ListWebhookDeliveriesResponseSchema,
@@ -3615,17 +3613,6 @@ export class ApiClient {
     await this.fetch(`/api/issues/${issueId}/tasks/${taskId}/supplements/${commentId}/retry`, {
       method: "POST",
     });
-  }
-
-  async getIssueUsage(issueId: string): Promise<IssueUsageSummary> {
-    const raw = await this.fetch<unknown>(`/api/issues/${issueId}/usage`);
-    return parseWithFallback<IssueUsageSummary>(raw, IssueUsageSummarySchema, {
-      total_input_tokens: 0,
-      total_output_tokens: 0,
-      total_cache_read_tokens: 0,
-      total_cache_write_tokens: 0,
-      task_count: 0,
-    }, { endpoint: "GET /api/issues/:id/usage" });
   }
 
   async cancelTask(issueId: string, taskId: string): Promise<AgentTask> {

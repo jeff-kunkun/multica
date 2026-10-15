@@ -51,7 +51,7 @@ afterEach(() => {
 });
 
 describe("IssueCostList", () => {
-  it("links each row into that issue's Token cost view", () => {
+  it("links each row to its issue", () => {
     renderList([
       makeRow(),
       makeRow({
@@ -66,11 +66,11 @@ describe("IssueCostList", () => {
     const list = within(screen.getByRole("list", { name: "Costliest issues" }));
     expect(list.getByRole("link", { name: /DENE-1/ })).toHaveAttribute(
       "href",
-      "/acme/issues/DENE-1?usage=1",
+      "/acme/issues/DENE-1",
     );
     expect(list.getByRole("link", { name: /DENE-2/ })).toHaveAttribute(
       "href",
-      "/acme/issues/DENE-2?usage=1",
+      "/acme/issues/DENE-2",
     );
   });
 
@@ -81,7 +81,7 @@ describe("IssueCostList", () => {
 
     expect(screen.getByRole("link")).toHaveAttribute(
       "href",
-      "/acme/issues/issue-1?usage=1",
+      "/acme/issues/issue-1",
     );
   });
 

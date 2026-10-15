@@ -29,7 +29,6 @@ import type {
   IssueLabelsResponse,
   IssueTableRowsResponse,
   IssueSubscriber,
-  IssueUsageSummary,
   Label,
   ListIssuesCache,
   TimelineEntry,
@@ -914,13 +913,6 @@ describe("onIssueDeleted", () => {
         created_at: "2025-01-01T00:00:00Z",
       },
     ]);
-    qc.setQueryData<IssueUsageSummary>(issueKeys.usage(ISSUE_ID), {
-      total_input_tokens: 10,
-      total_output_tokens: 20,
-      total_cache_read_tokens: 0,
-      total_cache_write_tokens: 0,
-      task_count: 1,
-    });
     qc.setQueryData<Attachment[]>(issueKeys.attachments(ISSUE_ID), [
       {
         id: "attachment-1",
@@ -959,7 +951,6 @@ describe("onIssueDeleted", () => {
     expect(qc.getQueryData(issueKeys.timeline(ISSUE_ID))).toBeUndefined();
     expect(qc.getQueryData(issueKeys.reactions(ISSUE_ID))).toBeUndefined();
     expect(qc.getQueryData(issueKeys.subscribers(ISSUE_ID))).toBeUndefined();
-    expect(qc.getQueryData(issueKeys.usage(ISSUE_ID))).toBeUndefined();
     expect(qc.getQueryData(issueKeys.attachments(ISSUE_ID))).toBeUndefined();
     expect(qc.getQueryData(issueKeys.tasks(ISSUE_ID))).toBeUndefined();
     expect(qc.getQueryData(issueKeys.children(WS_ID, ISSUE_ID))).toBeUndefined();

@@ -115,7 +115,6 @@ export type {
   RuntimeProviderPresetRequest,
   RuntimeProviderPresetUpsertInput,
   RuntimeProviderPresetsResult,
-  IssueUsageSummary,
   MikaBootstrapResponse,
   CodeDecision,
   SessionMode,

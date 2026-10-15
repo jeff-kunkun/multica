@@ -1291,13 +1291,6 @@ interface IssueDetailProps {
    */
   leadingAction?: ReactNode;
   /**
-   * Let the execution log mirror its usage dialog into `?usage=1` and open it
-   * from the URL. Only the standalone issue route sets this: the inbox renders
-   * this detail in a side panel whose URL it must not rewrite. See
-   * ../../common/issue-usage-link.
-   */
-  deepLinkUsage?: boolean;
-  /**
    * `"peek"` renders the detail inside the board's side peek (`IssuePeekHost`):
    * a single column with the core properties as pills under the title, no
    * properties sidebar, and `trailingActions` where the sidebar toggle sits.
@@ -1441,7 +1434,7 @@ export function IssueDetailSkeleton({
 // IssueDetail
 // ---------------------------------------------------------------------------
 
-export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = true, layoutId = "multica_issue_detail_layout", highlightCommentId, highlightRequestToken, leadingAction, deepLinkUsage = false, variant = "page", trailingActions }: IssueDetailProps) {
+export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = true, layoutId = "multica_issue_detail_layout", highlightCommentId, highlightRequestToken, leadingAction, variant = "page", trailingActions }: IssueDetailProps) {
   const isPeek = variant === "peek";
   const { t } = useT("issues");
   const { isGuest } = useGuestReadOnly();
@@ -3321,7 +3314,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
           own token spend, with the issue total on the section header.
           Self-contained; owns its own collapse state and WS subscriptions.
           Hides itself when there are no runs to show. */}
-      <ExecutionLogSection issueId={id} workspaceId={issue.workspace_id} identifier={issue.identifier} issueTitle={issue.title} halted={issue.metadata?.agent_halted === true} deepLinkUsage={deepLinkUsage} />
+      <ExecutionLogSection issueId={id} workspaceId={issue.workspace_id} identifier={issue.identifier} issueTitle={issue.title} halted={issue.metadata?.agent_halted === true} />
 
       {/* Details — creator and timestamps. Sits below the execution log
           because it is the least-read block in the sidebar: the values
@@ -3349,13 +3342,6 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
           </PropRow>
         </div>}
       </div>
-
-      {/* The standalone "Token usage" section that used to sit here is gone:
-          it showed the same issue totals the execution-log header now carries,
-          minus the cost and minus any way to tell which run spent them. Its
-          every field (input / output / cache / run count) lives in the usage
-          dialog that header opens. The `/api/issues/:id/usage` endpoint it
-          read stays — the CLI's `issue usage` command still uses it. */}
 
       {/* Metadata — agent-facing free-form KV bag. The values almost
           never mean anything to humans, so the trigger row matches the

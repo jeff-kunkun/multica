@@ -628,8 +628,7 @@ export function DashboardPage() {
                   lessThanMinuteLabel={lessThanMinuteLabel}
                 />
 
-                {/* Per-issue spend, ranked. Each row is the deep link into
-                    that issue's Token cost view — the agent leaderboard above
+                {/* Per-issue spend, ranked — the agent leaderboard above
                     answers "who spent it", this answers "on what". */}
                 <IssueCostList rows={issueCostRows} />
               </>
