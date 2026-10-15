@@ -2238,6 +2238,7 @@ type claimRuntimeGuardTask struct {
 	PriorSessionResumeUnavailable bool            `json:"prior_session_resume_unavailable"`
 	ChatMessage                   string          `json:"chat_message"`
 	ThreadName                    string          `json:"thread_name"`
+	MagpieGroup                   string          `json:"magpie_group"`
 	QuickCreateAttachmentIDs      []string        `json:"quick_create_attachment_ids"`
 	QuickCreatePriority           string          `json:"quick_create_priority"`
 	QuickCreateDueDate            string          `json:"quick_create_due_date"`
@@ -2439,6 +2440,34 @@ func TestChatSessionRuntimeBackfillRequiresMatchingSessionID(t *testing.T) {
 	if matchedRuntimeID != newRuntimeID {
 		t.Fatalf("expected matched session to backfill runtime %s, got %s", newRuntimeID, matchedRuntimeID)
 	}
+}
+
+// DENE-2078: the issue's magpie_group choice rides along to the daemon.
+func TestClaimTask_CarriesIssueMagpieGroup(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	agentID, runtimeID, daemonID := createRuntimeGuardAgent(t, ctx)
+	issueID := dbfx.Issue(t, "magpie group fixture", testutil.Cols{
+		"status":   "in_progress",
+		"number":   81299,
+		"metadata": `{"magpie_group":"office-pojia"}`,
+	})
+	dbfx.Exec(t, `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority)
+		VALUES ($1, $2, $3, 'queued', 0)
+	`, agentID, runtimeID, issueID)
+
+	task := claimTaskForRuntimeGuard(t, runtimeID, daemonID)
+	if task.MagpieGroup != "office-pojia" {
+		t.Fatalf("claimed magpie_group = %q, want office-pojia", task.MagpieGroup)
+	}
+	dbfx.Exec(t, `
+		UPDATE agent_task_queue
+		SET status = 'completed', completed_at = now()
+		WHERE issue_id = $1 AND status IN ('dispatched', 'running')
+	`, issueID)
 }
 
 func TestClaimTask_IssuePriorSessionRuntimeGuard(t *testing.T) {

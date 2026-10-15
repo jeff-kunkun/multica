@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 
@@ -15,6 +16,7 @@ import (
 // handful of models; anything past these is not a route.
 const (
 	magpieMaxModels   = 32
+	magpieMaxGroups   = 64
 	magpieMaxFieldLen = 200
 )
 
@@ -25,20 +27,42 @@ type magpieModel struct {
 
 // magpieRoute is a runtime's metadata.magpie: the routing group magpie serves
 // the runtime's CLI through and its models in order. An empty Group means
-// magpie is installed but does not route this CLI.
+// magpie is installed but does not route this CLI. Groups lists every group
+// magpie has on the machine, the choices an agent can be pinned to.
 type magpieRoute struct {
-	Group  string        `json:"group"`
+	Group  string              `json:"group"`
+	Models []magpieModel       `json:"models"`
+	Groups []magpieGroupOption `json:"groups,omitempty"`
+}
+
+type magpieGroupOption struct {
+	Name   string        `json:"name"`
 	Models []magpieModel `json:"models"`
 }
 
 func (r magpieRoute) valid() bool {
-	if len(r.Group) > magpieMaxFieldLen || len(r.Models) > magpieMaxModels {
+	if len(r.Group) > magpieMaxFieldLen || len(r.Groups) > magpieMaxGroups {
 		return false
 	}
 	if r.Group != "" && len(r.Models) == 0 {
 		return false
 	}
-	for _, m := range r.Models {
+	if !validMagpieModels(r.Models) {
+		return false
+	}
+	for _, g := range r.Groups {
+		if g.Name == "" || len(g.Name) > magpieMaxFieldLen || len(g.Models) == 0 || !validMagpieModels(g.Models) {
+			return false
+		}
+	}
+	return true
+}
+
+func validMagpieModels(models []magpieModel) bool {
+	if len(models) > magpieMaxModels {
+		return false
+	}
+	for _, m := range models {
 		if m.ID == "" || len(m.ID) > magpieMaxFieldLen || len(m.Name) > magpieMaxFieldLen {
 			return false
 		}
@@ -95,4 +119,21 @@ func (h *Handler) ReportRuntimeMagpie(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
+// issueMagpieGroupKey is the issue metadata key that picks which of the
+// assignee's magpie groups a run uses.
+const issueMagpieGroupKey = "magpie_group"
+
+// issueMagpieGroup reads the magpie group an issue asks for, "" when none.
+func issueMagpieGroup(metadata []byte) string {
+	if len(metadata) == 0 {
+		return ""
+	}
+	var m map[string]any
+	if err := json.Unmarshal(metadata, &m); err != nil {
+		return ""
+	}
+	group, _ := m[issueMagpieGroupKey].(string)
+	return strings.TrimSpace(group)
 }

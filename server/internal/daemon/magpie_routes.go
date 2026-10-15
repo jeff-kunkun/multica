@@ -48,9 +48,25 @@ type MagpieModel struct {
 
 // MagpieRoute is what a runtime's metadata.magpie carries. An empty Group
 // means magpie is installed but this CLI is not routed through any group.
+// Groups lists every group magpie has on the machine: the choices an agent on
+// this runtime can be pinned to instead of the CLI's own group.
 type MagpieRoute struct {
-	Group  string        `json:"group"`
+	Group  string              `json:"group"`
+	Models []MagpieModel       `json:"models"`
+	Groups []MagpieGroupOption `json:"groups,omitempty"`
+}
+
+// MagpieGroupOption is one of the machine's magpie groups.
+type MagpieGroupOption struct {
+	Name   string        `json:"name"`
 	Models []MagpieModel `json:"models"`
+}
+
+// magpieRoutes is one probe of magpie: each agent name's route and every
+// group on the machine.
+type magpieRoutes struct {
+	byAgent map[string]MagpieRoute
+	groups  []MagpieGroupOption
 }
 
 // runMagpie runs magpie with args and returns its stdout. A var so tests can
@@ -93,22 +109,22 @@ type magpieRouteProber struct {
 	lastNames map[string]string // model id -> display name
 }
 
-// probe returns each magpie agent name's route. installed is false when magpie
+// probe returns each magpie agent name's route and the machine's groups. installed is false when magpie
 // is not on this machine; ok is false when magpie is there but could not be
 // read this round (failed, timed out, unparseable), in which case nothing
 // should be reported.
-func (p *magpieRouteProber) probe(ctx context.Context) (routes map[string]MagpieRoute, installed, ok bool) {
+func (p *magpieRouteProber) probe(ctx context.Context) (routes magpieRoutes, installed, ok bool) {
 	path := lookupMagpie()
 	if path == "" {
-		return nil, false, true
+		return magpieRoutes{}, false, true
 	}
 	out, err := runMagpie(ctx, path, "groups")
 	if err != nil {
-		return nil, true, false
+		return magpieRoutes{}, true, false
 	}
 	groups, ok := parseMagpieGroups(string(out))
 	if !ok {
-		return nil, true, false
+		return magpieRoutes{}, true, false
 	}
 
 	p.mu.Lock()
@@ -135,15 +151,16 @@ func (p *magpieRouteProber) probe(ctx context.Context) (routes map[string]Magpie
 		p.lastNames = names
 	}
 
-	routes = map[string]MagpieRoute{}
+	routes = magpieRoutes{byAgent: map[string]MagpieRoute{}}
 	for _, g := range groups {
 		models := make([]MagpieModel, 0, len(g.models))
 		for _, id := range g.models {
 			models = append(models, MagpieModel{ID: id, Name: p.lastNames[id]})
 		}
+		routes.groups = append(routes.groups, MagpieGroupOption{Name: g.name, Models: models})
 		for _, user := range g.users {
-			if _, taken := routes[user]; !taken {
-				routes[user] = MagpieRoute{Group: g.name, Models: models}
+			if _, taken := routes.byAgent[user]; !taken {
+				routes.byAgent[user] = MagpieRoute{Group: g.name, Models: models}
 			}
 		}
 	}
@@ -151,14 +168,16 @@ func (p *magpieRouteProber) probe(ctx context.Context) (routes map[string]Magpie
 }
 
 // magpieRouteFor picks a provider's route out of a probe, unrouted when magpie
-// lists no group for it.
-func magpieRouteFor(routes map[string]MagpieRoute, provider string) MagpieRoute {
+// lists no group for it, with the machine's groups attached either way.
+func magpieRouteFor(routes magpieRoutes, provider string) MagpieRoute {
+	route := MagpieRoute{Group: "", Models: []MagpieModel{}}
 	if name, known := magpieAgentNames[provider]; known {
-		if route, ok := routes[name]; ok {
-			return route
+		if r, ok := routes.byAgent[name]; ok {
+			route = r
 		}
 	}
-	return MagpieRoute{Group: "", Models: []MagpieModel{}}
+	route.Groups = routes.groups
+	return route
 }
 
 type magpieGroup struct {
@@ -174,24 +193,24 @@ var (
 	magpieModelDetail = regexp.MustCompile(`^\s*(?:models\s+)?\d+ (\S+/\S+)\s{2,}(.+)$`)
 )
 
-// parseMagpieGroups reads the groups that serve at least one agent from
-// `magpie groups`, whose rows look like
+// parseMagpieGroups reads the groups from `magpie groups`, whose rows look
+// like
 //
 //	office-claude  group/office-claude  smart · 2 rules  claude/a · claude/b  ← Claude Code
 //
-// Rows without "←" serve no agent and are skipped, as are notes that are not
-// group rows. ok is false when a row that names a group and its agents does
-// not have the expected columns.
+// Rows without "←" serve no agent and come back without users; notes that are
+// not group rows are skipped. ok is false when a row that names a group and
+// its agents does not have the expected columns.
 func parseMagpieGroups(out string) ([]magpieGroup, bool) {
 	var groups []magpieGroup
 	for _, line := range strings.Split(out, "\n") {
 		left, users, served := strings.Cut(line, "←")
-		if !served {
-			continue
-		}
 		cols := magpieColumnSep.Split(strings.TrimSpace(left), -1)
 		if len(cols) < 4 || !strings.HasPrefix(cols[1], "group/") {
-			return nil, false
+			if served {
+				return nil, false
+			}
+			continue
 		}
 		g := magpieGroup{name: cols[0], id: strings.TrimPrefix(cols[1], "group/")}
 		for _, m := range magpieModelSep.Split(cols[len(cols)-1], -1) {
@@ -204,7 +223,7 @@ func parseMagpieGroups(out string) ([]magpieGroup, bool) {
 				g.users = append(g.users, u)
 			}
 		}
-		if g.name == "" || g.id == "" || len(g.models) == 0 || len(g.users) == 0 {
+		if g.name == "" || g.id == "" || len(g.models) == 0 || (served && len(g.users) == 0) {
 			return nil, false
 		}
 		groups = append(groups, g)

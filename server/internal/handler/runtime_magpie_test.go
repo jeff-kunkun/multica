@@ -98,6 +98,8 @@ func TestReportRuntimeMagpie(t *testing.T) {
 		map[string]any{"magpie": map[string]any{"group": "g", "models": []any{}}},
 		map[string]any{"magpie": map[string]any{"group": "g", "models": []map[string]string{{"name": "no id"}}}},
 		map[string]any{"magpie": "office-claude"},
+		map[string]any{"magpie": map[string]any{"group": "", "models": []any{}, "groups": []map[string]any{{"name": "g", "models": []any{}}}}},
+		map[string]any{"magpie": map[string]any{"group": "", "models": []any{}, "groups": []map[string]any{{"name": "", "models": []map[string]string{{"id": "a/b"}}}}}},
 	} {
 		report(bad, http.StatusBadRequest)
 	}
@@ -111,13 +113,47 @@ func TestReportRuntimeMagpie(t *testing.T) {
 		t.Fatalf("unrouted route = %s", got)
 	}
 
+	// The machine's group list rides along and is kept.
+	report(map[string]any{"magpie": map[string]any{"group": "", "models": nil, "groups": []map[string]any{
+		{"name": "office-pojia", "models": []map[string]string{{"id": "nexus-gpu/nexus-coder", "name": "nexus-coder"}}},
+	}}}, http.StatusOK)
+	var withGroups struct {
+		Groups []struct {
+			Name   string `json:"name"`
+			Models []struct {
+				ID string `json:"id"`
+			} `json:"models"`
+		} `json:"groups"`
+	}
+	if err := json.Unmarshal([]byte(readRuntimeMagpie(t, runtimeID)), &withGroups); err != nil {
+		t.Fatalf("stored groups: %v", err)
+	}
+	if len(withGroups.Groups) != 1 || withGroups.Groups[0].Name != "office-pojia" || withGroups.Groups[0].Models[0].ID != "nexus-gpu/nexus-coder" {
+		t.Fatalf("stored groups = %+v", withGroups)
+	}
+
 	// null clears it; clearing again is a no-op.
 	report(map[string]any{"magpie": nil}, http.StatusOK)
 	report(map[string]any{"magpie": nil}, http.StatusOK)
 	if got := readRuntimeMagpie(t, runtimeID); got != "" {
 		t.Fatalf("cleared route = %s", got)
 	}
-	if refreshes != 3 {
-		t.Fatalf("refreshes = %d, want 3", refreshes)
+	if refreshes != 4 {
+		t.Fatalf("refreshes = %d, want 4", refreshes)
+	}
+}
+
+func TestIssueMagpieGroup(t *testing.T) {
+	for metadata, want := range map[string]string{
+		`{"magpie_group":"office-pojia"}`:          "office-pojia",
+		`{"magpie_group":" office-pojia ","pr":1}`: "office-pojia",
+		`{"magpie_group":7}`:                       "",
+		`{}`:                                       "",
+		``:                                         "",
+		`not json`:                                 "",
+	} {
+		if got := issueMagpieGroup([]byte(metadata)); got != want {
+			t.Errorf("issueMagpieGroup(%q) = %q, want %q", metadata, got, want)
+		}
 	}
 }

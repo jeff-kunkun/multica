@@ -2251,6 +2251,7 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 			return resp, deliveredCommentIDs, issueSnapshot, failure
 		}
 		resp.ThreadName = issue.Title
+		resp.MagpieGroup = issueMagpieGroup(issue.Metadata)
 		issueNumber = issue.Number
 
 		// Issue-state delta (MUL-7344). Every field below already sits on the

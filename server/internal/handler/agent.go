@@ -336,7 +336,8 @@ type AgentTaskResponse struct {
 	// the cap, so the brief can say the list is incomplete instead of
 	// presenting a truncated catalog as the whole one.
 	IssueStatusesOmitted int                   `json:"issue_statuses_omitted,omitempty"`
-	ThreadName           string                `json:"thread_name,omitempty"` // semantic title for provider-native session/thread history
+	ThreadName           string                `json:"thread_name,omitempty"`  // semantic title for provider-native session/thread history
+	MagpieGroup          string                `json:"magpie_group,omitempty"` // issue metadata magpie_group; the daemon honours it only for a group in the agent's runtime_config.magpie_groups
 	Status               string                `json:"status"`
 	Priority             int32                 `json:"priority"`
 	DispatchedAt         *string               `json:"dispatched_at"`
