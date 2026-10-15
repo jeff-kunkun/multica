@@ -11,3 +11,6 @@ ALTER TABLE agent DROP COLUMN IF EXISTS doorbell_enabled;
 -- Goal mode (DENE-1051).
 DROP TABLE IF EXISTS issue_goal_check;
 DROP TABLE IF EXISTS issue_goal;
+
+-- Plan apply (DENE-864). Issues it created keep origin_type 'plan'.
+DROP INDEX IF EXISTS idx_issue_origin_plan_unique;

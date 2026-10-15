@@ -74,13 +74,12 @@ A refusal exits non-zero and prints JSON with `code`, `error`, and for budgets
 
 The same policy governs creating issues: `agent_spawn_disabled` and
 `agent_spawn_budget_exceeded` can also come back from `multica issue create`
-and `multica plan apply` when the workspace limits issue creation from a chat
-or from a task.
+when the workspace limits issue creation from a chat or from a task.
 
 ## Receipts from the issues a chat opened
 
 An IM `/issue` command and an alignment also record their chat, like a chat
-run's `issue create` / `plan apply`. `multica issue context`
+run's `issue create`. `multica issue context`
 opens with a 来源 line quoting the message the issue answered.
 
 When such an issue enters 待验收, done, blocked or cancelled, the server posts a

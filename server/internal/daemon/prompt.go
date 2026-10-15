@@ -963,7 +963,7 @@ func commentReplyThreads(task Task) []execenv.ThreadReplyTarget {
 }
 
 // chatTicketBoundary is the per-turn chat ⇄ issue boundary (DENE-1665).
-const chatTicketBoundary = "Boundary: in chat, only make an aligned small fix (at most 3 files and 150 lines, no migration, not a server+UI+CLI change). Aligned work bigger than that becomes an issue (`multica issue create` or `plan apply`) whose description has `## 目标` and `## 验收`: leave the executor empty for agent work so routing picks, assign the person when a human must do it. The issue is linked back to this chat; `multica chat tickets` lists them.\n\n"
+const chatTicketBoundary = "Boundary: in chat, only make an aligned small fix (at most 3 files and 150 lines, no migration, not a server+UI+CLI change). Aligned work bigger than that becomes an issue (`multica issue create`) whose description has `## 目标` and `## 验收`: leave the executor empty for agent work so routing picks, assign the person when a human must do it. The issue is linked back to this chat; `multica chat tickets` lists them.\n\n"
 
 // buildChatPrompt constructs a prompt for interactive chat tasks.
 func buildChatPrompt(task Task) string {

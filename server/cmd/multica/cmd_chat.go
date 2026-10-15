@@ -130,8 +130,7 @@ var chatTicketsCmd = &cobra.Command{
 	Short: "List the issues a chat opened or follows",
 	Long: `List a chat's tickets, in the order they joined it, each with its source:
 
-  created  opened from this chat — by its agent's "issue create" or
-           "plan apply"
+  created  opened from this chat — by its agent's "issue create"
   auto     followed: this chat's run changed its status or assignee,
            commented on it, handed it off or closed it (naming an issue in a
            reply does not count)

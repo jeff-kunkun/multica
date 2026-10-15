@@ -157,8 +157,6 @@ multica issue close <id> --outcome done --verdict pass --evidence-file ./close.m
 
 每个人「等我回复」的清单：`GET /api/summons/waiting`（当前用户、当前工作区，未回复、票未结束，按时间倒序），每行带票号、标题、谁叫的（`caller_type` / `caller_name`）、来源（`source`）和原因（`reason`）。
 
-建一整棵分阶段子票用 `multica plan apply <plan.yaml>`（DENE-864，`POST /api/issues/plan-apply`），不要逐张 `issue create` 再改派：父票和全部子票在一个事务里建好，执行人建票时就坐上，stage 1 进 `todo` 开跑，后面的 stage 停在 `backlog`。同一份 plan 再 apply 只补缺的节点，已有的票不改。示例见 `docs/kun/examples/dene-858.plan.yaml`。
-
 阶段自动推进卡住、或调度席决定手动放下一段时用 `multica issue stage advance <父票>`（`POST /api/issues/{id}/stage-advance`）：当前 stage 全部终态才把下一 stage 的 `backlog` 提到 `todo` 并叫醒执行人；没完就回 409，点名还差哪几张票和它们的状态，什么都不写。
 
 旧路径仍然可用（`multica issue status …` → 证据评论 → `multica issue metadata set` 逐键写 `close.*`），顺序写死：
