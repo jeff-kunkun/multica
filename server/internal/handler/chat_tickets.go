@@ -62,11 +62,31 @@ type ChatTicket struct {
 	LinkedAt string `json:"linked_at"`
 	// The chat's progress bar (DENE-1667): the latest status move (FromStatus
 	// empty and ChangedAt the creation time when it never moved) and the
-	// caller's bucket, as the project report computes it.
+	// caller's bucket (see chatTicketPhaseOf).
 	FromStatus string `json:"from_status,omitempty"`
 	ChangedAt  string `json:"changed_at"`
 	Phase      string `json:"phase"`
 	NeedsYou   bool   `json:"needs_you"`
+}
+
+const (
+	chatTicketPhaseDone       = "done"
+	chatTicketPhaseInProgress = "in_progress"
+	chatTicketPhaseWaitingYou = "waiting_you"
+)
+
+// chatTicketPhaseOf buckets an issue for the person: finished is done, one
+// assigned to them or with their unread call on it waits on them, the rest is
+// in progress.
+func chatTicketPhaseOf(terminal, onPerson bool) (phase string, needsYou bool) {
+	switch {
+	case terminal:
+		return chatTicketPhaseDone, false
+	case onPerson:
+		return chatTicketPhaseWaitingYou, true
+	default:
+		return chatTicketPhaseInProgress, false
+	}
 }
 
 type ChatTicketsResponse struct {
@@ -234,7 +254,7 @@ func (h *Handler) ListChatSessionTickets(w http.ResponseWriter, r *http.Request)
 			ticket.ChangedAt = timestampToString(p.ChangedAt)
 		}
 		onPerson := p.HasOpenCall || (issue.AssigneeType.String == "member" && uuidToString(issue.AssigneeID) == userID)
-		ticket.Phase, ticket.NeedsYou = projectReportPhaseOf(isTerminal[issue.Status], onPerson)
+		ticket.Phase, ticket.NeedsYou = chatTicketPhaseOf(isTerminal[issue.Status], onPerson)
 		tickets = append(tickets, ticket)
 	}
 	writeJSON(w, http.StatusOK, ChatTicketsResponse{ChatSessionID: uuidToString(session.ID), Tickets: tickets})

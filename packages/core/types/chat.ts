@@ -2,7 +2,9 @@ import type { MachineQueueReason } from "./agent";
 import type { AgentTask } from "./agent";
 import type { Progress } from "./progress";
 import type { ChatLinkedProject } from "./workspace-link";
-import type { ProjectReportPhase } from "./project";
+
+/** Where a chat's ticket stands for the caller (DENE-1667). */
+export type ChatTicketPhase = "done" | "in_progress" | "waiting_you";
 
 /** A user's pinned "quick agent" for the Chat list top bar. */
 export interface ChatPinnedAgent {
@@ -505,8 +507,7 @@ export interface ChatTicket {
   /** DENE-1667: the latest status move; empty `from_status` and the creation time when it never moved. */
   from_status?: string;
   changed_at: string;
-  /** The caller's bucket, as the project report computes it. */
-  phase: ProjectReportPhase;
+  phase: ChatTicketPhase;
   needs_you: boolean;
 }
 

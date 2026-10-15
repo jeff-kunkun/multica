@@ -436,8 +436,7 @@
       "project_sharing": "권한 및 공유",
       "workspace_links": "연결된 워크스페이스",
       "agent_permissions": "에이전트 권한",
-      "bots": "Group chat & Bots",
-      "overview": "워크스페이스 개요"
+      "bots": "Group chat & Bots"
     },
     "groups": {
       "personal": "개인",
@@ -2453,25 +2452,5 @@
       "copied": "복사했습니다. Bot에게 보내세요",
       "instruction": "내 컴퓨터에서 이 명령을 실행해 주세요. <URL>과 <KEY>는 메시지를 받을 내 HTTPS 주소와 그 키로 바꿔 주세요: {{command}}\n출력된 링크를 보내 주면, 제가 동의하는 즉시 연결되고 그룹 메시지와 제 결정이 전달됩니다. --expires-in-days 0이면 키가 만료되지 않습니다. 만료시키려면 일수를 지정하세요."
     }
-  },
-  "overview": {
-    "agents": "에이전트",
-    "projects": "프로젝트",
-    "chats": "활성 채팅",
-    "automations": "자동화",
-    "skills": "Skills",
-    "squads": "팀",
-    "runtimes": "런타임",
-    "workspace_links": "연결된 워크스페이스",
-    "external_connections": "외부 연결",
-    "refresh": "새로 고침",
-    "loading": "개요를 불러오는 중...",
-    "load_error": "개요를 불러올 수 없습니다. 새로 고침으로 다시 시도하세요.",
-    "restricted": "이 섹션을 볼 권한이 없습니다.",
-    "empty": "해당하는 항목이 없습니다.",
-    "accepting_work": "태스크 수락 중",
-    "paused": "태스크 수락 중지",
-    "all_projects": "모든 프로젝트",
-    "all_agents": "모든 에이전트"
   }
 }

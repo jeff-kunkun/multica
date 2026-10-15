@@ -2,8 +2,8 @@
 
 Start with `multica overview --compact` when you do not know the workspace,
 then `multica capabilities` for the live command map (see `external-bots.md`).
-This is one request to `GET /api/overview`; the CLI and Settings → Overview use
-that same read-only, permission-scoped projection. It never marks chats read.
+This is one request to `GET /api/overview`, a read-only, permission-scoped
+projection. It never marks chats read.
 
 ```sh
 multica overview

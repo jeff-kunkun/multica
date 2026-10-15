@@ -799,7 +799,6 @@ function invalidateWorkspaceScopedQueries(qc: QueryClient): void {
     qc.invalidateQueries({ queryKey: workspaceKeys.skills(wsId) });
     qc.invalidateQueries({ queryKey: workspaceKeys.invitations(wsId) });
     qc.invalidateQueries({ queryKey: workspaceLinkKeys.all(wsId) });
-    qc.invalidateQueries({ queryKey: ["workspaces", wsId, "overview"] });
     qc.invalidateQueries({ queryKey: projectKeys.all(wsId) });
     qc.invalidateQueries({ queryKey: runtimeKeys.all(wsId) });
     qc.invalidateQueries({ queryKey: autopilotKeys.all(wsId) });
@@ -861,7 +860,6 @@ function invalidateReconnectDetailQueries(qc: QueryClient): void {
     qc.invalidateQueries({ queryKey: workspaceKeys.skills(wsId) });
     qc.invalidateQueries({ queryKey: workspaceKeys.invitations(wsId) });
     qc.invalidateQueries({ queryKey: workspaceLinkKeys.all(wsId) });
-    qc.invalidateQueries({ queryKey: ["workspaces", wsId, "overview"] });
     qc.invalidateQueries({ queryKey: projectKeys.all(wsId) });
     qc.invalidateQueries({ queryKey: runtimeKeys.all(wsId) });
     qc.invalidateQueries({ queryKey: autopilotKeys.all(wsId) });
@@ -1384,7 +1382,6 @@ export function useRealtimeSync(
         }
         if (payload.status_changed) {
           qc.invalidateQueries({ queryKey: homeKeys.all(wsId) });
-          qc.invalidateQueries({ queryKey: projectKeys.reports(wsId) });
         }
         if (payload.progress_changed) {
           qc.invalidateQueries({ queryKey: issueKeys.progress(wsId, issue.id) });
@@ -1486,7 +1483,6 @@ export function useRealtimeSync(
       const wsId = getCurrentWsId();
       if (!wsId || !p || typeof p !== "object" || !("workspace_id" in p) || p.workspace_id !== wsId) return;
       qc.invalidateQueries({ queryKey: workspaceLinkKeys.all(wsId) });
-      qc.invalidateQueries({ queryKey: ["workspaces", wsId, "overview"] });
     });
     const unsubInboxNew = ws.on("inbox:new", async (p) => {
       const { item } = p as InboxNewPayload;
@@ -1931,8 +1927,6 @@ export function useRealtimeSync(
       // Patch the row in place; refetch only when the payload can't (DENE-1507).
       const id = getCurrentWsId();
       if (!id || !applyChatDoneToSessionList(qc, id, payload)) invalidateSessionLists();
-      // A turn may have told the report and moved the heard cursor (DENE-1667).
-      if (id) qc.invalidateQueries({ queryKey: projectKeys.reports(id) });
     });
 
     // Late quick-actions supplement from the daemon's background suggestion

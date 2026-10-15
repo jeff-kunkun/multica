@@ -54,7 +54,6 @@ import { PreferencesTab } from "./preferences-tab";
 import { TokensTab } from "./tokens-tab";
 import { BotsTab } from "./bots-tab";
 import { BotBindingSection } from "./bot-binding-section";
-import { OverviewTab } from "./overview-tab";
 import { WorkspaceTab } from "./workspace-tab";
 import { MembersTab } from "./members-tab";
 import { CodeTab } from "./code-tab";
@@ -183,7 +182,6 @@ export function SettingsPage({ extraDeviceTabs: deviceTabs = [] }: SettingsPageP
     entry("shortcuts", t(($) => $.page.tabs.shortcuts), Keyboard, <KeyboardShortcutsTab />),
     ...(appsAvailable ? [entry("apps", t(($) => $.page.tabs.apps), Plug, <ConnectedAppsTab />)] : []),
     entry("tokens", t(($) => $.page.tabs.tokens), KeyRound, <TokensTab />),
-    entry("overview", t(($) => $.page.tabs.overview), Network, <OverviewTab />),
     entry(
       "agent-permissions",
       t(($) => $.page.tabs.agent_permissions),

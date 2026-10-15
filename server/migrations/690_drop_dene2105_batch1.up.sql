@@ -14,3 +14,6 @@ DROP TABLE IF EXISTS issue_goal;
 
 -- Plan apply (DENE-864). Issues it created keep origin_type 'plan'.
 DROP INDEX IF EXISTS idx_issue_origin_plan_unique;
+
+-- Project report read state (DENE-1667).
+DROP TABLE IF EXISTS project_report_heard;

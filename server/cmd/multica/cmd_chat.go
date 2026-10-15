@@ -138,7 +138,7 @@ var chatTicketsCmd = &cobra.Command{
 
 Each ticket carries status, assignee and the first line of its 目标 section,
 plus its latest status move (from_status, changed_at) and phase — waiting_you,
-in_progress or done, bucketed as "multica project report" does. A ticket that
+in_progress or done, bucketed for the caller. A ticket that
 is done, blocked, cancelled or in review also carries its result: the close's
 summary, PRs and knowledge (summary, pull_requests, knowledge). The chat shows
 the same list as its ticket cards and progress bar. An issue names the chat it

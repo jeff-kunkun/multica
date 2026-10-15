@@ -142,7 +142,7 @@ func TestChatTickets_LinkBothWays(t *testing.T) {
 	if got := tickets.Tickets[0].Goal; got != "聊天能看到开了哪些单" {
 		t.Fatalf("ticket goal = %q", got)
 	}
-	if tk := tickets.Tickets[0]; tk.Phase != projectReportPhaseInProgress || tk.FromStatus != "" || tk.ChangedAt != tk.CreatedAt {
+	if tk := tickets.Tickets[0]; tk.Phase != chatTicketPhaseInProgress || tk.FromStatus != "" || tk.ChangedAt != tk.CreatedAt {
 		t.Fatalf("fresh ticket progress = %+v, want in progress since creation", tk)
 	}
 
@@ -152,14 +152,14 @@ func TestChatTickets_LinkBothWays(t *testing.T) {
 		t.Fatalf("assign to person: %v", err)
 	}
 	// A minute on: changed_at is second-precise, like created_at.
-	moveProjectReportTicket(t, created.ID, "todo", "in_review", time.Now().UTC().Add(time.Minute))
+	moveChatTicket(t, created.ID, "todo", "in_review", time.Now().UTC().Add(time.Minute))
 	w = httptest.NewRecorder()
 	testHandler.ListChatSessionTickets(w, withChatTestWorkspaceCtx(t, withURLParam(newRequest("GET", "/api/chat/sessions/"+sessionID+"/tickets", nil), "sessionId", sessionID)))
 	tickets = ChatTicketsResponse{}
 	if err := json.NewDecoder(w.Body).Decode(&tickets); err != nil {
 		t.Fatalf("decode tickets: %v", err)
 	}
-	if tk := tickets.Tickets[0]; tk.Phase != projectReportPhaseWaitingYou || !tk.NeedsYou || tk.FromStatus != "todo" || tk.ChangedAt == tk.CreatedAt {
+	if tk := tickets.Tickets[0]; tk.Phase != chatTicketPhaseWaitingYou || !tk.NeedsYou || tk.FromStatus != "todo" || tk.ChangedAt == tk.CreatedAt {
 		t.Fatalf("moved ticket progress = %+v, want waiting on the person, from todo", tk)
 	}
 
@@ -362,5 +362,19 @@ func TestChatTickets_FollowAndPin(t *testing.T) {
 	var origin string
 	if err := testPool.QueryRow(ctx, `SELECT COALESCE(origin_chat_session_id::text, '') FROM issue WHERE id = $1`, moved).Scan(&origin); err != nil || origin != "" {
 		t.Fatalf("followed issue origin = %q (%v), want empty", origin, err)
+	}
+}
+
+func moveChatTicket(t *testing.T, issueID, from, to string, at time.Time) {
+	t.Helper()
+	ctx := context.Background()
+	if _, err := testPool.Exec(ctx, `UPDATE issue SET status = $2 WHERE id = $1`, issueID, to); err != nil {
+		t.Fatalf("move ticket: %v", err)
+	}
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO activity_log (workspace_id, issue_id, actor_type, action, details, created_at)
+		VALUES ($1, $2, 'system', 'status_changed', jsonb_build_object('from', $3::text, 'to', $4::text), $5)
+	`, testWorkspaceID, issueID, from, to, at); err != nil {
+		t.Fatalf("record move: %v", err)
 	}
 }

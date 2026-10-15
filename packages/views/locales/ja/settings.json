@@ -436,8 +436,7 @@
       "project_sharing": "権限と共有",
       "workspace_links": "連携ワークスペース",
       "agent_permissions": "エージェント権限",
-      "bots": "Group chat & Bots",
-      "overview": "ワークスペースの全体像"
+      "bots": "Group chat & Bots"
     },
     "groups": {
       "personal": "個人",
@@ -2453,25 +2452,5 @@
       "copied": "コピーしました。Bot に送ってください",
       "instruction": "自分のマシンでこれを実行してください。<URL> と <KEY> は、メッセージを受け取る自分の HTTPS アドレスとそのキーに置き換えてください：{{command}}\n表示されたリンクを送ってください。私が同意すれば接続完了で、グループのメッセージと私の判断が届くようになります。--expires-in-days 0 でキーは無期限になります。期限を付けたい場合は日数を指定してください。"
     }
-  },
-  "overview": {
-    "agents": "エージェント",
-    "projects": "プロジェクト",
-    "chats": "進行中のチャット",
-    "automations": "自動化",
-    "skills": "Skills",
-    "squads": "チーム",
-    "runtimes": "ランタイム",
-    "workspace_links": "連携ワークスペース",
-    "external_connections": "外部接続",
-    "refresh": "更新",
-    "loading": "全体像を読み込み中...",
-    "load_error": "全体像を読み込めません。更新して再試行してください。",
-    "restricted": "このセクションを表示する権限がありません。",
-    "empty": "該当する項目はありません。",
-    "accepting_work": "タスク受付中",
-    "paused": "タスク受付停止中",
-    "all_projects": "すべてのプロジェクト",
-    "all_agents": "すべてのエージェント"
   }
 }

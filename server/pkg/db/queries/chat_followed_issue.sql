@@ -38,3 +38,29 @@ WHERE NOT EXISTS (
 )
 ORDER BY l.linked_at ASC, i.id ASC
 LIMIT 200;
+
+-- name: ListChatTicketProgress :many
+-- The chat's progress bar (DENE-1667): for each ticket the chat opened, its
+-- latest status move and whether an unread call to the person hangs on it.
+SELECT i.id,
+       COALESCE(m.from_status, '')::text AS from_status,
+       m.changed_at::timestamptz AS changed_at,
+       EXISTS (
+           SELECT 1 FROM inbox_item n
+           WHERE n.workspace_id = i.workspace_id
+             AND n.recipient_type = 'member'
+             AND n.recipient_id = sqlc.arg('user_id')::uuid
+             AND n.issue_id = i.id
+             AND n.severity = 'action_required'
+             AND n.read = false AND n.archived = false
+       )::boolean AS has_open_call
+FROM issue i
+LEFT JOIN LATERAL (
+    SELECT a.details->>'from' AS from_status, a.created_at AS changed_at
+    FROM activity_log a
+    WHERE a.issue_id = i.id AND a.action = 'status_changed'
+    ORDER BY a.created_at DESC, a.id DESC
+    LIMIT 1
+) m ON true
+WHERE i.workspace_id = sqlc.arg('workspace_id')::uuid
+  AND i.id = ANY(sqlc.arg('issue_ids')::uuid[]);

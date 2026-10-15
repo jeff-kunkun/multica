@@ -1,6 +1,6 @@
 ---
 name: multica-platform
-description: "Overview, ask, open a chat, consult, inbox, project board/report, sub-issue, wakeup, routing, close protocol, stall, driver, halt, mention, agent, specialisation, squad, autopilot, project, runtime, progress, state card, skill import, transfer, linked workspace, bot, GitHub App, status, env."
+description: "Overview, ask, open a chat, consult, inbox, sub-issue, wakeup, routing, close protocol, stall, driver, halt, mention, agent, specialisation, squad, autopilot, project, runtime, progress, state card, skill import, transfer, linked workspace, bot, GitHub App, status, env."
 user-invocable: false
 allowed-tools: Bash(multica *), Bash(git *), Bash(gh *)
 ---
@@ -50,8 +50,6 @@ See `references/overview.md` for filter semantics and examples.
 | `references/external-bots.md` | An owner-authorized external Bot: key-less one-yes connect (`multica bot connect`) or a personal CLI login instead of a mailbox; office event receipts and catch-up (`multica events`) |
 | `references/runtimes.md` | Runtimes, daemons, `repo checkout`, and the task CLI boundary |
 | `references/inbox.md` | The user asks about their inbox or what is stuck: `multica inbox board` (optionally `--project`) and the fixed five-part answer |
-| `references/project-report.md` | The user asks to hear a project's report (听汇报, 有什么新进展, 上次以来): `multica project report --mark-heard`, the fixed spoken shape with a Mermaid chart, and acting on its buttons |
-| `references/project-board.md` | The user asks for the full open-ticket panorama by project: `multica project board` (one or more projects, or the whole workspace) |
 | `references/consult.md` | Asking a strong-tier seat one question while you keep the ticket (`multica issue consult`): when to ask, the per-issue limit, cost, refusal codes |
 | `references/chats.md` | The chat directory and transcripts (`chat list` / `search` / `history`), messaging a running chat (`chat send` modes, `--urgent`), `chat handoff` |
 | `references/chat-spawn.md` | Opening a chat with another agent from a chat (`multica chat open`): task-or-chat table, limits, refusal codes |

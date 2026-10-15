@@ -436,8 +436,7 @@
       "project_sharing": "权限与共享",
       "workspace_links": "连通工作区",
       "agent_permissions": "智能体权限",
-      "bots": "群聊与 Bot",
-      "overview": "工作区全景"
+      "bots": "群聊与 Bot"
     },
     "groups": {
       "personal": "个人",
@@ -2453,25 +2452,5 @@
       "copied": "已复制，发给你的 Bot 吧",
       "instruction": "请在你的机器上运行下面这条命令，把 <URL> 和 <KEY> 换成你自己收消息的 HTTPS 地址和密钥：{{command}}\n然后把它给出的链接发给我，我点同意后你就接入了，群消息和要我拍板的事都会直接送到你那里。--expires-in-days 0 表示密钥永不过期；想让它到期失效，就换成天数。"
     }
-  },
-  "overview": {
-    "agents": "智能体",
-    "projects": "项目",
-    "chats": "活跃聊天",
-    "automations": "自动化",
-    "skills": "Skills",
-    "squads": "小队",
-    "runtimes": "运行时",
-    "workspace_links": "关联工作区",
-    "external_connections": "外部连接",
-    "refresh": "刷新",
-    "loading": "正在加载全景...",
-    "load_error": "无法加载全景，请刷新重试。",
-    "restricted": "你没有权限查看这部分内容。",
-    "empty": "暂无相关内容。",
-    "accepting_work": "接活中",
-    "paused": "不接活",
-    "all_projects": "所有项目",
-    "all_agents": "所有智能体"
   }
 }

@@ -60,7 +60,7 @@
 - DENE-1665：聊天开出的单自动记下来源聊天；聊天里开单卡（谁在做、为什么、实时状态，改给我 / 改给智能体 / 撤回），任务单显示「来自聊天」；`GET /api/chat/sessions/{id}/tickets` 与 `multica chat tickets`；[1280/390 截图](DENE-1665/preview.html)。
 - DENE-1672：聊天开出的任务完成 / 卡住 / 待验收时往来源聊天发回执卡（结论、PR、沉淀），`multica chat tickets` 带结果列，状态卡「来源」行与侧栏「原话」，聊天每回合带上它开出的任务现状；[375/390/768/1280 截图与 CLI 输出](DENE-1672/preview.html)。
 - DENE-1677：路由定档改为选择题加规则表，判断模型只能上调一档；设置页只读规则表与自动选派评论的答题记录，[预览（含 390px）](DENE-1677/preview.html)、[桌面](DENE-1677/desktop.png)、[手机](DENE-1677/mobile.png)。
-- DENE-1667：聊天底部「本聊天的单」进度条与浮窗/手机抽屉（刚变置顶），聊天里听汇报（Mermaid 图 + 要你做的 + 操作按钮，听完读掉收件箱），「听到哪了」按人 + 项目存服务端，项目页听汇报入口，`multica project report`；[预览与 375/768/1280 截图](DENE-1667/preview.html)，原生 App 的汇报图与入口在 DENE-1682。
+- DENE-1667：聊天底部「本聊天的单」进度条与浮窗/手机抽屉（刚变置顶）；[预览与 375/768/1280 截图](DENE-1667/preview.html)。
 - DENE-1647：验收席失败后的接力去向（执行记录「失败后已转给 X」/「等人决定」）和席位鉴权暂停说明；桌面与 390px 手机静态稿 [预览](DENE-1647/preview.html)、[桌面截图](DENE-1647/desktop.png)、[手机截图](DENE-1647/mobile.png)。
 
 - DENE-1679：子任务回执汇总给父票——完成评论、状态卡「子任务回执」、来源聊天的父票回执卡与 `multica issue context --output json` 的 `children` 都列出每张子票的结论、PR、沉淀；[375/390/768/1280 截图与 CLI 输出](DENE-1679/preview.html)。
@@ -79,7 +79,7 @@
 - DENE-1788：设置页「外部 Bot」（仅所有者/管理员可见）发管理员同权钥匙与接入指令，停用即 401、发新钥匙、删除，`multica bot`；[PR #626](https://github.com/jeff-kunkun/multica/pull/626)，[1280/768/390/375 截图](DENE-1788/index.html)，`multica chat new --wait` 等命令行全链路实测见 [bot-cli-e2e](DENE-1788/bot-cli-e2e.md)。
 - DENE-1794：评论、聊天和改单记录「经 Bot」，Bot 留言不算人的原话，停止和删除后保留历史；[最终验收证据](https://ai.example.com/api/attachments/01a129ef-dd01-77ac-b6dd-a0eaf945f3d7/download)含任务及聊天 375/390/768/1280 实页截图、禁止消息重拉时的真实 PAT 实时显示、PostgreSQL/Redis 与 CLI 来源专项测试；[来源与部署契约](../../server/docs/bot-write-provenance.md)。后台推送与四跳限制由 DENE-1792 集成验收。
 
-- DENE-1803：工作区全景聚合接口、CLI 与共享设置入口；[验收附件](https://ai.example.com/api/attachments/01a12a17-15bf-79fb-8d0f-bcd0526d52f6/download)含 375/390/768/1280 实页截图、筛选与刷新请求记录、真实 Bot 钥匙接口测试和本地 CLI 数量对照。完整/精简 JSON 为 3457/1730 字节（隔离测试工作区）。
+- DENE-1803：工作区全景聚合接口与 CLI；[验收附件](https://ai.example.com/api/attachments/01a12a17-15bf-79fb-8d0f-bcd0526d52f6/download)含 375/390/768/1280 实页截图、筛选与刷新请求记录、真实 Bot 钥匙接口测试和本地 CLI 数量对照。完整/精简 JSON 为 3457/1730 字节（隔离测试工作区）。
 
 - DENE-1806：项目默认参考项目、自动化继承/覆盖与每次运行重新核验；[含手机版的 HTML 预览（任务附件）](https://ai.example.com/api/attachments/01a12a26-bdc6-798a-b349-f9ed72409a6c/download)。数据库、任务认领与页面截图见任务交付附件；2026-10-11 已在升级后的 WD 真实巡检 run 简报中核验 `game`、`game-multica` 的描述、资源与项目记忆，均只进入参考段。[线上简报与升级证据（任务收尾附件）](https://ai.example.com/kunkunya/issues/01a12a20-e63b-7a09-bcd7-fafbfa684a9c)。
 

@@ -149,9 +149,7 @@ func (h *Handler) GetProjectMemoryMonitor(w http.ResponseWriter, r *http.Request
 	if !ok {
 		return
 	}
-	// The same person a project report is for: the human a task acts for,
-	// or the caller.
-	person, _, ok := h.projectReportPerson(w, r)
+	person, ok := h.projectMemoryMonitorPerson(w, r)
 	if !ok {
 		return
 	}
@@ -411,4 +409,25 @@ func monitorFlow(issue db.Issue, status string) string {
 		return monitorFlowReported
 	}
 	return monitorFlowNoConclusion
+}
+
+// projectMemoryMonitorPerson is whose view the monitor reads. A person calls
+// for themselves. A run calls for the human it works for — the task's
+// originator, else the creator of the chat it runs in — not the runtime owner.
+func (h *Handler) projectMemoryMonitorPerson(w http.ResponseWriter, r *http.Request) (pgtype.UUID, bool) {
+	if task, ok := h.taskFromRequestHeader(r); ok {
+		if task.OriginatorUserID.Valid {
+			return task.OriginatorUserID, true
+		}
+		if task.ChatSessionID.Valid {
+			if cs, err := h.Queries.GetChatSession(r.Context(), task.ChatSessionID); err == nil && cs.CreatorID.Valid {
+				return cs.CreatorID, true
+			}
+		}
+	}
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return pgtype.UUID{}, false
+	}
+	return parseUUID(userID), true
 }
