@@ -4,9 +4,10 @@
 -- zero-downtime: unsafe
 
 -- Agent doorbell / timed access passes (DENE-808).
-DROP TABLE IF EXISTS agent_access_pass;
 DROP TABLE IF EXISTS agent_access_request;
-ALTER TABLE agent DROP COLUMN IF EXISTS doorbell_enabled;
+-- agent_access_pass and agent.doorbell_enabled stay: the fast-access journal
+-- (673) captures agent_access_pass and compares doorbell_enabled on every
+-- agent UPDATE, so dropping either would break agent writes or the journal.
 
 -- Goal mode (DENE-1051).
 DROP TABLE IF EXISTS issue_goal_check;

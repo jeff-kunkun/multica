@@ -22,6 +22,7 @@ var workspaceDeletionManifest = map[string]workspaceDeleteAction{
 	"activity_log":                    workspaceDelete,
 	"agent_ask":                       workspaceDelete,
 	"agent":                           workspaceDelete,
+	"agent_access_pass":               workspaceDelete,
 	"agent_builder_draft":             workspaceDelete,
 	"agent_invocation_target":         workspaceDelete,
 	"agent_quota_breaker":             workspaceDelete,
