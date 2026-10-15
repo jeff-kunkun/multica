@@ -718,6 +718,10 @@
   "magpie": {
     "unrouted": "Not on magpie",
     "cli_models": "CLI's own models",
-    "edit_hint": "Change it in magpie"
+    "edit_hint": "Change it in magpie",
+    "group_label": "magpie groups",
+    "save_failed": "Couldn't change the magpie groups",
+    "default": "Default",
+    "make_default": "Make default"
   }
 }

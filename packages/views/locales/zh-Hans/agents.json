@@ -701,6 +701,10 @@
   "magpie": {
     "unrouted": "未接 magpie",
     "cli_models": "CLI 自带模型",
-    "edit_hint": "在 magpie 里修改"
+    "edit_hint": "在 magpie 里修改",
+    "group_label": "magpie 组",
+    "save_failed": "magpie 组没改成",
+    "default": "默认",
+    "make_default": "设为默认"
   }
 }

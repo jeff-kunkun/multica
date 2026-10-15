@@ -1184,6 +1184,17 @@ export class ApiClient {
     });
   }
 
+  async setIssueMetadataKey(id: string, key: string, value: string | number | boolean): Promise<void> {
+    await this.fetch(`/api/issues/${id}/metadata/${encodeURIComponent(key)}`, {
+      method: "PUT",
+      body: JSON.stringify({ value }),
+    });
+  }
+
+  async deleteIssueMetadataKey(id: string, key: string): Promise<void> {
+    await this.fetch(`/api/issues/${id}/metadata/${encodeURIComponent(key)}`, { method: "DELETE" });
+  }
+
   async moveIssue(id: string, data: MoveIssueRequest): Promise<Issue> {
     return this.fetch(`/api/issues/${id}/move`, {
       method: "POST",

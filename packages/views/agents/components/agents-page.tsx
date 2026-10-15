@@ -16,6 +16,7 @@ import { useWorkspaceId } from "@multica/core/hooks";
 import { issueDetailOptions } from "@multica/core/issues";
 import { useWorkspacePaths } from "@multica/core/paths";
 import {
+  agentMagpieRoutes,
   readRuntimeMagpieRoute,
   runtimeListOptions,
 } from "@multica/core/runtimes";
@@ -164,7 +165,11 @@ function AgentRow({
   const paths = useWorkspacePaths();
   const rowLink = useRowLink();
 
-  const route = readRuntimeMagpieRoute(runtime?.metadata);
+  const routes = agentMagpieRoutes(
+    readRuntimeMagpieRoute(runtime?.metadata),
+    runtime?.provider,
+    agent,
+  );
   const detailHref = paths.agentDetail(agent.id);
   const hasStatus = !isAgentRuntimeBound(agent) || presence !== null;
 
@@ -216,12 +221,13 @@ function AgentRow({
         {currentIssueId && (
           <CurrentWork issueId={currentIssueId} />
         )}
-        {route && (
+        {routes.map((route, i) => (
           <MagpieRouteLine
+            key={route.group || i}
             route={route}
-            className="mt-1.5 @xl:flex-nowrap @xl:overflow-hidden @xl:whitespace-nowrap"
+            className={`${i === 0 ? "mt-1.5" : "mt-1"} @xl:flex-nowrap @xl:overflow-hidden @xl:whitespace-nowrap`}
           />
-        )}
+        ))}
       </div>
 
       {hasStatus && (
