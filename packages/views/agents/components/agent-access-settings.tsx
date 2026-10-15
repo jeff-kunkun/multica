@@ -7,7 +7,6 @@ import {
 } from "../../settings/components/settings-layout";
 import { useT } from "../../i18n";
 import { AccessPicker } from "./inspector/access-picker";
-import { AgentAccessPasses } from "./agent-access-passes";
 
 export function AgentAccessSettings({
   agent,
@@ -26,7 +25,6 @@ export function AgentAccessSettings({
   const canEdit = currentUserId !== null && agent.owner_id === currentUserId;
 
   return (
-    <>
     <SettingsSection
       title={t(($) => $.access.section_title)}
     >
@@ -46,12 +44,5 @@ export function AgentAccessSettings({
         />
       </SettingsCard>
     </SettingsSection>
-    <AgentAccessPasses
-      agent={agent}
-      members={members}
-      canEdit={canEdit}
-      onUpdate={onUpdate}
-    />
-    </>
   );
 }

@@ -2725,10 +2725,6 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				// (DENE-922). One request, applied whole or not at all.
 				r.Put("/routing", h.BulkUpdateAgentRouting)
 				r.Route("/{id}", func(r chi.Router) {
-					// Timed access passes (DENE-808), owner-only.
-					r.Get("/access-passes", h.ListAgentAccessPasses)
-					r.Post("/access-passes", h.CreateAgentAccessPass)
-					r.Delete("/access-passes/{passId}", h.RevokeAgentAccessPass)
 					r.Get("/", h.GetAgent)
 					r.Put("/", h.UpdateAgent)
 					r.Post("/archive", h.ArchiveAgent)
@@ -3010,12 +3006,6 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			r.Get("/api/chat/thread", h.GetChatThread)
 
 			// Inbox
-			// Agent doorbell rings (DENE-808): owner approves / declines.
-			r.Route("/api/agent-access-requests", func(r chi.Router) {
-				r.Get("/", h.ListAgentAccessRequests)
-				r.Post("/{id}/approve", h.ApproveAgentAccessRequest)
-				r.Post("/{id}/decline", h.DeclineAgentAccessRequest)
-			})
 			// Calls still waiting on the current user (DENE-880).
 			r.Get("/api/summons/waiting", h.ListWaitingSummons)
 			r.Route("/api/inbox", func(r chi.Router) {

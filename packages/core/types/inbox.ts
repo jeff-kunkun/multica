@@ -31,12 +31,6 @@ export type InboxItemType =
   // same Inbox model so read/archive/realtime behavior remains consistent.
   | "autopilot_paused"
   | "autopilot_quota_exceeded"
-  // Agent borrowing (kun fork, DENE-808). The request lands with the agent
-  // owner and carries the issue it was raised on; the two receipts go back to
-  // the requester.
-  | "agent_access_request"
-  | "agent_access_approved"
-  | "agent_access_declined"
   // A run ended and its ticket stopped without saying why (kun fork,
   // DENE-881). Body carries the parking record's one sentence.
   | "parking_unexplained"

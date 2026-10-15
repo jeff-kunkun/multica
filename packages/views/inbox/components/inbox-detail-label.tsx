@@ -41,9 +41,6 @@ export function useTypeLabels(): Record<InboxItemType, string> {
     quick_create_unconfirmed: t(($) => $.types.quick_create_unconfirmed),
     autopilot_paused: t(($) => $.types.autopilot_paused),
     autopilot_quota_exceeded: t(($) => $.types.autopilot_quota_exceeded),
-    agent_access_request: t(($) => $.types.agent_access_request),
-    agent_access_approved: t(($) => $.types.agent_access_approved),
-    agent_access_declined: t(($) => $.types.agent_access_declined),
     parking_unexplained: t(($) => $.types.parking_unexplained),
     issue_stall_action: t(($) => $.types.issue_stall_action),
     children_done: t(($) => $.types.children_done),
@@ -149,28 +146,6 @@ export function InboxDetailLabel({ item }: { item: InboxItem }) {
     }
     case "autopilot_quota_exceeded":
       return <span>{t(($) => $.labels.autopilot_quota_blocked)}</span>;
-    case "agent_access_request": {
-      const requester = details.requester_name;
-      const agent = details.agent_name;
-      if (requester && agent) {
-        return <span>{t(($) => $.labels.access_requested_by, { requester, agent })}</span>;
-      }
-      return <span>{typeLabels[item.type]}</span>;
-    }
-    case "agent_access_approved":
-    case "agent_access_declined": {
-      const agent = details.agent_name;
-      if (agent) {
-        return (
-          <span>
-            {item.type === "agent_access_approved"
-              ? t(($) => $.labels.access_approved_for, { agent })
-              : t(($) => $.labels.access_declined_for, { agent })}
-          </span>
-        );
-      }
-      return <span>{typeLabels[item.type]}</span>;
-    }
     case "children_done": {
       // The stage arrives as a JSON number; details are typed as strings.
       const stage = details.stage != null ? String(details.stage) : "";

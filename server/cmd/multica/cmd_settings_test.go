@@ -187,23 +187,6 @@ func TestSettingsRejectsUnknownKeyAndTableOutput(t *testing.T) {
 	}
 }
 
-func TestPlanSettingsPinsAccessPassMethods(t *testing.T) {
-	read, err := planSettings("agent.ag-1.access-passes", false, nil, nil, "ws-123")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if read.Method != http.MethodGet || read.Path != "/api/agents/ag-1/access-passes" {
-		t.Fatalf("read = %s %s", read.Method, read.Path)
-	}
-	revoke, err := planSettings("agent.ag-1.access-passes", true, map[string]any{"revoke_id": "pass-1"}, nil, "ws-123")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if revoke.Method != http.MethodDelete || revoke.Path != "/api/agents/ag-1/access-passes/pass-1" {
-		t.Fatalf("revoke = %s %s", revoke.Method, revoke.Path)
-	}
-}
-
 func clearSettingsFlags(t *testing.T) {
 	t.Helper()
 	_ = settingsGetCmd.Flags().Set("output", "json")

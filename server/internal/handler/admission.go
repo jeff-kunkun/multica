@@ -58,7 +58,6 @@ const (
 	ReasonDeferred              = dispatch.ReasonDeferred
 	ReasonSteered               = dispatch.ReasonSteered
 	ReasonInvocationNotAllowed  = dispatch.ReasonInvocationNotAllowed
-	ReasonAccessRequested       = dispatch.ReasonAccessRequested
 	ReasonTargetUnavailable     = dispatch.ReasonTargetUnavailable
 	ReasonRuntimeOffline        = dispatch.ReasonRuntimeOffline
 	ReasonRuntimeUnusable       = dispatch.ReasonRuntimeUnusable
@@ -123,8 +122,6 @@ func dispatchBlockedFallbackMessage(code DispatchReasonCode) string {
 	switch code {
 	case ReasonInvocationNotAllowed:
 		return "you don't have permission to use this target"
-	case ReasonAccessRequested:
-		return "the agent owner has been asked to approve this request"
 	case ReasonTargetUnavailable:
 		return "the target is unavailable"
 	case ReasonRuntimeOffline:

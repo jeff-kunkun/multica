@@ -179,10 +179,6 @@ WHERE i.workspace_id = $1 AND i.recipient_type = $2 AND i.recipient_id = $3
   AND i.read = false AND i.archived = false
   AND (
     iss.id IS NULL
-    -- Agent doorbell rings and receipts are personal notices (DENE-808): the
-    -- owner must hear the bell even on a ticket not shared with them. Keep in
-    -- step with inboxItemIsPersonalNotice in internal/handler/agent_doorbell.go.
-    OR i.type IN ('agent_access_request', 'agent_access_approved', 'agent_access_declined')
     OR (iss.creator_type = 'member' AND iss.creator_id = i.recipient_id)
     OR (iss.assignee_type = 'member' AND iss.assignee_id = i.recipient_id)
     OR (iss.creator_type = 'agent' AND EXISTS (
@@ -244,7 +240,6 @@ FROM (
       -- not light for an issue the recipient cannot open (DENE-698).
       AND (
         iss.id IS NULL
-        OR i.type IN ('agent_access_request', 'agent_access_approved', 'agent_access_declined')
         OR (iss.creator_type = 'member' AND iss.creator_id = i.recipient_id)
         OR (iss.assignee_type = 'member' AND iss.assignee_id = i.recipient_id)
         OR (iss.creator_type = 'agent' AND EXISTS (
@@ -374,7 +369,6 @@ SELECT i.issue_id,
              OR (s.comment_id IS NOT NULL AND i.details->>'comment_id' = s.comment_id::text))
   )))::bigint AS held_count,
        max(i.created_at)::timestamptz AS latest_at,
-       bool_and(i.type IN ('agent_access_request', 'agent_access_approved', 'agent_access_declined'))::bool AS personal_only,
        iss.number AS issue_number,
        iss.title AS issue_title,
        iss.status AS issue_status,

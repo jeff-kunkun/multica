@@ -60,20 +60,6 @@
     "autopilot_quota_upgrade": "Voir les options de mise à niveau",
     "archive": "Archiver",
     "unarchive": "Désarchiver",
-    "access_request_mention_title": "{{requester}} a mentionné {{agent}} et attend votre approbation",
-    "access_request_assign_title": "{{requester}} a assigné {{agent}} et attend votre approbation",
-    "access_request_local_env_note": "Une fois approuvée, la tâche peut accéder aux clés, connexions et fichiers de votre machine.",
-    "access_pass_prompt": "Autoriser aussi pour un moment :",
-    "access_pass_2h": "2 heures",
-    "access_pass_today": "Jusqu'à ce soir",
-    "access_pass_custom": "Jusqu'à…",
-    "access_approve_once": "Approuver une fois",
-    "access_approve_with_pass": "Approuver et délivrer un laissez-passer",
-    "access_decline": "Refuser",
-    "access_request_expires": "Expire {{until}}",
-    "access_status_approved": "Approuvée",
-    "access_status_declined": "Refusée",
-    "access_status_expired": "Expirée : personne n'a répondu à temps",
     "stall_review_title": "Ce ticket est en revue de stagnation pendant 24 heures",
     "stall_processed_title": "Ce ticket a été traité automatiquement",
     "stall_keep": "Conserver",
@@ -108,9 +94,6 @@
     "autopilot_paused": "Automatisation en pause",
     "children_done": "Sous-tâches terminées",
     "autopilot_quota_exceeded": "Limite d'exécutions d'automatisation atteinte",
-    "agent_access_request": "Demande d'accès à un agent",
-    "agent_access_approved": "Accès à l'agent approuvé",
-    "agent_access_declined": "Accès à l'agent refusé",
     "parking_unexplained": "Arrêt sans explication",
     "issue_stall_action": "Action de stagnation",
     "workspace_link_request": "Demande de liaison",
@@ -133,9 +116,6 @@
     "failed_with_detail": "Échec : {{detail}}",
     "autopilot_quota_blocked": "Exécution bloquée car la limite a été atteinte",
     "children_done_stage": "Sous-tâches de l’étape {{stage}} terminées",
-    "access_requested_by": "{{requester}} demande à utiliser {{agent}}",
-    "access_approved_for": "Votre demande d'utiliser {{agent}} a été approuvée",
-    "access_declined_for": "Votre demande d'utiliser {{agent}} a été refusée",
     "link_requested_by": "{{source}} souhaite partager des projets avec vous",
     "link_accepted_by": "{{target}} a accepté votre liaison",
     "link_declined_by": "{{target}} a refusé votre liaison"
@@ -143,11 +123,7 @@
   "toasts": {
     "source_context_retry_started": "Nouvelle tentative démarrée avec le contexte d'origine",
     "archived": "Notification archivée",
-    "unarchived": "Notification restaurée",
-    "access_approved": "Approuvée : l'exécution est en file d'attente",
-    "access_approved_with_pass": "Approuvée : laissez-passer valable jusqu'au {{until}}",
-    "access_approved_but_blocked": "Approuvée, mais l'exécution n'a pas pu démarrer : vérifiez le runtime de l'agent",
-    "access_declined": "Refusée : le demandeur a été prévenu"
+    "unarchived": "Notification restaurée"
   },
   "errors": {
     "archived_lookup_failed": "Échec du chargement de la notification liée",
@@ -163,10 +139,7 @@
     "archive_completed_failed": "Échec de l'archivage des éléments terminés",
     "unarchive_failed": "Échec du désarchivage",
     "archived_load_failed": "Échec du chargement des notifications archivées",
-    "filters_load_failed": "Impossible de charger les filtres",
-    "access_request_not_pending": "Cette demande a déjà été traitée ou a expiré",
-    "access_request_failed": "Impossible de traiter la demande",
-    "access_pass_expiry_invalid": "Choisissez une échéance dans le futur"
+    "filters_load_failed": "Impossible de charger les filtres"
   },
   "board": {
     "title": "Inbox",

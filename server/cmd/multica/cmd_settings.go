@@ -155,13 +155,6 @@ var settingsKinds = map[string]settingsKind{
 			return settingsCall{Method: http.MethodPatch, Path: "/api/runtimes/" + url.PathEscape(id), Body: value}, nil
 		},
 	},
-	"agent.access-passes": {
-		handlers: []string{"ListAgentAccessPasses", "CreateAgentAccessPass", "RevokeAgentAccessPass"},
-		read: func(id string, _ map[string]any, _ string) (settingsCall, error) {
-			return settingsCall{Method: http.MethodGet, Path: "/api/agents/" + url.PathEscape(id) + "/access-passes"}, nil
-		},
-		write: planAccessPassWrite,
-	},
 	"agent.spawn": {
 		handlers: []string{"GetWorkspaceAgentSpawn", "UpdateWorkspaceAgentSpawn"},
 		read: func(_ string, _ map[string]any, workspaceID string) (settingsCall, error) {
@@ -208,18 +201,6 @@ func planRepoSharesWrite(_ string, value any) (settingsCall, error) {
 	return settingsCall{Method: http.MethodPost, Path: "/api/repos/shares", Body: value}, nil
 }
 
-func planAccessPassWrite(id string, value any) (settingsCall, error) {
-	path := "/api/agents/" + url.PathEscape(id) + "/access-passes"
-	if body, ok := value.(map[string]any); ok && body["revoke_id"] != nil {
-		revokeID := strings.TrimSpace(fmt.Sprint(body["revoke_id"]))
-		if revokeID == "" || revokeID == "<nil>" {
-			return settingsCall{}, fmt.Errorf("access-passes revoke_id is empty")
-		}
-		return settingsCall{Method: http.MethodDelete, Path: path + "/" + url.PathEscape(revokeID)}, nil
-	}
-	return settingsCall{Method: http.MethodPost, Path: path, Body: value}, nil
-}
-
 func settingsHandlerClaims() map[string]struct{} {
 	out := make(map[string]struct{})
 	for _, kind := range settingsKinds {
@@ -244,8 +225,6 @@ func parseSettingsKey(key string) (kind, id string, err error) {
 		return "module.visibility", parts[1], nil
 	case parts[0] == "runtime" && parts[2] == "visibility":
 		return "runtime.visibility", parts[1], nil
-	case parts[0] == "agent" && parts[2] == "access-passes":
-		return "agent.access-passes", parts[1], nil
 	case parts[0] == "agent" && parts[2] == "runtime-skill":
 		return "agent.runtime-skill", parts[1], nil
 	default:

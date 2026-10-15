@@ -800,9 +800,7 @@
     "steer_attachment_notice": "実行中に追加できるのはテキストのみのため、ファイル付きのメッセージはこの実行の後に処理されます。",
     "restart_send": "停止して送信",
     "restart_failed": "現在の実行を停止できませんでした。メッセージは送信されていません。",
-    "align_action": "これを起点にすり合わせる",
-    "trigger_blocked_access_requested": "エージェントの所有者に承認を依頼しました。承認後に開始します",
-    "trigger_blocked_short_access_requested": "所有者の承認待ち"
+    "align_action": "これを起点にすり合わせる"
   },
   "reply": {
     "placeholder": "返信を残す...",

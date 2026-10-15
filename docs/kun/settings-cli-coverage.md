@@ -68,7 +68,6 @@
 
 | 项 | 服务端接口 | 来源 | CLI |
 | --- | --- | --- | --- |
-| 智能体临时通行证 | `GET` / `POST /api/agents/{id}/access-passes`，撤销 `DELETE .../access-passes/{passId}` | 魔改、界面在用（智能体页，不是设置页） | `settings get/set agent.{id}.access-passes`。撤销体是 `{"revoke_id":"..."}` |
 | 运行时开放范围 | 写：`PATCH /api/runtimes/{id}`，体里带 `visibility`。读：单条地址没有 GET，开放范围在运行时列表上 | 界面有、接口是上游的 | `settings get/set runtime.{id}.visibility` |
 | 运行时技能开关 | 写：`PUT /api/agents/{id}/runtime-skills/enabled`。读：这条地址只接受写入，当前开关在智能体自己的 `disabled_runtime_skills` 上 | 界面有、接口是上游的 | `settings get/set agent.{id}.runtime-skill` |
 | 工作区模块访问策略 | `GET /api/modules`，`PUT /api/modules/{module}/visibility` | 魔改、界面在用 | `settings get modules.visibility`，`settings get/set module.{module}.visibility` |
@@ -107,7 +106,6 @@ multica settings get runtime.RUNTIME_ID.visibility
 multica settings set runtime.RUNTIME_ID.visibility --value-json '{"visibility":"public"}'
 multica settings get agent.AGENT_ID.runtime-skill
 multica settings set agent.AGENT_ID.runtime-skill --value-file ./runtime-skill.json
-multica settings set agent.AGENT_ID.access-passes --value-stdin < pass.json
 ```
 
 不带 `url` 的 `settings get repo.visibility` 返回工作区里每条仓库的当前可见范围。`repo.visibility` 的写入是 PUT。`runtime.{id}.visibility` 的写入仍是 PATCH。`agent.{id}.runtime-skill` 的写入仍是 PUT。
@@ -119,7 +117,6 @@ multica settings set agent.AGENT_ID.access-passes --value-stdin < pass.json
 `TestSettingsSurfaceRoutesAreClaimed` 读 `server/cmd/server/router.go`。下面这些路径上新出现的处理函数，如果没有写进 `settingsKinds`，也没有写进上面的例外表和本文件，测试变红：
 
 - `/api/repos/`
-- `access-passes`
 - `runtime-skills/`
 - `/api/modules`
 - 路径恰好是 `/visibility` 或 `/visibility/preview` 的可见范围

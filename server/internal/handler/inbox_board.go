@@ -376,7 +376,7 @@ func (h *Handler) gatherInboxBoard(
 		if !inProject(u.IssueProjectID) {
 			continue
 		}
-		if !u.PersonalOnly && !viewer.canSeeIssueFields(u.IssueID, u.IssueVisibility, u.IssueCreatorType,
+		if !viewer.canSeeIssueFields(u.IssueID, u.IssueVisibility, u.IssueCreatorType,
 			u.IssueCreatorID, u.IssueProjectID, u.IssueAssigneeType, u.IssueAssigneeID) {
 			continue
 		}

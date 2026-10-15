@@ -86,7 +86,7 @@ func (h *Handler) fastSaveCursor(ctx context.Context, token string, c fastCursor
 }
 
 // Membership/visibility is recalculated even with an unchanged permission
-// epoch (for example an access pass expires without a database write).
+// epoch.
 func (h *Handler) fastState(r *http.Request, viewer string, req fastRequest) ([]fastWorkspace, string, map[string]int64, time.Time, error) {
 	scopes, err := h.fastScopes(r, viewer, req)
 	if err != nil {

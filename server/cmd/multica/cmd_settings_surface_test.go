@@ -24,8 +24,6 @@ func isSettingsSurface(path string) bool {
 	switch {
 	case strings.Contains(path, "/api/repos/"):
 		return true
-	case strings.Contains(path, "access-passes"):
-		return true
 	case strings.Contains(path, "runtime-skills/"):
 		return true
 	case path == "/agent-spawn":

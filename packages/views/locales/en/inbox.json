@@ -60,20 +60,6 @@
     "autopilot_quota_upgrade": "View upgrade options",
     "archive": "Archive",
     "unarchive": "Unarchive",
-    "access_request_mention_title": "{{requester}} mentioned {{agent}} and needs your approval",
-    "access_request_assign_title": "{{requester}} assigned {{agent}} and needs your approval",
-    "access_request_local_env_note": "Once approved, the task can access keys, logins and files on your machine.",
-    "access_pass_prompt": "Also let them use it for a while:",
-    "access_pass_2h": "2 hours",
-    "access_pass_today": "Rest of today",
-    "access_pass_custom": "Until…",
-    "access_approve_once": "Approve this once",
-    "access_approve_with_pass": "Approve and issue pass",
-    "access_decline": "Decline",
-    "access_request_expires": "Expires {{until}}",
-    "access_status_approved": "Approved",
-    "access_status_declined": "Declined",
-    "access_status_expired": "Expired — nobody answered in time",
     "stall_review_title": "This ticket is under a 24-hour stall review",
     "stall_processed_title": "This ticket was handled automatically",
     "stall_keep": "Keep ticket",
@@ -108,9 +94,6 @@
     "autopilot_paused": "Autopilot paused",
     "children_done": "Sub-issues finished",
     "autopilot_quota_exceeded": "Autopilot run limit reached",
-    "agent_access_request": "Agent access request",
-    "agent_access_approved": "Agent access approved",
-    "agent_access_declined": "Agent access declined",
     "parking_unexplained": "Stopped without explanation",
     "issue_stall_action": "Stall action",
     "workspace_link_request": "Link request",
@@ -133,9 +116,6 @@
     "failed_with_detail": "Failed: {{detail}}",
     "autopilot_quota_blocked": "Run blocked because the limit was reached",
     "children_done_stage": "Stage {{stage}}'s sub-issues finished",
-    "access_requested_by": "{{requester}} asked to use {{agent}}",
-    "access_approved_for": "Your request to use {{agent}} was approved",
-    "access_declined_for": "Your request to use {{agent}} was declined",
     "link_requested_by": "{{source}} wants to share projects with you",
     "link_accepted_by": "{{target}} accepted your link",
     "link_declined_by": "{{target}} declined your link"
@@ -143,11 +123,7 @@
   "toasts": {
     "source_context_retry_started": "Retry started with the original context",
     "archived": "Notification archived",
-    "unarchived": "Notification restored",
-    "access_approved": "Approved — the run is queued",
-    "access_approved_with_pass": "Approved — pass valid until {{until}}",
-    "access_approved_but_blocked": "Approved, but the run could not start — check the agent's runtime",
-    "access_declined": "Declined — the requester has been told"
+    "unarchived": "Notification restored"
   },
   "errors": {
     "archived_lookup_failed": "Failed to load the linked notification",
@@ -163,10 +139,7 @@
     "archive_completed_failed": "Failed to archive completed",
     "unarchive_failed": "Failed to unarchive",
     "archived_load_failed": "Failed to load archived notifications",
-    "filters_load_failed": "Could not load filters",
-    "access_request_not_pending": "This request was already resolved or has expired",
-    "access_request_failed": "Could not resolve the request",
-    "access_pass_expiry_invalid": "Pick an expiry in the future"
+    "filters_load_failed": "Could not load filters"
   },
   "board": {
     "title": "Inbox",

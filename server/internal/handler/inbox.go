@@ -186,7 +186,7 @@ func (h *Handler) ListInbox(w http.ResponseWriter, r *http.Request) {
 		if viewerErr != nil {
 			break
 		}
-		if item.IssueID.Valid && !inboxItemIsPersonalNotice(item.Type) && !viewer.canSeeIssueFields(
+		if item.IssueID.Valid && !viewer.canSeeIssueFields(
 			item.IssueID, item.IssueVisibility, item.IssueCreatorType, item.IssueCreatorID, item.IssueProjectID,
 			item.IssueAssigneeType, item.IssueAssigneeID) {
 			continue
@@ -319,7 +319,7 @@ func (h *Handler) ListArchivedInbox(w http.ResponseWriter, r *http.Request) {
 		if viewerErr != nil {
 			break
 		}
-		if item.IssueID.Valid && !inboxItemIsPersonalNotice(item.Type) && !viewer.canSeeIssueFields(
+		if item.IssueID.Valid && !viewer.canSeeIssueFields(
 			item.IssueID, item.IssueVisibility, item.IssueCreatorType, item.IssueCreatorID, item.IssueProjectID,
 			item.IssueAssigneeType, item.IssueAssigneeID) {
 			continue
@@ -696,7 +696,7 @@ func (h *Handler) ListUnreadInboxIssues(w http.ResponseWriter, r *http.Request) 
 	prefix := h.getIssuePrefix(r.Context(), wsUUID)
 	resp := make([]UnreadInboxIssueResponse, 0, len(rows))
 	for _, row := range rows {
-		if !row.PersonalOnly && !viewer.canSeeIssueFields(row.IssueID, row.IssueVisibility, row.IssueCreatorType,
+		if !viewer.canSeeIssueFields(row.IssueID, row.IssueVisibility, row.IssueCreatorType,
 			row.IssueCreatorID, row.IssueProjectID, row.IssueAssigneeType, row.IssueAssigneeID) {
 			continue
 		}
