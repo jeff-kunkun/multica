@@ -294,8 +294,7 @@ func (h *Handler) GetDashboardUsageByAgent(w http.ResponseWriter, r *http.Reques
 // DashboardUsageByIssueResponse is one (issue, provider, model) aggregate.
 //
 // Carries the issue's human identifier and title so the dashboard can render
-// the row and link straight into the issue's Token cost view without a second
-// request per issue. Identifier is composed in the handler because the prefix
+// the row and link straight to the issue without a second request per issue. Identifier is composed in the handler because the prefix
 // lives on the workspace, not on the issue row.
 type DashboardUsageByIssueResponse struct {
 	IssueID    string `json:"issue_id"`
@@ -318,8 +317,7 @@ type DashboardUsageByIssueResponse struct {
 }
 
 // GetDashboardUsageByIssue returns per-(issue, model) token aggregates for the
-// workspace, optionally scoped to a project. It is the workspace-usage entry
-// point into a single issue's Token cost view.
+// workspace, optionally scoped to a project. Each row links into its issue.
 //
 // No agent dimension, so no per-agent visibility folding: this is the same
 // class of workspace-wide spend number as `usage/daily`. Exact N-day cutoff

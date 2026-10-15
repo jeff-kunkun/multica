@@ -883,10 +883,10 @@ describe("DashboardPage — leaderboard density", () => {
 });
 
 // DENE-709. The Usage tab is where the workspace's spend by issue lives, and
-// each row is the entry into that issue's Token cost view. The per-row markup
+// each row links to its issue. The per-row markup
 // is covered in issue-cost-list.test.tsx; what matters here is that the page
 // feeds the card from the by-issue rollup and puts it on the Usage tab.
-describe("DashboardPage — the costliest-issues card links into each issue's cost view", () => {
+describe("DashboardPage — the costliest-issues card links to each issue", () => {
   beforeEach(() => {
     queryKeys.length = 0;
     dashboardDataRef.current = true;
@@ -898,13 +898,13 @@ describe("DashboardPage — the costliest-issues card links into each issue's co
     issueUsageRef.current = false;
   });
 
-  it("renders the ranking on the Usage tab and deep-links every row", () => {
+  it("renders the ranking on the Usage tab and links every row", () => {
     renderDashboard();
 
     const list = within(screen.getByRole("list", { name: "Costliest issues" }));
     expect(list.getByRole("link", { name: /DENE-1/ })).toHaveAttribute(
       "href",
-      "/acme/issues/DENE-1?usage=1",
+      "/acme/issues/DENE-1",
     );
     // The page asks the server for the per-issue rollup in the same window as
     // the leaderboard above it.

@@ -2,16 +2,13 @@
 
 import { useMemo, useState, type CSSProperties } from "react";
 import { useWorkspacePaths } from "@multica/core/paths";
-import { issueUsageHref } from "../../common/issue-usage-link";
 import { AppLink } from "../../navigation";
 import { formatTokens, formatUsd } from "../../runtimes/utils";
 import { useT } from "../../i18n";
 import type { IssueCostRow } from "../utils";
 
-// Ranked list of the issues this window spent the most on, and the workspace
-// usage page's entry into an individual issue's Token cost view: every row
-// links to the issue with `?usage=1`, which opens the run-level breakdown on
-// arrival.
+// Ranked list of the issues this window spent the most on; every row links to
+// the issue.
 //
 // Ranked by cost, not tokens, because cost is the question ("where is the
 // money going") and the two do not order the same way once models and cache
@@ -102,9 +99,7 @@ export function IssueCostList({ rows }: { rows: IssueCostRow[] }) {
                     style={ISSUE_COST_GRID_STYLE}
                   >
                     <AppLink
-                      href={issueUsageHref(
-                        wsPaths.issueDetail(row.identifier || row.issueId),
-                      )}
+                      href={wsPaths.issueDetail(row.identifier || row.issueId)}
                       newTabTitle={title}
                       className="flex min-w-0 items-baseline gap-2 hover:underline"
                     >

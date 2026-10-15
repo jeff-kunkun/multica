@@ -2603,45 +2603,6 @@ export const AgentActivityBucketListSchema = z.array(z.object({
 
 export const AgentTaskListSchema = z.array(AgentTaskSchema);
 
-const IssueUsageRunSchema = z.object({
-  task_id: z.string().default(""),
-  provider: z.string().optional(),
-  model: z.string().default(""),
-  input_tokens: z.number().default(0),
-  output_tokens: z.number().default(0),
-  cache_read_tokens: z.number().default(0),
-  cache_write_tokens: z.number().default(0),
-  cost_usd_ticks: z.number().optional(),
-  num_turns: z.number().optional(),
-  resumed: z.boolean().optional(),
-  session_id: z.string().optional(),
-  last_context_tokens: z.number().optional(),
-  queue_to_claim_ms: z.number().optional(),
-  prepare_ms: z.number().optional(),
-  spawn_to_first_output_ms: z.number().optional(),
-  total_ms: z.number().optional(),
-  attribution_source: z.string().optional(),
-  trigger_evidence_kind: z.string().optional(),
-}).loose();
-
-export const IssueUsageSummarySchema = z.object({
-  total_input_tokens: z.number().default(0),
-  total_output_tokens: z.number().default(0),
-  total_cache_read_tokens: z.number().default(0),
-  total_cache_write_tokens: z.number().default(0),
-  cost_usd_ticks: z.number().optional(),
-  uncosted_input_tokens: z.number().optional(),
-  uncosted_output_tokens: z.number().optional(),
-  uncosted_cache_read_tokens: z.number().optional(),
-  uncosted_cache_write_tokens: z.number().optional(),
-  task_count: z.number().default(0),
-  terminal_task_count: z.number().optional(),
-  metered_task_count: z.number().optional(),
-  unreported_task_count: z.number().optional(),
-  runs: z.array(IssueUsageRunSchema).optional().catch(undefined),
-  attribution_source_counts: z.record(z.string(), z.number()).optional().catch(undefined),
-  trigger_evidence_kind_counts: z.record(z.string(), z.number()).optional().catch(undefined),
-}).loose();
 export const AgentTaskPageSchema = z.object({
   tasks: AgentTaskListSchema,
   nextCursor: z.string().min(1).nullable(),

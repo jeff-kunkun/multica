@@ -31,7 +31,6 @@ import {
 } from "../../runtimes/utils";
 import { TerminateTaskConfirmDialog } from "./terminate-task-confirm-dialog";
 import { IssueRunsDialog, RunTriggerLabel, runBarTone } from "./issue-runs-dialog";
-import { IssueUsageDialog } from "./issue-usage-dialog";
 import {
   buildRunTimeline,
   cumulativeCostAt,
@@ -44,11 +43,6 @@ import {
 import { canRetryRun, RetryRunButton } from "./retry-run-button";
 import { TaskStatusIcon } from "./task-status-icon";
 import { useStatusLabel, useTriggerText } from "./task-run-labels";
-import { currentPath, useOptionalNavigation } from "../../navigation";
-import {
-  hasIssueUsageDeepLink,
-  ISSUE_USAGE_QUERY_PARAM,
-} from "../../common/issue-usage-link";
 import { StopWorkDialog } from "../../common/stop-work-dialog";
 import { WakeupRunLabel } from "./wakeup-source-chip";
 
@@ -86,14 +80,6 @@ interface ExecutionLogSectionProps {
   identifier?: string;
   issueTitle?: string;
   halted?: boolean;
-  /**
-   * Mirror the usage dialog's open state into `?usage=1`, and open it on mount
-   * when the URL already carries that param. Set only by the standalone issue
-   * route: the inbox renders `IssueDetail` in a side panel whose URL it must
-   * not rewrite, and whose `?view=` it does not own. See
-   * ../../common/issue-usage-link.
-   */
-  deepLinkUsage?: boolean;
 }
 
 // How many past runs the sidebar lists before deferring to the Runs dialog.
@@ -108,62 +94,21 @@ const PAST_STATUS_RANK: Record<string, number> = {
   completed: 2,
 };
 
-export function ExecutionLogSection({ issueId, workspaceId, identifier, issueTitle, halted = false, deepLinkUsage = false }: ExecutionLogSectionProps) {
+export function ExecutionLogSection({ issueId, workspaceId, identifier, issueTitle, halted = false }: ExecutionLogSectionProps) {
   const { t } = useT("issues");
-  // Optional so this section still renders in isolation (no provider: the
-  // deep link is simply unavailable there, and the dialog stays local).
-  const navigation = useOptionalNavigation();
   const [open, setOpen] = useState(true);
   const [runsOpen, setRunsOpen] = useState(false);
   const pricings = useCustomPricingStore((s) => s.pricings);
-  // The dialog's open state is local everywhere except the standalone issue
-  // route, where the URL is the source of truth: `?usage=1` opens it on
-  // arrival, and toggling mirrors back so the link stays copyable and a
-  // refresh lands on the same view.
-  const urlWantsUsage =
-    deepLinkUsage && navigation !== null
-      ? hasIssueUsageDeepLink(navigation.searchParams)
-      : false;
-  const [usageOpen, setUsageOpen] = useState(urlWantsUsage);
   const [stopDialogOpen, setStopDialogOpen] = useState(false);
   const haltMutation = useHaltIssueRuns(issueId, workspaceId);
   const resumeMutation = useResumeIssueRuns(issueId, workspaceId);
-
-  useEffect(() => {
-    // A link to another issue's usage view can arrive while this component
-    // stays mounted (same route, different id) — follow the URL then too.
-    //
-    // Open-only on purpose: every close already writes the URL itself, and
-    // mirroring a `false` back would race the adapter's own commit — on
-    // desktop `searchParams` derives from the tab store, so a render that
-    // still saw the old string would shut the dialog the reader just opened.
-    if (urlWantsUsage) setUsageOpen(true);
-  }, [urlWantsUsage]);
-
-  const handleUsageOpenChange = (next: boolean) => {
-    setUsageOpen(next);
-    if (!deepLinkUsage || navigation === null) return;
-    const params = new URLSearchParams(navigation.searchParams);
-    if (next) params.set(ISSUE_USAGE_QUERY_PARAM, "1");
-    else params.delete(ISSUE_USAGE_QUERY_PARAM);
-    // Through `currentPath` with the rewritten params: composing
-    // pathname + search by hand drops the fragment, which would downgrade a
-    // `#comment-…` deep link to the whole issue the moment the reader opens
-    // the Token cost view. See navigation/current-path.ts.
-    navigation.replace(currentPath({ ...navigation, searchParams: params }));
-  };
 
   // Cache key registered in `issueKeys.tasks` (packages/core/issues/queries.ts)
   // so the global useRealtimeSync `task:` prefix path invalidates it via
   // a `["issues", "tasks"]` prefix-match — no local WS subscriptions
   // needed, and the cache stays fresh even when this component isn't
   // mounted (e.g. user cancels from agent-side, then navigates here).
-  const {
-    data: tasks = [],
-    isPending: tasksPending,
-    isError: tasksFailed,
-    refetch: refetchTasks,
-  } = useQuery(issueTasksOptions(issueId));
+  const { data: tasks = [] } = useQuery(issueTasksOptions(issueId));
 
   const activeTasks = useMemo(
     () =>
@@ -213,10 +158,8 @@ export function ExecutionLogSection({ issueId, workspaceId, identifier, issueTit
   const pastRuns = useMemo(() => timeline.runs.filter((run) => !run.active), [timeline]);
 
 
-  // No runs, no section — unless a deep link asked for the usage view, which
-  // has its own empty state explaining why the issue has no figures. Returning
-  // null there would swallow the very message the link promised.
-  if (activeTasks.length === 0 && pastTasks.length === 0 && !halted && !usageOpen) {
+  // No runs, no section.
+  if (activeTasks.length === 0 && pastTasks.length === 0 && !halted) {
     return null;
   }
 
@@ -270,9 +213,7 @@ export function ExecutionLogSection({ issueId, workspaceId, identifier, issueTit
         <IssueRunsTotal
           tasks={tasks}
           alone={activeTasks.length === 0}
-          // Through the same setter the dialog's own open-change uses, so the
-          // URL keeps up whichever door the reader came through.
-          onOpen={() => handleUsageOpenChange(true)}
+          onOpen={openRuns}
         />
         <button
           type="button"
@@ -348,20 +289,6 @@ export function ExecutionLogSection({ issueId, workspaceId, identifier, issueTit
         identifier={identifier ?? ""}
         issueTitle={issueTitle}
         tasks={tasks}
-      />
-      {/* The fork's Token cost view (DENE-420 lineage): the header total opens
-          it and `?usage=1` deep-links to it; the timeline above is upstream's
-          Runs view, opened from the sparkline and the "Open timeline" row. */}
-      <IssueUsageDialog
-        open={usageOpen}
-        onOpenChange={handleUsageOpenChange}
-        identifier={identifier ?? ""}
-        tasks={tasks}
-        isPending={tasksPending}
-        // A failed background refetch keeps the cached runs; only a load that
-        // left nothing to show is a failure worth replacing the view with.
-        isError={tasksFailed && tasks.length === 0}
-        onRetry={() => void refetchTasks()}
       />
     </div>
   );
@@ -642,7 +569,7 @@ export function IssueRunsTotal({
 }
 
 // Trigger description and status labels live in ./task-run-labels so the
-// usage dialog lists a run exactly the way this section does.
+// Runs dialog lists a run exactly the way this section does.
 
 // ─── Row visual config ─────────────────────────────────────────────────────
 

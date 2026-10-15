@@ -133,7 +133,7 @@ describe("useRealtimeSync — ws instance change", () => {
     // Awaited rather than counted synchronously: the inbox unread summary
     // refresh cancels any in-flight request before invalidating (see
     // onInboxSummaryInvalidate), so that one lands after the synchronous ones.
-    await waitFor(() => expect(invalidateSpy).toHaveBeenCalledTimes(31));
+    await waitFor(() => expect(invalidateSpy).toHaveBeenCalledTimes(32));
   });
 
   it("does not re-invalidate when rerendered with the same ws instance", () => {
@@ -316,7 +316,6 @@ describe("useRealtimeSync — ws instance change", () => {
     expect(calls).toContainEqual(["issues", "timeline"]);
     expect(calls).toContainEqual(["issues", "reactions"]);
     expect(calls).toContainEqual(["issues", "subscribers"]);
-    expect(calls).toContainEqual(["issues", "usage"]);
     expect(calls).toContainEqual(["issues", "attachments"]);
     expect(calls).toContainEqual(["issues", "tasks"]);
   });

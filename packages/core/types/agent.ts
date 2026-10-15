@@ -1324,51 +1324,6 @@ export interface SetAgentSkillsRequest {
   skill_ids: string[];
 }
 
-export interface IssueUsageSummary {
-  total_input_tokens: number;
-  total_output_tokens: number;
-  total_cache_read_tokens: number;
-  total_cache_write_tokens: number;
-  // Optional unlike the usage-row types: `getIssueUsage` returns this shape
-  // unvalidated (no zod schema), so nothing guarantees the field is present
-  // when the backend is older than the cost split.
-  cost_usd_ticks?: number;
-  uncosted_input_tokens?: number;
-  uncosted_output_tokens?: number;
-  uncosted_cache_read_tokens?: number;
-  uncosted_cache_write_tokens?: number;
-  // Coverage fields are optional for compatibility with older backends.
-  // task_count remains the legacy count of runs represented by usage rows.
-  terminal_task_count?: number;
-  metered_task_count?: number;
-  unreported_task_count?: number;
-  task_count: number;
-  runs?: IssueUsageRun[];
-  attribution_source_counts?: Record<string, number>;
-  trigger_evidence_kind_counts?: Record<string, number>;
-}
-
-export interface IssueUsageRun {
-  task_id: string;
-  provider?: string;
-  model: string;
-  input_tokens: number;
-  output_tokens: number;
-  cache_read_tokens: number;
-  cache_write_tokens: number;
-  cost_usd_ticks?: number;
-  num_turns?: number;
-  resumed?: boolean;
-  session_id?: string;
-  last_context_tokens?: number;
-  queue_to_claim_ms?: number;
-  prepare_ms?: number;
-  spawn_to_first_output_ms?: number;
-  total_ms?: number;
-  attribution_source?: string;
-  trigger_evidence_kind?: string;
-}
-
 // `cost_usd_ticks` + `uncosted_*`: the cost split every usage row carries.
 // All five are optional: a backend older than the split sends none of them,
 // and `undefined` has to stay distinguishable from a real 0 (see below).
@@ -1481,7 +1436,7 @@ export interface DashboardUsageByAgent {
 }
 
 // Per-(issue, model) token totals for the workspace dashboard's per-issue
-// cost list — the entry point into one issue's Token cost view.
+// cost list, each row linking to its issue.
 //
 // `identifier` and `title` ride along so the row can be rendered and linked
 // without an extra request per issue; the identifier is what the issue route

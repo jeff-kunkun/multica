@@ -11,84 +11,6 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-const getIssueUsageSummary = `-- name: GetIssueUsageSummary :one
-WITH usage AS (
-    SELECT
-        COALESCE(SUM(tu.input_tokens), 0)::bigint AS total_input_tokens,
-        COALESCE(SUM(tu.output_tokens), 0)::bigint AS total_output_tokens,
-        COALESCE(SUM(tu.cache_read_tokens), 0)::bigint AS total_cache_read_tokens,
-        COALESCE(SUM(tu.cache_write_tokens), 0)::bigint AS total_cache_write_tokens,
-        COALESCE(SUM(tu.cost_usd_ticks), 0)::bigint AS total_cost_usd_ticks,
-        COALESCE(SUM(tu.input_tokens)       FILTER (WHERE tu.cost_usd_ticks IS NULL), 0)::bigint AS uncosted_input_tokens,
-        COALESCE(SUM(tu.output_tokens)      FILTER (WHERE tu.cost_usd_ticks IS NULL), 0)::bigint AS uncosted_output_tokens,
-        COALESCE(SUM(tu.cache_read_tokens)  FILTER (WHERE tu.cost_usd_ticks IS NULL), 0)::bigint AS uncosted_cache_read_tokens,
-        COALESCE(SUM(tu.cache_write_tokens) FILTER (WHERE tu.cost_usd_ticks IS NULL), 0)::bigint AS uncosted_cache_write_tokens,
-        COUNT(DISTINCT tu.task_id)::int AS task_count
-    FROM task_usage tu
-    JOIN agent_task_queue atq ON atq.id = tu.task_id
-    WHERE atq.issue_id = $1
-), terminal_runs AS (
-    SELECT
-        COUNT(*)::int AS terminal_task_count,
-        COUNT(*) FILTER (WHERE EXISTS (
-            SELECT 1 FROM task_usage tu WHERE tu.task_id = atq.id
-        ))::int AS metered_task_count
-    FROM agent_task_queue atq
-    WHERE atq.issue_id = $1
-      AND atq.status IN ('completed', 'failed', 'cancelled')
-      AND atq.started_at IS NOT NULL
-      AND atq.completed_at IS NOT NULL
-)
-SELECT
-    usage.total_input_tokens, usage.total_output_tokens, usage.total_cache_read_tokens, usage.total_cache_write_tokens, usage.total_cost_usd_ticks, usage.uncosted_input_tokens, usage.uncosted_output_tokens, usage.uncosted_cache_read_tokens, usage.uncosted_cache_write_tokens, usage.task_count,
-    terminal_runs.terminal_task_count,
-    terminal_runs.metered_task_count,
-    (terminal_runs.terminal_task_count - terminal_runs.metered_task_count)::int AS unreported_task_count
-FROM usage
-CROSS JOIN terminal_runs
-`
-
-type GetIssueUsageSummaryRow struct {
-	TotalInputTokens         int64 `json:"total_input_tokens"`
-	TotalOutputTokens        int64 `json:"total_output_tokens"`
-	TotalCacheReadTokens     int64 `json:"total_cache_read_tokens"`
-	TotalCacheWriteTokens    int64 `json:"total_cache_write_tokens"`
-	TotalCostUsdTicks        int64 `json:"total_cost_usd_ticks"`
-	UncostedInputTokens      int64 `json:"uncosted_input_tokens"`
-	UncostedOutputTokens     int64 `json:"uncosted_output_tokens"`
-	UncostedCacheReadTokens  int64 `json:"uncosted_cache_read_tokens"`
-	UncostedCacheWriteTokens int64 `json:"uncosted_cache_write_tokens"`
-	TaskCount                int32 `json:"task_count"`
-	TerminalTaskCount        int32 `json:"terminal_task_count"`
-	MeteredTaskCount         int32 `json:"metered_task_count"`
-	UnreportedTaskCount      int32 `json:"unreported_task_count"`
-}
-
-// Keep the legacy usage aggregates intact, then report coverage over finite
-// terminal runs separately. A task_usage row is the durable evidence that a
-// run reported usage even when every token counter is legitimately zero.
-// Both passes use the existing issue_id / task_id indexes (migrations 035/032).
-func (q *Queries) GetIssueUsageSummary(ctx context.Context, issueID pgtype.UUID) (GetIssueUsageSummaryRow, error) {
-	row := q.db.QueryRow(ctx, getIssueUsageSummary, issueID)
-	var i GetIssueUsageSummaryRow
-	err := row.Scan(
-		&i.TotalInputTokens,
-		&i.TotalOutputTokens,
-		&i.TotalCacheReadTokens,
-		&i.TotalCacheWriteTokens,
-		&i.TotalCostUsdTicks,
-		&i.UncostedInputTokens,
-		&i.UncostedOutputTokens,
-		&i.UncostedCacheReadTokens,
-		&i.UncostedCacheWriteTokens,
-		&i.TaskCount,
-		&i.TerminalTaskCount,
-		&i.MeteredTaskCount,
-		&i.UnreportedTaskCount,
-	)
-	return i, err
-}
-
 const getTaskUsage = `-- name: GetTaskUsage :many
 SELECT id, task_id, provider, model, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, created_at, updated_at, cost_usd_ticks, num_turns, resumed, session_id, last_context_tokens, queue_to_claim_ms, prepare_ms, spawn_to_first_output_ms, total_ms FROM task_usage
 WHERE task_id = $1
@@ -702,8 +624,8 @@ type ListDashboardUsageByIssueRow struct {
 // (parseExactSinceParamInTZ) so this list covers the same span as the
 // by-agent card and the Cost / Tokens KPI tiles beside it.
 //
-// cost_usd_ticks / uncosted_* mirror GetIssueUsageSummary's split: the
-// provider's own charge plus the tokens from rows it did not price.
+// cost_usd_ticks / uncosted_* split the provider's own charge from the tokens
+// of rows it did not price.
 func (q *Queries) ListDashboardUsageByIssue(ctx context.Context, arg ListDashboardUsageByIssueParams) ([]ListDashboardUsageByIssueRow, error) {
 	rows, err := q.db.Query(ctx, listDashboardUsageByIssue, arg.WorkspaceID, arg.Since, arg.ProjectID)
 	if err != nil {
@@ -889,13 +811,12 @@ type ListIssueTaskUsageRow struct {
 }
 
 // Per-(task, provider, model) usage rows for every task on one issue — the
-// per-run half of GetIssueUsageSummary's issue-wide total.
+// execution log's per-run usage.
 //
 // The model dimension stays on the wire for the same reason the runtime and
 // dashboard usage rows keep it: cost is priced client-side from a per-model
 // rate table, and a row that has collapsed two models into one sum can no
-// longer be priced at all. The execution log sums the rows per task; the usage
-// panel shows them split.
+// longer be priced at all. The execution log sums the rows per task.
 //
 // Ordering is by task then model so the client can group by task_id in one
 // pass. Uses idx_agent_task_queue_issue_id (migration 035) + the task_usage

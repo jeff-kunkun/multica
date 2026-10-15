@@ -32,13 +32,12 @@ ORDER BY model;
 
 -- name: ListIssueTaskUsage :many
 -- Per-(task, provider, model) usage rows for every task on one issue — the
--- per-run half of GetIssueUsageSummary's issue-wide total.
+-- execution log's per-run usage.
 --
 -- The model dimension stays on the wire for the same reason the runtime and
 -- dashboard usage rows keep it: cost is priced client-side from a per-model
 -- rate table, and a row that has collapsed two models into one sum can no
--- longer be priced at all. The execution log sums the rows per task; the usage
--- panel shows them split.
+-- longer be priced at all. The execution log sums the rows per task.
 --
 -- Ordering is by task then model so the client can group by task_id in one
 -- pass. Uses idx_agent_task_queue_issue_id (migration 035) + the task_usage
@@ -94,46 +93,6 @@ JOIN agent_task_queue atq ON atq.id = tu.task_id
 WHERE atq.agent_id = sqlc.arg('agent_id')
   AND tu.task_id = ANY(sqlc.arg('task_ids')::uuid[])
 ORDER BY tu.task_id, tu.model;
-
--- name: GetIssueUsageSummary :one
--- Keep the legacy usage aggregates intact, then report coverage over finite
--- terminal runs separately. A task_usage row is the durable evidence that a
--- run reported usage even when every token counter is legitimately zero.
--- Both passes use the existing issue_id / task_id indexes (migrations 035/032).
-WITH usage AS (
-    SELECT
-        COALESCE(SUM(tu.input_tokens), 0)::bigint AS total_input_tokens,
-        COALESCE(SUM(tu.output_tokens), 0)::bigint AS total_output_tokens,
-        COALESCE(SUM(tu.cache_read_tokens), 0)::bigint AS total_cache_read_tokens,
-        COALESCE(SUM(tu.cache_write_tokens), 0)::bigint AS total_cache_write_tokens,
-        COALESCE(SUM(tu.cost_usd_ticks), 0)::bigint AS total_cost_usd_ticks,
-        COALESCE(SUM(tu.input_tokens)       FILTER (WHERE tu.cost_usd_ticks IS NULL), 0)::bigint AS uncosted_input_tokens,
-        COALESCE(SUM(tu.output_tokens)      FILTER (WHERE tu.cost_usd_ticks IS NULL), 0)::bigint AS uncosted_output_tokens,
-        COALESCE(SUM(tu.cache_read_tokens)  FILTER (WHERE tu.cost_usd_ticks IS NULL), 0)::bigint AS uncosted_cache_read_tokens,
-        COALESCE(SUM(tu.cache_write_tokens) FILTER (WHERE tu.cost_usd_ticks IS NULL), 0)::bigint AS uncosted_cache_write_tokens,
-        COUNT(DISTINCT tu.task_id)::int AS task_count
-    FROM task_usage tu
-    JOIN agent_task_queue atq ON atq.id = tu.task_id
-    WHERE atq.issue_id = $1
-), terminal_runs AS (
-    SELECT
-        COUNT(*)::int AS terminal_task_count,
-        COUNT(*) FILTER (WHERE EXISTS (
-            SELECT 1 FROM task_usage tu WHERE tu.task_id = atq.id
-        ))::int AS metered_task_count
-    FROM agent_task_queue atq
-    WHERE atq.issue_id = $1
-      AND atq.status IN ('completed', 'failed', 'cancelled')
-      AND atq.started_at IS NOT NULL
-      AND atq.completed_at IS NOT NULL
-)
-SELECT
-    usage.*,
-    terminal_runs.terminal_task_count,
-    terminal_runs.metered_task_count,
-    (terminal_runs.terminal_task_count - terminal_runs.metered_task_count)::int AS unreported_task_count
-FROM usage
-CROSS JOIN terminal_runs;
 
 -- name: ListDashboardUsageDaily :many
 -- Daily per-(date, provider, model) token aggregates for the workspace, served
@@ -232,8 +191,8 @@ ORDER BY agent_id, LOWER(provider), model;
 -- (parseExactSinceParamInTZ) so this list covers the same span as the
 -- by-agent card and the Cost / Tokens KPI tiles beside it.
 --
--- cost_usd_ticks / uncosted_* mirror GetIssueUsageSummary's split: the
--- provider's own charge plus the tokens from rows it did not price.
+-- cost_usd_ticks / uncosted_* split the provider's own charge from the tokens
+-- of rows it did not price.
 SELECT
     atq.issue_id,
     i.number,
