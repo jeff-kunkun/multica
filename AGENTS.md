@@ -164,3 +164,9 @@ wholesale, and delete removed features outright instead of hiding them.
 The two-way sync with the kun-line instance (`server/internal/mirror`, see
 `docs/kun-main/instance.md`) can be deleted as a whole; other changes need
 not accommodate it, and nothing outside it may depend on it.
+
+Browser
+- Office agents work on the "Office Agents" virtual display, in Kun's own Chrome, through the one CDP broker
+  (`~/.agents/vd/vd.mjs`); never connect to Chrome's DevTools port directly, raise a window or move the real mouse.
+  Only a page that needs Kun's own click may be brought to his screen, with a notification to Kun.
+  See `docs/kun-main/browser-background.md`.
