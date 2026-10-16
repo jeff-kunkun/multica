@@ -22,8 +22,6 @@ import (
 
 	"github.com/multica-ai/multica/server/internal/blockwait"
 	"github.com/multica-ai/multica/server/internal/cli"
-	"github.com/multica-ai/multica/server/internal/closeprotocol"
-	"github.com/multica-ai/multica/server/internal/projectmemory"
 	"github.com/multica-ai/multica/server/internal/titling"
 	"github.com/multica-ai/multica/server/internal/util"
 )
@@ -259,13 +257,8 @@ var issueChildrenCmd = &cobra.Command{
 	Use:     "children <id>",
 	Aliases: []string{"subissues"},
 	Short:   "List an issue's sub-issues grouped by stage",
-	Long: "List an issue's sub-issues grouped by stage. A sub-issue created after\n" +
-		"DENE-1537 delivers onto its parent's branch instead of opening its own PR;\n" +
-		"its delivery_line (JSON) or DELIVERY column (table) says whether its commits\n" +
-		"are merged back (merged, with commit_count), still open, or in conflict.\n" +
-		"`multica issue delivery <parent>` lists every sub-issue's commits.",
-	Args: exactArgs(1),
-	RunE: runIssueChildren,
+	Args:    exactArgs(1),
+	RunE:    runIssueChildren,
 }
 
 var issueCreateCmd = &cobra.Command{
@@ -338,8 +331,7 @@ var issueStatusCmd = &cobra.Command{
 		"Moving to blocked without --blocked-by / --wake-at / --wait-condition / --needs-human\n" +
 		"prints a warning: the platform cannot tell when to wake the issue. An agent must\n" +
 		"also pass --block-kind and --block-action (what the parent's blocker card shows);\n" +
-		"the server refuses the move without them. Prefer\n" +
-		"  multica issue close <id> --outcome blocked --blocked-by <DENE-N> --evidence-file ./close.md\n" +
+		"the server refuses the move without them.\n" +
 		"A blocked issue with no executor is seated by routing (parked, no run starts);\n" +
 		"the command reports whether that happened and, if not, why.",
 	Args: exactArgs(2),
@@ -361,22 +353,13 @@ var issueStatusBatchCmd = &cobra.Command{
 	RunE: runIssueStatusBatch,
 }
 
-var issueCloseCmd = &cobra.Command{
-	Use:   "close <id>",
-	Short: "Close out an issue in one call: evidence comment, status, close record",
-	Long:  issueCloseLong(),
-	Args:  exactArgs(1),
-	RunE:  runIssueClose,
-}
-
 var issueProgressCmd = &cobra.Command{
 	Use:   "progress <id> [text]",
 	Short: "Report or read the progress line under an issue's title",
 	Long: `Report where this issue stands — the second line under its title on the
 board, in the list and on the detail page. Report when the state changes,
-not on every step. A close summary also writes this line; between yours and
-a close, the latest wins. The parking summary only fills in while neither
-exists.
+not on every step. The parking summary only fills in while yours does not
+exist.
 
   multica issue progress DENE-12 "API done, wiring the settings page"
   multica issue progress DENE-12 "Waiting on the design review" --tone waiting
@@ -394,63 +377,6 @@ var issueTitleCmd = &cobra.Command{
 	Short: "Suggest a clearer issue title without applying it",
 	Args:  exactArgs(1),
 	RunE:  runIssueTitle,
-}
-
-func issueCloseLong() string {
-	return "One command for the close protocol. The server posts the evidence comment,\n" +
-		"writes the status and the close.* record in one transaction, and validates\n" +
-		"the record first — a close that is missing something is refused with the\n" +
-		"missing item named, and nothing is written.\n\n" +
-		"  --outcome done        delivered; without a GitHub App, gh squash-merges an open\n" +
-		"                        PR first when it is clean and checks are green. A sub-issue's\n" +
-		"                        parent stage is notified\n" +
-		"  --outcome in_review   delivered, awaiting acceptance (top-level issues only;\n" +
-		"                        routing hands the ticket to the acceptance seat, do not @ it)\n" +
-		"  --outcome blocked     needs one wait: --blocked-by / --wake-at /\n" +
-		"                        --wait-condition with --wait-timeout / --needs-human\n" +
-		"  --outcome cancelled   dropped on purpose; say why in --evidence\n" +
-		"  --outcome backlog     back to planning on purpose; --waiting-for says what it\n" +
-		"                        waits for (agents must), no PR needed, nobody is woken\n" +
-		"  --outcome todo        back to the ready list on purpose; say why in --evidence,\n" +
-		"                        no PR needed, nobody is woken\n" +
-		"  --outcome in_progress this round stops and the next one continues; --evidence\n" +
-		"                        says why, and one of --wake-at / --wait-condition with\n" +
-		"                        --wait-timeout / --blocked-by / --needs-human says who\n" +
-		"                        continues. The clock wait is patrolled, so the ticket\n" +
-		"                        comes back without anyone @-ing it\n" +
-		"  --verdict pass        acceptance seat only, with --outcome done: the platform\n" +
-		"                        merges the open PR and sets done, or blocks with the reason\n\n" +
-		"A sub-issue on its parent's delivery line (`delivery_line` in `issue get`) opens\n" +
-		"no PR: --outcome done, run in the sub-issue's working directory, merges its\n" +
-		"commits into the parent's branch and uses the commit list as evidence. A real\n" +
-		"conflict closes blocked with the files named; merge that branch into yours,\n" +
-		"resolve, and close done again. The parent opens the one PR, with Closes for\n" +
-		"every sub-issue, and --verdict pass on such a sub-issue is refused.\n\n" +
-		"--evidence is mandatory (PR link, test conclusion). Agent-authored bodies should\n" +
-		"use --evidence-file <path> inside the working directory. --pr <url> registers that\n" +
-		"pull or merge request with the close; an unverifiable link still closes and is\n" +
-		"marked 未核实. The response says what\n" +
-		"was actually written: the status, whether a PR merged, and who gets woken.\n" +
-		"The server owns the outcome table and every refusal; the CLI relays the\n" +
-		"server's reason as-is, and asks it first before any local merge.\n" +
-		"The old path (`issue status` + `comment add`) keeps working.\n\n" +
-		"Every close records a knowledge audit in that same transaction, including a\n" +
-		"ticket with no pull request. --knowledge-none declares that nothing qualified\n" +
-		"for project memory. Repeat --knowledge <key>=<summary> for each checklist slot\n" +
-		"this close wrote. Keys: " + strings.Join(projectmemory.LocationKeys(), ", ") + ".\n" +
-		"On done/in_review the written slots must ship with this delivery: commit the\n" +
-		"files on this branch first. The CLI sends the paths git says it changes\n" +
-		"(against the parent's delivery branch, else the nearest main line) and the\n" +
-		"server refuses a slot no delivered file writes.\n\n" +
-		"--summary is the round's conclusion (结论) — what got done, or where it is\n" +
-		"stuck and who must do what; proof goes in --evidence.\n\n" +
-		"Acceptance seat: pass with --outcome done --verdict pass when the checks this\n" +
-		"change owns are green and no named person still owes a decision\n" +
-		"(close.conclusion=awaiting_human). A check already red on the base branch is\n" +
-		"not such a wait: merge with `gh pr merge --squash <url>` and pass again. A\n" +
-		"failing ticket is not a close: `multica issue comment add <id> --verdict hold\n" +
-		"--content-file ./review.md` wakes the executor. Words like 通过 in a body are\n" +
-		"not a verdict, and a passed ticket is never left in_review for a person."
 }
 
 var issueDisposeCmd = &cobra.Command{
@@ -481,7 +407,7 @@ var issueHandoffCmd = &cobra.Command{
 		"  --to reviewer     the acceptance seat; refused if a person holds the seat\n" +
 		"  --to dispatcher   let routing pick the next owner\n" +
 		"  --to <agent>      a named agent (name or id)\n\n" +
-		"A close already hands over what it closes: `issue close --outcome in_review`\n" +
+		"Setting in_review already hands over: `multica issue status <id> in_review`\n" +
 		"routes the acceptance seat itself. The response reports target_name,\n" +
 		"run_created and duplicate — quote them, do not restate them from memory.",
 	Args: exactArgs(1),
@@ -821,7 +747,6 @@ func init() {
 	issueCmd.AddCommand(issueAssignCmd)
 	issueCmd.AddCommand(issueStatusCmd)
 	issueCmd.AddCommand(issueStatusBatchCmd)
-	issueCmd.AddCommand(issueCloseCmd)
 	issueCmd.AddCommand(issueProgressCmd)
 	issueCmd.AddCommand(issueTitleCmd)
 	issueCmd.AddCommand(issueHandoffCmd)
@@ -929,7 +854,6 @@ func init() {
 	issueUpdateCmd.Flags().Float64("position", 0, "Ordering position within the board column (lower sorts first); prefer `issue reorder` for relative moves")
 	issueUpdateCmd.Flags().Bool("no-start", false, "Apply the update without starting an agent run")
 	issueUpdateCmd.Flags().String("waiting-for", "", "What this backlog issue is waiting for, one line (80 chars max). Required when an agent puts an issue in backlog; nothing to wait for means use todo")
-	issueUpdateCmd.Flags().String("no-code", "", "Why this issue has no PR the platform can see: docs or research, or code merged outside GitHub (give the MR link). An agent moving an issue to in_review without a linked open/merged PR is refused unless this is given")
 	issueUpdateCmd.Flags().String("duplicate-of", "", "Mark the issue as a duplicate of this original issue (key like MUL-123, or full UUID) and cancel it; --status, if given, must be cancelled, and description/attachment changes must go in a separate update")
 	issueUpdateCmd.Flags().String("output", "json", "Output format: table or json")
 
@@ -947,10 +871,8 @@ func init() {
 	issueStatusCmd.Flags().String("block-kind", "", "Kind of stop for blocked: decision, permission, external, dependency or capacity (required for agents)")
 	issueStatusCmd.Flags().String("block-action", "", "One-line next step for blocked, at most 80 characters (required for agents)")
 	issueStatusCmd.Flags().String("waiting-for", "", "What this backlog issue is waiting for, one line (80 chars max). Required when an agent puts an issue in backlog; nothing to wait for means use todo")
-	registerIssueCloseFlags(issueCloseCmd)
 	registerIssueHandoffFlags(issueHandoffCmd)
 	registerIssueDisposeFlags(issueDisposeCmd)
-	issueStatusCmd.Flags().String("no-code", "", "Why this issue has no PR the platform can see: docs or research, or code merged outside GitHub (give the MR link). An agent moving an issue to in_review without a linked open/merged PR is refused unless this is given")
 	issueStatusBatchCmd.Flags().Bool("no-start", false, "Change status without starting agent runs")
 	issueStatusBatchCmd.Flags().String("waiting-for", "", "What this backlog issue is waiting for, one line (80 chars max). Required when an agent puts an issue in backlog; nothing to wait for means use todo")
 	issueStatusBatchCmd.Flags().String("output", "table", "Output format: table or json")
@@ -1004,7 +926,7 @@ func init() {
 	issueCommentAddCmd.Flags().String("content-file", "", "Read comment content from a UTF-8 file (preserves multi-line content verbatim; use this on Windows when stdin piping mangles non-ASCII bytes). Allowed: current working directory or your own regular files in the system temp directory (/tmp, $TMPDIR); other paths require --allow-external-file.")
 	issueCommentAddCmd.Flags().Bool("allow-external-file", false, "Allow --content-file / --attachment to read a path outside the current working directory. Off by default so a stale file from another run/environment can't be picked up (MUL-4252).")
 	issueCommentAddCmd.Flags().String("parent", "", "Parent comment ID to reply under. A comment-triggered agent run must reply under its trigger comment; omitting --parent to post a top-level comment is rejected")
-	issueCommentAddCmd.Flags().String("verdict", "", "Acceptance verdict written as its own line: pass or hold. This is what merges and closes; the words 通过 in the body do not")
+	issueCommentAddCmd.Flags().String("verdict", "", "Acceptance verdict written as its own line: pass or hold. This is what closes the issue; the words 通过 in the body do not")
 	issueCommentAddCmd.Flags().StringSlice("attachment", nil, "File path(s) to attach (can be specified multiple times). Non-image files, HTML included, show as file cards that open in the viewer; to render a chart inside the comment, put a ```html or ```mermaid block in the content instead")
 	issueCommentAddCmd.Flags().String("output", "json", "Output format: table or json")
 	issueCommentAddCmd.Flags().String("per-quote", "", "Exact words from this caller’s earlier human comment on this issue; the server verifies it before exempting the wake from the Bot chain limit")
@@ -1568,7 +1490,7 @@ func runIssueChildren(cmd *cobra.Command, args []string) error {
 	output, _ := cmd.Flags().GetString("output")
 	if output == "table" {
 		actors := loadActorDisplayLookup(ctx, client)
-		headers := []string{"STAGE", "KEY", "TITLE", "STATUS", "PRIORITY", "ASSIGNEE", "DRIVER", "DELIVERY"}
+		headers := []string{"STAGE", "KEY", "TITLE", "STATUS", "PRIORITY", "ASSIGNEE", "DRIVER"}
 		rows := make([][]string, 0, len(children))
 		for _, c := range children {
 			stageCell := "-"
@@ -1583,7 +1505,6 @@ func runIssueChildren(cmd *cobra.Command, args []string) error {
 				strVal(c, "priority"),
 				formatAssignee(c, actors),
 				driverCell(c),
-				deliveryLineCell(c),
 			})
 		}
 		cli.PrintTable(os.Stdout, headers, rows)
@@ -1624,28 +1545,6 @@ func runIssueChildren(cmd *cobra.Command, args []string) error {
 		"stages":   stages,
 		"unstaged": unstaged,
 	})
-}
-
-// deliveryLineCell summarizes a child that delivers onto its parent's branch
-// (DENE-1537): merged with its commit count, open, or in conflict.
-func deliveryLineCell(c map[string]any) string {
-	line, ok := c["delivery_line"].(map[string]any)
-	if !ok {
-		return "-"
-	}
-	status := strVal(line, "status")
-	if status == "merged" {
-		if n, ok := line["commit_count"].(float64); ok {
-			return fmt.Sprintf("父票分支 · %d 提交", int(n))
-		}
-	}
-	switch status {
-	case "conflict":
-		return "父票分支 · 冲突"
-	case "merged":
-		return "父票分支 · 已并回"
-	}
-	return "父票分支 · 未并回"
 }
 
 // isTerminalChildIssue reports whether a child issue counts as finished for
@@ -2154,9 +2053,6 @@ func runIssueUpdate(cmd *cobra.Command, args []string) error {
 	if statusChanged {
 		body["status"] = statusFlag
 	}
-	if v, _ := cmd.Flags().GetString("no-code"); v != "" {
-		body["no_code_reason"] = v
-	}
 	if v, _ := cmd.Flags().GetString("waiting-for"); strings.TrimSpace(v) != "" {
 		body["waiting_for"] = v
 	}
@@ -2452,17 +2348,12 @@ func runIssueStatus(cmd *cobra.Command, args []string) error {
 		{"needs-human", "needs_human"},
 		{"block-kind", "block_kind"},
 		{"block-action", "block_action"},
-		{"no-code", "no_code_reason"},
 		{"waiting-for", "waiting_for"},
 	} {
 		if v, _ := cmd.Flags().GetString(pair.flag); v != "" {
 			body[pair.key] = v
 		}
 	}
-	if status == "in_review" || status == "done" {
-		refreshIssuePullRequests(ctx, client, issueRef.ID, issueRef.Display, false, false)
-	}
-
 	var result map[string]any
 	if err := client.PutJSON(ctx, "/api/issues/"+issueRef.ID, body, &result); err != nil {
 		return fmt.Errorf("update status: %w", err)
@@ -2562,198 +2453,10 @@ func runIssueStatusBatch(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-// registerIssueCloseFlags wires `issue close`; shared with its tests so they
-// exercise the flag set that ships.
-func registerIssueCloseFlags(cmd *cobra.Command) {
-	cmd.Flags().String("outcome", "", "Close outcome: done, in_review, blocked, cancelled, backlog, todo, or in_progress (required; see --help for what each one needs)")
-	cmd.Flags().String("evidence", "", "Evidence body: PR link, test conclusion (decodes \\n; prefer --evidence-file for multi-line)")
-	cmd.Flags().Bool("evidence-stdin", false, "Read the evidence body from stdin")
-	cmd.Flags().String("evidence-file", "", "Read the evidence body from a UTF-8 file inside the working directory")
-	cmd.Flags().Bool("allow-external-file", false, "Allow --evidence-file to read a path outside the current working directory")
-	cmd.Flags().String("waiting-for", "", "With --outcome backlog: what the issue waits for, one line (80 chars max; required for agents)")
-	cmd.Flags().String("summary", "", "One-line conclusion (结论): what got done, or where it is stuck and who must do what. Placed above the evidence; proof goes in --evidence. Shown as the state card's 上一棒交代; for blocked it is the close.block_action (80 chars max)")
-	cmd.Flags().String("parent", "", "Comment ID to reply under; a comment-triggered run defaults to its trigger comment")
-	cmd.Flags().String("blocked-by", "", "Comma-separated issue identifiers this blocked issue is waiting on; on --outcome in_progress it says who continues")
-	cmd.Flags().String("wake-at", "", "RFC3339 time to wake a blocked issue for another look; on --outcome in_progress the patrol wakes the executor then")
-	cmd.Flags().String("wait-condition", "", "External condition a blocked issue is waiting on; on --outcome in_progress it is the condition for the next round")
-	cmd.Flags().String("wait-probe", "", "How to check the wait condition")
-	cmd.Flags().String("wait-timeout", "", "RFC3339 deadline for the wait condition")
-	cmd.Flags().String("needs-human", "", "Member UUID whose decision or acceptance the issue waits on; on --outcome in_progress this person continues it")
-	cmd.Flags().String("no-code", "", "Why this issue has no PR the platform can see: docs or research, or code merged outside GitHub (give the MR link). An agent's --outcome in_review without a linked open/merged PR is refused unless this is given")
-	cmd.Flags().String("verdict", "", "Acceptance verdict, reviewer only: pass (merges and closes)")
-	cmd.Flags().String("pr", "", "Pull or merge request URL to register with this close. A verified link is stored; an unverifiable link still closes and is marked 未核实")
-	cmd.Flags().Bool("knowledge-none", false, "Declare this close wrote no qualified project memory")
-	cmd.Flags().StringArray("knowledge", nil, "Project-memory change as <key>[:<action>[:<entry>]]=<summary>; action is new, update, merge or supersede (required on a boss-layer sediment round); repeat for each change")
-	cmd.Flags().String("output", "json", "Output format: table or json")
-}
-
 // registerIssueHandoffFlags wires `issue handoff`; shared with its tests.
 func registerIssueHandoffFlags(cmd *cobra.Command) {
 	cmd.Flags().String("to", "", "reviewer, dispatcher, or an agent name/id (required)")
 	cmd.Flags().String("output", "table", "Output format: table or json")
-}
-
-func runIssueClose(cmd *cobra.Command, args []string) error {
-	// The outcome table and every request-shape refusal live on the server
-	// (DENE-1183): the CLI forwards what it was given and relays the refusal,
-	// so a CLI from an older desktop build never disagrees with the server.
-	outcome, _ := cmd.Flags().GetString("outcome")
-	outcome = strings.ToLower(strings.TrimSpace(outcome))
-	evidence, _, err := resolveTextFlag(cmd, "evidence")
-	if err != nil {
-		return err
-	}
-	if err := guardLocalPathLinks(evidence, "evidence",
-		"Deliver the file itself with `multica issue comment add <issue-id> --attachment <path>` and drop the link."); err != nil {
-		return err
-	}
-	verdict, _ := cmd.Flags().GetString("verdict")
-	verdict = strings.ToLower(strings.TrimSpace(verdict))
-	audit := knowledgeAuditFromFlags(cmd)
-
-	client, err := newAPIClient(cmd)
-	if err != nil {
-		return err
-	}
-	ctx, cancel := cli.APIContext(context.Background())
-	defer cancel()
-
-	issueRef, err := resolveIssueRef(ctx, client, args[0])
-	if err != nil {
-		return fmt.Errorf("resolve issue: %w", err)
-	}
-
-	body := map[string]any{"outcome": outcome, "evidence": evidence, "knowledge_audit": audit}
-	for _, pair := range []struct{ flag, key string }{
-		{"summary", "summary"},
-		{"parent", "parent_id"},
-		{"blocked-by", "blocked_by"},
-		{"wake-at", "wake_at"},
-		{"wait-condition", "wait_condition"},
-		{"wait-probe", "wait_probe"},
-		{"wait-timeout", "wait_timeout"},
-		{"needs-human", "needs_human"},
-		{"no-code", "no_code_reason"},
-		{"pr", "pr_url"},
-		{"waiting-for", "waiting_for"},
-	} {
-		if v, _ := cmd.Flags().GetString(pair.flag); strings.TrimSpace(v) != "" {
-			body[pair.key] = v
-		}
-	}
-	if verdict != "" {
-		body["verdict"] = verdict
-	}
-	if closeprotocol.KnowledgeMustShip(outcome, verdict) {
-		// The knowledge the audit claims has to ship with this delivery
-		// (DENE-1661): send what git says it changes, the server matches.
-		// The memory files it touches go along whatever the audit says, so
-		// the server can hold the map files to their size limit (DENE-1680).
-		files, memory := closeDeliveredFiles(ctx, client, issueRef.ID)
-		if files != nil && len(audit.Changes) > 0 {
-			body["delivered_files"] = *files
-		}
-		if memory != nil {
-			body["memory_files"] = *memory
-		}
-	}
-	if outcome == "done" || outcome == "in_review" {
-		// The PR refresh below can merge locally, which cannot be undone.
-		// Ask the server's shape gate first so a close it would refuse
-		// never merges anything.
-		if err := preflightIssueClose(ctx, client, issueRef.ID, body); err != nil {
-			return fmt.Errorf("close issue: %w", err)
-		}
-	}
-	// A sub-issue on its parent's line (DENE-1537) delivers by merging its
-	// commits into the parent's branch, not through a PR of its own. The
-	// merge runs after the shape check above so a refused close moves
-	// nothing, and the server records what it did.
-	onLine := false
-	if outcome == "done" && verdict == "" {
-		merge, err := mergeIntoParentLine(ctx, client, issueRef.ID)
-		if err != nil {
-			return fmt.Errorf("close issue: %w", err)
-		}
-		if merge != nil {
-			onLine = true
-			body["delivery_merge"] = merge
-		}
-	}
-	declaredPR, _ := cmd.Flags().GetString("pr")
-	if strings.TrimSpace(declaredPR) == "" && !onLine {
-		declaredPR = pullURLFromText(evidence)
-	}
-	// A PR whose checks are still running is waited out here (DENE-1219):
-	// the server answers close_checks_pending and changes nothing, so the
-	// CLI refreshes the PR snapshot and asks again until CI settles or the
-	// wait runs out. Every other answer is final for this call.
-	var result map[string]any
-	deadline := closeNow().Add(closeWaitLimit)
-	for {
-		result, err = postIssueClose(client, issueRef, body, outcome, verdict, declaredPR, !onLine)
-		if err == nil {
-			break
-		}
-		if !isCloseChecksPending(err) {
-			return fmt.Errorf("close issue: %w", err)
-		}
-		if !closeNow().Add(closeWaitInterval).Before(deadline) {
-			return fmt.Errorf("close issue: PR 的检查等了 %s 还没跑完，票没动。CI 出结果后再执行一次同样的 close：%w", closeWaitLimit, err)
-		}
-		fmt.Fprintf(os.Stderr, "PR 的检查还在跑，%s 后再试（最多等 %s）…\n", closeWaitInterval, closeWaitLimit)
-		closeSleep(closeWaitInterval)
-	}
-
-	status, _ := result["status"].(string)
-	fmt.Fprintf(os.Stderr, "Issue %s closed: status %s", issueRef.Display, status)
-	if merged, _ := result["merged"].(bool); merged {
-		fmt.Fprint(os.Stderr, ", PR merged")
-	}
-	fmt.Fprintln(os.Stderr, ".")
-	if woken, ok := result["woken"].([]any); ok {
-		for _, line := range woken {
-			fmt.Fprintf(os.Stderr, "  - %v\n", line)
-		}
-	}
-	if warnings, ok := result["warnings"].([]any); ok {
-		for _, line := range warnings {
-			fmt.Fprintf(os.Stderr, "  ! %v\n", line)
-		}
-	}
-	output, _ := cmd.Flags().GetString("output")
-	if output == "table" {
-		return nil
-	}
-	return cli.PrintJSON(os.Stdout, result)
-}
-
-var (
-	closeWaitInterval = 30 * time.Second
-	closeWaitLimit    = 15 * time.Minute
-	closeSleep        = time.Sleep
-	closeNow          = time.Now
-)
-
-// postIssueClose refreshes the issue's PR snapshot and sends one close. Each
-// attempt gets its own request deadline, since the checks wait spans many.
-func postIssueClose(client *cli.APIClient, issueRef resolvedID, body map[string]any, outcome, verdict, declaredPR string, refreshPRs bool) (map[string]any, error) {
-	ctx, cancel := cli.APIContext(context.Background())
-	defer cancel()
-	if refreshPRs && (outcome == "done" || outcome == "in_review") {
-		refreshIssuePullRequestsWithURL(ctx, client, issueRef.ID, issueRef.Display, declaredPR, outcome == "done" && verdict == "pass", outcome == "done" && verdict == "")
-	}
-	var result map[string]any
-	err := client.PostJSON(ctx, "/api/issues/"+issueRef.ID+"/close", body, &result)
-	return result, err
-}
-
-// isCloseChecksPending reports the server's "checks still running" refusal,
-// the one close answer the CLI waits out instead of relaying.
-func isCloseChecksPending(err error) bool {
-	var httpErr *cli.HTTPError
-	return errors.As(err, &httpErr) && httpErr.StatusCode == http.StatusConflict &&
-		strings.Contains(httpErr.Body, `"code":"close_checks_pending"`)
 }
 
 func runIssueProgress(cmd *cobra.Command, args []string) error {
@@ -2795,47 +2498,6 @@ func runIssueTitle(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 	return cli.PrintJSON(os.Stdout, result)
-}
-
-// knowledgeAuditFromFlags builds the close body's knowledge_audit as given.
-// Whether it is acceptable is the server's call (DENE-1183).
-func knowledgeAuditFromFlags(cmd *cobra.Command) closeprotocol.KnowledgeAudit {
-	none, _ := cmd.Flags().GetBool("knowledge-none")
-	items, _ := cmd.Flags().GetStringArray("knowledge")
-	audit := closeprotocol.KnowledgeAudit{None: none}
-	for _, item := range items {
-		audit.Changes = append(audit.Changes, parseKnowledgeItem(item))
-	}
-	return audit
-}
-
-// parseKnowledgeItem reads one --knowledge value:
-// <location>[:<action>[:<entry>]]=<summary>. The action says what the change
-// does to the entries already there (DENE-1680); the server checks it.
-func parseKnowledgeItem(item string) closeprotocol.KnowledgeChange {
-	key, summary, _ := strings.Cut(item, "=")
-	parts := strings.SplitN(key, ":", 3)
-	change := closeprotocol.KnowledgeChange{Location: parts[0], Summary: summary}
-	if len(parts) > 1 {
-		change.Action = parts[1]
-	}
-	if len(parts) > 2 {
-		change.Entry = parts[2]
-	}
-	return change
-}
-
-// preflightIssueClose asks the server's read-only close shape gate. A server
-// that predates the endpoint answers 404/405; the close itself still runs
-// every check, so the preflight is skipped rather than failing the close.
-func preflightIssueClose(ctx context.Context, client *cli.APIClient, issueID string, body map[string]any) error {
-	var ignored map[string]any
-	err := client.PostJSON(ctx, "/api/issues/"+issueID+"/close/check", body, &ignored)
-	var httpErr *cli.HTTPError
-	if errors.As(err, &httpErr) && (httpErr.StatusCode == http.StatusNotFound || httpErr.StatusCode == http.StatusMethodNotAllowed) {
-		return nil
-	}
-	return err
 }
 
 // duplicateOfFlag returns the --duplicate-of reference, or "" when the flag is

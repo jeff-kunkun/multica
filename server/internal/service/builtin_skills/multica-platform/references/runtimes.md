@@ -144,8 +144,7 @@ ref by default for the current task; an explicit
 `repo checkout <url> --ref <branch-or-sha>` overrides it.
 
 When an issue is blocked on a condition that can be checked by one command, put
-that command in the same `multica issue close ... --outcome blocked` (or
-`issue status ... blocked`) call with `--wait-condition`, `--wait-probe`, and
+that command in the same `multica issue status ... blocked` call with `--wait-condition`, `--wait-probe`, and
 `--wait-timeout`. The daemon runs the probe in the ticket's last known workdir
 every few minutes and reports only its result to the server. Exit code `0`
 means ready, exit code `10` (or GitHub CLI's `gh pr checks` exit code `8`) means

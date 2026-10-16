@@ -30,10 +30,7 @@ type Receipt struct {
 	Summary    string `json:"summary,omitempty"`
 	ClosedAt   string `json:"closed_at,omitempty"`
 	PRs        []PR   `json:"pull_requests"`
-	// Knowledge is the close's knowledge audit in one line; empty when the
-	// close recorded none.
-	Knowledge string `json:"knowledge,omitempty"`
-	UpdatedAt string `json:"updated_at"`
+	UpdatedAt  string `json:"updated_at"`
 	// Children are the sub-tasks' receipts (DENE-1679): a parent reports for
 	// its children, so its card carries their conclusions.
 	Children []Receipt `json:"children,omitempty"`
@@ -116,9 +113,6 @@ func (r Receipt) Markdown() string {
 		}
 		fmt.Fprintf(&b, "\n\nPR：%s", strings.Join(labels, "，"))
 	}
-	if r.Knowledge != "" {
-		fmt.Fprintf(&b, "\n\n沉淀：%s", r.Knowledge)
-	}
 	if d := Digest(r.Children); d != "" {
 		b.WriteString("\n\n" + d)
 	}
@@ -126,7 +120,7 @@ func (r Receipt) Markdown() string {
 }
 
 // Item is a sub-task's receipt as one markdown list item: the issue chip,
-// status, conclusion, pull requests and knowledge on one line.
+// status, conclusion and pull requests on one line.
 func (r Receipt) Item() string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "- [%s](mention://issue/%s) %s", r.Identifier, r.IssueID, StatusLabel(r.Status))
@@ -139,9 +133,6 @@ func (r Receipt) Item() string {
 			labels = append(labels, prLabel(p))
 		}
 		fmt.Fprintf(&b, "；PR %s", strings.Join(labels, "，"))
-	}
-	if r.Knowledge != "" {
-		fmt.Fprintf(&b, "；沉淀 %s", Clip(r.Knowledge, 120))
 	}
 	return b.String()
 }

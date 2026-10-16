@@ -5,10 +5,9 @@ import { useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle, Circle, CircleDot } from "lucide-react";
 import type { Issue } from "@multica/core/types";
 import {
-  closeProtocolWaitingOn,
+  closeWaitingOn,
   deriveBlockerTree,
   orderBlockerRootCauses,
-  readCloseProtocol,
   type BlockerState,
   type BlockerTreeNode,
   type BlockerTreeResult,
@@ -89,7 +88,7 @@ export function useSubIssueBlockerData(
   const waitingIds = useMemo(() => {
     const result = new Set<string>();
     for (const item of allKnown.values()) {
-      const waitingOn = closeProtocolWaitingOn(readCloseProtocol(item.metadata, item.status).waitingOn);
+      const waitingOn = closeWaitingOn(item.metadata);
       // `close.waiting_on` is free-form metadata; only identifier-shaped values
       // can resolve, and issueIdentifierOptions expects the caller to gate.
       if (waitingOn && isIssueIdentifier(waitingOn) && !allKnown.has(waitingOn)) result.add(waitingOn);

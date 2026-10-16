@@ -1,5 +1,4 @@
-import type { Issue } from "../types";
-import { closeProtocolWaitingOn, readCloseProtocol, type CloseProtocolView } from "./close-protocol";
+import type { Issue, IssueMetadata } from "../types";
 
 export type BlockerState = "ROOT" | "PROPAGATED" | "CLEAR";
 
@@ -81,6 +80,59 @@ function lookupIssue(options: BlockerTreeOptions, identifier: string): Issue | u
   return (source as Record<string, Issue | undefined>)[identifier];
 }
 
+/**
+ * The `close.*` issue-metadata keys this module reads. The server's block-wait
+ * and waiting-on features write them; values are primitives on the wire.
+ */
+interface CloseMetadata {
+  conclusion: string | null;
+  /** True when `close.status` is present and differs from `issue.status`. */
+  statusDrift: boolean;
+  nextOwnerType: string | null;
+  nextOwnerId: string | null;
+  /** Non-empty `close.waiting_on` after trimming. */
+  waitingOn: string | null;
+  at: string | null;
+  blockKind: string | null;
+  blockAction: string | null;
+  /**
+   * True when `close.superseded` names this record's `close.at`: a person
+   * answered and the executor was woken, so the record no longer describes
+   * the ticket (DENE-1301).
+   */
+  superseded: boolean;
+}
+
+function metaString(metadata: IssueMetadata | null | undefined, key: string): string | null {
+  const value = metadata?.[key];
+  if (typeof value === "string") return value;
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  return null;
+}
+
+/** The ticket `close.waiting_on` names, or null when it waits on nothing. */
+export function closeWaitingOn(metadata: IssueMetadata | null | undefined): string | null {
+  return metaString(metadata, "close.waiting_on")?.trim() || null;
+}
+
+function readCloseMetadata(issue: Issue): CloseMetadata {
+  const { metadata } = issue;
+  const closeStatus = metaString(metadata, "close.status");
+  const at = metaString(metadata, "close.at");
+  const atKey = at?.trim();
+  return {
+    conclusion: metaString(metadata, "close.conclusion"),
+    statusDrift: closeStatus !== null && closeStatus !== issue.status,
+    nextOwnerType: metaString(metadata, "close.next_owner_type"),
+    nextOwnerId: metaString(metadata, "close.next_owner_id"),
+    waitingOn: closeWaitingOn(metadata),
+    at,
+    blockKind: metaString(metadata, "close.block_kind"),
+    blockAction: metaString(metadata, "close.block_action"),
+    superseded: !!atKey && metaString(metadata, "close.superseded")?.trim() === atKey,
+  };
+}
+
 function ref(issue: Issue): BlockerIssueRef {
   return { id: issue.id, identifier: issue.identifier };
 }
@@ -98,7 +150,7 @@ function hasActiveRun(options: BlockerTreeOptions, issue: Issue): boolean {
 
 function reviewOverdue(issue: Issue, options: BlockerTreeOptions, now: number): boolean {
   if (issue.status !== "in_review" || hasActiveRun(options, issue)) return false;
-  const close = readCloseProtocol(issue.metadata, issue.status);
+  const close = readCloseMetadata(issue);
   if (!close.at) return false;
   const at = Date.parse(close.at);
   if (!Number.isFinite(at)) return false;
@@ -110,7 +162,7 @@ function reviewOverdue(issue: Issue, options: BlockerTreeOptions, now: number): 
  * Whether the close record still describes the ticket: it matches the
  * current status and no reply has superseded it (DENE-1301).
  */
-function closeRecordCurrent(close: CloseProtocolView): boolean {
+function closeRecordCurrent(close: CloseMetadata): boolean {
   return !close.statusDrift && !close.superseded;
 }
 
@@ -119,7 +171,7 @@ function closeRecordCurrent(close: CloseProtocolView): boolean {
  * record that still describes it. A blocked close a person already answered
  * (superseded, or the status moved on) is history, not a blocker.
  */
-function isBlockedNow(issue: Issue, close: CloseProtocolView): boolean {
+function isBlockedNow(issue: Issue, close: CloseMetadata): boolean {
   return issue.status === "blocked" || (close.conclusion === "blocked" && closeRecordCurrent(close));
 }
 
@@ -146,7 +198,7 @@ function wakeMissedOn(issue: Issue, target: Issue, waiting: string, options: Blo
 }
 
 /** §3.3 / §3.4 "needs you": a member owner, or a decision/permission kind. */
-function attributionNeedsUserAction(issue: Issue, close: CloseProtocolView, overdue: boolean): boolean {
+function attributionNeedsUserAction(issue: Issue, close: CloseMetadata, overdue: boolean): boolean {
   if (overdue) return close.nextOwnerType === "member";
   if (!isBlockedNow(issue, close)) return false;
   return (closeRecordCurrent(close) && close.nextOwnerType === "member") ||
@@ -182,8 +234,8 @@ export function deriveBlockerTree(
     }
     const existing = nodes.get(issue.id);
     if (existing) return existing;
-    const close = readCloseProtocol(issue.metadata, issue.status);
-    const waiting = closeProtocolWaitingOn(close.waitingOn);
+    const close = readCloseMetadata(issue);
+    const waiting = close.waitingOn;
     const waitingIssue = waiting ? lookupIssue(options, waiting) : undefined;
     // §3.4 precedence, first hit wins: a wait whose target already finished is
     // a wake_missed blocker, then a review nobody picked up, then a recorded

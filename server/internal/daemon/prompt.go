@@ -73,7 +73,7 @@ func perTurnContextBlocks(task Task, opts promptOpts) string {
 	b.WriteString(buildReplaySkippedBlock(opts.replaySkippedNotice))
 	b.WriteString(buildInterruptedWorkBlock(opts.interruptedWorkNotice))
 	b.WriteString(buildStaleLocalBaselineBlock(opts.staleLocalBaselineNotice))
-	b.WriteString(buildDeliveryBranchBlock(opts.deliveryBranch, opts.deliveryUpstream, task.DeliveryLine))
+	b.WriteString(buildDeliveryBranchBlock(opts.deliveryBranch, opts.deliveryUpstream))
 	b.WriteString(buildDependencyInstallBlock(opts.dependencyInstallCommand))
 	b.WriteString(buildSparseCheckoutBlock(task.CheckoutPaths))
 	if task.PriorSessionResumeUnavailable {
@@ -242,16 +242,9 @@ func WithDeliveryBranch(branch, upstream string) PromptOption {
 	}
 }
 
-func buildDeliveryBranchBlock(branch, upstream string, line *DeliveryLine) string {
+func buildDeliveryBranchBlock(branch, upstream string) string {
 	if branch == "" {
 		return ""
-	}
-	if line != nil && strings.TrimSpace(line.Branch) != "" {
-		return "## Your delivery branch\n\n" +
-			"You are on `" + branch + "`. This sub-issue delivers onto its parent " + line.OwnerIdentifier + "'s branch `" + line.Branch + "`, " +
-			"which ships as the parent's one PR. Commit your work here; do not push, open a PR, or switch branches. " +
-			"`multica issue close --outcome done` merges your commits into `" + line.Branch + "` and records them as the evidence; " +
-			"a conflict closes the sub-issue blocked with the conflicting files. To pick up a sibling's newer work, run `git merge " + line.Branch + "`.\n\n"
 	}
 	target := "origin/<main branch>"
 	if upstream != "" {

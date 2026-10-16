@@ -36,17 +36,20 @@ func (h *Handler) issueReceipt(ctx context.Context, issue db.Issue, prefix strin
 		r.Conclusion = meta[closeprotocol.KeyConclusion]
 		r.ClosedAt = strings.TrimSpace(meta[closeprotocol.KeyAt])
 		r.Summary = receipt.Clip(h.closeNote(ctx, issue, meta), receipt.MaxSummary)
-		r.Knowledge = knowledgeLine(meta[closeprotocol.KeyKnowledgeAudit])
 	}
-	if gh, vcsRows, err := h.loadDeliveryRows(ctx, issue.ID); err == nil {
+	if gh, err := h.Queries.ListPullRequestsByIssue(ctx, issue.ID); err == nil {
 		for _, p := range gh {
-			r.PRs = append(r.PRs, receipt.PR{Number: p.PrNumber, URL: p.HtmlUrl, State: prReceiptState(p.State, p.MergedAt.Valid)})
-		}
-		for _, p := range vcsRows {
 			r.PRs = append(r.PRs, receipt.PR{Number: p.PrNumber, URL: p.HtmlUrl, State: prReceiptState(p.State, p.MergedAt.Valid)})
 		}
 	} else {
 		slog.Warn("receipt: list pull requests failed", "issue_id", r.IssueID, "error", err)
+	}
+	if vcsRows, err := h.Queries.ListVCSPullRequestsByIssue(ctx, issue.ID); err == nil {
+		for _, p := range vcsRows {
+			r.PRs = append(r.PRs, receipt.PR{Number: p.PrNumber, URL: p.HtmlUrl, State: prReceiptState(p.State, p.MergedAt.Valid)})
+		}
+	} else {
+		slog.Warn("receipt: list vcs pull requests failed", "issue_id", r.IssueID, "error", err)
 	}
 	return r
 }
@@ -211,26 +214,6 @@ func prReceiptState(state string, merged bool) string {
 		return "merged"
 	}
 	return state
-}
-
-// knowledgeLine is what the close wrote into project memory, in one line;
-// empty when it wrote nothing.
-func knowledgeLine(raw string) string {
-	if strings.TrimSpace(raw) == "" {
-		return ""
-	}
-	audit, err := closeprotocol.ParseStoredKnowledgeAudit(raw)
-	if err != nil {
-		return ""
-	}
-	if audit.None {
-		return "" // nothing worth a line on the card
-	}
-	parts := make([]string, 0, len(audit.Changes))
-	for _, c := range audit.Changes {
-		parts = append(parts, c.Location+"："+c.Summary)
-	}
-	return receipt.Clip(strings.Join(parts, "；"), 200)
 }
 
 // postSourceChatReceipt puts a receipt card into the chat an issue was opened

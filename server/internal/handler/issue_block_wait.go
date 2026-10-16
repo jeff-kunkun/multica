@@ -16,7 +16,6 @@ import (
 	"github.com/multica-ai/multica/server/internal/botsource"
 	"github.com/multica-ai/multica/server/internal/closeprotocol"
 	"github.com/multica-ai/multica/server/internal/events"
-	"github.com/multica-ai/multica/server/internal/integrations/ghsnapshot"
 	"github.com/multica-ai/multica/server/internal/issuestatus"
 	"github.com/multica-ai/multica/server/internal/routing"
 	"github.com/multica-ai/multica/server/internal/service"
@@ -130,7 +129,6 @@ func (h *Handler) syncBlockWait(ctx context.Context, prev, next db.Issue) {
 	if prev.Status == "in_review" && next.Status != "in_review" {
 		h.deleteIssueMeta(ctx, next, blockwait.KeyReleased)
 		h.deleteIssueMeta(ctx, next, blockwait.KeyReviewNudged)
-		h.deleteIssueMeta(ctx, next, blockwait.KeyReleaseHold)
 	}
 	if prev.Status == "done" && next.Status != "done" {
 		h.deleteIssueMeta(ctx, next, blockwait.KeyReleased)
@@ -254,8 +252,7 @@ func (h *Handler) postBlockComment(ctx context.Context, issue db.Issue, content 
 }
 
 // maybeReleaseOnAcceptance runs when a reviewer says the work passed and the
-// issue is still in review. DENE-810 only told the reviewer to merge; this
-// performs the close, or turns a real merge block into a structured wait.
+// issue is still in review, and closes it.
 func (h *Handler) maybeReleaseOnAcceptance(ctx context.Context, issue db.Issue, comment db.Comment) {
 	if comment.AuthorType == "system" || comment.Type == "system" {
 		return
@@ -268,35 +265,22 @@ func (h *Handler) maybeReleaseOnAcceptance(ctx context.Context, issue db.Issue, 
 	}
 	if !blockwait.IsAcceptancePass(comment.Content) {
 		if blockwait.LooksLikePassHint(comment.Content) {
-			h.postBlockComment(ctx, issue, "这句看起来像验收通过。平台只认单独一行的 verdict: pass，或者评论时带上 --verdict pass。写在句子里的「通过」不会合并，也不会关票。")
+			h.postBlockComment(ctx, issue, "这句看起来像验收通过。平台只认单独一行的 verdict: pass，或者评论时带上 --verdict pass。写在句子里的「通过」不会关票。")
 		}
 		return
 	}
 	h.releaseOnAcceptance(ctx, issue)
 }
 
-// releaseOutcome is what the merge chain actually did, so a caller that has
-// to report honestly (issue close --verdict pass, DENE-859) can say whether
-// the PR merged and where the ticket ended up instead of guessing.
+// releaseOutcome is where an accepted pass left the issue.
 type releaseOutcome struct {
 	// Released is false when the pass was ignored: already released once.
 	Released bool
-	// Status the issue holds after the chain: done, blocked, or the status it
-	// already had when nothing could be written.
+	// Status the issue holds afterwards: done, or the status it already had
+	// when nothing could be written.
 	Status string
-	// Merged is true when an open PR was merged by this call.
-	Merged bool
-	// PRURL is the open PR the chain looked at, if any.
-	PRURL string
-	// Note is the sentence the chain left on the issue.
+	// Note is the sentence left on the issue.
 	Note string
-	// Baseline is the "因主线原有失败放行" sentence when the merge let red
-	// checks through because the base branch already had them (DENE-892).
-	Baseline string
-	// Hold is the hold kind a pass that could not merge was kept in review
-	// for (DENE-1219); HoldNext is what clears it.
-	Hold     string
-	HoldNext string
 }
 
 // releaseOnAcceptance is the once-per-stay half of maybeReleaseOnAcceptance:
@@ -308,7 +292,7 @@ func (h *Handler) releaseOnAcceptance(ctx context.Context, issue db.Issue) relea
 		return releaseOutcome{Status: issue.Status}
 	}
 	h.setIssueMetaString(ctx, issue, blockwait.KeyReleased, blockwait.ReleasedPass)
-	out := h.releaseAcceptedIssue(ctx, issue, blockwait.Decision{Reason: "验收已经通过。"})
+	out := h.finishAcceptedIssue(ctx, issue, "验收已经通过。")
 	out.Released = true
 	return out
 }
@@ -318,77 +302,6 @@ func (h *Handler) authorIsReviewer(issue db.Issue, comment db.Comment) bool {
 		return false
 	}
 	return issue.ReviewerType.String == comment.AuthorType && issue.ReviewerID == comment.AuthorID
-}
-
-// releasePlan is what a pass would do right now, without doing it: the
-// linked PRs, the release decision, and the delivery the merge is checked
-// against. ok is false when the PRs could not be read.
-func (h *Handler) releasePlan(ctx context.Context, issue db.Issue) (prs []db.ListPullRequestsByIssueRow, decision blockwait.Decision, delivery *service.IssueDelivery, ok bool) {
-	view, ensureErr := h.ensureIssueDeliveries(ctx, issue)
-	var err error
-	if ensureErr != nil {
-		slog.Warn("block wait: delivery lookup failed", "error", ensureErr, "issue_id", uuidToString(issue.ID))
-		prs, err = h.Queries.ListPullRequestsByIssue(ctx, issue.ID)
-	} else {
-		prs = view.GateRows()
-	}
-	if err != nil {
-		slog.Warn("block wait: list pull requests failed", "error", err, "issue_id", uuidToString(issue.ID))
-		return nil, blockwait.Decision{}, nil, false
-	}
-	prs = h.dropLineChildPulls(ctx, issue, prs)
-	decision = blockwait.DecideRelease(h.gatePRSnapshots(ctx, prs), time.Now())
-	// The delivery aggregate (DENE-820) decides whether anything is still
-	// unaccounted for before the pass is allowed to close or merge. An
-	// unresolved rescue line or an unclassified second line holds the pass:
-	// the reviewer said the work is good, but the platform cannot yet say
-	// which branch that work is on, and the executor is the one who can sort
-	// it out.
-	if decision.Action == blockwait.ReleaseDone || decision.Action == blockwait.ReleaseMerge {
-		var deliveryErr error
-		delivery, deliveryErr = service.BuildIssueDelivery(ctx, h.Queries, issue)
-		if deliveryErr != nil {
-			slog.Warn("block wait: load delivery failed", "error", deliveryErr, "issue_id", uuidToString(issue.ID))
-		}
-		openHeads := []string{}
-		for _, pr := range prs {
-			if pr.State == "open" && pr.Branch.Valid {
-				openHeads = append(openHeads, pr.Branch.String)
-			}
-		}
-		if blocker := service.DeliveryMergeBlocker(delivery, openHeads); blocker != "" {
-			decision = blockwait.Decision{
-				Action: blockwait.ReleaseHold,
-				Kind:   blockwait.HoldDelivery,
-				Record: blockwait.Record{WaitCondition: "交付线还没对齐：" + blocker + "（`multica issue delivery <issue>` 看现场）"},
-			}
-		}
-	}
-	return prs, decision, delivery, true
-}
-
-func (h *Handler) releaseAcceptedIssue(ctx context.Context, issue db.Issue, seed blockwait.Decision) releaseOutcome {
-	prs, decision, delivery, ok := h.releasePlan(ctx, issue)
-	if !ok {
-		return releaseOutcome{Status: issue.Status}
-	}
-	if seed.Reason != "" && decision.Reason != "" {
-		decision.Reason = seed.Reason + decision.Reason
-	}
-	switch decision.Action {
-	case blockwait.ReleaseDone:
-		return h.finishAcceptedIssue(ctx, issue, decision.Reason)
-	case blockwait.ReleaseHold:
-		return h.holdAcceptedIssue(ctx, issue, decision.Kind, decision.Record.WaitCondition, seed.Reason+passLead)
-	case blockwait.ReleaseMerge:
-		h.trackBaselineFix(ctx, issue, &decision, issue.ReviewerType.String, issue.ReviewerID)
-		out := h.mergeAcceptedIssue(ctx, issue, prs, delivery, decision)
-		if out.Merged && len(decision.Inherited) > 0 {
-			out.Baseline = strings.TrimPrefix(decision.Reason, seed.Reason)
-		}
-		return out
-	}
-	return releaseOutcome{Status: issue.Status, Note: decision.Reason}
 }
 
 func (h *Handler) finishAcceptedIssue(ctx context.Context, issue db.Issue, reason string) releaseOutcome {
@@ -431,51 +344,6 @@ func (h *Handler) blockAcceptedIssue(ctx context.Context, issue db.Issue, decisi
 	return releaseOutcome{Status: updated.Status, Note: decision.Reason}
 }
 
-// passLead opens the timeline sentence of a pass the platform could not merge.
-const passLead = "先不合并："
-
-// holdAcceptedIssue is a pass the platform could not merge yet (DENE-1219).
-// The ticket stays in review and keeps its pass; the next pass or patrol
-// round tries again, so checks that turn green merge without anyone acting.
-// A stop the executor has to clear wakes it once per distinct stop; checks
-// still running wake nobody.
-func (h *Handler) holdAcceptedIssue(ctx context.Context, issue db.Issue, kind, condition, lead string) releaseOutcome {
-	h.deleteIssueMeta(ctx, issue, blockwait.KeyReleased)
-	next := releaseHoldNext(kind)
-	note := lead + condition + "。" + next
-	out := releaseOutcome{Status: issue.Status, Note: note, Hold: kind, HoldNext: next}
-	signature := kind + "|" + condition
-	if blockwait.MetaString(parseIssueMetadata(issue.Metadata), blockwait.KeyReleaseHold) == signature {
-		return out
-	}
-	h.setIssueMetaString(ctx, issue, blockwait.KeyReleaseHold, signature)
-	if kind == blockwait.HoldChecksPending {
-		h.postBlockComment(ctx, issue, note)
-		return out
-	}
-	h.wakeExecutor(ctx, issue, note)
-	return out
-}
-
-// releaseHoldNext is the sentence that tells the executor how a held pass
-// ends. The ticket stays in review either way.
-func releaseHoldNext(kind string) string {
-	switch kind {
-	case blockwait.HoldChecksPending:
-		return "票保持待验收，检查跑完变绿后平台巡检会自动合并关单，不用人管。"
-	case blockwait.HoldChecksRed:
-		return "票保持待验收。请执行人看红的检查：这次改动引起的就修好推上去；不是这次改动的问题就处理掉后用 `gh pr merge --squash <PR 链接>` 合入。PR 变绿或已合并后，巡检按已通过收口。"
-	case blockwait.HoldConflict:
-		return "票保持待验收。请执行人把 origin/kun 合进分支、解决冲突推上去；PR 能干净合并后，巡检按已通过收口。"
-	case blockwait.HoldMergeFailed:
-		return "票保持待验收。请执行人用 `gh pr merge --squash <PR 链接>` 在本机合入；巡检看到已合并就关单。"
-	case blockwait.HoldDelivery:
-		return "票保持待验收。请执行人用 `multica issue delivery` 归类分支或换 canonical；对齐后巡检按已通过收口。"
-	default:
-		return "票保持待验收，巡检下一轮再试。"
-	}
-}
-
 // wakeExecutor posts note with the executor's mention and starts it. A
 // ticket in review would otherwise wake its reviewer, who passed already and
 // cannot fix the branch.
@@ -489,69 +357,6 @@ func (h *Handler) wakeExecutor(ctx context.Context, issue db.Issue, note string)
 	if comment.ID.Valid {
 		h.dispatchWaitingOnAssigneeTrigger(ctx, issue, comment.ID)
 	}
-}
-
-func (h *Handler) mergeAcceptedIssue(ctx context.Context, issue db.Issue, prs []db.ListPullRequestsByIssueRow, delivery *service.IssueDelivery, decision blockwait.Decision) releaseOutcome {
-	// The PR on the canonical branch is the delivery; only when no PR sits on
-	// it does the first open PR stand in, as before DENE-820.
-	var open *db.ListPullRequestsByIssueRow
-	for i := range prs {
-		if prs[i].State != "open" {
-			continue
-		}
-		if open == nil {
-			open = &prs[i]
-		}
-		if delivery != nil && delivery.Canonical != nil && prs[i].Branch.Valid && prs[i].Branch.String == delivery.Canonical.Branch {
-			open = &prs[i]
-		}
-	}
-	if open == nil {
-		return h.finishAcceptedIssue(ctx, issue, decision.Reason)
-	}
-	err := h.mergeOpenPulls(ctx, issue.WorkspaceID, []db.ListPullRequestsByIssueRow{*open})
-	if err == nil {
-		out := h.finishAcceptedIssue(ctx, issue, decision.Reason+" PR 已合并。")
-		out.Merged = true
-		out.PRURL = open.HtmlUrl
-		return out
-	}
-	condition := "合并 " + open.HtmlUrl + " 重试一次后还是没成功"
-	if errors.Is(err, errPullMergeUnavailable) {
-		condition = "这台服务没有合并权限，合不了 " + open.HtmlUrl
-	} else if errors.Is(err, errPullNotMergeable) {
-		condition = open.HtmlUrl + " 现在合不进去"
-	}
-	out := h.holdAcceptedIssue(ctx, issue, blockwait.HoldMergeFailed, condition, "验收已经通过，平台合并没成功：")
-	out.PRURL = open.HtmlUrl
-	return out
-}
-
-var (
-	errPullMergeUnavailable = errors.New("pull merge unavailable")
-	errPullNotMergeable     = errors.New("pull request is not mergeable")
-)
-
-// canMergePulls reports whether mergePullRequest has any way to succeed.
-func (h *Handler) canMergePulls() bool {
-	return h.PRMerger != nil || (h.PRRefresh != nil && h.PRRefresh.Enabled())
-}
-
-func (h *Handler) mergePullRequest(ctx context.Context, installationID int64, owner, repo string, number int) error {
-	if h.PRMerger != nil {
-		return h.PRMerger.MergePullRequest(ctx, installationID, owner, repo, number)
-	}
-	if h.PRRefresh == nil || !h.PRRefresh.Enabled() {
-		return errPullMergeUnavailable
-	}
-	err := h.PRRefresh.MergePullRequest(ctx, installationID, owner, repo, number)
-	if err == nil {
-		return nil
-	}
-	if errors.Is(err, ghsnapshot.ErrNotMergeable) {
-		return errPullNotMergeable
-	}
-	return err
 }
 
 func (h *Handler) publishBlockStatus(prev, issue db.Issue) {
@@ -662,7 +467,7 @@ func (h *Handler) patrolOne(ctx context.Context, issue db.Issue) bool {
 	case blockwait.ActionRevive, blockwait.ActionEscalate:
 		h.reviveOrEscalate(ctx, issue, decision)
 	case blockwait.ActionRelease:
-		out := h.releaseAcceptedIssue(ctx, issue, decision)
+		out := h.finishAcceptedIssue(ctx, issue, decision.Reason)
 		if reviewSkip != nil && out.Status == issuestatus.Done {
 			if err := service.RecordReviewSkip(ctx, h.Queries, issue, *reviewSkip); err != nil {
 				slog.Warn("review skip: record failed", "issue_id", uuidToString(issue.ID), "error", err)
@@ -1083,7 +888,7 @@ func blockAttributionRejection(req UpdateIssueRequest, actorType string) string 
 	}
 	kind := strings.TrimSpace(deref(req.BlockKind))
 	action := strings.TrimSpace(deref(req.BlockAction))
-	const hint = "智能体把票改成 blocked 要写明卡点类型和下一步：--block-kind（decision / permission / external / dependency / capacity）配 --block-action（一句话，80 字以内）。更推荐用 `multica issue close --outcome blocked`，它会一并写好。"
+	const hint = "智能体把票改成 blocked 要写明卡点类型和下一步：--block-kind（decision / permission / external / dependency / capacity）配 --block-action（一句话，80 字以内）。"
 	if kind == "" || action == "" {
 		return hint
 	}
@@ -1196,4 +1001,23 @@ func (h *Handler) resumeBlockedOnReply(ctx context.Context, issue db.Issue, enqu
 		return
 	}
 	h.publishBlockStatus(prev, updated)
+}
+
+func setIssueMetaStringTx(ctx context.Context, q *db.Queries, issue db.Issue, key, value string) error {
+	raw, err := json.Marshal(value)
+	if err != nil {
+		return err
+	}
+	_, err = q.SetIssueMetadataKey(ctx, db.SetIssueMetadataKeyParams{
+		ID:          issue.ID,
+		WorkspaceID: issue.WorkspaceID,
+		Key:         key,
+		Value:       raw,
+	})
+	// No row means the key already holds this value (the query skips no-op
+	// writes), so a repeated write must not fail as "issue not found".
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil
+	}
+	return err
 }

@@ -278,7 +278,6 @@ func (s *TaskService) prepareQuotaRelay(ctx context.Context, task db.AgentTaskQu
 		}
 		handoff := quotaHandoff(locked, agent, issue, plan)
 		handoff.Demotion = demotion
-		handoff.Branch = canonicalBranch(ctx, qtx, issue.ID)
 		if locked.AutopilotRunID.Valid {
 			_, err = insertQuotaRelay(ctx, qtx, locked, agent, plan, db.InsertQuotaRelayParams{Outcome: "skipped_autopilot", IssueID: issue.ID})
 			return err
@@ -785,14 +784,6 @@ func balanceFailure(task db.AgentTaskQueue) bool {
 	return ok && plan.Kind == quotarelay.KindBalanceExhausted
 }
 
-func canonicalBranch(ctx context.Context, qtx *db.Queries, issueID pgtype.UUID) string {
-	row, err := qtx.GetIssueCanonicalDeliveryBranch(ctx, issueID)
-	if err != nil {
-		return ""
-	}
-	return row.BranchName
-}
-
 func dropBlockWaitKeys(ctx context.Context, qtx *db.Queries, issue db.Issue) error {
 	for _, key := range blockwait.WaitKeys() {
 		if _, err := qtx.DeleteIssueMetadataKey(ctx, db.DeleteIssueMetadataKeyParams{
@@ -1122,12 +1113,11 @@ func (s *TaskService) transferBrokenSeatIssues(ctx context.Context, qtx *db.Quer
 		if err != nil {
 			return nil, err
 		}
-		branch := canonicalBranch(ctx, qtx, issue.ID)
 		tierLabel := choice.Seat.Tier
 		if tier, ok := routing.DefaultLadder.TierByKey(choice.Seat.Tier); ok && tier.Label != "" {
 			tierLabel = tier.Label
 		}
-		audit := quotarelay.AuditBalanceTransfer(agent.Name, choice.Seat.Name, tierLabel, choice.SteppedDown, started, branch)
+		audit := quotarelay.AuditBalanceTransfer(agent.Name, choice.Seat.Name, tierLabel, choice.SteppedDown, started, "")
 		comment, err := postQuotaAudit(ctx, qtx, reassigned, audit, task.ID)
 		if err != nil {
 			return nil, err
@@ -1136,7 +1126,7 @@ func (s *TaskService) transferBrokenSeatIssues(ctx context.Context, qtx *db.Quer
 			issue:      reassigned,
 			prevStatus: issue.Status,
 			comment:    comment,
-			note:       quotarelay.BalanceTransferNote(agent.Name, choice.Seat.Name, branch, started),
+			note:       quotarelay.BalanceTransferNote(agent.Name, choice.Seat.Name, "", started),
 			actor:      actor,
 			enqueue:    reassigned.Status == "todo" || reassigned.Status == "in_progress",
 		})

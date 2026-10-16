@@ -96,10 +96,10 @@ func postMemberComment(t *testing.T, userID, issueID, content string) CommentRes
 	return resp
 }
 
-// A --needs-human close lands in that person's inbox, subscribes them, leaves
+// A --needs-human block lands in that person's inbox, subscribes them, leaves
 // a visible @, and their reply wakes the executor — even a reply the ordinary
 // comment rules would route to nobody.
-func TestCloseNeedsHumanSummonsAndReplyWakesExecutor(t *testing.T) {
+func TestBlockedNeedsHumanSummonsAndReplyWakesExecutor(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
 	}
@@ -113,21 +113,14 @@ func TestCloseNeedsHumanSummonsAndReplyWakesExecutor(t *testing.T) {
 		testPool.Exec(context.Background(), `DELETE FROM issue_summon WHERE issue_id = $1`, issue.ID)
 	})
 
-	w := closeIssueHTTP(t, issue.ID, agentID, taskID, map[string]any{
-		"outcome":     "blocked",
-		"evidence":    "两个方案都能做，等你挑一个。",
-		"summary":     "要人拍板：A 还是 B",
-		"needs_human": testUserID,
+	w := agentUpdateIssueHTTP(t, issue.ID, agentID, taskID, map[string]any{
+		"status":       "blocked",
+		"needs_human":  testUserID,
+		"block_kind":   "decision",
+		"block_action": "要人拍板：A 还是 B",
 	})
 	if w.Code != http.StatusOK {
-		t.Fatalf("close: %d %s", w.Code, w.Body.String())
-	}
-	var resp CloseIssueResponse
-	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
-	if !resp.Summoned {
-		t.Fatalf("close did not report the summon: %+v", resp)
+		t.Fatalf("block: %d %s", w.Code, w.Body.String())
 	}
 	if got := summonCount(t, `SELECT count(*) FROM inbox_item WHERE issue_id = $1 AND recipient_id = $2 AND type = 'needs_you' AND severity = 'action_required'`, issue.ID, testUserID); got != 1 {
 		t.Fatalf("needs_you inbox rows = %d, want 1", got)
@@ -143,7 +136,7 @@ func TestCloseNeedsHumanSummonsAndReplyWakesExecutor(t *testing.T) {
 	for _, row := range waiting {
 		if row.IssueID == issue.ID {
 			found = true
-			if row.Source != "needs_human" || row.CallerType != "agent" || !strings.Contains(row.Reason, "A 还是 B") {
+			if row.Source != "needs_human" || row.CallerType != "agent" || !strings.Contains(row.Reason, "等你拍板") {
 				t.Fatalf("waiting row = %+v", row)
 			}
 		}
@@ -152,7 +145,7 @@ func TestCloseNeedsHumanSummonsAndReplyWakesExecutor(t *testing.T) {
 		t.Fatalf("waiting list misses the call: %+v", waiting)
 	}
 
-	// The run that closed is over. The person answers with a comment that
+	// The run that blocked is over. The person answers with a comment that
 	// @-mentions someone else — the ordinary rules route that to nobody.
 	if _, err := testPool.Exec(ctx, `UPDATE agent_task_queue SET status = 'completed', completed_at = now() WHERE id = $1`, taskID); err != nil {
 		t.Fatalf("finish task: %v", err)

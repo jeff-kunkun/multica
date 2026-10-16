@@ -396,8 +396,7 @@ func TestChildDone_SquadPrivateLeader_AgentActorWakesLeader(t *testing.T) {
 	// no-code (DENE-875).
 	w = httptest.NewRecorder()
 	r = newRequest("PATCH", "/api/issues/"+child.ID, map[string]any{
-		"status":         "done",
-		"no_code_reason": "test fixture has no code delivery",
+		"status": "done",
 	})
 	r.Header.Set("X-Agent-ID", workerAgentID)
 	r.Header.Set("X-Task-ID", workerTaskID)

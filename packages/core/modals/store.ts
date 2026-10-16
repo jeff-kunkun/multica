@@ -12,7 +12,6 @@ type ModalType =
   | "issue-mark-duplicate"
   | "issue-add-child"
   | "issue-delete-confirm"
-  | "issue-close"
   | "issue-run-confirm"
   | "private-link"
   | null;

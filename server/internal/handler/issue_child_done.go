@@ -161,10 +161,6 @@ func (h *Handler) notifyParentOfChildDone(ctx context.Context, prev, issue db.Is
 	if !stageBarrierClosed(children, issue, terminal) {
 		return
 	}
-	// The sediment round follows the barrier, including a parent assigned to a
-	// person. The wake below still skips that parent (MUL-2538); the round is
-	// a project fact, not a ping.
-	h.sedimentClosedBarrier(ctx, parent, issue, children, terminal)
 	if parent.AssigneeType.Valid && parent.AssigneeType.String == "member" {
 		return
 	}
@@ -267,7 +263,6 @@ func (h *Handler) notifyParentsOfBatchChildDone(ctx context.Context, completed [
 			if !stageBarrierClosed(children, g.children[0], terminal) {
 				continue
 			}
-			h.sedimentClosedBarrier(ctx, parent, g.children[0], children, terminal)
 			if memberParent {
 				continue
 			}
@@ -287,7 +282,6 @@ func (h *Handler) notifyParentsOfBatchChildDone(ctx context.Context, completed [
 		if !found {
 			continue
 		}
-		h.sedimentClosedBarrier(ctx, parent, rep, children, terminal)
 		if memberParent {
 			continue
 		}
@@ -591,7 +585,6 @@ func (h *Handler) childDoneDigest(ctx context.Context, parent db.Issue, children
 	}, statuses.status)
 	for i := range receipts {
 		receipts[i].Summary = sanitizeChildTitleForSystemComment(receipts[i].Summary)
-		receipts[i].Knowledge = sanitizeChildTitleForSystemComment(receipts[i].Knowledge)
 	}
 	return receipt.Digest(receipts)
 }

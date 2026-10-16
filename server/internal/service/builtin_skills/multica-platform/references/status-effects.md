@@ -1,9 +1,9 @@
 # Status side effects
 
 What the server does when an issue status changes: which keys enqueue or skip
-agent work, acceptance scoping, blocked-close fields. Status keys themselves
-and the rest of the issue contract are in `references/issues.md`; the close
-command that writes a status is `references/close-protocol.md`.
+agent work, acceptance scoping, blocked fields. Status keys themselves
+and the rest of the issue contract are in `references/issues.md`. A status is
+written with `multica issue status <id> <status>` (or `issue update`).
 
 A status change is not cosmetic — the server enqueues or skips agent work based
 on it. These are the contracts, not advice.
@@ -56,7 +56,7 @@ archived statuses remain readable via an explicit status filter.
 - **`in_review`** is an accepted issue status. Some workflows use it while a PR
   is open and awaiting review; moving to it is an explicit mutation.
 - **`done`** on a child issue posts a system comment on its parent once the
-  stage closes, listing each finished child's conclusion, PRs and knowledge
+  stage closes, listing each finished child and its PRs
   (子任务回执); a sub-issue some reader of the parent cannot see stays off
   it. If a PR
   carries close intent (`Closes MUL-XXXX`), it advances the issue to `done`
@@ -67,12 +67,11 @@ archived statuses remain readable via an explicit status filter.
   one is rejected (a member's only warns); "等 DENE-N" in a comment is only a
   suggestion. An agent also passes `--block-kind <decision|permission|external|dependency|capacity>`
   and `--block-action "<one-line next step>"` (≤80 chars), or the change is
-  rejected — `multica issue close --outcome blocked` records both for you and
-  is the preferred path. Routing seats an empty executor parked (no run) and the command
+  rejected. Routing seats an empty executor parked (no run) and the command
   says if it did. A cleared blocker or passed acceptance wakes the waiter (no
   executor: a person gets a 缺执行人 card); the patrol wakes a quiet one ~30 min.
   A member's reply that starts a run for the executor moves the issue back to
-  `in_progress` and marks the blocked close superseded — do not re-block to
+  `in_progress` and marks the blocked record superseded — do not re-block to
   "acknowledge" it.
 - **`cancelled`** is a terminal, user-driven decision to close the issue. Like
   `done` it enqueues no new agent work, but it does **not** stop tasks already in

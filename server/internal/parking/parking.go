@@ -38,9 +38,9 @@ const (
 	// CategoryIdle is a ticket nobody has started, or one parked in backlog.
 	CategoryIdle = "idle"
 	// CategoryDeferred is a deliberate stop with a recorded reason and a
-	// continuation: `issue close --outcome backlog|todo` (back to planning) or
-	// `--outcome in_progress` (this turn stops, the next continues). It is an
-	// explained state, never "stopped without saying why" (DENE-1002).
+	// continuation: back to backlog or todo on purpose, or left in progress
+	// with a named continuation. It is an explained state, never "stopped
+	// without saying why" (DENE-1002).
 	CategoryDeferred = "deferred"
 
 	// CategoryStalledDelivery: the last run failed or the platform refused

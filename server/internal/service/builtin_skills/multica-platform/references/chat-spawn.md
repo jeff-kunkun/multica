@@ -83,13 +83,13 @@ An IM `/issue` command and an alignment also record their chat, like a chat
 run's `issue create` / `plan apply`.
 
 When such an issue enters 待验收, done, blocked or cancelled, the server posts a
-receipt card into the chat: status, the close's summary, PRs, knowledge. A
+receipt card into the chat: status, summary, PRs. A
 sub-issue of a ticket from the same chat stays quiet; its parent reports, and
-the parent's card lists each sub-issue's conclusion, PRs and knowledge
+the parent's card lists each sub-issue's conclusion and PRs
 (only sub-issues everyone in the chat may see). A
 chat run opens with the newest ten tickets and where each stands; answer "how
 is it going" from that list, not from memory. `multica chat tickets` shows the
-same result (`summary`, `pull_requests`, `knowledge`) for every ticket.
+same result (`summary`, `pull_requests`) for every ticket.
 
 The list also holds existing issues the chat follows, each with a `source`:
 `created` (opened here), `auto` (this chat's run changed its status or

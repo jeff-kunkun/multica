@@ -24,21 +24,13 @@ func TestIssueHelpCarriesMovedBriefRules(t *testing.T) {
 			"The title already serves as the H1",
 			"--description-file ./description.md",
 		}},
-		"issue close": {issueCloseCmd.Long, []string{
-			"in one transaction",
-			"refused with the\nmissing item named",
-			"--outcome in_review   delivered, awaiting acceptance (top-level issues only;",
-			"--verdict pass        acceptance seat only, with --outcome done",
-			"--verdict hold",
-			"who gets woken",
-		}},
 		"issue handoff": {issueHandoffCmd.Long, []string{
 			"skips a\ntarget that already has an active run",
 			"refused if a person holds the seat",
 			"never a hand-written @mention",
 		}},
 		"issue summon": {issueSummonCmd.Long, []string{
-			"A close with --needs-human already calls that person",
+			"blocked with --needs-human already calls that person",
 		}},
 	}
 	for name, tc := range cases {

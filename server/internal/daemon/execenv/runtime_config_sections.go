@@ -49,14 +49,14 @@ func writeHeader(b *strings.Builder) {
 // writeBackgroundTaskSafetySlim emits the Background work section: the
 // four constraints only the model can keep, so they stay in the brief
 // (DENE-1329, ADR-0007) — never background-and-yield, do not wait on CI
-// (`multica issue close` owns it, MUL-5223) unless the CI result is explicitly
-// asked for, the one persistent-service
+// (MUL-5223) unless the CI result is explicitly asked for, the one
+// persistent-service
 // exception (MUL-5274), and never kill the daemon by name. Incident history
 // behind each lives in those tickets, not here.
 func writeBackgroundTaskSafetySlim(b *strings.Builder) {
 	b.WriteString("## Background work\n\n")
 	b.WriteString("Your run ends when your turn exits; anything still running is orphaned and its result lost. Never background work and yield — block on results in the foreground. ")
-	b.WriteString("Don't wait on CI or external systems (no `gh pr checks --watch`, `gh run watch` or sleep polls); `multica issue close` handles CI, and \"Local tests pass; CI running: <PR link>\" is a complete hand-off. ")
+	b.WriteString("Don't wait on CI or external systems (no `gh pr checks --watch`, `gh run watch` or sleep polls); \"Local tests pass; CI running: <PR link>\" is a complete hand-off. ")
 	b.WriteString("Only when the trigger or the acceptance criteria explicitly ask for the CI result, wait for it in ONE foreground `gh pr checks <pr> --watch`. ")
 	b.WriteString("Only a service the user asked to keep running may outlive the turn: detach it (durable logs, a recorded PID), verify it, and reply with URL, logs and how to stop it; without a supervisor its survival is best-effort. ")
 	b.WriteString("Never kill `multica` by name; stop only a PID you started, and never the daemon's (`multica daemon status --output json`).\n\n")
@@ -196,9 +196,9 @@ func sanitizeBriefCodeToken(s string) string {
 // writeAvailableCommands emits the Commands section as a verb map
 // (DENE-1329, ADR-0007): one line per verb, flags and contracts in each
 // command's `--help`. The server refuses an incomplete call and names what is
-// missing, so the brief no longer restates the close decision table, the
-// comment-read flags or the formatting rules — those moved to `--help` of
-// `issue close`, `issue comment list`, `issue comment add` and `issue create`.
+// missing, so the brief no longer restates the comment-read flags or the
+// formatting rules — those moved to `--help` of `issue comment list`,
+// `issue comment add` and `issue create`.
 //
 // What stays inline is what no command can refuse: the stdout/stderr split
 // (a merged stream makes a successful write look failed and invites a
@@ -214,7 +214,6 @@ func writeAvailableCommands(b *strings.Builder, ctx TaskContextForEnv) {
 	b.WriteString("- `issue comment list | add` — read / post comments (bodies via `--content-file`)\n")
 	b.WriteString("- `issue create | update | assign` — create and edit issues; `--no-start` records a change without starting a run\n")
 	writeIssueStatusCommand(b, ctx)
-	b.WriteString("- `issue close` — finish this turn: evidence + status + merge in one call\n")
 	b.WriteString("- `issue handoff --to <seat|agent>` — wake the next owner\n")
 	b.WriteString("- `issue summon --to <member>` — call a person in\n")
 	b.WriteString("- `issue wakeup` — wait for a condition, then resume\n")
@@ -532,7 +531,6 @@ func writeProjectContext(b *strings.Builder, ctx TaskContextForEnv) {
 			b.WriteString("\n\n")
 		}
 		writeProjectChatDirectoryHint(b, project)
-		writeProjectMemoryLine(b, project.MemoryLine)
 		writeProjectResourceList(b, ctx, project.Resources)
 		return
 	}
@@ -549,7 +547,6 @@ func writeProjectContext(b *strings.Builder, ctx TaskContextForEnv) {
 			b.WriteString("\n\n")
 		}
 		writeProjectChatDirectoryHint(b, project)
-		writeProjectMemoryLine(b, project.MemoryLine)
 		writeProjectResourceList(b, ctx, project.Resources)
 	}
 	b.WriteString("When a deliverable must be attributed to one project — creating an issue, for example — infer the target from the request and the project descriptions above. If it is still ambiguous, ask the user which project to use instead of guessing.\n\n")
@@ -560,20 +557,6 @@ func writeProjectChatDirectoryHint(b *strings.Builder, project ProjectContextFor
 		return
 	}
 	fmt.Fprintf(b, "This project has %d chat(s) visible to you. Use `multica chat list --project %s` to browse them.\n\n", project.ChatCount, project.ID)
-}
-
-// writeProjectMemoryLine emits the one project-memory sentence. A blank line
-// adds nothing, so a claim without the field keeps the previous brief.
-func writeProjectMemoryLine(b *strings.Builder, line string) {
-	if i := strings.IndexAny(line, "\r\n"); i >= 0 {
-		line = line[:i]
-	}
-	line = strings.Join(strings.Fields(line), " ")
-	if line == "" {
-		return
-	}
-	b.WriteString(line)
-	b.WriteString("\n\n")
 }
 
 // writeProjectResourceList emits one project's resource list, or the
@@ -657,7 +640,6 @@ func writeWorkflowHeader(b *strings.Builder) {
 func writeWorkflowChat(b *strings.Builder) {
 	b.WriteString("**You are in chat mode.** Reply conversationally, concisely and directly. Look things up and act through the `multica` CLI (`issue list | get`, `workspace get`, `issue create | update`, `chat tickets`); get code with `multica repo checkout <url>` (`--ref` for an exact revision).\n\n")
 	b.WriteString("When the user hands you another chat to take over — a session link or id, often \"接管这个：<url>\" — read it silently first with `multica chat history --session <url-or-id> --output json` (a summary plus the latest messages; page older ones with `--before <next_cursor>`), then continue the work from it.\n\n")
-	b.WriteString("A chat that changed code or settled something worth keeping ends like a task: write project memory (refresh-project), commit, then `multica chat sediment`. Plain Q&A skips it.\n\n")
 }
 
 // writeWorkflowQuickCreate emits the quick-create workflow's hard
@@ -706,13 +688,9 @@ func writeWorkflowAutopilot(b *strings.Builder) {
 // throws away the prompt cache (MUL-5377). Trigger, `--parent` and reply
 // targets travel in the per-turn message (daemon.buildCommentPrompt).
 //
-// DENE-1329 cut the workflow to four steps (ADR-0007). What it dropped is now
+// DENE-1329 cut the workflow to a few short steps (ADR-0007). What it dropped is now
 // owned elsewhere, each with a refusal that names what is missing:
 //
-//   - The close decision table → `multica issue close`: blocked / in_progress
-//     without a wait, in_review without a PR or on a sub-issue, and every
-//     `--verdict pass` misuse are refused by the server (issue_close.go), and
-//     the outcome table lives in `issue close --help`.
 //   - Blocked without a wait via `issue status` → refused for agents.
 //   - Replying outside the trigger thread → the comment handler refuses a
 //     wrong or missing `--parent` on a comment-triggered run.
@@ -726,7 +704,8 @@ func writeWorkflowAutopilot(b *strings.Builder) {
 // starts the issue's own work (placed inside the numbered steps because a rule
 // outside the list did not fire, MUL-6460), write no status on an ancillary
 // turn (keeps concurrent runs from flapping the board, MUL-6417), treat
-// `source_context` as read-only, and deliver through a comment.
+// `source_context` as read-only, deliver through one comment, and leave the
+// status true.
 //
 // ctx.IsSquadLeader is a per-task role; branching on it is an owner-accepted
 // byte-stability tradeoff (MUL-5811).
@@ -736,17 +715,15 @@ func writeWorkflowIssue(b *strings.Builder, ctx TaskContextForEnv) {
 	b.WriteString("2. If this turn produces any of the issue's own deliverable, set `in_progress` first (unless it already is). A turn that only answers a question or consults on work owned elsewhere writes no status at all.\n")
 	b.WriteString("3. Do the work. When an assign or status change only records work already underway, pass `--no-start`.\n")
 	if ctx.IsSquadLeader {
-		b.WriteString("4. Finish with `multica issue close <id> --outcome <...> --evidence-file ./close.md` (or the `no_action` outcome from your Squad Operating Protocol). Dispatching members is not delivery: a dispatch turn leaves the parent `in_progress`; it goes to `in_review` only on the later turn where you confirm the overall goal is met. ")
+		b.WriteString("4. Post one result comment with `multica issue comment add`, under the `--parent` the per-turn message gave (top-level when none), unless the outcome is `no_action` from your Squad Operating Protocol.\n")
 	} else {
-		b.WriteString("4. Finish with `multica issue close <id> --outcome <...> --evidence-file ./close.md`. ")
+		b.WriteString("4. Post one result comment with `multica issue comment add`, under the `--parent` the per-turn message gave (top-level when none).\n")
 	}
-	b.WriteString("A refused close names what is missing; fix it and call again. The reply says the status written, whether a PR merged and who is woken — quote it. ")
+	b.WriteString("5. Leave the status true with `multica issue status`: `in_review` when delivered, `in_progress` while the work continues beyond this turn, `blocked` with what you wait on (`--blocked-by` / `--wake-at` / `--wait-condition` / `--needs-human`) when you cannot proceed. A turn that only answered a question writes no status. A refused write names what is missing; fix it and call again. ")
 	if ctx.IsSquadLeader {
-		b.WriteString("Otherwise post one comment under the `--parent` the per-turn message gave, unless the outcome is `no_action`. ")
-	} else {
-		b.WriteString("A turn that does not close (an answer, a review hold) posts one comment instead, under the `--parent` the per-turn message gave. ")
+		b.WriteString("Dispatching members is not delivery: a dispatch turn leaves the parent `in_progress`; it goes to `in_review` only on the later turn where you confirm the overall goal is met. ")
 	}
-	b.WriteString("Acceptance seat: pass with `--outcome done --verdict pass`; send it back with `issue comment add <id> --verdict hold`.\n\n")
+	b.WriteString("Acceptance seat: pass with `issue comment add <id> --verdict pass`; send it back with `--verdict hold`.\n\n")
 	// A custom catalog needs one reminder that workflow updates use exact keys.
 	if len(ctx.IssueStatuses) > 0 {
 		b.WriteString("Workflow rules name exact built-in status keys; custom statuses share lifecycle only, not built-in automation.\n\n")
@@ -944,9 +921,9 @@ func writeOutput(b *strings.Builder, kind taskKind, ctx TaskContextForEnv) {
 		}
 	default:
 		if ctx.IsSquadLeader {
-			b.WriteString("⚠️ **Deliver through a comment on the issue** (a close writes one) — unless your outcome is `no_action`, as your Squad Operating Protocol states. ")
+			b.WriteString("⚠️ **Deliver through a comment on the issue** — unless your outcome is `no_action`, as your Squad Operating Protocol states. ")
 		} else {
-			b.WriteString("⚠️ **Deliver through a comment on the issue** (a close writes one). ")
+			b.WriteString("⚠️ **Deliver through a comment on the issue**. ")
 		}
 		b.WriteString("Nobody sees your terminal or run log. Post exactly ONE comment per run, the final result — no progress updates; only a `[WAKEUP]` check that found nothing may use `multica issue wakeup checkin` instead. State the outcome, not the process.\n\n")
 		b.WriteString("**Delivering files here:** `--attachment <path>` on `issue comment add` (repeatable). Fetch attachments with `multica attachment download`, never by opening Multica URLs; a downloaded file is a private copy, so its path is no deliverable either.\n")

@@ -49,11 +49,11 @@ threshold (Settings → Routing, default 24 hours):
 - The status is moved to done **only** when the 验收席 already left a pass verdict
   on the ticket, and the comment recording it says which remark it read. With
   nothing from the reviewer on the ticket this branch cannot be taken at all.
-- The sweep does not merge, and it is not the release path. The release path is
-  the acceptance seat's pass: a comment with a standalone `verdict: pass` line
-  (`multica issue comment add <id> --verdict pass`) makes the platform merge the
-  open linked PR and set `done` right away. Waiting for this sweep leaves the PR
-  open.
+- The sweep is not the acceptance path. The acceptance seat's pass is: a
+  comment with a standalone `verdict: pass` line (`multica issue comment add
+  <id> --verdict pass`) sets `done` right away. A pass does not merge any
+  linked PR. An executor agent may not set `done` itself while someone else
+  holds the 验收席.
 - A top-level ticket that reached `in_review` before its 验收席 was ever decided gets the
   slot filled now and is handed on — this is the same row as `in_review` above,
   and it runs even when the assignee is a person.
@@ -151,7 +151,7 @@ naming the way out, and the CLI prints it on stderr. The ways out:
 |---|---|
 | a stronger seat | `multica issue escalate <id> --reason "..."` |
 | advice from a stronger seat, keeping the ticket | `multica issue consult <id> --question-file <path>` (`references/consult.md`) |
-| someone else to take it | `multica issue close <id> --outcome blocked --evidence-file <path> ...` — routing advises |
+| someone else to take it | `multica issue status <id> blocked <wait flag> --block-kind capacity --block-action "..."`, with the reason in your result comment — routing advises |
 | a person to decide | `multica issue ask-human <id> --to <member\|owner> --question "..." --option "..."` (blocks the ticket on them; their answer wakes you) — or `multica issue summon <id> --to <member> --reason "..."` for a plain call |
 | the person already named the new owner | `--per-quote "<原话>"`, checked as above |
 

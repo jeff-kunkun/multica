@@ -5,15 +5,14 @@ import (
 	"testing"
 )
 
-func TestMarkdownCarriesConclusionPRAndKnowledge(t *testing.T) {
+func TestMarkdownCarriesConclusionAndPR(t *testing.T) {
 	r := Receipt{
 		IssueID: "id-1", Identifier: "DENE-9", Title: "修登录", Status: "done",
-		Summary:   "登录改走新令牌",
-		PRs:       []PR{{Number: 12, URL: "https://github.com/o/r/pull/12", State: "merged"}},
-		Knowledge: "AGENTS.md：令牌规则",
+		Summary: "登录改走新令牌",
+		PRs:     []PR{{Number: 12, URL: "https://github.com/o/r/pull/12", State: "merged"}},
 	}
 	md := r.Markdown()
-	for _, want := range []string{"[DENE-9](mention://issue/id-1)", "已完成", "结论：登录改走新令牌", "[#12](https://github.com/o/r/pull/12)", "沉淀：AGENTS.md：令牌规则"} {
+	for _, want := range []string{"[DENE-9](mention://issue/id-1)", "已完成", "结论：登录改走新令牌", "[#12](https://github.com/o/r/pull/12)"} {
 		if !strings.Contains(md, want) {
 			t.Fatalf("markdown misses %q:\n%s", want, md)
 		}
@@ -22,7 +21,7 @@ func TestMarkdownCarriesConclusionPRAndKnowledge(t *testing.T) {
 
 func TestMarkdownOmitsEmptySections(t *testing.T) {
 	md := Receipt{IssueID: "id-1", Identifier: "DENE-9", Title: "修登录", Status: "blocked"}.Markdown()
-	for _, absent := range []string{"结论", "PR：", "沉淀"} {
+	for _, absent := range []string{"结论", "PR："} {
 		if strings.Contains(md, absent) {
 			t.Fatalf("markdown has empty section %q:\n%s", absent, md)
 		}
@@ -66,14 +65,14 @@ func TestMarkdownListsChildren(t *testing.T) {
 	r := Receipt{IssueID: "p", Identifier: "DENE-1", Status: "done", Children: []Receipt{
 		{IssueID: "c1", Identifier: "DENE-2", Status: "done", Summary: "接口做完。", PRs: []PR{{Number: 5, URL: "https://x/pull/5", State: "merged"}}},
 		{IssueID: "c2", Identifier: "DENE-3", Status: "cancelled"},
-		{IssueID: "c3", Identifier: "DENE-4", Status: "done", Summary: "界面做完", Knowledge: "AGENTS.md：新规则"},
+		{IssueID: "c3", Identifier: "DENE-4", Status: "done", Summary: "界面做完"},
 	}}
 	md := r.Markdown()
 	for _, want := range []string{
 		"子任务回执：",
 		"- [DENE-2](mention://issue/c1) 已完成：接口做完；PR [#5](https://x/pull/5) 已合并",
 		"- [DENE-3](mention://issue/c2) 已取消",
-		"- [DENE-4](mention://issue/c3) 已完成：界面做完；沉淀 AGENTS.md：新规则",
+		"- [DENE-4](mention://issue/c3) 已完成：界面做完",
 	} {
 		if !strings.Contains(md, want) {
 			t.Fatalf("markdown misses %q:\n%s", want, md)

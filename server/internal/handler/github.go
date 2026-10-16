@@ -979,7 +979,6 @@ func (h *Handler) ListPullRequestsForIssue(w http.ResponseWriter, r *http.Reques
 	if !ok {
 		return
 	}
-	view, _ := h.ensureIssueDeliveries(r.Context(), issue)
 	ws, err := h.Queries.GetWorkspace(r.Context(), issue.WorkspaceID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list pull requests")
@@ -1035,9 +1034,6 @@ func (h *Handler) ListPullRequestsForIssue(w http.ResponseWriter, r *http.Reques
 	payload := map[string]any{
 		"pull_requests": out,
 		"auto_complete": prAutoCompleteToResponse(decision),
-	}
-	if view.Gap != nil {
-		payload["gap"] = view.Gap
 	}
 	writeJSON(w, http.StatusOK, payload)
 }

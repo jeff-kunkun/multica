@@ -22,7 +22,8 @@ var issueSummonCmd = &cobra.Command{
 		"no-op that reports duplicate.\n\n" +
 		"  --to      the person: name, email or user id\n" +
 		"  --reason  one sentence on what they need to decide\n\n" +
-		"A close with --needs-human already calls that person; do not summon again.\n" +
+		"Moving the ticket to blocked with --needs-human already calls that person; do not\n" +
+		"summon again.\n" +
 		"To ask a person for a decision with a question and options, use\n" +
 		"`multica issue ask-human`: it also reaches people through their Bot.",
 	Args: exactArgs(1),

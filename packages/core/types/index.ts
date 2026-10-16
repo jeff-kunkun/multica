@@ -1,7 +1,6 @@
 export type { Issue, IssueStatus, BuiltInIssueStatus, IssuePriority, IssueAssigneeType, IssueAssigneeSource, IssueReviewerType, IssueMetadata, IssueMetadataValue, IssueAgentGuardResponse, IssueDriver, IssueDriverKind, IssueDisposeAction, IssueDisposeRequest, IssueDisposeResponse, IssueReaction, SourceContextAttachment, SourceContextAuthor, SourceContextIssueSnapshot, SourceContextCommentSnapshot, SourceContextSnapshot, SourceContextLimitUsage, SourceContextPreview, SourceContextAuthorState, IssueSourceContext, IssueSourceChat, IssueDuplicateOf } from "./issue";
 export type { Progress, ProgressTone } from "./progress";
 export type { IssueDraft, IssueDraftStatus, IssueDraftPayload, IssueDraftChild, IssueDraftProjectProposal, IssueDraftProjectChoice, IssueDraftCreatedIssue, IssueDraftAssignmentWarning, IssueDraftPolicy, IssueDraftCapabilities, IssueDraftSession, IssueDraftSummary, IssueDraftFinalizeResult, IssueDraftRuntimeSwitch } from "./issue-draft";
-export type { CloseIssueRequest, CloseIssueResponse, CloseOutcome, KnowledgeAudit, KnowledgeAuditChange } from "./close";
 export type {
   IssueStatusCategory,
   IssueStatusEntry,
@@ -232,17 +231,6 @@ export type {
 export type { StorageAdapter } from "./storage";
 export type {
   Project,
-  ProjectMemoryLocation,
-  ProjectMemoryChecklistItem,
-  ProjectMemoryIssue,
-  ProjectMemoryStatus,
-  ProjectMemoryMonitor,
-  MonitorWrite,
-  MonitorUnsettled,
-  MonitorRound,
-  MonitorChat,
-  MonitorChatTicket,
-  KnowledgeSediment,
   ProjectStatus,
   ProjectPriority,
   CreateProjectRequest,

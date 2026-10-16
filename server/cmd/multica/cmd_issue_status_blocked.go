@@ -29,8 +29,8 @@ func warnUnregisteredBlock(cmd *cobra.Command, w io.Writer, display string) {
 		display = "<id>"
 	}
 	fmt.Fprintf(w, "Warning: blocked without saying what it waits on — the platform cannot tell when to wake it.\n"+
-		"  Record the wait in one call: multica issue close %s --outcome blocked --blocked-by <DENE-N> --evidence-file ./close.md\n"+
-		"  (or pass --blocked-by / --wake-at / --wait-condition / --needs-human here).\n", display)
+		"  Record the wait in the same call: multica issue status %s blocked --blocked-by <DENE-N>\n"+
+		"  (or --wake-at / --wait-condition / --needs-human).\n", display)
 }
 
 // seatReport is what `issue status <id> blocked` learned about the executor

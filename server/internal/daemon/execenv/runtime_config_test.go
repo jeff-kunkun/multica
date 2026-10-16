@@ -193,9 +193,8 @@ func TestStatusRuleIsFactJudgmentAtBothMoments(t *testing.T) {
 		t.Errorf("brief must not contain a placeholder `<this-issue-id> in_review` flip — status is judged from what the turn delivered")
 	}
 
-	// DENE-1329 cut the long status rules and the close decision table: the
-	// server now refuses each wrong close with a readable error, and the
-	// per-outcome flags live in `multica issue close --help`. What the brief
+	// DENE-1329 cut the long status rules and the decision table: the server
+	// refuses each wrong status write with a readable error. What the brief
 	// keeps is the judgment the server cannot make for the agent.
 	for _, want := range []string{
 		// The start moment, conditional on the turn producing the issue's
@@ -203,14 +202,13 @@ func TestStatusRuleIsFactJudgmentAtBothMoments(t *testing.T) {
 		"2. If this turn produces any of the issue's own deliverable, set `in_progress` first (unless it already is)",
 		// Invariant 1: conversation does not move the board.
 		"A turn that only answers a question or consults on work owned elsewhere writes no status at all",
-		// The close is one call; a refusal names what is missing.
-		"Finish with `multica issue close <id> --outcome <...> --evidence-file ./close.md`",
-		"A refused close names what is missing; fix it and call again",
-		// The reply is the source of truth for what was written (DENE-859).
-		"The reply says the status written, whether a PR merged and who is woken — quote it",
-		// Acceptance: pass through the verdict, hold through a comment (DENE-850).
-		"Acceptance seat: pass with `--outcome done --verdict pass`",
-		"send it back with `issue comment add <id> --verdict hold`",
+		// Delivery is one comment; the status is left true, and a refusal
+		// names what is missing.
+		"4. Post one result comment with `multica issue comment add`, under the `--parent` the per-turn message gave",
+		"5. Leave the status true with `multica issue status`: `in_review` when delivered",
+		"A refused write names what is missing; fix it and call again",
+		// Acceptance: pass and hold both go through the verdict (DENE-850).
+		"Acceptance seat: pass with `issue comment add <id> --verdict pass`; send it back with `--verdict hold`",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("status rule missing %q\n---\n%s", want, out)
@@ -222,7 +220,7 @@ func TestStatusRuleIsFactJudgmentAtBothMoments(t *testing.T) {
 		"**Issue status — write the state the issue is in, whenever it changes**",
 	} {
 		if strings.Contains(out, gone) {
-			t.Errorf("brief re-grew %q; it lives in `multica issue close --help` (DENE-1329)", gone)
+			t.Errorf("brief re-grew %q (DENE-1329)", gone)
 		}
 	}
 
@@ -265,15 +263,18 @@ func TestStatusRuleIsFactJudgmentAtBothMoments(t *testing.T) {
 	// Position is load-bearing, not style (J's review on #7295): a
 	// presence-pin cannot tell WHERE a sentence lives, and both field
 	// incidents came from correct sentences sitting in positions that do
-	// not fire. The start write and the close must live INSIDE their
-	// numbered steps.
-	var step2, step4 string
+	// not fire. The start write, the delivery and the status write must live
+	// INSIDE their numbered steps.
+	var step2, step4, step5 string
 	for _, line := range strings.Split(out, "\n") {
 		if strings.HasPrefix(line, "2. ") {
 			step2 = line
 		}
 		if strings.HasPrefix(line, "4. ") {
 			step4 = line
+		}
+		if strings.HasPrefix(line, "5. ") {
+			step5 = line
 		}
 	}
 	if !strings.Contains(step2, "set `in_progress` first") {
@@ -282,8 +283,11 @@ func TestStatusRuleIsFactJudgmentAtBothMoments(t *testing.T) {
 	if !strings.Contains(step2, "writes no status at all") {
 		t.Errorf("the no-write guard must live inside step 2, the position that fires\n---\n%s", step2)
 	}
-	if !strings.Contains(step4, "multica issue close") {
-		t.Errorf("the close must be anchored inside step 4\n---\n%s", step4)
+	if !strings.Contains(step4, "multica issue comment add") {
+		t.Errorf("the delivery must be anchored inside step 4\n---\n%s", step4)
+	}
+	if !strings.Contains(step5, "multica issue status") {
+		t.Errorf("the status write must be anchored inside step 5\n---\n%s", step5)
 	}
 
 	// The squad-leader bullet must not leak into the ordinary path.
@@ -600,7 +604,7 @@ func TestProtocolHeadingInInstructionsGetsNoLeaderBrief(t *testing.T) {
 			t.Fatalf("ordinary-agent brief leaked leader-only content %q\n---\n%s", banned, out)
 		}
 	}
-	if !strings.Contains(out, "A turn that does not close (an answer, a review hold) posts one comment instead") {
+	if !strings.Contains(out, "4. Post one result comment with `multica issue comment add`, under the `--parent` the per-turn message gave (top-level when none).") {
 		t.Fatalf("ordinary-agent brief lost the unconditional reply obligation\n---\n%s", out)
 	}
 }
@@ -744,16 +748,16 @@ func TestSubIssueCreationSectionIsUnconditional(t *testing.T) {
 
 func TestIssueStatusRuleKeepsAcceptanceAtParent(t *testing.T) {
 	t.Parallel()
-	// DENE-1329: acceptance stays a parent-level decision, but the server owns
-	// it now — `issue close` refuses `in_review` on a sub-issue with a readable
-	// error (handler TestCloseSubIssueInReviewIsRejected). The brief routes
-	// every finish through that one call and no longer restates the rule.
+	// DENE-1329: acceptance stays a parent-level decision owned by the
+	// server, which refuses a wrong status write with a readable error. The
+	// brief routes the finish through `issue status` and no longer restates
+	// the rule.
 	out := buildMetaSkillContent("claude", TaskContextForEnv{IssueID: "issue-1"})
-	if !strings.Contains(out, "Finish with `multica issue close <id>") {
-		t.Errorf("brief must route the finish through `multica issue close`, where the sub-issue refusal lives\n---\n%s", out)
+	if !strings.Contains(out, "5. Leave the status true with `multica issue status`") {
+		t.Errorf("brief must route the finish through `multica issue status`\n---\n%s", out)
 	}
-	if !strings.Contains(out, "A refused close names what is missing; fix it and call again") {
-		t.Errorf("brief must say a refused close is the signal to fix and retry\n---\n%s", out)
+	if !strings.Contains(out, "A refused write names what is missing; fix it and call again") {
+		t.Errorf("brief must say a refused write is the signal to fix and retry\n---\n%s", out)
 	}
 	for _, gone := range []string{
 		"acceptance state belongs only to a top-level issue",
@@ -2429,34 +2433,8 @@ func TestEveryBriefThatTeachesJSONOutputAlsoWarnsAgainstMergingStderr(t *testing
 	}
 }
 
-// TestAvailableCommandsListIssueClose pins the `issue close` verb in the
-// command map (DENE-859). Since DENE-1329 the brief carries one line per verb;
-// the outcomes, the one-transaction guarantee and the quote-the-reply rule live
-// in `multica issue close --help` (pinned in cmd/multica TestIssueHelpCarriesMovedBriefRules)
-// and the server refuses an incomplete close naming what is missing.
-func TestAvailableCommandsListIssueClose(t *testing.T) {
-	t.Parallel()
-	out := buildMetaSkillContent("claude", TaskContextForEnv{IssueID: "issue-1"})
-	for _, want := range []string{
-		"- `issue close` — finish this turn: evidence + status + merge in one call",
-		"The server rejects an incomplete call and says what is missing",
-		"Run `multica <command> --help` for flags",
-		// The honest-reply rule stays in the workflow step that closes.
-		"The reply says the status written, whether a PR merged and who is woken — quote it",
-	} {
-		if !strings.Contains(out, want) {
-			t.Errorf("command map missing %q\n---\n%s", want, out)
-		}
-	}
-	statusIdx := strings.Index(out, "- `issue status <id> <status>`")
-	closeIdx := strings.Index(out, "- `issue close`")
-	if statusIdx < 0 || closeIdx < 0 || closeIdx < statusIdx {
-		t.Errorf("issue close should sit right after the status verb (status=%d close=%d)", statusIdx, closeIdx)
-	}
-}
-
 // TestAvailableCommandsListIssueHandoff pins the `issue handoff` verb
-// (DENE-863): it sits right after `issue close`. Its routing facts (skips an
+// (DENE-863): it sits right after the status verb. Its routing facts (skips an
 // active run, never seats a person) live in `--help`.
 func TestAvailableCommandsListIssueHandoff(t *testing.T) {
 	t.Parallel()
@@ -2464,11 +2442,11 @@ func TestAvailableCommandsListIssueHandoff(t *testing.T) {
 	if !strings.Contains(out, "- `issue handoff --to <seat|agent>` — wake the next owner") {
 		t.Errorf("command map missing the handoff verb\n---\n%s", out)
 	}
-	closeIdx := strings.Index(out, "- `issue close`")
+	statusIdx := strings.Index(out, "- `issue status <id> <status>`")
 	handoffIdx := strings.Index(out, "- `issue handoff")
 	summonIdx := strings.Index(out, "- `issue summon")
-	if !(closeIdx >= 0 && closeIdx < handoffIdx && handoffIdx < summonIdx) {
-		t.Errorf("issue handoff should sit right after issue close (close=%d handoff=%d summon=%d)", closeIdx, handoffIdx, summonIdx)
+	if !(statusIdx >= 0 && statusIdx < handoffIdx && handoffIdx < summonIdx) {
+		t.Errorf("issue handoff should sit right after the status verb (status=%d handoff=%d summon=%d)", statusIdx, handoffIdx, summonIdx)
 	}
 }
 

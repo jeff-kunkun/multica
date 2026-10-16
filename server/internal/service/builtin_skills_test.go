@@ -359,7 +359,6 @@ func TestPlatformSkillDescriptionNamesEveryDomain(t *testing.T) {
 		"references/wakeups.md":         "wakeup",
 		"references/github-app.md":      "github app",
 		"references/routing.md":         "routing",
-		"references/close-protocol.md":  "close protocol",
 		"references/mentions.md":        "mention",
 		"references/agents.md":          "agent",
 		"references/agent-env.md":       "env",
@@ -451,7 +450,6 @@ func TestPlatformSkillCoversPlatformContracts(t *testing.T) {
 				"references/projects.md",
 				"references/runtimes.md",
 				"references/skill-import.md",
-				"close protocol",
 				// Invariants deduplicated out of the eight merged bodies. Each
 				// was repeated in most of them; the router is now their only
 				// home, so losing one here loses it everywhere.
@@ -472,6 +470,11 @@ func TestPlatformSkillCoversPlatformContracts(t *testing.T) {
 				// The singular forms this replaced.
 				"open the ONE reference",
 				"there is never a reason to read all eight",
+				// The close protocol and project memory were removed; a turn
+				// ends with a result comment and `issue status`.
+				"multica issue close",
+				"close-protocol",
+				"project memory",
 			},
 		},
 		{
@@ -533,11 +536,14 @@ func TestPlatformSkillCoversPlatformContracts(t *testing.T) {
 			},
 			notWant: []string{
 				// MUL-6966 phase 1 banned teaching the generic KV bag.
-				// DENE-231 revisits that for exactly the `close.*` keys
-				// via `multica issue metadata set`, which now live in
-				// references/close-protocol.md. The scratchpad, curated
-				// key list, and pr_url guidance stay banned.
+				// The scratchpad, curated key list, and pr_url guidance
+				// stay banned.
 				"pr_url",
+				// The close protocol and the pull-requests `gap` field
+				// were removed.
+				"multica issue close",
+				"close.pr_unverified",
+				"`gap`",
 				// A curated key list is the "recommended fields" concept the
 				// owner ruled out on MUL-5442.
 				"High-signal keys",
@@ -551,81 +557,20 @@ func TestPlatformSkillCoversPlatformContracts(t *testing.T) {
 			},
 		},
 		{
-			// DENE-351 split the close protocol out of issues.md: both files
-			// were at or over the 500-line supporting-file budget, and the
-			// close contract is the one section that stands alone. The
-			// anchors below moved with the text; the ones that stayed behind
-			// are the routing rules issues.md still owns.
-			file: "references/close-protocol.md",
-			want: []string{
-				// DENE-231: close protocol excerpt. A comment alone is not a
-				// close; the `close.*` keys, write order, and four scenes
-				// are the runtime constraint. Status meanings stay the
-				// built-in keys documented in issues.md — this reference must
-				// not invent a parallel set.
-				"Close protocol",
-				"A comment alone is not a close",
-				"close.conclusion",
-				"close.status",
-				"close.evidence_comment_id",
-				"close.next_owner_type",
-				"close.next_owner_id",
-				"close.wake_action",
-				"close.waiting_on",
-				"close.at",
-				"close.block_kind",
-				"close.block_action",
-				"multica issue metadata set",
-				"`in_review` is not a stage terminal",
-				"Builder (PR / needs review)",
-				// DENE-232: cross-family waits wake the waiter on
-				// done/cancelled unless it already has live work.
-				"Prefer a real parent + stage",
-				"already has a queued or running task",
-				"A sub-issue never owns an acceptance conclusion",
-				// DENE-810: a pass releases. The old row told the reviewer
-				// to keep in_review until somebody else merged.
-				"Reviewer pass, owned checks green, no explicit human hold",
-				"A pass does not stop at `in_review`",
-				"--blocked-by",
-				// DENE-972: the audit rides the same close. It is not an
-				// eighth historical key, and a pull-request heading is not
-				// a second gate.
-				"close.knowledge_audit",
-				"--knowledge-none",
-				// DENE-1002: closing back to backlog / todo / in_progress is
-				// part of the protocol now, and the in_progress path must
-				// say who continues.
-				"--outcome backlog",
-				"--outcome in_progress",
-				"`deferred`",
-				"`continuing`",
-				"who continues",
-				"`clock`",
-			},
-			notWant: []string{
-				// The MUL-6966 / MUL-5442 bans on teaching the generic KV bag
-				// followed the `multica issue metadata set` text into this
-				// file. Only the `close.*` keys are sanctioned here.
-				"pr_url",
-				"High-signal keys",
-				"reuse these names so queries stay consistent",
-				"scratchpad for run state",
-				// Per-turn workflow the runtime brief owns.
-				"Start from the trigger, not from memory",
-				"multica issue comment list <issue-id> --thread <trigger-comment-id>",
-				"multica issue comment add <issue-id> --parent <trigger-comment-id>",
-			},
-		},
-		{
 			file: "references/routing.md",
 			want: []string{
 				"Top-level issues only own acceptance",
 				"not considered by the stale-review sweep",
 				"`in_review` (top-level only)",
-				// DENE-810: the stall sweep catches up a status. It is not
-				// the path that merges.
-				"The sweep does not merge",
+				// The stall sweep catches up a status; the acceptance
+				// seat's verdict is what closes the issue, and it merges
+				// nothing.
+				"The sweep is not the acceptance path",
+				"A pass does not merge any linked PR",
+			},
+			notWant: []string{
+				"multica issue close",
+				"makes the platform merge",
 			},
 		},
 		{
@@ -697,6 +642,9 @@ func TestPlatformSkillCoversPlatformContracts(t *testing.T) {
 				"Acceptance is parent-scoped",
 				"the parent is the one issue that moves to unified `in_review`",
 				"--blocked-by <DENE-N>",
+			},
+			notWant: []string{
+				"multica issue close",
 			},
 		},
 		{
@@ -790,6 +738,11 @@ func TestPlatformSkillCoversPlatformContracts(t *testing.T) {
 				"Project resources are durable and affect future tasks",
 				"github_repo.resource_ref.url",
 				"resource_ref.ref",
+			},
+			notWant: []string{
+				// Project memory and sediment were removed.
+				"project memory",
+				"chat sediment",
 			},
 		},
 		{

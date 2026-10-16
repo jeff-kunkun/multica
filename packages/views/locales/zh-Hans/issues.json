@@ -164,28 +164,6 @@
     "self_claim": "做父票的智能体自领的子票",
     "quote_text": "“{{quote}}”"
   },
-  "close_protocol": {
-    "missing": "无收口记录",
-    "status_drift": "close.status ≠ {{issueStatus}}",
-    "next_owner": "下一责任人：{{name}}",
-    "next_owner_none": "下一责任人：无",
-    "waiting_on": "等待 {{id}}",
-    "last_activity_missing": "无活动时间",
-    "knowledge_none": "无够格知识",
-    "knowledge_change": "知识：{{locations}}",
-    "knowledge_change_unverified": "知识：{{locations}}（未核对交付）",
-    "section_title": "收口记录",
-    "conclusion": "结论",
-    "status": "状态",
-    "evidence": "原因",
-    "evidence_missing": "原因评论还没加载出来。",
-    "conclusion_delivered": "已交付",
-    "conclusion_blocked": "卡住",
-    "conclusion_awaiting_review": "待验收",
-    "conclusion_awaiting_human": "等人验收",
-    "conclusion_deferred": "放回待规划 / 待办",
-    "conclusion_continuing": "本轮暂停，下轮继续"
-  },
   "driver": {
     "none": "没人在推进",
     "revived": "已重跑 {{count}} 次",
@@ -574,15 +552,6 @@
     "title_suggestion_updated": "标题已更新",
     "title_suggestion_apply_failed": "采用建议标题失败",
     "title_suggestion_dismiss_failed": "忽略建议标题失败",
-    "delivery_line": {
-      "section": "交付分支",
-      "section_children": "子票提交",
-      "delivers_to": "交付到父票 {{identifier}} 的分支",
-      "status_open": "还没并回",
-      "status_merged_other": "已并回 {{count}} 个提交",
-      "status_conflict": "并回冲突，等执行人解决",
-      "show_all_other": "展开全部 {{count}} 个"
-    },
     "from_chat": "来自聊天",
     "from_chat_hidden": "来自一个你看不到的聊天"
   },
@@ -957,7 +926,6 @@
     "remove_parent_issue": "移除父任务",
     "remove_parent_issue_success": "已移除父任务",
     "add_sub_issue": "添加子任务...",
-    "close_issue": "收口",
     "delete_issue": "删除任务",
     "mark_duplicate": "标记为重复...",
     "pin_to_sidebar": "固定到侧边栏",

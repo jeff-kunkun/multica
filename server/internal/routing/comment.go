@@ -372,7 +372,7 @@ func blockedFactComment(issue Issue, fillWhy string) (body string, mention, ok b
 		mention = true
 	}
 	if !issue.Wait.Registered {
-		facts = append(facts, "- **没登记在等什么**：挡路的票、时间点、条件、等的人一样都没有，平台不知道什么时候该叫醒执行人。执行人用 `multica issue close <票号> --outcome blocked --blocked-by <挡路的票>`（或 `--wake-at` / `--needs-human`）补上；其实没在等，就把状态改回待办。")
+		facts = append(facts, "- **没登记在等什么**：挡路的票、时间点、条件、等的人一样都没有，平台不知道什么时候该叫醒执行人。执行人用 `multica issue status <票号> blocked --blocked-by <挡路的票>`（或 `--wake-at` / `--needs-human`）补上；其实没在等，就把状态改回待办。")
 		mention = true
 	}
 	if issue.Wait.AllEnded() {

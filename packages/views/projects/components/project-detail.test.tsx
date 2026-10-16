@@ -45,8 +45,6 @@ vi.mock("@tanstack/react-query", () => ({
 
 vi.mock("@multica/core/projects/queries", () => ({
   projectDetailOptions: () => ({ queryKey: ["project-detail"] }),
-  projectMemoryOptions: () => ({ queryKey: ["project-memory"] }),
-  projectMemoryMonitorOptions: () => ({ queryKey: ["project-memory-monitor"] }),
   projectKeys: {
     detail: (wsId: string, id: string) => ["projects", wsId, "detail", id],
   },

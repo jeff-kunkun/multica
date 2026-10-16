@@ -1,6 +1,6 @@
 ---
 name: multica-platform
-description: "Overview, ask, open a chat, consult, inbox, sub-issue, wakeup, routing, close protocol, driver, halt, mention, agent, specialisation, squad, autopilot, project, runtime, progress, skill import, transfer, bot, GitHub App, status, env."
+description: "Overview, ask, open a chat, consult, inbox, sub-issue, wakeup, routing, driver, halt, mention, agent, specialisation, squad, autopilot, project, runtime, progress, skill import, transfer, bot, GitHub App, status, env."
 user-invocable: false
 allowed-tools: Bash(multica *), Bash(git *), Bash(gh *)
 ---
@@ -36,7 +36,6 @@ See `references/overview.md` for filter semantics and examples.
 | `references/wakeups.md` | Issue wakeups: events, conditions (`--until-*`), timers, check-ins, runaway protection |
 | `references/sub-issues.md` | Sub-issues: todo vs backlog at create time, stages as barrier groups, promoting parked children |
 | `references/routing.md` | Automatic routing: which slots it fills at which status, the 验收席 field, who may pick an executor (`--per-quote`, `issue escalate`), domains (`multica domain`, project/issue `--domain`), what an `issue route` result means, why dispatch stopped |
-| `references/close-protocol.md` | Closing an issue: the eight `close.*` keys, conclusion / status / next owner / wake decision tables, blocked-close fields, dispatcher stage promotion |
 | `references/mentions.md` | Writing a `mention://` link: which types enqueue a run, which are inert, why one silently did nothing; a comment that "Woke no one" |
 | `references/agents.md` | Creating, copying or debugging an agent definition: fields, skill binding |
 | `references/agent-env.md` | Agent env and secrets: `custom_env` input channels, redaction, write-only MCP server config |
@@ -44,7 +43,7 @@ See `references/overview.md` for filter semantics and examples.
 | `references/specialisations.md` | Base roles and specialisations: create by base role + domain, what a child inherits, the two-level cap, runtime following, solidify, the archive guard |
 | `references/squads.md` | Squads: leader routing, roster, recording leader activity, why a squad did or did not run |
 | `references/autopilots.md` | Autopilots: schedule / webhook / manual triggers, `create_issue` vs `run_only`, why one did not fire |
-| `references/projects.md` | Projects, their members (`project member list`), and their durable resources (`github_repo`, `local_directory`, worktree mode), and project memory (`check`, `status`, `monitor`, `seat`, `chat sediment`) |
+| `references/projects.md` | Projects, their members (`project member list`), and their durable resources (`github_repo`, `local_directory`, worktree mode) |
 | `references/external-bots.md` | An owner-authorized external Bot: key-less one-yes connect (`multica bot connect`) or a personal CLI login instead of a mailbox; office event receipts and catch-up (`multica events`) |
 | `references/runtimes.md` | Runtimes, daemons, `repo checkout`, and the task CLI boundary |
 | `references/inbox.md` | The user asks about their inbox or what is stuck: `multica inbox board` (optionally `--project`) and the fixed five-part answer |
@@ -106,8 +105,9 @@ must do it. Only 「你来做」 (or your name) self-assigns with `--per-quote "
 
 **The owner of a ticket owns it to the end.** Once it is yours: post a start
 comment first (how you read the ask, which direction you will take), comment at
-key milestones, and finish only with `multica issue close`. Too hard →
-`multica issue escalate`. Someone else should take it → close `blocked` and let
+key milestones, and finish each turn with one result comment plus a true
+status (`multica issue status <id> in_review|in_progress|blocked`). Too hard →
+`multica issue escalate`. Someone else should take it → set `blocked` and let
 routing advise. A person must decide → `multica issue ask-human <id> --to <member|owner> --question "..." [--option ...]` (never @ them: a person with a Bot is reached through it, and their answer wakes you); a bare call without a question → `multica issue summon`. **Never assign
 the ticket to someone else yourself**; with routing on, the server refuses it
 once the ticket is past `todo` (details in `references/routing.md`).
@@ -121,7 +121,8 @@ effects read `references/status-effects.md`; for API field meanings, `references
 `--thread <thread-id> --tail 30`, never one unbounded pull; when the
 per-turn message hands you a `--since` delta, that read is the bounded scan. The brief is a verb map: comment-body rules live in
 `multica issue comment add --help`, title and body style in `issue create
---help`, outcomes and `--verdict pass` / `--verdict hold` in `issue close --help`.
+--help`, blocked wait flags in `issue status --help`, and `--verdict pass` /
+`--verdict hold` in `issue comment add --help`.
 
 ## When behavior looks wrong
 

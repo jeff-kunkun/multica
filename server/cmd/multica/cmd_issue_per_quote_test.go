@@ -59,7 +59,7 @@ func TestNoteIgnoredAssigneeInFlightKeepsExecutorAndNamesAlternatives(t *testing
 		"assignee_ignored_reason": routing.ReasonAgentReassignInFlight,
 	})
 	got := c.read()
-	for _, want := range []string{"keeps its current assignee", "multica issue escalate", "--outcome blocked"} {
+	for _, want := range []string{"keeps its current assignee", "multica issue escalate", "blocked --needs-human"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("stderr missing %q:\n%s", want, got)
 		}

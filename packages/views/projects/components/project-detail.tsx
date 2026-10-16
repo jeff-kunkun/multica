@@ -26,7 +26,6 @@ import { ActorAvatar } from "../../common/actor-avatar";
 import { currentPath, useNavigation } from "../../navigation";
 import { TitleEditor, ContentEditor, ReadonlyContent, type ContentEditorRef } from "../../editor";
 import { ProjectCodeSection } from "./project-code-section";
-import { ProjectMemoryCard } from "./project-memory-card";
 import { ProjectMembersSection } from "./project-members-section";
 import { IssueSurface } from "../../issues/surface/issue-surface";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
@@ -465,7 +464,6 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
       </div>
 
       {/* Resources */}
-      <ProjectMemoryCard projectId={projectId} />
       <ProjectCodeSection projectId={projectId} />
 
       <div id="project-members-section">

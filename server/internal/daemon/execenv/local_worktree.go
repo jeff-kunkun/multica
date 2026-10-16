@@ -136,21 +136,6 @@ type LocalWorktreeParams struct {
 	// out the whole repository. A declaration narrows only this task's
 	// worktree; the user's own checkout stays complete.
 	CheckoutPaths string
-	// CanonicalBranch is the issue's canonical delivery branch as the server
-	// records it (DENE-820). When it exists in this repository and its record
-	// belongs to the same workspace and conversation, the task continues it
-	// even though another seat created it — a rerun by a different agent
-	// must land on the issue's one delivery line, not open a second one
-	// named after itself. Empty, or absent locally, falls back to the
-	// conversation branch rules below.
-	CanonicalBranch string
-	// DeliveryBranch is the parent's delivery branch a sub-issue delivers
-	// onto (DENE-1537). When it exists here, the task's own branch forks from
-	// its tip, so a later stage stands on every earlier stage's commits and
-	// parallel siblings each start from the same point. `issue close` merges
-	// the task's commits back into it. Empty, or absent locally, leaves the
-	// branch rules below unchanged.
-	DeliveryBranch string
 	// SweepTrunks names the integration lines merged task branches are swept
 	// against, beyond the repository's default branch (DENE-1666). The daemon
 	// fills it from the machine's configured trunk. Never derived from the
@@ -701,8 +686,8 @@ func PrepareLocalWorktree(params LocalWorktreeParams, logger *slog.Logger) (*Loc
 		// nothing distinguished it from a branch the user creates there
 		// themselves. And `git diff <baseline>..<branch>` is then the agent's
 		// work on every branch, not only on the ones that started dirty.
-		if dirty || !plan.carriesSnapshot() {
-			baseline, baseErr := commitBaseline(worktreePath, plan.carriesSnapshot(), dirty)
+		if dirty || !plan.continues {
+			baseline, baseErr := commitBaseline(worktreePath, plan.continues, dirty)
 			if baseErr != nil {
 				// Without a baseline the task cannot tell the user's work from the
 				// agent's, so it would later commit the user's files as if the agent
@@ -1795,17 +1780,7 @@ type taskBranchPlan struct {
 	// The recorded tree does not contain it. Empty when that tree is what the
 	// branch carries.
 	replayAbandoned string
-	// fork is true when base is the tip of the parent's delivery branch
-	// (DENE-1537): the task's branch is created (or moved, when it carries
-	// nothing the delivery branch does not) there. Its checkout is new, but
-	// it already carries the snapshot the delivery branch recorded, so the
-	// replay treats it like a continued branch.
-	fork bool
 }
-
-// carriesSnapshot is true when the checkout already holds a recorded user
-// snapshot, so the replay applies only what changed since.
-func (p taskBranchPlan) carriesSnapshot() bool { return p.continues || p.fork }
 
 // altName disambiguates a branch a live sibling already holds.
 func (p taskBranchPlan) altName(taskID string) string {
@@ -1838,80 +1813,12 @@ func (p taskBranchPlan) altName(taskID string) string {
 // own follow-ups continue it — and, if that is somehow taken too, onto a
 // task-scoped branch that continues nothing.
 func resolveTaskBranch(gitRoot string, params LocalWorktreeParams, headSHA string, logger *slog.Logger) taskBranchPlan {
-	plan := resolveOwnBranch(gitRoot, params, headSHA, logger)
-	if delivery := strings.TrimSpace(params.DeliveryBranch); delivery != "" {
-		return forkFromDeliveryLine(gitRoot, plan, delivery, logger)
-	}
-	return plan
-}
-
-// forkFromDeliveryLine moves a sub-issue's own branch onto its parent's
-// delivery branch (DENE-1537). The branch keeps its own name — two parallel
-// siblings cannot share one checked-out branch — and starts from the
-// delivery tip. A branch that already carries work the delivery branch
-// lacks is continued as is: that work has not been merged back yet, and
-// `issue close` merges it.
-func forkFromDeliveryLine(gitRoot string, plan taskBranchPlan, delivery string, logger *slog.Logger) taskBranchPlan {
-	tip, err := runGitTrimmed(gitRoot, "rev-parse", "--verify", "--quiet", "refs/heads/"+delivery)
-	if err != nil || tip == "" {
-		// The first sub-issue to run: the delivery branch is created by its
-		// merge-back, so it forks from HEAD like any task.
-		return plan
-	}
-	if plan.continues {
-		if _, err := runGit(gitRoot, "merge-base", "--is-ancestor", plan.base, tip); err != nil {
-			if logger != nil {
-				logger.Info("execenv: sub-issue branch carries work not yet on the delivery branch; continuing it",
-					"git_root", gitRoot, "branch", plan.name, "delivery_branch", delivery)
-			}
-			return plan
-		}
-	}
-	forked := plan
-	forked.base = tip
-	forked.continues = false
-	forked.reset = false
-	forked.fork = true
-	forked.priorState, forked.priorUserHead, forked.priorCheckpoint, forked.replayAbandoned = "", "", "", ""
-	if ref, refErr := readUserStateRef(gitRoot, delivery); refErr == nil && ref != "" {
-		if record, recErr := readBranchRecord(gitRoot, ref); recErr == nil {
-			forked.priorState = record.state
-			forked.priorUserHead = record.userHead
-			if forked.priorUserHead == "" && record.state != "" {
-				forked.priorUserHead = recoverCarriedUserHead(gitRoot, record.state)
-			}
-		}
-	}
-	if logger != nil {
-		logger.Info("execenv: sub-issue forks from its parent's delivery branch",
-			"git_root", gitRoot, "branch", forked.name, "delivery_branch", delivery, "tip", tip)
-	}
-	return forked
-}
-
-// resolveOwnBranch is resolveTaskBranch before the delivery line applies.
-func resolveOwnBranch(gitRoot string, params LocalWorktreeParams, headSHA string, logger *slog.Logger) taskBranchPlan {
 	agentSegment := sanitizeName(params.AgentName)
 	taskScoped := taskBranchPlan{name: fmt.Sprintf("agent/%s/%s", agentSegment, taskKey(params.TaskID)), base: headSHA}
 
 	owner := params.owner()
 	if params.ConversationKey == "" || !owner.valid() {
 		return taskScoped
-	}
-	// The issue's canonical line first (DENE-820). Only an EXISTING branch is
-	// continued: inventing the canonical name on a machine that never had it
-	// would claim to be that line while sharing no history with it.
-	if canonical := strings.TrimSpace(params.CanonicalBranch); canonical != "" {
-		if tip, err := runGitTrimmed(gitRoot, "rev-parse", "--verify", "--quiet", "refs/heads/"+canonical); err == nil && tip != "" {
-			plan, ok := planForBranch(gitRoot, canonical, headSHA, owner, sameDeliveryLine, logger)
-			if ok {
-				return plan
-			}
-			if logger != nil {
-				logger.Info("execenv: canonical delivery branch is not this issue's; not continuing it",
-					"git_root", gitRoot, "branch", canonical)
-			}
-		}
 	}
 	preferred := fmt.Sprintf("agent/%s/%s", agentSegment, sanitizeName(params.ConversationKey))
 	for _, name := range []string{preferred, preferred + "-" + owner.fingerprint()} {
@@ -1930,23 +1837,6 @@ func resolveOwnBranch(gitRoot string, params LocalWorktreeParams, headSHA string
 // planForConversationBranch reports how this task would use one candidate
 // branch name, and whether it may use it at all.
 func planForConversationBranch(gitRoot, name, headSHA string, owner branchOwner, logger *slog.Logger) (taskBranchPlan, bool) {
-	return planForBranch(gitRoot, name, headSHA, owner, sameOwner, logger)
-}
-
-// ownerMatch decides whether a branch's recorded owner lets this task
-// continue it. sameOwner is the conversation-branch rule: all three ids.
-// sameDeliveryLine is the canonical-branch rule (DENE-820): the issue is the
-// delivery aggregate, so any seat of the same workspace working the same
-// conversation continues its canonical line; the agent id may differ.
-type ownerMatch func(recorded, owner branchOwner) bool
-
-func sameOwner(recorded, owner branchOwner) bool { return recorded == owner }
-
-func sameDeliveryLine(recorded, owner branchOwner) bool {
-	return recorded.WorkspaceID == owner.WorkspaceID && recorded.ConversationID == owner.ConversationID
-}
-
-func planForBranch(gitRoot, name, headSHA string, owner branchOwner, match ownerMatch, logger *slog.Logger) (taskBranchPlan, bool) {
 	plan := taskBranchPlan{
 		name:           name,
 		base:           headSHA,
@@ -1959,7 +1849,7 @@ func planForBranch(gitRoot, name, headSHA string, owner branchOwner, match owner
 		// Free to create.
 		return plan, true
 	}
-	record, owned := branchOwnedByMatch(gitRoot, name, owner, match, logger)
+	record, owned := branchOwnedBy(gitRoot, name, owner, logger)
 	if !owned {
 		return taskBranchPlan{}, false
 	}
@@ -1998,16 +1888,12 @@ func planForBranch(gitRoot, name, headSHA string, owner branchOwner, match owner
 // A branch with no record is not ours by definition: every branch this code
 // creates writes one before its task is allowed to run.
 func branchOwnedBy(gitRoot, branch string, owner branchOwner, logger *slog.Logger) (branchRecord, bool) {
-	return branchOwnedByMatch(gitRoot, branch, owner, sameOwner, logger)
-}
-
-func branchOwnedByMatch(gitRoot, branch string, owner branchOwner, match ownerMatch, logger *slog.Logger) (branchRecord, bool) {
 	ref, err := readUserStateRef(gitRoot, branch)
 	if err != nil || ref == "" {
 		return branchRecord{}, false
 	}
 	record, err := readBranchRecord(gitRoot, ref)
-	if err != nil || !record.owner.valid() || !match(record.owner, owner) || record.checkpoint == "" {
+	if err != nil || !record.owner.valid() || record.owner != owner || record.checkpoint == "" {
 		return branchRecord{}, false
 	}
 	if _, err := runGit(gitRoot, "merge-base", "--is-ancestor", record.checkpoint, "refs/heads/"+branch); err != nil {
@@ -2033,7 +1919,7 @@ func addLocalWorktree(gitRoot, worktreePath string, plan taskBranchPlan, taskID 
 	switch {
 	case plan.continues:
 		args = []string{"worktree", "add", worktreePath, plan.name}
-	case plan.reset, plan.fork:
+	case plan.reset:
 		// -B moves the branch to base. Nothing is lost: this path only runs
 		// once the branch has been proven an ancestor of HEAD.
 		args = []string{"worktree", "add", "-B", plan.name, worktreePath, plan.base}
@@ -2044,7 +1930,7 @@ func addLocalWorktree(gitRoot, worktreePath string, plan taskBranchPlan, taskID 
 		args = append([]string{"worktree", "add", "--no-checkout"}, args[2:]...)
 	}
 	newBranch := ""
-	if !plan.continues && !plan.reset && !plan.fork {
+	if !plan.continues && !plan.reset {
 		newBranch = plan.name
 	}
 	out, err := addWorktreeRetrying(gitRoot, worktreePath, newBranch, args)
@@ -2195,7 +2081,7 @@ type replayResult struct {
 // was already advanced (the unmerged first cut of this fix) is not repaired:
 // that tree diff is empty, and there is no earlier snapshot left to replay.
 func replayUserState(worktreePath string, plan taskBranchPlan, snapshot string, logger *slog.Logger) (replayResult, error) {
-	if !plan.carriesSnapshot() {
+	if !plan.continues {
 		return replayIncrement(worktreePath, plan.base, snapshot, plan, logger)
 	}
 	newHead, err := runGitTrimmed(worktreePath, "rev-parse", "--verify", snapshot+"^")
@@ -2318,7 +2204,7 @@ func replayIncrement(worktreePath, carried, snapshot string, plan taskBranchPlan
 		return replayResult{}, fmt.Errorf("execenv: could not replay your local edits into the task worktree "+
 			"(the agent would have seen a different tree than you have): %s: %w", strings.TrimSpace(out), pickErr)
 	}
-	if !plan.carriesSnapshot() {
+	if !plan.continues {
 		// Unreachable by construction: a fresh branch is checked out at the
 		// increment's own parent, so there is nothing for git to disagree with.
 		// If it ever happens the tree is not one the user would recognise, and

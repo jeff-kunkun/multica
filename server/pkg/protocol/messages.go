@@ -102,12 +102,6 @@ const (
 	// along the inputs of wakeup rules that waited for this run; for any other
 	// daemon those rules keep their inputs and start a run of their own.
 	DaemonCapabilityJoinedWakeupsV1 = "joined-wakeups-v1"
-	// DaemonCapabilityDeliveryLineV1 advertises that the daemon forks a
-	// sub-issue's worktree from its parent's delivery branch and that its
-	// `multica issue close` merges the sub-issue's commits back into that
-	// branch (DENE-1537). Only then does the server put a sub-issue on its
-	// parent's line; any other daemon keeps one PR per sub-issue.
-	DaemonCapabilityDeliveryLineV1 = "delivery-line-v1"
 	// DaemonCapabilityConsultV1 advertises that the daemon runs a consult
 	// claim (DENE-1721): it sends the claim's consult_prompt as the whole
 	// prompt in an empty workdir. Only such a daemon's seats are offered as

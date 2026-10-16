@@ -411,9 +411,6 @@ type StageAdvanceResponse struct {
 	// Error repeats Message on a refusal so every client that reads the
 	// ordinary {"error": ...} shape shows the reason.
 	Error string `json:"error,omitempty"`
-	// SedimentError is set when the stage did advance but the memory round
-	// could not be opened. The advance itself still stands.
-	SedimentError string `json:"sediment_error,omitempty"`
 }
 
 // planStageAdvance decides the advance from the children's resolved statuses.
@@ -530,10 +527,6 @@ func (h *Handler) AdvanceIssueStage(w http.ResponseWriter, r *http.Request) {
 	}
 	if resp.Advanced {
 		resp.Message = fmt.Sprintf("stage %d of %s promoted to todo: %s", stage, parentLabel, strings.Join(labels, ", "))
-		if parent.ProjectID.Valid {
-			reason := fmt.Sprintf("阶段推进：%s 进入第 %d 阶段", parentLabel, stage)
-			resp.SedimentError = h.noteMemoryMilestone(r.Context(), parent.WorkspaceID, parent.ProjectID, reason, h.sedimentDigest(r.Context(), childrenBelowStage(children, stage)), &sedimentSource{Kind: "issue", ID: uuidToString(parent.ID)})
-		}
 	} else {
 		resp.Message = fmt.Sprintf("stage %d of %s was already promoted by a concurrent advance", stage, parentLabel)
 	}
@@ -576,19 +569,4 @@ func (h *Handler) promoteChildToTodo(ctx context.Context, child db.Issue, actorT
 	}
 	h.dispatchIssueRun(ctx, updated, trigger, actorType, actorID, "")
 	return updated, true, nil
-}
-
-// childrenBelowStage is the stage an advance just closed: the children of the
-// highest stage below the one being promoted. A first stage has none.
-func childrenBelowStage(children []db.Issue, stage int32) []db.Issue {
-	var prev int32
-	for _, c := range children {
-		if c.Stage.Valid && c.Stage.Int32 < stage && c.Stage.Int32 > prev {
-			prev = c.Stage.Int32
-		}
-	}
-	if prev == 0 {
-		return nil
-	}
-	return childrenInStage(children, prev)
 }

@@ -429,8 +429,8 @@ type Handler struct {
 	// secret created from Settings. Nil means this process cannot store them.
 	// Environment variables still configure the App without this box.
 	GitHubAppSecrets *secretbox.Box
-	// deliveryHTTP overrides the provider client used by the delivery lookup.
-	// Nil uses delivery.HTTP. Tests point it at an httptest server.
+	// deliveryHTTP overrides the provider client used for connection token
+	// checks. Nil uses delivery.HTTP. Tests point it at an httptest server.
 	deliveryHTTP *http.Client
 	// PluginSurfaceTokens seal short-lived launch claims. Nil disables surface
 	// launches; wired from a domain-separated MULTICA_PLUGIN_SECRET_KEY at boot.
@@ -464,19 +464,7 @@ type Handler struct {
 	// so the feature degrades cleanly on deployments without a private key.
 	// Wired in cmd/server/router.go after New.
 	PRRefresh *ghsnapshot.Manager
-	// PRMerger overrides PRRefresh for the acceptance-pass merge (DENE-850).
-	// Tests set it; production leaves it nil and uses PRRefresh.
-	PRMerger PullMerger
-	// PRBaseChecks overrides PRRefresh for reading a PR's base branch CI in
-	// the merge gates (DENE-892). Tests set it; production leaves it nil.
-	PRBaseChecks BaseCheckReader
-	cfg          Config
-}
-
-// PullMerger merges one linked pull request. A nil result from the deployment
-// means this server cannot merge, and the pass becomes a structured block.
-type PullMerger interface {
-	MergePullRequest(ctx context.Context, installationID int64, owner, repo string, number int) error
+	cfg       Config
 }
 
 func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *events.Bus, emailService *service.EmailService, store storage.Storage, cfSigner *auth.CloudFrontSigner, analyticsClient analytics.Client, cfg Config, daemonHubs ...*daemonws.Hub) *Handler {

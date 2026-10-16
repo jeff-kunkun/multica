@@ -7,7 +7,6 @@ import {
   issueBehavesAs,
   issueBehavesAsAny,
   issueStatusCategory,
-  readCloseProtocol,
 } from "@multica/core/issues";
 import { useStatusLabel } from "../utils/status-label";
 import { priorityLabel } from "../utils/priority-label";
@@ -112,8 +111,6 @@ import { IssueActionsDropdown, useIssueActions, IssueActionsContextMenu, IssueCo
 import { LabelChip } from "../../labels/label-chip";
 import { IssueAgentActivityIndicator } from "./issue-agent-activity-indicator";
 import { SubIssuesAgentWorkingChip } from "./sub-issues-agent-working-chip";
-import { SubIssueCloseStrip } from "./sub-issue-close-strip";
-import { IssueCloseRecordSection } from "./issue-close-record";
 import { SubIssueBlockerBadge, SubIssueBlockerSummary, blockerBadgeState, useSubIssueBlockerData } from "./sub-issue-blocker-summary";
 import { ProjectPicker } from "../../projects/components/project-picker";
 import { IssuePropertyPills } from "./issue-property-pills";
@@ -138,7 +135,6 @@ import { WakeupsSection } from "./wakeups-section";
 import { QuickActionsSection } from "./quick-actions-section";
 import { PluginPanelSection } from "../../plugins";
 import { PullRequestsSection } from "./pull-requests-section";
-import { DeliveryLineSection } from "./delivery-line-section";
 import { useGitHubSettings } from "@multica/core/github";
 import { DeliverablesSection } from "./deliverables/deliverables-section";
 import { DeliverablesOverview } from "./deliverables/deliverables-overview";
@@ -942,8 +938,6 @@ function SubIssueRow({
   rowProps,
   customProperties,
   blockerState,
-  parentStatus,
-  hasStagedSibling,
 }: {
   child: Issue;
   /** The sub-issue's OWN children progress (it can itself be a parent). */
@@ -953,8 +947,6 @@ function SubIssueRow({
   /** Workspace custom properties the user opted into showing on rows. */
   customProperties: IssueProperty[];
   blockerState?: { state: "ROOT" | "PROPAGATED" | "CLEAR"; rootCause?: string };
-  parentStatus?: Issue["status"];
-  hasStagedSibling?: boolean;
 }) {
   const { t } = useT("issues");
   const locale = useLocale();
@@ -1000,11 +992,10 @@ function SubIssueRow({
     <IssueActionsContextMenu issue={child}>
       <div
         className={cn(
-          "flex flex-col gap-1 px-3 py-2 hover:bg-accent/50 transition-colors group/row",
+          "flex items-center gap-2.5 px-3 py-2 hover:bg-accent/50 transition-colors group/row",
           selected && "bg-accent/30",
         )}
       >
-        <div className="flex items-center gap-2.5">
         {/* Priority ⇄ checkbox slot, mirroring the main list rows: the
             priority icon yields to the selection checkbox on hover/focus.
             Opacity (not display) swap keeps the checkbox keyboard-tabbable. */}
@@ -1156,8 +1147,6 @@ function SubIssueRow({
             }
           />
         )}
-        </div>
-        <SubIssueCloseStrip issue={child} parentStatus={parentStatus} hasStagedSibling={hasStagedSibling} />
       </div>
     </IssueActionsContextMenu>
   );
@@ -1776,15 +1765,6 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     previousCommentRuns.current = next.runs;
     return next;
   }, [commentTasks, timeline]);
-
-  // DENE-1002: the close record names the comment its reason lives in. Pull
-  // that body from the loaded timeline so the sidebar shows the conclusion and
-  // its reason together instead of making the reader hunt for the comment.
-  const closeEvidenceBody = useMemo(() => {
-    const evidenceId = readCloseProtocol(issue?.metadata, issue?.status ?? "").evidenceCommentId;
-    if (!evidenceId) return null;
-    return displayTimeline.find((entry) => entry.id === evidenceId)?.content ?? null;
-  }, [issue?.metadata, issue?.status, displayTimeline]);
 
   // Resolve / unresolve must always clear the per-session expand entry so
   // re-resolving an already-expanded thread folds it back to the bar (the
@@ -3204,10 +3184,6 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
       />
       <PluginPanelSection issueId={issue.id} />
 
-      {/* Close record (DENE-1002) — which conclusion closed this ticket, the
-          status it wrote, who continues and why. Renders nothing until the
-          `close.*` record is complete. */}
-      <IssueCloseRecordSection issue={issue} evidenceBody={closeEvidenceBody} />
 
       {/* Parent issue — standalone section, only when the issue has a
           parent. Setting a parent is reachable via the issue actions menu;
@@ -3268,11 +3244,6 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
           }}
         />
       )}
-
-      {/* Parent-branch delivery (DENE-1537): which parent's branch a
-          sub-issue delivers to, or the parent's sub-issue commits. Hidden
-          on every other issue. */}
-      <DeliveryLineSection wsId={issue.workspace_id} issueId={id} />
 
       {/* Deliverables — the files this issue's comments delivered. Hidden
           while there are none. */}
@@ -4174,8 +4145,6 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                               rowProps={subIssueRowProps}
                               customProperties={subIssueCustomProps}
                               blockerState={blockerBadgeState(blockerData.tree, child.id)}
-                              parentStatus={issue.status}
-                              hasStagedSibling={staged}
                             />
                           ))}
                         </Fragment>

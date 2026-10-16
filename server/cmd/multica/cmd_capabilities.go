@@ -60,7 +60,7 @@ var capabilityDomains = []struct {
 	Key, Title string
 	Roots      []string
 }{
-	{"issues", "票", []string{"issue", "ask", "plan", "knowledge"}},
+	{"issues", "票", []string{"issue", "ask", "plan"}},
 	{"chats", "聊天", []string{"chat"}},
 	{"agents", "智能体", []string{"agent", "squad", "skill"}},
 	{"projects", "项目", []string{"project", "label", "domain", "property"}},

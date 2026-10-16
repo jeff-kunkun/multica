@@ -3651,13 +3651,6 @@ func (d *Daemon) refreshWorkspaceRepos(ctx context.Context, workspaceID string) 
 	// what makes a toggled-off setting apply to checkouts that already exist
 	// instead of only to the next one (MUL-6921).
 	d.persistCoAuthoredByState(workspaceID)
-	// Project memory is an independent, read-only probe. The targets ride on
-	// this response so one refresh does not add a second control-plane read.
-	// An older server simply omits the field and the daemon keeps working.
-	if len(resp.MemoryTargets) > 0 {
-		d.refreshProjectMemoryTargets(refreshCtx, workspaceID, resp.MemoryTargets)
-	}
-
 	return resp, nil
 }
 
@@ -4620,9 +4613,6 @@ func (d *Daemon) syncWorkspacesFromAPI(ctx context.Context, reconcileProfiles bo
 
 		if d.repoCache != nil && len(resp.Repos) > 0 {
 			go d.syncWorkspaceRepos(id, resp.Repos)
-		}
-		if len(resp.MemoryTargets) > 0 {
-			d.refreshProjectMemoryTargets(ctx, id, resp.MemoryTargets)
 		}
 
 		// Tell the server about any tasks the previous daemon process was
@@ -9310,13 +9300,9 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 				WorktreeRoot:     strings.TrimSpace(localAssignment.Ref.WorktreeRoot),
 				ResumeWorkDir:    resumeWorkDir,
 				ReclaimPriorCopy: reclaimPriorCopy,
-				CanonicalBranch:  strings.TrimSpace(task.CanonicalBranch),
 			}
 			if trunk := strings.TrimSpace(d.worktreeCleanup.Settings().TrunkBranch); trunk != "" {
 				prepParams.LocalWorktree.SweepTrunks = []string{trunk}
-			}
-			if task.DeliveryLine != nil {
-				prepParams.LocalWorktree.DeliveryBranch = strings.TrimSpace(task.DeliveryLine.Branch)
 			}
 			// Take the per-path mutex for the snapshot alone, then hand it
 			// straight back — long enough to read a consistent tree, short
@@ -11540,7 +11526,6 @@ func convertProjectsForEnv(projects []ProjectContextData) []execenv.ProjectConte
 			Title:       p.Title,
 			Description: p.Description,
 			Resources:   convertProjectResourcesForEnv(p.Resources),
-			MemoryLine:  p.MemoryLine,
 			ChatCount:   p.ChatCount,
 		}
 	}

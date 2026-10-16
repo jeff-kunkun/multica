@@ -7,46 +7,6 @@ import (
 	"testing"
 )
 
-// A branch forked beside a busy conversation branch records its owner, so
-// once the server makes it the issue's canonical line the next turn continues
-// it instead of forking again (DENE-1286 ended up with four branches).
-func TestPrepareLocalWorktreeContinuesAForkedBranchMadeCanonical(t *testing.T) {
-	t.Parallel()
-	repo := newTestRepo(t)
-
-	holder := prepareTurn(t, repo, "MUL-6881", turnOneTask)
-	t.Cleanup(func() { holder.Discard(worktreeTestLogger()) })
-
-	forked := prepareTurn(t, repo, "MUL-6881", turnTwoTask)
-	if forked.Branch == holder.Branch {
-		t.Fatalf("fork took the busy branch %s", holder.Branch)
-	}
-	writeFile(t, filepath.Join(forked.WorkDir, "forked.txt"), "work on the fork\n")
-	out := finalizeOK(t, forked)
-
-	next, err := PrepareLocalWorktree(LocalWorktreeParams{
-		LocalPath:       repo,
-		EnvRoot:         t.TempDir(),
-		AgentName:       "J",
-		TaskID:          turnThreeTask,
-		ConversationKey: "MUL-6881",
-		WorkspaceID:     testBranchOwner.WorkspaceID,
-		AgentID:         testBranchOwner.AgentID,
-		ConversationID:  testBranchOwner.ConversationID,
-		CanonicalBranch: out.Branch,
-	}, worktreeTestLogger())
-	if err != nil {
-		t.Fatalf("next turn: %v", err)
-	}
-	t.Cleanup(func() { next.Discard(worktreeTestLogger()) })
-	if next.Branch != out.Branch || !next.Continued {
-		t.Fatalf("next turn branch = %q continued=%v, want to continue %q", next.Branch, next.Continued, out.Branch)
-	}
-	if _, err := os.Stat(filepath.Join(next.WorkDir, "forked.txt")); err != nil {
-		t.Fatalf("next turn does not carry the fork's work: %v", err)
-	}
-}
-
 // A run killed before Finalize leaves its copy on the conversation branch.
 // The same-seat retry reclaims it: same path, same branch, committed work
 // carried, uncommitted work saved under a ref and named in the notice.

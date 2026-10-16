@@ -12,7 +12,7 @@ import (
 
 // DENE-1678: an executor sending merged, already-reviewed work to review does
 // not wait for an acceptance seat. The ticket lands in done and says why.
-func TestCloseInReviewSkipsReviewWhenMergedAndReviewed(t *testing.T) {
+func TestAgentInReviewSkipsReviewWhenMergedAndReviewed(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
 	}
@@ -43,14 +43,11 @@ func TestCloseInReviewSkipsReviewWhenMergedAndReviewed(t *testing.T) {
 			}
 			tc.seed(t, issue.ID, prURL)
 
-			w := closeIssueHTTP(t, issue.ID, agentID, taskID, map[string]any{
-				"outcome":  "in_review",
-				"evidence": "PR: " + prURL + "\n已合入。",
-			})
+			w := agentUpdateIssueHTTP(t, issue.ID, agentID, taskID, map[string]any{"status": "in_review"})
 			if w.Code != http.StatusOK {
 				t.Fatalf("status = %d: %s", w.Code, w.Body.String())
 			}
-			var resp CloseIssueResponse
+			var resp IssueResponse
 			if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
 				t.Fatalf("decode: %v", err)
 			}
@@ -60,8 +57,8 @@ func TestCloseInReviewSkipsReviewWhenMergedAndReviewed(t *testing.T) {
 			if got := issueStatusDirect(t, issue.ID); got != "done" {
 				t.Fatalf("status = %s, want done", got)
 			}
-			if !strings.Contains(strings.Join(resp.Warnings, "\n"), "跳过验收席") {
-				t.Fatalf("warnings should say acceptance was skipped, got %v", resp.Warnings)
+			if body, _, _, _ := systemCommentOn(t, issue.ID); !strings.Contains(body, "跳过验收席") {
+				t.Fatalf("comment should say acceptance was skipped, got %s", body)
 			}
 			if got := issueMetaString(t, issue.ID, "review_skip"); !strings.Contains(got, tc.reason) {
 				t.Fatalf("review_skip = %q, want reason containing %q", got, tc.reason)
@@ -73,7 +70,7 @@ func TestCloseInReviewSkipsReviewWhenMergedAndReviewed(t *testing.T) {
 // Merged but not reviewed in a way that counts: the ticket still goes to
 // review. Covers the DENE-1678 review counterexamples — a pass by someone who
 // is not the acceptance seat, and an approval of another PR on the ticket.
-func TestCloseInReviewKeepsReviewWithoutQualifyingReview(t *testing.T) {
+func TestAgentInReviewKeepsReviewWithoutQualifyingReview(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
 	}
@@ -120,9 +117,7 @@ func TestCloseInReviewKeepsReviewWithoutQualifyingReview(t *testing.T) {
 				t.Fatalf("merge: %v", err)
 			}
 			tc.seed(t, issue.ID, prURL)
-			w := closeIssueHTTP(t, issue.ID, agentID, taskID, map[string]any{
-				"outcome": "in_review", "evidence": "PR: " + prURL,
-			})
+			w := agentUpdateIssueHTTP(t, issue.ID, agentID, taskID, map[string]any{"status": "in_review"})
 			if w.Code != http.StatusOK {
 				t.Fatalf("status = %d: %s", w.Code, w.Body.String())
 			}
@@ -139,7 +134,7 @@ func TestCloseInReviewKeepsReviewWithoutQualifyingReview(t *testing.T) {
 // DENE-1678 review F3: the seat passes the PR at H1, the executor pushes H2
 // to the same PR and merges it. The old pass never saw H2, so the ticket
 // still goes to review; once the seat passes again at H2, it skips.
-func TestCloseInReviewSkipNeedsReviewOfMergedHead(t *testing.T) {
+func TestAgentInReviewSkipNeedsReviewOfMergedHead(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
 	}
@@ -169,9 +164,7 @@ func TestCloseInReviewSkipNeedsReviewOfMergedHead(t *testing.T) {
 				`UPDATE github_pull_request SET state = 'merged', merged_at = now() WHERE html_url = $1`, prURL); err != nil {
 				t.Fatalf("merge: %v", err)
 			}
-			w := closeIssueHTTP(t, issue.ID, agentID, taskID, map[string]any{
-				"outcome": "in_review", "evidence": "PR: " + prURL,
-			})
+			w := agentUpdateIssueHTTP(t, issue.ID, agentID, taskID, map[string]any{"status": "in_review"})
 			if w.Code != http.StatusOK {
 				t.Fatalf("status = %d: %s", w.Code, w.Body.String())
 			}

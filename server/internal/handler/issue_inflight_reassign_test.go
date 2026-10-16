@@ -95,7 +95,7 @@ func TestAgentCannotReassignAnIssueInFlight(t *testing.T) {
 			if tc.rejected {
 				reason, _ := resp["assignee_ignored_reason"].(string)
 				if reason != routing.ReasonAgentReassignInFlight ||
-					!strings.Contains(reason, "multica issue escalate") || !strings.Contains(reason, "--outcome blocked") {
+					!strings.Contains(reason, "multica issue escalate") || !strings.Contains(reason, "issue status <id> blocked") {
 					t.Fatalf("assignee_ignored_reason = %q, want the way out named", reason)
 				}
 			}

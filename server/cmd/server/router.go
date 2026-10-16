@@ -1671,8 +1671,6 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		r.Get("/ws", h.DaemonWebSocket)
 		r.Get("/workspaces", h.ListDaemonWorkspaces)
 		r.Get("/workspaces/{workspaceId}/repos", h.GetDaemonWorkspaceRepos)
-		r.Get("/workspaces/{workspaceId}/memory", h.GetDaemonProjectMemoryTargets)
-		r.Post("/workspaces/{workspaceId}/memory/check", h.ReportDaemonProjectMemoryCheck)
 		r.Get("/workspaces/{workspaceId}/runtime-profiles", h.DaemonListRuntimeProfiles)
 		r.Get("/workspaces/{workspaceId}/block-waits", h.ListDaemonBlockWaits)
 		r.Post("/issues/{issueId}/wait-probe", h.ReportDaemonBlockWait)
@@ -2280,7 +2278,6 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			// Project-memory checklist (DENE-972). Not under /api/projects: that
 			// tree is behind the projects module, and a close must be able to
 			// read the same list the server validates against.
-			r.Get("/api/project-memory/locations", h.ListProjectMemoryLocations)
 
 			// Module-level sharing (DENE-699). These endpoints are themselves
 			// not behind RequireModule: the caller needs them to learn which
@@ -2385,18 +2382,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Post("/consults", h.CreateIssueConsult)
 					r.Get("/consults", h.ListIssueConsults)
 					r.Get("/consults/{consultId}", h.GetIssueConsult)
-					// One-shot close protocol (DENE-859): evidence comment,
-					// status and close.* keys in one transaction, checked by
-					// closeprotocol.Validate — `multica issue close`.
-					r.Post("/close", h.CloseIssue)
-					// Read-only shape gate `issue close` asks before a local
-					// merge; the outcome table lives only on the server (DENE-1183).
-					r.Post("/close/check", h.CheckCloseIssue)
 					r.Post("/progress", h.WriteIssueProgress)
 					r.Get("/progress", h.ListIssueProgress)
-					// PR state from the caller's gh, refreshed by `issue
-					// close` so the done gate sees merges without a GitHub App.
-					r.Post("/pull-requests/report", h.ReportIssuePullRequests)
 					// One-shot handoff (DENE-863): server routes, dedupes and
 					// reports what actually landed — `multica issue handoff`.
 					r.Post("/handoff", h.HandoffIssue)
@@ -2430,10 +2417,6 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Put("/properties/{propertyId}", h.SetIssueProperty)
 					r.Delete("/properties/{propertyId}", h.DeleteIssueProperty)
 					r.Get("/pull-requests", h.ListPullRequestsForIssue)
-					r.Get("/delivery", h.GetIssueDelivery)
-					r.Put("/delivery/canonical", h.SetIssueDeliveryCanonical)
-					r.Post("/delivery/classify", h.ClassifyIssueDeliveryBranch)
-					r.Post("/delivery/cleanup", h.RecordIssueDeliveryCleanup)
 					r.Post("/pull-requests", h.LinkIssuePullRequest)
 					r.Delete("/pull-requests/{prId}", h.UnlinkIssuePullRequest)
 					r.Put("/pr-auto-complete", h.SetIssuePRAutoComplete)
@@ -2536,11 +2519,6 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Post("/", h.CreateProject)
 				r.Route("/{id}", func(r chi.Router) {
 					r.Get("/", h.GetProject)
-					r.Get("/memory", h.GetProjectMemory)
-					r.Get("/memory/check", h.GetProjectMemory)
-					r.Get("/memory/status", h.GetProjectMemory)
-					r.Get("/memory/monitor", h.GetProjectMemoryMonitor)
-					r.Post("/memory/check", h.PostProjectMemoryCheck)
 					r.Put("/", h.UpdateProject)
 					r.Delete("/", h.DeleteProject)
 					// A project's scope change sweeps every resource it
@@ -2920,8 +2898,6 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Post("/title", h.WriteChatTitle)
 					r.Post("/progress", h.WriteChatProgress)
 					r.Get("/progress", h.ListChatProgress)
-					r.Post("/sediment", h.CreateChatSediment)
-					r.Get("/sediment", h.ListChatSediments)
 					r.Post("/onboarding", h.StartMikaOnboarding)
 					// Explicit "refresh" of a turn's quick actions: re-runs the
 					// daemon suggestion pass for the latest assistant reply (MUL-5149).

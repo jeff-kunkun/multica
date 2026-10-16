@@ -21,7 +21,6 @@ import (
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/permission"
 	"github.com/multica-ai/multica/server/internal/routing"
-	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
@@ -599,59 +598,6 @@ func workspaceReposByURL(stored []byte) map[string]workspaceRepoRef {
 	return out
 }
 
-func validateWorkspaceMemorySettings(ctx context.Context, q *db.Queries, workspaceID pgtype.UUID, settings any) error {
-	if settings == nil || q == nil {
-		return nil
-	}
-	raw, err := json.Marshal(settings)
-	if err != nil {
-		return nil
-	}
-	var parsed struct {
-		Memory *struct {
-			SedimentAgent       *string `json:"sediment_agent"`
-			SedimentInstruction *string `json:"sediment_instruction"`
-		} `json:"memory"`
-	}
-	if err := json.Unmarshal(raw, &parsed); err != nil {
-		return nil
-	}
-	if parsed.Memory == nil {
-		return nil
-	}
-	if s := parsed.Memory.SedimentInstruction; s != nil && len(strings.TrimSpace(*s)) > maxSedimentInstructionBytes {
-		return fmt.Errorf("memory.sediment_instruction is longer than %d bytes", maxSedimentInstructionBytes)
-	}
-	if parsed.Memory.SedimentAgent == nil {
-		return nil
-	}
-	agentStr := strings.TrimSpace(*parsed.Memory.SedimentAgent)
-	if agentStr == "" {
-		return nil
-	}
-	agentID, err := util.ParseUUID(agentStr)
-	if err != nil {
-		return fmt.Errorf("invalid memory.sediment_agent UUID: %w", err)
-	}
-	agent, err := q.GetAgentInWorkspace(ctx, db.GetAgentInWorkspaceParams{
-		ID:          agentID,
-		WorkspaceID: workspaceID,
-	})
-	if err != nil {
-		return fmt.Errorf("sediment agent not found in this workspace")
-	}
-	if agent.ArchivedAt.Valid {
-		return fmt.Errorf("sediment agent is archived")
-	}
-	if !agent.RuntimeID.Valid {
-		return fmt.Errorf("sediment agent has no runtime bound")
-	}
-	if !agent.WorkEnabled {
-		return fmt.Errorf("sediment agent has work disabled")
-	}
-	return nil
-}
-
 func (h *Handler) UpdateWorkspace(w http.ResponseWriter, r *http.Request) {
 	id := workspaceIDFromURL(r, "id")
 	idUUID, ok := parseUUIDOrBadRequest(w, id, "workspace id")
@@ -714,10 +660,6 @@ func (h *Handler) UpdateWorkspace(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Settings != nil {
 		if err := validateBotWakeChainSettings(req.Settings); err != nil {
-			writeError(w, http.StatusBadRequest, err.Error())
-			return
-		}
-		if err := validateWorkspaceMemorySettings(r.Context(), h.Queries, idUUID, req.Settings); err != nil {
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
 		}

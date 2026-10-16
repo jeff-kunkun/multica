@@ -6,12 +6,12 @@ import (
 )
 
 // RejectAssociationWait refuses a wait that asks the platform to notice a
-// pull request on its own. The close that has the link uses --pr; a wait
-// never produces that link (DENE-961).
+// pull request on its own. A wait never produces that link; the PR does, by
+// naming the issue (DENE-961).
 func RejectAssociationWait(in Input, rec Record) error {
 	if isAssociationWait(in.WaitCondition) || isAssociationWait(in.WaitProbe) ||
 		isAssociationWait(rec.WaitCondition) || isAssociationWait(rec.WaitProbe) {
-		return fmt.Errorf("不能用「等平台关联 PR」卡住。改用 `multica issue close <票号> --pr <链接>`，平台会核实；核不到也放行并标成未核实")
+		return fmt.Errorf("不能用「等平台关联 PR」卡住。在 PR 标题、分支名或描述里写上票号，平台会自动关联")
 	}
 	return nil
 }

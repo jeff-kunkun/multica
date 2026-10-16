@@ -5873,8 +5873,8 @@ func TestRunIssueStatusBlockedWarnsAndReportsSeat(t *testing.T) {
 
 	var warn bytes.Buffer
 	warnUnregisteredBlock(newIssueStatusTestCmd(), &warn, "MUL-1")
-	if !strings.Contains(warn.String(), "--outcome blocked --blocked-by") {
-		t.Fatalf("warning does not point at issue close: %s", warn.String())
+	if !strings.Contains(warn.String(), "issue status MUL-1 blocked --blocked-by") {
+		t.Fatalf("warning does not point at issue status: %s", warn.String())
 	}
 	flagged := newIssueStatusTestCmd()
 	for _, flag := range blockedWaitFlags {

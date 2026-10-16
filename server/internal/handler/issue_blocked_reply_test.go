@@ -26,8 +26,7 @@ func issueMetaValue(t *testing.T, issueID, key string) (string, bool) {
 }
 
 // A member's reply that wakes the executor puts the ticket back to work in
-// the same step: status in_progress, the wait dropped, and the blocked close
-// marked superseded rather than replaced.
+// the same step: status in_progress and the wait dropped.
 func TestMemberReplyThatWakesExecutorResumesBlockedTicket(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
@@ -42,21 +41,17 @@ func TestMemberReplyThatWakesExecutorResumesBlockedTicket(t *testing.T) {
 		testPool.Exec(context.Background(), `DELETE FROM issue_summon WHERE issue_id = $1`, issue.ID)
 	})
 
-	w := closeIssueHTTP(t, issue.ID, agentID, taskID, map[string]any{
-		"outcome":     "blocked",
-		"evidence":    "两个方案都能做，等你挑一个。",
-		"summary":     "要人拍板：A 还是 B",
-		"needs_human": testUserID,
+	w := agentUpdateIssueHTTP(t, issue.ID, agentID, taskID, map[string]any{
+		"status":       "blocked",
+		"needs_human":  testUserID,
+		"block_kind":   "decision",
+		"block_action": "要人拍板：A 还是 B",
 	})
 	if w.Code != http.StatusOK {
-		t.Fatalf("close: %d %s", w.Code, w.Body.String())
+		t.Fatalf("block: %d %s", w.Code, w.Body.String())
 	}
 	if got := issueStatusDirect(t, issue.ID); got != "blocked" {
-		t.Fatalf("status after close = %s, want blocked", got)
-	}
-	closeAt, _ := issueMetaValue(t, issue.ID, "close.at")
-	if closeAt == "" {
-		t.Fatal("close did not record close.at")
+		t.Fatalf("status after block = %s, want blocked", got)
 	}
 	if _, err := testPool.Exec(ctx, `UPDATE agent_task_queue SET status = 'completed', completed_at = now() WHERE id = $1`, taskID); err != nil {
 		t.Fatalf("finish task: %v", err)
@@ -69,12 +64,6 @@ func TestMemberReplyThatWakesExecutorResumesBlockedTicket(t *testing.T) {
 	}
 	if got := issueStatusDirect(t, issue.ID); got != "in_progress" {
 		t.Fatalf("status after reply = %s, want in_progress", got)
-	}
-	if got, _ := issueMetaValue(t, issue.ID, "close.superseded"); got != closeAt {
-		t.Fatalf("close.superseded = %q, want close.at %q", got, closeAt)
-	}
-	if got, _ := issueMetaValue(t, issue.ID, "close.conclusion"); got != "blocked" {
-		t.Fatalf("close.conclusion = %q, the record must not be forged", got)
 	}
 	for _, key := range []string{"block.needs_human", "close.block_kind", "close.block_action"} {
 		if v, ok := issueMetaValue(t, issue.ID, key); ok && v != "" {
@@ -107,7 +96,7 @@ func TestMemberCommentWithoutRunKeepsTicketBlocked(t *testing.T) {
 	}
 }
 
-func agentBlockRequest(t *testing.T, issueID, agentID, taskID string, body map[string]any) *httptest.ResponseRecorder {
+func agentUpdateIssueHTTP(t *testing.T, issueID, agentID, taskID string, body map[string]any) *httptest.ResponseRecorder {
 	t.Helper()
 	w := httptest.NewRecorder()
 	req := newRequest("PUT", "/api/issues/"+issueID, body)
@@ -119,7 +108,7 @@ func agentBlockRequest(t *testing.T, issueID, agentID, taskID string, body map[s
 }
 
 // An agent that blocks through the status path names what kind of block it is
-// and the one next step, same as the close path records.
+// and the one next step.
 func TestAgentStatusBlockedNeedsKindAndAction(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
@@ -128,18 +117,18 @@ func TestAgentStatusBlockedNeedsKindAndAction(t *testing.T) {
 	agentID := handlerTestAgentID(t)
 	taskID := insertIssueTaskWithStatus(t, agentID, issue.ID, "running")
 
-	w := agentBlockRequest(t, issue.ID, agentID, taskID, map[string]any{
+	w := agentUpdateIssueHTTP(t, issue.ID, agentID, taskID, map[string]any{
 		"status":     "blocked",
 		"blocked_by": "DENE-806",
 	})
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("missing kind: status = %d, want 400: %s", w.Code, w.Body.String())
 	}
-	if !strings.Contains(w.Body.String(), "--block-kind") || !strings.Contains(w.Body.String(), "multica issue close --outcome blocked") {
-		t.Fatalf("rejection should name the flags and the close command, got %s", w.Body.String())
+	if !strings.Contains(w.Body.String(), "--block-kind") || !strings.Contains(w.Body.String(), "--block-action") {
+		t.Fatalf("rejection should name the flags, got %s", w.Body.String())
 	}
 
-	w = agentBlockRequest(t, issue.ID, agentID, taskID, map[string]any{
+	w = agentUpdateIssueHTTP(t, issue.ID, agentID, taskID, map[string]any{
 		"status":       "blocked",
 		"blocked_by":   "DENE-806",
 		"block_kind":   "nonsense",
@@ -149,7 +138,7 @@ func TestAgentStatusBlockedNeedsKindAndAction(t *testing.T) {
 		t.Fatalf("bad kind: status = %d, want 400: %s", w.Code, w.Body.String())
 	}
 
-	w = agentBlockRequest(t, issue.ID, agentID, taskID, map[string]any{
+	w = agentUpdateIssueHTTP(t, issue.ID, agentID, taskID, map[string]any{
 		"status":       "blocked",
 		"blocked_by":   "DENE-806",
 		"block_kind":   "dependency",

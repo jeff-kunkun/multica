@@ -756,11 +756,7 @@ type TaskProjectContextData struct {
 	Title       string                `json:"title"`
 	Description string                `json:"description,omitempty"`
 	Resources   []ProjectResourceData `json:"resources,omitempty"`
-	// MemoryLine is one brief line: the project-memory map path and the
-	// missing checklist. Empty on a server that has not observed the project.
-	// File bodies stay out of this payload. Mirror field: daemon ProjectContextData.
-	MemoryLine string `json:"memory_line,omitempty"`
-	ChatCount  int    `json:"chat_count,omitempty"`
+	ChatCount   int                   `json:"chat_count,omitempty"`
 }
 
 // ConnectedAppData keeps the daemon-claim wire field local to handler types
@@ -822,25 +818,17 @@ type AgentTaskResponse struct {
 	ContextGeneration int32  `json:"context_generation,omitempty"`
 	// DENE-1345 session lineage: "new" or "resumed"; the run whose session this
 	// one resumed; why a new session started. Empty on rows predating it.
-	SessionMode           string `json:"session_mode,omitempty"`
-	ResumedFromRun        string `json:"resumed_from_run,omitempty"`
-	SessionBreakReason    string `json:"session_break_reason,omitempty"`
-	ContextMessageLimit   int32  `json:"context_message_limit,omitempty"`
-	ContextTokenBudget    int32  `json:"context_token_budget,omitempty"`
-	ContinuityBreakReason string `json:"continuity_break_reason,omitempty"`
-	IssueID               string `json:"issue_id"`
-	WorkspaceID           string `json:"workspace_id"`
-	WorkspaceSlug         string `json:"workspace_slug,omitempty"`
-	IssueIdentifier       string `json:"issue_identifier,omitempty"`
-	// CanonicalBranch is the issue's canonical delivery branch (DENE-820).
-	// A worktree-mode daemon continues it even when another seat created
-	// it, so a rerun never opens a second delivery line by accident.
-	CanonicalBranch string `json:"canonical_branch,omitempty"`
-	// DeliveryLine is set on a sub-issue that delivers onto its parent's
-	// branch (DENE-1537): the worktree forks from that branch and the close
-	// merges back into it instead of opening a PR.
-	DeliveryLine         *service.DeliveryLineClaim `json:"delivery_line,omitempty"`
-	RemoteMCPConnections []remotemcp.Connection     `json:"remote_mcp_connections,omitempty"`
+	SessionMode           string                 `json:"session_mode,omitempty"`
+	ResumedFromRun        string                 `json:"resumed_from_run,omitempty"`
+	SessionBreakReason    string                 `json:"session_break_reason,omitempty"`
+	ContextMessageLimit   int32                  `json:"context_message_limit,omitempty"`
+	ContextTokenBudget    int32                  `json:"context_token_budget,omitempty"`
+	ContinuityBreakReason string                 `json:"continuity_break_reason,omitempty"`
+	IssueID               string                 `json:"issue_id"`
+	WorkspaceID           string                 `json:"workspace_id"`
+	WorkspaceSlug         string                 `json:"workspace_slug,omitempty"`
+	IssueIdentifier       string                 `json:"issue_identifier,omitempty"`
+	RemoteMCPConnections  []remotemcp.Connection `json:"remote_mcp_connections,omitempty"`
 	// PluginHookTools are the workspace's agent-trigger plugin hooks, which the
 	// daemon renders as MCP tools for this task. Resolved at claim time so
 	// disabling or uninstalling a plugin takes effect on the next task rather

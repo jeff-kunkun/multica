@@ -220,14 +220,13 @@ func TestInjectRuntimeConfigKeepsTriggerCommentOutOfBrief(t *testing.T) {
 		// MUL-6417 retired the turn-mode router: one workflow, delivery
 		// routed on what the per-turn message carries. DENE-1329 slimmed the
 		// workflow to a verb map; pin the routing RULE halves that survive —
-		// the per-turn message names the trigger and the `--parent`, a
-		// closing turn delivers through `issue close`, and a turn that does
-		// not close replies under that `--parent`. A compression that drops
-		// either delivery case must fail here.
+		// the per-turn message names the trigger and the `--parent`, the
+		// result comment goes under that `--parent`, and the status is left
+		// true. A compression that drops either half must fail here.
 		"### Workflow",
 		"The per-turn message says what woke you — an assignment, or a comment with the `--parent` to reply under",
-		"multica issue close <id> --outcome <...> --evidence-file ./close.md",
-		"posts one comment instead, under the `--parent` the per-turn message gave",
+		"4. Post one result comment with `multica issue comment add`, under the `--parent` the per-turn message gave",
+		"5. Leave the status true with `multica issue status`",
 		// The no-write default that makes the un-routed workflow safe: a
 		// turn that moved nothing writes nothing (MUL-6300 → MUL-6417).
 		"A turn that only answers a question or consults on work owned elsewhere writes no status at all",

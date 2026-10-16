@@ -1559,10 +1559,9 @@ func TestInjectRuntimeConfigBackgroundTaskSafetyProviderAgnostic(t *testing.T) {
 				"Never background work and yield",
 				"block on results in the foreground",
 				// 2. CI / external systems are not run-owned — the full compound
-				// ban, not its first item (MUL-5223), and `issue close` owns CI.
+				// ban, not its first item (MUL-5223).
 				"Don't wait on CI or external systems",
 				"no `gh pr checks --watch`, `gh run watch` or sleep polls",
-				"`multica issue close` handles CI",
 				"CI running: <PR link>",
 				// 3. The one persistent-service exception and its handoff triple
 				// (MUL-5274).
@@ -1630,7 +1629,6 @@ func TestInjectRuntimeConfigAvailableCommandsCoreOnly(t *testing.T) {
 		"`issue create | update | assign`",
 		"`--no-start` records a change without starting a run",
 		"`issue status <id> <status>`",
-		"`issue close`",
 		"`issue handoff --to <seat|agent>`",
 		"`issue summon --to <member>`",
 		"`issue wakeup`",
@@ -2532,16 +2530,15 @@ func TestInjectRuntimeConfigRequiresExplicitCommentPost(t *testing.T) {
 			s := string(data)
 
 			// The workflow must name an explicit delivery call — not just a
-			// prose mention of posting. Since DENE-1329 the final step is
-			// `multica issue close` (which writes the evidence comment), and a
-			// turn that does not close posts one comment under `--parent`.
+			// prose mention of posting: step 4 posts one result comment under
+			// `--parent`, step 5 leaves the status true.
 			// MUL-5442 cross-channel dedup still holds: the ready-to-run
 			// commands with real ids live in the per-turn message, so pin the
 			// command names and flag mnemonics, not full templates.
 			mustContain := []string{
-				"4. Finish with `multica issue close <id> --outcome <...> --evidence-file ./close.md`",
-				"posts one comment instead, under the `--parent` the per-turn message gave",
-				"`issue comment add <id> --verdict hold`",
+				"4. Post one result comment with `multica issue comment add`, under the `--parent` the per-turn message gave",
+				"5. Leave the status true with `multica issue status`",
+				"`issue comment add <id> --verdict pass`; send it back with `--verdict hold`",
 			}
 			for _, want := range mustContain {
 				if !strings.Contains(s, want) {
@@ -2553,7 +2550,7 @@ func TestInjectRuntimeConfigRequiresExplicitCommentPost(t *testing.T) {
 			// output is not user-visible. This is the second line of defense
 			// in case the agent skips past the workflow steps.
 			for _, want := range []string{
-				"⚠️ **Deliver through a comment on the issue** (a close writes one)",
+				"⚠️ **Deliver through a comment on the issue**",
 				"Nobody sees your terminal or run log",
 				"Post exactly ONE comment per run, the final result",
 			} {
@@ -5687,10 +5684,9 @@ func TestInjectRuntimeConfigMentionLoopHardening(t *testing.T) {
 		// unconditional one-comment contract now lives in step 4, and the
 		// mention-after-work bullet is gone with the block (the discipline
 		// itself stays in `## Mentions`, pinned by the Mentions subtest).
-		// DENE-1329: step 4 now states the delivery as a close or, for a
-		// turn that does not close, one comment under --parent.
+		// Step 4 states the delivery as one result comment under --parent.
 		for _, want := range []string{
-			"A turn that does not close (an answer, a review hold) posts one comment instead",
+			"4. Post one result comment with `multica issue comment add`, under the `--parent` the per-turn message gave (top-level when none).",
 			"Post exactly ONE comment per run, the final result",
 			"a thank-you or FYI mention of an agent costs a paid run",
 		} {
@@ -5752,7 +5748,7 @@ func TestInjectRuntimeConfigSquadLeaderCommentTriggeredNoAction(t *testing.T) {
 	// appends to Instructions, and both sites point there (MUL-6984).
 	for _, want := range []string{
 		"unless your outcome is `no_action`, as your Squad Operating Protocol states",
-		"(or the `no_action` outcome from your Squad Operating Protocol)",
+		"unless the outcome is `no_action` from your Squad Operating Protocol",
 	} {
 		if !strings.Contains(s, want) {
 			t.Errorf("squad leader comment-triggered CLAUDE.md missing %q", want)
@@ -5760,7 +5756,7 @@ func TestInjectRuntimeConfigSquadLeaderCommentTriggeredNoAction(t *testing.T) {
 	}
 	// The unconditional ordinary-agent imperative must not coexist with the
 	// carve-out variant.
-	if strings.Contains(s, "A turn that does not close (an answer, a review hold) posts one comment instead") {
+	if strings.Contains(s, "4. Post one result comment with `multica issue comment add`, under the `--parent` the per-turn message gave (top-level when none).") {
 		t.Errorf("squad leader CLAUDE.md still carries the unconditional delivery step")
 	}
 	// And neither site may restate the rule's mechanics — that is what drifted
@@ -6372,7 +6368,7 @@ func TestBriefCarriesNoMetadataGuidance(t *testing.T) {
 			}
 			for _, want := range []string{
 				"1. Read the issue, then the comments: scan the threads with `issue comment list <id> --roots-only --summary`",
-				"4. Finish with `multica issue close <id>",
+				"4. Post one result comment with `multica issue comment add`",
 			} {
 				if !strings.Contains(s, want) {
 					t.Errorf("%s workflow lost %q\n---\n%s", tc.name, want, s)

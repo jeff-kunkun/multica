@@ -19,7 +19,7 @@ type Ref struct {
 	Key string
 }
 
-// ParsePullURL accepts the links a person pastes into `issue close --pr`:
+// ParsePullURL accepts pull and merge request links such as:
 //
 //	https://github.com/owner/repo/pull/392
 //	https://gitlab.com/group/sub/repo/-/merge_requests/12

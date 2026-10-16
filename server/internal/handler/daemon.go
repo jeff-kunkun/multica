@@ -463,11 +463,10 @@ func absoluteHostHomeDir(path string) string {
 }
 
 type daemonWorkspaceReposResponse struct {
-	WorkspaceID   string               `json:"workspace_id"`
-	Repos         []RepoData           `json:"repos"`
-	ReposVersion  string               `json:"repos_version"`
-	Settings      json.RawMessage      `json:"settings,omitempty"`
-	MemoryTargets []daemonMemoryTarget `json:"memory_targets,omitempty"`
+	WorkspaceID  string          `json:"workspace_id"`
+	Repos        []RepoData      `json:"repos"`
+	ReposVersion string          `json:"repos_version"`
+	Settings     json.RawMessage `json:"settings,omitempty"`
 }
 
 func normalizeWorkspaceRepos(repos []RepoData) []RepoData {
@@ -973,16 +972,12 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 	})
 
 	repoResp := workspaceReposResponse(req.WorkspaceID, ws.Repos, ws.Settings)
-	if targets, targetErr := h.listDaemonMemoryTargets(r.Context(), wsUUID); targetErr == nil {
-		repoResp.MemoryTargets = targets
-	}
 
 	writeJSON(w, http.StatusOK, map[string]any{
-		"runtimes":       resp,
-		"repos":          repoResp.Repos,
-		"repos_version":  repoResp.ReposVersion,
-		"settings":       repoResp.Settings,
-		"memory_targets": repoResp.MemoryTargets,
+		"runtimes":      resp,
+		"repos":         repoResp.Repos,
+		"repos_version": repoResp.ReposVersion,
+		"settings":      repoResp.Settings,
 	})
 }
 
@@ -1161,9 +1156,6 @@ func (h *Handler) GetDaemonWorkspaceRepos(w http.ResponseWriter, r *http.Request
 	}
 
 	response := workspaceReposResponse(workspaceID, ws.Repos, ws.Settings)
-	if targets, targetErr := h.listDaemonMemoryTargets(r.Context(), parseUUID(workspaceID)); targetErr == nil {
-		response.MemoryTargets = targets
-	}
 	writeJSON(w, http.StatusOK, response)
 }
 
@@ -4273,9 +4265,6 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 		resp.WorkspaceSlug = ws.Slug
 		if issueNumber > 0 {
 			resp.IssueIdentifier = service.IssueIdentifier(ws.IssuePrefix, issueNumber)
-			if canonical, err := h.Queries.GetIssueCanonicalDeliveryBranch(r.Context(), task.IssueID); err == nil {
-				resp.CanonicalBranch = canonical.BranchName
-			}
 		}
 		resp.IssueSubIssues = h.claimSubIssues(r.Context(), ws.IssuePrefix, subIssues)
 		if len(subIssues) > maxClaimSubIssues {
@@ -4413,13 +4402,6 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 			status:  http.StatusUnprocessableEntity,
 			message: reason,
 		}
-	}
-
-	// DENE-1537: a sub-issue delivers onto its parent's branch. The line is
-	// opened only on a worktree run by a daemon that can fork from it and
-	// merge back; once open it is handed to every later run of the issue.
-	if task.IssueID.Valid && requestHasClientCapability(r, protocol.DaemonCapabilityDeliveryLineV1) {
-		resp.DeliveryLine = h.claimDeliveryLine(r.Context(), task.IssueID, resp.CodeDecision != nil && resp.CodeDecision.Kind() == coderesolve.KindLocalWorktree)
 	}
 
 	// DENE-727: an automatic retry that inherited the parent's session already
@@ -6218,7 +6200,6 @@ func (h *Handler) AckTaskCancelled(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		delivered = true
-		h.recordCancelledTaskDeliveryBranch(r, task, branch)
 	}
 	if msg := strings.TrimSpace(req.ErrorMessage); msg != "" {
 		reason := strings.TrimSpace(req.FailureReason)
@@ -7082,33 +7063,4 @@ func (h *Handler) GetTaskGCCheck(w http.ResponseWriter, r *http.Request) {
 		"status":       task.Status,
 		"completed_at": task.CompletedAt.Time,
 	})
-}
-
-// recordCancelledTaskDeliveryBranch files a cancelled run's branch under its
-// issue (DENE-820). The complete/fail paths do this inside their
-// transaction; cancel is the third way a worktree branch reaches the server.
-// A failure here is logged, not returned: the branch name is already
-// persisted on the task and the aggregate re-derives from task rows.
-func (h *Handler) recordCancelledTaskDeliveryBranch(r *http.Request, task db.AgentTaskQueue, branch string) {
-	if !task.IssueID.Valid {
-		return
-	}
-	task.BranchName = pgtype.Text{String: branch, Valid: true}
-	row, newLine, err := service.RecordIssueDeliveryBranch(r.Context(), h.Queries, task)
-	if err != nil {
-		slog.Warn("cancel ack: record delivery branch failed", "task_id", uuidToString(task.ID), "error", err)
-		return
-	}
-	if row == nil || !newLine {
-		return
-	}
-	canonical, err := h.Queries.GetIssueCanonicalDeliveryBranch(r.Context(), task.IssueID)
-	if err != nil {
-		return
-	}
-	issue, err := h.Queries.GetIssue(r.Context(), task.IssueID)
-	if err != nil {
-		return
-	}
-	h.postBlockComment(r.Context(), issue, service.UnclassifiedDeliveryLineNotice(canonical.BranchName, row.BranchName))
 }

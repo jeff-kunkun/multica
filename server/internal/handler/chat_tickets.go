@@ -49,12 +49,11 @@ type ChatTicket struct {
 	AssigneeID   *string `json:"assignee_id"`
 	AssigneeName string  `json:"assignee_name,omitempty"`
 	Goal         string  `json:"goal,omitempty"`
-	// Summary, PullRequests and Knowledge are the ticket's receipt
+	// Summary and PullRequests are the ticket's receipt
 	// (DENE-1672): what its latest close reported, once it is done, blocked,
 	// cancelled or waiting for review.
 	Summary      string       `json:"summary,omitempty"`
 	PullRequests []receipt.PR `json:"pull_requests,omitempty"`
-	Knowledge    string       `json:"knowledge,omitempty"`
 	CreatedAt    string       `json:"created_at"`
 	UpdatedAt    string       `json:"updated_at"`
 	// LinkedAt is when the issue joined this chat: created_at for one it
@@ -242,7 +241,7 @@ func (h *Handler) ListChatSessionTickets(w http.ResponseWriter, r *http.Request)
 		}
 		if receipt.Reportable(issue.Status) {
 			rc := h.issueReceipt(r.Context(), issue, prefix)
-			ticket.Summary, ticket.PullRequests, ticket.Knowledge = rc.Summary, rc.PRs, rc.Knowledge
+			ticket.Summary, ticket.PullRequests = rc.Summary, rc.PRs
 		}
 		if issue.AssigneeType.Valid && issue.AssigneeID.Valid {
 			ticket.AssigneeName = h.chatTicketAssigneeName(r.Context(), names, issue.AssigneeType.String, issue.AssigneeID)

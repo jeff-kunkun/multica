@@ -45,25 +45,22 @@ func TestApplySnapshotMapsGateFields(t *testing.T) {
 	if pr.ChecksRunning != 1 {
 		t.Fatalf("running = %d, want 1", pr.ChecksRunning)
 	}
-	if pr.ReadyToMerge() {
-		t.Fatal("red checks must not be ready to merge")
-	}
 
 	var clean PR
 	applySnapshot(&clean, ghRow{MergeStateStatus: "CLEAN", StatusCheckRollup: json.RawMessage("null")})
-	if clean.ChecksRollup == nil || *clean.ChecksRollup != "" || !clean.ReadyToMerge() {
-		t.Fatalf("no checks + clean = %+v, want ready", clean)
+	if clean.ChecksRollup == nil || *clean.ChecksRollup != "" {
+		t.Fatalf("no checks + clean = %+v, want an empty rollup", clean)
 	}
 
 	var dirty PR
 	applySnapshot(&dirty, ghRow{MergeStateStatus: "DIRTY", StatusCheckRollup: json.RawMessage("null")})
-	if dirty.ReadyToMerge() || dirty.MergeableState == nil || *dirty.MergeableState != "dirty" {
+	if dirty.MergeableState == nil || *dirty.MergeableState != "dirty" {
 		t.Fatalf("dirty = %+v", dirty)
 	}
 
 	var broken PR
 	applySnapshot(&broken, ghRow{MergeStateStatus: "CLEAN", StatusCheckRollup: json.RawMessage(`{"state":"SUCCESS"}`)})
-	if broken.ChecksRollup != nil || broken.ReadyToMerge() {
+	if broken.ChecksRollup != nil {
 		t.Fatalf("unrecognized rollup must not look green: %+v", broken)
 	}
 }

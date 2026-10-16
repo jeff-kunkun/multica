@@ -339,7 +339,6 @@ func TestSlimQuickCreateAvailableCommands(t *testing.T) {
 		// verb-map lines of the full Commands section (DENE-1329)
 		"`issue get | list | children`",
 		"`issue comment list | add`",
-		"`issue close`",
 		"`issue handoff",
 		"`repo checkout <url>`",
 		"### Squad maintenance",
@@ -379,7 +378,6 @@ func TestBackgroundTaskSafetySlimHardPins(t *testing.T) {
 		// silently dropped.
 		"Don't wait on CI or external systems",
 		"no `gh pr checks --watch`, `gh run watch` or sleep polls",
-		"`multica issue close` handles CI",
 		"\"Local tests pass; CI running: <PR link>\" is a complete hand-off",
 		// 3. The one persistent-service exception and its handoff triple.
 		"Only a service the user asked to keep running may outlive the turn",

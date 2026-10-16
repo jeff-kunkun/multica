@@ -8,15 +8,15 @@ Product contracts the runtime brief does not fully encode.
 - [Sub-issues: todo starts work now, backlog parks it](#sub-issues-todo-starts-work-now-backlog-parks-it)
 - [Charts and files in a comment](#charts-and-files-in-a-comment)
 - [Incorrect to correct](#incorrect-to-correct)
-Closing is its own contract; read `references/close-protocol.md` for its `close.*` keys, decision tables, and dispatcher promotion rules.
+Finishing a turn is one result comment plus a true status (`multica issue status <id> in_review|in_progress|blocked`); what each status makes the server do is in `references/status-effects.md`.
 Who drives an open issue, and the `issue dispose` command for one nobody drives, are in `references/drivers.md`; stopping every run on an issue and the run limits are in `references/run-control.md`.
 `multica issue wait <id> --output json` is the read-only status view for a
 blocked issue's wait. It reports the wait condition, optional `wait_probe`,
 deadline, last probe status (`ready`, `pending`, or `failed`), check timestamp,
 and bounded output. A probe uses exit code `0` for ready, `10` (or GitHub CLI's
 `gh pr checks` code `8`) for pending, and
-any other code for failed. Do not add a follow-up stage-advance command after a
-close; the server advances stages as part of its close protocol.
+any other code for failed. Stage barriers are described in
+`references/sub-issues.md`.
 To move several issues to one lifecycle status at once, use the same batch
 endpoint as the web and desktop inbox actions:
 ```bash
@@ -167,27 +167,6 @@ Returns `{"pull_requests": [...], ...}`. Each element of `pull_requests` exposes
 So "is it merged?" is `state == "merged"` (or `merged_at != null`); "is it still
 a draft?" is `state == "draft"`; coarse CI status is `checks_conclusion`.
 
-The response may also include `gap` when nothing linked is merged or open
-(DENE-961). `gap.reason` is `no_connection` (no token and no GitHub App the
-server can query for that repository), `not_found` (a connection exists, but
-no pull or merge request title contains the ticket), or `not_merged` (one was
-found and it is still open or a draft). `gap.message` says which, and
-`gap.next_command` is the command to run. The server fills this by reading
-linked rows first and, when there are none, querying the repository
-connection with the ticket key.
-
-Do not block the ticket on “等待平台关联 PR” or any equivalent. That wait is
-rejected. Declare the link on the close instead:
-
-```bash
-multica issue close <id> --outcome done --pr <pull-or-mr-url> --evidence-file ./close.md
-```
-
-The server checks the URL once. When the check succeeds it registers the pull
-request and continues the normal gate. When the check cannot be done, the
-close still proceeds and the ticket records `close.pr_unverified` (未核实).
-An unverified link is not merged.
-
 If the command returns no linked PRs after a PR was opened, check the syntax
 first: the key must be in the PR title or branch, or right after a closing
 keyword in the body — a bare body mention does not count. When the syntax is the
@@ -258,10 +237,8 @@ multica issue property unset <issue-id> --name Environment
 - Agents cannot create or edit property definitions (owner/admin humans only).
   If a needed property does not exist, propose it in a comment instead.
 - Where state belongs: workflow state a human should see and filter by goes in
-  a property; the stage the issue is at goes in its status; a Close protocol
-  finish writes the eight `close.*` keys (see `references/close-protocol.md`);
-  everything else — what you did this run, what you found — goes in the result
-  comment.
+  a property; the stage the issue is at goes in its status; everything else —
+  what you did this run, what you found — goes in the result comment.
 - `issue list` filters and sorts by property with the same name addressing:
 
 ```bash
@@ -438,7 +415,7 @@ For GitLab, `glab ci status` can be used directly when it returns non-zero while
 
 ### Report progress
 
-`multica issue progress <issue-id> "<progress>" [--tone working|waiting|stuck|done] --output json` sets the line under the issue's title; `--history` reads earlier lines. Who wins between your line, a close summary and the parking summary: `references/progress.md`.
+`multica issue progress <issue-id> "<progress>" [--tone working|waiting|stuck|done] --output json` sets the line under the issue's title; `--history` reads earlier lines. Who wins between your line and the parking summary: `references/progress.md`.
 
 `multica issue title <issue-id> --suggest "<title>" --output json` stores a pending title suggestion for a human-created issue. It does not rename the issue; the issue page's adopt action is the only writer that applies it.
 

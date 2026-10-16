@@ -27,11 +27,6 @@ func setStatusAsRun(t *testing.T, issueID, status, agentID, taskID string) {
 	t.Helper()
 	w := httptest.NewRecorder()
 	body := map[string]any{"status": status}
-	if agentID != "" {
-		// The fork's close gate wants a linked PR from an agent; these tests
-		// are about who the rule wakes, so the run declares no code.
-		body["no_code_reason"] = "test"
-	}
 	req := withURLParam(newRequest("PUT", "/api/issues/"+issueID, body), "id", issueID)
 	if agentID != "" {
 		req = actAsRun(req, agentID, taskID)

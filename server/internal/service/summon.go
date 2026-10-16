@@ -341,7 +341,7 @@ func (s *TaskService) remindSummonAnswerClose(ctx context.Context, task db.Agent
 	if err != nil || issue.Status != "blocked" {
 		return
 	}
-	notice := s.createSystemNoticeComment(ctx, issue, "人已经回复，这次运行结束时票还停在 blocked。按回复继续推进，做完用 `multica issue close` 重新收口。")
+	notice := s.createSystemNoticeComment(ctx, issue, "人已经回复，这次运行结束时票还停在 blocked。按回复继续推进，做完把状态改到实际所在的位置。")
 	if notice == nil {
 		return
 	}

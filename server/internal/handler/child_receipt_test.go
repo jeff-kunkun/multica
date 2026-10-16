@@ -12,7 +12,7 @@ import (
 )
 
 // seedDoneClose writes a done close whose evidence opens with summary, the
-// record `multica issue close` leaves behind.
+// record the removed close command left behind on older issues.
 func seedDoneClose(t *testing.T, issueID, summary string) {
 	t.Helper()
 	ctx := context.Background()

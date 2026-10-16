@@ -3,7 +3,6 @@ import type { AgentSpawnPolicy, AgentSpawnPolicyPatch } from "../workspace/agent
 import type { ZodType } from "zod";
 import type { IssueWakeup, IssueWakeupInput, IssueWakeupSummaryRow, PausedWakeup, SystemWakeup, WakeupRun, WorkspaceSystemWakeup } from "../types/issue-wakeup";
 import type { WorkspaceWakeupPage, WorkspaceWakeupFilters } from "../types/issue-wakeup";
-import type { IssueDeliveryLines } from "./schemas";
 import { WorkspaceWakeupPageSchema, IssueWakeupSchema, IssueWakeupSummaryRowSchema, PausedWakeupSchema, SystemWakeupSchema, WakeupRunSchema, WorkspaceSystemWakeupSchema } from "./schemas";
 import type { InboxFilters } from "../inbox/filter-store";
 import type { ArchivedInboxPage, ArchivedInboxFacets } from "../types/inbox";
@@ -149,11 +148,6 @@ import type {
   StartMikaOnboardingResponse,
   CancelTaskResponse,
   Project,
-  ProjectMemoryStatus,
-  ProjectMemoryMonitor,
-  ProjectMemoryChecklistItem,
-  CloseIssueRequest,
-  CloseIssueResponse,
   ProjectMember,
   ResourceShare,
   CreateProjectRequest,
@@ -572,8 +566,6 @@ import {
   EMPTY_ISSUE_PROPERTIES_RESPONSE,
   EMPTY_ISSUE_PULL_REQUESTS_RESPONSE,
   IssuePullRequestsResponseSchema,
-  EMPTY_ISSUE_DELIVERY_LINES,
-  IssueDeliveryLinesSchema,
   ResourceLabelsResponseSchema,
   EMPTY_LABEL,
   EMPTY_LIST_LABELS_RESPONSE,
@@ -1846,13 +1838,6 @@ export class ApiClient {
 
   async upsertClientUsage(data: ClientUsageRequest): Promise<void> {
     await this.fetch("/api/client-usage", {
-      method: "POST",
-      body: JSON.stringify(data),
-    });
-  }
-
-  async closeIssue(id: string, data: CloseIssueRequest): Promise<CloseIssueResponse> {
-    return this.fetch(`/api/issues/${id}/close`, {
       method: "POST",
       body: JSON.stringify(data),
     });
@@ -5673,32 +5658,6 @@ export class ApiClient {
   }
 
   /** The project's news since the caller last heard it; reading moves nothing. */
-  async listProjectMemoryLocations(): Promise<{
-    locations: ProjectMemoryChecklistItem[];
-    builtin_sediment_instruction?: string;
-  }> {
-    return this.fetch("/api/project-memory/locations");
-  }
-
-  async getProjectMemory(id: string): Promise<ProjectMemoryStatus> {
-    return this.fetch(`/api/projects/${id}/memory/status`);
-  }
-
-  async getProjectMemoryMonitor(id: string, days?: number): Promise<ProjectMemoryMonitor> {
-    const query = days ? `?days=${days}` : "";
-    return this.fetch(`/api/projects/${id}/memory/monitor${query}`);
-  }
-
-  async checkProjectMemory(
-    id: string,
-    locations: unknown[],
-  ): Promise<ProjectMemoryStatus> {
-    return this.fetch(`/api/projects/${id}/memory/check`, {
-      method: "POST",
-      body: JSON.stringify({ locations }),
-    });
-  }
-
   async createProject(data: CreateProjectRequest): Promise<Project> {
     return this.fetch("/api/projects", {
       method: "POST",
@@ -6616,14 +6575,6 @@ export class ApiClient {
       EMPTY_ISSUE_PULL_REQUESTS_RESPONSE,
       { endpoint: "GET /api/issues/:id/pull-requests" },
     );
-  }
-
-  /** The parent-branch delivery of an issue: its own line, or its sub-issues' commits (DENE-1537). */
-  async getIssueDeliveryLines(issueId: string): Promise<IssueDeliveryLines> {
-    const raw = await this.fetch<unknown>(`/api/issues/${issueId}/delivery`);
-    return parseWithFallback(raw, IssueDeliveryLinesSchema, EMPTY_ISSUE_DELIVERY_LINES, {
-      endpoint: "GET /api/issues/:id/delivery",
-    });
   }
 
   /** Link a PR the workspace already mirrors, by pasted URL or by id (undo). */

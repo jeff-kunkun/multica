@@ -149,10 +149,6 @@ type IssueResponse struct {
 	Properties  map[string]any          `json:"properties"`
 	Reactions   []IssueReactionResponse `json:"reactions,omitempty"`
 	Attachments []AttachmentResponse    `json:"attachments,omitempty"`
-	// DeliveryLine is set on a sub-issue that delivers onto its parent's
-	// branch instead of opening its own PR (DENE-1537). Detail and children
-	// reads fill it; other paths leave it off.
-	DeliveryLine *service.IssueDeliveryLineSummary `json:"delivery_line,omitempty"`
 	// Labels are bulk-attached by list/detail endpoints so the client can render
 	// chips without an N+1 round-trip per row. Pointer + omitempty so paths that
 	// don't load labels (e.g. UpdateIssue, batch UpdateIssues, the issue:updated
@@ -2692,11 +2688,6 @@ func (h *Handler) GetIssue(w http.ResponseWriter, r *http.Request) {
 	if driver, ok := h.issueDriver(r.Context(), issue); ok {
 		resp.Driver = driverResponse(driver)
 	}
-	if lines, err := service.DeliveryLineSummaries(r.Context(), h.Queries, []pgtype.UUID{issue.ID}); err == nil {
-		if line, ok := lines[resp.ID]; ok {
-			resp.DeliveryLine = &line
-		}
-	}
 
 	writeJSON(w, http.StatusOK, resp)
 }
@@ -2733,16 +2724,9 @@ func (h *Handler) ListChildIssues(w http.ResponseWriter, r *http.Request) {
 	// costs one catalog read rather than one per row.
 	statusResolver := issuestatus.NewResolver(issue.WorkspaceID)
 	drivers := h.issueDrivers(r.Context(), issue.WorkspaceID, children)
-	lines, linesErr := service.DeliveryLineSummaries(r.Context(), h.Queries, ids)
-	if linesErr != nil {
-		slog.Warn("list child issues: delivery lines failed", "issue_id", uuidToString(issue.ID), "error", linesErr)
-	}
 	resp := make([]IssueResponse, len(children))
 	for i, child := range children {
 		resp[i] = issueToResponse(child, prefix)
-		if line, ok := lines[uuidToString(child.ID)]; ok {
-			resp[i].DeliveryLine = &line
-		}
 		if driver, ok := drivers[uuidToString(child.ID)]; ok {
 			resp[i].Driver = driverResponse(driver)
 		}
@@ -4037,12 +4021,6 @@ type UpdateIssueRequest struct {
 	// the issue to blocked must send both (DENE-1301).
 	BlockKind   *string `json:"block_kind,omitempty"`
 	BlockAction *string `json:"block_action,omitempty"`
-	// NoCodeReason is the declared exit from the review gate (DENE-869). An
-	// agent moving an issue to in_review without a linked open/draft/merged PR
-	// is refused unless it says here why this ticket carries no code (docs,
-	// research). The reason is echoed in the system comment; people are not
-	// gated and may leave it empty.
-	NoCodeReason *string `json:"no_code_reason,omitempty"`
 	// WaitingFor: see CreateIssueRequest.WaitingFor. Required when an agent
 	// moves a ticket into backlog.
 	WaitingFor *string `json:"waiting_for,omitempty"`
@@ -4695,9 +4673,9 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 	if statusActorType != "" {
 		_, actorIDForGuard = h.resolveActor(r, userID, workspaceID)
 	}
-	tr := h.guardSilentStall(r.Context(), prevIssue, statusKeyForGuard, statusActorType, actorIDForGuard, deref(req.NoCodeReason), params.AssigneeType, params.AssigneeID, params.ReviewerType, params.ReviewerID, touchedReviewerType || touchedReviewerID)
+	tr := h.guardSilentStall(r.Context(), prevIssue, statusKeyForGuard, statusActorType, actorIDForGuard, params.AssigneeType, params.AssigneeID, params.ReviewerType, params.ReviewerID, touchedReviewerType || touchedReviewerID)
 	if tr.refuse != "" {
-		writeTransitionRefusal(w, tr)
+		writeError(w, http.StatusConflict, tr.refuse)
 		return
 	}
 	if tr.status != "" {
@@ -4763,9 +4741,6 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 	issue = h.finishStatusTransition(r.Context(), issue, tr)
 	if _, touched := rawFields["parent_issue_id"]; touched || domainRequest != nil || targetProject != prevIssue.ProjectID {
 		issue = h.settleIssueDomain(r.Context(), issue, domainRequest)
-	}
-	if tr.noCode != "" {
-		h.setIssueMetaString(r.Context(), issue, "close.no_code_reason", tr.noCode)
 	}
 	if req.Status != nil || req.WaitingFor != nil {
 		issue = h.syncBacklogWaitingFor(r.Context(), issue, req.WaitingFor)
@@ -5753,7 +5728,7 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 		}
-		batchTransition := h.guardSilentStall(r.Context(), prevIssue, batchStatusKey, batchActorType, batchActorID, deref(req.Updates.NoCodeReason), params.AssigneeType, params.AssigneeID, params.ReviewerType, params.ReviewerID, false)
+		batchTransition := h.guardSilentStall(r.Context(), prevIssue, batchStatusKey, batchActorType, batchActorID, params.AssigneeType, params.AssigneeID, params.ReviewerType, params.ReviewerID, false)
 		if batchTransition.refuse != "" {
 			reject(issueID, batchTransition.refuse)
 			continue

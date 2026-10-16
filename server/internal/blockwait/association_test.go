@@ -18,8 +18,8 @@ func TestRejectAssociationWait(t *testing.T) {
 	}
 	for _, text := range bad {
 		_, err := Accept(nil, Input{WaitCondition: text, WaitTimeout: "2099-01-01T00:00:00Z"}, now)
-		if err == nil || !strings.Contains(err.Error(), "--pr") {
-			t.Fatalf("%q should be rejected with --pr, err=%v", text, err)
+		if err == nil || !strings.Contains(err.Error(), "票号") {
+			t.Fatalf("%q should be rejected naming the identifier, err=%v", text, err)
 		}
 	}
 	for _, text := range []string{"等待合并", "关联 PR 已先合并", "等 CI 跑完"} {
@@ -31,7 +31,7 @@ func TestRejectAssociationWait(t *testing.T) {
 		KeyWaitCondition: "等待平台关联 PR",
 		KeyWaitTimeout:   "2099-01-01T00:00:00Z",
 	}, Input{WakeAt: "2099-01-02T00:00:00Z"}, now)
-	if err == nil || !strings.Contains(err.Error(), "--pr") {
+	if err == nil || !strings.Contains(err.Error(), "票号") {
 		t.Fatal("stored association wait should be rejected")
 	}
 }

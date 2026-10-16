@@ -10,7 +10,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/delivery"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -58,29 +57,7 @@ func (h *Handler) ReportDaemonPullRequests(w http.ResponseWriter, r *http.Reques
 	if !h.requireDaemonWorkspaceAccess(w, r, req.WorkspaceID) {
 		return
 	}
-	if err := h.persistReportedPullRequests(r.Context(), parseUUID(req.WorkspaceID), req.PullRequests, ""); err != nil {
-		writeError(w, http.StatusInternalServerError, "persist PR failed")
-		return
-	}
-	w.WriteHeader(http.StatusAccepted)
-}
-
-// ReportIssuePullRequests is the same mirror scoped to one issue: `multica
-// issue close` refreshes the PR state from the caller's gh right before the
-// done gate reads it, so a reviewer's `gh pr merge` is visible without an App.
-// Only PRs whose title or branch names this issue are linked to it.
-func (h *Handler) ReportIssuePullRequests(w http.ResponseWriter, r *http.Request) {
-	issue, ok := h.loadIssueForUser(w, r, chi.URLParam(r, "id"))
-	if !ok {
-		return
-	}
-	var req DaemonPullRequestReport
-	if json.NewDecoder(r.Body).Decode(&req) != nil {
-		writeError(w, http.StatusBadRequest, "invalid report")
-		return
-	}
-	ident := issueIdentifier(h.getIssuePrefix(r.Context(), issue.WorkspaceID), issue.Number)
-	if err := h.persistReportedPullRequests(r.Context(), issue.WorkspaceID, req.PullRequests, ident); err != nil {
+	if err := h.persistReportedPullRequests(r.Context(), parseUUID(req.WorkspaceID), req.PullRequests); err != nil {
 		writeError(w, http.StatusInternalServerError, "persist PR failed")
 		return
 	}
@@ -88,18 +65,14 @@ func (h *Handler) ReportIssuePullRequests(w http.ResponseWriter, r *http.Request
 }
 
 // persistReportedPullRequests upserts the reported PRs (source=daemon) and
-// links each to the issues its title/branch names. onlyIdent, when set,
-// skips PRs that do not name that identifier at all.
-func (h *Handler) persistReportedPullRequests(ctx context.Context, ws pgtype.UUID, prs []DaemonPullRequest, onlyIdent string) error {
+// links each to the issues its title/branch names.
+func (h *Handler) persistReportedPullRequests(ctx context.Context, ws pgtype.UUID, prs []DaemonPullRequest) error {
 	prefix := h.getIssuePrefix(ctx, ws)
 	for _, p := range prs {
 		if p.Owner == "" || p.Repo == "" || p.Number == 0 {
 			continue
 		}
 		idents := extractIdentifiers(p.Title, p.Branch)
-		if onlyIdent != "" && !containsFold(idents, onlyIdent) {
-			continue
-		}
 		if provider := strings.ToLower(strings.TrimSpace(p.Provider)); provider != "" && provider != "github" {
 			if err := h.persistReportedVCSPull(ctx, ws, p, idents, prefix); err != nil {
 				return err
@@ -370,15 +343,6 @@ func (h *Handler) reportConnection(ctx context.Context, q *db.Queries, ws pgtype
 		WorkspaceID: ws, Provider: provider, InstanceUrl: instance, RepoUrl: "",
 		AccountLogin: "local-cli", AccessTokenEncrypted: token, WebhookSecretEncrypted: secret,
 	})
-}
-
-func containsFold(list []string, want string) bool {
-	for _, s := range list {
-		if strings.EqualFold(s, want) {
-			return true
-		}
-	}
-	return false
 }
 
 func timestamptzPtr(t *time.Time) pgtype.Timestamptz {

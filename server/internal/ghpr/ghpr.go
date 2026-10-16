@@ -1,6 +1,5 @@
 // Package ghpr reads pull-request state through the local gh CLI. It is the
-// App-free source for the PR mirror: the daemon reports after a run and
-// `multica issue close` refreshes right before the done gate reads it.
+// App-free source for the PR mirror: the daemon reports after a run.
 package ghpr
 
 import (
@@ -43,25 +42,6 @@ type PR struct {
 	ApprovedAt *time.Time `json:"approved_at,omitempty"`
 	// ApprovedHead is the commit that approval was given on.
 	ApprovedHead string `json:"approved_head_sha,omitempty"`
-}
-
-// ReadyToMerge reports whether the gh snapshot is one the close gate would
-// merge: merge state clean or has_hooks, and checks green or absent.
-func (p PR) ReadyToMerge() bool {
-	if p.MergeableState == nil || p.ChecksRollup == nil {
-		return false
-	}
-	switch strings.ToLower(strings.TrimSpace(*p.MergeableState)) {
-	case "clean", "has_hooks":
-	default:
-		return false
-	}
-	switch strings.ToLower(strings.TrimSpace(*p.ChecksRollup)) {
-	case "", "success", "passing", "neutral", "skipped":
-		return true
-	default:
-		return false
-	}
 }
 
 type ghRow struct {
@@ -337,16 +317,6 @@ func normalizeStatusState(s string) (status, conclusion string) {
 	default:
 		return "queued", ""
 	}
-}
-
-// Merge squash-merges one PR by URL.
-func Merge(ctx context.Context, dir, prURL string) error {
-	cmd := exec.CommandContext(ctx, "gh", "pr", "merge", prURL, "--squash")
-	cmd.Dir = dir
-	if out, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("gh pr merge %s: %w: %s", prURL, err, strings.TrimSpace(string(out)))
-	}
-	return nil
 }
 
 // ownerRepo reads owner/repo from https://github.com/<owner>/<repo>/pull/<n>.

@@ -755,7 +755,7 @@ func routingSummonFor(issue db.Issue) (source, reason string) {
 		return service.SummonSourceUnseated, unseatedReason
 	}
 	if issue.Status == "blocked" && !blockwait.ParseMetadata(parseIssueMetadata(issue.Metadata)).Structured() {
-		return service.SummonSourceRouting, "挂在阻塞但没写在等什么：让执行人用 `multica issue close --outcome blocked --blocked-by <挡路的票>` 补上，没在等就改回待办。"
+		return service.SummonSourceRouting, "挂在阻塞但没写在等什么：让执行人用 `multica issue status <票号> blocked --blocked-by <挡路的票>` 补上，没在等就改回待办。"
 	}
 	return service.SummonSourceRouting, routingSummonReason
 }

@@ -1222,7 +1222,6 @@ type claimProject struct {
 	Description string
 	Resources   []ProjectResourceData
 	Repos       []RepoData
-	MemoryLine  string
 	ChatCount   int
 }
 
@@ -1242,7 +1241,6 @@ func (c claimProjectContext) applyTo(resp *AgentTaskResponse) {
 				Title:       p.Title,
 				Description: p.Description,
 				Resources:   p.Resources,
-				MemoryLine:  p.MemoryLine,
 				ChatCount:   p.ChatCount,
 			})
 		}
@@ -1410,7 +1408,6 @@ func (h *Handler) resolveClaimProjectContexts(ctx context.Context, projectIDs []
 				Description: project.Description.String,
 				Resources:   resources,
 				Repos:       repos,
-				MemoryLine:  h.projectMemoryBriefLine(ctx, project),
 			})
 		}
 	}

@@ -56,57 +56,56 @@ func TestInReviewFillsADifferentAcceptanceSeat(t *testing.T) {
 	}
 }
 
-func TestDoneWithOpenPullMergesOrBlocks(t *testing.T) {
+// Done no longer waits on linked pull requests: an open, conflicting PR is
+// the reviewer's concern, not a gate on the status write.
+func TestDoneIgnoresOpenPull(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
 	}
-	t.Run("dirty is refused and the ticket stays as it was", func(t *testing.T) {
-		issue := createIssueHTTP(t, "dirty pr", "in_progress")
-		linkPull(t, issue.ID, 85101, "open", "dirty", "SUCCESS")
-		w := httptest.NewRecorder()
-		req := newRequest("PUT", "/api/issues/"+issue.ID, map[string]any{"status": "done"})
-		req = withURLParam(req, "id", issue.ID)
-		testHandler.UpdateIssue(w, req)
-		if w.Code != http.StatusConflict || !strings.Contains(w.Body.String(), `"code":"close_conflict"`) || !strings.Contains(w.Body.String(), "合并冲突") {
-			t.Fatalf("status = %d: %s, want 409 close_conflict", w.Code, w.Body.String())
-		}
-		var status, wake, watched string
-		if err := testPool.QueryRow(context.Background(), `
-			SELECT status, COALESCE(metadata->>'block.wake_at', ''), COALESCE(metadata->>'block.watched', '')
-			FROM issue WHERE id = $1
-		`, issue.ID).Scan(&status, &wake, &watched); err != nil {
-			t.Fatalf("read issue: %v", err)
-		}
-		if status != "in_progress" || wake != "" || watched != "" {
-			t.Fatalf("status = %q wake = %q watched = %q, want untouched", status, wake, watched)
-		}
-	})
+	issue := createIssueHTTP(t, "dirty pr", "in_progress")
+	linkPull(t, issue.ID, 85101, "open", "dirty", "SUCCESS")
+	w := httptest.NewRecorder()
+	req := newRequest("PUT", "/api/issues/"+issue.ID, map[string]any{"status": "done"})
+	req = withURLParam(req, "id", issue.ID)
+	testHandler.UpdateIssue(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", w.Code, w.Body.String())
+	}
+	if got := readIssueStatus(t, issue.ID); got != "done" {
+		t.Fatalf("status = %q, want done", got)
+	}
+}
 
-	t.Run("clean green merges then closes", func(t *testing.T) {
-		issue := createIssueHTTP(t, "clean pr", "in_progress")
-		linkPull(t, issue.ID, 85102, "open", "clean", "SUCCESS")
-		prev := testHandler.PRMerger
-		testHandler.PRMerger = fakeMerger{}
-		t.Cleanup(func() { testHandler.PRMerger = prev })
-		w := httptest.NewRecorder()
-		req := newRequest("PUT", "/api/issues/"+issue.ID, map[string]any{"status": "done"})
-		req = withURLParam(req, "id", issue.ID)
-		testHandler.UpdateIssue(w, req)
-		if w.Code != http.StatusOK {
-			t.Fatalf("status = %d, want 200: %s", w.Code, w.Body.String())
-		}
-		var status string
-		if err := testPool.QueryRow(context.Background(), `SELECT status FROM issue WHERE id = $1`, issue.ID).Scan(&status); err != nil {
-			t.Fatalf("read status: %v", err)
-		}
-		if status != "done" {
-			t.Fatalf("status = %q, want done", status)
-		}
-		body, _, _, _ := systemCommentOn(t, issue.ID)
-		if !strings.Contains(body, "合并") {
-			t.Fatalf("comment = %s", body)
-		}
-	})
+// An executor cannot close past someone else's acceptance seat.
+func TestAgentCannotCloseOverAcceptanceSeat(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	issue := createIssueHTTP(t, "seat close", "in_progress")
+	if _, err := testPool.Exec(context.Background(), `UPDATE issue SET reviewer_type = 'member', reviewer_id = $2 WHERE id = $1`, issue.ID, testUserID); err != nil {
+		t.Fatalf("set reviewer: %v", err)
+	}
+	w := httptest.NewRecorder()
+	req := newRequest("PUT", "/api/issues/"+issue.ID, map[string]any{"status": "done"})
+	req = withURLParam(req, "id", issue.ID)
+	asAgent(t, req, issue.ID)
+	testHandler.UpdateIssue(w, req)
+	if w.Code != http.StatusConflict || !strings.Contains(w.Body.String(), "in_review") {
+		t.Fatalf("status = %d: %s, want 409 pointing at in_review", w.Code, w.Body.String())
+	}
+	if got := readIssueStatus(t, issue.ID); got != "in_progress" {
+		t.Fatalf("status = %q, want in_progress", got)
+	}
+	// DENE-881: the refusal outlives the run that met it.
+	var action, kind string
+	if err := testPool.QueryRow(context.Background(),
+		`SELECT action, kind FROM issue_rejection WHERE issue_id = $1`, issue.ID,
+	).Scan(&action, &kind); err != nil {
+		t.Fatalf("rejection not recorded: %v", err)
+	}
+	if action != "status:done" {
+		t.Fatalf("rejection action = %s", action)
+	}
 }
 
 func ensureLadderAgent(t *testing.T, name string) string {
@@ -205,108 +204,23 @@ func readIssueStatus(t *testing.T, issueID string) string {
 	return status
 }
 
-// TestAgentReviewWithoutPullIsRefused is DENE-860 at the status write: the
-// executor said "done" with nothing pushed, and the move to in_review has to
-// stop there instead of two hours later.
-func TestAgentReviewWithoutPullIsRefused(t *testing.T) {
+// An agent's move to in_review does not depend on a linked pull request.
+func TestAgentReviewWithoutPullPasses(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
 	}
-	issue := createIssueHTTP(t, "review gate no pr", "in_progress")
+	issue := createIssueHTTP(t, "review without pr", "in_progress")
 	w := httptest.NewRecorder()
-	req := newRequest("PUT", "/api/issues/"+issue.ID, map[string]any{"status": "in_review"})
+	req := newRequest("PUT", "/api/issues/"+issue.ID, map[string]any{"status": "in_review", "reviewer_type": "none"})
 	req = withURLParam(req, "id", issue.ID)
-	agentID := asAgent(t, req, issue.ID)
-	setIssueAssigneeDirect(t, issue.ID, "agent", agentID)
+	asAgent(t, req, issue.ID)
 	testHandler.UpdateIssue(w, req)
-	if w.Code != http.StatusConflict {
-		t.Fatalf("status = %d, want 409: %s", w.Code, w.Body.String())
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", w.Code, w.Body.String())
 	}
-	body := w.Body.String()
-	if !strings.Contains(body, "PR") || !strings.Contains(body, issue.Identifier) || !strings.Contains(body, "--no-code") {
-		t.Fatalf("refusal must name the PR, the identifier and the exit, got %s", body)
+	if got := readIssueStatus(t, issue.ID); got != "in_review" {
+		t.Fatalf("status = %q, want in_review", got)
 	}
-	if got := readIssueStatus(t, issue.ID); got != "in_progress" {
-		t.Fatalf("status = %q, want the issue left in in_progress", got)
-	}
-	// DENE-881: the refusal outlives the run that met it.
-	var action, kind, reason string
-	if err := testPool.QueryRow(context.Background(),
-		`SELECT action, kind, reason FROM issue_rejection WHERE issue_id = $1`, issue.ID,
-	).Scan(&action, &kind, &reason); err != nil {
-		t.Fatalf("rejection not recorded: %v", err)
-	}
-	if action != "status:in_review" || kind != "pr_not_linked" || !strings.Contains(reason, issue.Identifier) {
-		t.Fatalf("rejection = %s/%s/%s", action, kind, reason)
-	}
-
-	t.Run("a declared no-code reason is the exit", func(t *testing.T) {
-		docs := createIssueHTTP(t, "review gate docs", "in_progress")
-		w := httptest.NewRecorder()
-		req := newRequest("PUT", "/api/issues/"+docs.ID, map[string]any{
-			"status": "in_review", "no_code_reason": "纯文档票，改动在 docs/ 里已直接合入", "reviewer_type": "none",
-		})
-		req = withURLParam(req, "id", docs.ID)
-		asAgent(t, req, docs.ID)
-		testHandler.UpdateIssue(w, req)
-		if w.Code != http.StatusOK {
-			t.Fatalf("status = %d, want 200: %s", w.Code, w.Body.String())
-		}
-		if got := readIssueStatus(t, docs.ID); got != "in_review" {
-			t.Fatalf("status = %q, want in_review", got)
-		}
-		body, _, _, _ := systemCommentOn(t, docs.ID)
-		if !strings.Contains(body, "没有代码交付") || !strings.Contains(body, "纯文档票") {
-			t.Fatalf("comment = %s", body)
-		}
-	})
-
-	t.Run("people are not gated", func(t *testing.T) {
-		human := createIssueHTTP(t, "review gate human", "in_progress")
-		w := httptest.NewRecorder()
-		req := newRequest("PUT", "/api/issues/"+human.ID, map[string]any{"status": "in_review", "reviewer_type": "none"})
-		req = withURLParam(req, "id", human.ID)
-		testHandler.UpdateIssue(w, req)
-		if w.Code != http.StatusOK {
-			t.Fatalf("status = %d, want 200: %s", w.Code, w.Body.String())
-		}
-	})
-}
-
-func TestAgentReviewWithPullPasses(t *testing.T) {
-	if testHandler == nil {
-		t.Skip("database not available")
-	}
-	for _, state := range []string{"open", "merged"} {
-		t.Run(state, func(t *testing.T) {
-			issue := createIssueHTTP(t, "review gate "+state, "in_progress")
-			linkPull(t, issue.ID, 86900+len(state), state, "clean", "SUCCESS")
-			w := httptest.NewRecorder()
-			req := newRequest("PUT", "/api/issues/"+issue.ID, map[string]any{"status": "in_review", "reviewer_type": "none"})
-			req = withURLParam(req, "id", issue.ID)
-			asAgent(t, req, issue.ID)
-			testHandler.UpdateIssue(w, req)
-			if w.Code != http.StatusOK {
-				t.Fatalf("status = %d, want 200: %s", w.Code, w.Body.String())
-			}
-			if got := readIssueStatus(t, issue.ID); got != "in_review" {
-				t.Fatalf("status = %q, want in_review", got)
-			}
-		})
-	}
-
-	t.Run("a closed unmerged pull is not a delivery", func(t *testing.T) {
-		issue := createIssueHTTP(t, "review gate closed", "in_progress")
-		linkPull(t, issue.ID, 86910, "closed", "clean", "SUCCESS")
-		w := httptest.NewRecorder()
-		req := newRequest("PUT", "/api/issues/"+issue.ID, map[string]any{"status": "in_review"})
-		req = withURLParam(req, "id", issue.ID)
-		asAgent(t, req, issue.ID)
-		testHandler.UpdateIssue(w, req)
-		if w.Code != http.StatusConflict {
-			t.Fatalf("status = %d, want 409: %s", w.Code, w.Body.String())
-		}
-	})
 }
 
 // TestChildInReviewFillsAcceptanceSeat is DENE-860's other half: the work of

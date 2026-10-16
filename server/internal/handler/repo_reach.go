@@ -4,8 +4,10 @@ import (
 	"context"
 	"net/http"
 	"net/url"
+	"strings"
 
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/delivery"
 	"github.com/multica-ai/multica/server/internal/gitconn"
 	"github.com/multica-ai/multica/server/internal/repoident"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -279,4 +281,99 @@ func (h *Handler) reachContacts(ctx context.Context, ws pgtype.UUID) []RepoReach
 		})
 	}
 	return out
+}
+
+// deliveryClient is the HTTP client for provider API calls. deliveryHTTP,
+// when set, replaces delivery.HTTP; tests point it at httptest.
+func (h *Handler) deliveryClient() *http.Client {
+	if h != nil && h.deliveryHTTP != nil {
+		return h.deliveryHTTP
+	}
+	return delivery.HTTP
+}
+
+// gateChecks maps provider check words onto the stored check vocabulary.
+// "passed" is not a ready state there; "success" is.
+func gateChecks(raw string) string {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "", "success", "passing", "neutral", "skipped":
+		if strings.TrimSpace(raw) == "" {
+			return ""
+		}
+		return "success"
+	case "passed":
+		return "success"
+	case "failed", "failure", "error", "failing", "cancelled":
+		return "failure"
+	case "pending", "running", "expected", "queued", "in_progress":
+		return "pending"
+	default:
+		return strings.ToLower(strings.TrimSpace(raw))
+	}
+}
+
+func matchConnection(conns []db.VcsConnection, key, host string) *db.VcsConnection {
+	var instance *db.VcsConnection
+	for i := range conns {
+		conn := &conns[i]
+		if strings.HasPrefix(conn.InstanceUrl, "cli://") {
+			continue
+		}
+		if key != "" && strings.EqualFold(conn.RepoUrl, key) {
+			return conn
+		}
+		if conn.RepoUrl == "" && host != "" && connectionHost(conn.InstanceUrl) == host && instance == nil {
+			instance = conn
+		}
+	}
+	return instance
+}
+
+func connectionHost(instanceURL string) string {
+	u, err := url.Parse(instanceURL)
+	if err != nil || u.Hostname() == "" {
+		return ""
+	}
+	return strings.ToLower(u.Hostname())
+}
+
+func guessProvider(host string, conns []db.VcsConnection) string {
+	host = strings.ToLower(host)
+	switch host {
+	case "github.com", "www.github.com":
+		return "github"
+	}
+	for _, conn := range conns {
+		if strings.HasPrefix(conn.InstanceUrl, "cli://") {
+			continue
+		}
+		if connectionHost(conn.InstanceUrl) == host && conn.Provider != "" {
+			return conn.Provider
+		}
+	}
+	if strings.Contains(host, "gitlab") {
+		return "gitlab"
+	}
+	return ""
+}
+
+func splitRepoKey(key string) (host, owner, repo string, ok bool) {
+	parts := strings.Split(key, "/")
+	if len(parts) < 3 {
+		return "", "", "", false
+	}
+	host = parts[0]
+	repo = parts[len(parts)-1]
+	owner = strings.Join(parts[1:len(parts)-1], "/")
+	if host == "" || owner == "" || repo == "" {
+		return "", "", "", false
+	}
+	return host, owner, repo, true
+}
+
+func nonempty(v, fallback string) string {
+	if strings.TrimSpace(v) == "" {
+		return fallback
+	}
+	return v
 }
